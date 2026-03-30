@@ -153,9 +153,9 @@ async function openAccountsWorkspace(page: Page): Promise<void> {
     .toBe(true);
 }
 
-async function openWorkspaceTab(page: Page, label: RegExp): Promise<void> {
+async function openWorkspaceTab(page: Page, tabTestId: string): Promise<void> {
   await openAccountsWorkspace(page);
-  const tab = page.locator('.account-workspace-tab').filter({ hasText: label }).first();
+  const tab = page.getByTestId(tabTestId).first();
   await expect(tab).toBeVisible({ timeout: 20_000 });
   await tab.scrollIntoViewIfNeeded();
   await tab.click();
@@ -182,7 +182,7 @@ async function resolveHubCardLabel(page: Page, hubId: string): Promise<string> {
 }
 
 async function ensureHubCardVisible(page: Page, hubId: string): Promise<void> {
-  await openWorkspaceTab(page, /Open Account/i);
+  await openWorkspaceTab(page, 'account-workspace-tab-open');
   const panel = page.locator('.hub-panel').first();
   await expect(panel).toBeVisible({ timeout: 20_000 });
   const hubCardLabel = await resolveHubCardLabel(page, hubId);
@@ -287,7 +287,7 @@ async function selectConfigureAccount(page: Page, hubId: string): Promise<void> 
 }
 
 async function openConfigureWorkspace(page: Page, hubId: string): Promise<void> {
-  await openWorkspaceTab(page, /Configure/i);
+  await openWorkspaceTab(page, 'account-workspace-tab-configure');
   await expect(page.locator('.configure-panel').first()).toBeVisible({ timeout: 20_000 });
   await expect(page.locator('.configure-empty').first()).not.toBeVisible({ timeout: 20_000 });
   await selectConfigureAccount(page, hubId);
@@ -295,13 +295,13 @@ async function openConfigureWorkspace(page: Page, hubId: string): Promise<void> 
 
 async function addTokenToAccount(page: Page, hubId: string, tokenId: number): Promise<void> {
   await openConfigureWorkspace(page, hubId);
-  const tokenTab = page.locator('.configure-tab').filter({ hasText: /Add Token/i }).first();
+  const tokenTab = page.getByTestId('configure-tab-token').first();
   await expect(tokenTab).toBeVisible({ timeout: 20_000 });
   await tokenTab.click();
   const tokenSelect = page.locator('.configure-token-select').first();
   await expect(tokenSelect).toBeVisible({ timeout: 20_000 });
   await tokenSelect.selectOption(String(tokenId));
-  const addButton = page.getByRole('button', { name: /^Add Token$/ }).first();
+  const addButton = page.getByTestId('configure-token-add').first();
   await expect(addButton).toBeEnabled({ timeout: 20_000 });
   await addButton.click();
 }

@@ -1,0 +1,17 @@
+{
+  "extends": "./tsconfig.json",
+  "include": [
+    "runtime/**/*.ts",
+    "custody/**/*.ts",
+    "playwright.config.ts",
+    "tests/scripts/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules",
+    "runtime/**/__tests__/**",
+    "tests/**/*.spec.ts",
+    "frontend/**",
+    "jurisdictions/**",
+    "brainvault/**"
+  ]
+}

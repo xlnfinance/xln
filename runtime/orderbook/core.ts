@@ -1,33 +1,21 @@
 /**
  * Pure Orderbook Core
  *
- * Limit order book using SoA (Struct of Arrays) for performance.
- * All functions are pure - state is passed in, new state returned.
- * Designed for integration into RJEA flow.
- *
- * NOTE(snapshot-perf): TypedArray serialization degrades after JSON round-trip
- * Current: Int32Array/Uint32Array serialize to number[] via JSON.stringify
- * Impact: After snapshot restore, arrays become regular JS arrays (slower iteration)
- * Fix: Update snapshot-coder.ts to detect and restore TypedArray types:
- *   - Serialize: { _type: 'Int32Array', data: [...] }
- *   - Deserialize: new Int32Array(obj.data)
- * Priority: Medium (functional correctness preserved, only perf affected)
+ * Exact-price limit order book with a bucket index:
+ * - canonical truth is always exact `priceTicks`
+ * - buckets only accelerate lookup / grouping
+ * - no price grid, repricing, or representability window
  */
-
-// ============================================================================
-// Types
-// ============================================================================
 
 export type Side = 0 | 1;        // 0 = BUY (bids), 1 = SELL (asks)
 export type TIF = 0 | 1 | 2;     // 0 = GTC, 1 = IOC, 2 = FOK
 
-// minFillRatio uses uint16 scale (0-65535) matching swap protocol
 export const MAX_FILL_RATIO = 65535;
 
 export type OrderCmd =
   | { kind: 0; ownerId: string; orderId: string; side: Side; tif: TIF; postOnly: boolean; priceTicks: bigint; qtyLots: number; minFillRatio?: number }
-  | { kind: 1; ownerId: string; orderId: string }  // CANCEL
-  | { kind: 2; ownerId: string; orderId: string; newPriceTicks: bigint | null; qtyDeltaLots: number };  // REPLACE
+  | { kind: 1; ownerId: string; orderId: string }
+  | { kind: 2; ownerId: string; orderId: string; newPriceTicks: bigint | null; qtyDeltaLots: number };
 
 export type BookEvent =
   | { type: 'ACK'; orderId: string; ownerId: string }
@@ -37,720 +25,516 @@ export type BookEvent =
   | { type: 'CANCELED'; orderId: string; ownerId: string };
 
 export interface BookParams {
-  tick: bigint;
-  pmin: bigint;
-  pmax: bigint;
+  bucketWidthTicks: bigint;
   maxOrders: number;
-  stpPolicy: 0 | 1 | 2;  // 0=off, 1=cancel taker, 2=reduce maker
+  stpPolicy: 0 | 1; // 0=off, 1=cancel taker
 }
 
-/** Orderbook state - immutable, create new on each mutation */
+export interface BookOrderState {
+  orderId: string;
+  ownerId: string;
+  side: Side;
+  priceTicks: bigint;
+  qtyLots: number;
+  seq: number;
+  bucketId: bigint;
+}
+
+export interface PriceLevelState {
+  priceTicks: bigint;
+  orderIds: string[];
+  totalQtyLots: number;
+}
+
+export interface PriceBucketState {
+  bucketId: bigint;
+  pricesAsc: bigint[];
+  levels: Map<string, PriceLevelState>;
+}
+
+export interface BookSideLevel {
+  priceTicks: bigint;
+  qtyLots: number;
+  ownerIds: string[];
+  orderIds: string[];
+}
+
 export interface BookState {
   readonly params: BookParams;
-  readonly levels: number;
-
-  // Order storage (SoA for cache efficiency)
-  readonly orderPriceIdx: Int32Array;
-  readonly orderQtyLots: Uint32Array;
-  readonly orderOwnerIdx: Uint32Array;  // index into owners array
-  readonly orderSide: Uint8Array;
-  readonly orderPrev: Int32Array;
-  readonly orderNext: Int32Array;
-  readonly orderActive: Uint8Array;
-
-  // Owner/OrderId mapping (strings stored separately)
-  readonly owners: string[];           // ownerId strings
-  readonly orderIds: string[];         // orderId strings
-  readonly orderIdToIdx: Map<string, number>;
-
-  // Level queues
-  readonly levelHeadBid: Int32Array;
-  readonly levelTailBid: Int32Array;
-  readonly levelHeadAsk: Int32Array;
-  readonly levelTailAsk: Int32Array;
-
-  // Bitmap for fast best-price lookup
-  readonly bitmapBid: Uint32Array;
-  readonly bitmapAsk: Uint32Array;
-
-  // Best prices (-1 = empty)
-  readonly bestBidIdx: number;
-  readonly bestAskIdx: number;
-
-  // Free list
-  readonly freeHead: number;
-
-  // Counters for state hash
+  readonly orders: Map<string, BookOrderState>;
+  readonly bidBuckets: Map<string, PriceBucketState>;
+  readonly askBuckets: Map<string, PriceBucketState>;
+  readonly bidBucketIdsDesc: bigint[];
+  readonly askBucketIdsAsc: bigint[];
+  readonly nextSeq: number;
   readonly tradeCount: number;
   readonly tradeQtySum: bigint;
   readonly eventHash: bigint;
 }
 
-const EMPTY = -1;
-const BITWORD = 32;
-// Uint32 max = 4,294,967,295 (~4.3 billion)
-// With LOT_SCALE = 10^12, this allows ~4294 ETH per order
-const MAX_QTY = 0xFFFFFFFF;  // Uint32 max - matches storage type
+const MAX_QTY = 0xFFFFFFFF;
 const PRIME = 0x1_0000_01n;
 
-// ============================================================================
-// Initialization
-// ============================================================================
+type MutableBookState = {
+  params: BookParams;
+  orders: Map<string, BookOrderState>;
+  bidBuckets: Map<string, PriceBucketState>;
+  askBuckets: Map<string, PriceBucketState>;
+  bidBucketIdsDesc: bigint[];
+  askBucketIdsAsc: bigint[];
+  nextSeq: number;
+  tradeCount: number;
+  tradeQtySum: bigint;
+  eventHash: bigint;
+};
+
+const sideBucketMap = (state: Pick<BookState, 'bidBuckets' | 'askBuckets'>, side: Side): Map<string, PriceBucketState> =>
+  side === 0 ? state.bidBuckets : state.askBuckets;
+
+const sideBucketIds = (state: Pick<BookState, 'bidBucketIdsDesc' | 'askBucketIdsAsc'>, side: Side): bigint[] =>
+  side === 0 ? state.bidBucketIdsDesc : state.askBucketIdsAsc;
+
+const priceKey = (priceTicks: bigint): string => priceTicks.toString();
+const bucketKey = (bucketId: bigint): string => bucketId.toString();
+
+export function bucketIdForPrice(priceTicks: bigint, bucketWidthTicks: bigint): bigint {
+  if (priceTicks <= 0n) throw new Error('priceTicks must be positive');
+  if (bucketWidthTicks <= 0n) throw new Error('bucketWidthTicks must be positive');
+  return priceTicks / bucketWidthTicks;
+}
+
+function insertBigIntUnique(sorted: bigint[], value: bigint, descending: boolean): void {
+  let low = 0;
+  let high = sorted.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    const current = sorted[mid]!;
+    if (current === value) return;
+    if (descending ? current > value : current < value) low = mid + 1;
+    else high = mid;
+  }
+  sorted.splice(low, 0, value);
+}
+
+function removeBigInt(sorted: bigint[], value: bigint): void {
+  const index = sorted.findIndex((entry) => entry === value);
+  if (index >= 0) sorted.splice(index, 1);
+}
+
+function insertPriceAsc(pricesAsc: bigint[], value: bigint): void {
+  let low = 0;
+  let high = pricesAsc.length;
+  while (low < high) {
+    const mid = (low + high) >> 1;
+    const current = pricesAsc[mid]!;
+    if (current === value) return;
+    if (current < value) low = mid + 1;
+    else high = mid;
+  }
+  pricesAsc.splice(low, 0, value);
+}
+
+function removeOrderId(orderIds: string[], orderId: string): boolean {
+  const index = orderIds.indexOf(orderId);
+  if (index < 0) return false;
+  orderIds.splice(index, 1);
+  return true;
+}
+
+function ensureBucket(state: MutableBookState, side: Side, bucketId: bigint): PriceBucketState {
+  const buckets = sideBucketMap(state, side);
+  const ids = sideBucketIds(state, side);
+  const key = bucketKey(bucketId);
+  let bucket = buckets.get(key);
+  if (bucket) return bucket;
+  bucket = {
+    bucketId,
+    pricesAsc: [],
+    levels: new Map(),
+  };
+  buckets.set(key, bucket);
+  insertBigIntUnique(ids, bucketId, side === 0);
+  return bucket;
+}
+
+function cleanupBucketIfEmpty(state: MutableBookState, side: Side, bucketId: bigint): void {
+  const buckets = sideBucketMap(state, side);
+  const ids = sideBucketIds(state, side);
+  const key = bucketKey(bucketId);
+  const bucket = buckets.get(key);
+  if (!bucket) return;
+  if (bucket.pricesAsc.length > 0) return;
+  buckets.delete(key);
+  removeBigInt(ids, bucketId);
+}
+
+function addRestingOrder(state: MutableBookState, order: BookOrderState): void {
+  const bucket = ensureBucket(state, order.side, order.bucketId);
+  const levelKey = priceKey(order.priceTicks);
+  let level = bucket.levels.get(levelKey);
+  if (!level) {
+    level = {
+      priceTicks: order.priceTicks,
+      orderIds: [],
+      totalQtyLots: 0,
+    };
+    bucket.levels.set(levelKey, level);
+    insertPriceAsc(bucket.pricesAsc, order.priceTicks);
+  }
+  level.orderIds.push(order.orderId);
+  level.totalQtyLots += order.qtyLots;
+  state.orders.set(order.orderId, order);
+}
+
+function removeExistingOrder(state: MutableBookState, orderId: string): BookOrderState | null {
+  const order = state.orders.get(orderId);
+  if (!order) return null;
+  const buckets = sideBucketMap(state, order.side);
+  const bucket = buckets.get(bucketKey(order.bucketId));
+  if (!bucket) {
+    throw new Error(`BOOK_CORRUPTION: missing bucket for order ${orderId}`);
+  }
+  const level = bucket.levels.get(priceKey(order.priceTicks));
+  if (!level) {
+    throw new Error(`BOOK_CORRUPTION: missing level for order ${orderId}`);
+  }
+  if (!removeOrderId(level.orderIds, orderId)) {
+    throw new Error(`BOOK_CORRUPTION: order ${orderId} missing from level queue`);
+  }
+  const nextTotalQtyLots = level.totalQtyLots - order.qtyLots;
+  if (nextTotalQtyLots < 0) {
+    throw new Error(`BOOK_CORRUPTION: level quantity underflow while removing ${orderId}`);
+  }
+  level.totalQtyLots = nextTotalQtyLots;
+  if (level.orderIds.length === 0 || level.totalQtyLots === 0) {
+    bucket.levels.delete(priceKey(order.priceTicks));
+    removeBigInt(bucket.pricesAsc, order.priceTicks);
+  }
+  cleanupBucketIfEmpty(state, order.side, order.bucketId);
+  state.orders.delete(orderId);
+  return order;
+}
+
+type OrderedLevelView = {
+  bucketId: bigint;
+  level: PriceLevelState;
+};
+
+function* iterateOrderedLevels(
+  state: Pick<BookState, 'bidBuckets' | 'askBuckets' | 'bidBucketIdsDesc' | 'askBucketIdsAsc'>,
+  side: Side,
+): Generator<OrderedLevelView, void, undefined> {
+  const buckets = sideBucketMap(state, side);
+  const bucketIds = sideBucketIds(state, side);
+  for (const bucketId of bucketIds) {
+    const bucket = buckets.get(bucketKey(bucketId));
+    if (!bucket) continue;
+    if (side === 0) {
+      for (let i = bucket.pricesAsc.length - 1; i >= 0; i -= 1) {
+        const priceTicks = bucket.pricesAsc[i]!;
+        const level = bucket.levels.get(priceKey(priceTicks));
+        if (!level || level.orderIds.length === 0 || level.totalQtyLots <= 0) continue;
+        yield { bucketId, level };
+      }
+      continue;
+    }
+    for (const priceTicks of bucket.pricesAsc) {
+      const level = bucket.levels.get(priceKey(priceTicks));
+      if (!level || level.orderIds.length === 0 || level.totalQtyLots <= 0) continue;
+      yield { bucketId, level };
+    }
+  }
+}
+
+function getTopLevel(
+  state: Pick<BookState, 'bidBuckets' | 'askBuckets' | 'bidBucketIdsDesc' | 'askBucketIdsAsc'>,
+  side: Side,
+): OrderedLevelView | null {
+  for (const level of iterateOrderedLevels(state, side)) return level;
+  return null;
+}
+
+function getOrderedLevels(state: Pick<BookState, 'bidBuckets' | 'askBuckets' | 'bidBucketIdsDesc' | 'askBucketIdsAsc'>, side: Side): OrderedLevelView[] {
+  return Array.from(iterateOrderedLevels(state, side));
+}
+
+function crosses(takerSide: Side, takerPriceTicks: bigint, makerPriceTicks: bigint): boolean {
+  return takerSide === 0 ? makerPriceTicks <= takerPriceTicks : makerPriceTicks >= takerPriceTicks;
+}
+
+function bumpHash(state: MutableBookState, tag: number, a: number | bigint, b: number | bigint): void {
+  const a32 = Number((typeof a === 'bigint' ? a : BigInt(a)) & 0xffffffffn);
+  const b32 = Number((typeof b === 'bigint' ? b : BigInt(b)) & 0xffffffffn);
+  state.eventHash = (state.eventHash * PRIME + BigInt((tag * 2654435761 >>> 0) ^ a32 ^ (b32 << 7))) & 0x1fffffffffffffn;
+}
+
+function estimateImmediateFill(
+  state: BookState,
+  takerSide: Side,
+  takerOwnerId: string,
+  takerPriceTicks: bigint,
+  qtyLots: number,
+): { filledQty: number; blockingOrderId?: string } {
+  let remaining = qtyLots;
+  const oppositeSide: Side = takerSide === 0 ? 1 : 0;
+  for (const view of iterateOrderedLevels(state, oppositeSide)) {
+    if (!crosses(takerSide, takerPriceTicks, view.level.priceTicks)) break;
+    for (const makerOrderId of view.level.orderIds) {
+      const maker = state.orders.get(makerOrderId);
+      if (!maker || maker.qtyLots <= 0) continue;
+      if (maker.ownerId === takerOwnerId && state.params.stpPolicy === 1) {
+        // STP cancels the remaining taker quantity from the first self-cross onward.
+        // Better-priced third-party liquidity ahead of that self order is still fillable.
+        return { filledQty: qtyLots - remaining, blockingOrderId: makerOrderId };
+      }
+      remaining -= Math.min(maker.qtyLots, remaining);
+      if (remaining <= 0) return { filledQty: qtyLots };
+    }
+  }
+  return { filledQty: qtyLots - remaining };
+}
+
+function matchAgainstBook(
+  state: MutableBookState,
+  takerSide: Side,
+  takerOwnerId: string,
+  takerOrderId: string,
+  takerPriceTicks: bigint,
+  takerQtyLots: number,
+  events: BookEvent[],
+): { remaining: number; blockingOrderId?: string } {
+  let remaining = takerQtyLots;
+  const oppositeSide: Side = takerSide === 0 ? 1 : 0;
+
+  while (remaining > 0) {
+    const best = getTopLevel(state, oppositeSide);
+    if (!best) break;
+    if (!crosses(takerSide, takerPriceTicks, best.level.priceTicks)) break;
+
+    const makerOrderId = best.level.orderIds[0];
+    if (!makerOrderId) break;
+    const maker = state.orders.get(makerOrderId);
+    if (!maker || maker.qtyLots <= 0) {
+      if (!removeOrderId(best.level.orderIds, makerOrderId)) {
+        throw new Error(`BOOK_CORRUPTION: top-of-book order ${makerOrderId} missing from level queue`);
+      }
+      state.orders.delete(makerOrderId);
+      if (best.level.orderIds.length === 0) {
+        const bucket = sideBucketMap(state, oppositeSide).get(bucketKey(best.bucketId));
+        if (bucket) {
+          bucket.levels.delete(priceKey(best.level.priceTicks));
+          removeBigInt(bucket.pricesAsc, best.level.priceTicks);
+          cleanupBucketIfEmpty(state, oppositeSide, best.bucketId);
+        }
+      }
+      continue;
+    }
+
+    if (maker.ownerId === takerOwnerId && state.params.stpPolicy === 1) {
+      events.push({
+        type: 'REJECT',
+        orderId: takerOrderId,
+        ownerId: takerOwnerId,
+        reason: 'STP cancel taker',
+        blockingOrderId: maker.orderId,
+      });
+      return { remaining, blockingOrderId: maker.orderId };
+    }
+
+    const tradeQty = Math.min(maker.qtyLots, remaining);
+    const makerQtyBefore = maker.qtyLots;
+
+    state.tradeCount += 1;
+    state.tradeQtySum += BigInt(tradeQty);
+    bumpHash(state, 3, best.level.priceTicks, tradeQty);
+
+    events.push({
+      type: 'TRADE',
+      price: best.level.priceTicks,
+      qty: tradeQty,
+      makerOwnerId: maker.ownerId,
+      takerOwnerId,
+      makerOrderId: maker.orderId,
+      takerOrderId,
+      makerQtyBefore,
+      takerQtyTotal: takerQtyLots,
+    });
+
+    remaining -= tradeQty;
+
+    if (tradeQty === maker.qtyLots) {
+      removeExistingOrder(state, maker.orderId);
+    } else {
+      maker.qtyLots -= tradeQty;
+      const nextTotalQtyLots = best.level.totalQtyLots - tradeQty;
+      if (nextTotalQtyLots < 0) {
+        throw new Error(`BOOK_CORRUPTION: level quantity underflow while reducing ${maker.orderId}`);
+      }
+      best.level.totalQtyLots = nextTotalQtyLots;
+      events.push({ type: 'REDUCED', orderId: maker.orderId, ownerId: maker.ownerId, delta: -tradeQty, remain: maker.qtyLots });
+    }
+  }
+
+  return { remaining };
+}
 
 export function createBook(params: BookParams): BookState {
-  const { tick, pmin, pmax, maxOrders } = params;
-
-  if (tick <= 0n) throw new Error('tick must be positive');
-  if (pmax <= pmin) throw new Error('pmax must be > pmin');
-
-  const levelsBig = ((pmax - pmin) / tick) + 1n;
-  if (levelsBig <= 0n) throw new Error('invalid price grid');
-  if (levelsBig > BigInt(Number.MAX_SAFE_INTEGER)) throw new Error('price grid too large');
-  const levels = Number(levelsBig);
-
-  const bitmapSize = Math.ceil(levels / BITWORD);
-
-  // Initialize order arrays
-  const orderNext = new Int32Array(maxOrders);
-  for (let i = 0; i < maxOrders - 1; i++) orderNext[i] = i + 1;
-  orderNext[maxOrders - 1] = EMPTY;
-
+  const { bucketWidthTicks, maxOrders, stpPolicy } = params;
+  if (bucketWidthTicks <= 0n) throw new Error('bucketWidthTicks must be positive');
+  if (!Number.isFinite(maxOrders) || maxOrders <= 0) throw new Error('maxOrders must be positive');
+  if (stpPolicy !== 0 && stpPolicy !== 1) throw new Error('unsupported stpPolicy');
   return {
-    params,
-    levels,
-    orderPriceIdx: new Int32Array(maxOrders).fill(EMPTY),
-    orderQtyLots: new Uint32Array(maxOrders),
-    orderOwnerIdx: new Uint32Array(maxOrders),
-    orderSide: new Uint8Array(maxOrders),
-    orderPrev: new Int32Array(maxOrders).fill(EMPTY),
-    orderNext,
-    orderActive: new Uint8Array(maxOrders),
-    owners: [],
-    orderIds: [],
-    orderIdToIdx: new Map(),
-    levelHeadBid: new Int32Array(levels).fill(EMPTY),
-    levelTailBid: new Int32Array(levels).fill(EMPTY),
-    levelHeadAsk: new Int32Array(levels).fill(EMPTY),
-    levelTailAsk: new Int32Array(levels).fill(EMPTY),
-    bitmapBid: new Uint32Array(bitmapSize),
-    bitmapAsk: new Uint32Array(bitmapSize),
-    bestBidIdx: EMPTY,
-    bestAskIdx: EMPTY,
-    freeHead: 0,
+    params: {
+      bucketWidthTicks,
+      maxOrders: Math.max(1, Math.floor(maxOrders)),
+      stpPolicy,
+    },
+    orders: new Map(),
+    bidBuckets: new Map(),
+    askBuckets: new Map(),
+    bidBucketIdsDesc: [],
+    askBucketIdsAsc: [],
+    nextSeq: 1,
     tradeCount: 0,
     tradeQtySum: 0n,
     eventHash: 0n,
   };
 }
 
-// ============================================================================
-// Helpers (internal, operate on mutable copies)
-// ============================================================================
-
-function cloneMutableState(s: BookState): {
-  orderPriceIdx: Int32Array;
-  orderQtyLots: Uint32Array;
-  orderOwnerIdx: Uint32Array;
-  orderSide: Uint8Array;
-  orderPrev: Int32Array;
-  orderNext: Int32Array;
-  orderActive: Uint8Array;
-  owners: string[];
-  orderIds: string[];
-  orderIdToIdx: Map<string, number>;
-  levelHeadBid: Int32Array;
-  levelTailBid: Int32Array;
-  levelHeadAsk: Int32Array;
-  levelTailAsk: Int32Array;
-  bitmapBid: Uint32Array;
-  bitmapAsk: Uint32Array;
-  bestBidIdx: number;
-  bestAskIdx: number;
-  freeHead: number;
-  tradeCount: number;
-  tradeQtySum: bigint;
-  eventHash: bigint;
-} {
-  return {
-    orderPriceIdx: s.orderPriceIdx.slice(),
-    orderQtyLots: s.orderQtyLots.slice(),
-    orderOwnerIdx: s.orderOwnerIdx.slice(),
-    orderSide: s.orderSide.slice(),
-    orderPrev: s.orderPrev.slice(),
-    orderNext: s.orderNext.slice(),
-    orderActive: s.orderActive.slice(),
-    owners: [...s.owners],
-    orderIds: [...s.orderIds],
-    orderIdToIdx: new Map(s.orderIdToIdx),
-    levelHeadBid: s.levelHeadBid.slice(),
-    levelTailBid: s.levelTailBid.slice(),
-    levelHeadAsk: s.levelHeadAsk.slice(),
-    levelTailAsk: s.levelTailAsk.slice(),
-    bitmapBid: s.bitmapBid.slice(),
-    bitmapAsk: s.bitmapAsk.slice(),
-    bestBidIdx: s.bestBidIdx,
-    bestAskIdx: s.bestAskIdx,
-    freeHead: s.freeHead,
-    tradeCount: s.tradeCount,
-    tradeQtySum: s.tradeQtySum,
-    eventHash: s.eventHash,
-  };
-}
-
-const ctz32 = (x: number) => Math.clz32((x & -x) >>> 0) ^ 31;
-
-function findNextNonEmpty(bitmap: Uint32Array, levels: number, start: number): number {
-  if (start < 0) start = 0;
-  for (let i = start; i < levels;) {
-    const w = (i / BITWORD) | 0;
-    const base = w * BITWORD;
-    let word = bitmap[w];
-    if (word) {
-      const shift = i - base;
-      word >>>= shift;
-      if (word) return base + shift + ctz32(word);
-    }
-    i = base + BITWORD;
-  }
-  return EMPTY;
-}
-
-function findPrevNonEmpty(bitmap: Uint32Array, start: number): number {
-  for (let i = start; i >= 0;) {
-    const w = (i / BITWORD) | 0;
-    const base = w * BITWORD;
-    let word = bitmap[w];
-    if (word) {
-      const upto = i - base;
-      const mask = upto === 31 ? 0xffffffff : (1 << (upto + 1)) - 1;
-      word &= mask >>> 0;
-      if (word) return base + (31 - Math.clz32(word));
-    }
-    i = base - 1;
-  }
-  return EMPTY;
-}
-
-// ============================================================================
-// Core Operations
-// ============================================================================
-
-export function applyCommand(
-  state: BookState,
-  cmd: OrderCmd
-): { state: BookState; events: BookEvent[] } {
+export function applyCommand(state: BookState, cmd: OrderCmd): { state: BookState; events: BookEvent[] } {
+  /**
+   * Hot-path note:
+   *
+   * The orderbook no longer clones the full pair book on every command.
+   * That old "pure per-command" shape was convenient, but it multiplied work
+   * and garbage for no real safety benefit at the book layer.
+   *
+   * Why in-place mutation is correct here:
+   * - rollback boundaries live above the book, at runtime/entity/account
+   *   working-state clones, not inside one book command
+   * - a book command is not a persistence boundary
+   * - if a process crashes, canonical recovery is snapshot + WAL replay
+   * - if a pair book corrupts, the caller can rebuild that pair from canonical
+   *   live offers instead of relying on a pre-command copy
+   *
+   * In other words: the book is a hot in-memory cache of canonical offers, not
+   * the source of truth for disaster recovery. The source of truth is the
+   * replicated entity/account state plus persisted snapshot/WAL.
+   *
+   * So `applyCommand` now mutates the provided working book directly and returns
+   * that same object for API compatibility.
+   */
   const events: BookEvent[] = [];
-  const m = cloneMutableState(state);
-  const { params, levels } = state;
-  const { tick, pmin, pmax, stpPolicy } = params;
+  const m = state as MutableBookState;
 
-  // Get or create owner index
-  function getOwnerIdx(ownerId: string): number {
-    let idx = m.owners.indexOf(ownerId);
-    if (idx === -1) {
-      idx = m.owners.length;
-      m.owners.push(ownerId);
+  if (cmd.kind === 2) {
+    events.push({ type: 'REJECT', orderId: cmd.orderId, ownerId: cmd.ownerId, reason: 'replace unsupported' });
+    return { state, events };
+  }
+
+  if (cmd.kind === 1) {
+    const existing = m.orders.get(cmd.orderId);
+    if (!existing) {
+      events.push({ type: 'REJECT', orderId: cmd.orderId, ownerId: cmd.ownerId, reason: 'not found' });
+      return { state, events };
     }
-    return idx;
+    if (existing.ownerId !== cmd.ownerId) {
+      events.push({ type: 'REJECT', orderId: cmd.orderId, ownerId: cmd.ownerId, reason: 'not owner' });
+      return { state, events };
+    }
+    removeExistingOrder(m, cmd.orderId);
+    events.push({ type: 'CANCELED', orderId: cmd.orderId, ownerId: cmd.ownerId });
+    bumpHash(m, 5, existing.bucketId, 0);
+    return { state, events };
   }
 
-  // Allocate order slot
-  function allocOrder(): number {
-    const i = m.freeHead;
-    if (i === EMPTY) throw new Error('Out of order slots');
-    m.freeHead = m.orderNext[i]!;
-    return i;
+  const { ownerId, orderId, side, tif, postOnly, priceTicks, qtyLots, minFillRatio = 0 } = cmd;
+
+  if (qtyLots <= 0 || qtyLots > MAX_QTY) {
+    events.push({ type: 'REJECT', orderId, ownerId, reason: 'qty out of range' });
+    return { state, events };
+  }
+  if (priceTicks <= 0n) {
+    events.push({ type: 'REJECT', orderId, ownerId, reason: 'price must be positive' });
+    return { state, events };
+  }
+  if (minFillRatio < 0 || minFillRatio > MAX_FILL_RATIO) {
+    events.push({ type: 'REJECT', orderId, ownerId, reason: `minFillRatio must be 0-${MAX_FILL_RATIO}` });
+    return { state, events };
+  }
+  if (m.orders.has(orderId)) {
+    events.push({ type: 'REJECT', orderId, ownerId, reason: 'duplicate orderId' });
+    return { state, events };
   }
 
-  // Free order slot
-  function freeOrder(i: number): void {
-    m.orderActive[i] = 0;
-    m.orderPriceIdx[i] = EMPTY;
-    m.orderQtyLots[i] = 0;
-    m.orderNext[i] = m.freeHead;
-    m.freeHead = i;
+  const bestBid = getBestBid(m as BookState);
+  const bestAsk = getBestAsk(m as BookState);
+
+  if (postOnly) {
+    if (side === 0 && bestAsk !== null && bestAsk <= priceTicks) {
+      events.push({ type: 'REJECT', orderId, ownerId, reason: 'postOnly would cross' });
+      return { state, events };
+    }
+    if (side === 1 && bestBid !== null && bestBid >= priceTicks) {
+      events.push({ type: 'REJECT', orderId, ownerId, reason: 'postOnly would cross' });
+      return { state, events };
+    }
   }
 
-  // Bitmap operations
-  function setBit(side: Side, levelIdx: number): void {
-    const bm = side === 0 ? m.bitmapBid : m.bitmapAsk;
-    const w = (levelIdx / BITWORD) | 0;
-    const b = levelIdx & 31;
-    bm[w] = (bm[w]! | (1 << b)) >>> 0;
+  const estimate = estimateImmediateFill(m as BookState, side, ownerId, priceTicks, qtyLots);
+  if (tif === 2 && estimate.filledQty < qtyLots) {
+    events.push({ type: 'REJECT', orderId, ownerId, reason: 'FOK cannot fill entirely' });
+    return { state, events };
+  }
+  if (minFillRatio > 0 && (tif === 1 || tif === 2)) {
+    const fillRatio = Math.floor((estimate.filledQty * MAX_FILL_RATIO) / qtyLots);
+    if (fillRatio < minFillRatio) {
+      events.push({ type: 'REJECT', orderId, ownerId, reason: `minFillRatio not met: ${fillRatio} < ${minFillRatio} (pre-check)` });
+      return { state, events };
+    }
   }
 
-  function clearBit(side: Side, levelIdx: number): void {
-    const bm = side === 0 ? m.bitmapBid : m.bitmapAsk;
-    const w = (levelIdx / BITWORD) | 0;
-    const b = levelIdx & 31;
-    bm[w] = (bm[w]! & ~(1 << b)) >>> 0;
-  }
+  const match = matchAgainstBook(m, side, ownerId, orderId, priceTicks, qtyLots, events);
+  const remaining = match.remaining;
+  const filledQty = qtyLots - remaining;
+  const stpBlocked = match.blockingOrderId !== undefined;
 
-  // Level queue operations
-  function enqueueTail(side: Side, levelIdx: number, idx: number): void {
-    const head = side === 0 ? m.levelHeadBid : m.levelHeadAsk;
-    const tail = side === 0 ? m.levelTailBid : m.levelTailAsk;
-
-    if (head[levelIdx] === EMPTY) {
-      head[levelIdx] = idx;
-      tail[levelIdx] = idx;
-      m.orderPrev[idx] = EMPTY;
-      m.orderNext[idx] = EMPTY;
-      setBit(side, levelIdx);
-
-      if (side === 0) {
-        if (m.bestBidIdx === EMPTY || levelIdx > m.bestBidIdx) m.bestBidIdx = levelIdx;
-      } else {
-        if (m.bestAskIdx === EMPTY || levelIdx < m.bestAskIdx) m.bestAskIdx = levelIdx;
+  if (remaining > 0) {
+    if (stpBlocked) {
+      // STP is an explicit cancel-remainder outcome. We never rest the leftover taker size.
+    } else if (tif === 1 || tif === 2) {
+      if (filledQty === 0) {
+        events.push({ type: 'REJECT', orderId, ownerId, reason: 'no fill' });
       }
     } else {
-      const t = tail[levelIdx]!;
-      m.orderNext[t] = idx;
-      m.orderPrev[idx] = t;
-      m.orderNext[idx] = EMPTY;
-      tail[levelIdx] = idx;
+      if (m.orders.size >= m.params.maxOrders) throw new Error('Out of order slots');
+      const order: BookOrderState = {
+        orderId,
+        ownerId,
+        side,
+        priceTicks,
+        qtyLots: remaining,
+        seq: m.nextSeq,
+        bucketId: bucketIdForPrice(priceTicks, m.params.bucketWidthTicks),
+      };
+      m.nextSeq += 1;
+      addRestingOrder(m, order);
+      events.push({ type: 'ACK', orderId, ownerId });
+      bumpHash(m, 1, order.bucketId, remaining);
     }
   }
 
-  function removeFromLevel(side: Side, levelIdx: number, idx: number): void {
-    const head = side === 0 ? m.levelHeadBid : m.levelHeadAsk;
-    const tail = side === 0 ? m.levelTailBid : m.levelTailAsk;
-
-    const p = m.orderPrev[idx]!;
-    const n = m.orderNext[idx]!;
-
-    if (p !== EMPTY) m.orderNext[p] = n;
-    else head[levelIdx] = n;
-
-    if (n !== EMPTY) m.orderPrev[n] = p;
-    else tail[levelIdx] = p;
-
-    m.orderPrev[idx] = EMPTY;
-    m.orderNext[idx] = EMPTY;
-
-    if (head[levelIdx] === EMPTY) {
-      clearBit(side, levelIdx);
-      if (side === 0 && m.bestBidIdx === levelIdx) {
-        m.bestBidIdx = findPrevNonEmpty(m.bitmapBid, levelIdx - 1);
-      }
-      if (side === 1 && m.bestAskIdx === levelIdx) {
-        m.bestAskIdx = findNextNonEmpty(m.bitmapAsk, levels, levelIdx + 1);
-      }
-    }
-  }
-
-  // Hash update
-  function bumpHash(tag: number, a: number | bigint, b: number | bigint): void {
-    const a32 = Number((typeof a === 'bigint' ? a : BigInt(a)) & 0xffffffffn);
-    const b32 = Number((typeof b === 'bigint' ? b : BigInt(b)) & 0xffffffffn);
-    m.eventHash = (m.eventHash * PRIME + BigInt((tag * 2654435761 >>> 0) ^ a32 ^ (b32 << 7))) & 0x1fffffffffffffn;
-  }
-
-  // Fill against resting orders
-  function fillAgainst(
-    side: Side,
-    levelIdx: number,
-    remaining: number,
-    takerOwnerIdx: number,
-    takerOrderId: string,
-    takerQtyTotal: number  // Taker's original order qty for fill ratio calculation
-  ): number {
-    const head = side === 0 ? m.levelHeadAsk : m.levelHeadBid;
-    const oppSide: Side = side === 0 ? 1 : 0;
-
-    while (remaining > 0) {
-      const headIdx = head[levelIdx]!;
-      if (headIdx === EMPTY) return remaining;
-
-      if (!m.orderActive[headIdx]) {
-        removeFromLevel(oppSide, levelIdx, headIdx);
-        freeOrder(headIdx);
-        continue;
-      }
-
-      const makerOwnerIdx = m.orderOwnerIdx[headIdx]!;
-      const makerOwnerId = m.owners[makerOwnerIdx]!;
-      const takerOwnerId = m.owners[takerOwnerIdx]!;
-      const makerOrderId = m.orderIds[headIdx]!;
-
-      // Self-trade prevention
-      if (makerOwnerIdx === takerOwnerIdx) {
-        if (stpPolicy === 1) {
-          // Cancel taker: return 0 to break outer matching loop
-          // (returning remaining would cause infinite loop since maker isn't modified)
-          events.push({
-            type: 'REJECT',
-            orderId: takerOrderId,
-            ownerId: takerOwnerId,
-            reason: 'STP cancel taker',
-            blockingOrderId: makerOrderId,
-          });
-          return 0;
-        }
-        if (stpPolicy === 2) {
-          // Reduce maker and skip the self-cross qty
-          const dec = Math.min(m.orderQtyLots[headIdx]!, remaining);
-          m.orderQtyLots[headIdx] = m.orderQtyLots[headIdx]! - dec;
-          remaining -= dec; // Also skip the qty that would have self-traded
-          events.push({ type: 'REDUCED', orderId: makerOrderId, ownerId: makerOwnerId, delta: -dec, remain: m.orderQtyLots[headIdx]! });
-          if (m.orderQtyLots[headIdx]! === 0) {
-            removeFromLevel(oppSide, levelIdx, headIdx);
-            freeOrder(headIdx);
-          }
-          continue;
-        }
-      }
-
-      const makerQty = m.orderQtyLots[headIdx]!;
-      const tradeQty = Math.min(makerQty, remaining);
-      const pxTicks = pmin + (BigInt(levelIdx) * tick);
-
-      m.orderQtyLots[headIdx] = m.orderQtyLots[headIdx]! - tradeQty;
-      remaining -= tradeQty;
-
-      m.tradeCount++;
-      m.tradeQtySum += BigInt(tradeQty);
-      bumpHash(3, pxTicks, tradeQty);
-
-      events.push({
-        type: 'TRADE',
-        price: pxTicks,
-        qty: tradeQty,
-        makerOwnerId,
-        takerOwnerId,
-        makerOrderId,
-        takerOrderId,
-        makerQtyBefore: makerQty,     // Maker's qty before this trade
-        takerQtyTotal,                 // Taker's total order qty
-      });
-
-      if (m.orderQtyLots[headIdx] === 0) {
-        removeFromLevel(oppSide, levelIdx, headIdx);
-        freeOrder(headIdx);
-        m.orderIdToIdx.delete(makerOrderId);
-      } else {
-        events.push({ type: 'REDUCED', orderId: makerOrderId, ownerId: makerOwnerId, delta: -tradeQty, remain: m.orderQtyLots[headIdx]! });
-      }
-    }
-    return remaining;
-  }
-
-  // Handle commands
-  if (cmd.kind === 0) {
-    // NEW ORDER
-    const { ownerId, orderId, side, tif, postOnly, priceTicks, qtyLots, minFillRatio = 0 } = cmd;
-
-    // Validation
-    if (qtyLots <= 0 || qtyLots > MAX_QTY) {
-      events.push({ type: 'REJECT', orderId, ownerId, reason: 'qty out of range' });
-      return { state, events };
-    }
-
-    if (minFillRatio < 0 || minFillRatio > MAX_FILL_RATIO) {
-      events.push({ type: 'REJECT', orderId, ownerId, reason: `minFillRatio must be 0-${MAX_FILL_RATIO}` });
-      return { state, events };
-    }
-
-    if (priceTicks < pmin || priceTicks > pmax) {
-      events.push({ type: 'REJECT', orderId, ownerId, reason: 'price out of range' });
-      return { state, events };
-    }
-    if (((priceTicks - pmin) % tick) !== 0n) {
-      events.push({ type: 'REJECT', orderId, ownerId, reason: 'price off grid' });
-      return { state, events };
-    }
-    const levelIdx = Number((priceTicks - pmin) / tick);
-    if (levelIdx < 0 || levelIdx >= levels) {
-      events.push({ type: 'REJECT', orderId, ownerId, reason: 'price out of range' });
-      return { state, events };
-    }
-
-    if (m.orderIdToIdx.has(orderId)) {
-      events.push({ type: 'REJECT', orderId, ownerId, reason: 'duplicate orderId' });
-      return { state, events };
-    }
-
-    const ownerIdx = getOwnerIdx(ownerId);
-    let remaining = qtyLots;
-
-    // Check postOnly
-    if (postOnly) {
-      if (side === 0 && m.bestAskIdx !== EMPTY && m.bestAskIdx <= levelIdx) {
-        events.push({ type: 'REJECT', orderId, ownerId, reason: 'postOnly would cross' });
-        return { state, events };
-      }
-      if (side === 1 && m.bestBidIdx !== EMPTY && m.bestBidIdx >= levelIdx) {
-        events.push({ type: 'REJECT', orderId, ownerId, reason: 'postOnly would cross' });
-        return { state, events };
-      }
-    }
-
-    // Dry-run simulation to check FOK and minFillRatio BEFORE mutating state
-    // This prevents partial fills that would need rollback
-    let simRemaining = qtyLots;
-    if (side === 0) {
-      let simBestAsk = m.bestAskIdx;
-      while (simRemaining > 0 && simBestAsk !== EMPTY && simBestAsk <= levelIdx) {
-        let headIdx = m.levelHeadAsk[simBestAsk]!;
-        while (headIdx !== EMPTY && simRemaining > 0) {
-          // Skip self-trades in simulation (STP would prevent them)
-          if (stpPolicy > 0 && m.orderOwnerIdx[headIdx]! === ownerIdx) {
-            headIdx = m.orderNext[headIdx]!;
-            continue;
-          }
-          const makerQty = m.orderQtyLots[headIdx]!;
-          simRemaining -= Math.min(makerQty, simRemaining);
-          headIdx = m.orderNext[headIdx]!;
-        }
-        if (simRemaining > 0) {
-          simBestAsk = findNextNonEmpty(m.bitmapAsk, levels, simBestAsk + 1);
-        }
-      }
-    } else {
-      let simBestBid = m.bestBidIdx;
-      while (simRemaining > 0 && simBestBid !== EMPTY && simBestBid >= levelIdx) {
-        let headIdx = m.levelHeadBid[simBestBid]!;
-        while (headIdx !== EMPTY && simRemaining > 0) {
-          // Skip self-trades in simulation (STP would prevent them)
-          if (stpPolicy > 0 && m.orderOwnerIdx[headIdx]! === ownerIdx) {
-            headIdx = m.orderNext[headIdx]!;
-            continue;
-          }
-          const makerQty = m.orderQtyLots[headIdx]!;
-          simRemaining -= Math.min(makerQty, simRemaining);
-          headIdx = m.orderNext[headIdx]!;
-        }
-        if (simRemaining > 0) {
-          simBestBid = findPrevNonEmpty(m.bitmapBid, simBestBid - 1);
-        }
-      }
-    }
-
-    // Check FOK constraint
-    if (tif === 2 && simRemaining > 0) {
-      events.push({ type: 'REJECT', orderId, ownerId, reason: 'FOK cannot fill entirely' });
-      return { state, events };
-    }
-
-    // Check minFillRatio constraint BEFORE mutating state
-    // For IOC/FOK orders, reject if can't fill immediately
-    // For GTC orders, minFillRatio is enforced at swap_resolve time (allows resting on book)
-    if (minFillRatio > 0 && (tif === 1 || tif === 2)) {
-      const simFilledQty = qtyLots - simRemaining;
-      const simFillRatio = Math.floor((simFilledQty / qtyLots) * MAX_FILL_RATIO);
-      if (simFillRatio < minFillRatio) {
-        events.push({ type: 'REJECT', orderId, ownerId, reason: `minFillRatio not met: ${simFillRatio} < ${minFillRatio} (pre-check)` });
-        return { state, events };
-      }
-    }
-
-    // Match against opposite side
-    if (side === 0) {
-      // BUY - match against asks
-      while (remaining > 0 && m.bestAskIdx !== EMPTY && m.bestAskIdx <= levelIdx) {
-        remaining = fillAgainst(0, m.bestAskIdx, remaining, ownerIdx, orderId, qtyLots);
-        if (m.bestAskIdx !== EMPTY && m.levelHeadAsk[m.bestAskIdx] === EMPTY) {
-          m.bestAskIdx = findNextNonEmpty(m.bitmapAsk, levels, m.bestAskIdx + 1);
-        }
-      }
-    } else {
-      // SELL - match against bids
-      while (remaining > 0 && m.bestBidIdx !== EMPTY && m.bestBidIdx >= levelIdx) {
-        remaining = fillAgainst(1, m.bestBidIdx, remaining, ownerIdx, orderId, qtyLots);
-        if (m.bestBidIdx !== EMPTY && m.levelHeadBid[m.bestBidIdx] === EMPTY) {
-          m.bestBidIdx = findPrevNonEmpty(m.bitmapBid, m.bestBidIdx - 1);
-        }
-      }
-    }
-
-    // minFillRatio already checked in pre-flight simulation above
-    // No post-check needed - state only mutated if pre-check passed
-    const filledQty = qtyLots - remaining;
-
-    // Handle remaining qty based on TIF
-    if (remaining > 0) {
-      if (tif === 1 || tif === 2) {
-        // IOC or FOK - don't add to book
-        // (FOK shouldn't reach here with remaining > 0 due to pre-check above)
-        if (filledQty === 0) {
-          events.push({ type: 'REJECT', orderId, ownerId, reason: 'no fill' });
-        }
-        // Partial fill for IOC is fine, just don't post remainder
-      } else {
-        // GTC (tif === 0) - add remaining to book
-        const idx = allocOrder();
-        m.orderPriceIdx[idx] = levelIdx;
-        m.orderQtyLots[idx] = remaining;
-        m.orderOwnerIdx[idx] = ownerIdx;
-        m.orderSide[idx] = side;
-        m.orderActive[idx] = 1;
-        m.orderIds[idx] = orderId;
-        m.orderIdToIdx.set(orderId, idx);
-        enqueueTail(side, levelIdx, idx);
-        events.push({ type: 'ACK', orderId, ownerId });
-        bumpHash(1, ownerIdx, remaining);
-      }
-    }
-
-  } else if (cmd.kind === 1) {
-    // CANCEL
-    const { ownerId, orderId } = cmd;
-    const idx = m.orderIdToIdx.get(orderId);
-
-    if (idx === undefined || !m.orderActive[idx]) {
-      events.push({ type: 'REJECT', orderId, ownerId, reason: 'not found' });
-      return { state, events };
-    }
-
-    // Check ownership
-    if (m.owners[m.orderOwnerIdx[idx]!]! !== ownerId) {
-      events.push({ type: 'REJECT', orderId, ownerId, reason: 'not owner' });
-      return { state, events };
-    }
-
-    const levelIdx = m.orderPriceIdx[idx]!;
-    const side = m.orderSide[idx]! as Side;
-    removeFromLevel(side, levelIdx, idx);
-    freeOrder(idx);
-    m.orderIdToIdx.delete(orderId);
-    events.push({ type: 'CANCELED', orderId, ownerId });
-    bumpHash(5, m.orderOwnerIdx[idx]!, 0);
-
-  } else if (cmd.kind === 2) {
-    // REPLACE (cancel + new)
-    const { ownerId, orderId, newPriceTicks, qtyDeltaLots } = cmd;
-    const idx = m.orderIdToIdx.get(orderId);
-
-    if (idx === undefined || !m.orderActive[idx]) {
-      events.push({ type: 'REJECT', orderId, ownerId, reason: 'not found' });
-      return { state, events };
-    }
-
-    if (m.owners[m.orderOwnerIdx[idx]!]! !== ownerId) {
-      events.push({ type: 'REJECT', orderId, ownerId, reason: 'not owner' });
-      return { state, events };
-    }
-
-    const side = m.orderSide[idx]! as Side;
-    const oldLevelIdx = m.orderPriceIdx[idx]!;
-    const oldQty = m.orderQtyLots[idx]!;
-    const newQty = oldQty + qtyDeltaLots;
-
-    if (newQty <= 0) {
-      // Cancel
-      removeFromLevel(side, oldLevelIdx, idx);
-      freeOrder(idx);
-      m.orderIdToIdx.delete(orderId);
-      events.push({ type: 'CANCELED', orderId, ownerId });
-    } else if (newPriceTicks !== null) {
-      // Price change - CANCEL old, then match+post new order (proper replace semantics)
-      if (newPriceTicks < pmin || newPriceTicks > pmax) {
-        events.push({ type: 'REJECT', orderId, ownerId, reason: 'new price out of range' });
-        return { state, events };
-      }
-      if (((newPriceTicks - pmin) % tick) !== 0n) {
-        events.push({ type: 'REJECT', orderId, ownerId, reason: 'new price off grid' });
-        return { state, events };
-      }
-      const newLevelIdx = Number((newPriceTicks - pmin) / tick);
-      if (newLevelIdx < 0 || newLevelIdx >= levels) {
-        events.push({ type: 'REJECT', orderId, ownerId, reason: 'new price out of range' });
-        return { state, events };
-      }
-
-      // Cancel existing order
-      removeFromLevel(side, oldLevelIdx, idx);
-      freeOrder(idx);
-      m.orderIdToIdx.delete(orderId);
-      events.push({ type: 'CANCELED', orderId, ownerId });
-
-      // Now attempt to match and post new order with crossing
-      const ownerIdx = m.orderOwnerIdx[idx]!;
-      let remaining = newQty;
-
-      // Match against opposite side
-      if (side === 0) {
-        // BUY - match against asks
-        while (remaining > 0 && m.bestAskIdx !== EMPTY && m.bestAskIdx <= newLevelIdx) {
-          remaining = fillAgainst(0, m.bestAskIdx, remaining, ownerIdx, orderId, newQty);
-          if (m.bestAskIdx !== EMPTY && m.levelHeadAsk[m.bestAskIdx]! === EMPTY) {
-            m.bestAskIdx = findNextNonEmpty(m.bitmapAsk, levels, m.bestAskIdx + 1);
-          }
-        }
-      } else {
-        // SELL - match against bids
-        while (remaining > 0 && m.bestBidIdx !== EMPTY && m.bestBidIdx >= newLevelIdx) {
-          remaining = fillAgainst(1, m.bestBidIdx, remaining, ownerIdx, orderId, newQty);
-          if (m.bestBidIdx !== EMPTY && m.levelHeadBid[m.bestBidIdx]! === EMPTY) {
-            m.bestBidIdx = findPrevNonEmpty(m.bitmapBid, m.bestBidIdx - 1);
-          }
-        }
-      }
-
-      // Post any remaining to book (GTC behavior)
-      if (remaining > 0) {
-        const newIdx = allocOrder();
-        m.orderPriceIdx[newIdx] = newLevelIdx;
-        m.orderQtyLots[newIdx] = remaining;
-        m.orderOwnerIdx[newIdx] = ownerIdx;
-        m.orderSide[newIdx] = side;
-        m.orderActive[newIdx] = 1;
-        m.orderIds[newIdx] = orderId;
-        m.orderIdToIdx.set(orderId, newIdx);
-        enqueueTail(side, newLevelIdx, newIdx);
-        events.push({ type: 'ACK', orderId, ownerId });
-        bumpHash(1, ownerIdx, remaining);
-      }
-    } else {
-      // Qty change only (no price change, no crossing needed)
-      m.orderQtyLots[idx] = newQty;
-      events.push({ type: 'REDUCED', orderId, ownerId, delta: qtyDeltaLots, remain: newQty });
-    }
-  }
-
-  // Build new immutable state
-  const newState: BookState = {
-    params: state.params,
-    levels: state.levels,
-    orderPriceIdx: m.orderPriceIdx,
-    orderQtyLots: m.orderQtyLots,
-    orderOwnerIdx: m.orderOwnerIdx,
-    orderSide: m.orderSide,
-    orderPrev: m.orderPrev,
-    orderNext: m.orderNext,
-    orderActive: m.orderActive,
-    owners: m.owners,
-    orderIds: m.orderIds,
-    orderIdToIdx: m.orderIdToIdx,
-    levelHeadBid: m.levelHeadBid,
-    levelTailBid: m.levelTailBid,
-    levelHeadAsk: m.levelHeadAsk,
-    levelTailAsk: m.levelTailAsk,
-    bitmapBid: m.bitmapBid,
-    bitmapAsk: m.bitmapAsk,
-    bestBidIdx: m.bestBidIdx,
-    bestAskIdx: m.bestAskIdx,
-    freeHead: m.freeHead,
-    tradeCount: m.tradeCount,
-    tradeQtySum: m.tradeQtySum,
-    eventHash: m.eventHash,
-  };
-
-  return { state: newState, events };
+  return { state, events };
 }
-
-// ============================================================================
-// Getters
-// ============================================================================
 
 export function getBestBid(state: BookState): bigint | null {
-  if (state.bestBidIdx === EMPTY) return null;
-  return state.params.pmin + (BigInt(state.bestBidIdx) * state.params.tick);
+  const first = getTopLevel(state, 0);
+  return first?.level.priceTicks ?? null;
 }
 
 export function getBestAsk(state: BookState): bigint | null {
-  if (state.bestAskIdx === EMPTY) return null;
-  return state.params.pmin + (BigInt(state.bestAskIdx) * state.params.tick);
+  const first = getTopLevel(state, 1);
+  return first?.level.priceTicks ?? null;
 }
 
 export function getSpread(state: BookState): bigint | null {
@@ -760,99 +544,93 @@ export function getSpread(state: BookState): bigint | null {
   return ask - bid;
 }
 
-/** Compute deterministic state hash for consensus */
-export function computeBookHash(state: BookState): string {
-  // Include: eventHash + tradeCount + tradeQtySum + bestBid + bestAsk
-  const bid = state.bestBidIdx;
-  const ask = state.bestAskIdx;
-  const combined = `${state.eventHash.toString(16)}|${state.tradeCount}|${state.tradeQtySum}|${bid}|${ask}`;
+export function getBookOrder(state: BookState, orderId: string): BookOrderState | null {
+  return state.orders.get(orderId) ?? null;
+}
 
-  // Simple hash (for real use, replace with keccak256)
+export function getBookOrders(state: BookState): BookOrderState[] {
+  return Array.from(state.orders.values()).sort((left, right) => left.seq - right.seq);
+}
+
+export function getBookSideLevels(state: BookState, side: Side, depth = 10): BookSideLevel[] {
+  const out: BookSideLevel[] = [];
+  for (const view of getOrderedLevels(state, side)) {
+    const ownerIds = new Set<string>();
+    const orderIds: string[] = [];
+    let totalQtyLots = 0;
+    for (const orderId of view.level.orderIds) {
+      const order = state.orders.get(orderId);
+      if (!order || order.qtyLots <= 0) continue;
+      ownerIds.add(order.ownerId);
+      orderIds.push(orderId);
+      totalQtyLots += order.qtyLots;
+    }
+    if (totalQtyLots <= 0) continue;
+    out.push({
+      priceTicks: view.level.priceTicks,
+      qtyLots: totalQtyLots,
+      ownerIds: Array.from(ownerIds),
+      orderIds,
+    });
+    if (out.length >= depth) break;
+  }
+  return out;
+}
+
+export function computeBookHash(state: BookState): string {
+  const bid = getBestBid(state)?.toString() ?? '-';
+  const ask = getBestAsk(state)?.toString() ?? '-';
+  const combined = `${state.eventHash.toString(16)}|${state.tradeCount}|${state.tradeQtySum}|${state.orders.size}|${bid}|${ask}`;
   let hash = 0n;
-  for (let i = 0; i < combined.length; i++) {
+  for (let i = 0; i < combined.length; i += 1) {
     hash = (hash * 31n + BigInt(combined.charCodeAt(i))) & 0xffffffffffffffffn;
   }
   return hash.toString(16).padStart(16, '0');
 }
 
-/**
- * ASCII snapshot of the top-of-book (depth rows),
- * with per-level individual orders listed as "qty@owner,qty@owner,...".
- */
 export function renderAscii(state: BookState, depth = 10, perLevelOrders = 10, lineWidth = 40): string {
-  const { params: { pmin, tick }, levelHeadBid, levelHeadAsk, orderQtyLots, orderOwnerIdx, orderNext, orderActive, owners, bestBidIdx, bestAskIdx } = state;
   const rows: string[] = [];
-  const BOLD = '\x1b[1m', DIM = '\x1b[2m', RESET = '\x1b[0m';
-  const GREEN = '\x1b[32m', RED = '\x1b[31m';
+  const BOLD = '\x1b[1m';
+  const DIM = '\x1b[2m';
+  const RESET = '\x1b[0m';
+  const GREEN = '\x1b[32m';
+  const RED = '\x1b[31m';
+  const pad = (value: string, width: number) => (value.length >= width ? value : ' '.repeat(width - value.length) + value);
 
-  const pad = (s: string, n: number) => (s.length >= n ? s : ' '.repeat(n - s.length) + s);
+  const bids = getBookSideLevels(state, 0, depth).map((level) => ({
+    px: level.priceTicks,
+    orders: level.orderIds
+      .slice(0, perLevelOrders)
+      .map((orderId) => {
+        const order = state.orders.get(orderId);
+        return order ? `${order.qtyLots}@${order.ownerId.slice(-4)}` : null;
+      })
+      .filter(Boolean)
+      .join(','),
+  }));
 
-  // Find previous non-empty bid level
-  const findPrevBid = (from: number): number => {
-    for (let i = from; i >= 0; i--) {
-      if (levelHeadBid[i] !== EMPTY) return i;
-    }
-    return EMPTY;
-  };
-
-  // Find next non-empty ask level
-  const findNextAsk = (from: number): number => {
-    for (let i = from; i < state.levels; i++) {
-      if (levelHeadAsk[i]! !== EMPTY) return i;
-    }
-    return EMPTY;
-  };
-
-  // Collect bids (descending price)
-  const bids: { px: bigint; orders: string }[] = [];
-  let bidIdx = bestBidIdx;
-  while (bidIdx !== EMPTY && bids.length < depth) {
-    let cur = levelHeadBid[bidIdx]!;
-    const parts: string[] = [];
-    let count = 0;
-    while (cur !== EMPTY && count < perLevelOrders) {
-      if (orderActive[cur]!) {
-        const owner = owners[orderOwnerIdx[cur]!]?.slice(-4) || '?';
-        parts.push(`${orderQtyLots[cur]!}@${owner}`);
-        count++;
-      }
-      cur = orderNext[cur]!;
-    }
-    if (parts.length) bids.push({ px: pmin + (BigInt(bidIdx) * tick), orders: parts.join(',') });
-    bidIdx = findPrevBid(bidIdx - 1);
-  }
-
-  // Collect asks (ascending price)
-  const asks: { px: bigint; orders: string }[] = [];
-  let askIdx = bestAskIdx;
-  while (askIdx !== EMPTY && asks.length < depth) {
-    let cur = levelHeadAsk[askIdx]!;
-    const parts: string[] = [];
-    let count = 0;
-    while (cur !== EMPTY && count < perLevelOrders) {
-      if (orderActive[cur]!) {
-        const owner = owners[orderOwnerIdx[cur]!]?.slice(-4) || '?';
-        parts.push(`${orderQtyLots[cur]!}@${owner}`);
-        count++;
-      }
-      cur = orderNext[cur]!;
-    }
-    if (parts.length) asks.push({ px: pmin + (BigInt(askIdx) * tick), orders: parts.join(',') });
-    askIdx = findNextAsk(askIdx + 1);
-  }
+  const asks = getBookSideLevels(state, 1, depth).map((level) => ({
+    px: level.priceTicks,
+    orders: level.orderIds
+      .slice(0, perLevelOrders)
+      .map((orderId) => {
+        const order = state.orders.get(orderId);
+        return order ? `${order.qtyLots}@${order.ownerId.slice(-4)}` : null;
+      })
+      .filter(Boolean)
+      .join(','),
+  }));
 
   rows.push(`${BOLD}     BID (qty@owner)      |      ASK (qty@owner)     ${RESET}`);
   rows.push(`${DIM}  PX      ORDERS          |   PX      ORDERS         ${RESET}`);
-
-  for (let i = 0; i < depth; i++) {
-    const b = bids[i];
-    const a = asks[i];
-    const bPx = b ? pad(String(b.px), 6) : '      ';
-    const aPx = a ? pad(String(a.px), 6) : '      ';
-    const bOrd = b ? pad(b.orders.slice(0, lineWidth), lineWidth) : ' '.repeat(lineWidth);
-    const aOrd = a ? pad(a.orders.slice(0, lineWidth), lineWidth) : ' '.repeat(lineWidth);
-    rows.push(`${GREEN}${bPx} ${bOrd}${RESET} | ${RED}${aPx} ${aOrd}${RESET}`);
+  for (let i = 0; i < depth; i += 1) {
+    const bid = bids[i];
+    const ask = asks[i];
+    const bidPx = bid ? pad(String(bid.px), 6) : '      ';
+    const askPx = ask ? pad(String(ask.px), 6) : '      ';
+    const bidOrders = bid ? pad(bid.orders.slice(0, lineWidth), lineWidth) : ' '.repeat(lineWidth);
+    const askOrders = ask ? pad(ask.orders.slice(0, lineWidth), lineWidth) : ' '.repeat(lineWidth);
+    rows.push(`${GREEN}${bidPx} ${bidOrders}${RESET} | ${RED}${askPx} ${askOrders}${RESET}`);
   }
-
   return rows.join('\n');
 }

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { getWatcherStartBlock } from '../jadapter/helpers';
+import { getWatcherStartBlock, updateWatcherJurisdictionCursor } from '../jadapter/helpers';
 
 describe('jadapter helper cursors', () => {
   test('uses matching jReplica blockNumber as watcher cursor source', () => {
@@ -33,5 +33,18 @@ describe('jadapter helper cursors', () => {
     } as any;
 
     expect(getWatcherStartBlock(env)).toBe(1);
+  });
+
+  test('watcher start block only advances after an explicit committed cursor update', () => {
+    const env = {
+      activeJurisdiction: 'Arrakis',
+      jReplicas: new Map([
+        ['Arrakis', { name: 'Arrakis', blockNumber: 100n, depositoryAddress: '0xaaa' }],
+      ]),
+    } as any;
+
+    expect(getWatcherStartBlock(env, '0xaaa')).toBe(101);
+    updateWatcherJurisdictionCursor(env, 120, '0xaaa');
+    expect(getWatcherStartBlock(env, '0xaaa')).toBe(121);
   });
 });

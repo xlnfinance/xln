@@ -27,8 +27,8 @@ import { createDefaultDelta } from '../validation-utils';
 const LOT_SCALE = SWAP_LOT_SCALE; // 10^12
 const PRICE_SCALE = ORDERBOOK_PRICE_SCALE; // 10_000n
 
-function makeBook(tick: number, pmin: number, pmax: number): BookState {
-  return createBook({ tick: BigInt(tick), pmin: BigInt(pmin), pmax: BigInt(pmax), maxOrders: 100, stpPolicy: 0 });
+function makeBook(): BookState {
+  return createBook({ bucketWidthTicks: 100n, maxOrders: 100, stpPolicy: 0 });
 }
 
 /** Extract TRADE events from command result */
@@ -124,7 +124,7 @@ describe('price improvement', () => {
     // Setup: 3 makers selling 1 lot each at prices 100, 110, 120
     // Taker wants to buy 3 lots with limit price 120
     test('orderbook matches at maker prices, not taker limit', () => {
-      let book = makeBook(10, 0, 200);
+      let book = makeBook();
 
       // Makers place asks
       const r1 = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'ask1', side: 1, tif: 0, postOnly: false, priceTicks: 100n, qtyLots: 1 });
@@ -160,7 +160,7 @@ describe('price improvement', () => {
     });
 
     test('execution amounts differ from current swap_resolve settlement', () => {
-      let book = makeBook(10, 0, 200);
+      let book = makeBook();
 
       // Makers: asks at 100, 110, 120
       let r;
@@ -203,7 +203,7 @@ describe('price improvement', () => {
     // Setup: 3 makers bidding 1 lot each at prices 3100, 3000, 2900
     // Taker wants to sell 3 lots with limit price 2900
     test('orderbook matches at maker prices, not taker limit', () => {
-      let book = makeBook(100, 2000, 4000);
+      let book = makeBook();
 
       // Makers place bids
       const r1 = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'bid1', side: 0, tif: 0, postOnly: false, priceTicks: 3100n, qtyLots: 1 });
@@ -238,7 +238,7 @@ describe('price improvement', () => {
     });
 
     test('execution amounts differ from current swap_resolve settlement', () => {
-      let book = makeBook(100, 2000, 4000);
+      let book = makeBook();
 
       // Makers: bids at 3100, 3000, 2900
       let r;
@@ -303,7 +303,7 @@ describe('price improvement', () => {
     }
 
     test('BUY taker gets price improvement with exact settlement', () => {
-      let book = makeBook(10, 0, 200);
+      let book = makeBook();
       let r;
       r = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'a1', side: 1, tif: 0, postOnly: false, priceTicks: 100n, qtyLots: 1 }); book = r.state;
       r = applyCommand(book, { kind: 0, ownerId: 'mm2', orderId: 'a2', side: 1, tif: 0, postOnly: false, priceTicks: 110n, qtyLots: 1 }); book = r.state;
@@ -335,7 +335,7 @@ describe('price improvement', () => {
     });
 
     test('handleSwapResolve settles BUY at exact execution amounts', async () => {
-      let book = makeBook(10, 0, 200);
+      let book = makeBook();
       let r;
       r = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'a1', side: 1, tif: 0, postOnly: false, priceTicks: 100n, qtyLots: 1 }); book = r.state;
       r = applyCommand(book, { kind: 0, ownerId: 'mm2', orderId: 'a2', side: 1, tif: 0, postOnly: false, priceTicks: 110n, qtyLots: 1 }); book = r.state;
@@ -386,7 +386,7 @@ describe('price improvement', () => {
     });
 
     test('SELL taker gets price improvement with exact settlement', () => {
-      let book = makeBook(100, 2000, 4000);
+      let book = makeBook();
       let r;
       r = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'b1', side: 0, tif: 0, postOnly: false, priceTicks: 3100n, qtyLots: 1 }); book = r.state;
       r = applyCommand(book, { kind: 0, ownerId: 'mm2', orderId: 'b2', side: 0, tif: 0, postOnly: false, priceTicks: 3000n, qtyLots: 1 }); book = r.state;
@@ -418,7 +418,7 @@ describe('price improvement', () => {
     });
 
     test('handleSwapResolve settles SELL at exact execution amounts', async () => {
-      let book = makeBook(100, 2000, 4000);
+      let book = makeBook();
       let r;
       r = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'b1', side: 0, tif: 0, postOnly: false, priceTicks: 3100n, qtyLots: 1 }); book = r.state;
       r = applyCommand(book, { kind: 0, ownerId: 'mm2', orderId: 'b2', side: 0, tif: 0, postOnly: false, priceTicks: 3000n, qtyLots: 1 }); book = r.state;

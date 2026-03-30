@@ -231,40 +231,81 @@ async function waitForPopupRoutesAndSubmit(popup: Page, targetEntityId: string):
   await popup.getByRole('button', { name: /^Pay Now$/i }).click();
 }
 
-async function ensureWalletAccountWorkspace(page: Page, counterpartyId?: string): Promise<void> {
+async function ensureWalletAccountsTabVisible(page: Page): Promise<void> {
+  const accountList = page.getByTestId('account-list-wrapper').first();
   const workspaceNav = page.locator('nav[aria-label="Account workspace"]').first();
-  if (await workspaceNav.isVisible().catch(() => false)) return;
+  const backButton = page.getByTestId('account-panel-back').first();
+  const accountsTab = page.getByTestId('tab-accounts').first();
 
-  const accountCard = counterpartyId
-    ? page.locator(`.account-preview[data-counterparty-id="${counterpartyId}"]`).first()
-    : page.locator('.account-preview').first();
-  await expect(accountCard).toBeVisible({ timeout: 20_000 });
-
-  const exploreButton = accountCard.locator('.popover-explore-btn').first();
-  if (!(await exploreButton.isVisible().catch(() => false))) {
-    const statusButton = accountCard.locator('.status-indicator').first();
-    await expect(statusButton).toBeVisible({ timeout: 20_000 });
-    await statusButton.click();
+  if (await backButton.isVisible().catch(() => false)) {
+    await backButton.click();
   }
 
-  await expect(exploreButton).toBeVisible({ timeout: 20_000 });
-  await exploreButton.click();
-  await expect(workspaceNav).toBeVisible({ timeout: 20_000 });
+  await expect(accountsTab).toBeVisible({ timeout: 20_000 });
+  for (let attempt = 0; attempt < 4; attempt += 1) {
+    if (
+      await accountList.isVisible().catch(() => false)
+      || await workspaceNav.isVisible().catch(() => false)
+    ) {
+      return;
+    }
+    await accountsTab.click();
+    await page.waitForTimeout(250);
+  }
+
+  await expect
+    .poll(async () => (
+      await accountList.isVisible().catch(() => false)
+      || await workspaceNav.isVisible().catch(() => false)
+    ), {
+      timeout: 20_000,
+      intervals: [200, 400, 800],
+      message: 'accounts tab shell must be visible before opening pay workspace',
+    })
+    .toBe(true);
 }
 
 async function openWalletPayWorkspace(page: Page, counterpartyId?: string): Promise<void> {
-  await ensureWalletAccountWorkspace(page, counterpartyId);
-  const visiblePayTab = page.locator('[data-testid="account-workspace-tab-pay"]:visible').first();
-  if (!(await visiblePayTab.isVisible().catch(() => false))) {
+  void counterpartyId;
+  await ensureWalletAccountsTabVisible(page);
+  const mainScroll = page.locator('.main-scroll').first();
+  const findVisibleSendTab = async (): Promise<Locator | null> => {
+    const navs = mainScroll.locator('nav[aria-label="Account workspace"]');
+    const navCount = await navs.count();
+    for (let i = 0; i < navCount; i += 1) {
+      const nav = navs.nth(i);
+      if (!(await nav.isVisible().catch(() => false))) continue;
+      const candidate = nav.getByTestId('account-workspace-tab-send').first();
+      if (await candidate.count()) return candidate;
+    }
+    return null;
+  };
+
+  let sendTab: Locator | null = null;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    sendTab = await findVisibleSendTab();
+    if (sendTab) break;
+    await mainScroll.evaluate((node, attemptIndex) => {
+      const target = node as HTMLElement;
+      target.scrollTo({ top: (attemptIndex + 1) * target.clientHeight, behavior: 'instant' });
+    }, attempt);
+    await page.waitForTimeout(250);
+  }
+
+  if (!sendTab) {
     const mobileToggle = page.getByTestId('account-workspace-mobile-toggle').first();
     if (await mobileToggle.isVisible().catch(() => false)) {
       await mobileToggle.click();
+      sendTab = page.getByTestId('account-workspace-tab-send').first();
     }
   }
-  const payTab = page.locator('[data-testid="account-workspace-tab-pay"]:visible').first();
-  await expect(payTab).toBeVisible({ timeout: 20_000 });
-  await payTab.click();
-  console.log(`[custody:wallet] opened pay workspace url=${page.url()}`);
+  if (!sendTab || !(await sendTab.isVisible().catch(() => false))) {
+    throw new Error(`Send workspace tab not visible after workspace open url=${page.url()}`);
+  }
+  await expect(sendTab).toBeVisible({ timeout: 20_000 });
+  await sendTab.scrollIntoViewIfNeeded().catch(() => undefined);
+  await sendTab.click();
+  console.log(`[custody:wallet] opened send workspace url=${page.url()}`);
   await expect(page.locator('#payment-invoice-input')).toBeVisible({ timeout: 20_000 });
 }
 

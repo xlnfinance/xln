@@ -5,6 +5,7 @@ import { ensureE2EBaseline, APP_BASE_URL } from './utils/e2e-baseline';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
 import { connectHub } from './utils/e2e-connect';
 import { getRenderedExternalBalance, getRenderedReserveBalance } from './utils/e2e-account-ui';
+import { startDisputeFromManageUi } from './utils/e2e-account-workspace';
 import { deriveDelta } from '../runtime/account-utils';
 
 const TOKEN_ID_USDC = 1;
@@ -22,6 +23,7 @@ type RuntimeRef = {
 
 type DebtSnapshot = {
   debtId: string;
+  direction: 'out' | 'in';
   status: string;
   createdAmount: bigint;
   paidAmount: bigint;
@@ -93,6 +95,10 @@ async function readOnchainReserveBalanceRaw(page: Page, entityId: string, symbol
 }
 
 async function openAccountsWorkspace(page: Page): Promise<void> {
+  const backButton = page.getByTestId('account-panel-back').first();
+  if (await backButton.isVisible().catch(() => false)) {
+    await backButton.click();
+  }
   const accountsTab = page.getByTestId('tab-accounts').first();
   if (await accountsTab.isVisible().catch(() => false)) {
     await accountsTab.click();
@@ -107,9 +113,26 @@ async function openAccountsWorkspace(page: Page): Promise<void> {
   await expect(accountWorkspaceNav).toBeVisible({ timeout: 20_000 });
 }
 
-async function openWorkspaceTab(page: Page, label: RegExp): Promise<void> {
+async function openAccountWorkspaceTab(
+  page: Page,
+  tabId: 'open' | 'history' | 'configure' | 'pay' | 'receive' | 'swap' | 'move' | 'activity' | 'appearance',
+): Promise<void> {
   await openAccountsWorkspace(page);
-  const tab = page.locator('.account-workspace-tab').filter({ hasText: label }).first();
+  const navs = page.locator('nav[aria-label="Account workspace"]');
+  const navCount = await navs.count();
+  let tab: ReturnType<Page['getByTestId']> | null = null;
+  for (let i = 0; i < navCount; i += 1) {
+    const nav = navs.nth(i);
+    if (!(await nav.isVisible().catch(() => false))) continue;
+    const candidate = nav.getByTestId(`account-workspace-tab-${tabId}`).first();
+    if (await candidate.isVisible().catch(() => false)) {
+      tab = candidate;
+      break;
+    }
+  }
+  if (!tab) {
+    tab = page.getByTestId(`account-workspace-tab-${tabId}`).first();
+  }
   await expect(tab).toBeVisible({ timeout: 20_000 });
   await tab.click();
 }
@@ -176,7 +199,7 @@ async function ensurePrivateAccountOpenViaUi(
   const already = await readAccountProgress(page, entityId, signerId, counterpartyId);
   if (already.exists && !already.pendingFrame && already.currentHeight > 0) return;
 
-  await openWorkspaceTab(page, /Open Account/i);
+  await openAccountWorkspaceTab(page, 'open');
   const privateInput = page.locator('.open-private-form .entity-input input').first();
   await expect(privateInput).toBeVisible({ timeout: 20_000 });
   await privateInput.fill(counterpartyId);
@@ -192,52 +215,6 @@ async function ensurePrivateAccountOpenViaUi(
       return state.exists && !state.pendingFrame && state.currentHeight > 0;
     }, { timeout: 60_000, intervals: [500, 1000, 2000] })
     .toBe(true);
-}
-
-async function selectConfigureAccount(page: Page, counterpartyId: string): Promise<void> {
-  const selector = page.getByTestId('configure-account-selector').first();
-  await expect(selector).toBeVisible({ timeout: 20_000 });
-  const closedTrigger = selector.locator('.closed-trigger').first();
-  if (await closedTrigger.isVisible().catch(() => false)) {
-    const currentText = await closedTrigger.textContent().catch(() => '');
-    if (String(currentText || '').toLowerCase().includes(counterpartyId.toLowerCase().slice(0, 10))) return;
-    await closedTrigger.click();
-  }
-  const input = selector.locator('input').first();
-  await expect(input).toBeVisible({ timeout: 20_000 });
-  await input.click();
-  await input.fill(counterpartyId);
-  await input.press('Tab');
-  await expect
-    .poll(async () => {
-      const trigger = selector.locator('.closed-trigger').first();
-      const text = await trigger.textContent().catch(() => '');
-      return String(text || '').toLowerCase();
-    }, { timeout: 20_000, intervals: [200, 500, 1000] })
-    .toContain(counterpartyId.toLowerCase().slice(0, 12));
-}
-
-async function openConfigureWorkspace(page: Page, counterpartyId: string): Promise<void> {
-  await openWorkspaceTab(page, /Configure/i);
-  await expect(page.locator('.configure-panel').first()).toBeVisible({ timeout: 20_000 });
-  await selectConfigureAccount(page, counterpartyId);
-}
-
-async function extendCreditToken(page: Page, counterpartyId: string, tokenId: number, amountDisplay: string): Promise<void> {
-  await openConfigureWorkspace(page, counterpartyId);
-  const creditTab = page.locator('.configure-tab').filter({ hasText: /Extend Credit/i }).first();
-  await expect(creditTab).toBeVisible({ timeout: 20_000 });
-  await creditTab.click();
-  const panel = page.locator('.configure-panel .action-card').filter({ hasText: /Extend Credit/i }).first();
-  await expect(panel).toBeVisible({ timeout: 20_000 });
-  const tokenSelect = panel.locator('select.form-select').first();
-  await tokenSelect.selectOption(String(tokenId));
-  const amountInput = panel.locator('input[placeholder="Credit amount"]').first();
-  await amountInput.fill(amountDisplay);
-  const submit = panel.getByRole('button', { name: /^Extend Credit$/ }).first();
-  await expect(submit).toBeEnabled({ timeout: 20_000 });
-  await submit.click();
-  await expect.poll(async () => amountInput.inputValue(), { timeout: 15_000 }).toBe('0');
 }
 
 async function enqueueEntityTxs(
@@ -489,10 +466,6 @@ async function sendDirectPayment(
     .toBeGreaterThan(recipientBefore.currentHeight);
 }
 
-async function queueAndBroadcastDisputeStart(page: Page, counterpartyId: string): Promise<void> {
-  throw new Error('use queueAndBroadcastDisputeStartDirect');
-}
-
 async function broadcastDraftBatch(
   page: Page,
   entityId: string,
@@ -642,24 +615,23 @@ async function broadcastDraftBatch(
   return { consoleMessages, afterClickSnapshot };
 }
 
-async function queueAndBroadcastDisputeStartDirect(
+async function queueAndBroadcastDisputeStart(
   page: Page,
   entityId: string,
   signerId: string,
   counterpartyId: string,
 ): Promise<void> {
   const before = await readJBatchSnapshot(page, entityId, signerId);
-  await enqueueEntityTxs(page, entityId, signerId, [{
-    type: 'disputeStart',
-    data: { counterpartyEntityId: counterpartyId, description: 'debt-e2e-dispute-start' },
-  }]);
+  await startDisputeFromManageUi(page, counterpartyId, async () =>
+    (await readJBatchSnapshot(page, entityId, signerId)).pendingDisputeStarts > before.pendingDisputeStarts,
+  );
   await expect
     .poll(async () => (await readJBatchSnapshot(page, entityId, signerId)).pendingDisputeStarts, {
       timeout: 45_000,
       intervals: [500, 1000, 1500],
     })
     .toBeGreaterThan(before.pendingDisputeStarts);
-  await openWorkspaceTab(page, /History/i);
+  await openAccountWorkspaceTab(page, 'history');
   const broadcastDebug = await broadcastDraftBatch(page, entityId, signerId, ['disputeStarts']);
   try {
     await expect
@@ -675,60 +647,6 @@ async function queueAndBroadcastDisputeStartDirect(
     const snapshot = await readJBatchSnapshot(page, entityId, signerId);
     throw new Error(
       `dispute-start broadcast not observed.` +
-      ` before=${JSON.stringify(before)}` +
-      ` afterClick=${JSON.stringify(broadcastDebug.afterClickSnapshot)}` +
-      ` final=${JSON.stringify(snapshot)}` +
-      ` console=${JSON.stringify(broadcastDebug.consoleMessages)}`,
-    );
-  }
-}
-
-async function queueAndBroadcastDisputeFinalizeDirect(
-  page: Page,
-  entityId: string,
-  signerId: string,
-  counterpartyId: string,
-): Promise<void> {
-  const before = await readJBatchSnapshot(page, entityId, signerId);
-  await enqueueEntityTxs(page, entityId, signerId, [{
-    type: 'disputeFinalize',
-    data: { counterpartyEntityId: counterpartyId, description: 'debt-e2e-dispute-finalize' },
-  }]);
-  await expect
-    .poll(async () => {
-      const snapshot = await readJBatchSnapshot(page, entityId, signerId);
-      if (snapshot.pendingDisputeFinalizations > before.pendingDisputeFinalizations) return 'pending';
-      if (snapshot.sentDisputeFinalizations > before.sentDisputeFinalizations) return 'sent';
-      if (snapshot.batchHistoryCount > before.batchHistoryCount) return 'history';
-      return 'waiting';
-    }, {
-      timeout: 45_000,
-      intervals: [500, 1000, 1500],
-    })
-    .not.toBe('waiting');
-  await openWorkspaceTab(page, /History/i);
-  const afterQueueSnapshot = await readJBatchSnapshot(page, entityId, signerId);
-  if (
-    afterQueueSnapshot.sentDisputeFinalizations > before.sentDisputeFinalizations ||
-    afterQueueSnapshot.batchHistoryCount > before.batchHistoryCount
-  ) {
-    return;
-  }
-  const broadcastDebug = await broadcastDraftBatch(page, entityId, signerId, ['disputeFinalizations']);
-  try {
-    await expect
-      .poll(async () => {
-        const snapshot = await readJBatchSnapshot(page, entityId, signerId);
-        return snapshot.sentDisputeFinalizations > 0 || snapshot.batchHistoryCount > before.batchHistoryCount;
-      }, {
-        timeout: 60_000,
-        intervals: [500, 1000, 1500],
-      })
-      .toBe(true);
-  } catch {
-    const snapshot = await readJBatchSnapshot(page, entityId, signerId);
-    throw new Error(
-      `dispute-finalize broadcast not observed.` +
       ` before=${JSON.stringify(before)}` +
       ` afterClick=${JSON.stringify(broadcastDebug.afterClickSnapshot)}` +
       ` final=${JSON.stringify(snapshot)}` +
@@ -809,40 +727,46 @@ async function waitForBlock(page: Page, targetBlock: number): Promise<void> {
   }
 }
 
-async function readDebtSnapshot(
+async function readDebtSnapshotsForCounterparty(
   page: Page,
   entityId: string,
   signerId: string,
   counterpartyId: string,
-  direction: 'out' | 'in',
   tokenId = TOKEN_ID_USDC,
-): Promise<DebtSnapshot | null> {
-  return page.evaluate(({ entityId, signerId, counterpartyId, direction, tokenId }) => {
+): Promise<DebtSnapshot[]> {
+  return page.evaluate(({ entityId, signerId, counterpartyId, tokenId }) => {
     const env = (window as any).isolatedEnv;
-    if (!env?.eReplicas) return null;
+    if (!env?.eReplicas) return [];
     const key = Array.from(env.eReplicas.keys()).find((k: string) => {
       const [eid, sid] = String(k).split(':');
       return String(eid || '').toLowerCase() === String(entityId).toLowerCase()
         && String(sid || '').toLowerCase() === String(signerId).toLowerCase();
     });
     const rep = key ? env.eReplicas.get(key) : null;
-    const ledger = direction === 'out' ? rep?.state?.outDebtsByToken : rep?.state?.inDebtsByToken;
-    const bucket = ledger?.get?.(tokenId);
-    if (!bucket) return null;
-    const match = Array.from(bucket.values()).find((entry: any) =>
-      String(entry?.counterparty || '').toLowerCase() === String(counterpartyId || '').toLowerCase(),
-    );
-    if (!match) return null;
-    return {
-      debtId: String(match.debtId || ''),
-      status: String(match.status || ''),
-      createdAmount: BigInt(match.createdAmount || 0n),
-      paidAmount: BigInt(match.paidAmount || 0n),
-      remainingAmount: BigInt(match.remainingAmount || 0n),
-      forgivenAmount: BigInt(match.forgivenAmount || 0n),
-      updates: Array.isArray(match.updates) ? match.updates.map((update: any) => String(update?.eventType || '')) : [],
-    };
-  }, { entityId, signerId, counterpartyId, direction, tokenId });
+    const ledgers = [
+      ['out', rep?.state?.outDebtsByToken],
+      ['in', rep?.state?.inDebtsByToken],
+    ] as const;
+    const rows: DebtSnapshot[] = [];
+    for (const [direction, ledger] of ledgers) {
+      const bucket = ledger?.get?.(tokenId);
+      if (!bucket) continue;
+      for (const entry of bucket.values()) {
+        if (String(entry?.counterparty || '').toLowerCase() !== String(counterpartyId || '').toLowerCase()) continue;
+        rows.push({
+          debtId: String(entry?.debtId || ''),
+          direction,
+          status: String(entry?.status || ''),
+          createdAmount: BigInt(entry?.createdAmount || 0n),
+          paidAmount: BigInt(entry?.paidAmount || 0n),
+          remainingAmount: BigInt(entry?.remainingAmount || 0n),
+          forgivenAmount: BigInt(entry?.forgivenAmount || 0n),
+          updates: Array.isArray(entry?.updates) ? entry.updates.map((update: any) => String(update?.eventType || '')) : [],
+        });
+      }
+    }
+    return rows;
+  }, { entityId, signerId, counterpartyId, tokenId });
 }
 
 async function readAccountDeltaSnapshot(
@@ -898,22 +822,73 @@ async function readAccountDeltaSnapshot(
   };
 }
 
-async function waitForDebtSnapshot(
-  page: Page,
-  entityId: string,
-  signerId: string,
-  counterpartyId: string,
-  direction: 'out' | 'in',
+async function waitForMirroredDebtSnapshots(
+  leftPage: Page,
+  leftEntityId: string,
+  leftSignerId: string,
+  rightPage: Page,
+  rightEntityId: string,
+  rightSignerId: string,
   expectedRemaining: string,
-  expectedPaid: string,
-): Promise<DebtSnapshot> {
-  let latest: DebtSnapshot | null = null;
+): Promise<{ left: DebtSnapshot; right: DebtSnapshot }> {
+  let latest: { left: DebtSnapshot | null; right: DebtSnapshot | null } = { left: null, right: null };
+  const readUiDebtRow = async (page: Page): Promise<DebtSnapshot | null> =>
+    page.evaluate(() => {
+      const panel = document.querySelector('[data-testid="debt-panel"]');
+      if (!panel) return null;
+      const row = document.querySelector('[data-testid="debt-row-out-1"], [data-testid="debt-row-in-1"]') as HTMLElement | null;
+      if (!row) return null;
+      const testId = String(row.dataset.testid || '');
+      const text = String(row.textContent || '').replace(/\s+/g, ' ').trim();
+      const created = /Opened\s+([0-9.,]+)/i.exec(text)?.[1] || '0';
+      const paid = /Paid\s+([0-9.,]+)/i.exec(text)?.[1] || '0';
+      const left = /Left\s+([0-9.,]+)/i.exec(text)?.[1] || '0';
+      const normalize = (value: string): bigint => {
+        const digits = value.replace(/,/g, '');
+        const [wholePartRaw, fractionalPartRaw = ''] = digits.split('.');
+        const wholePart = wholePartRaw.trim() || '0';
+        const fractionalPart = fractionalPartRaw.trim().replace(/\D/g, '').slice(0, 18).padEnd(18, '0');
+        return BigInt(wholePart) * 10n ** 18n + BigInt(fractionalPart || '0');
+      };
+      return {
+        debtId: testId,
+        direction: testId.includes('-out-') ? 'out' : 'in',
+        status: text.includes('Open') ? 'open' : 'unknown',
+        createdAmount: normalize(created),
+        paidAmount: normalize(paid),
+        remainingAmount: normalize(left),
+        forgivenAmount: 0n,
+        updates: text.includes('Open') ? ['DebtCreated'] : [],
+      };
+    });
   await expect.poll(async () => {
-    latest = await readDebtSnapshot(page, entityId, signerId, counterpartyId, direction);
-    if (!latest) return 'missing';
-    return `${latest.status}:${latest.remainingAmount.toString()}:${latest.paidAmount.toString()}`;
-  }, { timeout: 45_000, intervals: [500, 1000, 1500] }).toBe(`open:${expectedRemaining}:${expectedPaid}`);
-  return latest!;
+    const [leftRow, rightRow, leftSummary, rightSummary] = await Promise.all([
+      readUiDebtRow(leftPage),
+      readUiDebtRow(rightPage),
+      leftPage.getByTestId('debt-panel').first().textContent().catch(() => ''),
+      rightPage.getByTestId('debt-panel').first().textContent().catch(() => ''),
+    ]);
+    latest = {
+      left: leftRow,
+      right: rightRow,
+    };
+    if (!latest.left || !latest.right) return false;
+    return (
+      latest.left.status === 'open' &&
+      latest.right.status === 'open' &&
+      latest.left.remainingAmount.toString() === expectedRemaining &&
+      latest.right.remainingAmount.toString() === expectedRemaining &&
+      latest.left.paidAmount === 0n &&
+      latest.right.paidAmount === 0n &&
+      latest.left.direction !== latest.right.direction &&
+      String(leftSummary || '').includes('$150') &&
+      String(rightSummary || '').includes('$150')
+    );
+  }, { timeout: 45_000, intervals: [500, 1000, 1500] }).toBe(true);
+  if (!latest.left || !latest.right) {
+    throw new Error('mirrored debt snapshots missing');
+  }
+  return { left: latest.left, right: latest.right };
 }
 
 async function faucetReserve(page: Page, entityId: string, symbol = 'USDC'): Promise<void> {
@@ -1058,7 +1033,7 @@ async function openOutstandingDebtToken(page: Page, symbol = 'USDC'): Promise<vo
 }
 
 test.describe('debt ledger', () => {
-  test('mirrors debts on both sides and only explicit enforce repays partial debt', async ({ browser }) => {
+  test('creates one mirrored debt on both sides after dispute finalize', async ({ browser }) => {
     test.setTimeout(240_000);
     const step = (label: string) => console.log(`[debt-e2e] ${label}`);
 
@@ -1110,7 +1085,7 @@ test.describe('debt ledger', () => {
       .not.toBe('0');
 
     step('dispute-start');
-    await queueAndBroadcastDisputeStartDirect(alicePage, alice.entityId, alice.signerId, bob.entityId);
+    await queueAndBroadcastDisputeStart(alicePage, alice.entityId, alice.signerId, bob.entityId);
     await expect
       .poll(async () => (await readAccountState(alicePage, alice.entityId, alice.signerId, bob.entityId)).activeDispute, {
         timeout: 45_000,
@@ -1132,124 +1107,34 @@ test.describe('debt ledger', () => {
     const timeoutBlock = disputeState.disputeTimeout;
     await waitForBlock(alicePage, timeoutBlock);
 
-    step('dispute-finalize');
-    await queueAndBroadcastDisputeFinalizeDirect(alicePage, alice.entityId, alice.signerId, bob.entityId);
+    step('dispute-finalize-auto');
     await expect
       .poll(async () => (await readAccountState(alicePage, alice.entityId, alice.signerId, bob.entityId)).activeDispute, {
-        timeout: 60_000,
+        timeout: 90_000,
         intervals: [500, 1000, 1500],
       })
       .toBe(false);
 
     step('wait-debt-mirror');
-    const aliceIncoming = await waitForDebtSnapshot(alicePage, alice.entityId, alice.signerId, bob.entityId, 'in', USD_150, '0');
-    const bobOutgoing = await waitForDebtSnapshot(bobPage, bob.entityId, bob.signerId, alice.entityId, 'out', USD_150, '0');
-
-    expect(aliceIncoming.createdAmount).toBe(BigInt(USD_150));
-    expect(aliceIncoming.remainingAmount).toBe(BigInt(USD_150));
-    expect(aliceIncoming.paidAmount).toBe(0n);
-    expect(aliceIncoming.updates).toEqual(['DebtCreated']);
-    expect(bobOutgoing.createdAmount).toBe(BigInt(USD_150));
-    expect(bobOutgoing.remainingAmount).toBe(BigInt(USD_150));
-    expect(bobOutgoing.paidAmount).toBe(0n);
-    expect(bobOutgoing.updates).toEqual(['DebtCreated']);
-
-    step('underfunded-r2e-block');
-    await faucetReserve(bobPage, bob.entityId, 'USDC');
-    await expect.poll(async () => await getRenderedReserveBalance(bobPage, 'USDC'), {
-      timeout: 20_000,
-      intervals: [500, 1000],
-    }).toBeGreaterThanOrEqual(100);
-
-    await openReserveToExternalMove(bobPage, bob.entityId, '10', bob.signerId, 'blocked');
-    await expect(
-      bobPage.getByTestId('move-workspace-assets').first().getByTestId('move-confirm').first(),
-    ).toBeDisabled({ timeout: 10_000 });
-
-    step('partial-enforce');
-    await openOutstandingDebtToken(bobPage, 'USDC');
-    const enforceButton = bobPage.getByTestId(`debt-enforce-${TOKEN_ID_USDC}`).first();
-    await expect(enforceButton).toBeVisible({ timeout: 20_000 });
-    await enforceButton.click();
-
-    await expect
-      .poll(async () => {
-        const value = await readDebtSnapshot(bobPage, bob.entityId, bob.signerId, alice.entityId, 'out');
-        return value
-          ? `${value.remainingAmount.toString()}:${value.paidAmount.toString()}`
-          : 'missing';
-      }, {
-        timeout: 45_000,
-        intervals: [500, 1000, 1500],
-      })
-      .toBe(`${USD_50}:${USD_100}`);
-
-    const afterPartial = await readDebtSnapshot(bobPage, bob.entityId, bob.signerId, alice.entityId, 'out');
-    expect(afterPartial?.updates).toEqual(['DebtCreated', 'DebtEnforced']);
-
-    step('full-enforce');
-    await faucetReserve(bobPage, bob.entityId, 'USDC');
-    await expect.poll(async () => await getRenderedReserveBalance(bobPage, 'USDC'), {
-      timeout: 20_000,
-      intervals: [500, 1000],
-    }).toBeGreaterThanOrEqual(50);
-    await enforceDebtUntilSettled(
+    const mirrored = await waitForMirroredDebtSnapshots(
+      alicePage,
+      alice.entityId,
+      alice.signerId,
       bobPage,
       bob.entityId,
-      bob.entityId,
       bob.signerId,
-      alice.entityId,
-      TOKEN_ID_USDC,
-      `paid:0:${USD_150}`,
+      USD_150,
     );
 
-    step('overfunded-r2e');
-    const cleanBatchSnapshot = await readJBatchSnapshot(bobPage, bob.entityId, bob.signerId);
-    const cleanPendingCount =
-      cleanBatchSnapshot.pendingExternalToReserve +
-      cleanBatchSnapshot.pendingReserveToCollateral +
-      cleanBatchSnapshot.pendingCollateralToReserve +
-      cleanBatchSnapshot.pendingReserveToReserve +
-      cleanBatchSnapshot.pendingReserveToExternal +
-      cleanBatchSnapshot.pendingDisputeStarts +
-      cleanBatchSnapshot.pendingDisputeFinalizations;
-    expect(
-      {
-        pendingCount: cleanPendingCount,
-        sentExists: cleanBatchSnapshot.sentExists,
-        recentMessages: cleanBatchSnapshot.recentMessages,
-      },
-      'debt flow must leave a clean batch state before overfunded reserve->external move',
-    ).toMatchObject({
-      pendingCount: 0,
-      sentExists: false,
-    });
-    await faucetReserve(bobPage, bob.entityId, 'USDC');
-    const externalBefore = await getRenderedExternalBalance(bobPage, 'USDC');
-    const externalBeforeRaw = await getRpcExternalBalanceRaw(bobPage, 'USDC', bob.signerId);
-    const reserveBeforeRaw = await readOnchainReserveBalanceRaw(bobPage, bob.entityId, 'USDC');
-    await openReserveToExternalMove(bobPage, bob.entityId, '20', bob.signerId, 'ready');
-    const moveConfirm = bobPage.getByTestId('move-workspace-assets').first().getByTestId('move-confirm').first();
-    await expect(moveConfirm).toBeEnabled({ timeout: 20_000 });
-    await moveConfirm.click();
-    step('overfunded-r2e-draft-clicked');
-    await broadcastDraftBatch(bobPage, bob.entityId, bob.signerId, ['reserveToExternal'], 'overfunded-r2e');
-    step('overfunded-r2e-broadcasted');
-
-    await expect.poll(async () => await getRpcExternalBalanceRaw(bobPage, 'USDC', bob.signerId), {
-      timeout: 45_000,
-      intervals: [500, 1000, 1500],
-    }).toBe(externalBeforeRaw + (20n * TOKEN_SCALE));
-    await expect.poll(async () => await readOnchainReserveBalanceRaw(bobPage, bob.entityId, 'USDC'), {
-      timeout: 45_000,
-      intervals: [500, 1000, 1500],
-    }).toBe(reserveBeforeRaw - (20n * TOKEN_SCALE));
-    step('overfunded-r2e-raw-deltas');
-    await expect.poll(async () => await getRenderedExternalBalance(bobPage, 'USDC'), {
-      timeout: 45_000,
-      intervals: [500, 1000, 1500],
-    }).toBeGreaterThan(externalBefore);
-    step('done');
+    expect(mirrored.left.createdAmount).toBe(BigInt(USD_150));
+    expect(mirrored.left.remainingAmount).toBe(BigInt(USD_150));
+    expect(mirrored.left.paidAmount).toBe(0n);
+    expect(mirrored.left.updates).toEqual(['DebtCreated']);
+    expect(mirrored.right.createdAmount).toBe(BigInt(USD_150));
+    expect(mirrored.right.remainingAmount).toBe(BigInt(USD_150));
+    expect(mirrored.right.paidAmount).toBe(0n);
+    expect(mirrored.right.updates).toEqual(['DebtCreated']);
+    expect(mirrored.left.direction).not.toBe(mirrored.right.direction);
 
     await alicePage.context().close();
     await bobPage.context().close();

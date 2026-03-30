@@ -1326,7 +1326,9 @@ const buildMarketMakerOfferSpecs = (
             giveAmount: baseSize,
             wantTokenId: entry.pair.quoteTokenId,
             wantAmount: askWantAmount,
-            minFillRatio: 1,
+            // Resting MM quotes must remain plain GTC orders. Non-zero minFillRatio is
+            // reserved for IOC/FOK semantics and would make bootstrap quotes invalid.
+            minFillRatio: 0,
           });
         }
 
@@ -1338,7 +1340,8 @@ const buildMarketMakerOfferSpecs = (
             giveAmount: bidGiveAmount,
             wantTokenId: entry.pair.baseTokenId,
             wantAmount: baseSize,
-            minFillRatio: 1,
+            // Keep resting bids consistent with the runtime MM path above.
+            minFillRatio: 0,
           });
         }
       }
@@ -4036,6 +4039,17 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         path: filePath,
       }),
       { headers },
+    );
+  }
+
+  if (pathname === '/api/reset-site-data' && (req.method === 'POST' || req.method === 'GET')) {
+    const responseHeaders = new Headers(headers);
+    responseHeaders.set('Clear-Site-Data', '"cache", "cookies", "storage"');
+    responseHeaders.set('Cache-Control', 'no-store, no-cache, must-revalidate');
+    responseHeaders.set('Pragma', 'no-cache');
+    return new Response(
+      safeStringify({ ok: true, cleared: ['cache', 'cookies', 'storage'] }),
+      { headers: responseHeaders },
     );
   }
 

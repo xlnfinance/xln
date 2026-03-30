@@ -1,5 +1,6 @@
   <script lang="ts">
     import type { AccountMachine, AccountTx, EntityReplica, Tab } from '$lib/types/ui';
+  import { getBestAsk, getBestBid } from '@xln/runtime/xln-api';
   import type { SwapBookEntry } from '@xln/runtime/xln-api';
   import { enqueueEntityInputs, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
   import { isLive as globalIsLive } from '../../stores/timeStore';
@@ -24,7 +25,6 @@
   const AGGREGATED_ORDERBOOK_DEPTH = 10;
   const SELECTED_ORDERBOOK_DEPTH = 10;
   const ORDERBOOK_PRICE_SCALE = 10_000n;
-  const ORDERBOOK_MAX_LEVELS = 40_000;
   const ORDERBOOK_LOT_SCALE = 10n ** 12n;
   type PreparedSwapOrderLike = {
     side: 0 | 1;
@@ -136,8 +136,8 @@
   let orderbookPairId = '1/2';
   let orderbookViewKey = '';
   let orderbookRefreshNonce = 0;
-  let orderbookPriceStep: '0.0001' | '0.001' | '0.01' | '0.1' | '1' | '10' | '50' | '100' = '0.0001';
-  let orderbookAutoResolvedPriceStep: '0.0001' | '0.001' | '0.01' | '0.1' | '1' | '10' | '50' | '100' = '1';
+  let orderbookPriceStep: '0.0001' | '0.001' | '0.01' | '0.1' | '0.5' | '1' | '5' | '10' | '50' | '100' = '0.0001';
+  let orderbookAutoResolvedPriceStep: '0.0001' | '0.001' | '0.01' | '0.1' | '0.5' | '1' | '5' | '10' | '50' | '100' = '1';
   let orderPercent = 100;
   let submitError = '';
   let pendingSwapFeedbackOfferId = '';
@@ -376,9 +376,8 @@
     if (ORDERBOOK_PRICE_DECIMALS <= 0) return whole.toString();
     const frac = (ticks % ORDERBOOK_PRICE_SCALE)
       .toString()
-      .padStart(ORDERBOOK_PRICE_DECIMALS, '0')
-      .replace(/0+$/, '');
-    return frac ? `${whole.toString()}.${frac}` : whole.toString();
+      .padStart(ORDERBOOK_PRICE_DECIMALS, '0');
+    return `${whole.toString()}.${frac}`;
   }
 
   function lotsToBaseWei(sizeLots: number): bigint {
@@ -620,56 +619,6 @@
     return null;
   }
 
-  function readBookOccupiedPriceBounds(book: any): { minPrice: bigint; maxPrice: bigint; tick: bigint } | null {
-    const pmin = toBigIntSafe(book?.params?.pmin);
-    const tick = toBigIntSafe(book?.params?.tick);
-    const levels = Number(book?.levels ?? 0);
-    const levelHeadBid = book?.levelHeadBid;
-    const levelHeadAsk = book?.levelHeadAsk;
-    if (pmin === null || tick === null || tick <= 0n || !Number.isFinite(levels) || levels <= 0) return null;
-    if (!(levelHeadBid instanceof Int32Array) || !(levelHeadAsk instanceof Int32Array)) return null;
-
-    let minIdx = -1;
-    for (let idx = 0; idx < levels; idx += 1) {
-      if (levelHeadBid[idx] !== -1 || levelHeadAsk[idx] !== -1) {
-        minIdx = idx;
-        break;
-      }
-    }
-    if (minIdx < 0) return null;
-
-    let maxIdx = -1;
-    for (let idx = levels - 1; idx >= 0; idx -= 1) {
-      if (levelHeadBid[idx] !== -1 || levelHeadAsk[idx] !== -1) {
-        maxIdx = idx;
-        break;
-      }
-    }
-    if (maxIdx < minIdx) return null;
-
-    return {
-      minPrice: pmin + (BigInt(minIdx) * tick),
-      maxPrice: pmin + (BigInt(maxIdx) * tick),
-      tick,
-    };
-  }
-
-  function computeExactSpanValidationError(counterpartyEntityId: string, candidatePriceTicks: bigint | null): string {
-    if (!counterpartyEntityId || !candidatePriceTicks || candidatePriceTicks <= 0n) return '';
-    const book = readCurrentHubPairBook(counterpartyEntityId);
-    if (!book) return '';
-    const bounds = readBookOccupiedPriceBounds(book);
-    if (!bounds) return '';
-
-    const minObserved = candidatePriceTicks < bounds.minPrice ? candidatePriceTicks : bounds.minPrice;
-    const maxObserved = candidatePriceTicks > bounds.maxPrice ? candidatePriceTicks : bounds.maxPrice;
-    const requiredLevels = ((maxObserved - minObserved) / bounds.tick) + 1n;
-    if (requiredLevels > BigInt(ORDERBOOK_MAX_LEVELS)) {
-      return 'Price is too far from the current exact orderbook for this hub.';
-    }
-    return '';
-  }
-
   function computePriceDeviationBps(limitTicks: bigint, referenceTicks: bigint): bigint {
     if (limitTicks <= 0n || referenceTicks <= 0n) return 0n;
     const delta = limitTicks > referenceTicks ? limitTicks - referenceTicks : referenceTicks - limitTicks;
@@ -696,8 +645,6 @@
         return 'Price must stay within 30% of the current orderbook.';
       }
     }
-    const exactSpanValidationError = computeExactSpanValidationError(input.counterpartyId, input.limitPriceTicks);
-    if (exactSpanValidationError) return exactSpanValidationError;
     if (input.wantAmount <= 0n) return 'Amount to receive is too small for selected price.';
     if (input.notionalUsd < MIN_ORDER_NOTIONAL_USD) {
       return `Minimum order size is ~$${MIN_ORDER_NOTIONAL_USD}.`;
@@ -865,14 +812,7 @@
   function readCurrentHubBestPriceTicks(side: BookSide, hubEntityId: string): bigint | null {
     const book = readCurrentHubPairBook(hubEntityId);
     if (!book) return null;
-    const idx = side === 'ask'
-      ? Number(book.bestAskIdx ?? -1)
-      : Number(book.bestBidIdx ?? -1);
-    if (!Number.isFinite(idx) || idx < 0) return null;
-    const pmin = toBigIntSafe(book.params?.pmin) ?? 0n;
-    const tick = toBigIntSafe(book.params?.tick) ?? 1n;
-    const price = pmin + (BigInt(idx) * tick);
-    return price > 0n ? price : null;
+    return side === 'ask' ? getBestAsk(book) : getBestBid(book);
   }
 
   function toggleOrderbookScope(): void {
@@ -1133,6 +1073,41 @@
     return `${String(accountId || '').trim()}:${String(offerId || '').trim()}`;
   }
 
+  function createLifecycleFromResolveFallback(
+    accountId: string,
+    offerId: string,
+    frameTs: number,
+    data: Record<string, unknown>,
+  ): OfferLifecycle | null {
+    const giveTokenId = Number(data.restingGiveTokenId || 0);
+    const wantTokenId = Number(data.restingWantTokenId || 0);
+    if (!Number.isFinite(giveTokenId) || !Number.isFinite(wantTokenId) || giveTokenId <= 0 || wantTokenId <= 0) {
+      return null;
+    }
+    const giveAmount = toBigIntSafe(data.restingGiveAmount) ?? 0n;
+    const wantAmount = toBigIntSafe(data.restingWantAmount) ?? 0n;
+    if (giveAmount <= 0n || wantAmount <= 0n) return null;
+    const priceTicks = toBigIntSafe(data.restingPriceTicks)
+      ?? (activeXlnFunctions?.computeSwapPriceTicks
+        ? activeXlnFunctions.computeSwapPriceTicks(giveTokenId, wantTokenId, giveAmount, wantAmount)
+        : 0n);
+    return {
+      key: offerLifecycleKey(accountId, offerId),
+      offerId,
+      accountId,
+      giveTokenId,
+      wantTokenId,
+      giveAmount,
+      wantAmount,
+      priceTicks,
+      // The real creation timestamp may be older than the retained frameHistory window.
+      // Frame-local resolve time is still good enough for rendering and status tracking.
+      createdAt: frameTs,
+      resolves: [],
+      cancelRequested: false,
+    };
+  }
+
   function computeFilledPpmFromRatios(resolves: ResolveRecord[]): bigint {
     let remainingPpm = 1_000_000n;
     for (const resolve of resolves) {
@@ -1289,8 +1264,12 @@
             const feeTokenId = Number.isFinite(Number(data.feeTokenId)) ? Number(data.feeTokenId) : null;
             const feeAmount = toBigIntSafe(data.feeAmount);
             const comment = typeof data.comment === 'string' ? data.comment : '';
-            const prev = lifecycles.get(key);
-            if (!prev) continue;
+            let prev = lifecycles.get(key);
+            if (!prev) {
+              prev = createLifecycleFromResolveFallback(accountId, offerId, frameTs, data);
+              if (!prev) continue;
+              lifecycles.set(key, prev);
+            }
             prev.resolves.push({
               fillRatio: Number.isFinite(fillRatio) ? fillRatio : 0,
               cancelRemainder,
@@ -1523,8 +1502,6 @@
       );
       let canonicalPriceTicks = explicitSubmitPriceTicks;
 
-      const useIOC = !!selectedOrderLevel;
-
       if (effectiveGiveAmount <= 0n || effectiveWantAmount <= 0n) {
         throw new Error('Quantized order too small');
       }
@@ -1584,7 +1561,6 @@
           wantTokenId: wantToken,
           wantAmount: effectiveWantAmount,
           priceTicks: canonicalPriceTicks,
-          ...(useIOC ? { timeInForce: 1 as const } : {}),
           minFillRatio,
         },
       });

@@ -1,8 +1,16 @@
-import { canonicalPair, computeSwapPriceTicks, deriveSide, SWAP_LOT_SCALE, type BookState, type OrderbookExtState } from './types';
+import {
+  canonicalPair,
+  computeSwapPriceTicks,
+  deriveSide,
+  getBookOrders,
+  SWAP_LOT_SCALE,
+  type BookOrderState,
+  type BookState,
+  type OrderbookExtState,
+} from './types';
 import { compareCanonicalText, swapKey, type SwapKey } from '../swap-execution';
 import type { AccountMachine, EntityState, SwapOffer } from '../types';
 
-const EMPTY = -1;
 const MAX_QTY_LOTS = 0xFFFFFFFFn;
 
 export type OrderbookMediumField = 'pairId' | 'side' | 'priceTicks' | 'qtyLots' | 'ownerId';
@@ -80,32 +88,18 @@ const parseNamespacedOrderId = (orderId: string): { accountId: string; offerId: 
   return { accountId, offerId, swapKey: swapKey(accountId, offerId) };
 };
 
-const activeOrderCount = (book: BookState): number => {
-  let count = 0;
-  for (let i = 0; i < book.orderActive.length; i += 1) {
-    if (book.orderActive[i]) count += 1;
-  }
-  return count;
-};
+const activeOrderCount = (book: BookState): number => book.orders.size;
 
-const snapshotBookOrder = (book: BookState, pairId: string, orderId: string, idx: number): ActualBookOrder | null => {
-  if (idx < 0 || idx >= book.orderActive.length || !book.orderActive[idx]) return null;
-  const ownerIdx = book.orderOwnerIdx[idx]!;
-  const ownerId = book.owners[ownerIdx];
-  if (!ownerId) return null;
-  const priceIdx = book.orderPriceIdx[idx]!;
-  if (priceIdx < 0 || priceIdx >= book.levels) return null;
-  const side = book.orderSide[idx]!;
-  if (side !== 0 && side !== 1) return null;
-  const parsed = parseNamespacedOrderId(orderId);
+const snapshotBookOrder = (pairId: string, order: BookOrderState): ActualBookOrder => {
+  const parsed = parseNamespacedOrderId(order.orderId);
   return {
     swapKey: parsed?.swapKey ?? null,
     pairId,
-    orderId,
-    ownerId,
-    side,
-    priceTicks: book.params.pmin + (BigInt(priceIdx) * book.params.tick),
-    qtyLots: BigInt(book.orderQtyLots[idx]!),
+    orderId: order.orderId,
+    ownerId: order.ownerId,
+    side: order.side,
+    priceTicks: order.priceTicks,
+    qtyLots: BigInt(order.qtyLots),
   };
 };
 
@@ -140,7 +134,7 @@ const normalizeOpenOfferForBook = (
           offer.giveAmount,
           offer.wantAmount,
         );
-  if (priceTicks <= 0n || priceTicks > MAX_QTY_LOTS) return { invalid: { swapKey: key, reason: 'invalid-price' } };
+  if (priceTicks <= 0n) return { invalid: { swapKey: key, reason: 'invalid-price' } };
 
   const ownerId = offer.makerIsLeft ? account.leftEntity : account.rightEntity;
 
@@ -160,10 +154,9 @@ const normalizeOpenOfferForBook = (
 const collectActualBookOrders = (ext: OrderbookExtState): Map<string, ActualBookOrder> => {
   const actual = new Map<string, ActualBookOrder>();
   for (const [pairId, book] of ext.books.entries()) {
-    for (const [orderId, idx] of book.orderIdToIdx.entries()) {
-      const snapshot = snapshotBookOrder(book, pairId, orderId, idx);
-      if (!snapshot) continue;
-      actual.set(snapshot.swapKey ?? `orphan:${pairId}:${orderId}`, snapshot);
+    for (const order of getBookOrders(book)) {
+      const snapshot = snapshotBookOrder(pairId, order);
+      actual.set(snapshot.swapKey ?? `orphan:${pairId}:${order.orderId}`, snapshot);
     }
   }
   return actual;
@@ -171,90 +164,86 @@ const collectActualBookOrders = (ext: OrderbookExtState): Map<string, ActualBook
 
 export function validateBookStructure(book: BookState): BookStructureReport {
   const errors: string[] = [];
-  const reachable = new Set<number>();
-  const queueSeen = new Set<number>();
-  const maxOrders = book.orderActive.length;
-  const arrayLengths = [
-    book.orderPriceIdx.length,
-    book.orderQtyLots.length,
-    book.orderOwnerIdx.length,
-    book.orderSide.length,
-    book.orderPrev.length,
-    book.orderNext.length,
-  ];
+  const reachable = new Set<string>();
+  const orders = getBookOrders(book);
 
-  if (new Set(arrayLengths).size !== 1) {
-    errors.push(`order arrays length mismatch: ${arrayLengths.join('/')}`);
-  }
-
-  const visitQueue = (head: number, tail: number, side: 0 | 1, levelIdx: number, label: 'bid' | 'ask') => {
-    let current = head;
-    let prev = EMPTY;
-    let last = EMPTY;
-    const local = new Set<number>();
-    while (current !== EMPTY) {
-      if (current < 0 || current >= maxOrders) {
-        errors.push(`${label} level ${levelIdx}: order idx ${current} out of bounds`);
-        break;
+  const validateSideBuckets = (
+    side: 0 | 1,
+    bucketIds: bigint[],
+    buckets: Map<string, { bucketId: bigint; pricesAsc: bigint[]; levels: Map<string, { priceTicks: bigint; orderIds: string[]; totalQtyLots: number }> }>,
+    label: 'bid' | 'ask',
+  ): number => {
+    let levelCount = 0;
+    let previousBucket: bigint | null = null;
+    for (const bucketId of bucketIds) {
+      if (previousBucket !== null) {
+        const ordered = side === 0 ? previousBucket > bucketId : previousBucket < bucketId;
+        if (!ordered) errors.push(`${label} bucket order broken: ${previousBucket.toString()} -> ${bucketId.toString()}`);
       }
-      if (local.has(current)) {
-        errors.push(`${label} level ${levelIdx}: cycle at order idx ${current}`);
-        break;
+      previousBucket = bucketId;
+      const bucket = buckets.get(bucketId.toString());
+      if (!bucket) {
+        errors.push(`${label} bucket missing from map: ${bucketId.toString()}`);
+        continue;
       }
-      local.add(current);
-      queueSeen.add(current);
-
-      if (!book.orderActive[current]) errors.push(`${label} level ${levelIdx}: inactive order idx ${current} in queue`);
-      if (book.orderSide[current] !== side) errors.push(`${label} level ${levelIdx}: side mismatch for idx ${current}`);
-      if (book.orderPriceIdx[current] !== levelIdx) errors.push(`${label} level ${levelIdx}: price idx mismatch for idx ${current}`);
-      if (book.orderPrev[current] !== prev) errors.push(`${label} level ${levelIdx}: prev pointer mismatch for idx ${current}`);
-
-      reachable.add(current);
-      last = current;
-      prev = current;
-      current = book.orderNext[current]!;
+      let previousPrice: bigint | null = null;
+      for (const priceTicks of bucket.pricesAsc) {
+        if (previousPrice !== null && previousPrice >= priceTicks) {
+          errors.push(`${label} bucket ${bucketId.toString()} pricesAsc not strictly ascending`);
+        }
+        previousPrice = priceTicks;
+        const level = bucket.levels.get(priceTicks.toString());
+        if (!level) {
+          errors.push(`${label} bucket ${bucketId.toString()} missing level ${priceTicks.toString()}`);
+          continue;
+        }
+        if (level.orderIds.length === 0) errors.push(`${label} level ${priceTicks.toString()} empty orderIds`);
+        let computedTotal = 0;
+        for (const orderId of level.orderIds) {
+          reachable.add(orderId);
+          const order = book.orders.get(orderId);
+          if (!order) {
+            errors.push(`${label} level ${priceTicks.toString()} missing order ${orderId}`);
+            continue;
+          }
+          if (order.side !== side) errors.push(`${label} level ${priceTicks.toString()} side mismatch for ${orderId}`);
+          if (order.priceTicks !== priceTicks) errors.push(`${label} level ${priceTicks.toString()} price mismatch for ${orderId}`);
+          if (order.bucketId !== bucketId) errors.push(`${label} level ${priceTicks.toString()} bucket mismatch for ${orderId}`);
+          if (order.qtyLots <= 0) errors.push(`${label} level ${priceTicks.toString()} non-positive qty for ${orderId}`);
+          computedTotal += Math.max(0, order.qtyLots);
+        }
+        if (computedTotal !== level.totalQtyLots) {
+          errors.push(`${label} level ${priceTicks.toString()} total mismatch expected=${computedTotal} actual=${level.totalQtyLots}`);
+        }
+        levelCount += 1;
+      }
+      for (const [levelKey, level] of bucket.levels.entries()) {
+        if (!bucket.pricesAsc.some((price) => price.toString() === levelKey)) {
+          errors.push(`${label} bucket ${bucketId.toString()} level ${levelKey} missing from pricesAsc`);
+        }
+        if (level.totalQtyLots <= 0) errors.push(`${label} level ${levelKey} non-positive total`);
+      }
     }
-    if (head === EMPTY && tail !== EMPTY) errors.push(`${label} level ${levelIdx}: tail without head`);
-    if (head !== EMPTY && last !== tail) errors.push(`${label} level ${levelIdx}: tail mismatch expected=${tail} actual=${last}`);
+    return levelCount;
   };
 
-  for (let levelIdx = 0; levelIdx < book.levels; levelIdx += 1) {
-    visitQueue(book.levelHeadBid[levelIdx]!, book.levelTailBid[levelIdx]!, 0, levelIdx, 'bid');
-    visitQueue(book.levelHeadAsk[levelIdx]!, book.levelTailAsk[levelIdx]!, 1, levelIdx, 'ask');
-  }
+  const bidLevels = validateSideBuckets(0, book.bidBucketIdsDesc, book.bidBuckets, 'bid');
+  const askLevels = validateSideBuckets(1, book.askBucketIdsAsc, book.askBuckets, 'ask');
 
-  for (const [orderId, idx] of book.orderIdToIdx.entries()) {
-    if (idx < 0 || idx >= maxOrders) {
-      errors.push(`orderIdToIdx out of bounds: ${orderId} -> ${idx}`);
-      continue;
+  for (const order of orders) {
+    if (!reachable.has(order.orderId)) {
+      errors.push(`order ${order.orderId} missing from bucket queues`);
     }
-    if (!book.orderActive[idx]) errors.push(`orderIdToIdx points to inactive slot: ${orderId} -> ${idx}`);
-    if (book.orderIds[idx] !== orderId) errors.push(`orderIds mismatch at idx ${idx}: map=${orderId} slot=${book.orderIds[idx] ?? '<missing>'}`);
   }
-
-  for (let idx = 0; idx < maxOrders; idx += 1) {
-    if (!book.orderActive[idx]) continue;
-    if (!book.orderIds[idx]) errors.push(`active slot ${idx} missing orderId`);
-    if (!book.orderIdToIdx.has(book.orderIds[idx]!)) errors.push(`active slot ${idx} not present in orderIdToIdx`);
-    if (book.orderOwnerIdx[idx]! >= book.owners.length) errors.push(`active slot ${idx} ownerIdx out of bounds`);
-    if (book.orderPriceIdx[idx]! < 0 || book.orderPriceIdx[idx]! >= book.levels) errors.push(`active slot ${idx} priceIdx out of bounds`);
-    if (book.orderSide[idx] !== 0 && book.orderSide[idx] !== 1) errors.push(`active slot ${idx} has invalid side ${book.orderSide[idx]}`);
-    if (!queueSeen.has(idx)) errors.push(`active slot ${idx} is not reachable from any level queue`);
-  }
-
-  const hasBidLevels = book.levelHeadBid.some((idx) => idx !== EMPTY);
-  const hasAskLevels = book.levelHeadAsk.some((idx) => idx !== EMPTY);
-  if ((book.bestBidIdx === EMPTY) !== !hasBidLevels) errors.push(`bestBidIdx mismatch: ${book.bestBidIdx}`);
-  if ((book.bestAskIdx === EMPTY) !== !hasAskLevels) errors.push(`bestAskIdx mismatch: ${book.bestAskIdx}`);
 
   return {
     ok: errors.length === 0,
     errors,
     stats: {
       activeOrders: activeOrderCount(book),
-      indexedOrders: book.orderIdToIdx.size,
+      indexedOrders: book.orders.size,
       reachableOrders: reachable.size,
-      levels: book.levels,
+      levels: bidLevels + askLevels,
     },
   };
 }

@@ -22,7 +22,13 @@ import type {
   Delta,
   EntityReplica,
 } from './types';
-import { cloneAccountFrame, cloneAccountMachine, getAccountPerspective } from './state-helpers';
+import {
+  cloneAccountFrame,
+  cloneAccountMachine,
+  getAccountPerspective,
+  removeCommittedTxsFromMempool,
+  txFingerprint,
+} from './state-helpers';
 import { isLeft } from './account-utils';
 import { signAccountFrame, verifyAccountSignature } from './account-crypto';
 import { cryptoHash as hash, formatEntityId, HEAVY_LOGS } from './utils';
@@ -36,6 +42,7 @@ import { processAccountTx } from './account-tx/apply';
 
 // === CONSTANTS ===
 const MEMPOOL_LIMIT = 1000;
+const MAX_ACCOUNT_FRAME_TXS = 100;
 const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 const ADDRESS_HEX_20_RE = /^0x[0-9a-fA-F]{40}$/;
 const isEntityId32 = (value: unknown): value is string => typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
@@ -134,10 +141,6 @@ function captureSettlementVector(accountMachine: AccountMachine): SettlementVect
   return out;
 }
 
-function accountTxFingerprint(tx: AccountTx): string {
-  return `${tx.type}:${safeStringify(tx.data)}`;
-}
-
 type TokenizedAccountTx = AccountTx & {
   data?: {
     tokenId?: unknown;
@@ -146,10 +149,10 @@ type TokenizedAccountTx = AccountTx & {
 
 function prependUniqueMempoolTxs(accountMachine: AccountMachine, txs: AccountTx[]): number {
   if (txs.length === 0) return 0;
-  const existing = new Set(accountMachine.mempool.map(accountTxFingerprint));
+  const existing = new Set(accountMachine.mempool.map(txFingerprint));
   const missing: AccountTx[] = [];
   for (const tx of txs) {
-    const fp = accountTxFingerprint(tx);
+    const fp = txFingerprint(tx);
     if (existing.has(fp)) continue;
     existing.add(fp);
     missing.push(tx);
@@ -318,7 +321,7 @@ export function validateAccountFrame(
 ): boolean {
   if (frame.height < 0) return false;
   if (typeof frame.jHeight !== 'number' || frame.jHeight < 0) return false;
-  if (frame.accountTxs.length > 100) return false;
+  if (frame.accountTxs.length > MAX_ACCOUNT_FRAME_TXS) return false;
   if (frame.tokenIds.length !== frame.deltas.length) return false;
 
   // CRITICAL: Timestamp validation for HTLC safety
@@ -331,9 +334,9 @@ export function validateAccountFrame(
 
     // Ensure non-decreasing timestamps (prevent time-travel attacks on HTLCs)
     // Allow equal timestamps (batched frames), but reject backwards movement
-    if (previousFrameTimestamp !== undefined && frame.timestamp < previousFrameTimestamp - 1000) {
+    if (previousFrameTimestamp !== undefined && frame.timestamp < previousFrameTimestamp) {
       console.log(
-        `❌ Frame timestamp went backwards significantly: ${frame.timestamp} < ${previousFrameTimestamp} (delta: ${previousFrameTimestamp - frame.timestamp}ms)`,
+        `❌ Frame timestamp went backwards: ${frame.timestamp} < ${previousFrameTimestamp} (delta: ${previousFrameTimestamp - frame.timestamp}ms)`,
       );
       return false;
     }
@@ -478,7 +481,12 @@ export async function proposeAccountFrame(
   // simultaneous-proposal rollback/tiebreaker path below, not by a special
   // j_event_claim gate here.
 
-  if (!quiet) console.log(`✅ E-MACHINE: Creating frame with ${accountMachine.mempool.length} transactions...`);
+  const proposalWindow = accountMachine.mempool.slice(0, MAX_ACCOUNT_FRAME_TXS);
+  if (!quiet) {
+    console.log(
+      `✅ E-MACHINE: Creating frame from ${proposalWindow.length} queued txs (mempool=${accountMachine.mempool.length}, frameMax=${MAX_ACCOUNT_FRAME_TXS})...`,
+    );
+  }
   if (HEAVY_LOGS)
     console.log(
       `🔍 PROOF-HEADER: from=${formatEntityId(accountMachine.proofHeader.fromEntity)}, to=${formatEntityId(accountMachine.proofHeader.toEntity)}`,
@@ -516,15 +524,15 @@ export async function proposeAccountFrame(
 
   if (HEAVY_LOGS)
     console.log(
-      `🔍 MEMPOOL-BEFORE-PROCESS: ${accountMachine.mempool.length} txs:`,
-      accountMachine.mempool.map(tx => tx.type),
+      `🔍 MEMPOOL-BEFORE-PROCESS: proposalWindow=${proposalWindow.length}/${accountMachine.mempool.length} txs:`,
+      proposalWindow.map(tx => tx.type),
     );
 
   const validTxs: typeof accountMachine.mempool = [];
   const failedHtlcLocks: Array<{ hashlock: string; reason: string }> = [];
   const txsToRemove: typeof accountMachine.mempool = [];
 
-  for (const accountTx of accountMachine.mempool) {
+  for (const accountTx of proposalWindow) {
     if (HEAVY_LOGS) console.log(`   🔍 Processing accountTx type=${accountTx.type}`);
     // Channel.ts: byLeft = proposer is left entity (frame-level, same on both sides).
     // Use normalized ordering helper (not raw string equality) to avoid casing-induced
@@ -590,11 +598,9 @@ export async function proposeAccountFrame(
     }
   }
 
-  // Remove failed txs from mempool
-  for (const tx of txsToRemove) {
-    const idx = accountMachine.mempool.indexOf(tx);
-    if (idx >= 0) accountMachine.mempool.splice(idx, 1);
-  }
+  // Use the same fingerprint-based removal primitive as committed-tx cleanup.
+  // This avoids relying on object identity across validation/replay paths.
+  accountMachine.mempool = removeCommittedTxsFromMempool(accountMachine.mempool, txsToRemove);
 
   // If no valid txs remain after filtering, return early
   if (validTxs.length === 0) {
@@ -772,9 +778,6 @@ export async function proposeAccountFrame(
   // Build dispute proof and sign it (CRITICAL: always sign dispute proof with every frame)
   // BUG FIX: Use clonedMachine (has NEW state after txs) NOT accountMachine (old state)
   if (!isEntityId32(clonedMachine.leftEntity) || !isEntityId32(clonedMachine.rightEntity)) {
-    accountMachine.mempool = [];
-    delete accountMachine.pendingFrame;
-    delete accountMachine.pendingAccountInput;
     const left = String(clonedMachine.leftEntity);
     const right = String(clonedMachine.rightEntity);
     return {
@@ -787,9 +790,6 @@ export async function proposeAccountFrame(
   const { buildAccountProofBody, createDisputeProofHash } = await import('./proof-builder');
   const depositoryAddress = getDepositoryAddress(env);
   if (!isAddress20(depositoryAddress)) {
-    accountMachine.mempool = [];
-    delete accountMachine.pendingFrame;
-    delete accountMachine.pendingAccountInput;
     return {
       success: false,
       error: `DISPUTE_PROOF_BUILD_FAILED: MISSING_DEPOSITORY_ADDRESS`,
@@ -813,9 +813,6 @@ export async function proposeAccountFrame(
       );
     }
   } catch (error) {
-    accountMachine.mempool = [];
-    delete accountMachine.pendingFrame;
-    delete accountMachine.pendingAccountInput;
     return {
       success: false,
       error: `DISPUTE_PROOF_BUILD_FAILED: ${(error as Error).message}`,
@@ -852,8 +849,10 @@ export async function proposeAccountFrame(
     `🔒 PROPOSE: Account ${accountMachine.proofHeader.fromEntity.slice(-4)}:${accountMachine.proofHeader.toEntity.slice(-4)} pendingFrame=${newFrame.height}, txs=${newFrame.accountTxs.length}`,
   );
 
-  // Clear mempool (failed txs already removed above)
-  accountMachine.mempool = [];
+  // Remove only the transactions that actually made it into the proposed frame.
+  // This function is async and can yield while hashing/signing; late arrivals must
+  // remain queued for the next frame instead of being silently wiped by position.
+  accountMachine.mempool = removeCommittedTxsFromMempool(accountMachine.mempool, newFrame.accountTxs);
 
   events.push(`🚀 Proposed frame ${newFrame.height} with ${newFrame.accountTxs.length} transactions`);
 
@@ -1950,9 +1949,11 @@ export function shouldProposeFrame(accountMachine: AccountMachine): boolean {
   // 1. Has transactions in mempool
   // 2. No pending frame waiting for confirmation
   const should = accountMachine.mempool.length > 0 && !accountMachine.pendingFrame;
-  console.error(
-    `   shouldProposeFrame: mempool=${accountMachine.mempool.length}, pending=${!!accountMachine.pendingFrame}, result=${should}`,
-  );
+  if (HEAVY_LOGS) {
+    console.log(
+      `   shouldProposeFrame: mempool=${accountMachine.mempool.length}, pending=${!!accountMachine.pendingFrame}, result=${should}`,
+    );
+  }
   return should;
 }
 

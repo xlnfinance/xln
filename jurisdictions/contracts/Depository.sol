@@ -521,14 +521,6 @@ contract Depository is ReentrancyGuardLite {
     
   }
 
-  // transferControlShares and getControlShareTokenId removed for size
-
-
-
-
-  
-  // getDebts moved to DepositoryView.sol
-
   // FIFO debt enforcement - enforces chronological payment order.
   // `maxIterations == 0` means "drain as much as current reserve allows".
   function enforceDebts(bytes32 entity, uint256 tokenId, uint256 maxIterations) public {
@@ -886,13 +878,6 @@ contract Depository is ReentrancyGuardLite {
     }
   }
 
-
-
-
-
-  // getUsers and getAccounts moved to DepositoryView.sol
-
-  // createDebt removed for size reduction
 
   function onERC1155Received(address, address, uint256 id, uint256, bytes calldata) external returns (bytes4) {
     // SECURITY FIX: Don't credit here - _externalTokenToReserve:713 already credits

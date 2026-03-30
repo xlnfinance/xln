@@ -13,6 +13,7 @@
   import type { Readable } from 'svelte/store';
   import { xlnEnvironment } from '$lib/stores/xlnStore';
   import { formatEntityId } from '$lib/utils/format';
+  import { getBookSideLevels } from '@xln/runtime/xln-api';
   import type { BookState, EntityReplica, Env, EnvSnapshot } from '@xln/runtime/xln-api';
 
   export let hubId: string = '';
@@ -45,9 +46,13 @@
     updatedAt: number;
   };
   type MarketSnapshotPayload = {
+    format?: 'exact-price-levels-v2';
     hubEntityId: string;
     pairId: string;
     depth: number;
+    displayDecimals?: number;
+    priceScale?: string;
+    bucketWidthTicks?: string | null;
     bids: Array<{ price: bigint | string; size: number; total: number }>;
     asks: Array<{ price: bigint | string; size: number; total: number }>;
     spread: bigint | string | null;
@@ -100,7 +105,7 @@
   const STREAM_RETRY_MS = 2000;
   const UI_BOOK_DEPTH = 10;
   const streamSnapshots = new Map<string, MarketSnapshotPayload>();
-  const NUMERIC_PRICE_STEP_OPTIONS = ['0.0001', '0.001', '0.01', '0.1', '1', '10', '50', '100'] as const;
+  const NUMERIC_PRICE_STEP_OPTIONS = ['0.0001', '0.001', '0.01', '0.1', '0.5', '1', '5', '10', '50', '100'] as const;
   const PRICE_STEP_OPTIONS = ['auto', ...NUMERIC_PRICE_STEP_OPTIONS] as const;
   const PRICE_STEP_STORAGE_KEY = 'xln.orderbook.price-step-overrides.v1';
   export let selectedPriceStep: (typeof PRICE_STEP_OPTIONS)[number] = 'auto';
@@ -171,6 +176,10 @@
     return Math.max(1, Math.min(depth, UI_BOOK_DEPTH));
   }
 
+  function subscribedRawDepth(): number {
+    return Math.max(visibleDepth(), Math.min(visibleDepth() * 6, 100));
+  }
+
   function relayWsUrl(): string | null {
     if (typeof window === 'undefined') return null;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -230,56 +239,28 @@
     sideSources: Map<bigint, Set<string>>,
     rawLevels?: RawSourceLevel[],
   ) {
-    const { orderQtyLots, orderOwnerIdx, orderNext, orderActive, owners, params } = book;
-    const pmin = params.pmin;
-    const tick = params.tick;
-    const levelHead = side === 'bid' ? book.levelHeadBid : book.levelHeadAsk;
-    const bitmap = side === 'bid' ? book.bitmapBid : book.bitmapAsk;
-    const levels = book.levels;
-
-    let idx = side === 'bid' ? Number(book.bestBidIdx ?? -1) : Number(book.bestAskIdx ?? -1);
-    let visitedLevels = 0;
     const effectiveDepth = visibleDepth();
-    const maxLevelsPerBook = Math.max(effectiveDepth * 6, effectiveDepth);
+    const levels = getBookSideLevels(book, side === 'bid' ? 0 : 1, Math.max(effectiveDepth * 6, effectiveDepth));
 
-    while (idx !== -1 && visitedLevels < maxLevelsPerBook) {
-      visitedLevels += 1;
-      let headIdx = Number(levelHead[idx] ?? -1);
-      let levelSize = 0;
-      const levelOwnerSet = new Set<string>();
-
-      while (headIdx !== -1) {
-        if (Boolean(orderActive[headIdx])) {
-          levelSize += Number(orderQtyLots[headIdx] || 0);
-          if (showOwners) {
-            levelOwnerSet.add(String(owners[orderOwnerIdx[headIdx]] || '?').slice(-4));
-          }
-        }
-        headIdx = Number(orderNext[headIdx] ?? -1);
+    for (const level of levels) {
+      if (level.qtyLots <= 0) continue;
+      const price = level.priceTicks;
+      const levelOwnerSet = new Set<string>(showOwners ? level.ownerIds.map((owner) => String(owner || '?').slice(-4)) : []);
+      sideSizes.set(price, (sideSizes.get(price) || 0) + level.qtyLots);
+      if (showOwners) {
+        const ownersSet = sideOwners.get(price) || new Set<string>();
+        for (const owner of levelOwnerSet) ownersSet.add(owner);
+        sideOwners.set(price, ownersSet);
       }
-
-      if (levelSize > 0) {
-        const price = pmin + (BigInt(idx) * tick);
-        sideSizes.set(price, (sideSizes.get(price) || 0) + levelSize);
-        if (showOwners) {
-          const ownersSet = sideOwners.get(price) || new Set<string>();
-          for (const owner of levelOwnerSet) ownersSet.add(owner);
-          sideOwners.set(price, ownersSet);
-        }
-        const sourcesSet = sideSources.get(price) || new Set<string>();
-        sourcesSet.add(sourceHubId);
-        sideSources.set(price, sourcesSet);
-        rawLevels?.push({
-          price,
-          size: levelSize,
-          sourceId: sourceHubId,
-          ...(showOwners ? { owners: Array.from(levelOwnerSet) } : {}),
-        });
-      }
-
-      idx = side === 'bid'
-        ? findPrevLevel(bitmap, idx - 1)
-        : findNextLevel(bitmap, levels, idx + 1);
+      const sourcesSet = sideSources.get(price) || new Set<string>();
+      sourcesSet.add(sourceHubId);
+      sideSources.set(price, sourcesSet);
+      rawLevels?.push({
+        price,
+        size: level.qtyLots,
+        sourceId: sourceHubId,
+        ...(showOwners ? { owners: Array.from(levelOwnerSet) } : {}),
+      });
     }
   }
 
@@ -342,55 +323,56 @@
     return BigInt(Math.max(1, Math.round(stepDisplay * scale)));
   }
 
-  function getBestPrice(sideSizes: Map<bigint, number>, side: 'bid' | 'ask'): bigint | null {
-    let best: bigint | null = null;
+  function countPositiveLevels(sideSizes: Map<bigint, number>): number {
+    let count = 0;
+    for (const size of sideSizes.values()) {
+      if (Number.isFinite(size) && size > 0) count += 1;
+    }
+    return count;
+  }
+
+  function countAggregatedRows(sideSizes: Map<bigint, number>, side: 'bid' | 'ask', stepTicks: bigint): number {
+    if (stepTicks <= 1n) return countPositiveLevels(sideSizes);
+    const buckets = new Set<string>();
     for (const [price, size] of sideSizes.entries()) {
       if (!Number.isFinite(size) || size <= 0) continue;
-      if (best === null) best = price;
-      else if (side === 'bid') best = best > price ? best : price;
-      else best = best < price ? best : price;
+      const bucketPrice = side === 'bid'
+        ? (price / stepTicks) * stepTicks
+        : (((price + stepTicks - 1n) / stepTicks) * stepTicks);
+      buckets.add(bucketPrice.toString());
     }
+    return buckets.size;
+  }
+
+  function computeSmartStep(
+    bidSizes: Map<bigint, number>,
+    askSizes: Map<bigint, number>,
+  ): (typeof NUMERIC_PRICE_STEP_OPTIONS)[number] {
+    const scale = Number.isFinite(priceScale) && priceScale > 0 ? priceScale : 1;
+    const bidTarget = Math.min(visibleDepth(), countPositiveLevels(bidSizes));
+    const askTarget = Math.min(visibleDepth(), countPositiveLevels(askSizes));
+    let best = NUMERIC_PRICE_STEP_OPTIONS[0];
+
+    for (const candidate of NUMERIC_PRICE_STEP_OPTIONS) {
+      const stepTicks = BigInt(Math.max(1, Math.round(Number(candidate) * scale)));
+      const bidRows = countAggregatedRows(bidSizes, 'bid', stepTicks);
+      const askRows = countAggregatedRows(askSizes, 'ask', stepTicks);
+      const bidOk = bidTarget === 0 || bidRows >= bidTarget;
+      const askOk = askTarget === 0 || askRows >= askTarget;
+      if (!bidOk || !askOk) break;
+      best = candidate;
+    }
+
     return best;
   }
 
-  function computeSmartStep(rawBestBid: bigint | null, rawBestAsk: bigint | null): string {
-    const numericSteps = NUMERIC_PRICE_STEP_OPTIONS.map(Number);
-    if (canonicalPairId() === '1/3') {
-      return '0.0001';
-    }
-    if (rawBestBid === null || rawBestAsk === null || rawBestAsk <= rawBestBid) {
-      return '1';
-    }
-    const scale = Number.isFinite(priceScale) && priceScale > 0 ? priceScale : 1;
-    const spreadDisplay = Number(rawBestAsk - rawBestBid) / scale;
-    const midDisplay = Number(rawBestAsk + rawBestBid) / 2 / scale;
-
-    let smart = midDisplay >= 1000 ? 1 : midDisplay >= 100 ? 0.1 : 0.01;
-    smart = Math.max(numericSteps[0] || 0.01, smart);
-
-    // Keep visible spread density roughly in a readable range.
-    let ratio = spreadDisplay / smart;
-    while (ratio < 3) {
-      const lower = numericSteps.filter(v => v < smart).pop();
-      if (!lower) break;
-      smart = lower;
-      ratio = spreadDisplay / smart;
-    }
-    while (ratio > 100) {
-      const higher = numericSteps.find(v => v > smart);
-      if (!higher) break;
-      smart = higher;
-      ratio = spreadDisplay / smart;
-    }
-
-    const fallback = String(smart);
-    return NUMERIC_PRICE_STEP_OPTIONS.includes(fallback as (typeof NUMERIC_PRICE_STEP_OPTIONS)[number]) ? fallback : '1';
-  }
-
-  function applySmartOrSavedStep(rawBestBid: bigint | null, rawBestAsk: bigint | null): void {
+  function applySmartOrSavedStep(
+    bidSizes: Map<bigint, number>,
+    askSizes: Map<bigint, number>,
+  ): void {
     const pair = canonicalPairId();
     const saved = priceStepOverrides[pair];
-    autoResolvedPriceStep = computeSmartStep(rawBestBid, rawBestAsk) as (typeof NUMERIC_PRICE_STEP_OPTIONS)[number];
+    autoResolvedPriceStep = computeSmartStep(bidSizes, askSizes);
     const next = saved && NUMERIC_PRICE_STEP_OPTIONS.includes(saved as (typeof NUMERIC_PRICE_STEP_OPTIONS)[number])
       ? (saved as (typeof NUMERIC_PRICE_STEP_OPTIONS)[number])
       : 'auto';
@@ -532,7 +514,7 @@
 
     if (found === 0) return false;
     if (!hasAnyLevel) return false;
-    applySmartOrSavedStep(getBestPrice(bidSizes, 'bid'), getBestPrice(askSizes, 'ask'));
+    applySmartOrSavedStep(bidSizes, askSizes);
     const aggregatedBids = aggregateSideLevels(bidSizes, bidOwners, bidSources, 'bid');
     const aggregatedAsks = aggregateSideLevels(askSizes, askOwners, askSources, 'ask');
     const useSourceSpecificRows = showSources;
@@ -585,7 +567,7 @@
       accumulateBookSide(book, sourceHubId, 'ask', askSizes, askOwners, askSources, rawAskLevels);
     }
 
-    applySmartOrSavedStep(getBestPrice(bidSizes, 'bid'), getBestPrice(askSizes, 'ask'));
+    applySmartOrSavedStep(bidSizes, askSizes);
     const useSourceSpecificRows = showSources;
     const aggregatedBids = aggregateSideLevels(bidSizes, bidOwners, bidSources, 'bid');
     const aggregatedAsks = aggregateSideLevels(askSizes, askOwners, askSources, 'ask');
@@ -596,24 +578,6 @@
       ? buildSourceSpecificLevels(rawAskLevels, 'ask')
       : buildOrderLevels(aggregatedAsks.sizes, aggregatedAsks.owners, aggregatedAsks.sources, 'ask');
     updateView(nextBids, nextAsks, pair, sources, newestHubUpdate);
-  }
-
-  function findPrevLevel(bitmap: Uint32Array | number[], start: number): number {
-    for (let i = start; i >= 0; i--) {
-      const w = Math.floor(i / 32);
-      const b = i & 31;
-      if (bitmap[w] && (bitmap[w] & (1 << b))) return i;
-    }
-    return -1;
-  }
-
-  function findNextLevel(bitmap: Uint32Array | number[], levels: number, start: number): number {
-    for (let i = start; i < levels; i++) {
-      const w = Math.floor(i / 32);
-      const b = i & 31;
-      if (bitmap[w] && (bitmap[w] & (1 << b))) return i;
-    }
-    return -1;
   }
 
   function priceDisplayDecimals(): number {
@@ -628,8 +592,7 @@
     const scale = 10n ** BigInt(decimals);
     const whole = price / scale;
     const frac = price % scale;
-    if (frac === 0n) return whole.toString();
-    return `${whole.toString()}.${frac.toString().padStart(decimals, '0').replace(/0+$/, '')}`;
+    return `${whole.toString()}.${frac.toString().padStart(decimals, '0')}`;
   }
 
   function scaledSize(size: number): number {
@@ -691,9 +654,9 @@
       replace,
       hubEntityIds: sources,
       pairs: [pair],
-      depth: visibleDepth(),
+      depth: subscribedRawDepth(),
     }));
-    marketSubKey = `${pair}|${visibleDepth()}|${sources.join(',')}`;
+    marketSubKey = `${pair}|${subscribedRawDepth()}|${sources.join(',')}`;
   }
 
   function requestMarketSnapshot(): void {

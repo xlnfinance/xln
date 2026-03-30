@@ -100,7 +100,7 @@ const makeState = (book: BookState, offerId = 'offer-1', offer = makeOffer()): E
 describe('orderbook validity', () => {
   test('accepts structurally valid book and matching open offers', () => {
     const book = applyCommand(
-      createBook({ tick: 1n, pmin: 900n, pmax: 1100n, maxOrders: 32, stpPolicy: 1 }),
+      createBook({ bucketWidthTicks: 100n, maxOrders: 32, stpPolicy: 1 }),
       {
         kind: 0,
         ownerId: 'hub',
@@ -121,7 +121,7 @@ describe('orderbook validity', () => {
   });
 
   test('reports missing, orphaned, and mismatched orders', () => {
-    let book = createBook({ tick: 1n, pmin: 900n, pmax: 1200n, maxOrders: 32, stpPolicy: 1 });
+    let book = createBook({ bucketWidthTicks: 100n, maxOrders: 32, stpPolicy: 1 });
     book = applyCommand(book, {
       kind: 0,
       ownerId: 'wrong-owner',
@@ -151,10 +151,31 @@ describe('orderbook validity', () => {
   });
 
   test('reports invalid open offers that cannot be represented in the book', () => {
-    const book = createBook({ tick: 1n, pmin: 900n, pmax: 1100n, maxOrders: 32, stpPolicy: 1 });
+    const book = createBook({ bucketWidthTicks: 100n, maxOrders: 32, stpPolicy: 1 });
     const invalidOffer = makeOffer({ giveAmount: SWAP_LOT_SCALE - 1n });
     const report = validateBookAgainstOffers(makeState(book, 'offer-1', invalidOffer));
     expect(report.ok).toBe(false);
     expect(report.invalidOffers).toEqual([{ swapKey: 'alice:offer-1', reason: 'lot-misaligned' }]);
+  });
+
+  test('accepts offers with priceTicks above qty-lot limits', () => {
+    const hugePriceTicks = 5_000_000_000n;
+    const book = applyCommand(
+      createBook({ bucketWidthTicks: 100n, maxOrders: 32, stpPolicy: 1 }),
+      {
+        kind: 0,
+        ownerId: 'hub',
+        orderId: 'alice:offer-1',
+        side: 1,
+        tif: 0,
+        postOnly: false,
+        priceTicks: hugePriceTicks,
+        qtyLots: 1,
+      },
+    ).state;
+
+    const report = validateBookAgainstOffers(makeState(book, 'offer-1', makeOffer({ priceTicks: hugePriceTicks })));
+    expect(report.invalidOffers).toEqual([]);
+    expect(report.ok).toBe(true);
   });
 });

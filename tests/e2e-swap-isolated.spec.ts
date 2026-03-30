@@ -655,6 +655,23 @@ async function readFirstOpenOrderRemainingUi(page: Page): Promise<string> {
   return String(await remainingCell.textContent() || '').trim();
 }
 
+async function expectClosedOrderRowStatus(
+  page: Page,
+  expected: RegExp,
+  minimumCount = 1,
+): Promise<void> {
+  await page.getByTestId('swap-orders-tab-closed').first().click();
+  await expect
+    .poll(async () => await page.getByTestId('swap-closed-order-row').count(), {
+      timeout: 20_000,
+      intervals: [250, 500, 750],
+    })
+    .toBeGreaterThanOrEqual(minimumCount);
+  const firstClosedRow = page.getByTestId('swap-closed-order-row').first();
+  await expect(firstClosedRow).toBeVisible({ timeout: 20_000 });
+  await expect(firstClosedRow.locator('td').first()).toContainText(expected, { timeout: 10_000 });
+}
+
 async function readSwapOfferCount(
   page: Page,
   entityId: string,
@@ -1029,6 +1046,11 @@ test.describe('E2E Swap Isolated Flow', () => {
           intervals: [250, 500, 750],
         })
         .toBe(0);
+
+      await expectClosedOrderRowStatus(alicePage, /Partial/i);
+      const partialClosedRow = alicePage.getByTestId('swap-closed-order-row').first();
+      await expect(partialClosedRow).toBeVisible({ timeout: 20_000 });
+      await expect(partialClosedRow.locator('td').nth(3)).toContainText(/50\.00%/i, { timeout: 10_000 });
     } finally {
       await Promise.all([
         aliceContext ? aliceContext.close().catch(() => {}) : Promise.resolve(),
@@ -1152,12 +1174,90 @@ test.describe('E2E Swap Isolated Flow', () => {
         await ensureSelectedScope(alicePage);
         await alicePage.getByTestId('swap-orders-tab-closed').first().click();
       }
-      await expect(closedRow).toBeVisible({ timeout: 20_000 });
+      await expectClosedOrderRowStatus(alicePage, /Filled/i);
     } finally {
       await Promise.all([
         aliceContext ? aliceContext.close().catch(() => {}) : Promise.resolve(),
         bobContext ? bobContext.close().catch(() => {}) : Promise.resolve(),
         carolContext ? carolContext.close().catch(() => {}) : Promise.resolve(),
+      ]);
+    }
+  });
+
+  test('repeated maker and taker cycles accumulate closed swap rows', async ({ browser, page }) => {
+    let aliceContext: BrowserContext | null = null;
+    let bobContext: BrowserContext | null = null;
+
+    try {
+      await ensureE2EBaseline(page, {
+        apiBaseUrl: API_BASE_URL,
+        requireMarketMaker: false,
+        requireHubMesh: true,
+        minHubCount: 3,
+      });
+
+      const hubId = await getPrimaryHubId(page);
+
+      aliceContext = await browser.newContext({ ignoreHTTPSErrors: true });
+      bobContext = await browser.newContext({ ignoreHTTPSErrors: true });
+      const alicePage = await aliceContext.newPage();
+      const bobPage = await bobContext.newPage();
+
+      await Promise.all([
+        gotoApp(alicePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 }),
+        gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 }),
+      ]);
+
+      const alice = await createRuntimeIdentity(alicePage, 'alice-bench', selectDemoMnemonic('alice'));
+      const bob = await createRuntimeIdentity(bobPage, 'bob-bench', selectDemoMnemonic('bob'));
+
+      await Promise.all([
+        connectRuntimeToHub(alicePage, alice, hubId),
+        connectRuntimeToHub(bobPage, bob, hubId),
+      ]);
+
+      await extendCreditToken(alicePage, 2, '10000');
+      await waitForTokenDeltaActive(alicePage, alice.entityId, hubId, 2);
+
+      await Promise.all([
+        faucetOffchain(alicePage, alice.entityId, hubId, 2, '5'),
+        faucetOffchain(bobPage, bob.entityId, hubId, 1, '200'),
+      ]);
+
+      await Promise.all([
+        waitForOutCapAtLeast(alicePage, alice.entityId, hubId, 2, 1n * 10n ** 18n),
+        waitForOutCapAtLeast(bobPage, bob.entityId, hubId, 1, 10n * 10n ** 18n),
+      ]);
+
+      await Promise.all([
+        openSwapWorkspace(alicePage),
+        openSwapWorkspace(bobPage),
+      ]);
+      await Promise.all([
+        selectCounterpartyInSwap(alicePage, hubId),
+        selectCounterpartyInSwap(bobPage, hubId),
+        ensureSelectedScope(alicePage),
+        ensureSelectedScope(bobPage),
+      ]);
+
+      for (let round = 1; round <= 3; round += 1) {
+        await placeAliceSellOffer(alicePage, '0.01', '2500');
+        await placeBobMatchingBuyOrder(bobPage, '25', '2500');
+
+        await expect
+          .poll(async () => await readSwapOfferCount(alicePage, alice.entityId, alice.signerId, hubId), {
+            timeout: 30_000,
+            intervals: [250, 500, 750],
+            message: `alice offer should fully close on round ${round}`,
+          })
+          .toBe(0);
+
+        await expectClosedOrderRowStatus(alicePage, /Filled/i, round);
+      }
+    } finally {
+      await Promise.all([
+        aliceContext ? aliceContext.close().catch(() => {}) : Promise.resolve(),
+        bobContext ? bobContext.close().catch(() => {}) : Promise.resolve(),
       ]);
     }
   });

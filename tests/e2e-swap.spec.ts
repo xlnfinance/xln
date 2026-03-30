@@ -1135,24 +1135,44 @@ async function executeOrderbookClickFill(
     const hubRepKey = Array.from(env.eReplicas.keys()).find((k: string) => String(k).split(':')[0]?.toLowerCase() === String(counterpartyId).toLowerCase());
     const hubRep = hubRepKey ? env.eReplicas.get(hubRepKey) : null;
     const book = hubRep?.state?.orderbookExt?.books?.get?.('1/2');
-    const readLevels = (headArray: any, nextArray: any, priceIdx: any, qtyLots: any, ownerIdx: any, owners: any, active: any, startIdx: number) => {
-      const out = [];
-      let idx = startIdx;
-      while (idx !== -1 && out.length < 5) {
-        if (active?.[idx]) {
-          out.push({
-            idx,
-            owner: owners?.[ownerIdx?.[idx]],
-            qtyLots: qtyLots?.[idx],
-            priceIdx: priceIdx?.[idx],
+    const readSideLevels = (currentBook: any, side: 'ask' | 'bid') => {
+      if (!currentBook) return [];
+      const bucketIds = side === 'ask'
+        ? Array.from(currentBook.askBucketIdsAsc || [])
+        : Array.from(currentBook.bidBucketIdsDesc || []);
+      const buckets = side === 'ask' ? currentBook.askBuckets : currentBook.bidBuckets;
+      const levels = [];
+      for (const bucketId of bucketIds) {
+        const bucket = buckets?.get?.(String(bucketId)) ?? buckets?.get?.(bucketId);
+        if (!bucket) continue;
+        const pricesAsc = Array.from(bucket.pricesAsc || []);
+        const orderedPrices = side === 'ask' ? pricesAsc : [...pricesAsc].reverse();
+        for (const priceTicks of orderedPrices) {
+          const level = bucket.levels?.get?.(String(priceTicks)) ?? bucket.levels?.get?.(priceTicks);
+          if (!level) continue;
+          const orders = [];
+          for (const orderId of Array.from(level.orderIds || [])) {
+            const order = currentBook.orders?.get?.(orderId);
+            if (!order) continue;
+            orders.push({
+              orderId,
+              owner: order.ownerId,
+              qtyLots: order.qtyLots,
+              priceTicks: String(order.priceTicks),
+            });
+          }
+          if (orders.length === 0) continue;
+          levels.push({
+            priceTicks: String(level.priceTicks ?? priceTicks),
+            orders,
           });
+          if (levels.length >= 5) return levels;
         }
-        idx = nextArray?.[idx] ?? -1;
       }
-      return out;
+      return levels;
     };
-    const bestAskIdx = Number(book?.bestAskIdx ?? -1);
-    const bestBidIdx = Number(book?.bestBidIdx ?? -1);
+    const askTop = readSideLevels(book, 'ask');
+    const bidTop = readSideLevels(book, 'bid');
     return {
       selectedAccountId: accountSelect?.value || '',
       scopeMode: scopeToggle?.innerText?.trim() || '',
@@ -1176,16 +1196,10 @@ async function executeOrderbookClickFill(
         toEntity: offer.toEntity,
       } : null,
       hubBook: book ? {
-        bestAskIdx,
-        bestBidIdx,
-        bestAskHead: bestAskIdx >= 0 ? Number(book.levelHeadAsk?.[bestAskIdx] ?? -1) : -1,
-        bestBidHead: bestBidIdx >= 0 ? Number(book.levelHeadBid?.[bestBidIdx] ?? -1) : -1,
-        askTop: bestAskIdx >= 0
-          ? readLevels(book.levelHeadAsk, book.orderNext, book.orderPriceIdx, book.orderQtyLots, book.orderOwnerIdx, book.owners, book.orderActive, Number(book.levelHeadAsk?.[bestAskIdx] ?? -1))
-          : [],
-        bidTop: bestBidIdx >= 0
-          ? readLevels(book.levelHeadBid, book.orderNext, book.orderPriceIdx, book.orderQtyLots, book.orderOwnerIdx, book.owners, book.orderActive, Number(book.levelHeadBid?.[bestBidIdx] ?? -1))
-          : [],
+        bestAskPriceTicks: askTop[0]?.priceTicks ?? null,
+        bestBidPriceTicks: bidTop[0]?.priceTicks ?? null,
+        askTop,
+        bidTop,
       } : null,
     };
   }, accountRef);
@@ -1299,21 +1313,17 @@ async function executeOrderbookClickFill(
     }
     await closedTab.click();
     const closedOrdersTable = page.getByTestId('swap-closed-orders').first();
-    const closedOrdersVisible = await closedOrdersTable
-      .waitFor({ state: 'visible', timeout: 2_000 })
-      .then(() => true)
-      .catch(() => false);
-    if (closedOrdersVisible) {
-      const firstClosedRow = closedOrdersTable.locator('tbody tr').first();
-      const firstClosedRowVisible = await firstClosedRow
-        .waitFor({ state: 'visible', timeout: 2_000 })
-        .then(() => true)
-        .catch(() => false);
-      if (firstClosedRowVisible) {
-        await expect(firstClosedRow.locator('td').first()).toContainText(/Filled/i, { timeout: 10_000 });
-        await expect(firstClosedRow.locator('td').first()).not.toContainText(/Partial/i, { timeout: 10_000 });
-      }
-    }
+    await expect(closedOrdersTable).toBeVisible({ timeout: 10_000 });
+    await expect
+      .poll(async () => await page.getByTestId('swap-closed-order-row').count(), {
+        timeout: 15_000,
+        intervals: [100, 250, 500],
+      })
+      .toBeGreaterThan(0);
+    const firstClosedRow = page.getByTestId('swap-closed-order-row').first();
+    await expect(firstClosedRow).toBeVisible({ timeout: 10_000 });
+    await expect(firstClosedRow.locator('td').first()).toContainText(/Filled/i, { timeout: 10_000 });
+    await expect(firstClosedRow.locator('td').first()).not.toContainText(/Partial/i, { timeout: 10_000 });
     return { routedCounterpartyId };
   } catch (error) {
     const debugState = await readOrderbookDebug().catch(() => null);
@@ -1653,6 +1663,15 @@ test.describe('E2E Swap Flow', () => {
       expect(state.accountSwapOffersSize).toBe(0);
     });
 
+    await timedStep('swap.assert_closed_tab_canceled_row', async () => {
+      const closedTab = page.getByTestId('swap-orders-tab-closed').first();
+      await expect(closedTab).toBeVisible({ timeout: 10_000 });
+      await closedTab.click();
+      const firstClosedRow = page.getByTestId('swap-closed-order-row').first();
+      await expect(firstClosedRow).toBeVisible({ timeout: 20_000 });
+      await expect(firstClosedRow.locator('td').first()).toContainText(/Canceled/i, { timeout: 10_000 });
+    });
+
     await timedStep('swap.reload_page', async () => {
       await page.reload({ waitUntil: 'domcontentloaded' });
       await page.waitForFunction(() => {
@@ -1670,6 +1689,14 @@ test.describe('E2E Swap Flow', () => {
       await expect.poll(async () => await page.getByTestId('swap-open-order-row').count(), {
         timeout: 60_000,
       }).toBe(0);
+    });
+    await timedStep('swap.reload_assert_closed_row_persisted', async () => {
+      await openSwapWorkspace(page);
+      await selectCounterpartyInSwap(page, accountRef.counterpartyId);
+      await page.getByTestId('swap-orders-tab-closed').first().click();
+      const firstClosedRow = page.getByTestId('swap-closed-order-row').first();
+      await expect(firstClosedRow).toBeVisible({ timeout: 20_000 });
+      await expect(firstClosedRow.locator('td').first()).toContainText(/Canceled/i, { timeout: 10_000 });
     });
   });
 

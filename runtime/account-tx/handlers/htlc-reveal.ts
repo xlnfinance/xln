@@ -82,7 +82,31 @@ export async function handleHtlcReveal(
     return { success: false, error: `Delta ${lock.tokenId} not found`, events };
   }
 
-  // 5. Apply canonical delta (2024 pattern from DirectPayment:337)
+  // 5. Release hold (with underflow guard) before mutating deltas.
+  // Failed reveal must be a no-op on account state.
+  if (lock.senderIsLeft) {
+    const currentHold = delta.leftHold || 0n;
+    if (currentHold < lock.amount) {
+      return {
+        success: false,
+        error: `HTLC_REVEAL_HOLD_UNDERFLOW:left hold=${currentHold.toString()} amount=${lock.amount.toString()}`,
+        events,
+      };
+    }
+    delta.leftHold = currentHold - lock.amount;
+  } else {
+    const currentHold = delta.rightHold || 0n;
+    if (currentHold < lock.amount) {
+      return {
+        success: false,
+        error: `HTLC_REVEAL_HOLD_UNDERFLOW:right hold=${currentHold.toString()} amount=${lock.amount.toString()}`,
+        events,
+      };
+    }
+    delta.rightHold = currentHold - lock.amount;
+  }
+
+  // 6. Apply canonical delta (2024 pattern from DirectPayment:337)
   // If left sends → delta decreases (negative)
   // If right sends → delta increases (positive)
   const canonicalDelta = lock.senderIsLeft ? -lock.amount : lock.amount;
@@ -90,25 +114,6 @@ export async function handleHtlcReveal(
   console.log(`🔓 REVEAL-DELTA: offdelta BEFORE=${delta.offdelta}`);
   delta.offdelta += canonicalDelta;
   console.log(`🔓 REVEAL-DELTA: offdelta AFTER=${delta.offdelta}`);
-
-  // 6. Release hold (with underflow guard)
-  if (lock.senderIsLeft) {
-    const currentHold = delta.leftHold || 0n;
-    if (currentHold < lock.amount) {
-      console.error(`⚠️ HTLC hold underflow! leftHold=${currentHold} < amount=${lock.amount}`);
-      delta.leftHold = 0n;
-    } else {
-      delta.leftHold = currentHold - lock.amount;
-    }
-  } else {
-    const currentHold = delta.rightHold || 0n;
-    if (currentHold < lock.amount) {
-      console.error(`⚠️ HTLC hold underflow! rightHold=${currentHold} < amount=${lock.amount}`);
-      delta.rightHold = 0n;
-    } else {
-      delta.rightHold = currentHold - lock.amount;
-    }
-  }
 
   // 7. Remove lock
   accountMachine.locks.delete(lockId);

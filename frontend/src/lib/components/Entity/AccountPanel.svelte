@@ -516,7 +516,7 @@
 <div class="account-panel">
   <div class="panel-header">
     <div class="header-row-top">
-      <button class="back-button" on:click={handleBackToEntity}>← Back to Entity</button>
+      <button class="back-button" data-testid="account-panel-back" on:click={handleBackToEntity}>← Back to Entity</button>
 
       <div class="header-identity">
         <EntityIdentity
@@ -594,7 +594,7 @@
       {/if}
       {#if account.status === 'disputed'}
         <div class="management-buttons">
-          <button class="action-button open" on:click={openAccountWorkspace}>Open Accounts Workspace</button>
+          <button class="action-button open" data-testid="account-panel-open-accounts-workspace" on:click={openAccountWorkspace}>Open Accounts Workspace</button>
         </div>
       {/if}
     </div>

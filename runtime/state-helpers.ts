@@ -10,7 +10,13 @@ import { safeStringify } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
 import { cloneJBatch, type CompletedBatch } from './j-batch';
 import type { CrontabState } from './crontab-types';
-import type { BookState } from './orderbook';
+import type {
+  BookOrderState,
+  BookState,
+  OrderbookExtState,
+  PriceBucketState,
+  PriceLevelState,
+} from './orderbook';
 
 // Message size limit for snapshot efficiency
 const MESSAGE_LIMIT = 10;
@@ -59,6 +65,35 @@ export function addMessages(state: EntityState, messages: string[]): void {
   for (const msg of messages) {
     addMessage(state, msg);
   }
+}
+
+type FingerprintableTx = {
+  type: string;
+  data?: unknown;
+};
+
+export function txFingerprint(tx: FingerprintableTx): string {
+  return `${tx.type}:${safeStringify(tx.data)}`;
+}
+
+export function removeCommittedTxsFromMempool<T extends FingerprintableTx>(
+  mempool: T[],
+  committedTxs: readonly T[],
+): T[] {
+  if (committedTxs.length === 0 || mempool.length === 0) return mempool;
+  const pendingRemovals = new Map<string, number>();
+  for (const tx of committedTxs) {
+    const fp = txFingerprint(tx);
+    pendingRemovals.set(fp, (pendingRemovals.get(fp) ?? 0) + 1);
+  }
+  return mempool.filter((tx) => {
+    const fp = txFingerprint(tx);
+    const remaining = pendingRemovals.get(fp) ?? 0;
+    if (remaining <= 0) return true;
+    if (remaining === 1) pendingRemovals.delete(fp);
+    else pendingRemovals.set(fp, remaining - 1);
+    return false;
+  });
 }
 
 /**
@@ -333,13 +368,18 @@ function cloneCrontabState(crontabState: CrontabState): CrontabState {
 function cloneOrderbookExt(ext: EntityState['orderbookExt']): EntityState['orderbookExt'] {
   if (!ext) return undefined;
 
-  const clonedBooks = new Map<string, any>();
+  const clonedBooks = new Map<string, BookState>();
   for (const [key, book] of ext.books) {
     clonedBooks.set(key, cloneBookState(book));
   }
 
+  const clonedOrderPairs = new Map<string, string[]>();
+  for (const [orderId, pairIds] of ext.orderPairs ?? []) {
+    clonedOrderPairs.set(orderId, [...pairIds]);
+  }
+
   // Clone referrals Map
-  const clonedReferrals = new Map<string, any>();
+  const clonedReferrals = new Map<string, OrderbookExtState['referrals'] extends Map<string, infer T> ? T : never>();
   if (ext.referrals) {
     for (const [key, referral] of ext.referrals) {
       clonedReferrals.set(key, { ...referral });
@@ -354,35 +394,41 @@ function cloneOrderbookExt(ext: EntityState['orderbookExt']): EntityState['order
 
   return {
     books: clonedBooks,
+    orderPairs: clonedOrderPairs,
     referrals: clonedReferrals,
     hubProfile: clonedHubProfile,
   };
 }
 
-/**
- * Clone a BookState with TypedArrays properly copied
- */
 function cloneBookState(book: BookState): BookState {
+  const cloneBucketMap = (source: Map<string, PriceBucketState>): Map<string, PriceBucketState> => {
+    const cloned = new Map<string, PriceBucketState>();
+    for (const [key, bucket] of source.entries()) {
+      const clonedLevels = new Map<string, PriceLevelState>();
+      for (const [levelKey, level] of bucket.levels.entries()) {
+        clonedLevels.set(levelKey, {
+          priceTicks: level.priceTicks,
+          orderIds: [...level.orderIds],
+          totalQtyLots: level.totalQtyLots,
+        });
+      }
+      cloned.set(key, {
+        bucketId: bucket.bucketId,
+        pricesAsc: [...bucket.pricesAsc],
+        levels: clonedLevels,
+      });
+    }
+    return cloned;
+  };
+
   return {
     ...book,
-    // Clone TypedArrays via slice() which creates new underlying ArrayBuffer
-    orderPriceIdx: book.orderPriceIdx.slice(),
-    orderQtyLots: book.orderQtyLots.slice(),
-    orderOwnerIdx: book.orderOwnerIdx.slice(),
-    orderSide: book.orderSide.slice(),
-    orderPrev: book.orderPrev.slice(),
-    orderNext: book.orderNext.slice(),
-    orderActive: book.orderActive.slice(),
-    levelHeadBid: book.levelHeadBid.slice(),
-    levelTailBid: book.levelTailBid.slice(),
-    levelHeadAsk: book.levelHeadAsk.slice(),
-    levelTailAsk: book.levelTailAsk.slice(),
-    bitmapBid: book.bitmapBid.slice(),
-    bitmapAsk: book.bitmapAsk.slice(),
-    // Clone mutable reference types
-    owners: [...book.owners],
-    orderIds: [...book.orderIds],
-    orderIdToIdx: new Map(book.orderIdToIdx),
+    params: { ...book.params },
+    orders: new Map<string, BookOrderState>(Array.from(book.orders.entries()).map(([orderId, order]) => [orderId, { ...order }])),
+    bidBuckets: cloneBucketMap(book.bidBuckets),
+    askBuckets: cloneBucketMap(book.askBuckets),
+    bidBucketIdsDesc: [...book.bidBucketIdsDesc],
+    askBucketIdsAsc: [...book.askBucketIdsAsc],
   };
 }
 

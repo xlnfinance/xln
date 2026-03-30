@@ -12,7 +12,7 @@
   export let entityId: string;
   export let replica: EntityReplica | null = null;
   export let historyOnly = false;
-  type Action = 'r2c' | 'c2r' | 'transfer' | 'dispute' | 'history';
+  type Action = 'r2c' | 'c2r' | 'transfer' | 'history';
   type GasPreset = 'standard' | 'fast' | 'urgent' | 'custom';
   type BatchDetailField = { label: string; value: string };
   type BatchDetailOp = {
@@ -53,6 +53,9 @@
 
   $: if (historyOnly && action !== 'history') {
     action = 'history';
+  }
+  $: if (action === 'dispute') {
+    action = historyOnly ? 'history' : 'r2c';
   }
 
   let gasPreset: GasPreset = 'standard';
@@ -939,69 +942,6 @@
     }
   }
 
-  async function startDispute() {
-    if (!counterpartyEntityId) {
-      alert('Select account first');
-      return;
-    }
-    if (!confirm('Start dispute for selected account?')) return;
-
-    sending = true;
-    try {
-      const env = activeEnv;
-      if (!env || !isRuntimeEnv(env)) throw new Error('Runtime environment not available');
-      if (!activeIsLive) throw new Error('On-chain actions are only available in LIVE mode');
-      const signerId = resolveSignerId(env);
-
-      await enqueueEntityInputs(env, [{
-        entityId,
-        signerId,
-        entityTxs: [{
-          type: 'disputeStart',
-          data: {
-            counterpartyEntityId,
-            description: 'entity-settle-dispute-start',
-          },
-        }],
-      }]);
-    } catch (error) {
-      alert(`Dispute start failed: ${(error as Error)?.message}`);
-    } finally {
-      sending = false;
-    }
-  }
-
-  async function finalizeDispute() {
-    if (!counterpartyEntityId) {
-      alert('Select account first');
-      return;
-    }
-
-    sending = true;
-    try {
-      const env = activeEnv;
-      if (!env || !isRuntimeEnv(env)) throw new Error('Runtime environment not available');
-      if (!activeIsLive) throw new Error('On-chain actions are only available in LIVE mode');
-      const signerId = resolveSignerId(env);
-
-      await enqueueEntityInputs(env, [{
-        entityId,
-        signerId,
-        entityTxs: [{
-          type: 'disputeFinalize',
-          data: {
-            counterpartyEntityId,
-            description: 'entity-settle-dispute-finalize',
-          },
-        }],
-      }]);
-    } catch (error) {
-      alert(`Dispute finalize failed: ${(error as Error)?.message}`);
-    } finally {
-      sending = false;
-    }
-  }
-
   function handleAccountChange(e: CustomEvent) {
     counterpartyEntityId = e.detail.value;
   }
@@ -1214,7 +1154,6 @@
       <button class="tab" class:active={action === 'r2c'} on:click={() => action = 'r2c'} disabled={sending}>Reserve → Collateral</button>
       <button class="tab" class:active={action === 'c2r'} on:click={() => action = 'c2r'} disabled={sending}>Collateral → Reserve</button>
       <button class="tab" class:active={action === 'transfer'} on:click={() => action = 'transfer'} disabled={sending}>Reserve → Reserve</button>
-      <button class="tab" class:active={action === 'dispute'} on:click={() => action = 'dispute'} disabled={sending}>Dispute</button>
       <button class="tab" class:active={action === 'history'} on:click={() => action = 'history'} disabled={sending}>History ({batchHistory.length})</button>
     </div>
 
@@ -1223,8 +1162,6 @@
         Queue reserve-to-collateral into the current draft batch.
       {:else if action === 'c2r'}
         Queue collateral-to-reserve. Once the counterparty signs, it is added to your local draft batch.
-      {:else if action === 'dispute'}
-        Queue dispute start/finalize for selected account.
       {:else if action === 'history'}
         Review {batchHistory.length} finalized on-chain batch{batchHistory.length === 1 ? '' : 'es'} for this entity.
       {:else}
@@ -1327,43 +1264,6 @@
           {/each}
         </div>
       {/if}
-    </div>
-  {:else if action === 'dispute'}
-    <div class="dispute-inline">
-      <EntityInput
-        label="Account"
-        value={counterpartyEntityId}
-        entities={accountEntityIds}
-        excludeId={entityId}
-        disabled={sending}
-        on:change={handleAccountChange}
-      />
-      {#if counterpartyEntityId && !selectedAccount}
-        <p class="error-hint">Account not found in entity state.</p>
-      {/if}
-      {#if selectedAccountActiveDispute}
-        <p class="dispute-state">Active dispute: {selectedDisputeBlocksLeft} block{selectedDisputeBlocksLeft === 1 ? '' : 's'} left (until J#{selectedDisputeTimeout}).</p>
-      {:else if selectedAccountStatus === 'disputed'}
-        <p class="dispute-state finalized">Finalized disputed account. Use Open Account section to reopen.</p>
-      {/if}
-      <div class="dispute-actions">
-        <button
-          class="btn-dispute-start"
-          data-testid="settle-dispute-start"
-          on:click={startDispute}
-          disabled={sending || !counterpartyEntityId || !!selectedAccountActiveDispute || selectedAccountStatus === 'disputed'}
-        >
-          Start Dispute
-        </button>
-        <button
-          class="btn-dispute-finalize"
-          data-testid="settle-dispute-finalize"
-          on:click={finalizeDispute}
-          disabled={sending || !counterpartyEntityId || !selectedAccountActiveDispute}
-        >
-          Finalize Dispute
-        </button>
-      </div>
     </div>
   {:else if action === 'r2c' || action === 'c2r'}
     <EntityInput
@@ -1907,13 +1807,6 @@
     color: #fca5a5;
   }
 
-  .dispute-inline {
-    border: 1px solid #292524;
-    border-radius: 10px;
-    background: #151310;
-    padding: 10px;
-  }
-
   .dispute-state {
     margin: 8px 0 0;
     color: #fda4af;
@@ -1922,36 +1815,6 @@
 
   .dispute-state.finalized {
     color: #fb7185;
-  }
-
-  .dispute-actions {
-    margin-top: 10px;
-    display: flex;
-    gap: 8px;
-  }
-
-  .btn-dispute-start,
-  .btn-dispute-finalize {
-    border-radius: 8px;
-    border: 1px solid rgba(248, 113, 113, 0.4);
-    background: rgba(127, 29, 29, 0.18);
-    color: #fecaca;
-    padding: 9px 12px;
-    font-size: 12px;
-    font-weight: 700;
-    cursor: pointer;
-  }
-
-  .btn-dispute-finalize {
-    border-color: rgba(251, 191, 36, 0.45);
-    background: rgba(120, 53, 15, 0.2);
-    color: #fde68a;
-  }
-
-  .btn-dispute-start:disabled,
-  .btn-dispute-finalize:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
   }
 
   .action-tabs {

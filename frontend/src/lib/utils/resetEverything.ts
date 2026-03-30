@@ -40,6 +40,20 @@ let lastDismissedFatalFingerprint = '';
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
+async function requestBrowserSiteDataClear(): Promise<void> {
+  try {
+    await fetch('/api/reset-site-data', {
+      method: 'POST',
+      cache: 'no-store',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: '{}',
+    });
+  } catch {
+    // best effort only
+  }
+}
+
 function createResetSignal(triggerError?: unknown): ResetSignal {
   const reason = triggerError instanceof Error ? triggerError.message : String(triggerError ?? 'manual');
   return {
@@ -280,22 +294,12 @@ async function collectDebugDump(triggerError?: unknown): Promise<string> {
   return safeStringify(dump, 2);
 }
 
-/** Ship debug dump — log + best-effort ship without keeping client persistence */
+/** Emit debug dump locally without any network dependency during reset. */
 async function shipDebugDump(dump: string): Promise<void> {
   // 1. Console (always visible in F12)
   console.log('[RESET] Debug dump:\n', dump);
 
-  // 2. Ship full dump to debug server (best effort)
-  try {
-    await fetch('/api/debug/dumps', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: dump,
-      keepalive: true,
-    });
-  } catch { /* */ }
-
-  // 3. Emit compact crash marker to relay timeline (best effort)
+  // 2. Emit compact crash marker to relay timeline (best effort)
   try {
     const p2p = (window as any).__xln_env?.runtimeState?.p2p;
     if (p2p && typeof p2p.sendDebugEvent === 'function') {
@@ -482,6 +486,39 @@ async function verifyPersistentClientStateCleared(): Promise<void> {
   if (remainingDbNames.length > 0) {
     throw new Error(`IndexedDB verification failed; remaining databases: ${remainingDbNames.join(', ')}`);
   }
+
+  if (typeof document !== 'undefined' && document.cookie.trim().length > 0) {
+    throw new Error(`cookie wipe incomplete; remaining cookie string: ${document.cookie}`);
+  }
+
+  if (typeof caches !== 'undefined') {
+    const cacheNames = await caches.keys();
+    if (cacheNames.length > 0) {
+      throw new Error(`CacheStorage verification failed; remaining caches: ${cacheNames.join(', ')}`);
+    }
+  }
+
+  if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+    const registrations = await navigator.serviceWorker.getRegistrations();
+    if (registrations.length > 0) {
+      throw new Error(`service worker wipe incomplete; remaining registrations: ${registrations.length}`);
+    }
+  }
+
+  const storageWithDirectory = navigator.storage as StorageManager & {
+    getDirectory?: () => Promise<FileSystemDirectoryHandle>;
+  };
+  if (typeof storageWithDirectory?.getDirectory === 'function') {
+    const root = await storageWithDirectory.getDirectory();
+    const remainingEntries: string[] = [];
+    // @ts-ignore
+    for await (const [name] of root.entries()) {
+      remainingEntries.push(String(name));
+    }
+    if (remainingEntries.length > 0) {
+      throw new Error(`OPFS verification failed; remaining entries: ${remainingEntries.join(', ')}`);
+    }
+  }
 }
 
 async function collectRuntimeEnvs(): Promise<unknown[]> {
@@ -588,6 +625,8 @@ async function performReset(
     }
 
     await stopRuntimeBeforeReset();
+    await requestBrowserSiteDataClear();
+    await sleep(100);
     await clearAllPersistentClientState();
     await verifyPersistentClientStateCleared();
 
