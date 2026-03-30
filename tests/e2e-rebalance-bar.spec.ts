@@ -1179,6 +1179,12 @@ test.describe('Rebalance E2E', () => {
       try {
         localStorage.setItem('xln-app-mode', 'user');
         localStorage.setItem('xln-onboarding-complete', 'true');
+        const rawSettings = localStorage.getItem('xln-settings');
+        const parsedSettings = rawSettings ? JSON.parse(rawSettings) : {};
+        localStorage.setItem('xln-settings', JSON.stringify({
+          ...parsedSettings,
+          balanceRefreshMs: 1000,
+        }));
       } catch {
         // no-op
       }
@@ -1494,6 +1500,12 @@ test.describe('Rebalance E2E', () => {
       try {
         localStorage.setItem('xln-app-mode', 'user');
         localStorage.setItem('xln-onboarding-complete', 'true');
+        const rawSettings = localStorage.getItem('xln-settings');
+        const parsedSettings = rawSettings ? JSON.parse(rawSettings) : {};
+        localStorage.setItem('xln-settings', JSON.stringify({
+          ...parsedSettings,
+          balanceRefreshMs: 1000,
+        }));
       } catch {
         // no-op
       }

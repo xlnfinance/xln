@@ -46,7 +46,7 @@ const defaultSettings: Settings = {
   showTimeMachine: false, // Off by default to reduce visual noise in wallet mode
   dropdownMode: 'signer-first',
   runtimeDelay: 0, // 0 = no artificial frame delay (controls env.runtimeConfig.minFrameDelayMs)
-  balanceRefreshMs: 15000, // Default to 15s to avoid RPC pressure
+  balanceRefreshMs: 1000, // Default to 1s so balance-driven UX/rebalance stays responsive
   relayUrl: resolveDefaultRelayUrl(),
   portfolioScale: 5000, // Default scale: $5000 max for portfolio bars
   componentStates: {},

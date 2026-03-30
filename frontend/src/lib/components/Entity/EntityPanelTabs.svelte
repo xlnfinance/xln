@@ -3601,7 +3601,7 @@
   let refreshTimer: ReturnType<typeof setInterval> | null = null;
   $: {
     if (refreshTimer) clearInterval(refreshTimer);
-    const refreshMs = $settings.balanceRefreshMs ?? 15000;
+    const refreshMs = $settings.balanceRefreshMs ?? 1000;
     if (refreshMs > 0) {
       refreshTimer = setInterval(() => refreshBalances(), refreshMs);
     }
