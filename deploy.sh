@@ -574,7 +574,20 @@ if [ -n "$REMOTE_HOST" ]; then
     git push origin main
   fi
 
-  remote_cmd="cd /root/xln 2>/dev/null || cd ~/xln 2>/dev/null || exit 1; PATH=\"\$HOME/.bun/bin:\$PATH\" git fetch origin main && git stash push --include-untracked -m xln-deploy-prepull -- frontend/static/contracts jurisdictions/jurisdictions.json data/anvil-state.json >/dev/null 2>&1 || true && git checkout main && git pull --ff-only origin main && ./deploy.sh"
+  ORIGIN_URL="$(git remote get-url origin 2>/dev/null || printf '%s' 'https://github.com/xlnfinance/xln.git')"
+  case "$ORIGIN_URL" in
+    git@github.com:*)
+      ORIGIN_URL="https://github.com/${ORIGIN_URL#git@github.com:}"
+      ;;
+    ssh://git@github.com/*)
+      ORIGIN_URL="https://github.com/${ORIGIN_URL#ssh://git@github.com/}"
+      ;;
+  esac
+  # Remote deploy is the canonical rebuild path for production. Keep it self-healing:
+  # some servers may retain /root/xln but lose .git metadata after disk cleanup or
+  # manual recovery. In that case we must re-bootstrap the checkout before rebuilding
+  # frontend/runtime. WAL/snapshots live under data/, so repo recovery is safe.
+  remote_cmd="set -e; XLN_DIR=\"\"; if [ -d /root/xln ]; then XLN_DIR=/root/xln; elif [ -d \"\$HOME/xln\" ]; then XLN_DIR=\"\$HOME/xln\"; else XLN_DIR=/root/xln; mkdir -p \"\$XLN_DIR\"; fi; cd \"\$XLN_DIR\"; PATH=\"\$HOME/.bun/bin:\$PATH\"; if [ ! -d .git ]; then echo '[deploy] remote checkout missing .git; reinitializing repository'; git init; fi; if ! git remote get-url origin >/dev/null 2>&1; then git remote add origin '$ORIGIN_URL'; else git remote set-url origin '$ORIGIN_URL'; fi; git fetch origin main; git stash push --include-untracked -m xln-deploy-prepull -- frontend/static/contracts jurisdictions/jurisdictions.json data/anvil-state.json >/dev/null 2>&1 || true; git checkout -B main origin/main; git reset --hard origin/main; ./deploy.sh"
   if [ "$FRESH" = "1" ]; then
     remote_cmd="$remote_cmd --fresh"
   fi
