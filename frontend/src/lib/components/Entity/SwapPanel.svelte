@@ -1,6 +1,7 @@
   <script lang="ts">
     import type { AccountMachine, AccountTx, EntityReplica, Tab } from '$lib/types/ui';
   import { getBestAsk, getBestBid } from '@xln/runtime/xln-api';
+  import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import type { SwapBookEntry } from '@xln/runtime/xln-api';
   import { enqueueEntityInputs, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
   import { isLive as globalIsLive } from '../../stores/timeStore';
@@ -176,14 +177,21 @@
     if (!selected || !baseAccountIds.includes(selected)) return baseAccountIds;
     return [selected, ...baseAccountIds.filter((id) => id !== selected)];
   })();
-  $: cappedAccountIds = accountIds.slice(0, 10);
-  $: hiddenAccountCount = Math.max(0, accountIds.length - cappedAccountIds.length);
-  $: if (!selectedBookAccountId || !cappedAccountIds.includes(selectedBookAccountId)) {
-    selectedBookAccountId = counterpartyId && cappedAccountIds.includes(counterpartyId)
-      ? counterpartyId
-      : (cappedAccountIds[0] || '');
+  const getGossipProfiles = (): GossipProfile[] => activeEnv?.gossip?.getProfiles?.() || [];
+  function isHubAccount(accountIdValue: string): boolean {
+    const normalized = String(accountIdValue || '').trim().toLowerCase();
+    if (!normalized) return false;
+    const profile = getGossipProfiles().find((entry) => String(entry?.entityId || '').trim().toLowerCase() === normalized);
+    return profile?.metadata?.isHub === true;
   }
-  $: if (!createOrderAccountId || !cappedAccountIds.includes(createOrderAccountId)) {
+  $: hubAccountIds = accountIds.filter((id) => isHubAccount(id)).slice(0, 10);
+  $: hiddenAccountCount = Math.max(0, accountIds.length - hubAccountIds.length);
+  $: if (!selectedBookAccountId || !hubAccountIds.includes(selectedBookAccountId)) {
+    selectedBookAccountId = counterpartyId && hubAccountIds.includes(counterpartyId)
+      ? counterpartyId
+      : (hubAccountIds[0] || '');
+  }
+  $: if (!createOrderAccountId || !hubAccountIds.includes(createOrderAccountId)) {
     createOrderAccountId = selectedBookAccountId || '';
   }
   $: if (orderbookScopeMode === 'selected' && selectedBookAccountId) {
@@ -196,7 +204,7 @@
     ? createOrderAccountId
     : selectedBookAccountId;
   $: orderbookHubIds = orderbookScopeMode === 'aggregated'
-    ? cappedAccountIds
+    ? hubAccountIds
     : (selectedBookAccountId ? [selectedBookAccountId] : []);
   $: orderbookDepth = orderbookScopeMode === 'aggregated'
     ? AGGREGATED_ORDERBOOK_DEPTH
@@ -213,12 +221,12 @@
     const resolved = resolveEntityName(accountIdValue, activeEnv);
     return resolved || formatEntityId(accountIdValue);
   }
-  $: selectedHubOptions = cappedAccountIds.map((id) => ({ value: id, label: accountLabel(id) }));
+  $: selectedHubOptions = hubAccountIds.map((id) => ({ value: id, label: accountLabel(id) }));
   $: orderbookSourceLabels = Object.fromEntries(
-    cappedAccountIds.map((id) => [id, accountLabel(id)]),
+    hubAccountIds.map((id) => [id, accountLabel(id)]),
   );
   $: orderbookSourceAvatars = Object.fromEntries(
-    cappedAccountIds.map((id) => [id, activeXlnFunctions?.isReady ? (activeXlnFunctions.generateEntityAvatar?.(id) || '') : '']),
+    hubAccountIds.map((id) => [id, activeXlnFunctions?.isReady ? (activeXlnFunctions.generateEntityAvatar?.(id) || '') : '']),
   );
 
   type TokenKeyedMap<V> = Map<number, V> | Map<string, V>;
@@ -865,8 +873,8 @@
       ? event.detail.accountIds.map((id) => String(id || '').trim()).filter(Boolean)
       : [];
     const clickedAccountId = orderbookScopeMode === 'aggregated'
-      ? String(availableAccountIds.find((id) => cappedAccountIds.includes(id)) || activeOrderAccountId || '')
-      : String(selectedBookAccountId || availableAccountIds.find((id) => cappedAccountIds.includes(id)) || '');
+      ? String(availableAccountIds.find((id) => hubAccountIds.includes(id)) || activeOrderAccountId || '')
+      : String(selectedBookAccountId || availableAccountIds.find((id) => hubAccountIds.includes(id)) || '');
     if (!clickedAccountId) {
       submitError = 'Pick a priced level from a connected account.';
       return;

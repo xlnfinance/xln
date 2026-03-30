@@ -941,10 +941,18 @@ async function waitForSwapOrderbookLiquidity(
   const readVisibleLiquidity = async () => {
     const { asks, bids } = await readOrderbookRowCounts(page);
     const uniqueSourceIds = await countUniqueOrderbookSources(page);
-    return { asks, bids, rows: asks + bids, sources: uniqueSourceIds };
+    const sourceStatus = String(await page.getByTestId('orderbook-source-status').first().textContent().catch(() => '') || '').trim();
+    return { asks, bids, rows: asks + bids, sources: uniqueSourceIds, sourceStatus };
   };
 
-  const tryWaitOnce = async (timeoutMs: number): Promise<{ asks: number; bids: number; rows: number; sources: number }> => {
+  const isReadyState = (state: { rows: number; sources: number; sourceStatus: string }): boolean => (
+    state.rows > 0
+    && state.sources >= minSources
+  );
+
+  const tryWaitOnce = async (
+    timeoutMs: number,
+  ): Promise<{ asks: number; bids: number; rows: number; sources: number; sourceStatus: string }> => {
     const pairSelect = page.getByTestId('swap-pair-select').first();
     const scopeToggle = page.getByTestId('swap-scope-toggle').first();
     const refreshLabel = page.locator('.swap-panel .orderbook-panel .update-label').first();
@@ -952,18 +960,18 @@ async function waitForSwapOrderbookLiquidity(
     await expect(scopeToggle).toBeVisible({ timeout: 20_000 });
     await selectCounterpartyInSwap(page, options?.preferredAccountId);
     const start = Date.now();
-    let lastState = await readVisibleLiquidity().catch(() => ({ asks: 0, bids: 0, rows: 0, sources: 0 }));
+    let lastState = await readVisibleLiquidity().catch(() => ({ asks: 0, bids: 0, rows: 0, sources: 0, sourceStatus: '' }));
     while (Date.now() - start < timeoutMs) {
       await ensureSwapScope(page, desiredScope === 'Aggregated' ? 'aggregated' : 'selected');
       await pairSelect.selectOption({ label: pairLabel });
       await page.waitForTimeout(250);
       lastState = await readVisibleLiquidity();
-      if (lastState.rows > 0 && lastState.sources >= minSources) return lastState;
+      if (isReadyState(lastState)) return lastState;
       if (await refreshLabel.isVisible().catch(() => false)) {
         await refreshLabel.click().catch(() => {});
         await page.waitForTimeout(200);
         lastState = await readVisibleLiquidity().catch(() => lastState);
-        if (lastState.rows > 0 && lastState.sources >= minSources) return lastState;
+        if (isReadyState(lastState)) return lastState;
       }
       await selectCounterpartyInSwap(page, options?.preferredAccountId);
       await page.waitForTimeout(750);
@@ -972,7 +980,7 @@ async function waitForSwapOrderbookLiquidity(
   };
 
   let lastState = await tryWaitOnce(45_000);
-  if (lastState.rows > 0 && lastState.sources >= minSources) return;
+  if (isReadyState(lastState)) return;
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => {
@@ -981,7 +989,7 @@ async function waitForSwapOrderbookLiquidity(
   }, { timeout: 60_000 });
   await openSwapWorkspace(page);
   lastState = await tryWaitOnce(45_000);
-  if (lastState.rows > 0 && lastState.sources >= minSources) return;
+  if (isReadyState(lastState)) return;
 
   const selectedAccountId = await page.getByTestId('swap-account-select').first().inputValue().catch(() => '');
   throw new Error(
@@ -1359,6 +1367,7 @@ async function expectAllCanonicalSwapPairsHaveLiquidity(page: Page): Promise<voi
         rows: expect.any(Number),
         sources: 3,
       }));
+    await expect(page.getByTestId('orderbook-source-status').first()).toHaveText(/^Sources:\s*3$/i, { timeout: 15_000 });
     await expectOrderbookHasAnyVisibleLiquidity(page, { timeoutMs: 5_000, minSources: 3, maxSources: 3 });
   }
 }

@@ -1,8 +1,12 @@
 <!--
   OrderbookPanel.svelte
 
-  Displays a real-time orderbook from hub snapshots served via relay/aggregator.
-  Falls back to local env.eReplicas only when a fresh relay snapshot is not available.
+  Displays a real-time orderbook strictly from relay market snapshots.
+  We intentionally do not fall back to local env.eReplicas here: the relay stream is the
+  canonical UI API for combined books, freshness, and multi-hub visibility. Rendering a
+  local fallback after a partial or stale stream would mislabel the screen as an aggregated
+  combined book while silently dropping hubs. If the requested snapshot set is incomplete,
+  we render an explicit syncing state instead of pretending the partial book is complete.
 
   Usage:
     <OrderbookPanel hubId="0x..." pairId="1/2" />
@@ -10,11 +14,7 @@
 -->
 <script lang="ts">
   import { onMount, onDestroy, createEventDispatcher } from 'svelte';
-  import type { Readable } from 'svelte/store';
-  import { xlnEnvironment } from '$lib/stores/xlnStore';
   import { formatEntityId } from '$lib/utils/format';
-  import { getBookSideLevels } from '@xln/runtime/xln-api';
-  import type { BookState, EntityReplica, Env, EnvSnapshot } from '@xln/runtime/xln-api';
 
   export let hubId: string = '';
   export let hubIds: string[] = [];
@@ -31,8 +31,6 @@
   export let preferredClickSide: BookSide = 'ask';
   export let disablePriceAggregation: boolean = false;
   export let showPriceStepControl: boolean = true;
-  type RuntimeEnv = Env | EnvSnapshot;
-  export let envStore: Readable<RuntimeEnv | null> = xlnEnvironment;
 
   type BookSide = 'bid' | 'ask';
   type LevelClickDetail = { side: BookSide; priceTicks: string; displayPrice: string; size: number; accountIds: string[] };
@@ -72,12 +70,6 @@
     owners?: string[];
     accountIds?: string[];
   }
-  interface RawSourceLevel {
-    price: bigint;
-    size: number;
-    sourceId: string;
-    owners?: string[];
-  }
 
   let bids: OrderLevel[] = [];
   let asks: OrderLevel[] = [];
@@ -85,7 +77,9 @@
   let spreadPercent: string = '-';
   let lastUpdate = 0;
   let sourceCount = 0;
-  let sourceLabel = 'None';
+  let expectedSourceCount = 0;
+  let sourceLabel = 'Sources: 0';
+  let sourceStatus: 'ready' | 'syncing' = 'ready';
 
   // Cumulative hover: index of hovered row (-1 = none).
   // For asks (reversed display): hovering row i highlights rows [i..last] (toward center).
@@ -100,7 +94,6 @@
   let marketRetryTimer: ReturnType<typeof setTimeout> | null = null;
   let marketWsClosing = false;
   let marketSubKey = '';
-  let streamFreshUntil = 0;
   const STREAM_STALE_MS = 3000;
   const STREAM_RETRY_MS = 2000;
   const UI_BOOK_DEPTH = 10;
@@ -166,9 +159,11 @@
     return Array.from(new Set(normalized));
   }
 
-  function sourceLabelFor(sources: string[]): string {
-    if (sources.length === 1) return `Hub: ${formatEntityId(sources[0] || '')}`;
-    if (sources.length > 1) return `Sources: ${sources.length}`;
+  function sourceLabelFor(actualSources: string[], expectedCount: number): string {
+    if (expectedCount <= 0) return 'Sources: 0';
+    if (actualSources.length === 1 && expectedCount === 1) return `Hub: ${formatEntityId(actualSources[0] || '')}`;
+    if (actualSources.length < expectedCount) return `Sources: ${actualSources.length}/${expectedCount} syncing`;
+    if (actualSources.length > 1) return `Sources: ${actualSources.length}`;
     return 'Sources: 0';
   }
 
@@ -198,11 +193,6 @@
     return null;
   }
 
-  function readBookTickValue(value: unknown, fallback: bigint): bigint {
-    const parsed = toPriceTicks(value);
-    return parsed && parsed > 0n ? parsed : fallback;
-  }
-
   function wsMessageId(prefix: string): string {
     return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
   }
@@ -219,49 +209,6 @@
 
   function streamKey(hubEntityId: string, streamPairId: string): string {
     return `${hubEntityId}:${streamPairId}`;
-  }
-
-  function findHubReplica(env: RuntimeEnv, sourceHubId: string): EntityReplica | null {
-    for (const [key, replica] of env.eReplicas || []) {
-      if (String(key || '').toLowerCase().startsWith(sourceHubId + ':')) {
-        return replica;
-      }
-    }
-    return null;
-  }
-
-  function accumulateBookSide(
-    book: BookState,
-    sourceHubId: string,
-    side: 'bid' | 'ask',
-    sideSizes: Map<bigint, number>,
-    sideOwners: Map<bigint, Set<string>>,
-    sideSources: Map<bigint, Set<string>>,
-    rawLevels?: RawSourceLevel[],
-  ) {
-    const effectiveDepth = visibleDepth();
-    const levels = getBookSideLevels(book, side === 'bid' ? 0 : 1, Math.max(effectiveDepth * 6, effectiveDepth));
-
-    for (const level of levels) {
-      if (level.qtyLots <= 0) continue;
-      const price = level.priceTicks;
-      const levelOwnerSet = new Set<string>(showOwners ? level.ownerIds.map((owner) => String(owner || '?').slice(-4)) : []);
-      sideSizes.set(price, (sideSizes.get(price) || 0) + level.qtyLots);
-      if (showOwners) {
-        const ownersSet = sideOwners.get(price) || new Set<string>();
-        for (const owner of levelOwnerSet) ownersSet.add(owner);
-        sideOwners.set(price, ownersSet);
-      }
-      const sourcesSet = sideSources.get(price) || new Set<string>();
-      sourcesSet.add(sourceHubId);
-      sideSources.set(price, sourcesSet);
-      rawLevels?.push({
-        price,
-        size: level.qtyLots,
-        sourceId: sourceHubId,
-        ...(showOwners ? { owners: Array.from(levelOwnerSet) } : {}),
-      });
-    }
   }
 
   function buildOrderLevels(
@@ -287,31 +234,6 @@
       }
       entry.accountIds = Array.from(sideSources.get(price) || []);
       return entry;
-    });
-  }
-
-  function buildSourceSpecificLevels(levels: RawSourceLevel[], side: 'bid' | 'ask'): OrderLevel[] {
-    const sorted = [...levels]
-      .sort((a, b) => {
-        if (side === 'bid') {
-          if (b.price !== a.price) return b.price > a.price ? 1 : -1;
-        } else if (a.price !== b.price) {
-          return a.price < b.price ? -1 : 1;
-        }
-        return a.sourceId.localeCompare(b.sourceId);
-      })
-      .slice(0, visibleDepth());
-
-    let cumulative = 0;
-    return sorted.map((level) => {
-      cumulative += level.size;
-      return {
-        price: level.price,
-        size: level.size,
-        total: cumulative,
-        ...(level.owners ? { owners: level.owners } : {}),
-        accountIds: [level.sourceId],
-      };
     });
   }
 
@@ -427,13 +349,16 @@
     nextBids: OrderLevel[],
     nextAsks: OrderLevel[],
     pair: string,
-    sources: string[],
+    actualSources: string[],
+    requestedSources: string[],
     updatedAtOverride?: number,
   ) {
     bids = nextBids;
     asks = nextAsks;
-    sourceCount = sources.length;
-    sourceLabel = sourceLabelFor(sources);
+    sourceCount = actualSources.length;
+    expectedSourceCount = requestedSources.length;
+    sourceStatus = actualSources.length >= requestedSources.length ? 'ready' : 'syncing';
+    sourceLabel = sourceLabelFor(actualSources, requestedSources.length);
     const bestBid = bids[0];
     const bestAsk = asks[0];
     if (bestBid && bestAsk) {
@@ -466,24 +391,24 @@
     return `${whole.toString()}.${frac}`;
   }
 
-  function applyStreamOrderbookIfFresh(sources: string[], pair: string): boolean {
-    if (Date.now() > streamFreshUntil) return false;
+  function applyStreamOrderbook(sources: string[], pair: string): boolean {
     const bidSizes = new Map<bigint, number>();
     const askSizes = new Map<bigint, number>();
     const bidOwners = new Map<bigint, Set<string>>();
     const askOwners = new Map<bigint, Set<string>>();
     const bidSources = new Map<bigint, Set<string>>();
     const askSources = new Map<bigint, Set<string>>();
-    const rawBidLevels: RawSourceLevel[] = [];
-    const rawAskLevels: RawSourceLevel[] = [];
-    let found = 0;
+    const actualSources: string[] = [];
     let hasAnyLevel = false;
     let newestHubUpdate = 0;
+    const now = Date.now();
 
     for (const sourceHubId of sources) {
       const snapshot = streamSnapshots.get(streamKey(sourceHubId, pair));
       if (!snapshot) continue;
-      found += 1;
+      const snapshotUpdatedAt = Number(snapshot.updatedAt || 0);
+      if (!Number.isFinite(snapshotUpdatedAt) || now - snapshotUpdatedAt > STREAM_STALE_MS) continue;
+      actualSources.push(sourceHubId);
       const hubUpdatedAt = Number(snapshot.hubUpdatedAt || snapshot.updatedAt || 0);
       if (Number.isFinite(hubUpdatedAt) && hubUpdatedAt > newestHubUpdate) {
         newestHubUpdate = hubUpdatedAt;
@@ -493,7 +418,6 @@
         const size = Number(level.size || 0);
         if (price === null || !Number.isFinite(size) || size <= 0) continue;
         hasAnyLevel = true;
-        rawBidLevels.push({ price, size, sourceId: sourceHubId });
         bidSizes.set(price, (bidSizes.get(price) || 0) + size);
         const sourcesSet = bidSources.get(price) || new Set<string>();
         sourcesSet.add(sourceHubId);
@@ -504,7 +428,6 @@
         const size = Number(level.size || 0);
         if (price === null || !Number.isFinite(size) || size <= 0) continue;
         hasAnyLevel = true;
-        rawAskLevels.push({ price, size, sourceId: sourceHubId });
         askSizes.set(price, (askSizes.get(price) || 0) + size);
         const sourcesSet = askSources.get(price) || new Set<string>();
         sourcesSet.add(sourceHubId);
@@ -512,19 +435,24 @@
       }
     }
 
-    if (found === 0) return false;
-    if (!hasAnyLevel) return false;
+    if (actualSources.length === 0) {
+      updateView([], [], pair, [], sources, newestHubUpdate);
+      return false;
+    }
+    if (actualSources.length < sources.length) {
+      updateView([], [], pair, actualSources, sources, newestHubUpdate);
+      return true;
+    }
+    if (!hasAnyLevel) {
+      updateView([], [], pair, actualSources, sources, newestHubUpdate);
+      return true;
+    }
     applySmartOrSavedStep(bidSizes, askSizes);
     const aggregatedBids = aggregateSideLevels(bidSizes, bidOwners, bidSources, 'bid');
     const aggregatedAsks = aggregateSideLevels(askSizes, askOwners, askSources, 'ask');
-    const useSourceSpecificRows = showSources;
-    const nextBids = useSourceSpecificRows
-      ? buildSourceSpecificLevels(rawBidLevels, 'bid')
-      : buildOrderLevels(aggregatedBids.sizes, aggregatedBids.owners, aggregatedBids.sources, 'bid');
-    const nextAsks = useSourceSpecificRows
-      ? buildSourceSpecificLevels(rawAskLevels, 'ask')
-      : buildOrderLevels(aggregatedAsks.sizes, aggregatedAsks.owners, aggregatedAsks.sources, 'ask');
-    updateView(nextBids, nextAsks, pair, sources, newestHubUpdate);
+    const nextBids = buildOrderLevels(aggregatedBids.sizes, aggregatedBids.owners, aggregatedBids.sources, 'bid');
+    const nextAsks = buildOrderLevels(aggregatedAsks.sizes, aggregatedAsks.owners, aggregatedAsks.sources, 'ask');
+    updateView(nextBids, nextAsks, pair, actualSources, sources, newestHubUpdate);
     return true;
   }
 
@@ -533,51 +461,14 @@
     const pair = canonicalPairId();
 
     if (sources.length === 0) {
-      updateView([], [], pair, []);
+      updateView([], [], pair, [], []);
       return;
     }
 
-    if (applyStreamOrderbookIfFresh(sources, pair)) {
-      return;
+    const applied = applyStreamOrderbook(sources, pair);
+    if (!applied && marketWs && marketWs.readyState === 1) {
+      requestMarketSnapshot();
     }
-
-    const env = $envStore;
-    if (!env) return;
-    const bidSizes = new Map<bigint, number>();
-    const askSizes = new Map<bigint, number>();
-    const bidOwners = new Map<bigint, Set<string>>();
-    const askOwners = new Map<bigint, Set<string>>();
-    const bidSources = new Map<bigint, Set<string>>();
-    const askSources = new Map<bigint, Set<string>>();
-    const rawBidLevels: RawSourceLevel[] = [];
-    const rawAskLevels: RawSourceLevel[] = [];
-    let newestHubUpdate = 0;
-
-    for (const sourceHubId of sources) {
-      const hubReplica = findHubReplica(env, sourceHubId);
-      const books = hubReplica?.state?.orderbookExt?.books;
-      if (!(books instanceof Map)) continue;
-      const book = books.get(pair);
-      if (!book) continue;
-      const hubUpdatedAt = Number(hubReplica?.state?.timestamp || 0);
-      if (Number.isFinite(hubUpdatedAt) && hubUpdatedAt > newestHubUpdate) {
-        newestHubUpdate = hubUpdatedAt;
-      }
-      accumulateBookSide(book, sourceHubId, 'bid', bidSizes, bidOwners, bidSources, rawBidLevels);
-      accumulateBookSide(book, sourceHubId, 'ask', askSizes, askOwners, askSources, rawAskLevels);
-    }
-
-    applySmartOrSavedStep(bidSizes, askSizes);
-    const useSourceSpecificRows = showSources;
-    const aggregatedBids = aggregateSideLevels(bidSizes, bidOwners, bidSources, 'bid');
-    const aggregatedAsks = aggregateSideLevels(askSizes, askOwners, askSources, 'ask');
-    const nextBids = useSourceSpecificRows
-      ? buildSourceSpecificLevels(rawBidLevels, 'bid')
-      : buildOrderLevels(aggregatedBids.sizes, aggregatedBids.owners, aggregatedBids.sources, 'bid');
-    const nextAsks = useSourceSpecificRows
-      ? buildSourceSpecificLevels(rawAskLevels, 'ask')
-      : buildOrderLevels(aggregatedAsks.sizes, aggregatedAsks.owners, aggregatedAsks.sources, 'ask');
-    updateView(nextBids, nextAsks, pair, sources, newestHubUpdate);
   }
 
   function priceDisplayDecimals(): number {
@@ -665,8 +556,6 @@
   }
 
   function refreshOrderbookNow(): void {
-    // Force bypass stale stream cache and refresh from current hub state/snapshot.
-    streamFreshUntil = 0;
     requestMarketSnapshot();
     extractOrderbook();
     lastUpdate = Date.now();
@@ -713,13 +602,11 @@
         hubEntityId,
         pairId: streamPairId,
       });
-      streamFreshUntil = Date.now() + STREAM_STALE_MS;
       extractOrderbook();
     };
     marketWs.onclose = () => {
       marketWs = null;
       marketSubKey = '';
-      streamFreshUntil = 0;
       if (marketWsClosing) return;
       if (marketRetryTimer) clearTimeout(marketRetryTimer);
       marketRetryTimer = setTimeout(() => {
@@ -734,7 +621,6 @@
       clearTimeout(marketRetryTimer);
       marketRetryTimer = null;
     }
-    streamFreshUntil = 0;
     marketSubKey = '';
     streamSnapshots.clear();
     if (!marketWs) return;
@@ -755,7 +641,6 @@
     const pair = canonicalPairId();
     const nextKey = `${pair}|${visibleDepth()}|${sources.join(',')}`;
     if (typeof window !== 'undefined' && marketWs && marketWs.readyState === 1 && nextKey !== marketSubKey) {
-      streamFreshUntil = 0;
       streamSnapshots.clear();
       sendMarketSubscribe(true);
       requestMarketSnapshot();
@@ -776,7 +661,10 @@
     loadPriceStepOverrides();
     extractOrderbook();
     connectMarketStream();
-    pollInterval = setInterval(extractOrderbook, POLL_MS) as unknown as number;
+    pollInterval = setInterval(() => {
+      extractOrderbook();
+      requestMarketSnapshot();
+    }, POLL_MS) as unknown as number;
   });
 
   onDestroy(() => {
@@ -875,7 +763,7 @@
           {/if}
         </div>
       {:else}
-        <div class="empty-side">No asks</div>
+        <div class="empty-side">{sourceStatus === 'syncing' ? 'Syncing asks…' : 'No asks'}</div>
       {/each}
     </div>
 
@@ -950,7 +838,7 @@
           {/if}
         </div>
       {:else}
-        <div class="empty-side">No bids</div>
+        <div class="empty-side">{sourceStatus === 'syncing' ? 'Syncing bids…' : 'No bids'}</div>
       {/each}
     </div>
   </div>
@@ -974,6 +862,14 @@
         </select>
       </label>
     {/if}
+    <span
+      class="source-status"
+      class:is-syncing={sourceStatus === 'syncing'}
+      data-testid="orderbook-source-status"
+      title={sourceStatus === 'syncing'
+        ? `Waiting for ${Math.max(0, expectedSourceCount - sourceCount)} source snapshot(s)`
+        : `Book built from ${sourceCount} source${sourceCount === 1 ? '' : 's'}`}
+    >{sourceLabel}</span>
     <span
       class="update-label"
       on:click={refreshOrderbookNow}
@@ -1331,6 +1227,14 @@
 
   .update-label:hover {
     color: var(--text-secondary, #aaa);
+  }
+
+  .source-status {
+    color: var(--text-tertiary, #666);
+  }
+
+  .source-status.is-syncing {
+    color: #f3d27a;
   }
 
   .ratio-row {
