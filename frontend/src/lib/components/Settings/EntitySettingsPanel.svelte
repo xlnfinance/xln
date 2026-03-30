@@ -1111,7 +1111,7 @@
           <span class="setting-title">Balance Refresh</span>
           <span class="setting-desc">How often wallet balances poll RPC. Hard-capped to once per second.</span>
           <select
-            value={$settings.balanceRefreshMs ?? 15000}
+            value={$settings.balanceRefreshMs ?? 1000}
             on:change={(event) => settingsOperations.setBalanceRefreshMs(Number((event.currentTarget as HTMLSelectElement).value))}
             data-testid="settings-network-balance-refresh"
           >
