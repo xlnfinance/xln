@@ -62,6 +62,7 @@ import {
 } from './jadapter';
 import { ensureLocalDisputeDelayConfigured } from './jadapter/local-config';
 import { getAvailableJurisdictions } from './jurisdiction-config';
+import { TIMING } from './constants';
 import { canonicalizeProfile, createGossipLayer, parseProfile } from './networking/gossip';
 import { attachEventEmitters } from './env-events';
 import {
@@ -548,20 +549,21 @@ const waitForRuntimeLoopWake = async (env: Env): Promise<void> => {
   });
 };
 
-const waitForRuntimeLoopWakeOrTimeout = async (env: Env, timeoutMs: number): Promise<void> => {
+const waitForRuntimeLoopWakeOrTimeout = async (env: Env, timeoutMs: number): Promise<'wake' | 'timeout'> => {
   const state = ensureRuntimeState(env);
   if (timeoutMs <= 0) {
     if (state.wakeRequested) state.wakeRequested = false;
     await sleep(0);
-    return;
+    return 'timeout';
   }
   if (state.wakeRequested) {
     state.wakeRequested = false;
-    return;
+    return 'wake';
   }
-  await new Promise<void>((resolve) => {
+  return await new Promise<'wake' | 'timeout'>((resolve) => {
     let settled = false;
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let result: 'wake' | 'timeout' = 'timeout';
     const finish = () => {
       if (settled) return;
       settled = true;
@@ -569,10 +571,11 @@ const waitForRuntimeLoopWakeOrTimeout = async (env: Env, timeoutMs: number): Pro
       if (state.wakeLoop === wake) {
         state.wakeLoop = null;
       }
-      resolve();
+      resolve(result);
     };
     const wake = () => {
       state.wakeRequested = false;
+      result = 'wake';
       finish();
     };
     state.wakeLoop = wake;
@@ -644,7 +647,11 @@ const ensureRuntimeMempool = (env: Env): RuntimeInput => {
 
 const normalizeIngressTimestamp = (env: Env, explicitTimestamp?: number): number => {
   if (typeof explicitTimestamp === 'number' && Number.isFinite(explicitTimestamp) && explicitTimestamp > 0) {
-    return Math.floor(explicitTimestamp);
+    const sanitizedTimestamp = Math.floor(explicitTimestamp);
+    if (env.scenarioMode) return sanitizedTimestamp;
+    const logicalNow = env.timestamp ?? 0;
+    const maxAcceptedTimestamp = Math.max(logicalNow, getWallClockMs() + TIMING.TIMESTAMP_DRIFT_MS);
+    return Math.max(logicalNow, Math.min(sanitizedTimestamp, maxAcceptedTimestamp));
   }
   return env.timestamp ?? 0;
 };
@@ -687,7 +694,7 @@ const enqueueRuntimeInputs = (
     );
   }
   if (inputs?.length || runtimeTxs?.length || jInputs?.length) {
-    const targetQueuedAt = env.scenarioMode ? (env.timestamp ?? 0) : normalizedTimestamp;
+    const targetQueuedAt = normalizedTimestamp;
     mempool.queuedAt =
       mempool.queuedAt === undefined
         ? targetQueuedAt
@@ -979,6 +986,54 @@ const getEarliestWallClockDueTimestamp = (env: Env): number | null => {
   return Number.isFinite(earliestDue) ? earliestDue : null;
 };
 
+const getNextWallClockWakeTimestamp = (env: Env): number | null => {
+  if (!ensureRuntimeState(env).clockPrimed && !env.scenarioMode) return null;
+  const logicalNow = getRuntimeNowMs(env);
+  let nextWake = Infinity;
+
+  if (env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) {
+    const deferredMeta = ensureRuntimeState(env).deferredNetworkMeta;
+    for (const output of env.pendingNetworkOutputs) {
+      const retryAt = deferredMeta?.get(buildRouteOutputKey(output))?.nextRetryAt ?? 0;
+      if (retryAt > logicalNow) {
+        nextWake = Math.min(nextWake, retryAt);
+      }
+    }
+  }
+
+  if (!env.eReplicas || env.eReplicas.size === 0) {
+    return Number.isFinite(nextWake) ? nextWake : null;
+  }
+
+  for (const [, replica] of env.eReplicas) {
+    const crontab = replica.state?.crontabState;
+    if (!crontab) continue;
+
+    const hooks = crontab.hooks;
+    if (hooks && hooks.size > 0) {
+      for (const hook of hooks.values()) {
+        if (hook.triggerAt > logicalNow) {
+          nextWake = Math.min(nextWake, hook.triggerAt);
+        }
+      }
+    }
+
+    if (hubNeedsPeriodicWake(replica)) {
+      const tasks = crontab.tasks;
+      if (tasks && tasks.size > 0) {
+        for (const task of tasks.values()) {
+          const dueAt = task.lastRun + task.intervalMs;
+          if (dueAt > logicalNow) {
+            nextWake = Math.min(nextWake, dueAt);
+          }
+        }
+      }
+    }
+  }
+
+  return Number.isFinite(nextWake) ? nextWake : null;
+};
+
 const RUNTIME_WAKE_WATCHDOG_MS = 250;
 const trackedRuntimeEnvs = new Set<Env>();
 let runtimeWakeWatchdog: ReturnType<typeof setInterval> | null = null;
@@ -1170,6 +1225,24 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
           } else {
             // Drain chained outputs/ACKs immediately.
             await sleep(0);
+          }
+          continue;
+        }
+        const nextDueAt = getNextWallClockWakeTimestamp(env);
+        if (nextDueAt !== null) {
+          const waitResult = await waitForRuntimeLoopWakeOrTimeout(
+            env,
+            Math.max(0, nextDueAt - getWallClockMs()),
+          );
+          if (waitResult === 'timeout') {
+            const dueTimestamp = getEarliestWallClockDueTimestamp(env) ?? nextDueAt;
+            const mempool = ensureRuntimeMempool(env);
+            mempool.queuedAt =
+              mempool.queuedAt === undefined
+                ? dueTimestamp
+                : Math.max(mempool.queuedAt, dueTimestamp);
+            state.clockPrimed = true;
+            generateHookPings(env, dueTimestamp, dueTimestamp);
           }
           continue;
         }
@@ -3461,15 +3534,46 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
       console.log(`⚡ [SIDE-EFFECT] Submitting ${totalJTxs} J-txs via JAdapter (${jOutbox.length} JInputs)`);
 
       for (const jInput of jOutbox) {
+        const queueMissingInfraAbort = (reason: string) => {
+          const compactReason = String(reason || 'unknown').slice(0, 240);
+          for (const jTx of jInput.jTxs) {
+            if (jTx.type !== 'batch') continue;
+            const signerId = typeof jTx.data?.signerId === 'string' ? jTx.data.signerId : undefined;
+            enqueueRuntimeInputs(
+              env,
+              [
+                {
+                  entityId: jTx.entityId,
+                  ...(signerId ? { signerId } : {}),
+                  entityTxs: [
+                    {
+                      type: 'j_abort_sent_batch',
+                      data: {
+                        requeueToCurrent: true,
+                        reason: `submit_failed:${compactReason}`,
+                      },
+                    },
+                  ],
+                },
+              ],
+              undefined,
+              undefined,
+              env.timestamp,
+            );
+          }
+        };
+
         const jReplica = env.jReplicas?.get(jInput.jurisdictionName);
         if (!jReplica) {
           console.error(`❌ [J-SUBMIT] Jurisdiction "${jInput.jurisdictionName}" not found — skipping`);
+          queueMissingInfraAbort(`missing_jReplica:${jInput.jurisdictionName}`);
           continue;
         }
 
         const jAdapter = jReplica.jadapter;
         if (!jAdapter) {
           console.error(`❌ [J-SUBMIT] No JAdapter for jurisdiction "${jInput.jurisdictionName}" — skipping`);
+          queueMissingInfraAbort(`missing_jAdapter:${jInput.jurisdictionName}`);
           continue;
         }
 
@@ -3518,6 +3622,17 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
               console.log(
                 `✅ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)}: ok (events=${result.events?.length ?? 0}, txHash=${result.txHash ?? 'n/a'})`,
               );
+              if (typeof jAdapter.pollNow === 'function') {
+                try {
+                  await jAdapter.pollNow();
+                  console.log(`🔄 [J-SUBMIT] pollNow synced ${jInput.jurisdictionName} after ${jTx.type}`);
+                } catch (pollError) {
+                  console.warn(
+                    `⚠️ [J-SUBMIT] pollNow failed after ${jTx.type} from ${jTx.entityId.slice(-4)}:`,
+                    pollError,
+                  );
+                }
+              }
             } else {
               console.error(`❌ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} FAILED: ${result.error}`);
               if (!env.scenarioMode) {

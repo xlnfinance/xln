@@ -1510,7 +1510,6 @@
     const nextRaw = String(event.detail?.value || '').trim();
     const matched = workspaceAccountIds.find((id) => String(id).toLowerCase() === nextRaw.toLowerCase());
     workspaceAccountId = matched || nextRaw;
-    selectedAccountId = matched || nextRaw || null;
   }
 
   $: openAccountEntityOptions = (() => {
@@ -3319,10 +3318,6 @@
     }
   }
 
-  async function handleDisputeFromList(event: CustomEvent<{ counterpartyId: string }>) {
-    await confirmAndQueueDisputeStart(event.detail.counterpartyId, 'dispute-from-popover');
-  }
-
   function confirmDisputeAction(
     kind: 'start' | 'finalize',
     counterpartyEntityId: string,
@@ -4040,6 +4035,17 @@
     accountWorkspaceTab = 'activity';
   }
 
+  function selectTopLevelTab(nextTab: ViewTab) {
+    if (nextTab === 'accounts' && selectedAccountId) {
+      handleBackToAccounts();
+      return;
+    }
+    if (selectedAccountId) {
+      selectedAccountId = null;
+    }
+    activeTab = nextTab;
+  }
+
   function handleAccountPanelGoToOpenAccounts() {
     const nextWorkspaceId = String(selectedAccountId || '').trim();
     if (nextWorkspaceId) {
@@ -4424,7 +4430,7 @@
     { id: 'swap', icon: Repeat, label: 'Swap' },
     { id: 'move', icon: Landmark, label: 'Move' },
     { id: 'history', icon: Activity, label: 'History' },
-    { id: 'configure', icon: SettingsIcon, label: 'Configure' },
+    { id: 'configure', icon: SettingsIcon, label: 'Manage' },
     { id: 'activity', icon: Activity, label: 'Activity' },
     { id: 'appearance', icon: SlidersHorizontal, label: 'Appearance' },
   ];
@@ -4576,7 +4582,7 @@
             class="tab"
             class:active={activeTab === t.id}
             data-testid={`tab-${t.id}`}
-            on:click={() => activeTab = t.id}
+            on:click={() => selectTopLevelTab(t.id)}
           >
             <svelte:component this={t.icon} size={14} />
             <span>{t.label}</span>
@@ -4871,7 +4877,6 @@
             on:select={handleAccountSelect}
             on:faucet={handleAccountFaucet}
             on:settleApprove={handleQuickSettleApprove}
-            on:dispute={handleDisputeFromList}
           />
 
           <DebtPanel
@@ -5024,19 +5029,20 @@
               <div class="configure-panel">
                 <div class="workspace-inline-selector">
                   <EntityInput
-                    label="Configure Account"
+                    label="Manage Account"
                     value={workspaceAccountId}
                     entities={workspaceAccountIds}
                     testId="configure-account-selector"
                     excludeId={replica?.state?.entityId || tab.entityId}
-                    placeholder="Select account for configure..."
+                    placeholder="Select account for manage..."
                     disabled={!activeIsLive || workspaceAccountIds.length === 0}
                     on:change={handleWorkspaceAccountChange}
                   />
                 </div>
-                <nav class="configure-tabs" aria-label="Account configure workspace">
+                <nav class="configure-tabs" aria-label="Account manage workspace">
                   <button
                     class="configure-tab"
+                    data-testid="configure-tab-extend-credit"
                     class:active={configureWorkspaceTab === 'extend-credit'}
                     on:click={() => configureWorkspaceTab = 'extend-credit'}
                   >
@@ -5044,6 +5050,7 @@
                   </button>
                   <button
                     class="configure-tab"
+                    data-testid="configure-tab-request-credit"
                     class:active={configureWorkspaceTab === 'request-credit'}
                     on:click={() => configureWorkspaceTab = 'request-credit'}
                   >
@@ -5051,6 +5058,7 @@
                   </button>
                   <button
                     class="configure-tab"
+                    data-testid="configure-tab-collateral"
                     class:active={configureWorkspaceTab === 'collateral'}
                     on:click={() => configureWorkspaceTab = 'collateral'}
                   >
@@ -5058,6 +5066,7 @@
                   </button>
                   <button
                     class="configure-tab"
+                    data-testid="configure-tab-token"
                     class:active={configureWorkspaceTab === 'token'}
                     on:click={() => configureWorkspaceTab = 'token'}
                   >
@@ -5065,6 +5074,7 @@
                   </button>
                   <button
                     class="configure-tab danger"
+                    data-testid="configure-tab-dispute"
                     class:active={configureWorkspaceTab === 'dispute'}
                     on:click={() => configureWorkspaceTab = 'dispute'}
                   >
@@ -5145,7 +5155,12 @@
                           <option value={token.id}>{token.symbol}</option>
                         {/each}
                       </select>
-                      <button class="btn-add-token" on:click={addTokenToAccount} disabled={!activeIsLive || !workspaceAccountId}>
+                      <button
+                        class="btn-add-token"
+                        data-testid="configure-token-add"
+                        on:click={addTokenToAccount}
+                        disabled={!activeIsLive || !workspaceAccountId}
+                      >
                         Add Token
                       </button>
                     </div>

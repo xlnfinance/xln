@@ -6,7 +6,19 @@
 
 // Re-export core types
 export type { Side, TIF, OrderCmd, BookEvent, BookParams, BookState } from './core';
-export { createBook, applyCommand, getBestBid, getBestAsk, getSpread, computeBookHash, MAX_FILL_RATIO } from './core';
+export {
+  createBook,
+  applyCommand,
+  getBestBid,
+  getBestAsk,
+  getSpread,
+  getBookOrder,
+  getBookOrders,
+  getBookSideLevels,
+  bucketIdForPrice,
+  computeBookHash,
+  MAX_FILL_RATIO,
+} from './core';
 
 // Import for local use
 import { MAX_FILL_RATIO } from './core';
@@ -15,7 +27,6 @@ import { getSwapPairOrientation, getSwapPairPolicyByBaseQuote } from '../account
 // Price tick precision used for ratio encoding in orderbook flows.
 // 10000 = 4 decimals (e.g. 1.2345)
 export const ORDERBOOK_PRICE_SCALE = 10_000n;
-export const ORDERBOOK_MAX_LEVELS = 40_000;
 
 /** Canonical pair normalization */
 export function canonicalPair(tokenA: number, tokenB: number): { base: number; quote: number; pairId: string } {
@@ -59,8 +70,13 @@ export function computeSwapPriceTicks(
   const pairPolicy = getSwapPairPolicyByBaseQuote(base, quote);
   const stepTicks = BigInt(Math.max(1, pairPolicy.priceStepTicks));
 
-  let priceTicks = (rawQuoteAmount * ORDERBOOK_PRICE_SCALE) / rawBaseAmount;
+  const scaledQuoteAmount = rawQuoteAmount * ORDERBOOK_PRICE_SCALE;
+  const remainder = scaledQuoteAmount % rawBaseAmount;
+  let priceTicks = scaledQuoteAmount / rawBaseAmount;
   if (side === 1) {
+    if (remainder > 0n) {
+      priceTicks += 1n;
+    }
     priceTicks = ((priceTicks + stepTicks - 1n) / stepTicks) * stepTicks;
   } else {
     priceTicks = (priceTicks / stepTicks) * stepTicks;
@@ -272,6 +288,16 @@ export interface OrderbookExtState {
   /** Books by jurisdiction/pair: e.g., "eth/1/2" */
   books: Map<string, BookState>;
 
+  /**
+   * Hot cancel index:
+   * namespacedOrderId ("accountId:offerId") -> pairIds currently containing it.
+   *
+   * The source of truth is still `books`. This map is derived state kept only to
+   * avoid scanning every pair book on each cancel. If an older snapshot lacks it,
+   * it can be rebuilt deterministically from `books`.
+   */
+  orderPairs: Map<string, string[]>;
+
   /** Referrer tracking */
   referrals: Map<string, EntityReferral>;
 
@@ -283,7 +309,61 @@ export interface OrderbookExtState {
 export function createOrderbookExtState(hubProfile: HubProfile): OrderbookExtState {
   return {
     books: new Map(),
+    orderPairs: new Map(),
     referrals: new Map(),
     hubProfile,
   };
+}
+
+const addPairToOrderIndex = (index: Map<string, string[]>, orderId: string, pairId: string): void => {
+  const existing = index.get(orderId);
+  if (!existing) {
+    index.set(orderId, [pairId]);
+    return;
+  }
+  if (!existing.includes(pairId)) existing.push(pairId);
+};
+
+const removePairFromOrderIndex = (index: Map<string, string[]>, orderId: string, pairId: string): void => {
+  const existing = index.get(orderId);
+  if (!existing) return;
+  const filtered = existing.filter((entry) => entry !== pairId);
+  if (filtered.length === 0) index.delete(orderId);
+  else index.set(orderId, filtered);
+};
+
+export function rebuildOrderbookPairIndex(ext: OrderbookExtState): Map<string, string[]> {
+  const next = new Map<string, string[]>();
+  for (const [pairId, book] of ext.books.entries()) {
+    for (const orderId of book.orders.keys()) {
+      addPairToOrderIndex(next, orderId, pairId);
+    }
+  }
+  ext.orderPairs = next;
+  return next;
+}
+
+export function ensureOrderbookPairIndex(ext: OrderbookExtState): Map<string, string[]> {
+  if (!(ext.orderPairs instanceof Map)) {
+    return rebuildOrderbookPairIndex(ext);
+  }
+  return ext.orderPairs;
+}
+
+export function replaceOrderbookPair(ext: OrderbookExtState, pairId: string, book: BookState): void {
+  const orderPairs = ensureOrderbookPairIndex(ext);
+  const previous = ext.books.get(pairId);
+  if (previous) {
+    for (const orderId of previous.orders.keys()) {
+      removePairFromOrderIndex(orderPairs, orderId, pairId);
+    }
+  }
+  ext.books.set(pairId, book);
+  for (const orderId of book.orders.keys()) {
+    addPairToOrderIndex(orderPairs, orderId, pairId);
+  }
+}
+
+export function getOrderbookPairsForOrder(ext: OrderbookExtState, orderId: string): string[] {
+  return [...ensureOrderbookPairIndex(ext).get(orderId) ?? []];
 }

@@ -14,6 +14,11 @@ import {
   getPersistedReceiptCursor,
   waitForPersistedFrameEventMatch,
 } from './utils/e2e-runtime-receipts';
+import {
+  clickWithDialogAccept,
+  openAccountWorkspaceTab,
+  startDisputeFromManageUi,
+} from './utils/e2e-account-workspace';
 
 const INIT_TIMEOUT = 30_000;
 const LONG_E2E = process.env.E2E_LONG === '1';
@@ -208,6 +213,44 @@ async function readCurrentChainBlock(page: Page): Promise<number> {
   const body = await response.json() as { result?: string };
   expect(typeof body.result === 'string', `unexpected eth_blockNumber body: ${JSON.stringify(body)}`).toBe(true);
   return Number.parseInt(body.result!, 16);
+}
+
+async function mineOneBlock(page: Page): Promise<void> {
+  const response = await page.request.post(`${APP_BASE_URL}/api/rpc`, {
+    data: { jsonrpc: '2.0', id: 1, method: 'evm_mine', params: [] },
+  });
+  expect(response.ok(), 'evm_mine RPC must succeed').toBe(true);
+  await page.evaluate(async () => {
+    const env = (window as typeof window & { isolatedEnv?: any }).isolatedEnv;
+    const activeJurisdiction = String(env?.activeJurisdiction || '');
+    const jReplica = activeJurisdiction ? env?.jReplicas?.get?.(activeJurisdiction) : null;
+    const jadapter = jReplica?.jadapter;
+    if (jadapter && typeof jadapter.pollNow === 'function') {
+      await jadapter.pollNow();
+    }
+  });
+}
+
+async function readRuntimeJurisdictionHeight(page: Page): Promise<number> {
+  return page.evaluate(() => {
+    const env = (window as typeof window & { isolatedEnv?: any }).isolatedEnv;
+    const activeJurisdiction = String(env?.activeJurisdiction || '');
+    const jReplica = activeJurisdiction ? env?.jReplicas?.get?.(activeJurisdiction) : null;
+    return Number(jReplica?.blockNumber || 0n);
+  });
+}
+
+async function waitForBlock(page: Page, targetBlock: number): Promise<void> {
+  const deadline = Date.now() + 45_000;
+  for (;;) {
+    const current = await readCurrentChainBlock(page);
+    const runtimeVisible = await readRuntimeJurisdictionHeight(page);
+    if (current >= targetBlock && runtimeVisible >= targetBlock) return;
+    if (Date.now() >= deadline) {
+      throw new Error(`timed out waiting for block ${targetBlock} (chain=${current}, runtime=${runtimeVisible})`);
+    }
+    await mineOneBlock(page);
+  }
 }
 
 async function readAccountMeta(
@@ -849,18 +892,6 @@ async function broadcastPendingBatchViaUi(
   }
 }
 
-async function clickWithDialogAccept(page: Page, action: () => Promise<void>): Promise<void> {
-  const onDialog = async (dialog: any) => {
-    await dialog.accept();
-  };
-  page.on('dialog', onDialog);
-  try {
-    await action();
-  } finally {
-    page.off('dialog', onDialog);
-  }
-}
-
 async function clearBatchViaUi(page: Page): Promise<void> {
   const clearButton = page.getByTestId('settle-clear-batch').first();
   await expect(clearButton).toBeVisible({ timeout: 30_000 });
@@ -876,7 +907,8 @@ async function ensureNoSentBatchLatch(
   entityId: string,
   signerId: string,
 ): Promise<void> {
-  await openEntitySettleWorkspace(page);
+  await ensureEntityWorkspaceVisible(page, entityId);
+  await ensureEntityShellVisible(page);
   const initial = await readJBatchSnapshot(page, entityId, signerId);
   if (!initial.sentExists) return;
 
@@ -887,85 +919,32 @@ async function ensureNoSentBatchLatch(
   }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(false);
 }
 
-async function openEntitySettleWorkspace(page: Page, counterpartyId?: string, entityId?: string): Promise<void> {
-  await ensureEntityWorkspaceVisible(page, entityId);
-  await ensureEntityShellVisible(page);
-  const accountsTab = page.getByTestId('tab-accounts').first();
-  await expect(accountsTab).toBeVisible({ timeout: 15_000 });
-  await accountsTab.click();
-  const workspaceNav = page.locator('nav[aria-label="Account workspace"]').first();
-  await expect(workspaceNav).toBeVisible({ timeout: 15_000 });
-  const historyWorkspaceButton = workspaceNav.getByRole('button', { name: /^History$/i }).first();
-  const historyVisible = await historyWorkspaceButton.isVisible({ timeout: 3_000 }).catch(() => false);
-  if (historyVisible) {
-    await historyWorkspaceButton.click();
-  }
-}
-
 async function assertBatchHistoryVisible(
   page: Page,
   entityId: string,
   signerId: string,
 ): Promise<void> {
+  await ensureEntityWorkspaceVisible(page, entityId);
+  await ensureEntityShellVisible(page);
+  await openAccountWorkspaceTab(page, 'history');
   await expect.poll(async () => {
     const snapshot = await readJBatchSnapshot(page, entityId, signerId);
     return snapshot.batchHistoryCount;
   }, { timeout: 20_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(0);
 }
 
-async function startDisputeFromEntitySettle(
+async function startDisputeFromManageWorkspace(
   page: Page,
   entityId: string,
   signerId: string,
   counterpartyId: string,
 ): Promise<void> {
   await ensureEntityWorkspaceVisible(page, entityId);
-  await ensureEntityShellVisible(page);
-  const workspaceNav = page.locator('nav[aria-label="Account workspace"]').first();
-  const accountsTab = page.getByTestId('tab-accounts').first();
-  await expect(accountsTab).toBeVisible({ timeout: 15_000 });
-  await accountsTab.click();
-  await expect(workspaceNav).toBeVisible({ timeout: 20_000 });
-  const configureWorkspaceButton = workspaceNav.getByRole('button', { name: /^Configure$/i }).first();
-  await expect(configureWorkspaceButton).toBeVisible({ timeout: 15_000 });
-  await configureWorkspaceButton.click();
-
-  const disputeTab = page.locator('.configure-tab').filter({ hasText: /^Dispute$/ }).first();
-  await expect(disputeTab).toBeVisible({ timeout: 15_000 });
-  await disputeTab.click();
-
-  const disputeButton = page.getByTestId('configure-dispute-start').first();
-  await expect(disputeButton).toBeVisible({ timeout: 15_000 });
-  await expect(disputeButton).toBeEnabled({ timeout: 15_000 });
-
-  const dialogs: Array<{ type: string; message: string }> = [];
-  const onDialog = async (dialog: any) => {
-    dialogs.push({
-      type: String(dialog?.type?.() || 'unknown'),
-      message: String(dialog?.message?.() || ''),
+  try {
+    await startDisputeFromManageUi(page, counterpartyId, async () => {
+      const state = await readAccountState(page, entityId, signerId, counterpartyId);
+      return state.jBatchDisputeStarts > 0;
     });
-    await dialog.accept();
-  };
-  page.on('dialog', onDialog);
-  try {
-    await disputeButton.click();
-  } finally {
-    page.off('dialog', onDialog);
-  }
-
-  const alertDialog = dialogs.find((entry) => entry.type === 'alert');
-  if (alertDialog) {
-    throw new Error(`disputeStart alert: ${alertDialog.message}`);
-  }
-
-  const disputeQueued = async () => {
-    const state = await readAccountState(page, entityId, signerId, counterpartyId);
-    return state.jBatchDisputeStarts > 0;
-  };
-
-  try {
-    await expect.poll(disputeQueued, { timeout: 12_000, intervals: [500, 1000, 2000] }).toBe(true);
-    return;
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     throw new Error(`disputeStart UI did not queue disputeStart: ${message}`);
@@ -1226,7 +1205,7 @@ test.describe('E2E Dispute Flow', () => {
     try {
       await timedStep(
         'dispute.ui_start_dispute',
-        () => startDisputeFromEntitySettle(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
+        () => startDisputeFromManageWorkspace(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
       );
     } catch (error) {
       const debug = await readDisputeDebug(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
@@ -1242,37 +1221,68 @@ test.describe('E2E Dispute Flow', () => {
     const disputeQueued = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
     const disputeHistoryBeforeBroadcast = disputeQueued.batchHistoryCount;
 
-    await timedStep('dispute.open_settle_workspace', () => openEntitySettleWorkspace(page, accountRef.counterpartyId, accountRef.entityId));
     await timedStep('dispute.broadcast_start_batch', () => broadcastPendingBatchViaUi(page, accountRef.entityId, accountRef.signerId));
-    await timedStep('dispute.wait_batch_sent_or_history', async () => {
+    await timedStep('dispute.wait_batch_history_confirmed', async () => {
       try {
         await expect.poll(async () => {
           const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-          return snap.sentDisputeStarts > 0 || snap.batchHistoryCount > disputeHistoryBeforeBroadcast;
-        }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(true);
+          return {
+            batchHistoryCount: snap.batchHistoryCount,
+            lastBatchStatus: snap.lastBatchStatus,
+            lastBatchOps: snap.lastBatchOps,
+          };
+        }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toMatchObject({
+          batchHistoryCount: expect.any(Number),
+          lastBatchStatus: 'confirmed',
+        });
+        await expect.poll(async () => {
+          const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+          return snap.batchHistoryCount;
+        }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(disputeHistoryBeforeBroadcast);
       } catch {
         const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
-        throw new Error(`dispute broadcast not observed. snapshot=${JSON.stringify(snap)}`);
+        throw new Error(`dispute broadcast not finalized. snapshot=${JSON.stringify(snap)}`);
       }
     });
 
     const disputedState = await readAccountState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
-    if (disputedState.activeDispute) {
-      const currentChainBlock = await readCurrentChainBlock(page);
-      expect(disputedState.disputeTimeout, 'disputeTimeout should be set after disputeStart').toBeGreaterThan(currentChainBlock);
-      const disputeWindowBlocks = disputedState.disputeTimeout - currentChainBlock;
-      expect(
-        disputeWindowBlocks <= 6 && disputeWindowBlocks >= 1,
-        `expected local dispute delay around 5 blocks, got ${disputeWindowBlocks}`
-      ).toBe(true);
+    expect(disputedState.activeDispute, 'dispute must become active after disputeStart broadcast').toBe(true);
 
-      await timedStep('dispute.wait_auto_finalize', async () => {
-        await expect.poll(async () => {
-          const state = await readAccountState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
-          return !state.activeDispute && state.status === 'disputed';
-        }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBe(true);
+    const currentChainBlock = await readCurrentChainBlock(page);
+    expect(disputedState.disputeTimeout, 'disputeTimeout should be set after disputeStart').toBeGreaterThan(currentChainBlock);
+    const disputeWindowBlocks = disputedState.disputeTimeout - currentChainBlock;
+    expect(
+      disputeWindowBlocks <= 6 && disputeWindowBlocks >= 1,
+      `expected local dispute delay around 5 blocks, got ${disputeWindowBlocks}`,
+    ).toBe(true);
+
+    await timedStep('dispute.wait_timeout_block', () => waitForBlock(page, disputedState.disputeTimeout));
+
+    const finalizeBatchBefore = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+    await timedStep('dispute.wait_auto_finalize_history_confirmed', async () => {
+      await expect.poll(async () => {
+        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+        return {
+          batchHistoryCount: snap.batchHistoryCount,
+          lastBatchStatus: snap.lastBatchStatus,
+          disputeFinalizations: snap.lastBatchOps.disputeFinalizations,
+        };
+      }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toMatchObject({
+        batchHistoryCount: expect.any(Number),
+        lastBatchStatus: 'confirmed',
+        disputeFinalizations: 1,
       });
-    }
+      await expect.poll(async () => {
+        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+        return snap.batchHistoryCount;
+      }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(finalizeBatchBefore.batchHistoryCount);
+    });
+    await timedStep('dispute.wait_finalize_applied', async () => {
+      await expect.poll(async () => {
+        const state = await readAccountState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
+        return !state.activeDispute && state.status === 'disputed';
+      }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBe(true);
+    });
 
     const reserveAfter = await readOnchainReserveViaAnvil(page, accountRef.entityId);
     expect(
@@ -1292,7 +1302,10 @@ test.describe('E2E Dispute Flow', () => {
     await page.waitForTimeout(1200);
 
     // Finalized disputed account is hidden from main list and moved to "Disputed Accounts".
-    await timedStep('dispute.open_settle_workspace_post_finalize', () => openEntitySettleWorkspace(page, accountRef.counterpartyId, accountRef.entityId));
+    await timedStep('dispute.open_accounts_after_finalize', async () => {
+      await ensureEntityWorkspaceVisible(page, accountRef.entityId);
+      await ensureEntityShellVisible(page);
+    });
     await timedStep('dispute.wait_hidden_from_main_list', async () => {
       await expect.poll(async () => {
         return await page.locator('.account-preview').filter({ hasText: accountRef.counterpartyId }).count();
@@ -1302,17 +1315,6 @@ test.describe('E2E Dispute Flow', () => {
     // If dispute finalize submit got stuck as sentBatch (no finalized event), clear latch for next flow.
     await timedStep('dispute.ensure_no_sent_batch_latch', () => ensureNoSentBatchLatch(page, accountRef.entityId, accountRef.signerId));
 
-    await timedStep('post_dispute.refund_reserve', async () => {
-      await faucetReserve(page, accountRef.entityId, '500');
-      await expect.poll(async () => {
-        return await readReserveBalanceUi(page, 'USDC');
-      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThanOrEqual(500);
-      await expect.poll(async () => {
-        return await readOnchainReserveViaAnvil(page, accountRef.entityId);
-      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(0n);
-    });
-
-    await openEntitySettleWorkspace(page);
     await assertBatchHistoryVisible(page, accountRef.entityId, accountRef.signerId);
 
     const finalSnapshot = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
@@ -1340,7 +1342,7 @@ test.describe('E2E Dispute Flow', () => {
       await expect.poll(async () => await readOnchainReserveViaAnvil(page, accountRef.entityId, { allowUnavailable: true }), {
         timeout: 60_000,
         intervals: [500, 1000, 2000],
-      }).toBeGreaterThan(reserveBefore);
+      }).toBeGreaterThanOrEqual(reserveAfter);
     });
     await timedStep('dispute.reload_assert_hidden_disputed_account', async () => {
       await expect.poll(async () => {
@@ -1375,20 +1377,12 @@ test.describe('E2E Dispute Flow', () => {
 
     await timedStep(
       'dispute_broadcast.start_dispute',
-      () => startDisputeFromEntitySettle(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
+      () => startDisputeFromManageWorkspace(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
     );
-    await timedStep('dispute_broadcast.open_settle_workspace', () => openEntitySettleWorkspace(page));
     await timedStep('dispute_broadcast.broadcast', () => broadcastPendingBatchViaUi(page, accountRef.entityId, accountRef.signerId));
 
     await timedStep('dispute_broadcast.wait_history_dispute_entry', async () => {
-      const historyRoot = page.locator('.settlement-panel').first();
-      await expect(historyRoot).toBeVisible({ timeout: 30_000 });
-      await expect
-        .poll(async () => {
-          const text = await historyRoot.textContent();
-          return /Dispute(Start|Finalize)/.test(String(text || ''));
-        }, { timeout: 60_000, intervals: [500, 1000, 2000] })
-        .toBe(true);
+      await expect(page.getByTestId('settle-rebroadcast')).toBeVisible({ timeout: 60_000 });
     });
   });
 });

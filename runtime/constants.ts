@@ -38,7 +38,7 @@ export const LIMITS = {
   MAX_ACCOUNT_SWAP_OFFERS: 128,
 
   /** Maximum resting orders per pair book */
-  MAX_ORDERBOOK_ORDERS_PER_PAIR: 64,
+  MAX_ORDERBOOK_ORDERS_PER_PAIR: 10_000,
 } as const;
 
 // ═══════════════════════════════════════════════════════════════

@@ -74,6 +74,14 @@ export async function handleSwapOffer(
   if (timeInForce !== undefined && timeInForce !== 0 && timeInForce !== 1 && timeInForce !== 2) {
     return { success: false, error: `Invalid timeInForce: ${String(timeInForce)}`, events };
   }
+  const effectiveTif = timeInForce ?? 0;
+  if (minFillRatio > 0 && effectiveTif === 0) {
+    return {
+      success: false,
+      error: 'minFillRatio > 0 requires timeInForce to be IOC (1) or FOK (2)',
+      events,
+    };
+  }
 
   // 3. Determine maker perspective (Channel.ts: byLeft = frame proposer = maker)
   const { leftEntity, rightEntity } = accountMachine;

@@ -212,6 +212,46 @@ export async function handleSettleRelease(
 
   console.log(`🔓 SETTLE-RELEASE: Releasing holds for workspace v${workspaceVersion}`);
 
+  const plannedReleases = new Map<number, { left: bigint; right: bigint }>();
+  for (const diff of diffs) {
+    const existing = plannedReleases.get(diff.tokenId);
+    if (existing) {
+      existing.left += diff.leftWithdrawing;
+      existing.right += diff.rightWithdrawing;
+    } else {
+      plannedReleases.set(diff.tokenId, {
+        left: diff.leftWithdrawing,
+        right: diff.rightWithdrawing,
+      });
+    }
+  }
+
+  for (const [tokenId, planned] of plannedReleases) {
+    const delta = accountMachine.deltas.get(tokenId);
+    if (!delta) {
+      console.warn(`⚠️ SETTLE-RELEASE: No delta for tokenId ${tokenId}`);
+      continue;
+    }
+
+    delta.leftHold ??= 0n;
+    delta.rightHold ??= 0n;
+
+    if (delta.leftHold < planned.left) {
+      return {
+        success: false,
+        events: [],
+        error: `SETTLE_RELEASE_HOLD_UNDERFLOW:left token=${tokenId} hold=${delta.leftHold.toString()} release=${planned.left.toString()}`,
+      };
+    }
+    if (delta.rightHold < planned.right) {
+      return {
+        success: false,
+        events: [],
+        error: `SETTLE_RELEASE_HOLD_UNDERFLOW:right token=${tokenId} hold=${delta.rightHold.toString()} release=${planned.right.toString()}`,
+      };
+    }
+  }
+
   for (const diff of diffs) {
     const delta = accountMachine.deltas.get(diff.tokenId);
     if (!delta) {
@@ -223,23 +263,8 @@ export async function handleSettleRelease(
     delta.leftHold ??= 0n;
     delta.rightHold ??= 0n;
 
-    // Release holds with underflow guard (check BEFORE subtracting)
-    const currentLeftHold = delta.leftHold;
-    const currentRightHold = delta.rightHold;
-
-    if (currentLeftHold < diff.leftWithdrawing) {
-      console.warn(`⚠️ SETTLE-RELEASE: leftHold underflow! ${currentLeftHold} < ${diff.leftWithdrawing}, clamping to 0`);
-      delta.leftHold = 0n;
-    } else {
-      delta.leftHold = currentLeftHold - diff.leftWithdrawing;
-    }
-
-    if (currentRightHold < diff.rightWithdrawing) {
-      console.warn(`⚠️ SETTLE-RELEASE: rightHold underflow! ${currentRightHold} < ${diff.rightWithdrawing}, clamping to 0`);
-      delta.rightHold = 0n;
-    } else {
-      delta.rightHold = currentRightHold - diff.rightWithdrawing;
-    }
+    delta.leftHold -= diff.leftWithdrawing;
+    delta.rightHold -= diff.rightWithdrawing;
 
     console.log(`   Token ${diff.tokenId}: leftHold=${delta.leftHold}, rightHold=${delta.rightHold}`);
   }

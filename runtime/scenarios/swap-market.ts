@@ -19,6 +19,7 @@ import type { Env, EntityInput } from '../types';
 import { ensureJAdapter, getJAdapterMode, createJReplica } from './boot';
 import { findReplica, converge, assert, assertRuntimeIdle, processUntil, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 import { createGossipLayer } from '../networking/gossip';
+import { getBookOrders } from '../orderbook/core';
 
 // Lazy-loaded runtime functions
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
@@ -40,13 +41,17 @@ const getApplyRuntimeInput = async () => {
   return _applyRuntimeInput;
 };
 
-// Token IDs - USDC is quote (highest ID) so price > 1 for all pairs
-// Orderbook uses canonicalPair: base=min(a,b), quote=max(a,b)
-// So base tokens must have lower IDs than quote (USDC)
-const ETH = 1;   // Base for ETH/USDC - price ~3000 USDC per ETH
-const WBTC = 2;   // Base for WBTC/USDC - price ~60000 USDC per WBTC
-const DAI = 3;   // Base for DAI/USDC - price ~1 USDC per DAI
-const USDC = 4;  // Quote for all pairs (highest ID)
+// Keep scenario tokens away from production liquid-quote token ids except USDC itself.
+// That way scenario pair orientation follows the same liquid-quote rules as production
+// instead of accidentally inverting base/quote because ETH/DAI reused ids {1,3}.
+const USDC = 1;  // Quote / reference asset
+const ETH = 2;   // Base for ETH/USDC - price ~3000 USDC per ETH
+const WBTC = 4;  // Base for WBTC/USDC - price ~60000 USDC per WBTC
+const DAI = 5;   // Base for DAI/USDC - price ~1 USDC per DAI
+
+const ETH_USDC_PAIR = `${Math.min(ETH, USDC)}/${Math.max(ETH, USDC)}`;
+const WBTC_USDC_PAIR = `${Math.min(WBTC, USDC)}/${Math.max(WBTC, USDC)}`;
+const DAI_USDC_PAIR = `${Math.min(DAI, USDC)}/${Math.max(DAI, USDC)}`;
 
 const DECIMALS = 18n;
 const ONE = 10n ** DECIMALS;
@@ -171,9 +176,9 @@ export async function swapMarket(env: Env): Promise<void> {
   console.log('📦 Creating 10 market participants (3 hubs + 7 traders)...');
 
   const hubs = [
-    { name: 'HubETH', id: '0x' + '1'.padStart(64, '0'), signer: '1', role: 'hub', pairs: ['1/4'] }, // ETH/USDC
-    { name: 'HubWBTC', id: '0x' + '2'.padStart(64, '0'), signer: '2', role: 'hub', pairs: ['2/4'] }, // WBTC/USDC
-    { name: 'HubDAI', id: '0x' + '3'.padStart(64, '0'), signer: '3', role: 'hub', pairs: ['3/4'] }, // DAI/USDC
+    { name: 'HubETH', id: '0x' + '1'.padStart(64, '0'), signer: '1', role: 'hub', pairs: [ETH_USDC_PAIR] }, // ETH/USDC
+    { name: 'HubWBTC', id: '0x' + '2'.padStart(64, '0'), signer: '2', role: 'hub', pairs: [WBTC_USDC_PAIR] }, // WBTC/USDC
+    { name: 'HubDAI', id: '0x' + '3'.padStart(64, '0'), signer: '3', role: 'hub', pairs: [DAI_USDC_PAIR] }, // DAI/USDC
   ];
 
   const traders = [
@@ -649,7 +654,7 @@ export async function swapMarket(env: Env): Promise<void> {
   console.log('═══════════════════════════════════════════════════════════════\n');
 
   // Alice requests cancel for her ETH ask (price too high, no fills)
-  console.log('🚫 Alice: Request cancel ETH ask @ $3100 (no fills, repricing)');
+  console.log('🚫 Alice: Request cancel ETH ask @ $3100 (no fills, exact order remains open)');
   await process(env, [{
     entityId: alice.id,
     signerId: alice.signer,
@@ -781,13 +786,10 @@ export async function swapMarket(env: Env): Promise<void> {
     console.log(`📈 ${hub.name} Orderbook State:`);
     console.log(`  - Total pairs: ${hubExt.books.size}`);
     for (const [pairId, book] of hubExt.books) {
-      // Count active orders by side (TypedArray structure)
       let bidCount = 0, askCount = 0;
-      for (let i = 0; i < book.orderActive.length; i++) {
-        if (book.orderActive[i]) {
-          if (book.orderSide[i] === 0) bidCount++;
-          else askCount++;
-        }
+      for (const order of getBookOrders(book)) {
+        if (order.side === 0) bidCount++;
+        else askCount++;
       }
       console.log(`  - Pair ${pairId}: ${bidCount} bids, ${askCount} asks`);
     }
@@ -915,7 +917,7 @@ export async function swapMarketStress(env: Env): Promise<void> {
         spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
         referenceTokenId: USDC,
         minTradeSize: 0n,
-        supportedPairs: ['1/4'], // ETH/USDC only for simplicity
+        supportedPairs: [ETH_USDC_PAIR], // ETH/USDC only for simplicity
       },
     }],
   }]);
@@ -1031,13 +1033,10 @@ export async function swapMarketStress(env: Env): Promise<void> {
 
   if (book) {
     let bidCount = 0, askCount = 0, totalQty = 0n;
-    for (let i = 0; i < book.orderActive.length; i++) {
-      if (book.orderActive[i]) {
-        const qty = BigInt(book.orderQtyLots[i]!);
-        totalQty += qty;
-        if (book.orderSide[i] === 0) bidCount++;
-        else askCount++;
-      }
+    for (const order of getBookOrders(book)) {
+      totalQty += BigInt(order.qtyLots);
+      if (order.side === 0) bidCount++;
+      else askCount++;
     }
     console.log(`📊 Orderbook ETH/USDC:`);
     console.log(`   - Active bids: ${bidCount}`);

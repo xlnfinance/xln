@@ -1506,6 +1506,10 @@ export type AccountTx =
         executionWantAmount?: bigint;
         // Canonical resting offer state from the matcher/book.
         // Used to keep partial-fill remainder math identical to the book view.
+        // These fields also let the UI reconstruct closed-order history even if
+        // the original swap_offer frame has aged out of the short frameHistory window.
+        restingGiveTokenId?: number;
+        restingWantTokenId?: number;
         restingPriceTicks?: bigint;
         restingGiveAmount?: bigint;
         restingWantAmount?: bigint;

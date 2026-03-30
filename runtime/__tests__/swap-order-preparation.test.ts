@@ -59,4 +59,18 @@ describe('prepareSwapOrder', () => {
       priceTicks: prepared?.priceTicks,
     });
   });
+
+  test('rounds SELL price up when raw quote/base division has remainder', () => {
+    const giveTokenId = 2;
+    const wantTokenId = 1;
+    const giveAmount = 3n * SWAP_LOT_SCALE;
+    const wantAmount = 1n * SWAP_LOT_SCALE;
+
+    expect(computeSwapPriceTicks(giveTokenId, wantTokenId, giveAmount, wantAmount)).toBe(3334n);
+
+    const prepared = prepareSwapOrder(giveTokenId, wantTokenId, giveAmount, wantAmount);
+    expect(prepared).not.toBeNull();
+    expect(prepared?.side).toBe(1);
+    expect(prepared?.priceTicks).toBe(3334n);
+  });
 });

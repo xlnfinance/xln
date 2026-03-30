@@ -1626,7 +1626,9 @@ export async function createRpcAdapter(
           if (lastSyncedBlock >= safeToBlock) return;
 
           const fromBlock = lastSyncedBlock + 1;
-          updateWatcherJurisdictionCursor(activeEnv, safeToBlock, addresses.depository);
+          // Commit the watcher cursor only after a successful poll+apply.
+          // Advancing it before getLogs()/event processing can persist a speculative
+          // blockNumber into WAL snapshots and permanently skip finalized J events.
           const filter = { address: await getLiveDepositoryAddress(), fromBlock, toBlock: safeToBlock };
           const logs = await provider.getLogs(filter);
 
@@ -1688,6 +1690,7 @@ export async function createRpcAdapter(
               });
             }
             lastSyncedBlock = safeToBlock;
+            updateWatcherJurisdictionCursor(activeEnv, lastSyncedBlock, addresses.depository);
             return;
           }
 
@@ -1700,6 +1703,7 @@ export async function createRpcAdapter(
           }
 
           lastSyncedBlock = safeToBlock;
+          updateWatcherJurisdictionCursor(activeEnv, lastSyncedBlock, addresses.depository);
         })().catch((error: unknown) => {
           emitWatcherDebug({
             event: 'j_watch_error',

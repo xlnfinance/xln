@@ -1,5 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
+import { TIMING } from '../constants';
 import { initCrontab, scheduleHook } from '../entity-crontab';
 import { createEmptyEnv, enqueueRuntimeInput, process, startRuntimeLoop } from '../runtime';
 import type { EntityReplica } from '../types';
@@ -73,7 +74,7 @@ describe('runtime ingress timestamp', () => {
     expect(replica.state.crontabState?.hooks?.has('watchdog:futuristic')).toBe(true);
   });
 
-  test('new ingress timestamp advances runtime clock and fires due hooks', async () => {
+  test('new ingress timestamp is clamped in live mode and still fires due hooks', async () => {
     const env = createEmptyEnv('runtime-ingress-timestamp-seed');
     env.quietRuntimeLogs = true;
     env.timestamp = 1_000;
@@ -119,7 +120,9 @@ describe('runtime ingress timestamp', () => {
 
     await process(env);
 
-    expect(env.timestamp).toBe(futureIngressTimestamp);
+    expect(env.timestamp).toBeLessThan(futureIngressTimestamp);
+    expect(env.timestamp).toBeGreaterThan(10_000);
+    expect(env.timestamp).toBeLessThanOrEqual(Date.now() + TIMING.TIMESTAMP_DRIFT_MS);
     const updatedReplica = env.eReplicas.get(`${existingEntityId}:1`);
     expect(updatedReplica?.state.crontabState?.hooks?.has('watchdog:due-after-ingress')).toBe(false);
   });

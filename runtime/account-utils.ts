@@ -280,15 +280,15 @@ export function getSwapPairOrientation(
 export type SwapPairPolicy = {
   // Price step in ORDERBOOK_PRICE_SCALE ticks (ORDERBOOK_PRICE_SCALE=10_000 => 0.0001 precision).
   priceStepTicks: number;
-  // Price grid bootstrap range around first order center.
-  bookRangeBps: number;
+  // Outer bucket width for orderbook indexing (exact prices still remain exact inside buckets).
+  bookBucketWidthTicks: number;
   // MM mid price in ORDERBOOK_PRICE_SCALE ticks (quote per 1 base).
   mmMidPriceTicks: bigint;
 };
 
 const DEFAULT_SWAP_PAIR_POLICY: SwapPairPolicy = {
   priceStepTicks: 1,   // 0.0001
-  bookRangeBps: 400,
+  bookBucketWidthTicks: 10_000, // 1.0000
   mmMidPriceTicks: 10_000n, // 1.0000
 };
 
@@ -296,19 +296,19 @@ const SWAP_PAIR_POLICY_BY_BASE_QUOTE: Record<string, SwapPairPolicy> = {
   // WETH/USDC
   '2/1': {
     priceStepTicks: 1,    // 0.0001 USDC per WETH
-    bookRangeBps: 250,
+    bookBucketWidthTicks: 10_000, // 1.0000
     mmMidPriceTicks: 25_000_000n, // 2500.0000
   },
   // WETH/USDT
   '2/3': {
     priceStepTicks: 1,    // 0.0001 USDT per WETH
-    bookRangeBps: 250,
+    bookBucketWidthTicks: 10_000, // 1.0000
     mmMidPriceTicks: 25_000_000n, // 2500.0000
   },
   // USDC/USDT
   '1/3': {
     priceStepTicks: 1,      // 0.0001
-    bookRangeBps: 40,
+    bookBucketWidthTicks: 10_000, // 1.0000
     mmMidPriceTicks: 10_000n, // 1.0000
   },
 };
@@ -321,6 +321,11 @@ export function getSwapPairPolicy(tokenA: number, tokenB: number): SwapPairPolic
 export function getSwapPairPolicyByBaseQuote(baseTokenId: number, quoteTokenId: number): SwapPairPolicy {
   const key = `${baseTokenId}/${quoteTokenId}`;
   return SWAP_PAIR_POLICY_BY_BASE_QUOTE[key] ?? DEFAULT_SWAP_PAIR_POLICY;
+}
+
+export function hasSwapPairPolicyByBaseQuote(baseTokenId: number, quoteTokenId: number): boolean {
+  const key = `${baseTokenId}/${quoteTokenId}`;
+  return Object.prototype.hasOwnProperty.call(SWAP_PAIR_POLICY_BY_BASE_QUOTE, key);
 }
 
 export function buildDefaultEntitySwapPairs(

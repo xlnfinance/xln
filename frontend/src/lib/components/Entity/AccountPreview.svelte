@@ -338,11 +338,6 @@
     dispatch('settleApprove', { counterpartyId });
   }
 
-  function handleDispute(e: MouseEvent) {
-    e.stopPropagation();
-    dispatch('dispute', { counterpartyId });
-  }
-
   function formatFlowAmount(tokenId: number, amount: bigint): string {
     return activeXlnFunctions?.formatTokenAmount
       ? activeXlnFunctions.formatTokenAmount(tokenId, amount)
@@ -443,11 +438,6 @@
               <span>Dispute</span>
               <strong>{disputeBlocksLeft} block{disputeBlocksLeft === 1 ? '' : 's'} left · {disputeRole}</strong>
             </div>
-          {/if}
-          {#if !hasActiveDispute && !isFinalizedDisputed}
-            <button class="popover-dispute-btn" on:click={handleDispute}>
-              Dispute Account
-            </button>
           {/if}
           <button class="popover-explore-btn" on:click={handleClick}>
             Explore Account →
@@ -885,30 +875,6 @@
     font-size: 9px;
     font-weight: 400;
     font-family: 'JetBrains Mono', monospace;
-  }
-
-  .status-dot-wrap .consensus-popover .popover-dispute-btn {
-    display: block;
-    width: 100%;
-    margin-top: 8px;
-    padding: 9px 0;
-    border-radius: 8px;
-    border: 2px solid color-mix(in srgb, var(--account-preview-debit) 78%, transparent);
-    background: color-mix(in srgb, var(--account-preview-debit) 84%, transparent);
-    color: #ffffff;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.01em;
-    text-transform: none;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    text-align: center;
-    box-shadow: 0 0 12px rgba(220, 38, 38, 0.4);
-  }
-  .status-dot-wrap .consensus-popover .popover-dispute-btn:hover {
-    background: color-mix(in srgb, var(--account-preview-debit) 92%, black 8%);
-    border-color: color-mix(in srgb, var(--account-preview-debit) 92%, black 8%);
-    box-shadow: 0 0 18px color-mix(in srgb, var(--account-preview-debit) 44%, transparent);
   }
 
   .locks-row {

@@ -51,19 +51,23 @@ export async function handleHtlcTimeout(
   if (lock.senderIsLeft) {
     const currentHold = delta.leftHold || 0n;
     if (currentHold < lock.amount) {
-      console.error(`⚠️ HTLC timeout hold underflow! leftHold=${currentHold} < amount=${lock.amount}`);
-      delta.leftHold = 0n;
-    } else {
-      delta.leftHold = currentHold - lock.amount;
+      return {
+        success: false,
+        error: `HTLC_TIMEOUT_HOLD_UNDERFLOW:left hold=${currentHold.toString()} amount=${lock.amount.toString()}`,
+        events,
+      };
     }
+    delta.leftHold = currentHold - lock.amount;
   } else {
     const currentHold = delta.rightHold || 0n;
     if (currentHold < lock.amount) {
-      console.error(`⚠️ HTLC timeout hold underflow! rightHold=${currentHold} < amount=${lock.amount}`);
-      delta.rightHold = 0n;
-    } else {
-      delta.rightHold = currentHold - lock.amount;
+      return {
+        success: false,
+        error: `HTLC_TIMEOUT_HOLD_UNDERFLOW:right hold=${currentHold.toString()} amount=${lock.amount.toString()}`,
+        events,
+      };
     }
+    delta.rightHold = currentHold - lock.amount;
   }
 
   // 5. Remove lock

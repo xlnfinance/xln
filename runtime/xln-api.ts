@@ -56,6 +56,7 @@ export type { PaymentRoute } from './routing/pathfinding';
 export type { CompletedBatch, JBatch, JBatchState } from './j-batch';
 export type { JAdapter } from './jadapter/types';
 export type { BookState, OrderbookExtState, PreparedSwapOrder } from './orderbook';
+export { getBestBid, getBestAsk, getBookSideLevels } from './orderbook';
 
 // Re-export identity functions types
 export {

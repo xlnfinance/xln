@@ -37,8 +37,8 @@ import {
   waitUntil,
 } from './mesh-common';
 import { buildDefaultEntitySwapPairs, getSwapPairPolicyByBaseQuote } from '../account-utils';
-import { LIMITS } from '../constants';
-import { ORDERBOOK_MAX_LEVELS, ORDERBOOK_PRICE_SCALE } from '../orderbook';
+import { LIMITS, SWAP as SWAP_CONSTANTS } from '../constants';
+import { ORDERBOOK_PRICE_SCALE } from '../orderbook';
 
 type Args = {
   name: string;
@@ -325,31 +325,18 @@ const getMarketMakerLevelProfile = (baseTokenId: number, quoteTokenId: number): 
   };
 };
 
-const getReachableMarketMakerLevelCount = (
-  midPriceTicks: bigint,
-  stepTicks: number,
-  offsetsBps: readonly number[],
-): number => {
-  const maxExactSpanTicks = BigInt(Math.max(1, ORDERBOOK_MAX_LEVELS - 1)) * BigInt(Math.max(1, stepTicks));
-  let reachable = 0;
-  for (const offsetBps of offsetsBps) {
-    const askRaw = (midPriceTicks * BigInt(10_000 + offsetBps)) / 10_000n;
-    const bidRaw = (midPriceTicks * BigInt(Math.max(1, 10_000 - offsetBps))) / 10_000n;
-    const askPriceTicks = snapPriceTicks(askRaw, stepTicks, 'up');
-    let bidPriceTicks = snapPriceTicks(bidRaw, stepTicks, 'down');
-    if (bidPriceTicks >= askPriceTicks) {
-      bidPriceTicks = askPriceTicks > BigInt(stepTicks) ? askPriceTicks - BigInt(stepTicks) : 1n;
-    }
-    if ((askPriceTicks - bidPriceTicks) > maxExactSpanTicks) break;
-    reachable += 1;
-  }
-  return reachable;
-};
-
 const snapPriceTicks = (ticks: bigint, stepTicks: number, mode: 'up' | 'down'): bigint => {
   const step = BigInt(Math.max(1, stepTicks));
   if (mode === 'up') return ((ticks + step - 1n) / step) * step;
   return (ticks / step) * step;
+};
+
+const isWithinPairBand = (anchorTicks: bigint, priceTicks: bigint): boolean => {
+  if (anchorTicks <= 0n || priceTicks <= 0n) return false;
+  const rejectDelta = (anchorTicks * BigInt(SWAP_CONSTANTS.PRICE_REJECT_BPS)) / BigInt(SWAP_CONSTANTS.BPS_BASE);
+  const minAllowed = anchorTicks - rejectDelta;
+  const maxAllowed = anchorTicks + rejectDelta;
+  return priceTicks >= minAllowed && priceTicks <= maxAllowed;
 };
 
 const normalizeTokenIdsForMm = (tokenCatalog: JTokenInfo[]): number[] => {
@@ -408,17 +395,11 @@ const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: number[]):
         midPriceTicks,
         stepTicksBig: BigInt(Math.max(1, pairPolicy.priceStepTicks)),
         stepTicks: Math.max(1, pairPolicy.priceStepTicks),
-        reachableLevelCount: getReachableMarketMakerLevelCount(
-          midPriceTicks,
-          Math.max(1, pairPolicy.priceStepTicks),
-          levelProfile.offsetsBps,
-        ),
       };
     });
     const maxLevels = pairContexts.reduce((max, entry) => Math.max(max, entry.levelProfile.offsetsBps.length), 0);
     for (let level = 0; level < maxLevels; level += 1) {
       for (const entry of pairContexts) {
-        if (level >= entry.reachableLevelCount) continue;
         if (level >= entry.levelProfile.offsetsBps.length) continue;
         const offsetBps = entry.levelProfile.offsetsBps[level]!;
         const baseSize = entry.levelProfile.baseSizes[level]!;
@@ -429,6 +410,8 @@ const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: number[]):
         if (bidPriceTicks >= askPriceTicks) {
           bidPriceTicks = askPriceTicks > entry.stepTicksBig ? askPriceTicks - entry.stepTicksBig : 1n;
         }
+        if (!isWithinPairBand(entry.midPriceTicks, askPriceTicks)) continue;
+        if (!isWithinPairBand(entry.midPriceTicks, bidPriceTicks)) continue;
         const askWantAmount = (baseSize * askPriceTicks) / ORDERBOOK_PRICE_SCALE;
         const bidGiveAmount = (baseSize * bidPriceTicks) / ORDERBOOK_PRICE_SCALE;
         const levelId = level + 1;
@@ -442,7 +425,10 @@ const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: number[]):
             giveAmount: baseSize,
             wantTokenId: entry.pair.quoteTokenId,
             wantAmount: askWantAmount,
-            minFillRatio: 1,
+            // Resting MM quotes must be ordinary GTC orders. A non-zero minFillRatio on
+            // a resting book order creates AON-like semantics that the matcher cannot
+            // honor safely across bilateral state channels, so keep it at zero here.
+            minFillRatio: 0,
           });
         }
         if (bidGiveAmount > 0n) {
@@ -454,7 +440,9 @@ const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: number[]):
             giveAmount: bidGiveAmount,
             wantTokenId: entry.pair.baseTokenId,
             wantAmount: baseSize,
-            minFillRatio: 1,
+            // Same rule for resting bids: keep them plain GTC so they are always
+            // eligible to rest on book and match incrementally.
+            minFillRatio: 0,
           });
         }
       }

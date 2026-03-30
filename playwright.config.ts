@@ -28,20 +28,23 @@ const webkitMobileProject = {
   },
 };
 
+const brainvaultProject = {
+  name: 'brainvault',
+  testDir: './frontend/tests',
+  use: { ...devices['Desktop Chrome'] },
+};
+
 const projects = PW_PROFILE === 'webkit-mobile'
   ? [webkitMobileProject]
   : PW_PROFILE === 'cross-mobile'
     ? [desktopChromiumProject, webkitMobileProject]
+    : PW_PROFILE === 'brainvault'
+      ? [brainvaultProject]
+      : PW_PROFILE === 'cross-desktop'
+        ? [desktopChromiumProject, brainvaultProject]
     : PW_ONLY_CHROMIUM
       ? [desktopChromiumProject]
-      : [
-          desktopChromiumProject,
-          {
-            name: 'brainvault',
-            testDir: './frontend/tests',
-            use: { ...devices['Desktop Chrome'] },
-          },
-        ];
+      : [desktopChromiumProject];
 
 export default defineConfig({
   // testDir is relative to this config file's directory

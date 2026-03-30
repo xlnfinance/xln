@@ -9,7 +9,16 @@ import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, formatSignerDisplay, log } from './utils';
 import { safeStringify } from './serialization-utils';
 import { logError } from './logger';
-import { addMessages, cloneEntityReplica, cloneEntityState, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from './state-helpers';
+import {
+  addMessages,
+  cloneEntityReplica,
+  cloneEntityState,
+  canonicalAccountKey,
+  getAccountPerspective,
+  emitScopedEvents,
+  removeCommittedTxsFromMempool,
+  txFingerprint,
+} from './state-helpers';
 import { LIMITS } from './constants';
 import { signAccountFrame as signFrame, verifyAccountSignature as verifyFrame } from './account-crypto';
 import {
@@ -21,6 +30,7 @@ import {
 } from './entity-tx/handlers/account';
 import { compareCanonicalText, swapKey } from './swap-execution';
 import type { OrderbookExtState } from './orderbook';
+import { replaceOrderbookPair } from './orderbook';
 import { executeCrontab, initCrontab, scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from './entity-crontab';
 import { ethers } from 'ethers';
 
@@ -38,25 +48,18 @@ const compareNumericKey = (
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 
-function accountTxFingerprint(tx: EntityState['accounts'] extends Map<string, infer T>
-  ? T extends { mempool: Array<infer A> } ? A : never
-  : never,
-): string {
-  return `${tx.type}:${safeStringify(tx.data)}`;
-}
-
 function queueUniqueAccountMempoolTx(
   account: EntityState['accounts'] extends Map<string, infer T> ? T : never,
   tx: EntityState['accounts'] extends Map<string, infer T>
     ? T extends { mempool: Array<infer A> } ? A : never
     : never,
 ): boolean {
-  const fp = accountTxFingerprint(tx);
+  const fp = txFingerprint(tx);
   for (const existing of account.mempool) {
-    if (accountTxFingerprint(existing) === fp) return false;
+    if (txFingerprint(existing) === fp) return false;
   }
   for (const pendingTx of account.pendingFrame?.accountTxs ?? []) {
-    if (accountTxFingerprint(pendingTx) === fp) return false;
+    if (txFingerprint(pendingTx) === fp) return false;
   }
   account.mempool.push(tx);
   return true;
@@ -489,16 +492,6 @@ export const applyEntityInput = async (
       });
     }
 
-    if (workingReplica.signerId === 'alice') {
-      console.log(`🔥 ALICE-RECEIVES: Alice receiving ${entityInput.entityTxs.length} txs from input`);
-      console.log(
-        `🔥 ALICE-RECEIVES: Transaction types:`,
-        entityInput.entityTxs.map(tx => tx.type),
-      );
-      console.log(
-        `🔥 ALICE-RECEIVES: Alice isProposer=${workingReplica.isProposer}, current mempool=${workingReplica.mempool.length}`,
-      );
-    }
     // Log details of each EntityTx
     for (const tx of entityInput.entityTxs) {
       console.log(`🏛️ E-MACHINE: - EntityTx type="${tx.type}", data=`, safeStringify(tx.data, 2));
@@ -526,11 +519,6 @@ export const applyEntityInput = async (
     }
 
     const txCount = workingReplica.mempool.length;
-    console.log(`🔥 BOB-TO-ALICE: Bob sending ${txCount} txs to proposer ${proposerId}`);
-    console.log(
-      `🔥 BOB-TO-ALICE: Transaction types:`,
-      workingReplica.mempool.map(tx => tx.type),
-    );
     entityOutbox.push({
       entityId: entityInput.entityId,
       signerId: proposerId,
@@ -591,10 +579,10 @@ export const applyEntityInput = async (
 
       // CHANNEL.TS PATTERN: Clear only the committed txs, keep any new txs
       // This avoids dropping fresh inputs merged into the same tick (e.g., accountInput ACKs).
-      const committedTxCount = entityInput.proposedFrame.txs.length;
-      if (committedTxCount > 0) {
-        console.log(`📊 Clearing ${committedTxCount} committed txs from mempool (${workingReplica.mempool.length} total)`);
-        workingReplica.mempool.splice(0, committedTxCount);
+      const committedTxs = entityInput.proposedFrame.txs;
+      if (committedTxs.length > 0) {
+        console.log(`📊 Clearing ${committedTxs.length} committed txs from mempool (${workingReplica.mempool.length} total)`);
+        workingReplica.mempool = removeCommittedTxsFromMempool(workingReplica.mempool, committedTxs);
         console.log(`📊 Mempool after commit: ${workingReplica.mempool.length} txs remaining`);
       }
 
@@ -856,7 +844,7 @@ export const applyEntityInput = async (
             }
             // Attach quorum hanko for settlement approval (find by type in hankoWitness)
             if (accountInput.settleAction?.type === 'approve' && accountInput.settleAction.hanko) {
-              for (const [witnessHash, entry] of workingReplica.hankoWitness || []) {
+              for (const [, entry] of workingReplica.hankoWitness || []) {
                 if (entry.type === 'settlement' && entry.entityHeight === (workingReplica.state.height + 1)) {
                   accountInput.settleAction.hanko = entry.hanko;
                   attachedCount++;
@@ -903,9 +891,9 @@ export const applyEntityInput = async (
       committedFrame.hankos = committedHankos;
 
       // Clear only committed txs; keep any new txs merged into this tick
-      const committedTxCount = committedFrame.txs.length;
-      if (committedTxCount > 0) {
-        workingReplica.mempool.splice(0, committedTxCount);
+      const committedTxs = committedFrame.txs;
+      if (committedTxs.length > 0) {
+        workingReplica.mempool = removeCommittedTxsFromMempool(workingReplica.mempool, committedTxs);
       }
       delete workingReplica.proposal;
       delete workingReplica.lockedFrame;
@@ -967,15 +955,11 @@ export const applyEntityInput = async (
 
   // Single-signer entities must replay through the exact same direct-execution path as live mode.
   if (workingReplica.isProposer && workingReplica.mempool.length > 0 && !workingReplica.proposal && isSingleSigner) {
-    if (!quietRuntimeLogs) {
-      console.log(`🔥 ALICE-PROPOSES: Alice auto-propose triggered!`);
+    if (!quietRuntimeLogs && HEAVY_LOGS) {
       console.log(
-        `🔥 ALICE-PROPOSES: mempool=${workingReplica.mempool.length}, isProposer=${workingReplica.isProposer}, hasProposal=${!!workingReplica.proposal}`,
+        `🔥 AUTO-PROPOSE: mempool=${workingReplica.mempool.length}, isProposer=${workingReplica.isProposer}, hasProposal=${!!workingReplica.proposal}`,
       );
-      console.log(
-        `🔥 ALICE-PROPOSES: Mempool transaction types:`,
-        workingReplica.mempool.map(tx => tx.type),
-      );
+      console.log(`🔥 AUTO-PROPOSE tx types:`, workingReplica.mempool.map(tx => tx.type));
     }
 
     console.log(`🚀 SINGLE-SIGNER: Direct execution without consensus for single signer entity`);
@@ -1089,15 +1073,11 @@ export const applyEntityInput = async (
     workingReplica.mempool.length > 0 &&
     !workingReplica.proposal
   ) {
-    if (!quietRuntimeLogs) {
-      console.log(`🔥 ALICE-PROPOSES: Alice auto-propose triggered!`);
+    if (!quietRuntimeLogs && HEAVY_LOGS) {
       console.log(
-        `🔥 ALICE-PROPOSES: mempool=${workingReplica.mempool.length}, isProposer=${workingReplica.isProposer}, hasProposal=${!!workingReplica.proposal}`,
+        `🔥 AUTO-PROPOSE: mempool=${workingReplica.mempool.length}, isProposer=${workingReplica.isProposer}, hasProposal=${!!workingReplica.proposal}`,
       );
-      console.log(
-        `🔥 ALICE-PROPOSES: Mempool transaction types:`,
-        workingReplica.mempool.map(tx => tx.type),
-      );
+      console.log(`🔥 AUTO-PROPOSE tx types:`, workingReplica.mempool.map(tx => tx.type));
     }
 
     if (DEBUG)
@@ -1514,7 +1494,7 @@ export const applyEntityFrame = async (
     // Apply book updates
     const ext = currentEntityState.orderbookExt as OrderbookExtState;
     for (const { pairId, book } of matchResult.bookUpdates) {
-      ext.books.set(pairId, book);
+      replaceOrderbookPair(ext, pairId, book);
     }
   }
 
@@ -1538,7 +1518,7 @@ export const applyEntityFrame = async (
 
       const ext = currentEntityState.orderbookExt as OrderbookExtState;
       for (const { pairId, book } of cancelResult.bookUpdates) {
-        ext.books.set(pairId, book);
+        replaceOrderbookPair(ext, pairId, book);
       }
     } else {
       // Fallback: counterparty resolves cancel directly when no orderbook extension is configured.
@@ -1877,34 +1857,4 @@ export const shouldAutoPropose = (replica: EntityReplica, _config: ConsensusConf
   const hasProposal = replica.proposal !== undefined;
 
   return hasMempool && isProposer && !hasProposal;
-};
-
-/**
- * Processes empty transaction arrays (corner case)
- */
-export const handleEmptyTransactions = (): void => {
-  console.log(`    ⚠️  CORNER CASE: Empty transaction array received - no mempool changes`);
-};
-
-/**
- * Logs large transaction batches (corner case)
- */
-export const handleLargeBatch = (txCount: number): void => {
-  if (txCount >= 8) {
-    console.log(`    ⚠️  CORNER CASE: Large batch of ${txCount} transactions`);
-  }
-};
-
-/**
- * Handles gossip mode precommit distribution
- */
-export const handleGossipMode = (): void => {
-  console.log(`    ⚠️  CORNER CASE: Gossip mode - all validators receive precommits`);
-};
-
-/**
- * Logs proposer with empty mempool corner case
- */
-export const handleEmptyMempoolProposer = (): void => {
-  console.log(`    ⚠️  CORNER CASE: Proposer with empty mempool - no auto-propose`);
 };
