@@ -1,5 +1,7 @@
 import { isLeftEntity } from '../entity-id-utils';
 import { validateEntityOrderbooks } from '../orderbook/validity';
+import { rebuildOrderbookPairIndex } from '../orderbook/types';
+import type { OrderbookExtState } from '../orderbook/types';
 import type { Env, EntityReplica, EntityState, EnvSnapshot, JReplica, RuntimeInput } from '../types';
 import type { FrameLogEntry } from '../types';
 import {
@@ -71,6 +73,26 @@ const normalizeReplicaMap = (raw: unknown): Map<string, EntityReplica> => {
       for (const account of Object.values(accounts as Record<string, unknown>)) {
         normalizeAccountPendingSignatures(account);
       }
+    }
+    const rawOrderbookExt = replica.state?.orderbookExt as Record<string, unknown> | undefined;
+    if (rawOrderbookExt && typeof rawOrderbookExt === 'object') {
+      const normalizeNestedMap = <TValue>(value: unknown): Map<string, TValue> => {
+        if (value instanceof Map) return value as Map<string, TValue>;
+        if (Array.isArray(value)) {
+          if (value.length === 0) return new Map();
+          if (!isEntryArray(value)) throw new Error('Invalid orderbookExt map entry format in snapshot');
+          return new Map(value as Array<[string, TValue]>);
+        }
+        if (value && typeof value === 'object') {
+          return new Map(Object.entries(value as Record<string, TValue>));
+        }
+        return new Map();
+      };
+      const orderbookExt = rawOrderbookExt as OrderbookExtState;
+      orderbookExt.books = normalizeNestedMap(orderbookExt.books);
+      orderbookExt.referrals = normalizeNestedMap(orderbookExt.referrals);
+      orderbookExt.orderPairs = normalizeNestedMap<string[]>(orderbookExt.orderPairs);
+      rebuildOrderbookPairIndex(orderbookExt);
     }
     map.set(key, replica);
   }

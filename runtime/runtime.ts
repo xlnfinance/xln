@@ -1187,6 +1187,20 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
   void config;
   let running = true;
   state.loopActive = true;
+  // J-watchers are a runtime concern, not a UI/store concern.
+  // The runtime loop is the single canonical owner of watcher lifecycle for
+  // the current env. This keeps restored runtimes, fresh runtimes, and
+  // long-lived runtimes on one obvious path:
+  //   startRuntimeLoop(env) -> startJurisdictionWatchers(env) -> one poller per jReplica
+  //
+  // Why we do it here:
+  // - restored envs need watchers restarted after process reload
+  // - UI code should not decide when blockchain watchers exist
+  // - watchers already guard against duplicate starts internally
+  //
+  // This still coexists with importJ starting the watcher for newly imported
+  // jurisdictions while a loop is already running.
+  startJurisdictionWatchers(env);
 
   const loop = async () => {
     let haltedMessage: string | null = null;
@@ -3622,17 +3636,6 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
               console.log(
                 `✅ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)}: ok (events=${result.events?.length ?? 0}, txHash=${result.txHash ?? 'n/a'})`,
               );
-              if (typeof jAdapter.pollNow === 'function') {
-                try {
-                  await jAdapter.pollNow();
-                  console.log(`🔄 [J-SUBMIT] pollNow synced ${jInput.jurisdictionName} after ${jTx.type}`);
-                } catch (pollError) {
-                  console.warn(
-                    `⚠️ [J-SUBMIT] pollNow failed after ${jTx.type} from ${jTx.entityId.slice(-4)}:`,
-                    pollError,
-                  );
-                }
-              }
             } else {
               console.error(`❌ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} FAILED: ${result.error}`);
               if (!env.scenarioMode) {

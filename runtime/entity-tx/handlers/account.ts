@@ -1382,10 +1382,12 @@ export function processOrderbookSwaps(
     );
     let repairedBook = createOrRepairPairBook(bucketWidthTicks);
     try {
-      repairedBook = materializePairBookFromOffers(
+      const rebuilt = materializePairBookFromOffers(
         getLiveOffersForPairExcluding(pairId, currentAccountId, currentOfferId),
         bucketWidthTicks,
       );
+      handleRebuildRejections(rebuilt.rejected);
+      repairedBook = rebuilt.book;
     } catch (rebuildError) {
       const rebuildMessage = rebuildError instanceof Error ? rebuildError.message : String(rebuildError);
       console.error(
@@ -1414,11 +1416,37 @@ export function processOrderbookSwaps(
     stpPolicy: 1,
   });
 
+  type MaterializedPairBookResult = {
+    book: BookState;
+    rejected: Array<{ offer: NormalizedOrderbookOffer; reason: string }>;
+  };
+
+  const handleRebuildRejections = (
+    rejectedOffers: Array<{ offer: NormalizedOrderbookOffer; reason: string }>,
+  ): void => {
+    for (const rejected of rejectedOffers) {
+      console.warn(
+        `⚠️ ORDERBOOK: canonical rebuild rejected offer=${rejected.offer.offerId} account=${rejected.offer.accountId.slice(-8)} reason=${rejected.reason}`,
+      );
+      if (rehydrateOnly) {
+        quarantineOffer(rejected.offer.accountId, rejected.offer.offerId, `rebuild-reject:${rejected.reason}`);
+        continue;
+      }
+      queueUniqueSwapResolveForEntityState(mempoolOps, hubState, queuedSwapResolutions, rejected.offer.accountId, {
+        offerId: rejected.offer.offerId,
+        fillRatio: 0,
+        cancelRemainder: true,
+        comment: `rebuild-reject:${rejected.reason}`,
+      });
+    }
+  };
+
   const materializePairBookFromOffers = (
     liveOffersForPair: NormalizedOrderbookOffer[],
     bucketWidthTicks: number,
-  ): BookState => {
+  ): MaterializedPairBookResult => {
     let rebuiltBook = createOrRepairPairBook(bucketWidthTicks);
+    const rejected: Array<{ offer: NormalizedOrderbookOffer; reason: string }> = [];
     for (const liveOffer of liveOffersForPair) {
       const activeSide = deriveSide(liveOffer.giveTokenId, liveOffer.wantTokenId);
       const activeBaseAmount = activeSide === 1 ? liveOffer.giveAmount : liveOffer.wantAmount;
@@ -1439,12 +1467,13 @@ export function processOrderbookSwaps(
       });
       const reject = rebuildResult.events.find((event) => event.type === 'REJECT');
       if (reject) {
-        throw new Error(`ORDERBOOK_REBUILD_FAILED: ${activeOrderId} rejected: ${reject.reason}`);
+        rejected.push({ offer: liveOffer, reason: reject.reason });
+        continue;
       }
       rebuiltBook = rebuildResult.state;
     }
 
-    return rebuiltBook;
+    return { book: rebuiltBook, rejected };
   };
 
   const rebuildPairBookFromCanonicalOffers = (
@@ -1453,7 +1482,9 @@ export function processOrderbookSwaps(
   ): BookState | null => {
     const liveOffersForPair = getLiveOffersForPair(pairId);
     if (liveOffersForPair.length === 0) return null;
-    return materializePairBookFromOffers(liveOffersForPair, bucketWidthTicks);
+    const rebuilt = materializePairBookFromOffers(liveOffersForPair, bucketWidthTicks);
+    handleRebuildRejections(rebuilt.rejected);
+    return rebuilt.book;
   };
 
   const sweepPairOutOfBandOffers = (
@@ -1501,7 +1532,9 @@ export function processOrderbookSwaps(
 
     if (removed === 0) return currentBook;
     pairSweepCount += 1;
-    return materializePairBookFromOffers(keptOffers, bucketWidthTicks);
+    const rebuilt = materializePairBookFromOffers(keptOffers, bucketWidthTicks);
+    handleRebuildRejections(rebuilt.rejected);
+    return rebuilt.book;
   };
 
   const bookRequiresCanonicalRebuild = (pairId: string, book: BookState): boolean => {

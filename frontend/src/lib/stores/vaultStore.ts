@@ -143,9 +143,6 @@ const isRecord = (value: unknown): value is Record<string, unknown> => typeof va
 const hasStartRuntimeLoop = (xln: XLNModule): xln is XLNModule & { startRuntimeLoop: (env: Env) => unknown } =>
   typeof Reflect.get(xln as object, 'startRuntimeLoop') === 'function';
 
-const hasStartJEventWatcher = (xln: XLNModule): xln is XLNModule & { startJEventWatcher: (env: Env) => Promise<void> } =>
-  typeof Reflect.get(xln as object, 'startJEventWatcher') === 'function';
-
 const getRuntimeP2PHandle = (xln: XLNModule, env: Env): RuntimeP2PHandle | null => {
   const candidate = xln.getP2P(env);
   return isRecord(candidate) ? (candidate as RuntimeP2PHandle) : null;
@@ -972,10 +969,6 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
 
   ensureRuntimeLoopRunning(env, xln, `post-restore:${runtimeIdLower.slice(0, 12)}`);
 
-  if (hasStartJEventWatcher(xln)) {
-    await xln.startJEventWatcher(env);
-  }
-
   if (runtime.signers[0]?.entityId) {
     const entityId = runtime.signers[0].entityId;
     const signerAddress = runtime.signers[0].address;
@@ -1488,10 +1481,6 @@ export const vaultOperations = {
       45_000,
     );
     markPerf('import_j_testnet');
-    if (hasStartJEventWatcher(xln)) {
-      await xln.startJEventWatcher(newEnv);
-    }
-    markPerf('start_j_event_watcher');
     console.log('[VaultStore.createRuntime] ✅ Testnet imported');
 
     // === MVP: Create entity ===

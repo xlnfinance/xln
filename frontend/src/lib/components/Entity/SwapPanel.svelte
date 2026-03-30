@@ -1736,7 +1736,7 @@
               pairId={orderbookPairId}
               pairLabel={selectedPair?.label || `${baseTokenSymbol}/${quoteTokenSymbol}`}
               depth={orderbookDepth}
-              showSources={true}
+              showSources={false}
               sourceLabels={orderbookSourceLabels}
               sourceAvatars={orderbookSourceAvatars}
               compactHeader={true}

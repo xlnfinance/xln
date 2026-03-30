@@ -1700,6 +1700,116 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(getBookOrder(finalBook!, 'taker-account:taker-bid')).not.toBeNull();
   });
 
+  test('contains crossed canonical rebuild offers and cancels only the rejected resting offer', () => {
+    const lot = SWAP_LOT_SCALE;
+    const makerAsk = {
+      offerId: 'maker-ask',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'maker-entity',
+      accountId: 'maker-account',
+      createdHeight: 1,
+      giveTokenId: 2,
+      giveAmount: lot,
+      wantTokenId: 1,
+      wantAmount: (lot * 25_000_000n) / 10_000n,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 25_000_000n,
+    };
+    const crossedBid = {
+      offerId: 'crossed-bid',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'crossed-entity',
+      accountId: 'crossed-account',
+      createdHeight: 2,
+      giveTokenId: 1,
+      giveAmount: (lot * 25_000_100n) / 10_000n,
+      wantTokenId: 2,
+      wantAmount: lot,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 25_000_100n,
+    };
+    const takerBid = {
+      offerId: 'taker-bid',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'taker-entity',
+      accountId: 'taker-account',
+      createdHeight: 3,
+      giveTokenId: 1,
+      giveAmount: (lot * 24_999_900n) / 10_000n,
+      wantTokenId: 2,
+      wantAmount: lot,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 24_999_900n,
+    };
+
+    let staleBook = createBook({
+      bucketWidthTicks: 10_000n,
+      maxOrders: 10_000,
+      stpPolicy: 1,
+    });
+    staleBook = applyCommand(staleBook, {
+      kind: 0,
+      ownerId: 'maker-entity',
+      orderId: 'maker-account:maker-ask',
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 24_999_500n,
+      qtyLots: 1,
+    }).state;
+
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([
+        ['maker-account', { swapOffers: new Map([['maker-ask', makerAsk]]) }],
+        ['crossed-account', { swapOffers: new Map([['crossed-bid', crossedBid]]) }],
+        ['taker-account', { swapOffers: new Map() }],
+      ]),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 1,
+          supportedPairs: ['1/2'],
+        },
+        books: new Map([['1/2', staleBook]]),
+        pairConfig: new Map(),
+      } as any,
+    } as any;
+
+    const result = processOrderbookSwaps(entityState, [takerBid] as any);
+    const rebuildReject = result.mempoolOps.find((item) =>
+      item.accountId === 'crossed-account'
+      && item.tx.type === 'swap_resolve'
+      && item.tx.data.cancelRemainder === true
+      && String(item.tx.data.comment || '').includes('rebuild-reject:postOnly would cross'),
+    );
+
+    expect(rebuildReject).toBeDefined();
+
+    const finalBook = result.bookUpdates.at(-1)?.book;
+    expect(finalBook).toBeDefined();
+    expect(getBestAsk(finalBook!)).toBe(25_000_000n);
+    expect(getBestBid(finalBook!)).toBe(24_999_900n);
+    expect(getBookOrder(finalBook!, 'maker-account:maker-ask')).not.toBeNull();
+    expect(getBookOrder(finalBook!, 'taker-account:taker-bid')).not.toBeNull();
+    expect(getBookOrder(finalBook!, 'crossed-account:crossed-bid')).toBeNull();
+  });
+
   test('repairs only the mismatched cached pair price while preserving other canonical resting orders', () => {
     const firstAskPriceTicks = 25_000_002n;
     const secondAskPriceTicks = 25_000_006n;

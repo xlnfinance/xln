@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { applyCommand, createBook, type BookState } from '../orderbook/core';
-import { createOrderbookExtState, ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook/types';
+import { createOrderbookExtState, ORDERBOOK_PRICE_SCALE, replaceOrderbookPair, SWAP_LOT_SCALE } from '../orderbook/types';
 import { validateBookAgainstOffers, validateBookStructure, validateEntityOrderbooks } from '../orderbook/validity';
 import type { AccountMachine, EntityState, SwapOffer } from '../types';
 
@@ -58,8 +58,24 @@ const makeAccount = (offerId: string, offer: SwapOffer): AccountMachine =>
     onChainSettlementNonce: 0,
   }) as AccountMachine;
 
-const makeState = (book: BookState, offerId = 'offer-1', offer = makeOffer()): EntityState =>
-  ({
+const makeState = (book: BookState, offerId = 'offer-1', offer = makeOffer()): EntityState => {
+  const orderbookExt = createOrderbookExtState({
+    entityId: 'hub',
+    name: 'Hub',
+    spreadDistribution: {
+      makerBps: 0,
+      takerBps: 10_000,
+      hubBps: 0,
+      makerReferrerBps: 0,
+      takerReferrerBps: 0,
+    },
+    referenceTokenId: 2,
+    minTradeSize: 0n,
+    supportedPairs: ['4/6'],
+  });
+  replaceOrderbookPair(orderbookExt, '4/6', book);
+
+  return ({
     entityId: 'hub',
     height: 1,
     timestamp: 0,
@@ -77,25 +93,10 @@ const makeState = (book: BookState, offerId = 'offer-1', offer = makeOffer()): E
     profile: { name: 'Hub', isHub: true, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,
-    orderbookExt: {
-      ...createOrderbookExtState({
-        entityId: 'hub',
-        name: 'Hub',
-        spreadDistribution: {
-          makerBps: 0,
-          takerBps: 10_000,
-          hubBps: 0,
-          makerReferrerBps: 0,
-          takerReferrerBps: 0,
-        },
-        referenceTokenId: 2,
-        minTradeSize: 0n,
-        supportedPairs: ['4/6'],
-      }),
-      books: new Map([['4/6', book]]),
-    },
+    orderbookExt,
     lockBook: new Map(),
   }) as EntityState;
+};
 
 describe('orderbook validity', () => {
   test('accepts structurally valid book and matching open offers', () => {
@@ -177,5 +178,46 @@ describe('orderbook validity', () => {
     const report = validateBookAgainstOffers(makeState(book, 'offer-1', makeOffer({ priceTicks: hugePriceTicks })));
     expect(report.invalidOffers).toEqual([]);
     expect(report.ok).toBe(true);
+  });
+
+  test('reports broken sparse orderbook pair index entries', () => {
+    const book = applyCommand(
+      createBook({ bucketWidthTicks: 100n, maxOrders: 32, stpPolicy: 1 }),
+      {
+        kind: 0,
+        ownerId: 'hub',
+        orderId: 'alice:offer-1',
+        side: 1,
+        tif: 0,
+        postOnly: false,
+        priceTicks: 1000n,
+        qtyLots: 1,
+      },
+    ).state;
+
+    const state = makeState(book);
+    state.orderbookExt!.orderPairs = new Map([
+      ['alice:offer-1', ['9/9']],
+      ['ghost:offer-x', ['4/6']],
+    ]);
+
+    const report = validateBookAgainstOffers(state);
+    expect(report.ok).toBe(false);
+    expect(
+      report.mismatched.some((item) =>
+        item.swapKey === 'alice:offer-1'
+        && item.field === 'pairIndex'
+        && item.expected === '4/6'
+        && item.actual === '9/9',
+      ),
+    ).toBe(true);
+    expect(
+      report.mismatched.some((item) =>
+        item.swapKey === 'ghost:offer-x'
+        && item.field === 'pairIndex'
+        && item.expected === ''
+        && item.actual === '4/6',
+      ),
+    ).toBe(true);
   });
 });

@@ -158,17 +158,7 @@ export async function createRpcAdapter(
     if (!traceEnabled) return;
     console.log(`[JAdapter:rpc][trace] ${phase}${extra ? ` ${JSON.stringify(extra)}` : ''}`);
   };
-  const PROD_WATCH_POLL_MS = 3000;
-  const TEST_WATCH_POLL_MS = (() => {
-    const raw = Number(process.env.JADAPTER_TEST_WATCH_POLL_MS ?? '1000');
-    if (!Number.isFinite(raw)) return 1000;
-    return Math.max(1000, Math.floor(raw));
-  })();
-  const DEV_WATCH_POLL_MS = (() => {
-    const raw = Number(process.env.JADAPTER_DEV_WATCH_POLL_MS ?? '1000');
-    if (!Number.isFinite(raw)) return 1000;
-    return Math.max(1000, Math.floor(raw));
-  })();
+  const WATCH_POLL_MS = 1000;
   const TX_WAIT_TIMEOUT_MS = Math.max(
     10_000,
     Math.floor(Number(process.env.JADAPTER_TX_WAIT_TIMEOUT_MS ?? config.txWaitTimeoutMs ?? 300_000)),
@@ -335,15 +325,7 @@ export async function createRpcAdapter(
     );
   };
 
-  const resolveWatcherPollMs = (scenarioMode: boolean): number => {
-    if (scenarioMode) return TEST_WATCH_POLL_MS;
-    if (config.watchPollMs && Number.isFinite(config.watchPollMs)) {
-      return Math.max(1000, Math.floor(config.watchPollMs));
-    }
-    if (config.chainId === 1) return PROD_WATCH_POLL_MS;
-    if (DEV_CHAIN_IDS.has(config.chainId)) return DEV_WATCH_POLL_MS;
-    return 1500;
-  };
+  const resolveWatcherPollMs = (_scenarioMode: boolean): number => WATCH_POLL_MS;
 
   const resolveFinalityDepth = (scenarioMode: boolean): number => {
     if (scenarioMode || DEV_CHAIN_IDS.has(config.chainId)) return 0;

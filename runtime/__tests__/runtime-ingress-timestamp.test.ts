@@ -279,4 +279,46 @@ describe('runtime ingress timestamp', () => {
     }
   });
 
+  test('runtime loop starts jurisdiction watchers exactly once per replica', async () => {
+    const env = createEmptyEnv('runtime-watcher-start-seed');
+    env.quietRuntimeLogs = true;
+
+    let startCount = 0;
+    const fakeJAdapter = {
+      startWatching(_env: unknown) {
+        startCount += 1;
+      },
+    };
+
+    env.activeJurisdiction = 'Testnet';
+    env.jReplicas.set('Testnet', {
+      name: 'Testnet',
+      blockNumber: 0n,
+      stateRoot: new Uint8Array(32),
+      mempool: [],
+      blockDelayMs: 0,
+      lastBlockTimestamp: env.timestamp,
+      position: { x: 0, y: 0, z: 0 },
+      depositoryAddress: `0x${'11'.repeat(20)}`,
+      entityProviderAddress: `0x${'22'.repeat(20)}`,
+      contracts: {
+        account: `0x${'33'.repeat(20)}`,
+        depository: `0x${'11'.repeat(20)}`,
+        entityProvider: `0x${'22'.repeat(20)}`,
+        deltaTransformer: `0x${'44'.repeat(20)}`,
+      },
+      rpcs: ['http://localhost:8545'],
+      chainId: 31337,
+      jadapter: fakeJAdapter as never,
+    });
+
+    const stop = startRuntimeLoop(env, { tickDelayMs: 1 });
+    try {
+      await sleep(10);
+      expect(startCount).toBe(1);
+    } finally {
+      stop();
+    }
+  });
+
 });
