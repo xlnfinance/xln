@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { deserializeTaggedJson, safeParse, safeStringify, serializeTaggedJson } from '../serialization-utils';
 import { decode, encode } from '../snapshot-coder';
 import { applyCommand, createBook, type BookState } from '../orderbook';
+import { createOrderbookExtState, replaceOrderbookPair, type OrderbookExtState } from '../orderbook/types';
 
 type RoundTripDiff = {
   path: string;
@@ -240,6 +241,56 @@ describe('serialization-utils', () => {
     expect(afterRestored.state.tradeCount).toBe(afterLive.state.tradeCount);
     expect(afterRestored.state.tradeQtySum).toBe(afterLive.state.tradeQtySum);
     expect(afterRestored.state.eventHash).toBe(afterLive.state.eventHash);
+  });
+
+  test('round-trips sparse orderbook extension state with pair index', () => {
+    let book = createBook({
+      bucketWidthTicks: 10_000n,
+      maxOrders: 10_000,
+      stpPolicy: 1,
+    });
+
+    for (const command of [
+      { kind: 0 as const, ownerId: 'alice', orderId: 'acct-a:offer-1', side: 1 as const, tif: 0 as const, postOnly: false, priceTicks: 25_000_000n, qtyLots: 2 },
+      { kind: 0 as const, ownerId: 'bob', orderId: 'acct-b:offer-2', side: 0 as const, tif: 0 as const, postOnly: false, priceTicks: 24_999_000n, qtyLots: 1 },
+    ]) {
+      book = applyCommand(book, command).state;
+    }
+
+    const ext = createOrderbookExtState({
+      entityId: 'hub',
+      name: 'Hub',
+      spreadDistribution: {
+        makerBps: 0,
+        takerBps: 10_000,
+        hubBps: 0,
+        makerReferrerBps: 0,
+        takerReferrerBps: 0,
+      },
+      referenceTokenId: 1,
+      minTradeSize: 0n,
+      supportedPairs: ['1/2'],
+    });
+    replaceOrderbookPair(ext, '1/2', book);
+    ext.referrals.set('alice', { entityId: 'alice', referrerId: null, timestamp: 123 });
+
+    const restored = decode<OrderbookExtState>(encode(ext));
+    expect(restored.books).toBeInstanceOf(Map);
+    expect(restored.orderPairs).toBeInstanceOf(Map);
+    expect(restored.referrals).toBeInstanceOf(Map);
+    expect(restored.hubProfile.supportedPairs).toEqual(['1/2']);
+    expect(Array.from(restored.books.keys())).toEqual(['1/2']);
+    expect(restored.orderPairs.get('acct-a:offer-1')).toEqual(['1/2']);
+    expect(restored.orderPairs.get('acct-b:offer-2')).toEqual(['1/2']);
+    expect(restored.referrals.get('alice')).toEqual({ entityId: 'alice', referrerId: null, timestamp: 123 });
+
+    const afterRestored = applyCommand(restored.books.get('1/2')!, {
+      kind: 1 as const,
+      ownerId: 'alice',
+      orderId: 'acct-a:offer-1',
+    });
+    expect(afterRestored.state.orders.has('acct-a:offer-1')).toBe(false);
+    expect(afterRestored.events.some((event) => event.type === 'CANCELED')).toBe(true);
   });
 
   test('rejects old legacy bigint string encoding', () => {

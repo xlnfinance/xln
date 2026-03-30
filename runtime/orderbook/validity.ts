@@ -13,7 +13,7 @@ import type { AccountMachine, EntityState, SwapOffer } from '../types';
 
 const MAX_QTY_LOTS = 0xFFFFFFFFn;
 
-export type OrderbookMediumField = 'pairId' | 'side' | 'priceTicks' | 'qtyLots' | 'ownerId';
+export type OrderbookMediumField = 'pairId' | 'side' | 'priceTicks' | 'qtyLots' | 'ownerId' | 'pairIndex';
 export type QuarantineReason =
   | 'invalid-direction'
   | 'zero-amount'
@@ -160,6 +160,22 @@ const collectActualBookOrders = (ext: OrderbookExtState): Map<string, ActualBook
     }
   }
   return actual;
+};
+
+const collectExpectedPairIndex = (ext: OrderbookExtState): Map<string, string[]> => {
+  const expected = new Map<string, string[]>();
+  for (const [pairId, book] of ext.books.entries()) {
+    for (const orderId of book.orders.keys()) {
+      const existing = expected.get(orderId);
+      if (existing) {
+        if (!existing.includes(pairId)) existing.push(pairId);
+      } else {
+        expected.set(orderId, [pairId]);
+      }
+    }
+  }
+  for (const pairIds of expected.values()) pairIds.sort(compareCanonicalText);
+  return expected;
 };
 
 export function validateBookStructure(book: BookState): BookStructureReport {
@@ -309,6 +325,26 @@ export function validateBookAgainstOffers(state: EntityState): BookMediumReport 
 
   for (const [key, actualOrder] of actual.entries()) {
     if (actualOrder.swapKey === null || !expected.has(key)) orphanedInBook.push(key);
+  }
+
+  const expectedPairIndex = collectExpectedPairIndex(ext);
+  const actualPairIndex = ext.orderPairs instanceof Map ? ext.orderPairs : new Map<string, string[]>();
+  const indexedOrderIds = new Set<string>([
+    ...expectedPairIndex.keys(),
+    ...actualPairIndex.keys(),
+  ]);
+  for (const orderId of indexedOrderIds) {
+    const expectedPairs = [...expectedPairIndex.get(orderId) ?? []].sort(compareCanonicalText);
+    const actualPairs = [...actualPairIndex.get(orderId) ?? []].sort(compareCanonicalText);
+    const expectedJoined = expectedPairs.join(',');
+    const actualJoined = actualPairs.join(',');
+    if (expectedJoined === actualJoined) continue;
+    mismatched.push({
+      swapKey: orderId,
+      field: 'pairIndex',
+      expected: expectedJoined,
+      actual: actualJoined,
+    });
   }
 
   return {

@@ -400,7 +400,6 @@
     window.history.replaceState(window.history.state, '', `${window.location.pathname}${window.location.search}#${nextHash}`);
   }
 
-  const BALANCE_REFRESH_THROTTLE_MS = 1000;
 
   const ACCOUNT_BAR_USD_PER_100PX_MIN = 10;
   const ACCOUNT_BAR_USD_PER_100PX_MAX = 10_000;
@@ -1665,10 +1664,9 @@
   };
   let pendingAssetAutoC2Rs: PendingAssetAutoC2R[] = [];
   let resolvingAssetAutoC2R = false;
-  let externalFetchSeq = 0;
-  let externalFetchStartedAt = 0;
   let externalFetchInFlight: Promise<void> | null = null;
-  let lastExternalFetchKey = '';
+  let cachedExternalTokenRegistry: ExternalToken[] | null = null;
+  let cachedExternalTokenRegistryKey = '';
   let selectedExternalToReserveToken: (ExternalToken & { tokenId: number }) | null = null;
   let selectedReserveToCollateralToken: (ExternalToken & { tokenId: number }) | null = null;
   let selectedCollateralToReserveToken: (ExternalToken & { tokenId: number }) | null = null;
@@ -2161,6 +2159,14 @@
   }
 
   async function getTokenList(jadapter: JAdapter | null | undefined): Promise<ExternalToken[]> {
+    const signerId = String(currentSignerId || '').trim().toLowerCase();
+    const runtimeId = getRuntimeId(activeEnv);
+    const jurisdiction = String(getActiveJurisdictionName(activeEnv) || '').trim().toLowerCase();
+    const cacheKey = `${signerId}|${runtimeId}|${jurisdiction}`;
+    if (cachedExternalTokenRegistry && cachedExternalTokenRegistryKey === cacheKey) {
+      return cachedExternalTokenRegistry.map((token) => ({ ...token, balance: 0n }));
+    }
+
     let tokens: ExternalToken[] = [];
     if (jadapter?.getTokenRegistry) {
       const registry = await jadapter.getTokenRegistry();
@@ -2182,7 +2188,9 @@
         : [];
     }
 
-    return tokens.map(t => ({ ...t, balance: 0n }));
+    cachedExternalTokenRegistryKey = cacheKey;
+    cachedExternalTokenRegistry = tokens.map((token) => ({ ...token, balance: 0n }));
+    return cachedExternalTokenRegistry.map((token) => ({ ...token, balance: 0n }));
   }
 
   function buildOnchainReserves(
@@ -2493,37 +2501,25 @@
   }
 
   // Fetch external tokens (ERC20 balances for signer) - works for both BrowserVM and RPC modes
-  async function fetchExternalTokens(forceChainPoll = false) {
-    const waitMs = Math.max(0, 100 - (Date.now() - externalFetchStartedAt));
+  async function fetchExternalTokens() {
+    if (externalFetchInFlight) {
+      return await externalFetchInFlight;
+    }
     externalFetchInFlight = (async () => {
-      if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
-      externalFetchStartedAt = Date.now();
       const signerId = String(currentSignerId || '').trim();
       const runtimeId = getRuntimeId(activeEnv);
       const jurisdiction = String(getActiveJurisdictionName(activeEnv) || '');
       const fetchKey = `${signerId}|${runtimeId}|${jurisdiction}`;
-      lastExternalFetchKey = fetchKey;
-      const fetchSeq = ++externalFetchSeq;
       externalTokensLoading = true;
       if (!signerId) {
-        if (fetchSeq === externalFetchSeq) externalTokensLoading = false;
+        externalTokensLoading = false;
         return;
       }
 
       try {
         const xln = await getXLN();
-        // External balances are read directly from the active J-adapter/provider.
-        // Never derive them from cached UI state; the wallet EOA is the source of truth.
         const envAtStart = getRuntimeEnv(activeEnv);
         const jadapter = xln.getActiveJAdapter?.(envAtStart ?? null);
-        if (forceChainPoll && typeof jadapter?.pollNow === 'function') {
-          try {
-            await jadapter.pollNow();
-          } catch (err) {
-            console.warn('[EntityPanel] Forced J-event poll failed:', err);
-          }
-        }
-
         const tokenList = await getTokenList(jadapter);
         let nativeToken: ExternalToken | null = null;
         if (jadapter?.provider && typeof jadapter.provider.getBalance === 'function' && isAddress(signerId)) {
@@ -2540,65 +2536,32 @@
             console.warn('[EntityPanel] Failed to fetch native ETH balance:', err);
           }
         }
-        if (!jadapter?.getErc20Balance) {
-          if (fetchSeq === externalFetchSeq) {
-            externalTokens = sortExternalTokens(tokenList);
-            externalTokensLoading = false;
-          }
+        if (!jadapter?.getErc20Balances) {
+          externalTokens = sortExternalTokens(tokenList);
+          externalTokensLoading = false;
           return;
         }
 
-        if (jadapter.getErc20Balances) {
-          try {
-            const balances = await jadapter.getErc20Balances(tokenList.map(t => t.address), signerId);
-            balances.forEach((balance: bigint, idx: number) => {
-              if (tokenList[idx]) tokenList[idx].balance = balance;
-            });
-          } catch (err) {
-            console.warn('[EntityPanel] Batch balance fetch failed, falling back to per-token:', err);
-            for (const token of tokenList) {
-              try {
-                token.balance = await jadapter.getErc20Balance(token.address, signerId);
-              } catch (innerErr) {
-                console.warn(`[EntityPanel] Failed to fetch ${token.symbol} balance:`, innerErr);
-              }
-            }
-          }
-        } else {
-          for (const token of tokenList) {
-            try {
-              token.balance = await jadapter.getErc20Balance(token.address, signerId);
-            } catch (err) {
-              console.warn(`[EntityPanel] Failed to fetch ${token.symbol} balance:`, err);
-            }
-          }
-        }
+        const balances = await jadapter.getErc20Balances(tokenList.map(t => t.address), signerId);
+        balances.forEach((balance: bigint, idx: number) => {
+          if (tokenList[idx]) tokenList[idx].balance = balance;
+        });
 
         const runtimeIdNow = getRuntimeId(activeEnv);
         const jurisdictionNow = String(getActiveJurisdictionName(activeEnv) || '');
         const currentKey = `${String(currentSignerId || '').trim()}|${runtimeIdNow}|${jurisdictionNow}`;
-        if (fetchSeq === externalFetchSeq && currentKey === fetchKey && lastExternalFetchKey === fetchKey) {
+        if (currentKey === fetchKey) {
           externalTokens = sortExternalTokens(nativeToken ? [nativeToken, ...tokenList] : tokenList);
           externalTokensLoading = false;
         }
       } catch (err) {
         console.error('[EntityPanel] Failed to fetch external tokens:', err);
-        if (fetchSeq === externalFetchSeq) externalTokensLoading = false;
+        externalTokensLoading = false;
       }
     })().finally(() => {
       externalFetchInFlight = null;
     });
-    try {
-      return await externalFetchInFlight;
-    } finally {
-      externalFetchInFlight = null;
-      const runtimeIdNow = getRuntimeId(activeEnv);
-      const jurisdictionNow = String(getActiveJurisdictionName(activeEnv) || '');
-      const desiredKey = `${String(currentSignerId || '').trim()}|${runtimeIdNow}|${jurisdictionNow}`;
-      if (desiredKey && desiredKey !== lastExternalFetchKey) {
-        void fetchExternalTokens();
-      }
-    }
+    return await externalFetchInFlight;
   }
 
   async function getActiveSignerPrivateKey(): Promise<Uint8Array> {
@@ -3547,27 +3510,8 @@
     await faucetReserves(token.tokenId, token.symbol);
   }
 
-  let lastBalanceRefreshAt = 0;
-  let pendingBalanceRefreshTimer: ReturnType<typeof setTimeout> | null = null;
-
-  function refreshBalances(force = false) {
-    const now = Date.now();
-    const elapsed = now - lastBalanceRefreshAt;
-    if (force || elapsed >= BALANCE_REFRESH_THROTTLE_MS) {
-      if (pendingBalanceRefreshTimer) {
-        clearTimeout(pendingBalanceRefreshTimer);
-        pendingBalanceRefreshTimer = null;
-      }
-      lastBalanceRefreshAt = now;
-      void fetchExternalTokens(force);
-      return;
-    }
-    if (pendingBalanceRefreshTimer) return;
-    pendingBalanceRefreshTimer = setTimeout(() => {
-      pendingBalanceRefreshTimer = null;
-      lastBalanceRefreshAt = Date.now();
-      void fetchExternalTokens(force);
-    }, BALANCE_REFRESH_THROTTLE_MS - elapsed);
+  function refreshBalances(): void {
+    void fetchExternalTokens();
   }
 
   async function handleResetEverything(): Promise<void> {
@@ -3598,25 +3542,18 @@
     }
   }
 
-  let refreshTimer: ReturnType<typeof setInterval> | null = null;
-  $: {
-    if (refreshTimer) clearInterval(refreshTimer);
-    const refreshMs = $settings.balanceRefreshMs ?? 1000;
-    if (refreshMs > 0) {
-      refreshTimer = setInterval(() => refreshBalances(), refreshMs);
-    }
-  }
-
   onDestroy(() => {
-    if (refreshTimer) clearInterval(refreshTimer);
-    if (pendingBalanceRefreshTimer) clearTimeout(pendingBalanceRefreshTimer);
     resetMoveLineMeasurement();
     moveVisualResizeObserver?.disconnect();
   });
 
   onMount(() => {
-    // Fetch reserves and external tokens on mount
-    refreshBalances(true);
+    // Fetch once on mount and after explicit user/runtime transitions.
+    // Do not keep a UI-owned polling loop here:
+    // - blockchain event watching belongs to the runtime/J-adapter layer
+    // - repeated UI polling was spamming /rpc and hiding the real watcher cadence
+    // - external wallet balances are refreshed on demand, not by a background timer
+    refreshBalances();
     applyDeepLinkViewFromUrl();
 
     const handleMovePointer = (event: PointerEvent | MouseEvent) => {
@@ -4602,7 +4539,7 @@
               <p class="muted asset-ledger-note">External, reserve, and account balances.</p>
             </div>
             <div class="header-actions">
-              <button class="btn-refresh-small" data-testid="asset-ledger-refresh" on:click={() => refreshBalances(true)} disabled={externalTokensLoading}>
+              <button class="btn-refresh-small" data-testid="asset-ledger-refresh" on:click={() => refreshBalances()} disabled={externalTokensLoading}>
                 {externalTokensLoading ? '...' : 'Refresh'}
               </button>
             </div>
