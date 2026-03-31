@@ -146,8 +146,6 @@
   let orderbookPairId = '1/2';
   let orderbookViewKey = '';
   let orderbookRefreshNonce = 0;
-  let orderbookPriceStep: '0.0001' | '0.001' | '0.01' | '0.1' | '0.5' | '1' | '5' | '10' | '50' | '100' = '0.0001';
-  let orderbookAutoResolvedPriceStep: '0.0001' | '0.001' | '0.01' | '0.1' | '0.5' | '1' | '5' | '10' | '50' | '100' = '1';
   let orderPercent = 100;
   let submitError = '';
   let pendingSwapFeedbackOfferId = '';
@@ -1696,16 +1694,11 @@
         baseTokenSymbol={baseTokenSymbol}
         quoteTokenSymbol={quoteTokenSymbol}
         orderbookScopeMode={orderbookScopeMode}
-        selectedPriceStep={orderbookPriceStep}
-        autoResolvedPriceStep={orderbookAutoResolvedPriceStep}
         on:pairchange={(event) => {
           selectedPairValue = event.detail;
           handlePairChange();
         }}
         on:togglescope={toggleOrderbookScope}
-        on:pricestepchange={(event) => {
-          orderbookPriceStep = event.detail;
-        }}
       />
       {#if orderbookHubIds.length > 0}
         <div class="orderbook-wrap" data-testid="swap-orderbook">
@@ -1724,8 +1717,6 @@
               priceScale={Number(ORDERBOOK_PRICE_SCALE)}
               sizeDisplayScale={orderbookSizeDisplayScale}
               disablePriceAggregation={orderbookScopeMode === 'selected'}
-              bind:selectedPriceStep={orderbookPriceStep}
-              bind:autoResolvedPriceStep={orderbookAutoResolvedPriceStep}
               preferredClickSide={tradeSide === 'buy-base' ? 'ask' : 'bid'}
               on:levelclick={handleOrderbookLevelClick}
               on:snapshot={handleOrderbookSnapshot}
@@ -1843,7 +1834,6 @@
     <div class="orders-toolbar">
       <div class="orders-header-left">
         <h4 class="orders-inline-title">Orders</h4>
-        <span class="orders-count">{orderListTab === 'open' ? openOrders.length : filteredClosedOrderViews.length}</span>
         <div class="orders-tabs" role="tablist" aria-label="Swap orders">
           <button
             type="button"
@@ -1852,7 +1842,7 @@
             aria-pressed={orderListTab === 'open'}
             data-testid="swap-orders-tab-open"
             on:click={() => setOrderListTab('open')}
-          >Open</button>
+          >Open ({openOrders.length})</button>
           <button
             type="button"
             class="orders-tab-text"
@@ -1860,7 +1850,7 @@
             aria-pressed={orderListTab === 'closed'}
             data-testid="swap-orders-tab-closed"
             on:click={() => setOrderListTab('closed')}
-          >Closed</button>
+          >Closed ({closedOrderViews.length})</button>
         </div>
       </div>
       <label class="closed-status-filter" class:is-hidden={orderListTab !== 'closed'}>
@@ -1874,7 +1864,7 @@
         </select>
       </label>
     </div>
-    {#if totalPriceImprovementSummary}
+    {#if orderListTab === 'closed' && totalPriceImprovementSummary}
       <p class="improvement-summary">Total price improvement: <strong>{totalPriceImprovementSummary}</strong></p>
     {/if}
 
@@ -2402,11 +2392,6 @@
     margin: 0;
   }
 
-  .orders-count {
-    color: #9ca3af;
-    font-size: 11px;
-  }
-
   .orders-tabs {
     display: inline-flex;
     align-items: center;
@@ -2454,8 +2439,7 @@
   }
 
   .closed-status-filter.is-hidden {
-    opacity: 0;
-    pointer-events: none;
+    display: none;
   }
 
   .closed-status-filter select {

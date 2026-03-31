@@ -1,20 +1,16 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
 
-  const PRICE_STEP_OPTIONS = ['0.0001', '0.001', '0.01', '0.1', '0.5', '1', '5', '10', '50', '100'] as const;
-
   export let pairOptions: Array<{ value: string; label: string }> = [];
   export let selectedPairValue = '';
   export let baseTokenSymbol = '';
   export let quoteTokenSymbol = '';
   export let orderbookScopeMode: 'aggregated' | 'selected' = 'aggregated';
-  export let selectedPriceStep: (typeof PRICE_STEP_OPTIONS)[number] = '0.0001';
-  export let autoResolvedPriceStep: (typeof PRICE_STEP_OPTIONS)[number] = '1';
+  let selectedPairLabel = '';
 
   const dispatch = createEventDispatcher<{
     pairchange: string;
     togglescope: void;
-    pricestepchange: (typeof PRICE_STEP_OPTIONS)[number];
   }>();
 
   function handlePairChange(event: Event): void {
@@ -25,23 +21,28 @@
     dispatch('togglescope');
   }
 
-  function handlePriceStepChange(event: Event): void {
-    dispatch('pricestepchange', (event.currentTarget as HTMLSelectElement).value);
-  }
+  $: selectedPairLabel =
+    pairOptions.find((pair) => pair.value === selectedPairValue)?.label
+    || `${baseTokenSymbol}/${quoteTokenSymbol}`
+    || 'Select pair';
 </script>
 
 <div class="swap-toolbar">
   <div class="toolbar-select toolbar-select-pair">
+    <span class="toolbar-select-label">Pair</span>
     <select
+      class="pair-select"
       value={selectedPairValue}
       data-testid="swap-pair-select"
       aria-label="Swap pair"
+      title={selectedPairLabel}
       on:change={handlePairChange}
     >
       {#each pairOptions as pair (pair.value)}
         <option value={pair.value}>{pair.label}</option>
       {/each}
     </select>
+    <span class="toolbar-chevron" aria-hidden="true">▾</span>
   </div>
 
   <button
@@ -55,25 +56,12 @@
   >
     {orderbookScopeMode === 'aggregated' ? 'Aggregated' : 'Selected'}
   </button>
-
-  <label class="toolbar-select toolbar-select-step">
-    <select
-      value={selectedPriceStep}
-      aria-label="Orderbook precision"
-      data-testid="swap-orderbook-step-select"
-      on:change={handlePriceStepChange}
-    >
-      {#each PRICE_STEP_OPTIONS as step}
-        <option value={step}>{step}</option>
-      {/each}
-    </select>
-  </label>
 </div>
 
 <style>
   .swap-toolbar {
     display: grid;
-    grid-template-columns: minmax(0, 1.8fr) minmax(112px, 0.7fr) minmax(132px, 0.8fr);
+    grid-template-columns: minmax(0, 1.8fr) minmax(112px, 0.7fr);
     gap: 10px;
     align-items: stretch;
     margin-bottom: 8px;
@@ -84,10 +72,23 @@
     display: flex;
     align-items: center;
     min-width: 0;
+    min-height: 40px;
     border: 1px solid #2d313b;
     border-radius: 10px;
     background: linear-gradient(180deg, rgba(34, 35, 42, 0.96), rgba(24, 25, 31, 0.96));
     box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    transition: border-color 120ms ease, box-shadow 120ms ease, background 120ms ease;
+  }
+
+  .toolbar-select:hover {
+    border-color: rgba(251, 191, 36, 0.24);
+  }
+
+  .toolbar-select:focus-within {
+    border-color: rgba(251, 191, 36, 0.5);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.03),
+      0 0 0 3px rgba(251, 191, 36, 0.08);
   }
 
   .toolbar-select::after {
@@ -103,34 +104,62 @@
     min-width: 120px;
   }
 
-  .toolbar-select-step {
-    padding-left: 0;
-  }
-
   select {
     width: 100%;
     min-width: 0;
-    height: 32px;
+    height: 40px;
     border: 0;
     background: transparent;
-    padding: 0 12px;
-    font-size: 12px;
-    font-weight: 600;
-    color: #e5e7eb;
+    padding: 0 36px 0 12px;
+    font-size: 13px;
+    font-weight: 650;
+    color: #f3f4f6;
     color-scheme: dark;
     outline: none;
     box-sizing: border-box;
+    appearance: none;
+    -webkit-appearance: none;
+    -moz-appearance: none;
   }
 
   select option {
     background: #0f1117;
     color: #f3f4f6;
   }
+
+  .pair-select {
+    padding-top: 14px;
+    padding-bottom: 6px;
+    line-height: 1.15;
+  }
+
+  .toolbar-select-label {
+    position: absolute;
+    top: 7px;
+    left: 12px;
+    font-size: 9px;
+    font-weight: 700;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: rgba(194, 200, 211, 0.52);
+    pointer-events: none;
+  }
+
+  .toolbar-chevron {
+    position: absolute;
+    right: 12px;
+    top: 50%;
+    transform: translateY(-50%);
+    color: rgba(229, 231, 235, 0.7);
+    font-size: 12px;
+    pointer-events: none;
+  }
+
   .scope-toggle {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 32px;
+    min-height: 40px;
     padding: 0 12px;
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 10px;
@@ -138,6 +167,7 @@
     color: #c2c8d3;
     font-size: 11px;
     font-weight: 600;
+    letter-spacing: 0.04em;
     white-space: nowrap;
     box-sizing: border-box;
     transition: color 100ms ease, border-color 100ms ease, background 100ms ease;
@@ -156,7 +186,7 @@
 
   @media (max-width: 900px) {
     .swap-toolbar {
-      grid-template-columns: minmax(0, 1fr) minmax(108px, 0.8fr) minmax(116px, 0.9fr);
+      grid-template-columns: minmax(0, 1fr) minmax(108px, 0.8fr);
     }
 
     .scope-toggle {

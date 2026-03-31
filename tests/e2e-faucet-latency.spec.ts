@@ -1,7 +1,7 @@
 import { test, expect, type Page } from '@playwright/test';
 import { deriveDelta } from '../runtime/account-utils';
 import { getHealth } from './utils/e2e-baseline';
-import { connectRuntimeToHub } from './utils/e2e-connect';
+import { connectRuntimeToHubWithCredit } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
 import { requireIsolatedBaseUrl } from './utils/e2e-isolated-env';
 
@@ -9,6 +9,16 @@ const APP_BASE_URL = requireIsolatedBaseUrl('E2E_BASE_URL');
 const API_BASE_URL = requireIsolatedBaseUrl('E2E_API_BASE_URL');
 const INIT_TIMEOUT = 30_000;
 const LONG_E2E = process.env.E2E_LONG === '1';
+
+async function getApiTokenId(page: Page, symbol: string): Promise<number> {
+  const response = await page.request.get(`${API_BASE_URL}/api/tokens`);
+  expect(response.ok(), 'tokens endpoint must be available').toBe(true);
+  const body = await response.json().catch(() => ({} as { tokens?: Array<{ symbol?: string; tokenId?: number }> }));
+  const tokens = Array.isArray(body.tokens) ? body.tokens : [];
+  const match = tokens.find((token) => String(token.symbol || '').toUpperCase() === symbol.toUpperCase());
+  expect(typeof match?.tokenId === 'number', `Missing ${symbol} tokenId`).toBe(true);
+  return Number(match!.tokenId);
+}
 
 type DeltaSnapshot = {
   ondelta: string;
@@ -281,7 +291,8 @@ test.describe('E2E Faucet Latency', () => {
 
     const alice = await createRuntimeIdentity(page, 'alice', selectDemoMnemonic('alice'));
     const hubId = await getPrimaryHubId(page);
-    await connectRuntimeToHub(page, alice, hubId);
+    const usdtTokenId = await getApiTokenId(page, 'USDT');
+    await connectRuntimeToHubWithCredit(page, alice, hubId, '10000', [usdtTokenId]);
     await page.getByTestId('tab-accounts').first().click();
     const preview = page.locator(`.account-preview[data-counterparty-id="${hubId}"]`).first();
     await expect(preview).toBeVisible({ timeout: 20_000 });
@@ -292,13 +303,13 @@ test.describe('E2E Faucet Latency', () => {
 
     const baselineOut = await readRenderedAccountTokenOut(page, hubId, 'USDT');
     expect(Number.isFinite(baselineOut), 'rendered USDT out capacity must be readable').toBe(true);
-    const baselineAccount = await readFaucetAccountSnapshot(page, alice.entityId, alice.signerId, hubId, 3);
+    const baselineAccount = await readFaucetAccountSnapshot(page, alice.entityId, alice.signerId, hubId, usdtTokenId);
     const renderProbePromise = measureAccountStateToDomLatency(
       page,
       alice.entityId,
       alice.signerId,
       hubId,
-      3,
+      usdtTokenId,
       'USDT',
       baselineAccount.currentHeight,
       baselineOut,

@@ -52,10 +52,51 @@ export async function chooseVisibleRoute(
   const routeCount = await routeOptions.count();
   expect(routeCount, 'expected at least one visible payment route').toBeGreaterThan(0);
 
-  const routeNeedles = routeEntityIds
-    .map((hopId) => String(hopId || '').trim().toLowerCase())
-    .filter((hopId) => hopId.length > 0)
-    .map((hopId) => hopId.slice(0, 10));
+  const routeNeedles = await page.evaluate((ids) => {
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        gossip?: {
+          getProfiles?: () => Array<Record<string, unknown>>;
+        };
+      };
+      document: Document;
+    }).isolatedEnv;
+
+    const currentEntityId = String(
+      document.querySelector('[data-testid="context-current"]')?.getAttribute('data-entity-id') || '',
+    ).trim().toLowerCase();
+
+    const profiles = env?.gossip?.getProfiles?.() || [];
+    const profilesById = new Map<string, Record<string, unknown>>();
+    for (const profile of profiles) {
+      const entityId = String(profile?.entityId || '').trim().toLowerCase();
+      if (entityId) profilesById.set(entityId, profile);
+    }
+
+    const addAlias = (set: Set<string>, value: unknown) => {
+      const alias = String(value || '').trim().toLowerCase();
+      if (!alias) return;
+      set.add(alias);
+    };
+
+    return ids
+      .map((rawId) => String(rawId || '').trim().toLowerCase())
+      .filter((entityId) => entityId.length > 0)
+      .map((entityId) => {
+        const aliases = new Set<string>();
+        aliases.add(entityId.slice(0, 10));
+        if (entityId === currentEntityId) aliases.add('self');
+
+        const profile = profilesById.get(entityId);
+        addAlias(aliases, profile?.name);
+        addAlias(aliases, profile?.label);
+        addAlias(aliases, (profile?.metadata as Record<string, unknown> | undefined)?.name);
+        addAlias(aliases, (profile?.metadata as Record<string, unknown> | undefined)?.label);
+        addAlias(aliases, (profile?.metadata as Record<string, unknown> | undefined)?.displayName);
+
+        return [...aliases];
+      });
+  }, routeEntityIds);
 
   if (routeNeedles.length === 0) {
     if (routeCount !== 1) {
@@ -72,7 +113,7 @@ export async function chooseVisibleRoute(
   for (let index = 0; index < routeCount; index += 1) {
     const option = routeOptions.nth(index);
     const text = String((await option.textContent().catch(() => '')) || '').toLowerCase();
-    const matches = routeNeedles.every((needle) => text.includes(needle));
+    const matches = routeNeedles.every((aliases) => aliases.some((alias) => text.includes(alias)));
     if (!matches) continue;
     await option.click();
     return (await option.textContent().catch(() => '')) || '';

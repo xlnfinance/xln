@@ -47,9 +47,13 @@ const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]
 
 async function openRuntimeDropdown(page: Page): Promise<void> {
   const trigger = page.locator('.context-switcher .dropdown-trigger, .context-switcher .pill-trigger').first();
+  const menu = page.locator('.context-switcher .switcher-menu').first();
   await expect(trigger).toBeVisible({ timeout: 15_000 });
-  await trigger.click();
-  await expect(page.locator('.context-switcher .dropdown-menu').first()).toBeVisible({ timeout: 10_000 });
+  if (await menu.isVisible().catch(() => false)) {
+    return;
+  }
+  await trigger.click({ force: true });
+  await expect(menu).toBeVisible({ timeout: 10_000 });
 }
 
 async function ensureRuntimeCreationView(page: Page, label: string): Promise<void> {
@@ -491,7 +495,6 @@ export async function switchToRuntimeId(page: Page, runtimeId: string): Promise<
     await openRuntimeDropdown(page);
     const targetItem = page.locator('.switcher-menu .runtime-main').filter({ hasText: runtimeCardText }).first();
     await expect(targetItem, `runtime dropdown must contain ${runtimeCardText}`).toBeVisible({ timeout: 15_000 });
-    await targetItem.scrollIntoViewIfNeeded();
     await targetItem.click();
     try {
       await waitForActiveRuntimeId(page, normalizedRuntimeId);

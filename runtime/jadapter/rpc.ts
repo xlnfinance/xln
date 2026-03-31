@@ -1343,40 +1343,8 @@ export async function createRpcAdapter(
 
           try {
             console.log(`📦 [JAdapter:rpc] processBatch (${getBatchSize(batch)} ops) nonce=${nextNonce}`);
-            if (externalSubmitterWallet) {
-              const tokenOwner = externalSubmitterWallet.address;
-              const uniqueExternalTokenAddresses = [...new Set(batch.externalTokenToReserve.map((op) => op.contractAddress.toLowerCase()))];
-              for (const tokenAddressLower of uniqueExternalTokenAddresses) {
-                const originalAddress = batch.externalTokenToReserve.find(
-                  (op) => op.contractAddress.toLowerCase() === tokenAddressLower,
-                )?.contractAddress;
-                if (!originalAddress) continue;
-                const tokenContract = new ethers.Contract(originalAddress, [
-                  'function allowance(address owner, address spender) view returns (uint256)',
-                  'function approve(address spender, uint256 amount) returns (bool)',
-                ], externalSubmitterWallet);
-                const allowanceFn = tokenContract.getFunction('allowance') as (owner: string, spender: string) => Promise<bigint>;
-                const approveFn = tokenContract.getFunction('approve') as (
-                  spender: string,
-                  amount: bigint,
-                  overrides?: Record<string, bigint | number>
-                ) => Promise<{ wait: (confirms?: number, timeout?: number) => Promise<unknown>; hash: string }>;
-                const currentAllowance = await allowanceFn(tokenOwner, depositoryAddr);
-                if (currentAllowance >= ethers.MaxUint256 / 2n) continue;
-                if (currentAllowance > 0n) {
-                  const clearTx = await approveFn(depositoryAddr, 0n, {
-                    ...(await buildFeeOverrides()),
-                    nonce: await allocateSerializedSignerNonceFor(externalSubmitterWallet),
-                  });
-                  await waitForReceipt(clearTx, 'erc20ApproveReset');
-                }
-                const approveTx = await approveFn(depositoryAddr, ethers.MaxUint256, {
-                  ...(await buildFeeOverrides()),
-                  nonce: await allocateSerializedSignerNonceFor(externalSubmitterWallet),
-                });
-                await waitForReceipt(approveTx, 'erc20ApproveMax');
-              }
-            }
+            // ERC20 approvals are explicit user actions handled before batching.
+            // submitTx must not mutate external allowances as a hidden side effect.
             const gasLimit = await estimateGasWithHeadroom(
               () => submitterDepository.processBatch.estimateGas(encodedBatch, hankoData, nextNonce),
               DEFAULT_PROCESS_BATCH_GAS,

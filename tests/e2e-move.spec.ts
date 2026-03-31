@@ -3,7 +3,7 @@ import { Interface, MaxUint256, formatUnits, parseUnits } from 'ethers';
 import { deriveDelta } from '../runtime/account-utils';
 import { ensureE2EBaseline, API_BASE_URL, APP_BASE_URL, waitForNamedHubs } from './utils/e2e-baseline';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic, switchToRuntimeId } from './utils/e2e-demo-users';
-import { connectRuntimeToHub } from './utils/e2e-connect';
+import { connectRuntimeToHub, connectRuntimeToHubWithCredit } from './utils/e2e-connect';
 import {
   getRenderedAccountSpendableBalance,
   getRenderedExternalBalance,
@@ -304,6 +304,27 @@ async function waitForMoveReady(page: Page): Promise<void> {
       return text || 'disabled';
     }, { timeout: 10_000 })
     .toBe('enabled');
+}
+
+async function waitForMoveAllowanceRequired(page: Page): Promise<void> {
+  const confirm = page.getByTestId('move-confirm').first();
+  const allowancePanel = page.getByTestId('move-allow-panel').first();
+  await expect(allowancePanel).toBeVisible({ timeout: 20_000 });
+  await expect(confirm).toBeDisabled({ timeout: 20_000 });
+  await expect
+    .poll(async () => {
+      const statuses = await page.getByTestId('move-status').allTextContents().catch(() => []);
+      return statuses.map((entry) => String(entry || '').trim()).filter(Boolean).join(' | ');
+    }, { timeout: 10_000 })
+    .toContain('Allow ERC20 before adding to batch');
+}
+
+async function approveMoveAllowance(page: Page, mode: 'amount' | 'max'): Promise<void> {
+  const button = page.getByTestId(mode === 'amount' ? 'move-allow-exact' : 'move-allow-max').first();
+  await expect(button).toBeVisible({ timeout: 20_000 });
+  await expect(button).toBeEnabled({ timeout: 20_000 });
+  await button.click();
+  await waitForMoveActionToSettle(page);
 }
 
 async function waitForMoveActionToSettle(page: Page): Promise<void> {
@@ -728,8 +749,19 @@ test('asset faucet exposes correct modes and funds every supported token', async
   });
 
   const hubs = await waitForNamedHubs(page, ['H1'], { timeoutMs: ROUTE_TIMEOUT_MS });
+  const [usdcToken, wethToken, usdtToken] = await Promise.all([
+    getApiToken(page, 'USDC'),
+    getApiToken(page, 'WETH'),
+    getApiToken(page, 'USDT'),
+  ]);
   await timedStep('faucet.open-account', async () => {
-    await connectRuntimeToHub(page, { entityId: alice!.entityId, signerId: alice!.signerId }, hubs.h1);
+    await connectRuntimeToHubWithCredit(
+      page,
+      { entityId: alice!.entityId, signerId: alice!.signerId },
+      hubs.h1,
+      '10000',
+      [usdcToken.tokenId, wethToken.tokenId, usdtToken.tokenId],
+    );
   });
 
   await timedStep('faucet.mode-matrix', async () => {
@@ -819,6 +851,7 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
 
     const symbol = 'USDC';
     const token = await getApiToken(page, symbol);
+    const depository = await getDepositoryAddress(page);
     const amountRaw = (amount: string): bigint => parseUnits(amount, token.decimals);
     const aliceEoa = String(alice!.signerId || '').trim();
     const bobEoa = String(bob!.signerId || '').trim();
@@ -845,7 +878,6 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
       const amount = amountRaw('20');
       const beforeExternalRaw = await getRpcExternalBalanceRaw(page, symbol, aliceEoa);
       const beforeReserveRaw = await readOnchainReserveBalanceRaw(page, alice!.entityId, symbol);
-      const depository = await getDepositoryAddress(page);
       for (const requiredSymbol of ['USDC', 'USDT', 'WETH'] as const) {
         const beforeAllowance = await getRpcAllowanceRaw(page, requiredSymbol, aliceEoa, depository);
         expect(beforeAllowance, `${requiredSymbol} allowance should start at zero in fresh wallet`).toBe(0n);
@@ -855,10 +887,19 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await page.getByTestId('move-asset-symbol').selectOption(symbol);
         await chooseMoveRoute(page, 'external', 'reserve');
         await page.getByTestId('move-amount').fill('20');
-        await waitForMoveReady(page);
+        await waitForMoveAllowanceRequired(page);
         await expect(page.getByTestId('move-route-summary')).toContainText('External → Reserve');
         await expect(page.getByTestId('move-amount')).toHaveValue('20');
         await expect(page.getByTestId('move-asset-symbol')).toHaveValue(symbol);
+        await expect(page.getByTestId('move-allow-amount').first()).toHaveValue('20');
+        await approveMoveAllowance(page, 'max');
+        await waitForExactBigInt(
+          async () => await getRpcAllowanceRaw(page, symbol, aliceEoa, depository),
+          MaxUint256,
+          EXTERNAL_BATCH_TIMEOUT_MS,
+        );
+        await expect(page.getByTestId('move-allow-panel')).toHaveCount(0);
+        await waitForMoveReady(page);
         await expect(page.getByTestId('move-confirm').first()).toHaveText(/Add to Batch/i);
         await capturePageScreenshot(page, testInfo, 'move-batch-route-summary-desktop.png');
         await page.getByTestId('move-confirm').first().click();
@@ -873,6 +914,11 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await waitForExactBigInt(
           async () => await getRpcExternalBalanceRaw(page, symbol, aliceEoa),
           beforeExternalRaw - amount,
+          EXTERNAL_BATCH_TIMEOUT_MS,
+        );
+        await waitForExactBigInt(
+          async () => await getRpcAllowanceRaw(page, symbol, aliceEoa, depository),
+          MaxUint256,
           EXTERNAL_BATCH_TIMEOUT_MS,
         );
       });
@@ -1006,6 +1052,12 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await page.getByTestId('move-amount').fill('5');
         await selectMoveEntityField(page, 'move-target-entity-field', bob!.entityId);
         await selectMoveEntityField(page, 'move-target-counterparty-field', hubs.h2);
+        await waitForExactBigInt(
+          async () => await getRpcAllowanceRaw(page, symbol, aliceEoa, depository),
+          MaxUint256,
+          EXTERNAL_BATCH_TIMEOUT_MS,
+        );
+        await expect(page.getByTestId('move-allow-panel')).toHaveCount(0);
         await waitForMoveReady(page);
         await expect(page.getByTestId('move-confirm').first()).toHaveText(/Add to Batch/i);
         await page.getByTestId('move-confirm').first().click();

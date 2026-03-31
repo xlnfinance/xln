@@ -347,8 +347,13 @@ export const resetProdServer = async (
   options: E2EResetOptions = {},
 ): Promise<E2EHealthResponse> => {
   const resetBaseUrl = options.resetBaseUrl ?? RESET_BASE_URL;
-  const retries = options.retries ?? 30;
-  await waitForApiReachable(page, options.timeoutMs ?? DEFAULT_TIMEOUT_MS, options.apiBaseUrl ?? API_BASE_URL);
+  const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+  const apiBaseUrl = options.apiBaseUrl ?? API_BASE_URL;
+  const pollMs = options.pollMs ?? DEFAULT_POLL_MS;
+  const retries = options.retries ?? Math.max(30, Math.ceil(timeoutMs / Math.max(250, pollMs)));
+  const deadline = Date.now() + timeoutMs;
+
+  await waitForApiReachable(page, timeoutMs, apiBaseUrl);
 
   let resetDone = false;
   let lastError = '';
@@ -373,7 +378,14 @@ export const resetProdServer = async (
       lastError = error instanceof Error ? error.message : String(error);
     }
 
-    await page.waitForTimeout(500);
+    const remainingMs = deadline - Date.now();
+    if (remainingMs <= 0) break;
+    await page.waitForTimeout(Math.min(500, remainingMs));
+    try {
+      await waitForApiReachable(page, Math.min(5_000, remainingMs), apiBaseUrl);
+    } catch {
+      // Keep retrying reset until the overall reset budget is exhausted.
+    }
   }
 
   expect(resetDone, `reset failed after retries: ${lastError}`).toBe(true);

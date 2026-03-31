@@ -1111,7 +1111,6 @@ export class RuntimeP2P {
         registerSignerPublicKey(sanitized.entityId, publicKey);
       }
     }
-    if (verified > 0) console.log(`P2P_PROFILE_NEW from=${from} verified=${verified} skipped=${skipped}`);
     if (accepted > 0 && this.pendingByRuntime.size > 0) {
       this.flushPending();
     }

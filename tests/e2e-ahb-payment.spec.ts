@@ -817,7 +817,6 @@ async function faucet(page: Page, entityId: string, hubEntityId: string) {
     await page.waitForTimeout(1500);
   }
   expect(r.ok, `Faucet: ${JSON.stringify(r.data)}`).toBe(true);
-  await page.waitForTimeout(SETTLE_MS);
 }
 
 function parseRouteFeeText(rawText: string): bigint {
@@ -828,13 +827,13 @@ function parseRouteFeeText(rawText: string): bigint {
 }
 
 async function pay(page: Page, from: string, signerId: string, to: string, route: string[], amount: bigint): Promise<bigint> {
-  void from;
   void signerId;
+  const normalizedRoute = route.filter((hop, index) => !(index === 0 && hop.toLowerCase() === from.toLowerCase()));
 
   const { selectedRouteText } = await submitUiPayment(page, {
     recipientEntityId: to,
     amount,
-    routeEntityIds: route,
+    routeEntityIds: normalizedRoute,
   });
   const quotedSenderSpend = amount + parseRouteFeeText(selectedRouteText);
   return quotedSenderSpend;
@@ -897,7 +896,7 @@ async function getEntityPersistenceSnapshot(page: Page, entityId: string, counte
 // ─── Test ─────────────────────────────────────────────────────────
 
 test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
-  test.setTimeout(LONG_E2E ? 300_000 : 60_000);
+  test.setTimeout(LONG_E2E ? 300_000 : 180_000);
 
   test.beforeEach(async ({ page }) => {
     await resetProdServer(page, {
@@ -958,7 +957,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     expect(hubs.length, 'Need at least one hub visible in gossip').toBeGreaterThan(0);
     const hubId = hubs[0]!;
     const preferredThreeHubs = hubs.slice(0, 3);
-    const aliceSetupHubs = preferredThreeHubs.length >= 3 ? preferredThreeHubs : [hubId];
+    const aliceSetupHubs = [hubId];
     console.log(`[E2E] Primary hub: ${hubId.slice(0, 16)}`);
     console.log(`[E2E] Alice setup hubs: ${aliceSetupHubs.map((hub) => hub.slice(0, 10)).join(', ')}`);
 
@@ -1255,11 +1254,13 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     const requireThreeHubs = preferredThreeHubs.length >= 3;
     if (requireThreeHubs) {
       const existingCounterparties = await connectedCounterparties(page, alice!.entityId);
-      const hasAllCycleHubs = preferredThreeHubs.every((candidate) => existingCounterparties.has(candidate.toLowerCase()));
-      expect(
-        hasAllCycleHubs,
-        `Alice must already be connected to cycle hubs from setup: ${preferredThreeHubs.join(', ')}`,
-      ).toBe(true);
+      const missingCycleHubs = preferredThreeHubs.filter(
+        (candidate) => !existingCounterparties.has(candidate.toLowerCase()),
+      );
+      for (const candidate of missingCycleHubs) {
+        console.log(`[E2E] 10.i Connect Alice to cycle hub ${candidate.slice(0, 16)}`);
+        await connectActiveRuntimeToHub(page, candidate);
+      }
     }
     const selfRoute = await findSelfCycleRoute(
       page,

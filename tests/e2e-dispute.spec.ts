@@ -1375,8 +1375,31 @@ test.describe('E2E Dispute Flow', () => {
     );
     await timedStep('dispute_broadcast.broadcast', () => broadcastPendingBatchViaUi(page, accountRef.entityId, accountRef.signerId));
 
-    await timedStep('dispute_broadcast.wait_history_dispute_entry', async () => {
-      await expect(page.getByTestId('settle-rebroadcast')).toBeVisible({ timeout: 60_000 });
+    await timedStep('dispute_broadcast.wait_batch_history_confirmed', async () => {
+      await expect.poll(async () => {
+        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+        return {
+          batchHistoryCount: snap.batchHistoryCount,
+          lastBatchStatus: snap.lastBatchStatus,
+        };
+      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toMatchObject({
+        batchHistoryCount: expect.any(Number),
+        lastBatchStatus: 'confirmed',
+      });
+      await expect.poll(async () => {
+        const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+        return snap.batchHistoryCount;
+      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThanOrEqual(1);
+    });
+
+    await timedStep('dispute_broadcast.wait_hidden_disputed_entry', async () => {
+      await expect.poll(async () => {
+        return await page.locator('.account-preview').filter({ hasText: accountRef.counterpartyId }).count();
+      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(0);
+
+      const disputedRow = page.locator('.disputed-row').filter({ hasText: accountRef.counterpartyId }).first();
+      await expect(disputedRow).toBeVisible({ timeout: 60_000 });
+      await expect(disputedRow.getByRole('button', { name: /^Reopen$/ })).toBeVisible({ timeout: 60_000 });
     });
   });
 });
