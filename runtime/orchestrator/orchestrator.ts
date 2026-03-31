@@ -1897,7 +1897,7 @@ const server = Bun.serve({
     }
 
     if (
-      (pathname === '/api/reset' || pathname === '/reset' || pathname === '/api/debug/reset')
+      (pathname === '/api/reset' || pathname === '/api/debug/reset')
       && (request.method === 'POST' || request.method === 'GET')
     ) {
       if (!args.resetAllowed) {

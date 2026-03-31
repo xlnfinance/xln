@@ -157,7 +157,7 @@ function findEarliestOutstandingDebt(
   candidates.sort((left, right) =>
     left.createdDebtIndex - right.createdDebtIndex ||
     left.createdAtBlock - right.createdAtBlock ||
-    left.debtId.localeCompare(right.debtId),
+    (left.debtId === right.debtId ? 0 : left.debtId < right.debtId ? -1 : 1),
   );
   return candidates[0] ?? null;
 }
@@ -1087,7 +1087,7 @@ async function applyFinalizedJEvent(
     const decimals = getTokenDecimals(tokenIdNum);
     const balanceDisplay = (Number(newBalance) / (10 ** decimals)).toFixed(4);
 
-    if (entity === entityState.entityId) {
+    if (String(entity).toLowerCase() === String(entityState.entityId).toLowerCase()) {
       const before = entityState.reserves.get(tokenIdNum) ?? 0n;
       newState.reserves.set(tokenIdNum, BigInt(newBalance as string | number | bigint));
       console.log(`💰 ReserveUpdated APPLIED: entity=${entityShort} token=${tokenId} balance=${newBalance}`);

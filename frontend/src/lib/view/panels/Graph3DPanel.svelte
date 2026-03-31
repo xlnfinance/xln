@@ -51,25 +51,15 @@
   // Extract replicas from env (replaces $replicas)
   $: replicas = env?.eReplicas || new Map();
 
-  // Derive activeJurisdiction: from env.activeJurisdiction OR first jReplica name (for time-travel)
-  // EnvSnapshot stores jReplicas[] but not activeJurisdiction - we derive it
+  // Derive activeJurisdiction from explicit selection or the first available jurisdiction.
   $: activeJurisdictionName = env?.activeJurisdiction
-    || (env?.jReplicas?.length > 0 ? env.jReplicas[0].name : null)
-    || (Array.isArray(env?.jReplicas) && env.jReplicas[0]?.name)
+    || (env?.jReplicas ? Array.from(env.jReplicas.values())[0]?.name ?? null : null)
     || null;
 
   // Derive jurisdictions data for 3D rendering (properly tracks env changes)
   $: jurisdictionsData = (() => {
     if (!env?.jReplicas) return [];
-
-    let jReplicaValues: any[] = [];
-    if (env.jReplicas instanceof Map) {
-      jReplicaValues = Array.from(env.jReplicas.values());
-    } else if (Array.isArray(env.jReplicas)) {
-      jReplicaValues = env.jReplicas;
-    } else if (typeof env.jReplicas === 'object') {
-      jReplicaValues = Object.values(env.jReplicas);
-    }
+    const jReplicaValues = Array.from(env.jReplicas.values()) as any[];
 
     return jReplicaValues.map((jr: any) => ({
       name: jr.name,
@@ -3042,15 +3032,9 @@ let vrHammer: VRHammer | null = null;
 
     // Helper: Get j-machine position for a jurisdiction name
     const getJMachinePosition = (jurisdictionName: string): { x: number; y: number; z: number } | null => {
-      // First check env.jReplicas (works for both Map and Array)
       if (env?.jReplicas) {
-        if (env.jReplicas instanceof Map) {
-          const jr = env.jReplicas.get(jurisdictionName);
-          if (jr?.position) return jr.position;
-        } else if (Array.isArray(env.jReplicas)) {
-          const jr = env.jReplicas.find((x: any) => x.name === jurisdictionName);
-          if (jr?.position) return jr.position;
-        }
+        const jr = env.jReplicas.get(jurisdictionName);
+        if (jr?.position) return jr.position;
       }
       // Fallback: Check jMachines mesh positions (already created in scene)
       const jMesh = jMachines.get(jurisdictionName);

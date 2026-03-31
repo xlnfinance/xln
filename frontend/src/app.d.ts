@@ -2,8 +2,12 @@
 // for information about these interfaces
 declare global {
 	const __BUILD_NUMBER__: string;
-	const __BUILD_HASH__: string;
 	const __BUILD_TIME__: string;
+
+	interface Window {
+		__xln_instance?: typeof import('@xln/runtime/xln-api') | null;
+		__xln_env?: import('@xln/runtime').Env | null;
+	}
 
 	namespace App {
 		// interface Error {}

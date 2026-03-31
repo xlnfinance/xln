@@ -20,13 +20,7 @@
   $: jurisdictions = (() => {
     const env = activeEnv;
     if (!env?.jReplicas) return [];
-    if (env.jReplicas instanceof Map) {
-      return Array.from(env.jReplicas.values());
-    }
-    if (Array.isArray(env.jReplicas)) {
-      return env.jReplicas;
-    }
-    return Object.values(env.jReplicas || {});
+    return Array.from(env.jReplicas.values());
   })();
 
   function handleSelect(name: string | null) {

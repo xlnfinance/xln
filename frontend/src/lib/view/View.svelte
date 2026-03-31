@@ -52,7 +52,7 @@
 
   const localEnvStore = writable<Env | null>(null);
   const localHistoryStore = writable<EnvSnapshot[]>([]);
-  const localTimeIndex = writable<number>(0);
+  const localTimeIndex = writable<number>(-1);
   const localIsLive = writable<boolean>(true);
 
   const unsubLocalEnvSync = localEnvStore.subscribe((env) => {
@@ -218,9 +218,12 @@
         localHistoryStore.set(env.history || []);
         const histLen = (env.history || []).length;
         const importedTimeIndex = urlImport?.state.ui?.ti;
-        const importedIsLive = importedTimeIndex === undefined;
+        const importedIsLive = userMode ? true : importedTimeIndex === undefined;
         localIsLive.set(importedIsLive);
-        localTimeIndex.set(importedIsLive ? -1 : Math.min(importedTimeIndex, Math.max(0, histLen - 1)));
+        const nextTimeIndex = importedIsLive || importedTimeIndex === undefined
+          ? -1
+          : Math.min(importedTimeIndex, Math.max(0, histLen - 1));
+        localTimeIndex.set(nextTimeIndex);
         registerEnvChanges(env);
       }
 

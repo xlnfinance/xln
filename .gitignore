@@ -3,6 +3,7 @@ node_modules
 
 # OS/editor noise
 .DS_Store
+**/._*
 *.log
 logs/*
 
@@ -77,6 +78,7 @@ db/
 db-*/
 db-tmp/
 data/anvil-state.json
+data/storage-health-history.json
 
 # Lock files (use bun.lock only)
 package-lock.json

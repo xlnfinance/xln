@@ -25,13 +25,11 @@ import {
 
 import type { BrowserVMState, JTx, Env } from '../types';
 import { normalizeEntityId } from '../entity-id-utils';
-import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, JSubmitResult, SnapshotId, JBatchReceipt, BrowserVMProvider, JTokenInfo, JReserveMint } from './types';
+import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JSubmitResult, SnapshotId, JBatchReceipt, BrowserVMProvider, JTokenInfo, JReserveMint } from './types';
 import {
   buildExternalTokenToReserveBatch,
   computeAccountKey,
-  entityIdToAddress,
   parseReceiptLogsToJEvents,
-  toJEvent,
 } from './helpers';
 import { CANONICAL_J_EVENTS } from './helpers';
 import {
@@ -524,9 +522,6 @@ export async function createRpcAdapter(
     }
   }
 
-  const eventCallbacks = new Map<string, Set<JEventCallback>>();
-  const anyCallbacks = new Set<JEventCallback>();
-
   const getLiveDepositoryAddress = async (): Promise<string> =>
     requireUsableContractAddress(
       'depository',
@@ -708,19 +703,6 @@ export async function createRpcAdapter(
       } catch {
         throw new Error('loadState not supported by this RPC');
       }
-    },
-
-    on(eventName: string, callback: JEventCallback): () => void {
-      if (!eventCallbacks.has(eventName)) {
-        eventCallbacks.set(eventName, new Set());
-      }
-      eventCallbacks.get(eventName)!.add(callback);
-      return () => eventCallbacks.get(eventName)?.delete(callback);
-    },
-
-    onAny(callback: JEventCallback): () => void {
-      anyCallbacks.add(callback);
-      return () => anyCallbacks.delete(callback);
     },
 
     async processBlock(): Promise<JEvent[]> {
@@ -1601,18 +1583,6 @@ export async function createRpcAdapter(
           });
         }
       };
-      const emitAdapterCallbacks = (events: RawJEvent[]): void => {
-        for (const event of events) {
-          const jEvent = toJEvent(event.name, event.args, {
-            blockNumber: event.blockNumber,
-            blockHash: event.blockHash,
-            transactionHash: event.transactionHash,
-          });
-          eventCallbacks.get(event.name)?.forEach((cb) => cb(jEvent));
-          anyCallbacks.forEach((cb) => cb(jEvent));
-        }
-      };
-
       const doPoll = (): Promise<void> => {
         if (!watcherEnv) return Promise.resolve();
         if (pollInFlight) return pollInFlight;
@@ -1661,7 +1631,6 @@ export async function createRpcAdapter(
             }
 
             if (rawEvents.length > 0) {
-              emitAdapterCallbacks(rawEvents);
               const eventCounts: Record<string, number> = {};
               for (const e of rawEvents) {
                 eventCounts[e.name] = (eventCounts[e.name] || 0) + 1;

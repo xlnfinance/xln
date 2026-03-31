@@ -372,6 +372,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       locks: new Map(), // HTLC: Empty locks map
       swapOffers: new Map(), // Swap: Empty offers map
       swapOrderHistory: new Map(),
+      swapClosedOrders: new Map(),
       // Bilateral J-event consensus
       leftJObservations: [],
       rightJObservations: [],
@@ -1204,12 +1205,27 @@ export function processOrderbookSwaps(
     ? Math.max(0, Math.min(10_000, Math.floor(Number(swapTakerFeeBpsRaw))))
     : 0;
   const quarantinedOfferKeys = new Set<string>();
+  const canonicalInputOfferKeys = new Set(
+    swapOffers.map((offer) => swapKey(String(offer.accountId || ''), String(offer.offerId || ''))),
+  );
   const quarantineOffer = (accountId: string, offerId: string, reason: string): true => {
     const key = swapKey(accountId, offerId);
     if (quarantinedOfferKeys.has(key)) return true;
     quarantinedOfferKeys.add(key);
     quarantinedOffers.push({ accountId, offerId, reason });
     return true;
+  };
+  const rejectInvalidOffer = (accountId: string, offerId: string, reason: string): void => {
+    if (rehydrateOnly) {
+      quarantineOffer(accountId, offerId, reason);
+      return;
+    }
+    queueUniqueSwapResolveForEntityState(mempoolOps, hubState, queuedSwapResolutions, accountId, {
+      offerId,
+      fillRatio: 0,
+      cancelRemainder: true,
+      comment: reason,
+    });
   };
 
   // Pair books stay hot within this pass so same-tick offers see each other's exact fills.
@@ -1350,11 +1366,43 @@ export function processOrderbookSwaps(
   };
 
   const liveOffersByPair = new Map<string, NormalizedOrderbookOffer[]>();
-  for (const liveOffer of collectOpenSwapOffersForOrderbook(hubState)) {
+  for (const [accountId, account] of hubState.accounts.entries()) {
+    for (const [offerId, offer] of account.swapOffers.entries()) {
+      if (
+        !offer ||
+        typeof offer.giveTokenId !== 'number' ||
+        typeof offer.wantTokenId !== 'number' ||
+        typeof offer.giveAmount !== 'bigint' ||
+        typeof offer.wantAmount !== 'bigint'
+      ) {
+        if (canonicalInputOfferKeys.has(swapKey(accountId, String(offerId)))) {
+          continue;
+        }
+        rejectInvalidOffer(accountId, String(offerId), 'invalid-structure');
+        continue;
+      }
+      const liveOffer = normalizeSwapOfferForOrderbook(
+        {
+          offerId: String(offerId),
+          makerIsLeft: offer.makerIsLeft,
+          fromEntity: account.leftEntity,
+          toEntity: account.rightEntity,
+          createdHeight: offer.createdHeight,
+          giveTokenId: offer.giveTokenId,
+          giveAmount: offer.giveAmount,
+          wantTokenId: offer.wantTokenId,
+          wantAmount: offer.wantAmount,
+          priceTicks: offer.priceTicks,
+          timeInForce: offer.timeInForce,
+          minFillRatio: offer.minFillRatio,
+        },
+        accountId,
+      );
     const { pairId } = canonicalPair(liveOffer.giveTokenId, liveOffer.wantTokenId);
     const existing = liveOffersByPair.get(pairId);
     if (existing) existing.push(liveOffer);
     else liveOffersByPair.set(pairId, [liveOffer]);
+    }
   }
 
   const getLiveOffersForPair = (pairId: string): NormalizedOrderbookOffer[] =>
@@ -1591,7 +1639,7 @@ export function processOrderbookSwaps(
       console.warn(
         `⚠️ ORDERBOOK: Invalid token direction for offer=${offer.offerId} give=${offer.giveTokenId} want=${offer.wantTokenId} base=${base} quote=${quote}`,
       );
-      if (rehydrateOnly && quarantineOffer(currentAccountId, offer.offerId, 'invalid-direction')) continue;
+      rejectInvalidOffer(currentAccountId, offer.offerId, 'invalid-direction');
       continue;
     }
 
@@ -1599,7 +1647,7 @@ export function processOrderbookSwaps(
     const quoteAmount = isSellBase ? offer.wantAmount : offer.giveAmount;
     if (baseAmount <= 0n || quoteAmount <= 0n) {
       console.warn(`⚠️ ORDERBOOK: Zero amount in offer=${offer.offerId}, base=${baseAmount}, quote=${quoteAmount}`);
-      if (rehydrateOnly && quarantineOffer(currentAccountId, offer.offerId, 'zero-amount')) continue;
+      rejectInvalidOffer(currentAccountId, offer.offerId, 'zero-amount');
       continue;
     }
     if (minTradeSize > 0n && quoteAmount < minTradeSize) {
@@ -1622,7 +1670,7 @@ export function processOrderbookSwaps(
       console.warn(
         `⚠️ ORDERBOOK: base amount not aligned to SWAP_LOT_SCALE — skipping offer=${offer.offerId}, amount=${baseAmount}`,
       );
-      if (rehydrateOnly && quarantineOffer(currentAccountId, offer.offerId, `lot-misaligned:${baseAmount.toString()}`)) continue;
+      rejectInvalidOffer(currentAccountId, offer.offerId, `lot-misaligned:${baseAmount.toString()}`);
       continue;
     }
 
@@ -1632,7 +1680,7 @@ export function processOrderbookSwaps(
 
     if (qtyLots === 0n || qtyLots > MAX_LOTS || priceTicks <= 0n) {
       console.warn(`⚠️ ORDERBOOK: Invalid order — skipping offer=${offer.offerId}, qty=${qtyLots}, price=${priceTicks}`);
-      if (rehydrateOnly && quarantineOffer(currentAccountId, offer.offerId, `invalid-order:${qtyLots.toString()}:${priceTicks.toString()}`)) continue;
+      rejectInvalidOffer(currentAccountId, offer.offerId, `invalid-order:${qtyLots.toString()}:${priceTicks.toString()}`);
       continue;
     }
 

@@ -55,12 +55,10 @@
   $: if ($timeIndex !== lastTimeTravelIndex && $history.length > 0) {
     const targetIndex = $timeIndex < 0 ? $history.length - 1 : $timeIndex;
     const frame = $history[targetIndex];
-    if (frame?.jReplicas) {
-      const jReplicas = Array.isArray(frame.jReplicas)
-        ? frame.jReplicas
-        : Object.values(frame.jReplicas);
+    if (frame) {
+      const jReplicas = Array.from(frame.jReplicas.values());
       const stateRoot = jReplicas[0]?.stateRoot;
-      const browserVMState = frame?.browserVMState;
+      const browserVMState = frame.browserVMState;
       const hasBrowserVMState = !!browserVMState &&
         typeof browserVMState.stateRoot === 'string' &&
         Array.isArray(browserVMState.trieData);

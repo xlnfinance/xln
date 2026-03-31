@@ -152,7 +152,7 @@ export const buildCanonicalEnvSnapshot = (
     ...(core.runtimeSeed !== undefined && core.runtimeSeed !== null ? { runtimeSeed: core.runtimeSeed } : {}),
     ...(core.runtimeId ? { runtimeId: core.runtimeId } : {}),
     eReplicas: new Map(core.eReplicas),
-    jReplicas: core.jReplicas.map(([, replica]) => replica),
+    jReplicas: new Map(core.jReplicas),
     ...(core.browserVMState ? { browserVMState: core.browserVMState } : {}),
     runtimeInput: cloneRuntimeInput(options.runtimeInput),
     runtimeOutputs: cloneRuntimeOutputs(options.runtimeOutputs),
@@ -184,9 +184,14 @@ export const normalizePersistedSnapshotInPlace = (
   }
   if (snapshot.jReplicas) {
     const jMap = deps.normalizeJReplicaMap(snapshot.jReplicas);
-    snapshot.jReplicas = Array.from(jMap.values()).map(jr => ({
-      ...jr,
-      stateRoot: jr.stateRoot ? new Uint8Array(jr.stateRoot as any) : jr.stateRoot,
-    }));
+    snapshot.jReplicas = new Map(
+      Array.from(jMap.entries()).map(([name, jr]) => [
+        String(name),
+        {
+          ...jr,
+          stateRoot: jr.stateRoot ? new Uint8Array(jr.stateRoot as any) : jr.stateRoot,
+        },
+      ]),
+    );
   }
 };

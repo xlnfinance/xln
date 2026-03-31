@@ -58,13 +58,8 @@
 
   function buildJMachines(env: { jReplicas?: unknown } | null | undefined): JMachineNode[] {
     const jReplicas = env?.jReplicas;
-    if (!jReplicas) return [];
-
-    const list = jReplicas instanceof Map
-      ? Array.from(jReplicas.values())
-      : Array.isArray(jReplicas)
-        ? jReplicas
-        : Object.values(jReplicas);
+    if (!(jReplicas instanceof Map)) return [];
+    const list = Array.from(jReplicas.values());
 
     return list
       .map((jr: { name?: string } | unknown) => ({ name: (jr as { name?: string })?.name }))

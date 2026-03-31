@@ -389,6 +389,7 @@ export const applyEntityTx = async (
           locks: new Map(), // HTLC: Initialize empty locks
           swapOffers: new Map(), // Swap: Initialize empty offers
           swapOrderHistory: new Map(),
+          swapClosedOrders: new Map(),
           // Bilateral J-event consensus
           leftJObservations: [],
           rightJObservations: [],
@@ -1300,7 +1301,6 @@ export const applyEntityTx = async (
         leftEntity,
         rightEntity,
         contractDiffs,
-        [],
         [],
         sig,
         entityProviderAddress,

@@ -1,7 +1,6 @@
 <script lang="ts">
   import type { Env, Profile as GossipProfile } from '@xln/runtime/xln-api';
-  import { enqueueEntityInputs, xlnEnvironment, xlnFunctions, error } from '../../stores/xlnStore';
-  import { isLive as globalIsLive } from '../../stores/timeStore';
+  import { enqueueEntityInputs, xlnFunctions, error } from '../../stores/xlnStore';
   import {
     getCounterpartyAccount,
     getReplicaForEntity,
@@ -12,14 +11,16 @@
   import EntitySelect from './EntitySelect.svelte';
   import { amountToUsd } from '$lib/utils/assetPricing';
 
-  $: activeXlnFunctions = $xlnFunctions;
-  $: activeEnv = $xlnEnvironment;
-  $: activeIsLive = $globalIsLive;
-
   export let entityId: string;
+  export let env: Env;
+  export let isLive: boolean;
   export let signerId: string | null = null;
   export let counterpartyId: string | null;
   export let accountIds: string[] = [];
+
+  $: activeXlnFunctions = $xlnFunctions;
+  $: activeEnv = env;
+  $: activeIsLive = isLive;
 
   let selectedCounterparty = counterpartyId || '';
   let selectedTokenId = 1;

@@ -44,6 +44,8 @@ services:
     pull_policy: always
     restart: always
     stop_grace_period: 5m
+    logging:
+      driver: "none"
     depends_on:
       db:
         condition: service_healthy
@@ -68,7 +70,7 @@ services:
       BLOCKSCOUT_HOST: ${BLOCKSCOUT_DOMAIN}
       BLOCKSCOUT_PROTOCOL: https
       DISABLE_MARKET: "true"
-      DISABLE_FILE_LOGGING: "false"
+      DISABLE_FILE_LOGGING: "true"
       ADMIN_PANEL_ENABLED: "false"
       API_V1_READ_METHODS_DISABLED: "false"
       API_V1_WRITE_METHODS_DISABLED: "false"

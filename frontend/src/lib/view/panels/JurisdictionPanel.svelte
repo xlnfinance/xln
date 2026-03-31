@@ -120,16 +120,11 @@
     if (timeIndex >= 0 && history && history.length > 0) {
       const idx = Math.min(timeIndex as number, history.length - 1);
       const frame = history[idx];
-      // EnvSnapshot has jReplicas as array
-      return frame?.jReplicas || [];
+      return frame ? Array.from(frame.jReplicas.values()) : [];
     }
 
-    // From live env (jReplicas is a Map)
     if (env?.jReplicas) {
-      if (env.jReplicas instanceof Map) {
-        return Array.from(env.jReplicas.values());
-      }
-      return env.jReplicas;
+      return Array.from(env.jReplicas.values());
     }
 
     return [];

@@ -12,6 +12,13 @@ function ensureSwapOrderHistory(accountMachine: AccountMachine): Map<string, Swa
   return accountMachine.swapOrderHistory;
 }
 
+function ensureSwapClosedOrders(accountMachine: AccountMachine): Map<string, SwapOrderHistoryEntry> {
+  if (!(accountMachine.swapClosedOrders instanceof Map)) {
+    accountMachine.swapClosedOrders = new Map();
+  }
+  return accountMachine.swapClosedOrders;
+}
+
 export function recordSwapOfferLifecycle(
   accountMachine: AccountMachine,
   offer: SwapOffer,
@@ -24,7 +31,7 @@ export function recordSwapOfferLifecycle(
     giveAmount: offer.giveAmount,
     wantTokenId: offer.wantTokenId,
     wantAmount: offer.wantAmount,
-    priceTicks: offer.priceTicks,
+    ...(offer.priceTicks !== undefined ? { priceTicks: offer.priceTicks } : {}),
     createdHeight: offer.createdHeight,
     cancelRequested: false,
     lastUpdatedHeight: offer.createdHeight,
@@ -67,7 +74,7 @@ export function recordSwapResolveLifecycle(
       giveAmount: fallbackOffer.giveAmount,
       wantTokenId: fallbackOffer.wantTokenId,
       wantAmount: fallbackOffer.wantAmount,
-      priceTicks: fallbackOffer.priceTicks,
+      ...(fallbackOffer.priceTicks !== undefined ? { priceTicks: fallbackOffer.priceTicks } : {}),
       createdHeight: fallbackOffer.createdHeight ?? currentHeight,
       cancelRequested: false,
       lastUpdatedHeight: currentHeight,
@@ -77,4 +84,19 @@ export function recordSwapResolveLifecycle(
   }
   entry.lastUpdatedHeight = currentHeight;
   entry.resolves.push(resolve);
+}
+
+export function recordSwapClosedLifecycle(
+  accountMachine: AccountMachine,
+  offerId: string,
+): void {
+  const historyEntry = ensureSwapOrderHistory(accountMachine).get(offerId);
+  if (!historyEntry) return;
+  const closedOrders = ensureSwapClosedOrders(accountMachine);
+  closedOrders.set(offerId, {
+    ...historyEntry,
+    resolves: Array.isArray(historyEntry.resolves)
+      ? historyEntry.resolves.map((resolve) => ({ ...resolve }))
+      : [],
+  });
 }

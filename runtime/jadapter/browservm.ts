@@ -12,15 +12,12 @@ import type { TypedContractMethod } from '../../jurisdictions/typechain-types/co
 import { Account__factory, Depository__factory, EntityProvider__factory, DeltaTransformer__factory } from '../../jurisdictions/typechain-types/index.ts';
 
 import type { BrowserVMState, Env, JTx } from '../types';
-import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, JSubmitResult, SnapshotId, JBatchReceipt, JTokenInfo, JReserveMint } from './types';
+import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JSubmitResult, SnapshotId, JBatchReceipt, JTokenInfo, JReserveMint } from './types';
 import {
   buildExternalTokenToReserveBatch,
   computeAccountKey,
-  entityIdToAddress,
-  isCanonicalEvent,
   normalizeAdapterEvents,
   parseReceiptLogsToJEvents,
-  toJEvent,
 } from './helpers';
 import {
   processEventBatch,
@@ -59,8 +56,6 @@ export async function createBrowserVMAdapter(
     ? DeltaTransformer__factory.connect(addresses.deltaTransformer, signer as any) as DeltaTransformer
     : null;
 
-  const eventCallbacks = new Map<string, Set<JEventCallback>>();
-  const anyCallbacks = new Set<JEventCallback>();
   type NonPayableMethod<TArgs extends Array<any>, TResult> = TypedContractMethod<TArgs, [TResult], 'nonpayable'>;
 
   const sendTypedTx = async <TArgs extends Array<any>, TResult>(
@@ -98,17 +93,6 @@ export async function createBrowserVMAdapter(
   // Store snapshots for revert functionality
   const snapshots = new Map<string, any>();
   let snapshotCounter = 0;
-
-  // Forward events from browserVM
-  browserVM.onAny((event: any) => {
-    const jEvent = toJEvent(event.name, event.args ?? {}, {
-      blockNumber: event.blockNumber,
-      blockHash: event.blockHash,
-      transactionHash: event.transactionHash,
-    });
-    eventCallbacks.get(event.name)?.forEach(cb => cb(jEvent));
-    anyCallbacks.forEach(cb => cb(jEvent));
-  });
 
   const adapter: JAdapter = {
     mode: 'browservm',
@@ -160,19 +144,6 @@ export async function createBrowserVMAdapter(
         throw new Error('BrowserVM requires BrowserVMState object, not file path');
       }
       await browserVM.restoreState(state);
-    },
-
-    on(eventName: string, callback: JEventCallback): () => void {
-      if (!eventCallbacks.has(eventName)) {
-        eventCallbacks.set(eventName, new Set());
-      }
-      eventCallbacks.get(eventName)!.add(callback);
-      return () => eventCallbacks.get(eventName)?.delete(callback);
-    },
-
-    onAny(callback: JEventCallback): () => void {
-      anyCallbacks.add(callback);
-      return () => anyCallbacks.delete(callback);
     },
 
     async processBlock(): Promise<JEvent[]> {

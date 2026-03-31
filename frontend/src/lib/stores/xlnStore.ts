@@ -99,7 +99,7 @@ async function getXLN(): Promise<XLNModule> {
     XLN = loaded;
     xlnInstance.set(XLN);
     if (typeof window !== 'undefined') {
-      (window as any).__xln_instance = XLN;
+      window.__xln_instance = XLN;
     }
     return XLN;
   })();
@@ -158,7 +158,7 @@ export const xlnEnvironment = derived(
 export function setXlnEnvironment(env: Env | null): void {
   bootstrapEnvironment.set(env);
   if (typeof window !== 'undefined') {
-    (window as any).__xln_env = env;
+    window.__xln_env = env;
   }
   if (!env) return;
 
@@ -193,7 +193,7 @@ export function resolveRelayUrls(): string[] {
 }
 
 // Derived stores for convenience
-export const replicas = derived(xlnEnvironment, $env => $env?.eReplicas || new Map());
+export const replicas = derived(xlnEnvironment, $env => ($env ? $env.eReplicas : new Map()));
 
 // P2P connection state (polled from runtime)
 export type P2PState = {
@@ -318,7 +318,7 @@ export async function initializeXLN(): Promise<Env> {
   // CRITICAL: Don't re-initialize if we already have data
   if (isInitialized) {
     const currentEnv = get(xlnEnvironment);
-    if (currentEnv && currentEnv.eReplicas?.size > 0) {
+    if (currentEnv && currentEnv.eReplicas.size > 0) {
       console.log('🛑 PREVENTED RE-INITIALIZATION: XLN already has data, keeping existing state');
       error.set(null);
       isLoading.set(false);
@@ -348,33 +348,31 @@ export async function initializeXLN(): Promise<Env> {
       }
 
       setXlnEnvironment(env);
-      history.set(env?.history || []);
-      currentHeight.set(env?.height || 0);
+      history.set(env.history);
+      currentHeight.set(env.height);
 
       // Sync to runtimeStore (local runtime)
       runtimeOperations.updateLocalEnv(env);
 
       // Extract and persist entity positions from eReplicas (positions are immutable)
       // Positions are RELATIVE to j-machine - store jReplica reference for world position calculation
-      if (env?.eReplicas) {
-        entityPositions.update(currentPositions => {
-          let hasChanges = false;
-          for (const [replicaKey, replica] of env.eReplicas.entries()) {
-            const entityId = xln.extractEntityId(replicaKey); // Uses ids.ts - no split
-            if (entityId && replica.position && !currentPositions.has(entityId)) {
-              const pos = replica.position;
-              // Store relative position + jReplica reference (defaults to activeJurisdiction)
-              const jurisdiction = pos.jurisdiction || pos.xlnomy || env.activeJurisdiction || 'default';
-              currentPositions.set(entityId, { x: pos.x, y: pos.y, z: pos.z, jurisdiction });
-              hasChanges = true;
-              console.log(
-                `[xlnStore] 📍 Captured relative position for ${entityId.slice(0, 10)}: (${pos.x}, ${pos.y}, ${pos.z}) in jurisdiction=${jurisdiction}`,
-              );
-            }
+      entityPositions.update(currentPositions => {
+        let hasChanges = false;
+        for (const [replicaKey, replica] of env.eReplicas.entries()) {
+          const entityId = xln.extractEntityId(replicaKey); // Uses ids.ts - no split
+          if (entityId && replica.position && !currentPositions.has(entityId)) {
+            const pos = replica.position;
+            // Store relative position + jReplica reference (defaults to activeJurisdiction)
+            const jurisdiction = pos.jurisdiction || pos.xlnomy || env.activeJurisdiction || 'default';
+            currentPositions.set(entityId, { x: pos.x, y: pos.y, z: pos.z, jurisdiction });
+            hasChanges = true;
+            console.log(
+              `[xlnStore] 📍 Captured relative position for ${entityId.slice(0, 10)}: (${pos.x}, ${pos.y}, ${pos.z}) in jurisdiction=${jurisdiction}`,
+            );
           }
-          return hasChanges ? new Map(currentPositions) : currentPositions;
-        });
-      }
+        }
+        return hasChanges ? new Map(currentPositions) : currentPositions;
+      });
 
       // Update window for e2e testing
     };
@@ -404,23 +402,21 @@ export async function initializeXLN(): Promise<Env> {
 
     // Extract positions from initial load as well
     // Positions are RELATIVE to j-machine - store jReplica reference for world position calculation
-    if (env?.eReplicas) {
-      const initialPositions = new Map<string, RelativeEntityPosition>();
-      for (const [replicaKey, replica] of env.eReplicas.entries()) {
-        const entityId = xln.extractEntityId(replicaKey); // Uses ids.ts - no split
-        if (entityId && replica.position) {
-          const pos = replica.position;
-          // Store relative position + jReplica reference (defaults to activeJurisdiction)
-          const jurisdiction = pos.jurisdiction || pos.xlnomy || env.activeJurisdiction || 'default';
-          initialPositions.set(entityId, { x: pos.x, y: pos.y, z: pos.z, jurisdiction });
-          console.log(
-            `[xlnStore] 📍 Initial relative position for ${entityId.slice(0, 10)}: (${pos.x}, ${pos.y}, ${pos.z}) in jurisdiction=${jurisdiction}`,
-          );
-        }
+    const initialPositions = new Map<string, RelativeEntityPosition>();
+    for (const [replicaKey, replica] of env.eReplicas.entries()) {
+      const entityId = xln.extractEntityId(replicaKey); // Uses ids.ts - no split
+      if (entityId && replica.position) {
+        const pos = replica.position;
+        // Store relative position + jReplica reference (defaults to activeJurisdiction)
+        const jurisdiction = pos.jurisdiction || pos.xlnomy || env.activeJurisdiction || 'default';
+        initialPositions.set(entityId, { x: pos.x, y: pos.y, z: pos.z, jurisdiction });
+        console.log(
+          `[xlnStore] 📍 Initial relative position for ${entityId.slice(0, 10)}: (${pos.x}, ${pos.y}, ${pos.z}) in jurisdiction=${jurisdiction}`,
+        );
       }
-      if (initialPositions.size > 0) {
-        entityPositions.set(initialPositions);
-      }
+    }
+    if (initialPositions.size > 0) {
+      entityPositions.set(initialPositions);
     }
 
     error.set(null);
@@ -510,7 +506,7 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
     const fail = (fnName: string): never => {
       throw new Error(`XLN_NOT_READY:${fnName}`);
     };
-    const failFn = <T extends (...args: any[]) => any>(fnName: string): T =>
+    const failFn = <T extends (...args: unknown[]) => unknown>(fnName: string): T =>
       (((..._args: unknown[]) => fail(fnName)) as unknown as T);
 
     return {
