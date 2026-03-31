@@ -7,11 +7,11 @@
     RoutedEntityInput as EntityInputPayload,
     EntityReplica,
     Env,
+    EnvSnapshot,
     PaymentRoute,
     Profile as GossipProfile,
   } from '@xln/runtime/xln-api';
-  import { getXLN, xlnEnvironment, replicas, xlnFunctions, enqueueEntityInputs } from '../../stores/xlnStore';
-  import { isLive as globalIsLive } from '../../stores/timeStore';
+  import { getXLN, xlnFunctions, enqueueEntityInputs } from '../../stores/xlnStore';
   import { routePreview } from '../../stores/routePreviewStore';
   import { isCounterpartyBlockedByDispute, requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import { toasts } from '$lib/stores/toastStore';
@@ -30,6 +30,8 @@
   } from './payment-routing';
 
   export let entityId: string;
+  export let env: Env;
+  export let isLive: boolean;
 
   // Form state
   let targetEntityId = '';
@@ -106,10 +108,10 @@
   };
   type BarcodeDetectorCtor = new (options?: { formats?: string[] }) => BarcodeDetectorLike;
 
-  $: currentReplicas = $replicas;
-  $: currentEnv = $xlnEnvironment;
+  $: currentReplicas = env.eReplicas;
+  $: currentEnv = env;
   $: activeXlnFunctions = $xlnFunctions;
-  $: activeIsLive = $globalIsLive;
+  $: activeIsLive = isLive;
   $: isSelfRecipient = Boolean(targetEntityId) && normalizeEntityId(targetEntityId) === normalizeEntityId(entityId);
 
   const getGossipProfiles = (): GossipProfile[] => currentEnv?.gossip?.getProfiles?.() || [];
@@ -953,7 +955,11 @@
 
     return results.sort((a, b) => {
       if (a.length !== b.length) return a.length - b.length;
-      return a.join('>').localeCompare(b.join('>'));
+      const leftKey = a.join('>');
+      const rightKey = b.join('>');
+      if (leftKey < rightKey) return -1;
+      if (leftKey > rightKey) return 1;
+      return 0;
     });
   }
 

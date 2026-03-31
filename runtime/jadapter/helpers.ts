@@ -5,8 +5,7 @@
  */
 
 import { ethers } from 'ethers';
-import type { Depository, EntityProvider } from '../../jurisdictions/typechain-types/index.ts';
-import type { JEvent, JEventCallback } from './types';
+import type { JEvent } from './types';
 import type { EntityInput, Env } from '../types';
 import { createEmptyBatch, type JBatch } from '../j-batch';
 import { enqueueRuntimeInput } from '../runtime';
@@ -98,72 +97,6 @@ export const buildExternalTokenToReserveBatch = (params: {
   });
   return batch;
 };
-
-export function setupContractEventListeners(
-  depository: Depository,
-  entityProvider: EntityProvider,
-  eventCallbacks: Map<string, Set<JEventCallback>>,
-  anyCallbacks: Set<JEventCallback>
-) {
-  type ContractEventLike = {
-    args?: { entries(): Iterable<[string, unknown]> };
-    blockNumber?: number;
-    blockHash?: string;
-    transactionHash?: string;
-  };
-  type ContractEventSource = {
-    on(eventName: string, listener: (...args: unknown[]) => void): unknown;
-  };
-  const readEvent = (args: unknown[]): ContractEventLike | null => {
-    const lastArg = args.at(-1);
-    if (typeof lastArg !== 'object' || lastArg === null) return null;
-    return lastArg as ContractEventLike;
-  };
-  const depositoryEvents = [...CANONICAL_J_EVENTS];
-
-  for (const eventName of depositoryEvents) {
-    (depository as unknown as ContractEventSource).on(eventName, (...args: unknown[]) => {
-      const event = readEvent(args);
-      const jEvent = toJEvent(
-        eventName,
-        event?.args ? Object.fromEntries(event.args.entries()) : {},
-        {
-          blockNumber: event?.blockNumber,
-          blockHash: event?.blockHash,
-          transactionHash: event?.transactionHash,
-        },
-      );
-
-      eventCallbacks.get(eventName)?.forEach(cb => cb(jEvent));
-      anyCallbacks.forEach(cb => cb(jEvent));
-    });
-  }
-
-  const entityProviderEvents = [
-    'EntityRegistered',
-    'NameAssigned',
-    'NameTransferred',
-    'GovernanceEnabled',
-  ];
-
-  for (const eventName of entityProviderEvents) {
-    (entityProvider as unknown as ContractEventSource).on(eventName, (...args: unknown[]) => {
-      const event = readEvent(args);
-      const jEvent = toJEvent(
-        eventName,
-        event?.args ? Object.fromEntries(event.args.entries()) : {},
-        {
-          blockNumber: event?.blockNumber,
-          blockHash: event?.blockHash,
-          transactionHash: event?.transactionHash,
-        },
-      );
-
-      eventCallbacks.get(eventName)?.forEach(cb => cb(jEvent));
-      anyCallbacks.forEach(cb => cb(jEvent));
-    });
-  }
-}
 
 // ═══════════════════════════════════════════════════════════════════════════
 // SHARED EVENT CONVERSION — used by ALL JAdapter modes (browservm + rpc)

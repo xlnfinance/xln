@@ -1,6 +1,6 @@
   <script lang="ts">
     import type { AccountMachine, EntityReplica, Tab } from '$lib/types/ui';
-  import type { Env, EnvSnapshot } from '@xln/runtime/xln-api';
+  import type { Delta, Env, EnvSnapshot } from '@xln/runtime/xln-api';
   import { getBestAsk, getBestBid } from '@xln/runtime/xln-api';
   import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import type { SwapBookEntry } from '@xln/runtime/xln-api';
@@ -56,6 +56,13 @@
     accountIds: string[];
   };
   type SnapshotLevel = { price: bigint; size: number; total: number };
+  type OrderbookLevelClickDetail = {
+    side: BookSide;
+    priceTicks: string;
+    size: number;
+    accountIds: string[];
+    displayPrice?: string;
+  };
   type OrderbookSnapshot = {
     pairId: string;
     bids: SnapshotLevel[];
@@ -169,9 +176,7 @@
     $: activeFrame = env;
     $: runtimeEnv = isRuntimeEnv(activeFrame) ? activeFrame : null;
     $: activeIsLive = isLive;
-    $: currentReplica = replica
-      ? activeFrame.eReplicas.get(`${replica.entityId}:${replica.signerId}`) ?? null
-      : null;
+    $: currentReplica = replica;
 
     // Get available accounts (counterparties)
   $: accounts = currentReplica?.state?.accounts
@@ -235,19 +240,19 @@
   }
   $: selectedHubOptions = hubAccountIds.map((id) => ({ value: id, label: accountLabel(id) }));
   $: orderbookSourceLabels = Object.fromEntries(
-    hubAccountIds.map((id) => [id, accountLabel(id)]),
+    orderbookHubIds.map((id) => [id, accountLabel(id)]),
   );
   $: orderbookSourceAvatars = Object.fromEntries(
-    hubAccountIds.map((id) => [id, activeXlnFunctions?.isReady ? (activeXlnFunctions.generateEntityAvatar?.(id) || '') : '']),
+    orderbookHubIds.map((id) => [id, activeXlnFunctions?.isReady ? (activeXlnFunctions.generateEntityAvatar?.(id) || '') : '']),
   );
 
   type TokenKeyedMap<V> = Map<number, V> | Map<string, V>;
-  type DeltaLike = {
-    collateral?: unknown;
-    ondelta?: unknown;
-    offdelta?: unknown;
-    leftCreditLimit?: unknown;
-    rightCreditLimit?: unknown;
+  type OfferLike = {
+    giveTokenId: number;
+    wantTokenId: number;
+    giveAmount?: bigint;
+    wantAmount?: bigint;
+    priceTicks?: bigint;
   };
 
   function getTokenMapValue<V>(map: TokenKeyedMap<V> | undefined, tokenIdValue: number): V | undefined {
@@ -259,6 +264,20 @@
 
   function nonNegative(value: bigint): bigint {
     return value < 0n ? 0n : value;
+  }
+
+  function getAccountDelta(counterpartyEntityId: string, tokenIdValue: number): { delta: Delta; isLeft: boolean } | null {
+    if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0 || !tab.entityId) return null;
+    const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
+    const account = currentReplica?.state?.accounts?.get?.(resolvedCounterparty);
+    const deltas = account?.deltas as TokenKeyedMap<Delta> | undefined;
+    if (!(deltas instanceof Map)) return null;
+    const delta = getTokenMapValue(deltas, tokenIdValue);
+    if (!delta) return null;
+    return {
+      delta,
+      isLeft: String(tab.entityId).toLowerCase() < String(resolvedCounterparty).toLowerCase(),
+    };
   }
 
   type PairOption = {
@@ -351,7 +370,7 @@
       if (aKey === primaryKey && bKey !== primaryKey) return -1;
       if (bKey === primaryKey && aKey !== primaryKey) return 1;
       if (a.liquidScore !== b.liquidScore) return b.liquidScore - a.liquidScore;
-      return a.label.localeCompare(b.label);
+      return compareStableText(a.label, b.label);
     });
   }
 
@@ -436,6 +455,11 @@
     return whole;
   }
 
+  function compareStableText(left: string, right: string): number {
+    if (left === right) return 0;
+    return left < right ? -1 : 1;
+  }
+
   function handlePriceRatioInput(event: Event): void {
     const target = event.currentTarget as HTMLInputElement | null;
     hasUserEditedPriceInput = true;
@@ -454,16 +478,10 @@
   $: activeOffers = currentReplica ? activeXlnFunctions.listOpenSwapOffers(currentReplica.state) : [];
 
   function readOutCapacity(counterpartyEntityId: string, tokenIdValue: number): bigint {
-    if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return 0n;
-    const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
-    const account = currentReplica?.state?.accounts?.get?.(resolvedCounterparty);
-    const deltas = account?.deltas as TokenKeyedMap<unknown> | undefined;
-    if (!(deltas instanceof Map) || !activeXlnFunctions?.deriveDelta || !tab.entityId) return 0n;
-    const delta = getTokenMapValue(deltas, tokenIdValue);
-    if (!delta) return 0n;
-    const isLeft = String(tab.entityId).toLowerCase() < String(resolvedCounterparty).toLowerCase();
+    const accountDelta = getAccountDelta(counterpartyEntityId, tokenIdValue);
+    if (!accountDelta || !activeXlnFunctions?.deriveDelta) return 0n;
     try {
-      const derived = activeXlnFunctions.deriveDelta(delta, isLeft);
+      const derived = activeXlnFunctions.deriveDelta(accountDelta.delta, accountDelta.isLeft);
       const outCapacityRaw = (derived as { outCapacity?: unknown })?.outCapacity;
       if (typeof outCapacityRaw === 'bigint') return outCapacityRaw;
       return toBigIntSafe(outCapacityRaw) ?? 0n;
@@ -476,22 +494,16 @@
     if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return false;
     const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
     const account = currentReplica?.state?.accounts?.get?.(resolvedCounterparty);
-    const deltas = account?.deltas as TokenKeyedMap<unknown> | undefined;
+    const deltas = account?.deltas as TokenKeyedMap<Delta> | undefined;
     if (!(deltas instanceof Map)) return false;
     return getTokenMapValue(deltas, tokenIdValue) !== undefined;
   }
 
   function readInCapacity(counterpartyEntityId: string, tokenIdValue: number): bigint {
-    if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return 0n;
-    const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
-    const account = currentReplica?.state?.accounts?.get?.(resolvedCounterparty);
-    const deltas = account?.deltas as TokenKeyedMap<unknown> | undefined;
-    if (!(deltas instanceof Map) || !activeXlnFunctions?.deriveDelta || !tab.entityId) return 0n;
-    const delta = getTokenMapValue(deltas, tokenIdValue);
-    if (!delta) return 0n;
-    const isLeft = String(tab.entityId).toLowerCase() < String(resolvedCounterparty).toLowerCase();
+    const accountDelta = getAccountDelta(counterpartyEntityId, tokenIdValue);
+    if (!accountDelta || !activeXlnFunctions?.deriveDelta) return 0n;
     try {
-      const derived = activeXlnFunctions.deriveDelta(delta, isLeft);
+      const derived = activeXlnFunctions.deriveDelta(accountDelta.delta, accountDelta.isLeft);
       const inCapacityRaw = (derived as { inCapacity?: unknown })?.inCapacity;
       if (typeof inCapacityRaw === 'bigint') return inCapacityRaw;
       return toBigIntSafe(inCapacityRaw) ?? 0n;
@@ -500,14 +512,8 @@
     }
   }
 
-  function readAccountDelta(counterpartyEntityId: string, tokenIdValue: number): DeltaLike | null {
-    if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return null;
-    const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
-    const account = currentReplica?.state?.accounts?.get?.(resolvedCounterparty);
-    const deltas = account?.deltas as TokenKeyedMap<unknown> | undefined;
-    if (!(deltas instanceof Map)) return null;
-    const delta = getTokenMapValue(deltas, tokenIdValue) as DeltaLike | undefined;
-    return delta || null;
+  function readAccountDelta(counterpartyEntityId: string, tokenIdValue: number): Delta | null {
+    return getAccountDelta(counterpartyEntityId, tokenIdValue)?.delta ?? null;
   }
 
   function readPeerCreditLimit(counterpartyEntityId: string, tokenIdValue: number): bigint {
@@ -525,13 +531,11 @@
   ): bigint | null {
     if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0 || desiredInboundAmount <= 0n) return null;
     if (!activeXlnFunctions?.deriveDelta || !tab.entityId) return desiredInboundAmount;
-    const delta = readAccountDelta(counterpartyEntityId, tokenIdValue);
-    if (!delta) return desiredInboundAmount;
-
+    const accountDelta = getAccountDelta(counterpartyEntityId, tokenIdValue);
+    if (!accountDelta) return desiredInboundAmount;
     const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
-    const isLeft = String(tab.entityId).toLowerCase() < String(resolvedCounterparty).toLowerCase();
     try {
-      const derived = activeXlnFunctions.deriveDelta(delta, isLeft) as {
+      const derived = activeXlnFunctions.deriveDelta(accountDelta.delta, accountDelta.isLeft) as {
         inCapacity?: unknown;
         inPeerCredit?: unknown;
         outPeerCredit?: unknown;
@@ -561,10 +565,14 @@
 
   $: giveTokenSymbol = tokenSymbol(giveToken);
   $: wantTokenSymbol = tokenSymbol(wantToken);
-  $: wantTokenPresentInAccount = (currentReplica, hasTokenInAccount(activeOrderAccountId, wantToken));
-  // Include currentReplica in deps so capacity updates when account state changes (new frames)
-  $: availableGiveCapacity = (currentReplica, readOutCapacity(activeOrderAccountId, giveToken));
-  $: availableWantInCapacity = (currentReplica, readInCapacity(activeOrderAccountId, wantToken));
+  $: {
+    currentReplica;
+    wantTokenPresentInAccount = hasTokenInAccount(activeOrderAccountId, wantToken);
+    availableGiveCapacity = readOutCapacity(activeOrderAccountId, giveToken);
+    availableWantInCapacity = readInCapacity(activeOrderAccountId, wantToken);
+    autoInboundCreditTarget = computeAutoInboundCreditTarget(activeOrderAccountId, wantToken, canonicalWantAmount);
+    currentPeerCreditLimit = readPeerCreditLimit(activeOrderAccountId, wantToken);
+  }
   $: formattedAvailableGive = Number.isFinite(giveToken) && giveToken > 0
     ? `${formatAmount(availableGiveCapacity, giveToken)} ${giveTokenSymbol}`
     : availableGiveCapacity.toString();
@@ -581,8 +589,6 @@
   $: leftoverGiveLabel = Number.isFinite(giveToken) && giveToken > 0
     ? `${formatAmount(giveAmountLeftover, giveToken)} ${giveTokenSymbol}`
     : giveAmountLeftover.toString();
-  $: autoInboundCreditTarget = (currentReplica, computeAutoInboundCreditTarget(activeOrderAccountId, wantToken, canonicalWantAmount));
-  $: currentPeerCreditLimit = (currentReplica, readPeerCreditLimit(activeOrderAccountId, wantToken));
   $: autoInboundCreditIncrease = autoInboundCreditTarget && autoInboundCreditTarget > currentPeerCreditLimit
     ? autoInboundCreditTarget - currentPeerCreditLimit
     : 0n;
@@ -860,7 +866,7 @@
     orderListTab = nextTab;
   }
 
-  function handleOrderbookLevelClick(event: CustomEvent<{ side: BookSide; priceTicks: string; size: number; accountIds: string[] }>) {
+  function handleOrderbookLevelClick(event: CustomEvent<OrderbookLevelClickDetail>) {
     submitError = '';
     const pair = selectedPair;
     if (!pair) {
@@ -903,8 +909,11 @@
     selectedOrderLevel = {
       side,
       priceTicks,
-      displayPrice: String(event.detail?.displayPrice || ''),
-      inputPriceTicks: parseDisplayPriceTicks(String(event.detail?.displayPrice || ''), priceTicks),
+      displayPrice: typeof event.detail.displayPrice === 'string' ? event.detail.displayPrice : '',
+      inputPriceTicks: parseDisplayPriceTicks(
+        typeof event.detail.displayPrice === 'string' ? event.detail.displayPrice : '',
+        priceTicks,
+      ),
       sizeBaseWei,
       baseTokenId: pair.baseTokenId,
       quoteTokenId: pair.quoteTokenId,
@@ -1030,14 +1039,14 @@
   $: canonicalGiveAmount = preparedOrder?.effectiveGive ?? 0n;
   $: canonicalWantAmount = preparedOrder?.effectiveWant ?? 0n;
   $: giveAmountLeftover = preparedOrder?.unspentGiveAmount ?? 0n;
-  function offerSideLabel(offer: SwapOfferLike): 'Ask' | 'Bid' {
+  function offerSideLabel(offer: OfferLike): 'Ask' | 'Bid' {
     const give = Number(offer.giveTokenId || 0);
     const want = Number(offer.wantTokenId || 0);
     const pair = resolvePairOrientation(give, want);
     return give === pair.baseTokenId ? 'Ask' : 'Bid';
   }
 
-  function offerPriceTicks(offer: SwapOfferLike): bigint {
+  function offerPriceTicks(offer: OfferLike): bigint {
     const explicitPriceTicks = toBigIntSafe(offer.priceTicks);
     if (explicitPriceTicks && explicitPriceTicks > 0n) return explicitPriceTicks;
     const giveToken = Number(offer.giveTokenId || 0);
@@ -1071,7 +1080,7 @@
     if (aDust !== bDust) return aDust ? 1 : -1;
     const aCreated = BigInt(a.createdHeight);
     const bCreated = BigInt(b.createdHeight);
-    if (aCreated === bCreated) return String(a.offerId).localeCompare(String(b.offerId));
+    if (aCreated === bCreated) return compareStableText(String(a.offerId), String(b.offerId));
     return aCreated > bCreated ? -1 : 1;
   });
 
@@ -1194,11 +1203,14 @@
     };
   }
 
-  function collectOfferLifecycles(): OfferLifecycle[] {
+  function collectOfferLifecyclesFrom(
+    selectSource: (account: AccountMachine) => Map<string, unknown> | undefined,
+  ): OfferLifecycle[] {
     const lifecycles: OfferLifecycle[] = [];
     for (const { accountId, account } of accountMachines()) {
-      if (!(account.swapOrderHistory instanceof Map)) continue;
-      for (const [offerId, rawEntry] of account.swapOrderHistory.entries()) {
+      const source = selectSource(account);
+      if (!(source instanceof Map)) continue;
+      for (const [offerId, rawEntry] of source.entries()) {
         if (!rawEntry || typeof rawEntry !== 'object') continue;
         const entry = rawEntry as {
           giveTokenId?: unknown;
@@ -1311,15 +1323,14 @@
     return 'neutral';
   }
 
-  $: offerLifecycles = collectOfferLifecycles();
+  $: {
+    currentReplica;
+    activeXlnFunctions;
+    offerLifecycles = collectOfferLifecyclesFrom((account) => account.swapOrderHistory);
+    closedOfferLifecycles = collectOfferLifecyclesFrom((account) => account.swapClosedOrders);
+  }
 
-  $: openOfferIdSet = new Set(
-    openOrders
-      .map((offer) => offerLifecycleKey(String(offer.accountId || ''), String(offer.offerId || '')))
-      .filter(Boolean),
-  );
-  $: closedOrderViews = offerLifecycles
-    .filter((offer) => !openOfferIdSet.has(offer.key))
+  $: closedOrderViews = closedOfferLifecycles
     .map((offer) => {
       const side = offerSideLabel(offer);
       const pair = resolvePairOrientation(offer.giveTokenId, offer.wantTokenId);

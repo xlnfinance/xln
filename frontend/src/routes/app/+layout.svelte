@@ -32,7 +32,6 @@
   let bootGeneration = $state(0);
   let lockTestMode = $state(false);
   let currentHash = $state('');
-  const BUILD_HASH_STORAGE_KEY = 'xln-build-hash';
   const pageSearch = $derived(browser ? $page.url.search : '');
 
   type HashRouteState = {
@@ -104,48 +103,6 @@
     if (!browser) return false;
     const hostname = window.location.hostname;
     return hostname === 'localhost' || hostname === '127.0.0.1';
-  }
-
-  function shouldAutoResetOnBuildChange(): boolean {
-    if (!browser) return false;
-    const hostname = window.location.hostname;
-    return hostname !== 'localhost' && hostname !== '127.0.0.1';
-  }
-
-  function readCurrentBuildHash(): string {
-    const hash = typeof __BUILD_HASH__ === 'string' ? __BUILD_HASH__.trim() : '';
-    return hash.length > 0 ? hash : 'dev';
-  }
-
-  async function maybeHandleBuildHashReset(): Promise<boolean> {
-    if (!shouldAutoResetOnBuildChange()) return false;
-
-    const currentBuildHash = readCurrentBuildHash();
-    if (!currentBuildHash || currentBuildHash === 'dev') return false;
-
-    let previousBuildHash = '';
-    try {
-      previousBuildHash = localStorage.getItem(BUILD_HASH_STORAGE_KEY) || '';
-    } catch {
-      previousBuildHash = '';
-    }
-
-    if (!previousBuildHash) {
-      try {
-        localStorage.setItem(BUILD_HASH_STORAGE_KEY, currentBuildHash);
-      } catch {
-        // ignore storage errors
-      }
-      return false;
-    }
-
-    if (previousBuildHash === currentBuildHash) return false;
-
-    console.warn(
-      `[RESET] BUILD_HASH_CHANGED previous=${previousBuildHash} current=${currentBuildHash} -> resetEverything()`,
-    );
-    await resetEverything(`build-hash-reset:${previousBuildHash}->${currentBuildHash}`);
-    return true;
   }
 
   function syncHashLocation(): void {
@@ -223,7 +180,6 @@
 
     void (async () => {
       if (await maybeHandleResetHash()) return;
-      if (await maybeHandleBuildHashReset()) return;
       if (isInactiveTabStandby()) {
         hasActiveTabLock = false;
         activeTabLockReady = true;

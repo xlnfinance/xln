@@ -5,6 +5,7 @@
   import { runtimes as runtimeEntries } from '$lib/stores/runtimeStore';
   import { resetEverything } from '$lib/utils/resetEverything';
   import { xlnFunctions, xlnInstance } from '$lib/stores/xlnStore';
+  import type { Env } from '@xln/runtime';
   import type { Tab, EntityReplica } from '$lib/types/ui';
   import { entityAvatar, preferredAvatar } from '$lib/utils/avatar';
   import { resolveEntityName } from '$lib/utils/entityNaming';
@@ -81,25 +82,20 @@
   }
 
   function collectEntities(
-    env: { eReplicas?: unknown } | null,
+    env: Env | null,
     signerId: string,
     selfEntityId: string | null,
   ): EntitySummary[] {
-    const replicas = env?.eReplicas;
-    const entries = replicas instanceof Map
-      ? Array.from(replicas.values())
-      : Array.isArray(replicas)
-        ? replicas
-        : Object.values((replicas || {}) as Record<string, unknown>);
+    if (!env) return [];
+    const entries = Array.from(env.eReplicas.values());
 
     const signerLower = normalizeId(signerId);
     const seen = new Set<string>();
     const entities: EntitySummary[] = [];
 
-    for (const rawReplica of entries) {
-      const replica = rawReplica as EntityReplica;
-      if (normalizeId(replica?.signerId) !== signerLower) continue;
-      const entityId = replica?.entityId || '';
+    for (const replica of entries) {
+      if (normalizeId(replica.signerId) !== signerLower) continue;
+      const entityId = replica.entityId || '';
       const normalizedEntityId = normalizeId(entityId);
       if (!normalizedEntityId || seen.has(normalizedEntityId)) continue;
       seen.add(normalizedEntityId);
@@ -119,7 +115,7 @@
 
   function getEntityLabel(entityId: string, env: unknown, replica: EntityReplica | null | undefined): string {
     const resolved = resolveEntityName(entityId, env as Parameters<typeof resolveEntityName>[1]);
-    return resolved || replica?.state?.name || entityId;
+    return resolved || replica?.entityId || entityId;
   }
 
   function resolveCurrentEntity(): EntitySummary | null {
@@ -208,7 +204,14 @@
 
 <div class="context-switcher">
 <Dropdown bind:open minWidth={300} maxWidth={380} local={true}>
-  <span slot="trigger" class="pill-trigger">
+  <span
+    slot="trigger"
+    class="pill-trigger"
+    data-testid="context-current"
+    data-runtime-id={$activeVault?.id || ''}
+    data-entity-id={tab.entityId || ''}
+    data-signer-id={tab.signerId || ''}
+  >
     {#if currentAvatar}
       <img src={currentAvatar} alt="" class="pill-avatar" />
     {:else}

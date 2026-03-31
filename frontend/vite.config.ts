@@ -1,5 +1,6 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
+import type { PreviewServer } from 'vite';
 import fs from 'fs';
 import net from 'net';
 import http from 'node:http';
@@ -78,11 +79,6 @@ const hmrConfig = ENABLE_HMR ? {
 } : false;
 
 const proxyConfig = {
-	'/reset': {
-		target: API_PROXY_TARGET,
-		changeOrigin: true,
-		secure: false,
-	},
 	'/api': {
 		target: API_PROXY_TARGET,
 		changeOrigin: true,
@@ -102,7 +98,7 @@ const proxyConfig = {
 	},
 };
 
-const PREVIEW_PROXY_PREFIXES = ['/api', '/rpc', '/reset'];
+const PREVIEW_PROXY_PREFIXES = ['/api', '/rpc'];
 
 function createPreviewHttpProxyMiddleware(targetBase: string) {
 	const upstream = new URL(targetBase);
@@ -177,9 +173,9 @@ export default defineConfig(async ({ command }) => {
 		sveltekit(),
 		{
 			name: 'xln-preview-http-proxy',
-			configurePreviewServer(server) {
-				server.middlewares.use(createPreviewHttpProxyMiddleware(API_PROXY_TARGET));
-			},
+				configurePreviewServer(server: PreviewServer) {
+					server.middlewares.use(createPreviewHttpProxyMiddleware(API_PROXY_TARGET));
+				},
 		},
 	],
 	publicDir: 'static',
@@ -240,8 +236,6 @@ export default defineConfig(async ({ command }) => {
 		// Define globals for browser compatibility
 		global: 'globalThis',
 		__BUILD_NUMBER__: JSON.stringify(BUILD_NUMBER),
-		// Build hash for stale version detection (changes on every build)
-		__BUILD_HASH__: JSON.stringify(Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8)),
 		__BUILD_TIME__: JSON.stringify(new Date().toISOString()),
 	},
 	resolve: {

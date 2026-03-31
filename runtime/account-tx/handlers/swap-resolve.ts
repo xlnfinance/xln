@@ -31,7 +31,7 @@ import {
   requantizeRemainingSwapAtPrice,
   SWAP_LOT_SCALE,
 } from '../../orderbook/types';
-import { recordSwapResolveLifecycle } from './swap-history';
+import { recordSwapClosedLifecycle, recordSwapResolveLifecycle } from './swap-history';
 
 export async function handleSwapResolve(
   accountMachine: AccountMachine,
@@ -324,6 +324,7 @@ export async function handleSwapResolve(
   // 7. Handle remainder
   const makerId = offer.makerIsLeft ? accountMachine.leftEntity : accountMachine.rightEntity;
   let swapOfferCancelled: { offerId: string; accountId: string } | undefined;
+  let closeOrderInHistory = false;
 
   if (cancelRemainder || canonicalFillRatio === MAX_SWAP_FILL_RATIO) {
     // Cancel or fully filled - remove offer and notify orderbook
@@ -339,6 +340,7 @@ export async function handleSwapResolve(
     }
     accountMachine.swapOffers.delete(offerId);
     swapOfferCancelled = { offerId, accountId: makerId };
+    closeOrderInHistory = true;
     events.push(`📊 Swap offer ${offerId.slice(0,8)}... ${canonicalFillRatio === MAX_SWAP_FILL_RATIO ? 'fully filled' : 'cancelled'}`);
   } else {
     // Partial fill - requantize remainder so subsequent fills stay lot-aligned.
@@ -368,6 +370,7 @@ export async function handleSwapResolve(
       }
       accountMachine.swapOffers.delete(offerId);
       swapOfferCancelled = { offerId, accountId: makerId };
+      closeOrderInHistory = true;
       events.push(`📊 Swap offer ${offerId.slice(0,8)}... filled remainder dropped below lot size`);
     } else {
       const releasedGiveDust = requantized.releasedGiveDust;
@@ -411,10 +414,14 @@ export async function handleSwapResolve(
       giveAmount: canonicalGiveAmount,
       wantTokenId: offer.wantTokenId,
       wantAmount: canonicalWantAmount,
-      priceTicks: canonicalPriceTicks,
+      ...(canonicalPriceTicks !== undefined ? { priceTicks: canonicalPriceTicks } : {}),
       createdHeight: offer.createdHeight,
     },
   );
+
+  if (closeOrderInHistory) {
+    recordSwapClosedLifecycle(accountMachine, offerId);
+  }
 
   return { success: true, events, ...(swapOfferCancelled !== undefined && { swapOfferCancelled }) };
 }

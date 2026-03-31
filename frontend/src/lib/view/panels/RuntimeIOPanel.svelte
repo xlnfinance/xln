@@ -166,11 +166,9 @@
   $: replicasArray = currentFrame?.eReplicas ? mapToArray(currentFrame.eReplicas) : [];
 
   // Get xlnomies (J-Machine state) as array
-  // jReplicas is a Map, convert to array for display
-  $: xlnomiesArray = (currentFrame?.jReplicas ?
-    (currentFrame.jReplicas instanceof Map ?
-      Array.from(currentFrame.jReplicas.values()) :
-      Object.values(currentFrame.jReplicas)) : []) as Array<{ name: string; jMachine?: { blockNumber?: number; entities?: any[] } }>;
+  $: xlnomiesArray = (currentFrame?.jReplicas
+    ? Array.from(currentFrame.jReplicas.values())
+    : []) as Array<{ name: string; jMachine?: { blockNumber?: number; entities?: any[] } }>;
 
   // Toggle xlnomy expansion
   function toggleXlnomy(name: string) {

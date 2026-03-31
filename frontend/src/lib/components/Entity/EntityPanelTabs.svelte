@@ -27,8 +27,7 @@
     type DraftBatchReserveIssue,
   } from '@xln/runtime/j-batch';
   import type { Tab, EntityReplica } from '$lib/types/ui';
-  import { getXLN, history as historyStore, resolveConfiguredApiBase, xlnEnvironment as xlnEnvironmentStore } from '../../stores/xlnStore';
-  import { currentTimeIndex as currentTimeIndexStore, isLive as isLiveStore, timeOperations } from '../../stores/timeStore';
+  import { getXLN, resolveConfiguredApiBase } from '../../stores/xlnStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
   import { amountToUsd, getAssetUsdPrice } from '$lib/utils/assetPricing';
   import { activeVault, vaultOperations } from '$lib/stores/vaultStore';
@@ -78,11 +77,11 @@
   export let allowHeaderDeleteRuntime: boolean = false;
   export let headerRuntimeAddLabel: string = '+ Add Runtime';
   export let initialAction: 'r2r' | 'r2c' | undefined = undefined;
-  export let env: Env | EnvSnapshot | null = null;
-  export let history: EnvSnapshot[] | null = null;
-  export let timeIndex: number | null = null;
-  export let isLive: boolean | null = null;
-  export let onGoToLive: (() => void) | null = null;
+  export let env: Env | EnvSnapshot;
+  export let history: EnvSnapshot[];
+  export let timeIndex: number;
+  export let isLive: boolean;
+  export let onGoToLive: () => void;
 
   const dispatch = createEventDispatcher();
 
@@ -122,26 +121,26 @@
   let currentEntityValue = '';
   let currentExternalEoaValue = '';
   let entityActivityAccountFilter = 'all';
+  let firstFaucetAccountId = '';
+  let hasAnyAccounts = false;
 
   function materializeReplicaView(candidate: EntityReplica | null | undefined): EntityReplica | null {
     if (!candidate) return null;
-    return {
-      ...candidate,
-      state: candidate.state ? { ...candidate.state } : candidate.state,
-      position: candidate.position ? { ...candidate.position } : candidate.position,
-    };
+    const materialized: EntityReplica = { ...candidate };
+    if (candidate.state) materialized.state = { ...candidate.state };
+    if (candidate.position) materialized.position = { ...candidate.position };
+    return materialized;
   }
 
   function materializeAccountView(candidate: AccountMachine | null | undefined): AccountMachine | null {
     if (!candidate) return null;
-    return {
+    const materialized: AccountMachine = {
       ...candidate,
       deltas: candidate.deltas instanceof Map ? new Map(candidate.deltas) : candidate.deltas,
-      settlementWorkspace: candidate.settlementWorkspace
-        ? { ...candidate.settlementWorkspace }
-        : candidate.settlementWorkspace,
-      activeDispute: candidate.activeDispute ? { ...candidate.activeDispute } : candidate.activeDispute,
     };
+    if (candidate.settlementWorkspace) materialized.settlementWorkspace = { ...candidate.settlementWorkspace };
+    if (candidate.activeDispute) materialized.activeDispute = { ...candidate.activeDispute };
+    return materialized;
   }
 
   function materializeReplicaMap(
@@ -152,7 +151,7 @@
   }
 
   function getEnvReplicaMap(sourceEnv: Env | EnvSnapshot | null | undefined): Map<string, EntityReplica> | null {
-    if (!sourceEnv || !(sourceEnv.eReplicas instanceof Map)) return null;
+    if (!sourceEnv) return null;
     return materializeReplicaMap(sourceEnv.eReplicas as Map<string, EntityReplica>);
   }
 
@@ -1255,7 +1254,7 @@
         ) ?? 0n
       ) > 0n;
     });
-    return preferredWithBalance?.symbol ?? candidates[0]?.symbol ?? 'USDC';
+    return preferredWithBalance?.symbol ?? candidates[0]?.symbol ?? '';
   }
 
   function getP2PRelayUrls(env: Env | EnvSnapshot | null | undefined): string[] {
@@ -1334,10 +1333,10 @@
 
   $: activeReplicas = getEnvReplicaMap(activeEnv);
   $: activeXlnFunctions = $xlnFunctions;
-  $: activeHistory = history ?? $historyStore;
-  $: activeTimeIndex = timeIndex ?? $currentTimeIndexStore;
-  $: activeEnv = env ?? $xlnEnvironmentStore;
-  $: activeIsLive = isLive ?? $isLiveStore;
+  $: activeHistory = history;
+  $: activeTimeIndex = timeIndex;
+  $: activeEnv = env;
+  $: activeIsLive = isLive;
   $: liveRuntimeEnv = getRuntimeEnv(activeEnv);
 
   function resolveEntitySigner(entityId: string, reason: string): string {
@@ -1419,6 +1418,7 @@
   $: if (!workspaceAccountId || !workspaceAccountIds.includes(workspaceAccountId)) {
     workspaceAccountId = workspaceAccountIds[0] || '';
   }
+  $: firstFaucetAccountId = workspaceAccountIds[0] || accountIds[0] || '';
   $: if (assetWorkspaceTab === 'move' && workspaceAccountIds.length > 0) {
     const token = selectedMoveTransferToken;
     if (moveFromEndpoint === 'account' && token) {
@@ -1492,9 +1492,7 @@
   $: availableJurisdictions = (() => {
     const env = activeEnv;
     if (!env?.jReplicas) return [];
-    if (env.jReplicas instanceof Map) return Array.from(env.jReplicas.values());
-    if (Array.isArray(env.jReplicas)) return env.jReplicas;
-    return Object.values(env.jReplicas || {});
+    return Array.from(env.jReplicas.values());
   })() as Array<{ name?: string }>;
 
   $: {
@@ -3565,7 +3563,7 @@
       return;
     }
     if (target === 'account') {
-      const firstAccountId = workspaceAccountIds[0];
+      const firstAccountId = firstFaucetAccountId;
       if (!firstAccountId) {
         toasts.error('Open an account first');
         return;
@@ -3592,34 +3590,50 @@
     }
   }
 
-  let lastEntityId = '';
-  let lastSignerId = '';
-  let lastRuntimeBalanceKey = '';
-  $: if (tab.entityId !== lastEntityId || tab.signerId !== lastSignerId) {
-    lastEntityId = tab.entityId || '';
-    lastSignerId = tab.signerId || '';
-    refreshBalances();
+  let externalBalancePollTimer: ReturnType<typeof window.setInterval> | null = null;
+  let externalBalancePollKey = '';
+
+  function clearExternalBalancePoller(): void {
+    if (externalBalancePollTimer !== null) {
+      window.clearInterval(externalBalancePollTimer);
+      externalBalancePollTimer = null;
+    }
   }
+
   $: {
-    const runtimeBalanceKey = `${getRuntimeId(activeEnv)}|${String(getActiveJurisdictionName(activeEnv) || '')}`;
-    if (runtimeBalanceKey !== lastRuntimeBalanceKey) {
-      lastRuntimeBalanceKey = runtimeBalanceKey;
-      refreshBalances();
+    if (typeof window === 'undefined') {
+      externalBalancePollKey = '';
+    } else {
+      const signerId = String(currentSignerId || '').trim();
+      const runtimeId = String(getRuntimeId(activeEnv) || '').trim();
+      const jurisdiction = String(getActiveJurisdictionName(activeEnv) || '').trim();
+      const refreshMs = Math.max(1_000, Math.floor(Number($settings.balanceRefreshMs || 1_000)));
+      const nextKey = `${signerId}|${runtimeId}|${jurisdiction}|${activeIsLive ? 'live' : 'history'}|${refreshMs}`;
+      if (nextKey !== externalBalancePollKey) {
+        externalBalancePollKey = nextKey;
+        clearExternalBalancePoller();
+        if (signerId) {
+          void fetchExternalTokens();
+          if (activeIsLive) {
+            externalBalancePollTimer = window.setInterval(() => {
+              void fetchExternalTokens();
+            }, refreshMs);
+          }
+        } else {
+          externalTokens = [];
+          externalTokensLoading = false;
+        }
+      }
     }
   }
 
   onDestroy(() => {
+    clearExternalBalancePoller();
     resetMoveLineMeasurement();
     moveVisualResizeObserver?.disconnect();
   });
 
   onMount(() => {
-    // Fetch once on mount and after explicit user/runtime transitions.
-    // Do not keep a UI-owned polling loop here:
-    // - blockchain event watching belongs to the runtime/J-adapter layer
-    // - repeated UI polling was spamming /rpc and hiding the real watcher cadence
-    // - external wallet balances are refreshed on demand, not by a background timer
-    refreshBalances();
     applyDeepLinkViewFromUrl();
 
     const handleMovePointer = (event: PointerEvent | MouseEvent) => {
@@ -4177,7 +4191,7 @@
             actorEntityId: actorMeta.actorEntityId,
             actorName: actorMeta.actorName,
             actorAvatar: actorMeta.actorAvatar,
-            actorInitials: actorMeta.actorInitials,
+            actorInitials: actorMeta.actorInitials || '',
             headline,
             bodyLines,
             chips: [
@@ -4383,11 +4397,7 @@
   }
 
   function goToLive() {
-    if (onGoToLive) {
-      onGoToLive();
-      return;
-    }
-    timeOperations.goToLive();
+    onGoToLive();
   }
 
   function countBatchOps(batch: JBatch | null | undefined): number {
@@ -4744,8 +4754,9 @@
   ];
   const accountWorkspacePrimaryTabIds: AccountWorkspaceTab[] = ['open', 'send', 'receive', 'swap', 'move'];
   $: hasWorkspaceAccounts = workspaceAccountIds.length > 0;
+  $: hasAnyAccounts = accountIds.length > 0;
   $: faucetSupportsReserve = !!getFaucetReserveTokenMeta(faucetAssetSymbol);
-  $: canShowAccountFaucet = faucetSupportsReserve && hasWorkspaceAccounts;
+  $: canShowAccountFaucet = faucetSupportsReserve && hasAnyAccounts;
   $: visibleAccountWorkspaceTabs = hasWorkspaceAccounts
     ? accountWorkspaceTabs
     : accountWorkspaceTabs.filter((tabConfig) => tabConfig.id === 'open');
@@ -5045,7 +5056,7 @@
 
           <DebtPanel
             entityId={replica.state?.entityId || tab.entityId}
-            signerId={replica.state?.signerId || tab.signerId}
+            signerId={currentSignerId}
             sourceEnv={activeEnv}
             canEnforce={activeIsLive}
             enforcingTokenId={debtEnforcingTokenId}
@@ -5259,7 +5270,18 @@
 
           <section class="account-workspace-content">
             {#if accountWorkspaceTab === 'send'}
-              <PaymentPanel entityId={replica.state?.entityId || tab.entityId} />
+              {#if liveRuntimeEnv && activeIsLive}
+                <PaymentPanel
+                  entityId={replica.state?.entityId || tab.entityId}
+                  env={liveRuntimeEnv}
+                  isLive={activeIsLive}
+                />
+              {:else}
+                <div class="live-required configure-empty">
+                  <AlertTriangle size={18} />
+                  <p>Payments are only available in LIVE mode.</p>
+                </div>
+              {/if}
 
             {:else if accountWorkspaceTab === 'receive'}
               <ReceivePanel entityId={replica.state?.entityId || tab.entityId} />
@@ -5404,9 +5426,16 @@
                     <AlertTriangle size={18} />
                     <p>Select workspace account above first.</p>
                   </div>
+                {:else if !liveRuntimeEnv || !activeIsLive}
+                  <div class="live-required configure-empty">
+                    <AlertTriangle size={18} />
+                    <p>Account actions are only available in LIVE mode.</p>
+                  </div>
                 {:else if configureWorkspaceTab === 'extend-credit'}
                   <CreditForm
                     entityId={replica.state?.entityId || tab.entityId}
+                    env={liveRuntimeEnv}
+                    isLive={activeIsLive}
                     signerId={tab.signerId || null}
                     counterpartyId={workspaceAccountId}
                     accountIds={workspaceAccountIds}
@@ -5415,6 +5444,8 @@
                 {:else if configureWorkspaceTab === 'request-credit'}
                   <CreditForm
                     entityId={replica.state?.entityId || tab.entityId}
+                    env={liveRuntimeEnv}
+                    isLive={activeIsLive}
                     signerId={tab.signerId || null}
                     counterpartyId={workspaceAccountId}
                     accountIds={workspaceAccountIds}
@@ -5423,6 +5454,8 @@
                 {:else if configureWorkspaceTab === 'collateral'}
                   <CollateralForm
                     entityId={replica.state?.entityId || tab.entityId}
+                    env={liveRuntimeEnv}
+                    isLive={activeIsLive}
                     signerId={tab.signerId || null}
                     counterpartyId={workspaceAccountId}
                     accountIds={workspaceAccountIds}
@@ -5733,7 +5766,7 @@
             embedded={true}
             {replica}
             {activeIsLive}
-            currentTimeIndex={activeTimeIndex ?? -1}
+            currentTimeIndex={activeTimeIndex}
             jurisdictionLabel={selectedJurisdictionName || ''}
             requestedTab={settingsSubview}
             tab={tab}

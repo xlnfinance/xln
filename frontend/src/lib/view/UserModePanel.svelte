@@ -61,7 +61,35 @@
     isolatedTimeIndex = writable(-1),
     isolatedIsLive = writable(true)
   }: Props = $props();
+
+  function isLiveRuntimeFrame(frame: RuntimeFrame): frame is Env {
+    return frame.jReplicas instanceof Map;
+  }
+
+  function cloneLiveEnv(frame: Env): Env {
+    return {
+      ...frame,
+      eReplicas: new Map(frame.eReplicas),
+      jReplicas: new Map(frame.jReplicas),
+    };
+  }
+
+  function cloneEnvSnapshot(frame: EnvSnapshot): EnvSnapshot {
+    return {
+      ...frame,
+      eReplicas: new Map(frame.eReplicas),
+      jReplicas: frame.jReplicas.map((replica) => ({ ...replica })),
+    };
+  }
+
+  function cloneRuntimeFrame(frame: RuntimeFrame | null | undefined): RuntimeFrame | null {
+    if (!frame) return null;
+    return isLiveRuntimeFrame(frame) ? cloneLiveEnv(frame) : cloneEnvSnapshot(frame);
+  }
+
   onMount(async () => {
+    isolatedTimeIndex.set(-1);
+    isolatedIsLive.set(true);
     await vaultOperations.initialize();
   });
 
@@ -97,19 +125,12 @@
   let lastRuntimeId: string | null = null;
   let lastVaultId: string | null = null;
 
-  // Sync selected runtime env into isolated stores (user mode only)
-  $effect(() => {
-    if (!activeRuntime?.env) return;
-    isolatedEnv.set(activeRuntime.env);
-    isolatedHistory.set(activeRuntime.env.history || []);
-    isolatedTimeIndex.set(-1);
-    isolatedIsLive.set(true);
-  });
-
   // Reset selections when switching runtimes
   $effect(() => {
     if (!activeRuntime) return;
     if (lastRuntimeId && lastRuntimeId !== activeRuntime.id) {
+      isolatedTimeIndex.set(-1);
+      isolatedIsLive.set(true);
       selectedEntityId = null;
       selectedSignerId = null;
       selectedAccountId = null;
@@ -136,7 +157,7 @@
     lastVaultId = currentVaultId;
   });
 
-  // Current frame (time-aware)
+  // Current frame follows isolated time controls, but user mode should boot LIVE by default.
   const currentFrame: RuntimeFrame | null = $derived.by((): RuntimeFrame | null => {
     const isLive = $isolatedIsLive;
     const timeIdx = $isolatedTimeIndex;
@@ -145,22 +166,16 @@
 
     if (!isLive && timeIdx != null && timeIdx >= 0 && hist && hist.length > 0) {
       const idx = Math.min(timeIdx, hist.length - 1);
-      return hist[idx] ?? null;
+      return cloneRuntimeFrame(hist[idx] ?? null);
     }
-    return env;
+    return cloneRuntimeFrame(env);
   });
 
   // Available jurisdictions (time-aware)
   const availableJurisdictions = $derived.by(() => {
     const frame = currentFrame;
     if (!frame?.jReplicas) return [];
-    if (frame.jReplicas instanceof Map) {
-      return Array.from(frame.jReplicas.values()) as JurisdictionLike[];
-    }
-    if (Array.isArray(frame.jReplicas)) {
-      return frame.jReplicas as JurisdictionLike[];
-    }
-    return Object.values(frame.jReplicas || {}) as JurisdictionLike[];
+    return Array.from(frame.jReplicas.values()) as JurisdictionLike[];
   });
 
   function getFrameActiveJurisdiction(frame: RuntimeFrame | null | undefined): string | null {
@@ -188,9 +203,7 @@
     if (!selectedEntityId || !selectedSignerId || !currentFrame?.eReplicas) {
       return null;
     }
-    const replicas = currentFrame.eReplicas instanceof Map
-      ? currentFrame.eReplicas
-      : new Map<string, EntityReplica>(Object.entries(currentFrame.eReplicas || {}) as Array<[string, EntityReplica]>);
+    const replicas = currentFrame.eReplicas;
     const selectedEntityLower = selectedEntityId.toLowerCase();
     const selectedSignerLower = selectedSignerId.toLowerCase();
     for (const [key, replica] of replicas.entries()) {
@@ -228,9 +241,7 @@
   function listJMachineNames(env: RuntimeFrame | null | undefined): string[] {
     const jReplicas = env?.jReplicas;
     if (!jReplicas) return [];
-    if (jReplicas instanceof Map) return Array.from(jReplicas.keys());
-    if (Array.isArray(jReplicas)) return jReplicas.map((jr) => jr?.name).filter(Boolean);
-    return Object.keys(jReplicas || {});
+    return Array.from(jReplicas.keys());
   }
 
   function findReplicaBySigner(env: RuntimeFrame | null | undefined, signerId: string): EntityReplica | null {
@@ -396,11 +407,7 @@
       || selectedJurisdictionName
       || null;
     if (!jurisdictionName || !currentFrame?.jReplicas) return false;
-    const replicas: JurisdictionEntry[] = currentFrame.jReplicas instanceof Map
-      ? Array.from(currentFrame.jReplicas.values())
-      : Array.isArray(currentFrame.jReplicas)
-        ? currentFrame.jReplicas
-        : Object.values(currentFrame.jReplicas || {});
+    const replicas: JurisdictionEntry[] = Array.from(currentFrame.jReplicas.values());
     const match = replicas.find((replica) => replica?.name === jurisdictionName);
     return Array.isArray(match?.rpcs) && match.rpcs.some((rpc: string) => !rpc.startsWith('browservm://'));
   });
@@ -605,7 +612,7 @@
       on:complete={handleOnboardingComplete}
     />
   </main>
-{:else if viewMode === 'entity'}
+{:else if viewMode === 'entity' && currentFrame}
   <EntityPanelTabs
     tab={entityTab}
     userModeHeader={true}
@@ -628,6 +635,8 @@
     on:addRuntime={handleAddRuntime}
     on:deleteRuntime={handleRemoveRuntime}
   />
+{:else if viewMode === 'entity'}
+  <main class="panel-content"></main>
 {:else if viewMode === 'jurisdiction'}
   <main class="panel-content">
     <JurisdictionPanel

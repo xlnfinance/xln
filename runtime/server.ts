@@ -3980,17 +3980,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     );
   }
 
-  if (pathname === '/api/reset-site-data' && (req.method === 'POST' || req.method === 'GET')) {
-    const responseHeaders = new Headers(headers);
-    responseHeaders.set('Clear-Site-Data', '"cache", "cookies", "storage"');
-    responseHeaders.set('Cache-Control', 'no-store, no-cache, must-revalidate');
-    responseHeaders.set('Pragma', 'no-cache');
-    return new Response(
-      safeStringify({ ok: true, cleared: ['cache', 'cookies', 'storage'] }),
-      { headers: responseHeaders },
-    );
-  }
-
   if (pathname === '/api/debug/reset' && req.method === 'POST') {
     const configuredToken = process.env.DEBUG_RESET_TOKEN;
     if (configuredToken) {
@@ -4039,7 +4028,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     );
   }
 
-  if ((pathname === '/api/reset' || pathname === '/reset') && (req.method === 'POST' || req.method === 'GET')) {
+  if (pathname === '/api/reset' && (req.method === 'POST' || req.method === 'GET')) {
     const configuredToken = process.env.DEBUG_RESET_TOKEN;
     if (configuredToken) {
       const supplied = req.headers.get('x-debug-reset-token') || '';
@@ -4937,7 +4926,6 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
       if (
         pathname.startsWith('/api/') ||
-        pathname === '/reset' ||
         pathname === '/rpc'
       ) {
         try {

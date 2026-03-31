@@ -1,19 +1,21 @@
 <script lang="ts">
-  import { enqueueEntityInputs, xlnEnvironment, xlnFunctions, error } from '../../stores/xlnStore';
-  import { isLive as globalIsLive } from '../../stores/timeStore';
+  import type { Env } from '@xln/runtime/xln-api';
+  import { enqueueEntityInputs, xlnFunctions, error } from '../../stores/xlnStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import BigIntInput from '../Common/BigIntInput.svelte';
   import EntitySelect from './EntitySelect.svelte';
 
-  $: activeXlnFunctions = $xlnFunctions;
-  $: activeEnv = $xlnEnvironment;
-  $: activeIsLive = $globalIsLive;
-
   export let entityId: string;
+  export let env: Env;
+  export let isLive: boolean;
   export let signerId: string | null = null;
   export let counterpartyId: string | null;
   export let accountIds: string[] = [];
   export let mode: 'extend' | 'request' = 'extend';
+
+  $: activeXlnFunctions = $xlnFunctions;
+  $: activeEnv = env;
+  $: activeIsLive = isLive;
 
   let selectedCounterparty = counterpartyId || '';
   let selectedTokenId = 1;

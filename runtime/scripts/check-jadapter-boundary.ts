@@ -17,6 +17,7 @@ const DIRECT_EVM_ALLOWLIST = new Set<string>([
   'runtime/state-helpers.ts',
   'runtime/cli.ts',
   'runtime/j-batch.ts',
+  'runtime/jadapter/index.ts',
   'runtime/entity-factory.ts',
   'runtime/entity-tx/j-events.ts',
   'runtime/scenarios/boot.ts',
@@ -111,7 +112,6 @@ async function main(): Promise<void> {
   const files = await walk(RUNTIME_DIR);
   const scoped = files
     .map(toRel)
-    .filter((f) => !f.startsWith('runtime/jadapter/'))
     .filter((f) => !f.includes('runtime-check.js'));
 
   const violations: Violation[] = [];

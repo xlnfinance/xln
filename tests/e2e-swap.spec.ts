@@ -49,6 +49,49 @@ async function dismissOnboardingIfVisible(page: Page): Promise<void> {
   }
 }
 
+async function readSelectedUiRuntimeIdentity(page: Page): Promise<{
+  entityId: string;
+  signerId: string;
+  runtimeId: string;
+}> {
+  const trigger = page.getByTestId('context-current').first();
+  await expect(trigger).toBeVisible({ timeout: 20_000 });
+
+  const [entityId, signerId, runtimeId] = await Promise.all([
+    trigger.getAttribute('data-entity-id'),
+    trigger.getAttribute('data-signer-id'),
+    trigger.getAttribute('data-runtime-id'),
+  ]);
+
+  const selected = {
+    entityId: String(entityId || '').trim(),
+    signerId: String(signerId || '').trim(),
+    runtimeId: String(runtimeId || '').trim(),
+  };
+
+  expect(selected.entityId, 'UI-selected entityId must be present').toMatch(/^0x[a-fA-F0-9]{64}$/);
+  expect(selected.signerId, 'UI-selected signerId must be present').toMatch(/^0x[a-fA-F0-9]{40}$/);
+  expect(selected.runtimeId, 'UI-selected runtimeId must be present').not.toBe('');
+  return selected;
+}
+
+async function expectSelectedUiRuntimeIdentity(
+  page: Page,
+  expected: { entityId: string; signerId: string },
+): Promise<void> {
+  const selected = await readSelectedUiRuntimeIdentity(page);
+  expect(
+    {
+      entityId: selected.entityId.toLowerCase(),
+      signerId: selected.signerId.toLowerCase(),
+    },
+    'selected entity drift detected',
+  ).toEqual({
+    entityId: expected.entityId.toLowerCase(),
+    signerId: expected.signerId.toLowerCase(),
+  });
+}
+
 function orderbookRowTestId(side: 'ask' | 'bid'): string {
   return side === 'ask' ? 'orderbook-ask-row' : 'orderbook-bid-row';
 }
@@ -483,34 +526,15 @@ async function ensureDeterministicSwapAccount(page: Page): Promise<{
   signerId: string;
   counterpartyId: string;
 }> {
-  const identity = await page.evaluate(() => {
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        runtimeId?: string;
-        eReplicas?: Map<string, unknown>;
-      };
-    }).isolatedEnv;
-    if (!env?.eReplicas) return null;
-
-    const runtimeSigner = String(env.runtimeId || '').toLowerCase();
-    for (const key of env.eReplicas.keys()) {
-      const [entityId, signerId] = String(key).split(':');
-      if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;
-      if (runtimeSigner && String(signerId).toLowerCase() !== runtimeSigner) continue;
-      return { entityId, signerId, runtimeId: String(env.runtimeId || '') };
-    }
-
-    return null;
-  });
-  expect(identity, 'local entity not found').not.toBeNull();
+  const identity = await readSelectedUiRuntimeIdentity(page);
 
   const hubIds = await listSharedHubIds(page);
   const hubId = hubIds[0];
   expect(typeof hubId === 'string' && hubId.length > 0, 'hub not discovered').toBe(true);
 
   await connectRuntimeToSharedHub(page, {
-    entityId: identity!.entityId,
-    signerId: identity!.signerId,
+    entityId: identity.entityId,
+    signerId: identity.signerId,
   }, hubId!);
 
   for (const funding of [
@@ -519,8 +543,8 @@ async function ensureDeterministicSwapAccount(page: Page): Promise<{
   ]) {
     const faucetResponse = await page.request.post(`${API_BASE_URL}/api/faucet/offchain`, {
       data: {
-        userEntityId: identity!.entityId,
-        userRuntimeId: identity!.runtimeId,
+        userEntityId: identity.entityId,
+        userRuntimeId: identity.runtimeId,
         hubEntityId: hubId!,
         tokenId: funding.tokenId,
         amount: funding.amount,
@@ -538,12 +562,12 @@ async function ensureDeterministicSwapAccount(page: Page): Promise<{
   }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBeGreaterThan(0);
 
   await expect.poll(async () => {
-    return await readAccountTokenOutCapacity(page, identity!.entityId, identity!.signerId, hubId!, 2);
+    return await readAccountTokenOutCapacity(page, identity.entityId, identity.signerId, hubId!, 2);
   }, { timeout: 60_000, intervals: [250, 500, 1000] }).toBeGreaterThan(0);
 
   return {
-    entityId: identity!.entityId,
-    signerId: identity!.signerId,
+    entityId: identity.entityId,
+    signerId: identity.signerId,
     counterpartyId: hubId!,
   };
 }
@@ -645,34 +669,15 @@ async function ensureDeterministicSwapAccounts(
   runtimeId: string;
   hubIds: string[];
 }> {
-  const identity = await page.evaluate(() => {
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        runtimeId?: string;
-        eReplicas?: Map<string, unknown>;
-      };
-    }).isolatedEnv;
-    if (!env?.eReplicas) return null;
-
-    const runtimeSigner = String(env.runtimeId || '').toLowerCase();
-    for (const key of env.eReplicas.keys()) {
-      const [entityId, signerId] = String(key).split(':');
-      if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;
-      if (runtimeSigner && String(signerId).toLowerCase() !== runtimeSigner) continue;
-      return { entityId, signerId, runtimeId: String(env.runtimeId || '') };
-    }
-
-    return null;
-  });
-  expect(identity, 'local entity not found').not.toBeNull();
+  const identity = await readSelectedUiRuntimeIdentity(page);
 
   const hubIds = (await listSharedHubIds(page)).slice(0, minHubCount);
   expect(hubIds.length, `expected at least ${minHubCount} hubs for aggregated swap coverage`).toBeGreaterThanOrEqual(minHubCount);
 
   for (const hubId of hubIds) {
     await connectRuntimeToSharedHub(page, {
-      entityId: identity!.entityId,
-      signerId: identity!.signerId,
+      entityId: identity.entityId,
+      signerId: identity.signerId,
     }, hubId);
   }
 
@@ -699,9 +704,9 @@ async function ensureDeterministicSwapAccounts(
     .toEqual({ readyHubs: hubIds.length, pairBookCount: hubIds.length * CANONICAL_SWAP_PAIR_IDS.length });
 
   return {
-    entityId: identity!.entityId,
-    signerId: identity!.signerId,
-    runtimeId: identity!.runtimeId,
+    entityId: identity.entityId,
+    signerId: identity.signerId,
+    runtimeId: identity.runtimeId,
     hubIds,
   };
 }
@@ -714,6 +719,11 @@ async function readSwapState(
 ): Promise<{
   openOfferCount: number;
   accountSwapOffersSize: number;
+  accountSwapOrderHistorySize: number;
+  accountSwapClosedOrdersSize: number;
+  totalSwapOrderHistorySize: number;
+  accountHistoryCancelRequested: boolean;
+  accountHistoryResolveCount: number;
   accountHasSwapOfferInMempool: boolean;
   accountHasSwapOfferInPendingFrame: boolean;
   accountHasSwapCancelRequestInMempool: boolean;
@@ -742,6 +752,11 @@ async function readSwapState(
       return {
         openOfferCount: 0,
         accountSwapOffersSize: 0,
+        accountSwapOrderHistorySize: 0,
+        accountSwapClosedOrdersSize: 0,
+        totalSwapOrderHistorySize: 0,
+        accountHistoryCancelRequested: false,
+        accountHistoryResolveCount: 0,
         accountHasSwapOfferInMempool: false,
         accountHasSwapOfferInPendingFrame: false,
         accountHasSwapCancelRequestInMempool: false,
@@ -755,6 +770,15 @@ async function readSwapState(
     });
     const rep = key ? env.eReplicas.get(key) : null;
     const account = findAccount(rep?.state?.accounts, entityId, counterpartyId);
+    const accountHistory = account?.swapOrderHistory instanceof Map
+      ? Array.from(account.swapOrderHistory.values())
+      : [];
+    const totalSwapOrderHistorySize = Number(
+      Array.from(rep?.state?.accounts?.values?.() || []).reduce(
+        (count: number, item: any) => count + Number(item?.swapOrderHistory?.size || 0),
+        0,
+      ),
+    );
     return {
       openOfferCount: Number(
         Array.from(rep?.state?.accounts?.values?.() || []).reduce(
@@ -763,6 +787,16 @@ async function readSwapState(
         ),
       ),
       accountSwapOffersSize: Number(account?.swapOffers?.size || 0),
+      accountSwapOrderHistorySize: Number(account?.swapOrderHistory?.size || 0),
+      accountSwapClosedOrdersSize: Number(account?.swapClosedOrders?.size || 0),
+      totalSwapOrderHistorySize,
+      accountHistoryCancelRequested: accountHistory.some((entry: any) => Boolean(entry?.cancelRequested)),
+      accountHistoryResolveCount: Number(
+        accountHistory.reduce(
+          (count: number, entry: any) => count + Number(Array.isArray(entry?.resolves) ? entry.resolves.length : 0),
+          0,
+        ),
+      ),
       accountHasSwapOfferInMempool: !!(account?.mempool || []).find((tx: any) => tx?.type === 'swap_offer'),
       accountHasSwapOfferInPendingFrame: !!(account?.pendingFrame?.accountTxs || []).find((tx: any) => tx?.type === 'swap_offer'),
       accountHasSwapCancelRequestInMempool: !!(account?.mempool || []).find(
@@ -1188,7 +1222,6 @@ async function executeOrderbookClickFill(
       amountInput: amountInput?.value || '',
       priceInput: priceInput?.value || '',
       formError,
-      swapDebug: (window as any).__swapDebug ?? null,
       swapResolveCount,
       positiveSwapResolveCount,
       localOffer: offer ? {
@@ -1322,6 +1355,15 @@ async function executeOrderbookClickFill(
     await closedTab.click();
     const closedOrdersTable = page.getByTestId('swap-closed-orders').first();
     await expect(closedOrdersTable).toBeVisible({ timeout: 10_000 });
+    await expect
+      .poll(async () => {
+        const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, routedCounterpartyId);
+        return state.accountSwapClosedOrdersSize;
+      }, {
+        timeout: 15_000,
+        intervals: [100, 250, 500],
+      })
+      .toBeGreaterThan(0);
     await expect
       .poll(async () => await page.getByTestId('swap-closed-order-row').count(), {
         timeout: 15_000,
@@ -1609,6 +1651,7 @@ test.describe('E2E Swap Flow', () => {
     const accountRef = await timedStep('swap.prepare_book', () => prepareOrderbookClickTest(page));
 
     await expect(page.getByTestId('swap-orderbook')).toBeVisible({ timeout: 20_000 });
+    await timedStep('swap.assert_selected_entity_stable', () => expectSelectedUiRuntimeIdentity(page, accountRef));
     const swapResolveCountBefore = await timedStep('swap.read_resolve_count_before', () =>
       readSwapResolveCount(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId),
     );
@@ -1668,8 +1711,10 @@ test.describe('E2E Swap Flow', () => {
     });
 
     await timedStep('swap.assert_post_close_state', async () => {
+      await expectSelectedUiRuntimeIdentity(page, accountRef);
       const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
       expect(state.accountSwapOffersSize).toBe(0);
+      expect(state.accountSwapClosedOrdersSize, 'terminal closed-order store must contain canceled order').toBeGreaterThan(0);
     });
 
     await timedStep('swap.assert_closed_tab_canceled_row', async () => {
@@ -1689,6 +1734,7 @@ test.describe('E2E Swap Flow', () => {
       }, { timeout: 60_000 });
     });
     await timedStep('swap.reload_assert_no_open_offer', async () => {
+      await expectSelectedUiRuntimeIdentity(page, accountRef);
       await expect.poll(async () => {
         const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
         return state.accountSwapOffersSize;

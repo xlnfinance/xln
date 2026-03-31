@@ -17,6 +17,19 @@ function findAccountByCounterparty(state: EntityState, counterpartyEntityId: unk
   return null;
 }
 
+function isFinalizeOpStillLive(
+  state: EntityState,
+  counterpartyEntityId: unknown,
+  initialNonceRaw: unknown,
+): boolean {
+  const account = findAccountByCounterparty(state, counterpartyEntityId);
+  if (!account?.activeDispute) return false;
+  const initialNonce = Number(initialNonceRaw ?? 0);
+  if (!Number.isFinite(initialNonce) || initialNonce <= 0) return false;
+  const onChainSettlementNonce = Number(account.onChainSettlementNonce ?? 0);
+  return initialNonce > onChainSettlementNonce;
+}
+
 export function hasActiveDisputeForCounterparty(state: EntityState, counterpartyEntityId: unknown): boolean {
   return Boolean(findAccountByCounterparty(state, counterpartyEntityId)?.activeDispute);
 }
@@ -48,7 +61,7 @@ export function filterActiveDisputeFinalizations(
   const before = batch.disputeFinalizations.length;
   batch.disputeFinalizations = batch.disputeFinalizations.filter((entry) => {
     const counterpartyId = normalizeCounterpartyId(entry?.counterentity);
-    const keep = hasActiveDisputeForCounterparty(state, counterpartyId);
+    const keep = isFinalizeOpStillLive(state, counterpartyId, entry?.initialNonce);
     if (!keep && counterpartyId) {
       droppedCounterparties.add(counterpartyId);
     }

@@ -173,8 +173,9 @@ function assertSnapshotCounts(env: Env, expectedJ: number, expectedE: number, la
   assert(history.length > 0, `${label}: snapshot exists`);
 
   const snapshot = history[history.length - 1];
-  const jCount = snapshot?.jReplicas?.length ?? 0;
-  const eCount = snapshot?.eReplicas?.size ?? 0;
+  assert(snapshot, `${label}: snapshot frame exists`);
+  const jCount = snapshot.jReplicas.size;
+  const eCount = snapshot.eReplicas.size;
 
   assert(jCount === expectedJ, `${label}: snapshot jReplicas = ${expectedJ} (got ${jCount})`);
   assert(eCount === expectedE, `${label}: snapshot eReplicas = ${expectedE} (got ${eCount})`);

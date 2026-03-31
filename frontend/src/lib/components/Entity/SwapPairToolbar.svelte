@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
 
-  const PRICE_STEP_OPTIONS = ['0.0001', '0.001', '0.01', '0.1', '1', '10', '50', '100'] as const;
+  const PRICE_STEP_OPTIONS = ['0.0001', '0.001', '0.01', '0.1', '0.5', '1', '5', '10', '50', '100'] as const;
 
   export let pairOptions: Array<{ value: string; label: string }> = [];
   export let selectedPairValue = '';
@@ -14,7 +14,7 @@
   const dispatch = createEventDispatcher<{
     pairchange: string;
     togglescope: void;
-    pricestepchange: string;
+    pricestepchange: (typeof PRICE_STEP_OPTIONS)[number];
   }>();
 
   function handlePairChange(event: Event): void {

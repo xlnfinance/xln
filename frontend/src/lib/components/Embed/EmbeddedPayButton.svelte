@@ -96,13 +96,9 @@
 
   function getFirstEnvEntityId(): string {
     const env = get(xlnEnvironment);
-    if (!env?.eReplicas) return '';
-    const replicas = env.eReplicas instanceof Map
-      ? Array.from(env.eReplicas.values())
-      : Object.values(env.eReplicas as Record<string, EntityReplica>);
-    for (const rawReplica of replicas) {
-      const replica = rawReplica as EntityReplica;
-      const entityId = String(replica?.entityId || '').trim();
+    if (!env) return '';
+    for (const replica of env.eReplicas.values()) {
+      const entityId = String(replica.entityId || '').trim();
       if (entityId) return entityId;
     }
     return '';
@@ -200,15 +196,11 @@
   }
 
   function findEntityBySigner(env: Env | null, signerAddress: string | null | undefined): string {
-    if (!env?.eReplicas || !signerAddress) return '';
+    if (!env || !signerAddress) return '';
     const signerLower = normalizeId(signerAddress);
-    const replicas = env.eReplicas instanceof Map
-      ? Array.from(env.eReplicas.values())
-      : Object.values(env.eReplicas as Record<string, EntityReplica>);
-    for (const rawReplica of replicas) {
-      const replica = rawReplica as EntityReplica;
-      if (normalizeId(replica?.signerId) !== signerLower) continue;
-      const entityId = String(replica?.entityId || '').trim();
+    for (const replica of env.eReplicas.values()) {
+      if (normalizeId(replica.signerId) !== signerLower) continue;
+      const entityId = String(replica.entityId || '').trim();
       if (entityId) return entityId;
     }
     return '';
@@ -679,9 +671,14 @@
     <span class="progress-fill" style={`width:${progress}%`}></span>
   </button>
 
-  {#if checkoutEntityId && appReadyForPaymentPanel}
+  {#if checkoutEntityId && appReadyForPaymentPanel && $xlnEnvironment}
     <div class="hidden-payment-panel" aria-hidden="true">
-      <PaymentPanel bind:this={paymentPanelRef} entityId={checkoutEntityId} />
+      <PaymentPanel
+        bind:this={paymentPanelRef}
+        entityId={checkoutEntityId}
+        env={$xlnEnvironment}
+        isLive={true}
+      />
     </div>
   {/if}
 </div>

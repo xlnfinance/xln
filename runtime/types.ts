@@ -1103,6 +1103,10 @@ export interface AccountMachine {
   // Keep this in account state so closed/partial orders do not disappear
   // when the short bilateral frameHistory ring buffer prunes old frames.
   swapOrderHistory?: Map<string, SwapOrderHistoryEntry>;
+  // Terminal swap orders (filled/canceled/closed) used by the UI closed-orders view.
+  // Keep open working state and terminal history separate so the UI does not infer
+  // closed rows by subtracting live offers from a broad lifecycle store.
+  swapClosedOrders?: Map<string, SwapOrderHistoryEntry>;
 
   // Global credit limits (in reference currency - USDC)
   globalCreditLimits: {
@@ -2131,7 +2135,7 @@ export interface EnvSnapshot {
   runtimeId?: string;
   dbNamespace?: string;
   eReplicas: Map<string, EntityReplica>;  // E-layer state
-  jReplicas: JReplica[];                   // J-layer state (with stateRoot for time travel)
+  jReplicas: Map<string, JReplica>;        // J-layer state snapshot (same shape as live env)
   browserVMState?: BrowserVMState;
   runtimeInput: RuntimeInput;
   runtimeOutputs: RoutedEntityInput[];

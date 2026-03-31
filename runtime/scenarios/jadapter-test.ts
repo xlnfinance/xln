@@ -56,26 +56,13 @@ async function main() {
   const nextNumber = await j.entityProvider.nextNumber();
   console.log(`   ✅ Next entity number: ${nextNumber}`);
 
-  // Test events (via callback)
-  console.log('\n5️⃣  Testing events...');
-  let eventReceived = false;
-
-  const unsubscribe = j.on('EntityRegistered', (event) => {
-    console.log(`   📨 Event received: ${event.name}`);
-    eventReceived = true;
-  });
-
-  // Register another entity to trigger event
+  // Register another entity to verify state keeps moving through the canonical path
+  console.log('\n5️⃣  Testing second registration...');
   const boardHash2 = ethers.keccak256(ethers.toUtf8Bytes('test-board-2'));
   const tx2 = await j.entityProvider.registerNumberedEntity(boardHash2);
   await tx2.wait();
-
-  // For anvil/rpc, events are async - need to wait
-  if (mode === 'anvil') {
-    await new Promise(resolve => setTimeout(resolve, 1000));
-  }
-
-  unsubscribe();
+  const nextNumberAfterSecondRegistration = await j.entityProvider.nextNumber();
+  console.log(`   ✅ Next entity number after second registration: ${nextNumberAfterSecondRegistration}`);
 
   // Test snapshot/revert (browservm/anvil only)
   if (mode !== 'rpc') {

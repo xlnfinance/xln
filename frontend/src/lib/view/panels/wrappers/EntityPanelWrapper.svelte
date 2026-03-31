@@ -46,10 +46,10 @@
     isActive: true,
   });
 
-  const activeEnv = $derived(isolatedEnv ? $isolatedEnv : null);
-  const activeHistory = $derived(isolatedHistory ? $isolatedHistory : []);
-  const activeTimeIndex = $derived(isolatedTimeIndex ? $isolatedTimeIndex : -1);
-  const activeIsLive = $derived(isolatedIsLive ? $isolatedIsLive : true);
+  const activeEnv = $derived.by<Env | null>(() => isolatedEnv ? $isolatedEnv : null);
+  const activeHistory = $derived.by<EnvSnapshot[]>(() => isolatedHistory ? $isolatedHistory : []);
+  const activeTimeIndex = $derived.by<number>(() => isolatedTimeIndex ? $isolatedTimeIndex : -1);
+  const activeIsLive = $derived.by<boolean>(() => isolatedIsLive ? $isolatedIsLive : true);
 
   function goToLive(): void {
     isolatedTimeIndex?.set(-1);
@@ -62,15 +62,17 @@
 
 <div class="entity-panel-wrapper">
   <!-- Entity panel content only - time machine is in global TimeMachine bar -->
-  <EntityPanelTabs
-    tab={localTab}
-    {initialAction}
-    env={activeEnv}
-    history={activeHistory}
-    timeIndex={activeTimeIndex}
-    isLive={activeIsLive}
-    onGoToLive={goToLive}
-  />
+  {#if activeEnv}
+    <EntityPanelTabs
+      tab={localTab}
+      {initialAction}
+      env={activeEnv}
+      history={activeHistory}
+      timeIndex={activeTimeIndex}
+      isLive={activeIsLive}
+      onGoToLive={goToLive}
+    />
+  {/if}
 </div>
 
 <style>

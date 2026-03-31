@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount, onDestroy } from 'svelte';
   import { getXLN, enqueueEntityInputs, xlnFunctions } from '../../stores/xlnStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import type { EntityReplica, EntityTx, AccountMachine, EntityState } from '$lib/types/ui';
@@ -60,14 +59,10 @@
   let gasPreset: GasPreset = 'standard';
   let customMaxFeeGwei = '';
   let customPriorityFeeGwei = '';
-  let suggestedBaseMaxFeeWei = 0n;
-  let suggestedBasePriorityWei = 0n;
-  let gasLoading = false;
   let autoExecuteWorkspaceKey = '';
   let autoExecutingWorkspaceKey = '';
   let expandedHistoryKeys = new Set<string>();
   let historyExpansionInitialized = false;
-  let gasSuggestionTimer: ReturnType<typeof setInterval> | null = null;
 
   function normalizeEntityId(id: string | null | undefined): string {
     return String(id || '').trim().toLowerCase();
@@ -481,55 +476,15 @@
     return new Date(ms).toLocaleString();
   }
 
-  function scaleWei(value: bigint, bps: number): bigint {
-    if (bps <= 0) return value;
-    return (value * BigInt(bps) + 9_999n) / 10_000n;
-  }
-
-  async function refreshGasSuggestions(): Promise<void> {
-    const jReplicas = activeEnv?.jReplicas;
-    if (!(jReplicas instanceof Map) || jReplicas.size === 0) return;
-    const activeJKey = activeEnv?.activeJurisdiction;
-    const activeJReplica = activeJKey ? jReplicas.get(activeJKey) : null;
-    const anyJReplica = activeJReplica ?? Array.from(jReplicas.values())[0];
-    const provider = anyJReplica?.jadapter?.provider;
-    if (!provider || typeof provider.getFeeData !== 'function') return;
-
-    gasLoading = true;
-    try {
-      const feeData = await provider.getFeeData();
-      const maxFee = typeof feeData?.maxFeePerGas === 'bigint' ? feeData.maxFeePerGas : 0n;
-      const priority = typeof feeData?.maxPriorityFeePerGas === 'bigint' ? feeData.maxPriorityFeePerGas : 0n;
-      if (maxFee > 0n) suggestedBaseMaxFeeWei = maxFee;
-      if (priority > 0n) suggestedBasePriorityWei = priority;
-      if (!customMaxFeeGwei && suggestedBaseMaxFeeWei > 0n) customMaxFeeGwei = formatWeiToGwei(suggestedBaseMaxFeeWei);
-      if (!customPriorityFeeGwei && suggestedBasePriorityWei > 0n) customPriorityFeeGwei = formatWeiToGwei(suggestedBasePriorityWei);
-    } catch {
-      // Keep defaults.
-    } finally {
-      gasLoading = false;
-    }
-  }
-
   function buildFeeOverrides(): { gasBumpBps?: number; maxFeePerGasWei?: string; maxPriorityFeePerGasWei?: string } | null {
-    if (gasPreset === 'custom') {
-      const out: { maxFeePerGasWei?: string; maxPriorityFeePerGasWei?: string } = {};
-      if (customMaxFeeGwei.trim()) {
-        out.maxFeePerGasWei = parseDecimalToUnits(customMaxFeeGwei, 9).toString();
-      }
-      if (customPriorityFeeGwei.trim()) {
-        out.maxPriorityFeePerGasWei = parseDecimalToUnits(customPriorityFeeGwei, 9).toString();
-      }
-      return Object.keys(out).length > 0 ? out : null;
-    }
-
-    const multiplierBps = gasPreset === 'urgent' ? 15_000 : gasPreset === 'fast' ? 12_000 : 10_000;
-    const maxFee = suggestedBaseMaxFeeWei > 0n ? scaleWei(suggestedBaseMaxFeeWei, multiplierBps) : 0n;
-    const priority = suggestedBasePriorityWei > 0n ? scaleWei(suggestedBasePriorityWei, multiplierBps) : 0n;
-    if (maxFee <= 0n && priority <= 0n) return null;
+    if (gasPreset !== 'custom') return null;
     const out: { maxFeePerGasWei?: string; maxPriorityFeePerGasWei?: string } = {};
-    if (maxFee > 0n) out.maxFeePerGasWei = maxFee.toString();
-    if (priority > 0n) out.maxPriorityFeePerGasWei = priority.toString();
+    if (customMaxFeeGwei.trim()) {
+      out.maxFeePerGasWei = parseDecimalToUnits(customMaxFeeGwei, 9).toString();
+    }
+    if (customPriorityFeeGwei.trim()) {
+      out.maxPriorityFeePerGasWei = parseDecimalToUnits(customPriorityFeeGwei, 9).toString();
+    }
     return out;
   }
 
@@ -947,25 +902,16 @@
   }
 
   $: gasPreview = (() => {
-    const pick = (preset: GasPreset): { maxFeeWei: bigint; maxPriorityWei: bigint } => {
-      if (preset === 'custom') {
-        let maxFeeWei = 0n;
-        let maxPriorityWei = 0n;
-        try {
-          if (customMaxFeeGwei.trim()) maxFeeWei = parseDecimalToUnits(customMaxFeeGwei, 9);
-          if (customPriorityFeeGwei.trim()) maxPriorityWei = parseDecimalToUnits(customPriorityFeeGwei, 9);
-        } catch {
-          return { maxFeeWei: 0n, maxPriorityWei: 0n };
-        }
-        return { maxFeeWei, maxPriorityWei };
-      }
-      const bps = preset === 'urgent' ? 15_000 : preset === 'fast' ? 12_000 : 10_000;
-      return {
-        maxFeeWei: suggestedBaseMaxFeeWei > 0n ? scaleWei(suggestedBaseMaxFeeWei, bps) : 0n,
-        maxPriorityWei: suggestedBasePriorityWei > 0n ? scaleWei(suggestedBasePriorityWei, bps) : 0n,
-      };
-    };
-    return pick(gasPreset);
+    if (gasPreset !== 'custom') return { maxFeeWei: 0n, maxPriorityWei: 0n };
+    let maxFeeWei = 0n;
+    let maxPriorityWei = 0n;
+    try {
+      if (customMaxFeeGwei.trim()) maxFeeWei = parseDecimalToUnits(customMaxFeeGwei, 9);
+      if (customPriorityFeeGwei.trim()) maxPriorityWei = parseDecimalToUnits(customPriorityFeeGwei, 9);
+    } catch {
+      return { maxFeeWei: 0n, maxPriorityWei: 0n };
+    }
+    return { maxFeeWei, maxPriorityWei };
   })();
 
   $: {
@@ -986,16 +932,6 @@
     }
   }
 
-  onMount(() => {
-    gasSuggestionTimer = setInterval(() => {
-      if (hasAnyBatch) void refreshGasSuggestions();
-    }, 5000);
-    void refreshGasSuggestions();
-  });
-
-  onDestroy(() => {
-    if (gasSuggestionTimer) clearInterval(gasSuggestionTimer);
-  });
 </script>
 
 <div class="settlement-panel">
@@ -1083,9 +1019,6 @@
       <div class="gas-card">
         <div class="gas-header">
           <span>Gas</span>
-          <button class="btn-refresh-gas" on:click={() => refreshGasSuggestions()} disabled={gasLoading}>
-            {gasLoading ? 'Refreshing...' : 'Refresh'}
-          </button>
         </div>
         <div class="gas-presets">
           <button class:active={gasPreset === 'standard'} on:click={() => gasPreset = 'standard'}>Standard</button>

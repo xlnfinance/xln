@@ -1,61 +1,52 @@
 import { writable, derived, get } from 'svelte/store';
 import type { TimeState } from '$lib/types/ui';
 import type { GossipLayer, Profile as GossipProfile } from '@xln/runtime/xln-api';
+import type { Env, EnvSnapshot, EntityReplica } from '@xln/runtime';
 import { xlnEnvironment, history } from './xlnStore';
 
-// Load initial state from localStorage
-const loadTimeState = (): TimeState => {
-  if (typeof localStorage !== 'undefined') {
-    try {
-      const saved = localStorage.getItem('xln-time-state');
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        const loadedState = {
-          currentTimeIndex: Math.max(0, parsed.currentTimeIndex ?? 0),
-          maxTimeIndex: parsed.maxTimeIndex ?? 0,
-          isLive: parsed.isLive ?? true
-        };
-        console.log('🕰️ Loaded time state from localStorage:', loadedState);
-        return loadedState;
-      }
-    } catch (err) {
-      console.warn('Failed to load time state (clearing corrupted storage):', err);
-      localStorage.removeItem('xln-time-state');
-    }
-  }
-
-  const defaultState = {
-    currentTimeIndex: 0,
-    maxTimeIndex: 0,
-    isLive: true
-  };
-  console.log('🕰️ Using default time state:', defaultState);
-  return defaultState;
+const defaultTimeState: TimeState = {
+  currentTimeIndex: 0,
+  maxTimeIndex: 0,
+  isLive: true,
 };
 
-// Time machine state with persistence
-export const timeState = writable<TimeState>(loadTimeState());
+// Session-only developer tool state.
+// /app must always boot in LIVE mode instead of restoring an old historical cursor.
+export const timeState = writable<TimeState>({ ...defaultTimeState });
 
 // Derived stores
 export const currentTimeIndex = derived(timeState, $state => $state.currentTimeIndex);
 export const isLive = derived(timeState, $state => $state.isLive);
 export const maxTimeIndex = derived(timeState, $state => $state.maxTimeIndex);
 
+function cloneReplicaMap(replicas: Map<string, EntityReplica>): Map<string, EntityReplica> {
+  return new Map(replicas);
+}
+
+function requireHistoricalFrame(
+  frames: EnvSnapshot[],
+  currentTimeIndex: number,
+): EnvSnapshot {
+  const clampedIndex = Math.max(0, Math.min(currentTimeIndex, frames.length - 1));
+  const frame = frames[clampedIndex];
+  if (!frame) {
+    throw new Error(`Time machine selected invalid historical frame ${currentTimeIndex}`);
+  }
+  return frame;
+}
+
 // When not live, expose replicas from the selected snapshot; otherwise use live env replicas
 export const visibleReplicas = derived(
   [timeState, history, xlnEnvironment],
   ([$timeState, $history, $env]) => {
     if ($timeState.isLive) {
-      return $env?.eReplicas ? new Map($env.eReplicas) : new Map();
+      return $env ? cloneReplicaMap($env.eReplicas) : new Map();
     }
-
-    const idx = $timeState.currentTimeIndex;
-    if ($history && $history.length > 0) {
-      const clampedIdx = Math.max(0, Math.min(idx, $history.length - 1));
-      const frame = $history[clampedIdx];
-      if (frame?.eReplicas) return new Map(frame.eReplicas);
+    if ($history.length === 0) {
+      throw new Error('Time machine entered historical mode without any history');
     }
-    return $env?.eReplicas ? new Map($env.eReplicas) : new Map();
+    const frame = requireHistoricalFrame($history, $timeState.currentTimeIndex);
+    return cloneReplicaMap(frame.eReplicas);
   }
 );
 
@@ -106,27 +97,15 @@ export const visibleEnvironment = derived(
     if ($timeState.isLive) {
       return $env;
     }
-    const idx = $timeState.currentTimeIndex;
-    if (idx >= 0 && idx < $history.length) {
-      return $history[idx];
+    if ($history.length === 0) {
+      throw new Error('Time machine entered historical mode without any history');
     }
-    return $env; // Fallback to live if index is invalid
+    return requireHistoricalFrame($history, $timeState.currentTimeIndex);
   }
 );
 
 // Time operations
 const timeOperations = {
-  // Save time state to localStorage
-  saveTimeState(state: TimeState) {
-    if (typeof localStorage !== 'undefined') {
-      try {
-        localStorage.setItem('xln-time-state', JSON.stringify(state));
-      } catch (err) {
-        console.warn('Failed to save time state to localStorage:', err);
-      }
-    }
-  },
-
   // Update max time index based on history length - ROBUST VERSION
   updateMaxTimeIndex() {
     const $history = get(history);
@@ -165,7 +144,6 @@ const timeOperations = {
     };
 
     timeState.set(newState);
-    timeOperations.saveTimeState(newState);
     timeOperations.triggerEntityPanelUpdates();
   },
 
@@ -179,8 +157,18 @@ const timeOperations = {
       isLive: true
     };
     timeState.set(newState);
-    timeOperations.saveTimeState(newState);
     timeOperations.triggerEntityPanelUpdates();
+  },
+
+  resetToLive() {
+    if (typeof localStorage !== 'undefined') {
+      try {
+        localStorage.removeItem('xln-time-state');
+      } catch {
+        // Ignore storage failures; live state remains in memory.
+      }
+    }
+    timeState.set({ ...defaultTimeState, isLive: true });
   },
 
   // Go to history start
@@ -265,6 +253,8 @@ const timeOperations = {
 
   // Initialize time machine - SEQUENTIAL LOADING
   initialize() {
+    timeOperations.resetToLive();
+
     // LOAD-ORDER-DEBUG removed
 
     // Subscribe to history changes for REACTIVE initialization

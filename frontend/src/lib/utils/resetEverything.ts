@@ -40,20 +40,6 @@ let lastDismissedFatalFingerprint = '';
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
-async function requestBrowserSiteDataClear(): Promise<void> {
-  try {
-    await fetch('/api/reset-site-data', {
-      method: 'POST',
-      cache: 'no-store',
-      credentials: 'same-origin',
-      headers: { 'content-type': 'application/json' },
-      body: '{}',
-    });
-  } catch {
-    // best effort only
-  }
-}
-
 function createResetSignal(triggerError?: unknown): ResetSignal {
   const reason = triggerError instanceof Error ? triggerError.message : String(triggerError ?? 'manual');
   return {
@@ -625,7 +611,6 @@ async function performReset(
     }
 
     await stopRuntimeBeforeReset();
-    await requestBrowserSiteDataClear();
     await sleep(100);
     await clearAllPersistentClientState();
     await verifyPersistentClientStateCleared();

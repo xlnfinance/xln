@@ -52,7 +52,6 @@ export interface JReserveMint {
   amount: bigint;
 }
 
-export type JEventCallback = (event: JEvent) => void;
 export type SnapshotId = string;
 
 export interface JAdapter {
@@ -76,8 +75,6 @@ export interface JAdapter {
   loadState(state: BrowserVMState | string): Promise<void>;
 
   // Events
-  on(eventName: string, callback: JEventCallback): () => void;
-  onAny(callback: JEventCallback): () => void;
   processBlock(): Promise<JEvent[]>;
 
   // Reads

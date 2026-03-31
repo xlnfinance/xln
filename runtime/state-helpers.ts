@@ -531,6 +531,21 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
           ),
         }
       : {}),
+    ...(account.swapClosedOrders instanceof Map
+      ? {
+          swapClosedOrders: new Map(
+            Array.from(account.swapClosedOrders.entries()).map(([key, entry]) => [
+              key,
+              {
+                ...entry,
+                resolves: Array.isArray(entry.resolves)
+                  ? entry.resolves.map((resolve) => ({ ...resolve }))
+                  : [],
+              },
+            ]),
+          ),
+        }
+      : {}),
     pendingSignatures: [...account.pendingSignatures],
     frameHistory: account.frameHistory.map((frame) => cloneAccountFrame(frame)),
     globalCreditLimits: { ...account.globalCreditLimits },
@@ -683,6 +698,20 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
   if (account.swapOrderHistory instanceof Map) {
     result.swapOrderHistory = new Map(
       Array.from(account.swapOrderHistory.entries()).map(([offerId, entry]) => [
+        offerId,
+        {
+          ...entry,
+          resolves: Array.isArray(entry.resolves)
+            ? entry.resolves.map((resolve) => ({ ...resolve }))
+            : [],
+        },
+      ]),
+    );
+  }
+
+  if (account.swapClosedOrders instanceof Map) {
+    result.swapClosedOrders = new Map(
+      Array.from(account.swapClosedOrders.entries()).map(([offerId, entry]) => [
         offerId,
         {
           ...entry,

@@ -3,7 +3,6 @@ import { requireUsableContractAddress } from '../../contract-address';
 import { addMessage, cloneEntityState } from '../../state-helpers';
 import { batchOpCount, cloneJBatch, computeBatchHankoHash, encodeJBatch, isBatchEmpty } from '../../j-batch';
 import { resolveRuntimeJurisdictionConfig } from '../../jurisdiction-runtime';
-import { filterActiveDisputeFinalizations } from '../dispute-finalize-guards';
 import type { ApplyEntityTxResult } from '../apply';
 
 const MIN_GAS_BUMP_BPS = 0;
@@ -57,11 +56,11 @@ export async function handleJRebroadcast(
     return { newState, outputs, jOutputs };
   }
   const jurisdictionName = jurisdiction.name || env.activeJurisdiction || 'default';
+  // j_rebroadcast must stay dumb on purpose:
+  // resend the current sentBatch exactly as stored, without revalidation, filtering,
+  // or any state-dependent mutation. Stale cleanup belongs to the transition paths
+  // that move ops into or out of sentBatch, not to rebroadcast.
   const rebroadcastBatch = cloneJBatch(sent.batch);
-  const { removed } = filterActiveDisputeFinalizations(newState, rebroadcastBatch);
-  if (removed > 0) {
-    addMessage(newState, `🧹 Filtered ${removed} stale dispute-finalize op(s) from rebroadcast`);
-  }
   if (isBatchEmpty(rebroadcastBatch)) {
     newState.jBatchState.sentBatch = undefined;
     newState.jBatchState.status = isBatchEmpty(newState.jBatchState.batch) ? 'empty' : 'accumulating';

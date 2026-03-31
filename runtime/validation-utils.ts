@@ -192,7 +192,7 @@ export function validateEntityInput(input: unknown): RoutedEntityInput {
     throw new Error(`FINANCIAL-SAFETY: entityTxs must be array`);
   }
 
-  return obj as RoutedEntityInput;
+  return obj as unknown as RoutedEntityInput;
 }
 
 /**
@@ -211,7 +211,7 @@ export function validateEntityOutput(output: unknown): RoutedEntityInput {
     throw new Error(`FINANCIAL-SAFETY: EntityOutput signerId must be string when provided`);
   }
 
-  return obj as RoutedEntityInput;
+  return obj as unknown as RoutedEntityInput;
 }
 
 /**
@@ -429,7 +429,7 @@ function validateCrontabTaskState(value: unknown, fieldName: string): CrontabTas
       throw new FinancialDataCorruptionError(`${fieldName}.params.${paramKey} must be string | number | boolean`);
     }
   }
-  return obj as CrontabTaskState;
+  return obj as unknown as CrontabTaskState;
 }
 
 function validateScheduledHook(value: unknown, fieldName: string): ScheduledHook {
@@ -526,7 +526,7 @@ function validateCrontabState(value: unknown, fieldName: string): CrontabState {
       throw new FinancialDataCorruptionError(`${fieldName}.hooks[${hookId}].id must match hook key`);
     }
   }
-  return obj as CrontabState;
+  return obj as unknown as CrontabState;
 }
 
 // =============================================================================
@@ -608,11 +608,17 @@ export function validateAccountMachine(value: unknown, context = 'AccountMachine
   validateMapInstance(obj['deltas'], `${context}.deltas`);
   validateMapInstance(obj['locks'], `${context}.locks`);
   validateMapInstance(obj['swapOffers'], `${context}.swapOffers`);
-  validateObject(obj['globalCreditLimits'], `${context}.globalCreditLimits`);
-  if (typeof obj['globalCreditLimits']['ownLimit'] !== 'bigint') {
+  if (obj['swapOrderHistory'] !== undefined) {
+    validateMapInstance(obj['swapOrderHistory'], `${context}.swapOrderHistory`);
+  }
+  if (obj['swapClosedOrders'] !== undefined) {
+    validateMapInstance(obj['swapClosedOrders'], `${context}.swapClosedOrders`);
+  }
+  const globalCreditLimits = validateObject(obj['globalCreditLimits'], `${context}.globalCreditLimits`);
+  if (typeof globalCreditLimits['ownLimit'] !== 'bigint') {
     throw new FinancialDataCorruptionError(`${context}.globalCreditLimits.ownLimit must be bigint`);
   }
-  if (typeof obj['globalCreditLimits']['peerLimit'] !== 'bigint') {
+  if (typeof globalCreditLimits['peerLimit'] !== 'bigint') {
     throw new FinancialDataCorruptionError(`${context}.globalCreditLimits.peerLimit must be bigint`);
   }
   validateNumber(obj['currentHeight'], `${context}.currentHeight`);
@@ -634,11 +640,12 @@ export function validateAccountMachine(value: unknown, context = 'AccountMachine
   validateRebalanceFeeStateMap(obj['requestedRebalanceFeeState'], `${context}.requestedRebalanceFeeState`);
 
   // Validate all deltas in the map
-  for (const [tokenId, delta] of obj['deltas'].entries()) {
+  const deltas = obj['deltas'] as Map<unknown, unknown>;
+  for (const [tokenId, delta] of deltas.entries()) {
     validateDelta(delta, `${context}.deltas[${tokenId}]`);
   }
 
-  return obj as AccountMachine; // Cast after basic validation
+  return obj as unknown as AccountMachine; // Cast after validation boundary
 }
 
 /**
@@ -688,7 +695,7 @@ export function validateEntityState(value: unknown, context = 'EntityState'): En
     validateCrontabState(obj['crontabState'], `${context}.crontabState`);
   }
 
-  return obj as EntityState; // Cast after basic validation
+  return obj as unknown as EntityState; // Cast after validation boundary
 }
 
 // Config validation removed - ConsensusConfig is more complex than expected

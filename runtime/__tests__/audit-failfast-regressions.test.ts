@@ -605,7 +605,7 @@ describe('audit fail-fast regressions', () => {
     expect(failed.newState.jBatchState?.batch.disputeFinalizations.length).toBe(0);
   });
 
-  test('j_rebroadcast filters stale dispute finalize and only resubmits live ops', async () => {
+  test('j_rebroadcast resubmits the exact sent batch without mutating ops', async () => {
     const entityId = `0x${'ab'.repeat(32)}`;
     const counterpartyId = `0x${'cd'.repeat(32)}`;
     const state = makeEntityState(entityId);
@@ -689,11 +689,80 @@ describe('audit fail-fast regressions', () => {
     const rebroadcast = result.jOutputs[0]?.jTxs[0];
     expect(rebroadcast?.type).toBe('batch');
     if (rebroadcast?.type === 'batch') {
-      expect(rebroadcast.data.batch.disputeFinalizations.length).toBe(0);
+      expect(rebroadcast.data.batch.disputeFinalizations.length).toBe(1);
       expect(rebroadcast.data.batch.reserveToReserve.length).toBe(1);
     }
-    expect(result.newState.jBatchState?.sentBatch?.batch.disputeFinalizations.length).toBe(0);
+    expect(result.newState.jBatchState?.sentBatch?.batch.disputeFinalizations.length).toBe(1);
   });
+
+  test('HankoBatchProcessed(false) drops stale dispute finalize when on-chain nonce already moved even before DisputeFinalized arrives', async () => {
+    const entityId = `0x${'91'.repeat(32)}`;
+    const counterpartyId = `0x${'92'.repeat(32)}`;
+    const state = makeEntityState(entityId);
+    const account = makeProposalAccount([], entityId, counterpartyId);
+    account.activeDispute = {
+      startedByLeft: true,
+      disputeTimeout: 123,
+      initialProofbodyHash: `0x${'93'.repeat(32)}`,
+      initialNonce: 7,
+      finalizeQueued: true,
+    } as AccountMachine['activeDispute'];
+    account.onChainSettlementNonce = 7;
+    state.accounts.set(counterpartyId, account);
+    state.jBatchState = {
+      batch: createEmptyBatch(),
+      jurisdiction: null,
+      lastBroadcast: 0,
+      broadcastCount: 0,
+      failedAttempts: 0,
+      status: 'sent',
+      sentBatch: {
+        batch: {
+          ...createEmptyBatch(),
+          disputeFinalizations: [{
+            counterentity: counterpartyId,
+            initialNonce: 7,
+            finalNonce: 7,
+            initialProofbodyHash: `0x${'94'.repeat(32)}`,
+            finalProofbody: { offdeltas: [], tokenIds: [], transformers: [] },
+            finalArguments: '0x',
+            initialArguments: '0x',
+            sig: '0x',
+            startedByLeft: true,
+            disputeUntilBlock: 123,
+            cooperative: false,
+          }],
+        },
+        batchHash: `0x${'95'.repeat(32)}`,
+        encodedBatch: '0x',
+        entityNonce: 7,
+        firstSubmittedAt: 1000,
+        lastSubmittedAt: 1000,
+        submitAttempts: 1,
+      },
+      entityNonce: 7,
+    } as EntityState['jBatchState'];
+
+    const failed = await handleJEvent(state, {
+      from: `0x${'aa'.repeat(20)}`,
+      observedAt: 3000,
+      blockNumber: 23,
+      blockHash: `0x${'96'.repeat(32)}`,
+      transactionHash: `0x${'97'.repeat(32)}`,
+      event: {
+        type: 'HankoBatchProcessed',
+        data: {
+          entityId,
+          hankoHash: `0x${'98'.repeat(32)}`,
+          nonce: 7,
+          success: false,
+        },
+      },
+    }, createEmptyEnv('failed-batch-stale-finalize'));
+
+    expect(failed.newState.jBatchState?.batch.disputeFinalizations.length).toBe(0);
+  });
+
 
   test('htlc_lock refuses to add more than the configured per-account cap', async () => {
     const accountMachine = {
