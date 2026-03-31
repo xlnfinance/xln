@@ -1262,6 +1262,11 @@ test.describe('Rebalance E2E', () => {
         await page.waitForTimeout(700);
       }
     });
+    const firstSecuredCycleMs = Date.now() - start;
+    expect(
+      firstSecuredCycleMs,
+      `first secured rebalance cycle should complete promptly on anvil (got ${firstSecuredCycleMs}ms)`,
+    ).toBeLessThanOrEqual(10_000);
 
     const diagnostics = await readRebalanceDiagnostics(page, hubId);
     const rebalanceSteps = await readRebalanceStepEvents(page, scenarioStartedAt);
@@ -1387,6 +1392,11 @@ test.describe('Rebalance E2E', () => {
         await page.waitForTimeout(400);
       }
     });
+    const secondSecuredCycleMs = Date.now() - postStart;
+    expect(
+      secondSecuredCycleMs,
+      `second secured rebalance cycle should complete promptly on anvil (got ${secondSecuredCycleMs}ms)`,
+    ).toBeLessThanOrEqual(10_000);
     expect(postSnapshot, `post-secured faucet snapshot missing\n${debugDump}`).toBeTruthy();
     expect(
       Number(postSnapshot.currentHeight || 0) > currentHeightBefore,

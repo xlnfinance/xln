@@ -793,7 +793,8 @@ export function batchAddSettlement(
   entityProvider: string = '0x0000000000000000000000000000000000000000',
   hankoData: string = '0x',
   nonce: number = 0,
-  initiatorEntity?: string
+  initiatorEntity?: string,
+  disablePureC2RShortcut: boolean = false,
 ): void {
   // Block if batch has pending broadcast
   assertBatchNotPending(jBatchState, 'settlement');
@@ -811,7 +812,7 @@ export function batchAddSettlement(
 
   // Compress pure C2R settlements into collateralToReserve (saves calldata)
   const c2rResult = detectPureC2R(diffs, forgiveDebtsInTokenIds);
-  if (c2rResult.isPureC2R && sig) {
+  if (c2rResult.isPureC2R && sig && !disablePureC2RShortcut) {
     // Determine counterparty based on who is withdrawing
     const counterparty = c2rResult.withdrawer === 'left' ? rightEntity : leftEntity;
     const withdrawerEntity = c2rResult.withdrawer === 'left' ? leftEntity : rightEntity;

@@ -138,11 +138,12 @@
 
   // Current frame (time-aware)
   const currentFrame: RuntimeFrame | null = $derived.by((): RuntimeFrame | null => {
+    const isLive = $isolatedIsLive;
     const timeIdx = $isolatedTimeIndex;
     const hist = $isolatedHistory;
     const env = $isolatedEnv;
 
-    if (timeIdx != null && timeIdx >= 0 && hist && hist.length > 0) {
+    if (!isLive && timeIdx != null && timeIdx >= 0 && hist && hist.length > 0) {
       const idx = Math.min(timeIdx, hist.length - 1);
       return hist[idx] ?? null;
     }
@@ -560,6 +561,11 @@
     activeInlinePanel = 'none';
   }
 
+  function handleGoToLiveOverride(): void {
+    isolatedTimeIndex.set(-1);
+    isolatedIsLive.set(true);
+  }
+
 </script>
 
 {#if activeInlinePanel === 'formation'}
@@ -608,11 +614,11 @@
     allowHeaderAddRuntime={true}
     allowHeaderDeleteRuntime={true}
     headerRuntimeAddLabel="+ Add Runtime"
-    replicasOverride={currentFrame?.eReplicas instanceof Map ? currentFrame.eReplicas : null}
-    envOverride={$isolatedEnv}
-    historyOverride={$isolatedHistory}
-    timeIndexOverride={$isolatedTimeIndex}
-    isLiveOverride={$isolatedIsLive}
+    env={currentFrame}
+    history={$isolatedHistory}
+    timeIndex={$isolatedTimeIndex}
+    isLive={$isolatedIsLive}
+    onGoToLive={handleGoToLiveOverride}
     on:signerSelect={handleSignerSelect}
     on:addSigner={handleAddSigner}
     on:entitySelect={handleEntitySelect}

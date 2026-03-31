@@ -1,6 +1,5 @@
-import type { AccountMachine, Delta, EntityInput, Env, JEvent } from '../types';
+import type { AccountMachine, Delta, Env } from '../types';
 import { deriveDelta } from '../account-utils';
-import { enqueueRuntimeInput } from '../runtime.ts';
 
 export const HUB_MESH_TOKEN_ID = 1;
 export const HUB_MESH_CREDIT_AMOUNT = 1_000_000n * 10n ** 18n;
@@ -50,67 +49,6 @@ export const waitUntil = async (
     await sleep(stepMs);
   }
   return false;
-};
-
-export const applyJEventsToEnv = async (env: Env, events: JEvent[], label = 'J-EVENTS'): Promise<void> => {
-  if (!events || events.length === 0) return;
-
-  const grouped = new Map<
-    string,
-    {
-      events: Array<{ type: string; data: Record<string, unknown> }>;
-      blockNumber: number;
-      blockHash: string;
-      transactionHash: string;
-    }
-  >();
-
-  for (const event of events) {
-    const entity =
-      (event as any)?.args?.entity ||
-      (event as any)?.args?.entityId ||
-      (event as any)?.args?.leftEntity;
-    if (!entity) continue;
-    const key = String(entity).toLowerCase();
-    const entry = grouped.get(key) ?? {
-      events: [],
-      blockNumber: Number(event.blockNumber ?? 0),
-      blockHash: event.blockHash ?? '0x',
-      transactionHash: event.transactionHash ?? '0x',
-    };
-    entry.events.push({
-      type: event.name ?? (event as any).type ?? 'Unknown',
-      data: (event as any).args ?? {},
-    });
-    grouped.set(key, entry);
-  }
-
-  const observedAt = Date.now();
-  const entityInputs: EntityInput[] = [];
-  for (const [entityId, entry] of grouped.entries()) {
-    if (!getEntityReplicaById(env, entityId)) continue;
-    entityInputs.push({
-      entityId,
-      signerId: 'j-event',
-      entityTxs: [
-        {
-          type: 'j_event',
-          data: {
-            from: 'j-event',
-            events: entry.events,
-            observedAt,
-            blockNumber: entry.blockNumber,
-            blockHash: entry.blockHash,
-            transactionHash: entry.transactionHash,
-          },
-        },
-      ],
-    });
-  }
-
-  if (entityInputs.length === 0) return;
-  console.log(`[${label}] Queueing ${entityInputs.length} J-events`);
-  enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs });
 };
 
 export const getEntityReplicaById = (env: Env, entityId: string): any | null => {

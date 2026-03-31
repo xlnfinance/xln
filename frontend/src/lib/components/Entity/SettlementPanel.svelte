@@ -1,10 +1,9 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
-  import { getXLN, xlnEnvironment, replicas, enqueueEntityInputs, xlnFunctions } from '../../stores/xlnStore';
-  import { isLive as globalIsLive } from '../../stores/timeStore';
+  import { getXLN, enqueueEntityInputs, xlnFunctions } from '../../stores/xlnStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import type { EntityReplica, EntityTx, AccountMachine, EntityState } from '$lib/types/ui';
-  import type { Env } from '$types';
+  import type { Env, EnvSnapshot } from '@xln/runtime/xln-api';
   import { entityAvatar as resolveEntityAvatar } from '$lib/utils/avatar';
   import EntityInput from '../shared/EntityInput.svelte';
   import TokenSelect from '../shared/TokenSelect.svelte';
@@ -12,6 +11,8 @@
   export let entityId: string;
   export let replica: EntityReplica | null = null;
   export let historyOnly = false;
+  export let env: Env | EnvSnapshot;
+  export let isLive: boolean;
   type Action = 'r2c' | 'c2r' | 'transfer' | 'history';
   type GasPreset = 'standard' | 'fast' | 'urgent' | 'custom';
   type BatchDetailField = { label: string; value: string };
@@ -28,7 +29,6 @@
   type BatchHistoryRow = { entry: CompletedBatch; details: BatchDetailOp[]; key: string };
   type ActiveDispute = NonNullable<AccountMachine['activeDispute']>;
   type FeeOverrides = { gasBumpBps?: number; maxFeePerGasWei?: string; maxPriorityFeePerGasWei?: string };
-  type RuntimeJReplica = RuntimeEnv['jReplicas'] extends Map<string, infer Replica> ? Replica : never;
   type PendingSettleEntityTx = Extract<EntityTx, { type: 'r2r' }>;
   type SettlementLike = {
     leftEntity?: unknown;
@@ -36,10 +36,9 @@
     diffs?: Array<{ leftDiff?: unknown; rightDiff?: unknown }>;
   };
 
-  $: activeReplicas = $replicas;
   $: activeXlnFunctions = $xlnFunctions;
-  $: activeEnv = $xlnEnvironment;
-  $: activeIsLive = $globalIsLive;
+  $: activeEnv = env;
+  $: activeIsLive = isLive;
   // Settlement must read the same visible entity replica as the rest of the screen.
   // Mixing a second live lookup here causes split-brain UI (Assets sees new reserves, Settle sees old zeroes).
   $: currentReplica = replica ?? null;
@@ -68,9 +67,7 @@
   let autoExecutingWorkspaceKey = '';
   let expandedHistoryKeys = new Set<string>();
   let historyExpansionInitialized = false;
-
-  let liveJHeight = 0;
-  let liveJTimer: ReturnType<typeof setInterval> | null = null;
+  let gasSuggestionTimer: ReturnType<typeof setInterval> | null = null;
 
   function normalizeEntityId(id: string | null | undefined): string {
     return String(id || '').trim().toLowerCase();
@@ -80,6 +77,11 @@
     if (!value || typeof value !== 'object') return false;
     const obj = value as { eReplicas?: unknown; jReplicas?: unknown; runtimeInput?: unknown };
     return obj.eReplicas instanceof Map && obj.jReplicas instanceof Map;
+  }
+
+  function getFrameReplicaMap(sourceEnv: RuntimeEnv | EnvSnapshot | null | undefined): Map<string, EntityReplica> | null {
+    if (!sourceEnv || !(sourceEnv.eReplicas instanceof Map)) return null;
+    return sourceEnv.eReplicas as Map<string, EntityReplica>;
   }
 
   function resolveSignerId(env: RuntimeEnv): string {
@@ -484,28 +486,12 @@
     return (value * BigInt(bps) + 9_999n) / 10_000n;
   }
 
-  async function refreshLiveJHeight(): Promise<void> {
-    const jReplicas = activeEnv?.jReplicas;
-    if (!(jReplicas instanceof Map) || jReplicas.size === 0) return;
-    const activeJKey = activeEnv?.activeJurisdiction;
-    const activeJReplica = activeJKey ? jReplicas.get(activeJKey) : null;
-    const anyJReplica: RuntimeJReplica | undefined = activeJReplica ?? Array.from(jReplicas.values())[0];
-    const provider = anyJReplica?.jadapter?.provider;
-    if (!provider || typeof provider.getBlockNumber !== 'function') return;
-    try {
-      const blockNumber = Number(await provider.getBlockNumber());
-      if (Number.isFinite(blockNumber)) liveJHeight = blockNumber;
-    } catch {
-      // Non-fatal.
-    }
-  }
-
   async function refreshGasSuggestions(): Promise<void> {
     const jReplicas = activeEnv?.jReplicas;
     if (!(jReplicas instanceof Map) || jReplicas.size === 0) return;
     const activeJKey = activeEnv?.activeJurisdiction;
     const activeJReplica = activeJKey ? jReplicas.get(activeJKey) : null;
-    const anyJReplica: RuntimeJReplica | undefined = activeJReplica ?? Array.from(jReplicas.values())[0];
+    const anyJReplica = activeJReplica ?? Array.from(jReplicas.values())[0];
     const provider = anyJReplica?.jadapter?.provider;
     if (!provider || typeof provider.getFeeData !== 'function') return;
 
@@ -570,7 +556,7 @@
     };
 
     for (const accountId of accountEntityIds) add(accountId);
-    for (const key of activeReplicas?.keys?.() || []) add(String(key).split(':')[0]);
+    for (const key of getFrameReplicaMap(activeEnv)?.keys?.() || []) add(String(key).split(':')[0]);
     for (const profile of activeEnv?.gossip?.getProfiles?.() || []) add(profile.entityId);
 
     return Array.from(ids.values());
@@ -680,7 +666,13 @@
   $: selectedAccountStatus = String(selectedAccount?.status || '');
   $: selectedDisputeTimeout = Number(selectedAccountActiveDispute?.disputeTimeout || 0);
   $: selectedDisputeBlocksLeft = selectedAccountActiveDispute
-    ? Math.max(0, selectedDisputeTimeout - Math.max(Number(currentReplica?.state?.lastFinalizedJHeight || 0), Number(liveJHeight || 0)))
+    ? Math.max(
+        0,
+        selectedDisputeTimeout - Math.max(
+          Number(selectedAccount?.lastFinalizedJHeight || 0),
+          Number(currentReplica?.state?.lastFinalizedJHeight || 0),
+        ),
+      )
     : 0;
 
   function requireCurrentReplica(): EntityReplica {
@@ -976,10 +968,6 @@
     return pick(gasPreset);
   })();
 
-  $: if (activeIsLive) {
-    void refreshLiveJHeight();
-  }
-
   $: {
     const workspace = selectedAccount?.settlementWorkspace;
     const workspaceKey = getWorkspaceAutoExecuteKey(counterpartyEntityId, selectedAccount ?? null);
@@ -999,16 +987,14 @@
   }
 
   onMount(() => {
-    liveJTimer = setInterval(() => {
-      void refreshLiveJHeight();
+    gasSuggestionTimer = setInterval(() => {
       if (hasAnyBatch) void refreshGasSuggestions();
     }, 5000);
-    void refreshLiveJHeight();
     void refreshGasSuggestions();
   });
 
   onDestroy(() => {
-    if (liveJTimer) clearInterval(liveJTimer);
+    if (gasSuggestionTimer) clearInterval(gasSuggestionTimer);
   });
 </script>
 

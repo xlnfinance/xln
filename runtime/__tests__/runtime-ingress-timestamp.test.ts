@@ -1,7 +1,10 @@
 import { describe, expect, test } from 'bun:test';
 
+import { deriveSignerAddressSync } from '../account-crypto';
 import { TIMING } from '../constants';
 import { initCrontab, scheduleHook } from '../entity-crontab';
+import { generateLazyEntityId } from '../entity-factory';
+import { processEventBatch } from '../jadapter/watcher';
 import { createEmptyEnv, enqueueRuntimeInput, process, startRuntimeLoop } from '../runtime';
 import type { EntityReplica } from '../types';
 
@@ -284,9 +287,18 @@ describe('runtime ingress timestamp', () => {
     env.quietRuntimeLogs = true;
 
     let startCount = 0;
+    let started = false;
     const fakeJAdapter = {
       startWatching(_env: unknown) {
+        if (started) return;
+        started = true;
         startCount += 1;
+      },
+      isWatching() {
+        return started;
+      },
+      setBlockTimestamp(_timestamp: number) {
+        return undefined;
       },
     };
 
@@ -316,6 +328,209 @@ describe('runtime ingress timestamp', () => {
     try {
       await sleep(10);
       expect(startCount).toBe(1);
+    } finally {
+      stop();
+    }
+  });
+
+  test('runtime loop starts watcher for jReplica added after loop start', async () => {
+    const env = createEmptyEnv('runtime-late-watcher-start-seed');
+    env.quietRuntimeLogs = true;
+    env.timestamp = Date.now();
+
+    const entityId = `0x${'66'.repeat(32)}`;
+    const replica = makeReplica(entityId, env.timestamp);
+    env.eReplicas.set(`${entityId}:1`, replica);
+
+    let startCount = 0;
+    let started = false;
+    const fakeJAdapter = {
+      startWatching(_env: unknown) {
+        if (started) return;
+        started = true;
+        startCount += 1;
+      },
+      isWatching() {
+        return started;
+      },
+      setBlockTimestamp(_timestamp: number) {
+        return undefined;
+      },
+    };
+
+    const stop = startRuntimeLoop(env, { tickDelayMs: 1 });
+    try {
+      await sleep(10);
+      expect(startCount).toBe(0);
+
+      env.activeJurisdiction = 'Testnet';
+      env.jReplicas.set('Testnet', {
+        name: 'Testnet',
+        blockNumber: 0n,
+        stateRoot: new Uint8Array(32),
+        mempool: [],
+        blockDelayMs: 0,
+        lastBlockTimestamp: env.timestamp,
+        position: { x: 0, y: 0, z: 0 },
+        depositoryAddress: `0x${'11'.repeat(20)}`,
+        entityProviderAddress: `0x${'22'.repeat(20)}`,
+        contracts: {
+          account: `0x${'33'.repeat(20)}`,
+          depository: `0x${'11'.repeat(20)}`,
+          entityProvider: `0x${'22'.repeat(20)}`,
+          deltaTransformer: `0x${'44'.repeat(20)}`,
+        },
+        rpcs: ['http://localhost:8545'],
+        chainId: 31337,
+        jadapter: fakeJAdapter as never,
+      });
+
+      enqueueRuntimeInput(env, {
+        runtimeTxs: [],
+        entityInputs: [{ entityId, signerId: replica.signerId, entityTxs: [] }],
+      });
+
+      await sleep(20);
+      expect(startCount).toBe(1);
+    } finally {
+      stop();
+    }
+  });
+
+  test('runtime loop starts exactly one watcher per rpc/depository per runtime', async () => {
+    const env = createEmptyEnv('runtime-watcher-dedup-seed');
+    env.quietRuntimeLogs = true;
+    env.activeJurisdiction = 'J1';
+
+    let startCountA = 0;
+    let startedA = false;
+    const adapterA = {
+      startWatching(_env: unknown) {
+        startedA = true;
+        startCountA += 1;
+      },
+      isWatching() {
+        return startedA;
+      },
+      stopWatching() {
+        startedA = false;
+      },
+      setBlockTimestamp(_timestamp: number) {
+        return undefined;
+      },
+      mode: 'rpc',
+      chainId: 31337,
+      provider: {
+        _getConnection() {
+          return { url: 'http://localhost:8545' };
+        },
+      },
+    };
+    let startCountB = 0;
+    let startedB = false;
+    const adapterB = {
+      startWatching(_env: unknown) {
+        startedB = true;
+        startCountB += 1;
+      },
+      isWatching() {
+        return startedB;
+      },
+      stopWatching() {
+        startedB = false;
+      },
+      setBlockTimestamp(_timestamp: number) {
+        return undefined;
+      },
+      mode: 'rpc',
+      chainId: 31337,
+      provider: {
+        _getConnection() {
+          return { url: 'http://localhost:8545' };
+        },
+      },
+    };
+
+    const sharedReplicaState = {
+      blockNumber: 0n,
+      stateRoot: new Uint8Array(32),
+      mempool: [],
+      blockDelayMs: 0,
+      lastBlockTimestamp: env.timestamp,
+      position: { x: 0, y: 0, z: 0 },
+      depositoryAddress: `0x${'11'.repeat(20)}`,
+      entityProviderAddress: `0x${'22'.repeat(20)}`,
+      contracts: {
+        account: `0x${'33'.repeat(20)}`,
+        depository: `0x${'11'.repeat(20)}`,
+        entityProvider: `0x${'22'.repeat(20)}`,
+        deltaTransformer: `0x${'44'.repeat(20)}`,
+      },
+      rpcs: ['http://localhost:8545'],
+      chainId: 31337,
+    };
+
+    env.jReplicas.set('J1', {
+      name: 'J1',
+      ...sharedReplicaState,
+      jadapter: adapterA as never,
+    });
+    env.jReplicas.set('J2', {
+      name: 'J2',
+      ...sharedReplicaState,
+      jadapter: adapterB as never,
+    });
+
+    const stop = startRuntimeLoop(env, { tickDelayMs: 1 });
+    try {
+      await sleep(10);
+      expect(startCountA + startCountB).toBe(1);
+    } finally {
+      stop();
+    }
+  });
+
+  test('watcher-fed j events wake idle runtime and apply reserve updates without manual polling', async () => {
+    const seed = 'runtime-watcher-wake-seed';
+    const env = createEmptyEnv(seed);
+    env.quietRuntimeLogs = true;
+    env.timestamp = 1_000;
+
+    const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
+    const replica = makeReplica(entityId, 1_000);
+    replica.signerId = signerId;
+    replica.isProposer = true;
+    env.eReplicas.set(`${entityId}:${signerId}`, replica);
+
+    const stop = startRuntimeLoop(env, { tickDelayMs: 1 });
+    try {
+      processEventBatch(
+        [{
+          name: 'ReserveUpdated',
+          args: {
+            entity: entityId,
+            tokenId: 2,
+            newBalance: 500n,
+          },
+          blockNumber: 12,
+          blockHash: `0x${'bb'.repeat(32)}`,
+          transactionHash: `0x${'cc'.repeat(32)}`,
+          logIndex: 0,
+        }],
+        env,
+        12,
+        `0x${'bb'.repeat(32)}`,
+        { value: 0 },
+        'test',
+      );
+
+      for (let i = 0; i < 40; i += 1) {
+        if (env.eReplicas.get(`${entityId}:${signerId}`)?.state.reserves.get(2) === 500n) break;
+        await sleep(10);
+      }
+
+      expect(env.eReplicas.get(`${entityId}:${signerId}`)?.state.reserves.get(2)).toBe(500n);
     } finally {
       stop();
     }

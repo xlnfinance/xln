@@ -890,6 +890,7 @@ export type EntityTx =
       type: 'settle_execute';
       data: {
         counterpartyEntityId: string;
+        disableC2RShortcut?: boolean;
       };
     }
   | {
@@ -1023,6 +1024,30 @@ export interface SwapOffer {
   quantizedWant?: bigint;       // wantAmount scaled proportionally
 }
 
+export interface SwapOrderResolveHistoryEntry {
+  fillRatio: number;
+  cancelRemainder: boolean;
+  height: number;
+  executionGiveAmount?: bigint;
+  executionWantAmount?: bigint;
+  feeTokenId?: number;
+  feeAmount?: bigint;
+  comment?: string;
+}
+
+export interface SwapOrderHistoryEntry {
+  offerId: string;
+  giveTokenId: number;
+  giveAmount: bigint;
+  wantTokenId: number;
+  wantAmount: bigint;
+  priceTicks?: bigint;
+  createdHeight: number;
+  cancelRequested: boolean;
+  lastUpdatedHeight: number;
+  resolves: SwapOrderResolveHistoryEntry[];
+}
+
 /**
  * HTLC Routing Context (replaces 2024 User.hashlockMap)
  * Tracks inbound/outbound hops for automatic secret propagation
@@ -1074,6 +1099,10 @@ export interface AccountMachine {
 
   // Swap offers (limit orders)
   swapOffers: Map<string, SwapOffer>; // offerId → offer details
+  // Durable local lifecycle log for swap UI/history.
+  // Keep this in account state so closed/partial orders do not disappear
+  // when the short bilateral frameHistory ring buffer prunes old frames.
+  swapOrderHistory?: Map<string, SwapOrderHistoryEntry>;
 
   // Global credit limits (in reference currency - USDC)
   globalCreditLimits: {
@@ -1948,6 +1977,7 @@ export interface Env {
       runtimeId: string;
       seenAt: number;
     }>;
+    watcherDedupCounter?: import('./jadapter/watcher').EventBatchCounter;
     directEntityInputDispatch?: ((targetRuntimeId: string, input: DeliverableEntityInput, ingressTimestamp?: number) => boolean) | null;
   };
   history: EnvSnapshot[]; // Time machine snapshots - single source of truth

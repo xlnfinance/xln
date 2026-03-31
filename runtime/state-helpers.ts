@@ -516,6 +516,21 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
     deltas: new Map(Array.from(account.deltas.entries()).map(([key, delta]) => [key, { ...delta }])),
     locks: new Map(Array.from(account.locks.entries()).map(([key, lock]) => [key, { ...lock }])),
     swapOffers: new Map(Array.from(account.swapOffers.entries()).map(([key, offer]) => [key, { ...offer }])),
+    ...(account.swapOrderHistory instanceof Map
+      ? {
+          swapOrderHistory: new Map(
+            Array.from(account.swapOrderHistory.entries()).map(([key, entry]) => [
+              key,
+              {
+                ...entry,
+                resolves: Array.isArray(entry.resolves)
+                  ? entry.resolves.map((resolve) => ({ ...resolve }))
+                  : [],
+              },
+            ]),
+          ),
+        }
+      : {}),
     pendingSignatures: [...account.pendingSignatures],
     frameHistory: account.frameHistory.map((frame) => cloneAccountFrame(frame)),
     globalCreditLimits: { ...account.globalCreditLimits },
@@ -664,6 +679,20 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
       { ...offer } // Clone offer object
     ])
   );
+
+  if (account.swapOrderHistory instanceof Map) {
+    result.swapOrderHistory = new Map(
+      Array.from(account.swapOrderHistory.entries()).map(([offerId, entry]) => [
+        offerId,
+        {
+          ...entry,
+          resolves: Array.isArray(entry.resolves)
+            ? entry.resolves.map((resolve) => ({ ...resolve }))
+            : [],
+        },
+      ]),
+    );
+  }
 
   return result;
 }

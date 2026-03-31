@@ -27,8 +27,8 @@ const CUSTODY_DB_PATH = process.env.CUSTODY_DB_PATH || './db-tmp/custody.sqlite'
 const SESSION_COOKIE = 'custody_session';
 const JOURNAL_CURSOR_KEY = 'journal_cursor';
 const JOURNAL_ACTIVE_SYNC_MS = 1000;
-const JOURNAL_IDLE_SYNC_MS = 5000;
-const JOURNAL_ERROR_SYNC_MS = 5000;
+const JOURNAL_IDLE_SYNC_MS = 1000;
+const JOURNAL_ERROR_SYNC_MS = 1000;
 
 if (!CUSTODY_ENTITY_ID) {
   throw new Error('CUSTODY_ENTITY_ID is required');

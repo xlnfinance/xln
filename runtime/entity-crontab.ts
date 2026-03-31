@@ -53,6 +53,7 @@ import { isLeftEntity } from './entity-id-utils';
 import { deriveDelta } from './account-utils';
 import { resolveEntityProposerId } from './state-helpers';
 import { normalizeRebalanceMatchingStrategy } from './rebalance-policy';
+import { TIMING } from './constants';
 import { DEFAULT_SOFT_LIMIT } from './types';
 import { terminateHtlcRoute } from './entity-tx/htlc-route-lifecycle';
 import { getRuntimeJurisdictionHeight } from './j-height';
@@ -62,7 +63,7 @@ export const ACCOUNT_TIMEOUT_MS = 30000; // 30 seconds (configurable)
 export const HTLC_SECRET_ACK_TIMEOUT_MS = 30000; // auto-dispute if secret-return ACK missing
 export const ACCOUNT_TIMEOUT_CHECK_INTERVAL_MS = 10000; // Check every 10 seconds
 export const ACCOUNT_PENDING_RESEND_AFTER_MS = 8000; // Resend pending frame input after 8s without ACK
-export const HUB_REBALANCE_INTERVAL_MS = 3000; // Default production poll cadence (override via hub config if needed)
+export const HUB_REBALANCE_INTERVAL_MS = TIMING.CRONTAB_INTERVAL_MS; // Keep hub rebalance aligned with the canonical 1s runtime cadence.
 export const HUB_PENDING_BROADCAST_STALE_MS = 120000; // 2 minutes without finalize = stale
 export const HUB_SUBMITTED_REQUEST_STALE_MS = 5 * 60 * 1000; // 5 minutes since jBatch handoff => mark as stale/manual
 export const HUB_MAX_R2C_PER_TICK = 10;

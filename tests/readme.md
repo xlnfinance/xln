@@ -47,14 +47,15 @@ bun proofs/smoke-tests/test-ethereumjs-vm.ts
 
 **All tests:**
 ```bash
-bun run proofs              # Run all E2E tests
-bunx playwright test        # Same, with Playwright CLI
+bun run test:e2e:parallel:isolated
+bun run test:e2e:parallel:max
+bun run test:e2e:parallel:long
 ```
 
 **Specific test:**
 ```bash
-bunx playwright test proofs/tutorial-working-demo.spec.ts
-HEADED=true bunx playwright test proofs/browser-evm.spec.ts
+bun runtime/scripts/run-e2e-parallel-isolated.ts --pw-files=tests/e2e-swap-isolated.spec.ts
+HEADED=true bun runtime/scripts/run-e2e-parallel-isolated.ts --pw-files=tests/e2e-dispute.spec.ts
 ```
 
 **With notification:**

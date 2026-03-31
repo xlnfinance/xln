@@ -1033,10 +1033,6 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     }
   }
 
-  if (xln.startJurisdictionWatchers) {
-    xln.startJurisdictionWatchers(env);
-  }
-
   if (xln.startP2P) {
     const { resolveRelayUrls } = await import('./xlnStore');
     xln.startP2P(env, {

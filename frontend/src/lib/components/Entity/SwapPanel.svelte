@@ -1,10 +1,10 @@
   <script lang="ts">
-    import type { AccountMachine, AccountTx, EntityReplica, Tab } from '$lib/types/ui';
+    import type { AccountMachine, EntityReplica, Tab } from '$lib/types/ui';
+  import type { Env, EnvSnapshot } from '@xln/runtime/xln-api';
   import { getBestAsk, getBestBid } from '@xln/runtime/xln-api';
   import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import type { SwapBookEntry } from '@xln/runtime/xln-api';
-  import { enqueueEntityInputs, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
-  import { isLive as globalIsLive } from '../../stores/timeStore';
+  import { enqueueEntityInputs, xlnFunctions } from '../../stores/xlnStore';
   import { toasts } from '../../stores/toastStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import { amountToUsd } from '$lib/utils/assetPricing';
@@ -16,6 +16,8 @@
 
   export let replica: EntityReplica | null;
   export let tab: Tab;
+  export let env: Env | EnvSnapshot;
+  export let isLive: boolean;
 
   // Props
   export let counterpartyId: string = '';
@@ -67,7 +69,7 @@
   type ResolveRecord = {
     fillRatio: number;
     cancelRemainder: boolean;
-    timestamp: number;
+    height: number;
     executionGiveAmount: bigint | null;
     executionWantAmount: bigint | null;
     feeTokenId: number | null;
@@ -164,12 +166,16 @@
   const FILLED_DISPLAY_PPM_THRESHOLD = 999_950n;
 
     $: activeXlnFunctions = $xlnFunctions;
-    $: activeEnv = $xlnEnvironment;
-    $: activeIsLive = $globalIsLive;
+    $: activeFrame = env;
+    $: runtimeEnv = isRuntimeEnv(activeFrame) ? activeFrame : null;
+    $: activeIsLive = isLive;
+    $: currentReplica = replica
+      ? activeFrame.eReplicas.get(`${replica.entityId}:${replica.signerId}`) ?? null
+      : null;
 
     // Get available accounts (counterparties)
-  $: accounts = replica?.state?.accounts
-    ? Array.from(replica.state.accounts.keys())
+  $: accounts = currentReplica?.state?.accounts
+    ? Array.from(currentReplica.state.accounts.keys())
     : [];
   $: baseAccountIds = accounts.map((id) => String(id)).sort();
   $: accountIds = (() => {
@@ -177,7 +183,13 @@
     if (!selected || !baseAccountIds.includes(selected)) return baseAccountIds;
     return [selected, ...baseAccountIds.filter((id) => id !== selected)];
   })();
-  const getGossipProfiles = (): GossipProfile[] => activeEnv?.gossip?.getProfiles?.() || [];
+  const getGossipProfiles = (): GossipProfile[] => {
+    if (!activeFrame?.gossip) return [];
+    if ('getProfiles' in activeFrame.gossip && typeof activeFrame.gossip.getProfiles === 'function') {
+      return activeFrame.gossip.getProfiles();
+    }
+    return Array.isArray(activeFrame.gossip.profiles) ? activeFrame.gossip.profiles : [];
+  };
   function isHubAccount(accountIdValue: string): boolean {
     const normalized = String(accountIdValue || '').trim().toLowerCase();
     if (!normalized) return false;
@@ -218,7 +230,7 @@
     return match || String(input || '').trim();
   }
   function accountLabel(accountIdValue: string): string {
-    const resolved = resolveEntityName(accountIdValue, activeEnv);
+    const resolved = resolveEntityName(accountIdValue, activeFrame);
     return resolved || formatEntityId(accountIdValue);
   }
   $: selectedHubOptions = hubAccountIds.map((id) => ({ value: id, label: accountLabel(id) }));
@@ -286,8 +298,8 @@
           resolvePairOrientation(1, 3), // USDC/USDT
         ];
     const allowedPairKeys = new Set(requiredPairs.map((pair) => `${pair.baseTokenId}/${pair.quoteTokenId}`));
-    const configuredPairs = Array.isArray(replica?.state?.swapTradingPairs)
-      ? replica.state.swapTradingPairs
+    const configuredPairs = Array.isArray(currentReplica?.state?.swapTradingPairs)
+      ? currentReplica.state.swapTradingPairs
       : [];
     const out: PairOption[] = [];
     const seen = new Set<string>();
@@ -439,12 +451,12 @@
     priceRatioInput = normalized;
   }
 
-  $: activeOffers = replica ? activeXlnFunctions.listOpenSwapOffers(replica.state) : [];
+  $: activeOffers = currentReplica ? activeXlnFunctions.listOpenSwapOffers(currentReplica.state) : [];
 
   function readOutCapacity(counterpartyEntityId: string, tokenIdValue: number): bigint {
     if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return 0n;
     const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
-    const account = replica?.state?.accounts?.get?.(resolvedCounterparty);
+    const account = currentReplica?.state?.accounts?.get?.(resolvedCounterparty);
     const deltas = account?.deltas as TokenKeyedMap<unknown> | undefined;
     if (!(deltas instanceof Map) || !activeXlnFunctions?.deriveDelta || !tab.entityId) return 0n;
     const delta = getTokenMapValue(deltas, tokenIdValue);
@@ -463,7 +475,7 @@
   function hasTokenInAccount(counterpartyEntityId: string, tokenIdValue: number): boolean {
     if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return false;
     const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
-    const account = replica?.state?.accounts?.get?.(resolvedCounterparty);
+    const account = currentReplica?.state?.accounts?.get?.(resolvedCounterparty);
     const deltas = account?.deltas as TokenKeyedMap<unknown> | undefined;
     if (!(deltas instanceof Map)) return false;
     return getTokenMapValue(deltas, tokenIdValue) !== undefined;
@@ -472,7 +484,7 @@
   function readInCapacity(counterpartyEntityId: string, tokenIdValue: number): bigint {
     if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return 0n;
     const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
-    const account = replica?.state?.accounts?.get?.(resolvedCounterparty);
+    const account = currentReplica?.state?.accounts?.get?.(resolvedCounterparty);
     const deltas = account?.deltas as TokenKeyedMap<unknown> | undefined;
     if (!(deltas instanceof Map) || !activeXlnFunctions?.deriveDelta || !tab.entityId) return 0n;
     const delta = getTokenMapValue(deltas, tokenIdValue);
@@ -491,7 +503,7 @@
   function readAccountDelta(counterpartyEntityId: string, tokenIdValue: number): DeltaLike | null {
     if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return null;
     const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
-    const account = replica?.state?.accounts?.get?.(resolvedCounterparty);
+    const account = currentReplica?.state?.accounts?.get?.(resolvedCounterparty);
     const deltas = account?.deltas as TokenKeyedMap<unknown> | undefined;
     if (!(deltas instanceof Map)) return null;
     const delta = getTokenMapValue(deltas, tokenIdValue) as DeltaLike | undefined;
@@ -549,10 +561,10 @@
 
   $: giveTokenSymbol = tokenSymbol(giveToken);
   $: wantTokenSymbol = tokenSymbol(wantToken);
-  $: wantTokenPresentInAccount = (replica, hasTokenInAccount(activeOrderAccountId, wantToken));
-  // Include replica in deps so capacity updates when account state changes (new frames)
-  $: availableGiveCapacity = (replica, readOutCapacity(activeOrderAccountId, giveToken));
-  $: availableWantInCapacity = (replica, readInCapacity(activeOrderAccountId, wantToken));
+  $: wantTokenPresentInAccount = (currentReplica, hasTokenInAccount(activeOrderAccountId, wantToken));
+  // Include currentReplica in deps so capacity updates when account state changes (new frames)
+  $: availableGiveCapacity = (currentReplica, readOutCapacity(activeOrderAccountId, giveToken));
+  $: availableWantInCapacity = (currentReplica, readInCapacity(activeOrderAccountId, wantToken));
   $: formattedAvailableGive = Number.isFinite(giveToken) && giveToken > 0
     ? `${formatAmount(availableGiveCapacity, giveToken)} ${giveTokenSymbol}`
     : availableGiveCapacity.toString();
@@ -569,8 +581,8 @@
   $: leftoverGiveLabel = Number.isFinite(giveToken) && giveToken > 0
     ? `${formatAmount(giveAmountLeftover, giveToken)} ${giveTokenSymbol}`
     : giveAmountLeftover.toString();
-  $: autoInboundCreditTarget = (replica, computeAutoInboundCreditTarget(activeOrderAccountId, wantToken, canonicalWantAmount));
-  $: currentPeerCreditLimit = (replica, readPeerCreditLimit(activeOrderAccountId, wantToken));
+  $: autoInboundCreditTarget = (currentReplica, computeAutoInboundCreditTarget(activeOrderAccountId, wantToken, canonicalWantAmount));
+  $: currentPeerCreditLimit = (currentReplica, readPeerCreditLimit(activeOrderAccountId, wantToken));
   $: autoInboundCreditIncrease = autoInboundCreditTarget && autoInboundCreditTarget > currentPeerCreditLimit
     ? autoInboundCreditTarget - currentPeerCreditLimit
     : 0n;
@@ -616,10 +628,10 @@
   }
 
   function readCurrentHubPairBook(hubEntityId: string): any | null {
-    if (!activeEnv?.eReplicas || !hubEntityId) return null;
+    if (!(activeFrame?.eReplicas instanceof Map) || !hubEntityId) return null;
     const normalizedHubId = String(hubEntityId).trim().toLowerCase();
     if (!normalizedHubId) return null;
-    for (const [key, replica] of activeEnv.eReplicas.entries()) {
+    for (const [key, replica] of activeFrame.eReplicas.entries()) {
       const entityId = String(key || '').split(':')[0]?.trim().toLowerCase();
       if (entityId !== normalizedHubId) continue;
       return replica?.state?.orderbookExt?.books?.get?.(orderbookPairId) || null;
@@ -929,11 +941,11 @@
   }
 
   function resolveSignerId(entityId: string): string {
-    if (activeEnv && activeXlnFunctions?.resolveEntityProposerId) {
-      const proposerId = activeXlnFunctions.resolveEntityProposerId(activeEnv, entityId, 'swap-panel');
+    if (runtimeEnv && activeXlnFunctions?.resolveEntityProposerId) {
+      const proposerId = activeXlnFunctions.resolveEntityProposerId(runtimeEnv, entityId, 'swap-panel');
       if (proposerId) return proposerId;
     }
-    return requireSignerIdForEntity(activeEnv, entityId, 'swap-panel');
+    return requireSignerIdForEntity(runtimeEnv, entityId, 'swap-panel');
   }
 
   function getTokenDecimals(tokenIdValue: number): number {
@@ -1064,56 +1076,15 @@
   });
 
   function accountMachines(): Array<{ accountId: string; account: AccountMachine }> {
-    if (!(replica?.state?.accounts instanceof Map)) return [];
-    return Array.from(replica.state.accounts.entries()).map(([accountId, account]) => ({
+    if (!(currentReplica?.state?.accounts instanceof Map)) return [];
+    return Array.from(currentReplica.state.accounts.entries()).map(([accountId, account]) => ({
       accountId: String(accountId),
       account,
     }));
   }
 
-  function txDataAsRecord(tx: AccountTx): Record<string, unknown> {
-    if (!tx || typeof tx !== 'object') return {};
-    const data = (tx as { data?: unknown }).data;
-    return data && typeof data === 'object' ? (data as Record<string, unknown>) : {};
-  }
-
   function offerLifecycleKey(accountId: string, offerId: string): string {
     return `${String(accountId || '').trim()}:${String(offerId || '').trim()}`;
-  }
-
-  function createLifecycleFromResolveFallback(
-    accountId: string,
-    offerId: string,
-    frameTs: number,
-    data: Record<string, unknown>,
-  ): OfferLifecycle | null {
-    const giveTokenId = Number(data.restingGiveTokenId || 0);
-    const wantTokenId = Number(data.restingWantTokenId || 0);
-    if (!Number.isFinite(giveTokenId) || !Number.isFinite(wantTokenId) || giveTokenId <= 0 || wantTokenId <= 0) {
-      return null;
-    }
-    const giveAmount = toBigIntSafe(data.restingGiveAmount) ?? 0n;
-    const wantAmount = toBigIntSafe(data.restingWantAmount) ?? 0n;
-    if (giveAmount <= 0n || wantAmount <= 0n) return null;
-    const priceTicks = toBigIntSafe(data.restingPriceTicks)
-      ?? (activeXlnFunctions?.computeSwapPriceTicks
-        ? activeXlnFunctions.computeSwapPriceTicks(giveTokenId, wantTokenId, giveAmount, wantAmount)
-        : 0n);
-    return {
-      key: offerLifecycleKey(accountId, offerId),
-      offerId,
-      accountId,
-      giveTokenId,
-      wantTokenId,
-      giveAmount,
-      wantAmount,
-      priceTicks,
-      // The real creation timestamp may be older than the retained frameHistory window.
-      // Frame-local resolve time is still good enough for rendering and status tracking.
-      createdAt: frameTs,
-      resolves: [],
-      cancelRequested: false,
-    };
   }
 
   function computeFilledPpmFromRatios(resolves: ResolveRecord[]): bigint {
@@ -1224,84 +1195,72 @@
   }
 
   function collectOfferLifecycles(): OfferLifecycle[] {
-    const lifecycles = new Map<string, OfferLifecycle>();
+    const lifecycles: OfferLifecycle[] = [];
     for (const { accountId, account } of accountMachines()) {
-      const frames = Array.isArray(account.frameHistory) ? account.frameHistory : [];
-      for (const frame of frames) {
-        const frameTs = Number(frame.timestamp || 0);
-        const frameTxs = Array.isArray(frame.accountTxs) ? frame.accountTxs : [];
-        for (const tx of frameTxs) {
-          if (tx.type === 'swap_offer') {
-            const data = txDataAsRecord(tx);
-            const offerId = String(data.offerId || '');
-            if (!offerId) continue;
-            const key = offerLifecycleKey(accountId, offerId);
-            const giveToken = Number(data.giveTokenId || 0);
-            const wantToken = Number(data.wantTokenId || 0);
-            if (!Number.isFinite(giveToken) || !Number.isFinite(wantToken) || giveToken <= 0 || wantToken <= 0) continue;
-            const give = toBigIntSafe(data.giveAmount) ?? 0n;
-            const want = toBigIntSafe(data.wantAmount) ?? 0n;
-            const priceTicks = toBigIntSafe(data.priceTicks)
-              ?? (activeXlnFunctions?.computeSwapPriceTicks
-                ? activeXlnFunctions.computeSwapPriceTicks(giveToken, wantToken, give, want)
-                : 0n);
-            lifecycles.set(key, {
-              key,
-              offerId,
-              accountId,
-              giveTokenId: giveToken,
-              wantTokenId: wantToken,
-              giveAmount: give,
-              wantAmount: want,
-              priceTicks,
-              createdAt: frameTs,
-              resolves: [],
-              cancelRequested: false,
-            });
-            continue;
-          }
-          if (tx.type === 'swap_resolve') {
-            const data = txDataAsRecord(tx);
-            const offerId = String(data.offerId || '');
-            if (!offerId) continue;
-            const key = offerLifecycleKey(accountId, offerId);
-            const fillRatio = Number(data.fillRatio || 0);
-            const cancelRemainder = Boolean(data.cancelRemainder);
-            const executionGiveAmount = toBigIntSafe(data.executionGiveAmount);
-            const executionWantAmount = toBigIntSafe(data.executionWantAmount);
-            const feeTokenId = Number.isFinite(Number(data.feeTokenId)) ? Number(data.feeTokenId) : null;
-            const feeAmount = toBigIntSafe(data.feeAmount);
-            const comment = typeof data.comment === 'string' ? data.comment : '';
-            let prev = lifecycles.get(key);
-            if (!prev) {
-              prev = createLifecycleFromResolveFallback(accountId, offerId, frameTs, data);
-              if (!prev) continue;
-              lifecycles.set(key, prev);
-            }
-            prev.resolves.push({
-              fillRatio: Number.isFinite(fillRatio) ? fillRatio : 0,
-              cancelRemainder,
-              timestamp: frameTs,
-              executionGiveAmount,
-              executionWantAmount,
-              feeTokenId,
-              feeAmount,
-              comment,
-            });
-            continue;
-          }
-          if (tx.type === 'swap_cancel_request' || tx.type === 'swap_cancel') {
-            const data = txDataAsRecord(tx);
-            const offerId = String(data.offerId || '');
-            if (!offerId) continue;
-            const prev = lifecycles.get(offerLifecycleKey(accountId, offerId));
-            if (!prev) continue;
-            prev.cancelRequested = true;
-          }
-        }
+      if (!(account.swapOrderHistory instanceof Map)) continue;
+      for (const [offerId, rawEntry] of account.swapOrderHistory.entries()) {
+        if (!rawEntry || typeof rawEntry !== 'object') continue;
+        const entry = rawEntry as {
+          giveTokenId?: unknown;
+          wantTokenId?: unknown;
+          giveAmount?: unknown;
+          wantAmount?: unknown;
+          priceTicks?: unknown;
+          createdHeight?: unknown;
+          cancelRequested?: unknown;
+          resolves?: unknown;
+        };
+        const giveTokenId = Number(entry.giveTokenId || 0);
+        const wantTokenId = Number(entry.wantTokenId || 0);
+        const giveAmount = toBigIntSafe(entry.giveAmount) ?? 0n;
+        const wantAmount = toBigIntSafe(entry.wantAmount) ?? 0n;
+        if (!Number.isFinite(giveTokenId) || !Number.isFinite(wantTokenId) || giveTokenId <= 0 || wantTokenId <= 0) continue;
+        if (giveAmount <= 0n || wantAmount <= 0n) continue;
+        const priceTicks = toBigIntSafe(entry.priceTicks)
+          ?? (activeXlnFunctions?.computeSwapPriceTicks
+            ? activeXlnFunctions.computeSwapPriceTicks(giveTokenId, wantTokenId, giveAmount, wantAmount)
+            : 0n);
+        const resolves = Array.isArray(entry.resolves)
+          ? entry.resolves.map((resolve) => {
+              const rawResolve = resolve as {
+                fillRatio?: unknown;
+                cancelRemainder?: unknown;
+                height?: unknown;
+                executionGiveAmount?: unknown;
+                executionWantAmount?: unknown;
+                feeTokenId?: unknown;
+                feeAmount?: unknown;
+                comment?: unknown;
+              };
+              const feeTokenId = Number(rawResolve.feeTokenId);
+              return {
+                fillRatio: Number.isFinite(Number(rawResolve.fillRatio)) ? Number(rawResolve.fillRatio) : 0,
+                cancelRemainder: Boolean(rawResolve.cancelRemainder),
+                height: Number.isFinite(Number(rawResolve.height)) ? Number(rawResolve.height) : 0,
+                executionGiveAmount: toBigIntSafe(rawResolve.executionGiveAmount),
+                executionWantAmount: toBigIntSafe(rawResolve.executionWantAmount),
+                feeTokenId: Number.isFinite(feeTokenId) ? feeTokenId : null,
+                feeAmount: toBigIntSafe(rawResolve.feeAmount),
+                comment: typeof rawResolve.comment === 'string' ? rawResolve.comment : '',
+              } satisfies ResolveRecord;
+            })
+          : [];
+        lifecycles.push({
+          key: offerLifecycleKey(accountId, String(offerId || '')),
+          offerId: String(offerId || ''),
+          accountId,
+          giveTokenId,
+          wantTokenId,
+          giveAmount,
+          wantAmount,
+          priceTicks,
+          createdAt: Number(entry.createdHeight || 0),
+          resolves,
+          cancelRequested: Boolean(entry.cancelRequested),
+        });
       }
     }
-    return Array.from(lifecycles.values());
+    return lifecycles;
   }
 
   function classifyClosedStatus(lifecycle: OfferLifecycle): ClosedOrderStatus {
@@ -1310,9 +1269,8 @@
     if (filledPpm >= FILLED_DISPLAY_PPM_THRESHOLD) return 'filled';
     const hasFill = summary.filledBaseAmount > 0n;
     const hasCancelResolve = lifecycle.resolves.some((resolve) => resolve.cancelRemainder);
-    if (hasCancelResolve && hasFill) return 'partial';
+    if (hasFill) return 'partial';
     if (hasCancelResolve || lifecycle.cancelRequested) return 'canceled';
-    if (hasFill) return 'filled';
     return 'closed';
   }
 
@@ -1336,6 +1294,7 @@
 
   function formatOrderTime(ms: number): string {
     if (!Number.isFinite(ms) || ms <= 0) return '-';
+    if (ms < 1_000_000_000_000) return `#${ms}`;
     return new Date(ms).toLocaleTimeString();
   }
 
@@ -1370,7 +1329,7 @@
       const filledPercent = filledPpm >= FILLED_DISPLAY_PPM_THRESHOLD
         ? 100
         : Number((filledPpm * 10_000n) / 1_000_000n) / 100;
-      const latestResolveTs = offer.resolves.length > 0 ? offer.resolves[offer.resolves.length - 1]!.timestamp : offer.createdAt;
+      const latestResolveTs = offer.resolves.length > 0 ? offer.resolves[offer.resolves.length - 1]!.height : offer.createdAt;
       const closeComment = latestResolveComment(offer);
       return {
         offerId: offer.offerId,
@@ -1480,9 +1439,8 @@
   async function placeSwapOffer() {
     submitError = '';
     try {
-      const env = activeEnv;
+      const env = runtimeEnv;
       if (!env) throw new Error('XLN environment not ready');
-      if (!isRuntimeEnv(env)) throw new Error('Runtime environment not available');
       if (!activeIsLive) throw new Error('Swap actions are only available in LIVE mode');
       const signerId = resolveSignerId(tab.entityId);
       if (!signerId) throw new Error('No signer available for selected entity');
@@ -1598,9 +1556,8 @@
     if (!tab.entityId) return;
 
     try {
-      const env = activeEnv;
+      const env = runtimeEnv;
       if (!env) throw new Error('XLN environment not ready');
-      if (!isRuntimeEnv(env)) throw new Error('Runtime environment not available');
       if (!activeIsLive) throw new Error('Swap actions are only available in LIVE mode');
       const signerId = resolveSignerId(tab.entityId);
       if (!signerId) throw new Error('No signer available for selected entity');
@@ -1736,7 +1693,7 @@
               pairId={orderbookPairId}
               pairLabel={selectedPair?.label || `${baseTokenSymbol}/${quoteTokenSymbol}`}
               depth={orderbookDepth}
-              showSources={false}
+              showSources={true}
               sourceLabels={orderbookSourceLabels}
               sourceAvatars={orderbookSourceAvatars}
               compactHeader={true}

@@ -136,6 +136,18 @@ async function openMoveTab(page: Page): Promise<void> {
   await expect(page.getByTestId('move-committed-line').first()).toBeVisible({ timeout: 20_000 });
 }
 
+async function expectMoveAssetSelector(page: Page): Promise<void> {
+  const select = page.getByTestId('move-asset-symbol').first();
+  await expect(select).toBeVisible({ timeout: 20_000 });
+  const optionValues = (await select.locator('option').evaluateAll((nodes) =>
+    nodes.map((node) => String((node as HTMLOptionElement).value || '').trim()).filter(Boolean),
+  )).map((value) => value.toUpperCase());
+  expect(optionValues, `Move asset selector must expose canonical tokens, got ${JSON.stringify(optionValues)}`).toEqual(
+    expect.arrayContaining(['USDC', 'USDT', 'WETH']),
+  );
+  await expect(select, `Move asset selector must default to USDC, got ${JSON.stringify(optionValues)}`).toHaveValue('USDC');
+}
+
 type LocalEntityRef = {
   entityId: string;
   signerId: string;
@@ -147,13 +159,19 @@ type MoveBatchSnapshot = {
   pendingCollateralToReserve: number;
   pendingReserveToReserve: number;
   pendingReserveToExternal: number;
+  pendingOpCount: number;
   sentExternalToReserve: number;
   sentReserveToCollateral: number;
   sentCollateralToReserve: number;
   sentReserveToReserve: number;
   sentReserveToExternal: number;
+  sentOpCount: number;
   sentExists: boolean;
+  entityNonce: number;
+  sentEntityNonce: number | null;
   batchHistoryCount: number;
+  lastHistoryEntityNonce: number | null;
+  lastHistoryStatus: string;
   recentMessages: string[];
 };
 
@@ -201,13 +219,19 @@ async function readMoveBatchSnapshot(
         pendingCollateralToReserve: 0,
         pendingReserveToReserve: 0,
         pendingReserveToExternal: 0,
+        pendingOpCount: 0,
         sentExternalToReserve: 0,
         sentReserveToCollateral: 0,
         sentCollateralToReserve: 0,
         sentReserveToReserve: 0,
         sentReserveToExternal: 0,
+        sentOpCount: 0,
         sentExists: false,
+        entityNonce: 0,
+        sentEntityNonce: null,
         batchHistoryCount: 0,
+        lastHistoryEntityNonce: null,
+        lastHistoryStatus: '',
         recentMessages: [],
       };
     }
@@ -219,16 +243,19 @@ async function readMoveBatchSnapshot(
     const replica = key ? env.eReplicas.get(key) as {
       state?: {
         jBatchState?: {
+          entityNonce?: number;
           batch?: Record<string, unknown>;
-          sentBatch?: { batch?: Record<string, unknown> };
+          sentBatch?: { entityNonce?: number; batch?: Record<string, unknown> };
         };
-        batchHistory?: unknown[];
+        batchHistory?: Array<{ entityNonce?: number; status?: string }>;
         messages?: unknown[];
       };
     } | undefined : undefined;
     const pending = replica?.state?.jBatchState?.batch as Record<string, unknown> | undefined;
-    const sent = replica?.state?.jBatchState?.sentBatch?.batch as Record<string, unknown> | undefined;
+    const sentBatch = replica?.state?.jBatchState?.sentBatch;
+    const sent = sentBatch?.batch as Record<string, unknown> | undefined;
     const history = Array.isArray(replica?.state?.batchHistory) ? replica.state.batchHistory : [];
+    const lastHistory = history.length > 0 ? history[history.length - 1] : null;
     const recentMessages = Array.isArray(replica?.state?.messages)
       ? replica.state.messages.slice(-8).map((message) => String(message || ''))
       : [];
@@ -236,19 +263,32 @@ async function readMoveBatchSnapshot(
       const value = batch?.[key];
       return Array.isArray(value) ? value.length : 0;
     };
+    const countTotal = (batch: Record<string, unknown> | undefined): number => (
+      count(batch, 'externalTokenToReserve')
+      + count(batch, 'reserveToCollateral')
+      + count(batch, 'collateralToReserve')
+      + count(batch, 'reserveToReserve')
+      + count(batch, 'reserveToExternalToken')
+    );
     return {
       pendingExternalToReserve: count(pending, 'externalTokenToReserve'),
       pendingReserveToCollateral: count(pending, 'reserveToCollateral'),
       pendingCollateralToReserve: count(pending, 'collateralToReserve'),
       pendingReserveToReserve: count(pending, 'reserveToReserve'),
       pendingReserveToExternal: count(pending, 'reserveToExternalToken'),
+      pendingOpCount: countTotal(pending),
       sentExternalToReserve: count(sent, 'externalTokenToReserve'),
       sentReserveToCollateral: count(sent, 'reserveToCollateral'),
       sentCollateralToReserve: count(sent, 'collateralToReserve'),
       sentReserveToReserve: count(sent, 'reserveToReserve'),
       sentReserveToExternal: count(sent, 'reserveToExternalToken'),
-      sentExists: Boolean(replica?.state?.jBatchState?.sentBatch),
+      sentOpCount: countTotal(sent),
+      sentExists: Boolean(sentBatch),
+      entityNonce: Number(replica?.state?.jBatchState?.entityNonce || 0),
+      sentEntityNonce: typeof sentBatch?.entityNonce === 'number' ? Number(sentBatch.entityNonce) : null,
       batchHistoryCount: Number(history.length || 0),
+      lastHistoryEntityNonce: typeof lastHistory?.entityNonce === 'number' ? Number(lastHistory.entityNonce) : null,
+      lastHistoryStatus: String(lastHistory?.status || ''),
       recentMessages,
     };
   }, { entityId, signerId });
@@ -282,13 +322,7 @@ async function broadcastDraftBatch(
   await expect
     .poll(async () => {
       const snapshot = await readMoveBatchSnapshot(page, localEntity.entityId, localEntity.signerId);
-      return (
-        snapshot.pendingExternalToReserve +
-        snapshot.pendingReserveToCollateral +
-        snapshot.pendingCollateralToReserve +
-        snapshot.pendingReserveToReserve +
-        snapshot.pendingReserveToExternal
-      );
+      return snapshot.pendingOpCount;
     }, { timeout: timeoutMs })
     .toBeGreaterThan(0);
   await expect(page.getByTestId('workspace-pending-banner').first()).toBeVisible({ timeout: 20_000 });
@@ -296,9 +330,11 @@ async function broadcastDraftBatch(
   await expect(broadcast).toBeVisible({ timeout: 20_000 });
   await expect(broadcast).toBeEnabled({ timeout: 20_000 });
   const before = await readMoveBatchSnapshot(page, localEntity.entityId, localEntity.signerId);
+  const expectedNonce = before.entityNonce + 1;
   await broadcast.click();
   const deadline = Date.now() + timeoutMs;
   let lastSnapshot = before;
+  let observedSent = false;
 
   while (Date.now() < deadline) {
     lastSnapshot = await readMoveBatchSnapshot(page, localEntity.entityId, localEntity.signerId);
@@ -306,14 +342,28 @@ async function broadcastDraftBatch(
     if (recentMessageText.includes('submit_failed:') || recentMessageText.includes('🛑 Aborted sentBatch')) {
       throw new Error(`Batch broadcast failed: ${recentMessageText}`);
     }
+    if (
+      !observedSent
+      && lastSnapshot.sentExists
+      && lastSnapshot.sentEntityNonce === expectedNonce
+      && lastSnapshot.pendingOpCount === 0
+      && lastSnapshot.sentOpCount > 0
+    ) {
+      observedSent = true;
+    }
     if (lastSnapshot.batchHistoryCount > before.batchHistoryCount) {
+      expect(observedSent, `Batch must move through sentBatch before history commit: ${JSON.stringify(lastSnapshot)}`).toBe(true);
+      expect(lastSnapshot.sentExists, `sentBatch must clear after confirmation: ${JSON.stringify(lastSnapshot)}`).toBe(false);
+      expect(lastSnapshot.entityNonce, `entity nonce must advance after confirmed batch: ${JSON.stringify(lastSnapshot)}`).toBeGreaterThanOrEqual(expectedNonce);
+      expect(lastSnapshot.lastHistoryEntityNonce, `batchHistory must record confirmed nonce ${expectedNonce}: ${JSON.stringify(lastSnapshot)}`).toBe(expectedNonce);
+      expect(lastSnapshot.lastHistoryStatus, `batchHistory entry must be confirmed: ${JSON.stringify(lastSnapshot)}`).toBe('confirmed');
       return;
     }
     await page.waitForTimeout(250);
   }
 
   throw new Error(
-    `Batch broadcast did not advance within 20s: ${JSON.stringify(lastSnapshot)}`,
+    `Batch broadcast did not finalize within ${timeoutMs}ms: expectedNonce=${expectedNonce} observedSent=${observedSent} snapshot=${JSON.stringify(lastSnapshot)}`,
   );
 }
 
@@ -786,6 +836,11 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
       await waitForRecipientCounterpartyProfile(page, bob!.entityId, hubs.h2);
     });
 
+    await timedStep('move.asset-selector', async () => {
+      await openMoveTab(page);
+      await expectMoveAssetSelector(page);
+    });
+
     await timedStep('move.e2r', async () => {
       const amount = amountRaw('20');
       const beforeExternalRaw = await getRpcExternalBalanceRaw(page, symbol, aliceEoa);
@@ -802,10 +857,12 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await page.getByTestId('move-amount').fill('20');
         await waitForMoveReady(page);
         await expect(page.getByTestId('move-route-summary')).toContainText('External → Reserve');
-        await expect(page.getByTestId('move-route-summary')).toContainText('20 USDC');
+        await expect(page.getByTestId('move-amount')).toHaveValue('20');
+        await expect(page.getByTestId('move-asset-symbol')).toHaveValue(symbol);
         await expect(page.getByTestId('move-confirm').first()).toHaveText(/Add to Batch/i);
         await capturePageScreenshot(page, testInfo, 'move-batch-route-summary-desktop.png');
         await page.getByTestId('move-confirm').first().click();
+        await waitForMoveActionToSettle(page);
         await capturePageScreenshot(page, testInfo, 'move-batch-queued-desktop.png');
         await broadcastDraftBatch(page, asLocalEntityRef(alice!), EXTERNAL_BATCH_TIMEOUT_MS);
         await waitForExactBigInt(
@@ -835,6 +892,7 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await page.getByTestId('move-amount').fill('8');
         await waitForMoveReady(page);
         await page.getByTestId('move-confirm').first().click();
+        await waitForMoveActionToSettle(page);
         await broadcastDraftBatch(page, asLocalEntityRef(alice!));
         await waitForExactBigInt(
           async () => await readOnchainReserveBalanceRaw(page, alice!.entityId, symbol),
@@ -861,6 +919,7 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await page.getByTestId('move-amount').fill('3');
         await waitForMoveReady(page);
         await page.getByTestId('move-confirm').first().click();
+        await waitForMoveActionToSettle(page);
         await broadcastDraftBatch(page, asLocalEntityRef(alice!));
         await waitForExactBigInt(
           async () => await readOnchainReserveBalanceRaw(page, alice!.entityId, symbol),
@@ -888,9 +947,11 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await page.getByTestId('move-external-recipient').fill(aliceEoa);
         await waitForMoveReady(page);
         await expect(page.getByTestId('move-route-summary')).toContainText('Reserve → External');
-        await expect(page.getByTestId('move-route-summary')).toContainText('2 USDC');
+        await expect(page.getByTestId('move-amount')).toHaveValue('2');
+        await expect(page.getByTestId('move-asset-symbol')).toHaveValue(symbol);
         await expect(page.getByTestId('move-confirm').first()).toHaveText(/Add to Batch/i);
         await page.getByTestId('move-confirm').first().click();
+        await waitForMoveActionToSettle(page);
         await broadcastDraftBatch(page, asLocalEntityRef(alice!));
         await waitForExactBigInt(
           async () => await readOnchainReserveBalanceRaw(page, alice!.entityId, symbol),
@@ -918,6 +979,7 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await selectMoveEntityField(page, 'move-reserve-recipient-field', bob!.entityId);
         await waitForMoveReady(page);
         await page.getByTestId('move-confirm').first().click();
+        await waitForMoveActionToSettle(page);
         await broadcastDraftBatch(page, asLocalEntityRef(alice!));
         await waitForExactBigInt(
           async () => await readOnchainReserveBalanceRaw(page, alice!.entityId, symbol),
@@ -947,6 +1009,7 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await waitForMoveReady(page);
         await expect(page.getByTestId('move-confirm').first()).toHaveText(/Add to Batch/i);
         await page.getByTestId('move-confirm').first().click();
+        await waitForMoveActionToSettle(page);
         await broadcastDraftBatch(page, asLocalEntityRef(alice!));
         await waitForExactBigInt(
           async () => await getRpcExternalBalanceRaw(page, symbol, aliceEoa),
@@ -976,6 +1039,7 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await page.getByTestId('move-external-recipient').fill(aliceEoa);
         await waitForMoveReady(page);
         await page.getByTestId('move-confirm').first().click();
+        await waitForMoveActionToSettle(page);
         await broadcastDraftBatch(page, asLocalEntityRef(alice!));
         await waitForExactBigInt(
           async () => await readAccountOutCapacityRaw(page, alice!.entityId, hubs.h1, token.tokenId),
@@ -1004,6 +1068,7 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await selectMoveEntityField(page, 'move-target-counterparty-field', hubs.h2);
         await waitForMoveReady(page);
         await page.getByTestId('move-confirm').first().click();
+        await waitForMoveActionToSettle(page);
         await broadcastDraftBatch(page, asLocalEntityRef(alice!));
         await waitForExactBigInt(
           async () => await readAccountOutCapacityRaw(page, alice!.entityId, hubs.h1, token.tokenId),
@@ -1081,6 +1146,7 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await selectMoveEntityField(page, 'move-target-counterparty-field', hubs.h2);
         await waitForMoveReady(page);
         await page.getByTestId('move-confirm').first().click();
+        await waitForMoveActionToSettle(page);
         await broadcastDraftBatch(page, asLocalEntityRef(alice!));
         await waitForExactBigInt(
           async () => await getRpcExternalBalanceRaw(page, symbol, aliceEoa),
@@ -1113,6 +1179,7 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await page.getByTestId('move-amount').fill('0.5');
         await waitForMoveReady(page);
         await page.getByTestId('move-confirm').first().click();
+        await waitForMoveActionToSettle(page);
         await broadcastDraftBatch(page, asLocalEntityRef(alice!));
         await waitForExactBigInt(
           async () => await readAccountOutCapacityRaw(page, alice!.entityId, hubs.h1, token.tokenId),
@@ -1133,6 +1200,7 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
         await page.getByTestId('move-external-recipient').fill(aliceEoa);
         await waitForMoveReady(page);
         await page.getByTestId('move-confirm').first().click();
+        await waitForMoveActionToSettle(page);
         await broadcastDraftBatch(page, asLocalEntityRef(alice!));
         await waitForExactBigInt(
           async () => await readOnchainReserveBalanceRaw(page, alice!.entityId, symbol),

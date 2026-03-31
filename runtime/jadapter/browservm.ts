@@ -11,7 +11,7 @@ import type { Account, Depository, EntityProvider, DeltaTransformer } from '../.
 import type { TypedContractMethod } from '../../jurisdictions/typechain-types/common.ts';
 import { Account__factory, Depository__factory, EntityProvider__factory, DeltaTransformer__factory } from '../../jurisdictions/typechain-types/index.ts';
 
-import type { BrowserVMState, JTx } from '../types';
+import type { BrowserVMState, Env, JTx } from '../types';
 import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JEventCallback, JSubmitResult, SnapshotId, JBatchReceipt, JTokenInfo, JReserveMint } from './types';
 import {
   buildExternalTokenToReserveBatch,
@@ -20,11 +20,14 @@ import {
   isCanonicalEvent,
   normalizeAdapterEvents,
   parseReceiptLogsToJEvents,
-  processEventBatch,
   toJEvent,
-  updateWatcherJurisdictionCursor,
-  type RawJEvent,
 } from './helpers';
+import {
+  processEventBatch,
+  updateWatcherJurisdictionCursor,
+  type EventBatchCounter,
+  type RawJEvent,
+} from './watcher';
 import type { BrowserVMProvider } from './browservm-provider';
 
 export async function createBrowserVMAdapter(
@@ -33,6 +36,11 @@ export async function createBrowserVMAdapter(
   signer: Signer,
   browserVM: BrowserVMProvider
 ): Promise<JAdapter> {
+  throw new Error(
+    'BrowserVM JAdapter is demo-only and must not be used by the current runtime/test path. ' +
+    'Use the RPC JAdapter path instead.',
+  );
+
   const addresses: JAdapterAddresses = {
     account: browserVM.getAccountAddress?.() ?? '',
     depository: browserVM.getDepositoryAddress(),
@@ -482,22 +490,23 @@ export async function createBrowserVMAdapter(
       await browserVM.fundSignerWallet(address, amount);
     },
 
-    // === J-Watcher integration (uses shared event conversion from helpers.ts) ===
-    startWatching(env: any): void {
+    // === J-Watcher integration (uses shared event conversion from watcher.ts) ===
+    startWatching(env: Env): void {
       if (watcherUnsubscribe) {
         console.log(`🔭 [JAdapter:browservm] Already watching`);
         return;
       }
       watcherEnv = env;
       txCounter.value = 0;
-      (txCounter as any)._seenLogs = { set: new Set<string>(), order: [] as string[] };
+      txCounter._seenLogs = { set: new Set<string>(), order: [] as string[] };
       console.log(`🔭 [JAdapter:browservm] Starting event watcher (eReplicas=${env.eReplicas?.size ?? 0})...`);
 
-      watcherUnsubscribe = browserVM.onAny((rawEvents: any[]) => {
+      watcherUnsubscribe = browserVM.onAny((rawEvents: any) => {
         if (!watcherEnv) return;
+        const eventList = Array.isArray(rawEvents) ? rawEvents : [rawEvents];
 
         // Normalize to RawJEvent format (BrowserVM already emits { name, args })
-        const normalized: RawJEvent[] = rawEvents.map((e: any) => ({
+        const normalized: RawJEvent[] = eventList.map((e: any) => ({
           name: e.name,
           args: e.args ?? {},
           blockNumber: e.blockNumber,
@@ -508,17 +517,20 @@ export async function createBrowserVMAdapter(
 
         const blockNumber = normalized[0]?.blockNumber ?? Number((browserVM as any).getBlockNumber?.() ?? 0n);
         const blockHash = normalized[0]?.blockHash ?? (browserVM as any).getBlockHash?.() ?? '0x0';
+        // Shared: filter canonical, group by entity, convert, enqueue
+        processEventBatch(normalized, watcherEnv, blockNumber, blockHash, txCounter, 'browservm');
         updateWatcherJurisdictionCursor(
           watcherEnv,
           blockNumber,
           browserVM.getDepositoryAddress?.() ?? addresses.depository,
         );
-
-        // Shared: filter canonical, group by entity, convert, enqueue
-        processEventBatch(normalized, watcherEnv, blockNumber, blockHash, txCounter, 'browservm');
       });
 
       console.log(`🔭 [JAdapter:browservm] Watcher started (event subscription)`);
+    },
+
+    isWatching(): boolean {
+      return watcherUnsubscribe !== null;
     },
 
     stopWatching(): void {
@@ -571,8 +583,8 @@ export async function createBrowserVMAdapter(
 
   // Watcher state (managed by adapter, not external j-watcher)
   let watcherUnsubscribe: (() => void) | null = null;
-  let watcherEnv: any = null;
-  const txCounter = { value: 0 };
+  let watcherEnv: Env | null = null;
+  const txCounter: EventBatchCounter = { value: 0 };
 
   return adapter;
 }

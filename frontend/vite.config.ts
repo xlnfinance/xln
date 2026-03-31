@@ -4,7 +4,8 @@ import fs from 'fs';
 import net from 'net';
 import http from 'node:http';
 import https from 'node:https';
-import { URL } from 'node:url';
+import { execSync } from 'node:child_process';
+import { URL, fileURLToPath } from 'node:url';
 
 /**
  * HTTPS CONFIGURATION (DEV-ONLY)
@@ -48,6 +49,20 @@ const DEV_PORT_RAW = Number(process.env['VITE_DEV_PORT'] || '8080');
 const DEV_PORT = Number.isFinite(DEV_PORT_RAW) && DEV_PORT_RAW > 0 ? Math.floor(DEV_PORT_RAW) : 8080;
 const API_PROXY_TARGET = process.env['VITE_API_PROXY_TARGET'] || 'http://localhost:8082';
 const VITE_CACHE_DIR = process.env['VITE_CACHE_DIR'] || 'node_modules/.vite';
+const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
+const BUILD_NUMBER = (() => {
+  const explicit = String(process.env['XLN_BUILD_NUMBER'] || '').trim();
+  if (explicit) return explicit;
+  try {
+    return execSync('git rev-list --count HEAD', {
+      cwd: REPO_ROOT,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim() || '0';
+  } catch {
+    return '0';
+  }
+})();
 const ENABLE_HMR = (() => {
   const value = String(process.env['VITE_ENABLE_HMR'] || '').toLowerCase();
   return value === '1' || value === 'true' || value === 'yes';
@@ -221,9 +236,10 @@ export default defineConfig(async ({ command }) => {
 	esbuild: {
 		target: 'es2022'
 	},
-	define: {
+		define: {
 		// Define globals for browser compatibility
 		global: 'globalThis',
+		__BUILD_NUMBER__: JSON.stringify(BUILD_NUMBER),
 		// Build hash for stale version detection (changes on every build)
 		__BUILD_HASH__: JSON.stringify(Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 8)),
 		__BUILD_TIME__: JSON.stringify(new Date().toISOString()),

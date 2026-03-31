@@ -37,6 +37,11 @@
 	});
 
 	let showTopbar = $derived(!isEmbed && chromeMode === 'site');
+	let buildLabel = $derived.by(() => {
+		const buildNumber = typeof __BUILD_NUMBER__ === 'string' ? __BUILD_NUMBER__.trim() : '';
+		if (!buildNumber) return '';
+		return buildNumber;
+	});
 </script>
 
 {#if showTopbar}
@@ -52,6 +57,9 @@
 {/if}
 
 <Toast />
+{#if buildLabel}
+	<div class="build-badge">{buildLabel}</div>
+{/if}
 
 <style>
 	:global(html) {
@@ -75,6 +83,21 @@
 
 	main.with-topbar {
 		min-height: calc(100dvh - 56px);
+	}
+
+	.build-badge {
+		position: fixed;
+		right: 14px;
+		bottom: 10px;
+		z-index: 30;
+		color: color-mix(in srgb, var(--theme-text-secondary, #a1a1aa) 84%, transparent);
+		font-size: 10px;
+		font-weight: 600;
+		letter-spacing: 0.08em;
+		text-transform: uppercase;
+		pointer-events: none;
+		user-select: none;
+		opacity: 0.72;
 	}
 
 	:global(body.xln-user-mode .account-workspace-tab),

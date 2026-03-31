@@ -1,6 +1,7 @@
 /**
  * E2E: Alice and Bob run in separate browser contexts on the same origin, connect to one hub,
- * exchange HTLC payments in both directions, and survive reload with the same persisted state.
+ * exchange HTLC payments in both directions, validate persisted HTLC receipts, reject overspend,
+ * and survive reload with the same persisted state.
  *
  * This test exists to prove the honest user-facing topology: two isolated pages with separate
  * IndexedDB/localStorage state, not two runtimes multiplexed inside one browser page.
@@ -8,6 +9,7 @@
 
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import { ethers } from 'ethers';
+import { deriveDelta } from '../runtime/account-utils';
 import { resetProdServer } from './utils/e2e-baseline';
 import {
   getRenderedOutboundForAccount,
@@ -18,7 +20,6 @@ import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-
 import {
   getPersistedReceiptCursor,
   getPersistedRuntimeDbMeta,
-  waitForPersistedFrameEvent,
   waitForPersistedFrameEventMatch,
 } from './utils/e2e-runtime-receipts';
 
@@ -66,6 +67,18 @@ type FrameLogEntryView = {
   data?: Record<string, unknown>;
 };
 
+type DeltaSnapshot = {
+  ondelta: string;
+  offdelta: string;
+  collateral: string;
+  leftCreditLimit: string;
+  rightCreditLimit: string;
+  leftAllowance: string;
+  rightAllowance: string;
+  leftHold: string;
+  rightHold: string;
+};
+
 type TestWindow = typeof window & {
   isolatedEnv?: {
     runtimeId?: string;
@@ -88,6 +101,43 @@ const calcFee = (amount: bigint, feePPM: bigint, baseFee: bigint): bigint =>
 
 const afterFee = (amount: bigint, feePPM: bigint, baseFee: bigint): bigint =>
   amount - calcFee(amount, feePPM, baseFee);
+
+function assertHtlcReceivedPayload(
+  event: { data?: Record<string, unknown> },
+  recipientEntityId: string,
+  expectedFromEntity: string,
+  expectedAmount: bigint,
+): void {
+  expect(String(event.data?.amount || ''), 'receive event should include amount').toBe(expectedAmount.toString());
+  expect(String(event.data?.entityId || '').toLowerCase(), 'receive event should include entityId').toBe(recipientEntityId.toLowerCase());
+  expect(String(event.data?.toEntity || '').toLowerCase(), 'receive event should include toEntity').toBe(recipientEntityId.toLowerCase());
+  expect(String(event.data?.fromEntity || '').toLowerCase(), 'receive event should include fromEntity').toBe(expectedFromEntity.toLowerCase());
+  expect(String(event.data?.hashlock || ''), 'receive event should include hashlock').toMatch(/^0x[0-9a-f]{64}$/i);
+  expect(String(event.data?.lockId || '').length, 'receive event should include lockId').toBeGreaterThan(0);
+  expect(String(event.data?.jurisdictionId || '').length, 'receive event should include jurisdictionId').toBeGreaterThan(0);
+  expect(Number(event.data?.startedAtMs || 0), 'receive event should include startedAtMs').toBeGreaterThan(0);
+  expect(Number(event.data?.receivedAtMs || 0), 'receive event should include receivedAtMs').toBeGreaterThan(0);
+  expect(Number(event.data?.elapsedMs || 0), 'receive event should include elapsedMs').toBeGreaterThan(0);
+}
+
+function assertHtlcFinalizedPayload(
+  event: { data?: Record<string, unknown> },
+  senderEntityId: string,
+  expectedToEntity: string,
+  expectedAmount: bigint,
+): void {
+  expect(String(event.data?.amount || ''), 'finalized event should include amount').toBe(expectedAmount.toString());
+  expect(String(event.data?.entityId || '').toLowerCase(), 'finalized event should include entityId').toBe(senderEntityId.toLowerCase());
+  expect(String(event.data?.fromEntity || '').toLowerCase(), 'finalized event should include fromEntity').toBe(senderEntityId.toLowerCase());
+  expect(String(event.data?.toEntity || '').toLowerCase(), 'finalized event should include toEntity').toBe(expectedToEntity.toLowerCase());
+  expect(String(event.data?.hashlock || ''), 'finalized event should include hashlock').toMatch(/^0x[0-9a-f]{64}$/i);
+  expect(String(event.data?.lockId || '').length, 'finalized event should include lockId').toBeGreaterThan(0);
+  expect(String(event.data?.jurisdictionId || '').length, 'finalized event should include jurisdictionId').toBeGreaterThan(0);
+  expect(Number(event.data?.startedAtMs || 0), 'finalized event should include startedAtMs').toBeGreaterThan(0);
+  expect(Number(event.data?.finalizedAtMs || 0), 'finalized event should include finalizedAtMs').toBeGreaterThan(0);
+  expect(Number(event.data?.elapsedMs || 0), 'finalized event should include elapsedMs').toBeGreaterThan(0);
+  expect(Number(event.data?.finalizedInMs || 0), 'finalized event should include finalizedInMs').toBeGreaterThan(0);
+}
 
 function toWei(n: number): bigint {
   return BigInt(n) * 10n ** 18n;
@@ -271,6 +321,81 @@ async function waitForSenderSpend(
   );
 }
 
+async function outCapRaw(page: Page, entityId: string, cpId: string): Promise<bigint> {
+  const delta = await page.evaluate(({ cpId, entityId }) => {
+    const view = window as TestWindow;
+    const env = view.isolatedEnv;
+    if (!env?.eReplicas) return null;
+
+    for (const [replicaKey, replica] of env.eReplicas.entries()) {
+      if (!String(replicaKey).startsWith(`${entityId}:`)) continue;
+      const account = replica?.state?.accounts?.get?.(cpId);
+      const rawDelta = account?.deltas?.get?.(1);
+      if (!rawDelta || typeof rawDelta !== 'object') return null;
+
+      const raw = rawDelta as Record<string, unknown>;
+      const readBig = (value: unknown): string => {
+        if (typeof value === 'bigint') return value.toString();
+        if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) return String(value);
+        if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return value.trim();
+        return '0';
+      };
+
+      return {
+        ondelta: readBig(raw.ondelta),
+        offdelta: readBig(raw.offdelta),
+        collateral: readBig(raw.collateral),
+        leftCreditLimit: readBig(raw.leftCreditLimit),
+        rightCreditLimit: readBig(raw.rightCreditLimit),
+        leftAllowance: readBig(raw.leftAllowance),
+        rightAllowance: readBig(raw.rightAllowance),
+        leftHold: readBig(raw.leftHold),
+        rightHold: readBig(raw.rightHold),
+      } satisfies DeltaSnapshot;
+    }
+
+    return null;
+  }, { entityId, cpId });
+
+  if (!delta) return 0n;
+
+  return deriveDelta({
+    tokenId: 1,
+    ondelta: BigInt(delta.ondelta),
+    offdelta: BigInt(delta.offdelta),
+    collateral: BigInt(delta.collateral),
+    leftCreditLimit: BigInt(delta.leftCreditLimit),
+    rightCreditLimit: BigInt(delta.rightCreditLimit),
+    leftAllowance: BigInt(delta.leftAllowance),
+    rightAllowance: BigInt(delta.rightAllowance),
+    leftHold: BigInt(delta.leftHold),
+    rightHold: BigInt(delta.rightHold),
+  }, String(entityId).toLowerCase() < String(cpId).toLowerCase()).outCapacity;
+}
+
+async function waitForSenderSpendRaw(
+  page: Page,
+  entityId: string,
+  cpId: string,
+  baseline: bigint,
+  minSpend: bigint,
+  timeoutMs = 30_000,
+): Promise<{ latest: bigint; spent: bigint }> {
+  const startedAt = Date.now();
+  let latest = baseline;
+  let spent = 0n;
+  while (Date.now() - startedAt < timeoutMs) {
+    latest = await outCapRaw(page, entityId, cpId);
+    spent = baseline - latest;
+    if (spent >= minSpend) return { latest, spent };
+    await page.waitForTimeout(250);
+  }
+  throw new Error(
+    `Timed out waiting raw sender spend on ${entityId.slice(0, 10)}↔${cpId.slice(0, 10)} ` +
+    `(baseline=${baseline} latest=${latest} spent=${spent} minSpend=${minSpend})`,
+  );
+}
+
 async function waitForAccountIdle(
   page: Page,
   entityId: string,
@@ -386,26 +511,35 @@ function expectRenderedDeltaClose(actualDelta: number, expectedDelta: number, la
 async function openPayWorkspace(page: Page): Promise<void> {
   const accountsTab = page.getByTestId('tab-accounts').first();
   await expect(accountsTab).toBeVisible({ timeout: 20_000 });
-  await accountsTab.click();
-  const mobileToggle = page.getByTestId('account-workspace-mobile-toggle').first();
-  if (await mobileToggle.isVisible().catch(() => false)) {
-    await mobileToggle.click();
-  }
-  const candidateLocators = [
-    page.getByTestId('account-workspace-tab-pay'),
-    page.locator('.workspace-rail').getByRole('button', { name: /^Pay$/i }),
-  ];
-  for (const locator of candidateLocators) {
-    const count = await locator.count().catch(() => 0);
-    for (let index = 0; index < count; index += 1) {
-      const payTab = locator.nth(index);
-      if (await payTab.isVisible().catch(() => false)) {
-        await payTab.click();
-        return;
+  const invoiceInput = page.locator('#payment-invoice-input').first();
+  const startedAt = Date.now();
+
+  while (Date.now() - startedAt < 15_000) {
+    await accountsTab.click().catch(() => {});
+    const mobileToggle = page.getByTestId('account-workspace-mobile-toggle').first();
+    if (await mobileToggle.isVisible().catch(() => false)) {
+      await mobileToggle.click().catch(() => {});
+    }
+    const candidateLocators = [
+      page.getByTestId('account-workspace-tab-pay'),
+      page.locator('.workspace-rail').getByRole('button', { name: /^Pay$/i }),
+    ];
+    for (const locator of candidateLocators) {
+      const count = await locator.count().catch(() => 0);
+      for (let index = 0; index < count; index += 1) {
+        const payTab = locator.nth(index);
+        if (await payTab.isVisible().catch(() => false)) {
+          await payTab.click().catch(() => {});
+          if (await invoiceInput.isVisible({ timeout: 1000 }).catch(() => false)) {
+            return;
+          }
+        }
       }
     }
+    if (await invoiceInput.isVisible({ timeout: 500 }).catch(() => false)) return;
+    await page.waitForTimeout(250);
   }
-  throw new Error('visible Pay workspace tab not found');
+  throw new Error('payment form did not become visible after selecting Accounts -> Pay');
 }
 
 async function reloadAppForProject(
@@ -457,6 +591,27 @@ async function pay(
   await expect(payNowBtn).toBeEnabled({ timeout: 10_000 });
   await payNowBtn.click();
   await page.waitForTimeout(200);
+}
+
+async function attemptOverspend(page: Page, to: string, amount: bigint): Promise<void> {
+  await openPayWorkspace(page);
+  await fillPayIntent(page, to);
+
+  const amountInput = page.locator('#payment-amount-input');
+  await expect(amountInput).toBeVisible({ timeout: 10_000 });
+  await amountInput.click();
+  await amountInput.fill(ethers.formatUnits(amount, 18));
+
+  const findRoutesBtn = page.getByRole('button', { name: 'Find route' }).first();
+  await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
+  await findRoutesBtn.click();
+  await page.waitForTimeout(500);
+
+  const payNowBtn = page.getByRole('button', { name: 'Pay now' }).first();
+  if (await payNowBtn.isEnabled().catch(() => false)) {
+    await payNowBtn.click();
+    await page.waitForTimeout(300);
+  }
 }
 
 async function runtimeDbMeta(page: Page): Promise<{
@@ -524,7 +679,7 @@ async function waitForRuntimeInputDrain(page: Page, label: string, timeoutMs = 1
 }
 
 test.describe('E2E: Alice ↔ Hub ↔ Bob across isolated pages', () => {
-  test.setTimeout(LONG_E2E ? 240_000 : 120_000);
+  test.setTimeout(LONG_E2E ? 300_000 : 150_000);
 
 test('bidirectional payments survive across two isolated browser contexts', async ({ browser, page }, testInfo) => {
     if (testInfo.project.name === 'webkit-mobile') {
@@ -590,18 +745,22 @@ test('bidirectional payments survive across two isolated browser contexts', asyn
       await pay(alicePage, alice.entityId, alice.signerId, bob.entityId, [alice.entityId, hubId, bob.entityId], forwardAmount);
 
       const forwardSpend = await waitForSenderSpend(alicePage, hubId, aliceAfterFaucet, expectedForwardSpend);
-      await waitForPersistedFrameEventMatch(alicePage, {
+      const aliceForwardFinalizeEvent = await waitForPersistedFrameEventMatch(alicePage, {
         eventName: 'HtlcFinalized',
         entityId: alice.entityId,
         cursor: aliceForwardFinalizeCursor,
         timeoutMs: 30_000,
         predicate: (event) => String(event.data?.amount || '') === forwardAmount.toString(),
       });
-      await waitForPersistedFrameEvent(bobPage, {
+      assertHtlcFinalizedPayload(aliceForwardFinalizeEvent, alice.entityId, hubId, forwardAmount);
+      const bobForwardReceiveEvent = await waitForPersistedFrameEventMatch(bobPage, {
         eventName: 'HtlcReceived',
         entityId: bob.entityId,
         cursor: bobForwardCursor,
+        timeoutMs: 20_000,
+        predicate: (event) => String(event.data?.amount || '') === forwardAmount.toString(),
       });
+      assertHtlcReceivedPayload(bobForwardReceiveEvent, bob.entityId, hubId, forwardAmount);
       const bobAfterForward = await waitForRenderedOutboundForAccountDelta(
         bobPage,
         hubId,
@@ -627,18 +786,22 @@ test('bidirectional payments survive across two isolated browser contexts', asyn
       await pay(bobPage, bob.entityId, bob.signerId, alice.entityId, [bob.entityId, hubId, alice.entityId], reverseAmount);
 
       const reverseSpend = await waitForSenderSpend(bobPage, hubId, bobAfterForward, expectedReverseSpend);
-      await waitForPersistedFrameEventMatch(bobPage, {
+      const bobReverseFinalizeEvent = await waitForPersistedFrameEventMatch(bobPage, {
         eventName: 'HtlcFinalized',
         entityId: bob.entityId,
         cursor: bobReverseFinalizeCursor,
         timeoutMs: 30_000,
         predicate: (event) => String(event.data?.amount || '') === reverseAmount.toString(),
       });
-      await waitForPersistedFrameEvent(alicePage, {
+      assertHtlcFinalizedPayload(bobReverseFinalizeEvent, bob.entityId, hubId, reverseAmount);
+      const aliceReverseReceiveEvent = await waitForPersistedFrameEventMatch(alicePage, {
         eventName: 'HtlcReceived',
         entityId: alice.entityId,
         cursor: aliceReverseCursor,
+        timeoutMs: 20_000,
+        predicate: (event) => String(event.data?.amount || '') === reverseAmount.toString(),
       });
+      assertHtlcReceivedPayload(aliceReverseReceiveEvent, alice.entityId, hubId, reverseAmount);
       const aliceAfterReverse = await waitForRenderedOutboundForAccountDelta(
         alicePage,
         hubId,
@@ -659,6 +822,116 @@ test('bidirectional payments survive across two isolated browser contexts', asyn
       await waitForRuntimeInputDrain(bobPage, 'bob');
       await waitForDurableRuntimeState(alicePage, 'alice');
       await waitForDurableRuntimeState(bobPage, 'bob');
+
+      let expectedAliceAfterReload = aliceAfterReverse;
+      let expectedBobAfterReload = bobAfterReverse;
+
+      if (LONG_E2E) {
+        console.log('[E2E] restore both isolated pages before extended payment checks');
+        if (testInfo.project.name === 'webkit-mobile') {
+          await reloadAppForProject(alicePage, APP_BASE_URL, testInfo.project.name);
+          await reloadAppForProject(bobPage, APP_BASE_URL, testInfo.project.name);
+        } else {
+          await Promise.all([
+            reloadAppForProject(alicePage, APP_BASE_URL, testInfo.project.name),
+            reloadAppForProject(bobPage, APP_BASE_URL, testInfo.project.name),
+          ]);
+        }
+        await Promise.all([
+          gotoApp(alicePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1000 }),
+          gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1000 }),
+        ]);
+        await Promise.all([
+          waitForRestoredRuntime(alicePage, alice.runtimeId),
+          waitForRestoredRuntime(bobPage, bob.runtimeId),
+        ]);
+        await waitForAccountIdle(alicePage, alice.entityId, hubId);
+        await waitForAccountIdle(bobPage, bob.entityId, hubId);
+
+        console.log('[E2E] second forward HTLC Alice -> Hub -> Bob');
+
+        const secondForwardAmount = toWei(3);
+        const expectedSecondForwardSpend = requiredInbound(secondForwardAmount, hubFee.feePPM, hubFee.baseFee);
+        const aliceBeforeSecondForward = await getRenderedOutboundForAccount(alicePage, hubId);
+        const aliceBeforeSecondForwardRaw = await outCapRaw(alicePage, alice.entityId, hubId);
+        const bobBeforeSecondForward = await getRenderedOutboundForAccount(bobPage, hubId);
+        const bobSecondForwardCursor = await getPersistedReceiptCursor(bobPage);
+        const aliceSecondForwardFinalizeCursor = await getPersistedReceiptCursor(alicePage);
+
+        await pay(alicePage, alice.entityId, alice.signerId, bob.entityId, [alice.entityId, hubId, bob.entityId], secondForwardAmount);
+
+        const secondForwardSpend = await waitForSenderSpendRaw(
+          alicePage,
+          alice.entityId,
+          hubId,
+          aliceBeforeSecondForwardRaw,
+          expectedSecondForwardSpend,
+        );
+        const aliceSecondFinalizeEvent = await waitForPersistedFrameEventMatch(alicePage, {
+          eventName: 'HtlcFinalized',
+          entityId: alice.entityId,
+          cursor: aliceSecondForwardFinalizeCursor,
+          timeoutMs: 30_000,
+          predicate: (event) => String(event.data?.amount || '') === secondForwardAmount.toString(),
+        });
+        assertHtlcFinalizedPayload(aliceSecondFinalizeEvent, alice.entityId, hubId, secondForwardAmount);
+        const bobSecondReceiveEvent = await waitForPersistedFrameEventMatch(bobPage, {
+          eventName: 'HtlcReceived',
+          entityId: bob.entityId,
+          cursor: bobSecondForwardCursor,
+          timeoutMs: 20_000,
+          predicate: (event) => String(event.data?.amount || '') === secondForwardAmount.toString(),
+        });
+        assertHtlcReceivedPayload(bobSecondReceiveEvent, bob.entityId, hubId, secondForwardAmount);
+
+        const bobAfterSecondForward = await waitForRenderedOutboundForAccountDelta(
+          bobPage,
+          hubId,
+          bobBeforeSecondForward,
+          toDisplayed(secondForwardAmount),
+        );
+        const aliceAfterSecondForward = await getRenderedOutboundForAccount(alicePage, hubId);
+        expect(secondForwardSpend.spent).toBeGreaterThanOrEqual(expectedSecondForwardSpend);
+        expectRenderedDeltaClose(
+          bobAfterSecondForward - bobBeforeSecondForward,
+          toDisplayed(secondForwardAmount),
+          'bob second forward receive',
+        );
+
+        console.log('[E2E] overspend rejection');
+        if (testInfo.project.name === 'webkit-mobile') {
+          await reloadAppForProject(alicePage, APP_BASE_URL, testInfo.project.name);
+          await reloadAppForProject(bobPage, APP_BASE_URL, testInfo.project.name);
+        } else {
+          await Promise.all([
+            reloadAppForProject(alicePage, APP_BASE_URL, testInfo.project.name),
+            reloadAppForProject(bobPage, APP_BASE_URL, testInfo.project.name),
+          ]);
+        }
+        await Promise.all([
+          gotoApp(alicePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1000 }),
+          gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1000 }),
+        ]);
+        await Promise.all([
+          waitForRestoredRuntime(alicePage, alice.runtimeId),
+          waitForRestoredRuntime(bobPage, bob.runtimeId),
+        ]);
+        await waitForAccountIdle(alicePage, alice.entityId, hubId);
+        await waitForAccountIdle(bobPage, bob.entityId, hubId);
+        const aliceBeforeOverspend = aliceAfterSecondForward;
+        const overspendUnits = Math.max(1, Math.ceil(aliceBeforeOverspend) + 1);
+        await attemptOverspend(alicePage, bob.entityId, toWei(overspendUnits));
+        const aliceAfterOverspend = await getRenderedOutboundForAccount(alicePage, hubId);
+        expect(aliceAfterOverspend, 'overspend should not change alice balance').toBe(aliceBeforeOverspend);
+
+        expectedAliceAfterReload = aliceAfterSecondForward;
+        expectedBobAfterReload = bobAfterSecondForward;
+
+        await waitForRuntimeInputDrain(alicePage, 'alice-post-overspend');
+        await waitForRuntimeInputDrain(bobPage, 'bob-post-overspend');
+        await waitForDurableRuntimeState(alicePage, 'alice-post-overspend');
+        await waitForDurableRuntimeState(bobPage, 'bob-post-overspend');
+      }
 
       console.log('[E2E] capture persistence state before reload');
       const aliceDbBefore = await runtimeDbMeta(alicePage);
@@ -691,8 +964,8 @@ test('bidirectional payments survive across two isolated browser contexts', asyn
       const aliceDbAfter = await runtimeDbMeta(alicePage);
       const bobDbAfter = await runtimeDbMeta(bobPage);
 
-      expect(aliceAfterReload, 'alice balance must survive reload').toBe(aliceAfterReverse);
-      expect(bobAfterReload, 'bob balance must survive reload').toBe(bobAfterReverse);
+      expect(aliceAfterReload, 'alice balance must survive reload').toBe(expectedAliceAfterReload);
+      expect(bobAfterReload, 'bob balance must survive reload').toBe(expectedBobAfterReload);
       expect(aliceDbAfter.latestHeight, 'alice replay height must survive reload').toBeGreaterThanOrEqual(aliceDbBefore.latestHeight);
       expect(bobDbAfter.latestHeight, 'bob replay height must survive reload').toBeGreaterThanOrEqual(bobDbBefore.latestHeight);
     } finally {

@@ -388,6 +388,7 @@ export const applyEntityTx = async (
           rebalancePolicy: new Map(),
           locks: new Map(), // HTLC: Initialize empty locks
           swapOffers: new Map(), // Swap: Initialize empty offers
+          swapOrderHistory: new Map(),
           // Bilateral J-event consensus
           leftJObservations: [],
           rightJObservations: [],

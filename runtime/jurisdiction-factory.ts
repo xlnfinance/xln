@@ -17,6 +17,7 @@ import type {
   JurisdictionEVM,
   Env,
 } from './types.js';
+import { enqueueRuntimeInput } from './runtime';
 
 /**
  * Create new Xlnomy (jurisdiction + J-Machine + entities)
@@ -214,7 +215,7 @@ async function createGridEntities(xlnomy: Xlnomy, env: any): Promise<void> {
 
   // Apply to env to actually create the replicas
   if (env) {
-    env.runtimeInput.runtimeTxs.push(...entityInputs);
+    enqueueRuntimeInput(env, { runtimeTxs: entityInputs, entityInputs: [] });
   }
 
   console.log(`[Xlnomy] ✅ Grid queued: ${gridEntities.length} entities at positions`);

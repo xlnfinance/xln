@@ -246,6 +246,11 @@ const expandPlaywrightTargets = (pwFiles: string[]): Array<{ target: string; req
 };
 
 const listPlaywrightSpecFiles = (): string[] => {
+  const excludedDefaultSpecs = new Set<string>([
+    // Legacy shared-page AHB flow. Useful assertions were ported into
+    // tests/e2e-ahb-isolated.spec.ts; keep this out of the canonical isolated bar.
+    'tests/e2e-ahb-payment.spec.ts',
+  ]);
   const res = Bun.spawnSync(['rg', '--files', 'tests'], {
     cwd: process.cwd(),
     stdout: 'pipe',
@@ -256,17 +261,48 @@ const listPlaywrightSpecFiles = (): string[] => {
     .split('\n')
     .map((line) => line.trim())
     .filter((line) => line.endsWith('.spec.ts'))
+    .filter((line) => !excludedDefaultSpecs.has(line))
     .sort();
+};
+
+const waitForProcessExit = async (
+  proc: ChildProcessWithoutNullStreams,
+  timeoutMs: number,
+): Promise<boolean> => {
+  if (proc.exitCode !== null) return true;
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (value: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      proc.off('exit', onExit);
+      proc.off('close', onClose);
+      resolve(value);
+    };
+    const onExit = () => finish(true);
+    const onClose = () => finish(true);
+    const timer = setTimeout(() => finish(proc.exitCode !== null), timeoutMs);
+    proc.once('exit', onExit);
+    proc.once('close', onClose);
+  });
 };
 
 const stopProcess = async (proc: ChildProcessWithoutNullStreams | null): Promise<void> => {
   if (!proc || proc.exitCode !== null) return;
-  proc.kill('SIGTERM');
-  const deadline = Date.now() + 4000;
-  while (proc.exitCode === null && Date.now() < deadline) {
-    await delay(100);
+  try {
+    proc.kill('SIGTERM');
+  } catch {
+    return;
   }
-  if (proc.exitCode === null) proc.kill('SIGKILL');
+  const exitedAfterTerm = await waitForProcessExit(proc, 1200);
+  if (exitedAfterTerm || proc.exitCode !== null) return;
+  try {
+    proc.kill('SIGKILL');
+  } catch {
+    return;
+  }
+  await waitForProcessExit(proc, 1200);
 };
 
 const pidsOnPort = (port: number): number[] => {
@@ -643,9 +679,11 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
         : 'startup failure';
       log.write(`[runner] ${teardownLabel} -> SIGTERM api pid=${api.pid} reason=${teardownReason.split('\n')[0]}\n`);
     }
-    await stopProcess(vite);
-    await stopProcess(api);
-    await stopProcess(anvil);
+    await Promise.all([
+      stopProcess(vite),
+      stopProcess(api),
+      stopProcess(anvil),
+    ]);
     log.end();
   }
 };

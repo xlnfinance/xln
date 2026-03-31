@@ -7,7 +7,6 @@
   import type { Env, Profile as GossipProfile } from '@xln/runtime/xln-api';
   import {
     xlnFunctions,
-    xlnEnvironment,
     getXLN,
     enqueueEntityInputs,
     resolveConfiguredApiBase,
@@ -27,8 +26,8 @@
   import { RefreshCw, ChevronDown, ChevronUp, Plus, Check, AlertTriangle } from 'lucide-svelte';
 
   export let entityId: string = '';
-  export let envOverride: Env | null = null;
-  $: env = envOverride || $xlnEnvironment;
+  export let env: Env;
+  export let isLive: boolean;
   $: activeFunctions = $xlnFunctions;
 
   // State
@@ -287,6 +286,7 @@
 
       const currentEnv = env;
       if (!currentEnv) throw new Error('Environment not ready');
+      if (!isLive) throw new Error('Open account is only available in LIVE mode');
       await ensureRuntimeRelay(currentEnv, relaySelection);
 
       // Find signer for our entity

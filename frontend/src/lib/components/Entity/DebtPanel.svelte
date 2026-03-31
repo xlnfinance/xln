@@ -4,10 +4,11 @@
   import { xlnFunctions } from '$lib/stores/xlnStore';
   import { amountToUsd } from '$lib/utils/assetPricing';
   import { getEntityDisplayName } from '$lib/utils/entityNaming';
-  import type { DebtEntry, EntityState, Env } from '@xln/runtime/xln-api';
+  import type { DebtEntry, EntityState, Env, EnvSnapshot } from '@xln/runtime/xln-api';
 
-  export let entityState: EntityState | null = null;
-  export let sourceEnv: Env | null = null;
+  export let entityId: string;
+  export let signerId: string;
+  export let sourceEnv: Env | EnvSnapshot;
   export let canEnforce: boolean = false;
   export let enforcingTokenId: number | null = null;
 
@@ -15,32 +16,53 @@
     enforce: { tokenId: number; symbol: string };
   }>();
 
-  type DebtDirection = 'out' | 'in';
-  type DebtSectionKey = 'outstanding' | 'settled';
   type TokenGroup = {
+    key: string;
     tokenId: number;
     symbol: string;
+    direction: DebtDirection;
     decimals: number;
     debts: DebtEntry[];
+    openCount: number;
+    outgoingOpenCount: number;
+    outstandingAmount: bigint;
+    usdOutstanding: number;
     usdTotal: number;
   };
-  type SectionGroup = {
-    key: DebtSectionKey;
-    label: string;
-    debts: DebtEntry[];
-    usdTotal: number;
-    tokenGroups: TokenGroup[];
-  };
-  type DirectionGroup = {
-    key: DebtDirection;
-    label: string;
-    debts: DebtEntry[];
+  type DebtStatus = DebtEntry['status'];
+  type DebtDirection = DebtEntry['direction'];
+  type DebtRowTone = DebtStatus | 'neutral';
+
+  type DebtTotals = {
+    entries: number;
     openCount: number;
     usdOutstanding: number;
-    sections: SectionGroup[];
   };
 
   $: activeXlnFunctions = $xlnFunctions;
+  $: entityState = resolveEntityState(sourceEnv, entityId, signerId);
+
+  function resolveEntityState(
+    env: Env | EnvSnapshot,
+    currentEntityId: string,
+    currentSignerId: string,
+  ): EntityState | null {
+    if (!(env?.eReplicas instanceof Map)) return null;
+    const exact = env.eReplicas.get(`${currentEntityId}:${currentSignerId}`);
+    if (exact?.state) return exact.state as EntityState;
+
+    const entityNorm = String(currentEntityId || '').trim().toLowerCase();
+    const signerNorm = String(currentSignerId || '').trim().toLowerCase();
+    for (const [replicaKey, replica] of env.eReplicas.entries()) {
+      const [keyEntityId, keySignerId] = String(replicaKey || '').split(':');
+      const resolvedEntityId = String(keyEntityId || replica?.entityId || '').trim().toLowerCase();
+      const resolvedSignerId = String(keySignerId || replica?.signerId || '').trim().toLowerCase();
+      if (resolvedEntityId === entityNorm && resolvedSignerId === signerNorm) {
+        return (replica?.state || null) as EntityState | null;
+      }
+    }
+    return null;
+  }
 
   function flattenLedger(ledger: Map<number, Map<string, DebtEntry>> | undefined): DebtEntry[] {
     if (!ledger) return [];
@@ -98,204 +120,204 @@
     return 'Open';
   }
 
-  function buildSection(debts: DebtEntry[], key: DebtSectionKey): SectionGroup {
-    const filtered = debts.filter((entry) => key === 'outstanding' ? entry.status === 'open' : entry.status !== 'open');
-    const byToken = new Map<number, DebtEntry[]>();
-    for (const entry of filtered) {
-      const list = byToken.get(entry.tokenId) || [];
+  function debtDirectionLabel(direction: DebtDirection): string {
+    return direction === 'out' ? 'Outgoing' : 'Incoming';
+  }
+
+  function compareDebtRows(left: DebtEntry, right: DebtEntry): number {
+    const leftOpen = left.status === 'open' ? 1 : 0;
+    const rightOpen = right.status === 'open' ? 1 : 0;
+    if (leftOpen !== rightOpen) return rightOpen - leftOpen;
+    if (left.direction !== right.direction) return left.direction === 'out' ? -1 : 1;
+    const blockDiff = Number(right.lastUpdatedBlock || 0) - Number(left.lastUpdatedBlock || 0);
+    if (blockDiff !== 0) return blockDiff;
+    return String(left.debtId).localeCompare(String(right.debtId));
+  }
+
+  function buildTokenGroups(): TokenGroup[] {
+    const allDebts = [
+      ...flattenLedger(entityState?.outDebtsByToken),
+      ...flattenLedger(entityState?.inDebtsByToken),
+    ];
+    const byToken = new Map<string, DebtEntry[]>();
+    for (const entry of allDebts) {
+      const key = `${entry.tokenId}:${entry.direction}`;
+      const list = byToken.get(key) || [];
       list.push(entry);
-      byToken.set(entry.tokenId, list);
+      byToken.set(key, list);
     }
-    const tokenGroups = Array.from(byToken.entries()).map(([tokenId, tokenDebts]) => {
-      const meta = tokenMeta(tokenId);
-      return {
-        tokenId,
-        symbol: meta.symbol,
-        decimals: meta.decimals,
-        debts: tokenDebts.sort((left, right) =>
-          Number(right.lastUpdatedBlock || 0) - Number(left.lastUpdatedBlock || 0) ||
-          left.debtId.localeCompare(right.debtId),
-        ),
-        usdTotal: tokenDebts.reduce((sum, entry) => sum + debtUsd(entry, 'remainingAmount'), 0),
-      };
-    }).sort((left, right) => right.usdTotal - left.usdTotal || left.symbol.localeCompare(right.symbol));
-
-    return {
-      key,
-      label: key === 'outstanding' ? 'Outstanding' : 'Settled',
-      debts: filtered,
-      usdTotal: filtered.reduce((sum, entry) => sum + debtUsd(entry, 'remainingAmount'), 0),
-      tokenGroups,
-    };
+    return Array.from(byToken.entries())
+      .map(([groupKey, tokenDebts]) => {
+        const firstDebt = tokenDebts[0];
+        if (!firstDebt) {
+          return null;
+        }
+        const tokenId = firstDebt.tokenId;
+        const meta = tokenMeta(tokenId);
+        const orderedDebts = [...tokenDebts].sort(compareDebtRows);
+        const openDebts = orderedDebts.filter((entry) => entry.status === 'open');
+        const outstandingAmount = openDebts.reduce((sum, entry) => sum + entry.remainingAmount, 0n);
+        return {
+          key: groupKey,
+          tokenId,
+          symbol: meta.symbol,
+          decimals: meta.decimals,
+          direction: firstDebt.direction,
+          debts: orderedDebts,
+          openCount: openDebts.length,
+          outgoingOpenCount: firstDebt.direction === 'out' ? openDebts.length : 0,
+          outstandingAmount,
+          usdOutstanding: openDebts.reduce((sum, entry) => sum + debtUsd(entry, 'remainingAmount'), 0),
+          usdTotal: orderedDebts.reduce((sum, entry) => sum + debtUsd(entry, 'remainingAmount'), 0),
+        };
+      })
+      .filter((group): group is TokenGroup => group !== null)
+      .sort((left, right) => right.usdOutstanding - left.usdOutstanding || right.usdTotal - left.usdTotal || left.symbol.localeCompare(right.symbol));
   }
 
-  function buildDirectionGroup(key: DebtDirection): DirectionGroup {
-    const debts = flattenLedger(key === 'out' ? entityState?.outDebtsByToken : entityState?.inDebtsByToken);
-    return {
-      key,
-      label: key === 'out' ? 'Outgoing (We Owe)' : 'Incoming (Owed To Us)',
-      debts,
-      openCount: debts.filter((entry) => entry.status === 'open').length,
-      usdOutstanding: debts.filter((entry) => entry.status === 'open').reduce((sum, entry) => sum + debtUsd(entry, 'remainingAmount'), 0),
-      sections: [buildSection(debts, 'outstanding'), buildSection(debts, 'settled')],
-    };
+  function buildTotals(tokenGroups: TokenGroup[]): DebtTotals {
+    return tokenGroups.reduce<DebtTotals>((totals, group) => ({
+      entries: totals.entries + group.debts.length,
+      openCount: totals.openCount + group.openCount,
+      usdOutstanding: totals.usdOutstanding + group.usdOutstanding,
+    }), {
+      entries: 0,
+      openCount: 0,
+      usdOutstanding: 0,
+    });
   }
 
-  $: directionGroups = [buildDirectionGroup('out'), buildDirectionGroup('in')];
-  $: totalDebtEntries = directionGroups.reduce((sum, group) => sum + group.debts.length, 0);
-  $: totalOutstandingUsd = directionGroups.reduce((sum, group) => sum + group.usdOutstanding, 0);
-  $: totalOpenDebtCount = directionGroups.reduce((sum, group) => sum + group.openCount, 0);
+  function debtTone(status: DebtStatus): DebtRowTone {
+    return status === 'open' ? 'open' : status;
+  }
+
+  $: tokenGroups = buildTokenGroups();
+  $: debtTotals = buildTotals(tokenGroups);
 </script>
 
-{#if totalDebtEntries > 0}
-  <details class="debt-panel" data-testid="debt-panel">
+{#if debtTotals.entries > 0}
+  <details class="debt-panel" data-testid="debt-panel" open>
     <summary class="debt-summary">
       <div class="debt-summary-copy">
-        <span class="debt-summary-title">Debts {formatUsd(totalOutstandingUsd)}</span>
-        <span class="debt-summary-meta">{totalOpenDebtCount} open · {totalDebtEntries} entries</span>
+        <span class="debt-summary-title">Debts {formatUsd(debtTotals.usdOutstanding)}</span>
+        <span class="debt-summary-meta">{debtTotals.openCount} open · {debtTotals.entries} entries</span>
       </div>
       <div class="debt-summary-total">
         <span>Total debts</span>
-        <strong>{formatUsd(totalOutstandingUsd)}</strong>
+        <strong>{formatUsd(debtTotals.usdOutstanding)}</strong>
       </div>
     </summary>
 
     <div class="debt-body">
-      {#each directionGroups as direction (direction.key)}
-        {#if direction.debts.length > 0}
-          <details class="debt-direction" open={direction.key === 'out'}>
-            <summary class="debt-direction-summary">
-              <div>
-                <span class="debt-direction-title">{direction.label}</span>
-                <span class="debt-direction-meta">{direction.openCount} open</span>
+      <div class="debt-token-groups">
+        {#each tokenGroups as tokenGroup (tokenGroup.key)}
+          <details class="debt-token-group" open={tokenGroup.openCount > 0}>
+            <summary class="debt-token-summary">
+              <div class="debt-token-copy">
+                <span class="debt-token-title">
+                  {formatAmount(tokenGroup.tokenId, tokenGroup.outstandingAmount)} {tokenGroup.direction === 'out' ? 'we owe' : 'owed to us'}
+                </span>
+                <span class="debt-token-meta">{tokenGroup.openCount} open · {tokenGroup.debts.length} debts</span>
               </div>
-              <strong>{formatUsd(direction.usdOutstanding)}</strong>
+              <strong>{formatUsd(tokenGroup.usdOutstanding || tokenGroup.usdTotal)}</strong>
             </summary>
 
-            <div class="debt-sections">
-              {#each direction.sections as section (section.key)}
-                {#if section.debts.length > 0}
-                  <details class="debt-section" open={section.key === 'outstanding'}>
-                    <summary class="debt-section-summary">
-                      <span>{section.label}</span>
-                      <span>{section.debts.length} debts · {formatUsd(section.usdTotal)}</span>
-                    </summary>
+            {#if tokenGroup.outgoingOpenCount > 0}
+              <div class="debt-token-actions">
+                <button
+                  class="debt-enforce-btn"
+                  type="button"
+                  data-testid={`debt-enforce-${tokenGroup.tokenId}`}
+                  disabled={!canEnforce || enforcingTokenId === tokenGroup.tokenId}
+                  on:click={() => dispatch('enforce', { tokenId: tokenGroup.tokenId, symbol: tokenGroup.symbol })}
+                >
+                  {enforcingTokenId === tokenGroup.tokenId ? 'Enforcing...' : `Enforce ${tokenGroup.symbol}`}
+                </button>
+              </div>
+            {/if}
 
-                    <div class="debt-token-groups">
-                      {#each section.tokenGroups as tokenGroup (`${direction.key}-${section.key}-${tokenGroup.tokenId}`)}
-                        <details class="debt-token-group">
-                          <summary class="debt-token-summary">
-                            <span>{tokenGroup.symbol}</span>
-                            <span>{tokenGroup.debts.length} debts · {formatUsd(tokenGroup.usdTotal)}</span>
-                          </summary>
+            <div class="debt-rows">
+              {#each tokenGroup.debts as debt (debt.debtId)}
+                <article class="debt-row" data-testid={`debt-row-${debt.direction}-${debt.tokenId}`}>
+                  <div class="debt-row-summary">
+                    <div class="debt-row-identity">
+                      <EntityIdentity
+                        entityId={debt.counterparty}
+                        name={entityName(debt.counterparty)}
+                        size={24}
+                        clickable={false}
+                        copyable={false}
+                        showAddress={false}
+                      />
+                      <span class={`debt-badge debt-direction-${debt.direction}`}>{debtDirectionLabel(debt.direction)}</span>
+                      <span class={`debt-badge debt-status ${debtStatusClass(debt.status)}`}>{debtStatusLabel(debt.status)}</span>
+                    </div>
+                    <div class="debt-row-amounts">
+                      <span>Opened {formatAmount(debt.tokenId, debt.createdAmount)}</span>
+                      <span>Paid {formatAmount(debt.tokenId, debt.paidAmount)}</span>
+                      <strong>Left {formatAmount(debt.tokenId, debt.remainingAmount)}</strong>
+                    </div>
+                  </div>
 
-                          {#if direction.key === 'out' && section.key === 'outstanding'}
-                            <div class="debt-token-actions">
-                              <button
-                                class="debt-enforce-btn"
-                                type="button"
-                                data-testid={`debt-enforce-${tokenGroup.tokenId}`}
-                                disabled={!canEnforce || enforcingTokenId === tokenGroup.tokenId}
-                                on:click={() => dispatch('enforce', { tokenId: tokenGroup.tokenId, symbol: tokenGroup.symbol })}
-                              >
-                                {enforcingTokenId === tokenGroup.tokenId ? 'Enforcing...' : `Enforce ${tokenGroup.symbol}`}
-                              </button>
-                            </div>
-                          {/if}
+                  <div class="debt-row-details">
+                    <div class="debt-detail-grid">
+                      <div><span>Opened</span><strong>{formatAmount(debt.tokenId, debt.createdAmount)} · {formatUsd(debtUsd(debt, 'createdAmount'))}</strong></div>
+                      <div><span>Paid</span><strong>{formatAmount(debt.tokenId, debt.paidAmount)} · {formatUsd(debtUsd(debt, 'paidAmount'))}</strong></div>
+                      <div><span>Forgiven</span><strong>{formatAmount(debt.tokenId, debt.forgivenAmount)} · {formatUsd(debtUsd(debt, 'forgivenAmount'))}</strong></div>
+                      <div><span>Left</span><strong>{formatAmount(debt.tokenId, debt.remainingAmount)} · {formatUsd(debtUsd(debt, 'remainingAmount'))}</strong></div>
+                      <div><span>Debt ID</span><code>{debt.debtId}</code></div>
+                      <div><span>Indexes</span><strong>{debt.createdDebtIndex} → {debt.currentDebtIndex ?? 'closed'}</strong></div>
+                      <div><span>Direction</span><strong>{debtDirectionLabel(debt.direction)}</strong></div>
+                      <div><span>Updated</span><strong>J#{debt.lastUpdatedBlock} · {debt.lastUpdatedTxHash || '—'}</strong></div>
+                    </div>
 
-                          <div class="debt-rows">
-                            {#each tokenGroup.debts as debt (debt.debtId)}
-                              <details class="debt-row" data-testid={`debt-row-${debt.direction}-${debt.tokenId}`}>
-                                <summary class="debt-row-summary">
-                                  <div class="debt-row-identity">
-                                    <EntityIdentity
-                                      entityId={debt.counterparty}
-                                      name={entityName(debt.counterparty)}
-                                      size={24}
-                                      clickable={false}
-                                      copyable={false}
-                                      showAddress={false}
-                                    />
-                                    <span class={`debt-status ${debtStatusClass(debt.status)}`}>{debtStatusLabel(debt.status)}</span>
-                                  </div>
-                                  <div class="debt-row-amounts">
-                                    <span>Opened {formatAmount(debt.tokenId, debt.createdAmount)}</span>
-                                    <span>Paid {formatAmount(debt.tokenId, debt.paidAmount)}</span>
-                                    <strong>Left {formatAmount(debt.tokenId, debt.remainingAmount)}</strong>
-                                  </div>
-                                </summary>
-
-                                <div class="debt-row-details">
-                                  <div class="debt-detail-grid">
-                                    <div><span>Opened</span><strong>{formatAmount(debt.tokenId, debt.createdAmount)} · {formatUsd(debtUsd(debt, 'createdAmount'))}</strong></div>
-                                    <div><span>Paid</span><strong>{formatAmount(debt.tokenId, debt.paidAmount)} · {formatUsd(debtUsd(debt, 'paidAmount'))}</strong></div>
-                                    <div><span>Forgiven</span><strong>{formatAmount(debt.tokenId, debt.forgivenAmount)} · {formatUsd(debtUsd(debt, 'forgivenAmount'))}</strong></div>
-                                    <div><span>Left</span><strong>{formatAmount(debt.tokenId, debt.remainingAmount)} · {formatUsd(debtUsd(debt, 'remainingAmount'))}</strong></div>
-                                    <div><span>Debt ID</span><code>{debt.debtId}</code></div>
-                                    <div><span>Indexes</span><strong>{debt.createdDebtIndex} → {debt.currentDebtIndex ?? 'closed'}</strong></div>
-                                    <div><span>Created</span><strong>J#{debt.createdAtBlock} · {debt.createdTxHash || '—'}</strong></div>
-                                    <div><span>Updated</span><strong>J#{debt.lastUpdatedBlock} · {debt.lastUpdatedTxHash || '—'}</strong></div>
-                                  </div>
-
-                                  <div class="debt-updates">
-                                    <div class="debt-updates-title">Timeline</div>
-                                    {#each debt.updates as update, index (`${debt.debtId}-${index}`)}
-                                      <div class="debt-update-row">
-                                        <span>{update.eventType}</span>
-                                        <span>J#{update.blockNumber}</span>
-                                        <span>Δ {formatAmount(debt.tokenId, update.amountDelta)}</span>
-                                        <strong>Left {formatAmount(debt.tokenId, update.remainingAmount)}</strong>
-                                      </div>
-                                    {/each}
-                                  </div>
-                                </div>
-                              </details>
-                            {/each}
-                          </div>
-                        </details>
+                    <div class="debt-updates">
+                      <div class="debt-updates-title">Timeline</div>
+                      {#each debt.updates as update, index (`${debt.debtId}-${index}`)}
+                        <div class="debt-update-row">
+                          <span>{update.eventType}</span>
+                          <span>J#{update.blockNumber}</span>
+                          <span>Δ {formatAmount(debt.tokenId, update.amountDelta)}</span>
+                          <strong>Left {formatAmount(debt.tokenId, update.remainingAmount)}</strong>
+                        </div>
                       {/each}
                     </div>
-                  </details>
-                {/if}
+                  </div>
+                </article>
               {/each}
             </div>
           </details>
-        {/if}
-      {/each}
+        {/each}
+      </div>
     </div>
   </details>
 {/if}
 
 <style>
-  .debt-panel,
-  .debt-direction,
-  .debt-section,
-  .debt-token-group,
-  .debt-row {
-    border: 1px solid rgba(148, 163, 184, 0.14);
-    border-radius: 14px;
-    background: rgba(15, 23, 42, 0.48);
-  }
-
   .debt-panel {
     margin: 14px 0;
     overflow: hidden;
+    border: 1px solid color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 86%, transparent);
+    border-radius: 16px;
+    background: color-mix(in srgb, var(--theme-card-bg, var(--theme-surface, #111111)) 94%, transparent);
+    box-shadow: 0 18px 36px color-mix(in srgb, var(--theme-background, #09090b) 14%, transparent);
+  }
+
+  .debt-token-group,
+  .debt-row {
+    border: 1px solid color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 84%, transparent);
+    border-radius: 14px;
+    background: color-mix(in srgb, var(--theme-background, #0a0a0a) 72%, transparent);
   }
 
   .debt-summary,
-  .debt-direction-summary,
-  .debt-section-summary,
-  .debt-token-summary,
-  .debt-row-summary {
+  .debt-token-summary {
     list-style: none;
     cursor: pointer;
   }
 
   .debt-summary::-webkit-details-marker,
-  .debt-direction-summary::-webkit-details-marker,
-  .debt-section-summary::-webkit-details-marker,
-  .debt-token-summary::-webkit-details-marker,
-  .debt-row-summary::-webkit-details-marker {
+  .debt-token-summary::-webkit-details-marker {
     display: none;
   }
 
@@ -315,28 +337,30 @@
   }
 
   .debt-summary-title,
-  .debt-direction-title {
+  .debt-token-title {
     font-size: 14px;
     font-weight: 700;
-    color: #f8fafc;
+    color: var(--theme-text-primary, #f5f5f5);
   }
 
   .debt-summary-meta,
-  .debt-direction-meta,
-  .debt-section-summary span:last-child,
-  .debt-token-summary span:last-child {
-    color: #94a3b8;
+  .debt-token-meta {
+    color: var(--theme-text-muted, #a1a1aa);
+    font-size: 12px;
+  }
+
+  .debt-summary-total span {
+    color: var(--theme-text-muted, #a1a1aa);
     font-size: 12px;
   }
 
   .debt-summary-total strong,
-  .debt-direction-summary strong {
-    color: #fbbf24;
+  .debt-token-summary strong {
+    color: var(--theme-text-primary, #ffffff);
     font-size: 14px;
   }
 
   .debt-body,
-  .debt-sections,
   .debt-token-groups,
   .debt-rows {
     display: flex;
@@ -348,8 +372,6 @@
     padding: 0 14px 14px;
   }
 
-  .debt-direction-summary,
-  .debt-section-summary,
   .debt-token-summary {
     padding: 12px 14px;
     display: flex;
@@ -358,10 +380,15 @@
     align-items: baseline;
   }
 
-  .debt-sections,
   .debt-token-groups,
   .debt-rows {
     padding: 0 12px 12px;
+  }
+
+  .debt-token-copy {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
   }
 
   .debt-token-actions {
@@ -371,9 +398,9 @@
   }
 
   .debt-enforce-btn {
-    border: 1px solid rgba(248, 113, 113, 0.28);
-    background: rgba(127, 29, 29, 0.28);
-    color: #fecaca;
+    border: 1px solid color-mix(in srgb, var(--theme-text-secondary, #d4d4d8) 22%, transparent);
+    background: color-mix(in srgb, var(--theme-background, #09090b) 82%, var(--theme-text-primary, #ffffff) 6%);
+    color: var(--theme-text-primary, #f4f4f5);
     border-radius: 10px;
     padding: 8px 12px;
     font-size: 12px;
@@ -397,11 +424,12 @@
   .debt-row-identity {
     display: flex;
     align-items: center;
+    flex-wrap: wrap;
     gap: 10px;
     min-width: 0;
   }
 
-  .debt-status {
+  .debt-badge {
     display: inline-flex;
     align-items: center;
     border-radius: 999px;
@@ -409,21 +437,27 @@
     font-size: 11px;
     font-weight: 700;
     letter-spacing: 0.02em;
+    border: 1px solid color-mix(in srgb, var(--theme-text-muted, #a1a1aa) 22%, transparent);
+    background: color-mix(in srgb, var(--theme-background, #09090b) 82%, var(--theme-text-primary, #ffffff) 6%);
+    color: var(--theme-text-secondary, #d4d4d8);
+  }
+
+  .debt-direction-out {
+    color: var(--theme-text-primary, #ffffff);
+  }
+
+  .debt-direction-in {
+    color: var(--theme-text-muted, #d4d4d8);
   }
 
   .debt-status.open {
-    background: rgba(251, 146, 60, 0.16);
-    color: #fdba74;
+    color: var(--theme-text-primary, #ffffff);
+    border-color: color-mix(in srgb, var(--theme-text-primary, #ffffff) 28%, transparent);
   }
 
-  .debt-status.paid {
-    background: rgba(34, 197, 94, 0.14);
-    color: #86efac;
-  }
-
+  .debt-status.paid,
   .debt-status.forgiven {
-    background: rgba(148, 163, 184, 0.16);
-    color: #cbd5e1;
+    color: var(--theme-text-muted, #a1a1aa);
   }
 
   .debt-row-amounts {
@@ -431,12 +465,12 @@
     flex-wrap: wrap;
     justify-content: flex-end;
     gap: 14px;
-    color: #cbd5e1;
+    color: var(--theme-text-secondary, #d4d4d8);
     font-size: 12px;
   }
 
   .debt-row-amounts strong {
-    color: #f8fafc;
+    color: var(--theme-text-primary, #ffffff);
   }
 
   .debt-row-details {
@@ -457,12 +491,12 @@
     flex-direction: column;
     gap: 4px;
     border-radius: 10px;
-    background: rgba(15, 23, 42, 0.5);
+    background: color-mix(in srgb, var(--theme-background, #09090b) 78%, var(--theme-text-primary, #ffffff) 4%);
     padding: 10px;
   }
 
   .debt-detail-grid span {
-    color: #94a3b8;
+    color: var(--theme-text-muted, #a1a1aa);
     font-size: 11px;
     text-transform: uppercase;
     letter-spacing: 0.04em;
@@ -470,7 +504,7 @@
 
   .debt-detail-grid strong,
   .debt-detail-grid code {
-    color: #e2e8f0;
+    color: var(--theme-text-primary, #f5f5f5);
     font-size: 12px;
     overflow-wrap: anywhere;
   }
@@ -482,7 +516,7 @@
   }
 
   .debt-updates-title {
-    color: #f8fafc;
+    color: var(--theme-text-primary, #f5f5f5);
     font-size: 12px;
     font-weight: 700;
   }
@@ -493,14 +527,14 @@
     gap: 12px;
     align-items: center;
     font-size: 12px;
-    color: #cbd5e1;
+    color: var(--theme-text-secondary, #d4d4d8);
     border-radius: 10px;
-    background: rgba(15, 23, 42, 0.5);
+    background: color-mix(in srgb, var(--theme-background, #09090b) 78%, var(--theme-text-primary, #ffffff) 4%);
     padding: 10px 12px;
   }
 
   .debt-update-row strong {
-    color: #f8fafc;
+    color: var(--theme-text-primary, #ffffff);
   }
 
   @media (max-width: 860px) {

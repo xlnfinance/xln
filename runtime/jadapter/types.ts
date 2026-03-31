@@ -146,6 +146,7 @@ export interface JAdapter {
   // === J-Watcher integration ===
   // Starts feeding J-events back to runtime mempool. Same object handles submit + watch.
   startWatching(env: Env): void;
+  isWatching(): boolean;
   stopWatching(): void;
   // Immediate poll for scenarios (no-op if watcher not started)
   pollNow?(): Promise<void>;

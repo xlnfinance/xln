@@ -19,6 +19,7 @@ import {
   RPC_MARKET_MAX_DEPTH,
 } from '../market-snapshot';
 import { toPublicRpcUrl } from '../loopback-url';
+import { applyJEventsToEnv } from '../jadapter/watcher';
 import {
   getActiveJAdapter,
   getP2PState,
@@ -33,7 +34,6 @@ import {
 } from '../runtime.ts';
 import type { EntityInput, Env } from '../types';
 import {
-  applyJEventsToEnv,
   hasPendingRuntimeWork,
   BOOTSTRAP_POLL_MS,
   DEFAULT_ACCOUNT_TOKEN_IDS,
@@ -140,10 +140,6 @@ type JurisdictionConfig = {
     account?: string;
     deltaTransformer?: string;
   };
-};
-
-type PollableJAdapter = JAdapter & {
-  pollNow?: () => Promise<void>;
 };
 
 type JurisdictionsFile = {
@@ -623,8 +619,7 @@ const syncReserveSnapshotFromChain = async (
   for (const token of tokenCatalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)) {
     const tokenId = Number(token.tokenId);
     if (!Number.isFinite(tokenId) || tokenId <= 0) continue;
-    const onChain = await jadapter.getReserves(entityId, tokenId);
-    replica.state.reserves.set(tokenId, onChain);
+    await jadapter.getReserves(entityId, tokenId);
   }
   return getReserveHealth(env, entityId, tokenCatalog);
 };
@@ -662,11 +657,6 @@ const ensureBootstrapReserves = async (
 
   const events = await jadapter.debugFundReservesBatch(mints);
   await applyJEventsToEnv(env, events, `${resolvedArgs.name}-reserve-fund`);
-
-  const pollable = jadapter as PollableJAdapter;
-  if (typeof pollable.pollNow === 'function') {
-    await pollable.pollNow();
-  }
 
   await settleRuntimeFor(env, 30);
   const reserveHealth = await syncReserveSnapshotFromChain(env, entityId, tokenCatalog);

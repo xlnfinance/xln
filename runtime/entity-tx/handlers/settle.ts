@@ -408,7 +408,7 @@ export async function handleSettleExecute(
   entityTx: Extract<EntityTx, { type: 'settle_execute' }>,
   _env: Env
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[] }> {
-  const { counterpartyEntityId } = entityTx.data;
+  const { counterpartyEntityId, disableC2RShortcut = false } = entityTx.data;
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
   const mempoolOps: MempoolOp[] = [];
@@ -497,6 +497,7 @@ export async function handleSettleExecute(
       '0x',
       workspace.nonceAtSign ?? account.proofHeader.nonce,
       entityState.entityId,
+      disableC2RShortcut,
     );
   } catch (error) {
     const msg = (error as Error)?.message || '';

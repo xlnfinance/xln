@@ -55,12 +55,28 @@
   $: resolvedVisualScale = visualScale ?? buildTokenVisualScale(symbol, decimals, derived);
   $: outUsdHint = formatUsdHint(resolvedVisualScale?.outCapacityUsd ?? 0);
   $: inUsdHint = formatUsdHint(resolvedVisualScale?.inCapacityUsd ?? 0);
+  $: outHoldHint = formatHoldHint(derived.outTotalHold ?? 0n);
+  $: inHoldHint = formatHoldHint(derived.inTotalHold ?? 0n);
 
   function formatUsdHint(valueUsd: number): string {
     if (!Number.isFinite(valueUsd) || valueUsd <= 0) return '';
     if (valueUsd >= 1000) return `~$${Math.round(valueUsd).toLocaleString('en-US')}`;
     if (valueUsd >= 1) return `~$${valueUsd.toFixed(0)}`;
     return `~$${valueUsd.toFixed(2)}`;
+  }
+
+  function formatHoldHint(value: bigint): string {
+    if (value <= 0n) return '';
+    const scale = 10n ** BigInt(Math.max(0, decimals));
+    const whole = value / scale;
+    const fraction = value % scale;
+    const fractionText = fraction
+      .toString()
+      .padStart(Math.max(0, decimals), '0')
+      .slice(0, Math.min(4, Math.max(0, decimals)))
+      .replace(/0+$/, '');
+    const amountText = fractionText ? `${whole.toString()}.${fractionText}` : whole.toString();
+    return `${amountText} hold`;
   }
 
   function emitAction(): void {
@@ -112,6 +128,7 @@
           <span class="compact-out-value">
             <span>{outAmountCompact}</span>
             {#if outUsdHint}<span class="usd-hint">{outUsdHint}</span>{/if}
+            {#if outHoldHint}<span class="hold-hint">{outHoldHint}</span>{/if}
             {#if deltaFlashVisible}
               <span class="delta-flash" class:positive={deltaFlashPositive} class:negative={!deltaFlashPositive}>{deltaFlashText}</span>
             {/if}
@@ -122,6 +139,7 @@
           <span class="compact-in-value">
             <span class="inbound-label">&larr; Receivable</span>
             <span>{inAmountCompact}</span>
+            {#if inHoldHint}<span class="hold-hint">{inHoldHint}</span>{/if}
           </span>
         </div>
       </div>
@@ -306,6 +324,14 @@
     color: #94a3b8;
     font-size: 0.48em;
     font-weight: 600;
+    letter-spacing: -0.01em;
+    white-space: nowrap;
+  }
+
+  .hold-hint {
+    color: color-mix(in srgb, var(--theme-accent, #fbbf24) 88%, white 12%);
+    font-size: 0.48em;
+    font-weight: 700;
     letter-spacing: -0.01em;
     white-space: nowrap;
   }

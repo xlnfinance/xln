@@ -692,15 +692,6 @@ async function mineOneBlock(page: Page): Promise<void> {
     data: { jsonrpc: '2.0', id: 1, method: 'evm_mine', params: [] },
   });
   expect(response.ok(), 'evm_mine RPC must succeed').toBe(true);
-  await page.evaluate(async () => {
-    const env = (window as typeof window & { isolatedEnv?: any }).isolatedEnv;
-    const activeJurisdiction = String(env?.activeJurisdiction || '');
-    const jReplica = activeJurisdiction ? env?.jReplicas?.get?.(activeJurisdiction) : null;
-    const jadapter = jReplica?.jadapter;
-    if (jadapter && typeof jadapter.pollNow === 'function') {
-      await jadapter.pollNow();
-    }
-  });
 }
 
 async function readRuntimeJurisdictionHeight(page: Page): Promise<number> {
@@ -834,8 +825,12 @@ async function waitForMirroredDebtSnapshots(
   let latest: { left: DebtSnapshot | null; right: DebtSnapshot | null } = { left: null, right: null };
   const readUiDebtRow = async (page: Page): Promise<DebtSnapshot | null> =>
     page.evaluate(() => {
-      const panel = document.querySelector('[data-testid="debt-panel"]');
+      const panel = document.querySelector('[data-testid="debt-panel"]') as HTMLDetailsElement | null;
       if (!panel) return null;
+      panel.open = true;
+      panel.querySelectorAll('details').forEach((details) => {
+        (details as HTMLDetailsElement).open = true;
+      });
       const row = document.querySelector('[data-testid="debt-row-out-1"], [data-testid="debt-row-in-1"]') as HTMLElement | null;
       if (!row) return null;
       const testId = String(row.dataset.testid || '');
@@ -861,30 +856,79 @@ async function waitForMirroredDebtSnapshots(
         updates: text.includes('Open') ? ['DebtCreated'] : [],
       };
     });
-  await expect.poll(async () => {
-    const [leftRow, rightRow, leftSummary, rightSummary] = await Promise.all([
-      readUiDebtRow(leftPage),
-      readUiDebtRow(rightPage),
-      leftPage.getByTestId('debt-panel').first().textContent().catch(() => ''),
-      rightPage.getByTestId('debt-panel').first().textContent().catch(() => ''),
-    ]);
-    latest = {
-      left: leftRow,
-      right: rightRow,
-    };
-    if (!latest.left || !latest.right) return false;
-    return (
-      latest.left.status === 'open' &&
-      latest.right.status === 'open' &&
-      latest.left.remainingAmount.toString() === expectedRemaining &&
-      latest.right.remainingAmount.toString() === expectedRemaining &&
-      latest.left.paidAmount === 0n &&
-      latest.right.paidAmount === 0n &&
-      latest.left.direction !== latest.right.direction &&
-      String(leftSummary || '').includes('$150') &&
-      String(rightSummary || '').includes('$150')
-    );
-  }, { timeout: 45_000, intervals: [500, 1000, 1500] }).toBe(true);
+  const pickOpenDebt = (rows: DebtSnapshot[]): DebtSnapshot | null =>
+    rows.find((row) =>
+      row.status === 'open'
+      && row.remainingAmount.toString() === expectedRemaining
+      && row.paidAmount === 0n,
+    ) ?? null;
+
+  await expect
+    .poll(async () => {
+      const [
+        leftRuntimeRows,
+        rightRuntimeRows,
+        leftAccount,
+        rightAccount,
+      ] = await Promise.all([
+        readDebtSnapshotsForCounterparty(leftPage, leftEntityId, leftSignerId, rightEntityId),
+        readDebtSnapshotsForCounterparty(rightPage, rightEntityId, rightSignerId, leftEntityId),
+        readAccountState(leftPage, leftEntityId, leftSignerId, rightEntityId),
+        readAccountState(rightPage, rightEntityId, rightSignerId, leftEntityId),
+      ]);
+
+      latest = {
+        left: pickOpenDebt(leftRuntimeRows),
+        right: pickOpenDebt(rightRuntimeRows),
+      };
+
+      return (
+        !leftAccount.activeDispute &&
+        !rightAccount.activeDispute &&
+        !!latest.left &&
+        !!latest.right &&
+        latest.left.direction !== latest.right.direction
+      );
+    }, {
+      timeout: 60_000,
+      intervals: [500, 1000, 1500],
+      message: 'mirrored canonical debt state must exist on both runtimes',
+    })
+    .toBe(true);
+
+  await Promise.all([
+    openOutstandingDebtToken(leftPage),
+    openOutstandingDebtToken(rightPage),
+  ]);
+
+  await expect
+    .poll(async () => {
+      const [leftRow, rightRow, leftSummary, rightSummary] = await Promise.all([
+        readUiDebtRow(leftPage),
+        readUiDebtRow(rightPage),
+        leftPage.getByTestId('debt-panel').first().textContent().catch(() => ''),
+        rightPage.getByTestId('debt-panel').first().textContent().catch(() => ''),
+      ]);
+      return Boolean(
+        leftRow &&
+        rightRow &&
+        leftRow.status === 'open' &&
+        rightRow.status === 'open' &&
+        leftRow.remainingAmount.toString() === expectedRemaining &&
+        rightRow.remainingAmount.toString() === expectedRemaining &&
+        leftRow.paidAmount === 0n &&
+        rightRow.paidAmount === 0n &&
+        leftRow.direction !== rightRow.direction &&
+        String(leftSummary || '').includes('$150') &&
+        String(rightSummary || '').includes('$150'),
+      );
+    }, {
+      timeout: 30_000,
+      intervals: [500, 1000, 1500],
+      message: 'mirrored debt row must be visible in UI on both pages',
+    })
+    .toBe(true);
+
   if (!latest.left || !latest.right) {
     throw new Error('mirrored debt snapshots missing');
   }
@@ -1019,7 +1063,7 @@ async function openReserveToExternalMove(
 }
 
 async function openOutstandingDebtToken(page: Page, symbol = 'USDC'): Promise<void> {
-  await page.getByTestId('tab-accounts').first().click();
+  await openAssetsTab(page);
   const debtPanel = page.getByTestId('debt-panel').first();
   await expect(debtPanel).toBeVisible({ timeout: 20_000 });
   if (!(await debtPanel.evaluate((node) => node.hasAttribute('open')))) {
@@ -1135,6 +1179,21 @@ test.describe('debt ledger', () => {
     expect(mirrored.right.paidAmount).toBe(0n);
     expect(mirrored.right.updates).toEqual(['DebtCreated']);
     expect(mirrored.left.direction).not.toBe(mirrored.right.direction);
+
+    await Promise.all([
+      openOutstandingDebtToken(alicePage),
+      openOutstandingDebtToken(bobPage),
+    ]);
+    const [aliceDebtText, bobDebtText] = await Promise.all([
+      alicePage.getByTestId('debt-panel').first().textContent(),
+      bobPage.getByTestId('debt-panel').first().textContent(),
+    ]);
+    const aliceSummary = String(aliceDebtText || '');
+    const bobSummary = String(bobDebtText || '');
+    expect(aliceSummary).toMatch(/150(?:\.0+)?\s*USDC/i);
+    expect(bobSummary).toMatch(/150(?:\.0+)?\s*USDC/i);
+    expect(aliceSummary).toContain(mirrored.left.direction === 'out' ? 'we owe' : 'owed to us');
+    expect(bobSummary).toContain(mirrored.right.direction === 'out' ? 'we owe' : 'owed to us');
 
     await alicePage.context().close();
     await bobPage.context().close();
