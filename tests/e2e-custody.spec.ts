@@ -864,7 +864,6 @@ test.describe('E2E Custody Flow', () => {
       await timedStep('custody.reset_server', () => resetProdServer(walletPage, {
         apiBaseUrl: API_BASE_URL,
         timeoutMs: TEST_TIMEOUT_MS,
-        softPreserveHubs: false,
       }));
       await timedStep('custody.ensure_baseline', () => ensureE2EBaseline(walletPage, {
         apiBaseUrl: API_BASE_URL,

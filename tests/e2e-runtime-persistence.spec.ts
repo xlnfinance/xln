@@ -781,7 +781,6 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
       requireHubMesh: true,
       requireMarketMaker: false,
       minHubCount: 3,
-      softPreserveHubs: false,
     });
     await gotoApp(page, { appBaseUrl: APP_BASE_URL, settleMs: 600 });
   });

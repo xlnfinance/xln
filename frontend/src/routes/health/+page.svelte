@@ -38,7 +38,6 @@
     system: {
       runtime: boolean;
       p2p?: boolean;
-      database?: boolean;
       relay: boolean;
     };
     hubMesh?: {
@@ -181,9 +180,6 @@
         runtime: Boolean(rawSystem.runtime),
         relay: Boolean(rawSystem.relay),
         p2p: typeof rawSystem.p2p === 'boolean' ? rawSystem.p2p : Boolean(hubMesh?.ok),
-        database: typeof rawSystem.database === 'boolean'
-          ? rawSystem.database
-          : Boolean(rawSystem.runtime) && (bootstrapReserves?.ok ?? true) && (custody?.ok ?? true),
       },
       hubMesh,
       custody,
@@ -388,7 +384,6 @@
       <article class="metric"><div class="k">Runtime</div><div class="v" class:ok={health.system.runtime} class:bad={!health.system.runtime}>{health.system.runtime ? 'healthy' : 'down'}</div></article>
       <article class="metric"><div class="k">P2P</div><div class="v" class:ok={health.system.p2p} class:bad={!health.system.p2p}>{health.system.p2p ? 'healthy' : 'down'}</div></article>
       <article class="metric"><div class="k">Relay</div><div class="v" class:ok={health.system.relay} class:bad={!health.system.relay}>{health.system.relay ? 'healthy' : 'down'}</div></article>
-      <article class="metric"><div class="k">Database</div><div class="v" class:ok={health.system.database} class:bad={!health.system.database}>{health.system.database ? 'healthy' : 'down'}</div></article>
       <article class="metric"><div class="k">RPC</div><div class="v" class:ok={rpcOk === true} class:bad={rpcOk === false}>{rpcOk === null ? 'checking' : rpcOk ? `ok (${formatLatency(rpcLatencyMs || undefined)})` : 'down'}</div></article>
       <article class="metric"><div class="k">Uptime</div><div class="v">{formatUptime(health.uptime)}</div></article>
       <article class="metric"><div class="k">J Block</div><div class="v">#{health.jMachines?.[0]?.lastBlock ?? '-'}</div></article>

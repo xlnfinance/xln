@@ -63,8 +63,6 @@ type ResetState = {
   lastError: string | null;
   startedAt: number | null;
   completedAt: number | null;
-  requestedMarketMaker: boolean;
-  requestedCustody: boolean;
 };
 
 type HubProcessSpec = {
@@ -387,8 +385,6 @@ const resetState: ResetState = {
   lastError: null,
   startedAt: null,
   completedAt: null,
-  requestedMarketMaker: args.mmEnabled,
-  requestedCustody: args.custodyEnabled,
 };
 
 const hubChildren: HubChild[] = HUB_NAMES.map((name, index) => ({
@@ -1072,7 +1068,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       pairs: existing?.pairs ?? [],
     };
   });
-  const mmOk = !resetState.requestedMarketMaker
+  const mmOk = !args.mmEnabled
     ? true
     : mmHubs.length === HUB_NAMES.length && mmHubs.every((hub) => hub.ready);
 
@@ -1100,7 +1096,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       },
     },
     marketMaker: {
-      enabled: resetState.requestedMarketMaker,
+      enabled: args.mmEnabled,
       ok: mmOk,
       entityId: mmEntityId,
       startupPhase: marketMakerChild.lastStartupPhase,
@@ -1108,13 +1104,13 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       hubs: mmHubs,
     },
     custody: {
-      enabled: resetState.requestedCustody,
-      ok: resetState.requestedCustody
+      enabled: args.custodyEnabled,
+      ok: args.custodyEnabled
         ? Boolean(custodySupport?.identity.entityId && custodySupport?.daemonChild.proc.exitCode === null && custodySupport?.custodyChild.proc.exitCode === null)
         : true,
       entityId: custodySupport?.identity.entityId ?? null,
-      daemonPort: resetState.requestedCustody ? args.custodyDaemonPort : null,
-      servicePort: resetState.requestedCustody ? args.custodyPort : null,
+      daemonPort: args.custodyEnabled ? args.custodyDaemonPort : null,
+      servicePort: args.custodyEnabled ? args.custodyPort : null,
     },
     bootstrapReserves: {
       ok:
@@ -1339,7 +1335,7 @@ const waitForMarketMakerReady = async (): Promise<void> => {
     await pollMarketMakerHealth();
     const health = computeAggregatedHealth();
     if (
-      !resetState.requestedMarketMaker ||
+      !args.mmEnabled ||
       (health.marketMaker.ok && marketMakerChild.lastStartupPhase === 'offers-ready')
     ) {
       return;
@@ -1411,13 +1407,11 @@ const waitForShardJurisdictions = async (child: HubChild): Promise<void> => {
   throw new Error(`${child.name}_JURISDICTIONS_TIMEOUT path=${shardJurisdictionsPath}`);
 };
 
-const runReset = async (requestedMarketMaker: boolean): Promise<void> => {
+const runReset = async (): Promise<void> => {
   resetState.inProgress = true;
   resetState.lastError = null;
   resetState.startedAt = Date.now();
   resetState.completedAt = null;
-  resetState.requestedMarketMaker = requestedMarketMaker;
-  resetState.requestedCustody = args.custodyEnabled;
 
   const resetTotalStartedAt = startTiming('reset_total');
   try {
@@ -1458,7 +1452,7 @@ const runReset = async (requestedMarketMaker: boolean): Promise<void> => {
     await waitForHubBaseline();
     finishTiming('reset_wait_hubs', waitStartedAt);
 
-    if (requestedMarketMaker) {
+    if (args.mmEnabled) {
       spawnMarketMaker();
       await waitForMarketMakerReady();
     }
@@ -1490,33 +1484,17 @@ const runReset = async (requestedMarketMaker: boolean): Promise<void> => {
   }
 };
 
-const ensureReset = async (requestedMarketMaker: boolean): Promise<void> => {
+const ensureReset = async (): Promise<void> => {
   if (resetPromise) {
     await resetPromise;
-    if (resetState.requestedMarketMaker === requestedMarketMaker && !resetState.lastError) {
+    if (!resetState.lastError) {
       return;
     }
   }
-  resetPromise = runReset(requestedMarketMaker).finally(() => {
+  resetPromise = runReset().finally(() => {
     resetPromise = null;
   });
   await resetPromise;
-};
-
-const parseResetRequest = async (request: Request): Promise<boolean> => {
-  const url = new URL(request.url);
-  const mmParam = url.searchParams.get('mm');
-  if (mmParam === '1' || mmParam === 'true') return true;
-  if (mmParam === '0' || mmParam === 'false') return false;
-  if (request.method !== 'POST') return args.mmEnabled;
-  try {
-    const body = await request.clone().json() as { marketMaker?: boolean; requireMarketMaker?: boolean };
-    if (typeof body.marketMaker === 'boolean') return body.marketMaker;
-    if (typeof body.requireMarketMaker === 'boolean') return body.requireMarketMaker;
-  } catch {
-    // ignore invalid body
-  }
-  return args.mmEnabled;
 };
 
 const proxyRpc = async (request: Request): Promise<Response> => {
@@ -1896,16 +1874,12 @@ const server = Bun.serve({
       }), { headers });
     }
 
-    if (
-      (pathname === '/api/reset' || pathname === '/api/debug/reset')
-      && (request.method === 'POST' || request.method === 'GET')
-    ) {
+    if (pathname === '/api/reset' && request.method === 'POST') {
       if (!args.resetAllowed) {
         return new Response(safeStringify({ error: 'RESET_DISABLED' }), { status: 403, headers });
       }
-      const requestedMarketMaker = await parseResetRequest(request);
       try {
-        await ensureReset(requestedMarketMaker);
+        await ensureReset();
         await pollAllHubHealth();
         return new Response(safeStringify(computeAggregatedHealth()), { headers });
       } catch (error) {

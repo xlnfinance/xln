@@ -1854,10 +1854,17 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
       minSources: 3,
     });
 
+    const accountSelect = page.getByTestId('swap-account-select').first();
+    await expect(accountSelect).toBeVisible({ timeout: 20_000 });
+    await ensureSwapScope(page, 'selected');
+    await selectSwapAccount(page, accountRef.counterpartyId);
+
     const buySideButton = page.getByTestId('swap-side-buy').first();
+    const amountInput = page.getByTestId('swap-order-amount').first();
     const priceInput = page.getByTestId('swap-order-price').first();
     const placeButton = page.getByTestId('swap-submit-order').first();
     await expect(buySideButton).toBeVisible({ timeout: 20_000 });
+    await expect(amountInput).toBeVisible({ timeout: 20_000 });
     await buySideButton.click();
     await page.waitForTimeout(120);
 
@@ -1866,6 +1873,9 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     const clickedAskText = String(await asks.last().locator('.price').textContent() || '').trim();
     await asks.last().click();
 
+    const availableQuote = await readAvailableFromSizing(page);
+    expect(availableQuote, 'buy-side available quote must be positive').toBeGreaterThan(0);
+    await amountInput.fill(formatDecimalForInput(Math.min(availableQuote, 25)));
     await expect(page.getByTestId('swap-size-hint').first()).toBeVisible({ timeout: 10_000 });
     const editedPrice = shiftDisplayedPrice(clickedAskText, -0.0001);
     await priceInput.fill(editedPrice);

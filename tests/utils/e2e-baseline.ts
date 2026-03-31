@@ -98,7 +98,6 @@ export type E2EBaselineOptions = {
 export type E2EResetOptions = E2EBaselineOptions & {
   resetBaseUrl?: string;
   retries?: number;
-  softPreserveHubs?: boolean;
 };
 
 const DEFAULT_TIMEOUT_MS = 180_000;
@@ -320,7 +319,6 @@ export const ensureE2EBaseline = async (
       requireMarketMaker: resolved.requireMarketMaker,
       minHubCount: resolved.minHubCount,
       autoResetGraceMs: resolved.timeoutMs,
-      softPreserveHubs: false,
     });
   }
 
@@ -340,7 +338,6 @@ export const ensureE2EBaseline = async (
       requireMarketMaker: resolved.requireMarketMaker,
       minHubCount: resolved.minHubCount,
       autoResetGraceMs: remainingTimeoutMs,
-      softPreserveHubs: false,
     });
   }
 };
@@ -351,8 +348,6 @@ export const resetProdServer = async (
 ): Promise<E2EHealthResponse> => {
   const resetBaseUrl = options.resetBaseUrl ?? RESET_BASE_URL;
   const retries = options.retries ?? 30;
-  const softPreserveHubs = options.softPreserveHubs ?? false;
-
   await waitForApiReachable(page, options.timeoutMs ?? DEFAULT_TIMEOUT_MS, options.apiBaseUrl ?? API_BASE_URL);
 
   let resetDone = false;
@@ -363,7 +358,7 @@ export const resetProdServer = async (
       const resetBody = {
         requireMarketMaker: options.requireMarketMaker ?? false,
       };
-      const coldResponse = await page.request.post(`${resetBaseUrl}/api/reset?rpc=1&db=1&sync=1`, {
+      const coldResponse = await page.request.post(`${resetBaseUrl}/api/reset`, {
         data: resetBody,
         headers: { 'Content-Type': 'application/json' },
       });
@@ -373,22 +368,7 @@ export const resetProdServer = async (
       }
 
       const coldBody = await readText(coldResponse);
-      const softResponse = await page.request.post(`${resetBaseUrl}/api/debug/reset`, {
-        data: {
-          preserveHubs: softPreserveHubs,
-          requireMarketMaker: options.requireMarketMaker ?? false,
-        },
-        headers: { 'Content-Type': 'application/json' },
-      });
-      if (softResponse.ok()) {
-        resetDone = true;
-        break;
-      }
-
-      const softBody = await readText(softResponse);
-      lastError =
-        `cold(status=${coldResponse.status()} body=${coldBody.slice(0, 180)}) ` +
-        `soft(status=${softResponse.status()} body=${softBody.slice(0, 180)})`;
+      lastError = `reset(status=${coldResponse.status()} body=${coldBody.slice(0, 180)})`;
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }

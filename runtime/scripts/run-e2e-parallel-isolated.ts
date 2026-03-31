@@ -176,6 +176,10 @@ const parseStepTimings = (path: string): StepTiming[] => {
 
 const expandPlaywrightTargets = (pwFiles: string[]): Array<{ target: string; requireMarketMaker: boolean }> => {
   const out: Array<{ target: string; requireMarketMaker: boolean }> = [];
+  const requiresMarketMaker = (file: string): boolean => !/e2e-swap-isolated\.spec\.ts$/.test(file);
+  const unsplittableSpecs = new Set<string>([
+    'tests/e2e-active-tab-lock.spec.ts',
+  ]);
   const updateBraceDepth = (line: string, depth: number): number => {
     let next = depth;
     let inSingle = false;
@@ -217,6 +221,14 @@ const expandPlaywrightTargets = (pwFiles: string[]): Array<{ target: string; req
   };
 
   for (const file of pwFiles) {
+    if (unsplittableSpecs.has(file)) {
+      out.push({
+        target: file,
+        requireMarketMaker: requiresMarketMaker(file),
+      });
+      continue;
+    }
+
     const absolute = resolve(process.cwd(), file);
     const text = readFileSync(absolute, 'utf8');
     const lines = text.split('\n');
@@ -229,7 +241,7 @@ const expandPlaywrightTargets = (pwFiles: string[]): Array<{ target: string; req
       if (matchesTopLevelTest) {
         out.push({
           target: `${file}:${i + 1}`,
-          requireMarketMaker: !/e2e-swap-isolated\.spec\.ts$/.test(file),
+          requireMarketMaker: requiresMarketMaker(file),
         });
         added += 1;
       }
@@ -238,7 +250,7 @@ const expandPlaywrightTargets = (pwFiles: string[]): Array<{ target: string; req
     if (added === 0) {
       out.push({
         target: file,
-        requireMarketMaker: !/e2e-swap-isolated\.spec\.ts$/.test(file),
+        requireMarketMaker: requiresMarketMaker(file),
       });
     }
   }
@@ -483,12 +495,11 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
   const startedAt = Date.now();
   const logPath = join(logsDir, `e2e-shard-${String(shard).padStart(2, '0')}.log`);
   const log = createWriteStream(logPath, { flags: 'w' });
-
+ 
   let anvil: ChildProcessWithoutNullStreams | null = null;
   let api: ChildProcessWithoutNullStreams | null = null;
   let vite: ChildProcessWithoutNullStreams | null = null;
   let teardownReason: string | null = null;
-
   const rpcPort = args.basePort + shard * 20 + 0;
   const apiPort = args.basePort + shard * 20 + 2;
   const webPort = args.basePort + shard * 20 + 4;
@@ -498,6 +509,7 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
   const dbPath = join(logsDir, `db-e2e-shard-${shard}`);
   const anvilStatePath = join(dbPath, 'anvil-state.json');
   mkdirSync(dbPath, { recursive: true });
+
   const phaseMs: RunResult['phaseMs'] = {
     preflight: 0,
     anvilBoot: 0,
@@ -738,7 +750,12 @@ async function main(): Promise<void> {
 
   const startedAt = Date.now();
   const sourceFiles = args.pwFiles.length > 0 ? args.pwFiles : listPlaywrightSpecFiles();
-  const expandedTargets = expandPlaywrightTargets(sourceFiles);
+  const expandedTargets = args.pwGrep
+    ? sourceFiles.map((file) => ({
+        target: file,
+        requireMarketMaker: !/e2e-swap-isolated\.spec\.ts$/.test(file),
+      }))
+    : expandPlaywrightTargets(sourceFiles);
   const tasks: RunTask[] = expandedTargets.map((entry, index, entries) => ({
     shard: index,
     totalShards: entries.length,

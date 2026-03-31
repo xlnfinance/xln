@@ -36,6 +36,7 @@ export async function openAccountWorkspaceTab(page: Page, tabId: AccountWorkspac
   const targetTab = page.locator(`[data-testid="account-workspace-tab-${tabId}"]:visible`).first();
   const backButton = page.locator('[data-testid="account-panel-back"]:visible').first();
   const accountsTab = page.locator('[data-testid="tab-accounts"]:visible').first();
+  const mobileToggle = page.getByTestId('account-workspace-mobile-toggle').first();
 
   const focusedAccountVisible = await backButton.waitFor({ state: 'visible', timeout: 1_000 })
     .then(() => true)
@@ -47,6 +48,10 @@ export async function openAccountWorkspaceTab(page: Page, tabId: AccountWorkspac
 
   await expect(accountsTab).toBeVisible({ timeout: 20_000 });
   await accountsTab.click();
+  const tabVisible = await targetTab.isVisible({ timeout: 1_000 }).catch(() => false);
+  if (!tabVisible && await mobileToggle.isVisible().catch(() => false)) {
+    await mobileToggle.click();
+  }
   await expect(targetTab).toBeVisible({ timeout: 20_000 });
   await targetTab.click();
 }
