@@ -169,6 +169,15 @@
   let limitPriceTicks: bigint | null = null;
   let orderListTab: 'open' | 'closed' = 'open';
   let closedOrderStatusFilter: 'all' | ClosedOrderStatus = 'all';
+  let wantTokenPresentInAccount = false;
+  let availableGiveCapacity = 0n;
+  let availableWantInCapacity = 0n;
+  let autoInboundCreditTarget: bigint | null = null;
+  let currentPeerCreditLimit = 0n;
+  let formattedAvailableGive = '0';
+  let formattedAvailableWantIn = '0';
+  let autoInboundCreditIncrease = 0n;
+  let canAutoPrepareInboundCapacity = false;
   const MIN_ORDER_NOTIONAL_USD = 10;
   const FILLED_DISPLAY_PPM_THRESHOLD = 999_950n;
 
