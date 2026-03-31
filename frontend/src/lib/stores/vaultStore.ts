@@ -119,6 +119,7 @@ let initialized = false;
 let resumeListenerRegistered = false;
 let resumeRefreshPromise: Promise<boolean> | null = null;
 let runtimeSyncChannel: BroadcastChannel | null = null;
+let runtimeResumeTrigger: (() => void) | null = null;
 const runtimeEnvChangeUnsubscribers = new Map<string, () => void>();
 
 type FrameLogEntry = Env['frameLogs'][number];
@@ -129,7 +130,7 @@ type HealthPayload = {
   system?: { runtime?: boolean } | null;
   jMachines?: HealthMachine[];
 };
-type JurisdictionsPayload = { jurisdictions: Record<string, JurisdictionConfig> };
+type JurisdictionsPayload = { version?: string; jurisdictions: Record<string, JurisdictionConfig> };
 type FaucetResult = { success?: boolean; txHash?: string; error?: string };
 type RuntimeP2PHandle = {
   isConnected?: () => boolean;
@@ -456,6 +457,7 @@ const fetchJurisdictions = async (baseOrigin?: string): Promise<JurisdictionsPay
       console.log('[VaultStore] jurisdictions fetched:', JSON.stringify({
         url,
         finalUrl: resp.url,
+        version: payload.version ?? null,
         arrakis: payload?.jurisdictions?.arrakis?.contracts ?? null,
       }));
       return payload;
@@ -996,6 +998,7 @@ function registerRuntimeResumeListener(): void {
       console.warn('[VaultStore] Resume refresh failed:', error);
     });
   };
+  runtimeResumeTrigger = triggerRefresh;
   document.addEventListener('visibilitychange', triggerRefresh);
   window.addEventListener('focus', triggerRefresh);
   if (typeof BroadcastChannel !== 'undefined') {
@@ -1016,9 +1019,23 @@ function registerRuntimeResumeListener(): void {
   resumeListenerRegistered = true;
 }
 
+export function shutdownRuntimeResumeListener(): void {
+  if (typeof window !== 'undefined' && runtimeResumeTrigger) {
+    window.removeEventListener('focus', runtimeResumeTrigger);
+  }
+  if (typeof document !== 'undefined' && runtimeResumeTrigger) {
+    document.removeEventListener('visibilitychange', runtimeResumeTrigger);
+  }
+  runtimeResumeTrigger = null;
+  runtimeSyncChannel?.close();
+  runtimeSyncChannel = null;
+  resumeListenerRegistered = false;
+}
+
   // Runtime operations
 export const vaultOperations = {
   async suspendAllRuntimeActivity(): Promise<void> {
+    shutdownRuntimeResumeListener();
     const entries = Array.from(get(runtimes).entries());
     await Promise.all(entries.map(async ([runtimeId, entry]) => {
       unregisterRuntimeEnvChange(runtimeId);

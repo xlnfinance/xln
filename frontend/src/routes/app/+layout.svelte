@@ -34,6 +34,10 @@
   const pageSearch = $derived(browser ? $page.url.search : '');
   const DEPLOY_VERSION_KEY = 'xln-deploy-version';
 
+  type DeployVersionPayload = {
+    version: string;
+  };
+
   type HashRouteState = {
     route: string;
     params: URLSearchParams;
@@ -93,10 +97,6 @@
     currentHash = readCurrentHash();
   }
 
-  function currentDeployVersion(): string {
-    return typeof __BUILD_NUMBER__ === 'string' ? __BUILD_NUMBER__.trim() : '';
-  }
-
   function readStoredDeployVersion(): string {
     if (!browser) return '';
     return String(localStorage.getItem(DEPLOY_VERSION_KEY) || '').trim();
@@ -107,15 +107,51 @@
     localStorage.setItem(DEPLOY_VERSION_KEY, version);
   }
 
+  function parseDeployVersionPayload(payload: unknown): DeployVersionPayload {
+    if (!payload || typeof payload !== 'object') {
+      throw new Error('INVALID_DEPLOY_VERSION_PAYLOAD');
+    }
+
+    const root = payload as Record<string, unknown>;
+    const version = String(root.version || '').trim();
+    if (!version) {
+      throw new Error('MISSING_DEPLOY_VERSION');
+    }
+
+    return { version };
+  }
+
+  async function fetchCurrentDeployVersion(): Promise<string> {
+    const response = await fetch(`/api/jurisdictions?ts=${Date.now()}`, {
+      cache: 'no-store',
+      headers: {
+        'cache-control': 'no-cache, no-store, must-revalidate',
+        pragma: 'no-cache',
+      },
+    });
+    if (!response.ok) {
+      throw new Error(`DEPLOY_VERSION_FETCH_FAILED:${response.status}`);
+    }
+    const payload = parseDeployVersionPayload(await response.json());
+    return payload.version;
+  }
+
   async function ensureCurrentDeployVersion(): Promise<boolean> {
-    const currentVersion = currentDeployVersion();
-    if (!currentVersion) return false;
+    let currentVersion = '';
+    try {
+      currentVersion = await fetchCurrentDeployVersion();
+    } catch (error) {
+      console.warn('[deploy-version] failed to fetch deploy version:', error);
+      return false;
+    }
+
     const storedVersion = readStoredDeployVersion();
     if (!storedVersion) {
       persistDeployVersion(currentVersion);
       return false;
     }
     if (storedVersion === currentVersion) return false;
+
     await resetEverything(`deploy-version-mismatch:${storedVersion}->${currentVersion}`);
     return true;
   }
@@ -198,11 +234,19 @@
         isLoading.set(false);
         error.set(null);
         embedBootReady = true;
-        persistDeployVersion(currentDeployVersion());
+        try {
+          persistDeployVersion(await fetchCurrentDeployVersion());
+        } catch (error) {
+          console.warn('[deploy-version] failed to persist deploy version:', error);
+        }
         return;
       }
       await bootApp();
-      persistDeployVersion(currentDeployVersion());
+      try {
+        persistDeployVersion(await fetchCurrentDeployVersion());
+      } catch (error) {
+        console.warn('[deploy-version] failed to persist deploy version:', error);
+      }
     })().catch((err) => {
       if (disposed) return;
       console.error('Failed to initialize active tab lock:', err);
