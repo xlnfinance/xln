@@ -3,12 +3,16 @@ services:
     image: redis:alpine
     restart: always
     command: redis-server
+    logging:
+      driver: "none"
     volumes:
       - redis_data:/data
 
   db-init:
     image: postgres:17
     user: root
+    logging:
+      driver: "none"
     volumes:
       - db_data:/var/lib/postgresql/data
     entrypoint:
@@ -22,6 +26,8 @@ services:
     user: "2000:2000"
     shm_size: 256m
     restart: always
+    logging:
+      driver: "none"
     depends_on:
       db-init:
         condition: service_completed_successfully
@@ -86,6 +92,8 @@ services:
     pull_policy: always
     platform: linux/amd64
     restart: always
+    logging:
+      driver: "none"
     depends_on:
       backend:
         condition: service_started
@@ -111,6 +119,8 @@ services:
   proxy:
     image: nginx:alpine
     restart: always
+    logging:
+      driver: "none"
     depends_on:
       backend:
         condition: service_started

@@ -431,10 +431,10 @@ EOF
     if ! pm2 module:list 2>/dev/null | grep -q 'pm2-logrotate'; then
       pm2 install pm2-logrotate || true
     fi
-    pm2 set pm2-logrotate:max_size 20M >/dev/null || true
-    pm2 set pm2-logrotate:retain 2 >/dev/null || true
-    pm2 set pm2-logrotate:compress true >/dev/null || true
-    pm2 set pm2-logrotate:workerInterval 1800 >/dev/null || true
+    pm2 set pm2-logrotate:max_size 5M >/dev/null || true
+    pm2 set pm2-logrotate:retain 1 >/dev/null || true
+    pm2 set pm2-logrotate:compress false >/dev/null || true
+    pm2 set pm2-logrotate:workerInterval 900 >/dev/null || true
     pm2 set pm2-logrotate:rotateInterval '0 0 * * *' >/dev/null || true
     pm2 set pm2-logrotate:rotateModule true >/dev/null || true
   fi
@@ -442,8 +442,8 @@ EOF
   install -d /etc/cron.hourly
   cat > /etc/cron.hourly/xln-log-hygiene <<'EOF'
 #!/bin/sh
-find /root/.pm2/logs -type f -name '*.log' -size +20M -exec truncate -s 0 {} \; 2>/dev/null || true
-find /root/xln/logs -type f -name '*.log' -size +20M -exec truncate -s 0 {} \; 2>/dev/null || true
+find /root/.pm2/logs -type f -name '*.log' -size +5M -exec truncate -s 0 {} \; 2>/dev/null || true
+find /root/xln/logs -type f -name '*.log' -size +5M -exec truncate -s 0 {} \; 2>/dev/null || true
 find /root/.pm2/logs -type f -mtime +1 -delete 2>/dev/null || true
 find /root/xln/logs -type f -mtime +1 -delete 2>/dev/null || true
 find /root/xln/.logs -mindepth 1 -mtime +1 -exec rm -rf {} + 2>/dev/null || true
@@ -480,11 +480,11 @@ EOF
   cat > /etc/logrotate.d/xln-runtime-logs <<'EOF'
 /root/xln/logs/*.log {
   daily
-  rotate 2
-  compress
+  rotate 1
   missingok
   notifempty
   copytruncate
+  maxsize 5M
 }
 EOF
 
