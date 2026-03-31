@@ -2,6 +2,7 @@ let activeResetPromise: Promise<void> | null = null;
 const INDEXED_DB_DELETE_TIMEOUT_MS = 2_500;
 const INDEXED_DB_DELETE_RETRY_COUNT = 4;
 const INDEXED_DB_DELETE_RETRY_DELAY_MS = 150;
+const DEFAULT_RESET_RETURN_TO = '/app';
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -268,13 +269,19 @@ async function runResetStep(
   }
 }
 
-function navigateAfterReset(): void {
+function navigateAfterReset(returnTo = DEFAULT_RESET_RETURN_TO): void {
   try {
     window.onbeforeunload = null;
   } catch {
     // ignore
   }
-  window.location.reload();
+  window.location.replace(returnTo);
+}
+
+function navigateToResetPage(returnTo = DEFAULT_RESET_RETURN_TO): void {
+  const url = new URL('/resetdb', window.location.origin);
+  url.searchParams.set('returnTo', returnTo);
+  window.location.replace(url.toString());
 }
 
 export async function clearAllPersistentClientState(): Promise<void> {
@@ -306,16 +313,28 @@ export async function resetEverything(_trigger?: unknown): Promise<void> {
   if (activeResetPromise) return activeResetPromise;
 
   activeResetPromise = (async () => {
+    if (window.location.pathname !== '/resetdb') {
+      try {
+        await stopRuntimeBeforeReset();
+        await sleep(100);
+      } catch (error) {
+        console.error('[RESET] pre-navigation cleanup failed:', error);
+      }
+      navigateToResetPage();
+      return new Promise<void>(() => {});
+    }
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const returnTo = String(searchParams.get('returnTo') || DEFAULT_RESET_RETURN_TO).trim() || DEFAULT_RESET_RETURN_TO;
     try {
-      await stopRuntimeBeforeReset();
-      await sleep(100);
       await clearAllPersistentClientState();
     } catch (error) {
       console.error('[RESET] cleanup failed:', error);
-    } finally {
       activeResetPromise = null;
-      navigateAfterReset();
+      throw error;
     }
+    activeResetPromise = null;
+    navigateAfterReset(returnTo);
   })();
 
   return activeResetPromise;
