@@ -929,20 +929,29 @@ const run = async (): Promise<void> => {
     }
   };
 
-  const waitForBootstrapOffers = async (): Promise<void> => {
+  const markOffersReady = (): void => {
+    if (startupPhase === 'offers-ready') return;
+    startupPhase = 'offers-ready';
+    console.log(
+      `[MESH-MM] OFFERS_READY entityId=${mmEntityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
+    );
+  };
+
+  const waitForBootstrapOffers = async (): Promise<boolean> => {
     const deadline = Date.now() + MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS;
     while (!shuttingDown && Date.now() < deadline) {
       await driveQuotes();
       const visibleHubs = readVisibleHubProfiles(env);
       const health = getMarketMakerHealth(env, mmEntityId, visibleHubs.map(profile => profile.entityId), tokenIds);
-      if (health.ok) return;
+      if (health.ok) return true;
       await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
     }
     const visibleHubs = readVisibleHubProfiles(env);
     const health = getMarketMakerHealth(env, mmEntityId, visibleHubs.map(profile => profile.entityId), tokenIds);
-    throw new Error(
+    console.warn(
       `[MESH-MM] BOOTSTRAP_TIMEOUT visibleHubs=${visibleHubs.length} offers=${safeStringify(health.hubs.map(hub => ({ hubEntityId: hub.hubEntityId, offers: hub.offers })))}`,
     );
+    return false;
   };
 
   let loop: ReturnType<typeof setInterval> | null = null;
@@ -952,14 +961,23 @@ const run = async (): Promise<void> => {
   );
 
   startupPhase = 'bootstrap-offers';
-  await waitForBootstrapOffers();
-  startupPhase = 'offers-ready';
-  console.log(
-    `[MESH-MM] OFFERS_READY entityId=${mmEntityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
-  );
+  if (await waitForBootstrapOffers()) {
+    markOffersReady();
+  } else {
+    startupPhase = 'bootstrap-degraded';
+  }
   loop = setInterval(() => {
     if (shuttingDown) return;
-    void driveQuotes().catch(error => {
+    void (async () => {
+      await driveQuotes();
+      if (startupPhase !== 'offers-ready') {
+        const visibleHubs = readVisibleHubProfiles(env);
+        const health = getMarketMakerHealth(env, mmEntityId, visibleHubs.map(profile => profile.entityId), tokenIds);
+        if (health.ok) {
+          markOffersReady();
+        }
+      }
+    })().catch(error => {
       if (shuttingDown) return;
       console.error(`[MM] quote loop failed:`, (error as Error).message);
     });

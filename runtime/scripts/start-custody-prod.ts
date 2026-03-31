@@ -151,8 +151,7 @@ const waitForMainStackReady = async (): Promise<string[]> => {
       const runtimeOk = payload.system?.runtime === true;
       const relayOk = payload.system?.relay === true;
       const meshOk = payload.hubMesh?.ok === true;
-      const mmOk = payload.marketMaker?.ok === true;
-      if (runtimeOk && relayOk && meshOk && mmOk && hubIds.length >= 3) {
+      if (runtimeOk && relayOk && meshOk && hubIds.length >= 3) {
         return hubIds.slice(0, 3);
       }
     } catch {
@@ -160,7 +159,7 @@ const waitForMainStackReady = async (): Promise<string[]> => {
     }
     await sleep(500);
   }
-  throw new Error('MAIN_STACK_NOT_READY: expected runtime+relay+3 hubs+MM on main API');
+  throw new Error('MAIN_STACK_NOT_READY: expected runtime+relay+3 hubs on main API');
 };
 
 const ensureExistingCustodyState = async (

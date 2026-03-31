@@ -2092,7 +2092,17 @@ const readCanonicalJurisdictionsJson = async (): Promise<string> => {
   return await fs.readFile(resolveJurisdictionsJsonPath(), 'utf8');
 };
 
-const buildRuntimeJurisdictionsJson = (env?: Env | null): string | null => {
+const readCanonicalJurisdictionsVersion = async (): Promise<string> => {
+  const raw = await readCanonicalJurisdictionsJson();
+  const parsed = JSON.parse(raw) as { version?: unknown };
+  const version = String(parsed.version || '').trim();
+  if (!version) {
+    throw new Error('MISSING_JURISDICTIONS_VERSION');
+  }
+  return version;
+};
+
+const buildRuntimeJurisdictionsJson = async (env?: Env | null): Promise<string | null> => {
   if (!env?.jReplicas || env.jReplicas.size === 0) return null;
   const jurisdictionName = env.activeJurisdiction ?? env.jReplicas.keys().next().value;
   if (typeof jurisdictionName !== 'string' || !jurisdictionName) return null;
@@ -2128,8 +2138,9 @@ const buildRuntimeJurisdictionsJson = (env?: Env | null): string | null => {
     String(addresses.entityProvider || replica.entityProviderAddress || replica.contracts?.entityProvider || '').trim();
   if (!depository || !entityProvider) return null;
 
+  const version = await readCanonicalJurisdictionsVersion();
   const payload = {
-    version: '1.0.0',
+    version,
     lastUpdated: new Date().toISOString(),
     jurisdictions: {
       arrakis: {
@@ -3446,7 +3457,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
   if (pathname === '/api/jurisdictions') {
     try {
-      const payload = buildRuntimeJurisdictionsJson(env) ?? await readCanonicalJurisdictionsJson();
+      const payload = await buildRuntimeJurisdictionsJson(env) ?? await readCanonicalJurisdictionsJson();
       return new Response(payload, {
         headers: {
           ...headers,

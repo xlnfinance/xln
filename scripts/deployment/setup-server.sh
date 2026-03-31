@@ -186,7 +186,8 @@ server {
     
     location = /app {
         root /home/ubuntu/xln/frontend/build;
-        rewrite ^ /index.html break;
+        try_files /index.html =404;
+        default_type text/html;
         add_header Content-Security-Policy "frame-ancestors 'self' https://xln.finance https://app.xln.finance https://custody.xln.finance https://localhost:* http://localhost:*" always;
     }
 

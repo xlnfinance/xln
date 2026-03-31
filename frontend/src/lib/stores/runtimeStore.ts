@@ -146,6 +146,16 @@ export const runtimeOperations = {
     }
   },
 
+  resetAll() {
+    runtimes.update((currentRuntimes) => {
+      for (const runtime of currentRuntimes.values()) {
+        runtime.connection?.close();
+      }
+      return new Map();
+    });
+    activeRuntimeId.set('');
+  },
+
   // Update active runtime env (legacy name kept for compatibility).
   updateLocalEnv(env: Env) {
     runtimes.update(r => {

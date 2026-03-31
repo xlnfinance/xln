@@ -1,4 +1,7 @@
 let activeResetPromise: Promise<void> | null = null;
+const INDEXED_DB_DELETE_TIMEOUT_MS = 2_500;
+const INDEXED_DB_DELETE_RETRY_COUNT = 4;
+const INDEXED_DB_DELETE_RETRY_DELAY_MS = 150;
 
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -90,10 +93,28 @@ async function listIndexedDbNames(): Promise<string[]> {
 
 async function deleteIndexedDb(name: string): Promise<'success' | 'error' | 'blocked'> {
   return new Promise((resolve) => {
-    const request = indexedDB.deleteDatabase(name);
-    request.onsuccess = () => resolve('success');
-    request.onerror = () => resolve('error');
-    request.onblocked = () => resolve('blocked');
+    const factory = getIndexedDbFactory();
+    if (!factory) {
+      resolve('error');
+      return;
+    }
+
+    let blocked = false;
+    let settled = false;
+    const finish = (status: 'success' | 'error' | 'blocked'): void => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timeoutId);
+      resolve(status);
+    };
+
+    const request = factory.deleteDatabase(name);
+    const timeoutId = window.setTimeout(() => finish(blocked ? 'blocked' : 'error'), INDEXED_DB_DELETE_TIMEOUT_MS);
+    request.onsuccess = () => finish('success');
+    request.onerror = () => finish('error');
+    request.onblocked = () => {
+      blocked = true;
+    };
   });
 }
 
@@ -108,12 +129,31 @@ async function clearAllIndexedDB(): Promise<void> {
   if (dbNames.length === 0) return;
 
   console.log('[RESET] deleting IndexedDB databases:', dbNames);
-  const statuses = await Promise.all(dbNames.map((name) => deleteIndexedDb(name)));
-  const blocked = dbNames.filter((_, index) => statuses[index] === 'blocked');
-  const failed = dbNames.filter((_, index) => statuses[index] === 'error');
+  let remaining = dbNames;
+  const blockedNames = new Set<string>();
+  const failedNames = new Set<string>();
 
-  if (blocked.length > 0 || failed.length > 0) {
-    console.warn('[RESET] IndexedDB deletion incomplete', { blocked, failed });
+  for (let attempt = 0; attempt < INDEXED_DB_DELETE_RETRY_COUNT && remaining.length > 0; attempt += 1) {
+    const statuses = await Promise.all(remaining.map((name) => deleteIndexedDb(name)));
+    blockedNames.clear();
+    failedNames.clear();
+
+    for (let index = 0; index < remaining.length; index += 1) {
+      const name = remaining[index];
+      const status = statuses[index];
+      if (status === 'blocked') blockedNames.add(name);
+      if (status === 'error') failedNames.add(name);
+    }
+
+    await sleep(INDEXED_DB_DELETE_RETRY_DELAY_MS * (attempt + 1));
+    const existingNames = new Set(await listIndexedDbNames());
+    remaining = remaining.filter((name) => existingNames.has(name));
+  }
+
+  if (remaining.length > 0) {
+    throw new Error(
+      `IndexedDB deletion incomplete: remaining=${remaining.join(', ')} blocked=${Array.from(blockedNames).join(', ')} failed=${Array.from(failedNames).join(', ')}`,
+    );
   }
 }
 
@@ -164,6 +204,14 @@ async function collectRuntimeEnvs(): Promise<unknown[]> {
 }
 
 async function stopRuntimeBeforeReset(): Promise<void> {
+  try {
+    const vaultStore = await import('../stores/vaultStore');
+    await vaultStore.vaultOperations.suspendAllRuntimeActivity?.();
+    vaultStore.shutdownRuntimeResumeListener?.();
+  } catch {
+    // best effort
+  }
+
   const xln = (window as any).__xln_instance;
   const envs = await collectRuntimeEnvs();
 
@@ -196,6 +244,13 @@ async function stopRuntimeBeforeReset(): Promise<void> {
   try {
     (window as any).__xln_env = null;
     (window as any).__xln_instance = null;
+  } catch {
+    // best effort
+  }
+
+  try {
+    const runtimeStore = await import('../stores/runtimeStore');
+    runtimeStore.runtimeOperations.resetAll?.();
   } catch {
     // best effort
   }

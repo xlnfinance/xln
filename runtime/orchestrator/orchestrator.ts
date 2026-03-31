@@ -1452,11 +1452,6 @@ const runReset = async (): Promise<void> => {
     await waitForHubBaseline();
     finishTiming('reset_wait_hubs', waitStartedAt);
 
-    if (args.mmEnabled) {
-      spawnMarketMaker();
-      await waitForMarketMakerReady();
-    }
-
     if (args.custodyEnabled) {
       custodySupport = await startCustodySupport({
         apiBaseUrl: `http://${args.host}:${args.port}`,
@@ -1471,6 +1466,11 @@ const runReset = async (): Promise<void> => {
         profileName: 'Custody',
         jurisdictionId: 'arrakis',
       });
+    }
+
+    if (args.mmEnabled) {
+      spawnMarketMaker();
+      await waitForMarketMakerReady();
     }
 
     finishTiming('reset_total', resetTotalStartedAt);

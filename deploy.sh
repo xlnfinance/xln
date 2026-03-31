@@ -110,6 +110,21 @@ wait_for_http_status() {
   return 1
 }
 
+wait_for_http_content_type() {
+  local url="$1"
+  local expected_substring="$2"
+  local deadline="$3"
+  while [ "$SECONDS" -lt "$deadline" ]; do
+    local headers
+    headers="$(curl -ksSI "$url" || true)"
+    if printf '%s' "$headers" | grep -iq "^content-type: .*${expected_substring}"; then
+      return 0
+    fi
+    sleep 1
+  done
+  return 1
+}
+
 wait_for_public_ws() {
   local ws_url="$1"
   local deadline="$2"
@@ -165,7 +180,8 @@ wait_for_public_production_stack() {
     || return 1
 
   wait_for_http_status "https://xln.finance/" "200" "$deadline" || return 1
-  wait_for_http_status "https://xln.finance/app" "200" "$deadline"
+  wait_for_http_status "https://xln.finance/app" "200" "$deadline" || return 1
+  wait_for_http_content_type "https://xln.finance/app" "text/html" "$deadline"
 }
 
 wait_for_http_json_field() {
@@ -215,9 +231,45 @@ wait_for_custody() {
     || return 1
 
   wait_for_http_json_field_insecure \
-    "https://127.0.0.1:8087/api/me" \
+    "http://127.0.0.1:8087/api/me" \
     "return typeof payload?.custody?.entityId === 'string' && payload.custody.entityId.length > 0;" \
     "$deadline"
+}
+
+ensure_production_nginx_site_consistency() {
+  local available="/etc/nginx/sites-available/xln"
+  local enabled="/etc/nginx/sites-enabled/xln"
+
+  [ -f "$available" ] || {
+    echo "[deploy] missing nginx site: $available" >&2
+    return 1
+  }
+
+  rm -f "$enabled"
+  ln -s "$available" "$enabled"
+
+  if grep -q 'proxy_pass https://127.0.0.1:8087;' "$available"; then
+    echo "[deploy] invalid custody upstream scheme in nginx config: expected http://127.0.0.1:8087" >&2
+    return 1
+  fi
+
+  if ! grep -q 'proxy_pass http://127.0.0.1:8087;' "$available"; then
+    echo "[deploy] custody upstream missing from nginx config" >&2
+    return 1
+  fi
+
+  if grep -q 'return 301 https://$server_name$request_uri;' "$available"; then
+    echo "[deploy] invalid HTTP redirect target in nginx config: expected \$host, found \$server_name" >&2
+    return 1
+  fi
+
+  if ! grep -q 'return 301 https://$host$request_uri;' "$available"; then
+    echo "[deploy] HTTP redirect host rule missing from nginx config" >&2
+    return 1
+  fi
+
+  nginx -t
+  systemctl reload nginx
 }
 
 pretty_print_json() {
@@ -308,7 +360,7 @@ dump_production_debug_snapshot() {
   debug_dump_http_json "local main health" "http://127.0.0.1:8080/api/health"
   debug_dump_http_json "local main info" "http://127.0.0.1:8080/api/info"
   debug_dump_http_json "local custody daemon health" "http://127.0.0.1:8088/api/health"
-  debug_dump_http_json "local custody me" "https://127.0.0.1:8087/api/me"
+  debug_dump_http_json "local custody me" "http://127.0.0.1:8087/api/me"
   debug_dump_http_json "public health" "https://xln.finance/api/health"
   debug_dump_http_head "public root" "https://xln.finance/"
   debug_dump_http_head "public app" "https://xln.finance/app"
@@ -536,6 +588,7 @@ run_local_deploy() {
     if [ "$PRODUCTION" = "1" ]; then
       run_or_fail_deploy "failed to enforce production host hygiene" ensure_production_host_hygiene
       run_or_fail_deploy "failed to configure production direct hub ports" ensure_production_direct_hub_ports
+      run_or_fail_deploy "failed to enforce nginx site consistency" ensure_production_nginx_site_consistency
       echo "[deploy] resetting production anvil + runtime state"
       mkdir -p db/runtime db/custody data logs
       rm -rf db/runtime/prod-main db/runtime/prod-mesh db/custody/prod db-tmp/prod-custody
