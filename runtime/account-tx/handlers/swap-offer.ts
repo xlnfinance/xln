@@ -17,6 +17,7 @@ import { formatEntityId } from '../../utils';
 import { canonicalAccountKey } from '../../state-helpers';
 import { deriveSide, SWAP_LOT_SCALE, ORDERBOOK_PRICE_SCALE, prepareSwapOrder } from '../../orderbook';
 import { FINANCIAL, LIMITS } from '../../constants';
+import { recordSwapOfferLifecycle } from './swap-history';
 
 export async function handleSwapOffer(
   accountMachine: AccountMachine,
@@ -201,6 +202,7 @@ export async function handleSwapOffer(
 
   // 9. Store offer (proofBody includes swapOffers, so keep validation+commit aligned)
   accountMachine.swapOffers.set(offerId, offer);
+  recordSwapOfferLifecycle(accountMachine, offer);
   if (isValidation) {
     console.log(`📊 VALIDATION: Swap offer stored (for dispute proof)`);
   } else {

@@ -1,6 +1,9 @@
 import type { EntityInput, EntityState, EntityTx, Env, HashType, JInput, JTx } from '../../types';
+import { requireUsableContractAddress } from '../../contract-address';
 import { addMessage, cloneEntityState } from '../../state-helpers';
-import { batchOpCount, cloneJBatch } from '../../j-batch';
+import { batchOpCount, cloneJBatch, computeBatchHankoHash, encodeJBatch, isBatchEmpty } from '../../j-batch';
+import { resolveRuntimeJurisdictionConfig } from '../../jurisdiction-runtime';
+import { filterActiveDisputeFinalizations } from '../dispute-finalize-guards';
 import type { ApplyEntityTxResult } from '../apply';
 
 const MIN_GAS_BUMP_BPS = 0;
@@ -40,18 +43,43 @@ export async function handleJRebroadcast(
   }
 
   const gasBumpBps = normalizeGasBumpBps(entityTx.data.gasBumpBps);
-  const jurisdictionName =
-    entityState.config.jurisdiction?.name || env.activeJurisdiction || 'default';
+  const jurisdiction = resolveRuntimeJurisdictionConfig(env, newState.config.jurisdiction);
+  if (!jurisdiction) {
+    const msg = '❌ No jurisdiction configured for j_rebroadcast';
+    addMessage(newState, msg);
+    return { newState, outputs, jOutputs };
+  }
+  const depositoryAddress = requireUsableContractAddress('depository', jurisdiction.depositoryAddress);
+  const chainId = BigInt(jurisdiction.chainId ?? 0);
+  if (!chainId) {
+    const msg = '❌ Missing chainId for j_rebroadcast';
+    addMessage(newState, msg);
+    return { newState, outputs, jOutputs };
+  }
+  const jurisdictionName = jurisdiction.name || env.activeJurisdiction || 'default';
+  const rebroadcastBatch = cloneJBatch(sent.batch);
+  const { removed } = filterActiveDisputeFinalizations(newState, rebroadcastBatch);
+  if (removed > 0) {
+    addMessage(newState, `🧹 Filtered ${removed} stale dispute-finalize op(s) from rebroadcast`);
+  }
+  if (isBatchEmpty(rebroadcastBatch)) {
+    newState.jBatchState.sentBatch = undefined;
+    newState.jBatchState.status = isBatchEmpty(newState.jBatchState.batch) ? 'empty' : 'accumulating';
+    addMessage(newState, `🧹 j_rebroadcast cleared empty stale sentBatch nonce=${sent.entityNonce}`);
+    return { newState, outputs, jOutputs };
+  }
+  const encodedBatch = encodeJBatch(rebroadcastBatch);
+  const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, BigInt(sent.entityNonce));
 
   const jTx: JTx = {
     type: 'batch',
     entityId: entityState.entityId,
     data: {
-      batch: cloneJBatch(sent.batch),
-      batchHash: sent.batchHash,
-      encodedBatch: sent.encodedBatch,
+      batch: cloneJBatch(rebroadcastBatch),
+      batchHash,
+      encodedBatch,
       entityNonce: sent.entityNonce,
-      batchSize: batchOpCount(sent.batch),
+      batchSize: batchOpCount(rebroadcastBatch),
       signerId,
       ...(gasBumpBps !== undefined
         ? { feeOverrides: { gasBumpBps } }
@@ -62,6 +90,9 @@ export async function handleJRebroadcast(
 
   jOutputs.push({ jurisdictionName, jTxs: [jTx] });
 
+  sent.batch = cloneJBatch(rebroadcastBatch);
+  sent.batchHash = batchHash;
+  sent.encodedBatch = encodedBatch;
   sent.submitAttempts += 1;
   sent.lastSubmittedAt = newState.timestamp;
   newState.jBatchState.lastBroadcast = newState.timestamp;
@@ -76,7 +107,7 @@ export async function handleJRebroadcast(
 
   const hashesToSign: Array<{ hash: string; type: HashType; context: string }> = [
     {
-      hash: sent.batchHash,
+      hash: batchHash,
       type: 'jBatch',
       context: `jBatch:${entityState.entityId.slice(-4)}:nonce:${sent.entityNonce}:rebroadcast`,
     },

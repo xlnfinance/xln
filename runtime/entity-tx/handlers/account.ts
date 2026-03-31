@@ -371,6 +371,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       rebalancePolicy: new Map(), // Rebalance: per-token soft/hard/maxFee
       locks: new Map(), // HTLC: Empty locks map
       swapOffers: new Map(), // Swap: Empty offers map
+      swapOrderHistory: new Map(),
       // Bilateral J-event consensus
       leftJObservations: [],
       rightJObservations: [],
@@ -1204,7 +1205,7 @@ export function processOrderbookSwaps(
     : 0;
   const quarantinedOfferKeys = new Set<string>();
   const quarantineOffer = (accountId: string, offerId: string, reason: string): true => {
-    const key = `${accountId}:${offerId}`;
+    const key = swapKey(accountId, offerId);
     if (quarantinedOfferKeys.has(key)) return true;
     quarantinedOfferKeys.add(key);
     quarantinedOffers.push({ accountId, offerId, reason });

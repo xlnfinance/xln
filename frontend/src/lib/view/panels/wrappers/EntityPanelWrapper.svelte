@@ -14,6 +14,7 @@
   import type { Writable } from 'svelte/store';
   import EntityPanelTabs from '$lib/components/Entity/EntityPanelTabs.svelte';
   import type { Tab } from '$lib/types/ui';
+  import type { Env, EnvSnapshot } from '@xln/runtime/xln-api';
 
   // Props from Dockview panel params (Svelte 5 runes syntax)
   let {
@@ -29,8 +30,8 @@
     entityId?: string;
     entityName?: string;
     signerId?: string;
-    isolatedEnv?: Writable<unknown | null>;
-    isolatedHistory?: Writable<unknown[]>;
+    isolatedEnv?: Writable<Env | null>;
+    isolatedHistory?: Writable<EnvSnapshot[]>;
     isolatedTimeIndex?: Writable<number>;
     isolatedIsLive?: Writable<boolean>;
     initialAction?: 'r2r' | 'r2c';
@@ -45,13 +46,31 @@
     isActive: true,
   });
 
+  const activeEnv = $derived(isolatedEnv ? $isolatedEnv : null);
+  const activeHistory = $derived(isolatedHistory ? $isolatedHistory : []);
+  const activeTimeIndex = $derived(isolatedTimeIndex ? $isolatedTimeIndex : -1);
+  const activeIsLive = $derived(isolatedIsLive ? $isolatedIsLive : true);
+
+  function goToLive(): void {
+    isolatedTimeIndex?.set(-1);
+    isolatedIsLive?.set(true);
+  }
+
   // DISABLED $effect - was causing infinite loops
   // localTab is already initialized above with correct values from props
 </script>
 
 <div class="entity-panel-wrapper">
   <!-- Entity panel content only - time machine is in global TimeMachine bar -->
-  <EntityPanelTabs tab={localTab} {initialAction} />
+  <EntityPanelTabs
+    tab={localTab}
+    {initialAction}
+    env={activeEnv}
+    history={activeHistory}
+    timeIndex={activeTimeIndex}
+    isLive={activeIsLive}
+    onGoToLive={goToLive}
+  />
 </div>
 
 <style>

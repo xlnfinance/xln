@@ -31,6 +31,7 @@ import {
   requantizeRemainingSwapAtPrice,
   SWAP_LOT_SCALE,
 } from '../../orderbook/types';
+import { recordSwapResolveLifecycle } from './swap-history';
 
 export async function handleSwapResolve(
   accountMachine: AccountMachine,
@@ -388,6 +389,32 @@ export async function handleSwapResolve(
       events.push(`📊 Swap offer ${offerId.slice(0,8)}... partially filled, ${offer.giveAmount} remaining`);
     }
   }
+
+  recordSwapResolveLifecycle(
+    accountMachine,
+    offerId,
+    currentHeight,
+    {
+      fillRatio,
+      cancelRemainder,
+      height: currentHeight,
+      ...(executionGiveAmount !== undefined ? { executionGiveAmount } : {}),
+      ...(executionWantAmount !== undefined ? { executionWantAmount } : {}),
+      ...(feeTokenId !== undefined ? { feeTokenId } : {}),
+      ...(feeAmount > 0n ? { feeAmount } : {}),
+      ...(typeof accountTx.data.comment === 'string' && accountTx.data.comment.trim()
+        ? { comment: accountTx.data.comment }
+        : {}),
+    },
+    {
+      giveTokenId: offer.giveTokenId,
+      giveAmount: canonicalGiveAmount,
+      wantTokenId: offer.wantTokenId,
+      wantAmount: canonicalWantAmount,
+      priceTicks: canonicalPriceTicks,
+      createdHeight: offer.createdHeight,
+    },
+  );
 
   return { success: true, events, ...(swapOfferCancelled !== undefined && { swapOfferCancelled }) };
 }

@@ -12,6 +12,7 @@
   import { Wallet as EthersWallet, hexlify, isAddress, ZeroAddress, zeroPadValue } from 'ethers';
   import type {
     AccountMachine,
+    AccountTx,
     Env,
     EnvSnapshot,
     JAdapter,
@@ -26,8 +27,8 @@
     type DraftBatchReserveIssue,
   } from '@xln/runtime/j-batch';
   import type { Tab, EntityReplica } from '$lib/types/ui';
-  import { getXLN, history, resolveConfiguredApiBase, xlnEnvironment } from '../../stores/xlnStore';
-  import { visibleReplicas, currentTimeIndex, isLive, timeOperations } from '../../stores/timeStore';
+  import { getXLN, history as historyStore, resolveConfiguredApiBase, xlnEnvironment as xlnEnvironmentStore } from '../../stores/xlnStore';
+  import { currentTimeIndex as currentTimeIndexStore, isLive as isLiveStore, timeOperations } from '../../stores/timeStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
   import { amountToUsd, getAssetUsdPrice } from '$lib/utils/assetPricing';
   import { activeVault, vaultOperations } from '$lib/stores/vaultStore';
@@ -77,11 +78,11 @@
   export let allowHeaderDeleteRuntime: boolean = false;
   export let headerRuntimeAddLabel: string = '+ Add Runtime';
   export let initialAction: 'r2r' | 'r2c' | undefined = undefined;
-  export let replicasOverride: Map<string, EntityReplica> | null = null;
-  export let envOverride: Env | EnvSnapshot | null = null;
-  export let historyOverride: EnvSnapshot[] | null = null;
-  export let timeIndexOverride: number | null = null;
-  export let isLiveOverride: boolean | null = null;
+  export let env: Env | EnvSnapshot | null = null;
+  export let history: EnvSnapshot[] | null = null;
+  export let timeIndex: number | null = null;
+  export let isLive: boolean | null = null;
+  export let onGoToLive: (() => void) | null = null;
 
   const dispatch = createEventDispatcher();
 
@@ -120,6 +121,7 @@
   let openAccountEntityId = '';
   let currentEntityValue = '';
   let currentExternalEoaValue = '';
+  let entityActivityAccountFilter = 'all';
 
   function materializeReplicaView(candidate: EntityReplica | null | undefined): EntityReplica | null {
     if (!candidate) return null;
@@ -147,6 +149,11 @@
   ): Map<string, EntityReplica> | null {
     if (!(source instanceof Map)) return null;
     return new Map(source);
+  }
+
+  function getEnvReplicaMap(sourceEnv: Env | EnvSnapshot | null | undefined): Map<string, EntityReplica> | null {
+    if (!sourceEnv || !(sourceEnv.eReplicas instanceof Map)) return null;
+    return materializeReplicaMap(sourceEnv.eReplicas as Map<string, EntityReplica>);
   }
 
   $: if (userModeHeader) {
@@ -959,7 +966,7 @@
 
   function getMoveMaxAmount(
     from: MoveEndpoint,
-    reserveToken: (ExternalToken & { tokenId: number }) | null,
+    reserveToken: ReserveTransferAsset | null,
     externalToken: ExternalToken | null,
     sourceAccountId: string,
   ): bigint | null {
@@ -1205,7 +1212,7 @@
 
   function computeMoveSourceAvailableBalance(
     row: AssetLedgerRow | null,
-    liveTransferToken: (ExternalToken & { tokenId: number }) | null,
+    liveTransferToken: ReserveTransferAsset | null,
   ): bigint {
     switch (moveFromEndpoint) {
       case 'external':
@@ -1232,19 +1239,23 @@
   }
 
   function choosePreferredMoveAssetSymbol(): string {
-    const candidates = moveFromEndpoint === 'external' && moveToEndpoint === 'external'
-      ? externalTokens
-      : transferableAssetOptions;
+    const candidates = moveAssetOptions;
+    const preferredUsdc = candidates.find((token) => String(token.symbol || '').trim().toUpperCase() === 'USDC');
+    if (preferredUsdc) return preferredUsdc.symbol;
     const sourceAccountId = getCurrentMoveSourceAccountId();
-    const preferredWithBalance = candidates.find((token) => (
-      getMoveMaxAmount(
-        moveFromEndpoint,
-        isReserveTransferToken(token) ? token : null,
-        token,
-        sourceAccountId,
-      ) ?? 0n
-    ) > 0n);
-    return preferredWithBalance?.symbol ?? choosePreferredAssetSymbol(candidates);
+    const preferredWithBalance = candidates.find((token) => {
+      const externalToken = findExternalTokenBySymbol(token.symbol);
+      const reserveToken = findReserveTransferTokenBySymbol(token.symbol);
+      return (
+        getMoveMaxAmount(
+          moveFromEndpoint,
+          reserveToken,
+          externalToken,
+          sourceAccountId,
+        ) ?? 0n
+      ) > 0n;
+    });
+    return preferredWithBalance?.symbol ?? candidates[0]?.symbol ?? 'USDC';
   }
 
   function getP2PRelayUrls(env: Env | EnvSnapshot | null | undefined): string[] {
@@ -1321,14 +1332,13 @@
     return `${addr.slice(0, 10)}...${addr.slice(-6)}`;
   }
 
-  $: activeReplicas = materializeReplicaMap(replicasOverride)
-    || materializeReplicaMap(isRuntimeEnv(activeEnv) && activeEnv.eReplicas instanceof Map ? activeEnv.eReplicas as Map<string, EntityReplica> : null)
-    || materializeReplicaMap($visibleReplicas);
+  $: activeReplicas = getEnvReplicaMap(activeEnv);
   $: activeXlnFunctions = $xlnFunctions;
-  $: activeHistory = historyOverride ?? $history;
-  $: activeTimeIndex = timeIndexOverride ?? $currentTimeIndex;
-  $: activeEnv = envOverride || $xlnEnvironment;
-  $: activeIsLive = isLiveOverride ?? $isLive;
+  $: activeHistory = history ?? $historyStore;
+  $: activeTimeIndex = timeIndex ?? $currentTimeIndexStore;
+  $: activeEnv = env ?? $xlnEnvironmentStore;
+  $: activeIsLive = isLive ?? $isLiveStore;
+  $: liveRuntimeEnv = getRuntimeEnv(activeEnv);
 
   function resolveEntitySigner(entityId: string, reason: string): string {
     const env = getRuntimeEnv(activeEnv);
@@ -1578,6 +1588,14 @@
     tokenId: number | undefined;
   }
 
+  interface ReserveTransferAsset {
+    symbol: string;
+    address: string;
+    balance: bigint;
+    decimals: number;
+    tokenId: number;
+  }
+
   function normalizeOptionalTokenId(value: unknown): number | undefined {
     if (typeof value === 'number' && Number.isFinite(value) && value >= 0) return value;
     if (typeof value === 'bigint') {
@@ -1631,7 +1649,7 @@
   let collateralToReserveAmount = '';
   let reserveToExternalAmount = '';
   let sendingExternalToken: string | null = null;
-  let transferableAssetOptions: Array<ExternalToken & { tokenId: number }> = [];
+  let transferableAssetOptions: ReserveTransferAsset[] = [];
   let assetLedgerRows: AssetLedgerRow[] = [];
   let moveUiState: MoveUiState = {
     ledgerRow: null,
@@ -1667,14 +1685,14 @@
   let externalFetchInFlight: Promise<void> | null = null;
   let cachedExternalTokenRegistry: ExternalToken[] | null = null;
   let cachedExternalTokenRegistryKey = '';
-  let selectedExternalToReserveToken: (ExternalToken & { tokenId: number }) | null = null;
-  let selectedReserveToCollateralToken: (ExternalToken & { tokenId: number }) | null = null;
-  let selectedCollateralToReserveToken: (ExternalToken & { tokenId: number }) | null = null;
-  let selectedReserveToExternalToken: (ExternalToken & { tokenId: number }) | null = null;
+  let selectedExternalToReserveToken: ReserveTransferAsset | null = null;
+  let selectedReserveToCollateralToken: ReserveTransferAsset | null = null;
+  let selectedCollateralToReserveToken: ReserveTransferAsset | null = null;
+  let selectedReserveToExternalToken: ReserveTransferAsset | null = null;
   let selectedSendAssetToken: ExternalToken | null = null;
-  let moveAssetOptions: ExternalToken[] = [];
+  let moveAssetOptions: Array<{ symbol: string }> = [];
   let selectedMoveExternalToken: ExternalToken | null = null;
-  let selectedMoveTransferToken: (ExternalToken & { tokenId: number }) | null = null;
+  let selectedMoveTransferToken: ReserveTransferAsset | null = null;
 
   $: if (moveVisualRoot !== previousMoveVisualRoot) {
     moveVisualResizeObserver?.disconnect();
@@ -1787,10 +1805,21 @@
     return assetLedgerRows.find((row) => String(row.symbol || '').trim().toUpperCase() === normalized) ?? null;
   }
 
-  function findReserveTransferTokenBySymbol(symbol: string): (ExternalToken & { tokenId: number }) | null {
+  function findReserveTransferTokenBySymbol(symbol: string): ReserveTransferAsset | null {
     const token = findExternalTokenBySymbol(symbol);
-    if (!token || !isReserveTransferToken(token)) return null;
-    return token;
+    if (token && isReserveTransferToken(token)) {
+      return token;
+    }
+    const row = findAssetLedgerRowBySymbol(symbol);
+    if (!row || row.isNative || typeof row.tokenId !== 'number' || row.tokenId <= 0) return null;
+    const meta = resolveReserveTokenMeta(row.tokenId, row.symbol);
+    return {
+      symbol: row.symbol,
+      address: row.address || '',
+      balance: row.externalBalance ?? 0n,
+      decimals: row.decimals ?? meta.decimals,
+      tokenId: row.tokenId,
+    };
   }
 
   function getFaucetReserveTokenMeta(symbol: string): { tokenId: number; symbol: string } | null {
@@ -2295,9 +2324,20 @@
   $: selectedCollateralToReserveToken = findReserveTransferTokenBySymbol(collateralToReserveSymbol);
   $: selectedReserveToExternalToken = findReserveTransferTokenBySymbol(reserveToExternalSymbol);
   $: selectedSendAssetToken = findExternalTokenBySymbol(sendAssetSymbol);
-  $: moveAssetOptions = moveFromEndpoint === 'external' && moveToEndpoint === 'external'
-    ? externalTokens
-    : transferableAssetOptions;
+  $: moveAssetOptions = assetLedgerRows
+    .filter((row) => {
+      const symbol = String(row.symbol || '').trim();
+      if (!symbol) return false;
+      const externalToken = findExternalTokenBySymbol(symbol);
+      const reserveToken = findReserveTransferTokenBySymbol(symbol);
+      if (moveFromEndpoint === 'external') {
+        if (!externalToken) return false;
+        if (moveToEndpoint === 'external') return true;
+        return !!reserveToken;
+      }
+      return !!reserveToken;
+    })
+    .map((row) => ({ symbol: row.symbol }));
   $: selectedMoveExternalToken = findExternalTokenBySymbol(moveAssetSymbol);
   $: selectedMoveTransferToken = findReserveTransferTokenBySymbol(moveAssetSymbol);
   $: workspaceAccount = (() => {
@@ -2375,6 +2415,28 @@
         reserveUsd,
         accountUsd: getAssetValue(numericId, accountSpendableByToken.get(numericId) ?? 0n, info.symbol),
         totalUsd: reserveUsd + getAssetValue(numericId, accountSpendableByToken.get(numericId) ?? 0n, info.symbol),
+      });
+    }
+    for (const [tokenId, accountBalance] of accountSpendableByToken.entries()) {
+      const numericId = Number(tokenId);
+      if (!Number.isFinite(numericId) || numericId <= 0) continue;
+      const existing = Array.from(rows.values()).find((row) => row.tokenId === numericId);
+      if (existing) continue;
+      const info = resolveReserveTokenMeta(numericId);
+      const accountUsd = getAssetValue(numericId, accountBalance, info.symbol);
+      rows.set(info.symbol, {
+        symbol: info.symbol,
+        address: '',
+        decimals: info.decimals,
+        tokenId: numericId,
+        isNative: false,
+        externalBalance: 0n,
+        reserveBalance: 0n,
+        accountBalance,
+        externalUsd: 0,
+        reserveUsd: 0,
+        accountUsd,
+        totalUsd: accountUsd,
       });
     }
     if (!rows.has('ETH')) {
@@ -2744,10 +2806,14 @@
   }
 
   function buildMovePostSettleTxs(entityId: string, pending: PendingAssetAutoC2R): EntityTx[] {
+    const needsFollowUpReserveOp = pending.postSettleOp.type !== 'none';
     const entityTxs: EntityTx[] = [
       {
         type: 'settle_execute' as const,
-        data: { counterpartyEntityId: pending.counterpartyEntityId },
+        data: {
+          counterpartyEntityId: pending.counterpartyEntityId,
+          ...(needsFollowUpReserveOp ? { disableC2RShortcut: true } : {}),
+        },
       },
     ];
     if (pending.postSettleOp.type === 'r2r') {
@@ -3625,6 +3691,10 @@
     return `~${formatCompact(value)}`;
   }
 
+  function formatUsdExact(value: number): string {
+    return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
   function fillExternalToReserveMax(): void {
     if (!selectedExternalToReserveToken) return;
     externalToReserveAmount = formatTokenInputAmount(
@@ -3745,20 +3815,31 @@
 
   $: netWorth = externalTotal + reservesTotal + accountsData.total;
 
-  type EntityFrameActivityRow = {
+  type EntityActivityChip = {
+    label: string;
+    tone?: 'neutral' | 'good' | 'warn' | 'danger';
+  };
+
+  type EntityActivityRow = {
     id: string;
     height: number;
     timestamp: number;
+    source: 'frame' | 'batch';
     accountId: string;
     accountLabel: string;
-    kind: 'pending' | 'mempool' | 'confirmed';
+    kind: 'pending' | 'mempool' | 'confirmed' | 'batch';
     actor: 'you' | 'peer' | 'system';
     actorSide: 'L' | 'R' | '';
     actorLabel: string;
-    frameLabel: string;
-    statusLabel: string;
-    txCount: number;
-    types: Array<{ type: string; count: number }>;
+    actorEntityId: string;
+    actorName: string;
+    actorAvatar: string;
+    actorInitials: string;
+    headline: string;
+    bodyLines: string[];
+    chips: EntityActivityChip[];
+    footerLeft: string;
+    footerRight: string;
   };
 
   function formatTime(ms: number): string {
@@ -3809,107 +3890,414 @@
     actor: 'you' | 'peer' | 'system';
     actorSide: 'L' | 'R' | '';
     actorLabel: string;
+    actorEntityId: string;
+    actorName: string;
+    actorAvatar: string;
+    actorInitials: string;
   } {
-    const localEntity = String(replica?.state?.entityId || tab.entityId || '').toLowerCase();
-    const leftEntity = String(account?.leftEntity || '').toLowerCase();
+    const localEntityId = String(replica?.state?.entityId || tab.entityId || '').trim();
+    const localEntity = localEntityId.toLowerCase();
+    const leftEntityId = String(account?.leftEntity || '').trim();
+    const rightEntityId = String(account?.rightEntity || '').trim();
+    const leftEntity = leftEntityId.toLowerCase();
     const localIsLeft = Boolean(localEntity && leftEntity && localEntity === leftEntity);
+    const actorEntityId = typeof byLeft === 'boolean'
+      ? (byLeft ? leftEntityId : rightEntityId)
+      : '';
+    const actorName = actorEntityId
+      ? getEntityDisplayName(actorEntityId, {
+          source: activeEnv,
+          selfEntityId: localEntityId,
+          fallback: actorEntityId,
+        })
+      : 'System';
+    const actorAvatar = actorEntityId ? resolveEntityAvatar(activeXlnFunctions, actorEntityId) : '';
+    const actorInitials = actorName
+      .split(/[\s_-]+/)
+      .filter(Boolean)
+      .slice(0, 2)
+      .map((part) => part[0]?.toUpperCase() || '')
+      .join('') || 'SY';
     if (typeof byLeft !== 'boolean') {
-      return { actor: 'system', actorSide: '', actorLabel: 'System' };
+      return {
+        actor: 'system',
+        actorSide: '',
+        actorLabel: 'System',
+        actorEntityId: '',
+        actorName,
+        actorAvatar,
+        actorInitials,
+      };
     }
     const actorSide = byLeft ? 'L' : 'R';
     const actor = byLeft === localIsLeft ? 'you' : 'peer';
     return {
       actor,
       actorSide,
-      actorLabel: `${actor === 'you' ? 'You' : 'Peer'} (${actorSide})`,
+      actorLabel: `${actor === 'you' ? 'You' : 'Counterparty'} · ${actorSide}`,
+      actorEntityId,
+      actorName,
+      actorAvatar,
+      actorInitials,
     };
   }
 
-  $: entityActivityRows = (() => {
-    const rows: EntityFrameActivityRow[] = [];
-    const accounts = replica?.state?.accounts;
-    if (!(accounts instanceof Map) || accounts.size === 0) return rows;
+  function activityTokenAmount(tokenIdRaw: unknown, amountRaw: unknown): string {
+    const tokenId = Number(tokenIdRaw || 0);
+    const amount = (() => {
+      if (typeof amountRaw === 'bigint') return amountRaw;
+      try {
+        return BigInt(String(amountRaw ?? 0));
+      } catch {
+        return 0n;
+      }
+    })();
+    if (tokenId > 0 && activeXlnFunctions?.formatTokenAmount) {
+      return activeXlnFunctions.formatTokenAmount(tokenId, amount);
+    }
+    const token = tokenId > 0 ? getTokenInfo(tokenId) : { symbol: 'TOKEN', decimals: 18 };
+    return `${formatAmount(amount, Number(token.decimals ?? 18))} ${token.symbol || `#${tokenId}`}`;
+  }
 
-    for (const [counterpartyId, account] of accounts.entries()) {
-      const accountId = String(counterpartyId || '');
-      const accountLabel = activityAccountLabel(accountId);
-      const pushRow = (
-        kind: 'pending' | 'mempool' | 'confirmed',
-        frameLabel: string,
-        statusLabel: string,
-        height: number,
-        timestamp: number,
-        txs: Array<{ type?: string }>,
-        byLeft?: boolean,
-      ) => {
-        if (!Array.isArray(txs) || txs.length === 0) return;
-        const grouped = new Map<string, number>();
-        for (const tx of txs) {
-          const type = String(tx?.type || 'unknown');
-          grouped.set(type, (grouped.get(type) || 0) + 1);
-        }
-        const actorMeta = frameActorMeta(account, byLeft);
-        rows.push({
-          id: `entity-activity-${accountId}-${kind}-${height}-${timestamp}`,
-          height,
-          timestamp,
-          accountId,
-          accountLabel,
-          kind,
-          actor: actorMeta.actor,
-          actorSide: actorMeta.actorSide,
-          actorLabel: actorMeta.actorLabel,
-          frameLabel,
-          statusLabel,
-          txCount: txs.length,
-          types: Array.from(grouped.entries()).map(([type, count]) => ({ type, count })),
-        });
+  function activityEntityName(entityIdRaw: unknown, fallback: string): string {
+    const entityId = String(entityIdRaw || '').trim();
+    if (!entityId) return fallback;
+    return getEntityDisplayName(entityId, {
+      source: activeEnv,
+      selfEntityId: replica?.state?.entityId || tab.entityId,
+      fallback,
+    });
+  }
+
+  function shortHash(value: unknown): string {
+    const text = String(value || '').trim();
+    if (!text) return '-';
+    return text.length > 18 ? `${text.slice(0, 10)}...${text.slice(-6)}` : text;
+  }
+
+  function describeClaimedEvents(eventsRaw: unknown): string {
+    if (!Array.isArray(eventsRaw) || eventsRaw.length === 0) return 'no events';
+    const grouped = new Map<string, number>();
+    for (const event of eventsRaw) {
+      const type = String((event as { type?: unknown })?.type || 'event');
+      grouped.set(type, (grouped.get(type) || 0) + 1);
+    }
+    return Array.from(grouped.entries())
+      .map(([type, count]) => `${entityTxTypeLabel(type)}${count > 1 ? ` ×${count}` : ''}`)
+      .join(' · ');
+  }
+
+  function summarizeAccountTx(
+    tx: AccountTx,
+    accountId: string,
+    accountLabel: string,
+    actor: 'you' | 'peer' | 'system',
+  ): string {
+    const data = tx?.data && typeof tx.data === 'object'
+      ? tx.data as Record<string, unknown>
+      : {};
+
+    switch (tx.type) {
+      case 'direct_payment':
+      case 'account_payment': {
+        const amount = activityTokenAmount(data['tokenId'], data['amount']);
+        const description = String(data['description'] || '').trim();
+        const route = Array.isArray(data['route'])
+          ? data['route'].map((hop) => activityEntityName(hop, formatEntityId(String(hop || '')))).join(' → ')
+          : '';
+        let line = `${actor === 'peer' ? 'Received payment' : 'Sent payment'} ${amount}`;
+        line += actor === 'peer' ? ` from ${accountLabel}` : ` to ${accountLabel}`;
+        if (route) line += ` via ${route}`;
+        if (description) line += ` · ${description}`;
+        return line;
+      }
+      case 'swap_offer':
+        return `Created order · sell ${activityTokenAmount(data['giveTokenId'], data['giveAmount'])} for ${activityTokenAmount(data['wantTokenId'], data['wantAmount'])}`;
+      case 'swap_cancel':
+      case 'swap_cancel_request':
+        return `Cancelled order · ${String(data['offerId'] || 'unknown')}`;
+      case 'swap_resolve': {
+        const offerId = String(data['offerId'] || 'unknown');
+        const cancelRemainder = Boolean(data['cancelRemainder']);
+        const executionGive = data['executionGiveAmount'];
+        const executionWant = data['executionWantAmount'];
+        const giveToken = data['restingGiveTokenId'] ?? data['giveTokenId'];
+        const wantToken = data['restingWantTokenId'] ?? data['wantTokenId'];
+        const filled = executionGive !== undefined && executionWant !== undefined
+          ? `${activityTokenAmount(giveToken, executionGive)} ↔ ${activityTokenAmount(wantToken, executionWant)}`
+          : offerId;
+        if (cancelRemainder && executionGive !== undefined && executionWant !== undefined) return `Resolved order · ${filled} and closed remainder`;
+        if (cancelRemainder) return `Closed order · ${offerId}`;
+        return `Resolved order · ${filled}`;
+      }
+      case 'request_collateral': {
+        const amount = activityTokenAmount(data['tokenId'], data['amount']);
+        const fee = typeof data['feeAmount'] !== 'undefined'
+          ? activityTokenAmount(data['feeTokenId'] ?? data['tokenId'], data['feeAmount'])
+          : '';
+        return fee ? `Requested collateral · ${amount} (+ fee ${fee})` : `Requested collateral · ${amount}`;
+      }
+      case 'set_rebalance_policy':
+        return `Updated rebalance policy · soft ${activityTokenAmount(data['tokenId'], data['r2cRequestSoftLimit'])} / hard ${activityTokenAmount(data['tokenId'], data['hardLimit'])}`;
+      case 'set_credit_limit':
+        return `Set credit limit · ${activityTokenAmount(data['tokenId'], data['amount'])}`;
+      case 'add_delta':
+        return `Opened token lane · ${activityEntityName(accountId, accountLabel)} / ${getTokenInfo(Number(data['tokenId'] || 0)).symbol}`;
+      case 'account_settle':
+        return `Claimed on-chain settlement · ${getTokenInfo(Number(data['tokenId'] || 0)).symbol}`;
+      case 'reserve_to_collateral':
+        return `Claimed reserve → collateral move · ${getTokenInfo(Number(data['tokenId'] || 0)).symbol}`;
+      case 'htlc_lock':
+        return `Opened HTLC · ${activityTokenAmount(data['tokenId'], data['amount'])}`;
+      case 'htlc_resolve':
+        return `Resolved HTLC · ${String(data['outcome'] || 'unknown')}`;
+      case 'settle_hold': {
+        const diffs = Array.isArray(data['diffs']) ? data['diffs'].length : 0;
+        return `Placed settlement hold · ${diffs || 1} token${diffs === 1 ? '' : 's'}`;
+      }
+      case 'settle_release': {
+        const diffs = Array.isArray(data['diffs']) ? data['diffs'].length : 0;
+        return `Released settlement hold · ${diffs || 1} token${diffs === 1 ? '' : 's'}`;
+      }
+      case 'reopen_disputed':
+        return 'Reopened disputed account';
+      case 'j_event_claim':
+        return `Claimed J#${Number(data['jHeight'] || 0)} · ${describeClaimedEvents(data['events'])}`;
+      default:
+        return entityTxTypeLabel(String(tx.type || 'unknown'));
+    }
+  }
+
+  function batchCounterpartyId(entry: NonNullable<NonNullable<EntityReplica['state']['batchHistory']>[number]>): string {
+    const batch = entry.batch;
+    if (!batch) return '';
+    const fromStart = String(batch.disputeStarts?.[0]?.counterentity || '').trim();
+    if (fromStart) return fromStart;
+    const fromFinalize = String(batch.disputeFinalizations?.[0]?.counterentity || '').trim();
+    if (fromFinalize) return fromFinalize;
+    const fromR2C = String(batch.reserveToCollateral?.[0]?.receivingEntity || '').trim();
+    if (fromR2C) return fromR2C;
+    return '';
+  }
+
+  function batchActorMeta(entry: NonNullable<NonNullable<EntityReplica['state']['batchHistory']>[number]>) {
+    if (entry.source === 'self-batch') {
+      const selfId = String(replica?.state?.entityId || tab.entityId || '').trim();
+      const selfName = activityEntityName(selfId, 'You');
+      return {
+        actor: 'you' as const,
+        actorSide: '' as const,
+        actorLabel: 'You · on-chain',
+        actorEntityId: selfId,
+        actorName: selfName,
+        actorAvatar: resolveEntityAvatar(activeXlnFunctions, selfId),
+        actorInitials: selfName
+          .split(/[\s_-]+/)
+          .filter(Boolean)
+          .slice(0, 2)
+          .map((part) => part[0]?.toUpperCase() || '')
+          .join('') || 'YO',
       };
+    }
+    const counterpartyId = batchCounterpartyId(entry);
+    const actorName = activityEntityName(counterpartyId, counterpartyId ? formatEntityId(counterpartyId) : 'Counterparty');
+    return {
+      actor: counterpartyId ? 'peer' as const : 'system' as const,
+      actorSide: '' as const,
+      actorLabel: counterpartyId ? 'Counterparty · on-chain' : 'System',
+      actorEntityId: counterpartyId,
+      actorName,
+      actorAvatar: counterpartyId ? resolveEntityAvatar(activeXlnFunctions, counterpartyId) : '',
+      actorInitials: actorName
+        .split(/[\s_-]+/)
+        .filter(Boolean)
+        .slice(0, 2)
+        .map((part) => part[0]?.toUpperCase() || '')
+        .join('') || 'CP',
+    };
+  }
 
-      if (account.pendingFrame) {
-        pushRow(
-          'pending',
-          `Pending Frame #${Number(account.pendingFrame.height || 0)}`,
-          'Awaiting Consensus',
-          Number(account.pendingFrame.height || 0),
-          Number(account.pendingFrame.timestamp || 0),
-          Array.isArray(account.pendingFrame.accountTxs) ? account.pendingFrame.accountTxs : [],
-          account.pendingFrame.byLeft,
-        );
-      }
+  function summarizeBatchOperations(entry: NonNullable<NonNullable<EntityReplica['state']['batchHistory']>[number]>): string[] {
+    const ops = entry.operations;
+    if (!ops) {
+      return entry.opCount > 0 ? [`${entry.opCount} on-chain op${entry.opCount === 1 ? '' : 's'}`] : [];
+    }
+    const lines: string[] = [];
+    const push = (count: number | undefined, label: string) => {
+      const normalized = Number(count || 0);
+      if (normalized > 0) lines.push(`${normalized} ${label}${normalized === 1 ? '' : 's'}`);
+    };
+    push(ops.settlements, 'settlement');
+    push(ops.reserveToCollateral, 'reserve → collateral move');
+    push(ops.collateralToReserve, 'collateral → reserve move');
+    push(ops.reserveToReserve, 'reserve transfer');
+    push(ops.disputeStarts, 'dispute start');
+    push(ops.disputeFinalizations, 'dispute finalize');
+    push(ops.externalTokenToReserve, 'external deposit');
+    push(ops.reserveToExternalToken, 'reserve withdrawal');
+    push(ops.revealSecrets, 'secret reveal');
+    push(ops.flashloans, 'flashloan');
+    return lines;
+  }
 
-      if (Array.isArray(account.mempool) && account.mempool.length > 0) {
-        const pendingHeight = Number(account.pendingFrame?.height || 0);
-        pushRow(
-          'mempool',
-          'Mempool Queue',
-          `${account.mempool.length} queued`,
-          pendingHeight > 0 ? pendingHeight : Number(account.currentHeight || 0),
-          Number(account.pendingFrame?.timestamp || account.currentFrame?.timestamp || 0),
-          account.mempool,
-          account.leftEntity === (replica?.state?.entityId || tab.entityId),
-        );
-      }
+  $: entityActivityRows = (() => {
+    const rows: EntityActivityRow[] = [];
+    const accounts = replica?.state?.accounts;
+    if (accounts instanceof Map && accounts.size > 0) {
+      for (const [counterpartyId, account] of accounts.entries()) {
+        const accountId = String(counterpartyId || '');
+        const accountLabel = activityAccountLabel(accountId);
+        const pushFrameRow = (
+          kind: 'pending' | 'mempool' | 'confirmed',
+          frameLabel: string,
+          statusLabel: string,
+          height: number,
+          timestamp: number,
+          txs: AccountTx[],
+          byLeft?: boolean,
+        ) => {
+          if (!Array.isArray(txs) || txs.length === 0) return;
+          const actorMeta = frameActorMeta(account, byLeft);
+          const allLines = txs.map((tx) => summarizeAccountTx(tx, accountId, accountLabel, actorMeta.actor));
+          const headline = allLines.length === 1 ? allLines[0] : `${txs.length} actions in account frame`;
+          const bodyLines = allLines.length <= 1
+            ? []
+            : (allLines.length > 4 ? [...allLines.slice(0, 4), `+${allLines.length - 4} more actions`] : allLines);
+          rows.push({
+            id: `entity-activity-frame-${accountId}-${kind}-${height}-${timestamp}`,
+            height,
+            timestamp,
+            source: 'frame',
+            accountId,
+            accountLabel,
+            kind,
+            actor: actorMeta.actor,
+            actorSide: actorMeta.actorSide,
+            actorLabel: actorMeta.actorLabel,
+            actorEntityId: actorMeta.actorEntityId,
+            actorName: actorMeta.actorName,
+            actorAvatar: actorMeta.actorAvatar,
+            actorInitials: actorMeta.actorInitials,
+            headline,
+            bodyLines,
+            chips: [
+              { label: frameLabel },
+              { label: `${actorMeta.actor === 'peer' ? accountLabel : activityEntityName(tab.entityId, 'You')} → ${actorMeta.actor === 'peer' ? activityEntityName(tab.entityId, 'You') : accountLabel}` },
+              { label: statusLabel, tone: kind === 'confirmed' ? 'good' : (kind === 'mempool' ? 'warn' : 'neutral') },
+              { label: `${txs.length} tx` },
+            ],
+            footerLeft: formatEntityId(accountId),
+            footerRight: height > 0 ? `E#${height}` : statusLabel,
+          });
+        };
 
-      const frames = Array.isArray(account.frameHistory) ? account.frameHistory.slice(-12) : [];
-      for (const frame of frames) {
-        pushRow(
-          'confirmed',
-          `Frame #${Number(frame.height || 0)}`,
-          'Confirmed',
-          Number(frame.height || 0),
-          Number(frame.timestamp || 0),
-          Array.isArray(frame.accountTxs) ? frame.accountTxs : [],
-          frame.byLeft,
-        );
+        if (account.pendingFrame) {
+          pushFrameRow(
+            'pending',
+            'Pending frame',
+            'Awaiting consensus',
+            Number(account.pendingFrame.height || 0),
+            Number(account.pendingFrame.timestamp || 0),
+            Array.isArray(account.pendingFrame.accountTxs) ? account.pendingFrame.accountTxs : [],
+            account.pendingFrame.byLeft,
+          );
+        }
+
+        if (Array.isArray(account.mempool) && account.mempool.length > 0) {
+          pushFrameRow(
+            'mempool',
+            'Queued broadcast',
+            `${account.mempool.length} queued`,
+            Number(account.pendingFrame?.height || account.currentHeight || 0),
+            Number(account.pendingFrame?.timestamp || account.currentFrame?.timestamp || 0),
+            account.mempool,
+            account.leftEntity === (replica?.state?.entityId || tab.entityId),
+          );
+        }
+
+        const frames = Array.isArray(account.frameHistory) ? account.frameHistory.slice(-12) : [];
+        for (const frame of frames) {
+          pushFrameRow(
+            'confirmed',
+            'Confirmed frame',
+            'Confirmed',
+            Number(frame.height || 0),
+            Number(frame.timestamp || 0),
+            Array.isArray(frame.accountTxs) ? frame.accountTxs : [],
+            frame.byLeft,
+          );
+        }
       }
     }
+
+    const history = Array.isArray(replica?.state?.batchHistory) ? replica.state.batchHistory : [];
+    for (let index = 0; index < history.length; index += 1) {
+      const entry = history[index];
+      if (!entry) continue;
+      const actorMeta = batchActorMeta(entry);
+      const accountId = batchCounterpartyId(entry);
+      const accountLabel = accountId ? activityAccountLabel(accountId) : 'On-chain';
+      rows.push({
+        id: `entity-activity-batch-${entry.txHash || entry.batchHash || index}`,
+        height: Number(entry.entityNonce || 0),
+        timestamp: Number(entry.confirmedAt || entry.broadcastedAt || 0),
+        source: 'batch',
+        accountId,
+        accountLabel,
+        kind: 'batch',
+        actor: actorMeta.actor,
+        actorSide: actorMeta.actorSide,
+        actorLabel: actorMeta.actorLabel,
+        actorEntityId: actorMeta.actorEntityId,
+        actorName: actorMeta.actorName,
+        actorAvatar: actorMeta.actorAvatar,
+        actorInitials: actorMeta.actorInitials,
+        headline: entry.eventType === 'DisputeStarted'
+          ? 'Dispute started on-chain'
+          : entry.eventType === 'DisputeFinalized'
+            ? 'Dispute finalized on-chain'
+            : entry.status === 'confirmed'
+              ? 'On-chain batch confirmed'
+              : 'On-chain batch failed',
+        bodyLines: [
+          ...(entry.note ? [entry.note] : []),
+          ...summarizeBatchOperations(entry),
+        ],
+        chips: [
+          { label: entry.status === 'confirmed' ? 'On-chain' : 'Failed', tone: entry.status === 'confirmed' ? 'good' : 'danger' },
+          ...(accountId ? [{ label: accountLabel }] : []),
+          { label: `Nonce ${Number(entry.entityNonce || 0)}` },
+          ...(entry.jBlockNumber ? [{ label: `J#${Number(entry.jBlockNumber)}` }] : []),
+        ],
+        footerLeft: shortHash(entry.txHash || entry.batchHash),
+        footerRight: `Batch ${Number(entry.opCount || 0)} op${Number(entry.opCount || 0) === 1 ? '' : 's'}`,
+      });
+    }
+
     return rows.sort((a, b) => {
       if (a.timestamp !== b.timestamp) return b.timestamp - a.timestamp;
       if (a.height !== b.height) return b.height - a.height;
       return compareText(a.accountLabel, b.accountLabel);
     });
   })();
+
+  $: entityActivityAccounts = (() => {
+    const labels = new Map<string, string>();
+    for (const row of entityActivityRows) {
+      if (!row.accountId) continue;
+      labels.set(row.accountId, row.accountLabel);
+    }
+    return Array.from(labels.entries())
+      .map(([accountId, accountLabel]) => ({ accountId, accountLabel }))
+      .sort((a, b) => compareText(a.accountLabel, b.accountLabel));
+  })();
+
+  $: filteredEntityActivityRows = entityActivityAccountFilter === 'all'
+    ? entityActivityRows
+    : entityActivityRows.filter((row) => row.accountId === entityActivityAccountFilter);
+  $: if (entityActivityAccountFilter !== 'all' && !entityActivityAccounts.some((row) => row.accountId === entityActivityAccountFilter)) {
+    entityActivityAccountFilter = 'all';
+  }
 
   // Handlers
   function handleEntitySelect(event: CustomEvent) {
@@ -3995,7 +4383,10 @@
   }
 
   function goToLive() {
-    // Jump to live frame
+    if (onGoToLive) {
+      onGoToLive();
+      return;
+    }
     timeOperations.goToLive();
   }
 
@@ -4251,19 +4642,6 @@
   $: pendingBatchReserveIssueText = formatBatchReserveIssue(pendingBatchReserveIssue);
   $: canBroadcastPendingBatch = hasDraftBatch && !hasSentBatch && !pendingBatchReserveIssue;
 
-  async function waitForBatchStateTransition(
-    predicate: () => boolean,
-    timeoutMs = 4_000,
-    pollMs = 50,
-  ): Promise<void> {
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      if (predicate()) return;
-      await sleep(pollMs);
-    }
-    throw new Error('Batch state did not update in time after broadcast');
-  }
-
   async function clearPendingBatch(): Promise<void> {
     if (!pendingBatchCount || pendingBatchSubmitting) return;
     if (!confirm('Clear current draft and any sent batch state?')) return;
@@ -4301,14 +4679,7 @@
         type: 'j_broadcast',
         data: {},
       }])]);
-      await waitForBatchStateTransition(() => {
-        const batchState = replica?.state?.jBatchState;
-        const sent = countBatchOps(batchState?.sentBatch?.batch);
-        const draft = countBatchOps(batchState?.batch);
-        return sent > 0 || draft === 0;
-      });
-      const sentCount = countBatchOps(replica?.state?.jBatchState?.sentBatch?.batch);
-      toasts.success(sentCount > 0 ? 'Broadcast started' : 'Batch broadcast completed');
+      toasts.success('Broadcast queued');
     } catch (error) {
       toasts.error(`Batch broadcast failed: ${toErrorMessage(error, 'Unknown error')}`);
     } finally {
@@ -4444,7 +4815,7 @@
         </button>
       </div>
 
-    {:else if isAccountFocused && selectedAccount && selectedAccountId}
+    {:else if activeEnv && isAccountFocused && selectedAccount && selectedAccountId}
       <div class="focused-view">
         {#key selectedAccountId}
         <AccountPanel
@@ -4452,6 +4823,7 @@
           counterpartyId={selectedAccountId}
           entityId={tab.entityId}
           {replica}
+          env={activeEnv}
           on:back={handleBackToAccounts}
           on:faucet={handleAccountFaucet}
           on:goToOpenAccounts={handleAccountPanelGoToOpenAccounts}
@@ -4459,7 +4831,7 @@
         {/key}
       </div>
 
-    {:else if replica}
+    {:else if activeEnv && replica}
       <!-- Hero: Entity + Net Worth -->
       <section class="hero">
         <div class="hero-left" class:user-mode={userModeHeader}>
@@ -4507,7 +4879,7 @@
           </div>
         </div>
         <div class="hero-right">
-          <div class="hero-networth">{formatCompact(netWorth)}</div>
+          <div class="hero-networth">{formatUsdExact(netWorth)}</div>
           <div class="hero-label">Net Worth</div>
         </div>
       </section>
@@ -4548,8 +4920,8 @@
             <div class="faucet-inline-row">
               <span class="faucet-inline-label">Faucet</span>
               <select class="faucet-inline-token" bind:value={faucetAssetSymbol} data-testid="asset-faucet-symbol">
-                {#each externalTokens as token}
-                  <option value={token.symbol}>{token.symbol}</option>
+                {#each assetLedgerRows as row}
+                  <option value={row.symbol}>{row.symbol}</option>
                 {/each}
               </select>
               <button class="btn-table-action faucet" data-testid={`external-faucet-${faucetAssetSymbol}`} on:click={() => submitAssetFaucet('external')}>
@@ -4670,6 +5042,16 @@
               </div>
             </div>
           </div>
+
+          <DebtPanel
+            entityId={replica.state?.entityId || tab.entityId}
+            signerId={replica.state?.signerId || tab.signerId}
+            sourceEnv={activeEnv}
+            canEnforce={activeIsLive}
+            enforcingTokenId={debtEnforcingTokenId}
+            on:enforce={(event) => enforceOutstandingDebt(event.detail.tokenId)}
+          />
+
           <section class="asset-action-card">
             {#if openOutgoingDebtSummary.count > 0}
               <div class="workspace-debt-warning" data-testid="workspace-debt-warning">
@@ -4793,6 +5175,8 @@
               <SettlementPanel
                 entityId={replica.state?.entityId || tab.entityId}
                 {replica}
+                env={activeEnv}
+                isLive={activeIsLive}
                 historyOnly={true}
               />
             {/if}
@@ -4814,14 +5198,6 @@
             on:select={handleAccountSelect}
             on:faucet={handleAccountFaucet}
             on:settleApprove={handleQuickSettleApprove}
-          />
-
-          <DebtPanel
-            entityState={replica?.state || null}
-            sourceEnv={getRuntimeEnv(activeEnv)}
-            canEnforce={activeIsLive}
-            enforcingTokenId={debtEnforcingTokenId}
-            on:enforce={(event) => enforceOutstandingDebt(event.detail.tokenId)}
           />
 
           {#if openOutgoingDebtSummary.count > 0}
@@ -4892,6 +5268,8 @@
               <SwapPanel
                 {replica}
                 {tab}
+                env={activeEnv}
+                isLive={activeIsLive}
               />
 
             {:else if accountWorkspaceTab === 'move'}
@@ -4959,6 +5337,8 @@
               <SettlementPanel
                 entityId={replica.state?.entityId || tab.entityId}
                 {replica}
+                env={activeEnv}
+                isLive={activeIsLive}
                 historyOnly={true}
               />
 
@@ -5219,10 +5599,13 @@
                       <h4 class="section-head">Open Account</h4>
                     </div>
                   </div>
-                  <HubDiscoveryPanel
-                    entityId={replica?.state?.entityId || tab.entityId}
-                    envOverride={isRuntimeEnv(activeEnv) ? activeEnv : null}
-                  />
+                  {#if liveRuntimeEnv}
+                    <HubDiscoveryPanel
+                      entityId={replica?.state?.entityId || tab.entityId}
+                      env={liveRuntimeEnv}
+                      isLive={activeIsLive}
+                    />
+                  {/if}
                 </div>
                 <div class="open-section">
                   <div class="open-section-head compact">
@@ -5280,42 +5663,65 @@
               {#if entityActivityRows.length === 0}
                 <p class="muted">No entity frames with activity yet.</p>
               {:else}
+                <div class="entity-activity-toolbar">
+                  <label class="entity-activity-filter">
+                    <span>Account</span>
+                    <select bind:value={entityActivityAccountFilter}>
+                      <option value="all">All accounts</option>
+                      {#each entityActivityAccounts as accountOption}
+                        <option value={accountOption.accountId}>{accountOption.accountLabel}</option>
+                      {/each}
+                    </select>
+                  </label>
+                </div>
                 <div class="entity-activity-list">
-                  {#each entityActivityRows as row (row.id)}
-                    <article
-                      class="entity-frame-row"
-                      class:ours={row.actor === 'you'}
-                      class:peer={row.actor === 'peer'}
-                      class:system={row.actor === 'system'}
-                      class:queue={row.kind !== 'confirmed'}
-                    >
-                      <div class="entity-frame-row-head">
-                        <div class="entity-frame-row-left">
-                          <span class="entity-height-badge">E#{row.height}</span>
-                          <span class="entity-frame-actor">{row.actorLabel}</span>
-                          <span class="entity-frame-account">{row.accountLabel}</span>
-                          <span class="entity-frame-time">{formatTime(row.timestamp)}</span>
-                        </div>
-                        <div class="entity-frame-row-meta">
-                          {#if row.kind !== 'confirmed'}
-                            <span class="entity-frame-status">{row.statusLabel}</span>
+                  {#if filteredEntityActivityRows.length === 0}
+                    <p class="muted">No activity for this account yet.</p>
+                  {:else}
+                    {#each filteredEntityActivityRows as row (row.id)}
+                      <article
+                        class="entity-activity-row"
+                        class:ours={row.actor === 'you'}
+                        class:peer={row.actor === 'peer'}
+                        class:system={row.actor === 'system'}
+                        class:queue={row.kind === 'pending' || row.kind === 'mempool'}
+                      >
+                        <div class="entity-activity-actor">
+                          {#if row.actorAvatar}
+                            <img class="entity-activity-avatar" src={row.actorAvatar} alt="" />
+                          {:else}
+                            <div class="entity-activity-avatar entity-activity-avatar-fallback">{row.actorInitials}</div>
                           {/if}
-                          <span class="entity-frame-count">{row.txCount} tx</span>
+                          <div class="entity-activity-author-meta">
+                            <div class="entity-activity-author-name">{row.actorName}</div>
+                            <div class="entity-activity-author-badge">{row.actorLabel}</div>
+                          </div>
                         </div>
-                      </div>
-                      <div class="entity-frame-row-subhead">
-                        <span>{row.frameLabel}</span>
-                        <span>{formatEntityId(row.accountId)}</span>
-                      </div>
-                      <div class="entity-frame-types">
-                        {#each row.types as txType}
-                          <span class="entity-frame-chip">
-                            {entityTxTypeLabel(txType.type)}{#if txType.count > 1} ×{txType.count}{/if}
-                          </span>
-                        {/each}
-                      </div>
-                    </article>
-                  {/each}
+                        <div class="entity-activity-bubble">
+                          <div class="entity-activity-bubble-head">
+                            <div class="entity-activity-headline">{row.headline}</div>
+                            <div class="entity-activity-time">{formatTime(row.timestamp)}</div>
+                          </div>
+                          {#if row.bodyLines.length > 0}
+                            <div class="entity-activity-lines">
+                              {#each row.bodyLines as line}
+                                <div class="entity-activity-line">{line}</div>
+                              {/each}
+                            </div>
+                          {/if}
+                          <div class="entity-activity-chips">
+                            {#each row.chips as chip}
+                              <span class="entity-activity-chip tone-{chip.tone || 'neutral'}">{chip.label}</span>
+                            {/each}
+                          </div>
+                          <div class="entity-activity-footer">
+                            <span>{row.footerLeft}</span>
+                            <span>{row.footerRight}</span>
+                          </div>
+                        </div>
+                      </article>
+                    {/each}
+                  {/if}
                 </div>
               {/if}
 
@@ -6192,167 +6598,239 @@
   .entity-activity-list {
     display: flex;
     flex-direction: column;
-    gap: 8px;
+    gap: 12px;
   }
 
-  .entity-frame-row {
-    border: 1px solid #2a2d35;
-    border-radius: 10px;
-    background: #12141a;
-    padding: 10px;
-    max-width: calc(100% - 28px);
-  }
-
-  .entity-frame-row.ours {
-    margin-left: auto;
-    background: linear-gradient(180deg, rgba(22, 27, 34, 0.98), rgba(16, 20, 28, 0.98));
-    border-color: #2d435b;
-  }
-
-  .entity-frame-row.peer {
-    margin-right: auto;
-    background: linear-gradient(180deg, rgba(28, 20, 14, 0.96), rgba(21, 16, 12, 0.96));
-    border-color: #473324;
-  }
-
-  .entity-frame-row.system {
-    margin-right: auto;
-    max-width: 100%;
-    background: #12141a;
-  }
-
-  .entity-frame-row.queue {
-    border-style: dashed;
-  }
-
-  .entity-frame-row-head {
+  .entity-activity-toolbar {
     display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    margin-bottom: 8px;
+    justify-content: flex-end;
+    margin-bottom: 12px;
   }
 
-  .entity-frame-row-left {
+  .entity-activity-filter {
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    min-width: 0;
+    gap: 10px;
+    color: #a1a1aa;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
   }
 
-  .entity-height-badge {
+  .entity-activity-filter select {
+    min-height: 36px;
+    min-width: 220px;
+    padding: 0 12px;
+    border-radius: 12px;
+    border: 1px solid #2f333b;
+    background: #111315;
+    color: #f5f5f5;
+    font-size: 13px;
+  }
+
+  .entity-activity-row {
+    display: flex;
+    align-items: flex-end;
+    gap: 12px;
+  }
+
+  .entity-activity-row.ours {
+    flex-direction: row-reverse;
+  }
+
+  .entity-activity-row.system {
+    align-items: flex-start;
+  }
+
+  .entity-activity-actor {
+    width: 108px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-shrink: 0;
+  }
+
+  .entity-activity-row.ours .entity-activity-actor {
+    flex-direction: row-reverse;
+    text-align: right;
+  }
+
+  .entity-activity-avatar {
+    width: 40px;
+    height: 40px;
+    border-radius: 14px;
+    border: 1px solid #2c3139;
+    background: #121416;
+    flex-shrink: 0;
+  }
+
+  .entity-activity-avatar-fallback {
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    min-height: 24px;
-    padding: 0 8px;
-    border-radius: 999px;
-    background: #0f1116;
-    border: 1px solid #343742;
-    color: #e4e4e7;
-    font-size: 11px;
+    color: #f5f5f5;
+    font-size: 12px;
     font-weight: 700;
-    font-family: 'JetBrains Mono', monospace;
+    letter-spacing: 0.08em;
   }
 
-  .entity-frame-actor,
-  .entity-frame-account,
-  .entity-frame-status {
-    display: inline-flex;
-    align-items: center;
-    min-height: 22px;
-    padding: 0 8px;
-    border-radius: 999px;
+  .entity-activity-author-meta {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .entity-activity-author-name {
+    color: #f5f5f5;
+    font-size: 13px;
+    font-weight: 700;
+    line-height: 1.2;
+  }
+
+  .entity-activity-author-badge {
+    color: #a1a1aa;
     font-size: 10px;
     font-weight: 700;
-    letter-spacing: 0.02em;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
 
-  .entity-frame-actor {
-    background: #181b22;
-    border: 1px solid #333844;
-    color: #fbbf24;
+  .entity-activity-bubble {
+    flex: 1;
+    max-width: min(760px, calc(100% - 132px));
+    border-radius: 18px;
+    border: 1px solid #2a2d31;
+    background: linear-gradient(180deg, rgba(19, 21, 24, 0.98), rgba(13, 14, 16, 0.98));
+    padding: 14px 16px;
+    box-shadow: 0 20px 40px rgba(0, 0, 0, 0.22);
   }
 
-  .entity-frame-account {
-    background: #101217;
-    border: 1px solid #2d3139;
-    color: #d4d4d8;
-    max-width: 180px;
-    overflow: hidden;
-    text-overflow: ellipsis;
+  .entity-activity-row.ours .entity-activity-bubble {
+    border-color: #454545;
+    background: linear-gradient(180deg, rgba(23, 23, 23, 0.98), rgba(15, 15, 15, 0.98));
+  }
+
+  .entity-activity-row.peer .entity-activity-bubble {
+    border-color: #303030;
+  }
+
+  .entity-activity-row.queue .entity-activity-bubble {
+    border-style: dashed;
+  }
+
+  .entity-activity-bubble-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: flex-start;
+    gap: 12px;
+    margin-bottom: 8px;
+  }
+
+  .entity-activity-headline {
+    color: #fafafa;
+    font-size: 15px;
+    font-weight: 700;
+    line-height: 1.35;
+  }
+
+  .entity-activity-time {
+    font-size: 11px;
+    color: #8b8b8b;
+    font-family: 'JetBrains Mono', monospace;
     white-space: nowrap;
   }
 
-  .entity-frame-row-meta {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    flex-wrap: wrap;
-    justify-content: flex-end;
-  }
-
-  .entity-frame-status {
-    background: #151922;
-    border: 1px solid #313645;
-    color: #a1a1aa;
-  }
-
-  .entity-frame-row-subhead {
+  .entity-activity-lines {
     display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-    margin: -2px 0 8px;
-    color: #71717a;
-    font-size: 11px;
-    font-family: 'JetBrains Mono', monospace;
+    flex-direction: column;
+    gap: 6px;
+    margin-bottom: 12px;
   }
 
-  .entity-frame-time {
-    font-size: 11px;
-    color: #9ca3af;
-    font-family: 'JetBrains Mono', monospace;
+  .entity-activity-line {
+    color: #d4d4d4;
+    font-size: 13px;
+    line-height: 1.45;
   }
 
-  .entity-frame-count {
-    font-size: 11px;
-    color: #a1a1aa;
-  }
-
-  .entity-frame-types {
+  .entity-activity-chips {
     display: flex;
     flex-wrap: wrap;
     gap: 6px;
+    margin-bottom: 10px;
   }
 
-  .entity-frame-chip {
+  .entity-activity-chip {
     display: inline-flex;
     align-items: center;
     min-height: 24px;
-    padding: 0 9px;
+    padding: 0 10px;
     border-radius: 999px;
-    border: 1px solid #353844;
-    background: #0f1116;
-    color: #d4d4d8;
+    border: 1px solid #353535;
+    background: #121212;
+    color: #d4d4d4;
     font-size: 11px;
     font-weight: 600;
     white-space: nowrap;
   }
 
+  .entity-activity-chip.tone-good {
+    border-color: #27543a;
+    color: #b7f7c6;
+  }
+
+  .entity-activity-chip.tone-warn {
+    border-color: #61491c;
+    color: #f3d089;
+  }
+
+  .entity-activity-chip.tone-danger {
+    border-color: #633131;
+    color: #f0b4b4;
+  }
+
+  .entity-activity-footer {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    color: #7a7a7a;
+    font-size: 11px;
+    font-family: 'JetBrains Mono', monospace;
+  }
+
   @media (max-width: 720px) {
-    .entity-frame-row {
+    .entity-activity-toolbar {
+      justify-content: stretch;
+    }
+
+    .entity-activity-filter,
+    .entity-activity-filter select {
+      width: 100%;
+    }
+
+    .entity-activity-row,
+    .entity-activity-row.ours {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .entity-activity-actor,
+    .entity-activity-row.ours .entity-activity-actor {
+      width: 100%;
+      flex-direction: row;
+      text-align: left;
+    }
+
+    .entity-activity-bubble {
       max-width: 100%;
     }
 
-    .entity-frame-row-head,
-    .entity-frame-row-subhead {
+    .entity-activity-bubble-head,
+    .entity-activity-footer {
       flex-direction: column;
       align-items: flex-start;
-    }
-
-    .entity-frame-row-meta {
-      justify-content: flex-start;
     }
   }
 

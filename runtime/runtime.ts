@@ -201,7 +201,6 @@ import {
   generateSignerAvatar,
   getEntityDisplayInfo,
   getSignerDisplayInfo,
-  isBrowser,
   log,
 } from './utils';
 import { logError } from './logger';
@@ -218,7 +217,9 @@ import {
 import { rehydrateRestoredRuntimeInfra } from './runtime-infra';
 import { loadRuntimeStateFromDb, verifyPersistedRuntimeState } from './wal/state-restore';
 
-if (isBrowser && typeof globalThis.process === 'undefined') {
+const runtimeIsBrowser = typeof window !== 'undefined';
+
+if (runtimeIsBrowser && typeof globalThis.process === 'undefined') {
   const nowMs = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
   const hrtime = (prev?: [number, number]) => {
     const ms = nowMs();
@@ -299,7 +300,7 @@ function normalizeEntitySwapTradingPairs(state: { swapTradingPairs?: Array<{ bas
 
 // --- Database Setup ---
 // Level polyfill: Node.js uses filesystem, Browser uses IndexedDB
-const nodeProcess = !isBrowser && typeof globalThis.process !== 'undefined' ? globalThis.process : undefined;
+const nodeProcess = !runtimeIsBrowser && typeof globalThis.process !== 'undefined' ? globalThis.process : undefined;
 const defaultDbPath = nodeProcess ? 'db-tmp/runtime' : 'db';
 const dbRootPath = nodeProcess?.env?.XLN_DB_PATH || defaultDbPath;
 
@@ -499,6 +500,9 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
   if (!env.runtimeState.entityRuntimeHints) {
     env.runtimeState.entityRuntimeHints = new Map();
   }
+  if (!env.runtimeState.watcherDedupCounter) {
+    env.runtimeState.watcherDedupCounter = { value: 0 };
+  }
   trackedRuntimeEnvs.add(env);
   ensureRuntimeWakeWatchdogStarted();
   return env.runtimeState;
@@ -623,7 +627,7 @@ export const clearCleanLogs = (env: Env): void => {
 /** Copy clean logs to clipboard (returns text if clipboard fails) */
 export const copyCleanLogs = async (env: Env): Promise<string> => {
   const text = getCleanLogs(env);
-  if (isBrowser && navigator.clipboard) {
+  if (runtimeIsBrowser && navigator.clipboard) {
     try {
       await navigator.clipboard.writeText(text);
       console.log(`✅ Copied ${getCleanLogBuffer(env).length} log entries to clipboard`);
@@ -1034,7 +1038,7 @@ const getNextWallClockWakeTimestamp = (env: Env): number | null => {
   return Number.isFinite(nextWake) ? nextWake : null;
 };
 
-const RUNTIME_WAKE_WATCHDOG_MS = 250;
+const RUNTIME_WAKE_WATCHDOG_MS = 1000;
 const trackedRuntimeEnvs = new Set<Env>();
 let runtimeWakeWatchdog: ReturnType<typeof setInterval> | null = null;
 const logSlowBrowserTimer = (label: string, startedAt: number, extra = ''): void => {
@@ -1207,6 +1211,14 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
     try {
       while (running) {
         try {
+          // jReplicas can appear after the loop has already started:
+          // - server bootstrap wires the RPC adapter after startRuntimeLoop(env)
+          // - restored/fresh runtimes can import jurisdictions later
+          //
+          // The runtime loop remains the single canonical owner of watcher lifecycle.
+          // Re-checking here is safe because startWatching() is idempotent and guards
+          // duplicate intervals internally. Do not add parallel server/UI watcher starts.
+          startJurisdictionWatchers(env);
           if (hasRuntimeWork(env)) {
             const remainingDelayMs = getRemainingRuntimeFrameDelayMs(env);
             if (remainingDelayMs > 0) {
@@ -1287,9 +1299,43 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
 
 export const startJurisdictionWatchers = (env: Env): void => {
   if (!env.jReplicas || env.jReplicas.size === 0) return;
+  const watcherOwners = new Map<string, JAdapter>();
+  const providerUrlOf = (adapter: JAdapter, replica: JReplica): string => {
+    const configured = replica.rpcs?.find((rpc) => typeof rpc === 'string' && rpc.trim().length > 0);
+    if (configured) return configured.trim();
+    const providerWithConnection = adapter.provider as Provider & {
+      _getConnection?: () => { url?: string };
+    };
+    return String(providerWithConnection?._getConnection?.()?.url || '').trim();
+  };
+  const watcherKeyOf = (replica: JReplica): string | null => {
+    const adapter = replica.jadapter;
+    if (!adapter) return null;
+    const depository = String(replica.depositoryAddress || replica.contracts?.depository || '').trim().toLowerCase();
+    const chainId = String(replica.chainId ?? adapter.chainId ?? '');
+    if (adapter.mode === 'browservm') {
+      return `browservm:${chainId}:${depository || replica.name}`;
+    }
+    const rpcUrl = providerUrlOf(adapter, replica).toLowerCase();
+    return `rpc:${chainId}:${rpcUrl}:${depository || replica.name}`;
+  };
   for (const [name, jReplica] of env.jReplicas.entries()) {
-    if (!jReplica.jadapter) continue;
-    jReplica.jadapter.startWatching(env);
+    const adapter = jReplica.jadapter;
+    if (!adapter) continue;
+    const watcherKey = watcherKeyOf(jReplica);
+    const owner = watcherKey ? watcherOwners.get(watcherKey) : undefined;
+    if (owner) {
+      if (owner !== adapter && adapter.isWatching()) {
+        adapter.stopWatching();
+        console.warn(`⚠️ Stopped duplicate JAdapter watcher for "${name}" (${watcherKey})`);
+      }
+      continue;
+    }
+    if (watcherKey) {
+      watcherOwners.set(watcherKey, adapter);
+    }
+    if (adapter.isWatching()) continue;
+    adapter.startWatching(env);
     console.log(`✅ JAdapter watcher started for jReplica "${name}"`);
   }
 };
@@ -2188,9 +2234,10 @@ const applyRuntimeInput = async (
             env.activeJurisdiction = runtimeTx.data.name;
           }
 
-          // Start JAdapter's integrated watcher (feeds J-events → runtime mempool)
-          jadapter.startWatching(env);
-          console.log(`[Runtime] ✅ JReplica "${runtimeTx.data.name}" ready (watching)`);
+          // J-event watching belongs to the unified runtime watcher path.
+          // Import wires the replica; startJurisdictionWatchers(env) owns startup.
+          startJurisdictionWatchers(env);
+          console.log(`[Runtime] ✅ JReplica "${runtimeTx.data.name}" ready`);
         } catch (error) {
           console.error(`[Runtime] ❌ Failed to import J-machine:`, error);
           throw error;
@@ -2762,7 +2809,7 @@ const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
 
   let env = baseEnv;
   let restoredFromCoreDb = false;
-  if (isBrowser) {
+  if (runtimeIsBrowser) {
     const loaded = await loadEnvFromDB(baseEnv.runtimeId, baseEnv.runtimeSeed);
     if (loaded) {
       const loadedState = ensureRuntimeState(loaded);
@@ -2800,10 +2847,8 @@ const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
     }
   }
 
-  startJurisdictionWatchers(env);
-
   // Start the runtime event loop (single async while-loop, never re-enters)
-  if (isBrowser) {
+  if (runtimeIsBrowser) {
     console.log('🔄 [LOOP] Starting runtime event loop (browser mode)');
     startRuntimeLoop(env);
   }
@@ -3655,10 +3700,20 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
           }
         }
 
-        // Update jReplica metadata
+        // Submission does not own the watcher cursor.
+        // The only authoritative J-height/blockNumber advancement path is:
+        //   watcher poll -> processEventBatch -> updateWatcherJurisdictionCursor(...)
+        //
+        // Why this must stay watcher-owned:
+        // - submitTx success only proves the tx was accepted locally/by RPC, not that all
+        //   finalized J-events from the mined block were ingested into runtime state
+        // - persisting a speculative blockNumber here can make WAL/snapshots resume from
+        //   after a block whose events were never actually applied
+        // - after restart, getWatcherStartBlock() would then skip the missed finalized
+        //   range and one side can stay stale forever
+        //
+        // Keep only local submit timestamp metadata here. Let the watcher commit height.
         jReplica.lastBlockTimestamp = env.timestamp;
-        jReplica.blockNumber = jReplica.blockNumber + 1n;
-        console.log(`📊 [J-SUBMIT] ${jReplica.name} block #${jReplica.blockNumber}`);
       }
     }
 
@@ -3700,7 +3755,7 @@ export const saveEnvToDB = async (env: Env, currentFrameInput?: RuntimeInput): P
     getPerfMs,
     formatPerfMs,
   });
-  if (isBrowser && typeof BroadcastChannel !== 'undefined' && typeof env.runtimeId === 'string' && env.runtimeId.length > 0) {
+  if (runtimeIsBrowser && typeof BroadcastChannel !== 'undefined' && typeof env.runtimeId === 'string' && env.runtimeId.length > 0) {
     const runtimeSyncChannel = new BroadcastChannel('xln-runtime-sync');
     runtimeSyncChannel.postMessage({
       runtimeId: env.runtimeId,
@@ -3831,7 +3886,7 @@ export const loadEnvFromDB = async (
 
     if (latestEnv) {
       await rehydrateRestoredRuntimeInfra(latestEnv, {
-        isBrowser,
+        isBrowser: runtimeIsBrowser,
         loadGossipProfiles: loadGossipProfilesFromInfraDb,
         assertPersistedContractConfigReady,
         setBrowserVMJurisdiction,
@@ -3849,7 +3904,7 @@ export const loadEnvFromDB = async (
 export const clearDB = async (env?: Env): Promise<void> => {
   const targetEnv = env ?? createEmptyEnv(null);
 
-  if (!isBrowser && nodeProcess) {
+  if (!runtimeIsBrowser && nodeProcess) {
     try {
       await closeRuntimeDb(targetEnv);
       await closeInfraDb(targetEnv);
@@ -3863,7 +3918,7 @@ export const clearDB = async (env?: Env): Promise<void> => {
     return;
   }
 
-  if (!isBrowser) return;
+  if (!runtimeIsBrowser) return;
 
   try {
     const dbReady = await tryOpenDb(targetEnv);

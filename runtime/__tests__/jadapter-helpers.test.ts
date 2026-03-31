@@ -1,6 +1,51 @@
 import { describe, expect, test } from 'bun:test';
 
-import { getWatcherStartBlock, updateWatcherJurisdictionCursor } from '../jadapter/helpers';
+import { getWatcherStartBlock, processEventBatch, updateWatcherJurisdictionCursor } from '../jadapter/watcher';
+import { createEmptyEnv } from '../runtime';
+import type { EntityReplica } from '../types';
+
+const makeReplica = (entityId: string, signerId: string, isProposer: boolean): EntityReplica =>
+  ({
+    entityId,
+    signerId,
+    mempool: [],
+    isProposer,
+    state: {
+      entityId,
+      height: 0,
+      timestamp: 1_000,
+      nonces: new Map(),
+      messages: [],
+      proposals: new Map(),
+      config: {
+        mode: 'proposer-based',
+        threshold: 1n,
+        validators: [signerId],
+        shares: { [signerId]: 1n },
+      },
+      reserves: new Map(),
+      accounts: new Map(),
+      deferredAccountProposals: new Map(),
+      lastFinalizedJHeight: 0,
+      jBlockObservations: [],
+      jBlockChain: [],
+      entityEncPubKey: `${'0x'}${'11'.repeat(32)}`,
+      entityEncPrivKey: `${'0x'}${'22'.repeat(32)}`,
+      profile: {
+        name: 'Replica',
+        isHub: false,
+        avatar: '',
+        bio: '',
+        website: '',
+      },
+      htlcRoutes: new Map(),
+      htlcFeesEarned: 0n,
+      htlcNotes: new Map(),
+      lockBook: new Map(),
+      swapTradingPairs: [],
+      pendingSwapFillRatios: new Map(),
+    },
+  }) as EntityReplica;
 
 describe('jadapter helper cursors', () => {
   test('uses matching jReplica blockNumber as watcher cursor source', () => {
@@ -46,5 +91,44 @@ describe('jadapter helper cursors', () => {
     expect(getWatcherStartBlock(env, '0xaaa')).toBe(101);
     updateWatcherJurisdictionCursor(env, 120, '0xaaa');
     expect(getWatcherStartBlock(env, '0xaaa')).toBe(121);
+  });
+
+  test('processEventBatch fans out canonical events to every registered replica through runtime ingress', () => {
+    const env = createEmptyEnv('jadapter-helper-delivery-seed');
+    env.timestamp = 1_000;
+    env.quietRuntimeLogs = true;
+
+    const entityId = `0x${'44'.repeat(32)}`;
+    const proposerSignerId = `0x${'55'.repeat(20)}`;
+    const validatorSignerId = `0x${'66'.repeat(20)}`;
+    env.eReplicas.set(`${entityId}:${proposerSignerId}`, makeReplica(entityId, proposerSignerId, true));
+    env.eReplicas.set(`${entityId}:${validatorSignerId}`, makeReplica(entityId, validatorSignerId, false));
+
+    processEventBatch(
+      [{
+        name: 'ReserveUpdated',
+        args: {
+          entity: entityId,
+          tokenId: 2,
+          newBalance: 123n,
+        },
+        blockNumber: 7,
+        blockHash: `0x${'66'.repeat(32)}`,
+        transactionHash: `0x${'77'.repeat(32)}`,
+        logIndex: 0,
+      }],
+      env,
+      7,
+      `0x${'66'.repeat(32)}`,
+      { value: 0 },
+      'test',
+    );
+
+    const queuedInputs = env.runtimeMempool?.entityInputs ?? [];
+    expect(queuedInputs.length).toBe(2);
+    expect(queuedInputs.every((input) => input.entityId === entityId.toLowerCase())).toBe(true);
+    expect(queuedInputs.map((input) => input.signerId).sort()).toEqual([proposerSignerId, validatorSignerId].sort());
+    expect(queuedInputs.every((input) => input.entityTxs[0]?.type === 'j_event')).toBe(true);
+    expect(env.runtimeState?.wakeRequested).toBe(true);
   });
 });

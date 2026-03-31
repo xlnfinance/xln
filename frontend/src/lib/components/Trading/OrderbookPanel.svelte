@@ -87,9 +87,6 @@
   let hoverAskDisplayIdx = -1;
   let hoverBidIdx = -1;
 
-  let pollInterval: number | null = null;
-  const POLL_MS = 1000;
-
   let marketWs: WebSocket | null = null;
   let marketRetryTimer: ReturnType<typeof setTimeout> | null = null;
   let marketWsClosing = false;
@@ -465,10 +462,7 @@
       return;
     }
 
-    const applied = applyStreamOrderbook(sources, pair);
-    if (!applied && marketWs && marketWs.readyState === 1) {
-      requestMarketSnapshot();
-    }
+    applyStreamOrderbook(sources, pair);
   }
 
   function priceDisplayDecimals(): number {
@@ -661,14 +655,9 @@
     loadPriceStepOverrides();
     extractOrderbook();
     connectMarketStream();
-    pollInterval = setInterval(() => {
-      extractOrderbook();
-      requestMarketSnapshot();
-    }, POLL_MS) as unknown as number;
   });
 
   onDestroy(() => {
-    if (pollInterval) clearInterval(pollInterval);
     disconnectMarketStream();
   });
 

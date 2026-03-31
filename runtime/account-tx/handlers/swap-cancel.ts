@@ -12,6 +12,7 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
+import { recordSwapCancelRequested } from './swap-history';
 
 export async function handleSwapCancelRequest(
   accountMachine: AccountMachine,
@@ -46,6 +47,7 @@ export async function handleSwapCancelRequest(
   } else {
     console.log(`📊 COMMIT: swap_cancel_request accepted, offerId=${offerId.slice(0, 8)}`);
   }
+  recordSwapCancelRequested(accountMachine, offerId, _currentHeight);
   return { success: true, events, swapOfferCancelRequested: { offerId } };
 }
 

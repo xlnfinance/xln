@@ -6,11 +6,16 @@ import { handleHtlcLock } from '../account-tx/handlers/htlc-lock';
 import { handleRequestCollateral } from '../account-tx/handlers/request-collateral';
 import { handleSwapOffer } from '../account-tx/handlers/swap-offer';
 import { LIMITS } from '../constants';
+import { initCrontab } from '../entity-crontab';
 import { generateLazyEntityId } from '../entity-factory';
 import { applyEntityInput } from '../entity-consensus';
+import { handleJAbortSentBatch } from '../entity-tx/handlers/j-abort-sent-batch';
+import { handleJRebroadcast } from '../entity-tx/handlers/j-rebroadcast';
+import { handleJEvent } from '../entity-tx/j-events';
+import { createEmptyBatch } from '../j-batch';
 import { process, createEmptyEnv } from '../runtime';
 import { safeStringify } from '../serialization-utils';
-import type { AccountMachine, AccountTx, ConsensusConfig, EntityInput, EntityReplica } from '../types';
+import type { AccountMachine, AccountTx, ConsensusConfig, EntityInput, EntityReplica, EntityState } from '../types';
 
 const makeSingleSignerConfig = (): ConsensusConfig => ({
   mode: 'proposer-based',
@@ -26,7 +31,7 @@ const makeSingleSignerConfigFor = (signerId: string): ConsensusConfig => ({
   shares: { [signerId]: 1n },
 });
 
-const hex20 = (byte: string): string => `0x${byte.repeat(20)}`;
+const hex20 = (byte: string): string => `0x${byte.repeat(byte.length === 2 ? 20 : 40)}`;
 
 const makeProposalAccount = (
   mempool: AccountTx[],
@@ -140,7 +145,39 @@ const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
     lockBook: new Map(),
     swapTradingPairs: [],
     pendingSwapFillRatios: new Map(),
+    crontabState: initCrontab(),
   },
+});
+
+const makeEntityState = (entityId: string): EntityState => ({
+  entityId,
+  height: 0,
+  timestamp: 1_000,
+  nonces: new Map(),
+  messages: [],
+  proposals: new Map(),
+  config: makeSingleSignerConfig(),
+  reserves: new Map(),
+  accounts: new Map(),
+  deferredAccountProposals: new Map(),
+  lastFinalizedJHeight: 0,
+  jBlockObservations: [],
+  jBlockChain: [],
+  entityEncPubKey: `0x${'55'.repeat(32)}`,
+  entityEncPrivKey: `0x${'66'.repeat(32)}`,
+  profile: {
+    name: 'Audit Entity',
+    isHub: false,
+    avatar: '',
+    bio: '',
+    website: '',
+  },
+  htlcRoutes: new Map(),
+  htlcFeesEarned: 0n,
+  htlcNotes: new Map(),
+  lockBook: new Map(),
+  swapTradingPairs: [],
+  pendingSwapFillRatios: new Map(),
 });
 
 describe('audit fail-fast regressions', () => {
@@ -161,6 +198,135 @@ describe('audit fail-fast regressions', () => {
 
   test('safeStringify throws instead of hashing a placeholder string', () => {
     expect(() => safeStringify({ bad: new Date(Number.NaN) })).toThrow('SAFE_STRINGIFY_FAILED');
+  });
+
+  test('j_abort_sent_batch does not requeue dispute finalize after on-chain finalize already cleared activeDispute', async () => {
+    const entityId = `0x${'aa'.repeat(32)}`;
+    const counterpartyId = `0x${'bb'.repeat(32)}`;
+    const state = makeEntityState(entityId);
+    const account = makeProposalAccount([], entityId, counterpartyId);
+    delete account.activeDispute;
+    state.accounts.set(counterpartyId, account);
+    state.jBatchState = {
+      batch: createEmptyBatch(),
+      jurisdiction: null,
+      lastBroadcast: 0,
+      broadcastCount: 0,
+      failedAttempts: 0,
+      status: 'sent',
+      sentBatch: {
+        batch: {
+          ...createEmptyBatch(),
+          disputeFinalizations: [
+            {
+              counterentity: counterpartyId,
+              initialNonce: 3,
+              finalNonce: 3,
+              initialProofbodyHash: `0x${'11'.repeat(32)}`,
+              finalProofbody: {
+                offdeltas: [],
+                tokenIds: [],
+                transformers: [],
+              },
+              finalArguments: '0x',
+              initialArguments: '0x',
+              sig: '0x',
+              startedByLeft: true,
+              disputeUntilBlock: 123,
+              cooperative: false,
+            },
+          ],
+        },
+        batchHash: `0x${'22'.repeat(32)}`,
+        encodedBatch: '0x',
+        entityNonce: 1,
+        firstSubmittedAt: 1000,
+        lastSubmittedAt: 1000,
+        submitAttempts: 1,
+      },
+      entityNonce: 1,
+    };
+
+    const result = await handleJAbortSentBatch(
+      state,
+      {
+        type: 'j_abort_sent_batch',
+        data: { reason: 'submit_failed:E5()', requeueToCurrent: true },
+      },
+      createEmptyEnv('abort-stale-finalize'),
+    );
+
+    expect(result.newState.jBatchState?.sentBatch).toBeUndefined();
+    expect(result.newState.jBatchState?.batch.disputeFinalizations.length).toBe(0);
+    expect(result.newState.jBatchState?.status).toBe('empty');
+  });
+
+  test('j_abort_sent_batch never resurrects dispute finalize into current batch', async () => {
+    const entityId = `0x${'cc'.repeat(32)}`;
+    const counterpartyId = `0x${'dd'.repeat(32)}`;
+    const state = makeEntityState(entityId);
+    const account = makeProposalAccount([], entityId, counterpartyId);
+    account.activeDispute = {
+      startedByLeft: true,
+      disputeTimeout: 123,
+      initialProofbodyHash: `0x${'44'.repeat(32)}`,
+      initialNonce: 5,
+      finalizeQueued: true,
+    } as AccountMachine['activeDispute'];
+    state.accounts.set(counterpartyId, account);
+    state.jBatchState = {
+      batch: createEmptyBatch(),
+      jurisdiction: null,
+      lastBroadcast: 0,
+      broadcastCount: 0,
+      failedAttempts: 0,
+      status: 'sent',
+      sentBatch: {
+        batch: {
+          ...createEmptyBatch(),
+          disputeFinalizations: [
+            {
+              counterentity: counterpartyId,
+              initialNonce: 5,
+              finalNonce: 5,
+              initialProofbodyHash: `0x${'44'.repeat(32)}`,
+              finalProofbody: {
+                offdeltas: [],
+                tokenIds: [],
+                transformers: [],
+              },
+              finalArguments: '0x',
+              initialArguments: '0x',
+              sig: '0x',
+              startedByLeft: true,
+              disputeUntilBlock: 123,
+              cooperative: false,
+            },
+          ],
+        },
+        batchHash: `0x${'55'.repeat(32)}`,
+        encodedBatch: '0x',
+        entityNonce: 1,
+        firstSubmittedAt: 1000,
+        lastSubmittedAt: 1000,
+      },
+    };
+
+    const result = await handleJAbortSentBatch(
+      state,
+      {
+        type: 'j_abort_sent_batch',
+        data: {
+          reason: 'submit_failed',
+          requeueToCurrent: true,
+        },
+      },
+      createEmptyEnv('abort-finalize-regression'),
+    );
+
+    expect(result.newState.jBatchState?.sentBatch).toBeUndefined();
+    expect(result.newState.jBatchState?.batch.disputeFinalizations).toEqual([]);
+    expect(result.newState.accounts.get(counterpartyId)?.activeDispute?.finalizeQueued).toBe(false);
   });
 
   test('request_collateral checks prepaid fee against derived outCapacity', () => {
@@ -332,6 +498,201 @@ describe('audit fail-fast regressions', () => {
 
     expect(result.success).toBe(false);
     expect(result.error).toContain('minFillRatio > 0 requires timeInForce');
+  });
+
+  test('DisputeFinalized scrubs stale sentBatch finalize and failed Hanko does not resurrect it', async () => {
+    const entityId = `0x${'12'.repeat(32)}`;
+    const counterpartyId = `0x${'34'.repeat(32)}`;
+    const state = makeEntityState(entityId);
+    const account = makeProposalAccount([], entityId, counterpartyId);
+    account.activeDispute = {
+      startedByLeft: true,
+      disputeTimeout: 123,
+      initialProofbodyHash: `0x${'56'.repeat(32)}`,
+      initialNonce: 7,
+      finalizeQueued: true,
+    } as AccountMachine['activeDispute'];
+    state.accounts.set(counterpartyId, account);
+    state.jBatchState = {
+      batch: {
+        ...createEmptyBatch(),
+        disputeFinalizations: [{
+          counterentity: counterpartyId,
+          initialNonce: 7,
+          finalNonce: 7,
+          initialProofbodyHash: `0x${'56'.repeat(32)}`,
+          finalProofbody: { offdeltas: [], tokenIds: [], transformers: [] },
+          finalArguments: '0x',
+          initialArguments: '0x',
+          sig: '0x',
+          startedByLeft: true,
+          disputeUntilBlock: 123,
+          cooperative: false,
+        }],
+      },
+      jurisdiction: null,
+      lastBroadcast: 0,
+      broadcastCount: 0,
+      failedAttempts: 0,
+      status: 'sent',
+      sentBatch: {
+        batch: {
+          ...createEmptyBatch(),
+          disputeFinalizations: [{
+            counterentity: counterpartyId,
+            initialNonce: 7,
+            finalNonce: 7,
+            initialProofbodyHash: `0x${'56'.repeat(32)}`,
+            finalProofbody: { offdeltas: [], tokenIds: [], transformers: [] },
+            finalArguments: '0x',
+            initialArguments: '0x',
+            sig: '0x',
+            startedByLeft: true,
+            disputeUntilBlock: 123,
+            cooperative: false,
+          }],
+        },
+        batchHash: `0x${'78'.repeat(32)}`,
+        encodedBatch: '0x',
+        entityNonce: 7,
+        firstSubmittedAt: 1000,
+        lastSubmittedAt: 1000,
+        submitAttempts: 1,
+      },
+      entityNonce: 6,
+    } as EntityState['jBatchState'];
+
+    const env = createEmptyEnv('dispute-finalize-scrub-seed');
+    const finalized = await handleJEvent(state, {
+      from: `0x${'aa'.repeat(20)}`,
+      observedAt: 2000,
+      blockNumber: 22,
+      blockHash: `0x${'99'.repeat(32)}`,
+      transactionHash: `0x${'88'.repeat(32)}`,
+      event: {
+        type: 'DisputeFinalized',
+        data: {
+          sender: entityId,
+          counterentity: counterpartyId,
+          initialNonce: 7,
+          initialProofbodyHash: `0x${'56'.repeat(32)}`,
+          finalProofbodyHash: `0x${'57'.repeat(32)}`,
+        },
+      },
+    }, env);
+
+    expect(finalized.newState.accounts.get(counterpartyId)?.activeDispute).toBeUndefined();
+    expect(finalized.newState.jBatchState?.batch.disputeFinalizations.length).toBe(0);
+    expect(finalized.newState.jBatchState?.sentBatch?.batch.disputeFinalizations.length).toBe(0);
+
+    const failed = await handleJEvent(finalized.newState, {
+      from: `0x${'aa'.repeat(20)}`,
+      observedAt: 3000,
+      blockNumber: 23,
+      blockHash: `0x${'77'.repeat(32)}`,
+      transactionHash: `0x${'66'.repeat(32)}`,
+      event: {
+        type: 'HankoBatchProcessed',
+        data: {
+          entityId,
+          hankoHash: `0x${'55'.repeat(32)}`,
+          nonce: 7,
+          success: false,
+        },
+      },
+    }, env);
+
+    expect(failed.newState.jBatchState?.batch.disputeFinalizations.length).toBe(0);
+  });
+
+  test('j_rebroadcast filters stale dispute finalize and only resubmits live ops', async () => {
+    const entityId = `0x${'ab'.repeat(32)}`;
+    const counterpartyId = `0x${'cd'.repeat(32)}`;
+    const state = makeEntityState(entityId);
+    state.config = {
+      ...state.config,
+      jurisdiction: {
+        name: 'Testnet',
+        depositoryAddress: hex20('1'),
+        entityProviderAddress: hex20('2'),
+        chainId: 31337,
+      },
+    } as EntityState['config'];
+    state.jBatchState = {
+      batch: createEmptyBatch(),
+      jurisdiction: null,
+      lastBroadcast: 0,
+      broadcastCount: 0,
+      failedAttempts: 0,
+      status: 'sent',
+      sentBatch: {
+        batch: {
+          ...createEmptyBatch(),
+          reserveToReserve: [{
+            receivingEntity: `0x${'ef'.repeat(32)}`,
+            tokenId: 1,
+            amount: 10n,
+          }],
+          disputeFinalizations: [{
+            counterentity: counterpartyId,
+            initialNonce: 3,
+            finalNonce: 3,
+            initialProofbodyHash: `0x${'11'.repeat(32)}`,
+            finalProofbody: { offdeltas: [], tokenIds: [], transformers: [] },
+            finalArguments: '0x',
+            initialArguments: '0x',
+            sig: '0x',
+            startedByLeft: true,
+            disputeUntilBlock: 123,
+            cooperative: false,
+          }],
+        },
+        batchHash: `0x${'22'.repeat(32)}`,
+        encodedBatch: '0x1234',
+        entityNonce: 9,
+        firstSubmittedAt: 1000,
+        lastSubmittedAt: 1000,
+        submitAttempts: 1,
+      },
+      entityNonce: 8,
+    } as EntityState['jBatchState'];
+
+    const env = createEmptyEnv('j-rebroadcast-scrub-seed');
+    env.activeJurisdiction = 'Testnet';
+    env.jReplicas.set('Testnet', {
+      name: 'Testnet',
+      blockNumber: 0n,
+      stateRoot: new Uint8Array(32),
+      mempool: [],
+      blockDelayMs: 0,
+      lastBlockTimestamp: 0,
+      position: { x: 0, y: 0, z: 0 },
+      depositoryAddress: hex20('1'),
+      entityProviderAddress: hex20('2'),
+      contracts: {
+        account: hex20('3'),
+        depository: hex20('1'),
+        entityProvider: hex20('2'),
+        deltaTransformer: hex20('4'),
+      },
+      rpcs: ['http://localhost:8545'],
+      chainId: 31337,
+    });
+
+    const result = await handleJRebroadcast(
+      state,
+      { type: 'j_rebroadcast', data: {} },
+      env,
+    );
+
+    expect(result.jOutputs.length).toBe(1);
+    const rebroadcast = result.jOutputs[0]?.jTxs[0];
+    expect(rebroadcast?.type).toBe('batch');
+    if (rebroadcast?.type === 'batch') {
+      expect(rebroadcast.data.batch.disputeFinalizations.length).toBe(0);
+      expect(rebroadcast.data.batch.reserveToReserve.length).toBe(1);
+    }
+    expect(result.newState.jBatchState?.sentBatch?.batch.disputeFinalizations.length).toBe(0);
   });
 
   test('htlc_lock refuses to add more than the configured per-account cap', async () => {

@@ -30,22 +30,25 @@ import {
   buildExternalTokenToReserveBatch,
   computeAccountKey,
   entityIdToAddress,
-  getWatcherStartBlock,
   parseReceiptLogsToJEvents,
-  setupContractEventListeners,
+  toJEvent,
+} from './helpers';
+import { CANONICAL_J_EVENTS } from './helpers';
+import {
+  getWatcherStartBlock,
   processEventBatch,
   updateWatcherJurisdictionCursor,
   type EventBatchCounter,
   type RawJEvent,
   type RawJEventArgs,
-} from './helpers';
-import { CANONICAL_J_EVENTS } from './helpers';
+} from './watcher';
 import { DEV_CHAIN_IDS } from './index';
 import { preflightBatchForE2 } from '../j-batch';
 import { firstUsableContractAddress, requireUsableContractAddress } from '../contract-address';
 import { setDeltaTransformerAddress } from '../proof-builder';
 import { prepareSignedBatch } from '../hanko/batch';
 import { resolveEntityProposerId } from '../state-helpers';
+import { BLOCKCHAIN } from '../constants';
 
 type DebugEventEmitter = {
   sendDebugEvent(payload: Record<string, unknown>): void;
@@ -158,7 +161,6 @@ export async function createRpcAdapter(
     if (!traceEnabled) return;
     console.log(`[JAdapter:rpc][trace] ${phase}${extra ? ` ${JSON.stringify(extra)}` : ''}`);
   };
-  const WATCH_POLL_MS = 1000;
   const TX_WAIT_TIMEOUT_MS = Math.max(
     10_000,
     Math.floor(Number(process.env.JADAPTER_TX_WAIT_TIMEOUT_MS ?? config.txWaitTimeoutMs ?? 300_000)),
@@ -324,8 +326,6 @@ export async function createRpcAdapter(
       await provider.getTransactionCount(signerAddress, 'pending'),
     );
   };
-
-  const resolveWatcherPollMs = (_scenarioMode: boolean): number => WATCH_POLL_MS;
 
   const resolveFinalityDepth = (scenarioMode: boolean): number => {
     if (scenarioMode || DEV_CHAIN_IDS.has(config.chainId)) return 0;
@@ -566,7 +566,6 @@ export async function createRpcAdapter(
       if (deployed) {
         console.log('[JAdapter:rpc] Using existing contracts');
         setDeltaTransformerAddress(addresses.deltaTransformer);
-        setupContractEventListeners(depository, entityProvider, eventCallbacks, anyCallbacks);
         return;
       }
 
@@ -665,8 +664,6 @@ export async function createRpcAdapter(
       }
       console.log(`  TokenRegistry: USDC tokenId=${tokenId}`);
 
-      // Setup event listeners
-      setupContractEventListeners(depository, entityProvider, eventCallbacks, anyCallbacks);
       deployed = true;
 
       console.log('[JAdapter:rpc] Stack deployed');
@@ -1050,6 +1047,7 @@ export async function createRpcAdapter(
       const liveDepositoryAddress = await getLiveDepositoryAddress();
       const allowance: bigint = await allowanceFn(signerAddress, liveDepositoryAddress);
       if (allowance < amount) {
+        let nextNonce = await readSignerTxNonceFor(signerWallet);
         const approveFn = erc20.getFunction('approve') as (
           spender: string,
           amount: bigint,
@@ -1554,16 +1552,24 @@ export async function createRpcAdapter(
       return { success: false, error: `Unknown JTx type: ${String(unhandledType)}` };
     },
 
-    // === J-Watcher integration (RPC polling — uses shared event conversion from helpers.ts) ===
+    // === J-Watcher integration (RPC polling — uses shared event conversion from watcher.ts) ===
     startWatching(env: Env): void {
       if (watcherInterval) {
         console.log(`🔭 [JAdapter:rpc] Already watching`);
         return;
       }
+      type ContractListenerSource = {
+        removeAllListeners(): unknown;
+      };
+      // Canonical RPC polling below is the single long-lived J watcher path for this adapter.
+      // Drop any ethers contract.on() listeners first so JsonRpcProvider does not keep its own
+      // parallel polling loop alive beside the 1s watcher interval.
+      (depository as unknown as ContractListenerSource | undefined)?.removeAllListeners?.();
+      (entityProvider as unknown as ContractListenerSource | undefined)?.removeAllListeners?.();
       watcherEnv = env;
       txCounter.value = 0;
       txCounter._seenLogs = { set: new Set<string>(), order: [] as string[] };
-      const watchPollMs = resolveWatcherPollMs(!!env?.scenarioMode);
+      const watchPollMs = BLOCKCHAIN.J_WATCHER_POLL_INTERVAL_MS;
       const confirmationDepth = resolveFinalityDepth(!!env?.scenarioMode);
       const startBlock = getWatcherStartBlock(env, addresses.depository);
       lastSyncedBlock = Math.max(0, startBlock - 1);
@@ -1593,6 +1599,17 @@ export async function createRpcAdapter(
             code: 'J_WATCH_RPC',
             ...payload,
           });
+        }
+      };
+      const emitAdapterCallbacks = (events: RawJEvent[]): void => {
+        for (const event of events) {
+          const jEvent = toJEvent(event.name, event.args, {
+            blockNumber: event.blockNumber,
+            blockHash: event.blockHash,
+            transactionHash: event.transactionHash,
+          });
+          eventCallbacks.get(event.name)?.forEach((cb) => cb(jEvent));
+          anyCallbacks.forEach((cb) => cb(jEvent));
         }
       };
 
@@ -1644,6 +1661,7 @@ export async function createRpcAdapter(
             }
 
             if (rawEvents.length > 0) {
+              emitAdapterCallbacks(rawEvents);
               const eventCounts: Record<string, number> = {};
               for (const e of rawEvents) {
                 eventCounts[e.name] = (eventCounts[e.name] || 0) + 1;
@@ -1713,6 +1731,10 @@ export async function createRpcAdapter(
     async pollNow(): Promise<void> {
       const fn = pollNowHandler;
       if (fn) await fn();
+    },
+
+    isWatching(): boolean {
+      return watcherInterval !== null;
     },
 
     stopWatching(): void {

@@ -20,6 +20,7 @@ const DIRECT_EVM_ALLOWLIST = new Set<string>([
   'runtime/entity-factory.ts',
   'runtime/entity-tx/j-events.ts',
   'runtime/scenarios/boot.ts',
+  'runtime/scripts/dev-anvil-stack.ts',
 ]);
 
 const SCENARIO_FILE_ALLOWLIST = new Set<string>([
@@ -96,6 +97,11 @@ function findViolations(text: string, fileRel: string): Violation[] {
   // Batch submit path: should go through entity j_broadcast -> runtime jOutbox.
   if (fileRel !== 'runtime/j-batch.ts') {
     pushMatches(/\bbroadcastBatch\s*\(/g, 'runtime-no-direct-broadcastBatch-call');
+  }
+
+  // Reserve state must come from canonical j_event application, not direct chain reads.
+  if (fileRel !== 'runtime/entity-tx/j-events.ts') {
+    pushMatches(/\b(?:\w+\.)?state\.reserves\.set\s*\(/g, 'runtime-no-direct-reserve-write');
   }
 
   return violations;

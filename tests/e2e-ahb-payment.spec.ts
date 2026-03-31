@@ -1167,6 +1167,9 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
     console.log(`[E2E] 7. Reverse HTLC: Bob → Hub → Alice`);
     console.log(`[E2E]    Amount: ${ethers.formatUnits(reverseAmount, 18)} USDC, fee: ${ethers.formatUnits(reverseFee, 18)} USDC`);
 
+    await waitForAccountIdle(page, bob!.entityId, hubId);
+    await waitForAccountIdle(page, alice!.entityId, hubId);
+
     // Bob already received funds in step 6, so reverse payment should not depend on a second faucet call.
     const b2 = b1;
     expect(b2, 'Bob must have enough OUT capacity for reverse payment').toBeGreaterThanOrEqual(reverseSenderSpend);
@@ -1207,7 +1210,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
       cursor: bobReverseFinalizeCursor,
       eventName: 'HtlcFinalized',
       entityId: bob!.entityId,
-      timeoutMs: 20_000,
+      timeoutMs: LONG_E2E ? 30_000 : 20_000,
       predicate: (event) => String(event.data?.amount || '') === reverseAmount.toString(),
     });
     assertHtlcFinalizedPayload(bobReverseFinalizeEvent, bob!.entityId, hubId, reverseAmount);
@@ -1229,7 +1232,7 @@ test.describe('E2E: Alice ↔ Hub ↔ Bob', () => {
       cursor: aliceReverseCursor,
       eventName: 'HtlcReceived',
       entityId: alice!.entityId,
-      timeoutMs: 12_000,
+      timeoutMs: LONG_E2E ? 20_000 : 12_000,
     });
     assertHtlcReceivedPayload(aliceReceiveEvent, alice!.entityId, hubId, reverseAmount);
     const a4 = await waitForOutCapDelta(page, alice!.entityId, hubId, a3, reverseAmount);

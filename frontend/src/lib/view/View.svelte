@@ -217,8 +217,10 @@
         localEnvStore.set(env);
         localHistoryStore.set(env.history || []);
         const histLen = (env.history || []).length;
-        localTimeIndex.set(urlImport?.state.ui?.ti ?? Math.max(0, histLen - 1));
-        localIsLive.set(urlImport?.state.ui?.ti === undefined);
+        const importedTimeIndex = urlImport?.state.ui?.ti;
+        const importedIsLive = importedTimeIndex === undefined;
+        localIsLive.set(importedIsLive);
+        localTimeIndex.set(importedIsLive ? -1 : Math.min(importedTimeIndex, Math.max(0, histLen - 1)));
         registerEnvChanges(env);
       }
 
@@ -231,8 +233,7 @@
         localEnvStore.set(runtime.env);
         localHistoryStore.set(runtime.env.history || []);
         localIsLive.set(true);
-        const h = runtime.env.history || [];
-        localTimeIndex.set(Math.max(0, h.length - 1));
+        localTimeIndex.set(-1);
         registerEnvChanges(runtime.env);
       });
     } catch (err) {

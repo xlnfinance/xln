@@ -9,6 +9,10 @@ import { hashHtlcSecret } from '../htlc-utils';
 import { scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from '../entity-crontab';
 import { getRuntimeJurisdictionDefaultDisputeDelayBlocks } from '../j-height';
 import {
+  filterActiveDisputeFinalizations,
+  scrubDisputeFinalizationsForCounterparty,
+} from './dispute-finalize-guards';
+import {
   canonicalJurisdictionEventKey,
   normalizeJurisdictionEvent,
   normalizeJurisdictionEvents,
@@ -1454,18 +1458,18 @@ async function applyFinalizedJEvent(
       // Drop stale local draft dispute-finalize ops for this account.
       // If the dispute is already finalized on-chain, re-broadcasting the same finalize
       // in a future mixed batch can revert the whole batch.
-      const draftFinalizations = newState.jBatchState?.batch?.disputeFinalizations;
-      if (Array.isArray(draftFinalizations) && draftFinalizations.length > 0) {
-        const normalizeDisputeId = (value: unknown) => String(value || '').toLowerCase();
-        const before = draftFinalizations.length;
-        newState.jBatchState!.batch.disputeFinalizations = draftFinalizations.filter(
-          (entry: any) => normalizeDisputeId(entry?.counterentity) !== candidateCounterpartyId,
-        );
-        const removed = before - newState.jBatchState!.batch.disputeFinalizations.length;
-        if (removed > 0) {
-          addMessage(newState, `🧹 Removed ${removed} stale draft dispute-finalize op(s) for ${counterpartyId.slice(-4)}`);
-          console.log(`🧹 Cleared ${removed} stale draft disputeFinalizations for ${counterpartyId.slice(-4)}`);
-        }
+      const removedDraft = scrubDisputeFinalizationsForCounterparty(
+        newState.jBatchState?.batch,
+        candidateCounterpartyId,
+      );
+      const removedSent = scrubDisputeFinalizationsForCounterparty(
+        newState.jBatchState?.sentBatch?.batch,
+        candidateCounterpartyId,
+      );
+      const removed = removedDraft + removedSent;
+      if (removed > 0) {
+        addMessage(newState, `🧹 Removed ${removed} stale dispute-finalize op(s) for ${counterpartyId.slice(-4)}`);
+        console.log(`🧹 Cleared ${removed} stale disputeFinalizations for ${counterpartyId.slice(-4)}`);
       }
 
       // DisputeFinalized is authoritative. Clear the off-chain component and transient holds
@@ -1611,9 +1615,20 @@ async function applyFinalizedJEvent(
         // Requeue failed sentBatch ops back to current batch so operator can rebroadcast
         // with fresh nonce in the next cycle.
         if (sentBatch) {
-          mergeBatchOps(newState.jBatchState.batch, sentBatch.batch);
-          for (const fin of sentBatch.batch.disputeFinalizations || []) {
+          const requeueBatch = cloneJBatch(sentBatch.batch);
+          const { removed, droppedCounterparties } = filterActiveDisputeFinalizations(newState, requeueBatch);
+          if (removed > 0) {
+            addMessage(newState, `🧹 Filtered ${removed} stale dispute-finalize op(s) from failed batch requeue`);
+          }
+          mergeBatchOps(newState.jBatchState.batch, requeueBatch);
+          for (const fin of requeueBatch.disputeFinalizations || []) {
             const account = findAccountByCounterparty(newState, String(fin.counterentity || ''));
+            if (account?.activeDispute) {
+              account.activeDispute.finalizeQueued = false;
+            }
+          }
+          for (const counterpartyId of droppedCounterparties) {
+            const account = findAccountByCounterparty(newState, counterpartyId);
             if (account?.activeDispute) {
               account.activeDispute.finalizeQueued = false;
             }

@@ -167,7 +167,7 @@ export const BLOCKCHAIN = {
   CONFIRMATION_BLOCKS: 12, // ~3 minutes on Ethereum
 
   /** J-watcher polling interval (milliseconds) */
-  J_WATCHER_POLL_INTERVAL_MS: 6_000, // Every 0.5 blocks on Ethereum
+  J_WATCHER_POLL_INTERVAL_MS: 1_000, // One simple canonical poll per second
 
   /** Maximum gas price willing to pay (in gwei) */
   MAX_GAS_PRICE_GWEI: 300,

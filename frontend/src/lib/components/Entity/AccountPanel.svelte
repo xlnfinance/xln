@@ -1,7 +1,8 @@
 <script lang="ts">
   import type { AccountMachine, AccountTx, EntityReplica } from '$lib/types/ui';
+  import type { Env, EnvSnapshot } from '@xln/runtime/xln-api';
   import { createEventDispatcher, onMount, onDestroy } from 'svelte';
-  import { p2pState, xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
+  import { p2pState, xlnFunctions } from '../../stores/xlnStore';
   import { settings } from '../../stores/settingsStore';
   import EntityIdentity from '../shared/EntityIdentity.svelte';
   import DeltaTokenSummary from './shared/DeltaTokenSummary.svelte';
@@ -13,18 +14,17 @@
   export let counterpartyId: string;
   export let entityId: string;
   export let replica: EntityReplica | null = null;
+  export let env: Env | EnvSnapshot;
 
   const dispatch = createEventDispatcher();
 
   $: activeXlnFunctions = $xlnFunctions;
-  $: activeEnv = $xlnEnvironment;
+  $: activeEnv = env;
 
   let expandedTokenIds = new Set<number>();
   let nowMs = Date.now();
   let mounted = false;
   let nowTimer: ReturnType<typeof setInterval> | null = null;
-  let liveJHeightTimer: ReturnType<typeof setInterval> | null = null;
-  let liveJHeight = 0;
   let activityStatusFilter: 'all' | 'pending' | 'mempool' | 'confirmed' = 'all';
   let activityTypeFilter = 'all';
 
@@ -50,7 +50,6 @@
   $: currentJHeight = Math.max(
     Number(account.lastFinalizedJHeight ?? 0),
     Number(replica?.state?.lastFinalizedJHeight ?? 0),
-    Number(liveJHeight || 0),
   );
   $: disputeBlocksLeft = activeDispute ? Math.max(0, disputeTimeoutBlock - currentJHeight) : 0;
   $: pendingSecretAckInfo = (() => {
@@ -445,32 +444,6 @@
     }
   }
 
-  function clearLiveJHeightTimer(): void {
-    if (liveJHeightTimer) {
-      clearInterval(liveJHeightTimer);
-      liveJHeightTimer = null;
-    }
-  }
-
-  async function refreshLiveJHeight(): Promise<void> {
-    if (!activeDispute) return;
-    const jReplicas = activeEnv?.jReplicas;
-    if (!(jReplicas instanceof Map) || jReplicas.size === 0) return;
-    const activeJKey = activeEnv?.activeJurisdiction;
-    const activeJReplica = activeJKey ? jReplicas.get(activeJKey) : null;
-    const anyJReplica = activeJReplica ?? Array.from(jReplicas.values())[0];
-    const provider = anyJReplica?.jadapter?.provider;
-    if (!provider || typeof provider.getBlockNumber !== 'function') return;
-    try {
-      const blockNumber = Number(await provider.getBlockNumber());
-      if (Number.isFinite(blockNumber)) liveJHeight = blockNumber;
-    } catch {}
-  }
-
-  $: if (activeDispute) {
-    void refreshLiveJHeight();
-  }
-
   function syncLiveTimers(): void {
     const needNowTimer = Boolean(activeDispute || pendingSecretAckInfo || $p2pState.reconnect);
     if (needNowTimer) {
@@ -482,18 +455,6 @@
       }
     } else {
       clearNowTimer();
-    }
-
-    if (activeDispute) {
-      if (!liveJHeightTimer) {
-        liveJHeightTimer = setInterval(() => {
-          if (!activeDispute) return;
-          void refreshLiveJHeight();
-        }, 1000);
-      }
-      void refreshLiveJHeight();
-    } else {
-      clearLiveJHeightTimer();
     }
   }
 
@@ -509,7 +470,6 @@
   onDestroy(() => {
     mounted = false;
     clearNowTimer();
-    clearLiveJHeightTimer();
   });
 </script>
 
@@ -776,7 +736,7 @@
 
   .delta-card-toggle {
     border-radius: 10px;
-    cursor: pointer;
+    cursor: default;
   }
 
   .delta-card-toggle:focus-visible {

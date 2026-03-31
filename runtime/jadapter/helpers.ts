@@ -7,8 +7,9 @@
 import { ethers } from 'ethers';
 import type { Depository, EntityProvider } from '../../jurisdictions/typechain-types/index.ts';
 import type { JEvent, JEventCallback } from './types';
-import type { Env } from '../types';
+import type { EntityInput, Env } from '../types';
 import { createEmptyBatch, type JBatch } from '../j-batch';
+import { enqueueRuntimeInput } from '../runtime';
 
 // ═══════════════════════════════════════════════════════════════════════════
 // CANONICAL J-EVENTS (Single Source of Truth — must match Depository.sol)
@@ -438,6 +439,151 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
 }
 
 /**
+ * THE ONLY CANONICAL J-EVENT -> RUNTIME INGRESS HELPER.
+ *
+ * Do not duplicate fanout/grouping/enqueue logic in server/orchestrators/watchers.
+ * All J watchers and all manual J-event injections must end up here so that:
+ * 1. affected entities are selected by one relevance rule,
+ * 2. every registered local replica for that entity receives the same event feed,
+ * 3. enqueueing the event is also the wake-up mechanism for the runtime loop.
+ *
+ * If this logic ever needs to change, change it here once rather than forking
+ * subtle variants across the codebase.
+ */
+function enqueueRawJEventsToRuntime(
+  env: Env,
+  rawEvents: RawJEvent[],
+  options: {
+    blockNumber: number;
+    blockHash: string;
+    adapterLabel: string;
+    txCounter?: EventBatchCounter;
+    logBatch?: boolean;
+    emitSettledDebugEvents?: boolean;
+  },
+): void {
+  if (rawEvents.length === 0) return;
+
+  const {
+    blockNumber,
+    blockHash,
+    adapterLabel,
+    txCounter,
+    logBatch = false,
+    emitSettledDebugEvents = false,
+  } = options;
+
+  if (logBatch) {
+    console.log(`📡 [JAdapter:${adapterLabel}] ${rawEvents.length} canonical events from block ${blockNumber}`);
+  }
+
+  const eventsByReplica = new Map<string, { entityId: string; signerId: string; events: RawJEvent[] }>();
+
+  for (const [replicaKey, replica] of env.eReplicas.entries()) {
+    const [entityIdFromKey, signerIdFromKey] = replicaKey.split(':');
+    const entityId = String(replica.entityId || entityIdFromKey || '').toLowerCase();
+    const signerId = String(replica.signerId || signerIdFromKey || '');
+    if (!entityId || !signerId) continue;
+
+    const relevant = rawEvents.filter((event) => isEventRelevantToEntity(event, entityId));
+    if (relevant.length === 0) continue;
+
+    const existing = eventsByReplica.get(replicaKey);
+    if (existing) {
+      existing.events.push(...relevant);
+      continue;
+    }
+    eventsByReplica.set(replicaKey, { entityId, signerId, events: [...relevant] });
+  }
+
+  const entityInputs: EntityInput[] = [];
+  for (const { entityId, signerId, events } of eventsByReplica.values()) {
+    const jEvents = events.flatMap((event) => rawEventToJEvents(event, entityId));
+    if (jEvents.length === 0) continue;
+
+    const settledCount = jEvents.filter((event) => event.type === 'AccountSettled').length;
+    if (emitSettledDebugEvents && settledCount > 0) {
+      console.log(
+        `[REB][4][J_EVENT_DELIVER] entity=${entityId.slice(-8)} signer=${signerId.slice(-8)} block=${blockNumber} accountSettled=${settledCount}`,
+      );
+      const p2p = env?.runtimeState?.p2p;
+      if (p2p && typeof p2p.sendDebugEvent === 'function') {
+        p2p.sendDebugEvent({
+          level: 'info',
+          code: 'REB_STEP',
+          step: 4,
+          status: 'ok',
+          event: 'j_event_delivered',
+          entityId,
+          signerId,
+          blockNumber,
+          accountSettled: settledCount,
+        });
+      }
+    }
+
+    const transactionHash =
+      events[0]?.transactionHash ??
+      `${adapterLabel}-${blockNumber}-${txCounter ? txCounter.value++ : entityInputs.length}`;
+
+    entityInputs.push({
+      entityId,
+      signerId,
+      entityTxs: [
+        {
+          type: 'j_event',
+          data: {
+            from: signerId,
+            observedAt: env.timestamp ?? 0,
+            blockNumber,
+            blockHash,
+            transactionHash,
+            events: jEvents,
+            event: jEvents[0],
+          },
+        },
+      ],
+    });
+
+    if (logBatch) {
+      console.log(`   📮 [JAdapter:${adapterLabel}] → ${entityId.slice(-4)} (${jEvents.length} events)`);
+    }
+  }
+
+  if (entityInputs.length === 0) return;
+  enqueueRuntimeInput(env, {
+    timestamp: env.timestamp ?? 0,
+    runtimeTxs: [],
+    entityInputs,
+  });
+}
+
+export function applyJEventsToEnv(env: Env, events: JEvent[], label = 'J-EVENTS'): void {
+  if (!events || events.length === 0) return;
+  const rawEvents: RawJEvent[] = events
+    .filter((event): event is JEvent & { name: string; args?: Record<string, unknown> } => typeof event?.name === 'string')
+    .map((event) => ({
+      name: event.name,
+      args: (event.args ?? {}) as RawJEventArgs,
+      blockNumber: event.blockNumber,
+      blockHash: event.blockHash,
+      transactionHash: event.transactionHash,
+    }));
+  if (rawEvents.length === 0) return;
+  const blockGroups = new Map<number, RawJEvent[]>();
+  for (const event of rawEvents) {
+    const blockNumber = Number(event.blockNumber ?? 0);
+    if (!blockGroups.has(blockNumber)) blockGroups.set(blockNumber, []);
+    blockGroups.get(blockNumber)!.push(event);
+  }
+  const dedupCounter = env.runtimeState?.watcherDedupCounter ?? { value: 0 };
+  for (const [blockNumber, groupedEvents] of blockGroups) {
+    const blockHash = groupedEvents[0]?.blockHash ?? '0x';
+    processEventBatch(groupedEvents, env, blockNumber, blockHash, dedupCounter, label);
+  }
+}
+
+/**
  * Process a batch of raw events → group by entity → enqueue as j_event EntityTxs.
  * Shared logic used by both BrowserVM and RPC adapter startWatching().
  */
@@ -482,74 +628,12 @@ export function processEventBatch(
   }
   if (deduped.length === 0) return;
 
-  // Keep runtime console readable: disable noisy per-block watcher logs unless explicitly enabled.
-  const shouldLogBatch = !!env?.debugJWatcherBatches;
-  if (shouldLogBatch) {
-    console.log(`📡 [JAdapter:${adapterLabel}] ${deduped.length} canonical events from block ${blockNumber}`);
-  }
-
-  // Group events by relevant entity
-  const eventsByEntity = new Map<string, { signerId: string; events: RawJEvent[] }>();
-
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
-    if (!replica.isProposer) continue;
-    const [entityId, sid] = replicaKey.split(':');
-    if (!entityId || !sid) continue;
-
-    const relevant = deduped.filter(e => isEventRelevantToEntity(e, entityId));
-    if (relevant.length === 0) continue;
-
-    if (!eventsByEntity.has(entityId)) {
-      eventsByEntity.set(entityId, { signerId: sid, events: [] });
-    }
-    for (const e of relevant) {
-      eventsByEntity.get(entityId)!.events.push(e);
-    }
-  }
-
-  // Convert and enqueue
-  for (const [entityId, { signerId, events }] of eventsByEntity) {
-    const jEvents = events.flatMap(e => rawEventToJEvents(e, entityId));
-    if (jEvents.length === 0) continue;
-    const settledCount = jEvents.filter(e => e.type === 'AccountSettled').length;
-    if (settledCount > 0) {
-      console.log(
-        `[REB][4][J_EVENT_DELIVER] entity=${entityId.slice(-8)} signer=${signerId.slice(-8)} block=${blockNumber} accountSettled=${settledCount}`,
-      );
-      const p2p = env?.runtimeState?.p2p;
-      if (p2p && typeof p2p.sendDebugEvent === 'function') {
-        p2p.sendDebugEvent({
-          level: 'info',
-          code: 'REB_STEP',
-          step: 4,
-          status: 'ok',
-          event: 'j_event_delivered',
-          entityId,
-          signerId,
-          blockNumber,
-          accountSettled: settledCount,
-        });
-      }
-    }
-
-    const entityTx = {
-      type: 'j_event' as const,
-      data: {
-        from: signerId,
-        observedAt: env.timestamp ?? 0,
-        blockNumber,
-        blockHash,
-        transactionHash: events[0]?.transactionHash ?? `${adapterLabel}-${blockNumber}-${txCounter.value++}`,
-        events: jEvents,
-        event: jEvents[0],
-      },
-    };
-
-    if (shouldLogBatch) {
-      console.log(`   📮 [JAdapter:${adapterLabel}] → ${entityId.slice(-4)} (${jEvents.length} events)`);
-    }
-    const mempool = env.runtimeMempool ?? env.runtimeInput;
-    if (!mempool.entityInputs) mempool.entityInputs = [];
-    mempool.entityInputs.push({ entityId, signerId, entityTxs: [entityTx] });
-  }
+  enqueueRawJEventsToRuntime(env, deduped, {
+    blockNumber,
+    blockHash,
+    adapterLabel,
+    txCounter,
+    logBatch: !!env?.debugJWatcherBatches,
+    emitSettledDebugEvents: true,
+  });
 }

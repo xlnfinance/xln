@@ -98,7 +98,6 @@
   $: moveUsesDraftAction = canAddMoveToExistingBatch();
   $: moveVisibleActionError = moveUsesDraftAction ? moveDraftError : moveBroadcastError;
   $: moveSourceBalanceLabel = formatAmount(moveSourceAvailableBalance, moveDisplayDecimals);
-  $: moveAmountPreview = moveAmount.trim() || '0.00';
   $: moveStepList = moveRouteSteps(moveFromEndpoint, moveToEndpoint);
   $: onMoveVisualRoot(moveVisualRoot);
 
@@ -108,45 +107,6 @@
 </script>
 
 <div class="move-route-builder" data-testid={`move-workspace-${mode}`}>
-  <div class="move-topline">
-    <div class="move-hero-card">
-      <div class="move-hero-copy">
-        <span class="move-kicker">Amount</span>
-        <div class="move-hero-caption">
-          Available: {moveSourceBalanceLabel}
-        </div>
-      </div>
-
-      <div class="asset-amount-shell move-amount-shell">
-        <input class="move-amount-input" type="text" bind:value={moveAmount} placeholder="0.00" data-testid="move-amount" />
-
-        <button
-          type="button"
-          class="move-max-chip"
-          data-testid="move-max-chip"
-          data-raw-amount={moveSourceAvailableBalance.toString()}
-          on:click={fillMoveMax}
-          disabled={moveSourceAvailableBalance <= 0n}
-        >
-          <span class="move-max-label">Max</span>
-          <span
-            class="move-max-value"
-            data-testid="move-max-value"
-            data-raw-amount={moveSourceAvailableBalance.toString()}
-          >{formatInlineFillAmount(moveSourceAvailableBalance, moveDisplayDecimals)}</span>
-        </button>
-
-        <div class="asset-inline-controls">
-          <select class="asset-token-select-inline compact move-token-select" bind:value={moveAssetSymbol} data-testid="move-asset-symbol">
-            {#each moveAssetOptions as token}
-              <option value={token.symbol}>{token.symbol}</option>
-            {/each}
-          </select>
-        </div>
-      </div>
-    </div>
-  </div>
-
   <div class="move-visual" bind:this={moveVisualRoot}>
     <div class="move-column">
       <div class="move-column-head">
@@ -320,11 +280,17 @@
         <div class="move-summary-pill">
           {moveEndpointLabels[moveFromEndpoint]} → {moveEndpointLabels[moveToEndpoint]}
         </div>
+        <div class="move-summary-meta">
+          Available {moveSourceBalanceLabel} {moveAssetSymbol}
+        </div>
       </div>
-
-      <div class="move-summary-hero">
-        <span class="move-summary-hero-label">Amount</span>
-        <strong class="move-summary-hero-value">{moveAmountPreview} {moveAssetSymbol}</strong>
+      <div class="move-inline-composer">
+        <input class="move-amount-input" type="text" bind:value={moveAmount} placeholder="0.00" data-testid="move-amount" />
+        <select class="move-asset-select" bind:value={moveAssetSymbol} data-testid="move-asset-symbol">
+          {#each moveAssetOptions as token}
+            <option value={token.symbol}>{token.symbol}</option>
+          {/each}
+        </select>
       </div>
     </div>
 
@@ -392,63 +358,6 @@
   .move-route-builder,
   .move-route-builder * {
     box-sizing: border-box;
-  }
-
-  .move-topline {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
-  }
-
-  .move-hero-card {
-    display: grid;
-    grid-template-columns: minmax(0, 220px) minmax(0, 1fr);
-    gap: 12px;
-    align-items: end;
-    padding: 0;
-    border: none;
-    background: transparent;
-    box-shadow: none;
-    min-width: 0;
-  }
-
-  .move-hero-copy {
-    display: flex;
-    flex-direction: column;
-    justify-content: flex-end;
-    gap: 6px;
-    min-width: 0;
-    padding: 2px 2px 0;
-  }
-
-  .move-kicker {
-    font-size: 9px;
-    font-weight: 700;
-    letter-spacing: 0.14em;
-    text-transform: uppercase;
-    color: var(--move-accent);
-  }
-
-  .move-hero-title {
-    font-size: 15px;
-    font-weight: 700;
-    color: var(--move-text);
-    letter-spacing: -0.015em;
-    line-height: 1.15;
-    max-width: 18ch;
-  }
-
-  .move-hero-caption {
-    font-size: 11px;
-    color: color-mix(in srgb, var(--move-text-secondary) 90%, var(--move-text-muted));
-    line-height: 1.35;
-  }
-
-  .move-amount-shell {
-    min-height: 56px;
-    padding-right: 8px;
-    border-radius: 16px;
-    overflow: hidden;
   }
 
   .move-visual {
@@ -703,17 +612,25 @@
 
   .move-summary-top {
     display: flex;
-    align-items: flex-start;
+    align-items: center;
     justify-content: space-between;
-    gap: 16px;
-    flex-wrap: wrap;
+    gap: 12px;
     min-width: 0;
   }
 
   .move-summary-copy {
     display: flex;
-    align-items: center;
-    min-height: 44px;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    min-width: 0;
+  }
+
+  .move-summary-meta {
+    font-size: 11px;
+    color: color-mix(in srgb, var(--move-text-secondary) 90%, var(--move-text-muted));
+    line-height: 1.2;
+    font-variant-numeric: tabular-nums;
     min-width: 0;
   }
 
@@ -729,32 +646,38 @@
     text-transform: uppercase;
   }
 
-  .move-summary-hero {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    min-width: 0;
-    padding: 8px 10px;
-    border-radius: 10px;
-    background: color-mix(in srgb, var(--move-input-bg) 76%, transparent);
-    border: 1px solid color-mix(in srgb, var(--move-border) 40%, transparent);
-    max-width: 100%;
+  .move-inline-composer {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    min-height: 58px;
+    min-width: min(420px, 100%);
+    padding: 6px;
+    border: 1px solid color-mix(in srgb, var(--move-border) 46%, transparent);
+    border-radius: 16px;
+    background: linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--move-surface) 88%, transparent),
+      color-mix(in srgb, var(--move-input-bg) 98%, transparent)
+    );
   }
 
-  .move-summary-hero-label {
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.1em;
-    text-transform: uppercase;
-    color: var(--move-text-muted);
+  .move-inline-composer:focus-within {
+    border-color: color-mix(in srgb, var(--move-accent) 70%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--move-accent) 18%, transparent);
   }
 
-  .move-summary-hero-value {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 17px;
-    line-height: 1.1;
+  .move-asset-select {
+    min-height: 44px;
+    min-width: 140px;
+    padding: 0 12px;
+    border-radius: 12px;
+    border: 1px solid color-mix(in srgb, var(--move-border) 54%, transparent);
+    background: color-mix(in srgb, var(--move-input-bg) 92%, transparent);
     color: var(--move-text);
-    overflow-wrap: anywhere;
+    font-size: 13px;
+    font-weight: 600;
   }
 
   .move-summary-statuses {
@@ -796,67 +719,17 @@
     background: color-mix(in srgb, var(--theme-debit, #f43f5e) 8%, transparent);
   }
 
-  .asset-field {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    min-width: 0;
-    width: 100%;
-  }
-
-  .asset-field-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    min-width: 0;
-  }
-
-  .asset-field span {
-    font-size: 10px;
-    color: var(--move-text-muted);
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-  }
-
-  .asset-amount-shell {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
-    align-items: stretch;
-    gap: 8px;
-    min-height: var(--move-control-height);
-    width: 100%;
-    min-width: 0;
-    max-width: 100%;
-    padding: 0 8px 0 16px;
-    border: 1px solid color-mix(in srgb, var(--move-border) 42%, transparent);
-    border-radius: 16px;
-    background: linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--move-surface) 76%, transparent),
-      color-mix(in srgb, var(--move-input-bg) 100%, transparent)
-    );
-    box-sizing: border-box;
-    overflow: hidden;
-  }
-
-  .asset-amount-shell:focus-within {
-    border-color: color-mix(in srgb, var(--move-accent) 70%, transparent);
-    box-shadow:
-      0 0 0 1px color-mix(in srgb, var(--move-accent) 18%, transparent),
-      0 10px 24px color-mix(in srgb, var(--theme-background, #09090b) 8%, transparent);
-  }
-
   .move-amount-input {
     min-width: 0;
     width: 100%;
-    height: 100%;
-    padding: 0;
+    height: 44px;
+    padding: 0 14px;
     border: none;
-    background: transparent;
+    border-radius: 12px;
+    background: color-mix(in srgb, var(--move-input-bg) 96%, transparent);
     color: var(--move-text);
     font-family: 'IBM Plex Mono', monospace;
-    font-size: 26px;
+    font-size: 28px;
     font-weight: 600;
     line-height: 1;
     letter-spacing: -0.02em;
@@ -864,83 +737,6 @@
 
   .move-amount-input:focus {
     outline: none;
-  }
-
-  .asset-inline-controls {
-    display: inline-flex;
-    align-items: stretch;
-    gap: 8px;
-    margin-left: auto;
-    min-width: 0;
-    flex: 0 0 auto;
-    align-self: stretch;
-    max-width: 100%;
-  }
-
-  .move-max-chip {
-    min-height: var(--move-control-height);
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-height: 42px;
-    padding: 0 12px !important;
-    border-radius: 999px !important;
-    border: 1px solid color-mix(in srgb, var(--move-border) 44%, transparent) !important;
-    background: color-mix(in srgb, var(--move-surface-hover) 78%, transparent) !important;
-    color: var(--move-accent) !important;
-    font-size: 11px !important;
-    font-weight: 700 !important;
-    letter-spacing: 0.04em !important;
-    text-transform: uppercase;
-    cursor: pointer;
-    white-space: nowrap;
-  }
-
-  .move-max-chip:hover:not(:disabled) {
-    border-color: color-mix(in srgb, var(--move-accent) 30%, transparent) !important;
-    background: color-mix(in srgb, var(--move-accent) 12%, transparent) !important;
-  }
-
-  .move-max-chip:disabled {
-    opacity: 0.45;
-    cursor: default;
-  }
-
-  .move-max-label {
-    opacity: 0.58;
-  }
-
-  .move-max-value {
-    font-family: 'IBM Plex Mono', monospace;
-    font-size: 10px;
-    letter-spacing: 0;
-    text-transform: none;
-  }
-
-  .asset-token-select-inline {
-    min-height: 42px;
-    min-width: 110px;
-    width: 110px;
-    max-width: 100%;
-  }
-
-  .asset-token-select-inline.compact {
-    min-height: 42px;
-    padding: 0 30px 0 14px !important;
-    border-radius: 10px !important;
-    background: color-mix(in srgb, var(--move-surface) 78%, transparent) !important;
-    border: 1px solid color-mix(in srgb, var(--move-border) 44%, transparent) !important;
-    color: var(--move-text) !important;
-    align-self: stretch;
-    font-weight: 600 !important;
-  }
-
-  .move-token-select {
-    min-width: 110px;
-    width: 110px;
-    max-width: 100%;
-    min-height: var(--move-control-height);
   }
 
   .move-external-input {
@@ -1019,11 +815,6 @@
   }
 
   @media (max-width: 900px) {
-    .move-hero-card {
-      grid-template-columns: 1fr;
-      align-items: stretch;
-    }
-
     .move-detail-grid,
     .move-summary-grid {
       grid-template-columns: 1fr;
@@ -1058,42 +849,24 @@
       flex-direction: column;
       align-items: stretch;
     }
+
+    .move-inline-composer {
+      min-width: 0;
+    }
     .move-drag-layer {
       display: none;
     }
   }
 
   @media (max-width: 640px) {
-    .move-hero-card {
-      gap: 12px;
-    }
-
-    .move-amount-shell {
+    .move-inline-composer {
       grid-template-columns: 1fr;
-      gap: 10px;
-      min-height: 0;
-      padding: 12px;
     }
 
     .move-amount-input {
       width: 100%;
       min-height: 34px;
       font-size: 28px;
-    }
-
-    .move-max-chip {
-      min-height: 36px;
-      padding: 0 11px !important;
-    }
-
-    .asset-inline-controls {
-      width: 100%;
-      margin-left: 0;
-    }
-
-    .move-token-select {
-      width: 100%;
-      min-width: 0;
     }
 
     .move-column {
@@ -1104,10 +877,6 @@
 
     .move-summary {
       padding: 14px;
-    }
-
-    .move-summary-hero {
-      width: 100%;
     }
 
     .move-step-row {
@@ -1129,13 +898,7 @@
       justify-content: space-between;
     }
 
-    .asset-inline-controls {
-      width: 100%;
-      justify-content: space-between;
-    }
-
-    .asset-token-select-inline,
-    .move-token-select {
+    .move-asset-select {
       width: 100%;
       min-width: 0;
     }

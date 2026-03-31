@@ -102,8 +102,9 @@ cd frontend && bun run dev      # Vite dev server
 cd frontend && bun run build    # Production build
 
 # Testing
-bunx playwright test            # E2E tests
-bunx playwright test tests/ahb-smoke.spec.ts  # AHB smoke test
+bun run test:e2e:parallel:isolated  # Canonical isolated E2E runner
+bun run test:e2e:parallel:max       # Fast full isolated bar
+bun run test:e2e:parallel:long      # Full isolated bar + long branches
 ```
 
 ---

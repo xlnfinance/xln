@@ -7,7 +7,7 @@ cd "$ROOT_DIR"
 REMOTE_HOST=""
 PUSH=0
 FRESH=0
-BUILD_FRONTEND=0
+BUILD_FRONTEND=1
 PRODUCTION=0
 
 while [ $# -gt 0 ]; do
@@ -28,13 +28,17 @@ while [ $# -gt 0 ]; do
       BUILD_FRONTEND=1
       shift
       ;;
+    --runtime-only)
+      BUILD_FRONTEND=0
+      shift
+      ;;
     --production)
       PRODUCTION=1
       shift
       ;;
     *)
       echo "Unknown argument: $1" >&2
-      echo "Usage: ./deploy.sh [--remote host] [--push] [--fresh] [--frontend] [--production]" >&2
+      echo "Usage: ./deploy.sh [--remote host] [--push] [--fresh] [--frontend] [--runtime-only] [--production]" >&2
       exit 1
       ;;
   esac

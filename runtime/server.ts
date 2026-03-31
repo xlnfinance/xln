@@ -31,7 +31,7 @@ import { createExternalWalletApi } from './api/external-wallet-api';
 import { encodeBoard, hashBoard } from './entity-factory';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from './account-crypto';
 import { createJAdapter, DEV_CHAIN_IDS, type JAdapter } from './jadapter';
-import type { JEvent, JTokenInfo } from './jadapter/types';
+import type { JTokenInfo } from './jadapter/types';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from './jadapter/default-tokens';
 import { resolveEntityProposerId } from './state-helpers';
 import { DEFAULT_SPREAD_DISTRIBUTION, ORDERBOOK_PRICE_SCALE } from './orderbook';
@@ -287,66 +287,6 @@ const logOneShot = (key: string, message: string) => {
   if (nowMs - last < ONE_SHOT_TTL_MS) return;
   oneShotLogs.set(key, nowMs);
   console.warn(message);
-};
-
-type ObservedJEvent = JEvent & {
-  args?: Record<string, unknown>;
-  type?: string;
-};
-
-const applyJEventsToEnv = async (env: Env, events: JEvent[], label = 'J-EVENTS'): Promise<void> => {
-  if (!events || events.length === 0) return;
-  const grouped = new Map<
-    string,
-    {
-      events: Array<{ type: string; data: Record<string, unknown> }>;
-      blockNumber: number;
-      blockHash: string;
-      transactionHash: string;
-    }
-  >();
-
-  for (const rawEvent of events) {
-    const ev = rawEvent as ObservedJEvent;
-    const args = ev.args ?? {};
-    const entity = args.entity ?? args.entityId ?? args.leftEntity;
-    if (!entity) continue;
-    const key = String(entity).toLowerCase();
-    const entry = grouped.get(key) ?? {
-      events: [],
-      blockNumber: Number(ev.blockNumber ?? 0),
-      blockHash: ev.blockHash ?? '0x',
-      transactionHash: ev.transactionHash ?? '0x',
-    };
-    entry.events.push({ type: ev.name ?? ev.type ?? 'Unknown', data: args });
-    grouped.set(key, entry);
-  }
-
-  const observedAt = Date.now();
-  const entityInputs: EntityInput[] = [];
-  for (const [entityId, entry] of grouped.entries()) {
-    entityInputs.push({
-      entityId,
-      signerId: 'j-event',
-      entityTxs: [
-        {
-          type: 'j_event',
-          data: {
-            from: 'j-event',
-            events: entry.events,
-            observedAt,
-            blockNumber: entry.blockNumber,
-            blockHash: entry.blockHash,
-            transactionHash: entry.transactionHash,
-          },
-        },
-      ],
-    });
-  }
-
-  if (entityInputs.length === 0) return;
-  console.log(`[${label}] Queueing ${entityInputs.length} J-events`);
-  enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs });
 };
 
 const hasPendingRuntimeWork = (env: Env): boolean => {
@@ -2637,8 +2577,6 @@ const triggerColdReset = async (
         jadapter: globalJAdapter,
       });
       env.activeJurisdiction = jName;
-      globalJAdapter.startWatching(env);
-      console.log(`[RESET] J-event watcher restarted (${jName})`);
     }
 
     try {
@@ -5382,16 +5320,8 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       }
     }
 
-    // Start J-event watcher now that env + jReplica are wired.
-    // Without this, AccountSettled/ReserveUpdated never enter runtimeInput.
-    if (globalJAdapter && env) {
-      try {
-        globalJAdapter.startWatching(env);
-        console.log(`[XLN] J-event watcher started (${activeJName || env.activeJurisdiction || 'unknown'})`);
-      } catch (err) {
-        console.error('[XLN] Failed to start J-event watcher:', err);
-      }
-    }
+    // J-event watching belongs to the unified runtime loop. The server should
+    // wire jReplicas only; startRuntimeLoop() owns startJurisdictionWatchers().
 
     // Wire relay-router + local delivery as soon as env exists.
     // Relay WS can receive early hello/gossip traffic during bootstrap.

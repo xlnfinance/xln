@@ -1,5 +1,22 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
+import { execSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+
+const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
+const BUILD_NUMBER = (() => {
+	const explicit = String(process.env['XLN_BUILD_NUMBER'] || '').trim();
+	if (explicit) return explicit;
+	try {
+		return execSync('git rev-list --count HEAD', {
+			cwd: REPO_ROOT,
+			encoding: 'utf8',
+			stdio: ['ignore', 'pipe', 'ignore']
+		}).trim() || '0';
+	} catch {
+		return '0';
+	}
+})();
 
 const ENABLE_HMR = (() => {
 	const value = String(process.env['VITE_ENABLE_HMR'] || '').toLowerCase();
@@ -52,6 +69,7 @@ export default defineConfig({
 	},
 	define: {
 		global: 'globalThis',
+		__BUILD_NUMBER__: JSON.stringify(BUILD_NUMBER),
 	},
 	resolve: {
 		alias: {

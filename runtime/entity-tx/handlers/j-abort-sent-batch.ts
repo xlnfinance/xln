@@ -2,6 +2,14 @@ import type { EntityInput, EntityState, EntityTx, Env, JInput } from '../../type
 import { addMessage, cloneEntityState } from '../../state-helpers';
 import { createEmptyBatch, getBatchSize, mergeBatchOps } from '../../j-batch';
 
+function shouldRequeueDisputeFinalize(_state: EntityState, _counterpartyIdRaw: unknown): boolean {
+  // Dispute finality is watcher-authoritative. Do not resurrect disputeFinalize from a
+  // local abort path: if finalize really succeeded on-chain, requeueing races the next
+  // DisputeFinalized poll and can poison an unrelated mixed batch. If finalize did not
+  // succeed, crontab/manual dispute flow will draft a fresh op from current account state.
+  return false;
+}
+
 export async function handleJAbortSentBatch(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'j_abort_sent_batch' }>,
@@ -30,6 +38,21 @@ export async function handleJAbortSentBatch(
   if (requeue) {
     if (!newState.jBatchState.batch) {
       newState.jBatchState.batch = createEmptyBatch();
+    }
+    if (sent.batch.disputeFinalizations?.length) {
+      const before = sent.batch.disputeFinalizations.length;
+      sent.batch.disputeFinalizations = sent.batch.disputeFinalizations.filter((op) => {
+        const keep = shouldRequeueDisputeFinalize(newState, op.counterentity);
+        if (!keep) {
+          droppedFinalizeCounterparties.add(String(op.counterentity).toLowerCase());
+        }
+        return keep;
+      });
+      if (before !== sent.batch.disputeFinalizations.length) {
+        console.log(
+          `🧹 Filtered ${before - sent.batch.disputeFinalizations.length} stale dispute finalize op(s) from requeue`,
+        );
+      }
     }
     // Drop stale C2R ops whose signed nonce is now <= on-chain nonce (would revert E2).
     if (sent.batch.collateralToReserve?.length) {
