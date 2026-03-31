@@ -4,6 +4,17 @@ const DEFAULT_TOKEN_IDS = [1, 3, 2] as const;
 const DEFAULT_OPEN_TIMEOUT_MS = 75_000;
 const DEFAULT_CREDIT_AMOUNT_DISPLAY = '10000';
 
+type XlnWindow = typeof window & {
+  XLN?: {
+    enqueueRuntimeInput?: (env: unknown, input: unknown) => unknown;
+  };
+  __xln_instance?: {
+    enqueueRuntimeInput?: (env: unknown, input: unknown) => unknown;
+  };
+  isolatedEnv?: unknown;
+  __xln_env?: unknown;
+};
+
 async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
   const ok = await page.evaluate(async () => {
     const env = (window as typeof window & {
@@ -225,12 +236,7 @@ async function enqueueOpenAccount(
   hubId: string,
 ): Promise<void> {
   const queued = await page.evaluate(async ({ entityId, signerId, hubId }) => {
-    const view = window as typeof window & {
-      isolatedEnv?: unknown;
-      __xln_env?: unknown;
-      XLN?: { enqueueRuntimeInput?: (env: unknown, input: unknown) => void };
-      __xln_instance?: { enqueueRuntimeInput?: (env: unknown, input: unknown) => void };
-    };
+    const view = window as XlnWindow;
     const env = view.isolatedEnv ?? view.__xln_env;
     const XLN = view.XLN
       ?? view.__xln_instance
@@ -309,12 +315,7 @@ async function addTokenToAccount(page: Page, hubId: string, tokenId: number): Pr
 async function extendCreditToken(page: Page, hubId: string, tokenId: number, amountDisplay: string): Promise<void> {
   const amount = BigInt(amountDisplay) * 10n ** 18n;
   const queued = await page.evaluate(async ({ hubId, tokenId, amount }) => {
-    const view = window as typeof window & {
-      isolatedEnv?: unknown;
-      __xln_env?: unknown;
-      XLN?: { enqueueRuntimeInput?: (env: unknown, input: unknown) => void };
-      __xln_instance?: { enqueueRuntimeInput?: (env: unknown, input: unknown) => void };
-    };
+    const view = window as XlnWindow;
     const env = view.isolatedEnv ?? view.__xln_env;
     const XLN = view.XLN
       ?? view.__xln_instance
@@ -441,7 +442,17 @@ export async function connectRuntimeToHub(
   identity: { entityId: string; signerId: string },
   hubId: string,
 ): Promise<void> {
-  if (await isAccountReady(page, identity.entityId, identity.signerId, hubId, DEFAULT_TOKEN_IDS)) {
+  await connectRuntimeToHubWithCredit(page, identity, hubId, DEFAULT_CREDIT_AMOUNT_DISPLAY, DEFAULT_TOKEN_IDS);
+}
+
+export async function connectRuntimeToHubWithCredit(
+  page: Page,
+  identity: { entityId: string; signerId: string },
+  hubId: string,
+  creditAmountDisplay: string,
+  tokenIds: readonly number[] = [1],
+): Promise<void> {
+  if (await isAccountReady(page, identity.entityId, identity.signerId, hubId, tokenIds)) {
     return;
   }
   const initialStatus = await getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId);
@@ -463,11 +474,11 @@ export async function connectRuntimeToHub(
     },
   ).toBe(true);
 
-  for (const tokenId of DEFAULT_TOKEN_IDS) {
-    await extendCreditToken(page, hubId, tokenId, DEFAULT_CREDIT_AMOUNT_DISPLAY);
+  for (const tokenId of tokenIds) {
+    await extendCreditToken(page, hubId, tokenId, creditAmountDisplay);
   }
 
-  const opened = await isAccountReady(page, identity.entityId, identity.signerId, hubId, DEFAULT_TOKEN_IDS, DEFAULT_OPEN_TIMEOUT_MS);
+  const opened = await isAccountReady(page, identity.entityId, identity.signerId, hubId, tokenIds, DEFAULT_OPEN_TIMEOUT_MS);
   const finalStatus = await getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId);
 
   expect(

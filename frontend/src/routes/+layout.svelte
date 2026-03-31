@@ -5,7 +5,6 @@
 	import Topbar from '$lib/components/Topbar.svelte';
 	import Toast from '$lib/components/Toast.svelte';
 	import { installRangeSliderProgress } from '$lib/utils/rangeSliderProgress';
-	import { installFatalErrorInterceptor } from '$lib/utils/resetEverything';
 	import '$lib/styles/apple-glass.css';
 	import '$lib/styles/checkbox-controls.css';
 	import '$lib/styles/range-sliders.css';
@@ -13,7 +12,6 @@
 
 	onMount(() => {
 		if (!browser) return;
-		installFatalErrorInterceptor();
 		const disposeRangeSliderProgress = installRangeSliderProgress();
 		return () => {
 			disposeRangeSliderProgress();

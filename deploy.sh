@@ -516,11 +516,16 @@ run_local_deploy() {
   ./scripts/build-runtime.sh
 
   if [ "$BUILD_FRONTEND" = "1" ] || [ ! -d frontend/build ]; then
+    DEPLOY_BUILD_NUMBER="$(date -u +%Y%m%d%H%M%S)"
+    if git rev-parse --short HEAD >/dev/null 2>&1; then
+      DEPLOY_BUILD_NUMBER="${DEPLOY_BUILD_NUMBER}-$(git rev-parse --short HEAD)"
+    fi
     echo "[deploy] building frontend"
+    echo "[deploy] frontend version $DEPLOY_BUILD_NUMBER"
     (
       cd frontend
       bun install
-      bun run build
+      XLN_BUILD_NUMBER="$DEPLOY_BUILD_NUMBER" bun run build
     )
   else
     echo "[deploy] skipping frontend build (pass --frontend to force)"

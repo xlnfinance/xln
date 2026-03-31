@@ -67,7 +67,7 @@ Plus: scenario that verifies nonce increment after settle.
 
 ## 5. Hub restart recovery (HIGH)
 
-Server has `POST /api/reset` with `preserveHubs=1` but no automatic
+Server has one reset endpoint: `POST /api/reset`.
 crash recovery. PM2 restarts process but env state is lost unless
 explicitly saved. `loadEnvFromDB` exists but unclear if it works
 after unclean shutdown.

@@ -23,6 +23,7 @@ import {
   gotoApp as gotoSharedApp,
   switchToRuntime,
 } from './utils/e2e-demo-users';
+import { prepareUiPayment, submitUiPayment } from './utils/e2e-pay-ui';
 import { getPersistedReceiptCursor, waitForPersistedFrameEvent, waitForPersistedFrameEventMatch } from './utils/e2e-runtime-receipts';
 import { timedStep } from './utils/e2e-timing';
 
@@ -819,48 +820,6 @@ async function faucet(page: Page, entityId: string, hubEntityId: string) {
   await page.waitForTimeout(SETTLE_MS);
 }
 
-async function openPayWorkspace(page: Page): Promise<void> {
-  const accountsTab = page.getByTestId('tab-accounts').first();
-  await expect(accountsTab).toBeVisible({ timeout: 20_000 });
-  await accountsTab.click();
-  const mobileToggle = page.getByTestId('account-workspace-mobile-toggle').first();
-  if (await mobileToggle.isVisible().catch(() => false)) {
-    await mobileToggle.click();
-  }
-  const candidateLocators = [
-    page.getByTestId('account-workspace-tab-pay'),
-    page.locator('.workspace-rail').getByRole('button', { name: /^Pay$/i }),
-  ];
-  for (const locator of candidateLocators) {
-    const count = await locator.count().catch(() => 0);
-    for (let index = 0; index < count; index += 1) {
-      const payTab = locator.nth(index);
-      if (await payTab.isVisible().catch(() => false)) {
-        await payTab.click();
-        return;
-      }
-    }
-  }
-  throw new Error('visible Pay workspace tab not found');
-}
-
-async function chooseVisibleRoute(page: Page, route: string[]): Promise<void> {
-  if (route.length === 0) return;
-  const routeOptions = page.locator('.route-option');
-  const routeCount = await routeOptions.count();
-  if (routeCount <= 1) return;
-  const routeNeedles = route.map((hopId) => hopId.toLowerCase().slice(0, 10));
-  for (let index = 0; index < routeCount; index += 1) {
-    const option = routeOptions.nth(index);
-    const text = (await option.textContent()).toLowerCase();
-    const matches = routeNeedles.every((needle) => text.includes(needle));
-    if (matches) {
-      await option.click();
-      return;
-    }
-  }
-}
-
 function parseRouteFeeText(rawText: string): bigint {
   const match = rawText.match(/Fee:?\s*([0-9][0-9,]*(?:\.[0-9]+)?)/i);
   if (!match?.[1]) return 0n;
@@ -868,58 +827,25 @@ function parseRouteFeeText(rawText: string): bigint {
   return ethers.parseUnits(normalized, 18);
 }
 
-async function fillPayIntent(page: Page, targetEntityId: string): Promise<void> {
-  const invoiceInput = page.locator('#payment-invoice-input').first();
-  await expect(invoiceInput).toBeVisible({ timeout: 10_000 });
-  await invoiceInput.click();
-  await invoiceInput.fill(targetEntityId);
-}
-
 async function pay(page: Page, from: string, signerId: string, to: string, route: string[], amount: bigint): Promise<bigint> {
   void from;
   void signerId;
 
-  await openPayWorkspace(page);
-
-  await fillPayIntent(page, to);
-
-  const amountInput = page.locator('#payment-amount-input');
-  await expect(amountInput).toBeVisible({ timeout: 10_000 });
-  await amountInput.click();
-  await amountInput.fill(ethers.formatUnits(amount, 18));
-
-  const findRoutesBtn = page.getByRole('button', { name: 'Find route' }).first();
-  await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
-  await findRoutesBtn.click();
-
-  const routesPanel = page.locator('.route-option').first();
-  await expect(routesPanel).toBeVisible({ timeout: 15_000 });
-  await chooseVisibleRoute(page, route);
-  const selectedRoute = page.locator('.route-option.selected, .route-option:has(input[type="radio"]:checked)').first();
-  const selectedRouteText = (await selectedRoute.textContent().catch(() => '')) || '';
+  const { selectedRouteText } = await submitUiPayment(page, {
+    recipientEntityId: to,
+    amount,
+    routeEntityIds: route,
+  });
   const quotedSenderSpend = amount + parseRouteFeeText(selectedRouteText);
-
-  const sendPaymentBtn = page.getByRole('button', { name: /Pay now/i }).first();
-  await expect(sendPaymentBtn).toBeEnabled({ timeout: 10_000 });
-  await sendPaymentBtn.click();
-  await page.waitForTimeout(200);
   return quotedSenderSpend;
 }
 
 async function attemptOverspend(page: Page, to: string, route: string[], amount: bigint): Promise<void> {
-  await openPayWorkspace(page);
-
-  await fillPayIntent(page, to);
-
-  const amountInput = page.locator('#payment-amount-input');
-  await amountInput.click();
-  await amountInput.fill(ethers.formatUnits(amount, 18));
-
-  const findRoutesBtn = page.getByRole('button', { name: 'Find route' }).first();
-  await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
-  await findRoutesBtn.click();
-  await page.waitForTimeout(500);
-  await chooseVisibleRoute(page, route);
+  await prepareUiPayment(page, {
+    recipientEntityId: to,
+    amount,
+    routeEntityIds: route,
+  });
 
   const sendPaymentBtn = page.getByRole('button', { name: /Pay now/i }).first();
   if (await sendPaymentBtn.isEnabled().catch(() => false)) {

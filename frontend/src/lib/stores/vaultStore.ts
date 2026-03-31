@@ -7,7 +7,7 @@ import { settings } from './settingsStore';
 import { toasts } from './toastStore';
 import { writeSavedCollateralPolicy, writeHubJoinPreference } from '$lib/utils/onboardingPreferences';
 import { writeOnboardingComplete } from '$lib/utils/onboardingState';
-import { clearAllPersistentClientState, resetEverything } from '$lib/utils/resetEverything';
+import { resetEverything } from '$lib/utils/resetEverything';
 import { tabOperations } from './tabStore';
 import { isInactiveTabStandby } from '$lib/utils/activeTabLock';
 
@@ -385,12 +385,6 @@ const resolveRpcUrl = (rpc: string, baseOrigin?: string): string => {
   return rpc;
 };
 
-const RPC_FATAL_STYLE = 'background:#3b0000;color:#ff4d4f;font-weight:800;padding:2px 6px;border-radius:4px;';
-
-const logRpcFatal = (reason: string, details: Record<string, unknown>): void => {
-  console.error('%c[RPC FAIL-FAST]', RPC_FATAL_STYLE, reason, details);
-};
-
 const summarizeHealth = (payload: HealthPayload | null): Record<string, unknown> => {
   if (!payload) return {};
   return {
@@ -409,53 +403,16 @@ const summarizeHealth = (payload: HealthPayload | null): Record<string, unknown>
   };
 };
 
-const detectRpcChainId = async (rpcUrl: string): Promise<number> => {
-  const controller = typeof AbortController !== 'undefined' ? new AbortController() : null;
-  const timeout = controller ? setTimeout(() => controller.abort(), 5000) : null;
-  try {
-    const response = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'eth_chainId',
-        params: [],
-      }),
-      ...(controller ? { signal: controller.signal } : {}),
-    });
-    if (!response.ok) {
-      const body = (await response.text().catch(() => '')).slice(0, 300);
-      logRpcFatal('RPC_CHAINID_HTTP_ERROR', { rpcUrl, status: response.status, body });
-      throw new Error(`RPC_CHAINID_HTTP_${response.status}:${body || 'empty'}`);
-    }
-    const payload = await response.json();
-    const hex = typeof payload?.result === 'string' ? payload.result : '';
-    if (!hex || !hex.startsWith('0x')) {
-      logRpcFatal('RPC_CHAINID_MALFORMED_RESPONSE', { rpcUrl, payload });
-      throw new Error(`RPC_CHAINID_MALFORMED_RESPONSE:${JSON.stringify(payload)}`);
-    }
-    const parsed = Number.parseInt(hex, 16);
-    if (!Number.isFinite(parsed) || parsed <= 0) {
-      logRpcFatal('RPC_CHAINID_PARSE_FAILED', { rpcUrl, hex });
-      throw new Error(`RPC_CHAINID_PARSE_FAILED:${hex}`);
-    }
-    return parsed;
-  } catch (error) {
-    logRpcFatal('RPC_CHAINID_REQUEST_FAILED', {
-      rpcUrl,
-      message: error instanceof Error ? error.message : String(error),
-    });
-    throw error;
-  } finally {
-    if (timeout) clearTimeout(timeout);
+const assertAnvilChain = (chainId: number, context: string): void => {
+  if (chainId !== 31337) {
+    throw new Error(`[${context}] CHAIN_ID_MISMATCH: expected=31337 actual=${chainId}`);
   }
 };
 
-const assertAnvilChain = (chainId: number, rpcUrl: string, context: string): void => {
-  if (chainId !== 31337) {
-    throw new Error(`[${context}] CHAIN_ID_MISMATCH: expected=31337 actual=${chainId} rpc=${rpcUrl}`);
-  }
+const resolveCanonicalTestnetChainId = (config: JurisdictionConfig, context: string): number => {
+  const chainId = Number(config.chainId || 31337);
+  assertAnvilChain(chainId, context);
+  return chainId;
 };
 
 const fetchJurisdictions = async (baseOrigin?: string): Promise<JurisdictionsPayload> => {
@@ -846,21 +803,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     'delta_transformer',
   );
   xln.setDeltaTransformerAddress?.(canonicalDeltaTransformerAddress);
-  let chainId: number;
-  try {
-    chainId = await detectRpcChainId(rpcUrl);
-    assertAnvilChain(chainId, rpcUrl, 'VaultStore.restore');
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    logRpcFatal('VAULT_RPC_CHAIN_VALIDATION_FAILED', { context: 'restore', rpcUrl, message });
-    env?.error?.(
-      'network',
-      'VAULT_RPC_CHAIN_VALIDATION_FAILED',
-      { rpcUrl, message },
-      env?.runtimeId,
-    );
-    throw error;
-  }
+  const chainId = resolveCanonicalTestnetChainId(arrakisConfig, 'VaultStore.restore');
 
   if (!env) {
     env = xln.createEmptyEnv(runtimeSeed);
@@ -1422,22 +1365,7 @@ export const vaultOperations = {
     const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
     console.log('[VaultStore.createRuntime] Loaded contracts:', arrakisConfig.contracts);
     const rpcUrl = resolveRpcUrl(arrakisConfig.rpc, baseOrigin);
-    let chainId: number;
-    try {
-      chainId = await detectRpcChainId(rpcUrl);
-      markPerf('detect_rpc_chain_id');
-      assertAnvilChain(chainId, rpcUrl, 'VaultStore.createRuntime');
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      logRpcFatal('VAULT_RPC_CHAIN_VALIDATION_FAILED', { context: 'createRuntime', rpcUrl, message });
-      newEnv.error?.(
-        'network',
-        'VAULT_RPC_CHAIN_VALIDATION_FAILED',
-        { rpcUrl, message },
-        newEnv.runtimeId,
-      );
-      throw error;
-    }
+    const chainId = resolveCanonicalTestnetChainId(arrakisConfig, 'VaultStore.createRuntime');
 
     // Import testnet J-machine (shared anvil on xln.finance)
     console.log('[VaultStore.createRuntime] Importing testnet anvil...');

@@ -44,7 +44,7 @@
   import {
     ArrowUpRight, ArrowDownLeft, Repeat, Landmark, Users, Activity,
     Settings as SettingsIcon,
-    ChevronDown, Wallet, AlertTriangle, PlusCircle, Copy, Check, Trash2, SlidersHorizontal
+    ChevronDown, AlertTriangle, PlusCircle, Copy, Check, Trash2, SlidersHorizontal
   } from 'lucide-svelte';
 
   // Child components
@@ -67,6 +67,7 @@
   import EntitySettingsPanel from '$lib/components/Settings/EntitySettingsPanel.svelte';
   import RuntimeDropdown from '$lib/components/Runtime/RuntimeDropdown.svelte';
   import ContextSwitcher from './ContextSwitcher.svelte';
+  import RuntimeStateCard from '../shared/RuntimeStateCard.svelte';
 
   export let tab: Tab;
   export let hideHeader: boolean = false;
@@ -4818,12 +4819,16 @@
   <main class="main-scroll">
     {#if !tab.entityId || !tab.signerId}
       <div class="empty-state">
-        <Wallet size={40} />
-        <h3>Select Entity</h3>
-        <p>{userModeHeader ? 'Choose from the context pill above' : 'Choose from the dropdown above'}</p>
-        <button class="empty-state-reset" type="button" on:click={handleResetEverything} disabled={resettingEverything}>
-          {resettingEverything ? 'Resetting...' : 'Reset Everything'}
-        </button>
+        <RuntimeStateCard
+          compact={true}
+          title="Select Entity"
+          description={userModeHeader ? 'Choose an entity from the active context.' : 'Choose an entity from the header dropdown.'}
+          status={null}
+          actionLabel={resettingEverything ? 'Resetting...' : 'Reset local data'}
+          actionDisabled={resettingEverything}
+          onAction={handleResetEverything}
+          testId="entity-empty-card"
+        />
       </div>
 
     {:else if activeEnv && isAccountFocused && selectedAccount && selectedAccountId}
@@ -6020,47 +6025,9 @@
   /* Empty State */
   .empty-state {
     display: flex;
-    flex-direction: column;
-    align-items: center;
     justify-content: center;
     height: 300px;
-    color: var(--theme-text-muted, #71717a);
-    gap: 12px;
-  }
-
-  .empty-state h3 {
-    margin: 0;
-    font-size: 16px;
-    color: var(--theme-text-primary, #e4e4e7);
-  }
-
-  .empty-state p {
-    margin: 0;
-    font-size: 12px;
-  }
-
-  .empty-state-reset {
-    margin-top: 8px;
-    padding: 10px 14px;
-    border-radius: 10px;
-    border: 1px solid rgba(239, 68, 68, 0.28);
-    background: linear-gradient(180deg, rgba(69, 10, 10, 0.94), rgba(31, 12, 12, 0.96));
-    color: #fca5a5;
-    font-size: 12px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: border-color 0.15s ease, color 0.15s ease, transform 0.15s ease;
-  }
-
-  .empty-state-reset:hover:not(:disabled) {
-    border-color: rgba(248, 113, 113, 0.52);
-    color: #fecaca;
-    transform: translateY(-1px);
-  }
-
-  .empty-state-reset:disabled {
-    opacity: 0.55;
-    cursor: wait;
+    align-items: center;
   }
 
   /* Focused Account View */

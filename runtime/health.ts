@@ -37,7 +37,6 @@ export interface HubHealth {
 export interface SystemHealth {
   runtime: boolean;
   p2p: boolean;
-  database: boolean;
   relay: boolean;
 }
 
@@ -72,9 +71,6 @@ export async function getHealthStatus(env: Env | null): Promise<HealthStatus> {
   const jMachines: JMachineHealth[] = [];
   const hubs: HubHealth[] = [];
   const replicasByEntityId = env ? buildEntityReplicaIndex(env) : new Map<string, EntityReplica>();
-  const runtimeDb = env?.runtimeState && typeof env.runtimeState === 'object'
-    ? (env.runtimeState as { db?: unknown }).db
-    : null;
 
   // Check J-machines
   if (env?.jReplicas) {
@@ -139,7 +135,6 @@ export async function getHealthStatus(env: Env | null): Promise<HealthStatus> {
     system: {
       runtime: !!env,
       p2p: !!(env && getP2P(env)),
-      database: !!runtimeDb,
       // On Bun server, relay lives in-process as /relay regardless of local P2P client status.
       relay: !!env && (typeof Bun !== 'undefined' || !!getP2P(env)?.isConnected()),
     },

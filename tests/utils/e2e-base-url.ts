@@ -27,12 +27,7 @@ export function requireApiBaseUrl(): string {
 export function requireResetBaseUrl(): string {
   return requireUrl(
     'RESET base URL',
-    [
-      process.env.E2E_RESET_BASE_URL,
-      process.env.E2E_API_BASE_URL,
-      process.env.E2E_BASE_URL,
-      process.env.PW_BASE_URL,
-    ],
-    'Refusing to fall back to shared https://localhost:8080.',
+    [process.env.E2E_RESET_BASE_URL],
+    'Set E2E_RESET_BASE_URL explicitly to the orchestrator host. Refusing to guess from API/app URLs.',
   );
 }

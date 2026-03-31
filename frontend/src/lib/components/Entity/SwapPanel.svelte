@@ -169,6 +169,9 @@
   let limitPriceTicks: bigint | null = null;
   let orderListTab: 'open' | 'closed' = 'open';
   let closedOrderStatusFilter: 'all' | ClosedOrderStatus = 'all';
+  let offerLifecycles: OfferLifecycle[] = [];
+  let closedOfferLifecycles: OfferLifecycle[] = [];
+  let closedOrderViews: ClosedOrderView[] = [];
   let wantTokenPresentInAccount = false;
   let availableGiveCapacity = 0n;
   let availableWantInCapacity = 0n;

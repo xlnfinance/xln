@@ -70,7 +70,7 @@ test.describe('Active tab lock handoff', () => {
     }
   });
 
-  test('embedded pay path also participates in ownership handoff', async ({ browser }) => {
+  test('pay deeplink path also participates in ownership handoff', async ({ browser }) => {
     const context: BrowserContext = await browser.newContext({ ignoreHTTPSErrors: true });
     const first = await context.newPage();
     const second = await context.newPage();
@@ -81,7 +81,7 @@ test.describe('Active tab lock handoff', () => {
       await waitUntilOwnsActiveLock(first);
       await openApp(
         second,
-        `/app?locktest=1&e&mode=embed#pay/${encodeURIComponent(`${targetEntityId}?token=1&amount=1`)}`,
+        `/app?locktest=1#pay/${encodeURIComponent(`${targetEntityId}?token=1&amount=1`)}`,
       );
       await waitUntilOwnsActiveLock(second);
 

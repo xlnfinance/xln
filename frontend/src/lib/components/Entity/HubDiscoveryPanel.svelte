@@ -4,43 +4,33 @@
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
-  import type { Env, Profile as GossipProfile } from '@xln/runtime/xln-api';
+  import type { Env } from '@xln/runtime/xln-api';
   import {
     xlnFunctions,
-    getXLN,
     enqueueEntityInputs,
     resolveConfiguredApiBase,
-    resolveRelayUrls,
   } from '../../stores/xlnStore';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
   import { entityAvatar } from '$lib/utils/avatar';
-  import { normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
   import {
     normalizeEntityId,
     requireSignerIdForEntity,
-    hasCounterpartyAccount,
-    getCounterpartyAccount,
     getConnectedCounterpartyIds,
-    isCounterpartyBlockedByDispute,
   } from '$lib/utils/entityReplica';
   import { RefreshCw, ChevronDown, ChevronUp, Plus, Check, AlertTriangle } from 'lucide-svelte';
 
   export let entityId: string = '';
   export let env: Env;
-  export let isLive: boolean;
   $: activeFunctions = $xlnFunctions;
 
   // State
   let loading = false;
   let error = '';
-  let connecting: string | null = null;
+  let connectingHubIds = new Set<string>();
   let expandedHub: string | null = null;
-  const DEFAULT_RELAY = resolveRelayUrls()[0] || '';
-  const relaySelection = DEFAULT_RELAY;
 
   // Hub data structure
   interface Hub {
-    profile: GossipProfile;
     entityId: string;
     name: string;
     metadata: {
@@ -51,9 +41,6 @@
     };
     runtimeId: string;
     wsUrl: string | null;
-    verified: boolean;
-    creditScore: number;
-    isConnected: boolean;
     lastSeen: number;
     raw: string;
     avatar: string;
@@ -81,14 +68,6 @@
     }>;
   };
 
-  const HUB_NAME_ORDER = ['H1', 'H2', 'H3'] as const;
-
-  type RuntimeP2PView = {
-    relayUrls?: string[];
-    isConnected?: () => boolean;
-    updateConfig?: (cfg: { relayUrls: string[] }) => void;
-  };
-
   $: connectedHubIds = getConnectedCounterpartyIds(env, entityId);
 
   // Sorted hubs (with live connection status from current account state)
@@ -97,35 +76,11 @@
       ...hub,
       isConnected: connectedHubIds.has(normalizeEntityId(hub.entityId)),
     }))
-    .sort((a, b) => {
-      const fixedOrderA = HUB_NAME_ORDER.indexOf(String(a.name || '').toUpperCase() as typeof HUB_NAME_ORDER[number]);
-      const fixedOrderB = HUB_NAME_ORDER.indexOf(String(b.name || '').toUpperCase() as typeof HUB_NAME_ORDER[number]);
-      if (fixedOrderA !== fixedOrderB) {
-        if (fixedOrderA === -1) return 1;
-        if (fixedOrderB === -1) return -1;
-        return fixedOrderA - fixedOrderB;
-      }
-      return a.name.localeCompare(b.name);
-    });
+    .sort((a, b) => a.name.localeCompare(b.name));
 
   function formatFee(ppm?: number): string {
     if (!ppm && ppm !== 0) return '-';
     return (ppm / 100).toFixed(2) + ' bps';
-  }
-
-  function clamp(value: number, min: number, max: number): number {
-    return Math.min(max, Math.max(min, value));
-  }
-
-  function computeCreditScore(entity: string, feePpm: number, peerCount: number): number {
-    let hash = 0;
-    for (let i = 0; i < entity.length; i += 1) {
-      hash = ((hash << 5) - hash + entity.charCodeAt(i)) | 0;
-    }
-    const base = 720 + (Math.abs(hash) % 181); // 720..900 deterministic
-    const feeAdj = clamp(Math.round((120 - feePpm) / 10), -40, 20);
-    const peerAdj = clamp(peerCount * 4, 0, 24);
-    return clamp(base + feeAdj + peerAdj, 650, 980);
   }
 
   const formatRawProfile = (profile: unknown): string => {
@@ -165,20 +120,6 @@
           const peerCount = Array.isArray(hub.publicAccounts) ? hub.publicAccounts.length : 0;
           const feePpm = Number(hub.metadata?.routingFeePPM ?? 0);
           return {
-            profile: {
-              entityId: hub.entityId,
-              name: hub.name || hub.entityId,
-              bio: hub.bio || '',
-              website: hub.website || undefined,
-              wsUrl: hub.wsUrl || null,
-              publicAccounts: hub.publicAccounts || [],
-              metadata: {
-                isHub: true,
-                routingFeePPM: feePpm,
-              },
-              runtimeId: hub.runtimeId || '',
-              lastUpdated: Number(hub.lastUpdated || 0),
-            } as GossipProfile,
             entityId: hub.entityId,
             name: hub.name || hub.entityId,
             metadata: {
@@ -189,9 +130,6 @@
             },
             runtimeId: hub.runtimeId || '',
             wsUrl: hub.wsUrl || null,
-            verified: true,
-            creditScore: computeCreditScore(hub.entityId, feePpm, peerCount),
-            isConnected: false,
             lastSeen: Number(hub.lastUpdated || 0),
             raw: formatRawProfile(hub),
             avatar: entityAvatar(activeFunctions, fullEntityId),
@@ -204,63 +142,14 @@
     }
   }
 
-  function isP2PConnected(currentEnv: unknown): boolean {
-    try {
-      const p2p = (currentEnv as { runtimeState?: { p2p?: RuntimeP2PView } } | null)?.runtimeState?.p2p;
-      return typeof p2p?.isConnected === 'function' ? Boolean(p2p.isConnected()) : false;
-    } catch {
-      return false;
-    }
-  }
-
-  function hasP2PClient(currentEnv: unknown): boolean {
-    try {
-      return Boolean((currentEnv as { runtimeState?: { p2p?: unknown } } | null)?.runtimeState?.p2p);
-    } catch {
-      return false;
-    }
-  }
-
-  async function waitForP2PReady(currentEnv: unknown, timeoutMs = DISCOVERY_TIMEOUT_MS): Promise<boolean> {
-    if (!hasP2PClient(currentEnv)) return false;
-    const start = Date.now();
-    while (Date.now() - start < timeoutMs) {
-      if (isP2PConnected(currentEnv)) return true;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    return false;
-  }
-
   // Discover hubs from gossip network
-  async function discoverHubs(refreshGossip: boolean = false) {
+  async function discoverHubs() {
     loading = true;
     error = '';
 
     try {
-      const currentEnv = env;
       const fetchedHubs = await fetchPublicHubs();
-      if (refreshGossip) {
-        try {
-          const xln = await getXLN();
-          if (currentEnv && xln.refreshGossip) {
-            await ensureRuntimeRelay(currentEnv, relaySelection);
-            await Promise.race([
-              Promise.resolve(xln.refreshGossip(currentEnv)),
-              new Promise((_, reject) => setTimeout(() => reject(new Error('gossip refresh timeout')), DISCOVERY_TIMEOUT_MS)),
-            ]);
-            await new Promise(resolve => setTimeout(resolve, 50));
-          }
-        } catch {
-          // Discovery stays server-authoritative; local gossip refresh is best-effort only.
-        }
-      }
-
-      hubs = fetchedHubs
-        .filter((hub) => !currentEnv || !entityId || !isCounterpartyBlockedByDispute(currentEnv, entityId, hub.entityId))
-        .map((hub) => ({
-          ...hub,
-          isConnected: currentEnv ? hasCounterpartyAccount(currentEnv, entityId, hub.entityId) : false,
-        }));
+      hubs = fetchedHubs;
       if (hubs.length === 0) {
         error = 'No public hubs discovered yet. Try Refresh; if it persists, check relay connectivity.';
       }
@@ -275,19 +164,17 @@
 
   // Connect to hub (open account + extend credit in same frame)
   async function connectToHub(hub: Hub) {
-    if (!entityId || connecting) return;
+    if (!entityId) return;
 
-    connecting = hub.entityId;
+    const hubId = normalizeEntityId(hub.entityId);
+    if (connectingHubIds.has(hubId)) return;
+
+    connectingHubIds = new Set(connectingHubIds).add(hubId);
     error = '';
 
     try {
-      const xln = await getXLN();
-      if (!xln) throw new Error('XLN not initialized');
-
       const currentEnv = env;
       if (!currentEnv) throw new Error('Environment not ready');
-      if (!isLive) throw new Error('Open account is only available in LIVE mode');
-      await ensureRuntimeRelay(currentEnv, relaySelection);
 
       // Find signer for our entity
       const signerId = requireSignerIdForEntity(currentEnv, entityId, 'hub-connect');
@@ -305,69 +192,24 @@
         entityTxs: [
           {
             type: 'openAccount' as const,
-              data: {
-                targetEntityId: hub.entityId,
-                creditAmount,    // Both txs go in same frame
-                tokenId: 1,      // USDC
-                ...(rebalancePolicy ? { rebalancePolicy } : {}),
-              }
+            data: {
+              targetEntityId: hub.entityId,
+              creditAmount,
+              tokenId: 1,
+              ...(rebalancePolicy ? { rebalancePolicy } : {}),
             }
-          ]
-        }]);
-
-      const opened = await waitForAccountReady(currentEnv, entityId, hub.entityId, 20_000);
-      if (!opened) {
-        throw new Error('Account opening is still pending consensus. Wait for ACK and retry.');
-      }
-
-      // Update hub status
-      hubs = hubs.map(h =>
-        normalizeEntityId(h.entityId) === normalizeEntityId(hub.entityId)
-          ? { ...h, isConnected: true }
-          : h
-      );
+          },
+        ],
+      }]);
 
     } catch (err) {
       console.error('[HubDiscovery] Connect failed:', err);
       error = (err as Error)?.message || 'Connection failed';
     } finally {
-      connecting = null;
+      const next = new Set(connectingHubIds);
+      next.delete(hubId);
+      connectingHubIds = next;
     }
-  }
-
-  async function waitForAccountReady(currentEnv: Env, ownerEntityId: string, counterpartyEntityId: string, timeoutMs = 20_000): Promise<boolean> {
-    const started = Date.now();
-    while (Date.now() - started < timeoutMs) {
-      const accountEntry = getCounterpartyAccount(currentEnv, ownerEntityId, counterpartyEntityId);
-      if (accountEntry && !accountEntry.account?.pendingFrame) {
-        return true;
-      }
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    return false;
-  }
-
-  async function ensureRuntimeRelay(currentEnv: Env, relayUrl: string, timeoutMs = 12_000): Promise<void> {
-    const desired = normalizeWsUrl(String(relayUrl || '').trim() || resolveRelayUrls()[0] || '');
-    if (!desired) return;
-    const xln = await getXLN();
-    const p2p = xln.getP2P?.(currentEnv) as RuntimeP2PView | null | undefined;
-    if (!p2p?.updateConfig) {
-      throw new Error('Create or restore a wallet runtime first. Hub gossip uses the active runtime P2P client.');
-    }
-    const currentRelays = Array.isArray(p2p.relayUrls) ? p2p.relayUrls : [];
-    if (currentRelays.length !== 1 || !sameWsEndpoint(currentRelays[0] || '', desired)) {
-      p2p.updateConfig({ relayUrls: [desired] });
-    }
-    const started = Date.now();
-    while (Date.now() - started < timeoutMs) {
-      const relaysNow = Array.isArray(p2p.relayUrls) ? p2p.relayUrls : [];
-      const connected = typeof p2p.isConnected === 'function' ? p2p.isConnected() : false;
-      if (relaysNow.length === 1 && sameWsEndpoint(relaysNow[0] || '', desired) && connected) return;
-      await new Promise((resolve) => setTimeout(resolve, 50));
-    }
-    const relaysNow = Array.isArray(p2p.relayUrls) ? p2p.relayUrls.join(',') : 'none';
-    throw new Error(`Relay switch timeout (desired=${desired}, actual=${relaysNow})`);
   }
 
   // Track if we've already discovered (prevent repeated auto-fetch loops)
@@ -378,7 +220,7 @@
     if (env) {
       hasDiscoveredOnce = true;
       (async () => {
-        await discoverHubs(true);
+        await discoverHubs();
       })();
     }
     return () => {};
@@ -388,7 +230,7 @@
   $: if (env && hubs.length === 0 && !loading && !hasDiscoveredOnce) {
     hasDiscoveredOnce = true;
     (async () => {
-      await discoverHubs(true);
+      await discoverHubs();
     })();
   }
 </script>
@@ -399,7 +241,7 @@
       <span class="panel-kicker">Counterparties</span>
     </div>
     <div class="header-controls">
-      <button class="refresh-btn" on:click={() => discoverHubs(true)} disabled={loading}>
+      <button class="refresh-btn" on:click={() => discoverHubs()} disabled={loading}>
         <span class:spinning={loading}><RefreshCw size={14} /></span>
         Refresh
       </button>
@@ -446,9 +288,9 @@
                 <button
                   class="btn-connect"
                   on:click={() => connectToHub(hub)}
-                  disabled={connecting === hub.entityId}
+                  disabled={connectingHubIds.has(normalizeEntityId(hub.entityId))}
                 >
-                  {#if connecting === hub.entityId}
+                  {#if connectingHubIds.has(normalizeEntityId(hub.entityId))}
                     ...
                   {:else}
                     <Plus size={12} /> Connect
@@ -469,14 +311,6 @@
           {#if expandedHub === hub.entityId}
             <div class="row-details">
               <div class="detail-grid">
-                <div class="detail">
-                  <span class="label">Verified</span>
-                  <span class="value">{hub.verified ? 'Yes' : 'No'}</span>
-                </div>
-                <div class="detail">
-                  <span class="label">Score</span>
-                  <span class="value">{hub.creditScore}</span>
-                </div>
                 <div class="detail">
                   <span class="label">Fee</span>
                   <span class="value">{formatFee(hub.metadata.fee)}</span>

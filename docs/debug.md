@@ -225,7 +225,7 @@ Always validate these 3 scenarios, in this order, before merge/redeploy:
 
 ```bash
 # 0) clean debug state (preserve hub profiles)
-curl -s -X POST "https://xln.finance/api/debug/reset" | jq .
+curl -s -X POST "https://xln.finance/api/reset" | jq .
 
 # 1) lock-ahb
 bun run scenario:lock-ahb
