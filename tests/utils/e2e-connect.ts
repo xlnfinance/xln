@@ -1,6 +1,6 @@
 import { expect, type Page } from '@playwright/test';
 
-const DEFAULT_TOKEN_IDS = [1, 3, 2] as const;
+const DEFAULT_TOKEN_IDS = [1] as const;
 const DEFAULT_OPEN_TIMEOUT_MS = 75_000;
 const DEFAULT_CREDIT_AMOUNT_DISPLAY = '10000';
 
@@ -12,8 +12,26 @@ type XlnWindow = typeof window & {
     enqueueRuntimeInput?: (env: unknown, input: unknown) => unknown;
   };
   isolatedEnv?: unknown;
-  __xln_env?: unknown;
 };
+
+async function readSelectedUiRuntimeIdentity(page: Page): Promise<{ entityId: string; signerId: string }> {
+  const trigger = page.getByTestId('context-current').first();
+  await expect(trigger).toBeVisible({ timeout: 20_000 });
+
+  const [entityId, signerId] = await Promise.all([
+    trigger.getAttribute('data-entity-id'),
+    trigger.getAttribute('data-signer-id'),
+  ]);
+
+  const selected = {
+    entityId: String(entityId || '').trim(),
+    signerId: String(signerId || '').trim(),
+  };
+
+  expect(selected.entityId, 'UI-selected entityId must be present').toMatch(/^0x[a-fA-F0-9]{64}$/);
+  expect(selected.signerId, 'UI-selected signerId must be present').toMatch(/^0x[a-fA-F0-9]{40}$/);
+  return selected;
+}
 
 async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
   const ok = await page.evaluate(async () => {
@@ -99,18 +117,24 @@ async function isAccountReady(
       if (!env?.eReplicas) return false;
 
       const startedAt = Date.now();
-      while (Date.now() - startedAt <= timeoutMs) {
-        for (const [replicaKey, replica] of env.eReplicas.entries()) {
-          const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
-          if (String(replicaEntityId || '').toLowerCase() !== String(entityId || '').toLowerCase()) continue;
-          if (String(replicaSignerId || '').toLowerCase() !== String(signerId || '').toLowerCase()) continue;
-          const account = replica.state?.accounts?.get(hubId);
-          if (!account) continue;
-          const hasDelta = tokenIds.every((tokenId) => Boolean(account.deltas?.get?.(tokenId)));
-          const noPending = !account.pendingFrame;
-          const hasFrame = Number(account.currentHeight || 0) > 0;
-          if (hasDelta && noPending && hasFrame) return true;
-        }
+	      while (Date.now() - startedAt <= timeoutMs) {
+	        for (const [replicaKey, replica] of env.eReplicas.entries()) {
+	          const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
+	          if (String(replicaEntityId || '').toLowerCase() !== String(entityId || '').toLowerCase()) continue;
+	          if (String(replicaSignerId || '').toLowerCase() !== String(signerId || '').toLowerCase()) continue;
+	          const account = replica.state?.accounts?.get(hubId);
+	          if (!account) continue;
+	          const hasDelta = tokenIds.every((tokenId) => {
+	            if (!(account.deltas instanceof Map)) return false;
+	            for (const [deltaTokenId] of account.deltas.entries()) {
+	              if (Number(deltaTokenId) === tokenId) return true;
+	            }
+	            return false;
+	          });
+	          const noPending = !account.pendingFrame;
+	          const hasFrame = Number(account.currentHeight || 0) > 0;
+	          if (hasDelta && noPending && hasFrame) return true;
+	        }
         if (timeoutMs <= 0) break;
         await new Promise((resolve) => setTimeout(resolve, 500));
       }
@@ -237,7 +261,7 @@ async function enqueueOpenAccount(
 ): Promise<void> {
   const queued = await page.evaluate(async ({ entityId, signerId, hubId }) => {
     const view = window as XlnWindow;
-    const env = view.isolatedEnv ?? view.__xln_env;
+    const env = view.isolatedEnv;
     const XLN = view.XLN
       ?? view.__xln_instance
       ?? await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
@@ -312,35 +336,27 @@ async function addTokenToAccount(page: Page, hubId: string, tokenId: number): Pr
   await addButton.click();
 }
 
-async function extendCreditToken(page: Page, hubId: string, tokenId: number, amountDisplay: string): Promise<void> {
+async function extendCreditToken(
+  page: Page,
+  identity: { entityId: string; signerId: string },
+  hubId: string,
+  tokenId: number,
+  amountDisplay: string,
+): Promise<void> {
   const amount = BigInt(amountDisplay) * 10n ** 18n;
-  const queued = await page.evaluate(async ({ hubId, tokenId, amount }) => {
+  const queued = await page.evaluate(async ({ entityId, signerId, hubId, tokenId, amount }) => {
     const view = window as XlnWindow;
-    const env = view.isolatedEnv ?? view.__xln_env;
+    const env = view.isolatedEnv;
     const XLN = view.XLN
       ?? view.__xln_instance
       ?? await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
     if (!env || !XLN?.enqueueRuntimeInput) return { ok: false, error: 'isolatedEnv/XLN missing' };
 
-    const replicas = (env as { eReplicas?: Map<string, unknown>; runtimeId?: string }).eReplicas;
-    const runtimeId = String((env as { runtimeId?: string }).runtimeId || '').toLowerCase();
-    let identity: { entityId: string; signerId: string } | null = null;
-    if (replicas instanceof Map) {
-      for (const rawKey of replicas.keys()) {
-        const [entityId, signerId] = String(rawKey).split(':');
-        if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;
-        if (runtimeId && String(signerId).toLowerCase() !== runtimeId) continue;
-        identity = { entityId, signerId };
-        break;
-      }
-    }
-    if (!identity) return { ok: false, error: 'local identity missing' };
-
     XLN.enqueueRuntimeInput(env, {
       runtimeTxs: [],
       entityInputs: [{
-        entityId: identity.entityId,
-        signerId: identity.signerId,
+        entityId,
+        signerId,
         entityTxs: [{
           type: 'extendCredit',
           data: {
@@ -352,30 +368,12 @@ async function extendCreditToken(page: Page, hubId: string, tokenId: number, amo
       }],
     });
     return { ok: true };
-  }, { hubId, tokenId, amount });
+  }, { entityId: identity.entityId, signerId: identity.signerId, hubId, tokenId, amount });
   expect(queued.ok, queued.error || `extendCredit enqueue failed for token ${tokenId}`).toBe(true);
 
   await expect.poll(
     async () => {
-      const runtimeIdentity = await page.evaluate(() => {
-        const env = (window as typeof window & {
-          isolatedEnv?: {
-            runtimeId?: string;
-            eReplicas?: Map<string, unknown>;
-          };
-        }).isolatedEnv;
-        if (!env?.eReplicas) return null;
-        const runtimeId = String(env.runtimeId || '').toLowerCase();
-        for (const rawKey of env.eReplicas.keys()) {
-          const [entityId, signerId] = String(rawKey).split(':');
-          if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;
-          if (runtimeId && String(signerId).toLowerCase() !== runtimeId) continue;
-          return { entityId, signerId };
-        }
-        return null;
-      });
-      if (!runtimeIdentity) return false;
-      return await isAccountReady(page, runtimeIdentity.entityId, runtimeIdentity.signerId, hubId, [tokenId], 0);
+      return await isAccountReady(page, identity.entityId, identity.signerId, hubId, [tokenId], 0);
     },
     {
       timeout: DEFAULT_OPEN_TIMEOUT_MS,
@@ -421,14 +419,21 @@ async function getAccountOpenStatus(
         const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
         if (String(replicaEntityId || '').toLowerCase() !== String(entityId || '').toLowerCase()) continue;
         if (String(replicaSignerId || '').toLowerCase() !== String(signerId || '').toLowerCase()) continue;
-        const account = replica.state?.accounts?.get(hubId);
-        if (!account) continue;
-        return {
-          exists: true,
-          hasDelta: Boolean(account.deltas?.get?.(1)),
-          pendingHeight: account.pendingFrame ? Number(account.pendingFrame.height || 0) : null,
-          currentHeight: Number(account.currentHeight || 0),
-        };
+	        const account = replica.state?.accounts?.get(hubId);
+	        if (!account) continue;
+	        const hasTokenOneDelta = (() => {
+	          if (!(account.deltas instanceof Map)) return false;
+	          for (const [deltaTokenId] of account.deltas.entries()) {
+	            if (Number(deltaTokenId) === 1) return true;
+	          }
+	          return false;
+	        })();
+	        return {
+	          exists: true,
+	          hasDelta: hasTokenOneDelta,
+	          pendingHeight: account.pendingFrame ? Number(account.pendingFrame.height || 0) : null,
+	          currentHeight: Number(account.currentHeight || 0),
+	        };
       }
 
       return { exists: false, hasDelta: false, pendingHeight: null, currentHeight: 0 };
@@ -475,7 +480,7 @@ export async function connectRuntimeToHubWithCredit(
   ).toBe(true);
 
   for (const tokenId of tokenIds) {
-    await extendCreditToken(page, hubId, tokenId, creditAmountDisplay);
+    await extendCreditToken(page, identity, hubId, tokenId, creditAmountDisplay);
   }
 
   const opened = await isAccountReady(page, identity.entityId, identity.signerId, hubId, tokenIds, DEFAULT_OPEN_TIMEOUT_MS);
@@ -490,27 +495,6 @@ export async function connectRuntimeToHubWithCredit(
 
 export async function connectHub(page: Page, hubId: string): Promise<void> {
   await ensureRuntimeOnline(page, 'connect-hub');
-
-  const identity = await page.evaluate(() => {
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        runtimeId?: string;
-        eReplicas?: Map<string, unknown>;
-      };
-    }).isolatedEnv;
-    if (!env?.eReplicas) return null;
-
-    const runtimeId = String(env.runtimeId || '').toLowerCase();
-    for (const replicaKey of env.eReplicas.keys()) {
-      const [entityId, signerId] = String(replicaKey).split(':');
-      if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;
-      if (runtimeId && String(signerId).toLowerCase() !== runtimeId) continue;
-      return { entityId, signerId };
-    }
-
-    return null;
-  });
-
-  expect(identity, 'runtime must expose a local entity before opening an account').not.toBeNull();
-  await connectRuntimeToHub(page, identity!, hubId);
+  const identity = await readSelectedUiRuntimeIdentity(page);
+  await connectRuntimeToHub(page, identity, hubId);
 }

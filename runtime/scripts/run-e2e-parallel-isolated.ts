@@ -12,7 +12,7 @@
  */
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { createWriteStream, existsSync, mkdirSync, readFileSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -58,6 +58,12 @@ type RunTask = {
   pwTargets: string[];
   requireMarketMaker: boolean;
   usePlaywrightShard: boolean;
+};
+
+type RunnerLockPayload = {
+  pid: number;
+  startedAt: number;
+  cwd: string;
 };
 
 const parseArgs = (): CliArgs => {
@@ -127,6 +133,70 @@ const parseArgs = (): CliArgs => {
     pwFiles,
     skipBuild: args.includes('--skip-build'),
   };
+};
+
+const RUNNER_LOCK_PATH = resolve(process.cwd(), '.logs', 'e2e-parallel', '.runner-lock.json');
+
+const readRunnerLock = (): RunnerLockPayload | null => {
+  try {
+    return JSON.parse(readFileSync(RUNNER_LOCK_PATH, 'utf8')) as RunnerLockPayload;
+  } catch {
+    return null;
+  }
+};
+
+const pidIsAlive = (pid: number): boolean => {
+  if (!Number.isFinite(pid) || pid <= 0) return false;
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const acquireRunnerLock = (): (() => void) => {
+  mkdirSync(resolve(process.cwd(), '.logs', 'e2e-parallel'), { recursive: true });
+  const current: RunnerLockPayload = {
+    pid: process.pid,
+    startedAt: Date.now(),
+    cwd: process.cwd(),
+  };
+
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      writeFileSync(RUNNER_LOCK_PATH, JSON.stringify(current, null, 2), { flag: 'wx' });
+      const release = () => {
+        const active = readRunnerLock();
+        if (!active || active.pid !== process.pid) return;
+        try {
+          unlinkSync(RUNNER_LOCK_PATH);
+        } catch {}
+      };
+      process.once('exit', release);
+      process.once('SIGINT', () => {
+        release();
+        process.exit(130);
+      });
+      process.once('SIGTERM', () => {
+        release();
+        process.exit(143);
+      });
+      return release;
+    } catch {
+      const existing = readRunnerLock();
+      if (existing && pidIsAlive(existing.pid)) {
+        throw new Error(
+          `RUNNER_LOCKED pid=${existing.pid} startedAt=${existing.startedAt} path=${RUNNER_LOCK_PATH}`,
+        );
+      }
+      try {
+        unlinkSync(RUNNER_LOCK_PATH);
+      } catch {}
+    }
+  }
+
+  throw new Error(`RUNNER_LOCK_FAILED path=${RUNNER_LOCK_PATH}`);
 };
 
 const tsTag = (): string => {
@@ -702,6 +772,7 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
 
 async function main(): Promise<void> {
   const args = parseArgs();
+  const releaseRunnerLock = acquireRunnerLock();
   const logsDir = resolve(process.cwd(), '.logs', 'e2e-parallel', tsTag());
   mkdirSync(logsDir, { recursive: true });
 
@@ -717,99 +788,106 @@ async function main(): Promise<void> {
   console.log(`Logs     : ${logsDir}`);
   console.log('='.repeat(72) + '\n');
 
-  if (!args.skipBuild) {
-    const buildLogPath = join(logsDir, 'build-runtime.log');
-    const buildLog = createWriteStream(buildLogPath, { flags: 'w' });
-    const buildCode = await runCmd('bash', ['-lc', './scripts/build-runtime.sh'], {
-      env: process.env,
-      log: buildLog,
-      timeoutMs: 300000,
-    });
-    buildLog.write('\n=== frontend build ===\n');
-    const frontendBuildCode = await runCmd('bun', ['run', 'build'], {
-      cwd: resolve(process.cwd(), 'frontend'),
-      env: process.env,
-      log: buildLog,
-      timeoutMs: 300000,
-    });
-    buildLog.end();
-    if (buildCode !== 0 || frontendBuildCode !== 0) {
-      console.error(`❌ prebuild failed (runtime/frontend). See log: ${buildLogPath}`);
+  try {
+    if (!args.skipBuild) {
+      const buildLogPath = join(logsDir, 'build-runtime.log');
+      const buildLog = createWriteStream(buildLogPath, { flags: 'w' });
+      const buildCode = await runCmd('bash', ['-lc', './scripts/build-runtime.sh'], {
+        env: process.env,
+        log: buildLog,
+        timeoutMs: 300000,
+      });
+      buildLog.write('\n=== frontend build ===\n');
+      const frontendBuildCode = await runCmd('bun', ['run', 'build'], {
+        cwd: resolve(process.cwd(), 'frontend'),
+        env: process.env,
+        log: buildLog,
+        timeoutMs: 300000,
+      });
+      buildLog.end();
+      if (buildCode !== 0 || frontendBuildCode !== 0) {
+        console.error(`❌ prebuild failed (runtime/frontend). See log: ${buildLogPath}`);
+        process.exit(1);
+      }
+    } else {
+      console.log('⏩ skip-build enabled');
+    }
+
+    try {
+      await assertRunnerPreflight();
+    } catch (error) {
+      console.error(`❌ runner preflight failed: ${String(error instanceof Error ? error.message : error)}`);
       process.exit(1);
     }
-  } else {
-    console.log('⏩ skip-build enabled');
-  }
 
-  try {
-    await assertRunnerPreflight();
-  } catch (error) {
-    console.error(`❌ runner preflight failed: ${String(error instanceof Error ? error.message : error)}`);
-    process.exit(1);
-  }
+    const startedAt = Date.now();
+    const sourceFiles = args.pwFiles.length > 0 ? args.pwFiles : listPlaywrightSpecFiles();
+    const expandedTargets = args.pwFiles.length > 0
+      ? sourceFiles.map((file) => ({
+          target: file,
+          requireMarketMaker: !/e2e-swap-isolated\.spec\.ts$/.test(file),
+        }))
+      : args.pwGrep
+        ? sourceFiles.map((file) => ({
+            target: file,
+            requireMarketMaker: !/e2e-swap-isolated\.spec\.ts$/.test(file),
+          }))
+        : expandPlaywrightTargets(sourceFiles);
+    const tasks: RunTask[] = expandedTargets.map((entry, index, entries) => ({
+      shard: index,
+      totalShards: entries.length,
+      pwTargets: [entry.target],
+      requireMarketMaker: entry.requireMarketMaker,
+      usePlaywrightShard: false,
+    }));
 
-  const startedAt = Date.now();
-  const sourceFiles = args.pwFiles.length > 0 ? args.pwFiles : listPlaywrightSpecFiles();
-  const expandedTargets = args.pwGrep
-    ? sourceFiles.map((file) => ({
-        target: file,
-        requireMarketMaker: !/e2e-swap-isolated\.spec\.ts$/.test(file),
-      }))
-    : expandPlaywrightTargets(sourceFiles);
-  const tasks: RunTask[] = expandedTargets.map((entry, index, entries) => ({
-    shard: index,
-    totalShards: entries.length,
-    pwTargets: [entry.target],
-    requireMarketMaker: entry.requireMarketMaker,
-    usePlaywrightShard: false,
-  }));
+    const maxConcurrency = Math.max(1, Math.min(args.shards, tasks.length));
+    const results: RunResult[] = new Array(tasks.length);
+    let nextTaskIndex = 0;
+    const runWorker = async (): Promise<void> => {
+      while (nextTaskIndex < tasks.length) {
+        const taskIndex = nextTaskIndex++;
+        const task = tasks[taskIndex];
+        if (!task) break;
+        results[taskIndex] = await runShard(task, args, logsDir);
+      }
+    };
+    await Promise.all(Array.from({ length: maxConcurrency }, () => runWorker()));
+    const totalMs = Date.now() - startedAt;
+    const failed = results.filter(r => r.status === 'failed');
 
-  const maxConcurrency = Math.max(1, Math.min(args.shards, tasks.length));
-  const results: RunResult[] = new Array(tasks.length);
-  let nextTaskIndex = 0;
-  const runWorker = async (): Promise<void> => {
-    while (nextTaskIndex < tasks.length) {
-      const taskIndex = nextTaskIndex++;
-      const task = tasks[taskIndex];
-      if (!task) break;
-      results[taskIndex] = await runShard(task, args, logsDir);
+    console.log('\n' + '='.repeat(72));
+    console.log('E2E Summary');
+    console.log('='.repeat(72));
+    for (const r of results.sort((a, b) => a.shard - b.shard)) {
+      const sec = (r.durationMs / 1000).toFixed(1);
+      const p = r.phaseMs;
+      console.log(
+        `${r.status === 'passed' ? 'PASS' : 'FAIL'}  shard=${r.shard}  ${sec.padStart(8)}s  ` +
+        `phases[pre=${p.preflight} anvil=${p.anvilBoot} api=${p.apiBoot} health=${p.apiHealthy} vite=${p.viteBoot} pw=${p.playwright}]  ` +
+        `log=${r.logPath}`,
+      );
+      const steps = parseStepTimings(r.logPath).sort((a, b) => b.ms - a.ms).slice(0, 8);
+      if (steps.length > 0) {
+        console.log(`      slow-steps: ${steps.map((s) => `${s.label}=${s.ms}ms`).join(' | ')}`);
+      }
     }
-  };
-  await Promise.all(Array.from({ length: maxConcurrency }, () => runWorker()));
-  const totalMs = Date.now() - startedAt;
-  const failed = results.filter(r => r.status === 'failed');
+    console.log('-'.repeat(72));
+    console.log(`Total wall time: ${(totalMs / 1000).toFixed(1)}s (${totalMs}ms)`);
+    console.log(`Logs: ${logsDir}`);
 
-  console.log('\n' + '='.repeat(72));
-  console.log('E2E Summary');
-  console.log('='.repeat(72));
-  for (const r of results.sort((a, b) => a.shard - b.shard)) {
-    const sec = (r.durationMs / 1000).toFixed(1);
-    const p = r.phaseMs;
-    console.log(
-      `${r.status === 'passed' ? 'PASS' : 'FAIL'}  shard=${r.shard}  ${sec.padStart(8)}s  ` +
-      `phases[pre=${p.preflight} anvil=${p.anvilBoot} api=${p.apiBoot} health=${p.apiHealthy} vite=${p.viteBoot} pw=${p.playwright}]  ` +
-      `log=${r.logPath}`,
-    );
-    const steps = parseStepTimings(r.logPath).sort((a, b) => b.ms - a.ms).slice(0, 8);
-    if (steps.length > 0) {
-      console.log(`      slow-steps: ${steps.map((s) => `${s.label}=${s.ms}ms`).join(' | ')}`);
+    if (failed.length > 0) {
+      for (const f of failed) {
+        console.log(`\n--- shard ${f.shard} (tail: ${f.logPath}) ---`);
+        console.log(tail(f.logPath, 80));
+      }
+      process.exit(1);
     }
-  }
-  console.log('-'.repeat(72));
-  console.log(`Total wall time: ${(totalMs / 1000).toFixed(1)}s`);
-  console.log(`Logs: ${logsDir}`);
 
-  if (failed.length > 0) {
-    for (const f of failed) {
-      console.log(`\n--- shard ${f.shard} (tail: ${f.logPath}) ---`);
-      console.log(tail(f.logPath, 80));
-    }
-    process.exit(1);
+    process.exit(0);
+  } finally {
+    releaseRunnerLock();
   }
-
-  // Bun may keep event-loop handles alive (streams/timers) after successful run.
-  // Exit explicitly so parent orchestrators (run-all-tests-fast) don't hang.
-  process.exit(0);
 }
 
 main().catch((err) => {

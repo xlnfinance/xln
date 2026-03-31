@@ -397,6 +397,7 @@
     const askSources = new Map<bigint, Set<string>>();
     const actualSources: string[] = [];
     let hasAnyLevel = false;
+    let newestSnapshotUpdate = 0;
     let newestHubUpdate = 0;
     const now = Date.now();
 
@@ -406,6 +407,9 @@
       const snapshotUpdatedAt = Number(snapshot.updatedAt || 0);
       if (!Number.isFinite(snapshotUpdatedAt) || now - snapshotUpdatedAt > STREAM_STALE_MS) continue;
       actualSources.push(sourceHubId);
+      if (snapshotUpdatedAt > newestSnapshotUpdate) {
+        newestSnapshotUpdate = snapshotUpdatedAt;
+      }
       const hubUpdatedAt = Number(snapshot.hubUpdatedAt || snapshot.updatedAt || 0);
       if (Number.isFinite(hubUpdatedAt) && hubUpdatedAt > newestHubUpdate) {
         newestHubUpdate = hubUpdatedAt;
@@ -433,15 +437,15 @@
     }
 
     if (actualSources.length === 0) {
-      updateView([], [], pair, [], sources, newestHubUpdate);
+      updateView([], [], pair, [], sources, newestSnapshotUpdate || newestHubUpdate);
       return false;
     }
     if (actualSources.length < sources.length) {
-      updateView([], [], pair, actualSources, sources, newestHubUpdate);
+      updateView([], [], pair, actualSources, sources, newestSnapshotUpdate || newestHubUpdate);
       return true;
     }
     if (!hasAnyLevel) {
-      updateView([], [], pair, actualSources, sources, newestHubUpdate);
+      updateView([], [], pair, actualSources, sources, newestSnapshotUpdate || newestHubUpdate);
       return true;
     }
     applySmartOrSavedStep(bidSizes, askSizes);
@@ -449,7 +453,7 @@
     const aggregatedAsks = aggregateSideLevels(askSizes, askOwners, askSources, 'ask');
     const nextBids = buildOrderLevels(aggregatedBids.sizes, aggregatedBids.owners, aggregatedBids.sources, 'bid');
     const nextAsks = buildOrderLevels(aggregatedAsks.sizes, aggregatedAsks.owners, aggregatedAsks.sources, 'ask');
-    updateView(nextBids, nextAsks, pair, actualSources, sources, newestHubUpdate);
+    updateView(nextBids, nextAsks, pair, actualSources, sources, newestSnapshotUpdate || newestHubUpdate);
     return true;
   }
 
@@ -865,7 +869,7 @@
       on:keydown={(e) => e.key === 'Enter' && refreshOrderbookNow()}
       role="button"
       tabindex="0"
-      title="Click to refresh orderbook"
+      title="Last snapshot received. Click to refresh orderbook."
     >Updated: {formatUpdatedAt(lastUpdate)}</span>
   </div>
 </div>

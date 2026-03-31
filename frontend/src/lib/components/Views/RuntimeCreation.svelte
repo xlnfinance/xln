@@ -1434,18 +1434,18 @@
   .quick-login-section {
     margin-bottom: 20px;
     padding: 16px;
-    background: rgba(255, 255, 255, 0.02);
-    border: 1px solid rgba(255, 255, 255, 0.08);
+    background: rgba(255, 255, 255, 0.018);
+    border: 1px solid rgba(255, 255, 255, 0.06);
     border-radius: 12px;
     width: 100%;
     box-sizing: border-box;
   }
   .quick-login-header {
-    font-size: 11px;
+    font-size: 10px;
     font-weight: 600;
-    color: #9ca3af;
+    color: rgba(156, 163, 175, 0.78);
     text-transform: uppercase;
-    letter-spacing: 0.5px;
+    letter-spacing: 0.08em;
     margin-bottom: 12px;
   }
   .quick-login-grid {
@@ -2275,13 +2275,15 @@
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 4px;
-    padding: 12px 8px;
+    justify-content: center;
+    gap: 3px;
+    padding: 13px 6px;
+    min-height: 60px;
     background: rgba(255, 255, 255, 0.03);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
     cursor: pointer;
-    transition: all 0.2s;
+    transition: background 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.2s ease;
   }
 
   .factor-btn:hover {
@@ -2290,21 +2292,26 @@
   }
 
   .factor-btn.selected {
-    background: rgba(255, 200, 100, 0.1);
-    border-color: rgba(255, 200, 100, 0.4);
+    background: rgba(255, 200, 100, 0.13);
+    border-color: rgba(255, 200, 100, 0.52);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04), 0 0 0 1px rgba(255, 200, 100, 0.08);
+    transform: translateY(-1px);
   }
 
   .factor-num {
-    font-size: 18px;
+    font-size: 16px;
     font-weight: 600;
     color: rgba(255, 200, 100, 0.9);
+    line-height: 1;
   }
 
   .factor-tier {
-    font-size: 10px;
-    color: rgba(255, 255, 255, 0.5);
+    font-size: 9px;
+    color: rgba(255, 255, 255, 0.54);
     text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.08em;
+    line-height: 1.1;
+    text-align: center;
   }
 
   .factor-btn.selected .factor-tier {
@@ -2312,7 +2319,7 @@
   }
 
   .custom-btn .factor-num {
-    font-size: 16px;
+    font-size: 14px;
   }
 
   .custom-shard-input {
@@ -5052,11 +5059,12 @@
     }
 
     .factor-btn {
-      padding: 10px 4px;
+      padding: 11px 4px;
+      min-height: 56px;
     }
 
     .factor-num {
-      font-size: 15px;
+      font-size: 14px;
     }
 
     .factor-tier {

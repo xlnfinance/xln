@@ -52,9 +52,6 @@ let deltaTransformerAddress = '';
  */
 export function setDeltaTransformerAddress(address: string): void {
   deltaTransformerAddress = isUsableContractAddress(address) ? address : '';
-  console.log(
-    `[ProofBuilder] DeltaTransformer address set: ${deltaTransformerAddress || 'missing'}`,
-  );
 }
 
 /**

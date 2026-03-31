@@ -43,7 +43,7 @@
   let invoiceError = '';
   let invoiceLocked = false;
   let importedInvoiceIntent: ParsedXlnInvoice | null = null;
-  let preInvoiceState: { amount: string; tokenId: number; description: string; showNoteField: boolean } | null = null;
+  let preInvoiceState: { amount: string; tokenId: number; description: string } | null = null;
   let pendingAutoRouteKey = '';
   let completedAutoRouteKey = '';
   let autoRouteRetryTimer: ReturnType<typeof setTimeout> | null = null;
@@ -55,7 +55,6 @@
   let scannerFileInputEl: HTMLInputElement | null = null;
   let scannerStream: MediaStream | null = null;
   let scannerFrame = 0;
-  let useHtlc = true;
   let findingRoutes = false;
   let sendingPayment = false;
   type RouteOption = {
@@ -73,7 +72,6 @@
   let repeatTimer: ReturnType<typeof setInterval> | null = null;
   let repeatStoppedReason = '';
   let payMaxAmount = 0n;
-  let showNoteField = false;
   let canPayNow = false;
   const REPEAT_OPTIONS = [
     { value: 0, label: 'No repeat' },
@@ -92,7 +90,6 @@
   const GOSSIP_REFRESH_WAIT_MS = 100;
   const AUTO_ROUTE_RETRY_WINDOW_MS = 8_000;
   const AUTO_ROUTE_RETRY_DELAY_MS = 200;
-  const EMBEDDED_CONFIRMATION_POLL_MS = 150;
   type LockBookEntry = {
     accountId: string;
     tokenId: number;
@@ -153,20 +150,10 @@
 
   function applyPaymentPrefillFromURL() {
     const hashRoute = getURLHashRoute();
-    if (hashRoute === 'pay' || hashRoute === 'send' || hashRoute === 'accounts/send' || hashRoute?.startsWith('pay/')) {
-      useHtlc = true;
-    }
     if (!hashRoute?.startsWith('pay/')) return;
     try {
       const parsed = parseXlnInvoice(window.location.href);
       applyInvoiceIntent(parsed);
-      showNoteField = Boolean(parsed.description);
-      console.info('[PaymentPanel.prefill]', {
-        hashRoute,
-        targetEntityId: parsed.targetEntityId,
-        amount: parsed.amount,
-        tokenId: parsed.tokenId,
-      });
     } catch (error) {
       invoiceError = error instanceof Error ? error.message : String(error);
     }
@@ -206,7 +193,6 @@
       amount = preInvoiceState.amount;
       tokenId = preInvoiceState.tokenId;
       description = preInvoiceState.description;
-      showNoteField = preInvoiceState.showNoteField;
     }
     importedInvoiceIntent = null;
     preInvoiceState = null;
@@ -225,7 +211,6 @@
         amount,
         tokenId,
         description,
-        showNoteField,
       };
     }
     importedInvoiceIntent = parsed;
@@ -249,7 +234,6 @@
       amount = preInvoiceState.amount;
       tokenId = preInvoiceState.tokenId;
       description = preInvoiceState.description;
-      showNoteField = preInvoiceState.showNoteField;
     }
     importedInvoiceIntent = null;
     preInvoiceState = null;
@@ -337,15 +321,6 @@
     const profile = getGossipProfiles().find((p) => normalizeEntityId(p.entityId) === norm);
     const name = profile?.name;
     return typeof name === 'string' && name.trim() ? name.trim() : id;
-  }
-
-  function buildEmbeddedRouteLabel(route: RouteOption): string {
-    const viaNames = route.path
-      .slice(1, -1)
-      .map((hopId) => getEntityName(hopId))
-      .map((name) => String(name || '').trim())
-      .filter(Boolean);
-    return viaNames.length > 0 ? `Pay via ${viaNames.join('-')}` : 'Pay now';
   }
 
   function getGossipProfileByEntityId(id: string): GossipProfile | undefined {
@@ -1220,53 +1195,6 @@
     });
   }
 
-  async function waitForEmbeddedHtlcConfirmation(hashlock: string, timeoutMs = 45_000): Promise<void> {
-    const startedAfterId = (() => {
-      const lastLog = Array.isArray(currentEnv?.frameLogs) && currentEnv.frameLogs.length > 0
-        ? currentEnv.frameLogs[currentEnv.frameLogs.length - 1]
-        : null;
-      return Number((lastLog as { id?: number } | null)?.id ?? -1);
-    })();
-    const entityNorm = normalizeEntityId(entityId);
-    const deadline = Date.now() + timeoutMs;
-    while (Date.now() < deadline) {
-      const logs = Array.isArray(currentEnv?.frameLogs) ? currentEnv.frameLogs : [];
-      for (const rawEntry of logs as Array<{ id?: number; message?: string; data?: Record<string, unknown> }>) {
-        const entryId = Number(rawEntry?.id ?? -1);
-        if (entryId <= startedAfterId) continue;
-        const message = String(rawEntry?.message || '').trim();
-        const data = rawEntry?.data || {};
-        if (String(data.hashlock || '').trim() !== hashlock) continue;
-        const eventEntityNorm = normalizeEntityId(String(data.entityId || ''));
-        if (eventEntityNorm && eventEntityNorm !== entityNorm) continue;
-        if (message === 'HtlcFailed') {
-          throw new Error(String(data.reason || 'Payment failed'));
-        }
-        if (message === 'HtlcFinalized') {
-          return;
-        }
-      }
-      await sleep(EMBEDDED_CONFIRMATION_POLL_MS);
-    }
-    throw new Error('Payment confirmation timed out');
-  }
-
-  export async function embeddedPrepareFirstRoute(): Promise<string> {
-    if (sendingPayment || findingRoutes) {
-      throw new Error('Payment already in progress');
-    }
-    if (isSelfRecipient) {
-      throw new Error('Self-payment requires explicit route selection');
-    }
-    preflightError = null;
-    await findRoutes(false);
-    if (routes.length === 0) {
-      throw new Error(preflightError || 'No route found');
-    }
-    selectedRouteIndex = 0;
-    return buildEmbeddedRouteLabel(routes[0]!);
-  }
-
   function hasSelectedRoute(): boolean {
     return selectedRouteIndex >= 0 && !!routes[selectedRouteIndex];
   }
@@ -1289,34 +1217,6 @@
     await payNowCheapest();
   }
 
-  export async function embeddedPayUsingFirstRoute(): Promise<void> {
-    console.info('[PaymentPanel.embeddedPayUsingFirstRoute] start');
-    if (sendingPayment || findingRoutes) {
-      throw new Error('Payment already in progress');
-    }
-    if (isSelfRecipient) {
-      throw new Error('Self-payment requires explicit route selection');
-    }
-    if (routes.length === 0 || !routes[selectedRouteIndex]) {
-      await embeddedPrepareFirstRoute();
-    }
-    if (routes.length === 0) {
-      throw new Error(preflightError || 'No route available');
-    }
-    if (selectedRouteIndex < 0 || !routes[selectedRouteIndex]) {
-      selectedRouteIndex = 0;
-    }
-    const result = await sendPayment(true);
-    if (!result.queued) {
-      throw new Error(preflightError || 'Payment failed');
-    }
-    if (!result.hashlock) {
-      throw new Error('Missing HTLC hashlock');
-    }
-    await waitForEmbeddedHtlcConfirmation(result.hashlock);
-    console.info('[PaymentPanel.embeddedPayUsingFirstRoute] done');
-  }
-
   async function sendPayment(manual = true): Promise<SendPaymentResult> {
     if (selectedRouteIndex < 0 || !routes[selectedRouteIndex]) return { queued: false, hashlock: null };
     if (sendingPayment) return { queued: false, hashlock: null };
@@ -1324,7 +1224,6 @@
     sendingPayment = true;
     let queued = false;
     try {
-      const xln = await getXLN();
       const env = currentEnv;
       if (!env) throw new Error('Environment not ready');
       if (!activeIsLive) throw new Error('Payments are only available in LIVE mode');
@@ -1338,14 +1237,6 @@
 
       const route = routes[selectedRouteIndex];
       if (!route) throw new Error('Selected route is no longer available');
-      console.info('[PaymentPanel.sendPayment]', {
-        manual,
-        useHtlc,
-        selectedRouteIndex,
-        route: route.path,
-        senderAmount: route.senderAmount.toString(),
-        recipientAmount: route.recipientAmount.toString(),
-      });
       await ensureRouteKeyCoverage(route.path);
       const routeTargetEntityId = route.path[route.path.length - 1] || targetEntityId;
 
@@ -1353,53 +1244,27 @@
         || requireSignerIdForEntity(env, entityId, 'payment-panel');
 
       const descriptionValue = description.trim();
-      let paymentInput: EntityInputPayload;
-      let queuedHashlock: string | null = null;
-      if (useHtlc) {
-        // Hashlock: atomic multi-hop with hashlock
-        const { secret, hashlock } = generateSecretHashlock();
-        console.log(`[Send] Hashlock secret=${secret.slice(0,16)}... hashlock=${hashlock.slice(0,16)}...`);
-        queuedHashlock = hashlock;
-        paymentInput = {
-          entityId,
-          signerId,
-          entityTxs: [{
-            type: 'htlcPayment' as const,
-            data: {
-              targetEntityId: routeTargetEntityId,
-              tokenId,
-              amount: route.recipientAmount,
-              route: route.path,
-              secret, hashlock,
-              ...(descriptionValue ? { description: descriptionValue } : {}),
-            },
-          }],
-        };
-      } else {
-        // Direct: simple non-atomic payment
-        paymentInput = {
-          entityId,
-          signerId,
-          entityTxs: [{
-            type: 'directPayment' as const,
-            data: {
-              targetEntityId: routeTargetEntityId, tokenId,
-              amount: route.recipientAmount,
-              route: route.path,
-              ...(descriptionValue ? { description: descriptionValue } : {}),
-            },
-          }],
-        };
-      }
+      const { secret, hashlock } = generateSecretHashlock();
+      const queuedHashlock: string | null = hashlock;
+      const paymentInput: EntityInputPayload = {
+        entityId,
+        signerId,
+        entityTxs: [{
+          type: 'htlcPayment' as const,
+          data: {
+            targetEntityId: routeTargetEntityId,
+            tokenId,
+            amount: route.recipientAmount,
+            route: route.path,
+            secret,
+            hashlock,
+            ...(descriptionValue ? { description: descriptionValue } : {}),
+          },
+        }],
+      };
 
       await enqueueEntityInputs(env, [paymentInput]);
       queued = true;
-      console.info('[PaymentPanel.sendPayment.queued]', {
-        manual,
-        useHtlc,
-        hashlock: queuedHashlock,
-      });
-      console.log('[Send] Hashlock payment sent via:', route.path.join(' -> '));
       return { queued: true, hashlock: queuedHashlock };
     } catch (error) {
       console.error('[Send] Payment failed:', error);
@@ -1453,10 +1318,6 @@
   function handleAmountInput() {
     preflightError = null;
     resetQuotedRoutes();
-  }
-
-  function revealNoteField(): void {
-    showNoteField = true;
   }
 
   function handleRepeatChange(event: Event) {
@@ -1547,7 +1408,23 @@
 
   <div class="amount-token-row">
     <div class="amount-field">
-      <label for="payment-amount-input">Amount</label>
+      <div class="amount-field-header">
+        <label for="payment-amount-input">Amount</label>
+        <div class="payment-balance-meta">
+          <span class="payment-balance-label">Available</span>
+          <span class="payment-balance-value">
+            {formatTokenInputValue(tokenId, payMaxAmount)} {getTokenSymbol(tokenId)}
+          </span>
+          <button
+            type="button"
+            class="payment-balance-action"
+            on:click={fillMaxPaymentAmount}
+            disabled={payMaxAmount <= 0n || findingRoutes || sendingPayment}
+          >
+            Use max
+          </button>
+        </div>
+      </div>
       <div class="amount-input-shell">
         <input
           id="payment-amount-input"
@@ -1570,32 +1447,27 @@
           </div>
         </div>
       </div>
-      <button
-        type="button"
-        class="available-link"
-        on:click={fillMaxPaymentAmount}
-        disabled={payMaxAmount <= 0n || findingRoutes || sendingPayment}
-      >
-        Available {formatTokenInputValue(tokenId, payMaxAmount)} {getTokenSymbol(tokenId)}
-      </button>
     </div>
   </div>
 
-  {#if showNoteField || descriptionLocked}
-    <div class="field">
-      <input
-        id="payment-description-input"
-        type="text"
-        bind:value={description}
-        aria-label="Payment note"
-        placeholder="Note"
-        readonly={descriptionLocked || invoiceLocked}
-        aria-readonly={descriptionLocked || invoiceLocked}
-        disabled={findingRoutes || sendingPayment}
-      />
+  <div class="field payment-note-field">
+    <label for="payment-description-input">Note</label>
+    <input
+      id="payment-description-input"
+      type="text"
+      bind:value={description}
+      aria-label="Payment note"
+      placeholder="Note"
+      readonly={descriptionLocked || invoiceLocked}
+      aria-readonly={descriptionLocked || invoiceLocked}
+      disabled={findingRoutes || sendingPayment}
+    />
+  </div>
+
+  {#if routes.length > 0}
+    <div class="payment-route-summary payment-route-summary-inline">
+      {routes.length} route{routes.length === 1 ? '' : 's'} ready
     </div>
-  {:else}
-    <button type="button" class="add-note-btn" on:click={revealNoteField} disabled={findingRoutes || sendingPayment}>Add note</button>
   {/if}
 
   {#if isSelfRecipient}
@@ -1651,19 +1523,20 @@
   <div class="payment-actions">
     <div class="send-controls">
       <button
-        class="btn-find"
-        class:prominent={!canPayNow && !sendingPayment}
+        type="button"
+        class="btn-find btn-find-secondary"
         on:click={() => void findRoutes(false)}
         disabled={!targetEntityId || !amount || findingRoutes || sendingPayment}
       >
-        {findingRoutes ? 'Finding routes...' : 'Find route'}
+        {findingRoutes ? 'Finding routes...' : (routes.length > 0 ? 'Refresh routes' : 'Find routes')}
       </button>
       <button
         class="btn-pay-now"
         on:click={() => void payUsingCurrentIntent()}
         disabled={!canPayNow}
       >
-        {sendingPayment ? 'Sending...' : (findingRoutes ? 'Finding routes...' : 'Pay now')}
+        <span>{sendingPayment ? 'Sending...' : (findingRoutes ? 'Finding routes...' : 'Pay now')}</span>
+        <span class="btn-pay-now-arrow" aria-hidden="true">→</span>
       </button>
     </div>
     <!-- Repeat controls intentionally hidden for now. Keep timer wiring for later re-enable. -->
@@ -1714,7 +1587,7 @@
     flex-direction: column;
     gap: 18px;
     width: 100%;
-    max-width: 860px;
+    max-width: none;
   }
 
   .invoice-tool-btn {
@@ -1752,6 +1625,71 @@
 
   .amount-token-row {
     display: block;
+  }
+
+  .amount-field-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    flex-wrap: wrap;
+  }
+
+  .payment-balance-meta {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 10px;
+    min-width: 0;
+  }
+
+  .payment-balance-label {
+    color: #78716c;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .payment-balance-value {
+    color: #d6d3d1;
+    font-size: 13px;
+    font-weight: 600;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: 0.01em;
+  }
+
+  .payment-balance-action {
+    border: none;
+    background: transparent;
+    padding: 0;
+    color: #a8a29e;
+    font-size: 12px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    cursor: pointer;
+    transition: color 0.16s ease, opacity 0.16s ease;
+  }
+
+  .payment-balance-action:hover:not(:disabled) {
+    color: #f5efe6;
+  }
+
+  .payment-balance-action:disabled {
+    cursor: default;
+    opacity: 0.45;
+  }
+
+  .payment-route-summary {
+    color: #8d857d;
+    font-size: 11px;
+    font-weight: 600;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
+  }
+
+  .payment-route-summary-inline {
+    margin-top: -2px;
   }
 
   .amount-inline-tools {
@@ -1812,25 +1750,25 @@
     gap: 10px;
   }
 
-  .available-link {
-    border: none;
-    background: transparent;
-    padding: 0;
-    color: #a8a29e;
-    font-size: 14px;
-    font-weight: 500;
-    font-variant-numeric: tabular-nums;
-    cursor: pointer;
-    align-self: flex-start;
+  .payment-note-field {
+    gap: 8px;
   }
 
-  .available-link:hover:not(:disabled) {
-    color: #f5efe6;
+  .payment-note-field label {
+    color: #cfc7bd;
   }
 
-  .available-link:disabled {
-    cursor: default;
-    opacity: 0.55;
+  .payment-note-field input {
+    min-height: 50px;
+    padding: 0 16px;
+    background: linear-gradient(180deg, rgba(25, 24, 22, 0.96), rgba(18, 17, 16, 0.98));
+    border-color: rgba(255, 255, 255, 0.06);
+    font-size: 15px;
+    color: #e7e0d7;
+  }
+
+  .payment-note-field input::placeholder {
+    color: #6f665d;
   }
 
   label {
@@ -1880,50 +1818,74 @@
 
   .payment-actions {
     display: flex;
-    justify-content: flex-end;
+    width: 100%;
   }
 
   .btn-pay-now {
-    background: linear-gradient(180deg, #7c4a1e, #8f551f);
-    border: 1px solid #a16207;
+    min-width: 220px;
+    min-height: 56px;
+    padding: 0 28px;
+    border: 1px solid rgba(245, 199, 94, 0.42);
+    background:
+      linear-gradient(180deg, rgba(255, 234, 184, 0.18), rgba(255, 234, 184, 0)),
+      linear-gradient(135deg, #8c4d14 0%, #c87912 48%, #f1c15a 100%);
     color: #fff7ed;
     font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 10px;
+    letter-spacing: 0.02em;
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.18),
+      0 14px 32px rgba(161, 98, 7, 0.26);
   }
 
   .btn-pay-now:hover:not(:disabled) {
-    background: linear-gradient(180deg, #8d5421, #a16207);
-    border-color: #ca8a04;
+    transform: translateY(-1px);
+    border-color: rgba(245, 199, 94, 0.62);
+    background:
+      linear-gradient(180deg, rgba(255, 240, 205, 0.22), rgba(255, 240, 205, 0)),
+      linear-gradient(135deg, #99541a, #de9626 58%, #f6cb69);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.22),
+      0 16px 30px rgba(161, 98, 7, 0.32);
   }
 
   .btn-pay-now:disabled {
     opacity: 0.5;
     cursor: not-allowed;
+    transform: none;
+    box-shadow: none;
+  }
+
+  .btn-pay-now-arrow {
+    font-size: 16px;
+    opacity: 0.84;
   }
 
   .btn-find {
-    background: rgba(255, 255, 255, 0.03);
+    color: inherit;
+  }
+
+  .btn-find-secondary {
+    min-width: 156px;
+    min-height: 56px;
+    padding: 0 20px;
+    background: rgba(255, 255, 255, 0.025);
+    border-color: rgba(255, 255, 255, 0.08);
+    color: #a8a29e;
+    font-weight: 600;
+  }
+
+  .btn-find-secondary:hover:not(:disabled) {
+    border-color: rgba(255, 255, 255, 0.14);
+    background: rgba(255, 255, 255, 0.045);
     color: #d6d3d1;
   }
 
-  .btn-find.prominent {
-    background: linear-gradient(180deg, #7c4a1e, #8f551f);
-    border: 1px solid #a16207;
-    color: #fff7ed;
-  }
-
-  .btn-find.prominent:hover:not(:disabled) {
-    background: linear-gradient(180deg, #8d5421, #a16207);
-    border-color: #ca8a04;
-    color: #fff7ed;
-  }
-
-  .btn-find:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.07);
-    color: #fbbf24;
-  }
-
-  .btn-find:disabled {
-    opacity: 0.5;
+  .btn-find-secondary:disabled {
+    opacity: 0.45;
     cursor: not-allowed;
   }
 
@@ -2007,16 +1969,14 @@
   }
 
   .send-controls {
-    display: inline-grid;
-    grid-template-columns: auto auto;
+    display: flex;
+    width: 100%;
     gap: 12px;
-    align-items: end;
-    justify-content: end;
-  }
-
-  .send-controls-secondary {
-    grid-template-columns: auto;
-    justify-content: end;
+    align-items: center;
+    justify-content: flex-end;
+    flex-wrap: wrap;
+    padding: 14px 0 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
   }
 
   .repeat-control {
@@ -2204,11 +2164,6 @@
   }
 
   @media (max-width: 900px) {
-    .payment-actions,
-    .send-controls {
-      grid-template-columns: 1fr;
-    }
-
     .payment-actions {
       display: flex;
     }
@@ -2228,26 +2183,6 @@
     border-radius: 8px;
     padding: 10px 12px;
     font-size: 12px;
-  }
-
-  .add-note-btn {
-    align-self: flex-start;
-    border: none !important;
-    background: transparent !important;
-    box-shadow: none !important;
-    color: #a8a29e;
-    font-size: 14px;
-    font-weight: 500;
-    padding: 0 0 2px;
-    min-height: 0;
-    border-radius: 0;
-    border-bottom: 1px dashed rgba(255, 255, 255, 0.22);
-    cursor: pointer;
-  }
-
-  .add-note-btn:hover:not(:disabled) {
-    color: #f5efe6;
-    border-bottom-color: rgba(255, 255, 255, 0.45);
   }
 
   input[readonly] {
@@ -2294,9 +2229,17 @@
     }
 
     .recipient-picker-row,
-    .amount-input-shell,
+    .amount-input-shell {
+      grid-template-columns: 1fr;
+    }
+
     .send-controls {
       grid-template-columns: 1fr;
+      align-items: stretch;
+    }
+
+    .payment-balance-meta {
+      gap: 14px;
     }
 
     .recipient-picker-actions {
@@ -2306,9 +2249,12 @@
     }
 
     .invoice-tool-btn,
-    .btn-find,
     .btn-pay-now {
       width: 100%;
+    }
+
+    .btn-find {
+      width: fit-content;
     }
 
     .inline-token-select {

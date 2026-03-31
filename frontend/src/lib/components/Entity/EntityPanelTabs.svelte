@@ -9,7 +9,7 @@
   import { onDestroy, onMount } from 'svelte';
   import type { ComponentType } from 'svelte';
   import { get } from 'svelte/store';
-  import { Wallet as EthersWallet, hexlify, isAddress, ZeroAddress, zeroPadValue } from 'ethers';
+  import { MaxUint256, Wallet as EthersWallet, hexlify, isAddress, ZeroAddress, zeroPadValue } from 'ethers';
   import type {
     AccountMachine,
     AccountTx,
@@ -1050,17 +1050,91 @@
       return 'Select reserve-compatible asset first';
     }
 
+    let parsedAmount: bigint;
     try {
       const maxAmount = getCurrentMoveSourceAvailableBalance();
-      parsePositiveAssetAmount(moveAmount, moveFromEndpoint === 'external' && moveToEndpoint === 'external'
+      parsedAmount = parsePositiveAssetAmount(moveAmount, moveFromEndpoint === 'external' && moveToEndpoint === 'external'
         ? (externalToken as { decimals: number })
         : (reserveToken as { decimals: number }), maxAmount ?? undefined);
     } catch (error) {
       return toErrorMessage(error, 'Invalid move amount');
     }
 
+    if (mode === 'draft' && routeRequiresExplicitExternalAllowance(moveFromEndpoint, moveToEndpoint)) {
+      if (moveAllowanceLoading) return 'Checking ERC20 allowance';
+      if (moveAllowanceError) return moveAllowanceError;
+      if (moveAllowanceRaw === null || moveAllowanceRaw < parsedAmount) {
+        return 'Allow ERC20 before adding to batch';
+      }
+    }
+
     return null;
   }
+
+  $: moveAllowanceRouteEnabled = assetWorkspaceTab === 'move'
+    && activeIsLive
+    && routeRequiresExplicitExternalAllowance(moveFromEndpoint, moveToEndpoint);
+  $: moveAllowanceContextSignature = [
+    moveAllowanceRouteEnabled ? '1' : '0',
+    getMoveRouteKey(moveFromEndpoint, moveToEndpoint),
+    moveAssetSymbol,
+    String(currentSignerId || '').trim().toLowerCase(),
+    getRuntimeId(activeEnv),
+  ].join('|');
+  $: if (moveAllowanceContextSignature !== moveAllowanceContextKey) {
+    moveAllowanceContextKey = moveAllowanceContextSignature;
+    moveAllowanceAmountDirty = false;
+  }
+  $: if (moveAllowanceRouteEnabled && !moveAllowanceAmountDirty) {
+    moveAllowanceAmount = moveAmount;
+  }
+  $: if (!moveAllowanceRouteEnabled) {
+    moveAllowanceAmount = '';
+    moveAllowanceError = null;
+    moveAllowanceRaw = null;
+    moveAllowanceLoading = false;
+    moveAllowanceSubmittingMode = null;
+  }
+  $: moveAllowanceRefreshSignature = [
+    moveAllowanceRouteEnabled ? '1' : '0',
+    moveAssetSymbol,
+    String(currentSignerId || '').trim().toLowerCase(),
+    getRuntimeId(activeEnv),
+  ].join('|');
+  $: {
+    void moveAllowanceRefreshSignature;
+    if (moveAllowanceRouteEnabled) {
+      void refreshMoveExternalAllowance();
+    }
+  }
+  $: moveRequiredAllowanceAmount = (() => {
+    if (!moveAllowanceRouteEnabled) return null;
+    const token = findExternalTokenBySymbol(moveAssetSymbol);
+    if (!token) return null;
+    try {
+      return parsePositiveAssetAmount(moveAmount, token, moveUiState.sourceAvailableBalance ?? undefined);
+    } catch {
+      return null;
+    }
+  })();
+  $: moveAllowanceSatisfied = typeof moveRequiredAllowanceAmount === 'bigint'
+    && typeof moveAllowanceRaw === 'bigint'
+    && moveAllowanceRaw >= moveRequiredAllowanceAmount;
+  $: moveAllowanceStatusLabel = (() => {
+    if (!moveAllowanceRouteEnabled) return '';
+    const token = findExternalTokenBySymbol(moveAssetSymbol);
+    const decimals = Number(token?.decimals ?? 18);
+    const available = typeof moveAllowanceRaw === 'bigint'
+      ? formatAmount(moveAllowanceRaw, decimals)
+      : '—';
+    if (moveAllowanceLoading) return 'Checking allowance...';
+    if (moveAllowanceError) return moveAllowanceError;
+    if (typeof moveRequiredAllowanceAmount !== 'bigint') {
+      return `Current allowance ${available} ${moveAssetSymbol}`;
+    }
+    const required = formatAmount(moveRequiredAllowanceAmount, decimals);
+    return `Current allowance ${available} ${moveAssetSymbol} · required ${required} ${moveAssetSymbol}`;
+  })();
 
   $: moveValidationSignature = [
     moveFromEndpoint,
@@ -1083,6 +1157,9 @@
     moveUiState.ledgerRow ? moveUiState.ledgerRow.reserveBalance.toString() : '0',
     moveUiState.ledgerRow ? moveUiState.ledgerRow.accountBalance.toString() : '0',
     moveUiState.sourceAvailableBalance.toString(),
+    typeof moveAllowanceRaw === 'bigint' ? moveAllowanceRaw.toString() : 'null',
+    moveAllowanceLoading ? '1' : '0',
+    moveAllowanceError || '',
   ].join('|');
   $: {
     void moveValidationSignature;
@@ -1636,6 +1713,14 @@
   let moveLayoutSignature = '';
   let moveDraftError: string | null = null;
   let moveBroadcastError: string | null = null;
+  let moveAllowanceAmount = '';
+  let moveAllowanceAmountDirty = false;
+  let moveAllowanceLoading = false;
+  let moveAllowanceError: string | null = null;
+  let moveAllowanceRaw: bigint | null = null;
+  let moveAllowanceSubmittingMode: 'amount' | 'max' | null = null;
+  let moveAllowanceRefreshRequestId = 0;
+  let moveAllowanceContextKey = '';
   let moveSelectedSource: MoveEndpoint | null = null;
   let moveSelectedTarget: MoveEndpoint | null = null;
   let moveDragSource: MoveEndpoint | null = null;
@@ -1844,6 +1929,95 @@
     if (parsed <= 0n) throw new Error('Amount must be greater than zero');
     if (typeof maxAmount === 'bigint' && parsed > maxAmount) throw new Error('Amount exceeds available balance');
     return parsed;
+  }
+
+  function routeRequiresExplicitExternalAllowance(from: MoveEndpoint, to: MoveEndpoint): boolean {
+    const routeKey = getMoveRouteKey(from, to);
+    return routeKey === 'external->reserve' || routeKey === 'external->account';
+  }
+
+  function getMoveAllowanceToken(): ExternalToken {
+    const token = requireExternalTokenBySymbol(moveAssetSymbol);
+    if (!isAddress(token.address) || token.address === ZeroAddress) {
+      throw new Error('Select ERC20 asset first');
+    }
+    return token;
+  }
+
+  async function getMoveAllowanceContext(context: string): Promise<{
+    env: Env;
+    jadapter: JAdapter;
+    token: ExternalToken;
+    owner: string;
+    spender: string;
+  }> {
+    const env = requireRuntimeEnv(activeEnv, context);
+    const xln = await getXLN();
+    const jadapter = xln.getActiveJAdapter?.(env);
+    if (!jadapter) throw new Error('J-adapter not available');
+    const owner = resolveSelfEoaAddress();
+    if (!isAddress(owner)) throw new Error('Active signer EOA missing');
+    const spender = String(jadapter.addresses.depository || '').trim();
+    if (!isAddress(spender) || spender === ZeroAddress) {
+      throw new Error('Depository address unavailable');
+    }
+    return {
+      env,
+      jadapter,
+      token: getMoveAllowanceToken(),
+      owner,
+      spender,
+    };
+  }
+
+  async function refreshMoveExternalAllowance(): Promise<void> {
+    if (!routeRequiresExplicitExternalAllowance(moveFromEndpoint, moveToEndpoint) || !activeIsLive) {
+      moveAllowanceLoading = false;
+      moveAllowanceError = null;
+      moveAllowanceRaw = null;
+      return;
+    }
+    const requestId = ++moveAllowanceRefreshRequestId;
+    moveAllowanceLoading = true;
+    moveAllowanceError = null;
+    try {
+      const { jadapter, token, owner, spender } = await getMoveAllowanceContext('move-erc20-allowance-read');
+      const allowance = await jadapter.getErc20Allowance(token.address, owner, spender);
+      if (requestId !== moveAllowanceRefreshRequestId) return;
+      moveAllowanceRaw = allowance;
+    } catch (error) {
+      if (requestId !== moveAllowanceRefreshRequestId) return;
+      moveAllowanceRaw = null;
+      moveAllowanceError = toErrorMessage(error, 'Failed to read ERC20 allowance');
+    } finally {
+      if (requestId === moveAllowanceRefreshRequestId) {
+        moveAllowanceLoading = false;
+      }
+    }
+  }
+
+  async function approveMoveExternalAllowance(mode: 'amount' | 'max'): Promise<void> {
+    const { jadapter, token, spender } = await getMoveAllowanceContext('move-erc20-allowance-approve');
+    const privKey = await getActiveSignerPrivateKey();
+    const approvalAmount = mode === 'max'
+      ? MaxUint256
+      : parsePositiveAssetAmount(moveAllowanceAmount, token);
+    moveExecuting = true;
+    moveAllowanceSubmittingMode = mode;
+    moveProgressLabel = `Approving ${token.symbol} allowance`;
+    try {
+      await jadapter.approveErc20(privKey, token.address, spender, approvalAmount);
+      await refreshMoveExternalAllowance();
+      toasts.success(
+        mode === 'max'
+          ? `Approved MAX ${token.symbol}`
+          : `Approved ${formatAmount(approvalAmount, token.decimals)} ${token.symbol}`,
+      );
+    } finally {
+      moveProgressLabel = '';
+      moveAllowanceSubmittingMode = null;
+      moveExecuting = false;
+    }
   }
 
   function getDerivedDeltaForAccount(counterpartyEntityId: string, tokenId: number) {
@@ -3109,6 +3283,11 @@
   function getMovePrimaryActionLabel(): string {
     if (isExternalTransferMoveRoute(moveFromEndpoint, moveToEndpoint)) return 'Send Direct';
     return 'Add to Batch';
+  }
+
+  function handleMoveAllowanceAmountInput(nextValue: string): void {
+    moveAllowanceAmountDirty = true;
+    moveAllowanceAmount = nextValue;
   }
 
   async function submitMovePrimaryAction(): Promise<void> {
@@ -5143,6 +5322,12 @@
                 {moveProgressLabel}
                 {moveDraftError}
                 {moveBroadcastError}
+                moveRequiresExplicitAllowance={moveAllowanceRouteEnabled}
+                moveAllowanceSatisfied={moveAllowanceSatisfied}
+                moveAllowanceLoading={moveAllowanceLoading}
+                moveAllowanceStatusLabel={moveAllowanceStatusLabel}
+                moveAllowanceAmount={moveAllowanceAmount}
+                moveAllowanceSubmittingMode={moveAllowanceSubmittingMode}
                 {moveSelectedSource}
                 {moveSelectedTarget}
                 {moveDragSource}
@@ -5167,6 +5352,9 @@
                 {moveRouteSteps}
                 {canAddMoveToExistingBatch}
                 {submitMovePrimaryAction}
+                approveMoveAllowanceAmount={() => approveMoveExternalAllowance('amount')}
+                approveMoveAllowanceMax={() => approveMoveExternalAllowance('max')}
+                {handleMoveAllowanceAmountInput}
                 {handleMoveSourceAccountChange}
                 {handleMoveReserveRecipientChange}
                 {handleMoveTargetEntityChange}
@@ -5315,6 +5503,12 @@
                 {moveProgressLabel}
                 {moveDraftError}
                 {moveBroadcastError}
+                moveRequiresExplicitAllowance={moveAllowanceRouteEnabled}
+                moveAllowanceSatisfied={moveAllowanceSatisfied}
+                moveAllowanceLoading={moveAllowanceLoading}
+                moveAllowanceStatusLabel={moveAllowanceStatusLabel}
+                moveAllowanceAmount={moveAllowanceAmount}
+                moveAllowanceSubmittingMode={moveAllowanceSubmittingMode}
                 {moveSelectedSource}
                 {moveSelectedTarget}
                 {moveDragSource}
@@ -5339,6 +5533,9 @@
                 {moveRouteSteps}
                 {canAddMoveToExistingBatch}
                 {submitMovePrimaryAction}
+                approveMoveAllowanceAmount={() => approveMoveExternalAllowance('amount')}
+                approveMoveAllowanceMax={() => approveMoveExternalAllowance('max')}
+                {handleMoveAllowanceAmountInput}
                 {handleMoveSourceAccountChange}
                 {handleMoveReserveRecipientChange}
                 {handleMoveTargetEntityChange}

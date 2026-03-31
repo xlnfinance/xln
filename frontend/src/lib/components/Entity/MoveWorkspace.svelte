@@ -24,6 +24,12 @@
   export let moveProgressLabel = '';
   export let moveDraftError: string | null = null;
   export let moveBroadcastError: string | null = null;
+  export let moveRequiresExplicitAllowance = false;
+  export let moveAllowanceSatisfied = false;
+  export let moveAllowanceLoading = false;
+  export let moveAllowanceStatusLabel = '';
+  export let moveAllowanceAmount = '';
+  export let moveAllowanceSubmittingMode: 'amount' | 'max' | null = null;
   export let moveSelectedSource: MoveEndpoint | null = null;
   export let moveSelectedTarget: MoveEndpoint | null = null;
   export let moveDragSource: MoveEndpoint | null = null;
@@ -51,6 +57,9 @@
   export let moveRouteSteps: (from: MoveEndpoint, to: MoveEndpoint) => string[];
   export let canAddMoveToExistingBatch: () => boolean;
   export let submitMovePrimaryAction: () => Promise<void>;
+  export let approveMoveAllowanceAmount: () => Promise<void>;
+  export let approveMoveAllowanceMax: () => Promise<void>;
+  export let handleMoveAllowanceAmountInput: (value: string) => void;
   export let movePrimaryActionLabel = 'Add to Batch';
   export let handleMoveSourceAccountChange: (event: MoveEntityInputEvent) => void;
   export let handleMoveReserveRecipientChange: (event: MoveEntityInputEvent) => void;
@@ -292,11 +301,60 @@
           {/each}
         </select>
       </div>
-    </div>
+      </div>
 
-    {#if moveProgressLabel || moveVisibleActionError}
-      <div class="move-summary-statuses">
-        {#if moveProgressLabel}
+      {#if moveRequiresExplicitAllowance && !moveAllowanceSatisfied}
+        <div class="move-allow-panel" data-testid="move-allow-panel">
+          <div class="move-allow-copy">
+            <div class="move-allow-title">Approve ERC20 spend first</div>
+            <div class="move-allow-meta" data-testid="move-allow-status">{moveAllowanceStatusLabel}</div>
+          </div>
+          <div class="move-allow-actions">
+            <input
+              class="move-allow-input"
+              type="text"
+              value={moveAllowanceAmount}
+              placeholder={moveAmount || '0.00'}
+              data-testid="move-allow-amount"
+              on:input={(event) => handleMoveAllowanceAmountInput(event.currentTarget.value)}
+            />
+            <button
+              type="button"
+              class="move-allow-button"
+              data-testid="move-allow-max"
+              disabled={moveExecuting || moveAllowanceLoading}
+              on:click={async () => {
+                try {
+                  await approveMoveAllowanceMax();
+                } catch (err) {
+                  toastMoveError(err);
+                }
+              }}
+            >
+              {moveAllowanceSubmittingMode === 'max' ? 'Allowing...' : 'Allow MAX'}
+            </button>
+            <button
+              type="button"
+              class="move-allow-button ghost"
+              data-testid="move-allow-exact"
+              disabled={moveExecuting || moveAllowanceLoading || !moveAllowanceAmount.trim()}
+              on:click={async () => {
+                try {
+                  await approveMoveAllowanceAmount();
+                } catch (err) {
+                  toastMoveError(err);
+                }
+              }}
+            >
+              {moveAllowanceSubmittingMode === 'amount' ? 'Allowing...' : `Allow ${moveAssetSymbol}`}
+            </button>
+          </div>
+        </div>
+      {/if}
+
+      {#if moveProgressLabel || moveVisibleActionError}
+        <div class="move-summary-statuses">
+          {#if moveProgressLabel}
           <div class="move-summary-status accent" data-testid="move-status">{moveProgressLabel}</div>
         {/if}
         {#if moveVisibleActionError}
@@ -687,6 +745,90 @@
     min-width: 0;
   }
 
+  .move-allow-panel {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    border-radius: 12px;
+    border: 1px dashed color-mix(in srgb, var(--move-accent) 32%, var(--move-border));
+    background: color-mix(in srgb, var(--move-accent) 7%, transparent);
+  }
+
+  .move-allow-copy {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .move-allow-title {
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--move-accent);
+  }
+
+  .move-allow-meta {
+    font-size: 11px;
+    color: color-mix(in srgb, var(--move-text-secondary) 92%, var(--move-text-muted));
+    overflow-wrap: anywhere;
+  }
+
+  .move-allow-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: min(430px, 100%);
+  }
+
+  .move-allow-input {
+    min-width: 0;
+    width: 100%;
+    height: 40px;
+    padding: 0 12px;
+    border-radius: 10px;
+    border: 1px solid color-mix(in srgb, var(--move-border) 54%, transparent);
+    background: color-mix(in srgb, var(--move-input-bg) 94%, transparent);
+    color: var(--move-text);
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 13px;
+  }
+
+  .move-allow-input:focus {
+    outline: none;
+    border-color: color-mix(in srgb, var(--move-accent) 70%, transparent);
+    box-shadow: 0 0 0 1px color-mix(in srgb, var(--move-accent) 18%, transparent);
+  }
+
+  .move-allow-button {
+    height: 40px;
+    padding: 0 14px;
+    border-radius: 10px;
+    border: 1px solid color-mix(in srgb, var(--move-accent) 26%, transparent);
+    background: linear-gradient(135deg, color-mix(in srgb, var(--move-accent) 26%, #0b0b0d), color-mix(in srgb, var(--move-accent) 14%, #0b0b0d));
+    color: var(--move-text);
+    font-size: 11px;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    cursor: pointer;
+    white-space: nowrap;
+  }
+
+  .move-allow-button.ghost {
+    border-style: dashed;
+    background: color-mix(in srgb, var(--move-input-bg) 88%, transparent);
+    color: var(--move-text-secondary);
+  }
+
+  .move-allow-button:disabled {
+    opacity: 0.5;
+    cursor: not-allowed;
+  }
+
   .move-summary-status {
     padding: 8px 10px;
     border-radius: 10px;
@@ -853,6 +995,22 @@
     .move-inline-composer {
       min-width: 0;
     }
+
+    .move-allow-panel {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .move-allow-actions {
+      min-width: 0;
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .move-allow-button {
+      width: 100%;
+    }
+
     .move-drag-layer {
       display: none;
     }

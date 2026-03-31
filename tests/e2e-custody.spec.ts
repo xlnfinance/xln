@@ -26,8 +26,8 @@ import {
   getRenderedOutboundForAccount,
   waitForRenderedOutboundForAccountDelta,
 } from './utils/e2e-account-ui';
-import { connectRuntimeToHub } from './utils/e2e-connect';
-import { createRuntimeIdentity, gotoApp, selectDemoMnemonic, switchToRuntimeId } from './utils/e2e-demo-users';
+import { connectRuntimeToHubWithCredit } from './utils/e2e-connect';
+import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
 import { timedStep } from './utils/e2e-timing';
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
@@ -111,6 +111,11 @@ type OffchainCapacitySnapshot = {
   }>;
 };
 
+type ApiTokenEntry = {
+  symbol?: string;
+  tokenId?: number;
+};
+
 const getFreePort = async (): Promise<number> => {
   return await new Promise<number>((resolve, reject) => {
     const server = createServer();
@@ -136,6 +141,16 @@ const getFreePort = async (): Promise<number> => {
 };
 
 const apiUrl = (pathname: string): string => new URL(pathname, API_BASE_URL).toString();
+
+async function getApiTokenId(page: Page, symbol: string): Promise<number> {
+  const response = await page.request.get(`${API_BASE_URL}/api/tokens`);
+  expect(response.ok(), 'tokens endpoint must be available').toBe(true);
+  const body = await response.json().catch(() => ({} as { tokens?: ApiTokenEntry[] }));
+  const tokens = Array.isArray(body.tokens) ? body.tokens : [];
+  const match = tokens.find((token) => String(token.symbol || '').toUpperCase() === symbol.toUpperCase());
+  expect(typeof match?.tokenId === 'number', `Missing ${symbol} tokenId`).toBe(true);
+  return Number(match!.tokenId);
+}
 
 const toWsUrl = (baseUrl: string, pathname: string): string => {
   const url = new URL(pathname, baseUrl);
@@ -899,15 +914,19 @@ test.describe('E2E Custody Flow', () => {
         'custody.wallet.create_runtime',
         () => createRuntimeIdentity(walletPage, 'alice', selectDemoMnemonic('alice')),
       );
+      const usdtTokenId = await timedStep('custody.wallet.read_usdt_token_id', () => getApiTokenId(walletPage, 'USDT'));
       for (const [index, hubId] of senderHubIds.entries()) {
-        await timedStep(`custody.wallet.connect_hub_${index + 1}`, () => connectRuntimeToHub(walletPage, alice, hubId));
+        await timedStep(
+          `custody.wallet.connect_hub_${index + 1}`,
+          () => connectRuntimeToHubWithCredit(walletPage, alice, hubId, '10000', [1, usdtTokenId]),
+        );
       }
       const walletRenderedBeforeFunding = await timedStep(
         'custody.wallet.read_rendered_out_before_faucet',
         () => getRenderedOutboundForAccount(walletPage, fundingHubId),
       );
       await timedStep('custody.wallet.faucet.usdc', () => faucetOffchain(walletPage, alice.entityId, fundingHubId, '100', 1));
-      await timedStep('custody.wallet.faucet.usdt', () => faucetOffchain(walletPage, alice.entityId, fundingHubId, '30', 3));
+      await timedStep('custody.wallet.faucet.usdt', () => faucetOffchain(walletPage, alice.entityId, fundingHubId, '30', usdtTokenId));
       await timedStep(
         'custody.wallet.wait_rendered_out_after_faucet',
         () => waitForRenderedOutboundForAccountDelta(
@@ -920,7 +939,7 @@ test.describe('E2E Custody Flow', () => {
       );
       await timedStep(
         'custody.wallet.wait_usdt_out_after_faucet',
-        () => waitForOffchainOutboundCapacity(walletPage, alice.entityId, fundingHubId, 3, 30n * TOKEN_SCALE, 20_000),
+        () => waitForOffchainOutboundCapacity(walletPage, alice.entityId, fundingHubId, usdtTokenId, 30n * TOKEN_SCALE, 20_000),
       );
       await timedStep('custody.open_dashboard', () => custodyPage.goto(custodyBaseUrl));
       await expect(custodyPage.getByRole('heading', { name: 'Deposit' })).toBeVisible({ timeout: 15_000 });
@@ -943,7 +962,7 @@ test.describe('E2E Custody Flow', () => {
       }
       const depositCycles = [
         { whole: 3n, tokenId: 1 },
-        { whole: 10n, tokenId: 3 },
+        { whole: 10n, tokenId: usdtTokenId },
       ];
 
       for (const [cycleIndex, cycle] of depositCycles.entries()) {
@@ -1006,7 +1025,7 @@ test.describe('E2E Custody Flow', () => {
 
       const withdrawCycles = [
         { whole: 2n, tokenId: 1 },
-        { whole: 4n, tokenId: 3 },
+        { whole: 4n, tokenId: usdtTokenId },
       ];
       for (const [cycleIndex, cycle] of withdrawCycles.entries()) {
         await walletPage.bringToFront();
