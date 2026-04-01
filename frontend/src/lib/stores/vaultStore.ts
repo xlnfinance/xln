@@ -563,6 +563,13 @@ async function stopRuntimeEnv(env: Env): Promise<void> {
     env.runtimeState.loopActive = false;
     env.runtimeState.stopLoop = null;
   }
+
+  if (typeof xln.closeRuntimeDb === 'function') {
+    await xln.closeRuntimeDb(env);
+  }
+  if (typeof xln.closeInfraDb === 'function') {
+    await xln.closeInfraDb(env);
+  }
 }
 
 function unregisterRuntimeEnvChange(runtimeId: string): void {
