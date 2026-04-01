@@ -1767,8 +1767,6 @@
   let pendingAssetAutoC2Rs: PendingAssetAutoC2R[] = [];
   let resolvingAssetAutoC2R = false;
   let externalFetchInFlight: Promise<void> | null = null;
-  let cachedExternalTokenRegistry: ExternalToken[] | null = null;
-  let cachedExternalTokenRegistryKey = '';
   let selectedExternalToReserveToken: ReserveTransferAsset | null = null;
   let selectedReserveToCollateralToken: ReserveTransferAsset | null = null;
   let selectedCollateralToReserveToken: ReserveTransferAsset | null = null;
@@ -2361,14 +2359,6 @@
   }
 
   async function getTokenList(jadapter: JAdapter | null | undefined): Promise<ExternalToken[]> {
-    const signerId = String(currentSignerId || '').trim().toLowerCase();
-    const runtimeId = getRuntimeId(activeEnv);
-    const jurisdiction = String(getActiveJurisdictionName(activeEnv) || '').trim().toLowerCase();
-    const cacheKey = `${signerId}|${runtimeId}|${jurisdiction}`;
-    if (cachedExternalTokenRegistry && cachedExternalTokenRegistryKey === cacheKey) {
-      return cachedExternalTokenRegistry.map((token) => ({ ...token, balance: 0n }));
-    }
-
     let tokens: ExternalToken[] = [];
     if (jadapter?.getTokenRegistry) {
       const registry = await jadapter.getTokenRegistry();
@@ -2389,10 +2379,7 @@
         ? apiTokens.map(t => ({ ...t, balance: 0n }))
         : [];
     }
-
-    cachedExternalTokenRegistryKey = cacheKey;
-    cachedExternalTokenRegistry = tokens.map((token) => ({ ...token, balance: 0n }));
-    return cachedExternalTokenRegistry.map((token) => ({ ...token, balance: 0n }));
+    return tokens.map((token) => ({ ...token, balance: 0n }));
   }
 
   function buildOnchainReserves(
