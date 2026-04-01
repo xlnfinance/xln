@@ -1115,15 +1115,32 @@ export async function createRpcAdapter(
         approvalAmount: bigint,
         overrides?: Record<string, bigint>
       ) => Promise<{ hash: string }>;
+      const [tokenCode, spenderCode] = await Promise.all([
+        readContractCode(provider, config.rpcUrl, tokenAddress),
+        readContractCode(provider, config.rpcUrl, spender),
+      ]);
+      if (!tokenCode || tokenCode === '0x') {
+        throw new Error(`approveErc20 invalid token contract: ${tokenAddress}`);
+      }
+      if (!spenderCode || spenderCode === '0x') {
+        throw new Error(`approveErc20 invalid spender contract: ${spender}`);
+      }
       const currentAllowance = await allowanceFn(signerWallet.address, spender);
       if (currentAllowance === amount) return 'already-approved';
-      if (currentAllowance > 0n && currentAllowance !== amount) {
-        const clearTx = await approveFn(spender, 0n, await buildFeeOverrides());
-        await waitForReceipt(clearTx, 'approveErc20Reset');
+      try {
+        if (currentAllowance > 0n && currentAllowance !== amount) {
+          const clearTx = await approveFn(spender, 0n, await buildFeeOverrides());
+          await waitForReceipt(clearTx, 'approveErc20Reset');
+        }
+        const tx = await approveFn(spender, amount, await buildFeeOverrides());
+        await waitForReceipt(tx, 'approveErc20');
+        return tx.hash;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(
+          `approveErc20 failed owner=${signerWallet.address} token=${tokenAddress} spender=${spender} currentAllowance=${currentAllowance} requested=${amount} cause=${message}`,
+        );
       }
-      const tx = await approveFn(spender, amount, await buildFeeOverrides());
-      await waitForReceipt(tx, 'approveErc20');
-      return tx.hash;
     },
 
     async transferErc20(
