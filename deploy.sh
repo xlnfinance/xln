@@ -248,6 +248,36 @@ ensure_production_nginx_site_consistency() {
   rm -f "$enabled"
   ln -s "$available" "$enabled"
 
+  if ! grep -q 'location = /resetdb {' "$available"; then
+    python3 - "$available" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+marker = """    location = /app {
+        root /root/xln/frontend/build;
+        try_files /index.html =404;
+        default_type text/html;
+        add_header Content-Security-Policy "frame-ancestors 'self' https://xln.finance https://app.xln.finance https://custody.xln.finance https://localhost:* http://localhost:*" always;
+    }
+
+"""
+block = """    location = /resetdb {
+        default_type text/plain;
+        add_header Cache-Control "no-store, max-age=0" always;
+        add_header Clear-Site-Data '"*"' always;
+        add_header Refresh "0;url=/app" always;
+        return 200 "Resetting local data";
+    }
+
+"""
+if marker in text:
+    text = text.replace(marker, marker + block, 1)
+    path.write_text(text)
+PY
+  fi
+
   if grep -q 'proxy_pass https://127.0.0.1:8087;' "$available"; then
     echo "[deploy] invalid custody upstream scheme in nginx config: expected http://127.0.0.1:8087" >&2
     return 1
@@ -268,8 +298,23 @@ ensure_production_nginx_site_consistency() {
     return 1
   fi
 
+  if ! grep -q 'location = /resetdb {' "$available"; then
+    echo "[deploy] /resetdb location missing from nginx config" >&2
+    return 1
+  fi
+
+  if ! grep -Fq "add_header Clear-Site-Data '\"*\"' always;" "$available"; then
+    echo "[deploy] Clear-Site-Data header missing from /resetdb nginx config" >&2
+    return 1
+  fi
+
   nginx -t
   systemctl reload nginx
+
+  if ! curl -ksSI --max-time 10 'https://xln.finance/resetdb?returnTo=%2Fapp' | grep -iq '^clear-site-data: "\*"$'; then
+    echo "[deploy] /resetdb Clear-Site-Data header not visible on public endpoint" >&2
+    return 1
+  fi
 }
 
 pretty_print_json() {

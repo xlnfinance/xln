@@ -191,6 +191,14 @@ server {
         add_header Content-Security-Policy "frame-ancestors 'self' https://xln.finance https://app.xln.finance https://custody.xln.finance https://localhost:* http://localhost:*" always;
     }
 
+    location = /resetdb {
+        default_type text/plain;
+        add_header Cache-Control "no-store, max-age=0" always;
+        add_header Clear-Site-Data '"*"' always;
+        add_header Refresh "0;url=/app" always;
+        return 200 "Resetting local data";
+    }
+
     # Serve static frontend files
     location / {
         root /home/ubuntu/xln/frontend/build;
