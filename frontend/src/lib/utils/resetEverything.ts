@@ -257,6 +257,16 @@ async function stopRuntimeBeforeReset(): Promise<void> {
   }
 }
 
+async function requestOtherTabsShutdown(): Promise<void> {
+  try {
+    const activeTabLock = await import('./activeTabLock');
+    activeTabLock.broadcastHardResetRequest?.();
+    await sleep(300);
+  } catch {
+    // best effort
+  }
+}
+
 async function runResetStep(
   errors: string[],
   label: string,
@@ -316,6 +326,7 @@ export async function resetEverything(_trigger?: unknown): Promise<void> {
     if (window.location.pathname !== '/resetdb') {
       try {
         await stopRuntimeBeforeReset();
+        await requestOtherTabsShutdown();
         await sleep(100);
       } catch (error) {
         console.error('[RESET] pre-navigation cleanup failed:', error);

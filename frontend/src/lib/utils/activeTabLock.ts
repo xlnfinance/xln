@@ -3,6 +3,7 @@ import { writable } from 'svelte/store';
 const ACTIVE_TAB_LOCK_KEY = 'xln-active-tab-lock';
 const ACTIVE_TAB_CHANNEL_NAME = 'xln-active-tab-lock';
 const INACTIVE_TAB_STANDBY_KEY = 'xln-inactive-tab-standby';
+const ACTIVE_TAB_HARD_RESET_KEY = 'xln-hard-reset';
 
 type ActiveTabLockRecord = {
   tabId: string;
@@ -33,6 +34,11 @@ type ActiveTabLockChannelMessage =
   }
   | {
     type: 'released';
+    tabId: string;
+    timestamp: number;
+  }
+  | {
+    type: 'hard-reset';
     tabId: string;
     timestamp: number;
   };
@@ -125,6 +131,42 @@ function postChannelMessage(message: ActiveTabLockChannelMessage): void {
   } catch {
     // ignore channel errors
   }
+}
+
+async function handleHardResetRequest(sourceTabId: string): Promise<void> {
+  const tabId = getOrCreateTabId();
+  if (!sourceTabId || sourceTabId === tabId) return;
+  enterInactiveTabStandby();
+  try {
+    await onLoseLockHandler?.();
+  } finally {
+    maybeReleaseLock();
+    window.setTimeout(() => {
+      window.location.replace('about:blank');
+    }, 50);
+  }
+}
+
+export function broadcastHardResetRequest(): void {
+  if (typeof window === 'undefined') return;
+  const tabId = getOrCreateTabId();
+  const timestamp = Date.now();
+  try {
+    localStorage.setItem(
+      ACTIVE_TAB_HARD_RESET_KEY,
+      JSON.stringify({
+        tabId,
+        timestamp,
+      }),
+    );
+  } catch {
+    // ignore storage errors
+  }
+  postChannelMessage({
+    type: 'hard-reset',
+    tabId,
+    timestamp,
+  });
 }
 
 function writeLockRecord(tabId: string, previousOwnerTabId: string | null): ActiveTabLockRecord {
@@ -228,6 +270,10 @@ export async function initializeActiveTabLock(onLoseLock: () => void | Promise<v
             }
             return;
           }
+          if (message.type === 'hard-reset') {
+            void handleHardResetRequest(typeof message.tabId === 'string' ? message.tabId : '');
+            return;
+          }
         };
       }
     } catch {
@@ -235,10 +281,21 @@ export async function initializeActiveTabLock(onLoseLock: () => void | Promise<v
     }
 
     const onStorage = (event: StorageEvent) => {
-      if (event.key !== ACTIVE_TAB_LOCK_KEY || !event.newValue) return;
-      const current = readLockRecord();
-      if (current?.tabId) {
-        void handleExternalOwner(current.tabId);
+      if (event.key === ACTIVE_TAB_LOCK_KEY && event.newValue) {
+        const current = readLockRecord();
+        if (current?.tabId) {
+          void handleExternalOwner(current.tabId);
+        }
+        return;
+      }
+      if (event.key === ACTIVE_TAB_HARD_RESET_KEY && event.newValue) {
+        try {
+          const payload = JSON.parse(event.newValue) as { tabId?: unknown };
+          const sourceTabId = typeof payload?.tabId === 'string' ? payload.tabId : '';
+          void handleHardResetRequest(sourceTabId);
+        } catch {
+          // ignore malformed payload
+        }
       }
     };
 
