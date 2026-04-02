@@ -32,6 +32,7 @@ import {
 } from '../market-snapshot';
 import { normalizeLoopbackUrl } from '../loopback-url';
 import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync, type StorageHealth } from './storage-monitor';
+import { maybeHandleQaRequest } from '../qa/api';
 
 type Args = {
   host: string;
@@ -1729,6 +1730,9 @@ const server = Bun.serve({
       await pollMarketMakerHealth();
       return new Response(safeStringify(await buildAggregatedHealthResponse()), { headers });
     }
+
+    const qaResponse = await maybeHandleQaRequest(request, pathname, headers);
+    if (qaResponse) return qaResponse;
 
     if (pathname === '/api/hubs') {
       await pollAllHubHealth();
