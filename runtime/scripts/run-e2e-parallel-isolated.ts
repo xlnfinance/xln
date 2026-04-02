@@ -11,7 +11,7 @@
  *   bun runtime/scripts/run-e2e-parallel-isolated.ts --video=on --trace=on-first-retry --max-failures=1
  */
 
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -374,6 +374,30 @@ const writeRunManifest = (
     shards,
   };
   writeFileSync(join(logsDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+};
+
+const publishQaRunIfConfigured = (logsDir: string): void => {
+  const remoteBase = String(process.env.XLN_QA_PUBLISH_REMOTE || '').trim();
+  if (!remoteBase) return;
+
+  const runId = logsDir.split('/').at(-1) || 'run';
+  const remoteTarget = `${remoteBase.replace(/\/+$/, '')}/${runId}/`;
+  const startedAt = Date.now();
+  const result = spawnSync('rsync', ['-az', `${logsDir}/`, remoteTarget], {
+    stdio: 'pipe',
+    encoding: 'utf8',
+  });
+
+  if (result.status === 0) {
+    console.log(`[qa] publish=${Date.now() - startedAt}ms target=${remoteTarget}`);
+    return;
+  }
+
+  const stderr = String(result.stderr || '').trim();
+  const stdout = String(result.stdout || '').trim();
+  console.warn(`[qa] publish failed target=${remoteTarget} status=${result.status ?? 'null'}`);
+  if (stdout) console.warn(`[qa] publish stdout: ${stdout}`);
+  if (stderr) console.warn(`[qa] publish stderr: ${stderr}`);
 };
 
 const expandPlaywrightTargets = (pwFiles: string[]): Array<{ target: string; requireMarketMaker: boolean }> => {
@@ -998,6 +1022,7 @@ async function main(): Promise<void> {
     const totalMs = Date.now() - startedAt;
     const failed = results.filter(r => r.status === 'failed');
     writeRunManifest(logsDir, args, results, totalMs, startedAt);
+    publishQaRunIfConfigured(logsDir);
 
     console.log('\n' + '='.repeat(72));
     console.log('E2E Summary');
