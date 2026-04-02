@@ -12,7 +12,7 @@
  */
 
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { createWriteStream, existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -41,6 +41,8 @@ type RunResult = {
   status: 'passed' | 'failed';
   durationMs: number;
   logPath: string;
+  target: string;
+  requireMarketMaker: boolean;
   phaseMs: {
     preflight: number;
     anvilBoot: number;
@@ -244,6 +246,136 @@ const parseStepTimings = (path: string): StepTiming[] => {
   }
 };
 
+const detectArtifactKind = (name: string): 'video' | 'image' | 'trace' | 'json' | 'text' | 'archive' | 'other' => {
+  const lower = name.toLowerCase();
+  if (lower.endsWith('.webm')) return 'video';
+  if (lower.endsWith('.png') || lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image';
+  if (lower.endsWith('.zip')) return 'trace';
+  if (lower.endsWith('.json')) return 'json';
+  if (lower.endsWith('.log') || lower.endsWith('.txt')) return 'text';
+  if (lower.endsWith('.tar') || lower.endsWith('.gz')) return 'archive';
+  return 'other';
+};
+
+const detectArtifactContentType = (name: string): string => {
+  const lower = name.toLowerCase();
+  if (lower.endsWith('.webm')) return 'video/webm';
+  if (lower.endsWith('.png')) return 'image/png';
+  if (lower.endsWith('.jpg') || lower.endsWith('.jpeg')) return 'image/jpeg';
+  if (lower.endsWith('.zip')) return 'application/zip';
+  if (lower.endsWith('.json')) return 'application/json; charset=utf-8';
+  if (lower.endsWith('.log') || lower.endsWith('.txt')) return 'text/plain; charset=utf-8';
+  return 'application/octet-stream';
+};
+
+const collectShardArtifacts = (
+  logsDir: string,
+  shard: number,
+): Array<{ name: string; relativePath: string; sizeBytes: number; kind: string; contentType: string }> => {
+  const resultsDir = join(logsDir, `test-results-shard-${shard}`);
+  if (!existsSync(resultsDir)) return [];
+  const artifacts: Array<{ name: string; relativePath: string; sizeBytes: number; kind: string; contentType: string }> = [];
+
+  const walk = (dir: string): void => {
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      if (entry.name.startsWith('.')) continue;
+      const absolutePath = join(dir, entry.name);
+      if (entry.isDirectory()) {
+        walk(absolutePath);
+        continue;
+      }
+      const fileStat = statSync(absolutePath);
+      artifacts.push({
+        name: entry.name,
+        relativePath: absolutePath.slice(logsDir.length + 1),
+        sizeBytes: fileStat.size,
+        kind: detectArtifactKind(entry.name),
+        contentType: detectArtifactContentType(entry.name),
+      });
+    }
+  };
+
+  walk(resultsDir);
+  return artifacts;
+};
+
+const readShardLastRunStatus = (logsDir: string, shard: number): 'passed' | 'failed' | 'unknown' => {
+  const lastRunPath = join(logsDir, `test-results-shard-${shard}`, '.last-run.json');
+  if (!existsSync(lastRunPath)) return 'unknown';
+  try {
+    const parsed = JSON.parse(readFileSync(lastRunPath, 'utf8')) as { status?: unknown };
+    return parsed.status === 'passed' || parsed.status === 'failed' ? parsed.status : 'unknown';
+  } catch {
+    return 'unknown';
+  }
+};
+
+const readShardTitle = (logsDir: string, shard: number): string | null => {
+  const resultsDir = join(logsDir, `test-results-shard-${shard}`);
+  if (!existsSync(resultsDir)) return null;
+  const entry = readdirSync(resultsDir, { withFileTypes: true }).find((item) => item.isDirectory() && !item.name.startsWith('.'));
+  return entry?.name ?? null;
+};
+
+const writeRunManifest = (
+  logsDir: string,
+  args: CliArgs,
+  results: RunResult[],
+  totalMs: number,
+  createdAt: number,
+): void => {
+  const shards = results
+    .slice()
+    .sort((a, b) => a.shard - b.shard)
+    .map((result) => {
+      const slowSteps = parseStepTimings(result.logPath).sort((a, b) => b.ms - a.ms).slice(0, 12);
+      const artifacts = collectShardArtifacts(logsDir, result.shard);
+      return {
+        shard: result.shard,
+        status: readShardLastRunStatus(logsDir, result.shard) === 'unknown' ? result.status : readShardLastRunStatus(logsDir, result.shard),
+        durationMs: result.durationMs,
+        target: result.target,
+        title: readShardTitle(logsDir, result.shard),
+        requireMarketMaker: result.requireMarketMaker,
+        error: result.error ?? null,
+        phaseMs: result.phaseMs,
+        logRelativePath: result.logPath.slice(logsDir.length + 1),
+        slowSteps,
+        artifacts,
+        hasVideo: artifacts.some((artifact) => artifact.kind === 'video'),
+        hasTrace: artifacts.some((artifact) => artifact.kind === 'trace'),
+      };
+    });
+  const passedShards = shards.filter((shard) => shard.status === 'passed').length;
+  const failedShards = shards.filter((shard) => shard.status === 'failed').length;
+  const manifest = {
+    manifestVersion: 1,
+    runId: logsDir.split('/').at(-1) || logsDir,
+    createdAt,
+    completedAt: Date.now(),
+    status: failedShards > 0 ? 'failed' : 'passed',
+    totalMs,
+    totalShards: shards.length,
+    passedShards,
+    failedShards,
+    args: {
+      shards: args.shards,
+      basePort: args.basePort,
+      workersPerShard: args.workersPerShard,
+      maxFailures: args.maxFailures,
+      phaseWarnMs: args.phaseWarnMs,
+      videoMode: args.videoMode,
+      traceMode: args.traceMode,
+      screenshotMode: args.screenshotMode,
+      pwFiles: args.pwFiles,
+      pwGrep: args.pwGrep ?? null,
+      pwProject: args.pwProject ?? null,
+    },
+    shards,
+  };
+  writeFileSync(join(logsDir, 'manifest.json'), JSON.stringify(manifest, null, 2));
+};
+
 const expandPlaywrightTargets = (pwFiles: string[]): Array<{ target: string; requireMarketMaker: boolean }> => {
   const out: Array<{ target: string; requireMarketMaker: boolean }> = [];
   const requiresMarketMaker = (file: string): boolean => !/e2e-swap-isolated\.spec\.ts$/.test(file);
@@ -332,6 +464,9 @@ const listPlaywrightSpecFiles = (): string[] => {
     // Legacy shared-page AHB flow. Useful assertions were ported into
     // tests/e2e-ahb-isolated.spec.ts; keep this out of the canonical isolated bar.
     'tests/e2e-ahb-payment.spec.ts',
+    // Keep the default bar focused on fast isolated product checks.
+    'tests/e2e-multiroute-load.spec.ts',
+    'tests/e2e-runtime-persistence.spec.ts',
   ]);
   const res = Bun.spawnSync(['rg', '--files', 'tests'], {
     cwd: process.cwd(),
@@ -718,6 +853,7 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
           E2E_ANVIL_RPC: rpcUrl,
           E2E_RESET_BASE_URL: apiUrl,
           E2E_FAST: process.env.E2E_FAST ?? '1',
+          E2E_ISOLATED_BASELINE_READY: '1',
           XLN_INCLUDE_MARKET_MAKER: task.requireMarketMaker ? '1' : '0',
         },
         log,
@@ -732,6 +868,8 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
         status: 'failed',
         durationMs: Date.now() - startedAt,
         logPath,
+        target: task.pwTargets[0] || `shard-${task.shard}`,
+        requireMarketMaker: task.requireMarketMaker,
         phaseMs,
         error: `playwright_exit_${code}`,
       };
@@ -742,6 +880,8 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
       status: 'passed',
       durationMs: Date.now() - startedAt,
       logPath,
+      target: task.pwTargets[0] || `shard-${task.shard}`,
+      requireMarketMaker: task.requireMarketMaker,
       phaseMs,
     };
   } catch (error) {
@@ -751,6 +891,8 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
       status: 'failed',
       durationMs: Date.now() - startedAt,
       logPath,
+      target: task.pwTargets[0] || `shard-${task.shard}`,
+      requireMarketMaker: task.requireMarketMaker,
       phaseMs,
       error: (error as Error).message,
     };
@@ -855,6 +997,7 @@ async function main(): Promise<void> {
     await Promise.all(Array.from({ length: maxConcurrency }, () => runWorker()));
     const totalMs = Date.now() - startedAt;
     const failed = results.filter(r => r.status === 'failed');
+    writeRunManifest(logsDir, args, results, totalMs, startedAt);
 
     console.log('\n' + '='.repeat(72));
     console.log('E2E Summary');
