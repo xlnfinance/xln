@@ -28,6 +28,7 @@ import { deserializeTaggedJson, safeStringify, serializeTaggedJson } from './ser
 import type { AccountMachine, DeliverableEntityInput, Delta, EntityReplica, Env, EntityInput, EntityTx, RoutedEntityInput, RuntimeInput } from './types';
 import type { HubHealth } from './health';
 import { createExternalWalletApi } from './api/external-wallet-api';
+import { enrichQaRunUrls, listQaRuns, qaArtifactContentType, readQaRun, resolveQaArtifactPath, summarizeQaRun } from './qa-report';
 import { encodeBoard, hashBoard } from './entity-factory';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from './account-crypto';
 import { createJAdapter, DEV_CHAIN_IDS, type JAdapter } from './jadapter';
@@ -3367,6 +3368,78 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         'Cache-Control': 'private, max-age=10',
       },
     });
+  }
+
+  if (pathname === '/api/qa/runs' && req.method === 'GET') {
+    try {
+      const url = new URL(req.url);
+      const limitRaw = Number(url.searchParams.get('limit') || '20');
+      const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(50, Math.floor(limitRaw))) : 20;
+      const runs = await listQaRuns(limit);
+      return new Response(
+        safeStringify({
+          ok: true,
+          runs: runs.map((run) => summarizeQaRun(run)),
+        }),
+        {
+          headers: {
+            ...headers,
+            'Cache-Control': 'no-store',
+          },
+        },
+      );
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(safeStringify({ ok: false, error: message }), { status: 500, headers });
+    }
+  }
+
+  if (pathname === '/api/qa/run' && req.method === 'GET') {
+    const url = new URL(req.url);
+    const runId = String(url.searchParams.get('runId') || '').trim();
+    if (!runId) {
+      return new Response(safeStringify({ ok: false, error: 'runId is required' }), { status: 400, headers });
+    }
+    try {
+      const run = await readQaRun(runId);
+      return new Response(
+        safeStringify({
+          ok: true,
+          run: enrichQaRunUrls(run),
+        }),
+        {
+          headers: {
+            ...headers,
+            'Cache-Control': 'no-store',
+          },
+        },
+      );
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(safeStringify({ ok: false, error: message }), { status: 404, headers });
+    }
+  }
+
+  if (pathname === '/api/qa/artifact' && req.method === 'GET') {
+    const url = new URL(req.url);
+    const runId = String(url.searchParams.get('runId') || '').trim();
+    const relativePath = String(url.searchParams.get('path') || '').trim();
+    if (!runId || !relativePath) {
+      return new Response(safeStringify({ ok: false, error: 'runId and path are required' }), { status: 400, headers });
+    }
+    try {
+      const absolutePath = await resolveQaArtifactPath(runId, relativePath);
+      return new Response(Bun.file(absolutePath), {
+        headers: {
+          'Access-Control-Allow-Origin': '*',
+          'Cache-Control': 'no-store',
+          'Content-Type': qaArtifactContentType(absolutePath),
+        },
+      });
+    } catch (error: unknown) {
+      const message = error instanceof Error ? error.message : String(error);
+      return new Response(safeStringify({ ok: false, error: message }), { status: 404, headers });
+    }
   }
 
   if (pathname === '/api/hubs') {
