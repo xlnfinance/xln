@@ -13,6 +13,7 @@
 	onMount(() => {
 		if (!browser) return;
 		const disposeRangeSliderProgress = installRangeSliderProgress();
+		void loadDeployLabel();
 		return () => {
 			disposeRangeSliderProgress();
 		};
@@ -35,11 +36,26 @@
 	});
 
 	let showTopbar = $derived(!isEmbed && chromeMode === 'site');
-	let buildLabel = $derived.by(() => {
-		const buildNumber = typeof __BUILD_NUMBER__ === 'string' ? __BUILD_NUMBER__.trim() : '';
-		if (!buildNumber) return '';
-		return buildNumber;
-	});
+	let deployLabel = $state('');
+
+	async function loadDeployLabel(): Promise<void> {
+		if (!browser) return;
+		try {
+			const response = await fetch(`/api/jurisdictions?ts=${Date.now()}`, {
+				cache: 'no-store',
+				headers: {
+					'cache-control': 'no-cache, no-store, must-revalidate',
+					pragma: 'no-cache',
+				},
+			});
+			if (!response.ok) return;
+			const payload = await response.json() as { version?: unknown };
+			const version = String(payload?.version || '').trim();
+			deployLabel = version;
+		} catch {
+			deployLabel = '';
+		}
+	}
 </script>
 
 {#if showTopbar}
@@ -55,8 +71,8 @@
 {/if}
 
 <Toast />
-{#if buildLabel}
-	<div class="build-badge">{buildLabel}</div>
+{#if deployLabel}
+	<div class="build-badge">{deployLabel}</div>
 {/if}
 
 <style>

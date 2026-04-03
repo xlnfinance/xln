@@ -92,7 +92,7 @@ export async function createXlnomy(options: {
     evm,
     entities: [],
     created: env?.timestamp ?? 0,
-    version: '1.0.0',
+    version: '1',
   };
 
   // 5. Optional: Auto-create 2x2x2 grid with $1M reserves

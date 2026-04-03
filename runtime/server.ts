@@ -2043,7 +2043,7 @@ const updateJurisdictionsJson = async (
     } catch {
       data = {};
     }
-    data.version = data.version ?? '1.0.0';
+    data.version = String(data.version || '').trim() || '1';
     data.lastUpdated = new Date().toISOString();
     data.defaults = data.defaults ?? {
       timeout: 30000,

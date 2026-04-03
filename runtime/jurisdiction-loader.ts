@@ -60,7 +60,7 @@ export function loadJurisdictions(): JurisdictionsData {
   }
 
   const defaultJurisdictions: JurisdictionsData = {
-    version: '1.0.0',
+    version: '1',
     lastUpdated: new Date().toISOString(),
     jurisdictions: {},
     defaults: {
