@@ -737,10 +737,29 @@ const handleMarketMessage = async (ws: any, msg: any): Promise<void> => {
 };
 
 const readShardJurisdictions = (): string => {
+  const canonicalPath = resolveJurisdictionsJsonPath();
+  if (!existsSync(canonicalPath)) {
+    throw new Error(`CANONICAL_JURISDICTIONS_MISSING path=${canonicalPath}`);
+  }
   if (!existsSync(shardJurisdictionsPath)) {
     throw new Error(`JURISDICTIONS_JSON_MISSING path=${shardJurisdictionsPath}`);
   }
-  return readFileSync(shardJurisdictionsPath, 'utf8');
+  const canonical = readFileSync(canonicalPath, 'utf8');
+  const shard = readFileSync(shardJurisdictionsPath, 'utf8');
+  try {
+    const canonicalVersion = String((JSON.parse(canonical) as { version?: unknown }).version || '').trim() || '1';
+    const shardPayload = JSON.parse(shard) as { version?: unknown };
+    const shardVersion = String(shardPayload.version || '').trim();
+    if (shardVersion !== canonicalVersion) {
+      shardPayload.version = canonicalVersion;
+      const next = `${JSON.stringify(shardPayload, null, 2)}\n`;
+      writeFileSync(shardJurisdictionsPath, next, 'utf8');
+      return next;
+    }
+  } catch {
+    // If either payload is malformed, just return the shard payload unchanged.
+  }
+  return shard;
 };
 
 const seedShardJurisdictions = (): void => {
