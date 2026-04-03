@@ -291,6 +291,20 @@ const resolveJurisdictionPaths = (): string[] => {
   return [resolveJurisdictionsJsonPath()];
 };
 
+const readCurrentJurisdictionsVersion = (): string => {
+  for (const filePath of resolveJurisdictionPaths()) {
+    if (!existsSync(filePath)) continue;
+    try {
+      const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as JurisdictionsFile;
+      const version = String(parsed.version || '').trim();
+      if (version) return version;
+    } catch {
+      // Ignore malformed local file and keep falling back.
+    }
+  }
+  return '1';
+};
+
 const writeJurisdictionAddresses = async (jadapter: JAdapter, rpcUrl: string): Promise<void> => {
   if (!jadapter.addresses?.depository || !jadapter.addresses?.entityProvider) {
     throw new Error('JURISDICTION_WRITE_ADDRESSES_MISSING');
@@ -323,7 +337,7 @@ const writeJurisdictionAddresses = async (jadapter: JAdapter, rpcUrl: string): P
       },
     };
     const nextPayload: JurisdictionsFile = {
-      version: current.version ?? '1.0.0',
+      version: String(current.version || '').trim() || readCurrentJurisdictionsVersion(),
       lastUpdated: updatedAt,
       jurisdictions,
       defaults: current.defaults ?? {
@@ -391,8 +405,9 @@ const buildRuntimeJurisdictionsPayload = (env: Env): string | null => {
     String(addresses.entityProvider || replica.entityProviderAddress || replica.contracts?.entityProvider || '').trim();
   if (!depository || !entityProvider) return null;
 
+  const version = readCurrentJurisdictionsVersion();
   return JSON.stringify({
-    version: '1.0.0',
+    version,
     lastUpdated: new Date().toISOString(),
     jurisdictions: {
       arrakis: {
