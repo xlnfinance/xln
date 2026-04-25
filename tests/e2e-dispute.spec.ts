@@ -200,26 +200,50 @@ async function readAccountState(
 }
 
 async function readCurrentChainBlock(page: Page): Promise<number> {
+  const body = await postRpc(page, 'eth_blockNumber', []);
+  expect(typeof body.result === 'string', `unexpected eth_blockNumber body: ${JSON.stringify(body)}`).toBe(true);
+  return Number.parseInt(body.result!, 16);
+}
+
+async function postRpc(page: Page, method: string, params: unknown[]): Promise<{ result?: unknown; error?: unknown }> {
   const apiBase = await getActiveApiBase(page);
   const response = await page.request.post(`${apiBase}/api/rpc`, {
     data: {
       jsonrpc: '2.0',
       id: 1,
-      method: 'eth_blockNumber',
-      params: [],
+      method,
+      params,
     },
   });
-  expect(response.ok(), 'eth_blockNumber RPC must succeed').toBe(true);
-  const body = await response.json() as { result?: string };
-  expect(typeof body.result === 'string', `unexpected eth_blockNumber body: ${JSON.stringify(body)}`).toBe(true);
-  return Number.parseInt(body.result!, 16);
+  expect(response.ok(), `${method} RPC HTTP request must succeed`).toBe(true);
+  const body = await response.json() as { result?: unknown; error?: unknown };
+  if (body.error) throw new Error(`${method} RPC error: ${JSON.stringify(body.error)}`);
+  return body;
 }
 
 async function mineOneBlock(page: Page): Promise<void> {
-  const response = await page.request.post(`${APP_BASE_URL}/api/rpc`, {
-    data: { jsonrpc: '2.0', id: 1, method: 'evm_mine', params: [] },
-  });
-  expect(response.ok(), 'evm_mine RPC must succeed').toBe(true);
+  await postRpc(page, 'evm_mine', []);
+}
+
+async function mineBlocks(page: Page, count: number): Promise<void> {
+  const blocks = Math.max(0, Math.floor(count));
+  if (blocks <= 0) return;
+  if (blocks === 1) {
+    await mineOneBlock(page);
+    return;
+  }
+
+  const quantity = `0x${blocks.toString(16)}`;
+  const errors: string[] = [];
+  for (const method of ['anvil_mine', 'hardhat_mine']) {
+    try {
+      await postRpc(page, method, [quantity]);
+      return;
+    } catch (error) {
+      errors.push(`${method}: ${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+  throw new Error(`batch block mining unavailable for ${blocks} blocks: ${errors.join(' | ')}`);
 }
 
 async function readRuntimeJurisdictionHeight(page: Page): Promise<number> {
@@ -232,7 +256,7 @@ async function readRuntimeJurisdictionHeight(page: Page): Promise<number> {
 }
 
 async function waitForBlock(page: Page, targetBlock: number): Promise<void> {
-  const deadline = Date.now() + 45_000;
+  const deadline = Date.now() + 90_000;
   for (;;) {
     const current = await readCurrentChainBlock(page);
     const runtimeVisible = await readRuntimeJurisdictionHeight(page);
@@ -240,7 +264,11 @@ async function waitForBlock(page: Page, targetBlock: number): Promise<void> {
     if (Date.now() >= deadline) {
       throw new Error(`timed out waiting for block ${targetBlock} (chain=${current}, runtime=${runtimeVisible})`);
     }
-    await mineOneBlock(page);
+    if (current < targetBlock) {
+      await mineBlocks(page, targetBlock - current);
+    } else {
+      await page.waitForTimeout(250);
+    }
   }
 }
 
@@ -1244,8 +1272,8 @@ test.describe('E2E Dispute Flow', () => {
     expect(disputedState.disputeTimeout, 'disputeTimeout should be set after disputeStart').toBeGreaterThan(currentChainBlock);
     const disputeWindowBlocks = disputedState.disputeTimeout - currentChainBlock;
     expect(
-      disputeWindowBlocks <= 6 && disputeWindowBlocks >= 1,
-      `expected local dispute delay around 5 blocks, got ${disputeWindowBlocks}`,
+      disputeWindowBlocks <= 5_760 && disputeWindowBlocks >= 5_700,
+      `expected production dispute delay around 5760 blocks, got ${disputeWindowBlocks}`,
     ).toBe(true);
 
     await timedStep('dispute.wait_timeout_block', () => waitForBlock(page, disputedState.disputeTimeout));

@@ -1,5 +1,7 @@
 import type { Env } from './types';
 
+export const PRODUCTION_DISPUTE_DELAY_BLOCKS = 5_760;
+
 export function getRuntimeJurisdictionHeight(env: Env, fallbackHeight = 0): number {
   const active = env.activeJurisdiction ? env.jReplicas?.get(env.activeJurisdiction) : undefined;
   const candidates = active
@@ -16,7 +18,7 @@ export function getRuntimeJurisdictionHeight(env: Env, fallbackHeight = 0): numb
 export function getRuntimeJurisdictionDefaultDisputeDelayBlocks(
   env: Env,
   jurisdictionName?: string,
-  fallbackBlocks = 5,
+  fallbackBlocks = PRODUCTION_DISPUTE_DELAY_BLOCKS,
 ): number {
   const preferred =
     (jurisdictionName && env.jReplicas?.get(jurisdictionName)) ||
@@ -28,5 +30,7 @@ export function getRuntimeJurisdictionDefaultDisputeDelayBlocks(
     const raw = Number(replica?.defaultDisputeDelayBlocks ?? NaN);
     if (Number.isFinite(raw) && raw > 0) return Math.floor(raw);
   }
-  return Number.isFinite(fallbackBlocks) && fallbackBlocks > 0 ? Math.floor(fallbackBlocks) : 5;
+  return Number.isFinite(fallbackBlocks) && fallbackBlocks > 0
+    ? Math.floor(fallbackBlocks)
+    : PRODUCTION_DISPUTE_DELAY_BLOCKS;
 }

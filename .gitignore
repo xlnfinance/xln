@@ -51,6 +51,9 @@ test-results/**/*.webm
 .tmp-*
 frontend/static/img/print.png
 **/.playwright-artifacts-*/
+.claude/worktrees/
+.e2e-mesh-db/
+xln-*.png
 
 # Archive (old implementations)
 # .archive/ - NOW PUBLIC (was private, going open source)

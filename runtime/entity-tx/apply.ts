@@ -375,10 +375,11 @@ export const applyEntityTx = async (
             nonce: 1, // Next unified on-chain nonce to use
           },
           proofBody: { tokenIds: [], deltas: [] },
-          // Dispute configuration (default: 20 blocks = 2 * 10)
+          // Dispute configuration values are encoded in 10-block units.
+          // 576 * 10 = 5760 blocks, roughly 24h at 15-second block time.
           disputeConfig: {
-            leftDisputeDelay: 2, // 20 blocks for left entity
-            rightDisputeDelay: 2, // 20 blocks for right entity
+            leftDisputeDelay: 576,
+            rightDisputeDelay: 576,
           },
           frameHistory: [],
           pendingWithdrawals: new Map(),

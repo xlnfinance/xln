@@ -377,10 +377,11 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       rightJObservations: [],
       jEventChain: [],
       lastFinalizedJHeight: 0,
-      // Dispute resolution (delay values * 10 = blocks)
+      // Dispute resolution values are encoded in 10-block units.
+      // 576 * 10 = 5760 blocks, roughly 24h at 15-second block time.
       disputeConfig: {
-        leftDisputeDelay: 10,   // 100 blocks
-        rightDisputeDelay: 10,  // 100 blocks
+        leftDisputeDelay: 576,
+        rightDisputeDelay: 576,
       },
       onChainSettlementNonce: 0,
     };
