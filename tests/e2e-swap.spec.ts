@@ -8,7 +8,7 @@ import { test, expect, type Locator, type Page, type TestInfo } from '@playwrigh
 import { Wallet } from 'ethers';
 import { timedStep } from './utils/e2e-timing';
 import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, getHealth } from './utils/e2e-baseline';
-import { connectRuntimeToHub as connectRuntimeToSharedHub } from './utils/e2e-connect';
+import { connectRuntimeToHubWithCredit as connectRuntimeToSharedHubWithCredit } from './utils/e2e-connect';
 import {
   gotoApp as gotoSharedApp,
   createRuntime as createSharedRuntime,
@@ -18,6 +18,7 @@ import { buildDefaultEntitySwapPairs, getTokenInfo } from '../runtime/account-ut
 import { capturePageScreenshot } from './utils/e2e-screenshots';
 
 const INIT_TIMEOUT = 30_000;
+const SWAP_CONNECT_TOKEN_IDS = [1, 2] as const;
 const CANONICAL_SWAP_PAIRS = buildDefaultEntitySwapPairs().map((pair) => ({
   ...pair,
   label: `${getTokenInfo(pair.baseTokenId).symbol}/${getTokenInfo(pair.quoteTokenId).symbol}`,
@@ -532,10 +533,10 @@ async function ensureDeterministicSwapAccount(page: Page): Promise<{
   const hubId = hubIds[0];
   expect(typeof hubId === 'string' && hubId.length > 0, 'hub not discovered').toBe(true);
 
-  await connectRuntimeToSharedHub(page, {
+  await connectRuntimeToSharedHubWithCredit(page, {
     entityId: identity.entityId,
     signerId: identity.signerId,
-  }, hubId!);
+  }, hubId!, '10000', SWAP_CONNECT_TOKEN_IDS);
 
   for (const funding of [
     { tokenId: 1, amount: '100' },
@@ -675,10 +676,10 @@ async function ensureDeterministicSwapAccounts(
   expect(hubIds.length, `expected at least ${minHubCount} hubs for aggregated swap coverage`).toBeGreaterThanOrEqual(minHubCount);
 
   for (const hubId of hubIds) {
-    await connectRuntimeToSharedHub(page, {
+    await connectRuntimeToSharedHubWithCredit(page, {
       entityId: identity.entityId,
       signerId: identity.signerId,
-    }, hubId);
+    }, hubId, '10000', SWAP_CONNECT_TOKEN_IDS);
   }
 
   await expect

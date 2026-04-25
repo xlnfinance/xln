@@ -1,9 +1,9 @@
-import { expect, type APIResponse, type Page } from '@playwright/test';
+import { expect, request, type APIRequestContext, type APIResponse, type Page } from '@playwright/test';
 import { requireAppBaseUrl, requireApiBaseUrl, requireResetBaseUrl } from './e2e-base-url';
 
 export const APP_BASE_URL = requireAppBaseUrl();
 export const API_BASE_URL = requireApiBaseUrl();
-export const RESET_BASE_URL = requireResetBaseUrl();
+export const RESET_BASE_URL = process.env.E2E_RESET_BASE_URL ? requireResetBaseUrl() : '';
 
 export type E2EResetHealth = {
   inProgress?: boolean;
@@ -92,7 +92,6 @@ export type E2EBaselineOptions = {
   requireMarketMaker?: boolean;
   minHubCount?: number;
   autoResetGraceMs?: number;
-  forceReset?: boolean;
 };
 
 export type E2EResetOptions = E2EBaselineOptions & {
@@ -103,6 +102,16 @@ export type E2EResetOptions = E2EBaselineOptions & {
 const DEFAULT_TIMEOUT_MS = 180_000;
 const DEFAULT_POLL_MS = 500;
 const DEFAULT_AUTO_RESET_GRACE_MS = 5_000;
+const ISOLATED_BASELINE_READY = process.env.E2E_ISOLATED_BASELINE_READY === '1';
+
+const withApiContext = async <T>(run: (api: APIRequestContext) => Promise<T>): Promise<T> => {
+  const api = await request.newContext({ ignoreHTTPSErrors: true });
+  try {
+    return await run(api);
+  } finally {
+    await api.dispose();
+  }
+};
 
 const readJson = async <T>(response: APIResponse): Promise<T | null> => {
   try {
@@ -117,6 +126,19 @@ const readText = async (response: APIResponse): Promise<string> => {
     return await response.text();
   } catch {
     return '';
+  }
+};
+
+const getHealthWithApi = async (
+  api: APIRequestContext,
+  apiBaseUrl = API_BASE_URL,
+): Promise<E2EHealthResponse | null> => {
+  try {
+    const response = await api.get(`${apiBaseUrl}/api/health`);
+    if (!response.ok()) return null;
+    return await readJson<E2EHealthResponse>(response);
+  } catch {
+    return null;
   }
 };
 
@@ -194,16 +216,17 @@ const isBaselineReady = (health: E2EHealthResponse | null, options: Required<E2E
   return true;
 };
 
-const waitForBaselineReady = async (
+const waitForBaselineReadyWithApi = async (
   page: Page,
+  api: APIRequestContext,
   options: Required<E2EBaselineOptions>,
   timeoutMs: number,
 ): Promise<E2EHealthResponse> => {
   const startedAt = Date.now();
   let lastHealth: E2EHealthResponse | null = null;
   while (Date.now() - startedAt < timeoutMs) {
-    lastHealth = await getHealth(page, options.apiBaseUrl);
-    if (isBaselineReady(lastHealth, options)) return lastHealth;
+    lastHealth = await getHealthWithApi(api, options.apiBaseUrl);
+    if (lastHealth && isBaselineReady(lastHealth, options)) return lastHealth;
     const remainingMs = timeoutMs - (Date.now() - startedAt);
     if (remainingMs <= 0) break;
     await page.waitForTimeout(Math.min(options.pollMs, remainingMs));
@@ -218,13 +241,7 @@ export const getHealth = async (
   page: Page,
   apiBaseUrl = API_BASE_URL,
 ): Promise<E2EHealthResponse | null> => {
-  try {
-    const response = await page.request.get(`${apiBaseUrl}/api/health`);
-    if (!response.ok()) return null;
-    return await readJson<E2EHealthResponse>(response);
-  } catch {
-    return null;
-  }
+  return await withApiContext((api) => getHealthWithApi(api, apiBaseUrl));
 };
 
 export const waitForNamedHubs = async (
@@ -278,20 +295,22 @@ export const waitForApiReachable = async (
   timeoutMs = 120_000,
   apiBaseUrl = API_BASE_URL,
 ): Promise<void> => {
-  const startedAt = Date.now();
-  let lastError = '';
-  while (Date.now() - startedAt < timeoutMs) {
-    try {
-      const response = await page.request.get(`${apiBaseUrl}/api/health`);
-      if (response.ok()) return;
-      const body = await readText(response);
-      lastError = `status=${response.status()} body=${body.slice(0, 240)}`;
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
+  await withApiContext(async (api) => {
+    const startedAt = Date.now();
+    let lastError = '';
+    while (Date.now() - startedAt < timeoutMs) {
+      try {
+        const response = await api.get(`${apiBaseUrl}/api/health`);
+        if (response.ok()) return;
+        const body = await readText(response);
+        lastError = `status=${response.status()} body=${body.slice(0, 240)}`;
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+      }
+      await page.waitForTimeout(DEFAULT_POLL_MS);
     }
-    await page.waitForTimeout(DEFAULT_POLL_MS);
-  }
-  throw new Error(`API did not become reachable in time: ${lastError}`);
+    throw new Error(`API did not become reachable in time: ${lastError}`);
+  });
 };
 
 export const ensureE2EBaseline = async (
@@ -306,32 +325,28 @@ export const ensureE2EBaseline = async (
     requireMarketMaker: options.requireMarketMaker ?? false,
     minHubCount: options.minHubCount ?? 3,
     autoResetGraceMs: options.autoResetGraceMs ?? DEFAULT_AUTO_RESET_GRACE_MS,
-    forceReset: options.forceReset ?? false,
   };
 
-  if (resolved.forceReset) {
-    return await resetProdServer(page, {
-      apiBaseUrl: resolved.apiBaseUrl,
-      resetBaseUrl: RESET_BASE_URL,
-      timeoutMs: resolved.timeoutMs,
-      pollMs: resolved.pollMs,
-      requireHubMesh: resolved.requireHubMesh,
-      requireMarketMaker: resolved.requireMarketMaker,
-      minHubCount: resolved.minHubCount,
-      autoResetGraceMs: resolved.timeoutMs,
+  // The isolated runner already bootstraps a fresh shard-local mesh before Playwright starts.
+  // In that mode, baseline checks should only wait for readiness, never trigger an in-test reset.
+  if (ISOLATED_BASELINE_READY) {
+    return await withApiContext(async (api) => {
+      const health = await getHealthWithApi(api, resolved.apiBaseUrl);
+      if (health && isBaselineReady(health, resolved)) return health;
+      throw new Error(`E2E isolated baseline was not ready when Playwright started\n${summarizeHealth(health)}`);
     });
   }
 
   const initialWaitMs = Math.min(resolved.timeoutMs, resolved.autoResetGraceMs);
   try {
-    return await waitForBaselineReady(page, resolved, initialWaitMs);
+    return await withApiContext((api) => waitForBaselineReadyWithApi(page, api, resolved, initialWaitMs));
   } catch (initialError) {
     const remainingTimeoutMs = resolved.timeoutMs - initialWaitMs;
     if (remainingTimeoutMs <= 0) throw initialError;
 
     return await resetProdServer(page, {
       apiBaseUrl: resolved.apiBaseUrl,
-      resetBaseUrl: RESET_BASE_URL,
+      resetBaseUrl: RESET_BASE_URL || requireResetBaseUrl(),
       timeoutMs: remainingTimeoutMs,
       pollMs: resolved.pollMs,
       requireHubMesh: resolved.requireHubMesh,
@@ -346,49 +361,12 @@ export const resetProdServer = async (
   page: Page,
   options: E2EResetOptions = {},
 ): Promise<E2EHealthResponse> => {
-  const resetBaseUrl = options.resetBaseUrl ?? RESET_BASE_URL;
+  const resetBaseUrl = options.resetBaseUrl ?? (RESET_BASE_URL || requireResetBaseUrl());
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const apiBaseUrl = options.apiBaseUrl ?? API_BASE_URL;
   const pollMs = options.pollMs ?? DEFAULT_POLL_MS;
   const retries = options.retries ?? Math.max(30, Math.ceil(timeoutMs / Math.max(250, pollMs)));
   const deadline = Date.now() + timeoutMs;
-
-  await waitForApiReachable(page, timeoutMs, apiBaseUrl);
-
-  let resetDone = false;
-  let lastError = '';
-
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    try {
-      const resetBody = {
-        requireMarketMaker: options.requireMarketMaker ?? false,
-      };
-      const coldResponse = await page.request.post(`${resetBaseUrl}/api/reset`, {
-        data: resetBody,
-        headers: { 'Content-Type': 'application/json' },
-      });
-      if (coldResponse.ok()) {
-        resetDone = true;
-        break;
-      }
-
-      const coldBody = await readText(coldResponse);
-      lastError = `reset(status=${coldResponse.status()} body=${coldBody.slice(0, 180)})`;
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : String(error);
-    }
-
-    const remainingMs = deadline - Date.now();
-    if (remainingMs <= 0) break;
-    await page.waitForTimeout(Math.min(500, remainingMs));
-    try {
-      await waitForApiReachable(page, Math.min(5_000, remainingMs), apiBaseUrl);
-    } catch {
-      // Keep retrying reset until the overall reset budget is exhausted.
-    }
-  }
-
-  expect(resetDone, `reset failed after retries: ${lastError}`).toBe(true);
 
   const resolved: Required<E2EBaselineOptions> = {
     apiBaseUrl: options.apiBaseUrl ?? API_BASE_URL,
@@ -400,5 +378,66 @@ export const resetProdServer = async (
     autoResetGraceMs: options.autoResetGraceMs ?? DEFAULT_AUTO_RESET_GRACE_MS,
   };
 
-  return await waitForBaselineReady(page, resolved, resolved.timeoutMs);
+  return await withApiContext(async (api) => {
+    const startedAt = Date.now();
+    let lastError = '';
+    while (Date.now() - startedAt < timeoutMs) {
+      try {
+        const response = await api.get(`${apiBaseUrl}/api/health`);
+        if (response.ok()) {
+          lastError = '';
+          break;
+        }
+        const body = await readText(response);
+        lastError = `status=${response.status()} body=${body.slice(0, 240)}`;
+      } catch (error) {
+        lastError = error instanceof Error ? error.message : String(error);
+      }
+      await page.waitForTimeout(DEFAULT_POLL_MS);
+    }
+    if (lastError) {
+      throw new Error(`API did not become reachable in time: ${lastError}`);
+    }
+
+    let resetDone = false;
+    let lastResetError = '';
+
+    for (let attempt = 1; attempt <= retries; attempt++) {
+      try {
+        const resetBody = {
+          requireMarketMaker: options.requireMarketMaker ?? false,
+        };
+        const coldResponse = await api.post(`${resetBaseUrl}/api/reset`, {
+          data: resetBody,
+          headers: { 'Content-Type': 'application/json' },
+        });
+        if (coldResponse.ok()) {
+          resetDone = true;
+          break;
+        }
+
+        const coldBody = await readText(coldResponse);
+        lastResetError = `reset(status=${coldResponse.status()} body=${coldBody.slice(0, 180)})`;
+      } catch (error) {
+        lastResetError = error instanceof Error ? error.message : String(error);
+      }
+
+      const remainingMs = deadline - Date.now();
+      if (remainingMs <= 0) break;
+      await page.waitForTimeout(Math.min(500, remainingMs));
+      try {
+        const response = await api.get(`${apiBaseUrl}/api/health`);
+        if (!response.ok()) {
+          const body = await readText(response);
+          lastResetError = `status=${response.status()} body=${body.slice(0, 240)}`;
+        }
+      } catch (error) {
+        lastResetError = error instanceof Error ? error.message : String(error);
+      }
+    }
+
+    expect(resetDone, `reset failed after retries: ${lastResetError}`).toBe(true);
+
+    return await waitForBaselineReadyWithApi(page, api, resolved, resolved.timeoutMs);
+  });
 };

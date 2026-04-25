@@ -24,10 +24,6 @@ contract DeltaTransformer {
   mapping(bytes32 => uint) public hashToBlock;
   uint256 constant MAX_FILL_RATIO = type(uint16).max;
 
-  constructor() {
-    revealSecret(bytes32(0));
-  }
-  
   struct Batch {
     Payment[] payment;
     Swap[] swap;

@@ -1,12 +1,13 @@
 import { mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import {
+  closeInfraDb,
   createEmptyEnv,
   enqueueRuntimeInput,
+  getPersistedLatestHeight,
+  listPersistedCheckpointHeights,
   process as processRuntime,
   loadEnvFromDB,
-  getRuntimeDb,
-  tryOpenDb,
   closeRuntimeDb,
 } from '../runtime.ts';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
@@ -23,6 +24,11 @@ async function main() {
   const namespacePath = join(dbRoot, runtimeId);
 
   rmSync(namespacePath, { recursive: true, force: true });
+  rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-events`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
   mkdirSync(dbRoot, { recursive: true });
 
   const env = createEmptyEnv(seed);
@@ -88,13 +94,11 @@ async function main() {
   for (const [k, v] of Object.entries(beforeHashes)) console.log(`  ${k}: ${v}`);
 
   // Reload
-  const opened = await tryOpenDb(env);
-  assert(opened, 'db opened');
-  const db = getRuntimeDb(env);
-  const latestH = Number((await db.get(Buffer.from(`${runtimeId}:latest_height`))).toString());
-  const checkpointH = Number((await db.get(Buffer.from(`${runtimeId}:latest_checkpoint_height`))).toString());
+  const latestH = await getPersistedLatestHeight(env);
+  const checkpointH = Number((await listPersistedCheckpointHeights(env)).at(-1) || 0);
   console.log(`\nDB: latest=${latestH} checkpoint=${checkpointH} (replay=${latestH - checkpointH} frames)`);
   await closeRuntimeDb(env);
+  await closeInfraDb(env);
 
   const restored = await loadEnvFromDB(runtimeId, seed);
   assert(restored, 'restored env from db');
@@ -124,6 +128,8 @@ async function main() {
     console.log(`\n❌ bilateral-replay FAILED: ${mismatches} mismatches`);
     process.exit(1);
   }
+  await closeRuntimeDb(restored);
+  await closeInfraDb(restored);
 }
 
 main().catch((err) => {

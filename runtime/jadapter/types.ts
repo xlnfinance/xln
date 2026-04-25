@@ -46,6 +46,24 @@ export interface JTokenInfo {
   tokenId?: number;
 }
 
+export interface JWalletAllowanceRead {
+  tokenAddress: string;
+  spender: string;
+}
+
+export interface JWalletSnapshotRequest {
+  owner: string;
+  tokenAddresses: string[];
+  allowances?: JWalletAllowanceRead[];
+  includeNativeBalance?: boolean;
+}
+
+export interface JWalletSnapshot {
+  nativeBalance: bigint | null;
+  tokenBalances: bigint[];
+  allowances: bigint[];
+}
+
 export interface JReserveMint {
   entityId: string;
   tokenId: number;
@@ -88,6 +106,7 @@ export interface JAdapter {
   getEntityNonce(entityId: string): Promise<bigint>;
   isEntityRegistered(entityId: string): Promise<boolean>;
   getTokenRegistry(): Promise<JTokenInfo[]>;
+  readWalletSnapshot(request: JWalletSnapshotRequest): Promise<JWalletSnapshot>;
   getErc20Balance(tokenAddress: string, owner: string): Promise<bigint>;
   getErc20Balances(tokenAddresses: string[], owner: string): Promise<bigint[]>;
   getErc20Allowance(tokenAddress: string, owner: string, spender: string): Promise<bigint>;

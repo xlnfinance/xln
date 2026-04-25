@@ -4,15 +4,13 @@ import {
   createEmptyEnv,
   enqueueRuntimeInput,
   process as processRuntime,
-  getRuntimeDb,
-  tryOpenDb,
+  readPersistedFrameJournal,
   closeRuntimeDb,
   readPersistedCheckpointSnapshot,
 } from '../runtime.ts';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { generateLazyEntityId } from '../entity-factory';
 import { buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
-import { readPersistedFrameJournalBuffer } from '../wal/store';
 import { deserializeTaggedJson, serializeTaggedJson } from '../serialization-utils';
 
 function assert(condition: unknown, message: string): asserts condition {
@@ -110,6 +108,11 @@ async function main() {
   const namespacePath = join(dbRoot, runtimeId);
 
   rmSync(namespacePath, { recursive: true, force: true });
+  rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-events`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
   mkdirSync(dbRoot, { recursive: true });
 
   const env = createEmptyEnv(seed);
@@ -206,13 +209,10 @@ async function main() {
 
   const liveSnapshot = buildRuntimeCheckpointSnapshot(env);
 
-  const opened = await tryOpenDb(env);
-  assert(opened, 'db opened');
-  const db = getRuntimeDb(env);
   const checkpointSnapshot = await readPersistedCheckpointSnapshot(env, 1);
   assert(checkpointSnapshot, 'checkpoint snapshot 1 exists');
-  const frame2Buffer = await readPersistedFrameJournalBuffer(db, runtimeId, 2);
-  const frame2 = deserializeTaggedJson<any>(frame2Buffer.toString());
+  const frame2 = await readPersistedFrameJournal(env, 2);
+  assert(frame2, 'frame journal 2 exists');
 
   const replayEnv = createEmptyEnv(seed);
   replayEnv.runtimeId = runtimeId;

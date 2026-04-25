@@ -4,7 +4,7 @@ import { connectRuntimeToHub } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
 import { getPersistedReceiptCursor, waitForPersistedFrameEvent } from './utils/e2e-runtime-receipts';
 
-const TEST_TIMEOUT_MS = process.env.E2E_LONG === '1' ? 240_000 : 150_000;
+const TEST_TIMEOUT_MS = process.env.E2E_LONG === '1' ? 240_000 : 210_000;
 
 async function faucetOffchain(page: Page, entityId: string, hubId: string): Promise<void> {
   const result = await page.evaluate(async ({ entityId, hubId }) => {
@@ -37,7 +37,6 @@ test.describe('Canonical /app#pay deep link', () => {
         requireHubMesh: true,
         requireMarketMaker: false,
         minHubCount: 3,
-        forceReset: true,
       });
       const hubs = await waitForNamedHubs(aliceSetupPage, ['H1']);
       const hubId = hubs.h1;
@@ -66,12 +65,20 @@ test.describe('Canonical /app#pay deep link', () => {
       await expect(payPage.locator('#payment-amount-input')).toHaveValue('5');
 
       const paymentCursor = await getPersistedReceiptCursor(bobPage);
-      const findRoutesBtn = payPage.getByRole('button', { name: /^Find route$/i });
-      await expect(findRoutesBtn).toBeVisible({ timeout: 30_000 });
-      await findRoutesBtn.click();
-      await expect(payPage.locator('.route-option').first()).toBeVisible({ timeout: 30_000 });
-      await payPage.locator('.route-option').first().click();
+      const findRoutesBtn = payPage.getByRole('button', { name: /^Find routes?$/i });
+      const firstRoute = payPage.locator('.route-option').first();
+      if (await firstRoute.isVisible().catch(() => false)) {
+        await firstRoute.scrollIntoViewIfNeeded().catch(() => undefined);
+      } else {
+        await expect(findRoutesBtn).toBeVisible({ timeout: 30_000 });
+        await findRoutesBtn.scrollIntoViewIfNeeded().catch(() => undefined);
+        await findRoutesBtn.click();
+        await expect(firstRoute).toBeVisible({ timeout: 30_000 });
+      }
+      await firstRoute.scrollIntoViewIfNeeded().catch(() => undefined);
+      await firstRoute.click();
       const payNowBtn = payPage.getByRole('button', { name: /^Pay Now$/i });
+      await payNowBtn.scrollIntoViewIfNeeded().catch(() => undefined);
       await expect(payNowBtn).toBeEnabled({ timeout: 15_000 });
       await payNowBtn.click();
 

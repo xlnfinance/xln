@@ -60,7 +60,7 @@ const ORDERBOOK_MARKERS = [
   'runtime/swap-execution.ts',
   'runtime/account-tx/handlers/swap-resolve.ts',
   'runtime/entity-tx/handlers/account.ts',
-  'runtime/wal/state-restore.ts',
+  'runtime/storage/index.ts',
   'runtime/entity-consensus.ts',
   'runtime/entity-tx/handlers/dispute.ts',
   'runtime/scenarios/swap.ts',

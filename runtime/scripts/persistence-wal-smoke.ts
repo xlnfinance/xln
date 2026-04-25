@@ -1,13 +1,14 @@
 import { mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import {
+  closeInfraDb,
   createEmptyEnv,
   enqueueRuntimeInput,
   process as processRuntime,
+  getPersistedLatestHeight,
+  listPersistedCheckpointHeights,
   loadEnvFromDB,
   verifyRuntimeChain,
-  getRuntimeDb,
-  tryOpenDb,
   closeRuntimeDb,
 } from '../runtime.ts';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
@@ -24,6 +25,11 @@ async function main() {
   const namespacePath = join(dbRoot, runtimeId);
 
   rmSync(namespacePath, { recursive: true, force: true });
+  rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-events`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
   mkdirSync(dbRoot, { recursive: true });
 
   const env = createEmptyEnv(seed);
@@ -124,15 +130,13 @@ async function main() {
   assert(env.eReplicas.size === 2, `expected 2 replicas before reload, got ${env.eReplicas.size}`);
   assert(env.height > 2, `runtime advanced beyond checkpoint frame (height=${env.height})`);
 
-  const opened = await tryOpenDb(env);
-  assert(opened, 'db opened');
-  const db = getRuntimeDb(env);
-  const latestHeight = Number((await db.get(Buffer.from(`${runtimeId}:latest_height`))).toString());
-  const checkpointHeight = Number((await db.get(Buffer.from(`${runtimeId}:latest_checkpoint_height`))).toString());
+  const latestHeight = await getPersistedLatestHeight(env);
+  const checkpointHeight = Number((await listPersistedCheckpointHeights(env)).at(-1) || 0);
   assert(checkpointHeight < latestHeight, `WAL replay path active (checkpoint=${checkpointHeight}, latest=${latestHeight})`);
 
   // Simulate real restart boundary: close current DB handle before loading anew.
   await closeRuntimeDb(env);
+  await closeInfraDb(env);
 
   const restored = await loadEnvFromDB(runtimeId, seed);
   assert(restored, 'restored env from db');
@@ -143,6 +147,7 @@ async function main() {
   assert(!!replicaB, 'replica B present after reload');
   assert(restored.height === env.height, `runtime height preserved (${restored.height} == ${env.height})`);
   await closeRuntimeDb(restored);
+  await closeInfraDb(restored);
 
   const verifyFromGenesis = await verifyRuntimeChain(runtimeId, seed, { fromSnapshotHeight: 1 });
   assert(verifyFromGenesis.ok, 'genesis replay verification passed');

@@ -193,10 +193,11 @@ const createInvoiceId = () => {
 const buildWalletPayHref = (sourceState, tokenId, amount, invoiceId) => {
   const url = new URL('/app', CANONICAL_WALLET_ORIGIN);
   const params = new URLSearchParams();
+  const depositDescription = `Custody invoice:${invoiceId} | uid:${sourceState.session.userId}`;
   params.set('token', String(tokenId));
   params.set('amount', String(amount).trim());
   params.set('u', sourceState.session.userId);
-  params.set('desc', `Custody invoice:${invoiceId}`);
+  params.set('desc', depositDescription);
   if (sourceState.custody.jurisdictionId) {
     params.set('jId', sourceState.custody.jurisdictionId);
   }
@@ -206,10 +207,11 @@ const buildWalletPayHref = (sourceState, tokenId, amount, invoiceId) => {
 
 const buildInvoiceUri = (sourceState, tokenId, amount, invoiceId) => {
   const params = new URLSearchParams();
+  const depositDescription = `Custody invoice:${invoiceId} | uid:${sourceState.session.userId}`;
   params.set('token', String(tokenId));
   params.set('amount', String(amount).trim());
   params.set('u', sourceState.session.userId);
-  params.set('desc', `Custody invoice:${invoiceId}`);
+  params.set('desc', depositDescription);
   if (sourceState.custody.jurisdictionId) {
     params.set('jId', sourceState.custody.jurisdictionId);
   }

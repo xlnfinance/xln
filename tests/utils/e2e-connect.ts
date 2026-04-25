@@ -1,17 +1,13 @@
 import { expect, type Page } from '@playwright/test';
+import { listRenderedCounterpartyIds } from './e2e-account-ui';
+import { enqueueEntityTxs } from './e2e-runtime-input';
 
 const DEFAULT_TOKEN_IDS = [1] as const;
 const DEFAULT_OPEN_TIMEOUT_MS = 75_000;
 const DEFAULT_CREDIT_AMOUNT_DISPLAY = '10000';
 
-type XlnWindow = typeof window & {
-  XLN?: {
-    enqueueRuntimeInput?: (env: unknown, input: unknown) => unknown;
-  };
-  __xln_instance?: {
-    enqueueRuntimeInput?: (env: unknown, input: unknown) => unknown;
-  };
-  isolatedEnv?: unknown;
+type ConnectRuntimeOptions = {
+  requireOnline?: boolean;
 };
 
 async function readSelectedUiRuntimeIdentity(page: Page): Promise<{ entityId: string; signerId: string }> {
@@ -190,10 +186,44 @@ async function openAccountsWorkspace(page: Page): Promise<void> {
 
 async function openWorkspaceTab(page: Page, tabTestId: string): Promise<void> {
   await openAccountsWorkspace(page);
-  const tab = page.getByTestId(tabTestId).first();
-  await expect(tab).toBeVisible({ timeout: 20_000 });
-  await tab.scrollIntoViewIfNeeded();
-  await tab.click();
+  const tabs = page.getByTestId(tabTestId);
+  const readTabStatus = async (): Promise<'visible' | 'active-hidden' | 'missing'> => {
+    const count = await tabs.count();
+    for (let index = 0; index < count; index += 1) {
+      const tab = tabs.nth(index);
+      if (await tab.isVisible().catch(() => false)) return 'visible';
+      const [className, ariaSelected, dataState, ariaCurrent] = await Promise.all([
+        tab.getAttribute('class').catch(() => ''),
+        tab.getAttribute('aria-selected').catch(() => ''),
+        tab.getAttribute('data-state').catch(() => ''),
+        tab.getAttribute('aria-current').catch(() => ''),
+      ]);
+      const active = /\bactive\b/.test(String(className || ''))
+        || ariaSelected === 'true'
+        || dataState === 'active'
+        || ariaCurrent === 'page';
+      if (active) return 'active-hidden';
+    }
+    return 'missing';
+  };
+
+  await expect
+    .poll(readTabStatus, {
+      timeout: 20_000,
+      intervals: [200, 400, 800],
+      message: `${tabTestId} workspace tab must be visible or already active`,
+    })
+    .not.toBe('missing');
+
+  const count = await tabs.count();
+  for (let index = 0; index < count; index += 1) {
+    const tab = tabs.nth(index);
+    if (!await tab.isVisible().catch(() => false)) continue;
+    await tab.scrollIntoViewIfNeeded();
+    await tab.click();
+    return;
+  }
+  // Responsive screenshot layouts can hide the already-active tab. In that case the requested workspace is open.
 }
 
 function compactEntityLabel(entityId: string): string {
@@ -259,33 +289,14 @@ async function enqueueOpenAccount(
   signerId: string,
   hubId: string,
 ): Promise<void> {
-  const queued = await page.evaluate(async ({ entityId, signerId, hubId }) => {
-    const view = window as XlnWindow;
-    const env = view.isolatedEnv;
-    const XLN = view.XLN
-      ?? view.__xln_instance
-      ?? await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
-    if (!env || !XLN?.enqueueRuntimeInput) return { ok: false, error: 'isolatedEnv/XLN missing' };
-
-    XLN.enqueueRuntimeInput(env, {
-      runtimeTxs: [],
-      entityInputs: [{
-        entityId,
-        signerId,
-        entityTxs: [{
-          type: 'openAccount',
-          data: {
-            targetEntityId: hubId,
-            creditAmount: 10_000n * 10n ** 18n,
-            tokenId: 1,
-          },
-        }],
-      }],
-    });
-    return { ok: true };
-  }, { entityId, signerId, hubId });
-
-  expect(queued.ok, queued.error || `openAccount enqueue failed for ${hubId.slice(0, 10)}`).toBe(true);
+  await enqueueEntityTxs(page, entityId, signerId, [{
+    type: 'openAccount',
+    data: {
+      targetEntityId: hubId,
+      creditAmount: 10_000n * 10n ** 18n,
+      tokenId: 1,
+    },
+  }]);
 }
 
 async function selectConfigureAccount(page: Page, hubId: string): Promise<void> {
@@ -344,32 +355,14 @@ async function extendCreditToken(
   amountDisplay: string,
 ): Promise<void> {
   const amount = BigInt(amountDisplay) * 10n ** 18n;
-  const queued = await page.evaluate(async ({ entityId, signerId, hubId, tokenId, amount }) => {
-    const view = window as XlnWindow;
-    const env = view.isolatedEnv;
-    const XLN = view.XLN
-      ?? view.__xln_instance
-      ?? await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
-    if (!env || !XLN?.enqueueRuntimeInput) return { ok: false, error: 'isolatedEnv/XLN missing' };
-
-    XLN.enqueueRuntimeInput(env, {
-      runtimeTxs: [],
-      entityInputs: [{
-        entityId,
-        signerId,
-        entityTxs: [{
-          type: 'extendCredit',
-          data: {
-            counterpartyEntityId: hubId,
-            tokenId,
-            amount,
-          },
-        }],
-      }],
-    });
-    return { ok: true };
-  }, { entityId: identity.entityId, signerId: identity.signerId, hubId, tokenId, amount });
-  expect(queued.ok, queued.error || `extendCredit enqueue failed for token ${tokenId}`).toBe(true);
+  await enqueueEntityTxs(page, identity.entityId, identity.signerId, [{
+    type: 'extendCredit',
+    data: {
+      counterpartyEntityId: hubId,
+      tokenId,
+      amount,
+    },
+  }]);
 
   await expect.poll(
     async () => {
@@ -442,12 +435,29 @@ async function getAccountOpenStatus(
   );
 }
 
+async function hasExportedRuntimeEnv(page: Page): Promise<boolean> {
+  return await page.evaluate(() => typeof (window as typeof window & { isolatedEnv?: unknown }).isolatedEnv !== 'undefined');
+}
+
+async function hasRenderedAccountCard(page: Page, hubId: string): Promise<boolean> {
+  const ids = await listRenderedCounterpartyIds(page).catch(() => []);
+  return ids.includes(hubId.toLowerCase());
+}
+
 export async function connectRuntimeToHub(
   page: Page,
   identity: { entityId: string; signerId: string },
   hubId: string,
+  options: ConnectRuntimeOptions = {},
 ): Promise<void> {
-  await connectRuntimeToHubWithCredit(page, identity, hubId, DEFAULT_CREDIT_AMOUNT_DISPLAY, DEFAULT_TOKEN_IDS);
+  await connectRuntimeToHubWithCredit(
+    page,
+    identity,
+    hubId,
+    DEFAULT_CREDIT_AMOUNT_DISPLAY,
+    DEFAULT_TOKEN_IDS,
+    options,
+  );
 }
 
 export async function connectRuntimeToHubWithCredit(
@@ -456,20 +466,65 @@ export async function connectRuntimeToHubWithCredit(
   hubId: string,
   creditAmountDisplay: string,
   tokenIds: readonly number[] = [1],
+  options: ConnectRuntimeOptions = {},
 ): Promise<void> {
+  if (options.requireOnline !== false) {
+    await ensureRuntimeOnline(page, 'connect-runtime-to-hub');
+  } else {
+    await nudgeRuntimeOnline(page);
+  }
+  const canUseDefaultUiConnect =
+    creditAmountDisplay === DEFAULT_CREDIT_AMOUNT_DISPLAY
+    && tokenIds.includes(1);
+  const hasRuntimeEnv = await hasExportedRuntimeEnv(page);
+  if (!hasRuntimeEnv) {
+    if (!canUseDefaultUiConnect) {
+      throw new Error(`prod/runtime-global-free connect only supports default hub connect for ${hubId.slice(0, 10)}`);
+    }
+    if (await hasRenderedAccountCard(page, hubId)) return;
+    await connectHubThroughUi(page, hubId);
+    await expect.poll(
+      async () => await hasRenderedAccountCard(page, hubId),
+      {
+        timeout: DEFAULT_OPEN_TIMEOUT_MS,
+        intervals: [250, 500, 750],
+        message: `rendered account ${hubId.slice(0, 10)} must appear after hub connect`,
+      },
+    ).toBe(true);
+    return;
+  }
   if (await isAccountReady(page, identity.entityId, identity.signerId, hubId, tokenIds)) {
     return;
   }
   const initialStatus = await getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId);
 
-  if (!initialStatus.exists) {
-    await enqueueOpenAccount(page, identity.entityId, identity.signerId, hubId);
+  if (!initialStatus.exists || (initialStatus.currentHeight === 0 && !initialStatus.pendingHeight)) {
+    if (canUseDefaultUiConnect) {
+      await connectHubThroughUi(page, hubId);
+    } else {
+      await enqueueOpenAccount(page, identity.entityId, identity.signerId, hubId);
+    }
   }
 
+  let reopenAttempted = false;
   await expect.poll(
     async () => {
       await nudgeRuntimeOnline(page);
       const status = await getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId);
+      if (
+        status.exists
+        && status.currentHeight === 0
+        && !status.pendingHeight
+        && !reopenAttempted
+      ) {
+        reopenAttempted = true;
+        if (canUseDefaultUiConnect) {
+          await connectHubThroughUi(page, hubId);
+        } else {
+          await enqueueOpenAccount(page, identity.entityId, identity.signerId, hubId);
+        }
+        return false;
+      }
       return status.exists && status.currentHeight > 0 && !status.pendingHeight;
     },
     {
@@ -480,6 +535,7 @@ export async function connectRuntimeToHubWithCredit(
   ).toBe(true);
 
   for (const tokenId of tokenIds) {
+    if (canUseDefaultUiConnect && tokenId === 1) continue;
     await extendCreditToken(page, identity, hubId, tokenId, creditAmountDisplay);
   }
 

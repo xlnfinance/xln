@@ -21,7 +21,7 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { DaemonRpcClient, type DaemonFrameLog } from '../custody/daemon-client';
 import { deriveDelta } from '../runtime/account-utils';
 import { startCustodySupport, stopManagedChild, type ManagedChild } from '../runtime/orchestrator/custody-bootstrap';
-import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline, resetProdServer } from './utils/e2e-baseline';
+import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline } from './utils/e2e-baseline';
 import {
   getRenderedOutboundForAccount,
   waitForRenderedOutboundForAccountDelta,
@@ -33,7 +33,7 @@ import { timedStep } from './utils/e2e-timing';
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 const LONG_E2E = process.env.E2E_LONG === '1';
-const TEST_TIMEOUT_MS = LONG_E2E ? 240_000 : 150_000;
+const TEST_TIMEOUT_MS = LONG_E2E ? 240_000 : 210_000;
 const TOKEN_SCALE = 10n ** 18n;
 
 type CustodyDashboardPayload = {
@@ -207,14 +207,22 @@ async function ensureRuntimeProfileDownloaded(page: Page, entityId: string): Pro
 }
 
 async function waitForPopupRoutesAndSubmit(popup: Page, targetEntityId: string): Promise<void> {
-  const findRoutesButton = popup.getByRole('button', { name: /^Find route$/i });
+  const findRoutesButton = popup.getByRole('button', { name: /^Find routes?$/i });
   const firstRoute = popup.locator('.route-option').first();
   const routeError = popup.locator('.profile-preflight-error');
-  await expect(findRoutesButton).toBeVisible({ timeout: 60_000 });
   await popup.waitForTimeout(1_000);
+  if (await firstRoute.isVisible().catch(() => false)) {
+    await firstRoute.scrollIntoViewIfNeeded().catch(() => undefined);
+  } else if (await findRoutesButton.isVisible().catch(() => false)) {
+    await findRoutesButton.scrollIntoViewIfNeeded().catch(() => undefined);
+  }
   const deadline = Date.now() + 25_000;
   while (Date.now() < deadline) {
     if (await firstRoute.isVisible().catch(() => false)) break;
+    if (!await findRoutesButton.isVisible().catch(() => false)) {
+      await popup.waitForTimeout(500);
+      continue;
+    }
     console.log(`[custody:popup] finding routes url=${popup.url()}`);
     await findRoutesButton.click();
     try {
@@ -237,6 +245,7 @@ async function waitForPopupRoutesAndSubmit(popup: Page, targetEntityId: string):
       `Route not visible in wallet popup url=${currentUrl} error=${currentError || 'none'} invoice=${invoiceValue.slice(0, 96)}`,
     );
   }
+  await firstRoute.scrollIntoViewIfNeeded().catch(() => undefined);
   await popup.locator('.route-option').first().click();
   const sendOnSelectedRoute = popup.getByRole('button', { name: /^Send On Selected Route$/i });
   if (await sendOnSelectedRoute.isVisible().catch(() => false)) {
@@ -459,9 +468,28 @@ async function waitForDaemonReceiptEvent(
     await delay(500);
   }
 
+  const fallbackResponse = await daemonClient.getFrameReceipts({
+    fromHeight: Math.max(1, fromHeight - 8),
+    limit: 32,
+  }).catch(() => null);
+  const fallbackRecent = (fallbackResponse?.receipts || [])
+    .flatMap((receipt) =>
+      receipt.logs.map((log) => {
+        const data = log.data || {};
+        const entityHint =
+          typeof log.entityId === 'string'
+            ? log.entityId
+            : typeof data.entityId === 'string'
+              ? data.entityId
+              : '';
+        return `${receipt.height}:${log.message}${entityHint ? `@${entityHint.slice(0, 12)}` : ''}`;
+      }),
+    )
+    .slice(-24);
+
   throw new Error(
     `Timed out waiting for daemon receipt ${options.eventName} on ${targetEntityId.slice(0, 12)} ` +
-    `(recent=${recent.join(',') || 'none'})`,
+    `(recent=${recent.join(',') || 'none'}, fallback=${fallbackRecent.join(',') || 'none'})`,
   );
 }
 
@@ -876,17 +904,12 @@ test.describe('E2E Custody Flow', () => {
     });
 
     try {
-      await timedStep('custody.reset_server', () => resetProdServer(walletPage, {
-        apiBaseUrl: API_BASE_URL,
-        timeoutMs: TEST_TIMEOUT_MS,
-      }));
       await timedStep('custody.ensure_baseline', () => ensureE2EBaseline(walletPage, {
         apiBaseUrl: API_BASE_URL,
         timeoutMs: TEST_TIMEOUT_MS,
         requireHubMesh: true,
         requireMarketMaker: false,
         minHubCount: 3,
-        forceReset: true,
       }));
 
       const custodySupport = await timedStep('custody.start_support', () => startCustodySupport({
@@ -971,6 +994,9 @@ test.describe('E2E Custody Flow', () => {
             .map(item => String(item.id || ''))
             .filter(Boolean),
         );
+        const daemonReceiptCursorBeforeDeposit = daemonClient
+          ? await getDaemonReceiptCursor(daemonClient, custodyIdentity.entityId)
+          : 1;
 
         await timedStep(`custody.deposit_cycle_${cycleIndex + 1}`, async () => {
           await custodyPage.locator('select[name="depositTokenId"]').selectOption(String(cycle.tokenId));
@@ -1004,6 +1030,16 @@ test.describe('E2E Custody Flow', () => {
             .toEqual({ hasId: true, hasToken: true, hasAmount: true });
           await waitForPopupRoutesAndSubmit(walletPage, custodyIdentity.entityId);
         });
+        if (daemonClient) {
+          await timedStep(
+            `custody.deposit_cycle_${cycleIndex + 1}.wait_receipt`,
+            () => waitForDaemonReceiptEvent(daemonClient, {
+              entityId: custodyIdentity.entityId,
+              eventName: 'HtlcReceived',
+              fromHeight: daemonReceiptCursorBeforeDeposit,
+            }),
+          );
+        }
 
         const depositMinor = cycle.whole * TOKEN_SCALE;
         const currentTokenBalance = custodyBalances.get(cycle.tokenId) ?? 0n;

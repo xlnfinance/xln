@@ -121,8 +121,7 @@ import type { SwapKey } from './swap-keys';
  *    ├─ accountTxs: AccountTx[]        // State transitions this frame
  *    ├─ prevFrameHash: string          // Links to previous frame (blockchain)
  *    ├─ stateHash: string              // Merkle root of current state
- *    ├─ tokenIds: number[]             // Active tokens in this account
- *    └─ deltas: bigint[]               // Per-token balances (signed integers)
+ *    └─ deltas: Delta[]                // Single source for token state
  *
  * 6. AccountTx (Bilateral account state transitions)
  *    ├─ 'direct_payment'               // Update offdelta (instant settlement)
@@ -1201,8 +1200,9 @@ export interface AccountMachine {
 
   hankoSignature?: string; // LEGACY - will be removed
 
-  // Historical frame log - grows until manually pruned by entity
-  frameHistory: AccountFrame[]; // All confirmed bilateral frames in chronological order
+  // UI/debug view of recent bilateral frames. Future-consensus state does not
+  // depend on old frames; durable history is indexed in the separate frame DB.
+  frameHistory: AccountFrame[];
 
   // Payment routing: temporary storage for multi-hop payments
   pendingForward?: {
@@ -1253,10 +1253,20 @@ export interface AccountFrame {
   prevFrameHash: string; // Hash of previous frame (creates chain linkage, not state linkage)
   stateHash: string;
   byLeft?: boolean; // Who proposed this frame (left or right entity)
-  tokenIds: number[]; // Array of token IDs in this frame
-  deltas: bigint[]; // Array of deltas corresponding to tokenIds (ondelta+offdelta for quick access)
-  fullDeltaStates?: Delta[]; // OPTIONAL: Full delta objects (includes credit limits, allowances, collateral)
+  // One source of truth for account-frame token state. Compact offdelta arrays
+  // and token id arrays are derived by helpers when logs/proofs need them.
+  deltas: Delta[];
 }
+
+export type RuntimeFrameDbRecord =
+  | {
+      kind: 'accountFrame';
+      entityId: string;
+      counterpartyId: string;
+      accountHeight: number;
+      source: 'ackCommit' | 'peerCommit';
+      frame: AccountFrame;
+    };
 
 // AccountInput - Maps 1:1 to Channel.ts FlushMessage (frame-level consensus ONLY)
 export interface AccountInput {
@@ -1944,9 +1954,21 @@ export interface Env {
   runtimeConfig?: {
     minFrameDelayMs?: number; // Minimum delay between runtime frames
     loopIntervalMs?: number;  // Loop interval for runtime processing
+    snapshotIntervalFrames?: number;
+    storage?: {
+      enabled?: boolean;
+      packPeriodFrames?: number;
+      snapshotPeriodFrames?: number;
+      retainSnapshots?: number;
+      epochMaxBytes?: number;
+      frameDbMaxBytes?: number;
+      frameDbRetainFrames?: number;
+      accountMerkleRadix?: 16 | 256;
+    };
   };
   runtimeState?: {
     loopActive?: boolean;
+    loopPromise?: Promise<void> | null;
     stopLoop?: (() => void) | null;
     wakeLoop?: (() => void) | null;
     wakeRequested?: boolean;
@@ -1960,12 +1982,24 @@ export interface Env {
     envChangeCallbacks?: Set<(env: Env) => void>;
     db?: unknown;
     dbOpenPromise?: Promise<boolean> | null;
+    storageDb?: unknown;
+    storageDbOpenPromise?: Promise<boolean> | null;
+    storagePreviousDb?: unknown;
+    storagePreviousDbOpenPromise?: Promise<boolean> | null;
+    storageVerifiedCurrentHeight?: number;
+    storageVerifiedPreviousHeight?: number;
+    storageEpochRotatePromise?: Promise<void> | null;
+    storageEntityHashDocs?: unknown;
+    frameDb?: unknown;
+    frameDbOpenPromise?: Promise<boolean> | null;
     infraDb?: unknown;
     infraDbOpenPromise?: Promise<boolean> | null;
     logState?: {
       nextId: number;
       mirrorToConsole?: boolean;
     };
+    pendingAuditEvents?: Array<Record<string, unknown>>;
+    pendingFrameDbRecords?: RuntimeFrameDbRecord[];
     cleanLogs?: string[];
     routeDeferState?: Map<string, {
       warnAt: number;

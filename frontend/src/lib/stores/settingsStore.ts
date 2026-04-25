@@ -15,7 +15,7 @@ const VALID_ACCOUNT_DELTA_VIEW_MODES: readonly AccountDeltaViewMode[] = ['per-to
 const ACCOUNT_BAR_USD_PER_100PX_MIN = 10;
 const ACCOUNT_BAR_USD_PER_100PX_MAX = 10_000;
 const ACCOUNT_BAR_USD_PER_100PX_DEFAULT = 2_000;
-const MIN_BALANCE_REFRESH_MS = 1_000;
+const CANONICAL_BALANCE_REFRESH_MS = 1_000;
 
 function clampAccountBarUsdPerPx(raw: unknown): number {
   const numeric = Number(raw);
@@ -46,7 +46,7 @@ const defaultSettings: Settings = {
   showTimeMachine: false, // Off by default to reduce visual noise in wallet mode
   dropdownMode: 'signer-first',
   runtimeDelay: 0, // 0 = no artificial frame delay (controls env.runtimeConfig.minFrameDelayMs)
-  balanceRefreshMs: 1000, // Default to 1s so balance-driven UX/rebalance stays responsive
+  balanceRefreshMs: CANONICAL_BALANCE_REFRESH_MS, // One canonical wallet snapshot per second
   relayUrl: resolveDefaultRelayUrl(),
   portfolioScale: 5000, // Default scale: $5000 max for portfolio bars
   componentStates: {},
@@ -100,6 +100,7 @@ const settingsOperations = {
         if (!VALID_ACCOUNT_DELTA_VIEW_MODES.includes(parsed.accountDeltaViewMode)) {
           parsed.accountDeltaViewMode = defaultSettings.accountDeltaViewMode;
         }
+        parsed.balanceRefreshMs = CANONICAL_BALANCE_REFRESH_MS;
         parsed.uiStyle = normalizeUiStyle(parsed.uiStyle);
         settings.update(current => ({ ...current, ...parsed }));
       }
@@ -190,9 +191,8 @@ const settingsOperations = {
     this.saveToStorage();
   },
 
-  setBalanceRefreshMs(refreshMs: number) {
-    const next = Math.max(MIN_BALANCE_REFRESH_MS, Math.floor(Number(refreshMs) || MIN_BALANCE_REFRESH_MS));
-    settings.update(current => ({ ...current, balanceRefreshMs: next }));
+  setBalanceRefreshMs(_refreshMs: number) {
+    settings.update(current => ({ ...current, balanceRefreshMs: CANONICAL_BALANCE_REFRESH_MS }));
     this.saveToStorage();
   },
 

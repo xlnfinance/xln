@@ -1525,11 +1525,10 @@ export const vaultOperations = {
     );
     markPerf('import_entity_replica');
 
-    // Skip auto-funding (use faucet API)
-    console.log('[VaultStore.createRuntime] ✅ Entity ready (use /api/faucet to fund)');
-
     // Store entityId in signer
     runtime.signers[0]!.entityId = entityId;
+    await fundSignerWalletViaFaucet(signerAddress);
+    console.log('[VaultStore.createRuntime] ✅ Entity ready and signer auto-funded via faucet');
     if (!requiresOnboarding) {
       writeSavedCollateralPolicy({
         mode: 'autopilot',

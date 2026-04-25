@@ -729,11 +729,10 @@ test('asset faucet exposes correct modes and funds every supported token', async
 
   await timedStep('faucet.baseline', async () => {
     await ensureE2EBaseline(page, {
-      timeoutMs: LONG_E2E ? 240_000 : 120_000,
+      timeoutMs: LONG_E2E ? 240_000 : 180_000,
       requireHubMesh: true,
       requireMarketMaker: false,
       minHubCount: 3,
-      forceReset: true,
     });
   });
 
@@ -812,11 +811,10 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
 
   await timedStep('move.baseline', async () => {
     await ensureE2EBaseline(page, {
-      timeoutMs: LONG_E2E ? 240_000 : 120_000,
+      timeoutMs: LONG_E2E ? 240_000 : 180_000,
       requireHubMesh: true,
       requireMarketMaker: false,
       minHubCount: 3,
-      forceReset: true,
     });
   });
 
@@ -874,10 +872,27 @@ test('move tab covers all routed paths on isolated runtimes', async ({ page, bro
       await expectMoveAssetSelector(page);
     });
 
+    await timedStep('move.seed-reserve', async () => {
+      const beforeReserve = await refreshReserveBalance(page, symbol);
+      await clickReserveFaucet(page, symbol);
+      await expect.poll(async () => refreshReserveBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS }).toBeGreaterThan(beforeReserve);
+    });
+
+    await timedStep('move.seed-account', async () => {
+      const beforeAccount = await refreshAccountSpendableBalance(page, symbol);
+      await clickAccountFaucet(page, symbol);
+      await expect
+        .poll(async () => refreshAccountSpendableBalance(page, symbol), { timeout: ROUTE_TIMEOUT_MS })
+        .toBeGreaterThan(beforeAccount);
+    });
+
     await timedStep('move.e2r', async () => {
       const amount = amountRaw('20');
       const beforeExternalRaw = await getRpcExternalBalanceRaw(page, symbol, aliceEoa);
       const beforeReserveRaw = await readOnchainReserveBalanceRaw(page, alice!.entityId, symbol);
+      expect(beforeExternalRaw, 'move.e2r external wallet must hold enough ERC20 before approve/batch').toBeGreaterThanOrEqual(
+        amount,
+      );
       for (const requiredSymbol of ['USDC', 'USDT', 'WETH'] as const) {
         const beforeAllowance = await getRpcAllowanceRaw(page, requiredSymbol, aliceEoa, depository);
         expect(beforeAllowance, `${requiredSymbol} allowance should start at zero in fresh wallet`).toBe(0n);

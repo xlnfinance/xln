@@ -1,25 +1,18 @@
 import type { AccountFrame, AccountMachine, Env } from './types';
 import { validateEntityState } from './validation-utils';
 import { computeFrameHash } from './account-consensus';
+import { assertAccountFrameDeltaIntegrity } from './account-frame';
 
 const formatAccountLabel = (replicaKey: string, counterpartyId: string): string =>
   `${replicaKey.slice(-4)}↔${counterpartyId.slice(-4)}`;
 
 const assertFrameShape = (frame: AccountFrame, label: string): void => {
-  if (frame.tokenIds.length !== frame.deltas.length) {
-    throw new Error(`[STRICT] ${label}: tokenIds/deltas length mismatch`);
-  }
-  if (frame.fullDeltaStates && frame.fullDeltaStates.length !== frame.tokenIds.length) {
-    throw new Error(`[STRICT] ${label}: fullDeltaStates length mismatch`);
-  }
+  assertAccountFrameDeltaIntegrity(frame, `[STRICT] ${label}`);
 };
 
 const assertFrameHash = async (frame: AccountFrame, label: string): Promise<void> => {
   if (!frame.stateHash) {
     throw new Error(`[STRICT] ${label}: missing stateHash`);
-  }
-  if (!frame.fullDeltaStates) {
-    throw new Error(`[STRICT] ${label}: missing fullDeltaStates`);
   }
   const recomputed = await computeFrameHash(frame);
   if (recomputed !== frame.stateHash) {

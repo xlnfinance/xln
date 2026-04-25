@@ -228,24 +228,24 @@ const recomputedHash = await createFrameHash({...});
 
 **Impact:** ALL frame acceptance was blocked by this import error.
 
-### Pitfall 5: Receiver fullDeltaStates Mismatch
+### Pitfall 5: Receiver AccountFrame.deltas Mismatch
 
 **Bug Pattern:**
 ```typescript
 // Proposer
-const fullDeltaStates = sortedTokens.map(([_, delta]) => ({...delta}));
-const hash = createFrameHash({..., fullDeltaStates});
+const deltas = sortedTokens.map(([_, delta]) => ({...delta}));
+const hash = createFrameHash({..., deltas});
 
 // Receiver
-const hash = createFrameHash({..., fullDeltaStates: []});  // Empty!
+const hash = createFrameHash({..., deltas: []});  // Empty!
 // Hash mismatch → frame rejected
 ```
 
 **Fix:**
 ```typescript
-// Receiver computes fullDeltaStates identically to proposer
-const fullDeltaStates = sortedTokens.map(([_, delta]) => ({...delta}));
-const hash = createFrameHash({..., fullDeltaStates});
+// Receiver computes AccountFrame.deltas identically to proposer
+const deltas = sortedTokens.map(([_, delta]) => ({...delta}));
+const hash = createFrameHash({..., deltas});
 ```
 
 **Impact:** Credit extensions, collateral frames now verify correctly.

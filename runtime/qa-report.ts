@@ -31,6 +31,8 @@ export type QaShardManifest = {
   shard: number;
   status: 'passed' | 'failed' | 'unknown';
   durationMs: number | null;
+  handle: string | null;
+  description: string | null;
   target: string | null;
   title: string | null;
   requireMarketMaker: boolean | null;
@@ -98,9 +100,86 @@ const detectArtifactKind = (name: string): QaArtifactKind => {
   return 'other';
 };
 
-const detectContentType = (name: string): string => MIME_TYPES[extname(name).toLowerCase()] ?? 'application/octet-stream';
+const detectContentType = (name: string): string =>
+  MIME_TYPES[extname(name).toLowerCase()] ?? 'application/octet-stream';
 
 const shortTail = (text: string, lines = 80): string => text.split('\n').slice(-lines).join('\n');
+
+const humanizeSlug = (value: string): string =>
+  value
+    .replace(/^e2e-/, '')
+    .replace(/\.spec\.ts$/, '')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+
+const titleSlug = (title: string): string => {
+  const cleaned = title
+    .replace(/['"]/g, '')
+    .replace(/->/g, ' to ')
+    .replace(/[^a-zA-Z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .toLowerCase();
+  const words = cleaned.split('-').filter(Boolean);
+  return words.slice(0, 5).join('-') || 'case';
+};
+
+const parseTargetFile = (target: string | null | undefined): string => {
+  const raw = String(target || '').trim();
+  const match = raw.match(/^(.*?\.spec\.ts)(?::\d+)?/);
+  return match?.[1] || raw;
+};
+
+export const deriveQaTestHandle = (target: string | null | undefined, title: string | null | undefined): string => {
+  const file = parseTargetFile(target);
+  const suite = humanizeSlug(basename(file || 'e2e'));
+  const titlePart = titleSlug(String(title || target || 'case'));
+  return `${suite}.${titlePart}`;
+};
+
+export const deriveQaTestDescription = (
+  target: string | null | undefined,
+  title: string | null | undefined,
+): string => {
+  const text = String(title || target || '').trim();
+  if (!text) return 'No test description recorded.';
+  return `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
+};
+
+type QaTargetMetadata = {
+  shard: number;
+  target: string | null;
+  title: string | null;
+  handle: string | null;
+  description: string | null;
+  requireMarketMaker: boolean | null;
+};
+
+const readTargetsMetadata = async (runDir: string): Promise<Map<number, QaTargetMetadata>> => {
+  const out = new Map<number, QaTargetMetadata>();
+  try {
+    const raw = await readFile(join(runDir, 'targets.json'), 'utf8');
+    const parsed = JSON.parse(raw) as Array<Partial<QaTargetMetadata>>;
+    if (!Array.isArray(parsed)) return out;
+    for (const entry of parsed) {
+      const shard = Number(entry.shard);
+      if (!Number.isFinite(shard)) continue;
+      const target = typeof entry.target === 'string' ? entry.target : null;
+      const title = typeof entry.title === 'string' ? entry.title : target;
+      out.set(shard, {
+        shard,
+        target,
+        title,
+        handle: typeof entry.handle === 'string' ? entry.handle : deriveQaTestHandle(target, title),
+        description: typeof entry.description === 'string' ? entry.description : deriveQaTestDescription(target, title),
+        requireMarketMaker: typeof entry.requireMarketMaker === 'boolean' ? entry.requireMarketMaker : null,
+      });
+    }
+  } catch {
+    return out;
+  }
+  return out;
+};
 
 const parseSlowSteps = (text: string): QaSlowStep[] => {
   const out: QaSlowStep[] = [];
@@ -118,7 +197,7 @@ const parseSlowSteps = (text: string): QaSlowStep[] => {
 
 const parsePhaseTimings = (text: string): QaPhaseTimings | null => {
   const phases: Partial<QaPhaseTimings> = {};
-  const re = /^\[timing\]\s+(\w+)=(\d+)ms/mg;
+  const re = /^\[timing\]\s+(\w+)=(\d+)ms/gm;
   let match: RegExpExecArray | null = null;
   while ((match = re.exec(text)) !== null) {
     const phase = String(match[1] || '').trim();
@@ -147,12 +226,7 @@ const parsePhaseTimings = (text: string): QaPhaseTimings | null => {
 const sumPhaseTimings = (phaseMs: QaPhaseTimings | null): number | null => {
   if (!phaseMs) return null;
   return (
-    phaseMs.preflight +
-    phaseMs.anvilBoot +
-    phaseMs.apiBoot +
-    phaseMs.apiHealthy +
-    phaseMs.viteBoot +
-    phaseMs.playwright
+    phaseMs.preflight + phaseMs.anvilBoot + phaseMs.apiBoot + phaseMs.apiHealthy + phaseMs.viteBoot + phaseMs.playwright
   );
 };
 
@@ -186,7 +260,12 @@ const readLastRunStatus = async (resultsDir: string): Promise<'passed' | 'failed
   }
 };
 
-const collectLegacyShard = async (runId: string, runDir: string, shard: number): Promise<QaShardManifest> => {
+const collectLegacyShard = async (
+  runId: string,
+  runDir: string,
+  shard: number,
+  targetMetadata: Map<number, QaTargetMetadata>,
+): Promise<QaShardManifest> => {
   const logRelativePath = `e2e-shard-${String(shard).padStart(2, '0')}.log`;
   const logPath = join(runDir, logRelativePath);
   const resultsDir = join(runDir, `test-results-shard-${shard}`);
@@ -194,14 +273,15 @@ const collectLegacyShard = async (runId: string, runDir: string, shard: number):
   const phaseMs = parsePhaseTimings(logText);
   const slowSteps = parseSlowSteps(logText).slice(0, 12);
   const artifacts: QaArtifact[] = [];
-  let title: string | null = null;
+  const metadata = targetMetadata.get(shard) ?? null;
+  let title: string | null = metadata?.title ?? null;
   let status: 'passed' | 'failed' | 'unknown' = 'unknown';
 
   if (existsSync(resultsDir)) {
     status = await readLastRunStatus(resultsDir);
     const entries = await readdir(resultsDir, { withFileTypes: true });
-    const caseDir = entries.find((entry) => entry.isDirectory() && !entry.name.startsWith('.'));
-    if (caseDir) title = caseDir.name;
+    const caseDir = entries.find(entry => entry.isDirectory() && !entry.name.startsWith('.'));
+    if (!title && caseDir) title = caseDir.name;
     await walkArtifacts(runDir, resultsDir, artifacts);
   }
 
@@ -209,36 +289,42 @@ const collectLegacyShard = async (runId: string, runDir: string, shard: number):
     shard,
     status,
     durationMs: sumPhaseTimings(phaseMs),
-    target: null,
+    target: metadata?.target ?? null,
     title,
-    requireMarketMaker: null,
+    requireMarketMaker: metadata?.requireMarketMaker ?? null,
     logRelativePath: existsSync(logPath) ? logRelativePath : null,
     logTail: logText ? shortTail(logText) : null,
     error: status === 'failed' ? shortTail(logText, 40) : null,
     phaseMs,
     slowSteps,
     artifacts,
-    hasVideo: artifacts.some((artifact) => artifact.kind === 'video'),
-    hasTrace: artifacts.some((artifact) => artifact.kind === 'trace'),
+    hasVideo: artifacts.some(artifact => artifact.kind === 'video'),
+    hasTrace: artifacts.some(artifact => artifact.kind === 'trace'),
+    handle: metadata?.handle ?? deriveQaTestHandle(metadata?.target ?? null, title),
+    description: metadata?.description ?? deriveQaTestDescription(metadata?.target ?? null, title),
   };
 };
 
 const buildLegacyManifest = async (runId: string, runDir: string): Promise<QaRunManifest> => {
   const runStat = await stat(runDir);
   const allEntries = await readdir(runDir);
-  const shardIds = Array.from(new Set(
-    allEntries.flatMap((entry) => {
-      const logMatch = /^e2e-shard-(\d+)\.log$/.exec(entry);
-      if (logMatch) return [Number(logMatch[1])];
-      const resultsMatch = /^test-results-shard-(\d+)$/.exec(entry);
-      if (resultsMatch) return [Number(resultsMatch[1])];
-      return [];
-    }),
-  )).sort((a, b) => a - b);
+  const targetMetadata = await readTargetsMetadata(runDir);
+  const shardIds = Array.from(
+    new Set([
+      ...Array.from(targetMetadata.keys()),
+      ...allEntries.flatMap(entry => {
+        const logMatch = /^e2e-shard-(\d+)\.log$/.exec(entry);
+        if (logMatch) return [Number(logMatch[1])];
+        const resultsMatch = /^test-results-shard-(\d+)$/.exec(entry);
+        if (resultsMatch) return [Number(resultsMatch[1])];
+        return [];
+      }),
+    ]),
+  ).sort((a, b) => a - b);
 
-  const shards = await Promise.all(shardIds.map((shard) => collectLegacyShard(runId, runDir, shard)));
-  const passedShards = shards.filter((shard) => shard.status === 'passed').length;
-  const failedShards = shards.filter((shard) => shard.status === 'failed').length;
+  const shards = await Promise.all(shardIds.map(shard => collectLegacyShard(runId, runDir, shard, targetMetadata)));
+  const passedShards = shards.filter(shard => shard.status === 'passed').length;
+  const failedShards = shards.filter(shard => shard.status === 'failed').length;
   const totalMs = null;
 
   return {
@@ -260,11 +346,11 @@ export const listQaRuns = async (limit = 20): Promise<QaRunManifest[]> => {
   if (!existsSync(QA_LOGS_ROOT)) return [];
   const entries = await readdir(QA_LOGS_ROOT, { withFileTypes: true });
   const runIds = entries
-    .filter((entry) => entry.isDirectory() && /^\d{8}-\d{6}-\d{3}$/.test(entry.name))
-    .map((entry) => entry.name)
+    .filter(entry => entry.isDirectory() && /^\d{8}-\d{6}-\d{3}$/.test(entry.name))
+    .map(entry => entry.name)
     .sort((a, b) => b.localeCompare(a))
     .slice(0, limit);
-  return await Promise.all(runIds.map((runId) => readQaRun(runId)));
+  return await Promise.all(runIds.map(runId => readQaRun(runId)));
 };
 
 export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
@@ -281,17 +367,26 @@ export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
   if (existsSync(manifestPath)) {
     const raw = await readFile(manifestPath, 'utf8');
     const parsed = JSON.parse(raw) as QaRunManifest;
-    const shards = await Promise.all(parsed.shards.map(async (shard) => {
-      const logText =
-        shard.logRelativePath && existsSync(join(runDir, shard.logRelativePath))
-          ? await readFile(join(runDir, shard.logRelativePath), 'utf8')
-          : '';
-      return {
-        ...shard,
-        title: shard.title ?? readShardTitleFromResults(runDir, shard.shard),
-        logTail: shard.logTail ?? (logText ? shortTail(logText) : null),
-      };
-    }));
+    const targetMetadata = await readTargetsMetadata(runDir);
+    const shards = await Promise.all(
+      parsed.shards.map(async shard => {
+        const metadata = targetMetadata.get(shard.shard) ?? null;
+        const target = shard.target ?? metadata?.target ?? null;
+        const title = shard.title ?? metadata?.title ?? readShardTitleFromResults(runDir, shard.shard);
+        const logText =
+          shard.logRelativePath && existsSync(join(runDir, shard.logRelativePath))
+            ? await readFile(join(runDir, shard.logRelativePath), 'utf8')
+            : '';
+        return {
+          ...shard,
+          target,
+          title,
+          handle: shard.handle ?? metadata?.handle ?? deriveQaTestHandle(target, title),
+          description: shard.description ?? metadata?.description ?? deriveQaTestDescription(target, title),
+          logTail: shard.logTail ?? (logText ? shortTail(logText) : null),
+        };
+      }),
+    );
     return { ...parsed, shards };
   }
   return await buildLegacyManifest(runId, runDir);
@@ -301,7 +396,9 @@ const readShardTitleFromResults = (runDir: string, shard: number): string | null
   const resultsDir = join(runDir, `test-results-shard-${shard}`);
   if (!existsSync(resultsDir)) return null;
   try {
-    const entry = readdirSync(resultsDir, { withFileTypes: true }).find((item) => item.isDirectory() && !item.name.startsWith('.'));
+    const entry = readdirSync(resultsDir, { withFileTypes: true }).find(
+      item => item.isDirectory() && !item.name.startsWith('.'),
+    );
     return entry?.name ?? null;
   } catch {
     return null;
@@ -332,9 +429,9 @@ export const makeQaArtifactUrl = (runId: string, relativePath: string): string =
 
 export const enrichQaRunUrls = (run: QaRunManifest): QaRunManifest => ({
   ...run,
-  shards: run.shards.map((shard) => ({
+  shards: run.shards.map(shard => ({
     ...shard,
-    artifacts: shard.artifacts.map((artifact) => ({
+    artifacts: shard.artifacts.map(artifact => ({
       ...artifact,
       url: makeQaArtifactUrl(run.runId, artifact.relativePath),
     })),
@@ -353,8 +450,8 @@ export const summarizeQaRun = (run: QaRunManifest): Omit<QaRunManifest, 'shards'
   failedShards: run.failedShards,
   args: run.args ?? null,
   failingTargets: run.shards
-    .filter((shard) => shard.status === 'failed')
-    .map((shard) => shard.target || shard.title || `shard-${shard.shard}`)
+    .filter(shard => shard.status === 'failed')
+    .map(shard => shard.handle || shard.target || shard.title || `shard-${shard.shard}`)
     .slice(0, 5),
 });
 

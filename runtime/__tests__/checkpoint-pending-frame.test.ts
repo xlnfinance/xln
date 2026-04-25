@@ -6,10 +6,10 @@ import {
   closeRuntimeDb,
   createEmptyEnv,
   enqueueRuntimeInput,
-  getRuntimeDb,
+  listPersistedCheckpointHeights,
   loadEnvFromDB,
+  main,
   process as processRuntime,
-  tryOpenDb,
   verifyRuntimeChain,
 } from '../runtime.ts';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
@@ -35,6 +35,11 @@ describe('checkpoint persistence with pending bilateral state', () => {
     const namespacePath = join(dbRoot, runtimeId);
 
     rmSync(namespacePath, { recursive: true, force: true });
+    rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-events`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
     mkdirSync(dbRoot, { recursive: true });
 
     const env = createEmptyEnv(seed);
@@ -139,10 +144,8 @@ describe('checkpoint persistence with pending bilateral state', () => {
     expect(pendingObserved).toBe(true);
     expect(hasPendingBilateralState(env)).toBe(true);
 
-    const opened = await tryOpenDb(env);
-    expect(opened).toBe(true);
-    const db = getRuntimeDb(env);
-    const checkpointHeight = Number((await db.get(Buffer.from(`${runtimeId}:latest_checkpoint_height`))).toString());
+    const checkpointHeights = await listPersistedCheckpointHeights(env);
+    const checkpointHeight = Number(checkpointHeights.at(-1) || 0);
     expect(checkpointHeight).toBe(env.height);
 
     await closeRuntimeDb(env);
@@ -155,6 +158,12 @@ describe('checkpoint persistence with pending bilateral state', () => {
 
     await closeRuntimeDb(restored!);
     await closeInfraDb(restored!);
+
+    const restarted = await main(seed);
+    expect(restarted.height).toBe(checkpointHeight);
+    expect(hasPendingBilateralState(restarted)).toBe(true);
+    await closeRuntimeDb(restarted);
+    await closeInfraDb(restarted);
 
     const verify = await verifyRuntimeChain(runtimeId, seed, { fromSnapshotHeight: checkpointHeight });
     expect(verify.ok).toBe(true);

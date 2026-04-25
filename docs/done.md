@@ -579,7 +579,7 @@
 - 2026-03-11
   - Tightened `runtime/validation-utils.ts` on the live persistence/routing path:
     - replaced the low-value `any` casts in `validateDelta`, `validateEntityInput`, and `validateEntityOutput` with strict object reads
-    - `validateAccountFrame` now validates `fullDeltaStates` as real `Delta[]` instead of shallow-cloning unknown objects
+    - `validateAccountFrame` now validates account-frame delta objects instead of shallow-cloning unknown objects
     - preserved optional `leftHold/rightHold` while doing so; otherwise dispute-proof frame hashes diverge on HTLC/swap flows
   - Re-verified:
     - `bun x tsc --noEmit`

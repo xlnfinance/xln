@@ -5,22 +5,28 @@ import { fileURLToPath } from 'node:url';
 
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const BUILD_NUMBER = (() => {
-	const explicit = String(process.env['XLN_BUILD_NUMBER'] || '').trim();
-	if (explicit) return explicit;
-	try {
-		return execSync('git rev-list --count HEAD', {
-			cwd: REPO_ROOT,
-			encoding: 'utf8',
-			stdio: ['ignore', 'pipe', 'ignore']
-		}).trim() || '0';
-	} catch {
-		return '0';
-	}
+  const explicit = String(process.env['XLN_BUILD_NUMBER'] || '').trim();
+  if (explicit) return explicit;
+  try {
+    return (
+      execSync('git rev-list --count HEAD', {
+        cwd: REPO_ROOT,
+        encoding: 'utf8',
+        stdio: ['ignore', 'pipe', 'ignore'],
+      }).trim() || '0'
+    );
+  } catch {
+    return '0';
+  }
 })();
 
+const DEV_PORT_RAW = Number(process.env['VITE_DEV_PORT'] || '8081');
+const DEV_PORT = Number.isFinite(DEV_PORT_RAW) && DEV_PORT_RAW > 0 ? Math.floor(DEV_PORT_RAW) : 8081;
+const API_PROXY_TARGET = process.env['VITE_API_PROXY_TARGET'] || 'http://localhost:8082';
+
 const ENABLE_HMR = (() => {
-	const value = String(process.env['VITE_ENABLE_HMR'] || '').toLowerCase();
-	return value === '1' || value === 'true' || value === 'yes';
+  const value = String(process.env['VITE_ENABLE_HMR'] || '').toLowerCase();
+  return value === '1' || value === 'true' || value === 'yes';
 })();
 
 /**
@@ -29,51 +35,56 @@ const ENABLE_HMR = (() => {
  */
 
 export default defineConfig({
-	plugins: [sveltekit()],
-	server: {
-		host: '0.0.0.0',
-		port: 8081,
-		// NO HTTPS - plain HTTP only
-		allowedHosts: ['all'],
-		fs: {
-			allow: ['..']
-		},
-		watch: {
-			usePolling: false,
-		},
-		hmr: ENABLE_HMR
-			? {
-				overlay: false,
-				protocol: 'ws',
-				host: 'localhost',
-				port: 8081,
-				clientPort: 8081
-			}
-			: false,
-		// RPC Proxy - same single-path design as main config
-		proxy: {
-			'/rpc': {
-				target: process.env['VITE_API_PROXY_TARGET'] || 'http://localhost:8082',
-				changeOrigin: true,
-				secure: false,
-			}
-		},
-		headers: {
-			'Cache-Control': 'no-cache, no-store, must-revalidate',
-			'Pragma': 'no-cache',
-			'Expires': '0'
-		}
-	},
-	esbuild: {
-		target: 'es2022'
-	},
-	define: {
-		global: 'globalThis',
-		__BUILD_NUMBER__: JSON.stringify(BUILD_NUMBER),
-	},
-	resolve: {
-		alias: {
-			'$types': '../src/types.ts'
-		}
-	}
+  plugins: [sveltekit()],
+  server: {
+    host: '0.0.0.0',
+    port: DEV_PORT,
+    // NO HTTPS - plain HTTP only
+    allowedHosts: ['all'],
+    fs: {
+      allow: ['..'],
+    },
+    watch: {
+      usePolling: false,
+    },
+    hmr: ENABLE_HMR
+      ? {
+          overlay: false,
+          protocol: 'ws',
+          host: 'localhost',
+          port: DEV_PORT,
+          clientPort: DEV_PORT,
+        }
+      : false,
+    // Plain HTTP dev entrypoint mirrors the HTTPS config for QA/browser checks.
+    proxy: {
+      '/api': {
+        target: API_PROXY_TARGET,
+        changeOrigin: true,
+        secure: false,
+      },
+      '/rpc': {
+        target: API_PROXY_TARGET,
+        changeOrigin: true,
+        secure: false,
+      },
+    },
+    headers: {
+      'Cache-Control': 'no-cache, no-store, must-revalidate',
+      Pragma: 'no-cache',
+      Expires: '0',
+    },
+  },
+  esbuild: {
+    target: 'es2022',
+  },
+  define: {
+    global: 'globalThis',
+    __BUILD_NUMBER__: JSON.stringify(BUILD_NUMBER),
+  },
+  resolve: {
+    alias: {
+      $types: '../src/types.ts',
+    },
+  },
 });

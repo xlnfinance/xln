@@ -128,6 +128,7 @@ export const spawnBunChild = (
   args: string[],
   env: NodeJS.ProcessEnv,
 ): ManagedChild => {
+  const mirrorStdout = process.env.XLN_CHILD_MIRROR_STDOUT === '1';
   const proc = spawn('bun', args, {
     cwd: process.cwd(),
     env: { ...process.env, ...env },
@@ -142,6 +143,7 @@ export const spawnBunChild = (
       if (!trimmed) continue;
       target.push(trimmed);
       if (target.length > 500) target.shift();
+      if (mirrorStdout) console.log(`[${name}] ${trimmed}`);
     }
   };
 

@@ -10,6 +10,7 @@
 
 import { safeStringify } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
+import { assertAccountFrameDeltaIntegrity } from './account-frame';
 import type {
   Delta,
   DeliverableEntityInput,
@@ -558,17 +559,10 @@ export function validateAccountFrame(value: unknown, context = 'AccountFrame'): 
     accountTxs: validateArray(obj['accountTxs'], `${context}.accountTxs`),
     prevFrameHash,
     stateHash,
-    tokenIds: validateArray<number>(obj['tokenIds'] || [], `${context}.tokenIds`),
-    deltas: validateArray<bigint>(obj['deltas'] || [], `${context}.deltas`),
-    // Optional fields - preserve if present (deep copy to prevent mutation issues)
+    deltas: validateArray(obj['deltas'] || [], `${context}.deltas`).map((deltaState, index) =>
+      validateDelta(deltaState, `${context}.deltas[${index}]`),
+    ),
     ...(typeof obj['byLeft'] === 'boolean' ? { byLeft: obj['byLeft'] } : {}),
-    ...(Array.isArray(obj['fullDeltaStates'])
-      ? {
-          fullDeltaStates: obj['fullDeltaStates'].map((deltaState, index) =>
-            validateDelta(deltaState, `${context}.fullDeltaStates[${index}]`),
-          ),
-        }
-      : {}),
   };
 
   // Additional integrity checks
@@ -578,6 +572,11 @@ export function validateAccountFrame(value: unknown, context = 'AccountFrame'): 
 
   if (validated.height > 0 && validated.timestamp <= 0) {
     throw new FinancialDataCorruptionError('AccountFrame.timestamp must be positive', { timestamp: validated.timestamp });
+  }
+  try {
+    assertAccountFrameDeltaIntegrity(validated, context);
+  } catch (error) {
+    throw new FinancialDataCorruptionError((error as Error).message);
   }
 
   return validated;

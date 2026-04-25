@@ -11,7 +11,7 @@
   import { buildAccountTokenDetails, isAccountLeftPerspective } from './shared/account-token-details';
   import { amountToUsdMicros } from '$lib/utils/assetPricing';
   import { getGossipProfile, resolveEntityName } from '$lib/utils/entityNaming';
-  import { getAccountUiStatus, getAccountUiStatusLabel } from '$lib/utils/accountStatus';
+  import { getAccountUiStatus, getAccountUiStatusDescription, getAccountUiStatusLabel } from '$lib/utils/accountStatus';
 
   export let account: AccountMachine;
   export let counterpartyId: string;
@@ -236,6 +236,7 @@
   $: hasActiveDispute = uiStatus === 'disputed';
   $: isFinalizedDisputed = uiStatus === 'finalized_disputed';
   $: statusLabel = getAccountUiStatusLabel(uiStatus);
+  $: statusDescription = getAccountUiStatusDescription(uiStatus);
   $: accountHeight = Number(account.currentFrame?.height ?? account.currentHeight ?? 0);
   $: jFinalizedHeight = Number(account.lastFinalizedJHeight ?? 0);
   $: pendingLeftJClaim = Array.isArray(account.leftJObservations)
@@ -381,7 +382,7 @@
             {#if uiStatus === 'ready' && connState === 'connected'}
               <span class="popover-dot green"></span> Active — Online
             {:else if uiStatus === 'sent'}
-              <span class="popover-dot yellow"></span> Pending — On-chain confirmation
+              <span class="popover-dot yellow"></span> {statusDescription}
             {:else if connState === 'disconnected' || connState === 'queued'}
               <span class="popover-dot yellow"></span> Active — Offline
             {:else if uiStatus === 'disputed' || uiStatus === 'finalized_disputed'}

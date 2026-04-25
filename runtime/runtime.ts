@@ -32,7 +32,9 @@ import { listOpenSwapOffers } from './open-swap-offers';
 import { setDeltaTransformerAddress } from './proof-builder';
 import {
   buildCanonicalEnvSnapshot,
+  buildRuntimeCheckpointSnapshot,
 } from './wal/snapshot';
+import { computePersistedEnvStateHash } from './wal/hash';
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
 import { isLeftEntity } from './entity-id-utils';
 import type { JAdapter } from './jadapter';
@@ -64,7 +66,14 @@ import { ensureLocalDisputeDelayConfigured } from './jadapter/local-config';
 import { getAvailableJurisdictions } from './jurisdiction-config';
 import { TIMING } from './constants';
 import { canonicalizeProfile, createGossipLayer, parseProfile } from './networking/gossip';
-import { attachEventEmitters } from './env-events';
+import {
+  attachEventEmitters,
+  clearPendingAuditEvents,
+  dropPendingFrameDbRecords,
+  flushPendingAuditEvents,
+  peekPendingFrameDbRecords,
+  setAccountFrameHistoryView,
+} from './env-events';
 import {
   deriveSignerAddressSync,
   getCachedSignerPrivateKey,
@@ -171,6 +180,25 @@ import { cloneEntityReplica, resolveEntityProposerId } from './state-helpers';
 import { getEntityShortId, getEntityNumber, formatEntityId, HEAVY_LOGS } from './utils';
 import { deserializeTaggedJson, serializeTaggedJson, safeStringify } from './serialization-utils';
 import {
+  computeStorageAuditStateHashFromEnv,
+  computeStorageCanonicalStateHashFromEnv,
+  computeStorageDebugStateHashFromEnv,
+  findStorageLatestSnapshotAtOrBelow,
+  inspectStorage,
+  listStorageLiveEntityIds,
+  listStorageSnapshotEntityIds,
+  listStorageSnapshotHeights,
+  loadEntityStateFromStorage,
+  readFrameDbAccountFrames,
+  readFrameDbRuntimeActivity,
+  readStorageFrameRecord,
+  readStorageHead,
+  readStorageReplicaMeta,
+  saveRuntimeFrameToStorage,
+  seedFreshStorageEpoch,
+  verifyStorageTailIntegrity,
+} from './storage';
+import {
   validateDelta,
   validateAccountDeltas,
   createDefaultDelta,
@@ -183,6 +211,7 @@ import {
 import { mergeRuntimeJurisdictionConfig } from './jurisdiction-runtime';
 import type {
   DeliverableEntityInput,
+  AccountFrame,
   EntityInput,
   EntityState,
   Env,
@@ -205,17 +234,7 @@ import {
 } from './utils';
 import { logError } from './logger';
 import type { PersistedFrameJournal } from './wal/store';
-import { readPersistedSnapshotBuffer } from './wal/store';
-import {
-  getPersistedLatestHeight as getPersistedLatestHeightWal,
-  listPersistedCheckpointHeights as listPersistedCheckpointHeightsWal,
-  readPersistedFrameJournal as readPersistedFrameJournalWal,
-  readPersistedFrameJournals as readPersistedFrameJournalsWal,
-  saveRuntimeFrameToWal,
-  type VerifyRuntimeChainResult,
-} from './wal/runtime';
 import { rehydrateRestoredRuntimeInfra } from './runtime-infra';
-import { loadRuntimeStateFromDb, verifyPersistedRuntimeState } from './wal/state-restore';
 
 const runtimeIsBrowser = typeof window !== 'undefined';
 
@@ -355,6 +374,11 @@ const isDbNotFound = (error: unknown): boolean => {
   return code === 'LEVEL_NOT_FOUND' || name === 'NotFoundError';
 };
 
+const isFsNotFound = (error: unknown): boolean => {
+  if (!error || typeof error !== 'object') return false;
+  return String((error as { code?: unknown }).code ?? '') === 'ENOENT';
+};
+
 const captureEntityJHeights = (env: Env): Record<string, number> => {
   const result: Record<string, number> = {};
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
@@ -379,6 +403,338 @@ const resolveDbPath = (env: Env, kind: RuntimeDbKind = 'core'): string => {
   return `${dbRootPath}-${namespace}${suffix}`;
 };
 
+type StorageDbRole = 'current' | 'previous';
+type StorageEpochRotationMarker = {
+  snapshotHeight: number;
+  currentPath: string;
+  previousPath: string;
+  nextPath: string;
+  createdAt: number;
+};
+
+const storageEpochRecoveryPromises = new Map<string, Promise<void>>();
+
+const resolveStorageDbPath = (env: Env, role: StorageDbRole = 'current'): string => {
+  const base = resolveDbPath(env, 'core');
+  return `${base}-storage-${role}`;
+};
+
+const resolveFrameDbPath = (env: Env): string => {
+  const base = resolveDbPath(env, 'core');
+  return `${base}-frames`;
+};
+
+const resolveStorageRotationMarkerPath = (env: Env): string => {
+  const base = resolveDbPath(env, 'core');
+  return `${base}-storage-rotation.json`;
+};
+
+const storageStateFields = (role: StorageDbRole) =>
+  role === 'current'
+    ? ({
+        dbField: 'storageDb',
+        openField: 'storageDbOpenPromise',
+      } as const)
+    : ({
+        dbField: 'storagePreviousDb',
+        openField: 'storagePreviousDbOpenPromise',
+      } as const);
+
+const getStorageDb = (env: Env, role: StorageDbRole = 'current'): Level<Buffer, Buffer> => {
+  const state = ensureRuntimeState(env);
+  const fields = storageStateFields(role);
+  const existing = state[fields.dbField] as Level<Buffer, Buffer> | undefined;
+  if (existing) return existing;
+  const db = new Level(resolveStorageDbPath(env, role), { valueEncoding: 'buffer', keyEncoding: 'binary' });
+  state[fields.dbField] = db;
+  return db;
+};
+
+const closeStorageDb = async (env: Env, role: StorageDbRole = 'current'): Promise<void> => {
+  const state = env.runtimeState;
+  if (!state) return;
+  const fields = storageStateFields(role);
+  const db = state[fields.dbField] as Level<Buffer, Buffer> | undefined;
+  if (!db) return;
+  try {
+    await db.close();
+  } catch (error) {
+    console.warn(`⚠️ Failed to close storage ${role} DB:`, error instanceof Error ? error.message : error);
+  } finally {
+    state[fields.dbField] = undefined;
+    state[fields.openField] = null;
+    if (role === 'previous') delete state.storageVerifiedPreviousHeight;
+    else delete state.storageVerifiedCurrentHeight;
+  }
+};
+
+const storagePathExists = async (path: string): Promise<boolean> => {
+  if (!nodeProcess) return false;
+  const fs = await import('fs/promises');
+  try {
+    await fs.stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const fsyncParentDir = async (targetPath: string): Promise<void> => {
+  if (!nodeProcess) return;
+  const fs = await import('fs/promises');
+  const path = await import('path');
+  try {
+    const dir = await fs.open(path.dirname(targetPath), 'r');
+    try {
+      await dir.sync();
+    } finally {
+      await dir.close();
+    }
+  } catch {
+    // Best-effort on platforms/filesystems that do not support syncing dirs.
+  }
+};
+
+const readStorageRotationMarker = async (env: Env): Promise<StorageEpochRotationMarker | null> => {
+  if (!nodeProcess) return null;
+  const fs = await import('fs/promises');
+  const markerPath = resolveStorageRotationMarkerPath(env);
+  try {
+    const raw = await fs.readFile(markerPath, 'utf8');
+    const parsed = JSON.parse(raw) as Partial<StorageEpochRotationMarker>;
+    if (
+      typeof parsed.currentPath === 'string' &&
+      typeof parsed.previousPath === 'string' &&
+      typeof parsed.nextPath === 'string' &&
+      Number.isFinite(parsed.snapshotHeight)
+    ) {
+      return {
+        snapshotHeight: Number(parsed.snapshotHeight),
+        currentPath: parsed.currentPath,
+        previousPath: parsed.previousPath,
+        nextPath: parsed.nextPath,
+        createdAt: Number(parsed.createdAt || 0),
+      };
+    }
+  } catch (error) {
+    if (!isFsNotFound(error)) {
+      console.warn('[storage-epoch] failed to read rotation marker:', error instanceof Error ? error.message : error);
+    }
+  }
+  return null;
+};
+
+const writeStorageRotationMarker = async (env: Env, marker: StorageEpochRotationMarker): Promise<void> => {
+  if (!nodeProcess) return;
+  const fs = await import('fs/promises');
+  const markerPath = resolveStorageRotationMarkerPath(env);
+  const tmpPath = `${markerPath}.tmp`;
+  await fs.writeFile(tmpPath, `${JSON.stringify(marker)}\n`);
+  await fs.rename(tmpPath, markerPath);
+  await fsyncParentDir(markerPath);
+};
+
+const removeStorageRotationMarker = async (env: Env): Promise<void> => {
+  if (!nodeProcess) return;
+  const fs = await import('fs/promises');
+  const markerPath = resolveStorageRotationMarkerPath(env);
+  await fs.rm(markerPath, { force: true });
+  await fs.rm(`${markerPath}.tmp`, { force: true });
+  await fsyncParentDir(markerPath);
+};
+
+const recoverStorageEpochRotationOnce = async (env: Env): Promise<void> => {
+  if (!nodeProcess) return;
+  const fs = await import('fs/promises');
+  const marker = await readStorageRotationMarker(env);
+  const currentPath = resolveStorageDbPath(env, 'current');
+  const previousPath = resolveStorageDbPath(env, 'previous');
+
+  if (marker) {
+    const currentExists = await storagePathExists(marker.currentPath);
+    const nextExists = await storagePathExists(marker.nextPath);
+    const previousExists = await storagePathExists(marker.previousPath);
+
+    if (!currentExists && nextExists) {
+      console.warn(
+        `[storage-epoch] completing interrupted rotation snapshot=${marker.snapshotHeight}: next -> current`,
+      );
+      await fs.rename(marker.nextPath, marker.currentPath);
+      await fsyncParentDir(marker.currentPath);
+    } else if (!currentExists && previousExists) {
+      console.warn(
+        `[storage-epoch] rolling back interrupted rotation snapshot=${marker.snapshotHeight}: previous -> current`,
+      );
+      await fs.rename(marker.previousPath, marker.currentPath);
+      await fsyncParentDir(marker.currentPath);
+    } else if (currentExists && nextExists) {
+      console.warn(
+        `[storage-epoch] aborting interrupted rotation snapshot=${marker.snapshotHeight}: removing stale next DB`,
+      );
+      await fs.rm(marker.nextPath, { recursive: true, force: true });
+      await fsyncParentDir(marker.nextPath);
+    }
+
+    await removeStorageRotationMarker(env);
+    return;
+  }
+
+  if (!(await storagePathExists(currentPath)) && (await storagePathExists(previousPath))) {
+    console.warn('[storage-epoch] current DB missing while previous exists; restoring previous as current');
+    await fs.rename(previousPath, currentPath);
+    await fsyncParentDir(currentPath);
+  }
+};
+
+const recoverStorageEpochRotation = async (env: Env): Promise<void> => {
+  if (!nodeProcess) return;
+  const key = resolveStorageRotationMarkerPath(env);
+  const existing = storageEpochRecoveryPromises.get(key);
+  if (existing) {
+    await existing;
+    return;
+  }
+  const recovery = recoverStorageEpochRotationOnce(env);
+  storageEpochRecoveryPromises.set(key, recovery);
+  try {
+    await recovery;
+  } finally {
+    storageEpochRecoveryPromises.delete(key);
+  }
+};
+
+const waitForStorageEpochRotation = async (env: Env): Promise<void> => {
+  const pending = ensureRuntimeState(env).storageEpochRotatePromise;
+  if (pending) await pending;
+};
+
+const storageVerifyOnOpenDisabled = (): boolean => {
+  const raw = String(runtimeProcessEnv?.['XLN_STORAGE_SKIP_VERIFY_ON_OPEN'] ?? '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+};
+
+const storageForceRestoreEnabled = (): boolean => {
+  const raw = String(runtimeProcessEnv?.['XLN_STORAGE_FORCE_RESTORE'] ?? '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+};
+
+const verifyOpenedStorageDb = async (
+  env: Env,
+  role: StorageDbRole,
+  db: Level<Buffer, Buffer>,
+): Promise<void> => {
+  if (storageVerifyOnOpenDisabled()) return;
+  const state = ensureRuntimeState(env);
+  const verifiedField = role === 'current' ? 'storageVerifiedCurrentHeight' : 'storageVerifiedPreviousHeight';
+  const previousVerifiedHeight = Number(state[verifiedField] ?? -1);
+  try {
+    const verified = await verifyStorageTailIntegrity(db, { tailFrames: 128 });
+    if (verified.latestHeight <= previousVerifiedHeight) return;
+    state[verifiedField] = verified.latestHeight;
+  } catch (error) {
+    if (storageForceRestoreEnabled()) {
+      console.error(
+        `[storage] ${role} DB integrity verification failed but XLN_STORAGE_FORCE_RESTORE=1 is set:`,
+        error instanceof Error ? error.message : error,
+      );
+      return;
+    }
+    throw error;
+  }
+};
+
+const tryOpenStorageDb = async (env: Env, role: StorageDbRole = 'current'): Promise<boolean> => {
+  await waitForStorageEpochRotation(env);
+  await recoverStorageEpochRotation(env);
+  const state = ensureRuntimeState(env);
+  const fields = storageStateFields(role);
+  if (role === 'previous' && !(await storagePathExists(resolveStorageDbPath(env, role)))) {
+    return false;
+  }
+  if (!state[fields.openField]) {
+    const db = getStorageDb(env, role);
+    state[fields.openField] = (async () => {
+      try {
+        await db.open();
+        await verifyOpenedStorageDb(env, role, db);
+        return true;
+      } catch (error) {
+        const isBlocked =
+          error instanceof Error &&
+          (error.message?.includes('blocked') || error.name === 'SecurityError' || error.name === 'InvalidStateError');
+        if (isBlocked) {
+          console.log(`⚠️ storage ${role} DB blocked - skipping`);
+          return false;
+        }
+        state[fields.openField] = null;
+        throw error;
+      }
+    })();
+  }
+  try {
+    return await (state[fields.openField] as Promise<boolean>);
+  } catch (error) {
+    console.error(`❌ Failed to open storage ${role} DB:`, error);
+    throw error;
+  }
+};
+
+const rotateStorageEpochDb = async (env: Env, snapshotHeight: number): Promise<void> => {
+  if (!nodeProcess) return;
+  const state = ensureRuntimeState(env);
+  if (state.storageEpochRotatePromise) {
+    await state.storageEpochRotatePromise;
+    return;
+  }
+  const rotation = (async () => {
+    const currentPath = resolveStorageDbPath(env, 'current');
+    const previousPath = resolveStorageDbPath(env, 'previous');
+    const nextPath = `${currentPath}-next-${snapshotHeight}`;
+    const fs = await import('fs/promises');
+    const currentDb = getStorageDb(env, 'current');
+    const nextDb = new Level(nextPath, { valueEncoding: 'buffer', keyEncoding: 'binary' });
+    await fs.rm(nextPath, { recursive: true, force: true });
+    await nextDb.open();
+    try {
+      await seedFreshStorageEpoch({
+        sourceDb: currentDb,
+        targetDb: nextDb,
+        snapshotHeight,
+      });
+    } finally {
+      await nextDb.close();
+    }
+
+    await writeStorageRotationMarker(env, {
+      snapshotHeight,
+      currentPath,
+      previousPath,
+      nextPath,
+      createdAt: Date.now(),
+    });
+    await closeStorageDb(env, 'previous');
+    await closeStorageDb(env, 'current');
+    await fs.rm(previousPath, { recursive: true, force: true });
+    if (await storagePathExists(currentPath)) {
+      await fs.rename(currentPath, previousPath);
+      await fsyncParentDir(previousPath);
+    }
+    await fs.rename(nextPath, currentPath);
+    await fsyncParentDir(currentPath);
+    await removeStorageRotationMarker(env);
+    delete state.storageVerifiedCurrentHeight;
+    delete state.storageVerifiedPreviousHeight;
+  })();
+  state.storageEpochRotatePromise = rotation;
+  try {
+    await rotation;
+  } finally {
+    if (state.storageEpochRotatePromise === rotation) {
+      state.storageEpochRotatePromise = null;
+    }
+  }
+};
+
 export const getRuntimeDb = (env: Env): Level<Buffer, Buffer> => {
   const state = ensureRuntimeState(env);
   if (!state.db) {
@@ -397,9 +753,39 @@ export const getInfraDb = (env: Env): Level<Buffer, Buffer> => {
   return state.infraDb;
 };
 
-export const closeRuntimeDb = async (env: Env): Promise<void> => {
+export const getFrameDb = (env: Env): Level<Buffer, Buffer> => {
   const state = ensureRuntimeState(env);
-  if (!state.db) return;
+  if (!state.frameDb) {
+    state.frameDb = new Level(resolveFrameDbPath(env), { valueEncoding: 'buffer', keyEncoding: 'binary' });
+  }
+  return state.frameDb as Level<Buffer, Buffer>;
+};
+
+const closeFrameDb = async (env: Env): Promise<void> => {
+  const state = env.runtimeState;
+  const db = state?.frameDb as Level<Buffer, Buffer> | undefined;
+  if (!db) return;
+  try {
+    await db.close();
+  } catch (error) {
+    console.warn('⚠️ Failed to close runtime frame DB:', error instanceof Error ? error.message : error);
+  } finally {
+    state!.frameDb = null;
+    state!.frameDbOpenPromise = null;
+  }
+};
+
+export const closeRuntimeDb = async (env: Env): Promise<void> => {
+  const stopped = await stopRuntimeLoopAndWait(env, 10_000);
+  if (!stopped) {
+    console.warn('⚠️ Runtime loop did not drain before DB close deadline');
+  }
+  detachRuntimeEnv(env);
+  await closeStorageDb(env, 'current');
+  await closeStorageDb(env, 'previous');
+  await closeFrameDb(env);
+  const state = env.runtimeState;
+  if (!state?.db) return;
   try {
     await state.db.close();
   } catch (error) {
@@ -411,8 +797,8 @@ export const closeRuntimeDb = async (env: Env): Promise<void> => {
 };
 
 export const closeInfraDb = async (env: Env): Promise<void> => {
-  const state = ensureRuntimeState(env);
-  if (!state.infraDb) return;
+  const state = env.runtimeState;
+  if (!state?.infraDb) return;
   try {
     await state.infraDb.close();
   } catch (error) {
@@ -453,6 +839,35 @@ export async function tryOpenDb(env: Env): Promise<boolean> {
   }
 }
 
+export async function tryOpenFrameDb(env: Env): Promise<boolean> {
+  const state = ensureRuntimeState(env);
+  if (!state.frameDbOpenPromise) {
+    const db = getFrameDb(env);
+    state.frameDbOpenPromise = (async () => {
+      try {
+        await db.open();
+        return true;
+      } catch (error) {
+        const isBlocked =
+          error instanceof Error &&
+          (error.message?.includes('blocked') || error.name === 'SecurityError' || error.name === 'InvalidStateError');
+        if (isBlocked) {
+          console.log('⚠️ runtime frame DB blocked - persistence cannot index history safely');
+          return false;
+        }
+        state.frameDbOpenPromise = null;
+        throw error;
+      }
+    })();
+  }
+  try {
+    return await state.frameDbOpenPromise;
+  } catch (error) {
+    console.error('❌ Failed to open runtime frame DB:', error);
+    throw error;
+  }
+}
+
 // === ETHEREUM INTEGRATION ===
 
 // === SVELTE REACTIVITY INTEGRATION ===
@@ -486,11 +901,11 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
   if (!env.runtimeState) {
     env.runtimeState = {
       loopActive: false,
+      loopPromise: null,
       stopLoop: null,
       wakeLoop: null,
       wakeRequested: false,
       clockPrimed: false,
-      lastFrameAt: undefined,
       p2p: null,
       pendingP2PConfig: null,
       lastP2PConfig: null,
@@ -1076,6 +1491,13 @@ const ensureRuntimeWakeWatchdogStarted = (): void => {
   }, RUNTIME_WAKE_WATCHDOG_MS);
 };
 
+const stopRuntimeWakeWatchdogIfIdle = (): void => {
+  if (runtimeWakeWatchdog && trackedRuntimeEnvs.size === 0) {
+    clearInterval(runtimeWakeWatchdog);
+    runtimeWakeWatchdog = null;
+  }
+};
+
 /**
  * Generate entity input pings for entities with due hooks OR periodic tasks.
  * Injects empty entityInputs so applyEntityInput runs → crontab fires → hooks/tasks execute.
@@ -1190,6 +1612,7 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
   if (state.loopActive) return state.stopLoop ?? (() => {});
   void config;
   let running = true;
+  let loopPromise: Promise<void> | null = null;
   state.loopActive = true;
   // J-watchers are a runtime concern, not a UI/store concern.
   // The runtime loop is the single canonical owner of watcher lifecycle for
@@ -1284,18 +1707,37 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
       }
       state.loopActive = false;
       state.stopLoop = null;
+      if (state.loopPromise === loopPromise) state.loopPromise = null;
       state.wakeLoop = null;
       state.wakeRequested = false;
     }
   };
 
-  void loop(); // fire-and-forget — single async chain, never overlaps
+  loopPromise = loop(); // fire-and-forget — single async chain, never overlaps
+  state.loopPromise = loopPromise;
+  void loopPromise;
   state.stopLoop = () => {
     running = false;
     requestRuntimeLoopWake(env);
   };
   return state.stopLoop;
 }
+
+export const stopRuntimeLoopAndWait = async (env: Env, timeoutMs = 10_000): Promise<boolean> => {
+  const state = env.runtimeState;
+  state?.stopLoop?.();
+  const startedAt = Date.now();
+  const loopPromise = state?.loopPromise ?? null;
+  if (loopPromise) {
+    const loopDone = await Promise.race([
+      loopPromise.then(() => true, () => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), Math.max(0, timeoutMs))),
+    ]);
+    if (!loopDone) return false;
+  }
+  const remaining = Math.max(0, timeoutMs - (Date.now() - startedAt));
+  return waitForRuntimeProcessingIdle(env, remaining);
+};
 
 export const startJurisdictionWatchers = (env: Env): void => {
   if (!env.jReplicas || env.jReplicas.size === 0) return;
@@ -1338,6 +1780,52 @@ export const startJurisdictionWatchers = (env: Env): void => {
     adapter.startWatching(env);
     console.log(`✅ JAdapter watcher started for jReplica "${name}"`);
   }
+};
+
+const stopJurisdictionWatchers = (env: Env): void => {
+  if (!env.jReplicas || env.jReplicas.size === 0) return;
+  for (const [name, jReplica] of env.jReplicas.entries()) {
+    const adapter = jReplica.jadapter;
+    if (!adapter?.isWatching()) continue;
+    try {
+      adapter.stopWatching();
+    } catch (error) {
+      console.warn(
+        `⚠️ Failed to stop JAdapter watcher for "${name}":`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+};
+
+const detachRuntimeEnv = (env: Env): void => {
+  const state = env.runtimeState;
+  state?.stopLoop?.();
+  if (state?.p2p) {
+    try {
+      state.p2p.close();
+    } catch (error) {
+      console.warn('⚠️ Failed to close P2P during runtime detach:', error instanceof Error ? error.message : error);
+    }
+    const singleton = (env as Record<PropertyKey, unknown>)[ENV_P2P_SINGLETON_KEY];
+    if (singleton === state.p2p) {
+      delete (env as Record<PropertyKey, unknown>)[ENV_P2P_SINGLETON_KEY];
+    }
+    state.p2p = null;
+  }
+  if (state) {
+    state.lastP2PConfig = null;
+    state.pendingP2PConfig = null;
+    state.directEntityInputDispatch = null;
+    state.loopPromise = null;
+    state.stopLoop = null;
+    state.wakeLoop = null;
+    state.wakeRequested = false;
+    state.loopActive = false;
+  }
+  stopJurisdictionWatchers(env);
+  trackedRuntimeEnvs.delete(env);
+  stopRuntimeWakeWatchdogIfIdle();
 };
 
 /**
@@ -2805,19 +3293,26 @@ const applyRuntimeInput = async (
 const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
   const baseEnv = createEmptyEnv(runtimeSeedOverride ?? null);
 
-  await tryOpenDb(baseEnv);
-
   let env = baseEnv;
   let restoredFromCoreDb = false;
-  if (runtimeIsBrowser) {
+  const restoreDisabled =
+    !runtimeIsBrowser &&
+    !!nodeProcess &&
+    /^(1|true)$/i.test(String(nodeProcess.env['XLN_DISABLE_RUNTIME_RESTORE'] ?? ''));
+  if (!restoreDisabled) {
     const loaded = await loadEnvFromDB(baseEnv.runtimeId, baseEnv.runtimeSeed);
     if (loaded) {
       const loadedState = ensureRuntimeState(loaded);
       const baseState = ensureRuntimeState(baseEnv);
-      loadedState.db = baseState.db;
-      loadedState.dbOpenPromise = baseState.dbOpenPromise;
+      if (runtimeIsBrowser) {
+        loadedState.db = baseState.db;
+        loadedState.dbOpenPromise = baseState.dbOpenPromise;
+      }
       env = loaded;
       restoredFromCoreDb = true;
+      console.log(
+        `[main] restored runtime=${String(env.runtimeId || '').slice(0, 12)} height=${env.height} from storage`,
+      );
     }
   }
 
@@ -3299,7 +3794,7 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
   while (processState.processingPromise) {
     await processState.processingPromise;
   }
-  let releaseProcessLock: (() => void) | null = null;
+  let releaseProcessLock: () => void = () => {};
   processState.processingPromise = new Promise<void>(resolve => {
     releaseProcessLock = resolve;
   });
@@ -3481,6 +3976,7 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
         if (mempool.queuedAt === undefined) {
           mempool.queuedAt = mempoolQueuedAt ?? (env.timestamp ?? 0);
         }
+        clearPendingAuditEvents(env);
         throw error;
       } finally {
         (env as Record<PropertyKey, unknown>)[ENV_APPLY_ALLOWED_KEY] = false;
@@ -3558,11 +4054,19 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
       if (!quietRuntimeLogs) {
         console.log(`💾 [SAVE] Persisting R-frame ${env.height} to LevelDB...`);
       }
-      await saveEnvToDB(env, appliedRuntimeInputForPersistence);
-      env.frameLogs = [];
-      if (!quietRuntimeLogs) {
-        console.log(`💾 [SAVE] R-frame ${env.height} persisted`);
+      try {
+        await saveEnvToDB(env, appliedRuntimeInputForPersistence, entityOutbox);
+        flushPendingAuditEvents(env);
+        env.frameLogs = [];
+        if (!quietRuntimeLogs) {
+          console.log(`💾 [SAVE] R-frame ${env.height} persisted`);
+        }
+      } catch (error) {
+        clearPendingAuditEvents(env);
+        throw error;
       }
+    } else {
+      clearPendingAuditEvents(env);
     }
 
     // === SIDE EFFECTS (safe to fail — bilateral consensus retries) ===
@@ -3731,30 +4235,49 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
     return env;
   } finally {
     processState.processingPromise = null;
-    releaseProcessLock?.();
+    releaseProcessLock();
+  }
+};
+
+export const waitForRuntimeProcessingIdle = async (env: Env, timeoutMs = 5_000): Promise<boolean> => {
+  const startedAt = Date.now();
+  while (true) {
+    const pending = env.runtimeState?.processingPromise;
+    if (!pending) return true;
+    const remaining = timeoutMs - (Date.now() - startedAt);
+    if (remaining <= 0) return false;
+    const completed = await Promise.race([
+      pending.then(() => true, () => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), remaining)),
+    ]);
+    if (!completed) return false;
   }
 };
 
 // === LEVELDB PERSISTENCE ===
-export const saveEnvToDB = async (env: Env, currentFrameInput?: RuntimeInput): Promise<void> => {
+export const saveEnvToDB = async (
+  env: Env,
+  currentFrameInput?: RuntimeInput,
+  currentFrameOutputs?: RoutedEntityInput[],
+): Promise<void> => {
   if ((env as Record<PropertyKey, unknown>)[ENV_REPLAY_MODE_KEY] === true) {
     throw new Error('REPLAY_INVARIANT_FAILED: saveEnvToDB called during replay');
   }
-  await saveRuntimeFrameToWal({
+  const pendingFrameDbRecords = peekPendingFrameDbRecords(env);
+  await saveRuntimeFrameToStorage({
     env,
-    currentFrameInput,
-    persistenceSchemaVersion: PERSISTENCE_SCHEMA_VERSION,
-    defaultSnapshotIntervalFrames: DEFAULT_SNAPSHOT_INTERVAL_FRAMES,
-    tryOpenDb,
-    getRuntimeDb,
-    resolveDbNamespace: ({ env }) => resolveDbNamespace({ env }),
-    ensureRuntimeState,
-    ensureRuntimeConfig,
-    assertPersistedContractConfigReady,
-    isDbUnavailableError,
+    tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'current'),
+    getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'current'),
+    tryOpenFrameDb,
+    getFrameDb,
+    rotateEpochDb: rotateStorageEpochDb,
     getPerfMs,
     formatPerfMs,
+    frameDbRecords: pendingFrameDbRecords,
+    ...(currentFrameInput === undefined ? {} : { currentFrameInput }),
+    ...(currentFrameOutputs === undefined ? {} : { currentFrameOutputs }),
   });
+  dropPendingFrameDbRecords(env, pendingFrameDbRecords.length);
   if (runtimeIsBrowser && typeof BroadcastChannel !== 'undefined' && typeof env.runtimeId === 'string' && env.runtimeId.length > 0) {
     const runtimeSyncChannel = new BroadcastChannel('xln-runtime-sync');
     runtimeSyncChannel.postMessage({
@@ -3765,23 +4288,390 @@ export const saveEnvToDB = async (env: Env, currentFrameInput?: RuntimeInput): P
   }
 };
 
-export const getPersistedLatestHeight = async (env: Env): Promise<number> => {
-  return getPersistedLatestHeightWal(env, {
-    tryOpenDb,
-    getRuntimeDb,
-    resolveDbNamespace: ({ env }) => resolveDbNamespace({ env }),
-    isDbUnavailableError,
+type VerifyRuntimeChainResult = {
+  ok: boolean;
+  latestHeight: number;
+  checkpointHeight: number;
+  selectedSnapshotHeight: number;
+  restoredHeight: number;
+  expectedStateHash: string;
+  actualStateHash: string;
+  expectedAuditStateHash?: string;
+  actualAuditStateHash?: string;
+  expectedCanonicalStateHash?: string;
+  actualCanonicalStateHash?: string;
+};
+
+type PersistedStorageHandle = {
+  role: StorageDbRole;
+  db: Level<Buffer, Buffer>;
+  latestHeight: number;
+  latestSnapshotHeight: number;
+  snapshotHeights: number[];
+};
+
+const createPersistedStorageEnv = (runtimeId?: string | null, runtimeSeed?: string | null): Env => {
+  const env = createEmptyEnv(runtimeSeed ?? null);
+  const normalizedRuntimeId = normalizeRuntimeId(runtimeId ?? env.runtimeId ?? null);
+  if (normalizedRuntimeId) {
+    env.runtimeId = normalizedRuntimeId;
+    env.dbNamespace = normalizeDbNamespace(normalizedRuntimeId);
+  }
+  return env;
+};
+
+const listPersistedStorageHandles = async (env: Env): Promise<PersistedStorageHandle[]> => {
+  const handles: PersistedStorageHandle[] = [];
+  for (const role of ['current', 'previous'] as const) {
+    const opened = await tryOpenStorageDb(env, role);
+    if (!opened) continue;
+    const db = getStorageDb(env, role);
+    const head = await readStorageHead(db);
+    if (!head || head.latestHeight <= 0) continue;
+    handles.push({
+      role,
+      db,
+      latestHeight: head.latestHeight,
+      latestSnapshotHeight: head.latestSnapshotHeight,
+      snapshotHeights: await listStorageSnapshotHeights(db),
+    });
+  }
+  return handles.sort((left, right) => {
+    if (left.latestHeight !== right.latestHeight) return right.latestHeight - left.latestHeight;
+    if (left.role === right.role) return 0;
+    return left.role === 'current' ? -1 : 1;
   });
 };
 
-export const listPersistedCheckpointHeights = async (env: Env): Promise<number[]> => {
-  return listPersistedCheckpointHeightsWal(env, {
-    tryOpenDb,
-    getRuntimeDb,
-    resolveDbNamespace: ({ env }) => resolveDbNamespace({ env }),
-    isDbUnavailableError,
-    isDbNotFound,
+const resolvePersistedLatestHeight = async (env: Env): Promise<number> => {
+  const handles = await listPersistedStorageHandles(env);
+  return handles.reduce((max, handle) => Math.max(max, handle.latestHeight), 0);
+};
+
+const resolvePersistedCheckpointHeights = async (env: Env): Promise<number[]> => {
+  const handles = await listPersistedStorageHandles(env);
+  return Array.from(new Set(handles.flatMap((handle) => handle.snapshotHeights))).sort((left, right) => left - right);
+};
+
+const readPersistedStorageFrameRecord = async (
+  env: Env,
+  height: number,
+): Promise<ReturnType<typeof readStorageFrameRecord> extends Promise<infer T> ? T : never> => {
+  const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
+  if (targetHeight <= 0) return null;
+  for (const handle of await listPersistedStorageHandles(env)) {
+    if (targetHeight > handle.latestHeight) continue;
+    const frame = await readStorageFrameRecord(handle.db, targetHeight);
+    if (frame) return frame;
+  }
+  return null;
+};
+
+const readPersistedStorageReplicaMeta = async (
+  env: Env,
+  entityId: string,
+): Promise<ReturnType<typeof readStorageReplicaMeta> extends Promise<infer T> ? T : never> => {
+  const normalizedEntityId = String(entityId || '').toLowerCase();
+  if (!normalizedEntityId) return null;
+  for (const handle of await listPersistedStorageHandles(env)) {
+    const meta = await readStorageReplicaMeta(handle.db, normalizedEntityId);
+    if (meta) return meta;
+  }
+  return null;
+};
+
+const resolvePersistedSnapshotHeight = async (env: Env, targetHeight: number): Promise<number> => {
+  let best = 0;
+  for (const handle of await listPersistedStorageHandles(env)) {
+    if (targetHeight > handle.latestHeight) continue;
+    const candidate = await findStorageLatestSnapshotAtOrBelow(handle.db, targetHeight);
+    if (candidate > best) best = candidate;
+  }
+  return best;
+};
+
+const listPersistedEntityIdsAtHeight = async (env: Env, targetHeight: number): Promise<string[]> => {
+  const entityIds = new Set<string>();
+  for (const handle of await listPersistedStorageHandles(env)) {
+    for (const entityId of await listStorageLiveEntityIds(handle.db)) {
+      entityIds.add(entityId);
+    }
+    const snapshotHeight = await findStorageLatestSnapshotAtOrBelow(handle.db, targetHeight);
+    if (snapshotHeight > 0) {
+      for (const entityId of await listStorageSnapshotEntityIds(handle.db, snapshotHeight)) {
+        entityIds.add(entityId);
+      }
+    }
+  }
+  return Array.from(entityIds).sort();
+};
+
+const derivePersistedReplicaSignerId = (state: EntityState): string => {
+  const validator = Array.isArray(state.config?.validators) && state.config.validators.length > 0
+    ? state.config.validators[0]
+    : undefined;
+  const fallback = typeof validator === 'string' && validator.length > 0 ? validator : state.entityId;
+  return String(fallback || state.entityId).toLowerCase();
+};
+
+const rebuildPersistedJurisdictions = (env: Env): void => {
+  env.jReplicas = new Map();
+  for (const replica of env.eReplicas.values()) {
+    const jurisdiction = replica.state.config?.jurisdiction as Record<string, unknown> | undefined;
+    const name = typeof jurisdiction?.name === 'string' ? jurisdiction.name : '';
+    if (!name || env.jReplicas.has(name)) continue;
+    const depositoryAddress = String(jurisdiction?.depositoryAddress || '').trim();
+    const entityProviderAddress = String(jurisdiction?.entityProviderAddress || '').trim();
+    const deltaTransformerAddress = String(
+      jurisdiction?.deltaTransformerAddress ?? jurisdiction?.deltaTransformer ?? '',
+    ).trim();
+    const chainId = Number.isFinite(Number(jurisdiction?.chainId)) ? Number(jurisdiction?.chainId) : 31337;
+    env.jReplicas.set(name, {
+      name,
+      depositoryAddress,
+      entityProviderAddress,
+      chainId,
+      contracts: {
+        ...(depositoryAddress ? { depository: depositoryAddress } : {}),
+        ...(entityProviderAddress ? { entityProvider: entityProviderAddress } : {}),
+        ...(deltaTransformerAddress ? { deltaTransformer: deltaTransformerAddress } : {}),
+      },
+    } as never);
+    if (!env.activeJurisdiction) env.activeJurisdiction = name;
+  }
+};
+
+const loadEnvFromStorage = async (
+  runtimeId?: string | null,
+  runtimeSeed?: string | null,
+  targetHeightOverride?: number,
+): Promise<{
+  env: Env;
+  latestHeight: number;
+  checkpointHeight: number;
+  selectedSnapshotHeight: number;
+	} | null> => {
+  const env = createPersistedStorageEnv(runtimeId, runtimeSeed);
+  let returningEnv = false;
+  try {
+    const latestHeight = await resolvePersistedLatestHeight(env);
+    if (latestHeight <= 0) return null;
+    const targetHeight = Math.max(
+      1,
+      Math.min(
+        latestHeight,
+        Number.isFinite(Number(targetHeightOverride)) ? Math.floor(Number(targetHeightOverride)) : latestHeight,
+      ),
+    );
+    const selectedSnapshotHeight = await resolvePersistedSnapshotHeight(env, targetHeight);
+    const entityIds = await listPersistedEntityIdsAtHeight(env, targetHeight);
+    const restoredStates = new Map<string, EntityState>();
+
+    for (const entityId of entityIds) {
+      const state = await loadEntityStateFromStorageDb(env, entityId, targetHeight);
+      if (state) restoredStates.set(entityId, state);
+    }
+    if (restoredStates.size === 0) return null;
+
+    env.eReplicas = new Map();
+    env.activeJurisdiction = undefined;
+    for (const [entityId, state] of restoredStates.entries()) {
+      const meta = targetHeight === latestHeight ? await readPersistedStorageReplicaMeta(env, entityId) : null;
+      const signerId = String(meta?.signerId || derivePersistedReplicaSignerId(state)).toLowerCase();
+      const hankoWitness = meta?.hankoWitness instanceof Map ? meta.hankoWitness : new Map();
+      env.eReplicas.set(formatReplicaKey(createReplicaKey(entityId, signerId)), {
+        entityId,
+        signerId,
+        state,
+        mempool: [],
+        isProposer: typeof meta?.isProposer === 'boolean' ? meta.isProposer : true,
+        hankoWitness,
+        ...(meta?.proposal ? { proposal: meta.proposal } : {}),
+        ...(meta?.lockedFrame ? { lockedFrame: meta.lockedFrame } : {}),
+        ...(meta?.validatorComputedState ? { validatorComputedState: meta.validatorComputedState } : {}),
+      });
+    }
+
+    const frame = await readPersistedStorageFrameRecord(env, targetHeight);
+    env.height = targetHeight;
+	    env.timestamp = frame?.timestamp ?? Math.max(...Array.from(restoredStates.values()).map((state) => Number(state.timestamp ?? 0)), 0);
+	    env.runtimeInput = { runtimeTxs: [], entityInputs: [] };
+	    env.runtimeMempool = undefined;
+	    await hydrateAccountFrameHistoryViews(env);
+	    let restoredFrameLogs = Array.isArray(frame?.logs) ? frame.logs.map((entry) => ({ ...entry })) : [];
+    try {
+      if (await tryOpenFrameDb(env)) {
+        const activity = await readFrameDbRuntimeActivity(getFrameDb(env), targetHeight);
+        if (activity?.logs) restoredFrameLogs = activity.logs.map((entry) => ({ ...entry }));
+      }
+    } catch {
+      // Activity logs are secondary; state restore must not depend on them.
+    }
+    env.frameLogs = restoredFrameLogs;
+    rebuildPersistedJurisdictions(env);
+    (env as Record<string, unknown>).__replayMeta = {
+      checkpointHeight: selectedSnapshotHeight,
+      selectedSnapshotHeight,
+      selectedSnapshotLabel:
+        selectedSnapshotHeight <= 1
+          ? 'genesis:1'
+          : selectedSnapshotHeight === targetHeight
+            ? `checkpoint:${selectedSnapshotHeight}`
+            : `snapshot:${selectedSnapshotHeight}`,
+      latestHeight,
+    };
+    env.history = [
+      buildCanonicalEnvSnapshot(env, {
+        runtimeInput: frame?.runtimeInput ?? { runtimeTxs: [], entityInputs: [] },
+        runtimeOutputs: [],
+        description: `Persisted restore @ ${targetHeight}`,
+        logs: env.frameLogs,
+        gossipProfiles: env.gossip.getProfiles?.() ?? [],
+      }),
+    ];
+
+    returningEnv = true;
+    return {
+      env,
+      latestHeight,
+      checkpointHeight: selectedSnapshotHeight,
+      selectedSnapshotHeight,
+    };
+  } finally {
+    // loadEnvFromDB probes storage on fresh starts. If there is nothing to
+    // restore, the probe env must release LevelDB locks before the real runtime
+    // opens the same storage path for frame 1.
+    if (!returningEnv) {
+      await closeRuntimeDb(env);
+      await closeInfraDb(env);
+    }
+  }
+};
+
+const hydrateAccountFrameHistoryViews = async (env: Env, limit = 50): Promise<void> => {
+  try {
+    if (!(await tryOpenFrameDb(env))) return;
+    const db = getFrameDb(env);
+    for (const [replicaKey, replica] of env.eReplicas.entries()) {
+      const entityId = String(replica?.entityId || String(replicaKey).split(':')[0] || '').toLowerCase();
+      if (!entityId || !replica?.state?.accounts) continue;
+      for (const [counterpartyId, account] of replica.state.accounts.entries()) {
+        const accountCurrentHeight = Math.max(0, Math.floor(Number(account.currentHeight ?? 0)));
+        const records = (await readFrameDbAccountFrames(db, entityId, String(counterpartyId).toLowerCase()))
+          .filter((record) =>
+            Math.max(0, Math.floor(Number(record.runtimeHeight ?? 0))) <= env.height &&
+            Math.max(0, Math.floor(Number(record.accountHeight ?? 0))) <= accountCurrentHeight
+          );
+        setAccountFrameHistoryView(account, records.map((record) => record.frame), limit);
+      }
+    }
+  } catch (error) {
+    console.warn('⚠️ Failed to hydrate account frame history view:', error instanceof Error ? error.message : error);
+  }
+};
+
+export const getPersistedLatestHeight = async (env: Env): Promise<number> => {
+  return resolvePersistedLatestHeight(env);
+};
+
+export const loadEntityStateFromStorageDb = async (
+  env: Env,
+  entityId: string,
+  height?: number,
+): Promise<EntityState | null> => {
+  const current = await loadEntityStateFromStorage({
+    env,
+    tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'current'),
+    getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'current'),
+    entityId,
+    ...(height === undefined ? {} : { height }),
   });
+  if (current || height === undefined) return current;
+  return loadEntityStateFromStorage({
+    env,
+    tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'previous'),
+    getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'previous'),
+    entityId,
+    height,
+  });
+};
+
+export const inspectStorageDb = async (env: Env) => {
+  const current = await inspectStorage({
+    env,
+    tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'current'),
+    getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'current'),
+  });
+  const previous = await inspectStorage({
+    env,
+    tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'previous'),
+    getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'previous'),
+  });
+  if (!current && !previous) return null;
+
+  const epochs = [
+    current
+      ? {
+          role: 'current' as const,
+          path: resolveStorageDbPath(env, 'current'),
+          latestHeight: current.head?.latestHeight ?? 0,
+          latestSnapshotHeight: current.head?.latestSnapshotHeight ?? 0,
+          frameCount: current.frameCount,
+          diffCount: current.diffCount,
+          packCount: current.packCount,
+          snapshotCount: current.snapshotHeights.length,
+          liveBytes: current.liveBytes,
+          historyBytes: current.historyBytes,
+          totalBytes: current.totalBytes,
+        }
+      : null,
+    previous
+      ? {
+          role: 'previous' as const,
+          path: resolveStorageDbPath(env, 'previous'),
+          latestHeight: previous.head?.latestHeight ?? 0,
+          latestSnapshotHeight: previous.head?.latestSnapshotHeight ?? 0,
+          frameCount: previous.frameCount,
+          diffCount: previous.diffCount,
+          packCount: previous.packCount,
+          snapshotCount: previous.snapshotHeights.length,
+          liveBytes: previous.liveBytes,
+          historyBytes: previous.historyBytes,
+          totalBytes: previous.totalBytes,
+        }
+      : null,
+  ].filter(Boolean);
+
+  const snapshotHeights = Array.from(
+    new Set([...(current?.snapshotHeights ?? []), ...(previous?.snapshotHeights ?? [])]),
+  ).sort((left, right) => left - right);
+
+  return {
+    head: current?.head ?? previous?.head ?? null,
+    frameCount: (current?.frameCount ?? 0) + (previous?.frameCount ?? 0),
+    diffCount: (current?.diffCount ?? 0) + (previous?.diffCount ?? 0),
+    packCount: (current?.packCount ?? 0) + (previous?.packCount ?? 0),
+    snapshotHeights,
+    liveEntityCount: (current?.liveEntityCount ?? 0) + (previous?.liveEntityCount ?? 0),
+    liveAccountCount: (current?.liveAccountCount ?? 0) + (previous?.liveAccountCount ?? 0),
+    liveBookCount: (current?.liveBookCount ?? 0) + (previous?.liveBookCount ?? 0),
+    frameBytes: (current?.frameBytes ?? 0) + (previous?.frameBytes ?? 0),
+    diffBytes: (current?.diffBytes ?? 0) + (previous?.diffBytes ?? 0),
+    packBytes: (current?.packBytes ?? 0) + (previous?.packBytes ?? 0),
+    snapshotBytes: (current?.snapshotBytes ?? 0) + (previous?.snapshotBytes ?? 0),
+    liveBytes: (current?.liveBytes ?? 0) + (previous?.liveBytes ?? 0),
+    historyBytes: (current?.historyBytes ?? 0) + (previous?.historyBytes ?? 0),
+    totalBytes: (current?.totalBytes ?? 0) + (previous?.totalBytes ?? 0),
+    maxFrameBytes: Math.max(current?.maxFrameBytes ?? 0, previous?.maxFrameBytes ?? 0),
+    maxDiffBytes: Math.max(current?.maxDiffBytes ?? 0, previous?.maxDiffBytes ?? 0),
+    maxPackBytes: Math.max(current?.maxPackBytes ?? 0, previous?.maxPackBytes ?? 0),
+    maxSnapshotBytes: Math.max(current?.maxSnapshotBytes ?? 0, previous?.maxSnapshotBytes ?? 0),
+    epochDbs: epochs,
+  };
+};
+
+export const listPersistedCheckpointHeights = async (env: Env): Promise<number[]> => {
+  return resolvePersistedCheckpointHeights(env);
 };
 
 export const verifyRuntimeChain = async (
@@ -3789,35 +4679,170 @@ export const verifyRuntimeChain = async (
   runtimeSeed?: string | null,
   options?: { fromSnapshotHeight?: number },
 ): Promise<VerifyRuntimeChainResult> => {
-  return verifyPersistedRuntimeState({
-    runtimeId,
-    runtimeSeed,
-    fromSnapshotHeight: options?.fromSnapshotHeight,
-    persistenceSchemaVersion: PERSISTENCE_SCHEMA_VERSION,
-    createEmptyEnv,
-    tryOpenDb,
-    getRuntimeDb,
-    resolveDbNamespace,
-    isDbNotFound,
-    deriveRuntimeIdFromSeed: (seed: string) => deriveSignerAddressSync(seed, '1'),
-    assertPersistedContractConfigReady,
-    validateEntityState,
-    buildCanonicalEnvSnapshot,
-    ensureRuntimeState,
-    applyRuntimeInput,
-    normalizeEntitySwapTradingPairs,
-    replayModeKey: ENV_REPLAY_MODE_KEY,
-    applyAllowedKey: ENV_APPLY_ALLOWED_KEY,
-  });
+  const bootstrapEnv = createPersistedStorageEnv(runtimeId, runtimeSeed);
+  const latestHeight = await resolvePersistedLatestHeight(bootstrapEnv);
+  if (latestHeight <= 0) {
+    throw new Error('REPLAY_INVARIANT_FAILED: no persisted runtime state');
+  }
+  const requestedFromHeight = Number.isFinite(Number(options?.fromSnapshotHeight))
+    ? Math.max(1, Math.floor(Number(options?.fromSnapshotHeight)))
+    : latestHeight;
+  const selectedSnapshotHeight = await resolvePersistedSnapshotHeight(bootstrapEnv, requestedFromHeight);
+  const checkpointHeight = await resolvePersistedSnapshotHeight(bootstrapEnv, latestHeight);
+  let expectedStateHash = '';
+  let actualStateHash = '';
+  let expectedAuditStateHash = '';
+  let actualAuditStateHash = '';
+  let expectedCanonicalStateHash = '';
+  let actualCanonicalStateHash = '';
+  let restoredHeight = selectedSnapshotHeight;
+  try {
+    await closeRuntimeDb(bootstrapEnv);
+    await closeInfraDb(bootstrapEnv);
+    for (let height = Math.max(1, requestedFromHeight); height <= latestHeight; height += 1) {
+      const replayed = await loadEnvFromStorage(runtimeId, runtimeSeed, height);
+      if (!replayed) {
+        throw new Error(`REPLAY_INVARIANT_FAILED: failed to restore persisted runtime at height ${height}`);
+      }
+      try {
+        const persistedFrame = await readPersistedStorageFrameRecord(replayed.env, height);
+        if (!persistedFrame) {
+          throw new Error(`REPLAY_INVARIANT_FAILED: missing persisted frame at height ${height}`);
+        }
+        expectedStateHash = persistedFrame.stateHash;
+        actualStateHash =
+          persistedFrame.hashMode === 'storage-debug-v1' && Array.isArray(persistedFrame.entityHashes)
+            ? computeStorageDebugStateHashFromEnv(replayed.env)
+            : computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(replayed.env));
+        if (persistedFrame.hashMode === 'storage-debug-v1') {
+          expectedAuditStateHash = String(persistedFrame.auditStateHash || '');
+          actualAuditStateHash = computeStorageAuditStateHashFromEnv(replayed.env);
+          if (!expectedAuditStateHash || expectedAuditStateHash !== actualAuditStateHash) {
+            return {
+              ok: false,
+              latestHeight,
+              checkpointHeight,
+              selectedSnapshotHeight,
+              restoredHeight: height,
+              expectedStateHash,
+              actualStateHash,
+              expectedAuditStateHash,
+              actualAuditStateHash,
+              expectedCanonicalStateHash,
+              actualCanonicalStateHash,
+            };
+          }
+          if (persistedFrame.canonicalStateHash) {
+            expectedCanonicalStateHash = String(persistedFrame.canonicalStateHash);
+            actualCanonicalStateHash = computeStorageCanonicalStateHashFromEnv(replayed.env);
+            if (expectedCanonicalStateHash !== actualCanonicalStateHash) {
+              return {
+                ok: false,
+                latestHeight,
+                checkpointHeight,
+                selectedSnapshotHeight,
+                restoredHeight: height,
+                expectedStateHash,
+                actualStateHash,
+                expectedAuditStateHash,
+                actualAuditStateHash,
+                expectedCanonicalStateHash,
+                actualCanonicalStateHash,
+              };
+            }
+          } else {
+            expectedCanonicalStateHash = '';
+            actualCanonicalStateHash = '';
+          }
+        } else {
+          expectedAuditStateHash = expectedStateHash;
+          actualAuditStateHash = actualStateHash;
+          expectedCanonicalStateHash = expectedStateHash;
+          actualCanonicalStateHash = actualStateHash;
+        }
+        restoredHeight = height;
+        if (expectedStateHash !== actualStateHash) {
+          return {
+            ok: false,
+            latestHeight,
+            checkpointHeight,
+            selectedSnapshotHeight,
+            restoredHeight,
+            expectedStateHash,
+            actualStateHash,
+            expectedAuditStateHash,
+            actualAuditStateHash,
+            expectedCanonicalStateHash,
+            actualCanonicalStateHash,
+          };
+        }
+      } finally {
+        await closeRuntimeDb(replayed.env);
+        await closeInfraDb(replayed.env);
+      }
+    }
+  } finally {
+    await closeRuntimeDb(bootstrapEnv);
+    await closeInfraDb(bootstrapEnv);
+  }
+
+  return {
+    ok: true,
+    latestHeight,
+    checkpointHeight,
+    selectedSnapshotHeight,
+    restoredHeight,
+    expectedStateHash,
+    actualStateHash,
+      expectedAuditStateHash,
+      actualAuditStateHash,
+      expectedCanonicalStateHash,
+      actualCanonicalStateHash,
+    };
 };
 
 export const readPersistedFrameJournal = async (env: Env, height: number): Promise<PersistedFrameJournal | null> => {
-  return readPersistedFrameJournalWal(env, height, {
-    tryOpenDb,
-    getRuntimeDb,
-    resolveDbNamespace: ({ env }) => resolveDbNamespace({ env }),
-    isDbUnavailableError,
-  });
+  const frame = await readPersistedStorageFrameRecord(env, height);
+  if (!frame) return null;
+  let logs = frame.logs ?? [];
+  try {
+    if (await tryOpenFrameDb(env)) {
+      const activity = await readFrameDbRuntimeActivity(getFrameDb(env), height);
+      if (activity?.logs) logs = activity.logs;
+    }
+  } catch {
+    // Frame DB is a secondary activity index. Keep old inline logs or an empty
+    // array if it is temporarily unavailable.
+  }
+  return {
+    height: frame.height,
+    timestamp: frame.timestamp,
+    runtimeInput: frame.runtimeInput,
+    logs,
+  };
+};
+
+export const readPersistedAccountFrameHistory = async (
+  env: Env,
+  entityId: string,
+  counterpartyId: string,
+  limit = 50,
+  opts?: { maxRuntimeHeight?: number; maxAccountHeight?: number },
+): Promise<AccountFrame[]> => {
+  if (!(await tryOpenFrameDb(env))) return [];
+  const maxRuntimeHeight = Number.isFinite(Number(opts?.maxRuntimeHeight))
+    ? Math.max(0, Math.floor(Number(opts?.maxRuntimeHeight)))
+    : Number.POSITIVE_INFINITY;
+  const maxAccountHeight = Number.isFinite(Number(opts?.maxAccountHeight))
+    ? Math.max(0, Math.floor(Number(opts?.maxAccountHeight)))
+    : Number.POSITIVE_INFINITY;
+  const records = (await readFrameDbAccountFrames(getFrameDb(env), entityId, counterpartyId))
+    .filter((record) =>
+      Math.max(0, Math.floor(Number(record.runtimeHeight ?? 0))) <= maxRuntimeHeight &&
+      Math.max(0, Math.floor(Number(record.accountHeight ?? 0))) <= maxAccountHeight
+    );
+  const boundedLimit = Math.max(1, Math.min(1000, Math.floor(Number(limit || 50))));
+  return records.slice(-boundedLimit).map((record) => structuredClone(record.frame));
 };
 
 export const readPersistedFrameJournals = async (
@@ -3828,31 +4853,30 @@ export const readPersistedFrameJournals = async (
     limit?: number;
   },
 ): Promise<PersistedFrameJournal[]> => {
-  return readPersistedFrameJournalsWal(env, opts, {
-    tryOpenDb,
-    getRuntimeDb,
-    resolveDbNamespace: ({ env }) => resolveDbNamespace({ env }),
-    isDbUnavailableError,
-  });
+  const latestHeight = await resolvePersistedLatestHeight(env);
+  if (latestHeight <= 0) return [];
+  const fromHeight = Math.max(1, Math.floor(opts?.fromHeight ?? 1));
+  const boundedToHeight = Math.max(fromHeight, Math.floor(opts?.toHeight ?? latestHeight));
+  const toHeight = Math.min(latestHeight, boundedToHeight);
+  const limit = Math.max(1, Math.min(1000, Math.floor(opts?.limit ?? 200)));
+  const pageToHeight = Math.min(toHeight, fromHeight + limit - 1);
+  const receipts: PersistedFrameJournal[] = [];
+  for (let height = fromHeight; height <= pageToHeight; height += 1) {
+    const receipt = await readPersistedFrameJournal(env, height);
+    if (receipt) receipts.push(receipt);
+  }
+  return receipts;
 };
 
 export const readPersistedCheckpointSnapshot = async (
   env: Env,
   height: number,
 ): Promise<Record<string, unknown> | null> => {
-  const dbReady = await tryOpenDb(env);
-  if (!dbReady) return null;
-  const dbNamespace = resolveDbNamespace({ env });
-  const db = getRuntimeDb(env);
   const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
   if (targetHeight <= 0) return null;
-  try {
-    const snapshotBuffer = await readPersistedSnapshotBuffer(db, dbNamespace, targetHeight);
-    return deserializeTaggedJson<Record<string, unknown>>(snapshotBuffer.toString());
-  } catch (error) {
-    if (isDbNotFound(error) || isDbUnavailableError(error)) return null;
-    throw error;
-  }
+  const restored = await loadEnvFromStorage(env.runtimeId, env.runtimeSeed, targetHeight);
+  if (!restored || restored.env.height !== targetHeight) return null;
+  return buildRuntimeCheckpointSnapshot(restored.env);
 };
 
 export const loadEnvFromDB = async (
@@ -3861,28 +4885,12 @@ export const loadEnvFromDB = async (
   options?: { fromSnapshotHeight?: number },
 ): Promise<Env | null> => {
   try {
-    const latestEnv = await loadRuntimeStateFromDb({
+    const restored = await loadEnvFromStorage(
       runtimeId,
       runtimeSeed,
-      fromSnapshotHeight: Number.isFinite(options?.fromSnapshotHeight)
-        ? Math.floor(Number(options?.fromSnapshotHeight))
-        : undefined,
-      persistenceSchemaVersion: PERSISTENCE_SCHEMA_VERSION,
-      createEmptyEnv,
-      tryOpenDb,
-      getRuntimeDb,
-      resolveDbNamespace,
-      isDbNotFound,
-      deriveRuntimeIdFromSeed: (seed: string) => deriveSignerAddressSync(seed, '1'),
-      assertPersistedContractConfigReady,
-      validateEntityState,
-      buildCanonicalEnvSnapshot,
-      ensureRuntimeState,
-      applyRuntimeInput,
-      normalizeEntitySwapTradingPairs,
-      replayModeKey: ENV_REPLAY_MODE_KEY,
-      applyAllowedKey: ENV_APPLY_ALLOWED_KEY,
-    });
+      Number.isFinite(options?.fromSnapshotHeight) ? Math.floor(Number(options?.fromSnapshotHeight)) : undefined,
+    );
+    const latestEnv = restored?.env ?? null;
 
     if (latestEnv) {
       await rehydrateRestoredRuntimeInfra(latestEnv, {
@@ -3923,6 +4931,9 @@ export const clearDB = async (env?: Env): Promise<void> => {
   try {
     const dbReady = await tryOpenDb(targetEnv);
     const infraReady = await tryOpenInfraDb(targetEnv);
+    const storageReady = await tryOpenStorageDb(targetEnv, 'current');
+    const storagePreviousReady = await tryOpenStorageDb(targetEnv, 'previous');
+    const frameReady = await tryOpenFrameDb(targetEnv);
     if (dbReady) {
       const db = getRuntimeDb(targetEnv);
       await db.clear();
@@ -3930,6 +4941,18 @@ export const clearDB = async (env?: Env): Promise<void> => {
     if (infraReady) {
       const infraDb = getInfraDb(targetEnv);
       await infraDb.clear();
+    }
+    if (storageReady) {
+      const storageDb = getStorageDb(targetEnv, 'current');
+      await storageDb.clear();
+    }
+    if (storagePreviousReady) {
+      const previousStorageDb = getStorageDb(targetEnv, 'previous');
+      await previousStorageDb.clear();
+    }
+    if (frameReady) {
+      const frameDb = getFrameDb(targetEnv);
+      await frameDb.clear();
     }
     console.log('✅ LevelDB cleared (core + infra)');
   } catch (err) {

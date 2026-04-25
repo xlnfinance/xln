@@ -26,20 +26,14 @@ export type {
 } from './typechain/DeltaTransformer.ts';
 
 // Import for internal use
-import type {
-  ProofBodyStruct,
-  TransformerClauseStruct,
-  AllowanceStruct,
-} from './typechain/Depository.ts';
-
-import type { DeltaTransformer } from './typechain/DeltaTransformer.ts';
+import type { ProofBodyStruct } from './typechain/Depository.ts';
 
 /**
  * Runtime-friendly ProofBody (uses native types, not BigNumberish)
  * Converted to ProofBodyStruct for ABI encoding
  */
 export interface RuntimeProofBody {
-  offdeltas: bigint[];           // int256[] - ondelta + offdelta per token
+  offdeltas: bigint[];           // int256[] - bilateral offdelta per token
   tokenIds: number[];            // uint256[] - sorted ascending
   transformers: RuntimeTransformerClause[];
 }

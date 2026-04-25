@@ -15,7 +15,7 @@ Current state: Signatures work in test mode (entities have each other's private 
 ## CRITICAL SECURITY FIXES
 
 ### ✅ FIX-1: Remove Permissive Board Verification (COMPLETED)
-**File:** `runtime/hanko-signing.ts:305-308`
+**File:** `runtime/hanko/signing.ts`
 **Status:** ✅ DONE
 
 **Before:**

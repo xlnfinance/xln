@@ -29,6 +29,7 @@ import type { AccountMachine, DeliverableEntityInput, Delta, EntityReplica, Env,
 import type { HubHealth } from './health';
 import { createExternalWalletApi } from './api/external-wallet-api';
 import { maybeHandleQaRequest } from './qa/api';
+import { getStorageHealthSnapshotSync, type StorageHealth } from './orchestrator/storage-monitor';
 import { encodeBoard, hashBoard } from './entity-factory';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from './account-crypto';
 import { createJAdapter, DEV_CHAIN_IDS, type JAdapter } from './jadapter';
@@ -134,6 +135,24 @@ const buildDebugDumpFileName = (reason: string | undefined, runtimeId: string | 
 const invalidateHealthCache = (): void => {
   cachedHealthResponse = null;
   cachedHealthInFlight = null;
+};
+
+const buildDiskSummary = (storage: StorageHealth) => {
+  const totalBytes = Number(storage.disk.totalBytes || 0);
+  const usedBytes = Number(storage.disk.usedBytes || 0);
+  const freeBytes = Number(storage.disk.freeBytes || 0);
+  const toGiB = (value: number): number => Math.round((value / 1024 ** 3) * 100) / 100;
+  return {
+    ok: storage.ok,
+    minFreeBytes: storage.minFreeBytes,
+    freeBytes,
+    usedBytes,
+    totalBytes,
+    freeGiB: toGiB(freeBytes),
+    usedGiB: toGiB(usedBytes),
+    totalGiB: toGiB(totalBytes),
+    usedPct: totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 10000) / 100 : 0,
+  };
 };
 
 const probeLocalAnvilContractStack = async (adapter: JAdapter): Promise<{ ok: boolean; reason: string }> => {
@@ -2859,14 +2878,18 @@ const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, e
           ? 0
           : Math.min(latestPersistedHeight, requestedToHeight);
       const limit = Number.isFinite(limitRaw) ? Math.max(1, Math.min(1000, Math.floor(limitRaw))) : 200;
+      const pageToHeight =
+        toHeight > 0 && toHeight >= fromHeight
+          ? Math.min(toHeight, fromHeight + limit - 1)
+          : 0;
       const entityId =
         typeof msg?.entityId === 'string' && msg.entityId.trim().length > 0 ? msg.entityId.trim().toLowerCase() : undefined;
       const eventNames = normalizeRpcStringArray(msg?.eventNames ?? msg?.events);
       const includeInputs = msg?.includeInputs === true;
 
       const receipts =
-        toHeight > 0 && toHeight >= fromHeight
-          ? await readPersistedFrameJournals(env, { fromHeight, toHeight, limit })
+        pageToHeight > 0
+          ? await readPersistedFrameJournals(env, { fromHeight, toHeight: pageToHeight, limit })
           : [];
       const filtered = receipts
         .map(receipt => {
@@ -2887,7 +2910,7 @@ const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, e
           inReplyTo: id,
           data: {
             fromHeight,
-            toHeight,
+            toHeight: pageToHeight,
             returned: filtered.length,
             receipts: filtered,
           },
@@ -3277,6 +3300,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       cachedHealthInFlight = (async () => {
         const { getHealthStatus } = await import('./health.ts');
         const health = await getHealthStatus(env);
+        const storage = getStorageHealthSnapshotSync();
         const activeClientRuntimeIds = Array.from(relayStore.clients.keys());
         const activeClientsDetailed = Array.from(relayStore.clients.entries()).map(([runtimeId, client]) => ({
           runtimeId,
@@ -3320,12 +3344,13 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           const profile = relayHubsByEntity.get(entityId.toLowerCase());
           const runtimeId = profile?.runtimeId;
           const normalizedRuntimeId = normalizeRuntimeKey(runtimeId);
-          const activeClients =
-            normalizedRuntimeId && relayStore.clients.has(normalizedRuntimeId) ? [normalizedRuntimeId] : [];
+          const selfRelayPresence = Boolean(normalizedRuntimeId && relayStore.clients.has(normalizedRuntimeId));
+          const activeClients = activeClientRuntimeIds.filter((clientRuntimeId) => clientRuntimeId !== normalizedRuntimeId);
           return {
             ...hub,
             runtimeId: normalizedRuntimeId || runtimeId,
-            online: activeClients.length > 0,
+            online: selfRelayPresence,
+            selfRelayPresence,
             activeClients,
             reserves: env ? getReplicaReserveSnapshot(env, entityId) ?? hub.reserves : hub.reserves,
             accounts: env ? getReplicaAccountCount(env, entityId) ?? hub.accounts : hub.accounts,
@@ -3334,6 +3359,8 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         const bootstrapReserves = await getBootstrapReserveHealth(env);
         const body = JSON.stringify({
           ...health,
+          disk: buildDiskSummary(storage),
+          storage,
           boot: {
             phase: serverBootPhase,
             startedAt: serverBootStartedAt || null,

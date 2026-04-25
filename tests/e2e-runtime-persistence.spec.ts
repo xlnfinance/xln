@@ -18,7 +18,7 @@ import {
   switchToRuntimeId,
 } from './utils/e2e-demo-users';
 import { connectRuntimeToHub as connectRuntimeToSharedHub } from './utils/e2e-connect';
-import { APP_BASE_URL, API_BASE_URL, resetProdServer } from './utils/e2e-baseline';
+import { APP_BASE_URL, API_BASE_URL, ensureE2EBaseline } from './utils/e2e-baseline';
 
 function randomMnemonic(): string {
   return Wallet.createRandom().mnemonic!.phrase;
@@ -549,34 +549,24 @@ async function runtimeDbMeta(page: Page) {
     const env = (window as any).isolatedEnv;
     const XLN = (window as any).XLN
       || await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
-    if (!env || !XLN?.getRuntimeDb) return { ok: false, error: 'env/xln missing' };
-    const db = XLN.getRuntimeDb(env);
-    const ns = String(env.dbNamespace || env.runtimeId || '').toLowerCase();
-    const key = (name: string) => `${ns}:${name}`;
-    const read = async (name: string): Promise<string | null> => {
-      try {
-        const buf = await db.get((window as any).Buffer ? (window as any).Buffer.from(key(name)) : key(name));
-        return String(buf?.toString?.() ?? '');
-      } catch {
-        return null;
-      }
-    };
-    const latest = await read('latest_height');
-    const checkpoint = await read('latest_checkpoint_height');
-    const latestN = Number(latest || 0);
-    const checkpointN = Number(checkpoint || 0);
-    const hasFrameLatest = await read(`frame_input:${latestN}`) !== null;
-    const hasSnapshotLatest = await read(`snapshot:${latestN}`) !== null;
+    if (!env || !XLN?.getPersistedLatestHeight) return { ok: false, error: 'env/xln missing' };
+    const latestN = Number(await XLN.getPersistedLatestHeight(env) || 0);
+    const checkpointList = await XLN.listPersistedCheckpointHeights(env);
+    const checkpointHeights = Array.isArray(checkpointList) ? checkpointList : [];
+    const checkpointN = Number(checkpointHeights.at(-1) || 0);
+    const latest = String(latestN);
+    const checkpoint = String(checkpointN);
+    const hasFrameLatest = latestN > 0 ? (await XLN.readPersistedFrameJournal(env, latestN)) !== null : false;
+    const hasSnapshotLatest = latestN > 0 ? (await XLN.readPersistedCheckpointSnapshot(env, latestN)) !== null : false;
     let frameSummary: any = null;
     let snapshotSummary: any = null;
     const frameTimeline: any[] = [];
     try {
-      const frameRaw = await read(`frame_input:${latestN}`);
-      if (frameRaw) {
-        const parsed = JSON.parse(frameRaw);
-        const runtimeInput = parsed?.runtimeInput ?? {};
+      const parsed = latestN > 0 ? await XLN.readPersistedFrameJournal(env, latestN) : null;
+      if (parsed) {
+        const runtimeInput = parsed.runtimeInput ?? {};
         frameSummary = {
-          height: parsed?.height ?? null,
+          height: parsed.height ?? null,
           runtimeTxs: Array.isArray(runtimeInput.runtimeTxs) ? runtimeInput.runtimeTxs.map((tx: any) => tx?.type || 'unknown') : [],
           entityInputs: Array.isArray(runtimeInput.entityInputs)
             ? runtimeInput.entityInputs.map((input: any) => ({
@@ -591,16 +581,15 @@ async function runtimeDbMeta(page: Page) {
     }
     try {
       for (let h = 1; h <= latestN; h++) {
-        const raw = await read(`frame_input:${h}`);
-        if (!raw) {
+        const parsed = await XLN.readPersistedFrameJournal(env, h);
+        if (!parsed) {
           frameTimeline.push({ h, missing: true });
           continue;
         }
-        const parsed = JSON.parse(raw);
-        const runtimeInput = parsed?.runtimeInput ?? {};
+        const runtimeInput = parsed.runtimeInput ?? {};
         frameTimeline.push({
           h,
-          timestamp: Number(parsed?.timestamp ?? 0),
+          timestamp: Number(parsed.timestamp ?? 0),
           runtimeTxs: Array.isArray(runtimeInput.runtimeTxs)
             ? runtimeInput.runtimeTxs.map((tx: any) => tx?.type || 'unknown')
             : [],
@@ -634,9 +623,8 @@ async function runtimeDbMeta(page: Page) {
       frameTimeline.push({ parseError: true });
     }
     try {
-      const snapRaw = await read(`snapshot:${checkpointN}`);
-      if (snapRaw) {
-        const parsed = JSON.parse(snapRaw);
+      const parsed = checkpointN > 0 ? await XLN.readPersistedCheckpointSnapshot(env, checkpointN) : null;
+      if (parsed) {
         const eReps = parsed?.eReplicas;
         snapshotSummary = {
           height: parsed?.height ?? null,
@@ -650,12 +638,12 @@ async function runtimeDbMeta(page: Page) {
     }
     return {
       ok: true,
-      ns,
+      ns: String(env.dbNamespace || env.runtimeId || '').toLowerCase(),
       latest,
       checkpoint,
       hasFrameLatest,
       hasSnapshotLatest,
-      hasSnapshotCheckpoint: await read(`snapshot:${checkpointN}`) !== null,
+      hasSnapshotCheckpoint: checkpointN > 0 ? (await XLN.readPersistedCheckpointSnapshot(env, checkpointN)) !== null : false,
       frameSummary,
       frameTimeline,
       snapshotSummary,
@@ -776,7 +764,7 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
   test.setTimeout(120_000);
 
   test.beforeEach(async ({ page }) => {
-    await resetProdServer(page, {
+    await ensureE2EBaseline(page, {
       apiBaseUrl: API_BASE_URL,
       requireHubMesh: true,
       requireMarketMaker: false,
