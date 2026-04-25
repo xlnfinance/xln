@@ -59,7 +59,9 @@ contract Depository is ReentrancyGuardLite {
   // Immutable dispute timeout policy.
   // Delay selection is agreed off-chain and baked into the deployed jurisdiction,
   // not tuned via mutable admin setters.
-  uint256 public constant defaultDisputeDelay = 5; // fixed dispute window policy
+  // Fixed dispute window policy. Local tests fast-forward blocks explicitly;
+  // production deployments must not ship with a minutes-long challenge window.
+  uint256 public constant defaultDisputeDelay = 5760; // ~24h at 15s blocks
   
 
   mapping (bytes32 => mapping (uint => Debt[])) public _debts;

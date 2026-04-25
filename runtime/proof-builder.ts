@@ -362,11 +362,12 @@ export function createDisputeProofHashWithNonce(
 
 /**
  * Default dispute config (conservative)
- * 2 * 10 = 20 blocks delay for both sides
+ * Values are encoded in 10-block units. 576 * 10 = 5760 blocks,
+ * roughly 24 hours at 15-second block time.
  */
 export const DEFAULT_DISPUTE_CONFIG: DisputeConfig = {
-  leftDisputeDelay: 2,  // 20 blocks
-  rightDisputeDelay: 2, // 20 blocks
+  leftDisputeDelay: 576,
+  rightDisputeDelay: 576,
 };
 
 /**

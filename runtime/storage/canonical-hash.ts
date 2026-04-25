@@ -19,6 +19,8 @@ const normalizeEntityId = (value: string): string => String(value || '').toLower
 const hashCanonical = (value: unknown): string =>
   ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(value)));
 
+// Values are already canonicalized before sorting, so JSON.stringify is used
+// only as a stable byte comparator for tagged/sorted structures.
 const compareCanonical = (left: unknown, right: unknown): number =>
   JSON.stringify(left).localeCompare(JSON.stringify(right));
 

@@ -111,9 +111,9 @@ import type { SwapKey } from './swap-keys';
  *
  * 4. AccountInput (Bilateral consensus between two entities)
  *    ├─ height: number                 // Which frame we're ACKing
- *    ├─ prevSignatures: string[]       // ACK their previous frame
+ *    ├─ prevHanko: HankoString         // ACK hanko for their previous frame
  *    ├─ newAccountFrame: AccountFrame  // Our proposed frame
- *    ├─ newSignatures: string[]        // Signatures on new frame
+ *    ├─ newHanko: HankoString          // Hanko on newAccountFrame
  *    └─ disputeProofNonce: number       // nonce at dispute proof signing
  *
  * 5. AccountFrame (Agreed bilateral state - like a block)
@@ -152,7 +152,7 @@ import type { SwapKey } from './swap-keys';
  * Account Level (Bilateral):
  *   - Both sides must sign every frame (2-of-2 consensus)
  *   - Counter prevents replay attacks
- *   - prevSignatures ACK prevents forks
+ *   - prevHanko ACK prevents forks
  *   - State hash ensures deterministic state computation
  *   - Dispute resolution via on-chain proof submission
  *
