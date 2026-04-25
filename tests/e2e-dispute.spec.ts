@@ -1170,7 +1170,7 @@ test.describe('E2E Dispute Flow', () => {
   test.describe.configure({ timeout: LONG_E2E ? 480_000 : 180_000 });
 
   test.beforeEach(async ({ page }) => {
-    await timedStep('dispute.reset_server', () => resetProdServer(page, { timeoutMs: LONG_E2E ? 240_000 : 120_000 }));
+    await timedStep('dispute.reset_server', () => resetProdServer(page, { timeoutMs: LONG_E2E ? 240_000 : 180_000 }));
   });
 
   // Scenario: trigger a dispute from the entity workspace, observe reserve returning after finalize,

@@ -166,4 +166,43 @@ describe('relay-router gossip fanout', () => {
     expect(lastResponse).toBeDefined();
     expect(lastResponse?.payload?.profiles?.map((profile) => profile.entityId)).toEqual([ENTITY_B, ENTITY_A]);
   });
+
+  test('rebinds an already-identified socket if the client registry entry is lost', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const sentBySocket = new Map<FakeWs, unknown[]>();
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: (ws: FakeWs, raw: string) => {
+        const bucket = sentBySocket.get(ws) ?? [];
+        bucket.push(JSON.parse(raw));
+        sentBySocket.set(ws, bucket);
+      },
+    };
+    const wsA: FakeWs = { label: 'A' };
+
+    await relayRoute(config, wsA, { type: 'hello', from: RUNTIME_A, fromEncryptionPubKey: KEY_A });
+    expect(store.clients.get(RUNTIME_A)?.ws).toBe(wsA);
+
+    store.clients.clear();
+    expect(store.clients.size).toBe(0);
+
+    await relayRoute(config, wsA, {
+      type: 'gossip_request',
+      id: 'request-rebind',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      to: SERVER_RUNTIME_ID,
+      payload: {
+        ids: [],
+      },
+    });
+
+    expect(store.clients.get(RUNTIME_A)?.ws).toBe(wsA);
+    const responses = (sentBySocket.get(wsA) ?? []).filter(
+      (message) => (message as { type?: string }).type === 'gossip_response',
+    );
+    expect(responses.length).toBeGreaterThan(0);
+  });
 });

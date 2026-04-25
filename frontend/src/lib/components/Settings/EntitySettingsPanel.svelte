@@ -56,12 +56,7 @@
     { id: 'classic', label: 'Classic', style: LEGACY_UI_STYLE },
   ];
   const BALANCE_REFRESH_OPTIONS = [
-    { label: 'Off', value: 0 },
-    { label: '1s', value: 1000 },
-    { label: '5s', value: 5000 },
-    { label: '15s', value: 15000 },
-    { label: '30s', value: 30000 },
-    { label: '60s', value: 60000 },
+    { label: '1s fixed', value: 1000 },
   ];
 
   let activeTab: SettingsTab = requestedTab ?? 'wallet';
@@ -1109,7 +1104,7 @@
 
         <label class="setting-row stacked">
           <span class="setting-title">Balance Refresh</span>
-          <span class="setting-desc">How often wallet balances poll RPC. Hard-capped to once per second.</span>
+          <span class="setting-desc">One canonical wallet snapshot per second.</span>
           <select
             value={$settings.balanceRefreshMs ?? 1000}
             on:change={(event) => settingsOperations.setBalanceRefreshMs(Number((event.currentTarget as HTMLSelectElement).value))}

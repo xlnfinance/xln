@@ -354,7 +354,6 @@ export const applyEntityTx = async (
             jHeight: 0,
             accountTxs: [],
             prevFrameHash: '',
-            tokenIds: [],
             deltas: [],
             stateHash: '',
             byLeft: isLeft,

@@ -12,10 +12,20 @@
  */
 
 import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { createWriteStream, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import {
+  createWriteStream,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  readdirSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
+import { deriveQaTestDescription, deriveQaTestHandle } from '../qa-report';
 
 type CliArgs = {
   shards: number;
@@ -25,6 +35,7 @@ type CliArgs = {
   phaseWarnMs: number;
   anvilBin: string;
   maxFailures: number;
+  maxMmConcurrency: number;
   workersPerShard: number;
   videoMode: 'off' | 'on' | 'retain-on-failure' | 'on-first-retry';
   traceMode: 'off' | 'on' | 'retain-on-failure' | 'on-first-retry';
@@ -42,6 +53,7 @@ type RunResult = {
   durationMs: number;
   logPath: string;
   target: string;
+  title: string;
   requireMarketMaker: boolean;
   phaseMs: {
     preflight: number;
@@ -60,6 +72,8 @@ type RunTask = {
   pwTargets: string[];
   requireMarketMaker: boolean;
   usePlaywrightShard: boolean;
+  title?: string;
+  grep?: string;
 };
 
 type RunnerLockPayload = {
@@ -92,10 +106,12 @@ const parseArgs = (): CliArgs => {
 
   const shardsRaw = Number(getFlag('shards') || String(defaultShards));
   const basePortRaw = Number(getFlag('base-port') || '20000');
-  const stackTimeoutRaw = Number(getFlag('stack-timeout-ms') || '180000');
+  const defaultStackTimeoutMs = Math.min(420000, 180000 + Math.max(0, shardsRaw - 8) * 15000);
+  const stackTimeoutRaw = Number(getFlag('stack-timeout-ms') || String(defaultStackTimeoutMs));
   const testTimeoutRaw = Number(getFlag('test-timeout-ms') || (longMode ? '1200000' : '360000'));
   const phaseWarnRaw = Number(getFlag('phase-warn-ms') || '30000');
   const maxFailuresRaw = Number(getFlag('max-failures') || '1');
+  const maxMmConcurrencyRaw = Number(getFlag('max-mm-concurrency') || String(Math.min(2, shardsRaw || defaultShards)));
   const workersPerShardRaw = Number(getFlag('workers-per-shard') || '1');
   const videoRaw = String(getFlag('video') || 'on').toLowerCase();
   const traceRaw = String(getFlag('trace') || 'on-first-retry').toLowerCase();
@@ -112,19 +128,19 @@ const parseArgs = (): CliArgs => {
     mode === 'off' || mode === 'on' || mode === 'retain-on-failure' ? mode : 'on-first-retry';
   const coerceScreenshot = (mode: string): CliArgs['screenshotMode'] =>
     mode === 'off' || mode === 'on' ? mode : 'only-on-failure';
-  const coerceReporter = (mode: string): CliArgs['reporter'] =>
-    mode === 'list' || mode === 'dot' ? mode : 'line';
+  const coerceReporter = (mode: string): CliArgs['reporter'] => (mode === 'list' || mode === 'dot' ? mode : 'line');
 
   return {
     shards: Number.isFinite(shardsRaw) && shardsRaw > 0 ? Math.floor(shardsRaw) : 2,
     basePort: Number.isFinite(basePortRaw) && basePortRaw > 0 ? Math.floor(basePortRaw) : 20000,
     stackTimeoutMs: Number.isFinite(stackTimeoutRaw) && stackTimeoutRaw > 0 ? Math.floor(stackTimeoutRaw) : 180000,
-    testTimeoutMs: Number.isFinite(testTimeoutRaw) && testTimeoutRaw > 0
-      ? Math.floor(testTimeoutRaw)
-      : (longMode ? 1200000 : 360000),
+    testTimeoutMs:
+      Number.isFinite(testTimeoutRaw) && testTimeoutRaw > 0 ? Math.floor(testTimeoutRaw) : longMode ? 1200000 : 360000,
     phaseWarnMs: Number.isFinite(phaseWarnRaw) && phaseWarnRaw > 0 ? Math.floor(phaseWarnRaw) : 30000,
     anvilBin: getFlag('anvil-bin') || 'anvil',
     maxFailures: Number.isFinite(maxFailuresRaw) && maxFailuresRaw >= 0 ? Math.floor(maxFailuresRaw) : 1,
+    maxMmConcurrency:
+      Number.isFinite(maxMmConcurrencyRaw) && maxMmConcurrencyRaw > 0 ? Math.floor(maxMmConcurrencyRaw) : 2,
     workersPerShard: Number.isFinite(workersPerShardRaw) && workersPerShardRaw > 0 ? Math.floor(workersPerShardRaw) : 1,
     videoMode: coerceVideo(videoRaw),
     traceMode: coerceTrace(traceRaw),
@@ -188,9 +204,7 @@ const acquireRunnerLock = (): (() => void) => {
     } catch {
       const existing = readRunnerLock();
       if (existing && pidIsAlive(existing.pid)) {
-        throw new Error(
-          `RUNNER_LOCKED pid=${existing.pid} startedAt=${existing.startedAt} path=${RUNNER_LOCK_PATH}`,
-        );
+        throw new Error(`RUNNER_LOCKED pid=${existing.pid} startedAt=${existing.startedAt} path=${RUNNER_LOCK_PATH}`);
       }
       try {
         unlinkSync(RUNNER_LOCK_PATH);
@@ -274,7 +288,8 @@ const collectShardArtifacts = (
 ): Array<{ name: string; relativePath: string; sizeBytes: number; kind: string; contentType: string }> => {
   const resultsDir = join(logsDir, `test-results-shard-${shard}`);
   if (!existsSync(resultsDir)) return [];
-  const artifacts: Array<{ name: string; relativePath: string; sizeBytes: number; kind: string; contentType: string }> = [];
+  const artifacts: Array<{ name: string; relativePath: string; sizeBytes: number; kind: string; contentType: string }> =
+    [];
 
   const walk = (dir: string): void => {
     for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -313,7 +328,9 @@ const readShardLastRunStatus = (logsDir: string, shard: number): 'passed' | 'fai
 const readShardTitle = (logsDir: string, shard: number): string | null => {
   const resultsDir = join(logsDir, `test-results-shard-${shard}`);
   if (!existsSync(resultsDir)) return null;
-  const entry = readdirSync(resultsDir, { withFileTypes: true }).find((item) => item.isDirectory() && !item.name.startsWith('.'));
+  const entry = readdirSync(resultsDir, { withFileTypes: true }).find(
+    item => item.isDirectory() && !item.name.startsWith('.'),
+  );
   return entry?.name ?? null;
 };
 
@@ -327,27 +344,34 @@ const writeRunManifest = (
   const shards = results
     .slice()
     .sort((a, b) => a.shard - b.shard)
-    .map((result) => {
-      const slowSteps = parseStepTimings(result.logPath).sort((a, b) => b.ms - a.ms).slice(0, 12);
+    .map(result => {
+      const slowSteps = parseStepTimings(result.logPath)
+        .sort((a, b) => b.ms - a.ms)
+        .slice(0, 12);
       const artifacts = collectShardArtifacts(logsDir, result.shard);
       return {
         shard: result.shard,
-        status: readShardLastRunStatus(logsDir, result.shard) === 'unknown' ? result.status : readShardLastRunStatus(logsDir, result.shard),
+        status:
+          readShardLastRunStatus(logsDir, result.shard) === 'unknown'
+            ? result.status
+            : readShardLastRunStatus(logsDir, result.shard),
         durationMs: result.durationMs,
+        handle: deriveQaTestHandle(result.target, result.title),
+        description: deriveQaTestDescription(result.target, result.title),
         target: result.target,
-        title: readShardTitle(logsDir, result.shard),
+        title: result.title || readShardTitle(logsDir, result.shard),
         requireMarketMaker: result.requireMarketMaker,
         error: result.error ?? null,
         phaseMs: result.phaseMs,
         logRelativePath: result.logPath.slice(logsDir.length + 1),
         slowSteps,
         artifacts,
-        hasVideo: artifacts.some((artifact) => artifact.kind === 'video'),
-        hasTrace: artifacts.some((artifact) => artifact.kind === 'trace'),
+        hasVideo: artifacts.some(artifact => artifact.kind === 'video'),
+        hasTrace: artifacts.some(artifact => artifact.kind === 'trace'),
       };
     });
-  const passedShards = shards.filter((shard) => shard.status === 'passed').length;
-  const failedShards = shards.filter((shard) => shard.status === 'failed').length;
+  const passedShards = shards.filter(shard => shard.status === 'passed').length;
+  const failedShards = shards.filter(shard => shard.status === 'failed').length;
   const manifest = {
     manifestVersion: 1,
     runId: logsDir.split('/').at(-1) || logsDir,
@@ -383,6 +407,24 @@ const publishQaRunIfConfigured = (logsDir: string): void => {
   const runId = logsDir.split('/').at(-1) || 'run';
   const remoteTarget = `${remoteBase.replace(/\/+$/, '')}/${runId}/`;
   const startedAt = Date.now();
+  const remoteMatch = remoteBase.match(/^([^:]+):(.+)$/);
+  if (remoteMatch) {
+    const [, remoteHost, remotePath] = remoteMatch;
+    const mkdirResult = spawnSync('ssh', [remoteHost, 'mkdir', '-p', remotePath], {
+      stdio: 'pipe',
+      encoding: 'utf8',
+    });
+    if (mkdirResult.status !== 0) {
+      const stderr = String(mkdirResult.stderr || '').trim();
+      const stdout = String(mkdirResult.stdout || '').trim();
+      console.warn(`[qa] publish mkdir failed target=${remoteBase} status=${mkdirResult.status ?? 'null'}`);
+      if (stdout) console.warn(`[qa] publish mkdir stdout: ${stdout}`);
+      if (stderr) console.warn(`[qa] publish mkdir stderr: ${stderr}`);
+      return;
+    }
+  } else {
+    mkdirSync(remoteBase, { recursive: true });
+  }
   const result = spawnSync('rsync', ['-az', `${logsDir}/`, remoteTarget], {
     stdio: 'pipe',
     encoding: 'utf8',
@@ -400,12 +442,90 @@ const publishQaRunIfConfigured = (logsDir: string): void => {
   if (stderr) console.warn(`[qa] publish stderr: ${stderr}`);
 };
 
-const expandPlaywrightTargets = (pwFiles: string[]): Array<{ target: string; requireMarketMaker: boolean }> => {
-  const out: Array<{ target: string; requireMarketMaker: boolean }> = [];
-  const requiresMarketMaker = (file: string): boolean => !/e2e-swap-isolated\.spec\.ts$/.test(file);
-  const unsplittableSpecs = new Set<string>([
-    'tests/e2e-active-tab-lock.spec.ts',
-  ]);
+type PlaywrightTarget = {
+  target: string;
+  requireMarketMaker: boolean;
+  title?: string;
+  grep?: string;
+};
+
+const extractTopLevelTestTitle = (line: string): string | undefined => {
+  const match = line.match(/^\s*test(?:\.(?:only|fail))?\(\s*(['"`])((?:\\.|.)*?)\1/);
+  return match?.[2]?.replace(/\\(['"`])/g, '$1').trim() || undefined;
+};
+
+const buildGrepMatcher = (grep: string): ((entry: PlaywrightTarget) => boolean) => {
+  try {
+    const pattern = new RegExp(grep);
+    return entry => pattern.test(entry.title || entry.target);
+  } catch {
+    const needle = grep.toLowerCase();
+    return entry => `${entry.title || ''} ${entry.target}`.toLowerCase().includes(needle);
+  }
+};
+
+const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+const collectSpecsFromSuite = (suite: any, out: Array<{ title: string; file?: string; line?: number }>): void => {
+  for (const spec of suite?.specs ?? []) {
+    const title = String(spec?.title || '').trim();
+    if (!title) continue;
+    out.push({
+      title,
+      file: typeof spec?.file === 'string' ? spec.file : undefined,
+      line: Number.isFinite(Number(spec?.line)) ? Number(spec.line) : undefined,
+    });
+  }
+  for (const child of suite?.suites ?? []) collectSpecsFromSuite(child, out);
+};
+
+const listDynamicPlaywrightTargets = (
+  file: string,
+  requiresMarketMaker: (file: string) => boolean,
+): PlaywrightTarget[] => {
+  const env = {
+    ...process.env,
+    PW_SKIP_WEBSERVER: '1',
+    PW_BASE_URL: process.env['PW_BASE_URL'] || 'https://localhost:1',
+    E2E_BASE_URL: process.env['E2E_BASE_URL'] || 'https://localhost:1',
+    E2E_API_BASE_URL: process.env['E2E_API_BASE_URL'] || 'http://127.0.0.1:1',
+    E2E_ANVIL_RPC: process.env['E2E_ANVIL_RPC'] || 'http://127.0.0.1:1',
+    E2E_RESET_BASE_URL: process.env['E2E_RESET_BASE_URL'] || 'http://127.0.0.1:1',
+  };
+  const res = Bun.spawnSync(
+    ['bunx', 'playwright', 'test', '--config', 'playwright.config.ts', '--list', '--reporter=json', file],
+    {
+      cwd: process.cwd(),
+      env,
+      stdout: 'pipe',
+      stderr: 'pipe',
+    },
+  );
+  const stdout = Buffer.from(res.stdout).toString('utf8').trim();
+  let parsed: any = null;
+  try {
+    parsed = JSON.parse(stdout);
+  } catch {
+    const stderr = Buffer.from(res.stderr).toString('utf8').trim();
+    throw new Error(`Failed to list tests for ${file}: ${stderr || stdout || `exit=${String(res.exitCode)}`}`);
+  }
+  const specs: Array<{ title: string; file?: string; line?: number }> = [];
+  for (const suite of parsed?.suites ?? []) collectSpecsFromSuite(suite, specs);
+  if (specs.length === 0) {
+    throw new Error(`No isolated tests discovered for ${file}`);
+  }
+  return specs.map(spec => ({
+    target: file,
+    requireMarketMaker: requiresMarketMaker(file),
+    title: spec.title,
+    grep: escapeRegExp(spec.title),
+  }));
+};
+
+const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
+  const out: PlaywrightTarget[] = [];
+  const requiresMarketMaker = (file: string): boolean => /e2e-swap\.spec\.ts$/.test(file);
+  const unsplittableSpecs = new Set<string>();
   const updateBraceDepth = (line: string, depth: number): number => {
     let next = depth;
     let inSingle = false;
@@ -447,10 +567,22 @@ const expandPlaywrightTargets = (pwFiles: string[]): Array<{ target: string; req
   };
 
   for (const file of pwFiles) {
+    const explicitLineTarget = file.match(/^(.+\.spec\.ts):\d+(?::\d+)?$/);
+    if (explicitLineTarget) {
+      const sourceFile = explicitLineTarget[1]!;
+      out.push({
+        target: file,
+        requireMarketMaker: requiresMarketMaker(sourceFile),
+        title: file,
+      });
+      continue;
+    }
+
     if (unsplittableSpecs.has(file)) {
       out.push({
         target: file,
         requireMarketMaker: requiresMarketMaker(file),
+        title: file,
       });
       continue;
     }
@@ -462,22 +594,19 @@ const expandPlaywrightTargets = (pwFiles: string[]): Array<{ target: string; req
     let braceDepth = 0;
     for (let i = 0; i < lines.length; i++) {
       const line = lines[i] || '';
-      const matchesTopLevelTest =
-        braceDepth <= 1 && /^\s*test(?:\.(?:only|fail))?\(/.test(line);
+      const matchesTopLevelTest = braceDepth <= 1 && /^\s*test(?:\.(?:only|fail))?\(/.test(line);
       if (matchesTopLevelTest) {
         out.push({
           target: `${file}:${i + 1}`,
           requireMarketMaker: requiresMarketMaker(file),
+          title: extractTopLevelTestTitle(line) || `${file}:${i + 1}`,
         });
         added += 1;
       }
       braceDepth = updateBraceDepth(line, braceDepth);
     }
     if (added === 0) {
-      out.push({
-        target: file,
-        requireMarketMaker: requiresMarketMaker(file),
-      });
+      out.push(...listDynamicPlaywrightTargets(file, requiresMarketMaker));
     }
   }
   return out;
@@ -500,18 +629,15 @@ const listPlaywrightSpecFiles = (): string[] => {
   const text = Buffer.from(res.stdout).toString('utf8');
   return text
     .split('\n')
-    .map((line) => line.trim())
-    .filter((line) => line.endsWith('.spec.ts'))
-    .filter((line) => !excludedDefaultSpecs.has(line))
+    .map(line => line.trim())
+    .filter(line => line.endsWith('.spec.ts'))
+    .filter(line => !excludedDefaultSpecs.has(line))
     .sort();
 };
 
-const waitForProcessExit = async (
-  proc: ChildProcessWithoutNullStreams,
-  timeoutMs: number,
-): Promise<boolean> => {
+const waitForProcessExit = async (proc: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<boolean> => {
   if (proc.exitCode !== null) return true;
-  return await new Promise<boolean>((resolve) => {
+  return await new Promise<boolean>(resolve => {
     let settled = false;
     const finish = (value: boolean) => {
       if (settled) return;
@@ -559,16 +685,15 @@ const pidsOnPort = (port: number): number[] => {
     .filter(v => Number.isFinite(v) && v > 0);
 };
 
-const freePort = async (
-  port: number,
-  log?: ReturnType<typeof createWriteStream>,
-): Promise<void> => {
+const freePort = async (port: number, log?: ReturnType<typeof createWriteStream>): Promise<void> => {
   const first = pidsOnPort(port).filter(pid => pid !== process.pid);
   if (first.length === 0) return;
 
   log?.write(`[preflight] port ${port} busy by pids=${first.join(',')} -> SIGTERM\n`);
   for (const pid of first) {
-    try { process.kill(pid, 'SIGTERM'); } catch {}
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {}
   }
   await delay(300);
 
@@ -576,7 +701,9 @@ const freePort = async (
   if (second.length > 0) {
     log?.write(`[preflight] port ${port} still busy by pids=${second.join(',')} -> SIGKILL\n`);
     for (const pid of second) {
-      try { process.kill(pid, 'SIGKILL'); } catch {}
+      try {
+        process.kill(pid, 'SIGKILL');
+      } catch {}
     }
     await delay(150);
   }
@@ -585,6 +712,63 @@ const freePort = async (
   if (remain.length > 0) {
     throw new Error(`Port ${port} still in use after cleanup: ${remain.join(',')}`);
   }
+};
+
+type ProcessTableEntry = { pid: number; command: string };
+
+const readProcessTable = (): ProcessTableEntry[] => {
+  const res = Bun.spawnSync(['ps', '-axo', 'pid=,command='], {
+    cwd: process.cwd(),
+    stdout: 'pipe',
+    stderr: 'ignore',
+  });
+  return Buffer.from(res.stdout)
+    .toString('utf8')
+    .split(/\r?\n/)
+    .map((line): ProcessTableEntry | null => {
+      const match = line.match(/^\s*(\d+)\s+(.+)$/);
+      if (!match) return null;
+      const pid = Number.parseInt(match[1]!, 10);
+      if (!Number.isFinite(pid) || pid <= 0 || pid === process.pid) return null;
+      return { pid, command: match[2]!.trim() };
+    })
+    .filter((row): row is ProcessTableEntry => row !== null);
+};
+
+const killPids = async (pids: number[], label: string): Promise<void> => {
+  const unique = Array.from(new Set(pids)).filter(pid => pid > 0 && pid !== process.pid);
+  if (unique.length === 0) return;
+  console.warn(`[preflight] killing stale ${label}: ${unique.join(',')}`);
+  for (const pid of unique) {
+    try {
+      process.kill(pid, 'SIGTERM');
+    } catch {}
+  }
+  await delay(1_000);
+  for (const pid of unique) {
+    if (!pidIsAlive(pid)) continue;
+    try {
+      process.kill(pid, 'SIGKILL');
+    } catch {}
+  }
+  await delay(250);
+};
+
+const reapStaleIsolatedE2EProcesses = async (currentLogsDir: string): Promise<void> => {
+  const marker = `${resolve(process.cwd(), '.logs', 'e2e-parallel')}/`;
+  const currentMarker = `${currentLogsDir}/`;
+  const stalePids = readProcessTable()
+    .filter(({ command }) => command.includes(marker) && !command.includes(currentMarker))
+    .filter(
+      ({ command }) =>
+        command.includes('runtime/orchestrator/orchestrator.ts') ||
+        command.includes('runtime/orchestrator/hub-node.ts') ||
+        command.includes('runtime/orchestrator/mm-node.ts') ||
+        command.includes(' --state ') ||
+        command.includes('vite-cache-shard-'),
+    )
+    .map(({ pid }) => pid);
+  await killPids(stalePids, 'isolated e2e process(es)');
 };
 
 const waitForRpcReady = async (rpcUrl: string, timeoutMs: number): Promise<void> => {
@@ -597,7 +781,7 @@ const waitForRpcReady = async (rpcUrl: string, timeoutMs: number): Promise<void>
         body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
       });
       if (res.ok) {
-        const body = await res.json() as any;
+        const body = (await res.json()) as any;
         const chainId = Number.parseInt(String(body?.result || '0x0'), 16);
         if (chainId === 31337) return;
       }
@@ -643,9 +827,8 @@ const waitForServerHealthy = async (apiUrl: string, timeoutMs: number): Promise<
     }
     await delay(250);
   }
-  const marketMakerPhase = typeof lastHealth?.marketMaker?.startupPhase === 'string'
-    ? lastHealth.marketMaker.startupPhase
-    : null;
+  const marketMakerPhase =
+    typeof lastHealth?.marketMaker?.startupPhase === 'string' ? lastHealth.marketMaker.startupPhase : null;
   const snapshot = lastHealth
     ? JSON.stringify(
         {
@@ -664,16 +847,18 @@ const waitForServerHealthy = async (apiUrl: string, timeoutMs: number): Promise<
         2,
       )
     : 'no-health-payload';
-  throw new Error(`SERVER_HEALTH_TIMEOUT phase=${String(marketMakerPhase)} api=${apiUrl} timeoutMs=${timeoutMs}\n${snapshot}`);
+  throw new Error(
+    `SERVER_HEALTH_TIMEOUT phase=${String(marketMakerPhase)} api=${apiUrl} timeoutMs=${timeoutMs}\n${snapshot}`,
+  );
 };
 
 const waitForHttpsReady = async (url: string, timeoutMs: number): Promise<void> => {
   // Use curl -k for self-signed local certs.
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const ok = await new Promise<boolean>((resolve) => {
+    const ok = await new Promise<boolean>(resolve => {
       const p = spawn('curl', ['-k', '-sSf', url], { stdio: 'ignore' });
-      p.once('exit', (code) => resolve(code === 0));
+      p.once('exit', code => resolve(code === 0));
       p.once('error', () => resolve(false));
     });
     if (ok) return;
@@ -718,13 +903,88 @@ const runCmd = async (
   return code;
 };
 
+const fetchJsonWithTimeout = async (url: string, timeoutMs = 2000): Promise<unknown | null> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    if (!response.ok) return null;
+    return await response.json();
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
+const captureShardFailureForensics = async (options: {
+  logsDir: string;
+  shard: number;
+  apiUrl: string;
+  log: ReturnType<typeof createWriteStream>;
+}): Promise<void> => {
+  const outputDir = join(options.logsDir, `test-results-shard-${options.shard}`, 'failure-debug');
+  mkdirSync(outputDir, { recursive: true });
+
+  const health = await fetchJsonWithTimeout(`${options.apiUrl}/api/health`);
+  if (health) {
+    writeFileSync(join(outputDir, 'health.json'), JSON.stringify(health, null, 2));
+  }
+
+  const entities = await fetchJsonWithTimeout(`${options.apiUrl}/api/debug/entities?limit=5000`);
+  if (entities) {
+    writeFileSync(join(outputDir, 'entities.json'), JSON.stringify(entities, null, 2));
+  }
+
+  const events = await fetchJsonWithTimeout(`${options.apiUrl}/api/debug/events?last=500`);
+  if (events) {
+    writeFileSync(join(outputDir, 'events.json'), JSON.stringify(events, null, 2));
+  }
+
+  const entityEntries = Array.isArray((entities as { entities?: unknown })?.entities)
+    ? (entities as { entities: Array<Record<string, unknown>> }).entities
+    : [];
+
+  for (const entry of entityEntries) {
+    const runtimeId = typeof entry.runtimeId === 'string' ? entry.runtimeId.trim() : '';
+    const dbPath = typeof entry.dbPath === 'string' ? entry.dbPath.trim() : '';
+    const entityId = typeof entry.entityId === 'string' ? entry.entityId.trim().toLowerCase() : 'unknown';
+    if (!runtimeId || !dbPath) continue;
+
+    const receiptDump = spawnSync(
+      'bun',
+      ['runtime/scripts/read-frame-receipts.ts', '--runtime-id', runtimeId, '--tail', '20', '--json'],
+      {
+        cwd: process.cwd(),
+        env: sanitizeChildEnv({
+          ...process.env,
+          XLN_DB_PATH: dbPath,
+        }),
+        encoding: 'utf8',
+      },
+    );
+
+    if (receiptDump.status === 0 && receiptDump.stdout) {
+      writeFileSync(join(outputDir, `receipts-${entityId.slice(-8)}.json`), receiptDump.stdout);
+      continue;
+    }
+
+    const stderr = String(receiptDump.stderr || '').trim();
+    if (stderr) {
+      writeFileSync(join(outputDir, `receipts-${entityId.slice(-8)}.error.txt`), stderr);
+    }
+  }
+
+  options.log.write(`[forensics] wrote failure debug bundle: ${outputDir}\n`);
+};
+
 const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<RunResult> => {
   const shard = task.shard;
   const totalShards = task.totalShards;
   const startedAt = Date.now();
   const logPath = join(logsDir, `e2e-shard-${String(shard).padStart(2, '0')}.log`);
   const log = createWriteStream(logPath, { flags: 'w' });
- 
+
   let anvil: ChildProcessWithoutNullStreams | null = null;
   let api: ChildProcessWithoutNullStreams | null = null;
   let vite: ChildProcessWithoutNullStreams | null = null;
@@ -736,7 +996,8 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
   const apiUrl = `http://127.0.0.1:${apiPort}`;
   const webUrl = `https://localhost:${webPort}`;
   const dbPath = join(logsDir, `db-e2e-shard-${shard}`);
-  const anvilStatePath = join(dbPath, 'anvil-state.json');
+  // Keep anvil's live state outside orchestrator dbRoot. Reset intentionally rm -rf's dbRoot.
+  const anvilStatePath = join(logsDir, `anvil-state-shard-${shard}.json`);
   mkdirSync(dbPath, { recursive: true });
 
   const phaseMs: RunResult['phaseMs'] = {
@@ -775,38 +1036,59 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
     markPhase('preflight', preflightStart);
 
     const anvilStart = Date.now();
-    anvil = spawn(args.anvilBin, [
-      '--host', '127.0.0.1',
-      '--port', String(rpcPort),
-      '--chain-id', '31337',
-      '--block-gas-limit', '60000000',
-      '--code-size-limit', '65536',
-      '--state', anvilStatePath,
-      '--silent',
-    ], { stdio: ['ignore', 'pipe', 'pipe'], env: sanitizeChildEnv(process.env) });
+    anvil = spawn(
+      args.anvilBin,
+      [
+        '--host',
+        '127.0.0.1',
+        '--port',
+        String(rpcPort),
+        '--chain-id',
+        '31337',
+        '--block-gas-limit',
+        '60000000',
+        '--code-size-limit',
+        '65536',
+        '--state',
+        anvilStatePath,
+        '--silent',
+      ],
+      { stdio: ['ignore', 'pipe', 'pipe'], env: sanitizeChildEnv(process.env) },
+    );
     anvil.stdout.on('data', c => log.write(`[anvil] ${c.toString()}`));
     anvil.stderr.on('data', c => log.write(`[anvil:err] ${c.toString()}`));
     await waitForRpcReady(rpcUrl, args.stackTimeoutMs);
     markPhase('anvilBoot', anvilStart);
 
     const apiStart = Date.now();
-    api = spawn('bun', [
-      'runtime/orchestrator/orchestrator.ts',
-      '--host', '127.0.0.1',
-      '--port', String(apiPort),
-      '--public-ws-base-url', `ws://127.0.0.1:${apiPort}`,
-      '--rpc-url', rpcUrl,
-      '--db-root', dbPath,
-      '--allow-reset',
-      ...(task.requireMarketMaker ? ['--mm'] : []),
-    ], {
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: sanitizeChildEnv({
-        ...process.env,
-        USE_ANVIL: 'true',
-        ANVIL_RPC: rpcUrl,
-      }),
-    });
+    api = spawn(
+      'bun',
+      [
+        'runtime/orchestrator/orchestrator.ts',
+        '--host',
+        '127.0.0.1',
+        '--port',
+        String(apiPort),
+        '--public-ws-base-url',
+        `ws://127.0.0.1:${apiPort}`,
+        '--rpc-url',
+        rpcUrl,
+        '--db-root',
+        dbPath,
+        '--allow-reset',
+        ...(task.requireMarketMaker ? ['--mm'] : []),
+      ],
+      {
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: sanitizeChildEnv({
+          ...process.env,
+          USE_ANVIL: 'true',
+          ANVIL_RPC: rpcUrl,
+          XLN_SKIP_STALE_REAP: '1',
+          XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(args.stackTimeoutMs),
+        }),
+      },
+    );
     api.stdout.on('data', c => log.write(`[api] ${c.toString()}`));
     api.stderr.on('data', c => log.write(`[api:err] ${c.toString()}`));
     await waitForHttpReady(`${apiUrl}/api`, args.stackTimeoutMs);
@@ -817,35 +1099,46 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
 
     const shardViteCacheDir = join(logsDir, `vite-cache-shard-${shard}`);
     const viteStart = Date.now();
-    vite = spawn('bun', ['run', 'preview', '--', '--host', '0.0.0.0', '--port', String(webPort), '--strictPort'], {
-      cwd: resolve(process.cwd(), 'frontend'),
-      stdio: ['ignore', 'pipe', 'pipe'],
-      env: sanitizeChildEnv({
-        ...process.env,
-        ANVIL_RPC: rpcUrl,
-        RPC_ETHEREUM: rpcUrl,
-        VITE_DEV_PORT: String(webPort),
-        VITE_API_PROXY_TARGET: apiUrl,
-        VITE_CACHE_DIR: shardViteCacheDir,
-      }),
-    });
+    // Spawn Vite directly. `bun run preview` starts an extra child node
+    // process, so killing the Bun wrapper can leave `node .../vite preview`
+    // alive until the next global preflight cleanup.
+    vite = spawn(
+      'node',
+      [
+        resolve(process.cwd(), 'frontend', 'node_modules', 'vite', 'bin', 'vite.js'),
+        'preview',
+        '--host',
+        '0.0.0.0',
+        '--port',
+        String(webPort),
+        '--strictPort',
+      ],
+      {
+        cwd: resolve(process.cwd(), 'frontend'),
+        stdio: ['ignore', 'pipe', 'pipe'],
+        env: sanitizeChildEnv({
+          ...process.env,
+          ANVIL_RPC: rpcUrl,
+          RPC_ETHEREUM: rpcUrl,
+          VITE_DEV_PORT: String(webPort),
+          VITE_API_PROXY_TARGET: apiUrl,
+          VITE_CACHE_DIR: shardViteCacheDir,
+        }),
+      },
+    );
     vite.stdout.on('data', c => log.write(`[vite] ${c.toString()}`));
     vite.stderr.on('data', c => log.write(`[vite:err] ${c.toString()}`));
     await waitForHttpsReady(webUrl, args.stackTimeoutMs);
     markPhase('viteBoot', viteStart);
 
     const shardArg = `${shard + 1}/${totalShards}`;
-    const playwrightArgs = [
-      'playwright',
-      'test',
-      '--config',
-      'playwright.config.ts',
-    ];
+    const playwrightArgs = ['playwright', 'test', '--config', 'playwright.config.ts'];
     if (task.usePlaywrightShard) {
       playwrightArgs.push('--shard', shardArg);
     }
-    if (args.pwGrep) {
-      playwrightArgs.push('--grep', args.pwGrep);
+    const grep = task.grep || args.pwGrep;
+    if (grep) {
+      playwrightArgs.push('--grep', grep);
     }
     if (args.pwProject) {
       playwrightArgs.push(`--project=${args.pwProject}`);
@@ -857,42 +1150,45 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
     log.write(`[runner] playwright args: ${JSON.stringify(playwrightArgs)}\n`);
 
     const playwrightStart = Date.now();
-    const code = await runCmd(
-      'bunx',
-      playwrightArgs,
-      {
-        env: {
-          ...process.env,
-          PW_BASE_URL: webUrl,
-          PW_SKIP_WEBSERVER: '1',
-          PW_WORKERS: String(args.workersPerShard),
-          PW_VIDEO: args.videoMode,
-          PW_TRACE: args.traceMode,
-          PW_SCREENSHOT: args.screenshotMode,
-          PW_SIMPLE_REPORTER: '1',
-          PW_REPORTER: args.reporter,
-          PW_OUTPUT_DIR: join(logsDir, `test-results-shard-${shard}`),
-          E2E_BASE_URL: webUrl,
-          E2E_API_BASE_URL: apiUrl,
-          E2E_ANVIL_RPC: rpcUrl,
-          E2E_RESET_BASE_URL: apiUrl,
-          E2E_FAST: process.env.E2E_FAST ?? '1',
-          E2E_ISOLATED_BASELINE_READY: '1',
-          XLN_INCLUDE_MARKET_MAKER: task.requireMarketMaker ? '1' : '0',
-        },
-        log,
-        timeoutMs: args.testTimeoutMs,
+    const code = await runCmd('bunx', playwrightArgs, {
+      env: {
+        ...process.env,
+        PW_BASE_URL: webUrl,
+        PW_SKIP_WEBSERVER: '1',
+        PW_WORKERS: String(args.workersPerShard),
+        PW_VIDEO: args.videoMode,
+        PW_TRACE: args.traceMode,
+        PW_SCREENSHOT: args.screenshotMode,
+        PW_SIMPLE_REPORTER: '1',
+        PW_REPORTER: args.reporter,
+        PW_OUTPUT_DIR: join(logsDir, `test-results-shard-${shard}`),
+        E2E_BASE_URL: webUrl,
+        E2E_API_BASE_URL: apiUrl,
+        E2E_ANVIL_RPC: rpcUrl,
+        E2E_RESET_BASE_URL: apiUrl,
+        E2E_FAST: process.env.E2E_FAST ?? '1',
+        E2E_ISOLATED_BASELINE_READY: '1',
+        XLN_INCLUDE_MARKET_MAKER: task.requireMarketMaker ? '1' : '0',
       },
-    );
+      log,
+      timeoutMs: args.testTimeoutMs,
+    });
     markPhase('playwright', playwrightStart);
 
     if (code !== 0) {
+      await captureShardFailureForensics({
+        logsDir,
+        shard,
+        apiUrl,
+        log,
+      });
       return {
         shard,
         status: 'failed',
         durationMs: Date.now() - startedAt,
         logPath,
         target: task.pwTargets[0] || `shard-${task.shard}`,
+        title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
         requireMarketMaker: task.requireMarketMaker,
         phaseMs,
         error: `playwright_exit_${code}`,
@@ -905,33 +1201,39 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
       durationMs: Date.now() - startedAt,
       logPath,
       target: task.pwTargets[0] || `shard-${task.shard}`,
+      title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
       requireMarketMaker: task.requireMarketMaker,
       phaseMs,
     };
   } catch (error) {
     teardownReason = (error as Error).message;
+    try {
+      await captureShardFailureForensics({
+        logsDir,
+        shard,
+        apiUrl,
+        log,
+      });
+    } catch {
+      // Best effort only.
+    }
     return {
       shard,
       status: 'failed',
       durationMs: Date.now() - startedAt,
       logPath,
       target: task.pwTargets[0] || `shard-${task.shard}`,
+      title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
       requireMarketMaker: task.requireMarketMaker,
       phaseMs,
       error: (error as Error).message,
     };
   } finally {
     if (teardownReason && api && api.exitCode === null) {
-      const teardownLabel = phaseMs.apiHealthy > 0
-        ? 'shard teardown'
-        : 'startup failure';
+      const teardownLabel = phaseMs.apiHealthy > 0 ? 'shard teardown' : 'startup failure';
       log.write(`[runner] ${teardownLabel} -> SIGTERM api pid=${api.pid} reason=${teardownReason.split('\n')[0]}\n`);
     }
-    await Promise.all([
-      stopProcess(vite),
-      stopProcess(api),
-      stopProcess(anvil),
-    ]);
+    await Promise.all([stopProcess(vite), stopProcess(api), stopProcess(anvil)]);
     log.end();
   }
 };
@@ -948,6 +1250,7 @@ async function main(): Promise<void> {
   console.log(`Shards   : ${args.shards}`);
   console.log(`BasePort : ${args.basePort}`);
   console.log(`Workers/shard: ${args.workersPerShard}`);
+  console.log(`MM concurrency: ${args.maxMmConcurrency}`);
   console.log(`Max failures : ${args.maxFailures}`);
   console.log(`Phase warn ms: ${args.phaseWarnMs}`);
   console.log(`Artifacts    : video=${args.videoMode}, trace=${args.traceMode}, screenshot=${args.screenshotMode}`);
@@ -981,6 +1284,7 @@ async function main(): Promise<void> {
 
     try {
       await assertRunnerPreflight();
+      await reapStaleIsolatedE2EProcesses(logsDir);
     } catch (error) {
       console.error(`❌ runner preflight failed: ${String(error instanceof Error ? error.message : error)}`);
       process.exit(1);
@@ -988,34 +1292,71 @@ async function main(): Promise<void> {
 
     const startedAt = Date.now();
     const sourceFiles = args.pwFiles.length > 0 ? args.pwFiles : listPlaywrightSpecFiles();
-    const expandedTargets = args.pwFiles.length > 0
-      ? sourceFiles.map((file) => ({
-          target: file,
-          requireMarketMaker: !/e2e-swap-isolated\.spec\.ts$/.test(file),
-        }))
-      : args.pwGrep
-        ? sourceFiles.map((file) => ({
-            target: file,
-            requireMarketMaker: !/e2e-swap-isolated\.spec\.ts$/.test(file),
-          }))
-        : expandPlaywrightTargets(sourceFiles);
+    let expandedTargets = expandPlaywrightTargets(sourceFiles);
+    if (args.pwGrep) {
+      const matchesGrep = buildGrepMatcher(args.pwGrep);
+      expandedTargets = expandedTargets.filter(matchesGrep);
+      if (expandedTargets.length === 0) {
+        throw new Error(`No isolated test targets matched --pw-grep=${args.pwGrep}`);
+      }
+    }
     const tasks: RunTask[] = expandedTargets.map((entry, index, entries) => ({
       shard: index,
       totalShards: entries.length,
       pwTargets: [entry.target],
       requireMarketMaker: entry.requireMarketMaker,
       usePlaywrightShard: false,
+      title: entry.title,
+      grep: entry.grep,
     }));
+    writeFileSync(
+      join(logsDir, 'targets.json'),
+      JSON.stringify(
+        tasks.map(task => ({
+          shard: task.shard,
+          target: task.pwTargets[0],
+          title: task.title || task.pwTargets[0],
+          handle: deriveQaTestHandle(task.pwTargets[0], task.title || task.pwTargets[0]),
+          description: deriveQaTestDescription(task.pwTargets[0], task.title || task.pwTargets[0]),
+          requireMarketMaker: task.requireMarketMaker,
+          grep: task.grep,
+        })),
+        null,
+        2,
+      ),
+    );
+    console.log(`Targets  : ${tasks.length} isolated test stack${tasks.length === 1 ? '' : 's'}`);
 
     const maxConcurrency = Math.max(1, Math.min(args.shards, tasks.length));
     const results: RunResult[] = new Array(tasks.length);
-    let nextTaskIndex = 0;
+    const claimed = new Array<boolean>(tasks.length).fill(false);
+    let claimedCount = 0;
+    let activeMarketMakerTasks = 0;
+    const claimTask = async (): Promise<{ taskIndex: number; task: RunTask } | null> => {
+      while (claimedCount < tasks.length) {
+        for (let taskIndex = 0; taskIndex < tasks.length; taskIndex += 1) {
+          if (claimed[taskIndex]) continue;
+          const task = tasks[taskIndex];
+          if (!task) continue;
+          if (task.requireMarketMaker && activeMarketMakerTasks >= args.maxMmConcurrency) continue;
+          claimed[taskIndex] = true;
+          claimedCount += 1;
+          if (task.requireMarketMaker) activeMarketMakerTasks += 1;
+          return { taskIndex, task };
+        }
+        await delay(250);
+      }
+      return null;
+    };
     const runWorker = async (): Promise<void> => {
-      while (nextTaskIndex < tasks.length) {
-        const taskIndex = nextTaskIndex++;
-        const task = tasks[taskIndex];
-        if (!task) break;
-        results[taskIndex] = await runShard(task, args, logsDir);
+      while (true) {
+        const claim = await claimTask();
+        if (!claim) break;
+        try {
+          results[claim.taskIndex] = await runShard(claim.task, args, logsDir);
+        } finally {
+          if (claim.task.requireMarketMaker) activeMarketMakerTasks = Math.max(0, activeMarketMakerTasks - 1);
+        }
       }
     };
     await Promise.all(Array.from({ length: maxConcurrency }, () => runWorker()));
@@ -1032,12 +1373,14 @@ async function main(): Promise<void> {
       const p = r.phaseMs;
       console.log(
         `${r.status === 'passed' ? 'PASS' : 'FAIL'}  shard=${r.shard}  ${sec.padStart(8)}s  ` +
-        `phases[pre=${p.preflight} anvil=${p.anvilBoot} api=${p.apiBoot} health=${p.apiHealthy} vite=${p.viteBoot} pw=${p.playwright}]  ` +
-        `log=${r.logPath}`,
+          `phases[pre=${p.preflight} anvil=${p.anvilBoot} api=${p.apiBoot} health=${p.apiHealthy} vite=${p.viteBoot} pw=${p.playwright}]  ` +
+          `log=${r.logPath}`,
       );
-      const steps = parseStepTimings(r.logPath).sort((a, b) => b.ms - a.ms).slice(0, 8);
+      const steps = parseStepTimings(r.logPath)
+        .sort((a, b) => b.ms - a.ms)
+        .slice(0, 8);
       if (steps.length > 0) {
-        console.log(`      slow-steps: ${steps.map((s) => `${s.label}=${s.ms}ms`).join(' | ')}`);
+        console.log(`      slow-steps: ${steps.map(s => `${s.label}=${s.ms}ms`).join(' | ')}`);
       }
     }
     console.log('-'.repeat(72));
@@ -1058,7 +1401,7 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((err) => {
+main().catch(err => {
   console.error('E2E isolated parallel runner failed:', (err as Error).message);
   process.exit(1);
 });

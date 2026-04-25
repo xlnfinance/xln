@@ -30,12 +30,13 @@ import {
   txFingerprint,
 } from './state-helpers';
 import { isLeft } from './account-utils';
-import { signAccountFrame, verifyAccountSignature } from './account-crypto';
+import { signAccountFrame } from './account-crypto';
 import { cryptoHash as hash, formatEntityId, HEAVY_LOGS } from './utils';
-import { logError } from './logger';
 import { safeStringify } from './serialization-utils';
 import { validateAccountFrame as validateAccountFrameStrict } from './validation-utils';
 import { processAccountTx } from './account-tx/apply';
+import { appendAccountFrameHistoryView, recordAccountFrameHistory } from './env-events';
+import { assertAccountFrameDeltaIntegrity, deriveAccountFrameOffdeltas, deriveAccountFrameTokenIds } from './account-frame';
 // NOTE: Settlements now use SettlementWorkspace flow (see entity-tx/handlers/settle.ts)
 
 // Removed createValidAccountSnapshot - using simplified AccountSnapshot interface
@@ -322,7 +323,12 @@ export function validateAccountFrame(
   if (frame.height < 0) return false;
   if (typeof frame.jHeight !== 'number' || frame.jHeight < 0) return false;
   if (frame.accountTxs.length > MAX_ACCOUNT_FRAME_TXS) return false;
-  if (frame.tokenIds.length !== frame.deltas.length) return false;
+  try {
+    assertAccountFrameDeltaIntegrity(frame, `AccountFrame#${frame.height}`);
+  } catch (error) {
+    console.warn(`❌ Invalid account frame delta integrity: ${(error as Error).message}`);
+    return false;
+  }
 
   // CRITICAL: Timestamp validation for HTLC safety
   if (currentTimestamp !== undefined) {
@@ -351,6 +357,7 @@ export function validateAccountFrame(
 // === FRAME HASH COMPUTATION ===
 
 async function createFrameHash(frame: AccountFrame): Promise<string> {
+  assertAccountFrameDeltaIntegrity(frame, `AccountFrame#${frame.height}`);
   // CRITICAL: Use keccak256 for EVM compatibility (Channel.ts:585, 744)
   // Include prevFrameHash to chain frames together (prevents signature replay)
   const { ethers } = await import('ethers');
@@ -365,12 +372,10 @@ async function createFrameHash(frame: AccountFrame): Promise<string> {
       type: tx.type,
       data: tx.data,
     })),
-    tokenIds: frame.tokenIds,
-    deltas: frame.deltas.map(d => d.toString()), // Quick access sums
     // Include full shared delta state in frame hash.
     // collateral/ondelta are shared values and must stay identical across peers.
     // If they diverge, frame consensus must fail hard.
-    fullDeltaStates: frame.fullDeltaStates?.map(delta => ({
+    deltas: frame.deltas.map(delta => ({
       tokenId: delta.tokenId,
       collateral: delta.collateral.toString(),
       ondelta: delta.ondelta.toString(),
@@ -618,11 +623,8 @@ export async function proposeAccountFrame(
     return earlyResult;
   }
 
-  // CRITICAL FIX: Extract FULL delta state from clonedMachine.deltas (after processing)
-  // Include ALL fields (credit limits, allowances, collateral) for dispute proofs
   const finalTokenIds: number[] = [];
-  const finalDeltas: bigint[] = [];
-  const fullDeltaStates: import('./types').Delta[] = [];
+  const finalDeltas: Delta[] = [];
 
   // Sort by tokenId for deterministic ordering
   const sortedTokens = Array.from(clonedMachine.deltas.entries()).sort((a, b) => a[0] - b[0]);
@@ -646,19 +648,17 @@ export async function proposeAccountFrame(
     }
 
     finalTokenIds.push(tokenId);
-    finalDeltas.push(totalDelta);
-    // AUDIT FIX: Store FULL delta state (collateral, credit limits, allowances)
-    fullDeltaStates.push({ ...delta });
+    finalDeltas.push({ ...delta });
   }
 
   if (!quiet) {
     console.log(`📊 Frame state after processing: ${finalTokenIds.length} tokens`);
     if (HEAVY_LOGS) {
       console.log(`📊 TokenIds: [${finalTokenIds.join(', ')}]`);
-      console.log(`📊 Deltas: [${finalDeltas.map(d => d.toString()).join(', ')}]`);
+      console.log(`📊 Offdeltas: [${deriveAccountFrameOffdeltas(finalDeltas).map(d => d.toString()).join(', ')}]`);
       console.log(
-        `📊 FullDeltaStates:`,
-        fullDeltaStates.map(d => ({
+        `📊 Deltas:`,
+        finalDeltas.map(d => ({
           tokenId: d.tokenId,
           collateral: d.collateral?.toString(),
           leftCreditLimit: d.leftCreditLimit?.toString(),
@@ -696,9 +696,7 @@ export async function proposeAccountFrame(
     prevFrameHash: accountMachine.currentHeight === 0 ? 'genesis' : accountMachine.currentFrame.stateHash || '',
     stateHash: '', // Will be filled after hash calculation
     byLeft: weAreLeft, // Who proposed this frame
-    tokenIds: finalTokenIds, // Use computed state from clonedMachine.deltas
-    deltas: finalDeltas, // Quick access: ondelta+offdelta sums
-    fullDeltaStates, // AUDIT FIX: Full Delta objects for dispute proofs
+    deltas: finalDeltas,
   };
 
   // Calculate state hash (frameData is properly typed AccountFrame)
@@ -713,9 +711,9 @@ export async function proposeAccountFrame(
     console.log(`  prevFrameHash: ${frameData.prevFrameHash?.slice(0, 20)}...`);
     console.log(`  accountTxs count: ${frameData.accountTxs.length}`);
     console.log(`  accountTxs types: [${frameData.accountTxs.map(tx => tx.type).join(', ')}]`);
-    console.log(`  tokenIds: [${frameData.tokenIds.join(', ')}]`);
-    console.log(`  deltas: [${frameData.deltas.map(d => d.toString()).join(', ')}]`);
-    console.log(`  fullDeltaStates count: ${fullDeltaStates.length}`);
+    console.log(`  tokenIds: [${deriveAccountFrameTokenIds(frameData).join(', ')}]`);
+    console.log(`  offdeltas: [${deriveAccountFrameOffdeltas(frameData.deltas).map(d => d.toString()).join(', ')}]`);
+    console.log(`  delta count: ${frameData.deltas.length}`);
     console.log(`  byLeft: ${frameData.byLeft}`);
     console.log(`  stateHash: ${frameData.stateHash}`);
   }
@@ -1029,8 +1027,8 @@ export async function handleAccountInput(
       console.log(`🔒 COMMIT: Frame ${accountMachine.pendingFrame.height}`);
       console.log(`  Transactions: ${accountMachine.pendingFrame.accountTxs.length}`);
       console.log(`  Transactions detail:`, accountMachine.pendingFrame.accountTxs);
-      console.log(`  TokenIds: ${accountMachine.pendingFrame.tokenIds.join(',')}`);
-      console.log(`  Deltas: ${accountMachine.pendingFrame.deltas.map(d => `${d}`).join(',')}`);
+      console.log(`  TokenIds: ${deriveAccountFrameTokenIds(accountMachine.pendingFrame).join(',')}`);
+      console.log(`  Offdeltas: ${deriveAccountFrameOffdeltas(accountMachine.pendingFrame).map(d => `${d}`).join(',')}`);
       console.log(`  StateHash: ${frameHash.slice(0, 16)}...`);
 
       // PROPOSER COMMIT: Re-execute txs on REAL state (Channel.ts pattern)
@@ -1124,15 +1122,18 @@ export async function handleAccountInput(
           console.log(`✅ Stored counterparty settlement hanko from ACK`);
         }
 
-        // Add confirmed frame to history
-        accountMachine.frameHistory.push(cloneAccountFrame(accountMachine.pendingFrame));
-        // Cap history at 20 frames to prevent snapshot bloat
-        if (accountMachine.frameHistory.length > 20) {
-          accountMachine.frameHistory.shift();
-        }
-        console.log(
-          `📚 Frame ${accountMachine.pendingFrame.height} added to history (total: ${accountMachine.frameHistory.length})`,
-        );
+        const committedFrame = cloneAccountFrame(accountMachine.pendingFrame);
+        recordAccountFrameHistory(env, {
+          entityId: accountMachine.proofHeader.fromEntity,
+          counterpartyId: input.fromEntityId,
+          accountHeight: committedFrame.height,
+          source: 'ackCommit',
+          frame: committedFrame,
+        });
+        // Past bilateral frames are not future-consensus state. Keep only a
+        // non-enumerable UI/debug view; durable history lives in the frame DB.
+        appendAccountFrameHistoryView(accountMachine, committedFrame);
+        console.log(`📚 Frame ${accountMachine.pendingFrame.height} indexed in frame DB`);
 
       }
 
@@ -1493,7 +1494,7 @@ export async function handleAccountInput(
     // STATE VERIFICATION: Compare deltas directly (both sides compute identically)
     // Extract final state from clonedMachine after processing ALL transactions
     const ourFinalTokenIds: number[] = [];
-    const ourFinalDeltas: bigint[] = [];
+    const ourFinalDeltas: Delta[] = [];
 
     const sortedOurTokens = Array.from(clonedMachine.deltas.entries()).sort((a, b) => a[0] - b[0]);
     for (const [tokenId, delta] of sortedOurTokens) {
@@ -1510,7 +1511,7 @@ export async function handleAccountInput(
       }
 
       ourFinalTokenIds.push(tokenId);
-      ourFinalDeltas.push(totalDelta);
+      ourFinalDeltas.push({ ...delta });
     }
 
     if (HEAVY_LOGS)
@@ -1518,29 +1519,19 @@ export async function handleAccountInput(
         `🔍 RECEIVER: Computed ${ourFinalTokenIds.length} tokens after filtering: [${ourFinalTokenIds.join(', ')}]`,
       );
 
-    // CRITICAL: Extract FULL delta states for hash verification (same as proposer does)
-    // This ensures hash verification includes credit limits, collateral, allowances
-    const ourFullDeltaStates: import('./types').Delta[] = [];
-    for (const [tokenId, delta] of sortedOurTokens) {
-      // CRITICAL: Use offdelta ONLY for filtering (same as delta comparison)
-      const totalDelta = delta.offdelta;
-      // Apply SAME filtering as proposer (skip unused tokens)
-      if (!shouldIncludeToken(delta, totalDelta)) {
-        continue;
-      }
-      ourFullDeltaStates.push({ ...delta });
-    }
+    const ourOffdeltas = deriveAccountFrameOffdeltas(ourFinalDeltas);
+    const theirOffdeltas = deriveAccountFrameOffdeltas(receivedFrame);
 
-    const ourComputedState = Buffer.from(ourFinalDeltas.map(d => d.toString()).join(',')).toString('hex');
-    const theirClaimedState = Buffer.from(receivedFrame.deltas.map(d => d.toString()).join(',')).toString('hex');
+    const ourComputedState = Buffer.from(ourOffdeltas.map(d => d.toString()).join(',')).toString('hex');
+    const theirClaimedState = Buffer.from(theirOffdeltas.map(d => d.toString()).join(',')).toString('hex');
 
     // DEBUG: Show actual delta values
     console.log(`🔍 STATE-VERIFY Frame ${receivedFrame.height}:`);
     console.log(
-      `   Our tokenIds: [${ourFinalTokenIds.join(', ')}], deltas: [${ourFinalDeltas.map(d => d.toString()).join(', ')}]`,
+      `   Our tokenIds: [${ourFinalTokenIds.join(', ')}], offdeltas: [${ourOffdeltas.map(d => d.toString()).join(', ')}]`,
     );
     console.log(
-      `   Their tokenIds: [${receivedFrame.tokenIds.join(', ')}], deltas: [${receivedFrame.deltas.map(d => d.toString()).join(', ')}]`,
+      `   Their tokenIds: [${deriveAccountFrameTokenIds(receivedFrame).join(', ')}], offdeltas: [${theirOffdeltas.map(d => d.toString()).join(', ')}]`,
     );
     console.log(`  Our computed:  ${ourComputedState.slice(0, 32)}...`);
     console.log(`  Their claimed: ${theirClaimedState.slice(0, 32)}...`);
@@ -1553,22 +1544,22 @@ export async function handleAccountInput(
       return { success: false, error: `Bilateral consensus failure - states don't match`, events };
     }
 
-    // SECURITY FIX: Verify BILATERAL fields in fullDeltaStates (prevents state injection attack)
+    // SECURITY FIX: Verify BILATERAL fields in deltas (prevents state injection attack)
     // ondelta/collateral may differ due to J-event timing, but bilateral fields MUST match:
     // - offdelta: Set by bilateral payments
     // - creditLimit: Set by bilateral set_credit_limit tx
     // - allowance: Set by bilateral transactions
-    const theirFullDeltaStates = receivedFrame.fullDeltaStates || [];
-    if (ourFullDeltaStates.length !== theirFullDeltaStates.length) {
+    const theirDeltas = receivedFrame.deltas;
+    if (ourFinalDeltas.length !== theirDeltas.length) {
       console.warn(
-        `⚠️ SECURITY: fullDeltaStates count mismatch (our: ${ourFullDeltaStates.length}, their: ${theirFullDeltaStates.length})`,
+        `⚠️ SECURITY: delta count mismatch (our: ${ourFinalDeltas.length}, their: ${theirDeltas.length})`,
       );
       return { success: false, error: `Bilateral state injection detected - delta count mismatch`, events };
     }
 
-    for (let i = 0; i < ourFullDeltaStates.length; i++) {
-      const ours = ourFullDeltaStates[i]!;
-      const theirs = theirFullDeltaStates[i]!;
+    for (let i = 0; i < ourFinalDeltas.length; i++) {
+      const ours = ourFinalDeltas[i]!;
+      const theirs = theirDeltas[i]!;
 
       // Compare BILATERAL fields only (ondelta/collateral may differ due to J-event timing)
       const bilateralMismatch =
@@ -1593,18 +1584,17 @@ export async function handleAccountInput(
     // - unilateral fields (collateral/ondelta) may lag between peers until claims converge
     //   so hash must be recomputed from sender payload, not receiver-local unilateral state
     if (HEAVY_LOGS) console.log(`🔍 COMPUTING-HASH: Creating hash for frame ${receivedFrame.height}...`);
-    const recomputedSenderHash = await createFrameHash({
+    const senderHashFrame: AccountFrame = {
       height: receivedFrame.height,
       timestamp: receivedFrame.timestamp,
       jHeight: receivedFrame.jHeight,
       accountTxs: receivedFrame.accountTxs,
       prevFrameHash: receivedFrame.prevFrameHash,
-      tokenIds: receivedFrame.tokenIds,
       deltas: receivedFrame.deltas,
-      fullDeltaStates: theirFullDeltaStates,
       stateHash: '', // Computed by createFrameHash
-      byLeft: receivedFrame.byLeft,
-    });
+      ...(receivedFrame.byLeft === undefined ? {} : { byLeft: receivedFrame.byLeft }),
+    };
+    const recomputedSenderHash = await createFrameHash(senderHashFrame);
 
     if (recomputedSenderHash !== receivedFrame.stateHash) {
       console.warn(`⚠️ SECURITY: Frame hash mismatch after validation`);
@@ -1704,15 +1694,18 @@ export async function handleAccountInput(
       }
     }
 
-    // Add accepted frame to history
-    accountMachine.frameHistory.push(cloneAccountFrame(receivedFrame));
-    // Cap history at 20 frames to prevent snapshot bloat
-    if (accountMachine.frameHistory.length > 20) {
-      accountMachine.frameHistory.shift();
-    }
-    console.log(
-      `📚 Frame ${receivedFrame.height} accepted and added to history (total: ${accountMachine.frameHistory.length})`,
-    );
+    const committedFrame = cloneAccountFrame(receivedFrame);
+    recordAccountFrameHistory(env, {
+      entityId: accountMachine.proofHeader.fromEntity,
+      counterpartyId: input.fromEntityId,
+      accountHeight: committedFrame.height,
+      source: 'peerCommit',
+      frame: committedFrame,
+    });
+    // Past bilateral frames are not future-consensus state. Keep only a
+    // non-enumerable UI/debug view; durable history lives in the frame DB.
+    appendAccountFrameHistoryView(accountMachine, committedFrame);
+    console.log(`📚 Frame ${receivedFrame.height} accepted and indexed in frame DB`);
 
     events.push(...processEvents);
     events.push(`🤝 Accepted frame ${receivedFrame.height} from Entity ${input.fromEntityId.slice(-4)}`);

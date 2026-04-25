@@ -9,7 +9,7 @@
   import { onDestroy, onMount } from 'svelte';
   import type { ComponentType } from 'svelte';
   import { get } from 'svelte/store';
-  import { MaxUint256, Wallet as EthersWallet, hexlify, isAddress, ZeroAddress, zeroPadValue } from 'ethers';
+  import { MaxUint256, Wallet as EthersWallet, hexlify, isAddress, parseEther, ZeroAddress, zeroPadValue } from 'ethers';
   import type {
     AccountMachine,
     AccountTx,
@@ -1084,6 +1084,9 @@
   $: if (moveAllowanceContextSignature !== moveAllowanceContextKey) {
     moveAllowanceContextKey = moveAllowanceContextSignature;
     moveAllowanceAmountDirty = false;
+    if (moveAllowanceRouteEnabled && typeof window !== 'undefined' && String(currentSignerId || '').trim()) {
+      void fetchExternalTokens();
+    }
   }
   $: if (moveAllowanceRouteEnabled && !moveAllowanceAmountDirty) {
     moveAllowanceAmount = moveAmount;
@@ -1094,18 +1097,6 @@
     moveAllowanceRaw = null;
     moveAllowanceLoading = false;
     moveAllowanceSubmittingMode = null;
-  }
-  $: moveAllowanceRefreshSignature = [
-    moveAllowanceRouteEnabled ? '1' : '0',
-    moveAssetSymbol,
-    String(currentSignerId || '').trim().toLowerCase(),
-    getRuntimeId(activeEnv),
-  ].join('|');
-  $: {
-    void moveAllowanceRefreshSignature;
-    if (moveAllowanceRouteEnabled) {
-      void refreshMoveExternalAllowance();
-    }
   }
   $: moveRequiredAllowanceAmount = (() => {
     if (!moveAllowanceRouteEnabled) return null;
@@ -1719,7 +1710,6 @@
   let moveAllowanceError: string | null = null;
   let moveAllowanceRaw: bigint | null = null;
   let moveAllowanceSubmittingMode: 'amount' | 'max' | null = null;
-  let moveAllowanceRefreshRequestId = 0;
   let moveAllowanceContextKey = '';
   let moveSelectedSource: MoveEndpoint | null = null;
   let moveSelectedTarget: MoveEndpoint | null = null;
@@ -1767,6 +1757,8 @@
   let pendingAssetAutoC2Rs: PendingAssetAutoC2R[] = [];
   let resolvingAssetAutoC2R = false;
   let externalFetchInFlight: Promise<void> | null = null;
+  let externalTokenCatalogCacheKey = '';
+  let externalTokenCatalogCache: ExternalToken[] | null = null;
   let selectedExternalToReserveToken: ReserveTransferAsset | null = null;
   let selectedReserveToCollateralToken: ReserveTransferAsset | null = null;
   let selectedCollateralToReserveToken: ReserveTransferAsset | null = null;
@@ -1968,34 +1960,49 @@
     };
   }
 
-  async function refreshMoveExternalAllowance(): Promise<void> {
-    if (!routeRequiresExplicitExternalAllowance(moveFromEndpoint, moveToEndpoint) || !activeIsLive) {
-      moveAllowanceLoading = false;
-      moveAllowanceError = null;
-      moveAllowanceRaw = null;
-      return;
-    }
-    const requestId = ++moveAllowanceRefreshRequestId;
-    moveAllowanceLoading = true;
-    moveAllowanceError = null;
-    try {
-      const { jadapter, token, owner, spender } = await getMoveAllowanceContext('move-erc20-allowance-read');
-      const allowance = await jadapter.getErc20Allowance(token.address, owner, spender);
-      if (requestId !== moveAllowanceRefreshRequestId) return;
-      moveAllowanceRaw = allowance;
-    } catch (error) {
-      if (requestId !== moveAllowanceRefreshRequestId) return;
-      moveAllowanceRaw = null;
-      moveAllowanceError = toErrorMessage(error, 'Failed to read ERC20 allowance');
-    } finally {
-      if (requestId === moveAllowanceRefreshRequestId) {
-        moveAllowanceLoading = false;
-      }
+  async function requestExternalGasFaucet(owner: string, amount = '0.1'): Promise<void> {
+    const requestApiBase = resolveApiBase();
+    const response = await fetch(`${requestApiBase}/api/faucet/gas`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ userAddress: owner, amount }),
+    });
+    const result = await readJsonResponse<ApiResult>(response);
+    if (!response.ok || !result?.success) {
+      throw new Error(result?.error || `Gas faucet failed (${response.status})`);
     }
   }
 
+  async function ensureMoveAllowanceOwnerGas(jadapter: JAdapter, owner: string): Promise<void> {
+    if (!jadapter.provider || typeof jadapter.provider.getBalance !== 'function') return;
+    const minNativeBalance = parseEther('0.01');
+    const currentBalance = await jadapter.provider.getBalance(owner);
+    if (currentBalance >= minNativeBalance) return;
+    console.warn('[Move] external allowance gas low', {
+      owner,
+      nativeBalance: currentBalance.toString(),
+      minNativeBalance: minNativeBalance.toString(),
+    });
+    moveProgressLabel = 'Topping up external gas for approval';
+    await requestExternalGasFaucet(owner);
+    const deadline = Date.now() + 10_000;
+    while (Date.now() < deadline) {
+      const nextBalance = await jadapter.provider.getBalance(owner);
+      if (nextBalance >= minNativeBalance) {
+        console.info('[Move] external allowance gas topped up', {
+          owner,
+          nativeBalance: nextBalance.toString(),
+        });
+        return;
+      }
+      await sleep(200);
+    }
+    const nextBalance = await jadapter.provider.getBalance(owner);
+    throw new Error(`External wallet lacks gas for approve owner=${owner} nativeBalance=${nextBalance}`);
+  }
+
   async function approveMoveExternalAllowance(mode: 'amount' | 'max'): Promise<void> {
-    const { jadapter, token, spender } = await getMoveAllowanceContext('move-erc20-allowance-approve');
+    const { jadapter, token, owner, spender } = await getMoveAllowanceContext('move-erc20-allowance-approve');
     const privKey = await getActiveSignerPrivateKey();
     const approvalAmount = mode === 'max'
       ? MaxUint256
@@ -2004,13 +2011,33 @@
     moveAllowanceSubmittingMode = mode;
     moveProgressLabel = `Approving ${token.symbol} allowance`;
     try {
+      await ensureMoveAllowanceOwnerGas(jadapter, owner);
+      moveProgressLabel = `Approving ${token.symbol} allowance`;
       await jadapter.approveErc20(privKey, token.address, spender, approvalAmount);
-      await refreshMoveExternalAllowance();
+      const confirmedAllowance = await jadapter.getErc20Allowance(token.address, owner, spender);
+      if (confirmedAllowance < approvalAmount) {
+        throw new Error(
+          `approveErc20 postcondition failed owner=${owner} token=${token.address} spender=${spender} ` +
+          `allowance=${confirmedAllowance} requested=${approvalAmount}`,
+        );
+      }
+      moveAllowanceRaw = confirmedAllowance;
+      moveAllowanceError = null;
+      moveAllowanceLoading = false;
       toasts.success(
         mode === 'max'
           ? `Approved MAX ${token.symbol}`
           : `Approved ${formatAmount(approvalAmount, token.decimals)} ${token.symbol}`,
       );
+    } catch (error) {
+      console.error('[Move] approve allowance failed', {
+        owner,
+        token: token.address,
+        spender,
+        requested: approvalAmount.toString(),
+        error: toErrorMessage(error, 'Unknown error'),
+      });
+      throw error;
     } finally {
       moveProgressLabel = '';
       moveAllowanceSubmittingMode = null;
@@ -2358,9 +2385,23 @@
     }
   }
 
-  async function getTokenList(jadapter: JAdapter | null | undefined): Promise<ExternalToken[]> {
-    let tokens: ExternalToken[] = [];
-    if (jadapter?.getTokenRegistry) {
+  function cloneExternalTokenCatalog(tokens: ExternalToken[] | null): ExternalToken[] {
+    if (!tokens) return [];
+    return tokens.map((token) => ({ ...token, balance: 0n }));
+  }
+
+  async function getTokenList(
+    jadapter: JAdapter | null | undefined,
+    runtimeId: string,
+    jurisdiction: string,
+  ): Promise<ExternalToken[]> {
+    const cacheKey = `${runtimeId}|${jurisdiction}`;
+    if (cacheKey === externalTokenCatalogCacheKey && externalTokenCatalogCache !== null) {
+      return cloneExternalTokenCatalog(externalTokenCatalogCache);
+    }
+
+    let tokens = await fetchTokenCatalog();
+    if (tokens.length === 0 && jadapter?.getTokenRegistry) {
       const registry = await jadapter.getTokenRegistry();
       if (registry?.length) {
         tokens = registry.map((t: JTokenRegistryItem) => ({
@@ -2373,13 +2414,9 @@
       }
     }
 
-    if (tokens.length === 0) {
-      const apiTokens = await fetchTokenCatalog();
-      tokens = apiTokens.length > 0
-        ? apiTokens.map(t => ({ ...t, balance: 0n }))
-        : [];
-    }
-    return tokens.map((token) => ({ ...token, balance: 0n }));
+    externalTokenCatalogCacheKey = cacheKey;
+    externalTokenCatalogCache = tokens.map((token) => ({ ...token, balance: 0n }));
+    return cloneExternalTokenCatalog(externalTokenCatalogCache);
   }
 
   function buildOnchainReserves(
@@ -2729,11 +2766,18 @@
     }
     externalFetchInFlight = (async () => {
       const signerId = String(currentSignerId || '').trim();
-      const runtimeId = getRuntimeId(activeEnv);
-      const jurisdiction = String(getActiveJurisdictionName(activeEnv) || '');
-      const fetchKey = `${signerId}|${runtimeId}|${jurisdiction}`;
+      const owner = resolveSelfEoaAddress();
+      const runtimeId = String(getRuntimeId(activeEnv) || '').trim();
+      const jurisdiction = String(getActiveJurisdictionName(activeEnv) || '').trim();
+      const fetchKey = `${owner}|${runtimeId}|${jurisdiction}`;
       externalTokensLoading = true;
-      if (!signerId) {
+      if (!signerId || !isAddress(owner)) {
+        externalTokens = [];
+        if (moveAllowanceRouteEnabled) {
+          moveAllowanceRaw = null;
+          moveAllowanceError = 'Active signer EOA missing';
+          moveAllowanceLoading = false;
+        }
         externalTokensLoading = false;
         return;
       }
@@ -2742,42 +2786,89 @@
         const xln = await getXLN();
         const envAtStart = getRuntimeEnv(activeEnv);
         const jadapter = xln.getActiveJAdapter?.(envAtStart ?? null);
-        const tokenList = await getTokenList(jadapter);
-        let nativeToken: ExternalToken | null = null;
-        if (jadapter?.provider && typeof jadapter.provider.getBalance === 'function' && isAddress(signerId)) {
-          try {
-            const nativeBalance = await jadapter.provider.getBalance(signerId);
-            nativeToken = {
-              symbol: 'ETH',
-              address: ZeroAddress,
-              balance: nativeBalance,
-              decimals: 18,
-              tokenId: 0,
-            };
-          } catch (err) {
-            console.warn('[EntityPanel] Failed to fetch native ETH balance:', err);
-          }
-        }
-        if (!jadapter?.getErc20Balances) {
-          externalTokens = sortExternalTokens(tokenList);
-          externalTokensLoading = false;
-          return;
+        const tokenList = await getTokenList(jadapter, runtimeId, jurisdiction);
+        const allowanceToken = moveAllowanceRouteEnabled
+          ? tokenList.find((token) =>
+              String(token.symbol || '').trim().toUpperCase() === String(moveAssetSymbol || '').trim().toUpperCase() &&
+              isAddress(token.address) &&
+              token.address !== ZeroAddress,
+            ) ?? null
+          : null;
+        const spender = String(jadapter?.addresses?.depository || '').trim();
+        const allowanceReads = allowanceToken && isAddress(spender) && spender !== ZeroAddress
+          ? [{ tokenAddress: allowanceToken.address, spender }]
+          : [];
+        if (moveAllowanceRouteEnabled) {
+          moveAllowanceLoading = allowanceReads.length > 0 && moveAllowanceRaw === null;
+          moveAllowanceError = null;
         }
 
-        const balances = await jadapter.getErc20Balances(tokenList.map(t => t.address), signerId);
+        let nativeBalance = 0n;
+        let balances: bigint[] = tokenList.map(() => 0n);
+        let allowanceValues: bigint[] = [];
+
+        if (jadapter?.readWalletSnapshot) {
+          const snapshot = await jadapter.readWalletSnapshot({
+            owner,
+            tokenAddresses: tokenList.map((token) => token.address),
+            allowances: allowanceReads,
+            includeNativeBalance: true,
+          });
+          nativeBalance = snapshot.nativeBalance ?? 0n;
+          balances = snapshot.tokenBalances;
+          allowanceValues = snapshot.allowances;
+        } else {
+          if (jadapter?.provider && typeof jadapter.provider.getBalance === 'function') {
+            try {
+              nativeBalance = await jadapter.provider.getBalance(owner);
+            } catch (err) {
+              console.warn('[EntityPanel] Failed to fetch native ETH balance:', err);
+            }
+          }
+          if (jadapter?.getErc20Balances) {
+            balances = await jadapter.getErc20Balances(tokenList.map((token) => token.address), owner);
+          }
+          if (allowanceReads.length > 0 && jadapter?.getErc20Allowance) {
+            allowanceValues = [await jadapter.getErc20Allowance(
+              allowanceReads[0]!.tokenAddress,
+              owner,
+              allowanceReads[0]!.spender,
+            )];
+          }
+        }
+
         balances.forEach((balance: bigint, idx: number) => {
           if (tokenList[idx]) tokenList[idx].balance = balance;
         });
 
         const runtimeIdNow = getRuntimeId(activeEnv);
         const jurisdictionNow = String(getActiveJurisdictionName(activeEnv) || '');
-        const currentKey = `${String(currentSignerId || '').trim()}|${runtimeIdNow}|${jurisdictionNow}`;
+        const currentKey = `${resolveSelfEoaAddress()}|${String(runtimeIdNow || '').trim()}|${jurisdictionNow.trim()}`;
         if (currentKey === fetchKey) {
-          externalTokens = sortExternalTokens(nativeToken ? [nativeToken, ...tokenList] : tokenList);
+          externalTokens = sortExternalTokens([
+            {
+              symbol: 'ETH',
+              address: ZeroAddress,
+              balance: nativeBalance,
+              decimals: 18,
+              tokenId: 0,
+            },
+            ...tokenList,
+          ]);
+          if (moveAllowanceRouteEnabled) {
+            moveAllowanceRaw = allowanceReads.length > 0 ? (allowanceValues[0] ?? 0n) : null;
+            moveAllowanceError = null;
+            moveAllowanceLoading = false;
+          }
           externalTokensLoading = false;
         }
       } catch (err) {
         console.error('[EntityPanel] Failed to fetch external tokens:', err);
+        if (moveAllowanceRouteEnabled) {
+          moveAllowanceRaw = null;
+          moveAllowanceError = toErrorMessage(err, 'Failed to read wallet snapshot');
+          moveAllowanceLoading = false;
+        }
         externalTokensLoading = false;
       }
     })().finally(() => {
@@ -3774,7 +3865,7 @@
       const signerId = String(currentSignerId || '').trim();
       const runtimeId = String(getRuntimeId(activeEnv) || '').trim();
       const jurisdiction = String(getActiveJurisdictionName(activeEnv) || '').trim();
-      const refreshMs = Math.max(1_000, Math.floor(Number($settings.balanceRefreshMs || 1_000)));
+      const refreshMs = 1_000;
       const nextKey = `${signerId}|${runtimeId}|${jurisdiction}|${activeIsLive ? 'live' : 'history'}|${refreshMs}`;
       if (nextKey !== externalBalancePollKey) {
         externalBalancePollKey = nextKey;

@@ -13,7 +13,7 @@ export type RuntimeWalDb = {
 
 export type RuntimeWalBatch = {
   put: (key: Buffer, value: Buffer) => RuntimeWalBatch;
-  write: () => Promise<void>;
+  write: (options?: { sync?: boolean }) => Promise<void>;
 };
 
 export type RuntimeWalWritableDb = RuntimeWalDb & {
@@ -188,7 +188,7 @@ export const writePersistedWalOps = async (
   for (const op of ops) {
     batch.put(op.key, op.value);
   }
-  await batch.write();
+  await batch.write({ sync: true });
 };
 
 export const verifyPersistedFrameWrite = async (

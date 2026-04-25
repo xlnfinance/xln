@@ -19,8 +19,17 @@ export function getAccountUiStatus(account: AccountStatusSource): AccountUiStatu
 }
 
 export function getAccountUiStatusLabel(status: AccountUiStatus): string {
-  if (status === 'sent') return 'SENT';
+  if (status === 'sent') return 'PENDING';
   if (status === 'disputed') return 'DISPUTED';
   if (status === 'finalized_disputed') return 'FINALIZED DISPUTED';
   return 'READY';
+}
+
+export function getAccountUiStatusDescription(status: AccountUiStatus): string {
+  // "sent" is bilateral/off-chain account work: local mempool or pendingFrame.
+  // On-chain confirmation belongs only to settlement/dispute batches.
+  if (status === 'sent') return 'Pending off-chain frame';
+  if (status === 'disputed') return 'Dispute active';
+  if (status === 'finalized_disputed') return 'Finalized dispute';
+  return 'Active';
 }

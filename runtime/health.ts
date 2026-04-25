@@ -2,7 +2,7 @@
 // Returns status of all J-machines, hubs, and system health
 
 import type { EntityReplica, Env } from './types.js';
-import { getP2P } from './runtime.js';
+import { getP2PState } from './runtime.js';
 
 export interface HealthStatus {
   timestamp: number;
@@ -10,6 +10,17 @@ export interface HealthStatus {
   jMachines: JMachineHealth[];
   hubs: HubHealth[];
   system: SystemHealth;
+  disk?: {
+    ok: boolean;
+    minFreeBytes: number;
+    freeBytes: number;
+    usedBytes: number;
+    totalBytes: number;
+    freeGiB: number;
+    usedGiB: number;
+    totalGiB: number;
+    usedPct: number;
+  };
 }
 
 export interface JMachineHealth {
@@ -27,6 +38,7 @@ export interface HubHealth {
   name: string;
   runtimeId?: string;
   online?: boolean;
+  selfRelayPresence?: boolean;
   activeClients?: string[];
   status: 'healthy' | 'degraded' | 'down';
   reserves?: Record<string, string>;
@@ -116,16 +128,21 @@ export async function getHealthStatus(env: Env | null): Promise<HealthStatus> {
     for (const profile of profiles) {
       if (profile.metadata.isHub === true) {
         const replica = replicasByEntityId.get(String(profile.entityId).toLowerCase());
+        const hasReplica = Boolean(replica?.state);
+        const accounts = replica?.state?.accounts?.size;
         hubs.push({
           entityId: profile.entityId,
           name: profile.name,
-          status: 'healthy', // TODO: Add health check
+          status: hasReplica ? 'healthy' : 'degraded',
           reserves: replica?.state?.reserves?.size ? serializeReserves(replica.state.reserves) : undefined,
-          accounts: replica?.state?.accounts?.size,
+          accounts,
+          ...(hasReplica ? {} : { error: 'hub profile visible but no local replica state' }),
         });
       }
     }
   }
+
+  const p2pState = env ? getP2PState(env) : null;
 
   return {
     timestamp: Date.now(),
@@ -134,9 +151,8 @@ export async function getHealthStatus(env: Env | null): Promise<HealthStatus> {
     hubs,
     system: {
       runtime: !!env,
-      p2p: !!(env && getP2P(env)),
-      // On Bun server, relay lives in-process as /relay regardless of local P2P client status.
-      relay: !!env && (typeof Bun !== 'undefined' || !!getP2P(env)?.isConnected()),
+      p2p: p2pState?.connected === true,
+      relay: p2pState?.connected === true,
     },
   };
 }

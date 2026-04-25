@@ -342,7 +342,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         jHeight: 0,
         accountTxs: [],
         prevFrameHash: '',
-        tokenIds: [],
         deltas: [],
         stateHash: '',
         byLeft: state.entityId === leftEntity, // Am I left entity?
@@ -514,10 +513,12 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           : input.prevHanko && pendingFrameBefore && accountMachine.currentHeight > currentHeightBefore
             ? pendingFrameBefore
             : undefined;
-      const isNewFrame = Boolean(justCommittedFrame && input.newAccountFrame);
+      const committedViaNewFrame = Boolean(justCommittedFrame && input.newAccountFrame);
 
-      if (isNewFrame && justCommittedFrame?.accountTxs) {
-        if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: isNewFrame=${isNewFrame}, inputHeight=${justCommittedFrame.height}, currentHeight=${accountMachine.currentHeight}`);
+      if (justCommittedFrame?.accountTxs) {
+        if (HEAVY_LOGS) console.log(
+          `🔍 HTLC-CHECK: commitMode=${committedViaNewFrame ? 'newFrame' : 'ack'}, inputHeight=${justCommittedFrame.height}, currentHeight=${accountMachine.currentHeight}`,
+        );
         if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: accountMachine.locks.size=${accountMachine.locks.size}`);
         if (HEAVY_LOGS) console.log(`🔍 FRAME-TXS: ${justCommittedFrame.accountTxs.length} txs in frame:`, justCommittedFrame.accountTxs.map(tx => tx.type));
       }
@@ -526,7 +527,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         applyCommittedAccountFrameFollowups(newState, counterpartyId, justCommittedFrame);
       }
 
-      if (isNewFrame && justCommittedFrame?.accountTxs) {
+      if (justCommittedFrame?.accountTxs) {
         for (const accountTx of justCommittedFrame.accountTxs) {
           if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: Checking committed tx type=${accountTx.type}`);
 
@@ -535,6 +536,13 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           }
 
           if (accountTx.type === 'htlc_lock') {
+            // Only the receiver-side commit should decrypt/route an HTLC lock.
+            // On proposer ACK, the committed frame is our own outbound lock, so
+            // re-running receiver-side envelope handling will try to decrypt the
+            // next hop's ciphertext with our key and fail spuriously.
+            if (!committedViaNewFrame) {
+              continue;
+            }
             if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: Found htlc_lock in committed frame!`);
             const lock = accountMachine.locks.get(accountTx.data.lockId);
             if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: lock found? ${!!lock}`);

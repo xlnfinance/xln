@@ -24,6 +24,20 @@ import {
 } from './relay-store';
 import type { Profile } from './networking/gossip';
 
+const socketRuntimeIds = new WeakMap<object, string>();
+
+const rememberSocketRuntimeId = (ws: unknown, runtimeId: string): void => {
+  if (!ws || (typeof ws !== 'object' && typeof ws !== 'function')) return;
+  const normalized = normalizeRuntimeKey(runtimeId);
+  if (!normalized) return;
+  socketRuntimeIds.set(ws as object, normalized);
+};
+
+const getRememberedSocketRuntimeId = (ws: unknown): string => {
+  if (!ws || (typeof ws !== 'object' && typeof ws !== 'function')) return '';
+  return normalizeRuntimeKey(socketRuntimeIds.get(ws as object) || '');
+};
+
 // ---------------------------------------------------------------------------
 // Config
 // ---------------------------------------------------------------------------
@@ -66,14 +80,32 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
   const { type, to, from, payload, id } = msg;
   const fromKey = normalizeRuntimeKey(from);
   const toKey = normalizeRuntimeKey(to);
+  const traceId = typeof id === 'string' && id.length > 0
+    ? id
+    : `relay-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+  const rememberedRuntimeId = getRememberedSocketRuntimeId(ws);
+
+  if (rememberedRuntimeId && fromKey && rememberedRuntimeId === fromKey) {
+    const existing = store.clients.get(rememberedRuntimeId);
+    if (!existing || existing.ws !== ws) {
+      registerClient(store, rememberedRuntimeId, ws);
+      pushDebugEvent(store, {
+        event: 'ws_rebind',
+        runtimeId: rememberedRuntimeId,
+        from,
+        msgType: type,
+        status: 'reconnected',
+        details: { traceId: typeof id === 'string' ? id : null },
+      });
+    } else {
+      existing.lastSeen = nextWsTimestamp(store);
+    }
+  }
 
   // Cache encryption public key if provided
   const fromEncryptionPubKey = typeof msg.fromEncryptionPubKey === 'string'
     ? msg.fromEncryptionPubKey
     : null;
-  const traceId = typeof id === 'string' && id.length > 0
-    ? id
-    : `relay-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
   if (from && !fromEncryptionPubKey && type !== 'ping' && type !== 'pong') {
     pushDebugEvent(store, {
       event: 'error',
@@ -130,6 +162,7 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
       send(ws, safeStringify({ type: 'error', error: 'Invalid runtimeId in hello' }));
       return;
     }
+    rememberSocketRuntimeId(ws, fromKey);
     registerClient(store, from, ws);
     pushDebugEvent(store, {
       event: 'hello',

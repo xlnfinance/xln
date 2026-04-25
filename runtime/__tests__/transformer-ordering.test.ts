@@ -41,7 +41,6 @@ function makeProofAccountMachine(swaps: Array<[string, SwapOffer]>): AccountMach
       jHeight: 0,
       accountTxs: [],
       prevFrameHash: '',
-      tokenIds: [],
       deltas: [],
       stateHash: '',
       byLeft: true,

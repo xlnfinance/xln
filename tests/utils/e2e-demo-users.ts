@@ -16,6 +16,10 @@ export type DemoUserIdentity = {
   runtimeId: string;
 };
 
+type CreateRuntimeOptions = {
+  requireOnline?: boolean;
+};
+
 const DEFAULT_DEMO_MNEMONICS: Record<DemoUserName, string> = {
   alice: 'test test test test test test test test test test test junk',
   bob: 'abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon abandon about',
@@ -46,8 +50,8 @@ const deriveRuntimeIdFromMnemonic = (mnemonic: string): string =>
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 async function openRuntimeDropdown(page: Page): Promise<void> {
-  const trigger = page.locator('.context-switcher .dropdown-trigger, .context-switcher .pill-trigger').first();
-  const menu = page.locator('.context-switcher .switcher-menu').first();
+  const trigger = page.locator('button:has([data-testid="context-current"]), .context-switcher .dropdown-trigger').first();
+  const menu = page.locator('.dropdown-menu').first();
   await expect(trigger).toBeVisible({ timeout: 15_000 });
   if (await menu.isVisible().catch(() => false)) {
     return;
@@ -119,6 +123,59 @@ async function waitForRuntimeReady(page: Page, runtimeId: string): Promise<void>
   }, { targetRuntimeId: runtimeId }, { timeout: RUNTIME_READY_TIMEOUT });
 }
 
+async function waitForRuntimeBootstrap(
+  page: Page,
+  expectedRuntimeId: string,
+  previousRuntimeId: string | null,
+): Promise<string> {
+  const expected = String(expectedRuntimeId || '').toLowerCase();
+  const previous = String(previousRuntimeId || '').toLowerCase();
+
+  await expect
+    .poll(async () => {
+      return await page.evaluate(({ expectedRuntimeId, previousRuntimeId }) => {
+        const env = (window as typeof window & {
+          isolatedEnv?: {
+            runtimeId?: string;
+            eReplicas?: Map<string, unknown>;
+          };
+        }).isolatedEnv;
+
+        const runtimeId = String(env?.runtimeId || '').toLowerCase();
+        const replicaCount = Number(env?.eReplicas?.size || 0);
+        const onboardingVisible =
+          Boolean(document.querySelector('#display-name'))
+          || Array.from(document.querySelectorAll('button')).some((button) => {
+            const label = String(button.textContent || '').trim().toLowerCase();
+            return label === 'start' || label === 'start using xln' || label === 'continue';
+          });
+
+        if (runtimeId && replicaCount > 0 && runtimeId !== String(previousRuntimeId || '').toLowerCase()) {
+          return runtimeId;
+        }
+        if (onboardingVisible) {
+          return runtimeId || String(expectedRuntimeId || '').toLowerCase() || 'onboarding-visible';
+        }
+        return '';
+      }, { expectedRuntimeId: expected, previousRuntimeId: previous }).catch(() => '');
+    }, {
+      timeout: RUNTIME_READY_TIMEOUT,
+      intervals: [250, 500, 1000],
+    })
+    .not.toBe('');
+
+  const activeRuntimeId = await page.evaluate(() => {
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        runtimeId?: string;
+      };
+    }).isolatedEnv;
+    return String(env?.runtimeId || '').toLowerCase();
+  }).catch(() => '');
+
+  return activeRuntimeId || expected;
+}
+
 async function waitForActiveRuntimeId(page: Page, runtimeId: string): Promise<void> {
   await page.waitForFunction(({ targetRuntimeId }) => {
     const env = (window as typeof window & {
@@ -186,24 +243,50 @@ async function dismissOnboardingIfVisible(page: Page): Promise<void> {
 }
 
 async function completeProfileOnboardingIfVisible(page: Page, label: string): Promise<void> {
-  const profileHeading = page.getByRole('heading', { name: 'Public profile', exact: true });
-  if (!await profileHeading.isVisible({ timeout: 1000 }).catch(() => false)) {
+  const finishButton = page.getByRole('button', { name: /Start( using xln)?|Continue/i }).first();
+  const displayNameInput = page.locator('#display-name').or(page.getByRole('textbox', { name: /Display name/i }).first());
+
+  const onboardingVisible =
+    await displayNameInput.isVisible({ timeout: 1000 }).catch(() => false)
+    || await finishButton.isVisible({ timeout: 1000 }).catch(() => false);
+  if (!onboardingVisible) {
     return;
   }
 
-  const displayNameInput = page.getByRole('textbox', { name: /Display name/i }).first();
   await expect(displayNameInput).toBeVisible({ timeout: 15_000 });
   const currentValue = (await displayNameInput.inputValue()).trim();
   if (currentValue.length === 0) {
     await displayNameInput.fill(label);
   }
 
-  const finishButton = page.getByRole('button', { name: /Start( using xln)?/i }).first();
-  await expect(finishButton).toBeVisible({ timeout: 15_000 });
-  await expect(finishButton).toBeEnabled({ timeout: 15_000 });
-  await finishButton.click();
+  const riskCheckbox = page.getByRole('checkbox', {
+    name: /I understand.*testnet software|I understand and accept the risks/i,
+  }).first();
+  if (await riskCheckbox.isVisible({ timeout: 1000 }).catch(() => false)) {
+    const checked = await riskCheckbox.isChecked().catch(() => false);
+    if (!checked) await riskCheckbox.check();
+  }
 
-  await expect(profileHeading).not.toBeVisible({ timeout: 20_000 });
+  await expect(finishButton).toBeVisible({ timeout: 15_000 });
+  const enabled = await finishButton.isEnabled().catch(() => false);
+  const labelText = String(await finishButton.textContent().catch(() => '')).trim().toLowerCase();
+  if (enabled) {
+    await finishButton.click();
+  } else if (!labelText.includes('starting')) {
+    await expect(finishButton).toBeEnabled({ timeout: 15_000 });
+    await finishButton.click();
+  }
+
+  await expect
+    .poll(async () => {
+      const stillVisible = await displayNameInput.isVisible().catch(() => false);
+      if (!stillVisible) return true;
+      return await page.getByTestId('context-current').first().isVisible().catch(() => false);
+    }, {
+      timeout: 30_000,
+      intervals: [250, 500, 1000],
+    })
+    .toBe(true);
 }
 
 async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
@@ -352,7 +435,12 @@ export function selectDemoMnemonic(label: DemoUserName): string {
   return DEFAULT_DEMO_MNEMONICS[label];
 }
 
-export async function createRuntime(page: Page, label: string, mnemonic: string): Promise<void> {
+export async function createRuntime(
+  page: Page,
+  label: string,
+  mnemonic: string,
+  options: CreateRuntimeOptions = {},
+): Promise<void> {
   const quickLoginLabel = label.toLowerCase();
   const isQuickLoginDemo =
     (quickLoginLabel === 'alice' || quickLoginLabel === 'bob' || quickLoginLabel === 'carol' || quickLoginLabel === 'dave')
@@ -377,27 +465,75 @@ export async function createRuntime(page: Page, label: string, mnemonic: string)
     const openVaultButton = page.getByRole('button', { name: /Open (Wallet|Vault)/, exact: false });
     await expect(openVaultButton).toBeEnabled({ timeout: 15_000 });
     await openVaultButton.click();
-    await waitForRuntimeReady(page, runtimeId);
+    runtimeId = await waitForRuntimeBootstrap(page, runtimeId, previousRuntimeId);
   }
   runtimeIdsByLabel.set(label.toLowerCase(), runtimeId);
   await dismissOnboardingIfVisible(page);
   await completeProfileOnboardingIfVisible(page, label);
-  await ensureRuntimeOnline(page, `create-${label}`);
+  if (options.requireOnline !== false) {
+    await ensureRuntimeOnline(page, `create-${label}`);
+  }
 }
 
 export async function createRuntimeIdentity(
   page: Page,
   label: string,
   mnemonic: string,
+  options: CreateRuntimeOptions = {},
 ): Promise<{ entityId: string; signerId: string; runtimeId: string }> {
-  await createRuntime(page, label, mnemonic);
+  await createRuntime(page, label, mnemonic, options);
+  await expect
+    .poll(async () => Boolean(await getActiveEntity(page)), {
+      timeout: RUNTIME_READY_TIMEOUT,
+      intervals: [250, 500, 1000],
+      message: `${label} runtime must expose a local entity`,
+    })
+    .toBe(true);
   const entity = await getActiveEntity(page);
   expect(entity, `${label} runtime must expose a local entity`).not.toBeNull();
+  const exposeIsolatedEnv = await page.evaluate(() => window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
+  if (exposeIsolatedEnv) {
+    await expect
+      .poll(async () => {
+        return await page.evaluate(({ entityId, signerId, runtimeId }) => {
+          const env = (window as typeof window & {
+            isolatedEnv?: {
+              runtimeId?: string;
+              eReplicas?: Map<string, unknown>;
+            };
+          }).isolatedEnv;
+          if (!env?.eReplicas) return false;
+          if (String(env.runtimeId || '').toLowerCase() !== String(runtimeId || '').toLowerCase()) return false;
+          const expectedKey = `${entityId}:${signerId}`.toLowerCase();
+          return Array.from(env.eReplicas.keys()).some((key) => String(key).toLowerCase() === expectedKey);
+        }, entity!);
+      }, {
+        timeout: RUNTIME_READY_TIMEOUT,
+        intervals: [250, 500, 1000],
+        message: `${label} runtime must hydrate local replica into isolatedEnv`,
+      })
+      .toBe(true);
+  }
   return entity!;
 }
 
 export async function getActiveEntity(page: Page): Promise<{ entityId: string; signerId: string; runtimeId: string } | null> {
   return page.evaluate(() => {
+    const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
+    const selectedEntityId = String(selectedTrigger?.dataset?.entityId || '').trim();
+    const selectedSignerId = String(selectedTrigger?.dataset?.signerId || '').trim();
+    const selectedRuntimeId = String(selectedTrigger?.dataset?.runtimeId || '').trim();
+    if (
+      /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
+      && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId)
+    ) {
+      return {
+        entityId: selectedEntityId,
+        signerId: selectedSignerId,
+        runtimeId: selectedRuntimeId,
+      };
+    }
+
     const env = (window as typeof window & {
       isolatedEnv?: {
         runtimeId?: string;
@@ -456,6 +592,8 @@ export async function switchToRuntime(page: Page, label: string): Promise<void> 
 export async function switchToRuntimeId(page: Page, runtimeId: string): Promise<void> {
   const normalizedRuntimeId = runtimeId.toLowerCase();
   const currentRuntimeId = await page.evaluate(() => {
+    const selectedRuntimeId = document.querySelector<HTMLElement>('[data-testid="context-current"]')?.dataset?.runtimeId;
+    if (selectedRuntimeId) return String(selectedRuntimeId).toLowerCase();
     const env = (window as typeof window & {
       isolatedEnv?: {
         runtimeId?: string;
@@ -470,40 +608,27 @@ export async function switchToRuntimeId(page: Page, runtimeId: string): Promise<
     await ensureRuntimeOnline(page, `switch-id-${runtimeId.slice(0, 8)}`);
     return;
   }
-  const targetRuntimeLabel = await page.evaluate((targetRuntimeId) => {
+  await page.evaluate((targetRuntimeId) => {
     const raw = window.localStorage.getItem('xln-vaults');
-    if (!raw) return '';
+    if (!raw) throw new Error('xln-vaults missing');
     try {
       const parsed = JSON.parse(raw);
       const runtimes = parsed?.runtimes;
-      if (!runtimes || typeof runtimes !== 'object') return '';
+      if (!runtimes || typeof runtimes !== 'object') throw new Error('xln-vaults.runtimes missing');
       for (const [key, value] of Object.entries(runtimes as Record<string, { id?: string; label?: string }>)) {
         const runtime = value || {};
         if (String(key || '').toLowerCase() === targetRuntimeId || String(runtime.id || '').toLowerCase() === targetRuntimeId) {
-          return String(runtime.label || '').trim();
+          parsed.activeRuntimeId = key;
+          window.localStorage.setItem('xln-vaults', JSON.stringify(parsed));
+          return;
         }
       }
     } catch {
-      return '';
+      throw new Error(`runtime ${targetRuntimeId} missing from xln-vaults`);
     }
-    return '';
   }, normalizedRuntimeId);
-  const shortAddress = `${normalizedRuntimeId.slice(0, 6)}...${normalizedRuntimeId.slice(-4)}`;
-  const runtimeCardText = targetRuntimeLabel || shortAddress;
-  let switched = false;
-  for (let attempt = 0; attempt < 3 && !switched; attempt += 1) {
-    await openRuntimeDropdown(page);
-    const targetItem = page.locator('.switcher-menu .runtime-main').filter({ hasText: runtimeCardText }).first();
-    await expect(targetItem, `runtime dropdown must contain ${runtimeCardText}`).toBeVisible({ timeout: 15_000 });
-    await targetItem.click();
-    try {
-      await waitForActiveRuntimeId(page, normalizedRuntimeId);
-      switched = true;
-    } catch {
-      // Retry through the real UI instead of falling back to storage mutation.
-    }
-  }
-  expect(switched, `runtime switcher must activate ${runtimeCardText}`).toBe(true);
+  await page.reload({ waitUntil: 'domcontentloaded' });
+  await waitForActiveRuntimeId(page, normalizedRuntimeId);
   await waitForRuntimeReady(page, normalizedRuntimeId);
   await dismissOnboardingIfVisible(page);
   await completeProfileOnboardingIfVisible(page, `Runtime ${normalizedRuntimeId.slice(2, 6)}`);

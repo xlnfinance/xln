@@ -15,7 +15,7 @@
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import { deriveDelta } from '../runtime/account-utils';
 import { getHealth, ensureE2EBaseline } from './utils/e2e-baseline';
-import { connectRuntimeToHub } from './utils/e2e-connect';
+import { connectRuntimeToHubWithCredit } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
 import { requireIsolatedBaseUrl } from './utils/e2e-isolated-env';
 import { timedStep } from './utils/e2e-timing';
@@ -24,6 +24,7 @@ const LONG_E2E = process.env.E2E_LONG === '1';
 const INIT_TIMEOUT = 30_000;
 const APP_BASE_URL = requireIsolatedBaseUrl('E2E_BASE_URL');
 const API_BASE_URL = requireIsolatedBaseUrl('E2E_API_BASE_URL');
+const SWAP_CONNECT_TOKEN_IDS = [1, 2] as const;
 
 type SwapRuntimeWindow = typeof window & {
   isolatedEnv?: {
@@ -423,6 +424,7 @@ async function selectCounterpartyInSwap(page: Page, preferredAccountId?: string)
 }
 
 async function configurePair(page: Page, pairLabel: string, side: 'buy' | 'sell'): Promise<void> {
+  await dismissSwapCompletionModalIfVisible(page);
   const pairSelect = page.getByTestId('swap-pair-select').first();
   await pairSelect.scrollIntoViewIfNeeded().catch(() => {});
   await expect(pairSelect).toBeVisible({ timeout: 20_000 });
@@ -432,6 +434,13 @@ async function configurePair(page: Page, pairLabel: string, side: 'buy' | 'sell'
     : page.getByTestId('swap-side-sell').first();
   await expect(sideButton).toBeVisible({ timeout: 20_000 });
   await sideButton.click();
+}
+
+async function dismissSwapCompletionModalIfVisible(page: Page): Promise<void> {
+  const modalCloseButton = page.locator('.swap-modal-actions button').filter({ hasText: /^Close$/ }).first();
+  if (!await modalCloseButton.isVisible({ timeout: 500 }).catch(() => false)) return;
+  await modalCloseButton.click().catch(() => {});
+  await expect(page.locator('.swap-modal-overlay')).toHaveCount(0, { timeout: 10_000 });
 }
 
 async function ensureSelectedScope(page: Page): Promise<void> {
@@ -692,6 +701,7 @@ async function expectClosedOrderRowStatus(
   minimumCount = 1,
 ): Promise<void> {
   const openClosedOrders = async (): Promise<void> => {
+    await dismissSwapCompletionModalIfVisible(page);
     await page.getByTestId('swap-orders-tab-closed').first().click();
   };
   const waitForClosedRows = async (): Promise<void> => {
@@ -825,10 +835,14 @@ test.describe('E2E Swap Isolated Flow', () => {
       const alice = await createRuntimeIdentity(alicePage, 'alice-book', selectDemoMnemonic('alice'));
       const bob = await createRuntimeIdentity(bobPage, 'bob-book', selectDemoMnemonic('bob'));
 
-      await Promise.all([
-        connectRuntimeToHub(alicePage, alice, hubId),
-        connectRuntimeToHub(bobPage, bob, hubId),
-      ]);
+      await timedStep(
+        'swap_partial.alice.connect_hub',
+        () => connectRuntimeToHubWithCredit(alicePage, alice, hubId, '10000', SWAP_CONNECT_TOKEN_IDS),
+      );
+      await timedStep(
+        'swap_partial.bob.connect_hub',
+        () => connectRuntimeToHubWithCredit(bobPage, bob, hubId, '10000', SWAP_CONNECT_TOKEN_IDS),
+      );
 
       await extendCreditToken(alicePage, 2, '10000');
       await waitForTokenDeltaActive(alicePage, alice.entityId, hubId, 2);
@@ -976,8 +990,8 @@ test.describe('E2E Swap Isolated Flow', () => {
       expect(alice.entityId).not.toBe(bob.entityId);
 
       await Promise.all([
-        timedStep('swap_isolated.alice.connect_hub', () => connectRuntimeToHub(alicePage, alice, hubId)),
-        timedStep('swap_isolated.bob.connect_hub', () => connectRuntimeToHub(bobPage, bob, hubId)),
+        timedStep('swap_isolated.alice.connect_hub', () => connectRuntimeToHubWithCredit(alicePage, alice, hubId, '10000', SWAP_CONNECT_TOKEN_IDS)),
+        timedStep('swap_isolated.bob.connect_hub', () => connectRuntimeToHubWithCredit(bobPage, bob, hubId, '10000', SWAP_CONNECT_TOKEN_IDS)),
       ]);
 
       await timedStep('swap_isolated.alice.extend_credit_weth', async () => {
@@ -1058,10 +1072,10 @@ test.describe('E2E Swap Isolated Flow', () => {
       const alice = await createRuntimeIdentity(alicePage, 'alice-partial', selectDemoMnemonic('alice'));
       const bob = await createRuntimeIdentity(bobPage, 'bob-partial', selectDemoMnemonic('bob'));
 
-      await Promise.all([
-        connectRuntimeToHub(alicePage, alice, hubId),
-        connectRuntimeToHub(bobPage, bob, hubId),
-      ]);
+      await timedStep('swap_roundtrip.alice.connect_hub', () =>
+        connectRuntimeToHubWithCredit(alicePage, alice, hubId, '10000', SWAP_CONNECT_TOKEN_IDS));
+      await timedStep('swap_roundtrip.bob.connect_hub', () =>
+        connectRuntimeToHubWithCredit(bobPage, bob, hubId, '10000', SWAP_CONNECT_TOKEN_IDS));
 
       await extendCreditToken(alicePage, 2, '10000');
       await waitForTokenDeltaActive(alicePage, alice.entityId, hubId, 2);
@@ -1179,9 +1193,9 @@ test.describe('E2E Swap Isolated Flow', () => {
       const carol = await createRuntimeIdentity(carolPage, 'carol-multi', selectDemoMnemonic('carol'));
 
       await Promise.all([
-        connectRuntimeToHub(alicePage, alice, hubId),
-        connectRuntimeToHub(bobPage, bob, hubId),
-        connectRuntimeToHub(carolPage, carol, hubId),
+        connectRuntimeToHubWithCredit(alicePage, alice, hubId, '10000', SWAP_CONNECT_TOKEN_IDS),
+        connectRuntimeToHubWithCredit(bobPage, bob, hubId, '10000', SWAP_CONNECT_TOKEN_IDS),
+        connectRuntimeToHubWithCredit(carolPage, carol, hubId, '10000', SWAP_CONNECT_TOKEN_IDS),
       ]);
 
       await extendCreditToken(alicePage, 2, '10000');
@@ -1250,6 +1264,7 @@ test.describe('E2E Swap Isolated Flow', () => {
         })
         .toBe(0);
 
+      await dismissSwapCompletionModalIfVisible(alicePage);
       await alicePage.getByTestId('swap-orders-tab-closed').first().click();
       const closedRow = alicePage.getByTestId('swap-closed-order-row').first();
       const closedVisible = await closedRow.isVisible({ timeout: 10_000 }).catch(() => false);
@@ -1259,6 +1274,7 @@ test.describe('E2E Swap Isolated Flow', () => {
         await openSwapWorkspace(alicePage);
         await selectCounterpartyInSwap(alicePage, hubId);
         await ensureSelectedScope(alicePage);
+        await dismissSwapCompletionModalIfVisible(alicePage);
         await alicePage.getByTestId('swap-orders-tab-closed').first().click();
       }
       await expectClosedOrderRowStatus(alicePage, /Filled/i);
@@ -1299,8 +1315,8 @@ test.describe('E2E Swap Isolated Flow', () => {
       const bob = await createRuntimeIdentity(bobPage, 'bob-bench', selectDemoMnemonic('bob'));
 
       await Promise.all([
-        connectRuntimeToHub(alicePage, alice, hubId),
-        connectRuntimeToHub(bobPage, bob, hubId),
+        connectRuntimeToHubWithCredit(alicePage, alice, hubId, '10000', SWAP_CONNECT_TOKEN_IDS),
+        connectRuntimeToHubWithCredit(bobPage, bob, hubId, '10000', SWAP_CONNECT_TOKEN_IDS),
       ]);
 
       await extendCreditToken(alicePage, 2, '10000');
@@ -1383,8 +1399,8 @@ test.describe('E2E Swap Isolated Flow', () => {
       const bob = await createRuntimeIdentity(bobPage, 'bob-roundtrip', selectDemoMnemonic('bob'));
 
       await Promise.all([
-        connectRuntimeToHub(alicePage, alice, hubId),
-        connectRuntimeToHub(bobPage, bob, hubId),
+        connectRuntimeToHubWithCredit(alicePage, alice, hubId, '10000', SWAP_CONNECT_TOKEN_IDS),
+        connectRuntimeToHubWithCredit(bobPage, bob, hubId, '10000', SWAP_CONNECT_TOKEN_IDS),
       ]);
 
       await extendCreditToken(alicePage, 1, '10000');

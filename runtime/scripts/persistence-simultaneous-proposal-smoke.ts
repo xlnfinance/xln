@@ -1,6 +1,7 @@
 import { mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import {
+  closeInfraDb,
   closeRuntimeDb,
   createEmptyEnv,
   enqueueRuntimeInput,
@@ -34,6 +35,11 @@ async function main() {
   const namespacePath = join(dbRoot, runtimeId);
 
   rmSync(namespacePath, { recursive: true, force: true });
+  rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-events`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
   mkdirSync(dbRoot, { recursive: true });
 
   const env = createEmptyEnv(seed);
@@ -156,6 +162,7 @@ async function main() {
 
   const before = describeAccounts(env);
   await closeRuntimeDb(env);
+  await closeInfraDb(env);
 
   const restored = await loadEnvFromDB(runtimeId, seed);
   assert(restored, 'restored env from db');
@@ -206,6 +213,8 @@ async function main() {
       2,
     ),
   );
+  await closeRuntimeDb(restored);
+  await closeInfraDb(restored);
 }
 
 main().catch(error => {

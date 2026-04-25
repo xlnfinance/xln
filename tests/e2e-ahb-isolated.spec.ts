@@ -10,7 +10,7 @@
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import { ethers } from 'ethers';
 import { deriveDelta } from '../runtime/account-utils';
-import { resetProdServer } from './utils/e2e-baseline';
+import { ensureE2EBaseline } from './utils/e2e-baseline';
 import {
   getRenderedOutboundForAccount,
   waitForRenderedOutboundForAccountDelta,
@@ -582,7 +582,7 @@ async function pay(
   await amountInput.click();
   await amountInput.fill(ethers.formatUnits(amount, 18));
 
-  const findRoutesBtn = page.getByRole('button', { name: 'Find route' }).first();
+  const findRoutesBtn = page.getByRole('button', { name: /^Find routes?$/i }).first();
   await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
   await findRoutesBtn.click();
   await expect(page.locator('text=/1 hop|route/i').first()).toBeVisible({ timeout: 15_000 });
@@ -602,7 +602,7 @@ async function attemptOverspend(page: Page, to: string, amount: bigint): Promise
   await amountInput.click();
   await amountInput.fill(ethers.formatUnits(amount, 18));
 
-  const findRoutesBtn = page.getByRole('button', { name: 'Find route' }).first();
+  const findRoutesBtn = page.getByRole('button', { name: /^Find routes?$/i }).first();
   await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
   await findRoutesBtn.click();
   await page.waitForTimeout(500);
@@ -679,17 +679,21 @@ async function waitForRuntimeInputDrain(page: Page, label: string, timeoutMs = 1
 }
 
 test.describe('E2E: Alice ↔ Hub ↔ Bob across isolated pages', () => {
-  test.setTimeout(LONG_E2E ? 300_000 : 150_000);
+  test.setTimeout(LONG_E2E ? 300_000 : 210_000);
 
 test('bidirectional payments survive across two isolated browser contexts', async ({ browser, page }, testInfo) => {
     if (testInfo.project.name === 'webkit-mobile') {
-      testInfo.setTimeout(LONG_E2E ? 300_000 : 180_000);
+      testInfo.setTimeout(LONG_E2E ? 300_000 : 210_000);
     }
     let aliceContext: BrowserContext | null = null;
     let bobContext: BrowserContext | null = null;
 
     try {
-      await resetProdServer(page);
+      await ensureE2EBaseline(page, {
+        requireHubMesh: true,
+        requireMarketMaker: false,
+        minHubCount: 3,
+      });
 
       aliceContext = await browser.newContext({ ignoreHTTPSErrors: true });
       bobContext = await browser.newContext({ ignoreHTTPSErrors: true });

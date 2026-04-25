@@ -49,7 +49,6 @@ const makeProposalAccount = (
       jHeight: 0,
       accountTxs: [],
       prevFrameHash: '',
-      tokenIds: [],
       deltas: [],
       stateHash: '',
       byLeft: true,

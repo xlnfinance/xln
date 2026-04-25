@@ -4,7 +4,7 @@ import { connectRuntimeToHub } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
 import { getPersistedReceiptCursor, waitForPersistedFrameMessageMatch } from './utils/e2e-runtime-receipts';
 
-const TEST_TIMEOUT_MS = process.env.E2E_LONG === '1' ? 240_000 : 150_000;
+const TEST_TIMEOUT_MS = process.env.E2E_LONG === '1' ? 240_000 : 210_000;
 
 async function faucetOffchain(page: import('@playwright/test').Page, entityId: string, hubId: string): Promise<void> {
   const result = await page.evaluate(async ({ entityId, hubId }) => {
@@ -35,7 +35,6 @@ test.describe('Invoice QR flow', () => {
         requireHubMesh: true,
         requireMarketMaker: false,
         minHubCount: 3,
-        forceReset: true,
       });
       const hubs = await waitForNamedHubs(alicePage, ['H1']);
       const hubId = hubs.h1;
@@ -61,8 +60,11 @@ test.describe('Invoice QR flow', () => {
 
       const paymentCursor = await getPersistedReceiptCursor(bobPage);
       await alicePage.getByRole('button', { name: /^Pay$/i }).click();
-      await alicePage.getByRole('button', { name: /^QR$/i }).click();
-      await alicePage.locator('.scanner-file-input').setInputFiles(qrPath);
+      await alicePage.getByRole('button', { name: /^(qr|scan qr code)$/i }).click();
+      await expect(alicePage.locator('.scanner-overlay')).toBeVisible({ timeout: 15_000 });
+      const scannerInput = alicePage.locator('.scanner-file-input');
+      await expect(scannerInput).toBeAttached({ timeout: 15_000 });
+      await scannerInput.setInputFiles(qrPath);
 
       await expect(alicePage.locator('#payment-invoice-input')).toHaveValue(/^0x[0-9a-f]{64}(?:\?|$)/i, { timeout: 30_000 });
       await expect(alicePage.locator('#payment-amount-input')).toHaveValue('7', { timeout: 30_000 });

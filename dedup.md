@@ -40,10 +40,10 @@ Top 100 simplification targets:
 28. `runtime/entity-tx/j-events.ts` — extract settlement event application into `j-events-settlement.ts`.
 29. `runtime/entity-crontab.ts` — split periodic tasks and one-shot hooks into separate modules.
 30. `runtime/entity-crontab.ts` — extract dispute hook logic from rebalance and HTLC hook logic.
-31. `runtime/wal/replay.ts` — split frame replay loop from validation and debug/read helpers.
-32. `runtime/wal/runtime.ts` — split persistence API from DB-open/close plumbing.
+31. `runtime/runtime.ts` — split storage replay loop from validation and debug/read helpers.
+32. `runtime/storage/index.ts` — split persistence API from DB-open/close plumbing.
 33. `runtime/wal/snapshot.ts` — separate env snapshot building from BrowserVM state inclusion.
-34. `runtime/wal/state-restore.ts` — separate pure restore from infra rehydration glue.
+34. `runtime/storage/index.ts` — separate pure restore from infra rehydration glue.
 35. `runtime/wal/hash.ts` — centralize hash-input normalization with zero ad hoc field deletions outside this file.
 36. `runtime/state-helpers.ts` — split entity clone helpers, account clone helpers, and display/helpers.
 37. `runtime/state-helpers.ts` — replace ad hoc manual clone branches with smaller canonical clone functions.

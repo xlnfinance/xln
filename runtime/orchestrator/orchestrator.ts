@@ -1,7 +1,9 @@
 #!/usr/bin/env bun
 
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawn, type ChildProcess } from 'node:child_process';
+import { randomUUID } from 'node:crypto';
+import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { cpus, freemem, loadavg, totalmem } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { encodeBoard, hashBoard } from '../entity-factory';
@@ -30,9 +32,10 @@ import {
   RPC_MARKET_PUBLISH_MS,
   type MarketSnapshotPayload,
 } from '../market-snapshot';
-import { normalizeLoopbackUrl } from '../loopback-url';
+import { normalizeLoopbackUrl, toPublicRpcUrl } from '../loopback-url';
 import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync, type StorageHealth } from './storage-monitor';
 import { maybeHandleQaRequest } from '../qa/api';
+import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 
 type Args = {
   host: string;
@@ -51,6 +54,18 @@ type Args = {
   walletUrl: string;
 };
 
+const readPositiveIntEnv = (name: string, fallback: number): number => {
+  const value = Number(process.env[name] || '');
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+};
+
+const STARTUP_TIMEOUT_MS = readPositiveIntEnv('XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS', 180_000);
+const HUB_SELF_READY_TIMEOUT_MS = readPositiveIntEnv('XLN_HUB_SELF_READY_TIMEOUT_MS', STARTUP_TIMEOUT_MS);
+const HUB_API_READY_TIMEOUT_MS = readPositiveIntEnv('XLN_HUB_API_READY_TIMEOUT_MS', Math.max(60_000, STARTUP_TIMEOUT_MS));
+const HUB_PROFILES_READY_TIMEOUT_MS = readPositiveIntEnv('XLN_HUB_PROFILES_READY_TIMEOUT_MS', Math.max(45_000, STARTUP_TIMEOUT_MS));
+const HUB_BASELINE_TIMEOUT_MS = readPositiveIntEnv('XLN_HUB_BASELINE_TIMEOUT_MS', Math.max(90_000, STARTUP_TIMEOUT_MS));
+const MARKET_MAKER_READY_TIMEOUT_MS = readPositiveIntEnv('XLN_MARKET_MAKER_READY_TIMEOUT_MS', Math.max(90_000, STARTUP_TIMEOUT_MS));
+
 type StageTiming = {
   startedAt: number | null;
   completedAt: number | null;
@@ -64,6 +79,8 @@ type ResetState = {
   lastError: string | null;
   startedAt: number | null;
   completedAt: number | null;
+  failedAt: number | null;
+  resolvedAt: number | null;
 };
 
 type HubProcessSpec = {
@@ -78,7 +95,7 @@ type HubProcessSpec = {
 };
 
 type HubChild = HubProcessSpec & {
-  proc: ChildProcessWithoutNullStreams | null;
+  proc: ChildProcess | null;
   startedAt: number | null;
   exitedAt: number | null;
   exitCode: number | null;
@@ -117,6 +134,7 @@ type HubHealthPayload = {
   };
   bootstrapReserves?: {
     ok: boolean;
+    targetMet?: boolean;
     tokens: Array<{
       tokenId: number;
       symbol: string;
@@ -124,12 +142,15 @@ type HubHealthPayload = {
       current: string;
       expectedMin: string;
       ready: boolean;
+      operational?: boolean;
+      targetMet?: boolean;
     }>;
   };
   marketMaker?: {
     enabled: boolean;
     ok: boolean;
     entityId: string | null;
+    startupPhase: string | null;
     expectedOffersPerHub: number;
     expectedOffersPerPair?: number;
     hubs: Array<{
@@ -202,10 +223,54 @@ type RpcMarketSubscription = {
 
 type AggregatedHealth = {
   timestamp: number;
+  coreOk: boolean;
+  systemOk: boolean;
+  degraded: string[];
   reset: ResetState;
   system: {
     runtime: boolean;
     relay: boolean;
+  };
+  relay: {
+    clientCount: number;
+    managedRuntimeIds: string[];
+    externalClientIds: string[];
+  };
+  process: {
+    pid: number;
+    ownerId: string;
+    uptimeSec: number;
+    rssBytes: number;
+    heapUsedBytes: number;
+    loadavg: number[];
+    cpuCount: number;
+    memory: {
+      freeBytes: number;
+      totalBytes: number;
+      freePct: number;
+    };
+    children: Array<{
+      role: ManagedRuntimeRole;
+      name: string;
+      pid: number | null;
+      leasePid: number | null;
+      leaseOwnerId: string | null;
+      online: boolean;
+      exitCode: number | null;
+      apiPort: number;
+      dbPath: string;
+    }>;
+  };
+  disk: {
+    ok: boolean;
+    minFreeBytes: number;
+    freeBytes: number;
+    usedBytes: number;
+    totalBytes: number;
+    freeGiB: number;
+    usedGiB: number;
+    totalGiB: number;
+    usedPct: number;
   };
   storage: StorageHealth;
   hubMesh: {
@@ -221,6 +286,7 @@ type AggregatedHealth = {
     enabled: boolean;
     ok: boolean;
     entityId: string | null;
+    startupPhase: string | null;
     expectedOffersPerHub: number;
     hubs: Array<{
       hubEntityId: string;
@@ -238,12 +304,14 @@ type AggregatedHealth = {
   };
   bootstrapReserves: {
     ok: boolean;
+    targetMet: boolean;
     requiredTokenCount: number;
     entityCount: number;
     entities: Array<{
       entityId: string;
       role: 'hub' | 'market-maker';
       ready: boolean;
+      targetMet: boolean;
       tokens: Array<{
         tokenId: number;
         symbol: string;
@@ -251,6 +319,8 @@ type AggregatedHealth = {
         current: string;
         expectedMin: string;
         ready: boolean;
+        operational?: boolean;
+        targetMet?: boolean;
       }>;
     }>;
   };
@@ -259,9 +329,27 @@ type AggregatedHealth = {
     name: string;
     online: boolean;
     runtimeId: string;
-    activeClients: string[];
+    selfRelayPresence: boolean;
   }>;
   timings: TimingMap;
+};
+
+const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
+  const totalBytes = Number(storage.disk.totalBytes || 0);
+  const usedBytes = Number(storage.disk.usedBytes || 0);
+  const freeBytes = Number(storage.disk.freeBytes || 0);
+  const toGiB = (value: number): number => Math.round((value / 1024 ** 3) * 100) / 100;
+  return {
+    ok: storage.ok,
+    minFreeBytes: storage.minFreeBytes,
+    freeBytes,
+    usedBytes,
+    totalBytes,
+    freeGiB: toGiB(freeBytes),
+    usedGiB: toGiB(usedBytes),
+    totalGiB: toGiB(totalBytes),
+    usedPct: totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 10000) / 100 : 0,
+  };
 };
 
 type MarketMakerChild = {
@@ -271,7 +359,7 @@ type MarketMakerChild = {
   apiPort: number;
   publicPort: number;
   dbPath: string;
-  proc: ChildProcessWithoutNullStreams | null;
+  proc: ChildProcess | null;
   startedAt: number | null;
   exitedAt: number | null;
   exitCode: number | null;
@@ -288,6 +376,25 @@ type CustodySupportState = {
   custodyChild: ManagedChild;
   identity: ManagedIdentity;
   hubIds: string[];
+};
+
+type ManagedRuntimeRole = 'hub' | 'market-maker';
+
+type ManagedRuntimeSpec = {
+  role: ManagedRuntimeRole;
+  name: string;
+  script: 'runtime/orchestrator/hub-node.ts' | 'runtime/orchestrator/mm-node.ts';
+  apiPort: number;
+  dbPath: string;
+};
+
+type ManagedRuntimeLease = ManagedRuntimeSpec & {
+  ownerId: string;
+  orchestratorPid: number;
+  pid: number;
+  cwd: string;
+  startedAt: number;
+  updatedAt: number;
 };
 
 const HUB_NAMES = ['H1', 'H2', 'H3'] as const;
@@ -341,10 +448,10 @@ const parseArgs = (): Args => {
     publicWsBaseUrl: normalizeWsBaseUrl(getArg('--public-ws-base-url', ''), host, port),
     nodeApiPortBase,
     nodePublicPortBase,
-    rpcUrl: normalizeLoopbackUrl(getArg('--rpc-url', process.env.ANVIL_RPC || 'http://localhost:8545')),
+    rpcUrl: normalizeLoopbackUrl(getArg('--rpc-url', process.env['ANVIL_RPC'] || 'http://localhost:8545')),
     dbRoot: resolve(getArg('--db-root', join(process.cwd(), '.e2e-mesh-db'))),
     mmEnabled: hasFlag('--mm'),
-    resetAllowed: hasFlag('--allow-reset') || process.env.XLN_MESH_RESET_ALLOWED === '1',
+    resetAllowed: hasFlag('--allow-reset') || process.env['XLN_MESH_RESET_ALLOWED'] === '1',
     custodyEnabled: hasFlag('--custody'),
     custodyPort: Number(getArg('--custody-port', String(port + 7))),
     custodyDaemonPort: Number(getArg('--custody-daemon-port', String(port + 8))),
@@ -354,6 +461,8 @@ const parseArgs = (): Args => {
 };
 
 const args = parseArgs();
+const orchestratorOwnerId = `${process.pid}:${Date.now()}:${randomUUID()}`;
+const staleReapEnabled = process.env['XLN_SKIP_STALE_REAP'] !== '1';
 const relayUrl = (() => {
   const url = new URL(args.publicWsBaseUrl);
   url.pathname = '/relay';
@@ -362,6 +471,7 @@ const relayUrl = (() => {
   return url.toString();
 })();
 const shardJurisdictionsPath = join(args.dbRoot, 'jurisdictions.json');
+const controlPlaneDir = join(args.dbRoot, '.control-plane');
 
 const relayStore: RelayStore = createRelayStore('mesh-relay');
 const routerConfig: RelayRouterConfig = {
@@ -386,6 +496,8 @@ const resetState: ResetState = {
   lastError: null,
   startedAt: null,
   completedAt: null,
+  failedAt: null,
+  resolvedAt: null,
 };
 
 const hubChildren: HubChild[] = HUB_NAMES.map((name, index) => ({
@@ -441,32 +553,38 @@ let rpcMarketPublisherTimer: ReturnType<typeof setInterval> | null = null;
 let rpcMarketPublisherInFlight = false;
 
 let resetPromise: Promise<void> | null = null;
+const CHILD_GRACEFUL_SHUTDOWN_MS = 15_000;
 
 const startTiming = (stage: keyof typeof timings): number => {
   const now = Date.now();
-  timings[stage].startedAt = now;
-  timings[stage].completedAt = null;
-  timings[stage].ms = null;
+  const timing = timings[stage];
+  if (!timing) throw new Error(`Unknown timing stage: ${String(stage)}`);
+  timing.startedAt = now;
+  timing.completedAt = null;
+  timing.ms = null;
   return now;
 };
 
 const finishTiming = (stage: keyof typeof timings, startedAt: number): void => {
   const completedAt = Date.now();
-  timings[stage].completedAt = completedAt;
-  timings[stage].ms = completedAt - startedAt;
-  console.log(`[MESH-TIMING] ${stage} ${timings[stage].ms}ms`);
+  const timing = timings[stage];
+  if (!timing) throw new Error(`Unknown timing stage: ${String(stage)}`);
+  timing.completedAt = completedAt;
+  timing.ms = completedAt - startedAt;
+  console.log(`[MESH-TIMING] ${stage} ${timing.ms}ms`);
 };
 
 const serializeError = (error: unknown): string => error instanceof Error ? error.message : String(error);
 
-const stopProcess = async (proc: ChildProcessWithoutNullStreams | null): Promise<void> => {
+const stopProcess = async (proc: ChildProcess | null): Promise<void> => {
   if (!proc || proc.exitCode !== null) return;
   proc.kill('SIGTERM');
-  const deadline = Date.now() + 4_000;
+  const deadline = Date.now() + CHILD_GRACEFUL_SHUTDOWN_MS;
   while (proc.exitCode === null && Date.now() < deadline) {
     await delay(100);
   }
   if (proc.exitCode === null) {
+    console.warn(`[MESH] child pid=${proc.pid ?? 'unknown'} did not exit after ${CHILD_GRACEFUL_SHUTDOWN_MS}ms; sending SIGKILL`);
     proc.kill('SIGKILL');
   }
 };
@@ -494,14 +612,14 @@ const fetchJson = async <T>(url: string, timeoutMs = 2_000): Promise<T | null> =
   const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
     const insecureLocalHttps = url.startsWith('https://localhost:') || url.startsWith('https://127.0.0.1:');
-    const prevTlsReject = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+    const prevTlsReject = process.env['NODE_TLS_REJECT_UNAUTHORIZED'];
     if (insecureLocalHttps) {
-      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+      process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';
     }
     const response = await fetch(url, { signal: controller.signal });
     if (insecureLocalHttps) {
-      if (prevTlsReject === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-      else process.env.NODE_TLS_REJECT_UNAUTHORIZED = prevTlsReject;
+      if (prevTlsReject === undefined) delete process.env['NODE_TLS_REJECT_UNAUTHORIZED'];
+      else process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = prevTlsReject;
     }
     if (!response.ok) return null;
     return await response.json() as T;
@@ -528,16 +646,21 @@ const fetchText = async (url: string, timeoutMs = 2_000): Promise<string | null>
 
 const postJson = async (url: string, timeoutMs = 1_000): Promise<void> => {
   const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  let timer: ReturnType<typeof setTimeout> | null = null;
   try {
-    await fetch(url, {
-      method: 'POST',
-      signal: controller.signal,
-    });
+    await Promise.race([
+      fetch(url, { method: 'POST', signal: controller.signal }).catch(() => null),
+      new Promise<null>((resolve) => {
+        timer = setTimeout(() => {
+          controller.abort();
+          resolve(null);
+        }, timeoutMs);
+      }),
+    ]);
   } catch {
     // best effort before hard stop
   } finally {
-    clearTimeout(timer);
+    if (timer) clearTimeout(timer);
   }
 };
 
@@ -762,6 +885,22 @@ const readShardJurisdictions = (): string => {
   return shard;
 };
 
+const toPublicJurisdictionsPayload = (raw: string): string => {
+  try {
+    const parsed = JSON.parse(raw) as {
+      jurisdictions?: Record<string, { rpc?: unknown }>;
+    };
+    if (!parsed || typeof parsed !== 'object' || !parsed.jurisdictions) return raw;
+    for (const jurisdiction of Object.values(parsed.jurisdictions)) {
+      if (!jurisdiction || typeof jurisdiction !== 'object') continue;
+      jurisdiction.rpc = toPublicRpcUrl(String(jurisdiction.rpc || '/rpc'));
+    }
+    return `${JSON.stringify(parsed, null, 2)}\n`;
+  } catch {
+    return raw;
+  }
+};
+
 const seedShardJurisdictions = (): void => {
   const canonicalPath = resolveJurisdictionsJsonPath();
   if (!existsSync(canonicalPath)) {
@@ -842,29 +981,237 @@ const clearChildRestartTimer = (child: { restartTimer: ReturnType<typeof setTime
   child.restartTimer = null;
 };
 
+const managedSpecForHub = (child: HubChild): ManagedRuntimeSpec => ({
+  role: 'hub',
+  name: child.name,
+  script: 'runtime/orchestrator/hub-node.ts',
+  apiPort: child.apiPort,
+  dbPath: child.dbPath,
+});
+
+const managedSpecForMarketMaker = (): ManagedRuntimeSpec => ({
+  role: 'market-maker',
+  name: marketMakerChild.name,
+  script: 'runtime/orchestrator/mm-node.ts',
+  apiPort: marketMakerChild.apiPort,
+  dbPath: marketMakerChild.dbPath,
+});
+
+const leasePathForManagedRuntime = (spec: ManagedRuntimeSpec): string =>
+  join(controlPlaneDir, `${spec.role}-${spec.name.toLowerCase()}.lease.json`);
+
+const readManagedRuntimeLease = (spec: ManagedRuntimeSpec): ManagedRuntimeLease | null => {
+  const path = leasePathForManagedRuntime(spec);
+  if (!existsSync(path)) return null;
+  try {
+    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<ManagedRuntimeLease>;
+    if (
+      parsed.role === spec.role &&
+      parsed.name === spec.name &&
+      parsed.script === spec.script &&
+      Number(parsed.apiPort) === spec.apiPort &&
+      String(parsed.dbPath || '') === spec.dbPath &&
+      typeof parsed.ownerId === 'string' &&
+      Number.isFinite(parsed.pid)
+    ) {
+      return {
+        role: spec.role,
+        name: spec.name,
+        script: spec.script,
+        apiPort: spec.apiPort,
+        dbPath: spec.dbPath,
+        ownerId: parsed.ownerId,
+        orchestratorPid: Number(parsed.orchestratorPid || 0),
+        pid: Number(parsed.pid),
+        cwd: String(parsed.cwd || ''),
+        startedAt: Number(parsed.startedAt || 0),
+        updatedAt: Number(parsed.updatedAt || 0),
+      };
+    }
+  } catch (error) {
+    console.warn(`[MESH] ignoring unreadable child lease ${path}: ${serializeError(error)}`);
+  }
+  return null;
+};
+
+const writeManagedRuntimeLease = (spec: ManagedRuntimeSpec, pid: number, startedAt: number): void => {
+  mkdirSync(controlPlaneDir, { recursive: true });
+  const lease: ManagedRuntimeLease = {
+    ...spec,
+    ownerId: orchestratorOwnerId,
+    orchestratorPid: process.pid,
+    pid,
+    cwd: process.cwd(),
+    startedAt,
+    updatedAt: Date.now(),
+  };
+  const path = leasePathForManagedRuntime(spec);
+  const tmpPath = `${path}.tmp`;
+  writeFileSync(tmpPath, `${safeStringify(lease)}\n`);
+  renameSync(tmpPath, path);
+};
+
+const removeManagedRuntimeLease = (spec: ManagedRuntimeSpec, pid?: number | null): void => {
+  const lease = readManagedRuntimeLease(spec);
+  if (!lease) return;
+  if (lease.ownerId !== orchestratorOwnerId) return;
+  if (pid !== undefined && pid !== null && lease.pid !== pid) return;
+  rmSync(leasePathForManagedRuntime(spec), { force: true });
+};
+
+type ProcessTableEntry = { pid: number; command: string };
+
+const readProcessTable = async (): Promise<ProcessTableEntry[]> => {
+  return await new Promise<ProcessTableEntry[]>((resolve) => {
+    const child = spawn('ps', ['-axo', 'pid=,command='], {
+      cwd: process.cwd(),
+      stdio: ['ignore', 'pipe', 'ignore'],
+    });
+
+    let stdout = '';
+    child.stdout.on('data', chunk => {
+      stdout += chunk.toString();
+    });
+
+    child.on('error', () => resolve([]));
+    child.on('close', () => {
+      const rows = stdout
+        .split(/\r?\n/)
+        .map((line): ProcessTableEntry | null => {
+          const match = line.match(/^\s*(\d+)\s+(.+)$/);
+          if (!match) return null;
+          const pid = Number.parseInt(match[1]!, 10);
+          if (!Number.isFinite(pid) || pid <= 0 || pid === process.pid) return null;
+          return { pid, command: match[2]!.trim() };
+        })
+        .filter((row): row is ProcessTableEntry => row !== null);
+      resolve(rows);
+    });
+  });
+};
+
+const isPidAlive = (pid: number): boolean => {
+  try {
+    process.kill(pid, 0);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const commandMatchesManagedRuntime = (command: string, spec: ManagedRuntimeSpec): boolean => {
+  if (!command.includes(spec.script)) return false;
+  if (!command.includes(`--name ${spec.name}`) && !command.includes(`--name=${spec.name}`)) return false;
+  const hasApiPort =
+    command.includes(`--api-port ${spec.apiPort}`) ||
+    command.includes(`--api-port=${spec.apiPort}`);
+  const hasDbPath =
+    command.includes(`--db-path ${spec.dbPath}`) ||
+    command.includes(`--db-path=${spec.dbPath}`);
+  return hasApiPort && hasDbPath;
+};
+
+const killProcessIds = async (pids: number[], label: string): Promise<void> => {
+  if (pids.length === 0) return;
+  console.warn(`[MESH] killing stale ${label}: ${pids.join(' ')}`);
+  for (const pid of pids) {
+    try { process.kill(pid, 'SIGTERM'); } catch {}
+  }
+  await delay(1_000);
+  for (const pid of pids) {
+    if (!isPidAlive(pid)) continue;
+    try { process.kill(pid, 'SIGKILL'); } catch {}
+  }
+  await delay(200);
+};
+
+const reapStaleManagedRuntime = async (
+  spec: ManagedRuntimeSpec,
+  currentPid: number,
+  processTable?: ProcessTableEntry[],
+): Promise<void> => {
+  const table = processTable ?? await readProcessTable();
+  const candidates = new Set<number>();
+  const lease = readManagedRuntimeLease(spec);
+  if (lease) {
+    if (!isPidAlive(lease.pid)) {
+      rmSync(leasePathForManagedRuntime(spec), { force: true });
+    } else if (lease.ownerId !== orchestratorOwnerId && lease.pid !== currentPid) {
+      candidates.add(lease.pid);
+    }
+  }
+
+  const commandByPid = new Map<number, string>();
+  for (const row of table) {
+    commandByPid.set(row.pid, row.command);
+    if (row.pid === currentPid) continue;
+    if (commandMatchesManagedRuntime(row.command, spec)) candidates.add(row.pid);
+  }
+
+  const verified: number[] = [];
+  for (const pid of candidates) {
+    if (pid === process.pid || pid === currentPid || !isPidAlive(pid)) continue;
+    const command = commandByPid.get(pid) || '';
+    if (commandMatchesManagedRuntime(command, spec)) {
+      verified.push(pid);
+    }
+  }
+
+  await killProcessIds(verified, `${spec.name} ${spec.role} process(es)`);
+};
+
+const reapStaleHubProcess = async (child: HubChild, processTable?: ProcessTableEntry[]): Promise<void> => {
+  if (!staleReapEnabled) return;
+  await reapStaleManagedRuntime(managedSpecForHub(child), child.proc?.pid ?? -1, processTable);
+};
+
+const reapStaleMarketMakerProcess = async (processTable?: ProcessTableEntry[]): Promise<void> => {
+  if (!staleReapEnabled) return;
+  await reapStaleManagedRuntime(managedSpecForMarketMaker(), marketMakerChild.proc?.pid ?? -1, processTable);
+};
+
+const reapStaleManagedChildren = async (): Promise<void> => {
+  if (!staleReapEnabled) return;
+  const processTable = await readProcessTable();
+  await Promise.all(hubChildren.map(child => reapStaleHubProcess(child, processTable)));
+  if (args.mmEnabled) {
+    await reapStaleMarketMakerProcess(processTable);
+  }
+};
+
 const scheduleHubRestart = (child: HubChild): void => {
   if (resetState.inProgress || child.restartTimer) return;
+  const delayMs = Math.min(30_000, UNEXPECTED_EXIT_RESTART_MS * 2 ** Math.min(5, Math.max(0, child.restartCount - 1)));
   child.restartTimer = setTimeout(() => {
     child.restartTimer = null;
     if (resetState.inProgress || (child.proc && child.proc.exitCode === null)) return;
-    console.warn(`[MESH] restarting ${child.name} after unexpected exit`);
-    spawnHub(child);
-  }, UNEXPECTED_EXIT_RESTART_MS);
+    console.warn(`[MESH] restarting ${child.name} after unexpected exit delayMs=${delayMs} restartCount=${child.restartCount}`);
+    void spawnHub(child).catch(error => {
+      console.error(`[MESH] failed to restart ${child.name}: ${serializeError(error)}`);
+      scheduleHubRestart(child);
+    });
+  }, delayMs);
 };
 
 const scheduleMarketMakerRestart = (): void => {
   if (resetState.inProgress || marketMakerChild.restartTimer) return;
+  const delayMs = Math.min(30_000, UNEXPECTED_EXIT_RESTART_MS * 2 ** Math.min(5, Math.max(0, marketMakerChild.restartCount - 1)));
   marketMakerChild.restartTimer = setTimeout(() => {
     marketMakerChild.restartTimer = null;
     if (resetState.inProgress || (marketMakerChild.proc && marketMakerChild.proc.exitCode === null)) return;
-    console.warn('[MESH] restarting MM after unexpected exit');
-    spawnMarketMaker();
-  }, UNEXPECTED_EXIT_RESTART_MS);
+    console.warn(`[MESH] restarting MM after unexpected exit delayMs=${delayMs} restartCount=${marketMakerChild.restartCount}`);
+    void spawnMarketMaker().catch(error => {
+      console.error(`[MESH] failed to restart MM: ${serializeError(error)}`);
+      scheduleMarketMakerRestart();
+    });
+  }, delayMs);
 };
 
-const spawnHub = (child: HubChild): void => {
+const spawnHub = async (child: HubChild): Promise<void> => {
+  await reapStaleHubProcess(child);
   mkdirSync(child.dbPath, { recursive: true });
   clearChildRestartTimer(child);
+  const spec = managedSpecForHub(child);
   const cmd = [
     'runtime/orchestrator/hub-node.ts',
     '--name', child.name,
@@ -887,7 +1234,7 @@ const spawnHub = (child: HubChild): void => {
   child.restartCount += 1;
   child.lastHealth = null;
   child.lastInfo = null;
-  child.proc = spawn('bun', cmd, {
+  const proc = spawn('bun', cmd, {
     cwd: process.cwd(),
     stdio: ['ignore', 'pipe', 'pipe'],
     env: sanitizeChildEnv({
@@ -896,15 +1243,24 @@ const spawnHub = (child: HubChild): void => {
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
       ANVIL_RPC: args.rpcUrl,
       USE_ANVIL: 'true',
+      XLN_ORCHESTRATOR_PID: String(process.pid),
+      XLN_ORCHESTRATOR_OWNER_ID: orchestratorOwnerId,
+      XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(STARTUP_TIMEOUT_MS),
     }),
   });
-  child.proc.stdout.on('data', chunk => {
+  child.proc = proc;
+  if (!proc.pid) {
+    throw new Error(`${child.name}_SPAWN_FAILED_NO_PID`);
+  }
+  writeManagedRuntimeLease(spec, proc.pid, child.startedAt ?? Date.now());
+  proc.stdout?.on('data', chunk => {
     process.stdout.write(`[${child.name}] ${chunk.toString()}`);
   });
-  child.proc.stderr.on('data', chunk => {
+  proc.stderr?.on('data', chunk => {
     process.stderr.write(`[${child.name}:err] ${chunk.toString()}`);
   });
-  child.proc.once('exit', code => {
+  proc.once('exit', code => {
+    removeManagedRuntimeLease(spec, proc.pid ?? null);
     child.exitedAt = Date.now();
     child.exitCode = code;
     if (!resetState.inProgress && code !== 0) {
@@ -914,9 +1270,11 @@ const spawnHub = (child: HubChild): void => {
   });
 };
 
-const spawnMarketMaker = (): void => {
+const spawnMarketMaker = async (): Promise<void> => {
+  await reapStaleMarketMakerProcess();
   mkdirSync(marketMakerChild.dbPath, { recursive: true });
   clearChildRestartTimer(marketMakerChild);
+  const spec = managedSpecForMarketMaker();
   const cmd = [
     'runtime/orchestrator/mm-node.ts',
     '--name', marketMakerChild.name,
@@ -939,7 +1297,7 @@ const spawnMarketMaker = (): void => {
   marketMakerChild.lastHealth = null;
   marketMakerChild.lastInfo = null;
   marketMakerChild.lastStartupPhase = null;
-  marketMakerChild.proc = spawn('bun', cmd, {
+  const proc = spawn('bun', cmd, {
     cwd: process.cwd(),
     stdio: ['ignore', 'pipe', 'pipe'],
     env: sanitizeChildEnv({
@@ -948,15 +1306,24 @@ const spawnMarketMaker = (): void => {
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
       ANVIL_RPC: args.rpcUrl,
       USE_ANVIL: 'true',
+      XLN_ORCHESTRATOR_PID: String(process.pid),
+      XLN_ORCHESTRATOR_OWNER_ID: orchestratorOwnerId,
+      XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(STARTUP_TIMEOUT_MS),
     }),
   });
-  marketMakerChild.proc.stdout.on('data', chunk => {
+  marketMakerChild.proc = proc;
+  if (!proc.pid) {
+    throw new Error('MM_SPAWN_FAILED_NO_PID');
+  }
+  writeManagedRuntimeLease(spec, proc.pid, marketMakerChild.startedAt ?? Date.now());
+  proc.stdout?.on('data', chunk => {
     process.stdout.write(`[MM] ${chunk.toString()}`);
   });
-  marketMakerChild.proc.stderr.on('data', chunk => {
+  proc.stderr?.on('data', chunk => {
     process.stderr.write(`[MM:err] ${chunk.toString()}`);
   });
-  marketMakerChild.proc.once('exit', (code, signal) => {
+  proc.once('exit', (code, signal) => {
+    removeManagedRuntimeLease(spec, proc.pid ?? null);
     marketMakerChild.exitedAt = Date.now();
     marketMakerChild.exitCode = code ?? null;
     marketMakerChild.exitSignal = signal ?? null;
@@ -972,11 +1339,17 @@ const spawnMarketMaker = (): void => {
 const stopAllChildren = async (): Promise<void> => {
   for (const child of hubChildren) clearChildRestartTimer(child);
   clearChildRestartTimer(marketMakerChild);
-  await Promise.all([
-    ...hubChildren.map((child) => postJson(`http://${args.host}:${child.apiPort}/api/control/p2p/stop`)),
-    postJson(`http://${args.host}:${marketMakerChild.apiPort}/api/control/p2p/stop`),
-  ]);
-  await delay(150);
+  const ownedLiveChildren = hubChildren.filter((child) => child.proc && child.proc.exitCode === null);
+  const ownedLiveMarketMaker = marketMakerChild.proc && marketMakerChild.proc.exitCode === null ? marketMakerChild : null;
+  const p2pStops = [
+    ...ownedLiveChildren.map((child) => postJson(`http://${args.host}:${child.apiPort}/api/control/p2p/stop`)),
+    ...(ownedLiveMarketMaker ? [postJson(`http://${args.host}:${ownedLiveMarketMaker.apiPort}/api/control/p2p/stop`)] : []),
+  ];
+  // Initial reset often has no owned children yet. Do not probe random old listeners on the same ports.
+  if (p2pStops.length > 0) {
+    await Promise.all(p2pStops);
+    await delay(150);
+  }
 
   const hubProcs = hubChildren.map((child) => {
     const proc = child.proc;
@@ -994,20 +1367,88 @@ const stopAllChildren = async (): Promise<void> => {
     currentCustody ? stopManagedChild(currentCustody.custodyChild) : Promise.resolve(),
     currentCustody ? stopManagedChild(currentCustody.daemonChild) : Promise.resolve(),
   ]);
+  for (const child of hubChildren) removeManagedRuntimeLease(managedSpecForHub(child));
+  removeManagedRuntimeLease(managedSpecForMarketMaker());
+};
+
+const buildChildProcessHealth = (): AggregatedHealth['process']['children'] => {
+  const hubEntries = hubChildren.map((child) => {
+    const spec = managedSpecForHub(child);
+    const lease = readManagedRuntimeLease(spec);
+    return {
+      role: spec.role,
+      name: spec.name,
+      pid: child.proc?.pid ?? null,
+      leasePid: lease?.pid ?? null,
+      leaseOwnerId: lease?.ownerId ?? null,
+      online: child.proc?.exitCode === null,
+      exitCode: child.exitCode,
+      apiPort: spec.apiPort,
+      dbPath: spec.dbPath,
+    };
+  });
+  const mmSpec = managedSpecForMarketMaker();
+  const mmLease = readManagedRuntimeLease(mmSpec);
+  return [
+    ...hubEntries,
+    {
+      role: mmSpec.role,
+      name: mmSpec.name,
+      pid: marketMakerChild.proc?.pid ?? null,
+      leasePid: mmLease?.pid ?? null,
+      leaseOwnerId: mmLease?.ownerId ?? null,
+      online: marketMakerChild.proc?.exitCode === null,
+      exitCode: marketMakerChild.exitCode,
+      apiPort: mmSpec.apiPort,
+      dbPath: mmSpec.dbPath,
+    },
+  ];
+};
+
+const buildProcessHealth = (): AggregatedHealth['process'] => {
+  const mem = process.memoryUsage();
+  const totalMemory = totalmem();
+  const freeMemory = freemem();
+  return {
+    pid: process.pid,
+    ownerId: orchestratorOwnerId,
+    uptimeSec: Math.round(process.uptime()),
+    rssBytes: mem.rss,
+    heapUsedBytes: mem.heapUsed,
+    loadavg: loadavg(),
+    cpuCount: cpus().length,
+    memory: {
+      freeBytes: freeMemory,
+      totalBytes: totalMemory,
+      freePct: totalMemory > 0 ? Math.round((freeMemory / totalMemory) * 10000) / 100 : 0,
+    },
+    children: buildChildProcessHealth(),
+  };
 };
 
 const computeAggregatedHealth = (): AggregatedHealth => {
   const storage = getStorageHealthSnapshotSync();
+  const managedRuntimeIds = new Set<string>();
+  for (const child of hubChildren) {
+    const runtimeId = normalizeRuntimeKey(String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || ''));
+    if (runtimeId) managedRuntimeIds.add(runtimeId);
+  }
+  const marketMakerRuntimeId = normalizeRuntimeKey(String(marketMakerChild.lastInfo?.runtimeId || marketMakerChild.lastHealth?.runtimeId || ''));
+  if (marketMakerRuntimeId) managedRuntimeIds.add(marketMakerRuntimeId);
+  const relayClientIds = Array.from(relayStore.clients.keys()).map(normalizeRuntimeKey).filter(Boolean);
+  const externalClientIds = relayClientIds.filter((runtimeId) => !managedRuntimeIds.has(runtimeId));
   const hubs = hubChildren.map((child) => {
     const entityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '');
     const runtimeId = String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || '');
-    const online = child.proc?.exitCode === null && Boolean(child.lastHealth);
+    const normalizedRuntimeId = normalizeRuntimeKey(runtimeId);
+    const relayOnline = normalizedRuntimeId ? relayStore.clients.has(normalizedRuntimeId) : false;
+    const online = child.proc?.exitCode === null && Boolean(child.lastHealth) && relayOnline;
     return {
       entityId,
       name: child.name,
       online,
       runtimeId,
-      activeClients: runtimeId ? [runtimeId] : [],
+      selfRelayPresence: relayOnline,
     };
   });
 
@@ -1050,6 +1491,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
         entityId,
         role: 'hub' as const,
         ready: child.lastHealth?.bootstrapReserves?.ok === true,
+        targetMet: child.lastHealth?.bootstrapReserves?.targetMet === true,
         tokens: child.lastHealth?.bootstrapReserves?.tokens ?? [],
       };
     })
@@ -1091,19 +1533,54 @@ const computeAggregatedHealth = (): AggregatedHealth => {
   const mmOk = !args.mmEnabled
     ? true
     : mmHubs.length === HUB_NAMES.length && mmHubs.every((hub) => hub.ready);
+  const hubMeshOk =
+    hubIds.length === HUB_NAMES.length &&
+    hubChildren.every((child) => child.lastHealth?.mesh?.ready === true);
+  const hubsOnline = hubs.length === HUB_NAMES.length && hubs.every((hub) => hub.online);
+  const custodyOk = args.custodyEnabled
+    ? Boolean(custodySupport?.identity.entityId && custodySupport?.daemonChild.proc.exitCode === null && custodySupport?.custodyChild.proc.exitCode === null)
+    : true;
+  const bootstrapReservesOk =
+    reserveEntities.length === HUB_NAMES.length &&
+    reserveEntities.every((entity) => entity.ready);
+  const bootstrapReserveTargetsMet =
+    reserveEntities.length === HUB_NAMES.length &&
+    reserveEntities.every((entity) => entity.targetMet);
+  const coreOk = storage.ok && hubsOnline && hubMeshOk;
+  const systemOk = coreOk && mmOk && custodyOk && bootstrapReservesOk;
+  if (!resetState.inProgress && resetState.lastError && coreOk && !resetState.resolvedAt) {
+    resetState.resolvedAt = Date.now();
+  }
+  const degraded = [
+    storage.ok ? null : 'storage',
+    hubsOnline ? null : 'hubs',
+    hubMeshOk ? null : 'hubMesh',
+    mmOk ? null : 'marketMaker',
+    custodyOk ? null : 'custody',
+    bootstrapReservesOk ? null : 'bootstrapReserves',
+    bootstrapReserveTargetsMet ? null : 'bootstrapReserveTargets',
+  ].filter((value): value is string => Boolean(value));
 
   return {
     timestamp: Date.now(),
+    coreOk,
+    systemOk,
+    degraded,
     reset: { ...resetState },
     system: {
       runtime: true,
       relay: true,
     },
+    relay: {
+      clientCount: relayClientIds.length,
+      managedRuntimeIds: Array.from(managedRuntimeIds).sort(),
+      externalClientIds: externalClientIds.sort(),
+    },
+    process: buildProcessHealth(),
+    disk: buildDiskSummary(storage),
     storage,
     hubMesh: {
-      ok:
-        hubIds.length === HUB_NAMES.length &&
-        hubChildren.every((child) => child.lastHealth?.mesh?.ready === true),
+      ok: hubMeshOk,
       hubIds,
       pairs: Array.from(pairSet.values()).sort((left, right) =>
         `${left.left}:${left.right}`.localeCompare(`${right.left}:${right.right}`),
@@ -1125,17 +1602,14 @@ const computeAggregatedHealth = (): AggregatedHealth => {
     },
     custody: {
       enabled: args.custodyEnabled,
-      ok: args.custodyEnabled
-        ? Boolean(custodySupport?.identity.entityId && custodySupport?.daemonChild.proc.exitCode === null && custodySupport?.custodyChild.proc.exitCode === null)
-        : true,
+      ok: custodyOk,
       entityId: custodySupport?.identity.entityId ?? null,
       daemonPort: args.custodyEnabled ? args.custodyDaemonPort : null,
       servicePort: args.custodyEnabled ? args.custodyPort : null,
     },
     bootstrapReserves: {
-      ok:
-        reserveEntities.length === HUB_NAMES.length &&
-        reserveEntities.every((entity) => entity.ready),
+      ok: bootstrapReservesOk,
+      targetMet: bootstrapReserveTargetsMet,
       requiredTokenCount: HUB_REQUIRED_TOKEN_COUNT,
       entityCount: reserveEntities.length,
       entities: reserveEntities,
@@ -1198,7 +1672,12 @@ const buildPublicHubDiscoveryPayload = (): {
       const entityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '').trim();
       if (!entityId) return null;
       const runtimeId = String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || '').trim();
+      const normalizedRuntimeId = normalizeRuntimeKey(runtimeId);
       const directWsUrl = String(child.lastHealth?.directWsUrl || '').trim();
+      const online =
+        child.proc?.exitCode === null
+        && child.lastHealth?.ok === true
+        && Boolean(normalizedRuntimeId && relayStore.clients.has(normalizedRuntimeId));
       return {
         entityId,
         runtimeId: runtimeId || null,
@@ -1209,10 +1688,10 @@ const buildPublicHubDiscoveryPayload = (): {
         publicAccounts: [] as [],
         metadata: { isHub: true as const },
         lastUpdated: serverTime,
-        online: child.proc?.exitCode === null && Boolean(child.lastHealth),
+        online,
       };
     })
-    .filter((hub): hub is NonNullable<typeof hub> => Boolean(hub))
+    .filter((hub): hub is NonNullable<typeof hub> => Boolean(hub?.online))
     .sort((left, right) => left.name.localeCompare(right.name));
 
   return {
@@ -1225,7 +1704,7 @@ const buildPublicHubDiscoveryPayload = (): {
 
 const getDebugEntityEntries = (requestUrl: URL): Array<{
   entityId: string;
-  runtimeId?: string;
+  runtimeId?: string | undefined;
   name: string;
   isHub: boolean;
   online: boolean;
@@ -1240,7 +1719,7 @@ const getDebugEntityEntries = (requestUrl: URL): Array<{
 
   const entities = new Map<string, {
     entityId: string;
-    runtimeId?: string;
+    runtimeId?: string | undefined;
     name: string;
     isHub: boolean;
     online: boolean;
@@ -1313,14 +1792,14 @@ const getDebugEntityEntries = (requestUrl: URL): Array<{
 };
 
 const waitForHubBaseline = async (): Promise<void> => {
-  const deadline = Date.now() + 90_000;
+  const deadline = Date.now() + HUB_BASELINE_TIMEOUT_MS;
   while (Date.now() < deadline) {
     await pollAllHubHealth();
     const health = computeAggregatedHealth();
     if (
       health.hubMesh.ok &&
       health.hubMesh.direct.openLinkCount >= HUB_NAMES.length * Math.max(0, HUB_NAMES.length - 1) &&
-      health.bootstrapReserves.ok &&
+      health.bootstrapReserves.targetMet &&
       health.hubs.every(hub => hub.online)
     ) {
       return;
@@ -1331,7 +1810,7 @@ const waitForHubBaseline = async (): Promise<void> => {
 };
 
 const waitForHubProfilesReady = async (): Promise<void> => {
-  const deadline = Date.now() + 45_000;
+  const deadline = Date.now() + HUB_PROFILES_READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
     await pollAllHubHealth();
     const allVisible = hubChildren.every((child) => {
@@ -1350,7 +1829,7 @@ const waitForHubProfilesReady = async (): Promise<void> => {
 };
 
 const waitForMarketMakerReady = async (): Promise<void> => {
-  const deadline = Date.now() + 90_000;
+  const deadline = Date.now() + MARKET_MAKER_READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
     await pollMarketMakerHealth();
     const health = computeAggregatedHealth();
@@ -1373,16 +1852,10 @@ const waitForMarketMakerReady = async (): Promise<void> => {
 };
 
 const waitForHubSelfReady = async (child: HubChild): Promise<void> => {
-  const deadline = Date.now() + 120_000;
+  const deadline = Date.now() + HUB_SELF_READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
     await pollHubHealth(child);
-    if (
-      typeof child.lastInfo?.entityId === 'string' &&
-      child.lastInfo.entityId.length > 0 &&
-      child.lastHealth?.timings?.import_j?.completedAt &&
-      child.lastHealth?.timings?.hub_bootstrap?.completedAt &&
-      child.lastHealth?.timings?.orderbook_init?.completedAt
-    ) {
+    if (child.lastInfo !== null || child.lastHealth !== null) {
       return;
     }
     if (child.proc?.exitCode !== null) {
@@ -1394,7 +1867,7 @@ const waitForHubSelfReady = async (child: HubChild): Promise<void> => {
 };
 
 const waitForHubApiReady = async (child: HubChild): Promise<void> => {
-  const deadline = Date.now() + 60_000;
+  const deadline = Date.now() + HUB_API_READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
     await pollHubHealth(child);
     if (child.lastInfo || child.lastHealth) {
@@ -1432,6 +1905,8 @@ const runReset = async (): Promise<void> => {
   resetState.lastError = null;
   resetState.startedAt = Date.now();
   resetState.completedAt = null;
+  resetState.failedAt = null;
+  resetState.resolvedAt = null;
 
   const resetTotalStartedAt = startTiming('reset_total');
   try {
@@ -1441,6 +1916,7 @@ const runReset = async (): Promise<void> => {
 
     const clearStartedAt = startTiming('reset_clear_state');
     clearRelayState();
+    await reapStaleManagedChildren();
     if (existsSync(args.dbRoot)) {
       rmSync(args.dbRoot, { recursive: true, force: true });
     }
@@ -1452,7 +1928,7 @@ const runReset = async (): Promise<void> => {
     const h23 = hubChildren.slice(1);
 
     const spawnH1StartedAt = startTiming('reset_spawn_h1');
-    spawnHub(h1);
+    await spawnHub(h1);
     finishTiming('reset_spawn_h1', spawnH1StartedAt);
 
     const waitH1StartedAt = startTiming('reset_wait_h1');
@@ -1462,7 +1938,7 @@ const runReset = async (): Promise<void> => {
 
     const spawnH23StartedAt = startTiming('reset_spawn_h23');
     for (const child of h23) {
-      spawnHub(child);
+      await spawnHub(child);
       await waitForHubSelfReady(child);
     }
     finishTiming('reset_spawn_h23', spawnH23StartedAt);
@@ -1489,7 +1965,7 @@ const runReset = async (): Promise<void> => {
     }
 
     if (args.mmEnabled) {
-      spawnMarketMaker();
+      await spawnMarketMaker();
       await waitForMarketMakerReady();
     }
 
@@ -1497,7 +1973,8 @@ const runReset = async (): Promise<void> => {
     resetState.completedAt = Date.now();
   } catch (error) {
     resetState.lastError = serializeError(error);
-    resetState.completedAt = Date.now();
+    resetState.failedAt = Date.now();
+    resetState.completedAt = null;
     throw error;
   } finally {
     resetState.inProgress = false;
@@ -1507,7 +1984,7 @@ const runReset = async (): Promise<void> => {
 const ensureReset = async (): Promise<void> => {
   if (resetPromise) {
     await resetPromise;
-    if (!resetState.lastError) {
+    if (!resetState.lastError || resetState.resolvedAt) {
       return;
     }
   }
@@ -1705,10 +2182,13 @@ const proxyAnyHubRequest = async (
   }
 };
 
+const httpDrain = createHttpDrainTracker();
 const server = Bun.serve({
   hostname: args.host,
   port: args.port,
   async fetch(request, serverRef) {
+    const releaseHttp = httpDrain.begin();
+    try {
     const url = new URL(request.url);
     const pathname = url.pathname;
     const headers = {
@@ -1744,9 +2224,9 @@ const server = Bun.serve({
     }
 
     if (pathname === '/api/health') {
-      await getStorageHealth();
-      await pollAllHubHealth();
-      await pollMarketMakerHealth();
+      void getStorageHealth().catch(() => {});
+      void pollAllHubHealth().catch(() => {});
+      void pollMarketMakerHealth().catch(() => {});
       return new Response(safeStringify(await buildAggregatedHealthResponse()), { headers });
     }
 
@@ -1927,7 +2407,7 @@ const server = Bun.serve({
 
     if (pathname === '/api/jurisdictions') {
       try {
-        const payload = readShardJurisdictions();
+        const payload = toPublicJurisdictionsPayload(readShardJurisdictions());
         return new Response(payload, {
           headers: {
             ...headers,
@@ -1957,6 +2437,9 @@ const server = Bun.serve({
       status: 404,
       headers,
     });
+    } finally {
+      releaseHttp();
+    }
   },
   websocket: {
     open(ws) {
@@ -2013,8 +2496,8 @@ const server = Bun.serve({
 });
 
 const shutdown = async (): Promise<void> => {
+  await stopServerGracefully(server, httpDrain, 'orchestrator', 5_000);
   await stopAllChildren();
-  server.stop(true);
   process.exit(0);
 };
 
@@ -2032,6 +2515,6 @@ console.log(
 
 assertMinDiskFree();
 
-void ensureReset(args.mmEnabled).catch(error => {
+void ensureReset().catch(error => {
   console.error('[MESH] initial reset failed:', serializeError(error));
 });

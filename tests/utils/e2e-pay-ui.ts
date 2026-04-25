@@ -51,6 +51,7 @@ export async function chooseVisibleRoute(
   const routeOptions = page.locator('.route-option');
   const routeCount = await routeOptions.count();
   expect(routeCount, 'expected at least one visible payment route').toBeGreaterThan(0);
+  const expectedPath = routeEntityIds.map((id) => String(id || '').trim().toLowerCase()).filter(Boolean);
 
   const routeNeedles = await page.evaluate((ids) => {
     const env = (window as typeof window & {
@@ -98,7 +99,7 @@ export async function chooseVisibleRoute(
       });
   }, routeEntityIds);
 
-  if (routeNeedles.length === 0) {
+  if (expectedPath.length === 0) {
     if (routeCount !== 1) {
       const routeTexts = await routeOptions.evaluateAll((nodes) =>
         nodes.map((node) => String(node.textContent || '').trim()).filter((text) => text.length > 0),
@@ -108,6 +109,30 @@ export async function chooseVisibleRoute(
     const onlyRoute = routeOptions.first();
     await onlyRoute.click();
     return (await onlyRoute.textContent().catch(() => '')) || '';
+  }
+
+  for (let index = 0; index < routeCount; index += 1) {
+    const option = routeOptions.nth(index);
+    const path = String((await option.getAttribute('data-route-path').catch(() => '')) || '').trim().toLowerCase();
+    const routePath = path.split(',').map((entry) => entry.trim()).filter(Boolean);
+    const exact = path === expectedPath.join(',');
+    const suffix = routePath.length >= expectedPath.length
+      && expectedPath.every((entityId, offset) => routePath[routePath.length - expectedPath.length + offset] === entityId);
+    if (!exact && !suffix) continue;
+    await option.click();
+    return (await option.textContent().catch(() => '')) || '';
+  }
+
+  for (let index = 0; index < routeCount; index += 1) {
+    const option = routeOptions.nth(index);
+    const hopIds = await option.locator('.hop-card').evaluateAll((nodes) =>
+      nodes.map((node) => String(node.getAttribute('data-hop-entity-id') || '').trim().toLowerCase()),
+    );
+    const matches = hopIds.length >= expectedPath.length
+      && expectedPath.every((entityId, hopIndex) => hopIds[hopIds.length - expectedPath.length + hopIndex] === entityId);
+    if (!matches) continue;
+    await option.click();
+    return (await option.textContent().catch(() => '')) || '';
   }
 
   for (let index = 0; index < routeCount; index += 1) {
@@ -123,7 +148,7 @@ export async function chooseVisibleRoute(
     nodes.map((node) => String(node.textContent || '').trim()).filter((text) => text.length > 0),
   );
   throw new Error(
-    `no visible route matched ${JSON.stringify(routeNeedles)} among ${JSON.stringify(routeTexts)}`,
+    `no visible route matched path=${JSON.stringify(expectedPath)} aliases=${JSON.stringify(routeNeedles)} among ${JSON.stringify(routeTexts)}`,
   );
 }
 
@@ -134,7 +159,7 @@ export async function prepareUiPayment(
   await openPayWorkspace(page);
   await fillUiPaymentIntent(page, intent.recipientEntityId, intent.amount);
 
-  const findRoutesBtn = page.getByRole('button', { name: 'Find route' }).first();
+  const findRoutesBtn = page.getByRole('button', { name: /^Find routes?$/i }).first();
   await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
   await findRoutesBtn.click();
 

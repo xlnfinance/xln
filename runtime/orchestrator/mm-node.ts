@@ -12,12 +12,15 @@ import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
 import {
   getActiveJAdapter,
   getP2PState,
+  closeInfraDb,
+  closeRuntimeDb,
   main,
   enqueueRuntimeInput,
   handleInboundP2PEntityInput,
   startP2P,
   stopP2P,
   startRuntimeLoop,
+  stopRuntimeLoopAndWait,
 } from '../runtime.ts';
 import type { EntityInput, Env } from '../types';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
@@ -39,6 +42,8 @@ import {
 import { buildDefaultEntitySwapPairs, getSwapPairPolicyByBaseQuote } from '../account-utils';
 import { LIMITS, SWAP as SWAP_CONSTANTS } from '../constants';
 import { ORDERBOOK_PRICE_SCALE } from '../orderbook';
+import { startParentLivenessWatch } from './parent-watch';
+import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 
 type Args = {
   name: string;
@@ -769,10 +774,13 @@ const run = async (): Promise<void> => {
     },
   });
 
+  const httpDrain = createHttpDrainTracker();
   const server = Bun.serve({
     hostname: resolvedArgs.apiHost,
     port: resolvedArgs.apiPort,
     async fetch(request, serverRef) {
+      const releaseHttp = httpDrain.begin();
+      try {
       const url = new URL(request.url);
       const pathname = url.pathname;
 
@@ -836,6 +844,9 @@ const run = async (): Promise<void> => {
         status: 404,
         headers: JSON_HEADERS,
       });
+      } finally {
+        releaseHttp();
+      }
     },
     websocket: directRuntimeWs.websocket,
   });
@@ -983,16 +994,33 @@ const run = async (): Promise<void> => {
     });
   }, MARKET_MAKER_QUOTE_LOOP_MS);
 
-  const shutdown = async (): Promise<void> => {
+  let shutdownStarted = false;
+  const shutdown = async (code: number = 0): Promise<void> => {
+    if (shutdownStarted) return;
+    shutdownStarted = true;
     shuttingDown = true;
     if (loop) clearInterval(loop);
-    stopP2P(env);
-    server.stop(true);
-    process.exit(0);
+    try {
+      await stopServerGracefully(server, httpDrain, resolvedArgs.name, 5_000);
+      stopP2P(env);
+      const idle = await stopRuntimeLoopAndWait(env, 10_000);
+      if (!idle) {
+        console.warn(`[${resolvedArgs.name}] shutdown timed out waiting for runtime loop to drain`);
+      }
+      await closeRuntimeDb(env);
+      await closeInfraDb(env);
+    } catch (error) {
+      console.error(`[${resolvedArgs.name}] shutdown flush failed:`, error instanceof Error ? error.message : error);
+      process.exit(code || 1);
+    }
+    process.exit(code);
   };
+  const stopParentWatch = startParentLivenessWatch(resolvedArgs.name, process.env['XLN_ORCHESTRATOR_PID'], () => {
+    void shutdown(1);
+  });
 
-  process.on('SIGTERM', () => { void shutdown(); });
-  process.on('SIGINT', () => { void shutdown(); });
+  process.on('SIGTERM', () => { stopParentWatch(); void shutdown(); });
+  process.on('SIGINT', () => { stopParentWatch(); void shutdown(); });
   await new Promise<void>(() => {});
 };
 

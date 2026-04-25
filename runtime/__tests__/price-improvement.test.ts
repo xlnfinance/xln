@@ -88,7 +88,6 @@ function makeAccountMachine(offer: SwapOffer): AccountMachine {
       jHeight: 0,
       accountTxs: [],
       prevFrameHash: '',
-      tokenIds: [],
       deltas: [],
       stateHash: '',
       byLeft: true,

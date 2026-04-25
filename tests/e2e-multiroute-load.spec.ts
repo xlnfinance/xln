@@ -53,6 +53,7 @@ import {
   gotoApp,
   switchToRuntime,
 } from './utils/e2e-demo-users';
+import { submitUiPayment } from './utils/e2e-pay-ui';
 import { connectRuntimeToHub as connectRuntimeToSharedHub } from './utils/e2e-connect';
 import { enqueueEntityTxs } from './utils/e2e-runtime-input';
 
@@ -229,19 +230,13 @@ async function faucet(page: Page, entityId: string, hubEntityId: string) {
 }
 
 async function pay(page: Page, from: string, signerId: string, to: string, route: string[], amount: bigint) {
-  const secret = ethers.hexlify(ethers.randomBytes(32));
-  const hashlock = ethers.keccak256(ethers.solidityPacked(['bytes32'], [secret]));
-  await enqueueEntityTxs(page, from, signerId, [{
-    type: 'htlcPayment',
-    data: {
-      targetEntityId: to,
-      tokenId: 1,
-      amount,
-      route,
-      secret,
-      hashlock,
-    },
-  }]);
+  void from;
+  void signerId;
+  await submitUiPayment(page, {
+    recipientEntityId: to,
+    amount,
+    routeEntityIds: route,
+  });
 }
 
 async function getLockCount(page: Page, entityId: string): Promise<number> {

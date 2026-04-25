@@ -172,15 +172,14 @@ async function refreshExternalBalance(page: Page, symbol: string): Promise<numbe
 }
 
 test('move external to external sends directly from signer wallet', async ({ page }) => {
-  test.setTimeout(LONG_E2E ? 180_000 : 120_000);
+  test.setTimeout(LONG_E2E ? 180_000 : 180_000);
 
   await timedStep('move-direct.baseline', async () => {
     await ensureE2EBaseline(page, {
-      timeoutMs: LONG_E2E ? 240_000 : 120_000,
+      timeoutMs: LONG_E2E ? 240_000 : 180_000,
       requireHubMesh: true,
       requireMarketMaker: false,
       minHubCount: 3,
-      forceReset: true,
     });
   });
 

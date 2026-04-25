@@ -9,7 +9,7 @@
  *   env.emit('FrameCommitted', { entityId, height, hash });
  */
 
-import type { Env, LogLevel, LogCategory, FrameLogEntry } from './types';
+import type { AccountFrame, AccountMachine, Env, LogCategory, FrameLogEntry, RuntimeFrameDbRecord } from './types';
 
 const getLogState = (env: Env) => {
   if (!env.runtimeState) env.runtimeState = {};
@@ -75,6 +75,98 @@ const forwardDebugEvent = (env: Env, payload: Record<string, unknown>): void => 
   } catch {
     // Best effort only.
   }
+};
+
+const getPendingAuditEvents = (env: Env): Array<Record<string, unknown>> => {
+  if (!env.runtimeState) env.runtimeState = {};
+  if (!env.runtimeState.pendingAuditEvents) env.runtimeState.pendingAuditEvents = [];
+  return env.runtimeState.pendingAuditEvents;
+};
+
+export const flushPendingAuditEvents = (env: Env): void => {
+  const pending = env.runtimeState?.pendingAuditEvents;
+  if (!Array.isArray(pending) || pending.length === 0) return;
+  for (const payload of pending) {
+    forwardDebugEvent(env, payload);
+  }
+  pending.length = 0;
+};
+
+export const clearPendingAuditEvents = (env: Env): void => {
+  const pending = env.runtimeState?.pendingAuditEvents;
+  if (!Array.isArray(pending) || pending.length === 0) return;
+  pending.length = 0;
+};
+
+const getPendingFrameDbRecords = (env: Env): RuntimeFrameDbRecord[] => {
+  if (!env.runtimeState) env.runtimeState = {};
+  if (!env.runtimeState.pendingFrameDbRecords) env.runtimeState.pendingFrameDbRecords = [];
+  return env.runtimeState.pendingFrameDbRecords;
+};
+
+export const ACCOUNT_FRAME_HISTORY_VIEW_LIMIT = 50;
+
+const cloneFrameForView = (frame: AccountFrame): AccountFrame => structuredClone(frame);
+
+export const setAccountFrameHistoryView = (
+  account: AccountMachine,
+  frames: AccountFrame[],
+  limit = ACCOUNT_FRAME_HISTORY_VIEW_LIMIT,
+): void => {
+  const boundedLimit = Math.max(0, Math.floor(Number(limit || 0)));
+  const view = boundedLimit > 0
+    ? frames.slice(-boundedLimit).map((frame) => cloneFrameForView(frame))
+    : [];
+  Object.defineProperty(account, 'frameHistory', {
+    value: view,
+    enumerable: false,
+    writable: true,
+    configurable: true,
+  });
+};
+
+export const appendAccountFrameHistoryView = (
+  account: AccountMachine,
+  frame: AccountFrame,
+  limit = ACCOUNT_FRAME_HISTORY_VIEW_LIMIT,
+): void => {
+  const existing = Array.isArray(account.frameHistory) ? account.frameHistory : [];
+  setAccountFrameHistoryView(account, [...existing, frame], limit);
+};
+
+export const recordAccountFrameHistory = (
+  env: Env,
+  record: {
+    entityId: string;
+    counterpartyId: string;
+    accountHeight: number;
+    source: Extract<RuntimeFrameDbRecord, { kind: 'accountFrame' }>['source'];
+    frame: AccountFrame;
+  },
+): void => {
+  const entityId = String(record.entityId || '').toLowerCase();
+  const counterpartyId = String(record.counterpartyId || '').toLowerCase();
+  const accountHeight = Number(record.accountHeight || record.frame?.height || 0);
+  if (!entityId || !counterpartyId || !Number.isFinite(accountHeight) || accountHeight <= 0) return;
+  getPendingFrameDbRecords(env).push({
+    kind: 'accountFrame',
+    entityId,
+    counterpartyId,
+    accountHeight: Math.floor(accountHeight),
+    source: record.source,
+    frame: structuredClone(record.frame),
+  });
+};
+
+export const peekPendingFrameDbRecords = (env: Env): RuntimeFrameDbRecord[] =>
+  Array.isArray(env.runtimeState?.pendingFrameDbRecords)
+    ? env.runtimeState.pendingFrameDbRecords.map((record) => structuredClone(record))
+    : [];
+
+export const dropPendingFrameDbRecords = (env: Env, count: number): void => {
+  const pending = env.runtimeState?.pendingFrameDbRecords;
+  if (!Array.isArray(pending) || pending.length === 0) return;
+  pending.splice(0, Math.max(0, Math.floor(count)));
 };
 
 /**
@@ -188,7 +280,7 @@ export function attachEventEmitters(env: Env): void {
     env.frameLogs.push(entry);
     addCleanLog(env, 'EVENT', eventName);
     if (HIGH_SIGNAL_EVENTS.has(eventName) || isCriticalMessage(eventName)) {
-      forwardDebugEvent(env, {
+      getPendingAuditEvents(env).push({
         level: 'event',
         eventName,
         data,

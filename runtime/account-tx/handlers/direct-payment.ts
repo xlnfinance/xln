@@ -234,15 +234,14 @@ export function handleDirectPayment(
   }
 
   // Update current frame
-  const tokenIndex = accountMachine.currentFrame.tokenIds.indexOf(tokenId);
-  const totalDelta = delta.ondelta + delta.offdelta;
+  const tokenIndex = accountMachine.currentFrame.deltas.findIndex((entry) => entry.tokenId === tokenId);
 
   if (tokenIndex >= 0) {
-    accountMachine.currentFrame.deltas[tokenIndex] = totalDelta;
+    accountMachine.currentFrame.deltas[tokenIndex] = { ...delta };
   } else {
-    accountMachine.currentFrame.tokenIds.push(tokenId);
-    accountMachine.currentFrame.deltas.push(totalDelta);
+    accountMachine.currentFrame.deltas.push({ ...delta });
   }
+  accountMachine.currentFrame.deltas.sort((left, right) => left.tokenId - right.tokenId);
 
   // Check if we need to forward the payment (multi-hop routing)
   const isOutgoing = paymentFromEntity === accountMachine.proofHeader.fromEntity;

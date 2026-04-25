@@ -149,6 +149,34 @@ Why it stays:
 3. Fix green visual speech indicator in `/ai`.
 Status: open.
 
+## Testnet
+
+1. Runtime apply semantics.
+Status: open.
+Why it stays:
+- `applyRuntimeInput()` still has reachable `throw` paths for invalid input / invariant failures / import misconfiguration.
+- before testnet, decide whether that is truly allowed runtime behavior or should be impossible on supported paths.
+Exit:
+- either `applyRuntimeInput()` becomes preflight-safe on all supported live paths
+- or failed apply is treated as explicit fatal runtime state with tests proving the intended semantics.
+
+2. Destructive local reset / `clearDB` guardrails.
+Status: open.
+Why it stays:
+- destructive runtime wipe paths still exist in frontend runtime management.
+- before testnet, they should not be reachable as an accidental normal-user action.
+Exit:
+- destructive reset is clearly gated behind explicit debug/admin UX or an equally hard guard.
+
+3. Persistence recovery tooling for fail-fast checkpoint policy.
+Status: open.
+Why it stays:
+- WAL restore intentionally fails hard on missing checkpoint pointer / snapshot.
+- that policy is acceptable only if operators have a fast inspect/repair path.
+Exit:
+- add a supported inspect/repair workflow for persisted runtime state
+- or equivalent tooling that makes checkpoint corruption operationally recoverable.
+
 ## Notes
 
 - `NEXT-SESSION.md` is now historical, not canonical.
@@ -160,3 +188,70 @@ Status: open.
   - public direct hub discovery via `/api/hubs`
   - active transport contract cleanup to `wsUrl + relays`
   - hub-to-hub and user-to-hub direct WS on prod
+
+## Exception policy: debug vs mainnet
+
+Goal: catch developer mistakes aggressively in `debug/scenario/replay`, while keeping `mainnet` tolerant to malformed external input and only crashing on real invariant violations.
+
+Target model:
+
+1. `drop`
+External malformed/poisoned/unsupported input. Never throw.
+
+2. `defer`
+Temporary dependency not ready. Never throw.
+
+3. `debug-assert`
+Developer sanity checks. Throw only in `debug/scenario/replay`; log in `live/mainnet`.
+
+4. `fatal`
+Invariant violation / state corruption / impossible internal branch. Throw everywhere.
+
+Concrete runtime policy:
+
+- Keep `fatal` for invalid internal `EntityOutput` from local handlers.
+- Keep `fatal` for account/frame invariant violations and signing determinism violations.
+- Convert malformed external input to `drop`, not exceptions.
+- Convert temporary readiness/dependency issues to `defer`, not exceptions.
+- Replace mixed live-mode `log + throw` branches with one explicit disposition.
+- Split current assertion helpers into:
+  - `debugAssert(...)`
+  - `invariant(...)`
+- Prefer one explicit runtime strictness mode instead of scattered checks:
+  - `debug`
+  - `replay`
+  - `live`
+
+Candidates for `debug-assert` on live path:
+
+- unknown target entity
+- signer resolution failed
+- replica not found after resolution
+
+Candidates for `drop`:
+
+- malformed external entity input
+- malformed dispute proof body
+- malformed prepared HTLC payload
+- unsupported user/business input
+- poisoned input not meant for this runtime
+
+Candidates for `defer`:
+
+- replica temporarily not ready
+- signer/proposer temporarily unavailable
+- bootstrap/import dependency not ready
+
+Candidates for `fatal`:
+
+- invalid internal entity output
+- orderbook rebuild mismatch
+- account commit invariant failure
+- missing critical financial data inside accepted path
+- hanko/runtimeSeed determinism violation
+
+Implementation direction:
+
+- Introduce a typed disposition result for live apply-path: `accept | drop | defer | fatal`.
+- Reserve exceptions for `fatal` and debug-only assertions.
+- If `applyRuntimeInput()` still throws after this cleanup, treat it as runtime panic, not normal recoverable flow.

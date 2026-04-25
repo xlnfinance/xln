@@ -1,6 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount, tick } from 'svelte';
-  import { ScanLine, X } from 'lucide-svelte';
+  import { slide } from 'svelte/transition';
+  import { ScanLine, X, Check } from 'lucide-svelte';
   import jsQR from 'jsqr';
   import type {
     AccountMachine,
@@ -73,6 +74,11 @@
   let repeatStoppedReason = '';
   let payMaxAmount = 0n;
   let canPayNow = false;
+  let showNoteField = false;
+  let paySuccess = false;
+  let paySuccessMs = 0;
+  let paySuccessTimer: ReturnType<typeof setTimeout> | null = null;
+  let routeListExpanded = false;
   const REPEAT_OPTIONS = [
     { value: 0, label: 'No repeat' },
     { value: 1_000, label: 'Repeat 1s' },
@@ -309,6 +315,7 @@
   function resetQuotedRoutes(): void {
     routes = [];
     selectedRouteIndex = -1;
+    routeListExpanded = false;
     clearRepeatTimer();
     repeatArmed = false;
     repeatStoppedReason = '';
@@ -1200,21 +1207,41 @@
   }
 
   async function payNowCheapest() {
-    if (sendingPayment || findingRoutes) return;
-    if (isSelfRecipient) return;
-    await findRoutes(false);
-    if (routes.length === 0) return;
-    selectedRouteIndex = 0; // routes are sorted by cheapest fee by default
-    await sendPayment(true);
+    await payNowCheapestTracked();
+  }
+
+  function flashPaySuccess(elapsedMs: number): void {
+    paySuccess = true;
+    paySuccessMs = elapsedMs;
+    if (paySuccessTimer) clearTimeout(paySuccessTimer);
+    paySuccessTimer = setTimeout(() => {
+      paySuccess = false;
+      paySuccessMs = 0;
+      paySuccessTimer = null;
+    }, 2800);
   }
 
   async function payUsingCurrentIntent(): Promise<void> {
     if (sendingPayment || findingRoutes) return;
+    const t0 = performance.now();
+    let result: SendPaymentResult;
     if (hasSelectedRoute()) {
-      await sendPayment(true);
-      return;
+      result = await sendPayment(true);
+    } else {
+      result = await payNowCheapestTracked();
     }
-    await payNowCheapest();
+    if (result.queued) {
+      flashPaySuccess(Math.round(performance.now() - t0));
+    }
+  }
+
+  async function payNowCheapestTracked(): Promise<SendPaymentResult> {
+    if (sendingPayment || findingRoutes) return { queued: false, hashlock: null };
+    if (isSelfRecipient) return { queued: false, hashlock: null };
+    await findRoutes(false);
+    if (routes.length === 0) return { queued: false, hashlock: null };
+    selectedRouteIndex = 0;
+    return await sendPayment(true);
   }
 
   async function sendPayment(manual = true): Promise<SendPaymentResult> {
@@ -1338,7 +1365,23 @@
     activeIsLive &&
     !findingRoutes &&
     !sendingPayment &&
+    !paySuccess &&
     (!isSelfRecipient || hasSelectedRoute());
+
+  $: activeRoute = selectedRouteIndex >= 0 && routes[selectedRouteIndex]
+    ? routes[selectedRouteIndex]
+    : routes[0] ?? null;
+
+  $: isDirectRoute = activeRoute && activeRoute.path.length === 2;
+  $: showRouteList = routes.length > 1 || (routes.length === 1 && !isDirectRoute);
+
+  $: payButtonLabel = (() => {
+    if (paySuccess) return '';
+    if (sendingPayment) return 'Sending...';
+    if (findingRoutes) return 'Finding route...';
+    if (activeRoute && amount) return `Pay ${amount} ${getTokenSymbol(tokenId)}`;
+    return 'Pay now';
+  })();
 
   onMount(() => {
     applyPaymentPrefillFromURL();
@@ -1355,205 +1398,225 @@
   });
 </script>
 
-<div class="payment-panel">
-  <div class="recipient-picker-row">
-    <div class="recipient-picker-input">
-      <EntityInput
-        inputId="payment-invoice-input"
-        value={targetEntityId}
-        rawTextOverride={invoiceValue}
-        entities={knownRecipientEntities}
-        excludeId={entityId}
-        preferredId=""
-        testId="payment-invoice"
-        placeholder="Recipient, invoice, or entity ID"
-        disabled={findingRoutes || sendingPayment}
-        hideDropdownHint={true}
-        strictValueInput={true}
-        on:textinput={handleRecipientTextInput}
-        on:change={handleRecipientChange}
-      />
-    </div>
-    <div class="recipient-picker-actions">
+<div class="payment-panel" data-pp>
+  <!-- ── To ── -->
+  <div class="pay-section">
+    <span class="pay-field-label">To</span>
+    <div class="recipient-row">
+      <div class="recipient-input">
+        <EntityInput
+          inputId="payment-invoice-input"
+          value={targetEntityId}
+          rawTextOverride={invoiceValue}
+          entities={knownRecipientEntities}
+          excludeId={entityId}
+          preferredId=""
+          testId="payment-invoice"
+          placeholder="Name, address, or invoice"
+          disabled={findingRoutes || sendingPayment}
+          hideDropdownHint={true}
+          strictValueInput={true}
+          on:textinput={handleRecipientTextInput}
+          on:change={handleRecipientChange}
+        />
+      </div>
       <button
         type="button"
-        class="invoice-tool-btn qr-btn"
+        class="qr-btn"
         on:click={startInvoiceScanner}
         disabled={findingRoutes || sendingPayment}
+        aria-label="Scan QR code"
       >
-        <ScanLine size={14} />
-        <span>QR</span>
+        <ScanLine size={16} />
       </button>
       {#if invoiceLocked}
         <button
           type="button"
-          class="invoice-tool-btn invoice-clear-btn"
+          class="qr-btn clear-btn"
           on:click={clearInvoiceIntent}
           disabled={findingRoutes || sendingPayment}
+          aria-label="Clear invoice"
         >
-          <X size={14} />
-          <span>Clear</span>
+          <X size={16} />
         </button>
       {/if}
     </div>
   </div>
 
-  {#if invoiceError}
-    <div class="profile-preflight-error">{invoiceError}</div>
+  {#if invoiceError || preflightError}
+    <div class="form-error">{invoiceError || preflightError}</div>
   {/if}
 
-  {#if preflightError}
-    <div class="profile-preflight-error">{preflightError}</div>
-  {/if}
-
-  <div class="amount-token-row">
-    <div class="amount-field">
-      <div class="amount-field-header">
-        <label for="payment-amount-input">Amount</label>
-        <div class="payment-balance-meta">
-          <span class="payment-balance-label">Available</span>
-          <span class="payment-balance-value">
-            {formatTokenInputValue(tokenId, payMaxAmount)} {getTokenSymbol(tokenId)}
-          </span>
-          <button
-            type="button"
-            class="payment-balance-action"
-            on:click={fillMaxPaymentAmount}
-            disabled={payMaxAmount <= 0n || findingRoutes || sendingPayment}
-          >
-            Use max
-          </button>
-        </div>
-      </div>
-      <div class="amount-input-shell">
-        <input
-          id="payment-amount-input"
-          type="text"
-          bind:value={amount}
-          data-testid="payment-amount-input"
-          aria-label="Payment amount"
+  <!-- ── Amount ── -->
+  <div class="pay-section">
+    <div class="amount-shell">
+      <input
+        id="payment-amount-input"
+        class="amount-input"
+        type="text"
+        bind:value={amount}
+        data-testid="payment-amount-input"
+        aria-label="Payment amount"
+        disabled={invoiceLocked || findingRoutes || sendingPayment}
+        on:input={handleAmountInput}
+        placeholder="0"
+      />
+      <div class="amount-token">
+        <TokenSelect
+          value={tokenId}
+          compact={true}
           disabled={invoiceLocked || findingRoutes || sendingPayment}
-          on:input={handleAmountInput}
-          placeholder="0.00"
+          on:change={handleTokenChange}
         />
-        <div class="amount-inline-tools">
-          <div class="inline-token-select">
-            <TokenSelect
-              value={tokenId}
-              compact={true}
-              disabled={invoiceLocked || findingRoutes || sendingPayment}
-              on:change={handleTokenChange}
-            />
-          </div>
-        </div>
       </div>
     </div>
-  </div>
-
-  <div class="field payment-note-field">
-    <label for="payment-description-input">Note</label>
-    <input
-      id="payment-description-input"
-      type="text"
-      bind:value={description}
-      aria-label="Payment note"
-      placeholder="Note"
-      readonly={descriptionLocked || invoiceLocked}
-      aria-readonly={descriptionLocked || invoiceLocked}
-      disabled={findingRoutes || sendingPayment}
-    />
-  </div>
-
-  {#if routes.length > 0}
-    <div class="payment-route-summary payment-route-summary-inline">
-      {routes.length} route{routes.length === 1 ? '' : 's'} ready
+    <div class="amount-meta">
+      <button
+        type="button"
+        class="amount-available"
+        on:click={fillMaxPaymentAmount}
+        disabled={payMaxAmount <= 0n || findingRoutes || sendingPayment}
+      >
+        {formatTokenInputValue(tokenId, payMaxAmount)} {getTokenSymbol(tokenId)} available
+      </button>
     </div>
+  </div>
+
+  <!-- ── Note (liquid glass) ── -->
+  {#if showNoteField || descriptionLocked || description}
+    <div class="note-glass" transition:slide={{ duration: 150 }}>
+      <input
+        id="payment-description-input"
+        class="note-input"
+        type="text"
+        bind:value={description}
+        aria-label="Payment note"
+        placeholder="What's this for?"
+        readonly={descriptionLocked || invoiceLocked}
+        aria-readonly={descriptionLocked || invoiceLocked}
+        disabled={findingRoutes || sendingPayment}
+      />
+    </div>
+  {:else}
+    <button
+      type="button"
+      class="add-note-link"
+      on:click={() => { showNoteField = true; }}
+      disabled={findingRoutes || sendingPayment}
+    >+ Add note</button>
   {/if}
 
   {#if isSelfRecipient}
-    <div class="payment-note">
-      Self-pay needs an explicit route.
+    <div class="self-pay-hint">Self-pay requires an explicit route.</div>
+  {/if}
+
+  <!-- ── Route info (inline for direct, expandable for multi) ── -->
+  {#if activeRoute && isDirectRoute && !showRouteList}
+    <div class="route-inline" transition:slide={{ duration: 120 }}>
+      <span class="route-inline-label">Direct</span>
+      <span class="route-inline-dot"></span>
+      <span class="route-inline-fee">Fee {formatCompactRouteFee(tokenId, activeRoute.totalFee)} {getTokenSymbol(tokenId)}</span>
     </div>
   {/if}
 
-  {#if routes.length > 0}
-    <div class="routes">
+  {#if showRouteList}
+    <div class="routes" transition:slide={{ duration: 150 }}>
       <div class="routes-header">
-        <h4>Routes ({routes.length})</h4>
+        <span class="routes-count">{routes.length} route{routes.length === 1 ? '' : 's'}</span>
       </div>
       <div class="routes-scroll">
         {#each routes as route, index}
-          <label class="route-option" class:selected={selectedRouteIndex === index}>
-            <input
-              type="radio"
-              bind:group={selectedRouteIndex}
-              value={index}
-              disabled={sendingPayment}
-            />
-            <span class="route-marker" aria-hidden="true"></span>
-            <div class="route-info">
-              <div class="route-cards">
-                {#each route.path as hopId, hopIndex}
-                  <div class="hop-card">
-                    <EntityIdentity
-                      entityId={hopId}
-                      name={getEntityName(hopId)}
-                      compact={true}
-                      clickable={false}
-                      copyable={false}
-                      showAddress={false}
-                      size={20}
-                    />
-                  </div>
-                  {#if hopIndex < route.path.length - 1}
-                    <span class="hop-arrow">→</span>
-                  {/if}
-                {/each}
+          {#if routeListExpanded || index === 0}
+            <label
+              class="route-option"
+              class:selected={selectedRouteIndex === index}
+              data-route-path={route.path.map((hopId) => String(hopId || '').toLowerCase()).join(',')}
+              data-route-index={index}
+            >
+              <input
+                type="radio"
+                bind:group={selectedRouteIndex}
+                value={index}
+                disabled={sendingPayment}
+              />
+              <span class="route-marker" aria-hidden="true"></span>
+              <div class="route-info">
+                <div class="route-cards">
+                  {#each route.path as hopId, hopIndex}
+                    <div class="hop-card" data-hop-entity-id={String(hopId || '').toLowerCase()} data-hop-index={hopIndex}>
+                      <EntityIdentity
+                        entityId={hopId}
+                        name={getEntityName(hopId)}
+                        compact={true}
+                        clickable={false}
+                        copyable={false}
+                        showAddress={false}
+                        size={20}
+                      />
+                    </div>
+                    {#if hopIndex < route.path.length - 1}
+                      <span class="hop-arrow">&#8594;</span>
+                    {/if}
+                  {/each}
+                </div>
+                <span class="route-meta">
+                  Fee {formatCompactRouteFee(tokenId, route.totalFee)} {getTokenSymbol(tokenId)}
+                </span>
               </div>
-              <span class="route-meta">
-                Fee {formatCompactRouteFee(tokenId, route.totalFee)} {getTokenSymbol(tokenId)}
-              </span>
-            </div>
-          </label>
+            </label>
+          {/if}
         {/each}
       </div>
+      {#if routes.length > 1 && !routeListExpanded}
+        <button type="button" class="routes-expand" on:click={() => { routeListExpanded = true; }}>
+          + {routes.length - 1} more route{routes.length - 1 === 1 ? '' : 's'}
+        </button>
+      {/if}
     </div>
   {/if}
 
-  <div class="payment-actions">
-    <div class="send-controls">
+  <!-- ── CTA ── -->
+  <div class="pay-cta">
+    <button
+      class="btn-pay"
+      class:success={paySuccess}
+      class:sending={sendingPayment}
+      class:finding={findingRoutes && !sendingPayment}
+      aria-label={paySuccess ? 'Payment complete' : 'Pay now'}
+      on:click={() => void payUsingCurrentIntent()}
+      disabled={!canPayNow}
+    >
+      {#if paySuccess}
+        <Check size={20} strokeWidth={2.5} />
+        <span>Paid{paySuccessMs ? ` in ${paySuccessMs}ms` : ''}</span>
+      {:else if sendingPayment || findingRoutes}
+        <span class="pay-spinner"></span>
+        <span>{payButtonLabel}</span>
+      {:else}
+        <span>{payButtonLabel}</span>
+        <span class="pay-arrow" aria-hidden="true">&#8594;</span>
+      {/if}
+    </button>
+    {#if !routes.length && !findingRoutes && !sendingPayment}
       <button
         type="button"
-        class="btn-find btn-find-secondary"
+        class="find-routes-link"
         on:click={() => void findRoutes(false)}
-        disabled={!targetEntityId || !amount || findingRoutes || sendingPayment}
+        disabled={!targetEntityId || !amount}
       >
-        {findingRoutes ? 'Finding routes...' : (routes.length > 0 ? 'Refresh routes' : 'Find routes')}
+        {routes.length > 0 ? 'Refresh routes' : 'Find routes'}
       </button>
-      <button
-        class="btn-pay-now"
-        on:click={() => void payUsingCurrentIntent()}
-        disabled={!canPayNow}
-      >
-        <span>{sendingPayment ? 'Sending...' : (findingRoutes ? 'Finding routes...' : 'Pay now')}</span>
-        <span class="btn-pay-now-arrow" aria-hidden="true">→</span>
-      </button>
-    </div>
-    <!-- Repeat controls intentionally hidden for now. Keep timer wiring for later re-enable. -->
+    {/if}
   </div>
-
-  <!-- Repeat status intentionally hidden with repeat controls. -->
-
 </div>
 
 {#if scannerOpen}
-  <div class="scanner-modal" role="dialog" aria-modal="true" aria-label="Scan invoice QR">
+  <div class="scanner-overlay" role="dialog" aria-modal="true" aria-label="Scan invoice QR">
     <div class="scanner-card">
       <div class="scanner-card-header">
         <h4>Scan Invoice QR</h4>
-        <button type="button" class="invoice-tool-btn invoice-clear-btn" on:click={stopInvoiceScanner}>
-          <X size={14} />
-          <span>Close</span>
+        <button type="button" class="qr-btn" on:click={stopInvoiceScanner} aria-label="Close scanner">
+          <X size={16} />
         </button>
       </div>
       <video bind:this={scannerVideoEl} class="scanner-video" playsinline muted></video>
@@ -1561,7 +1624,7 @@
         <div class="scanner-status">{scannerStatus}</div>
       {/if}
       {#if scannerError}
-        <div class="profile-preflight-error">{scannerError}</div>
+        <div class="form-error">{scannerError}</div>
       {/if}
       <div class="scanner-actions">
         <input
@@ -1571,8 +1634,8 @@
           class="scanner-file-input"
           on:change={handleScannerFileChange}
         />
-        <button type="button" class="invoice-tool-btn" on:click={() => scannerFileInputEl?.click()}>
-          <span>Upload QR Image</span>
+        <button type="button" class="qr-btn" on:click={() => scannerFileInputEl?.click()} aria-label="Upload QR image">
+          <span style="font-size:12px;font-weight:500">Upload QR</span>
         </button>
       </div>
     </div>
@@ -1580,689 +1643,456 @@
 {/if}
 
 <style>
+  /* ═══════════════════════════════════════════════════════════════
+     All custom elements use :global([data-pp] ...) to guarantee
+     we outrank the layout's body.xln-user-mode selectors.
+     Prefix: html body [data-pp] → specificity 0,1,2 base.
+     Layout input selector: body.xln-user-mode input:not():not() → 0,3,2.
+     We add .xln-user-mode to match → 0,2,2 + element classes > 0,3,2.
+     ═══════════════════════════════════════════════════════════════ */
+
+  /* ══ Layout ══ */
   .payment-panel {
-    --pay-field-h: 56px;
-    --pay-field-radius: 14px;
     display: flex;
     flex-direction: column;
-    gap: 18px;
+    gap: 0;
     width: 100%;
-    max-width: none;
+    max-width: 540px;
+    font-family: 'Inter', -apple-system, system-ui, sans-serif;
   }
 
-  .invoice-tool-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 8px;
-    min-height: var(--pay-field-h);
-    padding: 0 18px;
-    border-radius: var(--pay-field-radius);
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    background:
-      linear-gradient(180deg, rgba(28, 25, 23, 0.98), rgba(15, 14, 13, 0.98));
-    color: #f5efe6;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    white-space: nowrap;
-    transition: border-color 0.15s ease, background 0.15s ease, transform 0.15s ease;
-  }
-
-  .invoice-tool-btn:hover:not(:disabled) {
-    border-color: rgba(255, 255, 255, 0.14);
-    background: linear-gradient(180deg, rgba(36, 33, 30, 0.98), rgba(18, 17, 15, 0.98));
-  }
-
-  .invoice-tool-btn:disabled {
-    cursor: not-allowed;
-    opacity: 0.55;
-  }
-
-  .invoice-clear-btn {
-    color: #e7b6a5;
-  }
-
-  .amount-token-row {
-    display: block;
-  }
-
-  .amount-field-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    flex-wrap: wrap;
-  }
-
-  .payment-balance-meta {
-    display: inline-flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 10px;
-    min-width: 0;
-  }
-
-  .payment-balance-label {
-    color: #78716c;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .payment-balance-value {
-    color: #d6d3d1;
-    font-size: 13px;
-    font-weight: 600;
-    font-variant-numeric: tabular-nums;
-    letter-spacing: 0.01em;
-  }
-
-  .payment-balance-action {
-    border: none;
-    background: transparent;
-    padding: 0;
-    color: #a8a29e;
-    font-size: 12px;
-    font-weight: 600;
-    letter-spacing: 0.02em;
-    cursor: pointer;
-    transition: color 0.16s ease, opacity 0.16s ease;
-  }
-
-  .payment-balance-action:hover:not(:disabled) {
-    color: #f5efe6;
-  }
-
-  .payment-balance-action:disabled {
-    cursor: default;
-    opacity: 0.45;
-  }
-
-  .payment-route-summary {
-    color: #8d857d;
-    font-size: 11px;
-    font-weight: 600;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-  }
-
-  .payment-route-summary-inline {
-    margin-top: -2px;
-  }
-
-  .amount-inline-tools {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-  }
-
-  .inline-token-select {
-    width: 188px;
-    flex-shrink: 0;
-  }
-
-  .inline-token-select :global(.token-select) {
-    width: 100%;
-  }
-
-  .inline-token-select :global(.select-trigger) {
-    min-height: calc(var(--pay-field-h) - 10px);
-    padding: 8px 11px;
-    border-radius: calc(var(--pay-field-radius) - 4px);
-  }
-
-  .amount-input-shell {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 10px;
-    min-height: calc(var(--pay-field-h) + 10px);
-    padding: 6px;
-    background: linear-gradient(180deg, rgba(28, 25, 23, 0.98), rgba(15, 14, 13, 0.98));
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: var(--pay-field-radius);
-    box-sizing: border-box;
-  }
-
-  .amount-input-shell:focus-within {
-    border-color: rgba(251, 191, 36, 0.9);
-    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.14);
-  }
-
-  .amount-input-shell input {
-    min-width: 0;
-    min-height: var(--pay-field-h);
-    padding: 0 18px;
-    border: none;
-    border-radius: calc(var(--pay-field-radius) - 4px);
-    background: #0f0e0d;
-    font-size: 34px;
-    font-weight: 650;
-    line-height: 1;
-  }
-
-  .field, .amount-field {
-    display: flex;
-    flex-direction: column;
-    gap: 10px;
-  }
-
-  .payment-note-field {
-    gap: 8px;
-  }
-
-  .payment-note-field label {
-    color: #cfc7bd;
-  }
-
-  .payment-note-field input {
-    min-height: 50px;
-    padding: 0 16px;
-    background: linear-gradient(180deg, rgba(25, 24, 22, 0.96), rgba(18, 17, 16, 0.98));
-    border-color: rgba(255, 255, 255, 0.06);
-    font-size: 15px;
-    color: #e7e0d7;
-  }
-
-  .payment-note-field input::placeholder {
-    color: #6f665d;
-  }
-
-  label {
-    font-size: 14px;
-    font-weight: 600;
-    color: #d6d3d1;
-    text-transform: none;
-    letter-spacing: 0.01em;
-  }
-
-  input {
-    min-height: var(--pay-field-h);
-    padding: 0 16px;
-    background: #141312;
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: var(--pay-field-radius);
-    color: #e7e5e4;
-    font-size: 16px;
-    font-family: inherit;
-    width: 100%;
-    box-sizing: border-box;
-  }
-
-  input:focus {
-    outline: none;
-    border-color: #fbbf24;
-  }
-
-  input::placeholder {
-    color: #57534e;
-  }
-
-  input:disabled {
-    opacity: 0.5;
-  }
-
-  .btn-find, .btn-send, .btn-pay-now {
-    min-height: 52px;
-    padding: 0 20px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 14px;
-    font-size: 15px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.15s;
-  }
-
-  .payment-actions {
-    display: flex;
-    width: 100%;
-  }
-
-  .btn-pay-now {
-    min-width: 220px;
-    min-height: 56px;
-    padding: 0 28px;
-    border: 1px solid rgba(245, 199, 94, 0.42);
-    background:
-      linear-gradient(180deg, rgba(255, 234, 184, 0.18), rgba(255, 234, 184, 0)),
-      linear-gradient(135deg, #8c4d14 0%, #c87912 48%, #f1c15a 100%);
-    color: #fff7ed;
-    font-weight: 700;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    gap: 10px;
-    letter-spacing: 0.02em;
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.18),
-      0 14px 32px rgba(161, 98, 7, 0.26);
-  }
-
-  .btn-pay-now:hover:not(:disabled) {
-    transform: translateY(-1px);
-    border-color: rgba(245, 199, 94, 0.62);
-    background:
-      linear-gradient(180deg, rgba(255, 240, 205, 0.22), rgba(255, 240, 205, 0)),
-      linear-gradient(135deg, #99541a, #de9626 58%, #f6cb69);
-    box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.22),
-      0 16px 30px rgba(161, 98, 7, 0.32);
-  }
-
-  .btn-pay-now:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-    transform: none;
-    box-shadow: none;
-  }
-
-  .btn-pay-now-arrow {
-    font-size: 16px;
-    opacity: 0.84;
-  }
-
-  .btn-find {
-    color: inherit;
-  }
-
-  .btn-find-secondary {
-    min-width: 156px;
-    min-height: 56px;
-    padding: 0 20px;
-    background: rgba(255, 255, 255, 0.025);
-    border-color: rgba(255, 255, 255, 0.08);
-    color: #a8a29e;
-    font-weight: 600;
-  }
-
-  .btn-find-secondary:hover:not(:disabled) {
-    border-color: rgba(255, 255, 255, 0.14);
-    background: rgba(255, 255, 255, 0.045);
-    color: #d6d3d1;
-  }
-
-  .btn-find-secondary:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-
-  .btn-send {
-    background: linear-gradient(180deg, #7c4a1e, #8f551f);
-    border: 1px solid #a16207;
-    color: #fff7ed;
-  }
-
-  .btn-send:hover:not(:disabled) {
-    background: linear-gradient(180deg, #8d5421, #a16207);
-    border-color: #ca8a04;
-  }
-
-  .btn-send:disabled {
-    opacity: 0.5;
-    cursor: not-allowed;
-  }
-
-  .routes {
-    padding-top: 16px;
-    border-top: 1px solid #292524;
-  }
-
-  .scanner-modal {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.74);
-    display: grid;
-    place-items: center;
-    z-index: 3000;
-    padding: 20px;
-  }
-
-  .scanner-card {
-    width: min(100%, 560px);
-    display: flex;
-    flex-direction: column;
-    gap: 14px;
-    padding: 18px;
-    border-radius: 18px;
-    background: #14110f;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.45);
-  }
-
-  .scanner-card-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .scanner-card-header h4 {
-    margin: 0;
-    color: #f5efe6;
-    font-size: 18px;
-  }
-
-  .scanner-video {
-    width: 100%;
-    aspect-ratio: 1;
-    object-fit: cover;
-    border-radius: 16px;
-    background: #0c0a09;
-  }
-
-  .scanner-status {
-    color: #cfc7bd;
-    font-size: 13px;
-  }
-
-  .scanner-actions {
-    display: flex;
-    justify-content: flex-start;
-    gap: 10px;
-  }
-
-  .scanner-file-input {
-    display: none;
-  }
-
-  .send-controls {
-    display: flex;
-    width: 100%;
-    gap: 12px;
-    align-items: center;
-    justify-content: flex-end;
-    flex-wrap: wrap;
-    padding: 14px 0 0;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
-  }
-
-  .repeat-control {
+  .pay-section {
     display: flex;
     flex-direction: column;
     gap: 6px;
-    font-size: 11px;
-    color: #78716c;
-    text-transform: uppercase;
-    letter-spacing: 0.03em;
+    padding: 14px 0;
+  }
+  .pay-section + .pay-section {
+    border-top: 1px solid rgba(255, 255, 255, 0.04);
   }
 
-  .repeat-control select {
-    min-width: 140px;
-    height: 44px;
-    padding: 0 10px;
-    background: #1c1917;
-    border: 1px solid #292524;
-    border-radius: 8px;
-    color: #e7e5e4;
+  .pay-field-label {
     font-size: 13px;
-    font-family: inherit;
+    font-weight: 500;
+    color: #5a5550;
+    padding-left: 2px;
   }
 
-  .repeat-status {
-    margin-top: 6px;
+  /* ══ Recipient ══ */
+  .recipient-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+  .recipient-input { flex: 1; min-width: 0; }
+
+  :global(html body.xln-user-mode [data-pp] .entity-input-field),
+  :global(html body.xln-user-mode [data-pp] .closed-trigger) {
+    min-height: 46px !important;
+    border-radius: 12px !important;
+    font-size: 14px !important;
+    background: rgba(255, 255, 255, 0.03) !important;
+    border: 1px solid rgba(255, 255, 255, 0.06) !important;
+    box-shadow: none !important;
+  }
+  :global(html body.xln-user-mode [data-pp] .entity-input-field:focus) {
+    border-color: rgba(212, 175, 55, 0.35) !important;
+    box-shadow: none !important;
+  }
+  :global([data-pp] .item-id) { color: #5a5550; }
+
+  /* ══ QR button ══ */
+  :global([data-pp] button.qr-btn) {
+    all: unset !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    width: 46px !important;
+    height: 46px !important;
+    flex-shrink: 0 !important;
+    border-radius: 12px !important;
+    border: 1px solid rgba(255, 255, 255, 0.06) !important;
+    background: rgba(255, 255, 255, 0.03) !important;
+    color: #5a5550 !important;
+    cursor: pointer !important;
+    transition: all 0.2s !important;
+  }
+  :global([data-pp] button.qr-btn:hover) {
+    color: #a09889 !important;
+    background: rgba(255, 255, 255, 0.06) !important;
+  }
+  :global([data-pp] button.qr-btn.clear-btn) { color: #c48b7a !important; }
+
+  /* ══ Error ══ */
+  .form-error {
+    border: 1px solid rgba(127, 29, 29, 0.5);
+    background: rgba(69, 10, 10, 0.6);
+    color: #fecaca;
+    border-radius: 10px;
+    padding: 8px 14px;
     font-size: 12px;
-    color: #a3e635;
+    margin: 4px 0;
   }
 
-  .repeat-status.repeat-stopped {
-    color: #f87171;
+  /* ══ Amount ══ */
+  .amount-shell {
+    display: flex;
+    align-items: center;
   }
 
-  .payment-note {
-    padding: 12px 14px;
+  :global(html body.xln-user-mode [data-pp] input.amount-input) {
+    all: unset !important;
+    box-sizing: border-box !important;
+    display: block !important;
+    flex: 1 !important;
+    min-width: 0 !important;
+    width: 100% !important;
+    height: 72px !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    outline: none !important;
+    color: #f5efe6 !important;
+    font-size: 52px !important;
+    font-weight: 200 !important;
+    font-family: 'Inter', -apple-system, system-ui, sans-serif !important;
+    font-variant-numeric: tabular-nums !important;
+    line-height: 72px !important;
+    text-align: right !important;
+    letter-spacing: -0.03em !important;
+    caret-color: #d4af37 !important;
+  }
+  :global(html body.xln-user-mode [data-pp] input.amount-input::placeholder) {
+    color: #3a3632 !important;
+  }
+
+  .amount-token {
+    flex-shrink: 0;
+    margin-left: 16px;
+  }
+  :global(html body.xln-user-mode [data-pp] .amount-token .select-trigger) {
+    min-height: 40px !important;
+    padding: 8px 12px !important;
+    border-radius: 10px !important;
+    background: rgba(255, 255, 255, 0.04) !important;
+    border: 1px solid rgba(255, 255, 255, 0.06) !important;
+    box-shadow: none !important;
+  }
+
+  .amount-meta {
+    display: flex;
+    justify-content: flex-end;
+    padding: 4px 0 0;
+  }
+
+  :global([data-pp] button.amount-available) {
+    all: unset !important;
+    box-sizing: border-box !important;
+    display: inline !important;
+    color: #5a5550 !important;
+    font-size: 12px !important;
+    font-weight: 500 !important;
+    font-variant-numeric: tabular-nums !important;
+    cursor: pointer !important;
+    transition: color 0.2s !important;
+  }
+  :global([data-pp] button.amount-available:hover) { color: #d4af37 !important; }
+
+  /* ══ Note (liquid glass) ══ */
+  .note-glass {
     border-radius: 12px;
-    border: none;
-    background: rgba(38, 26, 18, 0.52);
-    color: #d6c7b3;
-    font-size: 12px;
-    line-height: 1.45;
+    border: 1px solid rgba(255, 255, 255, 0.04);
+    background: linear-gradient(135deg, rgba(255, 255, 255, 0.02), rgba(255, 255, 255, 0.005));
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    padding: 2px;
   }
 
-  .payment-note strong {
-    color: #f5d28a;
-    font-weight: 700;
+  :global(html body.xln-user-mode [data-pp] input.note-input) {
+    all: unset !important;
+    box-sizing: border-box !important;
+    display: block !important;
+    width: 100% !important;
+    padding: 10px 14px !important;
+    margin: 0 !important;
+    border: none !important;
+    border-radius: 0 !important;
+    background: transparent !important;
+    box-shadow: none !important;
+    outline: none !important;
+    color: #ccc5bb !important;
+    font-size: 14px !important;
+    font-family: 'Inter', -apple-system, system-ui, sans-serif !important;
+  }
+  :global(html body.xln-user-mode [data-pp] input.note-input::placeholder) {
+    color: #3d3833 !important;
+  }
+
+  :global([data-pp] button.add-note-link) {
+    all: unset !important;
+    box-sizing: border-box !important;
+    display: inline !important;
+    color: #3a3632 !important;
+    font-size: 13px !important;
+    font-weight: 400 !important;
+    cursor: pointer !important;
+    transition: color 0.2s !important;
+    padding: 6px 0 !important;
+  }
+  :global([data-pp] button.add-note-link:hover) { color: #5a5550 !important; }
+
+  .self-pay-hint {
+    padding: 10px 14px;
+    border-radius: 10px;
+    background: rgba(38, 26, 18, 0.4);
+    color: #c8b99e;
+    font-size: 12px;
+  }
+
+  /* ══ Route inline ══ */
+  .route-inline {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    padding: 8px 0;
+    color: #5a5550;
+    font-size: 11px;
+    font-weight: 500;
+    letter-spacing: 0.04em;
+  }
+  .route-inline-dot {
+    width: 3px; height: 3px;
+    border-radius: 999px;
+    background: #3a3632;
+  }
+  .route-inline-fee { font-variant-numeric: tabular-nums; }
+
+  /* ══ Route list ══ */
+  .routes { padding-top: 8px; }
+  .routes-header { margin-bottom: 8px; }
+  .routes-count {
+    font-size: 11px; font-weight: 600;
+    color: #5a5550;
+    letter-spacing: 0.08em;
+    text-transform: uppercase;
   }
 
   .routes-scroll {
-    max-height: 360px;
+    max-height: 280px;
     overflow-y: auto;
-    scrollbar-color: var(--theme-scrollbar-thumb, #27272a) transparent;
+    scrollbar-color: #27272a transparent;
   }
-
-  .routes-scroll::-webkit-scrollbar {
-    width: 10px;
-  }
-
-  .routes-scroll::-webkit-scrollbar-track {
-    background: transparent;
-  }
-
+  .routes-scroll::-webkit-scrollbar { width: 8px; }
+  .routes-scroll::-webkit-scrollbar-track { background: transparent; }
   .routes-scroll::-webkit-scrollbar-thumb {
-    background: var(--theme-scrollbar-thumb, #27272a);
-    border-radius: 999px;
-    border: 2px solid transparent;
-    background-clip: padding-box;
-  }
-
-  .routes-scroll::-webkit-scrollbar-thumb:hover {
-    background: color-mix(in srgb, var(--theme-scrollbar-thumb, #27272a) 82%, white 18%);
-  }
-
-  .routes-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    margin-bottom: 12px;
-  }
-
-  .routes h4 {
-    font-size: 12px;
-    font-weight: 500;
-    color: #78716c;
-    margin: 0;
+    background: #27272a; border-radius: 999px;
+    border: 2px solid transparent; background-clip: padding-box;
   }
 
   .route-option {
     display: flex;
     align-items: center;
     gap: 8px;
-    padding: 7px 9px;
-    background: #1c1917;
-    border: 1px solid #292524;
-    border-radius: 8px;
+    padding: 8px 10px;
+    background: rgba(255, 255, 255, 0.02);
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    border-radius: 10px;
     cursor: pointer;
     transition: all 0.15s;
-    margin-bottom: 6px;
+    margin-bottom: 4px;
   }
-
-  .route-option:hover {
-    border-color: #44403c;
-  }
-
+  .route-option:hover { border-color: rgba(255, 255, 255, 0.1); }
   .route-option.selected {
-    border-color: #fbbf24;
-    background: #422006;
+    border-color: rgba(212, 175, 55, 0.45);
+    background: rgba(66, 32, 6, 0.35);
   }
-
-  .route-option input[type="radio"] {
-    position: absolute;
-    opacity: 0;
-    pointer-events: none;
-    width: 0;
-    height: 0;
-    margin: 0;
+  :global([data-pp] .route-option input[type="radio"]) {
+    position: absolute !important; opacity: 0 !important;
+    pointer-events: none !important; width: 0 !important; height: 0 !important; margin: 0 !important;
+    border: none !important; background: transparent !important; box-shadow: none !important;
   }
 
   .route-marker {
-    width: 12px;
-    height: 12px;
+    width: 12px; height: 12px;
     border-radius: 999px;
-    border: 2px solid rgba(255, 255, 255, 0.7);
-    background: transparent;
+    border: 2px solid rgba(255, 255, 255, 0.4);
     flex: 0 0 auto;
-    margin-top: 1px;
   }
-
   .route-option.selected .route-marker {
-    border-color: #f8fafc;
-    background: radial-gradient(circle at center, #3b82f6 0 40%, transparent 45%);
+    border-color: #d4af37;
+    background: radial-gradient(circle at center, #d4af37 0 35%, transparent 42%);
   }
 
-  .route-info {
-    flex: 1;
+  .route-info { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .route-cards { display: flex; align-items: center; flex-wrap: wrap; gap: 4px; }
+  :global([data-pp] .route-cards .entity-identity) { gap: 5px; }
+  :global([data-pp] .route-cards .name) { font-size: 10px; letter-spacing: 0.03em; text-transform: uppercase; }
+  .hop-card {
+    padding: 3px 7px; border-radius: 7px;
+    border: 1px solid rgba(255, 255, 255, 0.06);
+    background: rgba(255, 255, 255, 0.02);
+  }
+  .hop-arrow { color: #5a5550; font-size: 11px; }
+  .route-meta {
+    font-size: 9px; color: #5a5550;
+    text-transform: uppercase; letter-spacing: 0.06em;
+    font-variant-numeric: tabular-nums;
+  }
+
+  :global([data-pp] button.routes-expand) {
+    all: unset !important;
+    box-sizing: border-box !important;
+    display: inline !important;
+    color: #5a5550 !important;
+    font-size: 11px !important;
+    cursor: pointer !important;
+    padding: 6px 0 !important;
+    transition: color 0.15s !important;
+  }
+  :global([data-pp] button.routes-expand:hover) { color: #a09889 !important; }
+
+  /* ══ CTA ══ */
+  .pay-cta {
     display: flex;
     flex-direction: column;
-    gap: 1px;
-    min-width: 0;
+    align-items: stretch;
+    gap: 12px;
+    padding-top: 24px;
   }
 
-  .route-path {
-    font-family: 'JetBrains Mono', monospace;
-    font-size: 13px;
-    color: #e7e5e4;
+  :global([data-pp] button.btn-pay) {
+    all: unset !important;
+    box-sizing: border-box !important;
+    display: flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 10px !important;
+    width: 100% !important;
+    height: 56px !important;
+    border-radius: 16px !important;
+    border: 1px solid rgba(212, 175, 55, 0.3) !important;
+    background: linear-gradient(135deg, #7a4212, #b8720f 50%, #e8b84a) !important;
+    color: #fff7ed !important;
+    font-size: 16px !important;
+    font-weight: 600 !important;
+    font-family: 'Inter', -apple-system, system-ui, sans-serif !important;
+    letter-spacing: 0.02em !important;
+    cursor: pointer !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.12), 0 8px 24px rgba(140,77,20,0.22) !important;
+    transition: all 0.25s cubic-bezier(0.4,0,0.2,1) !important;
+  }
+  :global([data-pp] button.btn-pay:hover:not([disabled]):not(.success)) {
+    transform: translateY(-1px) !important;
+    border-color: rgba(212, 175, 55, 0.5) !important;
+    background: linear-gradient(135deg, #8c4d14, #cc8415 50%, #f0c556) !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.18), 0 14px 36px rgba(140,77,20,0.32) !important;
+  }
+  :global([data-pp] button.btn-pay:active:not([disabled]):not(.success)) {
+    transform: translateY(0) !important;
+  }
+  :global([data-pp] button.btn-pay[disabled]:not(.success)) {
+    cursor: not-allowed !important;
+    opacity: 1 !important;
+    background: linear-gradient(135deg, #2a1f10, #3d2c14 50%, #4a3518) !important;
+    border-color: rgba(255, 255, 255, 0.04) !important;
+    color: rgba(255, 247, 237, 0.35) !important;
+    box-shadow: none !important;
   }
 
-  .route-cards {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 4px;
+  :global([data-pp] button.btn-pay.success) {
+    background: linear-gradient(135deg, #166534, #22c55e) !important;
+    border-color: rgba(34, 197, 94, 0.5) !important;
+    box-shadow: inset 0 1px 0 rgba(255,255,255,0.15), 0 10px 28px rgba(34,197,94,0.2) !important;
+    animation: successPulse 0.4s ease-out !important;
   }
 
-  .route-cards :global(.entity-identity) {
-    gap: 6px;
+  @keyframes successPulse {
+    0% { transform: scale(1); }
+    30% { transform: scale(1.02); }
+    100% { transform: scale(1); }
   }
 
-  .route-cards :global(.name) {
-    font-size: 9px;
-    letter-spacing: 0.03em;
-    text-transform: uppercase;
+  :global([data-pp] button.btn-pay.sending),
+  :global([data-pp] button.btn-pay.finding) {
+    background: linear-gradient(135deg, #5a3510, #7a5012 50%, #a07520) !important;
   }
 
-  .hop-card {
-    padding: 2px 5px;
-    border-radius: 7px;
-    border: 1px solid #2a2623;
-    background: #171311;
-    min-width: 0;
+  .pay-arrow {
+    font-size: 18px; opacity: 0.7;
+    transition: transform 0.2s;
   }
+  :global([data-pp] button.btn-pay:hover:not([disabled])) .pay-arrow { transform: translateX(3px); }
 
-  .hop-arrow {
-    color: #7c7168;
-    font-size: 10px;
+  .pay-spinner {
+    width: 16px; height: 16px;
+    border: 2px solid rgba(255,255,255,0.2);
+    border-top-color: #fff7ed;
+    border-radius: 999px;
+    animation: spin 0.7s linear infinite;
   }
+  @keyframes spin { to { transform: rotate(360deg); } }
 
-  .route-meta {
-    font-size: 8px;
-    color: #71717a;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
+  :global([data-pp] button.find-routes-link) {
+    all: unset !important;
+    box-sizing: border-box !important;
+    display: inline !important;
+    color: #3a3632 !important;
+    font-size: 12px !important;
+    cursor: pointer !important;
+    align-self: center !important;
+    padding: 4px 0 !important;
+    transition: color 0.2s !important;
   }
+  :global([data-pp] button.find-routes-link:hover) { color: #5a5550 !important; }
 
+  /* ══ Scanner ══ */
+  .scanner-overlay {
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.8);
+    backdrop-filter: blur(8px);
+    display: grid; place-items: center;
+    z-index: 3000; padding: 20px;
+  }
+  .scanner-card {
+    width: min(100%, 480px);
+    display: flex; flex-direction: column; gap: 14px;
+    padding: 20px; border-radius: 20px;
+    background: rgba(20,17,15,0.95);
+    border: 1px solid rgba(255,255,255,0.08);
+    box-shadow: 0 32px 80px rgba(0,0,0,0.6);
+  }
+  .scanner-card-header {
+    display: flex; justify-content: space-between;
+    align-items: center; gap: 12px;
+  }
+  .scanner-card-header h4 {
+    margin: 0; color: #f5efe6;
+    font-size: 16px; font-weight: 600;
+  }
+  .scanner-video {
+    width: 100%; aspect-ratio: 1;
+    object-fit: cover; border-radius: 14px; background: #0c0a09;
+  }
+  .scanner-status { color: #5a5550; font-size: 12px; }
+  .scanner-actions { display: flex; gap: 10px; }
+  .scanner-file-input { display: none; }
+
+  /* ══ Responsive ══ */
   @media (max-width: 900px) {
-    .payment-actions {
-      display: flex;
+    .payment-panel { max-width: 100%; }
+    :global(html body.xln-user-mode [data-pp] input.amount-input) {
+      font-size: 36px !important;
+      height: 56px !important;
+      line-height: 56px !important;
     }
-  }
-
-  @media (max-width: 900px) {
-    .routes-scroll {
-      max-height: none;
-      overflow: visible;
-    }
-  }
-
-  .profile-preflight-error {
-    border: 1px solid #7f1d1d;
-    background: #450a0a;
-    color: #fecaca;
-    border-radius: 8px;
-    padding: 10px 12px;
-    font-size: 12px;
-  }
-
-  input[readonly] {
-    border-color: #3f3f46;
-    background: #161514;
-    color: #d4d4d8;
-  }
-
-  .payment-panel :global(.entity-input-field),
-  .payment-panel :global(.closed-trigger) {
-    min-height: var(--pay-field-h) !important;
-    border-radius: var(--pay-field-radius) !important;
-  }
-
-  .payment-panel :global(.closed-trigger) {
-    background: linear-gradient(180deg, rgba(28, 25, 23, 0.98), rgba(15, 14, 13, 0.98)) !important;
-  }
-
-  .payment-panel :global(.item-id) {
-    color: #8d857d;
-  }
-
-  .recipient-picker-row {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 10px;
-    align-items: center;
-  }
-
-  .recipient-picker-input {
-    min-width: 0;
-  }
-
-  .recipient-picker-actions {
-    display: inline-flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  @media (max-width: 900px) {
-    .payment-panel {
-      max-width: 100%;
-      gap: 16px;
-    }
-
-    .recipient-picker-row,
-    .amount-input-shell {
-      grid-template-columns: 1fr;
-    }
-
-    .send-controls {
-      grid-template-columns: 1fr;
-      align-items: stretch;
-    }
-
-    .payment-balance-meta {
-      gap: 14px;
-    }
-
-    .recipient-picker-actions {
-      width: 100%;
-      display: grid;
-      grid-template-columns: repeat(2, minmax(0, 1fr));
-    }
-
-    .invoice-tool-btn,
-    .btn-pay-now {
-      width: 100%;
-    }
-
-    .btn-find {
-      width: fit-content;
-    }
-
-    .inline-token-select {
-      width: 100%;
-    }
-
-    .amount-input-shell input {
-      font-size: 28px;
-    }
+    .amount-shell { flex-wrap: wrap; }
+    .amount-token { width: 100%; margin-left: 0; margin-top: 8px; }
+    :global([data-pp] button.btn-pay) { height: 50px !important; }
+    .recipient-row { flex-wrap: wrap; }
   }
 </style>

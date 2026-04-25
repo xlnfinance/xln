@@ -25,7 +25,20 @@ import {
 
 import type { BrowserVMState, JTx, Env } from '../types';
 import { normalizeEntityId } from '../entity-id-utils';
-import type { JAdapter, JAdapterAddresses, JAdapterConfig, JEvent, JSubmitResult, SnapshotId, JBatchReceipt, BrowserVMProvider, JTokenInfo, JReserveMint } from './types';
+import type {
+  JAdapter,
+  JAdapterAddresses,
+  JAdapterConfig,
+  JBatchReceipt,
+  BrowserVMProvider,
+  JEvent,
+  JReserveMint,
+  JSubmitResult,
+  JTokenInfo,
+  JWalletSnapshot,
+  JWalletSnapshotRequest,
+  SnapshotId,
+} from './types';
 import {
   buildExternalTokenToReserveBatch,
   computeAccountKey,
@@ -115,6 +128,42 @@ const readContractCode = async (provider: Provider, rpcUrl: string | undefined, 
     }
   }
   return provider.getCode(address);
+};
+
+type RpcBatchRequest = {
+  id: number;
+  jsonrpc: '2.0';
+  method: string;
+  params: unknown[];
+};
+
+type RpcBatchResponse = {
+  id?: number;
+  result?: unknown;
+  error?: { message?: string };
+};
+
+const sendRpcBatch = async (rpcUrl: string, batch: RpcBatchRequest[]): Promise<Map<number, RpcBatchResponse>> => {
+  if (batch.length === 0) return new Map();
+  const response = await fetch(rpcUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(batch),
+  });
+  if (!response.ok) {
+    throw new Error(`RPC_BATCH_HTTP_${response.status}`);
+  }
+  const json = await response.json();
+  if (!Array.isArray(json)) {
+    throw new Error('RPC_BATCH_INVALID_RESPONSE');
+  }
+  const byId = new Map<number, RpcBatchResponse>();
+  for (const item of json as RpcBatchResponse[]) {
+    if (item && typeof item.id === 'number') {
+      byId.set(item.id, item);
+    }
+  }
+  return byId;
 };
 
 const linkArtifactBytecode = (
@@ -409,6 +458,33 @@ export async function createRpcAdapter(
   };
   const allocateSerializedSignerNonce = async (): Promise<number> => {
     return allocateSerializedSignerNonceFor(signer);
+  };
+
+  const sendSignerTxWithExplicitNonce = async (
+    activeSigner: Signer,
+    label: string,
+    send: (nonce: number, feeOverrides: Record<string, bigint>) => Promise<ContractTransactionResponse>,
+  ): Promise<RpcReceipt> => {
+    for (let attempt = 1; attempt <= 2; attempt++) {
+      try {
+        if (attempt > 1) {
+          await resetSerializedSignerNonceFor(activeSigner);
+          console.warn(`⚠️ [JAdapter:rpc] retrying ${label} after nonce sync (attempt ${attempt}/2)`);
+        }
+        const nonce = await allocateSerializedSignerNonceFor(activeSigner);
+        const feeOverrides = await buildFeeOverrides();
+        console.log(`🔐 [JAdapter:rpc] ${label} nonce=${nonce}`);
+        const tx = await send(nonce, feeOverrides);
+        return await waitForReceipt(tx, label);
+      } catch (error) {
+        if (attempt < 2 && isNonceSyncError(error)) {
+          continue;
+        }
+        await resetSerializedSignerNonceFor(activeSigner);
+        throw error;
+      }
+    }
+    throw new Error(`${label} failed after nonce retry`);
   };
 
   type ErrorWithMessage = {
@@ -788,6 +864,106 @@ export async function createRpcAdapter(
       }
     },
 
+    async readWalletSnapshot(request: JWalletSnapshotRequest): Promise<JWalletSnapshot> {
+      const owner = request.owner;
+      const tokenAddresses = request.tokenAddresses;
+      const allowances = request.allowances ?? [];
+      const includeNativeBalance = request.includeNativeBalance !== false;
+      const erc20Interface = new ethers.Interface([
+        'function balanceOf(address owner) view returns (uint256)',
+        'function allowance(address owner, address spender) view returns (uint256)',
+      ]);
+
+      const rpcUrl = config.rpcUrl;
+      if (rpcUrl && rpcUrl.startsWith('http')) {
+        try {
+          let nextId = 1;
+          let nativeBalanceId: number | null = null;
+          const tokenIds: number[] = [];
+          const allowanceIds: number[] = [];
+          const batch: RpcBatchRequest[] = [];
+
+          if (includeNativeBalance) {
+            nativeBalanceId = nextId;
+            batch.push({
+              id: nextId,
+              jsonrpc: '2.0',
+              method: 'eth_getBalance',
+              params: [owner, 'latest'],
+            });
+            nextId += 1;
+          }
+
+          for (const tokenAddress of tokenAddresses) {
+            tokenIds.push(nextId);
+            batch.push({
+              id: nextId,
+              jsonrpc: '2.0',
+              method: 'eth_call',
+              params: [{
+                to: tokenAddress,
+                data: erc20Interface.encodeFunctionData('balanceOf', [owner]),
+              }, 'latest'],
+            });
+            nextId += 1;
+          }
+
+          for (const allowanceRead of allowances) {
+            allowanceIds.push(nextId);
+            batch.push({
+              id: nextId,
+              jsonrpc: '2.0',
+              method: 'eth_call',
+              params: [{
+                to: allowanceRead.tokenAddress,
+                data: erc20Interface.encodeFunctionData('allowance', [owner, allowanceRead.spender]),
+              }, 'latest'],
+            });
+            nextId += 1;
+          }
+
+          const responses = await sendRpcBatch(rpcUrl, batch);
+          const readBigInt = (id: number): bigint => {
+            const item = responses.get(id);
+            if (!item) return 0n;
+            if (item.error) {
+              throw new Error(item.error.message || `RPC_BATCH_ITEM_ERROR:${id}`);
+            }
+            if (typeof item.result !== 'string') return 0n;
+            try {
+              return BigInt(item.result);
+            } catch {
+              return 0n;
+            }
+          };
+
+          return {
+            nativeBalance: nativeBalanceId === null ? null : readBigInt(nativeBalanceId),
+            tokenBalances: tokenIds.map(readBigInt),
+            allowances: allowanceIds.map(readBigInt),
+          };
+        } catch (err) {
+          console.warn('[JAdapter:rpc] Wallet snapshot batch failed, falling back:', (err as Error).message);
+        }
+      }
+
+      const [nativeBalance, tokenBalances, allowanceValues] = await Promise.all([
+        includeNativeBalance ? provider.getBalance(owner).catch(() => 0n) : Promise.resolve<bigint | null>(null),
+        Promise.all(tokenAddresses.map((tokenAddress) => adapter.getErc20Balance(tokenAddress, owner))),
+        Promise.all(allowances.map((allowanceRead) => adapter.getErc20Allowance(
+          allowanceRead.tokenAddress,
+          owner,
+          allowanceRead.spender,
+        ))),
+      ]);
+
+      return {
+        nativeBalance,
+        tokenBalances,
+        allowances: allowanceValues,
+      };
+    },
+
     async getErc20Balance(tokenAddress: string, owner: string): Promise<bigint> {
       const erc20 = new ethers.Contract(tokenAddress, ['function balanceOf(address owner) view returns (uint256)'], provider);
       const balanceOf = erc20.getFunction('balanceOf') as (owner: string) => Promise<bigint>;
@@ -795,55 +971,13 @@ export async function createRpcAdapter(
     },
 
     async getErc20Balances(tokenAddresses: string[], owner: string): Promise<bigint[]> {
-      const erc20Interface = new ethers.Interface([
-        'function balanceOf(address owner) view returns (uint256)',
-      ]);
-
-      const rpcUrl = config.rpcUrl;
-      if (rpcUrl && rpcUrl.startsWith('http')) {
-        try {
-          const batch = tokenAddresses.map((tokenAddress, idx) => ({
-            id: idx + 1,
-            jsonrpc: '2.0',
-            method: 'eth_call',
-            params: [{
-              to: tokenAddress,
-              data: erc20Interface.encodeFunctionData('balanceOf', [owner]),
-            }, 'latest'],
-          }));
-
-          const response = await fetch(rpcUrl, {
-            method: 'POST',
-            headers: { 'content-type': 'application/json' },
-            body: JSON.stringify(batch),
-          });
-
-          if (response.ok) {
-            const json = await response.json();
-            if (Array.isArray(json)) {
-              const byId = new Map<number, string>();
-              for (const item of json) {
-                if (item && typeof item.id === 'number' && typeof item.result === 'string') {
-                  byId.set(item.id, item.result);
-                }
-              }
-              return tokenAddresses.map((_, idx) => {
-                const result = byId.get(idx + 1);
-                try {
-                  return result ? BigInt(result) : 0n;
-                } catch {
-                  return 0n;
-                }
-              });
-            }
-          }
-        } catch (err) {
-          console.warn('[JAdapter:rpc] Batch balance fetch failed, falling back to per-call:', (err as Error).message);
-        }
-      }
-
-      // Fallback: per-token calls
-      return Promise.all(tokenAddresses.map(addr => adapter.getErc20Balance(addr, owner)));
+      return (
+        await adapter.readWalletSnapshot({
+          owner,
+          tokenAddresses,
+          includeNativeBalance: false,
+        })
+      ).tokenBalances;
     },
 
     // === WRITE METHODS ===
@@ -1029,26 +1163,31 @@ export async function createRpcAdapter(
       const liveDepositoryAddress = await getLiveDepositoryAddress();
       const allowance: bigint = await allowanceFn(signerAddress, liveDepositoryAddress);
       if (allowance < amount) {
-        let nextNonce = await readSignerTxNonceFor(signerWallet);
         const approveFn = erc20.getFunction('approve') as (
           spender: string,
           amount: bigint,
           overrides?: Record<string, bigint>
-        ) => Promise<{ wait: (confirms?: number, timeout?: number) => Promise<unknown>; hash: string }>;
-        if (allowance > 0n) {
-          const clearTx = await approveFn(liveDepositoryAddress, 0n, {
-            ...(await buildFeeOverrides()),
-            nonce: nextNonce,
-          });
-          nextNonce += 1;
-          await waitForReceipt(clearTx, 'erc20ApproveReset');
-        }
-        const approveTx = await approveFn(liveDepositoryAddress, ethers.MaxUint256, {
-          ...(await buildFeeOverrides()),
-          nonce: nextNonce,
+        ) => Promise<ContractTransactionResponse>;
+        await runSerializedBatchFor(signerWallet, async () => {
+          if (allowance > 0n) {
+            await sendSignerTxWithExplicitNonce(
+              signerWallet,
+              'erc20ApproveReset',
+              (nonce, feeOverrides) => approveFn(liveDepositoryAddress, 0n, {
+                ...feeOverrides,
+                nonce,
+              }),
+            );
+          }
+          await sendSignerTxWithExplicitNonce(
+            signerWallet,
+            'erc20ApproveMax',
+            (nonce, feeOverrides) => approveFn(liveDepositoryAddress, ethers.MaxUint256, {
+              ...feeOverrides,
+              nonce,
+            }),
+          );
         });
-        nextNonce += 1;
-        await waitForReceipt(approveTx, 'erc20ApproveMax');
         console.log(`[JAdapter:rpc] Approved max allowance for current token at Depository`);
       }
 
@@ -1114,7 +1253,7 @@ export async function createRpcAdapter(
         spenderAddress: string,
         approvalAmount: bigint,
         overrides?: Record<string, bigint>
-      ) => Promise<{ hash: string }>;
+      ) => Promise<ContractTransactionResponse>;
       const [tokenCode, spenderCode] = await Promise.all([
         readContractCode(provider, config.rpcUrl, tokenAddress),
         readContractCode(provider, config.rpcUrl, spender),
@@ -1128,17 +1267,32 @@ export async function createRpcAdapter(
       const currentAllowance = await allowanceFn(signerWallet.address, spender);
       if (currentAllowance === amount) return 'already-approved';
       try {
-        if (currentAllowance > 0n && currentAllowance !== amount) {
-          const clearTx = await approveFn(spender, 0n, await buildFeeOverrides());
-          await waitForReceipt(clearTx, 'approveErc20Reset');
-        }
-        const tx = await approveFn(spender, amount, await buildFeeOverrides());
-        await waitForReceipt(tx, 'approveErc20');
-        return tx.hash;
+        return await runSerializedBatchFor(signerWallet, async () => {
+          if (currentAllowance > 0n && currentAllowance !== amount) {
+            await sendSignerTxWithExplicitNonce(
+              signerWallet,
+              'approveErc20Reset',
+              (nonce, feeOverrides) => approveFn(spender, 0n, {
+                ...feeOverrides,
+                nonce,
+              }),
+            );
+          }
+          const receipt = await sendSignerTxWithExplicitNonce(
+            signerWallet,
+            'approveErc20',
+            (nonce, feeOverrides) => approveFn(spender, amount, {
+              ...feeOverrides,
+              nonce,
+            }),
+          );
+          return receipt.hash;
+        });
       } catch (error) {
         const message = error instanceof Error ? error.message : String(error);
+        const nativeBalance = await provider.getBalance(signerWallet.address).catch(() => null);
         throw new Error(
-          `approveErc20 failed owner=${signerWallet.address} token=${tokenAddress} spender=${spender} currentAllowance=${currentAllowance} requested=${amount} cause=${message}`,
+          `approveErc20 failed owner=${signerWallet.address} token=${tokenAddress} spender=${spender} currentAllowance=${currentAllowance} requested=${amount} nativeBalance=${nativeBalance ?? 'unknown'} cause=${message}`,
         );
       }
     },

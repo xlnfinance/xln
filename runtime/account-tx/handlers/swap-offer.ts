@@ -192,7 +192,7 @@ export async function handleSwapOffer(
   };
 
   // 8. Lock capacity (CRITICAL PER CODEX: Apply during BOTH validation and commit!)
-  // Holds ARE consensus-critical - included in fullDeltaStates hash
+  // Holds ARE consensus-critical - included in AccountFrame.deltas hash.
   // Must be in BOTH validation (for hash) and commit (for real state) to match
   if (makerIsLeft) {
     delta.leftHold += effectiveGiveAmount;

@@ -19,10 +19,14 @@ import {
   RPC_MARKET_MAX_DEPTH,
 } from '../market-snapshot';
 import { toPublicRpcUrl } from '../loopback-url';
+import { startParentLivenessWatch } from './parent-watch';
+import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { applyJEventsToEnv } from '../jadapter/watcher';
 import {
   getActiveJAdapter,
   getP2PState,
+  closeInfraDb,
+  closeRuntimeDb,
   main,
   process as runtimeProcess,
   enqueueRuntimeInput,
@@ -31,6 +35,7 @@ import {
   startP2P,
   stopP2P,
   startRuntimeLoop,
+  stopRuntimeLoopAndWait,
 } from '../runtime.ts';
 import type { EntityInput, Env } from '../types';
 import {
@@ -118,6 +123,7 @@ type LocalHealthResponse = {
   };
   bootstrapReserves: {
     ok: boolean;
+    targetMet?: boolean;
     tokens: Array<{
       tokenId: number;
       symbol: string;
@@ -125,6 +131,8 @@ type LocalHealthResponse = {
       current: string;
       expectedMin: string;
       ready: boolean;
+      operational?: boolean;
+      targetMet?: boolean;
     }>;
   };
   timings: TimingMap;
@@ -134,7 +142,7 @@ type JurisdictionConfig = {
   name: string;
   chainId: number;
   rpc: string;
-  contracts: {
+  contracts?: {
     depository: string;
     entityProvider: string;
     account?: string;
@@ -285,6 +293,47 @@ const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig =
     ...(arrakis as JurisdictionConfig),
     rpc: rpcUrlOverride || (arrakis as JurisdictionConfig).rpc,
   };
+};
+
+const REQUIRED_RPC_CONTRACT_KEYS = ['account', 'depository', 'entityProvider', 'deltaTransformer'] as const;
+
+const findMissingRpcContractCode = async (
+  rpcUrl: string,
+  contracts: JurisdictionConfig['contracts'],
+): Promise<string[]> => {
+  if (!contracts) return ['contracts'];
+  const provider = new ethers.JsonRpcProvider(rpcUrl);
+  const missing: string[] = [];
+  for (const key of REQUIRED_RPC_CONTRACT_KEYS) {
+    const address = String(contracts[key] || '').trim();
+    if (!address) {
+      missing.push(`${key}:missing`);
+      continue;
+    }
+    const code = await provider.getCode(address);
+    if (!code || code === '0x') missing.push(`${key}:${address}`);
+  }
+  return missing;
+};
+
+const prepareJurisdictionForImport = async (jurisdiction: JurisdictionConfig): Promise<JurisdictionConfig> => {
+  if (!resolvedArgs.deployTokens || !jurisdiction.contracts) return jurisdiction;
+
+  const missingCode = await findMissingRpcContractCode(jurisdiction.rpc, jurisdiction.contracts);
+  if (missingCode.length === 0) return jurisdiction;
+
+  // H1 is the dev/testnet deployer. If an isolated anvil starts from an empty
+  // state file while jurisdictions.json still contains canonical hardhat
+  // addresses, connect-only importJ would bind to dead contracts and kill the
+  // hub before it can bootstrap. Drop those stale addresses and let importJ
+  // deploy a fresh stack; ensureRpcStackReady writes the resulting addresses
+  // back for H2/H3/MM.
+  console.warn(
+    `[${resolvedArgs.name}] RPC contracts have no code; deploying fresh stack instead of using stale addresses: ` +
+      missingCode.join(', '),
+  );
+  const { contracts: _staleContracts, ...withoutContracts } = jurisdiction;
+  return withoutContracts;
 };
 
 const resolveJurisdictionPaths = (): string[] => {
@@ -609,11 +658,14 @@ const getReserveHealth = (env: Env, entityId: string, tokenCatalog: JTokenInfo[]
       decimals,
       current: current.toString(),
       expectedMin: expectedMin.toString(),
-      ready: current >= expectedMin,
+      ready: current > 0n,
+      operational: current > 0n,
+      targetMet: current >= expectedMin,
     };
   });
   return {
-    ok: tokens.length >= HUB_REQUIRED_TOKEN_COUNT && tokens.every(token => token.ready),
+    ok: tokens.length >= HUB_REQUIRED_TOKEN_COUNT && tokens.every(token => token.operational === true),
+    targetMet: tokens.length >= HUB_REQUIRED_TOKEN_COUNT && tokens.every(token => token.targetMet === true),
     tokens,
   };
 };
@@ -773,7 +825,7 @@ const buildLocalHealth = (
       ready: Boolean(entityId) && pairs.length === Math.max(0, requiredNames.length - 1) && pairs.every(pair => pair.ready),
       pairs,
     },
-    bootstrapReserves: entityId ? getReserveHealth(env, entityId, tokenCatalog) : { ok: false, tokens: [] },
+    bootstrapReserves: entityId ? getReserveHealth(env, entityId, tokenCatalog) : { ok: false, targetMet: false, tokens: [] },
     timings,
   };
 };
@@ -821,10 +873,13 @@ const run = async (): Promise<void> => {
     },
   });
 
+  const httpDrain = createHttpDrainTracker();
   const server = Bun.serve({
     hostname: resolvedArgs.apiHost,
     port: resolvedArgs.apiPort,
     async fetch(request, serverRef) {
+      const releaseHttp = httpDrain.begin();
+      try {
       const url = new URL(request.url);
       const pathname = url.pathname;
       const headers = JSON_HEADERS;
@@ -1085,12 +1140,15 @@ const run = async (): Promise<void> => {
       }
 
       return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers });
+      } finally {
+        releaseHttp();
+      }
     },
     websocket: directRuntimeWs.websocket,
   });
 
   const importJStartedAt = startTiming('import_j');
-  const jurisdiction = resolveJurisdictionConfig(resolvedArgs.rpcUrl);
+  const jurisdiction = await prepareJurisdictionForImport(resolveJurisdictionConfig(resolvedArgs.rpcUrl));
   enqueueRuntimeInput(env, {
     runtimeTxs: [{
       type: 'importJ',
@@ -1099,7 +1157,7 @@ const run = async (): Promise<void> => {
         chainId: jurisdiction.chainId,
         ticker: 'XLN',
         rpcs: [jurisdiction.rpc],
-        ...(resolvedArgs.deployTokens ? {} : { contracts: jurisdiction.contracts }),
+        ...(jurisdiction.contracts ? { contracts: jurisdiction.contracts } : {}),
       },
     }],
     entityInputs: [],
@@ -1302,7 +1360,7 @@ const run = async (): Promise<void> => {
           await ensurePeerBootstrapReserves(env, peers.map(peer => peer.entityId), tokenCatalog);
         }
         const reserveHealth = await ensureBootstrapReserves(env, bootstrap.entityId, tokenCatalog);
-        reserveReadyMarked = reserveHealth.ok;
+        reserveReadyMarked = reserveHealth.targetMet === true;
       }
       if (allCreditReady && reserveReadyMarked && timings.mesh_ready_total.ms === null) {
         finishTiming('mesh_ready_total', totalMeshStartedAt);
@@ -1330,16 +1388,33 @@ const run = async (): Promise<void> => {
     `[MESH-HUB] READY name=${resolvedArgs.name} entityId=${bootstrap.entityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
   );
 
-  const shutdown = async () => {
+  let shutdownStarted = false;
+  const shutdown = async (code: number = 0) => {
+    if (shutdownStarted) return;
+    shutdownStarted = true;
     shuttingDown = true;
     if (meshLoop) clearInterval(meshLoop);
-    stopP2P(env);
-    server.stop(true);
-    process.exit(0);
+    try {
+      await stopServerGracefully(server, httpDrain, resolvedArgs.name, 5_000);
+      stopP2P(env);
+      const idle = await stopRuntimeLoopAndWait(env, 10_000);
+      if (!idle) {
+        console.warn(`[${resolvedArgs.name}] shutdown timed out waiting for runtime loop to drain`);
+      }
+      await closeRuntimeDb(env);
+      await closeInfraDb(env);
+    } catch (error) {
+      console.error(`[${resolvedArgs.name}] shutdown flush failed:`, error instanceof Error ? error.message : error);
+      process.exit(code || 1);
+    }
+    process.exit(code);
   };
+  const stopParentWatch = startParentLivenessWatch(resolvedArgs.name, process.env['XLN_ORCHESTRATOR_PID'], () => {
+    void shutdown(1);
+  });
 
-  process.on('SIGTERM', () => { void shutdown(); });
-  process.on('SIGINT', () => { void shutdown(); });
+  process.on('SIGTERM', () => { stopParentWatch(); void shutdown(); });
+  process.on('SIGINT', () => { stopParentWatch(); void shutdown(); });
 
   await waitUntil(() => false, Number.MAX_SAFE_INTEGER, 1000);
 };

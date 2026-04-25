@@ -3,13 +3,14 @@
  * Utilities for entity replica cloning, snapshots, and state persistence
  */
 
-import type { EntityReplica, EntityState, Env, RuntimeInput, AccountMachine, JReplica, LogCategory, AccountFrame, DebtEntry } from './types';
-import { DEBUG, HEAVY_LOGS } from './utils';
+import type { EntityReplica, EntityState, Env, AccountMachine, LogCategory, AccountFrame, AccountTx, DebtEntry } from './types';
+import { HEAVY_LOGS } from './utils';
 import { validateEntityState } from './validation-utils';
 import { safeStringify } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
 import { cloneJBatch, type CompletedBatch } from './j-batch';
 import type { CrontabState } from './crontab-types';
+import type { Profile } from './networking/gossip';
 import type {
   BookOrderState,
   BookState,
@@ -183,12 +184,13 @@ export function cloneAccountFrame(frame: AccountFrame): AccountFrame {
   try {
     return structuredClone(frame);
   } catch {
+    const accountTxs = frame.accountTxs.map(
+      (tx): AccountTx => ({ ...tx, data: tx.data ? structuredClone(tx.data) : tx.data }) as AccountTx,
+    );
     return {
       ...frame,
-      accountTxs: frame.accountTxs.map((tx) => ({ ...tx, data: tx.data ? structuredClone(tx.data) : tx.data })),
-      tokenIds: [...frame.tokenIds],
-      deltas: [...frame.deltas],
-      fullDeltaStates: frame.fullDeltaStates ? frame.fullDeltaStates.map((delta) => ({ ...delta })) : undefined,
+      accountTxs,
+      deltas: frame.deltas.map((delta) => ({ ...delta })),
     };
   }
 }
@@ -478,16 +480,27 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
 
 // === ACCOUNT MACHINE HELPERS ===
 
+function defineFrameHistoryView(account: AccountMachine, frames: AccountFrame[]): AccountMachine {
+  Object.defineProperty(account, 'frameHistory', {
+    value: frames,
+    enumerable: false,
+    writable: true,
+    configurable: true,
+  });
+  return account;
+}
+
 /**
  * Clone AccountMachine for validation (replaces dryRun pattern)
  */
 export function cloneAccountMachine(account: AccountMachine, forSnapshot: boolean = false): AccountMachine {
   // For snapshots, exclude clonedForValidation to avoid cycles
   if (forSnapshot) {
-    const { clonedForValidation, ...accountWithoutCloned } = account;
+    const { clonedForValidation, frameHistory, ...accountWithoutCloned } = account;
     void clonedForValidation;
+    void frameHistory;
     try {
-      return structuredClone(accountWithoutCloned) as AccountMachine;
+      return defineFrameHistoryView(structuredClone(accountWithoutCloned) as AccountMachine, []);
     } catch {
       return manualCloneAccountMachine(account, true);
     }
@@ -496,7 +509,10 @@ export function cloneAccountMachine(account: AccountMachine, forSnapshot: boolea
   // Normal clone - preserve clonedForValidation for consensus
   try {
     const cloned = structuredClone(account);
-    return cloned;
+    return defineFrameHistoryView(
+      cloned,
+      Array.isArray(account.frameHistory) ? account.frameHistory.map((frame) => cloneAccountFrame(frame)) : [],
+    );
   } catch (error) {
     if (HEAVY_LOGS) {
       console.log(`structuredClone failed for AccountMachine, using manual clone`);
@@ -547,7 +563,7 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
         }
       : {}),
     pendingSignatures: [...account.pendingSignatures],
-    frameHistory: account.frameHistory.map((frame) => cloneAccountFrame(frame)),
+    frameHistory: [],
     globalCreditLimits: { ...account.globalCreditLimits },
     proofHeader: { ...account.proofHeader },
     proofBody: {
@@ -608,6 +624,13 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
   if (account.clonedForValidation && !skipClonedForValidation) {
     result.clonedForValidation = manualCloneAccountMachine(account.clonedForValidation, true);
   }
+
+  defineFrameHistoryView(
+    result,
+    skipClonedForValidation || !Array.isArray(account.frameHistory)
+      ? []
+      : account.frameHistory.map((frame) => cloneAccountFrame(frame)),
+  );
 
   if (skipClonedForValidation) {
     delete result.clonedForValidation;

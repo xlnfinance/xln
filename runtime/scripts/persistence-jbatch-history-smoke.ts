@@ -1,6 +1,7 @@
 import { mkdirSync, rmSync } from 'fs';
 import { join } from 'path';
 import {
+  closeInfraDb,
   createEmptyEnv,
   enqueueRuntimeInput,
   process as processRuntime,
@@ -21,6 +22,11 @@ async function main() {
   const namespacePath = join(dbRoot, runtimeId);
 
   rmSync(namespacePath, { recursive: true, force: true });
+  rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-events`, { recursive: true, force: true });
+  rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
   mkdirSync(dbRoot, { recursive: true });
 
   const env = createEmptyEnv(seed);
@@ -28,6 +34,7 @@ async function main() {
   env.dbNamespace = runtimeId;
   env.runtimeConfig = { ...(env.runtimeConfig || {}), snapshotIntervalFrames: 1000 };
   env.quietRuntimeLogs = true;
+  env.activeJurisdiction = 'default';
 
   const signerId = deriveSignerAddressSync(seed, '1');
   const signerKey = deriveSignerKeySync(seed, '1');
@@ -36,6 +43,29 @@ async function main() {
 
   const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
   const otherEntityId = generateLazyEntityId(['0x0000000000000000000000000000000000000001'], 1n).toLowerCase();
+  env.jReplicas.set('default', {
+    name: 'default',
+    depositoryAddress: '0x' + '3'.repeat(40),
+    entityProviderAddress: '0x' + '2'.repeat(40),
+    chainId: 31337,
+    jadapter: {
+      submitTx: async () => ({
+        success: true,
+        txHash: `0x${'a'.repeat(64)}`,
+        events: [],
+      }),
+      startWatching: () => {},
+      isWatching: () => false,
+      stopWatching: () => {},
+      getBrowserVM: () => null,
+      setBlockTimestamp: () => {},
+      close: async () => {},
+    },
+    contracts: {
+      depository: '0x' + '3'.repeat(40),
+      entityProvider: '0x' + '2'.repeat(40),
+    },
+  } as never);
 
   enqueueRuntimeInput(env, {
     runtimeTxs: [
@@ -149,6 +179,7 @@ async function main() {
   assert(batchHistoryBefore.length === 3, `expected 3 batchHistory entries before reload, got ${batchHistoryBefore.length}`);
 
   await closeRuntimeDb(env);
+  await closeInfraDb(env);
 
   const restored = await loadEnvFromDB(runtimeId, seed);
   assert(restored, 'restored env exists');
@@ -169,6 +200,8 @@ async function main() {
     batchHistoryBefore: batchHistoryBefore.length,
     batchHistoryAfter: batchHistoryAfter.length,
   }, null, 2));
+  await closeRuntimeDb(restored);
+  await closeInfraDb(restored);
 }
 
 main().catch((error) => {

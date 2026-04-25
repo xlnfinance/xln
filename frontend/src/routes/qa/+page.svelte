@@ -33,6 +33,8 @@
     shard: number;
     status: 'passed' | 'failed' | 'unknown';
     durationMs: number | null;
+    handle: string | null;
+    description: string | null;
     target: string | null;
     title: string | null;
     requireMarketMaker: boolean | null;
@@ -112,6 +114,10 @@
     return `${run.passedShards}/${run.totalShards}`;
   }
 
+  function runArg(run: QaRun, key: string): unknown {
+    return run.args && typeof run.args === 'object' ? run.args[key] : undefined;
+  }
+
   function getRunLabel(run: QaSummary): string {
     const parts = run.runId.split('-');
     return parts.length >= 2 ? `${parts[0]} ${parts[1]}` : run.runId;
@@ -123,7 +129,30 @@
   }
 
   function describeShard(shard: QaShard): string {
-    return shard.target || shard.title || `shard ${shard.shard}`;
+    return shard.handle || shard.title || shard.target || `shard ${shard.shard}`;
+  }
+
+  function shardDescription(shard: QaShard): string {
+    return shard.description || shard.title || shard.target || 'No test description recorded.';
+  }
+
+  function artifactCount(shard: QaShard, kind: QaArtifact['kind']): number {
+    return shard.artifacts.filter((artifact) => artifact.kind === kind).length;
+  }
+
+  function formatBytes(bytes: number): string {
+    if (!Number.isFinite(bytes) || bytes <= 0) return '0 B';
+    if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+    if (bytes >= 1024) return `${(bytes / 1024).toFixed(1)} KB`;
+    return `${bytes} B`;
+  }
+
+  function artifactLabel(artifact: QaArtifact): string {
+    if (artifact.kind === 'video') return 'Video';
+    if (artifact.kind === 'image') return 'Screenshot';
+    if (artifact.kind === 'trace') return 'Trace';
+    if (artifact.kind === 'text') return 'Log';
+    return artifact.kind;
   }
 
   async function loadRuns(preserveSelection = true): Promise<void> {
@@ -294,23 +323,54 @@
           </article>
           <article class="summary-card">
             <span>Parallel</span>
-            <strong>{String(selectedRun.args?.shards ?? 'n/a')}</strong>
+            <strong>{String(runArg(selectedRun, 'shards') ?? 'n/a')}</strong>
           </article>
         </div>
       </section>
 
-      <section class="shard-grid">
+      <section class="suite-list">
+        <div class="suite-list-head">
+          <div>
+            <div class="eyebrow">E2E Suite</div>
+            <h3>{selectedRun.totalShards} isolated tests</h3>
+          </div>
+          <div class="suite-list-meta">
+            <span>{selectedRun.passedShards} passed</span>
+            <span>{selectedRun.failedShards} failed</span>
+          </div>
+        </div>
         {#each selectedRun.shards as shard, index}
-          <button class="shard-card" class:selected={index === selectedShardIndex} class:pass={shard.status === 'passed'} class:fail={shard.status === 'failed'} onclick={() => (selectedShardIndex = index)}>
-            <div class="shard-card-top">
-              <span>#{shard.shard}</span>
-              <span>{formatMs(shard.durationMs)}</span>
+          <button
+            class="suite-row"
+            class:selected={index === selectedShardIndex}
+            class:pass={shard.status === 'passed'}
+            class:fail={shard.status === 'failed'}
+            onclick={() => (selectedShardIndex = index)}
+          >
+            <span
+              class="status-dot"
+              class:pass={shard.status === 'passed'}
+              class:fail={shard.status === 'failed'}
+            ></span>
+            <div class="suite-row-main">
+              <div class="suite-row-title">
+                <strong>{describeShard(shard)}</strong>
+                <span>{shard.target || `shard-${shard.shard}`}</span>
+              </div>
+              <p>{shardDescription(shard)}</p>
+              <div class="artifact-chips">
+                <span class:muted={artifactCount(shard, 'video') === 0}>Video {artifactCount(shard, 'video')}</span>
+                <span class:muted={artifactCount(shard, 'image') === 0}>Screenshots {artifactCount(shard, 'image')}</span>
+                <span class:muted={artifactCount(shard, 'trace') === 0}>Trace {artifactCount(shard, 'trace')}</span>
+                {#if shard.logRelativePath}
+                  <span>Log</span>
+                {/if}
+              </div>
             </div>
-            <strong>{describeShard(shard)}</strong>
-            <div class="shard-card-meta">
+            <div class="suite-row-side">
               <span>{shard.status}</span>
-              <span>{shard.hasVideo ? 'video' : 'no video'}</span>
-              <span>{shard.artifacts.length} artifacts</span>
+              <strong>{formatMs(shard.durationMs)}</strong>
+              <small>#{shard.shard}</small>
             </div>
           </button>
         {/each}
@@ -322,6 +382,10 @@
             <div>
               <div class="eyebrow">Shard {selectedShard.shard}</div>
               <h3>{describeShard(selectedShard)}</h3>
+              <p>{shardDescription(selectedShard)}</p>
+              {#if selectedShard.target}
+                <small>{selectedShard.target}</small>
+              {/if}
             </div>
             <div class="detail-meta">
               <span>{selectedShard.status}</span>
@@ -331,22 +395,36 @@
 
           <div class="detail-layout">
             <div class="media-panel">
-              {#if selectedVideo?.url}
-                <!-- svelte-ignore a11y_media_has_caption -->
-                <video class="video-player" controls preload="metadata" src={selectedVideo.url}></video>
-              {:else}
-                <div class="empty-media">No video for this shard</div>
-              {/if}
+              <section class="media-block">
+                <div class="media-title">
+                  <h4>Video</h4>
+                  {#if selectedVideo?.url}
+                    <a href={selectedVideo.url} target="_blank" rel="noreferrer">{formatBytes(selectedVideo.sizeBytes)}</a>
+                  {/if}
+                </div>
+                {#if selectedVideo?.url}
+                  <!-- svelte-ignore a11y_media_has_caption -->
+                  <video class="video-player" controls preload="metadata" src={selectedVideo.url}></video>
+                {:else}
+                  <div class="empty-media">No video for this test</div>
+                {/if}
+              </section>
 
               {#if selectedImages.length > 0}
-                <div class="image-strip">
-                  {#each selectedImages as image}
-                    <a class="image-thumb" href={image.url} target="_blank" rel="noreferrer">
-                      <img alt={image.name} src={image.url} loading="lazy" />
-                      <span>{image.name}</span>
-                    </a>
-                  {/each}
-                </div>
+                <section class="media-block">
+                  <div class="media-title">
+                    <h4>Screenshots</h4>
+                    <span>{selectedImages.length}</span>
+                  </div>
+                  <div class="image-strip">
+                    {#each selectedImages as image}
+                      <a class="image-thumb" href={image.url} target="_blank" rel="noreferrer">
+                        <img alt={image.name} src={image.url} loading="lazy" />
+                        <span>{image.name}</span>
+                      </a>
+                    {/each}
+                  </div>
+                </section>
               {/if}
             </div>
 
@@ -385,8 +463,9 @@
                 <div class="artifact-list">
                   {#each selectedShard.artifacts as artifact}
                     <a href={artifact.url} target="_blank" rel="noreferrer">
-                      <span>{artifact.kind}</span>
+                      <span>{artifactLabel(artifact)}</span>
                       <strong>{artifact.name}</strong>
+                      <small>{formatBytes(artifact.sizeBytes)}</small>
                     </a>
                   {/each}
                 </div>
@@ -474,15 +553,16 @@
   .metric-card,
   .run-row,
   .summary-card,
-  .shard-card,
+  .suite-row,
   .panel-block,
   .log-panel,
+  .media-block,
   .empty-media,
   .empty-state,
   .error-banner {
     border: 1px solid rgba(255, 255, 255, 0.08);
     background: rgba(255, 255, 255, 0.03);
-    border-radius: 18px;
+    border-radius: 10px;
   }
 
   .refresh-toggle {
@@ -549,7 +629,7 @@
 
   .trend-pill.selected,
   .run-row.selected,
-  .shard-card.selected {
+  .suite-row.selected {
     border-color: rgba(216, 175, 79, 0.56);
     box-shadow: 0 0 0 1px rgba(216, 175, 79, 0.26) inset;
   }
@@ -564,7 +644,7 @@
   }
 
   .run-row,
-  .shard-card {
+  .suite-row {
     width: 100%;
     text-align: left;
     color: inherit;
@@ -576,6 +656,8 @@
   .run-row-meta,
   .run-duration,
   .detail-meta,
+  .suite-list-meta,
+  .suite-row-title span,
   small,
   p {
     color: #9b978a;
@@ -606,14 +688,17 @@
     grid-template-columns: repeat(4, minmax(0, 1fr));
   }
 
-  .shard-grid {
+  .suite-list {
     display: grid;
     gap: 0.75rem;
-    grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   }
 
-  .shard-card-top,
-  .shard-card-meta,
+  .suite-list-head,
+  .suite-row,
+  .suite-row-title,
+  .suite-row-side,
+  .artifact-chips,
+  .media-title,
   .phase-list div,
   .slow-step-list li,
   .artifact-list a {
@@ -623,14 +708,86 @@
     gap: 0.75rem;
   }
 
-  .shard-card {
-    display: grid;
-    gap: 0.55rem;
+  .suite-list-head {
+    padding: 0.2rem 0.1rem 0.3rem;
   }
 
-  .shard-card-meta {
+  .suite-list-meta,
+  .suite-row-title,
+  .suite-row-side,
+  .artifact-chips,
+  .media-title {
+    display: flex;
+    align-items: center;
+    gap: 0.65rem;
+  }
+
+  .suite-row {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: start;
+    gap: 0.85rem;
+  }
+
+  .suite-row.pass {
+    border-color: rgba(132, 224, 161, 0.14);
+  }
+
+  .suite-row.fail {
+    border-color: rgba(255, 146, 132, 0.35);
+  }
+
+  .suite-row-main {
+    display: grid;
+    gap: 0.45rem;
+    min-width: 0;
+  }
+
+  .suite-row-title {
+    justify-content: flex-start;
+    min-width: 0;
+  }
+
+  .suite-row-title strong {
+    color: #f6f2e8;
+    overflow-wrap: anywhere;
+  }
+
+  .suite-row-title span {
+    font-size: 0.78rem;
+    white-space: nowrap;
+  }
+
+  .suite-row-main p {
+    font-size: 0.9rem;
+    line-height: 1.45;
+  }
+
+  .suite-row-side {
+    flex-direction: column;
+    align-items: flex-end;
     color: #9b978a;
     font-size: 0.86rem;
+  }
+
+  .artifact-chips {
+    flex-wrap: wrap;
+  }
+
+  .artifact-chips span {
+    border: 1px solid rgba(112, 165, 255, 0.24);
+    background: rgba(112, 165, 255, 0.08);
+    border-radius: 999px;
+    color: #b9d2ff;
+    font-size: 0.74rem;
+    line-height: 1;
+    padding: 0.34rem 0.48rem;
+  }
+
+  .artifact-chips span.muted {
+    border-color: rgba(255, 255, 255, 0.07);
+    background: rgba(255, 255, 255, 0.025);
+    color: #6f6b61;
   }
 
   .detail-layout {
@@ -649,6 +806,23 @@
   .empty-media {
     width: 100%;
     min-height: 340px;
+  }
+
+  .media-block {
+    padding: 1rem;
+    display: grid;
+    gap: 0.8rem;
+  }
+
+  .media-title {
+    justify-content: space-between;
+  }
+
+  .media-title a,
+  .media-title span {
+    color: #9ec2ff;
+    font-size: 0.82rem;
+    text-decoration: none;
   }
 
   .empty-media,
@@ -717,6 +891,13 @@
   .artifact-list a {
     color: inherit;
     text-decoration: none;
+    display: grid;
+    grid-template-columns: 90px minmax(0, 1fr) auto;
+    align-items: center;
+  }
+
+  .artifact-list strong {
+    overflow-wrap: anywhere;
   }
 
   .log-panel pre {
@@ -753,6 +934,16 @@
     .summary-grid,
     .metric-stack {
       grid-template-columns: 1fr;
+    }
+
+    .suite-row {
+      grid-template-columns: auto minmax(0, 1fr);
+    }
+
+    .suite-row-side {
+      grid-column: 2;
+      align-items: flex-start;
+      flex-direction: row;
     }
   }
 </style>
