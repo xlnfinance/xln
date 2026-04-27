@@ -701,7 +701,8 @@ const syncReserveSnapshotFromChain = async (
   for (const token of tokenCatalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)) {
     const tokenId = Number(token.tokenId);
     if (!Number.isFinite(tokenId) || tokenId <= 0) continue;
-    await jadapter.getReserves(entityId, tokenId);
+    const current = await jadapter.getReserves(entityId, tokenId);
+    replica.state.reserves.set(tokenId, current);
   }
   return getReserveHealth(env, entityId, tokenCatalog);
 };

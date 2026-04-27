@@ -171,26 +171,33 @@ export const buildCanonicalEnvSnapshot = (
 };
 
 export const normalizePersistedSnapshotInPlace = (
-  snapshot: any,
+  snapshot: Record<string, unknown> | null | undefined,
   deps: {
     normalizeReplicaMap: (raw: unknown) => Map<string, unknown>;
     normalizeJReplicaMap: (raw: unknown) => Map<string, unknown>;
   },
 ): void => {
   if (!snapshot || typeof snapshot !== 'object') return;
-  if (snapshot.eReplicas) {
-    snapshot.eReplicas = deps.normalizeReplicaMap(snapshot.eReplicas);
+  if (snapshot['eReplicas']) {
+    snapshot['eReplicas'] = deps.normalizeReplicaMap(snapshot['eReplicas']);
   }
-  if (snapshot.jReplicas) {
-    const jMap = deps.normalizeJReplicaMap(snapshot.jReplicas);
-    snapshot.jReplicas = new Map(
+  if (snapshot['jReplicas']) {
+    const jMap = deps.normalizeJReplicaMap(snapshot['jReplicas']);
+    snapshot['jReplicas'] = new Map(
       Array.from(jMap.entries()).map(([name, raw]) => {
         const jr = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+        const stateRoot = jr['stateRoot'];
+        const normalizedStateRoot =
+          stateRoot instanceof Uint8Array
+            ? stateRoot
+            : Array.isArray(stateRoot)
+              ? new Uint8Array(stateRoot.map((value) => Number(value) & 0xff))
+              : stateRoot;
         return [
           String(name),
           {
             ...jr,
-            stateRoot: jr['stateRoot'] ? new Uint8Array(jr['stateRoot'] as any) : jr['stateRoot'],
+            stateRoot: normalizedStateRoot,
           },
         ];
       }),

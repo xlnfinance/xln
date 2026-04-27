@@ -9,11 +9,13 @@ import {
   enqueueRuntimeInput,
   getFrameDb,
   getPersistedLatestHeight,
+  listPersistedCheckpointHeights,
   loadEnvFromDB,
   process as processRuntime,
   readPersistedAccountFrameHistory,
   readPersistedFrameJournal,
   saveEnvToDB,
+  verifyRuntimeChain,
 } from '../runtime.ts';
 import { readFrameDbRuntimeActivity } from '../storage';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
@@ -271,6 +273,107 @@ describe('storage frame journal retention', () => {
       await closeRuntimeDb(restored);
       await closeInfraDb(restored);
     }
+  });
+
+  test('restores state from snapshot/replay journal when the secondary frame DB is lost', async () => {
+    const seed = `storage-crash-frame-db-loss ${Date.now()} alpha beta gamma`;
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+    const namespacePath = join(dbRoot, runtimeId);
+
+    rmSync(namespacePath, { recursive: true, force: true });
+    rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-events`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
+    mkdirSync(dbRoot, { recursive: true });
+
+    const env = createEmptyEnv(seed);
+    env.runtimeId = runtimeId;
+    env.dbNamespace = runtimeId;
+    env.quietRuntimeLogs = true;
+    env.runtimeConfig = {
+      ...(env.runtimeConfig || {}),
+      storage: {
+        ...(env.runtimeConfig?.storage || {}),
+        packPeriodFrames: 2,
+        snapshotPeriodFrames: 2,
+        retainSnapshots: 2,
+      },
+    };
+
+    const signer = deriveSignerAddressSync(seed, '1');
+    registerSignerKey(signer, deriveSignerKeySync(seed, '1'));
+    registerSignerKey(signer.slice(-4).toLowerCase(), deriveSignerKeySync(seed, '1'));
+    const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
+    const jurisdiction = {
+      name: 'storage-crash-frame-db-loss-test',
+      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
+      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      chainId: 31337,
+    };
+
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importReplica',
+        entityId,
+        signerId: signer,
+        data: {
+          isProposer: true,
+          config: {
+            mode: 'proposer-based',
+            threshold: 1n,
+            validators: [signer],
+            shares: { [signer]: 1n },
+            jurisdiction,
+          },
+        },
+      }],
+      entityInputs: [],
+    });
+    await processRuntime(env, []);
+
+    const firstManualHeight = env.height + 1;
+    const lastManualHeight = env.height + 4;
+    for (let height = firstManualHeight; height <= lastManualHeight; height += 1) {
+      env.height = height;
+      env.timestamp += 1;
+      env.frameLogs = [{
+        id: height,
+        timestamp: env.timestamp,
+        level: 'info',
+        category: 'system',
+        message: `storage-crash-frame-db-loss-${height}`,
+      }];
+      await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    }
+
+    const latestHeight = await getPersistedLatestHeight(env);
+    const checkpointHeights = await listPersistedCheckpointHeights(env);
+    const replayFromHeight = checkpointHeights.find((height) => height > 0 && height < latestHeight) ?? 1;
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+
+    const beforeCrashVerify = await verifyRuntimeChain(runtimeId, seed, { fromSnapshotHeight: replayFromHeight });
+    expect(beforeCrashVerify.ok).toBe(true);
+
+    // Simulates a crash after the source-of-truth state DB commit but before
+    // the secondary UI/activity frame DB is durable. State recovery must not
+    // depend on this optional index.
+    rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+
+    const restored = await loadEnvFromDB(runtimeId, seed);
+    expect(restored?.height).toBe(latestHeight);
+    expect(restored?.eReplicas.size).toBe(1);
+    if (restored) {
+      await closeRuntimeDb(restored);
+      await closeInfraDb(restored);
+    }
+
+    const afterCrashVerify = await verifyRuntimeChain(runtimeId, seed, { fromSnapshotHeight: replayFromHeight });
+    expect(afterCrashVerify.ok).toBe(true);
   });
 
 	test('prunes old frame DB activity without pruning replay frames', async () => {

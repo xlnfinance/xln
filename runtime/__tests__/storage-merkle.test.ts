@@ -57,3 +57,12 @@ test('storage radix merkle supports radix 256 with byte-depth paths', () => {
   expect(result.leafCount).toBe(2);
   expect(result.root).toMatch(/^0x[0-9a-f]{64}$/);
 });
+
+test('storage radix merkle rejects mixed key lengths', () => {
+  expect(() =>
+    buildHexKeyedMerkle([
+      { hexKey: '0x11', value: value('short') },
+      { hexKey: hexKey(0x22), value: value('full') },
+    ]),
+  ).toThrow(/RADIX_MERKLE_MIXED_KEY_LENGTHS/);
+});

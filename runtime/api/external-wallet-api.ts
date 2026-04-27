@@ -4,6 +4,8 @@ import { deriveSignerKeySync } from '../account-crypto';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import { safeStringify } from '../serialization-utils';
 
+type Erc20ContractRunner = NonNullable<Parameters<typeof ERC20Mock__factory.connect>[1]>;
+
 export type ExternalWalletApiContext = {
   getJAdapter: () => JAdapter | null;
   getRuntimeId: () => string;
@@ -88,6 +90,15 @@ const readGasFaucetBody = async (request: Request): Promise<GasFaucetRequestBody
   return { userAddress, amount };
 };
 
+const toErc20ContractRunner = (runner: unknown, label: string): Erc20ContractRunner => {
+  if (!runner || typeof runner !== 'object') {
+    throw new Error(`INVALID_ERC20_CONTRACT_RUNNER: ${label}`);
+  }
+  // TypeChain was generated under jurisdictions/node_modules/ethers while runtime imports root ethers.
+  // Both expose the same v6 ContractRunner surface; keep the package-boundary cast local and explicit.
+  return runner as Erc20ContractRunner;
+};
+
 const faucetSignerByAddress = new Map<string, ethers.NonceManager>();
 
 const getFaucetWallet = (context: ExternalWalletApiContext, adapter: JAdapter): ethers.NonceManager => {
@@ -127,7 +138,10 @@ const provisionFaucetWalletFunding = async (
 
   if (options.ensureTokens) {
     for (const token of tokenCatalog) {
-      const tokenContract = ERC20Mock__factory.connect(token.address, adapter.signer as any);
+      const tokenContract = ERC20Mock__factory.connect(
+        token.address,
+        toErc20ContractRunner(adapter.signer, 'adapter.signer'),
+      );
       const currentBalance = await tokenContract.balanceOf(faucetAddress);
       const targetBalance = context.faucetTokenTargetUnits * 10n ** BigInt(token.decimals);
       console.log(
@@ -204,7 +218,10 @@ const requireFaucetWalletBalances = async (
     if (!tokenInfo) {
       throw new Error(`FAUCET_TOKEN_UNKNOWN address=${options.requiredTokenAddress}`);
     }
-    const tokenContract = ERC20Mock__factory.connect(tokenInfo.address, adapter.provider as any);
+    const tokenContract = ERC20Mock__factory.connect(
+      tokenInfo.address,
+      toErc20ContractRunner(adapter.provider, 'adapter.provider'),
+    );
     const currentBalance = await tokenContract.balanceOf(faucetAddress);
     if (currentBalance < options.requiredTokenAmount) {
       throw new Error(
@@ -302,7 +319,10 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
         requiredTokenAmount: amountWei,
       });
       console.log(`[EXT-FAUCET/ERC20 ${requestId}] transfer token=${tokenInfo.symbol} amountWei=${amountWei}`);
-      const tokenContract = ERC20Mock__factory.connect(tokenInfo.address, faucetWallet as any);
+      const tokenContract = ERC20Mock__factory.connect(
+        tokenInfo.address,
+        toErc20ContractRunner(faucetWallet, 'faucetWallet'),
+      );
       const transferTx = await tokenContract.transfer(userAddress, amountWei);
       console.log(`[EXT-FAUCET/ERC20 ${requestId}] transfer tx=${transferTx.hash} waiting`);
       await transferTx.wait();

@@ -19,7 +19,8 @@ const bufferFrom = (data: string | Uint8Array | number[], encoding?: BufferEncod
 
   // For other encodings, use Buffer if available
   if (typeof Buffer !== 'undefined' && Buffer.from) {
-    return Buffer.from(data as any, encoding);
+    if (typeof data === 'string') return Buffer.from(data, encoding);
+    return Buffer.from(data);
   }
 
   // Browser fallback for non-hex

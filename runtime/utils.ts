@@ -8,13 +8,19 @@ import { Buffer as BufferPolyfill } from 'buffer';
 
 import { extractNumberFromEntityId } from './entity-factory';
 
+type RuntimePerformance = Pick<Performance, 'now' | 'timeOrigin'>;
+type RuntimeGlobal = typeof globalThis & {
+  performance?: RuntimePerformance;
+  Buffer?: typeof BufferPolyfill;
+};
+
 // === Time Helpers (merged from time.ts) ===
 
 /**
  * Wall-clock timestamp without Date.now() (determinism-safe)
  */
 export const getWallClockMs = (): number => {
-  const perf = typeof globalThis !== 'undefined' ? (globalThis as any).performance : undefined;
+  const perf = typeof globalThis !== 'undefined' ? (globalThis as RuntimeGlobal).performance : undefined;
   if (perf && typeof perf.timeOrigin === 'number' && typeof perf.now === 'function') {
     return Math.round(perf.timeOrigin + perf.now());
   }
@@ -29,7 +35,7 @@ export const getWallClockMs = (): number => {
  * Monotonic clock for durations
  */
 export const getPerfMs = (): number => {
-  const perf = typeof globalThis !== 'undefined' ? (globalThis as any).performance : undefined;
+  const perf = typeof globalThis !== 'undefined' ? (globalThis as RuntimeGlobal).performance : undefined;
   if (perf && typeof perf.now === 'function') {
     return perf.now();
   }
@@ -110,7 +116,7 @@ export const randomBytes = isBrowser
 
 // Robust Buffer polyfill (bip39 requires Buffer.isBuffer; avoid minimal polyfills here)
 const getBuffer = () => {
-  const globalBuffer = (globalThis as any).Buffer;
+  const globalBuffer = (globalThis as RuntimeGlobal).Buffer;
   if (globalBuffer && typeof globalBuffer.isBuffer === 'function') {
     return globalBuffer;
   }
@@ -124,8 +130,8 @@ if (isBrowser) {
   Uint8Array.prototype.toString = function (_encoding: string = 'utf8') {
     return new TextDecoder().decode(this);
   };
-  if ((globalThis as any).Buffer !== Buffer) {
-    (globalThis as any).Buffer = Buffer;
+  if ((globalThis as RuntimeGlobal).Buffer !== Buffer) {
+    (globalThis as RuntimeGlobal).Buffer = Buffer;
   }
   window.Buffer = Buffer;
 }
@@ -158,7 +164,7 @@ export const log = {
 export const hash = (data: Buffer | string): Buffer => {
   const result = createHash('sha256').update(data.toString()).digest();
   // Ensure we always return a Buffer, regardless of what digest() returns
-  return Buffer.from(result as any);
+  return typeof result === 'string' ? Buffer.from(result) : Buffer.from(result);
 };
 
 // Global debug flags (disable for production-clean output)
@@ -166,7 +172,11 @@ export const DEBUG = false; // General debug info (consensus checkpoints, critic
 export const HEAVY_LOGS = false; // Verbose traces (input details, signature checks, every frame step)
 
 // Function to clear the database and reset in-memory history
-export const clearDatabase = async (db?: any) => {
+type ClearableDb = {
+  clear: () => Promise<void> | void;
+};
+
+export const clearDatabase = async (db?: ClearableDb) => {
   console.log('Clearing database and resetting history...');
 
   if (db) {

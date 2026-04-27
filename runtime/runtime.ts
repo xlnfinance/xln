@@ -14,9 +14,10 @@ const RUNTIME_BUILD_ID = '2026-03-23-19:35Z';
 // Bump this only on breaking persistence/replay format or invariants.
 export const RUNTIME_SCHEMA_VERSION = 5;
 export const RUNTIME_BUILD = RUNTIME_BUILD_ID;
+type RuntimeProcessLike = { env?: Record<string, string | undefined> };
 const readRuntimeEnv = (name: string): string | undefined => {
   try {
-    const proc = (globalThis as any)?.process;
+    const proc = (globalThis as typeof globalThis & { process?: RuntimeProcessLike }).process;
     const value = proc?.env?.[name];
     return typeof value === 'string' ? value : undefined;
   } catch {
@@ -244,12 +245,22 @@ if (runtimeIsBrowser && typeof globalThis.process === 'undefined') {
     }
     return [sec, ns] as [number, number];
   };
-  globalThis.process = {
+  type BrowserProcessShim = {
+    env: Record<string, string | undefined>;
+    browser: true;
+    version: string;
+    versions: { node: string };
+    nextTick: (cb: (...args: unknown[]) => void, ...args: unknown[]) => void;
+    hrtime: (prev?: [number, number]) => [number, number];
+    uptime: () => number;
+    cwd: () => string;
+  };
+  const processShim: BrowserProcessShim = {
     env: {},
     browser: true,
     version: '0',
     versions: { node: '0' },
-    nextTick: (cb: (...args: any[]) => void, ...args: any[]) => {
+    nextTick: (cb: (...args: unknown[]) => void, ...args: unknown[]) => {
       if (typeof queueMicrotask === 'function') {
         queueMicrotask(() => cb(...args));
       } else {
@@ -259,7 +270,8 @@ if (runtimeIsBrowser && typeof globalThis.process === 'undefined') {
     hrtime,
     uptime: () => nowMs() / 1000,
     cwd: () => '/',
-  } as any;
+  };
+  Object.assign(globalThis, { process: processShim });
 }
 
 function normalizeEntitySwapTradingPairs(state: { swapTradingPairs?: Array<{ baseTokenId: number; quoteTokenId: number; pairId?: string }> }): void {
@@ -3991,7 +4003,7 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
       // History is a local/debug timeline, not the durable source of truth.
       // If the process crashes before WAL save, this in-memory tail is expected
       // to disappear; replay always trusts persisted frames, not env.history.
-      env.history.push(snapshot as any);
+      env.history.push(snapshot);
 
       if (!quietRuntimeLogs) {
         console.log(`📸 Snapshot: ${snapshot.meta?.title ?? `Frame ${env.height}`} (${env.history.length} total)`);
