@@ -324,7 +324,6 @@ export class RuntimeP2P {
     this.startRetryLoop();
     for (const url of this.relayUrls) {
       const runtimeSeed = this.env.runtimeSeed;
-      const isBrowserRuntime = typeof window !== 'undefined';
       const client = new RuntimeWsClient({
         url,
         runtimeId: this.runtimeId,
@@ -593,7 +592,12 @@ export class RuntimeP2P {
     }
 
     const queue = this.pendingByRuntime.get(normalizedTargetRuntimeId) || [];
-    queue.push({ input, enqueuedAt: Date.now(), ingressTimestamp });
+    const queuedInput: { input: RoutedEntityInput; enqueuedAt: number; ingressTimestamp?: number } = {
+      input,
+      enqueuedAt: Date.now(),
+    };
+    if (ingressTimestamp !== undefined) queuedInput.ingressTimestamp = ingressTimestamp;
+    queue.push(queuedInput);
     // Enforce queue size limit to prevent memory exhaustion
     while (queue.length > MAX_QUEUE_PER_RUNTIME) queue.shift();
     if (queue.length >= MAX_QUEUE_PER_RUNTIME) {
@@ -1062,8 +1066,11 @@ export class RuntimeP2P {
             const details = await inspectHankoForHash(String(hasHanko), String(result.hash || '0x'));
             hankoInspect = {
               recoveredAddresses: details.recoveredAddresses,
-              reconstructedBoardHash: details.claims[0]?.reconstructedBoardHash,
             };
+            const reconstructedBoardHash = details.claims[0]?.reconstructedBoardHash;
+            if (reconstructedBoardHash !== undefined) {
+              hankoInspect.reconstructedBoardHash = reconstructedBoardHash;
+            }
           } catch (error) {
             hankoInspect = {
               recoveredAddresses: [`inspect_failed:${(error as Error).message}`],

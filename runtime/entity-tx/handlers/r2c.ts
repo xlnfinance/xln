@@ -18,7 +18,7 @@
 
 import type { EntityState, EntityTx, EntityInput, AccountTx } from '../../types';
 import { QUOTE_EXPIRY_MS } from '../../types';
-import { cloneEntityState, addMessage, canonicalAccountKey } from '../../state-helpers';
+import { cloneEntityState, addMessage } from '../../state-helpers';
 import { getEffectiveDraftReserveBalance } from '../../j-batch';
 
 type MempoolOp = { accountId: string; tx: AccountTx };
@@ -86,7 +86,7 @@ export async function handleR2C(
     }
     if (currentTimestamp > quote.quoteId + QUOTE_EXPIRY_MS) {
       // Quote expired — clear it
-      account!.activeRebalanceQuote = undefined;
+      delete account!.activeRebalanceQuote;
       addMessage(newState, `❌ Rebalance fee: quote expired (age: ${currentTimestamp - quote.quoteId}ms)`);
       return { newState, outputs };
     }
@@ -118,7 +118,7 @@ export async function handleR2C(
     }
 
     // Clear the quote (consumed)
-    account!.activeRebalanceQuote = undefined;
+    delete account!.activeRebalanceQuote;
 
     console.log(`💰 Rebalance fee collected: ${rebalanceFeeAmount} token ${rebalanceFeeTokenId} (quoteId: ${rebalanceQuoteId})`);
   }

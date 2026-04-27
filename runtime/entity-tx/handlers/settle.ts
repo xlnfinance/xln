@@ -116,7 +116,7 @@ function diffsToOps(data: { ops?: SettlementOp[]; diffs?: SettlementDiff[]; forg
 export async function handleSettlePropose(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_propose' }>,
-  env: Env
+  _env: Env
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[] }> {
   const { counterpartyEntityId, executorIsLeft: execParam, memo } = entityTx.data;
   const ops = diffsToOps(entityTx.data);
@@ -195,7 +195,7 @@ export async function handleSettlePropose(
 export async function handleSettleUpdate(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_update' }>,
-  env: Env
+  _env: Env
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[] }> {
   const { counterpartyEntityId, executorIsLeft: execParam, memo } = entityTx.data;
   const ops = diffsToOps(entityTx.data);
@@ -537,7 +537,7 @@ export async function handleSettleExecute(
 export async function handleSettleReject(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_reject' }>,
-  env: Env
+  _env: Env
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[] }> {
   const { counterpartyEntityId, reason } = entityTx.data;
   const newState = cloneEntityState(entityState);
@@ -612,7 +612,7 @@ export async function processSettleAction(
       const ops = settleAction.ops || [];
 
       // Guard 1: Validate ops on receive path
-      const { diffs } = compileOps(ops, theyAreLeft);
+      compileOps(ops, theyAreLeft);
 
       const workspace: SettlementWorkspace = {
         ops,
