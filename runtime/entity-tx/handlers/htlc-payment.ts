@@ -7,9 +7,8 @@
  */
 
 import type { EntityState, EntityInput, AccountTx, Env, HtlcNoteKey } from '../../types';
-import type { Profile } from '../../networking/gossip';
-import { cloneEntityState, canonicalAccountKey } from '../../state-helpers';
-import { generateHashlock, generateLockId, calculateHopTimelock, calculateHopRevealHeight, hashHtlcSecret } from '../../htlc-utils';
+import { cloneEntityState } from '../../state-helpers';
+import { generateLockId, calculateHopTimelock, calculateHopRevealHeight, hashHtlcSecret } from '../../htlc-utils';
 import { calculateRequiredInboundForDesiredForward } from '../../htlc-utils';
 import { HTLC } from '../../constants';
 import { calculateDirectionalFeePPM, sanitizeBaseFee, sanitizeFeePPM } from '../../routing/fees';
@@ -65,7 +64,8 @@ export async function handleHtlcPayment(
 
   // Extract payment details
   let { targetEntityId, tokenId, amount, route, description, secret, hashlock } = entityTx.data;
-  const desiredRecipientAmount = amount;
+  const desiredRecipientAmount: bigint = typeof amount === 'bigint' ? amount : BigInt(String(amount));
+  amount = desiredRecipientAmount;
   const paymentStartedAtMs =
     typeof entityTx.data.startedAtMs === 'number' ? entityTx.data.startedAtMs : newState.timestamp;
 
@@ -116,7 +116,13 @@ export async function handleHtlcPayment(
         const paths = await networkGraph.findPaths(entityState.entityId, targetEntityId, amount, tokenId);
 
         if (paths.length > 0) {
-          route = paths[0].path;
+          const selectedPath = paths[0]?.path;
+          if (!selectedPath) {
+            logError("HTLC_PAYMENT", `❌ Route search returned an empty path to ${formatEntityId(targetEntityId)}`);
+            addMessage(newState, `❌ HTLC payment failed: invalid route`);
+            return { newState, outputs: [], mempoolOps: [] };
+          }
+          route = selectedPath;
           console.log(`🔒 Found route: ${route.map((e: string) => formatEntityId(e)).join(' → ')}`);
         } else {
           logError("HTLC_PAYMENT", `❌ No route found to ${formatEntityId(targetEntityId)}`);
@@ -217,23 +223,31 @@ export async function handleHtlcPayment(
       return { newState, outputs: [], mempoolOps: [] };
     }
   } else {
-    senderLockAmount = desiredRecipientAmount;
+    let computedSenderLockAmount = desiredRecipientAmount;
     for (let i = route.length - 2; i >= 1; i -= 1) {
       const intermediary = route[i]!;
       const nextHop = route[i + 1]!;
       const { feePpm, baseFee } = feeConfigForHop(intermediary, nextHop, tokenId);
-      const forwardAmount = senderLockAmount;
+      const forwardAmount = computedSenderLockAmount;
       hopForwardAmounts.set(intermediary, forwardAmount);
-      senderLockAmount = calculateRequiredInboundForDesiredForward(forwardAmount, feePpm, baseFee);
+      computedSenderLockAmount = calculateRequiredInboundForDesiredForward(forwardAmount, feePpm, baseFee);
     }
-    if (senderLockAmount < desiredRecipientAmount) {
+    if (computedSenderLockAmount < desiredRecipientAmount) {
       logError('HTLC_PAYMENT', '❌ Sender lock amount underflow after fee inversion');
       addMessage(newState, '❌ HTLC payment failed: fee inversion underflow');
       return { newState, outputs: [], mempoolOps: [] };
     }
-    totalFee = senderLockAmount - desiredRecipientAmount;
-    console.log(`🔒 HTLC recipient-exact quote: recipient=${desiredRecipientAmount}, senderLock=${senderLockAmount}, totalFee=${totalFee}`);
+    senderLockAmount = computedSenderLockAmount;
+    totalFee = computedSenderLockAmount - desiredRecipientAmount;
+    console.log(`🔒 HTLC recipient-exact quote: recipient=${desiredRecipientAmount}, senderLock=${computedSenderLockAmount}, totalFee=${totalFee}`);
   }
+  if (senderLockAmount === null || totalFee === null) {
+    logError('HTLC_PAYMENT', '❌ Missing finalized HTLC quote amounts');
+    addMessage(newState, '❌ HTLC payment failed: missing quote amounts');
+    return { newState, outputs: [], mempoolOps: [] };
+  }
+  const finalizedSenderLockAmount = senderLockAmount;
+  const finalizedTotalFee = totalFee;
 
   // Fail-fast sender-side capacity gate:
   // reject overspend before queuing any account mempool operation.
@@ -245,10 +259,10 @@ export async function handleHtlcPayment(
   }
   const senderIsLeftOnNextAccount = newState.accounts.get(nextHop)?.leftEntity === entityState.entityId;
   const nextHopCapacity = deriveDelta(nextHopDelta, senderIsLeftOnNextAccount).outCapacity;
-  if (senderLockAmount > nextHopCapacity) {
+  if (finalizedSenderLockAmount > nextHopCapacity) {
     logError(
       "HTLC_PAYMENT",
-      `❌ Insufficient outbound capacity to ${formatEntityId(nextHop)}: required=${senderLockAmount} available=${nextHopCapacity}`
+      `❌ Insufficient outbound capacity to ${formatEntityId(nextHop)}: required=${finalizedSenderLockAmount} available=${nextHopCapacity}`
     );
     addMessage(newState, `❌ HTLC payment failed: insufficient capacity`);
     return { newState, outputs: [], mempoolOps: [] };
@@ -425,7 +439,7 @@ export async function handleHtlcPayment(
       console.warn(`⚠️ HTLC: Available keys: ${availableList}`);
       return { newState, outputs: [], mempoolOps: [] };
     }
-    const keyDebug = hops.map((entityId) => {
+    const keyDebug = hops.map((entityId: string) => {
       const key = entityPubKeys.get(entityId) || '';
       const isHex = isHexValue(key, 32);
       const source = keySources.get(entityId) || 'unknown';
@@ -447,8 +461,8 @@ export async function handleHtlcPayment(
 
     // Persist deterministic payload for WAL replay.
     entityTx.data.preparedEnvelope = envelope;
-    entityTx.data.preparedSenderLockAmount = senderLockAmount.toString();
-    entityTx.data.preparedTotalFee = totalFee.toString();
+    entityTx.data.preparedSenderLockAmount = finalizedSenderLockAmount.toString();
+    entityTx.data.preparedTotalFee = finalizedTotalFee.toString();
   } catch (e) {
     logError("HTLC_PAYMENT", `❌ Envelope creation failed: ${e instanceof Error ? e.message : String(e)}`);
     addMessage(newState, `❌ HTLC payment failed: Invalid route`);
@@ -463,7 +477,7 @@ export async function handleHtlcPayment(
       hashlock,
       timelock,
       revealBeforeHeight,
-      amount: senderLockAmount,
+      amount: finalizedSenderLockAmount,
       tokenId,
       envelope  // Onion envelope (cleartext JSON in Phase 2)
     },
@@ -481,7 +495,7 @@ export async function handleHtlcPayment(
       lockId,
       accountId: nextHop, // Use counterparty ID as key (simpler than canonical)
       tokenId,
-      amount: senderLockAmount,
+      amount: finalizedSenderLockAmount,
       hashlock,
       timelock,
       direction: 'outgoing',
@@ -489,7 +503,7 @@ export async function handleHtlcPayment(
     });
 
     addMessage(newState,
-      `🔒 HTLC: Recipient ${desiredRecipientAmount}, sender lock ${senderLockAmount} (fee ${totalFee}) to ${formatEntityId(targetEntityId)} via ${route.length - 1} hops`
+      `🔒 HTLC: Recipient ${desiredRecipientAmount}, sender lock ${finalizedSenderLockAmount} (fee ${finalizedTotalFee}) to ${formatEntityId(targetEntityId)} via ${route.length - 1} hops`
     );
 
     // Trigger processing
