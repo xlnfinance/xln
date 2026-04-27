@@ -8,7 +8,7 @@
  * @license AGPL-3.0
  */
 
-import { createJAdapter, type JAdapter } from '../jadapter';
+import { createJAdapter } from '../jadapter';
 import { ethers } from 'ethers';
 
 const mode = process.argv[2] === 'anvil' ? 'anvil' : 'browservm';
@@ -65,7 +65,7 @@ async function main() {
   console.log(`   ✅ Next entity number after second registration: ${nextNumberAfterSecondRegistration}`);
 
   // Test snapshot/revert (browservm/anvil only)
-  if (mode !== 'rpc') {
+  if (mode === 'anvil' || mode === 'browservm') {
     console.log('\n6️⃣  Testing snapshot/revert...');
 
     const snapshotId = await j.snapshot();

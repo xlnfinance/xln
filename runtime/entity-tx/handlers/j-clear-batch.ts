@@ -42,7 +42,7 @@ export async function handleJClearBatch(
 
   // Clear current + sent batch and reset lifecycle
   newState.jBatchState.batch = createEmptyBatch();
-  newState.jBatchState.sentBatch = undefined;
+  delete newState.jBatchState.sentBatch;
   newState.jBatchState.status = 'empty';
 
   // Manual recovery: release stale "submitted" latches so hub can retry requests.

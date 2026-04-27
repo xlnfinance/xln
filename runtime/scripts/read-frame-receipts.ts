@@ -45,12 +45,12 @@ const readArgs = (): Args => {
     switch (current) {
       case '--runtime-id':
         if (!next) usage();
-        out.runtimeId = next;
+        out.runtimeId = String(next);
         index += 1;
         break;
       case '--runtime-seed':
         if (!next) usage();
-        out.runtimeSeed = next;
+        out.runtimeSeed = String(next);
         index += 1;
         break;
       case '--from':

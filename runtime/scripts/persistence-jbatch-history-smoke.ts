@@ -111,7 +111,7 @@ async function main() {
           data: {
             entity: entityId,
             tokenId: 1,
-            newBalance: 1000n * 10n ** 18n,
+            newBalance: (1000n * 10n ** 18n).toString(),
           },
         },
       },
@@ -138,6 +138,14 @@ async function main() {
       entityTxs: [{ type: 'j_broadcast', data: {} }],
     }]);
 
+    const reserveUpdatedEvent = {
+      type: 'ReserveUpdated' as const,
+      data: {
+        entity: entityId,
+        tokenId: 1,
+        newBalance: ((1000n - BigInt(nonce)) * 10n ** 18n).toString(),
+      },
+    };
     await processRuntime(env, [{
       entityId,
       signerId,
@@ -149,15 +157,9 @@ async function main() {
           blockNumber: nonce + 1,
           blockHash: `0x${String(nonce).padStart(64, '0')}`,
           transactionHash: `0x${String(nonce + 100).padStart(64, '0')}`,
+          event: reserveUpdatedEvent,
           events: [
-            {
-              type: 'ReserveUpdated',
-              data: {
-                entity: entityId,
-                tokenId: 1,
-                newBalance: (1000n - BigInt(nonce)) * 10n ** 18n,
-              },
-            },
+            reserveUpdatedEvent,
             {
               type: 'HankoBatchProcessed',
               data: {

@@ -82,7 +82,7 @@ export async function handleJAbortSentBatch(
     mergeBatchOps(newState.jBatchState.batch, sent.batch);
   }
 
-  newState.jBatchState.sentBatch = undefined;
+  delete newState.jBatchState.sentBatch;
   newState.jBatchState.status = getBatchSize(newState.jBatchState.batch) > 0 ? 'accumulating' : 'empty';
 
   // Release stale "submitted" latches if operator aborts the in-flight batch.

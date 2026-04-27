@@ -13,6 +13,7 @@ import {
 } from '../runtime.ts';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { generateLazyEntityId } from '../entity-factory';
+import type { JReplica, JurisdictionConfig } from '../types';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`ASSERT: ${message}`);
@@ -46,23 +47,34 @@ async function main() {
 
   const entityA = generateLazyEntityId([signer1], 1n).toLowerCase();
   const entityB = generateLazyEntityId([signer2], 1n).toLowerCase();
-  const jurisdiction = {
+  const depositoryAddress = '0x000000000000000000000000000000000000dEaD';
+  const entityProviderAddress = '0x000000000000000000000000000000000000bEEF';
+  const chainId = 31337;
+  const jurisdiction: JurisdictionConfig = {
     name: 'persistence-smoke',
-    depositoryAddress: '0x000000000000000000000000000000000000dEaD',
-    entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
-    chainId: 31337,
+    address: 'browservm://persistence-smoke',
+    depositoryAddress,
+    entityProviderAddress,
+    chainId,
   };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, {
+  const jReplica: JReplica = {
     name: jurisdiction.name,
-    depositoryAddress: jurisdiction.depositoryAddress,
-    entityProviderAddress: jurisdiction.entityProviderAddress,
-    chainId: jurisdiction.chainId,
+    blockNumber: 0n,
+    stateRoot: new Uint8Array(32),
+    mempool: [],
+    blockDelayMs: 0,
+    lastBlockTimestamp: 0,
+    depositoryAddress,
+    entityProviderAddress,
+    chainId,
+    position: { x: 0, y: 0, z: 0 },
     contracts: {
-      depository: jurisdiction.depositoryAddress,
-      entityProvider: jurisdiction.entityProviderAddress,
+      depository: depositoryAddress,
+      entityProvider: entityProviderAddress,
     },
-  } as any);
+  };
+  env.jReplicas.set(jurisdiction.name, jReplica);
 
   enqueueRuntimeInput(env, {
     runtimeTxs: [

@@ -570,10 +570,6 @@ export const canonicalizeProfile = (
 export function createGossipLayer(options: GossipLayerOptions = {}): GossipLayer {
   const profiles = new Map<string, Profile>();
 
-  const getLastUpdated = (profile: Profile): number => {
-    return typeof profile.lastUpdated === 'number' ? profile.lastUpdated : 0;
-  };
-
   const announce = (profile: Profile): void => {
     logDebug('GOSSIP', `📢 gossip.announce INPUT: ${profile.entityId.slice(-4)} accounts=${profile.accounts.length}`);
     const existingProfile = profiles.get(profile.entityId);

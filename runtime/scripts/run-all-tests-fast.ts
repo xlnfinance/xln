@@ -10,7 +10,8 @@
  *   bun runtime/scripts/run-all-tests-fast.ts --scenario-workers=3 --e2e-shards=2
  */
 
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessByStdio } from 'node:child_process';
+import type { Readable } from 'node:stream';
 
 type CliArgs = {
   scenarioWorkers: number;
@@ -51,7 +52,7 @@ type JobResult = {
 };
 
 const runJob = async (name: string, cmd: string, args: string[]): Promise<JobResult> => {
-  const proc: ChildProcessWithoutNullStreams = spawn(cmd, args, {
+  const proc: ChildProcessByStdio<null, Readable, Readable> = spawn(cmd, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: process.env,
   });

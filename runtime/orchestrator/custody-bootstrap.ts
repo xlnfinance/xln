@@ -1,7 +1,8 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
+import type { Readable } from 'node:stream';
 import { deserializeTaggedJson } from '../serialization-utils';
 
 const DEFAULT_CHILD_READY_TIMEOUT_MS = 120_000;
@@ -92,7 +93,7 @@ type DaemonControlCliResult = {
 
 export type ManagedChild = {
   name: string;
-  proc: ChildProcessWithoutNullStreams;
+  proc: ChildProcessByStdio<null, Readable, Readable>;
   stdoutLines: string[];
   stderrLines: string[];
 };

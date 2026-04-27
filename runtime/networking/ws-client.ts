@@ -321,6 +321,10 @@ export class RuntimeWsClient {
   }
 
   private sendHello() {
+    const encryptionKeyPair = this.options.encryptionKeyPair;
+    if (!encryptionKeyPair) {
+      throw new Error(`WS_HELLO_ENCRYPTION_KEY_MISSING: runtimeId=${this.options.runtimeId}`);
+    }
     if (this.options.useHelloAuth && this.options.signerId && this.options.seed) {
       // Transport hello auth is optional; keep plain hello as default path.
       // Signature verification still happens at frame/account consensus level.
@@ -332,7 +336,7 @@ export class RuntimeWsClient {
         this.sendRaw({
           type: 'hello',
           from: this.options.runtimeId,
-          fromEncryptionPubKey: pubKeyToHex(this.options.encryptionKeyPair.publicKey),
+          fromEncryptionPubKey: pubKeyToHex(encryptionKeyPair.publicKey),
           timestamp,
           auth: { nonce, signature, timestamp },
         });
@@ -344,7 +348,7 @@ export class RuntimeWsClient {
     this.sendRaw({
       type: 'hello',
       from: this.options.runtimeId,
-      fromEncryptionPubKey: pubKeyToHex(this.options.encryptionKeyPair.publicKey),
+      fromEncryptionPubKey: pubKeyToHex(encryptionKeyPair.publicKey),
       timestamp: nextTimestamp(),
     });
   }

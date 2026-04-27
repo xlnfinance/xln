@@ -313,7 +313,7 @@ const readLastRunStatus = async (resultsDir: string): Promise<'passed' | 'failed
 };
 
 const collectLegacyShard = async (
-  runId: string,
+  _runId: string,
   runDir: string,
   shard: number,
   targetMetadata: Map<number, QaTargetMetadata>,
