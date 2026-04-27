@@ -6,23 +6,22 @@ import {
   process as processRuntime,
   readPersistedFrameJournal,
   closeRuntimeDb,
+  closeInfraDb,
   readPersistedCheckpointSnapshot,
 } from '../runtime.ts';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { generateLazyEntityId } from '../entity-factory';
 import { buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
-import { deserializeTaggedJson, serializeTaggedJson } from '../serialization-utils';
+import { serializeTaggedJson } from '../serialization-utils';
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`ASSERT: ${message}`);
 }
 
-type PlainJson = null | boolean | number | string | PlainJson[] | { [key: string]: PlainJson };
-
-const toPlain = (value: unknown): PlainJson =>
-  JSON.parse(serializeTaggedJson(value)) as PlainJson;
-
 const render = (value: unknown): string => serializeTaggedJson(value);
+
+const drainBackgroundPersistence = (): Promise<void> =>
+  new Promise((resolve) => setTimeout(resolve, 50));
 
 const collectDiffs = (
   left: unknown,
@@ -62,7 +61,7 @@ const collectDiffs = (
     }
     const max = Math.max(left.length, right.length);
     for (let i = 0; i < max && out.length < limit; i++) {
-      collectDiffs(left[i] as PlainJson, right[i] as PlainJson, `${path}[${i}]`, out, limit);
+      collectDiffs(left[i], right[i], `${path}[${i}]`, out, limit);
     }
     return out;
   }
@@ -130,6 +129,7 @@ async function main() {
   const entityA = generateLazyEntityId([signer1], 1n).toLowerCase();
   const entityB = generateLazyEntityId([signer2], 1n).toLowerCase();
   const jurisdiction = {
+    address: '0x000000000000000000000000000000000000dEaD',
     name: 'persistence-smoke',
     depositoryAddress: '0x000000000000000000000000000000000000dEaD',
     entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
@@ -205,14 +205,19 @@ async function main() {
     ],
   });
   await processRuntime(env, []);
-  assert(env.height === 2, `expected live frame 2, got ${env.height}`);
+  assert(Number(env.height) === 2, `expected live frame 2, got ${env.height}`);
 
   const liveSnapshot = buildRuntimeCheckpointSnapshot(env);
+  await drainBackgroundPersistence();
+  await closeInfraDb(env);
+  await closeRuntimeDb(env);
 
   const checkpointSnapshot = await readPersistedCheckpointSnapshot(env, 1);
   assert(checkpointSnapshot, 'checkpoint snapshot 1 exists');
   const frame2 = await readPersistedFrameJournal(env, 2);
   assert(frame2, 'frame journal 2 exists');
+  await closeInfraDb(env);
+  await closeRuntimeDb(env);
 
   const replayEnv = createEmptyEnv(seed);
   replayEnv.runtimeId = runtimeId;
@@ -228,12 +233,12 @@ async function main() {
 
   const applyAllowedKey = Symbol.for('xln.runtime.env.apply.allowed');
   const replayModeKey = Symbol.for('xln.runtime.env.replay.mode');
-  (replayEnv as Record<PropertyKey, unknown>)[replayModeKey] = true;
-  (replayEnv as Record<PropertyKey, unknown>)[applyAllowedKey] = true;
+  (replayEnv as unknown as Record<PropertyKey, unknown>)[replayModeKey] = true;
+  (replayEnv as unknown as Record<PropertyKey, unknown>)[applyAllowedKey] = true;
   replayEnv.height = 1;
   replayEnv.timestamp = Number(frame2.timestamp ?? replayEnv.timestamp);
   await (await import('../runtime.ts')).applyRuntimeInput(replayEnv, frame2.runtimeInput);
-  (replayEnv as Record<PropertyKey, unknown>)[applyAllowedKey] = false;
+  (replayEnv as unknown as Record<PropertyKey, unknown>)[applyAllowedKey] = false;
 
   const replaySnapshot = buildRuntimeCheckpointSnapshot(replayEnv);
   const diffs = collectDiffs(liveSnapshot, replaySnapshot);
@@ -304,7 +309,8 @@ async function main() {
     replayAccounts,
   }, null, 2));
 
-  await closeRuntimeDb(env);
+  await drainBackgroundPersistence();
+  await closeInfraDb(replayEnv);
   await closeRuntimeDb(replayEnv);
 }
 

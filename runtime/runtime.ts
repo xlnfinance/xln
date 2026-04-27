@@ -4838,8 +4838,15 @@ export const readPersistedCheckpointSnapshot = async (
   const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
   if (targetHeight <= 0) return null;
   const restored = await loadEnvFromStorage(env.runtimeId, env.runtimeSeed, targetHeight);
-  if (!restored || restored.env.height !== targetHeight) return null;
-  return buildRuntimeCheckpointSnapshot(restored.env);
+  if (!restored || restored.env.height !== targetHeight) {
+    if (restored?.env) await closeRuntimeDb(restored.env);
+    return null;
+  }
+  try {
+    return buildRuntimeCheckpointSnapshot(restored.env);
+  } finally {
+    await closeRuntimeDb(restored.env);
+  }
 };
 
 export const loadEnvFromDB = async (
