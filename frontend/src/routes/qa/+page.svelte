@@ -128,12 +128,79 @@
     return failedIndex >= 0 ? failedIndex : 0;
   }
 
+  function readableText(raw: string | null | undefined): string {
+    const value = String(raw || '').trim();
+    if (!value) return '';
+    const withoutPath = value
+      .replace(/^.*\//, '')
+      .replace(/\.spec\.ts(?::\d+)?/g, '')
+      .replace(/^e2e[-_.]/i, '')
+      .replace(/[-_.]+/g, ' ')
+      .replace(/\s+/g, ' ')
+      .trim();
+    if (!withoutPath) return '';
+    return `${withoutPath.charAt(0).toUpperCase()}${withoutPath.slice(1)}`;
+  }
+
+  function testHandle(shard: QaShard): string {
+    const key = `${shard.handle || ''} ${shard.title || ''} ${shard.target || ''}`.toLowerCase();
+    if (key.includes('workspace-dispute-lifecycle') || key.includes('dispute lifecycle returns')) {
+      return 'dispute.lifecycle-return';
+    }
+    if (key.includes('settle-workspace-sign') || key.includes('sign-broadcast')) {
+      return 'dispute.sign-broadcast';
+    }
+    if (key.includes('payment-smoke') || key.includes('payment smoke')) {
+      return 'payment.smoke';
+    }
+    if (key.includes('baseline') || key.includes('cold reset provisions')) {
+      return 'baseline.mesh-reserves';
+    }
+    if (key.includes('connect')) {
+      return 'wallet.connect';
+    }
+    return shard.handle || readableText(shard.target) || `shard-${shard.shard}`;
+  }
+
   function describeShard(shard: QaShard): string {
-    return shard.handle || shard.title || shard.target || `shard ${shard.shard}`;
+    const key = `${shard.handle || ''} ${shard.title || ''} ${shard.target || ''}`.toLowerCase();
+    if (key.includes('workspace-dispute-lifecycle') || key.includes('dispute lifecycle returns')) {
+      return 'Dispute lifecycle returns reserve';
+    }
+    if (key.includes('settle-workspace-sign') || key.includes('sign-broadcast')) {
+      return 'Settlement workspace signs dispute batch';
+    }
+    if (key.includes('payment-smoke') || key.includes('payment smoke')) {
+      return 'Payment smoke';
+    }
+    if (key.includes('baseline')) {
+      return 'Baseline boot and account open';
+    }
+    if (key.includes('connect')) {
+      return 'Wallet connection flow';
+    }
+    return readableText(shard.title) || readableText(shard.handle) || readableText(shard.target) || `Shard ${shard.shard}`;
   }
 
   function shardDescription(shard: QaShard): string {
-    return shard.description || shard.title || shard.target || 'No test description recorded.';
+    const key = `${shard.handle || ''} ${shard.title || ''} ${shard.target || ''}`.toLowerCase();
+    if (key.includes('workspace-dispute-lifecycle') || key.includes('dispute lifecycle returns')) {
+      return 'Opens a disputed account, waits through the dispute window, finalizes the account, and checks that the reserve is returned.';
+    }
+    if (key.includes('settle-workspace-sign') || key.includes('sign-broadcast')) {
+      return 'Builds a settlement workspace, signs the dispute batch, broadcasts it, and verifies that the hub accepts the result.';
+    }
+    if (key.includes('payment-smoke') || key.includes('payment smoke')) {
+      return 'Creates users, opens the route through a hub, sends a payment, and verifies the receipt path.';
+    }
+    if (key.includes('baseline')) {
+      return 'Starts an isolated stack, logs in, checks health, and confirms that account opening reaches the first frame.';
+    }
+    if (key.includes('connect')) {
+      return 'Checks that the browser wallet connects to the local runtime and reaches the account workspace.';
+    }
+    const text = shard.description || shard.title || shard.target || '';
+    return readableText(text) || 'No test description recorded.';
   }
 
   function artifactCount(shard: QaShard, kind: QaArtifact['kind']): number {
@@ -155,14 +222,12 @@
     return artifact.kind;
   }
 
-  function artifactSummary(shard: QaShard): string {
-    const parts = [
-      `${artifactCount(shard, 'video')} video`,
-      `${artifactCount(shard, 'image')} screenshots`,
-      `${artifactCount(shard, 'trace')} traces`,
-    ];
-    if (shard.logRelativePath) parts.push('log');
-    return parts.join(' · ');
+  function plural(count: number, one: string, many: string): string {
+    return `${count} ${count === 1 ? one : many}`;
+  }
+
+  function isolatedTestLabel(count: number): string {
+    return plural(count, 'isolated test', 'isolated tests');
   }
 
   async function loadRuns(preserveSelection = true): Promise<void> {
@@ -342,7 +407,7 @@
         <div class="suite-list-head">
           <div>
             <div class="eyebrow">E2E Suite</div>
-            <h3>{selectedRun.totalShards} isolated tests</h3>
+            <h3>{isolatedTestLabel(selectedRun.totalShards)}</h3>
           </div>
           <div class="suite-list-meta">
             <span>{selectedRun.passedShards} passed</span>
@@ -363,18 +428,15 @@
               class:fail={shard.status === 'failed'}
             ></span>
             <div class="suite-row-main">
-              <div class="field-label">Handle</div>
               <div class="suite-row-title">
                 <strong>{describeShard(shard)}</strong>
-                <span>{shard.target || `shard-${shard.shard}`}</span>
+                <code>{testHandle(shard)}</code>
               </div>
-              <div class="field-label">What happens</div>
               <p>{shardDescription(shard)}</p>
-              <div class="field-label">Artifacts</div>
               <div class="artifact-chips">
-                <span class:muted={artifactCount(shard, 'video') === 0}>Video {artifactCount(shard, 'video')}</span>
-                <span class:muted={artifactCount(shard, 'image') === 0}>Screenshots {artifactCount(shard, 'image')}</span>
-                <span class:muted={artifactCount(shard, 'trace') === 0}>Trace {artifactCount(shard, 'trace')}</span>
+                <span class:muted={artifactCount(shard, 'video') === 0}>{plural(artifactCount(shard, 'video'), 'video', 'videos')}</span>
+                <span class:muted={artifactCount(shard, 'image') === 0}>{plural(artifactCount(shard, 'image'), 'screenshot', 'screenshots')}</span>
+                <span class:muted={artifactCount(shard, 'trace') === 0}>{plural(artifactCount(shard, 'trace'), 'trace', 'traces')}</span>
                 {#if shard.logRelativePath}
                   <span>Log</span>
                 {/if}
@@ -395,10 +457,16 @@
             <div>
               <div class="eyebrow">Shard {selectedShard.shard}</div>
               <h3>{describeShard(selectedShard)}</h3>
-              <div class="detail-label">What happens</div>
+              <code class="detail-handle">{testHandle(selectedShard)}</code>
               <p>{shardDescription(selectedShard)}</p>
-              <div class="detail-label">Artifacts</div>
-              <p>{artifactSummary(selectedShard)}</p>
+              <div class="artifact-chips detail-artifacts">
+                <span class:muted={artifactCount(selectedShard, 'video') === 0}>{plural(artifactCount(selectedShard, 'video'), 'video', 'videos')}</span>
+                <span class:muted={artifactCount(selectedShard, 'image') === 0}>{plural(artifactCount(selectedShard, 'image'), 'screenshot', 'screenshots')}</span>
+                <span class:muted={artifactCount(selectedShard, 'trace') === 0}>{plural(artifactCount(selectedShard, 'trace'), 'trace', 'traces')}</span>
+                {#if selectedShard.logRelativePath}
+                  <span>log</span>
+                {/if}
+              </div>
               {#if selectedShard.target}
                 <small>{selectedShard.target}</small>
               {/if}
@@ -413,7 +481,7 @@
             <div class="media-panel">
               <section class="media-block">
                 <div class="media-title">
-                  <h4>Evidence Video</h4>
+                  <h4>Video</h4>
                   {#if selectedVideo?.url}
                     <a href={selectedVideo.url} target="_blank" rel="noreferrer">{formatBytes(selectedVideo.sizeBytes)}</a>
                   {/if}
@@ -429,7 +497,7 @@
               {#if selectedImages.length > 0}
                 <section class="media-block">
                   <div class="media-title">
-                    <h4>Evidence Screenshots</h4>
+                    <h4>Screenshots</h4>
                     <span>{selectedImages.length}</span>
                   </div>
                   <div class="image-strip">
@@ -523,6 +591,8 @@
 
   .qa-shell {
     min-height: 100vh;
+    width: 100%;
+    overflow-x: hidden;
     display: grid;
     grid-template-columns: 340px minmax(0, 1fr);
     color: #f1efe7;
@@ -608,6 +678,7 @@
     padding: 0.9rem;
     display: grid;
     gap: 0.3rem;
+    min-width: 0;
   }
 
   .metric-label {
@@ -615,18 +686,6 @@
     letter-spacing: 0.12em;
     text-transform: uppercase;
     color: #8f8b80;
-  }
-
-  .field-label,
-  .detail-label {
-    color: #d8af4f;
-    font-size: 0.68rem;
-    letter-spacing: 0.11em;
-    text-transform: uppercase;
-  }
-
-  .detail-label {
-    margin-top: 0.35rem;
   }
 
   .trend-strip {
@@ -689,6 +748,7 @@
   .run-duration,
   .detail-meta,
   .suite-list-meta,
+  .suite-row-title code,
   .suite-row-title span,
   small,
   p {
@@ -708,6 +768,7 @@
     display: grid;
     gap: 1rem;
     align-content: start;
+    min-width: 0;
   }
 
   .run-summary,
@@ -744,6 +805,12 @@
     padding: 0.2rem 0.1rem 0.3rem;
   }
 
+  .detail-head > div {
+    display: grid;
+    gap: 0.35rem;
+    min-width: 0;
+  }
+
   .suite-list-meta,
   .suite-row-title,
   .suite-row-side,
@@ -778,10 +845,19 @@
   .suite-row-title {
     justify-content: flex-start;
     min-width: 0;
+    flex-wrap: wrap;
   }
 
   .suite-row-title strong {
     color: #f6f2e8;
+    overflow-wrap: anywhere;
+  }
+
+  .suite-row-title code,
+  .detail-handle {
+    color: #8f8b80;
+    font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+    font-size: 0.76rem;
     overflow-wrap: anywhere;
   }
 
@@ -804,6 +880,11 @@
 
   .artifact-chips {
     flex-wrap: wrap;
+    justify-content: flex-start;
+  }
+
+  .detail-artifacts {
+    margin-top: 0.4rem;
   }
 
   .artifact-chips span {
@@ -824,8 +905,9 @@
 
   .detail-layout {
     display: grid;
-    grid-template-columns: minmax(0, 1.2fr) minmax(320px, 0.8fr);
+    grid-template-columns: minmax(0, 1fr) minmax(320px, 0.44fr);
     gap: 1rem;
+    align-items: start;
   }
 
   .media-panel,
@@ -834,10 +916,20 @@
     gap: 1rem;
   }
 
-  .video-player,
+  .video-player {
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    height: auto;
+    max-height: min(72vh, 720px);
+    display: block;
+    object-fit: contain;
+    background: #050506;
+    border-radius: 8px;
+  }
+
   .empty-media {
     width: 100%;
-    min-height: 340px;
+    min-height: 220px;
   }
 
   .media-block {
