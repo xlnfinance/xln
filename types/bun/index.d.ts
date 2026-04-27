@@ -33,7 +33,7 @@ namespace Bun {
       cert?: BunFile | string;
       [key: string]: unknown;
     };
-    fetch(request: Request, server: Server): Response | Promise<Response>;
+    fetch(request: Request, server: Server): Response | undefined | Promise<Response | undefined>;
     websocket?: {
       open?(ws: ServeWebSocket<T>): void | Promise<void>;
       message?(ws: ServeWebSocket<T>, message: string | Uint8Array | ArrayBuffer): void | Promise<void>;
