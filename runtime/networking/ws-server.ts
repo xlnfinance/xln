@@ -15,8 +15,9 @@
  * - Even a malicious relay can't forge transactions (needs validator keys)
  */
 
-import WebSocket, { WebSocketServer } from 'ws';
+import WebSocket, { WebSocketServer, type RawData } from 'ws';
 import type { AddressInfo } from 'net';
+import type { IncomingHttpHeaders } from 'http';
 import * as secp256k1 from '@noble/secp256k1';
 import { keccak256 } from 'ethers';
 
@@ -73,7 +74,7 @@ const now = () => {
   return wsClock;
 };
 
-const parseRuntimeIdFromReq = (req: { headers?: Record<string, string | string[] | undefined>; url?: string }) => {
+const parseRuntimeIdFromReq = (req: { headers?: IncomingHttpHeaders | undefined; url?: string | undefined }) => {
   const headers = req.headers || {};
   const headerId =
     (headers['x-runtime-id'] as string | undefined) ||
@@ -88,6 +89,17 @@ const parseRuntimeIdFromReq = (req: { headers?: Record<string, string | string[]
   } catch {
     return null;
   }
+};
+
+const rawDataByteLength = (data: RawData): number => {
+  if (Array.isArray(data)) return data.reduce((total, chunk) => total + chunk.length, 0);
+  if (data instanceof ArrayBuffer) return data.byteLength;
+  return data.length;
+};
+
+const normalizeRawData = (data: RawData): Buffer | ArrayBuffer => {
+  if (Array.isArray(data)) return Buffer.concat(data);
+  return data;
 };
 
 const normalizeRuntimeId = (runtimeId: string | null | undefined): string | null => {
@@ -233,15 +245,16 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
     // GOSSIP REQUEST: Return all stored profiles
     if (msg.type === 'gossip_request') {
       const allProfiles = getAllGossipProfiles();
-      send(ws, {
+      const response: RuntimeWsMessage = {
         type: 'gossip_response',
         id: makeMessageId(),
         from: serverId,
-        to: msg.from,
         timestamp: now(),
         payload: { profiles: allProfiles },
-        inReplyTo: msg.id,
-      });
+      };
+      if (msg.from !== undefined) response.to = msg.from;
+      if (msg.id !== undefined) response.inReplyTo = msg.id;
+      send(ws, response);
       return;
     }
 
@@ -259,7 +272,9 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
     if (msg.type === 'runtime_input') {
       const payload = msg.payload as RuntimeInput | undefined;
       if (!payload || !Array.isArray(payload.runtimeTxs) || !Array.isArray(payload.entityInputs)) {
-        send(ws, { type: 'error', error: 'Invalid runtime_input payload', inReplyTo: msg.id });
+        const errorMessage: RuntimeWsMessage = { type: 'error', error: 'Invalid runtime_input payload' };
+        if (msg.id !== undefined) errorMessage.inReplyTo = msg.id;
+        send(ws, errorMessage);
         return;
       }
     }
@@ -271,12 +286,16 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
       if (!msg.encrypted) {
         const payload = msg.payload as RoutedEntityInput | undefined;
         if (!payload || typeof payload.entityId !== 'string') {
-          send(ws, { type: 'error', error: 'Invalid entity_input payload', inReplyTo: msg.id });
+          const errorMessage: RuntimeWsMessage = { type: 'error', error: 'Invalid entity_input payload' };
+          if (msg.id !== undefined) errorMessage.inReplyTo = msg.id;
+          send(ws, errorMessage);
           return;
         }
       } else if (!msg.payload || typeof msg.payload !== 'string') {
         // Encrypted payload must be a non-empty string (ciphertext)
-        send(ws, { type: 'error', error: 'Invalid encrypted payload', inReplyTo: msg.id });
+        const errorMessage: RuntimeWsMessage = { type: 'error', error: 'Invalid encrypted payload' };
+        if (msg.id !== undefined) errorMessage.inReplyTo = msg.id;
+        send(ws, errorMessage);
         return;
       }
     }
@@ -360,7 +379,7 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
 
     ws.on('message', async (data) => {
       if (closed) return;
-      if (data && data.length > MAX_MESSAGE_BYTES) {
+      if (rawDataByteLength(data) > MAX_MESSAGE_BYTES) {
         send(ws, { type: 'error', error: 'Message too large' });
         ws.close();
         return;
@@ -368,7 +387,7 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
 
       let msg: RuntimeWsMessage;
       try {
-        msg = deserializeWsMessage(data as Buffer);
+        msg = deserializeWsMessage(normalizeRawData(data));
         failfastAssert(!!msg && typeof msg === 'object', 'WS_SERVER_MSG_INVALID', 'WS message must decode to object');
         failfastAssert(typeof msg.type === 'string', 'WS_SERVER_MSG_TYPE_INVALID', 'WS message type must be string', { msg });
       } catch (error) {
