@@ -51,16 +51,17 @@ export const decodePersistedFrameJournal = (
       ? decoded.runtimeInput
       : { runtimeTxs: [], entityInputs: [] };
   const logs = Array.isArray(decoded.logs) ? decoded.logs : [];
-  return {
+  const frame: PersistedFrameJournal = {
     height:
       Number.isFinite(Number(decoded.height)) && Number(decoded.height) > 0
         ? Math.floor(Number(decoded.height))
         : fallbackHeight,
     timestamp: Number.isFinite(Number(decoded.timestamp)) ? Number(decoded.timestamp) : 0,
     runtimeInput,
-    runtimeStateHash: typeof decoded.runtimeStateHash === 'string' ? decoded.runtimeStateHash : undefined,
     logs,
   };
+  if (typeof decoded.runtimeStateHash === 'string') frame.runtimeStateHash = decoded.runtimeStateHash;
+  return frame;
 };
 
 export const readPersistedSchemaVersion = async (

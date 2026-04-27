@@ -179,7 +179,7 @@ export function getJAdapterMode(): JAdapterMode {
   // Browser scenarios run in BrowserVM mode by default.
   // Ignore env var leakage from build/test runners (process.env.* polyfills).
   if (IS_BROWSER_RUNTIME) return 'browservm';
-  const mode = process.env.JADAPTER_MODE?.toLowerCase();
+  const mode = process.env['JADAPTER_MODE']?.toLowerCase();
   if (mode === 'rpc' || mode === 'anvil') return mode as JAdapterMode;
   if (mode === 'browservm') return 'browservm';
   return 'rpc';
@@ -197,7 +197,7 @@ export async function ensureJAdapter(
   const { setBrowserVMJurisdiction } = await import('../jadapter');
 
   const actualMode = mode ?? getJAdapterMode();
-  const rpcUrl = process.env.ANVIL_RPC || getDefaultAnvilRpcUrl();
+  const rpcUrl = process.env['ANVIL_RPC'] || getDefaultAnvilRpcUrl();
   const chainId = actualMode === 'browservm'
     ? 31337
     : await ensureScenarioRpcReady(rpcUrl, 31337);
@@ -277,7 +277,7 @@ export async function bootScenario(config: ScenarioConfig): Promise<ScenarioBoot
   // 7. Create jurisdiction config
   const jurisdictionRpcUrl = jadapter.mode === 'browservm'
     ? 'browservm://'
-    : (config.rpcUrl ?? process.env.ANVIL_RPC ?? getDefaultAnvilRpcUrl());
+    : (config.rpcUrl ?? process.env['ANVIL_RPC'] ?? getDefaultAnvilRpcUrl());
   const jurisdiction = createJurisdictionConfig(
     jReplicaName,
     jadapter.addresses.depository,

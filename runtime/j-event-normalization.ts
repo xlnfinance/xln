@@ -45,55 +45,55 @@ const normalizeInt = (value: unknown): number | null => {
 
 const normalizeMetadata = (raw: Record<string, unknown>) => {
   const out: Pick<JurisdictionEvent, 'blockNumber' | 'blockHash' | 'transactionHash'> = {};
-  if (raw.blockNumber !== undefined) {
-    const n = normalizeInt(raw.blockNumber);
+  if (raw['blockNumber'] !== undefined) {
+    const n = normalizeInt(raw['blockNumber']);
     if (n !== null) out.blockNumber = n;
   }
-  if (typeof raw.blockHash === 'string' && raw.blockHash.trim()) out.blockHash = raw.blockHash;
-  if (typeof raw.transactionHash === 'string' && raw.transactionHash.trim()) out.transactionHash = raw.transactionHash;
+  if (typeof raw['blockHash'] === 'string' && raw['blockHash'].trim()) out.blockHash = raw['blockHash'];
+  if (typeof raw['transactionHash'] === 'string' && raw['transactionHash'].trim()) out.transactionHash = raw['transactionHash'];
   return out;
 };
 
 export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | null {
   const raw = toRecord(value);
   if (!raw) return null;
-  const type = typeof raw.type === 'string' ? raw.type : '';
-  const data = toRecord(raw.data);
+  const type = typeof raw['type'] === 'string' ? raw['type'] : '';
+  const data = toRecord(raw['data']);
   if (!type || !data) return null;
   const meta = normalizeMetadata(raw);
 
   if (type === 'ReserveUpdated') {
-    const entity = normalizeEntity(data.entity);
-    const tokenId = normalizeInt(data.tokenId);
-    const newBalance = normalizeBigNumberish(data.newBalance);
+    const entity = normalizeEntity(data['entity']);
+    const tokenId = normalizeInt(data['tokenId']);
+    const newBalance = normalizeBigNumberish(data['newBalance']);
     if (!entity || tokenId === null || newBalance === null) return null;
     return { ...meta, type, data: { entity, tokenId, newBalance } };
   }
 
   if (type === 'SecretRevealed') {
-    if (typeof data.hashlock !== 'string' || typeof data.revealer !== 'string' || typeof data.secret !== 'string') {
+    if (typeof data['hashlock'] !== 'string' || typeof data['revealer'] !== 'string' || typeof data['secret'] !== 'string') {
       return null;
     }
     return {
       ...meta,
       type,
       data: {
-        hashlock: data.hashlock,
-        revealer: data.revealer.toLowerCase(),
-        secret: data.secret,
+        hashlock: data['hashlock'],
+        revealer: data['revealer'].toLowerCase(),
+        secret: data['secret'],
       },
     };
   }
 
   if (type === 'AccountSettled') {
-    const leftEntity = normalizeEntity(data.leftEntity);
-    const rightEntity = normalizeEntity(data.rightEntity);
-    const tokenId = normalizeInt(data.tokenId);
-    const leftReserve = normalizeBigNumberish(data.leftReserve);
-    const rightReserve = normalizeBigNumberish(data.rightReserve);
-    const collateral = normalizeBigNumberish(data.collateral);
-    const ondelta = normalizeBigNumberish(data.ondelta);
-    const nonce = normalizeInt(data.nonce);
+    const leftEntity = normalizeEntity(data['leftEntity']);
+    const rightEntity = normalizeEntity(data['rightEntity']);
+    const tokenId = normalizeInt(data['tokenId']);
+    const leftReserve = normalizeBigNumberish(data['leftReserve']);
+    const rightReserve = normalizeBigNumberish(data['rightReserve']);
+    const collateral = normalizeBigNumberish(data['collateral']);
+    const ondelta = normalizeBigNumberish(data['ondelta']);
+    const nonce = normalizeInt(data['nonce']);
     if (
       !leftEntity ||
       !rightEntity ||
@@ -123,13 +123,13 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
   }
 
   if (type === 'DisputeStarted') {
-    const sender = normalizeEntity(data.sender);
-    const counterentity = normalizeEntity(data.counterentity);
-    const nonce = normalizeBigNumberish(data.nonce);
-    if (!sender || !counterentity || nonce === null || typeof data.proofbodyHash !== 'string') {
+    const sender = normalizeEntity(data['sender']);
+    const counterentity = normalizeEntity(data['counterentity']);
+    const nonce = normalizeBigNumberish(data['nonce']);
+    if (!sender || !counterentity || nonce === null || typeof data['proofbodyHash'] !== 'string') {
       return null;
     }
-    const initialArguments = typeof data.initialArguments === 'string' ? data.initialArguments : '0x';
+    const initialArguments = typeof data['initialArguments'] === 'string' ? data['initialArguments'] : '0x';
     return {
       ...meta,
       type,
@@ -137,22 +137,22 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
         sender,
         counterentity,
         nonce,
-        proofbodyHash: data.proofbodyHash,
+        proofbodyHash: data['proofbodyHash'],
         initialArguments,
       },
     };
   }
 
   if (type === 'DisputeFinalized') {
-    const sender = normalizeEntity(data.sender);
-    const counterentity = normalizeEntity(data.counterentity);
-    const initialNonce = normalizeBigNumberish(data.initialNonce);
+    const sender = normalizeEntity(data['sender']);
+    const counterentity = normalizeEntity(data['counterentity']);
+    const initialNonce = normalizeBigNumberish(data['initialNonce']);
     if (
       !sender ||
       !counterentity ||
       initialNonce === null ||
-      typeof data.initialProofbodyHash !== 'string' ||
-      typeof data.finalProofbodyHash !== 'string'
+      typeof data['initialProofbodyHash'] !== 'string' ||
+      typeof data['finalProofbodyHash'] !== 'string'
     ) {
       return null;
     }
@@ -163,29 +163,29 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
         sender,
         counterentity,
         initialNonce,
-        initialProofbodyHash: data.initialProofbodyHash,
-        finalProofbodyHash: data.finalProofbodyHash,
+        initialProofbodyHash: data['initialProofbodyHash'],
+        finalProofbodyHash: data['finalProofbodyHash'],
       },
     };
   }
 
   if (type === 'DebtCreated') {
-    const debtor = normalizeEntity(data.debtor);
-    const creditor = normalizeEntity(data.creditor);
-    const tokenId = normalizeInt(data.tokenId);
-    const amount = normalizeBigNumberish(data.amount);
-    const debtIndex = normalizeInt(data.debtIndex);
+    const debtor = normalizeEntity(data['debtor']);
+    const creditor = normalizeEntity(data['creditor']);
+    const tokenId = normalizeInt(data['tokenId']);
+    const amount = normalizeBigNumberish(data['amount']);
+    const debtIndex = normalizeInt(data['debtIndex']);
     if (!debtor || !creditor || tokenId === null || amount === null || debtIndex === null) return null;
     return { ...meta, type, data: { debtor, creditor, tokenId, amount, debtIndex } };
   }
 
   if (type === 'DebtEnforced') {
-    const debtor = normalizeEntity(data.debtor);
-    const creditor = normalizeEntity(data.creditor);
-    const tokenId = normalizeInt(data.tokenId);
-    const amountPaid = normalizeBigNumberish(data.amountPaid);
-    const remainingAmount = normalizeBigNumberish(data.remainingAmount);
-    const newDebtIndex = normalizeInt(data.newDebtIndex);
+    const debtor = normalizeEntity(data['debtor']);
+    const creditor = normalizeEntity(data['creditor']);
+    const tokenId = normalizeInt(data['tokenId']);
+    const amountPaid = normalizeBigNumberish(data['amountPaid']);
+    const remainingAmount = normalizeBigNumberish(data['remainingAmount']);
+    const newDebtIndex = normalizeInt(data['newDebtIndex']);
     if (!debtor || !creditor || tokenId === null || amountPaid === null || remainingAmount === null || newDebtIndex === null) {
       return null;
     }
@@ -193,11 +193,11 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
   }
 
   if (type === 'DebtForgiven') {
-    const debtor = normalizeEntity(data.debtor);
-    const creditor = normalizeEntity(data.creditor);
-    const tokenId = normalizeInt(data.tokenId);
-    const amountForgiven = normalizeBigNumberish(data.amountForgiven);
-    const debtIndex = normalizeInt(data.debtIndex);
+    const debtor = normalizeEntity(data['debtor']);
+    const creditor = normalizeEntity(data['creditor']);
+    const tokenId = normalizeInt(data['tokenId']);
+    const amountForgiven = normalizeBigNumberish(data['amountForgiven']);
+    const debtIndex = normalizeInt(data['debtIndex']);
     if (!debtor || !creditor || tokenId === null || amountForgiven === null || debtIndex === null) {
       return null;
     }
@@ -205,13 +205,13 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
   }
 
   if (type === 'HankoBatchProcessed') {
-    const entityId = normalizeEntity(data.entityId);
-    const nonce = normalizeInt(data.nonce);
-    if (!entityId || typeof data.hankoHash !== 'string' || nonce === null || typeof data.success !== 'boolean') return null;
+    const entityId = normalizeEntity(data['entityId']);
+    const nonce = normalizeInt(data['nonce']);
+    if (!entityId || typeof data['hankoHash'] !== 'string' || nonce === null || typeof data['success'] !== 'boolean') return null;
     return {
       ...meta,
       type,
-      data: { entityId, hankoHash: data.hankoHash, nonce, success: data.success },
+      data: { entityId, hankoHash: data['hankoHash'], nonce, success: data['success'] },
     };
   }
 

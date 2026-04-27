@@ -85,7 +85,7 @@ export async function createJAdapter(config: JAdapterConfig): Promise<JAdapter> 
   const privateKey = (() => {
     if (config.privateKey) return config.privateKey;
     if (DEV_CHAIN_IDS.has(config.chainId)) {
-      return process.env.JADAPTER_DEV_PRIVATE_KEY ?? DEFAULT_PRIVATE_KEY;
+      return process.env['JADAPTER_DEV_PRIVATE_KEY'] ?? DEFAULT_PRIVATE_KEY;
     }
     throw new Error(
       `[JAdapter] privateKey is required for chainId=${config.chainId}. Refusing unsafe default key on non-dev chain.`,

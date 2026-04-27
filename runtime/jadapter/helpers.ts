@@ -188,13 +188,13 @@ export function isEventRelevantToEntity(event: RawJEvent, entityId: string): boo
 
   switch (event.name) {
     case 'ReserveUpdated':
-      return normalize(args.entity) === normalizedEntity;
+      return normalize(args['entity']) === normalizedEntity;
 
     case 'SecretRevealed':
       return true; // Global: all entities with matching hashlock should observe
 
     case 'AccountSettled': {
-      const settled = args.settled ?? args[''] ?? args[0] ?? [];
+      const settled = args['settled'] ?? args[''] ?? args[0] ?? [];
       for (const s of settled) {
         const left = normalize(s[0] ?? s.left);
         const right = normalize(s[1] ?? s.right);
@@ -204,22 +204,22 @@ export function isEventRelevantToEntity(event: RawJEvent, entityId: string): boo
     }
 
     case 'DisputeStarted':
-      return normalize(args.sender) === normalizedEntity || normalize(args.counterentity) === normalizedEntity;
+      return normalize(args['sender']) === normalizedEntity || normalize(args['counterentity']) === normalizedEntity;
 
     case 'DisputeFinalized':
-      return normalize(args.sender) === normalizedEntity || normalize(args.counterentity) === normalizedEntity;
+      return normalize(args['sender']) === normalizedEntity || normalize(args['counterentity']) === normalizedEntity;
 
     case 'DebtCreated':
-      return normalize(args.debtor) === normalizedEntity || normalize(args.creditor) === normalizedEntity;
+      return normalize(args['debtor']) === normalizedEntity || normalize(args['creditor']) === normalizedEntity;
 
     case 'DebtEnforced':
-      return normalize(args.debtor) === normalizedEntity || normalize(args.creditor) === normalizedEntity;
+      return normalize(args['debtor']) === normalizedEntity || normalize(args['creditor']) === normalizedEntity;
 
     case 'DebtForgiven':
-      return normalize(args.debtor) === normalizedEntity || normalize(args.creditor) === normalizedEntity;
+      return normalize(args['debtor']) === normalizedEntity || normalize(args['creditor']) === normalizedEntity;
 
     case 'HankoBatchProcessed':
-      return normalize(args.entityId) === normalizedEntity;
+      return normalize(args['entityId']) === normalizedEntity;
 
     default:
       return false;
@@ -239,16 +239,16 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
       return [{
         type: 'ReserveUpdated',
         data: {
-          entity: args.entity,
-          tokenId: Number(args.tokenId),
-          newBalance: (args.newBalance ?? 0).toString(),
+          entity: args['entity'],
+          tokenId: Number(args['tokenId']),
+          newBalance: (args['newBalance'] ?? 0).toString(),
         },
       }];
 
     case 'AccountSettled': {
       // AccountSettlement[] = { left, right, tokens: TokenSettlement[], nonce }
       // TokenSettlement = { tokenId, leftReserve, rightReserve, collateral, ondelta }
-      const settled = args.settled ?? args[''] ?? args[0] ?? [];
+      const settled = args['settled'] ?? args[''] ?? args[0] ?? [];
       const results: Array<{ type: string; data: Record<string, any> }> = [];
       for (const s of settled) {
         const left = s[0] ?? s.left;
@@ -288,9 +288,9 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
       return [{
         type: 'SecretRevealed',
         data: {
-          hashlock: args.hashlock,
-          revealer: args.revealer,
-          secret: args.secret,
+          hashlock: args['hashlock'],
+          revealer: args['revealer'],
+          secret: args['secret'],
         },
       }];
 
@@ -298,11 +298,11 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
       return [{
         type: 'DisputeStarted',
         data: {
-          sender: args.sender,
-          counterentity: args.counterentity,
-          nonce: args.nonce,
-          proofbodyHash: args.proofbodyHash,
-          initialArguments: args.initialArguments ?? '0x',
+          sender: args['sender'],
+          counterentity: args['counterentity'],
+          nonce: args['nonce'],
+          proofbodyHash: args['proofbodyHash'],
+          initialArguments: args['initialArguments'] ?? '0x',
         },
       }];
 
@@ -310,11 +310,11 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
       return [{
         type: 'DisputeFinalized',
         data: {
-          sender: args.sender,
-          counterentity: args.counterentity,
-          initialNonce: args.initialNonce,
-          initialProofbodyHash: args.initialProofbodyHash,
-          finalProofbodyHash: args.finalProofbodyHash,
+          sender: args['sender'],
+          counterentity: args['counterentity'],
+          initialNonce: args['initialNonce'],
+          initialProofbodyHash: args['initialProofbodyHash'],
+          finalProofbodyHash: args['finalProofbodyHash'],
         },
       }];
 
@@ -322,11 +322,11 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
       return [{
         type: 'DebtCreated',
         data: {
-          debtor: args.debtor,
-          creditor: args.creditor,
-          tokenId: Number(args.tokenId),
-          amount: (args.amount ?? 0).toString(),
-          debtIndex: Number(args.debtIndex ?? 0),
+          debtor: args['debtor'],
+          creditor: args['creditor'],
+          tokenId: Number(args['tokenId']),
+          amount: (args['amount'] ?? 0).toString(),
+          debtIndex: Number(args['debtIndex'] ?? 0),
         },
       }];
 
@@ -334,12 +334,12 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
       return [{
         type: 'DebtEnforced',
         data: {
-          debtor: args.debtor,
-          creditor: args.creditor,
-          tokenId: Number(args.tokenId),
-          amountPaid: (args.amountPaid ?? 0).toString(),
-          remainingAmount: (args.remainingAmount ?? 0).toString(),
-          newDebtIndex: Number(args.newDebtIndex ?? 0),
+          debtor: args['debtor'],
+          creditor: args['creditor'],
+          tokenId: Number(args['tokenId']),
+          amountPaid: (args['amountPaid'] ?? 0).toString(),
+          remainingAmount: (args['remainingAmount'] ?? 0).toString(),
+          newDebtIndex: Number(args['newDebtIndex'] ?? 0),
         },
       }];
 
@@ -347,11 +347,11 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
       return [{
         type: 'DebtForgiven',
         data: {
-          debtor: args.debtor,
-          creditor: args.creditor,
-          tokenId: Number(args.tokenId),
-          amountForgiven: (args.amountForgiven ?? 0).toString(),
-          debtIndex: Number(args.debtIndex ?? 0),
+          debtor: args['debtor'],
+          creditor: args['creditor'],
+          tokenId: Number(args['tokenId']),
+          amountForgiven: (args['amountForgiven'] ?? 0).toString(),
+          debtIndex: Number(args['debtIndex'] ?? 0),
         },
       }];
 
@@ -359,10 +359,10 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
       return [{
         type: 'HankoBatchProcessed',
         data: {
-          entityId: args.entityId,
-          hankoHash: args.hankoHash,
-          nonce: Number(args.nonce),
-          success: Boolean(args.success),
+          entityId: args['entityId'],
+          hankoHash: args['hankoHash'],
+          nonce: Number(args['nonce']),
+          success: Boolean(args['success']),
         },
       }];
 

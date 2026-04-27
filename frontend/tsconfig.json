@@ -9,7 +9,8 @@
 		"skipLibCheck": true,
 		"sourceMap": true,
 		"moduleResolution": "bundler",
-		"types": ["svelte", "vite/client", "node"], // Avoid picking up stubbed @types (e.g., glob/minimatch) from repo root
+		"allowImportingTsExtensions": true,
+		"types": ["svelte", "vite/client", "node", "bun", "qrcode"], // Avoid picking up unrelated stubbed @types (e.g., glob/minimatch)
 
 		// STRICTEST RULES FOR FINANCIAL SYSTEM
 		"strict": true,

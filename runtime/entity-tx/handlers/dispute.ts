@@ -44,9 +44,9 @@ const isProofBodyStruct = (value: unknown): value is ProofBodyStruct => {
   if (!value || typeof value !== 'object') return false;
   const candidate = value as Record<string, unknown>;
   return (
-    Array.isArray(candidate.offdeltas) &&
-    Array.isArray(candidate.tokenIds) &&
-    Array.isArray(candidate.transformers)
+    Array.isArray(candidate['offdeltas']) &&
+    Array.isArray(candidate['tokenIds']) &&
+    Array.isArray(candidate['transformers'])
   );
 };
 

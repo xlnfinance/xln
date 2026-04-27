@@ -11,11 +11,16 @@
  * Pattern from 2019: DeleteLockNew with outcomeType (NoCapacity/invalid/fail)
  */
 
-import type { AccountMachine, AccountTx } from '../../types';
+import type { AccountMachine } from '../../types';
+
+type LegacyHtlcCancelTx = {
+  type: 'htlc_cancel';
+  data: { lockId: string; reason: string };
+};
 
 export async function handleHtlcCancel(
   accountMachine: AccountMachine,
-  accountTx: Extract<AccountTx, { type: 'htlc_cancel' }>,
+  accountTx: LegacyHtlcCancelTx,
 ): Promise<{ success: boolean; events: string[]; error?: string; cancelledHashlock?: string; cancelReason?: string }> {
   const { lockId, reason } = accountTx.data;
   const events: string[] = [];

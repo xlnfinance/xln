@@ -617,19 +617,11 @@ const computeStorageAuditEntityHash = (replica: EntityReplica): StorageFrameEnti
     hash: hashCanonicalJson({
       kind: 'xln.storage.auditEntityHash.v1',
       entityId,
-      // Deliberately hash the persistable consensus surface, not the whole
-      // in-process replica wrapper. Runtime queues/network caches are allowed
-      // to disappear across restore; state/proposal/witness data is not.
-      replica: {
-        entityId: snapshot.entityId,
-        signerId: snapshot.signerId,
-        isProposer: snapshot.isProposer,
-        state: snapshot.state,
-        ...(snapshot.proposal ? { proposal: snapshot.proposal } : {}),
-        ...(snapshot.lockedFrame ? { lockedFrame: snapshot.lockedFrame } : {}),
-        ...(snapshot.validatorComputedState ? { validatorComputedState: snapshot.validatorComputedState } : {}),
-        ...(snapshot.hankoWitness ? { hankoWitness: snapshot.hankoWitness } : {}),
-      },
+      // Historical replay only restores EntityState for arbitrary heights.
+      // Proposal/witness/validator metadata is latest-height crash-recovery
+      // state, so including it here makes verifyRuntimeChain fail for older
+      // heights even when replayed consensus state is correct.
+      state: snapshot.state,
     }),
   };
 };
@@ -2108,22 +2100,6 @@ export const saveRuntimeFrameToStorage = async (options: {
   let frameDbRetainedBytes = 0;
   let frameDbPrunedKeys = 0;
   let frameDbLatestPrunedHeight = 0;
-  if (frameDbPuts.length > 0) {
-    const frameDbReady = await options.tryOpenFrameDb(options.env);
-    if (!frameDbReady) throw new Error('RUNTIME_FRAME_DB_UNAVAILABLE');
-    const frameDb = options.getFrameDb(options.env);
-    const frameDbResult = await writeFrameDbPutsWithRetention({
-      db: frameDb,
-      height: options.env.height,
-      puts: frameDbPuts,
-      config,
-    });
-    frameDbBytes = frameDbResult.writtenBytes;
-    frameDbPrunedBytes = frameDbResult.prunedBytes;
-    frameDbRetainedBytes = frameDbResult.retainedBytes;
-    frameDbPrunedKeys = frameDbResult.prunedKeys;
-    frameDbLatestPrunedHeight = frameDbResult.latestPrunedRuntimeHeight;
-  }
   const batch = db.batch();
   batch.put(frameKey, frameBuffer);
   batch.put(diffKey, diffBuffer);
@@ -2142,9 +2118,11 @@ export const saveRuntimeFrameToStorage = async (options: {
   for (const item of preparedHashes.entityHashPuts) {
     batch.put(item.key, item.value);
   }
-  for (const entityId of touchedEntities) {
-    const replica = findReplicaForEntity(options.env, entityId);
-    if (replica) batch.put(keyLiveReplicaMeta(entityId), encodeBuffer(projectReplicaMeta(replica.replica)));
+  for (const replica of options.env.eReplicas.values()) {
+    if (!replica?.state) continue;
+    const entityId = normalizeEntityId(replica.entityId || replica.state.entityId || '');
+    if (!entityId) continue;
+    batch.put(keyLiveReplicaMeta(entityId), encodeBuffer(projectReplicaMeta(replica)));
   }
 
   const nextHead: StorageHead = {
@@ -2167,6 +2145,27 @@ export const saveRuntimeFrameToStorage = async (options: {
   batch.put(KEY_HEAD, encodeBuffer(nextHead));
   await writeBatch(batch);
   state.storageEntityHashDocs = preparedHashes.entityHashDocs;
+  if (frameDbPuts.length > 0) {
+    try {
+      const frameDbReady = await options.tryOpenFrameDb(options.env);
+      if (!frameDbReady) throw new Error('RUNTIME_FRAME_DB_UNAVAILABLE');
+      const frameDb = options.getFrameDb(options.env);
+      const frameDbResult = await writeFrameDbPutsWithRetention({
+        db: frameDb,
+        height: options.env.height,
+        puts: frameDbPuts,
+        config,
+      });
+      frameDbBytes = frameDbResult.writtenBytes;
+      frameDbPrunedBytes = frameDbResult.prunedBytes;
+      frameDbRetainedBytes = frameDbResult.retainedBytes;
+      frameDbPrunedKeys = frameDbResult.prunedKeys;
+      frameDbLatestPrunedHeight = frameDbResult.latestPrunedRuntimeHeight;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[PERSIST] frame DB secondary-index write failed after main commit: ${message}`);
+    }
+  }
   const writeMs = options.getPerfMs() - writeStartedAt;
 
   let packMs = 0;

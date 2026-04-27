@@ -176,6 +176,7 @@ export async function handleSettlePropose(
     entityTxs: [{
       type: 'accountInput',
       data: {
+        kind: 'settle',
         fromEntityId: entityState.entityId,
         toEntityId: counterpartyEntityId,
         settleAction,
@@ -267,6 +268,7 @@ export async function handleSettleUpdate(
     entityTxs: [{
       type: 'accountInput',
       data: {
+        kind: 'settle',
         fromEntityId: entityState.entityId,
         toEntityId: counterpartyEntityId,
         settleAction,
@@ -386,6 +388,7 @@ export async function handleSettleApprove(
     entityTxs: [{
       type: 'accountInput',
       data: {
+        kind: 'settle',
         fromEntityId: entityState.entityId,
         toEntityId: counterpartyEntityId,
         settleAction,
@@ -448,11 +451,16 @@ export async function handleSettleExecute(
       throw new Error(`Recompiled diffs length mismatch: ${diffs.length} vs ${cached.length}`);
     }
     for (let i = 0; i < diffs.length; i++) {
-      if (diffs[i].tokenId !== cached[i].tokenId ||
-          diffs[i].leftDiff !== cached[i].leftDiff ||
-          diffs[i].rightDiff !== cached[i].rightDiff ||
-          diffs[i].collateralDiff !== cached[i].collateralDiff ||
-          diffs[i].ondeltaDiff !== cached[i].ondeltaDiff) {
+      const nextDiff = diffs[i];
+      const cachedDiff = cached[i];
+      if (!nextDiff || !cachedDiff) {
+        throw new Error(`Recompiled diff missing at index ${i}`);
+      }
+      if (nextDiff.tokenId !== cachedDiff.tokenId ||
+          nextDiff.leftDiff !== cachedDiff.leftDiff ||
+          nextDiff.rightDiff !== cachedDiff.rightDiff ||
+          nextDiff.collateralDiff !== cachedDiff.collateralDiff ||
+          nextDiff.ondeltaDiff !== cachedDiff.ondeltaDiff) {
         throw new Error(`Recompiled diff mismatch at index ${i}`);
       }
     }
@@ -567,6 +575,7 @@ export async function handleSettleReject(
     entityTxs: [{
       type: 'accountInput',
       data: {
+        kind: 'settle',
         fromEntityId: entityState.entityId,
         toEntityId: counterpartyEntityId,
         settleAction,
@@ -657,6 +666,7 @@ export async function processSettleAction(
                   entityTxs: [{
                     type: 'accountInput',
                     data: {
+                      kind: 'settle',
                       fromEntityId: myEntityId,
                       toEntityId: fromEntityId,
                       settleAction: {
@@ -695,7 +705,7 @@ export async function processSettleAction(
       return {
         success: true,
         message: `Settlement proposed by ${fromEntityId.slice(-4)}${autoApproveOutput ? ' (auto-approved)' : ''}`,
-        autoApproveOutput,
+        ...(autoApproveOutput ? { autoApproveOutput } : {}),
       };
     }
 

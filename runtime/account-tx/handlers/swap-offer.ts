@@ -11,6 +11,7 @@
  */
 
 import type { AccountMachine, AccountTx, SwapOffer } from '../../types';
+import type { SwapOfferEvent } from '../../entity-tx/handlers/account';
 import { deriveDelta, getSwapPairPolicyByBaseQuote } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { formatEntityId } from '../../utils';
@@ -25,7 +26,7 @@ export async function handleSwapOffer(
   byLeft: boolean,
   currentHeight: number,
   isValidation: boolean = false
-): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCreated?: { offerId: string; makerIsLeft: boolean; fromEntity: string; toEntity: string; giveTokenId: number; giveAmount: bigint; wantTokenId: number; wantAmount: bigint; priceTicks?: bigint; timeInForce?: 0 | 1 | 2; minFillRatio: number } }> {
+): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCreated?: SwapOfferEvent }> {
   const { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks: inputPriceTicks, timeInForce, minFillRatio } = accountTx.data;
   const events: string[] = [];
   const LOT_SCALE = SWAP_LOT_SCALE;

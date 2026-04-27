@@ -41,13 +41,13 @@ export type StorageHealth = {
 
 const MIN_DISK_FREE_BYTES = Math.max(
   1 * 1024 ** 3,
-  Number(process.env.XLN_MIN_DISK_FREE_BYTES || String(5 * 1024 ** 3)),
+  Number(process.env['XLN_MIN_DISK_FREE_BYTES'] || String(5 * 1024 ** 3)),
 );
-const STORAGE_HEALTH_CACHE_MS = Math.max(5_000, Number(process.env.XLN_STORAGE_HEALTH_CACHE_MS || '60000'));
+const STORAGE_HEALTH_CACHE_MS = Math.max(5_000, Number(process.env['XLN_STORAGE_HEALTH_CACHE_MS'] || '60000'));
 const STORAGE_HISTORY_WINDOW_MS = 26 * 60 * 60 * 1000;
 const STORAGE_ONE_HOUR_MS = 60 * 60 * 1000;
 const STORAGE_HISTORY_PATH = join(process.cwd(), 'data', 'storage-health-history.json');
-const FOUNDRY_ANVIL_TMP_PATH = process.env.ANVIL_TMPDIR || join(homedir(), '.foundry', 'anvil', 'tmp');
+const FOUNDRY_ANVIL_TMP_PATH = process.env['ANVIL_TMPDIR'] || join(homedir(), '.foundry', 'anvil', 'tmp');
 const TRACKED_STORAGE_PATHS: TrackedStoragePath[] = [
   { name: 'pm2Logs', kind: 'log', path: '/root/.pm2/logs' },
   { name: 'runtimeLogs', kind: 'log', path: join(process.cwd(), 'logs') },

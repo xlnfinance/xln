@@ -9,6 +9,7 @@
  */
 
 import { PERFORMANCE } from './constants';
+import { safeStringify } from './serialization-utils';
 
 // Log filtering system for debugging
 export interface LogConfig {
@@ -56,7 +57,7 @@ function formatLogArgs(args: unknown[]): string {
     if (typeof arg === 'string') return arg;
     if (typeof arg === 'bigint') return `${arg.toString()}n`;
     try {
-      return JSON.stringify(arg);
+      return safeStringify(arg);
     } catch {
       return String(arg);
     }
@@ -70,6 +71,57 @@ export function shouldLog(category: keyof LogConfig): boolean {
 
 // Log levels for structured logging
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+
+export type StructuredLogFields = Record<string, unknown>;
+
+const LOG_LEVEL_ORDER: Record<LogLevel, number> = {
+  debug: 10,
+  info: 20,
+  warn: 30,
+  error: 40,
+};
+
+const configuredLevel = (): LogLevel => {
+  const raw = String(process.env['XLN_LOG_LEVEL'] || 'info').trim().toLowerCase();
+  if (raw === 'debug' || raw === 'info' || raw === 'warn' || raw === 'error') return raw;
+  return 'info';
+};
+
+const shouldEmitLevel = (level: LogLevel): boolean =>
+  LOG_LEVEL_ORDER[level] >= LOG_LEVEL_ORDER[configuredLevel()];
+
+export const emitStructuredLog = (
+  level: LogLevel,
+  scope: string,
+  message: string,
+  fields: StructuredLogFields = {},
+): void => {
+  if (!shouldEmitLevel(level)) return;
+  const payload = {
+    ts: new Date().toISOString(),
+    level,
+    scope,
+    message,
+    ...fields,
+  };
+  const line = process.env['XLN_LOG_FORMAT'] === 'json'
+    ? safeStringify(payload)
+    : `[${level.toUpperCase()}][${scope}] ${message}${Object.keys(fields).length ? ` ${safeStringify(fields)}` : ''}`;
+  if (level === 'error') console.error(line);
+  else if (level === 'warn') console.warn(line);
+  else console.log(line);
+};
+
+export const createStructuredLogger = (scope: string, baseFields: StructuredLogFields = {}) => ({
+  debug: (message: string, fields: StructuredLogFields = {}) =>
+    emitStructuredLog('debug', scope, message, { ...baseFields, ...fields }),
+  info: (message: string, fields: StructuredLogFields = {}) =>
+    emitStructuredLog('info', scope, message, { ...baseFields, ...fields }),
+  warn: (message: string, fields: StructuredLogFields = {}) =>
+    emitStructuredLog('warn', scope, message, { ...baseFields, ...fields }),
+  error: (message: string, fields: StructuredLogFields = {}) =>
+    emitStructuredLog('error', scope, message, { ...baseFields, ...fields }),
+});
 
 // Conditional logger with levels
 export function log(category: keyof LogConfig, level: LogLevel, ...args: unknown[]): void {

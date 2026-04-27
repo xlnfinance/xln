@@ -214,9 +214,9 @@ const fundWalletAndDeposit = async (
       ['function balanceOf(address owner) view returns (uint256)', 'function transfer(address to, uint256 amount) returns (bool)'],
       jadapter.signer as any
     );
-    const currentToken = (await erc20.balanceOf(walletAddress)) as bigint;
+    const currentToken = (await erc20['balanceOf'](walletAddress)) as bigint;
     if (currentToken < FAUCET_WALLET_AMOUNT) {
-      const tx = await erc20.transfer(walletAddress, FAUCET_WALLET_AMOUNT - currentToken);
+      const tx = await erc20['transfer'](walletAddress, FAUCET_WALLET_AMOUNT - currentToken);
       await tx.wait();
     }
   }

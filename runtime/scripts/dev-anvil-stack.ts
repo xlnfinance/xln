@@ -32,7 +32,7 @@ const parseArgs = (): Args => {
 
   const port = Number(flags.get('--port') || 8546);
   const chainId = Number(flags.get('--chain-id') || 31337);
-  const blockTime = Number(flags.get('--block-time') || process.env.XLN_ANVIL_BLOCK_TIME || 1);
+  const blockTime = Number(flags.get('--block-time') || process.env['XLN_ANVIL_BLOCK_TIME'] || 1);
   if (!Number.isFinite(port) || port <= 0) {
     throw new Error(`Invalid --port: ${String(flags.get('--port') || '')}`);
   }

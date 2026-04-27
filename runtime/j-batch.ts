@@ -13,6 +13,7 @@
 
 import { ethers } from 'ethers';
 import type { ProofBodyStruct } from './typechain/Depository.js';
+import type { JurisdictionConfig } from './types';
 import { isLeftEntity, normalizeEntityId, compareEntityIds } from './entity-id-utils';
 
 /**

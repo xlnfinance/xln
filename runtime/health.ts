@@ -134,8 +134,8 @@ export async function getHealthStatus(env: Env | null): Promise<HealthStatus> {
           entityId: profile.entityId,
           name: profile.name,
           status: hasReplica ? 'healthy' : 'degraded',
-          reserves: replica?.state?.reserves?.size ? serializeReserves(replica.state.reserves) : undefined,
-          accounts,
+          ...(replica?.state?.reserves?.size ? { reserves: serializeReserves(replica.state.reserves) } : {}),
+          ...(accounts !== undefined ? { accounts } : {}),
           ...(hasReplica ? {} : { error: 'hub profile visible but no local replica state' }),
         });
       }
@@ -152,7 +152,9 @@ export async function getHealthStatus(env: Env | null): Promise<HealthStatus> {
     system: {
       runtime: !!env,
       p2p: p2pState?.connected === true,
-      relay: p2pState?.connected === true,
+      // This endpoint is served by the local runtime HTTP/relay process; P2P
+      // connectivity is reported separately above.
+      relay: !!env,
     },
   };
 }

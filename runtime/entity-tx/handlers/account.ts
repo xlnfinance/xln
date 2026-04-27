@@ -114,8 +114,8 @@ export interface SwapOfferEvent {
   giveAmount: bigint;
   wantTokenId: number;
   wantAmount: bigint;
-  priceTicks?: bigint;
-  timeInForce?: 0 | 1 | 2;
+  priceTicks?: bigint | undefined;
+  timeInForce?: 0 | 1 | 2 | undefined;
   minFillRatio: number;
 }
 
@@ -424,6 +424,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       outputs,
       mempoolOps,
       swapOffersCreated: allSwapOffersCreated,
+      swapCancelRequests: allSwapCancelRequests,
       swapOffersCancelled: allSwapOffersCancelled,
       ...(allHashesToSign.length > 0 && { hashesToSign: allHashesToSign }),
     };

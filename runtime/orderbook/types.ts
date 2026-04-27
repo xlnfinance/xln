@@ -5,7 +5,7 @@
  */
 
 // Re-export core types
-export type { Side, TIF, OrderCmd, BookEvent, BookParams, BookState } from './core';
+export type { Side, TIF, OrderCmd, BookEvent, BookParams, BookOrderState, BookState } from './core';
 export {
   createBook,
   applyCommand,

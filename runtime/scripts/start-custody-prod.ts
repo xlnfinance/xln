@@ -28,18 +28,18 @@ const requireEnv = (name: string): string => {
 
 const MAIN_API_BASE_URL = requireEnv('CUSTODY_MAIN_API_BASE_URL');
 const MAIN_RPC_URL = requireEnv('CUSTODY_MAIN_RPC_URL');
-const PUBLIC_RPC_URL = process.env.CUSTODY_PUBLIC_RPC_URL || 'https://xln.finance/rpc';
-const RELAY_URL = process.env.CUSTODY_RELAY_URL || 'wss://xln.finance/relay';
-const WALLET_URL = process.env.CUSTODY_WALLET_URL || 'https://xln.finance/app';
-const DAEMON_PORT = Number(process.env.CUSTODY_DAEMON_PORT || '8088');
-const CUSTODY_PORT = Number(process.env.CUSTODY_PORT || '8087');
-const DB_ROOT = resolve(process.env.CUSTODY_DB_ROOT || './db-tmp/prod-custody');
-const SEED = process.env.CUSTODY_SEED || 'xln-prod-custody-seed';
-const SIGNER_LABEL = process.env.CUSTODY_SIGNER_LABEL || 'custody-prod-1';
-const PROFILE_NAME = process.env.CUSTODY_PROFILE_NAME || 'Custody';
+const PUBLIC_RPC_URL = process.env['CUSTODY_PUBLIC_RPC_URL'] || 'https://xln.finance/rpc';
+const RELAY_URL = process.env['CUSTODY_RELAY_URL'] || 'wss://xln.finance/relay';
+const WALLET_URL = process.env['CUSTODY_WALLET_URL'] || 'https://xln.finance/app';
+const DAEMON_PORT = Number(process.env['CUSTODY_DAEMON_PORT'] || '8088');
+const CUSTODY_PORT = Number(process.env['CUSTODY_PORT'] || '8087');
+const DB_ROOT = resolve(process.env['CUSTODY_DB_ROOT'] || './db-tmp/prod-custody');
+const SEED = process.env['CUSTODY_SEED'] || 'xln-prod-custody-seed';
+const SIGNER_LABEL = process.env['CUSTODY_SIGNER_LABEL'] || 'custody-prod-1';
+const PROFILE_NAME = process.env['CUSTODY_PROFILE_NAME'] || 'Custody';
 const JURISDICTION_ID = requireEnv('CUSTODY_JURISDICTION_ID');
-const GOSSIP_POLL_MS = Number(process.env.CUSTODY_GOSSIP_POLL_MS || '1000');
-const DAEMON_RUNTIME_SEED = process.env.CUSTODY_DAEMON_RUNTIME_SEED || `${SEED}:runtime`;
+const GOSSIP_POLL_MS = Number(process.env['CUSTODY_GOSSIP_POLL_MS'] || '1000');
+const DAEMON_RUNTIME_SEED = process.env['CUSTODY_DAEMON_RUNTIME_SEED'] || `${SEED}:runtime`;
 
 let shuttingDown = false;
 

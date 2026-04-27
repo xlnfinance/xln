@@ -735,7 +735,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
     signerId: bob.signer,
     data: {
       isProposer: true,
-      position: SWAP_POSITIONS.Bob,
+      position: SWAP_POSITIONS['Bob'],
       config: {
         mode: 'proposer-based' as const,
         threshold: 1n,

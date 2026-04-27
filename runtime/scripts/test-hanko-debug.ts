@@ -11,7 +11,7 @@ import { isLeftEntity } from '../entity-id-utils';
 async function main() {
   console.log('🔍 Testing Hanko Board Hash Computation\n');
 
-  const runtimeSeed = process.env.XLN_RUNTIME_SEED ?? process.env.RUNTIME_SEED;
+  const runtimeSeed = process.env['XLN_RUNTIME_SEED'] ?? process.env['RUNTIME_SEED'];
   if (runtimeSeed === undefined || runtimeSeed === null) {
     throw new Error('XLN_RUNTIME_SEED missing - unlock vault or set XLN_RUNTIME_SEED');
   }

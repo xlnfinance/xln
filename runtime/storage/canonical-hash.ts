@@ -24,9 +24,6 @@ const hashCanonical = (value: unknown): string =>
 const compareCanonical = (left: unknown, right: unknown): number =>
   JSON.stringify(left).localeCompare(JSON.stringify(right));
 
-const nonEmptyMapOrNull = <K, V>(value: Map<K, V> | undefined): Map<K, V> | null =>
-  value && value.size > 0 ? value : null;
-
 export const canonicalizeStorageAuditValue = (value: unknown, stack: object[] = []): unknown => {
   if (value === null || value === undefined) return null;
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') return value;
@@ -91,18 +88,11 @@ export const computeCanonicalEntityHash = (replica: EntityReplica): CanonicalFra
     hash: hashCanonical({
       kind: 'xln.storage.canonicalEntityHash.v1',
       entityId,
-      replica: canonicalizeStorageAuditValue({
-        entityId: replica.entityId,
-        signerId: replica.signerId,
-        isProposer: replica.isProposer,
-        state: replica.state,
-        proposal: replica.proposal ?? null,
-        lockedFrame: replica.lockedFrame ?? null,
-        validatorComputedState: replica.validatorComputedState ?? null,
-        // Restore initializes missing witness state as an empty Map. Treat
-        // empty/absent as the same value, but hash collected signatures.
-        hankoWitness: nonEmptyMapOrNull(replica.hankoWitness),
-      }),
+      // This hash is a historical replay oracle. It must cover only state that
+      // loadEnvFromStorage(height) can reconstruct for every height. In-flight
+      // proposal/witness metadata is persisted for latest-height crash recovery
+      // via replica meta, but it is not a per-height history source.
+      state: canonicalizeStorageAuditValue(replica.state),
     }),
   };
 };

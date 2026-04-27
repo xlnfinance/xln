@@ -18,7 +18,7 @@ function assert(condition: unknown, message: string): asserts condition {
 async function main() {
   const seed = 'persistence-jbatch-history-smoke-seed';
   const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
-  const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+  const dbRoot = process.env['XLN_DB_PATH'] || 'db-tmp/runtime';
   const namespacePath = join(dbRoot, runtimeId);
 
   rmSync(namespacePath, { recursive: true, force: true });

@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { deriveSignerKeySync } from '../account-crypto';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
+import { safeStringify } from '../serialization-utils';
 
 export type ExternalWalletApiContext = {
   getJAdapter: () => JAdapter | null;
@@ -45,7 +46,7 @@ const createJsonResponse = (
   payload: unknown,
   status = 200,
 ): Response =>
-  new Response(JSON.stringify(payload), {
+  new Response(safeStringify(payload), {
     status,
     headers,
   });
@@ -74,16 +75,16 @@ const createFaucetLock = (): FaucetLock => ({
 
 const readFaucetBody = async (request: Request): Promise<FaucetRequestBody> => {
   const body = await request.json() as Record<string, unknown>;
-  const userAddress = String(body.userAddress || '').trim();
-  const tokenSymbol = String(body.tokenSymbol || 'USDC').trim().toUpperCase();
-  const amount = String(body.amount || '100').trim();
+  const userAddress = String(body['userAddress'] || '').trim();
+  const tokenSymbol = String(body['tokenSymbol'] || 'USDC').trim().toUpperCase();
+  const amount = String(body['amount'] || '100').trim();
   return { userAddress, tokenSymbol, amount };
 };
 
 const readGasFaucetBody = async (request: Request): Promise<GasFaucetRequestBody> => {
   const body = await request.json() as Record<string, unknown>;
-  const userAddress = String(body.userAddress || '').trim();
-  const amount = String(body.amount || '0.1').trim();
+  const userAddress = String(body['userAddress'] || '').trim();
+  const amount = String(body['amount'] || '0.1').trim();
   return { userAddress, amount };
 };
 
@@ -126,7 +127,7 @@ const provisionFaucetWalletFunding = async (
 
   if (options.ensureTokens) {
     for (const token of tokenCatalog) {
-      const tokenContract = ERC20Mock__factory.connect(token.address, adapter.signer);
+      const tokenContract = ERC20Mock__factory.connect(token.address, adapter.signer as any);
       const currentBalance = await tokenContract.balanceOf(faucetAddress);
       const targetBalance = context.faucetTokenTargetUnits * 10n ** BigInt(token.decimals);
       console.log(
@@ -203,7 +204,7 @@ const requireFaucetWalletBalances = async (
     if (!tokenInfo) {
       throw new Error(`FAUCET_TOKEN_UNKNOWN address=${options.requiredTokenAddress}`);
     }
-    const tokenContract = ERC20Mock__factory.connect(tokenInfo.address, adapter.provider);
+    const tokenContract = ERC20Mock__factory.connect(tokenInfo.address, adapter.provider as any);
     const currentBalance = await tokenContract.balanceOf(faucetAddress);
     if (currentBalance < options.requiredTokenAmount) {
       throw new Error(
@@ -300,10 +301,8 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
         requiredTokenAddress: tokenInfo.address,
         requiredTokenAmount: amountWei,
       });
-      const faucetAddress = await faucetWallet.getAddress();
-
       console.log(`[EXT-FAUCET/ERC20 ${requestId}] transfer token=${tokenInfo.symbol} amountWei=${amountWei}`);
-      const tokenContract = ERC20Mock__factory.connect(tokenInfo.address, faucetWallet);
+      const tokenContract = ERC20Mock__factory.connect(tokenInfo.address, faucetWallet as any);
       const transferTx = await tokenContract.transfer(userAddress, amountWei);
       console.log(`[EXT-FAUCET/ERC20 ${requestId}] transfer tx=${transferTx.hash} waiting`);
       await transferTx.wait();

@@ -70,7 +70,7 @@ type ReplicaEntry = [string, EntityReplica];
  * Enable/disable via AHB_DEBUG=1 environment variable or pass enabled=true
  */
 function dumpSystemState(env: Env, label: string, enabled: boolean = true): void {
-  const debugEnabled = typeof process !== 'undefined' && process.env && process.env.AHB_DEBUG;
+  const debugEnabled = typeof process !== 'undefined' && process.env && process.env['AHB_DEBUG'];
   if (!enabled && !debugEnabled) return;
 
   // Named entities for easier reading
@@ -105,7 +105,7 @@ function dumpSystemState(env: Env, label: string, enabled: boolean = true): void
     if (replica.state.reserves) {
       for (const [tokenId, amount] of replica.state.reserves.entries()) {
         const usd = Number(amount) / 1e18;
-        entityState.reserves[tokenId] = { raw: amount.toString(), usd: `$${usd.toLocaleString()}` };
+        entityState['reserves'][tokenId] = { raw: amount.toString(), usd: `$${usd.toLocaleString()}` };
       }
     }
 
@@ -128,7 +128,7 @@ function dumpSystemState(env: Env, label: string, enabled: boolean = true): void
 
         for (const [tokenId, delta] of account.deltas.entries()) {
           const totalDelta = delta.ondelta + delta.offdelta;
-          accountState.deltas[tokenId] = {
+          accountState['deltas'][tokenId] = {
             collateral: { raw: delta.collateral.toString(), usd: `$${(Number(delta.collateral) / 1e18).toLocaleString()}` },
             ondelta: { raw: delta.ondelta.toString(), usd: `$${(Number(delta.ondelta) / 1e18).toLocaleString()}` },
             offdelta: { raw: delta.offdelta.toString(), usd: `$${(Number(delta.offdelta) / 1e18).toLocaleString()}` },
@@ -142,11 +142,11 @@ function dumpSystemState(env: Env, label: string, enabled: boolean = true): void
           };
         }
 
-        entityState.accounts[counterpartyName] = accountState;
+        entityState['accounts'][counterpartyName] = accountState;
       }
     }
 
-    state.entities[entityName] = entityState;
+    state['entities'][entityName] = entityState;
   }
 
   console.log('\n' + '='.repeat(80));

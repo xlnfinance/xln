@@ -56,10 +56,10 @@ const DEFAULT_CONFIG: HubConfig = {
   routingFeePPM: parseInt(getArg('--fee', '100')),
   swapTakerFeeBps: parseInt(getArg('--swap-taker-fee-bps', '1')),
   relayUrl: getArg('--relay', 'wss://xln.finance/relay'),
-  rpcUrl: getArg('--rpc', process.env.PUBLIC_RPC ?? ''),
-  httpUrl: getArg('--http', process.env.PUBLIC_HTTP ?? ''),
-  port: Number(getArg('--port', process.env.PORT ?? '0')) || undefined,
-  serverId: process.env.SERVER_ID ?? undefined,
+  rpcUrl: getArg('--rpc', process.env['PUBLIC_RPC'] ?? ''),
+  httpUrl: getArg('--http', process.env['PUBLIC_HTTP'] ?? ''),
+  port: Number(getArg('--port', process.env['PORT'] ?? '0')) || undefined,
+  serverId: process.env['SERVER_ID'] ?? undefined,
   position: { x: 0, y: 0, z: 0 },
 };
 

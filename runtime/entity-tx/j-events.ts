@@ -82,10 +82,10 @@ function appendBatchHistory(state: EntityState, entry: Record<string, any>): voi
   const last = state.batchHistory[state.batchHistory.length - 1];
   const sameAsLast =
     !!last &&
-    String(last.txHash || '') === String(entry.txHash || '') &&
-    String(last.eventType || '') === String(entry.eventType || '') &&
-    Number(last.jBlockNumber || 0) === Number(entry.jBlockNumber || 0) &&
-    Number(last.entityNonce || 0) === Number(entry.entityNonce || 0);
+    String(last.txHash || '') === String(entry['txHash'] || '') &&
+    String(last.eventType || '') === String(entry['eventType'] || '') &&
+    Number(last.jBlockNumber || 0) === Number(entry['jBlockNumber'] || 0) &&
+    Number(last.entityNonce || 0) === Number(entry['entityNonce'] || 0);
   if (sameAsLast) return;
   state.batchHistory.push(entry);
   if (state.batchHistory.length > 40) {

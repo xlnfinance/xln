@@ -110,11 +110,11 @@ import type { SwapKey } from './swap-keys';
  *    └─ 'accountInput'                 // Process bilateral consensus message
  *
  * 4. AccountInput (Bilateral consensus between two entities)
- *    ├─ height: number                 // Which frame we're ACKing
- *    ├─ prevHanko: HankoString         // ACK hanko for their previous frame
- *    ├─ newAccountFrame: AccountFrame  // Our proposed frame
- *    ├─ newHanko: HankoString          // Hanko on newAccountFrame
- *    └─ disputeProofNonce: number       // nonce at dispute proof signing
+ *    ├─ kind: 'frame' | 'ack' | 'frame_ack' | 'dispute' | 'settle'
+ *    ├─ frame messages carry newAccountFrame + newHanko
+ *    ├─ ack messages carry prevHanko for the counterparty frame
+ *    ├─ frame_ack batches ACK + next proposal in one wire message
+ *    └─ dispute/settle messages carry their dedicated hanko payloads
  *
  * 5. AccountFrame (Agreed bilateral state - like a block)
  *    ├─ height: number                 // Frame number in bilateral chain
@@ -216,6 +216,8 @@ import type { JAdapter } from './jadapter/types';
 import type { CompletedBatch, JBatch, JBatchState } from './j-batch';
 import type { CrontabState } from './crontab-types';
 
+export type { Profile } from './networking/gossip';
+
 export type RuntimeP2PConfigLike = {
   relayUrls?: string[];
   wsUrl?: string | null;
@@ -303,6 +305,15 @@ export type RuntimeTx =
 
 export interface EntityInput {
   entityId: string;
+  /**
+   * Transport hint used by orchestrators, relay delivery, scenarios, and
+   * bootstrap helpers before the input is normalized into deterministic REA
+   * processing. Consensus code must keep treating signer/runtime routing as
+   * envelope metadata, not state-machine input.
+   */
+  signerId?: string;
+  runtimeId?: string;
+  from?: string;
   entityTxs?: EntityTx[];
   proposedFrame?: ProposedEntityFrame;
 
@@ -1264,40 +1275,80 @@ export type RuntimeFrameDbRecord =
       frame: AccountFrame;
     };
 
-// AccountInput - Maps 1:1 to Channel.ts FlushMessage (frame-level consensus ONLY)
-export interface AccountInput {
+export type AccountSettleAction = {
+  type: 'propose' | 'update' | 'approve' | 'execute' | 'reject';
+  ops?: SettlementOp[];                // For propose/update
+  executorIsLeft?: boolean;            // For propose/update
+  hanko?: HankoString;                 // For approve (signer's hanko)
+  memo?: string;                       // For propose/update/reject
+  version?: number;                    // Version being approved/executed
+  nonceAtSign?: number;                // Settlement nonce counterparty signed with (approve)
+};
+
+type AccountInputBase = {
   fromEntityId: string;
   toEntityId: string;
 
   // Frame-level consensus (matches Channel.ts FlushMessage structure)
   height?: number;                   // Which frame we're ACKing or referencing (renamed from frameId)
 
-  // HANKO SYSTEM:
-  prevHanko?: HankoString;                // ACK hanko for their frame
-  newAccountFrame?: AccountFrame;         // Our new proposed frame (like block in Channel.ts)
-  newHanko?: HankoString;                 // Hanko on newAccountFrame
-  newDisputeHanko?: HankoString;          // Hanko on dispute proof (for J-machine enforcement)
-  newDisputeHash?: string;               // Full dispute hash (key in hankoWitness, wraps proofBodyHash)
-  newDisputeProofBodyHash?: string;       // ProofBodyHash that newDisputeHanko signs
-  newSettlementHanko?: HankoString;       // Hanko for settlement operations
-
-  // SETTLEMENT WORKSPACE ACTIONS (bilateral negotiation)
-  settleAction?: {
-    type: 'propose' | 'update' | 'approve' | 'execute' | 'reject';
-    ops?: SettlementOp[];                // For propose/update
-    executorIsLeft?: boolean;            // For propose/update
-    hanko?: HankoString;                 // For approve (signer's hanko)
-    memo?: string;                       // For propose/update/reject
-    version?: number;                    // Version being approved/executed
-    nonceAtSign?: number;                // Settlement nonce counterparty signed with (approve)
-  };
-
-  // LEGACY (will be removed):
-  prevSignatures?: string[];         // ACK for their frame (LEGACY)
-  newSignatures?: string[];          // Signatures on new frame (LEGACY)
-
   disputeProofNonce?: number;        // nonce at which dispute proof was signed (explicit, replaces counter-1 hack)
-}
+};
+
+type AccountDisputeSeal = {
+  newDisputeHanko?: HankoString;
+  newDisputeHash?: string;
+  newDisputeProofBodyHash?: string;
+  disputeProofNonce?: number;
+};
+
+type AccountInputNoSettlement = {
+  settleAction?: never;
+  newSettlementHanko?: never;
+};
+
+type AccountInputNoFrame = {
+  newAccountFrame?: never;
+  newHanko?: never;
+};
+
+type AccountInputNoAck = {
+  prevHanko?: never;
+};
+
+// AccountInput - Channel.ts-style bilateral wire message.
+// The discriminant preserves the real protocol shapes while still allowing the
+// existing ACK+next-frame batching path to be represented explicitly.
+export type AccountInput =
+  | (AccountInputBase & AccountDisputeSeal & AccountInputNoSettlement & AccountInputNoAck & {
+      kind: 'frame';
+      newAccountFrame: AccountFrame;
+      newHanko: HankoString;
+    })
+  | (AccountInputBase & AccountDisputeSeal & AccountInputNoSettlement & AccountInputNoFrame & {
+      kind: 'ack';
+      prevHanko: HankoString;
+    })
+  | (AccountInputBase & AccountDisputeSeal & AccountInputNoSettlement & {
+      kind: 'frame_ack';
+      prevHanko: HankoString;
+      newAccountFrame: AccountFrame;
+      newHanko: HankoString;
+    })
+  | (AccountInputBase & AccountDisputeSeal & AccountInputNoSettlement & AccountInputNoFrame & AccountInputNoAck & {
+      kind: 'dispute';
+      newDisputeHanko: HankoString;
+      newDisputeHash: string;
+      newDisputeProofBodyHash: string;
+    })
+  | (AccountInputBase & AccountInputNoFrame & AccountInputNoAck & {
+      kind: 'settle';
+      settleAction: AccountSettleAction;
+      newSettlementHanko?: HankoString;
+      newDisputeHanko?: never;
+      newDisputeHash?: never;
+      newDisputeProofBodyHash?: never;
+    });
 
 // Delta structure for per-token account state (based on old_src)
 export interface Delta {

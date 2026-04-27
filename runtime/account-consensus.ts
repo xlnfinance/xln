@@ -62,9 +62,12 @@ const isDebugEventEmitter = (value: unknown): value is DebugEventEmitter =>
  * CRITICAL for replay protection - domain separator for signatures
  */
 function getDepositoryAddress(env: Env): string {
+  const browserVMProvider = env.browserVM as
+    | (typeof env.browserVM & { browserVM?: { getDepositoryAddress?: () => string } })
+    | undefined;
   const browserVMAddress =
-    env.browserVM?.getDepositoryAddress?.() ||
-    env.browserVM?.browserVM?.getDepositoryAddress?.();
+    browserVMProvider?.getDepositoryAddress?.() ||
+    browserVMProvider?.browserVM?.getDepositoryAddress?.();
 
   // Active J-replica is authoritative for live RPC-backed runtimes.
   if (env.activeJurisdiction) {
@@ -427,10 +430,12 @@ export async function proposeAccountFrame(
     accountId?: string;
     giveTokenId: number;
     giveAmount: bigint;
-    wantTokenId: number;
-    wantAmount: bigint;
-    minFillRatio: number;
-  }>;
+	    wantTokenId: number;
+	    wantAmount: bigint;
+	    priceTicks?: bigint | undefined;
+	    timeInForce?: 0 | 1 | 2 | undefined;
+	    minFillRatio: number;
+	  }>;
   swapCancelRequests?: Array<{ offerId: string; accountId: string }>;
   swapOffersCancelled?: Array<{ offerId: string; accountId: string }>;
   // MULTI-SIGNER: Hashes that need entity-quorum signing
@@ -517,13 +522,14 @@ export async function proposeAccountFrame(
     fromEntity: string;
     toEntity: string;
     accountId?: string; // Enriched by entity handler
-    giveTokenId: number;
-    giveAmount: bigint;
-    wantTokenId: number;
-    wantAmount: bigint;
-    priceTicks?: bigint;
-    minFillRatio: number;
-  }> = [];
+	    giveTokenId: number;
+	    giveAmount: bigint;
+	    wantTokenId: number;
+	    wantAmount: bigint;
+	    priceTicks?: bigint | undefined;
+	    timeInForce?: 0 | 1 | 2 | undefined;
+	    minFillRatio: number;
+	  }> = [];
   const swapCancelRequests: Array<{ offerId: string; accountId: string }> = [];
   const swapOffersCancelled: Array<{ offerId: string; accountId: string }> = [];
 
@@ -593,7 +599,10 @@ export async function proposeAccountFrame(
     // Collect cancel requests for hub orderbook cancellation flow
     if (result.swapOfferCancelRequested) {
       if (!quiet) console.log(`📊 Collected swap cancel request: ${result.swapOfferCancelRequested.offerId}`);
-      swapCancelRequests.push(result.swapOfferCancelRequested);
+      swapCancelRequests.push({
+        ...result.swapOfferCancelRequested,
+        accountId: accountMachine.proofHeader.toEntity,
+      });
     }
 
     // Collect finalized cancellations for open-offer/orderbook cleanup
@@ -856,6 +865,7 @@ export async function proposeAccountFrame(
 
   const outboundFrame = cloneAccountFrame(newFrame);
   const accountInput: AccountInput = {
+    kind: 'frame',
     fromEntityId: accountMachine.proofHeader.fromEntity,
     toEntityId: accountMachine.proofHeader.toEntity,
     height: newFrame.height,
@@ -1116,13 +1126,7 @@ export async function handleAccountInput(
           }
         }
 
-        // Store counterparty settlement signature
-        if (input.newSettlementHanko) {
-          accountMachine.counterpartySettlementHanko = input.newSettlementHanko;
-          console.log(`✅ Stored counterparty settlement hanko from ACK`);
-        }
-
-        const committedFrame = cloneAccountFrame(accountMachine.pendingFrame);
+	        const committedFrame = cloneAccountFrame(accountMachine.pendingFrame);
         recordAccountFrameHistory(env, {
           entityId: accountMachine.proofHeader.fromEntity,
           counterpartyId: input.fromEntityId,
@@ -1443,11 +1447,12 @@ export async function handleAccountInput(
       accountId?: string;
       giveTokenId: number;
       giveAmount: bigint;
-      wantTokenId: number;
-      wantAmount: bigint;
-      priceTicks?: bigint;
-      minFillRatio: number;
-    }> = [];
+	      wantTokenId: number;
+	      wantAmount: bigint;
+	      priceTicks?: bigint | undefined;
+	      timeInForce?: 0 | 1 | 2 | undefined;
+	      minFillRatio: number;
+	    }> = [];
     const swapCancelRequests: Array<{ offerId: string; accountId: string }> = [];
     const swapOffersCancelled: Array<{ offerId: string; accountId: string }> = [];
 
@@ -1484,7 +1489,10 @@ export async function handleAccountInput(
         swapOffersCreated.push(result.swapOfferCreated);
       }
       if (result.swapOfferCancelRequested) {
-        swapCancelRequests.push(result.swapOfferCancelRequested);
+        swapCancelRequests.push({
+          ...result.swapOfferCancelRequested,
+          accountId: input.fromEntityId,
+        });
       }
       if (result.swapOfferCancelled) {
         swapOffersCancelled.push(result.swapOfferCancelled);
@@ -1781,7 +1789,8 @@ export async function handleAccountInput(
     }
     accountMachine.disputeProofBodiesByHash[ackProofResult.proofBodyHash] = ackProofResult.proofBodyStruct;
 
-    const response: AccountInput = {
+    const response = {
+      kind: 'ack',
       fromEntityId: accountMachine.proofHeader.fromEntity,
       toEntityId: input.fromEntityId,
       height: receivedFrame.height,
@@ -1790,7 +1799,7 @@ export async function handleAccountInput(
       newDisputeHash: ackDisputeHash, // Full dispute hash (key in hankoWitness for quorum lookup)
       newDisputeProofBodyHash: ackProofResult.proofBodyHash, // ProofBodyHash that ackDisputeHanko signs
       disputeProofNonce: ackSignedNonce, // nonce at which ACK's dispute proof was signed
-    };
+    } as AccountInput;
 
     if (HEAVY_LOGS)
       console.log(
@@ -1804,6 +1813,7 @@ export async function handleAccountInput(
 
       if (proposeResult.success && proposeResult.accountInput) {
         batchedWithNewFrame = true;
+        response.kind = 'frame_ack';
         // Merge ACK and new proposal into same AccountInput
         if (proposeResult.accountInput.newAccountFrame) {
           response.newAccountFrame = proposeResult.accountInput.newAccountFrame;

@@ -40,8 +40,8 @@ type ProcessAccountTxResult = {
     giveAmount: bigint;
     wantTokenId: number;
     wantAmount: bigint;
-    priceTicks?: bigint;
-    timeInForce?: 0 | 1 | 2;
+    priceTicks?: bigint | undefined;
+    timeInForce?: 0 | 1 | 2 | undefined;
     minFillRatio: number;
   };
   swapOfferCancelRequested?: { offerId: string };

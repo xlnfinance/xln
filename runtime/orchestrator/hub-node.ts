@@ -22,6 +22,8 @@ import { toPublicRpcUrl } from '../loopback-url';
 import { startParentLivenessWatch } from './parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { applyJEventsToEnv } from '../jadapter/watcher';
+import { safeStringify } from '../serialization-utils';
+import { createStructuredLogger } from '../logger';
 import {
   getActiveJAdapter,
   getP2PState,
@@ -223,7 +225,7 @@ const resolveHubSignerIndex = (name: string): number => {
 };
 
 const deriveAnvilDevPrivateKey = (index: number): string => {
-  const mnemonic = Mnemonic.fromPhrase(process.env.ANVIL_MNEMONIC || DEFAULT_ANVIL_MNEMONIC);
+  const mnemonic = Mnemonic.fromPhrase(process.env['ANVIL_MNEMONIC'] || DEFAULT_ANVIL_MNEMONIC);
   const wallet = HDNodeWallet.fromMnemonic(mnemonic, getIndexedAccountPath(index));
   return wallet.privateKey;
 };
@@ -250,6 +252,7 @@ const directWsUrl = String(resolvedArgs.directWsUrl || '').trim();
 if (!directWsUrl) {
   throw new Error(`[MESH-HUB] Missing required --direct-ws-url for ${resolvedArgs.name}`);
 }
+const nodeLog = createStructuredLogger('mesh.hub', { hub: resolvedArgs.name });
 
 const timings: TimingMap = {
   runtime_boot: { startedAt: null, completedAt: null, ms: null },
@@ -274,7 +277,7 @@ const finishTiming = (stage: keyof typeof timings, startedAt: number): void => {
   const ms = Date.now() - startedAt;
   timings[stage].completedAt = Date.now();
   timings[stage].ms = ms;
-  console.log(`[MESH-TIMING] ${resolvedArgs.name}.${stage} ${ms}ms`);
+  nodeLog.info('timing', { stage, ms });
 };
 
 const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig => {
@@ -285,7 +288,7 @@ const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig =
     if (!entry || typeof entry !== 'object') return false;
     return String((entry as JurisdictionConfig).rpc || '').trim() === requestedRpc;
   });
-  const arrakis = exactMatch ?? map.arrakis ?? Object.values(map)[0];
+  const arrakis = exactMatch ?? map['arrakis'] ?? Object.values(map)[0];
   if (!arrakis) {
     throw new Error('JURISDICTION_NOT_FOUND');
   }
@@ -832,9 +835,9 @@ const buildLocalHealth = (
 
 const run = async (): Promise<void> => {
   if (resolvedArgs.dbPath) {
-    process.env.XLN_DB_PATH = resolvedArgs.dbPath;
+    process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
   }
-  process.env.JADAPTER_DEV_PRIVATE_KEY = deriveAnvilDevPrivateKey(resolveHubSignerIndex(resolvedArgs.name));
+  process.env['JADAPTER_DEV_PRIVATE_KEY'] = deriveAnvilDevPrivateKey(resolveHubSignerIndex(resolvedArgs.name));
 
   const runtimeBootStartedAt = startTiming('runtime_boot');
   const env = await main(resolvedArgs.seed);
@@ -888,7 +891,7 @@ const run = async (): Promise<void> => {
       if (upgraded !== undefined) return upgraded;
 
       if (pathname === '/api/info') {
-        return new Response(JSON.stringify({
+        return new Response(safeStringify({
           name: resolvedArgs.name,
           entityId: bootstrap?.entityId ?? null,
           runtimeId: env.runtimeId,
@@ -899,7 +902,7 @@ const run = async (): Promise<void> => {
       }
 
       if (pathname === '/api/health') {
-        return new Response(JSON.stringify(buildLocalHealth(env, bootstrap?.entityId ?? null, activeTokenCatalog)), {
+        return new Response(safeStringify(buildLocalHealth(env, bootstrap?.entityId ?? null, activeTokenCatalog)), {
           headers,
         });
       }
@@ -908,13 +911,13 @@ const run = async (): Promise<void> => {
         shuttingDown = true;
         if (meshLoop) clearInterval(meshLoop);
         stopP2P(env);
-        return new Response(JSON.stringify({ ok: true }), { headers });
+        return new Response(safeStringify({ ok: true }), { headers });
       }
 
       if (pathname === '/api/jurisdictions') {
         const payload = buildRuntimeJurisdictionsPayload(env);
         if (!payload) {
-          return new Response(JSON.stringify({ error: 'JURISDICTION_PAYLOAD_UNAVAILABLE' }), {
+          return new Response(safeStringify({ error: 'JURISDICTION_PAYLOAD_UNAVAILABLE' }), {
             status: 503,
             headers,
           });
@@ -928,7 +931,7 @@ const run = async (): Promise<void> => {
       }
 
       if (!bootstrap || !activeJAdapter) {
-        return new Response(JSON.stringify({ error: 'HUB_NOT_READY' }), { status: 503, headers });
+        return new Response(safeStringify({ error: 'HUB_NOT_READY' }), { status: 503, headers });
       }
 
       if (pathname === '/api/market/snapshots' && request.method === 'GET') {
@@ -938,7 +941,7 @@ const run = async (): Promise<void> => {
             .filter((value): value is string => Boolean(value)),
         ));
         if (pairIds.length === 0) {
-          return new Response(JSON.stringify({ error: 'Missing valid pair query parameters' }), {
+          return new Response(safeStringify({ error: 'Missing valid pair query parameters' }), {
             status: 400,
             headers,
           });
@@ -951,7 +954,7 @@ const run = async (): Promise<void> => {
         const snapshots = pairIds.map((pairId) =>
           buildMarketSnapshotForReplica(replica, bootstrap.entityId, pairId, depth),
         );
-        return new Response(JSON.stringify({ hubEntityId: bootstrap.entityId, depth, snapshots }), { headers });
+        return new Response(safeStringify({ hubEntityId: bootstrap.entityId, depth, snapshots }), { headers });
       }
 
       if (pathname === '/api/tokens' && request.method === 'GET') {
@@ -979,10 +982,10 @@ const run = async (): Promise<void> => {
         const tokenSymbol = typeof body.tokenSymbol === 'string' ? body.tokenSymbol : undefined;
         const amount = typeof body.amount === 'string' ? body.amount : String(body.amount ?? '100');
         if (!userEntityId) {
-          return new Response(JSON.stringify({ error: 'Missing userEntityId' }), { status: 400, headers });
+          return new Response(safeStringify({ error: 'Missing userEntityId' }), { status: 400, headers });
         }
         if (!Number.isFinite(tokenId) || tokenId <= 0) {
-          return new Response(JSON.stringify({ error: 'Invalid tokenId' }), { status: 400, headers });
+          return new Response(safeStringify({ error: 'Invalid tokenId' }), { status: 400, headers });
         }
 
         const tokenMeta = activeTokenCatalog.find(token =>
@@ -990,7 +993,7 @@ const run = async (): Promise<void> => {
           (tokenSymbol ? String(token.symbol || '').toUpperCase() === tokenSymbol.toUpperCase() : false),
         );
         if (!tokenMeta) {
-          return new Response(JSON.stringify({ error: 'Unknown token', tokenId, tokenSymbol }), {
+          return new Response(safeStringify({ error: 'Unknown token', tokenId, tokenSymbol }), {
             status: 400,
             headers,
           });
@@ -1003,7 +1006,7 @@ const run = async (): Promise<void> => {
         const hubReplica = getEntityReplicaById(env, bootstrap.entityId);
         const hubReserve = hubReplica?.state?.reserves?.get(tokenId) ?? 0n;
         if (hubReserve < amountWei) {
-          return new Response(JSON.stringify({
+          return new Response(safeStringify({
             error: 'Hub has insufficient reserves',
             have: hubReserve.toString(),
             need: amountWei.toString(),
@@ -1044,7 +1047,7 @@ const run = async (): Promise<void> => {
         await waitForRuntimeIdle(env, 5000);
         const broadcastWindowReady = await waitForEntityBroadcastWindow(env, bootstrap.entityId, 10000);
         if (!broadcastWindowReady) {
-          return new Response(JSON.stringify({ error: 'Hub sentBatch did not clear in time' }), {
+          return new Response(safeStringify({ error: 'Hub sentBatch did not clear in time' }), {
             status: 504,
             headers,
           });
@@ -1053,7 +1056,7 @@ const run = async (): Promise<void> => {
         await waitForRuntimeIdle(env, 5000);
         const batchCleared = await waitForJBatchClear(env, 10000);
         if (!batchCleared) {
-          return new Response(JSON.stringify({ error: 'J-batch did not broadcast in time' }), {
+          return new Response(safeStringify({ error: 'J-batch did not broadcast in time' }), {
             status: 504,
             headers,
           });
@@ -1061,12 +1064,12 @@ const run = async (): Promise<void> => {
         const expectedMin = prevUserReserve + amountWei;
         const updatedReserve = await waitForReserveUpdate(activeJAdapter, userEntityId, tokenId, expectedMin, 10000);
         if (updatedReserve === null) {
-          return new Response(JSON.stringify({ error: 'Reserve update not confirmed on-chain' }), {
+          return new Response(safeStringify({ error: 'Reserve update not confirmed on-chain' }), {
             status: 504,
             headers,
           });
         }
-        return new Response(JSON.stringify({
+        return new Response(safeStringify({
           success: true,
           type: 'reserve',
           amount,
@@ -1084,13 +1087,13 @@ const run = async (): Promise<void> => {
         };
         const userEntityId = String(body.userEntityId || '').toLowerCase();
         if (!userEntityId) {
-          return new Response(JSON.stringify({ success: false, error: 'Missing userEntityId' }), {
+          return new Response(safeStringify({ success: false, error: 'Missing userEntityId' }), {
             status: 400,
             headers,
           });
         }
         if (!hasAccount(env, bootstrap.entityId, userEntityId)) {
-          return new Response(JSON.stringify({
+          return new Response(safeStringify({
             success: false,
             code: 'FAUCET_ACCOUNT_NOT_OPEN',
             error: 'No bilateral account with this hub. Open account first, then retry faucet.',
@@ -1119,27 +1122,27 @@ const run = async (): Promise<void> => {
             }],
           }],
         });
-        return new Response(JSON.stringify({ success: true, accepted: true }), { headers });
+        return new Response(safeStringify({ success: true, accepted: true }), { headers });
       }
 
       if (pathname === '/api/debug/reserve' && request.method === 'GET') {
         const entityId = String(url.searchParams.get('entityId') || '').trim();
         const tokenId = Number(url.searchParams.get('tokenId') || '1');
         if (!entityId) {
-          return new Response(JSON.stringify({ error: 'Missing entityId' }), { status: 400, headers });
+          return new Response(safeStringify({ error: 'Missing entityId' }), { status: 400, headers });
         }
         if (!Number.isInteger(tokenId) || tokenId <= 0) {
-          return new Response(JSON.stringify({ error: 'Invalid tokenId' }), { status: 400, headers });
+          return new Response(safeStringify({ error: 'Invalid tokenId' }), { status: 400, headers });
         }
         try {
           const reserve = await activeJAdapter.getReserves(entityId, tokenId);
-          return new Response(JSON.stringify({ ok: true, entityId, tokenId, reserve: reserve.toString() }), { headers });
+          return new Response(safeStringify({ ok: true, entityId, tokenId, reserve: reserve.toString() }), { headers });
         } catch (error) {
-          return new Response(JSON.stringify({ error: (error as Error).message }), { status: 500, headers });
+          return new Response(safeStringify({ error: (error as Error).message }), { status: 500, headers });
         }
       }
 
-      return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers });
+      return new Response(safeStringify({ error: 'Not found' }), { status: 404, headers });
       } finally {
         releaseHttp();
       }
@@ -1230,7 +1233,7 @@ const run = async (): Promise<void> => {
         .filter((profile): profile is { name: string; entityId: string } => profile !== null);
 
       if (!gossipReadyMarked && requiredHubProfiles.length === resolvedArgs.meshHubNames.length) {
-        finishTiming('gossip_ready', timings.gossip_ready.startedAt ?? startTiming('gossip_ready'));
+        finishTiming('gossip_ready', timings['gossip_ready'].startedAt ?? startTiming('gossip_ready'));
         gossipReadyMarked = true;
       } else if (!gossipReadyMarked) {
         startTiming('gossip_ready');
@@ -1336,7 +1339,7 @@ const run = async (): Promise<void> => {
           DEFAULT_ACCOUNT_TOKEN_IDS.every((tokenId) => Boolean(getAccountMachine(env, bootstrap.entityId, peer.entityId)?.deltas.get(tokenId))),
         );
       if (allAccountsReady && !accountsReadyMarked) {
-        finishTiming('mesh_accounts', timings.mesh_accounts.startedAt ?? startTiming('mesh_accounts'));
+        finishTiming('mesh_accounts', timings['mesh_accounts'].startedAt ?? startTiming('mesh_accounts'));
         accountsReadyMarked = true;
       }
 
@@ -1352,7 +1355,7 @@ const run = async (): Promise<void> => {
           hasPairMutualCredits(env, bootstrap.entityId, peer.entityId, DEFAULT_ACCOUNT_TOKEN_IDS, HUB_MESH_CREDIT_AMOUNT),
         );
       if (allCreditReady && !creditReadyMarked) {
-        finishTiming('mesh_credit', timings.mesh_credit.startedAt ?? startTiming('mesh_credit'));
+        finishTiming('mesh_credit', timings['mesh_credit'].startedAt ?? startTiming('mesh_credit'));
         creditReadyMarked = true;
       }
       if (allCreditReady && !reserveReadyMarked) {
@@ -1362,7 +1365,7 @@ const run = async (): Promise<void> => {
         const reserveHealth = await ensureBootstrapReserves(env, bootstrap.entityId, tokenCatalog);
         reserveReadyMarked = reserveHealth.targetMet === true;
       }
-      if (allCreditReady && reserveReadyMarked && timings.mesh_ready_total.ms === null) {
+      if (allCreditReady && reserveReadyMarked && timings['mesh_ready_total'].ms === null) {
         finishTiming('mesh_ready_total', totalMeshStartedAt);
       }
     } finally {

@@ -1,5 +1,4 @@
 import type {
-  AccountTx,
   EntityReplica,
   Env,
   EnvSnapshot,
@@ -66,7 +65,7 @@ const cloneRuntimeInput = (runtimeInput: RuntimeInput): RuntimeInput => ({
   runtimeTxs: [...runtimeInput.runtimeTxs],
   entityInputs: runtimeInput.entityInputs.map(input => ({
     entityId: input.entityId,
-    signerId: input.signerId,
+    ...(input.signerId ? { signerId: input.signerId } : {}),
     ...(input.entityTxs ? { entityTxs: [...input.entityTxs] } : {}),
     ...(input.hashPrecommits
       ? { hashPrecommits: new Map(Array.from(input.hashPrecommits.entries()).map(([key, value]) => [key, [...value]])) }
@@ -78,7 +77,7 @@ const cloneRuntimeInput = (runtimeInput: RuntimeInput): RuntimeInput => ({
 const cloneRuntimeOutputs = (runtimeOutputs: RoutedEntityInput[]): RoutedEntityInput[] =>
   runtimeOutputs.map(output => ({
     entityId: output.entityId,
-    signerId: output.signerId,
+    ...(output.signerId ? { signerId: output.signerId } : {}),
     ...(output.entityTxs ? { entityTxs: [...output.entityTxs] } : {}),
     ...(output.hashPrecommits
       ? { hashPrecommits: new Map(Array.from(output.hashPrecommits.entries()).map(([key, value]) => [key, [...value]])) }
@@ -185,13 +184,16 @@ export const normalizePersistedSnapshotInPlace = (
   if (snapshot.jReplicas) {
     const jMap = deps.normalizeJReplicaMap(snapshot.jReplicas);
     snapshot.jReplicas = new Map(
-      Array.from(jMap.entries()).map(([name, jr]) => [
-        String(name),
-        {
-          ...jr,
-          stateRoot: jr.stateRoot ? new Uint8Array(jr.stateRoot as any) : jr.stateRoot,
-        },
-      ]),
+      Array.from(jMap.entries()).map(([name, raw]) => {
+        const jr = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
+        return [
+          String(name),
+          {
+            ...jr,
+            stateRoot: jr['stateRoot'] ? new Uint8Array(jr['stateRoot'] as any) : jr['stateRoot'],
+          },
+        ];
+      }),
     );
   }
 };
