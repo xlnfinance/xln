@@ -9,10 +9,13 @@
  *   bun runtime/scenarios/run.ts lock-ahb --mode=rpc --rpc=http://127.0.0.1:18545
  */
 
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { createWriteStream, mkdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import type { Readable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
+
+type PipedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 
 const SCENARIOS: Record<string, { file: string; fn: string }> = {
   'rebalance': { file: './rebalance', fn: 'runRebalanceScenario' },
@@ -115,14 +118,23 @@ function parseArgs(): {
   const workersRaw = getFlag('workers');
   const workers = workersRaw ? Number(workersRaw) : undefined;
 
-  return {
-    scenario,
-    mode: getFlag('mode'),
-    rpc: getFlag('rpc'),
-    workers: Number.isFinite(workers as number) ? Math.max(1, Math.floor(workers as number)) : undefined,
-    set: getFlag('set'),
-    single: args.includes('--single'),
-  };
+  const parsed: {
+    scenario?: string;
+    mode?: string;
+    rpc?: string;
+    workers?: number;
+    set?: string;
+    single: boolean;
+  } = { single: args.includes('--single') };
+  if (scenario !== undefined) parsed.scenario = scenario;
+  const mode = getFlag('mode');
+  if (mode !== undefined) parsed.mode = mode;
+  const rpc = getFlag('rpc');
+  if (rpc !== undefined) parsed.rpc = rpc;
+  if (Number.isFinite(workers as number)) parsed.workers = Math.max(1, Math.floor(workers as number));
+  const set = getFlag('set');
+  if (set !== undefined) parsed.set = set;
+  return parsed;
 }
 
 function tail(path: string, lines = 60): string {
@@ -135,7 +147,7 @@ function tail(path: string, lines = 60): string {
   }
 }
 
-async function stopProcess(proc: ChildProcessWithoutNullStreams | null): Promise<void> {
+async function stopProcess(proc: PipedChildProcess | null): Promise<void> {
   if (!proc || proc.exitCode !== null) return;
   proc.kill('SIGTERM');
   const deadline = Date.now() + 4000;
@@ -145,7 +157,7 @@ async function stopProcess(proc: ChildProcessWithoutNullStreams | null): Promise
   if (proc.exitCode === null) proc.kill('SIGKILL');
 }
 
-async function waitRelayReady(proc: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<void> {
+async function waitRelayReady(proc: PipedChildProcess, timeoutMs: number): Promise<void> {
   await new Promise<void>((resolve, reject) => {
     let settled = false;
     const timer = setTimeout(() => {
@@ -219,8 +231,8 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
     const startedAt = Date.now();
     const logPath = join(logsDir, `${String(workerId).padStart(2, '0')}-${scenario}.log`);
     const log = createWriteStream(logPath, { flags: 'w' });
-    let relayProc: ChildProcessWithoutNullStreams | null = null;
-    let scenarioProc: ChildProcessWithoutNullStreams | null = null;
+    let relayProc: PipedChildProcess | null = null;
+    let scenarioProc: PipedChildProcess | null = null;
 
     try {
       const rpcPort = await reserveFreeLocalPort();
@@ -241,9 +253,10 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
         },
       });
 
-      relayProc.stdout.on('data', (c) => log.write(`[relay] ${c.toString()}`));
-      relayProc.stderr.on('data', (c) => log.write(`[relay:err] ${c.toString()}`));
-      await waitRelayReady(relayProc, 10_000);
+      const activeRelayProc = relayProc;
+      activeRelayProc.stdout.on('data', (c) => log.write(`[relay] ${c.toString()}`));
+      activeRelayProc.stderr.on('data', (c) => log.write(`[relay:err] ${c.toString()}`));
+      await waitRelayReady(activeRelayProc, 10_000);
 
       scenarioProc = spawn('bun', [
         'runtime/scenarios/run.ts',
@@ -265,12 +278,13 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
         },
       });
 
-      scenarioProc.stdout.on('data', (c) => log.write(c.toString()));
-      scenarioProc.stderr.on('data', (c) => log.write(c.toString()));
+      const activeScenarioProc = scenarioProc;
+      activeScenarioProc.stdout.on('data', (c) => log.write(c.toString()));
+      activeScenarioProc.stderr.on('data', (c) => log.write(c.toString()));
 
       const code = await new Promise<number | null>((resolveExit, rejectExit) => {
-        scenarioProc?.once('error', rejectExit);
-        scenarioProc?.once('exit', resolveExit);
+        activeScenarioProc.once('error', rejectExit);
+        activeScenarioProc.once('exit', resolveExit);
       });
 
       if (code !== 0) {
