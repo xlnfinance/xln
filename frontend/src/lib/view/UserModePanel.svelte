@@ -78,7 +78,7 @@
     return {
       ...frame,
       eReplicas: new Map(frame.eReplicas),
-      jReplicas: frame.jReplicas.map((replica) => ({ ...replica })),
+      jReplicas: new Map(frame.jReplicas),
     };
   }
 

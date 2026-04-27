@@ -1800,7 +1800,7 @@ const waitForHubBaseline = async (): Promise<void> => {
     if (
       health.hubMesh.ok &&
       health.hubMesh.direct.openLinkCount >= HUB_NAMES.length * Math.max(0, HUB_NAMES.length - 1) &&
-      health.bootstrapReserves.targetMet &&
+      health.bootstrapReserves.ok &&
       health.hubs.every(hub => hub.online)
     ) {
       return;

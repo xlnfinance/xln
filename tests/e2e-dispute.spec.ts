@@ -1276,9 +1276,8 @@ test.describe('E2E Dispute Flow', () => {
       `expected production dispute delay around 5760 blocks, got ${disputeWindowBlocks}`,
     ).toBe(true);
 
-    await timedStep('dispute.wait_timeout_block', () => waitForBlock(page, disputedState.disputeTimeout));
-
     const finalizeBatchBefore = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
+    await timedStep('dispute.wait_timeout_block', () => waitForBlock(page, disputedState.disputeTimeout));
     await timedStep('dispute.wait_auto_finalize_history_confirmed', async () => {
       await expect.poll(async () => {
         const snap = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);

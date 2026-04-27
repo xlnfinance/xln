@@ -46,10 +46,10 @@
     isActive: true,
   });
 
-  const activeEnv = $derived.by<Env | null>(() => isolatedEnv ? $isolatedEnv : null);
-  const activeHistory = $derived.by<EnvSnapshot[]>(() => isolatedHistory ? $isolatedHistory : []);
-  const activeTimeIndex = $derived.by<number>(() => isolatedTimeIndex ? $isolatedTimeIndex : -1);
-  const activeIsLive = $derived.by<boolean>(() => isolatedIsLive ? $isolatedIsLive : true);
+  const activeEnv = $derived.by<Env | null>(() => isolatedEnv ? ($isolatedEnv ?? null) : null);
+  const activeHistory = $derived.by<EnvSnapshot[]>(() => isolatedHistory ? ($isolatedHistory ?? []) : []);
+  const activeTimeIndex = $derived.by<number>(() => isolatedTimeIndex ? ($isolatedTimeIndex ?? -1) : -1);
+  const activeIsLive = $derived.by<boolean>(() => isolatedIsLive ? ($isolatedIsLive ?? true) : true);
 
   function goToLive(): void {
     isolatedTimeIndex?.set(-1);

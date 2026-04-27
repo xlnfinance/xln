@@ -72,7 +72,7 @@
       <h1>XLN Address Directory</h1>
       <p>All registered gossip profiles. Hubs first, then users.</p>
     </div>
-    <button onclick={loadDirectory}>Refresh</button>
+    <button onclick={() => loadDirectory()}>Refresh</button>
   </header>
 
   <section class="panel">

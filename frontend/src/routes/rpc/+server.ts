@@ -19,7 +19,7 @@ const getRpcUrl = (requestUrl: string): string => {
   if (isLocalHost) {
     return resolveLocalRpcUrlFromRequest(requestUrl);
   }
-  const rpcUrl = process.env.RPC_ETHEREUM ?? process.env.ANVIL_RPC;
+  const rpcUrl = process.env['RPC_ETHEREUM'] ?? process.env['ANVIL_RPC'];
   if (!rpcUrl) {
     throw new Error('RPC_PROXY_MISCONFIGURED: set RPC_ETHEREUM or ANVIL_RPC for non-local host');
   }

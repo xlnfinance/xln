@@ -428,6 +428,7 @@ export const startCustodySupport = async (
       XLN_EARLY_HTTP_BIND: '1',
       ANVIL_RPC: options.rpcUrl,
       PUBLIC_RPC: options.rpcUrl,
+      XLN_STARTUP_STEP_TIMEOUT_MS: process.env['XLN_STARTUP_STEP_TIMEOUT_MS'] ?? '60000',
       RELAY_URL: options.relayUrl,
       XLN_RUNTIME_SEED: options.daemonRuntimeSeed || `${options.seed}:runtime`,
       XLN_DB_PATH: `${options.dbRoot}/daemon-db`,

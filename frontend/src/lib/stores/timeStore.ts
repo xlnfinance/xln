@@ -62,7 +62,7 @@ const isStoredGossip = (value: unknown): value is StoredGossip =>
 
 function normalizeGossip(gossip: GossipLayer | StoredGossip | null | undefined): GossipLayer | null {
   if (!gossip) return null;
-  if (typeof gossip.getProfiles === 'function') {
+  if ('getProfiles' in gossip && typeof gossip.getProfiles === 'function') {
     return gossip;
   }
 

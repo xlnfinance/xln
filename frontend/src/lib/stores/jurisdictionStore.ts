@@ -70,7 +70,7 @@ export async function loadJurisdictions(): Promise<JurisdictionsData> {
       jurisdictionsList.forEach((j: RuntimeJurisdictionConfig) => {
         data.jurisdictions[j.name.toLowerCase()] = {
           name: j.name,
-          chainId: j.chainId,
+          chainId: j.chainId ?? 31337,
           rpc: j.address,
           contracts: {
             entityProvider: j.entityProviderAddress,

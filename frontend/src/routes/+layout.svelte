@@ -31,7 +31,8 @@
 	type ChromeMode = 'site' | 'app' | 'hidden';
 
 	let chromeMode = $derived.by<ChromeMode>(() => {
-		const value = (($page.data as Record<string, unknown> | undefined)?.chrome ?? 'site');
+		const pageData = $page.data as Record<string, unknown> | undefined;
+		const value = pageData?.['chrome'] ?? 'site';
 		return value === 'app' || value === 'hidden' ? value : 'site';
 	});
 

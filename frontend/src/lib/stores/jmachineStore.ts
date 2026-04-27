@@ -63,10 +63,10 @@ const normalizeChainId = (value: unknown): number | null => {
 
 const normalizeContracts = (value: unknown): JMachineConfig['contracts'] | undefined => {
   if (!isRecord(value)) return undefined;
-  const depository = normalizeAddress(value.depository);
-  const entityProvider = normalizeAddress(value.entityProvider);
-  const account = normalizeAddress(value.account);
-  const deltaTransformer = normalizeAddress(value.deltaTransformer);
+  const depository = normalizeAddress(value['depository']);
+  const entityProvider = normalizeAddress(value['entityProvider']);
+  const account = normalizeAddress(value['account']);
+  const deltaTransformer = normalizeAddress(value['deltaTransformer']);
   if (!depository && !entityProvider && !account && !deltaTransformer) return undefined;
   return {
     ...(depository ? { depository } : {}),
@@ -78,13 +78,13 @@ const normalizeContracts = (value: unknown): JMachineConfig['contracts'] | undef
 
 export function normalizeJMachineConfig(raw: unknown): JMachineConfig | null {
   if (!isRecord(raw)) return null;
-  const name = typeof raw.name === 'string' ? raw.name.trim() : '';
-  const ticker = typeof raw.ticker === 'string' ? raw.ticker.trim() : '';
-  const mode = normalizeMode(raw.mode);
-  const chainId = normalizeChainId(raw.chainId);
-  const rpcs = normalizeRpcList(raw.rpcs);
-  const contracts = normalizeContracts(raw.contracts);
-  const createdAtRaw = Number(raw.createdAt);
+  const name = typeof raw['name'] === 'string' ? raw['name'].trim() : '';
+  const ticker = typeof raw['ticker'] === 'string' ? raw['ticker'].trim() : '';
+  const mode = normalizeMode(raw['mode']);
+  const chainId = normalizeChainId(raw['chainId']);
+  const rpcs = normalizeRpcList(raw['rpcs']);
+  const contracts = normalizeContracts(raw['contracts']);
+  const createdAtRaw = Number(raw['createdAt']);
   if (!name || !ticker || chainId === null) return null;
   if (mode === 'rpc' && rpcs.length === 0) return null;
   return {

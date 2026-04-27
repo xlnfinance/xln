@@ -12,6 +12,7 @@
   import { MaxUint256, Wallet as EthersWallet, hexlify, isAddress, parseEther, ZeroAddress, zeroPadValue } from 'ethers';
   import type {
     AccountMachine,
+    AccountFrame,
     AccountTx,
     Env,
     EnvSnapshot,
@@ -3848,7 +3849,7 @@
     }
   }
 
-  let externalBalancePollTimer: ReturnType<typeof window.setInterval> | null = null;
+  let externalBalancePollTimer: number | null = null;
   let externalBalancePollKey = '';
 
   function clearExternalBalancePoller(): void {
@@ -4431,7 +4432,7 @@
           if (!Array.isArray(txs) || txs.length === 0) return;
           const actorMeta = frameActorMeta(account, byLeft);
           const allLines = txs.map((tx) => summarizeAccountTx(tx, accountId, accountLabel, actorMeta.actor));
-          const headline = allLines.length === 1 ? allLines[0] : `${txs.length} actions in account frame`;
+          const headline = allLines.length === 1 ? allLines[0] ?? 'Account frame action' : `${txs.length} actions in account frame`;
           const bodyLines = allLines.length <= 1
             ? []
             : (allLines.length > 4 ? [...allLines.slice(0, 4), `+${allLines.length - 4} more actions`] : allLines);
@@ -4487,7 +4488,8 @@
           );
         }
 
-        const frames = Array.isArray(account.frameHistory) ? account.frameHistory.slice(-12) : [];
+        const frameHistory = (account as { frameHistory?: AccountFrame[] }).frameHistory;
+        const frames = Array.isArray(frameHistory) ? frameHistory.slice(-12) : [];
         for (const frame of frames) {
           pushFrameRow(
             'confirmed',
@@ -5916,7 +5918,6 @@
                     <HubDiscoveryPanel
                       entityId={replica?.state?.entityId || tab.entityId}
                       env={liveRuntimeEnv}
-                      isLive={activeIsLive}
                     />
                   {/if}
                 </div>

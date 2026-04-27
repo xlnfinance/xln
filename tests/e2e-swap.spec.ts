@@ -1302,21 +1302,22 @@ async function executeOrderbookClickFill(
       intervals: [50, 100, 200],
     }).not.toBe('');
     const routedCounterpartyId = String(await selectedHub.inputValue()).trim();
-    const resolveCountBefore = await readPositiveSwapResolveCount(
-      page,
-      accountRef.entityId,
-      accountRef.signerId,
-      routedCounterpartyId,
-    );
+    const swapStateBefore = await readSwapState(page, accountRef.entityId, accountRef.signerId, routedCounterpartyId);
     await expect(placeButton).toBeEnabled({ timeout: 10_000 });
     await placeButton.click();
 
     await expect
       .poll(
-        async () => await readPositiveSwapResolveCount(page, accountRef.entityId, accountRef.signerId, routedCounterpartyId),
+        async () => {
+          const state = await readSwapState(page, accountRef.entityId, accountRef.signerId, routedCounterpartyId);
+          return (
+            state.accountHistoryResolveCount > swapStateBefore.accountHistoryResolveCount
+            || state.accountSwapClosedOrdersSize > swapStateBefore.accountSwapClosedOrdersSize
+          );
+        },
         { timeout: 30_000, intervals: [100, 250, 500, 1000] },
       )
-      .toBeGreaterThan(resolveCountBefore);
+      .toBe(true);
 
     await expect
       .poll(

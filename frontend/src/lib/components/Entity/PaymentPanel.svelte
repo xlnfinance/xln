@@ -974,7 +974,7 @@
   }
 
   async function findRoutes(preserveRepeatTimer = false, silent = false): Promise<boolean> {
-    if (!targetEntityId || !amount) return;
+    if (!targetEntityId || !amount) return false;
 
     const viewportY = typeof window === 'undefined' ? 0 : window.scrollY;
     findingRoutes = true;

@@ -1007,7 +1007,7 @@
     }
   }
 
-  function isRuntimeEnv(value: unknown): value is { eReplicas: Map<string, unknown>; jReplicas: Map<string, unknown> } {
+  function isRuntimeEnv(value: unknown): value is Env {
     if (!value || typeof value !== 'object') return false;
     const obj = value as { eReplicas?: unknown; jReplicas?: unknown };
     return obj.eReplicas instanceof Map && obj.jReplicas instanceof Map;

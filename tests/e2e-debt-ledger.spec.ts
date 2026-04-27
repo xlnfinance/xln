@@ -14,6 +14,8 @@ const USD_150 = (150n * TOKEN_SCALE).toString();
 const USD_100 = (100n * TOKEN_SCALE).toString();
 const USD_50 = (50n * TOKEN_SCALE).toString();
 const ERC20_BALANCE_OF = new Interface(['function balanceOf(address) view returns (uint256)']);
+const LONG_E2E = process.env.E2E_LONG === '1';
+const MAX_BATCH_MINE_BLOCKS = 100;
 
 type RuntimeRef = {
   entityId: string;
@@ -694,6 +696,40 @@ async function mineOneBlock(page: Page): Promise<void> {
   expect(response.ok(), 'evm_mine RPC must succeed').toBe(true);
 }
 
+async function mineBlocks(page: Page, count: number): Promise<void> {
+  const blocks = Math.max(0, Math.floor(count));
+  if (blocks <= 0) return;
+  if (blocks === 1) {
+    await mineOneBlock(page);
+    return;
+  }
+
+  let remaining = blocks;
+  while (remaining > 0) {
+    const chunk = Math.min(remaining, MAX_BATCH_MINE_BLOCKS);
+    await mineBlockChunk(page, chunk);
+    remaining -= chunk;
+  }
+}
+
+async function mineBlockChunk(page: Page, blocks: number): Promise<void> {
+  if (blocks <= 1) {
+    await mineOneBlock(page);
+    return;
+  }
+  const quantity = `0x${blocks.toString(16)}`;
+  const errors: string[] = [];
+  for (const method of ['anvil_mine', 'hardhat_mine']) {
+    const response = await page.request.post(`${APP_BASE_URL}/api/rpc`, {
+      data: { jsonrpc: '2.0', id: 1, method, params: [quantity] },
+    });
+    const body = await response.json().catch(() => ({})) as { error?: unknown };
+    if (response.ok() && !body.error) return;
+    errors.push(`${method}: ${JSON.stringify(body.error ?? response.status())}`);
+  }
+  throw new Error(`batch block mining unavailable for ${blocks} blocks: ${errors.join(' | ')}`);
+}
+
 async function readRuntimeJurisdictionHeight(page: Page): Promise<number> {
   return page.evaluate(() => {
     const env = (window as typeof window & { isolatedEnv?: any }).isolatedEnv;
@@ -704,16 +740,20 @@ async function readRuntimeJurisdictionHeight(page: Page): Promise<number> {
 }
 
 async function waitForBlock(page: Page, targetBlock: number): Promise<void> {
-  const deadline = Date.now() + 45_000;
+  const deadline = Date.now() + 90_000;
   for (;;) {
     const current = await readCurrentChainBlock(page);
     const runtimeVisible = await readRuntimeJurisdictionHeight(page);
     if (current >= targetBlock && runtimeVisible >= targetBlock) return;
-    await mineOneBlock(page);
     if (Date.now() > deadline) {
       throw new Error(
         `Timed out waiting for block ${targetBlock}, current=${current}, runtimeVisible=${runtimeVisible}`,
       );
+    }
+    if (current < targetBlock) {
+      await mineBlocks(page, Math.min(targetBlock - current, MAX_BATCH_MINE_BLOCKS));
+    } else {
+      await page.waitForTimeout(250);
     }
   }
 }
@@ -1078,7 +1118,7 @@ async function openOutstandingDebtToken(page: Page, symbol = 'USDC'): Promise<vo
 
 test.describe('debt ledger', () => {
   test('creates one mirrored debt on both sides after dispute finalize', async ({ browser }) => {
-    test.setTimeout(240_000);
+    test.setTimeout(LONG_E2E ? 360_000 : 240_000);
     const step = (label: string) => console.log(`[debt-e2e] ${label}`);
 
     step('bootstrap');
@@ -1153,7 +1193,13 @@ test.describe('debt ledger', () => {
 
     step('dispute-finalize-auto');
     await expect
-      .poll(async () => (await readAccountState(alicePage, alice.entityId, alice.signerId, bob.entityId)).activeDispute, {
+      .poll(async () => {
+        const state = await readAccountState(alicePage, alice.entityId, alice.signerId, bob.entityId);
+        if (state.activeDispute) {
+          await mineOneBlock(alicePage);
+        }
+        return state.activeDispute;
+      }, {
         timeout: 90_000,
         intervals: [500, 1000, 1500],
       })

@@ -154,22 +154,22 @@
 
   function normalizeHealthData(raw: unknown): HealthData {
     const input = (raw && typeof raw === 'object') ? raw as Record<string, unknown> : {};
-    const rawSystem = (input.system && typeof input.system === 'object') ? input.system as Record<string, unknown> : {};
-    const rawHubs = Array.isArray(input.hubs) ? input.hubs as HealthData['hubs'] : [];
+    const rawSystem = (input['system'] && typeof input['system'] === 'object') ? input['system'] as Record<string, unknown> : {};
+    const rawHubs = Array.isArray(input['hubs']) ? input['hubs'] as HealthData['hubs'] : [];
     const activeClientIds = Array.from(new Set(
       rawHubs.flatMap((hub) => Array.isArray(hub?.activeClients) ? hub.activeClients : [])
     ));
-    const relay = (input.relay && typeof input.relay === 'object') ? input.relay as HealthData['relay'] : undefined;
-    const hubMesh = (input.hubMesh && typeof input.hubMesh === 'object') ? input.hubMesh as HealthData['hubMesh'] : undefined;
-    const bootstrapReserves = (input.bootstrapReserves && typeof input.bootstrapReserves === 'object')
-      ? input.bootstrapReserves as HealthData['bootstrapReserves']
+    const relay = (input['relay'] && typeof input['relay'] === 'object') ? input['relay'] as HealthData['relay'] : undefined;
+    const hubMesh = (input['hubMesh'] && typeof input['hubMesh'] === 'object') ? input['hubMesh'] as HealthData['hubMesh'] : undefined;
+    const bootstrapReserves = (input['bootstrapReserves'] && typeof input['bootstrapReserves'] === 'object')
+      ? input['bootstrapReserves'] as HealthData['bootstrapReserves']
       : undefined;
-    const custody = (input.custody && typeof input.custody === 'object') ? input.custody as HealthData['custody'] : undefined;
+    const custody = (input['custody'] && typeof input['custody'] === 'object') ? input['custody'] as HealthData['custody'] : undefined;
 
-    return {
-      timestamp: typeof input.timestamp === 'number' ? input.timestamp : Date.now(),
-      uptime: typeof input.uptime === 'number' ? input.uptime : null,
-      jMachines: Array.isArray(input.jMachines) ? input.jMachines as HealthData['jMachines'] : [],
+    const normalized: HealthData = {
+      timestamp: typeof input['timestamp'] === 'number' ? input['timestamp'] : Date.now(),
+      uptime: typeof input['uptime'] === 'number' ? input['uptime'] : null,
+      jMachines: (Array.isArray(input['jMachines']) ? input['jMachines'] : []) as NonNullable<HealthData['jMachines']>,
       hubs: rawHubs,
       relay: {
         activeClients: relay?.activeClients ?? activeClientIds,
@@ -177,14 +177,15 @@
         clientsDetailed: relay?.clientsDetailed ?? [],
       },
       system: {
-        runtime: Boolean(rawSystem.runtime),
-        relay: Boolean(rawSystem.relay),
-        p2p: typeof rawSystem.p2p === 'boolean' ? rawSystem.p2p : Boolean(hubMesh?.ok),
+        runtime: Boolean(rawSystem['runtime']),
+        relay: Boolean(rawSystem['relay']),
+        p2p: typeof rawSystem['p2p'] === 'boolean' ? rawSystem['p2p'] : Boolean(hubMesh?.ok),
       },
-      hubMesh,
-      custody,
-      bootstrapReserves,
     };
+    if (hubMesh) normalized.hubMesh = hubMesh;
+    if (custody) normalized.custody = custody;
+    if (bootstrapReserves) normalized.bootstrapReserves = bootstrapReserves;
+    return normalized;
   }
 
   function short(id?: string, len = 10): string {
@@ -384,8 +385,8 @@
       <article class="metric"><div class="k">Runtime</div><div class="v" class:ok={health.system.runtime} class:bad={!health.system.runtime}>{health.system.runtime ? 'healthy' : 'down'}</div></article>
       <article class="metric"><div class="k">P2P</div><div class="v" class:ok={health.system.p2p} class:bad={!health.system.p2p}>{health.system.p2p ? 'healthy' : 'down'}</div></article>
       <article class="metric"><div class="k">Relay</div><div class="v" class:ok={health.system.relay} class:bad={!health.system.relay}>{health.system.relay ? 'healthy' : 'down'}</div></article>
-      <article class="metric"><div class="k">RPC</div><div class="v" class:ok={rpcOk === true} class:bad={rpcOk === false}>{rpcOk === null ? 'checking' : rpcOk ? `ok (${formatLatency(rpcLatencyMs || undefined)})` : 'down'}</div></article>
-      <article class="metric"><div class="k">Uptime</div><div class="v">{formatUptime(health.uptime)}</div></article>
+      <article class="metric"><div class="k">RPC</div><div class="v" class:ok={rpcOk === true} class:bad={rpcOk === false}>{rpcOk === null ? 'checking' : rpcOk ? `ok (${formatLatency(rpcLatencyMs ?? undefined)})` : 'down'}</div></article>
+      <article class="metric"><div class="k">Uptime</div><div class="v">{formatUptime(health.uptime ?? null)}</div></article>
       <article class="metric"><div class="k">J Block</div><div class="v">#{health.jMachines?.[0]?.lastBlock ?? '-'}</div></article>
       <article class="metric"><div class="k">Debug Events</div><div class="v">{events.length}</div></article>
       <article class="metric"><div class="k">Relay Clients</div><div class="v">{health.relay?.activeClientCount ?? 0}</div></article>

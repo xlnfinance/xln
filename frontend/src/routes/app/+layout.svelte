@@ -113,7 +113,7 @@
     }
 
     const root = payload as Record<string, unknown>;
-    const version = String(root.version || '').trim();
+    const version = String(root['version'] || '').trim();
     if (!version) {
       throw new Error('MISSING_DEPLOY_VERSION');
     }

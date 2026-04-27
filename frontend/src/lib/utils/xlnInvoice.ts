@@ -143,9 +143,10 @@ export function parseXlnInvoice(rawValue: string): ParsedXlnInvoice {
 
   if (raw.startsWith('0x')) {
     const [entityIdPart, queryPart = ''] = raw.split('?', 2);
-    if (isEntityId(entityIdPart.trim())) {
+    const entityId = entityIdPart?.trim() ?? '';
+    if (isEntityId(entityId)) {
       return parseInvoiceParams(
-        new URLSearchParams(`target=${entityIdPart.trim()}${queryPart ? `&${queryPart}` : ''}`),
+        new URLSearchParams(`target=${entityId}${queryPart ? `&${queryPart}` : ''}`),
         'entity-query',
         raw,
       );

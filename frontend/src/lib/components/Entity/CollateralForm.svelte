@@ -154,6 +154,7 @@
     const md = profile?.metadata;
     const policyVersion = Number(md?.policyVersion ?? 0);
     if (!Number.isFinite(policyVersion) || policyVersion <= 0) return null;
+    if (!md) return null;
     return {
       policyVersion,
       baseFee: parseBigIntSafe(md.rebalanceBaseFee ?? md.baseFee, 0n),

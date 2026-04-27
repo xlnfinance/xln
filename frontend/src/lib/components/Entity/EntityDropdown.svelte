@@ -8,6 +8,7 @@
   import { visibleReplicas } from '../../stores/timeStore';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
   import type { EntityReplica, Tab } from '$lib/types/ui';
+  import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
   import { entityAvatar, preferredAvatar } from '$lib/utils/avatar';
   import { resolveEntityName, scheduleGossipProfileFetch } from '$lib/utils/entityNaming';
 
@@ -17,7 +18,7 @@
   export let allowAdd: boolean = false;
   export let allowAddJurisdiction: boolean = false;
   export let replicasOverride: Map<string, EntityReplica> | null = null;
-  export let envOverride: { jReplicas?: unknown } | null = null;
+  export let envOverride: Parameters<typeof resolveEntityName>[1] & { jReplicas?: unknown } | null = null;
 
   const dispatch = createEventDispatcher();
 
@@ -63,16 +64,12 @@
 
     return list
       .map((jr: { name?: string } | unknown) => ({ name: (jr as { name?: string })?.name }))
-      .filter((jr: JMachineNode) => jr.name);
+      .filter((jr): jr is JMachineNode => typeof jr.name === 'string' && jr.name.length > 0);
   }
 
   function buildSignerTree(
     replicas: Map<string, EntityReplica> | null | undefined,
-    xlnFuncs: {
-      hashToAvatar: (seed: string, size?: number) => string;
-      isReady: boolean;
-      generateEntityAvatar?: (entityId: string) => string;
-    } | null,
+    xlnFuncs: FrontendXlnFunctions | null,
     search: string,
   ): SignerNode[] {
     if (!replicas) return [];
@@ -133,7 +130,7 @@
 
   function getEntityName(replica: EntityReplica): string {
     const name = resolveEntityName(replica?.entityId || '', activeEnv);
-    return name || replica.state?.name || '';
+    return name || '';
   }
 
   // Current selection display

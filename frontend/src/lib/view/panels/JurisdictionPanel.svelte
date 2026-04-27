@@ -8,15 +8,15 @@
   import type { Writable } from 'svelte/store';
   import { get } from 'svelte/store';
   import { panelBridge } from '../utils/panelBridge';
-  import type { BrowserVMTokenInfo } from '@xln/runtime/xln-api';
+  import type { BrowserVMTokenInfo, Env, EnvSnapshot, JReplica } from '@xln/runtime/xln-api';
   import { activeVault, allVaults } from '$lib/stores/vaultStore';
   import { settings } from '$lib/stores/settingsStore';
   import { xlnFunctions, xlnInstance } from '$lib/stores/xlnStore';
 
   // Props
   interface Props {
-    isolatedEnv: Writable<any>;
-    isolatedHistory?: Writable<any[]> | undefined;
+    isolatedEnv: Writable<Env | null>;
+    isolatedHistory?: Writable<EnvSnapshot[]> | undefined;
     isolatedTimeIndex?: Writable<number> | undefined;
     selectedJurisdiction?: string | null;
     hideSelector?: boolean;
@@ -46,6 +46,12 @@
     label: string;
     vaultId: string;
     signerName: string;
+  };
+
+  type TokenMapValue = Map<number | string, unknown> | Record<string, unknown>;
+  type JurisdictionView = JReplica & {
+    reserves?: Map<string, TokenMapValue> | Record<string, TokenMapValue>;
+    collaterals?: Map<string, TokenMapValue> | Record<string, TokenMapValue>;
   };
 
   let selectedTokenIdText = $state('');
@@ -93,14 +99,14 @@
   // ═══════════════════════════════════════════════════════════════════════════
 
   // Get current frame based on timeIndex
-  function getCurrentFrame(): any {
+  function getCurrentFrame(): Env | EnvSnapshot | null {
     const timeIndex = isolatedTimeIndex ? get(isolatedTimeIndex) : -1;
     const history = isolatedHistory ? get(isolatedHistory) : [];
     const env = get(isolatedEnv);
 
     if (timeIndex >= 0 && history && history.length > 0) {
       const idx = Math.min(timeIndex, history.length - 1);
-      return history[idx];
+      return history[idx] ?? null;
     }
     return env; // Live mode - return env directly
   }
@@ -111,7 +117,7 @@
   });
 
   // Get jurisdictions from current frame
-  let jurisdictions = $derived.by(() => {
+  let jurisdictions = $derived.by<JurisdictionView[]>(() => {
     const timeIndex = isolatedTimeIndex ? ($isolatedTimeIndex ?? -1) : -1;
     const history = isolatedHistory ? $isolatedHistory : [];
     const env = $isolatedEnv;
@@ -120,11 +126,11 @@
     if (timeIndex >= 0 && history && history.length > 0) {
       const idx = Math.min(timeIndex as number, history.length - 1);
       const frame = history[idx];
-      return frame ? Array.from(frame.jReplicas.values()) : [];
+      return frame ? (Array.from(frame.jReplicas.values()) as JurisdictionView[]) : [];
     }
 
     if (env?.jReplicas) {
-      return Array.from(env.jReplicas.values());
+      return Array.from(env.jReplicas.values()) as JurisdictionView[];
     }
 
     return [];
@@ -133,19 +139,19 @@
   // Auto-select first jurisdiction when available
   $effect(() => {
     if (jurisdictions.length > 0 && !selectedJurisdiction) {
-      selectedJurisdiction = jurisdictions[0].name;
+      selectedJurisdiction = jurisdictions[0]?.name ?? null;
       console.log(`[J-Panel] Auto-selected jurisdiction: ${selectedJurisdiction}`);
     }
     // Reset selection if current selection no longer exists
-    if (selectedJurisdiction && !jurisdictions.find((j: any) => j.name === selectedJurisdiction)) {
-      selectedJurisdiction = jurisdictions.length > 0 ? jurisdictions[0].name : null;
+    if (selectedJurisdiction && !jurisdictions.find((j) => j.name === selectedJurisdiction)) {
+      selectedJurisdiction = jurisdictions.length > 0 ? jurisdictions[0]?.name ?? null : null;
     }
   });
 
   // Get selected jurisdiction data
   let selectedJurisdictionData = $derived.by(() => {
     if (!selectedJurisdiction) return null;
-    return jurisdictions.find((j: any) => j.name === selectedJurisdiction) || null;
+    return jurisdictions.find((j) => j.name === selectedJurisdiction) || null;
   });
 
   // Get entity names from gossip profiles (time-aware)
@@ -156,7 +162,8 @@
     const env = $isolatedEnv;
 
     // Get gossip profiles for name resolution
-    const gossipProfiles = env?.gossip?.getProfiles?.() || env?.gossip?.profiles || [];
+    const rawProfiles = env?.gossip?.getProfiles?.() || env?.gossip?.profiles || [];
+    const gossipProfiles = rawProfiles instanceof Map ? Array.from(rawProfiles.values()) : rawProfiles;
     for (const profile of gossipProfiles) {
       if (profile?.entityId && profile?.name) {
         names.set(profile.entityId, profile.name);
@@ -167,9 +174,9 @@
     let eReplicas: Map<string, any> | null = null;
     if (timeIndex >= 0 && history && history.length > 0) {
       const idx = Math.min(timeIndex as number, history.length - 1);
-      eReplicas = history[idx]?.eReplicas;
+      eReplicas = history[idx]?.eReplicas ?? null;
     } else {
-      eReplicas = env?.eReplicas;
+      eReplicas = env?.eReplicas ?? null;
     }
 
     if (eReplicas) {
@@ -227,8 +234,9 @@
     for (const [channelKey, tokenMap] of collMap.entries()) {
       const tokens = tokenMap instanceof Map ? tokenMap : new Map(Object.entries(tokenMap || {}));
       for (const [tokenId, data] of tokens.entries()) {
-        const collateral = toBigInt(data?.collateral);
-        const ondelta = toBigInt(data?.ondelta);
+        const entry = data as { collateral?: unknown; ondelta?: unknown };
+        const collateral = toBigInt(entry.collateral);
+        const ondelta = toBigInt(entry.ondelta);
         if (collateral > 0n || ondelta !== 0n) {
           result.push({
             channelKey,
@@ -268,9 +276,9 @@
     let eReplicas: Map<string, any> | null = null;
     if (timeIndex >= 0 && history && history.length > 0) {
       const idx = Math.min(timeIndex as number, history.length - 1);
-      eReplicas = history[idx]?.eReplicas;
+      eReplicas = history[idx]?.eReplicas ?? null;
     } else {
-      eReplicas = env?.eReplicas;
+      eReplicas = env?.eReplicas ?? null;
     }
 
     if (!eReplicas) return disputes;
@@ -524,6 +532,7 @@
       externalEthBalancesError = null;
       return;
     }
+    const getEthBalance = jadapter.getEthBalance.bind(jadapter);
 
     const requestId = ++ethBalanceRequestId;
     externalEthBalancesLoading = true;
@@ -539,7 +548,7 @@
 
         const nextBalances: Array<{ address: string; label: string; balance: bigint }> = [];
         for (const signer of signers) {
-          const balance = await jadapter.getEthBalance(signer.address);
+          const balance = await getEthBalance(signer.address);
           if (balance > 0n) {
             nextBalances.push({
               address: signer.address,
@@ -586,6 +595,7 @@
       debtsLoading = false;
       return;
     }
+    const getDebts = jadapter.getDebts.bind(jadapter);
 
     // Get entity IDs from eReplicas
     const isolatedEnvValue = $isolatedEnv;
@@ -595,9 +605,9 @@
     let eReplicas: Map<string, any> | null = null;
     if (timeIndex >= 0 && history && history.length > 0) {
       const idx = Math.min(timeIndex, history.length - 1);
-      eReplicas = history[idx]?.eReplicas;
+      eReplicas = history[idx]?.eReplicas ?? null;
     } else {
-      eReplicas = isolatedEnvValue?.eReplicas;
+      eReplicas = isolatedEnvValue?.eReplicas ?? null;
     }
 
     if (!eReplicas || eReplicas.size === 0) {
@@ -629,7 +639,7 @@
 
         // Query debts for each entity
         for (const entityId of entityIds) {
-          const debts = await jadapter.getDebts(entityId, tokenId!);
+          const debts = await getDebts(entityId, tokenId);
           if (debts && debts.length > 0) {
             results.push({
               entityId,
@@ -826,18 +836,19 @@
             {:else}
               <div class="mempool-inline">
                 {#each mempool as tx, i}
+                  {@const txView = tx as Record<string, unknown>}
                   <div class="mempool-tx-row">
                     <span class="tx-idx">#{i + 1}</span>
-                    <span class="tx-type">{tx.type || tx.kind || 'tx'}</span>
-                    {#if tx.from || tx.entityId}
-                      <span class="tx-entity">{formatEntityId(tx.from || tx.entityId)}</span>
+                    <span class="tx-type">{String(txView['type'] || txView['kind'] || 'tx')}</span>
+                    {#if txView['from'] || txView['entityId']}
+                      <span class="tx-entity">{formatEntityId(String(txView['from'] || txView['entityId']))}</span>
                     {/if}
-                    {#if tx.to || tx.targetEntityId}
+                    {#if txView['to'] || txView['targetEntityId']}
                       <span class="tx-arrow">→</span>
-                      <span class="tx-entity">{formatEntityId(tx.to || tx.targetEntityId)}</span>
+                      <span class="tx-entity">{formatEntityId(String(txView['to'] || txView['targetEntityId']))}</span>
                     {/if}
-                    {#if tx.amount}
-                      <span class="tx-amt">{formatBalance(BigInt(tx.amount))}</span>
+                    {#if txView['amount']}
+                      <span class="tx-amt">{formatBalance(BigInt(String(txView['amount'])))}</span>
                     {/if}
                   </div>
                 {/each}
@@ -877,12 +888,13 @@
             </thead>
             <tbody>
               {#each mempool as tx, i}
+                {@const txView = tx as Record<string, unknown>}
                 <tr class="mempool-tx">
                   <td class="tx-index">#{i + 1}</td>
-                  <td class="tx-type-cell">{tx.type || tx.kind || 'tx'}</td>
-                  <td class="mono">{tx.from || tx.entityId ? formatEntityId(tx.from || tx.entityId) : '-'}</td>
-                  <td class="mono">{tx.to || tx.targetEntityId ? formatEntityId(tx.to || tx.targetEntityId) : '-'}</td>
-                  <td>{tx.amount ? formatBalance(BigInt(tx.amount)) : '-'}</td>
+                  <td class="tx-type-cell">{String(txView['type'] || txView['kind'] || 'tx')}</td>
+                  <td class="mono">{txView['from'] || txView['entityId'] ? formatEntityId(String(txView['from'] || txView['entityId'])) : '-'}</td>
+                  <td class="mono">{txView['to'] || txView['targetEntityId'] ? formatEntityId(String(txView['to'] || txView['targetEntityId'])) : '-'}</td>
+                  <td>{txView['amount'] ? formatBalance(BigInt(String(txView['amount']))) : '-'}</td>
                 </tr>
               {/each}
             </tbody>

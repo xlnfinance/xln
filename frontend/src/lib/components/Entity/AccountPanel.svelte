@@ -113,7 +113,8 @@
         txs: account.mempool,
       });
     }
-    const historicalFrames = Array.isArray(account.frameHistory) ? account.frameHistory.slice(-12).reverse() : [];
+    const frameHistory = (account as { frameHistory?: typeof account.currentFrame[] }).frameHistory;
+    const historicalFrames = Array.isArray(frameHistory) ? frameHistory.slice(-12).reverse() : [];
     for (const frame of historicalFrames) {
       const fByLeft = frame.byLeft;
       const isYou = fByLeft !== undefined ? (fByLeft === iAmLeft) : undefined;
