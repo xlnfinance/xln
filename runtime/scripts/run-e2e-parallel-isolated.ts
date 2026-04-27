@@ -11,7 +11,7 @@
  *   bun runtime/scripts/run-e2e-parallel-isolated.ts --video=on --trace=on-first-retry --max-failures=1
  */
 
-import { spawn, spawnSync, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, spawnSync, type ChildProcessByStdio } from 'node:child_process';
 import {
   createWriteStream,
   existsSync,
@@ -24,6 +24,7 @@ import {
 } from 'node:fs';
 import { availableParallelism } from 'node:os';
 import { join, resolve } from 'node:path';
+import type { Readable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import { deriveQaTestDescription, deriveQaTestHandle } from '../qa-report';
 
@@ -41,8 +42,8 @@ type CliArgs = {
   traceMode: 'off' | 'on' | 'retain-on-failure' | 'on-first-retry';
   screenshotMode: 'off' | 'on' | 'only-on-failure';
   reporter: 'line' | 'list' | 'dot';
-  pwGrep?: string;
-  pwProject?: string;
+  pwGrep?: string | undefined;
+  pwProject?: string | undefined;
   pwFiles: string[];
   skipBuild: boolean;
 };
@@ -72,9 +73,11 @@ type RunTask = {
   pwTargets: string[];
   requireMarketMaker: boolean;
   usePlaywrightShard: boolean;
-  title?: string;
-  grep?: string;
+  title?: string | undefined;
+  grep?: string | undefined;
 };
+
+type ManagedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 
 type RunnerLockPayload = {
   pid: number;
@@ -129,6 +132,8 @@ const parseArgs = (): CliArgs => {
   const coerceScreenshot = (mode: string): CliArgs['screenshotMode'] =>
     mode === 'off' || mode === 'on' ? mode : 'only-on-failure';
   const coerceReporter = (mode: string): CliArgs['reporter'] => (mode === 'list' || mode === 'dot' ? mode : 'line');
+  const pwGrep = getFlag('pw-grep');
+  const pwProject = getFlag('pw-project');
 
   return {
     shards: Number.isFinite(shardsRaw) && shardsRaw > 0 ? Math.floor(shardsRaw) : 2,
@@ -146,8 +151,8 @@ const parseArgs = (): CliArgs => {
     traceMode: coerceTrace(traceRaw),
     screenshotMode: coerceScreenshot(screenshotRaw),
     reporter: coerceReporter(reporterRaw),
-    pwGrep: getFlag('pw-grep'),
-    pwProject: getFlag('pw-project'),
+    pwGrep,
+    pwProject,
     pwFiles,
     skipBuild: args.includes('--skip-build'),
   };
@@ -419,7 +424,9 @@ const publishQaRunIfConfigured = (logsDir: string): void => {
   const startedAt = Date.now();
   const remoteMatch = remoteBase.match(/^([^:]+):(.+)$/);
   if (remoteMatch) {
-    const [, remoteHost, remotePath] = remoteMatch;
+    const remoteHost = remoteMatch[1];
+    const remotePath = remoteMatch[2];
+    if (!remoteHost || !remotePath) return;
     const mkdirResult = spawnSync('ssh', [remoteHost, 'mkdir', '-p', remotePath], {
       stdio: 'pipe',
       encoding: 'utf8',
@@ -480,11 +487,10 @@ const collectSpecsFromSuite = (suite: any, out: Array<{ title: string; file?: st
   for (const spec of suite?.specs ?? []) {
     const title = String(spec?.title || '').trim();
     if (!title) continue;
-    out.push({
-      title,
-      file: typeof spec?.file === 'string' ? spec.file : undefined,
-      line: Number.isFinite(Number(spec?.line)) ? Number(spec.line) : undefined,
-    });
+    const entry: { title: string; file?: string; line?: number } = { title };
+    if (typeof spec?.file === 'string') entry.file = spec.file;
+    if (Number.isFinite(Number(spec?.line))) entry.line = Number(spec.line);
+    out.push(entry);
   }
   for (const child of suite?.suites ?? []) collectSpecsFromSuite(child, out);
 };
@@ -502,22 +508,23 @@ const listDynamicPlaywrightTargets = (
     E2E_ANVIL_RPC: process.env['E2E_ANVIL_RPC'] || 'http://127.0.0.1:1',
     E2E_RESET_BASE_URL: process.env['E2E_RESET_BASE_URL'] || 'http://127.0.0.1:1',
   };
-  const res = Bun.spawnSync(
-    ['bunx', 'playwright', 'test', '--config', 'playwright.config.ts', '--list', '--reporter=json', file],
+  const res = spawnSync(
+    'bunx',
+    ['playwright', 'test', '--config', 'playwright.config.ts', '--list', '--reporter=json', file],
     {
       cwd: process.cwd(),
       env,
-      stdout: 'pipe',
-      stderr: 'pipe',
+      stdio: 'pipe',
+      encoding: 'utf8',
     },
   );
-  const stdout = Buffer.from(res.stdout).toString('utf8').trim();
+  const stdout = String(res.stdout || '').trim();
   let parsed: any = null;
   try {
     parsed = JSON.parse(stdout);
   } catch {
-    const stderr = Buffer.from(res.stderr).toString('utf8').trim();
-    throw new Error(`Failed to list tests for ${file}: ${stderr || stdout || `exit=${String(res.exitCode)}`}`);
+    const stderr = String(res.stderr || '').trim();
+    throw new Error(`Failed to list tests for ${file}: ${stderr || stdout || `exit=${String(res.status)}`}`);
   }
   const specs: Array<{ title: string; file?: string; line?: number }> = [];
   for (const suite of parsed?.suites ?? []) collectSpecsFromSuite(suite, specs);
@@ -631,12 +638,12 @@ const listPlaywrightSpecFiles = (): string[] => {
     'tests/e2e-multiroute-load.spec.ts',
     'tests/e2e-runtime-persistence.spec.ts',
   ]);
-  const res = Bun.spawnSync(['rg', '--files', 'tests'], {
+  const res = spawnSync('rg', ['--files', 'tests'], {
     cwd: process.cwd(),
-    stdout: 'pipe',
-    stderr: 'ignore',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    encoding: 'utf8',
   });
-  const text = Buffer.from(res.stdout).toString('utf8');
+  const text = String(res.stdout || '');
   return text
     .split('\n')
     .map(line => line.trim())
@@ -645,7 +652,7 @@ const listPlaywrightSpecFiles = (): string[] => {
     .sort();
 };
 
-const waitForProcessExit = async (proc: ChildProcessWithoutNullStreams, timeoutMs: number): Promise<boolean> => {
+const waitForProcessExit = async (proc: ManagedChildProcess, timeoutMs: number): Promise<boolean> => {
   if (proc.exitCode !== null) return true;
   return await new Promise<boolean>(resolve => {
     let settled = false;
@@ -665,7 +672,7 @@ const waitForProcessExit = async (proc: ChildProcessWithoutNullStreams, timeoutM
   });
 };
 
-const stopProcess = async (proc: ChildProcessWithoutNullStreams | null): Promise<void> => {
+const stopProcess = async (proc: ManagedChildProcess | null): Promise<void> => {
   if (!proc || proc.exitCode !== null) return;
   try {
     proc.kill('SIGTERM');
@@ -683,11 +690,11 @@ const stopProcess = async (proc: ChildProcessWithoutNullStreams | null): Promise
 };
 
 const pidsOnPort = (port: number): number[] => {
-  const res = Bun.spawnSync(['lsof', '-ti', `tcp:${port}`], {
-    stdout: 'pipe',
-    stderr: 'ignore',
+  const res = spawnSync('lsof', ['-ti', `tcp:${port}`], {
+    stdio: ['ignore', 'pipe', 'ignore'],
+    encoding: 'utf8',
   });
-  const text = Buffer.from(res.stdout).toString('utf8').trim();
+  const text = String(res.stdout || '').trim();
   if (!text) return [];
   return text
     .split(/\s+/)
@@ -727,13 +734,12 @@ const freePort = async (port: number, log?: ReturnType<typeof createWriteStream>
 type ProcessTableEntry = { pid: number; command: string };
 
 const readProcessTable = (): ProcessTableEntry[] => {
-  const res = Bun.spawnSync(['ps', '-axo', 'pid=,command='], {
+  const res = spawnSync('ps', ['-axo', 'pid=,command='], {
     cwd: process.cwd(),
-    stdout: 'pipe',
-    stderr: 'ignore',
+    stdio: ['ignore', 'pipe', 'ignore'],
+    encoding: 'utf8',
   });
-  return Buffer.from(res.stdout)
-    .toString('utf8')
+  return String(res.stdout || '')
     .split(/\r?\n/)
     .map((line): ProcessTableEntry | null => {
       const match = line.match(/^\s*(\d+)\s+(.+)$/);
@@ -995,9 +1001,9 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
   const logPath = join(logsDir, `e2e-shard-${String(shard).padStart(2, '0')}.log`);
   const log = createWriteStream(logPath, { flags: 'w' });
 
-  let anvil: ChildProcessWithoutNullStreams | null = null;
-  let api: ChildProcessWithoutNullStreams | null = null;
-  let vite: ChildProcessWithoutNullStreams | null = null;
+  let anvil: ManagedChildProcess | null = null;
+  let api: ManagedChildProcess | null = null;
+  let vite: ManagedChildProcess | null = null;
   let teardownReason: string | null = null;
   const rpcPort = args.basePort + shard * 20 + 0;
   const apiPort = args.basePort + shard * 20 + 2;
