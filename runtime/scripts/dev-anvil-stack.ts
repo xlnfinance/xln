@@ -1,4 +1,4 @@
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcess } from 'node:child_process';
 import { ethers } from 'ethers';
 
 import { createJAdapter } from '../jadapter';
@@ -86,7 +86,7 @@ const main = async (): Promise<void> => {
   const args = parseArgs();
   const rpcUrl = `http://${args.host}:${args.port}`;
   const verbose = !args.jsonOnly;
-  let anvil: ChildProcessWithoutNullStreams | null = null;
+  let anvil: ChildProcess | null = null;
 
   if (args.spawnAnvil) {
     log(verbose, `[dev-anvil-stack] starting anvil on ${rpcUrl}`);
@@ -101,8 +101,9 @@ const main = async (): Promise<void> => {
     ], {
       stdio: args.jsonOnly ? ['ignore', 'ignore', 'inherit'] : ['ignore', 'pipe', 'pipe'],
     });
-    if (!args.jsonOnly && anvil.stdout) anvil.stdout.on('data', () => undefined);
-    if (!args.jsonOnly && anvil.stderr) anvil.stderr.on('data', () => undefined);
+    const activeAnvil = anvil;
+    if (!args.jsonOnly && activeAnvil.stdout) activeAnvil.stdout.on('data', () => undefined);
+    if (!args.jsonOnly && activeAnvil.stderr) activeAnvil.stderr.on('data', () => undefined);
   }
 
   const cleanup = (): void => {
