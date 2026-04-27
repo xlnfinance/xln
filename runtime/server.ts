@@ -18,14 +18,12 @@ import {
   enqueueRuntimeInput,
   startP2P,
   startRuntimeLoop,
-  registerEntityRuntimeHint,
-  clearDB,
   ensureGossipProfiles,
   getPersistedLatestHeight,
   readPersistedFrameJournals,
 } from './runtime.ts';
 import { deserializeTaggedJson, safeStringify, serializeTaggedJson } from './serialization-utils';
-import type { AccountMachine, DeliverableEntityInput, Delta, EntityReplica, Env, EntityInput, EntityTx, RoutedEntityInput, RuntimeInput } from './types';
+import type { AccountMachine, DeliverableEntityInput, Delta, EntityReplica, Env, EntityInput, RuntimeInput } from './types';
 import type { HubHealth } from './health';
 import { createExternalWalletApi } from './api/external-wallet-api';
 import { maybeHandleQaRequest } from './qa/api';
@@ -36,8 +34,8 @@ import { createJAdapter, DEV_CHAIN_IDS, type JAdapter } from './jadapter';
 import type { JTokenInfo } from './jadapter/types';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from './jadapter/default-tokens';
 import { resolveEntityProposerId } from './state-helpers';
-import { DEFAULT_SPREAD_DISTRIBUTION, ORDERBOOK_PRICE_SCALE } from './orderbook';
-import { buildDefaultEntitySwapPairs, deriveDelta, getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenInfo } from './account-utils';
+import { ORDERBOOK_PRICE_SCALE } from './orderbook';
+import { buildDefaultEntitySwapPairs, deriveDelta, getSwapPairPolicyByBaseQuote, getTokenInfo } from './account-utils';
 import { LIMITS } from './constants';
 import { encryptJSON, hexToPubKey } from './networking/p2p-crypto';
 import type { Profile } from './networking/gossip';
@@ -45,17 +43,13 @@ import { encodeRebalancePolicyMemo } from './rebalance-policy';
 import { hashHtlcSecret } from './htlc-utils';
 import { isLoopbackUrl, toPublicRpcUrl } from './loopback-url';
 import {
-  type RelayStore,
   createRelayStore,
   normalizeRuntimeKey,
   nextWsTimestamp,
   pushDebugEvent,
-  storeGossipProfile,
   getAllGossipProfiles,
   removeClient,
-  resetStore as resetRelayStore,
   resolveEncryptionPublicKeyHex,
-  cacheEncryptionKey,
 } from './relay-store';
 import { relayRoute, type RelayRouterConfig } from './relay-router';
 import { createLocalDeliveryHandler } from './relay-local-delivery';
@@ -107,8 +101,6 @@ const JSON_HEADERS = {
 } as const;
 const DEBUG_DUMPS_DIR = join(process.cwd(), '.logs', 'debug-dumps');
 const formatTimingMs = (value: number): string => value.toFixed(2);
-const stringifyBootstrapDebug = (value: unknown): string =>
-  JSON.stringify(value, (_key, nested) => (typeof nested === 'bigint' ? nested.toString() : nested));
 const STACK_COMPATIBILITY_PROBE_ENTITY = `0x${'11'.repeat(32)}`;
 const resolveRequiredAnvilRpc = (): string => {
   const rpcUrl = String(process.env['ANVIL_RPC'] || '').trim();
@@ -130,11 +122,6 @@ const buildDebugDumpFileName = (reason: string | undefined, runtimeId: string | 
     .slice(0, 48) || 'dump';
   const runtimePart = String(runtimeId || 'runtime').replace(/[^a-zA-Z0-9_-]+/g, '').slice(-16) || 'runtime';
   return `${iso}-${reasonPart}-${runtimePart}.json`;
-};
-
-const invalidateHealthCache = (): void => {
-  cachedHealthResponse = null;
-  cachedHealthInFlight = null;
 };
 
 const buildDiskSummary = (storage: StorageHealth) => {
@@ -403,8 +390,6 @@ const FAUCET_WALLET_ETH_TARGET = ethers.parseEther('100');
 const FAUCET_TOKEN_TARGET_UNITS = 1_000_000n;
 const HUB_RESERVE_ASSERT_TIMEOUT_MS = 30_000;
 const HUB_MESH_ASSERT_TIMEOUT_MS = 20_000;
-const HUB_DEFAULT_SUPPORTED_PAIRS = ['1/2', '1/3', '2/3'] as const;
-const HUB_DEFAULT_MIN_TRADE_SIZE = 10n * 10n ** 18n;
 const BOOTSTRAP_POLL_MS = Math.max(
   10,
   Number(process.env['BOOTSTRAP_POLL_MS'] || (process.env['NODE_ENV'] === 'production' ? '40' : '50')),
@@ -720,9 +705,6 @@ const accountMatchesCounterparty = (
 ): boolean => {
   const needle = String(counterpartyId || '').toLowerCase();
   if (!needle) return false;
-
-  const cp = typeof account?.counterpartyEntityId === 'string' ? account.counterpartyEntityId.toLowerCase() : '';
-  if (cp === needle) return true;
 
   const me = String(ownerEntityId || '').toLowerCase();
   const left = typeof account?.leftEntity === 'string' ? account.leftEntity.toLowerCase() : '';
@@ -1123,7 +1105,7 @@ const ensureMarketMakerEntity = async (
   const activeJReplica = activeJurisdictionName ? env.jReplicas?.get(activeJurisdictionName) : undefined;
   const jurisdictionConfig = activeJReplica
     ? {
-        name: activeJurisdictionName,
+        name: activeJurisdictionName || 'default',
         chainId: Number(activeJReplica.jadapter?.chainId ?? activeJReplica.chainId ?? 0),
         address: activeJReplica.rpcs?.[0] ?? '',
         entityProviderAddress: activeJReplica.entityProviderAddress ?? activeJReplica.contracts?.entityProvider ?? '',
@@ -2185,10 +2167,10 @@ const buildRuntimeJurisdictionsJson = async (env?: Env | null): Promise<string |
 
 export type XlnServerOptions = {
   port: number;
-  host?: string;
-  staticDir?: string;
-  relaySeeds?: string[];
-  serverId?: string;
+  host?: string | undefined;
+  staticDir?: string | undefined;
+  relaySeeds?: string[] | undefined;
+  serverId?: string | undefined;
 };
 
 const DEFAULT_OPTIONS: XlnServerOptions = {
@@ -2198,7 +2180,6 @@ const DEFAULT_OPTIONS: XlnServerOptions = {
   relaySeeds: [],
   serverId: 'xln-server',
 };
-let activeServerOptions: XlnServerOptions = { ...DEFAULT_OPTIONS };
 const DEFAULT_TOKEN_CATALOG = DEFAULT_TOKENS.map(token => ({ ...token }));
 const getDefaultLocalRelayUrl = (port?: number): string => `ws://localhost:${port ?? DEFAULT_OPTIONS.port}/relay`;
 const resolveConfiguredRelayUrl = (port?: number): string => {
@@ -4489,7 +4470,6 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   console.log('═══ startXlnServer() CALLED ═══');
   console.log('Options:', opts);
   const options = { ...DEFAULT_OPTIONS, ...opts };
-  activeServerOptions = { ...options };
   relayStore = createRelayStore(options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server');
   rpcMarketSubscriptions.clear();
   if (rpcMarketPublisherTimer) {

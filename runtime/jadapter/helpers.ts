@@ -6,7 +6,7 @@
 
 import { ethers } from 'ethers';
 import type { JEvent } from './types';
-import type { EntityInput, Env } from '../types';
+import type { EntityInput, Env, JurisdictionEvent } from '../types';
 import { createEmptyBatch, type JBatch } from '../j-batch';
 import { enqueueRuntimeInput } from '../runtime';
 
@@ -50,13 +50,16 @@ export const toJEvent = (name: string, args: Record<string, unknown> | undefined
 export const normalizeAdapterEvents = (events: Array<{
   name: string; args?: Record<string, unknown>; blockNumber?: number; blockHash?: string; transactionHash?: string;
 }>, fallbackMeta?: { blockNumber?: number; blockHash?: string; transactionHash?: string }): JEvent[] =>
-  events.map((event) =>
-    toJEvent(event.name, event.args, {
-      blockNumber: event.blockNumber ?? fallbackMeta?.blockNumber,
-      blockHash: event.blockHash ?? fallbackMeta?.blockHash,
-      transactionHash: event.transactionHash ?? fallbackMeta?.transactionHash,
-    }),
-  );
+  events.map((event) => {
+    const meta: { blockNumber?: number; blockHash?: string; transactionHash?: string } = {};
+    const blockNumber = event.blockNumber ?? fallbackMeta?.blockNumber;
+    const blockHash = event.blockHash ?? fallbackMeta?.blockHash;
+    const transactionHash = event.transactionHash ?? fallbackMeta?.transactionHash;
+    if (blockNumber !== undefined) meta.blockNumber = blockNumber;
+    if (blockHash !== undefined) meta.blockHash = blockHash;
+    if (transactionHash !== undefined) meta.transactionHash = transactionHash;
+    return toJEvent(event.name, event.args, meta);
+  });
 
 export const parseReceiptLogsToJEvents = (receipt: {
   logs: Array<{ topics: readonly string[]; data: string }>; blockNumber: number; blockHash: string; hash: string;
@@ -194,10 +197,12 @@ export function isEventRelevantToEntity(event: RawJEvent, entityId: string): boo
       return true; // Global: all entities with matching hashlock should observe
 
     case 'AccountSettled': {
-      const settled = args['settled'] ?? args[''] ?? args[0] ?? [];
-      for (const s of settled) {
-        const left = normalize(s[0] ?? s.left);
-        const right = normalize(s[1] ?? s.right);
+      const settledRaw = args['settled'] ?? args[''] ?? args[0] ?? [];
+      const settled = Array.isArray(settledRaw) ? settledRaw : [];
+      for (const rawSettlement of settled) {
+        const s = rawSettlement as Record<string, unknown> & unknown[];
+        const left = normalize(s[0] ?? s['left']);
+        const right = normalize(s[1] ?? s['right']);
         if (left === normalizedEntity || right === normalizedEntity) return true;
       }
       return false;
@@ -231,7 +236,7 @@ export function isEventRelevantToEntity(event: RawJEvent, entityId: string): boo
  * Returns ARRAY because AccountSettled can contain multiple settlements for same entity.
  * Output format: { type: 'PascalCase', data: { ... } } — matches j-events.ts expectations.
  */
-export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ type: string; data: Record<string, unknown> }> {
+export function rawEventToJEvents(event: RawJEvent, entityId: string): JurisdictionEvent[] {
   const args = event.args;
 
   switch (event.name) {
@@ -239,7 +244,7 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
       return [{
         type: 'ReserveUpdated',
         data: {
-          entity: args['entity'],
+          entity: String(args['entity'] ?? ''),
           tokenId: Number(args['tokenId']),
           newBalance: (args['newBalance'] ?? 0).toString(),
         },
@@ -248,28 +253,32 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
     case 'AccountSettled': {
       // AccountSettlement[] = { left, right, tokens: TokenSettlement[], nonce }
       // TokenSettlement = { tokenId, leftReserve, rightReserve, collateral, ondelta }
-      const settled = args['settled'] ?? args[''] ?? args[0] ?? [];
-      const results: Array<{ type: string; data: Record<string, any> }> = [];
-      for (const s of settled) {
-        const left = s[0] ?? s.left;
-        const right = s[1] ?? s.right;
+      const settledRaw = args['settled'] ?? args[''] ?? args[0] ?? [];
+      const settled = Array.isArray(settledRaw) ? settledRaw : [];
+      const results: JurisdictionEvent[] = [];
+      for (const rawSettlement of settled) {
+        const s = rawSettlement as Record<string, unknown> & unknown[];
+        const left = s[0] ?? s['left'];
+        const right = s[1] ?? s['right'];
         if (String(left).toLowerCase() === entityId.toLowerCase() ||
             String(right).toLowerCase() === entityId.toLowerCase()) {
-          const tokens = s[2] ?? s.tokens ?? [];
-          const nonce = Number(s[3] ?? s.nonce ?? 0);
+          const tokensRaw = s[2] ?? s['tokens'] ?? [];
+          const tokens = Array.isArray(tokensRaw) ? tokensRaw : [];
+          const nonce = Number(s[3] ?? s['nonce'] ?? 0);
 
           // Emit one j-event per token in the settlement
-          for (const tok of tokens) {
-            const tokenId = Number(tok[0] ?? tok.tokenId ?? 0);
-            const leftReserve = (tok[1] ?? tok.leftReserve ?? 0n).toString();
-            const rightReserve = (tok[2] ?? tok.rightReserve ?? 0n).toString();
-            const collateral = (tok[3] ?? tok.collateral ?? 0n).toString();
-            const ondelta = (tok[4] ?? tok.ondelta ?? 0n).toString();
+          for (const rawToken of tokens) {
+            const tok = rawToken as Record<string, unknown> & unknown[];
+            const tokenId = Number(tok[0] ?? tok['tokenId'] ?? 0);
+            const leftReserve = (tok[1] ?? tok['leftReserve'] ?? 0n).toString();
+            const rightReserve = (tok[2] ?? tok['rightReserve'] ?? 0n).toString();
+            const collateral = (tok[3] ?? tok['collateral'] ?? 0n).toString();
+            const ondelta = (tok[4] ?? tok['ondelta'] ?? 0n).toString();
             results.push({
               type: 'AccountSettled',
               data: {
-                leftEntity: left,
-                rightEntity: right,
+                leftEntity: String(left),
+                rightEntity: String(right),
                 tokenId,
                 leftReserve,
                 rightReserve,
@@ -288,9 +297,9 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
       return [{
         type: 'SecretRevealed',
         data: {
-          hashlock: args['hashlock'],
-          revealer: args['revealer'],
-          secret: args['secret'],
+          hashlock: String(args['hashlock'] ?? ''),
+          revealer: String(args['revealer'] ?? ''),
+          secret: String(args['secret'] ?? ''),
         },
       }];
 
@@ -298,11 +307,11 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
       return [{
         type: 'DisputeStarted',
         data: {
-          sender: args['sender'],
-          counterentity: args['counterentity'],
-          nonce: args['nonce'],
-          proofbodyHash: args['proofbodyHash'],
-          initialArguments: args['initialArguments'] ?? '0x',
+          sender: String(args['sender'] ?? ''),
+          counterentity: String(args['counterentity'] ?? ''),
+          nonce: String(args['nonce'] ?? ''),
+          proofbodyHash: String(args['proofbodyHash'] ?? ''),
+          initialArguments: String(args['initialArguments'] ?? '0x'),
         },
       }];
 
@@ -310,11 +319,11 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
       return [{
         type: 'DisputeFinalized',
         data: {
-          sender: args['sender'],
-          counterentity: args['counterentity'],
-          initialNonce: args['initialNonce'],
-          initialProofbodyHash: args['initialProofbodyHash'],
-          finalProofbodyHash: args['finalProofbodyHash'],
+          sender: String(args['sender'] ?? ''),
+          counterentity: String(args['counterentity'] ?? ''),
+          initialNonce: String(args['initialNonce'] ?? ''),
+          initialProofbodyHash: String(args['initialProofbodyHash'] ?? ''),
+          finalProofbodyHash: String(args['finalProofbodyHash'] ?? ''),
         },
       }];
 
@@ -322,8 +331,8 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
       return [{
         type: 'DebtCreated',
         data: {
-          debtor: args['debtor'],
-          creditor: args['creditor'],
+          debtor: String(args['debtor'] ?? ''),
+          creditor: String(args['creditor'] ?? ''),
           tokenId: Number(args['tokenId']),
           amount: (args['amount'] ?? 0).toString(),
           debtIndex: Number(args['debtIndex'] ?? 0),
@@ -334,8 +343,8 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
       return [{
         type: 'DebtEnforced',
         data: {
-          debtor: args['debtor'],
-          creditor: args['creditor'],
+          debtor: String(args['debtor'] ?? ''),
+          creditor: String(args['creditor'] ?? ''),
           tokenId: Number(args['tokenId']),
           amountPaid: (args['amountPaid'] ?? 0).toString(),
           remainingAmount: (args['remainingAmount'] ?? 0).toString(),
@@ -347,8 +356,8 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
       return [{
         type: 'DebtForgiven',
         data: {
-          debtor: args['debtor'],
-          creditor: args['creditor'],
+          debtor: String(args['debtor'] ?? ''),
+          creditor: String(args['creditor'] ?? ''),
           tokenId: Number(args['tokenId']),
           amountForgiven: (args['amountForgiven'] ?? 0).toString(),
           debtIndex: Number(args['debtIndex'] ?? 0),
@@ -359,8 +368,8 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Array<{ t
       return [{
         type: 'HankoBatchProcessed',
         data: {
-          entityId: args['entityId'],
-          hankoHash: args['hankoHash'],
+          entityId: String(args['entityId'] ?? ''),
+          hankoHash: String(args['hankoHash'] ?? ''),
           nonce: Number(args['nonce']),
           success: Boolean(args['success']),
         },
@@ -433,6 +442,8 @@ function enqueueRawJEventsToRuntime(
   for (const { entityId, signerId, events } of eventsByReplica.values()) {
     const jEvents = events.flatMap((event) => rawEventToJEvents(event, entityId));
     if (jEvents.length === 0) continue;
+    const firstJEvent = jEvents[0];
+    if (!firstJEvent) continue;
 
     const settledCount = jEvents.filter((event) => event.type === 'AccountSettled').length;
     if (emitSettledDebugEvents && settledCount > 0) {
@@ -472,7 +483,7 @@ function enqueueRawJEventsToRuntime(
             blockHash,
             transactionHash,
             events: jEvents,
-            event: jEvents[0],
+            event: firstJEvent,
           },
         },
       ],

@@ -5,6 +5,7 @@ namespace Bun {
     readonly type: string;
     text(): Promise<string>;
     arrayBuffer(): Promise<ArrayBuffer>;
+    exists(): Promise<boolean>;
   }
 
   type ServeWebSocket<T = unknown> = {
@@ -71,4 +72,8 @@ declare module 'bun' {
   export type ServeOptions<T = unknown> = Bun.ServeOptions<T>;
   export const serve: typeof Bun.serve;
 export const file: typeof Bun.file;
+}
+
+interface ImportMeta {
+  main?: boolean;
 }

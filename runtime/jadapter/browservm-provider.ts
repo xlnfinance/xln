@@ -25,9 +25,9 @@ import {
   Depository__factory,
 } from '../../jurisdictions/typechain-types/index.ts';
 import { safeStringify } from '../serialization-utils.js';
-import { deriveSignerKeySync, getCachedSignerPrivateKey } from '../account-crypto.js';
+import { getCachedSignerPrivateKey } from '../account-crypto.js';
 import { isLeftEntity, normalizeEntityId } from '../entity-id-utils';
-import { batchAddReserveToReserve, batchAddSettlement, createEmptyBatch } from '../j-batch';
+import { batchAddSettlement, createEmptyBatch } from '../j-batch';
 import { buildExternalTokenToReserveBatch } from './helpers';
 import { buildSingleSignerHanko, prepareSignedBatch } from '../hanko/batch';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, DEFAULT_SIGNER_FAUCET, TOKEN_REGISTRATION_AMOUNT } from './default-tokens';
@@ -65,7 +65,6 @@ export class BrowserVMProvider {
   private depositoryInterface: ethers.Interface | null = null;
   private entityProviderInterface: ethers.Interface | null = null;
   private accountInterface: ethers.Interface | null = null;
-  private deltaTransformerInterface: ethers.Interface | null = null;
   private erc20Interface: ethers.Interface | null = null;
   private tokenRegistry: Map<string, { address: string; name: string; symbol: string; decimals: number; tokenId: number }> = new Map();
   private fundedAddresses: Set<string> = new Set();
@@ -73,7 +72,6 @@ export class BrowserVMProvider {
   private quietLogs = false;
   private blockHeight = 0; // Track J-Machine block height
   private blockHash = '0x0000000000000000000000000000000000000000000000000000000000000000'; // Current block hash
-  private prevBlockHash = '0x0000000000000000000000000000000000000000000000000000000000000000'; // Previous block hash
   private blockTimestamp = 0; // Deterministic block timestamp (set by runtime)
   private activeBlock: Block | null = null;
   // ─────────────────────────────────────────────────────────────────────────────
@@ -117,12 +115,6 @@ export class BrowserVMProvider {
     }
   }
 
-  private warn(...args: unknown[]): void {
-    if (!this.quietLogs) {
-      console.warn(...args);
-    }
-  }
-
   /** Initialize VM and deploy contracts */
   async init(options?: { chainId?: number }): Promise<void> {
     if (this.initialized) {
@@ -142,7 +134,6 @@ export class BrowserVMProvider {
     this.depositoryInterface = new ethers.Interface(this.depositoryArtifact.abi);
     this.entityProviderInterface = new ethers.Interface(this.entityProviderArtifact.abi);
     this.accountInterface = new ethers.Interface(this.accountArtifact.abi);
-    this.deltaTransformerInterface = new ethers.Interface(this.deltaTransformerArtifact.abi);
     this.erc20Interface = new ethers.Interface(this.erc20Artifact.abi);
     console.log('[BrowserVM] Loaded all contract artifacts (including Account library and DeltaTransformer)');
 
@@ -847,7 +838,7 @@ export class BrowserVMProvider {
     }];
 
     // Generate counterparty signature (REQUIRED)
-    const sig = await this.signSettlement(entityId, counterpartyId, diffs, [], []);
+    const sig = await this.signSettlement(entityId, counterpartyId, diffs, []);
 
     return this.settle(leftEntity, rightEntity, diffs, [], sig);
   }
@@ -942,7 +933,7 @@ export class BrowserVMProvider {
     const addressPart = '0x' + normalized.slice(-40);
 
     // Check if we have a wallet for this address
-    for (const [id, wallet] of this.entityWallets) {
+    for (const [, wallet] of this.entityWallets) {
       if (wallet.address.toLowerCase() === addressPart.toLowerCase()) {
         this.entityWallets.set(normalized, wallet);
         return wallet;
@@ -1831,7 +1822,6 @@ export class BrowserVMProvider {
       baseFeePerGas: 1n, // Low base fee for simnet
     };
     const block = createBlock({ header: headerData }, { common: this.common });
-    this.prevBlockHash = this.blockHash;
     this.blockHeight = nextHeight;
     this.blockHash = bytesToHex(block.header.hash());
     this.blockTimestamp = timestampMs;

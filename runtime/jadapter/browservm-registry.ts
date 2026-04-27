@@ -9,7 +9,7 @@ type BrowserVMCarrier = BrowserVMProvider | { browserVM?: BrowserVMProvider | nu
 const unwrapBrowserVM = (value: BrowserVMCarrier): BrowserVMProvider | null => {
   if (!value || typeof value !== 'object') return null;
   if ('browserVM' in value) return value.browserVM ?? null;
-  return value;
+  return value as BrowserVMProvider;
 };
 
 const buildBrowserVMJurisdiction = (
