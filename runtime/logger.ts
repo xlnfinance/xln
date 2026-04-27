@@ -20,6 +20,7 @@ export interface LogConfig {
   FRAME_CONSENSUS: boolean;
   ENTITY_OUTPUT: boolean;
   ENTITY_INPUT: boolean;
+  RUNTIME_TICK: boolean;
   SERVER_TICK: boolean;
   J_WATCHER: boolean;
   BLOCKCHAIN: boolean;
@@ -38,6 +39,7 @@ export const LOG_CONFIG: LogConfig = {
   FRAME_CONSENSUS: PERFORMANCE.DEBUG_CONSENSUS,  // BFT consensus
   ENTITY_OUTPUT: PERFORMANCE.DEBUG_LOGGING,      // Entity outputs
   ENTITY_INPUT: PERFORMANCE.DEBUG_LOGGING,       // Entity inputs
+  RUNTIME_TICK: PERFORMANCE.DEBUG_LOGGING,       // Runtime input processing
   SERVER_TICK: PERFORMANCE.DEBUG_LOGGING,        // Runtime tick processing
   J_WATCHER: PERFORMANCE.LOG_BLOCKCHAIN_ERRORS,  // Blockchain watcher
   BLOCKCHAIN: PERFORMANCE.LOG_BLOCKCHAIN_ERRORS, // Blockchain interactions

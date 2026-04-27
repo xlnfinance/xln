@@ -1,5 +1,7 @@
 import type { OrderbookExtState } from './orderbook';
 import type { SwapKey } from './swap-keys';
+import type { Level } from 'level';
+import type { RuntimeP2P } from './networking/p2p';
 
 /**
  * XLN Type Definitions
@@ -230,6 +232,13 @@ export type RuntimeP2PConfigLike = {
 };
 
 export type RuntimeP2PSurface = {
+  close(): void;
+  connect(): void;
+  isConnected(): boolean;
+  matchesIdentity(runtimeId: string, signerId?: string): boolean;
+  updateConfig(config: RuntimeP2PConfigLike): void;
+  refreshGossip(mode?: unknown): void;
+  ensureProfiles(entityIds: string[]): Promise<boolean>;
   sendDebugEvent(payload: unknown): boolean;
   syncProfiles(): Promise<boolean>;
   announceProfilesForEntities(entityIds: string[], reason?: string): void;
@@ -261,8 +270,8 @@ export interface RuntimeInput {
   runtimeTxs: RuntimeTx[];
   entityInputs: RoutedEntityInput[];
   jInputs?: JInput[]; // J-layer inputs (queue to J-mempool)
-  timestamp?: number; // External ingress timestamp seed (ms) for this runtime input batch
-  queuedAt?: number; // When first queued into runtime mempool (ms)
+  timestamp?: number | undefined; // External ingress timestamp seed (ms) for this runtime input batch
+  queuedAt?: number | undefined; // When first queued into runtime mempool (ms)
 }
 
 /** J-layer input - queues JTx to jurisdiction mempool */
@@ -280,7 +289,7 @@ export type RuntimeTx =
         config: ConsensusConfig;
         isProposer: boolean;
         profileName?: string;
-        position?: { x: number; y: number; z: number };
+        position?: { x: number; y: number; z: number; jurisdiction?: string; xlnomy?: string };
       };
     }
   | {
@@ -294,6 +303,8 @@ export type RuntimeTx =
         contracts?: {
           depository?: string;
           entityProvider?: string;
+          account?: string;
+          deltaTransformer?: string;
         };
         tokens?: Array<{      // Auto-deploy for BrowserVM only
           symbol: string;
@@ -1990,13 +2001,13 @@ export interface Env {
   jReplicas: Map<string, JReplica>;       // Jurisdiction replicas (J-layer EVM state)
   height: number;
   timestamp: number;
-  runtimeSeed?: string; // BrainVault seed backing this runtime (plaintext, dev mode)
-  runtimeId?: string; // Runtime identity (usually signer1 address)
+  runtimeSeed?: string | undefined; // BrainVault seed backing this runtime (plaintext, dev mode)
+  runtimeId?: string | undefined; // Runtime identity (usually signer1 address)
   lastProcessEnteredAt?: number; // Wall-clock timestamp of most recent process() entry
   dbNamespace?: string; // DB namespace for per-runtime persistence (defaults to runtimeId)
   // Runtime mempool (runtime-level queue; WAL-like)
   // NOTE: runtimeInput is deprecated alias - both point to same object
-  runtimeMempool?: RuntimeInput;
+  runtimeMempool?: RuntimeInput | undefined;
   runtimeInput: RuntimeInput; // Deprecated alias of runtimeMempool
   runtimeConfig?: {
     minFrameDelayMs?: number; // Minimum delay between runtime frames
@@ -2012,7 +2023,7 @@ export interface Env {
       frameDbRetainFrames?: number;
       accountMerkleRadix?: 16 | 256;
     };
-  };
+  } | undefined;
   runtimeState?: {
     loopActive?: boolean;
     loopPromise?: Promise<void> | null;
@@ -2023,24 +2034,24 @@ export interface Env {
     persistencePaused?: boolean;
     lastFrameAt?: number; // Wall-clock timestamp of the most recent processed runtime cycle
     processingPromise?: Promise<void> | null;
-    p2p?: RuntimeP2PSurface | null;
+    p2p?: RuntimeP2P | null | undefined;
     pendingP2PConfig?: RuntimeP2PConfigLike | null;
     lastP2PConfig?: RuntimeP2PConfigLike | null;
     envChangeCallbacks?: Set<(env: Env) => void>;
-    db?: unknown;
-    dbOpenPromise?: Promise<boolean> | null;
-    storageDb?: unknown;
-    storageDbOpenPromise?: Promise<boolean> | null;
-    storagePreviousDb?: unknown;
-    storagePreviousDbOpenPromise?: Promise<boolean> | null;
+    db?: Level<Buffer, Buffer> | null | undefined;
+    dbOpenPromise?: Promise<boolean> | null | undefined;
+    storageDb?: Level<Buffer, Buffer> | null | undefined;
+    storageDbOpenPromise?: Promise<boolean> | null | undefined;
+    storagePreviousDb?: Level<Buffer, Buffer> | null | undefined;
+    storagePreviousDbOpenPromise?: Promise<boolean> | null | undefined;
     storageVerifiedCurrentHeight?: number;
     storageVerifiedPreviousHeight?: number;
     storageEpochRotatePromise?: Promise<void> | null;
     storageEntityHashDocs?: unknown;
-    frameDb?: unknown;
-    frameDbOpenPromise?: Promise<boolean> | null;
-    infraDb?: unknown;
-    infraDbOpenPromise?: Promise<boolean> | null;
+    frameDb?: Level<Buffer, Buffer> | null | undefined;
+    frameDbOpenPromise?: Promise<boolean> | null | undefined;
+    infraDb?: Level<Buffer, Buffer> | null | undefined;
+    infraDbOpenPromise?: Promise<boolean> | null | undefined;
     logState?: {
       nextId: number;
       mirrorToConsole?: boolean;
@@ -2064,7 +2075,7 @@ export interface Env {
     }>;
     watcherDedupCounter?: import('./jadapter/watcher').EventBatchCounter;
     directEntityInputDispatch?: ((targetRuntimeId: string, input: DeliverableEntityInput, ingressTimestamp?: number) => boolean) | null;
-  };
+  } | undefined;
   history: EnvSnapshot[]; // Time machine snapshots - single source of truth
   gossip: GossipLayer;
 
@@ -2080,7 +2091,7 @@ export interface Env {
   evms: Map<string, unknown>;
 
   // Active jurisdiction
-  activeJurisdiction?: string; // Currently active J-replica name
+  activeJurisdiction?: string | undefined; // Currently active J-replica name
 
   // Scenario mode: deterministic time control (scenarios set env.timestamp manually)
   scenarioMode?: boolean; // When true, runtime doesn't auto-update timestamp
@@ -2090,10 +2101,10 @@ export interface Env {
   strictScenarioLabel?: string; // Optional label for strict scenario errors
 
   // Frame stepping: stop at specific frame for debugging
-  stopAtFrame?: number; // When set, process() stops at this frame and dumps state
+  stopAtFrame?: number | undefined; // When set, process() stops at this frame and dumps state
 
   // Frame display duration hint (for time-travel visualization)
-  frameDisplayMs?: number; // How long to display this frame (default: 100ms)
+  frameDisplayMs?: number | undefined; // How long to display this frame (default: 100ms)
 
   // Snapshot extras for scenarios (set before process(), consumed by captureSnapshot)
   extra?: {
@@ -2106,7 +2117,7 @@ export interface Env {
     };
     expectedSolvency?: bigint;
     description?: string;
-  };
+  } | undefined;
 
   // E→E message queue (always spans ticks - no same-tick cascade)
   pendingOutputs?: RoutedEntityInput[]; // Outputs queued for next tick
