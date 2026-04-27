@@ -22,9 +22,13 @@ import { createGossipLayer } from '../networking/gossip';
 import { getAccountFrameHistoryView } from '../env-events';
 import { getBookOrders } from '../orderbook/core';
 
+type ApplyRuntimeInputFn = typeof import('../runtime').applyRuntimeInput;
+type MarketHub = { name: string; id: string; signer: string; role: string; pairs: string[] };
+type MarketTrader = { name: string; id: string; signer: string; role: string };
+
 // Lazy-loaded runtime functions
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
-let _applyRuntimeInput: ((env: Env, runtimeInput: any) => Promise<Env>) | null = null;
+let _applyRuntimeInput: ApplyRuntimeInputFn | null = null;
 
 const getProcess = async () => {
   if (!_process) {
@@ -39,7 +43,18 @@ const getApplyRuntimeInput = async () => {
     const runtime = await import('../runtime');
     _applyRuntimeInput = runtime.applyRuntimeInput;
   }
-  return _applyRuntimeInput;
+  const applyRuntimeInput = _applyRuntimeInput;
+  if (!applyRuntimeInput) {
+    throw new Error('SWAP_MARKET_APPLY_RUNTIME_INPUT_UNAVAILABLE');
+  }
+  return applyRuntimeInput;
+};
+
+const requireDefined = <T>(value: T | undefined, label: string): T => {
+  if (!value) {
+    throw new Error(`SWAP_MARKET_MISSING_ENTITY:${label}`);
+  }
+  return value;
 };
 
 // Keep scenario tokens away from production liquid-quote token ids except USDC itself.
@@ -63,23 +78,9 @@ const wbtc = (amount: number | bigint) => BigInt(amount) * ONE;
 const dai = (amount: number | bigint) => BigInt(amount) * ONE;
 
 // Fill ratios
-const MAX_FILL_RATIO = 65535;
 const FILL_10 = 6553;
-const FILL_20 = 13107;
 const FILL_25 = 16384;
 const FILL_50 = 32768;
-const FILL_60 = 39321;
-
-const ceilDiv = (numerator: bigint, denominator: bigint): bigint => {
-  if (denominator === 0n) return 0n;
-  return (numerator + denominator - 1n) / denominator;
-};
-
-const computeFilledAmounts = (giveAmount: bigint, wantAmount: bigint, fillRatio: number) => {
-  const filledGive = (giveAmount * BigInt(fillRatio)) / BigInt(MAX_FILL_RATIO);
-  const filledWant = giveAmount > 0n ? ceilDiv(filledGive * wantAmount, giveAmount) : 0n;
-  return { filledGive, filledWant };
-};
 
 // Using helpers from helpers.ts (no duplication)
 
@@ -176,13 +177,13 @@ export async function swapMarket(env: Env): Promise<void> {
   // ============================================================================
   console.log('📦 Creating 10 market participants (3 hubs + 7 traders)...');
 
-  const hubs = [
+  const hubs: MarketHub[] = [
     { name: 'HubETH', id: '0x' + '1'.padStart(64, '0'), signer: '1', role: 'hub', pairs: [ETH_USDC_PAIR] }, // ETH/USDC
     { name: 'HubWBTC', id: '0x' + '2'.padStart(64, '0'), signer: '2', role: 'hub', pairs: [WBTC_USDC_PAIR] }, // WBTC/USDC
     { name: 'HubDAI', id: '0x' + '3'.padStart(64, '0'), signer: '3', role: 'hub', pairs: [DAI_USDC_PAIR] }, // DAI/USDC
   ];
 
-  const traders = [
+  const traders: MarketTrader[] = [
     { name: 'Alice', id: '0x' + '4'.padStart(64, '0'), signer: '4', role: 'maker' },
     { name: 'Bob', id: '0x' + '5'.padStart(64, '0'), signer: '5', role: 'maker' },
     { name: 'Carol', id: '0x' + '6'.padStart(64, '0'), signer: '6', role: 'taker' },
@@ -243,8 +244,16 @@ export async function swapMarket(env: Env): Promise<void> {
   await applyRuntimeInput(env, { runtimeTxs: createEntityTxs, entityInputs: [] });
   console.log(`  ✅ Created: ${entities.map(e => e.name).join(', ')}\n`);
 
-  const [hubEth, hubWbtc, hubDai] = hubs;
-  const [alice, bob, carol, dave, eve, frank, grace] = traders;
+  const hubEth = requireDefined(hubs[0], 'HubETH');
+  const hubWbtc = requireDefined(hubs[1], 'HubWBTC');
+  const hubDai = requireDefined(hubs[2], 'HubDAI');
+  const alice = requireDefined(traders[0], 'Alice');
+  const bob = requireDefined(traders[1], 'Bob');
+  const carol = requireDefined(traders[2], 'Carol');
+  const dave = requireDefined(traders[3], 'Dave');
+  const eve = requireDefined(traders[4], 'Eve');
+  const frank = requireDefined(traders[5], 'Frank');
+  const grace = requireDefined(traders[6], 'Grace');
 
   // Initialize orderbookExt for each hub
   const { DEFAULT_SPREAD_DISTRIBUTION } = await import('../orderbook');
@@ -515,9 +524,6 @@ export async function swapMarket(env: Env): Promise<void> {
   if (!bobEthOfferBefore) {
     console.warn('⚠️ Bob ETH ask missing after Phase 1; continuing with baseline order values');
   }
-  const bobEthGive = bobEthOfferBefore?.quantizedGive ?? bobEthOfferBefore?.giveAmount ?? eth(5);
-  const bobEthWant = bobEthOfferBefore?.quantizedWant ?? bobEthOfferBefore?.wantAmount ?? usdc(15250);
-
   const [, aliceWbtcRepBefore] = findReplica(env, alice.id);
   const aliceWbtcAccountBefore = aliceWbtcRepBefore.state.accounts.get(hubWbtc.id);
   const aliceWbtcOfferBefore = aliceWbtcAccountBefore?.swapOffers?.get('alice-wbtc-bid');
@@ -531,9 +537,6 @@ export async function swapMarket(env: Env): Promise<void> {
   if (!bobDaiOfferBefore) {
     console.warn('⚠️ Bob DAI ask missing after Phase 1; continuing with baseline order values');
   }
-  const bobDaiGive = bobDaiOfferBefore?.quantizedGive ?? bobDaiOfferBefore?.giveAmount ?? dai(500);
-  const bobDaiWant = bobDaiOfferBefore?.quantizedWant ?? bobDaiOfferBefore?.wantAmount ?? usdc(501);
-
   // ============================================================================
   // PHASE 2: Takers sweep orderbook
   // ============================================================================
