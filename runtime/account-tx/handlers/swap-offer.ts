@@ -14,8 +14,6 @@ import type { AccountMachine, AccountTx, SwapOffer } from '../../types';
 import type { SwapOfferEvent } from '../../entity-tx/handlers/account';
 import { deriveDelta, getSwapPairPolicyByBaseQuote } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
-import { formatEntityId } from '../../utils';
-import { canonicalAccountKey } from '../../state-helpers';
 import { deriveSide, SWAP_LOT_SCALE, ORDERBOOK_PRICE_SCALE, prepareSwapOrder } from '../../orderbook';
 import { FINANCIAL, LIMITS } from '../../constants';
 import { recordSwapOfferLifecycle } from './swap-history';
@@ -93,7 +91,6 @@ export async function handleSwapOffer(
   // This keeps account holds, swap state, and orderbook matching deterministic.
   const side = deriveSide(giveTokenId, wantTokenId);
   const rawBaseAmount = side === 1 ? giveAmount : wantAmount;
-  const rawQuoteAmount = side === 1 ? wantAmount : giveAmount;
   const baseTokenId = side === 1 ? giveTokenId : wantTokenId;
   const quoteTokenId = side === 1 ? wantTokenId : giveTokenId;
   if (rawBaseAmount < LOT_SCALE) {

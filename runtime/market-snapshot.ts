@@ -88,12 +88,9 @@ export const buildMarketSnapshotForReplica = (
   const spreadPercent = bestBidTicks !== null && bestAskTicks !== null
     ? formatPercent3(Number(spreadTicks ?? 0n), Number(bestAskTicks))
     : '-';
-  const entityHeight =
-    Number(replica?.state?.height || 0)
-    || Number(replica?.state?.currentHeight || 0)
-    || 0;
-  const entityStateHash = typeof replica?.state?.stateHash === 'string'
-    ? replica.state.stateHash
+  const entityHeight = Number(replica?.state?.height || 0) || 0;
+  const entityStateHash = typeof replica?.lockedFrame?.hash === 'string'
+    ? replica.lockedFrame.hash
     : null;
   const hubUpdatedAt = Number(replica?.state?.timestamp || 0);
   return {

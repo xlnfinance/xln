@@ -9,8 +9,18 @@
  * @license AGPL-3.0
  */
 
-import { createJAdapter, type JAdapter } from '../jadapter';
+import { createJAdapter } from '../jadapter';
+import type { ContractTransactionResponse } from 'ethers';
 import { ethers } from 'ethers';
+
+type ReserveToReserveDepository = {
+  reserveToReserve(
+    fromEntity: string,
+    toEntity: string,
+    tokenId: number,
+    amount: bigint,
+  ): Promise<ContractTransactionResponse>;
+};
 
 const mode = process.argv[2] === 'anvil' ? 'anvil' : 'browservm';
 
@@ -106,7 +116,8 @@ async function main() {
   // Test reserve-to-reserve transfer
   console.log('\n7. Testing reserve-to-reserve transfer...');
   const transferAmt = 100_000n * 10n ** 18n; // 100k
-  const txR2R = await j.depository.reserveToReserve(entity1, entity3, 1, transferAmt);
+  const r2rDepository = j.depository as unknown as ReserveToReserveDepository;
+  const txR2R = await r2rDepository.reserveToReserve(entity1, entity3, 1, transferAmt);
   await txR2R.wait();
 
   const e1After = await j.depository._reserves(entity1, 1);
@@ -114,7 +125,11 @@ async function main() {
   console.log(`   Entity1 reserve after: ${Number(e1After / 10n ** 18n).toLocaleString()}`);
   console.log(`   Entity3 reserve after: ${Number(e3After / 10n ** 18n).toLocaleString()}`);
 
-  if (e1After !== depositAmounts[0].amount - transferAmt) {
+  const firstDeposit = depositAmounts[0];
+  if (!firstDeposit) {
+    throw new Error('depositAmounts invariant failed: first deposit missing');
+  }
+  if (e1After !== firstDeposit.amount - transferAmt) {
     throw new Error(`Entity1 reserve wrong after R2R`);
   }
   if (e3After !== transferAmt) {
@@ -123,7 +138,7 @@ async function main() {
   console.log(`   ✓ R2R transfer successful (100k from Entity1 to Entity3)`);
 
   // Test 5: Snapshot and revert (if supported)
-  if (mode !== 'rpc') {
+  if (mode === 'anvil' || mode === 'browservm') {
     console.log('\n8. Testing snapshot/revert...');
     const snapshotId = await j.snapshot();
     console.log(`   Snapshot: ${snapshotId.slice(0, 18)}...`);
