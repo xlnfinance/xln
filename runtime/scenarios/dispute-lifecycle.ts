@@ -8,7 +8,7 @@
  * 4) explicit reopen moves both sides back to active and clears pending disputed state
  */
 
-import type { Env } from '../types';
+import type { AccountMachine, Env } from '../types';
 import type { JAdapter } from '../jadapter/types';
 import { getAccountFrameHistoryView } from '../env-events';
 import { bootScenario, registerEntities, fundEntities } from './boot';
@@ -27,28 +27,35 @@ import { cancelHook as cancelCrontabHook } from '../entity-crontab';
 const USDC = 1;
 
 type Registered = { id: string; signer: string; name: string };
+type MineableProvider = { send(method: string, params: unknown[]): Promise<unknown> };
 
-function jEventClaimCount(account: any): number {
+const requireRegistered = (entity: Registered | undefined, name: string): Registered => {
+  if (!entity) {
+    throw new Error(`DISPUTE_LIFECYCLE_MISSING_ENTITY:${name}`);
+  }
+  return entity;
+};
+
+function jEventClaimCount(account: AccountMachine | undefined): number {
   const frames = account ? getAccountFrameHistoryView(account) : [];
   let count = 0;
   for (const frame of frames) {
-    const txs = Array.isArray(frame?.accountTxs) ? frame.accountTxs : [];
-    for (const tx of txs) {
-      if (tx?.type === 'j_event_claim') count += 1;
+    for (const tx of frame.accountTxs) {
+      if (tx.type === 'j_event_claim') count += 1;
     }
   }
   return count;
 }
 
 async function mineUntilHeight(jadapter: JAdapter, targetHeight: number): Promise<void> {
-  const providerAny = jadapter.provider as any;
-  if (typeof providerAny?.send !== 'function') {
+  const mineableProvider = jadapter.provider as unknown as Partial<MineableProvider>;
+  if (typeof mineableProvider.send !== 'function') {
     throw new Error('dispute-lifecycle requires RPC provider with evm_mine support');
   }
   let current = Number(await jadapter.provider.getBlockNumber());
   let guard = 0;
   while (current < targetHeight) {
-    await providerAny.send('evm_mine', []);
+    await mineableProvider.send('evm_mine', []);
     current = Number(await jadapter.provider.getBlockNumber());
     guard += 1;
     if (guard > 2000) {
@@ -100,7 +107,7 @@ export async function runDisputeLifecycle(_existingEnv?: Env): Promise<Env> {
       }
     };
 
-    const [alice, hub] = await registerEntities(
+    const registered = await registerEntities(
       env,
       jadapter,
       [
@@ -109,6 +116,8 @@ export async function runDisputeLifecycle(_existingEnv?: Env): Promise<Env> {
       ],
       jurisdiction,
     ) as Registered[];
+    const alice = requireRegistered(registered[0], 'Alice');
+    const hub = requireRegistered(registered[1], 'Hub');
 
     await fundEntities(env, jadapter, [
       { id: alice.id, tokenId: USDC, amount: usd(2_000_000) },
@@ -171,7 +180,7 @@ export async function runDisputeLifecycle(_existingEnv?: Env): Promise<Env> {
     assert(aliceAccountFrozen?.status === 'disputed', 'disputeStart must freeze account immediately', env);
     assert(!aliceAccountFrozen?.pendingFrame, 'pendingFrame must be cleared on freeze', env);
     assert(!aliceAccountFrozen?.pendingAccountInput, 'pendingAccountInput must be cleared on freeze', env);
-    assert((env as any).jReplicas.size > 0, 'jReplicas missing', env);
+    assert(env.jReplicas.size > 0, 'jReplicas missing', env);
     assert(
       (findReplica(env, alice.id)[1].state.jBatchState?.batch?.disputeStarts?.length || 0) > 0,
       'disputeStart was not added to jBatch',
