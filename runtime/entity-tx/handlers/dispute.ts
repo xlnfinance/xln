@@ -16,16 +16,14 @@
 import { ethers } from 'ethers';
 import type { EntityState, EntityTx, EntityInput, Env, AccountMachine } from '../../types';
 import type { ProofBodyStruct } from '../../typechain/Depository';
-import { isUsableContractAddress, requireUsableContractAddress } from '../../contract-address';
+import { isUsableContractAddress } from '../../contract-address';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { initJBatch, batchAddRevealSecret } from '../../j-batch';
 import { getDeltaTransformerAddress } from '../../proof-builder';
 import { getRuntimeJurisdictionDefaultDisputeDelayBlocks, getRuntimeJurisdictionHeight } from '../../j-height';
 import {
   buildAccountProofBody,
-  createDisputeProofHash,
   createDisputeProofHashWithNonce,
-  buildInitialDisputeProof,
 } from '../../proof-builder';
 import { inspectHankoForHash, verifyHankoForHash } from '../../hanko/signing';
 import { asOfferId, swapKey, type OfferId } from '../../swap-keys';
@@ -626,7 +624,7 @@ export async function handleDisputeFinalize(
     counterpartyEntityId,
     'current',
   );
-  const storedProofBody = storedProofBodyRaw
+  const storedProofBody = isProofBodyStruct(storedProofBodyRaw)
     ? canonicalizeProofBodyStruct(
         storedProofBodyRaw,
         entityState.entityId,
