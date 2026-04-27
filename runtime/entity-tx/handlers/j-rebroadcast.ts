@@ -62,7 +62,7 @@ export async function handleJRebroadcast(
   // that move ops into or out of sentBatch, not to rebroadcast.
   const rebroadcastBatch = cloneJBatch(sent.batch);
   if (isBatchEmpty(rebroadcastBatch)) {
-    newState.jBatchState.sentBatch = undefined;
+    delete newState.jBatchState.sentBatch;
     newState.jBatchState.status = isBatchEmpty(newState.jBatchState.batch) ? 'empty' : 'accumulating';
     addMessage(newState, `🧹 j_rebroadcast cleared empty stale sentBatch nonce=${sent.entityNonce}`);
     return { newState, outputs, jOutputs };

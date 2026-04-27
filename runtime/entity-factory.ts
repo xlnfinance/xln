@@ -7,6 +7,7 @@ import { ethers } from 'ethers';
 
 import { getCachedSignerAddress } from './account-crypto';
 import { createJAdapter } from './jadapter';
+import { buildJAdapterConfigFromJurisdiction } from './jadapter/jurisdiction';
 import type { ConsensusConfig, EntityType, JurisdictionConfig } from './types';
 import { DEBUG } from './utils';
 
@@ -260,20 +261,7 @@ export const createNumberedEntity = async (
   if (DEBUG) console.log(`   💸 Gas required for registration`);
 
   try {
-    const jadapter = await createJAdapter({
-      mode: jurisdiction.address.startsWith('browservm://') ? 'browservm' : 'rpc',
-      chainId: jurisdiction.chainId ?? 31337,
-      rpcUrl: jurisdiction.address.startsWith('browservm://') ? undefined : jurisdiction.address,
-      fromReplica: {
-        chainId: jurisdiction.chainId,
-        depositoryAddress: jurisdiction.depositoryAddress,
-        entityProviderAddress: jurisdiction.entityProviderAddress,
-        contracts: {
-          depository: jurisdiction.depositoryAddress,
-          entityProvider: jurisdiction.entityProviderAddress,
-        },
-      } as any,
-    });
+    const jadapter = await createJAdapter(buildJAdapterConfigFromJurisdiction(jurisdiction));
 
     const nextEntityNumber = await jadapter.entityProvider.nextNumber();
     const tx = await jadapter.entityProvider.registerNumberedEntity(boardHash);
@@ -332,20 +320,7 @@ export const createNumberedEntitiesBatch = async (
   }));
 
   const boardHashes = configs.map((config) => hashBoard(encodeBoard(config)));
-  const jadapter = await createJAdapter({
-    mode: jurisdiction.address.startsWith('browservm://') ? 'browservm' : 'rpc',
-    chainId: jurisdiction.chainId ?? 31337,
-    rpcUrl: jurisdiction.address.startsWith('browservm://') ? undefined : jurisdiction.address,
-    fromReplica: {
-      chainId: jurisdiction.chainId,
-      depositoryAddress: jurisdiction.depositoryAddress,
-      entityProviderAddress: jurisdiction.entityProviderAddress,
-      contracts: {
-        depository: jurisdiction.depositoryAddress,
-        entityProvider: jurisdiction.entityProviderAddress,
-      },
-    } as any,
-  });
+  const jadapter = await createJAdapter(buildJAdapterConfigFromJurisdiction(jurisdiction));
   const nextEntityNumber = await jadapter.entityProvider.nextNumber();
   const tx = await jadapter.entityProvider.registerNumberedEntitiesBatch(boardHashes);
   const receipt = await tx.wait();

@@ -48,6 +48,9 @@ export type HubConfig = {
   position?: { x: number; y: number; z: number };
 };
 
+const defaultPort = Number(getArg('--port', process.env['PORT'] ?? '0')) || undefined;
+const defaultServerId = process.env['SERVER_ID'] ?? undefined;
+
 const DEFAULT_CONFIG: HubConfig = {
   name: getArg('--name', 'Main Hub'),
   region: getArg('--region', 'global'),
@@ -58,8 +61,8 @@ const DEFAULT_CONFIG: HubConfig = {
   relayUrl: getArg('--relay', 'wss://xln.finance/relay'),
   rpcUrl: getArg('--rpc', process.env['PUBLIC_RPC'] ?? ''),
   httpUrl: getArg('--http', process.env['PUBLIC_HTTP'] ?? ''),
-  port: Number(getArg('--port', process.env['PORT'] ?? '0')) || undefined,
-  serverId: process.env['SERVER_ID'] ?? undefined,
+  ...(defaultPort !== undefined ? { port: defaultPort } : {}),
+  ...(defaultServerId !== undefined ? { serverId: defaultServerId } : {}),
   position: { x: 0, y: 0, z: 0 },
 };
 
@@ -92,7 +95,7 @@ const resolveJurisdiction = (env: Env) => {
 
 export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Promise<{ entityId: string; signerId: string } | null> {
   const hubConfig: HubConfig = { ...DEFAULT_CONFIG, ...(config || {}) };
-  const { signerAddress, signerLabel } = deriveHubSigner(hubConfig.seed, hubConfig.signerId);
+  const { signerAddress } = deriveHubSigner(hubConfig.seed, hubConfig.signerId);
 
   console.log('[BOOTSTRAP] Starting hub bootstrap...');
   console.log(`[BOOTSTRAP] Name: ${hubConfig.name}`);

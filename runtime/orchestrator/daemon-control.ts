@@ -128,7 +128,7 @@ export const deriveManagedEntityIdentity = (config: ManagedEntityConfig): Manage
 
 export class DaemonControlClient {
   private baseUrl: string;
-  private controlToken?: string;
+  private controlToken: string | undefined;
   private timeoutMs: number;
 
   constructor(options: DaemonControlClientOptions) {
@@ -395,12 +395,7 @@ export const setupCustody = async (
     }
   }
   if (config.routingEnabled) {
-    await enableRouting(client, {
-      ...config,
-      routingFeePPM: config.routingFeePPM,
-      baseFee: config.baseFee,
-      swapTakerFeeBps: config.swapTakerFeeBps,
-    });
+    await enableRouting(client, config);
   } else {
     await client.configureP2P({
       ...(config.relayUrl ? { relayUrls: [config.relayUrl] } : {}),

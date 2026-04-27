@@ -98,7 +98,7 @@ import type {
   ConsensusConfig,
   RuntimeInput,
   EntityInput,
-  RoutedEntityInput,
+  EntityState,
 } from './types';
 import type { JAdapter } from './jadapter/types';
 import type { PersistedFrameJournal } from './wal/store';

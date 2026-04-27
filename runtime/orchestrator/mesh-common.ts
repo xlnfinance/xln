@@ -186,7 +186,7 @@ export const hasPairMutualCredit = (
   const account =
     getAccountMachine(env, leftEntityId, rightEntityId)
     ?? getAccountMachine(env, rightEntityId, leftEntityId);
-  if (!isAccountConsensusReady(account)) return false;
+  if (!account || !isAccountConsensusReady(account)) return false;
   const grantedByLeft = getCreditGrantedByEntity(account, leftEntityId, tokenId);
   const grantedByRight = getCreditGrantedByEntity(account, rightEntityId, tokenId);
   return grantedByLeft >= amount && grantedByRight >= amount;

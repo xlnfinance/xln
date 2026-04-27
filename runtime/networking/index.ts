@@ -19,9 +19,9 @@
  */
 
 // Gossip protocol
-export { createGossipLayer, loadPersistedProfiles } from './gossip';
+export { createGossipLayer } from './gossip';
 export type { Profile, GossipLayer, BoardValidator, BoardMetadata } from './gossip';
-export { buildEntityProfile, createProfileBroadcastTx } from './gossip-helper';
+export { buildEntityProfile } from './gossip-helper';
 
 // P2P overlay
 export { RuntimeP2P } from './p2p';

@@ -7,7 +7,7 @@
 
 import { enqueueRuntimeInput, registerEntityRuntimeHint } from './runtime.ts';
 import { deriveEncryptionKeyPair, decryptJSON, type P2PKeyPair } from './networking/p2p-crypto';
-import type { Env, EntityInput } from './types';
+import type { Env, EntityInput, EntityReplica, RoutedEntityInput } from './types';
 import {
   type RelayStore,
   normalizeRuntimeKey,
@@ -22,8 +22,8 @@ import {
 export const createLocalDeliveryHandler = (
   env: Env,
   store: RelayStore,
-  getEntityReplicaById: (env: Env, entityId: string) => any | null,
-): ((from: string | undefined, msg: any) => Promise<void>) => {
+  getEntityReplicaById: (env: Env, entityId: string) => EntityReplica | null,
+): ((from: string | undefined, msg: { payload?: unknown; to?: unknown; encrypted?: boolean }) => Promise<void>) => {
   let serverKeyPair: P2PKeyPair | null = null;
   let serverKeySeedFingerprint: string | null = null;
 
@@ -31,7 +31,7 @@ export const createLocalDeliveryHandler = (
     const seed = env.runtimeSeed;
     if (!seed) return null;
     if (typeof seed === 'string') return seed;
-    return Array.from(seed).map(b => b.toString(16).padStart(2, '0')).join('');
+    return null;
   };
 
   const getServerKeyPair = (): P2PKeyPair => {
@@ -47,8 +47,9 @@ export const createLocalDeliveryHandler = (
     return serverKeyPair;
   };
 
-  return async (from: string | undefined, msg: any): Promise<void> => {
-    const { payload, to } = msg;
+  return async (from: string | undefined, msg: { payload?: unknown; to?: unknown; encrypted?: boolean }): Promise<void> => {
+    const { payload } = msg;
+    const to = typeof msg.to === 'string' ? msg.to : undefined;
     const toKey = normalizeRuntimeKey(to);
     if (!toKey) {
       throw new Error('Invalid target runtimeId for local delivery');
@@ -75,7 +76,7 @@ export const createLocalDeliveryHandler = (
       pushDebugEvent(store, {
         event: 'delivery',
         from,
-        to,
+        to: toKey,
         msgType: 'entity_input',
         encrypted: msg.encrypted === true,
         status: targetIsServerRuntime ? 'queued-unknown-local-entity' : 'queued-nonlocal-target',
@@ -123,13 +124,14 @@ export const createLocalDeliveryHandler = (
     }
 
     // Enqueue to runtime
-    enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [{ ...input, from }] });
-    const queueSize = (env as any).runtimeMempool?.entityInputs?.length ?? env.runtimeInput?.entityInputs?.length ?? 0;
+    const routedInput: RoutedEntityInput = from ? { ...input, from } : { ...input };
+    enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [routedInput] });
+    const queueSize = env.runtimeMempool?.entityInputs?.length ?? env.runtimeInput?.entityInputs?.length ?? 0;
     console.log(`[RELAY] → enqueued to runtime (queue=${queueSize})`);
     pushDebugEvent(store, {
       event: 'delivery',
       from,
-      to,
+      to: toKey,
       msgType: 'entity_input',
       encrypted: msg.encrypted === true,
       status: 'delivered-local-queued',

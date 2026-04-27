@@ -79,7 +79,7 @@ function hashEnv(env: Env): string {
   // Hash J-machine state
   if (env.jReplicas) {
     for (const [name, jRep] of env.jReplicas.entries()) {
-      stateHashes.push(`j:${name}:${jRep.mempool.length}:${jRep.height}`);
+      stateHashes.push(`j:${name}:${jRep.mempool.length}:${jRep.blockNumber}`);
     }
   }
 

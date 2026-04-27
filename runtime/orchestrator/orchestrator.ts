@@ -62,7 +62,6 @@ const readPositiveIntEnv = (name: string, fallback: number): number => {
 
 const STARTUP_TIMEOUT_MS = readPositiveIntEnv('XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS', 180_000);
 const HUB_SELF_READY_TIMEOUT_MS = readPositiveIntEnv('XLN_HUB_SELF_READY_TIMEOUT_MS', STARTUP_TIMEOUT_MS);
-const HUB_API_READY_TIMEOUT_MS = readPositiveIntEnv('XLN_HUB_API_READY_TIMEOUT_MS', Math.max(60_000, STARTUP_TIMEOUT_MS));
 const HUB_PROFILES_READY_TIMEOUT_MS = readPositiveIntEnv('XLN_HUB_PROFILES_READY_TIMEOUT_MS', Math.max(45_000, STARTUP_TIMEOUT_MS));
 const HUB_BASELINE_TIMEOUT_MS = readPositiveIntEnv('XLN_HUB_BASELINE_TIMEOUT_MS', Math.max(90_000, STARTUP_TIMEOUT_MS));
 const MARKET_MAKER_READY_TIMEOUT_MS = readPositiveIntEnv('XLN_MARKET_MAKER_READY_TIMEOUT_MS', Math.max(90_000, STARTUP_TIMEOUT_MS));
@@ -1868,21 +1867,6 @@ const waitForHubSelfReady = async (child: HubChild): Promise<void> => {
   throw new Error(`${child.name}_SELF_READY_TIMEOUT ${safeStringify(child.lastHealth)}`);
 };
 
-const waitForHubApiReady = async (child: HubChild): Promise<void> => {
-  const deadline = Date.now() + HUB_API_READY_TIMEOUT_MS;
-  while (Date.now() < deadline) {
-    await pollHubHealth(child);
-    if (child.lastInfo || child.lastHealth) {
-      return;
-    }
-    if (child.proc?.exitCode !== null) {
-      throw new Error(`${child.name}_API_EXITED_EARLY code=${String(child.proc?.exitCode)}`);
-    }
-    await delay(250);
-  }
-  throw new Error(`${child.name}_API_READY_TIMEOUT`);
-};
-
 const waitForShardJurisdictions = async (child: HubChild): Promise<void> => {
   const deadline = Date.now() + 10_000;
   while (Date.now() < deadline) {
@@ -2444,7 +2428,7 @@ const server = Bun.serve({
     }
   },
   websocket: {
-    open(ws) {
+    open(_ws) {
       pushDebugEvent(relayStore, {
         event: 'ws_open',
         details: { wsType: 'relay' },

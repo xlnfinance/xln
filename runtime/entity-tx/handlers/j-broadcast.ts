@@ -23,21 +23,6 @@ import {
 import { resolveRuntimeJurisdictionConfig } from '../../jurisdiction-runtime';
 import type { ApplyEntityTxResult } from '../apply';
 
-const ZERO_HASH_32 = `0x${'0'.repeat(64)}`;
-
-function resolveAccountByCounterparty(state: EntityState, counterpartyEntityId: string) {
-  const target = String(counterpartyEntityId || '').toLowerCase();
-  if (!target) return null;
-  const direct = state.accounts.get(counterpartyEntityId);
-  if (direct) return { key: counterpartyEntityId, account: direct };
-  for (const [key, account] of state.accounts.entries()) {
-    if (String(key || '').toLowerCase() === target) {
-      return { key, account };
-    }
-  }
-  return null;
-}
-
 export async function handleJBroadcast(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'j_broadcast' }>,
