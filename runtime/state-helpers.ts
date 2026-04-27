@@ -3,18 +3,19 @@
  * Utilities for entity replica cloning, snapshots, and state persistence
  */
 
-import type { EntityReplica, EntityState, Env, AccountMachine, LogCategory, AccountFrame, AccountTx, DebtEntry } from './types';
+import type { EntityReplica, EntityState, Env, AccountMachine, LogCategory, AccountFrame, AccountTx, AccountSettleAction, DebtEntry } from './types';
 import { HEAVY_LOGS } from './utils';
 import { validateEntityState } from './validation-utils';
 import { safeStringify } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
 import { getAccountFrameHistoryView, setAccountFrameHistoryView } from './env-events';
-import { cloneJBatch, type CompletedBatch } from './j-batch';
-import type { CrontabState } from './crontab-types';
+import { cloneJBatch, type CompletedBatch, type JBatchState } from './j-batch';
+import type { CrontabState, ScheduledHook } from './crontab-types';
 import type { Profile } from './networking/gossip';
 import type {
   BookOrderState,
   BookState,
+  HubProfile,
   OrderbookExtState,
   PriceBucketState,
   PriceLevelState,
@@ -98,6 +99,38 @@ export function removeCommittedTxsFromMempool<T extends FingerprintableTx>(
   });
 }
 
+const cloneJBatchState = (state: JBatchState): JBatchState => {
+  const cloned: JBatchState = {
+    batch: cloneJBatch(state.batch),
+    jurisdiction: state.jurisdiction,
+    lastBroadcast: state.lastBroadcast,
+    broadcastCount: state.broadcastCount,
+    failedAttempts: state.failedAttempts,
+    status: state.status,
+  };
+  if (state.sentBatch) {
+    cloned.sentBatch = {
+      ...state.sentBatch,
+      batch: cloneJBatch(state.sentBatch.batch),
+    };
+  }
+  if (state.entityNonce !== undefined) {
+    cloned.entityNonce = state.entityNonce;
+  }
+  return cloned;
+};
+
+const cloneAccountSettleAction = (action: AccountSettleAction): AccountSettleAction => {
+  const cloned: AccountSettleAction = { type: action.type };
+  if (action.ops) cloned.ops = action.ops.map((op) => ({ ...op }));
+  if (action.executorIsLeft !== undefined) cloned.executorIsLeft = action.executorIsLeft;
+  if (action.hanko !== undefined) cloned.hanko = action.hanko;
+  if (action.memo !== undefined) cloned.memo = action.memo;
+  if (action.version !== undefined) cloned.version = action.version;
+  if (action.nonceAtSign !== undefined) cloned.nonceAtSign = action.nonceAtSign;
+  return cloned;
+};
+
 /**
  * Emit structured events with a scoped path for time-travel debugging.
  * This keeps per-frame logs queryable without bloating state.messages.
@@ -168,9 +201,8 @@ const cloneDebtEntry = (entry: DebtEntry): DebtEntry => ({
 });
 
 const cloneDebtLedger = (
-  ledger: Map<number, Map<string, DebtEntry>> | undefined,
-): Map<number, Map<string, DebtEntry>> | undefined => {
-  if (!ledger) return undefined;
+  ledger: Map<number, Map<string, DebtEntry>>,
+): Map<number, Map<string, DebtEntry>> => {
   return new Map(
     Array.from(ledger.entries()).map(([tokenId, debtMap]) => [
       tokenId,
@@ -237,16 +269,7 @@ export function cloneEntityState(entityState: EntityState, forSnapshot: boolean 
     }
 
     if (entityState.jBatchState && !cloned.jBatchState) {
-      cloned.jBatchState = {
-        ...entityState.jBatchState,
-        batch: cloneJBatch(entityState.jBatchState.batch),
-        sentBatch: entityState.jBatchState.sentBatch
-          ? {
-              ...entityState.jBatchState.sentBatch,
-              batch: cloneJBatch(entityState.jBatchState.sentBatch.batch),
-            }
-          : undefined,
-      };
+      cloned.jBatchState = cloneJBatchState(entityState.jBatchState);
     }
 
     // VALIDATE AT SOURCE: Guarantee type safety from this point forward
@@ -285,19 +308,10 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
     ),
     deferredAccountProposals: cloneMap(entityState.deferredAccountProposals || new Map()),
     accountInputQueue: cloneArray(entityState.accountInputQueue || []),
-    jBatchState: entityState.jBatchState ? {
-      ...entityState.jBatchState,
-      batch: cloneJBatch(entityState.jBatchState.batch),
-      sentBatch: entityState.jBatchState.sentBatch
-        ? {
-            ...entityState.jBatchState.sentBatch,
-            batch: cloneJBatch(entityState.jBatchState.sentBatch.batch),
-          }
-        : undefined,
-    } : undefined,
-    batchHistory: Array.isArray(entityState.batchHistory)
-      ? entityState.batchHistory.map((entry) => cloneBatchHistoryEntry(entry as CompletedBatch))
-      : undefined,
+    ...(entityState.jBatchState ? { jBatchState: cloneJBatchState(entityState.jBatchState) } : {}),
+    ...(Array.isArray(entityState.batchHistory)
+      ? { batchHistory: entityState.batchHistory.map((entry) => cloneBatchHistoryEntry(entry as CompletedBatch)) }
+      : {}),
     // JBlock consensus state
     lastFinalizedJHeight: entityState.lastFinalizedJHeight ?? 0,
     jBlockObservations: cloneArray(entityState.jBlockObservations || []),
@@ -306,7 +320,7 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
     // task metadata + scheduled hooks only. Handlers are rebound from the static
     // registry in entity-crontab.ts, so clone/persistence must preserve the data
     // and never try to serialize executable functions.
-    crontabState: entityState.crontabState ? cloneCrontabState(entityState.crontabState) : undefined,
+    ...(entityState.crontabState ? { crontabState: cloneCrontabState(entityState.crontabState) } : {}),
     // HTLC routing table (deep clone)
     htlcRoutes: new Map(
       Array.from((entityState.htlcRoutes || new Map()).entries()).map(([hashlock, route]) => [
@@ -316,8 +330,8 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
     ),
     htlcNotes: new Map(Array.from((entityState.htlcNotes || new Map()).entries())),
     htlcFeesEarned: entityState.htlcFeesEarned || 0n,
-    outDebtsByToken: cloneDebtLedger(entityState.outDebtsByToken),
-    inDebtsByToken: cloneDebtLedger(entityState.inDebtsByToken),
+    ...(entityState.outDebtsByToken ? { outDebtsByToken: cloneDebtLedger(entityState.outDebtsByToken) } : {}),
+    ...(entityState.inDebtsByToken ? { inDebtsByToken: cloneDebtLedger(entityState.inDebtsByToken) } : {}),
     // Orderbook extension (hub-only, contains TypedArrays)
     // Must manually clone since structuredClone failed (we're in fallback path)
     ...(entityState.orderbookExt && { orderbookExt: cloneOrderbookExt(entityState.orderbookExt) }),
@@ -327,12 +341,12 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
         { ...entry }
       ])
     ),
-    swapTradingPairs: Array.isArray(entityState.swapTradingPairs)
-      ? entityState.swapTradingPairs.map((pair) => ({ ...pair }))
-      : undefined,
-    pendingSwapFillRatios: new Map(
-      Array.from((entityState.pendingSwapFillRatios || new Map()).entries())
-    ),
+    ...(Array.isArray(entityState.swapTradingPairs)
+      ? { swapTradingPairs: entityState.swapTradingPairs.map((pair) => ({ ...pair })) }
+      : {}),
+    ...(entityState.pendingSwapFillRatios
+      ? { pendingSwapFillRatios: new Map(Array.from(entityState.pendingSwapFillRatios.entries())) }
+      : {}),
   };
 }
 
@@ -353,24 +367,34 @@ function cloneCrontabState(crontabState: CrontabState): CrontabState {
     hooks: new Map(
       Array.from(crontabState.hooks.entries()).map(([hookId, hook]) => [
         hookId,
-        {
-          id: hook.id,
-          triggerAt: hook.triggerAt,
-          type: hook.type,
-          data: { ...hook.data },
-        },
+        cloneScheduledHook(hook),
       ]),
     ),
   };
+}
+
+function cloneScheduledHook(hook: ScheduledHook): ScheduledHook {
+  switch (hook.type) {
+    case 'htlc_timeout':
+      return { ...hook, data: { ...hook.data } };
+    case 'dispute_deadline':
+      return { ...hook, data: { ...hook.data } };
+    case 'htlc_secret_ack_timeout':
+      return { ...hook, data: { ...hook.data } };
+    case 'settlement_window':
+      return { ...hook, data: {} };
+    case 'watchdog':
+      return { ...hook, data: {} };
+    case 'hub_rebalance_kick':
+      return { ...hook, data: { ...hook.data } };
+  }
 }
 
 /**
  * Manually clone OrderbookExtState for environments without structuredClone
  * TypedArrays must be explicitly copied via their constructors
  */
-function cloneOrderbookExt(ext: EntityState['orderbookExt']): EntityState['orderbookExt'] {
-  if (!ext) return undefined;
-
+function cloneOrderbookExt(ext: NonNullable<EntityState['orderbookExt']>): OrderbookExtState {
   const clonedBooks = new Map<string, BookState>();
   for (const [key, book] of ext.books) {
     clonedBooks.set(key, cloneBookState(book));
@@ -390,10 +414,10 @@ function cloneOrderbookExt(ext: EntityState['orderbookExt']): EntityState['order
   }
 
   // Clone hubProfile with nested arrays
-  const clonedHubProfile = ext.hubProfile ? {
+  const clonedHubProfile: HubProfile = {
     ...ext.hubProfile,
-    supportedPairs: ext.hubProfile.supportedPairs ? [...ext.hubProfile.supportedPairs] : [],
-  } : undefined;
+    supportedPairs: [...ext.hubProfile.supportedPairs],
+  };
 
   return {
     books: clonedBooks,
@@ -582,9 +606,13 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
       ]),
     ),
     rebalancePolicy: new Map(account.rebalancePolicy || []),
-    activeRebalanceQuote: account.activeRebalanceQuote ? { ...account.activeRebalanceQuote } : undefined,
-    pendingRebalanceRequest: account.pendingRebalanceRequest ? { ...account.pendingRebalanceRequest } : undefined,
   };
+  if (account.activeRebalanceQuote) {
+    result.activeRebalanceQuote = { ...account.activeRebalanceQuote };
+  }
+  if (account.pendingRebalanceRequest) {
+    result.pendingRebalanceRequest = { ...account.pendingRebalanceRequest };
+  }
 
   if (account.pendingFrame) {
     result.pendingFrame = cloneAccountFrame(account.pendingFrame);
@@ -594,17 +622,13 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
     try {
       result.pendingAccountInput = structuredClone(account.pendingAccountInput);
     } catch {
-      result.pendingAccountInput = {
+      const clonedInput: AccountMachine['pendingAccountInput'] = {
         ...account.pendingAccountInput,
-        settleAction: account.pendingAccountInput.settleAction
-          ? {
-              ...account.pendingAccountInput.settleAction,
-              ops: account.pendingAccountInput.settleAction.ops
-                ? account.pendingAccountInput.settleAction.ops.map((op) => ({ ...op }))
-                : undefined,
-            }
-          : undefined,
       };
+      if (account.pendingAccountInput.settleAction) {
+        clonedInput.settleAction = cloneAccountSettleAction(account.pendingAccountInput.settleAction);
+      }
+      result.pendingAccountInput = clonedInput;
     }
   }
 
