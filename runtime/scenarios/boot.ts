@@ -207,7 +207,7 @@ export async function ensureJAdapter(
   const jadapter = await createJAdapter({
     mode: actualMode,
     chainId,
-    rpcUrl: actualMode !== 'browservm' ? rpcUrl : undefined,
+    ...(actualMode !== 'browservm' ? { rpcUrl } : {}),
   });
 
   if (options?.deployStack !== false) {
@@ -347,30 +347,38 @@ export async function registerEntities(
   const entityNumbers = boardHashes.map((_, index) => Number(nextEntityNumber) + index);
 
   // 2. Build entity info from returned numbers
-  const result: RegisteredEntity[] = entities.map((e, i) => ({
-    id: '0x' + entityNumbers[i].toString(16).padStart(64, '0'),
-    name: e.name,
-    signer: e.signer,
-  }));
+  const result: RegisteredEntity[] = entities.map((e, i) => {
+    const entityNumber = entityNumbers[i];
+    if (entityNumber === undefined) throw new Error(`REGISTER_ENTITY_NUMBER_MISSING: index=${i}`);
+    return {
+      id: '0x' + entityNumber.toString(16).padStart(64, '0'),
+      name: e.name,
+      signer: e.signer,
+    };
+  });
 
   // 3. Create eReplicas via importReplica
   await applyRuntimeInput(env, {
-    runtimeTxs: result.map((r, i) => ({
-      type: 'importReplica' as const,
-      entityId: r.id,
-      signerId: r.signer,
-      data: {
-        isProposer: true,
-        position: entities[i].position,
-        config: {
-          mode: 'proposer-based' as const,
-          threshold: 1n,
-          validators: [r.signer],
-          shares: { [r.signer]: 1n },
-          jurisdiction,
+    runtimeTxs: result.map((r, i) => {
+      const sourceEntity = entities[i];
+      if (!sourceEntity) throw new Error(`REGISTER_ENTITY_SOURCE_MISSING: index=${i}`);
+      return {
+        type: 'importReplica' as const,
+        entityId: r.id,
+        signerId: r.signer,
+        data: {
+          isProposer: true,
+          position: sourceEntity.position,
+          config: {
+            mode: 'proposer-based' as const,
+            threshold: 1n,
+            validators: [r.signer],
+            shares: { [r.signer]: 1n },
+            jurisdiction,
+          }
         }
-      }
-    })),
+      };
+    }),
     entityInputs: []
   });
 
@@ -487,7 +495,7 @@ export function createJurisdictionConfig(
 export async function createNumberedEntity(
   env: Env,
   entityNumber: number,
-  name: string,
+  _name: string,
   jurisdiction: JurisdictionConfig,
   position: { x: number; y: number; z: number }
 ): Promise<string> {
