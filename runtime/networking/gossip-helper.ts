@@ -11,7 +11,7 @@ import { safeStringify } from '../serialization-utils';
 import { deriveSignerAddressSync, getSignerAddress, getSignerPublicKey } from '../account-crypto';
 import { deriveEncryptionKeyPair, pubKeyToHex } from './p2p-crypto';
 
-type BuiltProfile = Omit<Profile, 'runtimeEncPubKey'>;
+type BuiltProfile = Omit<Profile, 'runtimeId' | 'runtimeEncPubKey'>;
 
 const toUint16 = (value: bigint | number | undefined, fallback = 0): number => {
   const raw = typeof value === 'bigint' ? Number(value) : Number(value ?? fallback);
@@ -19,9 +19,6 @@ const toUint16 = (value: bigint | number | undefined, fallback = 0): number => {
   if (raw <= 0) return 0;
   return Math.min(65535, Math.floor(raw));
 };
-
-const bytesToHex = (bytes: Uint8Array): string =>
-  `0x${Array.from(bytes).map(b => b.toString(16).padStart(2, '0')).join('')}`;
 
 const normalizeX25519Hex = (raw: unknown): string | null => {
   if (typeof raw !== 'string') return null;
@@ -211,9 +208,11 @@ export const buildLocalEntityProfile = (
   }
   const profileTimestamp = Math.max(1, timestamp);
   const profile = buildEntityProfile(entityState, profileTimestamp, createProfileSignerResolver(env));
-  profile.runtimeId = resolveProfileRuntimeId(env, entityState.entityId);
-  profile.runtimeEncPubKey = pubKeyToHex(deriveEncryptionKeyPair(runtimeSeed).publicKey);
-  return profile;
+  return {
+    ...profile,
+    runtimeId: resolveProfileRuntimeId(env, entityState.entityId),
+    runtimeEncPubKey: pubKeyToHex(deriveEncryptionKeyPair(runtimeSeed).publicKey),
+  };
 };
 
 export const announceLocalEntityProfile = (
