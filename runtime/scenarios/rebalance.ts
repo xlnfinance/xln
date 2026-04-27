@@ -13,7 +13,7 @@
  * outCollateral is already secured value and must not inflate trigger metric.
  */
 
-import type { Env, EntityInput, EntityReplica, Delta, AccountMachine } from '../types';
+import type { Env, EntityReplica, AccountMachine } from '../types';
 import { getProcess, getApplyRuntimeInput, usd, ensureSignerKeysFromSeed, converge as _converge } from './helpers';
 import { formatRuntime } from '../runtime-ascii';
 import { deriveDelta } from '../account-utils';
@@ -25,7 +25,6 @@ const USDC_TOKEN_ID = 1;
 const HUB_INITIAL_RESERVE = usd(200_000); // $200K
 const USER_RESERVE = usd(25_000); // $25K each
 const INITIAL_COLLATERAL = usd(5_000); // $5K per account (deliberately low to create deficits)
-const SIGNER_PREFUND = usd(1_000_000);
 
 function assert(condition: unknown, message: string, env?: Env): asserts condition {
   if (!condition) {
@@ -40,6 +39,14 @@ function assert(condition: unknown, message: string, env?: Env): asserts conditi
 }
 
 type Entity = { id: string; signer: string; name: string };
+type AccountJEventBlock = { events?: Array<{ type?: string }> };
+
+const requireEntity = (entity: Entity | undefined, name: string): Entity => {
+  if (!entity) {
+    throw new Error(`REBALANCE_SCENARIO_MISSING_ENTITY:${name}`);
+  }
+  return entity;
+};
 
 function findReplica(env: Env, entityId: string): [string, EntityReplica] {
   const entry = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
@@ -70,7 +77,8 @@ function getAccountSettledEventCount(account: AccountMachine | undefined): numbe
   if (!account?.jEventChain) return 0;
   let count = 0;
   for (const block of account.jEventChain) {
-    const events = Array.isArray((block as any)?.events) ? (block as any).events : [];
+    const blockEvents = (block as AccountJEventBlock).events;
+    const events = Array.isArray(blockEvents) ? blockEvents : [];
     for (const event of events) {
       if (event?.type === 'AccountSettled') count++;
     }
@@ -194,6 +202,9 @@ export async function runRebalanceScenario(): Promise<void> {
 
   for (let i = 0; i < 5; i++) {
     const name = entityNames[i];
+    if (!name) {
+      throw new Error(`REBALANCE_SCENARIO_MISSING_ENTITY_NAME:${i}`);
+    }
     const signer = String(i + 2);
     const entityNumber = i + 2;
     const entityId = '0x' + entityNumber.toString(16).padStart(64, '0');
@@ -217,7 +228,12 @@ export async function runRebalanceScenario(): Promise<void> {
   }
 
   await applyRuntimeInput(env, { runtimeTxs: createEntityTxs, entityInputs: [] });
-  const [hub, alice, bob, charlie, dave] = entities;
+  const hub = requireEntity(entities[0], 'Hub');
+  const alice = requireEntity(entities[1], 'Alice');
+  const bob = requireEntity(entities[2], 'Bob');
+  const charlie = requireEntity(entities[3], 'Charlie');
+  const dave = requireEntity(entities[4], 'Dave');
+  const users = [alice, bob, charlie, dave];
   console.log(`✅ Created: ${entities.map(e => e.name).join(', ')}`);
 
   // ══════════════════════════════════════════════════════════════
@@ -250,7 +266,7 @@ export async function runRebalanceScenario(): Promise<void> {
   // Fund Hub with $200K via debugFundReserves (mints directly into depository)
   await jadapter.debugFundReserves(hub.id, USDC_TOKEN_ID, HUB_INITIAL_RESERVE);
   // Fund each user with $25K
-  for (const user of [alice, bob, charlie, dave]) {
+  for (const user of users) {
     await jadapter.debugFundReserves(user.id, USDC_TOKEN_ID, USER_RESERVE);
   }
   await syncChain(); // Poll all ReserveUpdated events at once
@@ -265,7 +281,7 @@ export async function runRebalanceScenario(): Promise<void> {
   // ══════════════════════════════════════════════════════════════
   console.log('\n🔗 Opening bilateral accounts...');
 
-  for (const user of [alice, bob, charlie, dave]) {
+  for (const user of users) {
     await process(env, [{
       entityId: user.id,
       signerId: user.signer,
@@ -280,7 +296,7 @@ export async function runRebalanceScenario(): Promise<void> {
 
   // Verify accounts exist
   const hubState = findReplica(env, hub.id)[1].state;
-  for (const user of [alice, bob, charlie, dave]) {
+  for (const user of users) {
     assert(hubState.accounts.has(user.id), `Hub↔${user.name} account missing`, env);
   }
   console.log('✅ All bilateral accounts created');
@@ -310,7 +326,7 @@ export async function runRebalanceScenario(): Promise<void> {
   // ══════════════════════════════════════════════════════════════
   console.log('\n💳 Hub extending credit to all users...');
 
-  for (const user of [alice, bob, charlie, dave]) {
+  for (const user of users) {
     await process(env, [{
       entityId: hub.id,
       signerId: hub.signer,
@@ -331,7 +347,7 @@ export async function runRebalanceScenario(): Promise<void> {
 
   // Users extend credit back to Hub (so Hub can route payments through them)
   console.log('\n💳 Users extending credit to Hub...');
-  for (const user of [alice, bob, charlie, dave]) {
+  for (const user of users) {
     await process(env, [{
       entityId: user.id,
       signerId: user.signer,
@@ -355,7 +371,7 @@ export async function runRebalanceScenario(): Promise<void> {
   // ══════════════════════════════════════════════════════════════
   console.log('\n🏦 Depositing initial collateral ($20K per account)...');
 
-  const r2cTxs = [alice, bob, charlie, dave].map(user => ({
+  const r2cTxs = users.map(user => ({
     type: 'r2c' as const,
     data: {
       counterpartyId: user.id,
@@ -386,7 +402,7 @@ export async function runRebalanceScenario(): Promise<void> {
 
   // Wait for the finalized AccountSettled J-events to land in bilateral state before asserting.
   // The on-chain R→C batch can be mined before the runtime ingests and finalizes its resulting J-events.
-  for (const user of [alice, bob, charlie, dave]) {
+  for (const user of users) {
     await waitForHubCollateral(user.id, INITIAL_COLLATERAL, `${user.name} collateral`);
   }
   console.log('✅ All accounts have $20K collateral');
@@ -473,7 +489,7 @@ export async function runRebalanceScenario(): Promise<void> {
   const hubAfterPayments = findReplica(env, hub.id)[1].state;
   const collateralBeforeRebalance = new Map<string, bigint>();
 
-  for (const user of [alice, bob, charlie, dave]) {
+  for (const user of users) {
     const acc = hubAfterPayments.accounts.get(user.id);
     if (!acc) continue;
     const delta = acc.deltas.get(USDC_TOKEN_ID);
@@ -517,7 +533,7 @@ export async function runRebalanceScenario(): Promise<void> {
   const preRebalanceJProgress = new Map<string, { hub: AccountJProgress; user: AccountJProgress }>();
   {
     const hubStateBeforeRebalance = findReplica(env, hub.id)[1].state;
-    for (const user of [alice, bob, charlie, dave]) {
+    for (const user of users) {
       const hubAcc = hubStateBeforeRebalance.accounts.get(user.id);
       const [, userReplica] = findReplica(env, user.id);
       const userAcc = userReplica.state.accounts.get(hub.id);
@@ -556,7 +572,7 @@ export async function runRebalanceScenario(): Promise<void> {
   console.log('\n  [After Cycle 1] State:');
   let pendingRequestedTotal = 0n;
   const requestedByUser = new Map<string, bigint>();
-  for (const user of [alice, bob, charlie, dave]) {
+  for (const user of users) {
     const acc = findReplica(env, hub.id)[1].state.accounts.get(user.id);
     if (!acc) continue;
     const ws = acc.settlementWorkspace;
@@ -585,8 +601,6 @@ export async function runRebalanceScenario(): Promise<void> {
     await process(env);
   }
   await converge(env);
-
-  const hubBeforeBroadcast = findReplica(env, hub.id)[1].state;
 
   // Let watcher + bilateral j_event_claim consensus finalize AccountSettled on both sides.
   for (let i = 0; i < 6; i++) {
@@ -733,7 +747,7 @@ export async function runRebalanceScenario(): Promise<void> {
 
   console.log(`\n  Hub final reserve: $${hubFinalReserve / 10n**18n}`);
 
-  for (const user of [alice, bob, charlie, dave]) {
+  for (const user of users) {
     const acc = hubFinal.accounts.get(user.id);
     const delta = acc?.deltas.get(USDC_TOKEN_ID);
     const hubIsLeft = isLeftEntity(hub.id, user.id);
@@ -750,7 +764,7 @@ export async function runRebalanceScenario(): Promise<void> {
   // ── NONCE ASSERTIONS ──
   // Mixed rebalance may include C→R settlements, so nonce can increase.
   // Invariant: nonce is bilateral-equal for each account.
-  for (const user of [alice, bob, charlie, dave]) {
+  for (const user of users) {
     const hubAcc = hubFinal.accounts.get(user.id);
     const hubNonce = hubAcc?.onChainSettlementNonce || 0;
     assert(hubNonce >= 0, `Hub↔${user.name} nonce must be non-negative (got ${hubNonce})`, env);
@@ -767,7 +781,7 @@ export async function runRebalanceScenario(): Promise<void> {
   // ── WORKSPACE ASSERTIONS ──
   // For C→R path, workspace can legitimately remain at awaiting_counterparty
   // if user signature was not provided during this scenario.
-  for (const user of [alice, bob, charlie, dave]) {
+  for (const user of users) {
     const acc = hubFinal.accounts.get(user.id);
     const ws = acc?.settlementWorkspace;
     if (ws) {
@@ -786,7 +800,7 @@ export async function runRebalanceScenario(): Promise<void> {
 
   // ── COLLATERAL + REQUEST LIFECYCLE ASSERTIONS ──
   let accountsWithTopUp = 0;
-  for (const user of [alice, bob, charlie, dave]) {
+  for (const user of users) {
     const acc = hubFinal.accounts.get(user.id);
     const delta = acc?.deltas.get(USDC_TOKEN_ID);
     const before = rebalanceExecuted
@@ -807,7 +821,7 @@ export async function runRebalanceScenario(): Promise<void> {
   assert(accountsWithTopUp > 0, `Expected at least one account to receive collateral top-up, got ${accountsWithTopUp}`, env);
 
   // Counterparty side: workspace cleared, requestedRebalance converges.
-  for (const user of [alice, bob, charlie, dave]) {
+  for (const user of users) {
     const [, userReplica] = findReplica(env, user.id);
     const userAcc = userReplica.state.accounts.get(hub.id);
     const userWs = userAcc?.settlementWorkspace;
@@ -838,7 +852,7 @@ export async function runRebalanceScenario(): Promise<void> {
   const getPendingRequests = (): Array<{ userId: string; userName: string; hubPending: bigint; userPending: bigint }> => {
     const pending: Array<{ userId: string; userName: string; hubPending: bigint; userPending: bigint }> = [];
     const latestHub = findReplica(env, hub.id)[1].state;
-    for (const user of [alice, bob, charlie, dave]) {
+    for (const user of users) {
       const hubAcc = latestHub.accounts.get(user.id);
       const [, userReplica] = findReplica(env, user.id);
       const userAcc = userReplica.state.accounts.get(hub.id);
