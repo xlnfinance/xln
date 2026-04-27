@@ -1,15 +1,11 @@
 #!/usr/bin/env bun
 
-import { existsSync, mkdirSync, readFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
-import { ethers } from 'ethers';
 import { safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
 import { encodeBoard, hashBoard } from '../entity-factory';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { createDirectRuntimeWsRoute } from '../networking/direct-runtime-bun';
 import { clearJurisdictionsCache, loadJurisdictions } from '../jurisdiction-loader';
-import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
 import {
   getActiveJAdapter,
   getP2PState,
@@ -23,7 +19,7 @@ import {
   startRuntimeLoop,
   stopRuntimeLoopAndWait,
 } from '../runtime.ts';
-import type { EntityInput, Env } from '../types';
+import type { AccountMachine, EntityInput, Env } from '../types';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import {
   BOOTSTRAP_POLL_MS,
@@ -287,7 +283,7 @@ const ensureJurisdictionReplica = (env: Env, jadapter: JAdapter, rpcUrl: string)
 const readVisibleHubProfiles = (env: Env): HubProfile[] => {
   const required = new Set(resolvedArgs.meshHubNames.map((name) => name.toLowerCase()));
   return (env.gossip?.getProfiles?.() || [])
-    .filter((profile): profile is { name: string; entityId: string; metadata?: { isHub?: boolean } } =>
+    .filter(profile =>
       typeof profile?.name === 'string' &&
       typeof profile?.entityId === 'string' &&
       profile.metadata?.isHub === true,
@@ -359,18 +355,18 @@ const normalizeTokenIdsForMm = (tokenCatalog: JTokenInfo[]): number[] => {
 };
 
 const collectOfferIdsForAccount = (
-  account: Pick<ReturnType<typeof getAccountMachine>, 'swapOffers' | 'mempool' | 'pendingFrame'> | null | undefined,
+  account: Pick<AccountMachine, 'swapOffers' | 'mempool' | 'pendingFrame'> | null | undefined,
 ): Set<string> => {
   const ids = new Set<string>();
   if (account?.swapOffers instanceof Map) {
     for (const offerId of account.swapOffers.keys()) ids.add(String(offerId));
   }
-  for (const tx of account?.mempool || []) {
+  for (const tx of account?.mempool ?? []) {
     if (tx?.type !== 'swap_offer') continue;
     const offerId = String(tx?.data?.offerId || '');
     if (offerId) ids.add(offerId);
   }
-  for (const tx of account?.pendingFrame?.accountTxs || []) {
+  for (const tx of account?.pendingFrame?.accountTxs ?? []) {
     if (tx?.type !== 'swap_offer') continue;
     const offerId = String(tx?.data?.offerId || '');
     if (offerId) ids.add(offerId);
@@ -545,7 +541,8 @@ const ensureMarketMakerHubConnectivity = async (
           signerId: hubSignerId,
           entityTxs: [],
         };
-        input.entityTxs.push({
+        const entityTxs = input.entityTxs ?? (input.entityTxs = []);
+        entityTxs.push({
           type: 'extendCredit',
           data: {
             counterpartyEntityId: mmEntityId,
@@ -562,7 +559,8 @@ const ensureMarketMakerHubConnectivity = async (
           signerId: mmSignerId,
           entityTxs: [],
         };
-        input.entityTxs.push({
+        const entityTxs = input.entityTxs ?? (input.entityTxs = []);
+        entityTxs.push({
           type: 'extendCredit',
           data: {
             counterpartyEntityId: hubEntityId,
