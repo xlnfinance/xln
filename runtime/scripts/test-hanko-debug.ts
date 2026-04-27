@@ -5,7 +5,7 @@
 
 import { BrowserVMProvider } from '../jadapter/browservm-provider.js';
 import { ethers } from 'ethers';
-import { getSignerPrivateKey, registerSeededKeys } from '../account-crypto.js';
+import { registerSeededKeys } from '../account-crypto.js';
 import { isLeftEntity } from '../entity-id-utils';
 
 async function main() {
@@ -32,24 +32,34 @@ async function main() {
   console.log('📝 Registering entities...\n');
   const signerIds = ['2', '3', '4'];
   const entityNumbers = await browserVM.registerEntitiesWithSigners(signerIds);
+  const [leftEntityNumber, rightEntityNumber] = entityNumbers;
+  if (leftEntityNumber === undefined || rightEntityNumber === undefined) {
+    throw new Error(`Expected at least two registered entities, got ${entityNumbers.length}`);
+  }
   console.log(`   Registered entities: ${JSON.stringify(entityNumbers)}\n`);
 
   // Get entity info
   for (let i = 0; i < entityNumbers.length; i++) {
-    const entityId = ethers.zeroPadValue(ethers.toBeHex(entityNumbers[i]), 32);
+    const entityNumber = entityNumbers[i];
+    const signerId = signerIds[i];
+    if (entityNumber === undefined || signerId === undefined) {
+      continue;
+    }
+    const entityId = ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32);
     const info = await browserVM.getEntityInfo(entityId);
-    console.log(`   Entity ${entityNumbers[i]} (${signerIds[i]}): boardHash=${info.currentBoardHash.slice(0, 18)}...`);
+    const boardHash = info.currentBoardHash ?? ethers.ZeroHash;
+    console.log(`   Entity ${entityNumber} (${signerId}): boardHash=${boardHash.slice(0, 18)}...`);
   }
   console.log();
 
   // Now test signing a settlement
   console.log('📝 Testing settlement signature...\n');
 
-  const leftEntity = ethers.zeroPadValue(ethers.toBeHex(entityNumbers[0]), 32); // Entity 2
-  const rightEntity = ethers.zeroPadValue(ethers.toBeHex(entityNumbers[1]), 32); // Entity 3
+  const leftEntity = ethers.zeroPadValue(ethers.toBeHex(leftEntityNumber), 32); // Entity 2
+  const rightEntity = ethers.zeroPadValue(ethers.toBeHex(rightEntityNumber), 32); // Entity 3
 
-  console.log(`   Left: ${leftEntity.slice(0, 18)}... (Entity ${entityNumbers[0]})`);
-  console.log(`   Right: ${rightEntity.slice(0, 18)}... (Entity ${entityNumbers[1]})\n`);
+  console.log(`   Left: ${leftEntity.slice(0, 18)}... (Entity ${leftEntityNumber})`);
+  console.log(`   Right: ${rightEntity.slice(0, 18)}... (Entity ${rightEntityNumber})\n`);
 
   // Create test settlement diffs
   // Conservation: leftDiff + rightDiff + collateralDiff = 0
@@ -65,7 +75,7 @@ async function main() {
   // Sign settlement (this creates Hanko for numbered entities)
   console.log('🔐 Signing settlement...');
   try {
-    const sig = await browserVM.signSettlement(leftEntity, rightEntity, diffs, [], []);
+    const sig = await browserVM.signSettlement(leftEntity, rightEntity, diffs, []);
     console.log(`   Signature length: ${sig.length} chars (${(sig.length - 2) / 2} bytes)`);
     console.log(`   Signature type: ${sig.length === 132 ? 'ECDSA (65 bytes)' : 'Hanko'}`);
     console.log(`   Signature prefix: ${sig.slice(0, 50)}...\n`);
@@ -101,7 +111,7 @@ async function main() {
         'function accountKey(bytes32 e1, bytes32 e2) pure returns (bytes)'
       ]);
       const callData = depInterface.encodeFunctionData('accountKey', [leftEntity, rightEntity]);
-      const result = await browserVM.executeTx({
+      await browserVM.executeTx({
         to: browserVM.getDepositoryAddress(),
         data: callData,
         gasLimit: 100000n,
@@ -344,18 +354,14 @@ async function main() {
       sig
     );
 
-    console.log(`   Hanko Result:`, JSON.stringify(hankoResult, (k, v) => typeof v === 'bigint' ? v.toString() : v, 2));
+    console.log(`   Hanko Result:`, JSON.stringify(hankoResult, (_key, v) => typeof v === 'bigint' ? v.toString() : v, 2));
 
-    if (hankoResult.success === false) {
-      console.log(`   ❌ Hanko Settlement failed!`);
-    } else {
-      console.log(`   ✅ Hanko Settlement succeeded!`);
-    }
-    console.log(`   Events: ${hankoResult.logs?.length || 0}`);
+    console.log(`   ✅ Hanko Settlement submitted`);
+    console.log(`   Events: ${hankoResult.length}`);
 
     // Show all events including debug ones
-    if (hankoResult.logs && hankoResult.logs.length > 0) {
-      for (const ev of hankoResult.logs) {
+    if (hankoResult.length > 0) {
+      for (const ev of hankoResult) {
         if (ev.name) {
           console.log(`     Event: ${ev.name}`);
         }
@@ -378,7 +384,7 @@ async function main() {
         [],
         dummySig100
       );
-      console.log(`   100-byte sig result: success=${result100.success}`);
+      console.log(`   100-byte sig result events=${result100.length}`);
     }
 
   } catch (err: any) {
