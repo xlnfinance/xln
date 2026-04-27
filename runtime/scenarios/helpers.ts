@@ -222,7 +222,8 @@ function filterOfflineInputs(
   const dropped: EntityInput[] = [];
 
   for (const input of inputs) {
-    if (offlineSigners.has(input.signerId)) {
+    const signerId = input.signerId;
+    if (signerId && offlineSigners.has(signerId)) {
       dropped.push(input);
     } else {
       filtered.push(input);
@@ -555,7 +556,8 @@ export const formatUSD = (amount: bigint): string => {
 const isMeaningfulScenarioEntityInput = (input: EntityInput): boolean => {
   const entityTxCount = input.entityTxs?.length ?? 0;
   const hasProposal = Boolean(input.proposedFrame);
-  const hasHashPrecommits = Boolean(input.hashPrecommits) && input.hashPrecommits.size > 0;
+  const hashPrecommits = input.hashPrecommits;
+  const hasHashPrecommits = Boolean(hashPrecommits && hashPrecommits.size > 0);
   return entityTxCount > 0 || hasProposal || hasHashPrecommits;
 };
 
@@ -642,11 +644,13 @@ export function snap(
     keyMetrics?: string[];
     expectedSolvency?: bigint;
     description?: string;
+    phase?: string;
   } = {}
 ) {
   env.extra = {
     subtitle: {
       title,
+      ...(opts.phase ? { phase: opts.phase } : {}),
       ...(opts.what ? { what: opts.what } : {}),
       ...(opts.why ? { why: opts.why } : {}),
       ...(opts.tradfiParallel ? { tradfiParallel: opts.tradfiParallel } : {}),
