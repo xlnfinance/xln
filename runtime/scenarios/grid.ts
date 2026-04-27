@@ -49,6 +49,13 @@ const GRID_DIMS = { x: 2, y: 2, z: 2 };
 const GRID_SPACING = 60; // px between nodes
 const J_MARGIN = 150; // Grid margin around J-Machine
 const USDC_TOKEN_ID = 1;
+type GridReserveTransferTx = {
+  type: 'r2r';
+  from: string;
+  to: string;
+  amount: bigint;
+  timestamp: number;
+};
 
 function usd(amount: number): bigint {
   return BigInt(amount) * 10n ** 18n;
@@ -169,8 +176,7 @@ export async function grid(env: Env): Promise<void> {
 
   // Fund all nodes with initial reserves via JAdapter
   console.log('💰 Funding nodes with initial reserves...');
-  for (let i = 0; i < gridEntities.length; i++) {
-    const nodeId = gridEntities[i];
+  for (const nodeId of gridEntities) {
     await jadapter.debugFundReserves(nodeId, USDC_TOKEN_ID, usd(100_000));
   }
 
@@ -189,12 +195,14 @@ export async function grid(env: Env): Promise<void> {
   console.log('   (8 concurrent txs → single mempool)');
 
   // Each node sends $10K to next node (circular)
+  const gridMempool = jReplica.mempool as unknown as GridReserveTransferTx[];
   for (let i = 0; i < gridEntities.length; i++) {
     const fromNode = gridEntities[i];
     const toNode = gridEntities[(i + 1) % gridEntities.length]; // Circular
+    if (!fromNode || !toNode) continue;
 
     // Add to J-Machine mempool (PENDING state - yellow cubes!)
-    jReplica.mempool.push({
+    gridMempool.push({
       type: 'r2r',
       from: fromNode,
       to: toNode,
@@ -223,7 +231,7 @@ export async function grid(env: Env): Promise<void> {
   console.log('\n⚡ J-Block #1: Processing batch...');
 
   // Execute all R2R txs from mempool via JAdapter
-  for (const tx of jReplica.mempool) {
+  for (const tx of gridMempool) {
     if (tx.type === 'r2r' && tx.from && tx.to && tx.amount) {
       await submitReserveToReserveBatch(env, jadapter, tx.from, tx.to, tx.amount);
     }
@@ -291,6 +299,7 @@ export async function grid(env: Env): Promise<void> {
     const nodeId = gridEntities[i];
     const nearestHubIdx = Math.floor(i / nodesPerHub);
     const hubId = hubs[Math.min(nearestHubIdx, hubs.length - 1)];
+    if (!nodeId || !hubId) continue;
 
     // Open bilateral account: Node ↔ Hub
     // TODO: Actually open accounts when we have proper routing visualization
@@ -312,6 +321,7 @@ export async function grid(env: Env): Promise<void> {
   for (let i = 0; i < hubs.length; i++) {
     const hub1 = hubs[i];
     const hub2 = hubs[(i + 1) % hubs.length]; // Connect to next hub (circular)
+    if (!hub1 || !hub2 || hub1 === hub2) continue;
 
     // Open bilateral account: Hub ↔ Hub
     // TODO: Actually open accounts
