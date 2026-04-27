@@ -23,20 +23,17 @@ import {
   readPersistedFrameJournals,
 } from './runtime.ts';
 import { deserializeTaggedJson, safeStringify, serializeTaggedJson } from './serialization-utils';
-import type { AccountMachine, DeliverableEntityInput, Delta, EntityReplica, Env, EntityInput, RuntimeInput } from './types';
+import type { AccountMachine, DeliverableEntityInput, EntityReplica, Env, EntityTx, RuntimeInput } from './types';
 import type { HubHealth } from './health';
 import { createExternalWalletApi } from './api/external-wallet-api';
 import { maybeHandleQaRequest } from './qa/api';
 import { getStorageHealthSnapshotSync, type StorageHealth } from './orchestrator/storage-monitor';
-import { encodeBoard, hashBoard } from './entity-factory';
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from './account-crypto';
+import { registerSignerKey } from './account-crypto';
 import { createJAdapter, DEV_CHAIN_IDS, type JAdapter } from './jadapter';
-import type { JTokenInfo } from './jadapter/types';
+import type { JAdapterConfig, JTokenInfo } from './jadapter/types';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from './jadapter/default-tokens';
 import { resolveEntityProposerId } from './state-helpers';
-import { ORDERBOOK_PRICE_SCALE } from './orderbook';
-import { buildDefaultEntitySwapPairs, deriveDelta, getSwapPairPolicyByBaseQuote, getTokenInfo } from './account-utils';
-import { LIMITS } from './constants';
+import { buildDefaultEntitySwapPairs, deriveDelta, getTokenInfo } from './account-utils';
 import { encryptJSON, hexToPubKey } from './networking/p2p-crypto';
 import type { Profile } from './networking/gossip';
 import { encodeRebalancePolicyMemo } from './rebalance-policy';
@@ -64,7 +61,6 @@ import {
   type MarketSnapshotPayload,
 } from './market-snapshot';
 import { ethers } from 'ethers';
-import type { ContractRunner } from 'ethers';
 import { ERC20Mock__factory } from '../jurisdictions/typechain-types/index.ts';
 import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
@@ -76,7 +72,6 @@ let serverEnv: Env | null = null;
 let serverStartupBarrier: Promise<void> = Promise.resolve();
 let resolveServerStartupBarrier: (() => void) | null = null;
 // Server encryption keypair now managed by relay-local-delivery.ts
-const HUB_SEED = process.env['HUB_SEED'] ?? 'xln-main-hub-2026';
 const HEALTH_CACHE_TTL_MS = 10_000;
 let cachedHealthResponse:
   | {
@@ -99,6 +94,10 @@ const JSON_HEADERS = {
   'Access-Control-Allow-Headers': '*',
   'Content-Type': 'application/json',
 } as const;
+const getErrorMessage = (error: unknown, fallback = 'Unknown error'): string =>
+  error instanceof Error ? error.message : typeof error === 'string' && error.length > 0 ? error : fallback;
+const isRecord = (value: unknown): value is Record<string, unknown> =>
+  typeof value === 'object' && value !== null;
 const DEBUG_DUMPS_DIR = join(process.cwd(), '.logs', 'debug-dumps');
 const formatTimingMs = (value: number): string => value.toFixed(2);
 const STACK_COMPATIBILITY_PROBE_ENTITY = `0x${'11'.repeat(32)}`;
@@ -162,10 +161,17 @@ const probeLocalAnvilContractStack = async (adapter: JAdapter): Promise<{ ok: bo
     ],
     adapter.signer as ethers.ContractRunner,
   );
+  const getTokensLength = probe.getFunction('getTokensLength') as unknown as () => Promise<bigint>;
+  const mintToReserve = probe.getFunction('mintToReserve') as unknown as {
+    estimateGas(entityId: string, tokenId: bigint, amount: bigint): Promise<bigint>;
+  };
+  const mintToReserveBatch = probe.getFunction('mintToReserveBatch') as unknown as {
+    estimateGas(mints: Array<[string, bigint, bigint]>): Promise<bigint>;
+  };
 
   let tokensLength = 0n;
   try {
-    tokensLength = await probe['getTokensLength']();
+    tokensLength = await getTokensLength();
   } catch (error) {
     return {
       ok: false,
@@ -178,7 +184,7 @@ const probeLocalAnvilContractStack = async (adapter: JAdapter): Promise<{ ok: bo
   }
 
   try {
-    await probe['mintToReserve'].estimateGas(STACK_COMPATIBILITY_PROBE_ENTITY, 1n, 1n);
+    await mintToReserve.estimateGas(STACK_COMPATIBILITY_PROBE_ENTITY, 1n, 1n);
   } catch (error) {
     return {
       ok: false,
@@ -187,7 +193,7 @@ const probeLocalAnvilContractStack = async (adapter: JAdapter): Promise<{ ok: bo
   }
 
   try {
-    await probe['mintToReserveBatch'].estimateGas([[STACK_COMPATIBILITY_PROBE_ENTITY, 1n, 1n]]);
+    await mintToReserveBatch.estimateGas([[STACK_COMPATIBILITY_PROBE_ENTITY, 1n, 1n]]);
   } catch (error) {
     return {
       ok: false,
@@ -369,8 +375,6 @@ const waitForReserveUpdate = async (
   return null;
 };
 
-const hubSignerLabels = new Map<string, string>();
-const hubSignerAddresses = new Map<string, string>();
 const SERVER_RUNTIME_SEED = (() => {
   const seed = process.env['XLN_RUNTIME_SEED']?.trim();
   if (!seed) {
@@ -383,32 +387,12 @@ const HUB_MESH_CREDIT_AMOUNT = 1_000_000n * 10n ** 18n;
 const HUB_MESH_REQUIRED_HUBS = 3;
 const HUB_REQUIRED_TOKEN_COUNT = 3;
 const HUB_RESERVE_TARGET_UNITS = 1_000_000_000n;
-const HUB_WALLET_ETH_TARGET = ethers.parseEther('1000');
 const FAUCET_SIGNER_LABEL = process.env['FAUCET_SIGNER_LABEL'] ?? 'faucet-1';
 const FAUCET_SEED = process.env['FAUCET_SEED'] ?? `${SERVER_RUNTIME_SEED}:faucet`;
 const FAUCET_WALLET_ETH_TARGET = ethers.parseEther('100');
 const FAUCET_TOKEN_TARGET_UNITS = 1_000_000n;
-const HUB_RESERVE_ASSERT_TIMEOUT_MS = 30_000;
-const HUB_MESH_ASSERT_TIMEOUT_MS = 20_000;
-const BOOTSTRAP_POLL_MS = Math.max(
-  10,
-  Number(process.env['BOOTSTRAP_POLL_MS'] || (process.env['NODE_ENV'] === 'production' ? '40' : '50')),
-);
-const RUNTIME_SETTLE_POLL_MS = Math.max(
-  5,
-  Number(process.env['RUNTIME_SETTLE_POLL_MS'] || (process.env['NODE_ENV'] === 'production' ? '25' : '10')),
-);
 const INCLUDE_MARKET_MAKER_BY_DEFAULT = !/^(0|false)$/i.test(process.env['XLN_INCLUDE_MARKET_MAKER'] ?? '1');
 const SKIP_SERVER_BOOTSTRAP = /^(1|true)$/i.test(process.env['XLN_SKIP_SERVER_BOOTSTRAP'] ?? '');
-const MARKET_MAKER_SIGNER_LABEL = process.env['MARKET_MAKER_SIGNER_LABEL'] ?? 'mm-1';
-const MARKET_MAKER_SEED = process.env['MARKET_MAKER_SEED'] ?? `${HUB_SEED}:market-maker`;
-const MARKET_MAKER_NAME = process.env['MARKET_MAKER_NAME'] ?? 'MM1';
-const MARKET_MAKER_CREDIT_AMOUNT = 50_000_000n * 10n ** 18n;
-const MARKET_MAKER_QUOTE_LOOP_MS = Math.max(1000, Number(process.env['MARKET_MAKER_QUOTE_LOOP_MS'] || '30000'));
-const MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
-  10,
-  Number(process.env['MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK'] || '30'),
-);
 const MARKET_MAKER_LEVEL_OFFSETS_BPS = [2, 4, 6, 8, 10, 12, 15, 20, 25, 32, 40, 50, 65, 80, 100] as const;
 const MARKET_MAKER_LEVEL_BASE_SIZES = [
   120n * 10n ** 18n,
@@ -472,127 +456,9 @@ const getExpectedMarketMakerOffersForPair = (baseTokenId: number, quoteTokenId: 
 };
 
 let marketMakerLoopTimer: ReturnType<typeof setInterval> | null = null;
-let marketMakerLoopInFlight = false;
 let marketMakerEntityId: string | null = null;
 let marketMakerTargetHubIds: string[] = [];
 let marketMakerTokenIds: number[] = [];
-
-type MarketMakerOfferSpec = {
-  offerId: string;
-  hubEntityId: string;
-  giveTokenId: number;
-  giveAmount: bigint;
-  wantTokenId: number;
-  wantAmount: bigint;
-  minFillRatio: number;
-};
-
-const getMapValueCaseInsensitive = <T>(map: Map<string, T>, key: string | undefined): T | undefined => {
-  if (!key) return undefined;
-  const needle = key.toLowerCase();
-  for (const [mapKey, value] of map.entries()) {
-    if (String(mapKey).toLowerCase() === needle) return value;
-  }
-  return undefined;
-};
-
-const getHubWallet = async (
-  env: Env,
-  hubEntityId?: string,
-): Promise<{ hubEntityId: string; hubSignerId: string; wallet: ethers.Wallet } | null> => {
-  if (!globalJAdapter) return null;
-  const activeHubIds = relayStore.activeHubEntityIds;
-  let targetEntityId = String(hubEntityId || '').toLowerCase();
-
-  if (!targetEntityId) {
-    const firstActiveWithSigner = activeHubIds.find(id => !!getMapValueCaseInsensitive(hubSignerLabels, id));
-    if (firstActiveWithSigner) {
-      targetEntityId = String(firstActiveWithSigner).toLowerCase();
-    } else {
-      const hubs = getFaucetHubProfiles(env);
-      const firstFaucetWithSigner = hubs.find(h => !!getMapValueCaseInsensitive(hubSignerLabels, h?.entityId));
-      if (!firstFaucetWithSigner?.entityId) return null;
-      targetEntityId = String(firstFaucetWithSigner.entityId).toLowerCase();
-    }
-  }
-
-  const signerLabel = getMapValueCaseInsensitive(hubSignerLabels, targetEntityId);
-  if (!signerLabel) {
-    console.warn(
-      `[XLN] Hub signer label missing for ${targetEntityId.slice(0, 12)}... active=${activeHubIds.map(id => id.slice(-8)).join(',')}`,
-    );
-    return null;
-  }
-  const hubSignerAddress = getMapValueCaseInsensitive(hubSignerAddresses, targetEntityId);
-  const hubPrivateKeyBytes = deriveSignerKeySync(HUB_SEED, signerLabel);
-  const hubPrivateKeyHex = '0x' + Buffer.from(hubPrivateKeyBytes).toString('hex');
-  const wallet = new ethers.Wallet(hubPrivateKeyHex, globalJAdapter.provider);
-  if (hubSignerAddress && wallet.address.toLowerCase() !== hubSignerAddress.toLowerCase()) {
-    console.error(
-      `[XLN] Hub signer address mismatch for ${targetEntityId.slice(0, 12)}... expected=${hubSignerAddress} got=${wallet.address}`,
-    );
-    return null;
-  }
-  return { hubEntityId: targetEntityId, hubSignerId: hubSignerAddress ?? wallet.address, wallet };
-};
-
-const ensureHubWalletFunding = async (
-  env: Env,
-  options: {
-    hubEntityId?: string;
-    tokenCatalog?: JTokenInfo[];
-    ensureTokens?: boolean;
-    ensureEth?: boolean;
-  } = {},
-): Promise<{ hubEntityId: string; hubSignerId: string; wallet: ethers.Wallet } | null> => {
-  if (!globalJAdapter) return null;
-  const hub = await getHubWallet(env, options.hubEntityId);
-  if (!hub) return null;
-
-  if (globalJAdapter.mode === 'browservm') {
-    if (options.ensureEth !== false) {
-      if (globalJAdapter.fundSignerWallet) {
-        await globalJAdapter.fundSignerWallet(await hub.wallet.getAddress(), HUB_WALLET_ETH_TARGET);
-      }
-    }
-    return hub;
-  }
-
-  const hubWalletAddress = await hub.wallet.getAddress();
-  const deployer = globalJAdapter.signer;
-  const ensureTokens = options.ensureTokens === true;
-  const ensureEth = options.ensureEth !== false;
-
-  if (ensureTokens) {
-    const erc20Abi = [
-      'function transfer(address to, uint256 amount) returns (bool)',
-      'function balanceOf(address) view returns (uint256)',
-    ];
-    const tokenCatalog = options.tokenCatalog ?? [];
-    for (const token of tokenCatalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)) {
-      if (!token?.address) continue;
-      const targetBalance = HUB_RESERVE_TARGET_UNITS * 10n ** BigInt(token.decimals ?? 18);
-      const erc20 = new ethers.Contract(token.address, erc20Abi, deployer);
-      const hubBalance = await erc20['balanceOf'](hubWalletAddress);
-      if (hubBalance >= targetBalance) continue;
-      const tx = await erc20['transfer'](hubWalletAddress, targetBalance - hubBalance);
-      await tx.wait();
-    }
-  }
-
-  if (ensureEth) {
-    const currentEth = await globalJAdapter.provider.getBalance(hubWalletAddress);
-    if (currentEth < HUB_WALLET_ETH_TARGET) {
-      const tx = await deployer.sendTransaction({
-        to: hubWalletAddress,
-        value: HUB_WALLET_ETH_TARGET - currentEth,
-      });
-      await tx.wait();
-    }
-  }
-
-  return hub;
-};
 
 const externalWalletApi = createExternalWalletApi({
   getJAdapter: () => globalJAdapter,
@@ -675,10 +541,6 @@ const getKnownProfileBundle = (env: Env | null, entityId: string): { profile: Pr
   return { profile, peers };
 };
 
-const sleep = async (ms: number): Promise<void> => {
-  await new Promise(resolve => setTimeout(resolve, ms));
-};
-
 const REQUEST_CREDIT_CAP_WHOLE = 1_000n;
 
 const getRequestCreditCap = (tokenId: number): bigint => {
@@ -718,28 +580,6 @@ const accountMatchesCounterparty = (
   return false;
 };
 
-const getAccountDelta = (env: Env, entityId: string, counterpartyId: string, tokenId: number): Delta | null => {
-  const account = getAccountMachine(env, entityId, counterpartyId);
-  if (!account?.deltas) return null;
-  return account.deltas.get(tokenId) ?? null;
-};
-
-const hasPairMutualCredit = (
-  env: Env,
-  leftEntityId: string,
-  rightEntityId: string,
-  tokenId: number,
-  amount: bigint,
-): boolean => {
-  const leftAccount = getAccountMachine(env, leftEntityId, rightEntityId);
-  const rightAccount = getAccountMachine(env, rightEntityId, leftEntityId);
-  if (!leftAccount || !rightAccount) return false;
-  return (
-    getEntityOutCapacity(leftAccount, leftEntityId, tokenId) >= amount &&
-    getEntityOutCapacity(rightAccount, rightEntityId, tokenId) >= amount
-  );
-};
-
 const hasAccount = (env: Env, entityId: string, counterpartyId: string): boolean => {
   const replica = getEntityReplicaById(env, entityId);
   if (!replica?.state?.accounts) return false;
@@ -777,85 +617,6 @@ const getEntityOutCapacity = (
   const delta = account.deltas.get(tokenId);
   if (!delta) return 0n;
   return deriveDelta(delta, account.leftEntity === ownerEntityId).outCapacity;
-};
-
-const isAccountConsensusReady = (account: AccountMachine | null): boolean => {
-  if (!account) return false;
-  if (!account.currentFrame) return false;
-  if (Number(account.currentHeight ?? 0) <= 0) return false;
-  if (account.pendingFrame) return false;
-  if ((account.mempool?.length ?? 0) > 0) return false;
-  return true;
-};
-
-const ensurePairMutualCreditForToken = async (
-  env: Env,
-  leftEntityId: string,
-  leftSignerId: string,
-  rightEntityId: string,
-  rightSignerId: string,
-  tokenId: number,
-  amount: bigint,
-): Promise<boolean> => {
-  if (hasPairMutualCredit(env, leftEntityId, rightEntityId, tokenId, amount)) return true;
-  if (!hasAccount(env, leftEntityId, rightEntityId) || !hasAccount(env, rightEntityId, leftEntityId)) return false;
-
-  const pairReady = await waitUntil(() => {
-    const leftAccount = getAccountMachine(env, leftEntityId, rightEntityId);
-    const rightAccount = getAccountMachine(env, rightEntityId, leftEntityId);
-    if (!leftAccount || !rightAccount) return false;
-    return isAccountConsensusReady(leftAccount) && isAccountConsensusReady(rightAccount);
-  }, 180, RUNTIME_SETTLE_POLL_MS);
-  if (!pairReady) return false;
-
-  const leftAccount = getAccountMachine(env, leftEntityId, rightEntityId);
-  const rightAccount = getAccountMachine(env, rightEntityId, leftEntityId);
-  if (!leftAccount || !rightAccount) return false;
-
-  const entityInputs: EntityInput[] = [];
-  const leftOutCapacity = getEntityOutCapacity(leftAccount, leftEntityId, tokenId);
-  const rightOutCapacity = getEntityOutCapacity(rightAccount, rightEntityId, tokenId);
-
-  if (leftOutCapacity < amount) {
-    entityInputs.push({
-      entityId: rightEntityId,
-      signerId: rightSignerId,
-      entityTxs: [{
-        type: 'extendCredit',
-        data: {
-          counterpartyEntityId: leftEntityId,
-          tokenId,
-          amount,
-        },
-      }],
-    });
-  }
-
-  if (rightOutCapacity < amount) {
-    entityInputs.push({
-      entityId: leftEntityId,
-      signerId: leftSignerId,
-      entityTxs: [{
-        type: 'extendCredit',
-        data: {
-          counterpartyEntityId: rightEntityId,
-          tokenId,
-          amount,
-        },
-      }],
-    });
-  }
-
-  if (entityInputs.length === 0) {
-    return hasPairMutualCredit(env, leftEntityId, rightEntityId, tokenId, amount);
-  }
-
-  enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs });
-  return await waitUntil(
-    () => hasPairMutualCredit(env, leftEntityId, rightEntityId, tokenId, amount),
-    180,
-    RUNTIME_SETTLE_POLL_MS,
-  );
 };
 
 const getHubMeshHealth = (env: Env | null) => {
@@ -1051,101 +812,19 @@ const getBootstrapReserveHealth = async (env: Env | null): Promise<BootstrapRese
   };
 };
 
-const getHubSignerForEntity = (env: Env, entityId: string): string => {
-  return hubSignerAddresses.get(entityId) || resolveEntityProposerId(env, entityId, 'hub-mesh-bootstrap');
-};
-
-const waitUntil = async (predicate: () => boolean, maxAttempts = 120, stepMs = BOOTSTRAP_POLL_MS): Promise<boolean> => {
-  for (let i = 0; i < maxAttempts; i++) {
-    if (predicate()) return true;
-    await sleep(stepMs);
-  }
-  return false;
-};
-
-const settleRuntimeFor = async (env: Env, rounds = 30): Promise<void> => {
-  for (let i = 0; i < rounds; i++) {
-    if (!hasPendingRuntimeWork(env)) break;
-    await sleep(RUNTIME_SETTLE_POLL_MS);
-  }
-};
-
 const stopMarketMakerLoop = (): void => {
   if (marketMakerLoopTimer) {
     clearInterval(marketMakerLoopTimer);
     marketMakerLoopTimer = null;
   }
-  marketMakerLoopInFlight = false;
   marketMakerEntityId = null;
   marketMakerTargetHubIds = [];
   marketMakerTokenIds = [];
 };
 
-const normalizeTokenIdsForMm = (tokenCatalog: JTokenInfo[]): number[] => {
-  const ids = tokenCatalog
-    .map(token => Number(token.tokenId))
-    .filter(tokenId => Number.isFinite(tokenId) && tokenId > 0)
-    .sort((a, b) => a - b);
-  return Array.from(new Set(ids)).slice(0, 3);
-};
-
 const buildMarketMakerPairs = (tokenIds: number[]): Array<{ baseTokenId: number; quoteTokenId: number; pairId: string }> => {
   return buildDefaultEntitySwapPairs(tokenIds);
 };
-
-const ensureMarketMakerEntity = async (
-  env: Env,
-): Promise<{ entityId: string; signerId: string } | null> => {
-  const mmSignerPrivateKey = deriveSignerKeySync(MARKET_MAKER_SEED, MARKET_MAKER_SIGNER_LABEL);
-  const mmSignerId = deriveSignerAddressSync(MARKET_MAKER_SEED, MARKET_MAKER_SIGNER_LABEL);
-  registerSignerKey(mmSignerId, mmSignerPrivateKey);
-
-  const activeJurisdictionName =
-    env.activeJurisdiction || (env.jReplicas ? Array.from(env.jReplicas.keys())[0] : undefined);
-  const activeJReplica = activeJurisdictionName ? env.jReplicas?.get(activeJurisdictionName) : undefined;
-  const jurisdictionConfig = activeJReplica
-    ? {
-        name: activeJurisdictionName || 'default',
-        chainId: Number(activeJReplica.jadapter?.chainId ?? activeJReplica.chainId ?? 0),
-        address: activeJReplica.rpcs?.[0] ?? '',
-        entityProviderAddress: activeJReplica.entityProviderAddress ?? activeJReplica.contracts?.entityProvider ?? '',
-        depositoryAddress: activeJReplica.depositoryAddress ?? activeJReplica.contracts?.depository ?? '',
-      }
-    : undefined;
-
-  const consensusConfig = {
-    mode: 'proposer-based' as const,
-    threshold: 1n,
-    validators: [mmSignerId],
-    shares: { [mmSignerId]: 1n },
-    ...(jurisdictionConfig ? { jurisdiction: jurisdictionConfig } : {}),
-  };
-
-  const entityId = hashBoard(encodeBoard(consensusConfig)).toLowerCase();
-  const existingReplica = getEntityReplicaById(env, entityId);
-  if (!existingReplica) {
-    enqueueRuntimeInput(env, {
-      runtimeTxs: [
-        {
-          type: 'importReplica',
-          entityId,
-          signerId: mmSignerId,
-          data: {
-            config: consensusConfig,
-            isProposer: true,
-            profileName: MARKET_MAKER_NAME,
-            position: { x: 0, y: -40, z: 120 },
-          },
-        },
-      ],
-      entityInputs: [],
-    });
-    await settleRuntimeFor(env, 35);
-  }
-
-  return { entityId, signerId: mmSignerId };
-};
-
 const collectOfferIdsForAccount = (
   account:
     | Pick<AccountMachine, 'swapOffers' | 'mempool' | 'pendingFrame'>
@@ -1201,266 +880,6 @@ const countMarketMakerOffersForHubPair = (
   }
   return count;
 };
-
-const snapPriceTicks = (ticks: bigint, stepTicks: number, mode: 'up' | 'down'): bigint => {
-  const step = BigInt(Math.max(1, stepTicks));
-  if (mode === 'up') {
-    return ((ticks + step - 1n) / step) * step;
-  }
-  return (ticks / step) * step;
-};
-
-const buildMarketMakerOfferSpecs = (
-  hubEntityIds: string[],
-  tokenIds: number[],
-): MarketMakerOfferSpec[] => {
-  const specs: MarketMakerOfferSpec[] = [];
-  const pairs = buildMarketMakerPairs(tokenIds);
-  const hubSkewBps = (hubEntityId: string, pairIndex: number): number => {
-    const tail = hubEntityId.slice(-6);
-    let hash = 0;
-    for (let i = 0; i < tail.length; i += 1) {
-      hash = ((hash * 33) + tail.charCodeAt(i) + (pairIndex * 17)) % 11;
-    }
-    return hash - 5;
-  };
-  for (const hubEntityId of hubEntityIds) {
-    const hubSuffix = hubEntityId.slice(-6).toLowerCase();
-    const pairContexts = pairs.map((pair, pairIndex) => {
-      const pairPolicy = getSwapPairPolicyByBaseQuote(pair.baseTokenId, pair.quoteTokenId);
-      const levelProfile = getMarketMakerLevelProfile(pair.baseTokenId, pair.quoteTokenId);
-      const skewBps = hubSkewBps(hubEntityId, pairIndex);
-      return {
-        pair,
-        levelProfile,
-        midPriceTicks: (pairPolicy.mmMidPriceTicks * BigInt(10_000 + skewBps)) / 10_000n,
-        stepTicksBig: BigInt(Math.max(1, pairPolicy.priceStepTicks)),
-        stepTicks: Math.max(1, pairPolicy.priceStepTicks),
-      };
-    });
-    const maxLevels = pairContexts.reduce((max, entry) => Math.max(max, entry.levelProfile.offsetsBps.length), 0);
-    for (let level = 0; level < maxLevels; level++) {
-      for (const entry of pairContexts) {
-        if (level >= entry.levelProfile.offsetsBps.length) continue;
-        const offsetBps = entry.levelProfile.offsetsBps[level]!;
-        const baseSize = entry.levelProfile.baseSizes[level]!;
-        const askRaw = (entry.midPriceTicks * BigInt(10_000 + offsetBps)) / 10_000n;
-        const bidRaw = (entry.midPriceTicks * BigInt(Math.max(1, 10_000 - offsetBps))) / 10_000n;
-        const askPriceTicks = snapPriceTicks(askRaw, entry.stepTicks, 'up');
-        let bidPriceTicks = snapPriceTicks(bidRaw, entry.stepTicks, 'down');
-        if (bidPriceTicks >= askPriceTicks) {
-          bidPriceTicks = askPriceTicks > entry.stepTicksBig ? askPriceTicks - entry.stepTicksBig : 1n;
-        }
-        const askWantAmount = (baseSize * askPriceTicks) / ORDERBOOK_PRICE_SCALE;
-        const bidGiveAmount = (baseSize * bidPriceTicks) / ORDERBOOK_PRICE_SCALE;
-        const levelId = level + 1;
-
-        if (askWantAmount > 0n) {
-          specs.push({
-            offerId: `mm-${hubSuffix}-${entry.pair.baseTokenId}-${entry.pair.quoteTokenId}-ask-${levelId}`,
-            hubEntityId,
-            giveTokenId: entry.pair.baseTokenId,
-            giveAmount: baseSize,
-            wantTokenId: entry.pair.quoteTokenId,
-            wantAmount: askWantAmount,
-            // Resting MM quotes must remain plain GTC orders. Non-zero minFillRatio is
-            // reserved for IOC/FOK semantics and would make bootstrap quotes invalid.
-            minFillRatio: 0,
-          });
-        }
-
-        if (bidGiveAmount > 0n) {
-          specs.push({
-            offerId: `mm-${hubSuffix}-${entry.pair.baseTokenId}-${entry.pair.quoteTokenId}-bid-${levelId}`,
-            hubEntityId,
-            giveTokenId: entry.pair.quoteTokenId,
-            giveAmount: bidGiveAmount,
-            wantTokenId: entry.pair.baseTokenId,
-            wantAmount: baseSize,
-            // Keep resting bids consistent with the runtime MM path above.
-            minFillRatio: 0,
-          });
-        }
-      }
-    }
-  }
-  return specs;
-};
-
-const ensureMarketMakerHubConnectivity = async (
-  env: Env,
-  mmEntityId: string,
-  mmSignerId: string,
-  hubEntityIds: string[],
-  tokenIds: number[],
-): Promise<void> => {
-  const accountOpenInputs: EntityInput[] = [];
-  const creditInputsByEntity = new Map<string, EntityInput>();
-
-  for (const hubEntityId of hubEntityIds) {
-    const hubSignerId = getHubSignerForEntity(env, hubEntityId);
-    const mmAccount = getAccountMachine(env, mmEntityId, hubEntityId);
-    const hubAccount = getAccountMachine(env, hubEntityId, mmEntityId);
-    const hasMmToHub = hasAccount(env, mmEntityId, hubEntityId);
-    const hasHubToMm = hasAccount(env, hubEntityId, mmEntityId);
-    const hasEitherAccount = hasMmToHub || hasHubToMm;
-    const hasPendingConsensus =
-      Boolean(mmAccount?.pendingFrame) ||
-      Boolean(hubAccount?.pendingFrame) ||
-      Number(mmAccount?.mempool?.length || 0) > 0 ||
-      Number(hubAccount?.mempool?.length || 0) > 0;
-
-    // Single-opener rule: only MM initiates account opening.
-    // Counterparty account materializes via inbound accountInput ACK path.
-    if (!hasEitherAccount && !hasPendingConsensus) {
-      accountOpenInputs.push({
-        entityId: mmEntityId,
-        signerId: mmSignerId,
-        entityTxs: [
-          {
-            type: 'openAccount',
-            data: {
-              targetEntityId: hubEntityId,
-              tokenId: tokenIds[0] ?? 1,
-              // Prime first token credit in the same account frame.
-              creditAmount: MARKET_MAKER_CREDIT_AMOUNT,
-            },
-          },
-        ],
-      });
-    }
-  }
-
-  if (accountOpenInputs.length > 0) {
-    enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: accountOpenInputs });
-    await settleRuntimeFor(env, 35);
-  }
-
-  for (const hubEntityId of hubEntityIds) {
-    const hubSignerId = getHubSignerForEntity(env, hubEntityId);
-    const mmAccount = getAccountMachine(env, mmEntityId, hubEntityId);
-    const hubAccount = getAccountMachine(env, hubEntityId, mmEntityId);
-    const hasMmToHub = hasAccount(env, mmEntityId, hubEntityId);
-    const hasHubToMm = hasAccount(env, hubEntityId, mmEntityId);
-    const hasPendingConsensus =
-      Boolean(mmAccount?.pendingFrame) ||
-      Boolean(hubAccount?.pendingFrame) ||
-      Number(mmAccount?.mempool?.length || 0) > 0 ||
-      Number(hubAccount?.mempool?.length || 0) > 0;
-    if (hasPendingConsensus) continue;
-    if (!hasMmToHub || !hasHubToMm) continue;
-    if (!mmAccount || !hubAccount) continue;
-
-    for (const tokenId of tokenIds) {
-      if (hasPairMutualCredit(env, mmEntityId, hubEntityId, tokenId, MARKET_MAKER_CREDIT_AMOUNT)) continue;
-      const mmOutCapacity = getEntityOutCapacity(mmAccount, mmEntityId, tokenId);
-      const hubOutCapacity = getEntityOutCapacity(hubAccount, hubEntityId, tokenId);
-
-      if (mmOutCapacity < MARKET_MAKER_CREDIT_AMOUNT) {
-        const input = creditInputsByEntity.get(hubEntityId) ?? {
-          entityId: hubEntityId,
-          signerId: hubSignerId,
-          entityTxs: [],
-        };
-        input.entityTxs.push({
-          type: 'extendCredit',
-          data: {
-            counterpartyEntityId: mmEntityId,
-            tokenId,
-            amount: MARKET_MAKER_CREDIT_AMOUNT,
-          },
-        });
-        creditInputsByEntity.set(hubEntityId, input);
-      }
-
-      if (hubOutCapacity < MARKET_MAKER_CREDIT_AMOUNT) {
-        const input = creditInputsByEntity.get(mmEntityId) ?? {
-          entityId: mmEntityId,
-          signerId: mmSignerId,
-          entityTxs: [],
-        };
-        input.entityTxs.push({
-          type: 'extendCredit',
-          data: {
-            counterpartyEntityId: hubEntityId,
-            tokenId,
-            amount: MARKET_MAKER_CREDIT_AMOUNT,
-          },
-        });
-        creditInputsByEntity.set(mmEntityId, input);
-      }
-    }
-  }
-
-  if (creditInputsByEntity.size > 0) {
-    enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: Array.from(creditInputsByEntity.values()) });
-    await settleRuntimeFor(env, 45);
-  }
-};
-
-const maintainMarketMakerQuotes = async (
-  env: Env,
-  mmEntityId: string,
-  mmSignerId: string,
-  hubEntityIds: string[],
-  tokenIds: number[],
-  maxOffersPerAccount = MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
-): Promise<void> => {
-  if (hubEntityIds.length === 0 || tokenIds.length < 3) return;
-  await ensureMarketMakerHubConnectivity(env, mmEntityId, mmSignerId, hubEntityIds, tokenIds);
-  const desiredOffers = buildMarketMakerOfferSpecs(hubEntityIds, tokenIds);
-  const grouped = new Map<string, MarketMakerOfferSpec[]>();
-  for (const spec of desiredOffers) {
-    const arr = grouped.get(spec.hubEntityId) ?? [];
-    arr.push(spec);
-    grouped.set(spec.hubEntityId, arr);
-  }
-
-  const entityTxs: EntityInput['entityTxs'] = [];
-  for (const [hubEntityId, specs] of grouped.entries()) {
-    const account = getAccountMachine(env, mmEntityId, hubEntityId);
-    if (!account) continue;
-    if (String(account.status || 'active') !== 'active') continue;
-    if (Number(account.mempool?.length || 0) > 0 || account.pendingFrame) continue;
-
-    const existingOfferIds = collectOfferIdsForAccount(account);
-    const remainingOpenSlots = Math.max(0, LIMITS.MAX_ACCOUNT_SWAP_OFFERS - existingOfferIds.size);
-    const allowedNewOffers = Math.min(
-      Math.max(1, Math.floor(maxOffersPerAccount)),
-      remainingOpenSlots,
-    );
-    if (allowedNewOffers <= 0) continue;
-    const missing = specs
-      .filter(spec => !existingOfferIds.has(spec.offerId))
-      .slice(0, allowedNewOffers);
-    if (missing.length === 0) continue;
-
-    entityTxs.push(...missing.map(spec => ({
-      type: 'placeSwapOffer' as const,
-      data: {
-        counterpartyEntityId: spec.hubEntityId,
-        offerId: spec.offerId,
-        giveTokenId: spec.giveTokenId,
-        giveAmount: spec.giveAmount,
-        wantTokenId: spec.wantTokenId,
-        wantAmount: spec.wantAmount,
-        minFillRatio: spec.minFillRatio,
-      },
-    })));
-  }
-
-  if (entityTxs.length > 0) {
-    enqueueRuntimeInput(env, {
-      runtimeTxs: [],
-      entityInputs: [{
-        entityId: mmEntityId,
-        signerId: mmSignerId,
-        entityTxs,
-      }],
-    });
-  }
-};
-
 const getMarketMakerHealth = (env: Env | null): {
   enabled: boolean;
   ok: boolean;
@@ -1542,354 +961,43 @@ const getMarketMakerHealth = (env: Env | null): {
   };
 };
 
-const bootstrapMarketMakerLiquidity = async (
-  env: Env,
-  hubEntityIds: string[],
-  tokenCatalog: JTokenInfo[],
-): Promise<void> => {
-  const marketMakerBootstrapStartedAt = Date.now();
-  stopMarketMakerLoop();
-  const mm = await ensureMarketMakerEntity(env);
-  if (!mm) return;
-  const tokenIds = normalizeTokenIdsForMm(tokenCatalog);
-  if (tokenIds.length < 3) {
-    console.warn('[XLN] MM bootstrap skipped: less than 3 tokens in catalog');
-    return;
-  }
-
-  const targetHubs = hubEntityIds.slice(0, HUB_MESH_REQUIRED_HUBS);
-  marketMakerEntityId = mm.entityId;
-  marketMakerTargetHubIds = [...targetHubs];
-  marketMakerTokenIds = [...tokenIds];
-  const expectedOffersPerHub = buildMarketMakerPairs(tokenIds).reduce(
-    (sum, pair) => sum + getExpectedMarketMakerOffersForPair(pair.baseTokenId, pair.quoteTokenId),
-    0,
-  );
-  const bootstrapOfferLimit = Math.max(expectedOffersPerHub, MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK);
-
-  const bootstrapDeadline = Date.now() + 45_000;
-  let bootstrapTicks = 0;
-  while (Date.now() < bootstrapDeadline) {
-    bootstrapTicks += 1;
-    const tickStartedAt = Date.now();
-    await maintainMarketMakerQuotes(env, mm.entityId, mm.signerId, targetHubs, tokenIds, bootstrapOfferLimit);
-    await settleRuntimeFor(env, 45);
-    const health = getMarketMakerHealth(env);
-    console.log(
-      `[XLN][MM-TIMING] tick=${bootstrapTicks} elapsed=${Date.now() - tickStartedAt}ms ` +
-      `offers=${health.hubs.map((hub) => `${hub.hubEntityId.slice(-4)}:${hub.offers}`).join(',')}`,
-    );
-    if (health.ok) break;
-    await sleep(150);
-  }
-
-  const mmHealth = getMarketMakerHealth(env);
-  if (!mmHealth.ok) {
-    throw new Error(
-      `HUB_BOOTSTRAP_FAILED: MM liquidity not ready (expected=${mmHealth.expectedOffersPerHub} ` +
-      `perHub=${safeStringify(mmHealth.hubs)})`,
-    );
-  }
-
-  marketMakerLoopTimer = setInterval(() => {
-    if (marketMakerLoopInFlight) return;
-    marketMakerLoopInFlight = true;
-    void maintainMarketMakerQuotes(env, mm.entityId, mm.signerId, targetHubs, tokenIds)
-      .catch(error => console.warn('[XLN] MM quote loop tick failed:', (error as Error).message))
-      .finally(() => {
-        marketMakerLoopInFlight = false;
-      });
-  }, MARKET_MAKER_QUOTE_LOOP_MS);
-
-  console.log(
-    `[XLN] MM bootstrap ready: ${targetHubs.length} hubs, target=${expectedOffersPerHub} resting offers/hub`,
-  );
-  console.log(
-    `[XLN][MM-TIMING] total=${Date.now() - marketMakerBootstrapStartedAt}ms ticks=${bootstrapTicks} ` +
-    `expectedOffersPerHub=${expectedOffersPerHub}`,
-  );
-};
-
-const ensureHubPairMeshCredit = async (env: Env, leftEntityId: string, rightEntityId: string): Promise<void> => {
-  const leftSignerId = getHubSignerForEntity(env, leftEntityId);
-  const rightSignerId = getHubSignerForEntity(env, rightEntityId);
-  if (hasPairMutualCredit(env, leftEntityId, rightEntityId, HUB_MESH_TOKEN_ID, HUB_MESH_CREDIT_AMOUNT)) {
-    console.log(`[XLN] Hub pair already funded: ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}..`);
-    return;
-  }
-
-  const MAX_ATTEMPTS = 4;
-  for (let attempt = 1; attempt <= MAX_ATTEMPTS; attempt += 1) {
-    if (hasPairMutualCredit(env, leftEntityId, rightEntityId, HUB_MESH_TOKEN_ID, HUB_MESH_CREDIT_AMOUNT)) {
-      console.log(`[XLN] Hub pair credit ready: ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}..`);
-      return;
-    }
-
-    const entityInputs: EntityInput[] = [];
-    const leftHasAccount = hasAccount(env, leftEntityId, rightEntityId);
-    const rightHasAccount = hasAccount(env, rightEntityId, leftEntityId);
-    const hasEitherAccount = leftHasAccount || rightHasAccount;
-
-    // Single-opener rule: only left side initiates openAccount.
-    // Right side must materialize via inbound accountInput/ACK flow.
-    if (!hasEitherAccount) {
-      entityInputs.push({
-        entityId: leftEntityId,
-        signerId: leftSignerId,
-        entityTxs: [
-          {
-            type: 'openAccount',
-            data: {
-              targetEntityId: rightEntityId,
-              tokenId: HUB_MESH_TOKEN_ID,
-              // Prime left->right credit inside the initial account frame.
-              creditAmount: HUB_MESH_CREDIT_AMOUNT,
-            },
-          },
-        ],
-      });
-    }
-
-    if (entityInputs.length > 0) {
-      console.log(
-        `[XLN] Opening hub account pair ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}.. (attempt ${attempt}/${MAX_ATTEMPTS})`,
-      );
-      enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs });
-      await settleRuntimeFor(env, 35);
-    }
-
-    const hasReadyPair = await waitUntil(
-      () => {
-        const leftAccount = getAccountMachine(env, leftEntityId, rightEntityId);
-        const rightAccount = getAccountMachine(env, rightEntityId, leftEntityId);
-        return isAccountConsensusReady(leftAccount) && isAccountConsensusReady(rightAccount);
-      },
-      120,
-      120,
-    );
-    if (!hasReadyPair) {
-      console.warn(
-        `[XLN] Hub mesh account open timed out before bilateral readiness: ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}.. (attempt ${attempt}/${MAX_ATTEMPTS})`,
-      );
-      continue;
-    }
-
-    const leftAccount = getAccountMachine(env, leftEntityId, rightEntityId);
-    const rightAccount = getAccountMachine(env, rightEntityId, leftEntityId);
-    if (!leftAccount || !rightAccount) continue;
-
-    const queuedByEntity = new Map<string, EntityInput>();
-    const leftOutCapacity = getEntityOutCapacity(leftAccount, leftEntityId, HUB_MESH_TOKEN_ID);
-    const rightOutCapacity = getEntityOutCapacity(rightAccount, rightEntityId, HUB_MESH_TOKEN_ID);
-
-    if (leftOutCapacity < HUB_MESH_CREDIT_AMOUNT) {
-      queuedByEntity.set(rightEntityId, {
-        entityId: rightEntityId,
-        signerId: rightSignerId,
-        entityTxs: [
-          {
-            type: 'extendCredit',
-            data: {
-              counterpartyEntityId: leftEntityId,
-              tokenId: HUB_MESH_TOKEN_ID,
-              amount: HUB_MESH_CREDIT_AMOUNT,
-            },
-          },
-        ],
-      });
-    }
-
-    if (rightOutCapacity < HUB_MESH_CREDIT_AMOUNT) {
-      queuedByEntity.set(leftEntityId, {
-        entityId: leftEntityId,
-        signerId: leftSignerId,
-        entityTxs: [
-          {
-            type: 'extendCredit',
-            data: {
-              counterpartyEntityId: rightEntityId,
-              tokenId: HUB_MESH_TOKEN_ID,
-              amount: HUB_MESH_CREDIT_AMOUNT,
-            },
-          },
-        ],
-      });
-    }
-
-    if (queuedByEntity.size > 0) {
-      console.log(
-        `[XLN] Queueing mesh extendCredit for ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}.. (attempt ${attempt}/${MAX_ATTEMPTS})`,
-      );
-      enqueueRuntimeInput(env, {
-        runtimeTxs: [],
-        entityInputs: Array.from(queuedByEntity.values()),
-      });
-      await settleRuntimeFor(env, 45);
-    }
-  }
-
-  console.warn(
-    `[XLN] Hub pair credit still below target: ${leftEntityId.slice(0, 8)}.. ↔ ${rightEntityId.slice(0, 8)}..`,
-  );
-};
-
-const bootstrapHubMeshCredit = async (env: Env, requiredHubEntityIds: string[]): Promise<void> => {
-  if (requiredHubEntityIds.length < 3) return;
-  const normalized = requiredHubEntityIds.map(id => id.toLowerCase());
-  const gossipReady = await waitUntil(
-    () => {
-      const profiles = env.gossip?.getProfiles?.() || [];
-      const ids = new Set(profiles.map(p => p.entityId.toLowerCase()));
-      return normalized.every(id => ids.has(id));
-    },
-    120,
-    100,
-  );
-
-  if (!gossipReady) {
-    console.warn('[XLN] Hub mesh bootstrap skipped: all hubs were not visible in gossip in time');
-    return;
-  }
-
-  console.log('[XLN] Bootstrapping H1/H2/H3 mutual credit mesh ($1M each direction, tokenId=1)');
-  for (let i = 0; i < requiredHubEntityIds.length; i++) {
-    for (let j = i + 1; j < requiredHubEntityIds.length; j++) {
-      const left = requiredHubEntityIds[i];
-      const right = requiredHubEntityIds[j];
-      if (!left || !right) continue;
-      await ensureHubPairMeshCredit(env, left, right);
-    }
-  }
-};
-
-const assertHubBootstrapReadiness = async (
-  env: Env,
-  hubEntityIds: string[],
-  tokenCatalog: JTokenInfo[],
-): Promise<void> => {
-  if (hubEntityIds.length < HUB_MESH_REQUIRED_HUBS) {
-    const message =
-      `HUB_BOOTSTRAP_FAILED: expected >=${HUB_MESH_REQUIRED_HUBS} hubs, got ${hubEntityIds.length}`;
-    pushDebugEvent(relayStore, {
-      event: 'error',
-      status: 'failed',
-      reason: 'HUB_BOOTSTRAP_HUB_COUNT',
-      details: { expected: HUB_MESH_REQUIRED_HUBS, actual: hubEntityIds.length, hubEntityIds },
-    });
-    throw new Error(message);
-  }
-
-  const requiredTokens = tokenCatalog
-    .map(token => ({
-      tokenId: Number(token.tokenId),
-      symbol: String(token.symbol || `token-${token.tokenId}`),
-      decimals: Number.isFinite(token.decimals) ? Number(token.decimals) : 18,
-    }))
-    .filter(token => Number.isFinite(token.tokenId) && token.tokenId > 0)
-    .slice(0, HUB_REQUIRED_TOKEN_COUNT);
-
-  if (requiredTokens.length < HUB_REQUIRED_TOKEN_COUNT) {
-    const message =
-      `HUB_BOOTSTRAP_FAILED: expected >=${HUB_REQUIRED_TOKEN_COUNT} tokens, got ${requiredTokens.length}`;
-    pushDebugEvent(relayStore, {
-      event: 'error',
-      status: 'failed',
-      reason: 'HUB_BOOTSTRAP_TOKEN_COUNT',
-      details: {
-        expected: HUB_REQUIRED_TOKEN_COUNT,
-        actual: requiredTokens.length,
-        tokenCatalog: tokenCatalog.map(t => ({
-          tokenId: Number(t.tokenId),
-          symbol: t.symbol,
-          decimals: t.decimals,
-        })),
-      },
-    });
-    throw new Error(message);
-  }
-
-  const expectedTargets = requiredTokens.map(token => ({
-    ...token,
-    target: HUB_RESERVE_TARGET_UNITS * 10n ** BigInt(token.decimals),
-  }));
-
-  const reserveReady = await waitUntil(
-    () => {
-      for (const hubEntityId of hubEntityIds) {
-        const replica = getEntityReplicaById(env, hubEntityId);
-        if (!replica?.state) return false;
-        for (const token of expectedTargets) {
-          const current = replica.state.reserves.get(token.tokenId) ?? 0n;
-          if (current < token.target) return false;
-        }
-      }
-      return true;
-    },
-    Math.ceil(HUB_RESERVE_ASSERT_TIMEOUT_MS / 200),
-    200,
-  );
-
-  if (!reserveReady) {
-    const reserveState = hubEntityIds.map(hubEntityId => {
-      const replica = getEntityReplicaById(env, hubEntityId);
-      const reserves = expectedTargets.map(token => ({
-        tokenId: token.tokenId,
-        symbol: token.symbol,
-        expectedMin: token.target.toString(),
-                actual: (replica?.state?.reserves?.get(token.tokenId) ?? 0n).toString(),
-      }));
-      return { hubEntityId, reserves };
-    });
-    pushDebugEvent(relayStore, {
-      event: 'error',
-      status: 'failed',
-      reason: 'HUB_BOOTSTRAP_RESERVES',
-      details: { reserveState },
-    });
-    throw new Error(`HUB_BOOTSTRAP_FAILED: reserves not funded for all hubs/tokens ${safeStringify(reserveState)}`);
-  }
-
-  const meshReady = await waitUntil(
-    () => getHubMeshHealth(env).ok === true,
-    Math.ceil(HUB_MESH_ASSERT_TIMEOUT_MS / 200),
-    200,
-  );
-  if (!meshReady) {
-    const mesh = getHubMeshHealth(env);
-    pushDebugEvent(relayStore, {
-      event: 'error',
-      status: 'failed',
-      reason: 'HUB_BOOTSTRAP_MESH',
-      details: mesh,
-    });
-    throw new Error(`HUB_BOOTSTRAP_FAILED: hub mesh credit not ready ${safeStringify(mesh)}`);
-  }
-};
-
 const deployDefaultTokensOnRpc = async (): Promise<void> => {
-  if (!globalJAdapter || globalJAdapter.mode === 'browservm') return;
-  const existing = await globalJAdapter.getTokenRegistry().catch(() => []);
+  const adapter = globalJAdapter;
+  if (!adapter || adapter.mode === 'browservm') return;
+  const existing = await adapter.getTokenRegistry().catch(() => []);
   const existingSymbols = new Set(
     existing
       .map(token => String(token.symbol || '').trim().toUpperCase())
       .filter(symbol => symbol.length > 0),
   );
 
-  const signer = globalJAdapter.signer;
-  const depository = globalJAdapter.depository;
-  const depositoryAddress = globalJAdapter.addresses?.depository;
+  const signer = adapter.signer;
+  const depository = adapter.depository;
+  const depositoryAddress = adapter.addresses?.depository;
   if (!depositoryAddress) {
     throw new Error('Depository address not available for token deployment');
   }
 
   console.log('[XLN] Deploying default ERC20 tokens to RPC...');
-  const erc20Factory = new ERC20Mock__factory(signer as ContractRunner);
+  const erc20Factory = new ethers.ContractFactory(
+    ERC20Mock__factory.abi,
+    ERC20Mock__factory.bytecode,
+    signer as ethers.ContractRunner,
+  );
 
   for (const token of DEFAULT_TOKEN_CATALOG) {
     if (existingSymbols.has(String(token.symbol || '').trim().toUpperCase())) {
       continue;
     }
-    const tokenContract = await erc20Factory.deploy(token.name, token.symbol, DEFAULT_TOKEN_SUPPLY);
+    const tokenContract = await erc20Factory.deploy(
+      token.name,
+      token.symbol,
+      DEFAULT_TOKEN_SUPPLY,
+    ) as unknown as {
+      waitForDeployment(): Promise<unknown>;
+      getAddress(): Promise<string>;
+      approve(spender: string, amount: bigint): Promise<{ wait(): Promise<unknown> }>;
+    };
     await tokenContract.waitForDeployment();
     const tokenAddress = await tokenContract.getAddress();
     console.log(`[XLN] ${token.symbol} deployed at ${tokenAddress}`);
@@ -1897,7 +1005,9 @@ const deployDefaultTokensOnRpc = async (): Promise<void> => {
     const approveTx = await tokenContract.approve(depositoryAddress, TOKEN_REGISTRATION_AMOUNT);
     await approveTx.wait();
 
-    const registerTx = await depository.connect(signer).adminRegisterExternalToken({
+    const registerTx = await depository
+      .connect(signer as unknown as Parameters<typeof depository.connect>[0])
+      .adminRegisterExternalToken({
       entity: ethers.ZeroHash,
       contractAddress: tokenAddress,
       externalTokenId: 0,
@@ -1927,12 +1037,13 @@ const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: str
 };
 
 const ensureTokenCatalog = async (): Promise<JTokenInfo[]> => {
-  if (!globalJAdapter) return [];
+  const adapter = globalJAdapter;
+  if (!adapter) return [];
   const fallbackTokens = tokenCatalogCache ?? [];
   const safeGetCode = async (address: string): Promise<string> => {
     try {
       return await withTimeout(
-        globalJAdapter.provider.getCode(address).catch(() => '0x'),
+        adapter.provider.getCode(address).catch(() => '0x'),
         TOKEN_CATALOG_TIMEOUT_MS,
         'provider.getCode',
       );
@@ -1944,7 +1055,7 @@ const ensureTokenCatalog = async (): Promise<JTokenInfo[]> => {
   const safeGetRegistry = async (): Promise<JTokenInfo[]> => {
     try {
       return await withTimeout(
-        globalJAdapter.getTokenRegistry().catch(() => []),
+        adapter.getTokenRegistry().catch(() => []),
         TOKEN_CATALOG_TIMEOUT_MS,
         'getTokenRegistry',
       );
@@ -1954,7 +1065,7 @@ const ensureTokenCatalog = async (): Promise<JTokenInfo[]> => {
     }
   };
   if (tokenCatalogCache && tokenCatalogCache.length > 0) {
-    if (globalJAdapter.mode !== 'browservm') {
+    if (adapter.mode !== 'browservm') {
       const firstToken = tokenCatalogCache[0];
       if (firstToken?.address) {
         const code = await safeGetCode(firstToken.address);
@@ -1972,10 +1083,10 @@ const ensureTokenCatalog = async (): Promise<JTokenInfo[]> => {
 
   tokenCatalogPromise = (async () => {
     const current = await safeGetRegistry();
-    const needsMoreDefaultTokens = globalJAdapter.mode !== 'browservm' && current.length < HUB_REQUIRED_TOKEN_COUNT;
+    const needsMoreDefaultTokens = adapter.mode !== 'browservm' && current.length < HUB_REQUIRED_TOKEN_COUNT;
 
     // Verify tokens have actual code on-chain (not stale addresses)
-    if (current.length > 0 && globalJAdapter.mode !== 'browservm') {
+    if (current.length > 0 && adapter.mode !== 'browservm') {
       const firstToken = current[0];
       if (firstToken?.address) {
         const code = await safeGetCode(firstToken.address);
@@ -2006,7 +1117,7 @@ const ensureTokenCatalog = async (): Promise<JTokenInfo[]> => {
       return current;
     }
 
-    if (current.length > 0 || globalJAdapter.mode === 'browservm') {
+    if (current.length > 0 || adapter.mode === 'browservm') {
       return current;
     }
 
@@ -2038,15 +1149,20 @@ const updateJurisdictionsJson = async (
     const publicRpc = toPublicRpcUrl(String(process.env['PUBLIC_RPC'] || rpcUrl || '/rpc'));
     await fs.mkdir(path.dirname(canonicalPath), { recursive: true });
 
-    let data: Record<string, unknown> = {};
+    type MutableJurisdictionsJson = Record<string, unknown> & {
+      defaults?: Record<string, unknown> & { rebalancePolicyUsd?: unknown };
+      jurisdictions?: Record<string, Record<string, unknown>>;
+    };
+    let data: MutableJurisdictionsJson = {};
     try {
-      data = JSON.parse(await fs.readFile(canonicalPath, 'utf-8'));
+      const parsed = JSON.parse(await fs.readFile(canonicalPath, 'utf-8'));
+      data = isRecord(parsed) ? parsed as MutableJurisdictionsJson : {};
     } catch {
       data = {};
     }
     data['version'] = String(data['version'] || '').trim() || '1';
     data['lastUpdated'] = new Date().toISOString();
-    data['defaults'] = data['defaults'] ?? {
+    const defaults = data.defaults ?? {
       timeout: 30000,
       retryAttempts: 3,
       gasLimit: 1_000_000,
@@ -2056,23 +1172,24 @@ const updateJurisdictionsJson = async (
         maxFee: 15,
       },
     };
-    data['defaults'].rebalancePolicyUsd = data['defaults'].rebalancePolicyUsd ?? {
+    defaults.rebalancePolicyUsd = defaults.rebalancePolicyUsd ?? {
       r2cRequestSoftLimit: 500,
       hardLimit: 10_000,
       maxFee: 15,
     };
+    data.defaults = defaults;
     if (data['testnet']) delete data['testnet'];
-    data['jurisdictions'] = data['jurisdictions'] ?? {};
-    for (const key of Object.keys(data['jurisdictions'])) {
-      if (key !== 'arrakis' && key.startsWith('arrakis_')) delete data['jurisdictions'][key];
+    const jurisdictions = data.jurisdictions ?? {};
+    for (const key of Object.keys(jurisdictions)) {
+      if (key !== 'arrakis' && key.startsWith('arrakis_')) delete jurisdictions[key];
     }
-    const existingArrakis = data['jurisdictions'].arrakis ?? {};
-    data['jurisdictions'].arrakis = {
+    const existingArrakis = jurisdictions['arrakis'] ?? {};
+    jurisdictions['arrakis'] = {
       ...existingArrakis,
       name: 'Arrakis (Shared Anvil)',
       chainId: chainIdOverride ?? 31337,
       rpc: publicRpc,
-      rebalancePolicyUsd: existingArrakis.rebalancePolicyUsd ?? data['defaults'].rebalancePolicyUsd,
+      rebalancePolicyUsd: existingArrakis['rebalancePolicyUsd'] ?? defaults.rebalancePolicyUsd,
       contracts: {
         account: contracts.account,
         depository: contracts.depository,
@@ -2080,6 +1197,7 @@ const updateJurisdictionsJson = async (
         deltaTransformer: contracts.deltaTransformer,
       },
     };
+    data.jurisdictions = jurisdictions;
 
     const payload = JSON.stringify(data, null, 2);
     await fs.writeFile(canonicalPath, payload);
@@ -2333,7 +1451,7 @@ const installProcessSafetyGuards = (): void => {
   });
 
   process.on('uncaughtException', error => {
-    const message = error?.message || 'Unknown uncaught exception';
+    const message = getErrorMessage(error, 'Unknown uncaught exception');
     console.error(`[PROCESS] Uncaught exception: ${message}`);
     pushDebugEvent(relayStore, {
       event: 'error',
@@ -2784,6 +1902,7 @@ const listLocalControlEntities = (env: Env): ControlEntitySummary[] => {
       continue;
     }
     seen.add(entityId);
+    const profile = replica?.state?.profile as (typeof replica.state.profile & { publicAccounts?: unknown[] }) | undefined;
     entities.push({
       entityId,
       signerId,
@@ -2791,8 +1910,8 @@ const listLocalControlEntities = (env: Env): ControlEntitySummary[] => {
       isRoutingEnabled: !!replica?.state?.hubRebalanceConfig,
       runtimeId: typeof env.runtimeId === 'string' && env.runtimeId.trim().length > 0 ? env.runtimeId : null,
       accountCount: replica?.state?.accounts instanceof Map ? replica.state.accounts.size : 0,
-      publicAccountCount: Array.isArray(replica?.state?.profile?.publicAccounts)
-        ? replica.state.profile.publicAccounts.length
+      publicAccountCount: Array.isArray(profile?.publicAccounts)
+        ? profile.publicAccounts.length
         : 0,
       accountEntityIds: replica?.state?.accounts instanceof Map
         ? Array.from(replica.state.accounts.keys()).map(value => String(value).toLowerCase()).sort()
@@ -2813,9 +1932,10 @@ const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, e
 
   if (type === 'subscribe') {
     const client = Array.from(relayStore.clients.values()).find(c => c.ws === ws);
-    if (client && msg['topics']) {
-      for (const topic of msg['topics']) {
-        client.topics.add(topic);
+    const topics = msg['topics'];
+    if (client && Array.isArray(topics)) {
+      for (const topic of topics) {
+        client.topics.add(String(topic));
       }
     }
     ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'subscribed' }));
@@ -3018,13 +2138,14 @@ const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, e
         txData['hashlock'] = hashlock;
       }
 
+      const paymentTx = { type: txType, data: txData } as EntityTx;
       enqueueRuntimeInput(env, {
         runtimeTxs: [],
         entityInputs: [
           {
             entityId: sourceEntityId,
             signerId,
-            entityTxs: [{ type: txType, data: txData }],
+            entityTxs: [paymentTx],
           },
         ],
       });
@@ -3211,7 +2332,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   if ((pathname === '/api/rpc' || pathname === '/rpc') && req.method === 'POST') {
     const blockLocal = process.env['BLOCK_LOCAL_RPC_PROXY'] === 'true';
     const explicitUpstream = process.env['RPC_UPSTREAM_URL'] || process.env['PUBLIC_RPC_URL'] || process.env['ANVIL_RPC'];
-    const jMachineRpc = env?.activeJurisdiction ? env.jReplicas.get(env.activeJurisdiction)?.rpcUrl : undefined;
+    const jMachineRpc = env?.activeJurisdiction ? env.jReplicas.get(env.activeJurisdiction)?.rpcs?.[0] : undefined;
     const upstream = explicitUpstream || jMachineRpc || '';
     const isLocal = isLoopbackUrl(upstream);
 
@@ -3259,9 +2380,9 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       pushDebugEvent(relayStore, {
         event: 'error',
         reason: 'RPC_PROXY_FETCH_FAILED',
-        details: { upstream, path: pathname, error: error?.message || String(error) },
+        details: { upstream, path: pathname, error: getErrorMessage(error, String(error)) },
       });
-      return new Response(safeStringify({ error: error?.message || 'RPC proxy failed' }), { status: 502, headers });
+      return new Response(safeStringify({ error: getErrorMessage(error, 'RPC proxy failed') }), { status: 502, headers });
     }
   }
 
@@ -3479,7 +2600,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       });
     } catch (error: unknown) {
       return new Response(
-        JSON.stringify({ error: error?.message || 'Failed to read jurisdictions.json' }),
+        safeStringify({ error: getErrorMessage(error, 'Failed to read jurisdictions.json') }),
         { status: 500, headers },
       );
     }
@@ -3827,7 +2948,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           { status: 503, headers },
         );
       }
-      const hubEntityId = hubs[0].entityId;
+      const hubEntityId = hubs[0]!.entityId;
 
       const hubSignerId = resolveEntityProposerId(env, hubEntityId, 'faucet-reserve');
       const tokenCatalog = await ensureTokenCatalog();
@@ -4008,7 +3129,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     } catch (error: unknown) {
       faucetLock.release();
       console.error('[FAUCET/RESERVE] Error:', error);
-      return new Response(safeStringify({ error: error.message }), { status: 500, headers });
+      return new Response(safeStringify({ error: getErrorMessage(error) }), { status: 500, headers });
     }
   }
 
@@ -4284,7 +3405,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           liquidityFeeBps: hubPolicy?.rebalanceLiquidityFeeBps ?? hubPolicy?.minFeeBps ?? 1n,
           gasFee: hubPolicy?.rebalanceGasFee ?? 0n,
         });
-        const entityTxs: Array<{ type: string; data: Record<string, unknown> }> = [{
+        const entityTxs: EntityTx[] = [{
           type: 'directPayment',
           data: {
             targetEntityId: normalizedUserEntityId,
@@ -4333,7 +3454,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       );
     } catch (error: unknown) {
       console.error('[FAUCET/OFFCHAIN] Error:', error);
-      const message = error?.message || 'Unknown faucet error';
+      const message = getErrorMessage(error, 'Unknown faucet error');
       const status =
         message.includes('SIGNER_RESOLUTION_FAILED') || message.includes('RUNTIME_REPLICA_NOT_FOUND') ? 503 : 500;
       return new Response(safeStringify({ error: message }), { status, headers });
@@ -4491,7 +3612,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
   const createHttpServer = () => Bun.serve({
     port: options.port,
-    hostname: options.host,
+    hostname: options.host ?? '0.0.0.0',
 
     async fetch(req, server) {
       const url = new URL(req.url);
@@ -4661,6 +3782,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     },
   });
   const server = createHttpServer();
+  void server;
 
   try {
     serverBootPhase = 'runtime';
@@ -4668,6 +3790,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     env = await main(SERVER_RUNTIME_SEED);
     serverEnv = env;
     console.log('[XLN] Runtime initialized ✓');
+    const runtimeEnv = env;
     const verboseRuntimeLogs = /^(1|true)$/i.test(process.env['RUNTIME_VERBOSE_LOGS'] ?? '');
     env.quietRuntimeLogs = !verboseRuntimeLogs;
     console.log(
@@ -4675,7 +3798,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     );
     env.runtimeState = env.runtimeState ?? {};
     env.runtimeState.directEntityInputDispatch = (targetRuntimeId, input, ingressTimestamp) =>
-      sendEntityInputDirectViaRelaySocket(env, targetRuntimeId, input, ingressTimestamp);
+      sendEntityInputDirectViaRelaySocket(runtimeEnv, targetRuntimeId, input, ingressTimestamp);
     startRuntimeLoop(env);
     console.log('[XLN] Runtime event loop started ✓');
 
@@ -4687,16 +3810,13 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     console.log('  USE_ANVIL =', useAnvil);
     console.log('  ANVIL_RPC =', anvilRpc);
 
-    let activeJName: string | null = null;
-
     if (useAnvil) {
       console.log('[XLN] Connecting to Anvil testnet...');
       const usePredeployedAddresses = process.env['XLN_USE_PREDEPLOYED_ADDRESSES'] === 'true';
 
     // Optional: reuse addresses from jurisdictions.json (disabled by default).
     const fs = await import('fs/promises');
-    const path = await import('path');
-    let fromReplica = undefined;
+    let fromReplica: JAdapterConfig['fromReplica'] | undefined = undefined;
     if (usePredeployedAddresses) {
       try {
         const jurisdictionsPath = resolveJurisdictionsJsonPath();
@@ -4711,7 +3831,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
             entityProviderAddress: arrakisConfig.contracts.entityProvider,
             contracts: arrakisConfig.contracts,
             chainId: arrakisConfig.chainId ?? 31337,
-          };
+          } as JAdapterConfig['fromReplica'];
           console.log('[XLN] Loaded predeployed contract addresses from jurisdictions.json');
         }
       } catch (err) {
@@ -4755,13 +3875,15 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       fromReplica.chainId = detectedChainId;
     }
 
-    if (fromReplica?.depositoryAddress && fromReplica?.entityProviderAddress) {
+    const fromReplicaDepositoryAddress = fromReplica?.depositoryAddress;
+    const fromReplicaEntityProviderAddress = fromReplica?.entityProviderAddress;
+    if (fromReplicaDepositoryAddress && fromReplicaEntityProviderAddress) {
       console.log('[XLN] Pre-checking predeployed contract code...');
       const [depositoryCode, entityProviderCode] = await withStartupStepTimeout(
         'precheckPredeployedCode',
         (async () => {
-          const depCode = await fetchRpcCode(anvilRpc, fromReplica.depositoryAddress);
-          const entityProviderCode = await fetchRpcCode(anvilRpc, fromReplica.entityProviderAddress);
+          const depCode = await fetchRpcCode(anvilRpc, fromReplicaDepositoryAddress);
+          const entityProviderCode = await fetchRpcCode(anvilRpc, fromReplicaEntityProviderAddress);
           return [depCode, entityProviderCode] as const;
         })(),
       );
@@ -4769,21 +3891,24 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       if (depositoryCode === '0x' || entityProviderCode === '0x') {
         console.warn(
           `[XLN] Ignoring stale jurisdictions addresses with no on-chain code: ` +
-            `depository=${fromReplica.depositoryAddress} code=${depositoryCode} ` +
-            `entityProvider=${fromReplica.entityProviderAddress} code=${entityProviderCode}`,
+            `depository=${fromReplicaDepositoryAddress} code=${depositoryCode} ` +
+            `entityProvider=${fromReplicaEntityProviderAddress} code=${entityProviderCode}`,
         );
         fromReplica = undefined;
       }
     }
 
+    const rpcAdapterConfig: JAdapterConfig = {
+      mode: 'rpc',
+      chainId: detectedChainId,
+      rpcUrl: anvilRpc,
+    };
+    if (fromReplica) {
+      rpcAdapterConfig.fromReplica = fromReplica;
+    }
     globalJAdapter = await withStartupStepTimeout(
       'createJAdapter(rpc)',
-      createJAdapter({
-        mode: 'rpc',
-        chainId: detectedChainId,
-        rpcUrl: anvilRpc,
-        fromReplica,
-      }),
+      createJAdapter(rpcAdapterConfig),
     );
 
     const deployFreshLocalStack = async (reason: string): Promise<void> => {
@@ -4852,7 +3977,6 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         console.log(`[XLN] J-replica "${jName}" registered in env`);
       }
       if (!env.activeJurisdiction) env.activeJurisdiction = jName;
-      activeJName = jName;
     }
     } else {
       console.log('[XLN] Using BrowserVM (local mode)');
@@ -4886,7 +4010,6 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
           console.log(`[XLN] J-replica "${jName}" registered in env`);
         }
         if (!env.activeJurisdiction) env.activeJurisdiction = jName;
-        activeJName = jName;
       }
     }
 
@@ -4898,12 +4021,12 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     const localDeliver = createLocalDeliveryHandler(env, relayStore, getEntityReplicaById);
     routerConfig = {
       store: relayStore,
-      localRuntimeId: env.runtimeId,
+      localRuntimeId: String(env.runtimeId),
       localDeliver,
       send: (ws, data) => ws.send(data),
       onGossipStore: profile => {
         try {
-          env.gossip?.announce?.(profile);
+          runtimeEnv.gossip?.announce?.(profile);
         } catch {
           /* best effort */
         }
