@@ -19,7 +19,7 @@ import {
   syncChain,
   assertBilateralSync,
 } from './helpers';
-import { bootScenario, registerEntities } from './boot';
+import { bootScenario, registerEntities, type RegisteredEntity } from './boot';
 
 const USDC = 1;
 const HUB_RESERVE = usd(20_000);
@@ -59,6 +59,12 @@ function getFinalizedEventCount(replica: EntityReplica, type: string): number {
   return count;
 }
 
+function requireRegistered(entities: RegisteredEntity[], index: number, label: string): RegisteredEntity {
+  const entity = entities[index];
+  if (!entity) throw new Error(`PROCESSBATCH_MISSING_ENTITY: ${label} at index ${index}`);
+  return entity;
+}
+
 export async function runProcessBatchScenario(_existingEnv?: Env): Promise<Env> {
   console.log('\n' + '═'.repeat(80));
   console.log('  PROCESSBATCH MIXED REBALANCE');
@@ -72,15 +78,21 @@ export async function runProcessBatchScenario(_existingEnv?: Env): Promise<Env> 
     seed: 'processbatch-mixed-seed',
   });
 
-  assert(jurisdiction.chainId > 0, `jurisdiction.chainId>0 (got ${jurisdiction.chainId})`, env);
+  const jurisdictionChainId = jurisdiction.chainId;
+  assert(typeof jurisdictionChainId === 'number' && jurisdictionChainId > 0, `jurisdiction.chainId>0 (got ${jurisdictionChainId})`, env);
 
-  const [hub, spenderA, spenderB, receiverA, receiverB] = await registerEntities(env, jadapter, [
+  const registered = await registerEntities(env, jadapter, [
     { name: 'Hub', signer: '2', position: { x: 0, y: 0, z: 0 } },
     { name: 'Spender-A', signer: '3', position: { x: -30, y: -20, z: 0 } },
     { name: 'Spender-B', signer: '4', position: { x: 30, y: -20, z: 0 } },
     { name: 'Receiver-A', signer: '5', position: { x: -40, y: 20, z: 0 } },
     { name: 'Receiver-B', signer: '6', position: { x: 40, y: 20, z: 0 } },
   ], jurisdiction);
+  const hub = requireRegistered(registered, 0, 'hub');
+  const spenderA = requireRegistered(registered, 1, 'spenderA');
+  const spenderB = requireRegistered(registered, 2, 'spenderB');
+  const receiverA = requireRegistered(registered, 3, 'receiverA');
+  const receiverB = requireRegistered(registered, 4, 'receiverB');
 
   const spenders = [spenderA, spenderB];
   const receivers = [receiverA, receiverB];
