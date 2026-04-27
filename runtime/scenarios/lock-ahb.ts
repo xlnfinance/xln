@@ -15,14 +15,15 @@
  * - Griefing protection (timelock cascade)
  */
 
-import type { Env, EntityInput, EntityReplica, Delta } from '../types';
+import type { Env, EntityInput } from '../types';
 import type { JAdapter } from '../jadapter/types';
-import { getProcess, getApplyRuntimeInput, usd, snap, checkSolvency, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain } from './helpers';
+import { getProcess, getApplyRuntimeInput, usd, snap, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain } from './helpers';
 import { ensureJAdapter, registerEntities, createJReplica, createJurisdictionConfig, getScenarioJAdapter } from './boot';
 import { formatRuntime } from '../runtime-ascii';
 import { isLeft } from '../account-utils';
 import { ethers } from 'ethers';
 import { createRngFromEnv } from './seeded-rng';
+import { createEmptyBatch } from '../j-batch';
 
 const USDC_TOKEN_ID = 1;
 const HUB_INITIAL_RESERVE = usd(10_000_000);
@@ -37,6 +38,7 @@ async function pushSnapshot(
   env: Env,
   title: string,
   opts: {
+    title?: string;
     what?: string;
     why?: string;
     tradfiParallel?: string;
@@ -59,101 +61,6 @@ async function pushSnapshot(
 
   snap(env, title, opts);
   await process(env, inputs);
-}
-
-type ReplicaEntry = [string, EntityReplica];
-
-
-
-/**
- * COMPREHENSIVE STATE DUMP - Full JSON dump of system state
- * Enable/disable via AHB_DEBUG=1 environment variable or pass enabled=true
- */
-function dumpSystemState(env: Env, label: string, enabled: boolean = true): void {
-  const debugEnabled = typeof process !== 'undefined' && process.env && process.env['AHB_DEBUG'];
-  if (!enabled && !debugEnabled) return;
-
-  // Named entities for easier reading
-  const ENTITY_NAMES: Record<string, string> = {
-    '0x0000000000000000000000000000000000000000000000000000000000000001': 'Alice',
-    '0x0000000000000000000000000000000000000000000000000000000000000002': 'Hub',
-    '0x0000000000000000000000000000000000000000000000000000000000000003': 'Bob',
-  };
-
-  const getName = (id: string): string => ENTITY_NAMES[id] || id.slice(-4);
-
-  // Build JSON-serializable state object
-  const state: Record<string, any> = {
-    label,
-    timestamp: env.timestamp, // System-level time from runtime frame
-    height: env.height,
-    entities: {} as Record<string, any>,
-  };
-
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
-    const entityId = replicaKey.split(':')[0];
-    const entityName = getName(entityId);
-
-    const entityState: Record<string, any> = {
-      name: entityName,
-      entityId: entityId.slice(-8),
-      reserves: {} as Record<string, string>,
-      accounts: {} as Record<string, any>,
-    };
-
-    // Reserves (convert BigInt to string for JSON)
-    if (replica.state.reserves) {
-      for (const [tokenId, amount] of replica.state.reserves.entries()) {
-        const usd = Number(amount) / 1e18;
-        entityState['reserves'][tokenId] = { raw: amount.toString(), usd: `$${usd.toLocaleString()}` };
-      }
-    }
-
-    // Accounts
-    if (replica.state.accounts) {
-      for (const [counterpartyId, account] of replica.state.accounts.entries()) {
-        const counterpartyName = getName(counterpartyId);
-        const isLeftEntity = isLeft(entityId, counterpartyId);
-
-        const accountState: Record<string, any> = {
-          counterparty: counterpartyName,
-          counterpartyId: counterpartyId.slice(-8),
-          perspective: isLeftEntity ? 'LEFT' : 'RIGHT',
-          globalCreditLimits: {
-            ownLimit: account.globalCreditLimits.ownLimit.toString(),
-            peerLimit: account.globalCreditLimits.peerLimit.toString(),
-          },
-          deltas: {} as Record<number, any>,
-        };
-
-        for (const [tokenId, delta] of account.deltas.entries()) {
-          const totalDelta = delta.ondelta + delta.offdelta;
-          accountState['deltas'][tokenId] = {
-            collateral: { raw: delta.collateral.toString(), usd: `$${(Number(delta.collateral) / 1e18).toLocaleString()}` },
-            ondelta: { raw: delta.ondelta.toString(), usd: `$${(Number(delta.ondelta) / 1e18).toLocaleString()}` },
-            offdelta: { raw: delta.offdelta.toString(), usd: `$${(Number(delta.offdelta) / 1e18).toLocaleString()}` },
-            totalDelta: {
-              raw: totalDelta.toString(),
-              usd: `$${(Number(totalDelta) / 1e18).toLocaleString()}`,
-              meaning: totalDelta > 0n ? 'RIGHT owes LEFT' : totalDelta < 0n ? 'LEFT owes RIGHT' : 'balanced',
-            },
-            leftCreditLimit: { raw: delta.leftCreditLimit.toString(), usd: `$${(Number(delta.leftCreditLimit) / 1e18).toLocaleString()}`, meaning: 'LEFT extends to RIGHT' },
-            rightCreditLimit: { raw: delta.rightCreditLimit.toString(), usd: `$${(Number(delta.rightCreditLimit) / 1e18).toLocaleString()}`, meaning: 'RIGHT extends to LEFT' },
-          };
-        }
-
-        entityState['accounts'][counterpartyName] = accountState;
-      }
-    }
-
-    state['entities'][entityName] = entityState;
-  }
-
-  console.log('\n' + '='.repeat(80));
-  console.log(`📊 SYSTEM STATE DUMP: ${label}`);
-  console.log('='.repeat(80));
-  console.log(JSON.stringify(state, null, 2));
-  console.log('='.repeat(80) + '\n');
 }
 
 
@@ -1141,7 +1048,6 @@ export async function lockAhb(env: Env): Promise<void> {
 
     // ✅ Store pre-rebalance state for assertions
     const [, hubPreRebal] = findReplica(env, hub.id);
-    const [, bobPreRebal] = findReplica(env, bob.id);
     const hbPreCollateral = hubPreRebal.state.accounts.get(bob.id)?.deltas.get(USDC_TOKEN_ID)?.collateral || 0n;
     const hubPreReserve = hubPreRebal.state.reserves.get(USDC_TOKEN_ID) || 0n;
 
@@ -1239,7 +1145,6 @@ export async function lockAhb(env: Env): Promise<void> {
 
     // ✅ ASSERT: H-B collateral increased by $200K
     const [, hubRepRebal] = findReplica(env, hub.id);
-    const [, bobRepRebal] = findReplica(env, bob.id);
 
     const hbDeltaRebal = hubRepRebal.state.accounts.get(bob.id)?.deltas.get(USDC_TOKEN_ID);
     const expectedHBCollateral = hbPreCollateral + rebalanceAmount;
@@ -1310,7 +1215,7 @@ export async function lockAhb(env: Env): Promise<void> {
       entityTxs: [{
         type: 'r2c',
         data: {
-          jurisdictionId: 'AHB Demo',
+          counterpartyId: hub.id,
           tokenId: USDC_TOKEN_ID,
           amount: usd(100_000)
         }
@@ -1375,7 +1280,7 @@ export async function lockAhb(env: Env): Promise<void> {
 
     // Generate hashlock without sharing secret with Charlie (timeout test)
     const { generateLockId } = await import('../htlc-utils');
-    const { secret: testSecret, hashlock: testHashlock } = rng.nextHashlock(); // Deterministic
+    const { hashlock: testHashlock } = rng.nextHashlock();
     const testLockId = generateLockId(testHashlock, shortExpiry, 0, env.timestamp);
 
     console.log(`   Lock ID: ${testLockId.slice(0,16)}...`);
@@ -1407,7 +1312,6 @@ export async function lockAhb(env: Env): Promise<void> {
 
     // H4 AUDIT FIX: Capture balance BEFORE lock for refund verification
     const hubCharlieOffsetBefore = hubCharlieAccount?.deltas.get(USDC_TOKEN_ID)?.offdelta || 0n;
-    const htlcAmount = usd(10_000);
     console.log(`💰 Hub-Charlie offdelta BEFORE lock: ${hubCharlieOffsetBefore}`);
 
     console.log(`🔐 Hub-Charlie account locks: ${hubCharlieAccount?.locks.size || 0}`);
@@ -1415,7 +1319,7 @@ export async function lockAhb(env: Env): Promise<void> {
     console.log(`📖 Hub lockBook size: ${hubRepBeforeTimeout.state.lockBook.size}\n`);
 
     // Lock might be in mempool or committed, check both
-    const lockInMempool = hubCharlieAccount?.mempool.some((tx: any) => tx.type === 'htlc_lock');
+    const lockInMempool = hubCharlieAccount?.mempool.some((tx) => tx.type === 'htlc_lock');
     const lockCommitted = (hubCharlieAccount?.locks.size || 0) > 0 || (charlieHubAccount?.locks.size || 0) > 0;
 
     if (!lockInMempool && !lockCommitted) {
@@ -1428,9 +1332,6 @@ export async function lockAhb(env: Env): Promise<void> {
       // Only test timeout if lock was actually created
       if (lockInMempool || lockCommitted) {
         // Advance J-blocks past expiry (Charlie doesn't reveal)
-        const jReplica = env.jReplicas.get('AHB Demo');
-        const startHeight = Number(jReplica?.blockNumber || 0n);
-
         console.log(`\n⏰ Timeout test: Advancing time (lock expires at height ${shortExpiry})...\n`);
 
         // Advance time significantly
@@ -1510,7 +1411,7 @@ export async function lockAhb(env: Env): Promise<void> {
       entityTxs: [{
         type: 'r2c',
         data: {
-          jurisdictionId: 'AHB Demo',
+          counterpartyId: hub.id,
           tokenId: USDC_TOKEN_ID,
           amount: usd(500_000)
         }
@@ -1704,9 +1605,8 @@ export async function lockAhb(env: Env): Promise<void> {
       hashlock: hostageSecret.hashlock,
       secret: hostageSecret.secret, // Bob knows the secret!
       inboundEntity: hub.id, // Hub sent the HTLC to Bob
-      outboundEntity: undefined, // Bob is the final recipient
       inboundLockId: hostageLockId,
-      outboundLockId: undefined,
+      createdTimestamp: env.timestamp,
     });
     console.log(`✅ Bob now has the secret in htlcRoutes\n`);
 
@@ -1779,13 +1679,12 @@ export async function lockAhb(env: Env): Promise<void> {
     const [, bobRepBeforeFinalize] = findReplica(env, bob.id);
     if (!bobRepBeforeFinalize.state.jBatchState) {
       bobRepBeforeFinalize.state.jBatchState = {
-        batch: {
-          reserveToCollateral: [],
-          collateralToReserve: [],
-          reserveToReserve: [],
-          revealSecrets: [], // This is what we're testing!
-        },
-        pendingDisputeProofs: [],
+        batch: createEmptyBatch(),
+        jurisdiction: null,
+        lastBroadcast: 0,
+        broadcastCount: 0,
+        failedAttempts: 0,
+        status: 'accumulating',
       };
     }
     const secretsBefore = bobRepBeforeFinalize.state.jBatchState.batch.revealSecrets.length;
@@ -1954,7 +1853,7 @@ if (import.meta.main) {
 
   // Handle circular refs
   const seen = new Set<object>();
-  const envJson = JSON.stringify(env, function(key, value) {
+  const envJson = JSON.stringify(env, function(_key, value) {
     if (value instanceof Map) return Array.from(value.entries());
     if (typeof value === 'bigint') return value.toString();
     if (typeof value === 'function') return undefined;
