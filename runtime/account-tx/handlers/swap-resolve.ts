@@ -29,7 +29,6 @@ import { deriveCanonicalSwapFillRatio, MAX_SWAP_FILL_RATIO } from '../../swap-ex
 import {
   computeSwapPriceTicks,
   requantizeRemainingSwapAtPrice,
-  SWAP_LOT_SCALE,
 } from '../../orderbook/types';
 import { recordSwapClosedLifecycle, recordSwapResolveLifecycle } from './swap-history';
 
@@ -38,7 +37,7 @@ export async function handleSwapResolve(
   accountTx: Extract<AccountTx, { type: 'swap_resolve' }>,
   byLeft: boolean,
   currentHeight: number,
-  isValidation: boolean = false
+  _isValidation: boolean = false
 ): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCancelled?: { offerId: string; accountId: string } }> {
   const {
     offerId,

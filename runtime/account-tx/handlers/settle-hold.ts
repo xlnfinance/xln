@@ -13,7 +13,6 @@
  */
 
 import type { AccountMachine, AccountTx, SettlementDiff } from '../../types';
-import { isLeftEntity } from '../../entity-id-utils';
 import { compileOps } from '../../settlement-ops';
 import { deriveDelta } from '../../account-utils';
 
@@ -132,8 +131,6 @@ export async function handleSettleHold(
   // We only enforce bilateral capacity limits for withdrawals from the account.
   // Reserve-sourced deposits are validated by L1 at settlement execution time.
   // ═══════════════════════════════════════════════════════════════════════════
-  const iAmLeft = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
-
   for (const diff of diffs) {
     const delta = accountMachine.deltas.get(diff.tokenId);
     if (!delta) {

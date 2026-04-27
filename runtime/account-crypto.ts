@@ -139,7 +139,7 @@ export function prewarmSignerKeyCache(seed: Uint8Array | string, count = 20): st
   return warmed;
 }
 
-export function setRuntimeSeed(seed: Uint8Array | string | null): void {
+export function setRuntimeSeed(_seed: Uint8Array | string | null): void {
   if (runtimeSeedLocked) {
     console.warn('⚠️ Runtime seed update ignored (crypto lock enabled)');
     return;
