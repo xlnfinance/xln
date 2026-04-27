@@ -27,6 +27,7 @@ import { bootScenario, registerEntities, type RegisteredEntity } from './boot';
 import type { JAdapter } from '../jadapter/types';
 import { userAutoApprove } from '../entity-tx/handlers/settle';
 import { deriveDelta } from '../account-utils';
+import { getAccountFrameHistoryView } from '../env-events';
 import { isLeftEntity } from '../entity-id-utils';
 import { hashHtlcSecret } from '../htlc-utils';
 import { ethers } from 'ethers';
@@ -447,11 +448,12 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
   const daveRequestedAfterHtlc = daveAccountAfterHtlc?.requestedRebalance.get(USDC) || 0n;
   const daveCollateralAfterHtlc = daveAccountAfterHtlc?.deltas.get(USDC)?.collateral || 0n;
   const phase65TopUpApplied = daveCollateralAfterHtlc > daveCollateralBeforeHtlc;
-  const daveRecentFrameHasHtlcResolve = (daveAccountAfterHtlc?.frameHistory || []).some((frame: any) =>
+  const daveRecentFramesAfterHtlc = daveAccountAfterHtlc ? getAccountFrameHistoryView(daveAccountAfterHtlc) : [];
+  const daveRecentFrameHasHtlcResolve = daveRecentFramesAfterHtlc.some((frame: any) =>
     (frame?.accountTxs || []).some((tx: any) => tx?.type === 'htlc_resolve'),
   );
   assert(daveRecentFrameHasHtlcResolve, 'Expected htlc_resolve in Dave frame history before request_collateral', env);
-  const daveRecentFrameHasRequestCollateral = (daveAccountAfterHtlc?.frameHistory || []).some((frame: any) =>
+  const daveRecentFrameHasRequestCollateral = daveRecentFramesAfterHtlc.some((frame: any) =>
     (frame?.accountTxs || []).some((tx: any) => tx?.type === 'request_collateral' && Number(tx?.data?.tokenId) === USDC),
   );
   assert(

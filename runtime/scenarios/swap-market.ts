@@ -19,6 +19,7 @@ import type { Env, EntityInput } from '../types';
 import { ensureJAdapter, getJAdapterMode, createJReplica } from './boot';
 import { findReplica, converge, assert, assertRuntimeIdle, processUntil, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 import { createGossipLayer } from '../networking/gossip';
+import { getAccountFrameHistoryView } from '../env-events';
 import { getBookOrders } from '../orderbook/core';
 
 // Lazy-loaded runtime functions
@@ -709,12 +710,14 @@ export async function swapMarket(env: Env): Promise<void> {
   const aliceEthAccountAfter = aliceEthRepAfter.state.accounts.get(hubEth.id);
   assert(!aliceEthAccountAfter?.swapOffers?.has('alice-eth-ask'), 'Alice ETH ask cancelled');
   const aliceEthOfferV2 = aliceEthAccountAfter?.swapOffers?.get('alice-eth-ask-v2');
-  const aliceEthOfferV2InHistory = (aliceEthAccountAfter?.frameHistory || []).some((frame: any) =>
+  const aliceEthOfferV2InHistory = aliceEthAccountAfter
+    ? getAccountFrameHistoryView(aliceEthAccountAfter).some((frame: any) =>
     Array.isArray(frame?.accountTxs) &&
       frame.accountTxs.some(
         (tx: any) => tx?.type === 'swap_offer' && String(tx?.data?.offerId || '') === 'alice-eth-ask-v2',
       ),
-  );
+    )
+    : false;
   if (!aliceEthOfferV2 && !aliceEthOfferV2InHistory) {
     console.warn('[SWAP-MARKET] Alice ETH ask v2 was not observed as open/history (likely rejected or immediately resolved)');
   }

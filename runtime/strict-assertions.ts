@@ -39,16 +39,6 @@ const assertAccountFrames = async (
     await assertFrameHash(currentFrame, `${label} currentFrame`);
   }
 
-  if (account.frameHistory.length > 0) {
-    const lastFrame = account.frameHistory[account.frameHistory.length - 1];
-    if (lastFrame.height !== account.currentHeight) {
-      throw new Error(`[STRICT] ${label}: frameHistory tail height ${lastFrame.height} != currentHeight ${account.currentHeight}`);
-    }
-    if (lastFrame.stateHash !== account.currentFrame.stateHash) {
-      throw new Error(`[STRICT] ${label}: frameHistory tail hash mismatch`);
-    }
-  }
-
   if (account.pendingFrame) {
     const pending = account.pendingFrame;
     const expectedHeight = account.currentHeight + 1;

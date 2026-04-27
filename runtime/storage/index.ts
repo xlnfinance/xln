@@ -611,9 +611,6 @@ const computeStorageAuditEntityHash = (replica: EntityReplica): StorageFrameEnti
   if (Array.isArray(snapshot.state.accountInputQueue) && snapshot.state.accountInputQueue.length === 0) {
     delete (snapshot.state as EntityState & { accountInputQueue?: unknown }).accountInputQueue;
   }
-  for (const account of snapshot.state?.accounts?.values?.() ?? []) {
-    delete (account as unknown as { frameHistory?: unknown }).frameHistory;
-  }
   return {
     entityId,
     cellCount: 1,
@@ -907,7 +904,6 @@ const hydrateAccountDoc = (doc: StorageAccountDoc): AccountMachine => ({
   proofBody: doc.proofBody,
   disputeConfig: doc.disputeConfig,
   onChainSettlementNonce: doc.onChainSettlementNonce,
-  frameHistory: [],
   pendingWithdrawals: doc.pendingWithdrawals ?? new Map(),
   requestedRebalance: doc.requestedRebalance ?? new Map(),
   requestedRebalanceFeeState: doc.requestedRebalanceFeeState ?? new Map(),

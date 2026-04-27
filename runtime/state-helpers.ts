@@ -8,6 +8,7 @@ import { HEAVY_LOGS } from './utils';
 import { validateEntityState } from './validation-utils';
 import { safeStringify } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
+import { getAccountFrameHistoryView, setAccountFrameHistoryView } from './env-events';
 import { cloneJBatch, type CompletedBatch } from './j-batch';
 import type { CrontabState } from './crontab-types';
 import type { Profile } from './networking/gossip';
@@ -480,27 +481,16 @@ export const cloneEntityReplica = (replica: EntityReplica, forSnapshot: boolean 
 
 // === ACCOUNT MACHINE HELPERS ===
 
-function defineFrameHistoryView(account: AccountMachine, frames: AccountFrame[]): AccountMachine {
-  Object.defineProperty(account, 'frameHistory', {
-    value: frames,
-    enumerable: false,
-    writable: true,
-    configurable: true,
-  });
-  return account;
-}
-
 /**
  * Clone AccountMachine for validation (replaces dryRun pattern)
  */
 export function cloneAccountMachine(account: AccountMachine, forSnapshot: boolean = false): AccountMachine {
   // For snapshots, exclude clonedForValidation to avoid cycles
   if (forSnapshot) {
-    const { clonedForValidation, frameHistory, ...accountWithoutCloned } = account;
+    const { clonedForValidation, ...accountWithoutCloned } = account;
     void clonedForValidation;
-    void frameHistory;
     try {
-      return defineFrameHistoryView(structuredClone(accountWithoutCloned) as AccountMachine, []);
+      return structuredClone(accountWithoutCloned) as AccountMachine;
     } catch {
       return manualCloneAccountMachine(account, true);
     }
@@ -509,10 +499,8 @@ export function cloneAccountMachine(account: AccountMachine, forSnapshot: boolea
   // Normal clone - preserve clonedForValidation for consensus
   try {
     const cloned = structuredClone(account);
-    return defineFrameHistoryView(
-      cloned,
-      Array.isArray(account.frameHistory) ? account.frameHistory.map((frame) => cloneAccountFrame(frame)) : [],
-    );
+    setAccountFrameHistoryView(cloned, getAccountFrameHistoryView(account));
+    return cloned;
   } catch (error) {
     if (HEAVY_LOGS) {
       console.log(`structuredClone failed for AccountMachine, using manual clone`);
@@ -563,7 +551,6 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
         }
       : {}),
     pendingSignatures: [...account.pendingSignatures],
-    frameHistory: [],
     globalCreditLimits: { ...account.globalCreditLimits },
     proofHeader: { ...account.proofHeader },
     proofBody: {
@@ -625,12 +612,9 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
     result.clonedForValidation = manualCloneAccountMachine(account.clonedForValidation, true);
   }
 
-  defineFrameHistoryView(
-    result,
-    skipClonedForValidation || !Array.isArray(account.frameHistory)
-      ? []
-      : account.frameHistory.map((frame) => cloneAccountFrame(frame)),
-  );
+  if (!skipClonedForValidation) {
+    setAccountFrameHistoryView(result, getAccountFrameHistoryView(account));
+  }
 
   if (skipClonedForValidation) {
     delete result.clonedForValidation;
