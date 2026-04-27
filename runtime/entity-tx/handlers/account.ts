@@ -1,6 +1,6 @@
-import type { AccountFrame, AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx, HtlcRoute, AccountMachine, HtlcNoteKey } from '../../types';
+import type { AccountFrame, AccountInput, AccountTx, EntityState, Env, EntityInput, HtlcRoute, AccountMachine, HtlcNoteKey } from '../../types';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
-import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from '../../state-helpers';
+import { addMessage, addMessages, emitScopedEvents } from '../../state-helpers';
 import {
   applyCommand,
   createBook,
@@ -1044,7 +1044,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             console.log(`⏭️ HTLC: Secret already recorded for ${hashlock.slice(0, 16)}..., skipping duplicate propagation`);
             continue;
           }
-          const isFinalRecipient = !!route.inboundEntity && !route.outboundEntity;
           const outboundLock = route.outboundLockId ? newState.lockBook.get(route.outboundLockId) : undefined;
           const inboundLock = route.inboundLockId ? newState.lockBook.get(route.inboundLockId) : undefined;
           const eventLock = inboundLock ?? outboundLock;
