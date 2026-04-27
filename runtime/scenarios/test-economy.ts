@@ -21,6 +21,14 @@ export interface EconomyConfig {
   jurisdictionName: string;
 }
 
+const requireEconomyEntity = (
+  value: EconomyEntity | undefined,
+  label: string,
+): EconomyEntity => {
+  if (!value) throw new Error(`ECONOMY_ENTITY_MISSING: ${label}`);
+  return value;
+};
+
 /**
  * Create N hubs + M users procedurally
  * Returns: { hubs: Entity[], users: Entity[][] }
@@ -96,18 +104,18 @@ export async function createEconomy(
 
   // Fund all entities
   console.log(`   Depositing ${config.initialCollateral} collateral for each entity...`);
-  await process(env, all.map(e => ({
+  const fundingInputs: EntityInput[] = all.map(e => ({
     entityId: e.id,
     signerId: e.signer,
     entityTxs: [{
-      type: 'depositCollateral',
+      type: 'mintReserves',
       data: {
-        jurisdictionId: config.jurisdictionName,
         tokenId: config.tokenId,
         amount: config.initialCollateral
       }
     }]
-  })));
+  }));
+  await process(env, fundingInputs);
 
   console.log(`   ✅ All entities funded\n`);
 
@@ -188,18 +196,22 @@ export async function connectEconomy(
   // Connect hubs to each other (full mesh)
   console.log(`   Connecting ${hubs.length} hubs (mesh)...`);
   for (let i = 0; i < hubs.length; i++) {
+    const leftHub = requireEconomyEntity(hubs[i], `hub[${i}]`);
     for (let j = i + 1; j < hubs.length; j++) {
-      await openAccount(env, hubs[i], hubs[j], creditLimit, tokenId);
-      console.log(`   ✅ ${hubs[i].name} ↔ ${hubs[j].name}`);
+      const rightHub = requireEconomyEntity(hubs[j], `hub[${j}]`);
+      await openAccount(env, leftHub, rightHub, creditLimit, tokenId);
+      console.log(`   ✅ ${leftHub.name} ↔ ${rightHub.name}`);
     }
   }
 
   // Connect each user to their hub
   console.log(`\n   Connecting users to hubs...`);
   for (let h = 0; h < hubs.length; h++) {
-    for (const user of users[h]) {
-      await openAccount(env, hubs[h], user, creditLimit, tokenId);
-      console.log(`   ✅ ${hubs[h].name} ↔ ${user.name}`);
+    const hub = requireEconomyEntity(hubs[h], `hub[${h}]`);
+    const hubUsers = users[h] ?? [];
+    for (const user of hubUsers) {
+      await openAccount(env, hub, user, creditLimit, tokenId);
+      console.log(`   ✅ ${hub.name} ↔ ${user.name}`);
     }
   }
 
