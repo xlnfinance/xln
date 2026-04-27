@@ -214,9 +214,11 @@ const fundWalletAndDeposit = async (
       ['function balanceOf(address owner) view returns (uint256)', 'function transfer(address to, uint256 amount) returns (bool)'],
       jadapter.signer as any
     );
-    const currentToken = (await erc20['balanceOf'](walletAddress)) as bigint;
+    const balanceOf = erc20.getFunction('balanceOf');
+    const transfer = erc20.getFunction('transfer');
+    const currentToken = (await balanceOf(walletAddress)) as bigint;
     if (currentToken < FAUCET_WALLET_AMOUNT) {
-      const tx = await erc20['transfer'](walletAddress, FAUCET_WALLET_AMOUNT - currentToken);
+      const tx = await transfer(walletAddress, FAUCET_WALLET_AMOUNT - currentToken);
       await tx.wait();
     }
   }
@@ -225,26 +227,6 @@ const fundWalletAndDeposit = async (
     internalTokenId: token.tokenId ?? 0,
   });
   console.log(`[P2P] Faucet: deposited ${amount} ${token.symbol} to ${entityId.slice(-4)}`);
-};
-
-let jWatcherProcessInterval: ReturnType<typeof setInterval> | null = null;
-let jWatcherInFlight = false;
-
-const startJWatcherProcessingLoop = (env: any) => {
-  if (jWatcherProcessInterval) return;
-  jWatcherProcessInterval = setInterval(async () => {
-    if (jWatcherInFlight) return;
-    const pending = env.runtimeInput?.entityInputs?.length ?? 0;
-    if (pending === 0) return;
-    jWatcherInFlight = true;
-    try {
-      const inputs = [...env.runtimeInput.entityInputs];
-      env.runtimeInput.entityInputs = [];
-      await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: inputs });
-    } finally {
-      jWatcherInFlight = false;
-    }
-  }, 100);
 };
 
 const getProfileByName = (env: any, name: string) => {
@@ -644,6 +626,13 @@ const run = async () => {
     rpcUrl = resolved.rpcUrl;
     contracts = resolved.contracts;
 
+    const importJContracts: { depository: string; entityProvider: string; account?: string; deltaTransformer?: string } = {
+      depository: contracts.depository,
+      entityProvider: contracts.entityProvider,
+    };
+    if (contracts.account !== undefined) importJContracts.account = contracts.account;
+    if (contracts.deltaTransformer !== undefined) importJContracts.deltaTransformer = contracts.deltaTransformer;
+
     enqueueRuntimeInput(env, {
       runtimeTxs: [
         {
@@ -653,12 +642,7 @@ const run = async () => {
             chainId: jurisdiction.chainId ?? 0,
             ticker: 'XLN',
             rpcs: [rpcUrl],
-            contracts: {
-              account: contracts.account,
-              depository: contracts.depository,
-              entityProvider: contracts.entityProvider,
-              deltaTransformer: contracts.deltaTransformer,
-            },
+            contracts: importJContracts,
           },
         },
       ],
@@ -676,7 +660,7 @@ const run = async () => {
       host: relayHost,
       port: relayPort,
       serverId: role,
-      serverRuntimeId: env.runtimeId,  // Enable local delivery for messages to self
+      ...(env.runtimeId ? { serverRuntimeId: env.runtimeId } : {}),  // Enable local delivery for messages to self
       requireAuth: false,
       // CRITICAL: Pass callback to feed messages into Hub's runtime
       onEntityInput: async (from: string, input: any) => {

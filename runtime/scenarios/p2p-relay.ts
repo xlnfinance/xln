@@ -115,7 +115,11 @@ const prefundRpcWallets = async (): Promise<void> => {
   for (const wallet of wallets) {
     const address = deriveSignerAddressSync(wallet.seed, wallet.signerId);
     try {
-      await jadapter.provider.send('anvil_setBalance', [address, ethers.toBeHex(targetEth)]);
+      const providerWithSend = jadapter.provider as { send?: (method: string, params: unknown[]) => Promise<unknown> };
+      if (typeof providerWithSend.send !== 'function') {
+        throw new Error('provider.send unavailable');
+      }
+      await providerWithSend.send('anvil_setBalance', [address, ethers.toBeHex(targetEth)]);
     } catch {
       const current = await jadapter.provider.getBalance(address);
       if (current < targetEth) {
@@ -135,9 +139,11 @@ const prefundRpcWallets = async (): Promise<void> => {
     );
     for (const wallet of wallets) {
       const address = deriveSignerAddressSync(wallet.seed, wallet.signerId);
-      const bal = (await erc20['balanceOf'](address)) as bigint;
+      const balanceOf = erc20.getFunction('balanceOf');
+      const transfer = erc20.getFunction('transfer');
+      const bal = (await balanceOf(address)) as bigint;
       if (bal < target) {
-        const tx = await erc20['transfer'](address, target - bal);
+        const tx = await transfer(address, target - bal);
         await tx.wait();
       }
     }
@@ -145,38 +151,6 @@ const prefundRpcWallets = async (): Promise<void> => {
 
   await jadapter.close();
   console.log('[P2P] Prefund complete');
-};
-
-const waitForLine = (procInfo: ProcInfo, matcher: RegExp, timeoutMs = 15000) => {
-  return new Promise<void>((resolve, reject) => {
-    const maxTicks = Math.max(1, Math.ceil(timeoutMs / 200));
-    let ticks = 0;
-    const handler = (chunk: Buffer) => {
-      const text = chunk.toString();
-      if (matcher.test(text)) {
-        cleanup();
-        resolve();
-      }
-    };
-    const cleanup = () => {
-      procInfo.proc.stdout?.off('data', handler);
-      procInfo.proc.off('exit', onExit);
-    };
-    const onExit = (code: number | null, signal: NodeJS.Signals | null) => {
-      cleanup();
-      reject(new Error(`${procInfo.role} exited early (code=${code ?? 'null'} signal=${signal ?? 'null'})`));
-    };
-    const timer = setInterval(() => {
-      ticks += 1;
-      if (ticks > maxTicks) {
-        cleanup();
-        clearInterval(timer);
-        reject(new Error(`Timeout waiting for ${matcher} from ${procInfo.role}`));
-      }
-    }, 200);
-    procInfo.proc.stdout?.on('data', handler);
-    procInfo.proc.once('exit', onExit);
-  });
 };
 
 const waitForLineOrError = (
