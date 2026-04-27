@@ -17,14 +17,12 @@
  * - Never trigger from (outCollateral + outPeerCredit), otherwise post-topup spam appears.
  */
 
-import type { Env, EntityReplica, SettlementDiff, SettlementOp } from '../types';
-import { compileOps } from '../settlement-ops';
+import type { Env, SettlementDiff, SettlementOp } from '../types';
 import {
   getProcess, advanceScenarioTime, enableStrictScenario, converge, syncChain,
-  processJEvents, assert, findReplica, usd, snap,
+  assert, findReplica, usd, snap,
 } from './helpers';
 import { bootScenario, registerEntities, type RegisteredEntity } from './boot';
-import type { JAdapter } from '../jadapter/types';
 import { userAutoApprove } from '../entity-tx/handlers/settle';
 import { deriveDelta } from '../account-utils';
 import { getAccountFrameHistoryView } from '../env-events';
@@ -34,7 +32,17 @@ import { ethers } from 'ethers';
 
 const USDC = 1;
 
-export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
+const requireRegisteredEntity = (
+  entity: RegisteredEntity | undefined,
+  name: string,
+): RegisteredEntity => {
+  if (!entity) {
+    throw new Error(`SETTLE_REBALANCE_MISSING_ENTITY:${name}`);
+  }
+  return entity;
+};
+
+export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
   console.log('=' .repeat(80));
   console.log('  MERGED SETTLEMENT + REBALANCE SCENARIO');
   console.log('  Hub + Alice + Bob + Charlie + Dave');
@@ -63,7 +71,7 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
 
   // Suppress noisy logs
   const originalLog = console.log;
-  const quietLog = (...args: any[]) => {
+  const quietLog = (...args: unknown[]) => {
     const msg = args[0]?.toString() || '';
     if (msg.includes('ASSERT') || msg.includes('PHASE') || msg.includes('TEST') ||
         msg.includes('settle_') || msg.includes('---') || msg.includes('===') ||
@@ -82,7 +90,11 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
     { name: 'Dave',    signer: '6', position: { x: 40, y: 30, z: 0 } },
   ], jurisdiction);
 
-  const [hub, alice, bob, charlie, dave] = registered;
+  const hub = requireRegisteredEntity(registered[0], 'Hub');
+  const alice = requireRegisteredEntity(registered[1], 'Alice');
+  const bob = requireRegisteredEntity(registered[2], 'Bob');
+  const charlie = requireRegisteredEntity(registered[3], 'Charlie');
+  const dave = requireRegisteredEntity(registered[4], 'Dave');
   const users = [alice, bob, charlie, dave];
 
   const waitForNoSentBatch = async (label: string, maxRounds = 30): Promise<void> => {
@@ -247,7 +259,6 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
   assert(hubWs1?.[hubHankoField], 'Hub should have auto-approved (signed)', env);
 
   // Alice should have received Hub's auto-approve hanko
-  const aliceHankoField = aliceIsLeft ? 'leftHanko' : 'rightHanko';
   const aliceReceivedHubHanko = aliceWs1?.[hubHankoField];
   assert(aliceReceivedHubHanko, 'Alice should have received Hub auto-approve hanko', env);
 
@@ -449,12 +460,12 @@ export async function runSettleRebalance(existingEnv?: Env): Promise<Env> {
   const daveCollateralAfterHtlc = daveAccountAfterHtlc?.deltas.get(USDC)?.collateral || 0n;
   const phase65TopUpApplied = daveCollateralAfterHtlc > daveCollateralBeforeHtlc;
   const daveRecentFramesAfterHtlc = daveAccountAfterHtlc ? getAccountFrameHistoryView(daveAccountAfterHtlc) : [];
-  const daveRecentFrameHasHtlcResolve = daveRecentFramesAfterHtlc.some((frame: any) =>
-    (frame?.accountTxs || []).some((tx: any) => tx?.type === 'htlc_resolve'),
+  const daveRecentFrameHasHtlcResolve = daveRecentFramesAfterHtlc.some((frame) =>
+    frame.accountTxs.some((tx) => tx.type === 'htlc_resolve'),
   );
   assert(daveRecentFrameHasHtlcResolve, 'Expected htlc_resolve in Dave frame history before request_collateral', env);
-  const daveRecentFrameHasRequestCollateral = daveRecentFramesAfterHtlc.some((frame: any) =>
-    (frame?.accountTxs || []).some((tx: any) => tx?.type === 'request_collateral' && Number(tx?.data?.tokenId) === USDC),
+  const daveRecentFrameHasRequestCollateral = daveRecentFramesAfterHtlc.some((frame) =>
+    frame.accountTxs.some((tx) => tx.type === 'request_collateral' && Number(tx.data?.tokenId) === USDC),
   );
   assert(
     daveRecentFrameHasRequestCollateral,
