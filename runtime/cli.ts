@@ -8,7 +8,7 @@
  */
 
 import * as readline from 'readline';
-import { createJAdapter, type JAdapter } from './jadapter';
+import type { JAdapter } from './jadapter';
 import { ethers } from 'ethers';
 import { createProviderScopedEntityId, normalizeEntityId } from './entity-id-utils';
 import { createEmptyBatch, batchAddReserveToReserve, encodeJBatch } from './j-batch';
@@ -25,7 +25,17 @@ const CONTRACTS = {
   deltaTransformer: '0xa513E6E4b8f2a923D98304ec87F64353C4D5C853',
 };
 
-let jAdapter: JAdapter;
+type CliJAdapter = JAdapter & {
+  reserveToReserve(
+    from: string,
+    to: string,
+    tokenId: number,
+    amount: bigint,
+    options: { entityProvider?: string; hankoData: string; nonce: bigint },
+  ): Promise<unknown[]>;
+};
+
+let jAdapter: CliJAdapter;
 
 async function init(remote: boolean) {
   const rpcUrl = remote ? REMOTE_RPC : LOCAL_RPC;
@@ -39,10 +49,12 @@ async function init(remote: boolean) {
   );
 
   // Connect to existing contracts
-  const { Depository__factory, EntityProvider__factory, Account__factory } = await import('../jurisdictions/typechain-types/index.ts');
+  const { Depository__factory, EntityProvider__factory } = await import('../jurisdictions/typechain-types/index.ts');
 
-  const depository = Depository__factory.connect(CONTRACTS.depository, signer);
-  const entityProvider = EntityProvider__factory.connect(CONTRACTS.entityProvider, signer);
+  type DepositoryRunner = Parameters<typeof Depository__factory.connect>[1];
+  const contractRunner = signer as unknown as DepositoryRunner;
+  const depository = Depository__factory.connect(CONTRACTS.depository, contractRunner);
+  const entityProvider = EntityProvider__factory.connect(CONTRACTS.entityProvider, contractRunner);
 
   // Create minimal adapter object for queries
   jAdapter = {
@@ -68,6 +80,7 @@ async function init(remote: boolean) {
       const providerAddr = options.entityProvider || CONTRACTS.entityProvider;
       const fromAddr = createProviderScopedEntityId(providerAddr, normalizeEntityId(from));
       const toAddr = createProviderScopedEntityId(providerAddr, normalizeEntityId(to));
+      console.log(`Submitting reserveToReserve from ${fromAddr} to ${toAddr}`);
       const batch = createEmptyBatch();
       batchAddReserveToReserve(
         { batch, jurisdiction: null, lastBroadcast: 0, broadcastCount: 0, failedAttempts: 0, status: 'empty' },
@@ -80,7 +93,7 @@ async function init(remote: boolean) {
       await tx.wait();
       return [];
     },
-  } as any;
+  } as unknown as CliJAdapter;
 
   const block = await provider.getBlockNumber();
   console.log(`Connected. Block: ${block}`);
@@ -110,14 +123,15 @@ Commands:
       console.log(`Depository: ${jAdapter.addresses.depository || CONTRACTS.depository}`);
       break;
 
-    case 'reserves':
+    case 'reserves': {
       if (!args[0]) { console.log('Usage: reserves <entityId>'); break; }
       const entityId = args[0].startsWith('0x') ? args[0] : '0x' + args[0].padStart(64, '0');
       const reserves = await jAdapter.getReserves(entityId, 1); // tokenId 1 = USDC
       console.log(`Reserves: ${ethers.formatUnits(reserves, 18)} USDC`);
       break;
+    }
 
-    case 'r2r':
+    case 'r2r': {
       if (args.length < 5) { console.log('Usage: r2r <from> <to> <amount> <nonce> <hankoData> [provider]'); break; }
       const [from, to, amountStr, nonceStr, hankoData, providerAddr] = args;
       const fromId = from!.startsWith('0x') ? from! : '0x' + from!.padStart(64, '0');
@@ -129,13 +143,15 @@ Commands:
       const events = await jAdapter.reserveToReserve(fromId, toId, 1, amount, { entityProvider: provider, hankoData: hankoData!, nonce });
       console.log(`Done. Events: ${events.length}`);
       break;
+    }
 
-    case 'nonce':
+    case 'nonce': {
       if (!args[0]) { console.log('Usage: nonce <entityId>'); break; }
       const eid = args[0].startsWith('0x') ? args[0] : '0x' + args[0].padStart(64, '0');
       const nonce = await jAdapter.getEntityNonce(eid);
       console.log(`Nonce: ${nonce}`);
       break;
+    }
 
 
     case 'exit':
