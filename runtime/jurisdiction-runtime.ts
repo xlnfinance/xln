@@ -50,11 +50,12 @@ export function resolveRuntimeJurisdictionConfig(
     current?.entityProviderAddress,
     browserVm?.getEntityProviderAddress?.(),
   );
-  const rawChainId = firstDefined(
+  const browserVmChainId = browserVm?.getChainId?.();
+  const rawChainId = firstDefined<number | bigint>(
     replica?.jadapter?.chainId,
     replica?.chainId,
     current?.chainId,
-    browserVm?.getChainId?.(),
+    browserVmChainId,
   );
   const chainId =
     typeof rawChainId === 'bigint'

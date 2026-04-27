@@ -11,10 +11,9 @@
  * - Enforces revealBeforeHeight for griefing protection
  */
 
-import type { AccountMachine, AccountTx, HtlcLock, Delta } from '../../types';
+import type { AccountMachine, AccountTx, HtlcLock } from '../../types';
 import { deriveDelta, getDefaultCreditLimit } from '../../account-utils';
 import { FINANCIAL, LIMITS } from '../../constants';
-import { HTLC } from '../../constants';
 
 export async function handleHtlcLock(
   accountMachine: AccountMachine,

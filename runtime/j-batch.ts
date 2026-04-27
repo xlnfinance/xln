@@ -14,7 +14,7 @@
 import { ethers } from 'ethers';
 import type { ProofBodyStruct } from './typechain/Depository.js';
 import type { JurisdictionConfig } from './types';
-import { isLeftEntity, normalizeEntityId, compareEntityIds } from './entity-id-utils';
+import { normalizeEntityId, compareEntityIds } from './entity-id-utils';
 
 /**
  * Batch structure matching Depository.sol (lines 203-231)
@@ -310,11 +310,10 @@ export function summarizeBatch(batch: JBatch): Record<string, unknown> {
 export function preflightBatchForE2(
   entityId: string,
   batch: JBatch,
-  blockTimestampSec?: number
+  _blockTimestampSec?: number
 ): string[] {
   const issues: string[] = [];
   const normalizedEntityId = normalizeEntityId(entityId);
-  const nowSec = blockTimestampSec ?? 0;
 
   const zeroEntity = '0x0000000000000000000000000000000000000000000000000000000000000000';
   for (const op of batch.externalTokenToReserve) {
