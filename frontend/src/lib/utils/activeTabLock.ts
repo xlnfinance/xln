@@ -61,7 +61,7 @@ let releaseCallback: (() => void) | null = null;
 let installed = false;
 let onLoseLockHandler: (() => void | Promise<void>) | null = null;
 let lockLost = false;
-let lockMonitorTimer: ReturnType<typeof setInterval> | null = null;
+let lockMonitorTimer: number | null = null;
 export function isInactiveTabStandby(): boolean {
   if (typeof window === 'undefined') return false;
   try {

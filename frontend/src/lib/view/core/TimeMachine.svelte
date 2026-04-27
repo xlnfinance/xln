@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { type Writable, type Readable } from 'svelte/store';
-  import type { XLNModule } from '@xln/runtime/xln-api';
+  import type { Env, EnvSnapshot, JReplica, XLNModule } from '@xln/runtime/xln-api';
   import type { JAdapter } from '@xln/runtime/jadapter';
   import FrameSubtitle from '../../components/TimeMachine/FrameSubtitle.svelte';
   import { panelBridge } from '../utils/panelBridge';
@@ -10,10 +10,10 @@
   // BrowserVM resolved via JAdapter
 
   // Props: Accept both Writable and Readable stores (for global vs isolated usage)
-  export let history: Writable<any[]> | Readable<any[]>;
+  export let history: Writable<EnvSnapshot[]> | Readable<EnvSnapshot[]>;
   export let timeIndex: Writable<number> | Readable<number>;
   export let isLive: Writable<boolean> | Readable<boolean>;
-  export let env: Writable<any> | Readable<any>; // For state export
+  export let env: Writable<Env | null> | Readable<Env | null>; // For state export
   export let showRuntimeSelector = false;
 
   // Type guard to check if store is writable
@@ -43,7 +43,7 @@
 
   type BrowserVMHandle = NonNullable<ReturnType<JAdapter['getBrowserVM']>>;
 
-  async function getBrowserVMFromEnv(envValue: any): Promise<BrowserVMHandle | null> {
+  async function getBrowserVMFromEnv(envValue: Env | null): Promise<BrowserVMHandle | null> {
     if (!envValue) return null;
     const xln = cachedXLN ?? await getXLN();
     cachedXLN = xln;
@@ -56,7 +56,7 @@
     const targetIndex = $timeIndex < 0 ? $history.length - 1 : $timeIndex;
     const frame = $history[targetIndex];
     if (frame) {
-      const jReplicas = Array.from(frame.jReplicas.values());
+      const jReplicas = Array.from(frame.jReplicas.values()) as JReplica[];
       const stateRoot = jReplicas[0]?.stateRoot;
       const browserVMState = frame.browserVMState;
       const hasBrowserVMState = !!browserVMState &&

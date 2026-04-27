@@ -27,7 +27,7 @@
     "test:e2e:prod:payment": "PW_SKIP_WEBSERVER=1 PW_ONLY_CHROMIUM=1 PW_BASE_URL=https://xln.finance E2E_BASE_URL=https://xln.finance E2E_API_BASE_URL=https://xln.finance PW_VIDEO=retain-on-failure PW_TRACE=on-first-retry bunx playwright test tests/e2e-payment-smoke.spec.ts --project=chromium",
     "test:e2e:pw": "echo 'deprecated: use bun run test:e2e:parallel:isolated or bun run test:e2e:parallel:long' && exit 1",
     "test:e2e:parallel:isolated": "bun runtime/scripts/run-e2e-parallel-isolated.ts",
-    "test:e2e:parallel:max": "bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=16 --workers-per-shard=1 --stack-timeout-ms=300000 --video=on --trace=off --screenshot=only-on-failure --max-failures=1",
+    "test:e2e:parallel:max": "E2E_LONG=1 bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=8 --workers-per-shard=1 --stack-timeout-ms=300000 --video=on --trace=off --screenshot=only-on-failure --max-failures=1",
     "test:e2e:parallel:long": "E2E_LONG=1 bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=8 --workers-per-shard=1 --max-mm-concurrency=2 --video=on --trace=off --screenshot=only-on-failure --max-failures=1",
     "test:e2e:mvp": "bun runtime/scripts/run-e2e-parallel-isolated.ts --video=on --trace=off --screenshot=only-on-failure --max-failures=1",
     "test:persistence:cli": "bun runtime/scripts/persistence-wal-smoke.ts",

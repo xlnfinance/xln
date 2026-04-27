@@ -53,7 +53,7 @@
 
   // Derive activeJurisdiction from explicit selection or the first available jurisdiction.
   $: activeJurisdictionName = env?.activeJurisdiction
-    || (env?.jReplicas ? Array.from(env.jReplicas.values())[0]?.name ?? null : null)
+    || (env?.jReplicas ? (Array.from(env.jReplicas.values())[0] as { name?: string } | undefined)?.name ?? null : null)
     || null;
 
   // Derive jurisdictions data for 3D rendering (properly tracks env changes)
@@ -5495,7 +5495,7 @@ let vrHammer: VRHammer | null = null;
     panelBridge.emit('openEntityOperations', {
       entityId,
       entityName,
-      signerId: findSignerForEntity(entityId),
+      signerId: getSignerIdForEntity(entityId),
       action: type // 'r2r' or 'r2c'
     });
     showMiniPanel = false;

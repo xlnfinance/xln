@@ -148,8 +148,8 @@ function buildJurisdictionConfig(env: Env, name?: string): JurisdictionConfig | 
   }
 
   // Support both top-level (new) and nested (legacy) contract addresses
-  const depositoryAddress = jReplica?.depositoryAddress || jReplica?.contracts?.depository || jReplica?.contracts?.depositoryAddress;
-  const entityProviderAddress = jReplica?.entityProviderAddress || jReplica?.contracts?.entityProvider || jReplica?.contracts?.entityProviderAddress;
+  const depositoryAddress = jReplica.depositoryAddress || jReplica.contracts?.depository;
+  const entityProviderAddress = jReplica.entityProviderAddress || jReplica.contracts?.entityProvider;
 
   if (!depositoryAddress || !entityProviderAddress) {
     console.error(`[buildJurisdictionConfig] ❌ Contracts not deployed for J-machine "${name}"`);
@@ -158,16 +158,16 @@ function buildJurisdictionConfig(env: Env, name?: string): JurisdictionConfig | 
     throw new Error(`J-machine "${name}" contracts not deployed`);
   }
 
-  const rpcAddress = Array.isArray(jReplica?.rpcs) && jReplica.rpcs.length > 0
-    ? jReplica.rpcs[0]
+  const rpcAddress = Array.isArray(jReplica.rpcs) && jReplica.rpcs.length > 0
+    ? jReplica.rpcs[0]!
     : 'browservm://';
 
   return {
-    name: jReplica?.name || name || 'browservm',
+    name: jReplica.name || name || 'browservm',
     address: rpcAddress,
     entityProviderAddress,
     depositoryAddress,
-    ...(jReplica?.chainId ? { chainId: jReplica.chainId } : {}),
+    ...(jReplica.chainId ? { chainId: jReplica.chainId } : {}),
   };
 }
 
@@ -176,7 +176,7 @@ async function ensureJMachine(env: Env): Promise<string | null> {
 
   const names = listJMachineNames(env);
   if (names.length > 0) {
-    return env.activeJurisdiction || names[0];
+    return env.activeJurisdiction || names[0]!;
   }
 
   isCreatingJMachine = true;

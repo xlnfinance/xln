@@ -321,7 +321,7 @@ async function readSwapResolveCount(
 
     const findAccount = (
       accounts: Map<string, {
-        frameHistory?: Array<{ accountTxs?: Array<{ type?: string }> }>;
+        swapOrderHistory?: Map<string, { resolves?: unknown[] }>;
       }> | undefined,
       ownerId: string,
       cpId: string,
@@ -347,10 +347,8 @@ async function readSwapResolveCount(
       const account = findAccount(replica.state?.accounts, entityId, counterpartyId);
       if (!account) return 0;
       let count = 0;
-      for (const frame of account.frameHistory || []) {
-        for (const tx of frame?.accountTxs || []) {
-          if (tx?.type === 'swap_resolve') count += 1;
-        }
+      for (const entry of account.swapOrderHistory?.values?.() || []) {
+        count += Array.isArray(entry?.resolves) ? entry.resolves.length : 0;
       }
       return count;
     }

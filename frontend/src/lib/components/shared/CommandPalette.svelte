@@ -89,7 +89,7 @@
     // open <hub>
     const openMatch = q.match(/^open\s+(.+)/i);
     if (openMatch) {
-      const hubQuery = openMatch[1].trim();
+      const hubQuery = openMatch[1]?.trim() ?? '';
       const matches = findEntities(hubQuery, env);
       for (const m of matches.slice(0, 3)) {
         results.push({

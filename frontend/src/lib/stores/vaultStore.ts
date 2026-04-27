@@ -2,7 +2,7 @@ import { writable, get, derived } from 'svelte/store';
 import { HDNodeWallet, Mnemonic, getAddress, getIndexedAccountPath } from 'ethers';
 import type { Env, JurisdictionConfig, PersistedFrameJournal, RoutedEntityInput, RuntimeInput, XLNModule } from '@xln/runtime/xln-api';
 import { runtimeOperations, runtimes, activeRuntimeId } from './runtimeStore';
-import { xlnEnvironment, setXlnEnvironment, isFinancialRestoreFailure } from './xlnStore';
+import { xlnEnvironment, setXlnEnvironment, isFinancialRestoreFailure, resolveRelayUrls, getXLN } from './xlnStore';
 import { settings } from './settingsStore';
 import { toasts } from './toastStore';
 import { writeSavedCollateralPolicy, writeHubJoinPreference } from '$lib/utils/onboardingPreferences';
@@ -30,13 +30,14 @@ export interface Runtime {
   loginType?: 'manual' | 'demo';
   requiresOnboarding?: boolean;
   createdAt: number;
+  env?: Env | null;
 }
 
 type CreateRuntimeOptions = {
-  loginType?: 'manual' | 'demo';
-  requiresOnboarding?: boolean;
-  devicePassphrase?: string;
-  mnemonic12?: string;
+  loginType?: 'manual' | 'demo' | undefined;
+  requiresOnboarding?: boolean | undefined;
+  devicePassphrase?: string | undefined;
+  mnemonic12?: string | undefined;
 };
 
 type ImportedJMachineConfig = {
@@ -50,6 +51,16 @@ type ImportedJMachineConfig = {
     entityProvider?: string;
     account?: string;
     deltaTransformer?: string;
+  };
+};
+type ApiJurisdictionConfig = JurisdictionConfig & {
+  rpc?: string;
+  rpcs?: string[];
+  contracts: {
+    depository: string;
+    entityProvider: string;
+    account: string;
+    deltaTransformer: string;
   };
 };
 
@@ -130,7 +141,7 @@ type HealthPayload = {
   system?: { runtime?: boolean } | null;
   jMachines?: HealthMachine[];
 };
-type JurisdictionsPayload = { version?: string; jurisdictions: Record<string, JurisdictionConfig> };
+type JurisdictionsPayload = { version?: string; jurisdictions: Record<string, ApiJurisdictionConfig> };
 type FaucetResult = { success?: boolean; txHash?: string; error?: string };
 type RuntimeP2PHandle = {
   isConnected?: () => boolean;
@@ -226,7 +237,7 @@ const getRuntimeFatalDiagnostics = (env: Env): string => {
     {
       runtimeId: env.runtimeId ?? null,
       height: env.height ?? null,
-      latestHeight: env.latestHeight ?? null,
+      latestHeight: env.height ?? null,
       loopActive: env.runtimeState?.loopActive ?? null,
       jState,
       recentErrors,
@@ -346,15 +357,18 @@ const hasConnectedJurisdictionAdapter = (replica: unknown): boolean => {
   );
 };
 
-const resolveJurisdictionConfig = (jurisdictions: JurisdictionsPayload): JurisdictionConfig => {
+const resolveJurisdictionConfig = (jurisdictions: JurisdictionsPayload): ApiJurisdictionConfig => {
   const map = jurisdictions.jurisdictions;
-  const arrakis = map.arrakis;
+  const arrakis = map['arrakis'];
   const first = arrakis ?? Object.values(map)[0];
   if (!first) {
     throw new Error('No jurisdictions found in /api/jurisdictions');
   }
   return first;
 };
+
+const resolveJurisdictionRpc = (config: ApiJurisdictionConfig): string =>
+  config.rpc ?? config.rpcs?.[0] ?? '';
 
 const resolveRpcUrl = (rpc: string, baseOrigin?: string): string => {
   if (!rpc) throw new Error('Missing RPC URL in /api/jurisdictions');
@@ -458,7 +472,7 @@ const fetchJurisdictions = async (baseOrigin?: string): Promise<JurisdictionsPay
         url,
         finalUrl: resp.url,
         version: payload.version ?? null,
-        arrakis: payload?.jurisdictions?.arrakis?.contracts ?? null,
+        arrakis: payload.jurisdictions['arrakis']?.contracts ?? null,
       }));
       return payload;
     } catch (err) {
@@ -806,7 +820,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
   const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
   const jurisdictions = await fetchJurisdictions(baseOrigin);
   const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
-  const rpcUrl = resolveRpcUrl(arrakisConfig.rpc, baseOrigin);
+  const rpcUrl = resolveRpcUrl(resolveJurisdictionRpc(arrakisConfig), baseOrigin);
   const canonicalDeltaTransformerAddress = requireContractAddress(
     arrakisConfig.contracts?.deltaTransformer,
     'delta_transformer',
@@ -945,11 +959,11 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
         validators: [signerAddress],
         shares: { [signerAddress]: 1n },
         jurisdiction: {
-          address: jReplica.depositoryAddress,
+          address: requireContractAddress(jReplica.depositoryAddress, 'depository'),
           name: 'Testnet',
           chainId: Number(jReplica.chainId ?? chainId ?? 31337),
-          entityProviderAddress: jReplica.entityProviderAddress,
-          depositoryAddress: jReplica.depositoryAddress,
+          entityProviderAddress: requireContractAddress(jReplica.entityProviderAddress, 'entity_provider'),
+          depositoryAddress: requireContractAddress(jReplica.depositoryAddress, 'depository'),
         }
       };
 
@@ -1388,7 +1402,7 @@ export const vaultOperations = {
     markPerf('fetch_jurisdictions');
     const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
     console.log('[VaultStore.createRuntime] Loaded contracts:', arrakisConfig.contracts);
-    const rpcUrl = resolveRpcUrl(arrakisConfig.rpc, baseOrigin);
+    const rpcUrl = resolveRpcUrl(resolveJurisdictionRpc(arrakisConfig), baseOrigin);
     const chainId = resolveCanonicalTestnetChainId(arrakisConfig, 'VaultStore.createRuntime');
 
     // Import testnet J-machine (shared anvil on xln.finance)
@@ -1443,8 +1457,8 @@ export const vaultOperations = {
     if (!jReplica) {
       throw new Error('Testnet J-machine not found after import');
     }
-    const depositoryAddress = jReplica.depositoryAddress;
-    const entityProviderAddress = jReplica.entityProviderAddress;
+    const depositoryAddress = requireContractAddress(jReplica.depositoryAddress, 'depository');
+    const entityProviderAddress = requireContractAddress(jReplica.entityProviderAddress, 'entity_provider');
 
     // Generate entityId using canonical lazy entity ID (sorted validators, consistent encoding)
     // This ensures same signer → same entityId regardless of where it's generated
@@ -1645,11 +1659,12 @@ export const vaultOperations = {
       if (!env) {
         await registerRuntimeSignerKeys(runtime, xln);
         env = await buildOrRestoreRuntimeEnv(runtime, xln, true);
+        const restoredEnv = env;
         runtimes.update(r => {
-          r.set(resolvedRuntimeId, runtimeToEntry(runtime, env));
+          r.set(resolvedRuntimeId, runtimeToEntry(runtime, restoredEnv));
           return r;
         });
-        registerRuntimeEnvChange(resolvedRuntimeId, env, xln);
+        registerRuntimeEnvChange(resolvedRuntimeId, restoredEnv, xln);
       }
       await ensureRuntimePipelineAlive(runtime ? { ...runtime, env } : null, xln);
     }
@@ -1933,10 +1948,10 @@ export const vaultOperations = {
       }
       if (runtimeToSync) {
         const activeXln = xln ?? await getXLN();
-        await ensureRuntimePipelineAlive(runtimeToSync, activeXln);
+        await ensureRuntimePipelineAlive(runtimeToSync as Runtime, activeXln);
       }
       console.log('[VaultStore.initialize] Active runtime selected:', activeId || 'none');
-      this.syncRuntime(runtimeToSync);
+      this.syncRuntime(runtimeToSync ?? null);
       initialized = true;
     })();
 

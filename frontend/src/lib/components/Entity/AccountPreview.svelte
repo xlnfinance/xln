@@ -320,7 +320,7 @@
     dispatch('select', { accountId: counterpartyId });
   }
 
-  function toggleInlineDetails(tokenId: number | 'all', event?: MouseEvent | KeyboardEvent): void {
+  function toggleInlineDetails(tokenId: number | 'all', event?: Event): void {
     event?.stopPropagation();
     expandedDetailTokenId = expandedDetailTokenId === tokenId ? null : tokenId;
   }
@@ -548,10 +548,10 @@
                 expanded={expandedDetailTokenId === row.tokenId}
                 actionLabel={liteMode ? '' : (row.actionLabel || '')}
                 actionTokenId={row.tokenId}
-                actionDisabled={row.actionDisabled || false}
+                actionDisabled={false}
                 on:action={(event) => {
                   event.stopPropagation();
-                  handleTokenFaucet(event.detail.tokenId);
+                  if (event.detail.tokenId !== null) handleTokenFaucet(event.detail.tokenId);
                 }}
                 on:bartoggle={(event) => toggleInlineDetails(row.tokenId, event)}
               />

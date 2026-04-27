@@ -1,5 +1,5 @@
 ﻿# XLN: Bilateral Ethereum + Bank-Grade Credit + Instant Settlement
-# ~285k tokens | Generated: 2026-04-12 23:19:52 | Git: 8c8384e
+# ~298k tokens | Generated: 2026-04-27 17:24:40 | Git: ab9fb64
 
 **TL;DR**: Banks without bailouts. Lightning without the inbound capacity wall.
 
@@ -144,7 +144,7 @@ One account, many subcontracts. All execute bilaterally, chain sees nothing unle
 - "What happens if counterparty disappears?" -> On-chain settlement with your collateral
 - "What's the worst case?" -> Lose credit limit you extended, nothing more
 
-## Token Budget Guide (~285k tokens total)
+## Token Budget Guide (~298k tokens total)
 
 **Critical path (read first, ~30min):**
 - intro.md (3min) - High-signal overview
@@ -166,33 +166,33 @@ One account, many subcontracts. All execute bilaterally, chain sees nothing unle
 xln/
   jurisdictions/contracts/
     Types.sol                  187 lines - Shared types: Diff, BatchArgs, InsuranceReg
-    Depository.sol             899 lines - enforceDebts() FIFO, collateral + credit (INVARIANT: L+R+C=0)
+    Depository.sol             901 lines - enforceDebts() FIFO, collateral + credit (INVARIANT: L+R+C=0)
     EntityProvider.sol         1164 lines - Hanko sigs, Control/Dividend, governance
     Account.sol                389 lines - A-machine on-chain: bilateral accounts, settlements
     DeltaTransformer.sol       162 lines - Delta transformations: HTLCs, swaps, limit orders
 
   runtime/
-    types.ts                     2422 lines - All TypeScript interfaces (START HERE)
-    ids.ts                       515 lines - Identity system: EntityId, SignerId, JId, ReplicaKey
-    runtime.ts                   4063 lines - Main coordinator, 100ms ticks, R->E->A routing
+    types.ts                     2515 lines - All TypeScript interfaces (START HERE)
+    ids.ts                       559 lines - Identity system: EntityId, SignerId, JId, ReplicaKey
+    runtime.ts                   5052 lines - Main coordinator, 100ms ticks, R->E->A routing
     entity-consensus.ts          1861 lines - BFT consensus (ADD_TX -> PROPOSE -> SIGN -> COMMIT)
-    account-consensus.ts         2068 lines - Bilateral consensus, left/right perspective
+    account-consensus.ts         2071 lines - Bilateral consensus, left/right perspective
     account-consensus-state.ts   168 lines - Bilateral state machine
-    j-batch.ts                   1031 lines - J-batch: E-machine accumulates -> jBroadcast -> J-machine
+    j-batch.ts                   1032 lines - J-batch: E-machine accumulates -> jBroadcast -> J-machine
     account-utils.ts             394 lines - deriveDelta() RCPAN calculation
     serialization-utils.ts       338 lines - BigInt serialization
     account-crypto.ts            558 lines - Signature verification
 
     entity-tx/
       index.ts                   7 lines - Entity transaction types
-      apply.ts                   1351 lines - Entity tx dispatcher
+      apply.ts                   1370 lines - Entity tx dispatcher
       validation.ts              37 lines - Transaction validation
       financial.ts               33 lines - Financial accounting
       proposals.ts               35 lines - Proposal logic
-      j-events.ts                1662 lines - Jurisdiction events
-      handlers/account.ts              2111 lines - Account operations
+      j-events.ts                1686 lines - Jurisdiction events
+      handlers/account.ts              2120 lines - Account operations
       handlers/deposit-collateral.ts   ? lines - R2C deposits
-      handlers/htlc-payment.ts         508 lines - HTLC routing
+      handlers/htlc-payment.ts         522 lines - HTLC routing
       handlers/create-settlement.ts    65 lines - Settlement creation
       handlers/mint-reserves.ts        53 lines - Reserve minting
 
@@ -205,7 +205,7 @@ xln/
       graph.ts                   141 lines - Network graph
       pathfinding.ts             269 lines - Dijkstra routing
 
-    state-helpers.ts             728 lines - Pure state management
+    state-helpers.ts             735 lines - Pure state management
     snapshot-coder.ts            20 lines - Deterministic RLP serialization
   docs/
     intro.md                           53 lines - * 5-min overview (new reader onramp)
@@ -418,7 +418,7 @@ enum MessageType {
 }
 
 
-//jurisdictions/contracts/Depository.sol (899 lines)
+//jurisdictions/contracts/Depository.sol (901 lines)
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
 
@@ -480,7 +480,9 @@ contract Depository is ReentrancyGuardLite {
   // Immutable dispute timeout policy.
   // Delay selection is agreed off-chain and baked into the deployed jurisdiction,
   // not tuned via mutable admin setters.
-  uint256 public constant defaultDisputeDelay = 5; // fixed dispute window policy
+  // Fixed dispute window policy. Local tests fast-forward blocks explicitly;
+  // production deployments must not ship with a minutes-long challenge window.
+  uint256 public constant defaultDisputeDelay = 5760; // ~24h at 15s blocks
   
 
   mapping (bytes32 => mapping (uint => Debt[])) public _debts;
@@ -3040,9 +3042,11 @@ contract DeltaTransformer {
 }
 
 
-//runtime/types.ts (2422 lines)
+//runtime/types.ts (2515 lines)
 import type { OrderbookExtState } from './orderbook';
 import type { SwapKey } from './swap-keys';
+import type { Level } from 'level';
+import type { RuntimeP2P } from './networking/p2p';
 
 /**
  * XLN Type Definitions
@@ -3153,19 +3157,18 @@ import type { SwapKey } from './swap-keys';
  *    └─ 'accountInput'                 // Process bilateral consensus message
  *
  * 4. AccountInput (Bilateral consensus between two entities)
- *    ├─ height: number                 // Which frame we're ACKing
- *    ├─ prevSignatures: string[]       // ACK their previous frame
- *    ├─ newAccountFrame: AccountFrame  // Our proposed frame
- *    ├─ newSignatures: string[]        // Signatures on new frame
- *    └─ disputeProofNonce: number       // nonce at dispute proof signing
+ *    ├─ kind: 'frame' | 'ack' | 'frame_ack' | 'dispute' | 'settle'
+ *    ├─ frame messages carry newAccountFrame + newHanko
+ *    ├─ ack messages carry prevHanko for the counterparty frame
+ *    ├─ frame_ack batches ACK + next proposal in one wire message
+ *    └─ dispute/settle messages carry their dedicated hanko payloads
  *
  * 5. AccountFrame (Agreed bilateral state - like a block)
  *    ├─ height: number                 // Frame number in bilateral chain
  *    ├─ accountTxs: AccountTx[]        // State transitions this frame
  *    ├─ prevFrameHash: string          // Links to previous frame (blockchain)
  *    ├─ stateHash: string              // Merkle root of current state
- *    ├─ tokenIds: number[]             // Active tokens in this account
- *    └─ deltas: bigint[]               // Per-token balances (signed integers)
+ *    └─ deltas: Delta[]                // Single source for token state
  *
  * 6. AccountTx (Bilateral account state transitions)
  *    ├─ 'direct_payment'               // Update offdelta (instant settlement)
@@ -3196,7 +3199,7 @@ import type { SwapKey } from './swap-keys';
  * Account Level (Bilateral):
  *   - Both sides must sign every frame (2-of-2 consensus)
  *   - Counter prevents replay attacks
- *   - prevSignatures ACK prevents forks
+ *   - prevHanko ACK prevents forks
  *   - State hash ensures deterministic state computation
  *   - Dispute resolution via on-chain proof submission
  *
@@ -3260,6 +3263,8 @@ import type { JAdapter } from './jadapter/types';
 import type { CompletedBatch, JBatch, JBatchState } from './j-batch';
 import type { CrontabState } from './crontab-types';
 
+export type { Profile } from './networking/gossip';
+
 export type RuntimeP2PConfigLike = {
   relayUrls?: string[];
   wsUrl?: string | null;
@@ -3272,6 +3277,13 @@ export type RuntimeP2PConfigLike = {
 };
 
 export type RuntimeP2PSurface = {
+  close(): void;
+  connect(): void;
+  isConnected(): boolean;
+  matchesIdentity(runtimeId: string, signerId?: string): boolean;
+  updateConfig(config: RuntimeP2PConfigLike): void;
+  refreshGossip(mode?: unknown): void;
+  ensureProfiles(entityIds: string[]): Promise<boolean>;
   sendDebugEvent(payload: unknown): boolean;
   syncProfiles(): Promise<boolean>;
   announceProfilesForEntities(entityIds: string[], reason?: string): void;
@@ -3303,8 +3315,8 @@ export interface RuntimeInput {
   runtimeTxs: RuntimeTx[];
   entityInputs: RoutedEntityInput[];
   jInputs?: JInput[]; // J-layer inputs (queue to J-mempool)
-  timestamp?: number; // External ingress timestamp seed (ms) for this runtime input batch
-  queuedAt?: number; // When first queued into runtime mempool (ms)
+  timestamp?: number | undefined; // External ingress timestamp seed (ms) for this runtime input batch
+  queuedAt?: number | undefined; // When first queued into runtime mempool (ms)
 }
 
 /** J-layer input - queues JTx to jurisdiction mempool */
@@ -3322,7 +3334,7 @@ export type RuntimeTx =
         config: ConsensusConfig;
         isProposer: boolean;
         profileName?: string;
-        position?: { x: number; y: number; z: number };
+        position?: { x: number; y: number; z: number; jurisdiction?: string; xlnomy?: string };
       };
     }
   | {
@@ -3336,6 +3348,8 @@ export type RuntimeTx =
         contracts?: {
           depository?: string;
           entityProvider?: string;
+          account?: string;
+          deltaTransformer?: string;
         };
         tokens?: Array<{      // Auto-deploy for BrowserVM only
           symbol: string;
@@ -3347,6 +3361,15 @@ export type RuntimeTx =
 
 export interface EntityInput {
   entityId: string;
+  /**
+   * Transport hint used by orchestrators, relay delivery, scenarios, and
+   * bootstrap helpers before the input is normalized into deterministic REA
+   * processing. Consensus code must keep treating signer/runtime routing as
+   * envelope metadata, not state-machine input.
+   */
+  signerId?: string;
+  runtimeId?: string;
+  from?: string;
   entityTxs?: EntityTx[];
   proposedFrame?: ProposedEntityFrame;
 
@@ -4244,9 +4267,6 @@ export interface AccountMachine {
 
   hankoSignature?: string; // LEGACY - will be removed
 
-  // Historical frame log - grows until manually pruned by entity
-  frameHistory: AccountFrame[]; // All confirmed bilateral frames in chronological order
-
   // Payment routing: temporary storage for multi-hop payments
   pendingForward?: {
     tokenId: number;
@@ -4296,45 +4316,95 @@ export interface AccountFrame {
   prevFrameHash: string; // Hash of previous frame (creates chain linkage, not state linkage)
   stateHash: string;
   byLeft?: boolean; // Who proposed this frame (left or right entity)
-  tokenIds: number[]; // Array of token IDs in this frame
-  deltas: bigint[]; // Array of deltas corresponding to tokenIds (ondelta+offdelta for quick access)
-  fullDeltaStates?: Delta[]; // OPTIONAL: Full delta objects (includes credit limits, allowances, collateral)
+  // One source of truth for account-frame token state. Compact offdelta arrays
+  // and token id arrays are derived by helpers when logs/proofs need them.
+  deltas: Delta[];
 }
 
-// AccountInput - Maps 1:1 to Channel.ts FlushMessage (frame-level consensus ONLY)
-export interface AccountInput {
+export type RuntimeFrameDbRecord =
+  | {
+      kind: 'accountFrame';
+      entityId: string;
+      counterpartyId: string;
+      accountHeight: number;
+      source: 'ackCommit' | 'peerCommit';
+      frame: AccountFrame;
+    };
+
+export type AccountSettleAction = {
+  type: 'propose' | 'update' | 'approve' | 'execute' | 'reject';
+  ops?: SettlementOp[];                // For propose/update
+  executorIsLeft?: boolean;            // For propose/update
+  hanko?: HankoString;                 // For approve (signer's hanko)
+  memo?: string;                       // For propose/update/reject
+  version?: number;                    // Version being approved/executed
+  nonceAtSign?: number;                // Settlement nonce counterparty signed with (approve)
+};
+
+type AccountInputBase = {
   fromEntityId: string;
   toEntityId: string;
 
   // Frame-level consensus (matches Channel.ts FlushMessage structure)
   height?: number;                   // Which frame we're ACKing or referencing (renamed from frameId)
 
-  // HANKO SYSTEM:
-  prevHanko?: HankoString;                // ACK hanko for their frame
-  newAccountFrame?: AccountFrame;         // Our new proposed frame (like block in Channel.ts)
-  newHanko?: HankoString;                 // Hanko on newAccountFrame
-  newDisputeHanko?: HankoString;          // Hanko on dispute proof (for J-machine enforcement)
-  newDisputeHash?: string;               // Full dispute hash (key in hankoWitness, wraps proofBodyHash)
-  newDisputeProofBodyHash?: string;       // ProofBodyHash that newDisputeHanko signs
-  newSettlementHanko?: HankoString;       // Hanko for settlement operations
-
-  // SETTLEMENT WORKSPACE ACTIONS (bilateral negotiation)
-  settleAction?: {
-    type: 'propose' | 'update' | 'approve' | 'execute' | 'reject';
-    ops?: SettlementOp[];                // For propose/update
-    executorIsLeft?: boolean;            // For propose/update
-    hanko?: HankoString;                 // For approve (signer's hanko)
-    memo?: string;                       // For propose/update/reject
-    version?: number;                    // Version being approved/executed
-    nonceAtSign?: number;                // Settlement nonce counterparty signed with (approve)
-  };
-
-  // LEGACY (will be removed):
-  prevSignatures?: string[];         // ACK for their frame (LEGACY)
-  newSignatures?: string[];          // Signatures on new frame (LEGACY)
-
   disputeProofNonce?: number;        // nonce at which dispute proof was signed (explicit, replaces counter-1 hack)
-}
+};
+
+type AccountDisputeSeal = {
+  newDisputeHanko?: HankoString;
+  newDisputeHash?: string;
+  newDisputeProofBodyHash?: string;
+  disputeProofNonce?: number;
+};
+
+type AccountInputNoSettlement = {
+  settleAction?: never;
+  newSettlementHanko?: never;
+};
+
+type AccountInputNoFrame = {
+  newAccountFrame?: never;
+  newHanko?: never;
+};
+
+type AccountInputNoAck = {
+  prevHanko?: never;
+};
+
+// AccountInput - Channel.ts-style bilateral wire message.
+// The discriminant preserves the real protocol shapes while still allowing the
+// existing ACK+next-frame batching path to be represented explicitly.
+export type AccountInput =
+  | (AccountInputBase & AccountDisputeSeal & AccountInputNoSettlement & AccountInputNoAck & {
+      kind: 'frame';
+      newAccountFrame: AccountFrame;
+      newHanko: HankoString;
+    })
+  | (AccountInputBase & AccountDisputeSeal & AccountInputNoSettlement & AccountInputNoFrame & {
+      kind: 'ack';
+      prevHanko: HankoString;
+    })
+  | (AccountInputBase & AccountDisputeSeal & AccountInputNoSettlement & {
+      kind: 'frame_ack';
+      prevHanko: HankoString;
+      newAccountFrame: AccountFrame;
+      newHanko: HankoString;
+    })
+  | (AccountInputBase & AccountDisputeSeal & AccountInputNoSettlement & AccountInputNoFrame & AccountInputNoAck & {
+      kind: 'dispute';
+      newDisputeHanko: HankoString;
+      newDisputeHash: string;
+      newDisputeProofBodyHash: string;
+    })
+  | (AccountInputBase & AccountInputNoFrame & AccountInputNoAck & {
+      kind: 'settle';
+      settleAction: AccountSettleAction;
+      newSettlementHanko?: HankoString;
+      newDisputeHanko?: never;
+      newDisputeHash?: never;
+      newDisputeProofBodyHash?: never;
+    });
 
 // Delta structure for per-token account state (based on old_src)
 export interface Delta {
@@ -4976,20 +5046,32 @@ export interface Env {
   jReplicas: Map<string, JReplica>;       // Jurisdiction replicas (J-layer EVM state)
   height: number;
   timestamp: number;
-  runtimeSeed?: string; // BrainVault seed backing this runtime (plaintext, dev mode)
-  runtimeId?: string; // Runtime identity (usually signer1 address)
+  runtimeSeed?: string | undefined; // BrainVault seed backing this runtime (plaintext, dev mode)
+  runtimeId?: string | undefined; // Runtime identity (usually signer1 address)
   lastProcessEnteredAt?: number; // Wall-clock timestamp of most recent process() entry
   dbNamespace?: string; // DB namespace for per-runtime persistence (defaults to runtimeId)
   // Runtime mempool (runtime-level queue; WAL-like)
   // NOTE: runtimeInput is deprecated alias - both point to same object
-  runtimeMempool?: RuntimeInput;
+  runtimeMempool?: RuntimeInput | undefined;
   runtimeInput: RuntimeInput; // Deprecated alias of runtimeMempool
   runtimeConfig?: {
     minFrameDelayMs?: number; // Minimum delay between runtime frames
     loopIntervalMs?: number;  // Loop interval for runtime processing
-  };
+    snapshotIntervalFrames?: number;
+    storage?: {
+      enabled?: boolean;
+      packPeriodFrames?: number;
+      snapshotPeriodFrames?: number;
+      retainSnapshots?: number;
+      epochMaxBytes?: number;
+      frameDbMaxBytes?: number;
+      frameDbRetainFrames?: number;
+      accountMerkleRadix?: 16 | 256;
+    };
+  } | undefined;
   runtimeState?: {
     loopActive?: boolean;
+    loopPromise?: Promise<void> | null;
     stopLoop?: (() => void) | null;
     wakeLoop?: (() => void) | null;
     wakeRequested?: boolean;
@@ -4997,18 +5079,30 @@ export interface Env {
     persistencePaused?: boolean;
     lastFrameAt?: number; // Wall-clock timestamp of the most recent processed runtime cycle
     processingPromise?: Promise<void> | null;
-    p2p?: RuntimeP2PSurface | null;
+    p2p?: RuntimeP2P | null | undefined;
     pendingP2PConfig?: RuntimeP2PConfigLike | null;
     lastP2PConfig?: RuntimeP2PConfigLike | null;
     envChangeCallbacks?: Set<(env: Env) => void>;
-    db?: unknown;
-    dbOpenPromise?: Promise<boolean> | null;
-    infraDb?: unknown;
-    infraDbOpenPromise?: Promise<boolean> | null;
+    db?: Level<Buffer, Buffer> | null | undefined;
+    dbOpenPromise?: Promise<boolean> | null | undefined;
+    storageDb?: Level<Buffer, Buffer> | null | undefined;
+    storageDbOpenPromise?: Promise<boolean> | null | undefined;
+    storagePreviousDb?: Level<Buffer, Buffer> | null | undefined;
+    storagePreviousDbOpenPromise?: Promise<boolean> | null | undefined;
+    storageVerifiedCurrentHeight?: number;
+    storageVerifiedPreviousHeight?: number;
+    storageEpochRotatePromise?: Promise<void> | null;
+    storageEntityHashDocs?: unknown;
+    frameDb?: Level<Buffer, Buffer> | null | undefined;
+    frameDbOpenPromise?: Promise<boolean> | null | undefined;
+    infraDb?: Level<Buffer, Buffer> | null | undefined;
+    infraDbOpenPromise?: Promise<boolean> | null | undefined;
     logState?: {
       nextId: number;
       mirrorToConsole?: boolean;
     };
+    pendingAuditEvents?: Array<Record<string, unknown>>;
+    pendingFrameDbRecords?: RuntimeFrameDbRecord[];
     cleanLogs?: string[];
     routeDeferState?: Map<string, {
       warnAt: number;
@@ -5026,7 +5120,7 @@ export interface Env {
     }>;
     watcherDedupCounter?: import('./jadapter/watcher').EventBatchCounter;
     directEntityInputDispatch?: ((targetRuntimeId: string, input: DeliverableEntityInput, ingressTimestamp?: number) => boolean) | null;
-  };
+  } | undefined;
   history: EnvSnapshot[]; // Time machine snapshots - single source of truth
   gossip: GossipLayer;
 
@@ -5042,20 +5136,21 @@ export interface Env {
   evms: Map<string, unknown>;
 
   // Active jurisdiction
-  activeJurisdiction?: string; // Currently active J-replica name
+  activeJurisdiction?: string | undefined; // Currently active J-replica name
 
   // Scenario mode: deterministic time control (scenarios set env.timestamp manually)
   scenarioMode?: boolean; // When true, runtime doesn't auto-update timestamp
   quietRuntimeLogs?: boolean; // When true, suppress noisy runtime console logs
+  debugJWatcherBatches?: boolean; // Enables verbose J watcher batch routing diagnostics
   scenarioLogLevel?: 'debug' | 'info' | 'warn' | 'error'; // Scenario log verbosity
   strictScenario?: boolean; // When true, runtime asserts invariants per frame
   strictScenarioLabel?: string; // Optional label for strict scenario errors
 
   // Frame stepping: stop at specific frame for debugging
-  stopAtFrame?: number; // When set, process() stops at this frame and dumps state
+  stopAtFrame?: number | undefined; // When set, process() stops at this frame and dumps state
 
   // Frame display duration hint (for time-travel visualization)
-  frameDisplayMs?: number; // How long to display this frame (default: 100ms)
+  frameDisplayMs?: number | undefined; // How long to display this frame (default: 100ms)
 
   // Snapshot extras for scenarios (set before process(), consumed by captureSnapshot)
   extra?: {
@@ -5068,7 +5163,7 @@ export interface Env {
     };
     expectedSolvency?: bigint;
     description?: string;
-  };
+  } | undefined;
 
   // E→E message queue (always spans ticks - no same-tick cascade)
   pendingOutputs?: RoutedEntityInput[]; // Outputs queued for next tick
@@ -5464,7 +5559,7 @@ export interface XlnomySnapshot {
 }
 
 
-//runtime/ids.ts (515 lines)
+//runtime/ids.ts (559 lines)
 /**
  * XLN Identity System
  *
@@ -5486,6 +5581,12 @@ declare const EntityIdBrand: unique symbol;
 declare const SignerIdBrand: unique symbol;
 declare const JIdBrand: unique symbol;
 declare const EntityProviderAddressBrand: unique symbol;
+declare const AccountKeyBrand: unique symbol;
+declare const HashlockBrand: unique symbol;
+declare const LockIdBrand: unique symbol;
+declare const ProposalIdBrand: unique symbol;
+declare const JurisdictionNameBrand: unique symbol;
+declare const TokenIdBrand: unique symbol;
 
 /** Entity identifier - 32-byte hex string (0x + 64 chars) */
 export type EntityId = string & { readonly [EntityIdBrand]: typeof EntityIdBrand };
@@ -5498,6 +5599,12 @@ export type JId = string & { readonly [JIdBrand]: typeof JIdBrand };
 
 /** EntityProvider contract address - 20-byte hex (0x + 40 chars) */
 export type EntityProviderAddress = string & { readonly [EntityProviderAddressBrand]: typeof EntityProviderAddressBrand };
+export type AccountKey = string & { readonly [AccountKeyBrand]: typeof AccountKeyBrand };
+export type Hashlock = string & { readonly [HashlockBrand]: typeof HashlockBrand };
+export type LockId = string & { readonly [LockIdBrand]: typeof LockIdBrand };
+export type ProposalId = string & { readonly [ProposalIdBrand]: typeof ProposalIdBrand };
+export type JurisdictionName = string & { readonly [JurisdictionNameBrand]: typeof JurisdictionNameBrand };
+export type TokenId = number & { readonly [TokenIdBrand]: typeof TokenIdBrand };
 
 // =============================================================================
 // CONSTANTS
@@ -5599,6 +5706,38 @@ export const toEpAddress = (s: string): EntityProviderAddress => {
     throw new Error(`FINTECH-SAFETY: Invalid EntityProviderAddress: ${s}`);
   }
   return s;
+};
+
+export const toAccountKey = (leftEntityId: string, rightEntityId: string): AccountKey => {
+  const left = toEntityId(leftEntityId.toLowerCase());
+  const right = toEntityId(rightEntityId.toLowerCase());
+  return (left < right ? `${left}:${right}` : `${right}:${left}`) as AccountKey;
+};
+
+export const toHashlock = (s: string): Hashlock => {
+  if (!/^0x[a-fA-F0-9]{64}$/.test(s)) throw new Error(`FINTECH-SAFETY: Invalid hashlock: ${s}`);
+  return s.toLowerCase() as Hashlock;
+};
+
+export const toLockId = (s: string): LockId => {
+  if (!s || s.includes(':')) throw new Error(`FINTECH-SAFETY: Invalid lock id: ${s}`);
+  return s as LockId;
+};
+
+export const toProposalId = (s: string): ProposalId => {
+  if (!s) throw new Error(`FINTECH-SAFETY: Invalid proposal id: ${s}`);
+  return s as ProposalId;
+};
+
+export const toJurisdictionName = (s: string): JurisdictionName => {
+  const value = String(s || '').trim();
+  if (!value) throw new Error('FINTECH-SAFETY: Invalid jurisdiction name');
+  return value as JurisdictionName;
+};
+
+export const toTokenId = (value: number): TokenId => {
+  if (!Number.isInteger(value) || value < 0) throw new Error(`FINTECH-SAFETY: Invalid token id: ${value}`);
+  return value as TokenId;
 };
 
 // =============================================================================
@@ -5981,7 +6120,7 @@ export const safeExtractEntityId = (keyString: string): EntityId | null => {
 };
 
 
-//runtime/runtime.ts (4063 lines)
+//runtime/runtime.ts (5052 lines)
 // for regular use > bun run runtime/runtime.ts
 // for debugging > bun repl
 // await import('./debug.js');
@@ -5990,6 +6129,8 @@ export const safeExtractEntityId = (keyString: string): EntityId | null => {
 // High-level database using Level polyfill (works in both Node.js and browser)
 import { Level } from 'level';
 import { ethers } from 'ethers';
+import type { Provider } from 'ethers';
+import type { JAdapterConfig } from './jadapter/types';
 
 // Bump this on runtime bundle changes that must be reflected in frontend immediately.
 const RUNTIME_BUILD_ID = '2026-03-23-19:35Z';
@@ -6016,7 +6157,9 @@ import { listOpenSwapOffers } from './open-swap-offers';
 import { setDeltaTransformerAddress } from './proof-builder';
 import {
   buildCanonicalEnvSnapshot,
+  buildRuntimeCheckpointSnapshot,
 } from './wal/snapshot';
+import { computePersistedEnvStateHash } from './wal/hash';
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
 import { isLeftEntity } from './entity-id-utils';
 import type { JAdapter } from './jadapter';
@@ -6048,13 +6191,18 @@ import { ensureLocalDisputeDelayConfigured } from './jadapter/local-config';
 import { getAvailableJurisdictions } from './jurisdiction-config';
 import { TIMING } from './constants';
 import { canonicalizeProfile, createGossipLayer, parseProfile } from './networking/gossip';
-import { attachEventEmitters } from './env-events';
+import {
+  attachEventEmitters,
+  clearPendingAuditEvents,
+  dropPendingFrameDbRecords,
+  flushPendingAuditEvents,
+  peekPendingFrameDbRecords,
+  setAccountFrameHistoryView,
+} from './env-events';
 import {
   deriveSignerAddressSync,
   getCachedSignerPrivateKey,
-  getSignerAddress,
   getSignerPrivateKey,
-  getSignerPublicKey,
   prewarmSignerKeyCache,
 } from './account-crypto';
 import {
@@ -6073,17 +6221,7 @@ import {
   extractSignerId,
   formatReplicaKey,
   createReplicaKey,
-  formatEntityDisplay as formatEntityDisplayIds,
-  formatSignerDisplay as formatSignerDisplayIds,
   formatReplicaDisplay,
-  // Types for re-export
-  type EntityId,
-  type SignerId,
-  type JId,
-  type EntityProviderAddress,
-  type ReplicaKey,
-  type FullReplicaAddress,
-  type ReplicaUri,
   // Constants
   XLN_URI_SCHEME,
   DEFAULT_RUNTIME_HOST,
@@ -6100,8 +6238,6 @@ import {
   toSignerId,
   toJId,
   toEpAddress,
-  // Entity type detection (re-export from ids.ts)
-  detectEntityType as detectEntityTypeIds,
   isNumberedEntity,
   isLazyEntity,
   getEntityDisplayNumber,
@@ -6112,8 +6248,6 @@ import {
   // Type-safe collections
   ReplicaMap,
   EntityMap,
-  // Jurisdiction helpers
-  type JurisdictionInfo,
   jIdFromChainId,
   createLazyJId,
   // Migration helpers
@@ -6151,15 +6285,33 @@ import {
   BigIntMath,
   FINANCIAL_CONSTANTS,
 } from './financial-utils';
-import { cloneEntityReplica, resolveEntityProposerId } from './state-helpers';
-import { getEntityShortId, getEntityNumber, formatEntityId, HEAVY_LOGS } from './utils';
+import { resolveEntityProposerId } from './state-helpers';
+import { getEntityShortId, getEntityNumber, formatEntityId } from './utils';
 import { deserializeTaggedJson, serializeTaggedJson, safeStringify } from './serialization-utils';
+import {
+  computeStorageAuditStateHashFromEnv,
+  computeStorageCanonicalStateHashFromEnv,
+  computeStorageDebugStateHashFromEnv,
+  findStorageLatestSnapshotAtOrBelow,
+  inspectStorage,
+  listStorageLiveEntityIds,
+  listStorageSnapshotEntityIds,
+  listStorageSnapshotHeights,
+  loadEntityStateFromStorage,
+  readFrameDbAccountFrames,
+  readFrameDbRuntimeActivity,
+  readStorageFrameRecord,
+  readStorageHead,
+  readStorageReplicaMeta,
+  saveRuntimeFrameToStorage,
+  seedFreshStorageEpoch,
+  verifyStorageTailIntegrity,
+} from './storage';
 import {
   validateDelta,
   validateAccountDeltas,
   createDefaultDelta,
   isDelta,
-  validateEntityState,
   validateDeliverableEntityInput,
   validateEntityInput,
   validateEntityOutput,
@@ -6167,13 +6319,18 @@ import {
 import { mergeRuntimeJurisdictionConfig } from './jurisdiction-runtime';
 import type {
   DeliverableEntityInput,
+  AccountFrame,
   EntityInput,
+  EntityReplica,
   EntityState,
+  EntityTx,
   Env,
   FrameLogEntry,
   JInput,
+  JReplica,
   RoutedEntityInput,
   RuntimeInput,
+  RuntimeTx,
 } from './types';
 import {
   clearDatabase,
@@ -6189,17 +6346,7 @@ import {
 } from './utils';
 import { logError } from './logger';
 import type { PersistedFrameJournal } from './wal/store';
-import { readPersistedSnapshotBuffer } from './wal/store';
-import {
-  getPersistedLatestHeight as getPersistedLatestHeightWal,
-  listPersistedCheckpointHeights as listPersistedCheckpointHeightsWal,
-  readPersistedFrameJournal as readPersistedFrameJournalWal,
-  readPersistedFrameJournals as readPersistedFrameJournalsWal,
-  saveRuntimeFrameToWal,
-  type VerifyRuntimeChainResult,
-} from './wal/runtime';
 import { rehydrateRestoredRuntimeInfra } from './runtime-infra';
-import { loadRuntimeStateFromDb, verifyPersistedRuntimeState } from './wal/state-restore';
 
 const runtimeIsBrowser = typeof window !== 'undefined';
 
@@ -6286,10 +6433,9 @@ function normalizeEntitySwapTradingPairs(state: { swapTradingPairs?: Array<{ bas
 // Level polyfill: Node.js uses filesystem, Browser uses IndexedDB
 const nodeProcess = !runtimeIsBrowser && typeof globalThis.process !== 'undefined' ? globalThis.process : undefined;
 const defaultDbPath = nodeProcess ? 'db-tmp/runtime' : 'db';
-const dbRootPath = nodeProcess?.env?.XLN_DB_PATH || defaultDbPath;
+const dbRootPath = nodeProcess?.env?.['XLN_DB_PATH'] || defaultDbPath;
 
 const DEFAULT_DB_NAMESPACE = 'default';
-const PERSISTENCE_SCHEMA_VERSION = 4;
 
 const normalizeDbNamespace = (value: string): string => value.trim().toLowerCase();
 type RuntimeDbKind = 'core' | 'infra';
@@ -6317,42 +6463,12 @@ const resolveDbNamespace = (
   return DEFAULT_DB_NAMESPACE;
 };
 
-const makeDbKey = (namespace: string, key: string): Buffer => Buffer.from(`${namespace}:${key}`);
-
 const formatPerfMs = (value: number): string => value.toFixed(2);
 
-const isDbUnavailableError = (error: unknown): boolean => {
-  const message = error instanceof Error ? error.message : String(error);
-  return (
-    message.includes('Database is not open') ||
-    message.includes('database is not open') ||
-    message.includes('InvalidStateError') ||
-    message.includes('not open') ||
-    message.includes('closing')
-  );
-};
-
-const isDbNotFound = (error: unknown): boolean => {
+const isFsNotFound = (error: unknown): boolean => {
   if (!error || typeof error !== 'object') return false;
-  const code = String((error as { code?: unknown }).code ?? '');
-  const name = String((error as { name?: unknown }).name ?? '');
-  return code === 'LEVEL_NOT_FOUND' || name === 'NotFoundError';
+  return String((error as { code?: unknown }).code ?? '') === 'ENOENT';
 };
-
-const captureEntityJHeights = (env: Env): Record<string, number> => {
-  const result: Record<string, number> = {};
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
-    const entityId = String(replica?.entityId || safeExtractEntityId(replicaKey) || '').toLowerCase();
-    if (!entityId) continue;
-    result[entityId] = Number(replica?.state?.lastFinalizedJHeight ?? 0);
-  }
-  return result;
-};
-
-// Helper: Race promise with timeout
-async function withTimeout<T>(promise: Promise<T>, ms: number): Promise<T> {
-  return Promise.race([promise, new Promise<T>((_, reject) => setTimeout(() => reject(new Error('TIMEOUT')), ms))]);
-}
 
 const resolveDbPath = (env: Env, kind: RuntimeDbKind = 'core'): string => {
   const namespace = resolveDbNamespace({ env });
@@ -6363,11 +6479,346 @@ const resolveDbPath = (env: Env, kind: RuntimeDbKind = 'core'): string => {
   return `${dbRootPath}-${namespace}${suffix}`;
 };
 
+type StorageDbRole = 'current' | 'previous';
+type StorageEpochRotationMarker = {
+  snapshotHeight: number;
+  currentPath: string;
+  previousPath: string;
+  nextPath: string;
+  createdAt: number;
+};
+
+const storageEpochRecoveryPromises = new Map<string, Promise<void>>();
+
+const resolveStorageDbPath = (env: Env, role: StorageDbRole = 'current'): string => {
+  const base = resolveDbPath(env, 'core');
+  return `${base}-storage-${role}`;
+};
+
+const resolveFrameDbPath = (env: Env): string => {
+  const base = resolveDbPath(env, 'core');
+  return `${base}-frames`;
+};
+
+const resolveStorageRotationMarkerPath = (env: Env): string => {
+  const base = resolveDbPath(env, 'core');
+  return `${base}-storage-rotation.json`;
+};
+
+const storageStateFields = (role: StorageDbRole) =>
+  role === 'current'
+    ? ({
+        dbField: 'storageDb',
+        openField: 'storageDbOpenPromise',
+      } as const)
+    : ({
+        dbField: 'storagePreviousDb',
+        openField: 'storagePreviousDbOpenPromise',
+      } as const);
+
+const getStorageDb = (env: Env, role: StorageDbRole = 'current'): Level<Buffer, Buffer> => {
+  const state = ensureRuntimeState(env);
+  const fields = storageStateFields(role);
+  const existing = state[fields.dbField] as Level<Buffer, Buffer> | undefined;
+  if (existing) return existing;
+  const db = new Level(resolveStorageDbPath(env, role), { valueEncoding: 'buffer', keyEncoding: 'binary' }) as unknown as Level<Buffer, Buffer>;
+  state[fields.dbField] = db;
+  return db;
+};
+
+const closeStorageDb = async (env: Env, role: StorageDbRole = 'current'): Promise<void> => {
+  const state = env.runtimeState;
+  if (!state) return;
+  const fields = storageStateFields(role);
+  const db = state[fields.dbField] as Level<Buffer, Buffer> | undefined;
+  if (!db) return;
+  try {
+    await db.close();
+  } catch (error) {
+    console.warn(`⚠️ Failed to close storage ${role} DB:`, error instanceof Error ? error.message : error);
+  } finally {
+    state[fields.dbField] = null;
+    state[fields.openField] = null;
+    if (role === 'previous') delete state.storageVerifiedPreviousHeight;
+    else delete state.storageVerifiedCurrentHeight;
+  }
+};
+
+const storagePathExists = async (path: string): Promise<boolean> => {
+  if (!nodeProcess) return false;
+  const fs = await import('fs/promises');
+  try {
+    await fs.stat(path);
+    return true;
+  } catch {
+    return false;
+  }
+};
+
+const fsyncParentDir = async (targetPath: string): Promise<void> => {
+  if (!nodeProcess) return;
+  const fs = await import('fs/promises');
+  const path = await import('path');
+  try {
+    const dir = await fs.open(path.dirname(targetPath), 'r');
+    try {
+      await dir.sync();
+    } finally {
+      await dir.close();
+    }
+  } catch {
+    // Best-effort on platforms/filesystems that do not support syncing dirs.
+  }
+};
+
+const readStorageRotationMarker = async (env: Env): Promise<StorageEpochRotationMarker | null> => {
+  if (!nodeProcess) return null;
+  const fs = await import('fs/promises');
+  const markerPath = resolveStorageRotationMarkerPath(env);
+  try {
+    const raw = await fs.readFile(markerPath, 'utf8');
+    const parsed = JSON.parse(raw) as Partial<StorageEpochRotationMarker>;
+    if (
+      typeof parsed.currentPath === 'string' &&
+      typeof parsed.previousPath === 'string' &&
+      typeof parsed.nextPath === 'string' &&
+      Number.isFinite(parsed.snapshotHeight)
+    ) {
+      return {
+        snapshotHeight: Number(parsed.snapshotHeight),
+        currentPath: parsed.currentPath,
+        previousPath: parsed.previousPath,
+        nextPath: parsed.nextPath,
+        createdAt: Number(parsed.createdAt || 0),
+      };
+    }
+  } catch (error) {
+    if (!isFsNotFound(error)) {
+      console.warn('[storage-epoch] failed to read rotation marker:', error instanceof Error ? error.message : error);
+    }
+  }
+  return null;
+};
+
+const writeStorageRotationMarker = async (env: Env, marker: StorageEpochRotationMarker): Promise<void> => {
+  if (!nodeProcess) return;
+  const fs = await import('fs/promises');
+  const markerPath = resolveStorageRotationMarkerPath(env);
+  const tmpPath = `${markerPath}.tmp`;
+  await fs.writeFile(tmpPath, `${JSON.stringify(marker)}\n`);
+  await fs.rename(tmpPath, markerPath);
+  await fsyncParentDir(markerPath);
+};
+
+const removeStorageRotationMarker = async (env: Env): Promise<void> => {
+  if (!nodeProcess) return;
+  const fs = await import('fs/promises');
+  const markerPath = resolveStorageRotationMarkerPath(env);
+  await fs.rm(markerPath, { force: true });
+  await fs.rm(`${markerPath}.tmp`, { force: true });
+  await fsyncParentDir(markerPath);
+};
+
+const recoverStorageEpochRotationOnce = async (env: Env): Promise<void> => {
+  if (!nodeProcess) return;
+  const fs = await import('fs/promises');
+  const marker = await readStorageRotationMarker(env);
+  const currentPath = resolveStorageDbPath(env, 'current');
+  const previousPath = resolveStorageDbPath(env, 'previous');
+
+  if (marker) {
+    const currentExists = await storagePathExists(marker.currentPath);
+    const nextExists = await storagePathExists(marker.nextPath);
+    const previousExists = await storagePathExists(marker.previousPath);
+
+    if (!currentExists && nextExists) {
+      console.warn(
+        `[storage-epoch] completing interrupted rotation snapshot=${marker.snapshotHeight}: next -> current`,
+      );
+      await fs.rename(marker.nextPath, marker.currentPath);
+      await fsyncParentDir(marker.currentPath);
+    } else if (!currentExists && previousExists) {
+      console.warn(
+        `[storage-epoch] rolling back interrupted rotation snapshot=${marker.snapshotHeight}: previous -> current`,
+      );
+      await fs.rename(marker.previousPath, marker.currentPath);
+      await fsyncParentDir(marker.currentPath);
+    } else if (currentExists && nextExists) {
+      console.warn(
+        `[storage-epoch] aborting interrupted rotation snapshot=${marker.snapshotHeight}: removing stale next DB`,
+      );
+      await fs.rm(marker.nextPath, { recursive: true, force: true });
+      await fsyncParentDir(marker.nextPath);
+    }
+
+    await removeStorageRotationMarker(env);
+    return;
+  }
+
+  if (!(await storagePathExists(currentPath)) && (await storagePathExists(previousPath))) {
+    console.warn('[storage-epoch] current DB missing while previous exists; restoring previous as current');
+    await fs.rename(previousPath, currentPath);
+    await fsyncParentDir(currentPath);
+  }
+};
+
+const recoverStorageEpochRotation = async (env: Env): Promise<void> => {
+  if (!nodeProcess) return;
+  const key = resolveStorageRotationMarkerPath(env);
+  const existing = storageEpochRecoveryPromises.get(key);
+  if (existing) {
+    await existing;
+    return;
+  }
+  const recovery = recoverStorageEpochRotationOnce(env);
+  storageEpochRecoveryPromises.set(key, recovery);
+  try {
+    await recovery;
+  } finally {
+    storageEpochRecoveryPromises.delete(key);
+  }
+};
+
+const waitForStorageEpochRotation = async (env: Env): Promise<void> => {
+  const pending = ensureRuntimeState(env).storageEpochRotatePromise;
+  if (pending) await pending;
+};
+
+const storageVerifyOnOpenDisabled = (): boolean => {
+  const raw = String(runtimeProcessEnv?.['XLN_STORAGE_SKIP_VERIFY_ON_OPEN'] ?? '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+};
+
+const storageForceRestoreEnabled = (): boolean => {
+  const raw = String(runtimeProcessEnv?.['XLN_STORAGE_FORCE_RESTORE'] ?? '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+};
+
+const verifyOpenedStorageDb = async (
+  env: Env,
+  role: StorageDbRole,
+  db: Level<Buffer, Buffer>,
+): Promise<void> => {
+  if (storageVerifyOnOpenDisabled()) return;
+  const state = ensureRuntimeState(env);
+  const verifiedField = role === 'current' ? 'storageVerifiedCurrentHeight' : 'storageVerifiedPreviousHeight';
+  const previousVerifiedHeight = Number(state[verifiedField] ?? -1);
+  try {
+    const verified = await verifyStorageTailIntegrity(db, { tailFrames: 128 });
+    if (verified.latestHeight <= previousVerifiedHeight) return;
+    state[verifiedField] = verified.latestHeight;
+  } catch (error) {
+    if (storageForceRestoreEnabled()) {
+      console.error(
+        `[storage] ${role} DB integrity verification failed but XLN_STORAGE_FORCE_RESTORE=1 is set:`,
+        error instanceof Error ? error.message : error,
+      );
+      return;
+    }
+    throw error;
+  }
+};
+
+const tryOpenStorageDb = async (env: Env, role: StorageDbRole = 'current'): Promise<boolean> => {
+  await waitForStorageEpochRotation(env);
+  await recoverStorageEpochRotation(env);
+  const state = ensureRuntimeState(env);
+  const fields = storageStateFields(role);
+  if (role === 'previous' && !(await storagePathExists(resolveStorageDbPath(env, role)))) {
+    return false;
+  }
+  if (!state[fields.openField]) {
+    const db = getStorageDb(env, role);
+    state[fields.openField] = (async () => {
+      try {
+        await db.open();
+        await verifyOpenedStorageDb(env, role, db);
+        return true;
+      } catch (error) {
+        const isBlocked =
+          error instanceof Error &&
+          (error.message?.includes('blocked') || error.name === 'SecurityError' || error.name === 'InvalidStateError');
+        if (isBlocked) {
+          console.log(`⚠️ storage ${role} DB blocked - skipping`);
+          return false;
+        }
+        state[fields.openField] = null;
+        throw error;
+      }
+    })();
+  }
+  try {
+    return await (state[fields.openField] as Promise<boolean>);
+  } catch (error) {
+    console.error(`❌ Failed to open storage ${role} DB:`, error);
+    throw error;
+  }
+};
+
+const rotateStorageEpochDb = async (env: Env, snapshotHeight: number): Promise<void> => {
+  if (!nodeProcess) return;
+  const state = ensureRuntimeState(env);
+  if (state.storageEpochRotatePromise) {
+    await state.storageEpochRotatePromise;
+    return;
+  }
+  const rotation = (async () => {
+    const currentPath = resolveStorageDbPath(env, 'current');
+    const previousPath = resolveStorageDbPath(env, 'previous');
+    const nextPath = `${currentPath}-next-${snapshotHeight}`;
+    const fs = await import('fs/promises');
+    const currentDb = getStorageDb(env, 'current');
+    const nextDb = new Level(nextPath, {
+      valueEncoding: 'buffer',
+      keyEncoding: 'binary',
+    }) as unknown as Level<Buffer, Buffer>;
+    await fs.rm(nextPath, { recursive: true, force: true });
+    await nextDb.open();
+    try {
+      await seedFreshStorageEpoch({
+        sourceDb: currentDb,
+        targetDb: nextDb,
+        snapshotHeight,
+      });
+    } finally {
+      await nextDb.close();
+    }
+
+    await writeStorageRotationMarker(env, {
+      snapshotHeight,
+      currentPath,
+      previousPath,
+      nextPath,
+      createdAt: Date.now(),
+    });
+    await closeStorageDb(env, 'previous');
+    await closeStorageDb(env, 'current');
+    await fs.rm(previousPath, { recursive: true, force: true });
+    if (await storagePathExists(currentPath)) {
+      await fs.rename(currentPath, previousPath);
+      await fsyncParentDir(previousPath);
+    }
+    await fs.rename(nextPath, currentPath);
+    await fsyncParentDir(currentPath);
+    await removeStorageRotationMarker(env);
+    delete state.storageVerifiedCurrentHeight;
+    delete state.storageVerifiedPreviousHeight;
+  })();
+  state.storageEpochRotatePromise = rotation;
+  try {
+    await rotation;
+  } finally {
+    if (state.storageEpochRotatePromise === rotation) {
+      state.storageEpochRotatePromise = null;
+    }
+  }
+};
+
 export const getRuntimeDb = (env: Env): Level<Buffer, Buffer> => {
   const state = ensureRuntimeState(env);
   if (!state.db) {
     const path = resolveDbPath(env, 'core');
-    state.db = new Level(path, { valueEncoding: 'buffer', keyEncoding: 'binary' });
+    state.db = new Level(path, { valueEncoding: 'buffer', keyEncoding: 'binary' }) as unknown as Level<Buffer, Buffer>;
   }
   return state.db;
 };
@@ -6376,14 +6827,44 @@ export const getInfraDb = (env: Env): Level<Buffer, Buffer> => {
   const state = ensureRuntimeState(env);
   if (!state.infraDb) {
     const path = resolveDbPath(env, 'infra');
-    state.infraDb = new Level(path, { valueEncoding: 'buffer', keyEncoding: 'binary' });
+    state.infraDb = new Level(path, { valueEncoding: 'buffer', keyEncoding: 'binary' }) as unknown as Level<Buffer, Buffer>;
   }
   return state.infraDb;
 };
 
-export const closeRuntimeDb = async (env: Env): Promise<void> => {
+export const getFrameDb = (env: Env): Level<Buffer, Buffer> => {
   const state = ensureRuntimeState(env);
-  if (!state.db) return;
+  if (!state.frameDb) {
+    state.frameDb = new Level(resolveFrameDbPath(env), { valueEncoding: 'buffer', keyEncoding: 'binary' }) as unknown as Level<Buffer, Buffer>;
+  }
+  return state.frameDb as Level<Buffer, Buffer>;
+};
+
+const closeFrameDb = async (env: Env): Promise<void> => {
+  const state = env.runtimeState;
+  const db = state?.frameDb as Level<Buffer, Buffer> | undefined;
+  if (!db) return;
+  try {
+    await db.close();
+  } catch (error) {
+    console.warn('⚠️ Failed to close runtime frame DB:', error instanceof Error ? error.message : error);
+  } finally {
+    state!.frameDb = null;
+    state!.frameDbOpenPromise = null;
+  }
+};
+
+export const closeRuntimeDb = async (env: Env): Promise<void> => {
+  const stopped = await stopRuntimeLoopAndWait(env, 10_000);
+  if (!stopped) {
+    console.warn('⚠️ Runtime loop did not drain before DB close deadline');
+  }
+  detachRuntimeEnv(env);
+  await closeStorageDb(env, 'current');
+  await closeStorageDb(env, 'previous');
+  await closeFrameDb(env);
+  const state = env.runtimeState;
+  if (!state?.db) return;
   try {
     await state.db.close();
   } catch (error) {
@@ -6395,8 +6876,8 @@ export const closeRuntimeDb = async (env: Env): Promise<void> => {
 };
 
 export const closeInfraDb = async (env: Env): Promise<void> => {
-  const state = ensureRuntimeState(env);
-  if (!state.infraDb) return;
+  const state = env.runtimeState;
+  if (!state?.infraDb) return;
   try {
     await state.infraDb.close();
   } catch (error) {
@@ -6437,6 +6918,35 @@ export async function tryOpenDb(env: Env): Promise<boolean> {
   }
 }
 
+export async function tryOpenFrameDb(env: Env): Promise<boolean> {
+  const state = ensureRuntimeState(env);
+  if (!state.frameDbOpenPromise) {
+    const db = getFrameDb(env);
+    state.frameDbOpenPromise = (async () => {
+      try {
+        await db.open();
+        return true;
+      } catch (error) {
+        const isBlocked =
+          error instanceof Error &&
+          (error.message?.includes('blocked') || error.name === 'SecurityError' || error.name === 'InvalidStateError');
+        if (isBlocked) {
+          console.log('⚠️ runtime frame DB blocked - persistence cannot index history safely');
+          return false;
+        }
+        state.frameDbOpenPromise = null;
+        throw error;
+      }
+    })();
+  }
+  try {
+    return await state.frameDbOpenPromise;
+  } catch (error) {
+    console.error('❌ Failed to open runtime frame DB:', error);
+    throw error;
+  }
+}
+
 // === ETHEREUM INTEGRATION ===
 
 // === SVELTE REACTIVITY INTEGRATION ===
@@ -6470,11 +6980,11 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
   if (!env.runtimeState) {
     env.runtimeState = {
       loopActive: false,
+      loopPromise: null,
       stopLoop: null,
       wakeLoop: null,
       wakeRequested: false,
       clockPrimed: false,
-      lastFrameAt: undefined,
       p2p: null,
       pendingP2PConfig: null,
       lastP2PConfig: null,
@@ -6575,12 +7085,19 @@ const ENV_P2P_SINGLETON_KEY = Symbol.for('xln.runtime.env.p2p.singleton');
 const ENV_APPLY_ALLOWED_KEY = Symbol.for('xln.runtime.env.apply.allowed');
 const ENV_REPLAY_MODE_KEY = Symbol.for('xln.runtime.env.replay.mode');
 
-const failfastAssert = (
+const envRecord = (env: Env): Record<PropertyKey, unknown> => env as unknown as Record<PropertyKey, unknown>;
+
+const failfastAssert: (
   condition: unknown,
   code: string,
   message: string,
   details?: Record<string, unknown>,
-): asserts condition => {
+) => asserts condition = (
+  condition: unknown,
+  code: string,
+  message: string,
+  details?: Record<string, unknown>,
+) => {
   if (condition) return;
   const detailText = details ? ` ${safeStringify(details)}` : '';
   throw new Error(`${code}: ${message}${detailText}`);
@@ -6589,6 +7106,8 @@ const failfastAssert = (
 type P2Pish = {
   matchesIdentity?: (runtimeId: string, signerId?: string) => boolean;
   updateConfig?: (config: P2PConfig) => void;
+  isConnected?: () => boolean;
+  connect?: () => void;
   close?: () => void;
 };
 
@@ -6729,7 +7248,7 @@ const runtimeProcessEnv =
   typeof globalThis === 'object'
     ? (globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } }).process?.env
     : undefined;
-const isProductionRuntime = runtimeProcessEnv?.NODE_ENV === 'production';
+const isProductionRuntime = runtimeProcessEnv?.['NODE_ENV'] === 'production';
 
 const readInfraStringArray = async (db: Level<Buffer, Buffer>, key: string): Promise<string[]> => {
   try {
@@ -6739,10 +7258,6 @@ const readInfraStringArray = async (db: Level<Buffer, Buffer>, key: string): Pro
   } catch {
     return [];
   }
-};
-
-const writeInfraStringArray = async (db: Level<Buffer, Buffer>, key: string, values: string[]): Promise<void> => {
-  await db.put(Buffer.from(key), Buffer.from(serializeTaggedJson([...new Set(values.filter(Boolean))].sort())));
 };
 
 const pruneInfraGossipProfile = async (db: Level<Buffer, Buffer>, entityId: string): Promise<void> => {
@@ -6828,16 +7343,16 @@ const buildRouteOutputKey = (output: RoutedEntityInput): string => {
   const txPart = (output.entityTxs || [])
     .map(tx => {
       const data = tx.data as Record<string, unknown> | undefined;
-      const height = typeof data?.height === 'number' ? data.height : '';
-      const from = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
-      const to = typeof data?.toEntityId === 'string' ? data.toEntityId : '';
+      const height = typeof data?.['height'] === 'number' ? data['height'] : '';
+      const from = typeof data?.['fromEntityId'] === 'string' ? data['fromEntityId'] : '';
+      const to = typeof data?.['toEntityId'] === 'string' ? data['toEntityId'] : '';
       // Handles both field names: settle_propose uses counterpartyEntityId,
       // r2c uses counterpartyId — both must produce unique keys.
       const cp =
-        typeof data?.counterpartyEntityId === 'string'
-          ? data.counterpartyEntityId
-          : typeof data?.counterpartyId === 'string'
-            ? data.counterpartyId
+        typeof data?.['counterpartyEntityId'] === 'string'
+          ? data['counterpartyEntityId']
+          : typeof data?.['counterpartyId'] === 'string'
+            ? data['counterpartyId']
             : '';
       return `${tx.type}:${height}:${from}:${to}:${cp}`;
     })
@@ -7060,6 +7575,13 @@ const ensureRuntimeWakeWatchdogStarted = (): void => {
   }, RUNTIME_WAKE_WATCHDOG_MS);
 };
 
+const stopRuntimeWakeWatchdogIfIdle = (): void => {
+  if (runtimeWakeWatchdog && trackedRuntimeEnvs.size === 0) {
+    clearInterval(runtimeWakeWatchdog);
+    runtimeWakeWatchdog = null;
+  }
+};
+
 /**
  * Generate entity input pings for entities with due hooks OR periodic tasks.
  * Injects empty entityInputs so applyEntityInput runs → crontab fires → hooks/tasks execute.
@@ -7174,6 +7696,7 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
   if (state.loopActive) return state.stopLoop ?? (() => {});
   void config;
   let running = true;
+  let loopPromise: Promise<void> | null = null;
   state.loopActive = true;
   // J-watchers are a runtime concern, not a UI/store concern.
   // The runtime loop is the single canonical owner of watcher lifecycle for
@@ -7268,18 +7791,37 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
       }
       state.loopActive = false;
       state.stopLoop = null;
+      if (state.loopPromise === loopPromise) state.loopPromise = null;
       state.wakeLoop = null;
       state.wakeRequested = false;
     }
   };
 
-  void loop(); // fire-and-forget — single async chain, never overlaps
+  loopPromise = loop(); // fire-and-forget — single async chain, never overlaps
+  state.loopPromise = loopPromise;
+  void loopPromise;
   state.stopLoop = () => {
     running = false;
     requestRuntimeLoopWake(env);
   };
   return state.stopLoop;
 }
+
+export const stopRuntimeLoopAndWait = async (env: Env, timeoutMs = 10_000): Promise<boolean> => {
+  const state = env.runtimeState;
+  state?.stopLoop?.();
+  const startedAt = Date.now();
+  const loopPromise = state?.loopPromise ?? null;
+  if (loopPromise) {
+    const loopDone = await Promise.race([
+      loopPromise.then(() => true, () => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), Math.max(0, timeoutMs))),
+    ]);
+    if (!loopDone) return false;
+  }
+  const remaining = Math.max(0, timeoutMs - (Date.now() - startedAt));
+  return waitForRuntimeProcessingIdle(env, remaining);
+};
 
 export const startJurisdictionWatchers = (env: Env): void => {
   if (!env.jReplicas || env.jReplicas.size === 0) return;
@@ -7324,6 +7866,52 @@ export const startJurisdictionWatchers = (env: Env): void => {
   }
 };
 
+const stopJurisdictionWatchers = (env: Env): void => {
+  if (!env.jReplicas || env.jReplicas.size === 0) return;
+  for (const [name, jReplica] of env.jReplicas.entries()) {
+    const adapter = jReplica.jadapter;
+    if (!adapter?.isWatching()) continue;
+    try {
+      adapter.stopWatching();
+    } catch (error) {
+      console.warn(
+        `⚠️ Failed to stop JAdapter watcher for "${name}":`,
+        error instanceof Error ? error.message : error,
+      );
+    }
+  }
+};
+
+const detachRuntimeEnv = (env: Env): void => {
+  const state = env.runtimeState;
+  state?.stopLoop?.();
+  if (state?.p2p) {
+    try {
+      state.p2p.close();
+    } catch (error) {
+      console.warn('⚠️ Failed to close P2P during runtime detach:', error instanceof Error ? error.message : error);
+    }
+    const singleton = envRecord(env)[ENV_P2P_SINGLETON_KEY];
+    if (singleton === state.p2p) {
+      delete envRecord(env)[ENV_P2P_SINGLETON_KEY];
+    }
+    state.p2p = null;
+  }
+  if (state) {
+    state.lastP2PConfig = null;
+    state.pendingP2PConfig = null;
+    state.directEntityInputDispatch = null;
+    state.loopPromise = null;
+    state.stopLoop = null;
+    state.wakeLoop = null;
+    state.wakeRequested = false;
+    state.loopActive = false;
+  }
+  stopJurisdictionWatchers(env);
+  trackedRuntimeEnvs.delete(env);
+  stopRuntimeWakeWatchdogIfIdle();
+};
+
 /**
  * Identity function for env (no module-level env exists).
  * Use to preserve legacy call sites that expected getEnv().
@@ -7345,13 +7933,15 @@ export const setRuntimeSeed = (env: Env, seed: string | null): void => {
   env.runtimeSeed = normalized;
   if (normalized) {
     try {
-      env.runtimeId = normalizeRuntimeId(deriveSignerAddressSync(normalized, '1')) || undefined;
+      const derivedRuntimeId = normalizeRuntimeId(deriveSignerAddressSync(normalized, '1'));
+      if (derivedRuntimeId) env.runtimeId = derivedRuntimeId;
+      else delete env.runtimeId;
     } catch (error) {
       console.warn('⚠️ Failed to derive runtimeId from seed:', error);
-      env.runtimeId = undefined;
+      delete env.runtimeId;
     }
   } else {
-    env.runtimeId = undefined;
+    delete env.runtimeId;
   }
   if (env.runtimeId) {
     env.dbNamespace = normalizeDbNamespace(env.runtimeId);
@@ -7367,7 +7957,8 @@ export const setRuntimeSeed = (env: Env, seed: string | null): void => {
 
 export const setRuntimeId = (env: Env, id: string | null): void => {
   const normalizedRuntimeId = normalizeRuntimeId(id);
-  env.runtimeId = normalizedRuntimeId || undefined;
+  if (normalizedRuntimeId) env.runtimeId = normalizedRuntimeId;
+  else delete env.runtimeId;
   if (env.runtimeId) {
     env.dbNamespace = normalizeDbNamespace(env.runtimeId);
   }
@@ -7509,7 +8100,7 @@ const collectSenderEntityHints = (input: RoutedEntityInput): string[] => {
   for (const tx of input.entityTxs || []) {
     const data = tx.data as Record<string, unknown> | undefined;
     if (!data || typeof data !== 'object') continue;
-    const fromEntityId = data.fromEntityId;
+    const fromEntityId = data['fromEntityId'];
     if (typeof fromEntityId === 'string' && fromEntityId.length > 0) {
       hints.add(fromEntityId);
     }
@@ -7841,7 +8432,7 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
     return null;
   }
 
-  const existingGlobalP2P = (env as Record<PropertyKey, unknown>)[ENV_P2P_SINGLETON_KEY] as P2Pish | undefined;
+  const existingGlobalP2P = envRecord(env)[ENV_P2P_SINGLETON_KEY] as P2Pish | undefined;
   if (existingGlobalP2P && existingGlobalP2P !== state.p2p) {
     const canReuse =
       typeof existingGlobalP2P.matchesIdentity === 'function' &&
@@ -7876,15 +8467,9 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
     state.p2p.close();
   }
 
-  state.p2p = new RuntimeP2P({
+  const p2pOptions: ConstructorParameters<typeof RuntimeP2P>[0] = {
     env,
     runtimeId: resolvedRuntimeId,
-    signerId: config.signerId,
-    relayUrls: config.relayUrls,
-    wsUrl: (config as P2PConfig & { wsUrl?: string | null }).wsUrl,
-    seedRuntimeIds: config.seedRuntimeIds,
-    advertiseEntityIds: config.advertiseEntityIds,
-    gossipPollMs: config.gossipPollMs,
     onEntityInput: (from, input, ingressTimestamp) => {
       handleInboundP2PEntityInput(env, from, input, ingressTimestamp);
     },
@@ -7902,9 +8487,18 @@ export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null =>
         );
       }
     },
-  });
+  };
+  if (config.signerId !== undefined) p2pOptions.signerId = config.signerId;
+  if (config.relayUrls !== undefined) p2pOptions.relayUrls = config.relayUrls;
+  const configuredWsUrl = (config as P2PConfig & { wsUrl?: string | null }).wsUrl;
+  if (configuredWsUrl !== undefined) p2pOptions.wsUrl = configuredWsUrl;
+  if (config.seedRuntimeIds !== undefined) p2pOptions.seedRuntimeIds = config.seedRuntimeIds;
+  if (config.advertiseEntityIds !== undefined) p2pOptions.advertiseEntityIds = config.advertiseEntityIds;
+  if (config.gossipPollMs !== undefined) p2pOptions.gossipPollMs = config.gossipPollMs;
 
-  (env as Record<PropertyKey, unknown>)[ENV_P2P_SINGLETON_KEY] = state.p2p;
+  state.p2p = new RuntimeP2P(p2pOptions);
+
+  envRecord(env)[ENV_P2P_SINGLETON_KEY] = state.p2p;
   state.p2p.connect();
   return state.p2p;
 };
@@ -7913,9 +8507,9 @@ export const stopP2P = (env: Env): void => {
   const state = ensureRuntimeState(env);
   if (state.p2p) {
     state.p2p.close();
-    const singleton = (env as Record<PropertyKey, unknown>)[ENV_P2P_SINGLETON_KEY];
+    const singleton = envRecord(env)[ENV_P2P_SINGLETON_KEY];
     if (singleton === state.p2p) {
-      delete (env as Record<PropertyKey, unknown>)[ENV_P2P_SINGLETON_KEY];
+      delete envRecord(env)[ENV_P2P_SINGLETON_KEY];
     }
     state.p2p = null;
   }
@@ -8035,7 +8629,7 @@ const applyRuntimeInput = async (
   appliedRuntimeInput: RuntimeInput;
 }> => {
   failfastAssert(
-    env.scenarioMode === true || (env as Record<PropertyKey, unknown>)[ENV_APPLY_ALLOWED_KEY] === true,
+    env.scenarioMode === true || envRecord(env)[ENV_APPLY_ALLOWED_KEY] === true,
     'RUNTIME_APPLY_DIRECT_CALL',
     'applyRuntimeInput must be invoked via process()/WAL replay (non-scenario)',
     { runtimeId: env.runtimeId, height: env.height },
@@ -8052,7 +8646,7 @@ const applyRuntimeInput = async (
       log.error(`❌ ${message}`);
       throw new Error(message);
     };
-    if ((env as Record<PropertyKey, unknown>)[ENV_REPLAY_MODE_KEY] === true) {
+    if (envRecord(env)[ENV_REPLAY_MODE_KEY] === true) {
       console.log(
         `[REPLAY] applyRuntimeInput runtimeTxs=${runtimeInput.runtimeTxs.length} entityInputs=${runtimeInput.entityInputs.length}`,
       );
@@ -8144,13 +8738,19 @@ const applyRuntimeInput = async (
               } as JReplica)
             : undefined;
 
-          const jadapter = await createJAdapter({
+          const adapterConfig: JAdapterConfig = {
             mode: isBrowserVM ? 'browservm' : 'rpc',
             chainId: runtimeTx.data.chainId,
-            rpcUrl: isBrowserVM ? undefined : runtimeTx.data.rpcs[0],
-            fromReplica, // Pass pre-deployed addresses (skips deployment)
             // TODO: Pass all rpcs for failover: rpcs: runtimeTx.data.rpcs
-          });
+          };
+          if (!isBrowserVM) {
+            const rpcUrl = runtimeTx.data.rpcs[0];
+            if (!rpcUrl) throw new Error(`IMPORT_J_RPC_MISSING: name=${runtimeTx.data.name}`);
+            adapterConfig.rpcUrl = rpcUrl;
+          }
+          if (fromReplica) adapterConfig.fromReplica = fromReplica; // Pass pre-deployed addresses (skips deployment)
+
+          const jadapter = await createJAdapter(adapterConfig);
 
           // Deploy contracts only if fromReplica not provided
           if (!fromReplica) {
@@ -8287,12 +8887,6 @@ const applyRuntimeInput = async (
             jBlockObservations: [],
             jBlockChain: [],
 
-            // ⏰ Crontab system - will be initialized on first use
-            crontabState: undefined,
-
-            // 📦 J-Batch system - will be initialized on first use
-            jBatchState: undefined,
-
             // Local entities derive deterministic keys; imported remote replicas stay keyless.
             entityEncPubKey: replicaKeys.publicKey,
             entityEncPrivKey: replicaKeys.privateKey,
@@ -8337,6 +8931,7 @@ const applyRuntimeInput = async (
         const threshold = runtimeTx.data.config.threshold;
         if (validators.length === 1 && threshold === 1n) {
           const signerId = validators[0];
+          if (!signerId) continue;
           try {
             const privateKey = getSignerPrivateKey(env, signerId);
             const privateKeyHex = `0x${Array.from(privateKey)
@@ -8386,10 +8981,10 @@ const applyRuntimeInput = async (
       return null;
     };
 
-    const isReplay = (env as Record<PropertyKey, unknown>)[ENV_REPLAY_MODE_KEY] === true;
+    const isReplay = envRecord(env)[ENV_REPLAY_MODE_KEY] === true;
 
     for (const entityInput of mergedInputs) {
-      if ((env as Record<PropertyKey, unknown>)[ENV_REPLAY_MODE_KEY] === true) {
+      if (envRecord(env)[ENV_REPLAY_MODE_KEY] === true) {
         console.log(
           `[REPLAY][RUNTIME] merged input entity=${String(entityInput.entityId).slice(-8)} ` +
             `signer=${String(entityInput.signerId ?? '')} txs=${entityInput.entityTxs?.length ?? 0} ` +
@@ -8562,7 +9157,7 @@ const applyRuntimeInput = async (
           ...normalizedInputWithSigner,
           signerId: actualSignerId,
         });
-        if ((env as Record<PropertyKey, unknown>)[ENV_REPLAY_MODE_KEY] === true) {
+        if (envRecord(env)[ENV_REPLAY_MODE_KEY] === true) {
           console.log(
             `[REPLAY][RUNTIME] applyEntityInput replica=${replicaKey.slice(0, 20)} ` +
               `txs=${normalizedInput.entityTxs?.length ?? 0}`,
@@ -8578,16 +9173,19 @@ const applyRuntimeInput = async (
         // IMMUTABILITY: Update replica with new state from applyEntityInput
         // CRITICAL: Preserve proposal/lockedFrame from workingReplica (multi-signer consensus)
         // Only cleared when threshold reached and frame committed (handled in entity-consensus.ts)
-        env.eReplicas.set(replicaKey, {
+        const nextReplica: EntityReplica = {
           ...entityReplica,
           state: newState,
           mempool: workingReplica.mempool, // Preserve mempool state
-          proposal: workingReplica.proposal, // CRITICAL: Preserve for multi-signer threshold
-          lockedFrame: workingReplica.lockedFrame, // CRITICAL: Preserve validator locks
-          // Preserve multi-signer consensus artifacts across ticks.
-          hankoWitness: workingReplica.hankoWitness,
-          validatorComputedState: workingReplica.validatorComputedState,
-        });
+        };
+        if (workingReplica.proposal !== undefined) nextReplica.proposal = workingReplica.proposal;
+        if (workingReplica.lockedFrame !== undefined) nextReplica.lockedFrame = workingReplica.lockedFrame;
+        // Preserve multi-signer consensus artifacts across ticks.
+        if (workingReplica.hankoWitness !== undefined) nextReplica.hankoWitness = workingReplica.hankoWitness;
+        if (workingReplica.validatorComputedState !== undefined) {
+          nextReplica.validatorComputedState = workingReplica.validatorComputedState;
+        }
+        env.eReplicas.set(replicaKey, nextReplica);
 
         // FINTECH-LEVEL TYPE SAFETY: Validate all entity outputs before routing
         outputs.forEach((output, index) => {
@@ -8648,12 +9246,13 @@ const applyRuntimeInput = async (
       );
       for (const jInput of jOutbox) {
         for (const jTx of jInput.jTxs) {
+          const jTxBatchSize = (jTx.data as { batchSize?: number } | undefined)?.batchSize;
           console.log(
-            `  📋 [J-OUTBOX] ${jTx.type} from ${jTx.entityId.slice(-4)} → ${jInput.jurisdictionName} (batchSize=${jTx.data?.batchSize ?? '?'})`,
+            `  📋 [J-OUTBOX] ${jTx.type} from ${jTx.entityId.slice(-4)} → ${jInput.jurisdictionName} (batchSize=${jTxBatchSize ?? '?'})`,
           );
           env.emit('JBatchQueued', {
             entityId: jTx.entityId,
-            batchSize: jTx.data?.batchSize,
+            batchSize: jTxBatchSize,
             jurisdictionName: jInput.jurisdictionName,
           });
         }
@@ -8690,13 +9289,6 @@ const applyRuntimeInput = async (
       // IMPORTANT: Do NOT mutate env.timestamp here.
       // process() sets a single frame timestamp before applyRuntimeInput(),
       // and that exact value must be used both for frame hashing and WAL journal.
-
-      // Capture snapshot BEFORE clearing (to show what was actually processed)
-      const inputDescription = `Tick ${env.height - 1}: ${mergedRuntimeTxs.length} runtimeTxs, ${appliedEntityInputs.length} merged entityInputs → ${entityOutbox.length} outputs`;
-      const processedInput = {
-        runtimeTxs: [...mergedRuntimeTxs],
-        entityInputs: [...appliedEntityInputs], // Persist only successfully applied inputs
-      };
 
       // NOTE: Snapshot creation moved to process() - single entry point
       // applyRuntimeInput just processes inputs, process() handles snapshotting
@@ -8744,7 +9336,7 @@ const applyRuntimeInput = async (
       }
     }
 
-    if ((env as Record<PropertyKey, unknown>)[ENV_REPLAY_MODE_KEY] !== true) {
+    if (envRecord(env)[ENV_REPLAY_MODE_KEY] !== true) {
       notifyEnvChange(env);
     }
 
@@ -8762,7 +9354,7 @@ const applyRuntimeInput = async (
     // Replica states dump removed - too verbose
 
     // Always notify UI after processing a frame (this is the discrete simulation step)
-    if ((env as Record<PropertyKey, unknown>)[ENV_REPLAY_MODE_KEY] !== true) {
+    if (envRecord(env)[ENV_REPLAY_MODE_KEY] !== true) {
       notifyEnvChange(env);
     }
 
@@ -8789,19 +9381,26 @@ const applyRuntimeInput = async (
 const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
   const baseEnv = createEmptyEnv(runtimeSeedOverride ?? null);
 
-  await tryOpenDb(baseEnv);
-
   let env = baseEnv;
   let restoredFromCoreDb = false;
-  if (runtimeIsBrowser) {
+  const restoreDisabled =
+    !runtimeIsBrowser &&
+    !!nodeProcess &&
+    /^(1|true)$/i.test(String(nodeProcess.env['XLN_DISABLE_RUNTIME_RESTORE'] ?? ''));
+  if (!restoreDisabled) {
     const loaded = await loadEnvFromDB(baseEnv.runtimeId, baseEnv.runtimeSeed);
     if (loaded) {
       const loadedState = ensureRuntimeState(loaded);
       const baseState = ensureRuntimeState(baseEnv);
-      loadedState.db = baseState.db;
-      loadedState.dbOpenPromise = baseState.dbOpenPromise;
+      if (runtimeIsBrowser) {
+        loadedState.db = baseState.db;
+        loadedState.dbOpenPromise = baseState.dbOpenPromise;
+      }
       env = loaded;
       restoredFromCoreDb = true;
+      console.log(
+        `[main] restored runtime=${String(env.runtimeId || '').slice(0, 12)} height=${env.height} from storage`,
+      );
     }
   }
 
@@ -8944,11 +9543,11 @@ export const queueEntityInput = async (
   enqueueRuntimeInputs(
     env,
     [
-      {
-        entityId,
-        signerId,
-        entityTxs: [{ type: txData.type, data: txData }],
-      },
+        {
+          entityId,
+          signerId,
+          entityTxs: [{ type: txData.type, data: txData } as EntityTx],
+        },
     ],
     undefined,
     undefined,
@@ -9283,7 +9882,7 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
   while (processState.processingPromise) {
     await processState.processingPromise;
   }
-  let releaseProcessLock: (() => void) | null = null;
+  let releaseProcessLock: () => void = () => {};
   processState.processingPromise = new Promise<void>(resolve => {
     releaseProcessLock = resolve;
   });
@@ -9411,10 +10010,7 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
       return input.entityTxs.some(
         tx =>
           tx.type === 'openAccount' ||
-          tx.type === 'closeAccount' ||
-          tx.type === 'governance_profile_update' ||
-          tx.type === 'governanceUpdateProfile' ||
-          tx.type === 'updateProfile',
+          tx.type === 'profile-update',
       );
     };
     if (hasRuntimeInput) {
@@ -9427,7 +10023,7 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
         }
       }
       try {
-        (env as Record<PropertyKey, unknown>)[ENV_APPLY_ALLOWED_KEY] = true;
+        envRecord(env)[ENV_APPLY_ALLOWED_KEY] = true;
         const result = await applyRuntimeInput(env, runtimeInput);
         if (!quietRuntimeLogs && (result.entityOutbox.length > 0 || result.jOutbox.length > 0)) {
           console.log(
@@ -9465,9 +10061,10 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
         if (mempool.queuedAt === undefined) {
           mempool.queuedAt = mempoolQueuedAt ?? (env.timestamp ?? 0);
         }
+        clearPendingAuditEvents(env);
         throw error;
       } finally {
-        (env as Record<PropertyKey, unknown>)[ENV_APPLY_ALLOWED_KEY] = false;
+        envRecord(env)[ENV_APPLY_ALLOWED_KEY] = false;
       }
     }
 
@@ -9542,11 +10139,19 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
       if (!quietRuntimeLogs) {
         console.log(`💾 [SAVE] Persisting R-frame ${env.height} to LevelDB...`);
       }
-      await saveEnvToDB(env, appliedRuntimeInputForPersistence);
-      env.frameLogs = [];
-      if (!quietRuntimeLogs) {
-        console.log(`💾 [SAVE] R-frame ${env.height} persisted`);
+      try {
+        await saveEnvToDB(env, appliedRuntimeInputForPersistence, entityOutbox);
+        flushPendingAuditEvents(env);
+        env.frameLogs = [];
+        if (!quietRuntimeLogs) {
+          console.log(`💾 [SAVE] R-frame ${env.height} persisted`);
+        }
+      } catch (error) {
+        clearPendingAuditEvents(env);
+        throw error;
       }
+    } else {
+      clearPendingAuditEvents(env);
     }
 
     // === SIDE EFFECTS (safe to fail — bilateral consensus retries) ===
@@ -9652,7 +10257,8 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
             );
           };
           try {
-            const submitSignerId = typeof jTx.data?.signerId === 'string' ? jTx.data.signerId : undefined;
+            const submitData = jTx.data as { signerId?: unknown } | undefined;
+            const submitSignerId = typeof submitData?.signerId === 'string' ? submitData.signerId : undefined;
             const submitSignerPrivateKey = submitSignerId ? getCachedSignerPrivateKey(submitSignerId) : null;
             const result = await jAdapter.submitTx(jTx, {
               env,
@@ -9715,30 +10321,49 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
     return env;
   } finally {
     processState.processingPromise = null;
-    releaseProcessLock?.();
+    releaseProcessLock();
+  }
+};
+
+export const waitForRuntimeProcessingIdle = async (env: Env, timeoutMs = 5_000): Promise<boolean> => {
+  const startedAt = Date.now();
+  while (true) {
+    const pending = env.runtimeState?.processingPromise;
+    if (!pending) return true;
+    const remaining = timeoutMs - (Date.now() - startedAt);
+    if (remaining <= 0) return false;
+    const completed = await Promise.race([
+      pending.then(() => true, () => true),
+      new Promise<boolean>((resolve) => setTimeout(() => resolve(false), remaining)),
+    ]);
+    if (!completed) return false;
   }
 };
 
 // === LEVELDB PERSISTENCE ===
-export const saveEnvToDB = async (env: Env, currentFrameInput?: RuntimeInput): Promise<void> => {
-  if ((env as Record<PropertyKey, unknown>)[ENV_REPLAY_MODE_KEY] === true) {
+export const saveEnvToDB = async (
+  env: Env,
+  currentFrameInput?: RuntimeInput,
+  currentFrameOutputs?: RoutedEntityInput[],
+): Promise<void> => {
+  if (envRecord(env)[ENV_REPLAY_MODE_KEY] === true) {
     throw new Error('REPLAY_INVARIANT_FAILED: saveEnvToDB called during replay');
   }
-  await saveRuntimeFrameToWal({
+  const pendingFrameDbRecords = peekPendingFrameDbRecords(env);
+  await saveRuntimeFrameToStorage({
     env,
-    currentFrameInput,
-    persistenceSchemaVersion: PERSISTENCE_SCHEMA_VERSION,
-    defaultSnapshotIntervalFrames: DEFAULT_SNAPSHOT_INTERVAL_FRAMES,
-    tryOpenDb,
-    getRuntimeDb,
-    resolveDbNamespace: ({ env }) => resolveDbNamespace({ env }),
-    ensureRuntimeState,
-    ensureRuntimeConfig,
-    assertPersistedContractConfigReady,
-    isDbUnavailableError,
+    tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'current'),
+    getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'current'),
+    tryOpenFrameDb,
+    getFrameDb,
+    rotateEpochDb: rotateStorageEpochDb,
     getPerfMs,
     formatPerfMs,
+    frameDbRecords: pendingFrameDbRecords,
+    ...(currentFrameInput === undefined ? {} : { currentFrameInput }),
+    ...(currentFrameOutputs === undefined ? {} : { currentFrameOutputs }),
   });
+  dropPendingFrameDbRecords(env, pendingFrameDbRecords.length);
   if (runtimeIsBrowser && typeof BroadcastChannel !== 'undefined' && typeof env.runtimeId === 'string' && env.runtimeId.length > 0) {
     const runtimeSyncChannel = new BroadcastChannel('xln-runtime-sync');
     runtimeSyncChannel.postMessage({
@@ -9749,23 +10374,390 @@ export const saveEnvToDB = async (env: Env, currentFrameInput?: RuntimeInput): P
   }
 };
 
-export const getPersistedLatestHeight = async (env: Env): Promise<number> => {
-  return getPersistedLatestHeightWal(env, {
-    tryOpenDb,
-    getRuntimeDb,
-    resolveDbNamespace: ({ env }) => resolveDbNamespace({ env }),
-    isDbUnavailableError,
+type VerifyRuntimeChainResult = {
+  ok: boolean;
+  latestHeight: number;
+  checkpointHeight: number;
+  selectedSnapshotHeight: number;
+  restoredHeight: number;
+  expectedStateHash: string;
+  actualStateHash: string;
+  expectedAuditStateHash?: string;
+  actualAuditStateHash?: string;
+  expectedCanonicalStateHash?: string;
+  actualCanonicalStateHash?: string;
+};
+
+type PersistedStorageHandle = {
+  role: StorageDbRole;
+  db: Level<Buffer, Buffer>;
+  latestHeight: number;
+  latestSnapshotHeight: number;
+  snapshotHeights: number[];
+};
+
+const createPersistedStorageEnv = (runtimeId?: string | null, runtimeSeed?: string | null): Env => {
+  const env = createEmptyEnv(runtimeSeed ?? null);
+  const normalizedRuntimeId = normalizeRuntimeId(runtimeId ?? env.runtimeId ?? null);
+  if (normalizedRuntimeId) {
+    env.runtimeId = normalizedRuntimeId;
+    env.dbNamespace = normalizeDbNamespace(normalizedRuntimeId);
+  }
+  return env;
+};
+
+const listPersistedStorageHandles = async (env: Env): Promise<PersistedStorageHandle[]> => {
+  const handles: PersistedStorageHandle[] = [];
+  for (const role of ['current', 'previous'] as const) {
+    const opened = await tryOpenStorageDb(env, role);
+    if (!opened) continue;
+    const db = getStorageDb(env, role);
+    const head = await readStorageHead(db);
+    if (!head || head.latestHeight <= 0) continue;
+    handles.push({
+      role,
+      db,
+      latestHeight: head.latestHeight,
+      latestSnapshotHeight: head.latestSnapshotHeight,
+      snapshotHeights: await listStorageSnapshotHeights(db),
+    });
+  }
+  return handles.sort((left, right) => {
+    if (left.latestHeight !== right.latestHeight) return right.latestHeight - left.latestHeight;
+    if (left.role === right.role) return 0;
+    return left.role === 'current' ? -1 : 1;
   });
 };
 
-export const listPersistedCheckpointHeights = async (env: Env): Promise<number[]> => {
-  return listPersistedCheckpointHeightsWal(env, {
-    tryOpenDb,
-    getRuntimeDb,
-    resolveDbNamespace: ({ env }) => resolveDbNamespace({ env }),
-    isDbUnavailableError,
-    isDbNotFound,
+const resolvePersistedLatestHeight = async (env: Env): Promise<number> => {
+  const handles = await listPersistedStorageHandles(env);
+  return handles.reduce((max, handle) => Math.max(max, handle.latestHeight), 0);
+};
+
+const resolvePersistedCheckpointHeights = async (env: Env): Promise<number[]> => {
+  const handles = await listPersistedStorageHandles(env);
+  return Array.from(new Set(handles.flatMap((handle) => handle.snapshotHeights))).sort((left, right) => left - right);
+};
+
+const readPersistedStorageFrameRecord = async (
+  env: Env,
+  height: number,
+): Promise<ReturnType<typeof readStorageFrameRecord> extends Promise<infer T> ? T : never> => {
+  const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
+  if (targetHeight <= 0) return null;
+  for (const handle of await listPersistedStorageHandles(env)) {
+    if (targetHeight > handle.latestHeight) continue;
+    const frame = await readStorageFrameRecord(handle.db, targetHeight);
+    if (frame) return frame;
+  }
+  return null;
+};
+
+const readPersistedStorageReplicaMeta = async (
+  env: Env,
+  entityId: string,
+): Promise<ReturnType<typeof readStorageReplicaMeta> extends Promise<infer T> ? T : never> => {
+  const normalizedEntityId = String(entityId || '').toLowerCase();
+  if (!normalizedEntityId) return null;
+  for (const handle of await listPersistedStorageHandles(env)) {
+    const meta = await readStorageReplicaMeta(handle.db, normalizedEntityId);
+    if (meta) return meta;
+  }
+  return null;
+};
+
+const resolvePersistedSnapshotHeight = async (env: Env, targetHeight: number): Promise<number> => {
+  let best = 0;
+  for (const handle of await listPersistedStorageHandles(env)) {
+    if (targetHeight > handle.latestHeight) continue;
+    const candidate = await findStorageLatestSnapshotAtOrBelow(handle.db, targetHeight);
+    if (candidate > best) best = candidate;
+  }
+  return best;
+};
+
+const listPersistedEntityIdsAtHeight = async (env: Env, targetHeight: number): Promise<string[]> => {
+  const entityIds = new Set<string>();
+  for (const handle of await listPersistedStorageHandles(env)) {
+    for (const entityId of await listStorageLiveEntityIds(handle.db)) {
+      entityIds.add(entityId);
+    }
+    const snapshotHeight = await findStorageLatestSnapshotAtOrBelow(handle.db, targetHeight);
+    if (snapshotHeight > 0) {
+      for (const entityId of await listStorageSnapshotEntityIds(handle.db, snapshotHeight)) {
+        entityIds.add(entityId);
+      }
+    }
+  }
+  return Array.from(entityIds).sort();
+};
+
+const derivePersistedReplicaSignerId = (state: EntityState): string => {
+  const validator = Array.isArray(state.config?.validators) && state.config.validators.length > 0
+    ? state.config.validators[0]
+    : undefined;
+  const fallback = typeof validator === 'string' && validator.length > 0 ? validator : state.entityId;
+  return String(fallback || state.entityId).toLowerCase();
+};
+
+const rebuildPersistedJurisdictions = (env: Env): void => {
+  env.jReplicas = new Map();
+  for (const replica of env.eReplicas.values()) {
+    const jurisdiction = replica.state.config?.jurisdiction as Record<string, unknown> | undefined;
+    const name = typeof jurisdiction?.['name'] === 'string' ? jurisdiction['name'] : '';
+    if (!name || env.jReplicas.has(name)) continue;
+    const depositoryAddress = String(jurisdiction?.['depositoryAddress'] || '').trim();
+    const entityProviderAddress = String(jurisdiction?.['entityProviderAddress'] || '').trim();
+    const deltaTransformerAddress = String(
+      jurisdiction?.['deltaTransformerAddress'] ?? jurisdiction?.['deltaTransformer'] ?? '',
+    ).trim();
+    const chainId = Number.isFinite(Number(jurisdiction?.['chainId'])) ? Number(jurisdiction?.['chainId']) : 31337;
+    env.jReplicas.set(name, {
+      name,
+      depositoryAddress,
+      entityProviderAddress,
+      chainId,
+      contracts: {
+        ...(depositoryAddress ? { depository: depositoryAddress } : {}),
+        ...(entityProviderAddress ? { entityProvider: entityProviderAddress } : {}),
+        ...(deltaTransformerAddress ? { deltaTransformer: deltaTransformerAddress } : {}),
+      },
+    } as never);
+    if (!env.activeJurisdiction) env.activeJurisdiction = name;
+  }
+};
+
+const loadEnvFromStorage = async (
+  runtimeId?: string | null,
+  runtimeSeed?: string | null,
+  targetHeightOverride?: number,
+): Promise<{
+  env: Env;
+  latestHeight: number;
+  checkpointHeight: number;
+  selectedSnapshotHeight: number;
+	} | null> => {
+  const env = createPersistedStorageEnv(runtimeId, runtimeSeed);
+  let returningEnv = false;
+  try {
+    const latestHeight = await resolvePersistedLatestHeight(env);
+    if (latestHeight <= 0) return null;
+    const targetHeight = Math.max(
+      1,
+      Math.min(
+        latestHeight,
+        Number.isFinite(Number(targetHeightOverride)) ? Math.floor(Number(targetHeightOverride)) : latestHeight,
+      ),
+    );
+    const selectedSnapshotHeight = await resolvePersistedSnapshotHeight(env, targetHeight);
+    const entityIds = await listPersistedEntityIdsAtHeight(env, targetHeight);
+    const restoredStates = new Map<string, EntityState>();
+
+    for (const entityId of entityIds) {
+      const state = await loadEntityStateFromStorageDb(env, entityId, targetHeight);
+      if (state) restoredStates.set(entityId, state);
+    }
+    if (restoredStates.size === 0) return null;
+
+    env.eReplicas = new Map();
+    env.activeJurisdiction = undefined;
+    for (const [entityId, state] of restoredStates.entries()) {
+      const meta = targetHeight === latestHeight ? await readPersistedStorageReplicaMeta(env, entityId) : null;
+      const signerId = String(meta?.signerId || derivePersistedReplicaSignerId(state)).toLowerCase();
+      const hankoWitness = meta?.hankoWitness instanceof Map ? meta.hankoWitness : new Map();
+      env.eReplicas.set(formatReplicaKey(createReplicaKey(entityId, signerId)), {
+        entityId,
+        signerId,
+        state,
+        mempool: [],
+        isProposer: typeof meta?.isProposer === 'boolean' ? meta.isProposer : true,
+        hankoWitness,
+        ...(meta?.proposal ? { proposal: meta.proposal } : {}),
+        ...(meta?.lockedFrame ? { lockedFrame: meta.lockedFrame } : {}),
+        ...(meta?.validatorComputedState ? { validatorComputedState: meta.validatorComputedState } : {}),
+      });
+    }
+
+    const frame = await readPersistedStorageFrameRecord(env, targetHeight);
+    env.height = targetHeight;
+	    env.timestamp = frame?.timestamp ?? Math.max(...Array.from(restoredStates.values()).map((state) => Number(state.timestamp ?? 0)), 0);
+	    env.runtimeInput = { runtimeTxs: [], entityInputs: [] };
+	    env.runtimeMempool = undefined;
+	    await hydrateAccountFrameHistoryViews(env);
+	    let restoredFrameLogs = Array.isArray(frame?.logs) ? frame.logs.map((entry) => ({ ...entry })) : [];
+    try {
+      if (await tryOpenFrameDb(env)) {
+        const activity = await readFrameDbRuntimeActivity(getFrameDb(env), targetHeight);
+        if (activity?.logs) restoredFrameLogs = activity.logs.map((entry) => ({ ...entry }));
+      }
+    } catch {
+      // Activity logs are secondary; state restore must not depend on them.
+    }
+    env.frameLogs = restoredFrameLogs;
+    rebuildPersistedJurisdictions(env);
+    envRecord(env)['__replayMeta'] = {
+      checkpointHeight: selectedSnapshotHeight,
+      selectedSnapshotHeight,
+      selectedSnapshotLabel:
+        selectedSnapshotHeight <= 1
+          ? 'genesis:1'
+          : selectedSnapshotHeight === targetHeight
+            ? `checkpoint:${selectedSnapshotHeight}`
+            : `snapshot:${selectedSnapshotHeight}`,
+      latestHeight,
+    };
+    env.history = [
+      buildCanonicalEnvSnapshot(env, {
+        runtimeInput: frame?.runtimeInput ?? { runtimeTxs: [], entityInputs: [] },
+        runtimeOutputs: [],
+        description: `Persisted restore @ ${targetHeight}`,
+        logs: env.frameLogs,
+        gossipProfiles: env.gossip.getProfiles?.() ?? [],
+      }),
+    ];
+
+    returningEnv = true;
+    return {
+      env,
+      latestHeight,
+      checkpointHeight: selectedSnapshotHeight,
+      selectedSnapshotHeight,
+    };
+  } finally {
+    // loadEnvFromDB probes storage on fresh starts. If there is nothing to
+    // restore, the probe env must release LevelDB locks before the real runtime
+    // opens the same storage path for frame 1.
+    if (!returningEnv) {
+      await closeRuntimeDb(env);
+      await closeInfraDb(env);
+    }
+  }
+};
+
+const hydrateAccountFrameHistoryViews = async (env: Env, limit = 50): Promise<void> => {
+  try {
+    if (!(await tryOpenFrameDb(env))) return;
+    const db = getFrameDb(env);
+    for (const [replicaKey, replica] of env.eReplicas.entries()) {
+      const entityId = String(replica?.entityId || String(replicaKey).split(':')[0] || '').toLowerCase();
+      if (!entityId || !replica?.state?.accounts) continue;
+      for (const [counterpartyId, account] of replica.state.accounts.entries()) {
+        const accountCurrentHeight = Math.max(0, Math.floor(Number(account.currentHeight ?? 0)));
+        const records = (await readFrameDbAccountFrames(db, entityId, String(counterpartyId).toLowerCase()))
+          .filter((record) =>
+            Math.max(0, Math.floor(Number(record.runtimeHeight ?? 0))) <= env.height &&
+            Math.max(0, Math.floor(Number(record.accountHeight ?? 0))) <= accountCurrentHeight
+          );
+        setAccountFrameHistoryView(account, records.map((record) => record.frame), limit);
+      }
+    }
+  } catch (error) {
+    console.warn('⚠️ Failed to hydrate account frame history view:', error instanceof Error ? error.message : error);
+  }
+};
+
+export const getPersistedLatestHeight = async (env: Env): Promise<number> => {
+  return resolvePersistedLatestHeight(env);
+};
+
+export const loadEntityStateFromStorageDb = async (
+  env: Env,
+  entityId: string,
+  height?: number,
+): Promise<EntityState | null> => {
+  const current = await loadEntityStateFromStorage({
+    env,
+    tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'current'),
+    getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'current'),
+    entityId,
+    ...(height === undefined ? {} : { height }),
   });
+  if (current || height === undefined) return current;
+  return loadEntityStateFromStorage({
+    env,
+    tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'previous'),
+    getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'previous'),
+    entityId,
+    height,
+  });
+};
+
+export const inspectStorageDb = async (env: Env) => {
+  const current = await inspectStorage({
+    env,
+    tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'current'),
+    getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'current'),
+  });
+  const previous = await inspectStorage({
+    env,
+    tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'previous'),
+    getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'previous'),
+  });
+  if (!current && !previous) return null;
+
+  const epochs = [
+    current
+      ? {
+          role: 'current' as const,
+          path: resolveStorageDbPath(env, 'current'),
+          latestHeight: current.head?.latestHeight ?? 0,
+          latestSnapshotHeight: current.head?.latestSnapshotHeight ?? 0,
+          frameCount: current.frameCount,
+          diffCount: current.diffCount,
+          packCount: current.packCount,
+          snapshotCount: current.snapshotHeights.length,
+          liveBytes: current.liveBytes,
+          historyBytes: current.historyBytes,
+          totalBytes: current.totalBytes,
+        }
+      : null,
+    previous
+      ? {
+          role: 'previous' as const,
+          path: resolveStorageDbPath(env, 'previous'),
+          latestHeight: previous.head?.latestHeight ?? 0,
+          latestSnapshotHeight: previous.head?.latestSnapshotHeight ?? 0,
+          frameCount: previous.frameCount,
+          diffCount: previous.diffCount,
+          packCount: previous.packCount,
+          snapshotCount: previous.snapshotHeights.length,
+          liveBytes: previous.liveBytes,
+          historyBytes: previous.historyBytes,
+          totalBytes: previous.totalBytes,
+        }
+      : null,
+  ].filter(Boolean);
+
+  const snapshotHeights = Array.from(
+    new Set([...(current?.snapshotHeights ?? []), ...(previous?.snapshotHeights ?? [])]),
+  ).sort((left, right) => left - right);
+
+  return {
+    head: current?.head ?? previous?.head ?? null,
+    frameCount: (current?.frameCount ?? 0) + (previous?.frameCount ?? 0),
+    diffCount: (current?.diffCount ?? 0) + (previous?.diffCount ?? 0),
+    packCount: (current?.packCount ?? 0) + (previous?.packCount ?? 0),
+    snapshotHeights,
+    liveEntityCount: (current?.liveEntityCount ?? 0) + (previous?.liveEntityCount ?? 0),
+    liveAccountCount: (current?.liveAccountCount ?? 0) + (previous?.liveAccountCount ?? 0),
+    liveBookCount: (current?.liveBookCount ?? 0) + (previous?.liveBookCount ?? 0),
+    frameBytes: (current?.frameBytes ?? 0) + (previous?.frameBytes ?? 0),
+    diffBytes: (current?.diffBytes ?? 0) + (previous?.diffBytes ?? 0),
+    packBytes: (current?.packBytes ?? 0) + (previous?.packBytes ?? 0),
+    snapshotBytes: (current?.snapshotBytes ?? 0) + (previous?.snapshotBytes ?? 0),
+    liveBytes: (current?.liveBytes ?? 0) + (previous?.liveBytes ?? 0),
+    historyBytes: (current?.historyBytes ?? 0) + (previous?.historyBytes ?? 0),
+    totalBytes: (current?.totalBytes ?? 0) + (previous?.totalBytes ?? 0),
+    maxFrameBytes: Math.max(current?.maxFrameBytes ?? 0, previous?.maxFrameBytes ?? 0),
+    maxDiffBytes: Math.max(current?.maxDiffBytes ?? 0, previous?.maxDiffBytes ?? 0),
+    maxPackBytes: Math.max(current?.maxPackBytes ?? 0, previous?.maxPackBytes ?? 0),
+    maxSnapshotBytes: Math.max(current?.maxSnapshotBytes ?? 0, previous?.maxSnapshotBytes ?? 0),
+    epochDbs: epochs,
+  };
+};
+
+export const listPersistedCheckpointHeights = async (env: Env): Promise<number[]> => {
+  return resolvePersistedCheckpointHeights(env);
 };
 
 export const verifyRuntimeChain = async (
@@ -9773,35 +10765,170 @@ export const verifyRuntimeChain = async (
   runtimeSeed?: string | null,
   options?: { fromSnapshotHeight?: number },
 ): Promise<VerifyRuntimeChainResult> => {
-  return verifyPersistedRuntimeState({
-    runtimeId,
-    runtimeSeed,
-    fromSnapshotHeight: options?.fromSnapshotHeight,
-    persistenceSchemaVersion: PERSISTENCE_SCHEMA_VERSION,
-    createEmptyEnv,
-    tryOpenDb,
-    getRuntimeDb,
-    resolveDbNamespace,
-    isDbNotFound,
-    deriveRuntimeIdFromSeed: (seed: string) => deriveSignerAddressSync(seed, '1'),
-    assertPersistedContractConfigReady,
-    validateEntityState,
-    buildCanonicalEnvSnapshot,
-    ensureRuntimeState,
-    applyRuntimeInput,
-    normalizeEntitySwapTradingPairs,
-    replayModeKey: ENV_REPLAY_MODE_KEY,
-    applyAllowedKey: ENV_APPLY_ALLOWED_KEY,
-  });
+  const bootstrapEnv = createPersistedStorageEnv(runtimeId, runtimeSeed);
+  const latestHeight = await resolvePersistedLatestHeight(bootstrapEnv);
+  if (latestHeight <= 0) {
+    throw new Error('REPLAY_INVARIANT_FAILED: no persisted runtime state');
+  }
+  const requestedFromHeight = Number.isFinite(Number(options?.fromSnapshotHeight))
+    ? Math.max(1, Math.floor(Number(options?.fromSnapshotHeight)))
+    : latestHeight;
+  const selectedSnapshotHeight = await resolvePersistedSnapshotHeight(bootstrapEnv, requestedFromHeight);
+  const checkpointHeight = await resolvePersistedSnapshotHeight(bootstrapEnv, latestHeight);
+  let expectedStateHash = '';
+  let actualStateHash = '';
+  let expectedAuditStateHash = '';
+  let actualAuditStateHash = '';
+  let expectedCanonicalStateHash = '';
+  let actualCanonicalStateHash = '';
+  let restoredHeight = selectedSnapshotHeight;
+  try {
+    await closeRuntimeDb(bootstrapEnv);
+    await closeInfraDb(bootstrapEnv);
+    for (let height = Math.max(1, requestedFromHeight); height <= latestHeight; height += 1) {
+      const replayed = await loadEnvFromStorage(runtimeId, runtimeSeed, height);
+      if (!replayed) {
+        throw new Error(`REPLAY_INVARIANT_FAILED: failed to restore persisted runtime at height ${height}`);
+      }
+      try {
+        const persistedFrame = await readPersistedStorageFrameRecord(replayed.env, height);
+        if (!persistedFrame) {
+          throw new Error(`REPLAY_INVARIANT_FAILED: missing persisted frame at height ${height}`);
+        }
+        expectedStateHash = persistedFrame.stateHash;
+        actualStateHash =
+          persistedFrame.hashMode === 'storage-debug-v1' && Array.isArray(persistedFrame.entityHashes)
+            ? computeStorageDebugStateHashFromEnv(replayed.env)
+            : computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(replayed.env));
+        if (persistedFrame.hashMode === 'storage-debug-v1') {
+          expectedAuditStateHash = String(persistedFrame.auditStateHash || '');
+          actualAuditStateHash = computeStorageAuditStateHashFromEnv(replayed.env);
+          if (!expectedAuditStateHash || expectedAuditStateHash !== actualAuditStateHash) {
+            return {
+              ok: false,
+              latestHeight,
+              checkpointHeight,
+              selectedSnapshotHeight,
+              restoredHeight: height,
+              expectedStateHash,
+              actualStateHash,
+              expectedAuditStateHash,
+              actualAuditStateHash,
+              expectedCanonicalStateHash,
+              actualCanonicalStateHash,
+            };
+          }
+          if (persistedFrame.canonicalStateHash) {
+            expectedCanonicalStateHash = String(persistedFrame.canonicalStateHash);
+            actualCanonicalStateHash = computeStorageCanonicalStateHashFromEnv(replayed.env);
+            if (expectedCanonicalStateHash !== actualCanonicalStateHash) {
+              return {
+                ok: false,
+                latestHeight,
+                checkpointHeight,
+                selectedSnapshotHeight,
+                restoredHeight: height,
+                expectedStateHash,
+                actualStateHash,
+                expectedAuditStateHash,
+                actualAuditStateHash,
+                expectedCanonicalStateHash,
+                actualCanonicalStateHash,
+              };
+            }
+          } else {
+            expectedCanonicalStateHash = '';
+            actualCanonicalStateHash = '';
+          }
+        } else {
+          expectedAuditStateHash = expectedStateHash;
+          actualAuditStateHash = actualStateHash;
+          expectedCanonicalStateHash = expectedStateHash;
+          actualCanonicalStateHash = actualStateHash;
+        }
+        restoredHeight = height;
+        if (expectedStateHash !== actualStateHash) {
+          return {
+            ok: false,
+            latestHeight,
+            checkpointHeight,
+            selectedSnapshotHeight,
+            restoredHeight,
+            expectedStateHash,
+            actualStateHash,
+            expectedAuditStateHash,
+            actualAuditStateHash,
+            expectedCanonicalStateHash,
+            actualCanonicalStateHash,
+          };
+        }
+      } finally {
+        await closeRuntimeDb(replayed.env);
+        await closeInfraDb(replayed.env);
+      }
+    }
+  } finally {
+    await closeRuntimeDb(bootstrapEnv);
+    await closeInfraDb(bootstrapEnv);
+  }
+
+  return {
+    ok: true,
+    latestHeight,
+    checkpointHeight,
+    selectedSnapshotHeight,
+    restoredHeight,
+    expectedStateHash,
+    actualStateHash,
+      expectedAuditStateHash,
+      actualAuditStateHash,
+      expectedCanonicalStateHash,
+      actualCanonicalStateHash,
+    };
 };
 
 export const readPersistedFrameJournal = async (env: Env, height: number): Promise<PersistedFrameJournal | null> => {
-  return readPersistedFrameJournalWal(env, height, {
-    tryOpenDb,
-    getRuntimeDb,
-    resolveDbNamespace: ({ env }) => resolveDbNamespace({ env }),
-    isDbUnavailableError,
-  });
+  const frame = await readPersistedStorageFrameRecord(env, height);
+  if (!frame) return null;
+  let logs = frame.logs ?? [];
+  try {
+    if (await tryOpenFrameDb(env)) {
+      const activity = await readFrameDbRuntimeActivity(getFrameDb(env), height);
+      if (activity?.logs) logs = activity.logs;
+    }
+  } catch {
+    // Frame DB is a secondary activity index. Keep old inline logs or an empty
+    // array if it is temporarily unavailable.
+  }
+  return {
+    height: frame.height,
+    timestamp: frame.timestamp,
+    runtimeInput: frame.runtimeInput,
+    logs,
+  };
+};
+
+export const readPersistedAccountFrameHistory = async (
+  env: Env,
+  entityId: string,
+  counterpartyId: string,
+  limit = 50,
+  opts?: { maxRuntimeHeight?: number; maxAccountHeight?: number },
+): Promise<AccountFrame[]> => {
+  if (!(await tryOpenFrameDb(env))) return [];
+  const maxRuntimeHeight = Number.isFinite(Number(opts?.maxRuntimeHeight))
+    ? Math.max(0, Math.floor(Number(opts?.maxRuntimeHeight)))
+    : Number.POSITIVE_INFINITY;
+  const maxAccountHeight = Number.isFinite(Number(opts?.maxAccountHeight))
+    ? Math.max(0, Math.floor(Number(opts?.maxAccountHeight)))
+    : Number.POSITIVE_INFINITY;
+  const records = (await readFrameDbAccountFrames(getFrameDb(env), entityId, counterpartyId))
+    .filter((record) =>
+      Math.max(0, Math.floor(Number(record.runtimeHeight ?? 0))) <= maxRuntimeHeight &&
+      Math.max(0, Math.floor(Number(record.accountHeight ?? 0))) <= maxAccountHeight
+    );
+  const boundedLimit = Math.max(1, Math.min(1000, Math.floor(Number(limit || 50))));
+  return records.slice(-boundedLimit).map((record) => structuredClone(record.frame));
 };
 
 export const readPersistedFrameJournals = async (
@@ -9812,31 +10939,30 @@ export const readPersistedFrameJournals = async (
     limit?: number;
   },
 ): Promise<PersistedFrameJournal[]> => {
-  return readPersistedFrameJournalsWal(env, opts, {
-    tryOpenDb,
-    getRuntimeDb,
-    resolveDbNamespace: ({ env }) => resolveDbNamespace({ env }),
-    isDbUnavailableError,
-  });
+  const latestHeight = await resolvePersistedLatestHeight(env);
+  if (latestHeight <= 0) return [];
+  const fromHeight = Math.max(1, Math.floor(opts?.fromHeight ?? 1));
+  const boundedToHeight = Math.max(fromHeight, Math.floor(opts?.toHeight ?? latestHeight));
+  const toHeight = Math.min(latestHeight, boundedToHeight);
+  const limit = Math.max(1, Math.min(1000, Math.floor(opts?.limit ?? 200)));
+  const pageToHeight = Math.min(toHeight, fromHeight + limit - 1);
+  const receipts: PersistedFrameJournal[] = [];
+  for (let height = fromHeight; height <= pageToHeight; height += 1) {
+    const receipt = await readPersistedFrameJournal(env, height);
+    if (receipt) receipts.push(receipt);
+  }
+  return receipts;
 };
 
 export const readPersistedCheckpointSnapshot = async (
   env: Env,
   height: number,
 ): Promise<Record<string, unknown> | null> => {
-  const dbReady = await tryOpenDb(env);
-  if (!dbReady) return null;
-  const dbNamespace = resolveDbNamespace({ env });
-  const db = getRuntimeDb(env);
   const targetHeight = Number.isFinite(height) ? Math.floor(height) : 0;
   if (targetHeight <= 0) return null;
-  try {
-    const snapshotBuffer = await readPersistedSnapshotBuffer(db, dbNamespace, targetHeight);
-    return deserializeTaggedJson<Record<string, unknown>>(snapshotBuffer.toString());
-  } catch (error) {
-    if (isDbNotFound(error) || isDbUnavailableError(error)) return null;
-    throw error;
-  }
+  const restored = await loadEnvFromStorage(env.runtimeId, env.runtimeSeed, targetHeight);
+  if (!restored || restored.env.height !== targetHeight) return null;
+  return buildRuntimeCheckpointSnapshot(restored.env);
 };
 
 export const loadEnvFromDB = async (
@@ -9845,28 +10971,12 @@ export const loadEnvFromDB = async (
   options?: { fromSnapshotHeight?: number },
 ): Promise<Env | null> => {
   try {
-    const latestEnv = await loadRuntimeStateFromDb({
+    const restored = await loadEnvFromStorage(
       runtimeId,
       runtimeSeed,
-      fromSnapshotHeight: Number.isFinite(options?.fromSnapshotHeight)
-        ? Math.floor(Number(options?.fromSnapshotHeight))
-        : undefined,
-      persistenceSchemaVersion: PERSISTENCE_SCHEMA_VERSION,
-      createEmptyEnv,
-      tryOpenDb,
-      getRuntimeDb,
-      resolveDbNamespace,
-      isDbNotFound,
-      deriveRuntimeIdFromSeed: (seed: string) => deriveSignerAddressSync(seed, '1'),
-      assertPersistedContractConfigReady,
-      validateEntityState,
-      buildCanonicalEnvSnapshot,
-      ensureRuntimeState,
-      applyRuntimeInput,
-      normalizeEntitySwapTradingPairs,
-      replayModeKey: ENV_REPLAY_MODE_KEY,
-      applyAllowedKey: ENV_APPLY_ALLOWED_KEY,
-    });
+      Number.isFinite(options?.fromSnapshotHeight) ? Math.floor(Number(options?.fromSnapshotHeight)) : undefined,
+    );
+    const latestEnv = restored?.env ?? null;
 
     if (latestEnv) {
       await rehydrateRestoredRuntimeInfra(latestEnv, {
@@ -9907,6 +11017,9 @@ export const clearDB = async (env?: Env): Promise<void> => {
   try {
     const dbReady = await tryOpenDb(targetEnv);
     const infraReady = await tryOpenInfraDb(targetEnv);
+    const storageReady = await tryOpenStorageDb(targetEnv, 'current');
+    const storagePreviousReady = await tryOpenStorageDb(targetEnv, 'previous');
+    const frameReady = await tryOpenFrameDb(targetEnv);
     if (dbReady) {
       const db = getRuntimeDb(targetEnv);
       await db.clear();
@@ -9914,6 +11027,18 @@ export const clearDB = async (env?: Env): Promise<void> => {
     if (infraReady) {
       const infraDb = getInfraDb(targetEnv);
       await infraDb.clear();
+    }
+    if (storageReady) {
+      const storageDb = getStorageDb(targetEnv, 'current');
+      await storageDb.clear();
+    }
+    if (storagePreviousReady) {
+      const previousStorageDb = getStorageDb(targetEnv, 'previous');
+      await previousStorageDb.clear();
+    }
+    if (frameReady) {
+      const frameDb = getFrameDb(targetEnv);
+      await frameDb.clear();
     }
     console.log('✅ LevelDB cleared (core + infra)');
   } catch (err) {
@@ -9965,7 +11090,10 @@ export const scenarios = {
     return env;
   },
   fullMechanics: async (env: Env): Promise<Env> => {
-    await prepopulateFullMechanicsImpl(env);
+    const { getScenario } = await import('./scenarios');
+    const scenario = getScenario('ahb');
+    if (!scenario) throw new Error('FULL_MECHANICS_SCENARIO_MISSING');
+    await scenario.run(env);
     return env;
   },
 };
@@ -11909,7 +13037,7 @@ export const shouldAutoPropose = (replica: EntityReplica, _config: ConsensusConf
 };
 
 
-//runtime/account-consensus.ts (2068 lines)
+//runtime/account-consensus.ts (2071 lines)
 /**
  * XLN Account Consensus System
  *
@@ -11942,12 +13070,13 @@ import {
   txFingerprint,
 } from './state-helpers';
 import { isLeft } from './account-utils';
-import { signAccountFrame, verifyAccountSignature } from './account-crypto';
+import { signAccountFrame } from './account-crypto';
 import { cryptoHash as hash, formatEntityId, HEAVY_LOGS } from './utils';
-import { logError } from './logger';
 import { safeStringify } from './serialization-utils';
 import { validateAccountFrame as validateAccountFrameStrict } from './validation-utils';
 import { processAccountTx } from './account-tx/apply';
+import { appendAccountFrameHistoryView, getAccountFrameHistoryView, recordAccountFrameHistory } from './env-events';
+import { assertAccountFrameDeltaIntegrity, deriveAccountFrameOffdeltas, deriveAccountFrameTokenIds } from './account-frame';
 // NOTE: Settlements now use SettlementWorkspace flow (see entity-tx/handlers/settle.ts)
 
 // Removed createValidAccountSnapshot - using simplified AccountSnapshot interface
@@ -11973,9 +13102,12 @@ const isDebugEventEmitter = (value: unknown): value is DebugEventEmitter =>
  * CRITICAL for replay protection - domain separator for signatures
  */
 function getDepositoryAddress(env: Env): string {
+  const browserVMProvider = env.browserVM as
+    | (typeof env.browserVM & { browserVM?: { getDepositoryAddress?: () => string } })
+    | undefined;
   const browserVMAddress =
-    env.browserVM?.getDepositoryAddress?.() ||
-    env.browserVM?.browserVM?.getDepositoryAddress?.();
+    browserVMProvider?.getDepositoryAddress?.() ||
+    browserVMProvider?.browserVM?.getDepositoryAddress?.();
 
   // Active J-replica is authoritative for live RPC-backed runtimes.
   if (env.activeJurisdiction) {
@@ -12234,7 +13366,12 @@ export function validateAccountFrame(
   if (frame.height < 0) return false;
   if (typeof frame.jHeight !== 'number' || frame.jHeight < 0) return false;
   if (frame.accountTxs.length > MAX_ACCOUNT_FRAME_TXS) return false;
-  if (frame.tokenIds.length !== frame.deltas.length) return false;
+  try {
+    assertAccountFrameDeltaIntegrity(frame, `AccountFrame#${frame.height}`);
+  } catch (error) {
+    console.warn(`❌ Invalid account frame delta integrity: ${(error as Error).message}`);
+    return false;
+  }
 
   // CRITICAL: Timestamp validation for HTLC safety
   if (currentTimestamp !== undefined) {
@@ -12263,6 +13400,7 @@ export function validateAccountFrame(
 // === FRAME HASH COMPUTATION ===
 
 async function createFrameHash(frame: AccountFrame): Promise<string> {
+  assertAccountFrameDeltaIntegrity(frame, `AccountFrame#${frame.height}`);
   // CRITICAL: Use keccak256 for EVM compatibility (Channel.ts:585, 744)
   // Include prevFrameHash to chain frames together (prevents signature replay)
   const { ethers } = await import('ethers');
@@ -12277,12 +13415,10 @@ async function createFrameHash(frame: AccountFrame): Promise<string> {
       type: tx.type,
       data: tx.data,
     })),
-    tokenIds: frame.tokenIds,
-    deltas: frame.deltas.map(d => d.toString()), // Quick access sums
     // Include full shared delta state in frame hash.
     // collateral/ondelta are shared values and must stay identical across peers.
     // If they diverge, frame consensus must fail hard.
-    fullDeltaStates: frame.fullDeltaStates?.map(delta => ({
+    deltas: frame.deltas.map(delta => ({
       tokenId: delta.tokenId,
       collateral: delta.collateral.toString(),
       ondelta: delta.ondelta.toString(),
@@ -12334,10 +13470,12 @@ export async function proposeAccountFrame(
     accountId?: string;
     giveTokenId: number;
     giveAmount: bigint;
-    wantTokenId: number;
-    wantAmount: bigint;
-    minFillRatio: number;
-  }>;
+	    wantTokenId: number;
+	    wantAmount: bigint;
+	    priceTicks?: bigint | undefined;
+	    timeInForce?: 0 | 1 | 2 | undefined;
+	    minFillRatio: number;
+	  }>;
   swapCancelRequests?: Array<{ offerId: string; accountId: string }>;
   swapOffersCancelled?: Array<{ offerId: string; accountId: string }>;
   // MULTI-SIGNER: Hashes that need entity-quorum signing
@@ -12424,13 +13562,14 @@ export async function proposeAccountFrame(
     fromEntity: string;
     toEntity: string;
     accountId?: string; // Enriched by entity handler
-    giveTokenId: number;
-    giveAmount: bigint;
-    wantTokenId: number;
-    wantAmount: bigint;
-    priceTicks?: bigint;
-    minFillRatio: number;
-  }> = [];
+	    giveTokenId: number;
+	    giveAmount: bigint;
+	    wantTokenId: number;
+	    wantAmount: bigint;
+	    priceTicks?: bigint | undefined;
+	    timeInForce?: 0 | 1 | 2 | undefined;
+	    minFillRatio: number;
+	  }> = [];
   const swapCancelRequests: Array<{ offerId: string; accountId: string }> = [];
   const swapOffersCancelled: Array<{ offerId: string; accountId: string }> = [];
 
@@ -12500,7 +13639,10 @@ export async function proposeAccountFrame(
     // Collect cancel requests for hub orderbook cancellation flow
     if (result.swapOfferCancelRequested) {
       if (!quiet) console.log(`📊 Collected swap cancel request: ${result.swapOfferCancelRequested.offerId}`);
-      swapCancelRequests.push(result.swapOfferCancelRequested);
+      swapCancelRequests.push({
+        ...result.swapOfferCancelRequested,
+        accountId: accountMachine.proofHeader.toEntity,
+      });
     }
 
     // Collect finalized cancellations for open-offer/orderbook cleanup
@@ -12530,11 +13672,8 @@ export async function proposeAccountFrame(
     return earlyResult;
   }
 
-  // CRITICAL FIX: Extract FULL delta state from clonedMachine.deltas (after processing)
-  // Include ALL fields (credit limits, allowances, collateral) for dispute proofs
   const finalTokenIds: number[] = [];
-  const finalDeltas: bigint[] = [];
-  const fullDeltaStates: import('./types').Delta[] = [];
+  const finalDeltas: Delta[] = [];
 
   // Sort by tokenId for deterministic ordering
   const sortedTokens = Array.from(clonedMachine.deltas.entries()).sort((a, b) => a[0] - b[0]);
@@ -12558,19 +13697,17 @@ export async function proposeAccountFrame(
     }
 
     finalTokenIds.push(tokenId);
-    finalDeltas.push(totalDelta);
-    // AUDIT FIX: Store FULL delta state (collateral, credit limits, allowances)
-    fullDeltaStates.push({ ...delta });
+    finalDeltas.push({ ...delta });
   }
 
   if (!quiet) {
     console.log(`📊 Frame state after processing: ${finalTokenIds.length} tokens`);
     if (HEAVY_LOGS) {
       console.log(`📊 TokenIds: [${finalTokenIds.join(', ')}]`);
-      console.log(`📊 Deltas: [${finalDeltas.map(d => d.toString()).join(', ')}]`);
+      console.log(`📊 Offdeltas: [${deriveAccountFrameOffdeltas(finalDeltas).map(d => d.toString()).join(', ')}]`);
       console.log(
-        `📊 FullDeltaStates:`,
-        fullDeltaStates.map(d => ({
+        `📊 Deltas:`,
+        finalDeltas.map(d => ({
           tokenId: d.tokenId,
           collateral: d.collateral?.toString(),
           leftCreditLimit: d.leftCreditLimit?.toString(),
@@ -12608,9 +13745,7 @@ export async function proposeAccountFrame(
     prevFrameHash: accountMachine.currentHeight === 0 ? 'genesis' : accountMachine.currentFrame.stateHash || '',
     stateHash: '', // Will be filled after hash calculation
     byLeft: weAreLeft, // Who proposed this frame
-    tokenIds: finalTokenIds, // Use computed state from clonedMachine.deltas
-    deltas: finalDeltas, // Quick access: ondelta+offdelta sums
-    fullDeltaStates, // AUDIT FIX: Full Delta objects for dispute proofs
+    deltas: finalDeltas,
   };
 
   // Calculate state hash (frameData is properly typed AccountFrame)
@@ -12625,9 +13760,9 @@ export async function proposeAccountFrame(
     console.log(`  prevFrameHash: ${frameData.prevFrameHash?.slice(0, 20)}...`);
     console.log(`  accountTxs count: ${frameData.accountTxs.length}`);
     console.log(`  accountTxs types: [${frameData.accountTxs.map(tx => tx.type).join(', ')}]`);
-    console.log(`  tokenIds: [${frameData.tokenIds.join(', ')}]`);
-    console.log(`  deltas: [${frameData.deltas.map(d => d.toString()).join(', ')}]`);
-    console.log(`  fullDeltaStates count: ${fullDeltaStates.length}`);
+    console.log(`  tokenIds: [${deriveAccountFrameTokenIds(frameData).join(', ')}]`);
+    console.log(`  offdeltas: [${deriveAccountFrameOffdeltas(frameData.deltas).map(d => d.toString()).join(', ')}]`);
+    console.log(`  delta count: ${frameData.deltas.length}`);
     console.log(`  byLeft: ${frameData.byLeft}`);
     console.log(`  stateHash: ${frameData.stateHash}`);
   }
@@ -12770,6 +13905,7 @@ export async function proposeAccountFrame(
 
   const outboundFrame = cloneAccountFrame(newFrame);
   const accountInput: AccountInput = {
+    kind: 'frame',
     fromEntityId: accountMachine.proofHeader.fromEntity,
     toEntityId: accountMachine.proofHeader.toEntity,
     height: newFrame.height,
@@ -12865,7 +14001,7 @@ export async function handleAccountInput(
     pendingHash: accountMachine.pendingFrame?.stateHash ?? null,
     pendingPrev: accountMachine.pendingFrame?.prevFrameHash ?? null,
     pendingTimestamp: Number(accountMachine.pendingFrame?.timestamp ?? 0),
-    frameHistoryTail: accountMachine.frameHistory.slice(-3).map((frame) => ({
+    frameHistoryTail: getAccountFrameHistoryView(accountMachine).slice(-3).map((frame) => ({
       height: Number(frame?.height ?? 0),
       stateHash: frame?.stateHash ?? null,
       prevFrameHash: frame?.prevFrameHash ?? null,
@@ -12941,8 +14077,8 @@ export async function handleAccountInput(
       console.log(`🔒 COMMIT: Frame ${accountMachine.pendingFrame.height}`);
       console.log(`  Transactions: ${accountMachine.pendingFrame.accountTxs.length}`);
       console.log(`  Transactions detail:`, accountMachine.pendingFrame.accountTxs);
-      console.log(`  TokenIds: ${accountMachine.pendingFrame.tokenIds.join(',')}`);
-      console.log(`  Deltas: ${accountMachine.pendingFrame.deltas.map(d => `${d}`).join(',')}`);
+      console.log(`  TokenIds: ${deriveAccountFrameTokenIds(accountMachine.pendingFrame).join(',')}`);
+      console.log(`  Offdeltas: ${deriveAccountFrameOffdeltas(accountMachine.pendingFrame).map(d => `${d}`).join(',')}`);
       console.log(`  StateHash: ${frameHash.slice(0, 16)}...`);
 
       // PROPOSER COMMIT: Re-execute txs on REAL state (Channel.ts pattern)
@@ -13030,21 +14166,18 @@ export async function handleAccountInput(
           }
         }
 
-        // Store counterparty settlement signature
-        if (input.newSettlementHanko) {
-          accountMachine.counterpartySettlementHanko = input.newSettlementHanko;
-          console.log(`✅ Stored counterparty settlement hanko from ACK`);
-        }
-
-        // Add confirmed frame to history
-        accountMachine.frameHistory.push(cloneAccountFrame(accountMachine.pendingFrame));
-        // Cap history at 20 frames to prevent snapshot bloat
-        if (accountMachine.frameHistory.length > 20) {
-          accountMachine.frameHistory.shift();
-        }
-        console.log(
-          `📚 Frame ${accountMachine.pendingFrame.height} added to history (total: ${accountMachine.frameHistory.length})`,
-        );
+	        const committedFrame = cloneAccountFrame(accountMachine.pendingFrame);
+        recordAccountFrameHistory(env, {
+          entityId: accountMachine.proofHeader.fromEntity,
+          counterpartyId: input.fromEntityId,
+          accountHeight: committedFrame.height,
+          source: 'ackCommit',
+          frame: committedFrame,
+        });
+        // Past bilateral frames are not future-consensus state. Keep only a
+        // non-enumerable UI/debug view; durable history lives in the frame DB.
+        appendAccountFrameHistoryView(accountMachine, committedFrame);
+        console.log(`📚 Frame ${accountMachine.pendingFrame.height} indexed in frame DB`);
 
       }
 
@@ -13354,11 +14487,12 @@ export async function handleAccountInput(
       accountId?: string;
       giveTokenId: number;
       giveAmount: bigint;
-      wantTokenId: number;
-      wantAmount: bigint;
-      priceTicks?: bigint;
-      minFillRatio: number;
-    }> = [];
+	      wantTokenId: number;
+	      wantAmount: bigint;
+	      priceTicks?: bigint | undefined;
+	      timeInForce?: 0 | 1 | 2 | undefined;
+	      minFillRatio: number;
+	    }> = [];
     const swapCancelRequests: Array<{ offerId: string; accountId: string }> = [];
     const swapOffersCancelled: Array<{ offerId: string; accountId: string }> = [];
 
@@ -13395,7 +14529,10 @@ export async function handleAccountInput(
         swapOffersCreated.push(result.swapOfferCreated);
       }
       if (result.swapOfferCancelRequested) {
-        swapCancelRequests.push(result.swapOfferCancelRequested);
+        swapCancelRequests.push({
+          ...result.swapOfferCancelRequested,
+          accountId: input.fromEntityId,
+        });
       }
       if (result.swapOfferCancelled) {
         swapOffersCancelled.push(result.swapOfferCancelled);
@@ -13405,7 +14542,7 @@ export async function handleAccountInput(
     // STATE VERIFICATION: Compare deltas directly (both sides compute identically)
     // Extract final state from clonedMachine after processing ALL transactions
     const ourFinalTokenIds: number[] = [];
-    const ourFinalDeltas: bigint[] = [];
+    const ourFinalDeltas: Delta[] = [];
 
     const sortedOurTokens = Array.from(clonedMachine.deltas.entries()).sort((a, b) => a[0] - b[0]);
     for (const [tokenId, delta] of sortedOurTokens) {
@@ -13422,7 +14559,7 @@ export async function handleAccountInput(
       }
 
       ourFinalTokenIds.push(tokenId);
-      ourFinalDeltas.push(totalDelta);
+      ourFinalDeltas.push({ ...delta });
     }
 
     if (HEAVY_LOGS)
@@ -13430,29 +14567,19 @@ export async function handleAccountInput(
         `🔍 RECEIVER: Computed ${ourFinalTokenIds.length} tokens after filtering: [${ourFinalTokenIds.join(', ')}]`,
       );
 
-    // CRITICAL: Extract FULL delta states for hash verification (same as proposer does)
-    // This ensures hash verification includes credit limits, collateral, allowances
-    const ourFullDeltaStates: import('./types').Delta[] = [];
-    for (const [tokenId, delta] of sortedOurTokens) {
-      // CRITICAL: Use offdelta ONLY for filtering (same as delta comparison)
-      const totalDelta = delta.offdelta;
-      // Apply SAME filtering as proposer (skip unused tokens)
-      if (!shouldIncludeToken(delta, totalDelta)) {
-        continue;
-      }
-      ourFullDeltaStates.push({ ...delta });
-    }
+    const ourOffdeltas = deriveAccountFrameOffdeltas(ourFinalDeltas);
+    const theirOffdeltas = deriveAccountFrameOffdeltas(receivedFrame);
 
-    const ourComputedState = Buffer.from(ourFinalDeltas.map(d => d.toString()).join(',')).toString('hex');
-    const theirClaimedState = Buffer.from(receivedFrame.deltas.map(d => d.toString()).join(',')).toString('hex');
+    const ourComputedState = Buffer.from(ourOffdeltas.map(d => d.toString()).join(',')).toString('hex');
+    const theirClaimedState = Buffer.from(theirOffdeltas.map(d => d.toString()).join(',')).toString('hex');
 
     // DEBUG: Show actual delta values
     console.log(`🔍 STATE-VERIFY Frame ${receivedFrame.height}:`);
     console.log(
-      `   Our tokenIds: [${ourFinalTokenIds.join(', ')}], deltas: [${ourFinalDeltas.map(d => d.toString()).join(', ')}]`,
+      `   Our tokenIds: [${ourFinalTokenIds.join(', ')}], offdeltas: [${ourOffdeltas.map(d => d.toString()).join(', ')}]`,
     );
     console.log(
-      `   Their tokenIds: [${receivedFrame.tokenIds.join(', ')}], deltas: [${receivedFrame.deltas.map(d => d.toString()).join(', ')}]`,
+      `   Their tokenIds: [${deriveAccountFrameTokenIds(receivedFrame).join(', ')}], offdeltas: [${theirOffdeltas.map(d => d.toString()).join(', ')}]`,
     );
     console.log(`  Our computed:  ${ourComputedState.slice(0, 32)}...`);
     console.log(`  Their claimed: ${theirClaimedState.slice(0, 32)}...`);
@@ -13465,22 +14592,22 @@ export async function handleAccountInput(
       return { success: false, error: `Bilateral consensus failure - states don't match`, events };
     }
 
-    // SECURITY FIX: Verify BILATERAL fields in fullDeltaStates (prevents state injection attack)
+    // SECURITY FIX: Verify BILATERAL fields in deltas (prevents state injection attack)
     // ondelta/collateral may differ due to J-event timing, but bilateral fields MUST match:
     // - offdelta: Set by bilateral payments
     // - creditLimit: Set by bilateral set_credit_limit tx
     // - allowance: Set by bilateral transactions
-    const theirFullDeltaStates = receivedFrame.fullDeltaStates || [];
-    if (ourFullDeltaStates.length !== theirFullDeltaStates.length) {
+    const theirDeltas = receivedFrame.deltas;
+    if (ourFinalDeltas.length !== theirDeltas.length) {
       console.warn(
-        `⚠️ SECURITY: fullDeltaStates count mismatch (our: ${ourFullDeltaStates.length}, their: ${theirFullDeltaStates.length})`,
+        `⚠️ SECURITY: delta count mismatch (our: ${ourFinalDeltas.length}, their: ${theirDeltas.length})`,
       );
       return { success: false, error: `Bilateral state injection detected - delta count mismatch`, events };
     }
 
-    for (let i = 0; i < ourFullDeltaStates.length; i++) {
-      const ours = ourFullDeltaStates[i]!;
-      const theirs = theirFullDeltaStates[i]!;
+    for (let i = 0; i < ourFinalDeltas.length; i++) {
+      const ours = ourFinalDeltas[i]!;
+      const theirs = theirDeltas[i]!;
 
       // Compare BILATERAL fields only (ondelta/collateral may differ due to J-event timing)
       const bilateralMismatch =
@@ -13505,18 +14632,17 @@ export async function handleAccountInput(
     // - unilateral fields (collateral/ondelta) may lag between peers until claims converge
     //   so hash must be recomputed from sender payload, not receiver-local unilateral state
     if (HEAVY_LOGS) console.log(`🔍 COMPUTING-HASH: Creating hash for frame ${receivedFrame.height}...`);
-    const recomputedSenderHash = await createFrameHash({
+    const senderHashFrame: AccountFrame = {
       height: receivedFrame.height,
       timestamp: receivedFrame.timestamp,
       jHeight: receivedFrame.jHeight,
       accountTxs: receivedFrame.accountTxs,
       prevFrameHash: receivedFrame.prevFrameHash,
-      tokenIds: receivedFrame.tokenIds,
       deltas: receivedFrame.deltas,
-      fullDeltaStates: theirFullDeltaStates,
       stateHash: '', // Computed by createFrameHash
-      byLeft: receivedFrame.byLeft,
-    });
+      ...(receivedFrame.byLeft === undefined ? {} : { byLeft: receivedFrame.byLeft }),
+    };
+    const recomputedSenderHash = await createFrameHash(senderHashFrame);
 
     if (recomputedSenderHash !== receivedFrame.stateHash) {
       console.warn(`⚠️ SECURITY: Frame hash mismatch after validation`);
@@ -13616,15 +14742,18 @@ export async function handleAccountInput(
       }
     }
 
-    // Add accepted frame to history
-    accountMachine.frameHistory.push(cloneAccountFrame(receivedFrame));
-    // Cap history at 20 frames to prevent snapshot bloat
-    if (accountMachine.frameHistory.length > 20) {
-      accountMachine.frameHistory.shift();
-    }
-    console.log(
-      `📚 Frame ${receivedFrame.height} accepted and added to history (total: ${accountMachine.frameHistory.length})`,
-    );
+    const committedFrame = cloneAccountFrame(receivedFrame);
+    recordAccountFrameHistory(env, {
+      entityId: accountMachine.proofHeader.fromEntity,
+      counterpartyId: input.fromEntityId,
+      accountHeight: committedFrame.height,
+      source: 'peerCommit',
+      frame: committedFrame,
+    });
+    // Past bilateral frames are not future-consensus state. Keep only a
+    // non-enumerable UI/debug view; durable history lives in the frame DB.
+    appendAccountFrameHistoryView(accountMachine, committedFrame);
+    console.log(`📚 Frame ${receivedFrame.height} accepted and indexed in frame DB`);
 
     events.push(...processEvents);
     events.push(`🤝 Accepted frame ${receivedFrame.height} from Entity ${input.fromEntityId.slice(-4)}`);
@@ -13700,7 +14829,8 @@ export async function handleAccountInput(
     }
     accountMachine.disputeProofBodiesByHash[ackProofResult.proofBodyHash] = ackProofResult.proofBodyStruct;
 
-    const response: AccountInput = {
+    const response = {
+      kind: 'ack',
       fromEntityId: accountMachine.proofHeader.fromEntity,
       toEntityId: input.fromEntityId,
       height: receivedFrame.height,
@@ -13709,7 +14839,7 @@ export async function handleAccountInput(
       newDisputeHash: ackDisputeHash, // Full dispute hash (key in hankoWitness for quorum lookup)
       newDisputeProofBodyHash: ackProofResult.proofBodyHash, // ProofBodyHash that ackDisputeHanko signs
       disputeProofNonce: ackSignedNonce, // nonce at which ACK's dispute proof was signed
-    };
+    } as AccountInput;
 
     if (HEAVY_LOGS)
       console.log(
@@ -13723,6 +14853,7 @@ export async function handleAccountInput(
 
       if (proposeResult.success && proposeResult.accountInput) {
         batchedWithNewFrame = true;
+        response.kind = 'frame_ack';
         // Merge ACK and new proposal into same AccountInput
         if (proposeResult.accountInput.newAccountFrame) {
           response.newAccountFrame = proposeResult.accountInput.newAccountFrame;
@@ -14149,7 +15280,7 @@ export function getAccountBarVisual(
 }
 
 
-//runtime/j-batch.ts (1031 lines)
+//runtime/j-batch.ts (1032 lines)
 /**
  * J-Batch Aggregator System
  *
@@ -14165,6 +15296,7 @@ export function getAccountBarVisual(
 
 import { ethers } from 'ethers';
 import type { ProofBodyStruct } from './typechain/Depository.js';
+import type { JurisdictionConfig } from './types';
 import { isLeftEntity, normalizeEntityId, compareEntityIds } from './entity-id-utils';
 
 /**
@@ -15927,7 +17059,7 @@ export * from './proposals';
 export * from './validation';
 
 
-//runtime/entity-tx/apply.ts (1351 lines)
+//runtime/entity-tx/apply.ts (1370 lines)
 import { calculateQuorumPower } from '../entity-consensus';
 import { requireUsableContractAddress } from '../contract-address';
 import { isLeftEntity } from '../entity-id-utils';
@@ -15936,7 +17068,7 @@ import { normalizeEntityName } from '../networking/gossip';
 import { createOrderbookExtState, validateSpreadDistribution } from '../orderbook';
 import type { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput, JInput, HashType } from '../types';
 import { DEFAULT_SOFT_LIMIT, DEFAULT_HARD_LIMIT, DEFAULT_MAX_FEE } from '../types';
-import { DEBUG, HEAVY_LOGS, log } from '../utils';
+import { DEBUG, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
 import { announceLocalEntityProfile } from '../networking/gossip-helper';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
@@ -15964,11 +17096,30 @@ export interface ApplyEntityTxResult {
 }
 import { executeProposal, generateProposalId } from './proposals';
 import { validateMessage } from './validation';
-import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-helpers';
+import { cloneEntityState, addMessage } from '../state-helpers';
 import { logError } from '../logger';
 import { FINANCIAL } from '../constants';
 import { normalizeRebalanceMatchingStrategy } from '../rebalance-policy';
+import { initJBatch, batchAddSettlement } from '../j-batch';
 import { handleR2E } from './handlers/r2e';
+import { handleHtlcPayment } from './handlers/htlc-payment';
+import { handleR2C } from './handlers/r2c';
+import { handleE2R } from './handlers/e2r';
+import { handleR2R } from './handlers/r2r';
+import { handleJBroadcast } from './handlers/j-broadcast';
+import { handleJRebroadcast } from './handlers/j-rebroadcast';
+import { handleJAbortSentBatch } from './handlers/j-abort-sent-batch';
+import { handleJClearBatch } from './handlers/j-clear-batch';
+import { handleMintReserves } from './handlers/mint-reserves';
+import { handleCreateSettlement } from './handlers/create-settlement';
+import {
+  handleSettleApprove,
+  handleSettleExecute,
+  handleSettlePropose,
+  handleSettleReject,
+  handleSettleUpdate,
+} from './handlers/settle';
+import { handleDisputeFinalize, handleDisputeStart } from './handlers/dispute';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -16284,7 +17435,6 @@ export const applyEntityTx = async (
             jHeight: 0,
             accountTxs: [],
             prevFrameHash: '',
-            tokenIds: [],
             deltas: [],
             stateHash: '',
             byLeft: isLeft,
@@ -16306,12 +17456,12 @@ export const applyEntityTx = async (
             nonce: 1, // Next unified on-chain nonce to use
           },
           proofBody: { tokenIds: [], deltas: [] },
-          // Dispute configuration (default: 20 blocks = 2 * 10)
+          // Dispute configuration values are encoded in 10-block units.
+          // 576 * 10 = 5760 blocks, roughly 24h at 15-second block time.
           disputeConfig: {
-            leftDisputeDelay: 2, // 20 blocks for left entity
-            rightDisputeDelay: 2, // 20 blocks for right entity
+            leftDisputeDelay: 576,
+            rightDisputeDelay: 576,
           },
-          frameHistory: [],
           pendingWithdrawals: new Map(),
           requestedRebalance: new Map(),
           requestedRebalanceFeeState: new Map(),
@@ -16415,7 +17565,6 @@ export const applyEntityTx = async (
     }
 
     if (entityTx.type === 'htlcPayment') {
-      const { handleHtlcPayment } = await import('./handlers/htlc-payment');
       return await handleHtlcPayment(entityState, entityTx, env);
     }
 
@@ -16603,7 +17752,11 @@ export const applyEntityTx = async (
 
             if (paths.length > 0) {
               // Use the shortest path
-              route = paths[0].path;
+              const firstPath = paths[0];
+              if (!firstPath) {
+                throw new Error('ROUTE_DISCOVERY_INVARIANT: paths.length > 0 but paths[0] is missing');
+              }
+              route = firstPath.path;
               if (verbose) console.log(`💸 Found route: ${route.map(e => formatEntityId(e)).join(' → ')}`);
             } else {
               logError('ENTITY_TX', `❌ No route found to ${formatEntityId(targetEntityId)}`);
@@ -16733,22 +17886,18 @@ export const applyEntityTx = async (
     }
 
     if (entityTx.type === 'r2c') {
-      const { handleR2C } = await import('./handlers/r2c');
       return await handleR2C(entityState, entityTx, env.timestamp);
     }
 
     if (entityTx.type === 'e2r') {
-      const { handleE2R } = await import('./handlers/e2r');
       return await handleE2R(entityState, entityTx);
     }
 
     if (entityTx.type === 'r2r') {
-      const { handleR2R } = await import('./handlers/r2r');
       return await handleR2R(entityState, entityTx);
     }
 
     if (entityTx.type === 'j_broadcast') {
-      const { handleJBroadcast } = await import('./handlers/j-broadcast');
       const batch = entityState.jBatchState?.batch;
       if (batch) {
         console.log(
@@ -16763,43 +17912,35 @@ export const applyEntityTx = async (
     }
 
     if (entityTx.type === 'j_rebroadcast') {
-      const { handleJRebroadcast } = await import('./handlers/j-rebroadcast');
       return await handleJRebroadcast(entityState, entityTx, env);
     }
 
     if (entityTx.type === 'j_abort_sent_batch') {
-      const { handleJAbortSentBatch } = await import('./handlers/j-abort-sent-batch');
       return await handleJAbortSentBatch(entityState, entityTx, env);
     }
 
     if (entityTx.type === 'j_clear_batch') {
-      const { handleJClearBatch } = await import('./handlers/j-clear-batch');
       return await handleJClearBatch(entityState, entityTx, env);
     }
 
     if (entityTx.type === 'mintReserves') {
-      const { handleMintReserves } = await import('./handlers/mint-reserves');
       return await handleMintReserves(entityState, entityTx, env);
     }
 
     if (entityTx.type === 'createSettlement') {
-      const { handleCreateSettlement } = await import('./handlers/create-settlement');
       return await handleCreateSettlement(entityState, entityTx);
     }
 
     // === SETTLEMENT WORKSPACE HANDLERS ===
     if (entityTx.type === 'settle_propose') {
-      const { handleSettlePropose } = await import('./handlers/settle');
       return await handleSettlePropose(entityState, entityTx, env);
     }
 
     if (entityTx.type === 'settle_update') {
-      const { handleSettleUpdate } = await import('./handlers/settle');
       return await handleSettleUpdate(entityState, entityTx, env);
     }
 
     if (entityTx.type === 'settle_approve') {
-      const { handleSettleApprove } = await import('./handlers/settle');
       const result = await handleSettleApprove(entityState, entityTx, env);
       return {
         ...result,
@@ -16808,12 +17949,10 @@ export const applyEntityTx = async (
     }
 
     if (entityTx.type === 'settle_execute') {
-      const { handleSettleExecute } = await import('./handlers/settle');
       return await handleSettleExecute(entityState, entityTx, env);
     }
 
     if (entityTx.type === 'settle_reject') {
-      const { handleSettleReject } = await import('./handlers/settle');
       return await handleSettleReject(entityState, entityTx, env);
     }
 
@@ -16993,7 +18132,13 @@ export const applyEntityTx = async (
 
       const accountTx: AccountTx = {
         type: 'request_collateral',
-        data: { tokenId, amount, feeTokenId, feeAmount, policyVersion },
+        data: {
+          tokenId,
+          amount,
+          ...(feeTokenId !== undefined ? { feeTokenId } : {}),
+          feeAmount,
+          policyVersion,
+        },
       };
       mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
 
@@ -17056,7 +18201,16 @@ export const applyEntityTx = async (
 
       const accountTx: AccountTx = {
         type: 'swap_offer',
-        data: { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks, timeInForce, minFillRatio },
+        data: {
+          offerId,
+          giveTokenId,
+          giveAmount,
+          wantTokenId,
+          wantAmount,
+          ...(priceTicks !== undefined ? { priceTicks } : {}),
+          ...(timeInForce !== undefined ? { timeInForce } : {}),
+          minFillRatio,
+        },
       };
 
       // Pure: return mempoolOp instead of mutating directly
@@ -17218,7 +18372,6 @@ export const applyEntityTx = async (
         );
       }
 
-      const { initJBatch, batchAddSettlement } = await import('../j-batch');
       if (!newState.jBatchState) {
         newState.jBatchState = initJBatch();
       }
@@ -17261,12 +18414,10 @@ export const applyEntityTx = async (
 
     // === DISPUTES ===
     if (entityTx.type === 'disputeStart') {
-      const { handleDisputeStart } = await import('./handlers/dispute');
       return await handleDisputeStart(entityState, entityTx, env);
     }
 
     if (entityTx.type === 'disputeFinalize') {
-      const { handleDisputeFinalize } = await import('./handlers/dispute');
       return await handleDisputeFinalize(entityState, entityTx, env);
     }
 
@@ -17391,12 +18542,12 @@ export const executeProposal = (entityState: EntityState, proposal: Proposal): E
 };
 
 
-//runtime/entity-tx/j-events.ts (1662 lines)
-import type { EntityState, Delta, JBlockObservation, JBlockFinalized, JurisdictionEvent, Env, AccountMachine, DebtEntry, DebtEventType } from '../types';
+//runtime/entity-tx/j-events.ts (1686 lines)
+import type { EntityState, JBlockObservation, JBlockFinalized, JurisdictionEvent, Env, DebtEntry, DebtEventType } from '../types';
+import type { CompletedBatch } from '../j-batch';
 import { ethers } from 'ethers';
-import { DEBUG } from '../utils';
-import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-helpers';
-import { getTokenInfo } from '../account-utils';
+import { cloneEntityState, addMessage } from '../state-helpers';
+import { getDefaultCreditLimit, getTokenInfo } from '../account-utils';
 import { safeStringify } from '../serialization-utils';
 import { CANONICAL_J_EVENTS } from '../jadapter/helpers';
 import { hashHtlcSecret } from '../htlc-utils';
@@ -17471,15 +18622,15 @@ function emptyOpBreakdown() {
   };
 }
 
-function appendBatchHistory(state: EntityState, entry: Record<string, any>): void {
+function appendBatchHistory(state: EntityState, entry: CompletedBatch): void {
   if (!state.batchHistory) state.batchHistory = [];
   const last = state.batchHistory[state.batchHistory.length - 1];
   const sameAsLast =
     !!last &&
-    String(last.txHash || '') === String(entry.txHash || '') &&
-    String(last.eventType || '') === String(entry.eventType || '') &&
-    Number(last.jBlockNumber || 0) === Number(entry.jBlockNumber || 0) &&
-    Number(last.entityNonce || 0) === Number(entry.entityNonce || 0);
+    String(last.txHash || '') === String(entry['txHash'] || '') &&
+    String(last.eventType || '') === String(entry['eventType'] || '') &&
+    Number(last.jBlockNumber || 0) === Number(entry['jBlockNumber'] || 0) &&
+    Number(last.entityNonce || 0) === Number(entry['entityNonce'] || 0);
   if (sameAsLast) return;
   state.batchHistory.push(entry);
   if (state.batchHistory.length > 40) {
@@ -17708,7 +18859,7 @@ function decodeDisputeInitialSecrets(initialArgumentsRaw: unknown): string[] {
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   let argArray: string[];
   try {
-    [argArray] = abiCoder.decode(['bytes[]'], initialArguments) as [string[]];
+    [argArray] = abiCoder.decode(['bytes[]'], initialArguments) as unknown as [string[]];
   } catch {
     return [];
   }
@@ -17717,7 +18868,7 @@ function decodeDisputeInitialSecrets(initialArgumentsRaw: unknown): string[] {
   for (const arg of argArray) {
     if (!arg || arg === '0x') continue;
     try {
-      const [, decodedSecrets] = abiCoder.decode(['uint16[]', 'bytes32[]'], arg) as [Array<bigint>, Array<string>];
+      const [, decodedSecrets] = abiCoder.decode(['uint16[]', 'bytes32[]'], arg) as unknown as [Array<bigint>, Array<string>];
       for (const secret of decodedSecrets) {
         if (ethers.isHexString(secret, 32)) {
           secrets.add(String(secret).toLowerCase());
@@ -18216,11 +19367,20 @@ function mergeAccountJObservations(observations: Array<{ jHeight: number; jBlock
   let i = 0;
   while (i < observations.length) {
     const obs = observations[i];
+    if (!obs) {
+      observations.splice(i, 1);
+      continue;
+    }
     const key = `${obs.jHeight}:${obs.jBlockHash}`;
     const existing = groups.get(key);
     if (existing !== undefined) {
       // Merge events into existing observation (dedup by type+data)
       const target = observations[existing];
+      if (!target) {
+        groups.delete(key);
+        i++;
+        continue;
+      }
       const normalizedEvents = normalizeJurisdictionEvents(obs.events);
       for (const ev of normalizedEvents) {
         const evKey = canonicalJurisdictionEventKey(ev);
@@ -18244,12 +19404,21 @@ function mergeJEventClaimOps(ops: Array<{ accountId: string; tx: any }>): void {
   let i = 0;
   while (i < ops.length) {
     const op = ops[i];
+    if (!op) {
+      ops.splice(i, 1);
+      continue;
+    }
     if (op.tx.type !== 'j_event_claim') { i++; continue; }
     const key = `${op.accountId}:${op.tx.data.jHeight}:${op.tx.data.jBlockHash}`;
     const existing = groups.get(key);
     if (existing !== undefined) {
       // Merge events into existing op
       const target = ops[existing];
+      if (!target) {
+        groups.delete(key);
+        i++;
+        continue;
+      }
       const normalizedEvents = normalizeJurisdictionEvents(op.tx.data.events);
       for (const ev of normalizedEvents) {
         target.tx.data.events.push(ev);
@@ -18497,7 +19666,7 @@ async function applyFinalizedJEvent(
 
   } else if (event.type === 'AccountSettled') {
     // Universal settlement event (covers R2C, C2R, settle, rebalance)
-    const { leftEntity, rightEntity, tokenId, leftReserve, rightReserve, collateral, ondelta } = event.data;
+    const { leftEntity, rightEntity, tokenId, leftReserve, rightReserve, collateral } = event.data;
     const tokenIdNum = Number(tokenId);
     const myEntityId = String(entityState.entityId).toLowerCase();
     const leftId = String(leftEntity).toLowerCase();
@@ -18589,7 +19758,7 @@ async function applyFinalizedJEvent(
   // ═══════════════════════════════════════════════════════════════════════════
 
   } else if (event.type === 'DebtCreated') {
-    const { debtor, creditor, tokenId, amount, debtIndex } = event.data;
+    const { debtor, creditor, tokenId, amount } = event.data;
     const tokenSymbol = getTokenSymbol(tokenId as number);
     const decimals = getTokenDecimals(tokenId as number);
     const amountDisplay = (Number(amount) / (10 ** decimals)).toFixed(4);
@@ -18598,7 +19767,7 @@ async function applyFinalizedJEvent(
     addMessage(newState, `🔴 DEBT: ${(debtor as string).slice(-8)} owes ${amountDisplay} ${tokenSymbol} to ${(creditor as string).slice(-8)} | Block ${blockNumber}`);
 
   } else if (event.type === 'DebtEnforced') {
-    const { debtor, creditor, tokenId, amountPaid, remainingAmount, newDebtIndex } = event.data;
+    const { creditor, tokenId, amountPaid } = event.data;
     const tokenSymbol = getTokenSymbol(tokenId as number);
     const decimals = getTokenDecimals(tokenId as number);
     const paidDisplay = (Number(amountPaid) / (10 ** decimals)).toFixed(4);
@@ -18642,13 +19811,17 @@ async function applyFinalizedJEvent(
     if (account) {
       account.status = 'disputed';
       const weAreStarter = senderStr === entityIdNorm;
+      const disputeEventData = event.data as typeof event.data & {
+        disputeTimeout?: unknown;
+        onChainNonce?: unknown;
+      };
       const disputeTimeout =
-        Number(event.data.disputeTimeout ?? 0) ||
+        Number(disputeEventData.disputeTimeout ?? 0) ||
         (
           Number(blockNumber || 0) +
           getRuntimeJurisdictionDefaultDisputeDelayBlocks(env, newState.config.jurisdiction?.name, 5)
         );
-      const onChainNonce = Number(event.data.onChainNonce ?? nonce);
+      const onChainNonce = Number(disputeEventData.onChainNonce ?? nonce);
 
       // Store dispute state from event payload only.
       // Unified nonce: initialNonce = the nonce used in disputeStart (from event)
@@ -18868,7 +20041,9 @@ async function applyFinalizedJEvent(
 
       // DisputeFinalized is authoritative. Clear the off-chain component and transient holds
       // using locally stored proof-body knowledge only.
-      const finalizedProofBody = finalProofbodyHash ? account.disputeProofBodiesByHash?.[finalProofbodyHash] : undefined;
+      const finalizedProofBody = finalProofbodyHash
+        ? account.disputeProofBodiesByHash?.[finalProofbodyHash] as { tokenIds?: unknown[]; offdeltas?: unknown[] } | undefined
+        : undefined;
       if (finalizedProofBody && Array.isArray(finalizedProofBody.tokenIds) && Array.isArray(finalizedProofBody.offdeltas)) {
         for (let i = 0; i < finalizedProofBody.tokenIds.length; i += 1) {
           const tokenId = Number(finalizedProofBody.tokenIds[i]);
@@ -18962,13 +20137,13 @@ async function applyFinalizedJEvent(
           opCount,
           entityNonce: Number(nonce),
           jBlockNumber: Number(blockNumber || 0),
-          batch: sentBatch?.batch ? cloneJBatch(sentBatch.batch) : undefined,
-          operations: opBreakdown,
+          ...(sentBatch?.batch ? { batch: cloneJBatch(sentBatch.batch) } : {}),
+          ...(opBreakdown ? { operations: opBreakdown } : {}),
           source: 'self-batch' as const,
         });
 
         // Clear sent batch for next cycle.
-        newState.jBatchState.sentBatch = undefined;
+        delete newState.jBatchState.sentBatch;
         newState.jBatchState.status = isBatchEmpty(newState.jBatchState.batch) ? 'empty' : 'accumulating';
         // Authoritative nonce sync from on-chain finalized event.
         // Never trust optimistic local increments from submission path.
@@ -19001,8 +20176,8 @@ async function applyFinalizedJEvent(
           opCount,
           entityNonce: Number(nonce),
           jBlockNumber: Number(blockNumber || 0),
-          batch: sentBatch?.batch ? cloneJBatch(sentBatch.batch) : undefined,
-          operations: opBreakdown,
+          ...(sentBatch?.batch ? { batch: cloneJBatch(sentBatch.batch) } : {}),
+          ...(opBreakdown ? { operations: opBreakdown } : {}),
           source: 'self-batch' as const,
         });
 
@@ -19028,7 +20203,7 @@ async function applyFinalizedJEvent(
             }
           }
         }
-        newState.jBatchState.sentBatch = undefined;
+        delete newState.jBatchState.sentBatch;
         newState.jBatchState.status = isBatchEmpty(newState.jBatchState.batch) ? 'failed' : 'accumulating';
       }
       // Batch is atomic on-chain; success=false means none of its ops applied.
@@ -19055,7 +20230,7 @@ async function applyFinalizedJEvent(
 }
 
 
-//runtime/entity-tx/handlers/account.ts (2111 lines)
+//runtime/entity-tx/handlers/account.ts (2120 lines)
 import type { AccountFrame, AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx, HtlcRoute, AccountMachine, HtlcNoteKey } from '../../types';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { cloneEntityState, addMessage, addMessages, canonicalAccountKey, getAccountPerspective, emitScopedEvents } from '../../state-helpers';
@@ -19172,8 +20347,8 @@ export interface SwapOfferEvent {
   giveAmount: bigint;
   wantTokenId: number;
   wantAmount: bigint;
-  priceTicks?: bigint;
-  timeInForce?: 0 | 1 | 2;
+  priceTicks?: bigint | undefined;
+  timeInForce?: 0 | 1 | 2 | undefined;
   minFillRatio: number;
 }
 
@@ -19400,7 +20575,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         jHeight: 0,
         accountTxs: [],
         prevFrameHash: '',
-        tokenIds: [],
         deltas: [],
         stateHash: '',
         byLeft: state.entityId === leftEntity, // Am I left entity?
@@ -19422,7 +20596,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         tokenIds: [],
         deltas: [],
       },
-      frameHistory: [],
       pendingWithdrawals: new Map(),
       requestedRebalance: new Map(), // request_collateral target amounts (prepaid by requester)
       requestedRebalanceFeeState: new Map(), // Prepaid fee metadata + scheduling hints
@@ -19436,10 +20609,11 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       rightJObservations: [],
       jEventChain: [],
       lastFinalizedJHeight: 0,
-      // Dispute resolution (delay values * 10 = blocks)
+      // Dispute resolution values are encoded in 10-block units.
+      // 576 * 10 = 5760 blocks, roughly 24h at 15-second block time.
       disputeConfig: {
-        leftDisputeDelay: 10,   // 100 blocks
-        rightDisputeDelay: 10,  // 100 blocks
+        leftDisputeDelay: 576,
+        rightDisputeDelay: 576,
       },
       onChainSettlementNonce: 0,
     };
@@ -19483,6 +20657,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       outputs,
       mempoolOps,
       swapOffersCreated: allSwapOffersCreated,
+      swapCancelRequests: allSwapCancelRequests,
       swapOffersCancelled: allSwapOffersCancelled,
       ...(allHashesToSign.length > 0 && { hashesToSign: allHashesToSign }),
     };
@@ -19572,10 +20747,12 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           : input.prevHanko && pendingFrameBefore && accountMachine.currentHeight > currentHeightBefore
             ? pendingFrameBefore
             : undefined;
-      const isNewFrame = Boolean(justCommittedFrame && input.newAccountFrame);
+      const committedViaNewFrame = Boolean(justCommittedFrame && input.newAccountFrame);
 
-      if (isNewFrame && justCommittedFrame?.accountTxs) {
-        if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: isNewFrame=${isNewFrame}, inputHeight=${justCommittedFrame.height}, currentHeight=${accountMachine.currentHeight}`);
+      if (justCommittedFrame?.accountTxs) {
+        if (HEAVY_LOGS) console.log(
+          `🔍 HTLC-CHECK: commitMode=${committedViaNewFrame ? 'newFrame' : 'ack'}, inputHeight=${justCommittedFrame.height}, currentHeight=${accountMachine.currentHeight}`,
+        );
         if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: accountMachine.locks.size=${accountMachine.locks.size}`);
         if (HEAVY_LOGS) console.log(`🔍 FRAME-TXS: ${justCommittedFrame.accountTxs.length} txs in frame:`, justCommittedFrame.accountTxs.map(tx => tx.type));
       }
@@ -19584,7 +20761,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         applyCommittedAccountFrameFollowups(newState, counterpartyId, justCommittedFrame);
       }
 
-      if (isNewFrame && justCommittedFrame?.accountTxs) {
+      if (justCommittedFrame?.accountTxs) {
         for (const accountTx of justCommittedFrame.accountTxs) {
           if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: Checking committed tx type=${accountTx.type}`);
 
@@ -19593,6 +20770,13 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           }
 
           if (accountTx.type === 'htlc_lock') {
+            // Only the receiver-side commit should decrypt/route an HTLC lock.
+            // On proposer ACK, the committed frame is our own outbound lock, so
+            // re-running receiver-side envelope handling will try to decrypt the
+            // next hop's ciphertext with our key and fail spuriously.
+            if (!committedViaNewFrame) {
+              continue;
+            }
             if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: Found htlc_lock in committed frame!`);
             const lock = accountMachine.locks.get(accountTx.data.lockId);
             if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: lock found? ${!!lock}`);
@@ -21168,7 +22352,7 @@ export function processOrderbookCancels(
 }
 
 
-//runtime/entity-tx/handlers/htlc-payment.ts (508 lines)
+//runtime/entity-tx/handlers/htlc-payment.ts (522 lines)
 /**
  * HTLC Payment Handler (Entity-level)
  * Creates conditional payment with hashlock, routes through network
@@ -21178,9 +22362,8 @@ export function processOrderbookCancels(
  */
 
 import type { EntityState, EntityInput, AccountTx, Env, HtlcNoteKey } from '../../types';
-import type { Profile } from '../../networking/gossip';
-import { cloneEntityState, canonicalAccountKey } from '../../state-helpers';
-import { generateHashlock, generateLockId, calculateHopTimelock, calculateHopRevealHeight, hashHtlcSecret } from '../../htlc-utils';
+import { cloneEntityState } from '../../state-helpers';
+import { generateLockId, calculateHopTimelock, calculateHopRevealHeight, hashHtlcSecret } from '../../htlc-utils';
 import { calculateRequiredInboundForDesiredForward } from '../../htlc-utils';
 import { HTLC } from '../../constants';
 import { calculateDirectionalFeePPM, sanitizeBaseFee, sanitizeFeePPM } from '../../routing/fees';
@@ -21236,7 +22419,8 @@ export async function handleHtlcPayment(
 
   // Extract payment details
   let { targetEntityId, tokenId, amount, route, description, secret, hashlock } = entityTx.data;
-  const desiredRecipientAmount = amount;
+  const desiredRecipientAmount: bigint = typeof amount === 'bigint' ? amount : BigInt(String(amount));
+  amount = desiredRecipientAmount;
   const paymentStartedAtMs =
     typeof entityTx.data.startedAtMs === 'number' ? entityTx.data.startedAtMs : newState.timestamp;
 
@@ -21287,7 +22471,13 @@ export async function handleHtlcPayment(
         const paths = await networkGraph.findPaths(entityState.entityId, targetEntityId, amount, tokenId);
 
         if (paths.length > 0) {
-          route = paths[0].path;
+          const selectedPath = paths[0]?.path;
+          if (!selectedPath) {
+            logError("HTLC_PAYMENT", `❌ Route search returned an empty path to ${formatEntityId(targetEntityId)}`);
+            addMessage(newState, `❌ HTLC payment failed: invalid route`);
+            return { newState, outputs: [], mempoolOps: [] };
+          }
+          route = selectedPath;
           console.log(`🔒 Found route: ${route.map((e: string) => formatEntityId(e)).join(' → ')}`);
         } else {
           logError("HTLC_PAYMENT", `❌ No route found to ${formatEntityId(targetEntityId)}`);
@@ -21388,23 +22578,31 @@ export async function handleHtlcPayment(
       return { newState, outputs: [], mempoolOps: [] };
     }
   } else {
-    senderLockAmount = desiredRecipientAmount;
+    let computedSenderLockAmount = desiredRecipientAmount;
     for (let i = route.length - 2; i >= 1; i -= 1) {
       const intermediary = route[i]!;
       const nextHop = route[i + 1]!;
       const { feePpm, baseFee } = feeConfigForHop(intermediary, nextHop, tokenId);
-      const forwardAmount = senderLockAmount;
+      const forwardAmount = computedSenderLockAmount;
       hopForwardAmounts.set(intermediary, forwardAmount);
-      senderLockAmount = calculateRequiredInboundForDesiredForward(forwardAmount, feePpm, baseFee);
+      computedSenderLockAmount = calculateRequiredInboundForDesiredForward(forwardAmount, feePpm, baseFee);
     }
-    if (senderLockAmount < desiredRecipientAmount) {
+    if (computedSenderLockAmount < desiredRecipientAmount) {
       logError('HTLC_PAYMENT', '❌ Sender lock amount underflow after fee inversion');
       addMessage(newState, '❌ HTLC payment failed: fee inversion underflow');
       return { newState, outputs: [], mempoolOps: [] };
     }
-    totalFee = senderLockAmount - desiredRecipientAmount;
-    console.log(`🔒 HTLC recipient-exact quote: recipient=${desiredRecipientAmount}, senderLock=${senderLockAmount}, totalFee=${totalFee}`);
+    senderLockAmount = computedSenderLockAmount;
+    totalFee = computedSenderLockAmount - desiredRecipientAmount;
+    console.log(`🔒 HTLC recipient-exact quote: recipient=${desiredRecipientAmount}, senderLock=${computedSenderLockAmount}, totalFee=${totalFee}`);
   }
+  if (senderLockAmount === null || totalFee === null) {
+    logError('HTLC_PAYMENT', '❌ Missing finalized HTLC quote amounts');
+    addMessage(newState, '❌ HTLC payment failed: missing quote amounts');
+    return { newState, outputs: [], mempoolOps: [] };
+  }
+  const finalizedSenderLockAmount = senderLockAmount;
+  const finalizedTotalFee = totalFee;
 
   // Fail-fast sender-side capacity gate:
   // reject overspend before queuing any account mempool operation.
@@ -21416,10 +22614,10 @@ export async function handleHtlcPayment(
   }
   const senderIsLeftOnNextAccount = newState.accounts.get(nextHop)?.leftEntity === entityState.entityId;
   const nextHopCapacity = deriveDelta(nextHopDelta, senderIsLeftOnNextAccount).outCapacity;
-  if (senderLockAmount > nextHopCapacity) {
+  if (finalizedSenderLockAmount > nextHopCapacity) {
     logError(
       "HTLC_PAYMENT",
-      `❌ Insufficient outbound capacity to ${formatEntityId(nextHop)}: required=${senderLockAmount} available=${nextHopCapacity}`
+      `❌ Insufficient outbound capacity to ${formatEntityId(nextHop)}: required=${finalizedSenderLockAmount} available=${nextHopCapacity}`
     );
     addMessage(newState, `❌ HTLC payment failed: insufficient capacity`);
     return { newState, outputs: [], mempoolOps: [] };
@@ -21596,7 +22794,7 @@ export async function handleHtlcPayment(
       console.warn(`⚠️ HTLC: Available keys: ${availableList}`);
       return { newState, outputs: [], mempoolOps: [] };
     }
-    const keyDebug = hops.map((entityId) => {
+    const keyDebug = hops.map((entityId: string) => {
       const key = entityPubKeys.get(entityId) || '';
       const isHex = isHexValue(key, 32);
       const source = keySources.get(entityId) || 'unknown';
@@ -21618,8 +22816,8 @@ export async function handleHtlcPayment(
 
     // Persist deterministic payload for WAL replay.
     entityTx.data.preparedEnvelope = envelope;
-    entityTx.data.preparedSenderLockAmount = senderLockAmount.toString();
-    entityTx.data.preparedTotalFee = totalFee.toString();
+    entityTx.data.preparedSenderLockAmount = finalizedSenderLockAmount.toString();
+    entityTx.data.preparedTotalFee = finalizedTotalFee.toString();
   } catch (e) {
     logError("HTLC_PAYMENT", `❌ Envelope creation failed: ${e instanceof Error ? e.message : String(e)}`);
     addMessage(newState, `❌ HTLC payment failed: Invalid route`);
@@ -21634,7 +22832,7 @@ export async function handleHtlcPayment(
       hashlock,
       timelock,
       revealBeforeHeight,
-      amount: senderLockAmount,
+      amount: finalizedSenderLockAmount,
       tokenId,
       envelope  // Onion envelope (cleartext JSON in Phase 2)
     },
@@ -21652,7 +22850,7 @@ export async function handleHtlcPayment(
       lockId,
       accountId: nextHop, // Use counterparty ID as key (simpler than canonical)
       tokenId,
-      amount: senderLockAmount,
+      amount: finalizedSenderLockAmount,
       hashlock,
       timelock,
       direction: 'outgoing',
@@ -21660,7 +22858,7 @@ export async function handleHtlcPayment(
     });
 
     addMessage(newState,
-      `🔒 HTLC: Recipient ${desiredRecipientAmount}, sender lock ${senderLockAmount} (fee ${totalFee}) to ${formatEntityId(targetEntityId)} via ${route.length - 1} hops`
+      `🔒 HTLC: Recipient ${desiredRecipientAmount}, sender lock ${finalizedSenderLockAmount} (fee ${finalizedTotalFee}) to ${formatEntityId(targetEntityId)} via ${route.length - 1} hops`
     );
 
     // Trigger processing
@@ -21855,8 +23053,8 @@ type ProcessAccountTxResult = {
     giveAmount: bigint;
     wantTokenId: number;
     wantAmount: bigint;
-    priceTicks?: bigint;
-    timeInForce?: 0 | 1 | 2;
+    priceTicks?: bigint | undefined;
+    timeInForce?: 0 | 1 | 2 | undefined;
     minFillRatio: number;
   };
   swapOfferCancelRequested?: { offerId: string };
@@ -23108,19 +24306,21 @@ export function validateAccountSignatures(
 }
 
 
-//runtime/state-helpers.ts (728 lines)
+//runtime/state-helpers.ts (735 lines)
 /**
  * XLN State Management Helpers
  * Utilities for entity replica cloning, snapshots, and state persistence
  */
 
-import type { EntityReplica, EntityState, Env, RuntimeInput, AccountMachine, JReplica, LogCategory, AccountFrame, DebtEntry } from './types';
-import { DEBUG, HEAVY_LOGS } from './utils';
+import type { EntityReplica, EntityState, Env, AccountMachine, LogCategory, AccountFrame, AccountTx, DebtEntry } from './types';
+import { HEAVY_LOGS } from './utils';
 import { validateEntityState } from './validation-utils';
 import { safeStringify } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
+import { getAccountFrameHistoryView, setAccountFrameHistoryView } from './env-events';
 import { cloneJBatch, type CompletedBatch } from './j-batch';
 import type { CrontabState } from './crontab-types';
+import type { Profile } from './networking/gossip';
 import type {
   BookOrderState,
   BookState,
@@ -23294,12 +24494,13 @@ export function cloneAccountFrame(frame: AccountFrame): AccountFrame {
   try {
     return structuredClone(frame);
   } catch {
+    const accountTxs = frame.accountTxs.map(
+      (tx): AccountTx => ({ ...tx, data: tx.data ? structuredClone(tx.data) : tx.data }) as AccountTx,
+    );
     return {
       ...frame,
-      accountTxs: frame.accountTxs.map((tx) => ({ ...tx, data: tx.data ? structuredClone(tx.data) : tx.data })),
-      tokenIds: [...frame.tokenIds],
-      deltas: [...frame.deltas],
-      fullDeltaStates: frame.fullDeltaStates ? frame.fullDeltaStates.map((delta) => ({ ...delta })) : undefined,
+      accountTxs,
+      deltas: frame.deltas.map((delta) => ({ ...delta })),
     };
   }
 }
@@ -23607,6 +24808,7 @@ export function cloneAccountMachine(account: AccountMachine, forSnapshot: boolea
   // Normal clone - preserve clonedForValidation for consensus
   try {
     const cloned = structuredClone(account);
+    setAccountFrameHistoryView(cloned, getAccountFrameHistoryView(account));
     return cloned;
   } catch (error) {
     if (HEAVY_LOGS) {
@@ -23658,7 +24860,6 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
         }
       : {}),
     pendingSignatures: [...account.pendingSignatures],
-    frameHistory: account.frameHistory.map((frame) => cloneAccountFrame(frame)),
     globalCreditLimits: { ...account.globalCreditLimits },
     proofHeader: { ...account.proofHeader },
     proofBody: {
@@ -23718,6 +24919,10 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
 
   if (account.clonedForValidation && !skipClonedForValidation) {
     result.clonedForValidation = manualCloneAccountMachine(account.clonedForValidation, true);
+  }
+
+  if (!skipClonedForValidation) {
+    setAccountFrameHistoryView(result, getAccountFrameHistoryView(account));
   }
 
   if (skipClonedForValidation) {
@@ -24339,24 +25544,24 @@ const recomputedHash = await createFrameHash({...});
 
 **Impact:** ALL frame acceptance was blocked by this import error.
 
-### Pitfall 5: Receiver fullDeltaStates Mismatch
+### Pitfall 5: Receiver AccountFrame.deltas Mismatch
 
 **Bug Pattern:**
 ```typescript
 // Proposer
-const fullDeltaStates = sortedTokens.map(([_, delta]) => ({...delta}));
-const hash = createFrameHash({..., fullDeltaStates});
+const deltas = sortedTokens.map(([_, delta]) => ({...delta}));
+const hash = createFrameHash({..., deltas});
 
 // Receiver
-const hash = createFrameHash({..., fullDeltaStates: []});  // Empty!
+const hash = createFrameHash({..., deltas: []});  // Empty!
 // Hash mismatch → frame rejected
 ```
 
 **Fix:**
 ```typescript
-// Receiver computes fullDeltaStates identically to proposer
-const fullDeltaStates = sortedTokens.map(([_, delta]) => ({...delta}));
-const hash = createFrameHash({..., fullDeltaStates});
+// Receiver computes AccountFrame.deltas identically to proposer
+const deltas = sortedTokens.map(([_, delta]) => ({...delta}));
+const hash = createFrameHash({..., deltas});
 ```
 
 **Impact:** Credit extensions, collateral frames now verify correctly.

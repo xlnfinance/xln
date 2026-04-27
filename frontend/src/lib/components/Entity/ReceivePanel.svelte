@@ -53,10 +53,10 @@
         dark: '#f5efe6',
         light: '#171513',
       },
-    }).then((url) => {
+    }).then((url: string) => {
       if (nextJob !== qrJob) return;
       qrDataUrl = url;
-    }).catch((error) => {
+    }).catch((error: unknown) => {
       if (nextJob !== qrJob) return;
       qrDataUrl = '';
       qrError = error instanceof Error ? error.message : String(error);

@@ -28,6 +28,7 @@ export type {
   EnvSnapshot,
   EntityReplica,
   EntityState,
+  JReplica,
   SwapBookEntry,
   EntityTx,
   AccountMachine,
@@ -47,6 +48,7 @@ export type {
   RuntimeInput,
   EntityInput,
   RoutedEntityInput,
+  AccountTx,
   SettlementDiff,
 } from './types';
 export type { PersistedFrameJournal } from './wal/store';
@@ -106,6 +108,14 @@ import type { PersistedFrameJournal } from './wal/store';
 export type QueueEntityInputPayload = {
   type: string;
 } & Record<string, unknown>;
+
+export type BrowserVMTokenInfo = {
+  tokenId: number;
+  symbol: string;
+  name?: string;
+  address?: string;
+  decimals: number;
+};
 
 export type LoadEnvFromDbOptions = {
   fromSnapshotHeight?: number;
@@ -184,7 +194,7 @@ export interface XLNModule {
   getActiveJAdapter?: (env: Env | null) => JAdapter | null;
   submitDebtEnforcement: (env: Env, entityId: string, tokenId: number) => Promise<void>;
   processJBlockEvents?: (env: Env) => Promise<void>;
-  queueEntityInput?: (entityId: string, signerId: string, txData: QueueEntityInputPayload) => Promise<void>;
+  queueEntityInput?: (env: Env, entityId: string, signerId: string, txData: QueueEntityInputPayload) => Promise<void>;
   setDeltaTransformerAddress?: (address: string) => void;
 
   // Identity system (from ids.ts)
@@ -270,6 +280,9 @@ export interface XLNModule {
   // Runtime operations
   applyRuntimeInput: (env: Env, input: RuntimeInput) => Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[] }>;
   enqueueRuntimeInput: (env: Env, input: RuntimeInput) => void;
+  startRuntimeLoop?: (env: Env) => () => void;
+  closeRuntimeDb?: (env: Env) => Promise<void>;
+  closeInfraDb?: (env: Env) => Promise<void>;
   startP2P: (env: Env, config?: P2PConfig) => unknown;
   startJurisdictionWatchers: (env: Env) => void;
   stopP2P: (env: Env) => void;

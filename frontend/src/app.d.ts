@@ -5,8 +5,12 @@ declare global {
 	const __BUILD_TIME__: string;
 
 	interface Window {
-		__xln_instance?: typeof import('@xln/runtime/xln-api') | null;
+		__xln_instance?: import('@xln/runtime/xln-api').XLNModule | null;
 		__xln_env?: import('@xln/runtime').Env | null;
+	}
+
+	interface ImportMeta {
+		readonly main?: boolean;
 	}
 
 	namespace App {
@@ -16,6 +20,16 @@ declare global {
 		// interface PageState {}
 		// interface Platform {}
 	}
+}
+
+declare module 'qrcode' {
+	const QRCode: {
+		toDataURL(
+			text: string,
+			options?: Record<string, unknown>,
+		): Promise<string>;
+	};
+	export default QRCode;
 }
 
 export {};

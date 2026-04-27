@@ -270,7 +270,7 @@
     const scale = Number.isFinite(priceScale) && priceScale > 0 ? priceScale : 1;
     const bidTarget = Math.min(visibleDepth(), countPositiveLevels(bidSizes));
     const askTarget = Math.min(visibleDepth(), countPositiveLevels(askSizes));
-    let best = NUMERIC_PRICE_STEP_OPTIONS[0];
+    let best: (typeof NUMERIC_PRICE_STEP_OPTIONS)[number] = NUMERIC_PRICE_STEP_OPTIONS[0]!;
 
     for (const candidate of NUMERIC_PRICE_STEP_OPTIONS) {
       const stepTicks = BigInt(Math.max(1, Math.round(Number(candidate) * scale)));

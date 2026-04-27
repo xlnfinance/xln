@@ -52,9 +52,6 @@
   $: if (historyOnly && action !== 'history') {
     action = 'history';
   }
-  $: if (action === 'dispute') {
-    action = historyOnly ? 'history' : 'r2c';
-  }
 
   let gasPreset: GasPreset = 'standard';
   let customMaxFeeGwei = '';
@@ -177,7 +174,9 @@
     if (!canonical) return 'Unknown';
     const normalized = normalizeEntityId(canonical);
     if (normalized === normalizeEntityId(entityId)) return 'You';
-    const profiles = activeEnv?.gossip?.getProfiles?.() || [];
+    const profiles = activeEnv?.gossip && 'getProfiles' in activeEnv.gossip && typeof activeEnv.gossip.getProfiles === 'function'
+      ? activeEnv.gossip.getProfiles()
+      : [];
     for (const profile of profiles) {
       if (normalizeEntityId(profile.entityId) !== normalized) continue;
       const profileName = profile.name.trim();
@@ -512,7 +511,10 @@
 
     for (const accountId of accountEntityIds) add(accountId);
     for (const key of getFrameReplicaMap(activeEnv)?.keys?.() || []) add(String(key).split(':')[0]);
-    for (const profile of activeEnv?.gossip?.getProfiles?.() || []) add(profile.entityId);
+    const profiles = activeEnv?.gossip && 'getProfiles' in activeEnv.gossip && typeof activeEnv.gossip.getProfiles === 'function'
+      ? activeEnv.gossip.getProfiles()
+      : [];
+    for (const profile of profiles) add(profile.entityId);
 
     return Array.from(ids.values());
   })();

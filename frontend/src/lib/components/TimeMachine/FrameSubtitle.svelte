@@ -1,9 +1,9 @@
 <script lang="ts">
   export let subtitle: {
     title: string;
-    what: string;
-    why: string;
-    tradfiParallel: string;
+    what?: string;
+    why?: string;
+    tradfiParallel?: string;
     keyMetrics?: string[];
   } | undefined;
 
@@ -33,17 +33,17 @@
         <div class="card-row">
           <div class="card-section what">
             <span class="tag">What</span>
-            <p>{subtitle.what}</p>
+            <p>{subtitle.what ?? ''}</p>
           </div>
           <div class="card-section why">
             <span class="tag">Why</span>
-            <p>{subtitle.why}</p>
+            <p>{subtitle.why ?? ''}</p>
           </div>
         </div>
         <div class="card-row tradfi-row">
           <div class="card-section tradfi">
             <span class="tag">TradFi</span>
-            <p>{subtitle.tradfiParallel}</p>
+            <p>{subtitle.tradfiParallel ?? ''}</p>
           </div>
           {#if subtitle.keyMetrics && subtitle.keyMetrics.length > 0}
             <div class="card-section metrics">
