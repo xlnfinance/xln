@@ -94,16 +94,30 @@ const requireBaseConfig = (): {
   if (!baseUrl || !name || !seed || !signerLabel) {
     throw new Error('--base-url, --name, --seed, and --signer-label are required');
   }
-  return {
+  const result: {
+    baseUrl: string;
+    controlToken?: string;
+    name: string;
+    seed: string;
+    signerLabel: string;
+    relayUrl?: string;
+    gossipPollMs?: number;
+    position?: { x: number; y: number; z: number };
+  } = {
     baseUrl,
-    controlToken: getArg('--control-token', '').trim() || undefined,
     name,
     seed,
     signerLabel,
-    relayUrl: getArg('--relay-url', '').trim() || undefined,
-    gossipPollMs: parseOptionalNumber(getArg('--gossip-poll-ms', '')),
-    position: parsePosition(getArg('--position', '')),
   };
+  const controlToken = getArg('--control-token', '').trim();
+  if (controlToken) result.controlToken = controlToken;
+  const relayUrl = getArg('--relay-url', '').trim();
+  if (relayUrl) result.relayUrl = relayUrl;
+  const gossipPollMs = parseOptionalNumber(getArg('--gossip-poll-ms', ''));
+  if (gossipPollMs !== undefined) result.gossipPollMs = gossipPollMs;
+  const position = parsePosition(getArg('--position', ''));
+  if (position) result.position = position;
+  return result;
 };
 
 const run = async (): Promise<void> => {
@@ -115,10 +129,13 @@ const run = async (): Promise<void> => {
   const base = requireBaseConfig();
   const client = new DaemonControlClient({
     baseUrl: base.baseUrl,
-    controlToken: base.controlToken,
+    ...(base.controlToken ? { controlToken: base.controlToken } : {}),
   });
 
   if (command === 'enable-routing' || command === 'become-hub') {
+    const routingFeePPM = parseOptionalNumber(getArg('--routing-fee-ppm', ''));
+    const baseFee = parseOptionalBigInt(getArg('--base-fee', ''));
+    const swapTakerFeeBps = parseOptionalNumber(getArg('--swap-taker-fee-bps', ''));
     const config: EnableRoutingConfig = {
       name: base.name,
       seed: base.seed,
@@ -126,15 +143,9 @@ const run = async (): Promise<void> => {
       ...(base.position ? { position: base.position } : {}),
       ...(base.relayUrl ? { relayUrl: base.relayUrl } : {}),
       ...(base.gossipPollMs !== undefined ? { gossipPollMs: base.gossipPollMs } : {}),
-      ...(parseOptionalNumber(getArg('--routing-fee-ppm', '')) !== undefined
-        ? { routingFeePPM: parseOptionalNumber(getArg('--routing-fee-ppm', '')) }
-        : {}),
-      ...(parseOptionalBigInt(getArg('--base-fee', '')) !== undefined
-        ? { baseFee: parseOptionalBigInt(getArg('--base-fee', '')) }
-        : {}),
-      ...(parseOptionalNumber(getArg('--swap-taker-fee-bps', '')) !== undefined
-        ? { swapTakerFeeBps: parseOptionalNumber(getArg('--swap-taker-fee-bps', '')) }
-        : {}),
+      ...(routingFeePPM !== undefined ? { routingFeePPM } : {}),
+      ...(baseFee !== undefined ? { baseFee } : {}),
+      ...(swapTakerFeeBps !== undefined ? { swapTakerFeeBps } : {}),
       initOrderbook: !hasFlag('--no-orderbook'),
     };
     const result = command === 'become-hub'
@@ -145,6 +156,10 @@ const run = async (): Promise<void> => {
   }
 
   if (command === 'setup-custody') {
+    const creditAmount = parseOptionalBigInt(getArg('--credit-amount', ''));
+    const routingFeePPM = parseOptionalNumber(getArg('--routing-fee-ppm', ''));
+    const baseFee = parseOptionalBigInt(getArg('--base-fee', ''));
+    const swapTakerFeeBps = parseOptionalNumber(getArg('--swap-taker-fee-bps', ''));
     const config: SetupCustodyConfig = {
       name: base.name,
       seed: base.seed,
@@ -153,22 +168,14 @@ const run = async (): Promise<void> => {
       ...(base.relayUrl ? { relayUrl: base.relayUrl } : {}),
       ...(base.gossipPollMs !== undefined ? { gossipPollMs: base.gossipPollMs } : {}),
       hubEntityIds: parseIds(getArg('--hub-ids', '')),
-      ...(parseOptionalBigInt(getArg('--credit-amount', '')) !== undefined
-        ? { creditAmount: parseOptionalBigInt(getArg('--credit-amount', '')) }
-        : {}),
+      ...(creditAmount !== undefined ? { creditAmount } : {}),
       ...(getArg('--credit-token-ids', '').trim()
         ? { creditTokenIds: parseNumbers(getArg('--credit-token-ids', '')) }
         : {}),
       routingEnabled: hasFlag('--routing-enabled'),
-      ...(parseOptionalNumber(getArg('--routing-fee-ppm', '')) !== undefined
-        ? { routingFeePPM: parseOptionalNumber(getArg('--routing-fee-ppm', '')) }
-        : {}),
-      ...(parseOptionalBigInt(getArg('--base-fee', '')) !== undefined
-        ? { baseFee: parseOptionalBigInt(getArg('--base-fee', '')) }
-        : {}),
-      ...(parseOptionalNumber(getArg('--swap-taker-fee-bps', '')) !== undefined
-        ? { swapTakerFeeBps: parseOptionalNumber(getArg('--swap-taker-fee-bps', '')) }
-        : {}),
+      ...(routingFeePPM !== undefined ? { routingFeePPM } : {}),
+      ...(baseFee !== undefined ? { baseFee } : {}),
+      ...(swapTakerFeeBps !== undefined ? { swapTakerFeeBps } : {}),
     };
     const result = await setupCustody(client, config);
     console.log(serializeTaggedJson({ ok: true, command, result }));

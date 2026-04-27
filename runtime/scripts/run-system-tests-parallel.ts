@@ -12,10 +12,13 @@
  *   bun runtime/scripts/run-system-tests-parallel.ts --base-port=18545 --stream
  */
 
-import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { mkdirSync, createWriteStream, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
+import type { Readable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
+
+type PipedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 
 type RunStatus = 'passed' | 'failed';
 type RunResult = {
@@ -140,7 +143,7 @@ async function waitForRpcReady(rpcUrl: string, timeoutMs: number): Promise<void>
   throw new Error(`RPC not ready on ${rpcUrl} (expected chainId=31337 within ${timeoutMs}ms)`);
 }
 
-async function stopProcess(proc: ChildProcessWithoutNullStreams | null): Promise<void> {
+async function stopProcess(proc: PipedChildProcess | null): Promise<void> {
   if (!proc || proc.exitCode !== null) return;
   proc.kill('SIGTERM');
   const startedAt = Date.now();
@@ -158,7 +161,7 @@ function spawnAnvil(
   log: ReturnType<typeof createWriteStream>,
   stream: boolean,
   prefix: string,
-): ChildProcessWithoutNullStreams {
+): PipedChildProcess {
   const proc = spawn(anvilBin, [
     '--host', '127.0.0.1',
     '--port', String(port),
@@ -198,8 +201,8 @@ async function runScenarioOnWorker(
   const log = createWriteStream(logPath, { flags: 'w' });
   const workerDbPath = join(logsDir, `db-worker-${workerId}`);
   mkdirSync(workerDbPath, { recursive: true });
-  let anvil: ChildProcessWithoutNullStreams | null = null;
-  let child: ChildProcessWithoutNullStreams | null = null;
+  let anvil: PipedChildProcess | null = null;
+  let child: PipedChildProcess | null = null;
 
   try {
     const rpcUrl = `http://127.0.0.1:${port}`;
@@ -225,24 +228,25 @@ async function runScenarioOnWorker(
       },
     });
 
-    child.stdout.on('data', (chunk) => {
+    const activeChild = child;
+    activeChild.stdout.on('data', (chunk) => {
       const text = chunk.toString();
       log.write(text);
       if (args.stream) process.stdout.write(`[${prefix}] ${text}`);
     });
-    child.stderr.on('data', (chunk) => {
+    activeChild.stderr.on('data', (chunk) => {
       const text = chunk.toString();
       log.write(text);
       if (args.stream) process.stderr.write(`[${prefix}] ${text}`);
     });
 
     const timeout = setTimeout(() => {
-      if (child && child.exitCode === null) child.kill('SIGKILL');
+      if (activeChild.exitCode === null) activeChild.kill('SIGKILL');
     }, args.scenarioTimeoutMs);
 
     const exitCode = await new Promise<number | null>((resolveExit, rejectExit) => {
-      child?.once('error', rejectExit);
-      child?.once('exit', (code) => resolveExit(code));
+      activeChild.once('error', rejectExit);
+      activeChild.once('exit', (code) => resolveExit(code));
     });
     clearTimeout(timeout);
 
