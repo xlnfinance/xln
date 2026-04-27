@@ -20,10 +20,12 @@
 import type { Env, EntityInput } from '../types';
 import { getPerfMs } from '../utils';
 import { ensureJAdapter, getJAdapterMode, createJReplica } from './boot';
-import { findReplica, getOffdelta, converge, assert, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
+import { getOffdelta, converge, assert, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
+
+type ApplyRuntimeInputFn = typeof import('../runtime').applyRuntimeInput;
 
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
-let _applyRuntimeInput: ((env: Env, runtimeInput: any) => Promise<Env>) | null = null;
+let _applyRuntimeInput: ApplyRuntimeInputFn | null = null;
 
 const getProcess = async () => {
   if (!_process) {
@@ -33,7 +35,7 @@ const getProcess = async () => {
   return _process;
 };
 
-const getApplyRuntimeInput = async () => {
+const getApplyRuntimeInput = async (): Promise<ApplyRuntimeInputFn> => {
   if (!_applyRuntimeInput) {
     const runtime = await import('../runtime');
     _applyRuntimeInput = runtime.applyRuntimeInput;
@@ -84,11 +86,10 @@ export async function rapidFire(env: Env): Promise<void> {
     deltaTransformer: jadapter.addresses.deltaTransformer,
   };
 
-  const entities = [
-    { name: 'Alice', id: '0x' + '1'.padStart(64, '0'), signer: '1' },
-    { name: 'Hub', id: '0x' + '2'.padStart(64, '0'), signer: '2' },
-    { name: 'Bob', id: '0x' + '3'.padStart(64, '0'), signer: '3' },
-  ];
+  const alice = { name: 'Alice', id: '0x' + '1'.padStart(64, '0'), signer: '1' };
+  const hub = { name: 'Hub', id: '0x' + '2'.padStart(64, '0'), signer: '2' };
+  const bob = { name: 'Bob', id: '0x' + '3'.padStart(64, '0'), signer: '3' };
+  const entities = [alice, hub, bob];
 
   await applyRuntimeInput(env, {
     runtimeTxs: entities.map(e => ({
@@ -104,7 +105,6 @@ export async function rapidFire(env: Env): Promise<void> {
     entityInputs: [],
   });
 
-  const [alice, hub, bob] = entities;
   console.log(`  ✅ Created: ${entities.map(e => e.name).join(', ')}\n`);
 
   // ============================================================================
