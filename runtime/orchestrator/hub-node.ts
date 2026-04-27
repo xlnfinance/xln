@@ -2,7 +2,11 @@
 
 import { ethers, getIndexedAccountPath, HDNodeWallet, Mnemonic } from 'ethers';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
-import { dirname, join } from 'node:path';
+import { dirname } from 'node:path';
+import type {
+  ContractRunner as JurisdictionContractRunner,
+  Signer as JurisdictionSigner,
+} from '../../jurisdictions/node_modules/ethers/lib.esm/ethers';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { createExternalWalletApi } from '../api/external-wallet-api';
 import { createDirectRuntimeWsRoute } from '../networking/direct-runtime-bun';
@@ -55,9 +59,7 @@ import {
   HUB_RESERVE_TARGET_UNITS,
   hasAccount,
   hasQueuedOpenAccount,
-  hasPairMutualCredit,
   hasPairMutualCredits,
-  serializeReserves,
   settleRuntimeFor,
   sleep,
   waitUntil,
@@ -269,15 +271,25 @@ const timings: TimingMap = {
 
 const startTiming = (stage: keyof typeof timings): number => {
   const now = Date.now();
-  if (timings[stage].startedAt === null) timings[stage].startedAt = now;
+  const timing = timings[stage];
+  if (!timing) throw new Error(`UNKNOWN_TIMING_STAGE: ${String(stage)}`);
+  if (timing.startedAt === null) timing.startedAt = now;
   return now;
 };
 
 const finishTiming = (stage: keyof typeof timings, startedAt: number): void => {
   const ms = Date.now() - startedAt;
-  timings[stage].completedAt = Date.now();
-  timings[stage].ms = ms;
+  const timing = timings[stage];
+  if (!timing) throw new Error(`UNKNOWN_TIMING_STAGE: ${String(stage)}`);
+  timing.completedAt = Date.now();
+  timing.ms = ms;
   nodeLog.info('timing', { stage, ms });
+};
+
+const startedAtFor = (stage: keyof typeof timings): number | null => {
+  const timing = timings[stage];
+  if (!timing) throw new Error(`UNKNOWN_TIMING_STAGE: ${String(stage)}`);
+  return timing.startedAt;
 };
 
 const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig => {
@@ -511,7 +523,7 @@ const deployDefaultTokensOnRpc = async (jadapter: JAdapter): Promise<void> => {
   }
 
   console.log(`[${resolvedArgs.name}] deploying default tokens on dev chain`);
-  const signer = jadapter.signer;
+  const signer = jadapter.signer as unknown as JurisdictionSigner;
   const erc20Factory = new ERC20Mock__factory(signer);
   for (const token of DEFAULT_TOKENS) {
     if (existingSymbols.has(String(token.symbol || '').trim().toUpperCase())) {
@@ -524,7 +536,7 @@ const deployDefaultTokensOnRpc = async (jadapter: JAdapter): Promise<void> => {
     const approveTx = await tokenContract.approve(depositoryAddress, TOKEN_REGISTRATION_AMOUNT);
     await approveTx.wait();
 
-    const registerTx = await jadapter.depository.connect(signer).adminRegisterExternalToken({
+    const registerTx = await jadapter.depository.connect(signer as unknown as JurisdictionContractRunner).adminRegisterExternalToken({
       entity: ethers.ZeroHash,
       contractAddress: tokenAddress,
       externalTokenId: 0,
@@ -933,6 +945,8 @@ const run = async (): Promise<void> => {
       if (!bootstrap || !activeJAdapter) {
         return new Response(safeStringify({ error: 'HUB_NOT_READY' }), { status: 503, headers });
       }
+      const readyBootstrap = bootstrap;
+      const readyJAdapter = activeJAdapter;
 
       if (pathname === '/api/market/snapshots' && request.method === 'GET') {
         const pairIds = Array.from(new Set(
@@ -950,11 +964,11 @@ const run = async (): Promise<void> => {
         const depth = Number.isFinite(depthRaw)
           ? Math.max(1, Math.min(Math.floor(depthRaw), RPC_MARKET_MAX_DEPTH))
           : RPC_MARKET_DEFAULT_DEPTH;
-        const replica = getEntityReplicaById(env, bootstrap.entityId);
+        const replica = getEntityReplicaById(env, readyBootstrap.entityId);
         const snapshots = pairIds.map((pairId) =>
-          buildMarketSnapshotForReplica(replica, bootstrap.entityId, pairId, depth),
+          buildMarketSnapshotForReplica(replica, readyBootstrap.entityId, pairId, depth),
         );
-        return new Response(safeStringify({ hubEntityId: bootstrap.entityId, depth, snapshots }), { headers });
+        return new Response(safeStringify({ hubEntityId: readyBootstrap.entityId, depth, snapshots }), { headers });
       }
 
       if (pathname === '/api/tokens' && request.method === 'GET') {
@@ -1002,8 +1016,8 @@ const run = async (): Promise<void> => {
         tokenId = Number(tokenMeta.tokenId);
         const decimals = typeof tokenMeta.decimals === 'number' ? Number(tokenMeta.decimals) : 18;
         const amountWei = ethers.parseUnits(amount, decimals);
-        const prevUserReserve = await activeJAdapter.getReserves(userEntityId, tokenId).catch(() => 0n);
-        const hubReplica = getEntityReplicaById(env, bootstrap.entityId);
+        const prevUserReserve = await readyJAdapter.getReserves(userEntityId, tokenId).catch(() => 0n);
+        const hubReplica = getEntityReplicaById(env, readyBootstrap.entityId);
         const hubReserve = hubReplica?.state?.reserves?.get(tokenId) ?? 0n;
         if (hubReserve < amountWei) {
           return new Response(safeStringify({
@@ -1020,8 +1034,8 @@ const run = async (): Promise<void> => {
           enqueueRuntimeInput(env, {
             runtimeTxs: [],
             entityInputs: [{
-              entityId: bootstrap.entityId,
-              signerId: bootstrap.signerId,
+              entityId: readyBootstrap.entityId,
+              signerId: readyBootstrap.signerId,
               entityTxs: [
                 {
                   type: 'r2r',
@@ -1036,8 +1050,8 @@ const run = async (): Promise<void> => {
           enqueueRuntimeInput(env, {
             runtimeTxs: [],
             entityInputs: [{
-              entityId: bootstrap.entityId,
-              signerId: bootstrap.signerId,
+              entityId: readyBootstrap.entityId,
+              signerId: readyBootstrap.signerId,
               entityTxs: [{ type: 'j_broadcast', data: {} }],
             }],
           });
@@ -1045,7 +1059,7 @@ const run = async (): Promise<void> => {
 
         enqueueReserveTransfer();
         await waitForRuntimeIdle(env, 5000);
-        const broadcastWindowReady = await waitForEntityBroadcastWindow(env, bootstrap.entityId, 10000);
+        const broadcastWindowReady = await waitForEntityBroadcastWindow(env, readyBootstrap.entityId, 10000);
         if (!broadcastWindowReady) {
           return new Response(safeStringify({ error: 'Hub sentBatch did not clear in time' }), {
             status: 504,
@@ -1062,7 +1076,7 @@ const run = async (): Promise<void> => {
           });
         }
         const expectedMin = prevUserReserve + amountWei;
-        const updatedReserve = await waitForReserveUpdate(activeJAdapter, userEntityId, tokenId, expectedMin, 10000);
+        const updatedReserve = await waitForReserveUpdate(readyJAdapter, userEntityId, tokenId, expectedMin, 10000);
         if (updatedReserve === null) {
           return new Response(safeStringify({ error: 'Reserve update not confirmed on-chain' }), {
             status: 504,
@@ -1074,7 +1088,7 @@ const run = async (): Promise<void> => {
           type: 'reserve',
           amount,
           tokenId,
-          from: bootstrap.entityId,
+          from: readyBootstrap.entityId,
           to: userEntityId,
         }), { headers });
       }
@@ -1092,7 +1106,7 @@ const run = async (): Promise<void> => {
             headers,
           });
         }
-        if (!hasAccount(env, bootstrap.entityId, userEntityId)) {
+        if (!hasAccount(env, readyBootstrap.entityId, userEntityId)) {
           return new Response(safeStringify({
             success: false,
             code: 'FAUCET_ACCOUNT_NOT_OPEN',
@@ -1108,15 +1122,15 @@ const run = async (): Promise<void> => {
         enqueueRuntimeInput(env, {
           runtimeTxs: [],
           entityInputs: [{
-            entityId: bootstrap.entityId,
-            signerId: resolveEntityProposerId(env, bootstrap.entityId, 'hub-offchain-faucet'),
+            entityId: readyBootstrap.entityId,
+            signerId: resolveEntityProposerId(env, readyBootstrap.entityId, 'hub-offchain-faucet'),
             entityTxs: [{
               type: 'directPayment',
               data: {
                 targetEntityId: userEntityId,
                 tokenId,
                 amount: ethers.parseUnits(amount, 18),
-                route: [bootstrap.entityId, userEntityId],
+                route: [readyBootstrap.entityId, userEntityId],
                 description: 'faucet-offchain',
               },
             }],
@@ -1233,7 +1247,7 @@ const run = async (): Promise<void> => {
         .filter((profile): profile is { name: string; entityId: string } => profile !== null);
 
       if (!gossipReadyMarked && requiredHubProfiles.length === resolvedArgs.meshHubNames.length) {
-        finishTiming('gossip_ready', timings['gossip_ready'].startedAt ?? startTiming('gossip_ready'));
+        finishTiming('gossip_ready', startedAtFor('gossip_ready') ?? startTiming('gossip_ready'));
         gossipReadyMarked = true;
       } else if (!gossipReadyMarked) {
         startTiming('gossip_ready');
@@ -1339,7 +1353,7 @@ const run = async (): Promise<void> => {
           DEFAULT_ACCOUNT_TOKEN_IDS.every((tokenId) => Boolean(getAccountMachine(env, bootstrap.entityId, peer.entityId)?.deltas.get(tokenId))),
         );
       if (allAccountsReady && !accountsReadyMarked) {
-        finishTiming('mesh_accounts', timings['mesh_accounts'].startedAt ?? startTiming('mesh_accounts'));
+        finishTiming('mesh_accounts', startedAtFor('mesh_accounts') ?? startTiming('mesh_accounts'));
         accountsReadyMarked = true;
       }
 
@@ -1355,7 +1369,7 @@ const run = async (): Promise<void> => {
           hasPairMutualCredits(env, bootstrap.entityId, peer.entityId, DEFAULT_ACCOUNT_TOKEN_IDS, HUB_MESH_CREDIT_AMOUNT),
         );
       if (allCreditReady && !creditReadyMarked) {
-        finishTiming('mesh_credit', timings['mesh_credit'].startedAt ?? startTiming('mesh_credit'));
+        finishTiming('mesh_credit', startedAtFor('mesh_credit') ?? startTiming('mesh_credit'));
         creditReadyMarked = true;
       }
       if (allCreditReady && !reserveReadyMarked) {
@@ -1365,7 +1379,7 @@ const run = async (): Promise<void> => {
         const reserveHealth = await ensureBootstrapReserves(env, bootstrap.entityId, tokenCatalog);
         reserveReadyMarked = reserveHealth.targetMet === true;
       }
-      if (allCreditReady && reserveReadyMarked && timings['mesh_ready_total'].ms === null) {
+      if (allCreditReady && reserveReadyMarked && (timings['mesh_ready_total']?.ms ?? null) === null) {
         finishTiming('mesh_ready_total', totalMeshStartedAt);
       }
     } finally {
