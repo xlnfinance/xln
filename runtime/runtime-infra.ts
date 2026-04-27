@@ -1,5 +1,6 @@
 import type { Env, JReplica } from './types';
 import type { JAdapter } from './jadapter';
+import type { BrowserVMProvider, JAdapterConfig } from './jadapter/types';
 import { createJAdapter } from './jadapter';
 
 const hasLiveJAdapter = (value: unknown): value is JAdapter => {
@@ -18,7 +19,7 @@ export const rehydrateRestoredRuntimeInfra = async (
     isBrowser: boolean;
     loadGossipProfiles: (env: Env) => Promise<void>;
     assertPersistedContractConfigReady: (env: Env, label: string) => void;
-    setBrowserVMJurisdiction: (env: Env, depositoryAddress: string, browserVM: unknown) => void;
+    setBrowserVMJurisdiction: (env: Env | null, depositoryAddress: string, browserVM?: BrowserVMProvider | null) => void;
   },
 ): Promise<void> => {
   try {
@@ -68,18 +69,22 @@ export const rehydrateRestoredRuntimeInfra = async (
       const chainId = jReplica.chainId ?? 31337;
 
       if (!hasRpcs && restoredBrowserVM) {
-        jReplica.jadapter = await createJAdapter({
+        const adapterConfig: JAdapterConfig = {
           mode: 'browservm',
           chainId,
-          browserVMState: env.browserVMState,
-        });
+        };
+        if (env.browserVMState !== undefined) adapterConfig.browserVMState = env.browserVMState;
+        jReplica.jadapter = await createJAdapter(adapterConfig);
       } else if (hasRpcs) {
-        const jadapter = await createJAdapter({
+        const rpcUrl = jReplica.rpcs?.[0];
+        if (!rpcUrl) continue;
+        const adapterConfig: JAdapterConfig = {
           mode: 'rpc',
           chainId,
-          rpcUrl: jReplica.rpcs![0],
-          fromReplica: jReplica as any,
-        });
+          rpcUrl,
+          fromReplica: jReplica,
+        };
+        const jadapter = await createJAdapter(adapterConfig);
         if (!jadapter.addresses?.depository || !jadapter.addresses?.entityProvider) {
           throw new Error(
             `RESTORE_JADAPTER_ADDRESSES_MISSING: name=${name} ` +

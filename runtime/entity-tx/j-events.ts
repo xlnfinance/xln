@@ -1,8 +1,8 @@
-import type { EntityState, Delta, JBlockObservation, JBlockFinalized, JurisdictionEvent, Env, AccountMachine, DebtEntry, DebtEventType } from '../types';
+import type { EntityState, JBlockObservation, JBlockFinalized, JurisdictionEvent, Env, DebtEntry, DebtEventType } from '../types';
+import type { CompletedBatch } from '../j-batch';
 import { ethers } from 'ethers';
-import { DEBUG } from '../utils';
-import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-helpers';
-import { getTokenInfo } from '../account-utils';
+import { cloneEntityState, addMessage } from '../state-helpers';
+import { getDefaultCreditLimit, getTokenInfo } from '../account-utils';
 import { safeStringify } from '../serialization-utils';
 import { CANONICAL_J_EVENTS } from '../jadapter/helpers';
 import { hashHtlcSecret } from '../htlc-utils';
@@ -77,7 +77,7 @@ function emptyOpBreakdown() {
   };
 }
 
-function appendBatchHistory(state: EntityState, entry: Record<string, any>): void {
+function appendBatchHistory(state: EntityState, entry: CompletedBatch): void {
   if (!state.batchHistory) state.batchHistory = [];
   const last = state.batchHistory[state.batchHistory.length - 1];
   const sameAsLast =
@@ -314,7 +314,7 @@ function decodeDisputeInitialSecrets(initialArgumentsRaw: unknown): string[] {
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   let argArray: string[];
   try {
-    [argArray] = abiCoder.decode(['bytes[]'], initialArguments) as [string[]];
+    [argArray] = abiCoder.decode(['bytes[]'], initialArguments) as unknown as [string[]];
   } catch {
     return [];
   }
@@ -323,7 +323,7 @@ function decodeDisputeInitialSecrets(initialArgumentsRaw: unknown): string[] {
   for (const arg of argArray) {
     if (!arg || arg === '0x') continue;
     try {
-      const [, decodedSecrets] = abiCoder.decode(['uint16[]', 'bytes32[]'], arg) as [Array<bigint>, Array<string>];
+      const [, decodedSecrets] = abiCoder.decode(['uint16[]', 'bytes32[]'], arg) as unknown as [Array<bigint>, Array<string>];
       for (const secret of decodedSecrets) {
         if (ethers.isHexString(secret, 32)) {
           secrets.add(String(secret).toLowerCase());
@@ -822,11 +822,20 @@ function mergeAccountJObservations(observations: Array<{ jHeight: number; jBlock
   let i = 0;
   while (i < observations.length) {
     const obs = observations[i];
+    if (!obs) {
+      observations.splice(i, 1);
+      continue;
+    }
     const key = `${obs.jHeight}:${obs.jBlockHash}`;
     const existing = groups.get(key);
     if (existing !== undefined) {
       // Merge events into existing observation (dedup by type+data)
       const target = observations[existing];
+      if (!target) {
+        groups.delete(key);
+        i++;
+        continue;
+      }
       const normalizedEvents = normalizeJurisdictionEvents(obs.events);
       for (const ev of normalizedEvents) {
         const evKey = canonicalJurisdictionEventKey(ev);
@@ -850,12 +859,21 @@ function mergeJEventClaimOps(ops: Array<{ accountId: string; tx: any }>): void {
   let i = 0;
   while (i < ops.length) {
     const op = ops[i];
+    if (!op) {
+      ops.splice(i, 1);
+      continue;
+    }
     if (op.tx.type !== 'j_event_claim') { i++; continue; }
     const key = `${op.accountId}:${op.tx.data.jHeight}:${op.tx.data.jBlockHash}`;
     const existing = groups.get(key);
     if (existing !== undefined) {
       // Merge events into existing op
       const target = ops[existing];
+      if (!target) {
+        groups.delete(key);
+        i++;
+        continue;
+      }
       const normalizedEvents = normalizeJurisdictionEvents(op.tx.data.events);
       for (const ev of normalizedEvents) {
         target.tx.data.events.push(ev);
@@ -1103,7 +1121,7 @@ async function applyFinalizedJEvent(
 
   } else if (event.type === 'AccountSettled') {
     // Universal settlement event (covers R2C, C2R, settle, rebalance)
-    const { leftEntity, rightEntity, tokenId, leftReserve, rightReserve, collateral, ondelta } = event.data;
+    const { leftEntity, rightEntity, tokenId, leftReserve, rightReserve, collateral } = event.data;
     const tokenIdNum = Number(tokenId);
     const myEntityId = String(entityState.entityId).toLowerCase();
     const leftId = String(leftEntity).toLowerCase();
@@ -1195,7 +1213,7 @@ async function applyFinalizedJEvent(
   // ═══════════════════════════════════════════════════════════════════════════
 
   } else if (event.type === 'DebtCreated') {
-    const { debtor, creditor, tokenId, amount, debtIndex } = event.data;
+    const { debtor, creditor, tokenId, amount } = event.data;
     const tokenSymbol = getTokenSymbol(tokenId as number);
     const decimals = getTokenDecimals(tokenId as number);
     const amountDisplay = (Number(amount) / (10 ** decimals)).toFixed(4);
@@ -1204,7 +1222,7 @@ async function applyFinalizedJEvent(
     addMessage(newState, `🔴 DEBT: ${(debtor as string).slice(-8)} owes ${amountDisplay} ${tokenSymbol} to ${(creditor as string).slice(-8)} | Block ${blockNumber}`);
 
   } else if (event.type === 'DebtEnforced') {
-    const { debtor, creditor, tokenId, amountPaid, remainingAmount, newDebtIndex } = event.data;
+    const { creditor, tokenId, amountPaid } = event.data;
     const tokenSymbol = getTokenSymbol(tokenId as number);
     const decimals = getTokenDecimals(tokenId as number);
     const paidDisplay = (Number(amountPaid) / (10 ** decimals)).toFixed(4);
@@ -1248,13 +1266,17 @@ async function applyFinalizedJEvent(
     if (account) {
       account.status = 'disputed';
       const weAreStarter = senderStr === entityIdNorm;
+      const disputeEventData = event.data as typeof event.data & {
+        disputeTimeout?: unknown;
+        onChainNonce?: unknown;
+      };
       const disputeTimeout =
-        Number(event.data.disputeTimeout ?? 0) ||
+        Number(disputeEventData.disputeTimeout ?? 0) ||
         (
           Number(blockNumber || 0) +
           getRuntimeJurisdictionDefaultDisputeDelayBlocks(env, newState.config.jurisdiction?.name, 5)
         );
-      const onChainNonce = Number(event.data.onChainNonce ?? nonce);
+      const onChainNonce = Number(disputeEventData.onChainNonce ?? nonce);
 
       // Store dispute state from event payload only.
       // Unified nonce: initialNonce = the nonce used in disputeStart (from event)
@@ -1474,7 +1496,9 @@ async function applyFinalizedJEvent(
 
       // DisputeFinalized is authoritative. Clear the off-chain component and transient holds
       // using locally stored proof-body knowledge only.
-      const finalizedProofBody = finalProofbodyHash ? account.disputeProofBodiesByHash?.[finalProofbodyHash] : undefined;
+      const finalizedProofBody = finalProofbodyHash
+        ? account.disputeProofBodiesByHash?.[finalProofbodyHash] as { tokenIds?: unknown[]; offdeltas?: unknown[] } | undefined
+        : undefined;
       if (finalizedProofBody && Array.isArray(finalizedProofBody.tokenIds) && Array.isArray(finalizedProofBody.offdeltas)) {
         for (let i = 0; i < finalizedProofBody.tokenIds.length; i += 1) {
           const tokenId = Number(finalizedProofBody.tokenIds[i]);
@@ -1568,13 +1592,13 @@ async function applyFinalizedJEvent(
           opCount,
           entityNonce: Number(nonce),
           jBlockNumber: Number(blockNumber || 0),
-          batch: sentBatch?.batch ? cloneJBatch(sentBatch.batch) : undefined,
-          operations: opBreakdown,
+          ...(sentBatch?.batch ? { batch: cloneJBatch(sentBatch.batch) } : {}),
+          ...(opBreakdown ? { operations: opBreakdown } : {}),
           source: 'self-batch' as const,
         });
 
         // Clear sent batch for next cycle.
-        newState.jBatchState.sentBatch = undefined;
+        delete newState.jBatchState.sentBatch;
         newState.jBatchState.status = isBatchEmpty(newState.jBatchState.batch) ? 'empty' : 'accumulating';
         // Authoritative nonce sync from on-chain finalized event.
         // Never trust optimistic local increments from submission path.
@@ -1607,8 +1631,8 @@ async function applyFinalizedJEvent(
           opCount,
           entityNonce: Number(nonce),
           jBlockNumber: Number(blockNumber || 0),
-          batch: sentBatch?.batch ? cloneJBatch(sentBatch.batch) : undefined,
-          operations: opBreakdown,
+          ...(sentBatch?.batch ? { batch: cloneJBatch(sentBatch.batch) } : {}),
+          ...(opBreakdown ? { operations: opBreakdown } : {}),
           source: 'self-batch' as const,
         });
 
@@ -1634,7 +1658,7 @@ async function applyFinalizedJEvent(
             }
           }
         }
-        newState.jBatchState.sentBatch = undefined;
+        delete newState.jBatchState.sentBatch;
         newState.jBatchState.status = isBatchEmpty(newState.jBatchState.batch) ? 'failed' : 'accumulating';
       }
       // Batch is atomic on-chain; success=false means none of its ops applied.
