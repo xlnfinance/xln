@@ -75,7 +75,7 @@ export const getEntityInfoFromChain = async (
   try {
     const { entityProvider } = await connectJurisdictionContracts(jurisdiction);
     const entityInfo = await entityProvider.entities(entityId);
-    if (Number(entityInfo.status) === 0) return { exists: false };
+    if (entityInfo.registrationBlock === 0n) return { exists: false };
 
     const entityType = detectEntityType(entityId);
     let entityNumber: number | undefined;
