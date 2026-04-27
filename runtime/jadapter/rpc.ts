@@ -11,10 +11,9 @@
  */
 
 import { ethers } from 'ethers';
-import type { ContractRunner, ContractTransactionResponse, Provider, Signer, TransactionReceipt } from 'ethers';
+import type { ContractRunner, Provider, Signer } from 'ethers';
 
 import type { Account, Depository, EntityProvider, DeltaTransformer } from '../../jurisdictions/typechain-types/index.ts';
-import type { TypedContractMethod } from '../../jurisdictions/typechain-types/common.ts';
 import {
   Account__factory,
   Depository__factory,
@@ -226,8 +225,38 @@ export async function createRpcAdapter(
   );
   const MAX_FEE_PER_GAS_WEI = ethers.parseUnits(String(MAX_FEE_PER_GAS_GWEI), 'gwei');
   const DEFAULT_PROCESS_BATCH_GAS = 5_000_000n;
-  const DEFAULT_SETTLE_GAS = 2_000_000n;
-  type RpcReceipt = TransactionReceipt;
+  type RpcReceipt = Parameters<typeof parseReceiptLogsToJEvents>[0] & {
+    gasUsed?: bigint;
+  };
+  type RpcTxResponse = {
+    hash: string;
+    wait(confirms?: number, timeout?: number): Promise<unknown | null>;
+  };
+  type FeeOverrides = {
+    maxFeePerGas?: bigint;
+    maxPriorityFeePerGas?: bigint;
+  };
+  type TxOverrides = FeeOverrides & { gasLimit?: bigint; nonce?: number };
+  type UntypedNonPayableMethod = {
+    estimateGas: (...args: unknown[]) => Promise<bigint>;
+    (...args: unknown[]): Promise<unknown>;
+  };
+  const asFactoryRunner = (runner: unknown): Parameters<typeof Account__factory.connect>[1] =>
+    runner as Parameters<typeof Account__factory.connect>[1];
+  const makeAccountFactory = (runner: unknown): Account__factory =>
+    new (Account__factory as unknown as new (runner: unknown) => Account__factory)(runner);
+  const makeEntityProviderFactory = (runner: unknown): EntityProvider__factory =>
+    new (EntityProvider__factory as unknown as new (runner: unknown) => EntityProvider__factory)(runner);
+  const makeDeltaTransformerFactory = (runner: unknown): DeltaTransformer__factory =>
+    new (DeltaTransformer__factory as unknown as new (runner: unknown) => DeltaTransformer__factory)(runner);
+  const makeErc20MockFactory = (runner: unknown): ERC20Mock__factory =>
+    new (ERC20Mock__factory as unknown as new (runner: unknown) => ERC20Mock__factory)(runner);
+  const eventCarriers = (
+    ...contracts: Array<{ interface: unknown }>
+  ): Parameters<typeof parseReceiptLogsToJEvents>[1] =>
+    contracts.map((contract) => ({ interface: contract.interface as ethers.Interface }));
+  const asRpcTxResponse = (tx: unknown): RpcTxResponse => tx as RpcTxResponse;
+  const asRpcReceipt = (receipt: unknown): RpcReceipt => receipt as RpcReceipt;
 
   trace('provider.getNetwork:start');
   const rpcChainId = Number((await provider.getNetwork()).chainId);
@@ -250,7 +279,7 @@ export async function createRpcAdapter(
     });
   };
 
-  const buildFeeOverrides = async (): Promise<Record<string, bigint>> => {
+  const buildFeeOverrides = async (): Promise<FeeOverrides> => {
     const feeData = await provider.getFeeData();
     if (feeData.maxFeePerGas && feeData.maxPriorityFeePerGas) {
       return {
@@ -265,12 +294,13 @@ export async function createRpcAdapter(
     );
   };
 
-  const waitForReceipt = async (tx: ContractTransactionResponse, label: string): Promise<RpcReceipt> => {
+  const waitForReceipt = async (txLike: unknown, label: string): Promise<RpcReceipt> => {
+    const tx = asRpcTxResponse(txLike);
     const receipt = await tx.wait(TX_WAIT_CONFIRMS, TX_WAIT_TIMEOUT_MS);
     if (!receipt) {
       throw new Error(`${label} transaction not mined (hash=${tx.hash})`);
     }
-    return receipt;
+    return asRpcReceipt(receipt);
   };
 
   const getBatchSignerPrivateKey = (): string => {
@@ -303,7 +333,9 @@ export async function createRpcAdapter(
           currentNonce,
         );
 
-        const depositoryWithSigner = txSigner ? depository.connect(txSigner) : depository;
+        const depositoryWithSigner = txSigner
+          ? depository.connect(txSigner as unknown as Parameters<typeof depository.connect>[0])
+          : depository;
         const feeOverrides = await buildFeeOverrides();
         const gasLimit = await estimateGasWithHeadroom(
           () => depositoryWithSigner.processBatch.estimateGas(encodedBatch, hankoData, nextNonce),
@@ -316,7 +348,7 @@ export async function createRpcAdapter(
           ...feeOverrides,
         });
         const receipt = await waitForReceipt(tx, 'processBatch');
-        const events = parseReceiptLogsToJEvents(receipt, [depository, entityProvider]);
+        const events = parseReceiptLogsToJEvents(receipt, eventCarriers(depository, entityProvider));
 
         return {
           txHash: receipt.hash,
@@ -338,40 +370,32 @@ export async function createRpcAdapter(
     }
   };
 
-  type NonPayableMethod<TArgs extends unknown[], TResult> = TypedContractMethod<TArgs, [TResult], 'nonpayable'>;
   type SendTxOptions = {
     gasFallback: bigint;
     txNonce: number | null;
     resetSignerNonce: boolean;
   };
 
-  const sendTypedTx = async <TArgs extends unknown[], TResult>(
+  const sendTypedTx = async (
     label: string,
-    method: NonPayableMethod<TArgs, TResult>,
-    args: [...TArgs],
+    method: unknown,
+    args: unknown[],
     options: SendTxOptions,
-  ) => {
+  ): Promise<RpcReceipt> => {
+    const txMethod = method as UntypedNonPayableMethod;
     const gasLimit = await estimateGasWithHeadroom(
-      () => method.estimateGas(...args),
+      () => txMethod.estimateGas(...args),
       options.gasFallback,
     );
     if (options.resetSignerNonce) {
       maybeResetSignerNonce();
     }
     const feeOverrides = await buildFeeOverrides();
-    const overrides = options.txNonce === null
+    const overrides: TxOverrides = options.txNonce === null
       ? { gasLimit, ...feeOverrides }
       : { gasLimit, nonce: options.txNonce, ...feeOverrides };
-    const tx = await method(...args, overrides);
+    const tx = await txMethod(...args, overrides);
     return waitForReceipt(tx, label);
-  };
-
-  const readSignerTxNonce = async (): Promise<number> => {
-    const signerAddress = await signer.getAddress();
-    return Math.max(
-      await provider.getTransactionCount(signerAddress, 'latest'),
-      await provider.getTransactionCount(signerAddress, 'pending'),
-    );
   };
 
   const resolveFinalityDepth = (scenarioMode: boolean): number => {
@@ -463,7 +487,7 @@ export async function createRpcAdapter(
   const sendSignerTxWithExplicitNonce = async (
     activeSigner: Signer,
     label: string,
-    send: (nonce: number, feeOverrides: Record<string, bigint>) => Promise<ContractTransactionResponse>,
+    send: (nonce: number, feeOverrides: FeeOverrides) => Promise<unknown>,
   ): Promise<RpcReceipt> => {
     for (let attempt = 1; attempt <= 2; attempt++) {
       try {
@@ -579,10 +603,10 @@ export async function createRpcAdapter(
     } else {
       trace('fromReplica.connect:start');
       // Use any cast to handle ethers version mismatch between root and jurisdictions
-      account = Account__factory.connect(addresses.account, signer);
-      depository = Depository__factory.connect(addresses.depository, signer);
-      entityProvider = EntityProvider__factory.connect(addresses.entityProvider, signer);
-      deltaTransformer = DeltaTransformer__factory.connect(addresses.deltaTransformer, signer);
+      account = Account__factory.connect(addresses.account, asFactoryRunner(signer));
+      depository = Depository__factory.connect(addresses.depository, asFactoryRunner(signer));
+      entityProvider = EntityProvider__factory.connect(addresses.entityProvider, asFactoryRunner(signer));
+      deltaTransformer = DeltaTransformer__factory.connect(addresses.deltaTransformer, asFactoryRunner(signer));
       trace('fromReplica.connect:done');
       trace('fromReplica.getAddress:start');
       addresses.account = await account.getAddress();
@@ -610,17 +634,6 @@ export async function createRpcAdapter(
       entityProvider ? await entityProvider.getAddress() : addresses.entityProvider,
     );
 
-  // Check if RPC supports snapshots (anvil)
-  const supportsSnapshots = async (): Promise<boolean> => {
-    try {
-      const rpc = provider as ethers.JsonRpcProvider;
-      await rpc.send('evm_snapshot', []);
-      return true;
-    } catch {
-      return false;
-    }
-  };
-
   const adapter: JAdapter = {
     mode: config.mode,
     chainId: config.chainId,
@@ -644,7 +657,7 @@ export async function createRpcAdapter(
 
       // Deploy Account library
       // Use any cast to handle ethers version mismatch between root and jurisdictions
-      const accountFactory = new Account__factory(signer);
+      const accountFactory = makeAccountFactory(signer);
       const accountContract = await accountFactory.deploy();
       await accountContract.waitForDeployment();
       addresses.account = await accountContract.getAddress();
@@ -652,7 +665,7 @@ export async function createRpcAdapter(
       console.log(`  Account: ${addresses.account}`);
 
       // Deploy EntityProvider
-      const entityProviderFactory = new EntityProvider__factory(signer);
+      const entityProviderFactory = makeEntityProviderFactory(signer);
       const entityProviderContract = await entityProviderFactory.deploy();
       await entityProviderContract.waitForDeployment();
       addresses.entityProvider = await entityProviderContract.getAddress();
@@ -689,11 +702,11 @@ export async function createRpcAdapter(
       });
       await depositoryContract.waitForDeployment();
       addresses.depository = await depositoryContract.getAddress();
-      depository = Depository__factory.connect(addresses.depository, signer);
+      depository = Depository__factory.connect(addresses.depository, asFactoryRunner(signer));
       console.log(`  Depository: ${addresses.depository}`);
 
       // Deploy DeltaTransformer
-      const deltaTransformerFactory = new DeltaTransformer__factory(signer);
+      const deltaTransformerFactory = makeDeltaTransformerFactory(signer);
       const deltaTransformerContract = await deltaTransformerFactory.deploy();
       await deltaTransformerContract.waitForDeployment();
       addresses.deltaTransformer = await deltaTransformerContract.getAddress();
@@ -702,7 +715,7 @@ export async function createRpcAdapter(
       console.log(`  DeltaTransformer: ${addresses.deltaTransformer}`);
 
       // Deploy bootstrap ERC20 test token (5th contract in local anvil stack)
-      const erc20Factory = new ERC20Mock__factory(signer);
+      const erc20Factory = makeErc20MockFactory(signer);
       const erc20Contract = await erc20Factory.deploy('USD Coin', 'USDC', ethers.parseUnits('10000000000', 18));
       await erc20Contract.waitForDeployment();
       const erc20Address = await erc20Contract.getAddress();
@@ -995,7 +1008,7 @@ export async function createRpcAdapter(
               resetSignerNonce: true,
             },
           );
-          const events = parseReceiptLogsToJEvents(receipt, [depository, entityProvider]);
+          const events = parseReceiptLogsToJEvents(receipt, eventCarriers(depository, entityProvider));
 
           return {
             txHash: receipt.hash,
@@ -1044,7 +1057,7 @@ export async function createRpcAdapter(
                 resetSignerNonce: false,
               },
             );
-            return parseReceiptLogsToJEvents(receipt, [depository]);
+            return parseReceiptLogsToJEvents(receipt, eventCarriers(depository));
           } catch (error) {
             await resetSerializedSignerNonce();
             throw error;
@@ -1106,7 +1119,7 @@ export async function createRpcAdapter(
               resetSignerNonce: false,
             },
           );
-          return parseReceiptLogsToJEvents(receipt, [depository]);
+          return parseReceiptLogsToJEvents(receipt, eventCarriers(depository));
         } catch (error) {
           await resetSerializedSignerNonce();
           throw error;
@@ -1166,8 +1179,8 @@ export async function createRpcAdapter(
         const approveFn = erc20.getFunction('approve') as (
           spender: string,
           amount: bigint,
-          overrides?: Record<string, bigint>
-        ) => Promise<ContractTransactionResponse>;
+          overrides?: TxOverrides
+        ) => Promise<unknown>;
         await runSerializedBatchFor(signerWallet, async () => {
           if (allowance > 0n) {
             await sendSignerTxWithExplicitNonce(
@@ -1252,8 +1265,8 @@ export async function createRpcAdapter(
       const approveFn = erc20.getFunction('approve') as (
         spenderAddress: string,
         approvalAmount: bigint,
-        overrides?: Record<string, bigint>
-      ) => Promise<ContractTransactionResponse>;
+        overrides?: TxOverrides
+      ) => Promise<unknown>;
       const [tokenCode, spenderCode] = await Promise.all([
         readContractCode(provider, config.rpcUrl, tokenAddress),
         readContractCode(provider, config.rpcUrl, spender),
@@ -1313,11 +1326,11 @@ export async function createRpcAdapter(
       const transferFn = erc20.getFunction('transfer') as (
         recipient: string,
         transferAmount: bigint,
-        overrides?: Record<string, bigint>
-      ) => Promise<{ hash: string }>;
+        overrides?: FeeOverrides
+      ) => Promise<unknown>;
       const tx = await transferFn(to, amount, await buildFeeOverrides());
       await waitForReceipt(tx, 'transferErc20');
-      return tx.hash;
+      return asRpcTxResponse(tx).hash;
     },
 
     async transferNative(
@@ -1420,7 +1433,9 @@ export async function createRpcAdapter(
                 return wallet;
               })()
             : null;
-          const submitterDepository = externalSubmitterWallet ? depository.connect(externalSubmitterWallet) : depository;
+          const submitterDepository = externalSubmitterWallet
+            ? depository.connect(externalSubmitterWallet as unknown as Parameters<typeof depository.connect>[0])
+            : depository;
           // Use pre-provided encoded batch + hanko (from entity consensus) or sign locally
           let encodedBatch: string;
           let hankoData: string;
@@ -1752,6 +1767,7 @@ export async function createRpcAdapter(
                 const args: RawJEventArgs = {};
                 for (let idx = 0; idx < parsed.fragment.inputs.length; idx++) {
                   const input = parsed.fragment.inputs[idx];
+                  if (!input) continue;
                   const key = input.name || String(idx);
                   args[key] = parsed.args[idx]; // Use positional index (always works)
                   if (input.name) args[input.name] = parsed.args[idx];
