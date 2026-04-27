@@ -5,7 +5,7 @@
 
 import { applyEntityTx } from './entity-tx';
 import { isLeftEntity } from './entity-id-utils';
-import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env, HankoString, JInput, JurisdictionEvent, JurisdictionEventData, RoutedEntityInput } from './types';
+import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env, HankoString, HashType, JInput, JurisdictionEvent, JurisdictionEventData, RoutedEntityInput } from './types';
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, formatSignerDisplay, log } from './utils';
 import { safeStringify } from './serialization-utils';
 import { logError } from './logger';
@@ -13,7 +13,6 @@ import {
   addMessages,
   cloneEntityReplica,
   cloneEntityState,
-  canonicalAccountKey,
   getAccountPerspective,
   emitScopedEvents,
   removeCommittedTxsFromMempool,
@@ -202,6 +201,8 @@ type HankoWitnessEntry = {
   createdAt: number;
 };
 
+const isWitnessHashType = (type: HashType): type is HankoWitnessEntry['type'] => type !== 'entityFrame';
+
 const attachHankoWitnessToOutputs = (
   outputs: EntityInput[],
   jOutputs: JInput[],
@@ -370,25 +371,6 @@ const validateEntityReplica = (replica: EntityReplica): boolean => {
 };
 
 /**
- * Detects Byzantine faults like double-signing
- */
-const detectByzantineFault = (signatures: Map<string, string>, signerId: string, newSignature: string): boolean => {
-  try {
-    const existingSig = signatures.get(signerId);
-    if (existingSig && existingSig !== newSignature) {
-      log.error(`❌ BYZANTINE FAULT: Double-sign detected from ${signerId}`);
-      log.error(`❌ Existing: ${existingSig}`);
-      log.error(`❌ New: ${newSignature}`);
-      return true;
-    }
-    return false;
-  } catch (error) {
-    log.error(`❌ Byzantine detection error: ${error}`);
-    return false;
-  }
-};
-
-/**
  * Validates voting power to prevent overflow attacks
  */
 const validateVotingPower = (power: bigint): boolean => {
@@ -449,7 +431,7 @@ export const applyEntityInput = async (
   // SECURITY: Validate all inputs
   if (!validateEntityInput(entityInput)) {
     const detail = `entityId=${entityInput.entityId} txs=${entityInput.entityTxs?.map(tx => tx.type).join(',') || 'none'}`;
-    log.error(`❌ Invalid input for ${entityInput.entityId}`);
+    log.error(`❌ Invalid input for ${entityInput.entityId}: ${detail}`);
     return { newState: workingReplica.state, outputs: [], jOutputs: [], workingReplica };
   }
   if (!validateEntityReplica(workingReplica)) {
@@ -799,10 +781,10 @@ export const applyEntityInput = async (
         for (let i = 0; i < proposal.hashesToSign.length; i++) {
           const hashInfo = proposal.hashesToSign[i];
           const hanko = committedHankos[i];
-          if (hashInfo && hanko) {
+          if (hashInfo && hanko && isWitnessHashType(hashInfo.type)) {
             workingReplica.hankoWitness.set(hashInfo.hash, {
               hanko,
-              type: hashInfo.type as 'accountFrame' | 'dispute' | 'settlement' | 'profile' | 'jBatch',
+              type: hashInfo.type,
               entityHeight: workingReplica.state.height + 1,
               createdAt: env.timestamp,
             });
@@ -1029,6 +1011,7 @@ export const applyEntityInput = async (
       const hashInfo = hashesToSign[i];
       const hanko = hankos[i];
       if (!hashInfo || !hanko) continue;
+      if (!isWitnessHashType(hashInfo.type)) continue;
       workingReplica.hankoWitness.set(hashInfo.hash, {
         hanko,
         type: hashInfo.type,
@@ -1132,8 +1115,6 @@ export const applyEntityInput = async (
       workingReplica.mempool,
       deterministicForHash
     );
-    const selfSignature = signFrame(env, workingReplica.signerId, frameHash);
-
     // Collect all hashes that need signing (entity frame hash FIRST + account/dispute hashes with types)
     // CRITICAL: entityFrame hash must stay at index 0 for legacy compatibility (signatures map uses sigs[0])
     const entityFrameHashToSign: import('./types').HashToSign = {
@@ -1216,7 +1197,7 @@ export const applyEntityInput = async (
     const hashPrecommitCount = output.hashPrecommits?.size || 0;
     if (!quietRuntimeLogs) {
       console.log(
-        `🔍 OUTPUT-${index + 1}: [${timestamp}] To Entity #${targetDisplay}:${formatSignerDisplay(output.signerId)} - txs=${output.entityTxs?.length || 0}, hashPrecommits=${hashPrecommitCount}, frame=${outputFrameHash}`,
+        `🔍 OUTPUT-${index + 1}: [${timestamp}] To Entity #${targetDisplay}:${formatSignerDisplay(output.signerId ?? '')} - txs=${output.entityTxs?.length || 0}, hashPrecommits=${hashPrecommitCount}, frame=${outputFrameHash}`,
       );
     }
 
@@ -1294,7 +1275,6 @@ export const applyEntityFrame = async (
       mempoolOps,
       swapOffersCreated,
       swapCancelRequests,
-      swapOffersCancelled,
     } = await applyEntityTx(env, currentEntityState, entityTx);
     currentEntityState = newState;
 
@@ -1742,8 +1722,10 @@ const mergeJEventTxs = (txs: EntityTx[]): EntityTx[] => {
       mergedEvents.push(event);
     }
 
+    const firstMergedEvent = mergedEvents[0];
+    if (!firstMergedEvent) continue;
     existingData.events = mergedEvents;
-    existingData.event = mergedEvents[0];
+    existingData.event = firstMergedEvent;
 
     if (typeof data.observedAt === 'number') {
       if (typeof existingData.observedAt !== 'number' || data.observedAt < existingData.observedAt) {
