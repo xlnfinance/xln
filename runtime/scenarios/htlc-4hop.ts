@@ -30,6 +30,11 @@ function findReplica(env: Env, entityId: string) {
   return entry;
 }
 
+function requireEconomyEntity(entity: EconomyEntity | undefined, label: string): EconomyEntity {
+  if (!entity) throw new Error(`HTLC_4HOP_MISSING_ENTITY: ${label}`);
+  return entity;
+}
+
 export async function htlc4hop(env: Env): Promise<void> {
   const restoreStrict = enableStrictScenario(env, 'HTLC 4-Hop');
   const prevScenarioMode = env.scenarioMode;
@@ -56,7 +61,7 @@ export async function htlc4hop(env: Env): Promise<void> {
   }
 
   // Create economy: 3 hubs + 2 users
-  const { hubs, users, all } = await createEconomy(env, {
+  const { hubs, users } = await createEconomy(env, {
     numHubs: 3,
     usersPerHub: 1,
     initialCollateral: usd(500_000),
@@ -65,9 +70,11 @@ export async function htlc4hop(env: Env): Promise<void> {
     jurisdictionName: '4-Hop Demo'
   });
 
-  const [hub1, hub2, hub3] = hubs;
-  const alice = users[0][0]; // User under Hub1
-  const bob = users[2][0];   // User under Hub3
+  const hub1 = requireEconomyEntity(hubs[0], 'hub1');
+  const hub2 = requireEconomyEntity(hubs[1], 'hub2');
+  const hub3 = requireEconomyEntity(hubs[2], 'hub3');
+  const alice = requireEconomyEntity(users[0]?.[0], 'alice');
+  const bob = requireEconomyEntity(users[2]?.[0], 'bob');
 
   console.log(`📋 Entities created:`);
   console.log(`   Alice: ${alice.id.slice(-4)} (user, connected to ${hub1.name})`);
@@ -111,7 +118,6 @@ export async function htlc4hop(env: Env): Promise<void> {
   const [, hub1Rep] = findReplica(env, hub1.id);
   const [, hub2Rep] = findReplica(env, hub2.id);
   const [, hub3Rep] = findReplica(env, hub3.id);
-  const [, bobRep] = findReplica(env, bob.id);
 
   // All locks should be cleared (auto-revealed)
   const aliceHub1Account = aliceRep.state.accounts.get(hub1.id);
