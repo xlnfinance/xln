@@ -282,6 +282,16 @@ const detectArtifactContentType = (name: string): string => {
   return 'application/octet-stream';
 };
 
+const artifactKindRank = (kind: string): number => {
+  if (kind === 'video') return 0;
+  if (kind === 'image') return 1;
+  if (kind === 'trace') return 2;
+  if (kind === 'text') return 3;
+  if (kind === 'json') return 4;
+  if (kind === 'archive') return 5;
+  return 6;
+};
+
 const collectShardArtifacts = (
   logsDir: string,
   shard: number,
@@ -311,7 +321,7 @@ const collectShardArtifacts = (
   };
 
   walk(resultsDir);
-  return artifacts;
+  return artifacts.sort((a, b) => artifactKindRank(a.kind) - artifactKindRank(b.kind) || a.name.localeCompare(b.name));
 };
 
 const readShardLastRunStatus = (logsDir: string, shard: number): 'passed' | 'failed' | 'unknown' => {

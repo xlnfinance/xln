@@ -130,7 +130,30 @@ const parseTargetFile = (target: string | null | undefined): string => {
   return match?.[1] || raw;
 };
 
+const normalizedQaText = (target: string | null | undefined, title: string | null | undefined): string =>
+  `${target || ''} ${title || ''}`
+    .replace(/[_./:-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .toLowerCase()
+    .trim();
+
 export const deriveQaTestHandle = (target: string | null | undefined, title: string | null | undefined): string => {
+  const key = normalizedQaText(target, title);
+  if (key.includes('dispute') && key.includes('lifecycle') && key.includes('reserve')) {
+    return 'dispute.lifecycle-return';
+  }
+  if (key.includes('dispute') && key.includes('sign') && key.includes('broadcast')) {
+    return 'dispute.sign-broadcast';
+  }
+  if (key.includes('payment') && key.includes('smoke')) {
+    return 'payment.smoke';
+  }
+  if (key.includes('baseline') || key.includes('cold reset provisions')) {
+    return 'baseline.mesh-reserves';
+  }
+  if (key.includes('connect')) {
+    return 'wallet.connect';
+  }
   const file = parseTargetFile(target);
   const suite = humanizeSlug(basename(file || 'e2e'));
   const titlePart = titleSlug(String(title || target || 'case'));
@@ -141,6 +164,22 @@ export const deriveQaTestDescription = (
   target: string | null | undefined,
   title: string | null | undefined,
 ): string => {
+  const key = normalizedQaText(target, title);
+  if (key.includes('dispute') && key.includes('lifecycle') && key.includes('reserve')) {
+    return 'Opens a disputed account, waits through the dispute window, finalizes it, and verifies that the reserve is returned.';
+  }
+  if (key.includes('dispute') && key.includes('sign') && key.includes('broadcast')) {
+    return 'Builds a settlement workspace, signs the dispute batch, broadcasts it, and verifies that the hub accepts the result.';
+  }
+  if (key.includes('payment') && key.includes('smoke')) {
+    return 'Creates users, opens the hub route, sends a payment, and verifies that the receipt path is usable.';
+  }
+  if (key.includes('baseline')) {
+    return 'Starts an isolated stack, logs in, checks health, and confirms account opening reaches the first frame.';
+  }
+  if (key.includes('connect')) {
+    return 'Checks that the browser wallet connects to the isolated runtime and reaches the account workspace.';
+  }
   const text = String(title || target || '').trim();
   if (!text) return 'No test description recorded.';
   return `${text.charAt(0).toUpperCase()}${text.slice(1)}.`;
@@ -230,6 +269,19 @@ const sumPhaseTimings = (phaseMs: QaPhaseTimings | null): number | null => {
   );
 };
 
+const artifactKindRank: Record<QaArtifactKind, number> = {
+  video: 0,
+  image: 1,
+  trace: 2,
+  text: 3,
+  json: 4,
+  archive: 5,
+  other: 6,
+};
+
+const sortArtifacts = (artifacts: QaArtifact[]): QaArtifact[] =>
+  artifacts.sort((a, b) => artifactKindRank[a.kind] - artifactKindRank[b.kind] || a.name.localeCompare(b.name));
+
 const walkArtifacts = async (baseDir: string, currentDir: string, out: QaArtifact[]): Promise<void> => {
   const entries = await readdir(currentDir, { withFileTypes: true });
   for (const entry of entries) {
@@ -283,6 +335,7 @@ const collectLegacyShard = async (
     const caseDir = entries.find(entry => entry.isDirectory() && !entry.name.startsWith('.'));
     if (!title && caseDir) title = caseDir.name;
     await walkArtifacts(runDir, resultsDir, artifacts);
+    sortArtifacts(artifacts);
   }
 
   return {
@@ -382,7 +435,8 @@ export const readQaRun = async (runId: string): Promise<QaRunManifest> => {
           target,
           title,
           handle: shard.handle ?? metadata?.handle ?? deriveQaTestHandle(target, title),
-          description: shard.description ?? metadata?.description ?? deriveQaTestDescription(target, title),
+          description: metadata?.description ?? deriveQaTestDescription(target, title) ?? shard.description,
+          artifacts: sortArtifacts([...(shard.artifacts ?? [])]),
           logTail: shard.logTail ?? (logText ? shortTail(logText) : null),
         };
       }),
@@ -431,7 +485,7 @@ export const enrichQaRunUrls = (run: QaRunManifest): QaRunManifest => ({
   ...run,
   shards: run.shards.map(shard => ({
     ...shard,
-    artifacts: shard.artifacts.map(artifact => ({
+    artifacts: sortArtifacts([...(shard.artifacts ?? [])]).map(artifact => ({
       ...artifact,
       url: makeQaArtifactUrl(run.runId, artifact.relativePath),
     })),

@@ -13,11 +13,17 @@ const PW_TRACE = process.env['PW_TRACE'] || (PW_FAST ? 'off' : 'on-first-retry')
 const PW_SCREENSHOT = process.env['PW_SCREENSHOT'] || (PW_FAST ? 'off' : 'only-on-failure');
 const PW_VIDEO = process.env['PW_VIDEO'] || 'on';
 const PW_REPORTER = process.env['PW_REPORTER'];
+const PW_VIEWPORT_WIDTH = Number(process.env['PW_VIEWPORT_WIDTH'] || '1280');
+const PW_VIEWPORT_HEIGHT = Number(process.env['PW_VIEWPORT_HEIGHT'] || '720');
+const PW_VIEWPORT = {
+  width: Number.isFinite(PW_VIEWPORT_WIDTH) && PW_VIEWPORT_WIDTH > 0 ? Math.floor(PW_VIEWPORT_WIDTH) : 1280,
+  height: Number.isFinite(PW_VIEWPORT_HEIGHT) && PW_VIEWPORT_HEIGHT > 0 ? Math.floor(PW_VIEWPORT_HEIGHT) : 720,
+};
 
 const desktopChromiumProject = {
   name: 'chromium',
   // Force full Chromium instead of chromium_headless_shell (regressed WebGL in 1.58+)
-  use: { ...devices['Desktop Chrome'], channel: 'chromium' },
+  use: { ...devices['Desktop Chrome'], channel: 'chromium', viewport: PW_VIEWPORT, deviceScaleFactor: 1 },
 };
 
 const webkitMobileProject = {
@@ -31,7 +37,7 @@ const webkitMobileProject = {
 const brainvaultProject = {
   name: 'brainvault',
   testDir: './frontend/tests',
-  use: { ...devices['Desktop Chrome'] },
+  use: { ...devices['Desktop Chrome'], viewport: PW_VIEWPORT, deviceScaleFactor: 1 },
 };
 
 const projects = PW_PROFILE === 'webkit-mobile'
@@ -70,13 +76,13 @@ export default defineConfig({
     ignoreHTTPSErrors: true, // Ignore self-signed cert errors
     trace: PW_TRACE as any,
     screenshot: PW_SCREENSHOT as any,
-    viewport: { width: 1920, height: 1080 },
+    viewport: PW_VIEWPORT,
+    deviceScaleFactor: 1,
     video: PW_VIDEO === 'off'
       ? 'off'
-      : { mode: PW_VIDEO as 'on' | 'retain-on-failure' | 'on-first-retry', size: { width: 1920, height: 1080 } },
+      : { mode: PW_VIDEO as 'on' | 'retain-on-failure' | 'on-first-retry', size: PW_VIEWPORT },
     launchOptions: {
       args: [
-        '--start-maximized',
         '--disable-gpu',
         '--use-gl=swiftshader',
         '--disable-dev-shm-usage',
