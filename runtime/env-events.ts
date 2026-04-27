@@ -107,6 +107,7 @@ const getPendingFrameDbRecords = (env: Env): RuntimeFrameDbRecord[] => {
 export const ACCOUNT_FRAME_HISTORY_VIEW_LIMIT = 50;
 
 const cloneFrameForView = (frame: AccountFrame): AccountFrame => structuredClone(frame);
+const accountFrameHistoryViews = new WeakMap<AccountMachine, AccountFrame[]>();
 
 export const setAccountFrameHistoryView = (
   account: AccountMachine,
@@ -117,12 +118,12 @@ export const setAccountFrameHistoryView = (
   const view = boundedLimit > 0
     ? frames.slice(-boundedLimit).map((frame) => cloneFrameForView(frame))
     : [];
-  Object.defineProperty(account, 'frameHistory', {
-    value: view,
-    enumerable: false,
-    writable: true,
-    configurable: true,
-  });
+  accountFrameHistoryViews.set(account, view);
+};
+
+export const getAccountFrameHistoryView = (account: AccountMachine): AccountFrame[] => {
+  const view = accountFrameHistoryViews.get(account);
+  return Array.isArray(view) ? view.map((frame) => cloneFrameForView(frame)) : [];
 };
 
 export const appendAccountFrameHistoryView = (
@@ -130,7 +131,7 @@ export const appendAccountFrameHistoryView = (
   frame: AccountFrame,
   limit = ACCOUNT_FRAME_HISTORY_VIEW_LIMIT,
 ): void => {
-  const existing = Array.isArray(account.frameHistory) ? account.frameHistory : [];
+  const existing = accountFrameHistoryViews.get(account) ?? [];
   setAccountFrameHistoryView(account, [...existing, frame], limit);
 };
 

@@ -381,7 +381,6 @@ export const applyEntityTx = async (
             leftDisputeDelay: 576,
             rightDisputeDelay: 576,
           },
-          frameHistory: [],
           pendingWithdrawals: new Map(),
           requestedRebalance: new Map(),
           requestedRebalanceFeeState: new Map(),

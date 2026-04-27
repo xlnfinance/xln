@@ -155,6 +155,16 @@
     return artifact.kind;
   }
 
+  function artifactSummary(shard: QaShard): string {
+    const parts = [
+      `${artifactCount(shard, 'video')} video`,
+      `${artifactCount(shard, 'image')} screenshots`,
+      `${artifactCount(shard, 'trace')} traces`,
+    ];
+    if (shard.logRelativePath) parts.push('log');
+    return parts.join(' · ');
+  }
+
   async function loadRuns(preserveSelection = true): Promise<void> {
     loadingRuns = true;
     error = null;
@@ -353,11 +363,14 @@
               class:fail={shard.status === 'failed'}
             ></span>
             <div class="suite-row-main">
+              <div class="field-label">Handle</div>
               <div class="suite-row-title">
                 <strong>{describeShard(shard)}</strong>
                 <span>{shard.target || `shard-${shard.shard}`}</span>
               </div>
+              <div class="field-label">What happens</div>
               <p>{shardDescription(shard)}</p>
+              <div class="field-label">Artifacts</div>
               <div class="artifact-chips">
                 <span class:muted={artifactCount(shard, 'video') === 0}>Video {artifactCount(shard, 'video')}</span>
                 <span class:muted={artifactCount(shard, 'image') === 0}>Screenshots {artifactCount(shard, 'image')}</span>
@@ -382,7 +395,10 @@
             <div>
               <div class="eyebrow">Shard {selectedShard.shard}</div>
               <h3>{describeShard(selectedShard)}</h3>
+              <div class="detail-label">What happens</div>
               <p>{shardDescription(selectedShard)}</p>
+              <div class="detail-label">Artifacts</div>
+              <p>{artifactSummary(selectedShard)}</p>
               {#if selectedShard.target}
                 <small>{selectedShard.target}</small>
               {/if}
@@ -397,7 +413,7 @@
             <div class="media-panel">
               <section class="media-block">
                 <div class="media-title">
-                  <h4>Video</h4>
+                  <h4>Evidence Video</h4>
                   {#if selectedVideo?.url}
                     <a href={selectedVideo.url} target="_blank" rel="noreferrer">{formatBytes(selectedVideo.sizeBytes)}</a>
                   {/if}
@@ -413,7 +429,7 @@
               {#if selectedImages.length > 0}
                 <section class="media-block">
                   <div class="media-title">
-                    <h4>Screenshots</h4>
+                    <h4>Evidence Screenshots</h4>
                     <span>{selectedImages.length}</span>
                   </div>
                   <div class="image-strip">
@@ -460,15 +476,19 @@
 
               <section class="panel-block">
                 <h4>Artifacts</h4>
-                <div class="artifact-list">
-                  {#each selectedShard.artifacts as artifact}
-                    <a href={artifact.url} target="_blank" rel="noreferrer">
-                      <span>{artifactLabel(artifact)}</span>
-                      <strong>{artifact.name}</strong>
-                      <small>{formatBytes(artifact.sizeBytes)}</small>
-                    </a>
-                  {/each}
-                </div>
+                {#if selectedShard.artifacts.length > 0}
+                  <div class="artifact-list">
+                    {#each selectedShard.artifacts as artifact}
+                      <a href={artifact.url} target="_blank" rel="noreferrer">
+                        <span>{artifactLabel(artifact)}</span>
+                        <strong>{artifact.name}</strong>
+                        <small>{formatBytes(artifact.sizeBytes)}</small>
+                      </a>
+                    {/each}
+                  </div>
+                {:else}
+                  <div class="empty">No artifact files captured</div>
+                {/if}
               </section>
             </div>
           </div>
@@ -595,6 +615,18 @@
     letter-spacing: 0.12em;
     text-transform: uppercase;
     color: #8f8b80;
+  }
+
+  .field-label,
+  .detail-label {
+    color: #d8af4f;
+    font-size: 0.68rem;
+    letter-spacing: 0.11em;
+    text-transform: uppercase;
+  }
+
+  .detail-label {
+    margin-top: 0.35rem;
   }
 
   .trend-strip {

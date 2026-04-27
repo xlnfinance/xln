@@ -363,7 +363,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         tokenIds: [],
         deltas: [],
       },
-      frameHistory: [],
       pendingWithdrawals: new Map(),
       requestedRebalance: new Map(), // request_collateral target amounts (prepaid by requester)
       requestedRebalanceFeeState: new Map(), // Prepaid fee metadata + scheduling hints

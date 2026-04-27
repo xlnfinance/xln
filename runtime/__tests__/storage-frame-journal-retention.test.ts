@@ -11,6 +11,7 @@ import {
   getPersistedLatestHeight,
   loadEnvFromDB,
   process as processRuntime,
+  readPersistedAccountFrameHistory,
   readPersistedFrameJournal,
   saveEnvToDB,
 } from '../runtime.ts';
@@ -249,10 +250,19 @@ describe('storage frame journal retention', () => {
     expect(restored).toBeTruthy();
     let restoredHistoryFrames = 0;
     for (const replica of restored?.eReplicas.values() ?? []) {
-      for (const account of replica.state.accounts.values()) {
+      for (const [counterpartyId, account] of replica.state.accounts.entries()) {
+        const frames = restored
+          ? await readPersistedAccountFrameHistory(
+              restored,
+              replica.entityId,
+              counterpartyId,
+              50,
+              { maxRuntimeHeight: restored.height, maxAccountHeight: account.currentHeight },
+            )
+          : [];
         restoredHistoryFrames = Math.max(
           restoredHistoryFrames,
-          Array.isArray(account.frameHistory) ? account.frameHistory.length : 0,
+          frames.length,
         );
       }
     }

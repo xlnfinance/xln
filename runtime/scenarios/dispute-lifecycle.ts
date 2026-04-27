@@ -10,6 +10,7 @@
 
 import type { Env } from '../types';
 import type { JAdapter } from '../jadapter/types';
+import { getAccountFrameHistoryView } from '../env-events';
 import { bootScenario, registerEntities, fundEntities } from './boot';
 import {
   getProcess,
@@ -28,7 +29,7 @@ const USDC = 1;
 type Registered = { id: string; signer: string; name: string };
 
 function jEventClaimCount(account: any): number {
-  const frames = Array.isArray(account?.frameHistory) ? account.frameHistory : [];
+  const frames = account ? getAccountFrameHistoryView(account) : [];
   let count = 0;
   for (const frame of frames) {
     const txs = Array.isArray(frame?.accountTxs) ? frame.accountTxs : [];

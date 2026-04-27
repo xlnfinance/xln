@@ -35,7 +35,7 @@ import { cryptoHash as hash, formatEntityId, HEAVY_LOGS } from './utils';
 import { safeStringify } from './serialization-utils';
 import { validateAccountFrame as validateAccountFrameStrict } from './validation-utils';
 import { processAccountTx } from './account-tx/apply';
-import { appendAccountFrameHistoryView, recordAccountFrameHistory } from './env-events';
+import { appendAccountFrameHistoryView, getAccountFrameHistoryView, recordAccountFrameHistory } from './env-events';
 import { assertAccountFrameDeltaIntegrity, deriveAccountFrameOffdeltas, deriveAccountFrameTokenIds } from './account-frame';
 // NOTE: Settlements now use SettlementWorkspace flow (see entity-tx/handlers/settle.ts)
 
@@ -951,7 +951,7 @@ export async function handleAccountInput(
     pendingHash: accountMachine.pendingFrame?.stateHash ?? null,
     pendingPrev: accountMachine.pendingFrame?.prevFrameHash ?? null,
     pendingTimestamp: Number(accountMachine.pendingFrame?.timestamp ?? 0),
-    frameHistoryTail: accountMachine.frameHistory.slice(-3).map((frame) => ({
+    frameHistoryTail: getAccountFrameHistoryView(accountMachine).slice(-3).map((frame) => ({
       height: Number(frame?.height ?? 0),
       stateHash: frame?.stateHash ?? null,
       prevFrameHash: frame?.prevFrameHash ?? null,

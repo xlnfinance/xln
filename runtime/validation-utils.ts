@@ -633,7 +633,6 @@ export function validateAccountMachine(value: unknown, context = 'AccountMachine
   validateObservationArray(obj['rightJObservations'], `${context}.rightJObservations`, 'observedAt');
   validateObservationArray(obj['jEventChain'], `${context}.jEventChain`, 'finalizedAt');
   validateNumber(obj['lastFinalizedJHeight'], `${context}.lastFinalizedJHeight`);
-  validateArray(obj['frameHistory'], `${context}.frameHistory`);
   validateMapInstance(obj['pendingWithdrawals'], `${context}.pendingWithdrawals`);
   validateBigIntMapValues(obj['requestedRebalance'], `${context}.requestedRebalance`);
   validateRebalanceFeeStateMap(obj['requestedRebalanceFeeState'], `${context}.requestedRebalanceFeeState`);

@@ -1200,10 +1200,6 @@ export interface AccountMachine {
 
   hankoSignature?: string; // LEGACY - will be removed
 
-  // UI/debug view of recent bilateral frames. Future-consensus state does not
-  // depend on old frames; durable history is indexed in the separate frame DB.
-  frameHistory: AccountFrame[];
-
   // Payment routing: temporary storage for multi-hop payments
   pendingForward?: {
     tokenId: number;
