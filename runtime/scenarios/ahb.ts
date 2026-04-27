@@ -15,10 +15,9 @@
  */
 
 import type { Env, EntityInput, EntityReplica, Delta, JTx } from '../types';
-import { ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig } from './boot';
+import { ensureJAdapter, getScenarioJAdapter, createJReplica } from './boot';
 import type { JAdapter } from '../jadapter/types';
 import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, syncChain } from './helpers';
-import { canonicalAccountKey } from '../state-helpers';
 import { formatRuntime } from '../runtime-ascii';
 import { deriveDelta, isLeft } from '../account-utils';
 import { createGossipLayer } from '../networking/gossip';
@@ -120,9 +119,6 @@ const AHB_DEBUG = getEnv('AHB_DEBUG', '0') === '1';
 
 // Jurisdiction name for AHB demo
 const AHB_JURISDICTION = 'AHB Demo';
-
-const ENTITY_NAME_MAP = new Map<string, string>();
-const getEntityName = (entityId: string): string => ENTITY_NAME_MAP.get(entityId) || entityId.slice(-4);
 
 // NOTE: Manual J-Machine queuing functions REMOVED
 // Entities now output jOutputs via process() which auto-queue to J-Machine
@@ -253,88 +249,6 @@ async function processUntil(
 
 
 
-/**
- * COMPREHENSIVE STATE DUMP - Full JSON dump of system state
- * Enable/disable via AHB_DEBUG=1 environment variable or pass enabled=true
- */
-function dumpSystemState(env: Env, label: string, enabled: boolean = true): void {
-  const debugEnabled = typeof process !== 'undefined' && process.env && process.env['AHB_DEBUG'];
-  if (!enabled && !debugEnabled) return;
-
-  // Build JSON-serializable state object
-  const state: Record<string, any> = {
-    label,
-    timestamp: env.timestamp,
-    height: env.height,
-    entities: {} as Record<string, any>,
-  };
-
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
-    const entityId = replicaKey.split(':')[0] ?? '';
-    const entityName = getEntityName(entityId);
-
-    const entityState: Record<string, any> = {
-      name: entityName,
-      entityId: entityId.slice(-8),
-      reserves: {} as Record<string, string>,
-      accounts: {} as Record<string, any>,
-    };
-
-    // Reserves (convert BigInt to string for JSON)
-    if (replica.state.reserves) {
-      for (const [tokenId, amount] of replica.state.reserves.entries()) {
-        const usd = Number(amount) / 1e18;
-        entityState['reserves'][tokenId] = { raw: amount.toString(), usd: `$${usd.toLocaleString()}` };
-      }
-    }
-
-    // Accounts
-    if (replica.state.accounts) {
-      for (const [counterpartyId, account] of replica.state.accounts.entries()) {
-        const counterpartyName = getEntityName(counterpartyId);
-        const isLeftEntity = isLeft(entityId, counterpartyId);
-
-        const accountState: Record<string, any> = {
-          counterparty: counterpartyName,
-          counterpartyId: counterpartyId.slice(-8),
-          perspective: isLeftEntity ? 'LEFT' : 'RIGHT',
-          globalCreditLimits: {
-            ownLimit: account.globalCreditLimits.ownLimit.toString(),
-            peerLimit: account.globalCreditLimits.peerLimit.toString(),
-          },
-          deltas: {} as Record<number, any>,
-        };
-
-        for (const [tokenId, delta] of account.deltas.entries()) {
-          const totalDelta = delta.ondelta + delta.offdelta;
-          accountState['deltas'][tokenId] = {
-            collateral: { raw: delta.collateral.toString(), usd: `$${(Number(delta.collateral) / 1e18).toLocaleString()}` },
-            ondelta: { raw: delta.ondelta.toString(), usd: `$${(Number(delta.ondelta) / 1e18).toLocaleString()}` },
-            offdelta: { raw: delta.offdelta.toString(), usd: `$${(Number(delta.offdelta) / 1e18).toLocaleString()}` },
-            totalDelta: {
-              raw: totalDelta.toString(),
-              usd: `$${(Number(totalDelta) / 1e18).toLocaleString()}`,
-              meaning: totalDelta > 0n ? 'RIGHT owes LEFT' : totalDelta < 0n ? 'LEFT owes RIGHT' : 'balanced',
-            },
-            leftCreditLimit: { raw: delta.leftCreditLimit.toString(), usd: `$${(Number(delta.leftCreditLimit) / 1e18).toLocaleString()}`, meaning: 'LEFT extends to RIGHT' },
-            rightCreditLimit: { raw: delta.rightCreditLimit.toString(), usd: `$${(Number(delta.rightCreditLimit) / 1e18).toLocaleString()}`, meaning: 'RIGHT extends to LEFT' },
-          };
-        }
-
-        entityState['accounts'][counterpartyName] = accountState;
-      }
-    }
-
-    state['entities'][entityName] = entityState;
-  }
-
-  console.log('\n' + '='.repeat(80));
-  console.log(`📊 SYSTEM STATE DUMP: ${label}`);
-  console.log('='.repeat(80));
-  console.log(JSON.stringify(state, null, 2));
-  console.log('='.repeat(80) + '\n');
-}
-
 // Get offdelta for a bilateral account from canonical LEFT entity's perspective
 // Returns: positive = RIGHT owes LEFT, negative = LEFT owes RIGHT
 function getOffdelta(env: Env, entityA: string, entityB: string, tokenId: number): bigint {
@@ -460,8 +374,6 @@ export async function ahb(env: Env): Promise<void> {
 
   const [aliceEntry, hubEntry, bobEntry] = walletEntries;
   console.log(`[AHB] Wallet ordering: Alice=${aliceEntry?.label}, Hub=${hubEntry?.label}, Bob=${bobEntry?.label}`);
-
-  ENTITY_NAME_MAP.clear();
 
   const process = await getProcess();
   env.scenarioMode = true; // Deterministic time control (scenarios set env.timestamp manually)
@@ -594,9 +506,6 @@ export async function ahb(env: Env): Promise<void> {
 
       entities.push({ id: entityId, signer, name, boardHash });
 
-      // Update name map
-      ENTITY_NAME_MAP.set(entityId, name);
-
       createEntityTxs.push({
         type: 'importReplica' as const,
         entityId,
@@ -627,13 +536,6 @@ export async function ahb(env: Env): Promise<void> {
       throw new Error('Failed to create all entities');
     }
     let carol: { id: string; signer: string; name: string; boardHash: string } | null = null;
-
-    // Build entityIds map from created entities (entityId = boardHash for lazy entities)
-    const entityIds = {
-      Alice: alice.id,
-      Hub: hub.id,
-      Bob: bob.id,
-    };
 
     // CRITICAL: Register public keys for signature validation
     // Without this, verifyAccountSignature will fail in browser
@@ -2107,8 +2009,6 @@ export async function ahb(env: Env): Promise<void> {
   // → Bob gets all $100K collateral, Hub owes $50K extra (becomes debt when Hub has $0 reserves)
   const disputeOffdeltaTarget = hubIsLeft ? -usd(150_000) : usd(150_000);
   const disputeOndeltaTarget = 0n;
-  const leftEntity = hubIsLeft ? hub.id : bob.id;
-  const rightEntity = hubIsLeft ? bob.id : hub.id;
   const leftActor = hubIsLeft ? hub : bob;
   const rightActor = hubIsLeft ? bob : hub;
 
@@ -2471,7 +2371,7 @@ export async function ahb(env: Env): Promise<void> {
   // H14: Parse and verify DebtCreated event fields
   // Format: "🔴 DEBT: {debtor} owes {amount} USDC to {creditor} | Block {block}"
   const debtAmountMatch = debtMessage?.match(/owes\s+([\d.]+)\s+USDC/);
-  const debtAmount = debtAmountMatch ? parseFloat(debtAmountMatch[1]) : 0;
+  const debtAmount = debtAmountMatch ? parseFloat(debtAmountMatch[1] ?? '0') : 0;
   const expectedDebtAmount = 50000; // $50K debt (delta $150K - collateral $100K)
   assert(
     Math.abs(debtAmount - expectedDebtAmount) < 1, // Allow small float tolerance
@@ -2827,8 +2727,6 @@ export async function ahb(env: Env): Promise<void> {
     const carolEncodedBoard = encodeBoard(carolConfig);
     const carolBoardHash = hashBoard(carolEncodedBoard);
     carol = { id: carolBoardHash, signer: carolSigner, name: 'Carol', boardHash: carolBoardHash };
-    ENTITY_NAME_MAP.set(carol.id, carol.name);
-
     await applyRuntimeInput(env, {
       runtimeTxs: [{
         type: 'importReplica',
@@ -3146,7 +3044,7 @@ if (import.meta.main) {
   console.log('💾 Dumping full runtime (Env) to JSON...');
 
   const seen = new Set<object>();
-  const envJson = JSON.stringify(env, function(key, value) {
+  const envJson = JSON.stringify(env, function(_key, value) {
     if (value instanceof Map) return Array.from(value.entries());
     if (typeof value === 'bigint') return value.toString();
     if (typeof value === 'function') return undefined;
