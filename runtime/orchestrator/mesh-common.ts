@@ -1,4 +1,4 @@
-import type { AccountMachine, Delta, Env } from '../types';
+import type { AccountMachine, Delta, EntityReplica, EntityTx, Env } from '../types';
 import { deriveDelta } from '../account-utils';
 
 export const HUB_MESH_TOKEN_ID = 1;
@@ -20,8 +20,8 @@ export const hasPendingRuntimeWork = (env: Env): boolean => {
   if (env.pendingOutputs?.length) return true;
   if (env.networkInbox?.length) return true;
   if (env.runtimeInput?.runtimeTxs?.length) return true;
-  if ((env as any).runtimeMempool?.entityInputs?.length) return true;
-  if ((env as any).runtimeMempool?.runtimeTxs?.length) return true;
+  if (env.runtimeMempool?.entityInputs?.length) return true;
+  if (env.runtimeMempool?.runtimeTxs?.length) return true;
 
   if (env.jReplicas) {
     for (const replica of env.jReplicas.values()) {
@@ -51,7 +51,7 @@ export const waitUntil = async (
   return false;
 };
 
-export const getEntityReplicaById = (env: Env, entityId: string): any | null => {
+export const getEntityReplicaById = (env: Env, entityId: string): EntityReplica | null => {
   const target = String(entityId || '').toLowerCase();
   if (!target || !env.eReplicas) return null;
   for (const [key, replica] of env.eReplicas.entries()) {
@@ -63,14 +63,18 @@ export const getEntityReplicaById = (env: Env, entityId: string): any | null => 
 };
 
 const accountMatchesCounterparty = (
-  account: any,
+  account: AccountMachine | null | undefined,
   ownerEntityId: string,
   counterpartyId: string,
 ): boolean => {
   const needle = String(counterpartyId || '').toLowerCase();
   if (!needle) return false;
 
-  const cp = typeof account?.counterpartyEntityId === 'string' ? account.counterpartyEntityId.toLowerCase() : '';
+  const counterpartyEntityId =
+    account && typeof account === 'object' && 'counterpartyEntityId' in account
+      ? account.counterpartyEntityId
+      : undefined;
+  const cp = typeof counterpartyEntityId === 'string' ? counterpartyEntityId.toLowerCase() : '';
   if (cp === needle) return true;
 
   const me = String(ownerEntityId || '').toLowerCase();
@@ -104,12 +108,11 @@ export const hasQueuedOpenAccount = (
   const replica = getEntityReplicaById(env, entityId);
   if (!replica) return false;
   const target = String(counterpartyId || '').toLowerCase();
-  const containsOpenAccount = (
-    txs: Array<{ type?: string; data?: { targetEntityId?: string } }> | undefined,
-  ): boolean => Array.isArray(txs) && txs.some((tx) =>
-    tx?.type === 'openAccount' &&
-    String(tx?.data?.targetEntityId || '').toLowerCase() === target,
-  );
+  const containsOpenAccount = (txs: readonly EntityTx[] | undefined): boolean =>
+    Array.isArray(txs) && txs.some((tx) =>
+      tx.type === 'openAccount' &&
+      String(tx.data.targetEntityId || '').toLowerCase() === target,
+    );
 
   if (containsOpenAccount(replica.mempool)) return true;
   if (containsOpenAccount(replica.proposal?.txs)) return true;

@@ -113,7 +113,8 @@ export function compileOps(
 
       default: {
         // Unknown op type — skip (shouldn't happen with TS types)
-        console.warn(`⚠️ compileOps: unknown op type "${(op as any).type}"`);
+        const unknownOp = op as { type?: unknown };
+        console.warn(`⚠️ compileOps: unknown op type "${String(unknownOp.type ?? 'unknown')}"`);
         break;
       }
     }

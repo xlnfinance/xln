@@ -33,7 +33,7 @@ export const rehydrateRestoredRuntimeInfra = async (
 
   options.assertPersistedContractConfigReady(env, 'loadEnvFromDB post-replay');
 
-  let restoredBrowserVM: any = null;
+  let restoredBrowserVM: BrowserVMProvider | null = null;
   if (env.browserVMState && options.isBrowser) {
     try {
       const restoredAdapter = await createJAdapter({
@@ -48,7 +48,7 @@ export const rehydrateRestoredRuntimeInfra = async (
         options.setBrowserVMJurisdiction(env, browserVM.getDepositoryAddress(), browserVM);
       }
       if (typeof window !== 'undefined') {
-        (window as any).__xlnBrowserVM = browserVM;
+        (window as Window & { __xlnBrowserVM?: BrowserVMProvider | null }).__xlnBrowserVM = browserVM;
       }
       console.log('✅ BrowserVM restored from loadEnvFromDB');
     } catch (error) {

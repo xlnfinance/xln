@@ -37,6 +37,17 @@ const DEFAULT_OPTIONS: FormatOptions = {
   indentSize: 2
 };
 
+const formatStateRootPreview = (value: unknown): string => {
+  if (typeof value === 'string') return value.slice(0, 16);
+  if (value instanceof Uint8Array) {
+    const hex = Array.from(value.slice(0, 8))
+      .map(byte => byte.toString(16).padStart(2, '0'))
+      .join('');
+    return hex ? `0x${hex}` : 'N/A';
+  }
+  return 'N/A';
+};
+
 // Box drawing characters
 const BOX = {
   topLeft: '┌',
@@ -229,7 +240,7 @@ export function formatRuntime(env: Env, options?: FormatOptions): string {
       const jDepository = jReplica.depositoryAddress || jReplica.contracts?.depository;
       const jInfo = [
         `Name: ${jName}`,
-        `Block: ${jReplica.blockNumber} | State Root: ${(jReplica.stateRoot as any).slice?.(0, 16) || 'N/A'}`,
+        `Block: ${jReplica.blockNumber} | State Root: ${formatStateRootPreview(jReplica.stateRoot)}`,
         `Mempool: ${jReplica.mempool?.length || 0} txs | Delay: ${jReplica.blockDelayMs}ms`,
         `Contracts: Depository=${formatMaybeAddress(jDepository)}`
       ];

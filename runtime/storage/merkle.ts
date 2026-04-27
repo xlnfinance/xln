@@ -61,6 +61,11 @@ export const buildRadixMerkle = (
 
   const items = Array.from(deduped.values());
   const depth = items[0]?.path.length ?? 0;
+  for (const item of items) {
+    if (item.path.length !== depth) {
+      throw new Error(`RADIX_MERKLE_MIXED_KEY_LENGTHS: expected=${depth} actual=${item.path.length}`);
+    }
+  }
 
   const buildNode = (level: number, group: typeof items): string => {
     if (group.length === 0) return EMPTY_ROOT;

@@ -11,6 +11,11 @@ import { HDNodeWallet, getIndexedAccountPath, getBytes, keccak256, recoverAddres
 import { Buffer as BufferPolyfill } from 'buffer';
 import * as bip39 from 'bip39';
 
+type RuntimeGlobal = typeof globalThis & {
+  Bun?: unknown;
+  Buffer?: typeof BufferPolyfill;
+};
+
 // Configure @noble/secp256k1 HMAC (required for signing)
 // Always install a sync HMAC implementation (Node/Bun fast path, browser fallback).
 const installHmacSync = () => {
@@ -20,7 +25,7 @@ const installHmacSync = () => {
     typeof window.document !== 'undefined';
   const isNodeLike =
     !isBrowser &&
-    (typeof (globalThis as any).Bun !== 'undefined' ||
+    (typeof (globalThis as RuntimeGlobal).Bun !== 'undefined' ||
       (typeof process !== 'undefined' && !!process.versions?.node));
   try {
     if (isNodeLike && typeof require !== 'undefined') {
@@ -58,9 +63,9 @@ const bytesToHex = (bytes: Uint8Array): string =>
   Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join('');
 // Ensure a full Buffer implementation exists before bip39 (Buffer.isBuffer is required).
 const ensureGlobalBuffer = () => {
-  const globalBuffer = (globalThis as any).Buffer;
+  const globalBuffer = (globalThis as RuntimeGlobal).Buffer;
   if (!globalBuffer || typeof globalBuffer.isBuffer !== 'function') {
-    (globalThis as any).Buffer = BufferPolyfill;
+    (globalThis as RuntimeGlobal).Buffer = BufferPolyfill;
   }
 };
 
