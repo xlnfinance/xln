@@ -10,15 +10,14 @@
  * Also tests auto-approve logic and conservation law validation.
  */
 
-import type { Env, EntityInput, EntityReplica, SettlementDiff, SettlementOp } from '../types';
+import type { Env, EntityReplica, SettlementDiff, SettlementOp } from '../types';
 import { compileOps } from '../settlement-ops';
-import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, getProcess, getApplyRuntimeInput, processJEvents as processJEventsHelper, converge as convergeHelper, syncChain as syncChainHelper } from './helpers';
+import { snap, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, getProcess, syncChain as syncChainHelper } from './helpers';
 import { ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig, registerEntities as bootRegisterEntities } from './boot';
 import type { JAdapter } from '../jadapter/types';
 import { formatRuntime } from '../runtime-ascii';
 import { createGossipLayer } from '../networking/gossip';
-import { userAutoApprove, canAutoApproveWorkspace } from '../entity-tx/handlers/settle';
-import { isLeftEntity } from '../entity-id-utils';
+import { userAutoApprove } from '../entity-tx/handlers/settle';
 
 const USDC_TOKEN_ID = 1;
 const DECIMALS = 18n;
@@ -28,7 +27,6 @@ const usd = (amount: number | bigint) => BigInt(amount) * ONE_TOKEN;
 
 const JURISDICTION = 'Settle Test';
 const ENTITY_NAME_MAP = new Map<string, string>();
-const getEntityName = (entityId: string): string => ENTITY_NAME_MAP.get(entityId) || entityId.slice(-4);
 
 type ReplicaEntry = [string, EntityReplica];
 
@@ -69,30 +67,12 @@ async function processJEvents(env: Env): Promise<void> {
   }
 }
 
-async function processUntil(
-  env: Env,
-  predicate: () => boolean,
-  maxRounds: number = 10,
-  label: string = 'condition'
-): Promise<void> {
-  const process = await getProcess();
-  for (let round = 0; round < maxRounds; round++) {
-    if (predicate()) return;
-    await process(env);
-    advanceScenarioTime(env);
-  }
-  if (!predicate()) {
-    throw new Error(`processUntil: ${label} not satisfied after ${maxRounds} rounds`);
-  }
-}
-
 export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   console.log('═══════════════════════════════════════════════════════════════════════════════');
   console.log('                    SETTLEMENT WORKSPACE TEST SCENARIO                          ');
   console.log('═══════════════════════════════════════════════════════════════════════════════');
 
   const process = await getProcess();
-  const applyRuntimeInput = await getApplyRuntimeInput();
 
   // ══════════════════════════════════════════════════════════════════════════════
   // PHASE 0: SETUP
@@ -101,21 +81,27 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
 
   // DETERMINISTIC: Use fixed timestamp for scenario init (scenarioMode advances it manually)
   const SCENARIO_START_TIMESTAMP = 1700000000000; // Fixed epoch for reproducibility
-  let env: Env = existingEnv || {
-    eReplicas: new Map(),
-    jReplicas: new Map(),
-    height: 0,
-    timestamp: SCENARIO_START_TIMESTAMP,
-    runtimeInput: { runtimeTxs: [], entityInputs: [] },
-    history: [],
-    gossip: null,
-    frameLogs: [],
-    log: (msg: string) => console.log(msg),
-    info: () => {},
-    warn: () => {},
-    error: () => {},
-    emit: () => {},
-  };
+  let env: Env;
+  if (existingEnv) {
+    env = existingEnv;
+  } else {
+    env = {
+      eReplicas: new Map(),
+      jReplicas: new Map(),
+      height: 0,
+      timestamp: SCENARIO_START_TIMESTAMP,
+      runtimeInput: { runtimeTxs: [], entityInputs: [] },
+      history: [],
+      gossip: createGossipLayer(),
+      evms: new Map(),
+      frameLogs: [],
+      log: (msg: string) => console.log(msg),
+      info: () => {},
+      warn: () => {},
+      error: () => {},
+      emit: () => {},
+    };
+  }
 
   env.scenarioMode = true;
   env.quietRuntimeLogs = true;
@@ -166,8 +152,11 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
     { name: 'Hub',   signer: '3', position: { x: 30, y: -30, z: 0 } },
   ], jurisdiction);
 
-  const ALICE_ID = registered[0].id;
-  const HUB_ID = registered[1].id;
+  const aliceRegistration = registered[0];
+  const hubRegistration = registered[1];
+  assert(aliceRegistration && hubRegistration, 'Alice and Hub should be registered', env);
+  const ALICE_ID = aliceRegistration.id;
+  const HUB_ID = hubRegistration.id;
 
   ENTITY_NAME_MAP.set(ALICE_ID, 'Alice');
   ENTITY_NAME_MAP.set(HUB_ID, 'Hub');
@@ -358,7 +347,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   snap(env, 'Settlement Proposed', {
     description: 'Alice proposes $100 deposit to collateral',
     phase: 'propose',
-    holdAmount: expectedHold.toString()
+    keyMetrics: [`holdAmount=${expectedHold.toString()}`],
   });
 
   // ══════════════════════════════════════════════════════════════════════════════
@@ -454,7 +443,9 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   assert(aliceAccount2?.settlementWorkspace?.version === 2, 'Version should be 2 after update', env);
   // Verify compiled ops match expected values
   const { diffs: compiledDiffs } = compileOps(aliceAccount2.settlementWorkspace.ops, aliceAccount2.settlementWorkspace.lastModifiedByLeft);
-  assert(compiledDiffs[0].rightDiff === -usd(50), 'Compiled diff should reflect update (Hub rightDiff)');
+  const firstCompiledDiff = compiledDiffs[0];
+  assert(firstCompiledDiff, 'Compiled settlement diff should exist', env);
+  assert(firstCompiledDiff.rightDiff === -usd(50), 'Compiled diff should reflect update (Hub rightDiff)');
 
   console.log(`✅ Settlement updated by Hub`);
   console.log(`   New version: ${aliceAccount2.settlementWorkspace.version}`);
