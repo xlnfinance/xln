@@ -7,7 +7,33 @@
  * Copyright (C) 2025 XLN Finance
  */
 
-import type { XlnomyTopology, TopologyLayer, ConnectionRules } from './types';
+export interface TopologyLayer {
+  name: string;
+  yPosition: number;
+  entityCount: number;
+  xzSpacing: number;
+  color: string;
+  size: number;
+  emissiveIntensity: number;
+  initialReserves: bigint;
+  canMintMoney: boolean;
+}
+
+export interface ConnectionRules {
+  allowedPairs: Array<{ from: string; to: string }>;
+  allowDirectInterbank: boolean;
+  requireHubRouting: boolean;
+  maxHops: number;
+  defaultCreditLimits: Map<string, bigint>;
+}
+
+export interface XlnomyTopology {
+  type: 'star' | 'mesh' | 'tiered' | 'correspondent' | 'hybrid';
+  layers: TopologyLayer[];
+  rules: ConnectionRules;
+  crisisThreshold: number;
+  crisisMode: 'star' | 'mesh' | 'tiered' | 'correspondent' | 'hybrid';
+}
 
 /**
  * Country Economic Presets (Top 9 GDP)
