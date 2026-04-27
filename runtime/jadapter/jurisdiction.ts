@@ -18,12 +18,16 @@ const buildFromReplica = (jurisdiction: JurisdictionConfig): JReplica =>
 export const isBrowserVMJurisdiction = (jurisdiction: JurisdictionConfig): boolean =>
   String(jurisdiction.address || '').startsWith('browservm://');
 
-export const buildJAdapterConfigFromJurisdiction = (jurisdiction: JurisdictionConfig): JAdapterConfig => ({
-  mode: isBrowserVMJurisdiction(jurisdiction) ? 'browservm' : 'rpc',
-  chainId: jurisdiction.chainId ?? 31337,
-  rpcUrl: isBrowserVMJurisdiction(jurisdiction) ? undefined : jurisdiction.address,
-  fromReplica: buildFromReplica(jurisdiction),
-});
+export const buildJAdapterConfigFromJurisdiction = (jurisdiction: JurisdictionConfig): JAdapterConfig => {
+  const browserVM = isBrowserVMJurisdiction(jurisdiction);
+  const config: JAdapterConfig = {
+    mode: browserVM ? 'browservm' : 'rpc',
+    chainId: jurisdiction.chainId ?? 31337,
+    fromReplica: buildFromReplica(jurisdiction),
+  };
+  if (!browserVM) config.rpcUrl = jurisdiction.address;
+  return config;
+};
 
 export const connectJurisdictionAdapter = async (jurisdiction: JurisdictionConfig): Promise<JAdapter> =>
   createJAdapter(buildJAdapterConfigFromJurisdiction(jurisdiction));

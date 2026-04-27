@@ -28,15 +28,15 @@ export type RelayDebugEvent = {
   id: number;
   ts: number;
   event: string;
-  runtimeId?: string;
-  from?: string;
-  to?: string;
-  msgType?: string;
-  status?: string;
-  reason?: string;
-  encrypted?: boolean;
-  size?: number;
-  queueSize?: number;
+  runtimeId?: string | undefined;
+  from?: string | undefined;
+  to?: string | undefined;
+  msgType?: string | undefined;
+  status?: string | undefined;
+  reason?: string | undefined;
+  encrypted?: boolean | undefined;
+  size?: number | undefined;
+  queueSize?: number | undefined;
   details?: unknown;
 };
 

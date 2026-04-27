@@ -36,14 +36,14 @@ export interface JMachineHealth {
 export interface HubHealth {
   entityId: string;
   name: string;
-  runtimeId?: string;
-  online?: boolean;
-  selfRelayPresence?: boolean;
-  activeClients?: string[];
+  runtimeId?: string | undefined;
+  online?: boolean | undefined;
+  selfRelayPresence?: boolean | undefined;
+  activeClients?: string[] | undefined;
   status: 'healthy' | 'degraded' | 'down';
-  reserves?: Record<string, string>;
-  accounts?: number;
-  error?: string;
+  reserves?: Record<string, string> | undefined;
+  accounts?: number | undefined;
+  error?: string | undefined;
 }
 
 export interface SystemHealth {
