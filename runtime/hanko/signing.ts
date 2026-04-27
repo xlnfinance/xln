@@ -287,7 +287,7 @@ export const signHashesAsSingleEntity = signEntityHashes;
 export async function buildQuorumHanko(
   env: Env,
   entityId: string,
-  hash: string,
+  _hash: string,
   signatures: Array<{ signerId: string; signature: string }>,
   config: { threshold: bigint; validators: string[]; shares: Record<string, bigint> }
 ): Promise<HankoString> {
@@ -517,8 +517,6 @@ export async function verifyHankoForHash(
 
     // CRITICAL: Verify recovered addresses match entity's board validators
     let expectedAddresses: string[] = [];
-    let boardVerified = false;
-
     if (env && env.eReplicas) {
       const replica: any = Array.from(env.eReplicas.values()).find((r: any) => r.state?.entityId === expectedEntityId);
       if (replica) {
@@ -535,11 +533,9 @@ export async function verifyHankoForHash(
             return v.toLowerCase();
           }
           // Or it may be a secp256k1 public key (33/65 bytes hex)
-          if (v.startsWith('0x')) {
-            return publicKeyToAddress(v);
-          }
-          // Legacy signerId path (numeric/string ids)
-          return getSignerAddress(env, v)?.toLowerCase();
+          // Public keys and signer IDs share the same wire slot. Try a key/address
+          // interpretation first, then fall back to deterministic local signer IDs.
+          return publicKeyToAddress(v) ?? getSignerAddress(env, v)?.toLowerCase();
         }).filter(Boolean) as string[];
       }
     }
@@ -558,7 +554,6 @@ export async function verifyHankoForHash(
           return { valid: false, entityId: null };
         }
       }
-      boardVerified = true;
     } else {
       // Self-contained verification: the Hanko IS the board declaration
       // Reconstruct board from claim's entityIndexes + recovered signatures + placeholders
@@ -567,13 +562,15 @@ export async function verifyHankoForHash(
       let signerWeightSum = 0;
       for (let i = 0; i < matchingClaim.entityIndexes.length; i++) {
         const memberIndex = matchingClaim.entityIndexes[i];
+        if (memberIndex === undefined) continue;
         if (memberIndex >= numPlaceholders) {
           // This slot maps to a signer (not a placeholder) — they actually signed
-          signerWeightSum += matchingClaim.weights[i];
+          signerWeightSum += matchingClaim.weights[i] ?? 0;
         }
       }
       if (signerWeightSum >= matchingClaim.threshold) {
-        boardVerified = true;
+        // Self-contained quorum is valid. The yes-entity check below still ensures
+        // the hanko core recovered at least one affirmative entity from the envelope.
       } else {
         console.warn(`❌ Hanko self-contained: insufficient weight ${signerWeightSum}/${matchingClaim.threshold}`);
         return { valid: false, entityId: null };

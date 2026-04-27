@@ -47,7 +47,7 @@
  * method names to concrete handlers via a static registry.
  */
 
-import type { Env, EntityReplica, EntityInput, AccountMachine, SettlementOp, EntityTx, HtlcLock } from './types';
+import type { Env, EntityReplica, EntityInput, SettlementOp, EntityTx } from './types';
 import type { CrontabState, CrontabTaskMethod, CrontabTaskState, ScheduledHook } from './crontab-types';
 import { isLeftEntity } from './entity-id-utils';
 import { deriveDelta } from './account-utils';
@@ -288,7 +288,7 @@ async function processDueHooks(
           );
 
           if (sentHasFinalize || replica.state.jBatchState?.sentBatch) {
-            account.activeDispute.finalizeQueued = sentHasFinalize || account.activeDispute.finalizeQueued;
+            account.activeDispute.finalizeQueued = sentHasFinalize || (account.activeDispute.finalizeQueued ?? false);
             const retryMs = 1000;
             if (replica.state.crontabState) {
               scheduleHook(replica.state.crontabState, {
@@ -450,7 +450,7 @@ async function checkAccountTimeoutsHandler(
   _env: Env,
   replica: EntityReplica,
   _task: CrontabTaskState,
-  context: CrontabExecutionContext,
+  _context: CrontabExecutionContext,
 ): Promise<EntityInput[]> {
   const outputs: EntityInput[] = [];
   const now = replica.state.timestamp; // DETERMINISTIC: Use entity's own timestamp
@@ -537,86 +537,6 @@ async function checkAccountTimeoutsHandler(
       console.warn(
         `⏰ ROLLBACK: Generated rollbackTimedOutFrames for ${timedOutAccounts.length} accounts (HTLC expired in pendingFrame)`,
       );
-    }
-  }
-
-  return outputs;
-}
-
-/**
- * Check all HTLC locks for expiration and auto-timeout
- *
- * Pattern:
- * - Iterate all accounts
- * - Check locks for currentHeight > revealBeforeHeight
- * - Generate htlc_timeout mempoolOps for expired locks
- * - Prevents locks from being stuck forever
- */
-async function checkHtlcTimeoutsHandler(_env: Env, replica: EntityReplica): Promise<EntityInput[]> {
-  const outputs: EntityInput[] = [];
-  const currentHeight = replica.state.lastFinalizedJHeight || 0;
-  const currentTimestamp = replica.state.timestamp; // Entity's deterministic clock
-
-  console.log(
-    `⏰ HTLC-TIMEOUT-CRON: Checking locks (entity ${replica.entityId.slice(-4)}, height=${currentHeight}, timestamp=${currentTimestamp})`,
-  );
-
-  // Collect expired locks per account
-  const expiredLocksByAccount: Array<{ accountId: string; lockId: string; lock: HtlcLock }> = [];
-  let totalLocks = 0;
-
-  // Iterate over all accounts
-  for (const [counterpartyId, accountMachine] of replica.state.accounts.entries()) {
-    if (!accountMachine.locks || accountMachine.locks.size === 0) continue;
-
-    totalLocks += accountMachine.locks.size;
-
-    // Check each lock for expiration
-    for (const [lockId, lock] of accountMachine.locks.entries()) {
-      console.log(
-        `⏰   Checking lock ${lockId.slice(0, 16)}... (heightDeadline=${lock.revealBeforeHeight}, timeDeadline=${lock.timelock})`,
-      );
-
-      // Check if lock expired - BOTH conditions (height OR timestamp)
-      // Height: Used when J-blocks are active (on-chain settlement)
-      // Timestamp: Fallback for off-chain timeout (entity's deterministic clock)
-      const heightExpired = currentHeight > 0 && currentHeight > lock.revealBeforeHeight;
-      const timestampExpired = currentTimestamp > Number(lock.timelock);
-      const expired = heightExpired || timestampExpired;
-
-      if (expired) {
-        console.log(`⏰ HTLC-TIMEOUT: Lock ${lockId.slice(0, 16)}... EXPIRED`);
-        console.log(`   Height: ${currentHeight} > ${lock.revealBeforeHeight} = ${heightExpired}`);
-        console.log(`   Timestamp: ${currentTimestamp} > ${lock.timelock} = ${timestampExpired}`);
-        console.log(`   Account: ${counterpartyId.slice(-4)}, Amount: ${lock.amount}`);
-
-        expiredLocksByAccount.push({
-          accountId: counterpartyId,
-          lockId,
-          lock,
-        });
-      }
-    }
-  }
-
-  console.log(`⏰ HTLC-TIMEOUT-CRON: Scanned ${totalLocks} locks, found ${expiredLocksByAccount.length} expired`);
-
-  // If we found expired locks, generate EntityTx to process them
-  if (expiredLocksByAccount.length > 0) {
-    console.log(`⏰ HTLC-TIMEOUT: Found ${expiredLocksByAccount.length} expired locks`);
-
-    const firstValidator = replica.state.config.validators?.[0];
-    if (firstValidator) {
-      outputs.push({
-        entityId: replica.entityId,
-        signerId: firstValidator,
-        entityTxs: [
-          {
-            type: 'processHtlcTimeouts',
-            data: { expiredLocks: expiredLocksByAccount },
-          },
-        ],
-      });
     }
   }
 
@@ -795,7 +715,6 @@ async function hubRebalanceHandler(
         continue;
       }
       const prepaidFee = feeState.feePaidUpfront;
-      const requestedAt = feeState.requestedAt;
       let jBatchSubmittedAt = feeState.jBatchSubmittedAt || 0;
       const submittedAgeMs = jBatchSubmittedAt > 0 ? now - jBatchSubmittedAt : 0;
       let submittedBatchStale = jBatchSubmittedAt > 0 && submittedAgeMs >= HUB_SUBMITTED_REQUEST_STALE_MS;
