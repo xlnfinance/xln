@@ -17,21 +17,22 @@
  * Run with: bun runtime/scenarios/swap.ts
  */
 
-import type { Env, EntityInput, JurisdictionConfig } from '../types';
+import type { AccountMachine, Env, EntityInput } from '../types';
 import { ethers } from 'ethers';
 import { getBestAsk } from '../orderbook/core';
 import { getOpenSwapOfferEntries } from '../open-swap-offers';
 import { ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig } from './boot';
 import type { JAdapter } from '../jadapter/types';
-import { canonicalAccountKey } from '../state-helpers';
-import { formatRuntime, formatEntity } from '../runtime-ascii';
+import { formatRuntime } from '../runtime-ascii';
 import { enableStrictScenario, processUntil, ensureSignerKeysFromSeed, requireRuntimeSeed, converge } from './helpers';
 import { createGossipLayer } from '../networking/gossip';
 import { swapKey } from '../swap-execution';
 
 // Lazy-loaded runtime functions
+type ApplyRuntimeInputFn = typeof import('../runtime').applyRuntimeInput;
+
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
-let _applyRuntimeInput: ((env: Env, runtimeInput: any) => Promise<Env>) | null = null;
+let _applyRuntimeInput: ApplyRuntimeInputFn | null = null;
 
 let _processWithStep: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
 
@@ -52,7 +53,7 @@ const getProcess = async () => {
   return _processWithStep;
 };
 
-const getApplyRuntimeInput = async () => {
+const getApplyRuntimeInput = async (): Promise<ApplyRuntimeInputFn> => {
   if (!_applyRuntimeInput) {
     const runtime = await import('../runtime');
     _applyRuntimeInput = runtime.applyRuntimeInput;
@@ -98,7 +99,6 @@ const ETH_CAPACITY_UNITS = USDC_CAPACITY_UNITS / ETH_PRICE_MAIN;
 const TRADE_ETH = ETH_CAPACITY_UNITS / 5n; // 20% of capacity
 const TRADE_ETH_HALF = TRADE_ETH / 2n;
 const TRADE_ETH_DOUBLE = TRADE_ETH * 2n;
-const TRADE_ETH_TRIPLE = TRADE_ETH * 3n;
 
 const TRADE_USDC_MAIN_UNITS = TRADE_ETH * ETH_PRICE_MAIN;
 const TRADE_USDC_HALF_UNITS = TRADE_ETH_HALF * ETH_PRICE_MAIN;
@@ -168,25 +168,17 @@ function getRegisteredEntityId(signerId: string): string {
   return entityId;
 }
 
-function assertSnapshotCounts(env: Env, expectedJ: number, expectedE: number, label: string): void {
-  const history = env.history || [];
-  assert(history.length > 0, `${label}: snapshot exists`);
-
-  const snapshot = history[history.length - 1];
-  assert(snapshot, `${label}: snapshot frame exists`);
-  const jCount = snapshot.jReplicas.size;
-  const eCount = snapshot.eReplicas.size;
-
-  assert(jCount === expectedJ, `${label}: snapshot jReplicas = ${expectedJ} (got ${jCount})`);
-  assert(eCount === expectedE, `${label}: snapshot eReplicas = ${expectedE} (got ${eCount})`);
-}
-
 function findReplica(env: Env, entityId: string) {
   const entry = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'));
   if (!entry) {
     throw new Error(`Replica for entity ${entityId} not found`);
   }
   return entry;
+}
+
+function requireAccount(account: AccountMachine | undefined, label: string): AccountMachine {
+  if (!account) throw new Error(`SWAP_MISSING_ACCOUNT: ${label}`);
+  return account;
 }
 
 export async function swap(env: Env): Promise<void> {
@@ -200,7 +192,6 @@ export async function swap(env: Env): Promise<void> {
   requireRuntimeSeed(env, 'SWAP');
   ensureSignerKeysFromSeed(env, ['1', '2', '3', '4', '5'], 'SWAP');
   const process = await getProcess();
-  const applyRuntimeInput = await getApplyRuntimeInput();
 
   if (env.scenarioMode && env.height === 0) {
     env.timestamp = 1;
@@ -362,7 +353,7 @@ export async function swap(env: Env): Promise<void> {
   // Verify offer was created in A-Machine
   const [, aliceRep1] = findReplica(env, alice.id);
   const aliceHubAccount1 = aliceRep1.state.accounts.get(hub.id);
-  assert(aliceHubAccount1?.swapOffers?.has(offerId1), 'Offer created in A-Machine account');
+  assert(aliceHubAccount1?.swapOffers?.has(offerId1) === true, 'Offer created in A-Machine account');
 
   const offer1 = aliceHubAccount1?.swapOffers?.get(offerId1);
   assert(offer1?.giveAmount === eth(TRADE_ETH), `Offer giveAmount = ${TRADE_ETH} ETH`);
@@ -448,7 +439,7 @@ export async function swap(env: Env): Promise<void> {
   console.log('═══════════════════════════════════════════════════════════════\n');
 
   console.log('💱 Hub: swap_resolve (100% fill, complete)');
-  assert(offer2, 'Offer remainder exists before final resolve');
+  if (!offer2) throw new Error('SWAP_MISSING_OFFER_REMAINDER: order-001');
   await process(env, [{
     entityId: hub.id,
     signerId: hub.signer,
@@ -459,8 +450,8 @@ export async function swap(env: Env): Promise<void> {
         offerId: offerId1,
         fillRatio: FULL_FILL, // Fill 100% of remaining
         cancelRemainder: false,
-        executionGiveAmount: offer2!.giveAmount,
-        executionWantAmount: offer2!.wantAmount,
+        executionGiveAmount: offer2.giveAmount,
+        executionWantAmount: offer2.wantAmount,
       },
     }],
   }]);
@@ -520,7 +511,7 @@ export async function swap(env: Env): Promise<void> {
   // Verify offer created in A-Machine and E-Machine (using namespaced key)
   const [, aliceRep4] = findReplica(env, alice.id);
   const account4 = aliceRep4.state.accounts.get(hub.id);
-  assert(account4?.swapOffers?.has(offerId2), 'Order 2 created in A-Machine');
+  assert(account4?.swapOffers?.has(offerId2) === true, 'Order 2 created in A-Machine');
   const openOfferKey2 = `${hub.id}:${offerId2}`;
   assert(getOpenSwapOfferEntries(aliceRep4.state).has(openOfferKey2), 'Order 2 in derived open-offers view');
 
@@ -624,7 +615,7 @@ export async function swap(env: Env): Promise<void> {
   // Verify offer still exists (fill was rejected)
   const [, aliceRep6] = findReplica(env, alice.id);
   const account6 = aliceRep6.state.accounts.get(hub.id);
-  assert(account6?.swapOffers?.has(offerId3), 'Order 3 still exists (50% fill rejected)');
+  assert(account6?.swapOffers?.has(offerId3) === true, 'Order 3 still exists (50% fill rejected)');
 
   // Hub fills 80% - should succeed
   const FILL_80_PERCENT = FILL_80;
@@ -670,6 +661,7 @@ export async function swap(env: Env): Promise<void> {
   console.log('  5. ✅ minFillRatio rejects underfills');
   console.log('\n');
   } finally {
+    env.scenarioMode = prevScenarioMode ?? false;
     restoreFailFast();
   }
 }
@@ -716,6 +708,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   }]);
   const [, hubRep] = findReplica(env, hub.id);
   const jurisdiction = hubRep.state.config.jurisdiction;
+  if (!jurisdiction) throw new Error('SWAP_MISSING_HUB_JURISDICTION');
   console.log('✅ Hub orderbook extension initialized');
   assert(!!hubRep.state.orderbookExt, 'orderbookExt initialized on hub state');
 
@@ -735,7 +728,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
     signerId: bob.signer,
     data: {
       isProposer: true,
-      position: SWAP_POSITIONS['Bob'],
+      position: SWAP_POSITIONS['Bob'] ?? { x: 0, y: 0, z: 0 },
       config: {
         mode: 'proposer-based' as const,
         threshold: 1n,
@@ -848,8 +841,8 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   await processUntil(env, () => {
     const [, hubRepMatch] = findReplica(env, hub.id);
     const pending = hubRepMatch.state.pendingSwapFillRatios;
-    aliceFillRatio = pending?.get(`${alice.id}:alice-sell-001`) || 0;
-    bobFillRatio = pending?.get(`${bob.id}:bob-buy-001`) || 0;
+    aliceFillRatio = pending?.get(swapKey(alice.id, 'alice-sell-001')) || 0;
+    bobFillRatio = pending?.get(swapKey(bob.id, 'bob-buy-001')) || 0;
     return aliceFillRatio > 0 && bobFillRatio > 0;
   }, 20, 'RJEA fill ratios recorded');
   await converge(env);
@@ -1124,24 +1117,26 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   await processJEvents(env);
 
   const [, hubAfterStart] = findReplica(env, hub.id);
-  const hubAccountAfterStart = hubAfterStart.state.accounts.get(alice.id);
-  assert(!!hubAccountAfterStart?.activeDispute, 'Dispute started for swap');
+  const hubAccountAfterStart = requireAccount(hubAfterStart.state.accounts.get(alice.id), 'hub/alice after dispute start');
+  const hubActiveDispute = hubAccountAfterStart.activeDispute;
+  if (!hubActiveDispute) throw new Error('SWAP_MISSING_HUB_ACTIVE_DISPUTE');
   const { buildAccountProofBody } = await import('../proof-builder');
   const hubProofAfterStart = buildAccountProofBody(hubAccountAfterStart);
   assert(
-    hubProofAfterStart.proofBodyHash === hubAccountAfterStart.activeDispute.initialProofbodyHash,
+    hubProofAfterStart.proofBodyHash === hubActiveDispute.initialProofbodyHash,
     'Hub dispute proofBodyHash matches on-chain start hash'
   );
   const [, aliceAfterStart] = findReplica(env, alice.id);
-  const aliceAccountAfterStart = aliceAfterStart.state.accounts.get(hub.id);
-  assert(!!aliceAccountAfterStart?.activeDispute, 'Dispute visible on counterparty');
+  const aliceAccountAfterStart = requireAccount(aliceAfterStart.state.accounts.get(hub.id), 'alice/hub after dispute start');
+  const aliceActiveDispute = aliceAccountAfterStart.activeDispute;
+  if (!aliceActiveDispute) throw new Error('SWAP_MISSING_ALICE_ACTIVE_DISPUTE');
   const aliceProofAfterStart = buildAccountProofBody(aliceAccountAfterStart);
   assert(
-    aliceProofAfterStart.proofBodyHash === aliceAccountAfterStart.activeDispute.initialProofbodyHash,
+    aliceProofAfterStart.proofBodyHash === aliceActiveDispute.initialProofbodyHash,
     'Counterparty dispute proofBodyHash matches on-chain start hash'
   );
 
-  const targetBlock = hubAccountAfterStart.activeDispute!.disputeTimeout;
+  const targetBlock = hubActiveDispute.disputeTimeout;
   console.log(`⏳ Waiting for dispute timeout (block ${targetBlock})...`);
   while (true) {
     const currentBlock = BigInt(await jadapter.provider.getBlockNumber());
@@ -1173,8 +1168,10 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   assert(finalArgs !== '0x', 'Dispute finalArguments encoded');
 
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-  const [argArray] = abiCoder.decode(['bytes[]'], finalArgs) as [string[]];
-  const [ratios] = abiCoder.decode(['uint16[]', 'bytes32[]'], argArray[0]) as [Array<bigint>, Array<string>];
+  const [argArray] = abiCoder.decode(['bytes[]'], finalArgs) as unknown as [string[]];
+  const ratioArgs = argArray[0];
+  if (typeof ratioArgs !== 'string') throw new Error('SWAP_MISSING_FINAL_RATIO_ARGS');
+  const [ratios] = abiCoder.decode(['uint16[]', 'bytes32[]'], ratioArgs) as unknown as [Array<bigint>, Array<string>];
   const ratioValue = Number(ratios[0] || 0n);
   assert(ratioValue === pendingRatio, `fillRatio matches pending (${pendingRatio})`);
 
@@ -1233,7 +1230,6 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
     env.quietRuntimeLogs = true;
   }
   const process = await getProcess();
-  const applyRuntimeInput = await getApplyRuntimeInput();
 
   console.log('═══════════════════════════════════════════════════════════════');
   console.log('         PHASE 3: MULTI-PARTY TRADING (Carol & Dave)           ');
@@ -1241,7 +1237,6 @@ export async function multiPartyTrading(env: Env): Promise<Env> {
 
   const hub = { id: getRegisteredEntityId('2'), signer: '2' };
   const [, hubRep] = findReplica(env, hub.id);
-  const jurisdiction = hubRep.state.config.jurisdiction;
 
   // Reset hub orderbook + swap holds to isolate Phase 3 from earlier tests
   if (hubRep.state.orderbookExt) {
