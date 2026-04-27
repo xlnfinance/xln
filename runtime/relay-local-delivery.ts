@@ -99,9 +99,9 @@ export const createLocalDeliveryHandler = (
         if (tx.type !== 'accountInput') continue;
 
         const fromEntityId =
-          typeof data.fromEntityId === 'string' ? String(data.fromEntityId).toLowerCase() : '';
+          typeof data['fromEntityId'] === 'string' ? String(data['fromEntityId']).toLowerCase() : '';
         const toEntityId =
-          typeof data.toEntityId === 'string' ? String(data.toEntityId).toLowerCase() : '';
+          typeof data['toEntityId'] === 'string' ? String(data['toEntityId']).toLowerCase() : '';
 
         let senderEntityId = '';
         if (fromEntityId && toEntityId) {

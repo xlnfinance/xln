@@ -128,7 +128,7 @@ export const spawnBunChild = (
   args: string[],
   env: NodeJS.ProcessEnv,
 ): ManagedChild => {
-  const mirrorStdout = process.env.XLN_CHILD_MIRROR_STDOUT === '1';
+  const mirrorStdout = process.env['XLN_CHILD_MIRROR_STDOUT'] === '1';
   const proc = spawn('bun', args, {
     cwd: process.cwd(),
     env: { ...process.env, ...env },
@@ -177,14 +177,14 @@ export const waitForHttpReady = async (
   while (Date.now() < deadline) {
     try {
       const insecureLocalHttps = url.startsWith('https://localhost:') || url.startsWith('https://127.0.0.1:');
-      const prevTlsReject = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
+      const prevTlsReject = process.env['NODE_TLS_REJECT_UNAUTHORIZED'];
       if (insecureLocalHttps) {
-        process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+        process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';
       }
       const response = await fetch(url);
       if (insecureLocalHttps) {
-        if (prevTlsReject === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-        else process.env.NODE_TLS_REJECT_UNAUTHORIZED = prevTlsReject;
+        if (prevTlsReject === undefined) delete process.env['NODE_TLS_REJECT_UNAUTHORIZED'];
+        else process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = prevTlsReject;
       }
       const bodyText = await response.text();
       if (response.status < 500) {

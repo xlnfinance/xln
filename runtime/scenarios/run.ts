@@ -186,7 +186,7 @@ type ParallelResult = {
 };
 
 async function runParallelScenarios(mode: string, workersArg?: number, setName?: string): Promise<number> {
-  const set = (setName || process.env.SCENARIO_SET || 'full').toLowerCase();
+  const set = (setName || process.env['SCENARIO_SET'] || 'full').toLowerCase();
   const selectedSet = set === 'smoke'
     ? SMOKE_PARALLEL_SET
     : (set === 'all' || set === 'everything' || set === 'full-catalog')
@@ -355,7 +355,7 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
 async function main() {
   const { scenario, mode, rpc, workers, set, single } = parseArgs();
 
-  const requestedMode = (mode || process.env.JADAPTER_MODE || 'rpc').toLowerCase();
+  const requestedMode = (mode || process.env['JADAPTER_MODE'] || 'rpc').toLowerCase();
   const runAll = !single && (!scenario || scenario === 'all');
 
   if (runAll) {
@@ -376,19 +376,19 @@ async function main() {
   }
 
   // Set env vars — scenarios read these via getJAdapterMode() / ensureJAdapter()
-  if (mode) process.env.JADAPTER_MODE = mode;
+  if (mode) process.env['JADAPTER_MODE'] = mode;
 
-  let effectiveRpc = rpc || process.env.ANVIL_RPC;
+  let effectiveRpc = rpc || process.env['ANVIL_RPC'];
   if (requestedMode !== 'browservm' && !effectiveRpc) {
     // Default to isolated RPC per scenario process to allow true parallel runs.
     const port = await reserveFreeLocalPort();
     effectiveRpc = `http://127.0.0.1:${port}`;
   }
-  if (effectiveRpc) process.env.ANVIL_RPC = effectiveRpc;
+  if (effectiveRpc) process.env['ANVIL_RPC'] = effectiveRpc;
 
   console.log(`\n${'='.repeat(60)}`);
   console.log(`  Scenario: ${scenario}`);
-  console.log(`  Mode: ${mode || process.env.JADAPTER_MODE || 'rpc'}`);
+  console.log(`  Mode: ${mode || process.env['JADAPTER_MODE'] || 'rpc'}`);
   if (effectiveRpc) console.log(`  RPC: ${effectiveRpc}`);
   console.log(`${'='.repeat(60)}\n`);
 

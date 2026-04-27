@@ -5,12 +5,12 @@ import { mkdir, rm } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { spawnBunChild, startCustodySupport, stopManagedChild, waitForHttpReady } from '../orchestrator/custody-bootstrap';
 
-const API_BASE_URL = process.env.DEV_API_BASE_URL || 'http://127.0.0.1:8082';
-const ANVIL_RPC = process.env.DEV_ANVIL_RPC || 'http://127.0.0.1:8545';
-const RELAY_URL = process.env.DEV_RELAY_URL || 'ws://127.0.0.1:8082/relay';
-const WALLET_PORT = Number(process.env.VITE_DEV_PORT || process.env.DEV_WALLET_PORT || '8080');
-const WALLET_BASE_URL = process.env.DEV_WALLET_BASE_URL || `https://localhost:${WALLET_PORT}`;
-const WALLET_URL = process.env.DEV_WALLET_URL || new URL('/app', WALLET_BASE_URL).toString();
+const API_BASE_URL = process.env['DEV_API_BASE_URL'] || 'http://127.0.0.1:8082';
+const ANVIL_RPC = process.env['DEV_ANVIL_RPC'] || 'http://127.0.0.1:8545';
+const RELAY_URL = process.env['DEV_RELAY_URL'] || 'ws://127.0.0.1:8082/relay';
+const WALLET_PORT = Number(process.env['VITE_DEV_PORT'] || process.env['DEV_WALLET_PORT'] || '8080');
+const WALLET_BASE_URL = process.env['DEV_WALLET_BASE_URL'] || `https://localhost:${WALLET_PORT}`;
+const WALLET_URL = process.env['DEV_WALLET_URL'] || new URL('/app', WALLET_BASE_URL).toString();
 const isFalseLike = (raw: string | undefined, defaultValue = false): boolean => {
   const value = String(raw ?? '').trim().toLowerCase();
   if (!value) return defaultValue;
@@ -23,16 +23,16 @@ const isTrueLike = (raw: string | undefined, defaultValue = false): boolean => {
   return value === '1' || value === 'true' || value === 'yes';
 };
 
-const CUSTODY_HTTPS = !isFalseLike(process.env.CUSTODY_HTTPS, false);
-const DAEMON_PORT = Number(process.env.DEV_CUSTODY_DAEMON_PORT || '8088');
-const CUSTODY_PORT = Number(process.env.DEV_CUSTODY_PORT || '8087');
+const CUSTODY_HTTPS = !isFalseLike(process.env['CUSTODY_HTTPS'], false);
+const DAEMON_PORT = Number(process.env['DEV_CUSTODY_DAEMON_PORT'] || '8088');
+const CUSTODY_PORT = Number(process.env['DEV_CUSTODY_PORT'] || '8087');
 const CUSTODY_BASE_URL = `${CUSTODY_HTTPS ? 'https' : 'http'}://localhost:${CUSTODY_PORT}`;
-const DB_ROOT = resolve(process.env.DEV_CUSTODY_DB_ROOT || './db/dev/custody');
-const RESET_DB_ON_START = isTrueLike(process.env.DEV_CUSTODY_RESET, false);
-const SEED = process.env.DEV_CUSTODY_SEED || 'xln-dev-custody-seed';
-const SIGNER_LABEL = process.env.DEV_CUSTODY_SIGNER_LABEL || 'custody-dev-1';
-const PROFILE_NAME = process.env.DEV_CUSTODY_NAME || 'Custody';
-const VERBOSE = isTrueLike(process.env.DEV_VERBOSE, false);
+const DB_ROOT = resolve(process.env['DEV_CUSTODY_DB_ROOT'] || './db/dev/custody');
+const RESET_DB_ON_START = isTrueLike(process.env['DEV_CUSTODY_RESET'], false);
+const SEED = process.env['DEV_CUSTODY_SEED'] || 'xln-dev-custody-seed';
+const SIGNER_LABEL = process.env['DEV_CUSTODY_SIGNER_LABEL'] || 'custody-dev-1';
+const PROFILE_NAME = process.env['DEV_CUSTODY_NAME'] || 'Custody';
+const VERBOSE = isTrueLike(process.env['DEV_VERBOSE'], false);
 
 let shuttingDown = false;
 let restartingCustody = false;
@@ -133,11 +133,11 @@ const main = async (): Promise<void> => {
 
   const probe = async (url: string): Promise<boolean> => {
     try {
-      const previous = process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-      process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
+      const previous = process.env['NODE_TLS_REJECT_UNAUTHORIZED'];
+      process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = '0';
       const response = await fetch(url);
-      if (previous === undefined) delete process.env.NODE_TLS_REJECT_UNAUTHORIZED;
-      else process.env.NODE_TLS_REJECT_UNAUTHORIZED = previous;
+      if (previous === undefined) delete process.env['NODE_TLS_REJECT_UNAUTHORIZED'];
+      else process.env['NODE_TLS_REJECT_UNAUTHORIZED'] = previous;
       return response.ok;
     } catch {
       return false;

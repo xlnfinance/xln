@@ -9,21 +9,21 @@ import { serializeTaggedJson } from '../runtime/serialization-utils';
 import { DaemonRpcClient, type DaemonFrameLog } from './daemon-client';
 import { CustodyStore, type ActivityRecord, type SessionRecord } from './store';
 
-const HOST = process.env.CUSTODY_HOST || 'localhost';
-const PORT = Number(process.env.CUSTODY_PORT || '8087');
-const DAEMON_WS_URL = process.env.CUSTODY_DAEMON_WS || 'ws://127.0.0.1:8088/rpc';
-const WALLET_URL = process.env.CUSTODY_WALLET_URL || 'https://localhost:8080/app';
+const HOST = process.env['CUSTODY_HOST'] || 'localhost';
+const PORT = Number(process.env['CUSTODY_PORT'] || '8087');
+const DAEMON_WS_URL = process.env['CUSTODY_DAEMON_WS'] || 'ws://127.0.0.1:8088/rpc';
+const WALLET_URL = process.env['CUSTODY_WALLET_URL'] || 'https://localhost:8080/app';
 const ENABLE_HTTPS = (() => {
-  const raw = String(process.env.CUSTODY_HTTPS || '').trim().toLowerCase();
+  const raw = String(process.env['CUSTODY_HTTPS'] || '').trim().toLowerCase();
   if (raw === '0' || raw === 'false' || raw === 'no') return false;
   if (raw === '1' || raw === 'true' || raw === 'yes') return true;
   return HOST === 'localhost';
 })();
-const CUSTODY_NAME = String(process.env.CUSTODY_PROFILE_NAME || 'Custody').trim() || 'Custody';
-const CUSTODY_JURISDICTION = String(process.env.CUSTODY_JURISDICTION_ID || process.env.CUSTODY_JURISDICTION || '').trim();
-const CUSTODY_ENTITY_ID = String(process.env.CUSTODY_ENTITY_ID || '').trim().toLowerCase();
-const CUSTODY_SIGNER_ID = String(process.env.CUSTODY_SIGNER_ID || '').trim().toLowerCase() || undefined;
-const CUSTODY_DB_PATH = process.env.CUSTODY_DB_PATH || './db-tmp/custody.sqlite';
+const CUSTODY_NAME = String(process.env['CUSTODY_PROFILE_NAME'] || 'Custody').trim() || 'Custody';
+const CUSTODY_JURISDICTION = String(process.env['CUSTODY_JURISDICTION_ID'] || process.env['CUSTODY_JURISDICTION'] || '').trim();
+const CUSTODY_ENTITY_ID = String(process.env['CUSTODY_ENTITY_ID'] || '').trim().toLowerCase();
+const CUSTODY_SIGNER_ID = String(process.env['CUSTODY_SIGNER_ID'] || '').trim().toLowerCase() || undefined;
+const CUSTODY_DB_PATH = process.env['CUSTODY_DB_PATH'] || './db-tmp/custody.sqlite';
 const SESSION_COOKIE = 'custody_session';
 const JOURNAL_CURSOR_KEY = 'journal_cursor';
 const JOURNAL_ACTIVE_SYNC_MS = 1000;
@@ -161,7 +161,8 @@ const formatAmount = (tokenId: number, amountMinor: bigint): string => {
     compactFractional = compactFractional.slice(0, -1);
   }
   compactFractional = compactFractional.slice(0, 6);
-  return compactFractional.length > 0 ? `${whole}.${compactFractional}` : whole;
+  const safeWhole = whole ?? '0';
+  return compactFractional.length > 0 ? `${safeWhole}.${compactFractional}` : safeWhole;
 };
 
 const parseUidFromDescription = (description: string): string | null => {
@@ -285,16 +286,16 @@ const buildDashboardPayload = (session: SessionRecord) => {
 
 const creditDepositFromLog = (height: number, log: DaemonFrameLog): void => {
   const data = log.data || {};
-  const entityId = getLogString(data.entityId).toLowerCase();
+  const entityId = getLogString(data['entityId']).toLowerCase();
   if (entityId !== CUSTODY_ENTITY_ID) return;
 
-  const description = getLogString(data.description);
+  const description = getLogString(data['description']);
   const userId = parseUidFromDescription(description);
-  const tokenId = Number(data.tokenId || 0);
-  const amountMinor = BigInt(getLogString(data.amount) || '0');
-  const hashlock = getLogString(data.hashlock);
-  const fromEntityId = getLogString(data.inboundEntity) || getLogString(data.fromEntity);
-  const startedAtMs = Number(data.startedAtMs || 0);
+  const tokenId = Number(data['tokenId'] || 0);
+  const amountMinor = BigInt(getLogString(data['amount']) || '0');
+  const hashlock = getLogString(data['hashlock']);
+  const fromEntityId = getLogString(data['inboundEntity']) || getLogString(data['fromEntity']);
+  const startedAtMs = Number(data['startedAtMs'] || 0);
   if (tokenId <= 0 || amountMinor <= 0n || !hashlock) return;
 
   store.creditDeposit({
@@ -319,9 +320,9 @@ const processFrameLog = (height: number, log: DaemonFrameLog): void => {
 
   if (log.message === 'HtlcFinalized') {
     const data = log.data || {};
-    const entityId = getLogString(data.entityId).toLowerCase();
+    const entityId = getLogString(data['entityId']).toLowerCase();
     if (entityId !== CUSTODY_ENTITY_ID) return;
-    const hashlock = getLogString(data.hashlock);
+    const hashlock = getLogString(data['hashlock']);
     if (hashlock) {
       store.finalizeWithdrawalByHashlock({
         hashlock,
@@ -334,11 +335,11 @@ const processFrameLog = (height: number, log: DaemonFrameLog): void => {
 
   if (log.message === 'HtlcFailed') {
     const data = log.data || {};
-    const entityId = getLogString(data.entityId).toLowerCase();
+    const entityId = getLogString(data['entityId']).toLowerCase();
     if (entityId !== CUSTODY_ENTITY_ID) return;
-    const hashlock = getLogString(data.hashlock);
+    const hashlock = getLogString(data['hashlock']);
     if (!hashlock) return;
-    const reason = getLogString(data.reason) || 'payment failed';
+    const reason = getLogString(data['reason']) || 'payment failed';
     store.failWithdrawalByHashlock({
       hashlock,
       error: reason,
@@ -530,7 +531,6 @@ const server = Bun.serve({
         try {
           const queued = await daemon.queuePayment({
             sourceEntityId: CUSTODY_ENTITY_ID,
-            signerId: CUSTODY_SIGNER_ID,
             targetEntityId,
             tokenId,
             amount: amountMinor.toString(),
@@ -538,6 +538,7 @@ const server = Bun.serve({
             startedAtMs,
             route: selectedRoute.path,
             mode: 'htlc',
+            ...(CUSTODY_SIGNER_ID !== undefined ? { signerId: CUSTODY_SIGNER_ID } : {}),
           });
           if (!queued.hashlock) {
             throw new Error('Daemon did not return hashlock for queued withdrawal');

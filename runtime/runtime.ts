@@ -6,6 +6,7 @@
 // High-level database using Level polyfill (works in both Node.js and browser)
 import { Level } from 'level';
 import { ethers } from 'ethers';
+import type { Provider } from 'ethers';
 
 // Bump this on runtime bundle changes that must be reflected in frontend immediately.
 const RUNTIME_BUILD_ID = '2026-03-23-19:35Z';
@@ -213,12 +214,15 @@ import type {
   DeliverableEntityInput,
   AccountFrame,
   EntityInput,
+  EntityReplica,
   EntityState,
   Env,
   FrameLogEntry,
   JInput,
+  JReplica,
   RoutedEntityInput,
   RuntimeInput,
+  RuntimeTx,
 } from './types';
 import {
   clearDatabase,
@@ -321,7 +325,7 @@ function normalizeEntitySwapTradingPairs(state: { swapTradingPairs?: Array<{ bas
 // Level polyfill: Node.js uses filesystem, Browser uses IndexedDB
 const nodeProcess = !runtimeIsBrowser && typeof globalThis.process !== 'undefined' ? globalThis.process : undefined;
 const defaultDbPath = nodeProcess ? 'db-tmp/runtime' : 'db';
-const dbRootPath = nodeProcess?.env?.XLN_DB_PATH || defaultDbPath;
+const dbRootPath = nodeProcess?.env?.['XLN_DB_PATH'] || defaultDbPath;
 
 const DEFAULT_DB_NAMESPACE = 'default';
 const PERSISTENCE_SCHEMA_VERSION = 4;
@@ -445,7 +449,7 @@ const getStorageDb = (env: Env, role: StorageDbRole = 'current'): Level<Buffer, 
   const fields = storageStateFields(role);
   const existing = state[fields.dbField] as Level<Buffer, Buffer> | undefined;
   if (existing) return existing;
-  const db = new Level(resolveStorageDbPath(env, role), { valueEncoding: 'buffer', keyEncoding: 'binary' });
+  const db = new Level(resolveStorageDbPath(env, role), { valueEncoding: 'buffer', keyEncoding: 'binary' }) as unknown as Level<Buffer, Buffer>;
   state[fields.dbField] = db;
   return db;
 };
@@ -739,7 +743,7 @@ export const getRuntimeDb = (env: Env): Level<Buffer, Buffer> => {
   const state = ensureRuntimeState(env);
   if (!state.db) {
     const path = resolveDbPath(env, 'core');
-    state.db = new Level(path, { valueEncoding: 'buffer', keyEncoding: 'binary' });
+    state.db = new Level(path, { valueEncoding: 'buffer', keyEncoding: 'binary' }) as unknown as Level<Buffer, Buffer>;
   }
   return state.db;
 };
@@ -748,7 +752,7 @@ export const getInfraDb = (env: Env): Level<Buffer, Buffer> => {
   const state = ensureRuntimeState(env);
   if (!state.infraDb) {
     const path = resolveDbPath(env, 'infra');
-    state.infraDb = new Level(path, { valueEncoding: 'buffer', keyEncoding: 'binary' });
+    state.infraDb = new Level(path, { valueEncoding: 'buffer', keyEncoding: 'binary' }) as unknown as Level<Buffer, Buffer>;
   }
   return state.infraDb;
 };
@@ -756,7 +760,7 @@ export const getInfraDb = (env: Env): Level<Buffer, Buffer> => {
 export const getFrameDb = (env: Env): Level<Buffer, Buffer> => {
   const state = ensureRuntimeState(env);
   if (!state.frameDb) {
-    state.frameDb = new Level(resolveFrameDbPath(env), { valueEncoding: 'buffer', keyEncoding: 'binary' });
+    state.frameDb = new Level(resolveFrameDbPath(env), { valueEncoding: 'buffer', keyEncoding: 'binary' }) as unknown as Level<Buffer, Buffer>;
   }
   return state.frameDb as Level<Buffer, Buffer>;
 };
@@ -1160,7 +1164,7 @@ const runtimeProcessEnv =
   typeof globalThis === 'object'
     ? (globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } }).process?.env
     : undefined;
-const isProductionRuntime = runtimeProcessEnv?.NODE_ENV === 'production';
+const isProductionRuntime = runtimeProcessEnv?.['NODE_ENV'] === 'production';
 
 const readInfraStringArray = async (db: Level<Buffer, Buffer>, key: string): Promise<string[]> => {
   try {
@@ -1259,16 +1263,16 @@ const buildRouteOutputKey = (output: RoutedEntityInput): string => {
   const txPart = (output.entityTxs || [])
     .map(tx => {
       const data = tx.data as Record<string, unknown> | undefined;
-      const height = typeof data?.height === 'number' ? data.height : '';
-      const from = typeof data?.fromEntityId === 'string' ? data.fromEntityId : '';
-      const to = typeof data?.toEntityId === 'string' ? data.toEntityId : '';
+      const height = typeof data?.['height'] === 'number' ? data['height'] : '';
+      const from = typeof data?.['fromEntityId'] === 'string' ? data['fromEntityId'] : '';
+      const to = typeof data?.['toEntityId'] === 'string' ? data['toEntityId'] : '';
       // Handles both field names: settle_propose uses counterpartyEntityId,
       // r2c uses counterpartyId — both must produce unique keys.
       const cp =
-        typeof data?.counterpartyEntityId === 'string'
-          ? data.counterpartyEntityId
-          : typeof data?.counterpartyId === 'string'
-            ? data.counterpartyId
+        typeof data?.['counterpartyEntityId'] === 'string'
+          ? data['counterpartyEntityId']
+          : typeof data?.['counterpartyId'] === 'string'
+            ? data['counterpartyId']
             : '';
       return `${tx.type}:${height}:${from}:${to}:${cp}`;
     })
@@ -2013,7 +2017,7 @@ const collectSenderEntityHints = (input: RoutedEntityInput): string[] => {
   for (const tx of input.entityTxs || []) {
     const data = tx.data as Record<string, unknown> | undefined;
     if (!data || typeof data !== 'object') continue;
-    const fromEntityId = data.fromEntityId;
+    const fromEntityId = data['fromEntityId'];
     if (typeof fromEntityId === 'string' && fromEntityId.length > 0) {
       hints.add(fromEntityId);
     }
@@ -4418,14 +4422,14 @@ const rebuildPersistedJurisdictions = (env: Env): void => {
   env.jReplicas = new Map();
   for (const replica of env.eReplicas.values()) {
     const jurisdiction = replica.state.config?.jurisdiction as Record<string, unknown> | undefined;
-    const name = typeof jurisdiction?.name === 'string' ? jurisdiction.name : '';
+    const name = typeof jurisdiction?.['name'] === 'string' ? jurisdiction['name'] : '';
     if (!name || env.jReplicas.has(name)) continue;
-    const depositoryAddress = String(jurisdiction?.depositoryAddress || '').trim();
-    const entityProviderAddress = String(jurisdiction?.entityProviderAddress || '').trim();
+    const depositoryAddress = String(jurisdiction?.['depositoryAddress'] || '').trim();
+    const entityProviderAddress = String(jurisdiction?.['entityProviderAddress'] || '').trim();
     const deltaTransformerAddress = String(
-      jurisdiction?.deltaTransformerAddress ?? jurisdiction?.deltaTransformer ?? '',
+      jurisdiction?.['deltaTransformerAddress'] ?? jurisdiction?.['deltaTransformer'] ?? '',
     ).trim();
-    const chainId = Number.isFinite(Number(jurisdiction?.chainId)) ? Number(jurisdiction?.chainId) : 31337;
+    const chainId = Number.isFinite(Number(jurisdiction?.['chainId'])) ? Number(jurisdiction?.['chainId']) : 31337;
     env.jReplicas.set(name, {
       name,
       depositoryAddress,
@@ -4509,7 +4513,7 @@ const loadEnvFromStorage = async (
     }
     env.frameLogs = restoredFrameLogs;
     rebuildPersistedJurisdictions(env);
-    (env as Record<string, unknown>).__replayMeta = {
+    (env as Record<string, unknown>)['__replayMeta'] = {
       checkpointHeight: selectedSnapshotHeight,
       selectedSnapshotHeight,
       selectedSnapshotLabel:

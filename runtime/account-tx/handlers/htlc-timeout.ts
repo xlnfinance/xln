@@ -8,11 +8,16 @@
  * Note: NO delta change - funds stay with sender (hold just releases)
  */
 
-import type { AccountMachine, AccountTx } from '../../types';
+import type { AccountMachine } from '../../types';
+
+type LegacyHtlcTimeoutTx = {
+  type: 'htlc_timeout';
+  data: { lockId: string };
+};
 
 export async function handleHtlcTimeout(
   accountMachine: AccountMachine,
-  accountTx: Extract<AccountTx, { type: 'htlc_timeout' }>,
+  accountTx: LegacyHtlcTimeoutTx,
   currentHeight: number,
   currentTimestamp: number
 ): Promise<{ success: boolean; events: string[]; error?: string; timedOutHashlock?: string }> {

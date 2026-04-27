@@ -4,6 +4,7 @@ import { existsSync, mkdirSync, readFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { ethers } from 'ethers';
 import { safeStringify } from '../serialization-utils';
+import { createStructuredLogger } from '../logger';
 import { encodeBoard, hashBoard } from '../entity-factory';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { createDirectRuntimeWsRoute } from '../networking/direct-runtime-bun';
@@ -128,19 +129,19 @@ type MarketMakerHealth = {
 };
 
 const MARKET_MAKER_CREDIT_AMOUNT = 50_000_000n * 10n ** 18n;
-const MARKET_MAKER_QUOTE_LOOP_MS = Math.max(1000, Number(process.env.MARKET_MAKER_QUOTE_LOOP_MS || '30000'));
-const MARKET_MAKER_BOOTSTRAP_LOOP_MS = Math.max(250, Number(process.env.MARKET_MAKER_BOOTSTRAP_LOOP_MS || '1000'));
+const MARKET_MAKER_QUOTE_LOOP_MS = Math.max(1000, Number(process.env['MARKET_MAKER_QUOTE_LOOP_MS'] || '30000'));
+const MARKET_MAKER_BOOTSTRAP_LOOP_MS = Math.max(250, Number(process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1000'));
 const MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS = Math.max(
   10_000,
-  Number(process.env.MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS || '90000'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS'] || '90000'),
 );
 const MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   2,
-  Number(process.env.MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK || '30'),
+  Number(process.env['MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK'] || '30'),
 );
 const MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK = Math.max(
   4,
-  Number(process.env.MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK || '12'),
+  Number(process.env['MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK'] || '12'),
 );
 const MARKET_MAKER_LEVEL_OFFSETS_BPS = [2, 4, 6, 8, 10, 12, 15, 20, 25, 32, 40, 50, 65, 80, 100] as const;
 const MARKET_MAKER_LEVEL_BASE_SIZES = [
@@ -218,6 +219,7 @@ if (!directWsUrl) {
   throw new Error('[MESH-MM] Missing required --direct-ws-url');
 }
 const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
+const nodeLog = createStructuredLogger('mesh.marketMaker', { name: resolvedArgs.name });
 
 const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig => {
   const data = loadJurisdictions();
@@ -227,7 +229,7 @@ const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig =
     if (!entry || typeof entry !== 'object') return false;
     return String((entry as JurisdictionConfig).rpc || '').trim() === requestedRpc;
   });
-  const arrakis = exactMatch ?? map.arrakis ?? Object.values(map)[0];
+  const arrakis = exactMatch ?? map['arrakis'] ?? Object.values(map)[0];
   if (!arrakis) {
     throw new Error('JURISDICTION_NOT_FOUND');
   }
@@ -756,7 +758,7 @@ const getMarketMakerHealth = (
 };
 
 const run = async (): Promise<void> => {
-  if (resolvedArgs.dbPath) process.env.XLN_DB_PATH = resolvedArgs.dbPath;
+  if (resolvedArgs.dbPath) process.env['XLN_DB_PATH'] = resolvedArgs.dbPath;
 
   const env = await main(resolvedArgs.seed);
   startRuntimeLoop(env);
@@ -764,7 +766,7 @@ const run = async (): Promise<void> => {
   let activeMmEntityId: string | null = null;
 
   const jurisdiction = resolveJurisdictionConfig(resolvedArgs.rpcUrl);
-  console.log(`[MESH-MM] startup phase=${startupPhase}`);
+  nodeLog.info('startup phase', { phase: startupPhase });
 
   const directRuntimeWs = createDirectRuntimeWsRoute({
     runtimeId: String(env.runtimeId || ''),
@@ -788,7 +790,7 @@ const run = async (): Promise<void> => {
       if (upgraded !== undefined) return upgraded;
 
       if (pathname === '/api/info') {
-        return new Response(JSON.stringify({
+        return new Response(safeStringify({
           name: resolvedArgs.name,
           entityId: activeMmEntityId,
           runtimeId: env.runtimeId,
@@ -830,17 +832,17 @@ const run = async (): Promise<void> => {
                 hubs: [],
               },
         };
-        return new Response(JSON.stringify(health), { headers: JSON_HEADERS });
+        return new Response(safeStringify(health), { headers: JSON_HEADERS });
       }
 
       if (pathname === '/api/control/p2p/stop' && request.method === 'POST') {
         stopP2P(env);
-        return new Response(JSON.stringify({ ok: true }), {
+        return new Response(safeStringify({ ok: true }), {
           headers: JSON_HEADERS,
         });
       }
 
-      return new Response(JSON.stringify({ error: 'Not found' }), {
+      return new Response(safeStringify({ error: 'Not found' }), {
         status: 404,
         headers: JSON_HEADERS,
       });

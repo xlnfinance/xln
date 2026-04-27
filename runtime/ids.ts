@@ -19,6 +19,12 @@ declare const EntityIdBrand: unique symbol;
 declare const SignerIdBrand: unique symbol;
 declare const JIdBrand: unique symbol;
 declare const EntityProviderAddressBrand: unique symbol;
+declare const AccountKeyBrand: unique symbol;
+declare const HashlockBrand: unique symbol;
+declare const LockIdBrand: unique symbol;
+declare const ProposalIdBrand: unique symbol;
+declare const JurisdictionNameBrand: unique symbol;
+declare const TokenIdBrand: unique symbol;
 
 /** Entity identifier - 32-byte hex string (0x + 64 chars) */
 export type EntityId = string & { readonly [EntityIdBrand]: typeof EntityIdBrand };
@@ -31,6 +37,12 @@ export type JId = string & { readonly [JIdBrand]: typeof JIdBrand };
 
 /** EntityProvider contract address - 20-byte hex (0x + 40 chars) */
 export type EntityProviderAddress = string & { readonly [EntityProviderAddressBrand]: typeof EntityProviderAddressBrand };
+export type AccountKey = string & { readonly [AccountKeyBrand]: typeof AccountKeyBrand };
+export type Hashlock = string & { readonly [HashlockBrand]: typeof HashlockBrand };
+export type LockId = string & { readonly [LockIdBrand]: typeof LockIdBrand };
+export type ProposalId = string & { readonly [ProposalIdBrand]: typeof ProposalIdBrand };
+export type JurisdictionName = string & { readonly [JurisdictionNameBrand]: typeof JurisdictionNameBrand };
+export type TokenId = number & { readonly [TokenIdBrand]: typeof TokenIdBrand };
 
 // =============================================================================
 // CONSTANTS
@@ -132,6 +144,38 @@ export const toEpAddress = (s: string): EntityProviderAddress => {
     throw new Error(`FINTECH-SAFETY: Invalid EntityProviderAddress: ${s}`);
   }
   return s;
+};
+
+export const toAccountKey = (leftEntityId: string, rightEntityId: string): AccountKey => {
+  const left = toEntityId(leftEntityId.toLowerCase());
+  const right = toEntityId(rightEntityId.toLowerCase());
+  return (left < right ? `${left}:${right}` : `${right}:${left}`) as AccountKey;
+};
+
+export const toHashlock = (s: string): Hashlock => {
+  if (!/^0x[a-fA-F0-9]{64}$/.test(s)) throw new Error(`FINTECH-SAFETY: Invalid hashlock: ${s}`);
+  return s.toLowerCase() as Hashlock;
+};
+
+export const toLockId = (s: string): LockId => {
+  if (!s || s.includes(':')) throw new Error(`FINTECH-SAFETY: Invalid lock id: ${s}`);
+  return s as LockId;
+};
+
+export const toProposalId = (s: string): ProposalId => {
+  if (!s) throw new Error(`FINTECH-SAFETY: Invalid proposal id: ${s}`);
+  return s as ProposalId;
+};
+
+export const toJurisdictionName = (s: string): JurisdictionName => {
+  const value = String(s || '').trim();
+  if (!value) throw new Error('FINTECH-SAFETY: Invalid jurisdiction name');
+  return value as JurisdictionName;
+};
+
+export const toTokenId = (value: number): TokenId => {
+  if (!Number.isInteger(value) || value < 0) throw new Error(`FINTECH-SAFETY: Invalid token id: ${value}`);
+  return value as TokenId;
 };
 
 // =============================================================================

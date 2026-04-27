@@ -10,12 +10,17 @@
  * - secret + hashlock for entity layer to propagate backward
  */
 
-import type { AccountMachine, AccountTx } from '../../types';
+import type { AccountMachine } from '../../types';
 import { hashHtlcSecret } from '../../htlc-utils';
+
+type LegacyHtlcRevealTx = {
+  type: 'htlc_reveal';
+  data: { lockId: string; secret: string };
+};
 
 export async function handleHtlcReveal(
   accountMachine: AccountMachine,
-  accountTx: Extract<AccountTx, { type: 'htlc_reveal' }>,
+  accountTx: LegacyHtlcRevealTx,
   currentHeight: number,
   currentTimestamp: number
 ): Promise<{

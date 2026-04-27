@@ -31,7 +31,7 @@ function describeAccounts(env: Awaited<ReturnType<typeof createEmptyEnv>>) {
 async function main() {
   const seed = 'persistence-simultaneous-proposal-smoke';
   const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
-  const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+  const dbRoot = process.env['XLN_DB_PATH'] || 'db-tmp/runtime';
   const namespacePath = join(dbRoot, runtimeId);
 
   rmSync(namespacePath, { recursive: true, force: true });

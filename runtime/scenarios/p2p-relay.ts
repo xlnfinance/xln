@@ -22,8 +22,8 @@ const getArg = (name: string, fallback?: string): string | undefined => {
   return args[idx + 1] || fallback;
 };
 
-const useRpc = hasFlag('--rpc') || process.env.P2P_RPC === '1';
-const rpcUrlOverride = getArg('--rpc-url') || process.env.P2P_RPC_URL;
+const useRpc = hasFlag('--rpc') || process.env['P2P_RPC'] === '1';
+const rpcUrlOverride = getArg('--rpc-url') || process.env['P2P_RPC_URL'];
 const jurisdictionName = getArg('--jurisdiction', 'arrakis')!;
 const nodeRpcArgs = useRpc
   ? ['--rpc', '--jurisdiction', jurisdictionName, '--skip-wallet-funding', ...(rpcUrlOverride ? ['--rpc-url', rpcUrlOverride] : [])]
@@ -135,9 +135,9 @@ const prefundRpcWallets = async (): Promise<void> => {
     );
     for (const wallet of wallets) {
       const address = deriveSignerAddressSync(wallet.seed, wallet.signerId);
-      const bal = (await erc20.balanceOf(address)) as bigint;
+      const bal = (await erc20['balanceOf'](address)) as bigint;
       if (bal < target) {
-        const tx = await erc20.transfer(address, target - bal);
+        const tx = await erc20['transfer'](address, target - bal);
         await tx.wait();
       }
     }
@@ -363,7 +363,7 @@ const getFreePort = async () => {
 const procs: ProcInfo[] = [];
 
 const run = async () => {
-  const envPort = process.env.P2P_RELAY_PORT;
+  const envPort = process.env['P2P_RELAY_PORT'];
   const relayPort = envPort ? Number(envPort) : await getFreePort();
   let hub: ProcInfo | null = null;
   let alice: ProcInfo | null = null;

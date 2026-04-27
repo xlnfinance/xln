@@ -262,8 +262,8 @@ const parseBigIntValue = (raw: unknown, field: string, entityId: string): bigint
   if (typeof raw === 'bigint') return raw;
   if (typeof raw === 'number' && Number.isInteger(raw)) return BigInt(raw);
   if (typeof raw === 'string' && /^-?\d+$/.test(raw)) return BigInt(raw);
-  if (isRecord(raw) && raw.__xlnType === 'BigInt' && typeof raw.value === 'string' && /^-?\d+$/.test(raw.value)) {
-    return BigInt(raw.value);
+  if (isRecord(raw) && raw['__xlnType'] === 'BigInt' && typeof raw['value'] === 'string' && /^-?\d+$/.test(raw['value'])) {
+    return BigInt(raw['value']);
   }
   throw new Error(`${field}: entity=${entityId}`);
 };
@@ -272,8 +272,8 @@ const stringifyBigIntLike = (raw: unknown): string => {
   if (typeof raw === 'bigint') return raw.toString();
   if (typeof raw === 'number' && Number.isFinite(raw)) return Math.floor(raw).toString();
   if (typeof raw === 'string' && /^-?\d+$/.test(raw)) return raw;
-  if (isRecord(raw) && raw.__xlnType === 'BigInt' && typeof raw.value === 'string' && /^-?\d+$/.test(raw.value)) {
-    return raw.value;
+  if (isRecord(raw) && raw['__xlnType'] === 'BigInt' && typeof raw['value'] === 'string' && /^-?\d+$/.test(raw['value'])) {
+    return raw['value'];
   }
   return '0';
 };
@@ -283,16 +283,16 @@ const parseBoardValidator = (raw: unknown, entityId: string): BoardValidator => 
     throw new Error(`GOSSIP_PROFILE_BOARD_VALIDATOR_INVALID: entity=${entityId}`);
   }
   assertOnlyAllowedKeys(raw, ALLOWED_BOARD_VALIDATOR_KEYS, 'GOSSIP_PROFILE_BOARD_VALIDATOR_UNKNOWN_FIELD', entityId);
-  const signer = typeof raw.signer === 'string' ? raw.signer.trim() : '';
+  const signer = typeof raw['signer'] === 'string' ? raw['signer'].trim() : '';
   if (!signer) {
     throw new Error(`GOSSIP_PROFILE_BOARD_SIGNER_REQUIRED: entity=${entityId}`);
   }
-  const weight = parseUint16(raw.weight, 'GOSSIP_PROFILE_BOARD_WEIGHT_INVALID', entityId);
-  const signerId = typeof raw.signerId === 'string' ? raw.signerId.trim() : '';
+  const weight = parseUint16(raw['weight'], 'GOSSIP_PROFILE_BOARD_WEIGHT_INVALID', entityId);
+  const signerId = typeof raw['signerId'] === 'string' ? raw['signerId'].trim() : '';
   if (!signerId) {
     throw new Error(`GOSSIP_PROFILE_BOARD_SIGNER_ID_REQUIRED: entity=${entityId}`);
   }
-  const publicKey = typeof raw.publicKey === 'string' ? raw.publicKey.trim() : '';
+  const publicKey = typeof raw['publicKey'] === 'string' ? raw['publicKey'].trim() : '';
   if (!publicKey) {
     throw new Error(`GOSSIP_PROFILE_BOARD_PUBLIC_KEY_REQUIRED: entity=${entityId}`);
   }
@@ -309,12 +309,12 @@ const parseBoardMetadata = (raw: unknown, entityId: string): BoardMetadata => {
     throw new Error(`GOSSIP_PROFILE_BOARD_REQUIRED: entity=${entityId}`);
   }
   assertOnlyAllowedKeys(raw, ALLOWED_BOARD_METADATA_KEYS, 'GOSSIP_PROFILE_BOARD_UNKNOWN_FIELD', entityId);
-  const validatorsRaw = raw.validators;
+  const validatorsRaw = raw['validators'];
   if (!Array.isArray(validatorsRaw) || validatorsRaw.length === 0) {
     throw new Error(`GOSSIP_PROFILE_BOARD_VALIDATORS_REQUIRED: entity=${entityId}`);
   }
   return {
-    threshold: parseUint16(raw.threshold, 'GOSSIP_PROFILE_BOARD_THRESHOLD_INVALID', entityId),
+    threshold: parseUint16(raw['threshold'], 'GOSSIP_PROFILE_BOARD_THRESHOLD_INVALID', entityId),
     validators: validatorsRaw.map((validator) => parseBoardValidator(validator, entityId)),
   };
 };
@@ -356,8 +356,8 @@ const parseProfileTokenCapacities = (
       entityId,
     );
     capacities[tokenId] = {
-      inCapacity: stringifyBigIntLike(capacityRaw.inCapacity),
-      outCapacity: stringifyBigIntLike(capacityRaw.outCapacity),
+      inCapacity: stringifyBigIntLike(capacityRaw['inCapacity']),
+      outCapacity: stringifyBigIntLike(capacityRaw['outCapacity']),
     };
   }
   return capacities;
@@ -370,15 +370,15 @@ const parseProfileAccounts = (raw: unknown, entityId: string): ProfileAccount[] 
       throw new Error(`GOSSIP_PROFILE_ACCOUNT_INVALID: entity=${entityId}`);
     }
     assertOnlyAllowedKeys(accountRaw, ALLOWED_PROFILE_ACCOUNT_KEYS, 'GOSSIP_PROFILE_ACCOUNT_UNKNOWN_FIELD', entityId);
-    const counterpartyId = typeof accountRaw.counterpartyId === 'string'
-      ? accountRaw.counterpartyId.trim()
+    const counterpartyId = typeof accountRaw['counterpartyId'] === 'string'
+      ? accountRaw['counterpartyId'].trim()
       : '';
     if (!counterpartyId) {
       throw new Error(`GOSSIP_PROFILE_ACCOUNT_COUNTERPARTY_REQUIRED: entity=${entityId}`);
     }
     return {
       counterpartyId,
-      tokenCapacities: parseProfileTokenCapacities(accountRaw.tokenCapacities, entityId, counterpartyId),
+      tokenCapacities: parseProfileTokenCapacities(accountRaw['tokenCapacities'], entityId, counterpartyId),
     };
   });
 };
@@ -387,74 +387,74 @@ export const parseProfile = (raw: unknown): Profile => {
   if (!isRecord(raw)) {
     throw new Error('GOSSIP_PROFILE_OBJECT_REQUIRED');
   }
-  const entityId = typeof raw.entityId === 'string' ? raw.entityId.trim() : '';
+  const entityId = typeof raw['entityId'] === 'string' ? raw['entityId'].trim() : '';
   if (!entityId) {
     throw new Error('GOSSIP_PROFILE_ENTITY_ID_REQUIRED');
   }
-  const metadataRaw = raw.metadata;
+  const metadataRaw = raw['metadata'];
   if (!isRecord(metadataRaw)) {
     throw new Error(`GOSSIP_PROFILE_METADATA_REQUIRED: entity=${entityId}`);
   }
   assertNoLegacyProfileFields(raw, metadataRaw, entityId);
-  const entityEncPubKey = normalizeX25519Key(metadataRaw.entityEncPubKey);
+  const entityEncPubKey = normalizeX25519Key(metadataRaw['entityEncPubKey']);
   if (!entityEncPubKey) {
     throw new Error(`GOSSIP_PROFILE_MISSING_ENTITY_ENC_PUBKEY: entity=${entityId}`);
   }
-  if (typeof raw.name !== 'string' || raw.name.trim().length === 0) {
+  if (typeof raw['name'] !== 'string' || raw['name'].trim().length === 0) {
     throw new Error(`GOSSIP_PROFILE_NAME_REQUIRED: entity=${entityId}`);
   }
-  const name = normalizeEntityName(raw.name, entityId);
-  const lastUpdated = parsePositiveTimestamp(raw.lastUpdated, entityId);
-  const runtimeEncPubKey = normalizeX25519Key(raw.runtimeEncPubKey);
+  const name = normalizeEntityName(raw['name'], entityId);
+  const lastUpdated = parsePositiveTimestamp(raw['lastUpdated'], entityId);
+  const runtimeEncPubKey = normalizeX25519Key(raw['runtimeEncPubKey']);
   if (!runtimeEncPubKey) {
     throw new Error(`GOSSIP_PROFILE_RUNTIME_ENC_PUBKEY_REQUIRED: entity=${entityId}`);
   }
-  const runtimeId = typeof raw.runtimeId === 'string' ? raw.runtimeId.trim() : '';
+  const runtimeId = typeof raw['runtimeId'] === 'string' ? raw['runtimeId'].trim() : '';
   if (!runtimeId) {
     throw new Error(`GOSSIP_PROFILE_RUNTIME_ID_REQUIRED: entity=${entityId}`);
   }
-  const publicAccounts = normalizeStringArray(raw.publicAccounts);
-  const wsUrl = normalizeWsUrl(raw.wsUrl);
-  const relays = normalizeStringArray(raw.relays);
-  const board = parseBoardMetadata(metadataRaw.board, entityId);
+  const publicAccounts = normalizeStringArray(raw['publicAccounts']);
+  const wsUrl = normalizeWsUrl(raw['wsUrl']);
+  const relays = normalizeStringArray(raw['relays']);
+  const board = parseBoardMetadata(metadataRaw['board'], entityId);
   getBoardPrimaryPublicKey(board, entityId);
   const metadata: ProfileMetadata = {
     entityEncPubKey,
-    isHub: metadataRaw.isHub === true,
+    isHub: metadataRaw['isHub'] === true,
     routingFeePPM: Math.max(
       0,
-      Number.isFinite(Number(metadataRaw.routingFeePPM)) ? Math.floor(Number(metadataRaw.routingFeePPM)) : 1,
+      Number.isFinite(Number(metadataRaw['routingFeePPM'])) ? Math.floor(Number(metadataRaw['routingFeePPM'])) : 1,
     ),
-    baseFee: parseBigIntValue(metadataRaw.baseFee ?? 0n, 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId),
-    ...(metadataRaw.swapTakerFeeBps !== undefined
-      ? { swapTakerFeeBps: parseUint16(metadataRaw.swapTakerFeeBps, 'GOSSIP_PROFILE_SWAP_TAKER_FEE_BPS_INVALID', entityId) }
+    baseFee: parseBigIntValue(metadataRaw['baseFee'] ?? 0n, 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId),
+    ...(metadataRaw['swapTakerFeeBps'] !== undefined
+      ? { swapTakerFeeBps: parseUint16(metadataRaw['swapTakerFeeBps'], 'GOSSIP_PROFILE_SWAP_TAKER_FEE_BPS_INVALID', entityId) }
       : {}),
     board,
-    ...(typeof metadataRaw.profileHanko === 'string' && metadataRaw.profileHanko.trim().length > 0
-      ? { profileHanko: metadataRaw.profileHanko.trim() }
+    ...(typeof metadataRaw['profileHanko'] === 'string' && metadataRaw['profileHanko'].trim().length > 0
+      ? { profileHanko: metadataRaw['profileHanko'].trim() }
       : {}),
-    ...(typeof metadataRaw.policyVersion === 'number' && Number.isFinite(metadataRaw.policyVersion)
-      ? { policyVersion: Math.floor(metadataRaw.policyVersion) }
+    ...(typeof metadataRaw['policyVersion'] === 'number' && Number.isFinite(metadataRaw['policyVersion'])
+      ? { policyVersion: Math.floor(metadataRaw['policyVersion']) }
       : {}),
-    ...(typeof metadataRaw.rebalanceBaseFee === 'string' && metadataRaw.rebalanceBaseFee.trim().length > 0
-      ? { rebalanceBaseFee: metadataRaw.rebalanceBaseFee.trim() }
+    ...(typeof metadataRaw['rebalanceBaseFee'] === 'string' && metadataRaw['rebalanceBaseFee'].trim().length > 0
+      ? { rebalanceBaseFee: metadataRaw['rebalanceBaseFee'].trim() }
       : {}),
-    ...(typeof metadataRaw.rebalanceLiquidityFeeBps === 'string' && metadataRaw.rebalanceLiquidityFeeBps.trim().length > 0
-      ? { rebalanceLiquidityFeeBps: metadataRaw.rebalanceLiquidityFeeBps.trim() }
+    ...(typeof metadataRaw['rebalanceLiquidityFeeBps'] === 'string' && metadataRaw['rebalanceLiquidityFeeBps'].trim().length > 0
+      ? { rebalanceLiquidityFeeBps: metadataRaw['rebalanceLiquidityFeeBps'].trim() }
       : {}),
-    ...(typeof metadataRaw.rebalanceGasFee === 'string' && metadataRaw.rebalanceGasFee.trim().length > 0
-      ? { rebalanceGasFee: metadataRaw.rebalanceGasFee.trim() }
+    ...(typeof metadataRaw['rebalanceGasFee'] === 'string' && metadataRaw['rebalanceGasFee'].trim().length > 0
+      ? { rebalanceGasFee: metadataRaw['rebalanceGasFee'].trim() }
       : {}),
-    ...(typeof metadataRaw.rebalanceTimeoutMs === 'number' && Number.isFinite(metadataRaw.rebalanceTimeoutMs)
-      ? { rebalanceTimeoutMs: Math.floor(metadataRaw.rebalanceTimeoutMs) }
+    ...(typeof metadataRaw['rebalanceTimeoutMs'] === 'number' && Number.isFinite(metadataRaw['rebalanceTimeoutMs'])
+      ? { rebalanceTimeoutMs: Math.floor(metadataRaw['rebalanceTimeoutMs']) }
       : {}),
   };
   return {
     entityId,
     name,
-    avatar: typeof raw.avatar === 'string' ? raw.avatar : '',
-    bio: typeof raw.bio === 'string' ? raw.bio : '',
-    website: typeof raw.website === 'string' ? raw.website : '',
+    avatar: typeof raw['avatar'] === 'string' ? raw['avatar'] : '',
+    bio: typeof raw['bio'] === 'string' ? raw['bio'] : '',
+    website: typeof raw['website'] === 'string' ? raw['website'] : '',
     lastUpdated,
     runtimeId,
     runtimeEncPubKey,
@@ -462,7 +462,7 @@ export const parseProfile = (raw: unknown): Profile => {
     wsUrl,
     relays,
     metadata,
-    accounts: parseProfileAccounts(raw.accounts, entityId),
+    accounts: parseProfileAccounts(raw['accounts'], entityId),
   };
 };
 
@@ -489,7 +489,7 @@ export const canonicalizeProfile = (
   const normalizedName = normalizeEntityName(profile.name, entityId);
   const incomingLastUpdated = parsePositiveTimestamp(profile.lastUpdated, entityId);
   const normalizedRuntimeEncPubKey = normalizeX25519Key(profile.runtimeEncPubKey);
-  const normalizedEntityEncPubKey = normalizeX25519Key(metadata.entityEncPubKey);
+  const normalizedEntityEncPubKey = normalizeX25519Key(metadata['entityEncPubKey']);
 
   if (!normalizedRuntimeEncPubKey) {
     throw new Error(`GOSSIP_PROFILE_RUNTIME_ENC_PUBKEY_REQUIRED: entity=${entityId}`);
@@ -504,7 +504,7 @@ export const canonicalizeProfile = (
     throw new Error(`GOSSIP_PROFILE_RUNTIME_ID_REQUIRED: entity=${entityId}`);
   }
   const normalizedRuntimeId = profile.runtimeId.trim();
-  if (typeof metadata.entityEncPubKey !== 'string' || metadata.entityEncPubKey !== normalizedEntityEncPubKey) {
+  if (typeof metadata['entityEncPubKey'] !== 'string' || metadata['entityEncPubKey'] !== normalizedEntityEncPubKey) {
     throw new Error(`GOSSIP_PROFILE_ENTITY_ENC_PUBKEY_NOT_NORMALIZED: entity=${entityId}`);
   }
   if (profile.name !== normalizedName) {
@@ -514,12 +514,12 @@ export const canonicalizeProfile = (
   const publicAccounts = normalizeStringArray(profile.publicAccounts);
   const wsUrl = normalizeWsUrl(profile.wsUrl);
   const relays = normalizeStringArray(profile.relays);
-  const board = parseBoardMetadata(metadata.board, entityId);
+  const board = parseBoardMetadata(metadata['board'], entityId);
   getBoardPrimaryPublicKey(board, entityId);
-  const routingFeePPM = Math.max(0, Number.isFinite(Number(metadata.routingFeePPM)) ? Math.floor(Number(metadata.routingFeePPM)) : 1);
-  const baseFee = parseBigIntValue(metadata.baseFee ?? 0n, 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId);
-  const swapTakerFeeBps = metadata.swapTakerFeeBps !== undefined
-    ? parseUint16(metadata.swapTakerFeeBps, 'GOSSIP_PROFILE_SWAP_TAKER_FEE_BPS_INVALID', entityId)
+  const routingFeePPM = Math.max(0, Number.isFinite(Number(metadata['routingFeePPM'])) ? Math.floor(Number(metadata['routingFeePPM'])) : 1);
+  const baseFee = parseBigIntValue(metadata['baseFee'] ?? 0n, 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId);
+  const swapTakerFeeBps = metadata['swapTakerFeeBps'] !== undefined
+    ? parseUint16(metadata['swapTakerFeeBps'], 'GOSSIP_PROFILE_SWAP_TAKER_FEE_BPS_INVALID', entityId)
     : undefined;
   return {
     ...profile,
@@ -544,25 +544,25 @@ export const canonicalizeProfile = (
       routingFeePPM,
       baseFee,
       ...(swapTakerFeeBps !== undefined ? { swapTakerFeeBps } : {}),
-      ...(typeof metadata.policyVersion === 'number' && Number.isFinite(metadata.policyVersion)
-        ? { policyVersion: Math.floor(metadata.policyVersion) }
+      ...(typeof metadata['policyVersion'] === 'number' && Number.isFinite(metadata['policyVersion'])
+        ? { policyVersion: Math.floor(metadata['policyVersion']) }
         : {}),
-      ...(typeof metadata.rebalanceBaseFee === 'string' && metadata.rebalanceBaseFee.trim().length > 0
-        ? { rebalanceBaseFee: metadata.rebalanceBaseFee.trim() }
+      ...(typeof metadata['rebalanceBaseFee'] === 'string' && metadata['rebalanceBaseFee'].trim().length > 0
+        ? { rebalanceBaseFee: metadata['rebalanceBaseFee'].trim() }
         : {}),
-      ...(typeof metadata.rebalanceLiquidityFeeBps === 'string' && metadata.rebalanceLiquidityFeeBps.trim().length > 0
-        ? { rebalanceLiquidityFeeBps: metadata.rebalanceLiquidityFeeBps.trim() }
+      ...(typeof metadata['rebalanceLiquidityFeeBps'] === 'string' && metadata['rebalanceLiquidityFeeBps'].trim().length > 0
+        ? { rebalanceLiquidityFeeBps: metadata['rebalanceLiquidityFeeBps'].trim() }
         : {}),
-      ...(typeof metadata.rebalanceGasFee === 'string' && metadata.rebalanceGasFee.trim().length > 0
-        ? { rebalanceGasFee: metadata.rebalanceGasFee.trim() }
+      ...(typeof metadata['rebalanceGasFee'] === 'string' && metadata['rebalanceGasFee'].trim().length > 0
+        ? { rebalanceGasFee: metadata['rebalanceGasFee'].trim() }
         : {}),
-      ...(typeof metadata.rebalanceTimeoutMs === 'number' && Number.isFinite(metadata.rebalanceTimeoutMs)
-        ? { rebalanceTimeoutMs: Math.floor(metadata.rebalanceTimeoutMs) }
+      ...(typeof metadata['rebalanceTimeoutMs'] === 'number' && Number.isFinite(metadata['rebalanceTimeoutMs'])
+        ? { rebalanceTimeoutMs: Math.floor(metadata['rebalanceTimeoutMs']) }
         : {}),
-      ...(typeof metadata.profileHanko === 'string' && metadata.profileHanko.trim().length > 0
-        ? { profileHanko: metadata.profileHanko.trim() }
+      ...(typeof metadata['profileHanko'] === 'string' && metadata['profileHanko'].trim().length > 0
+        ? { profileHanko: metadata['profileHanko'].trim() }
         : {}),
-      isHub: metadata.isHub === true,
+      isHub: metadata['isHub'] === true,
     },
   };
 };

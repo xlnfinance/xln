@@ -3,6 +3,7 @@
     "target": "esnext",
     "module": "esnext",
     "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
     "esModuleInterop": true,
     "outDir": "./dist",
 
@@ -32,7 +33,7 @@
     "allowSyntheticDefaultImports": true,
     "forceConsistentCasingInFileNames": true,
     "typeRoots": ["./node_modules/@types", "./types"],
-    "types": ["node"],
+    "types": ["node", "bun", "qrcode"],
     "paths": {
       "@xln/runtime/*": ["./runtime/*"],
       "@xln/brainvault/*": ["./brainvault/*"]

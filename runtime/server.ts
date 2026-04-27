@@ -82,7 +82,7 @@ let serverEnv: Env | null = null;
 let serverStartupBarrier: Promise<void> = Promise.resolve();
 let resolveServerStartupBarrier: (() => void) | null = null;
 // Server encryption keypair now managed by relay-local-delivery.ts
-const HUB_SEED = process.env.HUB_SEED ?? 'xln-main-hub-2026';
+const HUB_SEED = process.env['HUB_SEED'] ?? 'xln-main-hub-2026';
 const HEALTH_CACHE_TTL_MS = 10_000;
 let cachedHealthResponse:
   | {
@@ -111,7 +111,7 @@ const stringifyBootstrapDebug = (value: unknown): string =>
   JSON.stringify(value, (_key, nested) => (typeof nested === 'bigint' ? nested.toString() : nested));
 const STACK_COMPATIBILITY_PROBE_ENTITY = `0x${'11'.repeat(32)}`;
 const resolveRequiredAnvilRpc = (): string => {
-  const rpcUrl = String(process.env.ANVIL_RPC || '').trim();
+  const rpcUrl = String(process.env['ANVIL_RPC'] || '').trim();
   if (!rpcUrl) {
     throw new Error('ANVIL_RPC is required for server RPC operations');
   }
@@ -178,7 +178,7 @@ const probeLocalAnvilContractStack = async (adapter: JAdapter): Promise<{ ok: bo
 
   let tokensLength = 0n;
   try {
-    tokensLength = await probe.getTokensLength();
+    tokensLength = await probe['getTokensLength']();
   } catch (error) {
     return {
       ok: false,
@@ -191,7 +191,7 @@ const probeLocalAnvilContractStack = async (adapter: JAdapter): Promise<{ ok: bo
   }
 
   try {
-    await probe.mintToReserve.estimateGas(STACK_COMPATIBILITY_PROBE_ENTITY, 1n, 1n);
+    await probe['mintToReserve'].estimateGas(STACK_COMPATIBILITY_PROBE_ENTITY, 1n, 1n);
   } catch (error) {
     return {
       ok: false,
@@ -200,7 +200,7 @@ const probeLocalAnvilContractStack = async (adapter: JAdapter): Promise<{ ok: bo
   }
 
   try {
-    await probe.mintToReserveBatch.estimateGas([[STACK_COMPATIBILITY_PROBE_ENTITY, 1n, 1n]]);
+    await probe['mintToReserveBatch'].estimateGas([[STACK_COMPATIBILITY_PROBE_ENTITY, 1n, 1n]]);
   } catch (error) {
     return {
       ok: false,
@@ -227,7 +227,7 @@ const resolveReserveWaitPollMs = (): number => {
 
 const STARTUP_STEP_TIMEOUT_MS = Math.max(
   5_000,
-  Math.floor(Number(process.env.XLN_STARTUP_STEP_TIMEOUT_MS ?? '20000')),
+  Math.floor(Number(process.env['XLN_STARTUP_STEP_TIMEOUT_MS'] ?? '20000')),
 );
 
 const withStartupStepTimeout = async <T>(label: string, work: Promise<T>, timeoutMs = STARTUP_STEP_TIMEOUT_MS): Promise<T> => {
@@ -385,7 +385,7 @@ const waitForReserveUpdate = async (
 const hubSignerLabels = new Map<string, string>();
 const hubSignerAddresses = new Map<string, string>();
 const SERVER_RUNTIME_SEED = (() => {
-  const seed = process.env.XLN_RUNTIME_SEED?.trim();
+  const seed = process.env['XLN_RUNTIME_SEED']?.trim();
   if (!seed) {
     throw new Error('XLN_RUNTIME_SEED is required for runtime/server.ts');
   }
@@ -397,8 +397,8 @@ const HUB_MESH_REQUIRED_HUBS = 3;
 const HUB_REQUIRED_TOKEN_COUNT = 3;
 const HUB_RESERVE_TARGET_UNITS = 1_000_000_000n;
 const HUB_WALLET_ETH_TARGET = ethers.parseEther('1000');
-const FAUCET_SIGNER_LABEL = process.env.FAUCET_SIGNER_LABEL ?? 'faucet-1';
-const FAUCET_SEED = process.env.FAUCET_SEED ?? `${SERVER_RUNTIME_SEED}:faucet`;
+const FAUCET_SIGNER_LABEL = process.env['FAUCET_SIGNER_LABEL'] ?? 'faucet-1';
+const FAUCET_SEED = process.env['FAUCET_SEED'] ?? `${SERVER_RUNTIME_SEED}:faucet`;
 const FAUCET_WALLET_ETH_TARGET = ethers.parseEther('100');
 const FAUCET_TOKEN_TARGET_UNITS = 1_000_000n;
 const HUB_RESERVE_ASSERT_TIMEOUT_MS = 30_000;
@@ -407,22 +407,22 @@ const HUB_DEFAULT_SUPPORTED_PAIRS = ['1/2', '1/3', '2/3'] as const;
 const HUB_DEFAULT_MIN_TRADE_SIZE = 10n * 10n ** 18n;
 const BOOTSTRAP_POLL_MS = Math.max(
   10,
-  Number(process.env.BOOTSTRAP_POLL_MS || (process.env.NODE_ENV === 'production' ? '40' : '50')),
+  Number(process.env['BOOTSTRAP_POLL_MS'] || (process.env['NODE_ENV'] === 'production' ? '40' : '50')),
 );
 const RUNTIME_SETTLE_POLL_MS = Math.max(
   5,
-  Number(process.env.RUNTIME_SETTLE_POLL_MS || (process.env.NODE_ENV === 'production' ? '25' : '10')),
+  Number(process.env['RUNTIME_SETTLE_POLL_MS'] || (process.env['NODE_ENV'] === 'production' ? '25' : '10')),
 );
-const INCLUDE_MARKET_MAKER_BY_DEFAULT = !/^(0|false)$/i.test(process.env.XLN_INCLUDE_MARKET_MAKER ?? '1');
-const SKIP_SERVER_BOOTSTRAP = /^(1|true)$/i.test(process.env.XLN_SKIP_SERVER_BOOTSTRAP ?? '');
-const MARKET_MAKER_SIGNER_LABEL = process.env.MARKET_MAKER_SIGNER_LABEL ?? 'mm-1';
-const MARKET_MAKER_SEED = process.env.MARKET_MAKER_SEED ?? `${HUB_SEED}:market-maker`;
-const MARKET_MAKER_NAME = process.env.MARKET_MAKER_NAME ?? 'MM1';
+const INCLUDE_MARKET_MAKER_BY_DEFAULT = !/^(0|false)$/i.test(process.env['XLN_INCLUDE_MARKET_MAKER'] ?? '1');
+const SKIP_SERVER_BOOTSTRAP = /^(1|true)$/i.test(process.env['XLN_SKIP_SERVER_BOOTSTRAP'] ?? '');
+const MARKET_MAKER_SIGNER_LABEL = process.env['MARKET_MAKER_SIGNER_LABEL'] ?? 'mm-1';
+const MARKET_MAKER_SEED = process.env['MARKET_MAKER_SEED'] ?? `${HUB_SEED}:market-maker`;
+const MARKET_MAKER_NAME = process.env['MARKET_MAKER_NAME'] ?? 'MM1';
 const MARKET_MAKER_CREDIT_AMOUNT = 50_000_000n * 10n ** 18n;
-const MARKET_MAKER_QUOTE_LOOP_MS = Math.max(1000, Number(process.env.MARKET_MAKER_QUOTE_LOOP_MS || '30000'));
+const MARKET_MAKER_QUOTE_LOOP_MS = Math.max(1000, Number(process.env['MARKET_MAKER_QUOTE_LOOP_MS'] || '30000'));
 const MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   10,
-  Number(process.env.MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK || '30'),
+  Number(process.env['MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK'] || '30'),
 );
 const MARKET_MAKER_LEVEL_OFFSETS_BPS = [2, 4, 6, 8, 10, 12, 15, 20, 25, 32, 40, 50, 65, 80, 100] as const;
 const MARKET_MAKER_LEVEL_BASE_SIZES = [
@@ -588,9 +588,9 @@ const ensureHubWalletFunding = async (
       if (!token?.address) continue;
       const targetBalance = HUB_RESERVE_TARGET_UNITS * 10n ** BigInt(token.decimals ?? 18);
       const erc20 = new ethers.Contract(token.address, erc20Abi, deployer);
-      const hubBalance = await erc20.balanceOf(hubWalletAddress);
+      const hubBalance = await erc20['balanceOf'](hubWalletAddress);
       if (hubBalance >= targetBalance) continue;
-      const tx = await erc20.transfer(hubWalletAddress, targetBalance - hubBalance);
+      const tx = await erc20['transfer'](hubWalletAddress, targetBalance - hubBalance);
       await tx.wait();
     }
   }
@@ -1928,7 +1928,7 @@ const deployDefaultTokensOnRpc = async (): Promise<void> => {
   }
 };
 
-const TOKEN_CATALOG_TIMEOUT_MS = Math.max(1000, Number(process.env.TOKEN_CATALOG_TIMEOUT_MS || '6000'));
+const TOKEN_CATALOG_TIMEOUT_MS = Math.max(1000, Number(process.env['TOKEN_CATALOG_TIMEOUT_MS'] || '6000'));
 
 const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -2053,7 +2053,7 @@ const updateJurisdictionsJson = async (
     const fs = await import('fs/promises');
     const path = await import('path');
     const canonicalPath = resolveJurisdictionsJsonPath();
-    const publicRpc = toPublicRpcUrl(String(process.env.PUBLIC_RPC || rpcUrl || '/rpc'));
+    const publicRpc = toPublicRpcUrl(String(process.env['PUBLIC_RPC'] || rpcUrl || '/rpc'));
     await fs.mkdir(path.dirname(canonicalPath), { recursive: true });
 
     let data: Record<string, unknown> = {};
@@ -2062,9 +2062,9 @@ const updateJurisdictionsJson = async (
     } catch {
       data = {};
     }
-    data.version = String(data.version || '').trim() || '1';
-    data.lastUpdated = new Date().toISOString();
-    data.defaults = data.defaults ?? {
+    data['version'] = String(data['version'] || '').trim() || '1';
+    data['lastUpdated'] = new Date().toISOString();
+    data['defaults'] = data['defaults'] ?? {
       timeout: 30000,
       retryAttempts: 3,
       gasLimit: 1_000_000,
@@ -2074,23 +2074,23 @@ const updateJurisdictionsJson = async (
         maxFee: 15,
       },
     };
-    data.defaults.rebalancePolicyUsd = data.defaults.rebalancePolicyUsd ?? {
+    data['defaults'].rebalancePolicyUsd = data['defaults'].rebalancePolicyUsd ?? {
       r2cRequestSoftLimit: 500,
       hardLimit: 10_000,
       maxFee: 15,
     };
-    if (data.testnet) delete data.testnet;
-    data.jurisdictions = data.jurisdictions ?? {};
-    for (const key of Object.keys(data.jurisdictions)) {
-      if (key !== 'arrakis' && key.startsWith('arrakis_')) delete data.jurisdictions[key];
+    if (data['testnet']) delete data['testnet'];
+    data['jurisdictions'] = data['jurisdictions'] ?? {};
+    for (const key of Object.keys(data['jurisdictions'])) {
+      if (key !== 'arrakis' && key.startsWith('arrakis_')) delete data['jurisdictions'][key];
     }
-    const existingArrakis = data.jurisdictions.arrakis ?? {};
-    data.jurisdictions.arrakis = {
+    const existingArrakis = data['jurisdictions'].arrakis ?? {};
+    data['jurisdictions'].arrakis = {
       ...existingArrakis,
       name: 'Arrakis (Shared Anvil)',
       chainId: chainIdOverride ?? 31337,
       rpc: publicRpc,
-      rebalancePolicyUsd: existingArrakis.rebalancePolicyUsd ?? data.defaults.rebalancePolicyUsd,
+      rebalancePolicyUsd: existingArrakis.rebalancePolicyUsd ?? data['defaults'].rebalancePolicyUsd,
       contracts: {
         account: contracts.account,
         depository: contracts.depository,
@@ -2166,7 +2166,7 @@ const buildRuntimeJurisdictionsJson = async (env?: Env | null): Promise<string |
       arrakis: {
         name: String(replica.name || jurisdictionName || 'Testnet'),
         chainId: Number(replica.chainId || 31337),
-        rpc: toPublicRpcUrl(String(process.env.PUBLIC_RPC || replica.rpcs?.[0] || '/rpc')),
+        rpc: toPublicRpcUrl(String(process.env['PUBLIC_RPC'] || replica.rpcs?.[0] || '/rpc')),
         contracts: {
           account: String(addresses.account || replica.contracts?.account || ''),
           depository,
@@ -2204,8 +2204,8 @@ const getDefaultLocalRelayUrl = (port?: number): string => `ws://localhost:${por
 const resolveConfiguredRelayUrl = (port?: number): string => {
   const fallback = getDefaultLocalRelayUrl(port);
   const candidates = [
-    process.env.INTERNAL_RELAY_URL,
-    process.env.RELAY_URL,
+    process.env['INTERNAL_RELAY_URL'],
+    process.env['RELAY_URL'],
   ]
     .map(value => String(value || '').trim())
     .filter(Boolean);
@@ -2214,9 +2214,9 @@ const resolveConfiguredRelayUrl = (port?: number): string => {
 const resolveAdvertisedRelayUrl = (port?: number): string => {
   const fallback = getDefaultLocalRelayUrl(port);
   const candidates = [
-    process.env.PUBLIC_RELAY_URL,
-    process.env.RELAY_URL,
-    process.env.INTERNAL_RELAY_URL,
+    process.env['PUBLIC_RELAY_URL'],
+    process.env['RELAY_URL'],
+    process.env['INTERNAL_RELAY_URL'],
   ]
     .map(value => String(value || '').trim())
     .filter(Boolean);
@@ -2544,15 +2544,15 @@ const handleMarketMessage = (ws: RelaySocket, msg: Record<string, unknown>, env:
       ws.send(safeStringify({ type: 'error', inReplyTo: id, error: 'Runtime not ready' }));
       return;
     }
-    const hubValues = Array.isArray(msg?.hubEntityIds)
-      ? msg.hubEntityIds
-      : msg?.hubEntityId
-        ? [msg.hubEntityId]
+    const hubValues = Array.isArray(msg?.['hubEntityIds'])
+      ? msg['hubEntityIds']
+      : msg?.['hubEntityId']
+        ? [msg['hubEntityId']]
         : [];
-    const pairValues = Array.isArray(msg?.pairs)
-      ? msg.pairs
-      : msg?.pairId
-        ? [msg.pairId]
+    const pairValues = Array.isArray(msg?.['pairs'])
+      ? msg['pairs']
+      : msg?.['pairId']
+        ? [msg['pairId']]
         : [];
     const hubIds = Array.from(new Set(hubValues.map(normalizeMarketEntityId).filter(Boolean))) as string[];
     const pairIds = Array.from(new Set(pairValues.map(normalizeMarketPairId).filter(Boolean))) as string[];
@@ -2561,8 +2561,8 @@ const handleMarketMessage = (ws: RelaySocket, msg: Record<string, unknown>, env:
       return;
     }
 
-    const replace = msg?.replace === true;
-    const depthRaw = Number(msg?.depth);
+    const replace = msg?.['replace'] === true;
+    const depthRaw = Number(msg?.['depth']);
     const depth = Number.isFinite(depthRaw)
       ? Math.max(1, Math.min(Math.floor(depthRaw), RPC_MARKET_MAX_DEPTH))
       : RPC_MARKET_DEFAULT_DEPTH;
@@ -2611,15 +2611,15 @@ const handleMarketMessage = (ws: RelaySocket, msg: Record<string, unknown>, env:
       return;
     }
 
-    const hubValues = Array.isArray(msg?.hubEntityIds)
-      ? msg.hubEntityIds
-      : msg?.hubEntityId
-        ? [msg.hubEntityId]
+    const hubValues = Array.isArray(msg?.['hubEntityIds'])
+      ? msg['hubEntityIds']
+      : msg?.['hubEntityId']
+        ? [msg['hubEntityId']]
         : [];
-    const pairValues = Array.isArray(msg?.pairs)
-      ? msg.pairs
-      : msg?.pairId
-        ? [msg.pairId]
+    const pairValues = Array.isArray(msg?.['pairs'])
+      ? msg['pairs']
+      : msg?.['pairId']
+        ? [msg['pairId']]
         : [];
     const hubIds = Array.from(new Set(hubValues.map(normalizeMarketEntityId).filter(Boolean))) as string[];
     const pairIds = Array.from(new Set(pairValues.map(normalizeMarketPairId).filter(Boolean))) as string[];
@@ -2685,8 +2685,8 @@ const filterReceiptLogs = (
     const entityHint =
       typeof log?.entityId === 'string'
         ? log.entityId
-        : typeof log?.data?.entityId === 'string'
-          ? log.data.entityId
+        : typeof log?.data?.['entityId'] === 'string'
+          ? log.data['entityId']
           : '';
     return entityHint.trim().toLowerCase() === targetEntityId;
   });
@@ -2758,7 +2758,7 @@ type ControlEntitySummary = {
 };
 
 const requireDaemonControlAuth = (req: Request): Response | null => {
-  const configuredToken = process.env.DAEMON_CONTROL_TOKEN;
+  const configuredToken = process.env['DAEMON_CONTROL_TOKEN'];
   if (!configuredToken) return null;
   const supplied = req.headers.get('x-daemon-control-token') || '';
   if (supplied === configuredToken) return null;
@@ -2832,8 +2832,8 @@ const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, e
 
   if (type === 'subscribe') {
     const client = Array.from(relayStore.clients.values()).find(c => c.ws === ws);
-    if (client && msg.topics) {
-      for (const topic of msg.topics) {
+    if (client && msg['topics']) {
+      for (const topic of msg['topics']) {
         client.topics.add(topic);
       }
     }
@@ -2866,9 +2866,9 @@ const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, e
     }
     try {
       const latestPersistedHeight = await getPersistedLatestHeight(env);
-      const fromHeightRaw = Number(msg?.fromHeight ?? msg?.sinceHeight ?? 1);
-      const toHeightRaw = Number(msg?.toHeight ?? latestPersistedHeight);
-      const limitRaw = Number(msg?.limit ?? 200);
+      const fromHeightRaw = Number(msg?.['fromHeight'] ?? msg?.['sinceHeight'] ?? 1);
+      const toHeightRaw = Number(msg?.['toHeight'] ?? latestPersistedHeight);
+      const limitRaw = Number(msg?.['limit'] ?? 200);
       const fromHeight = Number.isFinite(fromHeightRaw) ? Math.max(1, Math.floor(fromHeightRaw)) : 1;
       const requestedToHeight = Number.isFinite(toHeightRaw)
         ? Math.max(fromHeight, Math.floor(toHeightRaw))
@@ -2883,9 +2883,9 @@ const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, e
           ? Math.min(toHeight, fromHeight + limit - 1)
           : 0;
       const entityId =
-        typeof msg?.entityId === 'string' && msg.entityId.trim().length > 0 ? msg.entityId.trim().toLowerCase() : undefined;
-      const eventNames = normalizeRpcStringArray(msg?.eventNames ?? msg?.events);
-      const includeInputs = msg?.includeInputs === true;
+        typeof msg?.['entityId'] === 'string' && msg['entityId'].trim().length > 0 ? msg['entityId'].trim().toLowerCase() : undefined;
+      const eventNames = normalizeRpcStringArray(msg?.['eventNames'] ?? msg?.['events']);
+      const includeInputs = msg?.['includeInputs'] === true;
 
       const receipts =
         pageToHeight > 0
@@ -2934,10 +2934,10 @@ const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, e
       return;
     }
     try {
-      const sourceEntityId = String(msg?.sourceEntityId || '').trim().toLowerCase();
-      const targetEntityId = String(msg?.targetEntityId || '').trim().toLowerCase();
-      const tokenId = Number(msg?.tokenId ?? 1);
-      const amount = parseRpcBigInt(msg?.amount, 'amount');
+      const sourceEntityId = String(msg?.['sourceEntityId'] || '').trim().toLowerCase();
+      const targetEntityId = String(msg?.['targetEntityId'] || '').trim().toLowerCase();
+      const tokenId = Number(msg?.['tokenId'] ?? 1);
+      const amount = parseRpcBigInt(msg?.['amount'], 'amount');
       if (!isEntityId32(sourceEntityId) || !isEntityId32(targetEntityId)) {
         throw new Error('sourceEntityId and targetEntityId must be 32-byte hex entity ids');
       }
@@ -2987,12 +2987,12 @@ const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, e
       return;
     }
     try {
-      const sourceEntityId = String(msg?.sourceEntityId || '').trim().toLowerCase();
-      const targetEntityId = String(msg?.targetEntityId || '').trim().toLowerCase();
-      const tokenId = Number(msg?.tokenId ?? 1);
-      const amount = parseRpcBigInt(msg?.amount, 'amount');
-      const mode = msg?.mode === 'direct' ? 'direct' : 'htlc';
-      const description = typeof msg?.description === 'string' ? msg.description.trim() : '';
+      const sourceEntityId = String(msg?.['sourceEntityId'] || '').trim().toLowerCase();
+      const targetEntityId = String(msg?.['targetEntityId'] || '').trim().toLowerCase();
+      const tokenId = Number(msg?.['tokenId'] ?? 1);
+      const amount = parseRpcBigInt(msg?.['amount'], 'amount');
+      const mode = msg?.['mode'] === 'direct' ? 'direct' : 'htlc';
+      const description = typeof msg?.['description'] === 'string' ? msg['description'].trim() : '';
       if (!isEntityId32(sourceEntityId) || !isEntityId32(targetEntityId)) {
         throw new Error('sourceEntityId and targetEntityId must be 32-byte hex entity ids');
       }
@@ -3007,10 +3007,10 @@ const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, e
       }
 
       const signerId =
-        typeof msg?.signerId === 'string' && msg.signerId.trim().length > 0
-          ? msg.signerId.trim().toLowerCase()
+        typeof msg?.['signerId'] === 'string' && msg['signerId'].trim().length > 0
+          ? msg['signerId'].trim().toLowerCase()
           : resolveEntityProposerId(env, sourceEntityId, 'rpc.queue_payment');
-      const route = await resolveRpcPaymentRoute(env, sourceEntityId, targetEntityId, tokenId, amount, msg?.route);
+      const route = await resolveRpcPaymentRoute(env, sourceEntityId, targetEntityId, tokenId, amount, msg?.['route']);
 
       let secret: string | undefined;
       let hashlock: string | undefined;
@@ -3026,15 +3026,15 @@ const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, e
       if (mode === 'htlc') {
         txType = 'htlcPayment';
         secret =
-          typeof msg?.secret === 'string' && msg.secret.trim().length > 0
-            ? msg.secret.trim()
+          typeof msg?.['secret'] === 'string' && msg['secret'].trim().length > 0
+            ? msg['secret'].trim()
             : ethers.hexlify(ethers.randomBytes(32));
         hashlock =
-          typeof msg?.hashlock === 'string' && msg.hashlock.trim().length > 0
-            ? msg.hashlock.trim()
+          typeof msg?.['hashlock'] === 'string' && msg['hashlock'].trim().length > 0
+            ? msg['hashlock'].trim()
             : hashHtlcSecret(secret);
-        txData.secret = secret;
-        txData.hashlock = hashlock;
+        txData['secret'] = secret;
+        txData['hashlock'] = hashlock;
       }
 
       enqueueRuntimeInput(env, {
@@ -3228,8 +3228,8 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   // JSON-RPC proxy endpoint (single canonical path: /rpc).
   // Keep /api/rpc for compatibility with older clients.
   if ((pathname === '/api/rpc' || pathname === '/rpc') && req.method === 'POST') {
-    const blockLocal = process.env.BLOCK_LOCAL_RPC_PROXY === 'true';
-    const explicitUpstream = process.env.RPC_UPSTREAM_URL || process.env.PUBLIC_RPC_URL || process.env.ANVIL_RPC;
+    const blockLocal = process.env['BLOCK_LOCAL_RPC_PROXY'] === 'true';
+    const explicitUpstream = process.env['RPC_UPSTREAM_URL'] || process.env['PUBLIC_RPC_URL'] || process.env['ANVIL_RPC'];
     const jMachineRpc = env?.activeJurisdiction ? env.jReplicas.get(env.activeJurisdiction)?.rpcUrl : undefined;
     const upstream = explicitUpstream || jMachineRpc || '';
     const isLocal = isLoopbackUrl(upstream);
@@ -3240,7 +3240,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         reason: 'RPC_PROXY_NO_UPSTREAM',
         details: { path: pathname },
       });
-      return new Response(JSON.stringify({ error: 'RPC upstream not configured' }), { status: 503, headers });
+      return new Response(safeStringify({ error: 'RPC upstream not configured' }), { status: 503, headers });
     }
     if (isLocal && blockLocal) {
       pushDebugEvent(relayStore, {
@@ -3280,7 +3280,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         reason: 'RPC_PROXY_FETCH_FAILED',
         details: { upstream, path: pathname, error: error?.message || String(error) },
       });
-      return new Response(JSON.stringify({ error: error?.message || 'RPC proxy failed' }), { status: 502, headers });
+      return new Response(safeStringify({ error: error?.message || 'RPC proxy failed' }), { status: 502, headers });
     }
   }
 
@@ -3639,17 +3639,17 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     const payload = parsed && typeof parsed === 'object'
       ? parsed
       : { rawBody };
-    const trigger = payload?.trigger && typeof payload.trigger === 'object'
-      ? payload.trigger as Record<string, unknown>
+    const trigger = payload?.['trigger'] && typeof payload['trigger'] === 'object'
+      ? payload['trigger'] as Record<string, unknown>
       : undefined;
-    const reason = typeof trigger?.message === 'string'
-      ? trigger.message
-      : typeof payload?.reason === 'string'
-        ? payload.reason
+    const reason = typeof trigger?.['message'] === 'string'
+      ? trigger['message']
+      : typeof payload?.['reason'] === 'string'
+        ? payload['reason']
         : 'debug-dump';
-    const runtimeId = typeof payload?.runtimeState === 'object' && payload.runtimeState
-      && typeof (payload.runtimeState as Record<string, unknown>).runtimeId === 'string'
-      ? String((payload.runtimeState as Record<string, unknown>).runtimeId)
+    const runtimeId = typeof payload?.['runtimeState'] === 'object' && payload['runtimeState']
+      && typeof (payload['runtimeState'] as Record<string, unknown>)['runtimeId'] === 'string'
+      ? String((payload['runtimeState'] as Record<string, unknown>)['runtimeId'])
       : undefined;
     const fileName = buildDebugDumpFileName(reason, runtimeId);
     const filePath = join(DEBUG_DUMPS_DIR, fileName);
@@ -3670,16 +3670,16 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       details: {
         file: fileName,
         trigger: trigger ?? null,
-        height: typeof payload?.runtimeState === 'object' && payload.runtimeState
-          ? (payload.runtimeState as Record<string, unknown>).height
+        height: typeof payload?.['runtimeState'] === 'object' && payload['runtimeState']
+          ? (payload['runtimeState'] as Record<string, unknown>)['height']
           : null,
-        persistedLatestHeight: typeof payload?.persistedWal === 'object' && payload.persistedWal
-          ? (payload.persistedWal as Record<string, unknown>).latestHeight
+        persistedLatestHeight: typeof payload?.['persistedWal'] === 'object' && payload['persistedWal']
+          ? (payload['persistedWal'] as Record<string, unknown>)['latestHeight']
           : null,
         preview: preview && typeof preview === 'object'
           ? {
-              timestamp: (preview as Record<string, unknown>).timestamp ?? null,
-              url: (preview as Record<string, unknown>).url ?? null,
+              timestamp: (preview as Record<string, unknown>)['timestamp'] ?? null,
+              url: (preview as Record<string, unknown>)['url'] ?? null,
             }
           : null,
       },
@@ -3747,7 +3747,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
   if (pathname === '/api/debug/reserve') {
     if (!globalJAdapter) {
-      return new Response(JSON.stringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
+      return new Response(safeStringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
     }
 
     const url = new URL(req.url);
@@ -3755,10 +3755,10 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     const tokenId = Number(url.searchParams.get('tokenId') || '1');
 
     if (!entityId) {
-      return new Response(JSON.stringify({ error: 'Missing entityId' }), { status: 400, headers });
+      return new Response(safeStringify({ error: 'Missing entityId' }), { status: 400, headers });
     }
     if (!Number.isInteger(tokenId) || tokenId <= 0) {
-      return new Response(JSON.stringify({ error: 'Invalid tokenId' }), { status: 400, headers });
+      return new Response(safeStringify({ error: 'Invalid tokenId' }), { status: 400, headers });
     }
 
     try {
@@ -3774,7 +3774,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       );
     } catch (error: unknown) {
       const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers });
+      return new Response(safeStringify({ error: message }), { status: 500, headers });
     }
   }
 
@@ -3806,11 +3806,11 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     try {
       if (!globalJAdapter) {
         faucetLock.release();
-        return new Response(JSON.stringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
+        return new Response(safeStringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
       }
       if (!env) {
         faucetLock.release();
-        return new Response(JSON.stringify({ error: 'Runtime not initialized' }), { status: 503, headers });
+        return new Response(safeStringify({ error: 'Runtime not initialized' }), { status: 503, headers });
       }
 
       const body = await req.json();
@@ -3825,11 +3825,11 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
       if (!userEntityId) {
         faucetLock.release();
-        return new Response(JSON.stringify({ error: 'Missing userEntityId' }), { status: 400, headers });
+        return new Response(safeStringify({ error: 'Missing userEntityId' }), { status: 400, headers });
       }
       if (!Number.isFinite(tokenId)) {
         faucetLock.release();
-        return new Response(JSON.stringify({ error: 'Invalid tokenId' }), { status: 400, headers });
+        return new Response(safeStringify({ error: 'Invalid tokenId' }), { status: 400, headers });
       }
 
       // Get hub from server-authoritative hub set + gossip
@@ -3859,7 +3859,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       }
       if (!tokenMeta) {
         faucetLock.release();
-        return new Response(JSON.stringify({ error: `Unknown token for faucet`, tokenId, tokenSymbol }), {
+        return new Response(safeStringify({ error: `Unknown token for faucet`, tokenId, tokenSymbol }), {
           status: 400,
           headers,
         });
@@ -4027,7 +4027,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     } catch (error: unknown) {
       faucetLock.release();
       console.error('[FAUCET/RESERVE] Error:', error);
-      return new Response(JSON.stringify({ error: error.message }), { status: 500, headers });
+      return new Response(safeStringify({ error: error.message }), { status: 500, headers });
     }
   }
 
@@ -4035,7 +4035,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   if (pathname === '/api/faucet/offchain' && req.method === 'POST') {
     try {
       if (!env) {
-        return new Response(JSON.stringify({ error: 'Runtime not initialized' }), { status: 503, headers });
+        return new Response(safeStringify({ error: 'Runtime not initialized' }), { status: 503, headers });
       }
 
       const body = await req.json();
@@ -4049,7 +4049,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const requestId = `offchain_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 
       if (!userEntityId) {
-        return new Response(JSON.stringify({ error: 'Missing userEntityId' }), { status: 400, headers });
+        return new Response(safeStringify({ error: 'Missing userEntityId' }), { status: 400, headers });
       }
       if (!isEntityId32(userEntityId)) {
         return new Response(
@@ -4355,14 +4355,14 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const message = error?.message || 'Unknown faucet error';
       const status =
         message.includes('SIGNER_RESOLUTION_FAILED') || message.includes('RUNTIME_REPLICA_NOT_FOUND') ? 503 : 500;
-      return new Response(JSON.stringify({ error: message }), { status, headers });
+      return new Response(safeStringify({ error: message }), { status, headers });
     }
   }
 
   if (pathname === '/api/credit/request' && req.method === 'POST') {
     try {
       if (!env) {
-        return new Response(JSON.stringify({ error: 'Runtime not initialized' }), { status: 503, headers });
+        return new Response(safeStringify({ error: 'Runtime not initialized' }), { status: 503, headers });
       }
 
       const body = await req.json();
@@ -4372,16 +4372,16 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const amountRaw = typeof body?.amount === 'string' ? body.amount.trim() : '';
 
       if (!isEntityId32(userEntityId)) {
-        return new Response(JSON.stringify({ error: 'Invalid userEntityId' }), { status: 400, headers });
+        return new Response(safeStringify({ error: 'Invalid userEntityId' }), { status: 400, headers });
       }
       if (!isEntityId32(requestedHubEntityId)) {
-        return new Response(JSON.stringify({ error: 'Invalid hubEntityId' }), { status: 400, headers });
+        return new Response(safeStringify({ error: 'Invalid hubEntityId' }), { status: 400, headers });
       }
       if (!/^\d+$/.test(amountRaw)) {
-        return new Response(JSON.stringify({ error: 'Invalid amount' }), { status: 400, headers });
+        return new Response(safeStringify({ error: 'Invalid amount' }), { status: 400, headers });
       }
       if (!Number.isFinite(tokenId) || tokenId <= 0) {
-        return new Response(JSON.stringify({ error: 'Invalid tokenId' }), { status: 400, headers });
+        return new Response(safeStringify({ error: 'Invalid tokenId' }), { status: 400, headers });
       }
 
       const hubs = getFaucetHubProfiles(env);
@@ -4411,7 +4411,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
       const requestedAmount = BigInt(amountRaw);
       if (requestedAmount <= 0n) {
-        return new Response(JSON.stringify({ error: 'Amount must be positive' }), { status: 400, headers });
+        return new Response(safeStringify({ error: 'Amount must be positive' }), { status: 400, headers });
       }
 
       const approvedAmount = requestedAmount > getRequestCreditCap(tokenId)
@@ -4473,11 +4473,11 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       );
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      return new Response(JSON.stringify({ error: message }), { status: 500, headers });
+      return new Response(safeStringify({ error: message }), { status: 500, headers });
     }
   }
 
-  return new Response(JSON.stringify({ error: 'Not found' }), { status: 404, headers });
+  return new Response(safeStringify({ error: 'Not found' }), { status: 404, headers });
 };
 
 // ============================================================================
@@ -4688,7 +4688,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     env = await main(SERVER_RUNTIME_SEED);
     serverEnv = env;
     console.log('[XLN] Runtime initialized ✓');
-    const verboseRuntimeLogs = /^(1|true)$/i.test(process.env.RUNTIME_VERBOSE_LOGS ?? '');
+    const verboseRuntimeLogs = /^(1|true)$/i.test(process.env['RUNTIME_VERBOSE_LOGS'] ?? '');
     env.quietRuntimeLogs = !verboseRuntimeLogs;
     console.log(
       `[XLN] Runtime log mode: ${env.quietRuntimeLogs ? 'quiet' : 'verbose'} (set RUNTIME_VERBOSE_LOGS=1 for verbose)`,
@@ -4700,7 +4700,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     console.log('[XLN] Runtime event loop started ✓');
 
     // Initialize J-adapter (anvil for testnet, browserVM for local)
-    const useAnvil = process.env.USE_ANVIL === 'true';
+    const useAnvil = process.env['USE_ANVIL'] === 'true';
     const anvilRpc = useAnvil ? resolveRequiredAnvilRpc() : '';
 
     console.log('[XLN] J-adapter mode check:');
@@ -4711,7 +4711,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
     if (useAnvil) {
       console.log('[XLN] Connecting to Anvil testnet...');
-      const usePredeployedAddresses = process.env.XLN_USE_PREDEPLOYED_ADDRESSES === 'true';
+      const usePredeployedAddresses = process.env['XLN_USE_PREDEPLOYED_ADDRESSES'] === 'true';
 
     // Optional: reuse addresses from jurisdictions.json (disabled by default).
     const fs = await import('fs/promises');
@@ -4998,8 +4998,8 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
 if (import.meta.main) {
   console.log('═══ SERVER.TS ENTRY POINT ═══');
-  console.log('ENV: USE_ANVIL =', process.env.USE_ANVIL);
-  console.log('ENV: ANVIL_RPC =', process.env.ANVIL_RPC);
+  console.log('ENV: USE_ANVIL =', process.env['USE_ANVIL']);
+  console.log('ENV: ANVIL_RPC =', process.env['ANVIL_RPC']);
   console.log('Args:', process.argv.slice(2));
 
   const args = process.argv.slice(2);

@@ -8,6 +8,7 @@ import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { encodeBoard, hashBoard } from '../entity-factory';
 import { safeStringify } from '../serialization-utils';
+import { createStructuredLogger } from '../logger';
 import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
 import { deriveSignerAddressSync } from '../account-crypto';
 import {
@@ -553,7 +554,7 @@ let rpcMarketPublisherTimer: ReturnType<typeof setInterval> | null = null;
 let rpcMarketPublisherInFlight = false;
 
 let resetPromise: Promise<void> | null = null;
-const CHILD_GRACEFUL_SHUTDOWN_MS = 15_000;
+const CHILD_GRACEFUL_SHUTDOWN_MS = 20_000;
 
 const startTiming = (stage: keyof typeof timings): number => {
   const now = Date.now();
@@ -571,10 +572,11 @@ const finishTiming = (stage: keyof typeof timings, startedAt: number): void => {
   if (!timing) throw new Error(`Unknown timing stage: ${String(stage)}`);
   timing.completedAt = completedAt;
   timing.ms = completedAt - startedAt;
-  console.log(`[MESH-TIMING] ${stage} ${timing.ms}ms`);
+  meshLog.info('timing', { stage, ms: timing.ms });
 };
 
 const serializeError = (error: unknown): string => error instanceof Error ? error.message : String(error);
+const meshLog = createStructuredLogger('mesh.orchestrator');
 
 const stopProcess = async (proc: ChildProcess | null): Promise<void> => {
   if (!proc || proc.exitCode !== null) return;
@@ -2042,7 +2044,7 @@ const proxyHubApi = async (
     bodyText = await request.text();
     bodyJson = bodyText ? JSON.parse(bodyText) as { hubEntityId?: string } : {};
   } catch (error) {
-    return new Response(JSON.stringify({ success: false, error: `Invalid JSON: ${serializeError(error)}` }), {
+    return new Response(safeStringify({ success: false, error: `Invalid JSON: ${serializeError(error)}` }), {
       status: 400,
       headers,
     });
@@ -2055,7 +2057,7 @@ const proxyHubApi = async (
     return entityId.length > 0 && entityId === requestedHubId;
   });
   if (!child) {
-    return new Response(JSON.stringify({
+    return new Response(safeStringify({
       success: false,
       error: `Hub not found for hubEntityId=${requestedHubId || 'missing'}`,
       code: 'FAUCET_HUB_NOT_FOUND',
@@ -2082,7 +2084,7 @@ const proxyHubApi = async (
       },
     });
   } catch (error) {
-    return new Response(JSON.stringify({
+    return new Response(safeStringify({
       success: false,
       error: serializeError(error),
       code: 'FAUCET_PROXY_FAILED',
@@ -2104,7 +2106,7 @@ const proxyAnyHubGet = async (request: Request, endpointWithQuery: string): Prom
   await pollAllHubHealth();
   const child = hubChildren.find((candidate) => candidate.proc?.exitCode === null && candidate.lastHealth);
   if (!child) {
-    return new Response(JSON.stringify({ error: 'No healthy hub API available' }), {
+    return new Response(safeStringify({ error: 'No healthy hub API available' }), {
       status: 503,
       headers,
     });
@@ -2126,7 +2128,7 @@ const proxyAnyHubGet = async (request: Request, endpointWithQuery: string): Prom
       },
     });
   } catch (error) {
-    return new Response(JSON.stringify({ error: serializeError(error) }), {
+    return new Response(safeStringify({ error: serializeError(error) }), {
       status: 502,
       headers,
     });
@@ -2147,7 +2149,7 @@ const proxyAnyHubRequest = async (
   await pollAllHubHealth();
   const child = hubChildren.find((candidate) => candidate.proc?.exitCode === null && candidate.lastHealth);
   if (!child) {
-    return new Response(JSON.stringify({ error: 'No healthy hub API available' }), {
+    return new Response(safeStringify({ error: 'No healthy hub API available' }), {
       status: 503,
       headers,
     });
@@ -2175,7 +2177,7 @@ const proxyAnyHubRequest = async (
       },
     });
   } catch (error) {
-    return new Response(JSON.stringify({ error: serializeError(error) }), {
+    return new Response(safeStringify({ error: serializeError(error) }), {
       status: 502,
       headers,
     });
@@ -2394,7 +2396,7 @@ const server = Bun.serve({
     }
 
     if (pathname === '/api/info') {
-      return new Response(JSON.stringify({
+      return new Response(safeStringify({
         name: 'mesh-control',
         relayUrl,
         rpcUrl: args.rpcUrl,
@@ -2416,7 +2418,7 @@ const server = Bun.serve({
           },
         });
       } catch (error) {
-        return new Response(JSON.stringify({ error: serializeError(error) }), {
+        return new Response(safeStringify({ error: serializeError(error) }), {
           status: 500,
           headers,
         });
@@ -2431,7 +2433,7 @@ const server = Bun.serve({
       return await proxyAnyHubRequest(request, `${pathname}${url.search}`);
     }
 
-    return new Response(JSON.stringify({
+    return new Response(safeStringify({
       error: `Unhandled mesh-control route: ${request.method} ${pathname}`,
     }), {
       status: 404,

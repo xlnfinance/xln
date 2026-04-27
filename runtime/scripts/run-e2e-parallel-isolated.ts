@@ -84,7 +84,7 @@ type RunnerLockPayload = {
 
 const parseArgs = (): CliArgs => {
   const args = process.argv.slice(2);
-  const longMode = process.env.E2E_LONG === '1';
+  const longMode = process.env['E2E_LONG'] === '1';
   const cpu = (() => {
     try {
       return Math.max(1, availableParallelism());
@@ -411,7 +411,7 @@ const writeRunManifest = (
 };
 
 const publishQaRunIfConfigured = (logsDir: string): void => {
-  const remoteBase = String(process.env.XLN_QA_PUBLISH_REMOTE || '').trim();
+  const remoteBase = String(process.env['XLN_QA_PUBLISH_REMOTE'] || '').trim();
   if (!remoteBase) return;
 
   const runId = logsDir.split('/').at(-1) || 'run';
@@ -956,9 +956,9 @@ const captureShardFailureForensics = async (options: {
     : [];
 
   for (const entry of entityEntries) {
-    const runtimeId = typeof entry.runtimeId === 'string' ? entry.runtimeId.trim() : '';
-    const dbPath = typeof entry.dbPath === 'string' ? entry.dbPath.trim() : '';
-    const entityId = typeof entry.entityId === 'string' ? entry.entityId.trim().toLowerCase() : 'unknown';
+    const runtimeId = typeof entry['runtimeId'] === 'string' ? entry['runtimeId'].trim() : '';
+    const dbPath = typeof entry['dbPath'] === 'string' ? entry['dbPath'].trim() : '';
+    const entityId = typeof entry['entityId'] === 'string' ? entry['entityId'].trim().toLowerCase() : 'unknown';
     if (!runtimeId || !dbPath) continue;
 
     const receiptDump = spawnSync(
@@ -1176,7 +1176,7 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
         E2E_API_BASE_URL: apiUrl,
         E2E_ANVIL_RPC: rpcUrl,
         E2E_RESET_BASE_URL: apiUrl,
-        E2E_FAST: process.env.E2E_FAST ?? '1',
+        E2E_FAST: process.env['E2E_FAST'] ?? '1',
         E2E_ISOLATED_BASELINE_READY: '1',
         XLN_INCLUDE_MARKET_MAKER: task.requireMarketMaker ? '1' : '0',
       },

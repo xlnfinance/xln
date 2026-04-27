@@ -130,7 +130,7 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
 
   // Log non-gossip messages
   if (
-    process.env.RELAY_VERBOSE_LOGS === '1'
+    process.env['RELAY_VERBOSE_LOGS'] === '1'
     && type !== 'gossip_request'
     && type !== 'gossip_response'
     && type !== 'gossip_announce'

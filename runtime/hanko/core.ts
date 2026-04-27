@@ -43,7 +43,7 @@ import { createHash, randomBytes } from '../utils';
 
 const HANKO_DEBUG =
   typeof process !== 'undefined' &&
-  /^(1|true)$/i.test(process.env.HANKO_DEBUG ?? process.env.RUNTIME_VERBOSE_LOGS ?? '');
+  /^(1|true)$/i.test(process.env['HANKO_DEBUG'] ?? process.env['RUNTIME_VERBOSE_LOGS'] ?? '');
 
 // Browser-compatible Buffer.concat replacement
 const bufferConcat = (buffers: Buffer[]): Buffer => {

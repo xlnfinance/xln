@@ -203,26 +203,26 @@ export async function createRpcAdapter(
   provider: Provider,
   signer: Signer
 ): Promise<JAdapter> {
-  const traceEnabled = process.env.JADAPTER_TRACE === '1';
+  const traceEnabled = process.env['JADAPTER_TRACE'] === '1';
   const trace = (phase: string, extra?: Record<string, unknown>): void => {
     if (!traceEnabled) return;
     console.log(`[JAdapter:rpc][trace] ${phase}${extra ? ` ${JSON.stringify(extra)}` : ''}`);
   };
   const TX_WAIT_TIMEOUT_MS = Math.max(
     10_000,
-    Math.floor(Number(process.env.JADAPTER_TX_WAIT_TIMEOUT_MS ?? config.txWaitTimeoutMs ?? 300_000)),
+    Math.floor(Number(process.env['JADAPTER_TX_WAIT_TIMEOUT_MS'] ?? config.txWaitTimeoutMs ?? 300_000)),
   );
   const TX_WAIT_CONFIRMS = Math.max(
     1,
-    Math.floor(Number(process.env.JADAPTER_TX_WAIT_CONFIRMS ?? config.txWaitConfirms ?? 1)),
+    Math.floor(Number(process.env['JADAPTER_TX_WAIT_CONFIRMS'] ?? config.txWaitConfirms ?? 1)),
   );
   const GAS_HEADROOM_BPS = Math.max(
     10_000,
-    Math.floor(Number(process.env.JADAPTER_GAS_HEADROOM_BPS ?? '12000')),
+    Math.floor(Number(process.env['JADAPTER_GAS_HEADROOM_BPS'] ?? '12000')),
   );
   const MAX_FEE_PER_GAS_GWEI = Math.max(
     1,
-    Math.floor(Number(process.env.JADAPTER_MAX_FEE_GWEI ?? '200')),
+    Math.floor(Number(process.env['JADAPTER_MAX_FEE_GWEI'] ?? '200')),
   );
   const MAX_FEE_PER_GAS_WEI = ethers.parseUnits(String(MAX_FEE_PER_GAS_GWEI), 'gwei');
   const DEFAULT_PROCESS_BATCH_GAS = 5_000_000n;
@@ -671,7 +671,7 @@ export async function createRpcAdapter(
       );
       // Fresh dev-chain deployments can exceed 30M after linking + viaIR.
       let deployGasLimit = DEV_CHAIN_IDS.has(config.chainId)
-        ? BigInt(process.env.JADAPTER_DEPLOY_GAS_LIMIT ?? '60000000')
+        ? BigInt(process.env['JADAPTER_DEPLOY_GAS_LIMIT'] ?? '60000000')
         : 30_000_000n;
       if (!DEV_CHAIN_IDS.has(config.chainId)) {
         try {
@@ -1203,14 +1203,14 @@ export async function createRpcAdapter(
       const normalizedEntityId = normalizeEntityId(entityId);
       const batchProcessed = receipt.events.find((event) =>
         event.name === 'HankoBatchProcessed' &&
-        String(event.args.entityId || '').toLowerCase() === normalizedEntityId,
+        String(event.args['entityId'] || '').toLowerCase() === normalizedEntityId,
       );
-      if (batchProcessed && batchProcessed.args.success === false) {
+      if (batchProcessed && batchProcessed.args['success'] === false) {
         throw new Error(`externalTokenToReserve failed on-chain for ${normalizedEntityId.slice(-8)}`);
       }
       const reserveUpdated = receipt.events.find((event) =>
         event.name === 'ReserveUpdated' &&
-        String(event.args.entity || '').toLowerCase() === normalizedEntityId,
+        String(event.args['entity'] || '').toLowerCase() === normalizedEntityId,
       );
       if (!reserveUpdated) {
         const eventNames = receipt.events.map((event) => event.name).join(',') || 'none';
@@ -1523,20 +1523,20 @@ export async function createRpcAdapter(
             const resolvedFeeOverrides = await buildFeeOverrides();
             const requestedFeeOverrides = batchData.feeOverrides;
             if (requestedFeeOverrides?.maxFeePerGasWei) {
-              resolvedFeeOverrides.maxFeePerGas = BigInt(requestedFeeOverrides.maxFeePerGasWei);
+              resolvedFeeOverrides['maxFeePerGas'] = BigInt(requestedFeeOverrides.maxFeePerGasWei);
             }
             if (requestedFeeOverrides?.maxPriorityFeePerGasWei) {
-              resolvedFeeOverrides.maxPriorityFeePerGas = BigInt(requestedFeeOverrides.maxPriorityFeePerGasWei);
+              resolvedFeeOverrides['maxPriorityFeePerGas'] = BigInt(requestedFeeOverrides.maxPriorityFeePerGasWei);
             }
             if (requestedFeeOverrides?.gasBumpBps && requestedFeeOverrides.gasBumpBps > 0) {
               const bumpBps = BigInt(Math.floor(requestedFeeOverrides.gasBumpBps));
               const factor = 10_000n + bumpBps;
-              if (resolvedFeeOverrides.maxFeePerGas) {
-                resolvedFeeOverrides.maxFeePerGas = (resolvedFeeOverrides.maxFeePerGas * factor + 9_999n) / 10_000n;
+              if (resolvedFeeOverrides['maxFeePerGas']) {
+                resolvedFeeOverrides['maxFeePerGas'] = (resolvedFeeOverrides['maxFeePerGas'] * factor + 9_999n) / 10_000n;
               }
-              if (resolvedFeeOverrides.maxPriorityFeePerGas) {
-                resolvedFeeOverrides.maxPriorityFeePerGas =
-                  (resolvedFeeOverrides.maxPriorityFeePerGas * factor + 9_999n) / 10_000n;
+              if (resolvedFeeOverrides['maxPriorityFeePerGas']) {
+                resolvedFeeOverrides['maxPriorityFeePerGas'] =
+                  (resolvedFeeOverrides['maxPriorityFeePerGas'] * factor + 9_999n) / 10_000n;
               }
             }
 

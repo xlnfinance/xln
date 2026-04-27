@@ -391,7 +391,7 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
               ws.close();
               return;
             }
-          } else if (msg.auth && process.env.XLN_LOG_HELLO_AUTH === '1') {
+          } else if (msg.auth && process.env['XLN_LOG_HELLO_AUTH'] === '1') {
             console.log(`[WS] Ignoring optional hello auth for ${msg.from.slice(0, 10)}...`);
           }
           registerClient(msg.from);
@@ -497,8 +497,8 @@ if (import.meta.main) {
   const portArgIdx = args.indexOf('--port');
   const port = portArgIdx !== -1 && args[portArgIdx + 1]
     ? Number(args[portArgIdx + 1])
-    : Number(process.env.WS_PORT || 8787);
-  const serverId = process.env.WS_SERVER_ID || 'hub';
+    : Number(process.env['WS_PORT'] || 8787);
+  const serverId = process.env['WS_SERVER_ID'] || 'hub';
   console.log(`[WS] Starting relay server on port ${port}`);
   startRuntimeWsServer({ port, serverId });
 }

@@ -6,7 +6,7 @@ import { normalizeEntityName } from '../networking/gossip';
 import { createOrderbookExtState, validateSpreadDistribution } from '../orderbook';
 import type { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput, JInput, HashType } from '../types';
 import { DEFAULT_SOFT_LIMIT, DEFAULT_HARD_LIMIT, DEFAULT_MAX_FEE } from '../types';
-import { DEBUG, HEAVY_LOGS, log } from '../utils';
+import { DEBUG, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
 import { announceLocalEntityProfile } from '../networking/gossip-helper';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
@@ -34,11 +34,30 @@ export interface ApplyEntityTxResult {
 }
 import { executeProposal, generateProposalId } from './proposals';
 import { validateMessage } from './validation';
-import { cloneEntityState, addMessage, canonicalAccountKey } from '../state-helpers';
+import { cloneEntityState, addMessage } from '../state-helpers';
 import { logError } from '../logger';
 import { FINANCIAL } from '../constants';
 import { normalizeRebalanceMatchingStrategy } from '../rebalance-policy';
+import { initJBatch, batchAddSettlement } from '../j-batch';
 import { handleR2E } from './handlers/r2e';
+import { handleHtlcPayment } from './handlers/htlc-payment';
+import { handleR2C } from './handlers/r2c';
+import { handleE2R } from './handlers/e2r';
+import { handleR2R } from './handlers/r2r';
+import { handleJBroadcast } from './handlers/j-broadcast';
+import { handleJRebroadcast } from './handlers/j-rebroadcast';
+import { handleJAbortSentBatch } from './handlers/j-abort-sent-batch';
+import { handleJClearBatch } from './handlers/j-clear-batch';
+import { handleMintReserves } from './handlers/mint-reserves';
+import { handleCreateSettlement } from './handlers/create-settlement';
+import {
+  handleSettleApprove,
+  handleSettleExecute,
+  handleSettlePropose,
+  handleSettleReject,
+  handleSettleUpdate,
+} from './handlers/settle';
+import { handleDisputeFinalize, handleDisputeStart } from './handlers/dispute';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -484,7 +503,6 @@ export const applyEntityTx = async (
     }
 
     if (entityTx.type === 'htlcPayment') {
-      const { handleHtlcPayment } = await import('./handlers/htlc-payment');
       return await handleHtlcPayment(entityState, entityTx, env);
     }
 
@@ -672,7 +690,11 @@ export const applyEntityTx = async (
 
             if (paths.length > 0) {
               // Use the shortest path
-              route = paths[0].path;
+              const firstPath = paths[0];
+              if (!firstPath) {
+                throw new Error('ROUTE_DISCOVERY_INVARIANT: paths.length > 0 but paths[0] is missing');
+              }
+              route = firstPath.path;
               if (verbose) console.log(`💸 Found route: ${route.map(e => formatEntityId(e)).join(' → ')}`);
             } else {
               logError('ENTITY_TX', `❌ No route found to ${formatEntityId(targetEntityId)}`);
@@ -802,22 +824,18 @@ export const applyEntityTx = async (
     }
 
     if (entityTx.type === 'r2c') {
-      const { handleR2C } = await import('./handlers/r2c');
       return await handleR2C(entityState, entityTx, env.timestamp);
     }
 
     if (entityTx.type === 'e2r') {
-      const { handleE2R } = await import('./handlers/e2r');
       return await handleE2R(entityState, entityTx);
     }
 
     if (entityTx.type === 'r2r') {
-      const { handleR2R } = await import('./handlers/r2r');
       return await handleR2R(entityState, entityTx);
     }
 
     if (entityTx.type === 'j_broadcast') {
-      const { handleJBroadcast } = await import('./handlers/j-broadcast');
       const batch = entityState.jBatchState?.batch;
       if (batch) {
         console.log(
@@ -832,43 +850,35 @@ export const applyEntityTx = async (
     }
 
     if (entityTx.type === 'j_rebroadcast') {
-      const { handleJRebroadcast } = await import('./handlers/j-rebroadcast');
       return await handleJRebroadcast(entityState, entityTx, env);
     }
 
     if (entityTx.type === 'j_abort_sent_batch') {
-      const { handleJAbortSentBatch } = await import('./handlers/j-abort-sent-batch');
       return await handleJAbortSentBatch(entityState, entityTx, env);
     }
 
     if (entityTx.type === 'j_clear_batch') {
-      const { handleJClearBatch } = await import('./handlers/j-clear-batch');
       return await handleJClearBatch(entityState, entityTx, env);
     }
 
     if (entityTx.type === 'mintReserves') {
-      const { handleMintReserves } = await import('./handlers/mint-reserves');
       return await handleMintReserves(entityState, entityTx, env);
     }
 
     if (entityTx.type === 'createSettlement') {
-      const { handleCreateSettlement } = await import('./handlers/create-settlement');
       return await handleCreateSettlement(entityState, entityTx);
     }
 
     // === SETTLEMENT WORKSPACE HANDLERS ===
     if (entityTx.type === 'settle_propose') {
-      const { handleSettlePropose } = await import('./handlers/settle');
       return await handleSettlePropose(entityState, entityTx, env);
     }
 
     if (entityTx.type === 'settle_update') {
-      const { handleSettleUpdate } = await import('./handlers/settle');
       return await handleSettleUpdate(entityState, entityTx, env);
     }
 
     if (entityTx.type === 'settle_approve') {
-      const { handleSettleApprove } = await import('./handlers/settle');
       const result = await handleSettleApprove(entityState, entityTx, env);
       return {
         ...result,
@@ -877,12 +887,10 @@ export const applyEntityTx = async (
     }
 
     if (entityTx.type === 'settle_execute') {
-      const { handleSettleExecute } = await import('./handlers/settle');
       return await handleSettleExecute(entityState, entityTx, env);
     }
 
     if (entityTx.type === 'settle_reject') {
-      const { handleSettleReject } = await import('./handlers/settle');
       return await handleSettleReject(entityState, entityTx, env);
     }
 
@@ -1062,7 +1070,13 @@ export const applyEntityTx = async (
 
       const accountTx: AccountTx = {
         type: 'request_collateral',
-        data: { tokenId, amount, feeTokenId, feeAmount, policyVersion },
+        data: {
+          tokenId,
+          amount,
+          ...(feeTokenId !== undefined ? { feeTokenId } : {}),
+          feeAmount,
+          policyVersion,
+        },
       };
       mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
 
@@ -1125,7 +1139,16 @@ export const applyEntityTx = async (
 
       const accountTx: AccountTx = {
         type: 'swap_offer',
-        data: { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks, timeInForce, minFillRatio },
+        data: {
+          offerId,
+          giveTokenId,
+          giveAmount,
+          wantTokenId,
+          wantAmount,
+          ...(priceTicks !== undefined ? { priceTicks } : {}),
+          ...(timeInForce !== undefined ? { timeInForce } : {}),
+          minFillRatio,
+        },
       };
 
       // Pure: return mempoolOp instead of mutating directly
@@ -1287,7 +1310,6 @@ export const applyEntityTx = async (
         );
       }
 
-      const { initJBatch, batchAddSettlement } = await import('../j-batch');
       if (!newState.jBatchState) {
         newState.jBatchState = initJBatch();
       }
@@ -1330,12 +1352,10 @@ export const applyEntityTx = async (
 
     // === DISPUTES ===
     if (entityTx.type === 'disputeStart') {
-      const { handleDisputeStart } = await import('./handlers/dispute');
       return await handleDisputeStart(entityState, entityTx, env);
     }
 
     if (entityTx.type === 'disputeFinalize') {
-      const { handleDisputeFinalize } = await import('./handlers/dispute');
       return await handleDisputeFinalize(entityState, entityTx, env);
     }
 
