@@ -333,6 +333,7 @@ const KEY_FRAME_DB_HEAD = Buffer.from([0x00]);
 const FRAME_DB_ACCOUNT_FRAME = 0x01;
 const FRAME_DB_RUNTIME_ACTIVITY = 0x02;
 const FRAME_DB_ENTITY_ACTIVITY = 0x03;
+const FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME = 0x04;
 const ZERO_FRAME_HASH = `0x${'00'.repeat(32)}`;
 
 type StorageCodecName = 'json' | 'msgpack';
@@ -463,6 +464,18 @@ const keyFrameDbAccountFrame = (
   counterpartyId: string,
   accountHeight: number,
 ): Buffer => Buffer.concat([Buffer.from([FRAME_DB_ACCOUNT_FRAME]), hexBytes(entityId), hexBytes(counterpartyId), encodeHeight(accountHeight)]);
+const keyFrameDbAccountFrameByRuntime = (
+  runtimeHeight: number,
+  entityId: string,
+  counterpartyId: string,
+  accountHeight: number,
+): Buffer => Buffer.concat([
+  Buffer.from([FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME]),
+  encodeHeight(runtimeHeight),
+  hexBytes(entityId),
+  hexBytes(counterpartyId),
+  encodeHeight(accountHeight),
+]);
 const keyFrameDbRuntimeActivity = (height: number): Buffer =>
   Buffer.concat([Buffer.from([FRAME_DB_RUNTIME_ACTIVITY]), encodeHeight(height)]);
 const keyFrameDbEntityActivity = (entityId: string, height: number): Buffer =>
@@ -472,6 +485,18 @@ const keyFrameDbAccountFramePrefix = (entityId?: string, counterpartyId?: string
   if (entityId) return Buffer.concat([Buffer.from([FRAME_DB_ACCOUNT_FRAME]), hexBytes(entityId)]);
   return Buffer.from([FRAME_DB_ACCOUNT_FRAME]);
 };
+const keyFrameDbAccountFrameByRuntimePrefix = (): Buffer => Buffer.from([FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME]);
+const parseFrameDbAccountFrameRuntimeIndexKey = (key: Buffer): {
+  runtimeHeight: number;
+  entityId: string;
+  counterpartyId: string;
+  accountHeight: number;
+} => ({
+  runtimeHeight: decodeHeight(key, 1),
+  entityId: decodeEntityId(key.subarray(9, 41)),
+  counterpartyId: decodeEntityId(key.subarray(41, 73)),
+  accountHeight: decodeHeight(key, 73),
+});
 
 const keySnapshotEntity = (height: number, entityId: string): Buffer =>
   Buffer.concat([Buffer.from([KEY_SNAPSHOT_ENTITY]), encodeHeight(height), hexBytes(entityId)]);
@@ -524,6 +549,17 @@ const listKeys = async (db: RuntimeDbLike, prefix: Buffer): Promise<Buffer[]> =>
   const out: Buffer[] = [];
   const upperBound = prefixUpperBound(prefix);
   for await (const rawKey of db.keys(upperBound ? { gte: prefix, lt: upperBound } : { gte: prefix })) {
+    if (Buffer.isBuffer(rawKey)) out.push(rawKey);
+    else if (rawKey instanceof Uint8Array) out.push(Buffer.from(rawKey));
+    else out.push(Buffer.from(String(rawKey)));
+  }
+  return out;
+};
+
+const listKeysRange = async (db: RuntimeDbLike, gte: Buffer, lt: Buffer): Promise<Buffer[]> => {
+  if (typeof db.keys !== 'function') return [];
+  const out: Buffer[] = [];
+  for await (const rawKey of db.keys({ gte, lt })) {
     if (Buffer.isBuffer(rawKey)) out.push(rawKey);
     else if (rawKey instanceof Uint8Array) out.push(Buffer.from(rawKey));
     else out.push(Buffer.from(String(rawKey)));
@@ -641,6 +677,7 @@ const prepareStorageAuditStateHashes = (
   env: Env,
   touchedEntities: string[],
   previousFrame: StorageFrameRecord | null,
+  replicaLookup = buildReplicaLookup(env),
 ): { auditStateHash: string; auditEntityHashes: StorageFrameEntityHash[] } => {
   const liveEntityIds = new Set(Array.from(env.eReplicas.values()).map((replica) => normalizeEntityId(replica.entityId)));
   const previousHashes = Array.isArray(previousFrame?.auditEntityHashes)
@@ -660,7 +697,7 @@ const prepareStorageAuditStateHashes = (
 
   for (const entityId of touchedEntities) {
     const normalized = normalizeEntityId(entityId);
-    const replica = findReplicaForEntity(env, normalized)?.replica;
+    const replica = findReplicaForEntity(env, normalized, replicaLookup)?.replica;
     if (replica) auditHashByEntity.set(normalized, computeStorageAuditEntityHash(replica));
     else auditHashByEntity.delete(normalized);
   }
@@ -677,6 +714,7 @@ const prepareStorageCanonicalStateHashes = (
   env: Env,
   touchedEntities: string[],
   previousFrame: StorageFrameRecord | null,
+  replicaLookup = buildReplicaLookup(env),
 ): { canonicalStateHash: string; canonicalEntityHashes: StorageFrameEntityHash[] } => {
   const liveEntityIds = new Set(Array.from(env.eReplicas.values()).map((replica) => normalizeEntityId(replica.entityId)));
   const previousHashes = Array.isArray(previousFrame?.canonicalEntityHashes)
@@ -696,7 +734,7 @@ const prepareStorageCanonicalStateHashes = (
 
   for (const entityId of touchedEntities) {
     const normalized = normalizeEntityId(entityId);
-    const replica = findReplicaForEntity(env, normalized)?.replica;
+    const replica = findReplicaForEntity(env, normalized, replicaLookup)?.replica;
     if (replica) {
       canonicalHashByEntity.set(normalized, computeCanonicalEntityHash(replica));
     } else {
@@ -1049,13 +1087,28 @@ const readHead = async (db: RuntimeDbLike, config: Required<StorageRuntimeConfig
 const findReplicaForEntity = (
   env: Env,
   entityId: string,
+  lookup?: StorageReplicaLookup,
 ): { replicaKey: string; replica: EntityReplica; state: EntityState } | null => {
   const normalized = normalizeEntityId(entityId);
+  if (lookup) return lookup.get(normalized) ?? null;
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
     const candidate = String(replica?.entityId || String(replicaKey).split(':')[0] || '').toLowerCase();
     if (candidate === normalized) return { replicaKey: String(replicaKey), replica, state: replica.state };
   }
   return null;
+};
+
+type StorageReplicaLookup = Map<string, { replicaKey: string; replica: EntityReplica; state: EntityState }>;
+
+const buildReplicaLookup = (env: Env): StorageReplicaLookup => {
+  const lookup: StorageReplicaLookup = new Map();
+  for (const [replicaKey, replica] of env.eReplicas.entries()) {
+    if (!replica?.state) continue;
+    const entityId = normalizeEntityId(replica.entityId || replica.state.entityId || String(replicaKey).split(':')[0] || '');
+    if (!entityId) continue;
+    lookup.set(entityId, { replicaKey: String(replicaKey), replica, state: replica.state });
+  }
+  return lookup;
 };
 
 const nextRouteHop = (entityId: string, route: string[] | undefined, fallback: string): string => {
@@ -1212,11 +1265,15 @@ const mergeTouchedRefs = (
   return base;
 };
 
-const buildDocPuts = (env: Env, touched: ReturnType<typeof collectTouchedRefs>): StorageDoc[] => {
+const buildDocPuts = (
+  env: Env,
+  touched: ReturnType<typeof collectTouchedRefs>,
+  replicaLookup = buildReplicaLookup(env),
+): StorageDoc[] => {
   const puts: StorageDoc[] = [];
 
   for (const entityId of touched.touchedEntities) {
-    const replica = findReplicaForEntity(env, entityId);
+    const replica = findReplicaForEntity(env, entityId, replicaLookup);
     if (!replica) continue;
     puts.push({
       family: 'entity',
@@ -1226,7 +1283,7 @@ const buildDocPuts = (env: Env, touched: ReturnType<typeof collectTouchedRefs>):
   }
 
   for (const ref of touched.touchedAccounts.values()) {
-    const replica = findReplicaForEntity(env, ref.entityId);
+    const replica = findReplicaForEntity(env, ref.entityId, replicaLookup);
     const account = replica?.state.accounts.get(ref.counterpartyId);
     if (!replica || !account) continue;
     puts.push({
@@ -1238,7 +1295,7 @@ const buildDocPuts = (env: Env, touched: ReturnType<typeof collectTouchedRefs>):
   }
 
   for (const entityId of touched.touchedBookEntities) {
-    const replica = findReplicaForEntity(env, entityId);
+    const replica = findReplicaForEntity(env, entityId, replicaLookup);
     const books = replica?.state.orderbookExt?.books;
     if (!books) continue;
     for (const [pairId, book] of books.entries()) {
@@ -1249,12 +1306,17 @@ const buildDocPuts = (env: Env, touched: ReturnType<typeof collectTouchedRefs>):
   return puts;
 };
 
-const buildBookDeletions = async (db: RuntimeDbLike, env: Env, touchedBookEntities: ReadonlySet<string>): Promise<StorageDocRef[]> => {
+const buildBookDeletions = async (
+  db: RuntimeDbLike,
+  env: Env,
+  touchedBookEntities: ReadonlySet<string>,
+  replicaLookup = buildReplicaLookup(env),
+): Promise<StorageDocRef[]> => {
   const dels: StorageDocRef[] = [];
   for (const entityId of touchedBookEntities) {
     const liveKeys = await listKeys(db, keyLiveBookPrefix(entityId));
     if (liveKeys.length === 0) continue;
-    const replica = findReplicaForEntity(env, entityId);
+    const replica = findReplicaForEntity(env, entityId, replicaLookup);
     const currentPairs = new Set(Array.from(replica?.state.orderbookExt?.books?.keys?.() ?? []).map(String));
     for (const key of liveKeys) {
       const parsed = parseLiveBookKey(key);
@@ -1484,6 +1546,13 @@ const buildFrameDbPuts = (options: {
   };
   puts.push({ key: keyFrameDbRuntimeActivity(options.height), value: encodeBuffer(runtimeActivity) });
 
+  const logCountsByEntity = new Map<string, number>();
+  for (const log of options.logs) {
+    const entityId = normalizeEntityId(String(log.entityId || log.data?.['entityId'] || ''));
+    if (!entityId) continue;
+    logCountsByEntity.set(entityId, (logCountsByEntity.get(entityId) ?? 0) + 1);
+  }
+
   const frameCountsByEntity = new Map<string, number>();
   for (const record of options.frameDbRecords ?? []) {
     if (record.kind !== 'accountFrame') continue;
@@ -1503,6 +1572,10 @@ const buildFrameDbPuts = (options: {
       key: keyFrameDbAccountFrame(entityId, counterpartyId, stored.accountHeight),
       value: encodeBuffer(stored),
     });
+    puts.push({
+      key: keyFrameDbAccountFrameByRuntime(options.height, entityId, counterpartyId, stored.accountHeight),
+      value: Buffer.alloc(0),
+    });
     frameCountsByEntity.set(entityId, (frameCountsByEntity.get(entityId) ?? 0) + 1);
   }
 
@@ -1516,7 +1589,7 @@ const buildFrameDbPuts = (options: {
       entityId: normalized,
       touchedAccounts: options.touchedAccounts.filter((account) => normalizeEntityId(account.entityId) === normalized),
       accountFrameCount: frameCountsByEntity.get(normalized) ?? 0,
-      logCount: options.logs.filter((log) => normalizeEntityId(String(log.entityId || log.data?.['entityId'] || '')) === normalized).length,
+      logCount: logCountsByEntity.get(normalized) ?? 0,
     };
     puts.push({ key: keyFrameDbEntityActivity(normalized, options.height), value: encodeBuffer(entityActivity) });
   }
@@ -1564,15 +1637,32 @@ const pruneFrameDbBeforeRuntimeHeight = async (
   removedBytes += await deleteKeys(db, entityActivityKeys);
   removedKeys += entityActivityKeys.length;
 
-  const accountFrameKeysToDelete: Buffer[] = [];
-  for (const key of await listKeys(db, keyFrameDbAccountFramePrefix())) {
-    const raw = await readRawOrNull(db, key);
-    if (!raw) continue;
-    const record = decodeBuffer<StoredAccountFrameRecord>(raw);
-    if (Math.max(0, Math.floor(Number(record.runtimeHeight ?? 0))) <= cutoff) {
-      accountFrameKeysToDelete.push(key);
+  const accountFrameKeysByHex = new Map<string, Buffer>();
+  const accountFrameIndexKeys = await listKeysRange(
+    db,
+    keyFrameDbAccountFrameByRuntimePrefix(),
+    Buffer.concat([Buffer.from([FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME]), encodeHeight(cutoff + 1)]),
+  );
+  for (const key of accountFrameIndexKeys) {
+    accountFrameKeysByHex.set(key.toString('hex'), key);
+    const parsed = parseFrameDbAccountFrameRuntimeIndexKey(key);
+    const primaryKey = keyFrameDbAccountFrame(parsed.entityId, parsed.counterpartyId, parsed.accountHeight);
+    accountFrameKeysByHex.set(primaryKey.toString('hex'), primaryKey);
+  }
+
+  if (accountFrameIndexKeys.length === 0) {
+    // Legacy frame DBs written before the runtime-height index still need one
+    // value scan to age out old account frames. Newly written rows prune by key.
+    for (const key of await listKeys(db, keyFrameDbAccountFramePrefix())) {
+      const raw = await readRawOrNull(db, key);
+      if (!raw) continue;
+      const record = decodeBuffer<StoredAccountFrameRecord>(raw);
+      if (Math.max(0, Math.floor(Number(record.runtimeHeight ?? 0))) <= cutoff) {
+        accountFrameKeysByHex.set(key.toString('hex'), key);
+      }
     }
   }
+  const accountFrameKeysToDelete = Array.from(accountFrameKeysByHex.values());
   removedBytes += await deleteKeys(db, accountFrameKeysToDelete);
   removedKeys += accountFrameKeysToDelete.length;
 
@@ -2009,8 +2099,9 @@ export const saveRuntimeFrameToStorage = async (options: {
       entityInputs: options.currentFrameOutputs ?? [],
     }),
   );
-  const puts = buildDocPuts(options.env, touched);
-  const bookDels = await buildBookDeletions(db, options.env, touched.touchedBookEntities);
+  const replicaLookup = buildReplicaLookup(options.env);
+  const puts = buildDocPuts(options.env, touched, replicaLookup);
+  const bookDels = await buildBookDeletions(db, options.env, touched.touchedBookEntities, replicaLookup);
 
   const diffBuildStartedAt = options.getPerfMs();
   const diff = buildDiffRecord(options.env.height, puts, bookDels);
@@ -2046,8 +2137,8 @@ export const saveRuntimeFrameToStorage = async (options: {
     .filter((ref): ref is Extract<StorageDocRef, { family: 'account' }> => ref.family === 'account')
     .map((ref) => ({ entityId: ref.entityId, counterpartyId: ref.counterpartyId }));
   const touchedBookEntities = Array.from(touched.touchedBookEntities.values()).sort();
-  const auditHashes = prepareStorageAuditStateHashes(options.env, touchedEntities, previousFrame);
-  const canonicalHashes = prepareStorageCanonicalStateHashes(options.env, touchedEntities, previousFrame);
+  const auditHashes = prepareStorageAuditStateHashes(options.env, touchedEntities, previousFrame, replicaLookup);
+  const canonicalHashes = prepareStorageCanonicalStateHashes(options.env, touchedEntities, previousFrame, replicaLookup);
   const frameRecordBase: StorageFrameRecord = {
     height: options.env.height,
     timestamp: options.env.timestamp,
