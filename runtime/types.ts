@@ -1,4 +1,4 @@
-import type { OrderbookExtState } from './orderbook';
+import type { BookState, OrderbookExtState } from './orderbook';
 import type { SwapKey } from './swap-keys';
 import type { Level } from 'level';
 import type { RuntimeP2P } from './networking/p2p';
@@ -1284,7 +1284,18 @@ export type RuntimeFrameDbRecord =
       accountHeight: number;
       source: 'ackCommit' | 'peerCommit';
       frame: AccountFrame;
+    }
+  | {
+      kind: 'bookUpdate';
+      entityId: string;
+      pairId: string;
+      book: BookState | null;
     };
+
+export type RuntimeStorageOverlayRecord =
+  | { family: 'entity'; entityId: string }
+  | { family: 'account'; entityId: string; counterpartyId: string }
+  | { family: 'book'; entityId: string; pairId: string; deleted?: boolean };
 
 export type AccountSettleAction = {
   type: 'propose' | 'update' | 'approve' | 'execute' | 'reject';
@@ -2058,6 +2069,7 @@ export interface Env {
     };
     pendingAuditEvents?: Array<Record<string, unknown>>;
     pendingFrameDbRecords?: RuntimeFrameDbRecord[];
+    pendingStorageOverlay?: RuntimeStorageOverlayRecord[];
     cleanLogs?: string[];
     routeDeferState?: Map<string, {
       warnAt: number;

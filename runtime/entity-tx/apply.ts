@@ -9,6 +9,7 @@ import { DEFAULT_SOFT_LIMIT, DEFAULT_HARD_LIMIT, DEFAULT_MAX_FEE } from '../type
 import { DEBUG, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
 import { announceLocalEntityProfile } from '../networking/gossip-helper';
+import { markStorageAccountDirty, markStorageEntityDirty } from '../env-events';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
 import {
   handleAccountInput,
@@ -417,6 +418,8 @@ export const applyEntityTx = async (
           // SYMMETRIC: Both sides increment via workspace status check in j-events.ts
           onChainSettlementNonce: 0,
         });
+        markStorageAccountDirty(env, newState.entityId, counterpartyId);
+        markStorageEntityDirty(env, newState.entityId);
       }
 
       // STEP 2: Add setup txs ONLY on LEFT side (Channel.ts pattern)

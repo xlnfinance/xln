@@ -36,6 +36,7 @@ import type {
   RebalanceRequestFeeState,
   RuntimeInput,
   RuntimeFrameDbRecord,
+  RuntimeStorageOverlayRecord,
   SwapOffer,
 } from '../types';
 import type { CrontabState } from '../crontab-types';
@@ -188,6 +189,13 @@ export type StorageDocRef =
   | { family: 'book'; entityId: string; pairId: string };
 
 type StorageAccountRef = Extract<StorageDocRef, { family: 'account' }>;
+type StorageBookRef = Extract<StorageDocRef, { family: 'book' }>;
+type TouchedStorageRefs = {
+  touchedEntities: Set<string>;
+  touchedAccounts: Map<string, StorageAccountRef>;
+  touchedBooks: Map<string, StorageBookRef>;
+  touchedBookEntities: Set<string>;
+};
 
 export type StorageFrameRecord = {
   height: number;
@@ -334,6 +342,7 @@ const FRAME_DB_ACCOUNT_FRAME = 0x01;
 const FRAME_DB_RUNTIME_ACTIVITY = 0x02;
 const FRAME_DB_ENTITY_ACTIVITY = 0x03;
 const FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME = 0x04;
+const FRAME_DB_ORDERBOOK_COMMIT = 0x05;
 const ZERO_FRAME_HASH = `0x${'00'.repeat(32)}`;
 
 type StorageCodecName = 'json' | 'msgpack';
@@ -389,6 +398,24 @@ const decodeBuffer = <T>(buffer: Buffer): T => {
   }
   return decodeWithCodec<T>(codec, buffer.subarray(1));
 };
+
+type StorageDocEncodedValue = { buffer: Buffer; hash: string; hashBytes: Buffer };
+const storageDocEncodeCache = new WeakMap<object, StorageDocEncodedValue>();
+
+const encodeStorageDocValue = (doc: StorageDoc): StorageDocEncodedValue => {
+  const cached = storageDocEncodeCache.get(doc);
+  if (cached) return cached;
+  const buffer = encodeBuffer(doc.value);
+  const hash = hashBuffer(buffer);
+  const encoded = { buffer, hash, hashBytes: Buffer.from(hash.slice(2), 'hex') };
+  storageDocEncodeCache.set(doc, encoded);
+  return encoded;
+};
+
+export const invalidateStorageDocHashCache = (doc: StorageDoc): void => {
+  storageDocEncodeCache.delete(doc);
+};
+
 const withProp = <K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> =>
   value === undefined ? {} : ({ [key]: value } as Record<K, V>);
 
@@ -480,6 +507,9 @@ const keyFrameDbRuntimeActivity = (height: number): Buffer =>
   Buffer.concat([Buffer.from([FRAME_DB_RUNTIME_ACTIVITY]), encodeHeight(height)]);
 const keyFrameDbEntityActivity = (entityId: string, height: number): Buffer =>
   Buffer.concat([Buffer.from([FRAME_DB_ENTITY_ACTIVITY]), hexBytes(entityId), encodeHeight(height)]);
+const keyFrameDbOrderbookCommit = (runtimeHeight: number, entityId: string, pairId: string): Buffer =>
+  Buffer.concat([Buffer.from([FRAME_DB_ORDERBOOK_COMMIT]), encodeHeight(runtimeHeight), hexBytes(entityId), textBytes(pairId)]);
+const keyFrameDbOrderbookCommitPrefix = (): Buffer => Buffer.from([FRAME_DB_ORDERBOOK_COMMIT]);
 const keyFrameDbAccountFramePrefix = (entityId?: string, counterpartyId?: string): Buffer => {
   if (entityId && counterpartyId) return Buffer.concat([Buffer.from([FRAME_DB_ACCOUNT_FRAME]), hexBytes(entityId), hexBytes(counterpartyId)]);
   if (entityId) return Buffer.concat([Buffer.from([FRAME_DB_ACCOUNT_FRAME]), hexBytes(entityId)]);
@@ -1130,15 +1160,17 @@ const addAccountPairRefs = (target: Map<string, StorageDocRef>, entityId: string
   addAccountRef(target, counterpartyId, entityId);
 };
 
-const touchesBooks = (input: EntityInput): boolean =>
-  (input.entityTxs ?? []).some((tx) =>
-    tx.type === 'placeSwapOffer' ||
-    tx.type === 'resolveSwap' ||
-    tx.type === 'cancelSwap' ||
-    tx.type === 'proposeCancelSwap' ||
-    tx.type === 'initOrderbookExt' ||
-    tx.type === 'accountInput',
-  );
+const addBookRef = (target: Map<string, StorageBookRef>, entityId: string, pairId: string): void => {
+  const normalizedEntityId = normalizeEntityId(entityId);
+  const normalizedPairId = String(pairId || '').trim();
+  if (!normalizedEntityId || !normalizedPairId) return;
+  const ref: StorageBookRef = {
+    family: 'book',
+    entityId: normalizedEntityId,
+    pairId: normalizedPairId,
+  };
+  target.set(docRefKey(ref), ref);
+};
 
 const collectJEventAccountRefs = (
   entityId: string,
@@ -1171,13 +1203,10 @@ const collectJEventAccountRefs = (
   }
 };
 
-const collectTouchedRefs = (appliedRuntimeInput: RuntimeInput): {
-  touchedEntities: Set<string>;
-  touchedAccounts: Map<string, StorageAccountRef>;
-  touchedBookEntities: Set<string>;
-} => {
+const collectTouchedRefs = (appliedRuntimeInput: RuntimeInput): TouchedStorageRefs => {
   const touchedEntities = new Set<string>();
   const touchedAccounts = new Map<string, StorageAccountRef>();
+  const touchedBooks = new Map<string, StorageBookRef>();
   const touchedBookEntities = new Set<string>();
 
   for (const runtimeTx of appliedRuntimeInput.runtimeTxs ?? []) {
@@ -1189,7 +1218,6 @@ const collectTouchedRefs = (appliedRuntimeInput: RuntimeInput): {
   for (const input of appliedRuntimeInput.entityInputs ?? []) {
     const entityId = normalizeEntityId(input.entityId);
     touchedEntities.add(entityId);
-    if (touchesBooks(input)) touchedBookEntities.add(entityId);
 
     for (const tx of input.entityTxs ?? []) {
       switch (tx.type) {
@@ -1252,43 +1280,85 @@ const collectTouchedRefs = (appliedRuntimeInput: RuntimeInput): {
     }
   }
 
-  return { touchedEntities, touchedAccounts, touchedBookEntities };
+  return { touchedEntities, touchedAccounts, touchedBooks, touchedBookEntities };
 };
 
 const mergeTouchedRefs = (
-  base: ReturnType<typeof collectTouchedRefs>,
-  extra: ReturnType<typeof collectTouchedRefs>,
-): ReturnType<typeof collectTouchedRefs> => {
+  base: TouchedStorageRefs,
+  extra: TouchedStorageRefs,
+): TouchedStorageRefs => {
   for (const entityId of extra.touchedEntities) base.touchedEntities.add(entityId);
   for (const [key, ref] of extra.touchedAccounts) base.touchedAccounts.set(key, ref);
+  for (const [key, ref] of extra.touchedBooks) base.touchedBooks.set(key, ref);
   for (const entityId of extra.touchedBookEntities) base.touchedBookEntities.add(entityId);
   return base;
 };
 
 const collectTouchedRefsFromFrameDbRecords = (
   records: readonly RuntimeFrameDbRecord[] | undefined,
-): ReturnType<typeof collectTouchedRefs> => {
+): TouchedStorageRefs => {
   const touchedEntities = new Set<string>();
   const touchedAccounts = new Map<string, StorageAccountRef>();
+  const touchedBooks = new Map<string, StorageBookRef>();
   const touchedBookEntities = new Set<string>();
 
   for (const record of records ?? []) {
-    if (record.kind !== 'accountFrame') continue;
-    const entityId = normalizeEntityId(record.entityId);
-    const counterpartyId = normalizeEntityId(record.counterpartyId);
-    if (!entityId || !counterpartyId) continue;
+    if (record.kind === 'accountFrame') {
+      const entityId = normalizeEntityId(record.entityId);
+      const counterpartyId = normalizeEntityId(record.counterpartyId);
+      if (!entityId || !counterpartyId) continue;
 
-    touchedEntities.add(entityId);
-    touchedEntities.add(counterpartyId);
-    addAccountPairRefs(touchedAccounts, entityId, counterpartyId);
+      touchedEntities.add(entityId);
+      touchedEntities.add(counterpartyId);
+      addAccountPairRefs(touchedAccounts, entityId, counterpartyId);
+      continue;
+    }
+
   }
 
-  return { touchedEntities, touchedAccounts, touchedBookEntities };
+  return { touchedEntities, touchedAccounts, touchedBooks, touchedBookEntities };
+};
+
+const collectTouchedRefsFromStorageOverlay = (
+  records: readonly RuntimeStorageOverlayRecord[] | undefined,
+): TouchedStorageRefs => {
+  const touchedEntities = new Set<string>();
+  const touchedAccounts = new Map<string, StorageAccountRef>();
+  const touchedBooks = new Map<string, StorageBookRef>();
+  const touchedBookEntities = new Set<string>();
+
+  for (const record of records ?? []) {
+    if (record.family === 'entity') {
+      const entityId = normalizeEntityId(record.entityId);
+      if (entityId) touchedEntities.add(entityId);
+      continue;
+    }
+
+    if (record.family === 'account') {
+      const entityId = normalizeEntityId(record.entityId);
+      const counterpartyId = normalizeEntityId(record.counterpartyId);
+      if (!entityId || !counterpartyId) continue;
+      touchedEntities.add(entityId);
+      addAccountRef(touchedAccounts, entityId, counterpartyId);
+      continue;
+    }
+
+    if (record.family === 'book') {
+      const entityId = normalizeEntityId(record.entityId);
+      const pairId = String(record.pairId || '').trim();
+      if (!entityId || !pairId) continue;
+      touchedEntities.add(entityId);
+      touchedBookEntities.add(entityId);
+      addBookRef(touchedBooks, entityId, pairId);
+    }
+  }
+
+  return { touchedEntities, touchedAccounts, touchedBooks, touchedBookEntities };
 };
 
 const buildDocPuts = (
   env: Env,
-  touched: ReturnType<typeof collectTouchedRefs>,
+  touched: TouchedStorageRefs,
   replicaLookup = buildReplicaLookup(env),
 ): StorageDoc[] => {
   const puts: StorageDoc[] = [];
@@ -1315,35 +1385,26 @@ const buildDocPuts = (
     });
   }
 
-  for (const entityId of touched.touchedBookEntities) {
-    const replica = findReplicaForEntity(env, entityId, replicaLookup);
-    const books = replica?.state.orderbookExt?.books;
-    if (!books) continue;
-    for (const [pairId, book] of books.entries()) {
-      puts.push({ family: 'book', entityId, pairId, value: book });
-    }
+  for (const ref of touched.touchedBooks.values()) {
+    const replica = findReplicaForEntity(env, ref.entityId, replicaLookup);
+    const book = replica?.state.orderbookExt?.books?.get(ref.pairId);
+    if (!book) continue;
+    puts.push({ family: 'book', entityId: ref.entityId, pairId: ref.pairId, value: book });
   }
 
   return puts;
 };
 
-const buildBookDeletions = async (
-  db: RuntimeDbLike,
+const buildBookDeletions = (
   env: Env,
-  touchedBookEntities: ReadonlySet<string>,
+  touchedBooks: ReadonlyMap<string, StorageBookRef>,
   replicaLookup = buildReplicaLookup(env),
-): Promise<StorageDocRef[]> => {
+): StorageDocRef[] => {
   const dels: StorageDocRef[] = [];
-  for (const entityId of touchedBookEntities) {
-    const liveKeys = await listKeys(db, keyLiveBookPrefix(entityId));
-    if (liveKeys.length === 0) continue;
-    const replica = findReplicaForEntity(env, entityId, replicaLookup);
-    const currentPairs = new Set(Array.from(replica?.state.orderbookExt?.books?.keys?.() ?? []).map(String));
-    for (const key of liveKeys) {
-      const parsed = parseLiveBookKey(key);
-      if (!currentPairs.has(parsed.pairId)) {
-        dels.push({ family: 'book', entityId, pairId: parsed.pairId });
-      }
+  for (const ref of touchedBooks.values()) {
+    const replica = findReplicaForEntity(env, ref.entityId, replicaLookup);
+    if (!replica?.state.orderbookExt?.books?.has(ref.pairId)) {
+      dels.push(ref);
     }
   }
   return dels;
@@ -1377,8 +1438,6 @@ const docRefCellKey = (ref: StorageDocRef): string => {
 
 const keyLiveDocHash = (ref: StorageDocRef): Buffer =>
   Buffer.concat([Buffer.from([KEY_LIVE_DOC_HASH]), liveKeyForRef(ref)]);
-
-const hashValueBuffer = (value: Buffer): Buffer => Buffer.from(hashBuffer(value).slice(2), 'hex');
 
 const readEntityHashDoc = async (db: RuntimeDbLike, entityId: string): Promise<StorageEntityHashDoc | null> =>
   readJsonOrNull<StorageEntityHashDoc>(db, keyLiveEntityHash(entityId));
@@ -1476,12 +1535,11 @@ const prepareStorageStateHashes = async (options: {
 
   for (const doc of options.puts) {
     const ref = docRefForDoc(doc);
-    const valueBuffer = encodeBuffer(doc.value);
-    const valueHash = hashBuffer(valueBuffer);
-    docValueBuffers.set(docValueKey(doc), valueBuffer);
-    docHashPuts.push({ key: keyLiveDocHash(ref), value: hashValueBuffer(valueBuffer) });
+    const encoded = encodeStorageDocValue(doc);
+    docValueBuffers.set(docValueKey(doc), encoded.buffer);
+    docHashPuts.push({ key: keyLiveDocHash(ref), value: encoded.hashBytes });
     await updateEntityCells(ref.entityId, (cells) => {
-      cells.set(docRefCellKey(ref), valueHash);
+      cells.set(docRefCellKey(ref), encoded.hash);
     });
   }
 
@@ -1526,6 +1584,11 @@ type StoredAccountFrameRecord = Extract<RuntimeFrameDbRecord, { kind: 'accountFr
   timestamp: number;
 };
 
+type StoredOrderbookCommitRecord = Extract<RuntimeFrameDbRecord, { kind: 'bookUpdate' }> & {
+  runtimeHeight: number;
+  timestamp: number;
+};
+
 type StoredRuntimeActivityRecord = {
   kind: 'runtimeActivity';
   height: number;
@@ -1534,6 +1597,7 @@ type StoredRuntimeActivityRecord = {
   touchedEntities: string[];
   touchedAccounts: Array<{ entityId: string; counterpartyId: string }>;
   touchedBookEntities: string[];
+  touchedBooks?: Array<{ entityId: string; pairId: string }>;
 };
 
 type StoredEntityActivityRecord = {
@@ -1575,29 +1639,58 @@ const buildFrameDbPuts = (options: {
   }
 
   const frameCountsByEntity = new Map<string, number>();
+  const orderbookCountsByEntity = new Map<string, number>();
+  const touchedBooksByKey = new Map<string, { entityId: string; pairId: string }>();
   for (const record of options.frameDbRecords ?? []) {
-    if (record.kind !== 'accountFrame') continue;
-    const entityId = normalizeEntityId(record.entityId);
-    const counterpartyId = normalizeEntityId(record.counterpartyId);
-    const accountHeight = Number(record.accountHeight || record.frame?.height || 0);
-    if (!entityId || !counterpartyId || !Number.isFinite(accountHeight) || accountHeight <= 0) continue;
-    const stored: StoredAccountFrameRecord = {
-      ...record,
-      entityId,
-      counterpartyId,
-      accountHeight: Math.floor(accountHeight),
-      runtimeHeight: options.height,
-      timestamp: options.timestamp,
-    };
-    puts.push({
-      key: keyFrameDbAccountFrame(entityId, counterpartyId, stored.accountHeight),
-      value: encodeBuffer(stored),
-    });
-    puts.push({
-      key: keyFrameDbAccountFrameByRuntime(options.height, entityId, counterpartyId, stored.accountHeight),
-      value: Buffer.alloc(0),
-    });
-    frameCountsByEntity.set(entityId, (frameCountsByEntity.get(entityId) ?? 0) + 1);
+    if (record.kind === 'accountFrame') {
+      const entityId = normalizeEntityId(record.entityId);
+      const counterpartyId = normalizeEntityId(record.counterpartyId);
+      const accountHeight = Number(record.accountHeight || record.frame?.height || 0);
+      if (!entityId || !counterpartyId || !Number.isFinite(accountHeight) || accountHeight <= 0) continue;
+      const stored: StoredAccountFrameRecord = {
+        ...record,
+        entityId,
+        counterpartyId,
+        accountHeight: Math.floor(accountHeight),
+        runtimeHeight: options.height,
+        timestamp: options.timestamp,
+      };
+      puts.push({
+        key: keyFrameDbAccountFrame(entityId, counterpartyId, stored.accountHeight),
+        value: encodeBuffer(stored),
+      });
+      puts.push({
+        key: keyFrameDbAccountFrameByRuntime(options.height, entityId, counterpartyId, stored.accountHeight),
+        value: Buffer.alloc(0),
+      });
+      frameCountsByEntity.set(entityId, (frameCountsByEntity.get(entityId) ?? 0) + 1);
+      continue;
+    }
+
+    if (record.kind === 'bookUpdate') {
+      const entityId = normalizeEntityId(record.entityId);
+      const pairId = String(record.pairId || '').trim();
+      if (!entityId || !pairId) continue;
+      const stored: StoredOrderbookCommitRecord = {
+        kind: 'bookUpdate',
+        entityId,
+        pairId,
+        book: record.book ? structuredClone(record.book) : null,
+        runtimeHeight: options.height,
+        timestamp: options.timestamp,
+      };
+      puts.push({
+        key: keyFrameDbOrderbookCommit(options.height, entityId, pairId),
+        value: encodeBuffer(stored),
+      });
+      orderbookCountsByEntity.set(entityId, (orderbookCountsByEntity.get(entityId) ?? 0) + 1);
+      touchedBooksByKey.set(`${entityId}:${pairId}`, { entityId, pairId });
+    }
+  }
+
+  if (touchedBooksByKey.size > 0) {
+    runtimeActivity.touchedBooks = Array.from(touchedBooksByKey.values())
+      .sort((left, right) => left.entityId.localeCompare(right.entityId) || left.pairId.localeCompare(right.pairId));
   }
 
   for (const entityId of options.touchedEntities) {
@@ -1610,7 +1703,7 @@ const buildFrameDbPuts = (options: {
       entityId: normalized,
       touchedAccounts: options.touchedAccounts.filter((account) => normalizeEntityId(account.entityId) === normalized),
       accountFrameCount: frameCountsByEntity.get(normalized) ?? 0,
-      logCount: logCountsByEntity.get(normalized) ?? 0,
+      logCount: (logCountsByEntity.get(normalized) ?? 0) + (orderbookCountsByEntity.get(normalized) ?? 0),
     };
     puts.push({ key: keyFrameDbEntityActivity(normalized, options.height), value: encodeBuffer(entityActivity) });
   }
@@ -1657,6 +1750,11 @@ const pruneFrameDbBeforeRuntimeHeight = async (
     .filter((key) => decodeHeight(key, 33) <= cutoff);
   removedBytes += await deleteKeys(db, entityActivityKeys);
   removedKeys += entityActivityKeys.length;
+
+  const orderbookCommitKeys = (await listKeys(db, keyFrameDbOrderbookCommitPrefix()))
+    .filter((key) => decodeHeight(key, 1) <= cutoff);
+  removedBytes += await deleteKeys(db, orderbookCommitKeys);
+  removedKeys += orderbookCommitKeys.length;
 
   const accountFrameKeysByHex = new Map<string, Buffer>();
   const accountFrameIndexKeys = await listKeysRange(
@@ -2098,6 +2196,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   getRuntimeDb: (env: Env) => RuntimeDbLike;
   tryOpenFrameDb: (env: Env) => Promise<boolean>;
   getFrameDb: (env: Env) => RuntimeFrameDbLike;
+  storageOverlayRecords?: RuntimeStorageOverlayRecord[];
   rotateEpochDb?: (env: Env, snapshotHeight: number) => Promise<void>;
 } & PerfDeps): Promise<void> => {
   const config = runtimeConfigFromEnv(options.env);
@@ -2123,9 +2222,10 @@ export const saveRuntimeFrameToStorage = async (options: {
     ),
     collectTouchedRefsFromFrameDbRecords(options.frameDbRecords),
   );
+  mergeTouchedRefs(touched, collectTouchedRefsFromStorageOverlay(options.storageOverlayRecords));
   const replicaLookup = buildReplicaLookup(options.env);
   const puts = buildDocPuts(options.env, touched, replicaLookup);
-  const bookDels = await buildBookDeletions(db, options.env, touched.touchedBookEntities, replicaLookup);
+  const bookDels = buildBookDeletions(options.env, touched.touchedBooks, replicaLookup);
 
   const diffBuildStartedAt = options.getPerfMs();
   const diff = buildDiffRecord(options.env.height, puts, bookDels);
