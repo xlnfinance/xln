@@ -1265,6 +1265,27 @@ const mergeTouchedRefs = (
   return base;
 };
 
+const collectTouchedRefsFromFrameDbRecords = (
+  records: readonly RuntimeFrameDbRecord[] | undefined,
+): ReturnType<typeof collectTouchedRefs> => {
+  const touchedEntities = new Set<string>();
+  const touchedAccounts = new Map<string, StorageAccountRef>();
+  const touchedBookEntities = new Set<string>();
+
+  for (const record of records ?? []) {
+    if (record.kind !== 'accountFrame') continue;
+    const entityId = normalizeEntityId(record.entityId);
+    const counterpartyId = normalizeEntityId(record.counterpartyId);
+    if (!entityId || !counterpartyId) continue;
+
+    touchedEntities.add(entityId);
+    touchedEntities.add(counterpartyId);
+    addAccountPairRefs(touchedAccounts, entityId, counterpartyId);
+  }
+
+  return { touchedEntities, touchedAccounts, touchedBookEntities };
+};
+
 const buildDocPuts = (
   env: Env,
   touched: ReturnType<typeof collectTouchedRefs>,
@@ -2093,11 +2114,14 @@ export const saveRuntimeFrameToStorage = async (options: {
 
   const appliedRuntimeInput = options.currentFrameInput ?? { runtimeTxs: [], entityInputs: [] };
   const touched = mergeTouchedRefs(
-    collectTouchedRefs(appliedRuntimeInput),
-    collectTouchedRefs({
-      runtimeTxs: [],
-      entityInputs: options.currentFrameOutputs ?? [],
-    }),
+    mergeTouchedRefs(
+      collectTouchedRefs(appliedRuntimeInput),
+      collectTouchedRefs({
+        runtimeTxs: [],
+        entityInputs: options.currentFrameOutputs ?? [],
+      }),
+    ),
+    collectTouchedRefsFromFrameDbRecords(options.frameDbRecords),
   );
   const replicaLookup = buildReplicaLookup(options.env);
   const puts = buildDocPuts(options.env, touched, replicaLookup);
