@@ -18,6 +18,7 @@ import {
   removeCommittedTxsFromMempool,
   txFingerprint,
 } from './state-helpers';
+import { recordOrderbookPairUpdate } from './env-events';
 import { LIMITS } from './constants';
 import { signAccountFrame as signFrame, verifyAccountSignature as verifyFrame } from './account-crypto';
 import {
@@ -1475,6 +1476,11 @@ export const applyEntityFrame = async (
     const ext = currentEntityState.orderbookExt as OrderbookExtState;
     for (const { pairId, book } of matchResult.bookUpdates) {
       replaceOrderbookPair(ext, pairId, book);
+      recordOrderbookPairUpdate(env, {
+        entityId: currentEntityState.entityId,
+        pairId,
+        book,
+      });
     }
   }
 
@@ -1499,6 +1505,11 @@ export const applyEntityFrame = async (
       const ext = currentEntityState.orderbookExt as OrderbookExtState;
       for (const { pairId, book } of cancelResult.bookUpdates) {
         replaceOrderbookPair(ext, pairId, book);
+        recordOrderbookPairUpdate(env, {
+          entityId: currentEntityState.entityId,
+          pairId,
+          book,
+        });
       }
     } else {
       // Fallback: counterparty resolves cancel directly when no orderbook extension is configured.

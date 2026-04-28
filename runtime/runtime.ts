@@ -73,8 +73,10 @@ import {
   attachEventEmitters,
   clearPendingAuditEvents,
   dropPendingFrameDbRecords,
+  dropPendingStorageOverlay,
   flushPendingAuditEvents,
   peekPendingFrameDbRecords,
+  peekPendingStorageOverlay,
   setAccountFrameHistoryView,
 } from './env-events';
 import {
@@ -4239,6 +4241,7 @@ export const saveEnvToDB = async (
     throw new Error('REPLAY_INVARIANT_FAILED: saveEnvToDB called during replay');
   }
   const pendingFrameDbRecords = peekPendingFrameDbRecords(env);
+  const pendingStorageOverlay = peekPendingStorageOverlay(env);
   await saveRuntimeFrameToStorage({
     env,
     tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'current'),
@@ -4249,10 +4252,12 @@ export const saveEnvToDB = async (
     getPerfMs,
     formatPerfMs,
     frameDbRecords: pendingFrameDbRecords,
+    storageOverlayRecords: pendingStorageOverlay,
     ...(currentFrameInput === undefined ? {} : { currentFrameInput }),
     ...(currentFrameOutputs === undefined ? {} : { currentFrameOutputs }),
   });
   dropPendingFrameDbRecords(env, pendingFrameDbRecords.length);
+  dropPendingStorageOverlay(env, pendingStorageOverlay.length);
   if (runtimeIsBrowser && typeof BroadcastChannel !== 'undefined' && typeof env.runtimeId === 'string' && env.runtimeId.length > 0) {
     const runtimeSyncChannel = new BroadcastChannel('xln-runtime-sync');
     runtimeSyncChannel.postMessage({

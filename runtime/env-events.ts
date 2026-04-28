@@ -9,7 +9,8 @@
  *   env.emit('FrameCommitted', { entityId, height, hash });
  */
 
-import type { AccountFrame, AccountMachine, Env, LogCategory, FrameLogEntry, RuntimeFrameDbRecord } from './types';
+import type { AccountFrame, AccountMachine, Env, LogCategory, FrameLogEntry, RuntimeFrameDbRecord, RuntimeStorageOverlayRecord } from './types';
+import type { BookState } from './orderbook';
 
 const getLogState = (env: Env) => {
   if (!env.runtimeState) env.runtimeState = {};
@@ -104,6 +105,46 @@ const getPendingFrameDbRecords = (env: Env): RuntimeFrameDbRecord[] => {
   return env.runtimeState.pendingFrameDbRecords;
 };
 
+const getPendingStorageOverlay = (env: Env): RuntimeStorageOverlayRecord[] => {
+  if (!env.runtimeState) env.runtimeState = {};
+  if (!env.runtimeState.pendingStorageOverlay) env.runtimeState.pendingStorageOverlay = [];
+  return env.runtimeState.pendingStorageOverlay;
+};
+
+export const markStorageEntityDirty = (env: Env, entityId: string): void => {
+  const normalized = String(entityId || '').toLowerCase();
+  if (!normalized) return;
+  getPendingStorageOverlay(env).push({ family: 'entity', entityId: normalized });
+};
+
+export const markStorageAccountDirty = (env: Env, entityId: string, counterpartyId: string): void => {
+  const normalizedEntityId = String(entityId || '').toLowerCase();
+  const normalizedCounterpartyId = String(counterpartyId || '').toLowerCase();
+  if (!normalizedEntityId || !normalizedCounterpartyId) return;
+  getPendingStorageOverlay(env).push({
+    family: 'account',
+    entityId: normalizedEntityId,
+    counterpartyId: normalizedCounterpartyId,
+  });
+};
+
+export const markStorageBookDirty = (
+  env: Env,
+  entityId: string,
+  pairId: string,
+  deleted = false,
+): void => {
+  const normalizedEntityId = String(entityId || '').toLowerCase();
+  const normalizedPairId = String(pairId || '').trim();
+  if (!normalizedEntityId || !normalizedPairId) return;
+  getPendingStorageOverlay(env).push({
+    family: 'book',
+    entityId: normalizedEntityId,
+    pairId: normalizedPairId,
+    ...(deleted ? { deleted: true } : {}),
+  });
+};
+
 export const ACCOUNT_FRAME_HISTORY_VIEW_LIMIT = 50;
 
 const cloneFrameForView = (frame: AccountFrame): AccountFrame => structuredClone(frame);
@@ -157,6 +198,27 @@ export const recordAccountFrameHistory = (
     source: record.source,
     frame: structuredClone(record.frame),
   });
+  markStorageAccountDirty(env, entityId, counterpartyId);
+};
+
+export const recordOrderbookPairUpdate = (
+  env: Env,
+  record: {
+    entityId: string;
+    pairId: string;
+    book?: BookState | null;
+  },
+): void => {
+  const entityId = String(record.entityId || '').toLowerCase();
+  const pairId = String(record.pairId || '').trim();
+  if (!entityId || !pairId) return;
+  getPendingFrameDbRecords(env).push({
+    kind: 'bookUpdate',
+    entityId,
+    pairId,
+    book: record.book ? structuredClone(record.book) : null,
+  });
+  markStorageBookDirty(env, entityId, pairId, !record.book);
 };
 
 export const peekPendingFrameDbRecords = (env: Env): RuntimeFrameDbRecord[] =>
@@ -164,8 +226,19 @@ export const peekPendingFrameDbRecords = (env: Env): RuntimeFrameDbRecord[] =>
     ? env.runtimeState.pendingFrameDbRecords.map((record) => structuredClone(record))
     : [];
 
+export const peekPendingStorageOverlay = (env: Env): RuntimeStorageOverlayRecord[] =>
+  Array.isArray(env.runtimeState?.pendingStorageOverlay)
+    ? env.runtimeState.pendingStorageOverlay.map((record) => ({ ...record }))
+    : [];
+
 export const dropPendingFrameDbRecords = (env: Env, count: number): void => {
   const pending = env.runtimeState?.pendingFrameDbRecords;
+  if (!Array.isArray(pending) || pending.length === 0) return;
+  pending.splice(0, Math.max(0, Math.floor(count)));
+};
+
+export const dropPendingStorageOverlay = (env: Env, count: number): void => {
+  const pending = env.runtimeState?.pendingStorageOverlay;
   if (!Array.isArray(pending) || pending.length === 0) return;
   pending.splice(0, Math.max(0, Math.floor(count)));
 };
