@@ -9,7 +9,7 @@
  *   env.emit('FrameCommitted', { entityId, height, hash });
  */
 
-import type { AccountFrame, AccountMachine, Env, LogCategory, FrameLogEntry, RuntimeFrameDbRecord, RuntimeStorageOverlayRecord } from './types';
+import type { AccountFrame, AccountMachine, Env, LogCategory, FrameLogEntry, RuntimeFrameDbRecord, RuntimeOverlayRecord } from './types';
 import type { BookState } from './orderbook';
 
 const getLogState = (env: Env) => {
@@ -105,26 +105,43 @@ const getPendingFrameDbRecords = (env: Env): RuntimeFrameDbRecord[] => {
   return env.runtimeState.pendingFrameDbRecords;
 };
 
-const getPendingStorageOverlay = (env: Env): RuntimeStorageOverlayRecord[] => {
-  if (!env.runtimeState) env.runtimeState = {};
-  if (!env.runtimeState.pendingStorageOverlay) env.runtimeState.pendingStorageOverlay = [];
-  return env.runtimeState.pendingStorageOverlay;
+const getOverlay = (env: Env): RuntimeOverlayRecord[] => {
+  if (!env.overlay) env.overlay = [];
+  return env.overlay;
+};
+
+const overlayKey = (record: RuntimeOverlayRecord): string => {
+  if (record.family === 'entity') return `e:${record.entityId}`;
+  if (record.family === 'account') return `a:${record.entityId}:${record.counterpartyId}`;
+  return `b:${record.entityId}:${record.pairId}`;
+};
+
+const pushOverlayRecord = (env: Env, record: RuntimeOverlayRecord): void => {
+  const overlay = getOverlay(env);
+  const key = overlayKey(record);
+  const existingIndex = overlay.findIndex((candidate) => overlayKey(candidate) === key);
+  if (existingIndex >= 0) {
+    overlay[existingIndex] = record;
+    return;
+  }
+  overlay.push(record);
 };
 
 export const markStorageEntityDirty = (env: Env, entityId: string): void => {
   const normalized = String(entityId || '').toLowerCase();
   if (!normalized) return;
-  getPendingStorageOverlay(env).push({ family: 'entity', entityId: normalized });
+  pushOverlayRecord(env, { family: 'entity', entityId: normalized, height: env.height });
 };
 
 export const markStorageAccountDirty = (env: Env, entityId: string, counterpartyId: string): void => {
   const normalizedEntityId = String(entityId || '').toLowerCase();
   const normalizedCounterpartyId = String(counterpartyId || '').toLowerCase();
   if (!normalizedEntityId || !normalizedCounterpartyId) return;
-  getPendingStorageOverlay(env).push({
+  pushOverlayRecord(env, {
     family: 'account',
     entityId: normalizedEntityId,
     counterpartyId: normalizedCounterpartyId,
+    height: env.height,
   });
 };
 
@@ -137,10 +154,11 @@ export const markStorageBookDirty = (
   const normalizedEntityId = String(entityId || '').toLowerCase();
   const normalizedPairId = String(pairId || '').trim();
   if (!normalizedEntityId || !normalizedPairId) return;
-  getPendingStorageOverlay(env).push({
+  pushOverlayRecord(env, {
     family: 'book',
     entityId: normalizedEntityId,
     pairId: normalizedPairId,
+    height: env.height,
     ...(deleted ? { deleted: true } : {}),
   });
 };
@@ -234,9 +252,9 @@ export const peekPendingFrameDbRecords = (env: Env): RuntimeFrameDbRecord[] =>
     ? env.runtimeState.pendingFrameDbRecords.map((record) => structuredClone(record))
     : [];
 
-export const peekPendingStorageOverlay = (env: Env): RuntimeStorageOverlayRecord[] =>
-  Array.isArray(env.runtimeState?.pendingStorageOverlay)
-    ? env.runtimeState.pendingStorageOverlay.map((record) => ({ ...record }))
+export const peekOverlay = (env: Env): RuntimeOverlayRecord[] =>
+  Array.isArray(env.overlay)
+    ? env.overlay.map((record) => ({ ...record }))
     : [];
 
 export const dropPendingFrameDbRecords = (env: Env, count: number): void => {
@@ -245,8 +263,8 @@ export const dropPendingFrameDbRecords = (env: Env, count: number): void => {
   pending.splice(0, Math.max(0, Math.floor(count)));
 };
 
-export const dropPendingStorageOverlay = (env: Env, count: number): void => {
-  const pending = env.runtimeState?.pendingStorageOverlay;
+export const dropOverlay = (env: Env, count: number): void => {
+  const pending = env.overlay;
   if (!Array.isArray(pending) || pending.length === 0) return;
   pending.splice(0, Math.max(0, Math.floor(count)));
 };

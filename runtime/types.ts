@@ -1292,10 +1292,12 @@ export type RuntimeFrameDbRecord =
       book: BookState | null;
     };
 
-export type RuntimeStorageOverlayRecord =
+type RuntimeOverlayBase = { height?: number };
+export type RuntimeOverlayRecord = RuntimeOverlayBase & (
   | { family: 'entity'; entityId: string }
   | { family: 'account'; entityId: string; counterpartyId: string }
-  | { family: 'book'; entityId: string; pairId: string; deleted?: boolean };
+  | { family: 'book'; entityId: string; pairId: string; deleted?: boolean }
+);
 
 export type AccountSettleAction = {
   type: 'propose' | 'update' | 'approve' | 'execute' | 'reject';
@@ -2020,6 +2022,7 @@ export interface Env {
   // NOTE: runtimeInput is deprecated alias - both point to same object
   runtimeMempool?: RuntimeInput | undefined;
   runtimeInput: RuntimeInput; // Deprecated alias of runtimeMempool
+  overlay?: RuntimeOverlayRecord[];
   runtimeConfig?: {
     minFrameDelayMs?: number; // Minimum delay between runtime frames
     loopIntervalMs?: number;  // Loop interval for runtime processing
@@ -2032,6 +2035,7 @@ export interface Env {
       epochMaxBytes?: number;
       frameDbMaxBytes?: number;
       frameDbRetainFrames?: number;
+      materializePeriodFrames?: number;
       accountMerkleRadix?: 16 | 256;
     };
   } | undefined;
@@ -2069,7 +2073,6 @@ export interface Env {
     };
     pendingAuditEvents?: Array<Record<string, unknown>>;
     pendingFrameDbRecords?: RuntimeFrameDbRecord[];
-    pendingStorageOverlay?: RuntimeStorageOverlayRecord[];
     cleanLogs?: string[];
     routeDeferState?: Map<string, {
       warnAt: number;
