@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { computeStorageCanonicalStateHashFromEnv } from '../storage';
+import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
 import type { AccountMachine, EntityReplica, Env } from '../types';
 
 const entityId = `0x${'11'.repeat(32)}`;
@@ -99,15 +99,15 @@ const makeEnv = (account: AccountMachine, reserves: Array<[number, bigint]>): En
   }) as Env;
 
 test('canonical storage hash is deterministic across Map insertion order', () => {
-  const left = computeStorageCanonicalStateHashFromEnv(makeEnv(makeAccount('history-a'), [[2, 20n], [1, 10n]]));
-  const right = computeStorageCanonicalStateHashFromEnv(makeEnv(makeAccount('history-a'), [[1, 10n], [2, 20n]]));
+  const left = computeCanonicalStateHashFromEnv(makeEnv(makeAccount('history-a'), [[2, 20n], [1, 10n]]));
+  const right = computeCanonicalStateHashFromEnv(makeEnv(makeAccount('history-a'), [[1, 10n], [2, 20n]]));
   expect(left).toBe(right);
 });
 
 test('canonical storage hash ignores UI frameHistory and reacts to consensus state', () => {
-  const base = computeStorageCanonicalStateHashFromEnv(makeEnv(makeAccount('history-a'), [[1, 10n]]));
-  const changedHistory = computeStorageCanonicalStateHashFromEnv(makeEnv(makeAccount('history-b'), [[1, 10n]]));
-  const changedReserve = computeStorageCanonicalStateHashFromEnv(makeEnv(makeAccount('history-a'), [[1, 11n]]));
+  const base = computeCanonicalStateHashFromEnv(makeEnv(makeAccount('history-a'), [[1, 10n]]));
+  const changedHistory = computeCanonicalStateHashFromEnv(makeEnv(makeAccount('history-b'), [[1, 10n]]));
+  const changedReserve = computeCanonicalStateHashFromEnv(makeEnv(makeAccount('history-a'), [[1, 11n]]));
 
   expect(changedHistory).toBe(base);
   expect(changedReserve).not.toBe(base);
