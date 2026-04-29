@@ -2061,7 +2061,7 @@ export interface Env {
     storageVerifiedPreviousHeight?: number;
     storageEpochRotatePromise?: Promise<void> | null;
     storageEntityHashDocs?: unknown;
-    debugStorageOverlayMarks?: RuntimeOverlayRecord[];
+    currentStorageOverlayMarks?: RuntimeOverlayRecord[];
     frameDb?: Level<Buffer, Buffer> | null | undefined;
     frameDbOpenPromise?: Promise<boolean> | null | undefined;
     infraDb?: Level<Buffer, Buffer> | null | undefined;

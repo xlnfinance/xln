@@ -117,27 +117,18 @@ const pushOverlayRecord = (env: Env, record: RuntimeOverlayRecord): void => {
   const existingIndex = overlay.findIndex((candidate) => storageOverlayRecordKey(candidate) === key);
   if (existingIndex >= 0) {
     overlay[existingIndex] = record;
-    return;
+  } else {
+    overlay.push(record);
   }
-  overlay.push(record);
-};
 
-const overlayDriftDebugEnabled = (): boolean => {
-  const raw = String(process.env['XLN_DEBUG_OVERLAY_DRIFT'] ?? '').trim().toLowerCase();
-  return raw === '1' || raw === 'true' || raw === 'yes';
-};
-
-const trackDebugOverlayMark = (env: Env, record: RuntimeOverlayRecord): void => {
-  if (!overlayDriftDebugEnabled()) return;
   const runtimeState = env.runtimeState ?? (env.runtimeState = {});
-  const marks = runtimeState.debugStorageOverlayMarks ?? (runtimeState.debugStorageOverlayMarks = []);
-  const key = storageOverlayRecordKey(record);
-  const existingIndex = marks.findIndex((candidate) => storageOverlayRecordKey(candidate) === key);
-  if (existingIndex >= 0) {
-    marks[existingIndex] = { ...record };
+  const currentMarks = runtimeState.currentStorageOverlayMarks ?? (runtimeState.currentStorageOverlayMarks = []);
+  const currentIndex = currentMarks.findIndex((candidate) => storageOverlayRecordKey(candidate) === key);
+  if (currentIndex >= 0) {
+    currentMarks[currentIndex] = { ...record };
     return;
   }
-  marks.push({ ...record });
+  currentMarks.push({ ...record });
 };
 
 export const markStorageEntityDirty = (env: Env, entityId: string): void => {
@@ -145,7 +136,6 @@ export const markStorageEntityDirty = (env: Env, entityId: string): void => {
   if (!normalized) return;
   const record: RuntimeOverlayRecord = { family: 'entity', entityId: normalized };
   pushOverlayRecord(env, record);
-  trackDebugOverlayMark(env, record);
 };
 
 export const markStorageAccountDirty = (env: Env, entityId: string, counterpartyId: string): void => {
@@ -158,7 +148,6 @@ export const markStorageAccountDirty = (env: Env, entityId: string, counterparty
     counterpartyId: normalizedCounterpartyId,
   };
   pushOverlayRecord(env, record);
-  trackDebugOverlayMark(env, record);
 };
 
 export const markStorageBookDirty = (
@@ -177,7 +166,6 @@ export const markStorageBookDirty = (
     ...(deleted ? { deleted: true } : {}),
   };
   pushOverlayRecord(env, record);
-  trackDebugOverlayMark(env, record);
 };
 
 export const ACCOUNT_FRAME_HISTORY_VIEW_LIMIT = 50;
