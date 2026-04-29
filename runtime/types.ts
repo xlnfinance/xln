@@ -1292,12 +1292,10 @@ export type RuntimeFrameDbRecord =
       book: BookState | null;
     };
 
-type RuntimeOverlayBase = { height?: number };
-export type RuntimeOverlayRecord = RuntimeOverlayBase & (
+export type RuntimeOverlayRecord =
   | { family: 'entity'; entityId: string }
   | { family: 'account'; entityId: string; counterpartyId: string }
-  | { family: 'book'; entityId: string; pairId: string; deleted?: boolean }
-);
+  | { family: 'book'; entityId: string; pairId: string; deleted?: boolean };
 
 export type AccountSettleAction = {
   type: 'propose' | 'update' | 'approve' | 'execute' | 'reject';
