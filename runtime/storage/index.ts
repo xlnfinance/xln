@@ -1,16 +1,26 @@
 import type { BookState } from '../orderbook';
-import { ethers } from 'ethers';
-import { serializeTaggedJson } from '../serialization-utils';
-import { buildHexKeyedMerkle } from './merkle';
-import { mergeStorageOverlayRecords, storageOverlayRecordKey } from './overlay';
 import { decodeBuffer, encodeBuffer, writeBatch } from './codec';
+import {
+  docRefKey,
+  docValueKey,
+  liveKeyForDoc,
+  liveKeyForRef,
+} from './doc-refs';
 import {
   listKeys,
   measurePrefixBytes,
   readJsonOrNull,
-  readRawOrNull,
 } from './level';
 import { buildFrameDbPuts, writeFrameDbPutsWithRetention } from './frame-db';
+import {
+  assertEntityHashesEqual,
+  computeStorageFrameHash,
+  computeStorageStateRoot,
+  prepareStorageCanonicalStateHashes,
+  prepareStorageStateHashes,
+  readAllEntityHashDocs,
+  toFrameEntityHashes,
+} from './hashes';
 import {
   createSnapshot,
   listSnapshotHeights,
@@ -19,10 +29,15 @@ import {
 } from './lifecycle';
 import {
   hydrateEntityStateFromStorage,
-  projectAccountDoc,
-  projectEntityCoreDoc,
   projectReplicaMeta,
 } from './projections';
+import {
+  buildBookDeletionsFromOverlay,
+  buildDocPuts,
+  mergeOverlayRecordsIntoEnv,
+  storageRefsFromOverlay,
+} from './overlay-docs';
+import { buildReplicaLookup } from './replicas';
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
   DEFAULT_EPOCH_MAX_BYTES,
@@ -36,7 +51,6 @@ import {
   KEY_HEAD,
   KEY_LIVE_ACCOUNT,
   KEY_LIVE_BOOK,
-  KEY_LIVE_DOC_HASH,
   KEY_LIVE_ENTITY,
   KEY_LIVE_REPLICA_META,
   KEY_SNAPSHOT_ACCOUNT,
@@ -47,16 +61,11 @@ import {
   STORAGE_VERIFY_TAIL_FRAMES,
   ZERO_FRAME_HASH,
   decodeEntityId,
-  hexBytes,
   keyDiff,
   keyFrame,
-  keyLiveAccount,
   keyLiveAccountPrefix,
-  keyLiveBook,
   keyLiveBookPrefix,
   keyLiveEntity,
-  keyLiveEntityHash,
-  keyLiveEntityHashPrefix,
   keyLiveReplicaMeta,
   keySnapshotAccountPrefix,
   keySnapshotBookPrefix,
@@ -66,32 +75,21 @@ import {
   parseLiveAccountKey,
   parseLiveBookKey,
 } from './keys';
-import {
-  computeCanonicalEntityHash,
-  computeCanonicalEntityHashesFromEnv,
-  computeCanonicalRuntimeStateHash,
-  type CanonicalFrameEntityHash,
-} from './canonical-hash';
-import type { AccountMachine, EntityInput, EntityReplica, EntityState, Env, RuntimeInput, RuntimeFrameDbRecord, RuntimeOverlayRecord } from '../types';
+import { computeCanonicalRuntimeStateHash } from './canonical-hash';
+import type { EntityInput, EntityState, Env, RuntimeInput, RuntimeFrameDbRecord } from '../types';
 import type {
   PerfDeps,
   RuntimeDbLike,
   RuntimeFrameDbLike,
-  StorageAccountRef,
   StorageAccountDoc,
-  StorageBookRef,
   StorageDebugStats,
   StorageDiffRecord,
   StorageDoc,
   StorageDocRef,
   StorageEntityCoreDoc,
   StorageEntityHashDoc,
-  StorageFrameEntityHash,
   StorageFrameRecord,
-  StorageHashCell,
   StorageHead,
-  StorageOverlayRefs,
-  StorageReplicaLookup,
   StorageReplicaMeta,
   StorageRuntimeConfig,
 } from './types';
@@ -109,6 +107,14 @@ export {
 export {
   seedFreshStorageEpoch,
 } from './lifecycle';
+export {
+  computeStorageDebugStateHashFromEnv,
+  computeStorageFrameHash,
+  computeStorageStateRoot,
+} from './hashes';
+export {
+  readStorageOverlayRecordsFromDiffs,
+} from './overlay-docs';
 
 export type {
   RuntimeDbLike,
@@ -128,198 +134,6 @@ export type {
   StorageRuntimeConfig,
   StorageSnapshotManifest,
 } from './types';
-
-type StorageDocEncodedValue = { buffer: Buffer; hash: string; hashBytes: Buffer };
-type StorageDocWithComputedHash = StorageDoc & {
-  hash?: string;
-  encodedValue?: Buffer;
-  hashBytes?: Buffer;
-};
-
-const setHiddenDocComputedValue = <K extends keyof StorageDocWithComputedHash>(
-  doc: StorageDocWithComputedHash,
-  key: K,
-  value: StorageDocWithComputedHash[K],
-): void => {
-  Object.defineProperty(doc, key, {
-    value,
-    enumerable: false,
-    configurable: true,
-    writable: true,
-  });
-};
-
-const encodeStorageDocValue = (doc: StorageDoc): StorageDocEncodedValue => {
-  const cached = doc as StorageDocWithComputedHash;
-  if (
-    typeof cached.hash === 'string' &&
-    Buffer.isBuffer(cached.encodedValue) &&
-    Buffer.isBuffer(cached.hashBytes)
-  ) {
-    return { buffer: cached.encodedValue, hash: cached.hash, hashBytes: cached.hashBytes };
-  }
-  const buffer = encodeBuffer(doc.value);
-  const hash = hashBuffer(buffer);
-  const hashBytes = Buffer.from(hash.slice(2), 'hex');
-  // Per-frame StorageDoc objects are the overlay. Keep computed values on that
-  // object, hidden from diff encoding. Durable truth remains KEY_LIVE_DOC_HASH
-  // and KEY_LIVE_ENTITY_HASH in LevelDB.
-  setHiddenDocComputedValue(cached, 'encodedValue', buffer);
-  setHiddenDocComputedValue(cached, 'hash', hash);
-  setHiddenDocComputedValue(cached, 'hashBytes', hashBytes);
-  return { buffer, hash, hashBytes };
-};
-
-const hashBuffer = (value: Buffer | Uint8Array): string =>
-  ethers.keccak256(value instanceof Uint8Array ? value : Uint8Array.from(value));
-
-const hashStable = (value: unknown): string => ethers.keccak256(ethers.toUtf8Bytes(serializeTaggedJson(value)));
-
-const hashToBytes = (hash: string): Buffer =>
-  Buffer.from(String(hash || '').replace(/^0x/, '').padStart(64, '0'), 'hex');
-
-const encodeMerkleUint64 = (value: string, label: string): Buffer => {
-  if (!/^\d+$/.test(value)) throw new Error(`STORAGE_INVALID_MERKLE_PATH_${label}: ${value}`);
-  const parsed = BigInt(value);
-  if (parsed < 0n || parsed > 0xffff_ffff_ffff_ffffn) {
-    throw new Error(`STORAGE_INVALID_MERKLE_PATH_${label}: ${value}`);
-  }
-  const out = Buffer.alloc(8);
-  out.writeBigUInt64BE(parsed);
-  return out;
-};
-
-const bookPairMerklePayload = (pairId: string): Buffer => {
-  const [baseTokenId, quoteTokenId, extra] = String(pairId || '').split('/');
-  if (baseTokenId === undefined || quoteTokenId === undefined || extra !== undefined) {
-    throw new Error(`STORAGE_INVALID_BOOK_MERKLE_PATH: ${pairId}`);
-  }
-  return Buffer.concat([
-    encodeMerkleUint64(baseTokenId, 'BOOK_BASE'),
-    encodeMerkleUint64(quoteTokenId, 'BOOK_QUOTE'),
-    Buffer.alloc(16),
-  ]);
-};
-
-const storageMerklePath = (key: string): string => {
-  const normalized = String(key || '');
-  if (normalized === 'entity') {
-    return `0x${Buffer.concat([Buffer.from([0x01]), Buffer.alloc(32)]).toString('hex')}`;
-  }
-
-  if (normalized.startsWith('accounts/')) {
-    const counterpartyId = normalized.slice('accounts/'.length);
-    return `0x${Buffer.concat([Buffer.from([0x02]), hexBytes(counterpartyId)]).toString('hex')}`;
-  }
-
-  if (normalized.startsWith('books/')) {
-    const pairId = normalized.slice('books/'.length);
-    return `0x${Buffer.concat([Buffer.from([0x03]), bookPairMerklePayload(pairId)]).toString('hex')}`;
-  }
-
-  throw new Error(`STORAGE_UNKNOWN_MERKLE_PATH: ${normalized}`);
-};
-
-const normalizeHashCells = (cells: Iterable<StorageHashCell>): StorageHashCell[] =>
-  Array.from(cells)
-    .map((cell) => ({ key: String(cell.key), hash: String(cell.hash) }))
-    .filter((cell) => cell.key.length > 0 && /^0x[0-9a-f]{64}$/i.test(cell.hash))
-    .sort((left, right) => left.key.localeCompare(right.key));
-
-const buildEntityHashDoc = (entityId: string, cells: Iterable<StorageHashCell>): StorageEntityHashDoc => {
-  const normalizedCells = normalizeHashCells(cells);
-  const merkle = buildHexKeyedMerkle(
-    normalizedCells.map((cell) => ({
-      hexKey: storageMerklePath(cell.key),
-      value: hashToBytes(cell.hash),
-    })),
-    { radix: DEFAULT_ACCOUNT_MERKLE_RADIX },
-  );
-  return {
-    entityId: normalizeEntityId(entityId),
-    cells: normalizedCells,
-    hash: merkle.root,
-  };
-};
-
-export const computeStorageStateRoot = (entityHashes: StorageFrameEntityHash[]): string => {
-  return buildHexKeyedMerkle(
-    entityHashes
-      .map((entry) => ({
-        hexKey: normalizeEntityId(entry.entityId),
-        value: hashToBytes(entry.hash),
-      })),
-    { radix: DEFAULT_ACCOUNT_MERKLE_RADIX },
-  ).root;
-};
-
-const prepareStorageCanonicalStateHashes = (
-  env: Env,
-  touchedEntities: string[],
-  previousFrame: StorageFrameRecord | null,
-  replicaLookup = buildReplicaLookup(env),
-): { canonicalStateHash: string; canonicalEntityHashes: StorageFrameEntityHash[] } => {
-  const liveEntityIds = new Set(Array.from(env.eReplicas.values()).map((replica) => normalizeEntityId(replica.entityId)));
-  const previousHashes = Array.isArray(previousFrame?.canonicalEntityHashes)
-    ? normalizeFrameEntityHashes(previousFrame.canonicalEntityHashes)
-    : [];
-  const canonicalHashByEntity = new Map<string, CanonicalFrameEntityHash>();
-
-  if (previousHashes.length > 0) {
-    for (const entry of previousHashes) {
-      if (liveEntityIds.has(entry.entityId)) canonicalHashByEntity.set(entry.entityId, entry);
-    }
-  } else {
-    for (const entry of computeCanonicalEntityHashesFromEnv(env)) {
-      canonicalHashByEntity.set(entry.entityId, entry);
-    }
-  }
-
-  for (const entityId of touchedEntities) {
-    const normalized = normalizeEntityId(entityId);
-    const replica = findReplicaForEntity(env, normalized, replicaLookup)?.replica;
-    if (replica) {
-      canonicalHashByEntity.set(normalized, computeCanonicalEntityHash(replica));
-    } else {
-      canonicalHashByEntity.delete(normalized);
-    }
-  }
-
-  const canonicalEntityHashes = Array.from(canonicalHashByEntity.values())
-    .sort((left, right) => left.entityId.localeCompare(right.entityId));
-  return {
-    canonicalEntityHashes,
-    canonicalStateHash: computeCanonicalRuntimeStateHash(env.height, env.timestamp, canonicalEntityHashes),
-  };
-};
-
-export const computeStorageFrameHash = (record: StorageFrameRecord): string => {
-  const { frameHash: _frameHash, ...stableRecord } = record;
-  void _frameHash;
-  return hashStable({
-    kind: 'xln.storage.frame.v1',
-    ...stableRecord,
-    entityHashes: (stableRecord.entityHashes ?? [])
-      .map((entry) => ({
-        entityId: normalizeEntityId(entry.entityId),
-        hash: entry.hash,
-        cellCount: entry.cellCount,
-      }))
-      .sort((left, right) => left.entityId.localeCompare(right.entityId)),
-  });
-};
-
-const docRefKey = (ref: StorageDocRef): string => {
-  if (ref.family === 'entity') return `e:${normalizeEntityId(ref.entityId)}`;
-  if (ref.family === 'account') return `a:${normalizeEntityId(ref.entityId)}:${normalizeEntityId(ref.counterpartyId)}`;
-  return `b:${normalizeEntityId(ref.entityId)}:${ref.pairId}`;
-};
-
-const docValueKey = (doc: StorageDoc): string => {
-  if (doc.family === 'entity') return `e:${normalizeEntityId(doc.entityId)}`;
-  if (doc.family === 'account') return `a:${normalizeEntityId(doc.entityId)}:${normalizeEntityId(doc.counterpartyId)}`;
-  return `b:${normalizeEntityId(doc.entityId)}:${doc.pairId}`;
-};
 
 const runtimeConfigFromEnv = (env: Env): Required<StorageRuntimeConfig> => ({
   enabled: env.runtimeConfig?.storage?.enabled ?? true,
@@ -376,374 +190,6 @@ const readHead = async (db: RuntimeDbLike, config: Required<StorageRuntimeConfig
     accountMerkleRadix: config.accountMerkleRadix,
     retainedHistoryBytes: 0,
   };
-};
-
-const findReplicaForEntity = (
-  env: Env,
-  entityId: string,
-  lookup?: StorageReplicaLookup,
-): { replicaKey: string; replica: EntityReplica; state: EntityState } | null => {
-  const normalized = normalizeEntityId(entityId);
-  if (lookup) return lookup.get(normalized) ?? null;
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
-    const candidate = String(replica?.entityId || String(replicaKey).split(':')[0] || '').toLowerCase();
-    if (candidate === normalized) return { replicaKey: String(replicaKey), replica, state: replica.state };
-  }
-  return null;
-};
-
-const buildReplicaLookup = (env: Env): StorageReplicaLookup => {
-  const lookup: StorageReplicaLookup = new Map();
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
-    if (!replica?.state) continue;
-    const entityId = normalizeEntityId(replica.entityId || replica.state.entityId || String(replicaKey).split(':')[0] || '');
-    if (!entityId) continue;
-    lookup.set(entityId, { replicaKey: String(replicaKey), replica, state: replica.state });
-  }
-  return lookup;
-};
-
-const addAccountRef = (target: Map<string, StorageDocRef>, entityId: string, counterpartyId: string): void => {
-  if (!entityId || !counterpartyId) return;
-  const ref: StorageDocRef = { family: 'account', entityId: normalizeEntityId(entityId), counterpartyId: normalizeEntityId(counterpartyId) };
-  target.set(docRefKey(ref), ref);
-};
-
-const addBookRef = (target: Map<string, StorageBookRef>, entityId: string, pairId: string): void => {
-  const normalizedEntityId = normalizeEntityId(entityId);
-  const normalizedPairId = String(pairId || '').trim();
-  if (!normalizedEntityId || !normalizedPairId) return;
-  const ref: StorageBookRef = {
-    family: 'book',
-    entityId: normalizedEntityId,
-    pairId: normalizedPairId,
-  };
-  target.set(docRefKey(ref), ref);
-};
-
-const mergeOverlayRecordsIntoEnv = (
-  env: Env,
-  records: readonly RuntimeOverlayRecord[],
-): RuntimeOverlayRecord[] => {
-  env.overlay = mergeStorageOverlayRecords(env.overlay, records);
-  return env.overlay.map((record) => ({ ...record }));
-};
-
-const overlayRecordsFromDocs = (
-  puts: readonly StorageDoc[] | undefined,
-  dels: readonly StorageDocRef[] | undefined,
-): RuntimeOverlayRecord[] => {
-  const records = new Map<string, RuntimeOverlayRecord>();
-  for (const doc of puts ?? []) {
-    const entityId = normalizeEntityId(doc.entityId);
-    if (!entityId) continue;
-    const record: RuntimeOverlayRecord = doc.family === 'account'
-      ? { family: 'account', entityId, counterpartyId: normalizeEntityId(doc.counterpartyId) }
-      : doc.family === 'book'
-        ? { family: 'book', entityId, pairId: String(doc.pairId || '').trim() }
-        : { family: 'entity', entityId };
-    records.set(storageOverlayRecordKey(record), record);
-  }
-  for (const ref of dels ?? []) {
-    if (ref.family !== 'book') {
-      throw new Error(`STORAGE_OVERLAY_DELETE_UNSUPPORTED: family=${ref.family}`);
-    }
-    const entityId = normalizeEntityId(ref.entityId);
-    if (!entityId) continue;
-    const record: RuntimeOverlayRecord = { family: 'book', entityId, pairId: String(ref.pairId || '').trim(), deleted: true };
-    records.set(storageOverlayRecordKey(record), record);
-  }
-  return Array.from(records.values());
-};
-
-export const readStorageOverlayRecordsFromDiffs = async (
-  db: RuntimeDbLike,
-  startHeight: number,
-  targetHeight: number,
-): Promise<RuntimeOverlayRecord[]> => {
-  let records: RuntimeOverlayRecord[] = [];
-  const start = Math.max(1, Math.floor(startHeight));
-  const end = Math.floor(targetHeight);
-  for (let height = start; height <= end; height += 1) {
-    const diff = await readJsonOrNull<StorageDiffRecord>(db, keyDiff(height));
-    if (!diff) continue;
-    records = mergeStorageOverlayRecords(records, overlayRecordsFromDocs(diff.puts, diff.dels));
-  }
-  return records;
-};
-
-const buildBookDeletionsFromOverlay = (
-  records: readonly RuntimeOverlayRecord[] | undefined,
-): StorageDocRef[] => {
-  const dels = new Map<string, StorageBookRef>();
-  for (const record of records ?? []) {
-    if (record.family !== 'book' || record.deleted !== true) continue;
-    const entityId = normalizeEntityId(record.entityId);
-    const pairId = String(record.pairId || '').trim();
-    if (!entityId || !pairId) continue;
-    const ref: StorageBookRef = { family: 'book', entityId, pairId };
-    dels.set(docRefKey(ref), ref);
-  }
-  return Array.from(dels.values());
-};
-
-const storageRefsFromOverlay = (
-  records: readonly RuntimeOverlayRecord[] | undefined,
-): StorageOverlayRefs => {
-  const touchedEntities = new Set<string>();
-  const touchedAccounts = new Map<string, StorageAccountRef>();
-  const touchedBooks = new Map<string, StorageBookRef>();
-  const touchedBookEntities = new Set<string>();
-
-  for (const record of records ?? []) {
-    if (record.family === 'entity') {
-      const entityId = normalizeEntityId(record.entityId);
-      if (entityId) touchedEntities.add(entityId);
-      continue;
-    }
-
-    if (record.family === 'account') {
-      const entityId = normalizeEntityId(record.entityId);
-      const counterpartyId = normalizeEntityId(record.counterpartyId);
-      if (!entityId || !counterpartyId) continue;
-      touchedEntities.add(entityId);
-      addAccountRef(touchedAccounts, entityId, counterpartyId);
-      continue;
-    }
-
-    if (record.family === 'book') {
-      const entityId = normalizeEntityId(record.entityId);
-      const pairId = String(record.pairId || '').trim();
-      if (!entityId || !pairId) continue;
-      touchedEntities.add(entityId);
-      touchedBookEntities.add(entityId);
-      addBookRef(touchedBooks, entityId, pairId);
-    }
-  }
-
-  return { touchedEntities, touchedAccounts, touchedBooks, touchedBookEntities };
-};
-
-const buildDocPuts = (
-  env: Env,
-  touched: StorageOverlayRefs,
-  replicaLookup = buildReplicaLookup(env),
-): StorageDoc[] => {
-  const puts: StorageDoc[] = [];
-
-  for (const entityId of touched.touchedEntities) {
-    const replica = findReplicaForEntity(env, entityId, replicaLookup);
-    if (!replica) continue;
-    puts.push({
-      family: 'entity',
-      entityId,
-      value: projectEntityCoreDoc(replica.state, replica.replica),
-    });
-  }
-
-  for (const ref of touched.touchedAccounts.values()) {
-    const replica = findReplicaForEntity(env, ref.entityId, replicaLookup);
-    const account = replica?.state.accounts.get(ref.counterpartyId);
-    if (!replica || !account) continue;
-    puts.push({
-      family: 'account',
-      entityId: ref.entityId,
-      counterpartyId: ref.counterpartyId,
-      value: projectAccountDoc(account),
-    });
-  }
-
-  for (const ref of touched.touchedBooks.values()) {
-    const replica = findReplicaForEntity(env, ref.entityId, replicaLookup);
-    const book = replica?.state.orderbookExt?.books?.get(ref.pairId);
-    if (!book) continue;
-    puts.push({ family: 'book', entityId: ref.entityId, pairId: ref.pairId, value: book });
-  }
-
-  return puts;
-};
-
-const liveKeyForDoc = (doc: StorageDoc): Buffer => {
-  if (doc.family === 'entity') return keyLiveEntity(doc.entityId);
-  if (doc.family === 'account') return keyLiveAccount(doc.entityId, doc.counterpartyId);
-  return keyLiveBook(doc.entityId, doc.pairId);
-};
-
-const liveKeyForRef = (ref: StorageDocRef): Buffer => {
-  if (ref.family === 'entity') return keyLiveEntity(ref.entityId);
-  if (ref.family === 'account') return keyLiveAccount(ref.entityId, ref.counterpartyId);
-  return keyLiveBook(ref.entityId, ref.pairId);
-};
-
-const docRefForDoc = (doc: StorageDoc): StorageDocRef => {
-  if (doc.family === 'entity') return { family: 'entity', entityId: doc.entityId };
-  if (doc.family === 'account') {
-    return { family: 'account', entityId: doc.entityId, counterpartyId: doc.counterpartyId };
-  }
-  return { family: 'book', entityId: doc.entityId, pairId: doc.pairId };
-};
-
-const docRefCellKey = (ref: StorageDocRef): string => {
-  if (ref.family === 'entity') return 'entity';
-  if (ref.family === 'account') return `accounts/${normalizeEntityId(ref.counterpartyId)}`;
-  return `books/${ref.pairId}`;
-};
-
-const keyLiveDocHash = (ref: StorageDocRef): Buffer =>
-  Buffer.concat([Buffer.from([KEY_LIVE_DOC_HASH]), liveKeyForRef(ref)]);
-
-const readEntityHashDoc = async (db: RuntimeDbLike, entityId: string): Promise<StorageEntityHashDoc | null> =>
-  readJsonOrNull<StorageEntityHashDoc>(db, keyLiveEntityHash(entityId));
-
-const buildEntityHashDocFromLive = async (db: RuntimeDbLike, entityId: string): Promise<StorageEntityHashDoc> => {
-  const normalizedEntityId = normalizeEntityId(entityId);
-  const cells: StorageHashCell[] = [];
-  const entityRaw = await readRawOrNull(db, keyLiveEntity(normalizedEntityId));
-  if (entityRaw) cells.push({ key: 'entity', hash: hashBuffer(entityRaw) });
-
-  for (const key of await listKeys(db, keyLiveAccountPrefix(normalizedEntityId))) {
-    const raw = await readRawOrNull(db, key);
-    if (!raw) continue;
-    const parsed = parseLiveAccountKey(key);
-    cells.push({ key: docRefCellKey({ family: 'account', entityId: normalizedEntityId, counterpartyId: parsed.counterpartyId }), hash: hashBuffer(raw) });
-  }
-
-  for (const key of await listKeys(db, keyLiveBookPrefix(normalizedEntityId))) {
-    const raw = await readRawOrNull(db, key);
-    if (!raw) continue;
-    const parsed = parseLiveBookKey(key);
-    cells.push({ key: docRefCellKey({ family: 'book', entityId: normalizedEntityId, pairId: parsed.pairId }), hash: hashBuffer(raw) });
-  }
-
-  return buildEntityHashDoc(normalizedEntityId, cells);
-};
-
-const readAllEntityHashDocs = async (db: RuntimeDbLike): Promise<Map<string, StorageEntityHashDoc>> => {
-  const docs = new Map<string, StorageEntityHashDoc>();
-  const hashKeys = await listKeys(db, keyLiveEntityHashPrefix());
-  for (const key of hashKeys) {
-    const entityId = decodeEntityId(key.subarray(1, 33));
-    const doc = await readEntityHashDoc(db, entityId);
-    if (doc) docs.set(normalizeEntityId(entityId), buildEntityHashDoc(entityId, doc.cells));
-  }
-
-  if (docs.size > 0) return docs;
-
-  // Backward-compatibility bootstrap for DBs created before storage-debug-v1
-  // hash docs. This is intentionally one-time O(live state); subsequent frames
-  // update only touched cell hashes.
-  for (const entityId of (await listKeys(db, Buffer.from([KEY_LIVE_ENTITY]))).map((key) => decodeEntityId(key.subarray(1, 33)))) {
-    docs.set(normalizeEntityId(entityId), await buildEntityHashDocFromLive(db, entityId));
-  }
-  return docs;
-};
-
-const toFrameEntityHashes = (docs: Iterable<StorageEntityHashDoc>): StorageFrameEntityHash[] =>
-  Array.from(docs)
-    .map((doc) => ({ entityId: normalizeEntityId(doc.entityId), hash: doc.hash, cellCount: doc.cells.length }))
-    .sort((left, right) => left.entityId.localeCompare(right.entityId));
-
-const prepareStorageStateHashes = async (options: {
-  db: RuntimeDbLike;
-  height: number;
-  timestamp: number;
-  puts: StorageDoc[];
-  dels: StorageDocRef[];
-  entityHashDocs?: Map<string, StorageEntityHashDoc>;
-}): Promise<{
-  stateHash: string;
-  entityHashes: StorageFrameEntityHash[];
-  entityHashDocs: Map<string, StorageEntityHashDoc>;
-  docValueBuffers: Map<string, Buffer>;
-  docHashPuts: Array<{ key: Buffer; value: Buffer }>;
-  docHashDels: Buffer[];
-  entityHashPuts: Array<{ key: Buffer; value: Buffer }>;
-}> => {
-  const entityHashDocs = options.entityHashDocs
-    ? new Map(Array.from(options.entityHashDocs.entries()).map(([key, value]) => [key, buildEntityHashDoc(value.entityId, value.cells)]))
-    : await readAllEntityHashDocs(options.db);
-  const docValueBuffers = new Map<string, Buffer>();
-  const docHashPuts: Array<{ key: Buffer; value: Buffer }> = [];
-  const docHashDels: Buffer[] = [];
-  const touchedEntityIds = new Set<string>();
-
-  const ensureEntityDoc = async (entityId: string): Promise<StorageEntityHashDoc> => {
-    const normalized = normalizeEntityId(entityId);
-    let doc = entityHashDocs.get(normalized);
-    if (!doc) {
-      doc = await buildEntityHashDocFromLive(options.db, normalized);
-      entityHashDocs.set(normalized, doc);
-    }
-    return doc;
-  };
-
-  const updateEntityCells = async (entityId: string, update: (cells: Map<string, string>) => void): Promise<void> => {
-    const normalized = normalizeEntityId(entityId);
-    const current = await ensureEntityDoc(normalized);
-    const cells = new Map(current.cells.map((cell) => [cell.key, cell.hash]));
-    update(cells);
-    entityHashDocs.set(normalized, buildEntityHashDoc(normalized, Array.from(cells, ([key, hash]) => ({ key, hash }))));
-    touchedEntityIds.add(normalized);
-  };
-
-  for (const doc of options.puts) {
-    const ref = docRefForDoc(doc);
-    const encoded = encodeStorageDocValue(doc);
-    docValueBuffers.set(docValueKey(doc), encoded.buffer);
-    docHashPuts.push({ key: keyLiveDocHash(ref), value: encoded.hashBytes });
-    await updateEntityCells(ref.entityId, (cells) => {
-      cells.set(docRefCellKey(ref), encoded.hash);
-    });
-  }
-
-  for (const ref of options.dels) {
-    docHashDels.push(keyLiveDocHash(ref));
-    await updateEntityCells(ref.entityId, (cells) => {
-      cells.delete(docRefCellKey(ref));
-    });
-  }
-
-  const entityHashPuts = Array.from(touchedEntityIds).map((entityId) => ({
-    key: keyLiveEntityHash(entityId),
-    value: encodeBuffer(entityHashDocs.get(entityId) ?? buildEntityHashDoc(entityId, [])),
-  }));
-  const entityHashes = toFrameEntityHashes(entityHashDocs.values());
-  return {
-    stateHash: computeStorageStateRoot(entityHashes),
-    entityHashes,
-    entityHashDocs,
-    docValueBuffers,
-    docHashPuts,
-    docHashDels,
-    entityHashPuts,
-  };
-};
-
-export const computeStorageDebugStateHashFromEnv = (env: Env): string => {
-  const entityHashDocs: StorageEntityHashDoc[] = [];
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
-    const entityId = normalizeEntityId(String(replica?.entityId || String(replicaKey).split(':')[0] || ''));
-    if (!entityId || !replica?.state) continue;
-    const cells: StorageHashCell[] = [];
-    cells.push({
-      key: 'entity',
-      hash: hashBuffer(encodeBuffer(projectEntityCoreDoc(replica.state, replica))),
-    });
-    for (const [counterpartyId, account] of replica.state.accounts ?? new Map<string, AccountMachine>()) {
-      cells.push({
-        key: docRefCellKey({ family: 'account', entityId, counterpartyId: normalizeEntityId(counterpartyId) }),
-        hash: hashBuffer(encodeBuffer(projectAccountDoc(account))),
-      });
-    }
-    for (const [pairId, book] of replica.state.orderbookExt?.books ?? new Map<string, BookState>()) {
-      cells.push({
-        key: docRefCellKey({ family: 'book', entityId, pairId: String(pairId) }),
-        hash: hashBuffer(encodeBuffer(book)),
-      });
-    }
-    entityHashDocs.push(buildEntityHashDoc(entityId, cells));
-  }
-  return computeStorageStateRoot(toFrameEntityHashes(entityHashDocs));
 };
 
 const buildDiffRecord = (height: number, puts: StorageDoc[], dels: StorageDocRef[]): StorageDiffRecord => ({
@@ -843,8 +289,6 @@ export const saveRuntimeFrameToStorage = async (options: {
   const preparedHashes = shouldMaterialize
     ? await prepareStorageStateHashes({
         db,
-        height: options.env.height,
-        timestamp: options.env.timestamp,
         puts: materializedPuts,
         dels: materializedDels,
         ...(cachedEntityHashDocs ? { entityHashDocs: cachedEntityHashDocs } : {}),
@@ -1077,41 +521,6 @@ export const readStorageReplicaMeta = async (
   entityId: string,
 ): Promise<StorageReplicaMeta | null> => readJsonOrNull<StorageReplicaMeta>(db, keyLiveReplicaMeta(entityId));
 
-const normalizeFrameEntityHashes = (entityHashes: StorageFrameEntityHash[] | undefined): StorageFrameEntityHash[] =>
-  (entityHashes ?? [])
-    .map((entry) => ({
-      entityId: normalizeEntityId(entry.entityId),
-      hash: String(entry.hash || ''),
-      cellCount: Number(entry.cellCount ?? 0),
-    }))
-    .sort((left, right) => left.entityId.localeCompare(right.entityId));
-
-const assertEntityHashesEqual = (
-  actual: StorageFrameEntityHash[] | undefined,
-  expected: StorageFrameEntityHash[] | undefined,
-  context: string,
-): void => {
-  const left = normalizeFrameEntityHashes(actual);
-  const right = normalizeFrameEntityHashes(expected);
-  if (left.length !== right.length) {
-    throw new Error(`STORAGE_ENTITY_HASH_COUNT_MISMATCH: ${context} actual=${left.length} expected=${right.length}`);
-  }
-  for (let index = 0; index < left.length; index += 1) {
-    const actualEntry = left[index]!;
-    const expectedEntry = right[index]!;
-    if (
-      actualEntry.entityId !== expectedEntry.entityId ||
-      actualEntry.hash !== expectedEntry.hash ||
-      actualEntry.cellCount !== expectedEntry.cellCount
-    ) {
-      throw new Error(
-        `STORAGE_ENTITY_HASH_MISMATCH: ${context} entity=${expectedEntry.entityId} ` +
-          `actual=${actualEntry.hash}/${actualEntry.cellCount} expected=${expectedEntry.hash}/${expectedEntry.cellCount}`,
-      );
-    }
-  }
-};
-
 export const verifyStorageTailIntegrity = async (
   db: RuntimeDbLike,
   options: { tailFrames?: number } = {},
@@ -1209,8 +618,7 @@ const applyDocs = (
   const filterEntity = entityId ? normalizeEntityId(entityId) : null;
   for (const ref of dels) {
     if (filterEntity) {
-      const owner = ref.family === 'entity' ? ref.entityId : ref.entityId;
-      if (normalizeEntityId(owner) !== filterEntity) continue;
+      if (normalizeEntityId(ref.entityId) !== filterEntity) continue;
     }
     target.delete(docRefKey(ref));
   }
