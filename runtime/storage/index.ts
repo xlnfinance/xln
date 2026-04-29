@@ -642,8 +642,47 @@ const hashStable = (value: unknown): string => ethers.keccak256(ethers.toUtf8Byt
 const hashToBytes = (hash: string): Buffer =>
   Buffer.from(String(hash || '').replace(/^0x/, '').padStart(64, '0'), 'hex');
 
-const storageMerkleKey = (key: string): string =>
-  hashStable({ kind: 'xln.storage.merkleKey.v1', key: String(key) });
+const encodeMerkleUint64 = (value: string, label: string): Buffer => {
+  if (!/^\d+$/.test(value)) throw new Error(`STORAGE_INVALID_MERKLE_PATH_${label}: ${value}`);
+  const parsed = BigInt(value);
+  if (parsed < 0n || parsed > 0xffff_ffff_ffff_ffffn) {
+    throw new Error(`STORAGE_INVALID_MERKLE_PATH_${label}: ${value}`);
+  }
+  const out = Buffer.alloc(8);
+  out.writeBigUInt64BE(parsed);
+  return out;
+};
+
+const bookPairMerklePayload = (pairId: string): Buffer => {
+  const [baseTokenId, quoteTokenId, extra] = String(pairId || '').split('/');
+  if (baseTokenId === undefined || quoteTokenId === undefined || extra !== undefined) {
+    throw new Error(`STORAGE_INVALID_BOOK_MERKLE_PATH: ${pairId}`);
+  }
+  return Buffer.concat([
+    encodeMerkleUint64(baseTokenId, 'BOOK_BASE'),
+    encodeMerkleUint64(quoteTokenId, 'BOOK_QUOTE'),
+    Buffer.alloc(16),
+  ]);
+};
+
+const storageMerklePath = (key: string): string => {
+  const normalized = String(key || '');
+  if (normalized === 'entity') {
+    return `0x${Buffer.concat([Buffer.from([0x01]), Buffer.alloc(32)]).toString('hex')}`;
+  }
+
+  if (normalized.startsWith('accounts/')) {
+    const counterpartyId = normalized.slice('accounts/'.length);
+    return `0x${Buffer.concat([Buffer.from([0x02]), hexBytes(counterpartyId)]).toString('hex')}`;
+  }
+
+  if (normalized.startsWith('books/')) {
+    const pairId = normalized.slice('books/'.length);
+    return `0x${Buffer.concat([Buffer.from([0x03]), bookPairMerklePayload(pairId)]).toString('hex')}`;
+  }
+
+  throw new Error(`STORAGE_UNKNOWN_MERKLE_PATH: ${normalized}`);
+};
 
 const normalizeHashCells = (cells: Iterable<StorageHashCell>): StorageHashCell[] =>
   Array.from(cells)
@@ -655,7 +694,7 @@ const buildEntityHashDoc = (entityId: string, cells: Iterable<StorageHashCell>):
   const normalizedCells = normalizeHashCells(cells);
   const merkle = buildHexKeyedMerkle(
     normalizedCells.map((cell) => ({
-      hexKey: storageMerkleKey(cell.key),
+      hexKey: storageMerklePath(cell.key),
       value: hashToBytes(cell.hash),
     })),
     { radix: DEFAULT_ACCOUNT_MERKLE_RADIX },
