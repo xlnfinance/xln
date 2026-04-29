@@ -58,6 +58,13 @@ export type { PaymentRoute } from './routing/pathfinding';
 export type { CompletedBatch, JBatch, JBatchState } from './j-batch';
 export type { JAdapter } from './jadapter/types';
 export type { BookState, OrderbookExtState, PreparedSwapOrder } from './orderbook';
+export type {
+  RuntimeAdapter,
+  RuntimeAdapterAuthLevel,
+  RuntimeAdapterConfig,
+  RuntimeAdapterReadQuery,
+  RuntimeAdapterStatus,
+} from './radapter';
 export { getBestBid, getBestAsk, getBookSideLevels } from './orderbook';
 
 // Re-export identity functions types
@@ -104,6 +111,9 @@ import type {
 } from './types';
 import type { JAdapter } from './jadapter/types';
 import type { PersistedFrameJournal } from './wal/store';
+import type { EmbeddedRuntimeAdapter } from './radapter/embedded';
+import type { RemoteRuntimeAdapter } from './radapter/remote';
+import type { resolveRuntimeAdapterRead } from './radapter/resolve';
 
 export type QueueEntityInputPayload = {
   type: string;
@@ -382,6 +392,11 @@ export interface XLNModule {
   // Bilateral consensus state
   classifyBilateralState: (myAccount: unknown, peerCurrentHeight: number | undefined, isLeft: boolean) => { state: string; isLeftEntity: boolean; shouldRollback: boolean; pendingHeight: number | null; mempoolCount: number };
   getAccountBarVisual: (leftState: unknown, rightState: unknown) => { glowColor: string | null; glowSide: string | null; glowIntensity: number; isDashed: boolean; pulseSpeed: number };
+
+  // Runtime adapter contract (embedded and remote share the same read resolver)
+  EmbeddedRuntimeAdapter: typeof EmbeddedRuntimeAdapter;
+  RemoteRuntimeAdapter: typeof RemoteRuntimeAdapter;
+  resolveRuntimeAdapterRead: typeof resolveRuntimeAdapterRead;
 }
 
 /**

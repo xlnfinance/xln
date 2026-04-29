@@ -20,7 +20,12 @@ import {
   startRuntimeLoop,
   ensureGossipProfiles,
   getPersistedLatestHeight,
+  listPersistedCheckpointHeights,
+  listPersistedEntityIdsAtHeight,
+  loadEntityStateFromStorageDb,
   readPersistedFrameJournals,
+  readPersistedStorageFrameRecord,
+  registerEnvChangeCallback,
 } from './runtime.ts';
 import { deserializeTaggedJson, safeStringify, serializeTaggedJson } from './serialization-utils';
 import type { AccountMachine, DeliverableEntityInput, EntityReplica, Env, EntityTx, RuntimeInput } from './types';
@@ -62,6 +67,11 @@ import {
 } from './market-snapshot';
 import { ethers } from 'ethers';
 import { ERC20Mock__factory } from '../jurisdictions/typechain-types/index.ts';
+import {
+  attachRuntimeAdapterTicker,
+  forgetRuntimeAdapterClient,
+  handleRuntimeAdapterMessage,
+} from './radapter/server';
 import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
 import type { ServerWebSocket } from 'bun';
@@ -1923,6 +1933,15 @@ const listLocalControlEntities = (env: Env): ControlEntitySummary[] => {
 };
 
 const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, env: Env | null) => {
+  const handledByRuntimeAdapter = await handleRuntimeAdapterMessage(ws, msg, env, {
+    enqueueRuntimeInput,
+    readFrame: (targetEnv, height) => readPersistedStorageFrameRecord(targetEnv, height),
+    listCheckpoints: (targetEnv) => listPersistedCheckpointHeights(targetEnv),
+    loadEntityState: (targetEnv, entityId, height) => loadEntityStateFromStorageDb(targetEnv, entityId, height),
+    listEntityIdsAtHeight: (targetEnv, height) => listPersistedEntityIdsAtHeight(targetEnv, height),
+  });
+  if (handledByRuntimeAdapter) return;
+
   const { type, id } = msg;
 
   if (isMarketMessageType(type)) {
@@ -3673,6 +3692,9 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       open(ws: RelaySocket) {
         const data = ws.data;
         console.log(`[WS] New ${data.type} connection`);
+        if (data.type === 'rpc' && env) {
+          attachRuntimeAdapterTicker(env, registerEnvChangeCallback);
+        }
         pushDebugEvent(relayStore, {
           event: 'ws_open',
           details: { wsType: data.type },
@@ -3726,6 +3748,9 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
             }
             routeRelayMessage();
           } else if (data.type === 'rpc') {
+            if (env) {
+              attachRuntimeAdapterTicker(env, registerEnvChangeCallback);
+            }
             Promise.resolve(handleRpcMessage(ws, msg, env)).catch(error => {
               const reason = (error as Error).message || 'rpc handler error';
               console.error(`[WS] RPC handler error: ${reason}`);
@@ -3754,6 +3779,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
       close(ws: RelaySocket, code, reason) {
         cleanupRpcMarketSubscription(ws);
+        forgetRuntimeAdapterClient(ws);
         forgetRelaySocketRuntimeId(ws);
         const removedId = removeClient(relayStore, ws);
         const wsType = ws.data.type;
