@@ -1,4 +1,5 @@
 import type { AccountFrame, AccountInput, AccountTx, EntityState, Env, EntityInput, HtlcRoute, AccountMachine, HtlcNoteKey } from '../../types';
+import { markStorageAccountDirty, markStorageEntityDirty } from '../../env-events';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { addMessage, addMessages, emitScopedEvents } from '../../state-helpers';
 import {
@@ -315,6 +316,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
   // Get or create account machine (KEY: counterparty ID for simpler lookups)
   // AccountMachine still uses canonical left/right internally
   const counterpartyId = normalizeEntityRef(input.fromEntityId);
+  markStorageEntityDirty(env, newState.entityId);
+  markStorageAccountDirty(env, newState.entityId, counterpartyId);
   const existingAccountKey = findAccountKeyInsensitive(newState.accounts, counterpartyId);
   let accountMachine = existingAccountKey ? newState.accounts.get(existingAccountKey) : undefined;
   let isNewAccount = false;

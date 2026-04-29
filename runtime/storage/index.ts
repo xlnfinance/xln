@@ -3,7 +3,9 @@ import { ethers } from 'ethers';
 import { Packr } from 'msgpackr';
 import { deserializeTaggedJson, safeStringify, serializeTaggedJson } from '../serialization-utils';
 import { cloneEntityReplica } from '../state-helpers';
+import { createStructuredLogger } from '../logger';
 import { buildHexKeyedMerkle, type RadixMerkleRadix } from './merkle';
+import { mergeStorageOverlayRecords, storageOverlayRecordKey } from './overlay';
 import {
   computeCanonicalEntityHash,
   computeCanonicalEntityHashesFromEnv,
@@ -53,6 +55,8 @@ type RuntimeDbLike = {
   };
   keys?: (options?: { gte?: Buffer; lt?: Buffer }) => AsyncIterable<Buffer | Uint8Array | string>;
 };
+
+const storageLog = createStructuredLogger('storage');
 
 type PerfDeps = {
   getPerfMs: () => number;
@@ -1246,11 +1250,6 @@ const addAccountRef = (target: Map<string, StorageDocRef>, entityId: string, cou
   target.set(docRefKey(ref), ref);
 };
 
-const addAccountPairRefs = (target: Map<string, StorageDocRef>, entityId: string, counterpartyId: string): void => {
-  addAccountRef(target, entityId, counterpartyId);
-  addAccountRef(target, counterpartyId, entityId);
-};
-
 const addBookRef = (target: Map<string, StorageBookRef>, entityId: string, pairId: string): void => {
   const normalizedEntityId = normalizeEntityId(entityId);
   const normalizedPairId = String(pairId || '').trim();
@@ -1283,13 +1282,13 @@ const collectJEventAccountRefs = (
     if (event.type === 'AccountSettled') {
       const leftEntity = String(eventData['leftEntity'] || '').toLowerCase();
       const rightEntity = String(eventData['rightEntity'] || '').toLowerCase();
-      if (leftEntity === entityId && rightEntity) addAccountPairRefs(touchedAccounts, entityId, rightEntity);
-      else if (rightEntity === entityId && leftEntity) addAccountPairRefs(touchedAccounts, entityId, leftEntity);
+      if (leftEntity === entityId && rightEntity) addAccountRef(touchedAccounts, entityId, rightEntity);
+      else if (rightEntity === entityId && leftEntity) addAccountRef(touchedAccounts, entityId, leftEntity);
     } else if (event.type === 'DisputeStarted' || event.type === 'DisputeFinalized') {
       const sender = String(eventData['sender'] || '').toLowerCase();
       const counterentity = String(eventData['counterentity'] || '').toLowerCase();
-      if (sender === entityId && counterentity) addAccountPairRefs(touchedAccounts, entityId, counterentity);
-      else if (counterentity === entityId && sender) addAccountPairRefs(touchedAccounts, entityId, sender);
+      if (sender === entityId && counterentity) addAccountRef(touchedAccounts, entityId, counterentity);
+      else if (counterentity === entityId && sender) addAccountRef(touchedAccounts, entityId, sender);
     }
   }
 };
@@ -1316,11 +1315,11 @@ const collectTouchedRefs = (appliedRuntimeInput: RuntimeInput): TouchedStorageRe
           const counterpartyId = normalizeEntityId(tx.data.fromEntityId) === entityId
             ? normalizeEntityId(tx.data.toEntityId)
             : normalizeEntityId(tx.data.fromEntityId);
-          addAccountPairRefs(touchedAccounts, entityId, counterpartyId);
+          addAccountRef(touchedAccounts, entityId, counterpartyId);
           break;
         }
         case 'openAccount':
-          addAccountPairRefs(touchedAccounts, entityId, tx.data.targetEntityId);
+          addAccountRef(touchedAccounts, entityId, tx.data.targetEntityId);
           break;
         case 'j_event_account_claim':
         case 'requestCollateral':
@@ -1340,27 +1339,27 @@ const collectTouchedRefs = (appliedRuntimeInput: RuntimeInput): TouchedStorageRe
         case 'settle_approve':
         case 'settle_execute':
         case 'settle_reject':
-          addAccountPairRefs(touchedAccounts, entityId, (tx.data as { counterpartyEntityId: string }).counterpartyEntityId);
+          addAccountRef(touchedAccounts, entityId, (tx.data as { counterpartyEntityId: string }).counterpartyEntityId);
           break;
         case 'r2c':
-          addAccountPairRefs(touchedAccounts, entityId, tx.data.counterpartyId);
+          addAccountRef(touchedAccounts, entityId, tx.data.counterpartyId);
           break;
         case 'directPayment':
         case 'htlcPayment':
-          addAccountPairRefs(touchedAccounts, entityId, nextRouteHop(entityId, tx.data.route, tx.data.targetEntityId));
+          addAccountRef(touchedAccounts, entityId, nextRouteHop(entityId, tx.data.route, tx.data.targetEntityId));
           break;
         case 'processHtlcTimeouts':
           for (const expired of tx.data.expiredLocks ?? []) {
-            addAccountPairRefs(touchedAccounts, entityId, expired.accountId);
+            addAccountRef(touchedAccounts, entityId, expired.accountId);
           }
           break;
         case 'rollbackTimedOutFrames':
           for (const timedOut of tx.data.timedOutAccounts ?? []) {
-            addAccountPairRefs(touchedAccounts, entityId, timedOut.counterpartyId);
+            addAccountRef(touchedAccounts, entityId, timedOut.counterpartyId);
           }
           break;
         case 'manualHtlcLock':
-          addAccountPairRefs(touchedAccounts, entityId, tx.data.counterpartyId);
+          addAccountRef(touchedAccounts, entityId, tx.data.counterpartyId);
           break;
         case 'j_event':
           collectJEventAccountRefs(entityId, tx.data, touchedAccounts);
@@ -1400,8 +1399,7 @@ const collectTouchedRefsFromFrameDbRecords = (
       if (!entityId || !counterpartyId) continue;
 
       touchedEntities.add(entityId);
-      touchedEntities.add(counterpartyId);
-      addAccountPairRefs(touchedAccounts, entityId, counterpartyId);
+      addAccountRef(touchedAccounts, entityId, counterpartyId);
       continue;
     }
 
@@ -1419,19 +1417,11 @@ const collectTouchedRefsFromFrameDbRecords = (
   return { touchedEntities, touchedAccounts, touchedBooks, touchedBookEntities };
 };
 
-const overlayRecordKey = (record: RuntimeOverlayRecord): string => {
-  if (record.family === 'entity') return `e:${normalizeEntityId(record.entityId)}`;
-  if (record.family === 'account') {
-    return `a:${normalizeEntityId(record.entityId)}:${normalizeEntityId(record.counterpartyId)}`;
-  }
-  return `b:${normalizeEntityId(record.entityId)}:${String(record.pairId || '').trim()}`;
-};
-
 const overlayRecordsFromTouchedRefs = (touched: TouchedStorageRefs): RuntimeOverlayRecord[] => {
   const records = new Map<string, RuntimeOverlayRecord>();
   for (const entityId of touched.touchedEntities) {
     const record: RuntimeOverlayRecord = { family: 'entity', entityId: normalizeEntityId(entityId) };
-    records.set(overlayRecordKey(record), record);
+    records.set(storageOverlayRecordKey(record), record);
   }
   for (const ref of touched.touchedAccounts.values()) {
     const record: RuntimeOverlayRecord = {
@@ -1439,7 +1429,7 @@ const overlayRecordsFromTouchedRefs = (touched: TouchedStorageRefs): RuntimeOver
       entityId: normalizeEntityId(ref.entityId),
       counterpartyId: normalizeEntityId(ref.counterpartyId),
     };
-    records.set(overlayRecordKey(record), record);
+    records.set(storageOverlayRecordKey(record), record);
   }
   for (const ref of touched.touchedBooks.values()) {
     const record: RuntimeOverlayRecord = {
@@ -1447,7 +1437,7 @@ const overlayRecordsFromTouchedRefs = (touched: TouchedStorageRefs): RuntimeOver
       entityId: normalizeEntityId(ref.entityId),
       pairId: String(ref.pairId || '').trim(),
     };
-    records.set(overlayRecordKey(record), record);
+    records.set(storageOverlayRecordKey(record), record);
   }
   return Array.from(records.values());
 };
@@ -1467,31 +1457,49 @@ const overlayRecordsFromFrameDbRecords = (
       pairId,
       ...(record.book ? {} : { deleted: true }),
     };
-    out.set(overlayRecordKey(item), item);
+    out.set(storageOverlayRecordKey(item), item);
   }
   return Array.from(out.values());
-};
-
-const mergeOverlayRecords = (
-  base: readonly RuntimeOverlayRecord[] | undefined,
-  extra: readonly RuntimeOverlayRecord[] | undefined,
-): RuntimeOverlayRecord[] => {
-  const byKey = new Map<string, RuntimeOverlayRecord>();
-  for (const record of base ?? []) {
-    byKey.set(overlayRecordKey(record), { ...record });
-  }
-  for (const record of extra ?? []) {
-    byKey.set(overlayRecordKey(record), { ...record });
-  }
-  return Array.from(byKey.values());
 };
 
 const mergeOverlayRecordsIntoEnv = (
   env: Env,
   records: readonly RuntimeOverlayRecord[],
 ): RuntimeOverlayRecord[] => {
-  env.overlay = mergeOverlayRecords(env.overlay, records);
+  env.overlay = mergeStorageOverlayRecords(env.overlay, records);
   return env.overlay.map((record) => ({ ...record }));
+};
+
+const overlayDriftDebugEnabled = (): boolean => {
+  const raw = String(process.env['XLN_DEBUG_OVERLAY_DRIFT'] ?? '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+};
+
+const reportOverlayDrift = (
+  env: Env,
+  legacyRecords: readonly RuntimeOverlayRecord[],
+): void => {
+  if (!overlayDriftDebugEnabled()) return;
+
+  const marks = env.runtimeState?.debugStorageOverlayMarks ?? [];
+  const expected = new Map<string, RuntimeOverlayRecord>();
+  const covered = new Map<string, RuntimeOverlayRecord>();
+  for (const record of legacyRecords) expected.set(storageOverlayRecordKey(record), record);
+  for (const record of env.overlay ?? []) covered.set(storageOverlayRecordKey(record), record);
+  for (const record of marks) covered.set(storageOverlayRecordKey(record), record);
+
+  const missing = Array.from(expected.keys()).filter((key) => !covered.has(key));
+  if (missing.length > 0) {
+    storageLog.warn('overlay drift detected', {
+      height: env.height,
+      missingCount: missing.length,
+      missing: missing.slice(0, 25),
+    });
+  }
+
+  if (env.runtimeState) {
+    env.runtimeState.debugStorageOverlayMarks = [];
+  }
 };
 
 const overlayRecordsFromDocs = (
@@ -1507,17 +1515,16 @@ const overlayRecordsFromDocs = (
       : doc.family === 'book'
         ? { family: 'book', entityId, pairId: String(doc.pairId || '').trim() }
         : { family: 'entity', entityId };
-    records.set(overlayRecordKey(record), record);
+    records.set(storageOverlayRecordKey(record), record);
   }
   for (const ref of dels ?? []) {
+    if (ref.family !== 'book') {
+      throw new Error(`STORAGE_OVERLAY_DELETE_UNSUPPORTED: family=${ref.family}`);
+    }
     const entityId = normalizeEntityId(ref.entityId);
     if (!entityId) continue;
-    const record: RuntimeOverlayRecord = ref.family === 'account'
-      ? { family: 'account', entityId, counterpartyId: normalizeEntityId(ref.counterpartyId) }
-      : ref.family === 'book'
-        ? { family: 'book', entityId, pairId: String(ref.pairId || '').trim(), deleted: true }
-        : { family: 'entity', entityId };
-    records.set(overlayRecordKey(record), record);
+    const record: RuntimeOverlayRecord = { family: 'book', entityId, pairId: String(ref.pairId || '').trim(), deleted: true };
+    records.set(storageOverlayRecordKey(record), record);
   }
   return Array.from(records.values());
 };
@@ -1533,7 +1540,7 @@ export const readStorageOverlayRecordsFromDiffs = async (
   for (let height = start; height <= end; height += 1) {
     const diff = await readJsonOrNull<StorageDiffRecord>(db, keyDiff(height));
     if (!diff) continue;
-    records = mergeOverlayRecords(records, overlayRecordsFromDocs(diff.puts, diff.dels));
+    records = mergeStorageOverlayRecords(records, overlayRecordsFromDocs(diff.puts, diff.dels));
   }
   return records;
 };
@@ -2191,6 +2198,10 @@ export const seedFreshStorageEpoch = async (options: {
     );
   }
 
+  // Epoch seeding intentionally skips diff/pack history. Rotation is only
+  // allowed at the current head, after that frame has produced a snapshot and
+  // materialized live state, so no unmaterialized overlay window crosses the
+  // epoch boundary.
   // Rotation must rebuild the fresh epoch through LevelDB writes, not copy the
   // old LSM directory. That gives the new DB clean compaction/fragments while
   // the old epoch remains immutable audit/history data.
@@ -2437,21 +2448,15 @@ export const saveRuntimeFrameToStorage = async (options: {
 
   const appliedRuntimeInput = options.currentFrameInput ?? { runtimeTxs: [], entityInputs: [] };
   const legacyTouched = mergeTouchedRefs(
-    mergeTouchedRefs(
-      collectTouchedRefs(appliedRuntimeInput),
-      collectTouchedRefs({
-        runtimeTxs: [],
-        entityInputs: options.currentFrameOutputs ?? [],
-      }),
-    ),
+    collectTouchedRefs(appliedRuntimeInput),
     collectTouchedRefsFromFrameDbRecords(options.frameDbRecords),
   );
-  const frameOverlayRecords = mergeOverlayRecords(
+  const legacyOverlayRecords = overlayRecordsFromTouchedRefs(legacyTouched);
+  const frameDbOverlayRecords = overlayRecordsFromFrameDbRecords(options.frameDbRecords);
+  reportOverlayDrift(options.env, mergeStorageOverlayRecords(legacyOverlayRecords, frameDbOverlayRecords));
+  const frameOverlayRecords = mergeStorageOverlayRecords(
     options.env.overlay,
-    mergeOverlayRecords(
-      overlayRecordsFromTouchedRefs(legacyTouched),
-      overlayRecordsFromFrameDbRecords(options.frameDbRecords),
-    ),
+    mergeStorageOverlayRecords(legacyOverlayRecords, frameDbOverlayRecords),
   );
   const overlayRecords = mergeOverlayRecordsIntoEnv(options.env, frameOverlayRecords);
   const frameTouched = collectTouchedRefsFromOverlay(frameOverlayRecords);

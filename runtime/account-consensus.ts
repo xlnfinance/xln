@@ -35,7 +35,7 @@ import { cryptoHash as hash, formatEntityId, HEAVY_LOGS } from './utils';
 import { safeStringify } from './serialization-utils';
 import { validateAccountFrame as validateAccountFrameStrict } from './validation-utils';
 import { processAccountTx } from './account-tx/apply';
-import { appendAccountFrameHistoryView, getAccountFrameHistoryView, recordAccountFrameHistory } from './env-events';
+import { appendAccountFrameHistoryView, getAccountFrameHistoryView, markStorageAccountDirty, recordAccountFrameHistory } from './env-events';
 import { assertAccountFrameDeltaIntegrity, deriveAccountFrameOffdeltas, deriveAccountFrameTokenIds } from './account-frame';
 // NOTE: Settlements now use SettlementWorkspace flow (see entity-tx/handlers/settle.ts)
 
@@ -615,6 +615,7 @@ export async function proposeAccountFrame(
   // Use the same fingerprint-based removal primitive as committed-tx cleanup.
   // This avoids relying on object identity across validation/replay paths.
   accountMachine.mempool = removeCommittedTxsFromMempool(accountMachine.mempool, txsToRemove);
+  markStorageAccountDirty(env, accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
 
   // If no valid txs remain after filtering, return early
   if (validTxs.length === 0) {
@@ -852,6 +853,7 @@ export async function proposeAccountFrame(
 
   // Set pending state (no longer storing clone - re-execution on commit)
   accountMachine.pendingFrame = newFrame;
+  markStorageAccountDirty(env, accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
   console.log(
     `🔒 PROPOSE: Account ${accountMachine.proofHeader.fromEntity.slice(-4)}:${accountMachine.proofHeader.toEntity.slice(-4)} pendingFrame=${newFrame.height}, txs=${newFrame.accountTxs.length}`,
   );
@@ -1146,6 +1148,7 @@ export async function handleAccountInput(
       delete accountMachine.pendingFrame;
       delete accountMachine.pendingAccountInput;
       delete accountMachine.clonedForValidation;
+      markStorageAccountDirty(env, accountMachine.proofHeader.fromEntity, input.fromEntityId);
       accountMachine.rollbackCount = Math.max(0, accountMachine.rollbackCount - 1); // Successful confirmation reduces rollback
       if (accountMachine.rollbackCount === 0) {
         delete accountMachine.lastRollbackFrameHash; // Reset deduplication on full resolution
@@ -1350,6 +1353,7 @@ export async function handleAccountInput(
           delete accountMachine.pendingFrame;
           delete accountMachine.pendingAccountInput;
           delete accountMachine.clonedForValidation;
+          markStorageAccountDirty(env, accountMachine.proofHeader.fromEntity, input.fromEntityId);
           accountMachine.rollbackCount = Math.max(1, accountMachine.rollbackCount + 1);
           accountMachine.lastRollbackFrameHash = receivedHash; // Track this rollback
           console.log(`📥 RIGHT-ROLLBACK: Accepting left's frame (rollbacks: ${accountMachine.rollbackCount})`);
