@@ -12,9 +12,6 @@ export const DEFAULT_ACCOUNT_MERKLE_RADIX: RadixMerkleRadix = 16;
 export const KEY_HEAD = Buffer.from([0x01]);
 export const KEY_FRAME = 0x02;
 export const KEY_DIFF = 0x03;
-// Legacy pack records are no longer written; keep the prefix only so history
-// pruning can clean DBs created before pack removal.
-export const KEY_PACK = 0x04;
 export const KEY_SNAPSHOT_MANIFEST = 0x05;
 export const KEY_LIVE_ENTITY = 0x21;
 export const KEY_LIVE_ACCOUNT = 0x22;

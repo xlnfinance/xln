@@ -10,7 +10,6 @@ import {
   KEY_LIVE_ENTITY,
   KEY_LIVE_ENTITY_HASH,
   KEY_LIVE_REPLICA_META,
-  KEY_PACK,
   KEY_SNAPSHOT_ACCOUNT,
   KEY_SNAPSHOT_BOOK,
   KEY_SNAPSHOT_ENTITY,
@@ -189,12 +188,10 @@ export const pruneHistoryBeforeHeight = async (db: RuntimeDbLike, heightInclusiv
   let removedBytes = 0;
   // Keep frame journals available for receipts/audit even after a snapshot exists.
   // Only replay-specific layers can be dropped once the snapshot covers them.
-  for (const prefix of [Buffer.from([KEY_DIFF]), Buffer.from([KEY_PACK])]) {
-    const keys = await listKeys(db, prefix);
-    removedBytes += await deleteKeys(
-      db,
-      keys.filter((key) => decodeHeight(key) <= heightInclusive),
-    );
-  }
+  const keys = await listKeys(db, Buffer.from([KEY_DIFF]));
+  removedBytes += await deleteKeys(
+    db,
+    keys.filter((key) => decodeHeight(key) <= heightInclusive),
+  );
   return removedBytes;
 };
