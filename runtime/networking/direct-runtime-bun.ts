@@ -26,7 +26,7 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
     throw new Error(`DIRECT_RUNTIME_WS_INVALID_RUNTIME_ID: ${String(options.runtimeId || '')}`);
   }
   const keyPair = deriveEncryptionKeyPair(options.runtimeSeed);
-  const sessions = new WeakMap<any, DirectWsSession>();
+  const sessions = new Map<any, DirectWsSession>();
 
   const ensureSession = (ws: any): DirectWsSession => {
     const existing = sessions.get(ws);

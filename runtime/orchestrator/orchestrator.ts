@@ -24,7 +24,7 @@ import {
   removeClient,
   type RelayStore,
 } from '../relay-store';
-import { relayRoute, type RelayRouterConfig } from '../relay-router';
+import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../relay-router';
 import {
   normalizeMarketEntityId,
   normalizeMarketPairId,
@@ -2476,6 +2476,7 @@ const server = Bun.serve({
     },
     close(ws) {
       cleanupRpcMarketSubscription(ws);
+      forgetRelaySocketRuntimeId(ws);
       removeClient(relayStore, ws);
     },
   },
