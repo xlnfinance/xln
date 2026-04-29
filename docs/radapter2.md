@@ -353,9 +353,18 @@ export async function initRuntime(config: RuntimeAdapterConfig) {
 
 export function readStore<T>(path: string, query?: ReadQuery) {
   // Returns a Svelte store that auto-refetches on every height bump.
+  // Pins atHeight to the tick height so every mounted component reads the
+  // same snapshot. That prevents torn financial UI across concurrent reads.
   const store = writable<T | null>(null)
-  const refetch = async () => { try { store.set(await adapter.read<T>(path, query)) } catch {} }
-  refetch()
+  const refetch = async (h: number) => {
+    try {
+      const pinned = query?.atHeight !== undefined
+        ? query
+        : { ...query, atHeight: h }
+      store.set(await adapter.read<T>(path, pinned))
+    } catch {}
+  }
+  // Svelte store subscription invokes refetch immediately with current height.
   const unsub = runtimeHeight.subscribe(refetch)
   return { ...store, dispose: unsub }
 }
@@ -403,6 +412,22 @@ We do not introduce `AccountView` or any other intermediate type.
 Time machine slider: a single store `viewHeight` (defaults to live).
 `readStore` passes `{ atHeight: viewHeight }`. When user scrubs, every mounted
 component refetches at that height. Live mode = `viewHeight = null`.
+
+## tearing protection
+
+Every live read pins `atHeight` to the last seen tick. When tick N arrives,
+all mounted `readStore` components refetch with `atHeight=N`, so the server
+returns one consistent snapshot for every read. Without pinning, two reads on
+the same UI refresh can land at heights N and N+1, rendering torn financial
+state such as a balance from one frame and an account list from the next.
+
+The pin is automatic in `readStore`; components do not pass it manually. Time
+machine scrubbing passes its own `atHeight`, which overrides the live pin.
+
+This is the only feature added on top of the bare three-method interface.
+Other optimizations such as batch reads, caching, `subscribe(prefixes)`,
+`AbortSignal`, HTTP, and SSE are deferred until profiling shows real pain.
+They are additive and do not break the wire protocol.
 
 ## migration from current frontend
 
@@ -490,8 +515,6 @@ re-introduction against this list.
    `runtime/storage/index.ts:74`). Bump = breaking change, frontend pins
    compatible major. Document in CHANGELOG.
 
-5. **read consistency at height boundary?** A client reads `entity/X` at
-   height H; before the response arrives, the server processes frame H+1.
-   Response reflects H+1. Acceptable: every read is at-or-after the request
-   timestamp, never older. Sticky historical reads use `atHeight=H`
-   explicitly.
+5. **read consistency at height boundary?** Resolved: `readStore` pins
+   `atHeight` to the last received tick height, so every batch of refetches on
+   a single tick reads against the same snapshot. See "tearing protection".
