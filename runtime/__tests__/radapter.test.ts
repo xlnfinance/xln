@@ -2,6 +2,8 @@ import { expect, test } from 'bun:test';
 
 import { deriveRuntimeAdapterAuthKey, verifyRuntimeAdapterAuthKey } from '../radapter/auth';
 import { resolveRuntimeAdapterRead } from '../radapter/resolve';
+import { handleRuntimeAdapterMessage } from '../radapter/server';
+import { deserializeTaggedJson } from '../serialization-utils';
 import type { EntityReplica, Env } from '../types';
 
 const entityId = `0x${'aa'.repeat(32)}`;
@@ -10,6 +12,7 @@ const counterpartyId = `0x${'bb'.repeat(32)}`;
 const makeEnv = (): Env => ({
   height: 7,
   timestamp: 700,
+  runtimeSeed: 'seed',
   eReplicas: new Map<string, EntityReplica>([
     [`${entityId}:signer`, {
       entityId,
@@ -105,4 +108,31 @@ test('runtime adapter resolver reads live head and entity paths', async () => {
   expect(accounts.items).toHaveLength(1);
   expect(accounts.items[0]?.currentHeight).toBe(1);
   expect(accounts.nextCursor).toBe(null);
+});
+
+test('runtime adapter websocket handler gates reads behind inspect auth', async () => {
+  const messages: string[] = [];
+  const socket = { send: (message: string) => { messages.push(message); } };
+  const env = makeEnv();
+
+  await handleRuntimeAdapterMessage(socket, { v: 1, id: 'read-1', op: 'read', path: 'head' }, env, {
+    enqueueRuntimeInput: () => {},
+  });
+  const denied = deserializeTaggedJson<{ ok: false; error: { code: string } }>(messages.pop() ?? '');
+  expect(denied.ok).toBe(false);
+  expect(denied.error.code).toBe('E_UNAUTHORIZED');
+
+  await handleRuntimeAdapterMessage(socket, { v: 1, id: 'auth-1', op: 'auth', key: deriveRuntimeAdapterAuthKey('seed', 'inspect') }, env, {
+    enqueueRuntimeInput: () => {},
+  });
+  const authed = deserializeTaggedJson<{ ok: true; payload: { authLevel: string } }>(messages.pop() ?? '');
+  expect(authed.ok).toBe(true);
+  expect(authed.payload.authLevel).toBe('inspect');
+
+  await handleRuntimeAdapterMessage(socket, { v: 1, id: 'read-2', op: 'read', path: 'head' }, env, {
+    enqueueRuntimeInput: () => {},
+  });
+  const read = deserializeTaggedJson<{ ok: true; payload: { latestHeight: number } }>(messages.pop() ?? '');
+  expect(read.ok).toBe(true);
+  expect(read.payload.latestHeight).toBe(7);
 });
