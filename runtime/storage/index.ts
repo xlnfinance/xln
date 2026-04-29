@@ -1427,10 +1427,10 @@ const overlayRecordKey = (record: RuntimeOverlayRecord): string => {
   return `b:${normalizeEntityId(record.entityId)}:${String(record.pairId || '').trim()}`;
 };
 
-const overlayRecordsFromTouchedRefs = (touched: TouchedStorageRefs, height: number): RuntimeOverlayRecord[] => {
+const overlayRecordsFromTouchedRefs = (touched: TouchedStorageRefs): RuntimeOverlayRecord[] => {
   const records = new Map<string, RuntimeOverlayRecord>();
   for (const entityId of touched.touchedEntities) {
-    const record: RuntimeOverlayRecord = { family: 'entity', entityId: normalizeEntityId(entityId), height };
+    const record: RuntimeOverlayRecord = { family: 'entity', entityId: normalizeEntityId(entityId) };
     records.set(overlayRecordKey(record), record);
   }
   for (const ref of touched.touchedAccounts.values()) {
@@ -1438,7 +1438,6 @@ const overlayRecordsFromTouchedRefs = (touched: TouchedStorageRefs, height: numb
       family: 'account',
       entityId: normalizeEntityId(ref.entityId),
       counterpartyId: normalizeEntityId(ref.counterpartyId),
-      height,
     };
     records.set(overlayRecordKey(record), record);
   }
@@ -1447,7 +1446,6 @@ const overlayRecordsFromTouchedRefs = (touched: TouchedStorageRefs, height: numb
       family: 'book',
       entityId: normalizeEntityId(ref.entityId),
       pairId: String(ref.pairId || '').trim(),
-      height,
     };
     records.set(overlayRecordKey(record), record);
   }
@@ -1456,7 +1454,6 @@ const overlayRecordsFromTouchedRefs = (touched: TouchedStorageRefs, height: numb
 
 const overlayRecordsFromFrameDbRecords = (
   records: readonly RuntimeFrameDbRecord[] | undefined,
-  height: number,
 ): RuntimeOverlayRecord[] => {
   const out = new Map<string, RuntimeOverlayRecord>();
   for (const record of records ?? []) {
@@ -1468,7 +1465,6 @@ const overlayRecordsFromFrameDbRecords = (
       family: 'book',
       entityId,
       pairId,
-      height,
       ...(record.book ? {} : { deleted: true }),
     };
     out.set(overlayRecordKey(item), item);
@@ -1498,13 +1494,49 @@ const mergeOverlayRecordsIntoEnv = (
   return env.overlay.map((record) => ({ ...record }));
 };
 
-const overlayRecordsForHeight = (
-  records: readonly RuntimeOverlayRecord[] | undefined,
-  height: number,
-): RuntimeOverlayRecord[] =>
-  (records ?? [])
-    .filter((record) => Math.floor(Number(record.height ?? 0)) === height)
-    .map((record) => ({ ...record }));
+const overlayRecordsFromDocs = (
+  puts: readonly StorageDoc[] | undefined,
+  dels: readonly StorageDocRef[] | undefined,
+): RuntimeOverlayRecord[] => {
+  const records = new Map<string, RuntimeOverlayRecord>();
+  for (const doc of puts ?? []) {
+    const entityId = normalizeEntityId(doc.entityId);
+    if (!entityId) continue;
+    const record: RuntimeOverlayRecord = doc.family === 'account'
+      ? { family: 'account', entityId, counterpartyId: normalizeEntityId(doc.counterpartyId) }
+      : doc.family === 'book'
+        ? { family: 'book', entityId, pairId: String(doc.pairId || '').trim() }
+        : { family: 'entity', entityId };
+    records.set(overlayRecordKey(record), record);
+  }
+  for (const ref of dels ?? []) {
+    const entityId = normalizeEntityId(ref.entityId);
+    if (!entityId) continue;
+    const record: RuntimeOverlayRecord = ref.family === 'account'
+      ? { family: 'account', entityId, counterpartyId: normalizeEntityId(ref.counterpartyId) }
+      : ref.family === 'book'
+        ? { family: 'book', entityId, pairId: String(ref.pairId || '').trim(), deleted: true }
+        : { family: 'entity', entityId };
+    records.set(overlayRecordKey(record), record);
+  }
+  return Array.from(records.values());
+};
+
+export const readStorageOverlayRecordsFromDiffs = async (
+  db: RuntimeDbLike,
+  startHeight: number,
+  targetHeight: number,
+): Promise<RuntimeOverlayRecord[]> => {
+  let records: RuntimeOverlayRecord[] = [];
+  const start = Math.max(1, Math.floor(startHeight));
+  const end = Math.floor(targetHeight);
+  for (let height = start; height <= end; height += 1) {
+    const diff = await readJsonOrNull<StorageDiffRecord>(db, keyDiff(height));
+    if (!diff) continue;
+    records = mergeOverlayRecords(records, overlayRecordsFromDocs(diff.puts, diff.dels));
+  }
+  return records;
+};
 
 const buildBookDeletionsFromOverlay = (
   records: readonly RuntimeOverlayRecord[] | undefined,
@@ -2415,11 +2447,11 @@ export const saveRuntimeFrameToStorage = async (options: {
     collectTouchedRefsFromFrameDbRecords(options.frameDbRecords),
   );
   const frameOverlayRecords = mergeOverlayRecords(
+    options.env.overlay,
     mergeOverlayRecords(
-      overlayRecordsForHeight(options.env.overlay, options.env.height),
-      overlayRecordsFromTouchedRefs(legacyTouched, options.env.height),
+      overlayRecordsFromTouchedRefs(legacyTouched),
+      overlayRecordsFromFrameDbRecords(options.frameDbRecords),
     ),
-    overlayRecordsFromFrameDbRecords(options.frameDbRecords, options.env.height),
   );
   const overlayRecords = mergeOverlayRecordsIntoEnv(options.env, frameOverlayRecords);
   const frameTouched = collectTouchedRefsFromOverlay(frameOverlayRecords);
@@ -2499,7 +2531,7 @@ export const saveRuntimeFrameToStorage = async (options: {
     height: options.env.height,
     timestamp: options.env.timestamp,
     prevFrameHash,
-    stateHash: preparedHashes?.stateHash ?? previousFrame?.stateHash ?? ZERO_FRAME_HASH,
+    stateHash: preparedHashes?.stateHash ?? '',
     hashMode: 'storage-merkle-v1',
     materializedState: shouldMaterialize,
     entityHashes: preparedHashes?.entityHashes ?? previousFrame?.entityHashes ?? [],
@@ -2513,7 +2545,9 @@ export const saveRuntimeFrameToStorage = async (options: {
     } : {}),
     runtimeInput: appliedRuntimeInput,
     frameOutputs: (options.currentFrameOutputs ?? []).map((output) => ({ ...output })),
-    overlayRecords: frameOverlayRecords.map((record) => ({ ...record })),
+    ...(shouldMaterialize && overlayRecords.length > 0
+      ? { overlayRecords: overlayRecords.map((record) => ({ ...record })) }
+      : {}),
     // Logs/history are indexed in the frame DB. Keep the runtime state journal
     // focused on replay inputs/outputs and state hashes.
     logs: [],
@@ -2797,11 +2831,11 @@ export const verifyStorageTailIntegrity = async (
     if (!Array.isArray(record.entityHashes)) {
       throw new Error(`STORAGE_VERIFY_ENTITY_HASHES_MISSING: height=${height}`);
     }
-    const expectedStateHash = computeStorageRuntimeStateHash(record.height, record.timestamp, record.entityHashes);
-    if (record.stateHash !== expectedStateHash) {
-      throw new Error(`STORAGE_VERIFY_STATE_HASH_MISMATCH: height=${height} expected=${expectedStateHash} actual=${record.stateHash}`);
-    }
     if (record.materializedState !== false) {
+      const expectedStateHash = computeStorageRuntimeStateHash(record.height, record.timestamp, record.entityHashes);
+      if (record.stateHash !== expectedStateHash) {
+        throw new Error(`STORAGE_VERIFY_STATE_HASH_MISMATCH: height=${height} expected=${expectedStateHash} actual=${record.stateHash}`);
+      }
       if (!Array.isArray(record.auditEntityHashes) || !record.auditStateHash) {
         throw new Error(`STORAGE_VERIFY_AUDIT_HASH_MISSING: height=${height}`);
       }

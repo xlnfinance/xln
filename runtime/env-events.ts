@@ -130,7 +130,7 @@ const pushOverlayRecord = (env: Env, record: RuntimeOverlayRecord): void => {
 export const markStorageEntityDirty = (env: Env, entityId: string): void => {
   const normalized = String(entityId || '').toLowerCase();
   if (!normalized) return;
-  pushOverlayRecord(env, { family: 'entity', entityId: normalized, height: env.height });
+  pushOverlayRecord(env, { family: 'entity', entityId: normalized });
 };
 
 export const markStorageAccountDirty = (env: Env, entityId: string, counterpartyId: string): void => {
@@ -141,7 +141,6 @@ export const markStorageAccountDirty = (env: Env, entityId: string, counterparty
     family: 'account',
     entityId: normalizedEntityId,
     counterpartyId: normalizedCounterpartyId,
-    height: env.height,
   });
 };
 
@@ -158,7 +157,6 @@ export const markStorageBookDirty = (
     family: 'book',
     entityId: normalizedEntityId,
     pairId: normalizedPairId,
-    height: env.height,
     ...(deleted ? { deleted: true } : {}),
   });
 };
@@ -252,11 +250,6 @@ export const peekPendingFrameDbRecords = (env: Env): RuntimeFrameDbRecord[] =>
     ? env.runtimeState.pendingFrameDbRecords.map((record) => structuredClone(record))
     : [];
 
-export const peekOverlay = (env: Env): RuntimeOverlayRecord[] =>
-  Array.isArray(env.overlay)
-    ? env.overlay.map((record) => ({ ...record }))
-    : [];
-
 export const dropPendingFrameDbRecords = (env: Env, count: number): void => {
   const pending = env.runtimeState?.pendingFrameDbRecords;
   if (!Array.isArray(pending) || pending.length === 0) return;
@@ -266,6 +259,10 @@ export const dropPendingFrameDbRecords = (env: Env, count: number): void => {
 export const dropOverlay = (env: Env, count: number): void => {
   const pending = env.overlay;
   if (!Array.isArray(pending) || pending.length === 0) return;
+  if (Math.max(0, Math.floor(count)) >= pending.length) {
+    env.overlay = [];
+    return;
+  }
   pending.splice(0, Math.max(0, Math.floor(count)));
 };
 

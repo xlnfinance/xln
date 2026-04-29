@@ -181,6 +181,7 @@ import {
   readFrameDbRuntimeActivity,
   readStorageFrameRecord,
   readStorageHead,
+  readStorageOverlayRecordsFromDiffs,
   readStorageReplicaMeta,
   saveRuntimeFrameToStorage,
   seedFreshStorageEpoch,
@@ -4340,20 +4341,34 @@ const restoreOverlayFromFrameLog = async (
   env: Env,
   targetHeight: number,
 ): Promise<void> => {
-  const records = new Map<string, RuntimeOverlayRecord>();
   for (const handle of await listPersistedStorageHandles(env)) {
     if (targetHeight > handle.latestHeight) continue;
+
+    const targetFrame = await readStorageFrameRecord(handle.db, targetHeight);
+    if (targetFrame?.materializedState !== false) {
+      env.overlay = [];
+      return;
+    }
+
     const startHeight = Math.max(1, handle.latestMaterializedHeight + 1);
-    if (startHeight > targetHeight) break;
-    for (let height = startHeight; height <= targetHeight; height += 1) {
-      const frame = await readStorageFrameRecord(handle.db, height);
-      for (const record of frame?.overlayRecords ?? []) {
+    if (startHeight > targetHeight) {
+      env.overlay = [];
+      return;
+    }
+
+    const records = new Map<string, RuntimeOverlayRecord>();
+    for (const record of await readStorageOverlayRecordsFromDiffs(handle.db, startHeight, targetHeight)) {
+      records.set(runtimeOverlayKey(record), { ...record });
+    }
+    if (records.size === 0 && Array.isArray(targetFrame?.overlayRecords)) {
+      for (const record of targetFrame.overlayRecords) {
         records.set(runtimeOverlayKey(record), { ...record });
       }
     }
-    break;
+    env.overlay = Array.from(records.values());
+    return;
   }
-  env.overlay = Array.from(records.values());
+  env.overlay = [];
 };
 
 const resolvePersistedLatestHeight = async (env: Env): Promise<number> => {
