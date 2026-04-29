@@ -4280,8 +4280,6 @@ type VerifyRuntimeChainResult = {
   restoredHeight: number;
   expectedStateHash: string;
   actualStateHash: string;
-  expectedAuditStateHash?: string;
-  actualAuditStateHash?: string;
   expectedCanonicalStateHash?: string;
   actualCanonicalStateHash?: string;
 };
@@ -4661,7 +4659,6 @@ export const inspectStorageDb = async (env: Env) => {
           latestSnapshotHeight: current.head?.latestSnapshotHeight ?? 0,
           frameCount: current.frameCount,
           diffCount: current.diffCount,
-          packCount: current.packCount,
           snapshotCount: current.snapshotHeights.length,
           liveBytes: current.liveBytes,
           historyBytes: current.historyBytes,
@@ -4676,7 +4673,6 @@ export const inspectStorageDb = async (env: Env) => {
           latestSnapshotHeight: previous.head?.latestSnapshotHeight ?? 0,
           frameCount: previous.frameCount,
           diffCount: previous.diffCount,
-          packCount: previous.packCount,
           snapshotCount: previous.snapshotHeights.length,
           liveBytes: previous.liveBytes,
           historyBytes: previous.historyBytes,
@@ -4693,21 +4689,18 @@ export const inspectStorageDb = async (env: Env) => {
     head: current?.head ?? previous?.head ?? null,
     frameCount: (current?.frameCount ?? 0) + (previous?.frameCount ?? 0),
     diffCount: (current?.diffCount ?? 0) + (previous?.diffCount ?? 0),
-    packCount: (current?.packCount ?? 0) + (previous?.packCount ?? 0),
     snapshotHeights,
     liveEntityCount: (current?.liveEntityCount ?? 0) + (previous?.liveEntityCount ?? 0),
     liveAccountCount: (current?.liveAccountCount ?? 0) + (previous?.liveAccountCount ?? 0),
     liveBookCount: (current?.liveBookCount ?? 0) + (previous?.liveBookCount ?? 0),
     frameBytes: (current?.frameBytes ?? 0) + (previous?.frameBytes ?? 0),
     diffBytes: (current?.diffBytes ?? 0) + (previous?.diffBytes ?? 0),
-    packBytes: (current?.packBytes ?? 0) + (previous?.packBytes ?? 0),
     snapshotBytes: (current?.snapshotBytes ?? 0) + (previous?.snapshotBytes ?? 0),
     liveBytes: (current?.liveBytes ?? 0) + (previous?.liveBytes ?? 0),
     historyBytes: (current?.historyBytes ?? 0) + (previous?.historyBytes ?? 0),
     totalBytes: (current?.totalBytes ?? 0) + (previous?.totalBytes ?? 0),
     maxFrameBytes: Math.max(current?.maxFrameBytes ?? 0, previous?.maxFrameBytes ?? 0),
     maxDiffBytes: Math.max(current?.maxDiffBytes ?? 0, previous?.maxDiffBytes ?? 0),
-    maxPackBytes: Math.max(current?.maxPackBytes ?? 0, previous?.maxPackBytes ?? 0),
     maxSnapshotBytes: Math.max(current?.maxSnapshotBytes ?? 0, previous?.maxSnapshotBytes ?? 0),
     epochDbs: epochs,
   };
@@ -4734,8 +4727,6 @@ export const verifyRuntimeChain = async (
   const checkpointHeight = await resolvePersistedSnapshotHeight(bootstrapEnv, latestHeight);
   let expectedStateHash = '';
   let actualStateHash = '';
-  let expectedAuditStateHash = '';
-  let actualAuditStateHash = '';
   let expectedCanonicalStateHash = '';
   let actualCanonicalStateHash = '';
   let restoredHeight = selectedSnapshotHeight;
@@ -4758,8 +4749,6 @@ export const verifyRuntimeChain = async (
           persistedFrame.hashMode === 'storage-merkle-v1';
         if (storageHashMode && persistedFrame.materializedState === false) {
           actualStateHash = expectedStateHash;
-          expectedAuditStateHash = '';
-          actualAuditStateHash = '';
           expectedCanonicalStateHash = '';
           actualCanonicalStateHash = '';
           restoredHeight = height;
@@ -4770,8 +4759,6 @@ export const verifyRuntimeChain = async (
             ? computeStorageDebugStateHashFromEnv(replayed.env)
             : computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(replayed.env));
         if (storageHashMode) {
-          expectedAuditStateHash = '';
-          actualAuditStateHash = '';
           if (persistedFrame.canonicalStateHash) {
             expectedCanonicalStateHash = String(persistedFrame.canonicalStateHash);
             actualCanonicalStateHash = computeStorageCanonicalStateHashFromEnv(replayed.env);
@@ -4784,8 +4771,6 @@ export const verifyRuntimeChain = async (
                 restoredHeight: height,
                 expectedStateHash,
                 actualStateHash,
-                expectedAuditStateHash,
-                actualAuditStateHash,
                 expectedCanonicalStateHash,
                 actualCanonicalStateHash,
               };
@@ -4795,8 +4780,6 @@ export const verifyRuntimeChain = async (
             actualCanonicalStateHash = '';
           }
         } else {
-          expectedAuditStateHash = expectedStateHash;
-          actualAuditStateHash = actualStateHash;
           expectedCanonicalStateHash = expectedStateHash;
           actualCanonicalStateHash = actualStateHash;
         }
@@ -4810,8 +4793,6 @@ export const verifyRuntimeChain = async (
             restoredHeight,
             expectedStateHash,
             actualStateHash,
-            expectedAuditStateHash,
-            actualAuditStateHash,
             expectedCanonicalStateHash,
             actualCanonicalStateHash,
           };
@@ -4834,11 +4815,9 @@ export const verifyRuntimeChain = async (
     restoredHeight,
     expectedStateHash,
     actualStateHash,
-      expectedAuditStateHash,
-      actualAuditStateHash,
-      expectedCanonicalStateHash,
-      actualCanonicalStateHash,
-    };
+    expectedCanonicalStateHash,
+    actualCanonicalStateHash,
+  };
 };
 
 export const readPersistedFrameJournal = async (env: Env, height: number): Promise<PersistedFrameJournal | null> => {

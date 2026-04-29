@@ -2027,7 +2027,6 @@ export interface Env {
     snapshotIntervalFrames?: number;
     storage?: {
       enabled?: boolean;
-      packPeriodFrames?: number;
       snapshotPeriodFrames?: number;
       retainSnapshots?: number;
       epochMaxBytes?: number;

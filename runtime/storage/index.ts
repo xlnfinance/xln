@@ -61,7 +61,6 @@ type PerfDeps = {
 
 export type StorageRuntimeConfig = {
   enabled?: boolean;
-  packPeriodFrames?: number;
   snapshotPeriodFrames?: number;
   retainSnapshots?: number;
   epochMaxBytes?: number;
@@ -76,8 +75,6 @@ export type StorageHead = {
   latestHeight: number;
   latestMaterializedHeight?: number;
   latestSnapshotHeight: number;
-  latestPackHeight: number;
-  packPeriodFrames: number;
   snapshotPeriodFrames: number;
   retainSnapshots: number;
   epochMaxBytes: number;
@@ -272,21 +269,18 @@ export type StorageDebugStats = {
   head: StorageHead | null;
   frameCount: number;
   diffCount: number;
-  packCount: number;
   snapshotHeights: number[];
   liveEntityCount: number;
   liveAccountCount: number;
   liveBookCount: number;
   frameBytes: number;
   diffBytes: number;
-  packBytes: number;
   snapshotBytes: number;
   liveBytes: number;
   historyBytes: number;
   totalBytes: number;
   maxFrameBytes: number;
   maxDiffBytes: number;
-  maxPackBytes: number;
   maxSnapshotBytes: number;
   epochDbs?: Array<{
     role: 'current' | 'previous';
@@ -295,7 +289,6 @@ export type StorageDebugStats = {
     latestSnapshotHeight: number;
     frameCount: number;
     diffCount: number;
-    packCount: number;
     snapshotCount: number;
     liveBytes: number;
     historyBytes: number;
@@ -304,7 +297,6 @@ export type StorageDebugStats = {
 };
 
 const STORAGE_SCHEMA_VERSION = 1;
-const DEFAULT_PACK_PERIOD_FRAMES = 64;
 const DEFAULT_SNAPSHOT_PERIOD_FRAMES = 256;
 const DEFAULT_RETAIN_SNAPSHOTS = 3;
 const DEFAULT_EPOCH_MAX_BYTES = 256 * 1024 * 1024;
@@ -326,7 +318,8 @@ const KEY_LIVE_REPLICA_META = 0x26;
 const KEY_SNAPSHOT_ENTITY = 0x31;
 const KEY_SNAPSHOT_ACCOUNT = 0x32;
 const KEY_SNAPSHOT_BOOK = 0x33;
-const EPOCH_SEED_FRAME_TAIL = 129;
+const STORAGE_VERIFY_TAIL_FRAMES = 128;
+const EPOCH_SEED_FRAME_TAIL = STORAGE_VERIFY_TAIL_FRAMES + 1;
 
 const KEY_FRAME_DB_HEAD = Buffer.from([0x00]);
 const FRAME_DB_ACCOUNT_FRAME = 0x01;
@@ -1042,10 +1035,6 @@ const docValueKey = (doc: StorageDoc): string => {
 
 const runtimeConfigFromEnv = (env: Env): Required<StorageRuntimeConfig> => ({
   enabled: env.runtimeConfig?.storage?.enabled ?? true,
-  packPeriodFrames: Math.max(
-    1,
-    Number(env.runtimeConfig?.storage?.packPeriodFrames ?? DEFAULT_PACK_PERIOD_FRAMES),
-  ),
   snapshotPeriodFrames: Math.max(
     1,
     Number(
@@ -1093,8 +1082,6 @@ const readHead = async (db: RuntimeDbLike, config: Required<StorageRuntimeConfig
     latestHeight: 0,
     latestMaterializedHeight: 0,
     latestSnapshotHeight: 0,
-    latestPackHeight: 0,
-    packPeriodFrames: config.packPeriodFrames,
     snapshotPeriodFrames: config.snapshotPeriodFrames,
     retainSnapshots: config.retainSnapshots,
     epochMaxBytes: config.epochMaxBytes,
@@ -1903,7 +1890,7 @@ export const seedFreshStorageEpoch = async (options: {
 
   if (latestHeight > 0) {
     // The fresh epoch must keep enough frame chain to verify its own tail and
-    // to compute prevFrameHash for the first append after rotation. Diffs/packs
+    // to compute prevFrameHash for the first append after rotation. Diffs
     // stay in the immutable previous epoch; live docs + latest snapshot are the
     // recovery truth for the new current epoch.
     const firstTailHeight = Math.max(1, latestHeight - EPOCH_SEED_FRAME_TAIL + 1);
@@ -1922,7 +1909,6 @@ export const seedFreshStorageEpoch = async (options: {
     encodeBuffer({
       ...head,
       latestMaterializedHeight: options.snapshotHeight,
-      latestPackHeight: 0,
       latestSnapshotHeight: options.snapshotHeight,
       retainedHistoryBytes: snapshotBytes + frameBytes,
     } satisfies StorageHead),
@@ -2232,8 +2218,6 @@ export const saveRuntimeFrameToStorage = async (options: {
       ? options.env.height
       : Math.max(0, Math.floor(Number(head.latestMaterializedHeight ?? 0))),
     latestSnapshotHeight: head.latestSnapshotHeight,
-    latestPackHeight: head.latestPackHeight,
-    packPeriodFrames: config.packPeriodFrames,
     snapshotPeriodFrames: config.snapshotPeriodFrames,
     retainSnapshots: config.retainSnapshots,
     epochMaxBytes: config.epochMaxBytes,
@@ -2404,7 +2388,7 @@ export const verifyStorageTailIntegrity = async (
   const head = await readJsonOrNull<StorageHead>(db, KEY_HEAD);
   if (!head || head.latestHeight <= 0) return { latestHeight: 0, checkedFrames: 0 };
   const latestHeight = Math.max(0, Math.floor(Number(head.latestHeight)));
-  const tailFrames = Math.max(1, Math.floor(Number(options.tailFrames ?? 128)));
+  const tailFrames = Math.max(1, Math.floor(Number(options.tailFrames ?? STORAGE_VERIFY_TAIL_FRAMES)));
   const startHeight = Math.max(1, latestHeight - tailFrames + 1);
   let previousHash = ZERO_FRAME_HASH;
   if (startHeight > 1) {
@@ -2627,7 +2611,6 @@ export const inspectStorage = async (options: {
     head,
     frameStats,
     diffStats,
-    packStats,
     snapshotManifestStats,
     snapshotEntityStats,
     snapshotAccountStats,
@@ -2641,7 +2624,6 @@ export const inspectStorage = async (options: {
     readJsonOrNull<StorageHead>(db, KEY_HEAD),
     measurePrefixBytes(db, Buffer.from([KEY_FRAME])),
     measurePrefixBytes(db, Buffer.from([KEY_DIFF])),
-    measurePrefixBytes(db, Buffer.from([KEY_PACK])),
     measurePrefixBytes(db, Buffer.from([KEY_SNAPSHOT_MANIFEST])),
     measurePrefixBytes(db, Buffer.from([KEY_SNAPSHOT_ENTITY])),
     measurePrefixBytes(db, Buffer.from([KEY_SNAPSHOT_ACCOUNT])),
@@ -2659,28 +2641,25 @@ export const inspectStorage = async (options: {
     snapshotAccountStats.bytes +
     snapshotBookStats.bytes;
   const liveBytes = liveEntityStats.bytes + liveAccountStats.bytes + liveBookStats.bytes + liveReplicaMetaStats.bytes;
-  const historyBytes = frameStats.bytes + diffStats.bytes + packStats.bytes + snapshotBytes;
+  const historyBytes = frameStats.bytes + diffStats.bytes + snapshotBytes;
   const totalBytes = historyBytes + liveBytes;
 
   return {
     head,
     frameCount: frameStats.count,
     diffCount: diffStats.count,
-    packCount: packStats.count,
     snapshotHeights,
     liveEntityCount: liveEntityStats.count,
     liveAccountCount: liveAccountStats.count,
     liveBookCount: liveBookStats.count,
     frameBytes: frameStats.bytes,
     diffBytes: diffStats.bytes,
-    packBytes: packStats.bytes,
     snapshotBytes,
     liveBytes,
     historyBytes,
     totalBytes,
     maxFrameBytes: frameStats.maxValueBytes,
     maxDiffBytes: diffStats.maxValueBytes,
-    maxPackBytes: packStats.maxValueBytes,
     maxSnapshotBytes: Math.max(
       snapshotManifestStats.maxValueBytes,
       snapshotEntityStats.maxValueBytes,
