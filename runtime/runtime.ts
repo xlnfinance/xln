@@ -75,6 +75,7 @@ import {
   dropPendingFrameDbRecords,
   dropOverlay,
   flushPendingAuditEvents,
+  markStorageEntityDirty,
   peekPendingFrameDbRecords,
   setAccountFrameHistoryView,
 } from './env-events';
@@ -187,6 +188,7 @@ import {
   seedFreshStorageEpoch,
   verifyStorageTailIntegrity,
 } from './storage';
+import { storageOverlayRecordKey } from './storage/overlay';
 import {
   validateDelta,
   validateAccountDeltas,
@@ -2748,6 +2750,7 @@ const applyRuntimeInput = async (
           }
           normalizeEntitySwapTradingPairs(existingReplica.state);
           env.eReplicas.set(replicaKey, existingReplica);
+          markStorageEntityDirty(env, existingReplica.state.entityId);
           if (DEBUG) {
             console.log(
               `Skipping fresh replica init for restored entity #${formatEntityDisplay(runtimeTx.entityId)}:${formatSignerDisplay(runtimeTx.signerId)}`,
@@ -2818,6 +2821,7 @@ const applyRuntimeInput = async (
         }
 
         env.eReplicas.set(replicaKey, replica);
+        markStorageEntityDirty(env, replica.state.entityId);
 
         const validators = runtimeTx.data.config.validators;
         const threshold = runtimeTx.data.config.threshold;
@@ -4329,14 +4333,6 @@ const listPersistedStorageHandles = async (env: Env): Promise<PersistedStorageHa
   });
 };
 
-const runtimeOverlayKey = (record: RuntimeOverlayRecord): string => {
-  if (record.family === 'entity') return `e:${String(record.entityId || '').toLowerCase()}`;
-  if (record.family === 'account') {
-    return `a:${String(record.entityId || '').toLowerCase()}:${String(record.counterpartyId || '').toLowerCase()}`;
-  }
-  return `b:${String(record.entityId || '').toLowerCase()}:${String(record.pairId || '').trim()}`;
-};
-
 const restoreOverlayFromFrameLog = async (
   env: Env,
   targetHeight: number,
@@ -4358,11 +4354,11 @@ const restoreOverlayFromFrameLog = async (
 
     const records = new Map<string, RuntimeOverlayRecord>();
     for (const record of await readStorageOverlayRecordsFromDiffs(handle.db, startHeight, targetHeight)) {
-      records.set(runtimeOverlayKey(record), { ...record });
+      records.set(storageOverlayRecordKey(record), { ...record });
     }
     if (records.size === 0 && Array.isArray(targetFrame?.overlayRecords)) {
       for (const record of targetFrame.overlayRecords) {
-        records.set(runtimeOverlayKey(record), { ...record });
+        records.set(storageOverlayRecordKey(record), { ...record });
       }
     }
     env.overlay = Array.from(records.values());

@@ -11,6 +11,7 @@
 
 import type { AccountFrame, AccountMachine, Env, LogCategory, FrameLogEntry, RuntimeFrameDbRecord, RuntimeOverlayRecord } from './types';
 import type { BookState } from './orderbook';
+import { storageOverlayRecordKey } from './storage/overlay';
 
 const getLogState = (env: Env) => {
   if (!env.runtimeState) env.runtimeState = {};
@@ -110,16 +111,10 @@ const getOverlay = (env: Env): RuntimeOverlayRecord[] => {
   return env.overlay;
 };
 
-const overlayKey = (record: RuntimeOverlayRecord): string => {
-  if (record.family === 'entity') return `e:${record.entityId}`;
-  if (record.family === 'account') return `a:${record.entityId}:${record.counterpartyId}`;
-  return `b:${record.entityId}:${record.pairId}`;
-};
-
 const pushOverlayRecord = (env: Env, record: RuntimeOverlayRecord): void => {
   const overlay = getOverlay(env);
-  const key = overlayKey(record);
-  const existingIndex = overlay.findIndex((candidate) => overlayKey(candidate) === key);
+  const key = storageOverlayRecordKey(record);
+  const existingIndex = overlay.findIndex((candidate) => storageOverlayRecordKey(candidate) === key);
   if (existingIndex >= 0) {
     overlay[existingIndex] = record;
     return;
@@ -127,21 +122,43 @@ const pushOverlayRecord = (env: Env, record: RuntimeOverlayRecord): void => {
   overlay.push(record);
 };
 
+const overlayDriftDebugEnabled = (): boolean => {
+  const raw = String(process.env['XLN_DEBUG_OVERLAY_DRIFT'] ?? '').trim().toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+};
+
+const trackDebugOverlayMark = (env: Env, record: RuntimeOverlayRecord): void => {
+  if (!overlayDriftDebugEnabled()) return;
+  const runtimeState = env.runtimeState ?? (env.runtimeState = {});
+  const marks = runtimeState.debugStorageOverlayMarks ?? (runtimeState.debugStorageOverlayMarks = []);
+  const key = storageOverlayRecordKey(record);
+  const existingIndex = marks.findIndex((candidate) => storageOverlayRecordKey(candidate) === key);
+  if (existingIndex >= 0) {
+    marks[existingIndex] = { ...record };
+    return;
+  }
+  marks.push({ ...record });
+};
+
 export const markStorageEntityDirty = (env: Env, entityId: string): void => {
   const normalized = String(entityId || '').toLowerCase();
   if (!normalized) return;
-  pushOverlayRecord(env, { family: 'entity', entityId: normalized });
+  const record: RuntimeOverlayRecord = { family: 'entity', entityId: normalized };
+  pushOverlayRecord(env, record);
+  trackDebugOverlayMark(env, record);
 };
 
 export const markStorageAccountDirty = (env: Env, entityId: string, counterpartyId: string): void => {
   const normalizedEntityId = String(entityId || '').toLowerCase();
   const normalizedCounterpartyId = String(counterpartyId || '').toLowerCase();
   if (!normalizedEntityId || !normalizedCounterpartyId) return;
-  pushOverlayRecord(env, {
+  const record: RuntimeOverlayRecord = {
     family: 'account',
     entityId: normalizedEntityId,
     counterpartyId: normalizedCounterpartyId,
-  });
+  };
+  pushOverlayRecord(env, record);
+  trackDebugOverlayMark(env, record);
 };
 
 export const markStorageBookDirty = (
@@ -153,12 +170,14 @@ export const markStorageBookDirty = (
   const normalizedEntityId = String(entityId || '').toLowerCase();
   const normalizedPairId = String(pairId || '').trim();
   if (!normalizedEntityId || !normalizedPairId) return;
-  pushOverlayRecord(env, {
+  const record: RuntimeOverlayRecord = {
     family: 'book',
     entityId: normalizedEntityId,
     pairId: normalizedPairId,
     ...(deleted ? { deleted: true } : {}),
-  });
+  };
+  pushOverlayRecord(env, record);
+  trackDebugOverlayMark(env, record);
 };
 
 export const ACCOUNT_FRAME_HISTORY_VIEW_LIMIT = 50;

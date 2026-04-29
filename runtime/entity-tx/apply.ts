@@ -108,6 +108,8 @@ export const applyEntityTx = async (
   }
 
   try {
+    markStorageEntityDirty(env, entityState.entityId);
+
     if (entityTx.type === 'chat') {
       const { from, message } = entityTx.data;
 
@@ -302,6 +304,7 @@ export const applyEntityTx = async (
 
     if (entityTx.type === 'accountInput') {
       const result = await handleAccountInput(entityState, entityTx.data, env);
+      markStorageAccountDirty(env, result.newState.entityId, entityTx.data.fromEntityId);
       return {
         newState: result.newState,
         outputs: result.outputs,

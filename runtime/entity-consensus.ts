@@ -18,7 +18,7 @@ import {
   removeCommittedTxsFromMempool,
   txFingerprint,
 } from './state-helpers';
-import { recordOrderbookPairUpdate } from './env-events';
+import { markStorageAccountDirty, markStorageEntityDirty, recordOrderbookPairUpdate } from './env-events';
 import { LIMITS } from './constants';
 import { signAccountFrame as signFrame, verifyAccountSignature as verifyFrame } from './account-crypto';
 import {
@@ -1304,6 +1304,8 @@ export const applyEntityFrame = async (
             continue;
           }
           proposableAccounts.add(accountId);
+          markStorageAccountDirty(env, currentEntityState.entityId, accountId);
+          markStorageEntityDirty(env, currentEntityState.entityId);
           console.log(`📦   → ${accountId.slice(-8)}: ${tx.type} (mempool now: ${account.mempool.length} txs, pendingFrame=${!!account.pendingFrame ? 'h'+account.pendingFrame.height : 'none'})`);
 
           // Schedule timeout hooks for HTLC locks (setTimeout-like)
@@ -1462,6 +1464,8 @@ export const applyEntityFrame = async (
           continue;
         }
         proposableAccounts.add(accountId);
+        markStorageAccountDirty(env, currentEntityState.entityId, accountId);
+        markStorageEntityDirty(env, currentEntityState.entityId);
         console.log(`📊   → ${accountId.slice(-8)}: ${tx.type}`);
       }
 
@@ -1499,6 +1503,8 @@ export const applyEntityFrame = async (
           continue;
         }
         proposableAccounts.add(accountId);
+        markStorageAccountDirty(env, currentEntityState.entityId, accountId);
+        markStorageEntityDirty(env, currentEntityState.entityId);
         console.log(`📊   → ${accountId.slice(-8)}: ${tx.type} (cancel-request resolution)`);
       }
 
