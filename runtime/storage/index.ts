@@ -1,9 +1,7 @@
 import { rebuildOrderbookPairIndex, type OrderbookExtState, type HubProfile, type EntityReferral, type BookState } from '../orderbook';
 import { ethers } from 'ethers';
 import { Packr } from 'msgpackr';
-import { deserializeTaggedJson, safeStringify, serializeTaggedJson } from '../serialization-utils';
-import { cloneEntityReplica } from '../state-helpers';
-import { createStructuredLogger } from '../logger';
+import { deserializeTaggedJson, serializeTaggedJson } from '../serialization-utils';
 import { buildHexKeyedMerkle, type RadixMerkleRadix } from './merkle';
 import { mergeStorageOverlayRecords, storageOverlayRecordKey } from './overlay';
 import {
@@ -55,8 +53,6 @@ type RuntimeDbLike = {
   };
   keys?: (options?: { gte?: Buffer; lt?: Buffer }) => AsyncIterable<Buffer | Uint8Array | string>;
 };
-
-const storageLog = createStructuredLogger('storage');
 
 type PerfDeps = {
   getPerfMs: () => number;
@@ -196,7 +192,7 @@ export type StorageDocRef =
 
 type StorageAccountRef = Extract<StorageDocRef, { family: 'account' }>;
 type StorageBookRef = Extract<StorageDocRef, { family: 'book' }>;
-type TouchedStorageRefs = {
+type StorageOverlayRefs = {
   touchedEntities: Set<string>;
   touchedAccounts: Map<string, StorageAccountRef>;
   touchedBooks: Map<string, StorageBookRef>;
@@ -212,13 +208,6 @@ export type StorageFrameRecord = {
   hashMode?: 'storage-debug-v1' | 'storage-merkle-v1' | 'legacy-env-v1';
   materializedState?: boolean;
   entityHashes?: StorageFrameEntityHash[];
-  /**
-   * Independent audit root computed from canonical EntityReplica snapshots,
-   * not from storage projection docs. This catches bugs where project*Doc()
-   * accidentally omits state that restore/replay would otherwise miss too.
-   */
-  auditStateHash?: string;
-  auditEntityHashes?: StorageFrameEntityHash[];
   /**
    * Independent canonical root computed directly from live EntityReplica data.
    * This intentionally avoids cloneEntityReplica(), project*Doc(), msgpack, and
@@ -269,13 +258,6 @@ export type StorageReplicaMeta = {
 
 export type StorageDiffRecord = {
   height: number;
-  puts: StorageDoc[];
-  dels: StorageDocRef[];
-};
-
-export type StoragePackRecord = {
-  startHeight: number;
-  endHeight: number;
   puts: StorageDoc[];
   dels: StorageDocRef[];
 };
@@ -497,7 +479,6 @@ const readText = (buffer: Buffer, offset: number): { value: string; nextOffset: 
 
 const keyFrame = (height: number): Buffer => Buffer.concat([Buffer.from([KEY_FRAME]), encodeHeight(height)]);
 const keyDiff = (height: number): Buffer => Buffer.concat([Buffer.from([KEY_DIFF]), encodeHeight(height)]);
-const keyPack = (endHeight: number): Buffer => Buffer.concat([Buffer.from([KEY_PACK]), encodeHeight(endHeight)]);
 const keySnapshotManifest = (height: number): Buffer => Buffer.concat([Buffer.from([KEY_SNAPSHOT_MANIFEST]), encodeHeight(height)]);
 
 const keyLiveEntity = (entityId: string): Buffer => Buffer.concat([Buffer.from([KEY_LIVE_ENTITY]), hexBytes(entityId)]);
@@ -732,94 +713,7 @@ export const computeStorageRuntimeStateHash = (
   ).root;
 };
 
-const hashCanonicalJson = (value: unknown): string =>
-  ethers.keccak256(ethers.toUtf8Bytes(safeStringify(value)));
-
-const computeStorageAuditRuntimeStateHash = (
-  height: number,
-  timestamp: number,
-  entityHashes: StorageFrameEntityHash[],
-): string => hashCanonicalJson({
-  kind: 'xln.storage.auditRuntimeHash.v1',
-  height,
-  timestamp,
-  entities: entityHashes
-    .map((entry) => ({
-      entityId: normalizeEntityId(entry.entityId),
-      hash: entry.hash,
-      cellCount: entry.cellCount,
-    }))
-    .sort((left, right) => left.entityId.localeCompare(right.entityId)),
-});
-
-const computeStorageAuditEntityHash = (replica: EntityReplica): StorageFrameEntityHash => {
-  const entityId = normalizeEntityId(replica.entityId || replica.state?.entityId || '');
-  const snapshot = cloneEntityReplica(replica, true);
-  if (Array.isArray(snapshot.state.accountInputQueue) && snapshot.state.accountInputQueue.length === 0) {
-    delete (snapshot.state as EntityState & { accountInputQueue?: unknown }).accountInputQueue;
-  }
-  return {
-    entityId,
-    cellCount: 1,
-    hash: hashCanonicalJson({
-      kind: 'xln.storage.auditEntityHash.v1',
-      entityId,
-      // Historical replay only restores EntityState for arbitrary heights.
-      // Proposal/witness/validator metadata is latest-height crash-recovery
-      // state, so including it here makes verifyRuntimeChain fail for older
-      // heights even when replayed consensus state is correct.
-      state: snapshot.state,
-    }),
-  };
-};
-
-export const computeStorageAuditEntityHashesFromEnv = (env: Env): StorageFrameEntityHash[] =>
-  Array.from(env.eReplicas.values())
-    .filter((replica): replica is EntityReplica => Boolean(replica?.state))
-    .map((replica) => computeStorageAuditEntityHash(replica))
-    .sort((left, right) => left.entityId.localeCompare(right.entityId));
-
-export const computeStorageAuditStateHashFromEnv = (env: Env): string =>
-  computeStorageAuditRuntimeStateHash(env.height, env.timestamp, computeStorageAuditEntityHashesFromEnv(env));
-
 export const computeStorageCanonicalStateHashFromEnv = computeCanonicalStateHashFromEnv;
-
-const prepareStorageAuditStateHashes = (
-  env: Env,
-  touchedEntities: string[],
-  previousFrame: StorageFrameRecord | null,
-  replicaLookup = buildReplicaLookup(env),
-): { auditStateHash: string; auditEntityHashes: StorageFrameEntityHash[] } => {
-  const liveEntityIds = new Set(Array.from(env.eReplicas.values()).map((replica) => normalizeEntityId(replica.entityId)));
-  const previousHashes = Array.isArray(previousFrame?.auditEntityHashes)
-    ? normalizeFrameEntityHashes(previousFrame.auditEntityHashes)
-    : [];
-  const auditHashByEntity = new Map<string, StorageFrameEntityHash>();
-
-  if (previousHashes.length > 0) {
-    for (const entry of previousHashes) {
-      if (liveEntityIds.has(entry.entityId)) auditHashByEntity.set(entry.entityId, entry);
-    }
-  } else {
-    for (const entry of computeStorageAuditEntityHashesFromEnv(env)) {
-      auditHashByEntity.set(entry.entityId, entry);
-    }
-  }
-
-  for (const entityId of touchedEntities) {
-    const normalized = normalizeEntityId(entityId);
-    const replica = findReplicaForEntity(env, normalized, replicaLookup)?.replica;
-    if (replica) auditHashByEntity.set(normalized, computeStorageAuditEntityHash(replica));
-    else auditHashByEntity.delete(normalized);
-  }
-
-  const auditEntityHashes = Array.from(auditHashByEntity.values())
-    .sort((left, right) => left.entityId.localeCompare(right.entityId));
-  return {
-    auditEntityHashes,
-    auditStateHash: computeStorageAuditRuntimeStateHash(env.height, env.timestamp, auditEntityHashes),
-  };
-};
 
 const prepareStorageCanonicalStateHashes = (
   env: Env,
@@ -1236,14 +1130,6 @@ const buildReplicaLookup = (env: Env): StorageReplicaLookup => {
   return lookup;
 };
 
-const nextRouteHop = (entityId: string, route: string[] | undefined, fallback: string): string => {
-  const normalized = normalizeEntityId(entityId);
-  const normalizedRoute = Array.isArray(route) ? route.map(normalizeEntityId) : [];
-  const index = normalizedRoute.indexOf(normalized);
-  if (index >= 0 && index + 1 < normalizedRoute.length) return normalizedRoute[index + 1]!;
-  return normalizeEntityId(fallback);
-};
-
 const addAccountRef = (target: Map<string, StorageDocRef>, entityId: string, counterpartyId: string): void => {
   if (!entityId || !counterpartyId) return;
   const ref: StorageDocRef = { family: 'account', entityId: normalizeEntityId(entityId), counterpartyId: normalizeEntityId(counterpartyId) };
@@ -1262,244 +1148,12 @@ const addBookRef = (target: Map<string, StorageBookRef>, entityId: string, pairI
   target.set(docRefKey(ref), ref);
 };
 
-const collectJEventAccountRefs = (
-  entityId: string,
-  data: unknown,
-  touchedAccounts: Map<string, StorageAccountRef>,
-): void => {
-  const record = data && typeof data === 'object' ? data as Record<string, unknown> : {};
-  const rawEvents = Array.isArray(record['events'])
-    ? record['events']
-    : record['event'] && typeof record['event'] === 'object'
-      ? [record['event']]
-      : [];
-  for (const rawEvent of rawEvents) {
-    if (!rawEvent || typeof rawEvent !== 'object') continue;
-    const event = rawEvent as { type?: unknown; data?: unknown };
-    const eventData = event.data && typeof event.data === 'object'
-      ? event.data as Record<string, unknown>
-      : {};
-    if (event.type === 'AccountSettled') {
-      const leftEntity = String(eventData['leftEntity'] || '').toLowerCase();
-      const rightEntity = String(eventData['rightEntity'] || '').toLowerCase();
-      if (leftEntity === entityId && rightEntity) addAccountRef(touchedAccounts, entityId, rightEntity);
-      else if (rightEntity === entityId && leftEntity) addAccountRef(touchedAccounts, entityId, leftEntity);
-    } else if (event.type === 'DisputeStarted' || event.type === 'DisputeFinalized') {
-      const sender = String(eventData['sender'] || '').toLowerCase();
-      const counterentity = String(eventData['counterentity'] || '').toLowerCase();
-      if (sender === entityId && counterentity) addAccountRef(touchedAccounts, entityId, counterentity);
-      else if (counterentity === entityId && sender) addAccountRef(touchedAccounts, entityId, sender);
-    }
-  }
-};
-
-const collectTouchedRefs = (appliedRuntimeInput: RuntimeInput): TouchedStorageRefs => {
-  const touchedEntities = new Set<string>();
-  const touchedAccounts = new Map<string, StorageAccountRef>();
-  const touchedBooks = new Map<string, StorageBookRef>();
-  const touchedBookEntities = new Set<string>();
-
-  for (const runtimeTx of appliedRuntimeInput.runtimeTxs ?? []) {
-    if (runtimeTx.type === 'importReplica' && runtimeTx.entityId) {
-      touchedEntities.add(normalizeEntityId(runtimeTx.entityId));
-    }
-  }
-
-  for (const input of appliedRuntimeInput.entityInputs ?? []) {
-    const entityId = normalizeEntityId(input.entityId);
-    touchedEntities.add(entityId);
-
-    for (const tx of input.entityTxs ?? []) {
-      switch (tx.type) {
-        case 'accountInput': {
-          const counterpartyId = normalizeEntityId(tx.data.fromEntityId) === entityId
-            ? normalizeEntityId(tx.data.toEntityId)
-            : normalizeEntityId(tx.data.fromEntityId);
-          addAccountRef(touchedAccounts, entityId, counterpartyId);
-          break;
-        }
-        case 'openAccount':
-          addAccountRef(touchedAccounts, entityId, tx.data.targetEntityId);
-          break;
-        case 'j_event_account_claim':
-        case 'requestCollateral':
-        case 'reopenDisputedAccount':
-        case 'settleDiffs':
-        case 'disputeStart':
-        case 'disputeFinalize':
-        case 'extendCredit':
-        case 'setRebalancePolicy':
-        case 'placeSwapOffer':
-        case 'resolveSwap':
-        case 'cancelSwap':
-        case 'proposeCancelSwap':
-        case 'createSettlement':
-        case 'settle_propose':
-        case 'settle_update':
-        case 'settle_approve':
-        case 'settle_execute':
-        case 'settle_reject':
-          addAccountRef(touchedAccounts, entityId, (tx.data as { counterpartyEntityId: string }).counterpartyEntityId);
-          break;
-        case 'r2c':
-          addAccountRef(touchedAccounts, entityId, tx.data.counterpartyId);
-          break;
-        case 'directPayment':
-        case 'htlcPayment':
-          addAccountRef(touchedAccounts, entityId, nextRouteHop(entityId, tx.data.route, tx.data.targetEntityId));
-          break;
-        case 'processHtlcTimeouts':
-          for (const expired of tx.data.expiredLocks ?? []) {
-            addAccountRef(touchedAccounts, entityId, expired.accountId);
-          }
-          break;
-        case 'rollbackTimedOutFrames':
-          for (const timedOut of tx.data.timedOutAccounts ?? []) {
-            addAccountRef(touchedAccounts, entityId, timedOut.counterpartyId);
-          }
-          break;
-        case 'manualHtlcLock':
-          addAccountRef(touchedAccounts, entityId, tx.data.counterpartyId);
-          break;
-        case 'j_event':
-          collectJEventAccountRefs(entityId, tx.data, touchedAccounts);
-          break;
-        default:
-          break;
-      }
-    }
-  }
-
-  return { touchedEntities, touchedAccounts, touchedBooks, touchedBookEntities };
-};
-
-const mergeTouchedRefs = (
-  base: TouchedStorageRefs,
-  extra: TouchedStorageRefs,
-): TouchedStorageRefs => {
-  for (const entityId of extra.touchedEntities) base.touchedEntities.add(entityId);
-  for (const [key, ref] of extra.touchedAccounts) base.touchedAccounts.set(key, ref);
-  for (const [key, ref] of extra.touchedBooks) base.touchedBooks.set(key, ref);
-  for (const entityId of extra.touchedBookEntities) base.touchedBookEntities.add(entityId);
-  return base;
-};
-
-const collectTouchedRefsFromFrameDbRecords = (
-  records: readonly RuntimeFrameDbRecord[] | undefined,
-): TouchedStorageRefs => {
-  const touchedEntities = new Set<string>();
-  const touchedAccounts = new Map<string, StorageAccountRef>();
-  const touchedBooks = new Map<string, StorageBookRef>();
-  const touchedBookEntities = new Set<string>();
-
-  for (const record of records ?? []) {
-    if (record.kind === 'accountFrame') {
-      const entityId = normalizeEntityId(record.entityId);
-      const counterpartyId = normalizeEntityId(record.counterpartyId);
-      if (!entityId || !counterpartyId) continue;
-
-      touchedEntities.add(entityId);
-      addAccountRef(touchedAccounts, entityId, counterpartyId);
-      continue;
-    }
-
-    if (record.kind === 'bookUpdate') {
-      const entityId = normalizeEntityId(record.entityId);
-      const pairId = String(record.pairId || '').trim();
-      if (!entityId || !pairId) continue;
-      touchedEntities.add(entityId);
-      touchedBookEntities.add(entityId);
-      addBookRef(touchedBooks, entityId, pairId);
-    }
-
-  }
-
-  return { touchedEntities, touchedAccounts, touchedBooks, touchedBookEntities };
-};
-
-const overlayRecordsFromTouchedRefs = (touched: TouchedStorageRefs): RuntimeOverlayRecord[] => {
-  const records = new Map<string, RuntimeOverlayRecord>();
-  for (const entityId of touched.touchedEntities) {
-    const record: RuntimeOverlayRecord = { family: 'entity', entityId: normalizeEntityId(entityId) };
-    records.set(storageOverlayRecordKey(record), record);
-  }
-  for (const ref of touched.touchedAccounts.values()) {
-    const record: RuntimeOverlayRecord = {
-      family: 'account',
-      entityId: normalizeEntityId(ref.entityId),
-      counterpartyId: normalizeEntityId(ref.counterpartyId),
-    };
-    records.set(storageOverlayRecordKey(record), record);
-  }
-  for (const ref of touched.touchedBooks.values()) {
-    const record: RuntimeOverlayRecord = {
-      family: 'book',
-      entityId: normalizeEntityId(ref.entityId),
-      pairId: String(ref.pairId || '').trim(),
-    };
-    records.set(storageOverlayRecordKey(record), record);
-  }
-  return Array.from(records.values());
-};
-
-const overlayRecordsFromFrameDbRecords = (
-  records: readonly RuntimeFrameDbRecord[] | undefined,
-): RuntimeOverlayRecord[] => {
-  const out = new Map<string, RuntimeOverlayRecord>();
-  for (const record of records ?? []) {
-    if (record.kind !== 'bookUpdate') continue;
-    const entityId = normalizeEntityId(record.entityId);
-    const pairId = String(record.pairId || '').trim();
-    if (!entityId || !pairId) continue;
-    const item: RuntimeOverlayRecord = {
-      family: 'book',
-      entityId,
-      pairId,
-      ...(record.book ? {} : { deleted: true }),
-    };
-    out.set(storageOverlayRecordKey(item), item);
-  }
-  return Array.from(out.values());
-};
-
 const mergeOverlayRecordsIntoEnv = (
   env: Env,
   records: readonly RuntimeOverlayRecord[],
 ): RuntimeOverlayRecord[] => {
   env.overlay = mergeStorageOverlayRecords(env.overlay, records);
   return env.overlay.map((record) => ({ ...record }));
-};
-
-const overlayDriftDebugEnabled = (): boolean => {
-  const raw = String(process.env['XLN_DEBUG_OVERLAY_DRIFT'] ?? '').trim().toLowerCase();
-  return raw === '1' || raw === 'true' || raw === 'yes';
-};
-
-const reportOverlayDrift = (
-  env: Env,
-  legacyRecords: readonly RuntimeOverlayRecord[],
-): void => {
-  if (!overlayDriftDebugEnabled()) return;
-
-  const marks = env.runtimeState?.debugStorageOverlayMarks ?? [];
-  const expected = new Map<string, RuntimeOverlayRecord>();
-  const covered = new Map<string, RuntimeOverlayRecord>();
-  for (const record of legacyRecords) expected.set(storageOverlayRecordKey(record), record);
-  for (const record of env.overlay ?? []) covered.set(storageOverlayRecordKey(record), record);
-  for (const record of marks) covered.set(storageOverlayRecordKey(record), record);
-
-  const missing = Array.from(expected.keys()).filter((key) => !covered.has(key));
-  if (missing.length > 0) {
-    storageLog.warn('overlay drift detected', {
-      height: env.height,
-      missingCount: missing.length,
-      missing: missing.slice(0, 25),
-    });
-  }
-
-  if (env.runtimeState) {
-    env.runtimeState.debugStorageOverlayMarks = [];
-  }
 };
 
 const overlayRecordsFromDocs = (
@@ -1560,9 +1214,9 @@ const buildBookDeletionsFromOverlay = (
   return Array.from(dels.values());
 };
 
-const collectTouchedRefsFromOverlay = (
+const storageRefsFromOverlay = (
   records: readonly RuntimeOverlayRecord[] | undefined,
-): TouchedStorageRefs => {
+): StorageOverlayRefs => {
   const touchedEntities = new Set<string>();
   const touchedAccounts = new Map<string, StorageAccountRef>();
   const touchedBooks = new Map<string, StorageBookRef>();
@@ -1599,7 +1253,7 @@ const collectTouchedRefsFromOverlay = (
 
 const buildDocPuts = (
   env: Env,
-  touched: TouchedStorageRefs,
+  touched: StorageOverlayRefs,
   replicaLookup = buildReplicaLookup(env),
 ): StorageDoc[] => {
   const puts: StorageDoc[] = [];
@@ -2356,42 +2010,6 @@ const pruneSnapshot = async (db: RuntimeDbLike, height: number): Promise<number>
   return removedBytes;
 };
 
-const maybeCreatePack = async (
-  db: RuntimeDbLike,
-  height: number,
-  packPeriodFrames: number,
-): Promise<{ created: boolean; bytes: number }> => {
-  if (height <= 0 || height % packPeriodFrames !== 0) return { created: false, bytes: 0 };
-  const startHeight = Math.max(1, height - packPeriodFrames + 1);
-  const docPuts = new Map<string, StorageDoc>();
-  const docDels = new Map<string, StorageDocRef>();
-
-  for (let h = startHeight; h <= height; h += 1) {
-    const diff = await readJsonOrNull<StorageDiffRecord>(db, keyDiff(h));
-    if (!diff) return { created: false, bytes: 0 };
-    for (const ref of diff.dels) {
-      docDels.set(docRefKey(ref), ref);
-      docPuts.delete(docRefKey(ref));
-    }
-    for (const doc of diff.puts) {
-      docPuts.set(docValueKey(doc), doc);
-      docDels.delete(docValueKey(doc) as string);
-    }
-  }
-
-  const batch = db.batch();
-  const packKey = keyPack(height);
-  const packValue = encodeBuffer({
-    startHeight,
-    endHeight: height,
-    puts: Array.from(docPuts.values()),
-    dels: Array.from(docDels.values()),
-  } satisfies StoragePackRecord);
-  batch.put(packKey, packValue);
-  await writeBatch(batch);
-  return { created: true, bytes: packKey.byteLength + packValue.byteLength };
-};
-
 const maybeRotateSnapshots = async (db: RuntimeDbLike, retainSnapshots: number): Promise<number> => {
   const heights = await listSnapshotHeights(db);
   if (heights.length <= retainSnapshots) return 0;
@@ -2447,19 +2065,11 @@ export const saveRuntimeFrameToStorage = async (options: {
   const openMs = options.getPerfMs() - openStartedAt;
 
   const appliedRuntimeInput = options.currentFrameInput ?? { runtimeTxs: [], entityInputs: [] };
-  const legacyTouched = mergeTouchedRefs(
-    collectTouchedRefs(appliedRuntimeInput),
-    collectTouchedRefsFromFrameDbRecords(options.frameDbRecords),
-  );
-  const legacyOverlayRecords = overlayRecordsFromTouchedRefs(legacyTouched);
-  const frameDbOverlayRecords = overlayRecordsFromFrameDbRecords(options.frameDbRecords);
-  reportOverlayDrift(options.env, mergeStorageOverlayRecords(legacyOverlayRecords, frameDbOverlayRecords));
-  const frameOverlayRecords = mergeStorageOverlayRecords(
-    options.env.overlay,
-    mergeStorageOverlayRecords(legacyOverlayRecords, frameDbOverlayRecords),
-  );
-  const overlayRecords = mergeOverlayRecordsIntoEnv(options.env, frameOverlayRecords);
-  const frameTouched = collectTouchedRefsFromOverlay(frameOverlayRecords);
+  const frameOverlayRecords = Array.isArray(state.currentStorageOverlayMarks)
+    ? state.currentStorageOverlayMarks.map((record) => ({ ...record }))
+    : [];
+  const overlayRecords = mergeOverlayRecordsIntoEnv(options.env, []);
+  const frameTouched = storageRefsFromOverlay(frameOverlayRecords);
   const replicaLookup = buildReplicaLookup(options.env);
   const diffBuildStartedAt = options.getPerfMs();
   const framePuts = buildDocPuts(options.env, frameTouched, replicaLookup);
@@ -2502,7 +2112,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   const touchedBookEntities = Array.from(frameTouched.touchedBookEntities.values()).sort();
 
   const materializedTouched = shouldMaterialize
-    ? collectTouchedRefsFromOverlay(overlayRecords)
+    ? storageRefsFromOverlay(overlayRecords)
     : null;
   const materializedPuts = materializedTouched
     ? buildDocPuts(options.env, materializedTouched, replicaLookup)
@@ -2526,9 +2136,6 @@ export const saveRuntimeFrameToStorage = async (options: {
   const materializedEntities = materializedTouched
     ? Array.from(materializedTouched.touchedEntities.values()).sort()
     : [];
-  const auditHashes = shouldMaterialize
-    ? prepareStorageAuditStateHashes(options.env, materializedEntities, previousFrame, replicaLookup)
-    : null;
   const canonicalHashes = shouldMaterialize
     ? prepareStorageCanonicalStateHashes(options.env, materializedEntities, previousFrame, replicaLookup)
     : null;
@@ -2540,10 +2147,6 @@ export const saveRuntimeFrameToStorage = async (options: {
     hashMode: 'storage-merkle-v1',
     materializedState: shouldMaterialize,
     entityHashes: preparedHashes?.entityHashes ?? previousFrame?.entityHashes ?? [],
-    ...(auditHashes ? {
-      auditStateHash: auditHashes.auditStateHash,
-      auditEntityHashes: auditHashes.auditEntityHashes,
-    } : {}),
     ...(canonicalHashes ? {
       canonicalStateHash: canonicalHashes.canonicalStateHash,
       canonicalEntityHashes: canonicalHashes.canonicalEntityHashes,
@@ -2639,6 +2242,9 @@ export const saveRuntimeFrameToStorage = async (options: {
   };
   batch.put(KEY_HEAD, encodeBuffer(nextHead));
   await writeBatch(batch);
+  if (state) {
+    state.currentStorageOverlayMarks = [];
+  }
   if (preparedHashes) {
     state.storageEntityHashDocs = preparedHashes.entityHashDocs;
   }
@@ -2665,30 +2271,14 @@ export const saveRuntimeFrameToStorage = async (options: {
   }
   const writeMs = options.getPerfMs() - writeStartedAt;
 
-  let packMs = 0;
   let snapshotMs = 0;
-  let packed = false;
   let snapDocs = 0;
-  let packBytes = 0;
   let snapshotBytes = 0;
   let prunedBytes = 0;
   let epochRotated = false;
   let epochDbRotated = false;
   let retainedHistoryBytes = nextHead.retainedHistoryBytes;
-  let latestPackHeight = head.latestPackHeight;
   let latestSnapshotHeight = head.latestSnapshotHeight;
-
-  if (options.env.height % config.packPeriodFrames === 0) {
-    const packStartedAt = options.getPerfMs();
-    const packResult = await maybeCreatePack(db, options.env.height, config.packPeriodFrames);
-    packed = packResult.created;
-    packBytes = packResult.bytes;
-    if (packed) {
-      retainedHistoryBytes += packBytes;
-      latestPackHeight = options.env.height;
-    }
-    packMs = options.getPerfMs() - packStartedAt;
-  }
 
   if (snapshotDue || snapshotRequiredByBytes) {
     const snapshotStartedAt = options.getPerfMs();
@@ -2714,14 +2304,13 @@ export const saveRuntimeFrameToStorage = async (options: {
 
   retainedHistoryBytes = Math.max(0, retainedHistoryBytes - prunedBytes);
 
-  if (packed || snapDocs > 0 || prunedBytes > 0) {
+  if (snapDocs > 0 || prunedBytes > 0) {
     const latest = await readHead(db, config);
     const update = db.batch();
     update.put(
       KEY_HEAD,
       encodeBuffer({
         ...latest,
-        latestPackHeight,
         latestSnapshotHeight,
         retainedHistoryBytes,
       }),
@@ -2742,11 +2331,11 @@ export const saveRuntimeFrameToStorage = async (options: {
       `[PERSIST] runtime=${String(options.env.runtimeId || '').slice(0, 12)} frame=${options.env.height} puts=${diff.puts.length} dels=${diff.dels.length} ` +
         `frameBytes=${frameBuffer.byteLength} diffBytes=${diffBuffer.byteLength} ` +
         `frameDbBytes=${frameDbBytes} frameDbRetained=${frameDbRetainedBytes} frameDbPruned=${frameDbPrunedBytes}/${frameDbPrunedKeys}@${frameDbLatestPrunedHeight} ` +
-        `packBytes=${packBytes} snapshotBytes=${snapshotBytes} historyBytes=${retainedHistoryBytes} ` +
+        `snapshotBytes=${snapshotBytes} historyBytes=${retainedHistoryBytes} ` +
         `entities=${frameTouched.touchedEntities.size} accounts=${frameTouched.touchedAccounts.size} books=${frameTouched.touchedBookEntities.size} materialized=${shouldMaterialize ? 1 : 0} overlay=${overlayRecords.length} ` +
         `highSignals=${highSignalEvents.join(',') || 'none'} ` +
-        `pack=${packed ? 1 : 0} snapDocs=${snapDocs} epoch=${epochRotated ? 1 : 0} epochDb=${epochDbRotated ? 1 : 0} ` +
-        `ms(open=${options.formatPerfMs(openMs)},diff=${options.formatPerfMs(diffBuildMs)},write=${options.formatPerfMs(writeMs)},pack=${options.formatPerfMs(packMs)},snap=${options.formatPerfMs(snapshotMs)})`,
+        `snapDocs=${snapDocs} epoch=${epochRotated ? 1 : 0} epochDb=${epochDbRotated ? 1 : 0} ` +
+        `ms(open=${options.formatPerfMs(openMs)},diff=${options.formatPerfMs(diffBuildMs)},write=${options.formatPerfMs(writeMs)},snap=${options.formatPerfMs(snapshotMs)})`,
     );
   }
   return {
@@ -2840,13 +2429,6 @@ export const verifyStorageTailIntegrity = async (
       const expectedStateHash = computeStorageRuntimeStateHash(record.height, record.timestamp, record.entityHashes);
       if (record.stateHash !== expectedStateHash) {
         throw new Error(`STORAGE_VERIFY_STATE_HASH_MISMATCH: height=${height} expected=${expectedStateHash} actual=${record.stateHash}`);
-      }
-      if (!Array.isArray(record.auditEntityHashes) || !record.auditStateHash) {
-        throw new Error(`STORAGE_VERIFY_AUDIT_HASH_MISSING: height=${height}`);
-      }
-      const expectedAuditHash = computeStorageAuditRuntimeStateHash(record.height, record.timestamp, record.auditEntityHashes);
-      if (record.auditStateHash !== expectedAuditHash) {
-        throw new Error(`STORAGE_VERIFY_AUDIT_HASH_MISMATCH: height=${height} expected=${expectedAuditHash} actual=${record.auditStateHash}`);
       }
       if (record.canonicalStateHash || Array.isArray(record.canonicalEntityHashes)) {
         if (!Array.isArray(record.canonicalEntityHashes) || !record.canonicalStateHash) {
@@ -3011,19 +2593,6 @@ export const loadEntityStateFromStorage = async (options: {
 
   let cursor = baseSnapshotHeight + 1;
   while (cursor <= targetHeight) {
-    const packEnd = cursor + head.packPeriodFrames - 1;
-    if (
-      head.packPeriodFrames > 1 &&
-      packEnd <= targetHeight &&
-      packEnd % head.packPeriodFrames === 0
-    ) {
-      const pack = await readJsonOrNull<StoragePackRecord>(db, keyPack(packEnd));
-      if (pack && pack.startHeight === cursor) {
-        applyDocs(docs, pack.puts, pack.dels, entityId);
-        cursor = packEnd + 1;
-        continue;
-      }
-    }
     const diff = await readJsonOrNull<StorageDiffRecord>(db, keyDiff(cursor));
     if (diff) {
       applyDocs(docs, diff.puts, diff.dels, entityId);

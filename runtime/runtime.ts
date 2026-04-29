@@ -169,7 +169,6 @@ import { resolveEntityProposerId } from './state-helpers';
 import { getEntityShortId, getEntityNumber, formatEntityId } from './utils';
 import { deserializeTaggedJson, serializeTaggedJson, safeStringify } from './serialization-utils';
 import {
-  computeStorageAuditStateHashFromEnv,
   computeStorageCanonicalStateHashFromEnv,
   computeStorageDebugStateHashFromEnv,
   findStorageLatestSnapshotAtOrBelow,
@@ -4771,23 +4770,8 @@ export const verifyRuntimeChain = async (
             ? computeStorageDebugStateHashFromEnv(replayed.env)
             : computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(replayed.env));
         if (storageHashMode) {
-          expectedAuditStateHash = String(persistedFrame.auditStateHash || '');
-          actualAuditStateHash = computeStorageAuditStateHashFromEnv(replayed.env);
-          if (!expectedAuditStateHash || expectedAuditStateHash !== actualAuditStateHash) {
-            return {
-              ok: false,
-              latestHeight,
-              checkpointHeight,
-              selectedSnapshotHeight,
-              restoredHeight: height,
-              expectedStateHash,
-              actualStateHash,
-              expectedAuditStateHash,
-              actualAuditStateHash,
-              expectedCanonicalStateHash,
-              actualCanonicalStateHash,
-            };
-          }
+          expectedAuditStateHash = '';
+          actualAuditStateHash = '';
           if (persistedFrame.canonicalStateHash) {
             expectedCanonicalStateHash = String(persistedFrame.canonicalStateHash);
             actualCanonicalStateHash = computeStorageCanonicalStateHashFromEnv(replayed.env);
