@@ -298,7 +298,6 @@ describe('storage frame journal retention', () => {
       ...(env.runtimeConfig || {}),
       storage: {
         ...(env.runtimeConfig?.storage || {}),
-        packPeriodFrames: 2,
         snapshotPeriodFrames: 2,
         retainSnapshots: 2,
       },
@@ -401,7 +400,6 @@ describe('storage frame journal retention', () => {
         ...(env.runtimeConfig?.storage || {}),
         materializePeriodFrames: 3,
         snapshotPeriodFrames: 100,
-        packPeriodFrames: 100,
       },
     };
 
@@ -462,7 +460,6 @@ describe('storage frame journal retention', () => {
         ...(restoredAtTwo.runtimeConfig?.storage || {}),
         materializePeriodFrames: 3,
         snapshotPeriodFrames: 100,
-        packPeriodFrames: 100,
       },
     };
     restoredAtTwo.height = 3;

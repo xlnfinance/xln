@@ -322,7 +322,6 @@ async function main() {
   const tokenId = parsePositiveInt(getArg('--token-id', '1'), 1);
   const persist = hasFlag('--persist');
   const storageEnabled = hasFlag('--storage');
-  const storagePackPeriod = parsePositiveInt(getArg('--storage-pack', '64'), 64);
   const storageSnapshotPeriod = parsePositiveInt(getArg('--storage-snapshot', '256'), 256);
   const storageEpochMb = parsePositiveInt(getArg('--storage-epoch-mb', '256'), 256);
   const accountMerkleRadix = getArg('--account-merkle-radix', '16') === '256' ? 256 : 16;
@@ -363,7 +362,6 @@ async function main() {
       ? {
           storage: {
             enabled: true,
-            packPeriodFrames: storagePackPeriod,
             snapshotPeriodFrames: storageSnapshotPeriod,
             retainSnapshots: 3,
             epochMaxBytes: storageEpochMb * 1024 * 1024,
@@ -697,7 +695,6 @@ async function main() {
               latestHeight: number;
               frameCount: number;
               diffCount: number;
-              packCount: number;
               snapshotCount: number;
               totalBytes: number;
             }>;
@@ -705,30 +702,28 @@ async function main() {
         : [];
       console.log(
         `Storage head: latest=${storageStats.head?.latestHeight ?? 'null'} ` +
-          `packPeriod=${storageStats.head?.packPeriodFrames ?? 'null'} ` +
           `snapshotPeriod=${storageStats.head?.snapshotPeriodFrames ?? 'null'} ` +
-          `latestPack=${storageStats.head?.latestPackHeight ?? 'null'} ` +
           `latestSnapshot=${storageStats.head?.latestSnapshotHeight ?? 'null'} ` +
           `epochMaxMb=${Math.round((storageStats.head?.epochMaxBytes ?? 0) / (1024 * 1024))}`,
       );
       console.log(
         `Storage totals: epochs=${epochRows.length} rFrames=${storageStats.frameCount} ` +
-          `diffs=${storageStats.diffCount} packs=${storageStats.packCount} snapshots=${storageStats.snapshotHeights.length}`,
+          `diffs=${storageStats.diffCount} snapshots=${storageStats.snapshotHeights.length}`,
       );
       console.log(
         `Storage counts: frames=${storageStats.frameCount} diffs=${storageStats.diffCount} ` +
-          `packs=${storageStats.packCount} snapshots=${storageStats.snapshotHeights.join(',') || 'none'} ` +
+          `snapshots=${storageStats.snapshotHeights.join(',') || 'none'} ` +
           `liveEntities=${storageStats.liveEntityCount} liveAccounts=${storageStats.liveAccountCount} liveBooks=${storageStats.liveBookCount}`,
       );
       console.log(
         `Storage bytes: live=${formatBytes(storageStats.liveBytes)} history=${formatBytes(storageStats.historyBytes)} ` +
           `frames=${formatBytes(storageStats.frameBytes)} diffs=${formatBytes(storageStats.diffBytes)} ` +
-          `packs=${formatBytes(storageStats.packBytes)} snapshots=${formatBytes(storageStats.snapshotBytes)} ` +
+          `snapshots=${formatBytes(storageStats.snapshotBytes)} ` +
           `total=${formatBytes(storageStats.totalBytes)}`,
       );
       console.log(
         `Storage max values: frame=${formatBytes(storageStats.maxFrameBytes)} ` +
-          `diff=${formatBytes(storageStats.maxDiffBytes)} pack=${formatBytes(storageStats.maxPackBytes)} ` +
+          `diff=${formatBytes(storageStats.maxDiffBytes)} ` +
           `snapshot=${formatBytes(storageStats.maxSnapshotBytes)}`,
       );
       if (epochRows.length > 0) {
@@ -758,7 +753,6 @@ async function main() {
         paymentsProcessed: processedPayments,
         persist,
         storageEnabled,
-        storagePackPeriod,
         storageSnapshotPeriod,
         snapshotInterval,
         importBatch,
