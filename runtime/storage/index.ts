@@ -1,25 +1,17 @@
-import type { BookState } from '../orderbook';
-import { decodeBuffer, encodeBuffer, writeBatch } from './codec';
+import { encodeBuffer, writeBatch } from './codec';
 import {
-  docRefKey,
   docValueKey,
   liveKeyForDoc,
   liveKeyForRef,
 } from './doc-refs';
 import {
-  listKeys,
-  measurePrefixBytes,
   readJsonOrNull,
 } from './level';
 import { buildFrameDbPuts, writeFrameDbPutsWithRetention } from './frame-db';
 import {
-  assertEntityHashesEqual,
   computeStorageFrameHash,
-  computeStorageStateRoot,
   prepareStorageCanonicalStateHashes,
   prepareStorageStateHashes,
-  readAllEntityHashDocs,
-  toFrameEntityHashes,
 } from './hashes';
 import {
   createSnapshot,
@@ -28,7 +20,6 @@ import {
   pruneHistoryBeforeHeight,
 } from './lifecycle';
 import {
-  hydrateEntityStateFromStorage,
   projectReplicaMeta,
 } from './projections';
 import {
@@ -38,6 +29,7 @@ import {
   storageRefsFromOverlay,
 } from './overlay-docs';
 import { buildReplicaLookup } from './replicas';
+import { readStorageFrameRecord } from './read';
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
   DEFAULT_EPOCH_MAX_BYTES,
@@ -46,51 +38,25 @@ import {
   DEFAULT_MATERIALIZE_PERIOD_FRAMES,
   DEFAULT_RETAIN_SNAPSHOTS,
   DEFAULT_SNAPSHOT_PERIOD_FRAMES,
-  KEY_DIFF,
-  KEY_FRAME,
   KEY_HEAD,
-  KEY_LIVE_ACCOUNT,
-  KEY_LIVE_BOOK,
-  KEY_LIVE_ENTITY,
-  KEY_LIVE_REPLICA_META,
-  KEY_SNAPSHOT_ACCOUNT,
-  KEY_SNAPSHOT_BOOK,
-  KEY_SNAPSHOT_ENTITY,
-  KEY_SNAPSHOT_MANIFEST,
   STORAGE_SCHEMA_VERSION,
-  STORAGE_VERIFY_TAIL_FRAMES,
   ZERO_FRAME_HASH,
-  decodeEntityId,
   keyDiff,
   keyFrame,
-  keyLiveAccountPrefix,
-  keyLiveBookPrefix,
-  keyLiveEntity,
   keyLiveReplicaMeta,
-  keySnapshotAccountPrefix,
-  keySnapshotBookPrefix,
-  keySnapshotEntity,
-  keySnapshotEntityPrefix,
   normalizeEntityId,
-  parseLiveAccountKey,
-  parseLiveBookKey,
 } from './keys';
-import { computeCanonicalRuntimeStateHash } from './canonical-hash';
-import type { EntityInput, EntityState, Env, RuntimeInput, RuntimeFrameDbRecord } from '../types';
+import type { EntityInput, Env, RuntimeInput, RuntimeFrameDbRecord } from '../types';
 import type {
   PerfDeps,
   RuntimeDbLike,
   RuntimeFrameDbLike,
-  StorageAccountDoc,
-  StorageDebugStats,
   StorageDiffRecord,
   StorageDoc,
   StorageDocRef,
-  StorageEntityCoreDoc,
   StorageEntityHashDoc,
   StorageFrameRecord,
   StorageHead,
-  StorageReplicaMeta,
   StorageRuntimeConfig,
 } from './types';
 export {
@@ -105,6 +71,9 @@ export {
   readFrameDbRuntimeActivity,
 } from './frame-db';
 export {
+  inspectStorage,
+} from './inspect';
+export {
   seedFreshStorageEpoch,
 } from './lifecycle';
 export {
@@ -115,6 +84,19 @@ export {
 export {
   readStorageOverlayRecordsFromDiffs,
 } from './overlay-docs';
+export {
+  findStorageLatestSnapshotAtOrBelow,
+  listStorageLiveEntityIds,
+  listStorageSnapshotEntityIds,
+  listStorageSnapshotHeights,
+  loadEntityStateFromStorage,
+  readStorageFrameRecord,
+  readStorageHead,
+  readStorageReplicaMeta,
+} from './read';
+export {
+  verifyStorageTailIntegrity,
+} from './verify';
 
 export type {
   RuntimeDbLike,
@@ -500,310 +482,5 @@ export const saveRuntimeFrameToStorage = async (options: {
   return {
     materialized: shouldMaterialize,
     materializedOverlayRecords: shouldMaterialize ? overlayRecords.length : 0,
-  };
-};
-
-export const readStorageHead = async (
-  db: RuntimeDbLike,
-): Promise<StorageHead | null> => readJsonOrNull<StorageHead>(db, KEY_HEAD);
-
-export const readStorageFrameRecord = async (
-  db: RuntimeDbLike,
-  height: number,
-): Promise<StorageFrameRecord | null> => {
-  const targetHeight = Number.isFinite(height) ? Math.max(1, Math.floor(height)) : 0;
-  if (targetHeight <= 0) return null;
-  return readJsonOrNull<StorageFrameRecord>(db, keyFrame(targetHeight));
-};
-
-export const readStorageReplicaMeta = async (
-  db: RuntimeDbLike,
-  entityId: string,
-): Promise<StorageReplicaMeta | null> => readJsonOrNull<StorageReplicaMeta>(db, keyLiveReplicaMeta(entityId));
-
-export const verifyStorageTailIntegrity = async (
-  db: RuntimeDbLike,
-  options: { tailFrames?: number } = {},
-): Promise<{ latestHeight: number; checkedFrames: number }> => {
-  const head = await readJsonOrNull<StorageHead>(db, KEY_HEAD);
-  if (!head || head.latestHeight <= 0) return { latestHeight: 0, checkedFrames: 0 };
-  const latestHeight = Math.max(0, Math.floor(Number(head.latestHeight)));
-  const tailFrames = Math.max(1, Math.floor(Number(options.tailFrames ?? STORAGE_VERIFY_TAIL_FRAMES)));
-  const startHeight = Math.max(1, latestHeight - tailFrames + 1);
-  let previousHash = ZERO_FRAME_HASH;
-  if (startHeight > 1) {
-    const previous = await readStorageFrameRecord(db, startHeight - 1);
-    if (!previous) throw new Error(`STORAGE_VERIFY_PREV_FRAME_MISSING: height=${startHeight - 1}`);
-    previousHash = previous.frameHash ?? computeStorageFrameHash(previous);
-  }
-
-  let checkedFrames = 0;
-  let latestRecord: StorageFrameRecord | null = null;
-  for (let height = startHeight; height <= latestHeight; height += 1) {
-    const record = await readStorageFrameRecord(db, height);
-    if (!record) throw new Error(`STORAGE_VERIFY_FRAME_MISSING: height=${height}`);
-    if (record.height !== height) throw new Error(`STORAGE_VERIFY_FRAME_HEIGHT_MISMATCH: key=${height} record=${record.height}`);
-    if (record.prevFrameHash !== previousHash) {
-      throw new Error(`STORAGE_VERIFY_FRAME_CHAIN_BROKEN: height=${height} expectedPrev=${previousHash} actualPrev=${record.prevFrameHash ?? 'none'}`);
-    }
-    if (!Array.isArray(record.entityHashes)) {
-      throw new Error(`STORAGE_VERIFY_ENTITY_HASHES_MISSING: height=${height}`);
-    }
-    if (record.materializedState !== false) {
-      const expectedStateHash = computeStorageStateRoot(record.entityHashes);
-      if (record.stateHash !== expectedStateHash) {
-        throw new Error(`STORAGE_VERIFY_STATE_HASH_MISMATCH: height=${height} expected=${expectedStateHash} actual=${record.stateHash}`);
-      }
-      if (record.canonicalStateHash || Array.isArray(record.canonicalEntityHashes)) {
-        if (!Array.isArray(record.canonicalEntityHashes) || !record.canonicalStateHash) {
-          throw new Error(`STORAGE_VERIFY_CANONICAL_HASH_MISSING: height=${height}`);
-        }
-        const expectedCanonicalHash = computeCanonicalRuntimeStateHash(record.height, record.timestamp, record.canonicalEntityHashes);
-        if (record.canonicalStateHash !== expectedCanonicalHash) {
-          throw new Error(`STORAGE_VERIFY_CANONICAL_HASH_MISMATCH: height=${height} expected=${expectedCanonicalHash} actual=${record.canonicalStateHash}`);
-        }
-      }
-    }
-    const actualFrameHash = computeStorageFrameHash(record);
-    if (record.frameHash !== actualFrameHash) {
-      throw new Error(`STORAGE_VERIFY_FRAME_HASH_MISMATCH: height=${height} expected=${actualFrameHash} actual=${record.frameHash ?? 'none'}`);
-    }
-    previousHash = actualFrameHash;
-    latestRecord = record;
-    checkedFrames += 1;
-  }
-
-  if (latestRecord) {
-    assertEntityHashesEqual(
-      toFrameEntityHashes((await readAllEntityHashDocs(db)).values()),
-      latestRecord.entityHashes,
-      `latestHeight=${latestHeight}`,
-    );
-  }
-  return { latestHeight, checkedFrames };
-};
-
-export const listStorageSnapshotHeights = async (db: RuntimeDbLike): Promise<number[]> => {
-  return listSnapshotHeights(db);
-};
-
-export const findStorageLatestSnapshotAtOrBelow = async (
-  db: RuntimeDbLike,
-  height: number,
-): Promise<number> => {
-  return findLatestSnapshotAtOrBelow(db, height);
-};
-
-export const listStorageLiveEntityIds = async (db: RuntimeDbLike): Promise<string[]> => {
-  const keys = await listKeys(db, Buffer.from([KEY_LIVE_ENTITY]));
-  return keys.map((key) => decodeEntityId(key.subarray(1, 33)));
-};
-
-export const listStorageSnapshotEntityIds = async (
-  db: RuntimeDbLike,
-  height: number,
-): Promise<string[]> => {
-  const targetHeight = Number.isFinite(height) ? Math.max(1, Math.floor(height)) : 0;
-  if (targetHeight <= 0) return [];
-  const keys = await listKeys(db, keySnapshotEntityPrefix(targetHeight));
-  return keys.map((key) => decodeEntityId(key.subarray(9, 41)));
-};
-
-const applyDocs = (
-  target: Map<string, StorageDoc>,
-  puts: StorageDoc[],
-  dels: StorageDocRef[],
-  entityId?: string,
-): void => {
-  const filterEntity = entityId ? normalizeEntityId(entityId) : null;
-  for (const ref of dels) {
-    if (filterEntity) {
-      if (normalizeEntityId(ref.entityId) !== filterEntity) continue;
-    }
-    target.delete(docRefKey(ref));
-  }
-  for (const doc of puts) {
-    if (filterEntity && normalizeEntityId(doc.entityId) !== filterEntity) continue;
-    target.set(docValueKey(doc), doc);
-  }
-};
-
-const loadSnapshotDocsForEntity = async (db: RuntimeDbLike, snapshotHeight: number, entityId: string): Promise<Map<string, StorageDoc>> => {
-  const docs = new Map<string, StorageDoc>();
-
-  const entityBuffer = await readJsonOrNull<StorageEntityCoreDoc>(db, keySnapshotEntity(snapshotHeight, entityId));
-  if (entityBuffer) {
-    docs.set(`e:${normalizeEntityId(entityId)}`, { family: 'entity', entityId: normalizeEntityId(entityId), value: entityBuffer });
-  }
-
-  const accountKeys = await listKeys(db, keySnapshotAccountPrefix(snapshotHeight, entityId));
-  for (const key of accountKeys) {
-    const entity = decodeEntityId(key.subarray(9, 41));
-    const counterparty = decodeEntityId(key.subarray(41, 73));
-    const value = decodeBuffer<StorageAccountDoc>(await db.get(key));
-    docs.set(`a:${normalizeEntityId(entity)}:${normalizeEntityId(counterparty)}`, {
-      family: 'account',
-      entityId: normalizeEntityId(entity),
-      counterpartyId: normalizeEntityId(counterparty),
-      value,
-    });
-  }
-
-  const bookKeys = await listKeys(db, keySnapshotBookPrefix(snapshotHeight, entityId));
-  for (const key of bookKeys) {
-    const parsed = parseLiveBookKey(key, 9);
-    const value = decodeBuffer<BookState>(await db.get(key));
-    docs.set(`b:${normalizeEntityId(parsed.entityId)}:${parsed.pairId}`, {
-      family: 'book',
-      entityId: normalizeEntityId(parsed.entityId),
-      pairId: parsed.pairId,
-      value,
-    });
-  }
-
-  return docs;
-};
-
-const findLatestSnapshotAtOrBelow = async (db: RuntimeDbLike, height: number): Promise<number> => {
-  const heights = await listSnapshotHeights(db);
-  let best = 0;
-  for (const value of heights) {
-    if (value <= height && value > best) best = value;
-  }
-  return best;
-};
-
-export const loadEntityStateFromStorage = async (options: {
-  env: Env;
-  tryOpenDb: (env: Env) => Promise<boolean>;
-  getRuntimeDb: (env: Env) => RuntimeDbLike;
-  entityId: string;
-  height?: number;
-}): Promise<EntityState | null> => {
-  const opened = await options.tryOpenDb(options.env);
-  if (!opened) return null;
-  const db = options.getRuntimeDb(options.env);
-  const head = await readJsonOrNull<StorageHead>(db, KEY_HEAD);
-  if (!head) return null;
-  const targetHeight = Math.min(options.height ?? head.latestHeight, head.latestHeight);
-  const entityId = normalizeEntityId(options.entityId);
-  const latestMaterializedHeight = Math.max(
-    0,
-    Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? head.latestHeight ?? 0)),
-  );
-
-  if (targetHeight === latestMaterializedHeight) {
-    const entityCore = await readJsonOrNull<StorageEntityCoreDoc>(db, keyLiveEntity(entityId));
-    if (!entityCore) return null;
-    const accounts = new Map<string, StorageAccountDoc>();
-    for (const key of await listKeys(db, keyLiveAccountPrefix(entityId))) {
-      const parsed = parseLiveAccountKey(key);
-      const doc = decodeBuffer<StorageAccountDoc>(await db.get(key));
-      accounts.set(parsed.counterpartyId, doc);
-    }
-    const books = new Map<string, BookState>();
-    for (const key of await listKeys(db, keyLiveBookPrefix(entityId))) {
-      const parsed = parseLiveBookKey(key);
-      books.set(parsed.pairId, decodeBuffer<BookState>(await db.get(key)));
-    }
-    return hydrateEntityStateFromStorage({ core: entityCore, accounts, books });
-  }
-
-  const baseSnapshotHeight = await findLatestSnapshotAtOrBelow(db, targetHeight);
-  const docs = baseSnapshotHeight > 0
-    ? await loadSnapshotDocsForEntity(db, baseSnapshotHeight, entityId)
-    : new Map<string, StorageDoc>();
-
-  let cursor = baseSnapshotHeight + 1;
-  while (cursor <= targetHeight) {
-    const diff = await readJsonOrNull<StorageDiffRecord>(db, keyDiff(cursor));
-    if (diff) {
-      applyDocs(docs, diff.puts, diff.dels, entityId);
-    }
-    cursor += 1;
-  }
-
-  const core = docs.get(`e:${entityId}`) as Extract<StorageDoc, { family: 'entity' }> | undefined;
-  if (!core) return null;
-  const accounts = new Map<string, StorageAccountDoc>();
-  const books = new Map<string, BookState>();
-  for (const doc of docs.values()) {
-    if (doc.family === 'account' && normalizeEntityId(doc.entityId) === entityId) {
-      accounts.set(doc.counterpartyId, doc.value);
-    } else if (doc.family === 'book' && normalizeEntityId(doc.entityId) === entityId) {
-      books.set(doc.pairId, doc.value);
-    }
-  }
-
-  return hydrateEntityStateFromStorage({ core: core.value, accounts, books });
-};
-
-export const inspectStorage = async (options: {
-  env: Env;
-  tryOpenDb: (env: Env) => Promise<boolean>;
-  getRuntimeDb: (env: Env) => RuntimeDbLike;
-}): Promise<StorageDebugStats | null> => {
-  const opened = await options.tryOpenDb(options.env);
-  if (!opened) return null;
-  const db = options.getRuntimeDb(options.env);
-  const [
-    head,
-    frameStats,
-    diffStats,
-    snapshotManifestStats,
-    snapshotEntityStats,
-    snapshotAccountStats,
-    snapshotBookStats,
-    snapshotHeights,
-    liveEntityStats,
-    liveAccountStats,
-    liveBookStats,
-    liveReplicaMetaStats,
-  ] = await Promise.all([
-    readJsonOrNull<StorageHead>(db, KEY_HEAD),
-    measurePrefixBytes(db, Buffer.from([KEY_FRAME])),
-    measurePrefixBytes(db, Buffer.from([KEY_DIFF])),
-    measurePrefixBytes(db, Buffer.from([KEY_SNAPSHOT_MANIFEST])),
-    measurePrefixBytes(db, Buffer.from([KEY_SNAPSHOT_ENTITY])),
-    measurePrefixBytes(db, Buffer.from([KEY_SNAPSHOT_ACCOUNT])),
-    measurePrefixBytes(db, Buffer.from([KEY_SNAPSHOT_BOOK])),
-    listSnapshotHeights(db),
-    measurePrefixBytes(db, Buffer.from([KEY_LIVE_ENTITY])),
-    measurePrefixBytes(db, Buffer.from([KEY_LIVE_ACCOUNT])),
-    measurePrefixBytes(db, Buffer.from([KEY_LIVE_BOOK])),
-    measurePrefixBytes(db, Buffer.from([KEY_LIVE_REPLICA_META])),
-  ]);
-
-  const snapshotBytes =
-    snapshotManifestStats.bytes +
-    snapshotEntityStats.bytes +
-    snapshotAccountStats.bytes +
-    snapshotBookStats.bytes;
-  const liveBytes = liveEntityStats.bytes + liveAccountStats.bytes + liveBookStats.bytes + liveReplicaMetaStats.bytes;
-  const historyBytes = frameStats.bytes + diffStats.bytes + snapshotBytes;
-  const totalBytes = historyBytes + liveBytes;
-
-  return {
-    head,
-    frameCount: frameStats.count,
-    diffCount: diffStats.count,
-    snapshotHeights,
-    liveEntityCount: liveEntityStats.count,
-    liveAccountCount: liveAccountStats.count,
-    liveBookCount: liveBookStats.count,
-    frameBytes: frameStats.bytes,
-    diffBytes: diffStats.bytes,
-    snapshotBytes,
-    liveBytes,
-    historyBytes,
-    totalBytes,
-    maxFrameBytes: frameStats.maxValueBytes,
-    maxDiffBytes: diffStats.maxValueBytes,
-    maxSnapshotBytes: Math.max(
-      snapshotManifestStats.maxValueBytes,
-      snapshotEntityStats.maxValueBytes,
-      snapshotAccountStats.maxValueBytes,
-      snapshotBookStats.maxValueBytes,
-    ),
   };
 };
