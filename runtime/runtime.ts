@@ -188,6 +188,18 @@ import {
   verifyStorageTailIntegrity,
 } from './storage';
 import { storageOverlayRecordKey } from './storage/overlay';
+export {
+  resolveRuntimeAdapterRead,
+  EmbeddedRuntimeAdapter,
+  RemoteRuntimeAdapter,
+} from './radapter';
+export type {
+  RuntimeAdapter,
+  RuntimeAdapterConfig,
+  RuntimeAdapterReadQuery,
+  RuntimeAdapterAuthLevel,
+  RuntimeAdapterStatus,
+} from './radapter';
 import {
   validateDelta,
   validateAccountDeltas,
@@ -4374,7 +4386,7 @@ const resolvePersistedCheckpointHeights = async (env: Env): Promise<number[]> =>
   return Array.from(new Set(handles.flatMap((handle) => handle.snapshotHeights))).sort((left, right) => left - right);
 };
 
-const readPersistedStorageFrameRecord = async (
+export const readPersistedStorageFrameRecord = async (
   env: Env,
   height: number,
 ): Promise<ReturnType<typeof readStorageFrameRecord> extends Promise<infer T> ? T : never> => {
@@ -4411,7 +4423,7 @@ const resolvePersistedSnapshotHeight = async (env: Env, targetHeight: number): P
   return best;
 };
 
-const listPersistedEntityIdsAtHeight = async (env: Env, targetHeight: number): Promise<string[]> => {
+export const listPersistedEntityIdsAtHeight = async (env: Env, targetHeight: number): Promise<string[]> => {
   const entityIds = new Set<string>();
   for (const handle of await listPersistedStorageHandles(env)) {
     for (const entityId of await listStorageLiveEntityIds(handle.db)) {
