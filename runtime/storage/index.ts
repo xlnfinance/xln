@@ -1,9 +1,73 @@
-import { rebuildOrderbookPairIndex, type OrderbookExtState, type HubProfile, type EntityReferral, type BookState } from '../orderbook';
+import { rebuildOrderbookPairIndex, type OrderbookExtState, type BookState } from '../orderbook';
 import { ethers } from 'ethers';
-import { Packr } from 'msgpackr';
-import { deserializeTaggedJson, serializeTaggedJson } from '../serialization-utils';
+import { serializeTaggedJson } from '../serialization-utils';
 import { buildHexKeyedMerkle, type RadixMerkleRadix } from './merkle';
 import { mergeStorageOverlayRecords, storageOverlayRecordKey } from './overlay';
+import { decodeBuffer, encodeBuffer, notFound, writeBatch } from './codec';
+import {
+  DEFAULT_ACCOUNT_MERKLE_RADIX,
+  DEFAULT_EPOCH_MAX_BYTES,
+  DEFAULT_FRAME_DB_MAX_BYTES,
+  DEFAULT_FRAME_DB_RETAIN_FRAMES,
+  DEFAULT_MATERIALIZE_PERIOD_FRAMES,
+  DEFAULT_RETAIN_SNAPSHOTS,
+  DEFAULT_SNAPSHOT_PERIOD_FRAMES,
+  EPOCH_SEED_FRAME_TAIL,
+  FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME,
+  FRAME_DB_ENTITY_ACTIVITY,
+  FRAME_DB_RUNTIME_ACTIVITY,
+  KEY_DIFF,
+  KEY_FRAME,
+  KEY_FRAME_DB_HEAD,
+  KEY_HEAD,
+  KEY_LIVE_ACCOUNT,
+  KEY_LIVE_BOOK,
+  KEY_LIVE_DOC_HASH,
+  KEY_LIVE_ENTITY,
+  KEY_LIVE_ENTITY_HASH,
+  KEY_LIVE_REPLICA_META,
+  KEY_PACK,
+  KEY_SNAPSHOT_ACCOUNT,
+  KEY_SNAPSHOT_BOOK,
+  KEY_SNAPSHOT_ENTITY,
+  KEY_SNAPSHOT_MANIFEST,
+  STORAGE_SCHEMA_VERSION,
+  STORAGE_VERIFY_TAIL_FRAMES,
+  ZERO_FRAME_HASH,
+  decodeEntityId,
+  decodeHeight,
+  encodeHeight,
+  hexBytes,
+  keyDiff,
+  keyFrame,
+  keyFrameDbAccountFrame,
+  keyFrameDbAccountFrameByRuntime,
+  keyFrameDbAccountFrameByRuntimePrefix,
+  keyFrameDbAccountFramePrefix,
+  keyFrameDbEntityActivity,
+  keyFrameDbOrderbookCommit,
+  keyFrameDbOrderbookCommitPrefix,
+  keyFrameDbRuntimeActivity,
+  keyLiveAccount,
+  keyLiveAccountPrefix,
+  keyLiveBook,
+  keyLiveBookPrefix,
+  keyLiveEntity,
+  keyLiveEntityHash,
+  keyLiveEntityHashPrefix,
+  keyLiveReplicaMeta,
+  keySnapshotAccountPrefix,
+  keySnapshotBookPrefix,
+  keySnapshotEntity,
+  keySnapshotEntityPrefix,
+  keySnapshotManifest,
+  normalizeEntityId,
+  parseFrameDbAccountFrameRuntimeIndexKey,
+  parseLiveAccountKey,
+  parseLiveBookKey,
+  parseSnapshotManifestHeight,
+  prefixUpperBound,
+} from './keys';
 import {
   computeCanonicalEntityHash,
   computeCanonicalEntityHashesFromEnv,
@@ -11,378 +75,62 @@ import {
   type CanonicalFrameEntityHash,
 } from './canonical-hash';
 import type {
-  AccountInput,
   AccountMachine,
-  AccountStatus,
-  ConsensusConfig,
-  Delta,
-  DebtEntry,
   EntityReplica,
   EntityInput,
   EntityState,
-  EntitySwapPair,
   Env,
   FrameLogEntry,
-  HtlcLock,
-  HtlcNoteKey,
-  HtlcRoute,
-  HubRebalanceConfig,
-  JurisdictionEvent,
-  LockBookEntry,
-  Proposal,
-  RebalancePolicy,
-  RebalanceQuote,
-  RebalanceRequestFeeState,
   RuntimeInput,
   RuntimeFrameDbRecord,
   RuntimeOverlayRecord,
-  SwapOffer,
 } from '../types';
-import type { CrontabState } from '../crontab-types';
-import type { JBatchState } from '../j-batch';
-import type { SwapKey } from '../swap-keys';
+import type {
+  FrameDbPut,
+  NamespaceBytes,
+  PerfDeps,
+  RuntimeDbLike,
+  RuntimeFrameDbLike,
+  StorageAccountRef,
+  StorageAccountDoc,
+  StorageBookRef,
+  StorageDebugStats,
+  StorageDiffRecord,
+  StorageDoc,
+  StorageDocRef,
+  StorageEntityCoreDoc,
+  StorageEntityHashDoc,
+  StorageEpochSeedStats,
+  StorageFrameDbHead,
+  StorageFrameEntityHash,
+  StorageFrameRecord,
+  StorageHashCell,
+  StorageHead,
+  StorageOverlayRefs,
+  StorageReplicaLookup,
+  StorageReplicaMeta,
+  StorageRuntimeConfig,
+  StorageSnapshotManifest,
+} from './types';
 
-type RuntimeDbLike = {
-  get: (key: Buffer) => Promise<Buffer>;
-  put?: (key: Buffer, value: Buffer, options?: { sync?: boolean }) => Promise<void>;
-  batch: () => {
-    put: (key: Buffer, value: Buffer) => unknown;
-    del?: (key: Buffer) => unknown;
-    write: (options?: { sync?: boolean }) => Promise<void>;
-  };
-  keys?: (options?: { gte?: Buffer; lt?: Buffer }) => AsyncIterable<Buffer | Uint8Array | string>;
-};
-
-type PerfDeps = {
-  getPerfMs: () => number;
-  formatPerfMs: (value: number) => string;
-};
-
-export type StorageRuntimeConfig = {
-  enabled?: boolean;
-  snapshotPeriodFrames?: number;
-  retainSnapshots?: number;
-  epochMaxBytes?: number;
-  frameDbMaxBytes?: number;
-  frameDbRetainFrames?: number;
-  materializePeriodFrames?: number;
-  accountMerkleRadix?: RadixMerkleRadix;
-};
-
-export type StorageHead = {
-  schemaVersion: number;
-  latestHeight: number;
-  latestMaterializedHeight?: number;
-  latestSnapshotHeight: number;
-  snapshotPeriodFrames: number;
-  retainSnapshots: number;
-  epochMaxBytes: number;
-  accountMerkleRadix: RadixMerkleRadix;
-  retainedHistoryBytes: number;
-};
-
-export type StorageEntityCoreDoc = {
-  entityId: string;
-  signerId?: string;
-  isProposer?: boolean;
-  height: number;
-  timestamp: number;
-  messages: EntityState['messages'];
-  nonces: Map<string, number>;
-  proposals: Map<string, Proposal>;
-  config: ConsensusConfig;
-  prevFrameHash?: string;
-  reserves: Map<number, bigint>;
-  deferredAccountProposals?: Map<string, true>;
-  lastFinalizedJHeight: number;
-  jBlockObservations: EntityState['jBlockObservations'];
-  jBlockChain: EntityState['jBlockChain'];
-  batchHistory?: EntityState['batchHistory'];
-  accountInputQueue?: AccountInput[];
-  crontabState?: CrontabState;
-  jBatchState?: JBatchState;
-  entityEncPubKey: string;
-  entityEncPrivKey: string;
-  profile: EntityState['profile'];
-  htlcRoutes: Map<string, HtlcRoute>;
-  htlcFeesEarned: bigint;
-  htlcNotes?: Map<HtlcNoteKey, string>;
-  outDebtsByToken?: Map<number, Map<string, DebtEntry>>;
-  inDebtsByToken?: Map<number, Map<string, DebtEntry>>;
-  lockBook: Map<string, LockBookEntry>;
-  swapTradingPairs?: EntitySwapPair[];
-  pendingSwapFillRatios?: Map<SwapKey, number>;
-  hubRebalanceConfig?: HubRebalanceConfig;
-  orderbookHubProfile?: HubProfile;
-  orderbookReferrals?: Map<string, EntityReferral>;
-};
-
-export type StorageAccountDoc = {
-  leftEntity: string;
-  rightEntity: string;
-  status: AccountStatus;
-  mempool: AccountMachine['mempool'];
-  currentFrame: AccountMachine['currentFrame'];
-  deltas: Map<number, Delta>;
-  locks: Map<string, HtlcLock>;
-  swapOffers: Map<string, SwapOffer>;
-  globalCreditLimits: AccountMachine['globalCreditLimits'];
-  currentHeight: number;
-  pendingFrame?: AccountMachine['pendingFrame'];
-  pendingSignatures: string[];
-  pendingAccountInput?: AccountMachine['pendingAccountInput'];
-  rollbackCount: number;
-  lastRollbackFrameHash?: string;
-  leftJObservations?: Array<{ jHeight: number; jBlockHash: string; events: JurisdictionEvent[]; observedAt: number }>;
-  rightJObservations?: Array<{ jHeight: number; jBlockHash: string; events: JurisdictionEvent[]; observedAt: number }>;
-  jEventChain?: AccountMachine['jEventChain'];
-  lastFinalizedJHeight: number;
-  proofHeader: AccountMachine['proofHeader'];
-  proofBody: AccountMachine['proofBody'];
-  abiProofBody?: AccountMachine['abiProofBody'];
-  disputeConfig: AccountMachine['disputeConfig'];
-  currentFrameHanko?: AccountMachine['currentFrameHanko'];
-  counterpartyFrameHanko?: AccountMachine['counterpartyFrameHanko'];
-  currentDisputeProofHanko?: AccountMachine['currentDisputeProofHanko'];
-  currentDisputeProofNonce?: number;
-  currentDisputeProofBodyHash?: string;
-  currentDisputeHash?: string;
-  counterpartyDisputeProofHanko?: AccountMachine['counterpartyDisputeProofHanko'];
-  counterpartyDisputeProofNonce?: number;
-  counterpartyDisputeProofBodyHash?: string;
-  counterpartyDisputeHash?: string;
-  counterpartySettlementHanko?: AccountMachine['counterpartySettlementHanko'];
-  disputeProofNoncesByHash?: AccountMachine['disputeProofNoncesByHash'];
-  disputeProofBodiesByHash?: AccountMachine['disputeProofBodiesByHash'];
-  onChainSettlementNonce: number;
-  settlementWorkspace?: AccountMachine['settlementWorkspace'];
-  activeDispute?: AccountMachine['activeDispute'];
-  swapOrderHistory?: AccountMachine['swapOrderHistory'];
-  swapClosedOrders?: AccountMachine['swapClosedOrders'];
-  pendingWithdrawals: Map<string, {
-    requestId: string;
-    tokenId: number;
-    amount: bigint;
-    requestedAt: number;
-    direction: 'outgoing' | 'incoming';
-    status: 'pending' | 'approved' | 'rejected' | 'timed_out';
-    signature?: string;
-  }>;
-  requestedRebalance: Map<number, bigint>;
-  requestedRebalanceFeeState: Map<number, RebalanceRequestFeeState>;
-  counterpartyRebalanceFeePolicy?: AccountMachine['counterpartyRebalanceFeePolicy'];
-  rebalancePolicy: Map<number, RebalancePolicy>;
-  activeRebalanceQuote?: RebalanceQuote;
-  pendingRebalanceRequest?: { tokenId: number; targetAmount: bigint };
-};
-
-export type StorageDoc =
-  | { family: 'entity'; entityId: string; value: StorageEntityCoreDoc }
-  | { family: 'account'; entityId: string; counterpartyId: string; value: StorageAccountDoc }
-  | { family: 'book'; entityId: string; pairId: string; value: BookState };
-
-export type StorageDocRef =
-  | { family: 'entity'; entityId: string }
-  | { family: 'account'; entityId: string; counterpartyId: string }
-  | { family: 'book'; entityId: string; pairId: string };
-
-type StorageAccountRef = Extract<StorageDocRef, { family: 'account' }>;
-type StorageBookRef = Extract<StorageDocRef, { family: 'book' }>;
-type StorageOverlayRefs = {
-  touchedEntities: Set<string>;
-  touchedAccounts: Map<string, StorageAccountRef>;
-  touchedBooks: Map<string, StorageBookRef>;
-  touchedBookEntities: Set<string>;
-};
-
-export type StorageFrameRecord = {
-  height: number;
-  timestamp: number;
-  prevFrameHash?: string;
-  frameHash?: string;
-  stateHash: string;
-  hashMode?: 'storage-debug-v1' | 'storage-merkle-v1' | 'legacy-env-v1';
-  materializedState?: boolean;
-  entityHashes?: StorageFrameEntityHash[];
-  /**
-   * Independent canonical root computed directly from live EntityReplica data.
-   * This intentionally avoids cloneEntityReplica(), project*Doc(), msgpack, and
-   * coarse-doc storage cells so replay verification can catch bugs in those
-   * pipelines instead of repeating them.
-   */
-  canonicalStateHash?: string;
-  canonicalEntityHashes?: StorageFrameEntityHash[];
-  /**
-   * Runtime replay journal. Activity/log/account-frame history is indexed in
-   * the separate frame DB so live state compaction is not coupled to UI history.
-   */
-  runtimeInput: RuntimeInput;
-  frameOutputs: EntityInput[];
-  overlayRecords?: RuntimeOverlayRecord[];
-  logs: FrameLogEntry[];
-  touchedEntities: string[];
-  touchedAccounts: Array<{ entityId: string; counterpartyId: string }>;
-  touchedBookEntities: string[];
-};
-
-export type StorageHashCell = {
-  key: string;
-  hash: string;
-};
-
-export type StorageEntityHashDoc = {
-  entityId: string;
-  hash: string;
-  cells: StorageHashCell[];
-};
-
-export type StorageFrameEntityHash = {
-  entityId: string;
-  hash: string;
-  cellCount: number;
-};
-
-export type StorageReplicaMeta = {
-  entityId: string;
-  signerId?: string;
-  isProposer?: boolean;
-  proposal?: EntityReplica['proposal'];
-  lockedFrame?: EntityReplica['lockedFrame'];
-  validatorComputedState?: EntityReplica['validatorComputedState'];
-  hankoWitness?: EntityReplica['hankoWitness'];
-};
-
-export type StorageDiffRecord = {
-  height: number;
-  puts: StorageDoc[];
-  dels: StorageDocRef[];
-};
-
-export type StorageSnapshotManifest = {
-  height: number;
-  createdAt: number;
-  docCount: number;
-};
-
-export type StorageDebugStats = {
-  head: StorageHead | null;
-  frameCount: number;
-  diffCount: number;
-  snapshotHeights: number[];
-  liveEntityCount: number;
-  liveAccountCount: number;
-  liveBookCount: number;
-  frameBytes: number;
-  diffBytes: number;
-  snapshotBytes: number;
-  liveBytes: number;
-  historyBytes: number;
-  totalBytes: number;
-  maxFrameBytes: number;
-  maxDiffBytes: number;
-  maxSnapshotBytes: number;
-  epochDbs?: Array<{
-    role: 'current' | 'previous';
-    path: string;
-    latestHeight: number;
-    latestSnapshotHeight: number;
-    frameCount: number;
-    diffCount: number;
-    snapshotCount: number;
-    liveBytes: number;
-    historyBytes: number;
-    totalBytes: number;
-  }>;
-};
-
-const STORAGE_SCHEMA_VERSION = 1;
-const DEFAULT_SNAPSHOT_PERIOD_FRAMES = 256;
-const DEFAULT_RETAIN_SNAPSHOTS = 3;
-const DEFAULT_EPOCH_MAX_BYTES = 256 * 1024 * 1024;
-const DEFAULT_FRAME_DB_MAX_BYTES = 1024 * 1024 * 1024;
-const DEFAULT_FRAME_DB_RETAIN_FRAMES = 100_000;
-const DEFAULT_MATERIALIZE_PERIOD_FRAMES = 64;
-const DEFAULT_ACCOUNT_MERKLE_RADIX: RadixMerkleRadix = 16;
-const KEY_HEAD = Buffer.from([0x01]);
-const KEY_FRAME = 0x02;
-const KEY_DIFF = 0x03;
-// Legacy pack records are no longer written; keep the prefix only so history
-// pruning can clean DBs created before pack removal.
-const KEY_PACK = 0x04;
-const KEY_SNAPSHOT_MANIFEST = 0x05;
-const KEY_LIVE_ENTITY = 0x21;
-const KEY_LIVE_ACCOUNT = 0x22;
-const KEY_LIVE_BOOK = 0x23;
-const KEY_LIVE_DOC_HASH = 0x24;
-const KEY_LIVE_ENTITY_HASH = 0x25;
-const KEY_LIVE_REPLICA_META = 0x26;
-const KEY_SNAPSHOT_ENTITY = 0x31;
-const KEY_SNAPSHOT_ACCOUNT = 0x32;
-const KEY_SNAPSHOT_BOOK = 0x33;
-const STORAGE_VERIFY_TAIL_FRAMES = 128;
-const EPOCH_SEED_FRAME_TAIL = STORAGE_VERIFY_TAIL_FRAMES + 1;
-
-const KEY_FRAME_DB_HEAD = Buffer.from([0x00]);
-const FRAME_DB_ACCOUNT_FRAME = 0x01;
-const FRAME_DB_RUNTIME_ACTIVITY = 0x02;
-const FRAME_DB_ENTITY_ACTIVITY = 0x03;
-const FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME = 0x04;
-const FRAME_DB_ORDERBOOK_COMMIT = 0x05;
-const ZERO_FRAME_HASH = `0x${'00'.repeat(32)}`;
-
-type StorageCodecName = 'json' | 'msgpack';
-
-const STORAGE_CODEC_MAGIC: Record<StorageCodecName, number> = {
-  msgpack: 0x01,
-  json: 0x02,
-};
-const STORAGE_CODEC_BY_MAGIC = new Map<number, StorageCodecName>(
-  Object.entries(STORAGE_CODEC_MAGIC).map(([codec, magic]) => [magic, codec as StorageCodecName]),
-);
-
-const notFound = (error: unknown): boolean => {
-  if (!error || typeof error !== 'object') return false;
-  const code = String((error as { code?: unknown }).code ?? '');
-  const name = String((error as { name?: unknown }).name ?? '');
-  return code === 'LEVEL_NOT_FOUND' || name === 'NotFoundError';
-};
-
-const msgpackCodec = new Packr({
-  mapsAsObjects: false,
-  structuredClone: true,
-});
-
-const storageCodecName = (): StorageCodecName => {
-  const raw = String(
-    typeof process !== 'undefined'
-      ? process.env['XLN_STORAGE_CODEC'] ?? ''
-      : '',
-  ).trim().toLowerCase();
-  return raw === 'json' ? 'json' : 'msgpack';
-};
-
-const encodeWithCodec = (codec: StorageCodecName, value: unknown): Buffer => {
-  if (codec === 'json') return Buffer.from(serializeTaggedJson(value));
-  return Buffer.from(msgpackCodec.pack(value));
-};
-
-const decodeWithCodec = <T>(codec: StorageCodecName, buffer: Buffer): T => {
-  if (codec === 'json') return deserializeTaggedJson<T>(buffer.toString());
-  return msgpackCodec.unpack(buffer) as T;
-};
-
-const encodeBuffer = (value: unknown): Buffer => {
-  const codec = storageCodecName();
-  return Buffer.concat([Buffer.from([STORAGE_CODEC_MAGIC[codec]]), encodeWithCodec(codec, value)]);
-};
-const decodeBuffer = <T>(buffer: Buffer): T => {
-  const magic = buffer[0];
-  const codec = magic === undefined ? undefined : STORAGE_CODEC_BY_MAGIC.get(magic);
-  if (!codec) {
-    throw new Error(`STORAGE_CODEC_MAGIC_MISSING: firstByte=${magic ?? 'none'}`);
-  }
-  return decodeWithCodec<T>(codec, buffer.subarray(1));
-};
+export type {
+  RuntimeDbLike,
+  StorageAccountDoc,
+  StorageDebugStats,
+  StorageDiffRecord,
+  StorageDoc,
+  StorageDocRef,
+  StorageEntityCoreDoc,
+  StorageEntityHashDoc,
+  StorageEpochSeedStats,
+  StorageFrameEntityHash,
+  StorageFrameRecord,
+  StorageHashCell,
+  StorageHead,
+  StorageReplicaMeta,
+  StorageRuntimeConfig,
+  StorageSnapshotManifest,
+} from './types';
 
 type StorageDocEncodedValue = { buffer: Buffer; hash: string; hashBytes: Buffer };
 type StorageDocWithComputedHash = StorageDoc & {
@@ -428,142 +176,6 @@ const encodeStorageDocValue = (doc: StorageDoc): StorageDocEncodedValue => {
 const withProp = <K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> =>
   value === undefined ? {} : ({ [key]: value } as Record<K, V>);
 
-const storageSyncWritesEnabled = (): boolean => {
-  const raw = String(typeof process !== 'undefined' ? process.env['XLN_STORAGE_SYNC_WRITES'] ?? '' : '').trim().toLowerCase();
-  return raw !== '0' && raw !== 'false' && raw !== 'off';
-};
-
-const writeBatch = async (
-  batch: { write: (options?: { sync?: boolean }) => Promise<void> },
-  options: { sync?: boolean } = {},
-): Promise<void> => {
-  const sync = options.sync ?? storageSyncWritesEnabled();
-  await batch.write(sync ? { sync: true } : undefined);
-};
-
-const normalizeEntityId = (value: string): string => String(value || '').toLowerCase();
-
-const hexBytes = (value: string): Buffer => {
-  const hex = normalizeEntityId(value).replace(/^0x/, '');
-  return Buffer.from(hex.padStart(64, '0'), 'hex');
-};
-
-const decodeEntityId = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString('hex')}`;
-
-const encodeHeight = (height: number): Buffer => {
-  const out = Buffer.allocUnsafe(8);
-  out.writeBigUInt64BE(BigInt(height));
-  return out;
-};
-
-const decodeHeight = (buffer: Buffer, offset = 1): number => Number(buffer.readBigUInt64BE(offset));
-
-const textBytes = (value: string): Buffer => {
-  const raw = Buffer.from(value, 'utf8');
-  const len = Buffer.allocUnsafe(2);
-  len.writeUInt16BE(raw.length);
-  return Buffer.concat([len, raw]);
-};
-
-const readText = (buffer: Buffer, offset: number): { value: string; nextOffset: number } => {
-  const len = buffer.readUInt16BE(offset);
-  const start = offset + 2;
-  return { value: buffer.subarray(start, start + len).toString('utf8'), nextOffset: start + len };
-};
-
-const keyFrame = (height: number): Buffer => Buffer.concat([Buffer.from([KEY_FRAME]), encodeHeight(height)]);
-const keyDiff = (height: number): Buffer => Buffer.concat([Buffer.from([KEY_DIFF]), encodeHeight(height)]);
-const keySnapshotManifest = (height: number): Buffer => Buffer.concat([Buffer.from([KEY_SNAPSHOT_MANIFEST]), encodeHeight(height)]);
-
-const keyLiveEntity = (entityId: string): Buffer => Buffer.concat([Buffer.from([KEY_LIVE_ENTITY]), hexBytes(entityId)]);
-
-const keyLiveAccount = (entityId: string, counterpartyId: string): Buffer =>
-  Buffer.concat([Buffer.from([KEY_LIVE_ACCOUNT]), hexBytes(entityId), hexBytes(counterpartyId)]);
-const keyLiveAccountPrefix = (entityId?: string): Buffer =>
-  entityId ? Buffer.concat([Buffer.from([KEY_LIVE_ACCOUNT]), hexBytes(entityId)]) : Buffer.from([KEY_LIVE_ACCOUNT]);
-
-const keyLiveBook = (entityId: string, pairId: string): Buffer =>
-  Buffer.concat([Buffer.from([KEY_LIVE_BOOK]), hexBytes(entityId), textBytes(pairId)]);
-const keyLiveBookPrefix = (entityId?: string): Buffer =>
-  entityId ? Buffer.concat([Buffer.from([KEY_LIVE_BOOK]), hexBytes(entityId)]) : Buffer.from([KEY_LIVE_BOOK]);
-
-const keyLiveEntityHash = (entityId: string): Buffer =>
-  Buffer.concat([Buffer.from([KEY_LIVE_ENTITY_HASH]), hexBytes(entityId)]);
-const keyLiveEntityHashPrefix = (): Buffer => Buffer.from([KEY_LIVE_ENTITY_HASH]);
-
-const keyLiveReplicaMeta = (entityId: string): Buffer =>
-  Buffer.concat([Buffer.from([KEY_LIVE_REPLICA_META]), hexBytes(entityId)]);
-
-const keyFrameDbAccountFrame = (
-  entityId: string,
-  counterpartyId: string,
-  accountHeight: number,
-): Buffer => Buffer.concat([Buffer.from([FRAME_DB_ACCOUNT_FRAME]), hexBytes(entityId), hexBytes(counterpartyId), encodeHeight(accountHeight)]);
-const keyFrameDbAccountFrameByRuntime = (
-  runtimeHeight: number,
-  entityId: string,
-  counterpartyId: string,
-  accountHeight: number,
-): Buffer => Buffer.concat([
-  Buffer.from([FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME]),
-  encodeHeight(runtimeHeight),
-  hexBytes(entityId),
-  hexBytes(counterpartyId),
-  encodeHeight(accountHeight),
-]);
-const keyFrameDbRuntimeActivity = (height: number): Buffer =>
-  Buffer.concat([Buffer.from([FRAME_DB_RUNTIME_ACTIVITY]), encodeHeight(height)]);
-const keyFrameDbEntityActivity = (entityId: string, height: number): Buffer =>
-  Buffer.concat([Buffer.from([FRAME_DB_ENTITY_ACTIVITY]), hexBytes(entityId), encodeHeight(height)]);
-const keyFrameDbOrderbookCommit = (runtimeHeight: number, entityId: string, pairId: string): Buffer =>
-  Buffer.concat([Buffer.from([FRAME_DB_ORDERBOOK_COMMIT]), encodeHeight(runtimeHeight), hexBytes(entityId), textBytes(pairId)]);
-const keyFrameDbOrderbookCommitPrefix = (): Buffer => Buffer.from([FRAME_DB_ORDERBOOK_COMMIT]);
-const keyFrameDbAccountFramePrefix = (entityId?: string, counterpartyId?: string): Buffer => {
-  if (entityId && counterpartyId) return Buffer.concat([Buffer.from([FRAME_DB_ACCOUNT_FRAME]), hexBytes(entityId), hexBytes(counterpartyId)]);
-  if (entityId) return Buffer.concat([Buffer.from([FRAME_DB_ACCOUNT_FRAME]), hexBytes(entityId)]);
-  return Buffer.from([FRAME_DB_ACCOUNT_FRAME]);
-};
-const keyFrameDbAccountFrameByRuntimePrefix = (): Buffer => Buffer.from([FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME]);
-const parseFrameDbAccountFrameRuntimeIndexKey = (key: Buffer): {
-  runtimeHeight: number;
-  entityId: string;
-  counterpartyId: string;
-  accountHeight: number;
-} => ({
-  runtimeHeight: decodeHeight(key, 1),
-  entityId: decodeEntityId(key.subarray(9, 41)),
-  counterpartyId: decodeEntityId(key.subarray(41, 73)),
-  accountHeight: decodeHeight(key, 73),
-});
-
-const keySnapshotEntity = (height: number, entityId: string): Buffer =>
-  Buffer.concat([Buffer.from([KEY_SNAPSHOT_ENTITY]), encodeHeight(height), hexBytes(entityId)]);
-const keySnapshotEntityPrefix = (height: number, entityId?: string): Buffer =>
-  entityId
-    ? Buffer.concat([Buffer.from([KEY_SNAPSHOT_ENTITY]), encodeHeight(height), hexBytes(entityId)])
-    : Buffer.concat([Buffer.from([KEY_SNAPSHOT_ENTITY]), encodeHeight(height)]);
-
-const keySnapshotAccountPrefix = (height: number, entityId?: string): Buffer =>
-  entityId
-    ? Buffer.concat([Buffer.from([KEY_SNAPSHOT_ACCOUNT]), encodeHeight(height), hexBytes(entityId)])
-    : Buffer.concat([Buffer.from([KEY_SNAPSHOT_ACCOUNT]), encodeHeight(height)]);
-
-const keySnapshotBookPrefix = (height: number, entityId?: string): Buffer =>
-  entityId
-    ? Buffer.concat([Buffer.from([KEY_SNAPSHOT_BOOK]), encodeHeight(height), hexBytes(entityId)])
-    : Buffer.concat([Buffer.from([KEY_SNAPSHOT_BOOK]), encodeHeight(height)]);
-
-const prefixUpperBound = (prefix: Buffer): Buffer | undefined => {
-  const out = Buffer.from(prefix);
-  for (let index = out.length - 1; index >= 0; index -= 1) {
-    const current = out[index];
-    if (current === undefined || current === 0xff) continue;
-    out[index] = current + 1;
-    return out.subarray(0, index + 1);
-  }
-  return undefined;
-};
-
 const readJsonOrNull = async <T>(db: RuntimeDbLike, key: Buffer): Promise<T | null> => {
   try {
     return decodeBuffer<T>(await db.get(key));
@@ -604,19 +216,6 @@ const listKeysRange = async (db: RuntimeDbLike, gte: Buffer, lt: Buffer): Promis
   }
   return out;
 };
-
-const parseLiveAccountKey = (key: Buffer): { entityId: string; counterpartyId: string } => ({
-  entityId: decodeEntityId(key.subarray(1, 33)),
-  counterpartyId: decodeEntityId(key.subarray(33, 65)),
-});
-
-const parseLiveBookKey = (key: Buffer, offset = 1): { entityId: string; pairId: string } => {
-  const entityId = decodeEntityId(key.subarray(offset, offset + 32));
-  const { value } = readText(key, offset + 32);
-  return { entityId, pairId: value };
-};
-
-const parseSnapshotManifestHeight = (key: Buffer): number => decodeHeight(key);
 
 const hashBuffer = (value: Buffer | Uint8Array): string =>
   ethers.keccak256(value instanceof Uint8Array ? value : Uint8Array.from(value));
@@ -1097,8 +696,6 @@ const findReplicaForEntity = (
   return null;
 };
 
-type StorageReplicaLookup = Map<string, { replicaKey: string; replica: EntityReplica; state: EntityState }>;
-
 const buildReplicaLookup = (env: Env): StorageReplicaLookup => {
   const lookup: StorageReplicaLookup = new Map();
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
@@ -1424,19 +1021,6 @@ const prepareStorageStateHashes = async (options: {
     docHashDels,
     entityHashPuts,
   };
-};
-
-type RuntimeFrameDbLike = RuntimeDbLike;
-
-type FrameDbPut = { key: Buffer; value: Buffer };
-
-type StorageFrameDbHead = {
-  schemaVersion: number;
-  latestHeight: number;
-  latestPrunedRuntimeHeight: number;
-  retainedBytes: number;
-  maxBytes: number;
-  retainFrames: number;
 };
 
 type StoredAccountFrameRecord = Extract<RuntimeFrameDbRecord, { kind: 'accountFrame' }> & {
@@ -1772,19 +1356,6 @@ const buildDiffRecord = (height: number, puts: StorageDoc[], dels: StorageDocRef
   puts,
   dels,
 });
-
-type NamespaceBytes = {
-  count: number;
-  bytes: number;
-  maxValueBytes: number;
-};
-
-export type StorageEpochSeedStats = {
-  liveBytes: number;
-  snapshotBytes: number;
-  frameBytes: number;
-  docCount: number;
-};
 
 const measurePrefixBytes = async (db: RuntimeDbLike, prefix: Buffer): Promise<NamespaceBytes> => {
   const keys = await listKeys(db, prefix);
