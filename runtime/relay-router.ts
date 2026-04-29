@@ -24,18 +24,29 @@ import {
 } from './relay-store';
 import type { Profile } from './networking/gossip';
 
-const socketRuntimeIds = new WeakMap<object, string>();
+const SOCKET_RUNTIME_ID = Symbol.for('xln.relay.socketRuntimeId');
+type RememberedRelaySocket = object & { [SOCKET_RUNTIME_ID]?: string };
 
 const rememberSocketRuntimeId = (ws: unknown, runtimeId: string): void => {
   if (!ws || (typeof ws !== 'object' && typeof ws !== 'function')) return;
   const normalized = normalizeRuntimeKey(runtimeId);
   if (!normalized) return;
-  socketRuntimeIds.set(ws as object, normalized);
+  Object.defineProperty(ws as RememberedRelaySocket, SOCKET_RUNTIME_ID, {
+    value: normalized,
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
 };
 
 const getRememberedSocketRuntimeId = (ws: unknown): string => {
   if (!ws || (typeof ws !== 'object' && typeof ws !== 'function')) return '';
-  return normalizeRuntimeKey(socketRuntimeIds.get(ws as object) || '');
+  return normalizeRuntimeKey((ws as RememberedRelaySocket)[SOCKET_RUNTIME_ID] || '');
+};
+
+export const forgetRelaySocketRuntimeId = (ws: unknown): void => {
+  if (!ws || (typeof ws !== 'object' && typeof ws !== 'function')) return;
+  delete (ws as RememberedRelaySocket)[SOCKET_RUNTIME_ID];
 };
 
 // ---------------------------------------------------------------------------

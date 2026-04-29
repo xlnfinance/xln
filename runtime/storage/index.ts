@@ -203,7 +203,7 @@ export type StorageFrameRecord = {
   prevFrameHash?: string;
   frameHash?: string;
   stateHash: string;
-  hashMode?: 'storage-debug-v1' | 'legacy-env-v1';
+  hashMode?: 'storage-debug-v1' | 'storage-merkle-v1' | 'legacy-env-v1';
   entityHashes?: StorageFrameEntityHash[];
   /**
    * Independent audit root computed from canonical EntityReplica snapshots,
@@ -400,20 +400,44 @@ const decodeBuffer = <T>(buffer: Buffer): T => {
 };
 
 type StorageDocEncodedValue = { buffer: Buffer; hash: string; hashBytes: Buffer };
-const storageDocEncodeCache = new WeakMap<object, StorageDocEncodedValue>();
-
-const encodeStorageDocValue = (doc: StorageDoc): StorageDocEncodedValue => {
-  const cached = storageDocEncodeCache.get(doc);
-  if (cached) return cached;
-  const buffer = encodeBuffer(doc.value);
-  const hash = hashBuffer(buffer);
-  const encoded = { buffer, hash, hashBytes: Buffer.from(hash.slice(2), 'hex') };
-  storageDocEncodeCache.set(doc, encoded);
-  return encoded;
+type StorageDocWithComputedHash = StorageDoc & {
+  hash?: string;
+  encodedValue?: Buffer;
+  hashBytes?: Buffer;
 };
 
-export const invalidateStorageDocHashCache = (doc: StorageDoc): void => {
-  storageDocEncodeCache.delete(doc);
+const setHiddenDocComputedValue = <K extends keyof StorageDocWithComputedHash>(
+  doc: StorageDocWithComputedHash,
+  key: K,
+  value: StorageDocWithComputedHash[K],
+): void => {
+  Object.defineProperty(doc, key, {
+    value,
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+};
+
+const encodeStorageDocValue = (doc: StorageDoc): StorageDocEncodedValue => {
+  const cached = doc as StorageDocWithComputedHash;
+  if (
+    typeof cached.hash === 'string' &&
+    Buffer.isBuffer(cached.encodedValue) &&
+    Buffer.isBuffer(cached.hashBytes)
+  ) {
+    return { buffer: cached.encodedValue, hash: cached.hash, hashBytes: cached.hashBytes };
+  }
+  const buffer = encodeBuffer(doc.value);
+  const hash = hashBuffer(buffer);
+  const hashBytes = Buffer.from(hash.slice(2), 'hex');
+  // Per-frame StorageDoc objects are the overlay. Keep computed values on that
+  // object, hidden from diff encoding. Durable truth remains KEY_LIVE_DOC_HASH
+  // and KEY_LIVE_ENTITY_HASH in LevelDB.
+  setHiddenDocComputedValue(cached, 'encodedValue', buffer);
+  setHiddenDocComputedValue(cached, 'hash', hash);
+  setHiddenDocComputedValue(cached, 'hashBytes', hashBytes);
+  return { buffer, hash, hashBytes };
 };
 
 const withProp = <K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> =>
@@ -615,6 +639,12 @@ const hashBuffer = (value: Buffer | Uint8Array): string =>
 
 const hashStable = (value: unknown): string => ethers.keccak256(ethers.toUtf8Bytes(serializeTaggedJson(value)));
 
+const hashToBytes = (hash: string): Buffer =>
+  Buffer.from(String(hash || '').replace(/^0x/, '').padStart(64, '0'), 'hex');
+
+const storageMerkleKey = (key: string): string =>
+  hashStable({ kind: 'xln.storage.merkleKey.v1', key: String(key) });
+
 const normalizeHashCells = (cells: Iterable<StorageHashCell>): StorageHashCell[] =>
   Array.from(cells)
     .map((cell) => ({ key: String(cell.key), hash: String(cell.hash) }))
@@ -623,14 +653,17 @@ const normalizeHashCells = (cells: Iterable<StorageHashCell>): StorageHashCell[]
 
 const buildEntityHashDoc = (entityId: string, cells: Iterable<StorageHashCell>): StorageEntityHashDoc => {
   const normalizedCells = normalizeHashCells(cells);
+  const merkle = buildHexKeyedMerkle(
+    normalizedCells.map((cell) => ({
+      hexKey: storageMerkleKey(cell.key),
+      value: hashToBytes(cell.hash),
+    })),
+    { radix: DEFAULT_ACCOUNT_MERKLE_RADIX },
+  );
   return {
     entityId: normalizeEntityId(entityId),
     cells: normalizedCells,
-    hash: hashStable({
-      kind: 'xln.storage.entityHash.v1',
-      entityId: normalizeEntityId(entityId),
-      cells: normalizedCells,
-    }),
+    hash: merkle.root,
   };
 };
 
@@ -638,18 +671,18 @@ export const computeStorageRuntimeStateHash = (
   height: number,
   timestamp: number,
   entityHashes: StorageFrameEntityHash[],
-): string => hashStable({
-  kind: 'xln.storage.runtimeHash.v1',
-  height,
-  timestamp,
-  entities: entityHashes
-    .map((entry) => ({
-      entityId: normalizeEntityId(entry.entityId),
-      hash: entry.hash,
-      cellCount: entry.cellCount,
-    }))
-    .sort((left, right) => left.entityId.localeCompare(right.entityId)),
-});
+): string => {
+  void height;
+  void timestamp;
+  return buildHexKeyedMerkle(
+    entityHashes
+      .map((entry) => ({
+        hexKey: normalizeEntityId(entry.entityId),
+        value: hashToBytes(entry.hash),
+      })),
+    { radix: DEFAULT_ACCOUNT_MERKLE_RADIX },
+  ).root;
+};
 
 const hashCanonicalJson = (value: unknown): string =>
   ethers.keccak256(ethers.toUtf8Bytes(safeStringify(value)));
@@ -2268,7 +2301,7 @@ export const saveRuntimeFrameToStorage = async (options: {
     timestamp: options.env.timestamp,
     prevFrameHash,
     stateHash: preparedHashes.stateHash,
-    hashMode: 'storage-debug-v1',
+    hashMode: 'storage-merkle-v1',
     entityHashes: preparedHashes.entityHashes,
     auditStateHash: auditHashes.auditStateHash,
     auditEntityHashes: auditHashes.auditEntityHashes,

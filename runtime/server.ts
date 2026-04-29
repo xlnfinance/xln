@@ -48,7 +48,7 @@ import {
   removeClient,
   resolveEncryptionPublicKeyHex,
 } from './relay-store';
-import { relayRoute, type RelayRouterConfig } from './relay-router';
+import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from './relay-router';
 import { createLocalDeliveryHandler } from './relay-local-delivery';
 import { resolveJurisdictionsJsonPath } from './jurisdictions-path';
 import {
@@ -3754,6 +3754,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
       close(ws: RelaySocket, code, reason) {
         cleanupRpcMarketSubscription(ws);
+        forgetRelaySocketRuntimeId(ws);
         const removedId = removeClient(relayStore, ws);
         const wsType = ws.data.type;
         const reasonText =

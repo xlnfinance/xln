@@ -4690,11 +4690,14 @@ export const verifyRuntimeChain = async (
           throw new Error(`REPLAY_INVARIANT_FAILED: missing persisted frame at height ${height}`);
         }
         expectedStateHash = persistedFrame.stateHash;
+        const storageHashMode =
+          persistedFrame.hashMode === 'storage-debug-v1' ||
+          persistedFrame.hashMode === 'storage-merkle-v1';
         actualStateHash =
-          persistedFrame.hashMode === 'storage-debug-v1' && Array.isArray(persistedFrame.entityHashes)
+          storageHashMode && Array.isArray(persistedFrame.entityHashes)
             ? computeStorageDebugStateHashFromEnv(replayed.env)
             : computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(replayed.env));
-        if (persistedFrame.hashMode === 'storage-debug-v1') {
+        if (storageHashMode) {
           expectedAuditStateHash = String(persistedFrame.auditStateHash || '');
           actualAuditStateHash = computeStorageAuditStateHashFromEnv(replayed.env);
           if (!expectedAuditStateHash || expectedAuditStateHash !== actualAuditStateHash) {

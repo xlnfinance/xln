@@ -146,9 +146,12 @@ export const markStorageBookDirty = (
 };
 
 export const ACCOUNT_FRAME_HISTORY_VIEW_LIMIT = 50;
+const ACCOUNT_FRAME_HISTORY_VIEW = Symbol.for('xln.accountFrameHistoryView');
+type AccountWithFrameHistoryView = AccountMachine & {
+  [ACCOUNT_FRAME_HISTORY_VIEW]?: AccountFrame[];
+};
 
 const cloneFrameForView = (frame: AccountFrame): AccountFrame => structuredClone(frame);
-const accountFrameHistoryViews = new WeakMap<AccountMachine, AccountFrame[]>();
 
 export const setAccountFrameHistoryView = (
   account: AccountMachine,
@@ -159,11 +162,16 @@ export const setAccountFrameHistoryView = (
   const view = boundedLimit > 0
     ? frames.slice(-boundedLimit).map((frame) => cloneFrameForView(frame))
     : [];
-  accountFrameHistoryViews.set(account, view);
+  Object.defineProperty(account, ACCOUNT_FRAME_HISTORY_VIEW, {
+    value: view,
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
 };
 
 export const getAccountFrameHistoryView = (account: AccountMachine): AccountFrame[] => {
-  const view = accountFrameHistoryViews.get(account);
+  const view = (account as AccountWithFrameHistoryView)[ACCOUNT_FRAME_HISTORY_VIEW];
   return Array.isArray(view) ? view.map((frame) => cloneFrameForView(frame)) : [];
 };
 
@@ -172,7 +180,7 @@ export const appendAccountFrameHistoryView = (
   frame: AccountFrame,
   limit = ACCOUNT_FRAME_HISTORY_VIEW_LIMIT,
 ): void => {
-  const existing = accountFrameHistoryViews.get(account) ?? [];
+  const existing = (account as AccountWithFrameHistoryView)[ACCOUNT_FRAME_HISTORY_VIEW] ?? [];
   setAccountFrameHistoryView(account, [...existing, frame], limit);
 };
 
