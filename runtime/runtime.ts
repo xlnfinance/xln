@@ -168,8 +168,8 @@ import {
 import { resolveEntityProposerId } from './state-helpers';
 import { getEntityShortId, getEntityNumber, formatEntityId } from './utils';
 import { deserializeTaggedJson, serializeTaggedJson, safeStringify } from './serialization-utils';
+import { computeCanonicalStateHashFromEnv } from './storage/canonical-hash';
 import {
-  computeStorageCanonicalStateHashFromEnv,
   computeStorageDebugStateHashFromEnv,
   findStorageLatestSnapshotAtOrBelow,
   inspectStorage,
@@ -4761,7 +4761,7 @@ export const verifyRuntimeChain = async (
         if (storageHashMode) {
           if (persistedFrame.canonicalStateHash) {
             expectedCanonicalStateHash = String(persistedFrame.canonicalStateHash);
-            actualCanonicalStateHash = computeStorageCanonicalStateHashFromEnv(replayed.env);
+            actualCanonicalStateHash = computeCanonicalStateHashFromEnv(replayed.env);
             if (expectedCanonicalStateHash !== actualCanonicalStateHash) {
               return {
                 ok: false,

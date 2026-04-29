@@ -8,7 +8,6 @@ import {
   computeCanonicalEntityHash,
   computeCanonicalEntityHashesFromEnv,
   computeCanonicalRuntimeStateHash,
-  computeCanonicalStateHashFromEnv,
   type CanonicalFrameEntityHash,
 } from './canonical-hash';
 import type {
@@ -307,6 +306,8 @@ const DEFAULT_ACCOUNT_MERKLE_RADIX: RadixMerkleRadix = 16;
 const KEY_HEAD = Buffer.from([0x01]);
 const KEY_FRAME = 0x02;
 const KEY_DIFF = 0x03;
+// Legacy pack records are no longer written; keep the prefix only so history
+// pruning can clean DBs created before pack removal.
 const KEY_PACK = 0x04;
 const KEY_SNAPSHOT_MANIFEST = 0x05;
 const KEY_LIVE_ENTITY = 0x21;
@@ -689,13 +690,7 @@ const buildEntityHashDoc = (entityId: string, cells: Iterable<StorageHashCell>):
   };
 };
 
-export const computeStorageRuntimeStateHash = (
-  height: number,
-  timestamp: number,
-  entityHashes: StorageFrameEntityHash[],
-): string => {
-  void height;
-  void timestamp;
+export const computeStorageStateRoot = (entityHashes: StorageFrameEntityHash[]): string => {
   return buildHexKeyedMerkle(
     entityHashes
       .map((entry) => ({
@@ -705,8 +700,6 @@ export const computeStorageRuntimeStateHash = (
     { radix: DEFAULT_ACCOUNT_MERKLE_RADIX },
   ).root;
 };
-
-export const computeStorageCanonicalStateHashFromEnv = computeCanonicalStateHashFromEnv;
 
 const prepareStorageCanonicalStateHashes = (
   env: Env,
@@ -1423,7 +1416,7 @@ const prepareStorageStateHashes = async (options: {
   }));
   const entityHashes = toFrameEntityHashes(entityHashDocs.values());
   return {
-    stateHash: computeStorageRuntimeStateHash(options.height, options.timestamp, entityHashes),
+    stateHash: computeStorageStateRoot(entityHashes),
     entityHashes,
     entityHashDocs,
     docValueBuffers,
@@ -1771,7 +1764,7 @@ export const computeStorageDebugStateHashFromEnv = (env: Env): string => {
     }
     entityHashDocs.push(buildEntityHashDoc(entityId, cells));
   }
-  return computeStorageRuntimeStateHash(env.height, env.timestamp, toFrameEntityHashes(entityHashDocs));
+  return computeStorageStateRoot(toFrameEntityHashes(entityHashDocs));
 };
 
 const buildDiffRecord = (height: number, puts: StorageDoc[], dels: StorageDocRef[]): StorageDiffRecord => ({
@@ -2410,7 +2403,7 @@ export const verifyStorageTailIntegrity = async (
       throw new Error(`STORAGE_VERIFY_ENTITY_HASHES_MISSING: height=${height}`);
     }
     if (record.materializedState !== false) {
-      const expectedStateHash = computeStorageRuntimeStateHash(record.height, record.timestamp, record.entityHashes);
+      const expectedStateHash = computeStorageStateRoot(record.entityHashes);
       if (record.stateHash !== expectedStateHash) {
         throw new Error(`STORAGE_VERIFY_STATE_HASH_MISMATCH: height=${height} expected=${expectedStateHash} actual=${record.stateHash}`);
       }
