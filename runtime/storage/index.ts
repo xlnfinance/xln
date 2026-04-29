@@ -3,7 +3,16 @@ import { ethers } from 'ethers';
 import { serializeTaggedJson } from '../serialization-utils';
 import { buildHexKeyedMerkle } from './merkle';
 import { mergeStorageOverlayRecords, storageOverlayRecordKey } from './overlay';
-import { decodeBuffer, encodeBuffer, notFound, writeBatch } from './codec';
+import { decodeBuffer, encodeBuffer, writeBatch } from './codec';
+import {
+  copyKeys,
+  deleteKeys,
+  listKeys,
+  listKeysRange,
+  measurePrefixBytes,
+  readJsonOrNull,
+  readRawOrNull,
+} from './level';
 import {
   hydrateEntityStateFromStorage,
   projectAccountDoc,
@@ -72,7 +81,6 @@ import {
   parseLiveAccountKey,
   parseLiveBookKey,
   parseSnapshotManifestHeight,
-  prefixUpperBound,
 } from './keys';
 import {
   computeCanonicalEntityHash,
@@ -83,7 +91,6 @@ import {
 import type { AccountMachine, EntityInput, EntityReplica, EntityState, Env, FrameLogEntry, RuntimeInput, RuntimeFrameDbRecord, RuntimeOverlayRecord } from '../types';
 import type {
   FrameDbPut,
-  NamespaceBytes,
   PerfDeps,
   RuntimeDbLike,
   RuntimeFrameDbLike,
@@ -174,47 +181,6 @@ const encodeStorageDocValue = (doc: StorageDoc): StorageDocEncodedValue => {
   setHiddenDocComputedValue(cached, 'hash', hash);
   setHiddenDocComputedValue(cached, 'hashBytes', hashBytes);
   return { buffer, hash, hashBytes };
-};
-
-const readJsonOrNull = async <T>(db: RuntimeDbLike, key: Buffer): Promise<T | null> => {
-  try {
-    return decodeBuffer<T>(await db.get(key));
-  } catch (error) {
-    if (notFound(error)) return null;
-    throw error;
-  }
-};
-
-const readRawOrNull = async (db: RuntimeDbLike, key: Buffer): Promise<Buffer | null> => {
-  try {
-    return await db.get(key);
-  } catch (error) {
-    if (notFound(error)) return null;
-    throw error;
-  }
-};
-
-const listKeys = async (db: RuntimeDbLike, prefix: Buffer): Promise<Buffer[]> => {
-  if (typeof db.keys !== 'function') return [];
-  const out: Buffer[] = [];
-  const upperBound = prefixUpperBound(prefix);
-  for await (const rawKey of db.keys(upperBound ? { gte: prefix, lt: upperBound } : { gte: prefix })) {
-    if (Buffer.isBuffer(rawKey)) out.push(rawKey);
-    else if (rawKey instanceof Uint8Array) out.push(Buffer.from(rawKey));
-    else out.push(Buffer.from(String(rawKey)));
-  }
-  return out;
-};
-
-const listKeysRange = async (db: RuntimeDbLike, gte: Buffer, lt: Buffer): Promise<Buffer[]> => {
-  if (typeof db.keys !== 'function') return [];
-  const out: Buffer[] = [];
-  for await (const rawKey of db.keys({ gte, lt })) {
-    if (Buffer.isBuffer(rawKey)) out.push(rawKey);
-    else if (rawKey instanceof Uint8Array) out.push(Buffer.from(rawKey));
-    else out.push(Buffer.from(String(rawKey)));
-  }
-  return out;
 };
 
 const hashBuffer = (value: Buffer | Uint8Array): string =>
@@ -1100,38 +1066,6 @@ const buildDiffRecord = (height: number, puts: StorageDoc[], dels: StorageDocRef
   dels,
 });
 
-const measurePrefixBytes = async (db: RuntimeDbLike, prefix: Buffer): Promise<NamespaceBytes> => {
-  const keys = await listKeys(db, prefix);
-  let bytes = 0;
-  let maxValueBytes = 0;
-  for (const key of keys) {
-    const value = await db.get(key);
-    bytes += key.byteLength + value.byteLength;
-    if (value.byteLength > maxValueBytes) maxValueBytes = value.byteLength;
-  }
-  return { count: keys.length, bytes, maxValueBytes };
-};
-
-const copyKeys = async (
-  sourceDb: RuntimeDbLike,
-  targetDb: RuntimeDbLike,
-  keys: Buffer[],
-): Promise<{ bytes: number; count: number }> => {
-  let bytes = 0;
-  let count = 0;
-  for (let offset = 0; offset < keys.length; offset += 256) {
-    const batch = targetDb.batch();
-    for (const key of keys.slice(offset, offset + 256)) {
-      const value = await sourceDb.get(key);
-      batch.put(key, value);
-      bytes += key.byteLength + value.byteLength;
-      count += 1;
-    }
-    await writeBatch(batch);
-  }
-  return { bytes, count };
-};
-
 export const seedFreshStorageEpoch = async (options: {
   sourceDb: RuntimeDbLike;
   targetDb: RuntimeDbLike;
@@ -1223,20 +1157,6 @@ export const seedFreshStorageEpoch = async (options: {
   await writeBatch(batch);
 
   return { liveBytes, snapshotBytes, frameBytes, docCount };
-};
-
-const deleteKeys = async (db: RuntimeDbLike, keys: Buffer[]): Promise<number> => {
-  let removedBytes = 0;
-  for (let offset = 0; offset < keys.length; offset += 256) {
-    const batch = db.batch();
-    for (const key of keys.slice(offset, offset + 256)) {
-      const value = await readRawOrNull(db, key);
-      if (value) removedBytes += key.byteLength + value.byteLength;
-      if (typeof batch.del === 'function') batch.del(key);
-    }
-    await writeBatch(batch);
-  }
-  return removedBytes;
 };
 
 const listSnapshotHeights = async (db: RuntimeDbLike): Promise<number[]> => {
