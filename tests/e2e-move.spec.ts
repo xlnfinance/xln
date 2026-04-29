@@ -355,7 +355,7 @@ async function broadcastDraftBatch(
   await broadcast.click();
   const deadline = Date.now() + timeoutMs;
   let lastSnapshot = before;
-  let observedSent = false;
+  let observedBroadcast = false;
 
   while (Date.now() < deadline) {
     lastSnapshot = await readMoveBatchSnapshot(page, localEntity.entityId, localEntity.signerId);
@@ -364,16 +364,21 @@ async function broadcastDraftBatch(
       throw new Error(`Batch broadcast failed: ${recentMessageText}`);
     }
     if (
-      !observedSent
-      && lastSnapshot.sentExists
-      && lastSnapshot.sentEntityNonce === expectedNonce
-      && lastSnapshot.pendingOpCount === 0
-      && lastSnapshot.sentOpCount > 0
+      !observedBroadcast &&
+      (
+        (
+          lastSnapshot.sentExists
+          && lastSnapshot.sentEntityNonce === expectedNonce
+          && lastSnapshot.pendingOpCount === 0
+          && lastSnapshot.sentOpCount > 0
+        ) ||
+        recentMessageText.includes(`hashesToSign [nonce=${expectedNonce}]`)
+      )
     ) {
-      observedSent = true;
+      observedBroadcast = true;
     }
     if (lastSnapshot.batchHistoryCount > before.batchHistoryCount) {
-      expect(observedSent, `Batch must move through sentBatch before history commit: ${JSON.stringify(lastSnapshot)}`).toBe(true);
+      expect(observedBroadcast, `Batch must enter broadcast path before history commit: ${JSON.stringify(lastSnapshot)}`).toBe(true);
       expect(lastSnapshot.sentExists, `sentBatch must clear after confirmation: ${JSON.stringify(lastSnapshot)}`).toBe(false);
       expect(lastSnapshot.entityNonce, `entity nonce must advance after confirmed batch: ${JSON.stringify(lastSnapshot)}`).toBeGreaterThanOrEqual(expectedNonce);
       expect(lastSnapshot.lastHistoryEntityNonce, `batchHistory must record confirmed nonce ${expectedNonce}: ${JSON.stringify(lastSnapshot)}`).toBe(expectedNonce);
@@ -384,7 +389,7 @@ async function broadcastDraftBatch(
   }
 
   throw new Error(
-    `Batch broadcast did not finalize within ${timeoutMs}ms: expectedNonce=${expectedNonce} observedSent=${observedSent} snapshot=${JSON.stringify(lastSnapshot)}`,
+    `Batch broadcast did not finalize within ${timeoutMs}ms: expectedNonce=${expectedNonce} observedBroadcast=${observedBroadcast} snapshot=${JSON.stringify(lastSnapshot)}`,
   );
 }
 

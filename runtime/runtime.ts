@@ -73,10 +73,9 @@ import {
   attachEventEmitters,
   clearPendingAuditEvents,
   dropPendingFrameDbRecords,
-  dropPendingStorageOverlay,
+  dropOverlay,
   flushPendingAuditEvents,
   peekPendingFrameDbRecords,
-  peekPendingStorageOverlay,
   setAccountFrameHistoryView,
 } from './env-events';
 import {
@@ -209,6 +208,7 @@ import type {
   JInput,
   JReplica,
   RoutedEntityInput,
+  RuntimeOverlayRecord,
   RuntimeInput,
   RuntimeTx,
 } from './types';
@@ -4241,8 +4241,7 @@ export const saveEnvToDB = async (
     throw new Error('REPLAY_INVARIANT_FAILED: saveEnvToDB called during replay');
   }
   const pendingFrameDbRecords = peekPendingFrameDbRecords(env);
-  const pendingStorageOverlay = peekPendingStorageOverlay(env);
-  await saveRuntimeFrameToStorage({
+  const saveResult = await saveRuntimeFrameToStorage({
     env,
     tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'current'),
     getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'current'),
@@ -4252,12 +4251,13 @@ export const saveEnvToDB = async (
     getPerfMs,
     formatPerfMs,
     frameDbRecords: pendingFrameDbRecords,
-    storageOverlayRecords: pendingStorageOverlay,
     ...(currentFrameInput === undefined ? {} : { currentFrameInput }),
     ...(currentFrameOutputs === undefined ? {} : { currentFrameOutputs }),
   });
   dropPendingFrameDbRecords(env, pendingFrameDbRecords.length);
-  dropPendingStorageOverlay(env, pendingStorageOverlay.length);
+  if (saveResult.materialized) {
+    dropOverlay(env, saveResult.materializedOverlayRecords);
+  }
   if (runtimeIsBrowser && typeof BroadcastChannel !== 'undefined' && typeof env.runtimeId === 'string' && env.runtimeId.length > 0) {
     const runtimeSyncChannel = new BroadcastChannel('xln-runtime-sync');
     runtimeSyncChannel.postMessage({
@@ -4286,6 +4286,7 @@ type PersistedStorageHandle = {
   role: StorageDbRole;
   db: Level<Buffer, Buffer>;
   latestHeight: number;
+  latestMaterializedHeight: number;
   latestSnapshotHeight: number;
   snapshotHeights: number[];
 };
@@ -4312,6 +4313,10 @@ const listPersistedStorageHandles = async (env: Env): Promise<PersistedStorageHa
       role,
       db,
       latestHeight: head.latestHeight,
+      latestMaterializedHeight: Math.max(
+        0,
+        Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? head.latestHeight ?? 0)),
+      ),
       latestSnapshotHeight: head.latestSnapshotHeight,
       snapshotHeights: await listStorageSnapshotHeights(db),
     });
@@ -4321,6 +4326,34 @@ const listPersistedStorageHandles = async (env: Env): Promise<PersistedStorageHa
     if (left.role === right.role) return 0;
     return left.role === 'current' ? -1 : 1;
   });
+};
+
+const runtimeOverlayKey = (record: RuntimeOverlayRecord): string => {
+  if (record.family === 'entity') return `e:${String(record.entityId || '').toLowerCase()}`;
+  if (record.family === 'account') {
+    return `a:${String(record.entityId || '').toLowerCase()}:${String(record.counterpartyId || '').toLowerCase()}`;
+  }
+  return `b:${String(record.entityId || '').toLowerCase()}:${String(record.pairId || '').trim()}`;
+};
+
+const restoreOverlayFromFrameLog = async (
+  env: Env,
+  targetHeight: number,
+): Promise<void> => {
+  const records = new Map<string, RuntimeOverlayRecord>();
+  for (const handle of await listPersistedStorageHandles(env)) {
+    if (targetHeight > handle.latestHeight) continue;
+    const startHeight = Math.max(1, handle.latestMaterializedHeight + 1);
+    if (startHeight > targetHeight) break;
+    for (let height = startHeight; height <= targetHeight; height += 1) {
+      const frame = await readStorageFrameRecord(handle.db, height);
+      for (const record of frame?.overlayRecords ?? []) {
+        records.set(runtimeOverlayKey(record), { ...record });
+      }
+    }
+    break;
+  }
+  env.overlay = Array.from(records.values());
 };
 
 const resolvePersistedLatestHeight = async (env: Env): Promise<number> => {
@@ -4380,6 +4413,25 @@ const listPersistedEntityIdsAtHeight = async (env: Env, targetHeight: number): P
     if (snapshotHeight > 0) {
       for (const entityId of await listStorageSnapshotEntityIds(handle.db, snapshotHeight)) {
         entityIds.add(entityId);
+      }
+    }
+    const replayStartHeight = Math.max(1, snapshotHeight + 1);
+    const replayEndHeight = Math.min(targetHeight, handle.latestHeight);
+    for (let height = replayStartHeight; height <= replayEndHeight; height += 1) {
+      const frame = await readStorageFrameRecord(handle.db, height);
+      for (const entityId of frame?.touchedEntities ?? []) {
+        const normalized = String(entityId || '').toLowerCase();
+        if (normalized) entityIds.add(normalized);
+      }
+      for (const account of frame?.touchedAccounts ?? []) {
+        const entityId = String(account?.entityId || '').toLowerCase();
+        const counterpartyId = String(account?.counterpartyId || '').toLowerCase();
+        if (entityId) entityIds.add(entityId);
+        if (counterpartyId) entityIds.add(counterpartyId);
+      }
+      for (const entry of frame?.entityHashes ?? []) {
+        const entityId = String(entry?.entityId || '').toLowerCase();
+        if (entityId) entityIds.add(entityId);
       }
     }
   }
@@ -4477,6 +4529,7 @@ const loadEnvFromStorage = async (
 	    env.timestamp = frame?.timestamp ?? Math.max(...Array.from(restoredStates.values()).map((state) => Number(state.timestamp ?? 0)), 0);
 	    env.runtimeInput = { runtimeTxs: [], entityInputs: [] };
 	    env.runtimeMempool = undefined;
+    await restoreOverlayFromFrameLog(env, targetHeight);
 	    await hydrateAccountFrameHistoryViews(env);
 	    let restoredFrameLogs = Array.isArray(frame?.logs) ? frame.logs.map((entry) => ({ ...entry })) : [];
     try {
@@ -4693,6 +4746,15 @@ export const verifyRuntimeChain = async (
         const storageHashMode =
           persistedFrame.hashMode === 'storage-debug-v1' ||
           persistedFrame.hashMode === 'storage-merkle-v1';
+        if (storageHashMode && persistedFrame.materializedState === false) {
+          actualStateHash = expectedStateHash;
+          expectedAuditStateHash = '';
+          actualAuditStateHash = '';
+          expectedCanonicalStateHash = '';
+          actualCanonicalStateHash = '';
+          restoredHeight = height;
+          continue;
+        }
         actualStateHash =
           storageHashMode && Array.isArray(persistedFrame.entityHashes)
             ? computeStorageDebugStateHashFromEnv(replayed.env)

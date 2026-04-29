@@ -17,6 +17,7 @@ import {
   saveEnvToDB,
   verifyRuntimeChain,
 } from '../runtime.ts';
+import { markStorageEntityDirty } from '../env-events';
 import { readFrameDbRuntimeActivity } from '../storage';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { generateLazyEntityId } from '../entity-factory';
@@ -374,6 +375,113 @@ describe('storage frame journal retention', () => {
 
     const afterCrashVerify = await verifyRuntimeChain(runtimeId, seed, { fromSnapshotHeight: replayFromHeight });
     expect(afterCrashVerify.ok).toBe(true);
+  });
+
+  test('rebuilds materialization overlay after restart between checkpoints', async () => {
+    const seed = `storage-overlay-restart ${Date.now()} alpha beta gamma`;
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+    const namespacePath = join(dbRoot, runtimeId);
+
+    rmSync(namespacePath, { recursive: true, force: true });
+    rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-events`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
+    mkdirSync(dbRoot, { recursive: true });
+
+    const env = createEmptyEnv(seed);
+    env.runtimeId = runtimeId;
+    env.dbNamespace = runtimeId;
+    env.quietRuntimeLogs = true;
+    env.runtimeConfig = {
+      ...(env.runtimeConfig || {}),
+      storage: {
+        ...(env.runtimeConfig?.storage || {}),
+        materializePeriodFrames: 3,
+        snapshotPeriodFrames: 100,
+        packPeriodFrames: 100,
+      },
+    };
+
+    const signer = deriveSignerAddressSync(seed, '1');
+    registerSignerKey(signer, deriveSignerKeySync(seed, '1'));
+    registerSignerKey(signer.slice(-4).toLowerCase(), deriveSignerKeySync(seed, '1'));
+    const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
+    const jurisdiction = {
+      name: 'storage-overlay-restart-test',
+      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
+      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      chainId: 31337,
+    };
+
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importReplica',
+        entityId,
+        signerId: signer,
+        data: {
+          isProposer: true,
+          config: {
+            mode: 'proposer-based',
+            threshold: 1n,
+            validators: [signer],
+            shares: { [signer]: 1n },
+            jurisdiction,
+          },
+        },
+      }],
+      entityInputs: [],
+    });
+    await processRuntime(env, []);
+
+    const replica = Array.from(env.eReplicas.values()).find((item) => item.entityId === entityId);
+    if (!replica) throw new Error('TEST_REPLICA_MISSING');
+    env.height = 2;
+    env.timestamp += 1;
+    replica.state.messages.push('non-materialized-message');
+    markStorageEntityDirty(env, entityId);
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    expect(env.overlay?.length ?? 0).toBeGreaterThan(0);
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+
+    const restoredAtTwo = await loadEnvFromDB(runtimeId, seed);
+    expect(restoredAtTwo?.height).toBe(2);
+    const restoredReplica = Array.from(restoredAtTwo?.eReplicas.values() ?? [])
+      .find((item) => item.entityId === entityId);
+    expect(restoredReplica?.state.messages).toContain('non-materialized-message');
+    expect(restoredAtTwo?.overlay?.length ?? 0).toBeGreaterThan(0);
+    if (!restoredAtTwo || !restoredReplica) throw new Error('TEST_RESTORE_MISSING');
+
+    restoredAtTwo.runtimeConfig = {
+      ...(restoredAtTwo.runtimeConfig || {}),
+      storage: {
+        ...(restoredAtTwo.runtimeConfig?.storage || {}),
+        materializePeriodFrames: 3,
+        snapshotPeriodFrames: 100,
+        packPeriodFrames: 100,
+      },
+    };
+    restoredAtTwo.height = 3;
+    restoredAtTwo.timestamp += 1;
+    await saveEnvToDB(restoredAtTwo, { runtimeTxs: [], entityInputs: [] }, []);
+    expect(restoredAtTwo.overlay?.length ?? 0).toBe(0);
+
+    await closeRuntimeDb(restoredAtTwo);
+    await closeInfraDb(restoredAtTwo);
+
+    const restoredAfterMaterialize = await loadEnvFromDB(runtimeId, seed);
+    const materializedReplica = Array.from(restoredAfterMaterialize?.eReplicas.values() ?? [])
+      .find((item) => item.entityId === entityId);
+    expect(restoredAfterMaterialize?.height).toBe(3);
+    expect(materializedReplica?.state.messages).toContain('non-materialized-message');
+    if (restoredAfterMaterialize) {
+      await closeRuntimeDb(restoredAfterMaterialize);
+      await closeInfraDb(restoredAfterMaterialize);
+    }
   });
 
 	test('prunes old frame DB activity without pruning replay frames', async () => {
