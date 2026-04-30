@@ -39,6 +39,7 @@ let remoteAdapterRefreshPromise: Promise<Env | null> | null = null;
 let activeRuntimeAdapterConfig: RuntimeAdapterConfig | null = null;
 const RESET_NOTICE_STORAGE_KEY = 'xln-reset-notice';
 const DEFAULT_REMOTE_ADAPTER_PATH = '/rpc';
+const REMOTE_VIEW_PAGE_SIZE = 10;
 
 type FrontendEntitySummary = {
   id: string;
@@ -534,10 +535,12 @@ const buildRemoteAdapterEnvSnapshot = async (
   adapter: RuntimeAdapter,
   config: RuntimeAdapterConfig,
 ): Promise<Env> => {
+  const pinnedHeight = Math.max(0, Math.floor(Number(adapter.currentHeight || 0)));
   const viewFrame = await adapter.read<RuntimeAdapterViewFrame>('view-frame', {
-    limit: 10,
-    accountsLimit: 10,
-    booksLimit: 10,
+    limit: REMOTE_VIEW_PAGE_SIZE,
+    accountsLimit: REMOTE_VIEW_PAGE_SIZE,
+    booksLimit: REMOTE_VIEW_PAGE_SIZE,
+    ...(pinnedHeight > 0 ? { atHeight: pinnedHeight } : {}),
   });
   const atHeight = Math.max(0, Math.floor(Number(viewFrame.height ?? viewFrame.head.latestHeight ?? adapter.currentHeight ?? 0)));
   const env = xln.createEmptyEnv(config.seed ?? null);

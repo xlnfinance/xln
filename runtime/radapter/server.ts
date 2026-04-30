@@ -1,5 +1,5 @@
 import type { EntityState, Env, RuntimeInput } from '../types';
-import { encodeRuntimeAdapterMessage } from './codec';
+import { assertRuntimeAdapterMessageSize, encodeRuntimeAdapterMessage } from './codec';
 import type { StorageFrameRecord, StorageHead } from '../storage/types';
 import { RuntimeAdapterError, toRuntimeAdapterErrorPayload } from './errors';
 import { consumeToken, createTokenBucket, tokenRetryAfterMs, type TokenBucket } from './rate-limit';
@@ -16,6 +16,7 @@ import {
 
 type AdapterSocket = {
   send: (message: string | Uint8Array) => unknown;
+  close?: (code?: number, reason?: string) => unknown;
 };
 
 type AdapterClientState = {
@@ -59,7 +60,23 @@ const sendResponse = (ws: AdapterSocket, response: RuntimeAdapterResponse): void
   if (buffered > 2 * 1024 * 1024) {
     throw new RuntimeAdapterError('E_RATE_LIMITED', 'runtime adapter socket backpressure', true);
   }
-  ws.send(encodeRuntimeAdapterMessage(response));
+  const encoded = encodeRuntimeAdapterMessage(response);
+  try {
+    assertRuntimeAdapterMessageSize(encoded);
+  } catch (error) {
+    if (!response.ok) throw error;
+    const capped = encodeRuntimeAdapterMessage({
+      v: 1,
+      inReplyTo: response.inReplyTo,
+      ok: false,
+      error: toRuntimeAdapterErrorPayload(new RuntimeAdapterError('E_INTERNAL', 'runtime adapter response too large', true)),
+    } satisfies RuntimeAdapterResponse);
+    assertRuntimeAdapterMessageSize(capped);
+    ws.send(capped);
+    ws.close?.(1009, 'runtime adapter response too large');
+    return;
+  }
+  ws.send(encoded);
 };
 
 const sendOk = (ws: AdapterSocket, inReplyTo: string, payload: unknown): void => {
@@ -107,7 +124,12 @@ export const broadcastRuntimeAdapterTick = (env: Env): void => {
   if (clients.size === 0) return;
   const height = Math.max(0, Math.floor(Number(env.height ?? 0)));
   const message = encodeRuntimeAdapterMessage({ v: 1, op: 'tick', height });
+  const now = Date.now();
   for (const [ws, state] of clients.entries()) {
+    if (state.authExpiresAtMs !== null && state.authExpiresAtMs <= now) {
+      state.authLevel = null;
+      state.authExpiresAtMs = null;
+    }
     if (!state.authLevel) continue;
     try {
       ws.send(message);

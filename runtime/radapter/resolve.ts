@@ -34,6 +34,7 @@ export type RuntimeAdapterAccountPage = {
 
 export type RuntimeAdapterBookPage = {
   items: Array<{ pairId: string; book: BookState }>;
+  nextCursor: string | null;
 };
 
 export type RuntimeAdapterViewEntityFrame = {
@@ -86,6 +87,9 @@ const assertSupportedSort = (query?: RuntimeAdapterReadQuery): void => {
     throw new RuntimeAdapterError('E_BAD_QUERY', `unsupported sortBy: ${sortBy}`);
   }
 };
+
+const compareAscii = (left: string, right: string): number =>
+  left < right ? -1 : left > right ? 1 : 0;
 
 const findReplica = (env: Env, entityId: string): EntityReplica | null => {
   const normalized = normalizeEntityId(entityId);
@@ -155,7 +159,7 @@ const listEntitySummaries = async (
         height: loaded?.height ?? height,
       });
     }
-    return summaries.sort((left, right) => left.entityId.localeCompare(right.entityId));
+    return summaries.sort((left, right) => compareAscii(left.entityId, right.entityId));
   }
 
   return Array.from(ctx.env.eReplicas?.values?.() ?? [])
@@ -164,7 +168,7 @@ const listEntitySummaries = async (
       label: labelForState(replica.state),
       height: Math.max(0, Math.floor(Number(replica.state.height ?? 0))),
     }))
-    .sort((left, right) => left.entityId.localeCompare(right.entityId));
+    .sort((left, right) => compareAscii(left.entityId, right.entityId));
 };
 
 const projectAccountsPage = (
@@ -177,31 +181,34 @@ const projectAccountsPage = (
   const cursor = query?.cursor ? normalizeEntityId(query.cursor) : '';
   const limit = readLimit(query);
   const direction = query?.sortDir === 'desc' ? 'desc' : 'asc';
-  const keys = Array.from(state.accounts?.keys?.() ?? [])
-    .map((key) => normalizeEntityId(String(key)))
-    .sort((left, right) => direction === 'desc' ? right.localeCompare(left) : left.localeCompare(right));
+  const compare = (left: string, right: string): number =>
+    direction === 'desc' ? compareAscii(right, left) : compareAscii(left, right);
+  const isAfterCursor = (key: string): boolean =>
+    !cursor || (direction === 'desc' ? key < cursor : key > cursor);
+  const pageKeys: Array<{ raw: string; normalized: string }> = [];
 
-  const filtered = cursor
-    ? keys.filter((key) => direction === 'desc' ? key < cursor : key > cursor)
-    : keys;
-  const pageKeys = filtered.slice(0, limit + 1);
+  for (const rawKey of state.accounts?.keys?.() ?? []) {
+    const raw = String(rawKey);
+    const normalizedKey = normalizeEntityId(raw);
+    if (!isAfterCursor(normalizedKey)) continue;
+    let insertAt = pageKeys.length;
+    while (insertAt > 0 && compare(normalizedKey, pageKeys[insertAt - 1]!.normalized) < 0) {
+      insertAt -= 1;
+    }
+    pageKeys.splice(insertAt, 0, { raw, normalized: normalizedKey });
+    if (pageKeys.length > limit + 1) pageKeys.pop();
+  }
+
   const visibleKeys = pageKeys.slice(0, limit);
-  const items = visibleKeys.map((counterpartyId) => {
-    const account = state.accounts.get(counterpartyId);
+  const items = visibleKeys.map(({ raw, normalized: counterpartyId }) => {
+    const account = state.accounts.get(raw) ?? state.accounts.get(counterpartyId);
     if (!account) throw new RuntimeAdapterError('E_INTERNAL', `account index drift: ${normalized}/${counterpartyId}`);
     return projectAccountDoc(account);
   });
   return {
     items,
-    nextCursor: pageKeys.length > limit ? visibleKeys[visibleKeys.length - 1] ?? null : null,
+    nextCursor: pageKeys.length > limit ? visibleKeys[visibleKeys.length - 1]?.normalized ?? null : null,
   };
-};
-
-const projectBooks = (state: EntityState): BookState[] => {
-  const books = Array.from(state.orderbookExt?.books?.entries?.() ?? []);
-  return books
-    .sort(([left], [right]) => String(left).localeCompare(String(right)))
-    .map(([, value]) => value);
 };
 
 const bestBidTicks = (book: BookState): bigint | null => {
@@ -238,15 +245,26 @@ const compareBooksNearSpread = (
   }
   if (leftSpread !== null && rightSpread === null) return -1;
   if (leftSpread === null && rightSpread !== null) return 1;
-  return String(left[0]).localeCompare(String(right[0]));
+  return compareAscii(String(left[0]), String(right[0]));
 };
 
-const projectBookPage = (state: EntityState, limit = 10): RuntimeAdapterBookPage => ({
-  items: Array.from(state.orderbookExt?.books?.entries?.() ?? [])
-    .sort(compareBooksNearSpread)
-    .slice(0, limit)
-    .map(([pairId, book]) => ({ pairId: String(pairId), book })),
-});
+const projectBookPage = (state: EntityState, limit = 10): RuntimeAdapterBookPage => {
+  const page: Array<[string, BookState]> = [];
+  for (const [rawPairId, book] of state.orderbookExt?.books?.entries?.() ?? []) {
+    const pairId = String(rawPairId);
+    let insertAt = page.length;
+    while (insertAt > 0 && compareBooksNearSpread([pairId, book], page[insertAt - 1]!) < 0) {
+      insertAt -= 1;
+    }
+    page.splice(insertAt, 0, [pairId, book]);
+    if (page.length > limit + 1) page.pop();
+  }
+  const visible = page.slice(0, limit);
+  return {
+    items: visible.map(([pairId, book]) => ({ pairId, book })),
+    nextCursor: page.length > limit ? visible[visible.length - 1]?.[0] ?? null : null,
+  };
+};
 
 const projectViewFrame = async (
   ctx: RuntimeAdapterResolveContext,
@@ -334,7 +352,7 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
     }
 
     if (parts.length === 3 && parts[2] === 'books') {
-      return projectBooks(state) as T;
+      return projectBookPage(state, readBoundedLimit(query?.booksLimit, query?.limit ?? 10)) as T;
     }
 
     if (parts.length === 3 && parts[2] === 'book-docs') {

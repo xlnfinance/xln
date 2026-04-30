@@ -906,6 +906,7 @@ const run = async (): Promise<void> => {
       msg = decodeRuntimeAdapterMessage<Record<string, unknown>>(raw);
     } catch (error) {
       ws.send(safeStringify({ type: 'error', error: `Invalid runtime adapter message: ${(error as Error).message}` }));
+      ws.close?.((error as Error).message.includes('RADAPTER_MESSAGE_TOO_LARGE') ? 1009 : 1003, 'Invalid runtime adapter message');
       return;
     }
     Promise.resolve(handleRuntimeAdapterMessage(ws, msg, env, {
