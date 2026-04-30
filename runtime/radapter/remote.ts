@@ -1,5 +1,5 @@
 import type { RuntimeInput } from '../types';
-import { deserializeTaggedJson, serializeTaggedJson } from '../serialization-utils';
+import { decodeRuntimeAdapterMessage, encodeRuntimeAdapterMessage } from './codec';
 import type {
   RuntimeAdapter,
   RuntimeAdapterAuthLevel,
@@ -15,6 +15,7 @@ import { RuntimeAdapterError } from './errors';
 type PendingRequest = {
   resolve: (value: unknown) => void;
   reject: (error: unknown) => void;
+  timer: ReturnType<typeof setTimeout>;
 };
 
 type RuntimeAdapterRequestBody =
@@ -60,8 +61,9 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     this.intentionalClose = false;
     await this.openSocket();
     if (config.authKey) {
-      const response = await this.request<{ authLevel: RuntimeAdapterAuthLevel }>({ op: 'auth', key: config.authKey });
+      const response = await this.request<{ authLevel: RuntimeAdapterAuthLevel; currentHeight?: number }>({ op: 'auth', key: config.authKey });
       this.level = response.authLevel;
+      this.height = Math.max(this.height, Math.floor(Number(response.currentHeight || 0)));
     }
   }
 
@@ -107,6 +109,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     this.setStatus('connecting');
     await new Promise<void>((resolve, reject) => {
       const ws = new WebSocket(wsUrl);
+      ws.binaryType = 'arraybuffer';
       let settled = false;
       ws.onopen = () => {
         settled = true;
@@ -136,8 +139,9 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
       this.openSocket()
         .then(async () => {
           if (this.config?.authKey) {
-            const response = await this.request<{ authLevel: RuntimeAdapterAuthLevel }>({ op: 'auth', key: this.config.authKey });
+            const response = await this.request<{ authLevel: RuntimeAdapterAuthLevel; currentHeight?: number }>({ op: 'auth', key: this.config.authKey });
             this.level = response.authLevel;
+            this.height = Math.max(this.height, Math.floor(Number(response.currentHeight || 0)));
           }
         })
         .catch(() => {
@@ -149,10 +153,12 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
   private handleMessage(raw: unknown): void {
     let message: RuntimeAdapterResponse | RuntimeAdapterPush;
     try {
-      message = deserializeTaggedJson<RuntimeAdapterResponse | RuntimeAdapterPush>(String(raw));
+      message = decodeRuntimeAdapterMessage<RuntimeAdapterResponse | RuntimeAdapterPush>(raw);
     } catch (error) {
       this.setStatus('error');
-      throw error;
+      this.failPending(error);
+      this.ws?.close();
+      return;
     }
 
     if ('op' in message && message.op === 'tick') {
@@ -179,11 +185,30 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     const id = `r-${++this.requestId}`;
     const payload = { v: 1 as const, id, ...body } as RuntimeAdapterRequest;
     return new Promise<T>((resolve, reject) => {
-      this.pending.set(id, {
-        resolve: (value) => resolve(value as T),
-        reject,
-      });
-      this.ws?.send(serializeTaggedJson(payload));
+      const timeoutMs = Math.max(1_000, Number(this.config?.requestTimeoutMs ?? 15_000));
+      const timer = setTimeout(() => {
+        this.pending.delete(id);
+        reject(new RuntimeAdapterError('E_INTERNAL', `runtime adapter request timed out: ${body.op}`, true));
+      }, timeoutMs);
+      const pending: PendingRequest = {
+        timer,
+        resolve: (value) => {
+          clearTimeout(timer);
+          resolve(value as T);
+        },
+        reject: (error) => {
+          clearTimeout(timer);
+          reject(error);
+        },
+      };
+      this.pending.set(id, pending);
+      try {
+        this.ws?.send(encodeRuntimeAdapterMessage(payload));
+      } catch (error) {
+        this.pending.delete(id);
+        clearTimeout(timer);
+        reject(error);
+      }
     });
   }
 

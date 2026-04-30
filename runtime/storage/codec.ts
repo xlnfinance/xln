@@ -1,21 +1,4 @@
-import { Packr } from 'msgpackr';
-import { deserializeTaggedJson, serializeTaggedJson } from '../serialization-utils';
-
-type StorageCodecName = 'json' | 'msgpack';
-
-const STORAGE_CODEC_MAGIC: Record<StorageCodecName, number> = {
-  msgpack: 0x01,
-  json: 0x02,
-};
-
-const STORAGE_CODEC_BY_MAGIC = new Map<number, StorageCodecName>(
-  Object.entries(STORAGE_CODEC_MAGIC).map(([codec, magic]) => [magic, codec as StorageCodecName]),
-);
-
-const msgpackCodec = new Packr({
-  mapsAsObjects: false,
-  structuredClone: true,
-});
+import { decodeBinaryPayload, encodeBinaryPayload, type XlnBinaryCodecName } from './binary-codec';
 
 export const notFound = (error: unknown): boolean => {
   if (!error || typeof error !== 'object') return false;
@@ -24,7 +7,7 @@ export const notFound = (error: unknown): boolean => {
   return code === 'LEVEL_NOT_FOUND' || name === 'NotFoundError';
 };
 
-const storageCodecName = (): StorageCodecName => {
+const storageCodecName = (): XlnBinaryCodecName => {
   const raw = String(
     typeof process !== 'undefined'
       ? process.env['XLN_STORAGE_CODEC'] ?? ''
@@ -33,28 +16,12 @@ const storageCodecName = (): StorageCodecName => {
   return raw === 'json' ? 'json' : 'msgpack';
 };
 
-const encodeWithCodec = (codec: StorageCodecName, value: unknown): Buffer => {
-  if (codec === 'json') return Buffer.from(serializeTaggedJson(value));
-  return Buffer.from(msgpackCodec.pack(value));
-};
-
-const decodeWithCodec = <T>(codec: StorageCodecName, buffer: Buffer): T => {
-  if (codec === 'json') return deserializeTaggedJson<T>(buffer.toString());
-  return msgpackCodec.unpack(buffer) as T;
-};
-
 export const encodeBuffer = (value: unknown): Buffer => {
-  const codec = storageCodecName();
-  return Buffer.concat([Buffer.from([STORAGE_CODEC_MAGIC[codec]]), encodeWithCodec(codec, value)]);
+  return Buffer.from(encodeBinaryPayload(value, storageCodecName()));
 };
 
 export const decodeBuffer = <T>(buffer: Buffer): T => {
-  const magic = buffer[0];
-  const codec = magic === undefined ? undefined : STORAGE_CODEC_BY_MAGIC.get(magic);
-  if (!codec) {
-    throw new Error(`STORAGE_CODEC_MAGIC_MISSING: firstByte=${magic ?? 'none'}`);
-  }
-  return decodeWithCodec<T>(codec, buffer.subarray(1));
+  return decodeBinaryPayload<T>(buffer);
 };
 
 const storageSyncWritesEnabled = (): boolean => {

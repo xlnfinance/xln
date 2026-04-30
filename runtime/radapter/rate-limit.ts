@@ -21,3 +21,9 @@ export const consumeToken = (bucket: TokenBucket, amount = 1): boolean => {
   bucket.tokens -= amount;
   return true;
 };
+
+export const tokenRetryAfterMs = (bucket: TokenBucket, amount = 1): number => {
+  if (bucket.tokens >= amount) return 0;
+  if (bucket.refillPerSecond <= 0) return 1_000;
+  return Math.max(1, Math.ceil(((amount - bucket.tokens) / bucket.refillPerSecond) * 1_000));
+};

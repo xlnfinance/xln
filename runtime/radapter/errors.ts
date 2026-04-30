@@ -3,12 +3,14 @@ import type { RuntimeAdapterErrorCode, RuntimeAdapterErrorPayload } from './type
 export class RuntimeAdapterError extends Error {
   readonly code: RuntimeAdapterErrorCode;
   readonly retryable: boolean;
+  readonly retryAfterMs?: number;
 
-  constructor(code: RuntimeAdapterErrorCode, message: string, retryable = false) {
+  constructor(code: RuntimeAdapterErrorCode, message: string, retryable = false, retryAfterMs?: number) {
     super(message);
     this.name = 'RuntimeAdapterError';
     this.code = code;
     this.retryable = retryable;
+    if (retryAfterMs !== undefined) this.retryAfterMs = retryAfterMs;
   }
 
   toPayload(): RuntimeAdapterErrorPayload {
@@ -16,6 +18,7 @@ export class RuntimeAdapterError extends Error {
       code: this.code,
       message: this.message,
       retryable: this.retryable,
+      ...(this.retryAfterMs !== undefined ? { retryAfterMs: this.retryAfterMs } : {}),
     };
   }
 }

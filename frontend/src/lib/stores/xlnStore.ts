@@ -535,9 +535,9 @@ const buildRemoteAdapterEnvSnapshot = async (
   config: RuntimeAdapterConfig,
 ): Promise<Env> => {
   const viewFrame = await adapter.read<RuntimeAdapterViewFrame>('view-frame', {
-    limit: 25,
-    accountsLimit: 25,
-    booksLimit: 25,
+    limit: 10,
+    accountsLimit: 10,
+    booksLimit: 10,
   });
   const atHeight = Math.max(0, Math.floor(Number(viewFrame.height ?? viewFrame.head.latestHeight ?? adapter.currentHeight ?? 0)));
   const env = xln.createEmptyEnv(config.seed ?? null);

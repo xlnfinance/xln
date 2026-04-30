@@ -62,7 +62,7 @@ const normalizePath = (path: string): string[] => {
 };
 
 const readLimit = (query?: RuntimeAdapterReadQuery): number => {
-  const raw = Number(query?.limit ?? 50);
+  const raw = Number(query?.limit ?? 10);
   if (!Number.isFinite(raw)) throw new RuntimeAdapterError('E_BAD_QUERY', 'limit must be finite');
   return Math.max(1, Math.min(500, Math.floor(raw)));
 };
@@ -204,9 +204,46 @@ const projectBooks = (state: EntityState): BookState[] => {
     .map(([, value]) => value);
 };
 
-const projectBookPage = (state: EntityState, limit = 500): RuntimeAdapterBookPage => ({
+const bestBidTicks = (book: BookState): bigint | null => {
+  const bucketId = book.bidBucketIdsDesc[0];
+  if (bucketId === undefined) return null;
+  const bucket = book.bidBuckets.get(bucketId.toString());
+  const price = bucket?.pricesAsc.at(-1);
+  return price ?? null;
+};
+
+const bestAskTicks = (book: BookState): bigint | null => {
+  const bucketId = book.askBucketIdsAsc[0];
+  if (bucketId === undefined) return null;
+  const bucket = book.askBuckets.get(bucketId.toString());
+  const price = bucket?.pricesAsc[0];
+  return price ?? null;
+};
+
+const bookSpreadSortKey = (book: BookState): bigint | null => {
+  const bid = bestBidTicks(book);
+  const ask = bestAskTicks(book);
+  if (bid === null || ask === null) return null;
+  return ask >= bid ? ask - bid : 0n;
+};
+
+const compareBooksNearSpread = (
+  left: [string, BookState],
+  right: [string, BookState],
+): number => {
+  const leftSpread = bookSpreadSortKey(left[1]);
+  const rightSpread = bookSpreadSortKey(right[1]);
+  if (leftSpread !== null && rightSpread !== null && leftSpread !== rightSpread) {
+    return leftSpread < rightSpread ? -1 : 1;
+  }
+  if (leftSpread !== null && rightSpread === null) return -1;
+  if (leftSpread === null && rightSpread !== null) return 1;
+  return String(left[0]).localeCompare(String(right[0]));
+};
+
+const projectBookPage = (state: EntityState, limit = 10): RuntimeAdapterBookPage => ({
   items: Array.from(state.orderbookExt?.books?.entries?.() ?? [])
-    .sort(([left], [right]) => String(left).localeCompare(String(right)))
+    .sort(compareBooksNearSpread)
     .slice(0, limit)
     .map(([pairId, book]) => ({ pairId: String(pairId), book })),
 });
@@ -240,7 +277,7 @@ const projectViewFrame = async (
   const accountsCursor = query?.accountsCursor ?? query?.cursor;
   if (accountsCursor) accountQuery.cursor = accountsCursor;
   const accounts = projectAccountsPage(activeEntityId, state, accountQuery);
-  const books = projectBookPage(state, readBoundedLimit(query?.booksLimit, query?.limit ?? 25));
+  const books = projectBookPage(state, readBoundedLimit(query?.booksLimit, query?.limit ?? 10));
 
   return {
     head,
@@ -301,7 +338,7 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
     }
 
     if (parts.length === 3 && parts[2] === 'book-docs') {
-      return projectBookPage(state, readBoundedLimit(query?.booksLimit, query?.limit ?? 500)) as T;
+      return projectBookPage(state, readBoundedLimit(query?.booksLimit, query?.limit ?? 10)) as T;
     }
   }
 

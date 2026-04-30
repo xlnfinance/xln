@@ -245,6 +245,24 @@ async function dismissOnboardingIfVisible(page: Page): Promise<void> {
 async function completeProfileOnboardingIfVisible(page: Page, label: string): Promise<void> {
   const finishButton = page.getByRole('button', { name: /Start( using xln)?|Continue/i }).first();
   const displayNameInput = page.locator('#display-name').or(page.getByRole('textbox', { name: /Display name/i }).first());
+  const contextReady = page.getByTestId('context-current').first();
+  const runtimeReady = async (): Promise<boolean> =>
+    await page.evaluate(() => {
+      const env = (window as typeof window & {
+        isolatedEnv?: {
+          runtimeId?: string;
+          eReplicas?: Map<string, unknown>;
+        };
+      }).isolatedEnv;
+      return Boolean(env?.runtimeId) && Number(env?.eReplicas?.size || 0) > 0;
+    }).catch(() => false);
+  const onboardingGoneOrReady = async (): Promise<boolean> => {
+    const stillHasInput = await displayNameInput.isVisible().catch(() => false);
+    const stillHasButton = await finishButton.isVisible().catch(() => false);
+    if (await runtimeReady()) return true;
+    if (!stillHasInput && !stillHasButton) return true;
+    return await contextReady.isVisible().catch(() => false);
+  };
 
   const onboardingVisible =
     await displayNameInput.isVisible({ timeout: 1000 }).catch(() => false)
@@ -253,10 +271,15 @@ async function completeProfileOnboardingIfVisible(page: Page, label: string): Pr
     return;
   }
 
-  await expect(displayNameInput).toBeVisible({ timeout: 15_000 });
-  const currentValue = (await displayNameInput.inputValue()).trim();
-  if (currentValue.length === 0) {
-    await displayNameInput.fill(label);
+  if (await displayNameInput.isVisible({ timeout: 15_000 }).catch(() => false)) {
+    const currentValue = (await displayNameInput.inputValue()).trim();
+    if (currentValue.length === 0) {
+      await displayNameInput.fill(label);
+    }
+  } else if (await onboardingGoneOrReady()) {
+    return;
+  } else {
+    await expect(displayNameInput).toBeVisible({ timeout: 1 });
   }
 
   const riskCheckbox = page.getByRole('checkbox', {
@@ -267,21 +290,24 @@ async function completeProfileOnboardingIfVisible(page: Page, label: string): Pr
     if (!checked) await riskCheckbox.check();
   }
 
-  await expect(finishButton).toBeVisible({ timeout: 15_000 });
-  const enabled = await finishButton.isEnabled().catch(() => false);
-  const labelText = String(await finishButton.textContent().catch(() => '')).trim().toLowerCase();
-  if (enabled) {
-    await finishButton.click();
-  } else if (!labelText.includes('starting')) {
-    await expect(finishButton).toBeEnabled({ timeout: 15_000 });
-    await finishButton.click();
+  const finishDeadline = Date.now() + 30_000;
+  while (Date.now() < finishDeadline) {
+    if (await onboardingGoneOrReady()) {
+      break;
+    }
+    if (await finishButton.isVisible().catch(() => false)) {
+      const enabled = await finishButton.isEnabled().catch(() => false);
+      if (enabled) {
+        await finishButton.click();
+        break;
+      }
+    }
+    await page.waitForTimeout(250);
   }
 
   await expect
     .poll(async () => {
-      const stillVisible = await displayNameInput.isVisible().catch(() => false);
-      if (!stillVisible) return true;
-      return await page.getByTestId('context-current').first().isVisible().catch(() => false);
+      return await onboardingGoneOrReady();
     }, {
       timeout: 30_000,
       intervals: [250, 500, 1000],
