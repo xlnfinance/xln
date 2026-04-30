@@ -384,7 +384,7 @@ const resolveDbPath = (env: Env, kind: RuntimeDbKind = 'core'): string => {
   return `${dbRootPath}-${namespace}${suffix}`;
 };
 
-type StorageDbRole = 'current' | 'previous';
+export type StorageDbRole = 'current' | 'previous';
 type StorageEpochRotationMarker = {
   snapshotHeight: number;
   currentPath: string;
@@ -727,6 +727,9 @@ export const getRuntimeDb = (env: Env): Level<Buffer, Buffer> => {
   }
   return state.db;
 };
+
+export const getRuntimeStorageDb = (env: Env, role: StorageDbRole = 'current'): Level<Buffer, Buffer> =>
+  getStorageDb(env, role);
 
 export const getInfraDb = (env: Env): Level<Buffer, Buffer> => {
   const state = ensureRuntimeState(env);
