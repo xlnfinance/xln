@@ -25,6 +25,7 @@ import {
   loadEntityStateFromStorageDb,
   readPersistedFrameJournals,
   readPersistedStorageFrameRecord,
+  readPersistedStorageHead,
   registerEnvChangeCallback,
 } from './runtime.ts';
 import { deserializeTaggedJson, safeStringify, serializeTaggedJson } from './serialization-utils';
@@ -72,6 +73,7 @@ import {
   forgetRuntimeAdapterClient,
   handleRuntimeAdapterMessage,
 } from './radapter/server';
+import { decodeRuntimeAdapterMessage, runtimeAdapterMessageByteLength } from './radapter/codec';
 import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
 import type { ServerWebSocket } from 'bun';
@@ -1935,6 +1937,7 @@ const listLocalControlEntities = (env: Env): ControlEntitySummary[] => {
 const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, env: Env | null) => {
   const handledByRuntimeAdapter = await handleRuntimeAdapterMessage(ws, msg, env, {
     enqueueRuntimeInput,
+    readHead: (targetEnv) => readPersistedStorageHead(targetEnv),
     readFrame: (targetEnv, height) => readPersistedStorageFrameRecord(targetEnv, height),
     listCheckpoints: (targetEnv) => listPersistedCheckpointHeights(targetEnv),
     loadEntityState: (targetEnv, entityId, height) => loadEntityStateFromStorageDb(targetEnv, entityId, height),
@@ -3703,9 +3706,10 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
       message(ws: RelaySocket, message) {
         const data = ws.data;
-        const msgStr = message.toString();
         try {
-          const msg = JSON.parse(msgStr);
+          const msg = data.type === 'rpc'
+            ? decodeRuntimeAdapterMessage<Record<string, unknown>>(message)
+            : JSON.parse(message.toString());
           const routeRelayMessage = () => {
             if (!routerConfig) {
               ws.send(safeStringify({ type: 'error', error: 'Runtime transport not ready' }));
@@ -3767,13 +3771,14 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
             });
           }
         } catch (error) {
-          console.error(`[WS] Parse error (type=${data.type}, len=${msgStr.length}):`, error);
+          const byteLength = data.type === 'rpc' ? runtimeAdapterMessageByteLength(message) : message.toString().length;
+          console.error(`[WS] Parse error (type=${data.type}, len=${byteLength}):`, error);
           pushDebugEvent(relayStore, {
             event: 'error',
-            reason: 'Invalid JSON',
-            details: { wsType: data.type, len: msgStr.length, error: (error as Error).message },
+            reason: data.type === 'rpc' ? 'Invalid runtime adapter message' : 'Invalid JSON',
+            details: { wsType: data.type, len: byteLength, error: (error as Error).message },
           });
-          ws.send(safeStringify({ type: 'error', error: 'Invalid JSON' }));
+          ws.send(safeStringify({ type: 'error', error: data.type === 'rpc' ? 'Invalid runtime adapter message' : 'Invalid JSON' }));
         }
       },
 

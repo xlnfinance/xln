@@ -185,6 +185,7 @@ import {
   readStorageReplicaMeta,
   saveRuntimeFrameToStorage,
   seedFreshStorageEpoch,
+  type StorageHead,
   verifyStorageTailIntegrity,
 } from './storage';
 import { storageOverlayRecordKey } from './storage/overlay';
@@ -4302,6 +4303,7 @@ type VerifyRuntimeChainResult = {
 type PersistedStorageHandle = {
   role: StorageDbRole;
   db: Level<Buffer, Buffer>;
+  head: StorageHead;
   latestHeight: number;
   latestMaterializedHeight: number;
   latestSnapshotHeight: number;
@@ -4329,6 +4331,7 @@ const listPersistedStorageHandles = async (env: Env): Promise<PersistedStorageHa
     handles.push({
       role,
       db,
+      head,
       latestHeight: head.latestHeight,
       latestMaterializedHeight: Math.max(
         0,
@@ -4723,6 +4726,11 @@ export const inspectStorageDb = async (env: Env) => {
 
 export const listPersistedCheckpointHeights = async (env: Env): Promise<number[]> => {
   return resolvePersistedCheckpointHeights(env);
+};
+
+export const readPersistedStorageHead = async (env: Env): Promise<StorageHead | null> => {
+  const handle = (await listPersistedStorageHandles(env))[0];
+  return handle?.head ?? null;
 };
 
 export const verifyRuntimeChain = async (

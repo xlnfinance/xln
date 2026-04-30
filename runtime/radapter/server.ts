@@ -1,8 +1,8 @@
 import type { EntityState, Env, RuntimeInput } from '../types';
-import { serializeTaggedJson } from '../serialization-utils';
+import { encodeRuntimeAdapterMessage } from './codec';
 import type { StorageFrameRecord, StorageHead } from '../storage/types';
 import { RuntimeAdapterError, toRuntimeAdapterErrorPayload } from './errors';
-import { consumeToken, createTokenBucket, type TokenBucket } from './rate-limit';
+import { consumeToken, createTokenBucket, tokenRetryAfterMs, type TokenBucket } from './rate-limit';
 import { resolveRuntimeAdapterRead } from './resolve';
 import type {
   RuntimeAdapterAuthLevel,
@@ -11,16 +11,19 @@ import type {
 } from './types';
 import {
   resolveRuntimeAdapterAuthSeed,
-  verifyRuntimeAdapterAuthKey,
+  verifyRuntimeAdapterAuthCredential,
 } from './auth';
 
 type AdapterSocket = {
-  send: (message: string) => unknown;
+  send: (message: string | Uint8Array) => unknown;
 };
 
 type AdapterClientState = {
   authLevel: RuntimeAdapterAuthLevel | null;
-  bucket: TokenBucket;
+  authExpiresAtMs: number | null;
+  controlBucket: TokenBucket;
+  readBucket: TokenBucket;
+  sendBucket: TokenBucket;
 };
 
 export type RuntimeAdapterServerDeps = {
@@ -41,7 +44,10 @@ const getClientState = (ws: AdapterSocket): AdapterClientState => {
   if (!state) {
     state = {
       authLevel: null,
-      bucket: createTokenBucket(120, 60),
+      authExpiresAtMs: null,
+      controlBucket: createTokenBucket(100, 50),
+      readBucket: createTokenBucket(100, 50),
+      sendBucket: createTokenBucket(10, 5),
     };
     clients.set(ws, state);
   }
@@ -53,7 +59,7 @@ const sendResponse = (ws: AdapterSocket, response: RuntimeAdapterResponse): void
   if (buffered > 2 * 1024 * 1024) {
     throw new RuntimeAdapterError('E_RATE_LIMITED', 'runtime adapter socket backpressure', true);
   }
-  ws.send(serializeTaggedJson(response));
+  ws.send(encodeRuntimeAdapterMessage(response));
 };
 
 const sendOk = (ws: AdapterSocket, inReplyTo: string, payload: unknown): void => {
@@ -72,9 +78,23 @@ const requireAuth = (
   state: AdapterClientState,
   level: RuntimeAdapterAuthLevel,
 ): void => {
+  if (state.authExpiresAtMs !== null && state.authExpiresAtMs <= Date.now()) {
+    state.authLevel = null;
+    state.authExpiresAtMs = null;
+  }
   if (state.authLevel === 'admin') return;
   if (level === 'inspect' && state.authLevel === 'inspect') return;
   throw new RuntimeAdapterError('E_UNAUTHORIZED', `${level} auth required`);
+};
+
+const requireBucket = (bucket: TokenBucket, label: string): void => {
+  if (consumeToken(bucket)) return;
+  throw new RuntimeAdapterError(
+    'E_RATE_LIMITED',
+    `runtime adapter ${label} rate limit exceeded`,
+    true,
+    tokenRetryAfterMs(bucket),
+  );
 };
 
 export const forgetRuntimeAdapterClient = (ws: AdapterSocket): void => {
@@ -86,8 +106,9 @@ export const runtimeAdapterClientCount = (): number => clients.size;
 export const broadcastRuntimeAdapterTick = (env: Env): void => {
   if (clients.size === 0) return;
   const height = Math.max(0, Math.floor(Number(env.height ?? 0)));
-  const message = serializeTaggedJson({ v: 1, op: 'tick', height });
-  for (const ws of clients.keys()) {
+  const message = encodeRuntimeAdapterMessage({ v: 1, op: 'tick', height });
+  for (const [ws, state] of clients.entries()) {
+    if (!state.authLevel) continue;
     try {
       ws.send(message);
     } catch {
@@ -114,8 +135,13 @@ export const handleRuntimeAdapterMessage = async (
 ): Promise<boolean> => {
   if (!isRuntimeAdapterRequest(msg)) return false;
   const state = getClientState(ws);
-  if (!consumeToken(state.bucket)) {
-    sendErr(ws, msg.id, new RuntimeAdapterError('E_RATE_LIMITED', 'runtime adapter rate limit exceeded', true));
+  if (!consumeToken(state.controlBucket)) {
+    sendErr(ws, msg.id, new RuntimeAdapterError(
+      'E_RATE_LIMITED',
+      'runtime adapter rate limit exceeded',
+      true,
+      tokenRetryAfterMs(state.controlBucket),
+    ));
     return true;
   }
   if (!env) {
@@ -126,15 +152,22 @@ export const handleRuntimeAdapterMessage = async (
   try {
     if (msg.op === 'auth') {
       const authSeed = resolveRuntimeAdapterAuthSeed(env);
-      const authLevel = verifyRuntimeAdapterAuthKey(authSeed, msg.key);
-      if (!authLevel) throw new RuntimeAdapterError('E_UNAUTHORIZED', 'invalid runtime adapter auth key');
-      state.authLevel = authLevel;
-      sendOk(ws, msg.id, { authLevel, currentHeight: Math.max(0, Math.floor(Number(env.height ?? 0))) });
+      const auth = verifyRuntimeAdapterAuthCredential(authSeed, msg.key);
+      if (!auth) throw new RuntimeAdapterError('E_UNAUTHORIZED', 'invalid runtime adapter auth key');
+      state.authLevel = auth.level;
+      state.authExpiresAtMs = auth.expiresAtMs;
+      sendOk(ws, msg.id, {
+        authLevel: auth.level,
+        expiresAtMs: auth.expiresAtMs,
+        legacy: auth.legacy,
+        currentHeight: Math.max(0, Math.floor(Number(env.height ?? 0))),
+      });
       return true;
     }
 
     if (msg.op === 'read') {
       requireAuth(state, 'inspect');
+      requireBucket(state.readBucket, 'read');
       const payload = await resolveRuntimeAdapterRead({
         env,
         ...(deps.readHead ? { readHead: () => deps.readHead?.(env) ?? Promise.resolve(null) } : {}),
@@ -149,6 +182,7 @@ export const handleRuntimeAdapterMessage = async (
 
     if (msg.op === 'send') {
       requireAuth(state, 'admin');
+      requireBucket(state.sendBucket, 'send');
       deps.enqueueRuntimeInput(env, msg.input);
       sendOk(ws, msg.id, { height: Math.max(0, Math.floor(Number(env.height ?? 0))) });
       return true;

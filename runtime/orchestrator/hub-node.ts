@@ -28,6 +28,12 @@ import { createHttpDrainTracker, stopServerGracefully } from './graceful-server'
 import { applyJEventsToEnv } from '../jadapter/watcher';
 import { safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
+import { decodeRuntimeAdapterMessage } from '../radapter/codec';
+import {
+  attachRuntimeAdapterTicker,
+  forgetRuntimeAdapterClient,
+  handleRuntimeAdapterMessage,
+} from '../radapter/server';
 import {
   getActiveJAdapter,
   getP2PState,
@@ -42,6 +48,12 @@ import {
   stopP2P,
   startRuntimeLoop,
   stopRuntimeLoopAndWait,
+  readPersistedStorageFrameRecord,
+  readPersistedStorageHead,
+  listPersistedCheckpointHeights,
+  loadEntityStateFromStorageDb,
+  listPersistedEntityIdsAtHeight,
+  registerEnvChangeCallback,
 } from '../runtime.ts';
 import type { EntityInput, Env } from '../types';
 import {
@@ -888,6 +900,25 @@ const run = async (): Promise<void> => {
       handleInboundP2PEntityInput(env, from, input, ingressTimestamp);
     },
   });
+  const handleRadapterWsMessage = (ws: any, raw: string | Buffer | ArrayBuffer): void => {
+    let msg: Record<string, unknown>;
+    try {
+      msg = decodeRuntimeAdapterMessage<Record<string, unknown>>(raw);
+    } catch (error) {
+      ws.send(safeStringify({ type: 'error', error: `Invalid runtime adapter message: ${(error as Error).message}` }));
+      return;
+    }
+    Promise.resolve(handleRuntimeAdapterMessage(ws, msg, env, {
+      enqueueRuntimeInput,
+      readHead: (targetEnv) => readPersistedStorageHead(targetEnv),
+      readFrame: (targetEnv, height) => readPersistedStorageFrameRecord(targetEnv, height),
+      listCheckpoints: (targetEnv) => listPersistedCheckpointHeights(targetEnv),
+      loadEntityState: (targetEnv, entityId, height) => loadEntityStateFromStorageDb(targetEnv, entityId, height),
+      listEntityIdsAtHeight: (targetEnv, height) => listPersistedEntityIdsAtHeight(targetEnv, height),
+    })).catch(error => {
+      ws.send(safeStringify({ type: 'error', error: `Runtime adapter failed: ${(error as Error).message}` }));
+    });
+  };
 
   const httpDrain = createHttpDrainTracker();
   const server = Bun.serve({
@@ -896,12 +927,18 @@ const run = async (): Promise<void> => {
     async fetch(request, serverRef) {
       const releaseHttp = httpDrain.begin();
       try {
-      const url = new URL(request.url);
-      const pathname = url.pathname;
-      const headers = JSON_HEADERS;
+	      const url = new URL(request.url);
+	      const pathname = url.pathname;
+	      const headers = JSON_HEADERS;
 
-      const upgraded = directRuntimeWs.maybeUpgrade(request, serverRef);
-      if (upgraded !== undefined) return upgraded;
+	      if (request.headers.get('upgrade') === 'websocket' && pathname === '/rpc') {
+	        const upgraded = serverRef.upgrade(request, { data: { type: 'rpc' } });
+	        if (upgraded) return;
+	        return new Response('WebSocket upgrade failed', { status: 400 });
+	      }
+
+	      const upgraded = directRuntimeWs.maybeUpgrade(request, serverRef);
+	      if (upgraded !== undefined) return upgraded;
 
       if (pathname === '/api/info') {
         return new Response(safeStringify({
@@ -1161,9 +1198,31 @@ const run = async (): Promise<void> => {
       } finally {
         releaseHttp();
       }
-    },
-    websocket: directRuntimeWs.websocket,
-  });
+	    },
+	    websocket: {
+	      open(ws: any) {
+	        if (ws.data?.type === 'rpc') {
+	          attachRuntimeAdapterTicker(env, registerEnvChangeCallback);
+	          return;
+	        }
+	        directRuntimeWs.websocket.open(ws);
+	      },
+	      message(ws: any, raw: string | Buffer | ArrayBuffer) {
+	        if (ws.data?.type === 'rpc') {
+	          handleRadapterWsMessage(ws, raw);
+	          return;
+	        }
+	        return directRuntimeWs.websocket.message(ws, raw);
+	      },
+	      close(ws: any) {
+	        if (ws.data?.type === 'rpc') {
+	          forgetRuntimeAdapterClient(ws);
+	          return;
+	        }
+	        directRuntimeWs.websocket.close(ws);
+	      },
+	    },
+	  });
 
   const importJStartedAt = startTiming('import_j');
   const jurisdiction = await prepareJurisdictionForImport(resolveJurisdictionConfig(resolvedArgs.rpcUrl));

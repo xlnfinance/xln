@@ -20,12 +20,40 @@ import {
 } from '../runtime.ts';
 import { markStorageEntityDirty } from '../env-events';
 import { readFrameDbRuntimeActivity, readStorageHead, verifyStorageTailIntegrity } from '../storage';
-import { encodeBuffer } from '../storage/codec';
-import { KEY_HEAD, keySnapshotEntity } from '../storage/keys';
+import { decodeBuffer, encodeBuffer } from '../storage/codec';
+import { KEY_HEAD, keyFrame, keySnapshotEntity, keySnapshotManifest } from '../storage/keys';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { generateLazyEntityId } from '../entity-factory';
+import type { StorageFrameRecord } from '../storage/types';
 
 describe('storage frame journal retention', () => {
+  const cleanupRuntimeStorage = (dbRoot: string, runtimeId: string): void => {
+    const namespacePath = join(dbRoot, runtimeId);
+    rmSync(namespacePath, { recursive: true, force: true });
+    rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-events`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
+    mkdirSync(dbRoot, { recursive: true });
+  };
+
+  const createSavedEmptyEnv = async (seedPrefix: string) => {
+    const seed = `${seedPrefix} ${Date.now()} alpha beta gamma`;
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+    cleanupRuntimeStorage(dbRoot, runtimeId);
+
+    const env = createEmptyEnv(seed);
+    env.runtimeId = runtimeId;
+    env.dbNamespace = runtimeId;
+    env.height = 1;
+    env.timestamp = 1_000;
+    env.quietRuntimeLogs = true;
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+    return env;
+  };
+
   test('refuses to overwrite an already persisted runtime frame', async () => {
     const seed = `frame-monotonic ${Date.now()} alpha beta gamma`;
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
@@ -413,6 +441,87 @@ describe('storage frame journal retention', () => {
     await batch.write({ sync: true });
 
     await expect(verifyStorageTailIntegrity(db)).rejects.toThrow('STORAGE_VERIFY_SNAPSHOT_MANIFEST_MISSING');
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+  });
+
+  test('rejects a snapshot head that points past the latest frame', async () => {
+    const env = await createSavedEmptyEnv('storage-crash-snapshot-after-head');
+    const db = getRuntimeStorageDb(env);
+    const head = await readStorageHead(db);
+    if (!head) throw new Error('TEST_HEAD_MISSING');
+    const batch = db.batch();
+    batch.put(KEY_HEAD, encodeBuffer({
+      ...head,
+      latestSnapshotHeight: head.latestHeight + 1,
+    }));
+    await batch.write({ sync: true });
+
+    await expect(verifyStorageTailIntegrity(db)).rejects.toThrow('STORAGE_VERIFY_SNAPSHOT_AFTER_HEAD');
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+  });
+
+  test('rejects a snapshot manifest with the wrong height', async () => {
+    const env = await createSavedEmptyEnv('storage-crash-snapshot-manifest-height');
+    const db = getRuntimeStorageDb(env);
+    const head = await readStorageHead(db);
+    if (!head) throw new Error('TEST_HEAD_MISSING');
+    const batch = db.batch();
+    batch.put(KEY_HEAD, encodeBuffer({
+      ...head,
+      latestSnapshotHeight: 1,
+      latestMaterializedHeight: 1,
+    }));
+    batch.put(keySnapshotManifest(1), encodeBuffer({ height: 2, createdAt: 1_000, docCount: 0 }));
+    await batch.write({ sync: true });
+
+    await expect(verifyStorageTailIntegrity(db)).rejects.toThrow('STORAGE_VERIFY_SNAPSHOT_MANIFEST_HEIGHT_MISMATCH');
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+  });
+
+  test('rejects a snapshot manifest when the materialized frame is missing', async () => {
+    const env = await createSavedEmptyEnv('storage-crash-snapshot-frame-missing');
+    const db = getRuntimeStorageDb(env);
+    const head = await readStorageHead(db);
+    if (!head) throw new Error('TEST_HEAD_MISSING');
+    const batch = db.batch();
+    batch.put(KEY_HEAD, encodeBuffer({
+      ...head,
+      latestSnapshotHeight: 1,
+      latestMaterializedHeight: 1,
+    }));
+    batch.put(keySnapshotManifest(1), encodeBuffer({ height: 1, createdAt: 1_000, docCount: 0 }));
+    batch.del?.(keyFrame(1));
+    await batch.write({ sync: true });
+
+    await expect(verifyStorageTailIntegrity(db)).rejects.toThrow('STORAGE_VERIFY_SNAPSHOT_FRAME_MISSING');
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+  });
+
+  test('rejects a snapshot manifest when the frame was not materialized', async () => {
+    const env = await createSavedEmptyEnv('storage-crash-snapshot-not-materialized');
+    const db = getRuntimeStorageDb(env);
+    const head = await readStorageHead(db);
+    if (!head) throw new Error('TEST_HEAD_MISSING');
+    const frame = decodeBuffer<StorageFrameRecord>(await db.get(keyFrame(1)));
+    const batch = db.batch();
+    batch.put(KEY_HEAD, encodeBuffer({
+      ...head,
+      latestSnapshotHeight: 1,
+      latestMaterializedHeight: 1,
+    }));
+    batch.put(keySnapshotManifest(1), encodeBuffer({ height: 1, createdAt: 1_000, docCount: 0 }));
+    batch.put(keyFrame(1), encodeBuffer({ ...frame, materializedState: false }));
+    await batch.write({ sync: true });
+
+    await expect(verifyStorageTailIntegrity(db)).rejects.toThrow('STORAGE_VERIFY_SNAPSHOT_NOT_MATERIALIZED');
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);

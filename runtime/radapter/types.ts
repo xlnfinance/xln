@@ -3,6 +3,7 @@ import type { RuntimeInput } from '../types';
 export type RuntimeAdapterMode = 'embedded' | 'remote';
 export type RuntimeAdapterStatus = 'connected' | 'connecting' | 'disconnected' | 'error';
 export type RuntimeAdapterAuthLevel = 'inspect' | 'admin';
+export type RuntimeAdapterAuthRole = RuntimeAdapterAuthLevel | 'read' | 'full';
 
 export type RuntimeAdapterConfig = {
   mode: RuntimeAdapterMode;
@@ -10,6 +11,7 @@ export type RuntimeAdapterConfig = {
   authKey?: string;
   seed?: string;
   reconnectMaxMs?: number;
+  requestTimeoutMs?: number;
 };
 
 export type RuntimeAdapterReadQuery = {
@@ -51,6 +53,7 @@ export type RuntimeAdapterErrorPayload = {
   code: RuntimeAdapterErrorCode;
   message: string;
   retryable: boolean;
+  retryAfterMs?: number;
 };
 
 export type RuntimeAdapterRequest =

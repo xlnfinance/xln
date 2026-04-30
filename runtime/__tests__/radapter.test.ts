@@ -1,9 +1,14 @@
 import { expect, test } from 'bun:test';
 
-import { deriveRuntimeAdapterAuthKey, verifyRuntimeAdapterAuthKey } from '../radapter/auth';
+import {
+  deriveRuntimeAdapterAuthKey,
+  deriveRuntimeAdapterCapabilityToken,
+  verifyRuntimeAdapterAuthCredential,
+  verifyRuntimeAdapterAuthKey,
+} from '../radapter/auth';
+import { decodeRuntimeAdapterMessage, encodeRuntimeAdapterMessage } from '../radapter/codec';
 import { resolveRuntimeAdapterRead } from '../radapter/resolve';
-import { handleRuntimeAdapterMessage } from '../radapter/server';
-import { deserializeTaggedJson } from '../serialization-utils';
+import { broadcastRuntimeAdapterTick, handleRuntimeAdapterMessage } from '../radapter/server';
 import type { EntityReplica, Env } from '../types';
 
 const entityId = `0x${'aa'.repeat(32)}`;
@@ -85,9 +90,14 @@ const makeEnv = (): Env => ({
 test('runtime adapter auth keys are scoped by level', () => {
   const inspect = deriveRuntimeAdapterAuthKey('seed', 'inspect');
   const admin = deriveRuntimeAdapterAuthKey('seed', 'admin');
+  const readToken = deriveRuntimeAdapterCapabilityToken('seed', 'read', Date.now() + 60_000);
+  const fullToken = deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000);
   expect(inspect).not.toBe(admin);
   expect(verifyRuntimeAdapterAuthKey('seed', inspect)).toBe('inspect');
   expect(verifyRuntimeAdapterAuthKey('seed', admin)).toBe('admin');
+  expect(verifyRuntimeAdapterAuthCredential('seed', readToken)?.level).toBe('inspect');
+  expect(verifyRuntimeAdapterAuthCredential('seed', fullToken)?.level).toBe('admin');
+  expect(() => deriveRuntimeAdapterCapabilityToken('seed', 'read', Date.now() - 1)).toThrow('RADAPTER_AUTH_EXPIRY_REQUIRED');
   expect(verifyRuntimeAdapterAuthKey('seed', `${admin.slice(0, -1)}0`)).toBe(null);
 });
 
@@ -135,29 +145,137 @@ test('runtime adapter resolver returns a bounded view frame for the app shell', 
   expect(frame.activeEntity?.books.items).toEqual([]);
 });
 
+test('runtime adapter view frame defaults to 10 accounts and cursor pagination', async () => {
+  const env = makeEnv();
+  const replica = Array.from(env.eReplicas.values())[0]!;
+  const base = replica.state.accounts.get(counterpartyId)!;
+  replica.state.accounts.clear();
+  for (let i = 0; i < 12; i += 1) {
+    const id = `0x${(i + 1).toString(16).padStart(64, '0')}`;
+    replica.state.accounts.set(id, {
+      ...base,
+      rightEntity: id,
+      proofHeader: { ...base.proofHeader, toEntity: id },
+    });
+  }
+
+  const first = await resolveRuntimeAdapterRead<{
+    activeEntity: { accounts: { items: Array<{ rightEntity: string }>; nextCursor: string | null } } | null;
+  }>({ env }, 'view-frame');
+  expect(first.activeEntity?.accounts.items).toHaveLength(10);
+  expect(first.activeEntity?.accounts.nextCursor).toBe(`0x${'0a'.padStart(64, '0')}`);
+
+  const second = await resolveRuntimeAdapterRead<{
+    items: Array<{ rightEntity: string }>;
+    nextCursor: string | null;
+  }>({ env }, `entity/${entityId}/accounts`, { cursor: first.activeEntity?.accounts.nextCursor || undefined });
+  expect(second.items).toHaveLength(2);
+  expect(second.items.map((item) => item.rightEntity)).toEqual([
+    `0x${'0b'.padStart(64, '0')}`,
+    `0x${'0c'.padStart(64, '0')}`,
+  ]);
+  expect(second.nextCursor).toBe(null);
+});
+
+test('runtime adapter binary codec preserves structured payloads', () => {
+  const encoded = encodeRuntimeAdapterMessage({
+    v: 1,
+    id: 'send-1',
+    op: 'send',
+    input: {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId,
+        signerId: 'signer',
+        entityTxs: [{
+          type: 'directPayment',
+          data: {
+            targetEntityId: counterpartyId,
+            tokenId: 1,
+            amount: 1234567890123456789n,
+            route: [entityId, counterpartyId],
+            metadata: new Map([['purpose', 'radapter-binary-test']]),
+            tags: new Set(['binary', 'codec']),
+            bytes: new Uint8Array([1, 2, 3]),
+          },
+        }],
+      }],
+    },
+  });
+  const decoded = decodeRuntimeAdapterMessage<{
+    input: { entityInputs: Array<{ entityTxs: Array<{ data: { amount: bigint; metadata: Map<string, string>; tags: Set<string>; bytes: Uint8Array } }> }> };
+  }>(encoded);
+
+  const data = decoded.input.entityInputs[0]?.entityTxs[0]?.data;
+  expect(data?.amount).toBe(1234567890123456789n);
+  expect(data?.metadata.get('purpose')).toBe('radapter-binary-test');
+  expect(data?.tags.has('codec')).toBe(true);
+  expect(Array.from(data?.bytes ?? [])).toEqual([1, 2, 3]);
+});
+
+test('runtime adapter rejects oversized wire messages before decoding', () => {
+  const previous = process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'];
+  process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'] = '4';
+  try {
+    expect(() => decodeRuntimeAdapterMessage(new Uint8Array([1, 2, 3, 4, 5]))).toThrow(/RADAPTER_MESSAGE_TOO_LARGE/);
+  } finally {
+    if (previous === undefined) {
+      delete process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'];
+    } else {
+      process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'] = previous;
+    }
+  }
+});
+
 test('runtime adapter websocket handler gates reads behind inspect auth', async () => {
-  const messages: string[] = [];
-  const socket = { send: (message: string) => { messages.push(message); } };
+  const messages: unknown[] = [];
+  const socket = { send: (message: unknown) => { messages.push(message); } };
   const env = makeEnv();
 
   await handleRuntimeAdapterMessage(socket, { v: 1, id: 'read-1', op: 'read', path: 'head' }, env, {
     enqueueRuntimeInput: () => {},
   });
-  const denied = deserializeTaggedJson<{ ok: false; error: { code: string } }>(messages.pop() ?? '');
+  const denied = decodeRuntimeAdapterMessage<{ ok: false; error: { code: string } }>(messages.pop());
   expect(denied.ok).toBe(false);
   expect(denied.error.code).toBe('E_UNAUTHORIZED');
 
   await handleRuntimeAdapterMessage(socket, { v: 1, id: 'auth-1', op: 'auth', key: deriveRuntimeAdapterAuthKey('seed', 'inspect') }, env, {
     enqueueRuntimeInput: () => {},
   });
-  const authed = deserializeTaggedJson<{ ok: true; payload: { authLevel: string } }>(messages.pop() ?? '');
+  const authed = decodeRuntimeAdapterMessage<{ ok: true; payload: { authLevel: string } }>(messages.pop());
   expect(authed.ok).toBe(true);
   expect(authed.payload.authLevel).toBe('inspect');
 
   await handleRuntimeAdapterMessage(socket, { v: 1, id: 'read-2', op: 'read', path: 'head' }, env, {
     enqueueRuntimeInput: () => {},
   });
-  const read = deserializeTaggedJson<{ ok: true; payload: { latestHeight: number } }>(messages.pop() ?? '');
+  const read = decodeRuntimeAdapterMessage<{ ok: true; payload: { latestHeight: number } }>(messages.pop());
   expect(read.ok).toBe(true);
   expect(read.payload.latestHeight).toBe(7);
+});
+
+test('runtime adapter ticks only go to authenticated clients', async () => {
+  const env = makeEnv();
+  const unauthMessages: unknown[] = [];
+  const inspectMessages: unknown[] = [];
+  const unauthSocket = { send: (message: unknown) => { unauthMessages.push(message); } };
+  const inspectSocket = { send: (message: unknown) => { inspectMessages.push(message); } };
+
+  await handleRuntimeAdapterMessage(unauthSocket, { v: 1, id: 'read-unauth', op: 'read', path: 'head' }, env, {
+    enqueueRuntimeInput: () => {},
+  });
+  unauthMessages.length = 0;
+
+  await handleRuntimeAdapterMessage(inspectSocket, { v: 1, id: 'auth-inspect', op: 'auth', key: deriveRuntimeAdapterAuthKey('seed', 'inspect') }, env, {
+    enqueueRuntimeInput: () => {},
+  });
+  inspectMessages.length = 0;
+
+  broadcastRuntimeAdapterTick(env);
+
+  expect(unauthMessages).toHaveLength(0);
+  expect(inspectMessages).toHaveLength(1);
+  const tick = decodeRuntimeAdapterMessage<{ op: string; height: number }>(inspectMessages[0]);
+  expect(tick.op).toBe('tick');
+  expect(tick.height).toBe(7);
 });
