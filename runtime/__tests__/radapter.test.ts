@@ -110,6 +110,31 @@ test('runtime adapter resolver reads live head and entity paths', async () => {
   expect(accounts.nextCursor).toBe(null);
 });
 
+test('runtime adapter resolver returns a bounded view frame for the app shell', async () => {
+  const env = makeEnv();
+  const frame = await resolveRuntimeAdapterRead<{
+    height: number;
+    entities: Array<{ entityId: string }>;
+    activeEntityId: string | null;
+    activeEntity: {
+      core: { entityId: string; profile?: { name?: string } };
+      accounts: { items: Array<{ leftEntity: string; rightEntity: string }>; nextCursor: string | null };
+      books: { items: unknown[] };
+    } | null;
+  }>({ env }, 'view-frame', { accountsLimit: 1, booksLimit: 1 });
+
+  expect(frame.height).toBe(7);
+  expect(frame.entities.map((entity) => entity.entityId)).toEqual([entityId]);
+  expect(frame.activeEntityId).toBe(entityId);
+  expect(frame.activeEntity?.core.entityId).toBe(entityId);
+  expect(frame.activeEntity?.core.profile?.name).toBe('Adapter Test');
+  expect(frame.activeEntity?.accounts.items).toHaveLength(1);
+  expect(frame.activeEntity?.accounts.items[0]?.leftEntity).toBe(entityId);
+  expect(frame.activeEntity?.accounts.items[0]?.rightEntity).toBe(counterpartyId);
+  expect(frame.activeEntity?.accounts.nextCursor).toBe(null);
+  expect(frame.activeEntity?.books.items).toEqual([]);
+});
+
 test('runtime adapter websocket handler gates reads behind inspect auth', async () => {
   const messages: string[] = [];
   const socket = { send: (message: string) => { messages.push(message); } };

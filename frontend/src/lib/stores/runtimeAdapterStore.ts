@@ -93,7 +93,11 @@ export const createRuntimeReadStore = <T = unknown>(
     }
     store.update((state) => ({ ...state, loading: true, error: null }));
     try {
-      const data = await adapter.read<T>(path, query);
+      const height = Math.max(0, Math.floor(Number(adapter.currentHeight || 0)));
+      const pinnedQuery = query?.atHeight !== undefined || height < 1
+        ? query
+        : { ...query, atHeight: height };
+      const data = await adapter.read<T>(path, pinnedQuery);
       if (disposed || version !== refreshVersion) return;
       store.set({ loading: false, data, error: null, height: adapter.currentHeight });
     } catch (error) {

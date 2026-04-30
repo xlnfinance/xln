@@ -113,7 +113,13 @@ import type { JAdapter } from './jadapter/types';
 import type { PersistedFrameJournal } from './wal/store';
 import type { EmbeddedRuntimeAdapter } from './radapter/embedded';
 import type { RemoteRuntimeAdapter } from './radapter/remote';
-import type { resolveRuntimeAdapterRead } from './radapter/resolve';
+import type {
+  RuntimeAdapterAccountPage,
+  RuntimeAdapterBookPage,
+  RuntimeAdapterViewFrame,
+  resolveRuntimeAdapterRead,
+} from './radapter/resolve';
+import type { RuntimeAdapterEntitySummary } from './radapter/types';
 
 export type QueueEntityInputPayload = {
   type: string;
@@ -139,6 +145,13 @@ export type VerifyRuntimeChainResult = {
   restoredHeight: number;
   expectedStateHash: string;
   actualStateHash: string;
+};
+
+export type {
+  RuntimeAdapterAccountPage,
+  RuntimeAdapterBookPage,
+  RuntimeAdapterViewFrame,
+  RuntimeAdapterEntitySummary,
 };
 
 export type P2PConfig = {

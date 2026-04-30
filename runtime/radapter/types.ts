@@ -16,6 +16,10 @@ export type RuntimeAdapterReadQuery = {
   atHeight?: number;
   cursor?: string;
   limit?: number;
+  entityId?: string;
+  accountsCursor?: string;
+  accountsLimit?: number;
+  booksLimit?: number;
   sortBy?: string;
   sortDir?: 'asc' | 'desc';
 };

@@ -13,19 +13,32 @@ import type {
   ReplicaKey,
   RoutedEntityInput,
   RuntimeInput,
+  RuntimeAdapter,
+  RuntimeAdapterConfig,
+  RuntimeAdapterStatus,
+  RuntimeAdapterViewFrame,
+  AccountMachine,
+  BookState,
   EntityDisplayInfo,
+  EntityReplica,
+  EntityState,
   SignerDisplayInfo,
   BigIntMathUtils,
   FinancialConstants,
   SwapBookEntry,
 } from '@xln/runtime/xln-api';
+import type { StorageAccountDoc, StorageEntityCoreDoc } from '@xln/runtime/storage/types';
 
 // Direct import of XLN runtime module (no wrapper boilerplate needed)
 let XLN: XLNModule | null = null;
 let xlnLoadPromise: Promise<XLNModule> | null = null;
 export const xlnInstance = writable<XLNModule | null>(null);
 let unregisterEnvChange: (() => void) | null = null;
+let unregisterRuntimeAdapterChange: (() => void) | null = null;
+let remoteAdapterRefreshPromise: Promise<Env | null> | null = null;
+let activeRuntimeAdapterConfig: RuntimeAdapterConfig | null = null;
 const RESET_NOTICE_STORAGE_KEY = 'xln-reset-notice';
+const DEFAULT_REMOTE_ADAPTER_PATH = '/rpc';
 
 type FrontendEntitySummary = {
   id: string;
@@ -178,6 +191,9 @@ export function setXlnEnvironment(env: Env | null): void {
 
 export const isLoading = writable<boolean>(true);
 export const error = writable<string | null>(null);
+export const appRuntimeAdapterMode = writable<RuntimeAdapterConfig['mode']>('embedded');
+export const appRuntimeAdapterStatus = writable<RuntimeAdapterStatus>('disconnected');
+export const appRuntimeAdapterEndpoint = writable<string>('');
 
 // xlnFunctions is now defined at the end of the file
 
@@ -279,6 +295,10 @@ function stopP2PPoll() {
 
 export async function suspendClientActivity(): Promise<void> {
   stopP2PPoll();
+  unregisterRuntimeAdapterChange?.();
+  unregisterRuntimeAdapterChange = null;
+  const { disconnectRuntimeAdapter } = await import('./runtimeAdapterStore');
+  disconnectRuntimeAdapter();
 }
 
 // Direct stores for immediate updates (no derived timing races)
@@ -312,6 +332,271 @@ export const resolveConfiguredApiBase = (baseOrigin: string): string => {
   return baseOrigin;
 };
 
+const normalizeEntityIdForView = (value: string): string => String(value || '').trim().toLowerCase();
+
+const readStoredAdapterValue = (key: string): string => {
+  if (typeof window === 'undefined') return '';
+  try {
+    return localStorage.getItem(key)?.trim() || '';
+  } catch {
+    return '';
+  }
+};
+
+const defaultRemoteAdapterWsUrl = (): string => {
+  if (typeof window === 'undefined') return `ws://127.0.0.1:8080${DEFAULT_REMOTE_ADAPTER_PATH}`;
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  return `${protocol}//${window.location.host}${DEFAULT_REMOTE_ADAPTER_PATH}`;
+};
+
+const resolveAppRuntimeAdapterConfig = (): RuntimeAdapterConfig => {
+  if (typeof window === 'undefined') return { mode: 'embedded' };
+  const params = new URLSearchParams(window.location.search);
+  const rawMode = (
+    params.get('runtime') ||
+    params.get('adapter') ||
+    readStoredAdapterValue('xln-runtime-adapter-mode') ||
+    ''
+  ).trim().toLowerCase();
+  const remoteRequested = rawMode === 'remote' || rawMode === 'ws' || params.has('ws') || params.has('runtimeWs');
+  if (!remoteRequested) {
+    appRuntimeAdapterMode.set('embedded');
+    appRuntimeAdapterEndpoint.set('embedded');
+    return { mode: 'embedded' };
+  }
+
+  const wsUrl = (
+    params.get('ws') ||
+    params.get('runtimeWs') ||
+    readStoredAdapterValue('xln-runtime-adapter-ws') ||
+    defaultRemoteAdapterWsUrl()
+  ).trim();
+  const authKey = (
+    params.get('key') ||
+    params.get('auth') ||
+    readStoredAdapterValue('xln-runtime-adapter-key') ||
+    ''
+  ).trim();
+
+  appRuntimeAdapterMode.set('remote');
+  appRuntimeAdapterEndpoint.set(wsUrl);
+  return {
+    mode: 'remote',
+    wsUrl,
+    ...(authKey ? { authKey } : {}),
+  };
+};
+
+const accountCounterpartyId = (entityId: string, doc: StorageAccountDoc): string => {
+  const normalizedEntityId = normalizeEntityIdForView(entityId);
+  const left = normalizeEntityIdForView(doc.leftEntity);
+  const right = normalizeEntityIdForView(doc.rightEntity);
+  return left === normalizedEntityId ? right : left;
+};
+
+const withDefinedProp = <K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> =>
+  value === undefined ? {} : ({ [key]: value } as Record<K, V>);
+
+const hydrateRemoteAccountDoc = (doc: StorageAccountDoc): AccountMachine => ({
+  leftEntity: doc.leftEntity,
+  rightEntity: doc.rightEntity,
+  status: doc.status,
+  mempool: doc.mempool,
+  currentFrame: doc.currentFrame,
+  deltas: doc.deltas,
+  locks: doc.locks,
+  swapOffers: doc.swapOffers,
+  globalCreditLimits: doc.globalCreditLimits,
+  currentHeight: doc.currentHeight,
+  pendingSignatures: doc.pendingSignatures,
+  rollbackCount: doc.rollbackCount,
+  leftJObservations: doc.leftJObservations ?? [],
+  rightJObservations: doc.rightJObservations ?? [],
+  jEventChain: doc.jEventChain ?? [],
+  lastFinalizedJHeight: doc.lastFinalizedJHeight,
+  proofHeader: doc.proofHeader,
+  proofBody: doc.proofBody,
+  disputeConfig: doc.disputeConfig,
+  onChainSettlementNonce: doc.onChainSettlementNonce,
+  pendingWithdrawals: doc.pendingWithdrawals ?? new Map(),
+  requestedRebalance: doc.requestedRebalance ?? new Map(),
+  requestedRebalanceFeeState: doc.requestedRebalanceFeeState ?? new Map(),
+  rebalancePolicy: doc.rebalancePolicy ?? new Map(),
+  swapOrderHistory: doc.swapOrderHistory ?? new Map(),
+  swapClosedOrders: doc.swapClosedOrders ?? new Map(),
+  ...withDefinedProp('pendingFrame', doc.pendingFrame),
+  ...withDefinedProp('pendingAccountInput', doc.pendingAccountInput),
+  ...withDefinedProp('lastRollbackFrameHash', doc.lastRollbackFrameHash),
+  ...withDefinedProp('abiProofBody', doc.abiProofBody),
+  ...withDefinedProp('currentFrameHanko', doc.currentFrameHanko),
+  ...withDefinedProp('counterpartyFrameHanko', doc.counterpartyFrameHanko),
+  ...withDefinedProp('currentDisputeProofHanko', doc.currentDisputeProofHanko),
+  ...withDefinedProp('currentDisputeProofNonce', doc.currentDisputeProofNonce),
+  ...withDefinedProp('currentDisputeProofBodyHash', doc.currentDisputeProofBodyHash),
+  ...withDefinedProp('currentDisputeHash', doc.currentDisputeHash),
+  ...withDefinedProp('counterpartyDisputeProofHanko', doc.counterpartyDisputeProofHanko),
+  ...withDefinedProp('counterpartyDisputeProofNonce', doc.counterpartyDisputeProofNonce),
+  ...withDefinedProp('counterpartyDisputeProofBodyHash', doc.counterpartyDisputeProofBodyHash),
+  ...withDefinedProp('counterpartyDisputeHash', doc.counterpartyDisputeHash),
+  ...withDefinedProp('counterpartySettlementHanko', doc.counterpartySettlementHanko),
+  ...withDefinedProp('disputeProofNoncesByHash', doc.disputeProofNoncesByHash),
+  ...withDefinedProp('disputeProofBodiesByHash', doc.disputeProofBodiesByHash),
+  ...withDefinedProp('settlementWorkspace', doc.settlementWorkspace),
+  ...withDefinedProp('activeDispute', doc.activeDispute),
+  ...withDefinedProp('counterpartyRebalanceFeePolicy', doc.counterpartyRebalanceFeePolicy),
+  ...withDefinedProp('activeRebalanceQuote', doc.activeRebalanceQuote),
+  ...withDefinedProp('pendingRebalanceRequest', doc.pendingRebalanceRequest),
+});
+
+const hydrateRemoteEntityState = (options: {
+  core: StorageEntityCoreDoc;
+  accounts: Map<string, StorageAccountDoc>;
+  books: Map<string, BookState>;
+}): EntityState => {
+  const { core, accounts, books } = options;
+  const orderbookExt = books.size > 0 || core.orderbookHubProfile || core.orderbookReferrals
+    ? {
+        books,
+        orderPairs: new Map(),
+        referrals: core.orderbookReferrals ?? new Map(),
+        hubProfile: core.orderbookHubProfile ?? {
+          entityId: core.entityId,
+          name: core.profile.name || core.entityId.slice(-8),
+          spreadDistribution: { makerBps: 0, takerBps: 10000, hubBps: 0, makerReferrerBps: 0, takerReferrerBps: 0 },
+          referenceTokenId: 1,
+          minTradeSize: 0n,
+          supportedPairs: [],
+        },
+      }
+    : undefined;
+
+  return {
+    entityId: core.entityId,
+    height: core.height,
+    timestamp: core.timestamp,
+    nonces: core.nonces ?? new Map(),
+    messages: core.messages ?? [],
+    proposals: core.proposals ?? new Map(),
+    config: core.config,
+    reserves: core.reserves ?? new Map(),
+    accounts: new Map(Array.from(accounts.entries()).map(([key, value]) => [key, hydrateRemoteAccountDoc(value)])),
+    lastFinalizedJHeight: core.lastFinalizedJHeight,
+    jBlockObservations: core.jBlockObservations ?? [],
+    jBlockChain: core.jBlockChain ?? [],
+    entityEncPubKey: core.entityEncPubKey,
+    entityEncPrivKey: core.entityEncPrivKey,
+    profile: core.profile,
+    htlcRoutes: core.htlcRoutes ?? new Map(),
+    htlcFeesEarned: core.htlcFeesEarned,
+    lockBook: core.lockBook ?? new Map(),
+    ...withDefinedProp('prevFrameHash', core.prevFrameHash),
+    ...withDefinedProp('deferredAccountProposals', core.deferredAccountProposals),
+    ...withDefinedProp('accountInputQueue', core.accountInputQueue),
+    ...withDefinedProp('crontabState', core.crontabState),
+    ...withDefinedProp('batchHistory', core.batchHistory),
+    ...withDefinedProp('jBatchState', core.jBatchState),
+    ...withDefinedProp('htlcNotes', core.htlcNotes),
+    ...withDefinedProp('outDebtsByToken', core.outDebtsByToken),
+    ...withDefinedProp('inDebtsByToken', core.inDebtsByToken),
+    ...withDefinedProp('orderbookExt', orderbookExt),
+    ...withDefinedProp('swapTradingPairs', core.swapTradingPairs),
+    ...withDefinedProp('pendingSwapFillRatios', core.pendingSwapFillRatios),
+    ...withDefinedProp('hubRebalanceConfig', core.hubRebalanceConfig),
+  };
+};
+
+const upsertRuntimeSnapshot = (
+  env: Env,
+  config: RuntimeAdapterConfig,
+  status: RuntimeAdapterStatus,
+): void => {
+  const runtimeId = String(env.runtimeId || '').toLowerCase();
+  if (!runtimeId) return;
+  runtimes.update((map) => {
+    map.set(runtimeId, {
+      id: runtimeId,
+      type: config.mode === 'remote' ? 'remote' : 'local',
+      label: config.mode === 'remote' ? `Remote ${config.wsUrl || 'runtime'}` : 'Embedded runtime',
+      env,
+      ...(config.seed ? { seed: config.seed } : {}),
+      ...(config.authKey ? { apiKey: config.authKey } : {}),
+      permissions: config.mode === 'remote' && !config.authKey ? 'read' : 'write',
+      status: status === 'connected' ? 'connected' : status === 'connecting' ? 'syncing' : status,
+      lastSynced: Date.now(),
+    });
+    return new Map(map);
+  });
+  activeRuntimeId.set(runtimeId);
+};
+
+const buildRemoteAdapterEnvSnapshot = async (
+  xln: XLNModule,
+  adapter: RuntimeAdapter,
+  config: RuntimeAdapterConfig,
+): Promise<Env> => {
+  const viewFrame = await adapter.read<RuntimeAdapterViewFrame>('view-frame', {
+    limit: 25,
+    accountsLimit: 25,
+    booksLimit: 25,
+  });
+  const atHeight = Math.max(0, Math.floor(Number(viewFrame.height ?? viewFrame.head.latestHeight ?? adapter.currentHeight ?? 0)));
+  const env = xln.createEmptyEnv(config.seed ?? null);
+  env.runtimeId = `radapter:${config.wsUrl || 'remote'}`;
+  env.height = atHeight;
+  env.timestamp = Date.now();
+  env.history = [];
+  env.eReplicas = new Map();
+  env.quietRuntimeLogs = true;
+
+  const active = viewFrame.activeEntity;
+  if (active) {
+    const entityId = normalizeEntityIdForView(active.core.entityId || active.summary.entityId);
+    const accounts = new Map<string, StorageAccountDoc>();
+    for (const doc of active.accounts.items) {
+      accounts.set(accountCounterpartyId(entityId, doc), doc);
+    }
+    const books = new Map<string, BookState>();
+    for (const item of active.books.items) {
+      books.set(String(item.pairId), item.book);
+    }
+    const state = hydrateRemoteEntityState({ core: active.core, accounts, books });
+    const signerId = normalizeEntityIdForView(active.core.signerId || entityId);
+    const replica: EntityReplica = {
+      entityId,
+      signerId,
+      isProposer: active.core.isProposer ?? true,
+      state,
+      hankoWitness: new Map(),
+    } as EntityReplica;
+    env.eReplicas.set(xln.formatReplicaKey(xln.createReplicaKey(entityId, signerId)), replica);
+  }
+
+  return env;
+};
+
+export const refreshRuntimeAdapterEnvironment = async (): Promise<Env | null> => {
+  if (activeRuntimeAdapterConfig?.mode !== 'remote') return get(xlnEnvironment);
+  if (remoteAdapterRefreshPromise) return remoteAdapterRefreshPromise;
+  remoteAdapterRefreshPromise = (async () => {
+    const xln = await getXLN();
+    const { runtimeAdapter } = await import('./runtimeAdapterStore');
+    const adapter = get(runtimeAdapter);
+    if (!adapter || adapter.mode !== 'remote') return get(xlnEnvironment);
+    const env = await buildRemoteAdapterEnvSnapshot(xln, adapter, activeRuntimeAdapterConfig);
+    setXlnEnvironment(env);
+    history.set(env.history || []);
+    currentHeight.set(env.height);
+    upsertRuntimeSnapshot(env, activeRuntimeAdapterConfig, adapter.status);
+    appRuntimeAdapterStatus.set(adapter.status);
+    return env;
+  })();
+  try {
+    return await remoteAdapterRefreshPromise;
+  } finally {
+    remoteAdapterRefreshPromise = null;
+  }
+};
+
 // Helper functions for common patterns (not wrappers)
 export async function initializeXLN(): Promise<Env> {
   showPendingResetNotice();
@@ -334,6 +619,38 @@ export async function initializeXLN(): Promise<Env> {
 
     // Store XLN instance separately for function access
     xlnInstance.set(xln);
+
+    const adapterConfig = resolveAppRuntimeAdapterConfig();
+    activeRuntimeAdapterConfig = adapterConfig;
+    if (adapterConfig.mode === 'remote') {
+      const { connectRuntimeAdapter } = await import('./runtimeAdapterStore');
+      const adapter = await connectRuntimeAdapter(adapterConfig);
+      unregisterEnvChange?.();
+      unregisterEnvChange = null;
+      unregisterRuntimeAdapterChange?.();
+      unregisterRuntimeAdapterChange = adapter.onChange(() => {
+        void refreshRuntimeAdapterEnvironment().catch((refreshError) => {
+          const message = refreshError instanceof Error ? refreshError.message : String(refreshError);
+          error.set(message);
+          errorLog.log(message, 'Runtime Adapter Refresh', refreshError);
+        });
+      });
+      adapter.onStatus((status) => {
+        appRuntimeAdapterStatus.set(status);
+        const currentEnv = get(xlnEnvironment);
+        if (currentEnv && activeRuntimeAdapterConfig) {
+          upsertRuntimeSnapshot(currentEnv, activeRuntimeAdapterConfig, status);
+        }
+      });
+
+      const env = await refreshRuntimeAdapterEnvironment();
+      if (!env) throw new Error('RUNTIME_ADAPTER_REMOTE_EMPTY_SNAPSHOT');
+      error.set(null);
+      isLoading.set(false);
+      isInitialized = true;
+      stopP2PPoll();
+      return env;
+    }
 
     // Shared callback for automatic reactivity (fires on every process())
     const onEnvChange = (env: Env) => {
@@ -419,6 +736,17 @@ export async function initializeXLN(): Promise<Env> {
       entityPositions.set(initialPositions);
     }
 
+    try {
+      const { connectRuntimeAdapter } = await import('./runtimeAdapterStore');
+      const adapter = await connectRuntimeAdapter(adapterConfig);
+      appRuntimeAdapterStatus.set(adapter.status);
+      appRuntimeAdapterEndpoint.set('embedded');
+      adapter.onStatus((status) => appRuntimeAdapterStatus.set(status));
+    } catch (adapterError) {
+      console.warn('[xlnStore] Embedded runtime adapter failed to connect; local env remains usable', adapterError);
+      appRuntimeAdapterStatus.set('error');
+    }
+
     error.set(null);
     isLoading.set(false);
 
@@ -464,15 +792,28 @@ export async function enqueueEntityInputs(env: Env, inputs: RoutedEntityInput[] 
   if (interesting.length > 0) {
     console.error(`[xlnStore.enqueueEntityInputs] ${JSON.stringify(interesting)}`);
   }
-  xln.enqueueRuntimeInput(env, {
+  const input: RuntimeInput = {
     runtimeTxs: [],
     entityInputs: inputs,
-  });
+  };
+  const { runtimeAdapter } = await import('./runtimeAdapterStore');
+  const adapter = get(runtimeAdapter);
+  if (adapter?.mode === 'remote') {
+    await adapter.send(input);
+    return (await refreshRuntimeAdapterEnvironment()) ?? env;
+  }
+  xln.enqueueRuntimeInput(env, input);
   return env;
 }
 
 export async function enqueueAndProcess(env: Env, input: RuntimeInput): Promise<Env> {
   const xln = await getXLN();
+  const { runtimeAdapter } = await import('./runtimeAdapterStore');
+  const adapter = get(runtimeAdapter);
+  if (adapter?.mode === 'remote') {
+    await adapter.send(input);
+    return (await refreshRuntimeAdapterEnvironment()) ?? env;
+  }
   xln.enqueueRuntimeInput(env, input);
   return env;
 }

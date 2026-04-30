@@ -11,8 +11,8 @@
   import PaymentSpotlight from '$lib/components/PaymentSpotlight.svelte';
   import { parseURLHash } from './utils/stateCodec';
   import { panelBridge } from './utils/panelBridge';
-  import { activeRuntimeId, runtimeOperations, runtimes } from '$lib/stores/runtimeStore';
-  import { getXLN, xlnInstance } from '$lib/stores/xlnStore';
+  import { activeRuntimeId, runtimes } from '$lib/stores/runtimeStore';
+  import { getXLN, xlnEnvironment, xlnInstance } from '$lib/stores/xlnStore';
 
   let commandPaletteOpen = false;
 
@@ -55,9 +55,7 @@
   const localTimeIndex = writable<number>(-1);
   const localIsLive = writable<boolean>(true);
 
-  const unsubLocalEnvSync = localEnvStore.subscribe((env) => {
-    if (env) runtimeOperations.updateLocalEnv(env);
-  });
+  const unsubLocalEnvSync = () => undefined;
 
   const LOG_TOAST_COOLDOWN_MS = 12000;
   const lastSeenFrameLogIdByRuntime = new Map<string, number>();
@@ -164,6 +162,7 @@
   let unsubActiveRuntime: (() => void) | null = null;
   let envChangeRegisteredFor: string | null = null;
   let unregisterEnvChange: (() => void) | null = null;
+  let unsubGlobalEnv: (() => void) | null = null;
   let dockRootPromise: Promise<typeof import('./DockRoot.svelte')> | null = null;
 
   $: if (typeof document !== 'undefined') {
@@ -195,6 +194,9 @@
         if (runtimeId) {
           const runtime = get(runtimes).get(runtimeId);
           if (runtime?.env) env = runtime.env;
+        }
+        if (!env) {
+          env = get(xlnEnvironment);
         }
       }
 
@@ -239,6 +241,18 @@
         localTimeIndex.set(-1);
         registerEnvChanges(runtime.env);
       });
+
+      unsubGlobalEnv = xlnEnvironment.subscribe((nextEnv) => {
+        if (!nextEnv) return;
+        const runtimeId = get(activeRuntimeId);
+        const activeRuntime = runtimeId ? get(runtimes).get(runtimeId) : null;
+        if (activeRuntime?.env && activeRuntime.env !== nextEnv) return;
+        localEnvStore.set(nextEnv);
+        localHistoryStore.set(nextEnv.history || []);
+        localIsLive.set(true);
+        localTimeIndex.set(-1);
+        registerEnvChanges(nextEnv);
+      });
     } catch (err) {
       console.error('[View] Failed to initialize XLN:', err);
     }
@@ -254,6 +268,7 @@
     unsubLocalEnvSync();
     unsubRuntimeErrorToasts();
     unsubActiveRuntime?.();
+    unsubGlobalEnv?.();
     lastSeenFrameLogIdByRuntime.clear();
     lastToastAtByKey.clear();
     lastPaymentSpotlightAtByKey.clear();
