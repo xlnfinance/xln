@@ -17,6 +17,25 @@ export XLN_JURISDICTIONS_PATH="${XLN_JURISDICTIONS_PATH:-./db/dev/jurisdictions.
 
 cd "$REPO_ROOT"
 
+node <<NODE
+const crypto = require('crypto');
+const web = 'http://127.0.0.1:${WEB_PORT}/app';
+const hubs = [
+  ['H1', 'xln-e2e-h1', ${API_PORT} + 10],
+  ['H2', 'xln-e2e-h2', ${API_PORT} + 11],
+  ['H3', 'xln-e2e-h3', ${API_PORT} + 12],
+  ['MM', 'xln-mesh-mm', ${API_PORT} + 13],
+];
+console.log('');
+console.log('XLN remote runtime adapter URLs (read-only inspect):');
+for (const [name, seed, port] of hubs) {
+  const key = crypto.createHmac('sha256', seed).update('xln-radapter-v1:inspect').digest('hex');
+  const url = web + '?runtime=remote&ws=' + encodeURIComponent('ws://127.0.0.1:' + port + '/rpc') + '&key=' + encodeURIComponent(key);
+  console.log('  ' + name + ': ' + url);
+}
+console.log('');
+NODE
+
 exec concurrently \
   --kill-others-on-fail \
   --names 'ANVIL,MESH,RUNTIME,VITE' \

@@ -1,4 +1,5 @@
 import { expect, test } from 'bun:test';
+import { createHmac } from 'crypto';
 
 import {
   deriveRuntimeAdapterAuthKey,
@@ -10,6 +11,8 @@ import { decodeRuntimeAdapterMessage, encodeRuntimeAdapterMessage } from '../rad
 import { resolveRuntimeAdapterRead } from '../radapter/resolve';
 import { broadcastRuntimeAdapterTick, handleRuntimeAdapterMessage } from '../radapter/server';
 import type { EntityReplica, Env } from '../types';
+import type { BookState } from '../orderbook';
+import { DEFAULT_SPREAD_DISTRIBUTION, type OrderbookExtState } from '../orderbook/types';
 
 const entityId = `0x${'aa'.repeat(32)}`;
 const counterpartyId = `0x${'bb'.repeat(32)}`;
@@ -86,6 +89,41 @@ const makeEnv = (): Env => ({
     } as EntityReplica],
   ]),
 }) as Env;
+
+const makeBook = (price: bigint): BookState => ({
+  params: { bucketWidthTicks: 1n, maxOrders: 100, stpPolicy: 0 },
+  orders: new Map(),
+  bidBuckets: new Map([[price.toString(), { bucketId: price, pricesAsc: [price], levels: new Map() }]]),
+  askBuckets: new Map([[(price + 1n).toString(), { bucketId: price + 1n, pricesAsc: [price + 1n], levels: new Map() }]]),
+  bidBucketIdsDesc: [price],
+  askBucketIdsAsc: [price + 1n],
+  nextSeq: 1,
+  tradeCount: 0,
+  tradeQtySum: 0n,
+  eventHash: 0n,
+});
+
+const makeOrderbookExt = (books: Map<string, BookState>): OrderbookExtState => ({
+  books,
+  orderPairs: new Map(),
+  referrals: new Map(),
+  hubProfile: {
+    entityId,
+    name: 'Adapter Test Hub',
+    spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
+    referenceTokenId: 1,
+    minTradeSize: 0n,
+    supportedPairs: Array.from(books.keys()),
+  },
+});
+
+const capabilityTokenUnchecked = (seed: string, role: 'read' | 'full', expiresAtMs: number): string => {
+  const level = role === 'read' ? 'inspect' : 'admin';
+  const signature = createHmac('sha256', seed)
+    .update(`xln-radapter-v1:cap:${level}:${expiresAtMs}`)
+    .digest('hex');
+  return `xlnra1.${role}.${expiresAtMs}.${signature}`;
+};
 
 test('runtime adapter auth keys are scoped by level', () => {
   const inspect = deriveRuntimeAdapterAuthKey('seed', 'inspect');
@@ -175,6 +213,47 @@ test('runtime adapter view frame defaults to 10 accounts and cursor pagination',
     `0x${'0c'.padStart(64, '0')}`,
   ]);
   expect(second.nextCursor).toBe(null);
+});
+
+test('runtime adapter account pagination avoids full sort materialization', async () => {
+  const env = makeEnv();
+  const replica = Array.from(env.eReplicas.values())[0]!;
+  const base = replica.state.accounts.get(counterpartyId)!;
+  replica.state.accounts.clear();
+  for (let i = 999; i >= 0; i -= 1) {
+    const id = `0x${(i + 1).toString(16).padStart(64, '0')}`;
+    replica.state.accounts.set(id, {
+      ...base,
+      rightEntity: id,
+      proofHeader: { ...base.proofHeader, toEntity: id },
+    });
+  }
+
+  const first = await resolveRuntimeAdapterRead<{
+    items: Array<{ rightEntity: string }>;
+    nextCursor: string | null;
+  }>({ env }, `entity/${entityId}/accounts`, { limit: 3 });
+  expect(first.items.map((item) => item.rightEntity)).toEqual([
+    `0x${'01'.padStart(64, '0')}`,
+    `0x${'02'.padStart(64, '0')}`,
+    `0x${'03'.padStart(64, '0')}`,
+  ]);
+  expect(first.nextCursor).toBe(`0x${'03'.padStart(64, '0')}`);
+});
+
+test('runtime adapter books path is bounded and paged', async () => {
+  const env = makeEnv();
+  const replica = Array.from(env.eReplicas.values())[0]!;
+  replica.state.orderbookExt = makeOrderbookExt(new Map(
+    Array.from({ length: 12 }, (_, index) => [`1/${index + 1}`, makeBook(BigInt(100 + index))]),
+  ));
+
+  const books = await resolveRuntimeAdapterRead<{
+    items: Array<{ pairId: string }>;
+    nextCursor: string | null;
+  }>({ env }, `entity/${entityId}/books`);
+  expect(books.items).toHaveLength(10);
+  expect(books.nextCursor).toBeTruthy();
 });
 
 test('runtime adapter binary codec preserves structured payloads', () => {
@@ -278,4 +357,59 @@ test('runtime adapter ticks only go to authenticated clients', async () => {
   const tick = decodeRuntimeAdapterMessage<{ op: string; height: number }>(inspectMessages[0]);
   expect(tick.op).toBe('tick');
   expect(tick.height).toBe(7);
+});
+
+test('runtime adapter drops expired clients before broadcasting ticks', async () => {
+  const env = makeEnv();
+  const messages: unknown[] = [];
+  const socket = { send: (message: unknown) => { messages.push(message); } };
+  const expiredToken = capabilityTokenUnchecked('seed', 'read', Date.now() - 1);
+
+  await handleRuntimeAdapterMessage(socket, { v: 1, id: 'auth-expired', op: 'auth', key: expiredToken }, env, {
+    enqueueRuntimeInput: () => {},
+  });
+  const denied = decodeRuntimeAdapterMessage<{ ok: false; error: { code: string } }>(messages.pop());
+  expect(denied.error.code).toBe('E_UNAUTHORIZED');
+
+  const liveToken = deriveRuntimeAdapterCapabilityToken('seed', 'read', Date.now() + 5);
+  await handleRuntimeAdapterMessage(socket, { v: 1, id: 'auth-live', op: 'auth', key: liveToken }, env, {
+    enqueueRuntimeInput: () => {},
+  });
+  messages.length = 0;
+  await new Promise((resolve) => setTimeout(resolve, 10));
+  broadcastRuntimeAdapterTick(env);
+  expect(messages).toHaveLength(0);
+});
+
+test('runtime adapter caps outgoing responses and closes oversized sockets', async () => {
+  const previous = process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'];
+  process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'] = '512';
+  const messages: unknown[] = [];
+  let closeCode: number | undefined;
+  const socket = {
+    send: (message: unknown) => { messages.push(message); },
+    close: (code?: number) => { closeCode = code; },
+  };
+  const env = makeEnv();
+  const replica = Array.from(env.eReplicas.values())[0]!;
+  replica.state.profile = { ...replica.state.profile, bio: 'x'.repeat(4_000) };
+  try {
+    await handleRuntimeAdapterMessage(socket, { v: 1, id: 'auth', op: 'auth', key: deriveRuntimeAdapterAuthKey('seed', 'inspect') }, env, {
+      enqueueRuntimeInput: () => {},
+    });
+    messages.length = 0;
+    await handleRuntimeAdapterMessage(socket, { v: 1, id: 'big-read', op: 'read', path: `entity/${entityId}` }, env, {
+      enqueueRuntimeInput: () => {},
+    });
+    const response = decodeRuntimeAdapterMessage<{ ok: false; error: { code: string } }>(messages[0]);
+    expect(response.ok).toBe(false);
+    expect(response.error.code).toBe('E_INTERNAL');
+    expect(closeCode).toBe(1009);
+  } finally {
+    if (previous === undefined) {
+      delete process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'];
+    } else {
+      process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'] = previous;
+    }
+  }
 });

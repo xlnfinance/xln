@@ -16,6 +16,11 @@
     nextCursor: string | null;
   };
 
+  type BookPage = {
+    items: unknown[];
+    nextCursor: string | null;
+  };
+
   let mode: 'embedded' | 'remote' = 'embedded';
   let wsUrl = '';
   let authKey = '';
@@ -24,7 +29,7 @@
   let entities: RuntimeAdapterEntitySummary[] = [];
   let entity: StorageEntityCoreDoc | null = null;
   let accounts: AccountPage | null = null;
-  let books: unknown[] = [];
+  let books: BookPage | null = null;
   let loading = false;
   let error: string | null = null;
   let unsubscribeHeight: (() => void) | null = null;
@@ -54,11 +59,11 @@
       if (selectedEntityId) {
         entity = await runtimeAdapterRead<StorageEntityCoreDoc>(`entity/${selectedEntityId}`);
         accounts = await runtimeAdapterRead<AccountPage>(`entity/${selectedEntityId}/accounts`, { limit: 100 });
-        books = await runtimeAdapterRead<unknown[]>(`entity/${selectedEntityId}/books`);
+        books = await runtimeAdapterRead<BookPage>(`entity/${selectedEntityId}/books`);
       } else {
         entity = null;
         accounts = null;
-        books = [];
+        books = null;
       }
     } catch (err) {
       error = errorMessage(err);

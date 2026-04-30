@@ -3779,6 +3779,9 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
             details: { wsType: data.type, len: byteLength, error: (error as Error).message },
           });
           ws.send(safeStringify({ type: 'error', error: data.type === 'rpc' ? 'Invalid runtime adapter message' : 'Invalid JSON' }));
+          if (data.type === 'rpc') {
+            ws.close((error as Error).message.includes('RADAPTER_MESSAGE_TOO_LARGE') ? 1009 : 1003, 'Invalid runtime adapter message');
+          }
         }
       },
 
