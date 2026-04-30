@@ -32,6 +32,25 @@ export type RuntimeAdapterAccountPage = {
   nextCursor: string | null;
 };
 
+export type RuntimeAdapterBookPage = {
+  items: Array<{ pairId: string; book: BookState }>;
+};
+
+export type RuntimeAdapterViewEntityFrame = {
+  summary: RuntimeAdapterEntitySummary;
+  core: StorageEntityCoreDoc;
+  accounts: RuntimeAdapterAccountPage;
+  books: RuntimeAdapterBookPage;
+};
+
+export type RuntimeAdapterViewFrame = {
+  head: StorageHead;
+  height: number;
+  entities: RuntimeAdapterEntitySummary[];
+  activeEntityId: string | null;
+  activeEntity: RuntimeAdapterViewEntityFrame | null;
+};
+
 const normalizePath = (path: string): string[] => {
   const parts = String(path || '')
     .trim()
@@ -44,6 +63,12 @@ const normalizePath = (path: string): string[] => {
 
 const readLimit = (query?: RuntimeAdapterReadQuery): number => {
   const raw = Number(query?.limit ?? 50);
+  if (!Number.isFinite(raw)) throw new RuntimeAdapterError('E_BAD_QUERY', 'limit must be finite');
+  return Math.max(1, Math.min(500, Math.floor(raw)));
+};
+
+const readBoundedLimit = (rawValue: unknown, fallback: number): number => {
+  const raw = Number(rawValue ?? fallback);
   if (!Number.isFinite(raw)) throw new RuntimeAdapterError('E_BAD_QUERY', 'limit must be finite');
   return Math.max(1, Math.min(500, Math.floor(raw)));
 };
@@ -179,6 +204,58 @@ const projectBooks = (state: EntityState): BookState[] => {
     .map(([, value]) => value);
 };
 
+const projectBookPage = (state: EntityState, limit = 500): RuntimeAdapterBookPage => ({
+  items: Array.from(state.orderbookExt?.books?.entries?.() ?? [])
+    .sort(([left], [right]) => String(left).localeCompare(String(right)))
+    .slice(0, limit)
+    .map(([pairId, book]) => ({ pairId: String(pairId), book })),
+});
+
+const projectViewFrame = async (
+  ctx: RuntimeAdapterResolveContext,
+  query?: RuntimeAdapterReadQuery,
+): Promise<RuntimeAdapterViewFrame> => {
+  const persistedHead = ctx.readHead ? await ctx.readHead() : null;
+  const head = persistedHead ?? headFromEnv(ctx.env);
+  const requestedHeight = readAtHeight(query);
+  const height = requestedHeight ?? Math.max(0, Math.floor(Number(head.latestHeight ?? ctx.env.height ?? 0)));
+  const heightQuery = height > 0 ? { ...query, atHeight: height } : query;
+  const entities = await listEntitySummaries(ctx, heightQuery);
+  const requestedEntityId = normalizeEntityId(String(query?.entityId || ''));
+  const activeEntityId = requestedEntityId || entities[0]?.entityId || null;
+  if (!activeEntityId) {
+    return { head, height, entities, activeEntityId: null, activeEntity: null };
+  }
+
+  const { state, replica } = await resolveEntityState(ctx, activeEntityId, heightQuery);
+  const summary = entities.find((entity) => normalizeEntityId(entity.entityId) === activeEntityId) ?? {
+    entityId: activeEntityId,
+    label: labelForState(state),
+    height: Math.max(0, Math.floor(Number(state.height ?? height))),
+  };
+  const accountQuery: RuntimeAdapterReadQuery = {
+    ...heightQuery,
+    limit: readBoundedLimit(query?.accountsLimit, query?.limit ?? 10),
+  };
+  const accountsCursor = query?.accountsCursor ?? query?.cursor;
+  if (accountsCursor) accountQuery.cursor = accountsCursor;
+  const accounts = projectAccountsPage(activeEntityId, state, accountQuery);
+  const books = projectBookPage(state, readBoundedLimit(query?.booksLimit, query?.limit ?? 25));
+
+  return {
+    head,
+    height,
+    entities,
+    activeEntityId,
+    activeEntity: {
+      summary,
+      core: projectEntityCoreDoc(state, replica),
+      accounts,
+      books,
+    },
+  };
+};
+
 export const resolveRuntimeAdapterRead = async <T = unknown>(
   ctx: RuntimeAdapterResolveContext,
   path: string,
@@ -193,6 +270,10 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
 
   if (parts.length === 1 && parts[0] === 'entities') {
     return await listEntitySummaries(ctx, query) as T;
+  }
+
+  if (parts.length === 1 && parts[0] === 'view-frame') {
+    return await projectViewFrame(ctx, query) as T;
   }
 
   if (parts[0] === 'entity' && parts.length >= 2) {
@@ -217,6 +298,10 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
 
     if (parts.length === 3 && parts[2] === 'books') {
       return projectBooks(state) as T;
+    }
+
+    if (parts.length === 3 && parts[2] === 'book-docs') {
+      return projectBookPage(state, readBoundedLimit(query?.booksLimit, query?.limit ?? 500)) as T;
     }
   }
 
