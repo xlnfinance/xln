@@ -8,6 +8,7 @@ import {
   createEmptyEnv,
   enqueueRuntimeInput,
   getFrameDb,
+  getRuntimeStorageDb,
   getPersistedLatestHeight,
   listPersistedCheckpointHeights,
   loadEnvFromDB,
@@ -18,7 +19,9 @@ import {
   verifyRuntimeChain,
 } from '../runtime.ts';
 import { markStorageEntityDirty } from '../env-events';
-import { readFrameDbRuntimeActivity } from '../storage';
+import { readFrameDbRuntimeActivity, readStorageHead, verifyStorageTailIntegrity } from '../storage';
+import { encodeBuffer } from '../storage/codec';
+import { KEY_HEAD, keySnapshotEntity } from '../storage/keys';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { generateLazyEntityId } from '../entity-factory';
 
@@ -374,6 +377,118 @@ describe('storage frame journal retention', () => {
 
     const afterCrashVerify = await verifyRuntimeChain(runtimeId, seed, { fromSnapshotHeight: replayFromHeight });
     expect(afterCrashVerify.ok).toBe(true);
+  });
+
+  test('rejects a torn snapshot head that points at a missing manifest', async () => {
+    const seed = `storage-crash-missing-snapshot-manifest ${Date.now()} alpha beta gamma`;
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+    const namespacePath = join(dbRoot, runtimeId);
+
+    rmSync(namespacePath, { recursive: true, force: true });
+    rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-events`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
+    mkdirSync(dbRoot, { recursive: true });
+
+    const env = createEmptyEnv(seed);
+    env.runtimeId = runtimeId;
+    env.dbNamespace = runtimeId;
+    env.height = 1;
+    env.timestamp = 1_000;
+    env.quietRuntimeLogs = true;
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+
+    const db = getRuntimeStorageDb(env);
+    const head = await readStorageHead(db);
+    if (!head) throw new Error('TEST_HEAD_MISSING');
+    const batch = db.batch();
+    batch.put(KEY_HEAD, encodeBuffer({
+      ...head,
+      latestSnapshotHeight: 1,
+      latestMaterializedHeight: 1,
+    }));
+    await batch.write({ sync: true });
+
+    await expect(verifyStorageTailIntegrity(db)).rejects.toThrow('STORAGE_VERIFY_SNAPSHOT_MANIFEST_MISSING');
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+  });
+
+  test('rejects a snapshot manifest whose copied docs were torn', async () => {
+    const seed = `storage-crash-torn-snapshot-docs ${Date.now()} alpha beta gamma`;
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+    const namespacePath = join(dbRoot, runtimeId);
+
+    rmSync(namespacePath, { recursive: true, force: true });
+    rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-events`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
+    mkdirSync(dbRoot, { recursive: true });
+
+    const env = createEmptyEnv(seed);
+    env.runtimeId = runtimeId;
+    env.dbNamespace = runtimeId;
+    env.quietRuntimeLogs = true;
+    env.runtimeConfig = {
+      ...(env.runtimeConfig || {}),
+      storage: {
+        ...(env.runtimeConfig?.storage || {}),
+        snapshotPeriodFrames: 1,
+        retainSnapshots: 2,
+      },
+    };
+
+    const signer = deriveSignerAddressSync(seed, '1');
+    registerSignerKey(signer, deriveSignerKeySync(seed, '1'));
+    registerSignerKey(signer.slice(-4).toLowerCase(), deriveSignerKeySync(seed, '1'));
+    const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
+    const jurisdiction = {
+      name: 'storage-crash-torn-snapshot-docs-test',
+      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
+      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      chainId: 31337,
+    };
+
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importReplica',
+        entityId,
+        signerId: signer,
+        data: {
+          isProposer: true,
+          config: {
+            mode: 'proposer-based',
+            threshold: 1n,
+            validators: [signer],
+            shares: { [signer]: 1n },
+            jurisdiction,
+          },
+        },
+      }],
+      entityInputs: [],
+    });
+    await processRuntime(env, []);
+
+    const db = getRuntimeStorageDb(env);
+    const head = await readStorageHead(db);
+    const snapshotHeight = Number(head?.latestSnapshotHeight ?? 0);
+    expect(snapshotHeight).toBeGreaterThan(0);
+
+    const batch = db.batch();
+    batch.del?.(keySnapshotEntity(snapshotHeight, entityId));
+    await batch.write({ sync: true });
+
+    await expect(verifyStorageTailIntegrity(db)).rejects.toThrow('STORAGE_VERIFY_SNAPSHOT_DOC_COUNT_MISMATCH');
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
   });
 
   test('rebuilds materialization overlay after restart between checkpoints', async () => {
