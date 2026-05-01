@@ -116,6 +116,23 @@ type MerkleNode = {
   proofValue?: string;
 };
 
+type MutableLeafNode = {
+  kind: 'leaf';
+  key: Uint8Array;
+  path: number[];
+  value: Uint8Array;
+  hash?: string;
+};
+
+type MutableBranchNode = {
+  kind: 'branch';
+  path: number[];
+  children: Map<number, MutableMerkleNode>;
+  hash?: string;
+};
+
+type MutableMerkleNode = MutableLeafNode | MutableBranchNode;
+
 const commonPrefixLength = (items: MerkleItem[], offset: number, depth: number): number => {
   if (items.length <= 1 || offset >= depth) return 0;
   let length = 0;
@@ -129,6 +146,255 @@ const commonPrefixLength = (items: MerkleItem[], offset: number, depth: number):
   }
   return length;
 };
+
+const commonPathPrefixLength = (left: number[], right: number[]): number => {
+  const max = Math.min(left.length, right.length);
+  let length = 0;
+  while (length < max && left[length] === right[length]) length += 1;
+  return length;
+};
+
+const pathHasPrefix = (path: number[], prefix: number[]): boolean => {
+  if (prefix.length > path.length) return false;
+  for (let index = 0; index < prefix.length; index += 1) {
+    if (path[index] !== prefix[index]) return false;
+  }
+  return true;
+};
+
+const mutableLeaf = (key: Uint8Array, value: Uint8Array, radix: RadixMerkleRadix): MutableLeafNode => ({
+  kind: 'leaf',
+  key: Uint8Array.from(key),
+  path: pathSlots(key, radix),
+  value: Uint8Array.from(value),
+});
+
+const invalidateNode = (node: MutableMerkleNode): void => {
+  delete node.hash;
+};
+
+const mutableNodeHash = (node: MutableMerkleNode, radix: RadixMerkleRadix): string => {
+  if (node.hash) return node.hash;
+  if (node.kind === 'leaf') {
+    node.hash = leafHash({ key: node.key, value: node.value });
+    return node.hash;
+  }
+  node.hash = branchHash(
+    radix,
+    Array.from(node.children.entries()).map(([slot, child]) => [slot, mutableEdgeHash(node.path, child, radix)]),
+  );
+  return node.hash;
+};
+
+const mutableEdgeHash = (
+  parentPath: number[],
+  child: MutableMerkleNode,
+  radix: RadixMerkleRadix,
+): string => {
+  const childHash = mutableNodeHash(child, radix);
+  if (child.kind === 'leaf') return childHash;
+  const segment = child.path.slice(parentPath.length + 1);
+  return segment.length > 0 ? extensionHash(radix, segment, childHash) : childHash;
+};
+
+const mutableRootHash = (root: MutableMerkleNode | null, radix: RadixMerkleRadix): string => {
+  if (!root) return EMPTY_ROOT;
+  const hash = mutableNodeHash(root, radix);
+  return root.kind === 'branch' && root.path.length > 0
+    ? extensionHash(radix, root.path, hash)
+    : hash;
+};
+
+const insertMutableNode = (
+  node: MutableMerkleNode | null,
+  leaf: MutableLeafNode,
+): { node: MutableMerkleNode; touchedNodes: number } => {
+  if (!node) return { node: leaf, touchedNodes: 1 };
+  if (node.kind === 'leaf') {
+    if (node.path.length === leaf.path.length && commonPathPrefixLength(node.path, leaf.path) === node.path.length) {
+      node.value = Uint8Array.from(leaf.value);
+      invalidateNode(node);
+      return { node, touchedNodes: 1 };
+    }
+    const shared = commonPathPrefixLength(node.path, leaf.path);
+    const branch: MutableBranchNode = {
+      kind: 'branch',
+      path: node.path.slice(0, shared),
+      children: new Map<number, MutableMerkleNode>([
+        [node.path[shared] ?? 0, node],
+        [leaf.path[shared] ?? 0, leaf],
+      ]),
+    };
+    return { node: branch, touchedNodes: 2 };
+  }
+
+  const shared = commonPathPrefixLength(node.path, leaf.path);
+  if (shared < node.path.length) {
+    const branch: MutableBranchNode = {
+      kind: 'branch',
+      path: node.path.slice(0, shared),
+      children: new Map<number, MutableMerkleNode>([
+        [node.path[shared] ?? 0, node],
+        [leaf.path[shared] ?? 0, leaf],
+      ]),
+    };
+    return { node: branch, touchedNodes: 2 };
+  }
+
+  const slot = leaf.path[node.path.length] ?? 0;
+  const child = node.children.get(slot) ?? null;
+  const inserted = insertMutableNode(child, leaf);
+  node.children.set(slot, inserted.node);
+  invalidateNode(node);
+  return { node, touchedNodes: inserted.touchedNodes + 1 };
+};
+
+const collapseMutableBranch = (node: MutableBranchNode): MutableMerkleNode | null => {
+  if (node.children.size === 0) return null;
+  if (node.children.size === 1) return Array.from(node.children.values())[0] ?? null;
+  return node;
+};
+
+const deleteMutableNode = (
+  node: MutableMerkleNode | null,
+  path: number[],
+): { node: MutableMerkleNode | null; deleted: boolean; touchedNodes: number } => {
+  if (!node) return { node: null, deleted: false, touchedNodes: 0 };
+  if (node.kind === 'leaf') {
+    const matches = node.path.length === path.length && commonPathPrefixLength(node.path, path) === path.length;
+    return { node: matches ? null : node, deleted: matches, touchedNodes: matches ? 1 : 0 };
+  }
+  if (!pathHasPrefix(path, node.path)) return { node, deleted: false, touchedNodes: 0 };
+  const slot = path[node.path.length] ?? 0;
+  const child = node.children.get(slot) ?? null;
+  const result = deleteMutableNode(child, path);
+  if (!result.deleted) return { node, deleted: false, touchedNodes: result.touchedNodes };
+  if (result.node) node.children.set(slot, result.node);
+  else node.children.delete(slot);
+  invalidateNode(node);
+  return { node: collapseMutableBranch(node), deleted: true, touchedNodes: result.touchedNodes + 1 };
+};
+
+const collectMutableLeaves = (node: MutableMerkleNode | null, out: RadixMerkleLeaf[]): void => {
+  if (!node) return;
+  if (node.kind === 'leaf') {
+    out.push({ key: Uint8Array.from(node.key), value: Uint8Array.from(node.value) });
+    return;
+  }
+  for (const child of node.children.values()) collectMutableLeaves(child, out);
+};
+
+const proveMutableNode = (
+  node: MutableMerkleNode,
+  keyPath: number[],
+  radix: RadixMerkleRadix,
+): { value: string; steps: RadixMerkleProofStep[] } | null => {
+  if (node.kind === 'leaf') {
+    if (node.path.length !== keyPath.length || commonPathPrefixLength(node.path, keyPath) !== keyPath.length) return null;
+    return { value: bytesToHex(node.value), steps: [] };
+  }
+  if (!pathHasPrefix(keyPath, node.path)) return null;
+  const slot = keyPath[node.path.length] ?? 0;
+  const child = node.children.get(slot);
+  if (!child) return null;
+  const childProof = proveMutableNode(child, keyPath, radix);
+  if (!childProof) return null;
+  const steps = [...childProof.steps];
+  if (child.kind === 'branch') {
+    const segment = child.path.slice(node.path.length + 1);
+    if (segment.length > 0) steps.push({ kind: 'extension', path: segment });
+  }
+  steps.push({
+    kind: 'branch',
+    slot,
+    siblings: Array.from(node.children.entries())
+      .filter(([candidateSlot]) => candidateSlot !== slot)
+      .map(([candidateSlot, sibling]) => [candidateSlot, mutableEdgeHash(node.path, sibling, radix)] as [number, string]),
+  });
+  return { value: childProof.value, steps };
+};
+
+export class MutableRadixMerkleTree {
+  readonly radix: RadixMerkleRadix;
+  private root: MutableMerkleNode | null = null;
+  private leaves = 0;
+  private lastTouched = 0;
+
+  constructor(options?: { radix?: RadixMerkleRadix; leaves?: RadixMerkleLeaf[] }) {
+    this.radix = options?.radix === 256 ? 256 : 16;
+    for (const leaf of options?.leaves ?? []) {
+      this.put(leaf.key, leaf.value);
+    }
+  }
+
+  get leafCount(): number {
+    return this.leaves;
+  }
+
+  get lastTouchedNodes(): number {
+    return this.lastTouched;
+  }
+
+  put(key: Uint8Array, value: Uint8Array): void {
+    const before = this.prove(key);
+    const result = insertMutableNode(this.root, mutableLeaf(key, value, this.radix));
+    this.root = result.node;
+    this.lastTouched = result.touchedNodes;
+    if (!before) this.leaves += 1;
+  }
+
+  del(key: Uint8Array): boolean {
+    const result = deleteMutableNode(this.root, pathSlots(key, this.radix));
+    this.root = result.node;
+    this.lastTouched = result.touchedNodes;
+    if (result.deleted) this.leaves = Math.max(0, this.leaves - 1);
+    return result.deleted;
+  }
+
+  getRoot(): string {
+    return mutableRootHash(this.root, this.radix);
+  }
+
+  toLeaves(): RadixMerkleLeaf[] {
+    const leaves: RadixMerkleLeaf[] = [];
+    collectMutableLeaves(this.root, leaves);
+    return leaves;
+  }
+
+  prove(key: Uint8Array): RadixMerkleProof | null {
+    if (!this.root) return null;
+    const keyPath = pathSlots(key, this.radix);
+    const proof = proveMutableNode(this.root, keyPath, this.radix);
+    if (!proof) return null;
+    const steps = [...proof.steps];
+    if (this.root.kind === 'branch' && this.root.path.length > 0) {
+      steps.push({ kind: 'extension', path: this.root.path });
+    }
+    return {
+      radix: this.radix,
+      key: bytesToHex(key),
+      value: proof.value,
+      root: this.getRoot(),
+      steps,
+    };
+  }
+
+  verify(mode: 'none' | 'shallow' | 'deep' = 'shallow'): void {
+    if (mode === 'none') return;
+    const expected = buildRadixMerkle(this.toLeaves(), { radix: this.radix }).root;
+    if (expected !== this.getRoot()) {
+      throw new Error(`RADIX_MERKLE_MUTABLE_ROOT_MISMATCH: actual=${this.getRoot()} expected=${expected}`);
+    }
+    if (mode === 'deep') {
+      for (const leaf of this.toLeaves()) {
+        const proof = this.prove(leaf.key);
+        if (!proof || !verifyRadixMerkleProof(proof)) {
+          throw new Error(`RADIX_MERKLE_MUTABLE_PROOF_MISMATCH: key=${bytesToHex(leaf.key)}`);
+        }
+      }
+    }
+  }
+}
 
 export const buildRadixMerkle = (
   leaves: RadixMerkleLeaf[],
