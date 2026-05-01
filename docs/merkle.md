@@ -1,6 +1,6 @@
 # XLN Merkle Storage Plan
 
-Status: implementation plan for audit and mainnet hardening.
+Status: implementation plan plus current implementation notes for audit and mainnet hardening.
 
 Date: 2026-05-01.
 
@@ -15,12 +15,14 @@ The target design is an incremental, persisted, compressed Merkle collection eng
 - just-in-time traversal stack for each dirty key;
 - `.hash` as a cache on branch/leaf objects, never as encoded business state;
 - persisted internal branch nodes keyed by entity/namespace/path;
-- shared implementation for accounts, trading pairs/books, lock maps, and future large collections;
+- a shared implementation that can later back accounts, trading pairs/books, lock maps, and future large collections;
 - optional recovery/audit verification of doc hashes and branch hashes.
 
 This document intentionally does not introduce a `v2` hash mode. The goal is to fix the current storage shape and implementation while preserving the existing high-level storage contract where possible.
 
 During the migration, `canonicalStateHash` is the safety anchor for replay verification. The storage Merkle root is still recorded, but any replacement of the entity root internals must be deployed with canonical replay checks enabled until the new root is verified across fresh boot, restore, and epoch rotation. Once the branch-backed root has been proven deterministic, `stateHash` returns to being the primary storage commitment.
+
+Current implementation note: mainline storage now persists root/branch/leaf side records and stores `rootKind` plus `rootPath` in the root document. A cold materialization can update a touched sparse entity through a just-in-time branch stack loaded from `KEY_MERKLE_BRANCH` / `KEY_MERKLE_LEAF`, without rebuilding the million-account cell map from live account docs. This is intentionally an integrity root. It is not a proof API.
 
 ## Current State
 
@@ -43,7 +45,7 @@ The current storage system has these durable pieces:
 
 The current Merkle builder is compressed and deterministic. It deduplicates keys, compresses shared prefixes, and splits branches only at divergence.
 
-However, `prepareStorageStateHashes()` still works conceptually like this:
+Before the branch-backed update landed, `prepareStorageStateHashes()` worked conceptually like this:
 
 1. Load or build a `StorageEntityHashDoc`.
 2. Convert `cells[]` into a map.
@@ -51,7 +53,11 @@ However, `prepareStorageStateHashes()` still works conceptually like this:
 4. Rebuild the entity root from all cells.
 5. Persist the updated `StorageEntityHashDoc` as one value.
 
-That means the hot path still has O(entity-cell-count) behavior on materialization for a large entity.
+That shape is still the legacy fallback for old DBs that do not have branch
+root metadata. Current sparse docs use the persisted branch stack instead:
+read root doc, descend only the touched path, update/collapse the affected
+nodes, and write the dirty branch/leaf records in the same materialization
+batch.
 
 ## Why This Is Not Enough For 1M Accounts
 
@@ -63,7 +69,9 @@ For a hub entity with one million accounts:
 - deep verification should be possible, but not required on the hot path;
 - account, book, lock, and route collections need the same scalable primitive.
 
-The current design has the right leaf truth (`KEY_LIVE_DOC_HASH`) but the wrong large-map root shape (`StorageEntityHashDoc.cells[]`).
+The current design keeps `KEY_LIVE_DOC_HASH` as leaf truth. For small entities
+`StorageEntityHashDoc.cells[]` may still be persisted for simple recovery; for
+large entities it is sparse and no longer the primary large-map root shape.
 
 ## Target Mental Model
 
@@ -134,6 +142,8 @@ type MerkleRootDoc = {
   entityId: string;
   namespace: MerkleNamespace;
   rootHash: string;
+  rootKind: 'empty' | 'branch' | 'leaf';
+  rootPath: number[];
   leafCount: number;
 };
 ```
@@ -226,7 +236,7 @@ review and not hidden inside the main hot-path storage primitive.
 
 ## Entity Root Shape
 
-Entity root should not be one flat collection of all individual accounts/books/locks forever. It should be a small root over coarse namespace roots:
+Longer-term, if account internals and lock maps become separate persisted docs, the entity root should be able to become a small root over coarse namespace roots:
 
 ```text
 EntityRoot
@@ -240,7 +250,7 @@ EntityRoot
 
 This makes the entity root cheap to update after a collection root changes.
 
-Recommended first namespaces:
+Possible future namespaces:
 
 1. `entity-core`
 2. `accounts`
@@ -258,7 +268,7 @@ AccountRoot(counterpartyId)
   pendingWithdrawalsRoot
 ```
 
-Do not implement every possible nested tree at once. The shared interface must allow it later.
+Do not implement every possible nested tree at once. For the current integrity-only storage root, one `runtime-roots` collection over existing storage doc refs is acceptable as long as touched updates are path-local and do not scan all accounts. The shared interface must allow namespace split later.
 
 ## Flat Mode And Auto-Promotion
 

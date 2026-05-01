@@ -28,7 +28,7 @@ import type {
   RuntimeOverlayRecord,
   SwapOffer,
 } from '../types';
-import type { RadixMerkleRadix } from './merkle';
+import type { RadixMerkleRadix, RadixMerkleRootKind } from './merkle';
 import type { StorageMerkleNamespace } from './keys';
 
 export type RuntimeDbLike = {
@@ -222,6 +222,8 @@ export type StorageMerkleRootDoc = {
   namespace: StorageMerkleNamespace;
   radix: RadixMerkleRadix;
   rootHash: string;
+  rootKind?: RadixMerkleRootKind;
+  rootPath?: number[];
   leafCount: number;
 };
 

@@ -97,8 +97,13 @@ const sendResponse = (ws: AdapterSocket, response: RuntimeAdapterResponse): void
       ok: false,
       error: toRuntimeAdapterErrorPayload(new RuntimeAdapterError('E_INTERNAL', 'runtime adapter response too large', true)),
     } satisfies RuntimeAdapterResponse);
-    assertRuntimeAdapterMessageSize(capped);
-    ws.send(capped);
+    try {
+      assertRuntimeAdapterMessageSize(capped);
+      ws.send(capped);
+    } catch {
+      // The configured cap is too small even for the structured error. The
+      // close code is the only reliable signal left.
+    }
     ws.close?.(1009, 'runtime adapter response too large');
     return;
   }

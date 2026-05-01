@@ -39,8 +39,17 @@ export type RadixMerkleStoredLeaf = {
   hash: string;
 };
 
+export type RadixMerkleRootKind = 'empty' | 'branch' | 'leaf';
+
+export type RadixMerkleRootRef = {
+  kind: RadixMerkleRootKind;
+  path: number[];
+};
+
 export type RadixMerkleDirtyNodes = {
   rootHash: string;
+  rootKind: RadixMerkleRootKind;
+  rootPath: number[];
   leafCount: number;
   branchPuts: RadixMerkleStoredBranch[];
   leafPuts: RadixMerkleStoredLeaf[];
@@ -48,7 +57,7 @@ export type RadixMerkleDirtyNodes = {
   leafDels: number[][];
 };
 
-const EMPTY_ROOT = `0x${'00'.repeat(32)}`;
+export const EMPTY_RADIX_MERKLE_ROOT = `0x${'00'.repeat(32)}`;
 
 const domainBytes = (tag: string): Buffer => {
   const raw = Buffer.from(tag, 'utf8');
@@ -76,6 +85,9 @@ const pathSlots = (key: Uint8Array, radix: RadixMerkleRadix): number[] => {
   return Array.from(key).flatMap((byte) => [byte >> 4, byte & 0x0f]);
 };
 
+export const radixMerklePathSlots = (key: Uint8Array, radix: RadixMerkleRadix): number[] =>
+  pathSlots(key, radix);
+
 const leafHash = (leaf: RadixMerkleLeaf): string =>
   hashParts(LEAF_DOMAIN, [leaf.key, leaf.value]);
 
@@ -83,7 +95,7 @@ export const computeRadixMerkleLeafHash = (key: Uint8Array, value: Uint8Array): 
   leafHash({ key, value });
 
 const branchHash = (radix: RadixMerkleRadix, children: Array<[number, string]>): string => {
-  if (children.length === 0) return EMPTY_ROOT;
+  if (children.length === 0) return EMPTY_RADIX_MERKLE_ROOT;
   const parts: Uint8Array[] = [Uint8Array.of(radix === 256 ? 0xff : 0x10)];
   for (const [slot, hash] of children.sort((left, right) => left[0] - right[0])) {
     parts.push(Uint8Array.of(slot));
@@ -122,6 +134,29 @@ const extensionHash = (radix: RadixMerkleRadix, path: number[], childHash: strin
     encodePathSegment(radix, path),
     hexToBytes(childHash),
   ]);
+
+export const computeRadixMerkleEdgeHash = (
+  radix: RadixMerkleRadix,
+  parentPath: number[],
+  childKind: 'branch' | 'leaf',
+  childPath: number[],
+  childNodeHash: string,
+): string => {
+  if (childKind === 'leaf') return childNodeHash;
+  const segment = childPath.slice(parentPath.length + 1);
+  return segment.length > 0 ? extensionHash(radix, segment, childNodeHash) : childNodeHash;
+};
+
+export const computeRadixMerkleRootHash = (
+  radix: RadixMerkleRadix,
+  rootKind: RadixMerkleRootKind,
+  rootPath: number[],
+  rootNodeHash: string,
+): string => {
+  if (rootKind === 'empty') return EMPTY_RADIX_MERKLE_ROOT;
+  if (rootKind === 'leaf') return rootNodeHash;
+  return rootPath.length > 0 ? extensionHash(radix, rootPath, rootNodeHash) : rootNodeHash;
+};
 
 type MerkleItem = {
   keyHex: string;
@@ -222,11 +257,9 @@ const mutableEdgeHash = (
 };
 
 const mutableRootHash = (root: MutableMerkleNode | null, radix: RadixMerkleRadix): string => {
-  if (!root) return EMPTY_ROOT;
+  if (!root) return EMPTY_RADIX_MERKLE_ROOT;
   const hash = mutableNodeHash(root, radix);
-  return root.kind === 'branch' && root.path.length > 0
-    ? extensionHash(radix, root.path, hash)
-    : hash;
+  return computeRadixMerkleRootHash(radix, root.kind, root.path, hash);
 };
 
 const insertMutableNode = (
@@ -436,6 +469,13 @@ export class MutableRadixMerkleTree {
 
   verify(mode: 'none' | 'shallow' | 'deep' = 'shallow'): void {
     if (mode === 'none') return;
+    if (mode === 'shallow') {
+      this.getRoot();
+      if (this.leaves < 0) {
+        throw new Error(`RADIX_MERKLE_MUTABLE_LEAF_COUNT_MISMATCH: actual=${this.leaves} expected>=0`);
+      }
+      return;
+    }
     const expected = buildRadixMerkle(this.toLeaves(), { radix: this.radix });
     if (expected.leafCount !== this.leaves) {
       throw new Error(`RADIX_MERKLE_MUTABLE_LEAF_COUNT_MISMATCH: actual=${this.leaves} expected=${expected.leafCount}`);
@@ -446,8 +486,12 @@ export class MutableRadixMerkleTree {
   }
 
   takeDirtyNodes(): RadixMerkleDirtyNodes {
+    const rootKind = this.root?.kind ?? 'empty';
+    const rootPath = this.root ? [...this.root.path] : [];
     const out: RadixMerkleDirtyNodes = {
       rootHash: this.getRoot(),
+      rootKind,
+      rootPath,
       leafCount: this.leaves,
       branchPuts: [],
       leafPuts: [],
@@ -468,7 +512,7 @@ export const buildRadixMerkle = (
 ): RadixMerkleResult => {
   const radix = options?.radix === 256 ? 256 : 16;
   if (leaves.length === 0) {
-    return { radix, depth: 0, leafCount: 0, branchCount: 0, extensionCount: 0, maxDepth: 0, root: EMPTY_ROOT };
+    return { radix, depth: 0, leafCount: 0, branchCount: 0, extensionCount: 0, maxDepth: 0, root: EMPTY_RADIX_MERKLE_ROOT };
   }
 
   const deduped = new Map<string, MerkleItem>();
@@ -490,9 +534,9 @@ export const buildRadixMerkle = (
   }
 
   const buildNode = (offset: number, group: MerkleItem[]): MerkleNode => {
-    if (group.length === 0) return { hash: EMPTY_ROOT, branchCount: 0, extensionCount: 0, maxDepth: offset };
+    if (group.length === 0) return { hash: EMPTY_RADIX_MERKLE_ROOT, branchCount: 0, extensionCount: 0, maxDepth: offset };
     if (group.length === 1 || offset >= depth) {
-      return { hash: group[0]?.hash ?? EMPTY_ROOT, branchCount: 0, extensionCount: 0, maxDepth: offset };
+      return { hash: group[0]?.hash ?? EMPTY_RADIX_MERKLE_ROOT, branchCount: 0, extensionCount: 0, maxDepth: offset };
     }
 
     const shared = commonPrefixLength(group, offset, depth);

@@ -289,7 +289,7 @@ const listAccountPageFromKeyspace = async (options: {
     const doc = decodeBuffer<StorageAccountDoc>(await db.get(key));
     pushAccountCandidate(candidates, seen, normalized, doc, limit, direction);
     const worst = candidates[candidates.length - 1]?.counterpartyId;
-    if (candidates.length > limit && worst && compareAscii(normalized, worst) >= 0) break;
+    if (direction === 'asc' && candidates.length > limit && worst && compareAscii(normalized, worst) >= 0) break;
   }
 
   return accountPageFromCandidates(candidates, limit);
