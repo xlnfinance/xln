@@ -5,10 +5,12 @@ import { ethers } from 'ethers';
 import {
   deriveRuntimeAdapterAuthKey,
   deriveRuntimeAdapterCapabilityToken,
+  resolveRuntimeAdapterAuthSeed,
   verifyRuntimeAdapterAuthCredential,
   verifyRuntimeAdapterAuthKey,
 } from '../radapter/auth';
 import { decodeRuntimeAdapterMessage, encodeRuntimeAdapterMessage } from '../radapter/codec';
+import { RemoteRuntimeAdapter } from '../radapter/remote';
 import { resolveRuntimeAdapterRead } from '../radapter/resolve';
 import { broadcastRuntimeAdapterTick, handleRuntimeAdapterMessage } from '../radapter/server';
 import { encodeBuffer } from '../storage/codec';
@@ -224,6 +226,29 @@ test('runtime adapter can require expiring capability tokens', () => {
       delete process.env['XLN_RADAPTER_REQUIRE_CAPABILITY'];
     } else {
       process.env['XLN_RADAPTER_REQUIRE_CAPABILITY'] = previous;
+    }
+  }
+});
+
+test('runtime adapter can require explicit auth seed', () => {
+  const previousRequireSeed = process.env['XLN_RADAPTER_REQUIRE_AUTH_SEED'];
+  const previousAuthSeed = process.env['XLN_RADAPTER_AUTH_SEED'];
+  process.env['XLN_RADAPTER_REQUIRE_AUTH_SEED'] = '1';
+  try {
+    delete process.env['XLN_RADAPTER_AUTH_SEED'];
+    expect(resolveRuntimeAdapterAuthSeed(makeEnv())).toBe(null);
+    process.env['XLN_RADAPTER_AUTH_SEED'] = 'explicit-auth-seed';
+    expect(resolveRuntimeAdapterAuthSeed(makeEnv())).toBe('explicit-auth-seed');
+  } finally {
+    if (previousRequireSeed === undefined) {
+      delete process.env['XLN_RADAPTER_REQUIRE_AUTH_SEED'];
+    } else {
+      process.env['XLN_RADAPTER_REQUIRE_AUTH_SEED'] = previousRequireSeed;
+    }
+    if (previousAuthSeed === undefined) {
+      delete process.env['XLN_RADAPTER_AUTH_SEED'];
+    } else {
+      process.env['XLN_RADAPTER_AUTH_SEED'] = previousAuthSeed;
     }
   }
 });
@@ -756,5 +781,71 @@ test('runtime adapter caps outgoing responses and closes oversized sockets', asy
     } else {
       process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'] = previous;
     }
+  }
+});
+
+test('remote runtime adapter does not reconnect after unauthorized auth', async () => {
+  const previousWebSocket = globalThis.WebSocket;
+  let constructed = 0;
+
+  class RejectingAuthWebSocket {
+    static readonly OPEN = 1;
+
+    binaryType = 'arraybuffer';
+    readyState = 0;
+    onopen: (() => void) | null = null;
+    onmessage: ((event: { data: unknown }) => void) | null = null;
+    onerror: (() => void) | null = null;
+    onclose: (() => void) | null = null;
+
+    constructor(_url: string) {
+      constructed += 1;
+      setTimeout(() => {
+        this.readyState = RejectingAuthWebSocket.OPEN;
+        this.onopen?.();
+      }, 0);
+    }
+
+    send(raw: unknown): void {
+      const request = decodeRuntimeAdapterMessage<{ id: string; op: string }>(raw);
+      if (request.op !== 'auth') return;
+      setTimeout(() => {
+        this.onmessage?.({
+          data: encodeRuntimeAdapterMessage({
+            v: 1,
+            inReplyTo: request.id,
+            ok: false,
+            error: {
+              code: 'E_UNAUTHORIZED',
+              message: 'bad auth',
+              retryable: false,
+            },
+          }),
+        });
+      }, 0);
+    }
+
+    close(): void {
+      this.readyState = 3;
+      setTimeout(() => this.onclose?.(), 0);
+    }
+  }
+
+  (globalThis as unknown as { WebSocket: typeof WebSocket }).WebSocket = RejectingAuthWebSocket as unknown as typeof WebSocket;
+  try {
+    const adapter = new RemoteRuntimeAdapter();
+    await adapter.connect({
+      mode: 'remote',
+      wsUrl: 'ws://runtime-adapter.invalid/rpc',
+      authKey: 'wrong',
+      reconnectMaxMs: 1_000,
+      requestTimeoutMs: 1_000,
+    });
+    await new Promise((resolve) => setTimeout(resolve, 1_100));
+    expect(adapter.status).toBe('error');
+    expect(adapter.authLevel).toBe(null);
+    expect(constructed).toBe(1);
+  } finally {
+    (globalThis as unknown as { WebSocket: typeof WebSocket }).WebSocket = previousWebSocket;
   }
 });

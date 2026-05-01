@@ -87,7 +87,10 @@ const sendResponse = (ws: AdapterSocket, response: RuntimeAdapterResponse): void
   try {
     assertRuntimeAdapterMessageSize(encoded);
   } catch (error) {
-    if (!response.ok) throw error;
+    if (!response.ok) {
+      ws.close?.(1009, 'runtime adapter error response too large');
+      return;
+    }
     const capped = encodeRuntimeAdapterMessage({
       v: 1,
       inReplyTo: response.inReplyTo,

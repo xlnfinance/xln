@@ -26,6 +26,9 @@ type RuntimeAdapterRequestBody =
 const nextBackoff = (attempt: number, maxMs: number): number =>
   Math.min(maxMs, Math.max(1_000, 2 ** Math.min(attempt, 5) * 250));
 
+const isTerminalAuthFailure = (error: unknown): boolean =>
+  error instanceof RuntimeAdapterError && error.code === 'E_UNAUTHORIZED' && error.retryable !== true;
+
 export class RemoteRuntimeAdapter implements RuntimeAdapter {
   readonly mode = 'remote' as const;
 
@@ -38,6 +41,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
   private reconnectAttempt = 0;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private intentionalClose = false;
+  private terminalAuthFailure = false;
   private currentStatus: RuntimeAdapterStatus = 'disconnected';
   private height = 0;
   private level: RuntimeAdapterAuthLevel | null = null;
@@ -59,17 +63,18 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     if (!config.wsUrl) throw new RuntimeAdapterError('E_BAD_QUERY', 'wsUrl is required');
     this.config = config;
     this.intentionalClose = false;
+    this.terminalAuthFailure = false;
     try {
       await this.openSocket();
       await this.authenticateIfNeeded();
     } catch (error) {
-      this.setStatus('error');
-      this.scheduleReconnect();
+      this.handleConnectionFailure(error);
     }
   }
 
   disconnect(): void {
     this.intentionalClose = true;
+    this.terminalAuthFailure = false;
     if (this.reconnectTimer) {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
@@ -131,22 +136,40 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     this.ws = null;
     this.level = null;
     this.failPending(new RuntimeAdapterError('E_INTERNAL', 'runtime adapter socket closed', true));
-    this.setStatus(this.intentionalClose ? 'disconnected' : 'error');
+    this.setStatus(this.terminalAuthFailure ? 'error' : this.intentionalClose ? 'disconnected' : 'error');
     this.scheduleReconnect();
   }
 
   private scheduleReconnect(): void {
-    if (this.intentionalClose || !this.config || this.reconnectTimer) return;
+    if (this.intentionalClose || this.terminalAuthFailure || !this.config || this.reconnectTimer) return;
     const maxMs = Math.max(1_000, Number(this.config.reconnectMaxMs ?? 30_000));
     const delay = nextBackoff(this.reconnectAttempt++, maxMs);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.openSocket()
         .then(() => this.authenticateIfNeeded())
-        .catch(() => {
-          this.handleClose();
-        });
+        .catch((error) => this.handleConnectionFailure(error));
     }, delay);
+  }
+
+  private handleConnectionFailure(error: unknown): void {
+    if (isTerminalAuthFailure(error)) {
+      this.terminalAuthFailure = true;
+      this.intentionalClose = true;
+      this.level = null;
+      this.failPending(error);
+      if (this.reconnectTimer) {
+        clearTimeout(this.reconnectTimer);
+        this.reconnectTimer = null;
+      }
+      const socket = this.ws;
+      this.ws = null;
+      socket?.close();
+      this.setStatus('error');
+      return;
+    }
+    this.setStatus('error');
+    this.scheduleReconnect();
   }
 
   private async authenticateIfNeeded(): Promise<void> {
