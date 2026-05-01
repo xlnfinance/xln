@@ -1363,11 +1363,17 @@
   $: avatar = resolveEntityAvatar(activeXlnFunctions, tab.entityId);
   $: currentEntityValue = String(replica && replica.state ? (replica.state.entityId || tab.entityId || '') : (tab.entityId || '')).trim();
   $: currentSignerId = (() => {
+    const tabSignerId = String(tab.signerId || '').trim();
+    if (tabSignerId) return tabSignerId;
     const entityId = String(replica && replica.state ? (replica.state.entityId || '') : (tab.entityId || '')).trim().toLowerCase();
-    if (!entityId) return String(tab.signerId || '').trim();
+    if (!entityId) return tabSignerId;
     const env = getRuntimeEnv(activeEnv);
-    if (!env) return String(tab.signerId || '').trim();
-    return requireSignerIdForEntity(env, entityId, 'entity-panel-current-signer');
+    if (!env) return tabSignerId;
+    try {
+      return requireSignerIdForEntity(env, entityId, 'entity-panel-current-signer');
+    } catch {
+      return tabSignerId;
+    }
   })();
   $: currentExternalEoaValue = String(currentSignerId || '').trim();
 
