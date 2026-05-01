@@ -13,7 +13,8 @@ import { decodeRuntimeAdapterMessage, encodeRuntimeAdapterMessage } from '../rad
 import { RemoteRuntimeAdapter } from '../radapter/remote';
 import { resolveRuntimeAdapterRead } from '../radapter/resolve';
 import { broadcastRuntimeAdapterTick, handleRuntimeAdapterMessage } from '../radapter/server';
-import { encodeBuffer } from '../storage/codec';
+import { decodeBuffer, encodeBuffer } from '../storage/codec';
+import { prepareStorageStateHashes } from '../storage/hashes';
 import {
   KEY_HEAD,
   hexBytes,
@@ -28,7 +29,7 @@ import {
 import { keyLiveDocHash } from '../storage/doc-refs';
 import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
 import { loadEntityStateFromStorage, loadEntityViewPageFromStorage } from '../storage/read';
-import type { RuntimeDbLike, StorageHead, StorageSnapshotManifest } from '../storage/types';
+import type { RuntimeDbLike, StorageEntityHashDoc, StorageHead, StorageSnapshotManifest } from '../storage/types';
 import type { EntityReplica, Env } from '../types';
 import type { BookState } from '../orderbook';
 import { DEFAULT_SPREAD_DISTRIBUTION, type OrderbookExtState } from '../orderbook/types';
@@ -782,6 +783,64 @@ test('runtime adapter caps outgoing responses and closes oversized sockets', asy
       process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'] = previous;
     }
   }
+});
+
+test('storage entity hash docs avoid serializing huge cell arrays', async () => {
+  const env = makeEnv();
+  const replica = Array.from(env.eReplicas.values())[0]!;
+  const base = replica.state.accounts.get(counterpartyId)!;
+  const accountCount = 4_100;
+  const puts = Array.from({ length: accountCount }, (_, index) => {
+    const id = `0x${(index + 1).toString(16).padStart(64, '0')}`;
+    return {
+      family: 'account' as const,
+      entityId,
+      counterpartyId: id,
+      value: projectAccountDoc({
+        ...base,
+        rightEntity: id,
+        proofHeader: { ...base.proofHeader, toEntity: id },
+      }),
+    };
+  });
+
+  const first = await prepareStorageStateHashes({
+    db: makeMemoryDb([]),
+    puts,
+    dels: [],
+  });
+  const firstDoc = first.entityHashDocs.get(entityId)!;
+  const stored = decodeBuffer<StorageEntityHashDoc>(first.entityHashPuts[0]!.value);
+
+  expect(firstDoc.cellCount).toBe(accountCount);
+  expect(firstDoc.cells).toHaveLength(0);
+  expect(stored.cellCount).toBe(accountCount);
+  expect(stored.cells).toHaveLength(0);
+  expect(first.entityHashes[0]?.cellCount).toBe(accountCount);
+
+  const oldRoot = firstDoc.hash;
+  const changedId = `0x${(2_001).toString(16).padStart(64, '0')}`;
+  const second = await prepareStorageStateHashes({
+    db: makeMemoryDb([]),
+    puts: [{
+      family: 'account',
+      entityId,
+      counterpartyId: changedId,
+      value: projectAccountDoc({
+        ...base,
+        rightEntity: changedId,
+        currentHeight: 999,
+        proofHeader: { ...base.proofHeader, toEntity: changedId },
+      }),
+    }],
+    dels: [],
+    entityHashDocs: first.entityHashDocs,
+  });
+  const secondDoc = second.entityHashDocs.get(entityId)!;
+
+  expect(secondDoc.cellCount).toBe(accountCount);
+  expect(secondDoc.cells).toHaveLength(0);
+  expect(secondDoc.hash).not.toBe(oldRoot);
 });
 
 test('remote runtime adapter does not reconnect after unauthorized auth', async () => {

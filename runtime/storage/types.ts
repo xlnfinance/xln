@@ -212,6 +212,7 @@ export type StorageHashCell = {
 export type StorageEntityHashDoc = {
   entityId: string;
   hash: string;
+  cellCount?: number;
   cells: StorageHashCell[];
 };
 
