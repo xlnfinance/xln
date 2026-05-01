@@ -20,6 +20,7 @@ import {
   hexBytes,
   keyLiveAccount,
   keyLiveEntity,
+  keyMerkleRoot,
   keySnapshotAccountPrefix,
   keySnapshotBookPrefix,
   keySnapshotEntity,
@@ -29,7 +30,7 @@ import {
 import { keyLiveDocHash } from '../storage/doc-refs';
 import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
 import { loadEntityStateFromStorage, loadEntityViewPageFromStorage } from '../storage/read';
-import type { RuntimeDbLike, StorageEntityHashDoc, StorageHead, StorageSnapshotManifest } from '../storage/types';
+import type { RuntimeDbLike, StorageEntityHashDoc, StorageHead, StorageMerkleRootDoc, StorageSnapshotManifest } from '../storage/types';
 import type { EntityReplica, Env } from '../types';
 import type { BookState } from '../orderbook';
 import { DEFAULT_SPREAD_DISTRIBUTION, type OrderbookExtState } from '../orderbook/types';
@@ -817,6 +818,10 @@ test('storage entity hash docs avoid serializing huge cell arrays', async () => 
   expect(stored.cellCount).toBe(accountCount);
   expect(stored.cells).toHaveLength(0);
   expect(first.entityHashes[0]?.cellCount).toBe(accountCount);
+  const firstRootPut = first.merklePuts.find((item) => Buffer.compare(item.key, keyMerkleRoot(entityId, 'runtime-roots')) === 0);
+  const firstRoot = decodeBuffer<StorageMerkleRootDoc>(firstRootPut!.value);
+  expect(firstRoot.rootHash).toBe(firstDoc.hash);
+  expect(firstRoot.leafCount).toBe(accountCount);
 
   const oldRoot = firstDoc.hash;
   const changedId = `0x${(2_001).toString(16).padStart(64, '0')}`;
@@ -841,6 +846,8 @@ test('storage entity hash docs avoid serializing huge cell arrays', async () => 
   expect(secondDoc.cellCount).toBe(accountCount);
   expect(secondDoc.cells).toHaveLength(0);
   expect(secondDoc.hash).not.toBe(oldRoot);
+  expect(second.merklePuts.length).toBeLessThan(50);
+  expect(second.merkleDels).toHaveLength(0);
 });
 
 test('remote runtime adapter does not reconnect after unauthorized auth', async () => {

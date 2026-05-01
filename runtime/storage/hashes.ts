@@ -25,12 +25,15 @@ import {
   keyLiveEntity,
   keyLiveEntityHash,
   keyLiveEntityHashPrefix,
+  keyMerkleBranch,
+  keyMerkleLeaf,
+  keyMerkleRoot,
   normalizeEntityId,
   parseLiveAccountKey,
   parseLiveBookKey,
 } from './keys';
 import { iterateKeys, readJsonOrNull, readRawOrNull } from './level';
-import { buildHexKeyedMerkle, MutableRadixMerkleTree } from './merkle';
+import { buildHexKeyedMerkle, MutableRadixMerkleTree, packRadixMerklePath } from './merkle';
 import { projectAccountDoc, projectEntityCoreDoc } from './projections';
 import { buildReplicaLookup, findReplicaForEntity } from './replicas';
 import type {
@@ -41,6 +44,9 @@ import type {
   StorageFrameEntityHash,
   StorageFrameRecord,
   StorageHashCell,
+  StorageMerkleBranchDoc,
+  StorageMerkleLeafDoc,
+  StorageMerkleRootDoc,
 } from './types';
 
 type StorageDocEncodedValue = { buffer: Buffer; hash: string; hashBytes: Buffer };
@@ -391,6 +397,8 @@ export const prepareStorageStateHashes = async (options: {
   docHashPuts: Array<{ key: Buffer; value: Buffer }>;
   docHashDels: Buffer[];
   entityHashPuts: Array<{ key: Buffer; value: Buffer }>;
+  merklePuts: Array<{ key: Buffer; value: Buffer }>;
+  merkleDels: Buffer[];
 }> => {
   const entityHashDocs = options.entityHashDocs
     ? new Map(options.entityHashDocs)
@@ -441,10 +449,60 @@ export const prepareStorageStateHashes = async (options: {
     await updateEntityCell(ref.entityId, docRefCellKey(ref), null);
   }
 
+  const merklePuts: Array<{ key: Buffer; value: Buffer }> = [];
+  const merkleDelsByKey = new Map<string, Buffer>();
   const entityHashPuts = Array.from(touchedEntityIds).map((entityId) => {
     const doc = syncEntityHashDocVisibleCells(
       (entityHashDocs.get(entityId) ?? buildEntityHashDoc(entityId, [])) as RuntimeEntityHashDoc,
-    );
+    ) as RuntimeEntityHashDoc;
+    const dirty = doc.merkleTree?.takeDirtyNodes();
+    if (dirty) {
+      const rootDoc: StorageMerkleRootDoc = {
+        entityId,
+        namespace: 'runtime-roots',
+        radix: DEFAULT_ACCOUNT_MERKLE_RADIX,
+        rootHash: dirty.rootHash,
+        leafCount: dirty.leafCount,
+      };
+      merklePuts.push({ key: keyMerkleRoot(entityId, 'runtime-roots'), value: encodeBuffer(rootDoc) });
+      for (const branch of dirty.branchPuts) {
+        const branchDoc: StorageMerkleBranchDoc = {
+          entityId,
+          namespace: 'runtime-roots',
+          radix: branch.radix,
+          path: branch.path,
+          hash: branch.hash,
+          children: branch.children,
+        };
+        merklePuts.push({
+          key: keyMerkleBranch(entityId, 'runtime-roots', packRadixMerklePath(branch.radix, branch.path)),
+          value: encodeBuffer(branchDoc),
+        });
+      }
+      for (const leaf of dirty.leafPuts) {
+        const leafDoc: StorageMerkleLeafDoc = {
+          entityId,
+          namespace: 'runtime-roots',
+          radix: leaf.radix,
+          path: leaf.path,
+          key: leaf.key,
+          valueHash: leaf.valueHash,
+          hash: leaf.hash,
+        };
+        merklePuts.push({
+          key: keyMerkleLeaf(entityId, 'runtime-roots', packRadixMerklePath(leaf.radix, leaf.path)),
+          value: encodeBuffer(leafDoc),
+        });
+      }
+      for (const path of dirty.branchDels) {
+        const key = keyMerkleBranch(entityId, 'runtime-roots', packRadixMerklePath(DEFAULT_ACCOUNT_MERKLE_RADIX, path));
+        merkleDelsByKey.set(key.toString('hex'), key);
+      }
+      for (const path of dirty.leafDels) {
+        const key = keyMerkleLeaf(entityId, 'runtime-roots', packRadixMerklePath(DEFAULT_ACCOUNT_MERKLE_RADIX, path));
+        merkleDelsByKey.set(key.toString('hex'), key);
+      }
+    }
     return {
       key: keyLiveEntityHash(entityId),
       value: encodeBuffer(doc),
@@ -459,6 +517,8 @@ export const prepareStorageStateHashes = async (options: {
     docHashPuts,
     docHashDels,
     entityHashPuts,
+    merklePuts,
+    merkleDels: Array.from(merkleDelsByKey.values()),
   };
 };
 
