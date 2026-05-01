@@ -14,6 +14,10 @@ import {
   keyLiveAccountPrefix,
   keyLiveBookPrefix,
   keyLiveEntity,
+  keyLiveEntityHash,
+  keyMerkleBranchPrefix,
+  keyMerkleLeafPrefix,
+  keyMerkleRoot,
   keyLiveReplicaMeta,
   keySnapshotAccountPrefix,
   keySnapshotBookPrefix,
@@ -26,6 +30,11 @@ import {
 } from './keys';
 import { iterateKeys, readJsonOrNull, readRawOrNull } from './level';
 import { listSnapshotHeights } from './lifecycle';
+import {
+  buildHexKeyedMerkle,
+  computeRadixMerkleBranchHash,
+  computeRadixMerkleLeafHash,
+} from './merkle';
 import { hydrateEntityStateFromStorage } from './projections';
 import type {
   RuntimeDbLike,
@@ -36,6 +45,9 @@ import type {
   StorageEntityCoreDoc,
   StorageFrameRecord,
   StorageHead,
+  StorageMerkleBranchDoc,
+  StorageMerkleLeafDoc,
+  StorageMerkleRootDoc,
   StorageReplicaMeta,
 } from './types';
 
@@ -102,6 +114,15 @@ const storageVerifyDocHashesEnabled = (): boolean => {
   return raw === '1' || raw === 'true' || raw === 'yes';
 };
 
+const storageVerifyMerkleMode = (): 'none' | 'shallow' | 'deep' => {
+  const raw = String(typeof process !== 'undefined' ? process.env['XLN_STORAGE_VERIFY_MERKLE'] ?? '' : '')
+    .trim()
+    .toLowerCase();
+  if (raw === 'deep') return 'deep';
+  if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'shallow') return 'shallow';
+  return 'none';
+};
+
 const hashRawDocValue = (value: Buffer | Uint8Array): string =>
   ethers.keccak256(value instanceof Uint8Array ? value : Uint8Array.from(value));
 
@@ -122,6 +143,59 @@ const assertLiveDocHash = async (options: {
   const actual = hashRawDocValue(options.raw);
   if (actual !== expected) {
     throw new Error(`STORAGE_DOC_HASH_MISMATCH: ${key} actual=${actual} expected=${expected}`);
+  }
+};
+
+const assertLiveMerkleIntegrity = async (
+  db: RuntimeDbLike,
+  entityId: string,
+  mode: 'none' | 'shallow' | 'deep',
+): Promise<void> => {
+  if (mode === 'none') return;
+  const normalized = normalizeEntityId(entityId);
+  const root = await readJsonOrNull<StorageMerkleRootDoc>(db, keyMerkleRoot(normalized, 'runtime-roots'));
+  const entityHash = await readJsonOrNull<{ hash: string; cellCount?: number; cells?: unknown[] }>(db, keyLiveEntityHash(normalized));
+  if (!root) throw new Error(`STORAGE_MERKLE_ROOT_MISSING: entity=${normalized}`);
+  if (!entityHash) throw new Error(`STORAGE_ENTITY_HASH_DOC_MISSING: entity=${normalized}`);
+  const expectedLeafCount = Number(entityHash.cellCount ?? entityHash.cells?.length ?? 0);
+  if (root.rootHash !== entityHash.hash) {
+    throw new Error(`STORAGE_MERKLE_ROOT_MISMATCH: entity=${normalized} actual=${root.rootHash} expected=${entityHash.hash}`);
+  }
+  if (root.leafCount !== expectedLeafCount) {
+    throw new Error(`STORAGE_MERKLE_LEAF_COUNT_MISMATCH: entity=${normalized} actual=${root.leafCount} expected=${expectedLeafCount}`);
+  }
+  if (mode !== 'deep') return;
+
+  let branchCount = 0;
+  for await (const key of iterateKeys(db, { prefix: keyMerkleBranchPrefix(normalized, 'runtime-roots') })) {
+    const branch = decodeBuffer<StorageMerkleBranchDoc>(await db.get(key));
+    const actual = computeRadixMerkleBranchHash(
+      branch.radix,
+      branch.children.map((child) => [child.slot, child.hash]),
+    );
+    if (actual !== branch.hash) {
+      throw new Error(`STORAGE_MERKLE_BRANCH_HASH_MISMATCH: entity=${normalized} path=${branch.path.join('.')}`);
+    }
+    branchCount += 1;
+  }
+
+  const leaves: Array<{ hexKey: string; value: Uint8Array }> = [];
+  for await (const key of iterateKeys(db, { prefix: keyMerkleLeafPrefix(normalized, 'runtime-roots') })) {
+    const leaf = decodeBuffer<StorageMerkleLeafDoc>(await db.get(key));
+    const keyBytes = Buffer.from(String(leaf.key || '').replace(/^0x/, ''), 'hex');
+    const valueBytes = Buffer.from(String(leaf.valueHash || '').replace(/^0x/, ''), 'hex');
+    const actual = computeRadixMerkleLeafHash(keyBytes, valueBytes);
+    if (actual !== leaf.hash) {
+      throw new Error(`STORAGE_MERKLE_LEAF_HASH_MISMATCH: entity=${normalized} path=${leaf.path.join('.')}`);
+    }
+    leaves.push({ hexKey: leaf.key, value: valueBytes });
+  }
+  if (leaves.length !== root.leafCount) {
+    throw new Error(`STORAGE_MERKLE_DEEP_LEAF_COUNT_MISMATCH: entity=${normalized} actual=${leaves.length} expected=${root.leafCount}`);
+  }
+  const rebuilt = buildHexKeyedMerkle(leaves, { radix: root.radix });
+  if (rebuilt.root !== root.rootHash) {
+    throw new Error(`STORAGE_MERKLE_DEEP_ROOT_MISMATCH: entity=${normalized} actual=${rebuilt.root} expected=${root.rootHash} branches=${branchCount}`);
   }
 };
 
@@ -545,6 +619,7 @@ export const loadEntityStateFromStorage = async (options: {
 
   if (targetHeight === latestMaterializedHeight) {
     const verifyDocHashes = storageVerifyDocHashesEnabled();
+    const verifyMerkleMode = storageVerifyMerkleMode();
     const entityRaw = await readRawOrNull(db, keyLiveEntity(entityId));
     if (!entityRaw) return null;
     await assertLiveDocHash({
@@ -580,6 +655,7 @@ export const loadEntityStateFromStorage = async (options: {
       });
       books.set(parsed.pairId, decodeBuffer<BookState>(raw));
     }
+    await assertLiveMerkleIntegrity(db, entityId, verifyMerkleMode);
     return hydrateEntityStateFromStorage({ core: entityCore, accounts, books });
   }
 
