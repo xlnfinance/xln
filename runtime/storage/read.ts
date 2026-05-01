@@ -1,7 +1,8 @@
 import type { BookState } from '../orderbook';
 import type { EntityState, Env } from '../types';
+import { ethers } from 'ethers';
 import { decodeBuffer } from './codec';
-import { docRefKey, docValueKey } from './doc-refs';
+import { docRefKey, docValueKey, keyLiveDocHash } from './doc-refs';
 import {
   KEY_HEAD,
   KEY_LIVE_ENTITY,
@@ -23,7 +24,7 @@ import {
   parseLiveBookKey,
   prefixUpperBound,
 } from './keys';
-import { iterateKeys, readJsonOrNull } from './level';
+import { iterateKeys, readJsonOrNull, readRawOrNull } from './level';
 import { listSnapshotHeights } from './lifecycle';
 import { hydrateEntityStateFromStorage } from './projections';
 import type {
@@ -93,6 +94,36 @@ const findLatestSnapshotAtOrBelow = async (db: RuntimeDbLike, height: number): P
 
 const compareAscii = (left: string, right: string): number =>
   left < right ? -1 : left > right ? 1 : 0;
+
+const storageVerifyDocHashesEnabled = (): boolean => {
+  const raw = String(typeof process !== 'undefined' ? process.env['XLN_STORAGE_VERIFY_DOC_HASHES'] ?? '' : '')
+    .trim()
+    .toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+};
+
+const hashRawDocValue = (value: Buffer | Uint8Array): string =>
+  ethers.keccak256(value instanceof Uint8Array ? value : Uint8Array.from(value));
+
+const assertLiveDocHash = async (options: {
+  db: RuntimeDbLike;
+  ref: StorageDocRef;
+  raw: Buffer | Uint8Array;
+  enabled: boolean;
+}): Promise<void> => {
+  if (!options.enabled) return;
+  const expectedRaw = await readRawOrNull(options.db, keyLiveDocHash(options.ref));
+  const key = docRefKey(options.ref);
+  if (!expectedRaw) throw new Error(`STORAGE_DOC_HASH_MISSING: ${key}`);
+  if (expectedRaw.byteLength !== 32) {
+    throw new Error(`STORAGE_DOC_HASH_INVALID: ${key} bytes=${expectedRaw.byteLength}`);
+  }
+  const expected = `0x${Buffer.from(expectedRaw).toString('hex')}`;
+  const actual = hashRawDocValue(options.raw);
+  if (actual !== expected) {
+    throw new Error(`STORAGE_DOC_HASH_MISMATCH: ${key} actual=${actual} expected=${expected}`);
+  }
+};
 
 const readPageLimit = (query?: StoragePageQuery): number => {
   const raw = Number(query?.limit ?? 10);
@@ -513,18 +544,41 @@ export const loadEntityStateFromStorage = async (options: {
   );
 
   if (targetHeight === latestMaterializedHeight) {
-    const entityCore = await readJsonOrNull<StorageEntityCoreDoc>(db, keyLiveEntity(entityId));
+    const verifyDocHashes = storageVerifyDocHashesEnabled();
+    const entityRaw = await readRawOrNull(db, keyLiveEntity(entityId));
+    if (!entityRaw) return null;
+    await assertLiveDocHash({
+      db,
+      ref: { family: 'entity', entityId },
+      raw: entityRaw,
+      enabled: verifyDocHashes,
+    });
+    const entityCore = decodeBuffer<StorageEntityCoreDoc>(entityRaw);
     if (!entityCore) return null;
     const accounts = new Map<string, StorageAccountDoc>();
     for await (const key of iterateKeys(db, { prefix: keyLiveAccountPrefix(entityId) })) {
       const parsed = parseLiveAccountKey(key);
-      const doc = decodeBuffer<StorageAccountDoc>(await db.get(key));
+      const raw = await db.get(key);
+      await assertLiveDocHash({
+        db,
+        ref: { family: 'account', entityId: parsed.entityId, counterpartyId: parsed.counterpartyId },
+        raw,
+        enabled: verifyDocHashes,
+      });
+      const doc = decodeBuffer<StorageAccountDoc>(raw);
       accounts.set(parsed.counterpartyId, doc);
     }
     const books = new Map<string, BookState>();
     for await (const key of iterateKeys(db, { prefix: keyLiveBookPrefix(entityId) })) {
       const parsed = parseLiveBookKey(key);
-      books.set(parsed.pairId, decodeBuffer<BookState>(await db.get(key)));
+      const raw = await db.get(key);
+      await assertLiveDocHash({
+        db,
+        ref: { family: 'book', entityId: parsed.entityId, pairId: parsed.pairId },
+        raw,
+        enabled: verifyDocHashes,
+      });
+      books.set(parsed.pairId, decodeBuffer<BookState>(raw));
     }
     return hydrateEntityStateFromStorage({ core: entityCore, accounts, books });
   }
