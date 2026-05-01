@@ -447,3 +447,63 @@ An auditor should verify:
 ## Bottom Line
 
 The correct mainnet design is not a bigger `cells[]` document and not eager parent graph rebuild. It is a shared persisted Merkle collection engine with just-in-time traversal stacks and cached hashes on branch/leaf objects. Accounts, trading pairs/books, and lock maps should all use the same engine through domain-specific key codecs.
+
+---
+
+## Review — Claude (Opus 4.7), 2026-05-01
+
+Read against `runtime/storage/{merkle.ts, hashes.ts, types.ts, keys.ts}` head of `main`.
+
+### ============ AGREE ============
+
+- O(N) hot path is the real bug. `prepareStorageStateHashes` → `buildEntityHashDoc` → `buildHexKeyedMerkle(allCells)` rebuilds the full radix tree per frame for any touched entity. At 1M accounts that's the whole world per HTLC. Fix is mandatory before mainnet.
+- Namespace split (`accounts`/`books`/`lock-book`/`entity-core`) mirrors the existing key prefixes (0x21–0x23) and the touched-set already tracked in `StorageOverlayRefs`. Cheap to land.
+- `.hash` as cache, not encoded state. Current `setHiddenDocComputedValue` already follows this discipline — just generalize to branch nodes.
+- JIT `descend()` over eager parent graph. Correct for cold restarts: `loadEnvFromDB` should not pay branch-graph rehydration on every start.
+
+### ============ GAPS / DISAGREE ============
+
+**1. Flat↔branch root equivalence is not an "open question" — it's a consensus property.**
+- If roots differ across modes and one peer crosses the 128 threshold one frame earlier than another, `stateHash` diverges → fork.
+- Resolution: mode is purely a function of `leafCount` (deterministic), so transition is safe. But the doc must commit: both modes hash the same canonical leaf set the same way *or* mode is part of the root preimage and the threshold is a hard protocol constant. Pick one. Don't ship with both options open.
+
+**2. Migration story is hand-waved.**
+- "No v2 mode" + "stateHash will change" is contradictory. PR2 alone changes the entity-root algorithm.
+- `canonicalStateHash` already exists as a parallel audit channel (`StorageFrameRecord.canonicalStateHash`). Use it: during PR2–PR4, canonical is the consensus anchor, `stateHash` becomes advisory. After PR5 lands and is verified across replicas, `stateHash` returns as primary.
+- Document this. Otherwise replay across the PR boundary explodes.
+
+**3. Branch-node write amplification is unmeasured.**
+- Per touched leaf: ~⌈log₁₆(N)⌉ branch rewrites. For N=1M, depth ≈ 5. 1k touches/frame → 5k branch puts/frame, plus root docs.
+- LevelDB SSTable write-amp is typically 10–30× on a hot working set. Concrete budget needed in PR2 acceptance criteria, not "benchmark TBD". Suggest target: <100 µs amortized per touched leaf at 1M-account scale, with frame commit batch size cap.
+
+**4. No mention of inclusion proofs.**
+- The whole point of a radix Merkle tree over a flat hash is verifiable subset proofs. If hub never exports proofs, a sorted-leaves Merkle root is simpler and 3× faster.
+- If XLN intends fraud proofs / light-client-style account verification (J-layer dispute, audit export), proofs must be a first-class API on `MerkleCollection<K>`. Add `proveInclusion(key)` and `verifyInclusion(root, key, valueHash, proof)` to the interface — or explicitly defer with a written "proofs not required because…" line.
+
+**5. Branch collapse thrash on HTLC churn.**
+- HTLC lock add → lock resolve in the same frame at the same path = create branch → collapse branch in one materialize pass. With order-of-N HTLCs/sec on a hub, this is the common case, not the edge.
+- Spec the collapse rule on *net* per-frame change, not per-mutation. Equivalent to building the new tree from final overlay state, not replaying inserts/deletes.
+
+**6. Snapshot/epoch coverage is listed as "consider" — it's a hard requirement.**
+- Open question 7 must be promoted to invariant. If `KEY_MERKLE_BRANCH` is durable truth and epoch rotation copies only `KEY_LIVE_*`, recovery silently produces a wrong root. That's worse than the current state.
+- Add to PR1 acceptance: epoch rotation copies the full Merkle keyspace; deep-verify gate runs after every rotation in CI.
+
+**7. Hash domain separation is currently fragile.**
+- `merkle.ts:22` uses single-byte tags 0x00/0x01/0x02 with an inner radix marker (0x10/0xff). Works, but the schema is implicit. New design should use length-prefixed ASCII tags ("xln.merkle.leaf.v1", "xln.merkle.branch.v1") or define a TLV explicitly in the doc. Future hash migration without this is painful.
+
+**8. `entity-core` is a single doc; calling it a "Merkle collection" is overstatement.**
+- Just hash the doc bytes and put it in the entity root as a fixed slot. No collection engine needed for n=1. Doc currently implies we wrap it in the collection abstraction — wasteful. Spell out: `entity-core` slot = `keccak256(encodedDoc)`, not a tree.
+
+### ============ NIT ============
+
+- `MerkleNamespace` enum should include `runtime-roots` (the per-entity hash map). Same engine, top of the cake.
+- `verify?` should not be optional on the interface. Make it required, with `'none' | 'shallow' | 'deep'`.
+- Drop `mode: 'flat' | 'branch'` from `MerkleRootDoc`'s persisted form once threshold is fixed; derivable from `leafCount`.
+
+### ============ NEXT ============
+
+- A) **Lock the migration anchor** — write down: canonicalStateHash is consensus root during PR2–PR5, stateHash becomes primary after PR5 verified. One paragraph, top of doc.
+- B) **Resolve flat↔branch equivalence before PR1 lands** — pick one rule, write the hash preimages explicitly, add unit test fixtures.
+- C) **Promote snapshot Merkle coverage to invariant** — move open question 7 into "Materialization Flow", add to PR1 audit checklist.
+- D) **Decide on inclusion-proof API** — ship it in PR1's interface or write the explicit deferral. Don't leave it implicit.
+
