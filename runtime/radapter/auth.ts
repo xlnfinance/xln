@@ -63,6 +63,7 @@ const constantTimeEquals = (left: string, right: string): boolean => {
 export const resolveRuntimeAdapterAuthSeed = (env: Env | null): string | null => {
   const fromEnv = typeof process !== 'undefined' ? String(process.env['XLN_RADAPTER_AUTH_SEED'] || '').trim() : '';
   if (fromEnv) return fromEnv;
+  if (truthyEnv('XLN_RADAPTER_REQUIRE_AUTH_SEED')) return null;
   const runtimeSeed = String(env?.runtimeSeed || '').trim();
   return runtimeSeed || null;
 };
