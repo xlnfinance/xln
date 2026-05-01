@@ -40,15 +40,30 @@ const clients = new Map<AdapterSocket, AdapterClientState>();
 let attachedEnv: Env | null = null;
 let detachEnvChange: (() => void) | null = null;
 
+const readPositiveNumberEnv = (name: string, fallback: number): number => {
+  const raw = typeof process !== 'undefined' ? process.env[name] : undefined;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+};
+
+const createConfiguredBucket = (
+  label: 'CONTROL' | 'READ' | 'SEND',
+  defaultCapacity: number,
+  defaultRefillPerSecond: number,
+): TokenBucket => createTokenBucket(
+  readPositiveNumberEnv(`XLN_RADAPTER_${label}_BURST`, defaultCapacity),
+  readPositiveNumberEnv(`XLN_RADAPTER_${label}_PER_SEC`, defaultRefillPerSecond),
+);
+
 const getClientState = (ws: AdapterSocket): AdapterClientState => {
   let state = clients.get(ws);
   if (!state) {
     state = {
       authLevel: null,
       authExpiresAtMs: null,
-      controlBucket: createTokenBucket(100, 50),
-      readBucket: createTokenBucket(100, 50),
-      sendBucket: createTokenBucket(10, 5),
+      controlBucket: createConfiguredBucket('CONTROL', 100, 50),
+      readBucket: createConfiguredBucket('READ', 100, 50),
+      sendBucket: createConfiguredBucket('SEND', 10, 5),
     };
     clients.set(ws, state);
   }

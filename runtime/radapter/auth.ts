@@ -24,6 +24,11 @@ const normalizedSeed = (seed: string): string => {
   return normalizedSeed;
 };
 
+const truthyEnv = (name: string): boolean => {
+  const raw = typeof process !== 'undefined' ? String(process.env[name] || '').trim().toLowerCase() : '';
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
+};
+
 const hmacHex = (seed: string, payload: string): string =>
   createHmac('sha256', normalizedSeed(seed))
     .update(payload)
@@ -91,6 +96,8 @@ export const verifyRuntimeAdapterAuthCredential = (
     if (constantTimeEquals(signature, expected)) return { level, expiresAtMs, legacy: false };
     return null;
   }
+
+  if (truthyEnv('XLN_RADAPTER_REQUIRE_CAPABILITY')) return null;
 
   const admin = deriveRuntimeAdapterAuthKey(seed, 'admin');
   if (constantTimeEquals(candidate, admin)) return { level: 'admin', expiresAtMs: null, legacy: true };

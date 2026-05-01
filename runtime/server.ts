@@ -3752,9 +3752,6 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
             }
             routeRelayMessage();
           } else if (data.type === 'rpc') {
-            if (env) {
-              attachRuntimeAdapterTicker(env, registerEnvChangeCallback);
-            }
             Promise.resolve(handleRpcMessage(ws, msg, env)).catch(error => {
               const reason = (error as Error).message || 'rpc handler error';
               console.error(`[WS] RPC handler error: ${reason}`);
