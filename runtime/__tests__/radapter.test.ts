@@ -1,5 +1,6 @@
 import { expect, test } from 'bun:test';
 import { createHmac } from 'crypto';
+import { ethers } from 'ethers';
 
 import {
   deriveRuntimeAdapterAuthKey,
@@ -14,14 +15,17 @@ import { encodeBuffer } from '../storage/codec';
 import {
   KEY_HEAD,
   hexBytes,
+  keyLiveAccount,
+  keyLiveEntity,
   keySnapshotAccountPrefix,
   keySnapshotBookPrefix,
   keySnapshotEntity,
   keySnapshotManifest,
   textBytes,
 } from '../storage/keys';
+import { keyLiveDocHash } from '../storage/doc-refs';
 import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
-import { loadEntityViewPageFromStorage } from '../storage/read';
+import { loadEntityStateFromStorage, loadEntityViewPageFromStorage } from '../storage/read';
 import type { RuntimeDbLike, StorageHead, StorageSnapshotManifest } from '../storage/types';
 import type { EntityReplica, Env } from '../types';
 import type { BookState } from '../orderbook';
@@ -181,6 +185,9 @@ const snapshotAccountKey = (height: number, entity: string, counterparty: string
 
 const snapshotBookKey = (height: number, entity: string, pairId: string): Buffer =>
   Buffer.concat([keySnapshotBookPrefix(height, entity), textBytes(pairId)]);
+
+const docHashBytes = (raw: Buffer): Buffer =>
+  Buffer.from(ethers.keccak256(raw).slice(2), 'hex');
 
 const capabilityTokenUnchecked = (seed: string, role: 'read' | 'full', expiresAtMs: number): string => {
   const level = role === 'read' ? 'inspect' : 'admin';
@@ -429,6 +436,87 @@ test('storage-backed historical view pages support desc account and book cursors
   expect(second?.accounts.nextCursor).toBe(null);
   expect(second?.books.items.map((item) => item.pairId)).toEqual(['1/2']);
   expect(second?.books.nextCursor).toBe(null);
+});
+
+test('storage live recovery can verify stored doc hashes', async () => {
+  const previous = process.env['XLN_STORAGE_VERIFY_DOC_HASHES'];
+  process.env['XLN_STORAGE_VERIFY_DOC_HASHES'] = '1';
+  try {
+    const env = makeEnv();
+    const replica = Array.from(env.eReplicas.values())[0]!;
+    const account = replica.state.accounts.get(counterpartyId)!;
+    const head: StorageHead = {
+      schemaVersion: 1,
+      latestHeight: env.height,
+      latestMaterializedHeight: env.height,
+      latestSnapshotHeight: 0,
+      snapshotPeriodFrames: 256,
+      retainSnapshots: 3,
+      epochMaxBytes: 1,
+      accountMerkleRadix: 16,
+      retainedHistoryBytes: 0,
+    };
+    const coreRaw = encodeBuffer(projectEntityCoreDoc(replica.state, replica));
+    const accountRaw = encodeBuffer(projectAccountDoc(account));
+    const db = makeMemoryDb([
+      [KEY_HEAD, encodeBuffer(head)],
+      [keyLiveEntity(entityId), coreRaw],
+      [keyLiveAccount(entityId, counterpartyId), accountRaw],
+      [keyLiveDocHash({ family: 'entity', entityId }), docHashBytes(coreRaw)],
+      [keyLiveDocHash({ family: 'account', entityId, counterpartyId }), docHashBytes(accountRaw)],
+    ]);
+
+    const state = await loadEntityStateFromStorage({
+      env,
+      tryOpenDb: async () => true,
+      getRuntimeDb: () => db,
+      entityId,
+    });
+    expect(state?.accounts.has(counterpartyId)).toBe(true);
+  } finally {
+    if (previous === undefined) delete process.env['XLN_STORAGE_VERIFY_DOC_HASHES'];
+    else process.env['XLN_STORAGE_VERIFY_DOC_HASHES'] = previous;
+  }
+});
+
+test('storage live recovery rejects corrupted doc hash side values', async () => {
+  const previous = process.env['XLN_STORAGE_VERIFY_DOC_HASHES'];
+  process.env['XLN_STORAGE_VERIFY_DOC_HASHES'] = '1';
+  try {
+    const env = makeEnv();
+    const replica = Array.from(env.eReplicas.values())[0]!;
+    const account = replica.state.accounts.get(counterpartyId)!;
+    const head: StorageHead = {
+      schemaVersion: 1,
+      latestHeight: env.height,
+      latestMaterializedHeight: env.height,
+      latestSnapshotHeight: 0,
+      snapshotPeriodFrames: 256,
+      retainSnapshots: 3,
+      epochMaxBytes: 1,
+      accountMerkleRadix: 16,
+      retainedHistoryBytes: 0,
+    };
+    const coreRaw = encodeBuffer(projectEntityCoreDoc(replica.state, replica));
+    const accountRaw = encodeBuffer(projectAccountDoc(account));
+    const db = makeMemoryDb([
+      [KEY_HEAD, encodeBuffer(head)],
+      [keyLiveEntity(entityId), coreRaw],
+      [keyLiveAccount(entityId, counterpartyId), accountRaw],
+      [keyLiveDocHash({ family: 'entity', entityId }), docHashBytes(coreRaw)],
+      [keyLiveDocHash({ family: 'account', entityId, counterpartyId }), Buffer.alloc(32)],
+    ]);
+
+    await expect(loadEntityStateFromStorage({
+      env,
+      tryOpenDb: async () => true,
+      getRuntimeDb: () => db,
+      entityId,
+    })).rejects.toThrow('STORAGE_DOC_HASH_MISMATCH');
+  } finally {
+    if (previous === undefined) delete process.env['XLN_STORAGE_VERIFY_DOC_HASHES'];
+    else process.env['XLN_STORAGE_VERIFY_DOC_HASHES'] = previous;
+  }
 });
 
 test('runtime adapter account pagination avoids full sort materialization', async () => {

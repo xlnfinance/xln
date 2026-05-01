@@ -11,6 +11,9 @@ export type RadixMerkleResult = {
   radix: RadixMerkleRadix;
   depth: number;
   leafCount: number;
+  branchCount: number;
+  extensionCount: number;
+  maxDepth: number;
   root: string;
 };
 
@@ -41,16 +44,65 @@ const branchHash = (radix: RadixMerkleRadix, children: Array<[number, string]>):
   return hashParts(0x01, parts);
 };
 
+const encodePathSegment = (radix: RadixMerkleRadix, path: number[]): Uint8Array => {
+  const header = Buffer.allocUnsafe(2);
+  header.writeUInt16BE(path.length);
+  if (radix === 256) return Buffer.concat([header, Buffer.from(path)]);
+
+  const packed = Buffer.alloc(Math.ceil(path.length / 2));
+  for (let index = 0; index < path.length; index += 1) {
+    const slot = path[index] ?? 0;
+    if (slot < 0 || slot > 0x0f) throw new Error(`RADIX_MERKLE_INVALID_NIBBLE: ${slot}`);
+    const byteIndex = Math.floor(index / 2);
+    if (index % 2 === 0) packed[byteIndex] = (packed[byteIndex] ?? 0) | (slot << 4);
+    else packed[byteIndex] = (packed[byteIndex] ?? 0) | slot;
+  }
+  return Buffer.concat([header, packed]);
+};
+
+const extensionHash = (radix: RadixMerkleRadix, path: number[], childHash: string): string =>
+  hashParts(0x02, [
+    Uint8Array.of(radix === 256 ? 0xff : 0x10),
+    encodePathSegment(radix, path),
+    hexToBytes(childHash),
+  ]);
+
+type MerkleItem = {
+  path: number[];
+  hash: string;
+};
+
+type MerkleNode = {
+  hash: string;
+  branchCount: number;
+  extensionCount: number;
+  maxDepth: number;
+};
+
+const commonPrefixLength = (items: MerkleItem[], offset: number, depth: number): number => {
+  if (items.length <= 1 || offset >= depth) return 0;
+  let length = 0;
+  while (offset + length < depth) {
+    const slot = items[0]?.path[offset + length];
+    if (slot === undefined) break;
+    for (let index = 1; index < items.length; index += 1) {
+      if (items[index]?.path[offset + length] !== slot) return length;
+    }
+    length += 1;
+  }
+  return length;
+};
+
 export const buildRadixMerkle = (
   leaves: RadixMerkleLeaf[],
   options?: { radix?: RadixMerkleRadix },
 ): RadixMerkleResult => {
   const radix = options?.radix === 256 ? 256 : 16;
   if (leaves.length === 0) {
-    return { radix, depth: 0, leafCount: 0, root: EMPTY_ROOT };
+    return { radix, depth: 0, leafCount: 0, branchCount: 0, extensionCount: 0, maxDepth: 0, root: EMPTY_ROOT };
   }
 
-  const deduped = new Map<string, { path: number[]; hash: string }>();
+  const deduped = new Map<string, MerkleItem>();
   for (const leaf of leaves) {
     const keyHex = Buffer.from(leaf.key).toString('hex');
     deduped.set(keyHex, {
@@ -67,31 +119,53 @@ export const buildRadixMerkle = (
     }
   }
 
-  const buildNode = (level: number, group: typeof items): string => {
-    if (group.length === 0) return EMPTY_ROOT;
-    if (level >= depth) {
-      return group[0]?.hash ?? EMPTY_ROOT;
+  const buildNode = (offset: number, group: MerkleItem[]): MerkleNode => {
+    if (group.length === 0) return { hash: EMPTY_ROOT, branchCount: 0, extensionCount: 0, maxDepth: offset };
+    if (group.length === 1 || offset >= depth) {
+      return { hash: group[0]?.hash ?? EMPTY_ROOT, branchCount: 0, extensionCount: 0, maxDepth: offset };
     }
 
-    const buckets = new Map<number, typeof items>();
+    const shared = commonPrefixLength(group, offset, depth);
+    if (shared > 0) {
+      const child = buildNode(offset + shared, group);
+      return {
+        hash: extensionHash(radix, group[0]?.path.slice(offset, offset + shared) ?? [], child.hash),
+        branchCount: child.branchCount,
+        extensionCount: child.extensionCount + 1,
+        maxDepth: child.maxDepth,
+      };
+    }
+
+    const buckets = new Map<number, MerkleItem[]>();
     for (const item of group) {
-      const slot = item.path[level] ?? 0;
+      const slot = item.path[offset] ?? 0;
       const existing = buckets.get(slot);
       if (existing) existing.push(item);
       else buckets.set(slot, [item]);
     }
 
-    return branchHash(
-      radix,
-      Array.from(buckets.entries()).map(([slot, bucket]) => [slot, buildNode(level + 1, bucket)]),
-    );
+    const children = Array.from(buckets.entries()).map(([slot, bucket]) => [slot, buildNode(offset + 1, bucket)] as const);
+    return {
+      hash: branchHash(
+        radix,
+        children.map(([slot, child]) => [slot, child.hash]),
+      ),
+      branchCount: children.reduce((sum, [, child]) => sum + child.branchCount, 1),
+      extensionCount: children.reduce((sum, [, child]) => sum + child.extensionCount, 0),
+      maxDepth: children.reduce((max, [, child]) => Math.max(max, child.maxDepth), offset + 1),
+    };
   };
+
+  const root = buildNode(0, items);
 
   return {
     radix,
     depth,
     leafCount: items.length,
-    root: buildNode(0, items),
+    branchCount: root.branchCount,
+    extensionCount: root.extensionCount,
+    maxDepth: root.maxDepth,
+    root: root.hash,
   };
 };
 
