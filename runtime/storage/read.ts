@@ -6,8 +6,10 @@ import {
   KEY_HEAD,
   KEY_LIVE_ENTITY,
   decodeEntityId,
+  hexBytes,
   keyDiff,
   keyFrame,
+  keyLiveAccount,
   keyLiveAccountPrefix,
   keyLiveBookPrefix,
   keyLiveEntity,
@@ -19,6 +21,7 @@ import {
   normalizeEntityId,
   parseLiveAccountKey,
   parseLiveBookKey,
+  prefixUpperBound,
 } from './keys';
 import { listKeys, readJsonOrNull } from './level';
 import { listSnapshotHeights } from './lifecycle';
@@ -34,6 +37,28 @@ import type {
   StorageHead,
   StorageReplicaMeta,
 } from './types';
+
+export type StorageAccountDocPage = {
+  items: StorageAccountDoc[];
+  nextCursor: string | null;
+};
+
+export type StorageBookDocPage = {
+  items: Array<{ pairId: string; book: BookState }>;
+  nextCursor: string | null;
+};
+
+export type StorageEntityViewPage = {
+  core: StorageEntityCoreDoc;
+  accounts: StorageAccountDocPage;
+  books: StorageBookDocPage;
+};
+
+export type StoragePageQuery = {
+  cursor?: string;
+  limit?: number;
+  sortDir?: 'asc' | 'desc';
+};
 
 export const readStorageHead = async (
   db: RuntimeDbLike,
@@ -64,6 +89,107 @@ const findLatestSnapshotAtOrBelow = async (db: RuntimeDbLike, height: number): P
     if (value <= height && value > best) best = value;
   }
   return best;
+};
+
+const compareAscii = (left: string, right: string): number =>
+  left < right ? -1 : left > right ? 1 : 0;
+
+const readPageLimit = (query?: StoragePageQuery): number => {
+  const raw = Number(query?.limit ?? 10);
+  return Number.isFinite(raw) ? Math.max(1, Math.min(500, Math.floor(raw))) : 10;
+};
+
+const readAccountCursor = (query?: StoragePageQuery): string =>
+  query?.cursor ? normalizeEntityId(query.cursor) : '';
+
+const isAfterAccountCursor = (
+  counterpartyId: string,
+  cursor: string,
+  direction: 'asc' | 'desc',
+): boolean => !cursor || (direction === 'desc' ? counterpartyId < cursor : counterpartyId > cursor);
+
+const pushAccountCandidate = (
+  candidates: Array<{ counterpartyId: string; doc: StorageAccountDoc }>,
+  seen: Set<string>,
+  counterpartyId: string,
+  doc: StorageAccountDoc,
+  limit: number,
+  direction: 'asc' | 'desc',
+): void => {
+  const normalized = normalizeEntityId(counterpartyId);
+  if (seen.has(normalized)) return;
+  seen.add(normalized);
+  const compare = (left: string, right: string): number =>
+    direction === 'desc' ? compareAscii(right, left) : compareAscii(left, right);
+  let insertAt = candidates.length;
+  while (insertAt > 0 && compare(normalized, candidates[insertAt - 1]!.counterpartyId) < 0) {
+    insertAt -= 1;
+  }
+  candidates.splice(insertAt, 0, { counterpartyId: normalized, doc });
+  if (candidates.length > limit + 1) {
+    const dropped = candidates.pop();
+    if (dropped) seen.delete(dropped.counterpartyId);
+  }
+};
+
+const accountPageFromCandidates = (
+  candidates: Array<{ counterpartyId: string; doc: StorageAccountDoc }>,
+  limit: number,
+): StorageAccountDocPage => {
+  const visible = candidates.slice(0, limit);
+  return {
+    items: visible.map((entry) => entry.doc),
+    nextCursor: candidates.length > limit ? visible[visible.length - 1]?.counterpartyId ?? null : null,
+  };
+};
+
+const parseSnapshotAccountKey = (key: Buffer): { entityId: string; counterpartyId: string } => ({
+  entityId: decodeEntityId(key.subarray(9, 41)),
+  counterpartyId: decodeEntityId(key.subarray(41, 73)),
+});
+
+const keySnapshotAccountCursor = (height: number, entityId: string, counterpartyId: string): Buffer =>
+  Buffer.concat([keySnapshotAccountPrefix(height, entityId), hexBytes(counterpartyId)]);
+
+const listAccountPageFromKeyspace = async (options: {
+  db: RuntimeDbLike;
+  prefix: Buffer;
+  cursorKey?: Buffer | undefined;
+  parseKey: (key: Buffer) => { counterpartyId: string };
+  cursor: string;
+  limit: number;
+  direction: 'asc' | 'desc';
+  overlay?: Map<string, StorageAccountDoc | null>;
+}): Promise<StorageAccountDocPage | null> => {
+  const { db, prefix, parseKey, cursor, limit, direction, overlay } = options;
+  if (direction === 'desc' || typeof db.keys !== 'function') return null;
+  const upperBound = prefixUpperBound(prefix);
+  const gte = options.cursorKey ?? prefix;
+  const candidates: Array<{ counterpartyId: string; doc: StorageAccountDoc }> = [];
+  const seen = new Set<string>();
+
+  for (const [counterpartyId, doc] of overlay?.entries?.() ?? []) {
+    if (!doc || !isAfterAccountCursor(counterpartyId, cursor, direction)) continue;
+    pushAccountCandidate(candidates, seen, counterpartyId, doc, limit, direction);
+  }
+
+  for await (const rawKey of db.keys(upperBound ? { gte, lt: upperBound } : { gte })) {
+    const key = Buffer.isBuffer(rawKey)
+      ? rawKey
+      : rawKey instanceof Uint8Array
+        ? Buffer.from(rawKey)
+        : Buffer.from(String(rawKey));
+    const { counterpartyId } = parseKey(key);
+    const normalized = normalizeEntityId(counterpartyId);
+    if (!isAfterAccountCursor(normalized, cursor, direction)) continue;
+    if (overlay?.has(normalized)) continue;
+    const doc = decodeBuffer<StorageAccountDoc>(await db.get(key));
+    pushAccountCandidate(candidates, seen, normalized, doc, limit, direction);
+    const worst = candidates[candidates.length - 1]?.counterpartyId;
+    if (candidates.length > limit && worst && compareAscii(normalized, worst) >= 0) break;
+  }
+
+  return accountPageFromCandidates(candidates, limit);
 };
 
 export const findStorageLatestSnapshotAtOrBelow = async (
@@ -141,6 +267,231 @@ const loadSnapshotDocsForEntity = async (db: RuntimeDbLike, snapshotHeight: numb
   return docs;
 };
 
+const loadEntityCoreDocAtHeight = async (
+  db: RuntimeDbLike,
+  entityId: string,
+  targetHeight: number,
+  latestMaterializedHeight: number,
+): Promise<StorageEntityCoreDoc | null> => {
+  const normalized = normalizeEntityId(entityId);
+  if (targetHeight === latestMaterializedHeight) {
+    return readJsonOrNull<StorageEntityCoreDoc>(db, keyLiveEntity(normalized));
+  }
+
+  const baseSnapshotHeight = await findLatestSnapshotAtOrBelow(db, targetHeight);
+  let core = baseSnapshotHeight > 0
+    ? await readJsonOrNull<StorageEntityCoreDoc>(db, keySnapshotEntity(baseSnapshotHeight, normalized))
+    : null;
+  for (let cursor = baseSnapshotHeight + 1; cursor <= targetHeight; cursor += 1) {
+    const diff = await readJsonOrNull<StorageDiffRecord>(db, keyDiff(cursor));
+    if (!diff) continue;
+    for (const ref of diff.dels) {
+      if (ref.family === 'entity' && normalizeEntityId(ref.entityId) === normalized) core = null;
+    }
+    for (const doc of diff.puts) {
+      if (doc.family === 'entity' && normalizeEntityId(doc.entityId) === normalized) core = doc.value;
+    }
+  }
+  return core;
+};
+
+const collectHistoricalAccountOverlay = async (
+  db: RuntimeDbLike,
+  entityId: string,
+  fromHeightExclusive: number,
+  toHeight: number,
+): Promise<Map<string, StorageAccountDoc | null>> => {
+  const normalized = normalizeEntityId(entityId);
+  const overlay = new Map<string, StorageAccountDoc | null>();
+  for (let height = fromHeightExclusive + 1; height <= toHeight; height += 1) {
+    const diff = await readJsonOrNull<StorageDiffRecord>(db, keyDiff(height));
+    if (!diff) continue;
+    for (const ref of diff.dels) {
+      if (ref.family === 'account' && normalizeEntityId(ref.entityId) === normalized) {
+        overlay.set(normalizeEntityId(ref.counterpartyId), null);
+      }
+    }
+    for (const doc of diff.puts) {
+      if (doc.family === 'account' && normalizeEntityId(doc.entityId) === normalized) {
+        overlay.set(normalizeEntityId(doc.counterpartyId), doc.value);
+      }
+    }
+  }
+  return overlay;
+};
+
+const loadAccountDocPageAtHeight = async (
+  db: RuntimeDbLike,
+  entityId: string,
+  targetHeight: number,
+  latestMaterializedHeight: number,
+  query?: StoragePageQuery,
+): Promise<StorageAccountDocPage | null> => {
+  const normalized = normalizeEntityId(entityId);
+  const limit = readPageLimit(query);
+  const direction = query?.sortDir === 'desc' ? 'desc' : 'asc';
+  const cursor = readAccountCursor(query);
+  if (direction === 'desc') return null;
+
+  if (targetHeight === latestMaterializedHeight) {
+    const prefix = keyLiveAccountPrefix(normalized);
+    return listAccountPageFromKeyspace({
+      db,
+      prefix,
+      cursorKey: cursor ? keyLiveAccount(normalized, cursor) : undefined,
+      parseKey: parseLiveAccountKey,
+      cursor,
+      limit,
+      direction,
+    });
+  }
+
+  const baseSnapshotHeight = await findLatestSnapshotAtOrBelow(db, targetHeight);
+  if (baseSnapshotHeight <= 0) return null;
+  const overlay = await collectHistoricalAccountOverlay(db, normalized, baseSnapshotHeight, targetHeight);
+  const prefix = keySnapshotAccountPrefix(baseSnapshotHeight, normalized);
+  return listAccountPageFromKeyspace({
+    db,
+    prefix,
+    cursorKey: cursor ? keySnapshotAccountCursor(baseSnapshotHeight, normalized, cursor) : undefined,
+    parseKey: parseSnapshotAccountKey,
+    cursor,
+    limit,
+    direction,
+    overlay,
+  });
+};
+
+const bestBidTicks = (book: BookState): bigint | null => {
+  const bucketId = book.bidBucketIdsDesc[0];
+  if (bucketId === undefined) return null;
+  const bucket = book.bidBuckets.get(bucketId.toString());
+  return bucket?.pricesAsc.at(-1) ?? null;
+};
+
+const bestAskTicks = (book: BookState): bigint | null => {
+  const bucketId = book.askBucketIdsAsc[0];
+  if (bucketId === undefined) return null;
+  const bucket = book.askBuckets.get(bucketId.toString());
+  return bucket?.pricesAsc[0] ?? null;
+};
+
+const bookSpreadSortKey = (book: BookState): bigint | null => {
+  const bid = bestBidTicks(book);
+  const ask = bestAskTicks(book);
+  if (bid === null || ask === null) return null;
+  return ask >= bid ? ask - bid : 0n;
+};
+
+const compareBooksNearSpread = (
+  left: [string, BookState],
+  right: [string, BookState],
+): number => {
+  const leftSpread = bookSpreadSortKey(left[1]);
+  const rightSpread = bookSpreadSortKey(right[1]);
+  if (leftSpread !== null && rightSpread !== null && leftSpread !== rightSpread) {
+    return leftSpread < rightSpread ? -1 : 1;
+  }
+  if (leftSpread !== null && rightSpread === null) return -1;
+  if (leftSpread === null && rightSpread !== null) return 1;
+  return compareAscii(String(left[0]), String(right[0]));
+};
+
+const bookPageFromMap = (
+  books: Map<string, BookState>,
+  query?: StoragePageQuery,
+): StorageBookDocPage => {
+  const limit = readPageLimit(query);
+  const cursor = String(query?.cursor || '').trim();
+  const ordered = Array.from(books.entries()).sort(compareBooksNearSpread);
+  const startIndex = cursor ? ordered.findIndex(([pairId]) => pairId === cursor) + 1 : 0;
+  const offset = Math.max(0, startIndex);
+  const visible = ordered.slice(offset, offset + limit);
+  return {
+    items: visible.map(([pairId, book]) => ({ pairId, book })),
+    nextCursor: offset + limit < ordered.length ? visible[visible.length - 1]?.[0] ?? null : null,
+  };
+};
+
+const loadBookDocPageAtHeight = async (
+  db: RuntimeDbLike,
+  entityId: string,
+  targetHeight: number,
+  latestMaterializedHeight: number,
+  query?: StoragePageQuery,
+): Promise<StorageBookDocPage> => {
+  const normalized = normalizeEntityId(entityId);
+  const books = new Map<string, BookState>();
+
+  if (targetHeight === latestMaterializedHeight) {
+    for (const key of await listKeys(db, keyLiveBookPrefix(normalized))) {
+      const parsed = parseLiveBookKey(key);
+      books.set(parsed.pairId, decodeBuffer<BookState>(await db.get(key)));
+    }
+  } else {
+    const baseSnapshotHeight = await findLatestSnapshotAtOrBelow(db, targetHeight);
+    if (baseSnapshotHeight > 0) {
+      for (const key of await listKeys(db, keySnapshotBookPrefix(baseSnapshotHeight, normalized))) {
+        const parsed = parseLiveBookKey(key, 9);
+        books.set(parsed.pairId, decodeBuffer<BookState>(await db.get(key)));
+      }
+    }
+    for (let height = baseSnapshotHeight + 1; height <= targetHeight; height += 1) {
+      const diff = await readJsonOrNull<StorageDiffRecord>(db, keyDiff(height));
+      if (!diff) continue;
+      for (const ref of diff.dels) {
+        if (ref.family === 'book' && normalizeEntityId(ref.entityId) === normalized) books.delete(ref.pairId);
+      }
+      for (const doc of diff.puts) {
+        if (doc.family === 'book' && normalizeEntityId(doc.entityId) === normalized) books.set(doc.pairId, doc.value);
+      }
+    }
+  }
+
+  return bookPageFromMap(books, query);
+};
+
+export const loadEntityViewPageFromStorage = async (options: {
+  env: Env;
+  tryOpenDb: (env: Env) => Promise<boolean>;
+  getRuntimeDb: (env: Env) => RuntimeDbLike;
+  entityId: string;
+  height?: number;
+  accountQuery?: StoragePageQuery;
+  bookQuery?: StoragePageQuery;
+}): Promise<StorageEntityViewPage | null> => {
+  const opened = await options.tryOpenDb(options.env);
+  if (!opened) return null;
+  const db = options.getRuntimeDb(options.env);
+  const head = await readJsonOrNull<StorageHead>(db, KEY_HEAD);
+  if (!head) return null;
+  const targetHeight = Math.min(options.height ?? head.latestHeight, head.latestHeight);
+  const entityId = normalizeEntityId(options.entityId);
+  const latestMaterializedHeight = Math.max(
+    0,
+    Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? 0)),
+  );
+
+  const core = await loadEntityCoreDocAtHeight(db, entityId, targetHeight, latestMaterializedHeight);
+  if (!core) return null;
+  const accounts = await loadAccountDocPageAtHeight(
+    db,
+    entityId,
+    targetHeight,
+    latestMaterializedHeight,
+    options.accountQuery,
+  );
+  if (!accounts) return null;
+  const books = await loadBookDocPageAtHeight(
+    db,
+    entityId,
+    targetHeight,
+    latestMaterializedHeight,
+    options.bookQuery,
+  );
+  return { core, accounts, books };
+};
+
 export const loadEntityStateFromStorage = async (options: {
   env: Env;
   tryOpenDb: (env: Env) => Promise<boolean>;
@@ -157,7 +508,7 @@ export const loadEntityStateFromStorage = async (options: {
   const entityId = normalizeEntityId(options.entityId);
   const latestMaterializedHeight = Math.max(
     0,
-    Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? head.latestHeight ?? 0)),
+    Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? 0)),
   );
 
   if (targetHeight === latestMaterializedHeight) {

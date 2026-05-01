@@ -1,11 +1,13 @@
 import type { EntityState, Env, RuntimeInput } from '../types';
 import { assertRuntimeAdapterMessageSize, encodeRuntimeAdapterMessage } from './codec';
 import type { StorageFrameRecord, StorageHead } from '../storage/types';
+import type { StorageEntityViewPage } from '../storage';
 import { RuntimeAdapterError, toRuntimeAdapterErrorPayload } from './errors';
 import { consumeToken, createTokenBucket, tokenRetryAfterMs, type TokenBucket } from './rate-limit';
 import { resolveRuntimeAdapterRead } from './resolve';
 import type {
   RuntimeAdapterAuthLevel,
+  RuntimeAdapterReadQuery,
   RuntimeAdapterRequest,
   RuntimeAdapterResponse,
 } from './types';
@@ -32,6 +34,7 @@ export type RuntimeAdapterServerDeps = {
   readFrame?: (env: Env, height: number) => Promise<StorageFrameRecord | null>;
   listCheckpoints?: (env: Env) => Promise<number[]>;
   loadEntityState?: (env: Env, entityId: string, height: number) => Promise<EntityState | null>;
+  loadEntityViewPage?: (env: Env, entityId: string, height: number, query?: RuntimeAdapterReadQuery) => Promise<StorageEntityViewPage | null>;
   listEntityIdsAtHeight?: (env: Env, height: number) => Promise<string[]>;
   enqueueRuntimeInput: (env: Env, input: RuntimeInput) => void;
 };
@@ -39,6 +42,7 @@ export type RuntimeAdapterServerDeps = {
 const clients = new Map<AdapterSocket, AdapterClientState>();
 let attachedEnv: Env | null = null;
 let detachEnvChange: (() => void) | null = null;
+const RUNTIME_ADAPTER_BACKPRESSURE_DEFAULT_BYTES = 2 * 1024 * 1024;
 
 const readPositiveNumberEnv = (name: string, fallback: number): number => {
   const raw = typeof process !== 'undefined' ? process.env[name] : undefined;
@@ -54,6 +58,9 @@ const createConfiguredBucket = (
   readPositiveNumberEnv(`XLN_RADAPTER_${label}_BURST`, defaultCapacity),
   readPositiveNumberEnv(`XLN_RADAPTER_${label}_PER_SEC`, defaultRefillPerSecond),
 );
+
+const runtimeAdapterBackpressureBytes = (): number =>
+  readPositiveNumberEnv('XLN_RADAPTER_BACKPRESSURE_BYTES', RUNTIME_ADAPTER_BACKPRESSURE_DEFAULT_BYTES);
 
 const getClientState = (ws: AdapterSocket): AdapterClientState => {
   let state = clients.get(ws);
@@ -72,8 +79,9 @@ const getClientState = (ws: AdapterSocket): AdapterClientState => {
 
 const sendResponse = (ws: AdapterSocket, response: RuntimeAdapterResponse): void => {
   const buffered = (ws as AdapterSocket & { getBufferedAmount?: () => number }).getBufferedAmount?.() ?? 0;
-  if (buffered > 2 * 1024 * 1024) {
-    throw new RuntimeAdapterError('E_RATE_LIMITED', 'runtime adapter socket backpressure', true);
+  if (buffered > runtimeAdapterBackpressureBytes()) {
+    ws.close?.(1013, 'runtime adapter socket backpressure');
+    return;
   }
   const encoded = encodeRuntimeAdapterMessage(response);
   try {
@@ -134,6 +142,11 @@ export const forgetRuntimeAdapterClient = (ws: AdapterSocket): void => {
 };
 
 export const runtimeAdapterClientCount = (): number => clients.size;
+
+export const closeInvalidRuntimeAdapterMessage = (ws: AdapterSocket, error: unknown): void => {
+  const message = error instanceof Error ? error.message : String(error || '');
+  ws.close?.(message.includes('RADAPTER_MESSAGE_TOO_LARGE') ? 1009 : 1003, 'Invalid runtime adapter message');
+};
 
 export const broadcastRuntimeAdapterTick = (env: Env): void => {
   if (clients.size === 0) return;
@@ -211,6 +224,7 @@ export const handleRuntimeAdapterMessage = async (
         ...(deps.readFrame ? { readFrame: (height) => deps.readFrame?.(env, height) ?? Promise.resolve(null) } : {}),
         ...(deps.listCheckpoints ? { listCheckpoints: () => deps.listCheckpoints?.(env) ?? Promise.resolve([]) } : {}),
         ...(deps.loadEntityState ? { loadEntityState: (entityId, height) => deps.loadEntityState?.(env, entityId, height) ?? Promise.resolve(null) } : {}),
+        ...(deps.loadEntityViewPage ? { loadEntityViewPage: (entityId, height, query) => deps.loadEntityViewPage?.(env, entityId, height, query) ?? Promise.resolve(null) } : {}),
         ...(deps.listEntityIdsAtHeight ? { listEntityIdsAtHeight: (height) => deps.listEntityIdsAtHeight?.(env, height) ?? Promise.resolve([]) } : {}),
       }, msg.path, msg.query);
       sendOk(ws, msg.id, payload);

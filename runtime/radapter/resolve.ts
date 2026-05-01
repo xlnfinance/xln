@@ -24,6 +24,15 @@ export type RuntimeAdapterResolveContext = {
   readFrame?: (height: number) => Promise<StorageFrameRecord | null>;
   listCheckpoints?: () => Promise<number[]>;
   loadEntityState?: (entityId: string, height: number) => Promise<EntityState | null>;
+  loadEntityViewPage?: (
+    entityId: string,
+    height: number,
+    query?: RuntimeAdapterReadQuery,
+  ) => Promise<{
+    core: StorageEntityCoreDoc;
+    accounts: RuntimeAdapterAccountPage;
+    books: RuntimeAdapterBookPage;
+  } | null>;
   listEntityIdsAtHeight?: (height: number) => Promise<string[]>;
 };
 
@@ -152,11 +161,15 @@ const listEntitySummaries = async (
     const ids = await ctx.listEntityIdsAtHeight(height);
     const summaries: RuntimeAdapterEntitySummary[] = [];
     for (const id of ids) {
-      const loaded = ctx.loadEntityState ? await ctx.loadEntityState(id, height) : null;
+      const loadedView = ctx.loadEntityViewPage
+        ? await ctx.loadEntityViewPage(id, height, { limit: 1, accountsLimit: 1, booksLimit: 1 })
+        : null;
+      const loaded = !loadedView && ctx.loadEntityState ? await ctx.loadEntityState(id, height) : null;
+      const profileName = loadedView ? String(loadedView.core.profile?.name || '').trim() : '';
       summaries.push({
         entityId: normalizeEntityId(id),
-        label: loaded ? labelForState(loaded) : normalizeEntityId(id),
-        height: loaded?.height ?? height,
+        label: profileName || (loaded ? labelForState(loaded) : normalizeEntityId(id)),
+        height: loadedView?.core.height ?? loaded?.height ?? height,
       });
     }
     return summaries.sort((left, right) => compareAscii(left.entityId, right.entityId));
@@ -201,7 +214,7 @@ const projectAccountsPage = (
 
   const visibleKeys = pageKeys.slice(0, limit);
   const items = visibleKeys.map(({ raw, normalized: counterpartyId }) => {
-    const account = state.accounts.get(raw) ?? state.accounts.get(counterpartyId);
+    const account = state.accounts.get(raw);
     if (!account) throw new RuntimeAdapterError('E_INTERNAL', `account index drift: ${normalized}/${counterpartyId}`);
     return projectAccountDoc(account);
   });
@@ -248,21 +261,21 @@ const compareBooksNearSpread = (
   return compareAscii(String(left[0]), String(right[0]));
 };
 
-const projectBookPage = (state: EntityState, limit = 10): RuntimeAdapterBookPage => {
-  const page: Array<[string, BookState]> = [];
-  for (const [rawPairId, book] of state.orderbookExt?.books?.entries?.() ?? []) {
-    const pairId = String(rawPairId);
-    let insertAt = page.length;
-    while (insertAt > 0 && compareBooksNearSpread([pairId, book], page[insertAt - 1]!) < 0) {
-      insertAt -= 1;
-    }
-    page.splice(insertAt, 0, [pairId, book]);
-    if (page.length > limit + 1) page.pop();
-  }
-  const visible = page.slice(0, limit);
+const projectBookPage = (
+  state: EntityState,
+  limit = 10,
+  query?: RuntimeAdapterReadQuery,
+): RuntimeAdapterBookPage => {
+  const cursor = String(query?.cursor || '').trim();
+  const ordered = Array.from(state.orderbookExt?.books?.entries?.() ?? [])
+    .map(([pairId, book]) => [String(pairId), book] as [string, BookState])
+    .sort(compareBooksNearSpread);
+  const startIndex = cursor ? ordered.findIndex(([pairId]) => pairId === cursor) + 1 : 0;
+  const offset = Math.max(0, startIndex);
+  const visible = ordered.slice(offset, offset + limit);
   return {
     items: visible.map(([pairId, book]) => ({ pairId, book })),
-    nextCursor: page.length > limit ? visible[visible.length - 1]?.[0] ?? null : null,
+    nextCursor: offset + limit < ordered.length ? visible[visible.length - 1]?.[0] ?? null : null,
   };
 };
 
@@ -282,20 +295,57 @@ const projectViewFrame = async (
     return { head, height, entities, activeEntityId: null, activeEntity: null };
   }
 
-  const { state, replica } = await resolveEntityState(ctx, activeEntityId, heightQuery);
-  const summary = entities.find((entity) => normalizeEntityId(entity.entityId) === activeEntityId) ?? {
-    entityId: activeEntityId,
-    label: labelForState(state),
-    height: Math.max(0, Math.floor(Number(state.height ?? height))),
-  };
   const accountQuery: RuntimeAdapterReadQuery = {
     ...heightQuery,
     limit: readBoundedLimit(query?.accountsLimit, query?.limit ?? 10),
   };
   const accountsCursor = query?.accountsCursor ?? query?.cursor;
   if (accountsCursor) accountQuery.cursor = accountsCursor;
+  const bookQuery: RuntimeAdapterReadQuery = {
+    ...heightQuery,
+    limit: readBoundedLimit(query?.booksLimit, query?.limit ?? 10),
+  };
+  if (query?.booksCursor) bookQuery.cursor = query.booksCursor;
+
+  if (height !== ctx.env.height && ctx.loadEntityViewPage) {
+    const storedQuery: RuntimeAdapterReadQuery = {
+      ...heightQuery,
+    };
+    if (accountQuery.limit !== undefined) storedQuery.limit = accountQuery.limit;
+    if (accountQuery.limit !== undefined) storedQuery.accountsLimit = accountQuery.limit;
+    if (accountQuery.cursor) storedQuery.accountsCursor = accountQuery.cursor;
+    if (bookQuery.limit !== undefined) storedQuery.booksLimit = bookQuery.limit;
+    if (bookQuery.cursor) storedQuery.booksCursor = bookQuery.cursor;
+    const stored = await ctx.loadEntityViewPage(activeEntityId, height, storedQuery);
+    if (stored) {
+      const summary = entities.find((entity) => normalizeEntityId(entity.entityId) === activeEntityId) ?? {
+        entityId: activeEntityId,
+        label: String(stored.core.profile?.name || '').trim() || activeEntityId,
+        height: Math.max(0, Math.floor(Number(stored.core.height ?? height))),
+      };
+      return {
+        head,
+        height,
+        entities,
+        activeEntityId,
+        activeEntity: {
+          summary,
+          core: stored.core,
+          accounts: stored.accounts,
+          books: stored.books,
+        },
+      };
+    }
+  }
+
+  const { state, replica } = await resolveEntityState(ctx, activeEntityId, heightQuery);
+  const summary = entities.find((entity) => normalizeEntityId(entity.entityId) === activeEntityId) ?? {
+    entityId: activeEntityId,
+    label: labelForState(state),
+    height: Math.max(0, Math.floor(Number(state.height ?? height))),
+  };
   const accounts = projectAccountsPage(activeEntityId, state, accountQuery);
-  const books = projectBookPage(state, readBoundedLimit(query?.booksLimit, query?.limit ?? 10));
+  const books = projectBookPage(state, bookQuery.limit, bookQuery);
 
   return {
     head,
@@ -334,6 +384,15 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
   if (parts[0] === 'entity' && parts.length >= 2) {
     const entityId = parts[1];
     if (!entityId) throw new RuntimeAdapterError('E_BAD_PATH', 'entity id is required');
+
+    if (parts.length === 3 && (parts[2] === 'accounts' || parts[2] === 'books' || parts[2] === 'book-docs')) {
+      const height = readAtHeight(query);
+      if (height !== null && height !== ctx.env.height && ctx.loadEntityViewPage) {
+        const stored = await ctx.loadEntityViewPage(entityId, height, query);
+        if (stored) return (parts[2] === 'accounts' ? stored.accounts : stored.books) as T;
+      }
+    }
+
     const { state, replica } = await resolveEntityState(ctx, entityId, query);
 
     if (parts.length === 2) {
@@ -352,11 +411,11 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
     }
 
     if (parts.length === 3 && parts[2] === 'books') {
-      return projectBookPage(state, readBoundedLimit(query?.booksLimit, query?.limit ?? 10)) as T;
+      return projectBookPage(state, readBoundedLimit(query?.booksLimit, query?.limit ?? 10), query) as T;
     }
 
     if (parts.length === 3 && parts[2] === 'book-docs') {
-      return projectBookPage(state, readBoundedLimit(query?.booksLimit, query?.limit ?? 10)) as T;
+      return projectBookPage(state, readBoundedLimit(query?.booksLimit, query?.limit ?? 10), query) as T;
     }
   }
 

@@ -45,6 +45,7 @@ export const connectRuntimeAdapter = async (config: RuntimeAdapterConfig): Promi
         readFrame: (height) => xln.readPersistedStorageFrameRecord(env, height),
         listCheckpoints: () => xln.listPersistedCheckpointHeights(env),
         loadEntityState: (entityId, height) => xln.loadEntityStateFromStorageDb(env, entityId, height),
+        loadEntityViewPage: (entityId, height, query) => xln.loadEntityViewPageFromStorageDb(env, entityId, height, query),
         listEntityIdsAtHeight: (height) => xln.listPersistedEntityIdsAtHeight(env, height),
       }),
     });

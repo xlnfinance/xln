@@ -90,20 +90,22 @@ export const buildFrameDbPuts = (options: {
       const counterpartyId = normalizeEntityId(record.counterpartyId);
       const accountHeight = Number(record.accountHeight || record.frame?.height || 0);
       if (!entityId || !counterpartyId || !Number.isFinite(accountHeight) || accountHeight <= 0) continue;
+      const recordHeight = Math.max(1, Math.floor(Number(record.runtimeHeight ?? options.height)));
+      const recordTimestamp = Math.max(0, Math.floor(Number(record.timestamp ?? options.timestamp)));
       const stored: StoredAccountFrameRecord = {
         ...record,
         entityId,
         counterpartyId,
         accountHeight: Math.floor(accountHeight),
-        runtimeHeight: options.height,
-        timestamp: options.timestamp,
+        runtimeHeight: recordHeight,
+        timestamp: recordTimestamp,
       };
       puts.push({
         key: keyFrameDbAccountFrame(entityId, counterpartyId, stored.accountHeight),
         value: encodeBuffer(stored),
       });
       puts.push({
-        key: keyFrameDbAccountFrameByRuntime(options.height, entityId, counterpartyId, stored.accountHeight),
+        key: keyFrameDbAccountFrameByRuntime(recordHeight, entityId, counterpartyId, stored.accountHeight),
         value: Buffer.alloc(0),
       });
       frameCountsByEntity.set(entityId, (frameCountsByEntity.get(entityId) ?? 0) + 1);
@@ -114,16 +116,18 @@ export const buildFrameDbPuts = (options: {
       const entityId = normalizeEntityId(record.entityId);
       const pairId = String(record.pairId || '').trim();
       if (!entityId || !pairId) continue;
+      const recordHeight = Math.max(1, Math.floor(Number(record.runtimeHeight ?? options.height)));
+      const recordTimestamp = Math.max(0, Math.floor(Number(record.timestamp ?? options.timestamp)));
       const stored: StoredOrderbookCommitRecord = {
         kind: 'bookUpdate',
         entityId,
         pairId,
         book: record.book ? structuredClone(record.book) : null,
-        runtimeHeight: options.height,
-        timestamp: options.timestamp,
+        runtimeHeight: recordHeight,
+        timestamp: recordTimestamp,
       };
       puts.push({
-        key: keyFrameDbOrderbookCommit(options.height, entityId, pairId),
+        key: keyFrameDbOrderbookCommit(recordHeight, entityId, pairId),
         value: encodeBuffer(stored),
       });
       orderbookCountsByEntity.set(entityId, (orderbookCountsByEntity.get(entityId) ?? 0) + 1);

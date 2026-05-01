@@ -177,6 +177,7 @@ import {
   listStorageSnapshotEntityIds,
   listStorageSnapshotHeights,
   loadEntityStateFromStorage,
+  loadEntityViewPageFromStorage,
   readFrameDbAccountFrames,
   readFrameDbRuntimeActivity,
   readStorageFrameRecord,
@@ -189,6 +190,7 @@ import {
   verifyStorageTailIntegrity,
 } from './storage';
 import { storageOverlayRecordKey } from './storage/overlay';
+import type { RuntimeAdapterReadQuery } from './radapter';
 export {
   resolveRuntimeAdapterRead,
   EmbeddedRuntimeAdapter,
@@ -4260,7 +4262,7 @@ export const saveEnvToDB = async (
   if (envRecord(env)[ENV_REPLAY_MODE_KEY] === true) {
     throw new Error('REPLAY_INVARIANT_FAILED: saveEnvToDB called during replay');
   }
-  const pendingFrameDbRecords = peekPendingFrameDbRecords(env);
+  const pendingFrameDbRecords = peekPendingFrameDbRecords(env, env.height, env.timestamp);
   const saveResult = await saveRuntimeFrameToStorage({
     env,
     tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'current'),
@@ -4274,7 +4276,9 @@ export const saveEnvToDB = async (
     ...(currentFrameInput === undefined ? {} : { currentFrameInput }),
     ...(currentFrameOutputs === undefined ? {} : { currentFrameOutputs }),
   });
-  dropPendingFrameDbRecords(env, pendingFrameDbRecords.length);
+  if (saveResult.frameDbCommitted) {
+    dropPendingFrameDbRecords(env, pendingFrameDbRecords.length);
+  }
   if (saveResult.materialized) {
     dropOverlay(env, saveResult.materializedOverlayRecords);
   }
@@ -4335,7 +4339,7 @@ const listPersistedStorageHandles = async (env: Env): Promise<PersistedStorageHa
       latestHeight: head.latestHeight,
       latestMaterializedHeight: Math.max(
         0,
-        Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? head.latestHeight ?? 0)),
+        Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? 0)),
       ),
       latestSnapshotHeight: head.latestSnapshotHeight,
       snapshotHeights: await listStorageSnapshotHeights(db),
@@ -4652,6 +4656,44 @@ export const loadEntityStateFromStorageDb = async (
     getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'previous'),
     entityId,
     height,
+  });
+};
+
+export const loadEntityViewPageFromStorageDb = async (
+  env: Env,
+  entityId: string,
+  height: number,
+  query?: RuntimeAdapterReadQuery,
+) => {
+  const accountQuery = {
+    ...(query?.cursor ? { cursor: query.cursor } : {}),
+    ...(query?.accountsCursor ? { cursor: query.accountsCursor } : {}),
+    ...(query?.accountsLimit !== undefined ? { limit: query.accountsLimit } : query?.limit !== undefined ? { limit: query.limit } : {}),
+    ...(query?.sortDir ? { sortDir: query.sortDir } : {}),
+  };
+  const bookCursor = query?.booksCursor ?? (query?.accountsCursor ? undefined : query?.cursor);
+  const bookQuery = {
+    ...(bookCursor ? { cursor: bookCursor } : {}),
+    ...(query?.booksLimit !== undefined ? { limit: query.booksLimit } : query?.limit !== undefined ? { limit: query.limit } : {}),
+  };
+  const current = await loadEntityViewPageFromStorage({
+    env,
+    tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'current'),
+    getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'current'),
+    entityId,
+    height,
+    accountQuery,
+    bookQuery,
+  });
+  if (current) return current;
+  return loadEntityViewPageFromStorage({
+    env,
+    tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'previous'),
+    getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'previous'),
+    entityId,
+    height,
+    accountQuery,
+    bookQuery,
   });
 };
 

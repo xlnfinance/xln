@@ -126,6 +126,12 @@
     isOpen = false;
   }
 
+  function handleRuntimeKeydown(event: KeyboardEvent, runtime: RuntimeEntry) {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    selectRuntime(runtime);
+  }
+
   function runtimeLabel(runtime: RuntimeEntry | null): string {
     if (!runtime) return allowAdd ? 'Add Runtime' : 'Select Runtime';
     return runtime.label || 'Runtime';
@@ -145,10 +151,13 @@
       <div class="empty-state">No runtimes yet</div>
     {:else}
       {#each runtimeEntries as runtime (runtime.id)}
-        <button
+        <div
           class="menu-item"
           class:selected={runtime.id === currentRuntime?.id}
+          role="button"
+          tabindex="0"
           on:click={() => selectRuntime(runtime)}
+          on:keydown={(event) => handleRuntimeKeydown(event, runtime)}
         >
           <span class="conn-dot {runtime.id === currentRuntime?.id ? runtime.status : 'inactive'}"></span>
           <span class="menu-label" title={runtime.title}>{runtime.label}</span>
@@ -162,7 +171,7 @@
               ×
             </button>
           {/if}
-        </button>
+        </div>
       {/each}
     {/if}
 

@@ -30,6 +30,8 @@
     "test:e2e:parallel:max": "E2E_LONG=1 bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=8 --workers-per-shard=1 --stack-timeout-ms=300000 --video=on --trace=off --screenshot=only-on-failure --max-failures=1",
     "test:e2e:parallel:long": "E2E_LONG=1 bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=8 --workers-per-shard=1 --max-mm-concurrency=2 --video=on --trace=off --screenshot=only-on-failure --max-failures=1",
     "test:e2e:mvp": "bun runtime/scripts/run-e2e-parallel-isolated.ts --video=on --trace=off --screenshot=only-on-failure --max-failures=1",
+    "test:e2e:core": "bun runtime/scripts/run-e2e-core.ts",
+    "test:e2e:core:fast": "bun runtime/scripts/run-e2e-core.ts --skip-build",
     "test:persistence:cli": "bun runtime/scripts/persistence-wal-smoke.ts",
     "debug:receipts": "bun runtime/scripts/read-frame-receipts.ts",
     "bench:storage:hub": "bun runtime/scripts/bench-storage-hub.ts",

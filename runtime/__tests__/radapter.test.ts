@@ -10,6 +10,7 @@ import {
 import { decodeRuntimeAdapterMessage, encodeRuntimeAdapterMessage } from '../radapter/codec';
 import { resolveRuntimeAdapterRead } from '../radapter/resolve';
 import { broadcastRuntimeAdapterTick, handleRuntimeAdapterMessage } from '../radapter/server';
+import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
 import type { EntityReplica, Env } from '../types';
 import type { BookState } from '../orderbook';
 import { DEFAULT_SPREAD_DISTRIBUTION, type OrderbookExtState } from '../orderbook/types';
@@ -230,6 +231,75 @@ test('runtime adapter view frame defaults to 10 accounts and cursor pagination',
     `0x${'0c'.padStart(64, '0')}`,
   ]);
   expect(second.nextCursor).toBe(null);
+});
+
+test('runtime adapter view frame honors the requested entity id', async () => {
+  const env = makeEnv();
+  const first = Array.from(env.eReplicas.values())[0]!;
+  const secondEntityId = `0x${'cc'.repeat(32)}`;
+  env.eReplicas.set(`${secondEntityId}:signer`, {
+    ...first,
+    entityId: secondEntityId,
+    signerId: 'other-signer',
+    state: {
+      ...first.state,
+      entityId: secondEntityId,
+      accounts: new Map(),
+      profile: { ...first.state.profile, name: 'Requested Entity' },
+    },
+  } as EntityReplica);
+
+  const frame = await resolveRuntimeAdapterRead<{
+    activeEntityId: string | null;
+    activeEntity: { core: { entityId: string; profile?: { name?: string } } } | null;
+  }>({ env }, 'view-frame', { entityId: secondEntityId });
+
+  expect(frame.activeEntityId).toBe(secondEntityId);
+  expect(frame.activeEntity?.core.entityId).toBe(secondEntityId);
+  expect(frame.activeEntity?.core.profile?.name).toBe('Requested Entity');
+});
+
+test('runtime adapter historical view frame uses paged storage loader instead of full entity load', async () => {
+  const env = makeEnv();
+  const replica = Array.from(env.eReplicas.values())[0]!;
+  const account = replica.state.accounts.get(counterpartyId)!;
+  let fullLoadCalled = false;
+  let pagedLoadCalled = false;
+
+  const frame = await resolveRuntimeAdapterRead<{
+    activeEntity: { accounts: { items: Array<{ rightEntity: string }> } } | null;
+  }>({
+    env,
+    readHead: async () => ({
+      schemaVersion: 1,
+      latestHeight: 9,
+      latestMaterializedHeight: 8,
+      latestSnapshotHeight: 8,
+      snapshotPeriodFrames: 256,
+      retainSnapshots: 3,
+      epochMaxBytes: 1,
+      accountMerkleRadix: 16,
+      retainedHistoryBytes: 0,
+    }),
+    listEntityIdsAtHeight: async () => [entityId],
+    loadEntityState: async () => {
+      fullLoadCalled = true;
+      return null;
+    },
+    loadEntityViewPage: async () => {
+      pagedLoadCalled = true;
+      return {
+        core: projectEntityCoreDoc(replica.state, replica),
+        accounts: { items: [projectAccountDoc(account)], nextCursor: null },
+        books: { items: [], nextCursor: null },
+      };
+    },
+  }, 'view-frame', { atHeight: 8, accountsLimit: 1 });
+
+  expect(pagedLoadCalled).toBe(true);
+  expect(fullLoadCalled).toBe(false);
+  expect(frame.activeEntity?.accounts.items).toHaveLength(1);
+  expect(frame.activeEntity?.accounts.items[0]?.rightEntity).toBe(counterpartyId);
 });
 
 test('runtime adapter account pagination avoids full sort materialization', async () => {

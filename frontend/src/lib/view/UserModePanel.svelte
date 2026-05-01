@@ -13,7 +13,16 @@
   import type { Writable } from 'svelte/store';
   import { writable, get } from 'svelte/store';
   import { activeVault, vaultOperations, allVaults } from '$lib/stores/vaultStore';
-  import { appRuntimeAdapterMode, entityPositions, xlnFunctions, xlnInstance, getXLN, enqueueAndProcess } from '$lib/stores/xlnStore';
+  import {
+    appRuntimeAdapterMode,
+    entityPositions,
+    xlnFunctions,
+    xlnInstance,
+    getXLN,
+    enqueueAndProcess,
+    refreshRuntimeAdapterEnvironment,
+    setRuntimeAdapterActiveEntityId,
+  } from '$lib/stores/xlnStore';
   import { jmachineOperations } from '$lib/stores/jmachineStore';
   import { runtimes, activeRuntimeId } from '$lib/stores/runtimeStore';
   import { showVaultPanel, vaultUiOperations } from '$lib/stores/vaultUiStore';
@@ -479,6 +488,10 @@
     selectedSignerId = signerId;
     selectedAccountId = null;
     selectedJurisdictionName = null; // Clear filter to allow any entity
+    if (isRemoteRuntime) {
+      setRuntimeAdapterActiveEntityId(entityId);
+      void refreshRuntimeAdapterEnvironment();
+    }
   }
 
   // Handle account selection from dropdown

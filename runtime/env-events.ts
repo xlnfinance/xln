@@ -252,10 +252,25 @@ export const recordOrderbookPairUpdate = (
   markStorageBookDirty(env, entityId, pairId, !record.book);
 };
 
-export const peekPendingFrameDbRecords = (env: Env): RuntimeFrameDbRecord[] =>
-  Array.isArray(env.runtimeState?.pendingFrameDbRecords)
-    ? env.runtimeState.pendingFrameDbRecords.map((record) => structuredClone(record))
-    : [];
+export const peekPendingFrameDbRecords = (
+  env: Env,
+  runtimeHeight?: number,
+  timestamp?: number,
+): RuntimeFrameDbRecord[] => {
+  const pending = env.runtimeState?.pendingFrameDbRecords;
+  if (!Array.isArray(pending) || pending.length === 0) return [];
+  const stampedHeight = Number.isFinite(runtimeHeight)
+    ? Math.max(0, Math.floor(Number(runtimeHeight)))
+    : null;
+  const stampedTimestamp = Number.isFinite(timestamp)
+    ? Math.max(0, Math.floor(Number(timestamp)))
+    : null;
+  for (const record of pending) {
+    if (record.runtimeHeight === undefined && stampedHeight !== null) record.runtimeHeight = stampedHeight;
+    if (record.timestamp === undefined && stampedTimestamp !== null) record.timestamp = stampedTimestamp;
+  }
+  return pending.map((record) => structuredClone(record));
+};
 
 export const dropPendingFrameDbRecords = (env: Env, count: number): void => {
   const pending = env.runtimeState?.pendingFrameDbRecords;
