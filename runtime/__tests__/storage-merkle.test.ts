@@ -5,6 +5,15 @@ import {
   buildHexKeyedMerkleProof,
   verifyRadixMerkleProof,
 } from '../storage/merkle';
+import {
+  KEY_MERKLE_BRANCH,
+  KEY_MERKLE_LEAF,
+  KEY_MERKLE_ROOT,
+  keyMerkleBranch,
+  keyMerkleBranchPrefix,
+  keyMerkleLeaf,
+  keyMerkleRoot,
+} from '../storage/keys';
 
 const hexKey = (byte: number): string => `0x${byte.toString(16).padStart(2, '0').repeat(32)}`;
 const value = (text: string): Uint8Array => new TextEncoder().encode(text);
@@ -145,4 +154,17 @@ test('storage radix merkle rejects mixed key lengths', () => {
       { hexKey: hexKey(0x22), value: value('full') },
     ]),
   ).toThrow(/RADIX_MERKLE_MIXED_KEY_LENGTHS/);
+});
+
+test('storage merkle durable keyspace is scoped by entity namespace and path', () => {
+  const entityId = hexKey(0xab);
+  const branch = keyMerkleBranch(entityId, 'accounts', Uint8Array.from([0x12, 0x34]));
+  const leaf = keyMerkleLeaf(entityId, 'accounts', Uint8Array.from([0x12, 0x34]));
+  const root = keyMerkleRoot(entityId, 'accounts');
+
+  expect(root[0]).toBe(KEY_MERKLE_ROOT);
+  expect(branch[0]).toBe(KEY_MERKLE_BRANCH);
+  expect(leaf[0]).toBe(KEY_MERKLE_LEAF);
+  expect(branch.subarray(0, keyMerkleBranchPrefix(entityId, 'accounts').length)).toEqual(keyMerkleBranchPrefix(entityId, 'accounts'));
+  expect(Buffer.compare(branch, leaf)).not.toBe(0);
 });
