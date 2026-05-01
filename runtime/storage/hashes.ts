@@ -29,7 +29,7 @@ import {
   parseLiveAccountKey,
   parseLiveBookKey,
 } from './keys';
-import { listKeys, readJsonOrNull, readRawOrNull } from './level';
+import { iterateKeys, readJsonOrNull, readRawOrNull } from './level';
 import { buildHexKeyedMerkle } from './merkle';
 import { projectAccountDoc, projectEntityCoreDoc } from './projections';
 import { buildReplicaLookup, findReplicaForEntity } from './replicas';
@@ -267,14 +267,14 @@ const buildEntityHashDocFromLive = async (db: RuntimeDbLike, entityId: string): 
   const entityRaw = await readRawOrNull(db, keyLiveEntity(normalizedEntityId));
   if (entityRaw) cells.push({ key: 'entity', hash: hashBuffer(entityRaw) });
 
-  for (const key of await listKeys(db, keyLiveAccountPrefix(normalizedEntityId))) {
+  for await (const key of iterateKeys(db, { prefix: keyLiveAccountPrefix(normalizedEntityId) })) {
     const raw = await readRawOrNull(db, key);
     if (!raw) continue;
     const parsed = parseLiveAccountKey(key);
     cells.push({ key: docRefCellKey({ family: 'account', entityId: normalizedEntityId, counterpartyId: parsed.counterpartyId }), hash: hashBuffer(raw) });
   }
 
-  for (const key of await listKeys(db, keyLiveBookPrefix(normalizedEntityId))) {
+  for await (const key of iterateKeys(db, { prefix: keyLiveBookPrefix(normalizedEntityId) })) {
     const raw = await readRawOrNull(db, key);
     if (!raw) continue;
     const parsed = parseLiveBookKey(key);
@@ -286,8 +286,7 @@ const buildEntityHashDocFromLive = async (db: RuntimeDbLike, entityId: string): 
 
 export const readAllEntityHashDocs = async (db: RuntimeDbLike): Promise<Map<string, StorageEntityHashDoc>> => {
   const docs = new Map<string, StorageEntityHashDoc>();
-  const hashKeys = await listKeys(db, keyLiveEntityHashPrefix());
-  for (const key of hashKeys) {
+  for await (const key of iterateKeys(db, { prefix: keyLiveEntityHashPrefix() })) {
     const entityId = decodeEntityId(key.subarray(1, 33));
     const doc = await readEntityHashDoc(db, entityId);
     if (doc) docs.set(normalizeEntityId(entityId), buildEntityHashDoc(entityId, doc.cells));
@@ -298,7 +297,8 @@ export const readAllEntityHashDocs = async (db: RuntimeDbLike): Promise<Map<stri
   // Backward-compatibility bootstrap for DBs created before storage-debug-v1
   // hash docs. This is intentionally one-time O(live state); subsequent frames
   // update only touched cell hashes.
-  for (const entityId of (await listKeys(db, Buffer.from([KEY_LIVE_ENTITY]))).map((key) => decodeEntityId(key.subarray(1, 33)))) {
+  for await (const key of iterateKeys(db, { prefix: Buffer.from([KEY_LIVE_ENTITY]) })) {
+    const entityId = decodeEntityId(key.subarray(1, 33));
     docs.set(normalizeEntityId(entityId), await buildEntityHashDocFromLive(db, entityId));
   }
   return docs;

@@ -15,17 +15,17 @@ import {
   keySnapshotEntityPrefix,
   keySnapshotManifest,
 } from './keys';
-import { listKeys, readJsonOrNull } from './level';
+import { countKeys, readJsonOrNull } from './level';
 import { readStorageFrameRecord } from './read';
 import type { RuntimeDbLike, StorageFrameRecord, StorageHead, StorageSnapshotManifest } from './types';
 
 const countSnapshotDocs = async (db: RuntimeDbLike, height: number): Promise<number> => {
   const [entities, accounts, books] = await Promise.all([
-    listKeys(db, keySnapshotEntityPrefix(height)),
-    listKeys(db, keySnapshotAccountPrefix(height)),
-    listKeys(db, keySnapshotBookPrefix(height)),
+    countKeys(db, { prefix: keySnapshotEntityPrefix(height) }),
+    countKeys(db, { prefix: keySnapshotAccountPrefix(height) }),
+    countKeys(db, { prefix: keySnapshotBookPrefix(height) }),
   ]);
-  return entities.length + accounts.length + books.length;
+  return entities + accounts + books;
 };
 
 export const verifyStorageSnapshotIntegrity = async (

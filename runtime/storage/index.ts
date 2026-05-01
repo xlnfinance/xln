@@ -433,7 +433,7 @@ export const saveRuntimeFrameToStorage = async (options: {
 
   if (snapshotDue || snapshotRequiredByBytes) {
     const snapshotStartedAt = options.getPerfMs();
-    const snapshotResult = await createSnapshot(db, options.env.height);
+    const snapshotResult = await createSnapshot(db, options.env.height, options.env.timestamp);
     snapDocs = snapshotResult.docCount;
     snapshotBytes = snapshotResult.bytes;
     retainedHistoryBytes += snapshotBytes;

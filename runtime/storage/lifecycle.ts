@@ -1,5 +1,5 @@
 import { encodeBuffer, writeBatch } from './codec';
-import { copyKeys, deleteKeys, listKeys, readJsonOrNull, readRawOrNull } from './level';
+import { copyKeyRange, copyKeys, deleteKeyRange, deleteKeys, iterateKeys, readJsonOrNull, readRawOrNull } from './level';
 import {
   EPOCH_SEED_FRAME_TAIL,
   KEY_DIFF,
@@ -14,7 +14,6 @@ import {
   KEY_SNAPSHOT_BOOK,
   KEY_SNAPSHOT_ENTITY,
   KEY_SNAPSHOT_MANIFEST,
-  decodeHeight,
   encodeHeight,
   keyFrame,
   keySnapshotAccountPrefix,
@@ -62,7 +61,7 @@ export const seedFreshStorageEpoch = async (options: {
   let docCount = 0;
 
   for (const prefix of livePrefixes) {
-    const copied = await copyKeys(options.sourceDb, options.targetDb, await listKeys(options.sourceDb, prefix));
+    const copied = await copyKeyRange(options.sourceDb, options.targetDb, { prefix });
     liveBytes += copied.bytes;
     docCount += copied.count;
   }
@@ -78,7 +77,7 @@ export const seedFreshStorageEpoch = async (options: {
   }
 
   for (const prefix of snapshotPrefixes.slice(1)) {
-    const copied = await copyKeys(options.sourceDb, options.targetDb, await listKeys(options.sourceDb, prefix));
+    const copied = await copyKeyRange(options.sourceDb, options.targetDb, { prefix });
     snapshotBytes += copied.bytes;
     docCount += copied.count;
   }
@@ -110,11 +109,18 @@ export const seedFreshStorageEpoch = async (options: {
 };
 
 export const listSnapshotHeights = async (db: RuntimeDbLike): Promise<number[]> => {
-  const keys = await listKeys(db, Buffer.from([KEY_SNAPSHOT_MANIFEST]));
-  return keys.map(parseSnapshotManifestHeight).sort((left, right) => left - right);
+  const heights: number[] = [];
+  for await (const key of iterateKeys(db, { prefix: Buffer.from([KEY_SNAPSHOT_MANIFEST]) })) {
+    heights.push(parseSnapshotManifestHeight(key));
+  }
+  return heights.sort((left, right) => left - right);
 };
 
-export const createSnapshot = async (db: RuntimeDbLike, height: number): Promise<{ docCount: number; bytes: number }> => {
+export const createSnapshot = async (
+  db: RuntimeDbLike,
+  height: number,
+  createdAt = 0,
+): Promise<{ docCount: number; bytes: number }> => {
   const livePrefixes = [
     Buffer.from([KEY_LIVE_ENTITY]),
     Buffer.from([KEY_LIVE_ACCOUNT]),
@@ -124,32 +130,24 @@ export const createSnapshot = async (db: RuntimeDbLike, height: number): Promise
   let written = 0;
   let bytes = 0;
   for (const prefix of livePrefixes) {
-    const keys = await listKeys(db, prefix);
-    for (let offset = 0; offset < keys.length; offset += 256) {
-      const batch = db.batch();
-      const slice = keys.slice(offset, offset + 256);
-      for (const key of slice) {
-        const value = await db.get(key);
-        let snapshotKey: Buffer;
-        if (key[0] === KEY_LIVE_ENTITY) {
-          snapshotKey = Buffer.concat([Buffer.from([KEY_SNAPSHOT_ENTITY]), encodeHeight(height), key.subarray(1)]);
-        } else if (key[0] === KEY_LIVE_ACCOUNT) {
-          snapshotKey = Buffer.concat([Buffer.from([KEY_SNAPSHOT_ACCOUNT]), encodeHeight(height), key.subarray(1)]);
-        } else if (key[0] === KEY_LIVE_BOOK) {
-          snapshotKey = Buffer.concat([Buffer.from([KEY_SNAPSHOT_BOOK]), encodeHeight(height), key.subarray(1)]);
-        } else {
-          continue;
-        }
-        batch.put(snapshotKey, value);
-        written += 1;
-        bytes += snapshotKey.byteLength + value.byteLength;
+    const copied = await copyKeyRange(db, db, { prefix }, (key) => {
+      if (key[0] === KEY_LIVE_ENTITY) {
+        return Buffer.concat([Buffer.from([KEY_SNAPSHOT_ENTITY]), encodeHeight(height), key.subarray(1)]);
       }
-      await writeBatch(batch);
-    }
+      if (key[0] === KEY_LIVE_ACCOUNT) {
+        return Buffer.concat([Buffer.from([KEY_SNAPSHOT_ACCOUNT]), encodeHeight(height), key.subarray(1)]);
+      }
+      if (key[0] === KEY_LIVE_BOOK) {
+        return Buffer.concat([Buffer.from([KEY_SNAPSHOT_BOOK]), encodeHeight(height), key.subarray(1)]);
+      }
+      return null;
+    });
+    written += copied.count;
+    bytes += copied.bytes;
   }
   const batch = db.batch();
   const manifestKey = keySnapshotManifest(height);
-  const manifestValue = encodeBuffer({ height, createdAt: Date.now(), docCount: written } satisfies StorageSnapshotManifest);
+  const manifestValue = encodeBuffer({ height, createdAt: Math.max(0, Math.floor(Number(createdAt || 0))), docCount: written } satisfies StorageSnapshotManifest);
   batch.put(manifestKey, manifestValue);
   await writeBatch(batch);
   bytes += manifestKey.byteLength + manifestValue.byteLength;
@@ -168,7 +166,7 @@ const pruneSnapshot = async (db: RuntimeDbLike, height: number): Promise<number>
   // missing snapshot docs.
   removedBytes += await deleteKeys(db, [keySnapshotManifest(height)]);
   for (const prefix of prefixes) {
-    removedBytes += await deleteKeys(db, await listKeys(db, prefix));
+    removedBytes += (await deleteKeyRange(db, { prefix })).removedBytes;
   }
   return removedBytes;
 };
@@ -185,13 +183,8 @@ export const maybeRotateSnapshots = async (db: RuntimeDbLike, retainSnapshots: n
 
 export const pruneHistoryBeforeHeight = async (db: RuntimeDbLike, heightInclusive: number): Promise<number> => {
   if (heightInclusive <= 0) return 0;
-  let removedBytes = 0;
   // Keep frame journals available for receipts/audit even after a snapshot exists.
   // Only replay-specific layers can be dropped once the snapshot covers them.
-  const keys = await listKeys(db, Buffer.from([KEY_DIFF]));
-  removedBytes += await deleteKeys(
-    db,
-    keys.filter((key) => decodeHeight(key) <= heightInclusive),
-  );
-  return removedBytes;
+  const lt = Buffer.concat([Buffer.from([KEY_DIFF]), encodeHeight(Math.max(0, Math.floor(heightInclusive)) + 1)]);
+  return (await deleteKeyRange(db, { gte: Buffer.from([KEY_DIFF]), lt })).removedBytes;
 };
