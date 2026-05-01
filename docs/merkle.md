@@ -203,7 +203,6 @@ type MerkleCollection<K> = {
   del(key: K): Promise<void>;
   flush(): Promise<MerkleFlushResult>;
   verify(mode: 'none' | 'shallow' | 'deep'): Promise<void>;
-  proveInclusion(key: K): Promise<MerkleProof>;
 };
 ```
 
@@ -220,20 +219,10 @@ Domain code provides key codecs. The shared engine owns:
 - flat persistence for small maps;
 - auto-promotion to persisted branch mode.
 
-Inclusion proof support is part of the interface, not an afterthought. The proof API is needed for audit exports and future subset-evidence flows:
-
-```ts
-type MerkleProof = {
-  namespace: MerkleNamespace;
-  keyPath: Uint8Array;
-  valueHash: string;
-  siblings: Array<{
-    path: Uint8Array;
-    children: Array<{ slot: number; hash: string }>;
-  }>;
-  rootHash: string;
-};
-```
+Inclusion proofs are explicitly out of scope for this storage layer. XLN uses
+this Merkle tree as an integrity/checkpoint root, not as a content proof API.
+If a future product needs subset evidence, that must be a separate design
+review and not hidden inside the main hot-path storage primitive.
 
 ## Entity Root Shape
 
@@ -415,7 +404,6 @@ Keep:
   - insert with collision creates one branch at divergence;
   - delete collapses branch;
   - flat persistence and branch persistence produce the same root;
-  - inclusion proof verifies against the root;
   - root deterministic across insertion order;
   - update touches only path-local nodes.
 
@@ -502,9 +490,9 @@ Read against `runtime/storage/{merkle.ts, hashes.ts, types.ts, keys.ts}` head of
 - Per touched leaf: ~⌈log₁₆(N)⌉ branch rewrites. For N=1M, depth ≈ 5. 1k touches/frame → 5k branch puts/frame, plus root docs.
 - LevelDB SSTable write-amp is typically 10–30× on a hot working set. Concrete budget needed in PR2 acceptance criteria, not "benchmark TBD". Suggest target: <100 µs amortized per touched leaf at 1M-account scale, with frame commit batch size cap.
 
-**4. No mention of inclusion proofs.**
-- The whole point of a radix Merkle tree over a flat hash is verifiable subset proofs. If hub never exports proofs, a sorted-leaves Merkle root is simpler and 3× faster.
-- If XLN intends fraud proofs / light-client-style account verification (J-layer dispute, audit export), proofs must be a first-class API on `MerkleCollection<K>`. Add `proveInclusion(key)` and `verifyInclusion(root, key, valueHash, proof)` to the interface — or explicitly defer with a written "proofs not required because…" line.
+**4. Inclusion proofs are deliberately excluded.**
+- The current storage Merkle is an integrity/checkpoint root. XLN does not use it to prove content membership to light clients or disputes.
+- Keeping proof APIs out reduces surface area and keeps the mainnet work focused on deterministic roots, path-local updates, recovery verification, and persistence cost.
 
 **5. Branch collapse thrash on HTLC churn.**
 - HTLC lock add → lock resolve in the same frame at the same path = create branch → collapse branch in one materialize pass. With order-of-N HTLCs/sec on a hub, this is the common case, not the edge.
@@ -531,4 +519,4 @@ Read against `runtime/storage/{merkle.ts, hashes.ts, types.ts, keys.ts}` head of
 - A) **Lock the migration anchor** — write down: canonicalStateHash is consensus root during PR2–PR5, stateHash becomes primary after PR5 verified. One paragraph, top of doc.
 - B) **Resolve flat↔branch equivalence before PR1 lands** — pick one rule, write the hash preimages explicitly, add unit test fixtures.
 - C) **Promote snapshot Merkle coverage to invariant** — move open question 7 into "Materialization Flow", add to PR1 audit checklist.
-- D) **Decide on inclusion-proof API** — ship it in PR1's interface or write the explicit deferral. Don't leave it implicit.
+- D) **Do not ship inclusion-proof API** — proofs are explicitly deferred; storage Merkle is integrity-only for this cycle.

@@ -17,25 +17,6 @@ export type RadixMerkleResult = {
   root: string;
 };
 
-export type RadixMerkleProofStep =
-  | {
-      kind: 'extension';
-      path: number[];
-    }
-  | {
-      kind: 'branch';
-      slot: number;
-      siblings: Array<[number, string]>;
-    };
-
-export type RadixMerkleProof = {
-  radix: RadixMerkleRadix;
-  key: string;
-  value: string;
-  root: string;
-  steps: RadixMerkleProofStep[];
-};
-
 const EMPTY_ROOT = `0x${'00'.repeat(32)}`;
 
 const domainBytes = (tag: string): Buffer => {
@@ -56,8 +37,6 @@ const hashParts = (domain: Buffer, parts: Uint8Array[]): string => {
 const hexToBytes = (hex: string): Uint8Array => {
   return Uint8Array.from(Buffer.from(String(hex).replace(/^0x/, ''), 'hex'));
 };
-
-const bytesToHex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString('hex')}`;
 
 const pathSlots = (key: Uint8Array, radix: RadixMerkleRadix): number[] => {
   if (radix === 256) return Array.from(key);
@@ -102,7 +81,6 @@ const extensionHash = (radix: RadixMerkleRadix, path: number[], childHash: strin
 
 type MerkleItem = {
   keyHex: string;
-  valueHex: string;
   path: number[];
   hash: string;
 };
@@ -112,8 +90,6 @@ type MerkleNode = {
   branchCount: number;
   extensionCount: number;
   maxDepth: number;
-  proof?: RadixMerkleProofStep[];
-  proofValue?: string;
 };
 
 type MutableLeafNode = {
@@ -284,34 +260,17 @@ const collectMutableLeaves = (node: MutableMerkleNode | null, out: RadixMerkleLe
   for (const child of node.children.values()) collectMutableLeaves(child, out);
 };
 
-const proveMutableNode = (
-  node: MutableMerkleNode,
+const mutableHasKey = (
+  node: MutableMerkleNode | null,
   keyPath: number[],
-  radix: RadixMerkleRadix,
-): { value: string; steps: RadixMerkleProofStep[] } | null => {
+): boolean => {
+  if (!node) return false;
   if (node.kind === 'leaf') {
-    if (node.path.length !== keyPath.length || commonPathPrefixLength(node.path, keyPath) !== keyPath.length) return null;
-    return { value: bytesToHex(node.value), steps: [] };
+    return node.path.length === keyPath.length && commonPathPrefixLength(node.path, keyPath) === keyPath.length;
   }
-  if (!pathHasPrefix(keyPath, node.path)) return null;
+  if (!pathHasPrefix(keyPath, node.path)) return false;
   const slot = keyPath[node.path.length] ?? 0;
-  const child = node.children.get(slot);
-  if (!child) return null;
-  const childProof = proveMutableNode(child, keyPath, radix);
-  if (!childProof) return null;
-  const steps = [...childProof.steps];
-  if (child.kind === 'branch') {
-    const segment = child.path.slice(node.path.length + 1);
-    if (segment.length > 0) steps.push({ kind: 'extension', path: segment });
-  }
-  steps.push({
-    kind: 'branch',
-    slot,
-    siblings: Array.from(node.children.entries())
-      .filter(([candidateSlot]) => candidateSlot !== slot)
-      .map(([candidateSlot, sibling]) => [candidateSlot, mutableEdgeHash(node.path, sibling, radix)] as [number, string]),
-  });
-  return { value: childProof.value, steps };
+  return mutableHasKey(node.children.get(slot) ?? null, keyPath);
 };
 
 export class MutableRadixMerkleTree {
@@ -336,11 +295,11 @@ export class MutableRadixMerkleTree {
   }
 
   put(key: Uint8Array, value: Uint8Array): void {
-    const before = this.prove(key);
+    const exists = mutableHasKey(this.root, pathSlots(key, this.radix));
     const result = insertMutableNode(this.root, mutableLeaf(key, value, this.radix));
     this.root = result.node;
     this.lastTouched = result.touchedNodes;
-    if (!before) this.leaves += 1;
+    if (!exists) this.leaves += 1;
   }
 
   del(key: Uint8Array): boolean {
@@ -361,37 +320,14 @@ export class MutableRadixMerkleTree {
     return leaves;
   }
 
-  prove(key: Uint8Array): RadixMerkleProof | null {
-    if (!this.root) return null;
-    const keyPath = pathSlots(key, this.radix);
-    const proof = proveMutableNode(this.root, keyPath, this.radix);
-    if (!proof) return null;
-    const steps = [...proof.steps];
-    if (this.root.kind === 'branch' && this.root.path.length > 0) {
-      steps.push({ kind: 'extension', path: this.root.path });
-    }
-    return {
-      radix: this.radix,
-      key: bytesToHex(key),
-      value: proof.value,
-      root: this.getRoot(),
-      steps,
-    };
-  }
-
   verify(mode: 'none' | 'shallow' | 'deep' = 'shallow'): void {
     if (mode === 'none') return;
-    const expected = buildRadixMerkle(this.toLeaves(), { radix: this.radix }).root;
-    if (expected !== this.getRoot()) {
-      throw new Error(`RADIX_MERKLE_MUTABLE_ROOT_MISMATCH: actual=${this.getRoot()} expected=${expected}`);
+    const expected = buildRadixMerkle(this.toLeaves(), { radix: this.radix });
+    if (expected.leafCount !== this.leaves) {
+      throw new Error(`RADIX_MERKLE_MUTABLE_LEAF_COUNT_MISMATCH: actual=${this.leaves} expected=${expected.leafCount}`);
     }
-    if (mode === 'deep') {
-      for (const leaf of this.toLeaves()) {
-        const proof = this.prove(leaf.key);
-        if (!proof || !verifyRadixMerkleProof(proof)) {
-          throw new Error(`RADIX_MERKLE_MUTABLE_PROOF_MISMATCH: key=${bytesToHex(leaf.key)}`);
-        }
-      }
+    if (expected.root !== this.getRoot()) {
+      throw new Error(`RADIX_MERKLE_MUTABLE_ROOT_MISMATCH: actual=${this.getRoot()} expected=${expected.root}`);
     }
   }
 }
@@ -410,7 +346,6 @@ export const buildRadixMerkle = (
     const keyHex = Buffer.from(leaf.key).toString('hex');
     deduped.set(keyHex, {
       keyHex,
-      valueHex: bytesToHex(leaf.value),
       path: pathSlots(leaf.key, radix),
       hash: leafHash(leaf),
     });
@@ -474,128 +409,6 @@ export const buildRadixMerkle = (
   };
 };
 
-const normalizeProofKey = (hex: string): string => String(hex || '').replace(/^0x/, '').toLowerCase();
-
-export const buildRadixMerkleProof = (
-  leaves: RadixMerkleLeaf[],
-  key: Uint8Array,
-  options?: { radix?: RadixMerkleRadix },
-): RadixMerkleProof | null => {
-  const radix = options?.radix === 256 ? 256 : 16;
-  if (leaves.length === 0) return null;
-
-  const targetKeyHex = Buffer.from(key).toString('hex');
-  const deduped = new Map<string, MerkleItem>();
-  for (const leaf of leaves) {
-    const keyHex = Buffer.from(leaf.key).toString('hex');
-    deduped.set(keyHex, {
-      keyHex,
-      valueHex: bytesToHex(leaf.value),
-      path: pathSlots(leaf.key, radix),
-      hash: leafHash(leaf),
-    });
-  }
-  const target = deduped.get(targetKeyHex);
-  if (!target) return null;
-
-  const items = Array.from(deduped.values());
-  const depth = items[0]?.path.length ?? 0;
-  for (const item of items) {
-    if (item.path.length !== depth) {
-      throw new Error(`RADIX_MERKLE_MIXED_KEY_LENGTHS: expected=${depth} actual=${item.path.length}`);
-    }
-  }
-
-  const buildNode = (offset: number, group: MerkleItem[]): MerkleNode => {
-    if (group.length === 0) return { hash: EMPTY_ROOT, branchCount: 0, extensionCount: 0, maxDepth: offset };
-    if (group.length === 1 || offset >= depth) {
-      const item = group[0];
-      return {
-        hash: item?.hash ?? EMPTY_ROOT,
-        branchCount: 0,
-        extensionCount: 0,
-        maxDepth: offset,
-        ...(item?.keyHex === targetKeyHex ? { proof: [], proofValue: item.valueHex } : {}),
-      };
-    }
-
-    const shared = commonPrefixLength(group, offset, depth);
-    if (shared > 0) {
-      const segment = group[0]?.path.slice(offset, offset + shared) ?? [];
-      const child = buildNode(offset + shared, group);
-      return {
-        hash: extensionHash(radix, segment, child.hash),
-        branchCount: child.branchCount,
-        extensionCount: child.extensionCount + 1,
-        maxDepth: child.maxDepth,
-        ...(child.proof
-          ? { proof: [...child.proof, { kind: 'extension' as const, path: segment }], proofValue: child.proofValue }
-          : {}),
-      };
-    }
-
-    const buckets = new Map<number, MerkleItem[]>();
-    for (const item of group) {
-      const slot = item.path[offset] ?? 0;
-      const existing = buckets.get(slot);
-      if (existing) existing.push(item);
-      else buckets.set(slot, [item]);
-    }
-
-    const children = Array.from(buckets.entries()).map(([slot, bucket]) => [slot, buildNode(offset + 1, bucket)] as const);
-    const proofChild = children.find(([, child]) => child.proof);
-    return {
-      hash: branchHash(
-        radix,
-        children.map(([slot, child]) => [slot, child.hash]),
-      ),
-      branchCount: children.reduce((sum, [, child]) => sum + child.branchCount, 1),
-      extensionCount: children.reduce((sum, [, child]) => sum + child.extensionCount, 0),
-      maxDepth: children.reduce((max, [, child]) => Math.max(max, child.maxDepth), offset + 1),
-      ...(proofChild
-        ? {
-            proof: [
-              ...proofChild[1].proof!,
-              {
-                kind: 'branch' as const,
-                slot: proofChild[0],
-                siblings: children
-                  .filter(([slot]) => slot !== proofChild[0])
-                  .map(([slot, child]) => [slot, child.hash] as [number, string]),
-              },
-            ],
-            proofValue: proofChild[1].proofValue,
-          }
-        : {}),
-    };
-  };
-
-  const root = buildNode(0, items);
-  if (!root.proof || !root.proofValue) return null;
-  return {
-    radix,
-    key: bytesToHex(key),
-    value: root.proofValue,
-    root: root.hash,
-    steps: root.proof,
-  };
-};
-
-export const verifyRadixMerkleProof = (proof: RadixMerkleProof): boolean => {
-  const radix = proof.radix === 256 ? 256 : 16;
-  const key = hexToBytes(proof.key);
-  const value = hexToBytes(proof.value);
-  let hash = leafHash({ key, value });
-  for (const step of proof.steps) {
-    if (step.kind === 'extension') {
-      hash = extensionHash(radix, step.path, hash);
-      continue;
-    }
-    hash = branchHash(radix, [...step.siblings, [step.slot, hash]]);
-  }
-  return normalizeProofKey(hash) === normalizeProofKey(proof.root);
-};
-
 export const buildHexKeyedMerkle = (
   leaves: Array<{ hexKey: string; value: Uint8Array }>,
   options?: { radix?: RadixMerkleRadix },
@@ -605,21 +418,6 @@ export const buildHexKeyedMerkle = (
       key: hexToBytes(leaf.hexKey),
       value: leaf.value,
     })),
-    options,
-  );
-};
-
-export const buildHexKeyedMerkleProof = (
-  leaves: Array<{ hexKey: string; value: Uint8Array }>,
-  hexKey: string,
-  options?: { radix?: RadixMerkleRadix },
-): RadixMerkleProof | null => {
-  return buildRadixMerkleProof(
-    leaves.map((leaf) => ({
-      key: hexToBytes(leaf.hexKey),
-      value: leaf.value,
-    })),
-    hexToBytes(hexKey),
     options,
   );
 };
