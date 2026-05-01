@@ -87,6 +87,7 @@ const proxyConfig = {
 	// RPC Proxy - Forward JSON-RPC to runtime server (/rpc endpoint)
 	'/rpc': {
 		target: API_PROXY_TARGET,
+		ws: true,
 		changeOrigin: true,
 		secure: false,
 	},

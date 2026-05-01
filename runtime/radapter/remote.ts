@@ -59,11 +59,12 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     if (!config.wsUrl) throw new RuntimeAdapterError('E_BAD_QUERY', 'wsUrl is required');
     this.config = config;
     this.intentionalClose = false;
-    await this.openSocket();
-    if (config.authKey) {
-      const response = await this.request<{ authLevel: RuntimeAdapterAuthLevel; currentHeight?: number }>({ op: 'auth', key: config.authKey });
-      this.level = response.authLevel;
-      this.height = Math.max(this.height, Math.floor(Number(response.currentHeight || 0)));
+    try {
+      await this.openSocket();
+      await this.authenticateIfNeeded();
+    } catch (error) {
+      this.setStatus('error');
+      this.scheduleReconnect();
     }
   }
 
@@ -131,23 +132,29 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
     this.level = null;
     this.failPending(new RuntimeAdapterError('E_INTERNAL', 'runtime adapter socket closed', true));
     this.setStatus(this.intentionalClose ? 'disconnected' : 'error');
-    if (this.intentionalClose || !this.config) return;
+    this.scheduleReconnect();
+  }
+
+  private scheduleReconnect(): void {
+    if (this.intentionalClose || !this.config || this.reconnectTimer) return;
     const maxMs = Math.max(1_000, Number(this.config.reconnectMaxMs ?? 30_000));
     const delay = nextBackoff(this.reconnectAttempt++, maxMs);
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       this.openSocket()
-        .then(async () => {
-          if (this.config?.authKey) {
-            const response = await this.request<{ authLevel: RuntimeAdapterAuthLevel; currentHeight?: number }>({ op: 'auth', key: this.config.authKey });
-            this.level = response.authLevel;
-            this.height = Math.max(this.height, Math.floor(Number(response.currentHeight || 0)));
-          }
-        })
+        .then(() => this.authenticateIfNeeded())
         .catch(() => {
           this.handleClose();
         });
     }, delay);
+  }
+
+  private async authenticateIfNeeded(): Promise<void> {
+    if (!this.config?.authKey) return;
+    const response = await this.request<{ authLevel: RuntimeAdapterAuthLevel; currentHeight?: number }>({ op: 'auth', key: this.config.authKey });
+    this.level = response.authLevel;
+    this.height = Math.max(this.height, Math.floor(Number(response.currentHeight || 0)));
+    for (const cb of this.changeCbs) cb(this.height);
   }
 
   private handleMessage(raw: unknown): void {
