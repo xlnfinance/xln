@@ -17,22 +17,55 @@ export type RadixMerkleResult = {
   root: string;
 };
 
+export type RadixMerkleProofStep =
+  | {
+      kind: 'extension';
+      path: number[];
+    }
+  | {
+      kind: 'branch';
+      slot: number;
+      siblings: Array<[number, string]>;
+    };
+
+export type RadixMerkleProof = {
+  radix: RadixMerkleRadix;
+  key: string;
+  value: string;
+  root: string;
+  steps: RadixMerkleProofStep[];
+};
+
 const EMPTY_ROOT = `0x${'00'.repeat(32)}`;
 
-const hashParts = (tag: number, parts: Uint8Array[]): string => {
-  return ethers.keccak256(Buffer.concat([Buffer.from([tag]), ...parts.map((part) => Buffer.from(part))]));
+const domainBytes = (tag: string): Buffer => {
+  const raw = Buffer.from(tag, 'utf8');
+  const len = Buffer.allocUnsafe(2);
+  len.writeUInt16BE(raw.length);
+  return Buffer.concat([len, raw]);
+};
+
+const LEAF_DOMAIN = domainBytes('xln.storage.merkle.leaf.v1');
+const BRANCH_DOMAIN = domainBytes('xln.storage.merkle.branch.v1');
+const EXTENSION_DOMAIN = domainBytes('xln.storage.merkle.extension.v1');
+
+const hashParts = (domain: Buffer, parts: Uint8Array[]): string => {
+  return ethers.keccak256(Buffer.concat([domain, ...parts.map((part) => Buffer.from(part))]));
 };
 
 const hexToBytes = (hex: string): Uint8Array => {
   return Uint8Array.from(Buffer.from(String(hex).replace(/^0x/, ''), 'hex'));
 };
 
+const bytesToHex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString('hex')}`;
+
 const pathSlots = (key: Uint8Array, radix: RadixMerkleRadix): number[] => {
   if (radix === 256) return Array.from(key);
   return Array.from(key).flatMap((byte) => [byte >> 4, byte & 0x0f]);
 };
 
-const leafHash = (leaf: RadixMerkleLeaf): string => hashParts(0x00, [leaf.key, leaf.value]);
+const leafHash = (leaf: RadixMerkleLeaf): string =>
+  hashParts(LEAF_DOMAIN, [leaf.key, leaf.value]);
 
 const branchHash = (radix: RadixMerkleRadix, children: Array<[number, string]>): string => {
   if (children.length === 0) return EMPTY_ROOT;
@@ -41,7 +74,7 @@ const branchHash = (radix: RadixMerkleRadix, children: Array<[number, string]>):
     parts.push(Uint8Array.of(slot));
     parts.push(hexToBytes(hash));
   }
-  return hashParts(0x01, parts);
+  return hashParts(BRANCH_DOMAIN, parts);
 };
 
 const encodePathSegment = (radix: RadixMerkleRadix, path: number[]): Uint8Array => {
@@ -61,13 +94,15 @@ const encodePathSegment = (radix: RadixMerkleRadix, path: number[]): Uint8Array 
 };
 
 const extensionHash = (radix: RadixMerkleRadix, path: number[], childHash: string): string =>
-  hashParts(0x02, [
+  hashParts(EXTENSION_DOMAIN, [
     Uint8Array.of(radix === 256 ? 0xff : 0x10),
     encodePathSegment(radix, path),
     hexToBytes(childHash),
   ]);
 
 type MerkleItem = {
+  keyHex: string;
+  valueHex: string;
   path: number[];
   hash: string;
 };
@@ -77,6 +112,8 @@ type MerkleNode = {
   branchCount: number;
   extensionCount: number;
   maxDepth: number;
+  proof?: RadixMerkleProofStep[];
+  proofValue?: string;
 };
 
 const commonPrefixLength = (items: MerkleItem[], offset: number, depth: number): number => {
@@ -106,6 +143,8 @@ export const buildRadixMerkle = (
   for (const leaf of leaves) {
     const keyHex = Buffer.from(leaf.key).toString('hex');
     deduped.set(keyHex, {
+      keyHex,
+      valueHex: bytesToHex(leaf.value),
       path: pathSlots(leaf.key, radix),
       hash: leafHash(leaf),
     });
@@ -169,6 +208,128 @@ export const buildRadixMerkle = (
   };
 };
 
+const normalizeProofKey = (hex: string): string => String(hex || '').replace(/^0x/, '').toLowerCase();
+
+export const buildRadixMerkleProof = (
+  leaves: RadixMerkleLeaf[],
+  key: Uint8Array,
+  options?: { radix?: RadixMerkleRadix },
+): RadixMerkleProof | null => {
+  const radix = options?.radix === 256 ? 256 : 16;
+  if (leaves.length === 0) return null;
+
+  const targetKeyHex = Buffer.from(key).toString('hex');
+  const deduped = new Map<string, MerkleItem>();
+  for (const leaf of leaves) {
+    const keyHex = Buffer.from(leaf.key).toString('hex');
+    deduped.set(keyHex, {
+      keyHex,
+      valueHex: bytesToHex(leaf.value),
+      path: pathSlots(leaf.key, radix),
+      hash: leafHash(leaf),
+    });
+  }
+  const target = deduped.get(targetKeyHex);
+  if (!target) return null;
+
+  const items = Array.from(deduped.values());
+  const depth = items[0]?.path.length ?? 0;
+  for (const item of items) {
+    if (item.path.length !== depth) {
+      throw new Error(`RADIX_MERKLE_MIXED_KEY_LENGTHS: expected=${depth} actual=${item.path.length}`);
+    }
+  }
+
+  const buildNode = (offset: number, group: MerkleItem[]): MerkleNode => {
+    if (group.length === 0) return { hash: EMPTY_ROOT, branchCount: 0, extensionCount: 0, maxDepth: offset };
+    if (group.length === 1 || offset >= depth) {
+      const item = group[0];
+      return {
+        hash: item?.hash ?? EMPTY_ROOT,
+        branchCount: 0,
+        extensionCount: 0,
+        maxDepth: offset,
+        ...(item?.keyHex === targetKeyHex ? { proof: [], proofValue: item.valueHex } : {}),
+      };
+    }
+
+    const shared = commonPrefixLength(group, offset, depth);
+    if (shared > 0) {
+      const segment = group[0]?.path.slice(offset, offset + shared) ?? [];
+      const child = buildNode(offset + shared, group);
+      return {
+        hash: extensionHash(radix, segment, child.hash),
+        branchCount: child.branchCount,
+        extensionCount: child.extensionCount + 1,
+        maxDepth: child.maxDepth,
+        ...(child.proof
+          ? { proof: [...child.proof, { kind: 'extension' as const, path: segment }], proofValue: child.proofValue }
+          : {}),
+      };
+    }
+
+    const buckets = new Map<number, MerkleItem[]>();
+    for (const item of group) {
+      const slot = item.path[offset] ?? 0;
+      const existing = buckets.get(slot);
+      if (existing) existing.push(item);
+      else buckets.set(slot, [item]);
+    }
+
+    const children = Array.from(buckets.entries()).map(([slot, bucket]) => [slot, buildNode(offset + 1, bucket)] as const);
+    const proofChild = children.find(([, child]) => child.proof);
+    return {
+      hash: branchHash(
+        radix,
+        children.map(([slot, child]) => [slot, child.hash]),
+      ),
+      branchCount: children.reduce((sum, [, child]) => sum + child.branchCount, 1),
+      extensionCount: children.reduce((sum, [, child]) => sum + child.extensionCount, 0),
+      maxDepth: children.reduce((max, [, child]) => Math.max(max, child.maxDepth), offset + 1),
+      ...(proofChild
+        ? {
+            proof: [
+              ...proofChild[1].proof!,
+              {
+                kind: 'branch' as const,
+                slot: proofChild[0],
+                siblings: children
+                  .filter(([slot]) => slot !== proofChild[0])
+                  .map(([slot, child]) => [slot, child.hash] as [number, string]),
+              },
+            ],
+            proofValue: proofChild[1].proofValue,
+          }
+        : {}),
+    };
+  };
+
+  const root = buildNode(0, items);
+  if (!root.proof || !root.proofValue) return null;
+  return {
+    radix,
+    key: bytesToHex(key),
+    value: root.proofValue,
+    root: root.hash,
+    steps: root.proof,
+  };
+};
+
+export const verifyRadixMerkleProof = (proof: RadixMerkleProof): boolean => {
+  const radix = proof.radix === 256 ? 256 : 16;
+  const key = hexToBytes(proof.key);
+  const value = hexToBytes(proof.value);
+  let hash = leafHash({ key, value });
+  for (const step of proof.steps) {
+    if (step.kind === 'extension') {
+      hash = extensionHash(radix, step.path, hash);
+      continue;
+    }
+    hash = branchHash(radix, [...step.siblings, [step.slot, hash]]);
+  }
+  return normalizeProofKey(hash) === normalizeProofKey(proof.root);
+};
+
 export const buildHexKeyedMerkle = (
   leaves: Array<{ hexKey: string; value: Uint8Array }>,
   options?: { radix?: RadixMerkleRadix },
@@ -178,6 +339,21 @@ export const buildHexKeyedMerkle = (
       key: hexToBytes(leaf.hexKey),
       value: leaf.value,
     })),
+    options,
+  );
+};
+
+export const buildHexKeyedMerkleProof = (
+  leaves: Array<{ hexKey: string; value: Uint8Array }>,
+  hexKey: string,
+  options?: { radix?: RadixMerkleRadix },
+): RadixMerkleProof | null => {
+  return buildRadixMerkleProof(
+    leaves.map((leaf) => ({
+      key: hexToBytes(leaf.hexKey),
+      value: leaf.value,
+    })),
+    hexToBytes(hexKey),
     options,
   );
 };
