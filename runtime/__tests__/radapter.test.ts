@@ -139,6 +139,23 @@ test('runtime adapter auth keys are scoped by level', () => {
   expect(verifyRuntimeAdapterAuthKey('seed', `${admin.slice(0, -1)}0`)).toBe(null);
 });
 
+test('runtime adapter can require expiring capability tokens', () => {
+  const previous = process.env['XLN_RADAPTER_REQUIRE_CAPABILITY'];
+  process.env['XLN_RADAPTER_REQUIRE_CAPABILITY'] = '1';
+  try {
+    const legacy = deriveRuntimeAdapterAuthKey('seed', 'admin');
+    const token = deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000);
+    expect(verifyRuntimeAdapterAuthCredential('seed', legacy)).toBe(null);
+    expect(verifyRuntimeAdapterAuthCredential('seed', token)?.level).toBe('admin');
+  } finally {
+    if (previous === undefined) {
+      delete process.env['XLN_RADAPTER_REQUIRE_CAPABILITY'];
+    } else {
+      process.env['XLN_RADAPTER_REQUIRE_CAPABILITY'] = previous;
+    }
+  }
+});
+
 test('runtime adapter resolver reads live head and entity paths', async () => {
   const env = makeEnv();
   const head = await resolveRuntimeAdapterRead<{ latestHeight: number }>({ env }, 'head');
@@ -331,6 +348,47 @@ test('runtime adapter websocket handler gates reads behind inspect auth', async 
   const read = decodeRuntimeAdapterMessage<{ ok: true; payload: { latestHeight: number } }>(messages.pop());
   expect(read.ok).toBe(true);
   expect(read.payload.latestHeight).toBe(7);
+});
+
+test('runtime adapter read rate limit is configurable', async () => {
+  const previousBurst = process.env['XLN_RADAPTER_READ_BURST'];
+  const previousRefill = process.env['XLN_RADAPTER_READ_PER_SEC'];
+  process.env['XLN_RADAPTER_READ_BURST'] = '1';
+  process.env['XLN_RADAPTER_READ_PER_SEC'] = '0.001';
+  const messages: unknown[] = [];
+  const socket = { send: (message: unknown) => { messages.push(message); } };
+  const env = makeEnv();
+  try {
+    await handleRuntimeAdapterMessage(socket, { v: 1, id: 'auth', op: 'auth', key: deriveRuntimeAdapterAuthKey('seed', 'inspect') }, env, {
+      enqueueRuntimeInput: () => {},
+    });
+    messages.length = 0;
+
+    await handleRuntimeAdapterMessage(socket, { v: 1, id: 'read-1', op: 'read', path: 'head' }, env, {
+      enqueueRuntimeInput: () => {},
+    });
+    await handleRuntimeAdapterMessage(socket, { v: 1, id: 'read-2', op: 'read', path: 'head' }, env, {
+      enqueueRuntimeInput: () => {},
+    });
+
+    const first = decodeRuntimeAdapterMessage<{ ok: boolean }>(messages[0]);
+    const second = decodeRuntimeAdapterMessage<{ ok: false; error: { code: string; retryAfterMs?: number } }>(messages[1]);
+    expect(first.ok).toBe(true);
+    expect(second.ok).toBe(false);
+    expect(second.error.code).toBe('E_RATE_LIMITED');
+    expect(second.error.retryAfterMs).toBeGreaterThan(0);
+  } finally {
+    if (previousBurst === undefined) {
+      delete process.env['XLN_RADAPTER_READ_BURST'];
+    } else {
+      process.env['XLN_RADAPTER_READ_BURST'] = previousBurst;
+    }
+    if (previousRefill === undefined) {
+      delete process.env['XLN_RADAPTER_READ_PER_SEC'];
+    } else {
+      process.env['XLN_RADAPTER_READ_PER_SEC'] = previousRefill;
+    }
+  }
 });
 
 test('runtime adapter ticks only go to authenticated clients', async () => {

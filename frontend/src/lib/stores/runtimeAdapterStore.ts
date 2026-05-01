@@ -40,6 +40,13 @@ export const connectRuntimeAdapter = async (config: RuntimeAdapterConfig): Promi
       getEnv,
       enqueueRuntimeInput: (env, input) => xln.enqueueRuntimeInput(env, input),
       registerEnvChangeCallback: (env, cb) => xln.registerEnvChangeCallback(env, cb),
+      buildReadContext: (env) => ({
+        readHead: () => xln.readPersistedStorageHead(env),
+        readFrame: (height) => xln.readPersistedStorageFrameRecord(env, height),
+        listCheckpoints: () => xln.listPersistedCheckpointHeights(env),
+        loadEntityState: (entityId, height) => xln.loadEntityStateFromStorageDb(env, entityId, height),
+        listEntityIdsAtHeight: (height) => xln.listPersistedEntityIdsAtHeight(env, height),
+      }),
     });
   }
 

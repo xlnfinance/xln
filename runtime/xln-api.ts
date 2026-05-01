@@ -52,6 +52,7 @@ export type {
   SettlementDiff,
 } from './types';
 export type { PersistedFrameJournal } from './wal/store';
+export type { StorageFrameRecord, StorageHead } from './storage/types';
 
 export type { Profile, GossipLayer } from './networking/gossip';
 export type { PaymentRoute } from './routing/pathfinding';
@@ -345,7 +346,11 @@ export interface XLNModule {
     options?: LoadEnvFromDbOptions,
   ) => Promise<Env | null>;
   getPersistedLatestHeight: (env: Env) => Promise<number>;
+  readPersistedStorageHead: (env: Env) => Promise<import('./storage/types').StorageHead | null>;
+  readPersistedStorageFrameRecord: (env: Env, height: number) => Promise<import('./storage/types').StorageFrameRecord | null>;
   listPersistedCheckpointHeights: (env: Env) => Promise<number[]>;
+  listPersistedEntityIdsAtHeight: (env: Env, height: number) => Promise<string[]>;
+  loadEntityStateFromStorageDb: (env: Env, entityId: string, height?: number) => Promise<EntityState | null>;
   verifyRuntimeChain: (
     runtimeId?: string | null,
     runtimeSeed?: string | null,
