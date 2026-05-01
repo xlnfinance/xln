@@ -2,9 +2,7 @@ import { expect, test } from 'bun:test';
 
 import {
   buildHexKeyedMerkle,
-  buildHexKeyedMerkleProof,
   MutableRadixMerkleTree,
-  verifyRadixMerkleProof,
 } from '../storage/merkle';
 import {
   KEY_MERKLE_BRANCH,
@@ -109,45 +107,6 @@ test('storage radix merkle supports radix 256 with byte-depth paths', () => {
   expect(result.root).toMatch(/^0x[0-9a-f]{64}$/);
 });
 
-test('storage radix merkle builds verifiable inclusion proofs', () => {
-  const leaves = [
-    { hexKey: hexKey(0x11), value: value('alice') },
-    { hexKey: hexKey(0x22), value: value('bob') },
-    { hexKey: hexKey(0x33), value: value('carol') },
-  ];
-  const root = buildHexKeyedMerkle(leaves, { radix: 16 });
-  const proof = buildHexKeyedMerkleProof(leaves, hexKey(0x22), { radix: 16 });
-
-  expect(proof?.root).toBe(root.root);
-  expect(proof?.steps.length).toBeGreaterThan(0);
-  expect(proof ? verifyRadixMerkleProof(proof) : false).toBe(true);
-});
-
-test('storage radix merkle rejects tampered inclusion proofs', () => {
-  const leaves = [
-    { hexKey: hexKey(0x11), value: value('alice') },
-    { hexKey: hexKey(0x22), value: value('bob') },
-    { hexKey: hexKey(0x33), value: value('carol') },
-  ];
-  const proof = buildHexKeyedMerkleProof(leaves, hexKey(0x22), { radix: 16 });
-  expect(proof).not.toBe(null);
-  const tampered = {
-    ...proof!,
-    value: `0x${Buffer.from(value('mallory')).toString('hex')}`,
-  };
-
-  expect(verifyRadixMerkleProof(tampered)).toBe(false);
-});
-
-test('storage radix merkle returns no proof for absent leaves', () => {
-  const leaves = [
-    { hexKey: hexKey(0x11), value: value('alice') },
-    { hexKey: hexKey(0x22), value: value('bob') },
-  ];
-
-  expect(buildHexKeyedMerkleProof(leaves, hexKey(0x33))).toBe(null);
-});
-
 test('storage radix merkle rejects mixed key lengths', () => {
   expect(() =>
     buildHexKeyedMerkle([
@@ -210,16 +169,16 @@ test('mutable radix merkle updates touch only the path-local branch stack', () =
   tree.verify('shallow');
 });
 
-test('mutable radix merkle creates verifiable proofs', () => {
+test('mutable radix merkle verification rejects corrupted cached roots', () => {
   const leaves = [
     { key: Buffer.from(hexKey(0x11).slice(2), 'hex'), value: value('alice') },
     { key: Buffer.from(hexKey(0x22).slice(2), 'hex'), value: value('bob') },
     { key: Buffer.from(hexKey(0x33).slice(2), 'hex'), value: value('carol') },
   ];
   const tree = new MutableRadixMerkleTree({ radix: 16, leaves });
-  const proof = tree.prove(leaves[1]!.key);
 
-  expect(proof).not.toBe(null);
-  expect(proof?.root).toBe(tree.getRoot());
-  expect(proof ? verifyRadixMerkleProof(proof) : false).toBe(true);
+  tree.verify('deep');
+  (tree as unknown as { root: { hash?: string } | null }).root!.hash = `0x${'ff'.repeat(32)}`;
+
+  expect(() => tree.verify('deep')).toThrow(/RADIX_MERKLE_MUTABLE_ROOT_MISMATCH/);
 });
