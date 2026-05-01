@@ -203,7 +203,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   getRuntimeDb: (env: Env) => RuntimeDbLike;
   tryOpenFrameDb: (env: Env) => Promise<boolean>;
   getFrameDb: (env: Env) => RuntimeFrameDbLike;
-  rotateEpochDb?: (env: Env, snapshotHeight: number) => Promise<void>;
+  rotateEpochDb?: (env: Env, snapshotHeight: number, timestamp: number) => Promise<void>;
 } & PerfDeps): Promise<StorageFrameSaveResult> => {
   const config = runtimeConfigFromEnv(options.env);
   if (!config.enabled) return { materialized: false, materializedOverlayRecords: 0, frameDbCommitted: true };
@@ -476,7 +476,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   }
 
   if (snapDocs > 0 && retainedHistoryBytes > config.epochMaxBytes && options.rotateEpochDb) {
-    await options.rotateEpochDb(options.env, latestSnapshotHeight);
+    await options.rotateEpochDb(options.env, latestSnapshotHeight, options.env.timestamp);
     epochDbRotated = true;
   }
 
