@@ -287,7 +287,12 @@ async function completeProfileOnboardingIfVisible(page: Page, label: string): Pr
   }).first();
   if (await riskCheckbox.isVisible({ timeout: 1000 }).catch(() => false)) {
     const checked = await riskCheckbox.isChecked().catch(() => false);
-    if (!checked) await riskCheckbox.check();
+    if (!checked) {
+      await riskCheckbox.check({ timeout: 5_000 }).catch(async (error) => {
+        if (page.isClosed() || await onboardingGoneOrReady()) return;
+        throw error;
+      });
+    }
   }
 
   const finishDeadline = Date.now() + 30_000;
@@ -316,36 +321,38 @@ async function completeProfileOnboardingIfVisible(page: Page, label: string): Pr
 }
 
 async function ensureRuntimeOnline(page: Page, tag: string): Promise<void> {
-  const ok = await page.evaluate(async () => {
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        runtimeState?: {
-          p2p?: {
-            isConnected?: () => boolean;
-            connect?: () => void;
-            reconnect?: () => void;
+  await expect
+    .poll(async () => {
+      if (page.isClosed()) return false;
+      return await page.evaluate(() => {
+        const env = (window as typeof window & {
+          isolatedEnv?: {
+            runtimeState?: {
+              p2p?: {
+                isConnected?: () => boolean;
+                connect?: () => void;
+                reconnect?: () => void;
+              };
+            };
           };
-        };
-      };
-    }).isolatedEnv;
-    const p2p = env?.runtimeState?.p2p;
-    if (!env || !p2p) return false;
-
-    const startedAt = Date.now();
-    while (Date.now() - startedAt < 20_000) {
-      if (typeof p2p.isConnected === 'function' && p2p.isConnected()) return true;
-      if (typeof p2p.connect === 'function') {
-        try { p2p.connect(); } catch {}
-      } else if (typeof p2p.reconnect === 'function') {
-        try { p2p.reconnect(); } catch {}
-      }
-      await new Promise((resolve) => setTimeout(resolve, 500));
-    }
-
-    return typeof p2p.isConnected === 'function' && p2p.isConnected();
-  });
-
-  expect(ok, `[${tag}] runtime must be online`).toBe(true);
+        }).isolatedEnv;
+        const p2p = env?.runtimeState?.p2p;
+        if (!env || !p2p) return false;
+        if (typeof p2p.isConnected === 'function' && p2p.isConnected()) return true;
+        const start = typeof p2p.connect === 'function' ? p2p.connect : p2p.reconnect;
+        if (typeof start === 'function') {
+          setTimeout(() => {
+            try { start.call(p2p); } catch {}
+          }, 0);
+        }
+        return false;
+      }).catch(() => false);
+    }, {
+      timeout: 20_000,
+      intervals: [250, 500, 1000],
+      message: `[${tag}] runtime must be online`,
+    })
+    .toBe(true);
 }
 
 export async function gotoApp(

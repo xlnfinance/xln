@@ -23,7 +23,7 @@ import {
   parseLiveBookKey,
   prefixUpperBound,
 } from './keys';
-import { listKeys, readJsonOrNull } from './level';
+import { iterateKeys, readJsonOrNull } from './level';
 import { listSnapshotHeights } from './lifecycle';
 import { hydrateEntityStateFromStorage } from './projections';
 import type {
@@ -162,8 +162,7 @@ const listAccountPageFromKeyspace = async (options: {
   overlay?: Map<string, StorageAccountDoc | null>;
 }): Promise<StorageAccountDocPage | null> => {
   const { db, prefix, parseKey, cursor, limit, direction, overlay } = options;
-  if (direction === 'desc' || typeof db.keys !== 'function') return null;
-  const upperBound = prefixUpperBound(prefix);
+  if (typeof db.keys !== 'function') return null;
   const gte = options.cursorKey ?? prefix;
   const candidates: Array<{ counterpartyId: string; doc: StorageAccountDoc }> = [];
   const seen = new Set<string>();
@@ -173,12 +172,11 @@ const listAccountPageFromKeyspace = async (options: {
     pushAccountCandidate(candidates, seen, counterpartyId, doc, limit, direction);
   }
 
-  for await (const rawKey of db.keys(upperBound ? { gte, lt: upperBound } : { gte })) {
-    const key = Buffer.isBuffer(rawKey)
-      ? rawKey
-      : rawKey instanceof Uint8Array
-        ? Buffer.from(rawKey)
-        : Buffer.from(String(rawKey));
+  const upperBound = prefixUpperBound(prefix);
+  const range = direction === 'asc'
+    ? (upperBound ? { gte, lt: upperBound } : { gte })
+    : { prefix };
+  for await (const key of iterateKeys(db, range)) {
     const { counterpartyId } = parseKey(key);
     const normalized = normalizeEntityId(counterpartyId);
     if (!isAfterAccountCursor(normalized, cursor, direction)) continue;
@@ -200,8 +198,11 @@ export const findStorageLatestSnapshotAtOrBelow = async (
 };
 
 export const listStorageLiveEntityIds = async (db: RuntimeDbLike): Promise<string[]> => {
-  const keys = await listKeys(db, Buffer.from([KEY_LIVE_ENTITY]));
-  return keys.map((key) => decodeEntityId(key.subarray(1, 33)));
+  const ids: string[] = [];
+  for await (const key of iterateKeys(db, { prefix: Buffer.from([KEY_LIVE_ENTITY]) })) {
+    ids.push(decodeEntityId(key.subarray(1, 33)));
+  }
+  return ids;
 };
 
 export const listStorageSnapshotEntityIds = async (
@@ -210,8 +211,11 @@ export const listStorageSnapshotEntityIds = async (
 ): Promise<string[]> => {
   const targetHeight = Number.isFinite(height) ? Math.max(1, Math.floor(height)) : 0;
   if (targetHeight <= 0) return [];
-  const keys = await listKeys(db, keySnapshotEntityPrefix(targetHeight));
-  return keys.map((key) => decodeEntityId(key.subarray(9, 41)));
+  const ids: string[] = [];
+  for await (const key of iterateKeys(db, { prefix: keySnapshotEntityPrefix(targetHeight) })) {
+    ids.push(decodeEntityId(key.subarray(9, 41)));
+  }
+  return ids;
 };
 
 const applyDocs = (
@@ -239,8 +243,7 @@ const loadSnapshotDocsForEntity = async (db: RuntimeDbLike, snapshotHeight: numb
     docs.set(`e:${normalizeEntityId(entityId)}`, { family: 'entity', entityId: normalizeEntityId(entityId), value: entityBuffer });
   }
 
-  const accountKeys = await listKeys(db, keySnapshotAccountPrefix(snapshotHeight, entityId));
-  for (const key of accountKeys) {
+  for await (const key of iterateKeys(db, { prefix: keySnapshotAccountPrefix(snapshotHeight, entityId) })) {
     const entity = decodeEntityId(key.subarray(9, 41));
     const counterparty = decodeEntityId(key.subarray(41, 73));
     const value = decodeBuffer<StorageAccountDoc>(await db.get(key));
@@ -252,8 +255,7 @@ const loadSnapshotDocsForEntity = async (db: RuntimeDbLike, snapshotHeight: numb
     });
   }
 
-  const bookKeys = await listKeys(db, keySnapshotBookPrefix(snapshotHeight, entityId));
-  for (const key of bookKeys) {
+  for await (const key of iterateKeys(db, { prefix: keySnapshotBookPrefix(snapshotHeight, entityId) })) {
     const parsed = parseLiveBookKey(key, 9);
     const value = decodeBuffer<BookState>(await db.get(key));
     docs.set(`b:${normalizeEntityId(parsed.entityId)}:${parsed.pairId}`, {
@@ -331,7 +333,6 @@ const loadAccountDocPageAtHeight = async (
   const limit = readPageLimit(query);
   const direction = query?.sortDir === 'desc' ? 'desc' : 'asc';
   const cursor = readAccountCursor(query);
-  if (direction === 'desc') return null;
 
   if (targetHeight === latestMaterializedHeight) {
     const prefix = keyLiveAccountPrefix(normalized);
@@ -424,14 +425,14 @@ const loadBookDocPageAtHeight = async (
   const books = new Map<string, BookState>();
 
   if (targetHeight === latestMaterializedHeight) {
-    for (const key of await listKeys(db, keyLiveBookPrefix(normalized))) {
+    for await (const key of iterateKeys(db, { prefix: keyLiveBookPrefix(normalized) })) {
       const parsed = parseLiveBookKey(key);
       books.set(parsed.pairId, decodeBuffer<BookState>(await db.get(key)));
     }
   } else {
     const baseSnapshotHeight = await findLatestSnapshotAtOrBelow(db, targetHeight);
     if (baseSnapshotHeight > 0) {
-      for (const key of await listKeys(db, keySnapshotBookPrefix(baseSnapshotHeight, normalized))) {
+      for await (const key of iterateKeys(db, { prefix: keySnapshotBookPrefix(baseSnapshotHeight, normalized) })) {
         const parsed = parseLiveBookKey(key, 9);
         books.set(parsed.pairId, decodeBuffer<BookState>(await db.get(key)));
       }
@@ -515,13 +516,13 @@ export const loadEntityStateFromStorage = async (options: {
     const entityCore = await readJsonOrNull<StorageEntityCoreDoc>(db, keyLiveEntity(entityId));
     if (!entityCore) return null;
     const accounts = new Map<string, StorageAccountDoc>();
-    for (const key of await listKeys(db, keyLiveAccountPrefix(entityId))) {
+    for await (const key of iterateKeys(db, { prefix: keyLiveAccountPrefix(entityId) })) {
       const parsed = parseLiveAccountKey(key);
       const doc = decodeBuffer<StorageAccountDoc>(await db.get(key));
       accounts.set(parsed.counterpartyId, doc);
     }
     const books = new Map<string, BookState>();
-    for (const key of await listKeys(db, keyLiveBookPrefix(entityId))) {
+    for await (const key of iterateKeys(db, { prefix: keyLiveBookPrefix(entityId) })) {
       const parsed = parseLiveBookKey(key);
       books.set(parsed.pairId, decodeBuffer<BookState>(await db.get(key)));
     }

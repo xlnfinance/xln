@@ -10,7 +10,19 @@ import {
 import { decodeRuntimeAdapterMessage, encodeRuntimeAdapterMessage } from '../radapter/codec';
 import { resolveRuntimeAdapterRead } from '../radapter/resolve';
 import { broadcastRuntimeAdapterTick, handleRuntimeAdapterMessage } from '../radapter/server';
+import { encodeBuffer } from '../storage/codec';
+import {
+  KEY_HEAD,
+  hexBytes,
+  keySnapshotAccountPrefix,
+  keySnapshotBookPrefix,
+  keySnapshotEntity,
+  keySnapshotManifest,
+  textBytes,
+} from '../storage/keys';
 import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
+import { loadEntityViewPageFromStorage } from '../storage/read';
+import type { RuntimeDbLike, StorageHead, StorageSnapshotManifest } from '../storage/types';
 import type { EntityReplica, Env } from '../types';
 import type { BookState } from '../orderbook';
 import { DEFAULT_SPREAD_DISTRIBUTION, type OrderbookExtState } from '../orderbook/types';
@@ -117,6 +129,58 @@ const makeOrderbookExt = (books: Map<string, BookState>): OrderbookExtState => (
     supportedPairs: Array.from(books.keys()),
   },
 });
+
+const makeMemoryDb = (entries: Array<[Buffer, Buffer]>): RuntimeDbLike => {
+  const store = new Map<string, { key: Buffer; value: Buffer }>();
+  const putValue = (key: Buffer, value: Buffer): void => {
+    store.set(key.toString('hex'), { key: Buffer.from(key), value: Buffer.from(value) });
+  };
+  for (const [key, value] of entries) putValue(key, value);
+  return {
+    get: async (key: Buffer) => {
+      const item = store.get(key.toString('hex'));
+      if (!item) {
+        const error = new Error('NotFound') as Error & { code?: string; notFound?: boolean };
+        error.code = 'LEVEL_NOT_FOUND';
+        error.notFound = true;
+        throw error;
+      }
+      return Buffer.from(item.value);
+    },
+    batch: () => {
+      const puts: Array<[Buffer, Buffer]> = [];
+      const dels: Buffer[] = [];
+      return {
+        put: (key: Buffer, value: Buffer) => {
+          puts.push([Buffer.from(key), Buffer.from(value)]);
+        },
+        del: (key: Buffer) => {
+          dels.push(Buffer.from(key));
+        },
+        write: async () => {
+          for (const key of dels) store.delete(key.toString('hex'));
+          for (const [key, value] of puts) putValue(key, value);
+        },
+      };
+    },
+    keys: async function* (options?: { gte?: Buffer; lt?: Buffer }) {
+      const ordered = Array.from(store.values())
+        .map((item) => item.key)
+        .sort(Buffer.compare);
+      for (const key of ordered) {
+        if (options?.gte && Buffer.compare(key, options.gte) < 0) continue;
+        if (options?.lt && Buffer.compare(key, options.lt) >= 0) continue;
+        yield Buffer.from(key);
+      }
+    },
+  };
+};
+
+const snapshotAccountKey = (height: number, entity: string, counterparty: string): Buffer =>
+  Buffer.concat([keySnapshotAccountPrefix(height, entity), hexBytes(counterparty)]);
+
+const snapshotBookKey = (height: number, entity: string, pairId: string): Buffer =>
+  Buffer.concat([keySnapshotBookPrefix(height, entity), textBytes(pairId)]);
 
 const capabilityTokenUnchecked = (seed: string, role: 'read' | 'full', expiresAtMs: number): string => {
   const level = role === 'read' ? 'inspect' : 'admin';
@@ -300,6 +364,71 @@ test('runtime adapter historical view frame uses paged storage loader instead of
   expect(fullLoadCalled).toBe(false);
   expect(frame.activeEntity?.accounts.items).toHaveLength(1);
   expect(frame.activeEntity?.accounts.items[0]?.rightEntity).toBe(counterpartyId);
+});
+
+test('storage-backed historical view pages support desc account and book cursors', async () => {
+  const env = makeEnv();
+  const replica = Array.from(env.eReplicas.values())[0]!;
+  const baseAccount = replica.state.accounts.get(counterpartyId)!;
+  const snapshotHeight = 4;
+  const latestHeight = 5;
+  const accountIds = [1, 2, 3].map((value) => `0x${value.toString(16).padStart(64, '0')}`);
+  const head: StorageHead = {
+    schemaVersion: 1,
+    latestHeight,
+    latestMaterializedHeight: latestHeight,
+    latestSnapshotHeight: snapshotHeight,
+    snapshotPeriodFrames: 256,
+    retainSnapshots: 3,
+    epochMaxBytes: 1,
+    accountMerkleRadix: 16,
+    retainedHistoryBytes: 0,
+  };
+  const manifest: StorageSnapshotManifest = { height: snapshotHeight, createdAt: 400, docCount: 6 };
+  const core = projectEntityCoreDoc(replica.state, replica);
+  const db = makeMemoryDb([
+    [KEY_HEAD, encodeBuffer(head)],
+    [keySnapshotManifest(snapshotHeight), encodeBuffer(manifest)],
+    [keySnapshotEntity(snapshotHeight, entityId), encodeBuffer(core)],
+    ...accountIds.map((id) => [
+      snapshotAccountKey(snapshotHeight, entityId, id),
+      encodeBuffer(projectAccountDoc({
+        ...baseAccount,
+        rightEntity: id,
+        proofHeader: { ...baseAccount.proofHeader, toEntity: id },
+      })),
+    ] as [Buffer, Buffer]),
+    [snapshotBookKey(snapshotHeight, entityId, '1/1'), encodeBuffer(makeBook(101n))],
+    [snapshotBookKey(snapshotHeight, entityId, '1/2'), encodeBuffer(makeBook(102n))],
+  ]);
+
+  const first = await loadEntityViewPageFromStorage({
+    env,
+    tryOpenDb: async () => true,
+    getRuntimeDb: () => db,
+    entityId,
+    height: snapshotHeight,
+    accountQuery: { limit: 2, sortDir: 'desc' },
+    bookQuery: { limit: 1 },
+  });
+  expect(first?.accounts.items.map((item) => item.rightEntity)).toEqual([accountIds[2], accountIds[1]]);
+  expect(first?.accounts.nextCursor).toBe(accountIds[1]);
+  expect(first?.books.items.map((item) => item.pairId)).toEqual(['1/1']);
+  expect(first?.books.nextCursor).toBe('1/1');
+
+  const second = await loadEntityViewPageFromStorage({
+    env,
+    tryOpenDb: async () => true,
+    getRuntimeDb: () => db,
+    entityId,
+    height: snapshotHeight,
+    accountQuery: { limit: 2, sortDir: 'desc', cursor: first?.accounts.nextCursor || undefined },
+    bookQuery: { limit: 1, cursor: first?.books.nextCursor || undefined },
+  });
+  expect(second?.accounts.items.map((item) => item.rightEntity)).toEqual([accountIds[0]]);
+  expect(second?.accounts.nextCursor).toBe(null);
+  expect(second?.books.items.map((item) => item.pairId)).toEqual(['1/2']);
+  expect(second?.books.nextCursor).toBe(null);
 });
 
 test('runtime adapter account pagination avoids full sort materialization', async () => {

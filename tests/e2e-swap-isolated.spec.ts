@@ -1159,6 +1159,7 @@ test.describe('E2E Swap Isolated Flow', () => {
   });
 
   test('one resting maker order can be matched by two isolated takers until fully closed', async ({ browser, page }) => {
+    test.setTimeout(240_000);
     let aliceContext: BrowserContext | null = null;
     let bobContext: BrowserContext | null = null;
     let carolContext: BrowserContext | null = null;

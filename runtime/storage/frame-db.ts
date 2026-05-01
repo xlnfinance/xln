@@ -1,10 +1,11 @@
 import type { FrameLogEntry, RuntimeFrameDbRecord } from '../types';
 import { decodeBuffer, encodeBuffer, writeBatch } from './codec';
-import { deleteKeys, listKeys, listKeysRange, readJsonOrNull, readRawOrNull } from './level';
+import { deleteKeyRange, deleteKeys, iterateKeys, readJsonOrNull, readRawOrNull } from './level';
 import {
   FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME,
   FRAME_DB_ENTITY_ACTIVITY,
   FRAME_DB_RUNTIME_ACTIVITY,
+  FRAME_DB_ORDERBOOK_COMMIT,
   KEY_FRAME_DB_HEAD,
   STORAGE_SCHEMA_VERSION,
   decodeHeight,
@@ -188,44 +189,60 @@ const pruneFrameDbBeforeRuntimeHeight = async (
 
   let removedBytes = 0;
   let removedKeys = 0;
-  const runtimeActivityKeys = (await listKeys(db, Buffer.from([FRAME_DB_RUNTIME_ACTIVITY])))
-    .filter((key) => decodeHeight(key, 1) <= cutoff);
-  removedBytes += await deleteKeys(db, runtimeActivityKeys);
-  removedKeys += runtimeActivityKeys.length;
+  const runtimeActivityPruned = await deleteKeyRange(db, {
+    gte: Buffer.from([FRAME_DB_RUNTIME_ACTIVITY]),
+    lt: Buffer.concat([Buffer.from([FRAME_DB_RUNTIME_ACTIVITY]), encodeHeight(cutoff + 1)]),
+  });
+  removedBytes += runtimeActivityPruned.removedBytes;
+  removedKeys += runtimeActivityPruned.removedKeys;
 
-  const entityActivityKeys = (await listKeys(db, Buffer.from([FRAME_DB_ENTITY_ACTIVITY])))
-    .filter((key) => decodeHeight(key, 33) <= cutoff);
-  removedBytes += await deleteKeys(db, entityActivityKeys);
-  removedKeys += entityActivityKeys.length;
+  const entityActivityPruned = await deleteKeyRange(
+    db,
+    { prefix: Buffer.from([FRAME_DB_ENTITY_ACTIVITY]) },
+    (key) => decodeHeight(key, 33) <= cutoff,
+  );
+  removedBytes += entityActivityPruned.removedBytes;
+  removedKeys += entityActivityPruned.removedKeys;
 
-  const orderbookCommitKeys = (await listKeys(db, keyFrameDbOrderbookCommitPrefix()))
-    .filter((key) => decodeHeight(key, 1) <= cutoff);
-  removedBytes += await deleteKeys(db, orderbookCommitKeys);
-  removedKeys += orderbookCommitKeys.length;
+  const orderbookCommitPruned = await deleteKeyRange(db, {
+    gte: keyFrameDbOrderbookCommitPrefix(),
+    lt: Buffer.concat([Buffer.from([FRAME_DB_ORDERBOOK_COMMIT]), encodeHeight(cutoff + 1)]),
+  });
+  removedBytes += orderbookCommitPruned.removedBytes;
+  removedKeys += orderbookCommitPruned.removedKeys;
 
   const accountFrameKeysByHex = new Map<string, Buffer>();
-  const accountFrameIndexKeys = await listKeysRange(
-    db,
-    keyFrameDbAccountFrameByRuntimePrefix(),
-    Buffer.concat([Buffer.from([FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME]), encodeHeight(cutoff + 1)]),
-  );
-  for (const key of accountFrameIndexKeys) {
+  for await (const key of iterateKeys(db, {
+    gte: keyFrameDbAccountFrameByRuntimePrefix(),
+    lt: Buffer.concat([Buffer.from([FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME]), encodeHeight(cutoff + 1)]),
+  })) {
     accountFrameKeysByHex.set(key.toString('hex'), key);
     const parsed = parseFrameDbAccountFrameRuntimeIndexKey(key);
     const primaryKey = keyFrameDbAccountFrame(parsed.entityId, parsed.counterpartyId, parsed.accountHeight);
     accountFrameKeysByHex.set(primaryKey.toString('hex'), primaryKey);
+    if (accountFrameKeysByHex.size >= 512) {
+      const keysToDelete = Array.from(accountFrameKeysByHex.values());
+      removedBytes += await deleteKeys(db, keysToDelete);
+      removedKeys += keysToDelete.length;
+      accountFrameKeysByHex.clear();
+    }
   }
 
-  if (accountFrameIndexKeys.length === 0) {
-    // Legacy frame DBs written before the runtime-height index still need one
-    // value scan to age out old account frames. Newly written rows prune by key.
-    for (const key of await listKeys(db, keyFrameDbAccountFramePrefix())) {
-      const raw = await readRawOrNull(db, key);
-      if (!raw) continue;
-      const record = decodeBuffer<StoredAccountFrameRecord>(raw);
-      if (Math.max(0, Math.floor(Number(record.runtimeHeight ?? 0))) <= cutoff) {
-        accountFrameKeysByHex.set(key.toString('hex'), key);
-      }
+  // Legacy frame DBs written before the runtime-height index have no secondary
+  // key to range-prune. Stream the primary keyspace so upgraded DBs eventually
+  // age out those rows without materializing all account-frame keys in memory.
+  for await (const key of iterateKeys(db, { prefix: keyFrameDbAccountFramePrefix() })) {
+    const raw = await readRawOrNull(db, key);
+    if (!raw) continue;
+    const record = decodeBuffer<StoredAccountFrameRecord>(raw);
+    if (Math.max(0, Math.floor(Number(record.runtimeHeight ?? 0))) <= cutoff) {
+      accountFrameKeysByHex.set(key.toString('hex'), key);
+    }
+    if (accountFrameKeysByHex.size >= 512) {
+      const keysToDelete = Array.from(accountFrameKeysByHex.values());
+      removedBytes += await deleteKeys(db, keysToDelete);
+      removedKeys += keysToDelete.length;
+      accountFrameKeysByHex.clear();
     }
   }
   const accountFrameKeysToDelete = Array.from(accountFrameKeysByHex.values());
@@ -319,7 +336,7 @@ export const readFrameDbAccountFrames = async (
 ): Promise<StoredAccountFrameRecord[]> => {
   const prefix = keyFrameDbAccountFramePrefix(entityId, counterpartyId);
   const records: StoredAccountFrameRecord[] = [];
-  for (const key of await listKeys(db, prefix)) {
+  for await (const key of iterateKeys(db, { prefix })) {
     const accountHeight = decodeHeight(key, 65);
     const record = decodeBuffer<StoredAccountFrameRecord>(await db.get(key));
     records.push({ ...record, accountHeight });
