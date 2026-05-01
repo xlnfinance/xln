@@ -13,6 +13,10 @@ const PW_TRACE = process.env['PW_TRACE'] || (PW_FAST ? 'off' : 'on-first-retry')
 const PW_SCREENSHOT = process.env['PW_SCREENSHOT'] || (PW_FAST ? 'off' : 'only-on-failure');
 const PW_VIDEO = process.env['PW_VIDEO'] || 'on';
 const PW_REPORTER = process.env['PW_REPORTER'];
+const PW_TEST_TIMEOUT_RAW = Number(process.env['PW_TEST_TIMEOUT'] || '60000');
+const PW_TEST_TIMEOUT = Number.isFinite(PW_TEST_TIMEOUT_RAW) && PW_TEST_TIMEOUT_RAW > 0
+  ? Math.floor(PW_TEST_TIMEOUT_RAW)
+  : 60000;
 const PW_VIEWPORT_WIDTH = Number(process.env['PW_VIEWPORT_WIDTH'] || '1280');
 const PW_VIEWPORT_HEIGHT = Number(process.env['PW_VIEWPORT_HEIGHT'] || '720');
 const PW_VIEWPORT = {
@@ -66,7 +70,7 @@ export default defineConfig({
         ],
   testDir: './tests',
   testIgnore: ['**/ux-flow-verification.spec.js'],
-  timeout: 60000, // 60s for AHB prepopulate
+  timeout: PW_TEST_TIMEOUT,
   workers: PW_WORKERS,
   // retries: 1,
   outputDir: PW_OUTPUT_DIR,
