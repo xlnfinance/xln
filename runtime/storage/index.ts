@@ -369,6 +369,12 @@ export const saveRuntimeFrameToStorage = async (options: {
     for (const item of preparedHashes.entityHashPuts) {
       batch.put(item.key, item.value);
     }
+    for (const key of preparedHashes.merkleDels) {
+      if (typeof batch.del === 'function') batch.del(key);
+    }
+    for (const item of preparedHashes.merklePuts) {
+      batch.put(item.key, item.value);
+    }
   }
   for (const replica of options.env.eReplicas.values()) {
     if (!replica?.state) continue;

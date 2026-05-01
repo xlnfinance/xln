@@ -17,6 +17,37 @@ export type RadixMerkleResult = {
   root: string;
 };
 
+export type RadixMerkleStoredChild = {
+  slot: number;
+  kind: 'branch' | 'leaf';
+  path: number[];
+  hash: string;
+};
+
+export type RadixMerkleStoredBranch = {
+  radix: RadixMerkleRadix;
+  path: number[];
+  hash: string;
+  children: RadixMerkleStoredChild[];
+};
+
+export type RadixMerkleStoredLeaf = {
+  radix: RadixMerkleRadix;
+  path: number[];
+  key: string;
+  valueHash: string;
+  hash: string;
+};
+
+export type RadixMerkleDirtyNodes = {
+  rootHash: string;
+  leafCount: number;
+  branchPuts: RadixMerkleStoredBranch[];
+  leafPuts: RadixMerkleStoredLeaf[];
+  branchDels: number[][];
+  leafDels: number[][];
+};
+
 const EMPTY_ROOT = `0x${'00'.repeat(32)}`;
 
 const domainBytes = (tag: string): Buffer => {
@@ -37,6 +68,8 @@ const hashParts = (domain: Buffer, parts: Uint8Array[]): string => {
 const hexToBytes = (hex: string): Uint8Array => {
   return Uint8Array.from(Buffer.from(String(hex).replace(/^0x/, ''), 'hex'));
 };
+
+const bytesToHex = (bytes: Uint8Array): string => `0x${Buffer.from(bytes).toString('hex')}`;
 
 const pathSlots = (key: Uint8Array, radix: RadixMerkleRadix): number[] => {
   if (radix === 256) return Array.from(key);
@@ -72,6 +105,9 @@ const encodePathSegment = (radix: RadixMerkleRadix, path: number[]): Uint8Array 
   return Buffer.concat([header, packed]);
 };
 
+export const packRadixMerklePath = (radix: RadixMerkleRadix, path: number[]): Buffer =>
+  Buffer.from(encodePathSegment(radix, path));
+
 const extensionHash = (radix: RadixMerkleRadix, path: number[], childHash: string): string =>
   hashParts(EXTENSION_DOMAIN, [
     Uint8Array.of(radix === 256 ? 0xff : 0x10),
@@ -98,6 +134,7 @@ type MutableLeafNode = {
   path: number[];
   value: Uint8Array;
   hash?: string;
+  dirty?: boolean;
 };
 
 type MutableBranchNode = {
@@ -105,6 +142,7 @@ type MutableBranchNode = {
   path: number[];
   children: Map<number, MutableMerkleNode>;
   hash?: string;
+  dirty?: boolean;
 };
 
 type MutableMerkleNode = MutableLeafNode | MutableBranchNode;
@@ -143,10 +181,12 @@ const mutableLeaf = (key: Uint8Array, value: Uint8Array, radix: RadixMerkleRadix
   key: Uint8Array.from(key),
   path: pathSlots(key, radix),
   value: Uint8Array.from(value),
+  dirty: true,
 });
 
 const invalidateNode = (node: MutableMerkleNode): void => {
   delete node.hash;
+  node.dirty = true;
 };
 
 const mutableNodeHash = (node: MutableMerkleNode, radix: RadixMerkleRadix): string => {
@@ -200,6 +240,7 @@ const insertMutableNode = (
         [node.path[shared] ?? 0, node],
         [leaf.path[shared] ?? 0, leaf],
       ]),
+      dirty: true,
     };
     return { node: branch, touchedNodes: 2 };
   }
@@ -213,6 +254,7 @@ const insertMutableNode = (
         [node.path[shared] ?? 0, node],
         [leaf.path[shared] ?? 0, leaf],
       ]),
+      dirty: true,
     };
     return { node: branch, touchedNodes: 2 };
   }
@@ -234,21 +276,34 @@ const collapseMutableBranch = (node: MutableBranchNode): MutableMerkleNode | nul
 const deleteMutableNode = (
   node: MutableMerkleNode | null,
   path: number[],
-): { node: MutableMerkleNode | null; deleted: boolean; touchedNodes: number } => {
-  if (!node) return { node: null, deleted: false, touchedNodes: 0 };
+): { node: MutableMerkleNode | null; deleted: boolean; touchedNodes: number; branchDels: number[][]; leafDels: number[][] } => {
+  if (!node) return { node: null, deleted: false, touchedNodes: 0, branchDels: [], leafDels: [] };
   if (node.kind === 'leaf') {
     const matches = node.path.length === path.length && commonPathPrefixLength(node.path, path) === path.length;
-    return { node: matches ? null : node, deleted: matches, touchedNodes: matches ? 1 : 0 };
+    return {
+      node: matches ? null : node,
+      deleted: matches,
+      touchedNodes: matches ? 1 : 0,
+      branchDels: [],
+      leafDels: matches ? [node.path] : [],
+    };
   }
-  if (!pathHasPrefix(path, node.path)) return { node, deleted: false, touchedNodes: 0 };
+  if (!pathHasPrefix(path, node.path)) return { node, deleted: false, touchedNodes: 0, branchDels: [], leafDels: [] };
   const slot = path[node.path.length] ?? 0;
   const child = node.children.get(slot) ?? null;
   const result = deleteMutableNode(child, path);
-  if (!result.deleted) return { node, deleted: false, touchedNodes: result.touchedNodes };
+  if (!result.deleted) return { node, deleted: false, touchedNodes: result.touchedNodes, branchDels: result.branchDels, leafDels: result.leafDels };
   if (result.node) node.children.set(slot, result.node);
   else node.children.delete(slot);
   invalidateNode(node);
-  return { node: collapseMutableBranch(node), deleted: true, touchedNodes: result.touchedNodes + 1 };
+  const collapsed = collapseMutableBranch(node);
+  return {
+    node: collapsed,
+    deleted: true,
+    touchedNodes: result.touchedNodes + 1,
+    branchDels: collapsed === node ? result.branchDels : [...result.branchDels, node.path],
+    leafDels: result.leafDels,
+  };
 };
 
 const collectMutableLeaves = (node: MutableMerkleNode | null, out: RadixMerkleLeaf[]): void => {
@@ -273,11 +328,58 @@ const mutableHasKey = (
   return mutableHasKey(node.children.get(slot) ?? null, keyPath);
 };
 
+const clearMutableDirty = (node: MutableMerkleNode | null): void => {
+  if (!node) return;
+  node.dirty = false;
+  if (node.kind === 'branch') {
+    for (const child of node.children.values()) clearMutableDirty(child);
+  }
+};
+
+const collectDirtyMutableNodes = (
+  node: MutableMerkleNode | null,
+  radix: RadixMerkleRadix,
+  out: Pick<RadixMerkleDirtyNodes, 'branchPuts' | 'leafPuts'>,
+): void => {
+  if (!node) return;
+  if (node.kind === 'leaf') {
+    if (node.dirty) {
+      out.leafPuts.push({
+        radix,
+        path: [...node.path],
+        key: bytesToHex(node.key),
+        valueHash: bytesToHex(node.value),
+        hash: mutableNodeHash(node, radix),
+      });
+    }
+    return;
+  }
+
+  if (node.dirty) {
+    out.branchPuts.push({
+      radix,
+      path: [...node.path],
+      hash: mutableNodeHash(node, radix),
+      children: Array.from(node.children.entries())
+        .sort((left, right) => left[0] - right[0])
+        .map(([slot, child]) => ({
+          slot,
+          kind: child.kind,
+          path: [...child.path],
+          hash: mutableEdgeHash(node.path, child, radix),
+        })),
+    });
+  }
+  for (const child of node.children.values()) collectDirtyMutableNodes(child, radix, out);
+};
+
 export class MutableRadixMerkleTree {
   readonly radix: RadixMerkleRadix;
   private root: MutableMerkleNode | null = null;
   private leaves = 0;
   private lastTouched = 0;
+  private deletedBranches: number[][] = [];
+  private deletedLeaves: number[][] = [];
 
   constructor(options?: { radix?: RadixMerkleRadix; leaves?: RadixMerkleLeaf[] }) {
     this.radix = options?.radix === 256 ? 256 : 16;
@@ -306,7 +408,11 @@ export class MutableRadixMerkleTree {
     const result = deleteMutableNode(this.root, pathSlots(key, this.radix));
     this.root = result.node;
     this.lastTouched = result.touchedNodes;
-    if (result.deleted) this.leaves = Math.max(0, this.leaves - 1);
+    if (result.deleted) {
+      this.leaves = Math.max(0, this.leaves - 1);
+      this.deletedBranches.push(...result.branchDels.map((path) => [...path]));
+      this.deletedLeaves.push(...result.leafDels.map((path) => [...path]));
+    }
     return result.deleted;
   }
 
@@ -329,6 +435,22 @@ export class MutableRadixMerkleTree {
     if (expected.root !== this.getRoot()) {
       throw new Error(`RADIX_MERKLE_MUTABLE_ROOT_MISMATCH: actual=${this.getRoot()} expected=${expected.root}`);
     }
+  }
+
+  takeDirtyNodes(): RadixMerkleDirtyNodes {
+    const out: RadixMerkleDirtyNodes = {
+      rootHash: this.getRoot(),
+      leafCount: this.leaves,
+      branchPuts: [],
+      leafPuts: [],
+      branchDels: this.deletedBranches.map((path) => [...path]),
+      leafDels: this.deletedLeaves.map((path) => [...path]),
+    };
+    collectDirtyMutableNodes(this.root, this.radix, out);
+    clearMutableDirty(this.root);
+    this.deletedBranches = [];
+    this.deletedLeaves = [];
+    return out;
   }
 }
 

@@ -29,6 +29,7 @@ import type {
   SwapOffer,
 } from '../types';
 import type { RadixMerkleRadix } from './merkle';
+import type { StorageMerkleNamespace } from './keys';
 
 export type RuntimeDbLike = {
   get: (key: Buffer) => Promise<Buffer>;
@@ -214,6 +215,38 @@ export type StorageEntityHashDoc = {
   hash: string;
   cellCount?: number;
   cells: StorageHashCell[];
+};
+
+export type StorageMerkleRootDoc = {
+  entityId: string;
+  namespace: StorageMerkleNamespace;
+  radix: RadixMerkleRadix;
+  rootHash: string;
+  leafCount: number;
+};
+
+export type StorageMerkleBranchDoc = {
+  entityId: string;
+  namespace: StorageMerkleNamespace;
+  radix: RadixMerkleRadix;
+  path: number[];
+  hash: string;
+  children: Array<{
+    slot: number;
+    kind: 'branch' | 'leaf';
+    path: number[];
+    hash: string;
+  }>;
+};
+
+export type StorageMerkleLeafDoc = {
+  entityId: string;
+  namespace: StorageMerkleNamespace;
+  radix: RadixMerkleRadix;
+  path: number[];
+  key: string;
+  valueHash: string;
+  hash: string;
 };
 
 export type StorageFrameEntityHash = {
