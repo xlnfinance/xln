@@ -195,6 +195,11 @@ export const error = writable<string | null>(null);
 export const appRuntimeAdapterMode = writable<RuntimeAdapterConfig['mode']>('embedded');
 export const appRuntimeAdapterStatus = writable<RuntimeAdapterStatus>('disconnected');
 export const appRuntimeAdapterEndpoint = writable<string>('');
+export const appRuntimeAdapterActiveEntityId = writable<string>('');
+
+export const setRuntimeAdapterActiveEntityId = (entityId: string): void => {
+  appRuntimeAdapterActiveEntityId.set(normalizeEntityIdForView(entityId));
+};
 
 // xlnFunctions is now defined at the end of the file
 
@@ -399,6 +404,56 @@ const accountCounterpartyId = (entityId: string, doc: StorageAccountDoc): string
 const withDefinedProp = <K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> =>
   value === undefined ? {} : ({ [key]: value } as Record<K, V>);
 
+const buildRemotePlaceholderCore = (entityId: string, label: string, height: number): StorageEntityCoreDoc => {
+  const signerId = normalizeEntityIdForView(entityId);
+  return {
+    entityId,
+    signerId,
+    isProposer: false,
+    height,
+    timestamp: Date.now(),
+    messages: [],
+    nonces: new Map(),
+    proposals: new Map(),
+    config: {
+      mode: 'proposer-based',
+      threshold: 1n,
+      validators: [signerId],
+      shares: { [signerId]: 1n },
+    },
+    reserves: new Map(),
+    lastFinalizedJHeight: 0,
+    jBlockObservations: [],
+    jBlockChain: [],
+    entityEncPubKey: '',
+    entityEncPrivKey: '',
+    profile: { name: label, isHub: false, avatar: '', bio: '', website: '' },
+    htlcRoutes: new Map(),
+    htlcFeesEarned: 0n,
+    lockBook: new Map(),
+  };
+};
+
+const addRemoteReplicaFromCore = (
+  xln: XLNModule,
+  env: Env,
+  core: StorageEntityCoreDoc,
+  accounts: Map<string, StorageAccountDoc>,
+  books: Map<string, BookState>,
+): void => {
+  const entityId = normalizeEntityIdForView(core.entityId);
+  const state = hydrateRemoteEntityState({ core: { ...core, entityId }, accounts, books });
+  const signerId = normalizeEntityIdForView(core.signerId || entityId);
+  const replica: EntityReplica = {
+    entityId,
+    signerId,
+    isProposer: core.isProposer ?? true,
+    state,
+    hankoWitness: new Map(),
+  } as EntityReplica;
+  env.eReplicas.set(xln.formatReplicaKey(xln.createReplicaKey(entityId, signerId)), replica);
+};
+
 const hydrateRemoteAccountDoc = (doc: StorageAccountDoc): AccountMachine => ({
   leftEntity: doc.leftEntity,
   rightEntity: doc.rightEntity,
@@ -537,11 +592,13 @@ const buildRemoteAdapterEnvSnapshot = async (
   config: RuntimeAdapterConfig,
 ): Promise<Env> => {
   const pinnedHeight = Math.max(0, Math.floor(Number(adapter.currentHeight || 0)));
+  const requestedEntityId = normalizeEntityIdForView(get(appRuntimeAdapterActiveEntityId));
   const viewFrame = await adapter.read<RuntimeAdapterViewFrame>('view-frame', {
     limit: REMOTE_VIEW_PAGE_SIZE,
     accountsLimit: REMOTE_VIEW_PAGE_SIZE,
     booksLimit: REMOTE_VIEW_PAGE_SIZE,
     ...(pinnedHeight > 0 ? { atHeight: pinnedHeight } : {}),
+    ...(requestedEntityId ? { entityId: requestedEntityId } : {}),
   });
   const atHeight = Math.max(0, Math.floor(Number(viewFrame.height ?? viewFrame.head.latestHeight ?? adapter.currentHeight ?? 0)));
   const env = xln.createEmptyEnv(config.seed ?? null);
@@ -552,9 +609,17 @@ const buildRemoteAdapterEnvSnapshot = async (
   env.eReplicas = new Map();
   env.quietRuntimeLogs = true;
 
+  for (const summary of viewFrame.entities || []) {
+    const entityId = normalizeEntityIdForView(summary.entityId);
+    if (!entityId) continue;
+    const core = buildRemotePlaceholderCore(entityId, summary.label || entityId, Math.max(0, Math.floor(Number(summary.height ?? atHeight))));
+    addRemoteReplicaFromCore(xln, env, core, new Map(), new Map());
+  }
+
   const active = viewFrame.activeEntity;
   if (active) {
     const entityId = normalizeEntityIdForView(active.core.entityId || active.summary.entityId);
+    appRuntimeAdapterActiveEntityId.set(entityId);
     const accounts = new Map<string, StorageAccountDoc>();
     for (const doc of active.accounts.items) {
       accounts.set(accountCounterpartyId(entityId, doc), doc);
@@ -563,16 +628,7 @@ const buildRemoteAdapterEnvSnapshot = async (
     for (const item of active.books.items) {
       books.set(String(item.pairId), item.book);
     }
-    const state = hydrateRemoteEntityState({ core: active.core, accounts, books });
-    const signerId = normalizeEntityIdForView(active.core.signerId || entityId);
-    const replica: EntityReplica = {
-      entityId,
-      signerId,
-      isProposer: active.core.isProposer ?? true,
-      state,
-      hankoWitness: new Map(),
-    } as EntityReplica;
-    env.eReplicas.set(xln.formatReplicaKey(xln.createReplicaKey(entityId, signerId)), replica);
+    addRemoteReplicaFromCore(xln, env, { ...active.core, entityId }, accounts, books);
   }
 
   return env;
@@ -816,6 +872,17 @@ export function getEnv(): Env | null {
   return get(xlnEnvironment);
 }
 
+const routeRuntimeInput = async (xln: XLNModule, env: Env, input: RuntimeInput): Promise<Env> => {
+  const { runtimeAdapter } = await import('./runtimeAdapterStore');
+  const adapter = get(runtimeAdapter);
+  if (adapter?.mode === 'remote') {
+    await adapter.send(input);
+    return (await refreshRuntimeAdapterEnvironment()) ?? env;
+  }
+  xln.enqueueRuntimeInput(env, input);
+  return env;
+};
+
 // Enqueue entity inputs into runtime mempool (processed on next tick)
 export async function enqueueEntityInputs(env: Env, inputs: RoutedEntityInput[] = []): Promise<Env> {
   const xln = await getXLN();
@@ -833,26 +900,12 @@ export async function enqueueEntityInputs(env: Env, inputs: RoutedEntityInput[] 
     runtimeTxs: [],
     entityInputs: inputs,
   };
-  const { runtimeAdapter } = await import('./runtimeAdapterStore');
-  const adapter = get(runtimeAdapter);
-  if (adapter?.mode === 'remote') {
-    await adapter.send(input);
-    return (await refreshRuntimeAdapterEnvironment()) ?? env;
-  }
-  xln.enqueueRuntimeInput(env, input);
-  return env;
+  return routeRuntimeInput(xln, env, input);
 }
 
 export async function enqueueAndProcess(env: Env, input: RuntimeInput): Promise<Env> {
   const xln = await getXLN();
-  const { runtimeAdapter } = await import('./runtimeAdapterStore');
-  const adapter = get(runtimeAdapter);
-  if (adapter?.mode === 'remote') {
-    await adapter.send(input);
-    return (await refreshRuntimeAdapterEnvironment()) ?? env;
-  }
-  xln.enqueueRuntimeInput(env, input);
-  return env;
+  return routeRuntimeInput(xln, env, input);
 }
 
 // === FRONTEND UTILITY FUNCTIONS ===

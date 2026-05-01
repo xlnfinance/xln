@@ -120,7 +120,7 @@ import type {
   RuntimeAdapterViewFrame,
   resolveRuntimeAdapterRead,
 } from './radapter/resolve';
-import type { RuntimeAdapterEntitySummary } from './radapter/types';
+import type { RuntimeAdapterEntitySummary, RuntimeAdapterReadQuery } from './radapter/types';
 
 export type QueueEntityInputPayload = {
   type: string;
@@ -351,6 +351,12 @@ export interface XLNModule {
   listPersistedCheckpointHeights: (env: Env) => Promise<number[]>;
   listPersistedEntityIdsAtHeight: (env: Env, height: number) => Promise<string[]>;
   loadEntityStateFromStorageDb: (env: Env, entityId: string, height?: number) => Promise<EntityState | null>;
+  loadEntityViewPageFromStorageDb: (
+    env: Env,
+    entityId: string,
+    height: number,
+    query?: RuntimeAdapterReadQuery,
+  ) => Promise<import('./storage').StorageEntityViewPage | null>;
   verifyRuntimeChain: (
     runtimeId?: string | null,
     runtimeSeed?: string | null,

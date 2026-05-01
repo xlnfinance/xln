@@ -1284,12 +1284,16 @@ export type RuntimeFrameDbRecord =
       accountHeight: number;
       source: 'ackCommit' | 'peerCommit';
       frame: AccountFrame;
+      runtimeHeight?: number;
+      timestamp?: number;
     }
   | {
       kind: 'bookUpdate';
       entityId: string;
       pairId: string;
       book: BookState | null;
+      runtimeHeight?: number;
+      timestamp?: number;
     };
 
 export type RuntimeOverlayRecord =

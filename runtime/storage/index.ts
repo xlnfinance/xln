@@ -90,6 +90,7 @@ export {
   listStorageSnapshotEntityIds,
   listStorageSnapshotHeights,
   loadEntityStateFromStorage,
+  loadEntityViewPageFromStorage,
   readStorageFrameRecord,
   readStorageHead,
   readStorageReplicaMeta,
@@ -97,6 +98,12 @@ export {
 export {
   verifyStorageTailIntegrity,
 } from './verify';
+
+export type {
+  StorageAccountDocPage,
+  StorageBookDocPage,
+  StorageEntityViewPage,
+} from './read';
 
 export type {
   RuntimeDbLike,
@@ -157,7 +164,7 @@ const readHead = async (db: RuntimeDbLike, config: Required<StorageRuntimeConfig
       ...head,
       latestMaterializedHeight: Math.max(
         0,
-        Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? head.latestHeight ?? 0)),
+        Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? 0)),
       ),
     };
   }
@@ -183,6 +190,7 @@ const buildDiffRecord = (height: number, puts: StorageDoc[], dels: StorageDocRef
 export type StorageFrameSaveResult = {
   materialized: boolean;
   materializedOverlayRecords: number;
+  frameDbCommitted: boolean;
 };
 
 export const saveRuntimeFrameToStorage = async (options: {
@@ -198,14 +206,14 @@ export const saveRuntimeFrameToStorage = async (options: {
   rotateEpochDb?: (env: Env, snapshotHeight: number) => Promise<void>;
 } & PerfDeps): Promise<StorageFrameSaveResult> => {
   const config = runtimeConfigFromEnv(options.env);
-  if (!config.enabled) return { materialized: false, materializedOverlayRecords: 0 };
+  if (!config.enabled) return { materialized: false, materializedOverlayRecords: 0, frameDbCommitted: true };
 
   const state = options.env.runtimeState ?? {};
-  if (state.persistencePaused) return { materialized: false, materializedOverlayRecords: 0 };
+  if (state.persistencePaused) return { materialized: false, materializedOverlayRecords: 0, frameDbCommitted: true };
 
   const openStartedAt = options.getPerfMs();
   const opened = await options.tryOpenDb(options.env);
-  if (!opened) return { materialized: false, materializedOverlayRecords: 0 };
+  if (!opened) return { materialized: false, materializedOverlayRecords: 0, frameDbCommitted: false };
   const db = options.getRuntimeDb(options.env);
   const openMs = options.getPerfMs() - openStartedAt;
 
@@ -341,6 +349,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   let frameDbRetainedBytes = 0;
   let frameDbPrunedKeys = 0;
   let frameDbLatestPrunedHeight = 0;
+  let frameDbCommitted = frameDbPuts.length === 0;
   const batch = db.batch();
   batch.put(frameKey, frameBuffer);
   batch.put(diffKey, diffBuffer);
@@ -405,6 +414,7 @@ export const saveRuntimeFrameToStorage = async (options: {
       frameDbRetainedBytes = frameDbResult.retainedBytes;
       frameDbPrunedKeys = frameDbResult.prunedKeys;
       frameDbLatestPrunedHeight = frameDbResult.latestPrunedRuntimeHeight;
+      frameDbCommitted = true;
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error(`[PERSIST] frame DB secondary-index write failed after main commit: ${message}`);
@@ -482,5 +492,6 @@ export const saveRuntimeFrameToStorage = async (options: {
   return {
     materialized: shouldMaterialize,
     materializedOverlayRecords: shouldMaterialize ? overlayRecords.length : 0,
+    frameDbCommitted,
   };
 };

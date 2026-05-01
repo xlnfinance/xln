@@ -31,6 +31,7 @@ import { createStructuredLogger } from '../logger';
 import { decodeRuntimeAdapterMessage } from '../radapter/codec';
 import {
   attachRuntimeAdapterTicker,
+  closeInvalidRuntimeAdapterMessage,
   forgetRuntimeAdapterClient,
   handleRuntimeAdapterMessage,
 } from '../radapter/server';
@@ -52,6 +53,7 @@ import {
   readPersistedStorageHead,
   listPersistedCheckpointHeights,
   loadEntityStateFromStorageDb,
+  loadEntityViewPageFromStorageDb,
   listPersistedEntityIdsAtHeight,
   registerEnvChangeCallback,
 } from '../runtime.ts';
@@ -905,8 +907,7 @@ const run = async (): Promise<void> => {
     try {
       msg = decodeRuntimeAdapterMessage<Record<string, unknown>>(raw);
     } catch (error) {
-      ws.send(safeStringify({ type: 'error', error: `Invalid runtime adapter message: ${(error as Error).message}` }));
-      ws.close?.((error as Error).message.includes('RADAPTER_MESSAGE_TOO_LARGE') ? 1009 : 1003, 'Invalid runtime adapter message');
+      closeInvalidRuntimeAdapterMessage(ws, error);
       return;
     }
     Promise.resolve(handleRuntimeAdapterMessage(ws, msg, env, {
@@ -915,6 +916,7 @@ const run = async (): Promise<void> => {
       readFrame: (targetEnv, height) => readPersistedStorageFrameRecord(targetEnv, height),
       listCheckpoints: (targetEnv) => listPersistedCheckpointHeights(targetEnv),
       loadEntityState: (targetEnv, entityId, height) => loadEntityStateFromStorageDb(targetEnv, entityId, height),
+      loadEntityViewPage: (targetEnv, entityId, height, query) => loadEntityViewPageFromStorageDb(targetEnv, entityId, height, query),
       listEntityIdsAtHeight: (targetEnv, height) => listPersistedEntityIdsAtHeight(targetEnv, height),
     })).catch(error => {
       ws.send(safeStringify({ type: 'error', error: `Runtime adapter failed: ${(error as Error).message}` }));

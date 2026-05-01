@@ -23,6 +23,7 @@ import {
   listPersistedCheckpointHeights,
   listPersistedEntityIdsAtHeight,
   loadEntityStateFromStorageDb,
+  loadEntityViewPageFromStorageDb,
   readPersistedFrameJournals,
   readPersistedStorageFrameRecord,
   readPersistedStorageHead,
@@ -70,6 +71,7 @@ import { ethers } from 'ethers';
 import { ERC20Mock__factory } from '../jurisdictions/typechain-types/index.ts';
 import {
   attachRuntimeAdapterTicker,
+  closeInvalidRuntimeAdapterMessage,
   forgetRuntimeAdapterClient,
   handleRuntimeAdapterMessage,
 } from './radapter/server';
@@ -1941,6 +1943,7 @@ const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, e
     readFrame: (targetEnv, height) => readPersistedStorageFrameRecord(targetEnv, height),
     listCheckpoints: (targetEnv) => listPersistedCheckpointHeights(targetEnv),
     loadEntityState: (targetEnv, entityId, height) => loadEntityStateFromStorageDb(targetEnv, entityId, height),
+    loadEntityViewPage: (targetEnv, entityId, height, query) => loadEntityViewPageFromStorageDb(targetEnv, entityId, height, query),
     listEntityIdsAtHeight: (targetEnv, height) => listPersistedEntityIdsAtHeight(targetEnv, height),
   });
   if (handledByRuntimeAdapter) return;
@@ -3775,9 +3778,10 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
             reason: data.type === 'rpc' ? 'Invalid runtime adapter message' : 'Invalid JSON',
             details: { wsType: data.type, len: byteLength, error: (error as Error).message },
           });
-          ws.send(safeStringify({ type: 'error', error: data.type === 'rpc' ? 'Invalid runtime adapter message' : 'Invalid JSON' }));
           if (data.type === 'rpc') {
-            ws.close((error as Error).message.includes('RADAPTER_MESSAGE_TOO_LARGE') ? 1009 : 1003, 'Invalid runtime adapter message');
+            closeInvalidRuntimeAdapterMessage(ws, error);
+          } else {
+            ws.send(safeStringify({ type: 'error', error: 'Invalid JSON' }));
           }
         }
       },

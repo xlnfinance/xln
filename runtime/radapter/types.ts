@@ -20,6 +20,7 @@ export type RuntimeAdapterReadQuery = {
   limit?: number;
   entityId?: string;
   accountsCursor?: string;
+  booksCursor?: string;
   accountsLimit?: number;
   booksLimit?: number;
   sortBy?: string;
