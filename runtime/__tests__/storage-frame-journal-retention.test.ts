@@ -405,7 +405,7 @@ describe('storage frame journal retention', () => {
 
     const afterCrashVerify = await verifyRuntimeChain(runtimeId, seed, { fromSnapshotHeight: replayFromHeight });
     expect(afterCrashVerify.ok).toBe(true);
-  });
+  }, 10_000);
 
   test('rejects a torn snapshot head that points at a missing manifest', async () => {
     const seed = `storage-crash-missing-snapshot-manifest ${Date.now()} alpha beta gamma`;

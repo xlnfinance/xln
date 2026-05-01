@@ -1,6 +1,10 @@
 import { expect, test } from 'bun:test';
 
-import { buildHexKeyedMerkle } from '../storage/merkle';
+import {
+  buildHexKeyedMerkle,
+  buildHexKeyedMerkleProof,
+  verifyRadixMerkleProof,
+} from '../storage/merkle';
 
 const hexKey = (byte: number): string => `0x${byte.toString(16).padStart(2, '0').repeat(32)}`;
 const value = (text: string): Uint8Array => new TextEncoder().encode(text);
@@ -93,6 +97,45 @@ test('storage radix merkle supports radix 256 with byte-depth paths', () => {
   expect(result.depth).toBe(32);
   expect(result.leafCount).toBe(2);
   expect(result.root).toMatch(/^0x[0-9a-f]{64}$/);
+});
+
+test('storage radix merkle builds verifiable inclusion proofs', () => {
+  const leaves = [
+    { hexKey: hexKey(0x11), value: value('alice') },
+    { hexKey: hexKey(0x22), value: value('bob') },
+    { hexKey: hexKey(0x33), value: value('carol') },
+  ];
+  const root = buildHexKeyedMerkle(leaves, { radix: 16 });
+  const proof = buildHexKeyedMerkleProof(leaves, hexKey(0x22), { radix: 16 });
+
+  expect(proof?.root).toBe(root.root);
+  expect(proof?.steps.length).toBeGreaterThan(0);
+  expect(proof ? verifyRadixMerkleProof(proof) : false).toBe(true);
+});
+
+test('storage radix merkle rejects tampered inclusion proofs', () => {
+  const leaves = [
+    { hexKey: hexKey(0x11), value: value('alice') },
+    { hexKey: hexKey(0x22), value: value('bob') },
+    { hexKey: hexKey(0x33), value: value('carol') },
+  ];
+  const proof = buildHexKeyedMerkleProof(leaves, hexKey(0x22), { radix: 16 });
+  expect(proof).not.toBe(null);
+  const tampered = {
+    ...proof!,
+    value: `0x${Buffer.from(value('mallory')).toString('hex')}`,
+  };
+
+  expect(verifyRadixMerkleProof(tampered)).toBe(false);
+});
+
+test('storage radix merkle returns no proof for absent leaves', () => {
+  const leaves = [
+    { hexKey: hexKey(0x11), value: value('alice') },
+    { hexKey: hexKey(0x22), value: value('bob') },
+  ];
+
+  expect(buildHexKeyedMerkleProof(leaves, hexKey(0x33))).toBe(null);
 });
 
 test('storage radix merkle rejects mixed key lengths', () => {
