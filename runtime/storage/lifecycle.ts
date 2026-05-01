@@ -10,6 +10,9 @@ import {
   KEY_LIVE_ENTITY,
   KEY_LIVE_ENTITY_HASH,
   KEY_LIVE_REPLICA_META,
+  KEY_MERKLE_BRANCH,
+  KEY_MERKLE_LEAF,
+  KEY_MERKLE_ROOT,
   KEY_SNAPSHOT_ACCOUNT,
   KEY_SNAPSHOT_BOOK,
   KEY_SNAPSHOT_ENTITY,
@@ -47,6 +50,9 @@ export const seedFreshStorageEpoch = async (options: {
     Buffer.from([KEY_LIVE_DOC_HASH]),
     Buffer.from([KEY_LIVE_ENTITY_HASH]),
     Buffer.from([KEY_LIVE_REPLICA_META]),
+    Buffer.from([KEY_MERKLE_ROOT]),
+    Buffer.from([KEY_MERKLE_BRANCH]),
+    Buffer.from([KEY_MERKLE_LEAF]),
   ];
   const snapshotPrefixes = [
     keySnapshotManifest(options.snapshotHeight),

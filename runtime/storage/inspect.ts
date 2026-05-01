@@ -7,6 +7,9 @@ import {
   KEY_LIVE_BOOK,
   KEY_LIVE_ENTITY,
   KEY_LIVE_REPLICA_META,
+  KEY_MERKLE_BRANCH,
+  KEY_MERKLE_LEAF,
+  KEY_MERKLE_ROOT,
   KEY_SNAPSHOT_ACCOUNT,
   KEY_SNAPSHOT_BOOK,
   KEY_SNAPSHOT_ENTITY,
@@ -37,6 +40,9 @@ export const inspectStorage = async (options: {
     liveAccountStats,
     liveBookStats,
     liveReplicaMetaStats,
+    merkleRootStats,
+    merkleBranchStats,
+    merkleLeafStats,
   ] = await Promise.all([
     readJsonOrNull<StorageHead>(db, KEY_HEAD),
     measurePrefixBytes(db, Buffer.from([KEY_FRAME])),
@@ -50,6 +56,9 @@ export const inspectStorage = async (options: {
     measurePrefixBytes(db, Buffer.from([KEY_LIVE_ACCOUNT])),
     measurePrefixBytes(db, Buffer.from([KEY_LIVE_BOOK])),
     measurePrefixBytes(db, Buffer.from([KEY_LIVE_REPLICA_META])),
+    measurePrefixBytes(db, Buffer.from([KEY_MERKLE_ROOT])),
+    measurePrefixBytes(db, Buffer.from([KEY_MERKLE_BRANCH])),
+    measurePrefixBytes(db, Buffer.from([KEY_MERKLE_LEAF])),
   ]);
 
   const snapshotBytes =
@@ -57,7 +66,14 @@ export const inspectStorage = async (options: {
     snapshotEntityStats.bytes +
     snapshotAccountStats.bytes +
     snapshotBookStats.bytes;
-  const liveBytes = liveEntityStats.bytes + liveAccountStats.bytes + liveBookStats.bytes + liveReplicaMetaStats.bytes;
+  const liveBytes =
+    liveEntityStats.bytes +
+    liveAccountStats.bytes +
+    liveBookStats.bytes +
+    liveReplicaMetaStats.bytes +
+    merkleRootStats.bytes +
+    merkleBranchStats.bytes +
+    merkleLeafStats.bytes;
   const historyBytes = frameStats.bytes + diffStats.bytes + snapshotBytes;
   const totalBytes = historyBytes + liveBytes;
 
@@ -69,6 +85,9 @@ export const inspectStorage = async (options: {
     liveEntityCount: liveEntityStats.count,
     liveAccountCount: liveAccountStats.count,
     liveBookCount: liveBookStats.count,
+    merkleRootCount: merkleRootStats.count,
+    merkleBranchCount: merkleBranchStats.count,
+    merkleLeafCount: merkleLeafStats.count,
     frameBytes: frameStats.bytes,
     diffBytes: diffStats.bytes,
     snapshotBytes,

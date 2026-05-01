@@ -251,6 +251,9 @@ export type StorageDebugStats = {
   liveEntityCount: number;
   liveAccountCount: number;
   liveBookCount: number;
+  merkleRootCount?: number;
+  merkleBranchCount?: number;
+  merkleLeafCount?: number;
   frameBytes: number;
   diffBytes: number;
   snapshotBytes: number;

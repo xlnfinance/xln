@@ -19,6 +19,9 @@ export const KEY_LIVE_BOOK = 0x23;
 export const KEY_LIVE_DOC_HASH = 0x24;
 export const KEY_LIVE_ENTITY_HASH = 0x25;
 export const KEY_LIVE_REPLICA_META = 0x26;
+export const KEY_MERKLE_ROOT = 0x27;
+export const KEY_MERKLE_BRANCH = 0x28;
+export const KEY_MERKLE_LEAF = 0x29;
 export const KEY_SNAPSHOT_ENTITY = 0x31;
 export const KEY_SNAPSHOT_ACCOUNT = 0x32;
 export const KEY_SNAPSHOT_BOOK = 0x33;
@@ -86,6 +89,47 @@ export const keyLiveEntityHashPrefix = (): Buffer => Buffer.from([KEY_LIVE_ENTIT
 
 export const keyLiveReplicaMeta = (entityId: string): Buffer =>
   Buffer.concat([Buffer.from([KEY_LIVE_REPLICA_META]), hexBytes(entityId)]);
+
+export type StorageMerkleNamespace =
+  | 'runtime-roots'
+  | 'entity-core'
+  | 'accounts'
+  | 'books'
+  | 'lock-book'
+  | 'account-deltas'
+  | 'account-locks'
+  | 'account-swap-offers'
+  | 'htlc-routes';
+
+const merkleNamespaceBytes = (namespace: StorageMerkleNamespace): Buffer => textBytes(namespace);
+
+const merklePathBytes = (path: Uint8Array | Buffer): Buffer => {
+  const raw = Buffer.from(path);
+  const len = Buffer.allocUnsafe(2);
+  len.writeUInt16BE(raw.length);
+  return Buffer.concat([len, raw]);
+};
+
+export const keyMerkleRoot = (entityId: string, namespace: StorageMerkleNamespace): Buffer =>
+  Buffer.concat([Buffer.from([KEY_MERKLE_ROOT]), hexBytes(entityId), merkleNamespaceBytes(namespace)]);
+export const keyMerkleRootPrefix = (entityId?: string): Buffer =>
+  entityId ? Buffer.concat([Buffer.from([KEY_MERKLE_ROOT]), hexBytes(entityId)]) : Buffer.from([KEY_MERKLE_ROOT]);
+
+export const keyMerkleBranch = (entityId: string, namespace: StorageMerkleNamespace, packedPath: Uint8Array | Buffer): Buffer =>
+  Buffer.concat([Buffer.from([KEY_MERKLE_BRANCH]), hexBytes(entityId), merkleNamespaceBytes(namespace), merklePathBytes(packedPath)]);
+export const keyMerkleBranchPrefix = (entityId?: string, namespace?: StorageMerkleNamespace): Buffer => {
+  if (entityId && namespace) return Buffer.concat([Buffer.from([KEY_MERKLE_BRANCH]), hexBytes(entityId), merkleNamespaceBytes(namespace)]);
+  if (entityId) return Buffer.concat([Buffer.from([KEY_MERKLE_BRANCH]), hexBytes(entityId)]);
+  return Buffer.from([KEY_MERKLE_BRANCH]);
+};
+
+export const keyMerkleLeaf = (entityId: string, namespace: StorageMerkleNamespace, packedPath: Uint8Array | Buffer): Buffer =>
+  Buffer.concat([Buffer.from([KEY_MERKLE_LEAF]), hexBytes(entityId), merkleNamespaceBytes(namespace), merklePathBytes(packedPath)]);
+export const keyMerkleLeafPrefix = (entityId?: string, namespace?: StorageMerkleNamespace): Buffer => {
+  if (entityId && namespace) return Buffer.concat([Buffer.from([KEY_MERKLE_LEAF]), hexBytes(entityId), merkleNamespaceBytes(namespace)]);
+  if (entityId) return Buffer.concat([Buffer.from([KEY_MERKLE_LEAF]), hexBytes(entityId)]);
+  return Buffer.from([KEY_MERKLE_LEAF]);
+};
 
 export const keyFrameDbAccountFrame = (
   entityId: string,
