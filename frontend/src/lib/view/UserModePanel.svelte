@@ -13,7 +13,7 @@
   import type { Writable } from 'svelte/store';
   import { writable, get } from 'svelte/store';
   import { activeVault, vaultOperations, allVaults } from '$lib/stores/vaultStore';
-  import { entityPositions, xlnFunctions, xlnInstance, getXLN, enqueueAndProcess } from '$lib/stores/xlnStore';
+  import { appRuntimeAdapterMode, entityPositions, xlnFunctions, xlnInstance, getXLN, enqueueAndProcess } from '$lib/stores/xlnStore';
   import { jmachineOperations } from '$lib/stores/jmachineStore';
   import { runtimes, activeRuntimeId } from '$lib/stores/runtimeStore';
   import { showVaultPanel, vaultUiOperations } from '$lib/stores/vaultUiStore';
@@ -90,7 +90,9 @@
   onMount(async () => {
     isolatedTimeIndex.set(-1);
     isolatedIsLive.set(true);
-    await vaultOperations.initialize();
+    if (get(appRuntimeAdapterMode) !== 'remote') {
+      await vaultOperations.initialize();
+    }
   });
 
   // Selection state
@@ -122,6 +124,7 @@
 
   // Active runtime (optional for multi-runtime setups)
   const activeRuntime = $derived.by(() => $runtimes.get($activeRuntimeId));
+  const isRemoteRuntime = $derived(activeRuntime?.type === 'remote' || $appRuntimeAdapterMode === 'remote');
   let lastRuntimeId: string | null = null;
   let lastVaultId: string | null = null;
 
@@ -215,6 +218,27 @@
       }
     }
     return null;
+  });
+
+  function firstReplicaInFrame(frame: RuntimeFrame | null | undefined): EntityReplica | null {
+    const replicas = frame?.eReplicas;
+    if (!replicas) return null;
+    for (const replica of replicas.values()) {
+      if (replica?.entityId && replica?.signerId) return replica;
+    }
+    return null;
+  }
+
+  $effect(() => {
+    if (!isRemoteRuntime || !currentFrame?.eReplicas) return;
+    if (selectedEntityId && selectedReplica) return;
+    const replica = firstReplicaInFrame(currentFrame);
+    if (!replica?.entityId || !replica?.signerId) return;
+    viewMode = 'entity';
+    selectedEntityId = String(replica.entityId).toLowerCase();
+    selectedSignerId = String(replica.signerId).toLowerCase();
+    selectedAccountId = null;
+    selectedJurisdictionName = null;
   });
 
   // Clear entity/account if jurisdiction filter no longer matches
@@ -396,7 +420,7 @@
 
   // Trigger entity creation when env becomes available OR vault changes
   $effect(() => {
-    if (!!$isolatedEnv && !!$activeVault) {
+    if (!isRemoteRuntime && !!$isolatedEnv && !!$activeVault) {
       void ensureSelfEntities();
     }
   });
@@ -412,9 +436,9 @@
     return Array.isArray(match?.rpcs) && match.rpcs.some((rpc: string) => !rpc.startsWith('browservm://'));
   });
 
-  const hasSigner = $derived(!!signer?.address);
-  const onboardingRequiredForRuntime = $derived($activeVault?.requiresOnboarding !== false);
-  const showVaultGate = $derived(!hasSigner);
+  const hasSigner = $derived(isRemoteRuntime || !!signer?.address);
+  const onboardingRequiredForRuntime = $derived(!isRemoteRuntime && $activeVault?.requiresOnboarding !== false);
+  const showVaultGate = $derived(!isRemoteRuntime && !hasSigner);
   const showVaultPanelVisible = $derived(showVaultGate || $showVaultPanel);
 
   $effect(() => {

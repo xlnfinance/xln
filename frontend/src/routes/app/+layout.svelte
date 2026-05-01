@@ -6,6 +6,7 @@
   import { appState } from '$lib/stores/appStateStore';
   import {
     initializeXLN,
+    appRuntimeAdapterMode,
     isLoading,
     error,
     suspendClientActivity,
@@ -21,6 +22,7 @@
     initializeActiveTabLock,
     isInactiveTabStandby
   } from '$lib/utils/activeTabLock';
+  import { normalizeWsUrl } from '$lib/utils/wsUrl';
 
   let { children } = $props();
 
@@ -31,11 +33,21 @@
   let bootGeneration = $state(0);
   let lockTestMode = $state(false);
   let currentHash = $state('');
+  let pendingRemoteRuntime = $state<RemoteRuntimeRequest | null>(null);
   const pageSearch = $derived(browser ? $page.url.search : '');
   const DEPLOY_VERSION_KEY = 'xln-deploy-version';
+  const REMOTE_ACCEPT_PREFIX = 'xln-remote-runtime-accepted:';
 
   type DeployVersionPayload = {
     version: string;
+  };
+
+  type RemoteRuntimeRequest = {
+    wsUrl: string;
+    authKey: string;
+    hostLabel: string;
+    keyLabel: string;
+    acceptKey: string;
   };
 
   type HashRouteState = {
@@ -95,6 +107,96 @@
   function syncHashLocation(): void {
     if (!browser) return;
     currentHash = readCurrentHash();
+  }
+
+  function normalizeRuntimeWsUrl(value: string): string {
+    const parsed = new URL(normalizeWsUrl(String(value || '').trim()));
+    if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
+      throw new Error('REMOTE_RUNTIME_WS_REQUIRED');
+    }
+    return parsed.toString();
+  }
+
+  function describeAuthKey(key: string): string {
+    if (!key) return 'no key';
+    if (key.startsWith('xlnra1.read.')) return 'read capability';
+    if (key.startsWith('xlnra1.full.')) return 'full capability';
+    if (/^[0-9a-f]{64}$/i.test(key)) return 'legacy inspect key';
+    return `${key.slice(0, 6)}...${key.slice(-4)}`;
+  }
+
+  function hostLabelForWsUrl(wsUrl: string): string {
+    try {
+      const parsed = new URL(wsUrl);
+      return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
+    } catch {
+      return wsUrl;
+    }
+  }
+
+  function remoteAcceptKey(wsUrl: string, authKey: string): string {
+    return `${REMOTE_ACCEPT_PREFIX}${wsUrl}|${authKey.slice(0, 16)}|${authKey.slice(-16)}`;
+  }
+
+  function readRemoteRuntimeRequestFromUrl(): RemoteRuntimeRequest | null {
+    if (!browser) return null;
+    const params = new URLSearchParams(window.location.search);
+    const mode = String(params.get('runtime') || params.get('adapter') || '').trim().toLowerCase();
+    const wsParam = String(params.get('ws') || params.get('runtimeWs') || '').trim();
+    if (mode !== 'remote' || !wsParam) return null;
+    const authKey = String(params.get('key') || params.get('auth') || '').trim();
+    const wsUrl = normalizeRuntimeWsUrl(wsParam);
+    return {
+      wsUrl,
+      authKey,
+      hostLabel: hostLabelForWsUrl(wsUrl),
+      keyLabel: describeAuthKey(authKey),
+      acceptKey: remoteAcceptKey(wsUrl, authKey),
+    };
+  }
+
+  function stripRemoteRuntimeParams(): void {
+    if (!browser) return;
+    const url = new URL(window.location.href);
+    for (const key of ['runtime', 'adapter', 'ws', 'runtimeWs', 'key', 'auth']) {
+      url.searchParams.delete(key);
+    }
+    const next = `${url.pathname}${url.search}${url.hash}`;
+    history.replaceState(null, '', next || '/app');
+  }
+
+  function persistRemoteRuntimeRequest(request: RemoteRuntimeRequest): void {
+    localStorage.setItem('xln-runtime-adapter-mode', 'remote');
+    localStorage.setItem('xln-runtime-adapter-ws', request.wsUrl);
+    if (request.authKey) {
+      localStorage.setItem('xln-runtime-adapter-key', request.authKey);
+    } else {
+      localStorage.removeItem('xln-runtime-adapter-key');
+    }
+    sessionStorage.setItem(request.acceptKey, '1');
+  }
+
+  function hasAcceptedRemoteRuntime(request: RemoteRuntimeRequest): boolean {
+    return sessionStorage.getItem(request.acceptKey) === '1'
+      || (
+        localStorage.getItem('xln-runtime-adapter-mode') === 'remote' &&
+        localStorage.getItem('xln-runtime-adapter-ws') === request.wsUrl &&
+        localStorage.getItem('xln-runtime-adapter-key') === request.authKey
+      );
+  }
+
+  function acceptRemoteRuntime(): void {
+    const request = pendingRemoteRuntime;
+    if (!request) return;
+    persistRemoteRuntimeRequest(request);
+    stripRemoteRuntimeParams();
+    window.location.reload();
+  }
+
+  function useLocalBrowserRuntime(): void {
+    localStorage.setItem('xln-runtime-adapter-mode', 'embedded');
+    stripRemoteRuntimeParams();
+    window.location.reload();
   }
 
   function readStoredDeployVersion(): string {
@@ -187,7 +289,9 @@
       tabOperations.initializeDefaultTabs();
       await initializeXLN();
       if (generation !== bootGeneration || !hasActiveTabLock) return;
-      await vaultOperations.initialize();
+      if ($appRuntimeAdapterMode !== 'remote') {
+        await vaultOperations.initialize();
+      }
       if (generation !== bootGeneration || !hasActiveTabLock) return;
       await tick();
       if (generation !== bootGeneration || !hasActiveTabLock) return;
@@ -217,6 +321,19 @@
     void (async () => {
       if (await ensureCurrentDeployVersion()) return;
       if (await maybeHandleResetHash()) return;
+      const remoteRequest = readRemoteRuntimeRequestFromUrl();
+      if (remoteRequest && !hasAcceptedRemoteRuntime(remoteRequest)) {
+        pendingRemoteRuntime = remoteRequest;
+        activeTabLockReady = true;
+        hasActiveTabLock = false;
+        isLoading.set(false);
+        error.set(null);
+        return;
+      }
+      if (remoteRequest) {
+        persistRemoteRuntimeRequest(remoteRequest);
+        stripRemoteRuntimeParams();
+      }
       if (isInactiveTabStandby()) {
         hasActiveTabLock = false;
         activeTabLockReady = true;
@@ -269,19 +386,46 @@
 </svelte:head>
 
 {#if activeTabLockReady && !hasActiveTabLock}
-  <div class="inactive-tab-screen" data-testid="inactive-tab-screen">
-    <h2>Inactive Tab</h2>
-    <p>This wallet tab lost the active lock to a newer tab.</p>
-    <button
-      data-testid="inactive-tab-reload"
-      onclick={() => {
-        clearInactiveTabStandby();
-        window.location.reload();
-      }}
-    >
-      Reload to acquire active lock
-    </button>
-  </div>
+  {#if pendingRemoteRuntime}
+    <div class="remote-login-screen" data-testid="remote-runtime-login-screen">
+      <section class="remote-login-card">
+        <div class="remote-kicker">Remote runtime</div>
+        <h2>Connect to this runtime host?</h2>
+        <p>
+          XLN will use the runtime already running at this host. No local wallet or browser runtime
+          will be created for this view.
+        </p>
+        <dl>
+          <div>
+            <dt>Host</dt>
+            <dd>{pendingRemoteRuntime.hostLabel}</dd>
+          </div>
+          <div>
+            <dt>Access</dt>
+            <dd>{pendingRemoteRuntime.keyLabel}</dd>
+          </div>
+        </dl>
+        <div class="remote-actions">
+          <button class="primary" onclick={acceptRemoteRuntime}>Connect remote runtime</button>
+          <button class="secondary" onclick={useLocalBrowserRuntime}>Use browser runtime</button>
+        </div>
+      </section>
+    </div>
+  {:else}
+    <div class="inactive-tab-screen" data-testid="inactive-tab-screen">
+      <h2>Inactive Tab</h2>
+      <p>This wallet tab lost the active lock to a newer tab.</p>
+      <button
+        data-testid="inactive-tab-reload"
+        onclick={() => {
+          clearInactiveTabStandby();
+          window.location.reload();
+        }}
+      >
+        Reload to acquire active lock
+      </button>
+    </div>
+  {/if}
 {:else if lockTestMode}
   <main class="app-shell-ready app-shell-ready--empty" data-testid="app-runtime-ready"></main>
 {:else if $error}
@@ -309,7 +453,8 @@
 <style>
   .loading-screen,
   .error-screen,
-  .inactive-tab-screen {
+  .inactive-tab-screen,
+  .remote-login-screen {
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -320,6 +465,98 @@
       radial-gradient(circle at bottom, color-mix(in srgb, var(--theme-accent, #facc15) 7%, transparent), transparent 28%),
       var(--theme-bg-gradient, linear-gradient(180deg, #0d0d10 0%, #09090b 100%));
     color: var(--theme-text-primary, #e8e8e8);
+  }
+
+  .remote-login-screen {
+    padding: 28px;
+  }
+
+  .remote-login-card {
+    width: min(520px, 100%);
+    padding: 28px;
+    border: 1px solid color-mix(in srgb, var(--theme-accent, #facc15) 24%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--theme-card-bg, #141416) 92%, transparent);
+    box-shadow: 0 24px 80px rgba(0, 0, 0, 0.34);
+  }
+
+  .remote-kicker {
+    margin-bottom: 10px;
+    color: var(--theme-accent, #facc15);
+    font-size: 12px;
+    font-weight: 800;
+    letter-spacing: 0.14em;
+    text-transform: uppercase;
+  }
+
+  .remote-login-card h2 {
+    margin: 0 0 10px;
+    font-size: 26px;
+  }
+
+  .remote-login-card p {
+    margin: 0 0 18px;
+    color: var(--theme-text-secondary, rgba(232, 232, 232, 0.72));
+    line-height: 1.5;
+  }
+
+  .remote-login-card dl {
+    display: grid;
+    gap: 10px;
+    margin: 0 0 22px;
+  }
+
+  .remote-login-card dl > div {
+    display: grid;
+    grid-template-columns: 78px 1fr;
+    gap: 12px;
+    align-items: center;
+    min-width: 0;
+  }
+
+  .remote-login-card dt {
+    color: var(--theme-text-muted, #8a8a8f);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .remote-login-card dd {
+    min-width: 0;
+    margin: 0;
+    overflow: hidden;
+    color: var(--theme-text-primary, #e8e8e8);
+    font-family: 'SF Mono', monospace;
+    font-size: 12px;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .remote-actions {
+    display: flex;
+    gap: 10px;
+    flex-wrap: wrap;
+  }
+
+  .remote-actions button {
+    min-height: 42px;
+    padding: 0 14px;
+    border-radius: 7px;
+    cursor: pointer;
+    font-weight: 800;
+  }
+
+  .remote-actions .primary {
+    border: 1px solid color-mix(in srgb, var(--theme-accent, #facc15) 38%, transparent);
+    background: color-mix(in srgb, var(--theme-accent, #facc15) 22%, var(--theme-surface, #18181b));
+    color: var(--theme-text-primary, #fff);
+  }
+
+  .remote-actions .secondary {
+    border: 1px solid color-mix(in srgb, var(--theme-border, #333) 88%, transparent);
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 92%, transparent);
+    color: var(--theme-text-secondary, #b4b4ba);
   }
 
   .app-shell-ready {

@@ -2,11 +2,23 @@
   /**
    * RuntimeDropdown - Runtime selector (local + remote)
    * Uses unified Dropdown base component.
-   */
+  */
   import { createEventDispatcher } from 'svelte';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
-  import { activeRuntime, allRuntimes, vaultOperations } from '$lib/stores/vaultStore';
-  import { p2pState } from '$lib/stores/xlnStore';
+  import {
+    activeRuntime as activeVaultRuntime,
+    allRuntimes as allVaultRuntimes,
+    vaultOperations,
+    type Runtime as VaultRuntime,
+  } from '$lib/stores/vaultStore';
+  import {
+    activeRuntime as activeStoreRuntime,
+    activeRuntimeId,
+    runtimes as runtimeStoreRuntimes,
+    runtimeOperations,
+    type Runtime as StoreRuntime,
+  } from '$lib/stores/runtimeStore';
+  import { appRuntimeAdapterEndpoint, appRuntimeAdapterMode, appRuntimeAdapterStatus, p2pState } from '$lib/stores/xlnStore';
   import { settings } from '$lib/stores/settingsStore';
 
   export let allowAdd = false;
@@ -16,13 +28,89 @@
   let isOpen = false;
   const dispatch = createEventDispatcher();
 
-  $: runtimeEntries = $allRuntimes;
-  $: currentRuntime = $activeRuntime;
-  $: connStatus = $p2pState.connected ? 'connected' : $p2pState.reconnect ? 'reconnecting' : 'disconnected';
-  $: relayUrl = $settings.relayUrl;
+  type RuntimeDotStatus = 'connected' | 'syncing' | 'reconnecting' | 'disconnected' | 'error' | 'inactive';
 
-  function selectRuntime(id: string) {
-    vaultOperations.selectRuntime(id);
+  type RuntimeEntry = {
+    id: string;
+    label: string;
+    title: string;
+    meta: string;
+    source: 'browser' | 'remote';
+    status: RuntimeDotStatus;
+    signers: number;
+    vault?: VaultRuntime;
+    remote?: StoreRuntime;
+  };
+
+  const shortId = (value: string): string => {
+    const raw = String(value || '').trim();
+    if (!raw) return '';
+    if (raw.length <= 16) return raw;
+    return `${raw.slice(0, 6)}...${raw.slice(-4)}`;
+  };
+
+  const remoteHostLabel = (runtime: StoreRuntime | null | undefined): string => {
+    const raw = String(runtime?.label || runtime?.id || $appRuntimeAdapterEndpoint || 'remote runtime');
+    const match = raw.match(/wss?:\/\/[^/\s]+(?:\/[^\s]*)?/);
+    if (!match) return raw.replace(/^Remote\s+/i, '');
+    try {
+      const url = new URL(match[0]);
+      return `${url.host}${url.pathname}`;
+    } catch {
+      return match[0];
+    }
+  };
+
+  const fromVaultRuntime = (runtime: VaultRuntime): RuntimeEntry => {
+    const signerAddress = runtime.signers?.[0]?.address || '';
+    return {
+      id: runtime.id,
+      label: signerAddress ? `${shortId(signerAddress)} (${runtime.label})` : runtime.label || 'Browser runtime',
+      title: signerAddress || runtime.id,
+      meta: `browser · ${runtime.signers.length} signer${runtime.signers.length === 1 ? '' : 's'}`,
+      source: 'browser',
+      status: runtime.id === $activeRuntimeId ? connStatus : 'inactive',
+      signers: runtime.signers.length,
+      vault: runtime,
+    };
+  };
+
+  const fromRemoteRuntime = (runtime: StoreRuntime): RuntimeEntry => ({
+    id: runtime.id,
+    label: `Remote ${remoteHostLabel(runtime)}`,
+    title: runtime.id,
+    meta: `${runtime.permissions === 'write' ? 'remote · full' : 'remote · read'} · ${runtime.status}`,
+    source: 'remote',
+    status: runtime.status,
+    signers: 0,
+    remote: runtime,
+  });
+
+  $: connStatus = ($p2pState.connected ? 'connected' : $p2pState.reconnect ? 'reconnecting' : 'disconnected') as RuntimeDotStatus;
+  $: runtimeAdapterDotStatus = ($appRuntimeAdapterStatus === 'connected'
+    ? 'connected'
+    : $appRuntimeAdapterStatus === 'connecting'
+      ? 'reconnecting'
+      : $appRuntimeAdapterStatus === 'error'
+        ? 'error'
+        : 'disconnected') as RuntimeDotStatus;
+  $: relayUrl = $settings.relayUrl;
+  $: remoteRuntimes = Array.from($runtimeStoreRuntimes.values()).filter((runtime) => runtime.type === 'remote');
+  $: runtimeEntries = [
+    ...remoteRuntimes.map(fromRemoteRuntime),
+    ...$allVaultRuntimes.map(fromVaultRuntime),
+  ];
+  $: currentRemoteRuntime = $activeStoreRuntime?.type === 'remote' || $appRuntimeAdapterMode === 'remote'
+    ? ($activeStoreRuntime?.type === 'remote' ? $activeStoreRuntime : remoteRuntimes[0] ?? null)
+    : null;
+  $: currentRuntime = currentRemoteRuntime ? fromRemoteRuntime(currentRemoteRuntime) : ($activeVaultRuntime ? fromVaultRuntime($activeVaultRuntime) : null);
+
+  function selectRuntime(entry: RuntimeEntry) {
+    if (entry.source === 'remote') {
+      runtimeOperations.selectRuntime(entry.id);
+    } else {
+      vaultOperations.selectRuntime(entry.id);
+    }
     isOpen = false;
   }
 
@@ -38,14 +126,9 @@
     isOpen = false;
   }
 
-  function runtimeLabel(runtime: any): string {
+  function runtimeLabel(runtime: RuntimeEntry | null): string {
     if (!runtime) return allowAdd ? 'Add Runtime' : 'Select Runtime';
-    const signerAddress = runtime.signers?.[0]?.address;
-    if (!signerAddress) return runtime.label || 'Runtime';
-
-    // Format: 0xABCD...1234 (Label)
-    const truncated = signerAddress.slice(0, 6) + '...' + signerAddress.slice(-4);
-    return `${truncated} (${runtime.label})`;
+    return runtime.label || 'Runtime';
   }
 </script>
 
@@ -62,19 +145,15 @@
       <div class="empty-state">No runtimes yet</div>
     {:else}
       {#each runtimeEntries as runtime (runtime.id)}
-        {@const signerAddr = runtime.signers?.[0]?.address}
-        {@const displayName = signerAddr
-          ? `${signerAddr.slice(0, 6)}...${signerAddr.slice(-4)} (${runtime.label})`
-          : runtime.label}
         <button
           class="menu-item"
           class:selected={runtime.id === currentRuntime?.id}
-          on:click={() => selectRuntime(runtime.id)}
+          on:click={() => selectRuntime(runtime)}
         >
-          <span class="conn-dot {runtime.id === currentRuntime?.id ? connStatus : 'inactive'}"></span>
-          <span class="menu-label" title={signerAddr}>{displayName}</span>
-          <span class="menu-meta">{runtime.signers.length} signers</span>
-          {#if allowDelete}
+          <span class="conn-dot {runtime.id === currentRuntime?.id ? runtime.status : 'inactive'}"></span>
+          <span class="menu-label" title={runtime.title}>{runtime.label}</span>
+          <span class="menu-meta">{runtime.meta}</span>
+          {#if allowDelete && runtime.source === 'browser'}
             <button
               class="delete-btn"
               on:click={(e) => handleDeleteRuntime(e, runtime.id)}
@@ -97,6 +176,17 @@
     <!-- Relay Status -->
     <div class="menu-divider"></div>
     <div class="status-section">
+      {#if $appRuntimeAdapterMode === 'remote'}
+        <div class="status-row">
+          <span class="conn-dot {runtimeAdapterDotStatus}"></span>
+          <span class="status-label">Runtime</span>
+          <span class="status-value">remote</span>
+        </div>
+        <div class="status-row">
+          <span class="status-label">Host</span>
+          <span class="status-value url" title={$appRuntimeAdapterEndpoint}>{$appRuntimeAdapterEndpoint}</span>
+        </div>
+      {:else}
       <div class="status-row">
         <span class="conn-dot {connStatus}"></span>
         <span class="status-label">Relay</span>
@@ -111,6 +201,7 @@
           <span class="status-label">Queue</span>
           <span class="status-value">{$p2pState.queue.totalMessages} msgs</span>
         </div>
+      {/if}
       {/if}
     </div>
   </div>
@@ -254,7 +345,17 @@
     animation: conn-pulse 2s infinite;
   }
 
+  .conn-dot.syncing {
+    background: #60a5fa;
+    animation: conn-pulse 2s infinite;
+  }
+
   .conn-dot.disconnected {
+    background: #ef4444;
+    box-shadow: 0 0 4px rgba(239, 68, 68, 0.3);
+  }
+
+  .conn-dot.error {
     background: #ef4444;
     box-shadow: 0 0 4px rgba(239, 68, 68, 0.3);
   }
