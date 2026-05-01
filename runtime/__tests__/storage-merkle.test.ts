@@ -3,6 +3,7 @@ import { expect, test } from 'bun:test';
 import {
   buildHexKeyedMerkle,
   buildHexKeyedMerkleProof,
+  MutableRadixMerkleTree,
   verifyRadixMerkleProof,
 } from '../storage/merkle';
 import {
@@ -167,4 +168,58 @@ test('storage merkle durable keyspace is scoped by entity namespace and path', (
   expect(leaf[0]).toBe(KEY_MERKLE_LEAF);
   expect(branch.subarray(0, keyMerkleBranchPrefix(entityId, 'accounts').length)).toEqual(keyMerkleBranchPrefix(entityId, 'accounts'));
   expect(Buffer.compare(branch, leaf)).not.toBe(0);
+});
+
+test('mutable radix merkle matches canonical batch roots across puts and deletes', () => {
+  const leaves = [
+    { hexKey: `0x${'ab'.repeat(30)}0011`, value: value('one') },
+    { hexKey: `0x${'ab'.repeat(30)}0022`, value: value('two') },
+    { hexKey: `0x${'ab'.repeat(30)}1033`, value: value('three') },
+  ];
+  const tree = new MutableRadixMerkleTree({ radix: 16 });
+  const live = new Map<string, Uint8Array>();
+
+  for (const leaf of leaves) {
+    tree.put(Buffer.from(leaf.hexKey.slice(2), 'hex'), leaf.value);
+    live.set(leaf.hexKey, leaf.value);
+    expect(tree.getRoot()).toBe(buildHexKeyedMerkle(Array.from(live, ([hexKey, value]) => ({ hexKey, value }))).root);
+  }
+
+  const replacement = value('two-v2');
+  tree.put(Buffer.from(leaves[1]!.hexKey.slice(2), 'hex'), replacement);
+  live.set(leaves[1]!.hexKey, replacement);
+  expect(tree.leafCount).toBe(3);
+  expect(tree.getRoot()).toBe(buildHexKeyedMerkle(Array.from(live, ([hexKey, value]) => ({ hexKey, value }))).root);
+
+  expect(tree.del(Buffer.from(leaves[0]!.hexKey.slice(2), 'hex'))).toBe(true);
+  live.delete(leaves[0]!.hexKey);
+  expect(tree.leafCount).toBe(2);
+  expect(tree.getRoot()).toBe(buildHexKeyedMerkle(Array.from(live, ([hexKey, value]) => ({ hexKey, value }))).root);
+  tree.verify('deep');
+});
+
+test('mutable radix merkle updates touch only the path-local branch stack', () => {
+  const leaves = Array.from({ length: 512 }, (_, index) => ({
+    key: Buffer.from(`0x${(index + 1).toString(16).padStart(64, '0')}`.slice(2), 'hex'),
+    value: value(`account-${index + 1}`),
+  }));
+  const tree = new MutableRadixMerkleTree({ radix: 16, leaves });
+  tree.put(leaves[255]!.key, value('account-256-updated'));
+
+  expect(tree.lastTouchedNodes).toBeLessThan(20);
+  tree.verify('shallow');
+});
+
+test('mutable radix merkle creates verifiable proofs', () => {
+  const leaves = [
+    { key: Buffer.from(hexKey(0x11).slice(2), 'hex'), value: value('alice') },
+    { key: Buffer.from(hexKey(0x22).slice(2), 'hex'), value: value('bob') },
+    { key: Buffer.from(hexKey(0x33).slice(2), 'hex'), value: value('carol') },
+  ];
+  const tree = new MutableRadixMerkleTree({ radix: 16, leaves });
+  const proof = tree.prove(leaves[1]!.key);
+
+  expect(proof).not.toBe(null);
+  expect(proof?.root).toBe(tree.getRoot());
+  expect(proof ? verifyRadixMerkleProof(proof) : false).toBe(true);
 });
