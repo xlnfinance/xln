@@ -79,6 +79,9 @@ const pathSlots = (key: Uint8Array, radix: RadixMerkleRadix): number[] => {
 const leafHash = (leaf: RadixMerkleLeaf): string =>
   hashParts(LEAF_DOMAIN, [leaf.key, leaf.value]);
 
+export const computeRadixMerkleLeafHash = (key: Uint8Array, value: Uint8Array): string =>
+  leafHash({ key, value });
+
 const branchHash = (radix: RadixMerkleRadix, children: Array<[number, string]>): string => {
   if (children.length === 0) return EMPTY_ROOT;
   const parts: Uint8Array[] = [Uint8Array.of(radix === 256 ? 0xff : 0x10)];
@@ -88,6 +91,11 @@ const branchHash = (radix: RadixMerkleRadix, children: Array<[number, string]>):
   }
   return hashParts(BRANCH_DOMAIN, parts);
 };
+
+export const computeRadixMerkleBranchHash = (
+  radix: RadixMerkleRadix,
+  children: Array<[number, string]>,
+): string => branchHash(radix, children);
 
 const encodePathSegment = (radix: RadixMerkleRadix, path: number[]): Uint8Array => {
   const header = Buffer.allocUnsafe(2);

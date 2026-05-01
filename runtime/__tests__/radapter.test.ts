@@ -20,6 +20,7 @@ import {
   hexBytes,
   keyLiveAccount,
   keyLiveEntity,
+  keyMerkleLeafPrefix,
   keyMerkleRoot,
   keySnapshotAccountPrefix,
   keySnapshotBookPrefix,
@@ -30,7 +31,14 @@ import {
 import { keyLiveDocHash } from '../storage/doc-refs';
 import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
 import { loadEntityStateFromStorage, loadEntityViewPageFromStorage } from '../storage/read';
-import type { RuntimeDbLike, StorageEntityHashDoc, StorageHead, StorageMerkleRootDoc, StorageSnapshotManifest } from '../storage/types';
+import type {
+  RuntimeDbLike,
+  StorageEntityHashDoc,
+  StorageHead,
+  StorageMerkleLeafDoc,
+  StorageMerkleRootDoc,
+  StorageSnapshotManifest,
+} from '../storage/types';
 import type { EntityReplica, Env } from '../types';
 import type { BookState } from '../orderbook';
 import { DEFAULT_SPREAD_DISTRIBUTION, type OrderbookExtState } from '../orderbook/types';
@@ -543,6 +551,71 @@ test('storage live recovery rejects corrupted doc hash side values', async () =>
   } finally {
     if (previous === undefined) delete process.env['XLN_STORAGE_VERIFY_DOC_HASHES'];
     else process.env['XLN_STORAGE_VERIFY_DOC_HASHES'] = previous;
+  }
+});
+
+test('storage live recovery can deep verify merkle side records', async () => {
+  const previous = process.env['XLN_STORAGE_VERIFY_MERKLE'];
+  process.env['XLN_STORAGE_VERIFY_MERKLE'] = 'deep';
+  try {
+    const env = makeEnv();
+    const replica = Array.from(env.eReplicas.values())[0]!;
+    const account = replica.state.accounts.get(counterpartyId)!;
+    const coreDoc = projectEntityCoreDoc(replica.state, replica);
+    const accountDoc = projectAccountDoc(account);
+    const prepared = await prepareStorageStateHashes({
+      db: makeMemoryDb([]),
+      puts: [
+        { family: 'entity', entityId, value: coreDoc },
+        { family: 'account', entityId, counterpartyId, value: accountDoc },
+      ],
+      dels: [],
+    });
+    const head: StorageHead = {
+      schemaVersion: 1,
+      latestHeight: env.height,
+      latestMaterializedHeight: env.height,
+      latestSnapshotHeight: 0,
+      snapshotPeriodFrames: 256,
+      retainSnapshots: 3,
+      epochMaxBytes: 1,
+      accountMerkleRadix: 16,
+      retainedHistoryBytes: 0,
+    };
+    const entries: Array<[Buffer, Buffer]> = [
+      [KEY_HEAD, encodeBuffer(head)],
+      [keyLiveEntity(entityId), prepared.docValueBuffers.get(`e:${entityId}`)!],
+      [keyLiveAccount(entityId, counterpartyId), prepared.docValueBuffers.get(`a:${entityId}:${counterpartyId}`)!],
+      ...prepared.docHashPuts.map((item) => [item.key, item.value] as [Buffer, Buffer]),
+      ...prepared.entityHashPuts.map((item) => [item.key, item.value] as [Buffer, Buffer]),
+      ...prepared.merklePuts.map((item) => [item.key, item.value] as [Buffer, Buffer]),
+    ];
+    const db = makeMemoryDb(entries);
+
+    const state = await loadEntityStateFromStorage({
+      env,
+      tryOpenDb: async () => true,
+      getRuntimeDb: () => db,
+      entityId,
+    });
+    expect(state?.accounts.has(counterpartyId)).toBe(true);
+
+    const leafEntry = entries.find(([key]) =>
+      Buffer.compare(key.subarray(0, keyMerkleLeafPrefix(entityId, 'runtime-roots').length), keyMerkleLeafPrefix(entityId, 'runtime-roots')) === 0);
+    const leaf = decodeBuffer<StorageMerkleLeafDoc>(leafEntry![1]);
+    const corrupted = { ...leaf, hash: `0x${'ff'.repeat(32)}` };
+    const corruptedDb = makeMemoryDb(entries.map(([key, value]) =>
+      key === leafEntry![0] ? [key, encodeBuffer(corrupted)] as [Buffer, Buffer] : [key, value] as [Buffer, Buffer]));
+
+    await expect(loadEntityStateFromStorage({
+      env,
+      tryOpenDb: async () => true,
+      getRuntimeDb: () => corruptedDb,
+      entityId,
+    })).rejects.toThrow('STORAGE_MERKLE_LEAF_HASH_MISMATCH');
+  } finally {
+    if (previous === undefined) delete process.env['XLN_STORAGE_VERIFY_MERKLE'];
+    else process.env['XLN_STORAGE_VERIFY_MERKLE'] = previous;
   }
 });
 
