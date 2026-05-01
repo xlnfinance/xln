@@ -19,7 +19,7 @@ cd "$REPO_ROOT"
 
 node <<NODE
 const crypto = require('crypto');
-const web = 'http://127.0.0.1:${WEB_PORT}/app';
+const web = 'https://localhost:${WEB_PORT}/app';
 const hubs = [
   ['H1', 'xln-e2e-h1', ${API_PORT} + 10],
   ['H2', 'xln-e2e-h2', ${API_PORT} + 11],
@@ -27,10 +27,12 @@ const hubs = [
   ['MM', 'xln-mesh-mm', ${API_PORT} + 13],
 ];
 console.log('');
-console.log('XLN remote runtime adapter URLs (read-only inspect):');
+console.log('XLN remote runtime adapter URLs (read-only inspect, token expires in 24h):');
 for (const [name, seed, port] of hubs) {
-  const key = crypto.createHmac('sha256', seed).update('xln-radapter-v1:inspect').digest('hex');
-  const url = web + '?runtime=remote&ws=' + encodeURIComponent('ws://127.0.0.1:' + port + '/rpc') + '&key=' + encodeURIComponent(key);
+  const exp = Date.now() + 24 * 60 * 60 * 1000;
+  const sig = crypto.createHmac('sha256', seed).update('xln-radapter-v1:cap:inspect:' + exp).digest('hex');
+  const key = 'xlnra1.read.' + exp + '.' + sig;
+  const url = web + '?runtime=remote&ws=' + encodeURIComponent('ws://localhost:' + port + '/rpc') + '&key=' + encodeURIComponent(key);
   console.log('  ' + name + ': ' + url);
 }
 console.log('');

@@ -65,6 +65,7 @@ export default defineConfig({
       },
       '/rpc': {
         target: API_PROXY_TARGET,
+        ws: true,
         changeOrigin: true,
         secure: false,
       },

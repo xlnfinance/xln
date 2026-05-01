@@ -372,6 +372,7 @@ const resolveAppRuntimeAdapterConfig = (): RuntimeAdapterConfig => {
     readStoredAdapterValue('xln-runtime-adapter-ws') ||
     defaultRemoteAdapterWsUrl()
   ).trim();
+  const normalizedWsUrl = normalizeWsUrl(wsUrl);
   const authKey = (
     params.get('key') ||
     params.get('auth') ||
@@ -380,10 +381,10 @@ const resolveAppRuntimeAdapterConfig = (): RuntimeAdapterConfig => {
   ).trim();
 
   appRuntimeAdapterMode.set('remote');
-  appRuntimeAdapterEndpoint.set(wsUrl);
+  appRuntimeAdapterEndpoint.set(normalizedWsUrl);
   return {
     mode: 'remote',
-    wsUrl,
+    wsUrl: normalizedWsUrl,
     ...(authKey ? { authKey } : {}),
   };
 };
@@ -577,6 +578,20 @@ const buildRemoteAdapterEnvSnapshot = async (
   return env;
 };
 
+const buildRemoteAdapterPlaceholderEnv = (
+  xln: XLNModule,
+  config: RuntimeAdapterConfig,
+): Env => {
+  const env = xln.createEmptyEnv(config.seed ?? null);
+  env.runtimeId = `radapter:${config.wsUrl || 'remote'}`;
+  env.height = 0;
+  env.timestamp = Date.now();
+  env.history = [];
+  env.eReplicas = new Map();
+  env.quietRuntimeLogs = true;
+  return env;
+};
+
 export const refreshRuntimeAdapterEnvironment = async (): Promise<Env | null> => {
   if (activeRuntimeAdapterConfig?.mode !== 'remote') return get(xlnEnvironment);
   if (remoteAdapterRefreshPromise) return remoteAdapterRefreshPromise;
@@ -644,10 +659,29 @@ export async function initializeXLN(): Promise<Env> {
         if (currentEnv && activeRuntimeAdapterConfig) {
           upsertRuntimeSnapshot(currentEnv, activeRuntimeAdapterConfig, status);
         }
+        if (status === 'connected') {
+          void refreshRuntimeAdapterEnvironment().catch((refreshError) => {
+            const message = refreshError instanceof Error ? refreshError.message : String(refreshError);
+            error.set(message);
+            errorLog.log(message, 'Runtime Adapter Refresh', refreshError);
+          });
+        }
       });
 
-      const env = await refreshRuntimeAdapterEnvironment();
-      if (!env) throw new Error('RUNTIME_ADAPTER_REMOTE_EMPTY_SNAPSHOT');
+      let env: Env | null = null;
+      try {
+        env = await refreshRuntimeAdapterEnvironment();
+      } catch (initialRemoteError) {
+        env = buildRemoteAdapterPlaceholderEnv(xln, adapterConfig);
+        setXlnEnvironment(env);
+        history.set(env.history || []);
+        currentHeight.set(env.height);
+        appRuntimeAdapterStatus.set(adapter.status);
+        upsertRuntimeSnapshot(env, adapterConfig, adapter.status);
+        const message = initialRemoteError instanceof Error ? initialRemoteError.message : String(initialRemoteError);
+        console.warn('[XLN] Remote runtime adapter is not ready yet; will reconnect', message);
+      }
+      if (!env) env = buildRemoteAdapterPlaceholderEnv(xln, adapterConfig);
       error.set(null);
       isLoading.set(false);
       isInitialized = true;
