@@ -1172,6 +1172,7 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
         PW_BASE_URL: webUrl,
         PW_SKIP_WEBSERVER: '1',
         PW_WORKERS: String(args.workersPerShard),
+        PW_TEST_TIMEOUT: String(args.testTimeoutMs),
         PW_VIDEO: args.videoMode,
         PW_TRACE: args.traceMode,
         PW_SCREENSHOT: args.screenshotMode,
