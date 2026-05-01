@@ -1,6 +1,6 @@
 # XLN Merkle Storage Plan
 
-Status: design note for audit and implementation planning.
+Status: implementation plan for audit and mainnet hardening.
 
 Date: 2026-05-01.
 
@@ -19,6 +19,8 @@ The target design is an incremental, persisted, compressed Merkle collection eng
 - optional recovery/audit verification of doc hashes and branch hashes.
 
 This document intentionally does not introduce a `v2` hash mode. The goal is to fix the current storage shape and implementation while preserving the existing high-level storage contract where possible.
+
+During the migration, `canonicalStateHash` is the safety anchor for replay verification. The storage Merkle root is still recorded, but any replacement of the entity root internals must be deployed with canonical replay checks enabled until the new root is verified across fresh boot, restore, and epoch rotation. Once the branch-backed root has been proven deterministic, `stateHash` returns to being the primary storage commitment.
 
 ## Current State
 
@@ -131,7 +133,6 @@ Example root document:
 type MerkleRootDoc = {
   entityId: string;
   namespace: MerkleNamespace;
-  mode: 'flat' | 'branch';
   rootHash: string;
   leafCount: number;
 };
@@ -201,7 +202,8 @@ type MerkleCollection<K> = {
   put(key: K, valueHash: string): Promise<void>;
   del(key: K): Promise<void>;
   flush(): Promise<MerkleFlushResult>;
-  verify?(mode: 'shallow' | 'deep'): Promise<void>;
+  verify(mode: 'none' | 'shallow' | 'deep'): Promise<void>;
+  proveInclusion(key: K): Promise<MerkleProof>;
 };
 ```
 
@@ -215,8 +217,23 @@ Domain code provides key codecs. The shared engine owns:
 - bottom-up recompute;
 - dirty node writes;
 - optional verification;
-- flat mode for small maps;
-- auto-promotion to branch mode.
+- flat persistence for small maps;
+- auto-promotion to persisted branch mode.
+
+Inclusion proof support is part of the interface, not an afterthought. The proof API is needed for audit exports and future subset-evidence flows:
+
+```ts
+type MerkleProof = {
+  namespace: MerkleNamespace;
+  keyPath: Uint8Array;
+  valueHash: string;
+  siblings: Array<{
+    path: Uint8Array;
+    children: Array<{ slot: number; hash: string }>;
+  }>;
+  rootHash: string;
+};
+```
 
 ## Entity Root Shape
 
@@ -256,7 +273,7 @@ Do not implement every possible nested tree at once. The shared interface must a
 
 ## Flat Mode And Auto-Promotion
 
-For small collections, a flat sorted hash is simpler and faster than persisted branch nodes.
+For small collections, flat persistence is simpler and faster than persisted branch nodes.
 
 Recommended policy:
 
@@ -266,19 +283,21 @@ Recommended policy:
 - create branches only at actual key divergence;
 - collapse branches after delete when a branch has only one child, unless this creates excessive write churn.
 
-Flat mode root:
+Important consensus rule: flat and branch persistence must produce the identical root for the same canonical leaf set. "Flat mode" does not mean a different hash algorithm. It means branch nodes are not separately persisted because the tree is small enough to recompute locally.
+
+Canonical root:
 
 ```text
-hash("flat", sorted([keyPath, valueHash]))
+hashCompressedTree(sorted([keyPath, valueHash]))
 ```
 
-Branch mode root:
+Persisted branch root:
 
 ```text
-hash("branch", compressed tree)
+hashCompressedTree(sorted([keyPath, valueHash]))
 ```
 
-Open question: whether flat and branch modes must produce identical roots for the same leaves. Identical roots are elegant but can complicate implementation. Different roots are acceptable if mode is part of the committed root document and the transition is deterministic.
+The promotion threshold is a storage policy constant, not a consensus fork boundary. Crossing the threshold must not change the root unless the leaf set changed.
 
 ## Materialization Flow
 
@@ -298,6 +317,10 @@ Current materialization receives overlay dirty refs. Target flow:
 8. Persist changed branch/root nodes in the same LevelDB batch as live docs and frame/head.
 
 The important invariant is: head moves last. A frame is committed only if all live docs, doc hashes, branch nodes, frame record, and head update are in the committed batch.
+
+Snapshot and epoch rotation must copy the full Merkle keyspace (`KEY_MERKLE_ROOT`, `KEY_MERKLE_BRANCH`, and any explicit leaf metadata keyspace) together with live docs. A restored epoch without branch nodes is invalid even if live docs are present.
+
+Branch split/collapse is applied to the net final overlay for the frame, not to every transient mutation. If an HTLC lock is added and removed before materialization, no branch churn should be persisted for that path.
 
 ## Recovery
 
@@ -351,20 +374,19 @@ Keep:
 
 1. Root compatibility.
    - Replacing the entity root algorithm changes `stateHash` for newly materialized frames.
-   - The user explicitly does not want a `v2` mode. The implementation must still document how old DBs are handled.
+   - The user explicitly does not want a `v2` mode.
+   - Migration is guarded by canonical replay verification. Existing DBs should either be re-materialized at a checkpoint or rebuilt from frame input with canonical equality asserted.
 
 2. Flat-to-branch transition root semantics.
-   - Decide whether flat and branch modes produce the same root for same leaves.
-   - If not, mode must be committed and transition must be deterministic.
+   - Resolved: roots must be identical. Flat/branch is persistence policy only.
 
 3. Branch node key design.
    - Key must be byte-sortable by entity/namespace/path.
    - It must support efficient subtree delete/collapse.
 
 4. Branch collapse policy.
-   - Immediate collapse keeps trees small.
-   - Lazy collapse reduces write churn.
-   - Recommended: immediate collapse for simple single-child branches, but benchmark.
+   - Immediate collapse is required for deterministic compactness.
+   - Apply collapse to the net final state of a materialization batch to avoid HTLC add/remove churn.
 
 5. Cache bounds.
    - A materialization can keep an in-memory branch cache for touched paths.
@@ -375,8 +397,8 @@ Keep:
    - Do not split all account internals in the first PR unless profiling proves it is needed.
 
 7. Snapshot interaction.
-   - Snapshots currently copy live docs, not Merkle branch nodes.
-   - If branch nodes become durable truth, epoch/snapshot copy paths must include Merkle root/branch keyspaces.
+   - Resolved as invariant: snapshots and epoch rotation must include Merkle root/branch keyspaces.
+   - Deep verification after rotation must prove restored roots match the latest materialized frame.
 
 ## Implementation Plan
 
@@ -392,6 +414,8 @@ Keep:
   - shared prefix splits correctly;
   - insert with collision creates one branch at divergence;
   - delete collapses branch;
+  - flat persistence and branch persistence produce the same root;
+  - inclusion proof verifies against the root;
   - root deterministic across insertion order;
   - update touches only path-local nodes.
 
@@ -401,6 +425,7 @@ Keep:
 - Update account doc materialization to call Merkle collection `put/del`.
 - Keep entity core and books on current path if needed.
 - Add benchmark/test for 10k-100k synthetic accounts showing update does not scan all accounts.
+- Acceptance budget: incremental update at 1M leaves should rewrite O(log16 N) nodes and target <100 us amortized CPU per touched leaf on a warm store, excluding LevelDB fsync.
 
 ### PR 3: Books And LockBook Collections
 
@@ -420,6 +445,7 @@ Keep:
   - bad branch hash;
   - orphan branch;
   - root mismatch.
+- Add epoch rotation test: branch-backed Merkle keyspace is copied and deep verification succeeds after rotation.
 
 ### PR 5: Remove Giant Entity Hash Docs
 
@@ -506,4 +532,3 @@ Read against `runtime/storage/{merkle.ts, hashes.ts, types.ts, keys.ts}` head of
 - B) **Resolve flat↔branch equivalence before PR1 lands** — pick one rule, write the hash preimages explicitly, add unit test fixtures.
 - C) **Promote snapshot Merkle coverage to invariant** — move open question 7 into "Materialization Flow", add to PR1 audit checklist.
 - D) **Decide on inclusion-proof API** — ship it in PR1's interface or write the explicit deferral. Don't leave it implicit.
-
