@@ -30,7 +30,7 @@ import {
   parseLiveBookKey,
 } from './keys';
 import { iterateKeys, readJsonOrNull, readRawOrNull } from './level';
-import { buildHexKeyedMerkle } from './merkle';
+import { buildHexKeyedMerkle, MutableRadixMerkleTree } from './merkle';
 import { projectAccountDoc, projectEntityCoreDoc } from './projections';
 import { buildReplicaLookup, findReplicaForEntity } from './replicas';
 import type {
@@ -49,6 +49,15 @@ type StorageDocWithComputedHash = StorageDoc & {
   encodedValue?: Buffer;
   hashBytes?: Buffer;
 };
+type RuntimeEntityHashDoc = StorageEntityHashDoc & {
+  cellMap?: Map<string, string>;
+  merkleTree?: MutableRadixMerkleTree;
+};
+
+const MAX_PERSISTED_HASH_CELLS = Math.max(
+  0,
+  Math.floor(Number(process.env['XLN_STORAGE_MAX_PERSISTED_HASH_CELLS'] ?? 4096)),
+);
 
 const setHiddenDocComputedValue = <K extends keyof StorageDocWithComputedHash>(
   doc: StorageDocWithComputedHash,
@@ -140,20 +149,75 @@ const normalizeHashCells = (cells: Iterable<StorageHashCell>): StorageHashCell[]
     .filter((cell) => cell.key.length > 0 && /^0x[0-9a-f]{64}$/i.test(cell.hash))
     .sort((left, right) => left.key.localeCompare(right.key));
 
+const hashCellLeaf = (cell: StorageHashCell): { key: Uint8Array; value: Uint8Array } => ({
+  key: hashToBytes(storageMerklePath(cell.key)),
+  value: hashToBytes(cell.hash),
+});
+
+const setHiddenEntityHashState = (
+  doc: RuntimeEntityHashDoc,
+  cellMap: Map<string, string>,
+  merkleTree: MutableRadixMerkleTree,
+): void => {
+  Object.defineProperty(doc, 'cellMap', {
+    value: cellMap,
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+  Object.defineProperty(doc, 'merkleTree', {
+    value: merkleTree,
+    enumerable: false,
+    configurable: true,
+    writable: true,
+  });
+};
+
+const syncEntityHashDocVisibleCells = (doc: RuntimeEntityHashDoc): StorageEntityHashDoc => {
+  const cellMap = doc.cellMap ?? new Map(doc.cells.map((cell) => [cell.key, cell.hash]));
+  doc.cellCount = cellMap.size;
+  doc.cells = cellMap.size <= MAX_PERSISTED_HASH_CELLS
+    ? Array.from(cellMap, ([key, hash]) => ({ key, hash })).sort((left, right) => left.key.localeCompare(right.key))
+    : [];
+  return doc;
+};
+
 const buildEntityHashDoc = (entityId: string, cells: Iterable<StorageHashCell>): StorageEntityHashDoc => {
   const normalizedCells = normalizeHashCells(cells);
-  const merkle = buildHexKeyedMerkle(
-    normalizedCells.map((cell) => ({
-      hexKey: storageMerklePath(cell.key),
-      value: hashToBytes(cell.hash),
-    })),
-    { radix: DEFAULT_ACCOUNT_MERKLE_RADIX },
-  );
-  return {
+  const cellMap = new Map(normalizedCells.map((cell) => [cell.key, cell.hash]));
+  const merkleTree = new MutableRadixMerkleTree({
+    radix: DEFAULT_ACCOUNT_MERKLE_RADIX,
+    leaves: normalizedCells.map(hashCellLeaf),
+  });
+  const doc: RuntimeEntityHashDoc = {
     entityId: normalizeEntityId(entityId),
-    cells: normalizedCells,
-    hash: merkle.root,
+    cells: normalizedCells.length <= MAX_PERSISTED_HASH_CELLS ? normalizedCells : [],
+    cellCount: normalizedCells.length,
+    hash: merkleTree.getRoot(),
   };
+  setHiddenEntityHashState(doc, cellMap, merkleTree);
+  return doc;
+};
+
+const ensureEntityHashRuntime = (doc: StorageEntityHashDoc): RuntimeEntityHashDoc => {
+  const runtimeDoc = doc as RuntimeEntityHashDoc;
+  if (
+    runtimeDoc.cellMap instanceof Map &&
+    runtimeDoc.merkleTree instanceof MutableRadixMerkleTree &&
+    runtimeDoc.cellMap.size === runtimeDoc.merkleTree.leafCount
+  ) {
+    return runtimeDoc;
+  }
+  const normalizedCells = normalizeHashCells(runtimeDoc.cells);
+  const cellMap = new Map(normalizedCells.map((cell) => [cell.key, cell.hash]));
+  const merkleTree = new MutableRadixMerkleTree({
+    radix: DEFAULT_ACCOUNT_MERKLE_RADIX,
+    leaves: normalizedCells.map(hashCellLeaf),
+  });
+  runtimeDoc.hash = merkleTree.getRoot();
+  runtimeDoc.cellCount = cellMap.size;
+  setHiddenEntityHashState(runtimeDoc, cellMap, merkleTree);
+  return syncEntityHashDocVisibleCells(runtimeDoc);
 };
 
 export const computeStorageStateRoot = (entityHashes: StorageFrameEntityHash[]): string => {
@@ -289,7 +353,12 @@ export const readAllEntityHashDocs = async (db: RuntimeDbLike): Promise<Map<stri
   for await (const key of iterateKeys(db, { prefix: keyLiveEntityHashPrefix() })) {
     const entityId = decodeEntityId(key.subarray(1, 33));
     const doc = await readEntityHashDoc(db, entityId);
-    if (doc) docs.set(normalizeEntityId(entityId), buildEntityHashDoc(entityId, doc.cells));
+    if (!doc) continue;
+    if (doc.cells.length === 0 && Number(doc.cellCount ?? 0) > 0) {
+      docs.set(normalizeEntityId(entityId), await buildEntityHashDocFromLive(db, entityId));
+    } else {
+      docs.set(normalizeEntityId(entityId), buildEntityHashDoc(entityId, doc.cells));
+    }
   }
 
   if (docs.size > 0) return docs;
@@ -306,7 +375,7 @@ export const readAllEntityHashDocs = async (db: RuntimeDbLike): Promise<Map<stri
 
 export const toFrameEntityHashes = (docs: Iterable<StorageEntityHashDoc>): StorageFrameEntityHash[] =>
   Array.from(docs)
-    .map((doc) => ({ entityId: normalizeEntityId(doc.entityId), hash: doc.hash, cellCount: doc.cells.length }))
+    .map((doc) => ({ entityId: normalizeEntityId(doc.entityId), hash: doc.hash, cellCount: Number(doc.cellCount ?? doc.cells.length) }))
     .sort((left, right) => left.entityId.localeCompare(right.entityId));
 
 export const prepareStorageStateHashes = async (options: {
@@ -324,7 +393,7 @@ export const prepareStorageStateHashes = async (options: {
   entityHashPuts: Array<{ key: Buffer; value: Buffer }>;
 }> => {
   const entityHashDocs = options.entityHashDocs
-    ? new Map(Array.from(options.entityHashDocs.entries()).map(([key, value]) => [key, buildEntityHashDoc(value.entityId, value.cells)]))
+    ? new Map(options.entityHashDocs)
     : await readAllEntityHashDocs(options.db);
   const docValueBuffers = new Map<string, Buffer>();
   const docHashPuts: Array<{ key: Buffer; value: Buffer }> = [];
@@ -334,19 +403,28 @@ export const prepareStorageStateHashes = async (options: {
   const ensureEntityDoc = async (entityId: string): Promise<StorageEntityHashDoc> => {
     const normalized = normalizeEntityId(entityId);
     let doc = entityHashDocs.get(normalized);
-    if (!doc) {
+    if (!doc || (doc.cells.length === 0 && Number(doc.cellCount ?? 0) > 0 && !(doc as RuntimeEntityHashDoc).cellMap)) {
       doc = await buildEntityHashDocFromLive(options.db, normalized);
       entityHashDocs.set(normalized, doc);
     }
     return doc;
   };
 
-  const updateEntityCells = async (entityId: string, update: (cells: Map<string, string>) => void): Promise<void> => {
+  const updateEntityCell = async (entityId: string, key: string, hash: string | null): Promise<void> => {
     const normalized = normalizeEntityId(entityId);
-    const current = await ensureEntityDoc(normalized);
-    const cells = new Map(current.cells.map((cell) => [cell.key, cell.hash]));
-    update(cells);
-    entityHashDocs.set(normalized, buildEntityHashDoc(normalized, Array.from(cells, ([key, hash]) => ({ key, hash }))));
+    const current = ensureEntityHashRuntime(await ensureEntityDoc(normalized));
+    const cellMap = current.cellMap!;
+    const merkleTree = current.merkleTree!;
+    if (hash) {
+      cellMap.set(key, hash);
+      merkleTree.put(hashToBytes(storageMerklePath(key)), hashToBytes(hash));
+    } else {
+      cellMap.delete(key);
+      merkleTree.del(hashToBytes(storageMerklePath(key)));
+    }
+    current.hash = merkleTree.getRoot();
+    current.cellCount = cellMap.size;
+    entityHashDocs.set(normalized, current);
     touchedEntityIds.add(normalized);
   };
 
@@ -355,22 +433,23 @@ export const prepareStorageStateHashes = async (options: {
     const encoded = encodeStorageDocValue(doc);
     docValueBuffers.set(docValueKey(doc), encoded.buffer);
     docHashPuts.push({ key: keyLiveDocHash(ref), value: encoded.hashBytes });
-    await updateEntityCells(ref.entityId, (cells) => {
-      cells.set(docRefCellKey(ref), encoded.hash);
-    });
+    await updateEntityCell(ref.entityId, docRefCellKey(ref), encoded.hash);
   }
 
   for (const ref of options.dels) {
     docHashDels.push(keyLiveDocHash(ref));
-    await updateEntityCells(ref.entityId, (cells) => {
-      cells.delete(docRefCellKey(ref));
-    });
+    await updateEntityCell(ref.entityId, docRefCellKey(ref), null);
   }
 
-  const entityHashPuts = Array.from(touchedEntityIds).map((entityId) => ({
-    key: keyLiveEntityHash(entityId),
-    value: encodeBuffer(entityHashDocs.get(entityId) ?? buildEntityHashDoc(entityId, [])),
-  }));
+  const entityHashPuts = Array.from(touchedEntityIds).map((entityId) => {
+    const doc = syncEntityHashDocVisibleCells(
+      (entityHashDocs.get(entityId) ?? buildEntityHashDoc(entityId, [])) as RuntimeEntityHashDoc,
+    );
+    return {
+      key: keyLiveEntityHash(entityId),
+      value: encodeBuffer(doc),
+    };
+  });
   const entityHashes = toFrameEntityHashes(entityHashDocs.values());
   return {
     stateHash: computeStorageStateRoot(entityHashes),
