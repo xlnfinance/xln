@@ -414,7 +414,7 @@ test('storage-backed historical view pages support desc account and book cursors
   const baseAccount = replica.state.accounts.get(counterpartyId)!;
   const snapshotHeight = 4;
   const latestHeight = 5;
-  const accountIds = [1, 2, 3].map((value) => `0x${value.toString(16).padStart(64, '0')}`);
+  const accountIds = [1, 2, 3, 4].map((value) => `0x${value.toString(16).padStart(64, '0')}`);
   const head: StorageHead = {
     schemaVersion: 1,
     latestHeight,
@@ -426,7 +426,7 @@ test('storage-backed historical view pages support desc account and book cursors
     accountMerkleRadix: 16,
     retainedHistoryBytes: 0,
   };
-  const manifest: StorageSnapshotManifest = { height: snapshotHeight, createdAt: 400, docCount: 6 };
+  const manifest: StorageSnapshotManifest = { height: snapshotHeight, createdAt: 400, docCount: 7 };
   const core = projectEntityCoreDoc(replica.state, replica);
   const db = makeMemoryDb([
     [KEY_HEAD, encodeBuffer(head)],
@@ -453,8 +453,8 @@ test('storage-backed historical view pages support desc account and book cursors
     accountQuery: { limit: 2, sortDir: 'desc' },
     bookQuery: { limit: 1 },
   });
-  expect(first?.accounts.items.map((item) => item.rightEntity)).toEqual([accountIds[2], accountIds[1]]);
-  expect(first?.accounts.nextCursor).toBe(accountIds[1]);
+  expect(first?.accounts.items.map((item) => item.rightEntity)).toEqual([accountIds[3], accountIds[2]]);
+  expect(first?.accounts.nextCursor).toBe(accountIds[2]);
   expect(first?.books.items.map((item) => item.pairId)).toEqual(['1/1']);
   expect(first?.books.nextCursor).toBe('1/1');
 
@@ -467,7 +467,7 @@ test('storage-backed historical view pages support desc account and book cursors
     accountQuery: { limit: 2, sortDir: 'desc', cursor: first?.accounts.nextCursor || undefined },
     bookQuery: { limit: 1, cursor: first?.books.nextCursor || undefined },
   });
-  expect(second?.accounts.items.map((item) => item.rightEntity)).toEqual([accountIds[0]]);
+  expect(second?.accounts.items.map((item) => item.rightEntity)).toEqual([accountIds[1], accountIds[0]]);
   expect(second?.accounts.nextCursor).toBe(null);
   expect(second?.books.items.map((item) => item.pairId)).toEqual(['1/2']);
   expect(second?.books.nextCursor).toBe(null);
@@ -895,6 +895,8 @@ test('storage entity hash docs avoid serializing huge cell arrays', async () => 
   const firstRoot = decodeBuffer<StorageMerkleRootDoc>(firstRootPut!.value);
   expect(firstRoot.rootHash).toBe(firstDoc.hash);
   expect(firstRoot.leafCount).toBe(accountCount);
+  expect(firstRoot.rootKind).toBe('branch');
+  expect(Array.isArray(firstRoot.rootPath)).toBe(true);
 
   const oldRoot = firstDoc.hash;
   const changedId = `0x${(2_001).toString(16).padStart(64, '0')}`;
@@ -921,6 +923,50 @@ test('storage entity hash docs avoid serializing huge cell arrays', async () => 
   expect(secondDoc.hash).not.toBe(oldRoot);
   expect(second.merklePuts.length).toBeLessThan(50);
   expect(second.merkleDels).toHaveLength(0);
+
+  const cold = await prepareStorageStateHashes({
+    db: makeMemoryDb([
+      ...first.entityHashPuts.map((item) => [item.key, item.value] as [Buffer, Buffer]),
+      ...first.merklePuts.map((item) => [item.key, item.value] as [Buffer, Buffer]),
+    ]),
+    puts: [{
+      family: 'account',
+      entityId,
+      counterpartyId: changedId,
+      value: projectAccountDoc({
+        ...base,
+        rightEntity: changedId,
+        currentHeight: 999,
+        proofHeader: { ...base.proofHeader, toEntity: changedId },
+      }),
+    }],
+    dels: [],
+  });
+  const coldDoc = cold.entityHashDocs.get(entityId)!;
+  expect(coldDoc.cellCount).toBe(accountCount);
+  expect(coldDoc.cells).toHaveLength(0);
+  expect(coldDoc.hash).toBe(secondDoc.hash);
+  expect(cold.merklePuts.length).toBeLessThan(50);
+
+  const warmDelete = await prepareStorageStateHashes({
+    db: makeMemoryDb([]),
+    puts: [],
+    dels: [{ family: 'account', entityId, counterpartyId: changedId }],
+    entityHashDocs: first.entityHashDocs,
+  });
+  const coldDelete = await prepareStorageStateHashes({
+    db: makeMemoryDb([
+      ...first.entityHashPuts.map((item) => [item.key, item.value] as [Buffer, Buffer]),
+      ...first.merklePuts.map((item) => [item.key, item.value] as [Buffer, Buffer]),
+    ]),
+    puts: [],
+    dels: [{ family: 'account', entityId, counterpartyId: changedId }],
+  });
+  const coldDeleteDoc = coldDelete.entityHashDocs.get(entityId)!;
+  expect(coldDeleteDoc.cellCount).toBe(accountCount - 1);
+  expect(coldDeleteDoc.hash).toBe(warmDelete.entityHashDocs.get(entityId)!.hash);
+  expect(coldDelete.merkleDels.length).toBeGreaterThan(0);
+  expect(coldDelete.merklePuts.length).toBeLessThan(50);
 });
 
 test('remote runtime adapter does not reconnect after unauthorized auth', async () => {
