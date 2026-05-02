@@ -8,6 +8,7 @@
  *   bun runtime/scripts/run-e2e-parallel-isolated.ts
  *   bun runtime/scripts/run-e2e-parallel-isolated.ts --shards=3
  *   bun runtime/scripts/run-e2e-parallel-isolated.ts --base-port=20000
+ *   bun runtime/scripts/run-e2e-parallel-isolated.ts --all
  *   bun runtime/scripts/run-e2e-parallel-isolated.ts --video=on --trace=on-first-retry --max-failures=1
  */
 
@@ -45,6 +46,7 @@ type CliArgs = {
   pwGrep?: string | undefined;
   pwProject?: string | undefined;
   pwFiles: string[];
+  includeAllSpecs: boolean;
   skipBuild: boolean;
 };
 
@@ -106,6 +108,7 @@ const parseArgs = (): CliArgs => {
     }
     return undefined;
   };
+  const hasFlag = (name: string): boolean => args.includes(`--${name}`);
 
   const shardsRaw = Number(getFlag('shards') || String(defaultShards));
   const basePortRaw = Number(getFlag('base-port') || '20000');
@@ -154,6 +157,7 @@ const parseArgs = (): CliArgs => {
     pwGrep,
     pwProject,
     pwFiles,
+    includeAllSpecs: hasFlag('all') || hasFlag('include-all') || process.env['E2E_ALL'] === '1',
     skipBuild: args.includes('--skip-build'),
   };
 };
@@ -629,7 +633,7 @@ const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
   return out;
 };
 
-const listPlaywrightSpecFiles = (): string[] => {
+const listPlaywrightSpecFiles = (includeAllSpecs: boolean): string[] => {
   const excludedDefaultSpecs = new Set<string>([
     // Legacy shared-page AHB flow. Useful assertions were ported into
     // tests/e2e-ahb-isolated.spec.ts; keep this out of the canonical isolated bar.
@@ -648,7 +652,7 @@ const listPlaywrightSpecFiles = (): string[] => {
     .split('\n')
     .map(line => line.trim())
     .filter(line => line.endsWith('.spec.ts'))
-    .filter(line => !excludedDefaultSpecs.has(line))
+    .filter(line => includeAllSpecs || !excludedDefaultSpecs.has(line))
     .sort();
 };
 
@@ -894,7 +898,13 @@ const sanitizeChildEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
 const runCmd = async (
   cmd: string,
   args: string[],
-  opts: { env?: NodeJS.ProcessEnv; cwd?: string; log?: ReturnType<typeof createWriteStream>; timeoutMs?: number },
+  opts: {
+    env?: NodeJS.ProcessEnv;
+    cwd?: string;
+    log?: ReturnType<typeof createWriteStream>;
+    timeoutMs?: number;
+    signal?: AbortSignal | undefined;
+  },
 ): Promise<number | null> => {
   const proc = spawn(cmd, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -904,6 +914,21 @@ const runCmd = async (
 
   proc.stdout.on('data', chunk => opts.log?.write(chunk.toString()));
   proc.stderr.on('data', chunk => opts.log?.write(chunk.toString()));
+
+  let abortKillTimer: ReturnType<typeof setTimeout> | null = null;
+  const abortChild = (): void => {
+    opts.log?.write(`[runner] aborting child pid=${proc.pid ?? 'unknown'} cmd=${cmd}\n`);
+    try {
+      if (proc.exitCode === null) proc.kill('SIGTERM');
+    } catch {}
+    abortKillTimer = setTimeout(() => {
+      try {
+        if (proc.exitCode === null) proc.kill('SIGKILL');
+      } catch {}
+    }, 1500);
+  };
+  if (opts.signal?.aborted) abortChild();
+  opts.signal?.addEventListener('abort', abortChild, { once: true });
 
   const timeout = opts.timeoutMs
     ? setTimeout(() => {
@@ -916,6 +941,8 @@ const runCmd = async (
     proc.once('exit', resolveExit);
   });
   if (timeout) clearTimeout(timeout);
+  if (abortKillTimer) clearTimeout(abortKillTimer);
+  opts.signal?.removeEventListener('abort', abortChild);
   return code;
 };
 
@@ -994,7 +1021,12 @@ const captureShardFailureForensics = async (options: {
   options.log.write(`[forensics] wrote failure debug bundle: ${outputDir}\n`);
 };
 
-const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<RunResult> => {
+const runShard = async (
+  task: RunTask,
+  args: CliArgs,
+  logsDir: string,
+  signal?: AbortSignal,
+): Promise<RunResult> => {
   const shard = task.shard;
   const totalShards = task.totalShards;
   const startedAt = Date.now();
@@ -1030,9 +1062,13 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
     const warn = ms > args.phaseWarnMs;
     log.write(`[timing] ${phase}=${ms}ms${warn ? ` (>${args.phaseWarnMs}ms)` : ''}\n`);
   };
+  const throwIfAborted = (): void => {
+    if (signal?.aborted) throw new Error('E2E_ABORTED_AFTER_FIRST_FAILURE');
+  };
 
   try {
     log.write(`shard=${shard}/${totalShards}\nrpc=${rpcUrl}\napi=${apiUrl}\nweb=${webUrl}\ndb=${dbPath}\n\n`);
+    throwIfAborted();
 
     // Hard preflight: kill stale processes that kept shard ports occupied
     // from previous crashed/aborted runs.
@@ -1050,6 +1086,7 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
     await freePort(apiPort + 12, log);
     await freePort(apiPort + 13, log);
     markPhase('preflight', preflightStart);
+    throwIfAborted();
 
     const anvilStart = Date.now();
     anvil = spawn(
@@ -1075,6 +1112,7 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
     anvil.stderr.on('data', c => log.write(`[anvil:err] ${c.toString()}`));
     await waitForRpcReady(rpcUrl, args.stackTimeoutMs);
     markPhase('anvilBoot', anvilStart);
+    throwIfAborted();
 
     const apiStart = Date.now();
     api = spawn(
@@ -1109,9 +1147,11 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
     api.stderr.on('data', c => log.write(`[api:err] ${c.toString()}`));
     await waitForHttpReady(`${apiUrl}/api`, args.stackTimeoutMs);
     markPhase('apiBoot', apiStart);
+    throwIfAborted();
     const healthStart = Date.now();
     await waitForServerHealthy(apiUrl, args.stackTimeoutMs);
     markPhase('apiHealthy', healthStart);
+    throwIfAborted();
 
     const shardViteCacheDir = join(logsDir, `vite-cache-shard-${shard}`);
     const viteStart = Date.now();
@@ -1146,6 +1186,7 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
     vite.stderr.on('data', c => log.write(`[vite:err] ${c.toString()}`));
     await waitForHttpsReady(webUrl, args.stackTimeoutMs);
     markPhase('viteBoot', viteStart);
+    throwIfAborted();
 
     const shardArg = `${shard + 1}/${totalShards}`;
     const playwrightArgs = ['playwright', 'test', '--config', 'playwright.config.ts'];
@@ -1189,6 +1230,7 @@ const runShard = async (task: RunTask, args: CliArgs, logsDir: string): Promise<
       },
       log,
       timeoutMs: args.testTimeoutMs,
+      signal,
     });
     markPhase('playwright', playwrightStart);
 
@@ -1308,7 +1350,7 @@ async function main(): Promise<void> {
     }
 
     const startedAt = Date.now();
-    const sourceFiles = args.pwFiles.length > 0 ? args.pwFiles : listPlaywrightSpecFiles();
+    const sourceFiles = args.pwFiles.length > 0 ? args.pwFiles : listPlaywrightSpecFiles(args.includeAllSpecs);
     let expandedTargets = expandPlaywrightTargets(sourceFiles);
     if (args.pwGrep) {
       const matchesGrep = buildGrepMatcher(args.pwGrep);
@@ -1345,12 +1387,16 @@ async function main(): Promise<void> {
     console.log(`Targets  : ${tasks.length} isolated test stack${tasks.length === 1 ? '' : 's'}`);
 
     const maxConcurrency = Math.max(1, Math.min(args.shards, tasks.length));
-    const results: RunResult[] = new Array(tasks.length);
+    const results: Array<RunResult | undefined> = new Array(tasks.length);
     const claimed = new Array<boolean>(tasks.length).fill(false);
+    const abortController = new AbortController();
     let claimedCount = 0;
     let activeMarketMakerTasks = 0;
+    let failedCount = 0;
     const claimTask = async (): Promise<{ taskIndex: number; task: RunTask } | null> => {
+      if (abortController.signal.aborted) return null;
       while (claimedCount < tasks.length) {
+        if (abortController.signal.aborted) return null;
         for (let taskIndex = 0; taskIndex < tasks.length; taskIndex += 1) {
           if (claimed[taskIndex]) continue;
           const task = tasks[taskIndex];
@@ -1370,7 +1416,17 @@ async function main(): Promise<void> {
         const claim = await claimTask();
         if (!claim) break;
         try {
-          results[claim.taskIndex] = await runShard(claim.task, args, logsDir);
+          const result = await runShard(claim.task, args, logsDir, abortController.signal);
+          results[claim.taskIndex] = result;
+          if (result.status === 'failed' && args.maxFailures > 0) {
+            failedCount += 1;
+            if (failedCount >= args.maxFailures && !abortController.signal.aborted) {
+              console.error(
+                `❌ max failures reached (${failedCount}/${args.maxFailures}); aborting active E2E stacks immediately`,
+              );
+              abortController.abort();
+            }
+          }
         } finally {
           if (claim.task.requireMarketMaker) activeMarketMakerTasks = Math.max(0, activeMarketMakerTasks - 1);
         }
@@ -1378,14 +1434,15 @@ async function main(): Promise<void> {
     };
     await Promise.all(Array.from({ length: maxConcurrency }, () => runWorker()));
     const totalMs = Date.now() - startedAt;
-    const failed = results.filter(r => r.status === 'failed');
-    writeRunManifest(logsDir, args, results, totalMs, startedAt);
+    const completedResults = results.filter((result): result is RunResult => Boolean(result));
+    const failed = completedResults.filter(r => r.status === 'failed');
+    writeRunManifest(logsDir, args, completedResults, totalMs, startedAt);
     publishQaRunIfConfigured(logsDir);
 
     console.log('\n' + '='.repeat(72));
     console.log('E2E Summary');
     console.log('='.repeat(72));
-    for (const r of results.sort((a, b) => a.shard - b.shard)) {
+    for (const r of completedResults.sort((a, b) => a.shard - b.shard)) {
       const sec = (r.durationMs / 1000).toFixed(1);
       const p = r.phaseMs;
       console.log(

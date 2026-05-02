@@ -41,7 +41,6 @@
 
   <div class="topbar-links">
     <a href="/app" class="topbar-link" class:active={currentPath === '/app'}>App</a>
-    <a href="/llms.txt" target="_blank" class="topbar-link llms-link">llms.txt</a>
     <div class="topbar-dropdown">
       <Dropdown bind:open={toolsDropdownOpen} minWidth={160} maxWidth={220}>
         <span slot="trigger" class="topbar-trigger">
@@ -153,12 +152,6 @@
 
   .topbar-link.active {
     color: #4fd18b;
-  }
-
-  /* llms.txt link */
-  .topbar-link.llms-link {
-    text-decoration: underline;
-    text-underline-offset: 3px;
   }
 
   .topbar-dropdown {

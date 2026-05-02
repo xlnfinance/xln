@@ -14,16 +14,19 @@ export type KeyRangeOptions = {
   prefix?: Buffer;
   gte?: Buffer;
   lt?: Buffer;
+  reverse?: boolean;
 };
 
-const keyIteratorOptions = (range: KeyRangeOptions): { gte?: Buffer; lt?: Buffer } => {
+const keyIteratorOptions = (range: KeyRangeOptions): { gte?: Buffer; lt?: Buffer; reverse?: boolean } => {
+  const reverse = range.reverse ? { reverse: true } : {};
   if (range.prefix) {
     const upperBound = prefixUpperBound(range.prefix);
-    return upperBound ? { gte: range.prefix, lt: upperBound } : { gte: range.prefix };
+    return upperBound ? { gte: range.prefix, lt: upperBound, ...reverse } : { gte: range.prefix, ...reverse };
   }
   return {
     ...(range.gte ? { gte: range.gte } : {}),
     ...(range.lt ? { lt: range.lt } : {}),
+    ...reverse,
   };
 };
 

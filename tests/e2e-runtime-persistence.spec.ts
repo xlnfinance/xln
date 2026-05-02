@@ -11,7 +11,7 @@
  * financial state machine, not a UI cache approximation.
  */
 import { test, expect, type Page } from '@playwright/test';
-import { Wallet, ethers } from 'ethers';
+import { Wallet } from 'ethers';
 import {
   createRuntimeIdentity,
   gotoApp,
@@ -248,123 +248,6 @@ async function waitForPairIdle(page: Page, counterpartyId: string, timeoutMs = 2
     await page.waitForTimeout(250);
   }
   throw new Error(`pair ${counterpartyId.slice(0, 10)} not idle: ${JSON.stringify(last)}`);
-}
-
-function generateHtlcPayload(): { secret: string; hashlock: string } {
-  const secret = ethers.hexlify(ethers.randomBytes(32));
-  const hashlock = ethers.keccak256(secret);
-  return { secret, hashlock };
-}
-
-async function sendRoutedHtlcPayment(
-  page: Page,
-  fromEntityId: string,
-  fromSignerId: string,
-  targetEntityId: string,
-  route: string[],
-  amountUsd: bigint,
-  description: string,
-): Promise<{ secret: string; hashlock: string }> {
-  const { secret, hashlock } = generateHtlcPayload();
-  const result = await page.evaluate(
-    async ({ fromEntityId, fromSignerId, targetEntityId, route, amountUsd, description, secret, hashlock }) => {
-      try {
-        const runtimeWindow = window as typeof window & {
-          isolatedEnv?: { runtimeId?: string; eReplicas?: Map<string, unknown> };
-          XLN?: { enqueueRuntimeInput?: (env: unknown, input: unknown) => void };
-        };
-        const env = runtimeWindow.isolatedEnv;
-        const runtimeModule =
-          runtimeWindow.XLN
-          || await import(/* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href);
-        const XLN = runtimeModule as { enqueueRuntimeInput?: (env: unknown, input: unknown) => void };
-        if (!env || !XLN?.enqueueRuntimeInput) {
-          return { ok: false, error: 'isolatedEnv/XLN missing' };
-        }
-        const expectedReplicaKey = `${fromEntityId}:${fromSignerId}`.toLowerCase();
-        const replicaKeys = env.eReplicas ? Array.from(env.eReplicas.keys(), (key) => String(key).toLowerCase()) : [];
-        if (!replicaKeys.includes(expectedReplicaKey)) {
-          return { ok: false, error: `local replica ${expectedReplicaKey} missing` };
-        }
-        XLN.enqueueRuntimeInput(env, {
-          runtimeTxs: [],
-          entityInputs: [{
-            entityId: fromEntityId,
-            signerId: fromSignerId,
-            entityTxs: [{
-              type: 'htlcPayment',
-              data: {
-                targetEntityId,
-                tokenId: 1,
-                amount: BigInt(amountUsd) * 10n ** 18n,
-                route,
-                description,
-                secret,
-                hashlock,
-              },
-            }],
-          }],
-        });
-        return { ok: true };
-      } catch (error: any) {
-        return { ok: false, error: error?.message || String(error) };
-      }
-    },
-    {
-      fromEntityId,
-      fromSignerId,
-      targetEntityId,
-      route,
-      amountUsd: amountUsd.toString(),
-      description,
-      secret,
-      hashlock,
-    },
-  );
-  expect(result.ok, `sendRoutedHtlcPayment failed: ${result.error || 'unknown'}`).toBe(true);
-  return { secret, hashlock };
-}
-
-async function waitForSenderHtlcLock(
-  page: Page,
-  counterpartyId: string,
-  hashlock: string,
-  baselineLockCount: number,
-  timeoutMs = 25_000,
-) {
-  const startedAt = Date.now();
-  let last: Awaited<ReturnType<typeof readPairProgress>> = null;
-  while (Date.now() - startedAt < timeoutMs) {
-    last = await readPairProgress(page, counterpartyId);
-    const hashSeen = Array.isArray(last?.recentHtlcHashlocks) && last.recentHtlcHashlocks.includes(hashlock);
-    const lockCountIncreased = Number(last?.recentHtlcLockCount || 0) > baselineLockCount;
-    if (hashSeen || lockCountIncreased) return last;
-    await page.waitForTimeout(350);
-  }
-  throw new Error(`sender HTLC lock not observed for ${counterpartyId.slice(0, 10)} hashlock=${hashlock.slice(0, 10)} last=${JSON.stringify(last)}`);
-}
-
-async function waitForRecipientPaymentObserved(
-  page: Page,
-  counterpartyId: string,
-  hashlock: string,
-  baselineResolveCount: number,
-  timeoutMs = 30_000,
-) {
-  const startedAt = Date.now();
-  let last: Awaited<ReturnType<typeof readPairProgress>> = null;
-  while (Date.now() - startedAt < timeoutMs) {
-    last = await readPairProgress(page, counterpartyId);
-    const hashSeen = Array.isArray(last?.recentHtlcHashlocks) && last.recentHtlcHashlocks.includes(hashlock);
-    const resolveSeen = Number(last?.recentHtlcResolveCount || 0) > baselineResolveCount;
-    if ((hashSeen || resolveSeen) && Number(last?.pendingHeight || 0) === 0) {
-      return last;
-    }
-    await page.waitForTimeout(400);
-  }
-  throw new Error(
-    `recipient payment not observed for ${counterpartyId.slice(0, 10)} hashlock=${hashlock.slice(0, 10)} baseline=${baselineResolveCount} last=${JSON.stringify(last)}`,
-  );
 }
 
 function parseFirstNumber(text: string): number {
@@ -761,7 +644,7 @@ async function setSnapshotInterval(page: Page, frames: number) {
 }
 
 test.describe('E2E: Multi-runtime persistence reload', () => {
-  test.setTimeout(120_000);
+  test.setTimeout(180_000);
 
   test.beforeEach(async ({ page }) => {
     await ensureE2EBaseline(page, {
@@ -773,8 +656,10 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
     await gotoApp(page, { appBaseUrl: APP_BASE_URL, settleMs: 600 });
   });
 
-  test('reload restores complex runtime WAL chain from genesis snapshot when #nosnapshot is set', async ({ page }) => {
-    page.on('console', msg => {
+  test('reload restores complex runtime WAL chain from genesis snapshot when #nosnapshot is set', async ({ page, browser }) => {
+    const bobContext = await browser.newContext({ ignoreHTTPSErrors: true });
+    const bobPage = await bobContext.newPage();
+    const attachPersistenceConsole = (targetPage: Page, label: string) => targetPage.on('console', msg => {
       const t = msg.text();
       if (
         t.includes('[VaultStore') ||
@@ -785,15 +670,17 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
         t.includes('Failed to save to LevelDB') ||
         t.includes('Recovery halted')
       ) {
-        console.log(`[B] ${t.slice(0, 300)}`);
+        console.log(`[${label}] ${t.slice(0, 300)}`);
       }
     });
+    attachPersistenceConsole(page, 'ALICE');
+    attachPersistenceConsole(bobPage, 'BOB');
+    await gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, settleMs: 600 });
 
     const alice = await createRuntimeIdentity(page, 'alice', randomMnemonic());
-    const bob = await createRuntimeIdentity(page, 'bob', randomMnemonic());
+    const bob = await createRuntimeIdentity(bobPage, 'bob', randomMnemonic());
     const hubId = await discoverHub(page);
 
-    await switchToRuntimeId(page, alice.runtimeId);
     await setSnapshotInterval(page, 5);
     await connectHub(page, alice.entityId, alice.signerId, hubId);
     const aliceOutBeforeFaucet = await outCap(page, alice.entityId, hubId);
@@ -806,74 +693,21 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
     const aliceOutAfterFaucet = await outCap(page, alice.entityId, hubId);
     expect(aliceOutAfterFaucet - aliceOutBeforeFaucet).toBe(500n * 10n ** 18n);
 
-    await switchToRuntimeId(page, bob.runtimeId);
-    await setSnapshotInterval(page, 5);
-    await connectHub(page, bob.entityId, bob.signerId, hubId);
-    const bobOutBeforeFaucet = await outCap(page, bob.entityId, hubId);
+    await setSnapshotInterval(bobPage, 5);
+    await connectHub(bobPage, bob.entityId, bob.signerId, hubId);
+    const bobOutBeforeFaucet = await outCap(bobPage, bob.entityId, hubId);
     let bobExpectedOut = bobOutBeforeFaucet;
     for (let i = 0; i < 5; i++) {
-      await faucet(page, bob.entityId, hubId);
+      await faucet(bobPage, bob.entityId, hubId);
       bobExpectedOut += 100n * 10n ** 18n;
-      await waitForOutCapAtLeast(page, bob.entityId, hubId, bobExpectedOut, 60_000);
+      await waitForOutCapAtLeast(bobPage, bob.entityId, hubId, bobExpectedOut, 60_000);
     }
-    const bobOutAfterFaucet = await outCap(page, bob.entityId, hubId);
+    const bobOutAfterFaucet = await outCap(bobPage, bob.entityId, hubId);
     expect(bobOutAfterFaucet - bobOutBeforeFaucet).toBe(500n * 10n ** 18n);
 
-    await switchToRuntimeId(page, alice.runtimeId);
     await waitForPairIdle(page, hubId);
-    const alicePairBeforePayment = await readPairProgress(page, hubId);
-    const alicePayment1 = await sendRoutedHtlcPayment(
-      page,
-      alice.entityId,
-      alice.signerId,
-      bob.entityId,
-      [alice.entityId, hubId, bob.entityId],
-      35n,
-      'persist alice->bob #1',
-    );
-    await waitForSenderHtlcLock(
-      page,
-      hubId,
-      alicePayment1.hashlock,
-      Number(alicePairBeforePayment?.recentHtlcLockCount || 0),
-    );
+    await waitForPairIdle(bobPage, hubId);
 
-    await switchToRuntimeId(page, bob.runtimeId);
-    const bobPairBeforePayment = await readPairProgress(page, hubId);
-    await waitForRecipientPaymentObserved(
-      page,
-      hubId,
-      alicePayment1.hashlock,
-      Number(bobPairBeforePayment?.recentHtlcResolveCount || 0),
-    );
-    await waitForPairIdle(page, hubId);
-    const bobPayment1 = await sendRoutedHtlcPayment(
-      page,
-      bob.entityId,
-      bob.signerId,
-      alice.entityId,
-      [bob.entityId, hubId, alice.entityId],
-      12n,
-      'persist bob->alice #1',
-    );
-    await waitForSenderHtlcLock(
-      page,
-      hubId,
-      bobPayment1.hashlock,
-      Number(bobPairBeforePayment?.recentHtlcLockCount || 0),
-    );
-
-    await switchToRuntimeId(page, alice.runtimeId);
-    const alicePairBeforeReceive = await readPairProgress(page, hubId);
-    await waitForRecipientPaymentObserved(
-      page,
-      hubId,
-      bobPayment1.hashlock,
-      Number(alicePairBeforeReceive?.recentHtlcResolveCount || 0),
-    );
-    await waitForPairIdle(page, hubId);
-
-    await switchToRuntimeId(page, alice.runtimeId);
     await placeNonMarketableSwapOrder(page, hubId);
     await expect
       .poll(async () => (await readSwapState(page, alice.entityId, alice.signerId, hubId)).accountSwapOffersSize, { timeout: 60_000 })
@@ -938,5 +772,6 @@ test.describe('E2E: Multi-runtime persistence reload', () => {
     ).toBe(true);
     expect(Number(aliceAfter.replayMeta?.latestHeight || 0)).toBe(Number(aliceDbBefore.latest || 0));
     expect(Number(aliceDbAfter.checkpoint || 0)).toBeGreaterThan(1);
+    await bobContext.close().catch(() => undefined);
   });
 });

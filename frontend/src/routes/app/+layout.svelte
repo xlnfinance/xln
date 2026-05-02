@@ -47,6 +47,7 @@
     authKey: string;
     hostLabel: string;
     keyLabel: string;
+    hostKind: 'localhost' | 'server';
     acceptKey: string;
   };
 
@@ -121,7 +122,6 @@
     if (!key) return 'no key';
     if (key.startsWith('xlnra1.read.')) return 'read capability';
     if (key.startsWith('xlnra1.full.')) return 'full capability';
-    if (/^[0-9a-f]{64}$/i.test(key)) return 'legacy inspect key';
     return `${key.slice(0, 6)}...${key.slice(-4)}`;
   }
 
@@ -131,6 +131,17 @@
       return `${parsed.protocol}//${parsed.host}${parsed.pathname}`;
     } catch {
       return wsUrl;
+    }
+  }
+
+  function remoteHostKind(wsUrl: string): RemoteRuntimeRequest['hostKind'] {
+    try {
+      const hostname = new URL(wsUrl).hostname.toLowerCase();
+      return hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1'
+        ? 'localhost'
+        : 'server';
+    } catch {
+      return 'server';
     }
   }
 
@@ -151,6 +162,7 @@
       authKey,
       hostLabel: hostLabelForWsUrl(wsUrl),
       keyLabel: describeAuthKey(authKey),
+      hostKind: remoteHostKind(wsUrl),
       acceptKey: remoteAcceptKey(wsUrl, authKey),
     };
   }
@@ -392,9 +404,23 @@
         <div class="remote-kicker">Remote runtime</div>
         <h2>Connect to this runtime host?</h2>
         <p>
-          XLN will use the runtime already running at this host. No local wallet or browser runtime
-          will be created for this view.
+          XLN will attach this app to the runtime that is already running at the host below. This
+          will not create a new browser runtime.
         </p>
+        <div class="runtime-mode-list" aria-label="Runtime mode options">
+          <div class="runtime-mode">
+            <span>Browser</span>
+            <small>Vault and runtime stay in this browser.</small>
+          </div>
+          <div class="runtime-mode" class:active={pendingRemoteRuntime.hostKind === 'localhost'}>
+            <span>Localhost</span>
+            <small>Runtime runs on this machine, app is only the view.</small>
+          </div>
+          <div class="runtime-mode" class:active={pendingRemoteRuntime.hostKind === 'server'}>
+            <span>Server</span>
+            <small>Runtime and vault live on the remote host.</small>
+          </div>
+        </div>
         <dl>
           <div>
             <dt>Host</dt>
@@ -500,6 +526,45 @@
     line-height: 1.5;
   }
 
+  .runtime-mode-list {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin: 0 0 18px;
+  }
+
+  .runtime-mode {
+    min-width: 0;
+    padding: 10px;
+    border: 1px solid color-mix(in srgb, var(--theme-border, #333) 76%, transparent);
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--theme-surface, #18181b) 82%, transparent);
+  }
+
+  .runtime-mode.active {
+    border-color: color-mix(in srgb, var(--theme-accent, #facc15) 46%, transparent);
+    background: color-mix(in srgb, var(--theme-accent, #facc15) 12%, var(--theme-surface, #18181b));
+  }
+
+  .runtime-mode span,
+  .runtime-mode small {
+    display: block;
+    min-width: 0;
+  }
+
+  .runtime-mode span {
+    margin-bottom: 5px;
+    color: var(--theme-text-primary, #f5f5f4);
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .runtime-mode small {
+    color: var(--theme-text-muted, #8a8a8f);
+    font-size: 10px;
+    line-height: 1.35;
+  }
+
   .remote-login-card dl {
     display: grid;
     gap: 10px;
@@ -557,6 +622,12 @@
     border: 1px solid color-mix(in srgb, var(--theme-border, #333) 88%, transparent);
     background: color-mix(in srgb, var(--theme-surface, #18181b) 92%, transparent);
     color: var(--theme-text-secondary, #b4b4ba);
+  }
+
+  @media (max-width: 540px) {
+    .runtime-mode-list {
+      grid-template-columns: 1fr;
+    }
   }
 
   .app-shell-ready {

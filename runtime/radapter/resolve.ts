@@ -71,12 +71,6 @@ const normalizePath = (path: string): string[] => {
   return parts;
 };
 
-const readLimit = (query?: RuntimeAdapterReadQuery): number => {
-  const raw = Number(query?.limit ?? 10);
-  if (!Number.isFinite(raw)) throw new RuntimeAdapterError('E_BAD_QUERY', 'limit must be finite');
-  return Math.max(1, Math.min(500, Math.floor(raw)));
-};
-
 const readBoundedLimit = (rawValue: unknown, fallback: number): number => {
   const raw = Number(rawValue ?? fallback);
   if (!Number.isFinite(raw)) throw new RuntimeAdapterError('E_BAD_QUERY', 'limit must be finite');
@@ -88,13 +82,6 @@ const readAtHeight = (query?: RuntimeAdapterReadQuery): number | null => {
   const raw = Number(query.atHeight);
   if (!Number.isFinite(raw) || raw < 1) throw new RuntimeAdapterError('E_BAD_QUERY', 'atHeight must be a positive integer');
   return Math.floor(raw);
-};
-
-const assertSupportedSort = (query?: RuntimeAdapterReadQuery): void => {
-  const sortBy = String(query?.sortBy || '').trim();
-  if (sortBy && sortBy !== 'counterparty') {
-    throw new RuntimeAdapterError('E_BAD_QUERY', `unsupported sortBy: ${sortBy}`);
-  }
 };
 
 const compareAscii = (left: string, right: string): number =>
@@ -184,99 +171,22 @@ const listEntitySummaries = async (
     .sort((left, right) => compareAscii(left.entityId, right.entityId));
 };
 
-const projectAccountsPage = (
+const loadRequiredEntityViewPage = async (
+  ctx: RuntimeAdapterResolveContext,
   entityId: string,
-  state: EntityState,
+  height: number,
   query?: RuntimeAdapterReadQuery,
-): RuntimeAdapterAccountPage => {
-  assertSupportedSort(query);
-  const normalized = normalizeEntityId(entityId);
-  const cursor = query?.cursor ? normalizeEntityId(query.cursor) : '';
-  const limit = readLimit(query);
-  const direction = query?.sortDir === 'desc' ? 'desc' : 'asc';
-  const compare = (left: string, right: string): number =>
-    direction === 'desc' ? compareAscii(right, left) : compareAscii(left, right);
-  const isAfterCursor = (key: string): boolean =>
-    !cursor || (direction === 'desc' ? key < cursor : key > cursor);
-  const pageKeys: Array<{ raw: string; normalized: string }> = [];
-
-  for (const rawKey of state.accounts?.keys?.() ?? []) {
-    const raw = String(rawKey);
-    const normalizedKey = normalizeEntityId(raw);
-    if (!isAfterCursor(normalizedKey)) continue;
-    let insertAt = pageKeys.length;
-    while (insertAt > 0 && compare(normalizedKey, pageKeys[insertAt - 1]!.normalized) < 0) {
-      insertAt -= 1;
-    }
-    pageKeys.splice(insertAt, 0, { raw, normalized: normalizedKey });
-    if (pageKeys.length > limit + 1) pageKeys.pop();
+): Promise<{
+  core: StorageEntityCoreDoc;
+  accounts: RuntimeAdapterAccountPage;
+  books: RuntimeAdapterBookPage;
+}> => {
+  if (!ctx.loadEntityViewPage) {
+    throw new RuntimeAdapterError('E_INTERNAL', 'storage view page loader is required for paged entity reads');
   }
-
-  const visibleKeys = pageKeys.slice(0, limit);
-  const items = visibleKeys.map(({ raw, normalized: counterpartyId }) => {
-    const account = state.accounts.get(raw);
-    if (!account) throw new RuntimeAdapterError('E_INTERNAL', `account index drift: ${normalized}/${counterpartyId}`);
-    return projectAccountDoc(account);
-  });
-  return {
-    items,
-    nextCursor: pageKeys.length > limit ? visibleKeys[visibleKeys.length - 1]?.normalized ?? null : null,
-  };
-};
-
-const bestBidTicks = (book: BookState): bigint | null => {
-  const bucketId = book.bidBucketIdsDesc[0];
-  if (bucketId === undefined) return null;
-  const bucket = book.bidBuckets.get(bucketId.toString());
-  const price = bucket?.pricesAsc.at(-1);
-  return price ?? null;
-};
-
-const bestAskTicks = (book: BookState): bigint | null => {
-  const bucketId = book.askBucketIdsAsc[0];
-  if (bucketId === undefined) return null;
-  const bucket = book.askBuckets.get(bucketId.toString());
-  const price = bucket?.pricesAsc[0];
-  return price ?? null;
-};
-
-const bookSpreadSortKey = (book: BookState): bigint | null => {
-  const bid = bestBidTicks(book);
-  const ask = bestAskTicks(book);
-  if (bid === null || ask === null) return null;
-  return ask >= bid ? ask - bid : 0n;
-};
-
-const compareBooksNearSpread = (
-  left: [string, BookState],
-  right: [string, BookState],
-): number => {
-  const leftSpread = bookSpreadSortKey(left[1]);
-  const rightSpread = bookSpreadSortKey(right[1]);
-  if (leftSpread !== null && rightSpread !== null && leftSpread !== rightSpread) {
-    return leftSpread < rightSpread ? -1 : 1;
-  }
-  if (leftSpread !== null && rightSpread === null) return -1;
-  if (leftSpread === null && rightSpread !== null) return 1;
-  return compareAscii(String(left[0]), String(right[0]));
-};
-
-const projectBookPage = (
-  state: EntityState,
-  limit = 10,
-  query?: RuntimeAdapterReadQuery,
-): RuntimeAdapterBookPage => {
-  const cursor = String(query?.cursor || '').trim();
-  const ordered = Array.from(state.orderbookExt?.books?.entries?.() ?? [])
-    .map(([pairId, book]) => [String(pairId), book] as [string, BookState])
-    .sort(compareBooksNearSpread);
-  const startIndex = cursor ? ordered.findIndex(([pairId]) => pairId === cursor) + 1 : 0;
-  const offset = Math.max(0, startIndex);
-  const visible = ordered.slice(offset, offset + limit);
-  return {
-    items: visible.map(([pairId, book]) => ({ pairId, book })),
-    nextCursor: offset + limit < ordered.length ? visible[visible.length - 1]?.[0] ?? null : null,
-  };
+  const stored = await ctx.loadEntityViewPage(entityId, height, query);
+  if (!stored) throw new RuntimeAdapterError('E_NOT_FOUND', `entity view not found at height ${height}: ${normalizeEntityId(entityId)}`);
+  return stored;
 };
 
 const projectViewFrame = async (
@@ -307,45 +217,20 @@ const projectViewFrame = async (
   };
   if (query?.booksCursor) bookQuery.cursor = query.booksCursor;
 
-  if (height !== ctx.env.height && ctx.loadEntityViewPage) {
-    const storedQuery: RuntimeAdapterReadQuery = {
-      ...heightQuery,
-    };
-    if (accountQuery.limit !== undefined) storedQuery.limit = accountQuery.limit;
-    if (accountQuery.limit !== undefined) storedQuery.accountsLimit = accountQuery.limit;
-    if (accountQuery.cursor) storedQuery.accountsCursor = accountQuery.cursor;
-    if (bookQuery.limit !== undefined) storedQuery.booksLimit = bookQuery.limit;
-    if (bookQuery.cursor) storedQuery.booksCursor = bookQuery.cursor;
-    const stored = await ctx.loadEntityViewPage(activeEntityId, height, storedQuery);
-    if (stored) {
-      const summary = entities.find((entity) => normalizeEntityId(entity.entityId) === activeEntityId) ?? {
-        entityId: activeEntityId,
-        label: String(stored.core.profile?.name || '').trim() || activeEntityId,
-        height: Math.max(0, Math.floor(Number(stored.core.height ?? height))),
-      };
-      return {
-        head,
-        height,
-        entities,
-        activeEntityId,
-        activeEntity: {
-          summary,
-          core: stored.core,
-          accounts: stored.accounts,
-          books: stored.books,
-        },
-      };
-    }
-  }
-
-  const { state, replica } = await resolveEntityState(ctx, activeEntityId, heightQuery);
+  const storedQuery: RuntimeAdapterReadQuery = {
+    ...heightQuery,
+  };
+  if (accountQuery.limit !== undefined) storedQuery.limit = accountQuery.limit;
+  if (accountQuery.limit !== undefined) storedQuery.accountsLimit = accountQuery.limit;
+  if (accountQuery.cursor) storedQuery.accountsCursor = accountQuery.cursor;
+  if (bookQuery.limit !== undefined) storedQuery.booksLimit = bookQuery.limit;
+  if (bookQuery.cursor) storedQuery.booksCursor = bookQuery.cursor;
+  const stored = await loadRequiredEntityViewPage(ctx, activeEntityId, height, storedQuery);
   const summary = entities.find((entity) => normalizeEntityId(entity.entityId) === activeEntityId) ?? {
     entityId: activeEntityId,
-    label: labelForState(state),
-    height: Math.max(0, Math.floor(Number(state.height ?? height))),
+    label: String(stored.core.profile?.name || '').trim() || activeEntityId,
+    height: Math.max(0, Math.floor(Number(stored.core.height ?? height))),
   };
-  const accounts = projectAccountsPage(activeEntityId, state, accountQuery);
-  const books = projectBookPage(state, bookQuery.limit, bookQuery);
 
   return {
     head,
@@ -354,9 +239,9 @@ const projectViewFrame = async (
     activeEntityId,
     activeEntity: {
       summary,
-      core: projectEntityCoreDoc(state, replica),
-      accounts,
-      books,
+      core: stored.core,
+      accounts: stored.accounts,
+      books: stored.books,
     },
   };
 };
@@ -387,10 +272,10 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
 
     if (parts.length === 3 && (parts[2] === 'accounts' || parts[2] === 'books' || parts[2] === 'book-docs')) {
       const height = readAtHeight(query);
-      if (height !== null && height !== ctx.env.height && ctx.loadEntityViewPage) {
-        const stored = await ctx.loadEntityViewPage(entityId, height, query);
-        if (stored) return (parts[2] === 'accounts' ? stored.accounts : stored.books) as T;
-      }
+      const targetHeight = height ?? Math.max(0, Math.floor(Number(ctx.env.height ?? 0)));
+      if (targetHeight < 1) throw new RuntimeAdapterError('E_BAD_QUERY', 'paged entity reads require a persisted runtime height');
+      const stored = await loadRequiredEntityViewPage(ctx, entityId, targetHeight, query);
+      return (parts[2] === 'accounts' ? stored.accounts : stored.books) as T;
     }
 
     const { state, replica } = await resolveEntityState(ctx, entityId, query);
@@ -399,23 +284,11 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
       return projectEntityCoreDoc(state, replica) as StorageEntityCoreDoc as T;
     }
 
-    if (parts.length === 3 && parts[2] === 'accounts') {
-      return projectAccountsPage(entityId, state, query) as T;
-    }
-
     if (parts.length === 4 && parts[2] === 'account') {
       const counterpartyId = normalizeEntityId(parts[3] ?? '');
       const account = state.accounts.get(counterpartyId);
       if (!account) throw new RuntimeAdapterError('E_NOT_FOUND', `account not found: ${normalizeEntityId(entityId)}/${counterpartyId}`);
       return projectAccountDoc(account) as T;
-    }
-
-    if (parts.length === 3 && parts[2] === 'books') {
-      return projectBookPage(state, readBoundedLimit(query?.booksLimit, query?.limit ?? 10), query) as T;
-    }
-
-    if (parts.length === 3 && parts[2] === 'book-docs') {
-      return projectBookPage(state, readBoundedLimit(query?.booksLimit, query?.limit ?? 10), query) as T;
     }
   }
 

@@ -1,7 +1,6 @@
-import type { BookState } from '../orderbook';
 import { ethers } from 'ethers';
 import { serializeTaggedJson } from '../serialization-utils';
-import type { AccountMachine, Env } from '../types';
+import type { Env } from '../types';
 import {
   computeCanonicalEntityHash,
   computeCanonicalEntityHashesFromEnv,
@@ -39,13 +38,11 @@ import {
   computeRadixMerkleEdgeHash,
   computeRadixMerkleLeafHash,
   computeRadixMerkleRootHash,
-  MutableRadixMerkleTree,
   packRadixMerklePath,
   radixMerklePathSlots,
   type RadixMerkleRootKind,
   EMPTY_RADIX_MERKLE_ROOT,
 } from './merkle';
-import { projectAccountDoc, projectEntityCoreDoc } from './projections';
 import { buildReplicaLookup, findReplicaForEntity } from './replicas';
 import type {
   RuntimeDbLike,
@@ -60,10 +57,6 @@ import type {
 } from './types';
 
 type StorageDocEncodedValue = { buffer: Buffer; hash: string; hashBytes: Buffer };
-type StorageHashEntry = {
-  key: string;
-  hash: string;
-};
 
 const ENTITY_MERKLE_NAMESPACE = 'runtime-roots' as const;
 
@@ -124,30 +117,8 @@ const storageMerklePath = (key: string): string => {
   throw new Error(`STORAGE_UNKNOWN_MERKLE_PATH: ${normalized}`);
 };
 
-const normalizeHashEntries = (entries: Iterable<StorageHashEntry>): StorageHashEntry[] =>
-  Array.from(entries)
-    .map((entry) => ({ key: String(entry.key), hash: String(entry.hash) }))
-    .filter((entry) => entry.key.length > 0 && /^0x[0-9a-f]{64}$/i.test(entry.hash))
-    .sort((left, right) => left.key.localeCompare(right.key));
-
-const hashEntryLeaf = (entry: StorageHashEntry): { key: Uint8Array; value: Uint8Array } => ({
-  key: hashToBytes(storageMerklePath(entry.key)),
-  value: hashToBytes(entry.hash),
-});
-
-const buildEntityHashDoc = (entityId: string, entries: Iterable<StorageHashEntry>): StorageEntityHashDoc => {
-  const normalizedEntries = normalizeHashEntries(entries);
-  const merkleTree = new MutableRadixMerkleTree({
-    radix: DEFAULT_ACCOUNT_MERKLE_RADIX,
-    leaves: normalizedEntries.map(hashEntryLeaf),
-  });
-  const doc: StorageEntityHashDoc = {
-    entityId: normalizeEntityId(entityId),
-    cellCount: normalizedEntries.length,
-    hash: merkleTree.getRoot(),
-  };
-  return doc;
-};
+export const storageMerkleCellHexKey = (cellKey: string): string =>
+  `0x${hashToBytes(storageMerklePath(cellKey)).toString('hex')}`;
 
 export const computeStorageStateRoot = (entityHashes: StorageFrameEntityHash[]): string => {
   return buildHexKeyedMerkle(
@@ -212,6 +183,8 @@ export const prepareStorageCanonicalStateHashes = (
       if (liveEntityIds.has(entry.entityId)) canonicalHashByEntity.set(entry.entityId, entry);
     }
   } else {
+    // This is the bootstrap frame path. After the first persisted frame, callers must
+    // pass previous canonical hashes so canonical hashing stays touched-entity scoped.
     for (const entry of computeCanonicalEntityHashesFromEnv(env)) {
       canonicalHashByEntity.set(entry.entityId, entry);
     }
@@ -327,7 +300,20 @@ class PersistedEntityMerkleEditor {
     if ((rootDoc.rootKind === 'branch' || rootDoc.rootKind === 'leaf') && Array.isArray(rootDoc.rootPath)) {
       return new PersistedEntityMerkleEditor(db, normalized, rootDoc);
     }
-    return null;
+    throw new Error(`STORAGE_MERKLE_ROOT_INVALID: entity=${normalized}`);
+  }
+
+  static empty(db: RuntimeDbLike, entityId: string): PersistedEntityMerkleEditor {
+    const normalized = normalizeEntityId(entityId);
+    return new PersistedEntityMerkleEditor(db, normalized, {
+      entityId: normalized,
+      namespace: ENTITY_MERKLE_NAMESPACE,
+      radix: DEFAULT_ACCOUNT_MERKLE_RADIX,
+      rootHash: EMPTY_RADIX_MERKLE_ROOT,
+      rootKind: 'empty',
+      rootPath: [],
+      leafCount: 0,
+    });
   }
 
   get leafCount(): number {
@@ -657,20 +643,6 @@ class PersistedEntityMerkleEditor {
   }
 }
 
-const readPersistedEntityHashDoc = async (
-  db: RuntimeDbLike,
-  entityId: string,
-): Promise<StorageEntityHashDoc | null> => {
-  const normalized = normalizeEntityId(entityId);
-  const rootDoc = await readJsonOrNull<StorageMerkleRootDoc>(db, keyMerkleRoot(normalized, ENTITY_MERKLE_NAMESPACE));
-  if (!rootDoc) return null;
-  return {
-    entityId: normalized,
-    hash: rootDoc.rootHash || EMPTY_RADIX_MERKLE_ROOT,
-    cellCount: Math.max(0, Math.floor(Number(rootDoc.leafCount ?? 0))),
-  };
-};
-
 const hasAnyKey = async (db: RuntimeDbLike, prefix: Buffer): Promise<boolean> => {
   for await (const _key of iterateKeys(db, { prefix })) return true;
   return false;
@@ -781,73 +753,34 @@ export const prepareStorageStateHashes = async (options: {
   const docHashDels: Buffer[] = [];
   const touchedEntityIds = new Set<string>();
   const persistedEditors = new Map<string, PersistedEntityMerkleEditor>();
-  const memoryEditors = new Map<string, MutableRadixMerkleTree>();
 
-  const ensureEntityDoc = async (entityId: string): Promise<StorageEntityHashDoc> => {
-    const normalized = normalizeEntityId(entityId);
-    let doc = entityHashDocs.get(normalized);
-    if (!doc) {
-      const persisted = await readPersistedEntityHashDoc(options.db, normalized);
-      if (persisted) {
-        doc = persisted;
-      } else {
-        await assertNoMerkleSideRowsWithoutRoot(options.db, normalized);
-        if (await hasPersistedLiveDocs(options.db, normalized)) {
-          throw new Error(`STORAGE_MERKLE_ROOT_MISSING: entity=${normalized}`);
-        }
-        doc = buildEntityHashDoc(normalized, []);
-      }
-      entityHashDocs.set(normalized, doc);
-    }
-    return doc;
-  };
-
-  const openPersistedEditor = async (entityId: string): Promise<PersistedEntityMerkleEditor | null> => {
+  const openEntityEditor = async (entityId: string): Promise<PersistedEntityMerkleEditor> => {
     const normalized = normalizeEntityId(entityId);
     const existing = persistedEditors.get(normalized);
     if (existing) return existing;
-    const editor = await PersistedEntityMerkleEditor.open(options.db, normalized);
-    if (!editor) return null;
-    persistedEditors.set(normalized, editor);
-    return editor;
-  };
-
-  const openMemoryEditor = async (entityId: string): Promise<MutableRadixMerkleTree> => {
-    const normalized = normalizeEntityId(entityId);
-    const existing = memoryEditors.get(normalized);
-    if (existing) return existing;
-    const doc = await ensureEntityDoc(normalized);
-    if (Number(doc.cellCount) > 0 || doc.hash !== EMPTY_RADIX_MERKLE_ROOT) {
-      throw new Error(`STORAGE_MERKLE_ROOT_MISSING: entity=${normalized}`);
+    let editor = await PersistedEntityMerkleEditor.open(options.db, normalized);
+    if (!editor) {
+      await assertNoMerkleSideRowsWithoutRoot(options.db, normalized);
+      if (await hasPersistedLiveDocs(options.db, normalized)) {
+        throw new Error(`STORAGE_MERKLE_ROOT_MISSING: entity=${normalized}`);
+      }
+      editor = PersistedEntityMerkleEditor.empty(options.db, normalized);
     }
-    const editor = new MutableRadixMerkleTree({ radix: DEFAULT_ACCOUNT_MERKLE_RADIX });
-    memoryEditors.set(normalized, editor);
+    persistedEditors.set(normalized, editor);
     return editor;
   };
 
   const updateEntityCell = async (entityId: string, key: string, hash: string | null): Promise<void> => {
     const normalized = normalizeEntityId(entityId);
-    const persistedEditor = await openPersistedEditor(normalized);
-    if (persistedEditor) {
-      if (hash) await persistedEditor.put(key, hash);
-      else await persistedEditor.del(key);
-      touchedEntityIds.add(normalized);
-      entityHashDocs.set(normalized, entityHashDocs.get(normalized) ?? {
-        entityId: normalized,
-        hash: EMPTY_RADIX_MERKLE_ROOT,
-        cellCount: persistedEditor.leafCount,
-      });
-      return;
-    }
-
-    const current = await ensureEntityDoc(normalized);
-    const memoryEditor = await openMemoryEditor(normalized);
-    if (hash) memoryEditor.put(hashToBytes(storageMerklePath(key)), hashToBytes(hash));
-    else memoryEditor.del(hashToBytes(storageMerklePath(key)));
-    current.hash = memoryEditor.getRoot();
-    current.cellCount = memoryEditor.leafCount;
-    entityHashDocs.set(normalized, current);
+    const editor = await openEntityEditor(normalized);
+    if (hash) await editor.put(key, hash);
+    else await editor.del(key);
     touchedEntityIds.add(normalized);
+    entityHashDocs.set(normalized, entityHashDocs.get(normalized) ?? {
+      entityId: normalized,
+      hash: EMPTY_RADIX_MERKLE_ROOT,
+      cellCount: editor.leafCount,
+    });
   };
 
   for (const doc of options.puts) {
@@ -867,63 +800,18 @@ export const prepareStorageStateHashes = async (options: {
   const merkleDelsByKey = new Map<string, Buffer>();
   const entityHashPuts: Array<{ key: Buffer; value: Buffer }> = [];
   for (const entityId of touchedEntityIds) {
-    const persistedEditor = persistedEditors.get(entityId);
-    if (persistedEditor) {
-      const flushed = await persistedEditor.flush();
-      const doc = (entityHashDocs.get(entityId) ?? {
-        entityId,
-        hash: flushed.rootDoc.rootHash,
-        cellCount: flushed.rootDoc.leafCount,
-      }) as StorageEntityHashDoc;
-      doc.hash = flushed.rootDoc.rootHash;
-      doc.cellCount = flushed.rootDoc.leafCount;
-      entityHashDocs.set(entityId, doc);
-      appendEntityMerkleFlush(entityId, flushed, merklePuts, merkleDelsByKey);
-      entityHashPuts.push({
-        key: keyLiveEntityHash(entityId),
-        value: encodeBuffer(doc),
-      });
-      continue;
-    }
-
-    const doc = entityHashDocs.get(entityId) ?? buildEntityHashDoc(entityId, []);
-    const memoryEditor = memoryEditors.get(entityId);
-    const dirty = memoryEditor?.takeDirtyNodes();
-    if (dirty) {
-      doc.hash = dirty.rootHash;
-      doc.cellCount = dirty.leafCount;
-      const rootDoc: StorageMerkleRootDoc = {
-        entityId,
-        namespace: ENTITY_MERKLE_NAMESPACE,
-        radix: DEFAULT_ACCOUNT_MERKLE_RADIX,
-        rootHash: dirty.rootHash,
-        rootKind: dirty.rootKind,
-        rootPath: dirty.rootPath,
-        leafCount: dirty.leafCount,
-      };
-      appendEntityMerkleFlush(entityId, {
-        rootDoc,
-        branchPuts: dirty.branchPuts.map((branch) => ({
-          entityId,
-          namespace: ENTITY_MERKLE_NAMESPACE,
-          radix: branch.radix,
-          path: branch.path,
-          hash: branch.hash,
-          children: branch.children,
-        })),
-        leafPuts: dirty.leafPuts.map((leaf) => ({
-          entityId,
-          namespace: ENTITY_MERKLE_NAMESPACE,
-          radix: leaf.radix,
-          path: leaf.path,
-          key: leaf.key,
-          valueHash: leaf.valueHash,
-          hash: leaf.hash,
-        })),
-        branchDels: dirty.branchDels,
-        leafDels: dirty.leafDels,
-      }, merklePuts, merkleDelsByKey);
-    }
+    const editor = persistedEditors.get(entityId);
+    if (!editor) throw new Error(`STORAGE_MERKLE_EDITOR_MISSING: entity=${entityId}`);
+    const flushed = await editor.flush();
+    const doc = (entityHashDocs.get(entityId) ?? {
+      entityId,
+      hash: flushed.rootDoc.rootHash,
+      cellCount: flushed.rootDoc.leafCount,
+    }) as StorageEntityHashDoc;
+    doc.hash = flushed.rootDoc.rootHash;
+    doc.cellCount = flushed.rootDoc.leafCount;
+    entityHashDocs.set(entityId, doc);
+    appendEntityMerkleFlush(entityId, flushed, merklePuts, merkleDelsByKey);
     entityHashPuts.push({
       key: keyLiveEntityHash(entityId),
       value: encodeBuffer(doc),
@@ -944,31 +832,4 @@ export const prepareStorageStateHashes = async (options: {
       .filter(([key]) => !merklePutKeys.has(key))
       .map(([, key]) => key),
   };
-};
-
-export const computeStorageDebugStateHashFromEnv = (env: Env): string => {
-  const entityHashDocs: StorageEntityHashDoc[] = [];
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
-    const entityId = normalizeEntityId(String(replica?.entityId || String(replicaKey).split(':')[0] || ''));
-    if (!entityId || !replica?.state) continue;
-    const entries: StorageHashEntry[] = [];
-    entries.push({
-      key: 'entity',
-      hash: hashBuffer(encodeBuffer(projectEntityCoreDoc(replica.state, replica))),
-    });
-    for (const [counterpartyId, account] of replica.state.accounts ?? new Map<string, AccountMachine>()) {
-      entries.push({
-        key: docRefCellKey({ family: 'account', entityId, counterpartyId: normalizeEntityId(counterpartyId) }),
-        hash: hashBuffer(encodeBuffer(projectAccountDoc(account))),
-      });
-    }
-    for (const [pairId, book] of replica.state.orderbookExt?.books ?? new Map<string, BookState>()) {
-      entries.push({
-        key: docRefCellKey({ family: 'book', entityId, pairId: String(pairId) }),
-        hash: hashBuffer(encodeBuffer(book)),
-      });
-    }
-    entityHashDocs.push(buildEntityHashDoc(entityId, entries));
-  }
-  return computeStorageStateRoot(toFrameEntityHashes(entityHashDocs));
 };
