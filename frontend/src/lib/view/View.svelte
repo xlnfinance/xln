@@ -149,7 +149,10 @@
     }
   });
 
-  if (typeof window !== 'undefined' && window.location.hostname === 'localhost') {
+  if (
+    typeof window !== 'undefined' &&
+    (window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1' || window.location.hostname === '::1')
+  ) {
     Object.defineProperty(window, 'isolatedEnv', {
       get() {
         return get(localEnvStore);

@@ -2,7 +2,12 @@
   import { createEventDispatcher } from 'svelte';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
   import { allRuntimes, activeRuntime as activeVault, vaultOperations } from '$lib/stores/vaultStore';
-  import { runtimes as runtimeEntries } from '$lib/stores/runtimeStore';
+  import {
+    activeRuntimeId as activeStoreRuntimeId,
+    runtimeOperations,
+    runtimes as runtimeEntries,
+    type Runtime as StoreRuntime,
+  } from '$lib/stores/runtimeStore';
   import { resetEverything } from '$lib/utils/resetEverything';
   import { xlnFunctions, xlnInstance } from '$lib/stores/xlnStore';
   import type { Env } from '@xln/runtime';
@@ -25,6 +30,7 @@
     signerId: string;
     status: 'connected' | 'syncing' | 'disconnected' | 'error' | 'inactive';
     avatar: string;
+    source: 'browser' | 'remote';
     selfEntity: EntitySummary | null;
     derivedEntities: EntitySummary[];
   };
@@ -39,7 +45,9 @@
   $: xlnReady = !!$xlnInstance;
   $: activeXlnFunctions = xlnReady ? $xlnFunctions : null;
   $: runtimeGroups = buildRuntimeGroups();
-  $: currentGroup = runtimeGroups.find((group) => group.runtimeId === $activeVault?.id) || null;
+  $: currentGroup = runtimeGroups.find((group) => group.runtimeId === $activeStoreRuntimeId)
+    || runtimeGroups.find((group) => group.runtimeId === $activeVault?.id)
+    || null;
   $: currentEntity = resolveCurrentEntity();
   $: currentAvatar = currentEntity?.avatar || currentGroup?.avatar || '';
   $: currentTitle = resolveCurrentTitle();
@@ -51,6 +59,10 @@
 
   function buildRuntimeGroups(): RuntimeSummary[] {
     const groups: RuntimeSummary[] = [];
+    for (const runtime of $runtimeEntries.values()) {
+      if (runtime.type !== 'remote') continue;
+      groups.push(buildRemoteRuntimeGroup(runtime));
+    }
     for (const runtime of $allRuntimes) {
       const signer = runtime.signers?.[runtime.activeSignerIndex] || runtime.signers?.[0];
       const signerId = signer?.address || '';
@@ -69,6 +81,7 @@
         signerId,
         status,
         avatar: selfEntity?.avatar || runtimeAvatar,
+        source: 'browser',
         selfEntity: selfEntity || (selfEntityId ? {
           entityId: signer?.entityId || '',
           name: signer?.entityId || 'Entity',
@@ -79,6 +92,21 @@
       });
     }
     return groups;
+  }
+
+  function buildRemoteRuntimeGroup(runtime: StoreRuntime): RuntimeSummary {
+    const entities = collectEntities(runtime.env, '', null);
+    const selfEntity = entities[0] || null;
+    return {
+      runtimeId: runtime.id,
+      runtimeLabel: runtime.label || 'Remote runtime',
+      signerId: '',
+      status: runtime.status,
+      avatar: selfEntity?.avatar || '',
+      source: 'remote',
+      selfEntity,
+      derivedEntities: selfEntity ? entities.slice(1) : entities,
+    };
   }
 
   function collectEntities(
@@ -94,7 +122,7 @@
     const entities: EntitySummary[] = [];
 
     for (const replica of entries) {
-      if (normalizeId(replica.signerId) !== signerLower) continue;
+      if (signerLower && normalizeId(replica.signerId) !== signerLower) continue;
       const entityId = replica.entityId || '';
       const normalizedEntityId = normalizeId(entityId);
       if (!normalizedEntityId || seen.has(normalizedEntityId)) continue;
@@ -159,11 +187,15 @@
   }
 
   function resolveRuntimeMeta(group: RuntimeSummary): string {
-    return formatEntityMeta(group.selfEntity?.entityId || group.runtimeId);
+    const source = group.source === 'remote' ? 'Remote runtime' : 'Browser runtime';
+    const entity = formatEntityMeta(group.selfEntity?.entityId || group.runtimeId);
+    return entity ? `${source} · ${entity}` : source;
   }
 
   async function selectRuntimeEntity(runtimeId: string, signerId: string, entityId: string) {
-    await vaultOperations.selectRuntime(runtimeId);
+    const group = runtimeGroups.find((candidate) => candidate.runtimeId === runtimeId);
+    if (group?.source === 'remote') runtimeOperations.selectRuntime(runtimeId);
+    else await vaultOperations.selectRuntime(runtimeId);
     dispatch('entitySelect', {
       jurisdiction: 'browservm',
       signerId,
@@ -173,7 +205,8 @@
   }
 
   async function selectRuntimeSelf(group: RuntimeSummary) {
-    await vaultOperations.selectRuntime(group.runtimeId);
+    if (group.source === 'remote') runtimeOperations.selectRuntime(group.runtimeId);
+    else await vaultOperations.selectRuntime(group.runtimeId);
     if (group.selfEntity) {
       dispatch('entitySelect', {
         jurisdiction: 'browservm',
@@ -208,7 +241,7 @@
     slot="trigger"
     class="pill-trigger"
     data-testid="context-current"
-    data-runtime-id={$activeVault?.id || ''}
+    data-runtime-id={currentGroup?.runtimeId || $activeVault?.id || ''}
     data-entity-id={tab.entityId || ''}
     data-signer-id={tab.signerId || ''}
   >
@@ -227,7 +260,7 @@
   <div slot="menu" class="switcher-menu">
     <div class="runtime-list">
       {#each runtimeGroups as group (group.runtimeId)}
-        <section class="runtime-group" class:active={group.runtimeId === $activeVault?.id}>
+        <section class="runtime-group" class:active={group.runtimeId === currentGroup?.runtimeId}>
           <div class="runtime-row">
             <button class="runtime-main" on:click={() => selectRuntimeSelf(group)}>
               {#if group.avatar}

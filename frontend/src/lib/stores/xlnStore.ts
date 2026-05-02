@@ -609,16 +609,21 @@ const buildRemoteAdapterEnvSnapshot = async (
   env.eReplicas = new Map();
   env.quietRuntimeLogs = true;
 
+  const active = viewFrame.activeEntity;
+  const activeEntityId = active
+    ? normalizeEntityIdForView(active.core.entityId || active.summary.entityId)
+    : '';
+
   for (const summary of viewFrame.entities || []) {
     const entityId = normalizeEntityIdForView(summary.entityId);
     if (!entityId) continue;
+    if (activeEntityId && entityId === activeEntityId) continue;
     const core = buildRemotePlaceholderCore(entityId, summary.label || entityId, Math.max(0, Math.floor(Number(summary.height ?? atHeight))));
     addRemoteReplicaFromCore(xln, env, core, new Map(), new Map());
   }
 
-  const active = viewFrame.activeEntity;
   if (active) {
-    const entityId = normalizeEntityIdForView(active.core.entityId || active.summary.entityId);
+    const entityId = activeEntityId;
     appRuntimeAdapterActiveEntityId.set(entityId);
     const accounts = new Map<string, StorageAccountDoc>();
     for (const doc of active.accounts.items) {

@@ -102,9 +102,14 @@ cd frontend && bun run dev      # Vite dev server
 cd frontend && bun run build    # Production build
 
 # Testing
-bun run test:e2e:parallel:isolated  # Canonical isolated E2E runner
-bun run test:e2e:parallel:max       # Fast full isolated bar
-bun run test:e2e:parallel:long      # Full isolated bar + long branches
+bun run test:e2e          # Fast E2E: 8 core scenarios in parallel
+bun run test:e2e:fast     # Same fast bar, explicit name
+bun run test:e2e:full     # Full E2E: every tests/e2e*.spec.ts target
+bun run test:e2e:parallel:isolated  # Raw isolated E2E runner for custom targets
+
+# Production-scale runtime adapter benchmarks
+bun run bench:radapter:hub1m         # 1M saved hub accounts, 1% hot set, real /rpc WebSocket
+bun run bench:radapter:hub1m:allmem  # Same, but materialize all 1M accounts into runtime memory
 ```
 
 ---

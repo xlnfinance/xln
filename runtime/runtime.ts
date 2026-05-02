@@ -170,7 +170,7 @@ import { getEntityShortId, getEntityNumber, formatEntityId } from './utils';
 import { deserializeTaggedJson, serializeTaggedJson, safeStringify } from './serialization-utils';
 import { computeCanonicalStateHashFromEnv } from './storage/canonical-hash';
 import {
-  computeStorageDebugStateHashFromEnv,
+  computeStorageStateRoot,
   findStorageLatestSnapshotAtOrBelow,
   inspectStorage,
   listStorageLiveEntityIds,
@@ -4809,9 +4809,7 @@ export const verifyRuntimeChain = async (
           throw new Error(`REPLAY_INVARIANT_FAILED: missing persisted frame at height ${height}`);
         }
         expectedStateHash = persistedFrame.stateHash;
-        const storageHashMode =
-          persistedFrame.hashMode === 'storage-debug-v1' ||
-          persistedFrame.hashMode === 'storage-merkle-v1';
+        const storageHashMode = persistedFrame.hashMode === 'storage-merkle-v1';
         if (storageHashMode && persistedFrame.materializedState === false) {
           actualStateHash = expectedStateHash;
           expectedCanonicalStateHash = '';
@@ -4821,7 +4819,7 @@ export const verifyRuntimeChain = async (
         }
         actualStateHash =
           storageHashMode && Array.isArray(persistedFrame.entityHashes)
-            ? computeStorageDebugStateHashFromEnv(replayed.env)
+            ? computeStorageStateRoot(persistedFrame.entityHashes)
             : computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(replayed.env));
         if (storageHashMode) {
           if (persistedFrame.canonicalStateHash) {

@@ -268,7 +268,6 @@ const listAccountPageFromKeyspace = async (options: {
 }): Promise<StorageAccountDocPage | null> => {
   const { db, prefix, parseKey, cursor, limit, direction, overlay } = options;
   if (typeof db.keys !== 'function') return null;
-  const gte = options.cursorKey ?? prefix;
   const candidates: Array<{ counterpartyId: string; doc: StorageAccountDoc }> = [];
   const seen = new Set<string>();
 
@@ -279,8 +278,10 @@ const listAccountPageFromKeyspace = async (options: {
 
   const upperBound = prefixUpperBound(prefix);
   const range = direction === 'asc'
-    ? (upperBound ? { gte, lt: upperBound } : { gte })
-    : { prefix };
+    ? (upperBound ? { gte: options.cursorKey ?? prefix, lt: upperBound } : { gte: options.cursorKey ?? prefix })
+    : (upperBound
+        ? { gte: prefix, lt: options.cursorKey ?? upperBound, reverse: true }
+        : { prefix, reverse: true });
   for await (const key of iterateKeys(db, range)) {
     const { counterpartyId } = parseKey(key);
     const normalized = normalizeEntityId(counterpartyId);
@@ -290,6 +291,7 @@ const listAccountPageFromKeyspace = async (options: {
     pushAccountCandidate(candidates, seen, normalized, doc, limit, direction);
     const worst = candidates[candidates.length - 1]?.counterpartyId;
     if (direction === 'asc' && candidates.length > limit && worst && compareAscii(normalized, worst) >= 0) break;
+    if (direction === 'desc' && candidates.length > limit && worst && compareAscii(normalized, worst) <= 0) break;
   }
 
   return accountPageFromCandidates(candidates, limit);

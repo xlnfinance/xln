@@ -39,7 +39,7 @@ export type RuntimeDbLike = {
     del?: (key: Buffer) => unknown;
     write: (options?: { sync?: boolean }) => Promise<void>;
   };
-  keys?: (options?: { gte?: Buffer; lt?: Buffer }) => AsyncIterable<Buffer | Uint8Array | string>;
+  keys?: (options?: { gte?: Buffer; lt?: Buffer; reverse?: boolean }) => AsyncIterable<Buffer | Uint8Array | string>;
 };
 
 export type PerfDeps = {
@@ -181,7 +181,7 @@ export type StorageFrameRecord = {
   prevFrameHash?: string;
   frameHash?: string;
   stateHash: string;
-  hashMode?: 'storage-debug-v1' | 'storage-merkle-v1' | 'legacy-env-v1';
+  hashMode?: 'storage-merkle-v1';
   materializedState?: boolean;
   entityHashes?: StorageFrameEntityHash[];
   /**

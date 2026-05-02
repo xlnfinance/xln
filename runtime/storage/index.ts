@@ -77,7 +77,6 @@ export {
   seedFreshStorageEpoch,
 } from './lifecycle';
 export {
-  computeStorageDebugStateHashFromEnv,
   computeStorageFrameHash,
   computeStorageStateRoot,
 } from './hashes';

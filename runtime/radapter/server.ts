@@ -217,7 +217,6 @@ export const handleRuntimeAdapterMessage = async (
       sendOk(ws, msg.id, {
         authLevel: auth.level,
         expiresAtMs: auth.expiresAtMs,
-        legacy: auth.legacy,
         currentHeight: Math.max(0, Math.floor(Number(env.height ?? 0))),
       });
       return true;

@@ -9,7 +9,6 @@ const DEFAULT_CAPABILITY_TTL_MS = 60 * 60 * 1_000;
 export type RuntimeAdapterAuthVerification = {
   level: RuntimeAdapterAuthLevel;
   expiresAtMs: number | null;
-  legacy: boolean;
 };
 
 const normalizeAuthLevel = (role: RuntimeAdapterAuthRole): RuntimeAdapterAuthLevel => {
@@ -29,19 +28,22 @@ const truthyEnv = (name: string): boolean => {
   return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
 };
 
+const runtimeAdapterCapabilityTtlMs = (): number => {
+  const raw = typeof process !== 'undefined' ? String(process.env['XLN_RADAPTER_TOKEN_TTL_MS'] || '').trim() : '';
+  if (!raw) return DEFAULT_CAPABILITY_TTL_MS;
+  const parsed = Number(raw);
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : DEFAULT_CAPABILITY_TTL_MS;
+};
+
 const hmacHex = (seed: string, payload: string): string =>
   createHmac('sha256', normalizedSeed(seed))
     .update(payload)
     .digest('hex');
 
-export const deriveRuntimeAdapterAuthKey = (seed: string, level: RuntimeAdapterAuthLevel): string => {
-  return hmacHex(seed, `${AUTH_DOMAIN}:${level}`);
-};
-
 export const deriveRuntimeAdapterCapabilityToken = (
   seed: string,
   role: RuntimeAdapterAuthRole,
-  expiresAtMs = Date.now() + DEFAULT_CAPABILITY_TTL_MS,
+  expiresAtMs = Date.now() + runtimeAdapterCapabilityTtlMs(),
 ): string => {
   const level = normalizeAuthLevel(role);
   const exp = Math.floor(Number(expiresAtMs));
@@ -63,6 +65,8 @@ const constantTimeEquals = (left: string, right: string): boolean => {
 export const resolveRuntimeAdapterAuthSeed = (env: Env | null): string | null => {
   const fromEnv = typeof process !== 'undefined' ? String(process.env['XLN_RADAPTER_AUTH_SEED'] || '').trim() : '';
   if (fromEnv) return fromEnv;
+  const nodeEnv = typeof process !== 'undefined' ? String(process.env['NODE_ENV'] || '').trim().toLowerCase() : '';
+  if (nodeEnv === 'production' && !truthyEnv('XLN_RADAPTER_ALLOW_RUNTIME_SEED_AUTH')) return null;
   if (truthyEnv('XLN_RADAPTER_REQUIRE_AUTH_SEED')) return null;
   const runtimeSeed = String(env?.runtimeSeed || '').trim();
   return runtimeSeed || null;
@@ -94,15 +98,8 @@ export const verifyRuntimeAdapterAuthCredential = (
       return null;
     }
     const expected = hmacHex(seed, `${AUTH_DOMAIN}:cap:${level}:${expiresAtMs}`);
-    if (constantTimeEquals(signature, expected)) return { level, expiresAtMs, legacy: false };
+    if (constantTimeEquals(signature, expected)) return { level, expiresAtMs };
     return null;
   }
-
-  if (truthyEnv('XLN_RADAPTER_REQUIRE_CAPABILITY')) return null;
-
-  const admin = deriveRuntimeAdapterAuthKey(seed, 'admin');
-  if (constantTimeEquals(candidate, admin)) return { level: 'admin', expiresAtMs: null, legacy: true };
-  const inspect = deriveRuntimeAdapterAuthKey(seed, 'inspect');
-  if (constantTimeEquals(candidate, inspect)) return { level: 'inspect', expiresAtMs: null, legacy: true };
   return null;
 };
