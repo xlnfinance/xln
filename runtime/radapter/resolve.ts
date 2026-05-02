@@ -24,6 +24,7 @@ export type RuntimeAdapterResolveContext = {
   readFrame?: (height: number) => Promise<StorageFrameRecord | null>;
   listCheckpoints?: () => Promise<number[]>;
   loadEntityState?: (entityId: string, height: number) => Promise<EntityState | null>;
+  loadEntityAccountDoc?: (entityId: string, counterpartyId: string, height: number) => Promise<StorageAccountDoc | null>;
   loadEntityViewPage?: (
     entityId: string,
     height: number,
@@ -278,17 +279,27 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
       return (parts[2] === 'accounts' ? stored.accounts : stored.books) as T;
     }
 
+    if (parts.length === 4 && parts[2] === 'account') {
+      const counterpartyId = normalizeEntityId(parts[3] ?? '');
+      const height = readAtHeight(query);
+      if (height !== null && height !== ctx.env.height) {
+        if (!ctx.loadEntityAccountDoc) {
+          throw new RuntimeAdapterError('E_BAD_QUERY', 'historical account reads are unavailable for this adapter');
+        }
+        const loaded = await ctx.loadEntityAccountDoc(entityId, counterpartyId, height);
+        if (!loaded) throw new RuntimeAdapterError('E_NOT_FOUND', `account not found at height ${height}: ${normalizeEntityId(entityId)}/${counterpartyId}`);
+        return loaded as T;
+      }
+      const { state } = await resolveEntityState(ctx, entityId, query);
+      const account = state.accounts.get(counterpartyId);
+      if (!account) throw new RuntimeAdapterError('E_NOT_FOUND', `account not found: ${normalizeEntityId(entityId)}/${counterpartyId}`);
+      return projectAccountDoc(account) as T;
+    }
+
     const { state, replica } = await resolveEntityState(ctx, entityId, query);
 
     if (parts.length === 2) {
       return projectEntityCoreDoc(state, replica) as StorageEntityCoreDoc as T;
-    }
-
-    if (parts.length === 4 && parts[2] === 'account') {
-      const counterpartyId = normalizeEntityId(parts[3] ?? '');
-      const account = state.accounts.get(counterpartyId);
-      if (!account) throw new RuntimeAdapterError('E_NOT_FOUND', `account not found: ${normalizeEntityId(entityId)}/${counterpartyId}`);
-      return projectAccountDoc(account) as T;
     }
   }
 

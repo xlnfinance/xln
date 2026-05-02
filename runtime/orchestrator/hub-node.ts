@@ -52,6 +52,7 @@ import {
   readPersistedStorageFrameRecord,
   readPersistedStorageHead,
   listPersistedCheckpointHeights,
+  loadEntityAccountDocFromStorageDb,
   loadEntityStateFromStorageDb,
   loadEntityViewPageFromStorageDb,
   listPersistedEntityIdsAtHeight,
@@ -916,6 +917,7 @@ const run = async (): Promise<void> => {
       readFrame: (targetEnv, height) => readPersistedStorageFrameRecord(targetEnv, height),
       listCheckpoints: (targetEnv) => listPersistedCheckpointHeights(targetEnv),
       loadEntityState: (targetEnv, entityId, height) => loadEntityStateFromStorageDb(targetEnv, entityId, height),
+      loadEntityAccountDoc: (targetEnv, entityId, counterpartyId, height) => loadEntityAccountDocFromStorageDb(targetEnv, entityId, counterpartyId, height),
       loadEntityViewPage: (targetEnv, entityId, height, query) => loadEntityViewPageFromStorageDb(targetEnv, entityId, height, query),
       listEntityIdsAtHeight: (targetEnv, height) => listPersistedEntityIdsAtHeight(targetEnv, height),
     })).catch(error => {

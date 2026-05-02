@@ -176,6 +176,7 @@ import {
   listStorageLiveEntityIds,
   listStorageSnapshotEntityIds,
   listStorageSnapshotHeights,
+  loadEntityAccountDocFromStorage,
   loadEntityStateFromStorage,
   loadEntityViewPageFromStorage,
   readFrameDbAccountFrames,
@@ -4257,7 +4258,7 @@ export const waitForRuntimeProcessingIdle = async (env: Env, timeoutMs = 5_000):
 export const saveEnvToDB = async (
   env: Env,
   currentFrameInput?: RuntimeInput,
-  currentFrameOutputs?: RoutedEntityInput[],
+  _currentFrameOutputs?: RoutedEntityInput[],
 ): Promise<void> => {
   if (envRecord(env)[ENV_REPLAY_MODE_KEY] === true) {
     throw new Error('REPLAY_INVARIANT_FAILED: saveEnvToDB called during replay');
@@ -4270,12 +4271,11 @@ export const saveEnvToDB = async (
     tryOpenFrameDb,
     getFrameDb,
     rotateEpochDb: rotateStorageEpochDb,
-    getPerfMs,
-    formatPerfMs,
-    frameDbRecords: pendingFrameDbRecords,
-    ...(currentFrameInput === undefined ? {} : { currentFrameInput }),
-    ...(currentFrameOutputs === undefined ? {} : { currentFrameOutputs }),
-  });
+	    getPerfMs,
+	    formatPerfMs,
+	    frameDbRecords: pendingFrameDbRecords,
+	    ...(currentFrameInput === undefined ? {} : { currentFrameInput }),
+	  });
   if (saveResult.frameDbCommitted) {
     dropPendingFrameDbRecords(env, pendingFrameDbRecords.length);
   }
@@ -4561,7 +4561,7 @@ const loadEnvFromStorage = async (
 	    env.runtimeMempool = undefined;
     await restoreOverlayFromFrameLog(env, targetHeight);
 	    await hydrateAccountFrameHistoryViews(env);
-	    let restoredFrameLogs = Array.isArray(frame?.logs) ? frame.logs.map((entry) => ({ ...entry })) : [];
+	    let restoredFrameLogs: FrameLogEntry[] = [];
     try {
       if (await tryOpenFrameDb(env)) {
         const activity = await readFrameDbRuntimeActivity(getFrameDb(env), targetHeight);
@@ -4655,6 +4655,31 @@ export const loadEntityStateFromStorageDb = async (
     tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'previous'),
     getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'previous'),
     entityId,
+    height,
+  });
+};
+
+export const loadEntityAccountDocFromStorageDb = async (
+  env: Env,
+  entityId: string,
+  counterpartyId: string,
+  height?: number,
+) => {
+  const current = await loadEntityAccountDocFromStorage({
+    env,
+    tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'current'),
+    getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'current'),
+    entityId,
+    counterpartyId,
+    ...(height === undefined ? {} : { height }),
+  });
+  if (current || height === undefined) return current;
+  return loadEntityAccountDocFromStorage({
+    env,
+    tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'previous'),
+    getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'previous'),
+    entityId,
+    counterpartyId,
     height,
   });
 };
@@ -4886,15 +4911,15 @@ export const verifyRuntimeChain = async (
 export const readPersistedFrameJournal = async (env: Env, height: number): Promise<PersistedFrameJournal | null> => {
   const frame = await readPersistedStorageFrameRecord(env, height);
   if (!frame) return null;
-  let logs = frame.logs ?? [];
+  let logs: FrameLogEntry[] = [];
   try {
     if (await tryOpenFrameDb(env)) {
       const activity = await readFrameDbRuntimeActivity(getFrameDb(env), height);
       if (activity?.logs) logs = activity.logs;
     }
   } catch {
-    // Frame DB is a secondary activity index. Keep old inline logs or an empty
-    // array if it is temporarily unavailable.
+    // Frame DB is a secondary activity index. Keep state replay independent
+    // from activity history availability.
   }
   return {
     height: frame.height,

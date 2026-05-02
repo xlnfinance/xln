@@ -9,11 +9,9 @@ import type {
   ConsensusConfig,
   Delta,
   DebtEntry,
-  EntityInput,
   EntityReplica,
   EntityState,
   EntitySwapPair,
-  FrameLogEntry,
   HtlcLock,
   HtlcNoteKey,
   HtlcRoute,
@@ -192,14 +190,8 @@ export type StorageFrameRecord = {
    */
   canonicalStateHash?: string;
   canonicalEntityHashes?: StorageFrameEntityHash[];
-  /**
-   * Runtime replay journal. Activity/log/account-frame history is indexed in
-   * the separate frame DB so live state compaction is not coupled to UI history.
-   */
   runtimeInput: RuntimeInput;
-  frameOutputs: EntityInput[];
   overlayRecords?: RuntimeOverlayRecord[];
-  logs: FrameLogEntry[];
   touchedEntities: string[];
   touchedAccounts: Array<{ entityId: string; counterpartyId: string }>;
   touchedBookEntities: string[];

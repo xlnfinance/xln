@@ -351,6 +351,12 @@ export interface XLNModule {
   listPersistedCheckpointHeights: (env: Env) => Promise<number[]>;
   listPersistedEntityIdsAtHeight: (env: Env, height: number) => Promise<string[]>;
   loadEntityStateFromStorageDb: (env: Env, entityId: string, height?: number) => Promise<EntityState | null>;
+  loadEntityAccountDocFromStorageDb: (
+    env: Env,
+    entityId: string,
+    counterpartyId: string,
+    height?: number,
+  ) => Promise<import('./storage/types').StorageAccountDoc | null>;
   loadEntityViewPageFromStorageDb: (
     env: Env,
     entityId: string,

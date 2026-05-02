@@ -16,8 +16,6 @@ export const KEY_SNAPSHOT_MANIFEST = 0x05;
 export const KEY_LIVE_ENTITY = 0x21;
 export const KEY_LIVE_ACCOUNT = 0x22;
 export const KEY_LIVE_BOOK = 0x23;
-export const KEY_LIVE_DOC_HASH = 0x24;
-export const KEY_LIVE_ENTITY_HASH = 0x25;
 export const KEY_LIVE_REPLICA_META = 0x26;
 export const KEY_MERKLE_ROOT = 0x27;
 export const KEY_MERKLE_BRANCH = 0x28;
@@ -82,9 +80,6 @@ export const keyLiveBook = (entityId: string, pairId: string): Buffer =>
   Buffer.concat([Buffer.from([KEY_LIVE_BOOK]), hexBytes(entityId), textBytes(pairId)]);
 export const keyLiveBookPrefix = (entityId?: string): Buffer =>
   entityId ? Buffer.concat([Buffer.from([KEY_LIVE_BOOK]), hexBytes(entityId)]) : Buffer.from([KEY_LIVE_BOOK]);
-
-export const keyLiveEntityHash = (entityId: string): Buffer =>
-  Buffer.concat([Buffer.from([KEY_LIVE_ENTITY_HASH]), hexBytes(entityId)]);
 
 export const keyLiveReplicaMeta = (entityId: string): Buffer =>
   Buffer.concat([Buffer.from([KEY_LIVE_REPLICA_META]), hexBytes(entityId)]);

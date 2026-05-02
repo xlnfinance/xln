@@ -640,7 +640,6 @@ const listPlaywrightSpecFiles = (includeAllSpecs: boolean): string[] => {
     'tests/e2e-ahb-payment.spec.ts',
     // Keep the default bar focused on fast isolated product checks.
     'tests/e2e-multiroute-load.spec.ts',
-    'tests/e2e-runtime-persistence.spec.ts',
   ]);
   const res = spawnSync('rg', ['--files', 'tests'], {
     cwd: process.cwd(),

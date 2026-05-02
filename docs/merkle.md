@@ -11,7 +11,7 @@ XLN uses the storage Merkle tree as an integrity/checkpoint root. It is not a pr
 The durable source of truth is split in two layers:
 
 - saved state rows: `KEY_LIVE_ENTITY`, `KEY_LIVE_ACCOUNT`, `KEY_LIVE_BOOK`;
-- saved Merkle rows: `KEY_MERKLE_ROOT`, `KEY_MERKLE_BRANCH`, `KEY_MERKLE_LEAF`, plus the small per-entity root summary in `KEY_LIVE_ENTITY_HASH`.
+- saved Merkle rows: `KEY_MERKLE_ROOT`, `KEY_MERKLE_BRANCH`, `KEY_MERKLE_LEAF`.
 
 There is no durable `cells[]` blob, no hidden `cellMap`, no hidden in-memory Merkle tree attached to serializable docs, and no fallback rebuild from all account rows on the hot path. If saved state rows exist for an entity, the Merkle root for that entity must exist too. Missing Merkle root means corruption in the current storage contract.
 
@@ -19,7 +19,7 @@ The update path is incremental:
 
 1. Runtime mutates entity/account/book state.
 2. Overlay marks the exact dirty docs.
-3. Materialization writes changed docs and changed doc hashes.
+3. Materialization writes changed docs.
 4. The persisted Merkle editor descends only the touched key path through `KEY_MERKLE_BRANCH` / `KEY_MERKLE_LEAF`.
 5. It updates or deletes the leaf, collapses branches after delete, recomputes the bottom-up stack, and writes only dirty root/branch/leaf records.
 
@@ -49,25 +49,13 @@ The code must not treat missing Merkle rows as an old schema. This testnet is re
 KEY_LIVE_ENTITY        | entityId
 KEY_LIVE_ACCOUNT       | entityId | counterpartyId
 KEY_LIVE_BOOK          | entityId | pairId
-KEY_LIVE_DOC_HASH      | docRef
-KEY_LIVE_ENTITY_HASH   | entityId
 
 KEY_MERKLE_ROOT        | entityId | namespace
 KEY_MERKLE_BRANCH      | entityId | namespace | packedPath
 KEY_MERKLE_LEAF        | entityId | namespace | packedPath
 ```
 
-`KEY_LIVE_ENTITY_HASH` is only a small summary:
-
-```ts
-type StorageEntityHashDoc = {
-  entityId: string;
-  hash: string;
-  cellCount: number;
-};
-```
-
-It must never contain `cells[]`.
+Per-entity root summaries are read from `KEY_MERKLE_ROOT`; there is no parallel entity-hash keyspace.
 
 ## Root Shape
 
@@ -98,7 +86,7 @@ Merkle hashing has explicit domain separation:
 
 Branch children are hashed in slot order. Compressed path segments are length-prefixed and byte-deterministic. A one-leaf tree stays one leaf. Branches split only where keys diverge. Deletes collapse branches immediately.
 
-`stateHash` uses the storage Merkle root. `canonicalStateHash` is still kept as an independent replay oracle computed from live runtime replicas. Both must verify.
+`stateHash` uses the storage Merkle root. `canonicalStateHash` is an opt-in audit oracle behind `XLN_STORAGE_VERIFY_CANONICAL=1`; it is intentionally not part of the production hot path.
 
 ## Incremental Update Contract
 
@@ -106,11 +94,9 @@ For every dirty doc:
 
 ```ts
 put(docRef, encodedDocHash)
-  -> update KEY_LIVE_DOC_HASH
   -> persistedEditor.put(docRefCellKey(docRef), encodedDocHash)
 
 del(docRef)
-  -> delete KEY_LIVE_DOC_HASH
   -> persistedEditor.del(docRefCellKey(docRef))
 ```
 
@@ -146,9 +132,8 @@ Everything else must either use the persisted root/branch/leaf rows or throw.
 
 On cold restart, storage reads the persisted Merkle root rows to recover per-entity root summaries. It does not need to scan a million account docs to reconstruct the root.
 
-Optional verification modes:
+Optional verification mode:
 
-- shallow: trust the root summary and validate frame/tail commitments;
 - deep: re-read Merkle branch/leaf rows and verify that the root matches the saved state hash.
 
 Deep verification is intentionally expensive and should be used in CI, audits, epoch-rotation checks, and operator diagnostics. It is not the normal hot path.
@@ -163,7 +148,7 @@ Overlay records decide which docs are dirty. The Merkle layer must mirror those 
 - deleted account/book => leaf delete;
 - no dirty mark => no Merkle mutation.
 
-The doc hash row and Merkle leaf must agree. If a doc is deleted, its doc hash is deleted and its Merkle leaf is deleted. If a doc is put, its encoded hash is written to both places.
+The Merkle leaf stores the encoded document hash. If a doc is deleted, its Merkle leaf is deleted. If a doc is put, its encoded hash is written to the leaf.
 
 ## Radapter Relationship
 
@@ -175,7 +160,7 @@ The `/app` remote path reads a bounded `view-frame` subset:
 - entity summaries;
 - active entity core;
 - account page, default 10;
-- book page, default 10, ordered near spread.
+- book page, default 10, ordered by durable book key.
 
 Embedded adapter calls the runtime directly and does not pay msgpack/WebSocket encode/decode. Remote adapter uses the shared binary codec over `/rpc`.
 
@@ -200,8 +185,8 @@ A hub with one million accounts must satisfy:
 
 Known remaining scaling work outside the Merkle hot path:
 
-- live in-memory account paging still walks the runtime `Map` for current-height reads above very large sizes;
-- historical book paging can still materialize all books for an entity before slicing;
+- full runtime restore still materializes the entity state maps in memory;
+- historical full-entity reads still materialize all accounts/books for the requested entity;
 - full snapshots still copy live state and should be reviewed before very large production hubs.
 
 These are separate storage/runtime scaling PRs. They must not reintroduce Merkle fallback logic.
