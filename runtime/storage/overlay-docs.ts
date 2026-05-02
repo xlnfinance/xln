@@ -129,6 +129,7 @@ export const storageRefsFromOverlay = (
       if (!entityId || !pairId) continue;
       touchedEntities.add(entityId);
       touchedBookEntities.add(entityId);
+      if (record.deleted === true) continue;
       addBookRef(touchedBooks, entityId, pairId);
     }
   }
