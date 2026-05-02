@@ -26,7 +26,9 @@ import {
   keyLiveEntityHash,
   keyLiveEntityHashPrefix,
   keyMerkleBranch,
+  keyMerkleBranchPrefix,
   keyMerkleLeaf,
+  keyMerkleLeafPrefix,
   keyMerkleRoot,
   normalizeEntityId,
   parseLiveAccountKey,
@@ -75,7 +77,7 @@ const ENTITY_MERKLE_NAMESPACE = 'runtime-roots' as const;
 
 const MAX_PERSISTED_HASH_CELLS = Math.max(
   0,
-  Math.floor(Number(process.env['XLN_STORAGE_MAX_PERSISTED_HASH_CELLS'] ?? 4096)),
+  Math.floor(Number(process.env['XLN_STORAGE_MAX_PERSISTED_HASH_CELLS'] ?? 16)),
 );
 
 const setHiddenDocComputedValue = <K extends keyof StorageDocWithComputedHash>(
@@ -773,13 +775,35 @@ class PersistedEntityMerkleEditor {
   }
 }
 
+const readPersistedEntityHashDoc = async (
+  db: RuntimeDbLike,
+  entityId: string,
+): Promise<StorageEntityHashDoc | null> => {
+  const normalized = normalizeEntityId(entityId);
+  const rootDoc = await readJsonOrNull<StorageMerkleRootDoc>(db, keyMerkleRoot(normalized, ENTITY_MERKLE_NAMESPACE));
+  if (!rootDoc) return null;
+  return {
+    entityId: normalized,
+    hash: rootDoc.rootHash || EMPTY_RADIX_MERKLE_ROOT,
+    cellCount: Math.max(0, Math.floor(Number(rootDoc.leafCount ?? 0))),
+    cells: [],
+  };
+};
+
+const hasAnyKey = async (db: RuntimeDbLike, prefix: Buffer): Promise<boolean> => {
+  for await (const _key of iterateKeys(db, { prefix })) return true;
+  return false;
+};
+
 export const readAllEntityHashDocs = async (db: RuntimeDbLike): Promise<Map<string, StorageEntityHashDoc>> => {
   const docs = new Map<string, StorageEntityHashDoc>();
   for await (const key of iterateKeys(db, { prefix: keyLiveEntityHashPrefix() })) {
     const entityId = decodeEntityId(key.subarray(1, 33));
     const doc = await readEntityHashDoc(db, entityId);
     if (!doc) continue;
-    if (doc.cells.length === 0 && Number(doc.cellCount ?? 0) > 0) docs.set(normalizeEntityId(entityId), doc);
+    const persisted = await readPersistedEntityHashDoc(db, entityId);
+    if (persisted) docs.set(normalizeEntityId(entityId), persisted);
+    else if (doc.cells.length === 0 && Number(doc.cellCount ?? 0) > 0) docs.set(normalizeEntityId(entityId), doc);
     else docs.set(normalizeEntityId(entityId), buildEntityHashDoc(entityId, doc.cells));
   }
 
@@ -790,7 +814,19 @@ export const readAllEntityHashDocs = async (db: RuntimeDbLike): Promise<Map<stri
   // update only touched cell hashes.
   for await (const key of iterateKeys(db, { prefix: Buffer.from([KEY_LIVE_ENTITY]) })) {
     const entityId = decodeEntityId(key.subarray(1, 33));
-    docs.set(normalizeEntityId(entityId), await buildEntityHashDocFromLive(db, entityId));
+    const normalized = normalizeEntityId(entityId);
+    const persisted = await readPersistedEntityHashDoc(db, normalized);
+    if (persisted) {
+      docs.set(normalized, persisted);
+      continue;
+    }
+    const hasOrphanedMerkleRows =
+      await hasAnyKey(db, keyMerkleBranchPrefix(normalized, ENTITY_MERKLE_NAMESPACE)) ||
+      await hasAnyKey(db, keyMerkleLeafPrefix(normalized, ENTITY_MERKLE_NAMESPACE));
+    if (hasOrphanedMerkleRows) {
+      throw new Error(`STORAGE_MERKLE_ORPHANED_SIDE_RECORDS: entity=${normalized}`);
+    }
+    docs.set(normalized, await buildEntityHashDocFromLive(db, normalized));
   }
   return docs;
 };
@@ -849,20 +885,20 @@ export const prepareStorageStateHashes = async (options: {
     const normalized = normalizeEntityId(entityId);
     const existingDoc = await ensureEntityDoc(normalized);
     const existingRuntime = existingDoc as RuntimeEntityHashDoc;
-    const shouldUsePersistedEditor =
-      existingDoc.cells.length === 0 &&
-      Number(existingDoc.cellCount ?? 0) > 0 &&
-      !(existingRuntime.cellMap instanceof Map) &&
-      !(existingRuntime.merkleTree instanceof MutableRadixMerkleTree);
-    if (shouldUsePersistedEditor) {
-      const editor = await openPersistedEditor(normalized);
-      if (editor) {
-        if (hash) await editor.put(key, hash);
-        else await editor.del(key);
-        touchedEntityIds.add(normalized);
-        entityHashDocs.set(normalized, existingDoc);
-        return;
-      }
+    const editor = await openPersistedEditor(normalized);
+    if (editor) {
+      if (hash) await editor.put(key, hash);
+      else await editor.del(key);
+      touchedEntityIds.add(normalized);
+      entityHashDocs.set(normalized, existingDoc);
+      return;
+    }
+    const hasUsableRuntimeTree =
+      existingRuntime.cellMap instanceof Map &&
+      existingRuntime.merkleTree instanceof MutableRadixMerkleTree &&
+      existingRuntime.cellMap.size === Number(existingDoc.cellCount ?? existingRuntime.cellMap.size) &&
+      existingRuntime.merkleTree.leafCount === Number(existingDoc.cellCount ?? existingRuntime.merkleTree.leafCount);
+    if (existingDoc.cells.length === 0 && Number(existingDoc.cellCount ?? 0) > 0 && !hasUsableRuntimeTree) {
       const rebuilt = await buildEntityHashDocFromLive(options.db, normalized);
       entityHashDocs.set(normalized, rebuilt);
       const current = ensureEntityHashRuntime(rebuilt);
@@ -1015,6 +1051,7 @@ export const prepareStorageStateHashes = async (options: {
     });
   }
   const entityHashes = toFrameEntityHashes(entityHashDocs.values());
+  const merklePutKeys = new Set(merklePuts.map((put) => put.key.toString('hex')));
   return {
     stateHash: computeStorageStateRoot(entityHashes),
     entityHashes,
@@ -1024,7 +1061,9 @@ export const prepareStorageStateHashes = async (options: {
     docHashDels,
     entityHashPuts,
     merklePuts,
-    merkleDels: Array.from(merkleDelsByKey.values()),
+    merkleDels: Array.from(merkleDelsByKey.entries())
+      .filter(([key]) => !merklePutKeys.has(key))
+      .map(([, key]) => key),
   };
 };
 
