@@ -4,6 +4,7 @@ import {
   buildHexKeyedMerkle,
   MutableRadixMerkleTree,
 } from '../storage/merkle';
+import { buildBookDeletionsFromOverlay, storageRefsFromOverlay } from '../storage/overlay-docs';
 import {
   KEY_MERKLE_BRANCH,
   KEY_MERKLE_LEAF,
@@ -127,6 +128,22 @@ test('storage merkle durable keyspace is scoped by entity namespace and path', (
   expect(leaf[0]).toBe(KEY_MERKLE_LEAF);
   expect(branch.subarray(0, keyMerkleBranchPrefix(entityId, 'accounts').length)).toEqual(keyMerkleBranchPrefix(entityId, 'accounts'));
   expect(Buffer.compare(branch, leaf)).not.toBe(0);
+});
+
+test('deleted book overlay produces a deletion ref without a put ref', () => {
+  const entityId = hexKey(0xcd);
+  const refs = storageRefsFromOverlay([
+    { family: 'book', entityId, pairId: '1/2', deleted: true },
+  ]);
+  const dels = buildBookDeletionsFromOverlay([
+    { family: 'book', entityId, pairId: '1/2', deleted: true },
+  ]);
+
+  expect(refs.touchedEntities.has(entityId)).toBe(true);
+  expect(refs.touchedBookEntities.has(entityId)).toBe(true);
+  expect(refs.touchedBooks.size).toBe(0);
+  expect(dels).toHaveLength(1);
+  expect(dels[0]).toMatchObject({ family: 'book', entityId, pairId: '1/2' });
 });
 
 test('mutable radix merkle matches canonical batch roots across puts and deletes', () => {
