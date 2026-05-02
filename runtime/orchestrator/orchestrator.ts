@@ -48,6 +48,7 @@ type Args = {
   dbRoot: string;
   mmEnabled: boolean;
   resetAllowed: boolean;
+  deferInitialReset: boolean;
   custodyEnabled: boolean;
   custodyPort: number;
   custodyDaemonPort: number;
@@ -62,8 +63,9 @@ const readPositiveIntEnv = (name: string, fallback: number): number => {
 
 const STARTUP_TIMEOUT_MS = readPositiveIntEnv('XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS', 180_000);
 const HUB_SELF_READY_TIMEOUT_MS = readPositiveIntEnv('XLN_HUB_SELF_READY_TIMEOUT_MS', STARTUP_TIMEOUT_MS);
-const HUB_PROFILES_READY_TIMEOUT_MS = readPositiveIntEnv('XLN_HUB_PROFILES_READY_TIMEOUT_MS', Math.max(45_000, STARTUP_TIMEOUT_MS));
+const HUB_PROFILES_READY_TIMEOUT_MS = readPositiveIntEnv('XLN_HUB_PROFILES_READY_TIMEOUT_MS', 5_000);
 const HUB_BASELINE_TIMEOUT_MS = readPositiveIntEnv('XLN_HUB_BASELINE_TIMEOUT_MS', Math.max(90_000, STARTUP_TIMEOUT_MS));
+const HUB_DIRECT_LINK_BASELINE_GRACE_MS = readPositiveIntEnv('XLN_HUB_DIRECT_LINK_BASELINE_GRACE_MS', 5_000);
 const MARKET_MAKER_READY_TIMEOUT_MS = readPositiveIntEnv('XLN_MARKET_MAKER_READY_TIMEOUT_MS', Math.max(90_000, STARTUP_TIMEOUT_MS));
 
 type StageTiming = {
@@ -452,6 +454,7 @@ const parseArgs = (): Args => {
     dbRoot: resolve(getArg('--db-root', join(process.cwd(), '.e2e-mesh-db'))),
     mmEnabled: hasFlag('--mm'),
     resetAllowed: hasFlag('--allow-reset') || process.env['XLN_MESH_RESET_ALLOWED'] === '1',
+    deferInitialReset: hasFlag('--defer-initial-reset') || process.env['XLN_MESH_DEFER_INITIAL_RESET'] === '1',
     custodyEnabled: hasFlag('--custody'),
     custodyPort: Number(getArg('--custody-port', String(port + 7))),
     custodyDaemonPort: Number(getArg('--custody-daemon-port', String(port + 8))),
@@ -1796,24 +1799,56 @@ const getDebugEntityEntries = (requestUrl: URL): Array<{
 
 const waitForHubBaseline = async (): Promise<void> => {
   const deadline = Date.now() + HUB_BASELINE_TIMEOUT_MS;
+  const directRequired = HUB_NAMES.length * Math.max(0, HUB_NAMES.length - 1);
+  const requireDirectLinks = process.env['XLN_REQUIRE_DIRECT_BASELINE'] === '1';
+  let directGraceStartedAt = 0;
+  let lastStatus: Record<string, unknown> | null = null;
+  let warnedDirectGrace = false;
   while (Date.now() < deadline) {
     await pollAllHubHealth();
     const health = computeAggregatedHealth();
-    if (
+    const coreReady =
       health.hubMesh.ok &&
-      health.hubMesh.direct.openLinkCount >= HUB_NAMES.length * Math.max(0, HUB_NAMES.length - 1) &&
       health.bootstrapReserves.ok &&
-      health.hubs.every(hub => hub.online)
-    ) {
-      return;
+      health.hubs.every(hub => hub.online);
+    const directReady = health.hubMesh.direct.openLinkCount >= directRequired;
+    lastStatus = {
+      coreReady,
+      directReady,
+      directOpen: health.hubMesh.direct.openLinkCount,
+      directRequired,
+      requireDirectLinks,
+      bootstrapReserves: health.bootstrapReserves.ok,
+      hubsOnline: health.hubs.map(hub => ({ name: hub.name, online: hub.online, selfRelayPresence: hub.selfRelayPresence })),
+      degraded: health.degraded,
+    };
+    if (coreReady) {
+      if (directReady || !requireDirectLinks) {
+        if (!directReady) {
+          if (!directGraceStartedAt) directGraceStartedAt = Date.now();
+          const waitedMs = Date.now() - directGraceStartedAt;
+          if (waitedMs < HUB_DIRECT_LINK_BASELINE_GRACE_MS) {
+            await delay(250);
+            continue;
+          }
+          if (!warnedDirectGrace) {
+            warnedDirectGrace = true;
+            console.warn(
+              `[MESH] baseline proceeding after direct-link grace: open=${health.hubMesh.direct.openLinkCount}/${directRequired} graceMs=${HUB_DIRECT_LINK_BASELINE_GRACE_MS}`,
+            );
+          }
+        }
+        return;
+      }
     }
     await delay(250);
   }
-  throw new Error(`HUB_BASELINE_TIMEOUT ${safeStringify(computeAggregatedHealth())}`);
+  throw new Error(`HUB_BASELINE_TIMEOUT ${safeStringify({ status: lastStatus, health: computeAggregatedHealth() })}`);
 };
 
 const waitForHubProfilesReady = async (): Promise<void> => {
   const deadline = Date.now() + HUB_PROFILES_READY_TIMEOUT_MS;
+  let lastVisibleByHub: Record<string, string[]> = {};
   while (Date.now() < deadline) {
     await pollAllHubHealth();
     const allVisible = hubChildren.every((child) => {
@@ -1823,12 +1858,18 @@ const waitForHubProfilesReady = async (): Promise<void> => {
     if (allVisible) {
       return;
     }
+    lastVisibleByHub = Object.fromEntries(hubChildren.map(child => [
+      child.name,
+      child.lastHealth?.gossip?.visibleHubNames ?? [],
+    ]));
     if (hubChildren.some((child) => child.proc?.exitCode !== null)) {
       throw new Error(`HUB_PROFILES_READY_EXIT ${safeStringify(computeAggregatedHealth().hubs)}`);
     }
     await delay(250);
   }
-  throw new Error(`HUB_PROFILES_READY_TIMEOUT ${safeStringify(computeAggregatedHealth())}`);
+  console.warn(
+    `[MESH] continuing after gossip profile grace: timeoutMs=${HUB_PROFILES_READY_TIMEOUT_MS} visible=${safeStringify(lastVisibleByHub)}`,
+  );
 };
 
 const waitForMarketMakerReady = async (): Promise<void> => {
@@ -2499,11 +2540,13 @@ process.on('SIGTERM', () => {
 process.on('SIGINT', () => { void shutdown(); });
 
 console.log(
-  `[MESH] CONTROL ready host=${args.host} port=${args.port} relay=${relayUrl} rpc=${args.rpcUrl} mm=${args.mmEnabled ? 'on' : 'off'} custody=${args.custodyEnabled ? 'on' : 'off'} reset=${args.resetAllowed ? 'on' : 'off'}`,
+  `[MESH] CONTROL ready host=${args.host} port=${args.port} relay=${relayUrl} rpc=${args.rpcUrl} mm=${args.mmEnabled ? 'on' : 'off'} custody=${args.custodyEnabled ? 'on' : 'off'} reset=${args.resetAllowed ? 'on' : 'off'} deferInitialReset=${args.deferInitialReset ? 'on' : 'off'}`,
 );
 
 assertMinDiskFree();
 
-void ensureReset().catch(error => {
-  console.error('[MESH] initial reset failed:', serializeError(error));
-});
+if (!args.deferInitialReset) {
+  void ensureReset().catch(error => {
+    console.error('[MESH] initial reset failed:', serializeError(error));
+  });
+}

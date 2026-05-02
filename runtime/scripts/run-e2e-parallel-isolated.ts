@@ -38,6 +38,7 @@ type CliArgs = {
   anvilBin: string;
   maxFailures: number;
   maxMmConcurrency: number;
+  maxResetConcurrency: number;
   workersPerShard: number;
   videoMode: 'off' | 'on' | 'retain-on-failure' | 'on-first-retry';
   traceMode: 'off' | 'on' | 'retain-on-failure' | 'on-first-retry';
@@ -48,6 +49,7 @@ type CliArgs = {
   pwFiles: string[];
   includeAllSpecs: boolean;
   skipBuild: boolean;
+  prewaitHealth: 'reset' | 'http' | 'full';
 };
 
 type RunResult = {
@@ -87,6 +89,26 @@ type RunnerLockPayload = {
   cwd: string;
 };
 
+type AsyncLimiter = <T>(fn: () => Promise<T>) => Promise<T>;
+
+const createAsyncLimiter = (limit: number): AsyncLimiter => {
+  const maxActive = Math.max(1, Math.floor(limit));
+  let active = 0;
+  const queue: Array<() => void> = [];
+  return async <T>(fn: () => Promise<T>): Promise<T> => {
+    if (active >= maxActive) {
+      await new Promise<void>(resolve => queue.push(resolve));
+    }
+    active += 1;
+    try {
+      return await fn();
+    } finally {
+      active = Math.max(0, active - 1);
+      queue.shift()?.();
+    }
+  };
+};
+
 const parseArgs = (): CliArgs => {
   const args = process.argv.slice(2);
   const longMode = process.env['E2E_LONG'] === '1';
@@ -99,8 +121,9 @@ const parseArgs = (): CliArgs => {
   })();
   const defaultShards = Math.max(2, Math.min(8, Math.floor(cpu / 2)));
   const getFlag = (name: string): string | undefined => {
-    const eq = args.find(a => a.startsWith(`--${name}=`));
-    if (eq) return eq.split('=')[1];
+    const prefix = `--${name}=`;
+    const eq = args.find(a => a.startsWith(prefix));
+    if (eq) return eq.slice(prefix.length);
     const i = args.findIndex(a => a === `--${name}`);
     if (i >= 0 && i + 1 < args.length) {
       const next = args[i + 1];
@@ -118,15 +141,25 @@ const parseArgs = (): CliArgs => {
   const phaseWarnRaw = Number(getFlag('phase-warn-ms') || '30000');
   const maxFailuresRaw = Number(getFlag('max-failures') || '1');
   const maxMmConcurrencyRaw = Number(getFlag('max-mm-concurrency') || String(Math.min(2, shardsRaw || defaultShards)));
+  const maxResetConcurrencyRaw = Number(getFlag('max-reset-concurrency') || String(Math.min(4, shardsRaw || defaultShards)));
   const workersPerShardRaw = Number(getFlag('workers-per-shard') || '1');
   const videoRaw = String(getFlag('video') || 'on').toLowerCase();
   const traceRaw = String(getFlag('trace') || 'on-first-retry').toLowerCase();
   const screenshotRaw = String(getFlag('screenshot') || 'only-on-failure').toLowerCase();
   const reporterRaw = String(getFlag('reporter') || 'line').toLowerCase();
-  const pwFiles = (getFlag('pw-files') || '')
-    .split(',')
-    .map(s => s.trim())
-    .filter(Boolean);
+  const pwFilesRaw = getFlag('pw-files') || '';
+  const pwFiles = (() => {
+    const trimmed = pwFilesRaw.trim();
+    if (trimmed.startsWith('[')) {
+      try {
+        const parsed = JSON.parse(trimmed);
+        if (Array.isArray(parsed)) return parsed.map(String).map(s => s.trim()).filter(Boolean);
+      } catch (error) {
+        throw new Error(`--pw-files JSON parse failed: ${error instanceof Error ? error.message : String(error)}`);
+      }
+    }
+    return trimmed.split(',').map(s => s.trim()).filter(Boolean);
+  })();
 
   const coerceVideo = (mode: string): CliArgs['videoMode'] =>
     mode === 'off' || mode === 'retain-on-failure' || mode === 'on-first-retry' ? mode : 'on';
@@ -137,6 +170,7 @@ const parseArgs = (): CliArgs => {
   const coerceReporter = (mode: string): CliArgs['reporter'] => (mode === 'list' || mode === 'dot' ? mode : 'line');
   const pwGrep = getFlag('pw-grep');
   const pwProject = getFlag('pw-project');
+  const prewaitHealthRaw = String(getFlag('prewait-health') || 'reset').trim().toLowerCase();
 
   return {
     shards: Number.isFinite(shardsRaw) && shardsRaw > 0 ? Math.floor(shardsRaw) : 2,
@@ -149,6 +183,8 @@ const parseArgs = (): CliArgs => {
     maxFailures: Number.isFinite(maxFailuresRaw) && maxFailuresRaw >= 0 ? Math.floor(maxFailuresRaw) : 1,
     maxMmConcurrency:
       Number.isFinite(maxMmConcurrencyRaw) && maxMmConcurrencyRaw > 0 ? Math.floor(maxMmConcurrencyRaw) : 2,
+    maxResetConcurrency:
+      Number.isFinite(maxResetConcurrencyRaw) && maxResetConcurrencyRaw > 0 ? Math.floor(maxResetConcurrencyRaw) : 4,
     workersPerShard: Number.isFinite(workersPerShardRaw) && workersPerShardRaw > 0 ? Math.floor(workersPerShardRaw) : 1,
     videoMode: coerceVideo(videoRaw),
     traceMode: coerceTrace(traceRaw),
@@ -159,6 +195,10 @@ const parseArgs = (): CliArgs => {
     pwFiles,
     includeAllSpecs: hasFlag('all') || hasFlag('include-all') || process.env['E2E_ALL'] === '1',
     skipBuild: args.includes('--skip-build'),
+    prewaitHealth:
+      prewaitHealthRaw === 'http' || prewaitHealthRaw === 'full' || prewaitHealthRaw === 'reset'
+        ? prewaitHealthRaw
+        : 'reset',
   };
 };
 
@@ -588,6 +628,19 @@ const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
   };
 
   for (const file of pwFiles) {
+    const explicitTitleTarget = file.match(/^(.+\.spec\.ts)::(.+)$/);
+    if (explicitTitleTarget) {
+      const sourceFile = explicitTitleTarget[1]!;
+      const title = explicitTitleTarget[2]!;
+      out.push({
+        target: sourceFile,
+        requireMarketMaker: requiresMarketMaker(sourceFile),
+        title,
+        grep: escapeRegExp(title),
+      });
+      continue;
+    }
+
     const explicitLineTarget = file.match(/^(.+\.spec\.ts):\d+(?::\d+)?$/);
     if (explicitLineTarget) {
       const sourceFile = explicitLineTarget[1]!;
@@ -790,15 +843,29 @@ const reapStaleIsolatedE2EProcesses = async (currentLogsDir: string): Promise<vo
   await killPids(stalePids, 'isolated e2e process(es)');
 };
 
+const fetchWithTimeout = async (url: string, init: RequestInit = {}, timeoutMs = 2_000): Promise<Response> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    return await fetch(url, { ...init, signal: controller.signal });
+  } finally {
+    clearTimeout(timer);
+  }
+};
+
 const waitForRpcReady = async (rpcUrl: string, timeoutMs: number): Promise<void> => {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(rpcUrl, {
-        method: 'POST',
-        headers: { 'content-type': 'application/json' },
-        body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
-      });
+      const res = await fetchWithTimeout(
+        rpcUrl,
+        {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
+        },
+        2_000,
+      );
       if (res.ok) {
         const body = (await res.json()) as any;
         const chainId = Number.parseInt(String(body?.result || '0x0'), 16);
@@ -816,7 +883,7 @@ const waitForHttpReady = async (url: string, timeoutMs: number): Promise<void> =
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(url);
+      const res = await fetchWithTimeout(url, {}, 2_000);
       if (res.status < 500) return;
     } catch {
       // retry
@@ -826,20 +893,21 @@ const waitForHttpReady = async (url: string, timeoutMs: number): Promise<void> =
   throw new Error(`HTTP endpoint not ready: ${url}`);
 };
 
-const waitForServerHealthy = async (apiUrl: string, timeoutMs: number): Promise<void> => {
+const waitForServerHealthy = async (apiUrl: string, timeoutMs: number): Promise<any> => {
   const deadline = Date.now() + timeoutMs;
   let lastHealth: any = null;
   while (Date.now() < deadline) {
     try {
-      const res = await fetch(`${apiUrl}/api/health`);
+      const res = await fetchWithTimeout(`${apiUrl}/api/health`, {}, 2_000);
       if (res.ok) {
         const body = await res.json();
         lastHealth = body;
         const resetDone = body?.reset?.inProgress !== true;
         const meshReady = body?.hubMesh?.ok === true;
         const mmReady = body?.marketMaker?.enabled === true ? body?.marketMaker?.ok === true : true;
+        const reservesReady = body?.bootstrapReserves?.ok === true;
         const hasTs = typeof body?.timestamp === 'number';
-        if (hasTs && resetDone && meshReady && mmReady) return;
+        if (hasTs && resetDone && meshReady && mmReady && reservesReady) return body;
       }
     } catch {
       // retry
@@ -854,6 +922,7 @@ const waitForServerHealthy = async (apiUrl: string, timeoutMs: number): Promise<
           reset: lastHealth?.reset || null,
           hubMesh: lastHealth?.hubMesh || null,
           marketMaker: lastHealth?.marketMaker || null,
+          bootstrapReserves: lastHealth?.bootstrapReserves || null,
           hubs: Array.isArray(lastHealth?.hubs)
             ? lastHealth.hubs.map((h: any) => ({
                 entityId: h?.entityId,
@@ -869,6 +938,40 @@ const waitForServerHealthy = async (apiUrl: string, timeoutMs: number): Promise<
   throw new Error(
     `SERVER_HEALTH_TIMEOUT phase=${String(marketMakerPhase)} api=${apiUrl} timeoutMs=${timeoutMs}\n${snapshot}`,
   );
+};
+
+const hardResetShardBaseline = async (
+  apiUrl: string,
+  timeoutMs: number,
+  requireMarketMaker: boolean,
+): Promise<any> => {
+  const startedAt = Date.now();
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), timeoutMs);
+  try {
+    const response = await fetch(`${apiUrl}/api/reset`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ requireMarketMaker }),
+      signal: controller.signal,
+    });
+    if (!response.ok) {
+      let body = '';
+      try {
+        body = await response.text();
+      } catch {}
+      throw new Error(`SHARD_BASELINE_RESET_FAILED status=${response.status} body=${body.slice(0, 800)}`);
+    }
+    const remainingMs = Math.max(1_000, timeoutMs - (Date.now() - startedAt));
+    return await waitForServerHealthy(apiUrl, remainingMs);
+  } catch (error) {
+    if (error instanceof Error && error.name === 'AbortError') {
+      throw new Error(`SHARD_BASELINE_RESET_TIMEOUT api=${apiUrl} timeoutMs=${timeoutMs}`);
+    }
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 };
 
 const waitForHttpsReady = async (url: string, timeoutMs: number): Promise<void> => {
@@ -946,16 +1049,12 @@ const runCmd = async (
 };
 
 const fetchJsonWithTimeout = async (url: string, timeoutMs = 2000): Promise<unknown | null> => {
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), timeoutMs);
   try {
-    const response = await fetch(url, { signal: controller.signal });
+    const response = await fetchWithTimeout(url, {}, timeoutMs);
     if (!response.ok) return null;
     return await response.json();
   } catch {
     return null;
-  } finally {
-    clearTimeout(timer);
   }
 };
 
@@ -1024,6 +1123,7 @@ const runShard = async (
   task: RunTask,
   args: CliArgs,
   logsDir: string,
+  resetLimiter: AsyncLimiter,
   signal?: AbortSignal,
 ): Promise<RunResult> => {
   const shard = task.shard;
@@ -1129,6 +1229,7 @@ const runShard = async (
         '--db-root',
         dbPath,
         '--allow-reset',
+        ...(args.prewaitHealth === 'reset' ? ['--defer-initial-reset'] : []),
         ...(task.requireMarketMaker ? ['--mm'] : []),
       ],
       {
@@ -1147,10 +1248,26 @@ const runShard = async (
     await waitForHttpReady(`${apiUrl}/api`, args.stackTimeoutMs);
     markPhase('apiBoot', apiStart);
     throwIfAborted();
-    const healthStart = Date.now();
-    await waitForServerHealthy(apiUrl, args.stackTimeoutMs);
-    markPhase('apiHealthy', healthStart);
-    throwIfAborted();
+    let baselineHealth: any = null;
+    if (args.prewaitHealth === 'reset') {
+      const resetQueuedAt = Date.now();
+      baselineHealth = await resetLimiter(async () => {
+        const resetStartedAt = Date.now();
+        const queueMs = resetStartedAt - resetQueuedAt;
+        if (queueMs > 0) log.write(`[timing] resetQueue=${queueMs}ms\n`);
+        throwIfAborted();
+        return await hardResetShardBaseline(apiUrl, args.stackTimeoutMs, task.requireMarketMaker);
+      });
+      markPhase('apiHealthy', resetQueuedAt);
+      throwIfAborted();
+    } else if (args.prewaitHealth === 'full') {
+      const healthStart = Date.now();
+      baselineHealth = await waitForServerHealthy(apiUrl, args.stackTimeoutMs);
+      markPhase('apiHealthy', healthStart);
+      throwIfAborted();
+    } else {
+      log.write('[timing] apiHealthy=0ms (prewait-health=http; baseline waits inside tests that need it)\n');
+    }
 
     const shardViteCacheDir = join(logsDir, `vite-cache-shard-${shard}`);
     const viteStart = Date.now();
@@ -1224,7 +1341,9 @@ const runShard = async (
         E2E_ANVIL_RPC: rpcUrl,
         E2E_RESET_BASE_URL: apiUrl,
         E2E_FAST: process.env['E2E_FAST'] ?? '1',
-        E2E_ISOLATED_BASELINE_READY: '1',
+        E2E_ISOLATED_STACK: '1',
+        E2E_ISOLATED_BASELINE_READY: args.prewaitHealth === 'http' ? '0' : '1',
+        E2E_BASELINE_HEALTH_JSON: baselineHealth ? JSON.stringify(baselineHealth) : '',
         XLN_INCLUDE_MARKET_MAKER: task.requireMarketMaker ? '1' : '0',
       },
       log,
@@ -1309,8 +1428,10 @@ async function main(): Promise<void> {
   console.log(`BasePort : ${args.basePort}`);
   console.log(`Workers/shard: ${args.workersPerShard}`);
   console.log(`MM concurrency: ${args.maxMmConcurrency}`);
+  console.log(`Reset concurrency: ${args.maxResetConcurrency}`);
   console.log(`Max failures : ${args.maxFailures}`);
   console.log(`Phase warn ms: ${args.phaseWarnMs}`);
+  console.log(`Prewait health: ${args.prewaitHealth}`);
   console.log(`Artifacts    : video=${args.videoMode}, trace=${args.traceMode}, screenshot=${args.screenshotMode}`);
   console.log(`Logs     : ${logsDir}`);
   console.log('='.repeat(72) + '\n');
@@ -1386,6 +1507,7 @@ async function main(): Promise<void> {
     console.log(`Targets  : ${tasks.length} isolated test stack${tasks.length === 1 ? '' : 's'}`);
 
     const maxConcurrency = Math.max(1, Math.min(args.shards, tasks.length));
+    const resetLimiter = createAsyncLimiter(Math.max(1, Math.min(args.maxResetConcurrency, maxConcurrency)));
     const results: Array<RunResult | undefined> = new Array(tasks.length);
     const claimed = new Array<boolean>(tasks.length).fill(false);
     const abortController = new AbortController();
@@ -1415,7 +1537,7 @@ async function main(): Promise<void> {
         const claim = await claimTask();
         if (!claim) break;
         try {
-          const result = await runShard(claim.task, args, logsDir, abortController.signal);
+          const result = await runShard(claim.task, args, logsDir, resetLimiter, abortController.signal);
           results[claim.taskIndex] = result;
           if (result.status === 'failed' && args.maxFailures > 0) {
             failedCount += 1;

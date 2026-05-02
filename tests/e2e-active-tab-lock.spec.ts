@@ -1,5 +1,5 @@
 import { expect, test, type BrowserContext, type Page } from '@playwright/test';
-import { APP_BASE_URL } from './utils/e2e-baseline';
+import { APP_BASE_URL, ensureE2EBaseline } from './utils/e2e-baseline';
 
 async function openApp(page: Page, path: string): Promise<void> {
   await page.goto(`${APP_BASE_URL}${path}`, { waitUntil: 'domcontentloaded' });
@@ -31,6 +31,7 @@ test.describe('Active tab lock handoff', () => {
     const second = await context.newPage();
 
     try {
+      await ensureE2EBaseline(first, { requireHubMesh: true });
       await openApp(first, '/app?locktest=1');
       await waitUntilOwnsActiveLock(first);
       await openApp(second, '/app?locktest=1');
@@ -49,6 +50,7 @@ test.describe('Active tab lock handoff', () => {
     const second = await context.newPage();
 
     try {
+      await ensureE2EBaseline(first, { requireHubMesh: true });
       await openApp(first, '/app?locktest=1');
       await waitUntilOwnsActiveLock(first);
       await openApp(second, '/app?locktest=1');
@@ -77,6 +79,7 @@ test.describe('Active tab lock handoff', () => {
     const targetEntityId = `0x${'1'.repeat(64)}`;
 
     try {
+      await ensureE2EBaseline(first, { requireHubMesh: true });
       await openApp(first, '/app?locktest=1');
       await waitUntilOwnsActiveLock(first);
       await openApp(

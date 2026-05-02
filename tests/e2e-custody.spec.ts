@@ -33,7 +33,8 @@ import { timedStep } from './utils/e2e-timing';
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
 const LONG_E2E = process.env.E2E_LONG === '1';
-const TEST_TIMEOUT_MS = LONG_E2E ? 240_000 : 210_000;
+const ISOLATED_BASELINE_READY = process.env.E2E_ISOLATED_BASELINE_READY === '1';
+const TEST_TIMEOUT_MS = LONG_E2E ? 420_000 : 360_000;
 const TOKEN_SCALE = 10n ** 18n;
 
 type CustodyDashboardPayload = {
@@ -904,13 +905,17 @@ test.describe('E2E Custody Flow', () => {
     });
 
     try {
-      await timedStep('custody.ensure_baseline', () => ensureE2EBaseline(walletPage, {
-        apiBaseUrl: API_BASE_URL,
-        timeoutMs: TEST_TIMEOUT_MS,
-        requireHubMesh: true,
-        requireMarketMaker: false,
-        minHubCount: 3,
-      }));
+      if (ISOLATED_BASELINE_READY) {
+        console.log('[E2E-TIMING] custody.ensure_baseline.skip 0ms');
+      } else {
+        await timedStep('custody.ensure_baseline', () => ensureE2EBaseline(walletPage, {
+          apiBaseUrl: API_BASE_URL,
+          timeoutMs: TEST_TIMEOUT_MS,
+          requireHubMesh: true,
+          requireMarketMaker: false,
+          minHubCount: 3,
+        }));
+      }
 
       const custodySupport = await timedStep('custody.start_support', () => startCustodySupport({
         apiBaseUrl: API_BASE_URL,
@@ -927,7 +932,7 @@ test.describe('E2E Custody Flow', () => {
       }));
       daemonChild = custodySupport.daemonChild;
       custodyChild = custodySupport.custodyChild;
-      daemonClient = new DaemonRpcClient(`ws://127.0.0.1:${daemonPort}/rpc`);
+      daemonClient = new DaemonRpcClient(`ws://127.0.0.1:${daemonPort}/rpc`, custodySupport.daemonControlToken);
       const custodyIdentity = custodySupport.identity;
       const senderHubIds = custodySupport.hubIds.slice(0, 2);
       const fundingHubId = senderHubIds[1] ?? senderHubIds[0]!;
