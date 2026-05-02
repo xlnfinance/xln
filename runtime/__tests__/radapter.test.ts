@@ -15,7 +15,6 @@ import { resolveRuntimeAdapterRead } from '../radapter/resolve';
 import { broadcastRuntimeAdapterTick, handleRuntimeAdapterMessage } from '../radapter/server';
 import { decodeBuffer, encodeBuffer } from '../storage/codec';
 import { prepareStorageStateHashes } from '../storage/hashes';
-import { MutableRadixMerkleTree } from '../storage/merkle';
 import {
   KEY_HEAD,
   hexBytes,
@@ -860,7 +859,7 @@ test('runtime adapter caps outgoing responses and closes oversized sockets', asy
   }
 });
 
-test('storage entity hash docs avoid serializing huge cell arrays', async () => {
+test('storage entity hash docs persist root metadata only', async () => {
   const env = makeEnv();
   const replica = Array.from(env.eReplicas.values())[0]!;
   const base = replica.state.accounts.get(counterpartyId)!;
@@ -888,9 +887,9 @@ test('storage entity hash docs avoid serializing huge cell arrays', async () => 
   const stored = decodeBuffer<StorageEntityHashDoc>(first.entityHashPuts[0]!.value);
 
   expect(firstDoc.cellCount).toBe(accountCount);
-  expect(firstDoc.cells).toHaveLength(0);
+  expect('cells' in firstDoc).toBe(false);
   expect(stored.cellCount).toBe(accountCount);
-  expect(stored.cells).toHaveLength(0);
+  expect('cells' in stored).toBe(false);
   expect(first.entityHashes[0]?.cellCount).toBe(accountCount);
   const firstRootPut = first.merklePuts.find((item) => Buffer.compare(item.key, keyMerkleRoot(entityId, 'runtime-roots')) === 0);
   const firstRoot = decodeBuffer<StorageMerkleRootDoc>(firstRootPut!.value);
@@ -902,7 +901,10 @@ test('storage entity hash docs avoid serializing huge cell arrays', async () => 
   const oldRoot = firstDoc.hash;
   const changedId = `0x${(2_001).toString(16).padStart(64, '0')}`;
   const second = await prepareStorageStateHashes({
-    db: makeMemoryDb([]),
+    db: makeMemoryDb([
+      ...first.entityHashPuts.map((item) => [item.key, item.value] as [Buffer, Buffer]),
+      ...first.merklePuts.map((item) => [item.key, item.value] as [Buffer, Buffer]),
+    ]),
     puts: [{
       family: 'account',
       entityId,
@@ -920,7 +922,7 @@ test('storage entity hash docs avoid serializing huge cell arrays', async () => 
   const secondDoc = second.entityHashDocs.get(entityId)!;
 
   expect(secondDoc.cellCount).toBe(accountCount);
-  expect(secondDoc.cells).toHaveLength(0);
+  expect('cells' in secondDoc).toBe(false);
   expect(secondDoc.hash).not.toBe(oldRoot);
   expect(second.merklePuts.length).toBeLessThan(50);
   expect(second.merkleDels).toHaveLength(0);
@@ -945,26 +947,15 @@ test('storage entity hash docs avoid serializing huge cell arrays', async () => 
   });
   const coldDoc = cold.entityHashDocs.get(entityId)!;
   expect(coldDoc.cellCount).toBe(accountCount);
-  expect(coldDoc.cells).toHaveLength(0);
+  expect('cells' in coldDoc).toBe(false);
   expect(coldDoc.hash).toBe(secondDoc.hash);
   expect(cold.merklePuts.length).toBeLessThan(50);
 
-  const staleDoc = decodeBuffer<StorageEntityHashDoc>(first.entityHashPuts[0]!.value) as StorageEntityHashDoc & {
-    cellMap?: Map<string, string>;
-    merkleTree?: MutableRadixMerkleTree;
+  const staleDoc: StorageEntityHashDoc = {
+    ...decodeBuffer<StorageEntityHashDoc>(first.entityHashPuts[0]!.value),
+    hash: `0x${'11'.repeat(32)}`,
+    cellCount: 1,
   };
-  Object.defineProperty(staleDoc, 'cellMap', {
-    value: new Map<string, string>(),
-    enumerable: false,
-    configurable: true,
-    writable: true,
-  });
-  Object.defineProperty(staleDoc, 'merkleTree', {
-    value: new MutableRadixMerkleTree({ radix: 16, leaves: [] }),
-    enumerable: false,
-    configurable: true,
-    writable: true,
-  });
   const staleRuntimeFields = await prepareStorageStateHashes({
     db: makeMemoryDb([
       ...first.entityHashPuts.map((item) => [item.key, item.value] as [Buffer, Buffer]),
@@ -1011,6 +1002,22 @@ test('storage entity hash docs avoid serializing huge cell arrays', async () => 
   expect(persistedRootOnlyDoc.cellCount).toBe(accountCount);
   expect(persistedRootOnlyDoc.hash).toBe(secondDoc.hash);
 
+  await expect(prepareStorageStateHashes({
+    db: makeMemoryDb([[keyLiveEntity(entityId), encodeBuffer(projectEntityCoreDoc(replica))]]),
+    puts: [{
+      family: 'account',
+      entityId,
+      counterpartyId: changedId,
+      value: projectAccountDoc({
+        ...base,
+        rightEntity: changedId,
+        currentHeight: 999,
+        proofHeader: { ...base.proofHeader, toEntity: changedId },
+      }),
+    }],
+    dels: [],
+  })).rejects.toThrow('STORAGE_MERKLE_ROOT_MISSING');
+
   const putThenDelete = await prepareStorageStateHashes({
     db: makeMemoryDb([
       ...first.entityHashPuts.map((item) => [item.key, item.value] as [Buffer, Buffer]),
@@ -1032,12 +1039,6 @@ test('storage entity hash docs avoid serializing huge cell arrays', async () => 
   const merklePutKeys = new Set(putThenDelete.merklePuts.map((item) => item.key.toString('hex')));
   expect(putThenDelete.merkleDels.some((key) => merklePutKeys.has(key.toString('hex')))).toBe(false);
 
-  const warmDelete = await prepareStorageStateHashes({
-    db: makeMemoryDb([]),
-    puts: [],
-    dels: [{ family: 'account', entityId, counterpartyId: changedId }],
-    entityHashDocs: first.entityHashDocs,
-  });
   const coldDelete = await prepareStorageStateHashes({
     db: makeMemoryDb([
       ...first.entityHashPuts.map((item) => [item.key, item.value] as [Buffer, Buffer]),
@@ -1048,7 +1049,6 @@ test('storage entity hash docs avoid serializing huge cell arrays', async () => 
   });
   const coldDeleteDoc = coldDelete.entityHashDocs.get(entityId)!;
   expect(coldDeleteDoc.cellCount).toBe(accountCount - 1);
-  expect(coldDeleteDoc.hash).toBe(warmDelete.entityHashDocs.get(entityId)!.hash);
   expect(coldDelete.merkleDels.length).toBeGreaterThan(0);
   expect(coldDelete.merklePuts.length).toBeLessThan(50);
 });

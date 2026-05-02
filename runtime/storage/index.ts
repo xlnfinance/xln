@@ -117,7 +117,6 @@ export type {
   StorageEpochSeedStats,
   StorageFrameEntityHash,
   StorageFrameRecord,
-  StorageHashCell,
   StorageHead,
   StorageReplicaMeta,
   StorageRuntimeConfig,

@@ -205,16 +205,10 @@ export type StorageFrameRecord = {
   touchedBookEntities: string[];
 };
 
-export type StorageHashCell = {
-  key: string;
-  hash: string;
-};
-
 export type StorageEntityHashDoc = {
   entityId: string;
   hash: string;
-  cellCount?: number;
-  cells: StorageHashCell[];
+  cellCount: number;
 };
 
 export type StorageMerkleRootDoc = {

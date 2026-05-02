@@ -6,7 +6,7 @@ Date: 2026-05-01.
 
 ## Executive Summary
 
-The current storage Merkle implementation is correct enough for small and medium states, but it is not the final design for a mainnet hub with one million accounts. The latest code already replaced the worst fixed-depth trie behavior with a compressed radix builder, so a small tree no longer creates a long artificial branch chain. That is a useful correctness and shape improvement, but it still rebuilds entity-level roots from large cell arrays during materialization.
+The current storage Merkle implementation is correct enough for small and medium states, but it is not the final design for a mainnet hub with one million accounts. The latest code already replaced the worst fixed-depth trie behavior with a compressed radix builder, so a small tree no longer creates a long artificial branch chain. It also removed `StorageEntityHashDoc.cells[]`; persisted root, branch, and leaf rows are now the only durable Merkle shape.
 
 The target design is an incremental, persisted, compressed Merkle collection engine:
 
@@ -53,11 +53,12 @@ Before the branch-backed update landed, `prepareStorageStateHashes()` worked con
 4. Rebuild the entity root from all cells.
 5. Persist the updated `StorageEntityHashDoc` as one value.
 
-That shape is still the legacy fallback for old DBs that do not have branch
-root metadata. Current sparse docs use the persisted branch stack instead:
-read root doc, descend only the touched path, update/collapse the affected
-nodes, and write the dirty branch/leaf records in the same materialization
-batch.
+That shape has been removed from the hot path. Current storage reads root
+metadata from the persisted Merkle keyspace, descends only the touched path,
+updates/collapses the affected nodes, and writes the dirty branch/leaf records
+in the same materialization batch. If live docs exist without the required
+root metadata, the storage layer treats that as corruption instead of
+rebuilding from a parallel source of truth.
 
 ## Why This Is Not Enough For 1M Accounts
 
@@ -69,9 +70,11 @@ For a hub entity with one million accounts:
 - deep verification should be possible, but not required on the hot path;
 - account, book, lock, and route collections need the same scalable primitive.
 
-The current design keeps `KEY_LIVE_DOC_HASH` as leaf truth. For small entities
-`StorageEntityHashDoc.cells[]` may still be persisted for simple recovery; for
-large entities it is sparse and no longer the primary large-map root shape.
+The current design keeps `KEY_LIVE_DOC_HASH` as leaf truth and keeps
+`StorageEntityHashDoc` as root metadata only (`entityId`, `hash`,
+`cellCount`). It must never persist a `cells[]` array. Recovery and cold
+updates use the persisted Merkle root/branch/leaf keyspace; if a live entity
+exists without those keys, storage is corrupt and must fail fast.
 
 ## Target Mental Model
 
@@ -357,7 +360,7 @@ Deep verification is for recovery/audit/CI, not for every frame.
 
 Eventually remove or replace:
 
-- large `StorageEntityHashDoc.cells[]` as the primary entity hash cache;
+- any `StorageEntityHashDoc.cells[]` persistence path;
 - full entity root rebuild from all cells on every materialization;
 - single-key multi-megabyte entity hash documents for large hubs.
 
@@ -447,8 +450,9 @@ Keep:
 
 ### PR 5: Remove Giant Entity Hash Docs
 
-- Stop writing `cells[]` for large collections.
-- Keep a small compatibility reader only if necessary.
+- `StorageEntityHashDoc.cells[]` has been removed. Keep it that way.
+- Do not add compatibility readers that rebuild Merkle roots from live docs on
+  the hot path.
 - Update inspect/metrics to show branch counts, leaf counts, flat/branch mode, and max branch depth.
 
 ## Audit Checklist

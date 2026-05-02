@@ -85,7 +85,6 @@ export const keyLiveBookPrefix = (entityId?: string): Buffer =>
 
 export const keyLiveEntityHash = (entityId: string): Buffer =>
   Buffer.concat([Buffer.from([KEY_LIVE_ENTITY_HASH]), hexBytes(entityId)]);
-export const keyLiveEntityHashPrefix = (): Buffer => Buffer.from([KEY_LIVE_ENTITY_HASH]);
 
 export const keyLiveReplicaMeta = (entityId: string): Buffer =>
   Buffer.concat([Buffer.from([KEY_LIVE_REPLICA_META]), hexBytes(entityId)]);
