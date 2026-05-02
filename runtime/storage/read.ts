@@ -154,10 +154,10 @@ const assertLiveMerkleIntegrity = async (
   if (mode === 'none') return;
   const normalized = normalizeEntityId(entityId);
   const root = await readJsonOrNull<StorageMerkleRootDoc>(db, keyMerkleRoot(normalized, 'runtime-roots'));
-  const entityHash = await readJsonOrNull<{ hash: string; cellCount?: number; cells?: unknown[] }>(db, keyLiveEntityHash(normalized));
+  const entityHash = await readJsonOrNull<{ hash: string; cellCount: number }>(db, keyLiveEntityHash(normalized));
   if (!root) throw new Error(`STORAGE_MERKLE_ROOT_MISSING: entity=${normalized}`);
   if (!entityHash) throw new Error(`STORAGE_ENTITY_HASH_DOC_MISSING: entity=${normalized}`);
-  const expectedLeafCount = Number(entityHash.cellCount ?? entityHash.cells?.length ?? 0);
+  const expectedLeafCount = Number(entityHash.cellCount);
   if (root.rootHash !== entityHash.hash) {
     throw new Error(`STORAGE_MERKLE_ROOT_MISMATCH: entity=${normalized} actual=${root.rootHash} expected=${entityHash.hash}`);
   }
