@@ -1,10 +1,4 @@
-import {
-  KEY_LIVE_DOC_HASH,
-  keyLiveAccount,
-  keyLiveBook,
-  keyLiveEntity,
-  normalizeEntityId,
-} from './keys';
+import { keyLiveAccount, keyLiveBook, keyLiveEntity, normalizeEntityId } from './keys';
 import type { StorageDoc, StorageDocRef } from './types';
 
 export const docRefKey = (ref: StorageDocRef): string => {
@@ -44,6 +38,3 @@ export const docRefCellKey = (ref: StorageDocRef): string => {
   if (ref.family === 'account') return `accounts/${normalizeEntityId(ref.counterpartyId)}`;
   return `books/${ref.pairId}`;
 };
-
-export const keyLiveDocHash = (ref: StorageDocRef): Buffer =>
-  Buffer.concat([Buffer.from([KEY_LIVE_DOC_HASH]), liveKeyForRef(ref)]);

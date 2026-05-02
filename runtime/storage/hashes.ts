@@ -12,7 +12,6 @@ import {
   docRefCellKey,
   docRefForDoc,
   docValueKey,
-  keyLiveDocHash,
 } from './doc-refs';
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
@@ -22,7 +21,6 @@ import {
   keyLiveAccountPrefix,
   keyLiveBookPrefix,
   keyLiveEntity,
-  keyLiveEntityHash,
   keyMerkleBranch,
   keyMerkleBranchPrefix,
   keyMerkleLeaf,
@@ -206,6 +204,13 @@ export const prepareStorageCanonicalStateHashes = (
     canonicalEntityHashes,
     canonicalStateHash: computeCanonicalRuntimeStateHash(env.height, env.timestamp, canonicalEntityHashes),
   };
+};
+
+export const storageCanonicalHashEnabled = (): boolean => {
+  const raw = typeof process !== 'undefined'
+    ? String(process.env['XLN_STORAGE_VERIFY_CANONICAL'] || '').trim().toLowerCase()
+    : '';
+  return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
 };
 
 export const computeStorageFrameHash = (record: StorageFrameRecord): string => {
@@ -739,9 +744,6 @@ export const prepareStorageStateHashes = async (options: {
   entityHashes: StorageFrameEntityHash[];
   entityHashDocs: Map<string, StorageEntityHashDoc>;
   docValueBuffers: Map<string, Buffer>;
-  docHashPuts: Array<{ key: Buffer; value: Buffer }>;
-  docHashDels: Buffer[];
-  entityHashPuts: Array<{ key: Buffer; value: Buffer }>;
   merklePuts: Array<{ key: Buffer; value: Buffer }>;
   merkleDels: Buffer[];
 }> => {
@@ -749,8 +751,6 @@ export const prepareStorageStateHashes = async (options: {
     ? new Map(options.entityHashDocs)
     : await readAllEntityHashDocs(options.db);
   const docValueBuffers = new Map<string, Buffer>();
-  const docHashPuts: Array<{ key: Buffer; value: Buffer }> = [];
-  const docHashDels: Buffer[] = [];
   const touchedEntityIds = new Set<string>();
   const persistedEditors = new Map<string, PersistedEntityMerkleEditor>();
 
@@ -787,18 +787,15 @@ export const prepareStorageStateHashes = async (options: {
     const ref = docRefForDoc(doc);
     const encoded = encodeStorageDocValue(doc);
     docValueBuffers.set(docValueKey(doc), encoded.buffer);
-    docHashPuts.push({ key: keyLiveDocHash(ref), value: encoded.hashBytes });
     await updateEntityCell(ref.entityId, docRefCellKey(ref), encoded.hash);
   }
 
   for (const ref of options.dels) {
-    docHashDels.push(keyLiveDocHash(ref));
     await updateEntityCell(ref.entityId, docRefCellKey(ref), null);
   }
 
   const merklePuts: Array<{ key: Buffer; value: Buffer }> = [];
   const merkleDelsByKey = new Map<string, Buffer>();
-  const entityHashPuts: Array<{ key: Buffer; value: Buffer }> = [];
   for (const entityId of touchedEntityIds) {
     const editor = persistedEditors.get(entityId);
     if (!editor) throw new Error(`STORAGE_MERKLE_EDITOR_MISSING: entity=${entityId}`);
@@ -812,10 +809,6 @@ export const prepareStorageStateHashes = async (options: {
     doc.cellCount = flushed.rootDoc.leafCount;
     entityHashDocs.set(entityId, doc);
     appendEntityMerkleFlush(entityId, flushed, merklePuts, merkleDelsByKey);
-    entityHashPuts.push({
-      key: keyLiveEntityHash(entityId),
-      value: encodeBuffer(doc),
-    });
   }
   const entityHashes = toFrameEntityHashes(entityHashDocs.values());
   const merklePutKeys = new Set(merklePuts.map((put) => put.key.toString('hex')));
@@ -824,9 +817,6 @@ export const prepareStorageStateHashes = async (options: {
     entityHashes,
     entityHashDocs,
     docValueBuffers,
-    docHashPuts,
-    docHashDels,
-    entityHashPuts,
     merklePuts,
     merkleDels: Array.from(merkleDelsByKey.entries())
       .filter(([key]) => !merklePutKeys.has(key))

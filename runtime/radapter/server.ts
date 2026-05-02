@@ -1,7 +1,7 @@
 import type { EntityState, Env, RuntimeInput } from '../types';
 import { assertRuntimeAdapterMessageSize, encodeRuntimeAdapterMessage } from './codec';
 import type { StorageFrameRecord, StorageHead } from '../storage/types';
-import type { StorageEntityViewPage } from '../storage';
+import type { StorageAccountDoc, StorageEntityViewPage } from '../storage';
 import { RuntimeAdapterError, toRuntimeAdapterErrorPayload } from './errors';
 import { consumeToken, createTokenBucket, tokenRetryAfterMs, type TokenBucket } from './rate-limit';
 import { resolveRuntimeAdapterRead } from './resolve';
@@ -34,6 +34,7 @@ export type RuntimeAdapterServerDeps = {
   readFrame?: (env: Env, height: number) => Promise<StorageFrameRecord | null>;
   listCheckpoints?: (env: Env) => Promise<number[]>;
   loadEntityState?: (env: Env, entityId: string, height: number) => Promise<EntityState | null>;
+  loadEntityAccountDoc?: (env: Env, entityId: string, counterpartyId: string, height: number) => Promise<StorageAccountDoc | null>;
   loadEntityViewPage?: (env: Env, entityId: string, height: number, query?: RuntimeAdapterReadQuery) => Promise<StorageEntityViewPage | null>;
   listEntityIdsAtHeight?: (env: Env, height: number) => Promise<string[]>;
   enqueueRuntimeInput: (env: Env, input: RuntimeInput) => void;
@@ -231,6 +232,7 @@ export const handleRuntimeAdapterMessage = async (
         ...(deps.readFrame ? { readFrame: (height) => deps.readFrame?.(env, height) ?? Promise.resolve(null) } : {}),
         ...(deps.listCheckpoints ? { listCheckpoints: () => deps.listCheckpoints?.(env) ?? Promise.resolve([]) } : {}),
         ...(deps.loadEntityState ? { loadEntityState: (entityId, height) => deps.loadEntityState?.(env, entityId, height) ?? Promise.resolve(null) } : {}),
+        ...(deps.loadEntityAccountDoc ? { loadEntityAccountDoc: (entityId, counterpartyId, height) => deps.loadEntityAccountDoc?.(env, entityId, counterpartyId, height) ?? Promise.resolve(null) } : {}),
         ...(deps.loadEntityViewPage ? { loadEntityViewPage: (entityId, height, query) => deps.loadEntityViewPage?.(env, entityId, height, query) ?? Promise.resolve(null) } : {}),
         ...(deps.listEntityIdsAtHeight ? { listEntityIdsAtHeight: (height) => deps.listEntityIdsAtHeight?.(env, height) ?? Promise.resolve([]) } : {}),
       }, msg.path, msg.query);

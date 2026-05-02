@@ -12,6 +12,7 @@ import {
   computeStorageFrameHash,
   prepareStorageCanonicalStateHashes,
   prepareStorageStateHashes,
+  storageCanonicalHashEnabled,
 } from './hashes';
 import {
   createSnapshot,
@@ -46,7 +47,7 @@ import {
   keyLiveReplicaMeta,
   normalizeEntityId,
 } from './keys';
-import type { EntityInput, Env, RuntimeInput, RuntimeFrameDbRecord } from '../types';
+import type { Env, RuntimeInput, RuntimeFrameDbRecord } from '../types';
 import type {
   PerfDeps,
   RuntimeDbLike,
@@ -88,6 +89,7 @@ export {
   listStorageLiveEntityIds,
   listStorageSnapshotEntityIds,
   listStorageSnapshotHeights,
+  loadEntityAccountDocFromStorage,
   loadEntityStateFromStorage,
   loadEntityViewPageFromStorage,
   readStorageFrameRecord,
@@ -195,7 +197,6 @@ export const saveRuntimeFrameToStorage = async (options: {
   env: Env;
   stateHash?: string;
   currentFrameInput?: RuntimeInput;
-  currentFrameOutputs?: EntityInput[];
   frameDbRecords?: RuntimeFrameDbRecord[];
   tryOpenDb: (env: Env) => Promise<boolean>;
   getRuntimeDb: (env: Env) => RuntimeDbLike;
@@ -285,7 +286,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   const materializedEntities = materializedTouched
     ? Array.from(materializedTouched.touchedEntities.values()).sort()
     : [];
-  const canonicalHashes = shouldMaterialize
+  const canonicalHashes = shouldMaterialize && storageCanonicalHashEnabled()
     ? prepareStorageCanonicalStateHashes(options.env, materializedEntities, previousFrame, replicaLookup)
     : null;
   const frameRecordBase: StorageFrameRecord = {
@@ -301,13 +302,9 @@ export const saveRuntimeFrameToStorage = async (options: {
       canonicalEntityHashes: canonicalHashes.canonicalEntityHashes,
     } : {}),
     runtimeInput: appliedRuntimeInput,
-    frameOutputs: (options.currentFrameOutputs ?? []).map((output) => ({ ...output })),
     ...(shouldMaterialize && overlayRecords.length > 0
       ? { overlayRecords: overlayRecords.map((record) => ({ ...record })) }
       : {}),
-    // Logs/history are indexed in the frame DB. Keep the runtime state journal
-    // focused on replay inputs/outputs and state hashes.
-    logs: [],
     touchedEntities,
     touchedAccounts,
     touchedBookEntities,
@@ -357,15 +354,6 @@ export const saveRuntimeFrameToStorage = async (options: {
     }
     for (const ref of materializedDels) {
       if (typeof batch.del === 'function') batch.del(liveKeyForRef(ref));
-    }
-    for (const item of preparedHashes.docHashPuts) {
-      batch.put(item.key, item.value);
-    }
-    for (const key of preparedHashes.docHashDels) {
-      if (typeof batch.del === 'function') batch.del(key);
-    }
-    for (const item of preparedHashes.entityHashPuts) {
-      batch.put(item.key, item.value);
     }
     for (const key of preparedHashes.merkleDels) {
       if (typeof batch.del === 'function') batch.del(key);

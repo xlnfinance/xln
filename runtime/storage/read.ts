@@ -2,19 +2,22 @@ import type { BookState } from '../orderbook';
 import type { EntityState, Env } from '../types';
 import { ethers } from 'ethers';
 import { decodeBuffer } from './codec';
-import { docRefKey, docValueKey, keyLiveDocHash } from './doc-refs';
+import { docRefCellKey, docRefKey, docValueKey } from './doc-refs';
+import { storageMerkleCellHexKey } from './hashes';
 import {
+  DEFAULT_ACCOUNT_MERKLE_RADIX,
   KEY_HEAD,
   KEY_LIVE_ENTITY,
   decodeEntityId,
   hexBytes,
   keyDiff,
   keyFrame,
+  keyMerkleLeaf,
   keyLiveAccount,
   keyLiveAccountPrefix,
+  keyLiveBook,
   keyLiveBookPrefix,
   keyLiveEntity,
-  keyLiveEntityHash,
   keyMerkleBranchPrefix,
   keyMerkleLeafPrefix,
   keyMerkleRoot,
@@ -27,6 +30,7 @@ import {
   parseLiveAccountKey,
   parseLiveBookKey,
   prefixUpperBound,
+  textBytes,
 } from './keys';
 import { iterateKeys, readJsonOrNull, readRawOrNull } from './level';
 import { listSnapshotHeights } from './lifecycle';
@@ -34,6 +38,8 @@ import {
   buildHexKeyedMerkle,
   computeRadixMerkleBranchHash,
   computeRadixMerkleLeafHash,
+  packRadixMerklePath,
+  radixMerklePathSlots,
 } from './merkle';
 import { hydrateEntityStateFromStorage } from './projections';
 import type {
@@ -114,12 +120,11 @@ const storageVerifyDocHashesEnabled = (): boolean => {
   return raw === '1' || raw === 'true' || raw === 'yes';
 };
 
-const storageVerifyMerkleMode = (): 'none' | 'shallow' | 'deep' => {
+const storageVerifyMerkleMode = (): 'none' | 'deep' => {
   const raw = String(typeof process !== 'undefined' ? process.env['XLN_STORAGE_VERIFY_MERKLE'] ?? '' : '')
     .trim()
     .toLowerCase();
-  if (raw === 'deep') return 'deep';
-  if (raw === '1' || raw === 'true' || raw === 'yes' || raw === 'shallow') return 'shallow';
+  if (raw === 'deep' || raw === '1' || raw === 'true' || raw === 'yes') return 'deep';
   return 'none';
 };
 
@@ -133,38 +138,37 @@ const assertLiveDocHash = async (options: {
   enabled: boolean;
 }): Promise<void> => {
   if (!options.enabled) return;
-  const expectedRaw = await readRawOrNull(options.db, keyLiveDocHash(options.ref));
   const key = docRefKey(options.ref);
-  if (!expectedRaw) throw new Error(`STORAGE_DOC_HASH_MISSING: ${key}`);
-  if (expectedRaw.byteLength !== 32) {
-    throw new Error(`STORAGE_DOC_HASH_INVALID: ${key} bytes=${expectedRaw.byteLength}`);
-  }
-  const expected = `0x${Buffer.from(expectedRaw).toString('hex')}`;
+  const entityId = normalizeEntityId(options.ref.entityId);
+  const leafKeyHex = storageMerkleCellHexKey(docRefCellKey(options.ref));
+  const leafKeyBytes = Buffer.from(leafKeyHex.slice(2), 'hex');
+  const leafPath = radixMerklePathSlots(leafKeyBytes, DEFAULT_ACCOUNT_MERKLE_RADIX);
+  const leaf = await readJsonOrNull<StorageMerkleLeafDoc>(
+    options.db,
+    keyMerkleLeaf(entityId, 'runtime-roots', packRadixMerklePath(DEFAULT_ACCOUNT_MERKLE_RADIX, leafPath)),
+  );
+  if (!leaf) throw new Error(`STORAGE_DOC_HASH_MISSING: ${key}`);
+  const expected = String(leaf.valueHash || '');
   const actual = hashRawDocValue(options.raw);
   if (actual !== expected) {
     throw new Error(`STORAGE_DOC_HASH_MISMATCH: ${key} actual=${actual} expected=${expected}`);
+  }
+  const valueBytes = Buffer.from(expected.replace(/^0x/, ''), 'hex');
+  const actualLeafHash = computeRadixMerkleLeafHash(leafKeyBytes, valueBytes);
+  if (actualLeafHash !== leaf.hash) {
+    throw new Error(`STORAGE_MERKLE_LEAF_HASH_MISMATCH: entity=${entityId} path=${leaf.path.join('.')}`);
   }
 };
 
 const assertLiveMerkleIntegrity = async (
   db: RuntimeDbLike,
   entityId: string,
-  mode: 'none' | 'shallow' | 'deep',
+  mode: 'none' | 'deep',
 ): Promise<void> => {
   if (mode === 'none') return;
   const normalized = normalizeEntityId(entityId);
   const root = await readJsonOrNull<StorageMerkleRootDoc>(db, keyMerkleRoot(normalized, 'runtime-roots'));
-  const entityHash = await readJsonOrNull<{ hash: string; cellCount: number }>(db, keyLiveEntityHash(normalized));
   if (!root) throw new Error(`STORAGE_MERKLE_ROOT_MISSING: entity=${normalized}`);
-  if (!entityHash) throw new Error(`STORAGE_ENTITY_HASH_DOC_MISSING: entity=${normalized}`);
-  const expectedLeafCount = Number(entityHash.cellCount);
-  if (root.rootHash !== entityHash.hash) {
-    throw new Error(`STORAGE_MERKLE_ROOT_MISMATCH: entity=${normalized} actual=${root.rootHash} expected=${entityHash.hash}`);
-  }
-  if (root.leafCount !== expectedLeafCount) {
-    throw new Error(`STORAGE_MERKLE_LEAF_COUNT_MISMATCH: entity=${normalized} actual=${root.leafCount} expected=${expectedLeafCount}`);
-  }
-  if (mode !== 'deep') return;
 
   let branchCount = 0;
   for await (const key of iterateKeys(db, { prefix: keyMerkleBranchPrefix(normalized, 'runtime-roots') })) {
@@ -255,6 +259,9 @@ const parseSnapshotAccountKey = (key: Buffer): { entityId: string; counterpartyI
 
 const keySnapshotAccountCursor = (height: number, entityId: string, counterpartyId: string): Buffer =>
   Buffer.concat([keySnapshotAccountPrefix(height, entityId), hexBytes(counterpartyId)]);
+
+const keySnapshotBookCursor = (height: number, entityId: string, pairId: string): Buffer =>
+  Buffer.concat([keySnapshotBookPrefix(height, entityId), textBytes(pairId)]);
 
 const listAccountPageFromKeyspace = async (options: {
   db: RuntimeDbLike;
@@ -470,55 +477,153 @@ const loadAccountDocPageAtHeight = async (
   });
 };
 
-const bestBidTicks = (book: BookState): bigint | null => {
-  const bucketId = book.bidBucketIdsDesc[0];
-  if (bucketId === undefined) return null;
-  const bucket = book.bidBuckets.get(bucketId.toString());
-  return bucket?.pricesAsc.at(-1) ?? null;
-};
+const loadAccountDocAtHeight = async (
+  db: RuntimeDbLike,
+  entityId: string,
+  counterpartyId: string,
+  targetHeight: number,
+  latestMaterializedHeight: number,
+): Promise<StorageAccountDoc | null> => {
+  const normalized = normalizeEntityId(entityId);
+  const counterparty = normalizeEntityId(counterpartyId);
 
-const bestAskTicks = (book: BookState): bigint | null => {
-  const bucketId = book.askBucketIdsAsc[0];
-  if (bucketId === undefined) return null;
-  const bucket = book.askBuckets.get(bucketId.toString());
-  return bucket?.pricesAsc[0] ?? null;
-};
-
-const bookSpreadSortKey = (book: BookState): bigint | null => {
-  const bid = bestBidTicks(book);
-  const ask = bestAskTicks(book);
-  if (bid === null || ask === null) return null;
-  return ask >= bid ? ask - bid : 0n;
-};
-
-const compareBooksNearSpread = (
-  left: [string, BookState],
-  right: [string, BookState],
-): number => {
-  const leftSpread = bookSpreadSortKey(left[1]);
-  const rightSpread = bookSpreadSortKey(right[1]);
-  if (leftSpread !== null && rightSpread !== null && leftSpread !== rightSpread) {
-    return leftSpread < rightSpread ? -1 : 1;
+  if (targetHeight === latestMaterializedHeight) {
+    const raw = await readRawOrNull(db, keyLiveAccount(normalized, counterparty));
+    if (!raw) return null;
+    await assertLiveDocHash({
+      db,
+      ref: { family: 'account', entityId: normalized, counterpartyId: counterparty },
+      raw,
+      enabled: storageVerifyDocHashesEnabled(),
+    });
+    return decodeBuffer<StorageAccountDoc>(raw);
   }
-  if (leftSpread !== null && rightSpread === null) return -1;
-  if (leftSpread === null && rightSpread !== null) return 1;
-  return compareAscii(String(left[0]), String(right[0]));
+
+  const baseSnapshotHeight = await findLatestSnapshotAtOrBelow(db, targetHeight);
+  if (baseSnapshotHeight <= 0) return null;
+  let doc = await readJsonOrNull<StorageAccountDoc>(
+    db,
+    keySnapshotAccountCursor(baseSnapshotHeight, normalized, counterparty),
+  );
+  for (let height = baseSnapshotHeight + 1; height <= targetHeight; height += 1) {
+    const diff = await readJsonOrNull<StorageDiffRecord>(db, keyDiff(height));
+    if (!diff) continue;
+    for (const ref of diff.dels) {
+      if (
+        ref.family === 'account' &&
+        normalizeEntityId(ref.entityId) === normalized &&
+        normalizeEntityId(ref.counterpartyId) === counterparty
+      ) {
+        doc = null;
+      }
+    }
+    for (const item of diff.puts) {
+      if (
+        item.family === 'account' &&
+        normalizeEntityId(item.entityId) === normalized &&
+        normalizeEntityId(item.counterpartyId) === counterparty
+      ) {
+        doc = item.value;
+      }
+    }
+  }
+  return doc;
 };
 
-const bookPageFromMap = (
-  books: Map<string, BookState>,
-  query?: StoragePageQuery,
+const readBookCursor = (query?: StoragePageQuery): string =>
+  String(query?.cursor || '').trim();
+
+const compareBookPairKeyOrder = (left: string, right: string): number => {
+  const leftBytes = Buffer.from(left, 'utf8');
+  const rightBytes = Buffer.from(right, 'utf8');
+  if (leftBytes.length !== rightBytes.length) return leftBytes.length < rightBytes.length ? -1 : 1;
+  return Buffer.compare(leftBytes, rightBytes);
+};
+
+const isAfterBookCursor = (
+  pairId: string,
+  cursor: string,
+  direction: 'asc' | 'desc',
+): boolean => {
+  if (!cursor) return true;
+  const order = compareBookPairKeyOrder(pairId, cursor);
+  return direction === 'desc' ? order < 0 : order > 0;
+};
+
+const pushBookCandidate = (
+  candidates: Array<{ pairId: string; book: BookState }>,
+  seen: Set<string>,
+  pairId: string,
+  book: BookState,
+  limit: number,
+  direction: 'asc' | 'desc',
+): void => {
+  if (seen.has(pairId)) return;
+  seen.add(pairId);
+  const compare = (left: string, right: string): number =>
+    direction === 'desc' ? compareBookPairKeyOrder(right, left) : compareBookPairKeyOrder(left, right);
+  let insertAt = candidates.length;
+  while (insertAt > 0 && compare(pairId, candidates[insertAt - 1]!.pairId) < 0) {
+    insertAt -= 1;
+  }
+  candidates.splice(insertAt, 0, { pairId, book });
+  if (candidates.length > limit + 1) {
+    const dropped = candidates.pop();
+    if (dropped) seen.delete(dropped.pairId);
+  }
+};
+
+const bookPageFromCandidates = (
+  candidates: Array<{ pairId: string; book: BookState }>,
+  limit: number,
 ): StorageBookDocPage => {
-  const limit = readPageLimit(query);
-  const cursor = String(query?.cursor || '').trim();
-  const ordered = Array.from(books.entries()).sort(compareBooksNearSpread);
-  const startIndex = cursor ? ordered.findIndex(([pairId]) => pairId === cursor) + 1 : 0;
-  const offset = Math.max(0, startIndex);
-  const visible = ordered.slice(offset, offset + limit);
+  const visible = candidates.slice(0, limit);
   return {
-    items: visible.map(([pairId, book]) => ({ pairId, book })),
-    nextCursor: offset + limit < ordered.length ? visible[visible.length - 1]?.[0] ?? null : null,
+    items: visible.map((entry) => ({ pairId: entry.pairId, book: entry.book })),
+    nextCursor: candidates.length > limit ? visible[visible.length - 1]?.pairId ?? null : null,
   };
+};
+
+const listBookPageFromKeyspace = async (options: {
+  db: RuntimeDbLike;
+  prefix: Buffer;
+  cursorKey?: Buffer | undefined;
+  parseKey: (key: Buffer) => { pairId: string };
+  cursor: string;
+  limit: number;
+  direction: 'asc' | 'desc';
+  overlay?: Map<string, BookState | null>;
+}): Promise<StorageBookDocPage | null> => {
+  const { db, prefix, parseKey, cursor, limit, direction, overlay } = options;
+  if (typeof db.keys !== 'function') return null;
+  const candidates: Array<{ pairId: string; book: BookState }> = [];
+  const seen = new Set<string>();
+
+  for (const [pairId, book] of overlay?.entries?.() ?? []) {
+    if (!book || !isAfterBookCursor(pairId, cursor, direction)) continue;
+    pushBookCandidate(candidates, seen, pairId, book, limit, direction);
+  }
+
+  const upperBound = prefixUpperBound(prefix);
+  const range = direction === 'asc'
+    ? (upperBound ? { gte: options.cursorKey ?? prefix, lt: upperBound } : { gte: options.cursorKey ?? prefix })
+    : (upperBound
+        ? { gte: prefix, lt: options.cursorKey ?? upperBound, reverse: true }
+        : { prefix, reverse: true });
+  for await (const key of iterateKeys(db, range)) {
+    const { pairId } = parseKey(key);
+    if (!isAfterBookCursor(pairId, cursor, direction)) continue;
+    if (overlay?.has(pairId)) continue;
+    const book = decodeBuffer<BookState>(await db.get(key));
+    pushBookCandidate(candidates, seen, pairId, book, limit, direction);
+    const worst = candidates[candidates.length - 1]?.pairId;
+    if (!worst || candidates.length <= limit) continue;
+    const order = compareBookPairKeyOrder(pairId, worst);
+    if (direction === 'asc' && order >= 0) break;
+    if (direction === 'desc' && order <= 0) break;
+  }
+
+  return bookPageFromCandidates(candidates, limit);
 };
 
 const loadBookDocPageAtHeight = async (
@@ -529,34 +634,57 @@ const loadBookDocPageAtHeight = async (
   query?: StoragePageQuery,
 ): Promise<StorageBookDocPage> => {
   const normalized = normalizeEntityId(entityId);
-  const books = new Map<string, BookState>();
+  const limit = readPageLimit(query);
+  const cursor = readBookCursor(query);
+  const direction = query?.sortDir === 'desc' ? 'desc' : 'asc';
 
   if (targetHeight === latestMaterializedHeight) {
-    for await (const key of iterateKeys(db, { prefix: keyLiveBookPrefix(normalized) })) {
-      const parsed = parseLiveBookKey(key);
-      books.set(parsed.pairId, decodeBuffer<BookState>(await db.get(key)));
+    const page = await listBookPageFromKeyspace({
+      db,
+      prefix: keyLiveBookPrefix(normalized),
+      cursorKey: cursor ? keyLiveBook(normalized, cursor) : undefined,
+      parseKey: (key) => parseLiveBookKey(key),
+      cursor,
+      limit,
+      direction,
+    });
+    if (page) return page;
+  }
+
+  const baseSnapshotHeight = await findLatestSnapshotAtOrBelow(db, targetHeight);
+  const overlay = new Map<string, BookState | null>();
+  for (let height = baseSnapshotHeight + 1; height <= targetHeight; height += 1) {
+    const diff = await readJsonOrNull<StorageDiffRecord>(db, keyDiff(height));
+    if (!diff) continue;
+    for (const ref of diff.dels) {
+      if (ref.family === 'book' && normalizeEntityId(ref.entityId) === normalized) overlay.set(ref.pairId, null);
     }
-  } else {
-    const baseSnapshotHeight = await findLatestSnapshotAtOrBelow(db, targetHeight);
-    if (baseSnapshotHeight > 0) {
-      for await (const key of iterateKeys(db, { prefix: keySnapshotBookPrefix(baseSnapshotHeight, normalized) })) {
-        const parsed = parseLiveBookKey(key, 9);
-        books.set(parsed.pairId, decodeBuffer<BookState>(await db.get(key)));
-      }
-    }
-    for (let height = baseSnapshotHeight + 1; height <= targetHeight; height += 1) {
-      const diff = await readJsonOrNull<StorageDiffRecord>(db, keyDiff(height));
-      if (!diff) continue;
-      for (const ref of diff.dels) {
-        if (ref.family === 'book' && normalizeEntityId(ref.entityId) === normalized) books.delete(ref.pairId);
-      }
-      for (const doc of diff.puts) {
-        if (doc.family === 'book' && normalizeEntityId(doc.entityId) === normalized) books.set(doc.pairId, doc.value);
-      }
+    for (const doc of diff.puts) {
+      if (doc.family === 'book' && normalizeEntityId(doc.entityId) === normalized) overlay.set(doc.pairId, doc.value);
     }
   }
 
-  return bookPageFromMap(books, query);
+  if (baseSnapshotHeight > 0) {
+    const page = await listBookPageFromKeyspace({
+      db,
+      prefix: keySnapshotBookPrefix(baseSnapshotHeight, normalized),
+      cursorKey: cursor ? keySnapshotBookCursor(baseSnapshotHeight, normalized, cursor) : undefined,
+      parseKey: (key) => parseLiveBookKey(key, 9),
+      cursor,
+      limit,
+      direction,
+      overlay,
+    });
+    if (page) return page;
+  }
+
+  const candidates: Array<{ pairId: string; book: BookState }> = [];
+  const seen = new Set<string>();
+  for (const [pairId, book] of overlay.entries()) {
+    if (!book || !isAfterBookCursor(pairId, cursor, direction)) continue;
+    pushBookCandidate(candidates, seen, pairId, book, limit, direction);
+  }
+  return bookPageFromCandidates(candidates, limit);
 };
 
 export const loadEntityViewPageFromStorage = async (options: {
@@ -598,6 +726,33 @@ export const loadEntityViewPageFromStorage = async (options: {
     options.bookQuery,
   );
   return { core, accounts, books };
+};
+
+export const loadEntityAccountDocFromStorage = async (options: {
+  env: Env;
+  tryOpenDb: (env: Env) => Promise<boolean>;
+  getRuntimeDb: (env: Env) => RuntimeDbLike;
+  entityId: string;
+  counterpartyId: string;
+  height?: number;
+}): Promise<StorageAccountDoc | null> => {
+  const opened = await options.tryOpenDb(options.env);
+  if (!opened) return null;
+  const db = options.getRuntimeDb(options.env);
+  const head = await readJsonOrNull<StorageHead>(db, KEY_HEAD);
+  if (!head) return null;
+  const targetHeight = Math.min(options.height ?? head.latestHeight, head.latestHeight);
+  const latestMaterializedHeight = Math.max(
+    0,
+    Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? 0)),
+  );
+  return loadAccountDocAtHeight(
+    db,
+    options.entityId,
+    options.counterpartyId,
+    targetHeight,
+    latestMaterializedHeight,
+  );
 };
 
 export const loadEntityStateFromStorage = async (options: {

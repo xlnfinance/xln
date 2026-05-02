@@ -18,13 +18,12 @@ import {
   handleRuntimeAdapterMessage,
 } from '../radapter/server';
 import { encodeBuffer, writeBatch } from '../storage/codec';
-import { docRefCellKey, docRefForDoc, docValueKey, keyLiveDocHash, liveKeyForDoc } from '../storage/doc-refs';
+import { docRefCellKey, docRefForDoc, docValueKey, liveKeyForDoc } from '../storage/doc-refs';
 import { prepareStorageStateHashes, storageMerkleCellHexKey } from '../storage/hashes';
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
   KEY_HEAD,
   normalizeEntityId,
-  keyLiveEntityHash,
   keyMerkleBranch,
   keyMerkleLeaf,
   keyMerkleRoot,
@@ -283,10 +282,7 @@ const writeDocs = async (
     if (!raw) throw new Error(`DOC_BUFFER_MISSING: ${docValueKey(doc)}`);
     batch.put(liveKeyForDoc(doc), raw);
   }
-  for (const key of prepared.docHashDels) batch.del?.(key);
   for (const key of prepared.merkleDels) batch.del?.(key);
-  for (const put of prepared.docHashPuts) batch.put(put.key, put.value);
-  for (const put of prepared.entityHashPuts) batch.put(put.key, put.value);
   for (const put of prepared.merklePuts) batch.put(put.key, put.value);
   batch.put(KEY_HEAD, encodeBuffer(makeHead(headHeight)));
   await writeBatch(batch);
@@ -351,7 +347,6 @@ const seedHubBulk = async (
     const encoded = encodedDoc(doc);
     const ref = docRefForDoc(doc);
     pending.push({ key: liveKeyForDoc(doc), value: encoded.raw });
-    pending.push({ key: keyLiveDocHash(ref), value: encoded.hashBytes });
     leaves.push({ hexKey: storageMerkleCellHexKey(docRefCellKey(ref)), value: encoded.hashBytes });
   };
 
@@ -398,7 +393,6 @@ const seedHubBulk = async (
   const entityHashDoc: StorageEntityHashDoc = { entityId, hash: built.root, cellCount: built.leafCount };
   const merkleRows: Array<{ key: Buffer; value: Buffer }> = [
     { key: keyMerkleRoot(entityId, 'runtime-roots'), value: encodeBuffer(rootDoc) },
-    { key: keyLiveEntityHash(entityId), value: encodeBuffer(entityHashDoc) },
     { key: KEY_HEAD, value: encodeBuffer(makeHead(state.height)) },
   ];
   for (const branch of built.branches) {

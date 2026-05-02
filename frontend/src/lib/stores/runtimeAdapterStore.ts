@@ -42,10 +42,11 @@ export const connectRuntimeAdapter = async (config: RuntimeAdapterConfig): Promi
       registerEnvChangeCallback: (env, cb) => xln.registerEnvChangeCallback(env, cb),
       buildReadContext: (env) => ({
         readHead: () => xln.readPersistedStorageHead(env),
-        readFrame: (height) => xln.readPersistedStorageFrameRecord(env, height),
-        listCheckpoints: () => xln.listPersistedCheckpointHeights(env),
-        loadEntityState: (entityId, height) => xln.loadEntityStateFromStorageDb(env, entityId, height),
-        loadEntityViewPage: (entityId, height, query) => xln.loadEntityViewPageFromStorageDb(env, entityId, height, query),
+	        readFrame: (height) => xln.readPersistedStorageFrameRecord(env, height),
+	        listCheckpoints: () => xln.listPersistedCheckpointHeights(env),
+	        loadEntityState: (entityId, height) => xln.loadEntityStateFromStorageDb(env, entityId, height),
+	        loadEntityAccountDoc: (entityId, counterpartyId, height) => xln.loadEntityAccountDocFromStorageDb(env, entityId, counterpartyId, height),
+	        loadEntityViewPage: (entityId, height, query) => xln.loadEntityViewPageFromStorageDb(env, entityId, height, query),
         listEntityIdsAtHeight: (height) => xln.listPersistedEntityIdsAtHeight(env, height),
       }),
     });
