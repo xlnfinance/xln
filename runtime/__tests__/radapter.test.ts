@@ -248,10 +248,16 @@ const snapshotBookKey = (height: number, entity: string, pairId: string): Buffer
 
 const capabilityTokenUnchecked = (seed: string, role: 'read' | 'full', expiresAtMs: number): string => {
   const level = role === 'read' ? 'inspect' : 'admin';
+  const audience = 'xln-runtime';
+  const keyId = 'test';
+  const tokenId = 'unchecked';
+  const encodedAudience = Buffer.from(audience, 'utf8').toString('base64url');
+  const encodedKeyId = Buffer.from(keyId, 'utf8').toString('base64url');
+  const encodedTokenId = Buffer.from(tokenId, 'utf8').toString('base64url');
   const signature = createHmac('sha256', seed)
-    .update(`xln-radapter-v1:cap:${level}:${expiresAtMs}`)
+    .update(`xln-radapter-v1:cap:${level}:${expiresAtMs}:${audience}:${keyId}:${tokenId}`)
     .digest('hex');
-  return `xlnra1.${role}.${expiresAtMs}.${signature}`;
+  return `xlnra1.${role}.${expiresAtMs}.${encodedAudience}.${encodedKeyId}.${encodedTokenId}.${signature}`;
 };
 
 const oldStaticAuthKey = (seed: string, level: 'inspect' | 'admin'): string =>
@@ -279,6 +285,28 @@ test('runtime adapter rejects old static auth keys', () => {
   const token = deriveRuntimeAdapterCapabilityToken('seed', 'full', Date.now() + 60_000);
   expect(verifyRuntimeAdapterAuthCredential('seed', oldAdmin)).toBe(null);
   expect(verifyRuntimeAdapterAuthCredential('seed', token)?.level).toBe('admin');
+});
+
+test('runtime adapter rejects legacy four-part capability tokens', () => {
+  const exp = Date.now() + 60_000;
+  const signature = createHmac('sha256', 'seed')
+    .update(`xln-radapter-v1:cap:admin:${exp}`)
+    .digest('hex');
+  expect(verifyRuntimeAdapterAuthCredential('seed', `xlnra1.full.${exp}.${signature}`)).toBe(null);
+});
+
+test('runtime adapter capability tokens are audience scoped and revocable', () => {
+  const token = deriveRuntimeAdapterCapabilityToken('seed', 'read', Date.now() + 60_000, {
+    audience: 'runtime-a',
+    keyId: 'kid-a',
+    tokenId: 'jti-a',
+  });
+  expect(verifyRuntimeAdapterAuthCredential('seed', token, { audience: 'runtime-a' })?.level).toBe('inspect');
+  expect(verifyRuntimeAdapterAuthCredential('seed', token, { audience: 'runtime-b' })).toBe(null);
+  expect(verifyRuntimeAdapterAuthCredential('seed', token, {
+    audience: 'runtime-a',
+    revokedTokenIds: new Set(['jti-a']),
+  })).toBe(null);
 });
 
 test('runtime adapter capability token ttl is configurable', () => {
@@ -340,10 +368,32 @@ test('runtime adapter runtime seed auth fallback is explicit opt-in', () => {
   }
 });
 
+test('runtime adapter production auth seed requires entropy', () => {
+  const previousNodeEnv = process.env['NODE_ENV'];
+  const previousAuthSeed = process.env['XLN_RADAPTER_AUTH_SEED'];
+  try {
+    process.env['NODE_ENV'] = 'production';
+    process.env['XLN_RADAPTER_AUTH_SEED'] = 'short';
+    expect(() => resolveRuntimeAdapterAuthSeed(makeEnv())).toThrow('RADAPTER_AUTH_SEED_TOO_WEAK');
+    process.env['XLN_RADAPTER_AUTH_SEED'] = 'x'.repeat(32);
+    expect(resolveRuntimeAdapterAuthSeed(makeEnv())).toBe('x'.repeat(32));
+  } finally {
+    if (previousNodeEnv === undefined) delete process.env['NODE_ENV'];
+    else process.env['NODE_ENV'] = previousNodeEnv;
+    if (previousAuthSeed === undefined) delete process.env['XLN_RADAPTER_AUTH_SEED'];
+    else process.env['XLN_RADAPTER_AUTH_SEED'] = previousAuthSeed;
+  }
+});
+
 test('runtime adapter resolver reads live head and entity paths', async () => {
   const env = makeEnv();
   const ctx = { env, loadEntityViewPage: makeTestViewPageLoader(env) };
-  const head = await resolveRuntimeAdapterRead<{ latestHeight: number }>({ env }, 'head');
+  const head = await resolveRuntimeAdapterRead<{ latestHeight: number }>({
+    env,
+    readHead: async () => {
+      throw new Error('current head must not hit storage');
+    },
+  }, 'head');
   const entities = await resolveRuntimeAdapterRead<Array<{ entityId: string; label: string }>>({ env }, 'entities');
   const entity = await resolveRuntimeAdapterRead<{ entityId: string; profile: { name: string } }>({ env }, `entity/${entityId}`);
   const accounts = await resolveRuntimeAdapterRead<{ items: Array<{ currentHeight: number }>; nextCursor: string | null }>(
@@ -486,39 +536,24 @@ test('runtime adapter historical view frame uses paged storage loader instead of
   expect(frame.activeEntity?.accounts.items[0]?.rightEntity).toBe(counterpartyId);
 });
 
-test('runtime adapter current view frame prefers paged storage loader over live account map scan', async () => {
+test('runtime adapter current view frame reads live env without touching storage loader', async () => {
   const env = makeEnv();
-  const replica = Array.from(env.eReplicas.values())[0]!;
-  const account = replica.state.accounts.get(counterpartyId)!;
   let pagedLoadCalled = false;
 
   const frame = await resolveRuntimeAdapterRead<{
     activeEntity: { accounts: { items: Array<{ rightEntity: string }> } } | null;
   }>({
     env,
-    readHead: async () => ({
-      schemaVersion: 1,
-      latestHeight: env.height,
-      latestMaterializedHeight: env.height,
-      latestSnapshotHeight: env.height,
-      snapshotPeriodFrames: 256,
-      retainSnapshots: 3,
-      epochMaxBytes: 1,
-      accountMerkleRadix: 16,
-      retainedHistoryBytes: 0,
-    }),
-    loadEntityViewPage: async (_entityId, height) => {
+    readHead: async () => {
+      throw new Error('current view-frame must not hit storage head');
+    },
+    loadEntityViewPage: async () => {
       pagedLoadCalled = true;
-      expect(height).toBe(env.height);
-      return {
-        core: projectEntityCoreDoc(replica.state, replica),
-        accounts: { items: [projectAccountDoc(account)], nextCursor: null },
-        books: { items: [], nextCursor: null },
-      };
+      throw new Error('current-height view-frame must not hit storage loader');
     },
   }, 'view-frame', { accountsLimit: 1 });
 
-  expect(pagedLoadCalled).toBe(true);
+  expect(pagedLoadCalled).toBe(false);
   expect(frame.activeEntity?.accounts.items).toHaveLength(1);
   expect(frame.activeEntity?.accounts.items[0]?.rightEntity).toBe(counterpartyId);
 });

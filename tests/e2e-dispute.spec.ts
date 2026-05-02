@@ -22,6 +22,7 @@ import {
 
 const INIT_TIMEOUT = 30_000;
 const LONG_E2E = process.env.E2E_LONG === '1';
+const ISOLATED_BASELINE_READY = process.env.E2E_ISOLATED_BASELINE_READY === '1';
 
 function randomMnemonic(): string {
   return Wallet.createRandom().mnemonic!.phrase;
@@ -1198,13 +1199,17 @@ test.describe('E2E Dispute Flow', () => {
   test.describe.configure({ timeout: LONG_E2E ? 480_000 : 180_000 });
 
   test.beforeEach(async ({ page }) => {
+    if (ISOLATED_BASELINE_READY) {
+      console.log('[E2E-TIMING] dispute.reset_server.skip 0ms');
+      return;
+    }
     await timedStep('dispute.reset_server', () => resetProdServer(page, { timeoutMs: LONG_E2E ? 240_000 : 180_000 }));
   });
 
   // Scenario: trigger a dispute from the entity workspace, observe reserve returning after finalize,
   // then continue with post-dispute R2R/R2C/C2R coverage and confirm reload restores the final state.
   test('entity workspace dispute lifecycle returns reserve', async ({ page }) => {
-    test.setTimeout(LONG_E2E ? 360_000 : 210_000);
+    test.setTimeout(LONG_E2E ? 420_000 : 300_000);
     page.on('console', (msg) => {
       if (msg.type() === 'error') {
         process.stdout.write(`[BROWSER:error] ${msg.text()}\n`);

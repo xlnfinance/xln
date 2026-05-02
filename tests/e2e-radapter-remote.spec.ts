@@ -7,12 +7,23 @@ import {
   waitForNamedHubs,
 } from './utils/e2e-baseline';
 
-const capabilityToken = (seed: string, role: 'read' | 'full', expiresAtMs: number): string => {
+const capabilityToken = (seed: string, role: 'read' | 'full', expiresAtMs: number, rawAudience: string): string => {
   const level = role === 'read' ? 'inspect' : 'admin';
+  const audience = String(rawAudience || 'xln-runtime').toLowerCase();
+  const keyId = 'e2e';
+  const tokenId = `e2e-${expiresAtMs}`;
   const signature = createHmac('sha256', seed)
-    .update(`xln-radapter-v1:cap:${level}:${expiresAtMs}`)
+    .update(`xln-radapter-v1:cap:${level}:${expiresAtMs}:${audience}:${keyId}:${tokenId}`)
     .digest('hex');
-  return `xlnra1.${role}.${expiresAtMs}.${signature}`;
+  return [
+    'xlnra1',
+    role,
+    String(expiresAtMs),
+    Buffer.from(audience, 'utf8').toString('base64url'),
+    Buffer.from(keyId, 'utf8').toString('base64url'),
+    Buffer.from(tokenId, 'utf8').toString('base64url'),
+    signature,
+  ].join('.');
 };
 
 const hubRpcUrl = (hubOffset: number): string => {
@@ -29,7 +40,12 @@ test('remote /app opens an existing hub runtime through radapter', async ({ page
   expect(h1).toMatch(/^0x[0-9a-f]{64}$/);
 
   const wsUrl = hubRpcUrl(10);
-  const key = capabilityToken('xln-e2e-h1', 'full', Date.now() + 60 * 60 * 1_000);
+  const hubInfoResponse = await page.request.get(`http://127.0.0.1:${Number(new URL(API_BASE_URL).port) + 10}/api/info`);
+  expect(hubInfoResponse.ok()).toBe(true);
+  const hubInfo = await hubInfoResponse.json().catch(() => ({}));
+  const audience = String(hubInfo.runtimeId || '').toLowerCase();
+  expect(audience.length).toBeGreaterThan(0);
+  const key = capabilityToken('xln-e2e-h1', 'full', Date.now() + 60 * 60 * 1_000, audience);
   const url = `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(wsUrl)}&key=${encodeURIComponent(key)}#accounts`;
 
   await page.goto(url, { waitUntil: 'domcontentloaded' });

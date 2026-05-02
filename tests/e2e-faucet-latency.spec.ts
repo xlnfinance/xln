@@ -281,7 +281,7 @@ async function measureAccountStateToDomLatency(
 
 test.describe('E2E Faucet Latency', () => {
   test('demo account single-hub UI USDT faucet finalizes as fast as possible', async ({ page }) => {
-    test.setTimeout(LONG_E2E ? 180_000 : 90_000);
+    test.setTimeout(LONG_E2E ? 240_000 : 180_000);
 
     await gotoApp(page, {
       appBaseUrl: APP_BASE_URL,

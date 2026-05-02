@@ -1308,7 +1308,7 @@ export type XlnServerOptions = {
 
 const DEFAULT_OPTIONS: XlnServerOptions = {
   port: 8080,
-  host: '0.0.0.0',
+  host: '127.0.0.1',
   staticDir: './frontend/build',
   relaySeeds: [],
   serverId: 'xln-server',
@@ -1885,6 +1885,31 @@ const requireDaemonControlAuth = (req: Request): Response | null => {
   );
 };
 
+const verifyDaemonControlTokenValue = (value: unknown): boolean => {
+  const configuredToken = String(process.env['DAEMON_CONTROL_TOKEN'] || '').trim();
+  if (!configuredToken) return false;
+  return String(value || '').trim() === configuredToken;
+};
+
+const requireLegacyDaemonRpcAuth = (ws: RelaySocket, id: unknown, msg: Record<string, unknown>): boolean => {
+  if (
+    verifyDaemonControlTokenValue(msg['key']) ||
+    verifyDaemonControlTokenValue(msg['auth']) ||
+    verifyDaemonControlTokenValue(msg['controlToken']) ||
+    verifyDaemonControlTokenValue(msg['daemonControlToken'])
+  ) {
+    return true;
+  }
+  const configuredToken = String(process.env['DAEMON_CONTROL_TOKEN'] || '').trim();
+  ws.send(safeStringify({
+    type: 'error',
+    inReplyTo: id,
+    code: 'E_UNAUTHORIZED',
+    error: configuredToken ? 'legacy daemon rpc auth required' : 'legacy daemon rpc disabled',
+  }));
+  return false;
+};
+
 const parseTaggedControlBody = async <T>(req: Request): Promise<T> => {
   const raw = await req.text();
   if (!raw.trim()) return {} as T;
@@ -1951,6 +1976,7 @@ const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, e
   if (handledByRuntimeAdapter) return;
 
   const { type, id } = msg;
+  if (!requireLegacyDaemonRpcAuth(ws, id, msg)) return;
 
   if (isMarketMessageType(type)) {
     ws.send(safeStringify({ type: 'error', inReplyTo: id, error: 'market_* messages are supported on /relay websocket' }));
@@ -3639,7 +3665,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
   const createHttpServer = () => Bun.serve({
     port: options.port,
-    hostname: options.host ?? '0.0.0.0',
+    hostname: options.host ?? '127.0.0.1',
 
     async fetch(req, server) {
       const url = new URL(req.url);
@@ -4114,7 +4140,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 ║                      XLN Unified Server                          ║
 ╠══════════════════════════════════════════════════════════════════╣
 ║  Port: ${String(options.port).padEnd(10)}                                       ║
-║  Host: ${(options.host || '0.0.0.0').padEnd(10)}                                       ║
+║  Host: ${(options.host || '127.0.0.1').padEnd(10)}                                       ║
 ║  Mode: ${(globalJAdapter ? globalJAdapter.mode : 'no-jadapter').padEnd(10)}                                       ║
 ╠══════════════════════════════════════════════════════════════════╣
 ║  Endpoints:                                                      ║
@@ -4153,7 +4179,7 @@ if (import.meta.main) {
 
   const options: Partial<XlnServerOptions> = {
     port: Number(getArg('--port', '8080')),
-    host: getArg('--host', '0.0.0.0'),
+    host: getArg('--host', '127.0.0.1'),
     staticDir: getArg('--static-dir', './frontend/build'),
     serverId: getArg('--server-id', 'xln-server'),
   };

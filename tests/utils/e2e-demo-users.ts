@@ -1,4 +1,4 @@
-import { expect, type Page } from '@playwright/test';
+import { expect, type Locator, type Page } from '@playwright/test';
 import { getIndexedAccountPath, HDNodeWallet, Mnemonic, Wallet } from 'ethers';
 import { requireAppBaseUrl } from './e2e-base-url';
 
@@ -244,7 +244,10 @@ async function dismissOnboardingIfVisible(page: Page): Promise<void> {
 
 async function completeProfileOnboardingIfVisible(page: Page, label: string): Promise<void> {
   const finishButton = page.getByRole('button', { name: /Start( using xln)?|Continue/i }).first();
-  const displayNameInput = page.locator('#display-name').or(page.getByRole('textbox', { name: /Display name/i }).first());
+  const displayNameInputs = [
+    page.locator('#display-name').first(),
+    page.getByRole('textbox', { name: /Display name/i }).first(),
+  ];
   const contextReady = page.getByTestId('context-current').first();
   const runtimeReady = async (): Promise<boolean> =>
     await page.evaluate(() => {
@@ -256,8 +259,14 @@ async function completeProfileOnboardingIfVisible(page: Page, label: string): Pr
       }).isolatedEnv;
       return Boolean(env?.runtimeId) && Number(env?.eReplicas?.size || 0) > 0;
     }).catch(() => false);
+  const visibleDisplayNameInput = async (timeoutMs = 0): Promise<Locator | null> => {
+    for (const input of displayNameInputs) {
+      if (await input.isVisible({ timeout: timeoutMs }).catch(() => false)) return input;
+    }
+    return null;
+  };
   const onboardingGoneOrReady = async (): Promise<boolean> => {
-    const stillHasInput = await displayNameInput.isVisible().catch(() => false);
+    const stillHasInput = await visibleDisplayNameInput() !== null;
     const stillHasButton = await finishButton.isVisible().catch(() => false);
     if (await runtimeReady()) return true;
     if (!stillHasInput && !stillHasButton) return true;
@@ -265,21 +274,29 @@ async function completeProfileOnboardingIfVisible(page: Page, label: string): Pr
   };
 
   const onboardingVisible =
-    await displayNameInput.isVisible({ timeout: 1000 }).catch(() => false)
+    await visibleDisplayNameInput(1000) !== null
     || await finishButton.isVisible({ timeout: 1000 }).catch(() => false);
   if (!onboardingVisible) {
     return;
   }
 
-  if (await displayNameInput.isVisible({ timeout: 15_000 }).catch(() => false)) {
-    const currentValue = (await displayNameInput.inputValue()).trim();
+  const displayNameInput = await visibleDisplayNameInput(15_000);
+  if (displayNameInput) {
+    const currentValue = await displayNameInput.inputValue({ timeout: 1_000 }).catch(async (error) => {
+      if (page.isClosed() || await onboardingGoneOrReady()) return null;
+      throw error;
+    });
+    if (currentValue === null) return;
     if (currentValue.length === 0) {
-      await displayNameInput.fill(label);
+      await displayNameInput.fill(label, { timeout: 5_000 }).catch(async (error) => {
+        if (page.isClosed() || await onboardingGoneOrReady()) return;
+        throw error;
+      });
     }
   } else if (await onboardingGoneOrReady()) {
     return;
   } else {
-    await expect(displayNameInput).toBeVisible({ timeout: 1 });
+    throw new Error('profile onboarding display name input disappeared before runtime became ready');
   }
 
   const riskCheckbox = page.getByRole('checkbox', {

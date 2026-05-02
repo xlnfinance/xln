@@ -12,6 +12,7 @@ import { CustodyStore, type ActivityRecord, type SessionRecord } from './store';
 const HOST = process.env['CUSTODY_HOST'] || 'localhost';
 const PORT = Number(process.env['CUSTODY_PORT'] || '8087');
 const DAEMON_WS_URL = process.env['CUSTODY_DAEMON_WS'] || 'ws://127.0.0.1:8088/rpc';
+const DAEMON_CONTROL_TOKEN = process.env['CUSTODY_DAEMON_CONTROL_TOKEN'] || '';
 const WALLET_URL = process.env['CUSTODY_WALLET_URL'] || 'https://localhost:8080/app';
 const ENABLE_HTTPS = (() => {
   const raw = String(process.env['CUSTODY_HTTPS'] || '').trim().toLowerCase();
@@ -46,7 +47,7 @@ const TOKENS = DEFAULT_TOKENS.map((token, index) => ({
 }));
 
 const store = new CustodyStore(CUSTODY_DB_PATH);
-const daemon = new DaemonRpcClient(DAEMON_WS_URL);
+const daemon = new DaemonRpcClient(DAEMON_WS_URL, DAEMON_CONTROL_TOKEN);
 
 let syncInFlight = false;
 let lastSyncOkAt = 0;

@@ -12,7 +12,9 @@ import type {
   RuntimeAdapterResponse,
 } from './types';
 import {
+  resolveRuntimeAdapterAuthAudience,
   resolveRuntimeAdapterAuthSeed,
+  runtimeAdapterRevokedTokenIds,
   verifyRuntimeAdapterAuthCredential,
 } from './auth';
 
@@ -211,7 +213,10 @@ export const handleRuntimeAdapterMessage = async (
   try {
     if (msg.op === 'auth') {
       const authSeed = resolveRuntimeAdapterAuthSeed(env);
-      const auth = verifyRuntimeAdapterAuthCredential(authSeed, msg.key);
+      const auth = verifyRuntimeAdapterAuthCredential(authSeed, msg.key, {
+        audience: resolveRuntimeAdapterAuthAudience(env),
+        revokedTokenIds: runtimeAdapterRevokedTokenIds(),
+      });
       if (!auth) throw new RuntimeAdapterError('E_UNAUTHORIZED', 'invalid runtime adapter auth key');
       state.authLevel = auth.level;
       state.authExpiresAtMs = auth.expiresAtMs;

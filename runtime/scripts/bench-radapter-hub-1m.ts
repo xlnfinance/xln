@@ -606,7 +606,11 @@ async function main() {
     trace.mark('server.ready', { wsUrl });
 
     const adapter = new RemoteRuntimeAdapter();
-    const token = deriveRuntimeAdapterCapabilityToken(cli.seed, 'full', Date.now() + 60 * 60 * 1000);
+    const token = deriveRuntimeAdapterCapabilityToken(cli.seed, 'full', Date.now() + 60 * 60 * 1000, {
+      audience: String(env.runtimeId || 'radapter-hub-1m'),
+      keyId: 'bench',
+      tokenId: 'bench-client',
+    });
     await adapter.connect({ mode: 'remote', wsUrl, authKey: token, requestTimeoutMs: 30_000 });
     trace.mark('adapter.connected', { height: adapter.currentHeight, authLevel: adapter.authLevel });
 

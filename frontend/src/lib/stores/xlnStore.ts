@@ -196,6 +196,13 @@ export const appRuntimeAdapterMode = writable<RuntimeAdapterConfig['mode']>('emb
 export const appRuntimeAdapterStatus = writable<RuntimeAdapterStatus>('disconnected');
 export const appRuntimeAdapterEndpoint = writable<string>('');
 export const appRuntimeAdapterActiveEntityId = writable<string>('');
+export const appRuntimeAdapterPageInfo = writable<{
+  entityId: string;
+  accountsShown: number;
+  accountsHasMore: boolean;
+  booksShown: number;
+  booksHasMore: boolean;
+} | null>(null);
 
 export const setRuntimeAdapterActiveEntityId = (entityId: string): void => {
   appRuntimeAdapterActiveEntityId.set(normalizeEntityIdForView(entityId));
@@ -368,6 +375,7 @@ const resolveAppRuntimeAdapterConfig = (): RuntimeAdapterConfig => {
   if (!remoteRequested) {
     appRuntimeAdapterMode.set('embedded');
     appRuntimeAdapterEndpoint.set('embedded');
+    appRuntimeAdapterPageInfo.set(null);
     return { mode: 'embedded' };
   }
 
@@ -613,6 +621,7 @@ const buildRemoteAdapterEnvSnapshot = async (
   const activeEntityId = active
     ? normalizeEntityIdForView(active.core.entityId || active.summary.entityId)
     : '';
+  if (!active) appRuntimeAdapterPageInfo.set(null);
 
   for (const summary of viewFrame.entities || []) {
     const entityId = normalizeEntityIdForView(summary.entityId);
@@ -625,6 +634,13 @@ const buildRemoteAdapterEnvSnapshot = async (
   if (active) {
     const entityId = activeEntityId;
     appRuntimeAdapterActiveEntityId.set(entityId);
+    appRuntimeAdapterPageInfo.set({
+      entityId,
+      accountsShown: active.accounts.items.length,
+      accountsHasMore: !!active.accounts.nextCursor,
+      booksShown: active.books.items.length,
+      booksHasMore: !!active.books.nextCursor,
+    });
     const accounts = new Map<string, StorageAccountDoc>();
     for (const doc of active.accounts.items) {
       accounts.set(accountCounterpartyId(entityId, doc), doc);
@@ -650,6 +666,7 @@ const buildRemoteAdapterPlaceholderEnv = (
   env.history = [];
   env.eReplicas = new Map();
   env.quietRuntimeLogs = true;
+  appRuntimeAdapterPageInfo.set(null);
   return env;
 };
 

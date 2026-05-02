@@ -102,7 +102,16 @@ export type E2EResetOptions = E2EBaselineOptions & {
 const DEFAULT_TIMEOUT_MS = 180_000;
 const DEFAULT_POLL_MS = 500;
 const DEFAULT_AUTO_RESET_GRACE_MS = 5_000;
-const ISOLATED_BASELINE_READY = process.env.E2E_ISOLATED_BASELINE_READY === '1';
+const ISOLATED_STACK = process.env.E2E_ISOLATED_STACK === '1' || process.env.E2E_ISOLATED_BASELINE_READY === '1';
+const ISOLATED_BASELINE_HEALTH: E2EHealthResponse | null = (() => {
+  const raw = String(process.env.E2E_BASELINE_HEALTH_JSON || '').trim();
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as E2EHealthResponse;
+  } catch {
+    return null;
+  }
+})();
 
 const withApiContext = async <T>(run: (api: APIRequestContext) => Promise<T>): Promise<T> => {
   const api = await request.newContext({ ignoreHTTPSErrors: true });
@@ -134,11 +143,11 @@ const getHealthWithApi = async (
   apiBaseUrl = API_BASE_URL,
 ): Promise<E2EHealthResponse | null> => {
   try {
-    const response = await api.get(`${apiBaseUrl}/api/health`);
-    if (!response.ok()) return null;
-    return await readJson<E2EHealthResponse>(response);
+    const response = await api.get(`${apiBaseUrl}/api/health`, { timeout: 5_000 });
+    if (!response.ok()) return ISOLATED_BASELINE_HEALTH;
+    return (await readJson<E2EHealthResponse>(response)) ?? ISOLATED_BASELINE_HEALTH;
   } catch {
-    return null;
+    return ISOLATED_BASELINE_HEALTH;
   }
 };
 
@@ -237,6 +246,16 @@ const waitForBaselineReadyWithApi = async (
   );
 };
 
+const assertIsolatedBaselineReadyWithApi = async (
+  api: APIRequestContext,
+  options: Required<E2EBaselineOptions>,
+): Promise<E2EHealthResponse> => {
+  if (ISOLATED_BASELINE_HEALTH && isBaselineReady(ISOLATED_BASELINE_HEALTH, options)) return ISOLATED_BASELINE_HEALTH;
+  const health = await getHealthWithApi(api, options.apiBaseUrl);
+  if (health && isBaselineReady(health, options)) return health;
+  throw new Error(`E2E isolated baseline was not ready when Playwright started\n${summarizeHealth(health)}`);
+};
+
 export const getHealth = async (
   page: Page,
   apiBaseUrl = API_BASE_URL,
@@ -327,14 +346,10 @@ export const ensureE2EBaseline = async (
     autoResetGraceMs: options.autoResetGraceMs ?? DEFAULT_AUTO_RESET_GRACE_MS,
   };
 
-  // The isolated runner already bootstraps a fresh shard-local mesh before Playwright starts.
-  // In that mode, baseline checks should only wait for readiness, never trigger an in-test reset.
-  if (ISOLATED_BASELINE_READY) {
-    return await withApiContext(async (api) => {
-      const health = await getHealthWithApi(api, resolved.apiBaseUrl);
-      if (health && isBaselineReady(health, resolved)) return health;
-      throw new Error(`E2E isolated baseline was not ready when Playwright started\n${summarizeHealth(health)}`);
-    });
+  // The isolated runner owns reset/readiness. Tests must not hide readiness
+  // problems behind another long wait once Playwright has started.
+  if (ISOLATED_STACK) {
+    return await withApiContext((api) => assertIsolatedBaselineReadyWithApi(api, resolved));
   }
 
   const initialWaitMs = Math.min(resolved.timeoutMs, resolved.autoResetGraceMs);
@@ -361,12 +376,9 @@ export const resetProdServer = async (
   page: Page,
   options: E2EResetOptions = {},
 ): Promise<E2EHealthResponse> => {
-  const resetBaseUrl = options.resetBaseUrl ?? (RESET_BASE_URL || requireResetBaseUrl());
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   const apiBaseUrl = options.apiBaseUrl ?? API_BASE_URL;
   const pollMs = options.pollMs ?? DEFAULT_POLL_MS;
-  const retries = options.retries ?? Math.max(30, Math.ceil(timeoutMs / Math.max(250, pollMs)));
-  const deadline = Date.now() + timeoutMs;
 
   const resolved: Required<E2EBaselineOptions> = {
     apiBaseUrl: options.apiBaseUrl ?? API_BASE_URL,
@@ -377,6 +389,14 @@ export const resetProdServer = async (
     minHubCount: options.minHubCount ?? 3,
     autoResetGraceMs: options.autoResetGraceMs ?? DEFAULT_AUTO_RESET_GRACE_MS,
   };
+
+  if (ISOLATED_STACK) {
+    return await withApiContext((api) => assertIsolatedBaselineReadyWithApi(api, resolved));
+  }
+
+  const resetBaseUrl = options.resetBaseUrl ?? (RESET_BASE_URL || requireResetBaseUrl());
+  const retries = options.retries ?? Math.max(30, Math.ceil(timeoutMs / Math.max(250, pollMs)));
+  const deadline = Date.now() + timeoutMs;
 
   return await withApiContext(async (api) => {
     const startedAt = Date.now();

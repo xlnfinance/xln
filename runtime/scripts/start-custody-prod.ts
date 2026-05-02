@@ -40,6 +40,7 @@ const PROFILE_NAME = process.env['CUSTODY_PROFILE_NAME'] || 'Custody';
 const JURISDICTION_ID = requireEnv('CUSTODY_JURISDICTION_ID');
 const GOSSIP_POLL_MS = Number(process.env['CUSTODY_GOSSIP_POLL_MS'] || '1000');
 const DAEMON_RUNTIME_SEED = process.env['CUSTODY_DAEMON_RUNTIME_SEED'] || `${SEED}:runtime`;
+const DAEMON_CONTROL_TOKEN = requireEnv('CUSTODY_DAEMON_CONTROL_TOKEN');
 
 let shuttingDown = false;
 
@@ -237,6 +238,7 @@ const startDaemon = async (): Promise<ManagedChild | null> => {
       PUBLIC_RPC: PUBLIC_RPC_URL,
       PUBLIC_RELAY_URL: RELAY_URL,
       RELAY_URL,
+      DAEMON_CONTROL_TOKEN,
       XLN_USE_PREDEPLOYED_ADDRESSES: 'true',
       XLN_JURISDICTIONS_PATH: resolveJurisdictionsJsonPath(),
       XLN_RUNTIME_SEED: DAEMON_RUNTIME_SEED,
@@ -261,7 +263,11 @@ const startDaemon = async (): Promise<ManagedChild | null> => {
 };
 
 const ensureCustodyIdentity = async (hubIds: string[]): Promise<{ entityId: string; signerId: string }> => {
-  const client = new DaemonControlClient({ baseUrl: `http://127.0.0.1:${DAEMON_PORT}`, timeoutMs: 20_000 });
+  const client = new DaemonControlClient({
+    baseUrl: `http://127.0.0.1:${DAEMON_PORT}`,
+    controlToken: DAEMON_CONTROL_TOKEN,
+    timeoutMs: 20_000,
+  });
   const identity = deriveManagedEntityIdentity({
     name: PROFILE_NAME,
     seed: SEED,
@@ -311,6 +317,7 @@ const startCustodyService = async (identity: { entityId: string; signerId: strin
       CUSTODY_HOST: '127.0.0.1',
       CUSTODY_PORT: String(CUSTODY_PORT),
       CUSTODY_DAEMON_WS: `ws://127.0.0.1:${DAEMON_PORT}/rpc`,
+      CUSTODY_DAEMON_CONTROL_TOKEN: DAEMON_CONTROL_TOKEN,
       CUSTODY_WALLET_URL: WALLET_URL,
       CUSTODY_ENTITY_ID: identity.entityId,
       CUSTODY_SIGNER_ID: identity.signerId,

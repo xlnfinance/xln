@@ -65,7 +65,7 @@ export class DaemonRpcClient {
   private readonly pending = new Map<string, PendingRequest>();
   private connected = false;
 
-  constructor(private readonly url: string) {}
+  constructor(private readonly url: string, private readonly controlToken = '') {}
 
   isConnected(): boolean {
     return this.connected && this.socket?.readyState === WebSocket.OPEN;
@@ -191,7 +191,12 @@ export class DaemonRpcClient {
       this.pending.set(id, { resolve: value => resolve(value as T), reject, timeout });
 
       try {
-        this.socket!.send(serializeTaggedJson({ id, type, ...payload }));
+        this.socket!.send(serializeTaggedJson({
+          id,
+          type,
+          ...(this.controlToken ? { daemonControlToken: this.controlToken } : {}),
+          ...payload,
+        }));
       } catch (error) {
         clearTimeout(timeout);
         this.pending.delete(id);
