@@ -100,6 +100,8 @@ const readAtHeight = (query?: RuntimeAdapterReadQuery): number | null => {
   return Math.floor(raw);
 };
 
+const envHeight = (env: Env): number => Math.max(0, Math.floor(Number(env.height ?? 0)));
+
 const findReplica = (env: Env, entityId: string): EntityReplica | null => {
   const normalized = normalizeEntityId(entityId);
   for (const replica of env.eReplicas?.values?.() ?? []) {
@@ -115,10 +117,11 @@ const labelForState = (state: EntityState): string => {
 
 const headFromEnv = (env: Env): StorageHead => {
   const storage = env.runtimeConfig?.storage;
+  const height = envHeight(env);
   return {
     schemaVersion: STORAGE_SCHEMA_VERSION,
-    latestHeight: Math.max(0, Math.floor(Number(env.height ?? 0))),
-    latestMaterializedHeight: Math.max(0, Math.floor(Number(env.height ?? 0))),
+    latestHeight: height,
+    latestMaterializedHeight: height,
     latestSnapshotHeight: 0,
     snapshotPeriodFrames: Math.max(
       1,
@@ -138,7 +141,7 @@ const resolveEntityState = async (
 ): Promise<{ state: EntityState; replica?: EntityReplica }> => {
   const normalized = normalizeEntityId(entityId);
   const height = readAtHeight(query);
-  if (height !== null && height !== ctx.env.height) {
+  if (height !== null && height !== envHeight(ctx.env)) {
     if (!ctx.loadEntityState) {
       throw new RuntimeAdapterError('E_BAD_QUERY', 'historical reads are unavailable for this adapter');
     }
@@ -157,7 +160,7 @@ const listEntitySummaries = async (
   query?: RuntimeAdapterReadQuery,
 ): Promise<RuntimeAdapterEntitySummary[]> => {
   const height = readAtHeight(query);
-  if (height !== null && height !== ctx.env.height) {
+  if (height !== null && height !== envHeight(ctx.env)) {
     if (!ctx.listEntityIdsAtHeight) {
       throw new RuntimeAdapterError('E_INTERNAL', 'storage entity listing is required for historical reads');
     }
@@ -168,6 +171,9 @@ const listEntitySummaries = async (
         ? await ctx.loadEntityViewPage(id, height, { limit: 1, accountsLimit: 1, booksLimit: 1 })
         : null;
       const loaded = !loadedView && ctx.loadEntityState ? await ctx.loadEntityState(id, height) : null;
+      if (!loadedView && !loaded) {
+        throw new RuntimeAdapterError('E_NOT_FOUND', `entity summary not found at height ${height}: ${normalizeEntityId(id)}`);
+      }
       const profileName = loadedView ? String(loadedView.core.profile?.name || '').trim() : '';
       summaries.push({
         entityId: normalizeEntityId(id),
@@ -334,14 +340,17 @@ const projectViewFrame = async (
   query?: RuntimeAdapterReadQuery,
 ): Promise<RuntimeAdapterViewFrame> => {
   const requestedHeight = readAtHeight(query);
-  const envHeight = Math.max(0, Math.floor(Number(ctx.env.height ?? 0)));
-  const isCurrentHeight = requestedHeight === null || requestedHeight === envHeight;
+  const currentEnvHeight = envHeight(ctx.env);
+  const isCurrentHeight = requestedHeight === null || requestedHeight === currentEnvHeight;
   if (!isCurrentHeight && !ctx.readHead) {
     throw new RuntimeAdapterError('E_INTERNAL', 'storage head reader is required for historical reads');
   }
   const persistedHead = !isCurrentHeight ? await ctx.readHead!() : null;
+  if (!isCurrentHeight && !persistedHead) {
+    throw new RuntimeAdapterError('E_NOT_FOUND', `storage head not found at height ${requestedHeight}`);
+  }
   const head = persistedHead ?? headFromEnv(ctx.env);
-  const height = requestedHeight ?? envHeight;
+  const height = requestedHeight ?? currentEnvHeight;
   const heightQuery = height > 0 ? { ...query, atHeight: height } : query;
   const entities = await listEntitySummaries(ctx, heightQuery);
   const requestedEntityId = normalizeEntityId(String(query?.entityId || ''));
@@ -365,8 +374,10 @@ const projectViewFrame = async (
   const storedQuery: RuntimeAdapterReadQuery = {
     ...heightQuery,
   };
-  if (accountQuery.limit !== undefined) storedQuery.limit = accountQuery.limit;
-  if (accountQuery.limit !== undefined) storedQuery.accountsLimit = accountQuery.limit;
+  if (accountQuery.limit !== undefined) {
+    storedQuery.limit = accountQuery.limit;
+    storedQuery.accountsLimit = accountQuery.limit;
+  }
   if (accountQuery.cursor) storedQuery.accountsCursor = accountQuery.cursor;
   if (query?.accountId) storedQuery.accountId = query.accountId;
   if (query?.accountsPage !== undefined) storedQuery.accountsPage = query.accountsPage;
@@ -405,13 +416,13 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
 
   if (parts.length === 1 && parts[0] === 'head') {
     const requestedHeight = readAtHeight(query);
-    const envHeight = Math.max(0, Math.floor(Number(ctx.env.height ?? 0)));
-    if (requestedHeight !== null && requestedHeight !== envHeight) {
+    const currentEnvHeight = envHeight(ctx.env);
+    if (requestedHeight !== null && requestedHeight !== currentEnvHeight) {
       if (!ctx.readHead) {
         throw new RuntimeAdapterError('E_INTERNAL', 'storage head reader is required for historical reads');
       }
       const head = await ctx.readHead();
-      if (!head) throw new RuntimeAdapterError('E_NOT_FOUND', 'storage head not found');
+      if (!head) throw new RuntimeAdapterError('E_NOT_FOUND', `storage head not found at height ${requestedHeight}`);
       return head as T;
     }
     return headFromEnv(ctx.env) as T;
@@ -431,12 +442,12 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
 
     if (parts.length === 3 && (parts[2] === 'accounts' || parts[2] === 'books' || parts[2] === 'book-docs')) {
       const height = readAtHeight(query);
-      const targetHeight = height ?? Math.max(0, Math.floor(Number(ctx.env.height ?? 0)));
+      const targetHeight = height ?? envHeight(ctx.env);
       if (targetHeight < 1) throw new RuntimeAdapterError('E_BAD_QUERY', 'paged entity reads require a persisted runtime height');
       const accountId = normalizeEntityId(String(query?.accountId || ''));
       if (parts[2] === 'accounts' && accountId) {
         const limit = readBoundedLimit(query?.accountsLimit ?? query?.limit, 10);
-        if (height === null || targetHeight === Math.max(0, Math.floor(Number(ctx.env.height ?? 0)))) {
+        if (height === null || targetHeight === envHeight(ctx.env)) {
           const replica = findReplica(ctx.env, entityId);
           if (!replica) throw new RuntimeAdapterError('E_NOT_FOUND', `entity not found: ${normalizeEntityId(entityId)}`);
           const account = replica.state.accounts.get(accountId);
@@ -448,7 +459,7 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
         const account = await ctx.loadEntityAccountDoc(entityId, accountId, targetHeight);
         return singleAccountPage(accountId, account, limit) as T;
       }
-      const stored = height === null || targetHeight === Math.max(0, Math.floor(Number(ctx.env.height ?? 0)))
+      const stored = height === null || targetHeight === envHeight(ctx.env)
         ? projectLiveEntityViewPage(ctx, entityId, query)
         : await loadRequiredEntityViewPage(ctx, entityId, targetHeight, query);
       return (parts[2] === 'accounts' ? stored.accounts : stored.books) as T;
@@ -457,7 +468,7 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
     if (parts.length === 4 && parts[2] === 'account') {
       const counterpartyId = normalizeEntityId(parts[3] ?? '');
       const height = readAtHeight(query);
-      if (height !== null && height !== ctx.env.height) {
+      if (height !== null && height !== envHeight(ctx.env)) {
         if (!ctx.loadEntityAccountDoc) {
           throw new RuntimeAdapterError('E_BAD_QUERY', 'historical account reads are unavailable for this adapter');
         }
@@ -480,7 +491,7 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
 
   if (parts[0] === 'frame' && parts.length === 2) {
     if (!ctx.readFrame) throw new RuntimeAdapterError('E_BAD_QUERY', 'frame reads are unavailable for this adapter');
-    const height = parts[1] === 'latest' ? Math.max(0, Math.floor(Number(ctx.env.height ?? 0))) : Number(parts[1]);
+    const height = parts[1] === 'latest' ? envHeight(ctx.env) : Number(parts[1]);
     if (!Number.isFinite(height) || height < 1) throw new RuntimeAdapterError('E_BAD_PATH', 'frame height must be a positive integer or latest');
     const frame = await ctx.readFrame(Math.floor(height));
     if (!frame) throw new RuntimeAdapterError('E_NOT_FOUND', `frame not found: ${Math.floor(height)}`);
