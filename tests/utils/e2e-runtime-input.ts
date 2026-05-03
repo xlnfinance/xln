@@ -1,3 +1,4 @@
+import { randomUUID } from 'node:crypto';
 import { expect, type Page } from '@playwright/test';
 
 type RuntimeEnv = {
@@ -22,6 +23,8 @@ type RuntimeTxEnqueueInput = {
 type EnqueueEntityTxOptions = {
   requireLocalReplica?: boolean;
 };
+
+const ENQUEUE_STATUS_PREFIX = 'xln:e2e:enqueue:';
 
 const isTransientEvaluateError = (error: unknown): boolean => {
   const message = error instanceof Error ? error.message : String(error);
@@ -56,22 +59,58 @@ async function evaluateWithRuntimeRetry<TResult, TArg>(
   throw new Error(`${label} failed: ${String(lastError)}`);
 }
 
+async function readEnqueueStatus(page: Page, storageKey: string): Promise<string | null> {
+  return await page.evaluate((key) => sessionStorage.getItem(key), storageKey).catch(() => null);
+}
+
 export async function enqueueRuntimeInput(page: Page, input: RuntimeTxEnqueueInput): Promise<void> {
-  const result = await evaluateWithRuntimeRetry(page, async ({ input }) => {
-    const runtimeWindow = window as typeof window & {
-      isolatedEnv?: RuntimeEnv;
-    };
-    const env = runtimeWindow.isolatedEnv;
-    if (!env) return { ok: false, error: 'isolatedEnv missing' };
+  const storageKey = `${ENQUEUE_STATUS_PREFIX}${randomUUID()}`;
+  let lastError: unknown = null;
 
-    const runtimeModule = await import(
-      /* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href
-    ) as RuntimeModule;
-    runtimeModule.enqueueRuntimeInput(env, input);
-    return { ok: true };
-  }, { input }, 'enqueueRuntimeInput');
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      await waitForRuntimeWindow(page);
+      const result = await page.evaluate(async ({ input, storageKey }) => {
+        const priorStatus = sessionStorage.getItem(storageKey);
+        if (priorStatus === 'committed') return { ok: true, alreadyCommitted: true };
+        if (priorStatus === 'started') {
+          return { ok: false, error: 'enqueueRuntimeInput already started; refusing duplicate enqueue' };
+        }
 
-  expect(result.ok, result.error || 'enqueueRuntimeInput failed').toBe(true);
+        const runtimeWindow = window as typeof window & {
+          isolatedEnv?: RuntimeEnv;
+        };
+        const env = runtimeWindow.isolatedEnv;
+        if (!env) return { ok: false, error: 'isolatedEnv missing' };
+
+        const runtimeModule = await import(
+          /* @vite-ignore */ new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href
+        ) as RuntimeModule;
+
+        sessionStorage.setItem(storageKey, 'started');
+        runtimeModule.enqueueRuntimeInput(env, input);
+        sessionStorage.setItem(storageKey, 'committed');
+        return { ok: true };
+      }, { input, storageKey });
+
+      expect(result.ok, result.error || 'enqueueRuntimeInput failed').toBe(true);
+      return;
+    } catch (error) {
+      lastError = error;
+      if (!isTransientEvaluateError(error) || attempt === 4) break;
+
+      const status = await readEnqueueStatus(page, storageKey);
+      if (status === 'committed') return;
+      if (status === 'started') {
+        throw new Error('enqueueRuntimeInput may already be committed; refusing duplicate enqueue', { cause: error });
+      }
+
+      await page.waitForTimeout(250 * (attempt + 1)).catch(() => {});
+    }
+  }
+
+  if (lastError instanceof Error) throw lastError;
+  throw new Error(`enqueueRuntimeInput failed: ${String(lastError)}`);
 }
 
 export async function enqueueEntityTxs(
