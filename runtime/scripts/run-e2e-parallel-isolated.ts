@@ -89,15 +89,29 @@ type RunnerLockPayload = {
   cwd: string;
 };
 
-type AsyncLimiter = <T>(fn: () => Promise<T>) => Promise<T>;
+type AsyncLimiter = {
+  run: <T>(fn: () => Promise<T>) => Promise<T>;
+  drain: () => Promise<void>;
+};
 
 const createAsyncLimiter = (limit: number): AsyncLimiter => {
   const maxActive = Math.max(1, Math.floor(limit));
   let active = 0;
+  let queued = 0;
   const queue: Array<() => void> = [];
-  return async <T>(fn: () => Promise<T>): Promise<T> => {
+  const drainWaiters: Array<() => void> = [];
+  const notifyDrain = (): void => {
+    if (active > 0 || queued > 0) return;
+    while (drainWaiters.length > 0) drainWaiters.shift()?.();
+  };
+
+  const run = async <T>(fn: () => Promise<T>): Promise<T> => {
     if (active >= maxActive) {
-      await new Promise<void>(resolve => queue.push(resolve));
+      queued += 1;
+      await new Promise<void>(resolve => queue.push(() => {
+        queued = Math.max(0, queued - 1);
+        resolve();
+      }));
     }
     active += 1;
     try {
@@ -105,8 +119,16 @@ const createAsyncLimiter = (limit: number): AsyncLimiter => {
     } finally {
       active = Math.max(0, active - 1);
       queue.shift()?.();
+      notifyDrain();
     }
   };
+
+  const drain = async (): Promise<void> => {
+    if (active === 0 && queued === 0) return;
+    await new Promise<void>(resolve => drainWaiters.push(resolve));
+  };
+
+  return { run, drain };
 };
 
 const parseArgs = (): CliArgs => {
@@ -1250,13 +1272,16 @@ const runShard = async (
     throwIfAborted();
     if (args.prewaitHealth === 'reset') {
       const resetQueuedAt = Date.now();
-      await resetLimiter(async () => {
+      await resetLimiter.run(async () => {
         const resetStartedAt = Date.now();
         const queueMs = resetStartedAt - resetQueuedAt;
         if (queueMs > 0) log.write(`[timing] resetQueue=${queueMs}ms\n`);
         throwIfAborted();
         await hardResetShardBaseline(apiUrl, args.stackTimeoutMs, task.requireMarketMaker);
       });
+      await resetLimiter.drain();
+      const remainingHealthMs = Math.max(1_000, args.stackTimeoutMs - (Date.now() - resetQueuedAt));
+      await waitForServerHealthy(apiUrl, remainingHealthMs);
       markPhase('apiHealthy', resetQueuedAt);
       throwIfAborted();
     } else if (args.prewaitHealth === 'full') {
