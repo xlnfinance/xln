@@ -37,6 +37,8 @@
   let lockTestMode = $state(false);
   let currentHash = $state('');
   let pendingRemoteRuntime = $state<RemoteRuntimeRequest | null>(null);
+  let remoteRuntimeAuthInput = $state('');
+  let remoteRuntimeAuthError = $state('');
   const pageSearch = $derived(browser ? $page.url.search : '');
   const DEPLOY_VERSION_KEY = 'xln-deploy-version';
   const REMOTE_ACCEPT_PREFIX = 'xln-remote-runtime-accepted:';
@@ -52,6 +54,7 @@
     keyLabel: string;
     hostKind: 'localhost' | 'server';
     acceptKey: string;
+    requiresAuthPaste?: boolean;
   };
 
   type HashRouteState = {
@@ -158,15 +161,18 @@
     const mode = String(params.get('runtime') || params.get('adapter') || '').trim().toLowerCase();
     const wsParam = String(params.get('ws') || params.get('runtimeWs') || '').trim();
     if (mode !== 'remote' || !wsParam) return null;
-    const authKey = String(params.get('key') || params.get('auth') || '').trim();
+    const rawAuthKey = String(params.get('key') || params.get('auth') || '').trim();
+    const requiresAuthPaste = rawAuthKey.startsWith('xlnra1.full.');
+    const authKey = requiresAuthPaste ? '' : rawAuthKey;
     const wsUrl = normalizeRuntimeWsUrl(wsParam);
     return {
       wsUrl,
       authKey,
       hostLabel: hostLabelForWsUrl(wsUrl),
-      keyLabel: describeAuthKey(authKey),
+      keyLabel: requiresAuthPaste ? 'full capability must be pasted' : describeAuthKey(authKey),
       hostKind: remoteHostKind(wsUrl),
       acceptKey: remoteAcceptKey(wsUrl, authKey),
+      requiresAuthPaste,
     };
   }
 
@@ -184,9 +190,16 @@
     localStorage.setItem('xln-runtime-adapter-mode', 'remote');
     localStorage.setItem('xln-runtime-adapter-ws', request.wsUrl);
     if (request.authKey) {
-      localStorage.setItem('xln-runtime-adapter-key', request.authKey);
+      if (request.authKey.startsWith('xlnra1.full.')) {
+        localStorage.removeItem('xln-runtime-adapter-key');
+        sessionStorage.setItem('xln-runtime-adapter-key', request.authKey);
+      } else {
+        sessionStorage.removeItem('xln-runtime-adapter-key');
+        localStorage.setItem('xln-runtime-adapter-key', request.authKey);
+      }
     } else {
       localStorage.removeItem('xln-runtime-adapter-key');
+      sessionStorage.removeItem('xln-runtime-adapter-key');
     }
     sessionStorage.setItem(request.acceptKey, '1');
   }
@@ -203,7 +216,17 @@
   function acceptRemoteRuntime(): void {
     const request = pendingRemoteRuntime;
     if (!request) return;
-    persistRemoteRuntimeRequest(request);
+    const authKey = request.requiresAuthPaste ? remoteRuntimeAuthInput.trim() : request.authKey;
+    if (request.requiresAuthPaste && !authKey.startsWith('xlnra1.full.')) {
+      remoteRuntimeAuthError = 'Paste the full capability token to connect.';
+      return;
+    }
+    remoteRuntimeAuthError = '';
+    persistRemoteRuntimeRequest({
+      ...request,
+      authKey,
+      acceptKey: remoteAcceptKey(request.wsUrl, authKey),
+    });
     stripRemoteRuntimeParams();
     window.location.reload();
   }
@@ -439,6 +462,21 @@
             <dd>{pendingRemoteRuntime.keyLabel}</dd>
           </div>
         </dl>
+        {#if pendingRemoteRuntime.requiresAuthPaste}
+          <label class="remote-token-input">
+            <span>Full capability</span>
+            <input
+              type="password"
+              autocomplete="off"
+              spellcheck="false"
+              bind:value={remoteRuntimeAuthInput}
+              placeholder="xlnra1.full..."
+            />
+          </label>
+          {#if remoteRuntimeAuthError}
+            <p class="remote-token-error">{remoteRuntimeAuthError}</p>
+          {/if}
+        {/if}
         <div class="remote-actions">
           <button class="primary" onclick={acceptRemoteRuntime}>Connect remote runtime</button>
           <button class="secondary" onclick={useLocalBrowserRuntime}>Use browser runtime</button>
@@ -638,6 +676,37 @@
     font-size: 12px;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+
+  .remote-token-input {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin: -8px 0 20px;
+    color: var(--theme-text-muted, #8a8a8f);
+    font-size: 12px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .remote-token-input input {
+    width: 100%;
+    box-sizing: border-box;
+    border: 1px solid color-mix(in srgb, var(--theme-accent, #facc15) 22%, transparent);
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.28);
+    color: var(--theme-text-primary, #e8e8e8);
+    padding: 10px 12px;
+    font: 12px 'SF Mono', monospace;
+    text-transform: none;
+    letter-spacing: 0;
+  }
+
+  .remote-token-error {
+    margin: -12px 0 18px;
+    color: rgba(255, 150, 150, 0.96);
+    font-size: 12px;
   }
 
   .remote-actions {
