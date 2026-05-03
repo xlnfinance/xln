@@ -57,6 +57,78 @@
     return bytes.length > maxBytes ? `${hex}...` : hex;
   };
 
+  const bytesToFullHex = (bytes: Uint8Array): string =>
+    Array.from(bytes, (byte) => byte.toString(16).padStart(2, '0')).join('');
+
+  const readU64 = (bytes: Uint8Array, offset = 1): number | null => {
+    if (bytes.byteLength < offset + 8) return null;
+    return Number(new DataView(bytes.buffer, bytes.byteOffset + offset, 8).getBigUint64(0, false));
+  };
+
+  const readEntityId = (bytes: Uint8Array, offset: number): string | null => {
+    if (bytes.byteLength < offset + 32) return null;
+    return `0x${bytesToFullHex(bytes.slice(offset, offset + 32))}`;
+  };
+
+  const readTextAt = (bytes: Uint8Array, offset: number): string | null => {
+    if (bytes.byteLength < offset + 2) return null;
+    const len = new DataView(bytes.buffer, bytes.byteOffset + offset, 2).getUint16(0, false);
+    if (bytes.byteLength < offset + 2 + len) return null;
+    return textDecoder.decode(bytes.slice(offset + 2, offset + 2 + len));
+  };
+
+  const decodeStorageKey = (bytes: Uint8Array): string | null => {
+    const tag = bytes[0];
+    const height = readU64(bytes, 1);
+    if (tag === 0x01 && bytes.byteLength === 1) return 'head';
+    if (tag === 0x02 && height !== null) return `frame/${height}`;
+    if (tag === 0x03 && height !== null) return `diff/${height}`;
+    if (tag === 0x05 && height !== null && bytes.byteLength === 9) return `snapshot/manifest/${height}`;
+    if (tag === 0x21) return `live/entity/${readEntityId(bytes, 1) ?? bytesToFullHex(bytes)}`;
+    if (tag === 0x22) {
+      const entityId = readEntityId(bytes, 1);
+      const counterpartyId = readEntityId(bytes, 33);
+      if (entityId && counterpartyId) return `live/account/${entityId}/${counterpartyId}`;
+    }
+    if (tag === 0x23) {
+      const entityId = readEntityId(bytes, 1);
+      const pairId = readTextAt(bytes, 33);
+      if (entityId && pairId) return `live/book/${entityId}/${pairId}`;
+    }
+    if (tag === 0x26) return `live/replica-meta/${readEntityId(bytes, 1) ?? bytesToFullHex(bytes)}`;
+    if (tag === 0x27 || tag === 0x28 || tag === 0x29) {
+      const family = tag === 0x27 ? 'merkle/root' : tag === 0x28 ? 'merkle/branch' : 'merkle/leaf';
+      const entityId = readEntityId(bytes, 1);
+      const namespace = readTextAt(bytes, 33);
+      if (entityId && namespace) return `${family}/${entityId}/${namespace}`;
+    }
+    if (tag === 0x31 || tag === 0x32 || tag === 0x33) {
+      const family = tag === 0x31 ? 'snapshot/entity' : tag === 0x32 ? 'snapshot/account' : 'snapshot/book';
+      const entityId = readEntityId(bytes, 9);
+      if (height !== null && entityId) return `${family}/${height}/${entityId}`;
+    }
+    if (tag === 0x00 && bytes.byteLength === 1) return 'frame-db/head';
+    if (tag === 0x01 && bytes.byteLength >= 73) {
+      return `frame-db/account/${readEntityId(bytes, 1)}/${readEntityId(bytes, 33)}/${readU64(bytes, 65) ?? '?'}`;
+    }
+    if (tag === 0x02 && height !== null) return `frame-db/runtime-activity/${height}`;
+    if (tag === 0x03 && bytes.byteLength >= 41) {
+      return `frame-db/entity-activity/${readEntityId(bytes, 1)}/${readU64(bytes, 33) ?? '?'}`;
+    }
+    if (tag === 0x04 && bytes.byteLength >= 81) {
+      return `frame-db/account-by-runtime/${height ?? '?'}/${readEntityId(bytes, 9)}/${readEntityId(bytes, 41)}/${readU64(bytes, 73) ?? '?'}`;
+    }
+    if (tag === 0x05 && bytes.byteLength >= 41) {
+      return `frame-db/orderbook/${height ?? '?'}/${readEntityId(bytes, 9)}/${readTextAt(bytes, 41) ?? '?'}`;
+    }
+    return null;
+  };
+
+  const compactValuePreview = (blob: DecodedBlob): string => {
+    const text = blob.pretty || blob.preview;
+    return text.length > 900 ? `${text.slice(0, 900)}...` : text;
+  };
+
   const isPrintableText = (text: string): boolean => {
     if (!text) return false;
     let printable = 0;
@@ -142,6 +214,25 @@
       preview: hex,
       pretty: null,
       byteLength: bytes.byteLength,
+    };
+  };
+
+  const decodeKeyBlob = (value: unknown): DecodedBlob => {
+    const bytes = asUint8Array(value);
+    if (bytes) {
+      const decoded = decodeStorageKey(bytes);
+      const hex = bytesToFullHex(bytes);
+      return {
+        label: decoded ? `${decoded} [${hex}]` : hex,
+        preview: hex,
+        pretty: null,
+        byteLength: bytes.byteLength,
+      };
+    }
+    const decoded = decodeBlob(value);
+    return {
+      ...decoded,
+      label: decoded.preview,
     };
   };
 
@@ -241,7 +332,7 @@
             if (cursorIndex >= startIndex && pageEntries.length < pageSize) {
               pageEntries.push({
                 index: cursorIndex,
-                key: decodeBlob(cursor.key),
+                key: decodeKeyBlob(cursor.key),
                 value: decodeBlob(cursor.value),
               });
             }
@@ -348,7 +439,6 @@
         <div class="db-header">
           <div>
             <h4>{selectedDatabaseName}</h4>
-            <p class="muted">Object stores are read lazily. Large values stay collapsed until expanded.</p>
           </div>
           <label class="store-select">
             <span>Store</span>
@@ -367,24 +457,18 @@
         {:else}
           <div class="entry-list">
             {#each entries as entry}
-              <details class="entry-card">
-                <summary>
+              <article class="entry-card">
+                <div class="entry-row">
                   <span class="entry-index">#{entry.index}</span>
-                  <span class="entry-key">{entry.key.label}</span>
-                  <span class="entry-bytes">K {formatBytes(entry.key.byteLength)}</span>
-                  <span class="entry-bytes">V {formatBytes(entry.value.byteLength)}</span>
-                </summary>
-                <div class="entry-body">
-                  <div class="entry-block">
-                    <h5>Key <span class="block-bytes">{formatBytes(entry.key.byteLength)}</span></h5>
-                    <pre>{entry.key.pretty || entry.key.preview}</pre>
-                  </div>
-                  <div class="entry-block">
-                    <h5>Value <span class="block-bytes">{formatBytes(entry.value.byteLength)}</span></h5>
-                    <pre>{entry.value.pretty || entry.value.preview}</pre>
-                  </div>
+                  <code class="entry-key">{entry.key.label}</code>
+                  <span class="entry-bytes">({formatBytes(entry.value.byteLength)})</span>
                 </div>
-              </details>
+                <pre class="entry-preview">{compactValuePreview(entry.value)}</pre>
+                <details class="entry-expand">
+                  <summary>Expand value</summary>
+                  <pre>{entry.value.pretty || entry.value.preview}</pre>
+                </details>
+              </article>
             {/each}
           </div>
 
@@ -459,8 +543,7 @@
   }
 
   .db-list h4,
-  .db-content h4,
-  .entry-block h5 {
+  .db-content h4 {
     margin: 0;
     color: rgba(255, 255, 255, 0.92);
   }
@@ -525,23 +608,17 @@
 
   .entry-card {
     border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 10px;
+    border-radius: 8px;
     background: rgba(0, 0, 0, 0.2);
     overflow: hidden;
   }
 
-  .entry-card summary {
+  .entry-row {
     display: grid;
-    grid-template-columns: 56px minmax(0, 1fr) auto auto;
+    grid-template-columns: 56px minmax(0, 1fr) auto;
     gap: 10px;
-    align-items: center;
-    list-style: none;
-    cursor: pointer;
+    align-items: start;
     padding: 10px 12px;
-  }
-
-  .entry-card summary::-webkit-details-marker {
-    display: none;
   }
 
   .entry-index,
@@ -551,39 +628,18 @@
     white-space: nowrap;
   }
 
-  .block-bytes {
-    color: rgba(255, 255, 255, 0.45);
-    font-weight: 400;
-    font-size: 11px;
-  }
-
   .entry-key {
     min-width: 0;
     font-size: 12px;
     color: rgba(255, 255, 255, 0.88);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
+    word-break: break-all;
   }
 
-  .entry-body {
-    display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 12px;
-    padding: 0 12px 12px;
-  }
-
-  .entry-block {
-    min-width: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-
-  .entry-block pre {
+  .entry-preview,
+  .entry-expand pre {
     margin: 0;
-    padding: 10px;
-    border-radius: 8px;
+    padding: 10px 12px;
     background: rgba(255, 255, 255, 0.04);
     color: rgba(255, 255, 255, 0.84);
     font-size: 11px;
@@ -592,6 +648,26 @@
     max-height: 320px;
     white-space: pre-wrap;
     word-break: break-word;
+  }
+
+  .entry-preview {
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+    max-height: 160px;
+  }
+
+  .entry-expand {
+    border-top: 1px solid rgba(255, 255, 255, 0.05);
+  }
+
+  .entry-expand summary {
+    padding: 8px 12px;
+    cursor: pointer;
+    color: rgba(255, 255, 255, 0.62);
+    font-size: 11px;
+  }
+
+  .entry-expand pre {
+    max-height: none;
   }
 
   .empty-state,
@@ -617,7 +693,6 @@
     }
 
     .db-header,
-    .entry-body,
     .toolbar {
       grid-template-columns: 1fr;
       flex-direction: column;
