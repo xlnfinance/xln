@@ -4,6 +4,7 @@ import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
+import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
 import { deserializeTaggedJson } from '../serialization-utils';
 
 const DEFAULT_CHILD_READY_TIMEOUT_MS = 120_000;
@@ -119,7 +120,9 @@ export type StartedCustodySupport = {
   custodyChild: ManagedChild;
   identity: ManagedIdentity;
   hubIds: string[];
-  daemonControlToken: string;
+  daemonAuthSeed: string;
+  daemonAuthAudience: string;
+  daemonAuthKey: string;
 };
 
 const DEFAULT_CUSTODY_TOKEN_IDS = [1, 2, 3] as const;
@@ -419,17 +422,31 @@ export const startCustodySupport = async (
   const shardJurisdictionsPath = join(options.dbRoot, 'jurisdictions.json');
   await mkdir(options.dbRoot, { recursive: true });
   await writeFile(shardJurisdictionsPath, await readFile(resolveCustodyJurisdictionsJsonPath(), 'utf8'), 'utf8');
-  const daemonControlToken = randomBytes(32).toString('hex');
+  const daemonAuthSeed = randomBytes(32).toString('hex');
+  const daemonAuthAudience = `custody-daemon-${options.daemonPort}`;
+  const deriveDaemonAdminKey = (): string => deriveRuntimeAdapterCapabilityToken(
+    daemonAuthSeed,
+    'full',
+    Date.now() + 30 * 60_000,
+    {
+      audience: daemonAuthAudience,
+      keyId: 'custody-bootstrap',
+      tokenId: randomBytes(16).toString('hex'),
+    },
+  );
+  const daemonAuthKey = deriveDaemonAdminKey();
   const daemonChild = spawnBunChild(
     'custody-daemon',
     ['runtime/server.ts', '--port', String(options.daemonPort), '--host', '127.0.0.1', '--server-id', `custody-daemon-${options.daemonPort}`],
     {
-      DAEMON_CONTROL_TOKEN: daemonControlToken,
       USE_ANVIL: 'true',
       XLN_USE_PREDEPLOYED_ADDRESSES: 'true',
       BOOTSTRAP_LOCAL_HUBS: '0',
       XLN_SKIP_SERVER_BOOTSTRAP: '1',
       XLN_EARLY_HTTP_BIND: '1',
+      XLN_RADAPTER_AUTH_SEED: daemonAuthSeed,
+      XLN_RADAPTER_AUDIENCE: daemonAuthAudience,
+      XLN_RADAPTER_REQUIRE_STRONG_AUTH_SEED: '1',
       ANVIL_RPC: options.rpcUrl,
       PUBLIC_RPC: options.rpcUrl,
       XLN_STARTUP_STEP_TIMEOUT_MS: process.env['XLN_STARTUP_STEP_TIMEOUT_MS'] ?? '60000',
@@ -450,7 +467,7 @@ export const startCustodySupport = async (
       '--name', options.profileName,
       '--seed', options.seed,
       '--signer-label', options.signerLabel,
-      '--control-token', daemonControlToken,
+      '--auth-key', daemonAuthKey,
       '--hub-ids', hubIds.join(','),
       '--relay-url', options.relayUrl,
       '--gossip-poll-ms', '250',
@@ -475,7 +492,8 @@ export const startCustodySupport = async (
       CUSTODY_PORT: String(options.custodyPort),
       CUSTODY_HTTPS: custodyHttps ? '1' : '0',
       CUSTODY_DAEMON_WS: `ws://127.0.0.1:${options.daemonPort}/rpc`,
-      CUSTODY_DAEMON_CONTROL_TOKEN: daemonControlToken,
+      CUSTODY_DAEMON_AUTH_SEED: daemonAuthSeed,
+      CUSTODY_DAEMON_AUTH_AUDIENCE: daemonAuthAudience,
       CUSTODY_WALLET_URL: options.walletUrl,
       CUSTODY_ENTITY_ID: identity.entityId,
       CUSTODY_SIGNER_ID: identity.signerId,
@@ -490,6 +508,8 @@ export const startCustodySupport = async (
     custodyChild,
     identity,
     hubIds,
-    daemonControlToken,
+    daemonAuthSeed,
+    daemonAuthAudience,
+    daemonAuthKey,
   };
 };

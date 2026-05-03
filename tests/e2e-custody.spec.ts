@@ -932,7 +932,7 @@ test.describe('E2E Custody Flow', () => {
       }));
       daemonChild = custodySupport.daemonChild;
       custodyChild = custodySupport.custodyChild;
-      daemonClient = new DaemonRpcClient(`ws://127.0.0.1:${daemonPort}/rpc`, custodySupport.daemonControlToken);
+      daemonClient = new DaemonRpcClient(`ws://127.0.0.1:${daemonPort}/rpc`, custodySupport.daemonAuthKey);
       const custodyIdentity = custodySupport.identity;
       const senderHubIds = custodySupport.hubIds.slice(0, 2);
       const fundingHubId = senderHubIds[1] ?? senderHubIds[0]!;
