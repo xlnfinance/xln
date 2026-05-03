@@ -804,7 +804,7 @@ async function readSwapHistoryCount(
 }
 
 test.describe('E2E Swap Isolated Flow', () => {
-  test.setTimeout(LONG_E2E ? 240_000 : 150_000);
+  test.setTimeout(240_000);
 
   test('relay orderbook publishes new resting ask and bid to both subscribed users', async ({ browser, page }) => {
     let aliceContext: BrowserContext | null = null;

@@ -103,15 +103,6 @@ const DEFAULT_TIMEOUT_MS = 180_000;
 const DEFAULT_POLL_MS = 500;
 const DEFAULT_AUTO_RESET_GRACE_MS = 5_000;
 const ISOLATED_STACK = process.env.E2E_ISOLATED_STACK === '1' || process.env.E2E_ISOLATED_BASELINE_READY === '1';
-const ISOLATED_BASELINE_HEALTH: E2EHealthResponse | null = (() => {
-  const raw = String(process.env.E2E_BASELINE_HEALTH_JSON || '').trim();
-  if (!raw) return null;
-  try {
-    return JSON.parse(raw) as E2EHealthResponse;
-  } catch {
-    return null;
-  }
-})();
 
 const withApiContext = async <T>(run: (api: APIRequestContext) => Promise<T>): Promise<T> => {
   const api = await request.newContext({ ignoreHTTPSErrors: true });
@@ -144,10 +135,10 @@ const getHealthWithApi = async (
 ): Promise<E2EHealthResponse | null> => {
   try {
     const response = await api.get(`${apiBaseUrl}/api/health`, { timeout: 5_000 });
-    if (!response.ok()) return ISOLATED_BASELINE_HEALTH;
-    return (await readJson<E2EHealthResponse>(response)) ?? ISOLATED_BASELINE_HEALTH;
+    if (!response.ok()) return null;
+    return await readJson<E2EHealthResponse>(response);
   } catch {
-    return ISOLATED_BASELINE_HEALTH;
+    return null;
   }
 };
 
@@ -250,7 +241,6 @@ const assertIsolatedBaselineReadyWithApi = async (
   api: APIRequestContext,
   options: Required<E2EBaselineOptions>,
 ): Promise<E2EHealthResponse> => {
-  if (ISOLATED_BASELINE_HEALTH && isBaselineReady(ISOLATED_BASELINE_HEALTH, options)) return ISOLATED_BASELINE_HEALTH;
   const health = await getHealthWithApi(api, options.apiBaseUrl);
   if (health && isBaselineReady(health, options)) return health;
   throw new Error(`E2E isolated baseline was not ready when Playwright started\n${summarizeHealth(health)}`);
