@@ -467,8 +467,8 @@ export const saveRuntimeFrameToStorage = async (options: {
   }
 
   const verboseStorageLogs =
-    String(process.env['XLN_STORAGE_VERBOSE'] ?? process.env['RUNTIME_VERBOSE_LOGS'] ?? '').toLowerCase() === '1' ||
-    String(process.env['XLN_STORAGE_VERBOSE'] ?? process.env['RUNTIME_VERBOSE_LOGS'] ?? '').toLowerCase() === 'true';
+    String(process.env['XLN_STORAGE_VERBOSE'] ?? '').toLowerCase() === '1' ||
+    String(process.env['XLN_STORAGE_VERBOSE'] ?? '').toLowerCase() === 'true';
   if (verboseStorageLogs && options.env.quietRuntimeLogs !== true) {
     console.log(
       `[PERSIST] runtime=${String(options.env.runtimeId || '').slice(0, 12)} frame=${options.env.height} puts=${diff.puts.length} dels=${diff.dels.length} ` +

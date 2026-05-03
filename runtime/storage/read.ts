@@ -34,6 +34,7 @@ import {
 } from './keys';
 import { iterateKeys, readJsonOrNull, readRawOrNull } from './level';
 import { listSnapshotHeights } from './lifecycle';
+import { compareAscii } from '../sorted-index';
 import {
   buildHexKeyedMerkle,
   computeRadixMerkleBranchHash,
@@ -109,9 +110,6 @@ const findLatestSnapshotAtOrBelow = async (db: RuntimeDbLike, height: number): P
   }
   return best;
 };
-
-const compareAscii = (left: string, right: string): number =>
-  left < right ? -1 : left > right ? 1 : 0;
 
 const storageVerifyDocHashesEnabled = (): boolean => {
   const raw = String(typeof process !== 'undefined' ? process.env['XLN_STORAGE_VERIFY_DOC_HASHES'] ?? '' : '')
