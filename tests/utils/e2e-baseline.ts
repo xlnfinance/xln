@@ -117,6 +117,16 @@ const ISOLATED_READY_TIMEOUT_MS = parsePositiveInteger(
 
 const delay = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
+const readIsolatedBaselineHealthSnapshot = (): E2EHealthResponse | null => {
+  const raw = String(process.env.E2E_BASELINE_HEALTH_JSON || '').trim();
+  if (!raw) return null;
+  try {
+    return JSON.parse(raw) as E2EHealthResponse;
+  } catch {
+    return null;
+  }
+};
+
 const withApiContext = async <T>(run: (api: APIRequestContext) => Promise<T>): Promise<T> => {
   const api = await request.newContext({ ignoreHTTPSErrors: true });
   try {
@@ -262,6 +272,12 @@ const assertIsolatedBaselineReadyWithApi = async (
   api: APIRequestContext,
   options: Required<E2EBaselineOptions>,
 ): Promise<E2EHealthResponse> => {
+  if (process.env.E2E_ISOLATED_BASELINE_READY === '1') {
+    const snapshot = readIsolatedBaselineHealthSnapshot();
+    if (snapshot && isBaselineReady(snapshot, options)) return snapshot;
+    throw new Error(`E2E isolated baseline snapshot was missing or not ready\n${summarizeHealth(snapshot)}`);
+  }
+
   const timeoutMs = Math.min(options.timeoutMs, ISOLATED_READY_TIMEOUT_MS);
   const deadline = Date.now() + timeoutMs;
   let lastHealth: E2EHealthResponse | null = null;

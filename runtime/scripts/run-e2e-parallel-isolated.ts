@@ -915,7 +915,7 @@ const waitForHttpReady = async (url: string, timeoutMs: number): Promise<void> =
   throw new Error(`HTTP endpoint not ready: ${url}`);
 };
 
-const waitForServerHealthy = async (apiUrl: string, timeoutMs: number): Promise<void> => {
+const waitForServerHealthy = async (apiUrl: string, timeoutMs: number): Promise<any> => {
   const deadline = Date.now() + timeoutMs;
   let lastHealth: any = null;
   while (Date.now() < deadline) {
@@ -929,7 +929,7 @@ const waitForServerHealthy = async (apiUrl: string, timeoutMs: number): Promise<
         const mmReady = body?.marketMaker?.enabled === true ? body?.marketMaker?.ok === true : true;
         const reservesReady = body?.bootstrapReserves?.ok === true;
         const hasTs = typeof body?.timestamp === 'number';
-        if (hasTs && resetDone && meshReady && mmReady && reservesReady) return;
+        if (hasTs && resetDone && meshReady && mmReady && reservesReady) return body;
       }
     } catch {
       // retry
@@ -966,7 +966,7 @@ const hardResetShardBaseline = async (
   apiUrl: string,
   timeoutMs: number,
   requireMarketMaker: boolean,
-): Promise<void> => {
+): Promise<any> => {
   const startedAt = Date.now();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
@@ -985,7 +985,7 @@ const hardResetShardBaseline = async (
       throw new Error(`SHARD_BASELINE_RESET_FAILED status=${response.status} body=${body.slice(0, 800)}`);
     }
     const remainingMs = Math.max(1_000, timeoutMs - (Date.now() - startedAt));
-    await waitForServerHealthy(apiUrl, remainingMs);
+    return await waitForServerHealthy(apiUrl, remainingMs);
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       throw new Error(`SHARD_BASELINE_RESET_TIMEOUT api=${apiUrl} timeoutMs=${timeoutMs}`);
@@ -1168,6 +1168,7 @@ const runShard = async (
   // Keep anvil's live state outside orchestrator dbRoot. Reset intentionally rm -rf's dbRoot.
   const anvilStatePath = join(logsDir, `anvil-state-shard-${shard}.json`);
   mkdirSync(dbPath, { recursive: true });
+  let baselineHealth: unknown | null = null;
 
   const phaseMs: RunResult['phaseMs'] = {
     preflight: 0,
@@ -1277,16 +1278,16 @@ const runShard = async (
         const queueMs = resetStartedAt - resetQueuedAt;
         if (queueMs > 0) log.write(`[timing] resetQueue=${queueMs}ms\n`);
         throwIfAborted();
-        await hardResetShardBaseline(apiUrl, args.stackTimeoutMs, task.requireMarketMaker);
+        baselineHealth = await hardResetShardBaseline(apiUrl, args.stackTimeoutMs, task.requireMarketMaker);
       });
       await resetLimiter.drain();
       const remainingHealthMs = Math.max(1_000, args.stackTimeoutMs - (Date.now() - resetQueuedAt));
-      await waitForServerHealthy(apiUrl, remainingHealthMs);
+      baselineHealth = await waitForServerHealthy(apiUrl, remainingHealthMs);
       markPhase('apiHealthy', resetQueuedAt);
       throwIfAborted();
     } else if (args.prewaitHealth === 'full') {
       const healthStart = Date.now();
-      await waitForServerHealthy(apiUrl, args.stackTimeoutMs);
+      baselineHealth = await waitForServerHealthy(apiUrl, args.stackTimeoutMs);
       markPhase('apiHealthy', healthStart);
       throwIfAborted();
     } else {
@@ -1364,6 +1365,7 @@ const runShard = async (
         E2E_API_BASE_URL: apiUrl,
         E2E_ANVIL_RPC: rpcUrl,
         E2E_RESET_BASE_URL: apiUrl,
+        E2E_BASELINE_HEALTH_JSON: baselineHealth ? JSON.stringify(baselineHealth) : '',
         E2E_FAST: process.env['E2E_FAST'] ?? '1',
         E2E_ISOLATED_STACK: '1',
         E2E_ISOLATED_BASELINE_READY: args.prewaitHealth === 'http' ? '0' : '1',
