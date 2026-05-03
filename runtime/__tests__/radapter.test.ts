@@ -561,6 +561,32 @@ test('runtime adapter historical reads fail closed when storage loaders are miss
     .rejects.toThrow('storage head reader is required for historical reads');
 });
 
+test('runtime adapter historical view frame fails closed when storage head is missing', async () => {
+  const env = makeEnv();
+
+  await expect(resolveRuntimeAdapterRead({
+    env,
+    readHead: async () => null,
+    listEntityIdsAtHeight: async () => [entityId],
+    loadEntityViewPage: async () => {
+      throw new Error('view page loader should not run after missing head');
+    },
+  }, 'view-frame', { atHeight: env.height - 1 }))
+    .rejects.toThrow('storage head not found at height');
+});
+
+test('runtime adapter historical entity summaries fail closed when listed state is missing', async () => {
+  const env = makeEnv();
+
+  await expect(resolveRuntimeAdapterRead({
+    env,
+    listEntityIdsAtHeight: async () => [entityId],
+    loadEntityViewPage: async () => null,
+    loadEntityState: async () => null,
+  }, 'entities', { atHeight: env.height - 1 }))
+    .rejects.toThrow('entity summary not found at height');
+});
+
 test('runtime adapter historical head reads persisted storage head', async () => {
   const env = makeEnv();
   const head = await resolveRuntimeAdapterRead<{ latestHeight: number; latestSnapshotHeight: number }>({
