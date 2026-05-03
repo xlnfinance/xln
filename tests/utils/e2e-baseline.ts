@@ -143,16 +143,23 @@ const readText = async (response: APIResponse): Promise<string> => {
 };
 
 const getHealthWithApi = async (
-  api: APIRequestContext,
+  _api: APIRequestContext,
   apiBaseUrl = API_BASE_URL,
   requestTimeoutMs = 5_000,
 ): Promise<E2EHealthResponse | null> => {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), requestTimeoutMs);
   try {
-    const response = await api.get(`${apiBaseUrl}/api/health`, { timeout: requestTimeoutMs });
-    if (!response.ok()) return null;
-    return await readJson<E2EHealthResponse>(response);
+    const response = await fetch(`${apiBaseUrl}/api/health`, {
+      cache: 'no-store',
+      signal: controller.signal,
+    });
+    if (!response.ok) return null;
+    return await response.json() as E2EHealthResponse;
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 };
 
