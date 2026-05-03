@@ -14,7 +14,7 @@
 
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
 import { deriveDelta } from '../runtime/account-utils';
-import { getHealth, ensureE2EBaseline } from './utils/e2e-baseline';
+import { ensureE2EBaseline, type E2EHealthResponse } from './utils/e2e-baseline';
 import { connectRuntimeToHubWithCredit } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
 import { requireIsolatedBaseUrl } from './utils/e2e-isolated-env';
@@ -68,8 +68,7 @@ function mirrorConsole(page: Page, tag: string): void {
   });
 }
 
-async function getPrimaryHubId(page: Page): Promise<string> {
-  const health = await getHealth(page, API_BASE_URL);
+function getPrimaryHubId(health: E2EHealthResponse): string {
   const hubId = health?.hubMesh?.hubIds?.[0];
   expect(typeof hubId === 'string' && hubId.length === 66, 'baseline must expose a primary hub id').toBe(true);
   return hubId!;
@@ -811,14 +810,14 @@ test.describe('E2E Swap Isolated Flow', () => {
     let bobContext: BrowserContext | null = null;
 
     try {
-      await timedStep('swap_book_publish.ensure_baseline', () => ensureE2EBaseline(page, {
+      const baseline = await timedStep('swap_book_publish.ensure_baseline', () => ensureE2EBaseline(page, {
         apiBaseUrl: API_BASE_URL,
         requireMarketMaker: false,
         requireHubMesh: true,
         minHubCount: 3,
       }));
 
-      const hubId = await getPrimaryHubId(page);
+      const hubId = getPrimaryHubId(baseline);
 
       aliceContext = await browser.newContext({ ignoreHTTPSErrors: true });
       bobContext = await browser.newContext({ ignoreHTTPSErrors: true });
@@ -960,14 +959,14 @@ test.describe('E2E Swap Isolated Flow', () => {
     let bobContext: BrowserContext | null = null;
 
     try {
-      await timedStep('swap_isolated.ensure_baseline', () => ensureE2EBaseline(page, {
+      const baseline = await timedStep('swap_isolated.ensure_baseline', () => ensureE2EBaseline(page, {
         apiBaseUrl: API_BASE_URL,
         requireMarketMaker: false,
         requireHubMesh: true,
         minHubCount: 3,
       }));
 
-      const hubId = await getPrimaryHubId(page);
+      const hubId = getPrimaryHubId(baseline);
 
       aliceContext = await browser.newContext({ ignoreHTTPSErrors: true });
       bobContext = await browser.newContext({ ignoreHTTPSErrors: true });
@@ -1048,14 +1047,14 @@ test.describe('E2E Swap Isolated Flow', () => {
     let bobContext: BrowserContext | null = null;
 
     try {
-      await timedStep('swap_partial.ensure_baseline', () => ensureE2EBaseline(page, {
+      const baseline = await timedStep('swap_partial.ensure_baseline', () => ensureE2EBaseline(page, {
         apiBaseUrl: API_BASE_URL,
         requireMarketMaker: false,
         requireHubMesh: true,
         minHubCount: 3,
       }));
 
-      const hubId = await getPrimaryHubId(page);
+      const hubId = getPrimaryHubId(baseline);
 
       aliceContext = await browser.newContext({ ignoreHTTPSErrors: true });
       bobContext = await browser.newContext({ ignoreHTTPSErrors: true });
@@ -1165,14 +1164,14 @@ test.describe('E2E Swap Isolated Flow', () => {
     let carolContext: BrowserContext | null = null;
 
     try {
-      await timedStep('swap_multi.ensure_baseline', () => ensureE2EBaseline(page, {
+      const baseline = await timedStep('swap_multi.ensure_baseline', () => ensureE2EBaseline(page, {
         apiBaseUrl: API_BASE_URL,
         requireMarketMaker: false,
         requireHubMesh: true,
         minHubCount: 3,
       }));
 
-      const hubId = await getPrimaryHubId(page);
+      const hubId = getPrimaryHubId(baseline);
 
       aliceContext = await browser.newContext({ ignoreHTTPSErrors: true });
       bobContext = await browser.newContext({ ignoreHTTPSErrors: true });
@@ -1291,14 +1290,14 @@ test.describe('E2E Swap Isolated Flow', () => {
     let bobContext: BrowserContext | null = null;
 
     try {
-      await ensureE2EBaseline(page, {
+      const baseline = await ensureE2EBaseline(page, {
         apiBaseUrl: API_BASE_URL,
         requireMarketMaker: false,
         requireHubMesh: true,
         minHubCount: 3,
       });
 
-      const hubId = await getPrimaryHubId(page);
+      const hubId = getPrimaryHubId(baseline);
 
       aliceContext = await browser.newContext({ ignoreHTTPSErrors: true });
       bobContext = await browser.newContext({ ignoreHTTPSErrors: true });
@@ -1375,14 +1374,14 @@ test.describe('E2E Swap Isolated Flow', () => {
     let bobContext: BrowserContext | null = null;
 
     try {
-      await ensureE2EBaseline(page, {
+      const baseline = await ensureE2EBaseline(page, {
         apiBaseUrl: API_BASE_URL,
         requireMarketMaker: false,
         requireHubMesh: true,
         minHubCount: 3,
       });
 
-      const hubId = await getPrimaryHubId(page);
+      const hubId = getPrimaryHubId(baseline);
 
       aliceContext = await browser.newContext({ ignoreHTTPSErrors: true });
       bobContext = await browser.newContext({ ignoreHTTPSErrors: true });
