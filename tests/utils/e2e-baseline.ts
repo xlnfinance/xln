@@ -102,7 +102,20 @@ export type E2EResetOptions = E2EBaselineOptions & {
 const DEFAULT_TIMEOUT_MS = 180_000;
 const DEFAULT_POLL_MS = 500;
 const DEFAULT_AUTO_RESET_GRACE_MS = 5_000;
+const DEFAULT_ISOLATED_READY_TIMEOUT_MS = 15_000;
 const ISOLATED_STACK = process.env.E2E_ISOLATED_STACK === '1' || process.env.E2E_ISOLATED_BASELINE_READY === '1';
+
+const parsePositiveInteger = (value: string | undefined, fallback: number): number => {
+  const parsed = Number(value || '');
+  return Number.isFinite(parsed) && parsed > 0 ? Math.floor(parsed) : fallback;
+};
+
+const ISOLATED_READY_TIMEOUT_MS = parsePositiveInteger(
+  process.env.E2E_ISOLATED_READY_TIMEOUT_MS,
+  DEFAULT_ISOLATED_READY_TIMEOUT_MS,
+);
+
+const delay = (ms: number): Promise<void> => new Promise(resolve => setTimeout(resolve, ms));
 
 const withApiContext = async <T>(run: (api: APIRequestContext) => Promise<T>): Promise<T> => {
   const api = await request.newContext({ ignoreHTTPSErrors: true });
@@ -132,9 +145,10 @@ const readText = async (response: APIResponse): Promise<string> => {
 const getHealthWithApi = async (
   api: APIRequestContext,
   apiBaseUrl = API_BASE_URL,
+  requestTimeoutMs = 5_000,
 ): Promise<E2EHealthResponse | null> => {
   try {
-    const response = await api.get(`${apiBaseUrl}/api/health`, { timeout: 5_000 });
+    const response = await api.get(`${apiBaseUrl}/api/health`, { timeout: requestTimeoutMs });
     if (!response.ok()) return null;
     return await readJson<E2EHealthResponse>(response);
   } catch {
@@ -241,9 +255,21 @@ const assertIsolatedBaselineReadyWithApi = async (
   api: APIRequestContext,
   options: Required<E2EBaselineOptions>,
 ): Promise<E2EHealthResponse> => {
-  const health = await getHealthWithApi(api, options.apiBaseUrl);
-  if (health && isBaselineReady(health, options)) return health;
-  throw new Error(`E2E isolated baseline was not ready when Playwright started\n${summarizeHealth(health)}`);
+  const timeoutMs = Math.min(options.timeoutMs, ISOLATED_READY_TIMEOUT_MS);
+  const deadline = Date.now() + timeoutMs;
+  let lastHealth: E2EHealthResponse | null = null;
+
+  while (Date.now() < deadline) {
+    const remainingMs = Math.max(1, deadline - Date.now());
+    lastHealth = await getHealthWithApi(api, options.apiBaseUrl, Math.min(2_000, remainingMs));
+    if (lastHealth && isBaselineReady(lastHealth, options)) return lastHealth;
+
+    const nextDelayMs = Math.min(options.pollMs, Math.max(0, deadline - Date.now()));
+    if (nextDelayMs <= 0) break;
+    await delay(nextDelayMs);
+  }
+
+  throw new Error(`E2E isolated baseline was not live-ready within ${timeoutMs}ms\n${summarizeHealth(lastHealth)}`);
 };
 
 export const getHealth = async (
