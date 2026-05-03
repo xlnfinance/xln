@@ -33,6 +33,7 @@ import {
   RPC_MARKET_PUBLISH_MS,
   type MarketSnapshotPayload,
 } from '../market-snapshot';
+import { MarketSubscriptionLimiter } from '../market-subscription-limiter';
 import { normalizeLoopbackUrl, toPublicRpcUrl } from '../loopback-url';
 import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync, type StorageHealth } from './storage-monitor';
 import { maybeHandleQaRequest } from '../qa/api';
@@ -69,6 +70,8 @@ const HUB_DIRECT_LINK_BASELINE_GRACE_MS = readPositiveIntEnv('XLN_HUB_DIRECT_LIN
 const MARKET_MAKER_READY_TIMEOUT_MS = readPositiveIntEnv('XLN_MARKET_MAKER_READY_TIMEOUT_MS', Math.max(90_000, STARTUP_TIMEOUT_MS));
 const RELAY_MARKET_MAX_SUBSCRIPTIONS = readPositiveIntEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTIONS', 1000);
 const RELAY_MARKET_MAX_SUBSCRIPTION_CELLS = readPositiveIntEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTION_CELLS', 64);
+const RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP = readPositiveIntEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP', 8);
+const CHILD_LOG_RING_MAX = 30;
 
 type StageTiming = {
   startedAt: number | null;
@@ -107,6 +110,8 @@ type HubChild = HubProcessSpec & {
   restartCount: number;
   lastHealth: HubHealthPayload | null;
   lastInfo: HubInfoPayload | null;
+  recentStdout: string[];
+  recentStderr: string[];
 };
 
 type HubHealthPayload = {
@@ -239,6 +244,13 @@ type AggregatedHealth = {
     clientCount: number;
     managedRuntimeIds: string[];
     externalClientIds: string[];
+    marketSubscriptions: {
+      total: number;
+      byIp: Record<string, number>;
+      maxTotal: number;
+      maxPerIp: number;
+      maxCellsPerSubscription: number;
+    };
   };
   process: {
     pid: number;
@@ -261,8 +273,15 @@ type AggregatedHealth = {
       leaseOwnerId: string | null;
       online: boolean;
       exitCode: number | null;
+      exitSignal?: NodeJS.Signals | null;
+      startedAt: number | null;
+      exitedAt: number | null;
+      restartCount: number;
       apiPort: number;
       dbPath: string;
+      lastErrorLine: string | null;
+      recentStdout: string[];
+      recentStderr: string[];
     }>;
   };
   disk: {
@@ -334,6 +353,14 @@ type AggregatedHealth = {
     online: boolean;
     runtimeId: string;
     selfRelayPresence: boolean;
+    pid: number | null;
+    apiPort: number;
+    dbPath: string;
+    startedAt: number | null;
+    exitedAt: number | null;
+    exitCode: number | null;
+    restartCount: number;
+    lastErrorLine: string | null;
   }>;
   timings: TimingMap;
 };
@@ -373,6 +400,8 @@ type MarketMakerChild = {
   lastHealth: MarketMakerHealthPayload | null;
   lastInfo: MarketMakerInfoPayload | null;
   lastStartupPhase: string | null;
+  recentStdout: string[];
+  recentStderr: string[];
 };
 
 type CustodySupportState = {
@@ -522,6 +551,8 @@ const hubChildren: HubChild[] = HUB_NAMES.map((name, index) => ({
   restartCount: 0,
   lastHealth: null,
   lastInfo: null,
+  recentStdout: [],
+  recentStderr: [],
 }));
 
 const marketMakerChild: MarketMakerChild = {
@@ -541,6 +572,8 @@ const marketMakerChild: MarketMakerChild = {
   lastHealth: null,
   lastInfo: null,
   lastStartupPhase: null,
+  recentStdout: [],
+  recentStderr: [],
 };
 
 const buildPublicDirectWsUrl = (publicPort: number): string => {
@@ -554,6 +587,11 @@ const buildPublicDirectWsUrl = (publicPort: number): string => {
 
 let custodySupport: CustodySupportState | null = null;
 const rpcMarketSubscriptions = new Map<any, RpcMarketSubscription>();
+const rpcMarketSubscriptionLimiter = new MarketSubscriptionLimiter(
+  RELAY_MARKET_MAX_SUBSCRIPTIONS,
+  RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP,
+  RELAY_MARKET_MAX_SUBSCRIPTION_CELLS,
+);
 let rpcMarketPublisherTimer: ReturnType<typeof setInterval> | null = null;
 let rpcMarketPublisherInFlight = false;
 
@@ -581,6 +619,25 @@ const finishTiming = (stage: keyof typeof timings, startedAt: number): void => {
 
 const serializeError = (error: unknown): string => error instanceof Error ? error.message : String(error);
 const meshLog = createStructuredLogger('mesh.orchestrator');
+
+const pushChildLogLines = (target: string[], chunk: Buffer | string): void => {
+  const text = chunk.toString();
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line) continue;
+    target.push(line.slice(0, 1000));
+  }
+  if (target.length > CHILD_LOG_RING_MAX) {
+    target.splice(0, target.length - CHILD_LOG_RING_MAX);
+  }
+};
+
+const resolveRequestClientIp = (request: Request): string => {
+  const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
+  const realIp = request.headers.get('x-real-ip')?.trim();
+  const cfIp = request.headers.get('cf-connecting-ip')?.trim();
+  return forwarded || realIp || cfIp || 'direct';
+};
 
 const stopProcess = async (proc: ChildProcess | null): Promise<void> => {
   if (!proc || proc.exitCode !== null) return;
@@ -611,6 +668,12 @@ const clearRelayState = (): void => {
   relayStore.debugEvents.length = 0;
   relayStore.debugId = 0;
   relayStore.wsCounter = 0;
+  rpcMarketSubscriptions.clear();
+  rpcMarketSubscriptionLimiter.clear();
+  if (rpcMarketPublisherTimer) {
+    clearInterval(rpcMarketPublisherTimer);
+    rpcMarketPublisherTimer = null;
+  }
 };
 
 const fetchJson = async <T>(url: string, timeoutMs = 2_000): Promise<T | null> => {
@@ -694,7 +757,11 @@ const fetchHubMarketSnapshots = async (
 };
 
 const cleanupRpcMarketSubscription = (ws: any): void => {
-  rpcMarketSubscriptions.delete(ws);
+  const existing = rpcMarketSubscriptions.get(ws);
+  if (existing) {
+    rpcMarketSubscriptionLimiter.remove(String(ws?.data?.clientIp || 'unknown'));
+    rpcMarketSubscriptions.delete(ws);
+  }
   if (rpcMarketSubscriptions.size > 0) return;
   if (!rpcMarketPublisherTimer) return;
   clearInterval(rpcMarketPublisherTimer);
@@ -781,9 +848,17 @@ const handleMarketMessage = async (ws: any, msg: any): Promise<void> => {
       ? Math.max(1, Math.min(Math.floor(depthRaw), RPC_MARKET_MAX_DEPTH))
       : RPC_MARKET_DEFAULT_DEPTH;
     const existing = rpcMarketSubscriptions.get(ws);
-    if (!existing && rpcMarketSubscriptions.size >= RELAY_MARKET_MAX_SUBSCRIPTIONS) {
-      ws.send(safeStringify({ type: 'error', inReplyTo: id, code: 'E_RATE_LIMITED', error: 'market subscription capacity exceeded' }));
-      return;
+    if (!existing) {
+      const decision = rpcMarketSubscriptionLimiter.canOpen(String(ws?.data?.clientIp || 'unknown'));
+      if (!decision.ok) {
+        ws.send(safeStringify({
+          type: 'error',
+          inReplyTo: id,
+          code: decision.code,
+          error: decision.error,
+        }));
+        return;
+      }
     }
     const nextHubIds = replace || !existing ? new Set<string>() : new Set(existing.hubIds);
     const nextPairIds = replace || !existing ? new Set<string>() : new Set(existing.pairIds);
@@ -808,6 +883,9 @@ const handleMarketMessage = async (ws: any, msg: any): Promise<void> => {
     subscription.hubIds = nextHubIds;
     subscription.pairIds = nextPairIds;
     subscription.depth = depth;
+    if (!existing) {
+      rpcMarketSubscriptionLimiter.add(String(ws?.data?.clientIp || 'unknown'));
+    }
     rpcMarketSubscriptions.set(ws, subscription);
     ensureRpcMarketPublisher();
 
@@ -1255,6 +1333,8 @@ const spawnHub = async (child: HubChild): Promise<void> => {
   child.restartCount += 1;
   child.lastHealth = null;
   child.lastInfo = null;
+  child.recentStdout = [];
+  child.recentStderr = [];
   const proc = spawn('bun', cmd, {
     cwd: process.cwd(),
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -1276,9 +1356,11 @@ const spawnHub = async (child: HubChild): Promise<void> => {
   }
   writeManagedRuntimeLease(spec, proc.pid, child.startedAt ?? Date.now());
   proc.stdout?.on('data', chunk => {
+    pushChildLogLines(child.recentStdout, chunk);
     process.stdout.write(`[${child.name}] ${chunk.toString()}`);
   });
   proc.stderr?.on('data', chunk => {
+    pushChildLogLines(child.recentStderr, chunk);
     process.stderr.write(`[${child.name}:err] ${chunk.toString()}`);
   });
   proc.once('exit', code => {
@@ -1319,6 +1401,8 @@ const spawnMarketMaker = async (): Promise<void> => {
   marketMakerChild.lastHealth = null;
   marketMakerChild.lastInfo = null;
   marketMakerChild.lastStartupPhase = null;
+  marketMakerChild.recentStdout = [];
+  marketMakerChild.recentStderr = [];
   const proc = spawn('bun', cmd, {
     cwd: process.cwd(),
     stdio: ['ignore', 'pipe', 'pipe'],
@@ -1340,9 +1424,11 @@ const spawnMarketMaker = async (): Promise<void> => {
   }
   writeManagedRuntimeLease(spec, proc.pid, marketMakerChild.startedAt ?? Date.now());
   proc.stdout?.on('data', chunk => {
+    pushChildLogLines(marketMakerChild.recentStdout, chunk);
     process.stdout.write(`[MM] ${chunk.toString()}`);
   });
   proc.stderr?.on('data', chunk => {
+    pushChildLogLines(marketMakerChild.recentStderr, chunk);
     process.stderr.write(`[MM:err] ${chunk.toString()}`);
   });
   proc.once('exit', (code, signal) => {
@@ -1406,8 +1492,14 @@ const buildChildProcessHealth = (): AggregatedHealth['process']['children'] => {
       leaseOwnerId: lease?.ownerId ?? null,
       online: child.proc?.exitCode === null,
       exitCode: child.exitCode,
+      startedAt: child.startedAt,
+      exitedAt: child.exitedAt,
+      restartCount: child.restartCount,
       apiPort: spec.apiPort,
       dbPath: spec.dbPath,
+      lastErrorLine: child.recentStderr.at(-1) ?? null,
+      recentStdout: child.recentStdout.slice(-10),
+      recentStderr: child.recentStderr.slice(-10),
     };
   });
   const mmSpec = managedSpecForMarketMaker();
@@ -1422,8 +1514,15 @@ const buildChildProcessHealth = (): AggregatedHealth['process']['children'] => {
       leaseOwnerId: mmLease?.ownerId ?? null,
       online: marketMakerChild.proc?.exitCode === null,
       exitCode: marketMakerChild.exitCode,
+      exitSignal: marketMakerChild.exitSignal,
+      startedAt: marketMakerChild.startedAt,
+      exitedAt: marketMakerChild.exitedAt,
+      restartCount: marketMakerChild.restartCount,
       apiPort: mmSpec.apiPort,
       dbPath: mmSpec.dbPath,
+      lastErrorLine: marketMakerChild.recentStderr.at(-1) ?? null,
+      recentStdout: marketMakerChild.recentStdout.slice(-10),
+      recentStderr: marketMakerChild.recentStderr.slice(-10),
     },
   ];
 };
@@ -1472,6 +1571,14 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       online,
       runtimeId,
       selfRelayPresence: relayOnline,
+      pid: child.proc?.pid ?? null,
+      apiPort: child.apiPort,
+      dbPath: child.dbPath,
+      startedAt: child.startedAt,
+      exitedAt: child.exitedAt,
+      exitCode: child.exitCode,
+      restartCount: child.restartCount,
+      lastErrorLine: child.recentStderr.at(-1) ?? null,
     };
   });
 
@@ -1598,6 +1705,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       clientCount: relayClientIds.length,
       managedRuntimeIds: Array.from(managedRuntimeIds).sort(),
       externalClientIds: externalClientIds.sort(),
+      marketSubscriptions: rpcMarketSubscriptionLimiter.snapshot(),
     },
     process: buildProcessHealth(),
     disk: buildDiskSummary(storage),
@@ -1920,11 +2028,11 @@ const waitForHubSelfReady = async (child: HubChild): Promise<void> => {
       return;
     }
     if (child.proc?.exitCode !== null) {
-      throw new Error(`${child.name}_SELF_READY_EXITED_EARLY code=${String(child.proc?.exitCode)}`);
+      throw new Error(`${child.name}_SELF_READY_EXITED_EARLY code=${String(child.proc?.exitCode)} stderr=${safeStringify(child.recentStderr.slice(-8))}`);
     }
     await delay(250);
   }
-  throw new Error(`${child.name}_SELF_READY_TIMEOUT ${safeStringify(child.lastHealth)}`);
+  throw new Error(`${child.name}_SELF_READY_TIMEOUT ${safeStringify({ health: child.lastHealth, stderr: child.recentStderr.slice(-8) })}`);
 };
 
 const waitForShardJurisdictions = async (child: HubChild): Promise<void> => {
@@ -2249,7 +2357,7 @@ const server = Bun.serve({
     }
 
     if (request.headers.get('upgrade') === 'websocket' && pathname === '/relay') {
-      const upgraded = serverRef.upgrade(request, { data: { type: 'relay' } });
+      const upgraded = serverRef.upgrade(request, { data: { type: 'relay', clientIp: resolveRequestClientIp(request) } });
       if (upgraded) return undefined;
       return new Response('WebSocket upgrade failed', { status: 400 });
     }

@@ -44,6 +44,7 @@ const GOSSIP_POLL_MS = Number(process.env['CUSTODY_GOSSIP_POLL_MS'] || '1000');
 const DAEMON_RUNTIME_SEED = process.env['CUSTODY_DAEMON_RUNTIME_SEED'] || `${SEED}:runtime`;
 const DAEMON_AUTH_SEED = requireEnv('CUSTODY_DAEMON_AUTH_SEED');
 const DAEMON_AUTH_AUDIENCE = String(process.env['CUSTODY_DAEMON_AUTH_AUDIENCE'] || `custody-daemon-${DAEMON_PORT}`).trim().toLowerCase();
+const REUSE_EXISTING_DAEMON = process.env['CUSTODY_REUSE_EXISTING_DAEMON'] === '1';
 
 process.env['XLN_RADAPTER_REQUIRE_STRONG_AUTH_SEED'] = process.env['XLN_RADAPTER_REQUIRE_STRONG_AUTH_SEED'] || '1';
 
@@ -150,16 +151,20 @@ const mirrorChildLogs = (prefix: string, child: ManagedChild): void => {
 const readMainHealth = async (): Promise<MainHealthPayload> => {
   const response = await fetch(new URL('/api/health', MAIN_API_BASE_URL));
   if (!response.ok) {
-    throw new Error(`main API health failed (${response.status})`);
+    const body = await response.text().catch(() => '');
+    throw new Error(`main API health failed (${response.status}) ${body.slice(0, 500)}`);
   }
   return await response.json() as MainHealthPayload;
 };
 
 const waitForMainStackReady = async (): Promise<string[]> => {
   const deadline = Date.now() + 120_000;
+  let lastHealth: unknown = null;
+  let lastError = '';
   while (Date.now() < deadline) {
     try {
       const payload = await readMainHealth();
+      lastHealth = payload;
       const hubIds = Array.isArray(payload.hubs)
         ? payload.hubs
           .map(hub => String(hub?.entityId || '').toLowerCase())
@@ -171,12 +176,15 @@ const waitForMainStackReady = async (): Promise<string[]> => {
       if (runtimeOk && relayOk && meshOk && hubIds.length >= 3) {
         return hubIds.slice(0, 3);
       }
-    } catch {
+    } catch (error) {
+      lastError = error instanceof Error ? error.message : String(error);
       // keep polling
     }
     await sleep(500);
   }
-  throw new Error('MAIN_STACK_NOT_READY: expected runtime+relay+3 hubs on main API');
+  throw new Error(
+    `MAIN_STACK_NOT_READY: expected runtime+relay+3 hubs on main API lastError=${lastError || 'none'} lastHealth=${JSON.stringify(lastHealth).slice(0, 2000)}`,
+  );
 };
 
 const ensureExistingCustodyState = async (
@@ -234,12 +242,15 @@ const readExistingCustodyPayload = async (): Promise<ExistingCustodyPayload | nu
 };
 
 const startDaemon = async (): Promise<ManagedChild | null> => {
-  if (
+  if (REUSE_EXISTING_DAEMON &&
     await isHttpReady(`http://127.0.0.1:${DAEMON_PORT}/api/health`)
     && await isDaemonControlReady()
   ) {
     console.log(`[custody-prod] reusing existing custody daemon on :${DAEMON_PORT}`);
     return null;
+  }
+  if (!REUSE_EXISTING_DAEMON) {
+    console.log('[custody-prod] restarting custody daemon; set CUSTODY_REUSE_EXISTING_DAEMON=1 to opt into reuse');
   }
 
   await killStaleCustodyDaemon();

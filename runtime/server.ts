@@ -68,6 +68,7 @@ import {
   normalizeMarketPairId,
   type MarketSnapshotPayload,
 } from './market-snapshot';
+import { MarketSubscriptionLimiter } from './market-subscription-limiter';
 import { ethers } from 'ethers';
 import { ERC20Mock__factory } from '../jurisdictions/typechain-types/index.ts';
 import {
@@ -107,7 +108,7 @@ let tokenCatalogCache: JTokenInfo[] | null = null;
 let tokenCatalogPromise: Promise<JTokenInfo[]> | null = null;
 let processGuardsInstalled = false;
 const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
-type RelaySocketData = { type: 'relay' | 'rpc' };
+type RelaySocketData = { type: 'relay' | 'rpc'; clientIp: string };
 type RelaySocket = ServerWebSocket<RelaySocketData>;
 const isEntityId32 = (value: unknown): value is string => typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
 const JSON_HEADERS = {
@@ -421,6 +422,7 @@ const readPositiveIntEnv = (name: string, fallback: number): number => {
 };
 const RELAY_MARKET_MAX_SUBSCRIPTIONS = readPositiveIntEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTIONS', 1000);
 const RELAY_MARKET_MAX_SUBSCRIPTION_CELLS = readPositiveIntEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTION_CELLS', 64);
+const RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP = readPositiveIntEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP', 8);
 const MARKET_MAKER_LEVEL_OFFSETS_BPS = [2, 4, 6, 8, 10, 12, 15, 20, 25, 32, 40, 50, 65, 80, 100] as const;
 const MARKET_MAKER_LEVEL_BASE_SIZES = [
   120n * 10n ** 18n,
@@ -1369,7 +1371,21 @@ type RpcMarketSubscription = {
 };
 
 const rpcMarketSubscriptions = new Map<RelaySocket, RpcMarketSubscription>();
+const rpcMarketSubscriptionLimiter = new MarketSubscriptionLimiter(
+  RELAY_MARKET_MAX_SUBSCRIPTIONS,
+  RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP,
+  RELAY_MARKET_MAX_SUBSCRIPTION_CELLS,
+);
 let rpcMarketPublisherTimer: ReturnType<typeof setInterval> | null = null;
+
+const resolveRequestClientIp = (request: Request): string => {
+  const forwarded = request.headers.get('x-forwarded-for')?.split(',')[0]?.trim();
+  const realIp = request.headers.get('x-real-ip')?.trim();
+  const cfIp = request.headers.get('cf-connecting-ip')?.trim();
+  return forwarded || realIp || cfIp || 'direct';
+};
+
+const getRelayClientIp = (ws: RelaySocket): string => String(ws.data?.clientIp || 'unknown');
 
 const sendEntityInputDirectViaRelaySocket = (
   env: Env,
@@ -1635,7 +1651,7 @@ const publishRpcMarketSnapshots = (env: Env): void => {
     try {
       sendRpcMarketSnapshot(ws, subscription, env);
     } catch {
-      rpcMarketSubscriptions.delete(ws);
+      cleanupRpcMarketSubscription(ws);
     }
   }
 };
@@ -1655,7 +1671,11 @@ const stopRpcMarketPublisherIfIdle = (): void => {
 };
 
 const cleanupRpcMarketSubscription = (ws: RelaySocket): void => {
-  rpcMarketSubscriptions.delete(ws);
+  const existing = rpcMarketSubscriptions.get(ws);
+  if (existing) {
+    rpcMarketSubscriptionLimiter.remove(getRelayClientIp(ws));
+    rpcMarketSubscriptions.delete(ws);
+  }
   stopRpcMarketPublisherIfIdle();
 };
 
@@ -1694,9 +1714,17 @@ const handleMarketMessage = (ws: RelaySocket, msg: Record<string, unknown>, env:
       ? Math.max(1, Math.min(Math.floor(depthRaw), RPC_MARKET_MAX_DEPTH))
       : RPC_MARKET_DEFAULT_DEPTH;
     const existing = rpcMarketSubscriptions.get(ws);
-    if (!existing && rpcMarketSubscriptions.size >= RELAY_MARKET_MAX_SUBSCRIPTIONS) {
-      ws.send(safeStringify({ type: 'error', inReplyTo: id, code: 'E_RATE_LIMITED', error: 'market subscription capacity exceeded' }));
-      return;
+    if (!existing) {
+      const decision = rpcMarketSubscriptionLimiter.canOpen(getRelayClientIp(ws));
+      if (!decision.ok) {
+        ws.send(safeStringify({
+          type: 'error',
+          inReplyTo: id,
+          code: decision.code,
+          error: decision.error,
+        }));
+        return;
+      }
     }
     const nextHubIds = replace || !existing ? new Set<string>() : new Set(existing.hubIds);
     const nextPairIds = replace || !existing ? new Set<string>() : new Set(existing.pairIds);
@@ -1721,6 +1749,7 @@ const handleMarketMessage = (ws: RelaySocket, msg: Record<string, unknown>, env:
     subscription.hubIds = nextHubIds;
     subscription.pairIds = nextPairIds;
     subscription.depth = depth;
+    if (!existing) rpcMarketSubscriptionLimiter.add(getRelayClientIp(ws));
     rpcMarketSubscriptions.set(ws, subscription);
     ensureRpcMarketPublisher(env);
 
@@ -3700,6 +3729,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
   const options = { ...DEFAULT_OPTIONS, ...opts };
   relayStore = createRelayStore(options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server');
   rpcMarketSubscriptions.clear();
+  rpcMarketSubscriptionLimiter.clear();
   if (rpcMarketPublisherTimer) {
     clearInterval(rpcMarketPublisherTimer);
     rpcMarketPublisherTimer = null;
@@ -3728,7 +3758,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       if (req.headers.get('upgrade') === 'websocket') {
         const wsType = pathname === '/relay' ? 'relay' : pathname === '/rpc' ? 'rpc' : null;
         if (wsType) {
-          const upgraded = server.upgrade(req, { data: { type: wsType } });
+          const upgraded = server.upgrade(req, { data: { type: wsType, clientIp: resolveRequestClientIp(req) } });
           if (upgraded) return;
         }
         return new Response('WebSocket upgrade failed', { status: 400 });
