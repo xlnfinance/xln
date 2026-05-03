@@ -550,6 +550,38 @@ test('runtime adapter historical view frame uses paged storage loader instead of
   expect(frame.activeEntity?.accounts.items[0]?.rightEntity).toBe(counterpartyId);
 });
 
+test('runtime adapter historical reads fail closed when storage loaders are missing', async () => {
+  const env = makeEnv();
+
+  await expect(resolveRuntimeAdapterRead({ env }, 'entities', { atHeight: env.height - 1 }))
+    .rejects.toThrow('storage entity listing is required for historical reads');
+  await expect(resolveRuntimeAdapterRead({ env }, 'head', { atHeight: env.height - 1 }))
+    .rejects.toThrow('storage head reader is required for historical reads');
+  await expect(resolveRuntimeAdapterRead({ env, listEntityIdsAtHeight: async () => [entityId] }, 'view-frame', { atHeight: env.height - 1 }))
+    .rejects.toThrow('storage head reader is required for historical reads');
+});
+
+test('runtime adapter historical head reads persisted storage head', async () => {
+  const env = makeEnv();
+  const head = await resolveRuntimeAdapterRead<{ latestHeight: number; latestSnapshotHeight: number }>({
+    env,
+    readHead: async () => ({
+      schemaVersion: 1,
+      latestHeight: 42,
+      latestMaterializedHeight: 41,
+      latestSnapshotHeight: 40,
+      snapshotPeriodFrames: 256,
+      retainSnapshots: 3,
+      epochMaxBytes: 1,
+      accountMerkleRadix: 16,
+      retainedHistoryBytes: 123,
+    }),
+  }, 'head', { atHeight: env.height - 1 });
+
+  expect(head.latestHeight).toBe(42);
+  expect(head.latestSnapshotHeight).toBe(40);
+});
+
 test('runtime adapter current view frame reads live env without touching storage loader', async () => {
   const env = makeEnv();
   let pagedLoadCalled = false;

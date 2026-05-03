@@ -666,12 +666,7 @@ const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
     const explicitLineTarget = file.match(/^(.+\.spec\.ts):\d+(?::\d+)?$/);
     if (explicitLineTarget) {
       const sourceFile = explicitLineTarget[1]!;
-      out.push({
-        target: file,
-        requireMarketMaker: requiresMarketMaker(sourceFile),
-        title: file,
-      });
-      continue;
+      throw new Error(`Line-pinned Playwright target is not supported: ${file}. Use ${sourceFile}::exact test title.`);
     }
 
     if (unsplittableSpecs.has(file)) {
@@ -692,10 +687,13 @@ const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
       const line = lines[i] || '';
       const matchesTopLevelTest = braceDepth <= 1 && /^\s*test(?:\.(?:only|fail))?\(/.test(line);
       if (matchesTopLevelTest) {
+        const title = extractTopLevelTestTitle(line);
+        if (!title) continue;
         out.push({
-          target: `${file}:${i + 1}`,
+          target: file,
           requireMarketMaker: requiresMarketMaker(file),
-          title: extractTopLevelTestTitle(line) || `${file}:${i + 1}`,
+          title,
+          grep: escapeRegExp(title),
         });
         added += 1;
       }
