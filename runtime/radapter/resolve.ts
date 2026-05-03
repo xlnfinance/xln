@@ -1,5 +1,5 @@
 import type { BookState } from '../orderbook';
-import type { AccountMachine, EntityReplica, EntityState, Env } from '../types';
+import type { EntityReplica, EntityState, Env } from '../types';
 import {
   DEFAULT_ACCOUNT_MERKLE_RADIX,
   DEFAULT_EPOCH_MAX_BYTES,
@@ -15,6 +15,7 @@ import type {
   StorageFrameRecord,
   StorageHead,
 } from '../storage/types';
+import { compareAscii, sortedStringMapKeys, sortedStringMapStartIndex } from '../sorted-index';
 import { RuntimeAdapterError } from './errors';
 import type { RuntimeAdapterEntitySummary, RuntimeAdapterReadQuery } from './types';
 
@@ -40,11 +41,25 @@ export type RuntimeAdapterResolveContext = {
 export type RuntimeAdapterAccountPage = {
   items: StorageAccountDoc[];
   nextCursor: string | null;
+  prevCursor?: string | null;
+  firstCursor?: string | null;
+  lastCursor?: string | null;
+  pageIndex?: number;
+  pageCount?: number;
+  totalItems?: number;
+  limit?: number;
 };
 
 export type RuntimeAdapterBookPage = {
   items: Array<{ pairId: string; book: BookState }>;
   nextCursor: string | null;
+  prevCursor?: string | null;
+  firstCursor?: string | null;
+  lastCursor?: string | null;
+  pageIndex?: number;
+  pageCount?: number;
+  totalItems?: number;
+  limit?: number;
 };
 
 export type RuntimeAdapterViewEntityFrame = {
@@ -84,12 +99,6 @@ const readAtHeight = (query?: RuntimeAdapterReadQuery): number | null => {
   if (!Number.isFinite(raw) || raw < 1) throw new RuntimeAdapterError('E_BAD_QUERY', 'atHeight must be a positive integer');
   return Math.floor(raw);
 };
-
-const compareAscii = (left: string, right: string): number =>
-  left < right ? -1 : left > right ? 1 : 0;
-
-const compareForDirection = (left: string, right: string, direction: 'asc' | 'desc'): number =>
-  direction === 'desc' ? compareAscii(right, left) : compareAscii(left, right);
 
 const findReplica = (env: Env, entityId: string): EntityReplica | null => {
   const normalized = normalizeEntityId(entityId);
@@ -175,44 +184,84 @@ const listEntitySummaries = async (
     .sort((left, right) => compareAscii(left.entityId, right.entityId));
 };
 
-const pushBoundedItem = <T>(
-  items: T[],
-  item: T,
-  sortId: (item: T) => string,
-  limit: number,
-  direction: 'asc' | 'desc',
-): void => {
-  let insertAt = items.length;
-  while (insertAt > 0 && compareForDirection(sortId(item), sortId(items[insertAt - 1]!), direction) < 0) {
-    insertAt -= 1;
-  }
-  items.splice(insertAt, 0, item);
-  if (items.length > limit + 1) items.pop();
+const readPageIndex = (rawValue: unknown): number => {
+  if (rawValue === undefined || rawValue === null || rawValue === '') return -1;
+  const raw = Number(rawValue);
+  if (!Number.isFinite(raw) || raw < 0) throw new RuntimeAdapterError('E_BAD_QUERY', 'page index must be a non-negative integer');
+  return Math.floor(raw);
 };
 
-const isAfterCursor = (id: string, cursor: string, direction: 'asc' | 'desc'): boolean => {
-  if (!cursor) return true;
-  const order = compareAscii(id, cursor);
-  return direction === 'desc' ? order < 0 : order > 0;
+const buildPageMeta = (
+  keys: readonly string[],
+  start: number,
+  limit: number,
+  visibleKeys: readonly string[],
+): Omit<RuntimeAdapterAccountPage, 'items'> => {
+  const safeLimit = Math.max(1, limit);
+  return {
+    nextCursor: start + safeLimit < keys.length ? visibleKeys[visibleKeys.length - 1] ?? null : null,
+    prevCursor: start > 0 ? keys[Math.max(0, start - safeLimit)] ?? null : null,
+    firstCursor: visibleKeys[0] ?? null,
+    lastCursor: visibleKeys[visibleKeys.length - 1] ?? null,
+    pageIndex: Math.floor(start / safeLimit),
+    pageCount: Math.ceil(keys.length / safeLimit),
+    totalItems: keys.length,
+    limit: safeLimit,
+  };
 };
+
+const emptyPageMeta = (limit: number): Omit<RuntimeAdapterAccountPage, 'items'> => ({
+  nextCursor: null,
+  prevCursor: null,
+  firstCursor: null,
+  lastCursor: null,
+  pageIndex: 0,
+  pageCount: 0,
+  totalItems: 0,
+  limit,
+});
+
+const singleAccountPage = (
+  accountId: string,
+  account: StorageAccountDoc | null,
+  limit: number,
+): RuntimeAdapterAccountPage => account
+  ? {
+      items: [account],
+      nextCursor: null,
+      prevCursor: null,
+      firstCursor: accountId,
+      lastCursor: accountId,
+      pageIndex: 0,
+      pageCount: 1,
+      totalItems: 1,
+      limit,
+    }
+  : { items: [], ...emptyPageMeta(limit) };
 
 const projectLiveAccountsPage = (
   state: EntityState,
   query?: RuntimeAdapterReadQuery,
 ): RuntimeAdapterAccountPage => {
   const limit = readBoundedLimit(query?.accountsLimit ?? query?.limit, 10);
-  const cursor = normalizeEntityId(String(query?.accountsCursor ?? query?.cursor ?? ''));
-  const direction = query?.sortDir === 'desc' ? 'desc' : 'asc';
-  const candidates: Array<{ id: string; account: AccountMachine }> = [];
-  for (const [rawId, account] of state.accounts.entries()) {
-    const id = normalizeEntityId(rawId);
-    if (!isAfterCursor(id, cursor, direction)) continue;
-    pushBoundedItem(candidates, { id, account }, entry => entry.id, limit, direction);
+  const accountId = normalizeEntityId(String(query?.accountId || ''));
+  if (accountId) {
+    const account = state.accounts.get(accountId);
+    return singleAccountPage(accountId, account ? projectAccountDoc(account) : null, limit);
   }
-  const visible = candidates.slice(0, limit);
+  const cursor = normalizeEntityId(String(query?.accountsCursor ?? query?.cursor ?? ''));
+  const pageIndex = readPageIndex(query?.accountsPage);
+  const orderedKeys = sortedStringMapKeys(state.accounts as Map<string, unknown>);
+  const keys = query?.sortDir === 'desc' ? [...orderedKeys].reverse() : orderedKeys;
+  const start = sortedStringMapStartIndex(keys, cursor, pageIndex, limit);
+  const visibleKeys = keys.slice(start, start + limit);
   return {
-    items: visible.map(({ account }) => projectAccountDoc(account)),
-    nextCursor: candidates.length > limit ? visible[visible.length - 1]?.id ?? null : null,
+    items: visibleKeys.map((id) => {
+      const account = state.accounts.get(id);
+      if (!account) throw new RuntimeAdapterError('E_INTERNAL', `live account index is stale: ${id}`);
+      return projectAccountDoc(account);
+    }),
+    ...buildPageMeta(keys, start, limit, visibleKeys),
   };
 };
 
@@ -222,18 +271,22 @@ const projectLiveBooksPage = (
 ): RuntimeAdapterBookPage => {
   const limit = readBoundedLimit(query?.booksLimit ?? query?.limit, 10);
   const cursor = String(query?.booksCursor ?? query?.cursor ?? '').trim();
-  const direction = query?.sortDir === 'desc' ? 'desc' : 'asc';
-  const candidates: Array<{ pairId: string; book: BookState }> = [];
   const books = state.orderbookExt?.books;
-  for (const [rawPairId, book] of books?.entries?.() ?? []) {
-    const pairId = String(rawPairId);
-    if (!isAfterCursor(pairId, cursor, direction)) continue;
-    pushBoundedItem(candidates, { pairId, book }, entry => entry.pairId, limit, direction);
+  if (!books) {
+    return { items: [], ...emptyPageMeta(limit) };
   }
-  const visible = candidates.slice(0, limit);
+  const pageIndex = readPageIndex(query?.booksPage);
+  const orderedKeys = sortedStringMapKeys(books as Map<string, unknown>);
+  const keys = query?.sortDir === 'desc' ? [...orderedKeys].reverse() : orderedKeys;
+  const start = sortedStringMapStartIndex(keys, cursor, pageIndex, limit);
+  const visibleKeys = keys.slice(start, start + limit);
   return {
-    items: visible.map(({ pairId, book }) => ({ pairId, book })),
-    nextCursor: candidates.length > limit ? visible[visible.length - 1]?.pairId ?? null : null,
+    items: visibleKeys.map((pairId) => {
+      const book = books.get(pairId);
+      if (!book) throw new RuntimeAdapterError('E_INTERNAL', `live book index is stale: ${pairId}`);
+      return { pairId, book };
+    }),
+    ...buildPageMeta(keys, start, limit, visibleKeys),
   };
 };
 
@@ -309,8 +362,11 @@ const projectViewFrame = async (
   if (accountQuery.limit !== undefined) storedQuery.limit = accountQuery.limit;
   if (accountQuery.limit !== undefined) storedQuery.accountsLimit = accountQuery.limit;
   if (accountQuery.cursor) storedQuery.accountsCursor = accountQuery.cursor;
+  if (query?.accountId) storedQuery.accountId = query.accountId;
+  if (query?.accountsPage !== undefined) storedQuery.accountsPage = query.accountsPage;
   if (bookQuery.limit !== undefined) storedQuery.booksLimit = bookQuery.limit;
   if (bookQuery.cursor) storedQuery.booksCursor = bookQuery.cursor;
+  if (query?.booksPage !== undefined) storedQuery.booksPage = query.booksPage;
   const stored = isCurrentHeight
     ? projectLiveEntityViewPage(ctx, activeEntityId, storedQuery)
     : await loadRequiredEntityViewPage(ctx, activeEntityId, height, storedQuery);
@@ -361,6 +417,21 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
       const height = readAtHeight(query);
       const targetHeight = height ?? Math.max(0, Math.floor(Number(ctx.env.height ?? 0)));
       if (targetHeight < 1) throw new RuntimeAdapterError('E_BAD_QUERY', 'paged entity reads require a persisted runtime height');
+      const accountId = normalizeEntityId(String(query?.accountId || ''));
+      if (parts[2] === 'accounts' && accountId) {
+        const limit = readBoundedLimit(query?.accountsLimit ?? query?.limit, 10);
+        if (height === null || targetHeight === Math.max(0, Math.floor(Number(ctx.env.height ?? 0)))) {
+          const replica = findReplica(ctx.env, entityId);
+          if (!replica) throw new RuntimeAdapterError('E_NOT_FOUND', `entity not found: ${normalizeEntityId(entityId)}`);
+          const account = replica.state.accounts.get(accountId);
+          return singleAccountPage(accountId, account ? projectAccountDoc(account) : null, limit) as T;
+        }
+        if (!ctx.loadEntityAccountDoc) {
+          throw new RuntimeAdapterError('E_BAD_QUERY', 'historical account reads are unavailable for this adapter');
+        }
+        const account = await ctx.loadEntityAccountDoc(entityId, accountId, targetHeight);
+        return singleAccountPage(accountId, account, limit) as T;
+      }
       const stored = height === null || targetHeight === Math.max(0, Math.floor(Number(ctx.env.height ?? 0)))
         ? projectLiveEntityViewPage(ctx, entityId, query)
         : await loadRequiredEntityViewPage(ctx, entityId, targetHeight, query);
