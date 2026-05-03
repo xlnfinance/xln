@@ -154,6 +154,13 @@ type LocalHealthResponse = {
       targetMet?: boolean;
     }>;
   };
+  jurisdiction: JurisdictionImportDiagnostics | null;
+  jadapter: {
+    ready: boolean;
+    mode: string | null;
+    contracts: JAdapter['addresses'] | null;
+    tokenCatalogCount: number;
+  };
   timings: TimingMap;
 };
 
@@ -187,6 +194,18 @@ type JurisdictionsFile = {
     };
   }>;
   defaults?: Record<string, unknown>;
+};
+
+type JurisdictionImportDiagnostics = {
+  name: string;
+  rpc: string;
+  chainId: number;
+  deployTokens: boolean;
+  inputContracts: boolean;
+  usedContracts: boolean;
+  probeRan: boolean;
+  missingCode: string[];
+  mode: 'no-contracts' | 'connect-existing' | 'deploy-fresh' | 'dropped-stale';
 };
 
 const argsRaw = process.argv.slice(2);
@@ -270,6 +289,7 @@ if (!directWsUrl) {
   throw new Error(`[MESH-HUB] Missing required --direct-ws-url for ${resolvedArgs.name}`);
 }
 const nodeLog = createStructuredLogger('mesh.hub', { hub: resolvedArgs.name });
+let jurisdictionImportDiagnostics: JurisdictionImportDiagnostics | null = null;
 
 const timings: TimingMap = {
   runtime_boot: { startedAt: null, completedAt: null, ms: null },
@@ -347,9 +367,22 @@ const findMissingRpcContractCode = async (
 };
 
 const prepareJurisdictionForImport = async (jurisdiction: JurisdictionConfig): Promise<JurisdictionConfig> => {
+  jurisdictionImportDiagnostics = {
+    name: jurisdiction.name,
+    rpc: jurisdiction.rpc,
+    chainId: jurisdiction.chainId,
+    deployTokens: resolvedArgs.deployTokens,
+    inputContracts: Boolean(jurisdiction.contracts),
+    usedContracts: Boolean(jurisdiction.contracts),
+    probeRan: false,
+    missingCode: [],
+    mode: jurisdiction.contracts ? 'connect-existing' : 'no-contracts',
+  };
   if (!resolvedArgs.deployTokens || !jurisdiction.contracts) return jurisdiction;
 
   const missingCode = await findMissingRpcContractCode(jurisdiction.rpc, jurisdiction.contracts);
+  jurisdictionImportDiagnostics.probeRan = true;
+  jurisdictionImportDiagnostics.missingCode = missingCode;
   if (missingCode.length === 0) return jurisdiction;
 
   // H1 is the dev/testnet deployer. If an isolated anvil starts from an empty
@@ -362,6 +395,8 @@ const prepareJurisdictionForImport = async (jurisdiction: JurisdictionConfig): P
     `[${resolvedArgs.name}] RPC contracts have no code; deploying fresh stack instead of using stale addresses: ` +
       missingCode.join(', '),
   );
+  jurisdictionImportDiagnostics.usedContracts = false;
+  jurisdictionImportDiagnostics.mode = 'dropped-stale';
   const { contracts: _staleContracts, ...withoutContracts } = jurisdiction;
   return withoutContracts;
 };
@@ -508,6 +543,12 @@ const ensureRpcStackReady = async (env: Env, jadapter: JAdapter): Promise<void> 
   if (jadapter.mode === 'browservm') return;
   const hasAddresses = Boolean(jadapter.addresses?.depository && jadapter.addresses?.entityProvider);
   if (hasAddresses) {
+    if (jurisdictionImportDiagnostics) {
+      jurisdictionImportDiagnostics.usedContracts = true;
+      if (jurisdictionImportDiagnostics.mode === 'no-contracts') {
+        jurisdictionImportDiagnostics.mode = 'connect-existing';
+      }
+    }
     syncEnvJurisdictionReplica(env, jadapter, resolvedArgs.rpcUrl);
     if (resolvedArgs.deployTokens) {
       await writeJurisdictionAddresses(jadapter, resolvedArgs.rpcUrl);
@@ -518,6 +559,10 @@ const ensureRpcStackReady = async (env: Env, jadapter: JAdapter): Promise<void> 
     throw new Error('RPC_STACK_ADDRESSES_MISSING');
   }
   console.log(`[${resolvedArgs.name}] deploying fresh RPC contract stack`);
+  if (jurisdictionImportDiagnostics) {
+    jurisdictionImportDiagnostics.usedContracts = false;
+    jurisdictionImportDiagnostics.mode = 'deploy-fresh';
+  }
   await jadapter.deployStack();
   syncEnvJurisdictionReplica(env, jadapter, resolvedArgs.rpcUrl);
   await writeJurisdictionAddresses(jadapter, resolvedArgs.rpcUrl);
@@ -826,6 +871,7 @@ const buildLocalHealth = (
   env: Env,
   entityId: string | null,
   tokenCatalog: JTokenInfo[],
+  jadapter: JAdapter | null,
 ): LocalHealthResponse => {
   const visibleHubProfiles = readVisibleHubProfiles(env);
   const visibleNames = visibleHubProfiles.map(profile => profile.name);
@@ -857,6 +903,13 @@ const buildLocalHealth = (
       pairs,
     },
     bootstrapReserves: entityId ? getReserveHealth(env, entityId, tokenCatalog) : { ok: false, targetMet: false, tokens: [] },
+    jurisdiction: jurisdictionImportDiagnostics,
+    jadapter: {
+      ready: Boolean(jadapter?.addresses?.depository && jadapter?.addresses?.entityProvider),
+      mode: jadapter?.mode ?? null,
+      contracts: jadapter?.addresses ?? null,
+      tokenCatalogCount: tokenCatalog.length,
+    },
     timings,
   };
 };
@@ -957,7 +1010,7 @@ const run = async (): Promise<void> => {
       }
 
       if (pathname === '/api/health') {
-        return new Response(safeStringify(buildLocalHealth(env, bootstrap?.entityId ?? null, activeTokenCatalog)), {
+        return new Response(safeStringify(buildLocalHealth(env, bootstrap?.entityId ?? null, activeTokenCatalog, activeJAdapter)), {
           headers,
         });
       }
