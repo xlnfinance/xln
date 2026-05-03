@@ -11,6 +11,7 @@ import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
 import { decodeRuntimeAdapterMessage } from '../radapter/codec';
 import { RemoteRuntimeAdapter } from '../radapter/remote';
 import type { RuntimeAdapterReadQuery } from '../radapter/types';
+import { createBook, createOrderbookExtState, DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';
 import {
   broadcastRuntimeAdapterTick,
   closeInvalidRuntimeAdapterMessage,
@@ -51,6 +52,7 @@ type Cli = {
   accounts: number;
   hotPercent: number;
   hotAccounts: number;
+  books: number;
   chunk: number;
   pageLimit: number;
   trafficRounds: number;
@@ -153,6 +155,7 @@ const readCli = (): Cli => {
     accounts,
     hotPercent,
     hotAccounts: Math.min(accounts, hotAccounts),
+    books: readInt('--books', 0),
     chunk: Math.max(1, readInt('--chunk', 10_000)),
     pageLimit: Math.max(1, readInt('--page-limit', 10)),
     trafficRounds: Math.max(0, readInt('--traffic-rounds', 10)),
@@ -234,6 +237,35 @@ const makeHubState = (entityId: string, height: number, timestamp: number): Enti
   swapTradingPairs: [],
   pendingSwapFillRatios: new Map(),
 });
+
+const seedBooks = (state: EntityState, count: number): void => {
+  if (count <= 0) return;
+  const supportedPairs = Array.from({ length: count }, (_, index) => `1/${index + 2}`);
+  const ext = createOrderbookExtState({
+    entityId: state.entityId,
+    name: state.profile.name,
+    spreadDistribution: DEFAULT_SPREAD_DISTRIBUTION,
+    referenceTokenId: 1,
+    minTradeSize: 1n,
+    supportedPairs,
+  });
+  for (const pairId of supportedPairs) {
+    ext.books.set(pairId, createBook({
+      bucketWidthTicks: 1n,
+      maxOrders: 1000,
+      stpPolicy: 0,
+    }));
+  }
+  state.orderbookExt = ext;
+  state.swapTradingPairs = supportedPairs.map((pairId) => {
+    const [baseTokenId, quoteTokenId] = pairId.split('/').map((value) => Number(value));
+    return {
+      pairId,
+      baseTokenId: baseTokenId || 1,
+      quoteTokenId: quoteTokenId || 2,
+    };
+  });
+};
 
 const makeEnv = (seed: string, entityId: string, state: EntityState): Env => ({
   height: state.height,
@@ -528,6 +560,7 @@ async function main() {
 
   const db = new Level<Buffer, Buffer>(dbPath, { valueEncoding: 'buffer', keyEncoding: 'binary' });
   const state = makeHubState(entityId, 1, 1_001);
+  seedBooks(state, cli.books);
   const env = makeEnv(cli.seed, entityId, state);
   process.env['XLN_RADAPTER_AUTH_SEED'] = cli.seed;
   process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'] = process.env['XLN_RADAPTER_MAX_MESSAGE_BYTES'] || String(4 * 1024 * 1024);
@@ -616,27 +649,30 @@ async function main() {
 
     const first = await adapter.read<{
       height: number;
-      activeEntity: { accounts: { items: unknown[]; nextCursor: string | null } };
+      activeEntity: { accounts: { items: unknown[]; nextCursor: string | null; totalItems?: number; pageCount?: number } };
     }>('view-frame', { entityId, accountsLimit: cli.pageLimit, booksLimit: cli.pageLimit, atHeight: adapter.currentHeight });
     trace.mark('adapter.read.first-page', {
       height: first.height,
       items: first.activeEntity.accounts.items.length,
       nextCursor: first.activeEntity.accounts.nextCursor,
+      totalItems: first.activeEntity.accounts.totalItems,
+      pageCount: first.activeEntity.accounts.pageCount,
     });
 
     if (first.activeEntity.accounts.nextCursor) {
       const second = await adapter.read<{
-        activeEntity: { accounts: { items: unknown[]; nextCursor: string | null } };
+        activeEntity: { accounts: { items: unknown[]; nextCursor: string | null; pageIndex?: number } };
       }>('view-frame', {
         entityId,
         accountsLimit: cli.pageLimit,
         booksLimit: cli.pageLimit,
-        accountsCursor: first.activeEntity.accounts.nextCursor,
+        accountsPage: 1,
         atHeight: adapter.currentHeight,
       });
       trace.mark('adapter.read.second-page', {
         items: second.activeEntity.accounts.items.length,
         nextCursor: second.activeEntity.accounts.nextCursor,
+        pageIndex: second.activeEntity.accounts.pageIndex,
       });
     }
 
@@ -653,6 +689,70 @@ async function main() {
       items: desc.activeEntity.accounts.items.length,
       nextCursor: desc.activeEntity.accounts.nextCursor,
     });
+
+    const lastPage = Math.max(0, Math.ceil(Math.max(1, state.accounts.size) / cli.pageLimit) - 1);
+    const deepPage = await adapter.read<{
+      activeEntity: { accounts: { items: unknown[]; nextCursor: string | null; pageIndex?: number } };
+    }>('view-frame', {
+      entityId,
+      accountsLimit: cli.pageLimit,
+      booksLimit: 1,
+      accountsPage: lastPage,
+      atHeight: adapter.currentHeight,
+    });
+    trace.mark('adapter.read.deep-account-page', {
+      pageIndex: deepPage.activeEntity.accounts.pageIndex,
+      items: deepPage.activeEntity.accounts.items.length,
+      nextCursor: deepPage.activeEntity.accounts.nextCursor,
+    });
+
+    const targetAccountId = normalizeEntityId(randomEntityId(cli.seed, Math.max(0, Math.min(cli.hotAccounts, cli.accounts) - 1)));
+    const accountSearch = await adapter.read<{
+      activeEntity: { accounts: { items: unknown[]; totalItems?: number } };
+    }>('view-frame', {
+      entityId,
+      accountsLimit: cli.pageLimit,
+      booksLimit: 1,
+      accountId: targetAccountId,
+      atHeight: adapter.currentHeight,
+    });
+    trace.mark('adapter.read.account-id', {
+      accountId: targetAccountId,
+      items: accountSearch.activeEntity.accounts.items.length,
+      totalItems: accountSearch.activeEntity.accounts.totalItems,
+    });
+
+    if (cli.books > 0) {
+      const booksFirst = await adapter.read<{
+        activeEntity: { books: { items: unknown[]; nextCursor: string | null; totalItems?: number; pageCount?: number } };
+      }>('view-frame', {
+        entityId,
+        accountsLimit: 1,
+        booksLimit: cli.pageLimit,
+        atHeight: adapter.currentHeight,
+      });
+      trace.mark('adapter.read.books-first-page', {
+        items: booksFirst.activeEntity.books.items.length,
+        nextCursor: booksFirst.activeEntity.books.nextCursor,
+        totalItems: booksFirst.activeEntity.books.totalItems,
+        pageCount: booksFirst.activeEntity.books.pageCount,
+      });
+      const lastBookPage = Math.max(0, Math.ceil(cli.books / cli.pageLimit) - 1);
+      const booksDeep = await adapter.read<{
+        activeEntity: { books: { items: unknown[]; nextCursor: string | null; pageIndex?: number } };
+      }>('view-frame', {
+        entityId,
+        accountsLimit: 1,
+        booksLimit: cli.pageLimit,
+        booksPage: lastBookPage,
+        atHeight: adapter.currentHeight,
+      });
+      trace.mark('adapter.read.deep-book-page', {
+        pageIndex: booksDeep.activeEntity.books.pageIndex,
+        items: booksDeep.activeEntity.books.items.length,
+        nextCursor: booksDeep.activeEntity.books.nextCursor,
+      });
+    }
 
     for (let round = 0; round < cli.trafficRounds; round += 1) {
       const start = (round * cli.touchPerRound) % Math.max(1, cli.hotAccounts);
@@ -691,6 +791,7 @@ async function main() {
       entityId,
       accounts: cli.accounts,
       hotAccounts: cli.hotAccounts,
+      books: cli.books,
       memoryMode: cli.memory,
       dbPath,
       dbBytes,
