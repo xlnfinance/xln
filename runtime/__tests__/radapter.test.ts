@@ -454,17 +454,31 @@ test('runtime adapter view frame defaults to 10 accounts and cursor pagination',
   }>({ env, loadEntityViewPage: makeTestViewPageLoader(env) }, 'view-frame');
   expect(first.activeEntity?.accounts.items).toHaveLength(10);
   expect(first.activeEntity?.accounts.nextCursor).toBe(`0x${'0a'.padStart(64, '0')}`);
+  expect(first.activeEntity?.accounts.totalItems).toBe(12);
+  expect(first.activeEntity?.accounts.pageIndex).toBe(0);
+  expect(first.activeEntity?.accounts.pageCount).toBe(2);
 
   const second = await resolveRuntimeAdapterRead<{
     items: Array<{ rightEntity: string }>;
     nextCursor: string | null;
-  }>({ env, loadEntityViewPage: makeTestViewPageLoader(env) }, `entity/${entityId}/accounts`, { cursor: first.activeEntity?.accounts.nextCursor || undefined });
+    prevCursor?: string | null;
+  }>({ env, loadEntityViewPage: makeTestViewPageLoader(env) }, `entity/${entityId}/accounts`, { accountsPage: 1 });
   expect(second.items).toHaveLength(2);
   expect(second.items.map((item) => item.rightEntity)).toEqual([
     `0x${'0b'.padStart(64, '0')}`,
     `0x${'0c'.padStart(64, '0')}`,
   ]);
   expect(second.nextCursor).toBe(null);
+  expect(second.prevCursor).toBe(`0x${'01'.padStart(64, '0')}`);
+
+  const found = await resolveRuntimeAdapterRead<{
+    items: Array<{ rightEntity: string }>;
+    totalItems?: number;
+  }>({ env, loadEntityViewPage: makeTestViewPageLoader(env) }, `entity/${entityId}/accounts`, {
+    accountId: `0x${'0b'.padStart(64, '0')}`,
+  });
+  expect(found.items.map((item) => item.rightEntity)).toEqual([`0x${'0b'.padStart(64, '0')}`]);
+  expect(found.totalItems).toBe(1);
 });
 
 test('runtime adapter view frame honors the requested entity id', async () => {

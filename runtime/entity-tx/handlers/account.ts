@@ -38,6 +38,7 @@ import {
 import { NobleCryptoProvider } from '../../crypto-noble';
 import { unwrapEnvelope, validateEnvelope } from '../../htlc-envelope-types';
 import { terminateHtlcRoute } from '../htlc-route-lifecycle';
+import { upsertSortedStringMapEntry } from '../../sorted-index';
 import {
   buildHtlcFinalizedEventPayload,
   buildHtlcReceivedEventPayload,
@@ -390,7 +391,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
     // Store with counterparty ID as key (simpler than canonical)
     // Type assertion safe: accountMachine was just created above in this block
-    newState.accounts.set(counterpartyId, accountMachine as AccountMachine);
+    upsertSortedStringMapEntry(newState.accounts, counterpartyId, accountMachine as AccountMachine);
     console.log(`✅ Account created with counterparty key: ${counterpartyId.slice(-4)}`);
   }
 

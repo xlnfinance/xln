@@ -196,16 +196,36 @@ export const appRuntimeAdapterMode = writable<RuntimeAdapterConfig['mode']>('emb
 export const appRuntimeAdapterStatus = writable<RuntimeAdapterStatus>('disconnected');
 export const appRuntimeAdapterEndpoint = writable<string>('');
 export const appRuntimeAdapterActiveEntityId = writable<string>('');
+export const appRuntimeAdapterAccountsPage = writable<number>(0);
+export const appRuntimeAdapterBooksPage = writable<number>(0);
 export const appRuntimeAdapterPageInfo = writable<{
   entityId: string;
   accountsShown: number;
+  accountsTotal: number;
+  accountsPageIndex: number;
+  accountsPageCount: number;
+  accountsPrevCursor: string | null;
+  accountsNextCursor: string | null;
   accountsHasMore: boolean;
   booksShown: number;
+  booksTotal: number;
+  booksPageIndex: number;
+  booksPageCount: number;
+  booksPrevCursor: string | null;
+  booksNextCursor: string | null;
   booksHasMore: boolean;
 } | null>(null);
 
 export const setRuntimeAdapterActiveEntityId = (entityId: string): void => {
   appRuntimeAdapterActiveEntityId.set(normalizeEntityIdForView(entityId));
+  appRuntimeAdapterAccountsPage.set(0);
+  appRuntimeAdapterBooksPage.set(0);
+};
+
+export const setRuntimeAdapterPage = (kind: 'accounts' | 'books', pageIndex: number): void => {
+  const safePage = Math.max(0, Math.floor(Number(pageIndex) || 0));
+  if (kind === 'accounts') appRuntimeAdapterAccountsPage.set(safePage);
+  else appRuntimeAdapterBooksPage.set(safePage);
 };
 
 // xlnFunctions is now defined at the end of the file
@@ -605,6 +625,8 @@ const buildRemoteAdapterEnvSnapshot = async (
     limit: REMOTE_VIEW_PAGE_SIZE,
     accountsLimit: REMOTE_VIEW_PAGE_SIZE,
     booksLimit: REMOTE_VIEW_PAGE_SIZE,
+    accountsPage: get(appRuntimeAdapterAccountsPage),
+    booksPage: get(appRuntimeAdapterBooksPage),
     ...(pinnedHeight > 0 ? { atHeight: pinnedHeight } : {}),
     ...(requestedEntityId ? { entityId: requestedEntityId } : {}),
   });
@@ -637,8 +659,18 @@ const buildRemoteAdapterEnvSnapshot = async (
     appRuntimeAdapterPageInfo.set({
       entityId,
       accountsShown: active.accounts.items.length,
+      accountsTotal: active.accounts.totalItems ?? active.accounts.items.length,
+      accountsPageIndex: active.accounts.pageIndex ?? 0,
+      accountsPageCount: active.accounts.pageCount ?? 1,
+      accountsPrevCursor: active.accounts.prevCursor ?? null,
+      accountsNextCursor: active.accounts.nextCursor ?? null,
       accountsHasMore: !!active.accounts.nextCursor,
       booksShown: active.books.items.length,
+      booksTotal: active.books.totalItems ?? active.books.items.length,
+      booksPageIndex: active.books.pageIndex ?? 0,
+      booksPageCount: active.books.pageCount ?? 1,
+      booksPrevCursor: active.books.prevCursor ?? null,
+      booksNextCursor: active.books.nextCursor ?? null,
       booksHasMore: !!active.books.nextCursor,
     });
     const accounts = new Map<string, StorageAccountDoc>();

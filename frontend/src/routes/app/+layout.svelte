@@ -8,6 +8,8 @@
     initializeXLN,
     appRuntimeAdapterMode,
     appRuntimeAdapterPageInfo,
+    refreshRuntimeAdapterEnvironment,
+    setRuntimeAdapterPage,
     isLoading,
     error,
     suspendClientActivity,
@@ -210,6 +212,11 @@
     localStorage.setItem('xln-runtime-adapter-mode', 'embedded');
     stripRemoteRuntimeParams();
     window.location.reload();
+  }
+
+  async function changeRemotePage(kind: 'accounts' | 'books', pageIndex: number): Promise<void> {
+    setRuntimeAdapterPage(kind, pageIndex);
+    await refreshRuntimeAdapterEnvironment();
   }
 
   function readStoredDeployVersion(): string {
@@ -476,11 +483,36 @@
 {:else}
   {#if $appRuntimeAdapterMode === 'remote' && $appRuntimeAdapterPageInfo && ($appRuntimeAdapterPageInfo.accountsHasMore || $appRuntimeAdapterPageInfo.booksHasMore)}
     <div class="remote-page-notice" data-testid="remote-page-notice">
-      Remote view is paged: showing {$appRuntimeAdapterPageInfo.accountsShown} accounts
-      {#if $appRuntimeAdapterPageInfo.booksShown > 0}
-        and {$appRuntimeAdapterPageInfo.booksShown} books
+      <span>
+        Accounts {$appRuntimeAdapterPageInfo.accountsPageIndex + 1}/{$appRuntimeAdapterPageInfo.accountsPageCount || 1}
+        ({$appRuntimeAdapterPageInfo.accountsShown}/{$appRuntimeAdapterPageInfo.accountsTotal})
+      </span>
+      <button
+        type="button"
+        disabled={$appRuntimeAdapterPageInfo.accountsPageIndex <= 0}
+        onclick={() => changeRemotePage('accounts', $appRuntimeAdapterPageInfo!.accountsPageIndex - 1)}
+      >Prev</button>
+      <button
+        type="button"
+        disabled={!$appRuntimeAdapterPageInfo.accountsHasMore}
+        onclick={() => changeRemotePage('accounts', $appRuntimeAdapterPageInfo!.accountsPageIndex + 1)}
+      >Next</button>
+      {#if $appRuntimeAdapterPageInfo.booksTotal > 0}
+        <span>
+          Books {$appRuntimeAdapterPageInfo.booksPageIndex + 1}/{$appRuntimeAdapterPageInfo.booksPageCount || 1}
+          ({$appRuntimeAdapterPageInfo.booksShown}/{$appRuntimeAdapterPageInfo.booksTotal})
+        </span>
+        <button
+          type="button"
+          disabled={$appRuntimeAdapterPageInfo.booksPageIndex <= 0}
+          onclick={() => changeRemotePage('books', $appRuntimeAdapterPageInfo!.booksPageIndex - 1)}
+        >Prev</button>
+        <button
+          type="button"
+          disabled={!$appRuntimeAdapterPageInfo.booksHasMore}
+          onclick={() => changeRemotePage('books', $appRuntimeAdapterPageInfo!.booksPageIndex + 1)}
+        >Next</button>
       {/if}
-      for {$appRuntimeAdapterPageInfo.entityId.slice(0, 10)}...
     </div>
   {/if}
   {@render children?.()}
@@ -650,6 +682,10 @@
     bottom: 14px;
     z-index: 60;
     max-width: min(440px, calc(100vw - 28px));
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
     padding: 9px 12px;
     border: 1px solid color-mix(in srgb, var(--theme-accent, #facc15) 28%, transparent);
     border-radius: 7px;
@@ -658,6 +694,22 @@
     font-size: 12px;
     line-height: 1.35;
     box-shadow: 0 16px 46px rgba(0, 0, 0, 0.28);
+  }
+
+  .remote-page-notice button {
+    min-height: 26px;
+    padding: 0 9px;
+    border-radius: 6px;
+    border: 1px solid color-mix(in srgb, var(--theme-accent, #facc15) 30%, transparent);
+    background: color-mix(in srgb, var(--theme-card-bg, #141416) 84%, var(--theme-accent, #facc15));
+    color: var(--theme-text-primary, #f5f5f4);
+    font: inherit;
+    cursor: pointer;
+  }
+
+  .remote-page-notice button:disabled {
+    opacity: 0.45;
+    cursor: default;
   }
 
   .error-screen {

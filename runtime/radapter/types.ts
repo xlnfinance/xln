@@ -19,6 +19,9 @@ export type RuntimeAdapterReadQuery = {
   cursor?: string;
   limit?: number;
   entityId?: string;
+  accountId?: string;
+  accountsPage?: number;
+  booksPage?: number;
   accountsCursor?: string;
   booksCursor?: string;
   accountsLimit?: number;

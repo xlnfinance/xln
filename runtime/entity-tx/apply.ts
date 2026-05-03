@@ -10,6 +10,7 @@ import { DEBUG, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
 import { announceLocalEntityProfile } from '../networking/gossip-helper';
 import { markStorageAccountDirty, markStorageEntityDirty } from '../env-events';
+import { upsertSortedStringMapEntry } from '../sorted-index';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
 import {
   handleAccountInput,
@@ -364,7 +365,7 @@ export const applyEntityTx = async (
         const leftEntity = isLeft ? entityState.entityId : counterpartyId;
         const rightEntity = isLeft ? counterpartyId : entityState.entityId;
 
-        newState.accounts.set(accountKey, {
+        upsertSortedStringMapEntry(newState.accounts, accountKey, {
           leftEntity,
           rightEntity,
           status: 'active',
