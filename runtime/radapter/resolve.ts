@@ -157,7 +157,10 @@ const listEntitySummaries = async (
   query?: RuntimeAdapterReadQuery,
 ): Promise<RuntimeAdapterEntitySummary[]> => {
   const height = readAtHeight(query);
-  if (height !== null && height !== ctx.env.height && ctx.listEntityIdsAtHeight) {
+  if (height !== null && height !== ctx.env.height) {
+    if (!ctx.listEntityIdsAtHeight) {
+      throw new RuntimeAdapterError('E_INTERNAL', 'storage entity listing is required for historical reads');
+    }
     const ids = await ctx.listEntityIdsAtHeight(height);
     const summaries: RuntimeAdapterEntitySummary[] = [];
     for (const id of ids) {
@@ -333,7 +336,10 @@ const projectViewFrame = async (
   const requestedHeight = readAtHeight(query);
   const envHeight = Math.max(0, Math.floor(Number(ctx.env.height ?? 0)));
   const isCurrentHeight = requestedHeight === null || requestedHeight === envHeight;
-  const persistedHead = !isCurrentHeight && ctx.readHead ? await ctx.readHead() : null;
+  if (!isCurrentHeight && !ctx.readHead) {
+    throw new RuntimeAdapterError('E_INTERNAL', 'storage head reader is required for historical reads');
+  }
+  const persistedHead = !isCurrentHeight ? await ctx.readHead!() : null;
   const head = persistedHead ?? headFromEnv(ctx.env);
   const height = requestedHeight ?? envHeight;
   const heightQuery = height > 0 ? { ...query, atHeight: height } : query;
@@ -398,6 +404,16 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
   const parts = normalizePath(path);
 
   if (parts.length === 1 && parts[0] === 'head') {
+    const requestedHeight = readAtHeight(query);
+    const envHeight = Math.max(0, Math.floor(Number(ctx.env.height ?? 0)));
+    if (requestedHeight !== null && requestedHeight !== envHeight) {
+      if (!ctx.readHead) {
+        throw new RuntimeAdapterError('E_INTERNAL', 'storage head reader is required for historical reads');
+      }
+      const head = await ctx.readHead();
+      if (!head) throw new RuntimeAdapterError('E_NOT_FOUND', 'storage head not found');
+      return head as T;
+    }
     return headFromEnv(ctx.env) as T;
   }
 

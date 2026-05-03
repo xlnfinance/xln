@@ -67,6 +67,8 @@ const HUB_PROFILES_READY_TIMEOUT_MS = readPositiveIntEnv('XLN_HUB_PROFILES_READY
 const HUB_BASELINE_TIMEOUT_MS = readPositiveIntEnv('XLN_HUB_BASELINE_TIMEOUT_MS', Math.max(90_000, STARTUP_TIMEOUT_MS));
 const HUB_DIRECT_LINK_BASELINE_GRACE_MS = readPositiveIntEnv('XLN_HUB_DIRECT_LINK_BASELINE_GRACE_MS', 5_000);
 const MARKET_MAKER_READY_TIMEOUT_MS = readPositiveIntEnv('XLN_MARKET_MAKER_READY_TIMEOUT_MS', Math.max(90_000, STARTUP_TIMEOUT_MS));
+const RELAY_MARKET_MAX_SUBSCRIPTIONS = readPositiveIntEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTIONS', 1000);
+const RELAY_MARKET_MAX_SUBSCRIPTION_CELLS = readPositiveIntEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTION_CELLS', 64);
 
 type StageTiming = {
   startedAt: number | null;
@@ -778,18 +780,33 @@ const handleMarketMessage = async (ws: any, msg: any): Promise<void> => {
     const depth = Number.isFinite(depthRaw)
       ? Math.max(1, Math.min(Math.floor(depthRaw), RPC_MARKET_MAX_DEPTH))
       : RPC_MARKET_DEFAULT_DEPTH;
-    const subscription = rpcMarketSubscriptions.get(ws) || {
+    const existing = rpcMarketSubscriptions.get(ws);
+    if (!existing && rpcMarketSubscriptions.size >= RELAY_MARKET_MAX_SUBSCRIPTIONS) {
+      ws.send(safeStringify({ type: 'error', inReplyTo: id, code: 'E_RATE_LIMITED', error: 'market subscription capacity exceeded' }));
+      return;
+    }
+    const nextHubIds = replace || !existing ? new Set<string>() : new Set(existing.hubIds);
+    const nextPairIds = replace || !existing ? new Set<string>() : new Set(existing.pairIds);
+    for (const hubEntityId of hubIds) nextHubIds.add(hubEntityId);
+    for (const pairId of pairIds) nextPairIds.add(pairId);
+    const cellCount = nextHubIds.size * nextPairIds.size;
+    if (cellCount > RELAY_MARKET_MAX_SUBSCRIPTION_CELLS) {
+      ws.send(safeStringify({
+        type: 'error',
+        inReplyTo: id,
+        code: 'E_BAD_QUERY',
+        error: `market subscription too broad: cells=${cellCount} max=${RELAY_MARKET_MAX_SUBSCRIPTION_CELLS}`,
+      }));
+      return;
+    }
+    const subscription = existing || {
       hubIds: new Set<string>(),
       pairIds: new Set<string>(),
       depth,
       seq: 0,
     };
-    if (replace) {
-      subscription.hubIds.clear();
-      subscription.pairIds.clear();
-    }
-    for (const hubEntityId of hubIds) subscription.hubIds.add(hubEntityId);
-    for (const pairId of pairIds) subscription.pairIds.add(pairId);
+    subscription.hubIds = nextHubIds;
+    subscription.pairIds = nextPairIds;
     subscription.depth = depth;
     rpcMarketSubscriptions.set(ws, subscription);
     ensureRpcMarketPublisher();

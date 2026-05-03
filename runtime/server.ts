@@ -415,6 +415,12 @@ const FAUCET_WALLET_ETH_TARGET = ethers.parseEther('100');
 const FAUCET_TOKEN_TARGET_UNITS = 1_000_000n;
 const INCLUDE_MARKET_MAKER_BY_DEFAULT = !/^(0|false)$/i.test(process.env['XLN_INCLUDE_MARKET_MAKER'] ?? '1');
 const SKIP_SERVER_BOOTSTRAP = /^(1|true)$/i.test(process.env['XLN_SKIP_SERVER_BOOTSTRAP'] ?? '');
+const readPositiveIntEnv = (name: string, fallback: number): number => {
+  const value = Number(process.env[name] || '');
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+};
+const RELAY_MARKET_MAX_SUBSCRIPTIONS = readPositiveIntEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTIONS', 1000);
+const RELAY_MARKET_MAX_SUBSCRIPTION_CELLS = readPositiveIntEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTION_CELLS', 64);
 const MARKET_MAKER_LEVEL_OFFSETS_BPS = [2, 4, 6, 8, 10, 12, 15, 20, 25, 32, 40, 50, 65, 80, 100] as const;
 const MARKET_MAKER_LEVEL_BASE_SIZES = [
   120n * 10n ** 18n,
@@ -1687,18 +1693,33 @@ const handleMarketMessage = (ws: RelaySocket, msg: Record<string, unknown>, env:
     const depth = Number.isFinite(depthRaw)
       ? Math.max(1, Math.min(Math.floor(depthRaw), RPC_MARKET_MAX_DEPTH))
       : RPC_MARKET_DEFAULT_DEPTH;
-    const subscription = rpcMarketSubscriptions.get(ws) || {
+    const existing = rpcMarketSubscriptions.get(ws);
+    if (!existing && rpcMarketSubscriptions.size >= RELAY_MARKET_MAX_SUBSCRIPTIONS) {
+      ws.send(safeStringify({ type: 'error', inReplyTo: id, code: 'E_RATE_LIMITED', error: 'market subscription capacity exceeded' }));
+      return;
+    }
+    const nextHubIds = replace || !existing ? new Set<string>() : new Set(existing.hubIds);
+    const nextPairIds = replace || !existing ? new Set<string>() : new Set(existing.pairIds);
+    for (const hubEntityId of hubIds) nextHubIds.add(hubEntityId);
+    for (const pairId of pairIds) nextPairIds.add(pairId);
+    const cellCount = nextHubIds.size * nextPairIds.size;
+    if (cellCount > RELAY_MARKET_MAX_SUBSCRIPTION_CELLS) {
+      ws.send(safeStringify({
+        type: 'error',
+        inReplyTo: id,
+        code: 'E_BAD_QUERY',
+        error: `market subscription too broad: cells=${cellCount} max=${RELAY_MARKET_MAX_SUBSCRIPTION_CELLS}`,
+      }));
+      return;
+    }
+    const subscription = existing || {
       hubIds: new Set<string>(),
       pairIds: new Set<string>(),
       depth,
       seq: 0,
     };
-    if (replace) {
-      subscription.hubIds.clear();
-      subscription.pairIds.clear();
-    }
-    for (const hubEntityId of hubIds) subscription.hubIds.add(hubEntityId);
-    for (const pairId of pairIds) subscription.pairIds.add(pairId);
+    subscription.hubIds = nextHubIds;
+    subscription.pairIds = nextPairIds;
     subscription.depth = depth;
     rpcMarketSubscriptions.set(ws, subscription);
     ensureRpcMarketPublisher(env);
