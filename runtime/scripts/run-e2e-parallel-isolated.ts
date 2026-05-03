@@ -1349,6 +1349,12 @@ const runShard = async (
     const code = await runCmd('bunx', playwrightArgs, {
       env: {
         ...process.env,
+        // Keep isolated CI-style runs headless even if the parent shell has
+        // debugging/browser-opening variables set.
+        CI: process.env['CI'] || '1',
+        HEADED: 'false',
+        PWDEBUG: '0',
+        PLAYWRIGHT_HTML_OPEN: 'never',
         PW_BASE_URL: webUrl,
         PW_SKIP_WEBSERVER: '1',
         PW_WORKERS: String(args.workersPerShard),
