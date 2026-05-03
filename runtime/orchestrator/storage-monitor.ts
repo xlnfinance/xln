@@ -24,6 +24,10 @@ export type StorageTrackedHealth = {
   deltaBytes1h: number;
   bytesPerHour: number;
   sampleWindowMs: number;
+  scanEntries: number;
+  scanMs: number;
+  scanTruncated: boolean;
+  scanMode: 'shallow' | 'deep';
 };
 
 export type StorageHealth = {
@@ -44,6 +48,10 @@ const MIN_DISK_FREE_BYTES = Math.max(
   Number(process.env['XLN_MIN_DISK_FREE_BYTES'] || String(5 * 1024 ** 3)),
 );
 const STORAGE_HEALTH_CACHE_MS = Math.max(5_000, Number(process.env['XLN_STORAGE_HEALTH_CACHE_MS'] || '60000'));
+const STORAGE_HEALTH_DEEP_SCAN = process.env['XLN_STORAGE_HEALTH_DEEP_SCAN'] === '1';
+const STORAGE_HEALTH_SCAN_MAX_ENTRIES = Math.max(100, Number(process.env['XLN_STORAGE_HEALTH_SCAN_MAX_ENTRIES'] || '2000'));
+const STORAGE_HEALTH_SCAN_MAX_DIR_ENTRIES = Math.max(50, Number(process.env['XLN_STORAGE_HEALTH_SCAN_MAX_DIR_ENTRIES'] || '500'));
+const STORAGE_HEALTH_SCAN_MAX_MS = Math.max(5, Number(process.env['XLN_STORAGE_HEALTH_SCAN_MAX_MS'] || '25'));
 const STORAGE_HISTORY_WINDOW_MS = 26 * 60 * 60 * 1000;
 const STORAGE_ONE_HOUR_MS = 60 * 60 * 1000;
 const STORAGE_HISTORY_PATH = join(process.cwd(), 'data', 'storage-health-history.json');
@@ -71,18 +79,88 @@ const statDiskBytes = (): { totalBytes: number; usedBytes: number; freeBytes: nu
   return { totalBytes, usedBytes, freeBytes };
 };
 
-const sumPathBytes = (targetPath: string): number => {
-  if (!existsSync(targetPath)) return 0;
-  const stats = lstatSync(targetPath);
-  if (stats.isSymbolicLink()) return 0;
-  if (stats.isFile()) return stats.size;
-  if (!stats.isDirectory()) return 0;
+type PathByteScan = {
+  bytes: number;
+  entries: number;
+  ms: number;
+  truncated: boolean;
+  mode: 'shallow' | 'deep';
+};
 
-  let total = 0;
-  for (const entry of readdirSync(targetPath)) {
-    total += sumPathBytes(join(targetPath, entry));
+const scanPathBytes = (targetPath: string): PathByteScan => {
+  const startedAt = Date.now();
+  const mode = STORAGE_HEALTH_DEEP_SCAN ? 'deep' : 'shallow';
+  let bytes = 0;
+  let entries = 0;
+  let truncated = false;
+
+  const deadlineReached = (): boolean => Date.now() - startedAt >= STORAGE_HEALTH_SCAN_MAX_MS;
+  const canScanMore = (): boolean => entries < STORAGE_HEALTH_SCAN_MAX_ENTRIES && !deadlineReached();
+
+  const addFileIfPresent = (path: string): void => {
+    if (!canScanMore()) {
+      truncated = true;
+      return;
+    }
+    entries += 1;
+    try {
+      const stats = lstatSync(path);
+      if (stats.isSymbolicLink()) return;
+      if (stats.isFile()) {
+        bytes += stats.size;
+        return;
+      }
+      if (stats.isDirectory()) truncated = true;
+    } catch {
+      // Best-effort diagnostics only.
+    }
+  };
+
+  if (!existsSync(targetPath)) {
+    return { bytes: 0, entries: 0, ms: Date.now() - startedAt, truncated: false, mode };
   }
-  return total;
+
+  if (!STORAGE_HEALTH_DEEP_SCAN) {
+    try {
+      const stats = lstatSync(targetPath);
+      entries += 1;
+      if (stats.isSymbolicLink()) return { bytes: 0, entries, ms: Date.now() - startedAt, truncated: false, mode };
+      if (stats.isFile()) return { bytes: stats.size, entries, ms: Date.now() - startedAt, truncated: false, mode };
+      if (!stats.isDirectory()) return { bytes: 0, entries, ms: Date.now() - startedAt, truncated: false, mode };
+      const names = readdirSync(targetPath);
+      if (names.length > STORAGE_HEALTH_SCAN_MAX_DIR_ENTRIES) truncated = true;
+      for (const name of names.slice(0, STORAGE_HEALTH_SCAN_MAX_DIR_ENTRIES)) {
+        addFileIfPresent(join(targetPath, name));
+      }
+    } catch {
+      return { bytes, entries, ms: Date.now() - startedAt, truncated: true, mode };
+    }
+    return { bytes, entries, ms: Date.now() - startedAt, truncated, mode };
+  }
+
+  const stack = [targetPath];
+  while (stack.length > 0 && canScanMore()) {
+    const current = stack.pop()!;
+    entries += 1;
+    try {
+      const stats = lstatSync(current);
+      if (stats.isSymbolicLink()) continue;
+      if (stats.isFile()) {
+        bytes += stats.size;
+        continue;
+      }
+      if (!stats.isDirectory()) continue;
+      const names = readdirSync(current);
+      if (names.length > STORAGE_HEALTH_SCAN_MAX_DIR_ENTRIES) truncated = true;
+      for (const name of names.slice(0, STORAGE_HEALTH_SCAN_MAX_DIR_ENTRIES)) {
+        stack.push(join(current, name));
+      }
+    } catch {
+      // Best-effort diagnostics only.
+    }
+  }
+  if (stack.length > 0 || !canScanMore()) truncated = true;
+  return { bytes, entries, ms: Date.now() - startedAt, truncated, mode };
 };
 
 const readStorageHistory = (): StorageHistoryEntry[] => {
@@ -111,8 +189,11 @@ const writeStorageHistory = (entries: StorageHistoryEntry[]): void => {
 const buildStorageHealth = (): StorageHealth => {
   const sampledAt = Date.now();
   const disk = statDiskBytes();
+  const scans = Object.fromEntries(
+    TRACKED_STORAGE_PATHS.map((entry) => [entry.name, scanPathBytes(entry.path)] as const),
+  );
   const currentTracked = Object.fromEntries(
-    TRACKED_STORAGE_PATHS.map((entry) => [entry.name, sumPathBytes(entry.path)] as const),
+    Object.entries(scans).map(([name, scan]) => [name, scan.bytes] as const),
   );
 
   const existingHistory = readStorageHistory().filter((entry) => sampledAt - entry.ts <= STORAGE_HISTORY_WINDOW_MS);
@@ -121,6 +202,7 @@ const buildStorageHealth = (): StorageHealth => {
   writeStorageHistory(nextHistory);
 
   const tracked = TRACKED_STORAGE_PATHS.map((entry): StorageTrackedHealth => {
+    const scan = scans[entry.name] ?? { bytes: 0, entries: 0, ms: 0, truncated: true, mode: STORAGE_HEALTH_DEEP_SCAN ? 'deep' as const : 'shallow' as const };
     const currentBytes = currentTracked[entry.name] ?? 0;
     const baseline =
       nextHistory.find((sample) => sampledAt - sample.ts <= STORAGE_ONE_HOUR_MS && typeof sample.tracked[entry.name] === 'number')
@@ -140,6 +222,10 @@ const buildStorageHealth = (): StorageHealth => {
       deltaBytes1h,
       bytesPerHour,
       sampleWindowMs,
+      scanEntries: scan.entries,
+      scanMs: scan.ms,
+      scanTruncated: scan.truncated,
+      scanMode: scan.mode,
     };
   });
 
