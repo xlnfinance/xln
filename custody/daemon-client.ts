@@ -1,5 +1,7 @@
 import { deserializeTaggedJson, serializeTaggedJson } from '../runtime/serialization-utils';
 
+export type DaemonAuthKeyProvider = string | (() => string);
+
 export type DaemonFrameLog = {
   id: number;
   timestamp: number;
@@ -65,7 +67,7 @@ export class DaemonRpcClient {
   private readonly pending = new Map<string, PendingRequest>();
   private connected = false;
 
-  constructor(private readonly url: string, private readonly controlToken = '') {}
+  constructor(private readonly url: string, private readonly authKey: DaemonAuthKeyProvider = '') {}
 
   isConnected(): boolean {
     return this.connected && this.socket?.readyState === WebSocket.OPEN;
@@ -191,10 +193,11 @@ export class DaemonRpcClient {
       this.pending.set(id, { resolve: value => resolve(value as T), reject, timeout });
 
       try {
+        const key = typeof this.authKey === 'function' ? this.authKey() : this.authKey;
         this.socket!.send(serializeTaggedJson({
           id,
           type,
-          ...(this.controlToken ? { daemonControlToken: this.controlToken } : {}),
+          ...(key ? { key } : {}),
           ...payload,
         }));
       } catch (error) {

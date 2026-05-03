@@ -55,7 +55,7 @@ Usage:
   bun runtime/scripts/daemon-control.ts setup-custody --base-url http://127.0.0.1:8080 --name Custody --seed my-seed --signer-label custody-1 --hub-ids 0x...,0x...
 
 Optional:
-  --control-token <token>
+  --auth-key <xlnra1 capability>
   --relay-url <ws://.../relay>
   --gossip-poll-ms <ms>
   --routing-fee-ppm <ppm>
@@ -79,7 +79,7 @@ const parsePosition = (value: string): { x: number; y: number; z: number } | und
 
 const requireBaseConfig = (): {
   baseUrl: string;
-  controlToken?: string;
+  authKey?: string;
   name: string;
   seed: string;
   signerLabel: string;
@@ -96,7 +96,7 @@ const requireBaseConfig = (): {
   }
   const result: {
     baseUrl: string;
-    controlToken?: string;
+    authKey?: string;
     name: string;
     seed: string;
     signerLabel: string;
@@ -109,8 +109,8 @@ const requireBaseConfig = (): {
     seed,
     signerLabel,
   };
-  const controlToken = getArg('--control-token', '').trim();
-  if (controlToken) result.controlToken = controlToken;
+  const authKey = getArg('--auth-key', '').trim();
+  if (authKey) result.authKey = authKey;
   const relayUrl = getArg('--relay-url', '').trim();
   if (relayUrl) result.relayUrl = relayUrl;
   const gossipPollMs = parseOptionalNumber(getArg('--gossip-poll-ms', ''));
@@ -129,7 +129,7 @@ const run = async (): Promise<void> => {
   const base = requireBaseConfig();
   const client = new DaemonControlClient({
     baseUrl: base.baseUrl,
-    ...(base.controlToken ? { controlToken: base.controlToken } : {}),
+    ...(base.authKey ? { authKey: base.authKey } : {}),
   });
 
   if (command === 'enable-routing' || command === 'become-hub') {

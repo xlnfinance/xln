@@ -1,10 +1,12 @@
 import { formatUnits } from 'ethers';
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import QRCode from 'qrcode';
 import { parseTokenAmount } from '../runtime/financial-utils';
 import { DEFAULT_TOKENS } from '../runtime/jadapter/default-tokens';
+import { deriveRuntimeAdapterCapabilityToken } from '../runtime/radapter/auth';
 import { serializeTaggedJson } from '../runtime/serialization-utils';
 import { DaemonRpcClient, type DaemonFrameLog } from './daemon-client';
 import { CustodyStore, type ActivityRecord, type SessionRecord } from './store';
@@ -12,7 +14,8 @@ import { CustodyStore, type ActivityRecord, type SessionRecord } from './store';
 const HOST = process.env['CUSTODY_HOST'] || 'localhost';
 const PORT = Number(process.env['CUSTODY_PORT'] || '8087');
 const DAEMON_WS_URL = process.env['CUSTODY_DAEMON_WS'] || 'ws://127.0.0.1:8088/rpc';
-const DAEMON_CONTROL_TOKEN = process.env['CUSTODY_DAEMON_CONTROL_TOKEN'] || '';
+const DAEMON_AUTH_SEED = String(process.env['CUSTODY_DAEMON_AUTH_SEED'] || '').trim();
+const DAEMON_AUTH_AUDIENCE = String(process.env['CUSTODY_DAEMON_AUTH_AUDIENCE'] || '').trim().toLowerCase();
 const WALLET_URL = process.env['CUSTODY_WALLET_URL'] || 'https://localhost:8080/app';
 const ENABLE_HTTPS = (() => {
   const raw = String(process.env['CUSTODY_HTTPS'] || '').trim().toLowerCase();
@@ -37,6 +40,9 @@ if (!CUSTODY_ENTITY_ID) {
 if (!CUSTODY_JURISDICTION) {
   throw new Error('CUSTODY_JURISDICTION_ID is required');
 }
+if (!DAEMON_AUTH_SEED || !DAEMON_AUTH_AUDIENCE) {
+  throw new Error('CUSTODY_DAEMON_AUTH_SEED and CUSTODY_DAEMON_AUTH_AUDIENCE are required');
+}
 
 const TOKENS = DEFAULT_TOKENS.map((token, index) => ({
   tokenId: index + 1,
@@ -47,7 +53,16 @@ const TOKENS = DEFAULT_TOKENS.map((token, index) => ({
 }));
 
 const store = new CustodyStore(CUSTODY_DB_PATH);
-const daemon = new DaemonRpcClient(DAEMON_WS_URL, DAEMON_CONTROL_TOKEN);
+const daemon = new DaemonRpcClient(DAEMON_WS_URL, () => deriveRuntimeAdapterCapabilityToken(
+  DAEMON_AUTH_SEED,
+  'full',
+  Date.now() + 5 * 60_000,
+  {
+    audience: DAEMON_AUTH_AUDIENCE,
+    keyId: 'custody',
+    tokenId: randomUUID(),
+  },
+));
 
 let syncInFlight = false;
 let lastSyncOkAt = 0;

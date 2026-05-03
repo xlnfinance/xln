@@ -78,7 +78,7 @@ export type ManagedEntityIdentity = {
 
 export type DaemonControlClientOptions = {
   baseUrl: string;
-  controlToken?: string;
+  authKey?: string;
   timeoutMs?: number;
 };
 
@@ -128,19 +128,19 @@ export const deriveManagedEntityIdentity = (config: ManagedEntityConfig): Manage
 
 export class DaemonControlClient {
   private baseUrl: string;
-  private controlToken: string | undefined;
+  private authKey: string | undefined;
   private timeoutMs: number;
 
   constructor(options: DaemonControlClientOptions) {
     this.baseUrl = normalizeBaseUrl(options.baseUrl);
-    this.controlToken = options.controlToken;
+    this.authKey = options.authKey;
     this.timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
   }
 
   private buildHeaders(): HeadersInit {
     return {
       'content-type': 'application/json',
-      ...(this.controlToken ? { 'x-daemon-control-token': this.controlToken } : {}),
+      ...(this.authKey ? { authorization: `Bearer ${this.authKey}` } : {}),
     };
   }
 

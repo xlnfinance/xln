@@ -1,10 +1,12 @@
 #!/usr/bin/env bun
 
 import { spawn } from 'node:child_process';
+import { randomBytes } from 'node:crypto';
 import { mkdir } from 'node:fs/promises';
 import { resolve } from 'node:path';
 import { deriveManagedEntityIdentity, DaemonControlClient, setupCustody } from '../orchestrator/daemon-control';
 import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
+import { deriveRuntimeAdapterCapabilityToken } from '../radapter/auth';
 import {
   spawnBunChild,
   stopManagedChild,
@@ -40,7 +42,21 @@ const PROFILE_NAME = process.env['CUSTODY_PROFILE_NAME'] || 'Custody';
 const JURISDICTION_ID = requireEnv('CUSTODY_JURISDICTION_ID');
 const GOSSIP_POLL_MS = Number(process.env['CUSTODY_GOSSIP_POLL_MS'] || '1000');
 const DAEMON_RUNTIME_SEED = process.env['CUSTODY_DAEMON_RUNTIME_SEED'] || `${SEED}:runtime`;
-const DAEMON_CONTROL_TOKEN = requireEnv('CUSTODY_DAEMON_CONTROL_TOKEN');
+const DAEMON_AUTH_SEED = requireEnv('CUSTODY_DAEMON_AUTH_SEED');
+const DAEMON_AUTH_AUDIENCE = String(process.env['CUSTODY_DAEMON_AUTH_AUDIENCE'] || `custody-daemon-${DAEMON_PORT}`).trim().toLowerCase();
+
+process.env['XLN_RADAPTER_REQUIRE_STRONG_AUTH_SEED'] = process.env['XLN_RADAPTER_REQUIRE_STRONG_AUTH_SEED'] || '1';
+
+const deriveDaemonAdminKey = (): string => deriveRuntimeAdapterCapabilityToken(
+  DAEMON_AUTH_SEED,
+  'full',
+  Date.now() + 30 * 60_000,
+  {
+    audience: DAEMON_AUTH_AUDIENCE,
+    keyId: 'custody-prod',
+    tokenId: randomBytes(16).toString('hex'),
+  },
+);
 
 let shuttingDown = false;
 
@@ -198,7 +214,9 @@ const isHttpReady = async (url: string): Promise<boolean> => {
 
 const isDaemonControlReady = async (): Promise<boolean> => {
   try {
-    const response = await fetch(`http://127.0.0.1:${DAEMON_PORT}/api/control/entities`);
+    const response = await fetch(`http://127.0.0.1:${DAEMON_PORT}/api/control/entities`, {
+      headers: { authorization: `Bearer ${deriveDaemonAdminKey()}` },
+    });
     return response.ok;
   } catch {
     return false;
@@ -238,7 +256,9 @@ const startDaemon = async (): Promise<ManagedChild | null> => {
       PUBLIC_RPC: PUBLIC_RPC_URL,
       PUBLIC_RELAY_URL: RELAY_URL,
       RELAY_URL,
-      DAEMON_CONTROL_TOKEN,
+      XLN_RADAPTER_AUTH_SEED: DAEMON_AUTH_SEED,
+      XLN_RADAPTER_AUDIENCE: DAEMON_AUTH_AUDIENCE,
+      XLN_RADAPTER_REQUIRE_STRONG_AUTH_SEED: '1',
       XLN_USE_PREDEPLOYED_ADDRESSES: 'true',
       XLN_JURISDICTIONS_PATH: resolveJurisdictionsJsonPath(),
       XLN_RUNTIME_SEED: DAEMON_RUNTIME_SEED,
@@ -265,7 +285,7 @@ const startDaemon = async (): Promise<ManagedChild | null> => {
 const ensureCustodyIdentity = async (hubIds: string[]): Promise<{ entityId: string; signerId: string }> => {
   const client = new DaemonControlClient({
     baseUrl: `http://127.0.0.1:${DAEMON_PORT}`,
-    controlToken: DAEMON_CONTROL_TOKEN,
+    authKey: deriveDaemonAdminKey(),
     timeoutMs: 20_000,
   });
   const identity = deriveManagedEntityIdentity({
@@ -317,7 +337,8 @@ const startCustodyService = async (identity: { entityId: string; signerId: strin
       CUSTODY_HOST: '127.0.0.1',
       CUSTODY_PORT: String(CUSTODY_PORT),
       CUSTODY_DAEMON_WS: `ws://127.0.0.1:${DAEMON_PORT}/rpc`,
-      CUSTODY_DAEMON_CONTROL_TOKEN: DAEMON_CONTROL_TOKEN,
+      CUSTODY_DAEMON_AUTH_SEED: DAEMON_AUTH_SEED,
+      CUSTODY_DAEMON_AUTH_AUDIENCE: DAEMON_AUTH_AUDIENCE,
       CUSTODY_WALLET_URL: WALLET_URL,
       CUSTODY_ENTITY_ID: identity.entityId,
       CUSTODY_SIGNER_ID: identity.signerId,

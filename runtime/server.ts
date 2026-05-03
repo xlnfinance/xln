@@ -76,7 +76,14 @@ import {
   forgetRuntimeAdapterClient,
   handleRuntimeAdapterMessage,
 } from './radapter/server';
+import {
+  resolveRuntimeAdapterAuthAudience,
+  resolveRuntimeAdapterAuthSeed,
+  runtimeAdapterRevokedTokenIds,
+  verifyRuntimeAdapterAuthCredential,
+} from './radapter/auth';
 import { decodeRuntimeAdapterMessage, runtimeAdapterMessageByteLength } from './radapter/codec';
+import type { RuntimeAdapterAuthLevel } from './radapter/types';
 import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
 import { join } from 'path';
 import type { ServerWebSocket } from 'bun';
@@ -1871,41 +1878,62 @@ type ControlEntitySummary = {
   accountEntityIds: string[];
 };
 
-const requireDaemonControlAuth = (req: Request): Response | null => {
-  const configuredToken = process.env['DAEMON_CONTROL_TOKEN'];
-  if (!configuredToken) return null;
-  const supplied = req.headers.get('x-daemon-control-token') || '';
-  if (supplied === configuredToken) return null;
-  return new Response(
-    serializeTaggedJson({ ok: false, error: 'Unauthorized' }),
-    {
-      status: 401,
+const authLevelRank = (level: RuntimeAdapterAuthLevel): number => level === 'admin' ? 2 : 1;
+
+const extractBearerAuth = (header: string | null): string => {
+  const raw = String(header || '').trim();
+  const match = raw.match(/^Bearer\s+(.+)$/i);
+  return match ? match[1]!.trim() : '';
+};
+
+const verifyDaemonCapability = (
+  env: Env | null,
+  key: unknown,
+  requiredLevel: RuntimeAdapterAuthLevel,
+): boolean => {
+  if (!env) return false;
+  const auth = verifyRuntimeAdapterAuthCredential(resolveRuntimeAdapterAuthSeed(env), key, {
+    audience: resolveRuntimeAdapterAuthAudience(env),
+    revokedTokenIds: runtimeAdapterRevokedTokenIds(),
+  });
+  return !!auth && authLevelRank(auth.level) >= authLevelRank(requiredLevel);
+};
+
+const requireDaemonControlAuth = (
+  req: Request,
+  env: Env | null,
+  requiredLevel: RuntimeAdapterAuthLevel = 'admin',
+): Response | null => {
+  if (!env) {
+    return new Response(serializeTaggedJson({ ok: false, error: 'Runtime not ready' }), {
+      status: 503,
       headers: { 'Content-Type': 'application/json' },
-    },
-  );
-};
-
-const verifyDaemonControlTokenValue = (value: unknown): boolean => {
-  const configuredToken = String(process.env['DAEMON_CONTROL_TOKEN'] || '').trim();
-  if (!configuredToken) return false;
-  return String(value || '').trim() === configuredToken;
-};
-
-const requireLegacyDaemonRpcAuth = (ws: RelaySocket, id: unknown, msg: Record<string, unknown>): boolean => {
-  if (
-    verifyDaemonControlTokenValue(msg['key']) ||
-    verifyDaemonControlTokenValue(msg['auth']) ||
-    verifyDaemonControlTokenValue(msg['controlToken']) ||
-    verifyDaemonControlTokenValue(msg['daemonControlToken'])
-  ) {
-    return true;
+    });
   }
-  const configuredToken = String(process.env['DAEMON_CONTROL_TOKEN'] || '').trim();
+  if (verifyDaemonCapability(env, extractBearerAuth(req.headers.get('authorization')), requiredLevel)) return null;
+  return new Response(serializeTaggedJson({ ok: false, error: 'Unauthorized' }), {
+    status: 401,
+    headers: { 'Content-Type': 'application/json' },
+  });
+};
+
+const requireDaemonRpcAuth = (
+  ws: RelaySocket,
+  id: unknown,
+  msg: Record<string, unknown>,
+  env: Env | null,
+  requiredLevel: RuntimeAdapterAuthLevel,
+): boolean => {
+  if (!env) {
+    ws.send(safeStringify({ type: 'error', inReplyTo: id, code: 'E_INTERNAL', error: 'Runtime not ready' }));
+    return false;
+  }
+  if (verifyDaemonCapability(env, msg['key'], requiredLevel)) return true;
   ws.send(safeStringify({
     type: 'error',
     inReplyTo: id,
     code: 'E_UNAUTHORIZED',
-    error: configuredToken ? 'legacy daemon rpc auth required' : 'legacy daemon rpc disabled',
+    error: 'runtime adapter capability required',
   }));
   return false;
 };
@@ -1976,7 +2004,6 @@ const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, e
   if (handledByRuntimeAdapter) return;
 
   const { type, id } = msg;
-  if (!requireLegacyDaemonRpcAuth(ws, id, msg)) return;
 
   if (isMarketMessageType(type)) {
     ws.send(safeStringify({ type: 'error', inReplyTo: id, error: 'market_* messages are supported on /relay websocket' }));
@@ -1984,6 +2011,7 @@ const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, e
   }
 
   if (type === 'subscribe') {
+    if (!requireDaemonRpcAuth(ws, id, msg, env, 'inspect')) return;
     const client = Array.from(relayStore.clients.values()).find(c => c.ws === ws);
     const topics = msg['topics'];
     if (client && Array.isArray(topics)) {
@@ -1995,7 +2023,9 @@ const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, e
     return;
   }
 
-  if (type === 'get_env' && env) {
+  if (type === 'get_env') {
+    if (!requireDaemonRpcAuth(ws, id, msg, env, 'inspect')) return;
+    if (!env) return;
     // Serialize env for remote UI
     ws.send(
       safeStringify({
@@ -2014,6 +2044,7 @@ const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, e
   }
 
   if (type === 'get_frame_receipts') {
+    if (!requireDaemonRpcAuth(ws, id, msg, env, 'inspect')) return;
     if (!env) {
       ws.send(safeStringify({ type: 'error', inReplyTo: id, error: 'Runtime not ready' }));
       return;
@@ -2083,6 +2114,7 @@ const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, e
   }
 
   if (type === 'find_routes') {
+    if (!requireDaemonRpcAuth(ws, id, msg, env, 'inspect')) return;
     if (!env) {
       ws.send(safeStringify({ type: 'error', inReplyTo: id, error: 'Runtime not ready' }));
       return;
@@ -2136,6 +2168,7 @@ const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, e
   }
 
   if (type === 'queue_payment') {
+    if (!requireDaemonRpcAuth(ws, id, msg, env, 'admin')) return;
     if (!env) {
       ws.send(safeStringify({ type: 'error', inReplyTo: id, error: 'Runtime not ready' }));
       return;
@@ -2242,7 +2275,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   }
 
   if (pathname === '/api/control/entities' && req.method === 'GET') {
-    const authError = requireDaemonControlAuth(req);
+    const authError = requireDaemonControlAuth(req, env);
     if (authError) return authError;
     if (!env) {
       return new Response(serializeTaggedJson({ ok: false, error: 'Runtime not ready' }), { status: 503, headers });
@@ -2258,7 +2291,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   }
 
   if (pathname === '/api/control/signers/register' && req.method === 'POST') {
-    const authError = requireDaemonControlAuth(req);
+    const authError = requireDaemonControlAuth(req, env);
     if (authError) return authError;
     try {
       const body = await parseTaggedControlBody<{ signerId?: unknown; privateKeyHex?: unknown }>(req);
@@ -2293,7 +2326,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   }
 
   if (pathname === '/api/control/runtime-input' && req.method === 'POST') {
-    const authError = requireDaemonControlAuth(req);
+    const authError = requireDaemonControlAuth(req, env);
     if (authError) return authError;
     if (!env) {
       return new Response(serializeTaggedJson({ ok: false, error: 'Runtime not ready' }), { status: 503, headers });
@@ -2334,7 +2367,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   }
 
   if (pathname === '/api/control/p2p' && req.method === 'POST') {
-    const authError = requireDaemonControlAuth(req);
+    const authError = requireDaemonControlAuth(req, env);
     if (authError) return authError;
     if (!env) {
       return new Response(serializeTaggedJson({ ok: false, error: 'Runtime not ready' }), { status: 503, headers });
