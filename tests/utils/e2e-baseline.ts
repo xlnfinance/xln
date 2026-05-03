@@ -247,6 +247,18 @@ const isBaselineReady = (health: E2EHealthResponse | null, options: Required<E2E
   return true;
 };
 
+const namedHubsFromHealth = (health: E2EHealthResponse | null): Map<string, string> => {
+  const hubs = Array.isArray(health?.hubs) ? health.hubs : [];
+  const byName = new Map<string, string>();
+  for (const hub of hubs) {
+    const name = String(hub.name ?? '').trim().toLowerCase();
+    const entityId = String(hub.entityId ?? '').trim().toLowerCase();
+    if (!name || !entityId) continue;
+    byName.set(name, entityId);
+  }
+  return byName;
+};
+
 const waitForBaselineReadyWithApi = async (
   page: Page,
   api: APIRequestContext,
@@ -318,16 +330,19 @@ export const waitForNamedHubs = async (
   let lastHealth: E2EHealthResponse | null = null;
   const wanted = requiredNames.map((name) => name.trim().toLowerCase()).filter(Boolean);
 
+  if (process.env.E2E_ISOLATED_BASELINE_READY === '1') {
+    lastHealth = readIsolatedBaselineHealthSnapshot();
+    const byName = namedHubsFromHealth(lastHealth);
+    const missing = wanted.filter(name => !byName.has(name));
+    if (missing.length === 0) return Object.fromEntries(wanted.map(name => [name, byName.get(name)!]));
+    throw new Error(
+      `Named hubs missing from isolated baseline snapshot: ${missing.join(', ')}\n${summarizeHealth(lastHealth)}`,
+    );
+  }
+
   while (Date.now() - startedAt < timeoutMs) {
     lastHealth = await getHealth(page, apiBaseUrl);
-    const hubs = Array.isArray(lastHealth?.hubs) ? lastHealth.hubs : [];
-    const byName = new Map<string, string>();
-    for (const hub of hubs) {
-      const name = String(hub.name ?? '').trim().toLowerCase();
-      const entityId = String(hub.entityId ?? '').trim().toLowerCase();
-      if (!name || !entityId) continue;
-      byName.set(name, entityId);
-    }
+    const byName = namedHubsFromHealth(lastHealth);
 
     const resolved: Record<string, string> = {};
     let ready = true;
