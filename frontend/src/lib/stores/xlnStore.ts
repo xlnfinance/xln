@@ -370,6 +370,8 @@ const normalizeEntityIdForView = (value: string): string => String(value || '').
 const readStoredAdapterValue = (key: string): string => {
   if (typeof window === 'undefined') return '';
   try {
+    const sessionValue = sessionStorage.getItem(key)?.trim();
+    if (sessionValue) return sessionValue;
     return localStorage.getItem(key)?.trim() || '';
   } catch {
     return '';

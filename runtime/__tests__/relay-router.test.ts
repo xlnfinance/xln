@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { Profile } from '../networking/gossip';
 import { relayRoute } from '../relay-router';
-import { createRelayStore } from '../relay-store';
+import { cacheEncryptionKey, createRelayStore, resolveEncryptionPublicKeyHex } from '../relay-store';
 
 const SERVER_RUNTIME_ID = '0x9999999999999999999999999999999999999999';
 const RUNTIME_A = '0x1111111111111111111111111111111111111111';
@@ -204,5 +204,40 @@ describe('relay-router gossip fanout', () => {
       (message) => (message as { type?: string }).type === 'gossip_response',
     );
     expect(responses.length).toBeGreaterThan(0);
+  });
+
+  test('rejects duplicate hello without closing the existing runtime socket', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const sentBySocket = new Map<FakeWs, unknown[]>();
+    let closeCount = 0;
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: (ws: FakeWs, raw: string) => {
+        const bucket = sentBySocket.get(ws) ?? [];
+        bucket.push(JSON.parse(raw));
+        sentBySocket.set(ws, bucket);
+      },
+    };
+    const wsA: FakeWs & { close: () => void } = { label: 'A', close: () => { closeCount += 1; } };
+    const attacker: FakeWs = { label: 'attacker' };
+
+    await relayRoute(config, wsA, { type: 'hello', from: RUNTIME_A, fromEncryptionPubKey: KEY_A });
+    await relayRoute(config, attacker, { type: 'hello', from: RUNTIME_A, fromEncryptionPubKey: KEY_A });
+
+    expect(store.clients.get(RUNTIME_A)?.ws).toBe(wsA);
+    expect(closeCount).toBe(0);
+    expect((sentBySocket.get(attacker)?.at(-1) as { type?: string; error?: string })?.type).toBe('error');
+  });
+
+  test('prefers gossip profile encryption key over relay cache', () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const profile = buildProfile(ENTITY_A, RUNTIME_A, KEY_A, { lastUpdated: 123 });
+
+    expect(cacheEncryptionKey(store, RUNTIME_A, KEY_B)).toBeUndefined();
+    store.gossipProfiles.set(ENTITY_A, { profile, timestamp: profile.lastUpdated });
+
+    expect(resolveEncryptionPublicKeyHex(store, RUNTIME_A)).toBe(KEY_A);
   });
 });

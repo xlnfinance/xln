@@ -54,6 +54,7 @@ export type RelayStore = {
 
 const MAX_DEBUG_EVENTS = 5000;
 const MAX_PENDING_PER_CLIENT = 200;
+const MAX_PENDING_TARGETS = 10_000;
 export const DEFAULT_GOSSIP_SYNC_LIMIT = DEFAULT_GOSSIP_BATCH_LIMIT;
 
 // ---------------------------------------------------------------------------
@@ -146,26 +147,25 @@ export const getProfileBatch = (
 // Client registry
 // ---------------------------------------------------------------------------
 
-export const registerClient = (store: RelayStore, runtimeId: string, ws: any): void => {
+export const registerClient = (store: RelayStore, runtimeId: string, ws: any): boolean => {
   const key = normalizeRuntimeKey(runtimeId);
-  if (!key) return;
+  if (!key) return false;
   const existing = store.clients.get(key);
   if (existing && existing.ws !== ws) {
     pushDebugEvent(store, {
-      event: 'ws_duplicate_runtime_replace',
+      event: 'ws_duplicate_runtime_rejected',
       runtimeId: key,
       from: key,
-      status: 'warning',
+      status: 'rejected',
       reason: 'DUPLICATE_RUNTIME_CONNECTION',
       details: {
         runtimeId: key,
       },
     });
-    try { existing.ws.close(4009, 'duplicate-runtime'); } catch {
-      try { existing.ws.close(); } catch { /* best effort */ }
-    }
+    return false;
   }
   store.clients.set(key, { ws, runtimeId: key, lastSeen: nextWsTimestamp(store), topics: new Set() });
+  return true;
 };
 
 export const removeClient = (store: RelayStore, ws: any): string | null => {
@@ -198,9 +198,6 @@ export const resolveEncryptionPublicKeyHex = (store: RelayStore, targetRuntimeId
   const normalizedTarget = normalizeRuntimeKey(targetRuntimeId);
   if (!normalizedTarget) return null;
 
-  const directKey = store.runtimeEncryptionKeys.get(normalizedTarget);
-  if (typeof directKey === 'string' && directKey.length > 0) return directKey;
-
   for (const { profile } of store.gossipProfiles.values()) {
     const profileRuntimeId = normalizeRuntimeKey(profile.runtimeId || '');
     if (!profileRuntimeId || profileRuntimeId !== normalizedTarget) continue;
@@ -209,6 +206,9 @@ export const resolveEncryptionPublicKeyHex = (store: RelayStore, targetRuntimeId
       return key.startsWith('0x') ? key : `0x${key}`;
     }
   }
+
+  const directKey = store.runtimeEncryptionKeys.get(normalizedTarget);
+  if (typeof directKey === 'string' && directKey.length > 0) return directKey;
   return null;
 };
 
@@ -217,6 +217,10 @@ export const resolveEncryptionPublicKeyHex = (store: RelayStore, targetRuntimeId
 // ---------------------------------------------------------------------------
 
 export const enqueueMessage = (store: RelayStore, toKey: string, msg: any): number => {
+  if (!store.pendingMessages.has(toKey) && store.pendingMessages.size >= MAX_PENDING_TARGETS) {
+    const oldestKey = store.pendingMessages.keys().next().value as string | undefined;
+    if (oldestKey) store.pendingMessages.delete(oldestKey);
+  }
   const queue = store.pendingMessages.get(toKey) || [];
   queue.push(msg);
   if (queue.length > MAX_PENDING_PER_CLIENT) queue.shift();

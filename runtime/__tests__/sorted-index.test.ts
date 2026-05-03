@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { sortedStringMapKeys, upsertSortedStringMapEntry } from '../sorted-index';
+import { removeSortedStringMapEntry, sortedStringMapKeys, upsertSortedStringMapEntry } from '../sorted-index';
 
 test('sorted string map index tracks delete plus insert without stale keys', () => {
   const map = new Map<string, number>([
@@ -10,8 +10,8 @@ test('sorted string map index tracks delete plus insert without stale keys', () 
 
   expect(sortedStringMapKeys(map)).toEqual(['a', 'c']);
 
-  expect(map.delete('a')).toBe(true);
-  map.set('b', 2);
+  expect(removeSortedStringMapEntry(map, 'a')).toBe(true);
+  upsertSortedStringMapEntry(map, 'b', 2);
 
   expect(sortedStringMapKeys(map)).toEqual(['b', 'c']);
 });

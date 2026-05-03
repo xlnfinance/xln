@@ -96,6 +96,20 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
     : `relay-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
   const rememberedRuntimeId = getRememberedSocketRuntimeId(ws);
 
+  if (rememberedRuntimeId && fromKey && rememberedRuntimeId !== fromKey) {
+    pushDebugEvent(store, {
+      event: 'error',
+      from,
+      to,
+      msgType: type,
+      status: 'rejected',
+      reason: 'RELAY_FROM_RUNTIME_MISMATCH',
+      details: { traceId, rememberedRuntimeId },
+    });
+    send(ws, safeStringify({ type: 'error', error: 'Relay socket runtime mismatch' }));
+    return;
+  }
+
   if (rememberedRuntimeId && fromKey && rememberedRuntimeId === fromKey) {
     const existing = store.clients.get(rememberedRuntimeId);
     if (!existing || existing.ws !== ws) {
@@ -130,7 +144,7 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
     send(ws, safeStringify({ type: 'error', error: 'Missing fromEncryptionPubKey' }));
     return;
   }
-  if (from && fromEncryptionPubKey) {
+  if (from && fromEncryptionPubKey && rememberedRuntimeId === fromKey) {
     cacheEncryptionKey(store, fromKey, fromEncryptionPubKey);
   }
   const deliveryEntityId = typeof msg.entityId === 'string' && msg.entityId.length > 0 ? msg.entityId : undefined;
@@ -173,8 +187,24 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
       send(ws, safeStringify({ type: 'error', error: 'Invalid runtimeId in hello' }));
       return;
     }
+    const registered = registerClient(store, from, ws);
+    if (!registered) {
+      pushDebugEvent(store, {
+        event: 'hello',
+        runtimeId: from,
+        from,
+        msgType: type,
+        status: 'rejected',
+        reason: 'DUPLICATE_RUNTIME_CONNECTION',
+        details: { traceId },
+      });
+      send(ws, safeStringify({ type: 'error', error: 'Runtime already connected' }));
+      return;
+    }
     rememberSocketRuntimeId(ws, fromKey);
-    registerClient(store, from, ws);
+    if (fromEncryptionPubKey) {
+      cacheEncryptionKey(store, fromKey, fromEncryptionPubKey);
+    }
     pushDebugEvent(store, {
       event: 'hello',
       runtimeId: from,
@@ -195,6 +225,18 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
 
   // ----- gossip_announce: store + fanout -----
   if (type === 'gossip_announce') {
+    if (!fromKey || rememberedRuntimeId !== fromKey) {
+      pushDebugEvent(store, {
+        event: 'error',
+        from,
+        msgType: type,
+        status: 'rejected',
+        reason: 'GOSSIP_ANNOUNCE_UNREGISTERED_RUNTIME',
+        details: { traceId },
+      });
+      send(ws, safeStringify({ type: 'error', error: 'Gossip announce requires registered relay hello' }));
+      return;
+    }
     const profiles = (payload?.profiles || []) as Profile[];
     let stored = 0;
     let droppedMalformed = 0;
