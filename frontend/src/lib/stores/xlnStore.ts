@@ -355,12 +355,6 @@ export const resolveConfiguredApiBase = (baseOrigin: string): string => {
   if (typeof window === 'undefined') return baseOrigin;
   const fromWindow = (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__;
   if (typeof fromWindow === 'string' && fromWindow.trim().length > 0) return fromWindow.trim();
-  try {
-    const fromStorage = localStorage.getItem('xln-api-base-url');
-    if (typeof fromStorage === 'string' && fromStorage.trim().length > 0) return fromStorage.trim();
-  } catch {
-    // ignore storage errors
-  }
   return baseOrigin;
 };
 
