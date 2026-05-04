@@ -89,6 +89,7 @@ type HubProcessSpec = {
   name: 'H1' | 'H2' | 'H3';
   region: string;
   seed: string;
+  authSeed: string;
   signerLabel: string;
   apiPort: number;
   publicPort: number;
@@ -374,6 +375,7 @@ const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
 type MarketMakerChild = {
   name: 'MM';
   seed: string;
+  authSeed: string;
   signerLabel: string;
   apiPort: number;
   publicPort: number;
@@ -522,10 +524,29 @@ const resetState: ResetState = {
   resolvedAt: null,
 };
 
+const readRadapterAuthSeeds = (): Record<string, string> => {
+  const raw = String(process.env['XLN_MESH_RADAPTER_AUTH_SEEDS_JSON'] || '').trim();
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    const out: Record<string, string> = {};
+    for (const [key, value] of Object.entries(parsed)) {
+      if (typeof value === 'string' && value.trim()) out[key.toUpperCase()] = value.trim();
+    }
+    return out;
+  } catch (error) {
+    throw new Error(`MESH_RADAPTER_AUTH_SEEDS_JSON_INVALID: ${(error as Error).message}`);
+  }
+};
+
+const radapterAuthSeeds = readRadapterAuthSeeds();
+const radapterAuthSeedFor = (name: string, fallback: string): string => radapterAuthSeeds[name.toUpperCase()] || fallback;
+
 const hubChildren: HubChild[] = HUB_NAMES.map((name, index) => ({
   name,
   region: 'global',
   seed: `xln-e2e-${name.toLowerCase()}`,
+  authSeed: radapterAuthSeedFor(name, `xln-e2e-${name.toLowerCase()}`),
   signerLabel: `${name.toLowerCase()}-hub`,
   apiPort: args.nodeApiPortBase + index,
   publicPort: args.nodePublicPortBase + index,
@@ -546,6 +567,7 @@ const hubChildren: HubChild[] = HUB_NAMES.map((name, index) => ({
 const marketMakerChild: MarketMakerChild = {
   name: 'MM',
   seed: 'xln-mesh-mm',
+  authSeed: radapterAuthSeedFor('MM', 'xln-mesh-mm'),
   signerLabel: 'mm-1',
   apiPort: args.nodeApiPortBase + 3,
   publicPort: args.nodePublicPortBase + 3,
@@ -1138,7 +1160,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
       ANVIL_RPC: args.rpcUrl,
       USE_ANVIL: 'true',
-      XLN_RADAPTER_AUTH_SEED: child.seed,
+      XLN_RADAPTER_AUTH_SEED: child.authSeed,
       XLN_ORCHESTRATOR_PID: String(process.pid),
       XLN_ORCHESTRATOR_OWNER_ID: orchestratorOwnerId,
       XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(STARTUP_TIMEOUT_MS),
@@ -1206,7 +1228,7 @@ const spawnMarketMaker = async (): Promise<void> => {
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
       ANVIL_RPC: args.rpcUrl,
       USE_ANVIL: 'true',
-      XLN_RADAPTER_AUTH_SEED: marketMakerChild.seed,
+      XLN_RADAPTER_AUTH_SEED: marketMakerChild.authSeed,
       XLN_ORCHESTRATOR_PID: String(process.pid),
       XLN_ORCHESTRATOR_OWNER_ID: orchestratorOwnerId,
       XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(STARTUP_TIMEOUT_MS),

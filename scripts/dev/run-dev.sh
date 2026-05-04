@@ -17,26 +17,14 @@ export XLN_JURISDICTIONS_PATH="${XLN_JURISDICTIONS_PATH:-./db/dev/jurisdictions.
 
 cd "$REPO_ROOT"
 
-node <<NODE
-const crypto = require('crypto');
-const web = 'https://localhost:${WEB_PORT}/app';
-const hubs = [
-  ['H1', 'xln-e2e-h1', ${API_PORT} + 10],
-  ['H2', 'xln-e2e-h2', ${API_PORT} + 11],
-  ['H3', 'xln-e2e-h3', ${API_PORT} + 12],
-  ['MM', 'xln-mesh-mm', ${API_PORT} + 13],
-];
-console.log('');
-console.log('XLN remote runtime adapter URLs (read-only inspect, token expires in 24h):');
-for (const [name, seed, port] of hubs) {
-  const exp = Date.now() + 24 * 60 * 60 * 1000;
-  const sig = crypto.createHmac('sha256', seed).update('xln-radapter-v1:cap:inspect:' + exp).digest('hex');
-  const key = 'xlnra1.read.' + exp + '.' + sig;
-  const url = web + '?runtime=remote&ws=' + encodeURIComponent('ws://localhost:' + port + '/rpc') + '&key=' + encodeURIComponent(key);
-  console.log('  ' + name + ': ' + url);
-}
-console.log('');
-NODE
+DEV_RADAPTER_KEYS_JSON="$REPO_ROOT/db/dev/radapter-keys.json"
+DEV_RADAPTER_KEYS_ENV="$REPO_ROOT/db/dev/radapter-keys.env"
+bun runtime/scripts/dev-radapter-keys.ts \
+  --web-port "${WEB_PORT}" \
+  --api-port "${API_PORT}" \
+  --out "$DEV_RADAPTER_KEYS_JSON" \
+  --env-out "$DEV_RADAPTER_KEYS_ENV"
+source "$DEV_RADAPTER_KEYS_ENV"
 
 exec concurrently \
   --kill-others-on-fail \
