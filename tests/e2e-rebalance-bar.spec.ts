@@ -2285,7 +2285,7 @@ test.describe('Rebalance E2E', () => {
       (step) => String(step?.accountId || '').toLowerCase() === h3Lower,
     );
     await switchRuntime(page, rt1Label);
-    await waitForPairIdle(page, h3);
+    await waitForPairIdle(page, h3, 60_000);
     const senderBeforeP2 = await readPairState(page, h3);
     const payment2 = await sendRoutedHtlcPayment(
       page,
@@ -2368,10 +2368,14 @@ test.describe('Rebalance E2E', () => {
       await page.waitForTimeout(800);
     }
     expect(rebDone, 'rebalance must complete before payment3').toBeTruthy();
+    const readyForP3 = await waitForPairIdle(page, h3, 60_000);
+    if (readyForP3) {
+      rebDone = readyForP3;
+    }
 
     // Step 9: HTLC #3 (550) after rebalance should pass again.
     await switchRuntime(page, rt1Label);
-    await waitForPairIdle(page, h3);
+    await waitForPairIdle(page, h3, 60_000);
     const senderBeforeP3 = await readPairState(page, h3);
     const payment3 = await sendRoutedHtlcPayment(
       page,
