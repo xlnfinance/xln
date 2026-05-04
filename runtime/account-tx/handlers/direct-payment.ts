@@ -174,24 +174,6 @@ export function handleDirectPayment(
   console.log(`🔍 OFFDELTA-UPDATE: ${oldOffdelta} + ${canonicalDelta} = ${delta.offdelta}`);
   console.log(`🔍 NEW-TOTAL: ondelta=${delta.ondelta} + offdelta=${delta.offdelta} = ${delta.ondelta + delta.offdelta}`);
 
-  const pendingRequest = accountMachine.requestedRebalance.get(tokenId) ?? 0n;
-  const pendingFeeState = accountMachine.requestedRebalanceFeeState?.get(tokenId);
-  if (pendingRequest > 0n && pendingFeeState) {
-    const requesterView = deriveDelta(delta, pendingFeeState.requestedByLeft);
-    const refreshedRequest = requesterView.outPeerCredit;
-    if (refreshedRequest > pendingRequest) {
-      accountMachine.requestedRebalance.set(tokenId, refreshedRequest);
-      pendingFeeState.requestedAmount = refreshedRequest;
-      events.push(
-        `🔄 Pending collateral request expanded after payment: token=${tokenId} ${pendingRequest}→${refreshedRequest}`,
-      );
-      console.log(
-        `[REB][1B][REQUEST_COLLATERAL_EXPANDED] token=${tokenId} previous=${pendingRequest} ` +
-          `refreshed=${refreshedRequest} submittedAt=${pendingFeeState.jBatchSubmittedAt || 0}`,
-      );
-    }
-  }
-
   const memoPolicy = decodeRebalancePolicyMemo(description);
   if (memoPolicy) {
     const existingPolicy = accountMachine.counterpartyRebalanceFeePolicy;
