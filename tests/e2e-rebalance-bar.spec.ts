@@ -960,6 +960,31 @@ function collapseLogicalRebalanceCommits(steps: any[]): any[] {
   return collapsed;
 }
 
+function collapseLogicalRebalanceBatchAdds(steps: any[]): any[] {
+  const sorted = [...steps].sort((left, right) => Number(left?.ts || 0) - Number(right?.ts || 0));
+  const collapsed: any[] = [];
+  for (const step of sorted) {
+    const previous = collapsed[collapsed.length - 1];
+    const sameSemanticAdd =
+      previous
+      && String(previous?.event || '') === String(step?.event || '')
+      && String(previous?.counterpartyId || '').toLowerCase() === String(step?.counterpartyId || '').toLowerCase()
+      && String(previous?.tokenId || '') === String(step?.tokenId || '')
+      && String(previous?.amount || '') === String(step?.amount || '');
+    if (!sameSemanticAdd) {
+      collapsed.push(step);
+      continue;
+    }
+    const requestedAtDelta = Math.abs(Number(previous?.requestedAt || 0) - Number(step?.requestedAt || 0));
+    const tsDelta = Math.abs(Number(previous?.ts || 0) - Number(step?.ts || 0));
+    if (requestedAtDelta <= 5 && tsDelta <= 250) {
+      continue;
+    }
+    collapsed.push(step);
+  }
+  return collapsed;
+}
+
 function buildRebalanceFailureDump(input: {
   entityId: string;
   hubId: string;
@@ -1601,9 +1626,9 @@ test.describe('Rebalance E2E', () => {
     expect(criticalConsole.length, `critical consensus/runtime errors during reload persistence flow:\n${criticalConsole.join('\n')}`).toBe(0);
   });
 
-  // Scenario: while one request_collateral is still pending, extra debt must not commit a duplicate
-  // request before the first settlement finalize arrives.
-  test('edge: pending request_collateral must not duplicate before first settlement finalize', async ({ page }) => {
+  // Scenario: while one request_collateral batch is already submitted, extra debt may top up
+  // the pending request, but it must not enqueue a second J batch before the first finalize.
+  test('edge: pending request_collateral must not duplicate J batch before first settlement finalize', async ({ page }) => {
     let scenarioStartedAt = 0;
     await timedStep('rebalance_edge.reset_server', () => resetProdServer(page));
     await page.addInitScript(() => {
@@ -1710,7 +1735,8 @@ test.describe('Rebalance E2E', () => {
     }
     expect(firstRequestCommit, 'expected request_collateral_committed before first finalize').toBeTruthy();
 
-    // While pending, add more debt; this must NOT create a second request commit before first finalize.
+    // While pending, add more debt. A request top-up is valid; a second J-batch
+    // submission before the first finalize is not.
     for (let i = 0; i < 3; i++) {
       await faucet(page, entityId, hubId);
       await page.waitForTimeout(100);
@@ -1725,16 +1751,26 @@ test.describe('Rebalance E2E', () => {
     const diagnostics = await readRebalanceDiagnostics(page, hubId);
     const steps = await readRebalanceStepEvents(page, scenarioStartedAt);
     const { phaseMarkers, debugErrors, frameEvents } = await collectRebalanceDebugArtifacts(page, scenarioStartedAt, hubId);
+    const lowerEntity = entityId.toLowerCase();
+    const isPairAccountId = (value: unknown): boolean => {
+      const normalized = String(value || '').toLowerCase();
+      return normalized === lowerHub || normalized === lowerEntity;
+    };
     const firstFinalizeIdx = steps.findIndex((s) =>
       String(s?.event || '') === 'account_settled_finalized_bilateral'
-      && String(s?.accountId || '').toLowerCase() === lowerHub,
+      && isPairAccountId(s?.accountId),
     );
-    const beforeFirstFinalize = firstFinalizeIdx >= 0 ? steps.slice(0, firstFinalizeIdx + 1) : steps;
+    const beforeFirstFinalize = firstFinalizeIdx >= 0 ? steps.slice(0, firstFinalizeIdx) : steps;
     const reqCommits = beforeFirstFinalize.filter((s) =>
       String(s?.event || '') === 'request_collateral_committed'
       && String(s?.accountId || '').toLowerCase() === lowerHub,
     );
     const logicalReqCommits = collapseLogicalRebalanceCommits(reqCommits);
+    const batchAdds = beforeFirstFinalize.filter((s) =>
+      String(s?.event || '') === 'batch_add'
+      && String(s?.counterpartyId || '').toLowerCase() === entityId.toLowerCase(),
+    );
+    const logicalBatchAdds = collapseLogicalRebalanceBatchAdds(batchAdds);
     const debugDump = buildRebalanceFailureDump({
       entityId,
       hubId,
@@ -1748,8 +1784,18 @@ test.describe('Rebalance E2E', () => {
       frameEvents,
     });
     expect(
-      logicalReqCommits.length,
-      `request_collateral logical-commit duplicated before first finalize: raw=${JSON.stringify(reqCommits, null, 2)} logical=${JSON.stringify(logicalReqCommits, null, 2)}\n${debugDump}`,
+      logicalReqCommits.length >= 1,
+      `expected at least one request_collateral commit before first finalize: raw=${JSON.stringify(reqCommits, null, 2)} logical=${JSON.stringify(logicalReqCommits, null, 2)}\n${debugDump}`,
+    ).toBe(true);
+    for (let i = 1; i < logicalReqCommits.length; i++) {
+      expect(
+        BigInt(logicalReqCommits[i]?.requestedAmount || '0') > BigInt(logicalReqCommits[i - 1]?.requestedAmount || '0'),
+        `request_collateral top-ups must strictly increase target amount before first finalize: logical=${JSON.stringify(logicalReqCommits, null, 2)}\n${debugDump}`,
+      ).toBe(true);
+    }
+    expect(
+      logicalBatchAdds.length,
+      `request_collateral J-batch duplicated before first finalize: raw=${JSON.stringify(batchAdds, null, 2)} logical=${JSON.stringify(logicalBatchAdds, null, 2)} requests=${JSON.stringify(logicalReqCommits, null, 2)}\n${debugDump}`,
     ).toBe(1);
   });
 

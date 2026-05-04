@@ -128,6 +128,7 @@ export function handleRequestCollateral(
 
   // ── Store request for hub crontab ─────────────────────────────
   // Hub's hubRebalanceHandler will pick this up and add R→C to jBatch.
+  const previousSubmittedAt = existingRequest > 0n ? (existingFeeState?.jBatchSubmittedAt || 0) : 0;
   accountMachine.requestedRebalance.set(tokenId, effectiveRequest);
   accountMachine.requestedRebalanceFeeState.set(tokenId, {
     feeTokenId: feeToken,
@@ -136,8 +137,10 @@ export function handleRequestCollateral(
     policyVersion,
     requestedAt: currentTimestamp,
     requestedByLeft: !!byLeft,
-    // Any refreshed amount must be treated as a fresh request for hub crontab routing.
-    jBatchSubmittedAt: 0,
+    // If the previous request is already in J-batch, keep the marker until the
+    // on-chain finalize reduces the pending amount. Otherwise a top-up can send
+    // the full refreshed request twice before the first settlement lands.
+    jBatchSubmittedAt: previousSubmittedAt,
   });
 
   const feeDisplay = effectiveFeeTarget > 0n ? `, prepaidFee=${effectiveFeeTarget}` : '';

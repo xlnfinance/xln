@@ -363,7 +363,7 @@ describe('audit fail-fast regressions', () => {
     expect(feeDelta.offdelta).toBe(100n);
   });
 
-  test('request_collateral tops up an existing pending request when exposure grows', () => {
+  test('request_collateral tops up an existing pending request without resubmitting in-flight batch', () => {
     const delta = {
       tokenId: 1,
       collateral: 0n,
@@ -403,7 +403,7 @@ describe('audit fail-fast regressions', () => {
     expect(result.success).toBe(true);
     expect(accountMachine.requestedRebalance.get(1)).toBe(780n);
     expect(accountMachine.requestedRebalanceFeeState.get(1)?.feePaidUpfront).toBe(20n);
-    expect(accountMachine.requestedRebalanceFeeState.get(1)?.jBatchSubmittedAt).toBe(0);
+    expect(accountMachine.requestedRebalanceFeeState.get(1)?.jBatchSubmittedAt).toBe(123);
     expect(delta.offdelta).toBe(990n);
   });
 
@@ -521,7 +521,7 @@ describe('audit fail-fast regressions', () => {
     expect(accountMachine.requestedRebalance.get(1)).toBe(outPeerCredit - requiredFee);
     expect(accountMachine.requestedRebalanceFeeState.get(1)?.feePaidUpfront).toBe(requiredFee);
     expect(accountMachine.requestedRebalanceFeeState.get(1)?.requestedAmount).toBe(outPeerCredit - requiredFee);
-    expect(accountMachine.requestedRebalanceFeeState.get(1)?.jBatchSubmittedAt).toBe(0);
+    expect(accountMachine.requestedRebalanceFeeState.get(1)?.jBatchSubmittedAt).toBe(123);
     expect(delta.offdelta).toBe(previousRequest + outPeerCredit - feeTopup);
   });
 
