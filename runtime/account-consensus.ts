@@ -774,9 +774,9 @@ export async function proposeAccountFrame(
   }
 
   // Build hanko for account frame
-  const { signHashesAsSingleEntity } = await import('./hanko/signing');
+  const { signEntityHashes } = await import('./hanko/signing');
   // Sign frame hash for bilateral consensus
-  const hankos = await signHashesAsSingleEntity(env, signingEntityId, signingSignerId, [newFrame.stateHash]);
+  const hankos = await signEntityHashes(env, signingEntityId, signingSignerId, [newFrame.stateHash]);
   const frameHanko = hankos[0];
   if (!frameHanko) {
     return { success: false, error: 'Failed to build frame hanko', events };
@@ -828,7 +828,7 @@ export async function proposeAccountFrame(
     };
   }
 
-  const disputeHankos = await signHashesAsSingleEntity(env, signingEntityId, signingSignerId, [disputeHash]);
+  const disputeHankos = await signEntityHashes(env, signingEntityId, signingSignerId, [disputeHash]);
   const disputeHanko = disputeHankos[0];
   if (!disputeHanko) {
     return { success: false, error: 'Failed to build dispute hanko', events };
@@ -1758,8 +1758,8 @@ export async function handleAccountInput(
     console.log(`🔐 HANKO-ACK: entityId=${ackEntityId.slice(-4)} → signerId=${ackSignerId.slice(-4)}`);
 
     // Build ACK hanko
-    const { signHashesAsSingleEntity } = await import('./hanko/signing');
-    const ackHankos = await signHashesAsSingleEntity(env, ackEntityId, ackSignerId, [receivedFrame.stateHash]);
+    const { signEntityHashes } = await import('./hanko/signing');
+    const ackHankos = await signEntityHashes(env, ackEntityId, ackSignerId, [receivedFrame.stateHash]);
     const confirmationHanko = ackHankos[0];
     if (!confirmationHanko) {
       return { success: false, error: 'Failed to build ACK hanko', events };
@@ -1781,7 +1781,7 @@ export async function handleAccountInput(
     }
     const ackProofResult = buildProof(accountMachine);
     const ackDisputeHash = createHash(accountMachine, ackProofResult.proofBodyHash, ackDepositoryAddress);
-    const ackDisputeHankos = await signHashesAsSingleEntity(env, ackEntityId, ackSignerId, [ackDisputeHash]);
+    const ackDisputeHankos = await signEntityHashes(env, ackEntityId, ackSignerId, [ackDisputeHash]);
     const ackDisputeHanko = ackDisputeHankos[0];
     const ackSignedNonce = accountMachine.proofHeader.nonce;
     if (!accountMachine.disputeProofNoncesByHash) {

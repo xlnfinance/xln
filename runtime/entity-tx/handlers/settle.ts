@@ -17,7 +17,7 @@ import { initJBatch, batchAddSettlement } from '../../j-batch';
 import { isLeftEntity } from '../../entity-id-utils';
 import type { Env, HankoString } from '../../types';
 import { createSettlementHashWithNonce, createDisputeProofHashWithNonce, buildAccountProofBody } from '../../proof-builder';
-import { signHashesAsSingleEntity } from '../../hanko/signing';
+import { signEntityHashes } from '../../hanko/signing';
 import { compileOps, userAutoApprove as userAutoApproveByDiff } from '../../settlement-ops';
 
 import type { AccountMachine } from '../../types';
@@ -41,7 +41,7 @@ async function signPostSettlementDisputeProof(
     const disputeHash = createDisputeProofHashWithNonce(
       account, proofBodyHash, jurisdiction.depositoryAddress, onChainNonce + 1
     );
-    const hankos = await signHashesAsSingleEntity(env, entityState.entityId, signerId, [disputeHash]);
+    const hankos = await signEntityHashes(env, entityState.entityId, signerId, [disputeHash]);
     if (!hankos[0]) return null;
     return { hanko: hankos[0], proofBodyHash, nonce: onChainNonce + 1 };
   } catch (e) {
@@ -342,7 +342,7 @@ export async function handleSettleApprove(
   const signerId = entityState.config.validators[0];
   if (!signerId) throw new Error('No validator configured for entity');
 
-  const hankos = await signHashesAsSingleEntity(env, entityState.entityId, signerId, [settlementHash]);
+  const hankos = await signEntityHashes(env, entityState.entityId, signerId, [settlementHash]);
   const hanko = hankos[0];
   if (!hanko) throw new Error(`Failed to generate settlement hanko for ${signerId.slice(-4)}`);
 
@@ -651,7 +651,7 @@ export async function processSettleAction(
 
             const signerId = entityState.config.validators[0];
             if (signerId) {
-              const hankos = await signHashesAsSingleEntity(env, myEntityId, signerId, [settlementHash]);
+              const hankos = await signEntityHashes(env, myEntityId, signerId, [settlementHash]);
               const hanko = hankos[0];
               if (hanko) {
                 if (iAmLeft) {

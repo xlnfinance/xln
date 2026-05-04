@@ -377,17 +377,3 @@ export function getDefaultCreditLimit(tokenId: number): bigint {
   const decimals = BigInt(tokenInfo.decimals ?? 18);
   return BASE_CREDIT_LIMIT * 10n ** decimals;
 }
-
-/**
- * Format amount for display with proper decimals
- */
-// DEPRECATED: Use financial-utils.ts formatTokenAmount instead
-// This is kept for backwards compatibility during migration
-export { formatTokenAmount } from './financial-utils';
-
-/**
- * Calculate percentage for capacity bar display
- */
-// DEPRECATED: Use financial-utils.ts calculatePercentage instead
-// This is kept for backwards compatibility during migration
-export { calculatePercentage } from './financial-utils';
