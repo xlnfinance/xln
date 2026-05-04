@@ -19,6 +19,7 @@ jurisdictions/bun.lock
 # Frontend generated files
 frontend/static/runtime.js
 frontend/static/llms.txt
+frontend/static/llms*.txt
 frontend/static/c.txt
 frontend/build/
 frontend/src/lib/generated/version.ts
