@@ -1,10 +1,19 @@
 import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers.js";
 import { expect } from "chai";
 import hre from "hardhat";
-import { ethers } from "hardhat";
+const { ethers } = hre;
 import type { HardhatEthersSigner } from "@nomicfoundation/hardhat-ethers/signers.js";
 import type { Depository } from "../typechain-types/index.js";
 import { Contract } from "ethers";
+import {
+  addressEntityId,
+  buildSingleSignerHanko,
+  computeDepositoryBatchHash,
+  deriveHardhatPrivateKey,
+  emptyBatch,
+  encodeBatch,
+  singleSignerLazyEntityId,
+} from "./helpers/hanko.ts";
 
 describe("Depository", function () {
   let user0: HardhatEthersSigner;
@@ -62,7 +71,7 @@ describe("Depository", function () {
     await erc20.approve(await depository.getAddress(), 10_000);
     expect(await erc20.balanceOf(user0.address)).to.equal(1_000_000);
 
-    await depository.externalTokenToReserve({
+    await depository.connect(user0).adminRegisterExternalToken({
       entity: ethers.ZeroHash,
       contractAddress: await erc20.getAddress(),
       externalTokenId: 0,
@@ -72,7 +81,7 @@ describe("Depository", function () {
     });
 
     const erc20id = await depository.getTokensLength() - 1n;
-    const reserve = await depository._reserves(user0.address, erc20id);
+    const reserve = await depository._reserves(addressEntityId(user0.address), erc20id);
 
     expect(reserve).to.equal(10_000);
     expect(await erc20.balanceOf(user0.address)).to.equal(990_000);
@@ -84,7 +93,7 @@ describe("Depository", function () {
     await erc721.approve(await depository.getAddress(), 1);
     expect(await erc721.ownerOf(1)).to.equal(user0.address);
 
-    await depository.externalTokenToReserve({
+    await depository.connect(user0).adminRegisterExternalToken({
       entity: ethers.ZeroHash,
       contractAddress: await erc721.getAddress(),
       externalTokenId: 1,
@@ -94,7 +103,7 @@ describe("Depository", function () {
     });
 
     const erc721id = await depository.getTokensLength() - 1n;
-    const reserve = await depository._reserves(user0.address, erc721id);
+    const reserve = await depository._reserves(addressEntityId(user0.address), erc721id);
 
     expect(await erc721.ownerOf(1)).to.equal(await depository.getAddress());
     expect(reserve).to.equal(1);
@@ -106,7 +115,7 @@ describe("Depository", function () {
     await erc1155.setApprovalForAll(await depository.getAddress(), true);
     expect(await erc1155.balanceOf(user0.address, 0)).to.equal(100);
 
-    await depository.externalTokenToReserve({
+    await depository.connect(user0).adminRegisterExternalToken({
       entity: ethers.ZeroHash,
       contractAddress: await erc1155.getAddress(),
       externalTokenId: 0,
@@ -116,7 +125,7 @@ describe("Depository", function () {
     });
 
     const erc1155id = await depository.getTokensLength() - 1n;
-    const reserve = await depository._reserves(user0.address, erc1155id);
+    const reserve = await depository._reserves(addressEntityId(user0.address), erc1155id);
 
     expect(reserve).to.equal(50);
     expect(await erc1155.balanceOf(user0.address, 0)).to.equal(50);
@@ -125,14 +134,22 @@ describe("Depository", function () {
   it("reserveToReserve transfers between entities", async function () {
     const { depository } = await loadFixture(deployFixture);
 
-    const fromEntity = ethers.zeroPadValue(user0.address, 32);
-    const toEntity = ethers.zeroPadValue(user1.address, 32);
+    const fromEntity = singleSignerLazyEntityId(user0.address);
+    const toEntity = addressEntityId(user1.address);
     const tokenId = 1;
 
     await depository.mintToReserve(fromEntity, tokenId, 1_000n);
 
+    const batch = emptyBatch({
+      reserveToReserve: [{ receivingEntity: toEntity, tokenId, amount: 250n }],
+    });
+    const encodedBatch = encodeBatch(batch);
+    const nonce = (await depository.entityNonces(fromEntity)) + 1n;
+    const batchHash = await computeDepositoryBatchHash(depository, encodedBatch, nonce);
+    const hankoData = buildSingleSignerHanko(fromEntity, batchHash, deriveHardhatPrivateKey(0));
+
     await expect(
-      depository.connect(user0).reserveToReserve(fromEntity, toEntity, tokenId, 250n)
+      depository.connect(user0).processBatch(encodedBatch, hankoData, nonce)
     ).to.not.be.reverted;
 
     const reserveFrom = await depository._reserves(fromEntity, tokenId);
