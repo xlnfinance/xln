@@ -24,6 +24,12 @@
   } from '@xln/brainvault/core';
   import { generateLazyEntityId } from '@xln/runtime/entity-factory';
   import { DEMO_ACCOUNTS } from '$lib/config/demo-accounts';
+  import {
+    BRAINVAULT_WORKER_CAP_STORAGE_KEY,
+    computeBrainVaultWorkerCap,
+    isBrainVaultWasmMemoryError,
+    nextBrainVaultWorkerCapAfterFailure,
+  } from '$lib/brainvault/workers';
 
   // Props
   export let embedded: boolean = false;
@@ -205,17 +211,25 @@
   // Allow user to configure beyond hardwareConcurrency (they'll find sweet spot)
   const hardwareCores = typeof navigator !== 'undefined' ? (navigator.hardwareConcurrency || 4) : 4;
   const SHARD_MEMORY_MB = BRAINVAULT_V1.SHARD_MEMORY_KB / 1024;
-  const WORKER_MEMORY_BUDGET_MB = SHARD_MEMORY_MB * 1.5;
 
-  // Argon2id is memory-bound. Each worker owns a Wasm instance plus a 256MB
-  // shard buffer, so CPU-count parallelism can overcommit browser memory.
-  const computeMaxWorkers = () => {
-    const memoryBudgetMB = Math.max(SHARD_MEMORY_MB, deviceMemoryMB * (isIOSFamilyWebKit ? 0.35 : 0.5));
-    const memoryBased = Math.max(1, Math.floor(memoryBudgetMB / WORKER_MEMORY_BUDGET_MB));
-    const cpuBased = Math.max(1, hardwareCores);
-    const browserHardCap = isIOSFamilyWebKit ? 2 : 16;
-    return Math.max(1, Math.min(cpuBased, memoryBased, browserHardCap));
-  };
+  function readPersistedWorkerCap(): number | null {
+    if (typeof localStorage === 'undefined') return null;
+    const value = Number(localStorage.getItem(BRAINVAULT_WORKER_CAP_STORAGE_KEY));
+    return Number.isFinite(value) && value > 0 ? Math.floor(value) : null;
+  }
+
+  function persistWorkerCap(cap: number): void {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(BRAINVAULT_WORKER_CAP_STORAGE_KEY, String(Math.max(1, Math.floor(cap))));
+  }
+
+  const computeMaxWorkers = () => computeBrainVaultWorkerCap({
+    hardwareConcurrency: hardwareCores,
+    deviceMemoryGB,
+    shardMemoryMB: SHARD_MEMORY_MB,
+    isWebKit: isIOSFamilyWebKit,
+    storedCap: readPersistedWorkerCap(),
+  });
 
   // Derivation state
   let workers: Worker[] = [];
@@ -226,6 +240,7 @@
   let workerCount = 1;
   let activeWorkerCount = 1;
   let derivationError = '';
+  let workerLimitNotice = '';
 
   let maxWorkers = computeMaxWorkers();
   let usableWorkerCap = Math.max(1, maxWorkers);
@@ -548,10 +563,6 @@
     return String(err || 'Worker failed');
   }
 
-  function isWasmMemoryError(message: string): boolean {
-    return /out of memory|cannot allocate|wasm memory|WebAssembly\.instantiate/i.test(message);
-  }
-
   function hasPendingShardWork(): boolean {
     return retryShardQueue.length > 0 || nextShardToDispatch < shardCount;
   }
@@ -574,10 +585,12 @@
 
   function reduceWorkerCapAfterMemoryError(message: string): void {
     const current = Math.max(activeWorkerCount, effectiveTargetWorkerCount, 1);
-    const reduced = Math.max(1, Math.floor(current / 2));
+    const reduced = nextBrainVaultWorkerCapAfterFailure(current);
     maxWorkers = Math.max(1, Math.min(maxWorkers, reduced));
+    persistWorkerCap(maxWorkers);
     targetWorkerCount = Math.max(1, Math.min(targetWorkerCount, maxWorkers));
-    console.warn(`[BrainVault] Wasm memory pressure; reduced worker cap to ${maxWorkers}. ${message}`);
+    workerLimitNotice = `Browser memory pressure detected. BrainVault is continuing with ${maxWorkers} worker${maxWorkers === 1 ? '' : 's'}.`;
+    console.warn(`[BrainVault] Wasm memory pressure; reduced worker cap to ${maxWorkers} and persisted it. ${message}`);
   }
 
   function failDerivation(message: string): void {
@@ -600,7 +613,7 @@
       return;
     }
 
-    const memoryError = isWasmMemoryError(message);
+    const memoryError = isBrainVaultWasmMemoryError(message);
     shutdownWorker(worker);
 
     if (memoryError) {
@@ -617,7 +630,7 @@
 
   function attachWorkerHandlers(
     worker: Worker,
-    opts: { onReady?: () => void; onError?: (err: unknown) => void } = {}
+    opts: { onReady?: () => void; onError?: (err: unknown) => void; handleErrors?: boolean } = {}
   ): void {
     worker.onmessage = (e) => {
       const { type, data } = e.data;
@@ -629,14 +642,20 @@
       } else if (type === 'shard_complete') {
         handleShardComplete(worker, data.shardIndex, data.resultHex, data.elapsedMs);
       } else if (type === 'error') {
-        handleWorkerFailure(worker, data?.message ?? 'Worker failed');
+        const error = data?.message ?? 'Worker failed';
+        opts.onError?.(error);
+        if (opts.handleErrors !== false) {
+          handleWorkerFailure(worker, error);
+        }
       }
     };
 
     worker.onerror = (e) => {
       console.error('[BrainVault] Worker error:', e);
       opts.onError?.(e);
-      handleWorkerFailure(worker, e);
+      if (opts.handleErrors !== false) {
+        handleWorkerFailure(worker, e);
+      }
     };
   }
 
@@ -682,6 +701,7 @@
     finalizeInProgress = false;
     phase = 'deriving';
     derivationError = '';
+    workerLimitNotice = '';
     retryShardQueue = [];
     shardRetryCounts.clear();
     shardsCompleted = 0;
@@ -720,8 +740,9 @@
               },
               onError: (err) => {
                 clearTimeout(timeout);
-                reject(err instanceof Error ? err : new Error('Worker init failed'));
+                reject(new Error(workerErrorMessage(err)));
               },
+              handleErrors: false,
             });
           });
 
@@ -735,19 +756,21 @@
           break;
         } catch (err) {
           terminateWorkers();
-          const message = err instanceof Error ? err.message : String(err);
-          if (attempts < 2 && /out of memory|memory/i.test(message) && initialWorkers > 1) {
-            const reduced = Math.max(1, Math.floor(initialWorkers / 2));
+          const message = workerErrorMessage(err);
+          if (attempts < 4 && isBrainVaultWasmMemoryError(message) && initialWorkers > 1) {
+            const reduced = nextBrainVaultWorkerCapAfterFailure(initialWorkers);
             if (reduced === initialWorkers) {
               throw err;
             }
             initialWorkers = reduced;
             maxWorkers = Math.max(1, Math.min(maxWorkers, reduced));
+            persistWorkerCap(maxWorkers);
             workerCount = initialWorkers;
             activeWorkerCount = initialWorkers;
             targetWorkerCount = Math.min(targetWorkerCount, initialWorkers);
             attempts += 1;
-            console.warn(`[BrainVault] Reducing workers to ${initialWorkers} after init failure`);
+            workerLimitNotice = `Browser memory pressure detected. BrainVault is retrying with ${initialWorkers} worker${initialWorkers === 1 ? '' : 's'}.`;
+            console.warn(`[BrainVault] Reducing workers to ${initialWorkers} after init failure: ${message}`);
             continue;
           }
           throw err;
@@ -763,8 +786,12 @@
       // Dispatch initial shards
       dispatchShards(name);
     } catch (err) {
-      console.error('Failed to initialize workers:', err);
+      const message = workerErrorMessage(err);
+      console.error('Failed to initialize workers:', message);
       terminateWorkers();
+      derivationError = isBrainVaultWasmMemoryError(message)
+        ? `BrainVault could not allocate browser Wasm memory. Reduce other tabs or retry with 1 worker. ${message}`
+        : `BrainVault worker initialization failed: ${message}`;
       phase = 'input';
     }
   }
@@ -938,9 +965,6 @@
           onReady: () => {
             dispatchNextShard(worker);
           },
-          onError: (err) => {
-            handleWorkerFailure(worker, err);
-          },
         });
 
         worker.postMessage({ type: 'init', id: currentTotal + i });
@@ -954,6 +978,7 @@
   function reset() {
     phase = 'input';
     terminateWorkers();
+    workerLimitNotice = '';
     if (elapsedInterval) {
       clearInterval(elapsedInterval);
       elapsedInterval = null;
@@ -1301,6 +1326,9 @@
                     <span class="speed-threads">{activeWorkerCount} active / {usableWorkerCap} cap</span>
                     <span class="speed-memory">{formatMemoryLabel(allocatedMemoryMB)} RAM</span>
                   </div>
+                  {#if workerLimitNotice}
+                    <div class="speed-warning">{workerLimitNotice}</div>
+                  {/if}
                 </div>
               </div>
 
@@ -3690,6 +3718,12 @@
 
   .speed-threads, .speed-memory {
     opacity: 0.8;
+  }
+
+  .speed-warning {
+    font-size: 10px;
+    line-height: 1.35;
+    color: rgba(255, 184, 112, 0.9);
   }
 
   .sound-control {
