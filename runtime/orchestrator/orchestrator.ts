@@ -25,15 +25,8 @@ import {
   type RelayStore,
 } from '../relay-store';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../relay-router';
-import {
-  normalizeMarketEntityId,
-  normalizeMarketPairId,
-  RPC_MARKET_DEFAULT_DEPTH,
-  RPC_MARKET_MAX_DEPTH,
-  RPC_MARKET_PUBLISH_MS,
-  type MarketSnapshotPayload,
-} from '../market-snapshot';
-import { MarketSubscriptionLimiter } from '../market-subscription-limiter';
+import { type MarketSnapshotPayload } from '../market-snapshot';
+import { createMarketSubscriptionStack, isMarketMessageType } from '../relay/market-subscriptions';
 import { normalizeLoopbackUrl, toPublicRpcUrl } from '../loopback-url';
 import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync, type StorageHealth } from './storage-monitor';
 import { maybeHandleQaRequest } from '../qa/api';
@@ -222,13 +215,6 @@ type MarketMakerHealthPayload = {
 };
 
 type MarketMakerInfoPayload = HubInfoPayload;
-
-type RpcMarketSubscription = {
-  hubIds: Set<string>;
-  pairIds: Set<string>;
-  depth: number;
-  seq: number;
-};
 
 type AggregatedHealth = {
   timestamp: number;
@@ -586,14 +572,6 @@ const buildPublicDirectWsUrl = (publicPort: number): string => {
 };
 
 let custodySupport: CustodySupportState | null = null;
-const rpcMarketSubscriptions = new Map<any, RpcMarketSubscription>();
-const rpcMarketSubscriptionLimiter = new MarketSubscriptionLimiter(
-  RELAY_MARKET_MAX_SUBSCRIPTIONS,
-  RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP,
-  RELAY_MARKET_MAX_SUBSCRIPTION_CELLS,
-);
-let rpcMarketPublisherTimer: ReturnType<typeof setInterval> | null = null;
-let rpcMarketPublisherInFlight = false;
 
 let resetPromise: Promise<void> | null = null;
 const CHILD_GRACEFUL_SHUTDOWN_MS = 20_000;
@@ -668,12 +646,7 @@ const clearRelayState = (): void => {
   relayStore.debugEvents.length = 0;
   relayStore.debugId = 0;
   relayStore.wsCounter = 0;
-  rpcMarketSubscriptions.clear();
-  rpcMarketSubscriptionLimiter.clear();
-  if (rpcMarketPublisherTimer) {
-    clearInterval(rpcMarketPublisherTimer);
-    rpcMarketPublisherTimer = null;
-  }
+  marketSubscriptionStack.clear();
 };
 
 const fetchJson = async <T>(url: string, timeoutMs = 2_000): Promise<T | null> => {
@@ -756,207 +729,26 @@ const fetchHubMarketSnapshots = async (
   return Array.isArray(response?.snapshots) ? response!.snapshots : [];
 };
 
-const cleanupRpcMarketSubscription = (ws: any): void => {
-  const existing = rpcMarketSubscriptions.get(ws);
-  if (existing) {
-    rpcMarketSubscriptionLimiter.remove(String(ws?.data?.clientIp || 'unknown'));
-    rpcMarketSubscriptions.delete(ws);
-  }
-  if (rpcMarketSubscriptions.size > 0) return;
-  if (!rpcMarketPublisherTimer) return;
-  clearInterval(rpcMarketPublisherTimer);
-  rpcMarketPublisherTimer = null;
-};
-
-const sendRpcMarketSnapshot = async (
-  ws: any,
-  subscription: RpcMarketSubscription,
-): Promise<boolean> => {
-  let sentAny = false;
-  const pairIds = Array.from(subscription.pairIds);
-  for (const hubEntityId of subscription.hubIds) {
+const marketSubscriptionStack = createMarketSubscriptionStack<any>({
+  maxSubscriptions: RELAY_MARKET_MAX_SUBSCRIPTIONS,
+  maxSubscriptionsPerIp: RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP,
+  maxCellsPerSubscription: RELAY_MARKET_MAX_SUBSCRIPTION_CELLS,
+  getClientIp: ws => String(ws?.data?.clientIp || 'unknown'),
+  fetchSnapshots: async (hubEntityId, pairIds, depth) => {
     const child = getHubChildByEntityId(hubEntityId);
-    if (!child) continue;
-    const snapshots = await fetchHubMarketSnapshots(child, pairIds, subscription.depth);
-    for (const payload of snapshots) {
-      subscription.seq += 1;
-      ws.send(
-        safeStringify({
-          type: 'market_snapshot',
-          id: `market_${Date.now()}_${subscription.seq}`,
-          timestamp: Date.now(),
-          payload,
-        }),
-      );
-      sentAny = true;
-    }
-  }
-  return sentAny;
-};
+    if (!child) return [];
+    return fetchHubMarketSnapshots(child, pairIds, depth);
+  },
+  onHandlerError: (error, msg) => {
+    pushDebugEvent(relayStore, {
+      event: 'error',
+      reason: 'MARKET_HANDLER_EXCEPTION',
+      details: { error: serializeError(error), msgType: msg['type'] },
+    });
+  },
+});
 
-const publishRpcMarketSnapshots = async (): Promise<void> => {
-  if (rpcMarketPublisherInFlight || rpcMarketSubscriptions.size === 0) return;
-  rpcMarketPublisherInFlight = true;
-  try {
-    for (const [ws, subscription] of rpcMarketSubscriptions.entries()) {
-      try {
-        await sendRpcMarketSnapshot(ws, subscription);
-      } catch {
-        cleanupRpcMarketSubscription(ws);
-      }
-    }
-  } finally {
-    rpcMarketPublisherInFlight = false;
-  }
-};
-
-const ensureRpcMarketPublisher = (): void => {
-  if (rpcMarketPublisherTimer) return;
-  rpcMarketPublisherTimer = setInterval(() => {
-    void publishRpcMarketSnapshots();
-  }, RPC_MARKET_PUBLISH_MS);
-};
-
-const isMarketMessageType = (type: unknown): type is 'market_subscribe' | 'market_unsubscribe' | 'market_snapshot_request' =>
-  type === 'market_subscribe' || type === 'market_unsubscribe' || type === 'market_snapshot_request';
-
-const handleMarketMessage = async (ws: any, msg: any): Promise<void> => {
-  const { type, id } = msg;
-  if (!isMarketMessageType(type)) return;
-
-  if (type === 'market_subscribe') {
-    const hubValues = Array.isArray(msg?.hubEntityIds)
-      ? msg.hubEntityIds
-      : msg?.hubEntityId
-        ? [msg.hubEntityId]
-        : [];
-    const pairValues = Array.isArray(msg?.pairs)
-      ? msg.pairs
-      : msg?.pairId
-        ? [msg.pairId]
-        : [];
-    const hubIds = Array.from(new Set(hubValues.map(normalizeMarketEntityId).filter(Boolean))) as string[];
-    const pairIds = Array.from(new Set(pairValues.map(normalizeMarketPairId).filter(Boolean))) as string[];
-    if (hubIds.length === 0 || pairIds.length === 0) {
-      ws.send(safeStringify({ type: 'error', inReplyTo: id, error: 'market_subscribe requires valid hubEntityId(s) and pair(s)' }));
-      return;
-    }
-
-    const replace = msg?.replace === true;
-    const depthRaw = Number(msg?.depth);
-    const depth = Number.isFinite(depthRaw)
-      ? Math.max(1, Math.min(Math.floor(depthRaw), RPC_MARKET_MAX_DEPTH))
-      : RPC_MARKET_DEFAULT_DEPTH;
-    const existing = rpcMarketSubscriptions.get(ws);
-    if (!existing) {
-      const decision = rpcMarketSubscriptionLimiter.canOpen(String(ws?.data?.clientIp || 'unknown'));
-      if (!decision.ok) {
-        ws.send(safeStringify({
-          type: 'error',
-          inReplyTo: id,
-          code: decision.code,
-          error: decision.error,
-        }));
-        return;
-      }
-    }
-    const nextHubIds = replace || !existing ? new Set<string>() : new Set(existing.hubIds);
-    const nextPairIds = replace || !existing ? new Set<string>() : new Set(existing.pairIds);
-    for (const hubEntityId of hubIds) nextHubIds.add(hubEntityId);
-    for (const pairId of pairIds) nextPairIds.add(pairId);
-    const cellCount = nextHubIds.size * nextPairIds.size;
-    if (cellCount > RELAY_MARKET_MAX_SUBSCRIPTION_CELLS) {
-      ws.send(safeStringify({
-        type: 'error',
-        inReplyTo: id,
-        code: 'E_BAD_QUERY',
-        error: `market subscription too broad: cells=${cellCount} max=${RELAY_MARKET_MAX_SUBSCRIPTION_CELLS}`,
-      }));
-      return;
-    }
-    const subscription = existing || {
-      hubIds: new Set<string>(),
-      pairIds: new Set<string>(),
-      depth,
-      seq: 0,
-    };
-    subscription.hubIds = nextHubIds;
-    subscription.pairIds = nextPairIds;
-    subscription.depth = depth;
-    if (!existing) {
-      rpcMarketSubscriptionLimiter.add(String(ws?.data?.clientIp || 'unknown'));
-    }
-    rpcMarketSubscriptions.set(ws, subscription);
-    ensureRpcMarketPublisher();
-
-    ws.send(
-      safeStringify({
-        type: 'ack',
-        inReplyTo: id,
-        status: 'market_subscribed',
-        data: {
-          hubEntityIds: Array.from(subscription.hubIds),
-          pairs: Array.from(subscription.pairIds),
-          depth: subscription.depth,
-          intervalMs: RPC_MARKET_PUBLISH_MS,
-        },
-      }),
-    );
-
-    try {
-      await sendRpcMarketSnapshot(ws, subscription);
-    } catch {
-      cleanupRpcMarketSubscription(ws);
-    }
-    return;
-  }
-
-  if (type === 'market_unsubscribe') {
-    const existing = rpcMarketSubscriptions.get(ws);
-    if (!existing) {
-      ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'market_unsubscribed' }));
-      return;
-    }
-
-    const hubValues = Array.isArray(msg?.hubEntityIds)
-      ? msg.hubEntityIds
-      : msg?.hubEntityId
-        ? [msg.hubEntityId]
-        : [];
-    const pairValues = Array.isArray(msg?.pairs)
-      ? msg.pairs
-      : msg?.pairId
-        ? [msg.pairId]
-        : [];
-    const hubIds = Array.from(new Set(hubValues.map(normalizeMarketEntityId).filter(Boolean))) as string[];
-    const pairIds = Array.from(new Set(pairValues.map(normalizeMarketPairId).filter(Boolean))) as string[];
-    if (hubIds.length === 0 && pairIds.length === 0) {
-      cleanupRpcMarketSubscription(ws);
-      ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'market_unsubscribed' }));
-      return;
-    }
-    for (const hubEntityId of hubIds) existing.hubIds.delete(hubEntityId);
-    for (const pairId of pairIds) existing.pairIds.delete(pairId);
-    if (existing.hubIds.size === 0 || existing.pairIds.size === 0) {
-      cleanupRpcMarketSubscription(ws);
-    }
-    ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'market_unsubscribed' }));
-    return;
-  }
-
-  const existing = rpcMarketSubscriptions.get(ws);
-  if (!existing) {
-    ws.send(safeStringify({ type: 'error', inReplyTo: id, error: 'No active market subscription' }));
-    return;
-  }
-  try {
-    await sendRpcMarketSnapshot(ws, existing);
-    ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'market_snapshot_sent' }));
-  } catch {
-    cleanupRpcMarketSubscription(ws);
-    ws.send(safeStringify({ type: 'error', inReplyTo: id, error: 'Failed to send market snapshot' }));
-  }
-};
+const cleanupRpcMarketSubscription = (ws: any): void => marketSubscriptionStack.cleanup(ws);
 
 const readShardJurisdictions = (): string => {
   const canonicalPath = resolveJurisdictionsJsonPath();
@@ -1705,7 +1497,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       clientCount: relayClientIds.length,
       managedRuntimeIds: Array.from(managedRuntimeIds).sort(),
       externalClientIds: externalClientIds.sort(),
-      marketSubscriptions: rpcMarketSubscriptionLimiter.snapshot(),
+      marketSubscriptions: marketSubscriptionStack.snapshot(),
     },
     process: buildProcessHealth(),
     disk: buildDiskSummary(storage),
@@ -2607,7 +2399,7 @@ const server = Bun.serve({
       try {
         const msg = JSON.parse(msgStr);
         if (isMarketMessageType(msg?.type)) {
-          Promise.resolve(handleMarketMessage(ws, msg)).catch(error => {
+          Promise.resolve(marketSubscriptionStack.handleMessage(ws, msg as Record<string, unknown>)).catch(error => {
             const reason = serializeError(error);
             pushDebugEvent(relayStore, {
               event: 'error',
