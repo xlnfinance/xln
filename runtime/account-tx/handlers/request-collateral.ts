@@ -55,17 +55,6 @@ export function handleRequestCollateral(
   const requesterIsLeft = !!byLeft;
   const effectiveAmount = amount;
 
-  // One pending request per token until finalized/cleared.
-  // Do not upsize in-frame; let hub fulfill current request first, then re-evaluate.
-  if (existingRequest > 0n) {
-    return {
-      success: true,
-      events: [
-        `ℹ️ request_collateral skipped: pending request exists token=${tokenId} amount=${existingRequest}`,
-      ],
-    };
-  }
-
   // Fee is prepaid in this same account frame.
   // Keep fee proportional to effective request after clamping.
   const effectiveFeeTarget = amount > 0n ? (feeAmount * effectiveAmount) / amount : 0n;
@@ -80,7 +69,6 @@ export function handleRequestCollateral(
   }
 
   const requesterFeeCapacity = deriveDelta(feeDelta, requesterIsLeft).outCapacity;
-  // No in-place upsize path: each request starts with fresh upfront fee debit.
   const existingFeePaid = existingRequest > 0n ? (existingFeeState?.feePaidUpfront ?? 0n) : 0n;
   const feeTopup = effectiveFeeTarget > existingFeePaid ? effectiveFeeTarget - existingFeePaid : 0n;
   if (feeTopup > requesterFeeCapacity) {
@@ -106,6 +94,14 @@ export function handleRequestCollateral(
   let effectiveRequest = effectiveAmount;
   if (feeToken === tokenId) {
     effectiveRequest = effectiveAmount > effectiveFeeTarget ? effectiveAmount - effectiveFeeTarget : 0n;
+  }
+  if (existingRequest > 0n && effectiveRequest <= existingRequest) {
+    return {
+      success: true,
+      events: [
+        `ℹ️ request_collateral skipped: pending request already covers target token=${tokenId} amount=${existingRequest}`,
+      ],
+    };
   }
   if (effectiveRequest <= 0n) {
     // Roll back prepaid debit because no request remains after recompute.
@@ -146,15 +142,17 @@ export function handleRequestCollateral(
 
   const feeDisplay = effectiveFeeTarget > 0n ? `, prepaidFee=${effectiveFeeTarget}` : '';
   const events = [
-    `🔄 Collateral requested: ${effectiveRequest} token ${tokenId}${feeDisplay}, feeTopup=${feeTopup} (hub will deposit R→C)`,
+    existingRequest > 0n
+      ? `🔄 Collateral request topped up: ${existingRequest}→${effectiveRequest} token ${tokenId}${feeDisplay}, feeTopup=${feeTopup} (hub will deposit R→C)`
+      : `🔄 Collateral requested: ${effectiveRequest} token ${tokenId}${feeDisplay}, feeTopup=${feeTopup} (hub will deposit R→C)`,
   ];
 
   console.log(
     `🔄 request_collateral: token=${tokenId} requested=${amount} effective=${effectiveRequest} ` +
-    `prepaidFee=${effectiveFeeTarget} feeTopup=${feeTopup} byLeft=${byLeft}`,
+    `previous=${existingRequest} prepaidFee=${effectiveFeeTarget} feeTopup=${feeTopup} byLeft=${byLeft}`,
   );
   console.log(
-    `[REB][1][REQUEST_COLLATERAL_COMMITTED] token=${tokenId} requested=${effectiveRequest} fee=${effectiveFeeTarget} feeTopup=${feeTopup} byLeft=${byLeft} requestedAt=${currentTimestamp}`,
+    `[REB][1][REQUEST_COLLATERAL_COMMITTED] token=${tokenId} requested=${effectiveRequest} previous=${existingRequest} fee=${effectiveFeeTarget} feeTopup=${feeTopup} byLeft=${byLeft} requestedAt=${currentTimestamp}`,
   );
 
   return { success: true, events };
@@ -187,12 +185,11 @@ export function checkAutoRebalance(
 ): AccountTx[] {
   const result: AccountTx[] = [];
 
-  // Settlement negotiations/execution and auto-rebalance should not run concurrently
-  // on the same bilateral account state, otherwise one side may evaluate against a
-  // different pre-settlement surface and propose divergent frames.
-  if (accountMachine.settlementWorkspace) {
-    return result;
-  }
+  // New rebalance cycles must not start during settlement. A pending request,
+  // however, may be topped up when more credit is consumed before the in-flight
+  // settlement finalizes; otherwise a small unsecured tail can remain forever
+  // below the soft limit.
+  const settlementInFlight = !!accountMachine.settlementWorkspace;
 
   if (accountMachine.rebalancePolicy.size === 0) {
     console.log(
@@ -272,11 +269,22 @@ export function checkAutoRebalance(
         continue;
       }
       const existingRequest = accountMachine.requestedRebalance.get(tokenId);
-      if (existingRequest && existingRequest > 0n) {
+      if (settlementInFlight && (!existingRequest || existingRequest <= 0n)) {
         console.log(
-          `⏭️ Auto-rebalance skipped: existing pending request token=${tokenId} amount=${existingRequest} (netTarget=${netRequestedTarget})`,
+          `⏭️ Auto-rebalance skipped: settlement in flight without existing request token=${tokenId}`,
         );
-        continue; // Already requested, don't spam
+        continue;
+      }
+      if (existingRequest && existingRequest > 0n) {
+        if (netRequestedTarget <= existingRequest) {
+          console.log(
+            `⏭️ Auto-rebalance skipped: existing pending request token=${tokenId} amount=${existingRequest} (netTarget=${netRequestedTarget})`,
+          );
+          continue;
+        }
+        console.log(
+          `🔄 Auto-rebalance topping up pending request token=${tokenId} amount=${existingRequest} → netTarget=${netRequestedTarget}`,
+        );
       }
 
       result.push({

@@ -2,8 +2,9 @@ import { describe, expect, test } from 'bun:test';
 
 import { handleAccountInput, proposeAccountFrame } from '../account-consensus';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
+import { handleDirectPayment } from '../account-tx/handlers/direct-payment';
 import { handleHtlcLock } from '../account-tx/handlers/htlc-lock';
-import { handleRequestCollateral } from '../account-tx/handlers/request-collateral';
+import { checkAutoRebalance, handleRequestCollateral } from '../account-tx/handlers/request-collateral';
 import { handleSwapOffer } from '../account-tx/handlers/swap-offer';
 import { LIMITS } from '../constants';
 import { initCrontab } from '../entity-crontab';
@@ -361,6 +362,149 @@ describe('audit fail-fast regressions', () => {
     expect(result.error).toContain('insufficient fee capacity');
     expect(accountMachine.requestedRebalance.size).toBe(0);
     expect(feeDelta.offdelta).toBe(100n);
+  });
+
+  test('request_collateral tops up an existing pending request when exposure grows', () => {
+    const delta = {
+      tokenId: 1,
+      collateral: 0n,
+      ondelta: 0n,
+      offdelta: 1_000n,
+      leftCreditLimit: 0n,
+      rightCreditLimit: 2_000n,
+      leftAllowance: 0n,
+      rightAllowance: 0n,
+      leftHold: 0n,
+      rightHold: 0n,
+    };
+    const accountMachine = {
+      deltas: new Map([[1, delta]]),
+      requestedRebalance: new Map<number, bigint>([[1, 590n]]),
+      requestedRebalanceFeeState: new Map([[1, {
+        feeTokenId: 1,
+        feePaidUpfront: 10n,
+        requestedAmount: 590n,
+        policyVersion: 1,
+        requestedAt: 1,
+        requestedByLeft: true,
+        jBatchSubmittedAt: 123,
+      }]]),
+    };
+
+    const result = handleRequestCollateral(
+      accountMachine as Parameters<typeof handleRequestCollateral>[0],
+      {
+        type: 'request_collateral',
+        data: { tokenId: 1, amount: 800n, feeTokenId: 1, feeAmount: 20n, policyVersion: 1 },
+      },
+      true,
+      2,
+    );
+
+    expect(result.success).toBe(true);
+    expect(accountMachine.requestedRebalance.get(1)).toBe(780n);
+    expect(accountMachine.requestedRebalanceFeeState.get(1)?.feePaidUpfront).toBe(20n);
+    expect(accountMachine.requestedRebalanceFeeState.get(1)?.jBatchSubmittedAt).toBe(0);
+    expect(delta.offdelta).toBe(990n);
+  });
+
+  test('auto-rebalance allows pending request top-up during settlement', () => {
+    const usd = 10n ** 18n;
+    const accountMachine = {
+      settlementWorkspace: { status: 'sent' },
+      mempool: [],
+      pendingFrame: undefined,
+      requestedRebalance: new Map<number, bigint>([[1, 590n * usd]]),
+      requestedRebalanceFeeState: new Map([[1, {
+        feeTokenId: 1,
+        feePaidUpfront: 10n * usd,
+        requestedAmount: 590n * usd,
+        policyVersion: 1,
+        requestedAt: 1,
+        requestedByLeft: true,
+        jBatchSubmittedAt: 123,
+      }]]),
+      rebalancePolicy: new Map([[1, {
+        r2cRequestSoftLimit: 500n * usd,
+        hardLimit: 10_000n * usd,
+        maxAcceptableFee: 100n * usd,
+      }]]),
+      deltas: new Map([[1, {
+        tokenId: 1,
+        collateral: 590n * usd,
+        ondelta: 0n,
+        offdelta: 1_390n * usd,
+        leftCreditLimit: 0n,
+        rightCreditLimit: 2_000n * usd,
+        leftAllowance: 0n,
+        rightAllowance: 0n,
+        leftHold: 0n,
+        rightHold: 0n,
+      }]]),
+    };
+
+    const txs = checkAutoRebalance(
+      accountMachine as Parameters<typeof checkAutoRebalance>[0],
+      `0x${'11'.repeat(32)}`,
+      `0x${'ff'.repeat(32)}`,
+      { policyVersion: 1, baseFee: 10n * usd, gasFee: 0n, liquidityFeeBps: 0n },
+    );
+
+    expect(txs).toHaveLength(1);
+    expect(txs[0]?.type).toBe('request_collateral');
+    expect(txs[0]?.data.amount).toBe(800n * usd);
+  });
+
+  test('direct_payment expands in-flight collateral request to cover new exposure', () => {
+    const delta = {
+      tokenId: 1,
+      collateral: 0n,
+      ondelta: 590n,
+      offdelta: -1_190n,
+      leftCreditLimit: 2_000n,
+      rightCreditLimit: 0n,
+      leftAllowance: 0n,
+      rightAllowance: 0n,
+      leftHold: 0n,
+      rightHold: 0n,
+    };
+    const accountMachine = {
+      leftEntity: `0x${'11'.repeat(32)}`,
+      rightEntity: `0x${'22'.repeat(32)}`,
+      proofHeader: { fromEntity: `0x${'11'.repeat(32)}` },
+      currentFrame: { deltas: [{ ...delta }] },
+      deltas: new Map([[1, delta]]),
+      requestedRebalance: new Map<number, bigint>([[1, 590n]]),
+      requestedRebalanceFeeState: new Map([[1, {
+        feeTokenId: 1,
+        feePaidUpfront: 10n,
+        requestedAmount: 590n,
+        policyVersion: 1,
+        requestedAt: 1,
+        requestedByLeft: false,
+        jBatchSubmittedAt: 123,
+      }]]),
+    };
+
+    const result = handleDirectPayment(
+      accountMachine as Parameters<typeof handleDirectPayment>[0],
+      {
+        type: 'direct_payment',
+        data: {
+          tokenId: 1,
+          amount: 100n,
+          route: [`0x${'22'.repeat(32)}`],
+          fromEntityId: `0x${'11'.repeat(32)}`,
+          toEntityId: `0x${'22'.repeat(32)}`,
+        },
+      },
+      true,
+    );
+
+    expect(result.success).toBe(true);
+    expect(accountMachine.requestedRebalance.get(1)).toBe(700n);
+    expect(accountMachine.requestedRebalanceFeeState.get(1)?.requestedAmount).toBe(700n);
+    expect(accountMachine.requestedRebalanceFeeState.get(1)?.jBatchSubmittedAt).toBe(123);
   });
 
   test('entity proposal fails fast when prevFrameHash is missing above genesis', async () => {
