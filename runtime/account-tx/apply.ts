@@ -115,11 +115,6 @@ export async function processAccountTx(
     case 'direct_payment':
       return handleDirectPayment(accountMachine, accountTx, byLeft);
 
-    case 'account_payment':
-      // Legacy type - not used in new implementation
-      console.warn(`⚠️ account_payment type is deprecated`);
-      return { success: false, events: ['❌ account_payment is deprecated'], error: 'account_payment is deprecated' };
-
     case 'account_settle':
       // Blockchain settlement - handled separately in entity-tx/handlers/account.ts
       return { success: false, events: ['❌ account_settle must not be processed here'], error: 'account_settle handled externally' };
@@ -248,10 +243,9 @@ export async function processAccountTx(
       );
 
     case 'swap_cancel_request':
-    case 'swap_cancel': // legacy alias
       return await handleSwapCancelRequest(
         accountMachine,
-        accountTx as Extract<AccountTx, { type: 'swap_cancel_request' }> | Extract<AccountTx, { type: 'swap_cancel' }>,
+        accountTx as Extract<AccountTx, { type: 'swap_cancel_request' }>,
         byLeft,
         currentHeight,
         isValidation,
