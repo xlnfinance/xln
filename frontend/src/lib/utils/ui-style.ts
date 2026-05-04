@@ -42,7 +42,7 @@ export const DEFAULT_UI_STYLE: UIStyleSettings = {
   typography: 'md',
 };
 
-export const LEGACY_UI_STYLE: UIStyleSettings = {
+export const CLASSIC_UI_STYLE: UIStyleSettings = {
   density: 'comfortable',
   radius: 'soft',
   borders: 'subtle',

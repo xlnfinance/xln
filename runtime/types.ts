@@ -661,7 +661,7 @@ export type EntityTx =
       type: 'disputeFinalize';
       data: {
         counterpartyEntityId: string;
-        cooperative?: boolean;  // Legacy flag (ignored). disputeFinalize is unilateral-only.
+        cooperative?: boolean;  // Ignored compatibility flag. disputeFinalize is unilateral-only.
         useOnchainRegistry?: boolean; // Optional HTLC reveal via on-chain registry
         description?: string;
       };
@@ -1220,7 +1220,7 @@ export interface AccountMachine {
     finalizeQueued?: boolean;         // Finalize op already queued locally (single-source lifecycle guard)
   };
 
-  hankoSignature?: string; // LEGACY - will be removed
+  hankoSignature?: string; // Latest generated account proof hanko.
 
   // Payment routing: temporary storage for multi-hop payments
   pendingForward?: {
