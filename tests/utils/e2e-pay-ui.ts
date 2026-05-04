@@ -50,8 +50,15 @@ export async function chooseVisibleRoute(
 ): Promise<string> {
   const routeOptions = page.locator('.route-option');
   const routeCount = await routeOptions.count();
-  expect(routeCount, 'expected at least one visible payment route').toBeGreaterThan(0);
   const expectedPath = routeEntityIds.map((id) => String(id || '').trim().toLowerCase()).filter(Boolean);
+
+  if (routeCount === 0 && expectedPath.length === 0) {
+    const directRoute = page.locator('.route-inline').first();
+    await expect(directRoute, 'expected visible direct payment route').toBeVisible({ timeout: 10_000 });
+    return (await directRoute.textContent().catch(() => '')) || 'Direct';
+  }
+
+  expect(routeCount, 'expected at least one visible payment route').toBeGreaterThan(0);
 
   const routeNeedles = await page.evaluate((ids) => {
     const env = (window as typeof window & {
@@ -163,8 +170,11 @@ export async function prepareUiPayment(
   await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
   await findRoutesBtn.click();
 
-  const routesPanel = page.locator('.route-option').first();
-  await expect(routesPanel).toBeVisible({ timeout: 15_000 });
+  if (intent.routeEntityIds.length === 0) {
+    await expect(page.locator('.route-inline').first()).toBeVisible({ timeout: 15_000 });
+  } else {
+    await expect(page.locator('.route-option').first()).toBeVisible({ timeout: 15_000 });
+  }
   const selectedRouteText = await chooseVisibleRoute(page, intent.routeEntityIds);
 
   const sendPaymentBtn = page.getByRole('button', { name: /Pay now/i }).first();
