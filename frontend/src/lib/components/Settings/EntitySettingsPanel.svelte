@@ -16,7 +16,7 @@
   import { toasts } from '$lib/stores/toastStore';
   import { resetEverything } from '$lib/utils/resetEverything';
   import { THEME_DEFINITIONS, getAvailableThemes } from '$lib/utils/themes';
-  import { DEFAULT_UI_STYLE, LEGACY_UI_STYLE, isUiStyleEqual } from '$lib/utils/ui-style';
+  import { CLASSIC_UI_STYLE, DEFAULT_UI_STYLE, isUiStyleEqual } from '$lib/utils/ui-style';
   import { getBarColors } from '$lib/utils/bar-colors';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import { Check, ChevronDown, ChevronUp, Copy, Download, Trash2, Upload, X } from 'lucide-svelte';
@@ -53,7 +53,7 @@
   const BUILD_UI_OPTIONS = UI_STYLE_OPTIONS.filter((group) => group.key !== 'tabs');
   const UI_PRESETS: Array<{ id: 'fintech' | 'classic'; label: string; style: UIStyleSettings }> = [
     { id: 'fintech', label: 'Fintech', style: DEFAULT_UI_STYLE },
-    { id: 'classic', label: 'Classic', style: LEGACY_UI_STYLE },
+    { id: 'classic', label: 'Classic', style: CLASSIC_UI_STYLE },
   ];
   const BALANCE_REFRESH_OPTIONS = [
     { label: '1s fixed', value: 1000 },
@@ -141,7 +141,7 @@
   $: selectedTheme = $settings.theme;
   $: selectedUiPreset = isUiStyleEqual($settings.uiStyle, DEFAULT_UI_STYLE)
     ? 'fintech'
-    : isUiStyleEqual($settings.uiStyle, LEGACY_UI_STYLE)
+    : isUiStyleEqual($settings.uiStyle, CLASSIC_UI_STYLE)
       ? 'classic'
       : 'custom';
   $: if (activeTab === 'display' && !uiSettingsJsonDraft) {
