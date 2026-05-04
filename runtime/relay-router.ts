@@ -13,7 +13,7 @@ import {
   normalizeRuntimeKey,
   nextWsTimestamp,
   pushDebugEvent,
-  storeGossipProfile,
+  storeVerifiedGossipProfile,
   getDefaultGossipProfiles,
   getProfileBatch,
   DEFAULT_GOSSIP_SYNC_LIMIT,
@@ -23,6 +23,8 @@ import {
   cacheEncryptionKey,
 } from './relay-store';
 import type { Profile } from './networking/gossip';
+import { verifyProfileSignature, type ProfileVerifyResult } from './networking/profile-signing';
+import { verifyHelloAuth } from './networking/hello-auth';
 
 const SOCKET_RUNTIME_ID = Symbol.for('xln.relay.socketRuntimeId');
 type RememberedRelaySocket = object & { [SOCKET_RUNTIME_ID]?: string };
@@ -62,7 +64,13 @@ export type RelayRouterConfig = {
   send: (ws: any, data: string) => void;
   /** Hook to mirror gossip into env. */
   onGossipStore?: (profile: any) => void;
+  /** Defaults to true. Unsigned hello cannot claim a runtime slot. */
+  requireHelloAuth?: boolean;
+  helloSkewMs?: number;
+  verifyProfile?: (profile: Profile) => Promise<ProfileVerifyResult> | ProfileVerifyResult;
 };
+
+const DEFAULT_HELLO_SKEW_MS = 5 * 60 * 1000;
 
 // ---------------------------------------------------------------------------
 // Main entry point
@@ -187,6 +195,22 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
       send(ws, safeStringify({ type: 'error', error: 'Invalid runtimeId in hello' }));
       return;
     }
+    if (config.requireHelloAuth !== false) {
+      const authError = verifyHelloAuth(fromKey, msg.auth, config.helloSkewMs ?? DEFAULT_HELLO_SKEW_MS);
+      if (authError) {
+        pushDebugEvent(store, {
+          event: 'hello',
+          runtimeId: from,
+          from,
+          msgType: type,
+          status: 'rejected',
+          reason: 'HELLO_AUTH_INVALID',
+          details: { traceId, authError },
+        });
+        send(ws, safeStringify({ type: 'error', error: authError }));
+        return;
+      }
+    }
     const registered = registerClient(store, from, ws);
     if (!registered) {
       pushDebugEvent(store, {
@@ -240,7 +264,9 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
     const profiles = (payload?.profiles || []) as Profile[];
     let stored = 0;
     let droppedMalformed = 0;
+    let droppedInvalidSignature = 0;
     const storedProfiles: Profile[] = [];
+    const verifyProfile = config.verifyProfile ?? verifyProfileSignature;
     for (const profile of profiles) {
       if (!profile || typeof profile !== 'object') continue;
       const normalized: Profile = {
@@ -248,7 +274,24 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
         runtimeId: profile.runtimeId || from,
       };
       try {
-        if (storeGossipProfile(store, normalized)) {
+        const verified = await verifyProfile(normalized);
+        if (!verified.valid) {
+          droppedInvalidSignature += 1;
+          pushDebugEvent(store, {
+            event: 'error',
+            from,
+            msgType: type,
+            status: 'rejected',
+            reason: 'GOSSIP_PROFILE_SIGNATURE_INVALID',
+            details: {
+              entityId: typeof normalized.entityId === 'string' ? normalized.entityId : null,
+              verifyReason: verified.reason || 'invalid',
+              traceId,
+            },
+          });
+          continue;
+        }
+        if (storeVerifiedGossipProfile(store, normalized)) {
           stored += 1;
           storedProfiles.push(normalized);
         }
@@ -287,7 +330,7 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
           from,
           msgType: type,
           status: 'stored',
-          details: { received: profiles.length, stored, droppedMalformed, broadcastTargets, traceId },
+          details: { received: profiles.length, stored, droppedMalformed, droppedInvalidSignature, broadcastTargets, traceId },
         });
         return;
       }
@@ -311,7 +354,7 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
       from,
       msgType: type,
       status: 'stored',
-      details: { received: profiles.length, stored, droppedMalformed, broadcastTargets, traceId },
+      details: { received: profiles.length, stored, droppedMalformed, droppedInvalidSignature, broadcastTargets, traceId },
     });
 
     return;

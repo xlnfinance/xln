@@ -86,7 +86,7 @@ export type RuntimeWsClientOptions = {
   runtimeId: string;
   signerId?: string;
   seed?: Uint8Array | string;
-  useHelloAuth?: boolean; // Optional transport hardening; disabled by default
+  useHelloAuth?: boolean;
   encryptionKeyPair?: { publicKey: Uint8Array; privateKey: Uint8Array }; // For E2E encryption
   getTargetEncryptionKey?: (runtimeId: string) => Uint8Array | null; // Lookup target's pubkey
   onPeerEncryptionKey?: (runtimeId: string, pubKeyHex: string) => void;
@@ -186,7 +186,7 @@ export class RuntimeWsClient {
         this.connecting = false;
         this.reconnectAttempts = 0;
         console.log(`[WS] Connected to ${this.options.url}`);
-        this.sendHello();
+        if (!this.sendHello()) return;
         this.options.onOpen?.();
       });
       this.ws.on('message', (data: Buffer) => this.handleMessage(data));
@@ -225,7 +225,7 @@ export class RuntimeWsClient {
         this.connecting = false;
         this.reconnectAttempts = 0;
         console.log(`[WS] Connected to ${this.options.url}`);
-        this.sendHello();
+        if (!this.sendHello()) return;
         this.options.onOpen?.();
       };
       this.ws.onmessage = (event: MessageEvent) => this.handleMessage(event.data);
@@ -320,14 +320,19 @@ export class RuntimeWsClient {
     return null;
   }
 
-  private sendHello() {
+  private sendHello(): boolean {
     const encryptionKeyPair = this.options.encryptionKeyPair;
     if (!encryptionKeyPair) {
       throw new Error(`WS_HELLO_ENCRYPTION_KEY_MISSING: runtimeId=${this.options.runtimeId}`);
     }
-    if (this.options.useHelloAuth && this.options.signerId && this.options.seed) {
-      // Transport hello auth is optional; keep plain hello as default path.
-      // Signature verification still happens at frame/account consensus level.
+    if (this.options.useHelloAuth) {
+      if (!this.options.signerId || !this.options.seed) {
+        const error = new Error(`WS_HELLO_AUTH_KEY_MISSING: runtimeId=${this.options.runtimeId}`);
+        this.options.onError?.(error);
+        this.ws?.close();
+        return false;
+      }
+      // Relay routers require signed hello; direct test servers can still opt out.
       try {
         const timestamp = nextTimestamp();
         const nonce = makeHelloNonce();
@@ -340,9 +345,11 @@ export class RuntimeWsClient {
           timestamp,
           auth: { nonce, signature, timestamp },
         });
-        return;
+        return true;
       } catch (error) {
         this.options.onError?.(error as Error);
+        this.ws?.close();
+        return false;
       }
     }
     this.sendRaw({
@@ -351,6 +358,7 @@ export class RuntimeWsClient {
       fromEncryptionPubKey: pubKeyToHex(encryptionKeyPair.publicKey),
       timestamp: nextTimestamp(),
     });
+    return true;
   }
 
   private async handleMessage(raw: string | Buffer | ArrayBuffer) {

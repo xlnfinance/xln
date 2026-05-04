@@ -2,10 +2,14 @@ import { describe, expect, test } from 'bun:test';
 import type { Profile } from '../networking/gossip';
 import { relayRoute } from '../relay-router';
 import { cacheEncryptionKey, createRelayStore, resolveEncryptionPublicKeyHex } from '../relay-store';
+import { hashHelloMessage, makeHelloNonce } from '../networking/ws-protocol';
+import { deriveSignerAddressSync, signDigest } from '../account-crypto';
 
 const SERVER_RUNTIME_ID = '0x9999999999999999999999999999999999999999';
-const RUNTIME_A = '0x1111111111111111111111111111111111111111';
-const RUNTIME_B = '0x2222222222222222222222222222222222222222';
+const SEED_A = 'relay-router-test-seed-a';
+const SEED_B = 'relay-router-test-seed-b';
+const RUNTIME_A = deriveSignerAddressSync(SEED_A, '1');
+const RUNTIME_B = deriveSignerAddressSync(SEED_B, '2');
 const KEY_A = '0x' + '11'.repeat(32);
 const KEY_B = '0x' + '22'.repeat(32);
 const ENTITY_A = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
@@ -13,6 +17,20 @@ const ENTITY_B = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
 const ENTITY_C = '0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
 
 type FakeWs = { label: string };
+
+const helloAuth = (runtimeId: string, seed: string, signerId = '1') => {
+  const timestamp = Date.now();
+  const nonce = makeHelloNonce();
+  const signature = signDigest(seed, signerId, hashHelloMessage(runtimeId, timestamp, nonce));
+  return { nonce, signature, timestamp };
+};
+
+const signedHello = (runtimeId: string, seed: string, key: string, signerId = '1') => ({
+  type: 'hello',
+  from: runtimeId,
+  fromEncryptionPubKey: key,
+  auth: helloAuth(runtimeId, seed, signerId),
+});
 
 const buildProfile = (
   entityId: string,
@@ -58,6 +76,7 @@ describe('relay-router gossip fanout', () => {
       store,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
+      verifyProfile: async () => ({ valid: true }),
       send: (ws: FakeWs, raw: string) => {
         const bucket = sentBySocket.get(ws) ?? [];
         bucket.push(JSON.parse(raw));
@@ -67,8 +86,8 @@ describe('relay-router gossip fanout', () => {
     const wsA: FakeWs = { label: 'A' };
     const wsB: FakeWs = { label: 'B' };
 
-    await relayRoute(config, wsA, { type: 'hello', from: RUNTIME_A, fromEncryptionPubKey: KEY_A });
-    await relayRoute(config, wsB, { type: 'hello', from: RUNTIME_B, fromEncryptionPubKey: KEY_B });
+    await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    await relayRoute(config, wsB, signedHello(RUNTIME_B, SEED_B, KEY_B, '2'));
 
     await relayRoute(config, wsA, {
       type: 'gossip_announce',
@@ -102,6 +121,7 @@ describe('relay-router gossip fanout', () => {
       store,
       localRuntimeId: SERVER_RUNTIME_ID,
       localDeliver: async () => {},
+      verifyProfile: async () => ({ valid: true }),
       send: (ws: FakeWs, raw: string) => {
         const bucket = sentBySocket.get(ws) ?? [];
         bucket.push(JSON.parse(raw));
@@ -110,7 +130,7 @@ describe('relay-router gossip fanout', () => {
     };
     const wsA: FakeWs = { label: 'A' };
 
-    await relayRoute(config, wsA, { type: 'hello', from: RUNTIME_A, fromEncryptionPubKey: KEY_A });
+    await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
 
     await relayRoute(config, wsA, {
       type: 'gossip_announce',
@@ -182,7 +202,7 @@ describe('relay-router gossip fanout', () => {
     };
     const wsA: FakeWs = { label: 'A' };
 
-    await relayRoute(config, wsA, { type: 'hello', from: RUNTIME_A, fromEncryptionPubKey: KEY_A });
+    await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
     expect(store.clients.get(RUNTIME_A)?.ws).toBe(wsA);
 
     store.clients.clear();
@@ -223,21 +243,71 @@ describe('relay-router gossip fanout', () => {
     const wsA: FakeWs & { close: () => void } = { label: 'A', close: () => { closeCount += 1; } };
     const attacker: FakeWs = { label: 'attacker' };
 
-    await relayRoute(config, wsA, { type: 'hello', from: RUNTIME_A, fromEncryptionPubKey: KEY_A });
-    await relayRoute(config, attacker, { type: 'hello', from: RUNTIME_A, fromEncryptionPubKey: KEY_A });
+    await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    await relayRoute(config, attacker, signedHello(RUNTIME_A, SEED_A, KEY_A));
 
     expect(store.clients.get(RUNTIME_A)?.ws).toBe(wsA);
     expect(closeCount).toBe(0);
     expect((sentBySocket.get(attacker)?.at(-1) as { type?: string; error?: string })?.type).toBe('error');
   });
 
-  test('prefers gossip profile encryption key over relay cache', () => {
+  test('rejects unsigned hello by default', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const sentBySocket = new Map<FakeWs, unknown[]>();
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: (ws: FakeWs, raw: string) => {
+        const bucket = sentBySocket.get(ws) ?? [];
+        bucket.push(JSON.parse(raw));
+        sentBySocket.set(ws, bucket);
+      },
+    };
+    const wsA: FakeWs = { label: 'A' };
+
+    await relayRoute(config, wsA, { type: 'hello', from: RUNTIME_A, fromEncryptionPubKey: KEY_A });
+
+    expect(store.clients.has(RUNTIME_A)).toBe(false);
+    expect(sentBySocket.get(wsA)?.at(-1)).toMatchObject({ type: 'error', error: 'Missing auth fields' });
+  });
+
+  test('drops unsigned gossip profiles when no verifier override is installed', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const sentBySocket = new Map<FakeWs, unknown[]>();
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: (ws: FakeWs, raw: string) => {
+        const bucket = sentBySocket.get(ws) ?? [];
+        bucket.push(JSON.parse(raw));
+        sentBySocket.set(ws, bucket);
+      },
+    };
+    const wsA: FakeWs = { label: 'A' };
+
+    await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    await relayRoute(config, wsA, {
+      type: 'gossip_announce',
+      id: 'announce-unsigned',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      to: SERVER_RUNTIME_ID,
+      payload: { profiles: [buildProfile(ENTITY_A, RUNTIME_A, KEY_A)] },
+    });
+
+    expect(store.gossipProfiles.size).toBe(0);
+    expect(store.debugEvents.some(event => event.reason === 'GOSSIP_PROFILE_SIGNATURE_INVALID')).toBe(true);
+  });
+
+  test('prefers verified relay socket encryption key over gossip profile cache', () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const profile = buildProfile(ENTITY_A, RUNTIME_A, KEY_A, { lastUpdated: 123 });
 
     expect(cacheEncryptionKey(store, RUNTIME_A, KEY_B)).toBeUndefined();
     store.gossipProfiles.set(ENTITY_A, { profile, timestamp: profile.lastUpdated });
 
-    expect(resolveEncryptionPublicKeyHex(store, RUNTIME_A)).toBe(KEY_A);
+    expect(resolveEncryptionPublicKeyHex(store, RUNTIME_A)).toBe(KEY_B);
   });
 });
