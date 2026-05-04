@@ -46,7 +46,7 @@ test('remote /app opens an existing hub runtime through radapter', async ({ page
   const audience = String(hubInfo.runtimeId || '').toLowerCase();
   expect(audience.length).toBeGreaterThan(0);
   const key = capabilityToken('xln-e2e-h1', 'full', Date.now() + 60 * 60 * 1_000, audience);
-  const url = `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(wsUrl)}&key=${encodeURIComponent(key)}#accounts`;
+  const url = `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(wsUrl)}&key=paste#accounts`;
 
   await page.goto(url, { waitUntil: 'domcontentloaded' });
 
@@ -55,7 +55,7 @@ test('remote /app opens an existing hub runtime through radapter', async ({ page
     .then(() => true)
     .catch(() => false);
   if (promptVisible) {
-    const capabilityInput = page.getByLabel('Full capability');
+    const capabilityInput = page.getByLabel('Capability');
     if (await capabilityInput.isVisible().catch(() => false)) {
       await capabilityInput.fill(key);
     }
