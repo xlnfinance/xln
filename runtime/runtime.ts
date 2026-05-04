@@ -3625,8 +3625,7 @@ export type {
 } from './ids';
 
 // Runtime is a pure library - no auto-execution side effects.
-// Use xln.ts as CLI entry point: `bun run xln.ts`
-// Browser: index.html calls xln.main() explicitly
+// Browser and server entrypoints call xln.main() explicitly.
 
 // === HANKO DEMO FUNCTION ===
 

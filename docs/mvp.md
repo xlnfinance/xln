@@ -68,7 +68,7 @@ anvil --host 0.0.0.0 --port 8545 \
 
 **Purpose:** Routes messages between runtimes (dumb pipe)
 
-**Location:** `runtime/networking/ws-server.ts` (standalone process)
+**Location:** `runtime/relay/standalone-server.ts` (standalone process)
 
 **Functions:**
 - Accept WebSocket connections from runtimes
@@ -79,7 +79,7 @@ anvil --host 0.0.0.0 --port 8545 \
 
 **Deployment:**
 ```bash
-pm2 start runtime/networking/ws-server.ts \
+pm2 start runtime/relay/standalone-server.ts \
   --name xln-relay \
   --interpreter bun \
   -- --port 9000 --host 0.0.0.0
@@ -685,7 +685,7 @@ export USE_ANVIL=true
 bun scripts/bootstrap-hub.ts
 
 # 3. Start relay
-pm2 start runtime/networking/ws-server.ts --name xln-relay \
+pm2 start runtime/relay/standalone-server.ts --name xln-relay \
   --interpreter bun -- --port 9000 --host 0.0.0.0
 
 # 4. Start server

@@ -3,7 +3,7 @@
  * Usage (internal): bun run runtime/scenarios/p2p-node.ts --role hub|alice|bob ...
  */
 
-import { startRuntimeWsServer } from '../networking/ws-server';
+import { startStandaloneRelayServer } from '../relay/standalone-server';
 import { main, startP2P, process as runtimeProcess, enqueueRuntimeInput, createLazyEntity, generateLazyEntityId, getActiveJAdapter, startRuntimeLoop } from '../runtime.ts';
 import { processUntil, converge } from './helpers';
 import { isLeft, deriveDelta } from '../account-utils';
@@ -656,14 +656,15 @@ const run = async () => {
 
   // CRITICAL: Start relay AFTER env created so we can pass callbacks
   if (isHub && relayPort > 0) {
-    const relay = startRuntimeWsServer({
+    startStandaloneRelayServer({
       host: relayHost,
       port: relayPort,
       serverId: role,
       ...(env.runtimeId ? { serverRuntimeId: env.runtimeId } : {}),  // Enable local delivery for messages to self
       // CRITICAL: Pass callback to feed messages into Hub's runtime
-      onEntityInput: async (from: string, input: any) => {
-        console.log(`[HUB-RELAY] Received entity_input from=${from.slice(0,10)} entity=${input.entityId.slice(-4)}`);
+      onEntityInput: async (from: string | undefined, input: any) => {
+        const fromLabel = from ? from.slice(0, 10) : 'unknown';
+        console.log(`[HUB-RELAY] Received entity_input from=${fromLabel} entity=${input.entityId.slice(-4)}`);
 
         // CRITICAL: Ensure we have profiles before processing
         // Only refresh if we haven't recently (to avoid slowdown)
@@ -682,9 +683,7 @@ const run = async () => {
         // Runtime loop will pick this up on next tick (always-on via startRuntimeLoop)
       },
     });
-    relay.server.on('listening', () => {
-      console.log(`P2P_RELAY_READY host=${relayHost} port=${relayPort}`);
-    });
+    console.log(`P2P_RELAY_READY host=${relayHost} port=${relayPort}`);
   } else if (isHub) {
     throw new Error(`RELAY_PORT_MISSING: ${relayPort}`);
   }

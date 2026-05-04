@@ -17,7 +17,7 @@ The relay server enables P2P communication between XLN runtime instances (browse
 npm install -g pm2
 
 # Start relay as daemon
-pm2 start runtime/networking/ws-server.ts --name xln-relay --interpreter bun -- --port 9000 --host 0.0.0.0
+pm2 start runtime/relay/standalone-server.ts --name xln-relay --interpreter bun -- --port 9000 --host 0.0.0.0
 
 # Save PM2 config
 pm2 save
@@ -47,7 +47,7 @@ After=network.target
 Type=simple
 User=xln
 WorkingDirectory=/var/www/xln
-ExecStart=/usr/local/bin/bun runtime/networking/ws-server.ts --port 9000 --host 0.0.0.0
+ExecStart=/usr/local/bin/bun runtime/relay/standalone-server.ts --port 9000 --host 0.0.0.0
 Restart=always
 RestartSec=5
 StandardOutput=journal
@@ -224,7 +224,7 @@ journalctl -u xln-relay -f | grep -E "connect|ERROR"
 cd /var/www/xln
 git pull
 bun install
-pm2 restart xln-relay || pm2 start runtime/networking/ws-server.ts --name xln-relay --interpreter bun -- --port 9000
+pm2 restart xln-relay || pm2 start runtime/relay/standalone-server.ts --name xln-relay --interpreter bun -- --port 9000
 pm2 save
 echo "✅ Relay deployed"
 ```

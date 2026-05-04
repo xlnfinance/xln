@@ -452,7 +452,7 @@
   - removed more legacy profile fallbacks from the live runtime/frontend path:
     - runtime lookup now trusts only canonical top-level `profile.runtimeId` in [runtime.ts](/Users/egor/xln/runtime/runtime.ts)
     - relay broadcast fanout no longer checks optional `metadata?.isHub` in [relay-router.ts](/Users/egor/xln/runtime/relay-router.ts)
-    - WS gossip store logging no longer fabricates a fallback profile name in [ws-server.ts](/Users/egor/xln/runtime/networking/ws-server.ts)
+    - WS gossip store logging no longer fabricates a fallback profile name in [standalone-server.ts](/Users/egor/xln/runtime/relay/standalone-server.ts)
     - shared E2E hub connect helper no longer falls back to nonexistent `metadata.runtimeId` in [e2e-connect.ts](/Users/egor/xln/tests/utils/e2e-connect.ts)
     - profile edit/view panels now read required `name/avatar/bio/website` directly in:
       - [ProfileForm.svelte](/Users/egor/xln/frontend/src/lib/components/Network/ProfileForm.svelte)
