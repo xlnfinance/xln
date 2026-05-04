@@ -302,44 +302,6 @@
     showExportMenu = false;
   }
 
-  async function shareURL() {
-    try {
-      const { generateShareURL } = await import('../utils/stateCodec');
-      const shareableURL = generateShareURL($env, false); // Data only, no UI
-
-      // Copy to clipboard
-      await navigator.clipboard.writeText(shareableURL);
-
-      console.log('[TimeMachine] ✅ Shareable URL copied to clipboard');
-      console.log('[TimeMachine] 🔗', shareableURL);
-
-      // Visual feedback (could add toast notification)
-      alert('Shareable URL copied to clipboard!\n\nPaste in new tab to restore xlnomies + entities.');
-
-      showExportMenu = false;
-    } catch (err) {
-      console.error('[TimeMachine] Failed to generate share URL:', err);
-      alert(`Failed to generate URL: ${err}`);
-    }
-  }
-
-  async function shareURLWithUI() {
-    try {
-      const { generateShareURL } = await import('../utils/stateCodec');
-      const shareableURL = generateShareURL($env, true); // Include UI settings
-
-      await navigator.clipboard.writeText(shareableURL);
-
-      console.log('[TimeMachine] ✅ Shareable URL (with UI) copied');
-      alert('Shareable URL (with UI settings) copied to clipboard!');
-
-      showExportMenu = false;
-    } catch (err) {
-      console.error('[TimeMachine] Failed to generate share URL:', err);
-      alert(`Failed: ${err}`);
-    }
-  }
-
   // Handle slider drag/input
   function handleSliderInput(event: Event) {
     const target = event.target as HTMLInputElement;
@@ -478,8 +440,6 @@
           <Download size={12} />
           Export JSON
         </button>
-        <button on:click={shareURL}>Share URL</button>
-        <button on:click={shareURLWithUI}>Share URL + UI</button>
       </div>
         {/if}
       </div>

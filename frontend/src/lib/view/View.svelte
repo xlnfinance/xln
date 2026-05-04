@@ -9,7 +9,6 @@
   import UserModePanel from './UserModePanel.svelte';
   import CommandPalette from '../components/shared/CommandPalette.svelte';
   import PaymentSpotlight from '$lib/components/PaymentSpotlight.svelte';
-  import { parseURLHash } from './utils/stateCodec';
   import { panelBridge } from './utils/panelBridge';
   import { activeRuntimeId, runtimes } from '$lib/stores/runtimeStore';
   import { getXLN, xlnEnvironment, xlnInstance } from '$lib/stores/xlnStore';
@@ -183,24 +182,15 @@
       const XLN = await getXLN();
       xlnInstance.set(XLN);
 
-      const urlImport = parseURLHash();
       let env;
 
-      if (urlImport) {
-        env = XLN.createEmptyEnv();
-        env.quietRuntimeLogs = true;
-        env.jReplicas = urlImport.state.x as unknown as typeof env.jReplicas;
-        env.activeJurisdiction = urlImport.state.a;
-        env.eReplicas = urlImport.state.e as unknown as typeof env.eReplicas;
-      } else {
-        const runtimeId = get(activeRuntimeId);
-        if (runtimeId) {
-          const runtime = get(runtimes).get(runtimeId);
-          if (runtime?.env) env = runtime.env;
-        }
-        if (!env) {
-          env = get(xlnEnvironment);
-        }
+      const runtimeId = get(activeRuntimeId);
+      if (runtimeId) {
+        const runtime = get(runtimes).get(runtimeId);
+        if (runtime?.env) env = runtime.env;
+      }
+      if (!env) {
+        env = get(xlnEnvironment);
       }
 
       const registerEnvChanges = (envToRegister: Env | null) => {
@@ -221,14 +211,8 @@
       if (env) {
         localEnvStore.set(env);
         localHistoryStore.set(env.history || []);
-        const histLen = (env.history || []).length;
-        const importedTimeIndex = urlImport?.state.ui?.ti;
-        const importedIsLive = userMode ? true : importedTimeIndex === undefined;
-        localIsLive.set(importedIsLive);
-        const nextTimeIndex = importedIsLive || importedTimeIndex === undefined
-          ? -1
-          : Math.min(importedTimeIndex, Math.max(0, histLen - 1));
-        localTimeIndex.set(nextTimeIndex);
+        localIsLive.set(true);
+        localTimeIndex.set(-1);
         registerEnvChanges(env);
       }
 
