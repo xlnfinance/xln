@@ -55,6 +55,10 @@ test('remote /app opens an existing hub runtime through radapter', async ({ page
     .then(() => true)
     .catch(() => false);
   if (promptVisible) {
+    const capabilityInput = page.getByLabel('Full capability');
+    if (await capabilityInput.isVisible().catch(() => false)) {
+      await capabilityInput.fill(key);
+    }
     await Promise.all([
       page.waitForURL((nextUrl) => !nextUrl.searchParams.has('runtime'), { timeout: 30_000 }).catch(() => undefined),
       page.getByRole('button', { name: /connect remote runtime/i }).click(),
