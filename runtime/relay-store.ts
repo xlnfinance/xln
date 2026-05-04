@@ -47,6 +47,7 @@ export type RelayStore = {
   pendingMessages: Map<string, PendingRelayMessage[]>;
   pendingMessageBytes: number;
   pendingLimits: RelayPendingLimits;
+  maxGossipProfiles: number;
   gossipProfiles: Map<string, { profile: Profile; timestamp: number }>;
   runtimeEncryptionKeys: Map<string, string>;
   debugEvents: RelayDebugEvent[];
@@ -59,6 +60,7 @@ const MAX_DEBUG_EVENTS = 5000;
 const MAX_PENDING_PER_CLIENT = 200;
 const MAX_PENDING_TARGETS = 10_000;
 const MAX_PENDING_TOTAL_BYTES = 256 * 1024 * 1024;
+const MAX_GOSSIP_PROFILES = 50_000;
 export const DEFAULT_GOSSIP_SYNC_LIMIT = DEFAULT_GOSSIP_BATCH_LIMIT;
 
 type RelayPendingLimits = {
@@ -74,6 +76,7 @@ type PendingRelayMessage = {
 
 type RelayStoreOptions = {
   pendingLimits?: Partial<RelayPendingLimits>;
+  maxGossipProfiles?: number;
 };
 
 // ---------------------------------------------------------------------------
@@ -90,6 +93,7 @@ export const createRelayStore = (serverId: string, options: RelayStoreOptions = 
     maxTargets: options.pendingLimits?.maxTargets ?? MAX_PENDING_TARGETS,
     maxTotalBytes: options.pendingLimits?.maxTotalBytes ?? MAX_PENDING_TOTAL_BYTES,
   },
+  maxGossipProfiles: Math.max(1, Math.floor(Number(options.maxGossipProfiles ?? MAX_GOSSIP_PROFILES))),
   gossipProfiles: new Map(),
   runtimeEncryptionKeys: new Map(),
   debugEvents: [],
@@ -135,6 +139,15 @@ export const storeVerifiedGossipProfile = (store: RelayStore, profile: Profile):
   const newTs = canonicalProfile.lastUpdated;
   const existing = store.gossipProfiles.get(entityId);
   if (existing && existing.timestamp >= newTs) return false;
+  if (!existing && store.gossipProfiles.size >= store.maxGossipProfiles) {
+    pushDebugEvent(store, {
+      event: 'gossip_drop',
+      status: 'dropped',
+      reason: 'GOSSIP_PROFILE_CAP_EXCEEDED',
+      details: { entityId, maxGossipProfiles: store.maxGossipProfiles },
+    });
+    return false;
+  }
   store.gossipProfiles.set(entityId, { profile: canonicalProfile, timestamp: newTs });
   return true;
 };
@@ -242,7 +255,7 @@ export const resolveEncryptionPublicKeyHex = (store: RelayStore, targetRuntimeId
 // Pending message queue
 // ---------------------------------------------------------------------------
 
-const estimatePendingMessageBytes = (msg: any): number => {
+const estimatePendingMessageBytes = (msg: unknown): number => {
   try {
     return Buffer.byteLength(safeStringify(msg));
   } catch {
@@ -250,69 +263,28 @@ const estimatePendingMessageBytes = (msg: any): number => {
   }
 };
 
-const dropPendingQueue = (store: RelayStore, key: string, reason: string): void => {
-  const queue = store.pendingMessages.get(key);
-  if (!queue) return;
-  for (const item of queue) {
-    store.pendingMessageBytes = Math.max(0, store.pendingMessageBytes - item.bytes);
-  }
-  store.pendingMessages.delete(key);
-  pushDebugEvent(store, {
-    event: 'pending_drop',
-    to: key,
-    status: 'dropped',
-    reason,
-    queueSize: queue.length,
-    size: store.pendingMessageBytes,
-  });
-};
-
-const dropOldestPendingMessage = (store: RelayStore): boolean => {
-  const oldestKey = store.pendingMessages.keys().next().value as string | undefined;
-  if (!oldestKey) return false;
-  const queue = store.pendingMessages.get(oldestKey);
-  if (!queue || queue.length === 0) {
-    store.pendingMessages.delete(oldestKey);
-    return true;
-  }
-  const dropped = queue.shift();
-  if (dropped) {
-    store.pendingMessageBytes = Math.max(0, store.pendingMessageBytes - dropped.bytes);
-  }
-  if (queue.length === 0) {
-    store.pendingMessages.delete(oldestKey);
-  } else {
-    store.pendingMessages.set(oldestKey, queue);
-  }
-  pushDebugEvent(store, {
-    event: 'pending_drop',
-    to: oldestKey,
-    status: 'dropped',
-    reason: 'PENDING_TOTAL_BYTES_EXCEEDED',
-    queueSize: queue.length,
-    size: store.pendingMessageBytes,
-  });
-  return true;
-};
-
-export const enqueueMessage = (store: RelayStore, toKey: string, msg: any): number => {
+export const enqueueMessage = (store: RelayStore, toKey: string, msg: unknown): number => {
   if (!store.pendingMessages.has(toKey) && store.pendingMessages.size >= store.pendingLimits.maxTargets) {
-    const oldestKey = store.pendingMessages.keys().next().value as string | undefined;
-    if (oldestKey) dropPendingQueue(store, oldestKey, 'PENDING_TARGET_CAP_EXCEEDED');
-  }
-  const bytes = estimatePendingMessageBytes(msg);
-  if (bytes > store.pendingLimits.maxTotalBytes) {
     pushDebugEvent(store, {
       event: 'pending_drop',
       to: toKey,
       status: 'dropped',
-      reason: 'PENDING_MESSAGE_TOO_LARGE',
+      reason: 'PENDING_TARGET_CAP_EXCEEDED',
+      queueSize: store.pendingMessages.size,
+      size: store.pendingMessageBytes,
+    });
+    return 0;
+  }
+  const bytes = estimatePendingMessageBytes(msg);
+  if (bytes > store.pendingLimits.maxTotalBytes || store.pendingMessageBytes + bytes > store.pendingLimits.maxTotalBytes) {
+    pushDebugEvent(store, {
+      event: 'pending_drop',
+      to: toKey,
+      status: 'dropped',
+      reason: bytes > store.pendingLimits.maxTotalBytes ? 'PENDING_MESSAGE_TOO_LARGE' : 'PENDING_TOTAL_BYTES_EXCEEDED',
       size: bytes,
     });
     return store.pendingMessages.get(toKey)?.length ?? 0;
-  }
-  while (store.pendingMessageBytes + bytes > store.pendingLimits.maxTotalBytes) {
-    if (!dropOldestPendingMessage(store)) break;
   }
   const queue = store.pendingMessages.get(toKey) || [];
   queue.push({ msg, bytes });
@@ -327,7 +299,7 @@ export const enqueueMessage = (store: RelayStore, toKey: string, msg: any): numb
   return queue.length;
 };
 
-export const flushPendingMessages = (store: RelayStore, toKey: string): any[] => {
+export const flushPendingMessages = (store: RelayStore, toKey: string): unknown[] => {
   const pending = store.pendingMessages.get(toKey) || [];
   store.pendingMessages.delete(toKey);
   for (const item of pending) {
