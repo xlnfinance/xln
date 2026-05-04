@@ -150,10 +150,10 @@ async function dismissOnboardingIfVisible(page: Page): Promise<void> {
   }).first();
   if (await riskCheckbox.isVisible().catch(() => false)) {
     const checked = await riskCheckbox.isChecked().catch(() => false);
-    if (!checked) await riskCheckbox.check();
+    if (!checked) await riskCheckbox.check({ timeout: 2000 }).catch(() => null);
   }
 
-  await startUsingButton.click();
+  await startUsingButton.click({ timeout: 2000 }).catch(() => null);
   await expect(startUsingButton).not.toBeVisible({ timeout: 20_000 });
 }
 
