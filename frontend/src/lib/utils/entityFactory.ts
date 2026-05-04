@@ -68,12 +68,7 @@ export async function createEphemeralEntity(
   const { getXLN } = await import('$lib/stores/xlnStore');
   const xln = await getXLN();
 
-  // Use LAZY entity ID (deterministic, no blockchain registration)
-  // For lazy entities: entityId == boardHash (as per EntityProvider contract)
-  //
-  // TODO(provider-scoped-entities): See vaultStore.ts for full design notes
-  // Current: entityId = boardHash (works for single EP per Depository)
-  // Future: entityAddress = hash(providerAddress + entityId) for multi-EP support
+  // Lazy entities are addressed by the EntityProvider board hash.
   const entityId = xln.generateLazyEntityId([signerId], 1n);
   console.log(`[EntityFactory] Entity ID: ${entityId.slice(0, 18)}...`);
   console.log(`[EntityFactory]   signer: ${signerId}`);
@@ -147,9 +142,8 @@ function buildJurisdictionConfig(env: Env, name?: string): JurisdictionConfig | 
     throw new Error(`J-machine "${name}" not found in runtime`);
   }
 
-  // Support both top-level (new) and nested (legacy) contract addresses
-  const depositoryAddress = jReplica.depositoryAddress || jReplica.contracts?.depository;
-  const entityProviderAddress = jReplica.entityProviderAddress || jReplica.contracts?.entityProvider;
+  const depositoryAddress = jReplica.depositoryAddress;
+  const entityProviderAddress = jReplica.entityProviderAddress;
 
   if (!depositoryAddress || !entityProviderAddress) {
     console.error(`[buildJurisdictionConfig] ❌ Contracts not deployed for J-machine "${name}"`);

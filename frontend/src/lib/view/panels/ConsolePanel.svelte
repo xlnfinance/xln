@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import type { Writable } from 'svelte/store';
 
   // Props for isolated mode (passed from View.svelte)
@@ -21,7 +20,6 @@
   let filterLevel: 'all' | 'debug' | 'log' | 'warn' | 'error' = 'all';
   let maxLogs = 500;
   let scrollContainer: HTMLDivElement;
-  let mirrorToDevTools = true; // Toggle for sending to browser console
   let searchText = '';
   let debouncedSearchText = ''; // Debounced version for filtering
   let searchDebounceTimer: ReturnType<typeof setTimeout> | null = null;
@@ -66,88 +64,12 @@
     loadFrameLogs();
   }
 
-  // RAF-batched logging to break Svelte reactivity loops
-  let pendingLogs: ConsoleEntry[] = [];
-  let rafScheduled = false;
-
   // Command REPL
   let commandInput = '';
   let commandHistory: string[] = [];
   let historyIndex = -1;
   let commandInputEl: HTMLInputElement;
   let suggestions: string[] = [];
-
-  // Intercept console methods
-  const originalConsole = {
-    debug: console.debug,
-    log: console.log,
-    info: console.info,
-    warn: console.warn,
-    error: console.error,
-  };
-
-  function formatTimestamp(): string {
-    const now = new Date();
-    return now.toLocaleTimeString('en-US', {
-      hour12: false,
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      fractionalSecondDigits: 3
-    });
-  }
-
-  function flushPendingLogs() {
-    if (pendingLogs.length === 0) return;
-    logs = [...logs, ...pendingLogs].slice(-maxLogs);
-    pendingLogs = [];
-    rafScheduled = false;
-
-    if (autoScroll && scrollContainer) {
-      scrollContainer.scrollTop = scrollContainer.scrollHeight;
-    }
-  }
-
-  function addLog(level: ConsoleEntry['level'], args: any[]) {
-    // Format message synchronously (no Svelte reactivity)
-    const message = args.map(arg => {
-      if (typeof arg === 'object') {
-        try {
-          return JSON.stringify(arg, (key, value) =>
-            typeof value === 'bigint' ? `BigInt(${value})` : value, 2
-          );
-        } catch {
-          return String(arg);
-        }
-      }
-      return String(arg);
-    }).join(' ');
-
-    // Push to pending queue (non-reactive)
-    pendingLogs.push({
-      id: logId++,
-      timestamp: formatTimestamp(),
-      level,
-      message,
-      stack: args.find(arg => arg instanceof Error)?.stack
-    });
-
-    // Schedule ONE RAF update to flush all pending logs
-    if (!rafScheduled) {
-      rafScheduled = true;
-      requestAnimationFrame(flushPendingLogs);
-    }
-  }
-
-  // DISABLED - Console intercept causes infinite loops with EntityPanelWrapper
-  // TODO: Fix reactivity loop before re-enabling
-  // onMount(() => {
-  //   console.debug = (...args) => {
-  //     if (mirrorToDevTools) originalConsole.debug(...args);
-  //     addLog('debug', args);
-  //   };
-  //   // ... etc
-  // });
 
   function clearLogs() {
     logs = [];
@@ -375,10 +297,6 @@
         <option value="warn">Warn ({logs.filter(l => l.level === 'warn').length})</option>
         <option value="error">Error ({logs.filter(l => l.level === 'error').length})</option>
       </select>
-      <label title="Also send logs to browser DevTools (F12)">
-        <input type="checkbox" bind:checked={mirrorToDevTools} />
-        DevTools
-      </label>
       <label>
         <input type="checkbox" bind:checked={autoScroll} />
         Auto-scroll

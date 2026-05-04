@@ -19,6 +19,7 @@ type EventMap = {
   'settings:update': { key: string; value: any };
   'settings:reset': {};
   'camera:focus': { target: { x: number; y: number; z: number } };
+  'rebalance:requested': { entityId: string };
   'renderFps': number; // Real-time rendering FPS from Graph3DPanel
   'auto-demo:start': {}; // Auto-start demo in VR mode
   'openEntityOperations': { entityId: string; entityName: string; signerId?: string; action?: 'r2r' | 'r2c' }; // Open entity panel with optional action

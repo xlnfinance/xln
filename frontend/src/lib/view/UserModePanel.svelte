@@ -12,7 +12,7 @@
   import { onMount } from 'svelte';
   import type { Writable } from 'svelte/store';
   import { writable, get } from 'svelte/store';
-  import { activeVault, vaultOperations, allVaults } from '$lib/stores/vaultStore';
+  import { activeRuntime as activeRuntimeStore, vaultOperations, allRuntimes } from '$lib/stores/vaultStore';
   import {
     appRuntimeAdapterMode,
     entityPositions,
@@ -121,7 +121,7 @@
   let onboardingComplete = $state(false);
 
   // Reactive: signer info from vault
-  const signer = $derived($activeVault?.signers?.[0] || null);
+  const signer = $derived($activeRuntimeStore?.signers?.[0] || null);
   const positionsMap = $derived($entityPositions);
   const activeXlnFunctions = $derived($xlnFunctions);
   const xlnReady = $derived(Boolean(activeXlnFunctions?.isReady));
@@ -156,7 +156,7 @@
 
   // Reset selections when switching vaults
   $effect(() => {
-    const currentVaultId = $activeVault?.id || null;
+    const currentVaultId = $activeRuntimeStore?.id || null;
     if (lastVaultId && lastVaultId !== currentVaultId) {
       selectedEntityId = null;
       selectedSignerId = null;
@@ -332,7 +332,7 @@
   async function ensureSelfEntities() {
     const runEpoch = ++ensureSelfEntitiesEpoch;
     const env = get(isolatedEnv);
-    const vault = get(activeVault);
+    const vault = get(activeRuntimeStore);
 
     if (!env || !vault?.signers?.length) return;
 
@@ -429,7 +429,7 @@
 
   // Trigger entity creation when env becomes available OR vault changes
   $effect(() => {
-    if (!isRemoteRuntime && !!$isolatedEnv && !!$activeVault) {
+    if (!isRemoteRuntime && !!$isolatedEnv && !!$activeRuntimeStore) {
       void ensureSelfEntities();
     }
   });
@@ -446,7 +446,7 @@
   });
 
   const hasSigner = $derived(isRemoteRuntime || !!signer?.address);
-  const onboardingRequiredForRuntime = $derived(!isRemoteRuntime && $activeVault?.requiresOnboarding !== false);
+  const onboardingRequiredForRuntime = $derived(!isRemoteRuntime && $activeRuntimeStore?.requiresOnboarding !== false);
   const showVaultGate = $derived(!isRemoteRuntime && !hasSigner);
   const showVaultPanelVisible = $derived(showVaultGate || $showVaultPanel);
 
@@ -528,7 +528,7 @@
 
   async function handleRemoveRuntime(event: CustomEvent<{ runtimeId: string }>) {
     const runtimeId = event.detail.runtimeId;
-    const runtime = get(allVaults).find(v => v.id === runtimeId);
+    const runtime = get(allRuntimes).find(v => v.id === runtimeId);
     const runtimeLabel = runtime?.label || runtimeId;
 
     const isLast = get(runtimes).size <= 1;

@@ -1,14 +1,14 @@
 <!--
   FormationPanel.svelte - Entity formation as proper panel
 
-  Merged from legacy EntityFormation.svelte with new styling.
+  Entity formation with jurisdiction, type, validator, and threshold controls.
   Features: Jurisdiction, entity type (numbered/lazy/named), validators with weights, threshold.
 -->
 <script lang="ts">
   import { createEventDispatcher, onMount } from 'svelte';
   import type { ConsensusConfig, Env, JurisdictionConfig } from '@xln/runtime/xln-api';
   import { xlnFunctions, getXLN, xlnEnvironment, enqueueAndProcess } from '../../stores/xlnStore';
-  import { activeVault, vaultOperations } from '../../stores/vaultStore';
+  import { activeRuntime, vaultOperations } from '../../stores/vaultStore';
   import { tabOperations } from '../../stores/tabStore';
   import { Plus, X, Copy, Download, Upload, Users, User, Shield, Hash, Tag, Zap } from 'lucide-svelte';
 
@@ -17,7 +17,7 @@
   const dispatch = createEventDispatcher();
   $: env = $xlnEnvironment as Env | null;
   $: activeFunctions = $xlnFunctions;
-  $: vault = $activeVault;
+  $: vault = $activeRuntime;
 
   // Form state
   type EntityType = 'numbered' | 'lazy' | 'named';

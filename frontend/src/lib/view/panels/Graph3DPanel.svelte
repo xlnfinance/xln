@@ -7,11 +7,6 @@
   // VR Hand tracking
   import { VRHandTrackingController, type GrabbableEntity } from '../utils/vrHandTracking';
 
-  // Visual effects system
-  // import VisualDemoPanel from '../Views/VisualDemoPanel.svelte'; // TODO: Move to view/
-  // import AdminPanel from '../Admin/AdminPanel.svelte'; // TODO: Move to view/
-  // import VRScenarioBuilder from '../VR/VRScenarioBuilder.svelte'; // TODO: Move to view/
-
   // Network3D managers
   import { EntityManager } from '$lib/network3d/EntityManager';
   import { createAccountBars } from '$lib/network3d/AccountBarRenderer';
@@ -364,7 +359,6 @@ let vrHammer: VRHammer | null = null;
   let jAutoProposerEnabled = true; // Enable/disable auto-proposer
   let lastAnimatedFrameIndex = -1; // Track which frame we last animated (to avoid re-animating)
 
-  // Network data with proper typing (legacy - will migrate to managers)
   let entities: EntityData[] = [];
   let connections: ConnectionData[] = [];
 
@@ -563,21 +557,10 @@ let vrHammer: VRHammer | null = null;
       if (typeof parsed.selectedTokenId === 'string') {
         parsed.selectedTokenId = Number(parsed.selectedTokenId);
       }
-      // Backward compatibility: convert old rotationSpeed to rotationY
-      if (parsed.rotationSpeed !== undefined) {
-        parsed.rotationY = parsed.rotationSpeed;
-        delete parsed.rotationSpeed;
-      }
-      // Backward compatibility: convert old autoRotate boolean to rotationY
-      if (parsed.autoRotate !== undefined && parsed.rotationY === undefined) {
-        parsed.rotationY = parsed.autoRotate ? 3000 : 0;
-        delete parsed.autoRotate;
-      }
       // Provide defaults for new fields if missing
       if (parsed.rotationX === undefined) parsed.rotationX = 0;
       if (parsed.rotationY === undefined) parsed.rotationY = 0;
       if (parsed.rotationZ === undefined) parsed.rotationZ = 0;
-      // Migration: 'close' is now the default (was 'spread')
       if (parsed.barsMode === undefined) parsed.barsMode = 'close';
       return parsed;
     } catch {
@@ -2378,9 +2361,7 @@ let vrHammer: VRHammer | null = null;
   async function handleRebalanceGesture(entityId: string) {
     try {
 
-      // TODO: Implement hub rebalance coordination (Phase 3 of docs/next.md)
-
-      // Visual feedback ripple
+      panelBridge.emit('rebalance:requested', { entityId });
       if (spatialHash) {
         const entity = entities.find(e => e.id === entityId);
         if (entity) {
@@ -3721,9 +3702,6 @@ let vrHammer: VRHammer | null = null;
       confirmedAccount = accountData;
       pendingAccount = null;
     }
-
-    // TODO: Future enhancement - render both confirmed (solid) and pending (translucent) bars
-    // when pendingAccount !== null for visual desync indication
 
     // Always show current state - use confirmedAccount as fallback (last committed proof)
     if (!accountData) {
@@ -5540,12 +5518,15 @@ let vrHammer: VRHammer | null = null;
         return; // Gracefully ignore instead of throwing
       }
 
-      // Switch to normal panel view and focus this entity
-
-      // Save bird view as closed
       saveBirdViewSettings(false);
-
-      // TODO: Switch to panels view and focus specific entity
+      const entityName = getEntityName(entity.id);
+      const signerId = getSignerIdForEntity(entity.id);
+      panelBridge.emit('entity:selected', { entityId: entity.id });
+      panelBridge.emit('openEntityOperations', {
+        entityId: entity.id,
+        entityName: entityName || entity.id,
+        signerId: signerId || entity.id
+      });
     }
   }
 

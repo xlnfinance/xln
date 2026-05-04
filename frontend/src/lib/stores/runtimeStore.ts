@@ -156,7 +156,7 @@ export const runtimeOperations = {
     activeRuntimeId.set('');
   },
 
-  // Update active runtime env (legacy name kept for compatibility).
+  // Update active runtime env.
   updateLocalEnv(env: Env) {
     runtimes.update(r => {
       const envRuntimeId = getEnvRuntimeId(env);
@@ -184,7 +184,7 @@ export const runtimeOperations = {
     });
   },
 
-  // Update active runtime metadata (legacy name kept for compatibility).
+  // Update active runtime metadata.
   setLocalRuntimeMetadata(meta: { label?: string; seed?: string; vaultId?: string }) {
     runtimes.update(r => {
       const activeId = get(activeRuntimeId);

@@ -871,7 +871,6 @@
         case 'credit':
           await demoCreditExtension(XLN);
           break;
-        // TODO: Add other mechanics
         default:
           lastAction = `⚠️ Demo for "${mechanic}" not implemented yet`;
           return;
@@ -1656,252 +1655,10 @@
     console.log('[createEntities]  COMPLETE - Created economy with', entities.length, 'entities in ~3 frames (was 466)');
   }
 
-  /** OLD: FED RESERVE DEMO (legacy - will be removed) */
-  async function createFedReserveDemo() {
-    if (!requireLiveMode('create demo')) return;
-    if (!$isolatedEnv?.activeJurisdiction) {
-      lastAction = ' Create jurisdiction first';
-      return;
-    }
-
-    if (entityIds.length > 0) {
-      lastAction = ' Economy already exists (use Reset first)';
-      return;
-    }
-
-    loading = true;
-    lastAction = 'Creating 4-layer banking system (J-Machine → Fed → Banks → Users)...';
-
-    try {
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ runtimeUrl);
-
-      const xlnomy = $isolatedEnv.jReplicas.get($isolatedEnv.activeJurisdiction);
-      if (!xlnomy) throw new Error('Active xlnomy not found');
-
-      const jPos = xlnomy.jMachine.position;
-
-      // 4 LAYERS:
-      // Layer 1: J-Machine at y=300 (already exists)
-      // Layer 2: Federal Reserve at y=200 (central hub)
-      // Layer 3: Big Four Banks at y=100 (commercial hubs)
-      // Layer 4: Customers at y=0 (ground level, 2-4 per bank)
-
-      const banks = [
-        { name: 'JPMorgan', x: -100, z: -100, customers: 4 },
-        { name: 'BofA', x: 100, z: -100, customers: 3 },
-        { name: 'Wells', x: -100, z: 100, customers: 2 },
-        { name: 'Citi', x: 100, z: 100, customers: 3 }
-      ];
-
-      const entities = [];
-
-      // LAYER 2: Federal Reserve (center, y=200)
-      const fedSignerId = `${$isolatedEnv.activeJurisdiction}_fed`;
-      const fedData = new TextEncoder().encode(`${$isolatedEnv.activeJurisdiction}:fed:${Date.now()}`);
-      const fedHashBuffer = await crypto.subtle.digest('SHA-256', fedData);
-      const fedHashArray = Array.from(new Uint8Array(fedHashBuffer));
-      const fedHashHex = fedHashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-      const fedEntityId = '0x' + fedHashHex;
-
-      entities.push({
-        type: 'importReplica',
-        entityId: fedEntityId,
-        signerId: fedSignerId,
-        data: {
-          config: {
-            mode: 'proposer-based',
-            threshold: 1n,
-            validators: [fedSignerId],
-            shares: { [fedSignerId]: 1n },
-            jurisdiction: $isolatedEnv.activeJurisdiction
-          },
-          isProposer: true,
-          position: { x: jPos.x, y: 200, z: jPos.z }
-        }
-      });
-
-      // LAYER 3: Big Four commercial banks (y=100)
-      const bankEntityIds = [];
-      for (let i = 0; i < banks.length; i++) {
-        const bank = banks[i]!;
-        const signerId = `${$isolatedEnv.activeJurisdiction}_${bank.name.toLowerCase().replace(/\s/g, '_')}`;
-        const data = new TextEncoder().encode(`${$isolatedEnv.activeJurisdiction}:${bank.name}:${Date.now() + i}`);
-        const hashBuffer = await crypto.subtle.digest('SHA-256', data);
-        const hashArray = Array.from(new Uint8Array(hashBuffer));
-        const hashHex = hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-        const entityId = '0x' + hashHex;
-
-        entities.push({
-          type: 'importReplica',
-          entityId,
-          signerId,
-          data: {
-            config: {
-              mode: 'proposer-based',
-              threshold: 1n,
-              validators: [signerId],
-              shares: { [signerId]: 1n },
-              jurisdiction: $isolatedEnv.activeJurisdiction
-            },
-            isProposer: true,
-            position: { x: jPos.x + bank.x, y: 100, z: jPos.z + bank.z }
-          }
-        });
-
-        bankEntityIds.push({ entityId, signerId, bank });
-      }
-
-      // LAYER 4: Customers (y=0, ground level, clustered around their banks)
-      for (let i = 0; i < bankEntityIds.length; i++) {
-        const bankData = bankEntityIds[i]!;
-        const bankPos = { x: jPos.x + banks[i]!.x, z: jPos.z + banks[i]!.z };
-        const customerCount = banks[i]!.customers;
-
-        // Position customers in circle around their bank
-        for (let c = 0; c < customerCount; c++) {
-          const angle = (c / customerCount) * Math.PI * 2;
-          const radius = 25; // Close to bank
-          const custX = bankPos.x + Math.cos(angle) * radius;
-          const custZ = bankPos.z + Math.sin(angle) * radius;
-
-          const custSignerId = `${$isolatedEnv.activeJurisdiction}_${banks[i]!.name.toLowerCase()}_c${c}`;
-          const custData = new TextEncoder().encode(`${$isolatedEnv.activeJurisdiction}:customer:${banks[i]!.name}:${c}:${Date.now()}`);
-          const custHashBuffer = await crypto.subtle.digest('SHA-256', custData);
-          const custHashArray = Array.from(new Uint8Array(custHashBuffer));
-          const custHashHex = custHashArray.map(b => b.toString(16).padStart(2, '0')).join('');
-          const custEntityId = '0x' + custHashHex;
-
-          entities.push({
-            type: 'importReplica',
-            entityId: custEntityId,
-            signerId: custSignerId,
-            data: {
-              config: {
-                mode: 'proposer-based',
-                threshold: 1n,
-                validators: [custSignerId],
-                shares: { [custSignerId]: 1n },
-                jurisdiction: $isolatedEnv.activeJurisdiction
-              },
-              isProposer: true,
-              position: { x: custX, y: 0, z: custZ }
-            }
-          });
-        }
-      }
-
-      // Import all entities
-      await ingressRuntimeInput(XLN, {
-        runtimeTxs: entities,
-        entityInputs: []
-      });
-
-      const fundingMints: Array<{ entityId: string; tokenId: number; amount: bigint }> = [];
-
-      // FUNDING TIER 1: Fed Reserve with $100M (base money)
-      const fedReplicaKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(fedEntityId + ':'));
-      const fedReplica = fedReplicaKey ? $isolatedEnv.eReplicas.get(fedReplicaKey) : null;
-
-      if (fedReplica) {
-        fundingMints.push({ entityId: fedEntityId, tokenId: 1, amount: 100_000_000n });
-      }
-
-      // FUNDING TIER 2: Banks with $1M each
-      for (const bankData of bankEntityIds) {
-        const replicaKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(bankData.entityId + ':'));
-        const replica = replicaKey ? $isolatedEnv.eReplicas.get(replicaKey) : null;
-
-        if (replica) {
-          fundingMints.push({ entityId: bankData.entityId, tokenId: 1, amount: 1_000_000n });
-        }
-      }
-
-      // FUNDING TIER 3: Customers with $10K each
-      const customerStartIndex = 1 + bankEntityIds.length; // Skip Fed + Banks
-      for (let i = customerStartIndex; i < entities.length; i++) {
-        const entity = entities[i]!;
-        const replicaKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(entity.entityId + ':'));
-        const replica = replicaKey ? $isolatedEnv.eReplicas.get(replicaKey) : null;
-
-        if (replica) {
-          fundingMints.push({ entityId: entity.entityId, tokenId: 1, amount: 10_000n });
-        }
-      }
-
-      await debugFundReservesBatch(fundingMints);
-
-      // CREDIT LINES TIER 1: Fed → Banks ($10M limit each)
-      for (const bankData of bankEntityIds) {
-        const replicaKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(bankData.entityId + ':'));
-        const replica = replicaKey ? $isolatedEnv.eReplicas.get(replicaKey) : null;
-
-        if (replica) {
-          XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
-            entityId: bankData.entityId,
-            signerId: replica.signerId,
-            entityTxs: [{
-              type: 'openAccount',
-              data: { targetEntityId: fedEntityId }
-            }]
-          }] });
-        }
-      }
-
-      // CREDIT LINES TIER 2: Banks → Customers ($100K limit each)
-      for (let i = customerStartIndex; i < entities.length; i++) {
-        const custEntity = entities[i]!;
-
-        // Find which bank this customer belongs to
-        const custSignerId = custEntity.signerId;
-        const bankName = custSignerId.split('_')[1] || ''; // Extract bank name from signerId
-        const parentBank = bankEntityIds.find(b => bankName && b.signerId.includes(bankName));
-
-        if (parentBank) {
-          const custReplicaKey = (Array.from($isolatedEnv.eReplicas.keys()) as string[]).find(k => k.startsWith(custEntity.entityId + ':'));
-          const custReplica = custReplicaKey ? $isolatedEnv.eReplicas.get(custReplicaKey) : null;
-
-          if (custReplica) {
-            XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: [{
-              entityId: custEntity.entityId,
-              signerId: custReplica.signerId,
-              entityTxs: [{
-                type: 'openAccount',
-                data: { targetEntityId: parentBank.entityId }
-              }]
-            }] });
-          }
-        }
-      }
-
-      // Count totals
-      const totalCustomers = banks.reduce((sum, b) => sum + b.customers, 0);
-      const totalEntities = 1 + banks.length + totalCustomers; // Fed + Banks + Customers
-
-      // Start automatic payment flow
-      setTimeout(() => startFedPaymentLoop(), 2000);
-
-      lastAction = ` Created ${totalEntities} entities: Fed ($100M, y=200) + 4 Banks ($1M, y=100) + ${totalCustomers} Customers ($10K, y=0)`;
-
-      isolatedEnv.set($isolatedEnv);
-      isolatedHistory.set($isolatedEnv.history || []);
-      isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
-
-      console.log('[Architect] Fed Reserve demo created - payment loop starting');
-    } catch (err: any) {
-      lastAction = ` ${err.message}`;
-      console.error('[Architect] Fed Reserve demo error:', err);
-    } finally {
-      loading = false;
-    }
-  }
-
   /** Smart Payment Loop: 20% circular payments + Smart QE */
   let fedPaymentInterval: any = null;
-  let currentTopology: any = null;
 
   async function startSmartPaymentLoop(topology: any) {
-    currentTopology = topology;
     if (fedPaymentInterval) clearInterval(fedPaymentInterval);
 
     fedPaymentInterval = setInterval(async () => {
@@ -2075,14 +1832,18 @@
       if (totalDeposits > 0n) {
         const ratio = (reserves * 100n) / totalDeposits;
         if (ratio < 20n) {
-          console.log(`[Crisis] 🚨 Entity ${id.slice(0,10)} reserves ${ratio}% < 20% threshold`);
-          // TODO: Trigger Fed emergency lending
+          const targetReserves = (totalDeposits * 20n) / 100n;
+          const rescueAmount = targetReserves > reserves ? targetReserves - reserves : 0n;
+          if (rescueAmount > 0n) {
+            await debugFundReservesBatch([{ entityId: id, tokenId: 1, amount: rescueAmount }]);
+            console.log(`[Crisis] 🚨 Entity ${id.slice(0,10)} reserves ${ratio}% < 20%; injected $${(Number(rescueAmount) / 1000).toFixed(0)}K`);
+          }
         }
       }
     }
   }
 
-  /** OLD: Fed Reserve Payment Loop (legacy) */
+  /** VR/topology payment loop. */
   async function startFedPaymentLoop() {
     if (fedPaymentInterval) clearInterval(fedPaymentInterval);
 
@@ -2405,14 +2166,12 @@
     lastAction = `Switching to "${name}"...`;
 
     try {
-      $isolatedEnv.activeJurisdiction = name;
-      const xlnomy = $isolatedEnv.jReplicas?.get(name);
-
-      if (xlnomy) {
-        // TODO: Load xlnomy's replicas and history into env
-        // For now, just update the active name
-        lastAction = ` Switched to "${name}"`;
+      if (!$isolatedEnv.jReplicas?.has(name)) {
+        lastAction = ` Xlnomy "${name}" not found`;
+        return;
       }
+      $isolatedEnv.activeJurisdiction = name;
+      lastAction = ` Switched to "${name}"`;
 
       isolatedEnv.set($isolatedEnv);
     } catch (err: any) {

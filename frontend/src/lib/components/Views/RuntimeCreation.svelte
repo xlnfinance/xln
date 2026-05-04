@@ -3,7 +3,7 @@
   import { locale, translations$, initI18n, loadTranslations } from '$lib/i18n';
   // Removed WalletView - Entity = Wallet, no separate signer wallet view
   import HierarchicalNav from '$lib/components/Navigation/HierarchicalNav.svelte';
-  import { vaultOperations, activeVault, activeSigner, allVaults, type Runtime as Vault, type Signer } from '$lib/stores/vaultStore';
+  import { vaultOperations, activeRuntime, activeSigner, allRuntimes, type Runtime as Vault, type Signer } from '$lib/stores/vaultStore';
   import { deriveRequestSignal, showVaultPanel, vaultUiOperations } from '$lib/stores/vaultUiStore';
   import { xlnFunctions } from '$lib/stores/xlnStore';
   import type { Tab } from '$lib/types/ui';
@@ -281,7 +281,7 @@
     vaultOperations.initialize();
 
     // Check if there's an active vault
-    const vault = $activeVault;
+    const vault = $activeRuntime;
     if (vault && !$showVaultPanel) {
       // Restore state from saved vault
       name = vault.id;
@@ -371,9 +371,9 @@
   }
 
   // Reactive: Get current vault/signer for display
-  $: currentVault = $activeVault;
+  $: currentVault = $activeRuntime;
   $: currentSigner = $activeSigner;
-  $: savedVaults = $allVaults;
+  $: savedVaults = $allRuntimes;
 
   // Current signer's address
   $: currentSignerAddress = currentSigner?.address || ethereumAddress;
@@ -424,7 +424,7 @@
 
   // Switch to a saved vault
   function switchToVault(vaultId: string) {
-    vaultOperations.selectVault(vaultId);
+    vaultOperations.selectRuntime(vaultId);
     vaultDropdownOpen = false;
   }
 

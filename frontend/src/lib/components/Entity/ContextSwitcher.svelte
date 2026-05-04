@@ -1,7 +1,7 @@
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import Dropdown from '$lib/components/UI/Dropdown.svelte';
-  import { allRuntimes, activeRuntime as activeVault, vaultOperations } from '$lib/stores/vaultStore';
+  import { allRuntimes, activeRuntime, vaultOperations } from '$lib/stores/vaultStore';
   import {
     activeRuntimeId as activeStoreRuntimeId,
     runtimeOperations,
@@ -46,7 +46,7 @@
   $: activeXlnFunctions = xlnReady ? $xlnFunctions : null;
   $: runtimeGroups = buildRuntimeGroups();
   $: currentGroup = runtimeGroups.find((group) => group.runtimeId === $activeStoreRuntimeId)
-    || runtimeGroups.find((group) => group.runtimeId === $activeVault?.id)
+    || runtimeGroups.find((group) => group.runtimeId === $activeRuntime?.id)
     || null;
   $: currentEntity = resolveCurrentEntity();
   $: currentAvatar = currentEntity?.avatar || currentGroup?.avatar || '';
@@ -241,7 +241,7 @@
     slot="trigger"
     class="pill-trigger"
     data-testid="context-current"
-    data-runtime-id={currentGroup?.runtimeId || $activeVault?.id || ''}
+    data-runtime-id={currentGroup?.runtimeId || $activeRuntime?.id || ''}
     data-entity-id={tab.entityId || ''}
     data-signer-id={tab.signerId || ''}
   >

@@ -3,14 +3,14 @@
 
   Single-pass post-wallet setup.
   Public profile, default policy, and initial hub join live on one screen so
-  the user can create a usable entity without walking a legacy wizard.
+  the user can create a usable entity in one pass.
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
   import { createEventDispatcher } from 'svelte';
   import type { Env } from '@xln/runtime/xln-api';
   import { enqueueEntityInputs, getEnv, xlnFunctions } from '../../stores/xlnStore';
-  import { activeVault } from '../../stores/vaultStore';
+  import { activeRuntime } from '../../stores/vaultStore';
   import { entityAvatar } from '../../utils/avatar';
   import {
     type HubJoinPreference,
@@ -83,7 +83,7 @@
     const replica = currentEnv?.eReplicas?.get(entityId);
     const replicaName = String(replica?.state?.profile?.name || '').trim();
     if (replicaName) return replicaName;
-    const vaultLabel = String($activeVault?.label || '').trim();
+    const vaultLabel = String($activeRuntime?.label || '').trim();
     if (vaultLabel) return vaultLabel;
     if (typeof localStorage !== 'undefined') {
       const savedName = String(localStorage.getItem('xln-display-name') || '').trim();

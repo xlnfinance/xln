@@ -1,5 +1,4 @@
 <script lang="ts">
-  // @ts-nocheck - TODO: Add proper types
   /**
    * EntityMiniPanel - Compact popup when clicking entity in Graph3D
    * Shows quick info + actions, can expand to full panel
@@ -8,24 +7,36 @@
    */
   import { createEventDispatcher } from 'svelte';
   import type { Writable } from 'svelte/store';
+  import type { Env, EnvSnapshot } from '@xln/runtime/xln-api';
   import { formatTokenAmount } from './entity/shared/formatters';
+
+  type MapRecord<T> = Map<string, T> | Record<string, T>;
+  type DeltaLike = { collateral?: bigint | number | string; ondelta?: bigint | number | string };
+  type AccountLike = { deltas?: Map<number, DeltaLike> | Record<string, DeltaLike> };
+  type ReplicaLike = {
+    state?: {
+      reserves?: MapRecord<bigint | number | string>;
+      accounts?: MapRecord<AccountLike>;
+    };
+  };
+  type FrameLike = Env | EnvSnapshot | null;
 
   export let entityId: string;
   export let entityName: string = '';
   export let position: { x: number; y: number } = { x: 0, y: 0 };
-  export let isolatedEnv: Writable<any>;
-  export let isolatedHistory: Writable<any[]>;
+  export let isolatedEnv: Writable<Env | null>;
+  export let isolatedHistory: Writable<EnvSnapshot[]>;
   export let isolatedTimeIndex: Writable<number>;
 
   const dispatch = createEventDispatcher();
 
   // TIME-TRAVEL AWARE: Read from history[timeIndex] when scrubbing, else live state
-  $: env = (() => {
+  $: env = ((): FrameLike => {
     const timeIdx = $isolatedTimeIndex;
     const hist = $isolatedHistory;
     if (timeIdx >= 0 && hist && hist.length > 0) {
       const idx = Math.min(timeIdx, hist.length - 1);
-      return hist[idx];  // Historical frame
+      return hist[idx] ?? null;  // Historical frame
     }
     return $isolatedEnv;  // Live state
   })();
@@ -34,41 +45,40 @@
    * Get reserve values from reserves object (handles both Map and plain Object formats)
    * Maps serialize to plain objects when passed through postMessage/JSON
    */
-  function getReserveValue(reserves: Map<string, bigint> | Record<string, unknown> | undefined, key: string): bigint {
+  function toBigint(value: unknown): bigint {
+    if (value === undefined || value === null) return 0n;
+    if (typeof value === 'bigint') return value;
+    if (typeof value === 'number') return BigInt(Math.trunc(value));
+    if (typeof value === 'string') return BigInt(value.replace(/n$/, '') || '0');
+    return BigInt(String(value));
+  }
+
+  function getReserveValue(reserves: MapRecord<bigint | number | string> | undefined, key: string): bigint {
     if (!reserves) return 0n;
-    // If it's a Map, use .get()
     if (reserves instanceof Map) {
-      return reserves.get(key) || 0n;
+      return toBigint(reserves.get(key));
     }
-    // If it's a plain object (serialized Map), use property access
     if (typeof reserves === 'object') {
-      const v = (reserves as Record<string, unknown>)[key];
-      if (v === undefined || v === null) return 0n;
-      if (typeof v === 'string') {
-        const numStr = v.replace(/n$/, '');
-        return BigInt(numStr);
-      }
-      return BigInt(v as bigint);
+      return toBigint(reserves[key]);
     }
     return 0n;
   }
 
   // Find replica for this entity
-  $: replica = (() => {
+  $: replica = ((): ReplicaLike | null => {
     if (!env?.eReplicas) return null;
-    // Handle both Map and plain Object (serialized)
     if (env.eReplicas instanceof Map) {
-      return Array.from(env.eReplicas.entries()).find(([key]: [string, any]) => key.startsWith(entityId + ':'))?.[1];
+      const match = Array.from(env.eReplicas.entries()).find(([key]) => key.startsWith(entityId + ':'))?.[1] as ReplicaLike | undefined;
+      return match ?? null;
     }
-    // Plain object case
-    const entries = Object.entries(env.eReplicas);
-    return entries.find(([key]) => key.startsWith(entityId + ':'))?.[1];
+    const entries = Object.entries(env.eReplicas as Record<string, ReplicaLike>);
+    return entries.find(([key]) => key.startsWith(entityId + ':'))?.[1] ?? null;
   })();
 
   $: reserves = getReserveValue(replica?.state?.reserves, '1');
 
   // Handle both Map and plain Object (serialized) for accounts
-  $: accounts = (() => {
+  $: accounts = ((): [string, AccountLike][] => {
     if (!replica?.state?.accounts) return [];
     if (replica.state.accounts instanceof Map) {
       return Array.from(replica.state.accounts.entries());
@@ -76,18 +86,17 @@
     return Object.entries(replica.state.accounts);
   })();
 
-  // Get delta from account (handles both Map and Object)
-  function getDelta(acc: any, tokenId: number): any {
+  function getDelta(acc: AccountLike, tokenId: number): DeltaLike | null {
     if (!acc?.deltas) return null;
     if (acc.deltas instanceof Map) {
-      return acc.deltas.get(tokenId);
+      return acc.deltas.get(tokenId) ?? null;
     }
-    return acc.deltas[tokenId];
+    return acc.deltas[String(tokenId)] ?? null;
   }
 
-  $: totalCollateral = accounts.reduce((sum: bigint, [_, acc]: [string, any]) => {
+  $: totalCollateral = accounts.reduce((sum: bigint, [, acc]) => {
     const delta = getDelta(acc, 1);
-    return sum + BigInt(delta?.collateral || 0);
+    return sum + toBigint(delta?.collateral);
   }, 0n);
 
   // Use shared formatter with token ID 1 (USDC default)
@@ -154,7 +163,7 @@
       <div class="section-title">Accounts</div>
       {#each accounts.slice(0, 3) as [counterpartyId, acc]}
         {@const delta = getDelta(acc, 1)}
-        {@const ondelta = BigInt(delta?.ondelta || 0)}
+        {@const ondelta = toBigint(delta?.ondelta)}
         <div class="account-row">
           <span class="peer">{counterpartyId}</span>
           <span class="ondelta" class:positive={ondelta > 0n} class:negative={ondelta < 0n}>
