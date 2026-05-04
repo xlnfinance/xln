@@ -127,19 +127,6 @@
     console.log('[HierarchicalNav] Auto-selecting entity:', $activeSigner.entityId.slice(0, 10));
     appStateOperations.navigate('entity', $activeSigner.entityId);
   }
-
-  // New actions
-  function createRuntime() {
-    console.log('TODO: Create new runtime');
-  }
-
-  function createJurisdiction() {
-    console.log('TODO: Create new jurisdiction');
-  }
-
-  function createEntity() {
-    console.log('TODO: Create new entity');
-  }
 </script>
 
 <nav class="hierarchical-nav">
@@ -148,7 +135,7 @@
     items={runtimeItems}
     selected={$appState.navigation.runtime}
     onSelect={handleRuntimeSelect}
-    onNew={createRuntime}
+    onNew={null}
   />
 
   <Breadcrumb
@@ -156,7 +143,7 @@
     items={jurisdictionItems}
     selected={$appState.navigation.jurisdiction}
     onSelect={handleJurisdictionSelect}
-    onNew={createJurisdiction}
+    onNew={null}
     disabled={!$appState.navigation.runtime || jurisdictionItems.length === 0}
   />
 
@@ -174,7 +161,7 @@
     items={entityItems}
     selected={$appState.navigation.entity}
     onSelect={handleEntitySelect}
-    onNew={createEntity}
+    onNew={null}
     disabled={!$appState.navigation.runtime || entityItems.length === 0}
   />
 
