@@ -239,6 +239,64 @@ describe("EntityProvider with Automatic Governance", function () {
     });
   });
 
+  describe("Board proposal permissions", function () {
+    const defaultArticles = {
+      controlDelay: 1000,
+      dividendDelay: 3000,
+      foundationDelay: 10000,
+      controlThreshold: 51
+    };
+
+    async function registerGovernedEntity() {
+      const boardHash = ethers.keccak256(ethers.toUtf8Bytes("proposal_board"));
+      await entityProvider.registerNumberedEntity(boardHash);
+
+      const entityNumber = 2;
+      const entityId = ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32);
+      const entityAddress = ethers.getAddress(`0x${entityNumber.toString(16).padStart(40, '0')}`);
+      const [controlTokenId, dividendTokenId] = await entityProvider.getTokenIds(entityNumber);
+
+      await ethers.provider.send("hardhat_impersonateAccount", [entityAddress]);
+      const entitySigner = await ethers.getSigner(entityAddress);
+      await owner.sendTransaction({ to: entityAddress, value: ethers.parseEther("1.0") });
+      await entityProvider.connect(entitySigner).safeTransferFrom(entityAddress, alice.address, dividendTokenId, 100, "0x");
+      await entityProvider.connect(entitySigner).safeTransferFrom(entityAddress, bob.address, controlTokenId, 100, "0x");
+      await ethers.provider.send("hardhat_stopImpersonatingAccount", [entityAddress]);
+
+      return { entityId };
+    }
+
+    it("rejects board proposer type until board Hanko authorization exists", async function () {
+      const { entityId } = await registerGovernedEntity();
+      const newBoardHash = ethers.keccak256(ethers.toUtf8Bytes("new_board"));
+
+      await expect(
+        entityProvider.connect(alice).proposeBoard(entityId, newBoardHash, 0, defaultArticles)
+      ).to.be.revertedWith("Board proposer disabled");
+    });
+
+    it("requires real governance tokens before cancelling another proposal", async function () {
+      const { entityId } = await registerGovernedEntity();
+      const dividendBoardHash = ethers.keccak256(ethers.toUtf8Bytes("dividend_board"));
+
+      await expect(
+        entityProvider.connect(alice).proposeBoard(entityId, dividendBoardHash, 2, defaultArticles)
+      ).to.not.be.reverted;
+
+      await expect(
+        entityProvider.connect(carol).cancelBoardProposal(entityId, 1, defaultArticles)
+      ).to.be.revertedWith("No control tokens");
+
+      await expect(
+        entityProvider.connect(carol).cancelBoardProposal(entityId, 0, defaultArticles)
+      ).to.be.revertedWith("Board proposer disabled");
+
+      await expect(
+        entityProvider.connect(bob).cancelBoardProposal(entityId, 1, defaultArticles)
+      ).to.not.be.reverted;
+    });
+  });
+
   describe("Foundation Access Control", function () {
     it("Should prevent non-foundation holders from using foundation functions", async function () {
       const boardHash = ethers.keccak256(ethers.toUtf8Bytes("test_board"));
@@ -287,4 +345,4 @@ describe("EntityProvider with Automatic Governance", function () {
     });
   });
 
-}); 
+});
