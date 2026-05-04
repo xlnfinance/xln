@@ -202,23 +202,30 @@
 
   let deviceMemoryMB = deviceMemoryGB * 1024;
 
+  // Allow user to configure beyond hardwareConcurrency (they'll find sweet spot)
+  const hardwareCores = typeof navigator !== 'undefined' ? (navigator.hardwareConcurrency || 4) : 4;
+  const SHARD_MEMORY_MB = BRAINVAULT_V1.SHARD_MEMORY_KB / 1024;
+  const WORKER_MEMORY_BUDGET_MB = SHARD_MEMORY_MB * 1.5;
+
+  // Argon2id is memory-bound. Each worker owns a Wasm instance plus a 256MB
+  // shard buffer, so CPU-count parallelism can overcommit browser memory.
+  const computeMaxWorkers = () => {
+    const memoryBudgetMB = Math.max(SHARD_MEMORY_MB, deviceMemoryMB * (isIOSFamilyWebKit ? 0.35 : 0.5));
+    const memoryBased = Math.max(1, Math.floor(memoryBudgetMB / WORKER_MEMORY_BUDGET_MB));
+    const cpuBased = Math.max(1, hardwareCores);
+    const browserHardCap = isIOSFamilyWebKit ? 2 : 16;
+    return Math.max(1, Math.min(cpuBased, memoryBased, browserHardCap));
+  };
+
   // Derivation state
   let workers: Worker[] = [];
   const drainingWorkers = new Set<Worker>();
+  const workerActiveShard = new WeakMap<Worker, number>();
+  let retryShardQueue: number[] = [];
+  const shardRetryCounts = new Map<number, number>();
   let workerCount = 1;
   let activeWorkerCount = 1;
-  // Allow user to configure beyond hardwareConcurrency (they'll find sweet spot)
-  const hardwareCores = typeof navigator !== 'undefined' ? (navigator.hardwareConcurrency || 4) : 4;
-
-  // Ultra-permissive worker limits (browser WASM will be the real bottleneck)
-  const computeMaxWorkers = () => {
-    // For memory-bound ops like argon2id, 8x CPU cores is reasonable ceiling
-    const coreBased = hardwareCores * 8; // 32 cores → 256 workers
-    // Allow 4 workers per GB of RAM (conservative estimate)
-    const memBased = Math.floor(deviceMemoryGB * 4);
-    // Hard cap at 512 (browser will OOM before this on most machines)
-    return Math.min(coreBased, memBased, 512);
-  };
+  let derivationError = '';
 
   let maxWorkers = computeMaxWorkers();
   let usableWorkerCap = Math.max(1, maxWorkers);
@@ -523,6 +530,7 @@
   }
 
   function shutdownWorker(worker: Worker): void {
+    workerActiveShard.delete(worker);
     drainingWorkers.delete(worker);
     const index = workers.indexOf(worker);
     if (index >= 0) {
@@ -530,6 +538,81 @@
     }
     worker.terminate();
     syncWorkerCounts();
+  }
+
+  function workerErrorMessage(err: unknown): string {
+    if (err instanceof Error) return err.message;
+    if (err && typeof err === 'object' && 'message' in err) {
+      return String((err as { message?: unknown }).message ?? 'Worker failed');
+    }
+    return String(err || 'Worker failed');
+  }
+
+  function isWasmMemoryError(message: string): boolean {
+    return /out of memory|cannot allocate|wasm memory|WebAssembly\.instantiate/i.test(message);
+  }
+
+  function hasPendingShardWork(): boolean {
+    return retryShardQueue.length > 0 || nextShardToDispatch < shardCount;
+  }
+
+  function requeueShard(shardIndex: number, message: string): boolean {
+    if (shardResults.has(shardIndex)) return true;
+    const attempts = (shardRetryCounts.get(shardIndex) ?? 0) + 1;
+    shardRetryCounts.set(shardIndex, attempts);
+    if (attempts > 3) {
+      derivationError = `BrainVault shard ${shardIndex + 1} failed repeatedly: ${message}`;
+      return false;
+    }
+    if (!retryShardQueue.includes(shardIndex)) {
+      retryShardQueue.unshift(shardIndex);
+    }
+    shardStatus[shardIndex] = 'pending';
+    shardStatus = shardStatus;
+    return true;
+  }
+
+  function reduceWorkerCapAfterMemoryError(message: string): void {
+    const current = Math.max(activeWorkerCount, effectiveTargetWorkerCount, 1);
+    const reduced = Math.max(1, Math.floor(current / 2));
+    maxWorkers = Math.max(1, Math.min(maxWorkers, reduced));
+    targetWorkerCount = Math.max(1, Math.min(targetWorkerCount, maxWorkers));
+    console.warn(`[BrainVault] Wasm memory pressure; reduced worker cap to ${maxWorkers}. ${message}`);
+  }
+
+  function failDerivation(message: string): void {
+    derivationError = message;
+    if (elapsedInterval) {
+      clearInterval(elapsedInterval);
+      elapsedInterval = null;
+    }
+    terminateWorkers();
+    phase = 'input';
+  }
+
+  function handleWorkerFailure(worker: Worker, err: unknown): void {
+    const message = workerErrorMessage(err);
+    const shardIndex = workerActiveShard.get(worker);
+    console.error('[BrainVault] Worker failed:', message);
+
+    if (typeof shardIndex === 'number' && !requeueShard(shardIndex, message)) {
+      failDerivation(derivationError || message);
+      return;
+    }
+
+    const memoryError = isWasmMemoryError(message);
+    shutdownWorker(worker);
+
+    if (memoryError) {
+      reduceWorkerCapAfterMemoryError(message);
+      if (maxWorkers <= 1 && activeWorkerCount === 0 && hasPendingShardWork()) {
+        console.warn('[BrainVault] Retrying with a single worker after Wasm memory failure');
+      }
+    }
+
+    if (activeWorkerCount === 0 && hasPendingShardWork()) {
+      void adjustWorkers();
+    }
   }
 
   function attachWorkerHandlers(
@@ -546,12 +629,12 @@
       } else if (type === 'shard_complete') {
         handleShardComplete(worker, data.shardIndex, data.resultHex, data.elapsedMs);
       } else if (type === 'error') {
-        console.error('Worker error:', data.message);
+        handleWorkerFailure(worker, data?.message ?? 'Worker failed');
       }
     };
 
     worker.onerror = (e) => {
-      console.error('Worker error:', e);
+      console.error('[BrainVault] Worker error:', e);
       opts.onError?.(e);
     };
   }
@@ -597,6 +680,9 @@
     activeWorkerCount = initialWorkers;
     finalizeInProgress = false;
     phase = 'deriving';
+    derivationError = '';
+    retryShardQueue = [];
+    shardRetryCounts.clear();
     shardsCompleted = 0;
     shardResults = new Map();
     shardStatus = Array(shardCount).fill('pending');
@@ -610,7 +696,7 @@
 
     // Start with the exact worker count the UI is allowed to request.
     const cpuCores = navigator.hardwareConcurrency || 4;
-    console.log(`[BrainVault] Using ${initialWorkers} workers (${cpuCores} cores, cap ${usableWorkerCap}, requested ${effectiveTargetWorkerCount})`);
+    console.log(`[BrainVault] Using ${initialWorkers} workers (${cpuCores} cores, cap ${usableWorkerCap}, requested ${effectiveTargetWorkerCount}, memory ${deviceMemoryGB}GB)`);
 
     try {
       let attempts = 0;
@@ -655,6 +741,7 @@
               throw err;
             }
             initialWorkers = reduced;
+            maxWorkers = Math.max(1, Math.min(maxWorkers, reduced));
             workerCount = initialWorkers;
             activeWorkerCount = initialWorkers;
             targetWorkerCount = Math.min(targetWorkerCount, initialWorkers);
@@ -698,11 +785,15 @@
     while (nextShardToDispatch < shardCount && shardResults.has(nextShardToDispatch)) {
       nextShardToDispatch++;
     }
-    if (nextShardToDispatch >= shardCount) return;
+    while (retryShardQueue.length > 0 && shardResults.has(retryShardQueue[0]!)) {
+      retryShardQueue.shift();
+    }
+    if (retryShardQueue.length === 0 && nextShardToDispatch >= shardCount) return;
 
-    const shardIndex = nextShardToDispatch++;
+    const shardIndex = retryShardQueue.length > 0 ? retryShardQueue.shift()! : nextShardToDispatch++;
     shardStatus[shardIndex] = 'computing';
     shardStatus = shardStatus; // Trigger reactivity
+    workerActiveShard.set(worker, shardIndex);
 
     worker.postMessage({
       type: 'derive_shard',
@@ -717,6 +808,7 @@
   }
 
   async function handleShardComplete(worker: Worker, shardIndex: number, resultHex: string, elapsedMs: number) {
+    workerActiveShard.delete(worker);
     if (shardResults.has(shardIndex)) {
       return;
     }
@@ -831,18 +923,21 @@
       for (const worker of toDrain) {
         markWorkerDraining(worker);
       }
-    } else if (target > currentCount && nextShardToDispatch < shardCount) {
+    } else if (target > currentCount && hasPendingShardWork()) {
       // Scale up: add more workers
       const workersToAdd = target - currentCount;
       const currentTotal = workers.length;
 
-      for (let i = 0; i < workersToAdd && nextShardToDispatch < shardCount; i++) {
+      for (let i = 0; i < workersToAdd && hasPendingShardWork(); i++) {
         const worker = new Worker('/brainvault-worker.js');
         workers.push(worker);
 
         attachWorkerHandlers(worker, {
           onReady: () => {
             dispatchNextShard(worker);
+          },
+          onError: (err) => {
+            handleWorkerFailure(worker, err);
           },
         });
 
@@ -1145,6 +1240,9 @@
           >
             {t('vault.derive')}
           </button>
+          {#if derivationError}
+            <div class="matrix-status error">{derivationError}</div>
+          {/if}
           {#if hasAnyPersistedState}
             <button
               class="reset-link"
