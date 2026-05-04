@@ -20,6 +20,7 @@ import {
   keyFrameDbOrderbookCommitPrefix,
   keyFrameDbRuntimeActivity,
   normalizeEntityId,
+  parseFrameDbAccountFrameKey,
   parseFrameDbAccountFrameRuntimeIndexKey,
 } from './keys';
 import type { FrameDbPut, RuntimeFrameDbLike, StorageFrameDbHead, StorageRuntimeConfig } from './types';
@@ -29,8 +30,20 @@ export type StoredAccountFrameRecord = Extract<RuntimeFrameDbRecord, { kind: 'ac
   timestamp: number;
 };
 
+export type StoredAccountFrameValue = {
+  source: Extract<RuntimeFrameDbRecord, { kind: 'accountFrame' }>['source'];
+  frame: Extract<RuntimeFrameDbRecord, { kind: 'accountFrame' }>['frame'];
+  runtimeHeight: number;
+  timestamp: number;
+};
+
 export type StoredOrderbookCommitRecord = Extract<RuntimeFrameDbRecord, { kind: 'bookUpdate' }> & {
   runtimeHeight: number;
+  timestamp: number;
+};
+
+export type StoredOrderbookCommitValue = {
+  book: Extract<RuntimeFrameDbRecord, { kind: 'bookUpdate' }>['book'];
   timestamp: number;
 };
 
@@ -94,20 +107,18 @@ export const buildFrameDbPuts = (options: {
       if (!entityId || !counterpartyId || !Number.isFinite(accountHeight) || accountHeight <= 0) continue;
       const recordHeight = Math.max(1, Math.floor(Number(record.runtimeHeight ?? options.height)));
       const recordTimestamp = Math.max(0, Math.floor(Number(record.timestamp ?? options.timestamp)));
-      const stored: StoredAccountFrameRecord = {
-        ...record,
-        entityId,
-        counterpartyId,
-        accountHeight: Math.floor(accountHeight),
+      const stored: StoredAccountFrameValue = {
+        source: record.source,
+        frame: structuredClone(record.frame),
         runtimeHeight: recordHeight,
         timestamp: recordTimestamp,
       };
       puts.push({
-        key: keyFrameDbAccountFrame(entityId, counterpartyId, stored.accountHeight),
+        key: keyFrameDbAccountFrame(entityId, counterpartyId, Math.floor(accountHeight)),
         value: encodeBuffer(stored),
       });
       puts.push({
-        key: keyFrameDbAccountFrameByRuntime(recordHeight, entityId, counterpartyId, stored.accountHeight),
+        key: keyFrameDbAccountFrameByRuntime(recordHeight, entityId, counterpartyId, Math.floor(accountHeight)),
         value: Buffer.alloc(0),
       });
       frameCountsByEntity.set(entityId, (frameCountsByEntity.get(entityId) ?? 0) + 1);
@@ -120,12 +131,8 @@ export const buildFrameDbPuts = (options: {
       if (!entityId || !pairId) continue;
       const recordHeight = Math.max(1, Math.floor(Number(record.runtimeHeight ?? options.height)));
       const recordTimestamp = Math.max(0, Math.floor(Number(record.timestamp ?? options.timestamp)));
-      const stored: StoredOrderbookCommitRecord = {
-        kind: 'bookUpdate',
-        entityId,
-        pairId,
+      const stored: StoredOrderbookCommitValue = {
         book: record.book ? structuredClone(record.book) : null,
-        runtimeHeight: recordHeight,
         timestamp: recordTimestamp,
       };
       puts.push({
@@ -235,7 +242,7 @@ const pruneFrameDbBeforeRuntimeHeight = async (
   for await (const key of iterateKeys(db, { prefix: keyFrameDbAccountFramePrefix() })) {
     const raw = await readRawOrNull(db, key);
     if (!raw) continue;
-    const record = decodeBuffer<StoredAccountFrameRecord>(raw);
+    const record = decodeBuffer<StoredAccountFrameValue>(raw);
     if (Math.max(0, Math.floor(Number(record.runtimeHeight ?? 0))) <= cutoff) {
       accountFrameKeysByHex.set(key.toString('hex'), key);
     }
@@ -338,9 +345,18 @@ export const readFrameDbAccountFrames = async (
   const prefix = keyFrameDbAccountFramePrefix(entityId, counterpartyId);
   const records: StoredAccountFrameRecord[] = [];
   for await (const key of iterateKeys(db, { prefix })) {
-    const accountHeight = decodeHeight(key, 65);
-    const record = decodeBuffer<StoredAccountFrameRecord>(await db.get(key));
-    records.push({ ...record, accountHeight });
+    const parsed = parseFrameDbAccountFrameKey(key);
+    const record = decodeBuffer<StoredAccountFrameValue>(await db.get(key));
+    records.push({
+      kind: 'accountFrame',
+      entityId: normalizeEntityId(parsed.entityId),
+      counterpartyId: normalizeEntityId(parsed.counterpartyId),
+      accountHeight: Math.max(1, Math.floor(Number(parsed.accountHeight))),
+      source: record.source,
+      frame: record.frame,
+      runtimeHeight: Math.max(0, Math.floor(Number(record.runtimeHeight ?? 0))),
+      timestamp: Math.max(0, Math.floor(Number(record.timestamp ?? 0))),
+    });
   }
   return records.sort((left, right) => left.accountHeight - right.accountHeight);
 };

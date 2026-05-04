@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { unpack } from 'msgpackr';
   import { compareStableText } from '$lib/utils/stableSort';
 
   type DbKindFilter = 'all' | 'core' | 'infra';
@@ -9,6 +10,7 @@
     preview: string;
     pretty: string | null;
     byteLength: number;
+    keyFields?: StorageKeyFields;
   };
 
   type DbEntryView = {
@@ -21,6 +23,30 @@
     name: string;
     version?: number;
   };
+
+  type StorageKeyFields =
+    | {
+        family: 'frame-db/account';
+        entityId: string;
+        counterpartyId: string;
+        accountHeight: number;
+      }
+    | {
+        family: 'frame-db/account-by-runtime';
+        runtimeHeight: number;
+        entityId: string;
+        counterpartyId: string;
+        accountHeight: number;
+      }
+    | {
+        family: 'frame-db/orderbook';
+        runtimeHeight: number;
+        entityId: string;
+        pairId: string;
+      }
+    | {
+        family: 'generic';
+      };
 
   export let databaseNames: string[] = [];
   export let databaseNamePrefixes: string[] = ['level-js-db-'];
@@ -78,49 +104,73 @@
     return textDecoder.decode(bytes.slice(offset + 2, offset + 2 + len));
   };
 
-  const decodeStorageKey = (bytes: Uint8Array): string | null => {
+  const decodeStorageKey = (bytes: Uint8Array): { label: string; fields: StorageKeyFields } | null => {
     const tag = bytes[0];
     const height = readU64(bytes, 1);
-    if (tag === 0x20 && bytes.byteLength === 1) return 'head';
-    if (tag === 0x10 && height !== null) return `frame/${height}`;
-    if (tag === 0x11 && height !== null) return `diff/${height}`;
-    if (tag === 0x12 && height !== null && bytes.byteLength === 9) return `snapshot/manifest/${height}`;
-    if (tag === 0x21) return `live/entity/${readEntityId(bytes, 1) ?? bytesToFullHex(bytes)}`;
+    const generic = (label: string) => ({ label, fields: { family: 'generic' } as const });
+    if (tag === 0x20 && bytes.byteLength === 1) return generic('head');
+    if (tag === 0x10 && height !== null) return generic(`frame/${height}`);
+    if (tag === 0x11 && height !== null) return generic(`diff/${height}`);
+    if (tag === 0x12 && height !== null && bytes.byteLength === 9) return generic(`snapshot/manifest/${height}`);
+    if (tag === 0x21) return generic(`live/entity/${readEntityId(bytes, 1) ?? bytesToFullHex(bytes)}`);
     if (tag === 0x22) {
       const entityId = readEntityId(bytes, 1);
       const counterpartyId = readEntityId(bytes, 33);
-      if (entityId && counterpartyId) return `live/account/${entityId}/${counterpartyId}`;
+      if (entityId && counterpartyId) return generic(`live/account/${entityId}/${counterpartyId}`);
     }
     if (tag === 0x23) {
       const entityId = readEntityId(bytes, 1);
       const pairId = readTextAt(bytes, 33);
-      if (entityId && pairId) return `live/book/${entityId}/${pairId}`;
+      if (entityId && pairId) return generic(`live/book/${entityId}/${pairId}`);
     }
-    if (tag === 0x26) return `live/replica-meta/${readEntityId(bytes, 1) ?? bytesToFullHex(bytes)}`;
+    if (tag === 0x26) return generic(`live/replica-meta/${readEntityId(bytes, 1) ?? bytesToFullHex(bytes)}`);
     if (tag === 0x27 || tag === 0x28 || tag === 0x29) {
       const family = tag === 0x27 ? 'merkle/root' : tag === 0x28 ? 'merkle/branch' : 'merkle/leaf';
       const entityId = readEntityId(bytes, 1);
       const namespace = readTextAt(bytes, 33);
-      if (entityId && namespace) return `${family}/${entityId}/${namespace}`;
+      if (entityId && namespace) return generic(`${family}/${entityId}/${namespace}`);
     }
     if (tag === 0x31 || tag === 0x32 || tag === 0x33) {
       const family = tag === 0x31 ? 'snapshot/entity' : tag === 0x32 ? 'snapshot/account' : 'snapshot/book';
       const entityId = readEntityId(bytes, 9);
-      if (height !== null && entityId) return `${family}/${height}/${entityId}`;
+      if (height !== null && entityId) return generic(`${family}/${height}/${entityId}`);
     }
-    if (tag === 0x00 && bytes.byteLength === 1) return 'frame-db/head';
+    if (tag === 0x00 && bytes.byteLength === 1) return generic('frame-db/head');
     if (tag === 0x01 && bytes.byteLength >= 73) {
-      return `frame-db/account/${readEntityId(bytes, 1)}/${readEntityId(bytes, 33)}/${readU64(bytes, 65) ?? '?'}`;
+      const entityId = readEntityId(bytes, 1);
+      const counterpartyId = readEntityId(bytes, 33);
+      const accountHeight = readU64(bytes, 65);
+      if (entityId && counterpartyId && accountHeight !== null) {
+        return {
+          label: `frame-db/account/${entityId}/${counterpartyId}/${accountHeight}`,
+          fields: { family: 'frame-db/account', entityId, counterpartyId, accountHeight },
+        };
+      }
     }
-    if (tag === 0x02 && height !== null) return `frame-db/runtime-activity/${height}`;
+    if (tag === 0x02 && height !== null) return generic(`frame-db/runtime-activity/${height}`);
     if (tag === 0x03 && bytes.byteLength >= 41) {
-      return `frame-db/entity-activity/${readEntityId(bytes, 1)}/${readU64(bytes, 33) ?? '?'}`;
+      return generic(`frame-db/entity-activity/${readEntityId(bytes, 1)}/${readU64(bytes, 33) ?? '?'}`);
     }
     if (tag === 0x04 && bytes.byteLength >= 81) {
-      return `frame-db/account-by-runtime/${height ?? '?'}/${readEntityId(bytes, 9)}/${readEntityId(bytes, 41)}/${readU64(bytes, 73) ?? '?'}`;
+      const entityId = readEntityId(bytes, 9);
+      const counterpartyId = readEntityId(bytes, 41);
+      const accountHeight = readU64(bytes, 73);
+      if (height !== null && entityId && counterpartyId && accountHeight !== null) {
+        return {
+          label: `frame-db/account-by-runtime/${height}/${entityId}/${counterpartyId}/${accountHeight}`,
+          fields: { family: 'frame-db/account-by-runtime', runtimeHeight: height, entityId, counterpartyId, accountHeight },
+        };
+      }
     }
     if (tag === 0x05 && bytes.byteLength >= 41) {
-      return `frame-db/orderbook/${height ?? '?'}/${readEntityId(bytes, 9)}/${readTextAt(bytes, 41) ?? '?'}`;
+      const entityId = readEntityId(bytes, 9);
+      const pairId = readTextAt(bytes, 41);
+      if (height !== null && entityId && pairId) {
+        return {
+          label: `frame-db/orderbook/${height}/${entityId}/${pairId}`,
+          fields: { family: 'frame-db/orderbook', runtimeHeight: height, entityId, pairId },
+        };
+      }
     }
     return null;
   };
@@ -160,6 +210,104 @@
     }
   };
 
+  const isPlainObject = (value: unknown): value is Record<string, unknown> => (
+    !!value && typeof value === 'object' && !Array.isArray(value) && !(value instanceof Uint8Array)
+  );
+
+  const inspectableValue = (value: unknown): unknown => {
+    if (typeof value === 'bigint') return `${value.toString()}n`;
+    if (value instanceof Uint8Array) return `0x${bytesToFullHex(value)}`;
+    if (value instanceof ArrayBuffer) return `0x${bytesToFullHex(new Uint8Array(value))}`;
+    if (ArrayBuffer.isView(value)) {
+      return `0x${bytesToFullHex(new Uint8Array(value.buffer, value.byteOffset, value.byteLength))}`;
+    }
+    if (value instanceof Map) {
+      return Object.fromEntries(Array.from(value.entries()).map(([key, entryValue]) => [String(key), inspectableValue(entryValue)]));
+    }
+    if (value instanceof Set) return Array.from(value.values()).map(inspectableValue);
+    if (Array.isArray(value)) return value.map(inspectableValue);
+    if (isPlainObject(value)) {
+      const out: Record<string, unknown> = {};
+      for (const [key, entryValue] of Object.entries(value)) out[key] = inspectableValue(entryValue);
+      return out;
+    }
+    return value;
+  };
+
+  const sameStorageValue = (left: unknown, right: unknown): boolean => (
+    String(left ?? '').toLowerCase() === String(right ?? '').toLowerCase()
+  );
+
+  const withoutKeyDerivedFields = (
+    value: unknown,
+    keyFields?: StorageKeyFields,
+  ): { value: unknown; omitted: string[] } => {
+    if (!keyFields || !isPlainObject(value)) return { value, omitted: [] };
+    const out = { ...value };
+    const omitted: string[] = [];
+    const omitIfSame = (field: string, expected: unknown): void => {
+      if (!(field in out)) return;
+      if (!sameStorageValue(out[field], expected)) return;
+      delete out[field];
+      omitted.push(field);
+    };
+    if (keyFields.family === 'frame-db/account') {
+      omitIfSame('kind', 'accountFrame');
+      omitIfSame('entityId', keyFields.entityId);
+      omitIfSame('counterpartyId', keyFields.counterpartyId);
+      omitIfSame('accountHeight', keyFields.accountHeight);
+    } else if (keyFields.family === 'frame-db/account-by-runtime') {
+      omitIfSame('kind', 'accountFrame');
+      omitIfSame('runtimeHeight', keyFields.runtimeHeight);
+      omitIfSame('entityId', keyFields.entityId);
+      omitIfSame('counterpartyId', keyFields.counterpartyId);
+      omitIfSame('accountHeight', keyFields.accountHeight);
+    } else if (keyFields.family === 'frame-db/orderbook') {
+      omitIfSame('kind', 'bookUpdate');
+      omitIfSame('runtimeHeight', keyFields.runtimeHeight);
+      omitIfSame('entityId', keyFields.entityId);
+      omitIfSame('pairId', keyFields.pairId);
+    }
+    return { value: out, omitted };
+  };
+
+  const prettyStringify = (value: unknown): string => JSON.stringify(value, null, 2) ?? String(value);
+
+  const summarizeInline = (value: unknown): string => {
+    if (Array.isArray(value)) return `[${value.length}]`;
+    if (isPlainObject(value)) {
+      if ('height' in value && 'accountTxs' in value && 'deltas' in value) {
+        const txCount = Array.isArray(value['accountTxs']) ? value['accountTxs'].length : '?';
+        const deltaCount = Array.isArray(value['deltas']) ? value['deltas'].length : '?';
+        return `{height=${value['height']} txs=${txCount} deltas=${deltaCount}}`;
+      }
+      return `{${Object.keys(value).length} fields}`;
+    }
+    const text = String(value);
+    return text.length > 72 ? `${text.slice(0, 72)}...` : text;
+  };
+
+  const summarizeDecodedValue = (value: unknown, omitted: string[]): string => {
+    if (!isPlainObject(value)) return summarizeInline(value);
+    const parts = Object.entries(value)
+      .slice(0, 8)
+      .map(([key, entryValue]) => `${key}=${summarizeInline(entryValue)}`);
+    if (omitted.length > 0) parts.push(`key-derived omitted: ${omitted.join(',')}`);
+    return parts.join('  ');
+  };
+
+  const tryDecodeXlnBinaryPayload = (bytes: Uint8Array): unknown | null => {
+    const magic = bytes[0];
+    const body = bytes.subarray(1);
+    try {
+      if (magic === 0x01) return unpack(body);
+      if (magic === 0x02) return JSON.parse(textDecoder.decode(body));
+    } catch {
+      return null;
+    }
+    return null;
+  };
+
   const asUint8Array = (value: unknown): Uint8Array | null => {
     if (value instanceof Uint8Array) return value;
     if (value instanceof ArrayBuffer) return new Uint8Array(value);
@@ -169,7 +317,7 @@
     return null;
   };
 
-  const decodeBlob = (value: unknown): DecodedBlob => {
+  const decodeBlob = (value: unknown, keyFields?: StorageKeyFields): DecodedBlob => {
     if (typeof value === 'string') {
       const pretty = tryPrettyJson(value);
       return {
@@ -198,6 +346,18 @@
         byteLength: text.length,
       };
     }
+    const decodedPayload = tryDecodeXlnBinaryPayload(bytes);
+    if (decodedPayload !== null) {
+      const inspectable = inspectableValue(decodedPayload);
+      const compacted = withoutKeyDerivedFields(inspectable, keyFields);
+      const pretty = prettyStringify(compacted.value);
+      return {
+        label: bytes[0] === 0x01 ? 'xln/msgpack' : 'xln/json',
+        preview: summarizeDecodedValue(compacted.value, compacted.omitted),
+        pretty,
+        byteLength: bytes.byteLength,
+      };
+    }
     const decodedText = textDecoder.decode(bytes);
     if (isPrintableText(decodedText)) {
       const pretty = tryPrettyJson(decodedText);
@@ -223,11 +383,15 @@
     if (bytes) {
       const decoded = decodeStorageKey(bytes);
       const hex = bytesToFullHex(bytes);
-      return {
-        label: decoded ? `${decoded} [${hex}]` : hex,
+      const base = {
+        label: decoded ? decoded.label : hex,
         preview: hex,
-        pretty: null,
+        pretty: decoded ? hex : null,
         byteLength: bytes.byteLength,
+      };
+      if (decoded) return { ...base, keyFields: decoded.fields };
+      return {
+        ...base,
       };
     }
     const decoded = decodeBlob(value);
@@ -331,10 +495,11 @@
               return;
             }
             if (cursorIndex >= startIndex && pageEntries.length < pageSize) {
+              const key = decodeKeyBlob(cursor.key);
               pageEntries.push({
                 index: cursorIndex,
-                key: decodeKeyBlob(cursor.key),
-                value: decodeBlob(cursor.value),
+                key,
+                value: decodeBlob(cursor.value, key.keyFields),
               });
             }
             cursorIndex += 1;
@@ -465,8 +630,14 @@
                   <span class="entry-bytes">({formatBytes(entry.value.byteLength)})</span>
                 </div>
                 <pre class="entry-preview">{compactValuePreview(entry.value)}</pre>
+                {#if entry.key.pretty}
+                  <details class="entry-expand key-expand">
+                    <summary>Raw key</summary>
+                    <pre>{entry.key.pretty}</pre>
+                  </details>
+                {/if}
                 <details class="entry-expand">
-                  <summary>Expand value</summary>
+                  <summary>Expand value fully</summary>
                   <pre>{entry.value.pretty || entry.value.preview}</pre>
                 </details>
               </article>

@@ -172,6 +172,16 @@ export const parseFrameDbAccountFrameRuntimeIndexKey = (key: Buffer): {
   accountHeight: decodeHeight(key, 73),
 });
 
+export const parseFrameDbAccountFrameKey = (key: Buffer): {
+  entityId: string;
+  counterpartyId: string;
+  accountHeight: number;
+} => ({
+  entityId: decodeEntityId(key.subarray(1, 33)),
+  counterpartyId: decodeEntityId(key.subarray(33, 65)),
+  accountHeight: decodeHeight(key, 65),
+});
+
 export const keySnapshotEntity = (height: number, entityId: string): Buffer =>
   Buffer.concat([Buffer.from([KEY_SNAPSHOT_ENTITY]), encodeHeight(height), hexBytes(entityId)]);
 
