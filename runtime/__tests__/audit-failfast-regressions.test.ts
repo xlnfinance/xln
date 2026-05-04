@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test';
 
-import { proposeAccountFrame } from '../account-consensus';
+import { handleAccountInput, proposeAccountFrame } from '../account-consensus';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { handleHtlcLock } from '../account-tx/handlers/htlc-lock';
 import { handleRequestCollateral } from '../account-tx/handlers/request-collateral';
@@ -478,6 +478,44 @@ describe('audit fail-fast regressions', () => {
     expect(result.accountInput?.prevHanko).toBe(accountMachine.lastOutboundFrameAck?.prevHanko);
     expect(result.accountInput?.newAccountFrame.height).toBe(11);
     expect(accountMachine.pendingAccountInput?.kind).toBe('frame_ack');
+  });
+
+  test('handleAccountInput re-acks duplicate committed frames when the original ACK was lost', async () => {
+    const seed = 'account-frame-duplicate-reack';
+    const env = createEmptyEnv(seed);
+    env.quietRuntimeLogs = true;
+
+    const left = registerLazySigner(seed, '1');
+    const right = registerLazySigner(seed, '2');
+    const accountMachine = makeProposalAccount([], left.entityId, right.entityId);
+    accountMachine.currentHeight = 10;
+    accountMachine.currentFrame = {
+      ...accountMachine.currentFrame,
+      height: 10,
+      stateHash: `0x${'ef'.repeat(32)}`,
+    };
+    accountMachine.lastOutboundFrameAck = {
+      height: 10,
+      counterpartyEntityId: right.entityId,
+      prevHanko: `0x${'12'.repeat(65)}`,
+    };
+
+    const result = await handleAccountInput(env, accountMachine, {
+      kind: 'frame',
+      fromEntityId: right.entityId,
+      toEntityId: left.entityId,
+      height: 10,
+      newAccountFrame: {
+        ...accountMachine.currentFrame,
+        prevFrameHash: `0x${'34'.repeat(32)}`,
+      },
+      newHanko: `0x${'56'.repeat(65)}`,
+    });
+
+    expect(result.success).toBe(true);
+    expect(result.response?.kind).toBe('ack');
+    expect(result.response?.height).toBe(10);
+    expect(result.response?.prevHanko).toBe(accountMachine.lastOutboundFrameAck.prevHanko);
   });
 
   test('failed proposal keeps queued txs, including late arrivals, instead of wiping the mempool', async () => {
