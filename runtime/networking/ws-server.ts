@@ -25,6 +25,7 @@ import { asFailFastPayload, failfastAssert } from './failfast';
 import { normalizeRuntimeId as normalizeCanonicalRuntimeId } from './runtime-id';
 import type { Profile } from './gossip';
 import { verifyHelloAuth } from './hello-auth';
+import { verifyProfileSignature } from './profile-signing';
 
 type ClientEntry = {
   ws: WebSocket;
@@ -110,7 +111,7 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
   const serverId = options.serverId;
   const maxQueue = options.maxQueuePerRuntime ?? DEFAULT_MAX_QUEUE;
   const queueTtlMs = options.queueTtlMs ?? DEFAULT_QUEUE_TTL;
-  const requireAuth = options.requireAuth ?? false;
+  const requireAuth = options.requireAuth ?? true;
   const helloSkewMs = options.helloSkewMs ?? DEFAULT_HELLO_SKEW_MS;
 
   const clients = new Map<string, ClientEntry>();
@@ -167,9 +168,19 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
   // Key: entityId, Value: profile with timestamp (newer replaces older)
   const gossipProfiles = new Map<string, StoredRelayProfile>();
 
-  const storeGossipProfile = (profile: Profile, fromRuntimeId: string) => {
+  const storeGossipProfile = async (profile: Profile, fromRuntimeId: string) => {
     const entityId = profile.entityId;
     if (!entityId) return false;
+    const verified = await verifyProfileSignature({
+      ...profile,
+      runtimeId: profile.runtimeId || fromRuntimeId,
+    });
+    if (!verified.valid) {
+      console.warn(
+        `[WS] GOSSIP_PROFILE_REJECTED entity=${entityId.slice(-8)} reason=${verified.reason || 'invalid'}`,
+      );
+      return false;
+    }
     const newTs = profile.lastUpdated || 0;
     const existing = gossipProfiles.get(entityId);
     if (existing && existing.timestamp >= newTs) {
@@ -201,7 +212,7 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
       const profiles = payload?.profiles || [];
       let stored = 0;
       for (const profile of profiles) {
-        if (storeGossipProfile(profile, msg.from || 'unknown')) stored++;
+        if (await storeGossipProfile(profile, msg.from || 'unknown')) stored++;
       }
       return;
     }
@@ -374,8 +385,6 @@ export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {
               ws.close();
               return;
             }
-          } else if (msg.auth && process.env['XLN_LOG_HELLO_AUTH'] === '1') {
-            console.log(`[WS] Ignoring optional hello auth for ${msg.from.slice(0, 10)}...`);
           }
           registerClient(msg.from);
         } else if (runtimeId && !requireAuth) {
@@ -482,6 +491,6 @@ if (import.meta.main) {
     ? Number(args[portArgIdx + 1])
     : Number(process.env['WS_PORT'] || 8787);
   const serverId = process.env['WS_SERVER_ID'] || 'hub';
-  console.log(`[WS] Starting relay server on port ${port}`);
+  console.log(`[WS] Starting signed relay server on port ${port}`);
   startRuntimeWsServer({ port, serverId });
 }
