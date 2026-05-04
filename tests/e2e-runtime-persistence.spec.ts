@@ -387,8 +387,8 @@ async function readSwapState(page: Page, entityId: string, signerId: string, cou
       accountSwapOffersSize: Number(account?.swapOffers?.size || 0),
       accountHasSwapOfferInMempool: !!(account?.mempool || []).find((tx: any) => tx?.type === 'swap_offer'),
       accountHasSwapOfferInPendingFrame: !!(account?.pendingFrame?.accountTxs || []).find((tx: any) => tx?.type === 'swap_offer'),
-      accountHasSwapCancelRequestInMempool: !!(account?.mempool || []).find((tx: any) => tx?.type === 'swap_cancel_request' || tx?.type === 'swap_cancel'),
-      accountHasSwapCancelRequestInPendingFrame: !!(account?.pendingFrame?.accountTxs || []).find((tx: any) => tx?.type === 'swap_cancel_request' || tx?.type === 'swap_cancel'),
+      accountHasSwapCancelRequestInMempool: !!(account?.mempool || []).find((tx: any) => tx?.type === 'swap_cancel_request'),
+      accountHasSwapCancelRequestInPendingFrame: !!(account?.pendingFrame?.accountTxs || []).find((tx: any) => tx?.type === 'swap_cancel_request'),
     };
   }, { entityId, signerId, counterpartyId });
 }

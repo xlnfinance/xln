@@ -16,7 +16,7 @@ import { recordSwapCancelRequested } from './swap-history';
 
 export async function handleSwapCancelRequest(
   accountMachine: AccountMachine,
-  accountTx: Extract<AccountTx, { type: 'swap_cancel_request' }> | Extract<AccountTx, { type: 'swap_cancel' }>,
+  accountTx: Extract<AccountTx, { type: 'swap_cancel_request' }>,
   byLeft: boolean,
   _currentHeight: number,
   isValidation: boolean = false
@@ -50,6 +50,3 @@ export async function handleSwapCancelRequest(
   recordSwapCancelRequested(accountMachine, offerId, _currentHeight);
   return { success: true, events, swapOfferCancelRequested: { offerId } };
 }
-
-// Legacy export for older imports.
-export const handleSwapCancel = handleSwapCancelRequest;

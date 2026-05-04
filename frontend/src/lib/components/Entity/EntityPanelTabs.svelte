@@ -4278,7 +4278,7 @@
 
     switch (tx.type) {
       case 'direct_payment':
-      case 'account_payment': {
+      {
         const amount = activityTokenAmount(data['tokenId'], data['amount']);
         const description = String(data['description'] || '').trim();
         const route = Array.isArray(data['route'])
@@ -4292,7 +4292,6 @@
       }
       case 'swap_offer':
         return `Created order · sell ${activityTokenAmount(data['giveTokenId'], data['giveAmount'])} for ${activityTokenAmount(data['wantTokenId'], data['wantAmount'])}`;
-      case 'swap_cancel':
       case 'swap_cancel_request':
         return `Cancelled order · ${String(data['offerId'] || 'unknown')}`;
       case 'swap_resolve': {

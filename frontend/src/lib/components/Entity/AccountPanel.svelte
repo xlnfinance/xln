@@ -163,7 +163,6 @@
       account_settle: 'Account Settle',
       j_event_claim: 'J Event Claim',
       direct_payment: 'Direct Payment',
-      account_payment: 'Account Payment',
       add_delta: 'Add Delta',
       set_credit_limit: 'Set Credit Limit',
     };

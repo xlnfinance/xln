@@ -801,10 +801,10 @@ async function readSwapState(
       accountHasSwapOfferInMempool: !!(account?.mempool || []).find((tx: any) => tx?.type === 'swap_offer'),
       accountHasSwapOfferInPendingFrame: !!(account?.pendingFrame?.accountTxs || []).find((tx: any) => tx?.type === 'swap_offer'),
       accountHasSwapCancelRequestInMempool: !!(account?.mempool || []).find(
-        (tx: any) => tx?.type === 'swap_cancel_request' || tx?.type === 'swap_cancel'
+        (tx: any) => tx?.type === 'swap_cancel_request'
       ),
       accountHasSwapCancelRequestInPendingFrame: !!(account?.pendingFrame?.accountTxs || []).find(
-        (tx: any) => tx?.type === 'swap_cancel_request' || tx?.type === 'swap_cancel'
+        (tx: any) => tx?.type === 'swap_cancel_request'
       ),
     };
   }, { entityId, signerId, counterpartyId });

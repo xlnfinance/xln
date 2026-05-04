@@ -1507,7 +1507,6 @@ export type AccountEvent =
 
 // Account transaction types
 export type AccountTx =
-  | { type: 'account_payment'; data: { tokenId: number; amount: bigint } }
   | { type: 'direct_payment'; data: { tokenId: number; amount: bigint; route?: string[]; description?: string; fromEntityId?: string; toEntityId?: string } }
   | { type: 'add_delta'; data: { tokenId: number } }
   | { type: 'set_credit_limit'; data: { tokenId: number; amount: bigint } }
@@ -1596,13 +1595,6 @@ export type AccountTx =
   | {
       // Maker proposes cancellation; counterparty/hub resolves via swap_resolve.
       type: 'swap_cancel_request';
-      data: {
-        offerId: string;
-      };
-    }
-  | {
-      // Legacy alias for swap_cancel_request.
-      type: 'swap_cancel';
       data: {
         offerId: string;
       };
