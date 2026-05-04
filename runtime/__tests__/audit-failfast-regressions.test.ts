@@ -444,6 +444,42 @@ describe('audit fail-fast regressions', () => {
     ]);
   });
 
+  test('proposeAccountFrame bundles the last outbound ACK into the next frame for loss recovery', async () => {
+    const seed = 'account-frame-ack-loss-recovery';
+    const env = createEmptyEnv(seed);
+    env.quietRuntimeLogs = true;
+    env.browserVM = {
+      getDepositoryAddress: () => hex20('dd'),
+    } as typeof env.browserVM;
+
+    const left = registerLazySigner(seed, '1');
+    const right = registerLazySigner(seed, '2');
+    const accountMachine = makeProposalAccount([
+      { type: 'add_delta', data: { tokenId: 1 } },
+    ], left.entityId, right.entityId);
+    accountMachine.currentHeight = 10;
+    accountMachine.currentFrame = {
+      ...accountMachine.currentFrame,
+      height: 10,
+      stateHash: `0x${'ab'.repeat(32)}`,
+    };
+    accountMachine.lastOutboundFrameAck = {
+      height: 10,
+      counterpartyEntityId: right.entityId,
+      prevHanko: `0x${'cd'.repeat(65)}`,
+    };
+    attachSigningReplica(env, accountMachine.proofHeader.fromEntity, left.signerId);
+
+    const result = await proposeAccountFrame(env, accountMachine);
+
+    expect(result.success).toBe(true);
+    expect(result.accountInput?.kind).toBe('frame_ack');
+    expect(result.accountInput?.height).toBe(10);
+    expect(result.accountInput?.prevHanko).toBe(accountMachine.lastOutboundFrameAck?.prevHanko);
+    expect(result.accountInput?.newAccountFrame.height).toBe(11);
+    expect(accountMachine.pendingAccountInput?.kind).toBe('frame_ack');
+  });
+
   test('failed proposal keeps queued txs, including late arrivals, instead of wiping the mempool', async () => {
     const seed = 'account-proposal-failure-retains-mempool';
     const env = createEmptyEnv(seed);
