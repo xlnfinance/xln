@@ -234,7 +234,6 @@ export interface XLNModule {
 
   // Entity utilities
   getEntityShortId: (entityId: string) => string;
-  getEntityNumber: (entityId: string) => string; // deprecated
   formatEntityId: (entityId: string) => string;
   formatEntityDisplay: (entityId: EntityId) => string;
 
