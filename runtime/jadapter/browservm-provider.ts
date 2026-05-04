@@ -1864,6 +1864,80 @@ export class BrowserVMProvider {
     return this.txReceipts.get(txHash) ?? null;
   }
 
+  getLogs(filter?: {
+    fromBlock?: number | bigint | string;
+    toBlock?: number | bigint | string;
+    address?: string | string[];
+    topics?: Array<string | string[] | null>;
+  }): Array<{
+    address: string;
+    topics: string[];
+    data: string;
+    blockNumber: number;
+    blockHash: string;
+    transactionHash: string;
+    transactionIndex: number;
+    logIndex: number;
+    removed: boolean;
+  }> {
+    const parseBlock = (value: unknown, defaultValue: number): number => {
+      if (value === undefined || value === null || value === 'latest') return defaultValue;
+      const parsed = Number(value);
+      return Number.isFinite(parsed) ? Math.max(0, Math.floor(parsed)) : defaultValue;
+    };
+    const fromBlock = parseBlock(filter?.fromBlock, 0);
+    const toBlock = parseBlock(filter?.toBlock, Number.MAX_SAFE_INTEGER);
+    const addresses = (() => {
+      const raw = filter?.address;
+      if (!raw) return null;
+      const values = Array.isArray(raw) ? raw : [raw];
+      return new Set(values.map((entry) => entry.toLowerCase()));
+    })();
+
+    const topicMatches = (topics: string[]): boolean => {
+      const expected = filter?.topics;
+      if (!expected?.length) return true;
+      for (let i = 0; i < expected.length; i++) {
+        const wanted = expected[i];
+        if (wanted === null || wanted === undefined) continue;
+        const actual = topics[i]?.toLowerCase();
+        if (!actual) return false;
+        if (Array.isArray(wanted)) {
+          if (!wanted.some((topic) => topic.toLowerCase() === actual)) return false;
+        } else if (wanted.toLowerCase() !== actual) {
+          return false;
+        }
+      }
+      return true;
+    };
+
+    const logs: Array<{
+      address: string;
+      topics: string[];
+      data: string;
+      blockNumber: number;
+      blockHash: string;
+      transactionHash: string;
+      transactionIndex: number;
+      logIndex: number;
+      removed: boolean;
+    }> = [];
+    for (const receipt of this.txReceipts.values()) {
+      if (receipt.blockNumber < fromBlock || receipt.blockNumber > toBlock) continue;
+      for (const log of receipt.logs) {
+        if (addresses && !addresses.has(log.address.toLowerCase())) continue;
+        if (!topicMatches(log.topics)) continue;
+        logs.push({
+          ...log,
+          blockHash: receipt.blockHash,
+          transactionIndex: 0,
+          removed: false,
+        });
+      }
+    }
+    return logs.sort((left, right) => left.blockNumber - right.blockNumber || left.logIndex - right.logIndex);
+  }
+
   /** Set deterministic block timestamp for next tx/block */
   setBlockTimestamp(timestamp: number): void {
     if (!this.activeBlock) {
