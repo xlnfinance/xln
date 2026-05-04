@@ -1914,6 +1914,3 @@ export async function createRpcAdapter(
   trace('return adapter');
   return adapter;
 }
-
-// Alias for backward compatibility
-export const createAnvilAdapter = createRpcAdapter;

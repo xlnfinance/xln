@@ -71,7 +71,7 @@
 
         <div class="iframe-container">
           <iframe
-            src="/view?embed=1"
+            src="/app?embed=1"
             title={scenario.title}
             allow="accelerometer; autoplay; encrypted-media; gyroscope"
           ></iframe>

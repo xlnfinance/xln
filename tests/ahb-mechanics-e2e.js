@@ -24,13 +24,13 @@ async function main() {
   console.log(' ALICE-HUB-BOB MECHANICS E2E TEST');
   console.log('========================================\n');
 
-  const browser = await chromium.launch({ headless: false, slowMo: 50 });
+  const browser = await chromium.launch({ headless: process.env.HEADED !== 'true', slowMo: 50 });
   const page = await browser.newPage({ viewport: { width: 1400, height: 900 } });
 
   try {
     // 1. Navigate
-    log('1. Opening /view...');
-    await page.goto('http://localhost:8080/view', { waitUntil: 'networkidle', timeout: 30000 });
+    log('1. Opening /app...');
+    await page.goto('http://localhost:8080/app', { waitUntil: 'networkidle', timeout: 30000 });
     await page.waitForTimeout(1500);
 
     // 2. Close tutorial if present

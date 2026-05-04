@@ -148,10 +148,8 @@
     </div>
   {:else if scenarioLoaded}
     <div class="player-container">
-      <!-- 3D Visualization -->
       <div class="viewport">
-        <!-- OLD ROUTE DISABLED: Graph3DPanel removed - use /view instead -->
-        <div class="disabled-message">Visit /view for panel workspace</div>
+        <div class="disabled-message">Open /app for the panel workspace</div>
       </div>
 
       <!-- YouTube-style controls -->
