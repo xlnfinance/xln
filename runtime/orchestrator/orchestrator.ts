@@ -19,6 +19,7 @@ import {
 } from './custody-bootstrap';
 import {
   createRelayStore,
+  clearPendingMessages,
   normalizeRuntimeKey,
   pushDebugEvent,
   removeClient,
@@ -639,7 +640,7 @@ const clearRelayState = (): void => {
     }
   }
   relayStore.clients.clear();
-  relayStore.pendingMessages.clear();
+  clearPendingMessages(relayStore);
   relayStore.gossipProfiles.clear();
   relayStore.runtimeEncryptionKeys.clear();
   relayStore.activeHubEntityIds = [];

@@ -7,6 +7,7 @@
 
 import { isRuntimeId, normalizeRuntimeId } from './networking/runtime-id';
 import { canonicalizeProfile, type Profile } from './networking/gossip';
+import { safeStringify } from './serialization-utils';
 import {
   DEFAULT_GOSSIP_BATCH_LIMIT,
   selectProfileBatch,
@@ -43,7 +44,9 @@ export type RelayDebugEvent = {
 export type RelayStore = {
   serverId: string;
   clients: Map<string, RelayClient>;
-  pendingMessages: Map<string, any[]>;
+  pendingMessages: Map<string, PendingRelayMessage[]>;
+  pendingMessageBytes: number;
+  pendingLimits: RelayPendingLimits;
   gossipProfiles: Map<string, { profile: Profile; timestamp: number }>;
   runtimeEncryptionKeys: Map<string, string>;
   debugEvents: RelayDebugEvent[];
@@ -55,16 +58,38 @@ export type RelayStore = {
 const MAX_DEBUG_EVENTS = 5000;
 const MAX_PENDING_PER_CLIENT = 200;
 const MAX_PENDING_TARGETS = 10_000;
+const MAX_PENDING_TOTAL_BYTES = 256 * 1024 * 1024;
 export const DEFAULT_GOSSIP_SYNC_LIMIT = DEFAULT_GOSSIP_BATCH_LIMIT;
+
+type RelayPendingLimits = {
+  maxPerTarget: number;
+  maxTargets: number;
+  maxTotalBytes: number;
+};
+
+type PendingRelayMessage = {
+  msg: any;
+  bytes: number;
+};
+
+type RelayStoreOptions = {
+  pendingLimits?: Partial<RelayPendingLimits>;
+};
 
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
 
-export const createRelayStore = (serverId: string): RelayStore => ({
+export const createRelayStore = (serverId: string, options: RelayStoreOptions = {}): RelayStore => ({
   serverId,
   clients: new Map(),
   pendingMessages: new Map(),
+  pendingMessageBytes: 0,
+  pendingLimits: {
+    maxPerTarget: options.pendingLimits?.maxPerTarget ?? MAX_PENDING_PER_CLIENT,
+    maxTargets: options.pendingLimits?.maxTargets ?? MAX_PENDING_TARGETS,
+    maxTotalBytes: options.pendingLimits?.maxTotalBytes ?? MAX_PENDING_TOTAL_BYTES,
+  },
   gossipProfiles: new Map(),
   runtimeEncryptionKeys: new Map(),
   debugEvents: [],
@@ -103,7 +128,7 @@ export const pushDebugEvent = (store: RelayStore, event: Omit<RelayDebugEvent, '
 // Gossip profiles
 // ---------------------------------------------------------------------------
 
-export const storeGossipProfile = (store: RelayStore, profile: Profile): boolean => {
+export const storeVerifiedGossipProfile = (store: RelayStore, profile: Profile): boolean => {
   const canonicalProfile = canonicalizeProfile(profile);
   const entityId = canonicalProfile.entityId;
   if (!entityId) return false;
@@ -198,6 +223,9 @@ export const resolveEncryptionPublicKeyHex = (store: RelayStore, targetRuntimeId
   const normalizedTarget = normalizeRuntimeKey(targetRuntimeId);
   if (!normalizedTarget) return null;
 
+  const directKey = store.runtimeEncryptionKeys.get(normalizedTarget);
+  if (typeof directKey === 'string' && directKey.length > 0) return directKey;
+
   for (const { profile } of store.gossipProfiles.values()) {
     const profileRuntimeId = normalizeRuntimeKey(profile.runtimeId || '');
     if (!profileRuntimeId || profileRuntimeId !== normalizedTarget) continue;
@@ -207,8 +235,6 @@ export const resolveEncryptionPublicKeyHex = (store: RelayStore, targetRuntimeId
     }
   }
 
-  const directKey = store.runtimeEncryptionKeys.get(normalizedTarget);
-  if (typeof directKey === 'string' && directKey.length > 0) return directKey;
   return null;
 };
 
@@ -216,14 +242,87 @@ export const resolveEncryptionPublicKeyHex = (store: RelayStore, targetRuntimeId
 // Pending message queue
 // ---------------------------------------------------------------------------
 
+const estimatePendingMessageBytes = (msg: any): number => {
+  try {
+    return Buffer.byteLength(safeStringify(msg));
+  } catch {
+    return Buffer.byteLength(String(msg));
+  }
+};
+
+const dropPendingQueue = (store: RelayStore, key: string, reason: string): void => {
+  const queue = store.pendingMessages.get(key);
+  if (!queue) return;
+  for (const item of queue) {
+    store.pendingMessageBytes = Math.max(0, store.pendingMessageBytes - item.bytes);
+  }
+  store.pendingMessages.delete(key);
+  pushDebugEvent(store, {
+    event: 'pending_drop',
+    to: key,
+    status: 'dropped',
+    reason,
+    queueSize: queue.length,
+    size: store.pendingMessageBytes,
+  });
+};
+
+const dropOldestPendingMessage = (store: RelayStore): boolean => {
+  const oldestKey = store.pendingMessages.keys().next().value as string | undefined;
+  if (!oldestKey) return false;
+  const queue = store.pendingMessages.get(oldestKey);
+  if (!queue || queue.length === 0) {
+    store.pendingMessages.delete(oldestKey);
+    return true;
+  }
+  const dropped = queue.shift();
+  if (dropped) {
+    store.pendingMessageBytes = Math.max(0, store.pendingMessageBytes - dropped.bytes);
+  }
+  if (queue.length === 0) {
+    store.pendingMessages.delete(oldestKey);
+  } else {
+    store.pendingMessages.set(oldestKey, queue);
+  }
+  pushDebugEvent(store, {
+    event: 'pending_drop',
+    to: oldestKey,
+    status: 'dropped',
+    reason: 'PENDING_TOTAL_BYTES_EXCEEDED',
+    queueSize: queue.length,
+    size: store.pendingMessageBytes,
+  });
+  return true;
+};
+
 export const enqueueMessage = (store: RelayStore, toKey: string, msg: any): number => {
-  if (!store.pendingMessages.has(toKey) && store.pendingMessages.size >= MAX_PENDING_TARGETS) {
+  if (!store.pendingMessages.has(toKey) && store.pendingMessages.size >= store.pendingLimits.maxTargets) {
     const oldestKey = store.pendingMessages.keys().next().value as string | undefined;
-    if (oldestKey) store.pendingMessages.delete(oldestKey);
+    if (oldestKey) dropPendingQueue(store, oldestKey, 'PENDING_TARGET_CAP_EXCEEDED');
+  }
+  const bytes = estimatePendingMessageBytes(msg);
+  if (bytes > store.pendingLimits.maxTotalBytes) {
+    pushDebugEvent(store, {
+      event: 'pending_drop',
+      to: toKey,
+      status: 'dropped',
+      reason: 'PENDING_MESSAGE_TOO_LARGE',
+      size: bytes,
+    });
+    return store.pendingMessages.get(toKey)?.length ?? 0;
+  }
+  while (store.pendingMessageBytes + bytes > store.pendingLimits.maxTotalBytes) {
+    if (!dropOldestPendingMessage(store)) break;
   }
   const queue = store.pendingMessages.get(toKey) || [];
-  queue.push(msg);
-  if (queue.length > MAX_PENDING_PER_CLIENT) queue.shift();
+  queue.push({ msg, bytes });
+  store.pendingMessageBytes += bytes;
+  while (queue.length > store.pendingLimits.maxPerTarget) {
+    const dropped = queue.shift();
+    if (dropped) {
+      store.pendingMessageBytes = Math.max(0, store.pendingMessageBytes - dropped.bytes);
+    }
+  }
   store.pendingMessages.set(toKey, queue);
   return queue.length;
 };
@@ -231,7 +330,15 @@ export const enqueueMessage = (store: RelayStore, toKey: string, msg: any): numb
 export const flushPendingMessages = (store: RelayStore, toKey: string): any[] => {
   const pending = store.pendingMessages.get(toKey) || [];
   store.pendingMessages.delete(toKey);
-  return pending;
+  for (const item of pending) {
+    store.pendingMessageBytes = Math.max(0, store.pendingMessageBytes - item.bytes);
+  }
+  return pending.map(item => item.msg);
+};
+
+export const clearPendingMessages = (store: RelayStore): void => {
+  store.pendingMessages.clear();
+  store.pendingMessageBytes = 0;
 };
 
 // ---------------------------------------------------------------------------
@@ -241,6 +348,6 @@ export const flushPendingMessages = (store: RelayStore, toKey: string): any[] =>
 export const resetStore = (store: RelayStore): void => {
   store.debugEvents.length = 0;
   store.debugId = 0;
-  store.pendingMessages.clear();
+  clearPendingMessages(store);
   store.runtimeEncryptionKeys.clear();
 };

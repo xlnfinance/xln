@@ -18,14 +18,13 @@
 import WebSocket, { WebSocketServer, type RawData } from 'ws';
 import type { AddressInfo } from 'net';
 import type { IncomingHttpHeaders } from 'http';
-import * as secp256k1 from '@noble/secp256k1';
-import { keccak256 } from 'ethers';
 
 import type { RuntimeInput, RoutedEntityInput } from '../types';
-import { deserializeWsMessage, hashHelloMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage, type RuntimeWsAuth } from './ws-protocol';
+import { deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
 import { asFailFastPayload, failfastAssert } from './failfast';
 import { normalizeRuntimeId as normalizeCanonicalRuntimeId } from './runtime-id';
 import type { Profile } from './gossip';
+import { verifyHelloAuth } from './hello-auth';
 
 type ClientEntry = {
   ws: WebSocket;
@@ -105,41 +104,6 @@ const normalizeRawData = (data: RawData): Buffer | ArrayBuffer => {
 const normalizeRuntimeId = (runtimeId: string | null | undefined): string | null => {
   const normalized = normalizeCanonicalRuntimeId(runtimeId);
   return normalized || null;
-};
-
-const recoverAddressFromSignature = (digestHex: string, signatureHex: string): string => {
-  const sig = signatureHex.replace('0x', '');
-  if (sig.length < 130) {
-    throw new Error('Signature too short');
-  }
-  const compact = sig.slice(0, 128);
-  const recovery = Number.parseInt(sig.slice(128, 130), 16);
-  const messageBytes = Buffer.from(digestHex.replace('0x', ''), 'hex');
-  const signatureBytes = Buffer.from(compact, 'hex');
-  const publicKey = secp256k1.recoverPublicKey(messageBytes, signatureBytes, recovery, false);
-  const hash = keccak256(publicKey.slice(1));
-  return `0x${hash.slice(-40)}`.toLowerCase();
-};
-
-const verifyHelloAuth = (runtimeId: string, auth: RuntimeWsAuth, maxSkewMs: number): string | null => {
-  const nowTs = now();
-  if (!auth.nonce || !auth.signature || !auth.timestamp) {
-    return 'Missing auth fields';
-  }
-  if (Math.abs(nowTs - auth.timestamp) > maxSkewMs) {
-    return `Hello timestamp skew too large (${nowTs - auth.timestamp}ms)`;
-  }
-  const digest = hashHelloMessage(runtimeId, auth.timestamp, auth.nonce);
-  let recovered: string;
-  try {
-    recovered = recoverAddressFromSignature(digest, auth.signature);
-  } catch (error) {
-    return `Hello signature invalid: ${(error as Error).message}`;
-  }
-  if (recovered.toLowerCase() !== runtimeId.toLowerCase()) {
-    return 'Hello signature does not match runtimeId';
-  }
-  return null;
 };
 
 export const startRuntimeWsServer = (options: RuntimeWsServerOptions) => {

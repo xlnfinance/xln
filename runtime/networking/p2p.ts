@@ -329,6 +329,7 @@ export class RuntimeP2P {
         runtimeId: this.runtimeId,
         signerId: this.signerId,
         ...(runtimeSeed ? { seed: runtimeSeed } : {}),  // Pass seed for hello auth signing if available
+        useHelloAuth: true,
         encryptionKeyPair: this.encryptionKeyPair, // Pass our keypair for encryption/decryption
         onPeerEncryptionKey: (fromRuntimeId: string, pubKeyHex: string) => {
           const normalizedRuntimeId = normalizeRuntimeId(fromRuntimeId);
