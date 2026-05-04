@@ -9,6 +9,7 @@
   import AccountTokenDetails from './shared/AccountTokenDetails.svelte';
   import { buildAccountTokenDetails, isAccountLeftPerspective } from './shared/account-token-details';
   import { resolveEntityName } from '$lib/utils/entityNaming';
+  import { compareStableText } from '$lib/utils/stableSort';
 
   export let account: AccountMachine;
   export let counterpartyId: string;
@@ -137,7 +138,7 @@
     for (const row of activityRows) {
       for (const tx of row.txs) typeSet.add(String(tx?.type || 'unknown'));
     }
-    return Array.from(typeSet.values()).sort((a, b) => txTypeLabel(a).localeCompare(txTypeLabel(b)));
+    return Array.from(typeSet.values()).sort((a, b) => compareStableText(txTypeLabel(a), txTypeLabel(b)));
   })();
   $: filteredActivityRows = activityRows
     .filter((row) => activityStatusFilter === 'all' || row.kind === activityStatusFilter)

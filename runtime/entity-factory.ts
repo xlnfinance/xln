@@ -8,6 +8,7 @@ import { ethers } from 'ethers';
 import { getCachedSignerAddress } from './account-crypto';
 import { createJAdapter } from './jadapter';
 import { buildJAdapterConfigFromJurisdiction } from './jadapter/jurisdiction';
+import { compareStableText } from './serialization-utils';
 import type { ConsensusConfig, EntityType, JurisdictionConfig } from './types';
 import { DEBUG } from './utils';
 
@@ -86,7 +87,7 @@ export const generateLazyEntityId = (
   const sortedValidators = validatorData.slice().sort((a, b) => {
     const aAddr = resolveValidatorAddress(a.name);
     const bAddr = resolveValidatorAddress(b.name);
-    return aAddr.localeCompare(bAddr);
+    return compareStableText(aAddr, bAddr);
   });
 
   const shares: { [validatorId: string]: bigint } = {};

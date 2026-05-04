@@ -4,6 +4,7 @@
   import { replicas, xlnFunctions, xlnEnvironment } from '../../stores/xlnStore';
   import AccountPreview from './AccountPreview.svelte';
   import { getEntityDisplayName } from '$lib/utils/entityNaming';
+  import { compareStableText } from '$lib/utils/stableSort';
 
 export let replica: EntityReplica | null;
 export let selectedAccountId: string | null = null;
@@ -123,7 +124,7 @@ export let selectedAccountId: string | null = null;
         hasAccount
       };
     }).sort((a, b) => {
-      return a.entityId.localeCompare(b.entityId);
+      return compareStableText(a.entityId, b.entityId);
     });
   }
 
@@ -246,7 +247,7 @@ export let selectedAccountId: string | null = null;
       });
     }
 
-    items.sort((left, right) => right.createdAt - left.createdAt || left.id.localeCompare(right.id));
+    items.sort((left, right) => right.createdAt - left.createdAt || compareStableText(left.id, right.id));
     return {
       items: items.slice(0, 3),
       overflowCount: Math.max(0, items.length - 3),

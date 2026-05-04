@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
+  import { compareStableText } from '$lib/utils/stableSort';
 
   type DbKindFilter = 'all' | 'core' | 'infra';
 
@@ -265,7 +266,7 @@
       if (!matchesPrefix(entry.name)) continue;
       merged.set(entry.name, entry);
     }
-    return Array.from(merged.values()).sort((a, b) => a.name.localeCompare(b.name));
+    return Array.from(merged.values()).sort((a, b) => compareStableText(a.name, b.name));
   };
 
   async function refreshDatabaseList(): Promise<void> {
@@ -293,7 +294,7 @@
     }
     const db = await openDatabase(databaseName);
     try {
-      objectStoreNames = Array.from(db.objectStoreNames).sort((a, b) => a.localeCompare(b));
+      objectStoreNames = Array.from(db.objectStoreNames).sort(compareStableText);
       if (!selectedObjectStore || !objectStoreNames.includes(selectedObjectStore)) {
         selectedObjectStore = objectStoreNames[0] || '';
       }

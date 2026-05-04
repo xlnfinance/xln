@@ -14,6 +14,7 @@
   import type { Tab, EntityReplica } from '$lib/types/ui';
   import { entityAvatar, preferredAvatar } from '$lib/utils/avatar';
   import { resolveEntityName } from '$lib/utils/entityNaming';
+  import { compareStableText } from '$lib/utils/stableSort';
 
   export let tab: Tab;
   export let allowAddRuntime = false;
@@ -137,7 +138,7 @@
 
     return entities.sort((a, b) => {
       if (a.isSelf !== b.isSelf) return a.isSelf ? -1 : 1;
-      return a.name.localeCompare(b.name);
+      return compareStableText(a.name, b.name);
     });
   }
 

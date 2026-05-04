@@ -1,5 +1,6 @@
 import type { AccountMachine, Delta, EntityReplica, EntityTx, Env } from '../types';
 import { deriveDelta } from '../account-utils';
+import { compareStableText } from '../serialization-utils';
 
 export const HUB_MESH_TOKEN_ID = 1;
 export const HUB_MESH_CREDIT_AMOUNT = 1_000_000n * 10n ** 18n;
@@ -212,7 +213,7 @@ export const serializeReserves = (reserves: ReadonlyMap<string | number, bigint>
       if (Number.isFinite(leftNum) && Number.isFinite(rightNum) && leftNum !== rightNum) {
         return leftNum - rightNum;
       }
-      return left.localeCompare(right);
+      return compareStableText(left, right);
     });
   return Object.fromEntries(entries);
 };

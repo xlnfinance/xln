@@ -67,7 +67,7 @@ Created `EntityObject.ts`:
 - Label is child of entity group
 - Position updates propagate automatically
 
-### Phase 2: Extract Modules (TODO)
+### Phase 2: Extract Modules (Planned)
 
 Split Graph3DPanel.svelte:
 

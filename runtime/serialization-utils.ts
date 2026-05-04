@@ -132,10 +132,13 @@ const cloneArrayBuffer = (bytes: Uint8Array): ArrayBuffer => {
 
 const stableString = (value: TaggedJsonValue): string => JSON.stringify(value);
 
+export const compareStableText = (left: string, right: string): number =>
+  left < right ? -1 : left > right ? 1 : 0;
+
 const compareTaggedValues = (left: TaggedJsonValue, right: TaggedJsonValue): number => {
   const leftEncoded = stableString(left);
   const rightEncoded = stableString(right);
-  return leftEncoded.localeCompare(rightEncoded);
+  return compareStableText(leftEncoded, rightEncoded);
 };
 
 const compareTaggedEntries = (
@@ -215,7 +218,7 @@ const normalizeSerializableValue = (
     const result: TaggedJsonRecord = {};
     const keys = Object.keys(source)
       .filter((key) => !ALWAYS_EXCLUDED_KEYS.has(key) && !options.excludeKeys?.has(key))
-      .sort((left, right) => left.localeCompare(right));
+      .sort(compareStableText);
     for (const key of keys) {
       const value = normalizeSerializableValue(source[key], options, stack);
       if (value !== undefined) result[key] = value;

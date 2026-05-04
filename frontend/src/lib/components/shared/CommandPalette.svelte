@@ -15,6 +15,7 @@
   import { createEventDispatcher, onMount, onDestroy } from 'svelte';
   import { xlnEnvironment, xlnFunctions } from '../../stores/xlnStore';
   import { fly, fade } from 'svelte/transition';
+  import { compareStableText } from '$lib/utils/stableSort';
 
   export let isOpen = false;
 
@@ -201,7 +202,7 @@
       const aPrefix = a.name.toLowerCase().startsWith(q) ? 0 : 1;
       const bPrefix = b.name.toLowerCase().startsWith(q) ? 0 : 1;
       if (aPrefix !== bPrefix) return aPrefix - bPrefix;
-      return a.name.localeCompare(b.name);
+      return compareStableText(a.name, b.name);
     });
 
     return results;

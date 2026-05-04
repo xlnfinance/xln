@@ -7,7 +7,7 @@ import { ethers } from 'ethers';
 import type { EntityState, Env } from '../types';
 import type { BoardMetadata, Profile, ProfileAccount, ProfileTokenCapacity } from './gossip';
 import { deriveDelta, isLeft } from '../account-utils';
-import { safeStringify } from '../serialization-utils';
+import { compareStableText, safeStringify } from '../serialization-utils';
 import { deriveSignerAddressSync, getSignerAddress, getSignerPublicKey } from '../account-crypto';
 import { deriveEncryptionKeyPair, pubKeyToHex } from './p2p-crypto';
 
@@ -246,7 +246,7 @@ const compareTokenIdStrings = (left: string, right: string): number => {
   if (Number.isFinite(leftNum) && Number.isFinite(rightNum) && leftNum !== rightNum) {
     return leftNum - rightNum;
   }
-  return left.localeCompare(right);
+  return compareStableText(left, right);
 };
 
 /**
@@ -277,7 +277,7 @@ export function buildEntityAdvertisedStateFingerprint(
         tokenCapacities,
       };
     })
-    .sort((left, right) => left.counterpartyId.localeCompare(right.counterpartyId));
+    .sort((left, right) => compareStableText(left.counterpartyId, right.counterpartyId));
 
   const metadata = profile.metadata;
   const fingerprintPayload = {

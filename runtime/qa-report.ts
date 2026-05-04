@@ -1,6 +1,7 @@
 import { existsSync, readdirSync } from 'node:fs';
 import { readdir, readFile, stat } from 'node:fs/promises';
 import { basename, extname, join, resolve } from 'node:path';
+import { compareStableText } from './serialization-utils';
 
 export type QaSlowStep = {
   label: string;
@@ -280,7 +281,7 @@ const artifactKindRank: Record<QaArtifactKind, number> = {
 };
 
 const sortArtifacts = (artifacts: QaArtifact[]): QaArtifact[] =>
-  artifacts.sort((a, b) => artifactKindRank[a.kind] - artifactKindRank[b.kind] || a.name.localeCompare(b.name));
+  artifacts.sort((a, b) => artifactKindRank[a.kind] - artifactKindRank[b.kind] || compareStableText(a.name, b.name));
 
 const walkArtifacts = async (baseDir: string, currentDir: string, out: QaArtifact[]): Promise<void> => {
   const entries = await readdir(currentDir, { withFileTypes: true });
@@ -401,7 +402,7 @@ export const listQaRuns = async (limit = 20): Promise<QaRunManifest[]> => {
   const runIds = entries
     .filter(entry => entry.isDirectory() && /^\d{8}-\d{6}-\d{3}$/.test(entry.name))
     .map(entry => entry.name)
-    .sort((a, b) => b.localeCompare(a))
+    .sort((a, b) => compareStableText(b, a))
     .slice(0, limit);
   return await Promise.all(runIds.map(runId => readQaRun(runId)));
 };

@@ -33,6 +33,7 @@ import { inspectHankoForHash } from '../hanko/signing';
 import { deriveEncryptionKeyPair, pubKeyToHex, hexToPubKey, type P2PKeyPair } from './p2p-crypto';
 import { asFailFastPayload, failfastAssert } from './failfast';
 import { normalizeRuntimeId, isRuntimeId } from './runtime-id';
+import { compareStableText } from '../serialization-utils';
 import {
   DEFAULT_GOSSIP_BATCH_LIMIT,
   selectProfileBatch,
@@ -527,7 +528,7 @@ export class RuntimeP2P {
         open: client.isOpen(),
       });
     }
-    return rows.sort((left, right) => left.runtimeId.localeCompare(right.runtimeId));
+    return rows.sort((left, right) => compareStableText(left.runtimeId, right.runtimeId));
   }
 
   enqueueEntityInput(targetRuntimeId: string, input: RoutedEntityInput, ingressTimestamp?: number) {

@@ -21,7 +21,7 @@ import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceSc
 import { formatRuntime } from '../runtime-ascii';
 import { deriveDelta, isLeft } from '../account-utils';
 import { createGossipLayer } from '../networking/gossip';
-import { safeStringify } from '../serialization-utils';
+import { compareStableText, safeStringify } from '../serialization-utils';
 import { createEmptyBatch, batchAddReserveToReserve, getBatchSize } from '../j-batch';
 import { ethers } from 'ethers';
 
@@ -365,7 +365,7 @@ export async function ahb(env: Env): Promise<void> {
       throw new Error(`AHB: Missing private key for signer ${entry.signerId}`);
     }
     return { label: entry.label, wallet: new ethers.Wallet(ethers.hexlify(privateKey)) };
-  }).sort((a, b) => a.wallet.address.toLowerCase().localeCompare(b.wallet.address.toLowerCase()));
+  }).sort((a, b) => compareStableText(a.wallet.address.toLowerCase(), b.wallet.address.toLowerCase()));
 
   const [aliceEntry, hubEntry, bobEntry] = walletEntries;
   console.log(`[AHB] Wallet ordering: Alice=${aliceEntry?.label}, Hub=${hubEntry?.label}, Bob=${bobEntry?.label}`);

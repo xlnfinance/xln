@@ -6,6 +6,7 @@
  */
 
 import type { EntityTx, Env, NameSearchResult, ProfileUpdateTx } from './types';
+import { compareStableText } from './serialization-utils';
 import { formatEntityDisplay, generateEntityAvatar } from './utils';
 
 type DisplayProfile = {
@@ -87,7 +88,7 @@ export const searchEntityNames = async (
 
   matches.sort((left, right) => {
     if (left.relevance !== right.relevance) return right.relevance - left.relevance;
-    return left.name.localeCompare(right.name);
+    return compareStableText(left.name, right.name);
   });
 
   return matches.slice(0, Math.max(1, Math.floor(limit)));

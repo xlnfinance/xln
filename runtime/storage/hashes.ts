@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { serializeTaggedJson } from '../serialization-utils';
+import { compareStableText, serializeTaggedJson } from '../serialization-utils';
 import type { Env } from '../types';
 import {
   computeCanonicalEntityHash,
@@ -136,7 +136,7 @@ export const normalizeFrameEntityHashes = (entityHashes: StorageFrameEntityHash[
       hash: String(entry.hash || ''),
       cellCount: Number(entry.cellCount ?? 0),
     }))
-    .sort((left, right) => left.entityId.localeCompare(right.entityId));
+    .sort((left, right) => compareStableText(left.entityId, right.entityId));
 
 export const assertEntityHashesEqual = (
   actual: StorageFrameEntityHash[] | undefined,
@@ -199,7 +199,7 @@ export const prepareStorageCanonicalStateHashes = (
   }
 
   const canonicalEntityHashes = Array.from(canonicalHashByEntity.values())
-    .sort((left, right) => left.entityId.localeCompare(right.entityId));
+    .sort((left, right) => compareStableText(left.entityId, right.entityId));
   return {
     canonicalEntityHashes,
     canonicalStateHash: computeCanonicalRuntimeStateHash(env.height, env.timestamp, canonicalEntityHashes),
@@ -224,7 +224,7 @@ export const computeStorageFrameHash = (record: StorageFrameRecord): string => {
         hash: entry.hash,
         cellCount: entry.cellCount,
       }))
-      .sort((left, right) => left.entityId.localeCompare(right.entityId)),
+      .sort((left, right) => compareStableText(left.entityId, right.entityId)),
   });
 };
 
@@ -731,7 +731,7 @@ export const readAllEntityHashDocs = async (db: RuntimeDbLike): Promise<Map<stri
 export const toFrameEntityHashes = (docs: Iterable<StorageEntityHashDoc>): StorageFrameEntityHash[] =>
   Array.from(docs)
     .map((doc) => ({ entityId: normalizeEntityId(doc.entityId), hash: doc.hash, cellCount: Number(doc.cellCount) }))
-    .sort((left, right) => left.entityId.localeCompare(right.entityId));
+    .sort((left, right) => compareStableText(left.entityId, right.entityId));
 
 export const prepareStorageStateHashes = async (options: {
   db: RuntimeDbLike;
