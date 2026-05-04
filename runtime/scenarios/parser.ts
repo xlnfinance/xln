@@ -72,11 +72,10 @@ export function parseScenario(text: string): ParsedScenario {
     if (trimmed.startsWith('INCLUDE ')) {
       const includePath = trimmed.substring(8).trim();
       includes.push(includePath);
-      // TODO: Actually load and merge included scenarios
-      warnings.push({
+      errors.push({
         lineNumber: context.lineNumber,
-        message: 'INCLUDE directive parsed but not yet implemented',
-        suggestion: 'Included scenarios will be merged in future implementation',
+        message: `INCLUDE directive is not supported: ${includePath}`,
+        context: 'Inline the scenario content before parsing.',
       });
       continue;
     }

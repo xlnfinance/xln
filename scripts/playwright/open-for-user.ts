@@ -34,7 +34,7 @@ try {
   const ahbButton = page.locator('button:has-text("Alice-Hub-Bob")').first();
   await ahbButton.click();
 
-  console.log('✅ AHB clicked. Waiting for prepopulate (15s)...');
+  console.log('✅ AHB clicked. Waiting for scenario load (15s)...');
   await page.waitForTimeout(15000);
 
   console.log('🖱️  Looking for Bob entity to click...');

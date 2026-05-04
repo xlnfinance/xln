@@ -321,7 +321,7 @@ export interface XLNModule {
   setRuntimeId: (env: Env, id: string | null) => void;
   deriveRuntimeId: (seed: string) => string;  // Derive runtimeId from seed (for isolated envs)
 
-  // Scenarios namespace (replaces legacy prepopulate functions)
+  // Scenarios namespace
   scenarios: {
     ahb: (env: Env) => Promise<Env>;
     lockAhb: (env: Env) => Promise<Env>;
@@ -329,10 +329,6 @@ export interface XLNModule {
     grid: (env: Env) => Promise<Env>;
     fullMechanics: (env: Env) => Promise<Env>;
   };
-
-  // Deprecated aliases (backwards compatibility - will be removed)
-  prepopulateAHB: (env: Env) => Promise<Env>;
-  prepopulateFullMechanics: (env: Env) => Promise<Env>;
 
   // Database operations
   clearDB: (env?: Env) => Promise<void>;

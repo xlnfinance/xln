@@ -290,7 +290,7 @@ export async function createRpcAdapter(
       };
     }
     throw new Error(
-      `[JAdapter:rpc] EIP-1559 fee data unavailable for chainId=${config.chainId}. Refusing legacy gasPrice mode.`,
+      `[JAdapter:rpc] EIP-1559 fee data unavailable for chainId=${config.chainId}. Refusing gasPrice-only mode.`,
     );
   };
 

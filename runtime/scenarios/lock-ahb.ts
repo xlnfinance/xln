@@ -29,9 +29,8 @@ const USDC_TOKEN_ID = 1;
 const HUB_INITIAL_RESERVE = usd(10_000_000);
 const SIGNER_PREFUND = usd(1_000_000);
 
-// Transition wrapper: pushSnapshot -> snap + process (to be removed later)
-// This maintains backward compatibility while we migrate calls
-// Note: The old pushSnapshot had complex signature. This version accepts:
+// Scenario transition wrapper: records a snapshot and optionally processes inputs.
+// This version accepts:
 // - env, title, opts (required)
 // - Optional 4th param: either EntityInput[] OR {expectedSolvency: bigint} to merge into opts
 async function pushSnapshot(

@@ -488,20 +488,21 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
   console.log(`🏛️ [2/3] E-MACHINE: ${entityShort} ← ${rawEvents.length} events (block ${blockNumber})`);
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Skip already-finalized blocks
+  // Skip already-finalized blocks and reject same-height hash conflicts.
   // ─────────────────────────────────────────────────────────────────────────────
-  // Check if this block height was already finalized (prevents re-applying events)
-  const alreadyFinalized = entityState.jBlockChain.some(b => b.jHeight === blockNumber);
-  if (alreadyFinalized) {
+  const finalizedAtHeight = entityState.jBlockChain.find(b => b.jHeight === blockNumber);
+  if (finalizedAtHeight) {
+    if (finalizedAtHeight.jBlockHash !== blockHash) {
+      throw new Error(
+        `j_event conflict: block ${blockNumber} finalized as ${finalizedAtHeight.jBlockHash}, observed ${blockHash}`,
+      );
+    }
     console.log(`   ⏭️ SKIP: block ${blockNumber} already finalized`);
     return { newState: entityState, mempoolOps: [] };
   }
 
   // Skip blocks at or below lastFinalizedJHeight (monotonic progress only)
-  // Note: The == case is already caught by alreadyFinalized check above,
-  // but we use <= here for explicit monotonic enforcement
-  // TODO: For multi-signer production, add appliedJBlockHashes: Set<string>
-  // to track exact block hashes and reject conflicting observations
+  // Note: The == case is already handled above with hash conflict detection.
   if (blockNumber <= entityState.lastFinalizedJHeight) {
     console.log(`   ⏭️ SKIP: stale block (${blockNumber} <= finalized ${entityState.lastFinalizedJHeight})`);
     return { newState: entityState, mempoolOps: [] };
@@ -924,6 +925,22 @@ async function tryFinalizeJBlocks(
   // ─────────────────────────────────────────────────────────────────────────────
   const finalizedHeights: number[] = [];
   console.log(`   📊 OBSERVATION-GROUPS: ${observationGroups.size} groups, keys=[${Array.from(observationGroups.keys()).join(', ')}]`);
+
+  const thresholdHashesByHeight = new Map<number, Set<string>>();
+  for (const observations of observationGroups.values()) {
+    const uniqueSigners = new Set(observations.map(o => o.signerId));
+    if (BigInt(uniqueSigners.size) < threshold) continue;
+    const jHeight = observations[0]!.jHeight;
+    const jBlockHash = observations[0]!.jBlockHash;
+    const hashes = thresholdHashesByHeight.get(jHeight) ?? new Set<string>();
+    hashes.add(jBlockHash);
+    thresholdHashesByHeight.set(jHeight, hashes);
+    if (hashes.size > 1) {
+      throw new Error(
+        `j_event conflict: multiple threshold hashes for block ${jHeight}: ${Array.from(hashes).join(', ')}`,
+      );
+    }
+  }
 
   for (const [_key, observations] of observationGroups) {
     // Count UNIQUE signers (ignore duplicate submissions from same signer)

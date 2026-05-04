@@ -731,7 +731,7 @@ export async function runRebalanceScenario(): Promise<void> {
 
     if (hubPost.staleObservationCount > 0 || userPost.staleObservationCount > 0) {
       console.warn(
-        `  ⚠️ TODO: stale J-observations remain for ${userId.slice(-4)} ` +
+        `  ⚠️ Stale J-observations remain for ${userId.slice(-4)} ` +
         `(hub=${hubPost.staleObservationCount}, user=${userPost.staleObservationCount})`,
       );
     }
@@ -911,14 +911,14 @@ export async function runRebalanceScenario(): Promise<void> {
   const blockingPending = pendingAfterBroadcast.filter(p => trackedRequestUserIds.has(p.userId));
   if (rebalanceExecuted) {
     if (blockingPending.length > 0) {
-      console.warn(`  ⚠️ TODO: tracked requestedRebalance not fully cleared after refill cycles:`);
+      console.warn(`  ⚠️ Tracked requestedRebalance not fully cleared after refill cycles:`);
       for (const p of blockingPending) {
         console.warn(`     - ${p.userName}(hub=${p.hubPending}, user=${p.userPending})`);
       }
     }
     const nonBlockingPending = pendingAfterBroadcast.filter(p => !trackedRequestUserIds.has(p.userId));
     if (nonBlockingPending.length > 0) {
-      console.warn(`  ⚠️ TODO: late/untracked requestedRebalance remains after refill cycles:`);
+      console.warn(`  ⚠️ Late/untracked requestedRebalance remains after refill cycles:`);
       for (const p of nonBlockingPending) {
         console.warn(`     - ${p.userName}(hub=${p.hubPending}, user=${p.userPending})`);
       }

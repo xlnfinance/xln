@@ -12,7 +12,7 @@
   import { onDestroy, onMount } from 'svelte';
   import { panelBridge } from '../utils/panelBridge';
   // @ts-ignore - Vite raw import
-  import prepopulateAHBCode from '../../../../../runtime/scenarios/ahb.ts?raw';
+  import ahbScenarioCode from '../../../../../runtime/scenarios/ahb.ts?raw';
   // @ts-ignore - Vite raw import
   import settleScenarioCode from '../../../../../runtime/scenarios/settle.ts?raw';
   import { shortAddress } from '$lib/utils/format';
@@ -319,7 +319,7 @@
 
   // Scenario Code - shows actual scenarios/ahb.ts from /runtime (via Vite raw import)
   let scenarioCodeTextarea: HTMLTextAreaElement;
-  const scenarioCode = prepopulateAHBCode;
+  const scenarioCode = ahbScenarioCode;
 
   // Find line number for current frame in scenarios/ahb.ts
   function getFrameLineNumber(frameIndex: number): number {
@@ -739,8 +739,7 @@
       $isolatedEnv.history = [];
       console.log('[H-Topology] Cleared old state');
 
-      // Run regular prepopulate (H-topology)
-      await XLN.prepopulate($isolatedEnv, XLN.process);
+      await XLN.scenarios.ahb($isolatedEnv);
 
       // CRITICAL: Set timeIndex BEFORE history to avoid race condition
       const frames = $isolatedEnv.history || [];
@@ -778,8 +777,7 @@
       $isolatedEnv.history = [];
       console.log('[Full Mechanics] Cleared old state');
 
-      // Run comprehensive mechanics demo
-      await XLN.prepopulateFullMechanics($isolatedEnv);
+      await XLN.scenarios.fullMechanics($isolatedEnv);
 
       // CRITICAL: Set timeIndex BEFORE history to avoid race condition
       const frames = $isolatedEnv.history || [];

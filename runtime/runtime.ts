@@ -1834,7 +1834,6 @@ const detachRuntimeEnv = (env: Env): void => {
 
 /**
  * Identity function for env (no module-level env exists).
- * Use to preserve legacy call sites that expected getEnv().
  */
 export const getEnv = (env?: Env | null): Env | null => {
   if (!env) {
@@ -2491,8 +2490,7 @@ export const clearGossip = (env: Env): void => {
 };
 
 /**
- * Initialize module-level env if not already set
- * Call this early in frontend initialization before prepopulate
+ * Create a runtime environment for frontend initialization.
  */
 export const initEnv = (seed?: string | null): Env => {
   return createEmptyEnv(seed ?? null);
@@ -2661,7 +2659,6 @@ const applyRuntimeInput = async (
           const adapterConfig: JAdapterConfig = {
             mode: isBrowserVM ? 'browservm' : 'rpc',
             chainId: runtimeTx.data.chainId,
-            // TODO: Pass all rpcs for failover: rpcs: runtimeTx.data.rpcs
           };
           if (!isBrowserVM) {
             const rpcUrl = runtimeTx.data.rpcs[0];
@@ -5043,10 +5040,7 @@ export const clearDB = async (env?: Env): Promise<void> => {
   }
 };
 
-// === PREPOPULATE FUNCTION ===
-// REMOVED: Legacy prepopulate functions replaced by scenarios namespace below
-
-// Scenarios namespace for better organization
+// === SCENARIO FUNCTIONS ===
 export const scenarios = {
   ahb: async (env: Env): Promise<Env> => {
     const { ahb } = await import('./scenarios/ahb');
@@ -5095,10 +5089,6 @@ export const scenarios = {
   },
 };
 
-// Deprecated aliases (backwards compatibility - will be removed)
-export const prepopulateAHB = scenarios.ahb;
-export const prepopulateFullMechanics = scenarios.fullMechanics;
-
 // === SCENARIO SYSTEM ===
 export { parseScenario, mergeAndSortEvents } from './scenarios/parser.js';
 export { executeScenario } from './scenarios/executor.js';
@@ -5120,8 +5110,8 @@ export {
 } from './account-crypto.js';
 
 // === NAME RESOLUTION WRAPPERS (override imports) ===
-// Runtime no longer keeps a module-global env/db. These legacy wrappers stay
-// available for external callers, but they only expose deterministic fallbacks.
+// Runtime no longer keeps a module-global env/db; these pure wrappers expose
+// deterministic name formatting for callers that do not own an Env.
 const searchEntityNames = (query: string, limit?: number) => searchEntityNamesOriginal(null, query, limit);
 const resolveEntityName = (entityId: string) => resolveEntityNameOriginal(null, entityId);
 const getEntityDisplayInfoFromProfile = (entityId: string) => getEntityDisplayInfoFromProfileOriginal(null, entityId);

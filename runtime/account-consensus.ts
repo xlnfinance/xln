@@ -90,16 +90,6 @@ function getDepositoryAddress(env: Env): string {
       }
       return jReplica.depositoryAddress;
     }
-    // Fallback to legacy contracts.depository
-    if (jReplica?.contracts?.depository) {
-      if (browserVMAddress && browserVMAddress !== jReplica.contracts.depository) {
-        console.warn(
-          `[account-consensus] browserVM depository ${browserVMAddress} ignored in favor of active jurisdiction ` +
-            `${env.activeJurisdiction}=${jReplica.contracts.depository}`,
-        );
-      }
-      return jReplica.contracts.depository;
-    }
   }
 
   // Fallback: first J-replica with depositoryAddress
@@ -109,10 +99,6 @@ function getDepositoryAddress(env: Env): string {
     }
     if (jReplica.depositoryAddress) {
       return jReplica.depositoryAddress;
-    }
-    // Fallback to legacy contracts.depository
-    if (jReplica.contracts?.depository) {
-      return jReplica.contracts.depository;
     }
   }
 
@@ -846,8 +832,7 @@ export async function proposeAccountFrame(
   }
   accountMachine.disputeProofBodiesByHash[proofResult.proofBodyHash] = proofResult.proofBodyStruct;
 
-  // NOTE: Settlements are now handled via SettlementWorkspace flow (entity-tx/handlers/settle.ts)
-  // The old frame-level settlement signing was removed (deprecated buildSettlementDiffs)
+  // Settlements are handled via SettlementWorkspace flow (entity-tx/handlers/settle.ts).
 
   console.log(`✅ Signed frame + dispute proof for account ${accountMachine.proofHeader.toEntity.slice(-4)}`);
 
@@ -1312,8 +1297,7 @@ export async function handleAccountInput(
             `📤 LEFT-WINS-BUT-HAS-MEMPOOL: ${accountMachine.mempool.length} txs waiting - notifying counterparty`,
           );
           events.push(`⚠️ LEFT has ${accountMachine.mempool.length} pending txs while waiting for RIGHT's ACK`);
-          // Send a message with just mempool status so they know we have pending work
-          // TODO: Determine if we should send frames or just signal
+        // The pending mempool remains local until RIGHT acknowledges our frame.
         }
 
         // STRICT CONSENSUS: ignored frame must not mutate local account state.
@@ -2031,7 +2015,7 @@ export async function generateAccountProof(
     lastUpdatedHeight: accountMachine.currentHeight,
   };
 
-  // Create proof structure compatible with Depository.sol (legacy format)
+  // Create proof structure expected by Depository.sol.
   const proofData = {
     fromEntity: accountMachine.proofHeader.fromEntity,
     toEntity: accountMachine.proofHeader.toEntity,

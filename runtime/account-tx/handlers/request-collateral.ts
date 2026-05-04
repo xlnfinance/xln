@@ -17,8 +17,8 @@
  * Reference: 2019src.txt line 2976 (they_requested_deposit)
  */
 
-import type { AccountMachine, AccountTx, RebalancePolicy } from '../../types';
-import { DEFAULT_SOFT_LIMIT, DEFAULT_HARD_LIMIT, DEFAULT_MAX_FEE } from '../../types';
+import type { AccountMachine, AccountTx } from '../../types';
+import { DEFAULT_SOFT_LIMIT } from '../../types';
 import { isLeftEntity } from '../../entity-id-utils';
 import { deriveDelta } from '../../account-utils';
 
@@ -194,35 +194,11 @@ export function checkAutoRebalance(
     return result;
   }
 
-  // Bootstrap legacy accounts that were created before rebalancePolicy existed.
-  // This keeps faucet/offchain auto-collateralization working without manual setup.
   if (accountMachine.rebalancePolicy.size === 0) {
-    for (const [tokenId] of accountMachine.deltas.entries()) {
-      const defaultPolicy: RebalancePolicy = {
-        r2cRequestSoftLimit: DEFAULT_SOFT_LIMIT,
-        hardLimit: DEFAULT_HARD_LIMIT,
-        maxAcceptableFee: DEFAULT_MAX_FEE,
-      };
-      accountMachine.rebalancePolicy.set(tokenId, defaultPolicy);
-      result.push({
-        type: 'set_rebalance_policy',
-        data: {
-          tokenId,
-          r2cRequestSoftLimit: defaultPolicy.r2cRequestSoftLimit,
-          hardLimit: defaultPolicy.hardLimit,
-          maxAcceptableFee: defaultPolicy.maxAcceptableFee,
-        },
-      });
-      console.log(
-        `🔄 Auto-rebalance policy bootstrapped: token=${tokenId} soft=${defaultPolicy.r2cRequestSoftLimit} hard=${defaultPolicy.hardLimit} maxFee=${defaultPolicy.maxAcceptableFee}`,
-      );
-    }
-    if (accountMachine.rebalancePolicy.size === 0) {
-      console.log(
-        `⏭️ Auto-rebalance skipped: no rebalancePolicy and no deltas (our=${ourEntityId.slice(-4)}, cp=${counterpartyId.slice(-4)})`,
-      );
-      return result;
-    }
+    console.log(
+      `⏭️ Auto-rebalance skipped: no rebalancePolicy (our=${ourEntityId.slice(-4)}, cp=${counterpartyId.slice(-4)})`,
+    );
+    return result;
   }
 
   const isLeft = isLeftEntity(ourEntityId, counterpartyId);

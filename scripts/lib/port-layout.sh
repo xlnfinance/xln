@@ -16,7 +16,7 @@ xln_port_number() {
 }
 
 xln_derived_port() {
-  local legacy="$1"
+  local default_port="$1"
   local offset="$2"
   if xln_port_base_enabled; then
     local base
@@ -24,7 +24,7 @@ xln_derived_port() {
     printf '%s' "$((base + offset))"
     return 0
   fi
-  xln_port_number "$legacy"
+  xln_port_number "$default_port"
 }
 
 xln_rpc_port() {

@@ -489,8 +489,7 @@ export function createJurisdictionConfig(
 // ============================================================================
 
 /**
- * Create numbered entity using importReplica pattern
- * @deprecated Use registerEntities() for proper on-chain registration
+ * Create a numbered scenario entity using importReplica.
  */
 export async function createNumberedEntity(
   env: Env,
@@ -528,8 +527,7 @@ export async function createNumberedEntity(
 }
 
 /**
- * Create 3D grid of entities (NxMxZ)
- * @deprecated Use registerEntities() for proper on-chain registration
+ * Create a 3D grid of scenario entities (NxMxZ).
  */
 export async function createGridEntities(
   env: Env,

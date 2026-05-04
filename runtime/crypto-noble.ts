@@ -116,7 +116,6 @@ export class NobleCryptoProvider implements CryptoProvider {
     return bytes;
   }
 
-  // Accept both modern hex (0x + 64 chars) and legacy/base64 key encodings.
   private parseKeyBytes(raw: string, label: string): Uint8Array {
     const key = raw.trim();
     if (!key) throw new Error(`Missing ${label}`);
@@ -132,18 +131,6 @@ export class NobleCryptoProvider implements CryptoProvider {
       return out;
     }
 
-    if (key.length % 4 !== 0 || !/^[A-Za-z0-9+/]+={0,2}$/.test(key)) {
-      throw new Error(`Unsupported ${label} format`);
-    }
-    let bytes: Uint8Array;
-    try {
-      bytes = this.base64ToBytes(key);
-    } catch {
-      throw new Error(`Unsupported ${label} format`);
-    }
-    if (bytes.length !== 32) {
-      throw new Error(`Invalid ${label} length: expected 32, got ${bytes.length}`);
-    }
-    return bytes;
+    throw new Error(`Unsupported ${label} format`);
   }
 }
