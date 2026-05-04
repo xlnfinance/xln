@@ -277,23 +277,8 @@ contract EntityProvider is ERC1155 {
     require(entities[entityId].currentBoardHash != bytes32(0), "Entity doesn't exist");
     require(keccak256(abi.encode(articles)) == entities[entityId].articlesHash, "Invalid articles");
     
-    // Check permissions and delays
     uint32 delay = _getDelayForProposer(articles, proposerType);
-    require(delay > 0, "Proposer type disabled");
-    
-    // Verify proposer has the right to propose based on type
-    if (proposerType == ProposerType.CONTROL) {
-      // Control holders can override any proposal
-      _validateControlProposer(entityId, msg.sender, articles);
-    } else if (proposerType == ProposerType.BOARD) {
-      // Current board can propose (shortest delay)
-      // NOTE: Board verification requires Hanko, not simple balance check
-      // For now, allow any caller (board verification happens via Hanko at execution)
-      // TODO: Add board member verification via EntityProvider
-    } else if (proposerType == ProposerType.DIVIDEND) {
-      // Dividend holders can propose (longest delay)
-      _validateDividendProposer(entityId, msg.sender);
-    }
+    _validateGovernanceCaller(entityId, msg.sender, articles, proposerType);
     
     // Cancel any existing proposal that can be overridden
     if (entities[entityId].proposedBoardHash != bytes32(0)) {
@@ -341,7 +326,8 @@ contract EntityProvider is ERC1155 {
     require(entities[entityId].proposedBoardHash != bytes32(0), "No proposed board");
     require(keccak256(abi.encode(articles)) == entities[entityId].articlesHash, "Invalid articles");
     
-    // Check if this proposer type can cancel the existing proposal
+    _validateGovernanceCaller(entityId, msg.sender, articles, proposerType);
+
     require(_canCancelProposal(proposerType, entities[entityId].proposerType), 
             "Cannot cancel this proposal");
     
@@ -900,7 +886,7 @@ contract EntityProvider is ERC1155 {
   function _getDelayForProposer(EntityArticles memory articles, ProposerType proposerType) internal pure returns (uint32) {
     if (proposerType == ProposerType.CONTROL) return articles.controlDelay;
     if (proposerType == ProposerType.DIVIDEND) return articles.dividendDelay;
-    return 0; // BOARD has no delay
+    revert("Board proposer disabled");
   }
 
   function _canCancelProposal(ProposerType canceller, ProposerType existing) internal pure returns (bool) {
@@ -924,6 +910,23 @@ contract EntityProvider is ERC1155 {
     (, uint256 dividendTokenId) = getTokenIds(uint256(entityId));
     uint256 proposerBalance = balanceOf(proposer, dividendTokenId);
     require(proposerBalance > 0, "No dividend tokens");
+  }
+
+  function _validateGovernanceCaller(
+    bytes32 entityId,
+    address proposer,
+    EntityArticles memory articles,
+    ProposerType proposerType
+  ) internal view {
+    if (proposerType == ProposerType.CONTROL) {
+      _validateControlProposer(entityId, proposer, articles);
+      return;
+    }
+    if (proposerType == ProposerType.DIVIDEND) {
+      _validateDividendProposer(entityId, proposer);
+      return;
+    }
+    revert("Board proposer disabled");
   }
 
   function _validateControlSupport(bytes32 entityId, address[] memory supporters, EntityArticles memory articles) internal view {
