@@ -1301,13 +1301,13 @@ const hasRuntimeWork = (env: Env): boolean => {
 };
 
 /**
- * True only when a hub has periodic/security work that actually needs wakeups.
- * Prevents synthetic empty ticks for fully-idle hubs.
+ * True when an entity has periodic/security work that actually needs wakeups.
+ * Generic bilateral work must not be hub-gated: a normal user runtime with a
+ * lost ACK still needs to wake up and resend its pending account frame.
  */
-const hubNeedsPeriodicWake = (replica: EntityReplica): boolean => {
+export const entityNeedsPeriodicWake = (replica: EntityReplica): boolean => {
   const state = replica?.state;
-  if (!state?.hubRebalanceConfig) return false;
-  if (state.jBatchState?.sentBatch) return true;
+  if (!state) return false;
 
   for (const accountMachine of state.accounts.values()) {
     const settlementWorkspace = accountMachine.settlementWorkspace;
@@ -1319,6 +1319,12 @@ const hubNeedsPeriodicWake = (replica: EntityReplica): boolean => {
 
     if (accountMachine.activeDispute) return true;
     if (accountMachine.pendingFrame || accountMachine.pendingAccountInput) return true;
+  }
+
+  if (!state.hubRebalanceConfig) return false;
+  if (state.jBatchState?.sentBatch) return true;
+
+  for (const accountMachine of state.accounts.values()) {
     if ((accountMachine.requestedRebalance?.size ?? 0) > 0) return true;
     if ((accountMachine.requestedRebalanceFeeState?.size ?? 0) > 0) return true;
   }
@@ -1348,7 +1354,7 @@ const hasDueEntityHooks = (env: Env): boolean => {
     }
     // Periodic tasks (setInterval-like) — only when hub has actual pending work.
     // Fully idle hubs should not receive synthetic empty pings.
-    if (hubNeedsPeriodicWake(replica)) {
+    if (entityNeedsPeriodicWake(replica)) {
       const tasks = crontab.tasks;
       if (tasks && tasks.size > 0) {
         for (const task of tasks.values()) {
@@ -1393,7 +1399,7 @@ const getEarliestWallClockDueTimestamp = (env: Env): number | null => {
       }
     }
 
-    if (hubNeedsPeriodicWake(replica)) {
+    if (entityNeedsPeriodicWake(replica)) {
       const tasks = crontab.tasks;
       if (tasks && tasks.size > 0) {
         for (const task of tasks.values()) {
@@ -1441,7 +1447,7 @@ const getNextWallClockWakeTimestamp = (env: Env): number | null => {
       }
     }
 
-    if (hubNeedsPeriodicWake(replica)) {
+    if (entityNeedsPeriodicWake(replica)) {
       const tasks = crontab.tasks;
       if (tasks && tasks.size > 0) {
         for (const task of tasks.values()) {
@@ -1531,7 +1537,7 @@ const generateHookPings = (env: Env, nowMs = getRuntimeNowMs(env), queuedAt = en
       }
     }
     // Periodic tasks — only when hub has actual pending work.
-    if (!hasDue && hubNeedsPeriodicWake(replica)) {
+    if (!hasDue && entityNeedsPeriodicWake(replica)) {
       const tasks = crontab.tasks;
       if (tasks && tasks.size > 0) {
         for (const task of tasks.values()) {

@@ -5,8 +5,8 @@ import { TIMING } from '../constants';
 import { initCrontab, scheduleHook } from '../entity-crontab';
 import { generateLazyEntityId } from '../entity-factory';
 import { processEventBatch } from '../jadapter/watcher';
-import { createEmptyEnv, enqueueRuntimeInput, process, startRuntimeLoop } from '../runtime';
-import type { EntityReplica } from '../types';
+import { createEmptyEnv, enqueueRuntimeInput, entityNeedsPeriodicWake, process, startRuntimeLoop } from '../runtime';
+import type { AccountMachine, EntityReplica } from '../types';
 
 const makeReplica = (entityId: string, timestamp: number): EntityReplica =>
   ({
@@ -219,6 +219,23 @@ describe('runtime ingress timestamp', () => {
     expect(env.timestamp).toBeGreaterThanOrEqual(dueAt);
     const updatedReplica = env.eReplicas.get(`${entityId}:1`);
     expect(updatedReplica?.state.crontabState?.hooks?.has('watchdog:idle-loop-due-after-wall-clock')).toBe(false);
+  });
+
+  test('non-hub pending account frames keep the runtime wakeable for ACK resend', () => {
+    const entityId = `0x${'99'.repeat(32)}`;
+    const counterpartyId = `0x${'aa'.repeat(32)}`;
+    const replica = makeReplica(entityId, Date.now());
+    replica.state.profile.isHub = false;
+    delete replica.state.hubRebalanceConfig;
+    replica.state.accounts.set(counterpartyId, {
+      pendingFrame: {
+        height: 10,
+        timestamp: replica.state.timestamp - 20_000,
+        accountTxs: [],
+      },
+    } as AccountMachine);
+
+    expect(entityNeedsPeriodicWake(replica)).toBe(true);
   });
 
   test('runtime loop waits for minFrameDelayMs between processed cycles', async () => {
