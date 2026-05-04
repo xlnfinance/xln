@@ -83,7 +83,7 @@ function killMLXModel(modelId: string): Promise<void> {
 }
 
 /**
- * Kill ALL MLX server processes (legacy compatibility)
+ * Kill all MLX server processes.
  */
 function killMLXServer(): Promise<void> {
   return new Promise(async (resolve) => {
@@ -1106,7 +1106,6 @@ serve({
           await killMLXModel(modelId);
           return new Response(JSON.stringify({ success: true, message: `Model ${modelId} unloaded` }), { headers });
         } else {
-          // Unload all models (legacy behavior)
           await killMLXServer();
           return new Response(JSON.stringify({ success: true, message: "All MLX servers stopped" }), { headers });
         }
