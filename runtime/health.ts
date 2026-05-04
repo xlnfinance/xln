@@ -3,6 +3,7 @@
 
 import type { EntityReplica, Env } from './types.js';
 import { getP2PState } from './runtime.js';
+import { compareStableText } from './serialization-utils';
 
 export interface HealthStatus {
   timestamp: number;
@@ -74,7 +75,7 @@ const serializeReserves = (reserves: ReadonlyMap<string | number, bigint>): Reco
       if (Number.isFinite(leftNum) && Number.isFinite(rightNum) && leftNum !== rightNum) {
         return leftNum - rightNum;
       }
-      return left.localeCompare(right);
+      return compareStableText(left, right);
     });
   return Object.fromEntries(entries);
 };

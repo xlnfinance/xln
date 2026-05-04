@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { deserializeTaggedJson, safeParse, safeStringify, serializeTaggedJson } from '../serialization-utils';
+import { compareStableText, deserializeTaggedJson, safeParse, safeStringify, serializeTaggedJson } from '../serialization-utils';
 import { decode, encode } from '../snapshot-coder';
 import { applyCommand, createBook, type BookState } from '../orderbook';
 import { createOrderbookExtState, replaceOrderbookPair, type OrderbookExtState } from '../orderbook/types';
@@ -73,10 +73,10 @@ const collectRoundTripDiffs = (
   }
   if (before instanceof Map && after instanceof Map) {
     const beforeEntries = Array.from(before.entries()).sort((left, right) =>
-      stringifyValue(left[0]).localeCompare(stringifyValue(right[0])),
+      compareStableText(stringifyValue(left[0]), stringifyValue(right[0])),
     );
     const afterEntries = Array.from(after.entries()).sort((left, right) =>
-      stringifyValue(left[0]).localeCompare(stringifyValue(right[0])),
+      compareStableText(stringifyValue(left[0]), stringifyValue(right[0])),
     );
     if (beforeEntries.length !== afterEntries.length) {
       diffs.push({

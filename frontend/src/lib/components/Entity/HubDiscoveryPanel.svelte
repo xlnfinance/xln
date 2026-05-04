@@ -17,6 +17,7 @@
     requireSignerIdForEntity,
     getConnectedCounterpartyIds,
   } from '$lib/utils/entityReplica';
+  import { compareStableText } from '$lib/utils/stableSort';
   import { RefreshCw, ChevronDown, ChevronUp, Plus, Check, AlertTriangle } from 'lucide-svelte';
 
   export let entityId: string = '';
@@ -76,7 +77,7 @@
       ...hub,
       isConnected: connectedHubIds.has(normalizeEntityId(hub.entityId)),
     }))
-    .sort((a, b) => a.name.localeCompare(b.name));
+    .sort((a, b) => compareStableText(a.name, b.name));
 
   function formatFee(ppm?: number): string {
     if (!ppm && ppm !== 0) return '-';

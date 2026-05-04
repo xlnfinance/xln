@@ -7,6 +7,7 @@
 
 import { writable, get } from 'svelte/store';
 import { ethers } from 'ethers';
+import { compareStableText } from '$lib/utils/stableSort';
 
 export interface JMachineConfig {
   name: string;
@@ -107,7 +108,7 @@ export function normalizeJMachineConfigList(raw: unknown): JMachineConfig[] {
   for (const config of configs) {
     deduped.set(config.name.toLowerCase(), config);
   }
-  return Array.from(deduped.values()).sort((a, b) => a.name.localeCompare(b.name));
+  return Array.from(deduped.values()).sort((a, b) => compareStableText(a.name, b.name));
 }
 
 export function stringifyJMachineConfig(config: JMachineConfig): string {

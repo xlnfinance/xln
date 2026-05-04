@@ -4,6 +4,7 @@
   import { xlnFunctions } from '$lib/stores/xlnStore';
   import { amountToUsd } from '$lib/utils/assetPricing';
   import { getEntityDisplayName } from '$lib/utils/entityNaming';
+  import { compareStableText } from '$lib/utils/stableSort';
   import type { DebtEntry, EntityState, Env, EnvSnapshot } from '@xln/runtime/xln-api';
 
   export let entityId: string;
@@ -70,7 +71,7 @@
       .flatMap((bucket) => Array.from(bucket.values()))
       .sort((left, right) =>
         Number(right.lastUpdatedBlock || 0) - Number(left.lastUpdatedBlock || 0) ||
-        String(left.debtId).localeCompare(String(right.debtId)),
+        compareStableText(String(left.debtId), String(right.debtId)),
       );
   }
 
@@ -131,7 +132,7 @@
     if (left.direction !== right.direction) return left.direction === 'out' ? -1 : 1;
     const blockDiff = Number(right.lastUpdatedBlock || 0) - Number(left.lastUpdatedBlock || 0);
     if (blockDiff !== 0) return blockDiff;
-    return String(left.debtId).localeCompare(String(right.debtId));
+    return compareStableText(String(left.debtId), String(right.debtId));
   }
 
   function buildTokenGroups(): TokenGroup[] {
@@ -172,7 +173,7 @@
         };
       })
       .filter((group): group is TokenGroup => group !== null)
-      .sort((left, right) => right.usdOutstanding - left.usdOutstanding || right.usdTotal - left.usdTotal || left.symbol.localeCompare(right.symbol));
+      .sort((left, right) => right.usdOutstanding - left.usdOutstanding || right.usdTotal - left.usdTotal || compareStableText(left.symbol, right.symbol));
   }
 
   function buildTotals(tokenGroups: TokenGroup[]): DebtTotals {

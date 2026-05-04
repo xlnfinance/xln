@@ -18,6 +18,7 @@
   import VRControlsHUD from '../components/VRControlsHUD.svelte';
   import { HandGesturePaymentController } from '../utils/handGesturePayments';
   import EntityMiniPanel from '../components/EntityMiniPanel.svelte';
+  import { compareStableText } from '$lib/utils/stableSort';
 
   // Mini panel state for entity click
   let showMiniPanel = false;
@@ -2968,7 +2969,7 @@ let vrHammer: VRHammer | null = null;
       const countA = connectionCounts.get(a.entityId) || 0;
       const countB = connectionCounts.get(b.entityId) || 0;
       if (countB !== countA) return countB - countA;
-      return a.entityId.localeCompare(b.entityId);
+      return compareStableText(a.entityId, b.entityId);
     });
 
     // Radial layout

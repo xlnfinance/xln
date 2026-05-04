@@ -13,7 +13,7 @@
 
 import type { Env, EntityState } from '../types';
 import { createHash } from 'crypto';
-import { safeStringify } from '../serialization-utils';
+import { compareStableText, safeStringify } from '../serialization-utils';
 
 const RUNS = 3; // Number of times to run each scenario
 const SEED = 'determinism-test-seed-42';
@@ -24,7 +24,7 @@ function compareNumericKey(left: string | number, right: string | number): numbe
   if (Number.isFinite(leftNum) && Number.isFinite(rightNum) && leftNum !== rightNum) {
     return leftNum - rightNum;
   }
-  return String(left).localeCompare(String(right));
+  return compareStableText(String(left), String(right));
 }
 
 /**
@@ -38,7 +38,7 @@ function hashEntityState(state: EntityState): string {
     timestamp: state.timestamp,
     reserves: Array.from(state.reserves.entries()).sort((a, b) => compareNumericKey(a[0], b[0])),
     accounts: Array.from(state.accounts.entries())
-      .sort((a, b) => String(a[0]).localeCompare(String(b[0])))
+      .sort((a, b) => compareStableText(String(a[0]), String(b[0])))
       .map(([id, acc]) => ({
         id,
         currentHeight: acc.currentHeight,
@@ -69,7 +69,7 @@ function hashEnv(env: Env): string {
 
   // Hash all entity replicas in deterministic order
   const sortedReplicas = Array.from(env.eReplicas.entries())
-    .sort((a, b) => a[0].localeCompare(b[0]));
+    .sort((a, b) => compareStableText(a[0], b[0]));
 
   for (const [key, replica] of sortedReplicas) {
     const stateHash = hashEntityState(replica.state);

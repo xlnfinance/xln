@@ -7,7 +7,7 @@ import { cpus, freemem, loadavg, totalmem } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { encodeBoard, hashBoard } from '../entity-factory';
-import { safeStringify } from '../serialization-utils';
+import { compareStableText, safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
 import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
 import { deriveSignerAddressSync } from '../account-crypto';
@@ -1530,12 +1530,12 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       ok: hubMeshOk,
       hubIds,
       pairs: Array.from(pairSet.values()).sort((left, right) =>
-        `${left.left}:${left.right}`.localeCompare(`${right.left}:${right.right}`),
+        compareStableText(`${left.left}:${left.right}`, `${right.left}:${right.right}`),
       ),
       direct: {
         openLinkCount: directLinkMap.size,
         links: Array.from(directLinkMap.values()).sort((left, right) =>
-          `${left.fromRuntimeId}:${left.toRuntimeId}`.localeCompare(`${right.fromRuntimeId}:${right.toRuntimeId}`),
+          compareStableText(`${left.fromRuntimeId}:${left.toRuntimeId}`, `${right.fromRuntimeId}:${right.toRuntimeId}`),
         ),
       },
     },
@@ -1639,7 +1639,7 @@ const buildPublicHubDiscoveryPayload = (): {
       };
     })
     .filter((hub): hub is NonNullable<typeof hub> => Boolean(hub?.online))
-    .sort((left, right) => left.name.localeCompare(right.name));
+    .sort((left, right) => compareStableText(left.name, right.name));
 
   return {
     ok: true,

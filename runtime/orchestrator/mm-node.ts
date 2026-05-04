@@ -1,6 +1,6 @@
 #!/usr/bin/env bun
 
-import { safeStringify } from '../serialization-utils';
+import { compareStableText, safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
 import { decodeRuntimeAdapterMessage } from '../radapter/codec';
 import { encodeBoard, hashBoard } from '../entity-factory';
@@ -308,7 +308,7 @@ const readVisibleHubProfiles = (env: Env): HubProfile[] => {
       name: profile.name,
       entityId: profile.entityId.toLowerCase(),
     }))
-    .sort((left, right) => left.name.localeCompare(right.name));
+    .sort((left, right) => compareStableText(left.name, right.name));
 };
 
 const parseMeshHubIdentities = (raw: string): MeshHubIdentity[] => {

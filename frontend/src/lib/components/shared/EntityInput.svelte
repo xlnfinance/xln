@@ -13,6 +13,7 @@
   import { xlnFunctions, xlnEnvironment } from '../../stores/xlnStore';
   import { entityAvatar } from '../../utils/avatar';
   import { getGossipProfile, getGossipProfiles as getProfilesFromSource, scheduleGossipProfileFetch } from '../../utils/entityNaming';
+  import { compareStableText } from '$lib/utils/stableSort';
 
   export let value: string = '';
   export let placeholder: string = 'Select or enter entity...';
@@ -231,7 +232,7 @@
       if (leftNorm === preferredNorm && rightNorm !== preferredNorm) return -1;
       if (rightNorm === preferredNorm && leftNorm !== preferredNorm) return 1;
     }
-    return left.displayName.localeCompare(right.displayName);
+    return compareStableText(left.displayName, right.displayName);
   }
 
   // All options

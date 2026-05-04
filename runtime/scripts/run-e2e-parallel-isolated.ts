@@ -28,6 +28,7 @@ import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
 import { deriveQaTestDescription, deriveQaTestHandle } from '../qa-report';
+import { compareStableText } from '../serialization-utils';
 
 type CliArgs = {
   shards: number;
@@ -392,7 +393,7 @@ const collectShardArtifacts = (
   };
 
   walk(resultsDir);
-  return artifacts.sort((a, b) => artifactKindRank(a.kind) - artifactKindRank(b.kind) || a.name.localeCompare(b.name));
+  return artifacts.sort((a, b) => artifactKindRank(a.kind) - artifactKindRank(b.kind) || compareStableText(a.name, b.name));
 };
 
 const readShardLastRunStatus = (logsDir: string, shard: number): 'passed' | 'failed' | 'unknown' => {

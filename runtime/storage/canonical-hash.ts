@@ -1,4 +1,5 @@
 import { ethers } from 'ethers';
+import { compareStableText } from '../serialization-utils';
 import type { EntityReplica, Env } from '../types';
 
 export type CanonicalFrameEntityHash = {
@@ -22,7 +23,7 @@ const hashCanonical = (value: unknown): string =>
 // Values are already canonicalized before sorting, so JSON.stringify is used
 // only as a stable byte comparator for tagged/sorted structures.
 const compareCanonical = (left: unknown, right: unknown): number =>
-  JSON.stringify(left).localeCompare(JSON.stringify(right));
+  compareStableText(JSON.stringify(left), JSON.stringify(right));
 
 export const canonicalizeStorageAuditValue = (value: unknown, stack: object[] = []): unknown => {
   if (value === null || value === undefined) return null;
@@ -70,7 +71,7 @@ export const canonicalizeStorageAuditValue = (value: unknown, stack: object[] = 
     const out: Record<string, unknown> = {};
     for (const key of Object.keys(record)
       .filter((entryKey) => !VOLATILE_FIELDS.has(entryKey))
-      .sort((left, right) => left.localeCompare(right))) {
+      .sort(compareStableText)) {
       if (record[key] === undefined) continue;
       out[key] = canonicalizeStorageAuditValue(record[key], stack);
     }
@@ -101,7 +102,7 @@ export const computeCanonicalEntityHashesFromEnv = (env: Env): CanonicalFrameEnt
   Array.from(env.eReplicas.values())
     .filter((replica): replica is EntityReplica => Boolean(replica?.state))
     .map((replica) => computeCanonicalEntityHash(replica))
-    .sort((left, right) => left.entityId.localeCompare(right.entityId));
+    .sort((left, right) => compareStableText(left.entityId, right.entityId));
 
 export const computeCanonicalRuntimeStateHash = (
   height: number,
@@ -118,7 +119,7 @@ export const computeCanonicalRuntimeStateHash = (
         hash: entry.hash,
         cellCount: entry.cellCount,
       }))
-      .sort((left, right) => left.entityId.localeCompare(right.entityId)),
+      .sort((left, right) => compareStableText(left.entityId, right.entityId)),
   });
 
 export const computeCanonicalStateHashFromEnv = (env: Env): string =>

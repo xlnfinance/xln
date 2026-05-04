@@ -1,5 +1,6 @@
 <script lang="ts">
   import { onMount, onDestroy } from 'svelte';
+  import { compareStableText } from '$lib/utils/stableSort';
 
   // ============================================================================
   // CONFIGURATION
@@ -1010,7 +1011,7 @@ Help the user understand this entity's state, suggest actions, or answer questio
     <div class="chat-list">
       {#if savedChats.some(c => c.pinned)}
         <div class="section-header">Pinned</div>
-        {#each savedChats.filter(c => c.pinned).sort((a, b) => b.updated.localeCompare(a.updated)) as chat}
+        {#each savedChats.filter(c => c.pinned).sort((a, b) => compareStableText(b.updated, a.updated)) as chat}
           <div class="chat-item" class:active={chat.id === chatId} class:pinned={true}>
             <button class="chat-title" on:click={() => loadChatById(chat.id)}>
               {chat.title.slice(0, 25)}{chat.title.length > 25 ? '...' : ''}
@@ -1025,7 +1026,7 @@ Help the user understand this entity's state, suggest actions, or answer questio
 
       {#if savedChats.some(c => !c.pinned)}
         <div class="section-header">Recent</div>
-        {#each savedChats.filter(c => !c.pinned).sort((a, b) => b.updated.localeCompare(a.updated)) as chat}
+        {#each savedChats.filter(c => !c.pinned).sort((a, b) => compareStableText(b.updated, a.updated)) as chat}
           <div class="chat-item" class:active={chat.id === chatId}>
             <button class="chat-title" on:click={() => loadChatById(chat.id)}>
               {chat.title.slice(0, 25)}{chat.title.length > 25 ? '...' : ''}

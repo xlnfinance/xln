@@ -1,4 +1,5 @@
 import type { Profile } from '../networking/gossip';
+import { compareStableText } from '../serialization-utils';
 
 export type GossipProfileBatchRequest = {
   ids?: string[];
@@ -21,7 +22,7 @@ export const sortProfilesForBatch = (left: Profile, right: Profile): number => {
   const leftTs = left.lastUpdated;
   const rightTs = right.lastUpdated;
   if (leftTs !== rightTs) return rightTs - leftTs;
-  return String(left.entityId).localeCompare(String(right.entityId));
+  return compareStableText(String(left.entityId), String(right.entityId));
 };
 
 export const selectProfileBatch = (

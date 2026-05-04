@@ -4,6 +4,7 @@
   import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import EntityIdentity from '$lib/components/shared/EntityIdentity.svelte';
   import { isCounterpartyBlockedByDispute } from '$lib/utils/entityReplica';
+  import { compareStableText } from '$lib/utils/stableSort';
 
   export let currentEntityId: string = '';
 
@@ -37,8 +38,8 @@
     if (aHub !== bHub) return aHub ? -1 : 1;
     const aName = String(a.name || '').toLowerCase();
     const bName = String(b.name || '').toLowerCase();
-    if (aName && bName && aName !== bName) return aName.localeCompare(bName);
-    return String(a.entityId).localeCompare(String(b.entityId));
+    if (aName && bName && aName !== bName) return compareStableText(aName, bName);
+    return compareStableText(String(a.entityId), String(b.entityId));
   });
 
   $: hubCount = profiles.filter(isHub).length;

@@ -1,4 +1,5 @@
 import type { FrameLogEntry, RuntimeFrameDbRecord } from '../types';
+import { compareStableText } from '../serialization-utils';
 import { decodeBuffer, encodeBuffer, writeBatch } from './codec';
 import { deleteKeyRange, deleteKeys, iterateKeys, readJsonOrNull, readRawOrNull } from './level';
 import {
@@ -138,7 +139,7 @@ export const buildFrameDbPuts = (options: {
 
   if (touchedBooksByKey.size > 0) {
     runtimeActivity.touchedBooks = Array.from(touchedBooksByKey.values())
-      .sort((left, right) => left.entityId.localeCompare(right.entityId) || left.pairId.localeCompare(right.pairId));
+      .sort((left, right) => compareStableText(left.entityId, right.entityId) || compareStableText(left.pairId, right.pairId));
   }
 
   for (const entityId of options.touchedEntities) {
