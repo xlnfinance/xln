@@ -997,8 +997,8 @@ export const applyEntityInput = async (
     additionalHashesToSign.sort((a, b) => compareCanonicalText(a.hash, b.hash));
     const hashesToSign: import('./types').HashToSign[] = [entityFrameHashToSign, ...additionalHashesToSign];
 
-    const { signHashesAsSingleEntity } = await import('./hanko/signing');
-    const hankos = await signHashesAsSingleEntity(
+    const { signEntityHashes } = await import('./hanko/signing');
+    const hankos = await signEntityHashes(
       env,
       workingReplica.state.entityId,
       workingReplica.signerId,

@@ -269,9 +269,6 @@ export async function signEntityHashes(
   return hankos;
 }
 
-/** @deprecated Use signEntityHashes instead */
-export const signHashesAsSingleEntity = signEntityHashes;
-
 /**
  * Build quorum hanko from multiple validator EOA signatures
  *

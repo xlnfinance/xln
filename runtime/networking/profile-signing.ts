@@ -6,7 +6,7 @@
  *
  * ARCHITECTURE:
  * - Profile hash computed from canonical JSON representation
- * - Signed using signHashesAsSingleEntity() (same as accountFrame signing)
+ * - Signed using signEntityHashes() (same as accountFrame signing)
  * - Verified using verifyHankoForHash() (same verification path)
  * - Hanko stored in profile.metadata.profileHanko (ABI-encoded HankoBytes)
  *
@@ -19,7 +19,7 @@
 import { keccak256 } from 'ethers';
 import { canonicalizeProfile, getBoardPrimaryPublicKey, type Profile } from './gossip';
 import type { Env, HankoString } from '../types';
-import { inspectHankoForHash, signHashesAsSingleEntity, verifyHankoForHash } from '../hanko/signing';
+import { inspectHankoForHash, signEntityHashes, verifyHankoForHash } from '../hanko/signing';
 import { getSignerAddress, getSignerPublicKey } from '../account-crypto';
 import { serializeTaggedJson } from '../serialization-utils';
 
@@ -71,7 +71,7 @@ export async function signProfile(
   const hash = computeProfileHash(canonicalProfile);
 
   // Use same signing mechanism as accountFrames
-  const hankos = await signHashesAsSingleEntity(
+  const hankos = await signEntityHashes(
     env,
     canonicalProfile.entityId,
     signerId,

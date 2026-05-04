@@ -1475,8 +1475,8 @@ export async function createRpcAdapter(
             const batchHash = computeBatchHankoHash(BigInt(config.chainId), depositoryAddr, encodedBatch, nextNonce);
 
             console.log(`🔐 [JAdapter:rpc] Local signing: entity=${normalizedId.slice(-4)} nonce=${nextNonce}`);
-            const { signHashesAsSingleEntity } = await import('../hanko/signing');
-            const hankos = await signHashesAsSingleEntity(env, normalizedId, sid, [batchHash]);
+            const { signEntityHashes } = await import('../hanko/signing');
+            const hankos = await signEntityHashes(env, normalizedId, sid, [batchHash]);
             hankoData = hankos[0]!;
             if (!hankoData) {
               return { success: false, error: 'Failed to build batch hanko signature' };

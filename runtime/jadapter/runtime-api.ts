@@ -2,7 +2,7 @@ import { requireUsableContractAddress } from '../contract-address';
 import { detectEntityType, extractNumberFromEntityId } from '../entity-factory';
 import { encodeJBatch, computeBatchHankoHash, type JBatch } from '../j-batch';
 import { normalizeEntityId } from '../entity-id-utils';
-import { signHashesAsSingleEntity } from '../hanko/signing';
+import { signEntityHashes } from '../hanko/signing';
 import type { Env, JurisdictionConfig } from '../types';
 import { connectJurisdictionAdapter, connectJurisdictionContracts } from './jurisdiction';
 
@@ -41,7 +41,7 @@ export const submitProcessBatch = async (
     encodedBatch,
     nextNonce,
   );
-  const hankos = await signHashesAsSingleEntity(env, entityId, signerId, [batchHash]);
+  const hankos = await signEntityHashes(env, entityId, signerId, [batchHash]);
   const hankoData = hankos[0];
   if (!hankoData) {
     throw new Error('Failed to build batch hanko signature');

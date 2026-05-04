@@ -150,13 +150,13 @@ import {
   getSwapPairOrientation,
   buildDefaultEntitySwapPairs,
   getDefaultSwapTradingPairs,
-  formatTokenAmount,
   createDemoDelta,
   getDefaultCreditLimit,
 } from './account-utils';
 import { computeSwapPriceTicks, prepareSwapOrder, quantizeSwapOrder } from './orderbook';
 import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
 import {
+  formatTokenAmount,
   formatTokenAmount as formatTokenAmountEthers,
   parseTokenAmount,
   convertTokenPrecision,
