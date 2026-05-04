@@ -1140,6 +1140,11 @@ export interface AccountMachine {
   pendingFrame?: AccountFrame;
   pendingSignatures: string[];
   pendingAccountInput?: AccountInput; // Cached outbound frame input for resend/nudge
+  lastOutboundFrameAck?: {
+    height: number;
+    counterpartyEntityId: string;
+    prevHanko: HankoString;
+  };
 
   // Rollback support for bilateral disagreements
   rollbackCount: number;

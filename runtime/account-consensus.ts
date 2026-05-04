@@ -851,7 +851,25 @@ export async function proposeAccountFrame(
   events.push(`🚀 Proposed frame ${newFrame.height} with ${newFrame.accountTxs.length} transactions`);
 
   const outboundFrame = cloneAccountFrame(newFrame);
-  const accountInput: AccountInput = {
+  const reusableAck = accountMachine.lastOutboundFrameAck;
+  const shouldBundlePreviousAck =
+    !!reusableAck &&
+    reusableAck.counterpartyEntityId.toLowerCase() === accountMachine.proofHeader.toEntity.toLowerCase() &&
+    Number(reusableAck.height) === Number(newFrame.height) - 1 &&
+    Number(accountMachine.currentHeight) === Number(reusableAck.height);
+  const accountInput: AccountInput = shouldBundlePreviousAck ? {
+    kind: 'frame_ack',
+    fromEntityId: accountMachine.proofHeader.fromEntity,
+    toEntityId: accountMachine.proofHeader.toEntity,
+    height: reusableAck.height,
+    prevHanko: reusableAck.prevHanko,
+    newAccountFrame: outboundFrame,
+    newHanko: frameHanko,
+    newDisputeHanko: disputeHanko,
+    newDisputeHash: disputeHash,
+    newDisputeProofBodyHash: proofResult.proofBodyHash,
+    disputeProofNonce: accountMachine.proofHeader.nonce,
+  } : {
     kind: 'frame',
     fromEntityId: accountMachine.proofHeader.fromEntity,
     toEntityId: accountMachine.proofHeader.toEntity,
@@ -864,6 +882,9 @@ export async function proposeAccountFrame(
     // NOTE: Settlement hankos now handled via SettlementWorkspace (entity-tx/handlers/settle.ts)
     disputeProofNonce: accountMachine.proofHeader.nonce, // nonce at which dispute proof was signed (before increment)
   };
+  if (!shouldBundlePreviousAck && reusableAck && Number(reusableAck.height) < Number(accountMachine.currentHeight)) {
+    delete accountMachine.lastOutboundFrameAck;
+  }
   if (!skipNonceIncrement) ++accountMachine.proofHeader.nonce;
   accountMachine.pendingAccountInput = structuredClone(accountInput);
 
@@ -1133,6 +1154,12 @@ export async function handleAccountInput(
       delete accountMachine.pendingFrame;
       delete accountMachine.pendingAccountInput;
       delete accountMachine.clonedForValidation;
+      if (
+        accountMachine.lastOutboundFrameAck &&
+        Number(accountMachine.lastOutboundFrameAck.height) < Number(committedHeight)
+      ) {
+        delete accountMachine.lastOutboundFrameAck;
+      }
       markStorageAccountDirty(env, accountMachine.proofHeader.fromEntity, input.fromEntityId);
       accountMachine.rollbackCount = Math.max(0, accountMachine.rollbackCount - 1); // Successful confirmation reduces rollback
       if (accountMachine.rollbackCount === 0) {
@@ -1788,6 +1815,11 @@ export async function handleAccountInput(
       newDisputeProofBodyHash: ackProofResult.proofBodyHash, // ProofBodyHash that ackDisputeHanko signs
       disputeProofNonce: ackSignedNonce, // nonce at which ACK's dispute proof was signed
     } as AccountInput;
+    const outboundAck = {
+      height: receivedFrame.height,
+      counterpartyEntityId: input.fromEntityId,
+      prevHanko: confirmationHanko,
+    };
 
     if (HEAVY_LOGS)
       console.log(
@@ -1840,11 +1872,16 @@ export async function handleAccountInput(
       }
     }
 
-    if (!batchedWithNewFrame && ackDisputeHanko) {
-      accountMachine.currentDisputeProofHanko = ackDisputeHanko;
-      accountMachine.currentDisputeProofNonce = ackSignedNonce;
-      accountMachine.currentDisputeProofBodyHash = ackProofResult.proofBodyHash;
-      accountMachine.currentDisputeHash = ackDisputeHash;
+    if (!batchedWithNewFrame) {
+      accountMachine.lastOutboundFrameAck = outboundAck;
+      if (ackDisputeHanko) {
+        accountMachine.currentDisputeProofHanko = ackDisputeHanko;
+        accountMachine.currentDisputeProofNonce = ackSignedNonce;
+        accountMachine.currentDisputeProofBodyHash = ackProofResult.proofBodyHash;
+        accountMachine.currentDisputeHash = ackDisputeHash;
+      }
+    } else if (batchedWithNewFrame) {
+      delete accountMachine.lastOutboundFrameAck;
     }
 
     // Increment nonce for this message (on-chain nonce for dispute proofs / settlements)
