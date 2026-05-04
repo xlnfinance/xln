@@ -173,7 +173,6 @@ import {
   computeStorageStateRoot,
   findStorageLatestSnapshotAtOrBelow,
   inspectStorage,
-  listStorageLiveEntityIds,
   listStorageSnapshotEntityIds,
   listStorageSnapshotHeights,
   loadEntityAccountDocFromStorage,
@@ -613,7 +612,8 @@ const verifyOpenedStorageDb = async (
   const verifiedField = role === 'current' ? 'storageVerifiedCurrentHeight' : 'storageVerifiedPreviousHeight';
   const previousVerifiedHeight = Number(state[verifiedField] ?? -1);
   try {
-    const verified = await verifyStorageTailIntegrity(db, { tailFrames: 128 });
+    const head = await readStorageHead(db);
+    const verified = { latestHeight: Math.max(0, Math.floor(Number(head?.latestHeight ?? 0))) };
     if (verified.latestHeight <= previousVerifiedHeight) return;
     state[verifiedField] = verified.latestHeight;
   } catch (error) {
@@ -763,6 +763,7 @@ const closeFrameDb = async (env: Env): Promise<void> => {
   } finally {
     state!.frameDb = null;
     state!.frameDbOpenPromise = null;
+    delete state!.storageVerifiedHistoryHeight;
   }
 };
 
@@ -837,6 +838,13 @@ export async function tryOpenFrameDb(env: Env): Promise<boolean> {
     state.frameDbOpenPromise = (async () => {
       try {
         await db.open();
+        if (!storageVerifyOnOpenDisabled()) {
+          const previousVerifiedHeight = Number(state.storageVerifiedHistoryHeight ?? -1);
+          const verified = await verifyStorageTailIntegrity(db, { tailFrames: 128 });
+          if (verified.latestHeight > previousVerifiedHeight) {
+            state.storageVerifiedHistoryHeight = verified.latestHeight;
+          }
+        }
         return true;
       } catch (error) {
         const isBlocked =
@@ -4305,7 +4313,7 @@ type VerifyRuntimeChainResult = {
 };
 
 type PersistedStorageHandle = {
-  role: StorageDbRole;
+  role: 'history';
   db: Level<Buffer, Buffer>;
   head: StorageHead;
   latestHeight: number;
@@ -4325,31 +4333,23 @@ const createPersistedStorageEnv = (runtimeId?: string | null, runtimeSeed?: stri
 };
 
 const listPersistedStorageHandles = async (env: Env): Promise<PersistedStorageHandle[]> => {
-  const handles: PersistedStorageHandle[] = [];
-  for (const role of ['current', 'previous'] as const) {
-    const opened = await tryOpenStorageDb(env, role);
-    if (!opened) continue;
-    const db = getStorageDb(env, role);
-    const head = await readStorageHead(db);
-    if (!head || head.latestHeight <= 0) continue;
-    handles.push({
-      role,
-      db,
-      head,
-      latestHeight: head.latestHeight,
-      latestMaterializedHeight: Math.max(
-        0,
-        Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? 0)),
-      ),
-      latestSnapshotHeight: head.latestSnapshotHeight,
-      snapshotHeights: await listStorageSnapshotHeights(db),
-    });
-  }
-  return handles.sort((left, right) => {
-    if (left.latestHeight !== right.latestHeight) return right.latestHeight - left.latestHeight;
-    if (left.role === right.role) return 0;
-    return left.role === 'current' ? -1 : 1;
-  });
+  const opened = await tryOpenFrameDb(env);
+  if (!opened) return [];
+  const db = getFrameDb(env);
+  const head = await readStorageHead(db);
+  if (!head || head.latestHeight <= 0) return [];
+  return [{
+    role: 'history',
+    db,
+    head,
+    latestHeight: head.latestHeight,
+    latestMaterializedHeight: Math.max(
+      0,
+      Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? 0)),
+    ),
+    latestSnapshotHeight: head.latestSnapshotHeight,
+    snapshotHeights: await listStorageSnapshotHeights(db),
+  }];
 };
 
 const restoreOverlayFromFrameLog = async (
@@ -4416,11 +4416,8 @@ const readPersistedStorageReplicaMeta = async (
 ): Promise<ReturnType<typeof readStorageReplicaMeta> extends Promise<infer T> ? T : never> => {
   const normalizedEntityId = String(entityId || '').toLowerCase();
   if (!normalizedEntityId) return null;
-  for (const handle of await listPersistedStorageHandles(env)) {
-    const meta = await readStorageReplicaMeta(handle.db, normalizedEntityId);
-    if (meta) return meta;
-  }
-  return null;
+  if (!(await tryOpenStorageDb(env, 'current'))) return null;
+  return readStorageReplicaMeta(getStorageDb(env, 'current'), normalizedEntityId);
 };
 
 const resolvePersistedSnapshotHeight = async (env: Env, targetHeight: number): Promise<number> => {
@@ -4436,9 +4433,6 @@ const resolvePersistedSnapshotHeight = async (env: Env, targetHeight: number): P
 export const listPersistedEntityIdsAtHeight = async (env: Env, targetHeight: number): Promise<string[]> => {
   const entityIds = new Set<string>();
   for (const handle of await listPersistedStorageHandles(env)) {
-    for (const entityId of await listStorageLiveEntityIds(handle.db)) {
-      entityIds.add(entityId);
-    }
     const snapshotHeight = await findStorageLatestSnapshotAtOrBelow(handle.db, targetHeight);
     if (snapshotHeight > 0) {
       for (const entityId of await listStorageSnapshotEntityIds(handle.db, snapshotHeight)) {
@@ -4642,20 +4636,13 @@ export const loadEntityStateFromStorageDb = async (
   entityId: string,
   height?: number,
 ): Promise<EntityState | null> => {
-  const current = await loadEntityStateFromStorage({
-    env,
-    tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'current'),
-    getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'current'),
-    entityId,
-    ...(height === undefined ? {} : { height }),
-  });
-  if (current || height === undefined) return current;
   return loadEntityStateFromStorage({
     env,
-    tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'previous'),
-    getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'previous'),
+    tryOpenDb: tryOpenFrameDb,
+    getRuntimeDb: getFrameDb,
     entityId,
-    height,
+    ...(height === undefined ? {} : { height }),
+    liveStateReadable: false,
   });
 };
 
@@ -4665,22 +4652,14 @@ export const loadEntityAccountDocFromStorageDb = async (
   counterpartyId: string,
   height?: number,
 ) => {
-  const current = await loadEntityAccountDocFromStorage({
+  return loadEntityAccountDocFromStorage({
     env,
-    tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'current'),
-    getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'current'),
+    tryOpenDb: tryOpenFrameDb,
+    getRuntimeDb: getFrameDb,
     entityId,
     counterpartyId,
     ...(height === undefined ? {} : { height }),
-  });
-  if (current || height === undefined) return current;
-  return loadEntityAccountDocFromStorage({
-    env,
-    tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'previous'),
-    getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'previous'),
-    entityId,
-    counterpartyId,
-    height,
+    liveStateReadable: false,
   });
 };
 
@@ -4701,24 +4680,15 @@ export const loadEntityViewPageFromStorageDb = async (
     ...(bookCursor ? { cursor: bookCursor } : {}),
     ...(query?.booksLimit !== undefined ? { limit: query.booksLimit } : query?.limit !== undefined ? { limit: query.limit } : {}),
   };
-  const current = await loadEntityViewPageFromStorage({
-    env,
-    tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'current'),
-    getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'current'),
-    entityId,
-    height,
-    accountQuery,
-    bookQuery,
-  });
-  if (current) return current;
   return loadEntityViewPageFromStorage({
     env,
-    tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'previous'),
-    getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'previous'),
+    tryOpenDb: tryOpenFrameDb,
+    getRuntimeDb: getFrameDb,
     entityId,
     height,
     accountQuery,
     bookQuery,
+    liveStateReadable: false,
   });
 };
 
@@ -4728,12 +4698,12 @@ export const inspectStorageDb = async (env: Env) => {
     tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'current'),
     getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'current'),
   });
-  const previous = await inspectStorage({
+  const history = await inspectStorage({
     env,
-    tryOpenDb: (targetEnv) => tryOpenStorageDb(targetEnv, 'previous'),
-    getRuntimeDb: (targetEnv) => getStorageDb(targetEnv, 'previous'),
+    tryOpenDb: tryOpenFrameDb,
+    getRuntimeDb: getFrameDb,
   });
-  if (!current && !previous) return null;
+  if (!current && !history) return null;
 
   const epochs = [
     current
@@ -4750,43 +4720,43 @@ export const inspectStorageDb = async (env: Env) => {
           totalBytes: current.totalBytes,
         }
       : null,
-    previous
+    history
       ? {
-          role: 'previous' as const,
-          path: resolveStorageDbPath(env, 'previous'),
-          latestHeight: previous.head?.latestHeight ?? 0,
-          latestSnapshotHeight: previous.head?.latestSnapshotHeight ?? 0,
-          frameCount: previous.frameCount,
-          diffCount: previous.diffCount,
-          snapshotCount: previous.snapshotHeights.length,
-          liveBytes: previous.liveBytes,
-          historyBytes: previous.historyBytes,
-          totalBytes: previous.totalBytes,
+          role: 'history' as const,
+          path: resolveFrameDbPath(env),
+          latestHeight: history.head?.latestHeight ?? 0,
+          latestSnapshotHeight: history.head?.latestSnapshotHeight ?? 0,
+          frameCount: history.frameCount,
+          diffCount: history.diffCount,
+          snapshotCount: history.snapshotHeights.length,
+          liveBytes: history.liveBytes,
+          historyBytes: history.historyBytes,
+          totalBytes: history.totalBytes,
         }
       : null,
   ].filter(Boolean);
 
   const snapshotHeights = Array.from(
-    new Set([...(current?.snapshotHeights ?? []), ...(previous?.snapshotHeights ?? [])]),
+    new Set([...(history?.snapshotHeights ?? [])]),
   ).sort((left, right) => left - right);
 
   return {
-    head: current?.head ?? previous?.head ?? null,
-    frameCount: (current?.frameCount ?? 0) + (previous?.frameCount ?? 0),
-    diffCount: (current?.diffCount ?? 0) + (previous?.diffCount ?? 0),
+    head: history?.head ?? current?.head ?? null,
+    frameCount: history?.frameCount ?? 0,
+    diffCount: history?.diffCount ?? 0,
     snapshotHeights,
-    liveEntityCount: (current?.liveEntityCount ?? 0) + (previous?.liveEntityCount ?? 0),
-    liveAccountCount: (current?.liveAccountCount ?? 0) + (previous?.liveAccountCount ?? 0),
-    liveBookCount: (current?.liveBookCount ?? 0) + (previous?.liveBookCount ?? 0),
-    frameBytes: (current?.frameBytes ?? 0) + (previous?.frameBytes ?? 0),
-    diffBytes: (current?.diffBytes ?? 0) + (previous?.diffBytes ?? 0),
-    snapshotBytes: (current?.snapshotBytes ?? 0) + (previous?.snapshotBytes ?? 0),
-    liveBytes: (current?.liveBytes ?? 0) + (previous?.liveBytes ?? 0),
-    historyBytes: (current?.historyBytes ?? 0) + (previous?.historyBytes ?? 0),
-    totalBytes: (current?.totalBytes ?? 0) + (previous?.totalBytes ?? 0),
-    maxFrameBytes: Math.max(current?.maxFrameBytes ?? 0, previous?.maxFrameBytes ?? 0),
-    maxDiffBytes: Math.max(current?.maxDiffBytes ?? 0, previous?.maxDiffBytes ?? 0),
-    maxSnapshotBytes: Math.max(current?.maxSnapshotBytes ?? 0, previous?.maxSnapshotBytes ?? 0),
+    liveEntityCount: current?.liveEntityCount ?? 0,
+    liveAccountCount: current?.liveAccountCount ?? 0,
+    liveBookCount: current?.liveBookCount ?? 0,
+    frameBytes: history?.frameBytes ?? 0,
+    diffBytes: history?.diffBytes ?? 0,
+    snapshotBytes: history?.snapshotBytes ?? 0,
+    liveBytes: current?.liveBytes ?? 0,
+    historyBytes: history?.historyBytes ?? 0,
+    totalBytes: (current?.liveBytes ?? 0) + (history?.historyBytes ?? 0),
+    maxFrameBytes: history?.maxFrameBytes ?? 0,
+    maxDiffBytes: history?.maxDiffBytes ?? 0,
+    maxSnapshotBytes: history?.maxSnapshotBytes ?? 0,
     epochDbs: epochs,
   };
 };
@@ -4796,8 +4766,8 @@ export const listPersistedCheckpointHeights = async (env: Env): Promise<number[]
 };
 
 export const readPersistedStorageHead = async (env: Env): Promise<StorageHead | null> => {
-  const handle = (await listPersistedStorageHandles(env))[0];
-  return handle?.head ?? null;
+  if (!(await tryOpenFrameDb(env))) return null;
+  return readStorageHead(getFrameDb(env));
 };
 
 export const verifyRuntimeChain = async (

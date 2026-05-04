@@ -214,6 +214,9 @@ export const saveRuntimeFrameToStorage = async (options: {
   const opened = await options.tryOpenDb(options.env);
   if (!opened) return { materialized: false, materializedOverlayRecords: 0, frameDbCommitted: false };
   const db = options.getRuntimeDb(options.env);
+  const historyOpened = await options.tryOpenFrameDb(options.env);
+  if (!historyOpened) return { materialized: false, materializedOverlayRecords: 0, frameDbCommitted: false };
+  const historyDb = options.getFrameDb(options.env);
   const openMs = options.getPerfMs() - openStartedAt;
 
   const appliedRuntimeInput = options.currentFrameInput ?? { runtimeTxs: [], entityInputs: [] };
@@ -230,13 +233,13 @@ export const saveRuntimeFrameToStorage = async (options: {
   const diffBuildMs = options.getPerfMs() - diffBuildStartedAt;
 
   const writeStartedAt = options.getPerfMs();
-  const head = await readHead(db, config);
+  const head = await readHead(historyDb, config);
   if (head.latestHeight !== options.env.height - 1) {
     throw new Error(
       `STORAGE_APPEND_INVARIANT_FAILED: refusing to write frame ${options.env.height} after persisted head ${head.latestHeight}`,
     );
   }
-  const previousFrame = head.latestHeight > 0 ? await readStorageFrameRecord(db, head.latestHeight) : null;
+  const previousFrame = head.latestHeight > 0 ? await readStorageFrameRecord(historyDb, head.latestHeight) : null;
   if (head.latestHeight > 0 && !previousFrame) {
     throw new Error(`STORAGE_PREV_FRAME_MISSING: height=${head.latestHeight}`);
   }
@@ -333,10 +336,8 @@ export const saveRuntimeFrameToStorage = async (options: {
     );
 
   const frameBuffer = encodeBuffer(frameRecord);
-  const projectedHistoryBytes =
+  const projectedReplayBytes =
     head.retainedHistoryBytes +
-    frameKey.byteLength +
-    frameBuffer.byteLength +
     diffKey.byteLength +
     diffBuffer.byteLength;
   let frameDbBytes = 0;
@@ -345,9 +346,10 @@ export const saveRuntimeFrameToStorage = async (options: {
   let frameDbPrunedKeys = 0;
   let frameDbLatestPrunedHeight = 0;
   let frameDbCommitted = frameDbPuts.length === 0;
+  const historyBatch = historyDb.batch();
+  historyBatch.put(frameKey, frameBuffer);
+  historyBatch.put(diffKey, diffBuffer);
   const batch = db.batch();
-  batch.put(frameKey, frameBuffer);
-  batch.put(diffKey, diffBuffer);
   if (preparedHashes) {
     for (const doc of materializedPuts) {
       batch.put(liveKeyForDoc(doc), preparedHashes.docValueBuffers.get(docValueKey(doc)) ?? encodeBuffer(doc.value));
@@ -380,9 +382,11 @@ export const saveRuntimeFrameToStorage = async (options: {
     retainSnapshots: config.retainSnapshots,
     epochMaxBytes: config.epochMaxBytes,
     accountMerkleRadix: config.accountMerkleRadix,
-    retainedHistoryBytes: projectedHistoryBytes,
+    retainedHistoryBytes: projectedReplayBytes,
   };
+  historyBatch.put(KEY_HEAD, encodeBuffer(nextHead));
   batch.put(KEY_HEAD, encodeBuffer(nextHead));
+  await writeBatch(historyBatch);
   await writeBatch(batch);
   if (state) {
     state.currentStorageOverlayMarks = [];
@@ -392,11 +396,8 @@ export const saveRuntimeFrameToStorage = async (options: {
   }
   if (frameDbPuts.length > 0) {
     try {
-      const frameDbReady = await options.tryOpenFrameDb(options.env);
-      if (!frameDbReady) throw new Error('RUNTIME_FRAME_DB_UNAVAILABLE');
-      const frameDb = options.getFrameDb(options.env);
       const frameDbResult = await writeFrameDbPutsWithRetention({
-        db: frameDb,
+        db: historyDb,
         height: options.env.height,
         puts: frameDbPuts,
         config,
@@ -425,12 +426,12 @@ export const saveRuntimeFrameToStorage = async (options: {
 
   if (snapshotDue || snapshotRequiredByBytes) {
     const snapshotStartedAt = options.getPerfMs();
-    const snapshotResult = await createSnapshot(db, options.env.height, options.env.timestamp);
+    const snapshotResult = await createSnapshot(db, historyDb, options.env.height, options.env.timestamp);
     snapDocs = snapshotResult.docCount;
     snapshotBytes = snapshotResult.bytes;
     retainedHistoryBytes += snapshotBytes;
     latestSnapshotHeight = options.env.height;
-    prunedBytes += await maybeRotateSnapshots(db, config.retainSnapshots);
+    prunedBytes += await maybeRotateSnapshots(historyDb, config.retainSnapshots);
     snapshotMs = options.getPerfMs() - snapshotStartedAt;
     if (snapshotRequiredByBytes && !snapshotDue) {
       epochRotated = true;
@@ -438,33 +439,34 @@ export const saveRuntimeFrameToStorage = async (options: {
   }
 
   if (snapDocs > 0) {
-    const retainedSnapshotHeights = await listSnapshotHeights(db);
+    const retainedSnapshotHeights = await listSnapshotHeights(historyDb);
     const oldestRetainedSnapshotHeight = retainedSnapshotHeights[0] ?? 0;
     if (oldestRetainedSnapshotHeight > 0) {
-      prunedBytes += await pruneHistoryBeforeHeight(db, oldestRetainedSnapshotHeight);
+      prunedBytes += await pruneHistoryBeforeHeight(historyDb, oldestRetainedSnapshotHeight);
     }
   }
 
   retainedHistoryBytes = Math.max(0, retainedHistoryBytes - prunedBytes);
 
   if (snapDocs > 0 || prunedBytes > 0) {
-    const latest = await readHead(db, config);
-    const update = db.batch();
-    update.put(
+    const latest = await readHead(historyDb, config);
+    const historyUpdate = historyDb.batch();
+    const stateUpdate = db.batch();
+    const updatedHead = {
+      ...latest,
+      latestSnapshotHeight,
+      retainedHistoryBytes,
+    } satisfies StorageHead;
+    historyUpdate.put(
       KEY_HEAD,
-      encodeBuffer({
-        ...latest,
-        latestSnapshotHeight,
-        retainedHistoryBytes,
-      }),
+      encodeBuffer(updatedHead),
     );
-    await writeBatch(update);
+    stateUpdate.put(KEY_HEAD, encodeBuffer(updatedHead));
+    await writeBatch(historyUpdate);
+    await writeBatch(stateUpdate);
   }
 
-  if (snapDocs > 0 && retainedHistoryBytes > config.epochMaxBytes && options.rotateEpochDb) {
-    await options.rotateEpochDb(options.env, latestSnapshotHeight, options.env.timestamp);
-    epochDbRotated = true;
-  }
+  epochDbRotated = false;
 
   const verboseStorageLogs =
     String(process.env['XLN_STORAGE_VERBOSE'] ?? '').toLowerCase() === '1' ||
