@@ -369,6 +369,10 @@ const normalizeEntityIdForView = (value: string): string => String(value || '').
 const readStoredAdapterValue = (key: string): string => {
   if (typeof window === 'undefined') return '';
   try {
+    if (key === 'xln-runtime-adapter-key') {
+      localStorage.removeItem(key);
+      return sessionStorage.getItem(key)?.trim() || '';
+    }
     const sessionValue = sessionStorage.getItem(key)?.trim();
     if (sessionValue) return sessionValue;
     return localStorage.getItem(key)?.trim() || '';
@@ -408,8 +412,6 @@ const resolveAppRuntimeAdapterConfig = (): RuntimeAdapterConfig => {
   ).trim();
   const normalizedWsUrl = normalizeWsUrl(wsUrl);
   const authKey = (
-    params.get('key') ||
-    params.get('auth') ||
     readStoredAdapterValue('xln-runtime-adapter-key') ||
     ''
   ).trim();

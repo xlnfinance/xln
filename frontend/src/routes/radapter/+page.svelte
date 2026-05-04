@@ -93,11 +93,16 @@
   onMount(() => {
     const params = new URLSearchParams(window.location.search);
     const queryWs = params.get('ws');
-    const queryKey = params.get('key');
     if (queryWs) {
       mode = 'remote';
       wsUrl = queryWs;
-      authKey = queryKey ?? '';
+      authKey = '';
+      if (params.has('key') || params.has('auth')) {
+        const url = new URL(window.location.href);
+        url.searchParams.delete('key');
+        url.searchParams.delete('auth');
+        history.replaceState(null, '', `${url.pathname}${url.search}${url.hash}`);
+      }
     } else {
       const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
       wsUrl = `${protocol}//${window.location.host}/rpc`;

@@ -161,15 +161,14 @@
     const mode = String(params.get('runtime') || params.get('adapter') || '').trim().toLowerCase();
     const wsParam = String(params.get('ws') || params.get('runtimeWs') || '').trim();
     if (mode !== 'remote' || !wsParam) return null;
-    const rawAuthKey = String(params.get('key') || params.get('auth') || '').trim();
-    const requiresAuthPaste = rawAuthKey.startsWith('xlnra1.full.');
-    const authKey = requiresAuthPaste ? '' : rawAuthKey;
+    const requiresAuthPaste = params.has('key') || params.has('auth');
+    const authKey = '';
     const wsUrl = normalizeRuntimeWsUrl(wsParam);
     return {
       wsUrl,
       authKey,
       hostLabel: hostLabelForWsUrl(wsUrl),
-      keyLabel: requiresAuthPaste ? 'full capability must be pasted' : describeAuthKey(authKey),
+      keyLabel: requiresAuthPaste ? 'capability must be pasted' : describeAuthKey(authKey),
       hostKind: remoteHostKind(wsUrl),
       acceptKey: remoteAcceptKey(wsUrl, authKey),
       requiresAuthPaste,
@@ -190,13 +189,8 @@
     localStorage.setItem('xln-runtime-adapter-mode', 'remote');
     localStorage.setItem('xln-runtime-adapter-ws', request.wsUrl);
     if (request.authKey) {
-      if (request.authKey.startsWith('xlnra1.full.')) {
-        localStorage.removeItem('xln-runtime-adapter-key');
-        sessionStorage.setItem('xln-runtime-adapter-key', request.authKey);
-      } else {
-        sessionStorage.removeItem('xln-runtime-adapter-key');
-        localStorage.setItem('xln-runtime-adapter-key', request.authKey);
-      }
+      localStorage.removeItem('xln-runtime-adapter-key');
+      sessionStorage.setItem('xln-runtime-adapter-key', request.authKey);
     } else {
       localStorage.removeItem('xln-runtime-adapter-key');
       sessionStorage.removeItem('xln-runtime-adapter-key');
@@ -205,20 +199,20 @@
   }
 
   function hasAcceptedRemoteRuntime(request: RemoteRuntimeRequest): boolean {
-    return sessionStorage.getItem(request.acceptKey) === '1'
-      || (
-        localStorage.getItem('xln-runtime-adapter-mode') === 'remote' &&
-        localStorage.getItem('xln-runtime-adapter-ws') === request.wsUrl &&
-        localStorage.getItem('xln-runtime-adapter-key') === request.authKey
-      );
+    try {
+      localStorage.removeItem('xln-runtime-adapter-key');
+      return sessionStorage.getItem(request.acceptKey) === '1';
+    } catch {
+      return false;
+    }
   }
 
   function acceptRemoteRuntime(): void {
     const request = pendingRemoteRuntime;
     if (!request) return;
     const authKey = request.requiresAuthPaste ? remoteRuntimeAuthInput.trim() : request.authKey;
-    if (request.requiresAuthPaste && !authKey.startsWith('xlnra1.full.')) {
-      remoteRuntimeAuthError = 'Paste the full capability token to connect.';
+    if (request.requiresAuthPaste && !authKey.startsWith('xlnra1.')) {
+      remoteRuntimeAuthError = 'Paste the capability token to connect.';
       return;
     }
     remoteRuntimeAuthError = '';
@@ -365,8 +359,9 @@
       if (await ensureCurrentDeployVersion()) return;
       if (await maybeHandleResetHash()) return;
       const remoteRequest = readRemoteRuntimeRequestFromUrl();
-      if (remoteRequest && !hasAcceptedRemoteRuntime(remoteRequest)) {
+      if (remoteRequest?.requiresAuthPaste || (remoteRequest && !hasAcceptedRemoteRuntime(remoteRequest))) {
         pendingRemoteRuntime = remoteRequest;
+        stripRemoteRuntimeParams();
         activeTabLockReady = true;
         hasActiveTabLock = false;
         isLoading.set(false);
@@ -464,13 +459,13 @@
         </dl>
         {#if pendingRemoteRuntime.requiresAuthPaste}
           <label class="remote-token-input">
-            <span>Full capability</span>
+            <span>Capability</span>
             <input
               type="password"
               autocomplete="off"
               spellcheck="false"
               bind:value={remoteRuntimeAuthInput}
-              placeholder="xlnra1.full..."
+              placeholder="xlnra1..."
             />
           </label>
           {#if remoteRuntimeAuthError}
