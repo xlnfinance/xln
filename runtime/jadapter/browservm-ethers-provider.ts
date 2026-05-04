@@ -151,9 +151,7 @@ export class BrowserVMEthersProvider extends ethers.AbstractProvider {
       }
 
       case 'getLogs': {
-        // For now return empty - logs are delivered via callbacks
-        // TODO: Implement proper log storage and filtering
-        return [];
+        return this.browserVM.getLogs?.(req.filter) ?? [];
       }
 
       default:
