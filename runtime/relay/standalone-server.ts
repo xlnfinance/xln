@@ -2,7 +2,7 @@
  * Standalone relay process backed by the same relay router as runtime/server.ts.
  */
 
-import { createRelayStore, type RelayStore } from '../relay-store';
+import { createRelayStore, removeClient, type RelayStore } from '../relay-store';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../relay-router';
 import { deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from '../networking/ws-protocol';
 import { safeStringify } from '../serialization-utils';
@@ -79,6 +79,7 @@ export const startStandaloneRelayServer = (options: StandaloneRelayOptions): Sta
       },
       close(ws) {
         forgetRelaySocketRuntimeId(ws);
+        removeClient(store, ws);
       },
     },
   });
