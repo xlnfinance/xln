@@ -533,7 +533,6 @@
               name: governanceName.trim(),
               bio: governanceBio.trim(),
               website: governanceWebsite.trim(),
-              hankoSignature: '',
             },
           },
         }],

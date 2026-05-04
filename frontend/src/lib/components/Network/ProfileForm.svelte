@@ -65,7 +65,6 @@
         signerId: currentSignerId, // Use the active tab's signer
         entityTxs: [profileUpdateTx],
         timestamp: Date.now(),
-        signature: '', // TODO: Add proper signature
       };
 
       await enqueueAndProcess(env, {
