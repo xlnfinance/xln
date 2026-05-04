@@ -49,7 +49,7 @@ async function runDemo() {
   console.log('==========================================\n');
 
   const browser = await chromium.launch({
-    headless: false,
+    headless: process.env.HEADED !== 'true',
     slowMo: SLOW_MO
   });
 
@@ -60,7 +60,7 @@ async function runDemo() {
     // SCENE 1: Welcome
     // ═══════════════════════════════════════════════════════════════
     console.log('\n🎬 Scene 1: Introduction');
-    await page.goto('http://localhost:8080/view', { waitUntil: 'domcontentloaded' });
+    await page.goto('http://localhost:8080/app', { waitUntil: 'domcontentloaded' });
     await page.waitForTimeout(2500);
 
     // Dismiss tutorial
