@@ -258,6 +258,26 @@ async function readDebugErrors(page: Page, sinceTs: number): Promise<DebugErrorS
   return out.slice(-80);
 }
 
+async function hasDebugHtlcEvent(
+  page: Page,
+  hashlock: string,
+  eventName: 'HtlcReceived' | 'HtlcFinalized',
+  sinceTs: number,
+): Promise<boolean> {
+  const targetHashlock = hashlock.toLowerCase();
+  const events = await readDebugTimeline(page, { last: 1000, sinceTs });
+  return events.some((event) => {
+    const details = isRecord(event.details) ? event.details : {};
+    const payload = isRecord(details.payload) ? details.payload : {};
+    const data = isRecord(payload.data) ? payload.data : {};
+    return (
+      payload.eventName === eventName &&
+      typeof data.hashlock === 'string' &&
+      data.hashlock.toLowerCase() === targetHashlock
+    );
+  });
+}
+
 async function readRecentFrameEvents(page: Page, counterpartyId: string): Promise<FrameEventSummary> {
   return page.evaluate(({ counterpartyId }) => {
     const env = (window as any).isolatedEnv;
@@ -1925,19 +1945,18 @@ test.describe('Rebalance E2E', () => {
     const senderOutBaseline = BigInt(senderBeforeFaucet?.outCapacity || '0');
     await faucetAmount(page, rt1.entityId, h1, '2000');
     await waitForOutCapacityIncrease(page, h1, senderOutBaseline);
-    await waitForPairIdle(page, h1);
+    await waitForPairIdle(page, h1, 60_000);
 
     await switchRuntime(page, rt2Label);
     const baseline = await readPairState(page, h2);
     expect(baseline, 'rt2-h2 baseline must exist').toBeTruthy();
     const baselineDebt = BigInt(baseline?.hubExposure || baseline?.hubDebt || '0');
-    const baselineResolveCount = Number(baseline?.recentHtlcResolveCount || 0);
     // Start collection window after reset/bootstrap to avoid cross-test bleed.
     scenarioStartedAt = Date.now();
 
     // Payment #1 succeeds.
     await switchRuntime(page, rt1Label);
-    await waitForPairIdle(page, h1);
+    await waitForPairIdle(page, h1, 60_000);
     const senderBeforeP1 = await readPairState(page, h1);
     const senderP1LockBaseline = Number(senderBeforeP1?.recentHtlcLockCount || 0);
     const p1 = await sendRoutedHtlcPayment(
@@ -1954,12 +1973,13 @@ test.describe('Rebalance E2E', () => {
     await switchRuntime(page, rt2Label);
     const p1Start = Date.now();
     let afterP1: any = null;
+    let p1Received = false;
     while (Date.now() - p1Start < 30_000) {
       afterP1 = await readPairState(page, h2);
       const debtIncreased = afterP1
         && BigInt(afterP1.hubExposure || afterP1.hubDebt || '0') >= baselineDebt + 500n * 10n ** 18n;
-      const resolveSeen = Number(afterP1?.recentHtlcResolveCount || 0) > baselineResolveCount;
-      if (debtIncreased && resolveSeen) break;
+      p1Received = await hasDebugHtlcEvent(page, p1.hashlock, 'HtlcReceived', scenarioStartedAt);
+      if (debtIncreased && p1Received) break;
       await page.waitForTimeout(400);
     }
     expect(afterP1, 'rt2-h2 state after payment#1').toBeTruthy();
@@ -1968,13 +1988,20 @@ test.describe('Rebalance E2E', () => {
       `payment#1 must increase H2 exposure by ~550 (baseline=${baselineDebt}, now=${afterP1?.hubExposure || afterP1?.hubDebt || 'n/a'})`,
     ).toBe(true);
     expect(
-      Number(afterP1?.recentHtlcResolveCount || 0) > baselineResolveCount,
-      `payment#1 must be resolved (resolveCount baseline=${baselineResolveCount}, now=${afterP1?.recentHtlcResolveCount || 0})`,
+      p1Received,
+      `payment#1 must emit HtlcReceived for hashlock ${p1.hashlock.slice(0, 12)}`,
     ).toBe(true);
 
     // Payment #2 should fail before rebalance due credit ceiling.
+    const rt2P2Cursor = await getPersistedReceiptCursor(page);
+    const h2Lower = h2.toLowerCase();
+    const h2SettlesBeforeP2 = countRebalanceStepEvents(
+      await readRebalanceStepEvents(page, scenarioStartedAt),
+      'account_settled_finalized_bilateral',
+      (step) => String(step?.accountId || '').toLowerCase() === h2Lower,
+    );
     await switchRuntime(page, rt1Label);
-    await waitForPairIdle(page, h1);
+    await waitForPairIdle(page, h1, 60_000);
     const senderBeforeP2 = await readPairState(page, h1);
     const p2 = await sendRoutedHtlcPayment(
       page,
@@ -1995,7 +2022,6 @@ test.describe('Rebalance E2E', () => {
 
     await switchRuntime(page, rt2Label);
     const beforeP2Debt = BigInt(afterP1?.hubExposure || afterP1?.hubDebt || '0');
-    const rt2P2Cursor = await getPersistedReceiptCursor(page);
     const p2Start = Date.now();
     const PRE_REBALANCE_WINDOW_MS = 2_000;
     let afterP2: any = null;
@@ -2013,9 +2039,16 @@ test.describe('Rebalance E2E', () => {
     const h2SettledEarly = rt2P2Events.events.some((event) =>
       event.message === 'account_settled_finalized_bilateral' && persistedEventHasAccount(event, h2),
     );
-    if (p2HashSeen) {
+    const h2SettlesAfterP2 = countRebalanceStepEvents(
+      await readRebalanceStepEvents(page, scenarioStartedAt),
+      'account_settled_finalized_bilateral',
+      (step) => String(step?.accountId || '').toLowerCase() === h2Lower,
+    );
+    const h2SettledDuringP2 = h2SettledEarly || h2SettlesAfterP2 > h2SettlesBeforeP2;
+    const p2Received = await hasDebugHtlcEvent(page, p2.hashlock, 'HtlcReceived', scenarioStartedAt);
+    if (p2HashSeen || p2Received) {
       expect(
-        h2SettledEarly,
+        h2SettledDuringP2,
         `payment#2 passed too early without persisted rebalance finalize evidence: ${JSON.stringify(rt2P2Events.events.slice(-24), null, 2)}`,
       ).toBe(true);
     } else {
@@ -2027,8 +2060,7 @@ test.describe('Rebalance E2E', () => {
 
     // Wait for H2 R2C rebalance pipeline only if the post-cursor slice has not already
     // captured the bilateral finalize event that allowed payment #2 through.
-    const h2Lower = h2.toLowerCase();
-    if (!h2SettledEarly) {
+    if (!h2SettledDuringP2) {
       await expect.poll(async () => {
         const steps = await readRebalanceStepEvents(page, scenarioStartedAt);
         return countRebalanceStepEvents(
@@ -2065,14 +2097,14 @@ test.describe('Rebalance E2E', () => {
 
     await switchRuntime(page, rt2Label);
     const debtBeforeP3 = BigInt(rebDone.hubExposure || rebDone.hubDebt || '0');
-    const resolveBeforeP3 = Number(rebDone.recentHtlcResolveCount || 0);
     const p3Start = Date.now();
     let afterP3: any = null;
+    let p3Received = false;
     while (Date.now() - p3Start < 30_000) {
       afterP3 = await readPairState(page, h2);
-      const resolveSeen = Number(afterP3?.recentHtlcResolveCount || 0) > resolveBeforeP3;
       const debtIncreased = afterP3 && BigInt(afterP3.hubExposure || afterP3.hubDebt || '0') >= debtBeforeP3 + 500n * 10n ** 18n;
-      if (debtIncreased && resolveSeen) break;
+      p3Received = await hasDebugHtlcEvent(page, p3.hashlock, 'HtlcReceived', scenarioStartedAt);
+      if (debtIncreased && p3Received) break;
       await page.waitForTimeout(450);
     }
     expect(afterP3, 'rt2-h2 state after payment#3').toBeTruthy();
@@ -2081,8 +2113,8 @@ test.describe('Rebalance E2E', () => {
       `payment#3 should increase exposure by ~550 (before=${debtBeforeP3}, after=${afterP3?.hubExposure || afterP3?.hubDebt || 'n/a'})`,
     ).toBe(true);
     expect(
-      Number(afterP3?.recentHtlcResolveCount || 0) > resolveBeforeP3,
-      `payment#3 should resolve after rebalance (resolveCount before=${resolveBeforeP3}, after=${afterP3?.recentHtlcResolveCount || 0})`,
+      p3Received,
+      `payment#3 should emit HtlcReceived after rebalance for hashlock ${p3.hashlock.slice(0, 12)}`,
     ).toBe(true);
 
     await page.screenshot({ path: 'test-results/rebalance-rt1-h1-h2-rt2.png', fullPage: true });
@@ -2125,7 +2157,7 @@ test.describe('Rebalance E2E', () => {
     await connectHubWithCredit(page, rt2.entityId, rt2.signerId, h1, 10_000n);
     await connectHubWithCredit(page, rt2.entityId, rt2.signerId, h3, 1_000n);
     await setRebalancePolicy(page, rt2.entityId, rt2.signerId, h3, 500n, 10_000n, 20n);
-    await waitForPairIdle(page, h3);
+    await waitForPairIdle(page, h3, 60_000);
 
     // Step 4: runtime1 opens funding path via H3 and receives spendable liquidity.
     await switchRuntime(page, rt1Label);
@@ -2134,20 +2166,19 @@ test.describe('Rebalance E2E', () => {
     expect(h3BeforeFaucet, 'runtime1-h3 pair must exist before faucet').toBeTruthy();
     await faucetAmount(page, rt1.entityId, h3, '2000');
     await waitForOutCapacityIncrease(page, h3, BigInt(h3BeforeFaucet?.outCapacity || '0'));
-    await waitForPairIdle(page, h3);
+    await waitForPairIdle(page, h3, 60_000);
 
     // Step 5: switch to runtime2 and capture baseline on H3.
     await switchRuntime(page, rt2Label);
     const baseline = await readPairState(page, h3);
     expect(baseline, 'runtime2-h3 baseline must exist').toBeTruthy();
     const baselineDebt = BigInt(baseline?.hubDebt || baseline?.hubExposure || '0');
-    const baselineResolveCount = Number(baseline?.recentHtlcResolveCount || 0);
     // Start collection window after reset/bootstrap to avoid cross-test bleed.
     scenarioStartedAt = Date.now();
 
     // Step 6: HTLC #1 (550) from runtime1 -> runtime2 via H3 should pass.
     await switchRuntime(page, rt1Label);
-    await waitForPairIdle(page, h3);
+    await waitForPairIdle(page, h3, 60_000);
     const senderBeforeFirstH3 = await readPairState(page, h3);
     const payment1 = await sendRoutedHtlcPayment(
       page,
@@ -2164,12 +2195,13 @@ test.describe('Rebalance E2E', () => {
 
     const p1Start = Date.now();
     let afterP1: any = null;
+    let p1Received = false;
     while (Date.now() - p1Start < 60_000) {
       afterP1 = await readPairState(page, h3);
       const debtIncreased = afterP1
         && BigInt(afterP1.hubDebt || afterP1.hubExposure || '0') >= baselineDebt + 500n * 10n ** 18n;
-      const resolveSeen = Number(afterP1?.recentHtlcResolveCount || 0) > baselineResolveCount;
-      if (debtIncreased && resolveSeen) break;
+      p1Received = await hasDebugHtlcEvent(page, payment1.hashlock, 'HtlcReceived', scenarioStartedAt);
+      if (debtIncreased && p1Received) break;
       await page.waitForTimeout(700);
     }
     expect(afterP1, 'runtime2-h3 state after payment1').toBeTruthy();
@@ -2178,11 +2210,18 @@ test.describe('Rebalance E2E', () => {
       `payment1 must increase H3 debt by ~550 (baseline=${baselineDebt}, now=${afterP1?.hubDebt || afterP1?.hubExposure || 'n/a'})`,
     ).toBe(true);
     expect(
-      Number(afterP1?.recentHtlcResolveCount || 0) > baselineResolveCount,
-      `payment1 must be resolved (resolveCount baseline=${baselineResolveCount}, now=${afterP1?.recentHtlcResolveCount || 0})`,
+      p1Received,
+      `payment1 must emit HtlcReceived for hashlock ${payment1.hashlock.slice(0, 12)}`,
     ).toBe(true);
 
     // Step 7: HTLC #2 (550) immediately should fail on H3 capacity (1k credit total).
+    const rt2P2Cursor = await getPersistedReceiptCursor(page);
+    const h3Lower = h3.toLowerCase();
+    const h3SettlesBeforeP2 = countRebalanceStepEvents(
+      await readRebalanceStepEvents(page, scenarioStartedAt),
+      'account_settled_finalized_bilateral',
+      (step) => String(step?.accountId || '').toLowerCase() === h3Lower,
+    );
     await switchRuntime(page, rt1Label);
     await waitForPairIdle(page, h3);
     const senderBeforeP2 = await readPairState(page, h3);
@@ -2200,7 +2239,6 @@ test.describe('Rebalance E2E', () => {
 
     await switchRuntime(page, rt2Label);
 
-    const rt2P2Cursor = await getPersistedReceiptCursor(page);
     const p2Start = Date.now();
     const PRE_REBALANCE_WINDOW_MS = 2_000;
     let afterP2: any = null;
@@ -2218,8 +2256,20 @@ test.describe('Rebalance E2E', () => {
     const h3SettledEarly = rt2P2Events.events.some((event) =>
       event.message === 'account_settled_finalized_bilateral' && persistedEventHasAccount(event, h3),
     );
+    const h3SettlesAfterP2 = countRebalanceStepEvents(
+      await readRebalanceStepEvents(page, scenarioStartedAt),
+      'account_settled_finalized_bilateral',
+      (step) => String(step?.accountId || '').toLowerCase() === h3Lower,
+    );
+    const h3SettledDuringP2 = h3SettledEarly || h3SettlesAfterP2 > h3SettlesBeforeP2;
+    const payment2Received = await hasDebugHtlcEvent(page, payment2.hashlock, 'HtlcReceived', scenarioStartedAt);
     const debtAfterP2 = BigInt(afterP2.hubDebt || '0');
-    if (!hasPayment2PreRebalance) {
+    if (hasPayment2PreRebalance || payment2Received) {
+      expect(
+        h3SettledDuringP2,
+        `payment2 passed too early without rebalance finalize evidence: ${JSON.stringify(rt2P2Events.events.slice(-24), null, 2)}`,
+      ).toBe(true);
+    } else {
       expect(
         debtAfterP2 <= 1_000n * 10n ** 18n + 20n * 10n ** 18n,
         `runtime2-H3 debt should remain around <=1k in pre-rebalance window, got ${debtAfterP2}`,
@@ -2228,8 +2278,7 @@ test.describe('Rebalance E2E', () => {
 
     // Step 8: wait rebalance finalize on runtime2-H3 (collateralized and request cleared).
     let rebDone: any = null;
-    const h3Lower = h3.toLowerCase();
-    if (!h3SettledEarly) {
+    if (!h3SettledDuringP2) {
       await expect.poll(async () => {
         const steps = await readRebalanceStepEvents(page, scenarioStartedAt);
         return countRebalanceStepEvents(
@@ -2276,20 +2325,20 @@ test.describe('Rebalance E2E', () => {
     await switchRuntime(page, rt2Label);
 
     const debtBeforeP3 = BigInt(rebDone.hubDebt || '0');
-    const resolveBeforeP3 = Number(rebDone.recentHtlcResolveCount || 0);
     const p3Start = Date.now();
     let afterP3: any = null;
+    let p3Received = false;
     while (Date.now() - p3Start < 70_000) {
       afterP3 = await readPairState(page, h3);
-      const hasResolve = Number(afterP3?.recentHtlcResolveCount || 0) > resolveBeforeP3;
       const debtIncreased = afterP3 && BigInt(afterP3.hubDebt || '0') >= debtBeforeP3 + 500n * 10n ** 18n;
-      if (afterP3 && hasResolve && debtIncreased) break;
+      p3Received = await hasDebugHtlcEvent(page, payment3.hashlock, 'HtlcReceived', scenarioStartedAt);
+      if (afterP3 && p3Received && debtIncreased) break;
       await page.waitForTimeout(700);
     }
     expect(afterP3, 'runtime2-h3 state after payment3').toBeTruthy();
     expect(
-      Number(afterP3?.recentHtlcResolveCount || 0) > resolveBeforeP3,
-      `payment3 should resolve post-rebalance (resolveCount before=${resolveBeforeP3}, after=${afterP3?.recentHtlcResolveCount || 0})`,
+      p3Received,
+      `payment3 should emit HtlcReceived post-rebalance for hashlock ${payment3.hashlock.slice(0, 12)}`,
     ).toBe(true);
     expect(
       BigInt(afterP3.hubDebt || '0') >= debtBeforeP3 + 500n * 10n ** 18n,

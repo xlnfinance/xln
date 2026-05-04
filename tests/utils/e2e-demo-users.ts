@@ -234,10 +234,10 @@ async function dismissOnboardingIfVisible(page: Page): Promise<void> {
   }).first();
   if (await checkbox.isVisible({ timeout: 1000 }).catch(() => false)) {
     const checked = await checkbox.isChecked().catch(() => false);
-    if (!checked) await checkbox.check();
+    if (!checked) await checkbox.check({ timeout: 2000 }).catch(() => null);
     const startBtn = page.getByRole('button', { name: /Start( using xln)?|Continue/i }).first();
     if (await startBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await startBtn.click();
+      await startBtn.click({ timeout: 2000 }).catch(() => null);
     }
   }
 }
