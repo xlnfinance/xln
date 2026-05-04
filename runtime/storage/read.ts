@@ -386,9 +386,10 @@ const loadEntityCoreDocAtHeight = async (
   entityId: string,
   targetHeight: number,
   latestMaterializedHeight: number,
+  liveStateReadable = true,
 ): Promise<StorageEntityCoreDoc | null> => {
   const normalized = normalizeEntityId(entityId);
-  if (targetHeight === latestMaterializedHeight) {
+  if (liveStateReadable && targetHeight === latestMaterializedHeight) {
     return readJsonOrNull<StorageEntityCoreDoc>(db, keyLiveEntity(normalized));
   }
 
@@ -440,13 +441,14 @@ const loadAccountDocPageAtHeight = async (
   targetHeight: number,
   latestMaterializedHeight: number,
   query?: StoragePageQuery,
+  liveStateReadable = true,
 ): Promise<StorageAccountDocPage | null> => {
   const normalized = normalizeEntityId(entityId);
   const limit = readPageLimit(query);
   const direction = query?.sortDir === 'desc' ? 'desc' : 'asc';
   const cursor = readAccountCursor(query);
 
-  if (targetHeight === latestMaterializedHeight) {
+  if (liveStateReadable && targetHeight === latestMaterializedHeight) {
     const prefix = keyLiveAccountPrefix(normalized);
     return listAccountPageFromKeyspace({
       db,
@@ -460,8 +462,16 @@ const loadAccountDocPageAtHeight = async (
   }
 
   const baseSnapshotHeight = await findLatestSnapshotAtOrBelow(db, targetHeight);
-  if (baseSnapshotHeight <= 0) return null;
   const overlay = await collectHistoricalAccountOverlay(db, normalized, baseSnapshotHeight, targetHeight);
+  if (baseSnapshotHeight <= 0) {
+    const candidates: Array<{ counterpartyId: string; doc: StorageAccountDoc }> = [];
+    const seen = new Set<string>();
+    for (const [counterpartyId, doc] of overlay.entries()) {
+      if (!doc || !isAfterAccountCursor(counterpartyId, cursor, direction)) continue;
+      pushAccountCandidate(candidates, seen, counterpartyId, doc, limit, direction);
+    }
+    return accountPageFromCandidates(candidates, limit);
+  }
   const prefix = keySnapshotAccountPrefix(baseSnapshotHeight, normalized);
   return listAccountPageFromKeyspace({
     db,
@@ -481,11 +491,12 @@ const loadAccountDocAtHeight = async (
   counterpartyId: string,
   targetHeight: number,
   latestMaterializedHeight: number,
+  liveStateReadable = true,
 ): Promise<StorageAccountDoc | null> => {
   const normalized = normalizeEntityId(entityId);
   const counterparty = normalizeEntityId(counterpartyId);
 
-  if (targetHeight === latestMaterializedHeight) {
+  if (liveStateReadable && targetHeight === latestMaterializedHeight) {
     const raw = await readRawOrNull(db, keyLiveAccount(normalized, counterparty));
     if (!raw) return null;
     await assertLiveDocHash({
@@ -498,11 +509,12 @@ const loadAccountDocAtHeight = async (
   }
 
   const baseSnapshotHeight = await findLatestSnapshotAtOrBelow(db, targetHeight);
-  if (baseSnapshotHeight <= 0) return null;
-  let doc = await readJsonOrNull<StorageAccountDoc>(
-    db,
-    keySnapshotAccountCursor(baseSnapshotHeight, normalized, counterparty),
-  );
+  let doc = baseSnapshotHeight > 0
+    ? await readJsonOrNull<StorageAccountDoc>(
+        db,
+        keySnapshotAccountCursor(baseSnapshotHeight, normalized, counterparty),
+      )
+    : null;
   for (let height = baseSnapshotHeight + 1; height <= targetHeight; height += 1) {
     const diff = await readJsonOrNull<StorageDiffRecord>(db, keyDiff(height));
     if (!diff) continue;
@@ -630,13 +642,14 @@ const loadBookDocPageAtHeight = async (
   targetHeight: number,
   latestMaterializedHeight: number,
   query?: StoragePageQuery,
+  liveStateReadable = true,
 ): Promise<StorageBookDocPage> => {
   const normalized = normalizeEntityId(entityId);
   const limit = readPageLimit(query);
   const cursor = readBookCursor(query);
   const direction = query?.sortDir === 'desc' ? 'desc' : 'asc';
 
-  if (targetHeight === latestMaterializedHeight) {
+  if (liveStateReadable && targetHeight === latestMaterializedHeight) {
     const page = await listBookPageFromKeyspace({
       db,
       prefix: keyLiveBookPrefix(normalized),
@@ -693,6 +706,7 @@ export const loadEntityViewPageFromStorage = async (options: {
   height?: number;
   accountQuery?: StoragePageQuery;
   bookQuery?: StoragePageQuery;
+  liveStateReadable?: boolean;
 }): Promise<StorageEntityViewPage | null> => {
   const opened = await options.tryOpenDb(options.env);
   if (!opened) return null;
@@ -706,7 +720,8 @@ export const loadEntityViewPageFromStorage = async (options: {
     Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? 0)),
   );
 
-  const core = await loadEntityCoreDocAtHeight(db, entityId, targetHeight, latestMaterializedHeight);
+  const liveStateReadable = options.liveStateReadable !== false;
+  const core = await loadEntityCoreDocAtHeight(db, entityId, targetHeight, latestMaterializedHeight, liveStateReadable);
   if (!core) return null;
   const accounts = await loadAccountDocPageAtHeight(
     db,
@@ -714,6 +729,7 @@ export const loadEntityViewPageFromStorage = async (options: {
     targetHeight,
     latestMaterializedHeight,
     options.accountQuery,
+    liveStateReadable,
   );
   if (!accounts) return null;
   const books = await loadBookDocPageAtHeight(
@@ -722,6 +738,7 @@ export const loadEntityViewPageFromStorage = async (options: {
     targetHeight,
     latestMaterializedHeight,
     options.bookQuery,
+    liveStateReadable,
   );
   return { core, accounts, books };
 };
@@ -733,6 +750,7 @@ export const loadEntityAccountDocFromStorage = async (options: {
   entityId: string;
   counterpartyId: string;
   height?: number;
+  liveStateReadable?: boolean;
 }): Promise<StorageAccountDoc | null> => {
   const opened = await options.tryOpenDb(options.env);
   if (!opened) return null;
@@ -750,6 +768,7 @@ export const loadEntityAccountDocFromStorage = async (options: {
     options.counterpartyId,
     targetHeight,
     latestMaterializedHeight,
+    options.liveStateReadable !== false,
   );
 };
 
@@ -759,6 +778,7 @@ export const loadEntityStateFromStorage = async (options: {
   getRuntimeDb: (env: Env) => RuntimeDbLike;
   entityId: string;
   height?: number;
+  liveStateReadable?: boolean;
 }): Promise<EntityState | null> => {
   const opened = await options.tryOpenDb(options.env);
   if (!opened) return null;
@@ -772,7 +792,7 @@ export const loadEntityStateFromStorage = async (options: {
     Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? 0)),
   );
 
-  if (targetHeight === latestMaterializedHeight) {
+  if (options.liveStateReadable !== false && targetHeight === latestMaterializedHeight) {
     const verifyDocHashes = storageVerifyDocHashesEnabled();
     const verifyMerkleMode = storageVerifyMerkleMode();
     const entityRaw = await readRawOrNull(db, keyLiveEntity(entityId));

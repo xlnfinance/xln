@@ -2062,6 +2062,7 @@ export interface Env {
     storagePreviousDbOpenPromise?: Promise<boolean> | null | undefined;
     storageVerifiedCurrentHeight?: number;
     storageVerifiedPreviousHeight?: number;
+    storageVerifiedHistoryHeight?: number;
     storageEpochRotatePromise?: Promise<void> | null;
     storageEntityHashDocs?: unknown;
     currentStorageOverlayMarks?: RuntimeOverlayRecord[];

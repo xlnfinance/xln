@@ -114,11 +114,14 @@ export const verifyStorageTailIntegrity = async (
   }
 
   if (latestRecord) {
-    assertEntityHashesEqual(
-      toFrameEntityHashes((await readAllEntityHashDocs(db)).values()),
-      latestRecord.entityHashes,
-      `latestHeight=${latestHeight}`,
-    );
+    const liveEntityHashes = await readAllEntityHashDocs(db);
+    if (liveEntityHashes.size > 0) {
+      assertEntityHashesEqual(
+        toFrameEntityHashes(liveEntityHashes.values()),
+        latestRecord.entityHashes,
+        `latestHeight=${latestHeight}`,
+      );
+    }
   }
   return { latestHeight, checkedFrames };
 };

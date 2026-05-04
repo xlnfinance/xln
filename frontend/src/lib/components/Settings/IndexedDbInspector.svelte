@@ -80,10 +80,10 @@
   const decodeStorageKey = (bytes: Uint8Array): string | null => {
     const tag = bytes[0];
     const height = readU64(bytes, 1);
-    if (tag === 0x01 && bytes.byteLength === 1) return 'head';
-    if (tag === 0x02 && height !== null) return `frame/${height}`;
-    if (tag === 0x03 && height !== null) return `diff/${height}`;
-    if (tag === 0x05 && height !== null && bytes.byteLength === 9) return `snapshot/manifest/${height}`;
+    if (tag === 0x20 && bytes.byteLength === 1) return 'head';
+    if (tag === 0x10 && height !== null) return `frame/${height}`;
+    if (tag === 0x11 && height !== null) return `diff/${height}`;
+    if (tag === 0x12 && height !== null && bytes.byteLength === 9) return `snapshot/manifest/${height}`;
     if (tag === 0x21) return `live/entity/${readEntityId(bytes, 1) ?? bytesToFullHex(bytes)}`;
     if (tag === 0x22) {
       const entityId = readEntityId(bytes, 1);

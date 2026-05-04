@@ -9,10 +9,10 @@ export const DEFAULT_FRAME_DB_RETAIN_FRAMES = 100_000;
 export const DEFAULT_MATERIALIZE_PERIOD_FRAMES = 64;
 export const DEFAULT_ACCOUNT_MERKLE_RADIX: RadixMerkleRadix = 16;
 
-export const KEY_HEAD = Buffer.from([0x01]);
-export const KEY_FRAME = 0x02;
-export const KEY_DIFF = 0x03;
-export const KEY_SNAPSHOT_MANIFEST = 0x05;
+export const KEY_HEAD = Buffer.from([0x20]);
+export const KEY_FRAME = 0x10;
+export const KEY_DIFF = 0x11;
+export const KEY_SNAPSHOT_MANIFEST = 0x12;
 export const KEY_LIVE_ENTITY = 0x21;
 export const KEY_LIVE_ACCOUNT = 0x22;
 export const KEY_LIVE_BOOK = 0x23;

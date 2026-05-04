@@ -21,7 +21,8 @@ import {
 import { markStorageEntityDirty } from '../env-events';
 import { readFrameDbRuntimeActivity, readStorageHead, verifyStorageTailIntegrity } from '../storage';
 import { decodeBuffer, encodeBuffer } from '../storage/codec';
-import { KEY_HEAD, keyFrame, keySnapshotEntity, keySnapshotManifest } from '../storage/keys';
+import { readRawOrNull } from '../storage/level';
+import { KEY_HEAD, keyDiff, keyFrame, keySnapshotEntity, keySnapshotManifest } from '../storage/keys';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { generateLazyEntityId } from '../entity-factory';
 import type { StorageFrameRecord } from '../storage/types';
@@ -84,7 +85,21 @@ describe('storage frame journal retention', () => {
     await closeInfraDb(env);
   });
 
-  test('keeps frame tail usable after storage epoch rotation', async () => {
+  test('stores replay frames and diffs only in the history frame DB', async () => {
+    const env = await createSavedEmptyEnv('storage-history-db-split');
+    const currentDb = getRuntimeStorageDb(env);
+    const historyDb = getFrameDb(env);
+
+    expect(await readRawOrNull(currentDb, keyFrame(1))).toBeNull();
+    expect(await readRawOrNull(currentDb, keyDiff(1))).toBeNull();
+    expect(await readRawOrNull(historyDb, keyFrame(1))).toBeTruthy();
+    expect(await readRawOrNull(historyDb, keyDiff(1))).toBeTruthy();
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+  });
+
+  test('keeps frame tail usable without storage epoch rotation', async () => {
     const seed = `epoch-rotation-tail ${Date.now()} alpha beta gamma`;
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
     const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
@@ -144,7 +159,7 @@ describe('storage frame journal retention', () => {
 
     const latestAfterRotation = await getPersistedLatestHeight(env);
     expect(latestAfterRotation).toBeGreaterThan(0);
-    expect(existsSync(`${namespacePath}-storage-previous`)).toBe(true);
+    expect(existsSync(`${namespacePath}-storage-previous`)).toBe(false);
 
     env.height = latestAfterRotation + 1;
     env.timestamp += 1;
@@ -307,7 +322,7 @@ describe('storage frame journal retention', () => {
     }
   });
 
-  test('restores state from snapshot/replay journal when the secondary frame DB is lost', async () => {
+  test('fails closed when the primary history frame DB is lost', async () => {
     const seed = `storage-crash-frame-db-loss ${Date.now()} alpha beta gamma`;
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
     const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
@@ -390,21 +405,19 @@ describe('storage frame journal retention', () => {
     const beforeCrashVerify = await verifyRuntimeChain(runtimeId, seed, { fromSnapshotHeight: replayFromHeight });
     expect(beforeCrashVerify.ok).toBe(true);
 
-    // Simulates a crash after the source-of-truth state DB commit but before
-    // the secondary UI/activity frame DB is durable. State recovery must not
-    // depend on this optional index.
+    // The frame DB is the primary history/replay store. Losing it must fail
+    // closed instead of silently rebuilding from current-state rows.
     rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
 
     const restored = await loadEnvFromDB(runtimeId, seed);
-    expect(restored?.height).toBe(latestHeight);
-    expect(restored?.eReplicas.size).toBe(1);
+    expect(restored).toBeNull();
     if (restored) {
       await closeRuntimeDb(restored);
       await closeInfraDb(restored);
     }
 
-    const afterCrashVerify = await verifyRuntimeChain(runtimeId, seed, { fromSnapshotHeight: replayFromHeight });
-    expect(afterCrashVerify.ok).toBe(true);
+    await expect(verifyRuntimeChain(runtimeId, seed, { fromSnapshotHeight: replayFromHeight }))
+      .rejects.toThrow('no persisted runtime state');
   }, 10_000);
 
   test('rejects a torn snapshot head that points at a missing manifest', async () => {
@@ -429,7 +442,7 @@ describe('storage frame journal retention', () => {
     env.quietRuntimeLogs = true;
     await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
 
-    const db = getRuntimeStorageDb(env);
+    const db = getFrameDb(env);
     const head = await readStorageHead(db);
     if (!head) throw new Error('TEST_HEAD_MISSING');
     const batch = db.batch();
@@ -448,7 +461,7 @@ describe('storage frame journal retention', () => {
 
   test('rejects a snapshot head that points past the latest frame', async () => {
     const env = await createSavedEmptyEnv('storage-crash-snapshot-after-head');
-    const db = getRuntimeStorageDb(env);
+    const db = getFrameDb(env);
     const head = await readStorageHead(db);
     if (!head) throw new Error('TEST_HEAD_MISSING');
     const batch = db.batch();
@@ -466,7 +479,7 @@ describe('storage frame journal retention', () => {
 
   test('rejects a snapshot manifest with the wrong height', async () => {
     const env = await createSavedEmptyEnv('storage-crash-snapshot-manifest-height');
-    const db = getRuntimeStorageDb(env);
+    const db = getFrameDb(env);
     const head = await readStorageHead(db);
     if (!head) throw new Error('TEST_HEAD_MISSING');
     const batch = db.batch();
@@ -486,7 +499,7 @@ describe('storage frame journal retention', () => {
 
   test('rejects a snapshot manifest when the materialized frame is missing', async () => {
     const env = await createSavedEmptyEnv('storage-crash-snapshot-frame-missing');
-    const db = getRuntimeStorageDb(env);
+    const db = getFrameDb(env);
     const head = await readStorageHead(db);
     if (!head) throw new Error('TEST_HEAD_MISSING');
     const batch = db.batch();
@@ -507,7 +520,7 @@ describe('storage frame journal retention', () => {
 
   test('rejects a snapshot manifest when the frame was not materialized', async () => {
     const env = await createSavedEmptyEnv('storage-crash-snapshot-not-materialized');
-    const db = getRuntimeStorageDb(env);
+    const db = getFrameDb(env);
     const head = await readStorageHead(db);
     if (!head) throw new Error('TEST_HEAD_MISSING');
     const frame = decodeBuffer<StorageFrameRecord>(await db.get(keyFrame(1)));
@@ -585,7 +598,7 @@ describe('storage frame journal retention', () => {
     });
     await processRuntime(env, []);
 
-    const db = getRuntimeStorageDb(env);
+    const db = getFrameDb(env);
     const head = await readStorageHead(db);
     const snapshotHeight = Number(head?.latestSnapshotHeight ?? 0);
     expect(snapshotHeight).toBeGreaterThan(0);

@@ -1,7 +1,6 @@
 import { encodeBuffer, writeBatch } from './codec';
-import { copyKeyRange, copyKeys, deleteKeyRange, deleteKeys, iterateKeys, readJsonOrNull, readRawOrNull } from './level';
+import { copyKeyRange, deleteKeyRange, deleteKeys, iterateKeys, readJsonOrNull } from './level';
 import {
-  EPOCH_SEED_FRAME_TAIL,
   KEY_DIFF,
   KEY_HEAD,
   KEY_LIVE_ACCOUNT,
@@ -16,7 +15,6 @@ import {
   KEY_SNAPSHOT_ENTITY,
   KEY_SNAPSHOT_MANIFEST,
   encodeHeight,
-  keyFrame,
   keySnapshotAccountPrefix,
   keySnapshotBookPrefix,
   keySnapshotEntityPrefix,
@@ -50,48 +48,12 @@ export const seedFreshStorageEpoch = async (options: {
     Buffer.from([KEY_MERKLE_BRANCH]),
     Buffer.from([KEY_MERKLE_LEAF]),
   ];
-  const snapshotPrefixes = [
-    keySnapshotManifest(options.snapshotHeight),
-    keySnapshotEntityPrefix(options.snapshotHeight),
-    keySnapshotAccountPrefix(options.snapshotHeight),
-    keySnapshotBookPrefix(options.snapshotHeight),
-  ];
-
   let liveBytes = 0;
-  let snapshotBytes = 0;
-  let frameBytes = 0;
   let docCount = 0;
 
   for (const prefix of livePrefixes) {
     const copied = await copyKeyRange(options.sourceDb, options.targetDb, { prefix });
     liveBytes += copied.bytes;
-    docCount += copied.count;
-  }
-
-  const manifestRaw = await readRawOrNull(options.sourceDb, keySnapshotManifest(options.snapshotHeight));
-  if (manifestRaw) {
-    const batch = options.targetDb.batch();
-    const manifestKey = keySnapshotManifest(options.snapshotHeight);
-    batch.put(manifestKey, manifestRaw);
-    await writeBatch(batch);
-    snapshotBytes += manifestKey.byteLength + manifestRaw.byteLength;
-    docCount += 1;
-  }
-
-  for (const prefix of snapshotPrefixes.slice(1)) {
-    const copied = await copyKeyRange(options.sourceDb, options.targetDb, { prefix });
-    snapshotBytes += copied.bytes;
-    docCount += copied.count;
-  }
-
-  if (latestHeight > 0) {
-    const firstTailHeight = Math.max(1, latestHeight - EPOCH_SEED_FRAME_TAIL + 1);
-    const frameKeys: Buffer[] = [];
-    for (let height = firstTailHeight; height <= latestHeight; height += 1) {
-      frameKeys.push(keyFrame(height));
-    }
-    const copied = await copyKeys(options.sourceDb, options.targetDb, frameKeys);
-    frameBytes += copied.bytes;
     docCount += copied.count;
   }
 
@@ -102,12 +64,12 @@ export const seedFreshStorageEpoch = async (options: {
       ...head,
       latestMaterializedHeight: options.snapshotHeight,
       latestSnapshotHeight: options.snapshotHeight,
-      retainedHistoryBytes: snapshotBytes + frameBytes,
+      retainedHistoryBytes: 0,
     } satisfies StorageHead),
   );
   await writeBatch(batch);
 
-  return { liveBytes, snapshotBytes, frameBytes, docCount };
+  return { liveBytes, snapshotBytes: 0, frameBytes: 0, docCount };
 };
 
 export const listSnapshotHeights = async (db: RuntimeDbLike): Promise<number[]> => {
@@ -119,7 +81,8 @@ export const listSnapshotHeights = async (db: RuntimeDbLike): Promise<number[]> 
 };
 
 export const createSnapshot = async (
-  db: RuntimeDbLike,
+  sourceDb: RuntimeDbLike,
+  targetDb: RuntimeDbLike,
   height: number,
   createdAt = 0,
 ): Promise<{ docCount: number; bytes: number }> => {
@@ -132,7 +95,7 @@ export const createSnapshot = async (
   let written = 0;
   let bytes = 0;
   for (const prefix of livePrefixes) {
-    const copied = await copyKeyRange(db, db, { prefix }, (key) => {
+    const copied = await copyKeyRange(sourceDb, targetDb, { prefix }, (key) => {
       if (key[0] === KEY_LIVE_ENTITY) {
         return Buffer.concat([Buffer.from([KEY_SNAPSHOT_ENTITY]), encodeHeight(height), key.subarray(1)]);
       }
@@ -147,7 +110,7 @@ export const createSnapshot = async (
     written += copied.count;
     bytes += copied.bytes;
   }
-  const batch = db.batch();
+  const batch = targetDb.batch();
   const manifestKey = keySnapshotManifest(height);
   const manifestValue = encodeBuffer({ height, createdAt: Math.max(0, Math.floor(Number(createdAt || 0))), docCount: written } satisfies StorageSnapshotManifest);
   batch.put(manifestKey, manifestValue);

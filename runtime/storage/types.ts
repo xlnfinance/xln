@@ -286,7 +286,7 @@ export type StorageDebugStats = {
   maxDiffBytes: number;
   maxSnapshotBytes: number;
   epochDbs?: Array<{
-    role: 'current' | 'previous';
+    role: 'current' | 'history';
     path: string;
     latestHeight: number;
     latestSnapshotHeight: number;
