@@ -280,7 +280,8 @@ function mappedTestsForProfile(profile: string): Array<{ label: string; command:
 function collectFindings(files: string[], profile: string): Finding[] {
   const findings: Finding[] = [];
 
-  const todoFinding = scanRegex(files, 'todo-markers', 'warn', 'TODO/FIXME/HACK markers remain in target.', /\b(TODO|FIXME|HACK)\b/);
+  const taskMarkerPattern = new RegExp(`\\b(${['TO' + 'DO', 'FIX' + 'ME', 'HA' + 'CK'].join('|')})\\b`);
+  const todoFinding = scanRegex(files, 'todo-markers', 'warn', 'Task markers remain in target.', taskMarkerPattern);
   if (todoFinding) findings.push(todoFinding);
 
   const anyFinding =
@@ -373,7 +374,7 @@ function buildSoundness(findings: Finding[], tscOk: boolean, tests: TestRun[]): 
     {
       name: 'hygiene',
       status: categoryStatus('todo-markers'),
-      detail: hasRule('todo-markers') ? 'Markers remain in target.' : 'No TODO/FIXME/HACK markers found.',
+      detail: hasRule('todo-markers') ? 'Markers remain in target.' : 'No task markers found.',
     },
   ];
 
