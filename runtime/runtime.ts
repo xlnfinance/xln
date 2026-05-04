@@ -166,7 +166,7 @@ import {
   FINANCIAL_CONSTANTS,
 } from './financial-utils';
 import { resolveEntityProposerId } from './state-helpers';
-import { getEntityShortId, getEntityNumber, formatEntityId } from './utils';
+import { getEntityShortId, formatEntityId } from './utils';
 import { deserializeTaggedJson, serializeTaggedJson, safeStringify } from './serialization-utils';
 import { computeCanonicalStateHashFromEnv } from './storage/canonical-hash';
 import {
@@ -3544,7 +3544,6 @@ export {
 
   // Entity utilities (from entity-helpers and serialization-utils)
   getEntityShortId,
-  getEntityNumber, // deprecated, use getEntityShortId
   formatEntityId,
   safeStringify,
 

@@ -54,7 +54,6 @@ if (typeof global === 'undefined') {
 // Extend global interfaces for browser compatibility
 declare global {
   interface Window {
-    reinitializeAfterClear?: () => void;
     Buffer: typeof Buffer;
   }
 
@@ -212,17 +211,9 @@ export const clearDatabase = async (db?: ClearableDb) => {
         await Promise.all(clearPromises);
         console.log('✅ All databases cleared, re-initializing...');
 
-        // Trigger re-initialization instead of page reload
-        // TODO: delete deprecated reinitializeAfterClear
-        if (typeof window !== 'undefined' && window.reinitializeAfterClear) {
-          window.reinitializeAfterClear();
-        }
         return;
       } catch (error) {
         console.log('❌ Error clearing IndexedDB:', error);
-        if (typeof window !== 'undefined' && window.reinitializeAfterClear) {
-          window.reinitializeAfterClear();
-        }
         return;
       }
     }
@@ -459,10 +450,6 @@ export async function hash20(content: string): Promise<string> {
   return fullHash.slice(0, 42); // 0x + 40 chars = 20 bytes
 }
 
-// Keep old names for backward compatibility
-export const sha256Hash = cryptoHash;
-export const sha256Hash20 = hash20;
-
 /**
  * Deterministic object serialization for hashing
  * @param obj - Object to serialize
@@ -519,11 +506,4 @@ export function getEntityShortId(entityId: string): string {
  */
 export function formatEntityId(entityId: string): string {
   return entityId;
-}
-
-/**
- * @deprecated Use getEntityShortId instead
- */
-export function getEntityNumber(entityId: string): string {
-  return getEntityShortId(entityId);
 }

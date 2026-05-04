@@ -74,7 +74,6 @@ export interface FrontendXlnFunctions {
   getEntity: (entityId: string) => FrontendEntitySummary;
   getEntityShortId: XLNModule['getEntityShortId'];
   formatEntityId: XLNModule['formatEntityId'];
-  getEntityNumber: (entityId: string) => string;
   formatEntityDisplay: XLNModule['formatEntityDisplay'];
   formatShortEntityId: XLNModule['formatShortEntityId'];
   hashToAvatar: XLNModule['hashToAvatar'];
@@ -1021,7 +1020,6 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
       getEntity: failFn('getEntity'),
       getEntityShortId: failFn('getEntityShortId'),
       formatEntityId: failFn('formatEntityId'),
-      getEntityNumber: failFn('getEntityNumber'),
       formatEntityDisplay: failFn('formatEntityDisplay'),
       formatShortEntityId: failFn('formatShortEntityId'),
       // Display-only helpers must not crash early boot paths like /app#pay deep links.
@@ -1115,11 +1113,6 @@ export const xlnFunctions = derived([xlnInstance, settings], ([$xlnInstance, $se
     },
 
     formatEntityId: $xlnInstance.formatEntityId,
-
-    // Legacy function (use getEntityShortId instead)
-    getEntityNumber: (entityId: string): string => {
-      return $xlnInstance.getEntityShortId(entityId);
-    },
     formatEntityDisplay: $xlnInstance.formatEntityDisplay,
     formatShortEntityId: $xlnInstance.formatShortEntityId,
 
