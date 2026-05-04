@@ -661,7 +661,6 @@ const run = async () => {
       port: relayPort,
       serverId: role,
       ...(env.runtimeId ? { serverRuntimeId: env.runtimeId } : {}),  // Enable local delivery for messages to self
-      requireAuth: false,
       // CRITICAL: Pass callback to feed messages into Hub's runtime
       onEntityInput: async (from: string, input: any) => {
         console.log(`[HUB-RELAY] Received entity_input from=${from.slice(0,10)} entity=${input.entityId.slice(-4)}`);

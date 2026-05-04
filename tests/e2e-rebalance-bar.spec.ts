@@ -1026,7 +1026,7 @@ async function reloadRuntimeAndWaitReady(page: Page, rebalanceConsole: string[],
   });
 }
 
-test.describe.skip('Rebalance E2E', () => {
+test.describe('Rebalance E2E', () => {
   // Rebalance involves async j-event bilateral finalization and can exceed 60s on local runs.
   test.setTimeout(300_000);
 
