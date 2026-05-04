@@ -235,7 +235,6 @@
                   name: displayName.trim(),
                   bio: '',
                   website: '',
-                  hankoSignature: '',
                 },
               },
             }],
