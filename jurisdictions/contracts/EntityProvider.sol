@@ -896,14 +896,13 @@ contract EntityProvider is ERC1155 {
     return false; // DIVIDEND cannot cancel anyone
   }
 
-  function _validateControlProposer(bytes32 entityId, address proposer, EntityArticles memory /*articles*/) internal view {
+  function _validateControlProposer(bytes32 entityId, address proposer, EntityArticles memory articles) internal view {
     (uint256 controlTokenId,) = getTokenIds(uint256(entityId));
     uint256 proposerBalance = balanceOf(proposer, controlTokenId);
     require(proposerBalance > 0, "No control tokens");
-    
-    // Optional: require minimum percentage
-    // uint256 required = (totalControlSupply[entityId] * articles.controlThreshold) / 10000;
-    // require(proposerBalance >= required, "Insufficient control tokens");
+
+    uint256 required = (totalControlSupply[entityId] * articles.controlThreshold) / 100;
+    require(proposerBalance >= required, "Insufficient control tokens");
   }
 
   function _validateDividendProposer(bytes32 entityId, address proposer) internal view {

@@ -260,7 +260,8 @@ describe("EntityProvider with Automatic Governance", function () {
       const entitySigner = await ethers.getSigner(entityAddress);
       await owner.sendTransaction({ to: entityAddress, value: ethers.parseEther("1.0") });
       await entityProvider.connect(entitySigner).safeTransferFrom(entityAddress, alice.address, dividendTokenId, 100, "0x");
-      await entityProvider.connect(entitySigner).safeTransferFrom(entityAddress, bob.address, controlTokenId, 100, "0x");
+      await entityProvider.connect(entitySigner).safeTransferFrom(entityAddress, alice.address, controlTokenId, 1, "0x");
+      await entityProvider.connect(entitySigner).safeTransferFrom(entityAddress, bob.address, controlTokenId, (10n ** 15n * 60n) / 100n, "0x");
       await ethers.provider.send("hardhat_stopImpersonatingAccount", [entityAddress]);
 
       return { entityId };
@@ -286,6 +287,10 @@ describe("EntityProvider with Automatic Governance", function () {
       await expect(
         entityProvider.connect(carol).cancelBoardProposal(entityId, 1, defaultArticles)
       ).to.be.revertedWith("No control tokens");
+
+      await expect(
+        entityProvider.connect(alice).cancelBoardProposal(entityId, 1, defaultArticles)
+      ).to.be.revertedWith("Insufficient control tokens");
 
       await expect(
         entityProvider.connect(carol).cancelBoardProposal(entityId, 0, defaultArticles)
