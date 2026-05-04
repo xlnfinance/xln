@@ -31,7 +31,7 @@
   import { getXLN, resolveConfiguredApiBase } from '../../stores/xlnStore';
   import { settings, settingsOperations } from '../../stores/settingsStore';
   import { amountToUsd, getAssetUsdPrice } from '$lib/utils/assetPricing';
-  import { activeVault, vaultOperations } from '$lib/stores/vaultStore';
+  import { activeRuntime, vaultOperations } from '$lib/stores/vaultStore';
   import { xlnFunctions, entityPositions, enqueueEntityInputs, p2pState } from '../../stores/xlnStore';
   import { toasts } from '../../stores/toastStore';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
@@ -1162,7 +1162,7 @@
   function resolveSelfEoaAddress(): string {
     const signerId = String(currentSignerId || '').trim();
     if (isAddress(signerId)) return signerId;
-    const vaultId = String($activeVault?.id || '').trim();
+    const vaultId = String($activeRuntime?.id || '').trim();
     if (isAddress(vaultId)) return vaultId;
     return '';
   }

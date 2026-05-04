@@ -121,10 +121,6 @@ export const allRuntimes = derived(runtimesState, ($state) => {
   return Object.values($state.runtimes).sort((a, b) => b.createdAt - a.createdAt);
 });
 
-// Backward compatibility aliases
-export const activeVault = activeRuntime;
-export const allVaults = allRuntimes;
-
 let initializePromise: Promise<void> | null = null;
 let initialized = false;
 let resumeListenerRegistered = false;
@@ -1460,23 +1456,7 @@ export const vaultOperations = {
     const depositoryAddress = requireContractAddress(jReplica.depositoryAddress, 'depository');
     const entityProviderAddress = requireContractAddress(jReplica.entityProviderAddress, 'entity_provider');
 
-    // Generate entityId using canonical lazy entity ID (sorted validators, consistent encoding)
-    // This ensures same signer → same entityId regardless of where it's generated
-    // For lazy entities: entityId == boardHash (as per EntityProvider contract)
-    //
-    // TODO(provider-scoped-entities): Current format is entityId = boardHash (local to EP)
-    // Future format: entityAddress = hash(providerAddress + entityId)
-    // Why: Same boardHash on different EntityProviders should be different global addresses
-    //      (like user@google vs user@github in OAuth)
-    // When: Needed for multi-jurisdiction routing and cross-EP entity references
-    // Impact on Hanko:
-    //   - Current: 65-byte short hanko (signature only) - sufficient for self-entities
-    //   - Future: Extended hanko = sig(65) + entityId(32) + providerAddress(20) = 117 bytes
-    //   - Verifier reconstructs entityAddress from hanko fields
-    // EP Generalization:
-    //   - Current: Single EP per Depository (rigid but simple)
-    //   - Future: Multiple EPs can authenticate/dispute in same Depository
-    //   - Cross-EP entity references for federated trust
+    // Lazy entity IDs are board hashes generated from the sorted validator set.
     const entityId = generateLazyEntityId([signerAddress], 1n);
     console.log('[VaultStore.createRuntime] Entity ID:', entityId.slice(0, 18) + '...');
     console.log('[VaultStore.createRuntime]   signer:', signerAddress);
@@ -1602,11 +1582,6 @@ export const vaultOperations = {
     return runtime;
   },
 
-  // Alias for backward compatibility
-  async createVault(name: string, seed: string): Promise<Runtime> {
-    return this.createRuntime(name, seed);
-  },
-
   // Select runtime
   async selectRuntime(runtimeId: string) {
     // If restore is still in progress after reload, wait for it to settle first.
@@ -1671,11 +1646,6 @@ export const vaultOperations = {
 
     activeRuntimeId.set(resolvedRuntimeId);
     this.syncRuntime(runtime || null);
-  },
-
-  // Alias for backward compatibility
-  async selectVault(vaultId: string) {
-    await this.selectRuntime(vaultId);
   },
 
   // Add signer to active runtime
@@ -1835,11 +1805,6 @@ export const vaultOperations = {
     this.syncRuntime(current.activeRuntimeId ? current.runtimes[current.activeRuntimeId] || null : null);
   },
 
-  // Alias for backward compatibility
-  async deleteVault(vaultId: string) {
-    await this.deleteRuntime(vaultId);
-  },
-
   // Get private key for active signer
   getActiveSignerPrivateKey(): string | null {
     const current = get(runtimesState);
@@ -1869,11 +1834,6 @@ export const vaultOperations = {
     const normalized = normalizeRuntimeId(id);
     if (!normalized) return false;
     return normalized in current.runtimes;
-  },
-
-  // Alias for backward compatibility
-  vaultExists(id: string): boolean {
-    return this.runtimeExists(id);
   },
 
   // Initialize

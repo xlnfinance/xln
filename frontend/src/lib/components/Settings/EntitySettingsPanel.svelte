@@ -3,7 +3,7 @@
   import { ethers } from 'ethers';
   import type { Env, EntityTx } from '@xln/runtime/xln-api';
   import type { BarColorMode, EntityReplica, Tab, ThemeName, UIStyleSettings } from '$lib/types/ui';
-  import { activeVault, vaultOperations } from '$lib/stores/vaultStore';
+  import { activeRuntime, vaultOperations } from '$lib/stores/vaultStore';
   import {
     jmachineConfigs,
     jmachineOperations,
@@ -242,16 +242,16 @@
   }
 
   function copySeed() {
-    if ($activeVault?.seed) {
-      navigator.clipboard.writeText($activeVault.seed);
+    if ($activeRuntime?.seed) {
+      navigator.clipboard.writeText($activeRuntime.seed);
       seedCopied = true;
       setTimeout(() => seedCopied = false, 2000);
     }
   }
 
   function copyMnemonic12() {
-    if ($activeVault?.mnemonic12) {
-      navigator.clipboard.writeText($activeVault.mnemonic12);
+    if ($activeRuntime?.mnemonic12) {
+      navigator.clipboard.writeText($activeRuntime.mnemonic12);
       mnemonic12Copied = true;
       setTimeout(() => mnemonic12Copied = false, 2000);
     }
@@ -467,7 +467,7 @@
   async function verifyRuntimeChainNow() {
     const env = $xlnEnvironment;
     const runtimeId = String(env?.runtimeId || '').trim() || null;
-    const runtimeSeed = $activeVault?.seed || null;
+    const runtimeSeed = $activeRuntime?.seed || null;
     if (!runtimeId || !runtimeSeed) return;
     verifyLoading = true;
     verifyError = '';
@@ -720,15 +720,15 @@
           </div>
         </div>
 
-        {#if $activeVault}
+        {#if $activeRuntime}
           <div class="info-card">
             <div class="info-row">
               <span class="label">Label</span>
-              <span class="value">{$activeVault.label}</span>
+              <span class="value">{$activeRuntime.label}</span>
             </div>
             <div class="info-row">
               <span class="label">Created</span>
-              <span class="value">{new Date($activeVault.createdAt).toLocaleDateString()}</span>
+              <span class="value">{new Date($activeRuntime.createdAt).toLocaleDateString()}</span>
             </div>
           </div>
 
@@ -752,7 +752,7 @@
             </div>
 
             {#if recoveryPhraseRevealed}
-              {#if $activeVault.mnemonic12}
+              {#if $activeRuntime.mnemonic12}
                 <div class="seed-row">
                   <div class="seed-row-head">
                     <span>12 words</span>
@@ -764,7 +764,7 @@
                       {/if}
                     </button>
                   </div>
-                  <code class="seed-code">{$activeVault.mnemonic12}</code>
+                  <code class="seed-code">{$activeRuntime.mnemonic12}</code>
                 </div>
               {/if}
 
@@ -779,7 +779,7 @@
                     {/if}
                   </button>
                 </div>
-                <code class="seed-code">{$activeVault.seed}</code>
+                <code class="seed-code">{$activeRuntime.seed}</code>
               </div>
             {/if}
           </div>
@@ -1340,7 +1340,7 @@
         <button
           class="primary-btn"
           on:click={verifyRuntimeChainNow}
-          disabled={verifyLoading || checkpointHeights.length === 0 || !$xlnEnvironment?.runtimeId || !$activeVault?.seed}
+          disabled={verifyLoading || checkpointHeights.length === 0 || !$xlnEnvironment?.runtimeId || !$activeRuntime?.seed}
           data-testid="settings-verify-runtime-chain"
         >
           {verifyLoading ? 'Verifying...' : 'Verify Chain'}

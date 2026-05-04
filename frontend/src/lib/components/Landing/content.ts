@@ -358,7 +358,7 @@ export const content = {
       items: [
         "<strong>2025:</strong> 72 CBDCs en fase piloto",
         "<strong>2026:</strong> La interoperabilidad transfronteriza de CBDC se convierte en imperativo político",
-        "<strong>Rieles legacy incompatibles:</strong> SWIFT y la banca corresponsal no pueden manejar dinero programable",
+        "<strong>Rieles antiguos incompatibles:</strong> SWIFT y la banca corresponsal no pueden manejar dinero programable",
         "<strong>La ventana se cierra:</strong> Cada CBDC construyendo soluciones incompatibles crea fragmentación permanente",
         "<strong>Se necesita sustrato universal AHORA:</strong> Antes de que los estándares se osifiquen"
       ]
@@ -679,7 +679,7 @@ export const content = {
       items: [
         "<strong>2025:</strong> 72 CBDCs em fase piloto",
         "<strong>2026:</strong> Interoperabilidade transfronteiriça de CBDC se torna imperativo político",
-        "<strong>Rails legacy incompatíveis:</strong> SWIFT e bancos correspondentes não conseguem lidar com dinheiro programável",
+        "<strong>Rails antigos incompatíveis:</strong> SWIFT e bancos correspondentes não conseguem lidar com dinheiro programável",
         "<strong>Janela fechando:</strong> Cada CBDC construindo soluções de escala incompatíveis cria fragmentação permanente",
         "<strong>Substrato universal necessário AGORA:</strong> Antes que os padrões se ossifiquem"
       ]
@@ -893,7 +893,7 @@ export const content = {
       items: [
         "<strong>2025 :</strong> 72 CBDCs en phase pilote",
         "<strong>2026 :</strong> L'interopérabilité transfrontalière des CBDC devient un impératif politique",
-        "<strong>Rails legacy incompatibles :</strong> SWIFT et les banques correspondantes ne peuvent pas gérer l'argent programmable",
+        "<strong>Rails anciens incompatibles :</strong> SWIFT et les banques correspondantes ne peuvent pas gérer l'argent programmable",
         "<strong>La fenêtre se ferme :</strong> Chaque CBDC construisant des solutions d'évolution incompatibles crée une fragmentation permanente",
         "<strong>Substrat universel nécessaire MAINTENANT :</strong> Avant que les standards ne s'ossifient"
       ]

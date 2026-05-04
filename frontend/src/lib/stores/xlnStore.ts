@@ -919,7 +919,7 @@ export async function initializeXLN(): Promise<Env> {
   }
 }
 
-// Export XLN for direct use in components (like legacy index.html)
+// Export XLN for direct component access.
 export { getXLN };
 
 // Helper to get current environment

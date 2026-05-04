@@ -231,7 +231,7 @@
       {/if}
     </div>
   {:else}
-    <div class="bar center legacy-center">
+    <div class="bar center split-center">
       <div class="half out">
         {#if derived.outOwnCredit > 0n}<div class="seg credit" style={creditPctStyle(pctOf(derived.outOwnCredit, halfMax))}></div>{/if}
         {#if derived.outCollateral > 0n}<div class="seg coll" style={`width:${pctOf(derived.outCollateral, halfMax)}%`}></div>{/if}
@@ -321,7 +321,7 @@
     align-items: stretch;
   }
 
-  .bar.legacy-center {
+  .bar.split-center {
     justify-content: center;
   }
 

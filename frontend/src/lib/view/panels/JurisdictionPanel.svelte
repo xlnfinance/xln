@@ -9,7 +9,7 @@
   import { get } from 'svelte/store';
   import { panelBridge } from '../utils/panelBridge';
   import type { BrowserVMTokenInfo, Env, EnvSnapshot, JReplica } from '@xln/runtime/xln-api';
-  import { activeVault, allVaults } from '$lib/stores/vaultStore';
+  import { activeRuntime, allRuntimes } from '$lib/stores/vaultStore';
   import { settings } from '$lib/stores/settingsStore';
   import { xlnFunctions, xlnInstance } from '$lib/stores/xlnStore';
 
@@ -419,8 +419,8 @@
   });
 
   let signerRefs = $derived.by(() => {
-    const vault = $activeVault;
-    const vaults = $allVaults;
+    const vault = $activeRuntime;
+    const vaults = $allRuntimes;
     const scope = vault ? [vault] : vaults;
     const seen = new Map<string, SignerRef>();
 

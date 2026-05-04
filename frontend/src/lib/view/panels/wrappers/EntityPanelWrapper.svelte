@@ -1,6 +1,6 @@
 <script lang="ts">
   /**
-   * EntityPanelWrapper - Dockview adapter for legacy EntityPanel
+   * EntityPanelWrapper - Dockview adapter for EntityPanelTabs
    *
    * Wraps the existing EntityPanel component for use in /view Dockview workspace.
    * Child components read canonical state from xlnStore.
@@ -56,8 +56,6 @@
     isolatedIsLive?.set(true);
   }
 
-  // DISABLED $effect - was causing infinite loops
-  // localTab is already initialized above with correct values from props
 </script>
 
 <div class="entity-panel-wrapper">

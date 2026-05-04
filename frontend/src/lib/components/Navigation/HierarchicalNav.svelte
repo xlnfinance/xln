@@ -2,7 +2,7 @@
   import Breadcrumb from './Breadcrumb.svelte';
   import { appState, appStateOperations } from '$lib/stores/appStateStore';
   import { runtimes, activeRuntimeId } from '$lib/stores/runtimeStore';
-  import { activeVault, activeSigner, allVaults } from '$lib/stores/vaultStore';
+  import { activeRuntime, activeSigner, allRuntimes } from '$lib/stores/vaultStore';
 
   // Compute items for each level based on current selection
 
@@ -28,8 +28,8 @@
 
   // Signer items (from active vault)
   $: signerItems = (() => {
-    if (!$activeVault) return [];
-    return $activeVault.signers.map(signer => ({
+    if (!$activeRuntime) return [];
+    return $activeRuntime.signers.map(signer => ({
       id: signer.address,
       label: signer.name
     }));
