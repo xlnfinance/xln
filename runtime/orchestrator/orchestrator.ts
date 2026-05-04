@@ -32,6 +32,7 @@ import { normalizeLoopbackUrl, toPublicRpcUrl } from '../loopback-url';
 import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync, type StorageHealth } from './storage-monitor';
 import { maybeHandleQaRequest } from '../qa/api';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
+import { isLocalOperatorRequest, publicAggregatedHealth } from '../health-redaction';
 
 type Args = {
   host: string;
@@ -2174,7 +2175,8 @@ const server = Bun.serve({
       void getStorageHealth().catch(() => {});
       void pollAllHubHealth().catch(() => {});
       void pollMarketMakerHealth().catch(() => {});
-      return new Response(safeStringify(await buildAggregatedHealthResponse()), { headers });
+      const health = await buildAggregatedHealthResponse();
+      return new Response(safeStringify(isLocalOperatorRequest(request) ? health : publicAggregatedHealth(health)), { headers });
     }
 
     const qaResponse = await maybeHandleQaRequest(request, pathname, headers);
