@@ -34,8 +34,6 @@ export type { RuntimeWsMessage, RuntimeWsAuth, RuntimeWsMessageType } from './ws
 // WebSocket client/server
 export { RuntimeWsClient } from './ws-client';
 export type { RuntimeWsClientOptions } from './ws-client';
-export { startRuntimeWsServer } from './ws-server';
-export type { RuntimeWsServerOptions } from './ws-server';
 
 // Encryption
 export {

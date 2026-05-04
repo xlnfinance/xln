@@ -244,7 +244,7 @@ async function runParallelScenarios(mode: string, workersArg?: number, setName?:
 
       log.write(`scenario=${scenario}\nworker=${workerId}\nrpc=${rpcUrl}\nrelay=${relayUrl}\n\n`);
 
-      relayProc = spawn('bun', ['runtime/networking/ws-server.ts', '--port', String(relayPort)], {
+      relayProc = spawn('bun', ['runtime/relay/standalone-server.ts', '--port', String(relayPort)], {
         stdio: ['ignore', 'pipe', 'pipe'],
         env: {
           ...process.env,
