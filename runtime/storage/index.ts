@@ -395,23 +395,18 @@ export const saveRuntimeFrameToStorage = async (options: {
     state.storageEntityHashDocs = preparedHashes.entityHashDocs;
   }
   if (frameDbPuts.length > 0) {
-    try {
-      const frameDbResult = await writeFrameDbPutsWithRetention({
-        db: historyDb,
-        height: options.env.height,
-        puts: frameDbPuts,
-        config,
-      });
-      frameDbBytes = frameDbResult.writtenBytes;
-      frameDbPrunedBytes = frameDbResult.prunedBytes;
-      frameDbRetainedBytes = frameDbResult.retainedBytes;
-      frameDbPrunedKeys = frameDbResult.prunedKeys;
-      frameDbLatestPrunedHeight = frameDbResult.latestPrunedRuntimeHeight;
-      frameDbCommitted = true;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      console.error(`[PERSIST] frame DB secondary-index write failed after main commit: ${message}`);
-    }
+    const frameDbResult = await writeFrameDbPutsWithRetention({
+      db: historyDb,
+      height: options.env.height,
+      puts: frameDbPuts,
+      config,
+    });
+    frameDbBytes = frameDbResult.writtenBytes;
+    frameDbPrunedBytes = frameDbResult.prunedBytes;
+    frameDbRetainedBytes = frameDbResult.retainedBytes;
+    frameDbPrunedKeys = frameDbResult.prunedKeys;
+    frameDbLatestPrunedHeight = frameDbResult.latestPrunedRuntimeHeight;
+    frameDbCommitted = true;
   }
   const writeMs = options.getPerfMs() - writeStartedAt;
 
