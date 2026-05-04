@@ -13,7 +13,6 @@
 
 import type {
   Xlnomy,
-  XlnomySnapshot,
   JurisdictionEVM,
 } from './types.js';
 import { enqueueRuntimeInput } from './runtime';
@@ -229,60 +228,4 @@ export async function exportXlnomy(xlnomy: Xlnomy): Promise<string> {
   return JSON.stringify(snapshot, (_key, value) =>
     typeof value === 'bigint' ? `BigInt(${value.toString()})` : value
   , 2);
-}
-
-/**
- * Import Xlnomy from JSON snapshot
- */
-export async function importXlnomy(json: string): Promise<Xlnomy> {
-  const snapshot: XlnomySnapshot = JSON.parse(json, (_key, value) => {
-    if (typeof value === 'string' && value.startsWith('BigInt(')) {
-      return BigInt(value.slice(7, -1));
-    }
-    return value;
-  });
-
-  // Reconstruct EVM from snapshot
-  const evm = await createEVM(snapshot.evmType, snapshot.evmState.rpcUrl);
-
-  // TODO: Restore VM state from snapshot.evmState.vmState
-
-  return {
-    name: snapshot.name,
-    evmType: snapshot.evmType,
-    blockTimeMs: snapshot.blockTimeMs,
-    jMachine: {
-      ...snapshot.jMachine,
-      mempool: [],
-    },
-    contracts: snapshot.contracts,
-    evm,
-    entities: snapshot.entities,
-    created: snapshot.created,
-    version: snapshot.version,
-  };
-}
-
-/**
- * Persist Xlnomy to Level/IndexedDB
- */
-export async function saveXlnomy(xlnomy: Xlnomy): Promise<void> {
-  await xlnomy.evm.serialize();
-
-  // TODO: Save to Level storage
-  // await level.put(`xln-xlnomy-${xlnomy.name}`, snapshot);
-
-  console.log(`[Xlnomy] Saved "${xlnomy.name}" to storage`);
-}
-
-/**
- * Load Xlnomy from Level/IndexedDB
- */
-export async function loadXlnomy(name: string): Promise<Xlnomy | null> {
-  // TODO: Load from Level storage
-  // const snapshot = await level.get(`xln-xlnomy-${name}`);
-  // return importXlnomy(JSON.stringify(snapshot));
-
-  console.log(`[Xlnomy] Loaded "${name}" from storage`);
-  return null;
 }
