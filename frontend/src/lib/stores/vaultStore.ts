@@ -282,6 +282,7 @@ async function ensureRuntimePipelineAlive(runtime: Runtime | null, xln: XLNModul
   );
   if (!p2p) {
     xln.startP2P(env, {
+      signerId: resolvedRuntimeId,
       relayUrls: resolveRelayUrls(),
       gossipPollMs: BROWSER_GOSSIP_POLL_MS,
     });
@@ -989,6 +990,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
   if (xln.startP2P) {
     const { resolveRelayUrls } = await import('./xlnStore');
     xln.startP2P(env, {
+      signerId: runtimeIdLower,
       relayUrls: resolveRelayUrls(),
       gossipPollMs: BROWSER_GOSSIP_POLL_MS,
     });
@@ -1554,6 +1556,7 @@ export const vaultOperations = {
       const relayUrls = resolveRelayUrls();
       console.log(`[VaultStore.createRuntime] P2P: Starting on env runtimeId=${newEnv.runtimeId?.slice(0,12)}, relay=${relayUrls[0]}`);
       xln.startP2P(newEnv, {
+        signerId: runtimeId,
         relayUrls,
         gossipPollMs: BROWSER_GOSSIP_POLL_MS,
       });

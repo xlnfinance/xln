@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 import type { Profile } from '../networking/gossip';
 import { relayRoute } from '../relay-router';
-import { cacheEncryptionKey, createRelayStore, resolveEncryptionPublicKeyHex } from '../relay-store';
+import { cacheEncryptionKey, createRelayStore, enqueueMessage, resolveEncryptionPublicKeyHex } from '../relay-store';
 import { hashHelloMessage, makeHelloNonce } from '../networking/ws-protocol';
 import { deriveSignerAddressSync, signDigest } from '../account-crypto';
 
@@ -206,6 +206,14 @@ describe('relay-router gossip fanout', () => {
     expect(store.clients.get(RUNTIME_A)?.ws).toBe(wsA);
 
     store.clients.clear();
+    enqueueMessage(store, RUNTIME_A, {
+      type: 'entity_input',
+      id: 'pending-ack',
+      from: RUNTIME_B,
+      to: RUNTIME_A,
+      payload: 'encrypted-payload',
+      encrypted: true,
+    });
     expect(store.clients.size).toBe(0);
 
     await relayRoute(config, wsA, {
@@ -220,10 +228,16 @@ describe('relay-router gossip fanout', () => {
     });
 
     expect(store.clients.get(RUNTIME_A)?.ws).toBe(wsA);
-    const responses = (sentBySocket.get(wsA) ?? []).filter(
+    const messages = sentBySocket.get(wsA) ?? [];
+    const pending = messages.filter(
+      (message) => (message as { id?: string }).id === 'pending-ack',
+    );
+    const responses = messages.filter(
       (message) => (message as { type?: string }).type === 'gossip_response',
     );
+    expect(pending).toHaveLength(1);
     expect(responses.length).toBeGreaterThan(0);
+    expect(store.pendingMessages.has(RUNTIME_A)).toBe(false);
   });
 
   test('rejects duplicate hello without closing the existing runtime socket', async () => {

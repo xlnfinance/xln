@@ -72,6 +72,19 @@ export type RelayRouterConfig = {
 
 const DEFAULT_HELLO_SKEW_MS = 5 * 60 * 1000;
 
+const flushPendingToSocket = (
+  store: RelayStore,
+  runtimeId: string,
+  ws: unknown,
+  send: RelayRouterConfig['send'],
+): number => {
+  const pending = flushPendingMessages(store, runtimeId);
+  for (const pendingMsg of pending) {
+    send(ws, safeStringify(pendingMsg));
+  }
+  return pending.length;
+};
+
 // ---------------------------------------------------------------------------
 // Main entry point
 // ---------------------------------------------------------------------------
@@ -121,14 +134,17 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
   if (rememberedRuntimeId && fromKey && rememberedRuntimeId === fromKey) {
     const existing = store.clients.get(rememberedRuntimeId);
     if (!existing || existing.ws !== ws) {
-      registerClient(store, rememberedRuntimeId, ws);
+      const registered = registerClient(store, rememberedRuntimeId, ws);
+      const flushedPending = registered
+        ? flushPendingToSocket(store, rememberedRuntimeId, ws, send)
+        : 0;
       pushDebugEvent(store, {
         event: 'ws_rebind',
         runtimeId: rememberedRuntimeId,
         from,
         msgType: type,
-        status: 'reconnected',
-        details: { traceId: typeof id === 'string' ? id : null },
+        status: registered ? 'reconnected' : 'rejected',
+        details: { traceId: typeof id === 'string' ? id : null, flushedPending },
       });
     } else {
       existing.lastSeen = nextWsTimestamp(store);
@@ -238,11 +254,7 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
       details: { traceId },
     });
 
-    // Flush pending messages
-    const pending = flushPendingMessages(store, fromKey);
-    for (const pendingMsg of pending) {
-      send(ws, safeStringify(pendingMsg));
-    }
+    flushPendingToSocket(store, fromKey, ws, send);
 
     return;
   }
