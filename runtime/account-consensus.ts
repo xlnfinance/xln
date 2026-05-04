@@ -1257,6 +1257,29 @@ export async function handleAccountInput(
   if (input.newAccountFrame) {
     const receivedFrame = input.newAccountFrame;
     if (Number(receivedFrame.height) <= Number(accountMachine.currentHeight ?? 0)) {
+      const cachedAck = accountMachine.lastOutboundFrameAck;
+      const canReackCommittedFrame =
+        Number(receivedFrame.height) === Number(accountMachine.currentHeight ?? 0) &&
+        receivedFrame.stateHash === accountMachine.currentFrame?.stateHash &&
+        !!cachedAck &&
+        Number(cachedAck.height) === Number(receivedFrame.height) &&
+        cachedAck.counterpartyEntityId.toLowerCase() === input.fromEntityId.toLowerCase();
+      if (canReackCommittedFrame) {
+        events.push(
+          `↩️ Re-sent ACK for duplicate committed frame ${String(receivedFrame.height)}`,
+        );
+        return {
+          success: true,
+          response: {
+            kind: 'ack',
+            fromEntityId: accountMachine.proofHeader.fromEntity,
+            toEntityId: input.fromEntityId,
+            height: cachedAck.height,
+            prevHanko: cachedAck.prevHanko,
+          },
+          events,
+        };
+      }
       events.push(
         `ℹ️ Ignored stale frame ${String(receivedFrame.height)} (current=${String(accountMachine.currentHeight ?? 0)})`,
       );

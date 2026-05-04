@@ -2324,13 +2324,13 @@ test.describe('Rebalance E2E', () => {
 
     await switchRuntime(page, rt2Label);
 
-    const debtBeforeP3 = BigInt(rebDone.hubDebt || '0');
+    const debtBeforeP3 = BigInt(rebDone.hubDebt || rebDone.hubExposure || '0');
     const p3Start = Date.now();
     let afterP3: any = null;
     let p3Received = false;
     while (Date.now() - p3Start < 70_000) {
       afterP3 = await readPairState(page, h3);
-      const debtIncreased = afterP3 && BigInt(afterP3.hubDebt || '0') >= debtBeforeP3 + 500n * 10n ** 18n;
+      const debtIncreased = afterP3 && BigInt(afterP3.hubDebt || afterP3.hubExposure || '0') >= debtBeforeP3 + 500n * 10n ** 18n;
       p3Received = await hasDebugHtlcEvent(page, payment3.hashlock, 'HtlcReceived', scenarioStartedAt);
       if (afterP3 && p3Received && debtIncreased) break;
       await page.waitForTimeout(700);
@@ -2341,8 +2341,8 @@ test.describe('Rebalance E2E', () => {
       `payment3 should emit HtlcReceived post-rebalance for hashlock ${payment3.hashlock.slice(0, 12)}`,
     ).toBe(true);
     expect(
-      BigInt(afterP3.hubDebt || '0') >= debtBeforeP3 + 500n * 10n ** 18n,
-      `post-rebalance payment3 should increase debt by ~550 (debt ${debtBeforeP3} -> ${afterP3?.hubDebt || 'n/a'})`,
+      BigInt(afterP3.hubDebt || afterP3.hubExposure || '0') >= debtBeforeP3 + 500n * 10n ** 18n,
+      `post-rebalance payment3 should increase debt by ~550 (debt ${debtBeforeP3} -> ${afterP3?.hubDebt || afterP3?.hubExposure || 'n/a'})`,
     ).toBe(true);
   });
 });
