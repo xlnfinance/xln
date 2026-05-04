@@ -64,6 +64,7 @@ import {
   type MarketSnapshotPayload,
 } from './market-snapshot';
 import { createMarketSubscriptionStack, isMarketMessageType } from './relay/market-subscriptions';
+import { isLocalOperatorRequest, publicRuntimeHealthBody } from './health-redaction';
 import { ethers } from 'ethers';
 import { ERC20Mock__factory } from '../jurisdictions/typechain-types/index.ts';
 import {
@@ -93,11 +94,12 @@ let resolveServerStartupBarrier: (() => void) | null = null;
 const HEALTH_CACHE_TTL_MS = 10_000;
 let cachedHealthResponse:
   | {
-      body: string;
+      fullBody: string;
+      publicBody: string;
       expiresAt: number;
     }
   | null = null;
-let cachedHealthInFlight: Promise<string> | null = null;
+let cachedHealthInFlight: Promise<{ fullBody: string; publicBody: string }> | null = null;
 
 let tokenCatalogCache: JTokenInfo[] | null = null;
 let tokenCatalogPromise: Promise<JTokenInfo[]> | null = null;
@@ -2319,8 +2321,9 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   // Health check
   if (pathname === '/api/health') {
     const now = Date.now();
+    const includeOperatorHealth = isLocalOperatorRequest(req);
     if (cachedHealthResponse && cachedHealthResponse.expiresAt > now) {
-      return new Response(cachedHealthResponse.body, {
+      return new Response(includeOperatorHealth ? cachedHealthResponse.fullBody : cachedHealthResponse.publicBody, {
         headers: {
           ...headers,
           'Cache-Control': 'private, max-age=10',
@@ -2389,7 +2392,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           };
         });
         const bootstrapReserves = await getBootstrapReserveHealth(env);
-        const body = JSON.stringify({
+        const payload = {
           ...health,
           disk: buildDiskSummary(storage),
           storage,
@@ -2409,19 +2412,22 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
             profileCount: relayProfiles.length,
             profiles: relayProfileSummaries,
           },
-        });
+        };
+        const fullBody = JSON.stringify(payload);
+        const publicBody = publicRuntimeHealthBody(payload);
         cachedHealthResponse = {
-          body,
+          fullBody,
+          publicBody,
           expiresAt: Date.now() + HEALTH_CACHE_TTL_MS,
         };
-        return body;
+        return { fullBody, publicBody };
       })().finally(() => {
         cachedHealthInFlight = null;
       });
     }
 
     const body = await cachedHealthInFlight;
-    return new Response(body, {
+    return new Response(includeOperatorHealth ? body.fullBody : body.publicBody, {
       headers: {
         ...headers,
         'Cache-Control': 'private, max-age=10',

@@ -28,6 +28,7 @@ import { createHttpDrainTracker, stopServerGracefully } from './graceful-server'
 import { applyJEventsToEnv } from '../jadapter/watcher';
 import { safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
+import { isLocalOperatorRequest, publicLocalHubHealth } from '../health-redaction';
 import { decodeRuntimeAdapterMessage } from '../radapter/codec';
 import {
   attachRuntimeAdapterTicker,
@@ -1010,7 +1011,8 @@ const run = async (): Promise<void> => {
       }
 
       if (pathname === '/api/health') {
-        return new Response(safeStringify(buildLocalHealth(env, bootstrap?.entityId ?? null, activeTokenCatalog, activeJAdapter)), {
+        const health = buildLocalHealth(env, bootstrap?.entityId ?? null, activeTokenCatalog, activeJAdapter);
+        return new Response(safeStringify(isLocalOperatorRequest(request) ? health : publicLocalHubHealth(health)), {
           headers,
         });
       }
