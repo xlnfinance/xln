@@ -2,6 +2,9 @@
   "name": "xln-contracts",
   "version": "1.0.0",
   "type": "module",
+  "engines": {
+    "node": ">=20 <23"
+  },
   "scripts": {
     "compile": "bunx hardhat compile",
     "test": "bunx hardhat test",
