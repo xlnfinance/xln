@@ -339,11 +339,6 @@ function assertBilateralSync(env: Env, entityA: string, entityB: string, tokenId
   console.log(`✅ [${label}] Bilateral sync OK: ${entityA.slice(-4)}←→${entityB.slice(-4)} token ${tokenId} - all ${fieldsToCheck.length} fields match`);
 }
 
-// Verify payment moved through accounts - throws on failure
-// verifyPayment DELETED - was causing false positives due to incorrect delta semantics expectations
-// TODO: Re-implement with correct bilateral consensus understanding
-
-
 export async function ahb(env: Env): Promise<void> {
   if (env.quietRuntimeLogs === undefined) {
     env.quietRuntimeLogs = true;

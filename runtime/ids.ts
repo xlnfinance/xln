@@ -183,8 +183,8 @@ export const toTokenId = (value: number): TokenId => {
 // =============================================================================
 
 /**
- * Parse legacy replica key string "entityId:signerId" → ReplicaKey
- * This is the ONLY place string splitting should happen!
+ * Parse replica key string "entityId:signerId" → ReplicaKey.
+ * This is the only place string splitting should happen.
  */
 export const parseReplicaKey = (keyString: string): ReplicaKey => {
   const colonIndex = keyString.indexOf(':');
@@ -206,8 +206,7 @@ export const parseReplicaKey = (keyString: string): ReplicaKey => {
 };
 
 /**
- * Format ReplicaKey → legacy string "entityId:signerId"
- * Use for IndexedDB keys and Map lookups (temporary until full migration)
+ * Format ReplicaKey → storage key string "entityId:signerId".
  */
 export const formatReplicaKey = (key: ReplicaKey): string => {
   return `${key.entityId}:${key.signerId}`;
@@ -222,16 +221,14 @@ export const createReplicaKey = (entityId: string, signerId: string): ReplicaKey
 });
 
 /**
- * Extract just entityId from legacy key string
- * Convenience for cases where only entityId is needed
+ * Extract just entityId from a replica key string.
  */
 export const extractEntityId = (keyString: string): EntityId => {
   return parseReplicaKey(keyString).entityId;
 };
 
 /**
- * Extract just signerId from legacy key string
- * Convenience for cases where only signerId is needed
+ * Extract just signerId from a replica key string.
  */
 export const extractSignerId = (keyString: string): SignerId => {
   return parseReplicaKey(keyString).signerId;
@@ -537,20 +534,19 @@ export const createLazyJId = (name: string): JId => {
 
 /**
  * Safely parse replica key with fallback for invalid data
- * Use ONLY during migration - prefer parseReplicaKey for validated code paths
+ * Prefer parseReplicaKey for validated code paths.
  */
 export const safeParseReplicaKey = (keyString: string): ReplicaKey | null => {
   try {
     return parseReplicaKey(keyString);
   } catch {
-    console.warn(`[ids] Invalid replica key during migration: ${keyString}`);
+    console.warn(`[ids] Invalid replica key: ${keyString}`);
     return null;
   }
 };
 
 /**
- * Extract entityId from legacy key string with fallback
- * Use ONLY during migration
+ * Extract entityId from a replica key string.
  */
 export const safeExtractEntityId = (keyString: string): EntityId | null => {
   const key = safeParseReplicaKey(keyString);

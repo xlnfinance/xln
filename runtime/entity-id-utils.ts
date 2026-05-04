@@ -54,25 +54,7 @@ export function isLeftEntity(a: string, b: string): boolean {
  * Universal Entity ID format:
  *   hash(abi.encodePacked(providerAddress, entityIdHash))
  *
- * This allows the same entity ID to exist on different EntityProviders
- * (similar to OAuth where user@google differs from user@github).
- *
- * TODO(provider-scoped-entities): This format is DEFINED but NOT YET USED
- *
- * Current state (MVP):
- *   - entityId = boardHash (lazy entities)
- *   - Single EntityProvider per Depository
- *   - 65-byte short hanko (signature only)
- *
- * Future state (multi-EP):
- *   - entityAddress = createProviderScopedEntityId(provider, entityId)
- *   - Multiple EPs can authenticate in same Depository
- *   - Extended hanko format: sig(65) + entityId(32) + providerAddress(20) = 117 bytes
- *   - Hanko verifier reconstructs entityAddress from embedded fields
- *
- * Why extend hanko?
- *   - Signature alone can't prove which EP the entity belongs to
- *   - Verifier needs (provider, entityId) to compute entityAddress
+ * This lets tooling address an entity under a specific EntityProvider.
  *   - Without this, same boardHash on different EPs would collide
  *
  * Migration path:

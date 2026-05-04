@@ -1206,7 +1206,7 @@ export interface AccountMachine {
   // DISTINCT from proofHeader.nonce (which tracks what value to use next)
   onChainSettlementNonce: number;
 
-  // SETTLEMENT WORKSPACE: Structured negotiation area (replaces legacy fields)
+  // SETTLEMENT WORKSPACE: Structured negotiation area
   settlementWorkspace?: SettlementWorkspace;
 
   // Active dispute state (set after disputeStart, needed for disputeFinalize)
@@ -2012,10 +2012,9 @@ export interface Env {
   runtimeId?: string | undefined; // Runtime identity (usually signer1 address)
   lastProcessEnteredAt?: number; // Wall-clock timestamp of most recent process() entry
   dbNamespace?: string; // DB namespace for per-runtime persistence (defaults to runtimeId)
-  // Runtime mempool (runtime-level queue; WAL-like)
-  // NOTE: runtimeInput is deprecated alias - both point to same object
+  // Runtime mempool (runtime-level queue; WAL-like). runtimeInput is the persisted frame input field.
   runtimeMempool?: RuntimeInput | undefined;
-  runtimeInput: RuntimeInput; // Deprecated alias of runtimeMempool
+  runtimeInput: RuntimeInput;
   overlay?: RuntimeOverlayRecord[];
   runtimeConfig?: {
     minFrameDelayMs?: number; // Minimum delay between runtime frames
@@ -2181,7 +2180,7 @@ export interface JReplica {
   depositoryAddress?: string; // Primary depository address (for replay protection)
   entityProviderAddress?: string; // Primary entity provider address
 
-  // Decoded contract addresses for UI (deprecated - use depositoryAddress/entityProviderAddress)
+  // Additional deployed contract addresses.
   contracts?: {
     depository?: string;
     entityProvider?: string;

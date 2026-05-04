@@ -1510,7 +1510,7 @@ let vrHammer: VRHammer | null = null;
     const unsubscribe2 = isolatedTimeIndex.subscribe(debouncedUpdate);
     const unsubscribe3 = isolatedHistory.subscribe(debouncedUpdate);
 
-    // CRITICAL: Listen for scenario loaded event (from View.svelte after prepopulate)
+    // CRITICAL: Listen for scenario loaded event from View.svelte
     const handleScenarioLoaded = () => {
       if (scene) updateNetworkData();
     };
@@ -6443,7 +6443,6 @@ let vrHammer: VRHammer | null = null;
     return `${isNegative ? '-' : ''}${wholePart.toLocaleString()}.${formatted}`;
   }
 
-  // REMOVED hardcoded bank names - override prepopulate names!
   const BANK_NAMES: string[] = [];
 
   // S&P 500 tickers (matches ArchitectPanel)

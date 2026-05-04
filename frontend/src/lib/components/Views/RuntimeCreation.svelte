@@ -220,7 +220,7 @@
   // Derivation state
   let workers: Worker[] = [];
   const drainingWorkers = new Set<Worker>();
-  const workerActiveShard = new WeakMap<Worker, number>();
+  const workerActiveShard = new Map<Worker, number>();
   let retryShardQueue: number[] = [];
   const shardRetryCounts = new Map<number, number>();
   let workerCount = 1;
@@ -636,6 +636,7 @@
     worker.onerror = (e) => {
       console.error('[BrainVault] Worker error:', e);
       opts.onError?.(e);
+      handleWorkerFailure(worker, e);
     };
   }
 
@@ -905,6 +906,7 @@
     }
     workers = [];
     drainingWorkers.clear();
+    workerActiveShard.clear();
     syncWorkerCounts();
   }
 

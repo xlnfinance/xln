@@ -174,20 +174,10 @@ async function executeAction(
       break;
 
     case 'deposit':
-      await handleDeposit(entityId!, params, context);
-      break;
-
     case 'withdraw':
-      await handleWithdraw(entityId!, params, context);
-      break;
-
     case 'transfer':
-      await handleTransfer(entityId!, params, context);
-      break;
-
     case 'chat':
-      await handleChat(entityId!, params, context);
-      break;
+      throw new Error(`❌ SCENARIO ERROR: action "${type}" is not wired to runtime transactions`);
 
     case 'VIEW':
       // VIEW is handled at event level, not action level
@@ -948,95 +938,6 @@ async function handleOpenAccount(
       ],
     },
   ]);
-}
-
-/**
- * Handle deposit action
- */
-async function handleDeposit(
-  entityId: string,
-  params: any[],
-  context: ScenarioExecutionContext
-): Promise<void> {
-  const counterpartyScenarioId = String(params[0]);
-  const amount = BigInt(params[1]);
-
-  const fromAddress = context.entityMapping.get(entityId);
-  const toAddress = context.entityMapping.get(counterpartyScenarioId);
-
-  if (!fromAddress || !toAddress) {
-    throw new Error(`Entity mapping not found: ${entityId}, ${counterpartyScenarioId}`);
-  }
-
-  console.log(`  💰 ${entityId} deposit ${counterpartyScenarioId} ${amount}`);
-
-  // TODO: Implement actual deposit logic via entity transactions
-}
-
-/**
- * Handle withdraw action
- */
-async function handleWithdraw(
-  entityId: string,
-  params: any[],
-  context: ScenarioExecutionContext
-): Promise<void> {
-  const counterpartyScenarioId = String(params[0]);
-  const amount = BigInt(params[1]);
-
-  const fromAddress = context.entityMapping.get(entityId);
-  const toAddress = context.entityMapping.get(counterpartyScenarioId);
-
-  if (!fromAddress || !toAddress) {
-    throw new Error(`Entity mapping not found: ${entityId}, ${counterpartyScenarioId}`);
-  }
-
-  console.log(`  💸 ${entityId} withdraw ${counterpartyScenarioId} ${amount}`);
-
-  // TODO: Implement actual withdraw logic
-}
-
-/**
- * Handle transfer action
- */
-async function handleTransfer(
-  entityId: string,
-  params: any[],
-  context: ScenarioExecutionContext
-): Promise<void> {
-  const counterpartyScenarioId = String(params[0]);
-  const amount = BigInt(params[1]);
-
-  const fromAddress = context.entityMapping.get(entityId);
-  const toAddress = context.entityMapping.get(counterpartyScenarioId);
-
-  if (!fromAddress || !toAddress) {
-    throw new Error(`Entity mapping not found: ${entityId}, ${counterpartyScenarioId}`);
-  }
-
-  console.log(`  🔄 ${entityId} transfer ${counterpartyScenarioId} ${amount}`);
-
-  // TODO: Implement actual transfer logic
-}
-
-/**
- * Handle chat message
- */
-async function handleChat(
-  entityId: string,
-  params: any[],
-  context: ScenarioExecutionContext
-): Promise<void> {
-  const message = String(params[0]);
-
-  const fromAddress = context.entityMapping.get(entityId);
-  if (!fromAddress) {
-    throw new Error(`Entity mapping not found: ${entityId}`);
-  }
-
-  console.log(`  💬 ${entityId}: "${message}"`);
-
-  // TODO: Implement chat via entity transactions
 }
 
 /**

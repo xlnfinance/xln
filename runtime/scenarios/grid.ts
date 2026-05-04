@@ -61,6 +61,23 @@ function usd(amount: number): bigint {
   return BigInt(amount) * 10n ** 18n;
 }
 
+async function openGridAccount(env: Env, fromEntityId: string, toEntityId: string): Promise<void> {
+  const replicaKey = Array.from(env.eReplicas.keys()).find(k => k.startsWith(`${fromEntityId}:`));
+  const replica = replicaKey ? env.eReplicas.get(replicaKey) : null;
+  if (!replica) {
+    throw new Error(`Grid scenario cannot open account: missing replica for ${fromEntityId}`);
+  }
+  const process = await getProcess();
+  await process(env, [{
+    entityId: fromEntityId,
+    signerId: replica.signerId,
+    entityTxs: [{
+      type: 'openAccount',
+      data: { targetEntityId: toEntityId },
+    }],
+  }]);
+}
+
 // Process any pending j_events queued by j-watcher
 async function processJEvents(env: Env): Promise<void> {
   const process = await getProcess();
@@ -301,8 +318,7 @@ export async function grid(env: Env): Promise<void> {
     const hubId = hubs[Math.min(nearestHubIdx, hubs.length - 1)];
     if (!nodeId || !hubId) continue;
 
-    // Open bilateral account: Node ↔ Hub
-    // TODO: Actually open accounts when we have proper routing visualization
+    await openGridAccount(env, nodeId, hubId);
     accountsOpened++;
   }
 
@@ -323,8 +339,7 @@ export async function grid(env: Env): Promise<void> {
     const hub2 = hubs[(i + 1) % hubs.length]; // Connect to next hub (circular)
     if (!hub1 || !hub2 || hub1 === hub2) continue;
 
-    // Open bilateral account: Hub ↔ Hub
-    // TODO: Actually open accounts
+    await openGridAccount(env, hub1, hub2);
     hubConnections++;
   }
 

@@ -1116,8 +1116,8 @@ export const applyEntityInput = async (
       workingReplica.mempool,
       deterministicForHash
     );
-    // Collect all hashes that need signing (entity frame hash FIRST + account/dispute hashes with types)
-    // CRITICAL: entityFrame hash must stay at index 0 for legacy compatibility (signatures map uses sigs[0])
+    // Collect all hashes that need signing. The entity frame hash is the primary
+    // signature slot because validators read sigs[0] for frame acceptance.
     const entityFrameHashToSign: import('./types').HashToSign = {
       hash: frameHash,
       type: 'entityFrame',

@@ -108,9 +108,7 @@ contract DeltaTransformer {
   }
 
   function applyPayment(int[] memory deltas, Payment memory payment, bytes32[] memory lSecrets, bytes32[] memory rSecrets) private view {
-    // Apply amount to delta if revealed on time.
-    // Runtime default: secrets are passed in `lSecrets/rSecrets` via dispute arguments (calldata path).
-    // Storage registry (`hashToBlock`) is kept as compatibility/debug fallback only.
+    // Apply amount when the hash was revealed on chain or supplied in settlement calldata.
     uint revealedAt = hashToBlock[payment.hash];
     bool revealed = false;
     if (revealedAt != 0 && revealedAt <= payment.revealedUntilBlock) {
@@ -147,8 +145,6 @@ contract DeltaTransformer {
 
 
   function revealSecret(bytes32 secret) public {
-    // Compatibility/debug helper: writes hash reveal into on-chain registry.
-    // Current runtime payment/dispute flow does not require this for normal settlement.
     hashToBlock[keccak256(abi.encode(secret))] = block.number;
   }
   
