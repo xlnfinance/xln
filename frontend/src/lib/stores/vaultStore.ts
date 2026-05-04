@@ -430,16 +430,7 @@ const fetchJurisdictions = async (baseOrigin?: string): Promise<JurisdictionsPay
   const primaryOrigin = baseOrigin ?? (typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance');
   const configuredApiBase =
     typeof window !== 'undefined'
-      ? (() => {
-          const fromWindow = (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__;
-          if (typeof fromWindow === 'string' && fromWindow.trim().length > 0) return fromWindow.trim();
-          try {
-            const fromStorage = localStorage.getItem('xln-api-base-url');
-            return typeof fromStorage === 'string' && fromStorage.trim().length > 0 ? fromStorage.trim() : null;
-          } catch {
-            return null;
-          }
-        })()
+      ? (window as typeof window & { __XLN_API_BASE_URL__?: string }).__XLN_API_BASE_URL__?.trim() || null
       : null;
   const bust = `ts=${Date.now()}`;
   const candidates = configuredApiBase
