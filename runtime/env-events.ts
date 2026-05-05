@@ -10,7 +10,6 @@
  */
 
 import type { AccountFrame, AccountMachine, Env, LogCategory, FrameLogEntry, RuntimeFrameDbRecord, RuntimeOverlayRecord } from './types';
-import type { BookState } from './orderbook';
 import { storageOverlayRecordKey } from './storage/overlay';
 
 const getLogState = (env: Env) => {
@@ -237,18 +236,12 @@ export const recordOrderbookPairUpdate = (
   record: {
     entityId: string;
     pairId: string;
-    book?: BookState | null;
+    book?: unknown | null;
   },
 ): void => {
   const entityId = String(record.entityId || '').toLowerCase();
   const pairId = String(record.pairId || '').trim();
   if (!entityId || !pairId) return;
-  getPendingFrameDbRecords(env).push({
-    kind: 'bookUpdate',
-    entityId,
-    pairId,
-    book: record.book ? structuredClone(record.book) : null,
-  });
   markStorageBookDirty(env, entityId, pairId, !record.book);
 };
 

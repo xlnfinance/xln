@@ -1,23 +1,16 @@
 import type { FrameLogEntry, RuntimeFrameDbRecord } from '../types';
-import { compareStableText } from '../serialization-utils';
 import { decodeBuffer, encodeBuffer, writeBatch } from './codec';
-import { deleteKeyRange, deleteKeys, iterateKeys, readJsonOrNull, readRawOrNull } from './level';
+import { deleteKeyRange, deleteKeys, iterateKeys, readJsonOrNull } from './level';
 import {
   FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME,
-  FRAME_DB_ENTITY_ACTIVITY,
   FRAME_DB_RUNTIME_ACTIVITY,
-  FRAME_DB_ORDERBOOK_COMMIT,
   KEY_FRAME_DB_HEAD,
   STORAGE_SCHEMA_VERSION,
-  decodeHeight,
   encodeHeight,
   keyFrameDbAccountFrame,
   keyFrameDbAccountFrameByRuntime,
   keyFrameDbAccountFrameByRuntimePrefix,
   keyFrameDbAccountFramePrefix,
-  keyFrameDbEntityActivity,
-  keyFrameDbOrderbookCommit,
-  keyFrameDbOrderbookCommitPrefix,
   keyFrameDbRuntimeActivity,
   normalizeEntityId,
   parseFrameDbAccountFrameKey,
@@ -37,35 +30,17 @@ export type StoredAccountFrameValue = {
   timestamp: number;
 };
 
-export type StoredOrderbookCommitRecord = Extract<RuntimeFrameDbRecord, { kind: 'bookUpdate' }> & {
-  runtimeHeight: number;
-  timestamp: number;
-};
-
-export type StoredOrderbookCommitValue = {
-  book: Extract<RuntimeFrameDbRecord, { kind: 'bookUpdate' }>['book'];
-  timestamp: number;
-};
-
-export type StoredRuntimeActivityRecord = {
-  kind: 'runtimeActivity';
-  height: number;
+export type StoredRuntimeActivityValue = {
   timestamp: number;
   logs: FrameLogEntry[];
   touchedEntities: string[];
   touchedAccounts: Array<{ entityId: string; counterpartyId: string }>;
   touchedBookEntities: string[];
-  touchedBooks?: Array<{ entityId: string; pairId: string }>;
 };
 
-type StoredEntityActivityRecord = {
-  kind: 'entityActivity';
+export type StoredRuntimeActivityRecord = StoredRuntimeActivityValue & {
+  kind: 'runtimeActivity';
   height: number;
-  timestamp: number;
-  entityId: string;
-  touchedAccounts: Array<{ entityId: string; counterpartyId: string }>;
-  accountFrameCount: number;
-  logCount: number;
 };
 
 export const buildFrameDbPuts = (options: {
@@ -78,9 +53,7 @@ export const buildFrameDbPuts = (options: {
   frameDbRecords?: RuntimeFrameDbRecord[];
 }): FrameDbPut[] => {
   const puts: FrameDbPut[] = [];
-  const runtimeActivity: StoredRuntimeActivityRecord = {
-    kind: 'runtimeActivity',
-    height: options.height,
+  const runtimeActivity: StoredRuntimeActivityValue = {
     timestamp: options.timestamp,
     logs: options.logs,
     touchedEntities: options.touchedEntities,
@@ -89,79 +62,27 @@ export const buildFrameDbPuts = (options: {
   };
   puts.push({ key: keyFrameDbRuntimeActivity(options.height), value: encodeBuffer(runtimeActivity) });
 
-  const logCountsByEntity = new Map<string, number>();
-  for (const log of options.logs) {
-    const entityId = normalizeEntityId(String(log.entityId || log.data?.['entityId'] || ''));
-    if (!entityId) continue;
-    logCountsByEntity.set(entityId, (logCountsByEntity.get(entityId) ?? 0) + 1);
-  }
-
-  const frameCountsByEntity = new Map<string, number>();
-  const orderbookCountsByEntity = new Map<string, number>();
-  const touchedBooksByKey = new Map<string, { entityId: string; pairId: string }>();
   for (const record of options.frameDbRecords ?? []) {
-    if (record.kind === 'accountFrame') {
-      const entityId = normalizeEntityId(record.entityId);
-      const counterpartyId = normalizeEntityId(record.counterpartyId);
-      const accountHeight = Number(record.accountHeight || record.frame?.height || 0);
-      if (!entityId || !counterpartyId || !Number.isFinite(accountHeight) || accountHeight <= 0) continue;
-      const recordHeight = Math.max(1, Math.floor(Number(record.runtimeHeight ?? options.height)));
-      const recordTimestamp = Math.max(0, Math.floor(Number(record.timestamp ?? options.timestamp)));
-      const stored: StoredAccountFrameValue = {
-        source: record.source,
-        frame: structuredClone(record.frame),
-        runtimeHeight: recordHeight,
-        timestamp: recordTimestamp,
-      };
-      puts.push({
-        key: keyFrameDbAccountFrame(entityId, counterpartyId, Math.floor(accountHeight)),
-        value: encodeBuffer(stored),
-      });
-      puts.push({
-        key: keyFrameDbAccountFrameByRuntime(recordHeight, entityId, counterpartyId, Math.floor(accountHeight)),
-        value: Buffer.alloc(0),
-      });
-      frameCountsByEntity.set(entityId, (frameCountsByEntity.get(entityId) ?? 0) + 1);
-      continue;
-    }
-
-    if (record.kind === 'bookUpdate') {
-      const entityId = normalizeEntityId(record.entityId);
-      const pairId = String(record.pairId || '').trim();
-      if (!entityId || !pairId) continue;
-      const recordHeight = Math.max(1, Math.floor(Number(record.runtimeHeight ?? options.height)));
-      const recordTimestamp = Math.max(0, Math.floor(Number(record.timestamp ?? options.timestamp)));
-      const stored: StoredOrderbookCommitValue = {
-        book: record.book ? structuredClone(record.book) : null,
-        timestamp: recordTimestamp,
-      };
-      puts.push({
-        key: keyFrameDbOrderbookCommit(recordHeight, entityId, pairId),
-        value: encodeBuffer(stored),
-      });
-      orderbookCountsByEntity.set(entityId, (orderbookCountsByEntity.get(entityId) ?? 0) + 1);
-      touchedBooksByKey.set(`${entityId}:${pairId}`, { entityId, pairId });
-    }
-  }
-
-  if (touchedBooksByKey.size > 0) {
-    runtimeActivity.touchedBooks = Array.from(touchedBooksByKey.values())
-      .sort((left, right) => compareStableText(left.entityId, right.entityId) || compareStableText(left.pairId, right.pairId));
-  }
-
-  for (const entityId of options.touchedEntities) {
-    const normalized = normalizeEntityId(entityId);
-    if (!normalized) continue;
-    const entityActivity: StoredEntityActivityRecord = {
-      kind: 'entityActivity',
-      height: options.height,
-      timestamp: options.timestamp,
-      entityId: normalized,
-      touchedAccounts: options.touchedAccounts.filter((account) => normalizeEntityId(account.entityId) === normalized),
-      accountFrameCount: frameCountsByEntity.get(normalized) ?? 0,
-      logCount: (logCountsByEntity.get(normalized) ?? 0) + (orderbookCountsByEntity.get(normalized) ?? 0),
+    const entityId = normalizeEntityId(record.entityId);
+    const counterpartyId = normalizeEntityId(record.counterpartyId);
+    const accountHeight = Number(record.accountHeight || record.frame?.height || 0);
+    if (!entityId || !counterpartyId || !Number.isFinite(accountHeight) || accountHeight <= 0) continue;
+    const recordHeight = Math.max(1, Math.floor(Number(record.runtimeHeight ?? options.height)));
+    const recordTimestamp = Math.max(0, Math.floor(Number(record.timestamp ?? options.timestamp)));
+    const stored: StoredAccountFrameValue = {
+      source: record.source,
+      frame: structuredClone(record.frame),
+      runtimeHeight: recordHeight,
+      timestamp: recordTimestamp,
     };
-    puts.push({ key: keyFrameDbEntityActivity(normalized, options.height), value: encodeBuffer(entityActivity) });
+    puts.push({
+      key: keyFrameDbAccountFrame(entityId, counterpartyId, Math.floor(accountHeight)),
+      value: encodeBuffer(stored),
+    });
+    puts.push({
+      key: keyFrameDbAccountFrameByRuntime(recordHeight, entityId, counterpartyId, Math.floor(accountHeight)),
+      value: Buffer.alloc(0),
+    });
   }
 
   return puts;
@@ -204,21 +125,6 @@ const pruneFrameDbBeforeRuntimeHeight = async (
   removedBytes += runtimeActivityPruned.removedBytes;
   removedKeys += runtimeActivityPruned.removedKeys;
 
-  const entityActivityPruned = await deleteKeyRange(
-    db,
-    { prefix: Buffer.from([FRAME_DB_ENTITY_ACTIVITY]) },
-    (key) => decodeHeight(key, 33) <= cutoff,
-  );
-  removedBytes += entityActivityPruned.removedBytes;
-  removedKeys += entityActivityPruned.removedKeys;
-
-  const orderbookCommitPruned = await deleteKeyRange(db, {
-    gte: keyFrameDbOrderbookCommitPrefix(),
-    lt: Buffer.concat([Buffer.from([FRAME_DB_ORDERBOOK_COMMIT]), encodeHeight(cutoff + 1)]),
-  });
-  removedBytes += orderbookCommitPruned.removedBytes;
-  removedKeys += orderbookCommitPruned.removedKeys;
-
   const accountFrameKeysByHex = new Map<string, Buffer>();
   for await (const key of iterateKeys(db, {
     gte: keyFrameDbAccountFrameByRuntimePrefix(),
@@ -228,24 +134,6 @@ const pruneFrameDbBeforeRuntimeHeight = async (
     const parsed = parseFrameDbAccountFrameRuntimeIndexKey(key);
     const primaryKey = keyFrameDbAccountFrame(parsed.entityId, parsed.counterpartyId, parsed.accountHeight);
     accountFrameKeysByHex.set(primaryKey.toString('hex'), primaryKey);
-    if (accountFrameKeysByHex.size >= 512) {
-      const keysToDelete = Array.from(accountFrameKeysByHex.values());
-      removedBytes += await deleteKeys(db, keysToDelete);
-      removedKeys += keysToDelete.length;
-      accountFrameKeysByHex.clear();
-    }
-  }
-
-  // Legacy frame DBs written before the runtime-height index have no secondary
-  // key to range-prune. Stream the primary keyspace so upgraded DBs eventually
-  // age out those rows without materializing all account-frame keys in memory.
-  for await (const key of iterateKeys(db, { prefix: keyFrameDbAccountFramePrefix() })) {
-    const raw = await readRawOrNull(db, key);
-    if (!raw) continue;
-    const record = decodeBuffer<StoredAccountFrameValue>(raw);
-    if (Math.max(0, Math.floor(Number(record.runtimeHeight ?? 0))) <= cutoff) {
-      accountFrameKeysByHex.set(key.toString('hex'), key);
-    }
     if (accountFrameKeysByHex.size >= 512) {
       const keysToDelete = Array.from(accountFrameKeysByHex.values());
       removedBytes += await deleteKeys(db, keysToDelete);
@@ -334,7 +222,17 @@ export const readFrameDbRuntimeActivity = async (
 ): Promise<StoredRuntimeActivityRecord | null> => {
   const targetHeight = Number.isFinite(height) ? Math.max(1, Math.floor(height)) : 0;
   if (targetHeight <= 0) return null;
-  return readJsonOrNull<StoredRuntimeActivityRecord>(db, keyFrameDbRuntimeActivity(targetHeight));
+  const value = await readJsonOrNull<StoredRuntimeActivityValue>(db, keyFrameDbRuntimeActivity(targetHeight));
+  if (!value) return null;
+  return {
+    kind: 'runtimeActivity',
+    height: targetHeight,
+    timestamp: Math.max(0, Math.floor(Number(value.timestamp ?? 0))),
+    logs: Array.isArray(value.logs) ? value.logs : [],
+    touchedEntities: Array.isArray(value.touchedEntities) ? value.touchedEntities : [],
+    touchedAccounts: Array.isArray(value.touchedAccounts) ? value.touchedAccounts : [],
+    touchedBookEntities: Array.isArray(value.touchedBookEntities) ? value.touchedBookEntities : [],
+  };
 };
 
 export const readFrameDbAccountFrames = async (
@@ -347,11 +245,16 @@ export const readFrameDbAccountFrames = async (
   for await (const key of iterateKeys(db, { prefix })) {
     const parsed = parseFrameDbAccountFrameKey(key);
     const record = decodeBuffer<StoredAccountFrameValue>(await db.get(key));
+    const accountHeight = Math.max(1, Math.floor(Number(parsed.accountHeight)));
+    const frameHeight = Math.max(0, Math.floor(Number(record.frame?.height ?? 0)));
+    if (frameHeight !== accountHeight) {
+      throw new Error(`FRAME_DB_ACCOUNT_FRAME_HEIGHT_MISMATCH: key=${accountHeight} frame=${frameHeight}`);
+    }
     records.push({
       kind: 'accountFrame',
       entityId: normalizeEntityId(parsed.entityId),
       counterpartyId: normalizeEntityId(parsed.counterpartyId),
-      accountHeight: Math.max(1, Math.floor(Number(parsed.accountHeight))),
+      accountHeight,
       source: record.source,
       frame: record.frame,
       runtimeHeight: Math.max(0, Math.floor(Number(record.runtimeHeight ?? 0))),

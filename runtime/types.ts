@@ -1,4 +1,4 @@
-import type { BookState, OrderbookExtState } from './orderbook';
+import type { OrderbookExtState } from './orderbook';
 import type { SwapKey } from './swap-keys';
 import type { Level } from 'level';
 import type { RuntimeP2P } from './networking/p2p';
@@ -1282,24 +1282,16 @@ export interface AccountFrame {
 }
 
 export type RuntimeFrameDbRecord =
-  | {
-      kind: 'accountFrame';
-      entityId: string;
-      counterpartyId: string;
-      accountHeight: number;
-      source: 'ackCommit' | 'peerCommit';
-      frame: AccountFrame;
-      runtimeHeight?: number;
-      timestamp?: number;
-    }
-  | {
-      kind: 'bookUpdate';
-      entityId: string;
-      pairId: string;
-      book: BookState | null;
-      runtimeHeight?: number;
-      timestamp?: number;
-    };
+  {
+    kind: 'accountFrame';
+    entityId: string;
+    counterpartyId: string;
+    accountHeight: number;
+    source: 'ackCommit' | 'peerCommit';
+    frame: AccountFrame;
+    runtimeHeight?: number;
+    timestamp?: number;
+  };
 
 export type RuntimeOverlayRecord =
   | { family: 'entity'; entityId: string }
