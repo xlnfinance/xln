@@ -47,7 +47,7 @@
  * method names to concrete handlers via a static registry.
  */
 
-import type { Env, EntityReplica, EntityInput, SettlementOp, EntityTx } from './types';
+import type { Env, EntityReplica, EntityInput, SettlementOp, EntityTx, AccountInput } from './types';
 import type { CrontabState, CrontabTaskMethod, CrontabTaskState, ScheduledHook } from './crontab-types';
 import { isLeftEntity } from './entity-id-utils';
 import { deriveDelta } from './account-utils';
@@ -68,6 +68,12 @@ export const HUB_PENDING_BROADCAST_STALE_MS = 120000; // 2 minutes without final
 export const HUB_SUBMITTED_REQUEST_STALE_MS = 5 * 60 * 1000; // 5 minutes since jBatch handoff => mark as stale/manual
 export const HUB_MAX_R2C_PER_TICK = 10;
 export const HUB_MAX_C2R_PER_TICK = 10;
+
+const accountInputProposedFrameHeight = (input: AccountInput): number => {
+  const candidate = input.newAccountFrame?.height ?? input.height ?? 0;
+  const height = Number(candidate);
+  return Number.isFinite(height) ? Math.max(0, Math.floor(height)) : 0;
+};
 
 type CrontabExecutionContext = {
   manualBroadcastInInput: boolean;
@@ -490,11 +496,14 @@ async function checkAccountTimeoutsHandler(
 
       // ACK may be lost on relay reconnect. Safe resend of the exact cached input
       // unblocks bilateral consensus without mutating account shared state.
+      const cachedInputHeight = accountMachine.pendingAccountInput
+        ? accountInputProposedFrameHeight(accountMachine.pendingAccountInput)
+        : 0;
       if (
         firstValidator &&
         frameAge > ACCOUNT_PENDING_RESEND_AFTER_MS &&
         accountMachine.pendingAccountInput &&
-        accountMachine.pendingAccountInput.height === accountMachine.pendingFrame.height
+        cachedInputHeight === accountMachine.pendingFrame.height
       ) {
         outputs.push({
           entityId: accountMachine.pendingAccountInput.toEntityId,

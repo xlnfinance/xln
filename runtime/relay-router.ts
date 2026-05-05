@@ -18,9 +18,11 @@ import {
   getProfileBatch,
   DEFAULT_GOSSIP_SYNC_LIMIT,
   registerClient,
+  removeClient,
   flushPendingMessages,
   enqueueMessage,
   cacheEncryptionKey,
+  isRelaySocketOpen,
 } from './relay-store';
 import type { Profile } from './networking/gossip';
 import { verifyProfileSignature, type ProfileVerifyResult } from './networking/profile-signing';
@@ -60,8 +62,8 @@ export type RelayRouterConfig = {
   localRuntimeId: string;
   /** Called when an entity_input is addressed to this runtime. */
   localDeliver: (from: string | undefined, msg: any) => Promise<void>;
-  /** Thin wrapper: (ws, data: string) => void */
-  send: (ws: any, data: string) => void;
+  /** Thin wrapper: (ws, data: string) => boolean | number | void */
+  send: (ws: any, data: string) => boolean | number | void;
   /** Hook to mirror gossip into env. */
   onGossipStore?: (profile: any) => void;
   /** Defaults to true. Unsigned hello cannot claim a runtime slot. */
@@ -83,6 +85,26 @@ const flushPendingToSocket = (
     send(ws, safeStringify(pendingMsg));
   }
   return pending.length;
+};
+
+const trySendRelay = (
+  config: RelayRouterConfig,
+  ws: unknown,
+  msg: unknown,
+): boolean => {
+  if (!isRelaySocketOpen(ws)) return false;
+  try {
+    const result = config.send(ws, safeStringify(msg));
+    if (result === false) return false;
+    return !(typeof result === 'number' && result < 0);
+  } catch (error) {
+    pushDebugEvent(config.store, {
+      event: 'delivery',
+      status: 'send-failed',
+      reason: error instanceof Error ? error.message : String(error),
+    });
+    return false;
+  }
 };
 
 // ---------------------------------------------------------------------------
@@ -448,22 +470,34 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
     // If addressed to a remote WS client (not local), forward directly
     const target = store.clients.get(toKey);
     if (target && !isLocalTarget) {
-      console.log(`[RELAY] → forwarding to WS client`);
-      send(target.ws, safeStringify(msg));
+      if (trySendRelay(config, target.ws, msg)) {
+        console.log(`[RELAY] → forwarding to WS client`);
+        pushDebugEvent(store, {
+          event: 'delivery',
+          from,
+          to,
+          msgType: type,
+          encrypted: msg.encrypted === true,
+          status: 'delivered',
+          details: {
+            traceId,
+            ...(deliveryEntityId ? { entityId: deliveryEntityId } : {}),
+            ...(deliveryTxCount !== undefined ? { txs: deliveryTxCount } : {}),
+          },
+        });
+        return;
+      }
+      removeClient(store, target.ws);
       pushDebugEvent(store, {
         event: 'delivery',
         from,
         to,
         msgType: type,
         encrypted: msg.encrypted === true,
-        status: 'delivered',
-        details: {
-          traceId,
-          ...(deliveryEntityId ? { entityId: deliveryEntityId } : {}),
-          ...(deliveryTxCount !== undefined ? { txs: deliveryTxCount } : {}),
-        },
+        status: 'stale-target',
+        reason: 'TARGET_SOCKET_NOT_OPEN',
+        details: { traceId },
       });
-      return;
     }
 
     // Local delivery for entity_input addressed to this runtime
