@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { unpack } from 'msgpackr';
+  import { decodeBinaryPayload } from '@xln/runtime/storage/binary-codec';
   import { compareStableText } from '$lib/utils/stableSort';
 
   type DbKindFilter = 'all' | 'core' | 'infra';
@@ -9,6 +9,7 @@
     label: string;
     preview: string;
     pretty: string | null;
+    prettyFactory?: () => string | null;
     byteLength: number;
     keyFields?: StorageKeyFields;
   };
@@ -32,17 +33,15 @@
         accountHeight: number;
       }
     | {
+        family: 'frame-db/runtime-activity';
+        height: number;
+      }
+    | {
         family: 'frame-db/account-by-runtime';
         runtimeHeight: number;
         entityId: string;
         counterpartyId: string;
         accountHeight: number;
-      }
-    | {
-        family: 'frame-db/orderbook';
-        runtimeHeight: number;
-        entityId: string;
-        pairId: string;
       }
     | {
         family: 'generic';
@@ -53,9 +52,9 @@
   export let pageSize = 50;
 
   const textDecoder = new TextDecoder();
-  const indexedDbWithListing = indexedDB as IDBFactory & {
+  const getIndexedDb = (): (IDBFactory & {
     databases?: () => Promise<Array<{ name?: string; version?: number }>>;
-  };
+  }) | null => (typeof indexedDB === 'undefined' ? null : indexedDB);
 
   let loadingDatabases = false;
   let loadingEntries = false;
@@ -68,6 +67,7 @@
   let entries: DbEntryView[] = [];
   let loadedCount = 0;
   let hasMoreEntries = false;
+  let expandedValueEntries = new Set<number>();
 
   const normalizeName = (value: string): string => value.trim();
 
@@ -147,9 +147,11 @@
         };
       }
     }
-    if (tag === 0x02 && height !== null) return generic(`frame-db/runtime-activity/${height}`);
-    if (tag === 0x03 && bytes.byteLength >= 41) {
-      return generic(`frame-db/entity-activity/${readEntityId(bytes, 1)}/${readU64(bytes, 33) ?? '?'}`);
+    if (tag === 0x02 && height !== null) {
+      return {
+        label: `frame-db/runtime-activity/${height}`,
+        fields: { family: 'frame-db/runtime-activity', height },
+      };
     }
     if (tag === 0x04 && bytes.byteLength >= 81) {
       const entityId = readEntityId(bytes, 9);
@@ -162,22 +164,23 @@
         };
       }
     }
-    if (tag === 0x05 && bytes.byteLength >= 41) {
-      const entityId = readEntityId(bytes, 9);
-      const pairId = readTextAt(bytes, 41);
-      if (height !== null && entityId && pairId) {
-        return {
-          label: `frame-db/orderbook/${height}/${entityId}/${pairId}`,
-          fields: { family: 'frame-db/orderbook', runtimeHeight: height, entityId, pairId },
-        };
-      }
-    }
     return null;
   };
 
   const compactValuePreview = (blob: DecodedBlob): string => {
     const text = blob.pretty || blob.preview;
     return text.length > 900 ? `${text.slice(0, 900)}...` : text;
+  };
+
+  const renderBlobPretty = (blob: DecodedBlob): string => (
+    blob.pretty ?? blob.prettyFactory?.() ?? blob.preview
+  );
+
+  const setValueExpanded = (index: number, expanded: boolean): void => {
+    const next = new Set(expandedValueEntries);
+    if (expanded) next.add(index);
+    else next.delete(index);
+    expandedValueEntries = next;
   };
 
   const isPrintableText = (text: string): boolean => {
@@ -256,17 +259,15 @@
       omitIfSame('entityId', keyFields.entityId);
       omitIfSame('counterpartyId', keyFields.counterpartyId);
       omitIfSame('accountHeight', keyFields.accountHeight);
+    } else if (keyFields.family === 'frame-db/runtime-activity') {
+      omitIfSame('kind', 'runtimeActivity');
+      omitIfSame('height', keyFields.height);
     } else if (keyFields.family === 'frame-db/account-by-runtime') {
       omitIfSame('kind', 'accountFrame');
       omitIfSame('runtimeHeight', keyFields.runtimeHeight);
       omitIfSame('entityId', keyFields.entityId);
       omitIfSame('counterpartyId', keyFields.counterpartyId);
       omitIfSame('accountHeight', keyFields.accountHeight);
-    } else if (keyFields.family === 'frame-db/orderbook') {
-      omitIfSame('kind', 'bookUpdate');
-      omitIfSame('runtimeHeight', keyFields.runtimeHeight);
-      omitIfSame('entityId', keyFields.entityId);
-      omitIfSame('pairId', keyFields.pairId);
     }
     return { value: out, omitted };
   };
@@ -297,15 +298,11 @@
   };
 
   const tryDecodeXlnBinaryPayload = (bytes: Uint8Array): unknown | null => {
-    const magic = bytes[0];
-    const body = bytes.subarray(1);
     try {
-      if (magic === 0x01) return unpack(body);
-      if (magic === 0x02) return JSON.parse(textDecoder.decode(body));
+      return decodeBinaryPayload(bytes);
     } catch {
       return null;
     }
-    return null;
   };
 
   const asUint8Array = (value: unknown): Uint8Array | null => {
@@ -350,11 +347,11 @@
     if (decodedPayload !== null) {
       const inspectable = inspectableValue(decodedPayload);
       const compacted = withoutKeyDerivedFields(inspectable, keyFields);
-      const pretty = prettyStringify(compacted.value);
       return {
-        label: bytes[0] === 0x01 ? 'xln/msgpack' : 'xln/json',
+        label: 'xln/codec',
         preview: summarizeDecodedValue(compacted.value, compacted.omitted),
-        pretty,
+        pretty: null,
+        prettyFactory: () => prettyStringify(compacted.value),
         byteLength: bytes.byteLength,
       };
     }
@@ -382,6 +379,18 @@
     const bytes = asUint8Array(value);
     if (bytes) {
       const decoded = decodeStorageKey(bytes);
+      if (!decoded) {
+        const decodedText = textDecoder.decode(bytes);
+        if (isPrintableText(decodedText)) {
+          const hex = bytesToFullHex(bytes);
+          return {
+            label: decodedText,
+            preview: hex,
+            pretty: hex,
+            byteLength: bytes.byteLength,
+          };
+        }
+      }
       const hex = bytesToFullHex(bytes);
       const base = {
         label: decoded ? decoded.label : hex,
@@ -410,7 +419,12 @@
   );
 
   const openDatabase = (name: string): Promise<IDBDatabase> => new Promise((resolve, reject) => {
-    const request = indexedDB.open(name);
+    const idb = getIndexedDb();
+    if (!idb) {
+      reject(new Error('IndexedDB is not available'));
+      return;
+    }
+    const request = idb.open(name);
     request.onerror = () => reject(request.error || new Error(`Failed to open IndexedDB ${name}`));
     request.onsuccess = () => resolve(request.result);
   });
@@ -420,8 +434,9 @@
       .map(normalizeName)
       .filter(Boolean)
       .map((name) => ({ name }));
-    const discovered = indexedDbWithListing.databases
-      ? (await indexedDbWithListing.databases())
+    const idb = getIndexedDb();
+    const discovered = idb?.databases
+      ? (await idb.databases())
           .filter((entry): entry is { name: string; version?: number } => typeof entry.name === 'string' && !!entry.name)
           .map((entry) => ({ name: entry.name, version: entry.version }))
       : [];
@@ -472,6 +487,7 @@
       entries = [];
       loadedCount = 0;
       hasMoreEntries = false;
+      expandedValueEntries = new Set();
       return;
     }
     loadingEntries = true;
@@ -514,6 +530,7 @@
 
         if (reset) {
           entries = pageEntries;
+          expandedValueEntries = new Set();
         } else {
           entries = [...entries, ...pageEntries];
         }
@@ -552,6 +569,7 @@
     entries = [];
     loadedCount = 0;
     hasMoreEntries = false;
+    expandedValueEntries = new Set();
   }
 
   $: if (selectedDatabaseName && selectedObjectStore) {
@@ -636,9 +654,14 @@
                     <pre>{entry.key.pretty}</pre>
                   </details>
                 {/if}
-                <details class="entry-expand">
+                <details
+                  class="entry-expand"
+                  on:toggle={(event) => setValueExpanded(entry.index, (event.currentTarget as HTMLDetailsElement).open)}
+                >
                   <summary>Expand value fully</summary>
-                  <pre>{entry.value.pretty || entry.value.preview}</pre>
+                  {#if expandedValueEntries.has(entry.index)}
+                    <pre>{renderBlobPretty(entry.value)}</pre>
+                  {/if}
                 </details>
               </article>
             {/each}

@@ -30,9 +30,7 @@ export const EPOCH_SEED_FRAME_TAIL = STORAGE_VERIFY_TAIL_FRAMES + 1;
 export const KEY_FRAME_DB_HEAD = Buffer.from([0x00]);
 export const FRAME_DB_ACCOUNT_FRAME = 0x01;
 export const FRAME_DB_RUNTIME_ACTIVITY = 0x02;
-export const FRAME_DB_ENTITY_ACTIVITY = 0x03;
 export const FRAME_DB_ACCOUNT_FRAME_BY_RUNTIME = 0x04;
-export const FRAME_DB_ORDERBOOK_COMMIT = 0x05;
 export const ZERO_FRAME_HASH = `0x${'00'.repeat(32)}`;
 
 export const normalizeEntityId = (value: string): string => String(value || '').toLowerCase();
@@ -146,11 +144,6 @@ export const keyFrameDbAccountFrameByRuntime = (
 
 export const keyFrameDbRuntimeActivity = (height: number): Buffer =>
   Buffer.concat([Buffer.from([FRAME_DB_RUNTIME_ACTIVITY]), encodeHeight(height)]);
-export const keyFrameDbEntityActivity = (entityId: string, height: number): Buffer =>
-  Buffer.concat([Buffer.from([FRAME_DB_ENTITY_ACTIVITY]), hexBytes(entityId), encodeHeight(height)]);
-export const keyFrameDbOrderbookCommit = (runtimeHeight: number, entityId: string, pairId: string): Buffer =>
-  Buffer.concat([Buffer.from([FRAME_DB_ORDERBOOK_COMMIT]), encodeHeight(runtimeHeight), hexBytes(entityId), textBytes(pairId)]);
-export const keyFrameDbOrderbookCommitPrefix = (): Buffer => Buffer.from([FRAME_DB_ORDERBOOK_COMMIT]);
 
 export const keyFrameDbAccountFramePrefix = (entityId?: string, counterpartyId?: string): Buffer => {
   if (entityId && counterpartyId) return Buffer.concat([Buffer.from([FRAME_DB_ACCOUNT_FRAME]), hexBytes(entityId), hexBytes(counterpartyId)]);

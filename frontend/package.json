@@ -35,7 +35,6 @@
 		"hash-wasm": "^4.12.0",
 		"jsqr": "^1.4.0",
 		"lucide-svelte": "^0.544.0",
-		"msgpackr": "^1.11.9",
 		"qrcode": "^1.5.4",
 		"react": "^19.2.0",
 		"react-dom": "^19.2.0",
