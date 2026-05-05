@@ -16,7 +16,7 @@ const ENTITY_A = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
 const ENTITY_B = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 const ENTITY_C = '0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
 
-type FakeWs = { label: string };
+type FakeWs = { label: string; readyState?: number };
 
 const helloAuth = (runtimeId: string, seed: string, signerId = '1') => {
   const timestamp = Date.now();
@@ -263,6 +263,70 @@ describe('relay-router gossip fanout', () => {
     expect(store.clients.get(RUNTIME_A)?.ws).toBe(wsA);
     expect(closeCount).toBe(0);
     expect((sentBySocket.get(attacker)?.at(-1) as { type?: string; error?: string })?.type).toBe('error');
+  });
+
+  test('allows signed reconnect after the previous runtime socket is closed', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const sentBySocket = new Map<FakeWs, unknown[]>();
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: (ws: FakeWs, raw: string) => {
+        const bucket = sentBySocket.get(ws) ?? [];
+        bucket.push(JSON.parse(raw));
+        sentBySocket.set(ws, bucket);
+      },
+    };
+    const stale: FakeWs = { label: 'stale', readyState: 1 };
+    const fresh: FakeWs = { label: 'fresh', readyState: 1 };
+
+    await relayRoute(config, stale, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    expect(store.clients.get(RUNTIME_A)?.ws).toBe(stale);
+
+    stale.readyState = 3;
+    await relayRoute(config, fresh, signedHello(RUNTIME_A, SEED_A, KEY_A));
+
+    expect(store.clients.get(RUNTIME_A)?.ws).toBe(fresh);
+    expect((sentBySocket.get(fresh)?.at(-1) as { type?: string; error?: string } | undefined)?.type).not.toBe('error');
+  });
+
+  test('queues delivery when the registered target socket is stale', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const sentBySocket = new Map<FakeWs, unknown[]>();
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: (ws: FakeWs, raw: string) => {
+        const bucket = sentBySocket.get(ws) ?? [];
+        bucket.push(JSON.parse(raw));
+        sentBySocket.set(ws, bucket);
+      },
+    };
+    const wsA: FakeWs = { label: 'A', readyState: 1 };
+    const staleB: FakeWs = { label: 'stale-B', readyState: 1 };
+
+    await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    await relayRoute(config, staleB, signedHello(RUNTIME_B, SEED_B, KEY_B, '2'));
+    staleB.readyState = 3;
+
+    await relayRoute(config, wsA, {
+      type: 'entity_input',
+      id: 'deliver-to-stale',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      to: RUNTIME_B,
+      payload: 'encrypted-payload',
+      encrypted: true,
+      entityId: ENTITY_B,
+      txs: 1,
+    });
+
+    expect(sentBySocket.get(staleB) ?? []).toHaveLength(0);
+    expect(store.clients.has(RUNTIME_B)).toBe(false);
+    expect(store.pendingMessages.get(RUNTIME_B)).toHaveLength(1);
+    expect(store.debugEvents.some(event => event.status === 'stale-target')).toBe(true);
   });
 
   test('rejects unsigned hello by default', async () => {

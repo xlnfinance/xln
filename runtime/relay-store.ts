@@ -112,6 +112,12 @@ export const normalizeRuntimeKey = (runtimeId: unknown): string => normalizeRunt
 
 export const nextWsTimestamp = (store: RelayStore): number => ++store.wsCounter;
 
+export const isRelaySocketOpen = (ws: unknown): boolean => {
+  if (!ws || (typeof ws !== 'object' && typeof ws !== 'function')) return false;
+  const readyState = Number((ws as { readyState?: unknown }).readyState);
+  return !Number.isFinite(readyState) || readyState === 1;
+};
+
 // ---------------------------------------------------------------------------
 // Debug events
 // ---------------------------------------------------------------------------
@@ -190,17 +196,21 @@ export const registerClient = (store: RelayStore, runtimeId: string, ws: any): b
   if (!key) return false;
   const existing = store.clients.get(key);
   if (existing && existing.ws !== ws) {
-    pushDebugEvent(store, {
-      event: 'ws_duplicate_runtime_rejected',
-      runtimeId: key,
-      from: key,
-      status: 'rejected',
-      reason: 'DUPLICATE_RUNTIME_CONNECTION',
-      details: {
+    if (!isRelaySocketOpen(existing.ws)) {
+      store.clients.delete(key);
+    } else {
+      pushDebugEvent(store, {
+        event: 'ws_duplicate_runtime_rejected',
         runtimeId: key,
-      },
-    });
-    return false;
+        from: key,
+        status: 'rejected',
+        reason: 'DUPLICATE_RUNTIME_CONNECTION',
+        details: {
+          runtimeId: key,
+        },
+      });
+      return false;
+    }
   }
   store.clients.set(key, { ws, runtimeId: key, lastSeen: nextWsTimestamp(store), topics: new Set() });
   return true;

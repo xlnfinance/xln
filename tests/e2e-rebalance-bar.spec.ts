@@ -694,6 +694,48 @@ async function waitForOutCapacityIncrease(
   );
 }
 
+async function waitForRebalanceReceiveReady(
+  page: Page,
+  opts: {
+    sinceTs: number;
+    localAccountId: string;
+    hubAccountId: string;
+    requiredInCapacity: bigint;
+    timeoutMs?: number;
+  },
+) {
+  const timeoutMs = opts.timeoutMs ?? 120_000;
+  const startedAt = Date.now();
+  let lastSnap: Awaited<ReturnType<typeof readPairState>> = null;
+  let lastLocalFinalized = false;
+  let lastHubFinalized = false;
+
+  while (Date.now() - startedAt < timeoutMs) {
+    const steps = await readRebalanceStepEvents(page, opts.sinceTs);
+    lastLocalFinalized = hasAccountSettledFinalizedStep(steps, opts.localAccountId.toLowerCase());
+    lastHubFinalized = hasAccountSettledFinalizedStep(steps, opts.hubAccountId.toLowerCase());
+    lastSnap = await readPairState(page, opts.hubAccountId);
+    if (
+      lastLocalFinalized &&
+      lastHubFinalized &&
+      lastSnap &&
+      Number(lastSnap.pendingHeight || 0) === 0 &&
+      Number(lastSnap.mempoolLen || 0) === 0 &&
+      BigInt(lastSnap.requested || '0') === 0n &&
+      BigInt(lastSnap.inCapacity || '0') >= opts.requiredInCapacity
+    ) {
+      return lastSnap;
+    }
+    await page.waitForTimeout(800);
+  }
+
+  throw new Error(
+    `rebalance receive capacity not ready: ` +
+      `localFinalized=${lastLocalFinalized} hubFinalized=${lastHubFinalized} ` +
+      `requiredIn=${opts.requiredInCapacity} last=${JSON.stringify(lastSnap, null, 2)}`,
+  );
+}
+
 async function waitForSenderHtlcLock(
   page: Page,
   counterpartyId: string,
@@ -1033,6 +1075,18 @@ function countRebalanceStepEvents(
   predicate?: (step: Record<string, unknown>) => boolean,
 ): number {
   return steps.filter((step) => step?.event === event && (!predicate || predicate(step))).length;
+}
+
+function hasAccountSettledFinalizedStep(
+  steps: Array<Record<string, unknown>>,
+  accountId: string,
+): boolean {
+  const normalized = accountId.toLowerCase();
+  return countRebalanceStepEvents(
+    steps,
+    'account_settled_finalized_bilateral',
+    (step) => String(step?.accountId || '').toLowerCase() === normalized,
+  ) > 0;
 }
 
 async function reloadRuntimeAndWaitReady(page: Page, rebalanceConsole: string[], timingLabel: string): Promise<void> {
@@ -2338,40 +2392,15 @@ test.describe('Rebalance E2E', () => {
       ).toBe(true);
     }
 
-    // Step 8: wait rebalance finalize on runtime2-H3 (collateralized and request cleared).
-    let rebDone: any = null;
-    if (!h3SettledDuringP2) {
-      await expect.poll(async () => {
-        const steps = await readRebalanceStepEvents(page, scenarioStartedAt);
-        return countRebalanceStepEvents(
-          steps,
-          'account_settled_finalized_bilateral',
-          (step) => String(step?.accountId || '').toLowerCase() === h3Lower,
-        );
-      }, {
-        timeout: 180_000,
-        message: `expected saved rebalance finalize step for ${h3Lower.slice(0, 10)}`,
-      }).toBeGreaterThan(0);
-    }
-    const rebStart = Date.now();
-    while (Date.now() - rebStart < 30_000) {
-      const snap = await readPairState(page, h3);
-      if (
-        snap &&
-        BigInt(snap.requested || '0') === 0n &&
-        BigInt(snap.collateral || '0') >= BigInt(snap.hubDebt || '0') &&
-        Number(snap.lastFinalizedJHeight || 0) > 0
-      ) {
-        rebDone = snap;
-        break;
-      }
-      await page.waitForTimeout(800);
-    }
-    expect(rebDone, 'rebalance must complete before payment3').toBeTruthy();
-    const readyForP3 = await waitForPairIdle(page, h3, 60_000);
-    if (readyForP3) {
-      rebDone = readyForP3;
-    }
+    // Step 8: wait rebalance finalize on runtime2-H3 and prove the recipient can
+    // receive another 550 before sending the next HTLC.
+    const requiredReceiveCapacity = 550n * 10n ** 18n;
+    const rebDone = await waitForRebalanceReceiveReady(page, {
+      sinceTs: scenarioStartedAt,
+      localAccountId: rt2.entityId,
+      hubAccountId: h3,
+      requiredInCapacity: requiredReceiveCapacity,
+    });
 
     // Step 9: HTLC #3 (550) after rebalance should pass again.
     await switchRuntime(page, rt1Label);

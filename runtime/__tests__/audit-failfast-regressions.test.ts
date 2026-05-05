@@ -6,7 +6,7 @@ import { handleHtlcLock } from '../account-tx/handlers/htlc-lock';
 import { checkAutoRebalance, handleRequestCollateral } from '../account-tx/handlers/request-collateral';
 import { handleSwapOffer } from '../account-tx/handlers/swap-offer';
 import { LIMITS } from '../constants';
-import { initCrontab } from '../entity-crontab';
+import { ACCOUNT_PENDING_RESEND_AFTER_MS, executeCrontab, initCrontab } from '../entity-crontab';
 import { generateLazyEntityId } from '../entity-factory';
 import { applyEntityInput } from '../entity-consensus';
 import { handleJAbortSentBatch } from '../entity-tx/handlers/j-abort-sent-batch';
@@ -640,6 +640,46 @@ describe('audit fail-fast regressions', () => {
     expect(result.accountInput?.prevHanko).toBe(accountMachine.lastOutboundFrameAck?.prevHanko);
     expect(result.accountInput?.newAccountFrame.height).toBe(11);
     expect(accountMachine.pendingAccountInput?.kind).toBe('frame_ack');
+  });
+
+  test('crontab resends bundled ACK plus pending frame after relay loss', async () => {
+    const env = createEmptyEnv('account-frame-bundled-resend');
+    env.quietRuntimeLogs = true;
+    const replica = makeReplicaMissingPrevFrameHash();
+    replica.state.timestamp = 100_000;
+    const counterpartyId = hex20('22');
+    const pendingFrame = {
+      height: 11,
+      timestamp: replica.state.timestamp - ACCOUNT_PENDING_RESEND_AFTER_MS - 1,
+      jHeight: 0,
+      accountTxs: [{ type: 'add_delta' as const, data: { tokenId: 1 } }],
+      prevFrameHash: `0x${'ab'.repeat(32)}`,
+      deltas: [],
+      stateHash: `0x${'cd'.repeat(32)}`,
+      byLeft: true,
+    };
+    const accountMachine = makeProposalAccount([], replica.entityId, counterpartyId);
+    accountMachine.pendingFrame = pendingFrame;
+    accountMachine.pendingAccountInput = {
+      kind: 'frame_ack',
+      fromEntityId: replica.entityId,
+      toEntityId: counterpartyId,
+      height: 10,
+      prevHanko: `0x${'12'.repeat(65)}`,
+      newAccountFrame: pendingFrame,
+      newHanko: `0x${'34'.repeat(65)}`,
+    };
+    replica.state.accounts.set(counterpartyId, accountMachine);
+
+    const outputs = await executeCrontab(env, replica, replica.state.crontabState!, {
+      manualBroadcastInInput: false,
+    });
+
+    expect(outputs).toHaveLength(1);
+    expect(outputs[0]?.entityId).toBe(counterpartyId);
+    expect(outputs[0]?.entityTxs).toEqual([
+      { type: 'accountInput', data: accountMachine.pendingAccountInput },
+    ]);
   });
 
   test('handleAccountInput re-acks duplicate committed frames when the original ACK was lost', async () => {
