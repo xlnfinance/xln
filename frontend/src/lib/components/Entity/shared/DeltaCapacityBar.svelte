@@ -129,24 +129,18 @@
   }
 </script>
 
-<div
+<svelte:element
+  this={interactive ? 'button' : 'div'}
   class="delta-capacity-bar"
   class:visual-center={hasVisualScale && layout === 'center'}
   class:visual-sides={hasVisualScale && layout === 'sides'}
   class:interactive={interactive}
   class:anim-transition={animTransition}
   class:anim-glow={glowActive}
+  type={interactive ? 'button' : undefined}
   role={interactive ? 'button' : undefined}
-  tabindex={interactive ? 0 : undefined}
   aria-expanded={interactive ? expanded : undefined}
   on:click={activate}
-  on:keydown={(event) => {
-    if (!interactive) return;
-    if (event.key === 'Enter' || event.key === ' ') {
-      event.preventDefault();
-      activate(event);
-    }
-  }}
   style={`--bar-h:${heightPx}px; --center-gap:${CENTER_GAP_PX}px; --sides-gap:${SIDES_GAP_PX}px;`}
 >
   {#if hasVisualScale}
@@ -254,12 +248,20 @@
       </div>
     </div>
   {/if}
-</div>
+</svelte:element>
 
 <style>
   .delta-capacity-bar {
+    display: block;
     width: 100%;
+    padding: 0;
+    border: 0;
     position: relative;
+    appearance: none;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    text-align: initial;
   }
 
   .delta-capacity-bar.interactive {

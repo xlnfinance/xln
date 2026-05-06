@@ -63,6 +63,12 @@
     setTimeout(() => { if (copied === id) copied = ''; }, 1500);
   }
 
+  function handleOptionKeydown(event: KeyboardEvent, id: string) {
+    if (event.key !== 'Enter' && event.key !== ' ') return;
+    event.preventDefault();
+    select(id);
+  }
+
   function handleClickOutside(e: MouseEvent) {
     const target = e.target as HTMLElement;
     if (!target.closest('.entity-select')) open = false;
@@ -90,9 +96,9 @@
   </button>
 
   {#if open}
-    <div class="es-panel" on:click|stopPropagation>
+    <div class="es-panel" role="listbox" tabindex="-1">
       {#each optionViews as option (option.id)}
-        <div class="es-option" class:selected={option.id === value} on:click={() => select(option.id)} on:keydown={() => {}} role="option" aria-selected={option.id === value} tabindex="0">
+        <div class="es-option" class:selected={option.id === value} on:click={() => select(option.id)} on:keydown={(event) => handleOptionKeydown(event, option.id)} role="option" aria-selected={option.id === value} tabindex="0">
           {#if option.avatar}
             <img class="es-avatar" src={option.avatar} alt="" />
           {:else}
