@@ -608,6 +608,39 @@ test('runtime adapter historical head reads persisted storage head', async () =>
   expect(head.latestSnapshotHeight).toBe(40);
 });
 
+test('runtime adapter historical account search uses the point storage loader', async () => {
+  const env = makeEnv();
+  env.height = 9;
+  const replica = Array.from(env.eReplicas.values())[0]!;
+  const account = replica.state.accounts.get(counterpartyId)!;
+  let viewPageCalled = false;
+  let pointLookup: { entityId: string; counterpartyId: string; height: number } | null = null;
+
+  const result = await resolveRuntimeAdapterRead<{
+    items: Array<{ rightEntity: string }>;
+    totalItems?: number;
+  }>({
+    env,
+    loadEntityAccountDoc: async (requestedEntityId, requestedCounterpartyId, height) => {
+      pointLookup = { entityId: requestedEntityId, counterpartyId: requestedCounterpartyId, height };
+      return projectAccountDoc(account);
+    },
+    loadEntityViewPage: async () => {
+      viewPageCalled = true;
+      return null;
+    },
+  }, `entity/${entityId}/accounts`, {
+    atHeight: 8,
+    accountId: counterpartyId,
+    accountsLimit: 1,
+  });
+
+  expect(result.items.map((item) => item.rightEntity)).toEqual([counterpartyId]);
+  expect(result.totalItems).toBe(1);
+  expect(pointLookup).toEqual({ entityId, counterpartyId, height: 8 });
+  expect(viewPageCalled).toBe(false);
+});
+
 test('runtime adapter current view frame reads live env without touching storage loader', async () => {
   const env = makeEnv();
   let pagedLoadCalled = false;
