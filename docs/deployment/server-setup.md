@@ -228,6 +228,7 @@ server {
 - Do not install the legacy `/root/xln/auto-redeploy.sh` cron. Production should deploy from an explicit release script or operator command, then restart the managed PM2 processes.
 - Keep `/root/xln` clean before deployment (`git status --short` must be empty except approved runtime data outside the repo).
 - After redeploy, verify `/api/health` includes live hub child diagnostics and no stale contract-code warnings.
+- Use [`ops-runbook.md`](ops-runbook.md) for `/api/health`, `/api/metrics`, alert thresholds, and storage recovery triage.
 
 ## Deployment Steps
 

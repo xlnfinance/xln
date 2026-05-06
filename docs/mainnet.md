@@ -48,8 +48,8 @@
 **Missing:**
 - ❌ Production J-layer (real L1 via RPC, not BrowserVM)
 - ❌ HSM key management (currently in-memory keys)
-- ❌ Monitoring/metrics (Prometheus, Grafana)
-- ❌ State backup/recovery (disaster recovery)
+- ⚠️ Monitoring/metrics (health JSON and Prometheus text are available; dashboards/alerting still need deployment)
+- ⚠️ State backup/recovery (storage crash reconciliation exists; backup/restore drills still required)
 - ❌ DOS protection hardening
 - ❌ Rate limiting
 - ❌ Circuit breakers
@@ -66,7 +66,7 @@
 - ❌ Dynamic fee market
 - ❌ Liquidity balancing strategies
 - ❌ Real-world topology testing
-- ❌ Network health monitoring
+- ⚠️ Network health monitoring (hub mesh and child readiness are exposed in `/api/health` and `/api/metrics`; real topology alerting still required)
 - ❌ Channel capacity optimization
 
 ---
