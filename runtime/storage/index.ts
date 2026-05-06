@@ -7,7 +7,12 @@ import {
 import {
   readJsonOrNull,
 } from './level';
-import { buildFrameDbPuts, writeFrameDbPutsWithRetention } from './frame-db';
+import {
+  buildFrameDbPuts,
+  prepareFrameDbCommit,
+  pruneFrameDbRetention,
+  putFrameDbCommit,
+} from './frame-db';
 import {
   computeStorageFrameHash,
   prepareStorageCanonicalStateHashes,
@@ -187,6 +192,76 @@ const buildDiffRecord = (height: number, puts: StorageDoc[], dels: StorageDocRef
   dels,
 });
 
+const materializedHeightOf = (head: StorageHead): number =>
+  Math.max(0, Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? 0)));
+
+const applyDiffToLiveDb = async (options: {
+  db: RuntimeDbLike;
+  diff: StorageDiffRecord;
+  entityHashDocs?: Map<string, StorageEntityHashDoc>;
+}): Promise<Map<string, StorageEntityHashDoc>> => {
+  const preparedHashes = await prepareStorageStateHashes({
+    db: options.db,
+    puts: options.diff.puts,
+    dels: options.diff.dels,
+    ...(options.entityHashDocs ? { entityHashDocs: options.entityHashDocs } : {}),
+  });
+  const batch = options.db.batch();
+  for (const doc of options.diff.puts) {
+    batch.put(liveKeyForDoc(doc), preparedHashes.docValueBuffers.get(docValueKey(doc)) ?? encodeBuffer(doc.value));
+  }
+  for (const ref of options.diff.dels) {
+    if (typeof batch.del === 'function') batch.del(liveKeyForRef(ref));
+  }
+  for (const key of preparedHashes.merkleDels) {
+    if (typeof batch.del === 'function') batch.del(key);
+  }
+  for (const item of preparedHashes.merklePuts) {
+    batch.put(item.key, item.value);
+  }
+  await writeBatch(batch);
+  return preparedHashes.entityHashDocs;
+};
+
+export const recoverStorageDbFromHistory = async (options: {
+  db: RuntimeDbLike;
+  historyDb: RuntimeFrameDbLike;
+  config: Required<StorageRuntimeConfig>;
+}): Promise<{ recovered: boolean; entityHashDocs?: Map<string, StorageEntityHashDoc> }> => {
+  const historyHead = await readHead(options.historyDb, options.config);
+  const currentHead = await readHead(options.db, options.config);
+  const historyLatestHeight = Math.max(0, Math.floor(Number(historyHead.latestHeight ?? 0)));
+  const currentLatestHeight = Math.max(0, Math.floor(Number(currentHead.latestHeight ?? 0)));
+  const historyMaterializedHeight = materializedHeightOf(historyHead);
+  const currentMaterializedHeight = materializedHeightOf(currentHead);
+
+  if (currentLatestHeight > historyLatestHeight || currentMaterializedHeight > historyMaterializedHeight) {
+    throw new Error(
+      `STORAGE_CURRENT_AHEAD_OF_HISTORY: current=${currentLatestHeight}/${currentMaterializedHeight} ` +
+        `history=${historyLatestHeight}/${historyMaterializedHeight}`,
+    );
+  }
+  if (historyLatestHeight === currentLatestHeight && historyMaterializedHeight === currentMaterializedHeight) {
+    return { recovered: false };
+  }
+
+  let entityHashDocs: Map<string, StorageEntityHashDoc> | undefined;
+  for (let height = currentMaterializedHeight + 1; height <= historyMaterializedHeight; height += 1) {
+    const diff = await readJsonOrNull<StorageDiffRecord>(options.historyDb, keyDiff(height));
+    if (!diff) throw new Error(`STORAGE_RECOVERY_DIFF_MISSING: height=${height}`);
+    entityHashDocs = await applyDiffToLiveDb({
+      db: options.db,
+      diff,
+      ...(entityHashDocs ? { entityHashDocs } : {}),
+    });
+  }
+
+  const batch = options.db.batch();
+  batch.put(KEY_HEAD, encodeBuffer(historyHead));
+  await writeBatch(batch);
+  return { recovered: true, ...(entityHashDocs ? { entityHashDocs } : {}) };
+};
+
 export type StorageFrameSaveResult = {
   materialized: boolean;
   materializedOverlayRecords: number;
@@ -217,6 +292,10 @@ export const saveRuntimeFrameToStorage = async (options: {
   const historyOpened = await options.tryOpenFrameDb(options.env);
   if (!historyOpened) return { materialized: false, materializedOverlayRecords: 0, frameDbCommitted: false };
   const historyDb = options.getFrameDb(options.env);
+  const recoveredStorage = await recoverStorageDbFromHistory({ db, historyDb, config });
+  if (recoveredStorage.entityHashDocs) {
+    state.storageEntityHashDocs = recoveredStorage.entityHashDocs;
+  }
   const openMs = options.getPerfMs() - openStartedAt;
 
   const appliedRuntimeInput = options.currentFrameInput ?? { runtimeTxs: [], entityInputs: [] };
@@ -346,9 +425,20 @@ export const saveRuntimeFrameToStorage = async (options: {
   let frameDbPrunedKeys = 0;
   let frameDbLatestPrunedHeight = 0;
   let frameDbCommitted = frameDbPuts.length === 0;
+  let frameDbCommitPlan: Awaited<ReturnType<typeof prepareFrameDbCommit>> | null = null;
   const historyBatch = historyDb.batch();
   historyBatch.put(frameKey, frameBuffer);
   historyBatch.put(diffKey, diffBuffer);
+  if (frameDbPuts.length > 0) {
+    frameDbCommitPlan = await prepareFrameDbCommit({
+      db: historyDb,
+      height: options.env.height,
+      puts: frameDbPuts,
+      config,
+    });
+    frameDbBytes = frameDbCommitPlan.writtenBytes;
+    putFrameDbCommit(historyBatch, frameDbCommitPlan);
+  }
   const batch = db.batch();
   if (preparedHashes) {
     for (const doc of materializedPuts) {
@@ -387,6 +477,9 @@ export const saveRuntimeFrameToStorage = async (options: {
   historyBatch.put(KEY_HEAD, encodeBuffer(nextHead));
   batch.put(KEY_HEAD, encodeBuffer(nextHead));
   await writeBatch(historyBatch);
+  if (frameDbCommitPlan) {
+    frameDbCommitted = true;
+  }
   await writeBatch(batch);
   if (state) {
     state.currentStorageOverlayMarks = [];
@@ -394,14 +487,13 @@ export const saveRuntimeFrameToStorage = async (options: {
   if (preparedHashes) {
     state.storageEntityHashDocs = preparedHashes.entityHashDocs;
   }
-  if (frameDbPuts.length > 0) {
-    const frameDbResult = await writeFrameDbPutsWithRetention({
+  if (frameDbCommitPlan) {
+    const frameDbResult = await pruneFrameDbRetention({
       db: historyDb,
       height: options.env.height,
-      puts: frameDbPuts,
+      head: frameDbCommitPlan.nextHead,
       config,
     });
-    frameDbBytes = frameDbResult.writtenBytes;
     frameDbPrunedBytes = frameDbResult.prunedBytes;
     frameDbRetainedBytes = frameDbResult.retainedBytes;
     frameDbPrunedKeys = frameDbResult.prunedKeys;
