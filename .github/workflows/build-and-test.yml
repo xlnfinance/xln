@@ -20,6 +20,11 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
         with:
@@ -40,7 +45,7 @@ jobs:
 
       - name: Install contracts dependencies
         run: |
-          cd contracts
+          cd jurisdictions
           bun install
 
       - name: Build contracts
@@ -52,6 +57,11 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+
+      - name: Setup Node 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
 
       - name: Setup Bun
         uses: oven-sh/setup-bun@v2
@@ -155,9 +165,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            contracts/artifacts
-            contracts/cache
-          key: ${{ runner.os }}-contracts-${{ hashFiles('contracts/**/*.sol', 'contracts/hardhat.config.*') }}
+            jurisdictions/artifacts
+            jurisdictions/cache
+          key: ${{ runner.os }}-contracts-${{ hashFiles('jurisdictions/**/*.sol', 'jurisdictions/hardhat.config.*') }}
           restore-keys: |
             ${{ runner.os }}-contracts-
 
@@ -165,7 +175,7 @@ jobs:
         run: |
           bun run env:build
           # Clear any existing deployment cache to avoid reconciliation issues in CI
-          rm -rf contracts/ignition/deployments/chain-* || true
+          rm -rf jurisdictions/ignition/deployments/chain-* || true
 
       - name: Start dev server and wait for readiness
         run: |
