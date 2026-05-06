@@ -201,6 +201,23 @@ bun run bench:radapter:hub1m
 
 This creates a hub with one million saved active account rows, one Merkle root/branch/leaf keyspace, a 1% hot set, and a real `/rpc` WebSocket connection through `RemoteRuntimeAdapter`. It records timestamped phases for state-row generation, Merkle materialization, Merkle persistence, paged reads, descending reads, authenticated sends, durable hot updates, and explicit GC probes.
 
+The radapter read phase deliberately runs at a persisted height below the daemon's current runtime height. That forces `/rpc` reads through `loadEntityViewPageFromStorage` and proves bounded DB-backed pagination rather than the hot in-memory account map. The benchmark also does a point lookup for the last deterministic account id and asserts it is not in the hot map when `--memory=hot`.
+
+Fast deterministic gates:
+
+```bash
+bun run bench:radapter:hub10k
+bun run bench:radapter:hub100k:hot10k
+```
+
+Full 1M gate with explicit RSS/read/write/cold-restart caps:
+
+```bash
+bun run bench:radapter:hub1m:assert
+```
+
+The bulk fixture builder materializes the initial Merkle rows in one shot, so its RSS is intentionally much higher than steady daemon traffic. On 2026-05-07, the 1M asserted run completed with 1,000,000 persisted accounts, 10,000 hot accounts, DB size around 818 MiB, storage-backed read p99 around 2 ms, durable write p99 around 649 ms, cold first-page read around 2.4 ms, and peak RSS around 16.3 GiB during fixture materialization.
+
 Use the all-memory variant when the goal is to measure runtime heap/GC behavior rather than the hot-set production profile:
 
 ```bash
