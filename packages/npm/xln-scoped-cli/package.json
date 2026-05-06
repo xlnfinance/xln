@@ -1,0 +1,22 @@
+{
+  "name": "@xln/cli",
+  "version": "0.0.0",
+  "description": "Reserved scoped CLI package for XLN Finance.",
+  "license": "AGPL-3.0",
+  "type": "module",
+  "bin": {
+    "xln": "bin/xln.js"
+  },
+  "files": [
+    "bin",
+    "README.md",
+    "package.json"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/xlnfinance/xln.git"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}
