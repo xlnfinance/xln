@@ -105,7 +105,7 @@ const formatBytes = (value: number): string => {
 };
 
 const summarizeMs = (values: number[]): Record<string, number> => {
-  if (values.length === 0) return { count: 0, min: 0, p50: 0, p95: 0, max: 0 };
+  if (values.length === 0) return { count: 0, min: 0, p50: 0, p95: 0, p99: 0, max: 0 };
   const sorted = [...values].sort((left, right) => left - right);
   const pick = (pct: number): number => sorted[Math.min(sorted.length - 1, Math.floor((sorted.length - 1) * pct))]!;
   const round = (value: number): number => Math.round(value * 1000) / 1000;
@@ -114,6 +114,7 @@ const summarizeMs = (values: number[]): Record<string, number> => {
     min: round(sorted[0]!),
     p50: round(pick(0.5)),
     p95: round(pick(0.95)),
+    p99: round(pick(0.99)),
     max: round(sorted[sorted.length - 1]!),
   };
 };
@@ -163,6 +164,8 @@ const readCli = (): Cli => {
   const accounts = readInt('--accounts', 1_000_000);
   const hotPercent = readFloat('--hot-percent', 1);
   const hotAccounts = readInt('--hot-accounts', Math.max(1, Math.floor(accounts * hotPercent / 100)));
+  const rssCapMb = readFloat('--rss-cap-mb', 0);
+  const defaultRssCapBytes = rssCapMb > 0 ? Math.floor(rssCapMb * 1024 * 1024) : 0;
   const memory = readArg('--memory', 'hot') as Cli['memory'];
   if (memory !== 'hot' && memory !== 'all' && memory !== 'none') throw new Error(`BAD_MEMORY_MODE: ${memory}`);
   const seedMode = readArg('--seed-mode', 'bulk') as Cli['seedMode'];
@@ -177,7 +180,7 @@ const readCli = (): Cli => {
     trafficRounds: Math.max(0, readInt('--traffic-rounds', 10)),
     touchPerRound: Math.max(1, readInt('--touch-per-round', 100)),
     newAfterRead: Math.max(0, readInt('--new-after-read', 100)),
-    rssCapBytes: Math.max(0, readInt('--rss-cap-bytes', 0)),
+    rssCapBytes: Math.max(0, readInt('--rss-cap-bytes', defaultRssCapBytes)),
     seed: readArg('--seed', 'xln-radapter-1m-hub-production-bench'),
     dbRoot: readArg('--db-root', 'db-tmp/radapter-hub-1m'),
     port: readInt('--port', 0),
@@ -542,7 +545,7 @@ const touchAccounts = async (
   entityId: string,
   startIndex: number,
   count: number,
-): Promise<void> => {
+): Promise<number> => {
   const state = Array.from(env.eReplicas.values())[0]!.state;
   const docs: StorageDoc[] = [];
   const limit = Math.min(cli.accounts, startIndex + count);
@@ -563,7 +566,9 @@ const touchAccounts = async (
     entityId,
     value: projectEntityCoreDoc(state, { signerId: 'bench-signer', isProposer: true }),
   });
+  const writeStarted = nowMs();
   entityHashDocsRef.current = await writeDocs(db, docs, entityHashDocsRef.current, env.height);
+  return nowMs() - writeStarted;
 };
 
 const insertNewAccountsAfterRead = async (
@@ -574,8 +579,8 @@ const insertNewAccountsAfterRead = async (
   entityId: string,
   startIndex: number,
   count: number,
-): Promise<void> => {
-  if (count <= 0) return;
+): Promise<number> => {
+  if (count <= 0) return 0;
   const state = Array.from(env.eReplicas.values())[0]!.state;
   const docs: StorageDoc[] = [];
   env.height = Math.max(0, Math.floor(Number(env.height ?? 0))) + 1;
@@ -595,7 +600,9 @@ const insertNewAccountsAfterRead = async (
     entityId,
     value: projectEntityCoreDoc(state, { signerId: 'bench-signer', isProposer: true }),
   });
+  const writeStarted = nowMs();
   entityHashDocsRef.current = await writeDocs(db, docs, entityHashDocsRef.current, env.height);
+  return nowMs() - writeStarted;
 };
 
 async function main() {
@@ -608,7 +615,7 @@ async function main() {
   if (!cli.keepDb) rmSync(dbPath, { recursive: true, force: true });
   mkdirSync(cli.dbRoot, { recursive: true });
 
-  const db = new Level<Buffer, Buffer>(dbPath, { valueEncoding: 'buffer', keyEncoding: 'binary' });
+  let db = new Level<Buffer, Buffer>(dbPath, { valueEncoding: 'buffer', keyEncoding: 'binary' });
   const state = makeHubState(entityId, 1, 1_001);
   seedBooks(state, cli.books);
   const env = makeEnv(cli.seed, entityId, state);
@@ -617,10 +624,14 @@ async function main() {
 
   let server: ReturnType<typeof Bun.serve> | null = null;
   const entityHashDocsRef = { current: new Map<string, StorageEntityHashDoc>() };
-  let pendingWrite: Promise<void> = Promise.resolve();
+  let pendingWrite: Promise<number> = Promise.resolve(0);
   const readLatencyMs: number[] = [];
   const touchDurableMs: number[] = [];
   let newAfterReadMs = 0;
+  let newAfterReadDurableMs = 0;
+  let coldRestartOpenMs = 0;
+  let coldRestartReadMs = 0;
+  let coldRestartHead: StorageHead | null = null;
   try {
     trace.mark('start');
     entityHashDocsRef.current = cli.seedMode === 'bulk'
@@ -675,7 +686,10 @@ async function main() {
                 const count = Math.max(1, Math.floor(Number(data.count ?? cli.touchPerRound)));
                 pendingWrite = pendingWrite
                   .then(() => touchAccounts(cli, db, env, entityHashDocsRef, entityId, start, count))
-                  .then(() => broadcastRuntimeAdapterTick(env));
+                  .then(async (durableMs) => {
+                    await broadcastRuntimeAdapterTick(env);
+                    return durableMs;
+                  });
               },
             });
           } catch (error) {
@@ -823,12 +837,14 @@ async function main() {
 
     if (cli.newAfterRead > 0) {
       const started = nowMs();
-      await insertNewAccountsAfterRead(cli, db, env, entityHashDocsRef, entityId, cli.accounts, cli.newAfterRead);
+      newAfterReadDurableMs = await insertNewAccountsAfterRead(cli, db, env, entityHashDocsRef, entityId, cli.accounts, cli.newAfterRead);
       await broadcastRuntimeAdapterTick(env);
       newAfterReadMs = nowMs() - started;
+      touchDurableMs.push(newAfterReadDurableMs);
       trace.mark('adapter.write.new-after-read', {
         count: cli.newAfterRead,
         durableMs: Math.round(newAfterReadMs * 1000) / 1000,
+        storageWriteMs: Math.round(newAfterReadDurableMs * 1000) / 1000,
         inMemoryAccounts: state.accounts.size,
         height: env.height,
       });
@@ -846,9 +862,7 @@ async function main() {
         }],
       });
       const wireMs = nowMs() - sendStarted;
-      const durableStarted = nowMs();
-      await pendingWrite;
-      const durableMs = nowMs() - durableStarted;
+      const durableMs = await pendingWrite;
       touchDurableMs.push(durableMs);
       trace.mark('adapter.send.touch-round', {
         round: round + 1,
@@ -863,8 +877,40 @@ async function main() {
     forceGc(trace, 'post-traffic.gc');
     await adapter.disconnect();
     trace.mark('adapter.disconnected');
+    server?.stop(true);
+    server = null;
 
-    const head = await readStorageHead(db);
+    await db.close();
+    forceGc(trace, 'cold-restart.before-open.gc');
+    db = new Level<Buffer, Buffer>(dbPath, { valueEncoding: 'buffer', keyEncoding: 'binary' });
+    const coldOpenStarted = nowMs();
+    await db.open();
+    coldRestartOpenMs = nowMs() - coldOpenStarted;
+    coldRestartHead = await readStorageHead(db);
+    trace.mark('cold-restart.open', {
+      openMs: Math.round(coldRestartOpenMs * 1000) / 1000,
+      latestHeight: coldRestartHead?.latestHeight ?? 0,
+      latestMaterializedHeight: coldRestartHead?.latestMaterializedHeight ?? coldRestartHead?.latestSnapshotHeight ?? 0,
+    });
+
+    const coldReadStarted = nowMs();
+    const coldView = await loadEntityViewPageFromStorage({
+      env,
+      tryOpenDb: async () => true,
+      getRuntimeDb: () => db,
+      entityId,
+      height: coldRestartHead?.latestHeight ?? env.height,
+      accountQuery: { limit: cli.pageLimit },
+      bookQuery: { limit: cli.pageLimit },
+    });
+    coldRestartReadMs = nowMs() - coldReadStarted;
+    trace.mark('cold-restart.read-first-page', {
+      readMs: Math.round(coldRestartReadMs * 1000) / 1000,
+      accounts: coldView?.accounts.items.length ?? 0,
+      books: coldView?.books.items.length ?? 0,
+    });
+
+    const head = coldRestartHead ?? await readStorageHead(db);
     const dbBytes = dirBytes(dbPath);
     const peakRss = Math.max(...trace.events.map(event => event.rss));
     if (cli.rssCapBytes > 0 && peakRss > cli.rssCapBytes) {
@@ -883,18 +929,28 @@ async function main() {
       dbBytesHuman: formatBytes(dbBytes),
       peakRss,
       peakRssHuman: formatBytes(peakRss),
+      rssCapBytes: cli.rssCapBytes,
+      rssCapHuman: cli.rssCapBytes > 0 ? formatBytes(cli.rssCapBytes) : null,
       head,
       inMemoryAccounts: state.accounts.size,
       readLatencyMs: summarizeMs(readLatencyMs),
       touchDurableMs: summarizeMs(touchDurableMs),
       newAfterReadMs: Math.round(newAfterReadMs * 1000) / 1000,
+      newAfterReadDurableMs: Math.round(newAfterReadDurableMs * 1000) / 1000,
+      coldRestart: {
+        openMs: Math.round(coldRestartOpenMs * 1000) / 1000,
+        readFirstPageMs: Math.round(coldRestartReadMs * 1000) / 1000,
+        latestHeight: coldRestartHead?.latestHeight ?? 0,
+      },
       events: trace.events,
     }, null, 2));
   } finally {
     try {
       server?.stop(true);
     } catch {}
-    await db.close();
+    try {
+      await db.close();
+    } catch {}
     if (!cli.keepDb) rmSync(dbPath, { recursive: true, force: true });
   }
 }
