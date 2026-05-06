@@ -8,7 +8,7 @@ import "./Types.sol";
  *
  * Strict production write surface:
  * - processBatch() for entity-authenticated state changes
- * - explicit admin helpers for bootstrap/dev only
+ * - local Anvil-only admin helpers for bootstrap/dev only
  */
 interface IDepository {
   event ReserveUpdated(bytes32 indexed entity, uint indexed tokenId, uint newBalance);
@@ -21,16 +21,16 @@ interface IDepository {
 
   function _reserves(bytes32 entity, uint tokenId) external view returns (uint);
   function getTokensLength() external view returns (uint);
-  /// @dev TESTNET/DEV ONLY admin helper.
+  /// @dev Local Anvil-only admin helper.
   function mintToReserve(bytes32 entity, uint tokenId, uint amount) external;
-  /// @dev TESTNET/DEV ONLY admin helper.
+  /// @dev Local Anvil-only admin helper.
   function mintToReserveBatch(ReserveMint[] calldata mints) external;
   function processBatch(
     bytes calldata encodedBatch,
     bytes calldata hankoData,
     uint256 nonce
   ) external returns (bool);
-  /// @dev TESTNET/DEV ONLY admin helper. Production user deposits should use processBatch().
+  /// @dev Local Anvil-only admin helper. Production user deposits should use processBatch().
   function adminRegisterExternalToken(ExternalTokenToReserve memory params) external;
   function getCollateral(bytes32 leftEntity, bytes32 rightEntity, uint tokenId) external view returns (uint collateral, int ondelta);
 }
