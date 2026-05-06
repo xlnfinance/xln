@@ -81,11 +81,11 @@ export async function loadTranslations(_loc: Locale): Promise<void> {
 // Get nested value from object using dot notation
 function getNestedValue(obj: TranslationDict, path: string): string | undefined {
   const keys = path.split('.');
-  let current: any = obj;
+  let current: unknown = obj;
 
   for (const key of keys) {
-    if (current === undefined || current === null) return undefined;
-    current = current[key];
+    if (current === undefined || current === null || typeof current !== 'object') return undefined;
+    current = (current as Record<string, unknown>)[key];
   }
 
   return typeof current === 'string' ? current : undefined;

@@ -23,6 +23,7 @@
   let showDropdown = false;
 
   $: selectedToken = tokens.find(t => t.id === value) ?? tokens[0]!;
+  $: tokenLabel = label || 'Token';
 
   function selectToken(id: number) {
     value = id;
@@ -41,12 +42,15 @@
 
 <div class="token-select" class:disabled class:compact>
   {#if label}
-    <label class="select-label">{label}</label>
+    <span class="select-label">{label}</span>
   {/if}
 
   <button
     class="select-trigger"
     type="button"
+    aria-label={tokenLabel}
+    aria-haspopup="listbox"
+    aria-expanded={showDropdown}
     on:click={toggleDropdown}
     on:blur={handleBlur}
     {disabled}
@@ -61,11 +65,13 @@
   </button>
 
   {#if showDropdown}
-    <div class="dropdown">
+    <div class="dropdown" role="listbox" aria-label={tokenLabel}>
       {#each tokens as token}
         <button
           class="dropdown-item"
           class:selected={token.id === value}
+          aria-selected={token.id === value}
+          role="option"
           on:mousedown|preventDefault={() => selectToken(token.id)}
         >
           <span class="token-icon" style="background: {token.color}">

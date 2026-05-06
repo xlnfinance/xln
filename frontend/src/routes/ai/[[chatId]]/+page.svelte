@@ -80,7 +80,7 @@
 
   // Voice state
   let isListening = false;
-  let speechRecognition: any = null; // Web Speech API for instant wake word
+  let speechRecognition: BrowserSpeechRecognition | null = null; // Web Speech API for instant wake word
   let mediaRecorder: MediaRecorder | null = null;
   let audioContext: AudioContext | null = null;
   let micStream: MediaStream | null = null;
@@ -119,7 +119,71 @@
       arguments: string;
     };
   }
-  let availableTools: any[] = [];
+
+  interface ToolDefinition {
+    type?: string;
+    function?: {
+      name: string;
+      description?: string;
+      parameters?: unknown;
+    };
+    [key: string]: unknown;
+  }
+
+  interface ChatRequestBody {
+    model: string;
+    messages: Array<{ role: Message['role']; content: string }>;
+    stream: boolean;
+    images?: string[] | undefined;
+    tools?: ToolDefinition[];
+    tool_choice?: 'auto';
+  }
+
+  interface SpeechRecognitionAlternative {
+    transcript: string;
+    confidence?: number;
+  }
+
+  interface SpeechRecognitionResult {
+    readonly isFinal: boolean;
+    readonly length: number;
+    [index: number]: SpeechRecognitionAlternative;
+  }
+
+  interface SpeechRecognitionResultList {
+    readonly length: number;
+    [index: number]: SpeechRecognitionResult;
+  }
+
+  interface SpeechRecognitionResultEvent extends Event {
+    readonly resultIndex: number;
+    readonly results: SpeechRecognitionResultList;
+  }
+
+  interface SpeechRecognitionErrorEvent extends Event {
+    readonly error: string;
+  }
+
+  interface BrowserSpeechRecognition extends EventTarget {
+    continuous: boolean;
+    interimResults: boolean;
+    lang: string;
+    onresult: ((event: SpeechRecognitionResultEvent) => void) | null;
+    onerror: ((event: SpeechRecognitionErrorEvent) => void) | null;
+    onend: (() => void) | null;
+    start(): void;
+    stop(): void;
+    abort(): void;
+  }
+
+  type BrowserSpeechRecognitionConstructor = new () => BrowserSpeechRecognition;
+
+  interface SpeechRecognitionWindow extends Window {
+    SpeechRecognition?: BrowserSpeechRecognitionConstructor;
+    webkitSpeechRecognition?: BrowserSpeechRecognitionConstructor;
+  }
+
+  let availableTools: ToolDefinition[] = [];
   let agentModeEnabled = false;
 
   // TTS/STT model selection
@@ -502,7 +566,7 @@ Help the user understand this entity's state, suggest actions, or answer questio
           content: m.content,
         }));
 
-        const requestBody: Record<string, any> = {
+        const requestBody: ChatRequestBody = {
           model: selectedModel,
           messages: allMessages,
           stream: !agentModeEnabled, // Disable streaming for agent mode (tool calls need full response)
@@ -511,8 +575,8 @@ Help the user understand this entity's state, suggest actions, or answer questio
 
         // Add tools if agent mode is enabled
         if (agentModeEnabled && availableTools.length > 0) {
-          requestBody['tools'] = availableTools;
-          requestBody['tool_choice'] = 'auto';
+          requestBody.tools = availableTools;
+          requestBody.tool_choice = 'auto';
         }
 
         const res = await fetch(`${API_URL}/api/chat`, {
@@ -667,7 +731,9 @@ Help the user understand this entity's state, suggest actions, or answer questio
 
   async function startContinuousListening() {
     // Use Web Speech API for instant wake word detection (browser-native, no latency)
-    const SpeechRecognition = (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+    const SpeechRecognition =
+      (window as SpeechRecognitionWindow).SpeechRecognition ??
+      (window as SpeechRecognitionWindow).webkitSpeechRecognition;
 
     if (!SpeechRecognition) {
       console.error('Web Speech API not supported');
@@ -694,10 +760,12 @@ Help the user understand this entity's state, suggest actions, or answer questio
     speechRecognition.interimResults = true;
     speechRecognition.lang = 'en-US';
 
-    speechRecognition.onresult = async (event: any) => {
+    speechRecognition.onresult = async (event: SpeechRecognitionResultEvent) => {
       let transcript = '';
       for (let i = event.resultIndex; i < event.results.length; i++) {
-        transcript += event.results[i][0].transcript;
+        const result = event.results[i];
+        const alternative = result?.[0];
+        if (alternative) transcript += alternative.transcript;
       }
 
       const lowerTranscript = transcript.toLowerCase();
@@ -707,16 +775,17 @@ Help the user understand this entity's state, suggest actions, or answer questio
       if (lowerTranscript.includes(WAKE_WORD)) {
         const idx = lowerTranscript.indexOf(WAKE_WORD);
         const command = transcript.slice(idx + WAKE_WORD.length).trim();
+        const finalResult = event.results[event.results.length - 1];
 
         // If command follows wake word immediately, send it
-        if (command.length > 2 && event.results[event.results.length - 1].isFinal) {
+        if (command.length > 2 && finalResult?.isFinal) {
           inputText = command;
           await sendMessage();
         }
       }
     };
 
-    speechRecognition.onerror = (event: any) => {
+    speechRecognition.onerror = (event: SpeechRecognitionErrorEvent) => {
       console.error('Speech recognition error:', event.error);
       if (event.error === 'not-allowed' || event.error === 'audio-capture') {
         isListening = false;
@@ -1042,16 +1111,16 @@ Help the user understand this entity's state, suggest actions, or answer questio
 
     <div class="sidebar-footer">
       <div class="model-select-group">
-        <label>STT</label>
-        <select bind:value={selectedSTT}>
+        <label for="stt-model-select">STT</label>
+        <select id="stt-model-select" bind:value={selectedSTT}>
           {#each sttModels as m}
             <option value={m.id}>{m.name}</option>
           {/each}
         </select>
       </div>
       <div class="model-select-group">
-        <label>TTS</label>
-        <select bind:value={selectedTTS}>
+        <label for="tts-model-select">TTS</label>
+        <select id="tts-model-select" bind:value={selectedTTS}>
           {#each ttsModels as m}
             <option value={m.id}>{m.name}</option>
           {/each}
@@ -1061,7 +1130,7 @@ Help the user understand this entity's state, suggest actions, or answer questio
       <!-- Voice-Paste Config -->
       <div class="voice-paste-section">
         <div class="voice-paste-header">
-          <label>Voice-Paste (Global)</label>
+          <span class="voice-paste-label">Voice-Paste (Global)</span>
           <div class="status-indicator" class:active={voicePasteRunning}>
             {voicePasteRunning ? '🎤 Running' : '⭕ Stopped'}
           </div>
@@ -1153,8 +1222,8 @@ Help the user understand this entity's state, suggest actions, or answer questio
             {#if systemStats.mlx?.activeModelParams}
               <span class="mlx-params">{systemStats.mlx.activeModelParams}</span>
             {/if}
-            <button class="eject-btn" on:click={ejectMLXModel} title="Eject model from memory">
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <button class="eject-btn" on:click={ejectMLXModel} title="Eject model from memory" aria-label="Eject model from memory">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" aria-hidden="true">
                 <path d="M9 9L15 15M15 9L9 15M21 12a9 9 0 11-18 0 9 9 0 0118 0z"/>
               </svg>
             </button>
@@ -1468,7 +1537,7 @@ Help the user understand this entity's state, suggest actions, or answer questio
     margin-bottom: 8px;
   }
 
-  .voice-paste-header label {
+  .voice-paste-label {
     font-size: 11px;
     color: #888;
     font-weight: 600;
