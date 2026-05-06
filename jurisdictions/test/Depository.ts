@@ -158,4 +158,29 @@ describe("Depository", function () {
     expect(reserveFrom).to.equal(750n);
     expect(reserveTo).to.equal(250n);
   });
+
+  it("rejects non-admin use of local dev bootstrap helpers", async function () {
+    const { depository, erc20 } = await loadFixture(deployFixture);
+    const entity = addressEntityId(user1.address);
+
+    await expect(
+      depository.connect(user1).mintToReserve(entity, 1, 1n)
+    ).to.be.revertedWithCustomError(depository, "E2");
+
+    await expect(
+      depository.connect(user1).mintToReserveBatch([{ entity, tokenId: 1, amount: 1n }])
+    ).to.be.revertedWithCustomError(depository, "E2");
+
+    await erc20.connect(user1).approve(await depository.getAddress(), 1n);
+    await expect(
+      depository.connect(user1).adminRegisterExternalToken({
+        entity: ethers.ZeroHash,
+        contractAddress: await erc20.getAddress(),
+        externalTokenId: 0,
+        tokenType: 0,
+        internalTokenId: 0,
+        amount: 1n,
+      })
+    ).to.be.revertedWithCustomError(depository, "E2");
+  });
 });

@@ -72,12 +72,13 @@ contract Depository is ReentrancyGuardLite {
 
 
   address public immutable admin;
+  uint256 private constant LOCAL_DEV_CHAIN_ID = 31337;
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex);
   event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, uint256 remainingAmount, uint256 newDebtIndex);
   event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
 
-  modifier onlyAdmin() {
-    if (msg.sender != admin) revert E2();
+  modifier onlyLocalDevAdmin() {
+    if (msg.sender != admin || block.chainid != LOCAL_DEV_CHAIN_ID) revert E2();
     _;
   }
 
@@ -187,15 +188,14 @@ contract Depository is ReentrancyGuardLite {
   }
 
   /**
-   * @notice Mint new reserves to an entity (admin only).
-   * @dev TESTNET/DEV ONLY helper.
-   *      In production, minting would be gated by governance. For testnet/demo, admin can mint freely.
-   *      Emits both ReserveMinted (for j-watchers tracking mint events) and ReserveUpdated (for balance sync).
+   * @notice Mint new reserves to an entity (local dev admin only).
+   * @dev Local Anvil bootstrap helper. Mainnet/testnet deployments must fund reserves
+   *      through processBatch() deposits or a governance-controlled production path.
    * @param entity The entity receiving the minted reserves.
    * @param tokenId The internal token ID.
    * @param amount The amount to mint.
    */
-  function mintToReserve(bytes32 entity, uint tokenId, uint amount) external onlyAdmin {
+  function mintToReserve(bytes32 entity, uint tokenId, uint amount) external onlyLocalDevAdmin {
     if (amount == 0) revert E1();
     
     
@@ -215,10 +215,10 @@ contract Depository is ReentrancyGuardLite {
   }
 
   /**
-   * @notice Mint reserves for multiple entity/token pairs in a single admin tx.
-   * @dev TESTNET/DEV ONLY helper for deterministic bootstrap. Emits canonical ReserveUpdated per op.
+   * @notice Mint reserves for multiple entity/token pairs in a single local dev tx.
+   * @dev Local Anvil bootstrap helper. Disabled outside chain id 31337.
    */
-  function mintToReserveBatch(ReserveMint[] calldata mints) external onlyAdmin {
+  function mintToReserveBatch(ReserveMint[] calldata mints) external onlyLocalDevAdmin {
     uint len = mints.length;
     if (len == 0) revert E1();
 
@@ -424,8 +424,8 @@ contract Depository is ReentrancyGuardLite {
   // registerHub removed for size reduction
 
   // ExternalTokenToReserve struct is in Types.sol
-  // TESTNET/DEV ONLY bootstrap helper. User deposits must go through processBatch().
-  function adminRegisterExternalToken(ExternalTokenToReserve memory params) external onlyAdmin nonReentrant {
+  // Local Anvil bootstrap helper. User deposits must go through processBatch().
+  function adminRegisterExternalToken(ExternalTokenToReserve memory params) external onlyLocalDevAdmin nonReentrant {
     _externalTokenToReserve(params);
   }
 
