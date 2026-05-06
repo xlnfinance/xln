@@ -1,4 +1,4 @@
-import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers.js";
+import { loadFixture, mine } from "@nomicfoundation/hardhat-toolbox/network-helpers.js";
 import { expect } from "chai";
 import hre from "hardhat";
 const { ethers } = hre;
@@ -14,6 +14,115 @@ import {
   encodeBatch,
   singleSignerLazyEntityId,
 } from "./helpers/hanko.ts";
+
+const abi = ethers.AbiCoder.defaultAbiCoder();
+const COOPERATIVE_UPDATE = 0;
+const DISPUTE_PROOF = 1;
+const COOPERATIVE_DISPUTE_PROOF = 3;
+
+const SETTLEMENT_DIFFS_ABI = "tuple(uint256 tokenId,int256 leftDiff,int256 rightDiff,int256 collateralDiff,int256 ondeltaDiff)[]";
+const PROOF_BODY_ABI =
+  "tuple(int256[] offdeltas,uint256[] tokenIds,tuple(address transformerAddress,bytes encodedBatch,tuple(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers)";
+
+type TestActor = {
+  signer: HardhatEthersSigner;
+  entityId: string;
+  privateKey: string;
+};
+
+function lazyActor(signer: HardhatEthersSigner, signerIndex: number): TestActor {
+  return {
+    signer,
+    entityId: singleSignerLazyEntityId(signer.address),
+    privateKey: deriveHardhatPrivateKey(signerIndex),
+  };
+}
+
+function orderedActors(a: TestActor, b: TestActor): [TestActor, TestActor] {
+  return BigInt(a.entityId) < BigInt(b.entityId) ? [a, b] : [b, a];
+}
+
+async function signDepositoryBatch(
+  depository: Depository,
+  entityId: string,
+  privateKey: string,
+  batch: Record<string, unknown>,
+  nonce?: bigint,
+): Promise<{ encodedBatch: string; hankoData: string; nonce: bigint }> {
+  const encodedBatch = encodeBatch(batch);
+  const nextNonce = nonce ?? ((await depository.entityNonces(entityId)) + 1n);
+  const batchHash = await computeDepositoryBatchHash(depository, encodedBatch, nextNonce);
+  return {
+    encodedBatch,
+    hankoData: buildSingleSignerHanko(entityId, batchHash, privateKey),
+    nonce: nextNonce,
+  };
+}
+
+function signEntityHash(entityId: string, hash: string, privateKey: string): string {
+  return buildSingleSignerHanko(entityId, hash, privateKey);
+}
+
+async function accountKeyFor(depository: Depository, left: string, right: string): Promise<string> {
+  return depository.accountKey(left, right);
+}
+
+async function cooperativeUpdateHash(
+  depository: Depository,
+  accountKey: string,
+  nonce: bigint,
+  diffs: unknown[],
+  forgiveDebtsInTokenIds: bigint[] = [],
+): Promise<string> {
+  return ethers.keccak256(abi.encode(
+    ["uint8", "address", "bytes", "uint256", SETTLEMENT_DIFFS_ABI, "uint256[]"],
+    [COOPERATIVE_UPDATE, await depository.getAddress(), accountKey, nonce, diffs, forgiveDebtsInTokenIds],
+  ));
+}
+
+async function disputeProofHash(
+  depository: Depository,
+  accountKey: string,
+  nonce: bigint,
+  proofbodyHash: string,
+): Promise<string> {
+  return ethers.keccak256(abi.encode(
+    ["uint8", "address", "bytes", "uint256", "bytes32"],
+    [DISPUTE_PROOF, await depository.getAddress(), accountKey, nonce, proofbodyHash],
+  ));
+}
+
+async function cooperativeDisputeProofHash(
+  depository: Depository,
+  accountKey: string,
+  nonce: bigint,
+  proofbody: Record<string, unknown>,
+  initialArguments: string,
+): Promise<string> {
+  return ethers.keccak256(abi.encode(
+    ["uint8", "address", "bytes", "uint256", "bytes32", "bytes32"],
+    [
+      COOPERATIVE_DISPUTE_PROOF,
+      await depository.getAddress(),
+      accountKey,
+      nonce,
+      proofBodyHash(proofbody),
+      ethers.keccak256(initialArguments),
+    ],
+  ));
+}
+
+function proofBodyHash(proofbody: Record<string, unknown>): string {
+  return ethers.keccak256(abi.encode([PROOF_BODY_ABI], [proofbody]));
+}
+
+function proofBody(offdeltas: bigint[], tokenIds: bigint[]): Record<string, unknown> {
+  return {
+    offdeltas,
+    tokenIds,
+    transformers: [],
+  };
+}
 
 describe("Depository", function () {
   let user0: HardhatEthersSigner;
@@ -157,6 +266,375 @@ describe("Depository", function () {
 
     expect(reserveFrom).to.equal(750n);
     expect(reserveTo).to.equal(250n);
+  });
+
+  it("processBatch deposits and withdraws external ERC20 reserves through the production path", async function () {
+    const { depository, erc20 } = await loadFixture(deployFixture);
+
+    const actor = lazyActor(user0, 0);
+    const recipientEntity = addressEntityId(user1.address);
+
+    await erc20.approve(await depository.getAddress(), 10_000n);
+
+    const depositBatch = emptyBatch({
+      externalTokenToReserve: [{
+        entity: ethers.ZeroHash,
+        contractAddress: await erc20.getAddress(),
+        externalTokenId: 0,
+        tokenType: 0,
+        internalTokenId: 0,
+        amount: 10_000n,
+      }],
+    });
+    const deposit = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, depositBatch);
+
+    await expect(
+      depository.connect(user0).processBatch(deposit.encodedBatch, deposit.hankoData, deposit.nonce)
+    ).to.emit(depository, "HankoBatchProcessed")
+      .withArgs(actor.entityId, ethers.keccak256(deposit.hankoData), deposit.nonce, true);
+
+    const erc20id = (await depository.getTokensLength()) - 1n;
+    expect(await depository._reserves(actor.entityId, erc20id)).to.equal(10_000n);
+    expect(await erc20.balanceOf(user0.address)).to.equal(990_000n);
+
+    const withdrawBatch = emptyBatch({
+      reserveToExternalToken: [{ receivingEntity: recipientEntity, tokenId: erc20id, amount: 2_500n }],
+    });
+    const withdraw = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, withdrawBatch);
+
+    await expect(
+      depository.connect(user0).processBatch(withdraw.encodedBatch, withdraw.hankoData, withdraw.nonce)
+    ).to.emit(depository, "ReserveUpdated")
+      .withArgs(actor.entityId, erc20id, 7_500n);
+
+    expect(await depository._reserves(actor.entityId, erc20id)).to.equal(7_500n);
+    expect(await erc20.balanceOf(user1.address)).to.equal(2_500n);
+  });
+
+  it("requires strictly sequential entity batch nonces and binds signatures to nonce and calldata", async function () {
+    const { depository } = await loadFixture(deployFixture);
+
+    const actor = lazyActor(user0, 0);
+    const recipient = addressEntityId(user1.address);
+    const tokenId = 1;
+    await depository.mintToReserve(actor.entityId, tokenId, 1_000n);
+
+    const firstBatch = emptyBatch({
+      reserveToReserve: [{ receivingEntity: recipient, tokenId, amount: 100n }],
+    });
+    const first = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, firstBatch);
+
+    await depository.connect(user0).processBatch(first.encodedBatch, first.hankoData, first.nonce);
+    expect(await depository.entityNonces(actor.entityId)).to.equal(1n);
+
+    await expect(
+      depository.connect(user0).processBatch(first.encodedBatch, first.hankoData, first.nonce)
+    ).to.be.revertedWithCustomError(depository, "E2");
+
+    await expect(
+      depository.connect(user0).processBatch(first.encodedBatch, first.hankoData, 2n)
+    ).to.be.reverted;
+
+    const secondBatch = emptyBatch({
+      reserveToReserve: [{ receivingEntity: recipient, tokenId, amount: 25n }],
+    });
+    const second = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, secondBatch, 2n);
+    const tamperedBatch = emptyBatch({
+      reserveToReserve: [{ receivingEntity: recipient, tokenId, amount: 26n }],
+    });
+
+    await expect(
+      depository.connect(user0).processBatch(encodeBatch(tamperedBatch), second.hankoData, second.nonce)
+    ).to.be.reverted;
+    expect(await depository.entityNonces(actor.entityId)).to.equal(1n);
+
+    await depository.connect(user0).processBatch(second.encodedBatch, second.hankoData, second.nonce);
+    expect(await depository.entityNonces(actor.entityId)).to.equal(2n);
+    expect(await depository._reserves(actor.entityId, tokenId)).to.equal(875n);
+    expect(await depository._reserves(recipient, tokenId)).to.equal(125n);
+  });
+
+  it("settles bilateral diffs with counterparty hanko and rejects settlement replay", async function () {
+    const { depository } = await loadFixture(deployFixture);
+
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const tokenId = 1n;
+    await depository.mintToReserve(left.entityId, tokenId, 1_000n);
+
+    const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+    const settlementNonce = 1n;
+    const diffs = [{
+      tokenId,
+      leftDiff: -125n,
+      rightDiff: 125n,
+      collateralDiff: 0n,
+      ondeltaDiff: 0n,
+    }];
+    const settlementHash = await cooperativeUpdateHash(depository, acctKey, settlementNonce, diffs);
+    const settlementSig = signEntityHash(right.entityId, settlementHash, right.privateKey);
+    const settlement = {
+      leftEntity: left.entityId,
+      rightEntity: right.entityId,
+      diffs,
+      forgiveDebtsInTokenIds: [],
+      sig: settlementSig,
+      entityProvider: ethers.ZeroAddress,
+      hankoData: "0x",
+      nonce: settlementNonce,
+    };
+
+    const batch = emptyBatch({ settlements: [settlement] });
+    const signed = await signDepositoryBatch(depository, left.entityId, left.privateKey, batch);
+
+    await expect(
+      depository.connect(left.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce)
+    ).to.emit(depository, "AccountSettled");
+
+    const account = await depository._accounts(acctKey);
+    expect(account.nonce).to.equal(settlementNonce);
+    expect(await depository._reserves(left.entityId, tokenId)).to.equal(875n);
+    expect(await depository._reserves(right.entityId, tokenId)).to.equal(125n);
+
+    const replay = await signDepositoryBatch(depository, left.entityId, left.privateKey, batch);
+    await expect(
+      depository.connect(left.signer).processBatch(replay.encodedBatch, replay.hankoData, replay.nonce)
+    ).to.be.revertedWithCustomError(depository, "E2");
+
+    expect((await depository._accounts(acctKey)).nonce).to.equal(settlementNonce);
+    expect(await depository.entityNonces(left.entityId)).to.equal(1n);
+  });
+
+  it("starts a dispute and finalizes a newer counter-dispute proof", async function () {
+    const { depository } = await loadFixture(deployFixture);
+
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const tokenId = 1n;
+    await depository.mintToReserve(left.entityId, tokenId, 1_000n);
+
+    const fundCollateralBatch = emptyBatch({
+      reserveToCollateral: [{
+        tokenId,
+        receivingEntity: left.entityId,
+        pairs: [{ entity: right.entityId, amount: 300n }],
+      }],
+    });
+    const fundCollateral = await signDepositoryBatch(depository, left.entityId, left.privateKey, fundCollateralBatch);
+    await depository.connect(left.signer).processBatch(
+      fundCollateral.encodedBatch,
+      fundCollateral.hankoData,
+      fundCollateral.nonce,
+    );
+
+    const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+    const collateralBefore = await depository._collaterals(acctKey, tokenId);
+    expect(collateralBefore.collateral).to.equal(300n);
+    expect(collateralBefore.ondelta).to.equal(300n);
+
+    const initialProofbody = proofBody([0n], [tokenId]);
+    const initialProofbodyHash = proofBodyHash(initialProofbody);
+    const initialArguments = "0x";
+    const disputeNonce = 1n;
+    const startHash = await disputeProofHash(depository, acctKey, disputeNonce, initialProofbodyHash);
+    const startSig = signEntityHash(right.entityId, startHash, right.privateKey);
+    const disputeStart = {
+      counterentity: right.entityId,
+      nonce: disputeNonce,
+      proofbodyHash: initialProofbodyHash,
+      sig: startSig,
+      initialArguments,
+    };
+    const startBatch = emptyBatch({ disputeStarts: [disputeStart] });
+    const start = await signDepositoryBatch(depository, left.entityId, left.privateKey, startBatch);
+
+    await expect(
+      depository.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce)
+    ).to.emit(depository, "DisputeStarted")
+      .withArgs(left.entityId, right.entityId, disputeNonce, initialProofbodyHash, initialArguments);
+
+    const startedAccount = await depository._accounts(acctKey);
+    expect(startedAccount.nonce).to.equal(disputeNonce);
+    expect(startedAccount.disputeHash).to.not.equal(ethers.ZeroHash);
+
+    const finalNonce = 2n;
+    const finalProofbody = proofBody([-200n], [tokenId]);
+    const finalProofbodyHash = proofBodyHash(finalProofbody);
+    const finalHash = await disputeProofHash(depository, acctKey, finalNonce, finalProofbodyHash);
+    const finalSig = signEntityHash(right.entityId, finalHash, right.privateKey);
+    const finalization = {
+      counterentity: right.entityId,
+      initialNonce: disputeNonce,
+      finalNonce,
+      initialProofbodyHash,
+      finalProofbody,
+      finalArguments: "0x",
+      initialArguments,
+      sig: finalSig,
+      startedByLeft: true,
+      disputeUntilBlock: 0,
+      cooperative: false,
+    };
+    const finalBatch = emptyBatch({ disputeFinalizations: [finalization] });
+    const final = await signDepositoryBatch(depository, left.entityId, left.privateKey, finalBatch);
+
+    await expect(
+      depository.connect(left.signer).processBatch(final.encodedBatch, final.hankoData, final.nonce)
+    ).to.emit(depository, "DisputeFinalized")
+      .withArgs(left.entityId, right.entityId, disputeNonce, initialProofbodyHash, finalProofbodyHash);
+
+    const finalizedAccount = await depository._accounts(acctKey);
+    const collateralAfter = await depository._collaterals(acctKey, tokenId);
+    expect(finalizedAccount.nonce).to.equal(finalNonce);
+    expect(finalizedAccount.disputeHash).to.equal(ethers.ZeroHash);
+    expect(finalizedAccount.disputeTimeout).to.equal(0n);
+    expect(collateralAfter.collateral).to.equal(0n);
+    expect(collateralAfter.ondelta).to.equal(0n);
+    expect(await depository._reserves(left.entityId, tokenId)).to.equal(800n);
+    expect(await depository._reserves(right.entityId, tokenId)).to.equal(200n);
+  });
+
+  it("requires timeout for unilateral dispute finalization and bumps account nonce once", async function () {
+    const { depository } = await loadFixture(deployFixture);
+
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+    const finalProofbody = proofBody([], []);
+    const finalProofbodyHash = proofBodyHash(finalProofbody);
+    const initialArguments = "0x";
+    const disputeNonce = 1n;
+
+    const startHash = await disputeProofHash(depository, acctKey, disputeNonce, finalProofbodyHash);
+    const startSig = signEntityHash(right.entityId, startHash, right.privateKey);
+    const startBatch = emptyBatch({
+      disputeStarts: [{
+        counterentity: right.entityId,
+        nonce: disputeNonce,
+        proofbodyHash: finalProofbodyHash,
+        sig: startSig,
+        initialArguments,
+      }],
+    });
+    const start = await signDepositoryBatch(depository, left.entityId, left.privateKey, startBatch);
+    await depository.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
+
+    const finalization = {
+      counterentity: right.entityId,
+      initialNonce: disputeNonce,
+      finalNonce: disputeNonce,
+      initialProofbodyHash: finalProofbodyHash,
+      finalProofbody,
+      finalArguments: "0x",
+      initialArguments,
+      sig: "0x",
+      startedByLeft: true,
+      disputeUntilBlock: 0,
+      cooperative: false,
+    };
+
+    const tooEarlyBatch = emptyBatch({ disputeFinalizations: [finalization] });
+    const tooEarly = await signDepositoryBatch(depository, left.entityId, left.privateKey, tooEarlyBatch);
+    await expect(
+      depository.connect(left.signer).processBatch(tooEarly.encodedBatch, tooEarly.hankoData, tooEarly.nonce)
+    ).to.be.revertedWithCustomError(depository, "E2");
+
+    await mine(Number(await depository.defaultDisputeDelay()));
+
+    const afterTimeout = await signDepositoryBatch(depository, left.entityId, left.privateKey, tooEarlyBatch);
+    await depository.connect(left.signer).processBatch(
+      afterTimeout.encodedBatch,
+      afterTimeout.hankoData,
+      afterTimeout.nonce,
+    );
+
+    const account = await depository._accounts(acctKey);
+    expect(account.nonce).to.equal(2n);
+    expect(account.disputeHash).to.equal(ethers.ZeroHash);
+    expect(account.disputeTimeout).to.equal(0n);
+  });
+
+  it("cooperatively finalizes an existing account without an active dispute", async function () {
+    const { depository } = await loadFixture(deployFixture);
+
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const tokenId = 1n;
+    await depository.mintToReserve(left.entityId, tokenId, 500n);
+
+    const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+    const settlementNonce = 1n;
+    const diffs = [{
+      tokenId,
+      leftDiff: -100n,
+      rightDiff: 100n,
+      collateralDiff: 0n,
+      ondeltaDiff: 0n,
+    }];
+    const settlementSig = signEntityHash(
+      right.entityId,
+      await cooperativeUpdateHash(depository, acctKey, settlementNonce, diffs),
+      right.privateKey,
+    );
+    const settlementBatch = emptyBatch({
+      settlements: [{
+        leftEntity: left.entityId,
+        rightEntity: right.entityId,
+        diffs,
+        forgiveDebtsInTokenIds: [],
+        sig: settlementSig,
+        entityProvider: ethers.ZeroAddress,
+        hankoData: "0x",
+        nonce: settlementNonce,
+      }],
+    });
+    const settlement = await signDepositoryBatch(depository, left.entityId, left.privateKey, settlementBatch);
+    await depository.connect(left.signer).processBatch(settlement.encodedBatch, settlement.hankoData, settlement.nonce);
+
+    const finalNonce = 2n;
+    const finalProofbody = proofBody([], []);
+    const cooperativeHash = await cooperativeDisputeProofHash(depository, acctKey, finalNonce, finalProofbody, "0x");
+    const cooperativeSig = signEntityHash(right.entityId, cooperativeHash, right.privateKey);
+    const closeBatch = emptyBatch({
+      disputeFinalizations: [{
+        counterentity: right.entityId,
+        initialNonce: settlementNonce,
+        finalNonce,
+        initialProofbodyHash: ethers.ZeroHash,
+        finalProofbody,
+        finalArguments: "0x",
+        initialArguments: "0x",
+        sig: cooperativeSig,
+        startedByLeft: true,
+        disputeUntilBlock: 0,
+        cooperative: true,
+      }],
+    });
+    const close = await signDepositoryBatch(depository, left.entityId, left.privateKey, closeBatch);
+
+    await depository.connect(left.signer).processBatch(close.encodedBatch, close.hankoData, close.nonce);
+    expect((await depository._accounts(acctKey)).nonce).to.equal(finalNonce);
+  });
+
+  it("aggregates duplicate-token flashloans before enforcing repayment", async function () {
+    const { depository } = await loadFixture(deployFixture);
+
+    const actor = lazyActor(user0, 0);
+    const recipient = addressEntityId(user1.address);
+    const tokenId = 1n;
+
+    const exploitBatch = emptyBatch({
+      flashloans: [
+        { tokenId, amount: 10n },
+        { tokenId, amount: 10n },
+      ],
+      reserveToReserve: [{ receivingEntity: recipient, tokenId, amount: 10n }],
+    });
+    const exploit = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, exploitBatch);
+
+    await expect(
+      depository.connect(user0).processBatch(exploit.encodedBatch, exploit.hankoData, exploit.nonce)
+    ).to.be.revertedWithCustomError(depository, "E3");
+
+    expect(await depository.entityNonces(actor.entityId)).to.equal(0n);
+    expect(await depository._reserves(actor.entityId, tokenId)).to.equal(0n);
+    expect(await depository._reserves(recipient, tokenId)).to.equal(0n);
   });
 
   it("rejects non-admin use of local dev bootstrap helpers", async function () {
