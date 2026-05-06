@@ -18,6 +18,8 @@ import {
 } from './keys';
 import type { FrameDbPut, RuntimeFrameDbLike, StorageFrameDbHead, StorageRuntimeConfig } from './types';
 
+type RuntimeFrameDbBatch = ReturnType<RuntimeFrameDbLike['batch']>;
+
 export type StoredAccountFrameRecord = Extract<RuntimeFrameDbRecord, { kind: 'accountFrame' }> & {
   runtimeHeight: number;
   timestamp: number;
@@ -88,7 +90,7 @@ export const buildFrameDbPuts = (options: {
   return puts;
 };
 
-const readFrameDbHead = async (
+export const readFrameDbHead = async (
   db: RuntimeFrameDbLike,
   config: Required<StorageRuntimeConfig>,
 ): Promise<StorageFrameDbHead> => {
@@ -107,6 +109,43 @@ const writeFrameDbHead = async (db: RuntimeFrameDbLike, head: StorageFrameDbHead
   const batch = db.batch();
   batch.put(KEY_FRAME_DB_HEAD, encodeBuffer(head));
   await writeBatch(batch);
+};
+
+export type FrameDbCommitPlan = {
+  puts: FrameDbPut[];
+  writtenBytes: number;
+  nextHead: StorageFrameDbHead;
+};
+
+export const prepareFrameDbCommit = async (options: {
+  db: RuntimeFrameDbLike;
+  height: number;
+  puts: FrameDbPut[];
+  config: Required<StorageRuntimeConfig>;
+}): Promise<FrameDbCommitPlan> => {
+  const height = Math.max(1, Math.floor(Number(options.height)));
+  const head = await readFrameDbHead(options.db, options.config);
+  const writtenBytes = options.puts.reduce((sum, item) => sum + item.key.byteLength + item.value.byteLength, 0);
+  const appendBytes = head.latestHeight >= height ? 0 : writtenBytes;
+  const nextHead: StorageFrameDbHead = {
+    schemaVersion: STORAGE_SCHEMA_VERSION,
+    latestHeight: Math.max(head.latestHeight, height),
+    latestPrunedRuntimeHeight: head.latestPrunedRuntimeHeight,
+    retainedBytes: head.retainedBytes + appendBytes,
+    maxBytes: options.config.frameDbMaxBytes,
+    retainFrames: options.config.frameDbRetainFrames,
+  };
+
+  return {
+    puts: options.puts,
+    writtenBytes,
+    nextHead,
+  };
+};
+
+export const putFrameDbCommit = (batch: RuntimeFrameDbBatch, plan: FrameDbCommitPlan): void => {
+  for (const item of plan.puts) batch.put(item.key, item.value);
+  batch.put(KEY_FRAME_DB_HEAD, encodeBuffer(plan.nextHead));
 };
 
 const pruneFrameDbBeforeRuntimeHeight = async (
@@ -172,26 +211,38 @@ export const writeFrameDbPutsWithRetention = async (options: {
   }
 
   const height = Math.max(1, Math.floor(Number(options.height)));
-  const head = await readFrameDbHead(options.db, options.config);
-  const writtenBytes = options.puts.reduce((sum, item) => sum + item.key.byteLength + item.value.byteLength, 0);
-  const appendBytes = head.latestHeight >= height ? 0 : writtenBytes;
-  const nextHead: StorageFrameDbHead = {
-    schemaVersion: STORAGE_SCHEMA_VERSION,
-    latestHeight: Math.max(head.latestHeight, height),
-    latestPrunedRuntimeHeight: head.latestPrunedRuntimeHeight,
-    retainedBytes: head.retainedBytes + appendBytes,
-    maxBytes: options.config.frameDbMaxBytes,
-    retainFrames: options.config.frameDbRetainFrames,
-  };
-
+  const plan = await prepareFrameDbCommit(options);
   const batch = options.db.batch();
-  for (const item of options.puts) batch.put(item.key, item.value);
-  batch.put(KEY_FRAME_DB_HEAD, encodeBuffer(nextHead));
+  putFrameDbCommit(batch, plan);
   await writeBatch(batch);
 
+  const retention = await pruneFrameDbRetention({
+    db: options.db,
+    height,
+    head: plan.nextHead,
+    config: options.config,
+  });
+  return {
+    writtenBytes: plan.writtenBytes,
+    ...retention,
+  };
+};
+
+export const pruneFrameDbRetention = async (options: {
+  db: RuntimeFrameDbLike;
+  height: number;
+  head: StorageFrameDbHead;
+  config: Required<StorageRuntimeConfig>;
+}): Promise<{
+  prunedBytes: number;
+  retainedBytes: number;
+  prunedKeys: number;
+  latestPrunedRuntimeHeight: number;
+}> => {
+  const height = Math.max(1, Math.floor(Number(options.height)));
+  const nextHead = options.head;
   if (nextHead.retainedBytes <= options.config.frameDbMaxBytes || height <= options.config.frameDbRetainFrames) {
     return {
-      writtenBytes,
       prunedBytes: 0,
       retainedBytes: nextHead.retainedBytes,
       prunedKeys: 0,
@@ -208,7 +259,6 @@ export const writeFrameDbPutsWithRetention = async (options: {
   };
   await writeFrameDbHead(options.db, finalHead);
   return {
-    writtenBytes,
     prunedBytes: pruned.removedBytes,
     retainedBytes: finalHead.retainedBytes,
     prunedKeys: pruned.removedKeys,
