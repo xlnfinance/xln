@@ -33,6 +33,7 @@ import { buildHexKeyedMerkleMaterialized, packRadixMerklePath } from '../storage
 import { projectEntityCoreDoc } from '../storage/projections';
 import {
   listStorageLiveEntityIds,
+  loadEntityAccountDocFromStorage,
   loadEntityViewPageFromStorage,
   readStorageHead,
 } from '../storage/read';
@@ -59,6 +60,10 @@ type Cli = {
   touchPerRound: number;
   newAfterRead: number;
   rssCapBytes: number;
+  maxReadP99Ms: number;
+  maxDurableP99Ms: number;
+  maxColdOpenMs: number;
+  maxColdReadMs: number;
   seed: string;
   dbRoot: string;
   port: number;
@@ -117,6 +122,11 @@ const summarizeMs = (values: number[]): Record<string, number> => {
     p99: round(pick(0.99)),
     max: round(sorted[sorted.length - 1]!),
   };
+};
+
+const assertMetricCap = (label: string, value: number, cap: number): void => {
+  if (cap <= 0 || value <= cap) return;
+  throw new Error(`${label}_CAP_EXCEEDED: value=${value} cap=${cap}`);
 };
 
 const dirBytes = (path: string): number => {
@@ -181,6 +191,10 @@ const readCli = (): Cli => {
     touchPerRound: Math.max(1, readInt('--touch-per-round', 100)),
     newAfterRead: Math.max(0, readInt('--new-after-read', 100)),
     rssCapBytes: Math.max(0, readInt('--rss-cap-bytes', defaultRssCapBytes)),
+    maxReadP99Ms: Math.max(0, readFloat('--max-read-p99-ms', 0)),
+    maxDurableP99Ms: Math.max(0, readFloat('--max-durable-p99-ms', 0)),
+    maxColdOpenMs: Math.max(0, readFloat('--max-cold-open-ms', 0)),
+    maxColdReadMs: Math.max(0, readFloat('--max-cold-read-ms', 0)),
     seed: readArg('--seed', 'xln-radapter-1m-hub-production-bench'),
     dbRoot: readArg('--db-root', 'db-tmp/radapter-hub-1m'),
     port: readInt('--port', 0),
@@ -632,6 +646,7 @@ async function main() {
   let coldRestartOpenMs = 0;
   let coldRestartReadMs = 0;
   let coldRestartHead: StorageHead | null = null;
+  let storageReadHeight = 0;
   try {
     trace.mark('start');
     entityHashDocsRef.current = cli.seedMode === 'bulk'
@@ -639,6 +654,14 @@ async function main() {
       : await seedHub(cli, trace, db, entityId, state);
     env.height = state.height;
     env.timestamp = state.timestamp;
+    storageReadHeight = state.height;
+    env.height = storageReadHeight + 1;
+    env.timestamp += 1;
+    trace.mark('storage-read.probe-height', {
+      persistedHeight: storageReadHeight,
+      runtimeCurrentHeight: env.height,
+      storageBackedReason: 'atHeight below current runtime height',
+    });
     forceGc(trace, 'post-seed.gc');
 
     const readHead = async (): Promise<StorageHead | null> => readStorageHead(db);
@@ -678,6 +701,19 @@ async function main() {
             const decoded = decodeRuntimeAdapterMessage<Record<string, unknown>>(message);
             await handleRuntimeAdapterMessage(ws, decoded, env, {
               readHead,
+              loadEntityAccountDoc: async (
+                targetEnv,
+                targetEntityId,
+                counterpartyId,
+                height,
+              ) => loadEntityAccountDocFromStorage({
+                env: targetEnv,
+                tryOpenDb: async () => true,
+                getRuntimeDb: () => db,
+                entityId: targetEntityId,
+                counterpartyId,
+                height,
+              }),
               loadEntityViewPage,
               listEntityIdsAtHeight: async () => listStorageLiveEntityIds(db),
               enqueueRuntimeInput: (_targetEnv, input: RuntimeInput) => {
@@ -718,9 +754,12 @@ async function main() {
     const first = await adapter.read<{
       height: number;
       activeEntity: { accounts: { items: unknown[]; nextCursor: string | null; totalItems?: number; pageCount?: number } };
-    }>('view-frame', { entityId, accountsLimit: cli.pageLimit, booksLimit: cli.pageLimit, atHeight: adapter.currentHeight });
+    }>('view-frame', { entityId, accountsLimit: cli.pageLimit, booksLimit: cli.pageLimit, atHeight: storageReadHeight });
     readLatencyMs.push(nowMs() - readStarted);
-    trace.mark('adapter.read.first-page', {
+    if (cli.accounts > cli.pageLimit && !first.activeEntity.accounts.nextCursor) {
+      throw new Error(`STORAGE_PAGE_CURSOR_MISSING: accounts=${cli.accounts} limit=${cli.pageLimit}`);
+    }
+    trace.mark('adapter.read.storage.first-page', {
       height: first.height,
       items: first.activeEntity.accounts.items.length,
       nextCursor: first.activeEntity.accounts.nextCursor,
@@ -736,11 +775,11 @@ async function main() {
         entityId,
         accountsLimit: cli.pageLimit,
         booksLimit: cli.pageLimit,
-        accountsPage: 1,
-        atHeight: adapter.currentHeight,
+        accountsCursor: first.activeEntity.accounts.nextCursor,
+        atHeight: storageReadHeight,
       });
       readLatencyMs.push(nowMs() - readStarted);
-      trace.mark('adapter.read.second-page', {
+      trace.mark('adapter.read.storage.second-page', {
         items: second.activeEntity.accounts.items.length,
         nextCursor: second.activeEntity.accounts.nextCursor,
         pageIndex: second.activeEntity.accounts.pageIndex,
@@ -755,48 +794,38 @@ async function main() {
       accountsLimit: cli.pageLimit,
       booksLimit: cli.pageLimit,
       sortDir: 'desc',
-      atHeight: adapter.currentHeight,
+      atHeight: storageReadHeight,
     });
     readLatencyMs.push(nowMs() - readStarted);
-    trace.mark('adapter.read.desc-page', {
+    trace.mark('adapter.read.storage.desc-page', {
       items: desc.activeEntity.accounts.items.length,
       nextCursor: desc.activeEntity.accounts.nextCursor,
     });
 
-    const lastPage = Math.max(0, Math.ceil(Math.max(1, state.accounts.size) / cli.pageLimit) - 1);
+    const coldAccountIndex = Math.max(0, cli.accounts - 1);
+    const coldAccountId = normalizeEntityId(randomEntityId(cli.seed, coldAccountIndex));
+    if (cli.memory === 'hot' && coldAccountIndex >= cli.hotAccounts && state.accounts.has(coldAccountId)) {
+      throw new Error(`COLD_ACCOUNT_UNEXPECTEDLY_IN_MEMORY: ${coldAccountId}`);
+    }
     readStarted = nowMs();
-    const deepPage = await adapter.read<{
-      activeEntity: { accounts: { items: unknown[]; nextCursor: string | null; pageIndex?: number } };
-    }>('view-frame', {
-      entityId,
-      accountsLimit: cli.pageLimit,
-      booksLimit: 1,
-      accountsPage: lastPage,
-      atHeight: adapter.currentHeight,
+    const coldAccount = await adapter.read<{
+      items: Array<{ rightEntity: string; currentHeight: number }>;
+      totalItems?: number;
+    }>(`entity/${entityId}/accounts`, {
+      accountId: coldAccountId,
+      accountsLimit: 1,
+      atHeight: storageReadHeight,
     });
     readLatencyMs.push(nowMs() - readStarted);
-    trace.mark('adapter.read.deep-account-page', {
-      pageIndex: deepPage.activeEntity.accounts.pageIndex,
-      items: deepPage.activeEntity.accounts.items.length,
-      nextCursor: deepPage.activeEntity.accounts.nextCursor,
-    });
-
-    const targetAccountId = normalizeEntityId(randomEntityId(cli.seed, Math.max(0, Math.min(cli.hotAccounts, cli.accounts) - 1)));
-    readStarted = nowMs();
-    const accountSearch = await adapter.read<{
-      activeEntity: { accounts: { items: unknown[]; totalItems?: number } };
-    }>('view-frame', {
-      entityId,
-      accountsLimit: cli.pageLimit,
-      booksLimit: 1,
-      accountId: targetAccountId,
-      atHeight: adapter.currentHeight,
-    });
-    readLatencyMs.push(nowMs() - readStarted);
-    trace.mark('adapter.read.account-id', {
-      accountId: targetAccountId,
-      items: accountSearch.activeEntity.accounts.items.length,
-      totalItems: accountSearch.activeEntity.accounts.totalItems,
+    if (coldAccount.items[0]?.rightEntity !== coldAccountId) {
+      throw new Error(`COLD_ACCOUNT_LOOKUP_MISSING: ${coldAccountId}`);
+    }
+    trace.mark('adapter.read.storage.cold-account-id', {
+      accountId: coldAccountId,
+      accountIndex: coldAccountIndex,
+      inMemory: state.accounts.has(coldAccountId),
+      items: coldAccount.items.length,
+      totalItems: coldAccount.totalItems,
     });
 
     if (cli.books > 0) {
@@ -807,32 +836,33 @@ async function main() {
         entityId,
         accountsLimit: 1,
         booksLimit: cli.pageLimit,
-        atHeight: adapter.currentHeight,
+        atHeight: storageReadHeight,
       });
       readLatencyMs.push(nowMs() - readStarted);
-      trace.mark('adapter.read.books-first-page', {
+      trace.mark('adapter.read.storage.books-first-page', {
         items: booksFirst.activeEntity.books.items.length,
         nextCursor: booksFirst.activeEntity.books.nextCursor,
         totalItems: booksFirst.activeEntity.books.totalItems,
         pageCount: booksFirst.activeEntity.books.pageCount,
       });
-      const lastBookPage = Math.max(0, Math.ceil(cli.books / cli.pageLimit) - 1);
-      readStarted = nowMs();
-      const booksDeep = await adapter.read<{
-        activeEntity: { books: { items: unknown[]; nextCursor: string | null; pageIndex?: number } };
-      }>('view-frame', {
-        entityId,
-        accountsLimit: 1,
-        booksLimit: cli.pageLimit,
-        booksPage: lastBookPage,
-        atHeight: adapter.currentHeight,
-      });
-      readLatencyMs.push(nowMs() - readStarted);
-      trace.mark('adapter.read.deep-book-page', {
-        pageIndex: booksDeep.activeEntity.books.pageIndex,
-        items: booksDeep.activeEntity.books.items.length,
-        nextCursor: booksDeep.activeEntity.books.nextCursor,
-      });
+      if (booksFirst.activeEntity.books.nextCursor) {
+        readStarted = nowMs();
+        const booksSecond = await adapter.read<{
+          activeEntity: { books: { items: unknown[]; nextCursor: string | null; pageIndex?: number } };
+        }>('view-frame', {
+          entityId,
+          accountsLimit: 1,
+          booksLimit: cli.pageLimit,
+          booksCursor: booksFirst.activeEntity.books.nextCursor,
+          atHeight: storageReadHeight,
+        });
+        readLatencyMs.push(nowMs() - readStarted);
+        trace.mark('adapter.read.storage.books-second-page', {
+          pageIndex: booksSecond.activeEntity.books.pageIndex,
+          items: booksSecond.activeEntity.books.items.length,
+          nextCursor: booksSecond.activeEntity.books.nextCursor,
+        });
+      }
     }
 
     if (cli.newAfterRead > 0) {
@@ -913,9 +943,15 @@ async function main() {
     const head = coldRestartHead ?? await readStorageHead(db);
     const dbBytes = dirBytes(dbPath);
     const peakRss = Math.max(...trace.events.map(event => event.rss));
+    const readLatencySummary = summarizeMs(readLatencyMs);
+    const touchDurableSummary = summarizeMs(touchDurableMs);
     if (cli.rssCapBytes > 0 && peakRss > cli.rssCapBytes) {
       throw new Error(`RSS_CAP_EXCEEDED: peak=${peakRss} cap=${cli.rssCapBytes}`);
     }
+    assertMetricCap('READ_P99_MS', readLatencySummary.p99 ?? 0, cli.maxReadP99Ms);
+    assertMetricCap('DURABLE_P99_MS', touchDurableSummary.p99 ?? 0, cli.maxDurableP99Ms);
+    assertMetricCap('COLD_OPEN_MS', coldRestartOpenMs, cli.maxColdOpenMs);
+    assertMetricCap('COLD_READ_MS', coldRestartReadMs, cli.maxColdReadMs);
     console.log('');
     console.log(JSON.stringify({
       ok: true,
@@ -933,8 +969,9 @@ async function main() {
       rssCapHuman: cli.rssCapBytes > 0 ? formatBytes(cli.rssCapBytes) : null,
       head,
       inMemoryAccounts: state.accounts.size,
-      readLatencyMs: summarizeMs(readLatencyMs),
-      touchDurableMs: summarizeMs(touchDurableMs),
+      storageReadHeight,
+      readLatencyMs: readLatencySummary,
+      touchDurableMs: touchDurableSummary,
       newAfterReadMs: Math.round(newAfterReadMs * 1000) / 1000,
       newAfterReadDurableMs: Math.round(newAfterReadDurableMs * 1000) / 1000,
       coldRestart: {
