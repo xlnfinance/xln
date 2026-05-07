@@ -169,7 +169,7 @@ async function openAccountsWorkspace(page: Page): Promise<void> {
   for (let attempt = 0; attempt < 4; attempt += 1) {
     if (await isAccountsWorkspaceVisible()) break;
     if (await accountsTab.isVisible().catch(() => false)) {
-      await accountsTab.click();
+      await accountsTab.click({ timeout: 5_000 });
       await page.waitForTimeout(300);
       continue;
     }
@@ -220,7 +220,7 @@ async function openWorkspaceTab(page: Page, tabTestId: string): Promise<void> {
     const tab = tabs.nth(index);
     if (!await tab.isVisible().catch(() => false)) continue;
     await tab.scrollIntoViewIfNeeded();
-    await tab.click();
+    await tab.click({ timeout: 5_000 });
     return;
   }
   // Responsive screenshot layouts can hide the already-active tab. In that case the requested workspace is open.
@@ -250,8 +250,10 @@ async function ensureHubCardVisible(page: Page, hubId: string): Promise<void> {
   await openWorkspaceTab(page, 'account-workspace-tab-open');
   const panel = page.locator('.hub-panel').first();
   await expect(panel).toBeVisible({ timeout: 20_000 });
+  const hubIdNorm = hubId.toLowerCase();
   const hubCardLabel = await resolveHubCardLabel(page, hubId);
-  const hubCard = panel.locator('.hub-card').filter({ hasText: hubCardLabel }).first();
+  const exactHubCard = panel.locator(`.hub-card[data-hub-entity-id="${hubIdNorm}"]`).first();
+  const hubCard = exactHubCard.or(panel.locator('.hub-card').filter({ hasText: hubCardLabel }).first()).first();
   const refresh = panel.getByRole('button', { name: /^Refresh$/ }).first();
   const detailsButtons = panel.locator('.expand-toggle');
 
@@ -261,12 +263,12 @@ async function ensureHubCardVisible(page: Page, hubId: string): Promise<void> {
     for (let index = 0; index < count; index += 1) {
       const button = detailsButtons.nth(index);
       if (await button.isVisible().catch(() => false)) {
-        await button.click().catch(() => {});
+        await button.click({ timeout: 2_000 }).catch(() => {});
       }
     }
     if (await hubCard.isVisible().catch(() => false)) return;
     await expect(refresh).toBeVisible({ timeout: 10_000 });
-    await refresh.click();
+    await refresh.click({ timeout: 5_000 });
     await page.waitForTimeout(1_000);
   }
 
@@ -275,11 +277,13 @@ async function ensureHubCardVisible(page: Page, hubId: string): Promise<void> {
 
 async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
   await ensureHubCardVisible(page, hubId);
+  const hubIdNorm = hubId.toLowerCase();
   const hubCardLabel = await resolveHubCardLabel(page, hubId);
-  const hubCard = page.locator('.hub-card').filter({ hasText: hubCardLabel }).first();
+  const exactHubCard = page.locator(`.hub-card[data-hub-entity-id="${hubIdNorm}"]`).first();
+  const hubCard = exactHubCard.or(page.locator('.hub-card').filter({ hasText: hubCardLabel }).first()).first();
   const connectButton = hubCard.getByRole('button', { name: /Connect/i }).first();
   if (await connectButton.isVisible().catch(() => false)) {
-    await connectButton.click();
+    await connectButton.click({ timeout: 5_000 });
   }
 }
 
