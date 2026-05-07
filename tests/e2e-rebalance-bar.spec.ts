@@ -2003,10 +2003,16 @@ test.describe('Rebalance E2E', () => {
       await faucet(page, entityId, hubId);
       await page.waitForTimeout(100);
     }
+    const phase3CollateralFloor = c2rShouldTrigger ? collateralAfterC2R : collateralAfterFirstR2C;
     const r2cSnapshot2 = await waitForState(
-      (s) =>
-        BigInt(s.requested) === 0n &&
-        Number(s.lastFinalizedJHeight || 0) > Number(c2rSnapshot?.lastFinalizedJHeight || r2cSnapshot1.lastFinalizedJHeight || 0),
+      (s) => {
+        const collateral = BigInt(s.collateral || '0');
+        const collateralReady = c2rShouldTrigger
+          ? collateral > phase3CollateralFloor
+          : collateral >= phase3CollateralFloor;
+        return collateralReady &&
+          Number(s.lastFinalizedJHeight || 0) > Number(c2rSnapshot?.lastFinalizedJHeight || r2cSnapshot1.lastFinalizedJHeight || 0);
+      },
       180_000,
       'phase3-r2c-again',
     );
