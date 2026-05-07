@@ -701,6 +701,7 @@ async function waitForRebalanceReceiveReady(
     localAccountId: string;
     hubAccountId: string;
     requiredInCapacity: bigint;
+    minHubFinalizedCount?: number;
     timeoutMs?: number;
   },
 ) {
@@ -709,11 +710,19 @@ async function waitForRebalanceReceiveReady(
   let lastSnap: Awaited<ReturnType<typeof readPairState>> = null;
   let lastLocalFinalized = false;
   let lastHubFinalized = false;
+  let lastHubFinalizedCount = 0;
 
   while (Date.now() - startedAt < timeoutMs) {
     const steps = await readRebalanceStepEvents(page, opts.sinceTs);
     lastLocalFinalized = hasAccountSettledFinalizedStep(steps, opts.localAccountId.toLowerCase());
-    lastHubFinalized = hasAccountSettledFinalizedStep(steps, opts.hubAccountId.toLowerCase());
+    lastHubFinalizedCount = countRebalanceStepEvents(
+      steps,
+      'account_settled_finalized_bilateral',
+      (step) => String(step?.accountId || '').toLowerCase() === opts.hubAccountId.toLowerCase(),
+    );
+    lastHubFinalized = typeof opts.minHubFinalizedCount === 'number'
+      ? lastHubFinalizedCount >= opts.minHubFinalizedCount
+      : lastHubFinalizedCount > 0;
     lastSnap = await readPairState(page, opts.hubAccountId);
     if (
       lastLocalFinalized &&
@@ -732,6 +741,7 @@ async function waitForRebalanceReceiveReady(
   throw new Error(
     `rebalance receive capacity not ready: ` +
       `localFinalized=${lastLocalFinalized} hubFinalized=${lastHubFinalized} ` +
+      `hubFinalizedCount=${lastHubFinalizedCount} minHubFinalizedCount=${opts.minHubFinalizedCount ?? 'any'} ` +
       `requiredIn=${opts.requiredInCapacity} last=${JSON.stringify(lastSnap, null, 2)}`,
   );
 }
@@ -2400,6 +2410,7 @@ test.describe('Rebalance E2E', () => {
       localAccountId: rt2.entityId,
       hubAccountId: h3,
       requiredInCapacity: requiredReceiveCapacity,
+      minHubFinalizedCount: h3SettlesBeforeP2 + 1,
     });
 
     // Step 9: HTLC #3 (550) after rebalance should pass again.
@@ -2426,7 +2437,8 @@ test.describe('Rebalance E2E', () => {
     while (Date.now() - p3Start < 70_000) {
       afterP3 = await readPairState(page, h3);
       const debtIncreased = afterP3 && BigInt(afterP3.hubDebt || afterP3.hubExposure || '0') >= debtBeforeP3 + 500n * 10n ** 18n;
-      p3Received = await hasDebugHtlcEvent(page, payment3.hashlock, 'HtlcReceived', scenarioStartedAt);
+      const hashSeen = Array.isArray(afterP3?.recentHtlcHashlocks) && afterP3.recentHtlcHashlocks.includes(payment3.hashlock);
+      p3Received = hashSeen || await hasDebugHtlcEvent(page, payment3.hashlock, 'HtlcReceived', scenarioStartedAt);
       if (afterP3 && p3Received && debtIncreased) break;
       await page.waitForTimeout(700);
     }
