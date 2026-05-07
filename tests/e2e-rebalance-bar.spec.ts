@@ -2299,27 +2299,7 @@ test.describe('Rebalance E2E', () => {
     await waitForOutCapacityIncrease(page, h3, BigInt(h3BeforeFaucet?.outCapacity || '0'));
     await waitForPairIdle(page, h3, 60_000);
 
-    async function createFundedH3Sender(prefix: string): Promise<{ label: string; entityId: string; signerId: string }> {
-      const label = `${prefix}-${Date.now()}`;
-      await createRuntime(page, label, randomMnemonic());
-      await ensureRuntimeOnline(page, `${prefix}-online`);
-      const sender = await getLocalEntity(page);
-      await connectHubWithCredit(page, sender.entityId, sender.signerId, h3, 10_000n);
-      const beforeFaucet = await readPairState(page, h3);
-      expect(beforeFaucet, `${prefix}-h3 pair must exist before faucet`).toBeTruthy();
-      await faucetAmount(page, sender.entityId, h3, '2000');
-      await waitForOutCapacityIncrease(page, h3, BigInt(beforeFaucet?.outCapacity || '0'));
-      await waitForPairIdle(page, h3, 60_000);
-      return { label, entityId: sender.entityId, signerId: sender.signerId };
-    }
-
-    // Step 5: prepare independent funded H3 senders before the measured
-    // recipient rebalance window. That keeps later assertions focused on H3
-    // capacity/recovery instead of runtime-creation UI timing.
-    const p2Sender = await createFundedH3Sender('rt-h3-p2-sender');
-    const p3Sender = await createFundedH3Sender('rt-h3-p3-sender');
-
-    // Step 6: switch to runtime2 and capture baseline on H3.
+    // Step 5: switch to runtime2 and capture baseline on H3.
     await switchRuntime(page, rt2Label);
     const baseline = await readPairState(page, h3);
     expect(baseline, 'runtime2-h3 baseline must exist').toBeTruthy();
@@ -2327,7 +2307,7 @@ test.describe('Rebalance E2E', () => {
     // Start collection window after reset/bootstrap to avoid cross-test bleed.
     scenarioStartedAt = Date.now();
 
-    // Step 7: HTLC #1 (550) from runtime1 -> runtime2 via H3 should pass.
+    // Step 6: HTLC #1 (550) from runtime1 -> runtime2 via H3 should pass.
     await switchRuntime(page, rt1Label);
     await waitForPairIdle(page, h3, 60_000);
     const senderBeforeFirstH3 = await readPairState(page, h3);
@@ -2365,7 +2345,7 @@ test.describe('Rebalance E2E', () => {
       `payment1 must emit HtlcReceived for hashlock ${payment1.hashlock.slice(0, 12)}`,
     ).toBe(true);
 
-    // Step 8: HTLC #2 (550) immediately should fail on H3 capacity (1k credit total).
+    // Step 7: HTLC #2 (550) immediately should fail on H3 capacity (1k credit total).
     const rt2P2Cursor = await getPersistedReceiptCursor(page);
     const h3Lower = h3.toLowerCase();
     const h3SettlesBeforeP2 = countRebalanceStepEvents(
@@ -2373,15 +2353,15 @@ test.describe('Rebalance E2E', () => {
       'account_settled_finalized_bilateral',
       (step) => String(step?.accountId || '').toLowerCase() === h3Lower,
     );
-    await switchRuntime(page, p2Sender.label);
+    await switchRuntime(page, rt1Label);
     await waitForPairIdle(page, h3, 60_000);
     const senderBeforeP2 = await readPairState(page, h3);
     const payment2 = await sendRoutedHtlcPayment(
       page,
-      p2Sender.entityId,
-      p2Sender.signerId,
+      rt1.entityId,
+      rt1.signerId,
       rt2.entityId,
-      [p2Sender.entityId, h3, rt2.entityId],
+      [rt1.entityId, h3, rt2.entityId],
       550n,
       'rt1->rt2 via h3 htlc #2 should fail pre-rebalance',
     );
@@ -2427,7 +2407,7 @@ test.describe('Rebalance E2E', () => {
       ).toBe(true);
     }
 
-    // Step 9: wait rebalance finalize on runtime2-H3 and prove the recipient can
+    // Step 8: wait rebalance finalize on runtime2-H3 and prove the recipient can
     // receive another 550 before sending the next HTLC. Lowering the policy
     // after the failed payment deterministically triggers request_collateral.
     const h3FinalizedJHeightBeforeRebalance = Number(afterP2?.lastFinalizedJHeight || 0);
@@ -2441,16 +2421,16 @@ test.describe('Rebalance E2E', () => {
       minLocalFinalizedJHeight: h3FinalizedJHeightBeforeRebalance,
     });
 
-    // Step 10: HTLC #3 (550) after rebalance should pass again.
-    await switchRuntime(page, p3Sender.label);
+    // Step 9: HTLC #3 (550) after rebalance should pass again.
+    await switchRuntime(page, rt1Label);
     await waitForPairIdle(page, h3, 60_000);
     const senderBeforeP3 = await readPairState(page, h3);
     const payment3 = await sendRoutedHtlcPayment(
       page,
-      p3Sender.entityId,
-      p3Sender.signerId,
+      rt1.entityId,
+      rt1.signerId,
       rt2.entityId,
-      [p3Sender.entityId, h3, rt2.entityId],
+      [rt1.entityId, h3, rt2.entityId],
       550n,
       'rt1->rt2 via h3 htlc #3 post-rebalance',
     );
