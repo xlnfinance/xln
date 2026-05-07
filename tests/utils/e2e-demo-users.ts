@@ -320,7 +320,10 @@ async function completeProfileOnboardingIfVisible(page: Page, label: string): Pr
     if (await finishButton.isVisible().catch(() => false)) {
       const enabled = await finishButton.isEnabled().catch(() => false);
       if (enabled) {
-        await finishButton.click();
+        await finishButton.click({ timeout: 5_000 }).catch(async (error) => {
+          if (page.isClosed() || await onboardingGoneOrReady()) return;
+          throw error;
+        });
         break;
       }
     }
