@@ -272,7 +272,12 @@
   {:else}
     <div class="hub-cards">
       {#each sortedHubs as hub (hub.entityId)}
-        <article class="hub-card" class:connected={hub.isConnected}>
+        <article
+          class="hub-card"
+          class:connected={hub.isConnected}
+          data-testid="hub-discovery-card"
+          data-hub-entity-id={normalizeEntityId(hub.entityId)}
+        >
           <div class="hub-strip" aria-hidden="true"></div>
 
           <div class="hub-card-top">
