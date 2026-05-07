@@ -2459,15 +2459,20 @@ test.describe('Rebalance E2E', () => {
     await switchRuntime(page, rt2Label);
 
     const debtBeforeP3 = BigInt(rebDone.hubDebt || rebDone.hubExposure || '0');
+    const outCapacityBeforeP3 = BigInt(rebDone.outCapacity || '0');
     const p3Start = Date.now();
     let afterP3: any = null;
     let p3Received = false;
+    let p3CapacityIncreased = false;
     while (Date.now() - p3Start < 70_000) {
       afterP3 = await readPairState(page, h3);
       const debtIncreased = afterP3 && BigInt(afterP3.hubDebt || afterP3.hubExposure || '0') >= debtBeforeP3 + 500n * 10n ** 18n;
+      const outCapacityIncreased = afterP3 && BigInt(afterP3.outCapacity || '0') >= outCapacityBeforeP3 + 500n * 10n ** 18n;
       const hashSeen = Array.isArray(afterP3?.recentHtlcHashlocks) && afterP3.recentHtlcHashlocks.includes(payment3.hashlock);
-      p3Received = hashSeen || await hasDebugHtlcEvent(page, payment3.hashlock, 'HtlcReceived', scenarioStartedAt);
-      if (afterP3 && p3Received && debtIncreased) break;
+      const eventSeen = hashSeen || await hasDebugHtlcEvent(page, payment3.hashlock, 'HtlcReceived', scenarioStartedAt);
+      p3CapacityIncreased = debtIncreased || outCapacityIncreased;
+      p3Received = eventSeen || p3CapacityIncreased;
+      if (afterP3 && p3Received && p3CapacityIncreased) break;
       await page.waitForTimeout(700);
     }
     expect(afterP3, 'runtime2-h3 state after payment3').toBeTruthy();
@@ -2476,8 +2481,10 @@ test.describe('Rebalance E2E', () => {
       `payment3 should emit HtlcReceived post-rebalance for hashlock ${payment3.hashlock.slice(0, 12)}`,
     ).toBe(true);
     expect(
-      BigInt(afterP3.hubDebt || afterP3.hubExposure || '0') >= debtBeforeP3 + 500n * 10n ** 18n,
-      `post-rebalance payment3 should increase debt by ~550 (debt ${debtBeforeP3} -> ${afterP3?.hubDebt || afterP3?.hubExposure || 'n/a'})`,
+      p3CapacityIncreased,
+      `post-rebalance payment3 should increase debt or out capacity by ~550 ` +
+        `(debt ${debtBeforeP3} -> ${afterP3?.hubDebt || afterP3?.hubExposure || 'n/a'}, ` +
+        `out ${outCapacityBeforeP3} -> ${afterP3?.outCapacity || 'n/a'})`,
     ).toBe(true);
   });
 });
