@@ -3,18 +3,18 @@
   import { locale, translations$, initI18n, loadTranslations } from '$lib/i18n';
   // Removed WalletView - Entity = Wallet, no separate signer wallet view
   import HierarchicalNav from '$lib/components/Navigation/HierarchicalNav.svelte';
-  import { vaultOperations, activeRuntime, activeSigner, allRuntimes, type Runtime as Vault, type Signer } from '$lib/stores/vaultStore';
+  import { vaultOperations, activeRuntime, activeSigner, allRuntimes } from '$lib/stores/vaultStore';
   import { deriveRequestSignal, showVaultPanel, vaultUiOperations } from '$lib/stores/vaultUiStore';
   import { xlnFunctions } from '$lib/stores/xlnStore';
   import type { Tab } from '$lib/types/ui';
   import ContextSwitcher from '$lib/components/Entity/ContextSwitcher.svelte';
   import { resetEverything } from '$lib/utils/resetEverything';
-  import { Copy, Check } from 'lucide-svelte';
   import {
     BRAINVAULT_V1,
     bytesToHex,
     combineShards,
     deriveEthereumAddress,
+    deriveEthereumAddressMatrix,
     deriveKey,
     entropyToMnemonic,
     estimatePasswordStrength,
@@ -275,6 +275,7 @@
 
 
   // Result state
+  type DerivedEoaAddress = { index: number; path: string; address: string };
   let mnemonic24 = '';
   let mnemonic12 = '';
   let recoveryMnemonic24 = '';
@@ -282,7 +283,11 @@
   let devicePassphrase = '';
   let ethereumAddress = '';
   let entityId = ''; // bytes32 entity ID derived from address
+  let derivedEoaAddresses: DerivedEoaAddress[] = [];
+  let eoaDerivationSeq = 0;
   let copiedField: string | null = null;
+  let creatingRuntime = false;
+  let runtimeCreateError = '';
 
   // FAQ state
   let expandedFaq: number | null = null;
@@ -310,6 +315,7 @@
         ethereumAddress = signer.address;
         entityId = signer.entityId || '';
       }
+      void refreshDerivedEoaAddresses(mnemonic24);
 
       // Skip to complete phase
       phase = 'complete';
@@ -326,6 +332,7 @@
   let addressCopied = false;
 
   function copyAddress() {
+    if (!currentSignerAddress) return;
     navigator.clipboard.writeText(currentSignerAddress);
     addressCopied = true;
     setTimeout(() => addressCopied = false, 2000);
@@ -389,15 +396,22 @@
   $: currentVault = $activeRuntime;
   $: currentSigner = $activeSigner;
   $: savedVaults = $allRuntimes;
+  $: derivedRuntime = ethereumAddress
+    ? savedVaults.find((vault) => vault.id.toLowerCase() === ethereumAddress.toLowerCase()) ?? null
+    : null;
+  $: activeRuntimeMatchesDerived = Boolean(
+    currentVault && ethereumAddress && currentVault.id.toLowerCase() === ethereumAddress.toLowerCase()
+  );
 
   // Current signer's address
-  $: currentSignerAddress = currentSigner?.address || ethereumAddress;
+  $: currentSignerAddress = activeRuntimeMatchesDerived ? (currentSigner?.address || ethereumAddress) : ethereumAddress;
+  $: displayEntityId = activeRuntimeMatchesDerived ? (currentSigner?.entityId || entityId) : entityId;
   $: creationContextTab = ({
     id: 'runtime-creation',
     title: 'Runtime Creation',
     jurisdiction: 'browservm',
-    signerId: currentSigner?.address || '',
-    entityId: currentSigner?.entityId || '',
+    signerId: activeRuntimeMatchesDerived ? (currentSigner?.address || '') : '',
+    entityId: activeRuntimeMatchesDerived ? (currentSigner?.entityId || '') : '',
     isActive: true,
   }) satisfies Tab;
 
@@ -414,27 +428,64 @@
     }
   }
 
-  // Helper to save current derivation as runtime (uses mnemonic24 for valid BIP39)
-  async function saveCurrentAsVault() {
-    if (!mnemonic24 || !ethereumAddress) return;
-
-    const runtimeId = ethereumAddress; // RuntimeID = signer EOA
-    const label = vaultNameInput.trim() || `Runtime ${ethereumAddress.slice(0, 6)}`;
-
-    // Check if runtime exists (by EOA, not name)
-    if (vaultOperations.runtimeExists(runtimeId)) {
-      alert('A runtime with this address already exists');
+  async function refreshDerivedEoaAddresses(seed: string): Promise<void> {
+    const normalizedSeed = seed.trim().split(/\s+/).join(' ');
+    const seq = ++eoaDerivationSeq;
+    if (!normalizedSeed) {
+      derivedEoaAddresses = [];
       return;
     }
 
-    await vaultOperations.createRuntime(label, mnemonic24, {
-      loginType: 'manual',
-      requiresOnboarding: true,
-      mnemonic12: recoveryMnemonic12 || undefined,
-      devicePassphrase: devicePassphrase || undefined,
-    });
-    showSaveVaultModal = false;
-    vaultNameInput = '';
+    try {
+      const matrix = await deriveEthereumAddressMatrix(normalizedSeed, '', 3);
+      if (seq !== eoaDerivationSeq) return;
+      derivedEoaAddresses = matrix.standard.map((address, index) => ({
+        index,
+        path: `m/44'/60'/0'/0/${index}`,
+        address,
+      }));
+    } catch (err) {
+      if (seq !== eoaDerivationSeq) return;
+      console.warn('[BrainVault] Failed to derive EOA preview addresses:', err);
+      derivedEoaAddresses = [];
+    }
+  }
+
+  async function createXlnWalletFromCurrentVault(labelOverride?: string) {
+    if (!mnemonic24 || !ethereumAddress || creatingRuntime) return;
+
+    creatingRuntime = true;
+    runtimeCreateError = '';
+    try {
+      const runtimeId = ethereumAddress;
+      const label = (labelOverride || vaultNameInput || name || '').trim() || `Runtime ${ethereumAddress.slice(0, 6)}`;
+
+      if (!vaultOperations.runtimeExists(runtimeId)) {
+        const runtime = await vaultOperations.createRuntime(label, mnemonic24, {
+          loginType: createLoginType,
+          requiresOnboarding: createLoginType !== 'demo',
+          mnemonic12: recoveryMnemonic12 || undefined,
+          devicePassphrase: devicePassphrase || undefined,
+        });
+        entityId = runtime.signers[0]?.entityId || entityId;
+        console.log('🔐 XLN runtime created from BrainVault:', runtimeId.slice(0, 10) + '...', `(${label})`);
+      } else {
+        await vaultOperations.selectRuntime(runtimeId);
+        console.log('🔐 Existing XLN runtime selected:', runtimeId.slice(0, 10) + '...');
+      }
+      createLoginType = 'manual';
+      showSaveVaultModal = false;
+      vaultNameInput = '';
+    } catch (err) {
+      runtimeCreateError = err instanceof Error ? err.message : 'Failed to create XLN wallet';
+    } finally {
+      creatingRuntime = false;
+    }
+  }
+
+  // Helper to save current derivation as runtime (uses mnemonic24 for valid BIP39)
+  async function saveCurrentAsVault() {
+    await createXlnWalletFromCurrentVault(vaultNameInput.trim());
   }
 
   // Switch to a saved vault
@@ -670,6 +721,7 @@
 
       // Derive Ethereum address (for display)
       ethereumAddress = await deriveEthereumAddress(mnemonic24);
+      await refreshDerivedEoaAddresses(mnemonic24);
 
       // Auto-save runtime - createRuntime handles entity creation + funding
       const runtimeId = ethereumAddress;
@@ -898,32 +950,16 @@
 
     // Derive Ethereum address using the standard path (m/44'/60'/0'/0/0)
     ethereumAddress = await deriveEthereumAddress(mnemonic24);
+    await refreshDerivedEoaAddresses(mnemonic24);
     // Entity ID is a lazy entity ID for a single-signer quorum (matches runtime algorithm)
     entityId = generateLazyEntityId([ethereumAddress], 1n);
 
     phase = 'complete';
 
-    // Auto-save runtime using derived EOA as ID
-    if (mnemonic24 && ethereumAddress) {
-      const runtimeId = ethereumAddress; // RuntimeID = signer EOA
-      const label = name.trim() || `Runtime ${ethereumAddress.slice(0, 6)}`;
-
-      if (!vaultOperations.runtimeExists(runtimeId)) {
-        await vaultOperations.createRuntime(label, mnemonic24, {
-          loginType: createLoginType,
-          requiresOnboarding: createLoginType !== 'demo',
-          mnemonic12,
-          devicePassphrase: devicePassphrase || undefined,
-        });
-        // Auto-create entity for first signer
-        vaultOperations.setSignerEntity(0, entityId);
-        console.log('🔐 Runtime auto-saved:', runtimeId.slice(0, 10) + '...', `(${label})`);
-      } else {
-        // Runtime exists, just select it
-        vaultOperations.selectRuntime(runtimeId);
-        console.log('🔐 Existing runtime selected:', runtimeId.slice(0, 10) + '...');
-      }
-      createLoginType = 'manual';
+    // Demo quick-login still opens an XLN runtime immediately; normal BrainVault
+    // derivation remains a standalone seed/address export until the user opts in.
+    if (createLoginType === 'demo') {
+      await createXlnWalletFromCurrentVault(name.trim() || `Runtime ${ethereumAddress.slice(0, 6)}`);
     }
   }
 
@@ -979,6 +1015,7 @@
     phase = 'input';
     terminateWorkers();
     workerLimitNotice = '';
+    createLoginType = 'manual';
     if (elapsedInterval) {
       clearInterval(elapsedInterval);
       elapsedInterval = null;
@@ -993,6 +1030,10 @@
     mnemonic12 = '';
     devicePassphrase = '';
     ethereumAddress = '';
+    entityId = '';
+    derivedEoaAddresses = [];
+    runtimeCreateError = '';
+    creatingRuntime = false;
     shardsCompleted = 0;
     shardResults = new Map();
     shardStatus = [];
@@ -1377,7 +1418,7 @@
                 </svg>
               </div>
             </div>
-            <h2>Vault Opened</h2>
+            <h2>{activeRuntimeMatchesDerived ? 'XLN Wallet Ready' : 'BrainVault Ready'}</h2>
             <p class="success-stats">{formatRuntimeDurationRounded(elapsedMs)} <span class="stat-divider">·</span> {shardCount} shards</p>
           </div>
         {/if}
@@ -1386,7 +1427,7 @@
         <!-- Tab Content -->
         <div class="complete-tab-content">
           <!-- Unified Context Bar: Vault+Signer (always visible) -->
-          {#if !embedded}
+          {#if !embedded && activeRuntimeMatchesDerived}
           <div class="context-bar">
                 <!-- Combined Vault + Signer Dropdown -->
                 <div class="context-dropdown vault-signer-combo" class:open={vaultDropdownOpen}>
@@ -1473,7 +1514,7 @@
                 <img src={currentSignerAvatar} alt="" class="context-avatar" />
                 <div>
                   <h3>Recovery</h3>
-                  <p class="muted-tight">Entity {entityId}</p>
+                  <p class="muted-tight">Entity {displayEntityId}</p>
                   <p class="muted-tight">Signer {currentSignerAddress || ethereumAddress}</p>
                 </div>
               </div>
@@ -1482,13 +1523,36 @@
               </button>
             </div>
 
+            {#if derivedEoaAddresses.length > 0}
+              <div class="result-section">
+                <label>
+                  EOA Addresses
+                  <span class="label-hint">(standard derivation)</span>
+                </label>
+                <div class="eoa-grid">
+                  {#each derivedEoaAddresses as item}
+                    <div class="eoa-row" data-testid={`brainvault-eoa-address-${item.index}`}>
+                      <div class="eoa-meta">
+                        <span>EOA {item.index + 1}</span>
+                        <code>{item.path}</code>
+                      </div>
+                      <code class="eoa-address">{item.address}</code>
+                      <button class="copy-btn" on:click={() => copyToClipboard(item.address, `eoa-${item.index}`)}>
+                        {copiedField === `eoa-${item.index}` ? '✓' : 'Copy'}
+                      </button>
+                    </div>
+                  {/each}
+                </div>
+              </div>
+            {/if}
+
             {#if recoveryMnemonic12}
               <div class="result-section">
                 <label>
                   Recovery Phrase
                   <span class="label-hint">(12 words)</span>
                 </label>
-                <div class="result-box mnemonic">
+                <div class="result-box mnemonic" data-testid="brainvault-mnemonic-12">
                   <div class="mnemonic-words compact">
                     {#each recoveryMnemonic12.split(' ') as word, i}
                       {#if word}
@@ -1508,7 +1572,7 @@
                 Recovery Phrase
                 <span class="label-hint">(24 words)</span>
               </label>
-              <div class="result-box mnemonic">
+              <div class="result-box mnemonic" data-testid="brainvault-mnemonic-24">
                 <div class="mnemonic-words">
                   {#each recoveryMnemonic24.split(' ') as word, i}
                     {#if word}
@@ -1522,6 +1586,23 @@
               </div>
             </div>
 
+            <div class="xln-wallet-cta">
+              <div>
+                <h3>{derivedRuntime ? 'XLN wallet available' : 'Use this BrainVault in XLN'}</h3>
+                <p>{derivedRuntime ? 'Open the existing XLN wallet for this signer.' : 'Create an XLN wallet only when you want this BrainVault to join the app runtime.'}</p>
+              </div>
+              <button
+                class="derive-btn network-btn"
+                on:click={() => createXlnWalletFromCurrentVault()}
+                disabled={creatingRuntime || !mnemonic24 || !ethereumAddress || activeRuntimeMatchesDerived}
+              >
+                {creatingRuntime ? 'Creating...' : activeRuntimeMatchesDerived ? 'XLN wallet active' : derivedRuntime ? 'Open XLN wallet' : 'Create XLN wallet'}
+              </button>
+            </div>
+            {#if runtimeCreateError}
+              <div class="matrix-status error">{runtimeCreateError}</div>
+            {/if}
+
             <button class="derive-btn secondary" on:click={reset}>
               Derive Another Vault
             </button>
@@ -1531,8 +1612,8 @@
           {#if showSaveVaultModal}
             <div class="modal-overlay" on:click={() => showSaveVaultModal = false}>
               <div class="modal-content" on:click|stopPropagation>
-                <h3>Save Vault</h3>
-                <p class="modal-desc">Give this vault a name to save it for quick access later.</p>
+                <h3>Create XLN Wallet</h3>
+                <p class="modal-desc">Name the XLN wallet created from this BrainVault.</p>
                 <input
                   type="text"
                   class="vault-name-input"
@@ -1542,7 +1623,9 @@
                 />
                 <div class="modal-actions">
                   <button class="modal-btn cancel" on:click={() => showSaveVaultModal = false}>Cancel</button>
-                  <button class="modal-btn save" on:click={saveCurrentAsVault} disabled={!vaultNameInput.trim()}>Save Vault</button>
+                  <button class="modal-btn save" on:click={saveCurrentAsVault} disabled={!vaultNameInput.trim() || creatingRuntime}>
+                    {creatingRuntime ? 'Creating...' : 'Create Wallet'}
+                  </button>
                 </div>
               </div>
             </div>
@@ -2851,6 +2934,83 @@
     margin: 0 0 6px;
     font-size: 18px;
     color: rgba(255, 255, 255, 0.95);
+  }
+
+  .eoa-grid {
+    display: grid;
+    gap: 10px;
+  }
+
+  .eoa-row {
+    display: grid;
+    grid-template-columns: minmax(90px, 120px) minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 10px;
+    background: rgba(0, 0, 0, 0.22);
+  }
+
+  .eoa-meta {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    min-width: 0;
+  }
+
+  .eoa-meta span {
+    font-size: 12px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.86);
+  }
+
+  .eoa-meta code {
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+    font-size: 11px;
+    color: rgba(255, 255, 255, 0.45);
+    word-break: break-word;
+  }
+
+  .eoa-address {
+    min-width: 0;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+    font-size: 13px;
+    color: #fbbf24;
+    word-break: break-all;
+  }
+
+  .xln-wallet-cta {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 16px;
+    margin-top: 20px;
+    padding: 16px;
+    border: 1px solid rgba(180, 140, 80, 0.2);
+    border-radius: 12px;
+    background: rgba(180, 140, 80, 0.06);
+  }
+
+  .xln-wallet-cta h3 {
+    margin: 0 0 6px;
+    font-size: 16px;
+    color: rgba(255, 255, 255, 0.94);
+  }
+
+  .xln-wallet-cta p {
+    margin: 0;
+    font-size: 13px;
+    line-height: 1.45;
+    color: rgba(255, 255, 255, 0.58);
+  }
+
+  .xln-wallet-cta .derive-btn.network-btn {
+    width: auto;
+    min-width: 170px;
+    margin: 0;
+    padding: 14px 18px;
+    font-size: 14px;
   }
 
   .muted-tight {
@@ -5226,6 +5386,24 @@
     .signer-menu {
       left: 0;
       right: 0;
+    }
+
+    .eoa-row {
+      grid-template-columns: 1fr;
+      align-items: stretch;
+    }
+
+    .eoa-row .copy-btn {
+      width: 100%;
+    }
+
+    .xln-wallet-cta {
+      flex-direction: column;
+      align-items: stretch;
+    }
+
+    .xln-wallet-cta .derive-btn.network-btn {
+      width: 100%;
     }
   }
 </style>

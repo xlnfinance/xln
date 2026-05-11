@@ -42,6 +42,13 @@ function runBrainvaultCli(name: string, passphrase: string, shards: number): Bra
   };
 }
 
+async function readMnemonicWords(page: Page, testId: string): Promise<string> {
+  const box = page.getByTestId(testId);
+  await expect(box).toBeVisible({ timeout: 120_000 });
+  const words = await box.locator('.word').allTextContents();
+  return normalizeMnemonic(words.map((word) => word.replace(/^\d+\.\s*/, '').trim()).join(' '));
+}
+
 async function deriveBrainvaultInUi(page: Page, name: string, passphrase: string, shards: number): Promise<BrainvaultCliOutput> {
   await expect(page.getByRole('button', { name: 'BrainVault', exact: true })).toBeVisible({ timeout: 15_000 });
   await page.getByRole('button', { name: 'BrainVault', exact: true }).click();
@@ -56,31 +63,12 @@ async function deriveBrainvaultInUi(page: Page, name: string, passphrase: string
   await expect(openVaultButton).toBeEnabled({ timeout: 15_000 });
   await openVaultButton.click();
 
-  const handle = await page.waitForFunction((expectedLabel: string) => {
-    try {
-      const raw = localStorage.getItem('xln-vaults');
-      if (!raw) return null;
-      const parsed = JSON.parse(raw) as {
-        activeRuntimeId?: string;
-        runtimes?: Record<string, { label?: string; seed?: string; mnemonic12?: string }>;
-      };
-      const activeId = parsed.activeRuntimeId;
-      const runtime = activeId ? parsed.runtimes?.[activeId] : null;
-      if (!runtime?.seed || !runtime?.mnemonic12 || runtime.label !== expectedLabel) return null;
-      return {
-        mnemonic24: runtime.seed,
-        mnemonic12: runtime.mnemonic12,
-      };
-    } catch {
-      return null;
-    }
-  }, name, { timeout: 120_000 });
+  const [mnemonic12, mnemonic24] = await Promise.all([
+    readMnemonicWords(page, 'brainvault-mnemonic-12'),
+    readMnemonicWords(page, 'brainvault-mnemonic-24'),
+  ]);
 
-  const stored = await handle.jsonValue() as BrainvaultCliOutput;
-  return {
-    mnemonic12: normalizeMnemonic(stored.mnemonic12),
-    mnemonic24: normalizeMnemonic(stored.mnemonic24),
-  };
+  return { mnemonic12, mnemonic24 };
 }
 
 test.describe('brainvault parity', () => {
