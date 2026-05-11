@@ -273,12 +273,19 @@ const merklePathHasPrefix = (path: number[], prefix: number[]): boolean => {
 const nodeSlotUnder = (parentPath: number[], childPath: number[]): number =>
   childPath[parentPath.length] ?? 0;
 
+const merklePathKey = (path: number[]): string => path.join('.');
+
+const cloneMerklePathSet = (paths: Set<string>): number[][] =>
+  Array.from(paths)
+    .sort(compareStableText)
+    .map((key) => key === '' ? [] : key.split('.').map((slot) => Number(slot)));
+
 class PersistedEntityMerkleEditor {
   private rootNodeLoaded = false;
   private rootNode: PersistedMerkleNode | null = null;
   private leafCountValue: number;
-  private branchDels: number[][] = [];
-  private leafDels: number[][] = [];
+  private readonly initialBranchPaths = new Set<string>();
+  private readonly initialLeafPaths = new Set<string>();
 
   constructor(
     private readonly db: RuntimeDbLike,
@@ -357,6 +364,11 @@ class PersistedEntityMerkleEditor {
     const branchPuts: StorageMerkleBranchDoc[] = [];
     const leafPuts: StorageMerkleLeafDoc[] = [];
     this.collectDirty(root, branchPuts, leafPuts);
+    const finalBranchPaths = new Set<string>();
+    const finalLeafPaths = new Set<string>();
+    this.collectLoadedFinalPaths(root, finalBranchPaths, finalLeafPaths);
+    const branchDels = new Set([...this.initialBranchPaths].filter((path) => !finalBranchPaths.has(path)));
+    const leafDels = new Set([...this.initialLeafPaths].filter((path) => !finalLeafPaths.has(path)));
     return {
       rootDoc: {
         entityId: this.entityId,
@@ -369,8 +381,8 @@ class PersistedEntityMerkleEditor {
       },
       branchPuts,
       leafPuts,
-      branchDels: this.branchDels.map((path) => [...path]),
-      leafDels: this.leafDels.map((path) => [...path]),
+      branchDels: cloneMerklePathSet(branchDels),
+      leafDels: cloneMerklePathSet(leafDels),
     };
   }
 
@@ -418,6 +430,7 @@ class PersistedEntityMerkleEditor {
       keyMerkleLeaf(this.entityId, ENTITY_MERKLE_NAMESPACE, packRadixMerklePath(DEFAULT_ACCOUNT_MERKLE_RADIX, path)),
     );
     if (!doc) throw new Error(`STORAGE_MERKLE_LEAF_MISSING: entity=${this.entityId} path=${path.join('.')}`);
+    this.initialLeafPaths.add(merklePathKey(doc.path));
     return {
       kind: 'leaf',
       path: [...doc.path],
@@ -433,6 +446,7 @@ class PersistedEntityMerkleEditor {
       keyMerkleBranch(this.entityId, ENTITY_MERKLE_NAMESPACE, packRadixMerklePath(DEFAULT_ACCOUNT_MERKLE_RADIX, path)),
     );
     if (!doc) throw new Error(`STORAGE_MERKLE_BRANCH_MISSING: entity=${this.entityId} path=${path.join('.')}`);
+    this.initialBranchPaths.add(merklePathKey(doc.path));
     return {
       kind: 'branch',
       path: [...doc.path],
@@ -578,7 +592,6 @@ class PersistedEntityMerkleEditor {
     if (node.kind === 'leaf') {
       const matches = commonMerklePathPrefixLength(node.path, path) === path.length && node.path.length === path.length;
       if (!matches) return { node, deleted: false };
-      this.leafDels.push([...node.path]);
       return { node: null, deleted: true };
     }
     if (!merklePathHasPrefix(path, node.path)) return { node, deleted: false };
@@ -592,11 +605,9 @@ class PersistedEntityMerkleEditor {
     else node.children.delete(slot);
     this.markBranchDirty(node);
     if (node.children.size === 0) {
-      this.branchDels.push([...node.path]);
       return { node: null, deleted: true };
     }
     if (node.children.size === 1) {
-      this.branchDels.push([...node.path]);
       const only = Array.from(node.children.values())[0]!;
       return { node: await this.loadChild(only), deleted: true };
     }
@@ -643,6 +654,22 @@ class PersistedEntityMerkleEditor {
     }
     for (const child of node.children.values()) {
       if (child.node) this.collectDirty(child.node, branchPuts, leafPuts);
+    }
+  }
+
+  private collectLoadedFinalPaths(
+    node: PersistedMerkleNode | null,
+    branchPaths: Set<string>,
+    leafPaths: Set<string>,
+  ): void {
+    if (!node) return;
+    if (node.kind === 'leaf') {
+      leafPaths.add(merklePathKey(node.path));
+      return;
+    }
+    branchPaths.add(merklePathKey(node.path));
+    for (const child of node.children.values()) {
+      if (child.node) this.collectLoadedFinalPaths(child.node, branchPaths, leafPaths);
     }
   }
 }
@@ -810,15 +837,12 @@ export const prepareStorageStateHashes = async (options: {
     appendEntityMerkleFlush(entityId, flushed, merklePuts, merkleDelsByKey);
   }
   const entityHashes = toFrameEntityHashes(entityHashDocs.values());
-  const merklePutKeys = new Set(merklePuts.map((put) => put.key.toString('hex')));
   return {
     stateHash: computeStorageStateRoot(entityHashes),
     entityHashes,
     entityHashDocs,
     docValueBuffers,
     merklePuts,
-    merkleDels: Array.from(merkleDelsByKey.entries())
-      .filter(([key]) => !merklePutKeys.has(key))
-      .map(([, key]) => key),
+    merkleDels: Array.from(merkleDelsByKey.values()),
   };
 };
