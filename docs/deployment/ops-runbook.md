@@ -61,6 +61,16 @@ curl -fsS https://xln.finance/api/metrics | grep -E 'xln_(core_ok|system_ok|disk
 
 - The history frame DB is authoritative for runtime replay.
 - On startup and before durable writes, the current materialized DB is reconciled from history if it lagged after a crash.
+- `storage.epochMaxBytes` is the byte trigger for a full storage epoch rotation. When retained replay bytes cross the limit, the runtime writes a full snapshot into the history frame DB, prunes replay diffs covered by the retained snapshot, seeds a fresh `*-storage-current` DB from live rows plus Merkle rows, and leaves the replaced DB at `*-storage-previous`.
+- Treat `*-frames` as the recovery source of truth. `*-storage-previous` is an archive/debug candidate after the new `*-storage-current` opens and `/api/health` is green; do not delete or move `*-frames` while investigating storage incidents.
+- For high-load hub drills, use the rotation benchmarks:
+
+  ```bash
+  bun run bench:radapter:hub10k:rotation
+  bun run bench:radapter:hub1m:rotation
+  ```
+
+  The 1M drill should show `rotationProbe.snapshotDocs == rotationProbe.liveDocs`, `rotationProbe.nextRetainedHistoryBytes == 0`, read p99 under the script cap, durable-write p99 under the script cap, and peak RSS under the configured cap.
 - If health reports storage verification failure, keep the DB directories intact and collect:
 
   ```bash
