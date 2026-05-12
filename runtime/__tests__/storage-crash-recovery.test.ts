@@ -20,6 +20,7 @@ import {
 } from '../storage/keys';
 import type {
   RuntimeDbLike,
+  StorageAccountDoc,
   StorageDiffRecord,
   StorageDoc,
   StorageEntityCoreDoc,
@@ -28,6 +29,7 @@ import type {
 } from '../storage/types';
 
 const entityId = `0x${'11'.repeat(32)}`;
+type PreparedStorageHashes = Awaited<ReturnType<typeof prepareStorageStateHashes>>;
 
 const config: Required<StorageRuntimeConfig> = {
   enabled: true,
@@ -100,6 +102,42 @@ const entityDoc = (height: number): StorageEntityCoreDoc => ({
 const entityDiff = (height: number): StorageDiffRecord => {
   const doc: StorageDoc = { family: 'entity', entityId, value: entityDoc(height) };
   return { height, puts: [doc], dels: [] };
+};
+
+const accountId = (prefix: string): string => `0x${prefix.padEnd(64, '0')}`;
+
+const accountDoc = (counterpartyId: string, version: number): StorageAccountDoc => ({
+  rightEntity: counterpartyId,
+  currentHeight: version,
+} as unknown as StorageAccountDoc);
+
+const accountPut = (counterpartyId: string, version: number): StorageDoc => ({
+  family: 'account',
+  entityId,
+  counterpartyId,
+  value: accountDoc(counterpartyId, version),
+});
+
+const merkleEntries = (prepared: PreparedStorageHashes): Array<[Buffer, Buffer]> =>
+  prepared.merklePuts.map((item) => [item.key, item.value] as [Buffer, Buffer]);
+
+const applyMerkleDiff = (
+  entries: Array<[Buffer, Buffer]>,
+  prepared: PreparedStorageHashes,
+): Array<[Buffer, Buffer]> => {
+  const rows = new Map<string, [Buffer, Buffer]>();
+  for (const [key, value] of entries) rows.set(key.toString('hex'), [Buffer.from(key), Buffer.from(value)]);
+  for (const key of prepared.merkleDels) rows.delete(key.toString('hex'));
+  for (const put of prepared.merklePuts) rows.set(put.key.toString('hex'), [Buffer.from(put.key), Buffer.from(put.value)]);
+  return Array.from(rows.values()).sort(([left], [right]) => Buffer.compare(left, right));
+};
+
+const entityHash = (prepared: PreparedStorageHashes): string =>
+  prepared.entityHashDocs.get(entityId)?.hash ?? '';
+
+const expectNoMerklePutDeleteOverlap = (prepared: PreparedStorageHashes): void => {
+  const putKeys = new Set(prepared.merklePuts.map((item) => item.key.toString('hex')));
+  expect(prepared.merkleDels.some((key) => putKeys.has(key.toString('hex')))).toBe(false);
 };
 
 const head = (latestHeight: number, latestMaterializedHeight: number): StorageHead => ({
@@ -190,5 +228,87 @@ describe('storage crash recovery', () => {
 
     expect(prepared.entityHashes).toHaveLength(1);
     expect(prepared.entityHashes[0]?.entityId).toBe(entityId);
+  });
+
+  test('merkle flush diff cancels split then collapse in one frame', async () => {
+    const left = accountId('1');
+    const right = accountId('2');
+    const initial = await prepareStorageStateHashes({
+      db: makeMemoryDb(),
+      puts: [accountPut(left, 1)],
+      dels: [],
+    });
+
+    const prepared = await prepareStorageStateHashes({
+      db: makeMemoryDb(merkleEntries(initial)),
+      puts: [accountPut(right, 1)],
+      dels: [{ family: 'account', entityId, counterpartyId: right }],
+    });
+
+    expect(entityHash(prepared)).toBe(entityHash(initial));
+    expect(prepared.entityHashDocs.get(entityId)?.cellCount).toBe(1);
+    expect(prepared.merkleDels).toHaveLength(0);
+    expectNoMerklePutDeleteOverlap(prepared);
+  });
+
+  test('merkle flush diff handles collapse then split without deleting surviving leaves', async () => {
+    const survivor = accountId('1');
+    const removed = accountId('2');
+    const addedUnderSurvivorPrefix = accountId('12');
+    const initial = await prepareStorageStateHashes({
+      db: makeMemoryDb(),
+      puts: [accountPut(survivor, 1), accountPut(removed, 1)],
+      dels: [],
+    });
+
+    const prepared = await prepareStorageStateHashes({
+      db: makeMemoryDb(merkleEntries(initial)),
+      puts: [accountPut(addedUnderSurvivorPrefix, 1)],
+      dels: [{ family: 'account', entityId, counterpartyId: removed }],
+    });
+    const reference = await prepareStorageStateHashes({
+      db: makeMemoryDb(),
+      puts: [accountPut(survivor, 1), accountPut(addedUnderSurvivorPrefix, 1)],
+      dels: [],
+    });
+
+    expect(entityHash(prepared)).toBe(entityHash(reference));
+    expect(prepared.entityHashDocs.get(entityId)?.cellCount).toBe(2);
+    expect(prepared.merkleDels.length).toBeGreaterThan(0);
+    expectNoMerklePutDeleteOverlap(prepared);
+  });
+
+  test('merkle editor can flush, reload from db, and continue to the same root', async () => {
+    const a = accountId('1');
+    const b = accountId('2');
+    const c = accountId('3');
+    const d = accountId('31');
+    const initial = await prepareStorageStateHashes({
+      db: makeMemoryDb(),
+      puts: [accountPut(a, 1), accountPut(b, 1), accountPut(c, 1)],
+      dels: [],
+    });
+    const first = await prepareStorageStateHashes({
+      db: makeMemoryDb(merkleEntries(initial)),
+      puts: [accountPut(a, 2)],
+      dels: [{ family: 'account', entityId, counterpartyId: b }],
+    });
+    const afterFirstEntries = applyMerkleDiff(merkleEntries(initial), first);
+
+    const second = await prepareStorageStateHashes({
+      db: makeMemoryDb(afterFirstEntries),
+      puts: [accountPut(c, 2), accountPut(d, 1)],
+      dels: [],
+    });
+    const reference = await prepareStorageStateHashes({
+      db: makeMemoryDb(merkleEntries(initial)),
+      puts: [accountPut(a, 2), accountPut(c, 2), accountPut(d, 1)],
+      dels: [{ family: 'account', entityId, counterpartyId: b }],
+    });
+
+    expect(entityHash(second)).toBe(entityHash(reference));
+    expect(second.entityHashDocs.get(entityId)?.cellCount).toBe(3);
+    expectNoMerklePutDeleteOverlap(first);
+    expectNoMerklePutDeleteOverlap(second);
   });
 });
