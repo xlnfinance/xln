@@ -273,12 +273,14 @@ const merklePathHasPrefix = (path: number[], prefix: number[]): boolean => {
 const nodeSlotUnder = (parentPath: number[], childPath: number[]): number =>
   childPath[parentPath.length] ?? 0;
 
-const merklePathKey = (path: number[]): string => path.join('.');
+const merklePathKey = (path: number[]): string => JSON.stringify(path);
+
+const parseMerklePathKey = (key: string): number[] => JSON.parse(key) as number[];
 
 const cloneMerklePathSet = (paths: Set<string>): number[][] =>
   Array.from(paths)
     .sort(compareStableText)
-    .map((key) => key === '' ? [] : key.split('.').map((slot) => Number(slot)));
+    .map(parseMerklePathKey);
 
 class PersistedEntityMerkleEditor {
   private rootNodeLoaded = false;
@@ -668,6 +670,8 @@ class PersistedEntityMerkleEditor {
       return;
     }
     branchPaths.add(merklePathKey(node.path));
+    // Every mutation goes through loadChild(), so an unloaded subtree is unchanged
+    // on disk and must stay out of both initial and final diff sets.
     for (const child of node.children.values()) {
       if (child.node) this.collectLoadedFinalPaths(child.node, branchPaths, leafPaths);
     }
