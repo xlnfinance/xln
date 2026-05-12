@@ -266,6 +266,15 @@ export type StorageFrameSaveResult = {
   materialized: boolean;
   materializedOverlayRecords: number;
   frameDbCommitted: boolean;
+  latestSnapshotHeight?: number;
+  retainedHistoryBytes?: number;
+  snapshotCreated?: boolean;
+  snapshotBytes?: number;
+  historyPrunedBytes?: number;
+  epochRotated?: boolean;
+  epochDbRotated?: boolean;
+  frameDbRetainedBytes?: number;
+  frameDbPrunedBytes?: number;
 };
 
 export const saveRuntimeFrameToStorage = async (options: {
@@ -277,7 +286,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   getRuntimeDb: (env: Env) => RuntimeDbLike;
   tryOpenFrameDb: (env: Env) => Promise<boolean>;
   getFrameDb: (env: Env) => RuntimeFrameDbLike;
-  rotateEpochDb?: (env: Env, snapshotHeight: number, timestamp: number) => Promise<void>;
+  rotateEpochDb?: (env: Env, snapshotHeight: number, timestamp: number) => Promise<boolean | void>;
 } & PerfDeps): Promise<StorageFrameSaveResult> => {
   const config = runtimeConfigFromEnv(options.env);
   if (!config.enabled) return { materialized: false, materializedOverlayRecords: 0, frameDbCommitted: true };
@@ -506,7 +515,7 @@ export const saveRuntimeFrameToStorage = async (options: {
   let snapDocs = 0;
   let snapshotBytes = 0;
   let prunedBytes = 0;
-  let epochRotated = false;
+  const epochRotated = snapshotRequiredByBytes;
   let epochDbRotated = false;
   let retainedHistoryBytes = nextHead.retainedHistoryBytes;
   let latestSnapshotHeight = head.latestSnapshotHeight;
@@ -520,9 +529,6 @@ export const saveRuntimeFrameToStorage = async (options: {
     latestSnapshotHeight = options.env.height;
     prunedBytes += await maybeRotateSnapshots(historyDb, config.retainSnapshots);
     snapshotMs = options.getPerfMs() - snapshotStartedAt;
-    if (snapshotRequiredByBytes && !snapshotDue) {
-      epochRotated = true;
-    }
   }
 
   if (snapDocs > 0) {
@@ -553,7 +559,10 @@ export const saveRuntimeFrameToStorage = async (options: {
     await writeBatch(stateUpdate);
   }
 
-  epochDbRotated = false;
+  if (epochRotated && snapDocs > 0 && options.rotateEpochDb) {
+    const rotated = await options.rotateEpochDb(options.env, latestSnapshotHeight, options.env.timestamp);
+    epochDbRotated = rotated !== false;
+  }
 
   const verboseStorageLogs =
     String(process.env['XLN_STORAGE_VERBOSE'] ?? '').toLowerCase() === '1' ||
@@ -574,5 +583,14 @@ export const saveRuntimeFrameToStorage = async (options: {
     materialized: shouldMaterialize,
     materializedOverlayRecords: shouldMaterialize ? overlayRecords.length : 0,
     frameDbCommitted,
+    latestSnapshotHeight,
+    retainedHistoryBytes,
+    snapshotCreated: snapDocs > 0,
+    snapshotBytes,
+    historyPrunedBytes: prunedBytes,
+    epochRotated,
+    epochDbRotated,
+    frameDbRetainedBytes,
+    frameDbPrunedBytes,
   };
 };
