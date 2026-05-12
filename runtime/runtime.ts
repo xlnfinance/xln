@@ -664,12 +664,12 @@ const tryOpenStorageDb = async (env: Env, role: StorageDbRole = 'current'): Prom
   }
 };
 
-const rotateStorageEpochDb = async (env: Env, snapshotHeight: number, timestamp = env.timestamp): Promise<void> => {
-  if (!nodeProcess) return;
+const rotateStorageEpochDb = async (env: Env, snapshotHeight: number, timestamp = env.timestamp): Promise<boolean> => {
+  if (!nodeProcess) return false;
   const state = ensureRuntimeState(env);
   if (state.storageEpochRotatePromise) {
     await state.storageEpochRotatePromise;
-    return;
+    return true;
   }
   const rotation = (async () => {
     const currentPath = resolveStorageDbPath(env, 'current');
@@ -716,6 +716,7 @@ const rotateStorageEpochDb = async (env: Env, snapshotHeight: number, timestamp 
   state.storageEpochRotatePromise = rotation;
   try {
     await rotation;
+    return true;
   } finally {
     if (state.storageEpochRotatePromise === rotation) {
       state.storageEpochRotatePromise = null;

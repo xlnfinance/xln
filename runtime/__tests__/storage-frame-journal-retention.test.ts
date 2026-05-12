@@ -99,7 +99,7 @@ describe('storage frame journal retention', () => {
     await closeInfraDb(env);
   });
 
-  test('keeps frame tail usable without storage epoch rotation', async () => {
+  test('rotates current storage epoch after byte-threshold snapshot and keeps frame tail usable', async () => {
     const seed = `epoch-rotation-tail ${Date.now()} alpha beta gamma`;
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
     const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
@@ -121,7 +121,7 @@ describe('storage frame journal retention', () => {
       ...(env.runtimeConfig || {}),
       storage: {
         ...(env.runtimeConfig?.storage || {}),
-        snapshotPeriodFrames: 1,
+        snapshotPeriodFrames: 1000,
         epochMaxBytes: 1,
       },
     };
@@ -159,10 +159,26 @@ describe('storage frame journal retention', () => {
 
     const latestAfterRotation = await getPersistedLatestHeight(env);
     expect(latestAfterRotation).toBeGreaterThan(0);
-    expect(existsSync(`${namespacePath}-storage-previous`)).toBe(false);
+    expect(existsSync(`${namespacePath}-storage-current`)).toBe(true);
+    expect(existsSync(`${namespacePath}-storage-previous`)).toBe(true);
+
+    const currentHead = await readStorageHead(getRuntimeStorageDb(env));
+    const historyHead = await readStorageHead(getFrameDb(env));
+    const snapshotHeight = historyHead?.latestSnapshotHeight ?? 0;
+    expect(snapshotHeight).toBe(latestAfterRotation);
+    expect(currentHead?.latestHeight).toBe(historyHead?.latestHeight);
+    expect(currentHead?.latestMaterializedHeight).toBe(snapshotHeight);
+    expect(currentHead?.latestSnapshotHeight).toBe(snapshotHeight);
+    expect(currentHead?.retainedHistoryBytes).toBe(0);
+    expect(historyHead?.retainedHistoryBytes ?? 0).toBeGreaterThan(0);
+    expect(await readRawOrNull(getFrameDb(env), keySnapshotManifest(snapshotHeight))).toBeTruthy();
+    expect(await readRawOrNull(getFrameDb(env), keyFrame(snapshotHeight))).toBeTruthy();
+    expect(await readRawOrNull(getFrameDb(env), keyDiff(snapshotHeight))).toBeNull();
+    expect(await readRawOrNull(getRuntimeStorageDb(env), keyFrame(snapshotHeight))).toBeNull();
 
     env.height = latestAfterRotation + 1;
     env.timestamp += 1;
+    env.runtimeConfig.storage.epochMaxBytes = 1_000_000;
     await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
     expect(await getPersistedLatestHeight(env)).toBe(latestAfterRotation + 1);
 
