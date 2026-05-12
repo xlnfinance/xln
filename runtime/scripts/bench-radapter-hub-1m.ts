@@ -29,6 +29,8 @@ import {
   keyMerkleLeaf,
   keyMerkleRoot,
 } from '../storage/keys';
+import { inspectStorage } from '../storage/inspect';
+import { createSnapshot, seedFreshStorageEpoch } from '../storage/lifecycle';
 import { buildHexKeyedMerkleMaterialized, packRadixMerklePath } from '../storage/merkle';
 import { projectEntityCoreDoc } from '../storage/projections';
 import {
@@ -70,6 +72,12 @@ type Cli = {
   keepDb: boolean;
   memory: 'hot' | 'all' | 'none';
   seedMode: 'bulk' | 'incremental';
+  rotationProbe: boolean;
+  rotationRetainSnapshots: number;
+  rotationEpochBytes: number;
+  maxSnapshotMs: number;
+  maxEpochSeedMs: number;
+  maxRotationProbeMs: number;
 };
 
 type TimedEvent = {
@@ -201,6 +209,12 @@ const readCli = (): Cli => {
     keepDb: hasFlag('--keep-db'),
     memory,
     seedMode,
+    rotationProbe: hasFlag('--rotation-probe'),
+    rotationRetainSnapshots: Math.max(1, readInt('--rotation-retain-snapshots', 2)),
+    rotationEpochBytes: Math.max(0, readInt('--rotation-epoch-bytes', 1024 * 1024 * 1024)),
+    maxSnapshotMs: Math.max(0, readFloat('--max-snapshot-ms', 0)),
+    maxEpochSeedMs: Math.max(0, readFloat('--max-epoch-seed-ms', 0)),
+    maxRotationProbeMs: Math.max(0, readFloat('--max-rotation-probe-ms', 0)),
   };
 };
 
@@ -619,6 +633,150 @@ const insertNewAccountsAfterRead = async (
   return nowMs() - writeStarted;
 };
 
+type RotationProbeResult = {
+  height: number;
+  liveDocs: number;
+  snapshotDocs: number;
+  snapshotBytes: number;
+  snapshotMs: number;
+  epochSeedMs: number;
+  totalMs: number;
+  seedLiveBytes: number;
+  seedDocCount: number;
+  currentLiveBytes: number;
+  historyBytes: number;
+  nextLiveBytes: number;
+  nextRetainedHistoryBytes: number;
+  epochBytes: number;
+};
+
+const runSnapshotRotationProbe = async (
+  cli: Cli,
+  trace: Trace,
+  db: RuntimeDbLike,
+  dbPath: string,
+  env: Env,
+): Promise<RotationProbeResult | null> => {
+  if (!cli.rotationProbe) return null;
+  const historyPath = `${dbPath}-rotation-frames`;
+  const nextPath = `${dbPath}-rotation-next`;
+  rmSync(historyPath, { recursive: true, force: true });
+  rmSync(nextPath, { recursive: true, force: true });
+
+  const historyDb = new Level<Buffer, Buffer>(historyPath, { valueEncoding: 'buffer', keyEncoding: 'binary' });
+  const nextDb = new Level<Buffer, Buffer>(nextPath, { valueEncoding: 'buffer', keyEncoding: 'binary' });
+  const started = nowMs();
+  try {
+    await historyDb.open();
+    await nextDb.open();
+    const head = await readStorageHead(db);
+    if (!head) throw new Error('ROTATION_PROBE_HEAD_MISSING');
+    const currentStats = await inspectStorage({
+      env,
+      tryOpenDb: async () => true,
+      getRuntimeDb: () => db,
+    });
+    if (!currentStats) throw new Error('ROTATION_PROBE_CURRENT_STATS_MISSING');
+    const liveDocs = currentStats.liveEntityCount + currentStats.liveAccountCount + currentStats.liveBookCount;
+    const historyHead: StorageHead = {
+      ...head,
+      retainSnapshots: cli.rotationRetainSnapshots,
+      epochMaxBytes: cli.rotationEpochBytes,
+      retainedHistoryBytes: cli.rotationEpochBytes + 1,
+    };
+    const historyBatch = historyDb.batch();
+    historyBatch.put(KEY_HEAD, encodeBuffer(historyHead));
+    await writeBatch(historyBatch);
+
+    const snapshotStarted = nowMs();
+    const snapshot = await createSnapshot(db, historyDb, head.latestHeight, env.timestamp);
+    const snapshotMs = nowMs() - snapshotStarted;
+    if (snapshot.docCount !== liveDocs) {
+      throw new Error(`ROTATION_PROBE_SNAPSHOT_DOC_MISMATCH: snapshot=${snapshot.docCount} live=${liveDocs}`);
+    }
+
+    const seedStarted = nowMs();
+    const seed = await seedFreshStorageEpoch({
+      sourceDb: db,
+      targetDb: nextDb,
+      snapshotHeight: head.latestHeight,
+    });
+    const epochSeedMs = nowMs() - seedStarted;
+    const nextHead = await readStorageHead(nextDb);
+    if (!nextHead) throw new Error('ROTATION_PROBE_NEXT_HEAD_MISSING');
+    if (nextHead.latestSnapshotHeight !== head.latestHeight || nextHead.latestMaterializedHeight !== head.latestHeight) {
+      throw new Error(
+        `ROTATION_PROBE_NEXT_HEAD_MISMATCH: snapshot=${nextHead.latestSnapshotHeight} materialized=${nextHead.latestMaterializedHeight} expected=${head.latestHeight}`,
+      );
+    }
+    if (nextHead.retainedHistoryBytes !== 0) {
+      throw new Error(`ROTATION_PROBE_NEXT_HISTORY_NOT_RESET: retained=${nextHead.retainedHistoryBytes}`);
+    }
+    const nextStats = await inspectStorage({
+      env,
+      tryOpenDb: async () => true,
+      getRuntimeDb: () => nextDb,
+    });
+    if (!nextStats) throw new Error('ROTATION_PROBE_NEXT_STATS_MISSING');
+    if (
+      nextStats.liveEntityCount !== currentStats.liveEntityCount ||
+      nextStats.liveAccountCount !== currentStats.liveAccountCount ||
+      nextStats.liveBookCount !== currentStats.liveBookCount ||
+      nextStats.merkleLeafCount !== currentStats.merkleLeafCount
+    ) {
+      throw new Error(
+        `ROTATION_PROBE_NEXT_LIVE_MISMATCH: current=${currentStats.liveAccountCount}/${currentStats.merkleLeafCount} ` +
+          `next=${nextStats.liveAccountCount}/${nextStats.merkleLeafCount}`,
+      );
+    }
+    const historyStats = await inspectStorage({
+      env,
+      tryOpenDb: async () => true,
+      getRuntimeDb: () => historyDb,
+    });
+    const totalMs = nowMs() - started;
+    assertMetricCap('SNAPSHOT_MS', snapshotMs, cli.maxSnapshotMs);
+    assertMetricCap('EPOCH_SEED_MS', epochSeedMs, cli.maxEpochSeedMs);
+    assertMetricCap('ROTATION_PROBE_MS', totalMs, cli.maxRotationProbeMs);
+    const result: RotationProbeResult = {
+      height: head.latestHeight,
+      liveDocs,
+      snapshotDocs: snapshot.docCount,
+      snapshotBytes: snapshot.bytes,
+      snapshotMs: Math.round(snapshotMs * 1000) / 1000,
+      epochSeedMs: Math.round(epochSeedMs * 1000) / 1000,
+      totalMs: Math.round(totalMs * 1000) / 1000,
+      seedLiveBytes: seed.liveBytes,
+      seedDocCount: seed.docCount,
+      currentLiveBytes: currentStats.liveBytes,
+      historyBytes: historyStats?.historyBytes ?? 0,
+      nextLiveBytes: nextStats.liveBytes,
+      nextRetainedHistoryBytes: nextHead.retainedHistoryBytes,
+      epochBytes: cli.rotationEpochBytes,
+    };
+    trace.mark('rotation.probe.done', {
+      height: result.height,
+      liveDocs: result.liveDocs,
+      snapshotBytes: result.snapshotBytes,
+      snapshotMs: result.snapshotMs,
+      epochSeedMs: result.epochSeedMs,
+      nextRetainedHistoryBytes: result.nextRetainedHistoryBytes,
+    });
+    return result;
+  } finally {
+    try {
+      await historyDb.close();
+    } catch {}
+    try {
+      await nextDb.close();
+    } catch {}
+    if (!cli.keepDb) {
+      rmSync(historyPath, { recursive: true, force: true });
+      rmSync(nextPath, { recursive: true, force: true });
+    }
+  }
+};
+
 async function main() {
   const cli = readCli();
   const trace = new Trace();
@@ -647,6 +805,7 @@ async function main() {
   let coldRestartReadMs = 0;
   let coldRestartHead: StorageHead | null = null;
   let storageReadHeight = 0;
+  let rotationProbeResult: RotationProbeResult | null = null;
   try {
     trace.mark('start');
     entityHashDocsRef.current = cli.seedMode === 'bulk'
@@ -939,6 +1098,7 @@ async function main() {
       accounts: coldView?.accounts.items.length ?? 0,
       books: coldView?.books.items.length ?? 0,
     });
+    rotationProbeResult = await runSnapshotRotationProbe(cli, trace, db, dbPath, env);
 
     const head = coldRestartHead ?? await readStorageHead(db);
     const dbBytes = dirBytes(dbPath);
@@ -979,6 +1139,7 @@ async function main() {
         readFirstPageMs: Math.round(coldRestartReadMs * 1000) / 1000,
         latestHeight: coldRestartHead?.latestHeight ?? 0,
       },
+      rotationProbe: rotationProbeResult,
       events: trace.events,
     }, null, 2));
   } finally {
