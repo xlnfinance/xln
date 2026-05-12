@@ -187,7 +187,7 @@ Known remaining scaling work outside the Merkle hot path:
 
 - full runtime restore still materializes the entity state maps in memory;
 - historical full-entity reads still materialize all accounts/books for the requested entity;
-- full snapshots still copy live state and should be reviewed before very large production hubs.
+- full snapshots are O(live docs) by design; high-load hubs must budget and drill epoch rotation rather than treating it as a hot-frame operation.
 
 These are separate storage/runtime scaling PRs. They must not reintroduce Merkle fallback logic.
 
@@ -217,6 +217,15 @@ bun run bench:radapter:hub1m:assert
 ```
 
 The bulk fixture builder materializes the initial Merkle rows in one shot, so its RSS is intentionally much higher than steady daemon traffic. On 2026-05-07, the 1M asserted run completed with 1,000,000 persisted accounts, 10,000 hot accounts, DB size around 818 MiB, storage-backed read p99 around 2 ms, durable write p99 around 649 ms, cold first-page read around 2.4 ms, and peak RSS around 16.3 GiB during fixture materialization.
+
+Storage epoch rotation gates:
+
+```bash
+bun run bench:radapter:hub10k:rotation
+bun run bench:radapter:hub1m:rotation
+```
+
+The rotation probe keeps the normal read/write/cold-restart assertions and then copies a full live snapshot into the history DB and seeds a fresh current DB from live rows plus Merkle rows. It asserts `snapshotDocs == liveDocs`, fresh-epoch live/Merkle row counts match the source, and the fresh current head resets `retainedHistoryBytes` to `0`. On 2026-05-12, the 1M rotation run completed with 1,000,101 live docs, read p99 about 1.9 ms, durable write p99 about 648 ms, cold first-page read about 2.5 ms, full snapshot bytes about 1.014 GB in 12.9 s, fresh epoch seed in 27.5 s, and peak RSS about 17.1 GiB under the 24 GiB cap.
 
 Use the all-memory variant when the goal is to measure runtime heap/GC behavior rather than the hot-set production profile:
 
