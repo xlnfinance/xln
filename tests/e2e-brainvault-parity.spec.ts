@@ -55,6 +55,13 @@ async function readMnemonicWords(page: Page, testId: string): Promise<string> {
   return normalizeMnemonic(words.map((word) => word.replace(/^\d+\.\s*/, '').trim()).join(' '));
 }
 
+async function openBrainvaultExport(page: Page): Promise<void> {
+  const toggle = page.getByTestId('brainvault-export-toggle');
+  await expect(toggle).toBeVisible({ timeout: 120_000 });
+  await toggle.click();
+  await expect(page.getByTestId('brainvault-mnemonic-24')).toBeVisible({ timeout: 15_000 });
+}
+
 async function readRuntimeCount(page: Page): Promise<number> {
   return await page.evaluate(() => {
     const raw = localStorage.getItem('xln-vaults');
@@ -96,6 +103,7 @@ async function deriveBrainvaultInUi(page: Page, name: string, passphrase: string
   const openVaultButton = page.getByRole('button', { name: /Open (Wallet|Vault)/, exact: false });
   await expect(openVaultButton).toBeEnabled({ timeout: 15_000 });
   await openVaultButton.click();
+  await openBrainvaultExport(page);
 
   const [mnemonic12, mnemonic24] = await Promise.all([
     readMnemonicWords(page, 'brainvault-mnemonic-12'),
@@ -135,6 +143,14 @@ test.describe('brainvault parity', () => {
     await expect(openVaultButton).toBeEnabled({ timeout: 15_000 });
     await openVaultButton.click();
 
+    const createWalletButton = page.getByRole('button', { name: 'Create XLN wallet' });
+    await expect(createWalletButton).toBeEnabled({ timeout: 120_000 });
+    await expect(page.getByTestId('brainvault-export-toggle')).toBeVisible();
+    await expect(page.getByTestId('brainvault-mnemonic-24')).toBeHidden();
+    expect(await readRuntimeCount(page)).toBe(0);
+
+    await openBrainvaultExport(page);
+
     const [mnemonic12, mnemonic24] = await Promise.all([
       readMnemonicWords(page, 'brainvault-mnemonic-12'),
       readMnemonicWords(page, 'brainvault-mnemonic-24'),
@@ -145,8 +161,6 @@ test.describe('brainvault parity', () => {
     await expect(page.getByTestId('brainvault-eoa-address-2')).toBeVisible();
     expect(await readRuntimeCount(page)).toBe(0);
 
-    const createWalletButton = page.getByRole('button', { name: 'Create XLN wallet' });
-    await expect(createWalletButton).toBeEnabled({ timeout: 15_000 });
     await createWalletButton.click();
 
     const runtime = await waitForRuntimeWithSeed(page, mnemonic24);
