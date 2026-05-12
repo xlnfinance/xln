@@ -1508,88 +1508,18 @@
               </div>
           {/if}
 
-          <section class="recovery-card">
-            <div class="recovery-head">
+          <section class="recovery-card wallet-primary-card">
+            <div class="wallet-ready-head">
               <div class="recovery-identity">
                 <img src={currentSignerAvatar} alt="" class="context-avatar" />
                 <div>
-                  <h3>Recovery</h3>
+                  <h3>{derivedRuntime ? 'XLN wallet available' : 'Create XLN wallet'}</h3>
+                  <p class="muted-tight">
+                    {derivedRuntime ? 'Open the existing XLN wallet for this signer.' : 'Use this BrainVault as your XLN account seed.'}
+                  </p>
                   <p class="muted-tight">Entity {displayEntityId}</p>
                   <p class="muted-tight">Signer {currentSignerAddress || ethereumAddress}</p>
                 </div>
-              </div>
-              <button class="copy-btn" on:click={copyAddress}>
-                {addressCopied ? '✓' : 'Copy address'}
-              </button>
-            </div>
-
-            {#if derivedEoaAddresses.length > 0}
-              <div class="result-section">
-                <label>
-                  EOA Addresses
-                  <span class="label-hint">(standard derivation)</span>
-                </label>
-                <div class="eoa-grid">
-                  {#each derivedEoaAddresses as item}
-                    <div class="eoa-row" data-testid={`brainvault-eoa-address-${item.index}`}>
-                      <div class="eoa-meta">
-                        <span>EOA {item.index + 1}</span>
-                        <code>{item.path}</code>
-                      </div>
-                      <code class="eoa-address">{item.address}</code>
-                      <button class="copy-btn" on:click={() => copyToClipboard(item.address, `eoa-${item.index}`)}>
-                        {copiedField === `eoa-${item.index}` ? '✓' : 'Copy'}
-                      </button>
-                    </div>
-                  {/each}
-                </div>
-              </div>
-            {/if}
-
-            {#if recoveryMnemonic12}
-              <div class="result-section">
-                <label>
-                  Recovery Phrase
-                  <span class="label-hint">(12 words)</span>
-                </label>
-                <div class="result-box mnemonic" data-testid="brainvault-mnemonic-12">
-                  <div class="mnemonic-words compact">
-                    {#each recoveryMnemonic12.split(' ') as word, i}
-                      {#if word}
-                        <span class="word"><span class="word-num">{i + 1}.</span> {word}</span>
-                      {/if}
-                    {/each}
-                  </div>
-                  <button class="copy-btn full" on:click={() => copyToClipboard(recoveryMnemonic12, 'mnemonic12')}>
-                    {copiedField === 'mnemonic12' ? '✓ Copied!' : 'Copy 12 words'}
-                  </button>
-                </div>
-              </div>
-            {/if}
-
-            <div class="result-section">
-              <label>
-                Recovery Phrase
-                <span class="label-hint">(24 words)</span>
-              </label>
-              <div class="result-box mnemonic" data-testid="brainvault-mnemonic-24">
-                <div class="mnemonic-words">
-                  {#each recoveryMnemonic24.split(' ') as word, i}
-                    {#if word}
-                      <span class="word"><span class="word-num">{i + 1}.</span> {word}</span>
-                    {/if}
-                  {/each}
-                </div>
-                <button class="copy-btn full" on:click={() => copyToClipboard(recoveryMnemonic24, 'mnemonic24')}>
-                  {copiedField === 'mnemonic24' ? '✓ Copied!' : 'Copy 24 words'}
-                </button>
-              </div>
-            </div>
-
-            <div class="xln-wallet-cta">
-              <div>
-                <h3>{derivedRuntime ? 'XLN wallet available' : 'Use this BrainVault in XLN'}</h3>
-                <p>{derivedRuntime ? 'Open the existing XLN wallet for this signer.' : 'Create an XLN wallet only when you want this BrainVault to join the app runtime.'}</p>
               </div>
               <button
                 class="derive-btn network-btn"
@@ -1602,6 +1532,91 @@
             {#if runtimeCreateError}
               <div class="matrix-status error">{runtimeCreateError}</div>
             {/if}
+
+            <details class="brainvault-export-details" data-testid="brainvault-export-details">
+              <summary data-testid="brainvault-export-toggle">
+                <span>
+                  <strong>BrainVault export</strong>
+                  <small>Show EOA addresses and recovery phrases</small>
+                </span>
+                <span class="export-chevron">⌄</span>
+              </summary>
+
+              <div class="brainvault-export-panel">
+                <div class="export-address-row">
+                  <div>
+                    <span class="export-address-label">Signer address</span>
+                    <code>{currentSignerAddress || ethereumAddress}</code>
+                  </div>
+                  <button class="copy-btn" on:click={copyAddress}>
+                    {addressCopied ? '✓' : 'Copy address'}
+                  </button>
+                </div>
+
+                {#if derivedEoaAddresses.length > 0}
+                  <div class="result-section">
+                    <label>
+                      EOA Addresses
+                      <span class="label-hint">(standard derivation)</span>
+                    </label>
+                    <div class="eoa-grid">
+                      {#each derivedEoaAddresses as item}
+                        <div class="eoa-row" data-testid={`brainvault-eoa-address-${item.index}`}>
+                          <div class="eoa-meta">
+                            <span>EOA {item.index + 1}</span>
+                            <code>{item.path}</code>
+                          </div>
+                          <code class="eoa-address">{item.address}</code>
+                          <button class="copy-btn" on:click={() => copyToClipboard(item.address, `eoa-${item.index}`)}>
+                            {copiedField === `eoa-${item.index}` ? '✓' : 'Copy'}
+                          </button>
+                        </div>
+                      {/each}
+                    </div>
+                  </div>
+                {/if}
+
+                {#if recoveryMnemonic12}
+                  <div class="result-section">
+                    <label>
+                      Recovery Phrase
+                      <span class="label-hint">(12 words)</span>
+                    </label>
+                    <div class="result-box mnemonic" data-testid="brainvault-mnemonic-12">
+                      <div class="mnemonic-words compact">
+                        {#each recoveryMnemonic12.split(' ') as word, i}
+                          {#if word}
+                            <span class="word"><span class="word-num">{i + 1}.</span> {word}</span>
+                          {/if}
+                        {/each}
+                      </div>
+                      <button class="copy-btn full" on:click={() => copyToClipboard(recoveryMnemonic12, 'mnemonic12')}>
+                        {copiedField === 'mnemonic12' ? '✓ Copied!' : 'Copy 12 words'}
+                      </button>
+                    </div>
+                  </div>
+                {/if}
+
+                <div class="result-section">
+                  <label>
+                    Recovery Phrase
+                    <span class="label-hint">(24 words)</span>
+                  </label>
+                  <div class="result-box mnemonic" data-testid="brainvault-mnemonic-24">
+                    <div class="mnemonic-words">
+                      {#each recoveryMnemonic24.split(' ') as word, i}
+                        {#if word}
+                          <span class="word"><span class="word-num">{i + 1}.</span> {word}</span>
+                        {/if}
+                      {/each}
+                    </div>
+                    <button class="copy-btn full" on:click={() => copyToClipboard(recoveryMnemonic24, 'mnemonic24')}>
+                      {copiedField === 'mnemonic24' ? '✓ Copied!' : 'Copy 24 words'}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            </details>
 
             <button class="derive-btn secondary" on:click={reset}>
               Derive Another Vault
@@ -2916,12 +2931,27 @@
     background: rgba(255, 255, 255, 0.02);
   }
 
+  .wallet-primary-card {
+    max-width: 900px;
+    margin-left: auto;
+    margin-right: auto;
+  }
+
+  .wallet-ready-head,
   .recovery-head {
     display: flex;
     align-items: flex-start;
     justify-content: space-between;
     gap: 16px;
-    margin-bottom: 20px;
+    margin-bottom: 16px;
+  }
+
+  .wallet-ready-head .derive-btn.network-btn {
+    width: auto;
+    min-width: 190px;
+    margin: 0;
+    padding: 14px 20px;
+    font-size: 14px;
   }
 
   .recovery-identity {
@@ -2934,6 +2964,83 @@
     margin: 0 0 6px;
     font-size: 18px;
     color: rgba(255, 255, 255, 0.95);
+  }
+
+  .brainvault-export-details {
+    margin-top: 14px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 12px;
+    background: rgba(0, 0, 0, 0.2);
+    overflow: hidden;
+  }
+
+  .brainvault-export-details summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px;
+    cursor: pointer;
+    list-style: none;
+    user-select: none;
+  }
+
+  .brainvault-export-details summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .brainvault-export-details summary strong {
+    display: block;
+    margin-bottom: 3px;
+    font-size: 13px;
+    color: rgba(255, 255, 255, 0.9);
+  }
+
+  .brainvault-export-details summary small {
+    display: block;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.5);
+  }
+
+  .export-chevron {
+    flex: 0 0 auto;
+    font-size: 18px;
+    color: rgba(255, 255, 255, 0.5);
+    transition: transform 0.15s ease;
+  }
+
+  .brainvault-export-details[open] .export-chevron {
+    transform: rotate(180deg);
+  }
+
+  .brainvault-export-panel {
+    padding: 0 16px 16px;
+    border-top: 1px solid rgba(255, 255, 255, 0.08);
+  }
+
+  .export-address-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 0;
+  }
+
+  .export-address-row code {
+    display: block;
+    margin-top: 4px;
+    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
+    font-size: 12px;
+    color: rgba(255, 255, 255, 0.72);
+    word-break: break-all;
+  }
+
+  .export-address-label {
+    display: block;
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    color: rgba(180, 140, 80, 0.8);
   }
 
   .eoa-grid {
@@ -5397,13 +5504,20 @@
       width: 100%;
     }
 
+    .wallet-ready-head,
     .xln-wallet-cta {
       flex-direction: column;
       align-items: stretch;
     }
 
+    .wallet-ready-head .derive-btn.network-btn,
     .xln-wallet-cta .derive-btn.network-btn {
       width: 100%;
+    }
+
+    .export-address-row {
+      flex-direction: column;
+      align-items: stretch;
     }
   }
 </style>
