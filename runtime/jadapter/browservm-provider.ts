@@ -1159,11 +1159,11 @@ export class BrowserVMProvider {
   }
 
   /** Enforce debts (FIFO) */
-  async enforceDebts(entityId: string, tokenId: number): Promise<void> {
+  async enforceDebts(entityId: string, tokenId: number, maxIterations: number | bigint = 100n): Promise<void> {
     if (!this.depositoryAddress || !this.depositoryInterface) throw new Error('Depository not deployed');
 
     // Use ethers Interface for ABI encoding (same as mainnet)
-    const callData = this.depositoryInterface.encodeFunctionData('enforceDebts', [entityId, tokenId, 100n]);
+    const callData = this.depositoryInterface.encodeFunctionData('enforceDebts', [entityId, tokenId, BigInt(maxIterations)]);
 
     const currentNonce = await this.getCurrentNonce();
     const tx = createLegacyTx({

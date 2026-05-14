@@ -13,8 +13,21 @@
   export let canEnforce: boolean = false;
   export let enforcingTokenId: number | null = null;
 
+  const DEBT_DRAIN_MAX_SLOTS = 100;
+
+  type DebtEnforceRequest = {
+    tokenId: number;
+    symbol: string;
+    maxIterations: number;
+    openCount: number;
+    outstandingAmount: bigint;
+    reserveAmount: bigint;
+    payableAmount: bigint;
+    nextDebtIndex: number | null;
+  };
+
   const dispatch = createEventDispatcher<{
-    enforce: { tokenId: number; symbol: string };
+    enforce: DebtEnforceRequest;
   }>();
 
   type TokenGroup = {
@@ -27,6 +40,9 @@
     openCount: number;
     outgoingOpenCount: number;
     outstandingAmount: bigint;
+    reserveAmount: bigint;
+    payableAmount: bigint;
+    nextOpenDebt: DebtEntry | null;
     usdOutstanding: number;
     usdTotal: number;
   };
@@ -158,6 +174,8 @@
         const orderedDebts = [...tokenDebts].sort(compareDebtRows);
         const openDebts = orderedDebts.filter((entry) => entry.status === 'open');
         const outstandingAmount = openDebts.reduce((sum, entry) => sum + entry.remainingAmount, 0n);
+        const reserveAmount = entityState?.reserves?.get(tokenId) ?? 0n;
+        const payableAmount = reserveAmount < outstandingAmount ? reserveAmount : outstandingAmount;
         return {
           key: groupKey,
           tokenId,
@@ -168,6 +186,9 @@
           openCount: openDebts.length,
           outgoingOpenCount: firstDebt.direction === 'out' ? openDebts.length : 0,
           outstandingAmount,
+          reserveAmount,
+          payableAmount,
+          nextOpenDebt: nextFifoDebt(openDebts),
           usdOutstanding: openDebts.reduce((sum, entry) => sum + debtUsd(entry, 'remainingAmount'), 0),
           usdTotal: orderedDebts.reduce((sum, entry) => sum + debtUsd(entry, 'remainingAmount'), 0),
         };
@@ -190,6 +211,38 @@
 
   function debtTone(status: DebtStatus): DebtRowTone {
     return status === 'open' ? 'open' : status;
+  }
+
+  function debtIndexLabel(entry: DebtEntry | null): string {
+    if (!entry) return '—';
+    const index = entry.currentDebtIndex ?? entry.createdDebtIndex;
+    return Number.isFinite(index) ? `#${index}` : '—';
+  }
+
+  function debtQueueIndex(entry: DebtEntry): number {
+    const index = entry.currentDebtIndex ?? entry.createdDebtIndex;
+    return Number.isFinite(index) ? index : Number.MAX_SAFE_INTEGER;
+  }
+
+  function nextFifoDebt(openDebts: DebtEntry[]): DebtEntry | null {
+    return [...openDebts].sort((left, right) =>
+      debtQueueIndex(left) - debtQueueIndex(right) ||
+      Number(left.lastUpdatedBlock || 0) - Number(right.lastUpdatedBlock || 0) ||
+      compareStableText(String(left.debtId), String(right.debtId)),
+    )[0] || null;
+  }
+
+  function dispatchDrain(tokenGroup: TokenGroup): void {
+    dispatch('enforce', {
+      tokenId: tokenGroup.tokenId,
+      symbol: tokenGroup.symbol,
+      maxIterations: DEBT_DRAIN_MAX_SLOTS,
+      openCount: tokenGroup.outgoingOpenCount,
+      outstandingAmount: tokenGroup.outstandingAmount,
+      reserveAmount: tokenGroup.reserveAmount,
+      payableAmount: tokenGroup.payableAmount,
+      nextDebtIndex: tokenGroup.nextOpenDebt?.currentDebtIndex ?? tokenGroup.nextOpenDebt?.createdDebtIndex ?? null,
+    });
   }
 
   $: tokenGroups = buildTokenGroups();
@@ -225,15 +278,41 @@
 
             {#if tokenGroup.outgoingOpenCount > 0}
               <div class="debt-token-actions">
-                <button
-                  class="debt-enforce-btn"
-                  type="button"
-                  data-testid={`debt-enforce-${tokenGroup.tokenId}`}
-                  disabled={!canEnforce || enforcingTokenId === tokenGroup.tokenId}
-                  on:click={() => dispatch('enforce', { tokenId: tokenGroup.tokenId, symbol: tokenGroup.symbol })}
-                >
-                  {enforcingTokenId === tokenGroup.tokenId ? 'Enforcing...' : `Enforce ${tokenGroup.symbol}`}
-                </button>
+                <div class="debt-drain-card" data-testid={`debt-drain-summary-${tokenGroup.tokenId}`}>
+                  <div class="debt-drain-copy">
+                    <span class="debt-drain-title">Drain FIFO</span>
+                    <span class="debt-drain-meta">
+                      {tokenGroup.outgoingOpenCount} open · {formatAmount(tokenGroup.tokenId, tokenGroup.outstandingAmount)} outstanding · {DEBT_DRAIN_MAX_SLOTS} slots max
+                    </span>
+                  </div>
+                  <div class="debt-drain-metrics">
+                    <div>
+                      <span>Reserve</span>
+                      <strong>{formatAmount(tokenGroup.tokenId, tokenGroup.reserveAmount)}</strong>
+                    </div>
+                    <div>
+                      <span>Payable now</span>
+                      <strong>{formatAmount(tokenGroup.tokenId, tokenGroup.payableAmount)}</strong>
+                    </div>
+                    <div>
+                      <span>Next FIFO</span>
+                      <strong>{debtIndexLabel(tokenGroup.nextOpenDebt)} · {tokenGroup.nextOpenDebt ? entityName(tokenGroup.nextOpenDebt.counterparty) : '—'}</strong>
+                    </div>
+                  </div>
+                  <button
+                    class="debt-enforce-btn"
+                    type="button"
+                    data-testid={`debt-enforce-${tokenGroup.tokenId}`}
+                    disabled={!canEnforce || enforcingTokenId === tokenGroup.tokenId || tokenGroup.reserveAmount <= 0n}
+                    on:click={() => dispatchDrain(tokenGroup)}
+                  >
+                    {enforcingTokenId === tokenGroup.tokenId
+                      ? 'Draining...'
+                      : tokenGroup.reserveAmount <= 0n
+                        ? 'No reserve'
+                        : `Drain ${tokenGroup.symbol}`}
+                  </button>
+                </div>
               </div>
             {/if}
 
@@ -395,10 +474,73 @@
   .debt-token-actions {
     padding: 0 12px 12px;
     display: flex;
-    justify-content: flex-end;
+    justify-content: stretch;
+  }
+
+  .debt-drain-card {
+    width: 100%;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 12px;
+    align-items: center;
+    border: 1px solid color-mix(in srgb, var(--theme-text-secondary, #d4d4d8) 14%, transparent);
+    border-radius: 10px;
+    background: color-mix(in srgb, var(--theme-background, #09090b) 82%, var(--theme-text-primary, #ffffff) 4%);
+    padding: 10px;
+  }
+
+  .debt-drain-copy {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .debt-drain-title {
+    color: var(--theme-text-primary, #f5f5f5);
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .debt-drain-meta {
+    color: var(--theme-text-secondary, #d4d4d8);
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+
+  .debt-drain-metrics {
+    grid-column: 1 / -1;
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .debt-drain-metrics div {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 3px;
+    border-radius: 8px;
+    background: color-mix(in srgb, var(--theme-background, #09090b) 72%, var(--theme-text-primary, #ffffff) 4%);
+    padding: 8px;
+  }
+
+  .debt-drain-metrics span {
+    color: var(--theme-text-muted, #a1a1aa);
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+  }
+
+  .debt-drain-metrics strong {
+    min-width: 0;
+    color: var(--theme-text-primary, #f5f5f5);
+    font-size: 12px;
+    overflow-wrap: anywhere;
   }
 
   .debt-enforce-btn {
+    min-width: 112px;
     border: 1px solid color-mix(in srgb, var(--theme-text-secondary, #d4d4d8) 22%, transparent);
     background: color-mix(in srgb, var(--theme-background, #09090b) 82%, var(--theme-text-primary, #ffffff) 6%);
     color: var(--theme-text-primary, #f4f4f5);
@@ -548,6 +690,14 @@
     .debt-row-amounts,
     .debt-summary-total {
       justify-content: flex-start;
+    }
+
+    .debt-drain-card {
+      grid-template-columns: 1fr;
+    }
+
+    .debt-drain-metrics {
+      grid-template-columns: 1fr;
     }
 
     .debt-update-row {

@@ -311,6 +311,41 @@ describe("Depository", function () {
     expect(await erc20.balanceOf(user1.address)).to.equal(2_500n);
   });
 
+  it("rejects zero-amount ERC721 withdrawals instead of transferring the NFT for free", async function () {
+    const { depository, erc721 } = await loadFixture(deployFixture);
+
+    const actor = lazyActor(user0, 0);
+    const recipientEntity = addressEntityId(user1.address);
+
+    await erc721.approve(await depository.getAddress(), 1);
+
+    const depositBatch = emptyBatch({
+      externalTokenToReserve: [{
+        entity: ethers.ZeroHash,
+        contractAddress: await erc721.getAddress(),
+        externalTokenId: 1,
+        tokenType: 1,
+        internalTokenId: 0,
+        amount: 1n,
+      }],
+    });
+    const deposit = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, depositBatch);
+    await depository.connect(user0).processBatch(deposit.encodedBatch, deposit.hankoData, deposit.nonce);
+
+    const erc721id = (await depository.getTokensLength()) - 1n;
+    const withdrawBatch = emptyBatch({
+      reserveToExternalToken: [{ receivingEntity: recipientEntity, tokenId: erc721id, amount: 0n }],
+    });
+    const withdraw = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, withdrawBatch);
+
+    await expect(
+      depository.connect(user0).processBatch(withdraw.encodedBatch, withdraw.hankoData, withdraw.nonce)
+    ).to.be.revertedWithCustomError(depository, "E1");
+
+    expect(await erc721.ownerOf(1)).to.equal(await depository.getAddress());
+    expect(await depository._reserves(actor.entityId, erc721id)).to.equal(1n);
+  });
+
   it("requires strictly sequential entity batch nonces and binds signatures to nonce and calldata", async function () {
     const { depository } = await loadFixture(deployFixture);
 
@@ -490,6 +525,121 @@ describe("Depository", function () {
     expect(collateralAfter.ondelta).to.equal(0n);
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(800n);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(200n);
+  });
+
+  it("locks outstanding debt before reserve outflows and pays FIFO debt in bounded chunks", async function () {
+    const { depository } = await loadFixture(deployFixture);
+
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const recipient = addressEntityId(user1.address);
+    const tokenId = 1n;
+    await depository.mintToReserve(left.entityId, tokenId, 100n);
+
+    const fundCollateralBatch = emptyBatch({
+      reserveToCollateral: [{
+        tokenId,
+        receivingEntity: left.entityId,
+        pairs: [{ entity: right.entityId, amount: 100n }],
+      }],
+    });
+    const fundCollateral = await signDepositoryBatch(depository, left.entityId, left.privateKey, fundCollateralBatch);
+    await depository.connect(left.signer).processBatch(
+      fundCollateral.encodedBatch,
+      fundCollateral.hankoData,
+      fundCollateral.nonce,
+    );
+
+    const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+    const initialProofbody = proofBody([0n], [tokenId]);
+    const initialProofbodyHash = proofBodyHash(initialProofbody);
+    const initialArguments = "0x";
+    const disputeNonce = 1n;
+    const startHash = await disputeProofHash(depository, acctKey, disputeNonce, initialProofbodyHash);
+    const startSig = signEntityHash(right.entityId, startHash, right.privateKey);
+    const startBatch = emptyBatch({
+      disputeStarts: [{
+        counterentity: right.entityId,
+        nonce: disputeNonce,
+        proofbodyHash: initialProofbodyHash,
+        sig: startSig,
+        initialArguments,
+      }],
+    });
+    const start = await signDepositoryBatch(depository, left.entityId, left.privateKey, startBatch);
+    await depository.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
+
+    const finalNonce = 2n;
+    const finalProofbody = proofBody([-300n], [tokenId]);
+    const finalHash = await disputeProofHash(depository, acctKey, finalNonce, proofBodyHash(finalProofbody));
+    const finalSig = signEntityHash(right.entityId, finalHash, right.privateKey);
+    const finalBatch = emptyBatch({
+      disputeFinalizations: [{
+        counterentity: right.entityId,
+        initialNonce: disputeNonce,
+        finalNonce,
+        initialProofbodyHash,
+        finalProofbody,
+        finalArguments: "0x",
+        initialArguments,
+        sig: finalSig,
+        startedByLeft: true,
+        disputeUntilBlock: 0,
+        cooperative: false,
+      }],
+    });
+    const finalization = await signDepositoryBatch(depository, left.entityId, left.privateKey, finalBatch);
+    await depository.connect(left.signer).processBatch(
+      finalization.encodedBatch,
+      finalization.hankoData,
+      finalization.nonce,
+    );
+
+    expect(await depository._reserves(left.entityId, tokenId)).to.equal(0n);
+    expect(await depository._reserves(right.entityId, tokenId)).to.equal(100n);
+    expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(200n);
+    expect(await depository._activeDebtsByToken(left.entityId, tokenId)).to.equal(1n);
+
+    await depository.mintToReserve(left.entityId, tokenId, 100n);
+    expect(await depository.spendableReserve(left.entityId, tokenId)).to.equal(0n);
+
+    const blockedBatch = emptyBatch({
+      reserveToReserve: [{ receivingEntity: recipient, tokenId, amount: 1n }],
+    });
+    const blocked = await signDepositoryBatch(depository, left.entityId, left.privateKey, blockedBatch);
+    await expect(
+      depository.connect(left.signer).processBatch(blocked.encodedBatch, blocked.hankoData, blocked.nonce)
+    ).to.be.revertedWithCustomError(depository, "E3");
+
+    expect(await depository._reserves(left.entityId, tokenId)).to.equal(100n);
+    expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(200n);
+
+    await depository.enforceDebts(left.entityId, tokenId, 32);
+    expect(await depository._reserves(left.entityId, tokenId)).to.equal(0n);
+    expect(await depository._reserves(right.entityId, tokenId)).to.equal(200n);
+    expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(100n);
+
+    await depository.mintToReserve(left.entityId, tokenId, 150n);
+    const spendableTransferBatch = emptyBatch({
+      reserveToReserve: [{ receivingEntity: recipient, tokenId, amount: 50n }],
+    });
+    const spendableTransfer = await signDepositoryBatch(
+      depository,
+      left.entityId,
+      left.privateKey,
+      spendableTransferBatch,
+    );
+    await depository.connect(left.signer).processBatch(
+      spendableTransfer.encodedBatch,
+      spendableTransfer.hankoData,
+      spendableTransfer.nonce,
+    );
+
+    expect(await depository._reserves(left.entityId, tokenId)).to.equal(0n);
+    expect(await depository._reserves(right.entityId, tokenId)).to.equal(300n);
+    expect(await depository._reserves(recipient, tokenId)).to.equal(50n);
+    expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(0n);
+    expect(await depository._activeDebtsByToken(left.entityId, tokenId)).to.equal(0n);
+    expect(await depository._activeDebts(left.entityId)).to.equal(0n);
   });
 
   it("requires timeout for unilateral dispute finalization and bumps account nonce once", async function () {

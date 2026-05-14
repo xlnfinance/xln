@@ -115,7 +115,7 @@ export interface JAdapter {
 
   // Writes - Core Operations
   processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<JBatchReceipt>;
-  enforceDebts(entityId: string, tokenId: number): Promise<void>;
+  enforceDebts(entityId: string, tokenId: number, maxIterations?: number | bigint): Promise<void>;
 
   // Writes - Testing/Debug (may be no-op on mainnet)
   debugFundReserves(entityId: string, tokenId: number, amount: bigint): Promise<JEvent[]>;
@@ -216,7 +216,7 @@ export interface JBatchReceipt {
 // Forward declare BrowserVMProvider (avoid circular import)
 export interface BrowserVMProvider {
   processBatch(encodedBatch: string, hankoData: string, nonce: bigint): Promise<unknown[]>;
-  enforceDebts(entityId: string, tokenId: number): Promise<void>;
+  enforceDebts(entityId: string, tokenId: number, maxIterations?: number | bigint): Promise<void>;
   setBlockTimestamp(timestamp: number): void;
   getDepositoryAddress(): string;
   getEntityProviderAddress(): string;

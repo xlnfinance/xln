@@ -23,6 +23,7 @@ abstract contract ReentrancyGuardLite {
 interface IERC20 {
   function transfer(address to, uint256 value) external returns (bool);
   function transferFrom(address from, address to, uint256 value) external returns (bool);
+  function balanceOf(address account) external view returns (uint256);
 }
 interface IERC721 {
   function transferFrom(address from, address to, uint256 tokenId) external;
@@ -67,12 +68,17 @@ contract Depository is ReentrancyGuardLite {
   mapping (bytes32 => mapping (uint => Debt[])) public _debts;
   // the current debt index to pay
   mapping (bytes32 => mapping (uint => uint)) public _debtIndex;
+  // total reserve locked by unpaid debt, scoped by debtor and token
+  mapping (bytes32 => mapping (uint => uint)) public debtOutstanding;
+  // total number of active debts of an entity for a token
+  mapping (bytes32 => mapping (uint => uint)) public _activeDebtsByToken;
   // total number of debts of an entity  
   mapping (bytes32 => uint) public _activeDebts;
 
 
   address public immutable admin;
   uint256 private constant LOCAL_DEV_CHAIN_ID = 31337;
+  uint256 private constant DEBT_ENFORCEMENT_CHUNK = 32;
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex);
   event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, uint256 remainingAmount, uint256 newDebtIndex);
   event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
@@ -197,21 +203,7 @@ contract Depository is ReentrancyGuardLite {
    */
   function mintToReserve(bytes32 entity, uint tokenId, uint amount) external onlyLocalDevAdmin {
     if (amount == 0) revert E1();
-    
-    
-    
-    
-    
-    
-
-    _reserves[entity][tokenId] += amount;
-    uint newBalance = _reserves[entity][tokenId];
-
-    // Single canonical event for reserve changes
-    emit ReserveUpdated(entity, tokenId, newBalance);
-
-    
-    
+    _increaseReserve(entity, tokenId, amount);
   }
 
   /**
@@ -226,8 +218,7 @@ contract Depository is ReentrancyGuardLite {
       ReserveMint calldata mint = mints[i];
       if (mint.amount == 0) revert E1();
 
-      _reserves[mint.entity][mint.tokenId] += mint.amount;
-      emit ReserveUpdated(mint.entity, mint.tokenId, _reserves[mint.entity][mint.tokenId]);
+      _increaseReserve(mint.entity, mint.tokenId, mint.amount);
     }
   }
 
@@ -263,7 +254,7 @@ contract Depository is ReentrancyGuardLite {
 
     // Grant aggregated flashloans (flash-mint)
     for (uint j = 0; j < uniqueCount; j++) {
-      _reserves[entityId][flashloanTokenIds[j]] += flashloanTotals[j];
+      _increaseReserve(entityId, flashloanTokenIds[j], flashloanTotals[j]);
     }
 
     // the order is important: first go methods that increase entity's balance
@@ -365,7 +356,7 @@ contract Depository is ReentrancyGuardLite {
       if (_reserves[entityId][tid] < expectedFinal) revert E3(); // Flashloan not returned
 
       // Burn flashloan (remove temporary mint)
-      _reserves[entityId][tid] -= flashloanTotals[j];
+      _decreaseReserve(entityId, tid, flashloanTotals[j]);
 
       // Final check: reserves back to original or higher
       if (_reserves[entityId][tid] < flashloanStarting[j]) revert E3(); // Reserve decreased
@@ -386,6 +377,7 @@ contract Depository is ReentrancyGuardLite {
 
   function _addDebt(bytes32 debtor, uint256 tokenId, bytes32 creditor, uint256 amount) internal returns (uint256 index) {
     if (creditor == bytes32(0)) revert E2();
+    if (debtor == creditor) revert E2();
     if (amount == 0) revert E1();
     _debts[debtor][tokenId].push(Debt({ amount: amount, creditor: creditor }));
     index = _debts[debtor][tokenId].length - 1;
@@ -394,16 +386,42 @@ contract Depository is ReentrancyGuardLite {
       _debtIndex[debtor][tokenId] = 0;
     }
 
+    debtOutstanding[debtor][tokenId] += amount;
     _activeDebts[debtor]++;
+    _activeDebtsByToken[debtor][tokenId]++;
     emit DebtCreated(debtor, creditor, tokenId, amount, index);
   }
 
-  function _afterDebtCleared(bytes32 entity) internal {
+  function _afterDebtCleared(bytes32 entity, uint256 tokenId) internal {
     if (_activeDebts[entity] > 0) {
       unchecked {
         _activeDebts[entity]--;
       }
     }
+    if (_activeDebtsByToken[entity][tokenId] > 0) {
+      unchecked {
+        _activeDebtsByToken[entity][tokenId]--;
+      }
+    }
+  }
+
+  function _reduceDebtOutstanding(bytes32 entity, uint256 tokenId, uint256 amount) internal {
+    if (amount == 0) return;
+    uint256 outstanding = debtOutstanding[entity][tokenId];
+    if (outstanding < amount) revert E3();
+    unchecked {
+      debtOutstanding[entity][tokenId] = outstanding - amount;
+    }
+  }
+
+  function _spendableReserve(bytes32 entity, uint256 tokenId) internal view returns (uint256) {
+    uint256 reserve = _reserves[entity][tokenId];
+    uint256 outstanding = debtOutstanding[entity][tokenId];
+    return reserve > outstanding ? reserve - outstanding : 0;
+  }
+
+  function spendableReserve(bytes32 entity, uint256 tokenId) external view returns (uint256) {
+    return _spendableReserve(entity, tokenId);
   }
 
   function packTokenReference(uint8 tokenType, address contractAddress, uint96 externalTokenId) public pure returns (bytes32) {
@@ -455,7 +473,10 @@ contract Depository is ReentrancyGuardLite {
     }
 
     if (params.tokenType == TypeERC20) {
+      uint256 balanceBefore = IERC20(params.contractAddress).balanceOf(address(this));
       if (!IERC20(params.contractAddress).transferFrom(msg.sender, address(this), params.amount)) revert E3();
+      uint256 balanceAfter = IERC20(params.contractAddress).balanceOf(address(this));
+      params.amount = balanceAfter - balanceBefore;
     } else if (params.tokenType == TypeERC721) {
       IERC721(params.contractAddress).transferFrom(msg.sender, address(this), uint(params.externalTokenId));
       params.amount = 1;
@@ -469,62 +490,33 @@ contract Depository is ReentrancyGuardLite {
 
   // ReserveToExternalToken struct is in Types.sol
   function _reserveToExternalToken(bytes32 entity, ReserveToExternalToken memory params) internal {
-    enforceDebts(entity, params.tokenId, 0);
+    if (params.amount == 0) revert E1();
+    enforceDebts(entity, params.tokenId, DEBT_ENFORCEMENT_CHUNK);
 
     TokenMetadata memory meta = _tokens[params.tokenId];
+    if (params.amount > _spendableReserve(entity, params.tokenId)) revert E3();
+    if (uint256(params.receivingEntity) > type(uint160).max) revert E2();
+    address recipient = address(uint160(uint256(params.receivingEntity)));
+    if (meta.tokenType == TypeERC721 && params.amount != 1) revert E1();
     _decreaseReserve(entity, params.tokenId, params.amount);
 
     if (meta.tokenType == TypeERC20) {
-      if (!IERC20(meta.contractAddress).transfer(address(uint160(uint256(params.receivingEntity))), params.amount)) revert E3();
+      if (!IERC20(meta.contractAddress).transfer(recipient, params.amount)) revert E3();
     } else if (meta.tokenType == TypeERC721) {
-      IERC721(meta.contractAddress).transferFrom(address(this), address(uint160(uint256(params.receivingEntity))), uint(meta.externalTokenId));
+      IERC721(meta.contractAddress).transferFrom(address(this), recipient, uint(meta.externalTokenId));
     } else if (meta.tokenType == TypeERC1155) {
-      IERC1155(meta.contractAddress).safeTransferFrom(address(this), address(uint160(uint256(params.receivingEntity))), uint(meta.externalTokenId), params.amount, "");
+      IERC1155(meta.contractAddress).safeTransferFrom(address(this), recipient, uint(meta.externalTokenId), params.amount, "");
     }
   }
   // ReserveToReserve struct is in Types.sol
   function _reserveToReserve(bytes32 entity, ReserveToReserve memory params) internal {
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-    
-
-    enforceDebts(entity, params.tokenId, 0);
-
-    
-    if (_reserves[entity][params.tokenId] >= params.amount) {
-      
-    } else {
-      
-      
-      
-      
-      
-    }
-
-    if (_reserves[entity][params.tokenId] < params.amount) revert E3();
-    
-    
+    enforceDebts(entity, params.tokenId, DEBT_ENFORCEMENT_CHUNK);
+    if (params.amount > _spendableReserve(entity, params.tokenId)) revert E3();
     _decreaseReserve(entity, params.tokenId, params.amount);
     _increaseReserve(params.receivingEntity, params.tokenId, params.amount);
-    
-    
-    
-    
-    
-    
-    
   }
 
-  // FIFO debt enforcement - enforces chronological payment order.
-  // `maxIterations == 0` means "drain as much as current reserve allows".
+  // FIFO debt enforcement. `maxIterations == 0` drains without a slot cap.
   function enforceDebts(bytes32 entity, uint256 tokenId, uint256 maxIterations) public {
     Debt[] storage queue = _debts[entity][tokenId];
     uint256 length = queue.length;
@@ -540,65 +532,47 @@ contract Depository is ReentrancyGuardLite {
 
     uint256 available = _reserves[entity][tokenId];
     uint256 iterationCap = maxIterations == 0 ? type(uint256).max : maxIterations;
-    uint256 iterations = 0;
+    uint256 steps = 0;
 
-    if (available == 0) {
-      _debtIndex[entity][tokenId] = cursor;
-      return;
-    }
-
-    while (cursor < length && available > 0 && iterations < iterationCap) {
+    while (cursor < length && steps < iterationCap) {
+      steps++;
       Debt storage debt = queue[cursor];
       uint256 amount = debt.amount;
       if (amount == 0) {
         cursor++;
         continue;
       }
+      if (available == 0) break;
 
       bytes32 creditor = debt.creditor;
       uint256 payableAmount = available < amount ? available : amount;
 
-      // Pay from reserves first
-      if (payableAmount > 0) {
-        _increaseReserve(creditor, tokenId, payableAmount);
-        available -= payableAmount;
-        amount -= payableAmount;
-      }
-
+      _decreaseReserve(entity, tokenId, payableAmount);
+      _increaseReserve(creditor, tokenId, payableAmount);
+      _reduceDebtOutstanding(entity, tokenId, payableAmount);
+      available -= payableAmount;
+      amount -= payableAmount;
 
       // Update debt state
       uint256 totalPaid = debt.amount - amount;
       if (amount == 0) {
         debt.amount = 0;
         emit DebtEnforced(entity, creditor, tokenId, totalPaid, 0, cursor + 1);
-        _afterDebtCleared(entity);
+        _afterDebtCleared(entity, tokenId);
         delete queue[cursor];
         cursor++;
       } else {
         debt.amount = amount;
         emit DebtEnforced(entity, creditor, tokenId, totalPaid, debt.amount, cursor);
       }
-
-      iterations++;
     }
 
-    _reserves[entity][tokenId] = available;
     if (cursor >= length) {
       _debtIndex[entity][tokenId] = 0;
       delete _debts[entity][tokenId];
       return;
     }
-
-    while (cursor < length && queue[cursor].amount == 0) {
-      cursor++;
-    }
-
-    if (cursor >= length) {
-      _debtIndex[entity][tokenId] = 0;
-      delete _debts[entity][tokenId];
-    } else {
-      _debtIndex[entity][tokenId] = cursor;
-    }
+    _debtIndex[entity][tokenId] = cursor;
   }
 
 
@@ -612,7 +586,7 @@ contract Depository is ReentrancyGuardLite {
     bytes32 receivingEntity = params.receivingEntity;
    
     // debts must be paid before any transfers from reserve 
-    enforceDebts(entity, tokenId, 0);
+    enforceDebts(entity, tokenId, DEBT_ENFORCEMENT_CHUNK);
 
     for (uint i = 0; i < params.pairs.length; i++) {
       bytes32 counterentity = params.pairs[i].entity;
@@ -621,10 +595,10 @@ contract Depository is ReentrancyGuardLite {
       bytes memory acct_key = accountKey(receivingEntity, counterentity);
 
       
-      if (_reserves[entity][tokenId] >= amount) {
+      if (amount <= _spendableReserve(entity, tokenId)) {
         AccountCollateral storage col = _collaterals[acct_key][tokenId];
 
-        _reserves[entity][tokenId] -= amount;
+        _decreaseReserve(entity, tokenId, amount);
         col.collateral += amount;
         if (receivingEntity < counterentity) { // if receiver is left
           col.ondelta += int(amount);
@@ -678,7 +652,8 @@ contract Depository is ReentrancyGuardLite {
       }
       if (queue[j].creditor == creditor) {
         queue[j].amount = 0;
-        _afterDebtCleared(debtor);
+        _reduceDebtOutstanding(debtor, tokenId, amount);
+        _afterDebtCleared(debtor, tokenId);
         emit DebtForgiven(debtor, creditor, tokenId, amount, j);
       } else if (nextLive == type(uint256).max) {
         nextLive = j;
@@ -810,6 +785,7 @@ contract Depository is ReentrancyGuardLite {
         i < decodedLeft.length ? decodedLeft[i] : bytes(""),
         i < decodedRight.length ? decodedRight[i] : bytes("")
       );
+      if (newDeltas.length != deltas.length) revert E8();
 
       for (uint256 j = 0; j < tc.allowances.length; j++) {
         Allowance memory allow = tc.allowances[j];
@@ -817,6 +793,9 @@ contract Depository is ReentrancyGuardLite {
         int diff = newDeltas[allow.deltaIndex] - deltas[allow.deltaIndex];
         if (diff > 0 && uint256(diff) > allow.leftAllowance) revert E2();
         if (diff < 0 && uint256(-diff) > allow.rightAllowance) revert E2();
+      }
+      for (uint256 j = 0; j < deltas.length; j++) {
+        if (!_hasTransformerAllowance(tc.allowances, j) && newDeltas[j] != deltas[j]) revert E2();
       }
       deltas = newDeltas;
     }
@@ -828,6 +807,13 @@ contract Depository is ReentrancyGuardLite {
 
     // Nonce update is handled by _disputeFinalizeInternal (caller)
     return true;
+  }
+
+  function _hasTransformerAllowance(Allowance[] memory allowances, uint256 deltaIndex) internal pure returns (bool) {
+    for (uint256 i = 0; i < allowances.length; i++) {
+      if (allowances[i].deltaIndex == deltaIndex) return true;
+    }
+    return false;
   }
 
   /// @notice Apply delta to account collateral and reserves
@@ -865,7 +851,8 @@ contract Depository is ReentrancyGuardLite {
   function _settleShortfall(bytes32 debtor, bytes32 creditor, uint256 tokenId, uint256 amount) internal {
     if (amount == 0) return;
 
-    uint256 available = _reserves[debtor][tokenId];
+    enforceDebts(debtor, tokenId, DEBT_ENFORCEMENT_CHUNK);
+    uint256 available = _spendableReserve(debtor, tokenId);
     uint256 payAmount = available >= amount ? amount : available;
     if (payAmount > 0) {
       _decreaseReserve(debtor, tokenId, payAmount);

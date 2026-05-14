@@ -21,7 +21,9 @@ Subcontracts - Programmable Delta Transformers
   */
 contract DeltaTransformer {
   error InvalidDeltaIndex();
+  error AlreadyRevealed();
   mapping(bytes32 => uint) public hashToBlock;
+  mapping(bytes32 => bool) public hashRevealed;
   uint256 constant MAX_FILL_RATIO = type(uint16).max;
 
   struct Batch {
@@ -145,7 +147,10 @@ contract DeltaTransformer {
 
 
   function revealSecret(bytes32 secret) public {
-    hashToBlock[keccak256(abi.encode(secret))] = block.number;
+    bytes32 hash = keccak256(abi.encode(secret));
+    if (hashRevealed[hash]) revert AlreadyRevealed();
+    hashRevealed[hash] = true;
+    hashToBlock[hash] = block.number;
   }
   
   // anyone can get gas refund by deleting very old revealed secrets
