@@ -1,8 +1,11 @@
 #!/usr/bin/env node
 
 const fs = require('fs');
+const { createRequire } = require('module');
 const path = require('path');
-const { glob, runTypeChain } = require('typechain');
+
+const rootRequire = createRequire(path.resolve(__dirname, '..', '..', 'package.json'));
+const { glob, runTypeChain } = rootRequire('typechain');
 
 async function main() {
   const cwd = path.resolve(__dirname, '..');
