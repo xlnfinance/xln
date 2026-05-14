@@ -704,6 +704,8 @@ if [ -n "$REMOTE_HOST" ]; then
   fi
   if [ "$BUILD_FRONTEND" = "1" ]; then
     remote_cmd="$remote_cmd --frontend"
+  else
+    remote_cmd="$remote_cmd --runtime-only"
   fi
   if [ "$PRODUCTION" = "1" ]; then
     remote_cmd="$remote_cmd --production"
