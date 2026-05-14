@@ -61,6 +61,7 @@ contract EntityProvider is ERC1155 {
   mapping(bytes32 => BoardProposal) public activeProposals;  // entityId => proposal
   mapping(bytes32 => uint256) public totalControlSupply;      // entityId => total control tokens
   mapping(bytes32 => uint256) public totalDividendSupply;     // entityId => total dividend tokens
+  mapping(bytes32 => uint256) public entityActionNonces;       // entity-authorized ERC1155 actions
   
   // Fixed token supplies for all entities (immutable and fair)
   uint256 public constant TOTAL_CONTROL_SUPPLY = 1e15;   // 1 quadrillion (max granularity)
@@ -432,6 +433,9 @@ contract EntityProvider is ERC1155 {
     
     if (v < 27) v += 27;
     if (v != 27 && v != 28) return address(0);
+    if (uint256(s) > 0x7FFFFFFFFFFFFFFFFFFFFFFFFFFFFFFF5D576E7357A4501DDFE92F46681B20A0) {
+      return address(0);
+    }
     
     return ecrecover(_hash, v, r, s);
   }
@@ -446,14 +450,9 @@ contract EntityProvider is ERC1155 {
     bool isLazyEntity = entities[entityId].currentBoardHash == bytes32(0);
 
     if (isLazyEntity) {
-      // Lazy entity: entityId must equal boardHash
-      require(entityId == boardHash, "Lazy entity: ID must equal board hash");
-      return true;
-    } else {
-      // Registered entity: use stored boardHash
-      require(boardHash == entities[entityId].currentBoardHash, "Board hash mismatch");
-      return false;
+      return entityId == boardHash;
     }
+    return boardHash == entities[entityId].currentBoardHash;
   }
 
 
@@ -724,7 +723,8 @@ contract EntityProvider is ERC1155 {
     // Calculate total entities for bounds checking
     uint256 totalEntities = hanko.placeholders.length + signatureCount + hanko.claims.length;
     
-    // Recover EOA signers for quorum hash building
+    // Recover EOA signers by original signature slot. Invalid signatures stay
+    // as address(0), so a bad signature cannot shift later signers or earn votes.
     address[] memory actualSigners = new address[](signatureCount);
     uint256 validSignerCount = 0;
     
@@ -732,17 +732,12 @@ contract EntityProvider is ERC1155 {
       if (signatures[i].length == 65) {
         address signer = _recoverSigner(hash, signatures[i]);
         if (signer != address(0)) {
-          actualSigners[validSignerCount] = signer;
+          actualSigners[i] = signer;
           validSignerCount++;
         }
       }
     }
-    
-    // Resize to valid signers only
-    address[] memory validSigners = new address[](validSignerCount);
-    for (uint256 i = 0; i < validSignerCount; i++) {
-      validSigners[i] = actualSigners[i];
-    }
+    if (validSignerCount == 0) return (bytes32(0), false);
     
     // 🔥 FLASHLOAN GOVERNANCE: in rare 0.001% of self-harmed entities
     // KEY INSIGHT: When processing claim X that references claim Y:
@@ -768,13 +763,26 @@ contract EntityProvider is ERC1155 {
     
     for (uint256 claimIndex = 0; claimIndex < hanko.claims.length; claimIndex++) {
       HankoClaim memory claim = hanko.claims[claimIndex];
+      uint256 placeholderCount = hanko.placeholders.length;
+
+      for (uint256 i = 0; i < claim.entityIndexes.length; i++) {
+        uint256 entityIndex = claim.entityIndexes[i];
+        require(entityIndex < totalEntities, "Entity index out of bounds");
+        if (entityIndex >= placeholderCount && entityIndex < placeholderCount + signatureCount) {
+          if (actualSigners[entityIndex - placeholderCount] == address(0)) {
+            return (bytes32(0), false);
+          }
+        }
+      }
 
       // Build board hash from placeholders + signers using entityIndexes mapping
       // Supports M-of-N: reconstructs full board even when not all members sign
-      bytes32 reconstructedBoardHash = _buildBoardHash(hanko, validSigners, claim);
+      bytes32 reconstructedBoardHash = _buildBoardHash(hanko, actualSigners, claim);
 
       // Validate entity exists (registered or lazy) and verify board hash
-      _validateEntity(claim.entityId, reconstructedBoardHash);
+      if (!_validateEntity(claim.entityId, reconstructedBoardHash)) {
+        return (bytes32(0), false);
+      }
 
       uint256 totalVotingPower = 0;
       
@@ -787,16 +795,16 @@ contract EntityProvider is ERC1155 {
         // Bounds check
         require(entityIndex < totalEntities, "Entity index out of bounds");
 
-        if (entityIndex < hanko.placeholders.length) {
+        if (entityIndex < placeholderCount) {
           // Index 0..N-1: Placeholder (failed entity) - contributes 0 voting power
           continue;
-        } else if (entityIndex < hanko.placeholders.length + signatureCount) {
+        } else if (entityIndex < placeholderCount + signatureCount) {
           // Index N..M-1: EOA signature - verified, contributes full weight
           totalVotingPower += claim.weights[i];
           eoaVotingPower += claim.weights[i]; // Count toward EOA power
         } else {
           // Index M..∞: Entity claim - ASSUME YES! (flashloan governance)
-          uint256 referencedClaimIndex = entityIndex - hanko.placeholders.length - signatureCount;
+          uint256 referencedClaimIndex = entityIndex - placeholderCount - signatureCount;
           require(referencedClaimIndex < hanko.claims.length, "Referenced claim index out of bounds");
 
           // Entity refs add voting power but don't count toward EOA requirement
@@ -1072,22 +1080,28 @@ contract EntityProvider is ERC1155 {
     bytes calldata encodedBoard,
     bytes calldata encodedSignature
   ) external {
+    bytes32 entityId = bytes32(entityNumber);
+    uint256 actionNonce = entityActionNonces[entityId] + 1;
+
     // Create transfer hash
     bytes32 transferHash = keccak256(abi.encodePacked(
       "ENTITY_TRANSFER",
+      block.chainid,
+      address(this),
       entityNumber,
       to,
       tokenId,
       amount,
-      block.timestamp
+      actionNonce
     ));
     
     // Verify entity signature
     uint256 recoveredEntityId = recoverEntity(encodedBoard, encodedSignature, transferHash);
     require(recoveredEntityId == entityNumber, "Invalid entity signature");
+    entityActionNonces[entityId] = actionNonce;
     
     // Execute transfer
-    address entityAddress = address(uint160(uint256(bytes32(entityNumber))));
+    address entityAddress = address(uint160(uint256(entityId)));
     _safeTransferFrom(entityAddress, to, tokenId, amount, "");
   }
 
@@ -1126,21 +1140,25 @@ contract EntityProvider is ERC1155 {
     
     bytes32 entityId = bytes32(entityNumber);
     require(entities[entityId].currentBoardHash != bytes32(0), "Entity doesn't exist");
+    uint256 actionNonce = entityActionNonces[entityId] + 1;
     
     // Create release authorization hash
     bytes32 releaseHash = keccak256(abi.encodePacked(
       "RELEASE_CONTROL_SHARES",
+      block.chainid,
+      address(this),
       entityNumber,
       depository,
       controlAmount,
       dividendAmount,
       keccak256(bytes(purpose)),
-      block.timestamp
+      actionNonce
     ));
     
     // Verify entity signature authorization
     uint256 recoveredEntityId = recoverEntity(encodedBoard, encodedSignature, releaseHash);
     require(recoveredEntityId == entityNumber, "Invalid entity signature");
+    entityActionNonces[entityId] = actionNonce;
     
     address entityAddress = address(uint160(uint256(entityId)));
     (uint256 controlTokenId, uint256 dividendTokenId) = getTokenIds(entityNumber);

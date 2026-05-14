@@ -48,6 +48,7 @@ contract Depository is ReentrancyGuardLite {
   error E7(); // InvalidParty
   error E8(); // LengthMismatch
   error E9(); // HashMismatch
+  error E10(); // BatchTooLarge
 
   // Immutable EntityProvider (set in constructor, gas-efficient static calls)
   address public immutable entityProvider;
@@ -79,6 +80,17 @@ contract Depository is ReentrancyGuardLite {
   address public immutable admin;
   uint256 private constant LOCAL_DEV_CHAIN_ID = 31337;
   uint256 private constant DEBT_ENFORCEMENT_CHUNK = 32;
+  uint256 private constant MAX_BATCH_FLASHLOANS = 8;
+  uint256 private constant MAX_BATCH_RESERVE_TO_RESERVE = 64;
+  uint256 private constant MAX_BATCH_RESERVE_TO_COLLATERAL = 64;
+  uint256 private constant MAX_BATCH_COLLATERAL_TO_RESERVE = 64;
+  uint256 private constant MAX_BATCH_SETTLEMENTS = 32;
+  uint256 private constant MAX_BATCH_DISPUTE_STARTS = 8;
+  uint256 private constant MAX_BATCH_DISPUTE_FINALIZATIONS = 8;
+  uint256 private constant MAX_BATCH_EXTERNAL_TO_RESERVE = 64;
+  uint256 private constant MAX_BATCH_RESERVE_TO_EXTERNAL = 64;
+  uint256 private constant MAX_BATCH_SECRET_REVEALS = 32;
+  uint256 private constant MAX_RESERVE_TO_COLLATERAL_PAIRS = 64;
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex);
   event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, uint256 remainingAmount, uint256 newDebtIndex);
   event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
@@ -190,6 +202,7 @@ contract Depository is ReentrancyGuardLite {
     if (nonce != entityNonces[entityId] + 1) revert E2();
     entityNonces[entityId] = nonce;
     completeSuccess = _processBatch(entityId, abi.decode(encodedBatch, (Batch)));
+    if (!completeSuccess) revert E4();
     emit HankoBatchProcessed(entityId, keccak256(hankoData), nonce, completeSuccess);
   }
 
@@ -223,7 +236,26 @@ contract Depository is ReentrancyGuardLite {
   }
 
 
+  function _assertBatchBounds(Batch memory batch) private pure {
+    if (batch.flashloans.length > MAX_BATCH_FLASHLOANS) revert E10();
+    if (batch.reserveToReserve.length > MAX_BATCH_RESERVE_TO_RESERVE) revert E10();
+    if (batch.reserveToCollateral.length > MAX_BATCH_RESERVE_TO_COLLATERAL) revert E10();
+    if (batch.collateralToReserve.length > MAX_BATCH_COLLATERAL_TO_RESERVE) revert E10();
+    if (batch.settlements.length > MAX_BATCH_SETTLEMENTS) revert E10();
+    if (batch.disputeStarts.length > MAX_BATCH_DISPUTE_STARTS) revert E10();
+    if (batch.disputeFinalizations.length > MAX_BATCH_DISPUTE_FINALIZATIONS) revert E10();
+    if (batch.externalTokenToReserve.length > MAX_BATCH_EXTERNAL_TO_RESERVE) revert E10();
+    if (batch.reserveToExternalToken.length > MAX_BATCH_RESERVE_TO_EXTERNAL) revert E10();
+    if (batch.revealSecrets.length > MAX_BATCH_SECRET_REVEALS) revert E10();
+
+    for (uint i = 0; i < batch.reserveToCollateral.length; i++) {
+      if (batch.reserveToCollateral[i].pairs.length > MAX_RESERVE_TO_COLLATERAL_PAIRS) revert E10();
+    }
+  }
+
   function _processBatch(bytes32 entityId, Batch memory batch) private returns (bool completeSuccess) {
+    _assertBatchBounds(batch);
+
     // SECURITY FIX: Aggregate flashloans by tokenId (prevent duplicate tokenId exploit)
     uint256[] memory flashloanTokenIds = new uint256[](batch.flashloans.length);
     uint256[] memory flashloanStarting = new uint256[](batch.flashloans.length);

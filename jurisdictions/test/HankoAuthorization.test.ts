@@ -14,6 +14,23 @@ import {
   singleSignerLazyEntityId,
 } from "./helpers/hanko.ts";
 
+const HANKO_ABI = ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'];
+const SECP256K1_N = BigInt("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141");
+
+function buildHighSHanko(entityId: string, hash: string, privateKey: string): string {
+  const signingKey = new ethers.SigningKey(privateKey);
+  const signature = signingKey.sign(ethers.getBytes(hash));
+  const highS = SECP256K1_N - BigInt(signature.s);
+  const flippedV = signature.v === 28 ? 27 : 28;
+  const vBit = flippedV === 28 ? 1 : 0;
+  const packedSig = ethers.concat([signature.r, ethers.toBeHex(highS, 32), ethers.toBeHex(vBit, 1)]);
+  return ethers.AbiCoder.defaultAbiCoder().encode(HANKO_ABI, [[
+    [],
+    packedSig,
+    [[ethers.zeroPadValue(entityId, 32), [0], [1], 1]],
+  ]]);
+}
+
 /**
  * Hanko Authorization Tests
  */
@@ -102,6 +119,31 @@ describe("Hanko Authorization", function () {
     const entity2Balance = await depository._reserves(entity2Id, tokenId);
     expect(entity1Balance).to.equal(fundAmount - transferAmount);
     expect(entity2Balance).to.equal(transferAmount);
+  });
+
+  it("processBatch rejects high-s malleable Hanko signatures", async function () {
+    const { depository, entity1, entity2 } = await loadFixture(deployFixture);
+
+    const entity1Id = singleSignerLazyEntityId(entity1.address);
+    const entity2Id = addressEntityId(entity2.address);
+    const tokenId = 1;
+    await depository.mintToReserve(entity1Id, tokenId, 1_000n);
+
+    const batch = emptyBatch({
+      reserveToReserve: [{ receivingEntity: entity2Id, tokenId, amount: 100n }],
+    });
+    const encodedBatch = encodeBatch(batch);
+    const nextNonce = (await depository.entityNonces(entity1Id)) + 1n;
+    const batchHash = await computeDepositoryBatchHash(depository, encodedBatch, nextNonce);
+    const hankoData = buildHighSHanko(entity1Id, batchHash, deriveHardhatPrivateKey(1));
+
+    await expect(
+      depository.connect(entity1).processBatch(encodedBatch, hankoData, nextNonce)
+    ).to.be.revertedWithCustomError(depository, "E4");
+
+    expect(await depository.entityNonces(entity1Id)).to.equal(0n);
+    expect(await depository._reserves(entity1Id, tokenId)).to.equal(1_000n);
+    expect(await depository._reserves(entity2Id, tokenId)).to.equal(0n);
   });
 
   it("does not expose unsafeProcessBatch", async function () {
