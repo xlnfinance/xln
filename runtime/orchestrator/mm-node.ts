@@ -144,7 +144,7 @@ const MARKET_MAKER_QUOTE_LOOP_MS = Math.max(1000, Number(process.env['MARKET_MAK
 const MARKET_MAKER_BOOTSTRAP_LOOP_MS = Math.max(250, Number(process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1000'));
 const MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS = Math.max(
   10_000,
-  Number(process.env['MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS'] || '90000'),
+  Number(process.env['MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS'] || '300000'),
 );
 const MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
   2,
@@ -990,14 +990,29 @@ const run = async (): Promise<void> => {
 
   let shuttingDown = false;
   let loopInFlight = false;
-  const driveQuotes = async (): Promise<void> => {
+  const driveQuotes = async (mode: 'bootstrap' | 'steady' = 'steady'): Promise<void> => {
     if (loopInFlight) return;
     loopInFlight = true;
     try {
       const visibleHubs = readVisibleHubProfiles(env);
       const hubEntityIds = visibleHubs.map(profile => profile.entityId);
       if (hubEntityIds.length === 0) return;
-      await maintainMarketMakerQuotes(env, mmEntityId, mmSignerId, hubEntityIds, hubSignerIdsByEntityId, tokenIds);
+      const desiredOfferCount = buildMarketMakerOfferSpecs(hubEntityIds, tokenIds).length;
+      const expectedOffersPerHub = Math.max(1, Math.ceil(desiredOfferCount / Math.max(1, hubEntityIds.length)));
+      await maintainMarketMakerQuotes(
+        env,
+        mmEntityId,
+        mmSignerId,
+        hubEntityIds,
+        hubSignerIdsByEntityId,
+        tokenIds,
+        mode === 'bootstrap'
+          ? Math.max(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK, expectedOffersPerHub)
+          : MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
+        mode === 'bootstrap'
+          ? Math.max(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK, desiredOfferCount)
+          : MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
+      );
       await settleRuntimeFor(env, 45);
     } finally {
       loopInFlight = false;
@@ -1015,7 +1030,7 @@ const run = async (): Promise<void> => {
   const waitForBootstrapOffers = async (): Promise<boolean> => {
     const deadline = Date.now() + MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS;
     while (!shuttingDown && Date.now() < deadline) {
-      await driveQuotes();
+      await driveQuotes('bootstrap');
       const visibleHubs = readVisibleHubProfiles(env);
       const health = getMarketMakerHealth(env, mmEntityId, visibleHubs.map(profile => profile.entityId), tokenIds);
       if (health.ok) return true;
