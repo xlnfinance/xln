@@ -16,13 +16,13 @@ import type {
   TypedListener,
 } from "../../../../common";
 
-export interface MathInterface extends Interface {}
+export interface SafeCastInterface extends Interface {}
 
-export interface Math extends BaseContract {
-  connect(runner?: ContractRunner | null): Math;
+export interface SafeCast extends BaseContract {
+  connect(runner?: ContractRunner | null): SafeCast;
   waitForDeployment(): Promise<this>;
 
-  interface: MathInterface;
+  interface: SafeCastInterface;
 
   queryFilter<TCEvent extends TypedContractEvent>(
     event: TCEvent,
