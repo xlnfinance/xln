@@ -806,9 +806,19 @@ const readShardJurisdictions = (): string => {
 const toPublicJurisdictionsPayload = (raw: string): string => {
   try {
     const parsed = JSON.parse(raw) as {
+      deployVersion?: unknown;
+      networkVersion?: unknown;
+      lastUpdated?: unknown;
       jurisdictions?: Record<string, { rpc?: unknown }>;
     };
     if (!parsed || typeof parsed !== 'object' || !parsed.jurisdictions) return raw;
+    const explicitNetworkVersion = String(parsed.deployVersion || parsed.networkVersion || '').trim();
+    const lastUpdatedMs = Date.parse(String(parsed.lastUpdated || ''));
+    const networkVersion = explicitNetworkVersion || (Number.isFinite(lastUpdatedMs) ? String(lastUpdatedMs) : '');
+    if (networkVersion) {
+      parsed.deployVersion = networkVersion;
+      parsed.networkVersion = networkVersion;
+    }
     for (const jurisdiction of Object.values(parsed.jurisdictions)) {
       if (!jurisdiction || typeof jurisdiction !== 'object') continue;
       jurisdiction.rpc = toPublicRpcUrl(String(jurisdiction.rpc || '/rpc'));

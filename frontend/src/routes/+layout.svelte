@@ -50,8 +50,12 @@
 				},
 			});
 			if (!response.ok) return;
-			const payload = await response.json() as { version?: unknown };
-			const version = String(payload?.version || '').trim();
+			const payload = await response.json() as {
+				deployVersion?: unknown;
+				networkVersion?: unknown;
+				version?: unknown;
+			};
+			const version = String(payload?.deployVersion || payload?.networkVersion || payload?.version || '').trim();
 			deployLabel = version;
 		} catch {
 			deployLabel = '';
