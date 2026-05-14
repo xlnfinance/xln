@@ -93,6 +93,16 @@
   type AccountWorkspaceTab = 'send' | 'receive' | 'swap' | 'open' | 'activity' | 'move' | 'history' | 'configure' | 'appearance';
   type AssetWorkspaceTab = 'move' | 'history';
   type ConfigureWorkspaceTab = 'extend-credit' | 'request-credit' | 'collateral' | 'token' | 'dispute';
+  type DebtDrainRequest = {
+    tokenId: number;
+    symbol: string;
+    maxIterations: number;
+    openCount: number;
+    outstandingAmount: bigint;
+    reserveAmount: bigint;
+    payableAmount: bigint;
+    nextDebtIndex: number | null;
+  };
 
   // Set initial tab based on action
   function getInitialTab(): ViewTab {
@@ -3801,7 +3811,8 @@
     }
   }
 
-  async function enforceOutstandingDebt(tokenId: number): Promise<void> {
+  async function enforceOutstandingDebt(request: DebtDrainRequest): Promise<void> {
+    const { tokenId, symbol, maxIterations, openCount, outstandingAmount, reserveAmount, payableAmount, nextDebtIndex } = request;
     const entityId = String(replica?.state?.entityId || tab.entityId || '').trim();
     if (!entityId) {
       notifyUserActionError('debt-enforcement', 'Active entity missing for debt enforcement');
@@ -3814,9 +3825,15 @@
     debtEnforcingTokenId = tokenId;
     try {
       const xln = await getXLN();
-      await xln.submitDebtEnforcement(requireRuntimeEnv(activeEnv, 'debt-enforcement'), entityId, tokenId);
-      const tokenLabel = getTokenInfo(tokenId).symbol || `Token #${tokenId}`;
-      toasts.success(`Debt enforcement submitted for ${tokenLabel}.`);
+      await xln.submitDebtEnforcement(requireRuntimeEnv(activeEnv, 'debt-enforcement'), entityId, tokenId, maxIterations);
+      const token = getTokenInfo(tokenId);
+      const tokenLabel = symbol || token.symbol || `Token #${tokenId}`;
+      const amountLabel = `${formatAmount(payableAmount, token.decimals)} ${tokenLabel}`;
+      const totalLabel = `${formatAmount(outstandingAmount, token.decimals)} ${tokenLabel}`;
+      const reserveLabel = `${formatAmount(reserveAmount, token.decimals)} ${tokenLabel}`;
+      toasts.success(
+        `Drain submitted: ${amountLabel} payable now, ${openCount} open debts, ${totalLabel} outstanding, ${reserveLabel} reserve, next ${nextDebtIndex === null ? '—' : `#${nextDebtIndex}`}.`,
+      );
     } catch (err) {
       console.error('[EntityPanel] Enforce debt failed:', err);
       toasts.error(`Debt enforcement failed: ${(err as Error).message}`);
@@ -5415,7 +5432,7 @@
             sourceEnv={activeEnv}
             canEnforce={activeIsLive}
             enforcingTokenId={debtEnforcingTokenId}
-            on:enforce={(event) => enforceOutstandingDebt(event.detail.tokenId)}
+            on:enforce={(event) => enforceOutstandingDebt(event.detail)}
           />
 
           <section class="asset-action-card">

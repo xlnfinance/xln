@@ -109,6 +109,7 @@ export interface DepositoryInterface extends Interface {
       | "DOMAIN_SEPARATOR"
       | "_accounts"
       | "_activeDebts"
+      | "_activeDebtsByToken"
       | "_collaterals"
       | "_debtIndex"
       | "_debts"
@@ -117,6 +118,7 @@ export interface DepositoryInterface extends Interface {
       | "accountKey"
       | "admin"
       | "adminRegisterExternalToken"
+      | "debtOutstanding"
       | "defaultDisputeDelay"
       | "enforceDebts"
       | "entityNonces"
@@ -129,6 +131,7 @@ export interface DepositoryInterface extends Interface {
       | "onERC1155Received"
       | "packTokenReference"
       | "processBatch"
+      | "spendableReserve"
       | "tokenToId"
       | "unpackTokenReference"
   ): FunctionFragment;
@@ -160,6 +163,10 @@ export interface DepositoryInterface extends Interface {
     values: [BytesLike]
   ): string;
   encodeFunctionData(
+    functionFragment: "_activeDebtsByToken",
+    values: [BytesLike, BigNumberish]
+  ): string;
+  encodeFunctionData(
     functionFragment: "_collaterals",
     values: [BytesLike, BigNumberish]
   ): string;
@@ -187,6 +194,10 @@ export interface DepositoryInterface extends Interface {
   encodeFunctionData(
     functionFragment: "adminRegisterExternalToken",
     values: [ExternalTokenToReserveStruct]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "debtOutstanding",
+    values: [BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "defaultDisputeDelay",
@@ -243,6 +254,10 @@ export interface DepositoryInterface extends Interface {
     values: [BytesLike, BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(
+    functionFragment: "spendableReserve",
+    values: [BytesLike, BigNumberish]
+  ): string;
+  encodeFunctionData(
     functionFragment: "tokenToId",
     values: [BytesLike]
   ): string;
@@ -261,6 +276,10 @@ export interface DepositoryInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "_activeDebtsByToken",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "_collaterals",
     data: BytesLike
   ): Result;
@@ -272,6 +291,10 @@ export interface DepositoryInterface extends Interface {
   decodeFunctionResult(functionFragment: "admin", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "adminRegisterExternalToken",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "debtOutstanding",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -320,6 +343,10 @@ export interface DepositoryInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "processBatch",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "spendableReserve",
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "tokenToId", data: BytesLike): Result;
@@ -634,6 +661,12 @@ export interface Depository extends BaseContract {
 
   _activeDebts: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
 
+  _activeDebtsByToken: TypedContractMethod<
+    [arg0: BytesLike, arg1: BigNumberish],
+    [bigint],
+    "view"
+  >;
+
   _collaterals: TypedContractMethod<
     [arg0: BytesLike, arg1: BigNumberish],
     [[bigint, bigint] & { collateral: bigint; ondelta: bigint }],
@@ -682,6 +715,12 @@ export interface Depository extends BaseContract {
     [params: ExternalTokenToReserveStruct],
     [void],
     "nonpayable"
+  >;
+
+  debtOutstanding: TypedContractMethod<
+    [arg0: BytesLike, arg1: BigNumberish],
+    [bigint],
+    "view"
   >;
 
   defaultDisputeDelay: TypedContractMethod<[], [bigint], "view">;
@@ -762,6 +801,12 @@ export interface Depository extends BaseContract {
     "nonpayable"
   >;
 
+  spendableReserve: TypedContractMethod<
+    [entity: BytesLike, tokenId: BigNumberish],
+    [bigint],
+    "view"
+  >;
+
   tokenToId: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
 
   unpackTokenReference: TypedContractMethod<
@@ -799,6 +844,13 @@ export interface Depository extends BaseContract {
   getFunction(
     nameOrSignature: "_activeDebts"
   ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "_activeDebtsByToken"
+  ): TypedContractMethod<
+    [arg0: BytesLike, arg1: BigNumberish],
+    [bigint],
+    "view"
+  >;
   getFunction(
     nameOrSignature: "_collaterals"
   ): TypedContractMethod<
@@ -852,6 +904,13 @@ export interface Depository extends BaseContract {
     [params: ExternalTokenToReserveStruct],
     [void],
     "nonpayable"
+  >;
+  getFunction(
+    nameOrSignature: "debtOutstanding"
+  ): TypedContractMethod<
+    [arg0: BytesLike, arg1: BigNumberish],
+    [bigint],
+    "view"
   >;
   getFunction(
     nameOrSignature: "defaultDisputeDelay"
@@ -942,6 +1001,13 @@ export interface Depository extends BaseContract {
     [encodedBatch: BytesLike, hankoData: BytesLike, nonce: BigNumberish],
     [boolean],
     "nonpayable"
+  >;
+  getFunction(
+    nameOrSignature: "spendableReserve"
+  ): TypedContractMethod<
+    [entity: BytesLike, tokenId: BigNumberish],
+    [bigint],
+    "view"
   >;
   getFunction(
     nameOrSignature: "tokenToId"

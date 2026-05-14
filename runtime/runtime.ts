@@ -5139,12 +5139,13 @@ export async function submitDebtEnforcement(
   env: Env,
   entityId: string,
   tokenId: number,
+  maxIterations: number | bigint = 100n,
 ): Promise<void> {
   const jAdapter = getActiveJAdapter(env);
   if (!jAdapter) {
     throw new Error('ACTIVE_JADAPTER_UNAVAILABLE');
   }
-  await jAdapter.enforceDebts(entityId, tokenId);
+  await jAdapter.enforceDebts(entityId, tokenId, maxIterations);
 }
 
 export { setDeltaTransformerAddress } from './proof-builder';

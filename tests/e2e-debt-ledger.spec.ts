@@ -949,6 +949,7 @@ async function waitForMirroredDebtSnapshots(
         leftPage.getByTestId('debt-panel').first().textContent().catch(() => ''),
         rightPage.getByTestId('debt-panel').first().textContent().catch(() => ''),
       ]);
+      const debtorSummary = leftRow?.direction === 'out' ? leftSummary : rightSummary;
       return Boolean(
         leftRow &&
         rightRow &&
@@ -960,7 +961,9 @@ async function waitForMirroredDebtSnapshots(
         rightRow.paidAmount === 0n &&
         leftRow.direction !== rightRow.direction &&
         String(leftSummary || '').includes('$150') &&
-        String(rightSummary || '').includes('$150'),
+        String(rightSummary || '').includes('$150') &&
+        String(debtorSummary || '').includes('Drain FIFO') &&
+        String(debtorSummary || '').includes('100 slots max'),
       );
     }, {
       timeout: 30_000,

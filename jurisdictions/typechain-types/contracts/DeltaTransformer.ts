@@ -82,6 +82,7 @@ export interface DeltaTransformerInterface extends Interface {
       | "applyBatch"
       | "cleanSecret"
       | "encodeBatch"
+      | "hashRevealed"
       | "hashToBlock"
       | "revealSecret"
   ): FunctionFragment;
@@ -99,6 +100,10 @@ export interface DeltaTransformerInterface extends Interface {
     values: [DeltaTransformer.BatchStruct]
   ): string;
   encodeFunctionData(
+    functionFragment: "hashRevealed",
+    values: [BytesLike]
+  ): string;
+  encodeFunctionData(
     functionFragment: "hashToBlock",
     values: [BytesLike]
   ): string;
@@ -114,6 +119,10 @@ export interface DeltaTransformerInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "encodeBatch",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "hashRevealed",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -188,6 +197,8 @@ export interface DeltaTransformer extends BaseContract {
     "view"
   >;
 
+  hashRevealed: TypedContractMethod<[arg0: BytesLike], [boolean], "view">;
+
   hashToBlock: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
 
   revealSecret: TypedContractMethod<[secret: BytesLike], [void], "nonpayable">;
@@ -214,6 +225,9 @@ export interface DeltaTransformer extends BaseContract {
   getFunction(
     nameOrSignature: "encodeBatch"
   ): TypedContractMethod<[b: DeltaTransformer.BatchStruct], [string], "view">;
+  getFunction(
+    nameOrSignature: "hashRevealed"
+  ): TypedContractMethod<[arg0: BytesLike], [boolean], "view">;
   getFunction(
     nameOrSignature: "hashToBlock"
   ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;

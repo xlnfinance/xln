@@ -1022,13 +1022,14 @@ export async function createRpcAdapter(
       });
     },
 
-    async enforceDebts(entityId: string, tokenId: number): Promise<void> {
+    async enforceDebts(entityId: string, tokenId: number, maxIterations: number | bigint = 100n): Promise<void> {
       await runSerializedBatch(async () => {
         try {
+          const iterationCap = BigInt(maxIterations);
           await sendTypedTx(
             'enforceDebts',
             depository.enforceDebts,
-            [entityId, BigInt(tokenId), 100n],
+            [entityId, BigInt(tokenId), iterationCap],
             {
               gasFallback: 500_000n,
               txNonce: await allocateSerializedSignerNonce(),

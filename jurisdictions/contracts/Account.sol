@@ -196,6 +196,7 @@ library Account {
     if (col.collateral < amount) revert E3();
 
     _reserves[entityId][tokenId] += amount;
+    emit ReserveUpdated(entityId, tokenId, _reserves[entityId][tokenId]);
     col.collateral -= amount;
     if (isLeft) {
       col.ondelta -= int(amount);
@@ -287,15 +288,19 @@ library Account {
       if (diff.leftDiff < 0) {
         if (_reserves[leftEntity][tokenId] < uint(-diff.leftDiff)) revert E3();
         _reserves[leftEntity][tokenId] -= uint(-diff.leftDiff);
+        emit ReserveUpdated(leftEntity, tokenId, _reserves[leftEntity][tokenId]);
       } else if (diff.leftDiff > 0) {
         _reserves[leftEntity][tokenId] += uint(diff.leftDiff);
+        emit ReserveUpdated(leftEntity, tokenId, _reserves[leftEntity][tokenId]);
       }
 
       if (diff.rightDiff < 0) {
         if (_reserves[rightEntity][tokenId] < uint(-diff.rightDiff)) revert E3();
         _reserves[rightEntity][tokenId] -= uint(-diff.rightDiff);
+        emit ReserveUpdated(rightEntity, tokenId, _reserves[rightEntity][tokenId]);
       } else if (diff.rightDiff > 0) {
         _reserves[rightEntity][tokenId] += uint(diff.rightDiff);
+        emit ReserveUpdated(rightEntity, tokenId, _reserves[rightEntity][tokenId]);
       }
 
       AccountCollateral storage col = _collaterals[acct_key][tokenId];

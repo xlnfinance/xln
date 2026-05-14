@@ -160,6 +160,21 @@ describe("DeltaTransformer", function () {
     ).to.be.reverted;
   });
 
+  it("stores the first secret reveal block and rejects later overwrites", async function () {
+    const { transformer } = await loadFixture(deployFixture);
+
+    const secret = ethers.encodeBytes32String("secret");
+    const hash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["bytes32"], [secret]));
+
+    await transformer.revealSecret(secret);
+    const firstRevealBlock = await transformer.hashToBlock(hash);
+
+    expect(firstRevealBlock > 0n).to.equal(true);
+    expect(await transformer.hashRevealed(hash)).to.equal(true);
+    await expect(transformer.revealSecret(secret)).to.be.revertedWithCustomError(transformer, "AlreadyRevealed");
+    expect(await transformer.hashToBlock(hash)).to.equal(firstRevealBlock);
+  });
+
   it("applies mixed-side positional fill ratio arrays exactly in batch order", async function () {
     const { transformer } = await loadFixture(deployFixture);
 
