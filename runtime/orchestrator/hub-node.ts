@@ -1216,6 +1216,7 @@ const run = async (): Promise<void> => {
       }
 
       if (pathname === '/api/faucet/offchain' && request.method === 'POST') {
+        const requestStartedAt = Date.now();
         const body = await request.json() as {
           userEntityId?: string;
           tokenId?: number;
@@ -1258,7 +1259,11 @@ const run = async (): Promise<void> => {
             }],
           }],
         });
-        return new Response(safeStringify({ success: true, accepted: true }), { headers });
+        return new Response(safeStringify({
+          success: true,
+          accepted: true,
+          serverDurationMs: Date.now() - requestStartedAt,
+        }), { headers });
       }
 
       if (pathname === '/api/debug/reserve' && request.method === 'GET') {

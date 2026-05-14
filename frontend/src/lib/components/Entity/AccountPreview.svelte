@@ -39,6 +39,7 @@
     subtitle: string;
   }> = [];
   export let activeFlowOverflowCount = 0;
+  export let pendingFaucetKeys: Set<string> = new Set();
 
   const dispatch = createEventDispatcher();
   let expandedDetailTokenId: number | 'all' | null = null;
@@ -230,6 +231,8 @@
     return false;
   })();
   $: faucetLabel = isDevnet ? 'Faucet' : '';
+  $: counterpartyKeyBase = String(counterpartyId || '').toLowerCase();
+  $: primaryFaucetPending = pendingFaucetKeys.has(`${counterpartyKeyBase}:${agg.primaryTokenId}`);
   $: liteMode = !!$settings.liteMode;
   $: uiStatus = getAccountUiStatus(account);
   $: isPending = uiStatus === 'sent';
@@ -327,10 +330,12 @@
 
   function handleFaucet(e: MouseEvent) {
     e.stopPropagation();
+    if (primaryFaucetPending) return;
     dispatch('faucet', { counterpartyId, tokenId: agg.primaryTokenId });
   }
 
   function handleTokenFaucet(tokenId: number): void {
+    if (pendingFaucetKeys.has(`${counterpartyKeyBase}:${tokenId}`)) return;
     dispatch('faucet', { counterpartyId, tokenId });
   }
 
@@ -511,8 +516,9 @@
             visualScale={aggregateVisualScale}
             showBar={!liteMode}
             expanded={expandedDetailTokenId === 'all'}
-            actionLabel={liteMode ? '' : faucetLabel}
+            actionLabel={liteMode ? '' : primaryFaucetPending ? 'Funding...' : faucetLabel}
             actionTokenId={agg.primaryTokenId}
+            actionDisabled={primaryFaucetPending}
             on:action={(event) => {
               event.stopPropagation();
               handleTokenFaucet(agg.primaryTokenId);
@@ -529,6 +535,7 @@
         {/if}
       {:else}
         {#each tokenSummaries as row (row.tokenId)}
+          {@const rowFaucetPending = pendingFaucetKeys.has(`${counterpartyKeyBase}:${row.tokenId}`)}
           <div class="delta-row-stack">
             <div class="delta-preview-toggle">
               <DeltaTokenSummary
@@ -546,9 +553,9 @@
                 showMetricLabels={false}
                 showBar={!liteMode}
                 expanded={expandedDetailTokenId === row.tokenId}
-                actionLabel={liteMode ? '' : (row.actionLabel || '')}
+                actionLabel={liteMode ? '' : rowFaucetPending ? 'Funding...' : (row.actionLabel || '')}
                 actionTokenId={row.tokenId}
-                actionDisabled={false}
+                actionDisabled={rowFaucetPending}
                 on:action={(event) => {
                   event.stopPropagation();
                   if (event.detail.tokenId !== null) handleTokenFaucet(event.detail.tokenId);

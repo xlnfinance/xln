@@ -2251,7 +2251,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         ? body.advertiseEntityIds.map(value => (typeof value === 'string' ? value.trim().toLowerCase() : '')).filter(Boolean)
         : undefined;
       const gossipPollMs = Number.isFinite(Number(body?.gossipPollMs))
-        ? Math.max(1000, Math.floor(Number(body?.gossipPollMs)))
+        ? Math.max(250, Math.floor(Number(body?.gossipPollMs)))
         : undefined;
 
       startP2P(env, {
@@ -3091,6 +3091,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
   // Faucet C: Offchain payment via bilateral account
   if (pathname === '/api/faucet/offchain' && req.method === 'POST') {
+    const requestStartedAt = Date.now();
     try {
       if (!env) {
         return new Response(safeStringify({ error: 'Runtime not initialized' }), { status: 503, headers });
@@ -3391,7 +3392,8 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           { status: 503, headers },
         );
       }
-      console.log(`[FAUCET/OFFCHAIN] ✅ Payment accepted`);
+      const serverDurationMs = Date.now() - requestStartedAt;
+      console.log(`[FAUCET/OFFCHAIN] ✅ Payment accepted req=${requestId} duration=${serverDurationMs}ms`);
 
       return new Response(
         JSON.stringify({
@@ -3405,6 +3407,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           to: normalizedUserEntityId.slice(0, 16) + '...',
           accountReady: true,
           senderOutCapacity: currentOutCapacity.toString(),
+          serverDurationMs,
         }),
         { headers },
       );
@@ -4030,7 +4033,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       relayUrls: [internalRelayUrl],
       ...(advertisedEntityIds.length > 0 ? { advertiseEntityIds: advertisedEntityIds } : {}),
       isHub: hubEntityIds.length > 0,
-      gossipPollMs: 1000,
+      gossipPollMs: 250,
     });
     serverBootPhase = 'ready';
     serverBootCompletedAt = Date.now();
