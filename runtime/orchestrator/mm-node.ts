@@ -788,6 +788,9 @@ const run = async (): Promise<void> => {
       handleInboundP2PEntityInput(env, from, input, ingressTimestamp);
     },
   });
+  env.runtimeState = env.runtimeState ?? {};
+  env.runtimeState.directEntityInputDispatch = (targetRuntimeId, input, ingressTimestamp) =>
+    directRuntimeWs.sendEntityInput(targetRuntimeId, input, ingressTimestamp);
   const handleRadapterWsMessage = (ws: any, raw: string | Buffer | ArrayBuffer): void => {
     let msg: Record<string, unknown>;
     try {

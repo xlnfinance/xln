@@ -1234,6 +1234,7 @@ export class RuntimeP2P {
       runtimeId: this.runtimeId,
       signerId: this.signerId,
       ...(this.env.runtimeSeed ? { seed: this.env.runtimeSeed } : {}),
+      useHelloAuth: true,
       encryptionKeyPair: this.encryptionKeyPair,
       getTargetEncryptionKey: (targetRuntimeId: string) => {
         return this.resolveTargetEncryptionKey(targetRuntimeId);
