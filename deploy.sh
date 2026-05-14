@@ -71,7 +71,7 @@ wait_for_rpc_chain() {
 }
 
 wait_for_main_stack() {
-  local deadline=$((SECONDS + 180))
+  local deadline=$((SECONDS + 600))
   while [ "$SECONDS" -lt "$deadline" ]; do
     local body
     body="$(curl -fsS http://127.0.0.1:8080/api/health || true)"
@@ -172,7 +172,7 @@ wait_for_public_direct_mesh() {
 }
 
 wait_for_public_production_stack() {
-  local deadline=$((SECONDS + 120))
+  local deadline=$((SECONDS + 300))
   wait_for_http_json_field \
     "https://xln.finance/api/health" \
     "return payload?.system?.runtime === true && payload?.system?.relay === true && payload?.hubMesh?.ok === true && payload?.marketMaker?.ok === true && payload?.bootstrapReserves?.ok === true && payload?.custody?.ok === true && Array.isArray(payload?.hubs) && payload.hubs.length >= 3;" \
