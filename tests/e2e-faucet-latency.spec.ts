@@ -46,7 +46,17 @@ type FaucetRenderProbe = {
 
 async function getPrimaryHubId(page: Page): Promise<string> {
   const health = await getHealth(page, API_BASE_URL);
-  const hubId = health?.hubMesh?.hubIds?.[0];
+  let hubId = health?.hubMesh?.hubIds?.[0];
+  if (!hubId) {
+    const response = await page.request.get(`${API_BASE_URL}/api/debug/entities?online=true&limit=100`);
+    const body = await response.json().catch(() => ({} as {
+      entities?: Array<{ entityId?: string; isHub?: boolean; metadata?: { isHub?: boolean } }>;
+    }));
+    hubId = (Array.isArray(body.entities) ? body.entities : []).find((entity) =>
+      (entity.isHub === true || entity.metadata?.isHub === true) &&
+      /^0x[a-fA-F0-9]{64}$/.test(String(entity.entityId || '')),
+    )?.entityId;
+  }
   expect(typeof hubId === 'string' && hubId.length === 66, 'baseline must expose a primary hub id').toBe(true);
   return hubId!;
 }
