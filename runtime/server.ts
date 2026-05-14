@@ -1187,8 +1187,12 @@ const updateJurisdictionsJson = async (
     } catch {
       data = {};
     }
+    const updatedAt = new Date().toISOString();
+    const networkVersion = String(Date.parse(updatedAt));
     data['version'] = String(data['version'] || '').trim() || '1';
-    data['lastUpdated'] = new Date().toISOString();
+    data['deployVersion'] = networkVersion;
+    data['networkVersion'] = networkVersion;
+    data['lastUpdated'] = updatedAt;
     const defaults = data.defaults ?? {
       timeout: 30000,
       retryAttempts: 3,
@@ -1249,6 +1253,19 @@ const readCanonicalJurisdictionsVersion = async (): Promise<string> => {
   return version;
 };
 
+const readCanonicalNetworkVersion = async (): Promise<string> => {
+  const raw = await readCanonicalJurisdictionsJson();
+  const parsed = JSON.parse(raw) as {
+    deployVersion?: unknown;
+    networkVersion?: unknown;
+    lastUpdated?: unknown;
+  };
+  const explicit = String(parsed.deployVersion || parsed.networkVersion || '').trim();
+  if (explicit) return explicit;
+  const lastUpdated = Date.parse(String(parsed.lastUpdated || ''));
+  return Number.isFinite(lastUpdated) ? String(lastUpdated) : readCanonicalJurisdictionsVersion();
+};
+
 const buildRuntimeJurisdictionsJson = async (env?: Env | null): Promise<string | null> => {
   if (!env?.jReplicas || env.jReplicas.size === 0) return null;
   const jurisdictionName = env.activeJurisdiction ?? env.jReplicas.keys().next().value;
@@ -1286,8 +1303,11 @@ const buildRuntimeJurisdictionsJson = async (env?: Env | null): Promise<string |
   if (!depository || !entityProvider) return null;
 
   const version = await readCanonicalJurisdictionsVersion();
+  const networkVersion = await readCanonicalNetworkVersion();
   const payload = {
     version,
+    deployVersion: networkVersion,
+    networkVersion,
     lastUpdated: new Date().toISOString(),
     jurisdictions: {
       arrakis: {

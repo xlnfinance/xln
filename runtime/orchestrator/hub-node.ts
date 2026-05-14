@@ -179,6 +179,8 @@ type JurisdictionConfig = {
 
 type JurisdictionsFile = {
   version?: string;
+  deployVersion?: string;
+  networkVersion?: string;
   lastUpdated?: string;
   jurisdictions?: Record<string, {
     name?: string;
@@ -420,12 +422,29 @@ const readCurrentJurisdictionsVersion = (): string => {
   return '1';
 };
 
+const readCurrentNetworkVersion = (): string => {
+  for (const filePath of resolveJurisdictionPaths()) {
+    if (!existsSync(filePath)) continue;
+    try {
+      const parsed = JSON.parse(readFileSync(filePath, 'utf8')) as JurisdictionsFile;
+      const explicit = String(parsed.deployVersion || parsed.networkVersion || '').trim();
+      if (explicit) return explicit;
+      const lastUpdated = Date.parse(String(parsed.lastUpdated || ''));
+      if (Number.isFinite(lastUpdated)) return String(lastUpdated);
+    } catch {
+      // Ignore malformed local file and keep falling back.
+    }
+  }
+  return readCurrentJurisdictionsVersion();
+};
+
 const writeJurisdictionAddresses = async (jadapter: JAdapter, rpcUrl: string): Promise<void> => {
   if (!jadapter.addresses?.depository || !jadapter.addresses?.entityProvider) {
     throw new Error('JURISDICTION_WRITE_ADDRESSES_MISSING');
   }
   const publicRpcUrl = toPublicRpcUrl(rpcUrl);
   const updatedAt = new Date().toISOString();
+  const networkVersion = String(Date.parse(updatedAt));
   for (const filePath of resolveJurisdictionPaths()) {
     const parent = dirname(filePath);
     mkdirSync(parent, { recursive: true });
@@ -453,6 +472,8 @@ const writeJurisdictionAddresses = async (jadapter: JAdapter, rpcUrl: string): P
     };
     const nextPayload: JurisdictionsFile = {
       version: String(current.version || '').trim() || readCurrentJurisdictionsVersion(),
+      deployVersion: networkVersion,
+      networkVersion,
       lastUpdated: updatedAt,
       jurisdictions,
       defaults: current.defaults ?? {
@@ -521,8 +542,11 @@ const buildRuntimeJurisdictionsPayload = (env: Env): string | null => {
   if (!depository || !entityProvider) return null;
 
   const version = readCurrentJurisdictionsVersion();
+  const networkVersion = readCurrentNetworkVersion();
   return JSON.stringify({
     version,
+    deployVersion: networkVersion,
+    networkVersion,
     lastUpdated: new Date().toISOString(),
     jurisdictions: {
       arrakis: {
