@@ -112,6 +112,16 @@ async function ensureRuntimeCreationView(page: Page, label: string): Promise<voi
 
 async function waitForRuntimeReady(page: Page, runtimeId: string): Promise<void> {
   await page.waitForFunction(({ targetRuntimeId }) => {
+    const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
+    const selectedRuntimeId = String(selectedTrigger?.dataset?.runtimeId || '').toLowerCase();
+    const selectedEntityId = String(selectedTrigger?.dataset?.entityId || '');
+    const selectedSignerId = String(selectedTrigger?.dataset?.signerId || '');
+    const selectedReady =
+      selectedRuntimeId === String(targetRuntimeId || '').toLowerCase()
+      && /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
+      && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId);
+    if (selectedReady) return true;
+
     const env = (window as typeof window & {
       isolatedEnv?: {
         runtimeId?: string;
@@ -134,6 +144,19 @@ async function waitForRuntimeBootstrap(
   await expect
     .poll(async () => {
       return await page.evaluate(({ expectedRuntimeId, previousRuntimeId }) => {
+        const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
+        const selectedRuntimeId = String(selectedTrigger?.dataset?.runtimeId || '').toLowerCase();
+        const selectedEntityId = String(selectedTrigger?.dataset?.entityId || '');
+        const selectedSignerId = String(selectedTrigger?.dataset?.signerId || '');
+        if (
+          selectedRuntimeId
+          && selectedRuntimeId !== String(previousRuntimeId || '').toLowerCase()
+          && /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
+          && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId)
+        ) {
+          return selectedRuntimeId;
+        }
+
         const env = (window as typeof window & {
           isolatedEnv?: {
             runtimeId?: string;
@@ -165,6 +188,8 @@ async function waitForRuntimeBootstrap(
     .not.toBe('');
 
   const activeRuntimeId = await page.evaluate(() => {
+    const selectedRuntimeId = document.querySelector<HTMLElement>('[data-testid="context-current"]')?.dataset?.runtimeId;
+    if (selectedRuntimeId) return String(selectedRuntimeId).toLowerCase();
     const env = (window as typeof window & {
       isolatedEnv?: {
         runtimeId?: string;
@@ -178,6 +203,8 @@ async function waitForRuntimeBootstrap(
 
 async function waitForActiveRuntimeId(page: Page, runtimeId: string): Promise<void> {
   await page.waitForFunction(({ targetRuntimeId }) => {
+    const selectedRuntimeId = document.querySelector<HTMLElement>('[data-testid="context-current"]')?.dataset?.runtimeId;
+    if (String(selectedRuntimeId || '').toLowerCase() === String(targetRuntimeId || '').toLowerCase()) return true;
     const env = (window as typeof window & {
       isolatedEnv?: {
         runtimeId?: string;
@@ -189,6 +216,18 @@ async function waitForActiveRuntimeId(page: Page, runtimeId: string): Promise<vo
 
 async function waitForAnyRuntimeReady(page: Page): Promise<string> {
   return await page.waitForFunction(() => {
+    const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
+    const selectedRuntimeId = String(selectedTrigger?.dataset?.runtimeId || '').toLowerCase();
+    const selectedEntityId = String(selectedTrigger?.dataset?.entityId || '');
+    const selectedSignerId = String(selectedTrigger?.dataset?.signerId || '');
+    if (
+      selectedRuntimeId
+      && /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
+      && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId)
+    ) {
+      return selectedRuntimeId;
+    }
+
     const env = (window as typeof window & {
       isolatedEnv?: {
         runtimeId?: string;
@@ -208,6 +247,20 @@ async function waitForAnyRuntimeReady(page: Page): Promise<string> {
 
 async function waitForNextRuntimeReady(page: Page, previousRuntimeId: string | null): Promise<string> {
   return await page.waitForFunction(({ priorRuntimeId }) => {
+    const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
+    const selectedRuntimeId = String(selectedTrigger?.dataset?.runtimeId || '').toLowerCase();
+    const selectedEntityId = String(selectedTrigger?.dataset?.entityId || '');
+    const selectedSignerId = String(selectedTrigger?.dataset?.signerId || '');
+    const previous = String(priorRuntimeId || '').toLowerCase();
+    if (
+      selectedRuntimeId
+      && selectedRuntimeId !== previous
+      && /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
+      && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId)
+    ) {
+      return selectedRuntimeId;
+    }
+
     const env = (window as typeof window & {
       isolatedEnv?: {
         runtimeId?: string;
@@ -216,7 +269,6 @@ async function waitForNextRuntimeReady(page: Page, previousRuntimeId: string | n
     }).isolatedEnv;
     const runtimeId = String(env?.runtimeId || '').toLowerCase();
     if (!runtimeId || Number(env?.eReplicas?.size || 0) <= 0) return null;
-    const previous = String(priorRuntimeId || '').toLowerCase();
     if (previous && runtimeId === previous) return null;
     return runtimeId;
   }, { priorRuntimeId: previousRuntimeId }, { timeout: RUNTIME_READY_TIMEOUT }).then(async (handle) => {

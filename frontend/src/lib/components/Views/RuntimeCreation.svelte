@@ -388,13 +388,8 @@
     deriveNewVault();
   }
 
-  $: if (phase === 'complete' && $showVaultPanel) {
-    vaultUiOperations.hideVault();
-  }
-
   // Reactive: Get current vault/signer for display
   $: currentVault = $activeRuntime;
-  $: currentSigner = $activeSigner;
   $: savedVaults = $allRuntimes;
   $: derivedRuntime = ethereumAddress
     ? savedVaults.find((vault) => vault.id.toLowerCase() === ethereumAddress.toLowerCase()) ?? null
@@ -402,10 +397,14 @@
   $: activeRuntimeMatchesDerived = Boolean(
     currentVault && ethereumAddress && currentVault.id.toLowerCase() === ethereumAddress.toLowerCase()
   );
+  $: matchingRuntime = activeRuntimeMatchesDerived ? currentVault : derivedRuntime;
+  $: currentSigner = activeRuntimeMatchesDerived
+    ? $activeSigner
+    : matchingRuntime?.signers?.[0] ?? null;
 
   // Current signer's address
-  $: currentSignerAddress = activeRuntimeMatchesDerived ? (currentSigner?.address || ethereumAddress) : ethereumAddress;
-  $: displayEntityId = activeRuntimeMatchesDerived ? (currentSigner?.entityId || entityId) : entityId;
+  $: currentSignerAddress = currentSigner?.address || ethereumAddress;
+  $: displayEntityId = currentSigner?.entityId || entityId;
   $: creationContextTab = ({
     id: 'runtime-creation',
     title: 'Runtime Creation',
@@ -417,8 +416,8 @@
 
   // Identicon for current signer
   $: currentSignerAvatar = currentSignerAddress ? avatarFns.hashToAvatar(currentSignerAddress, 80) : avatar;
-  $: recoveryMnemonic24 = (mnemonic24 || currentVault?.seed || '').trim().split(/\s+/).join(' ');
-  $: recoveryMnemonic12 = (mnemonic12 || currentVault?.mnemonic12 || '').trim().split(/\s+/).join(' ');
+  $: recoveryMnemonic24 = (mnemonic24 || matchingRuntime?.seed || '').trim().split(/\s+/).join(' ');
+  $: recoveryMnemonic12 = (mnemonic12 || matchingRuntime?.mnemonic12 || '').trim().split(/\s+/).join(' ');
 
   // Helper to add a new signer
   function handleAddSigner() {
@@ -476,6 +475,9 @@
       createLoginType = 'manual';
       showSaveVaultModal = false;
       vaultNameInput = '';
+      if (embedded) {
+        vaultUiOperations.hideVault();
+      }
     } catch (err) {
       runtimeCreateError = err instanceof Error ? err.message : 'Failed to create XLN wallet';
     } finally {

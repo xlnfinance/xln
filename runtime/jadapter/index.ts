@@ -35,6 +35,17 @@ export {
  * Used to gate mint/debugFundReserves and disable confirmation depth.
  */
 export const DEV_CHAIN_IDS = new Set<number>([31337]);
+const DEFAULT_RPC_POLLING_INTERVAL_MS = 100;
+
+const configureFastRpcPolling = (provider: ethers.JsonRpcProvider): void => {
+  const configuredInterval =
+    typeof process !== 'undefined' && process.env
+      ? process.env['XLN_RPC_POLLING_INTERVAL_MS']
+      : undefined;
+  const rawInterval = Number(configuredInterval ?? DEFAULT_RPC_POLLING_INTERVAL_MS);
+  if (!Number.isFinite(rawInterval) || rawInterval <= 0) return;
+  (provider as ethers.JsonRpcProvider & { pollingInterval?: number }).pollingInterval = Math.floor(rawInterval);
+};
 
 import type { JAdapter, JAdapterConfig } from './types';
 import { DEFAULT_PRIVATE_KEY } from './helpers';
@@ -116,6 +127,7 @@ export async function createJAdapter(config: JAdapterConfig): Promise<JAdapter> 
   }
   const rpcUrl = normalizeLoopbackUrl(config.rpcUrl);
   const provider = new ethers.JsonRpcProvider(rpcUrl);
+  configureFastRpcPolling(provider);
   // Use NonceTrackingWallet for rapid sequential txs (anvil deploys many contracts)
   const signer = new NonceTrackingWallet(privateKey, provider);
 
