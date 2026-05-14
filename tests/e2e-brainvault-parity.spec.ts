@@ -2,7 +2,7 @@ import { execFileSync } from 'node:child_process';
 
 import { expect, test, type Page } from '@playwright/test';
 
-import { APP_BASE_URL, gotoApp } from './utils/e2e-demo-users';
+import { APP_BASE_URL, createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
 
 type BrainvaultCliOutput = {
   mnemonic24: string;
@@ -69,6 +69,28 @@ async function readRuntimeCount(page: Page): Promise<number> {
     const parsed = JSON.parse(raw) as { runtimes?: Record<string, unknown> };
     return Object.keys(parsed.runtimes ?? {}).length;
   });
+}
+
+async function readActiveRuntimeId(page: Page): Promise<string | null> {
+  return await page.evaluate(() => {
+    const raw = localStorage.getItem('xln-vaults');
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as { activeRuntimeId?: string };
+    return parsed.activeRuntimeId ?? null;
+  });
+}
+
+async function openAddRuntimePanel(page: Page): Promise<void> {
+  const trigger = page.locator('button:has([data-testid="context-current"]), .context-switcher .dropdown-trigger').first();
+  const menu = page.locator('.switcher-menu').first();
+  await expect(trigger).toBeVisible({ timeout: 15_000 });
+  if (!await menu.isVisible().catch(() => false)) {
+    await trigger.click({ force: true });
+  }
+  const addRuntimeItem = page.locator('.switcher-menu .add-runtime-btn').filter({ hasText: /Add Runtime/i }).first();
+  await expect(addRuntimeItem).toBeVisible({ timeout: 10_000 });
+  await addRuntimeItem.click();
+  await expect(page.getByRole('button', { name: 'BrainVault', exact: true })).toBeVisible({ timeout: 15_000 });
 }
 
 async function waitForRuntimeWithSeed(page: Page, seed: string): Promise<StoredRuntime> {
@@ -167,5 +189,28 @@ test.describe('brainvault parity', () => {
     expect(runtime.label).toBe('standalone vault');
     expect(normalizeMnemonic(runtime.mnemonic12 || '')).toBe(mnemonic12);
     expect(await readRuntimeCount(page)).toBe(1);
+  });
+
+  test('embedded BrainVault add-runtime flow does not fall back to the active wallet', async ({ page }) => {
+    test.slow();
+
+    await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 250 });
+
+    const oldRuntime = await createRuntimeIdentity(page, 'alice', selectDemoMnemonic('alice'));
+    expect(await readRuntimeCount(page)).toBe(1);
+
+    await openAddRuntimePanel(page);
+    const derived = await deriveBrainvaultInUi(page, 'embedded add runtime', 'ced-add-runtime-42', 1);
+
+    await expect(page.getByRole('heading', { name: 'BrainVault Ready' })).toBeVisible({ timeout: 15_000 });
+    expect(await readActiveRuntimeId(page)).toBe(oldRuntime.runtimeId);
+
+    await page.getByRole('button', { name: 'Create XLN wallet' }).click();
+
+    const runtime = await waitForRuntimeWithSeed(page, derived.mnemonic24);
+    expect(runtime.label).toBe('embedded add runtime');
+    expect(normalizeMnemonic(runtime.mnemonic12 || '')).toBe(derived.mnemonic12);
+    expect(await readActiveRuntimeId(page)).not.toBe(oldRuntime.runtimeId);
+    expect(await readRuntimeCount(page)).toBe(2);
   });
 });

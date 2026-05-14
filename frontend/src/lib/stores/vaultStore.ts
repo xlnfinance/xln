@@ -1514,8 +1514,8 @@ export const vaultOperations = {
 
     // Store entityId in signer
     runtime.signers[0]!.entityId = entityId;
-    await fundSignerWalletViaFaucet(signerAddress);
-    console.log('[VaultStore.createRuntime] ✅ Entity ready and signer auto-funded via faucet');
+    void fundSignerWalletViaFaucet(signerAddress);
+    console.log('[VaultStore.createRuntime] ✅ Entity ready; signer faucet funding queued');
     if (!requiresOnboarding) {
       writeSavedCollateralPolicy({
         mode: 'autopilot',
