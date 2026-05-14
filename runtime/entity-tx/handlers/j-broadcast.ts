@@ -20,7 +20,10 @@ import {
   isBatchEmpty, getBatchSize, cloneJBatch, encodeJBatch,
   computeBatchHankoHash, batchOpCount, createEmptyBatch,
 } from '../../j-batch';
-import { resolveRuntimeJurisdictionConfig } from '../../jurisdiction-runtime';
+import {
+  getJurisdictionConfigName,
+  requireRuntimeJurisdictionConfigByName,
+} from '../../jurisdiction-runtime';
 import type { ApplyEntityTxResult } from '../apply';
 
 export async function handleJBroadcast(
@@ -53,9 +56,22 @@ export async function handleJBroadcast(
   }
 
   // ── Validate: jurisdiction configured ──
-  const jurisdiction = resolveRuntimeJurisdictionConfig(env, newState.config.jurisdiction);
-  if (!jurisdiction) {
+  const configuredJurisdictionName = getJurisdictionConfigName(newState.config.jurisdiction);
+  if (!configuredJurisdictionName) {
     addMessage(newState, '❌ No jurisdiction configured for this entity');
+    return { newState, outputs, jOutputs };
+  }
+
+  let jurisdiction;
+  try {
+    jurisdiction = requireRuntimeJurisdictionConfigByName(
+      env,
+      configuredJurisdictionName,
+      newState.config.jurisdiction,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    addMessage(newState, `❌ Jurisdiction unavailable: ${message}`);
     return { newState, outputs, jOutputs };
   }
   newState.config = {
@@ -96,7 +112,7 @@ export async function handleJBroadcast(
 
   const batchSize = getBatchSize(newState.jBatchState.batch);
   const opCount = batchOpCount(newState.jBatchState.batch);
-  const jurisdictionName = jurisdiction.name || env.activeJurisdiction || 'default';
+  const jurisdictionName = jurisdiction.name;
 
   console.log(`📤 j_broadcast: ${entityState.entityId.slice(-4)} | ${batchSize} ops | nonce=${nextNonce} | hash=${batchHash.slice(0, 10)}...`);
   console.log(

@@ -12,6 +12,10 @@
 
 import type { EntityState, EntityTx, EntityInput, JInput, JTx, Env } from '../../types';
 import { cloneEntityState, addMessage } from '../../state-helpers';
+import {
+  getJurisdictionConfigName,
+  requireRuntimeJurisdictionConfigByName,
+} from '../../jurisdiction-runtime';
 
 export async function handleMintReserves(
   entityState: EntityState,
@@ -36,8 +40,23 @@ export async function handleMintReserves(
     timestamp: newState.timestamp, // Entity-level timestamp for determinism
   };
 
-  // Route to J-machine via standard jOutput flow
-  const jurisdictionName = env.activeJurisdiction || 'default';
+  // Route to the entity-bound J-machine when configured. The active
+  // jurisdiction remains only a legacy fallback for old dev/test entities.
+  const configuredJurisdictionName = getJurisdictionConfigName(newState.config.jurisdiction);
+  let jurisdictionName = env.activeJurisdiction || 'default';
+  if (configuredJurisdictionName) {
+    try {
+      jurisdictionName = requireRuntimeJurisdictionConfigByName(
+        env,
+        configuredJurisdictionName,
+        newState.config.jurisdiction,
+      ).name;
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      addMessage(newState, `❌ Jurisdiction unavailable for mint: ${message}`);
+      return { newState, outputs, jOutputs: [] };
+    }
+  }
   const jOutputs: JInput[] = [{
     jurisdictionName,
     jTxs: [jTx],

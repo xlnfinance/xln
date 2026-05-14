@@ -28,6 +28,8 @@ export type ProfileMetadata = {
   routingFeePPM: number;
   baseFee: bigint;
   swapTakerFeeBps?: number;
+  jurisdiction?: ProfileJurisdiction;
+  mirrors?: ProfileMirror[];
   board: BoardMetadata;
   profileHanko?: string;
   policyVersion?: number;
@@ -35,6 +37,18 @@ export type ProfileMetadata = {
   rebalanceLiquidityFeeBps?: string;
   rebalanceGasFee?: string;
   rebalanceTimeoutMs?: number;
+};
+
+export type ProfileJurisdiction = {
+  name: string;
+  chainId?: number;
+  entityProviderAddress?: string;
+  depositoryAddress?: string;
+};
+
+export type ProfileMirror = {
+  entityId: string;
+  jurisdiction: ProfileJurisdiction;
 };
 
 export type ProfileTokenCapacity = {
@@ -138,6 +152,8 @@ const ALLOWED_PROFILE_METADATA_KEYS = [
   'routingFeePPM',
   'baseFee',
   'swapTakerFeeBps',
+  'jurisdiction',
+  'mirrors',
   'board',
   'profileHanko',
   'policyVersion',
@@ -167,6 +183,18 @@ const ALLOWED_BOARD_VALIDATOR_KEYS = [
   'weight',
   'signerId',
   'publicKey',
+] as const;
+
+const ALLOWED_PROFILE_JURISDICTION_KEYS = [
+  'name',
+  'chainId',
+  'entityProviderAddress',
+  'depositoryAddress',
+] as const;
+
+const ALLOWED_PROFILE_MIRROR_KEYS = [
+  'entityId',
+  'jurisdiction',
 ] as const;
 
 const assertNoLegacyProfileFields = (
@@ -327,6 +355,63 @@ export const getBoardPrimaryPublicKey = (board: BoardMetadata, entityId: string)
   return publicKey;
 };
 
+const parseProfileJurisdiction = (raw: unknown, entityId: string, field: string): ProfileJurisdiction | undefined => {
+  if (raw == null) return undefined;
+  if (!isRecord(raw)) {
+    throw new Error(`${field}_INVALID: entity=${entityId}`);
+  }
+  assertOnlyAllowedKeys(raw, ALLOWED_PROFILE_JURISDICTION_KEYS, `${field}_UNKNOWN_FIELD`, entityId);
+  const name = typeof raw['name'] === 'string' ? raw['name'].trim() : '';
+  if (!name) {
+    throw new Error(`${field}_NAME_REQUIRED: entity=${entityId}`);
+  }
+  const chainIdRaw = raw['chainId'];
+  const chainId = chainIdRaw === undefined ? undefined : Number(chainIdRaw);
+  if (chainIdRaw !== undefined && (typeof chainId !== 'number' || !Number.isFinite(chainId) || chainId <= 0)) {
+    throw new Error(`${field}_CHAIN_ID_INVALID: entity=${entityId}`);
+  }
+  const entityProviderAddress = typeof raw['entityProviderAddress'] === 'string'
+    ? raw['entityProviderAddress'].trim()
+    : '';
+  const depositoryAddress = typeof raw['depositoryAddress'] === 'string'
+    ? raw['depositoryAddress'].trim()
+    : '';
+  return {
+    name,
+    ...(chainId !== undefined ? { chainId: Math.floor(chainId) } : {}),
+    ...(entityProviderAddress ? { entityProviderAddress } : {}),
+    ...(depositoryAddress ? { depositoryAddress } : {}),
+  };
+};
+
+const parseProfileMirrors = (raw: unknown, entityId: string): ProfileMirror[] | undefined => {
+  if (raw == null) return undefined;
+  if (!Array.isArray(raw)) {
+    throw new Error(`GOSSIP_PROFILE_MIRRORS_INVALID: entity=${entityId}`);
+  }
+  const mirrors: ProfileMirror[] = [];
+  const seen = new Set<string>();
+  for (const item of raw) {
+    if (!isRecord(item)) {
+      throw new Error(`GOSSIP_PROFILE_MIRROR_INVALID: entity=${entityId}`);
+    }
+    assertOnlyAllowedKeys(item, ALLOWED_PROFILE_MIRROR_KEYS, 'GOSSIP_PROFILE_MIRROR_UNKNOWN_FIELD', entityId);
+    const mirrorEntityId = typeof item['entityId'] === 'string' ? item['entityId'].trim() : '';
+    if (!mirrorEntityId) {
+      throw new Error(`GOSSIP_PROFILE_MIRROR_ENTITY_REQUIRED: entity=${entityId}`);
+    }
+    if (seen.has(mirrorEntityId.toLowerCase())) continue;
+    seen.add(mirrorEntityId.toLowerCase());
+    const jurisdiction = parseProfileJurisdiction(item['jurisdiction'], entityId, 'GOSSIP_PROFILE_MIRROR_JURISDICTION');
+    if (!jurisdiction) {
+      throw new Error(`GOSSIP_PROFILE_MIRROR_JURISDICTION_REQUIRED: entity=${entityId}`);
+    }
+    mirrors.push({ entityId: mirrorEntityId, jurisdiction });
+  }
+  mirrors.sort((a, b) => a.entityId.localeCompare(b.entityId) || a.jurisdiction.name.localeCompare(b.jurisdiction.name));
+  return mirrors;
+};
+
 const parseProfileTokenCapacities = (
   raw: unknown,
   entityId: string,
@@ -418,6 +503,8 @@ export const parseProfile = (raw: unknown): Profile => {
   const relays = normalizeStringArray(raw['relays']);
   const board = parseBoardMetadata(metadataRaw['board'], entityId);
   getBoardPrimaryPublicKey(board, entityId);
+  const jurisdiction = parseProfileJurisdiction(metadataRaw['jurisdiction'], entityId, 'GOSSIP_PROFILE_JURISDICTION');
+  const mirrors = parseProfileMirrors(metadataRaw['mirrors'], entityId);
   const metadata: ProfileMetadata = {
     entityEncPubKey,
     isHub: metadataRaw['isHub'] === true,
@@ -429,6 +516,8 @@ export const parseProfile = (raw: unknown): Profile => {
     ...(metadataRaw['swapTakerFeeBps'] !== undefined
       ? { swapTakerFeeBps: parseUint16(metadataRaw['swapTakerFeeBps'], 'GOSSIP_PROFILE_SWAP_TAKER_FEE_BPS_INVALID', entityId) }
       : {}),
+    ...(jurisdiction ? { jurisdiction } : {}),
+    ...(mirrors ? { mirrors } : {}),
     board,
     ...(typeof metadataRaw['profileHanko'] === 'string' && metadataRaw['profileHanko'].trim().length > 0
       ? { profileHanko: metadataRaw['profileHanko'].trim() }
@@ -516,6 +605,8 @@ export const canonicalizeProfile = (
   const relays = normalizeStringArray(profile.relays);
   const board = parseBoardMetadata(metadata['board'], entityId);
   getBoardPrimaryPublicKey(board, entityId);
+  const jurisdiction = parseProfileJurisdiction(metadata['jurisdiction'], entityId, 'GOSSIP_PROFILE_JURISDICTION');
+  const mirrors = parseProfileMirrors(metadata['mirrors'], entityId);
   const routingFeePPM = Math.max(0, Number.isFinite(Number(metadata['routingFeePPM'])) ? Math.floor(Number(metadata['routingFeePPM'])) : 1);
   const baseFee = parseBigIntValue(metadata['baseFee'] ?? 0n, 'GOSSIP_PROFILE_BASE_FEE_INVALID', entityId);
   const swapTakerFeeBps = metadata['swapTakerFeeBps'] !== undefined
@@ -544,6 +635,8 @@ export const canonicalizeProfile = (
       routingFeePPM,
       baseFee,
       ...(swapTakerFeeBps !== undefined ? { swapTakerFeeBps } : {}),
+      ...(jurisdiction ? { jurisdiction } : {}),
+      ...(mirrors ? { mirrors } : {}),
       ...(typeof metadata['policyVersion'] === 'number' && Number.isFinite(metadata['policyVersion'])
         ? { policyVersion: Math.floor(metadata['policyVersion']) }
         : {}),

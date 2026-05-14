@@ -212,7 +212,11 @@ import {
   validateEntityInput,
   validateEntityOutput,
 } from './validation-utils';
-import { mergeRuntimeJurisdictionConfig } from './jurisdiction-runtime';
+import {
+  assertEntityJurisdictionBinding,
+  mergeRuntimeJurisdictionConfig,
+  requireEntityRuntimeJurisdictionConfig,
+} from './jurisdiction-runtime';
 import type {
   DeliverableEntityInput,
   AccountFrame,
@@ -2761,6 +2765,7 @@ const applyRuntimeInput = async (
         const config = runtimeTx.data.config
           ? mergeRuntimeJurisdictionConfig(runtimeTx.data.config, env)
           : runtimeTx.data.config;
+        assertEntityJurisdictionBinding(env, runtimeTx.entityId, config?.jurisdiction);
         if (existingReplica) {
           // Persistence safety: never overwrite restored replica state on re-import.
           existingReplica.isProposer = runtimeTx.data.isProposer;
@@ -5135,15 +5140,23 @@ export function getActiveJAdapter(env: Env): JAdapter | null {
   return jReplica?.jadapter || null;
 }
 
+export function getEntityJAdapter(env: Env, entityId: string, signerId?: string): JAdapter | null {
+  const jurisdiction = requireEntityRuntimeJurisdictionConfig(env, entityId, signerId);
+  const jReplica = env.jReplicas?.get(jurisdiction.name);
+  return jReplica?.jadapter || null;
+}
+
 export async function submitDebtEnforcement(
   env: Env,
   entityId: string,
   tokenId: number,
   maxIterations: number | bigint = 100n,
+  signerId?: string,
 ): Promise<void> {
-  const jAdapter = getActiveJAdapter(env);
+  const jurisdiction = requireEntityRuntimeJurisdictionConfig(env, entityId, signerId);
+  const jAdapter = getEntityJAdapter(env, entityId, signerId);
   if (!jAdapter) {
-    throw new Error('ACTIVE_JADAPTER_UNAVAILABLE');
+    throw new Error(`ENTITY_JADAPTER_UNAVAILABLE: ${jurisdiction.name}`);
   }
   await jAdapter.enforceDebts(entityId, tokenId, maxIterations);
 }

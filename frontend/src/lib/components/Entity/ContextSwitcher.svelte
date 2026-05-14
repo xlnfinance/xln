@@ -13,6 +13,7 @@
   import type { Env } from '@xln/runtime';
   import type { Tab, EntityReplica } from '$lib/types/ui';
   import { entityAvatar, preferredAvatar } from '$lib/utils/avatar';
+  import { getJurisdictionBadgeInfo, type JurisdictionBadgeInfo } from '$lib/utils/jurisdictionBadge';
   import { resolveEntityName } from '$lib/utils/entityNaming';
   import { compareStableText } from '$lib/utils/stableSort';
 
@@ -40,6 +41,8 @@
     entityId: string;
     name: string;
     avatar: string;
+    jurisdiction: string;
+    jurisdictionBadge: JurisdictionBadgeInfo | null;
     isSelf: boolean;
   };
 
@@ -51,6 +54,7 @@
     || null;
   $: currentEntity = resolveCurrentEntity();
   $: currentAvatar = currentEntity?.avatar || currentGroup?.avatar || '';
+  $: currentJurisdictionBadge = currentEntity?.jurisdictionBadge || null;
   $: currentTitle = resolveCurrentTitle();
   $: currentSubtitle = currentEntity?.entityId
     ? formatEntityMeta(currentEntity.entityId)
@@ -87,6 +91,8 @@
           entityId: signer?.entityId || '',
           name: signer?.entityId || 'Entity',
           avatar: entityAvatar(activeXlnFunctions, signer?.entityId || ''),
+          jurisdiction: signer?.jurisdiction || '',
+          jurisdictionBadge: getJurisdictionBadgeInfo(signer?.jurisdiction || null, null),
           isSelf: true
         } : null),
         derivedEntities,
@@ -132,6 +138,11 @@
         entityId,
         name: getEntityLabel(entityId, env, replica),
         avatar: entityAvatar(activeXlnFunctions, entityId),
+        jurisdiction: String(replica.state?.config?.jurisdiction?.name || replica.position?.jurisdiction || '').trim(),
+        jurisdictionBadge: getJurisdictionBadgeInfo(
+          replica.state?.config?.jurisdiction?.name || replica.position?.jurisdiction || null,
+          replica.state?.config?.jurisdiction?.chainId ?? null,
+        ),
         isSelf: normalizedEntityId === normalizeId(selfEntityId),
       });
     }
@@ -193,14 +204,14 @@
     return entity ? `${source} · ${entity}` : source;
   }
 
-  async function selectRuntimeEntity(runtimeId: string, signerId: string, entityId: string) {
+  async function selectRuntimeEntity(runtimeId: string, signerId: string, entity: EntitySummary) {
     const group = runtimeGroups.find((candidate) => candidate.runtimeId === runtimeId);
     if (group?.source === 'remote') runtimeOperations.selectRuntime(runtimeId);
     else await vaultOperations.selectRuntime(runtimeId);
     dispatch('entitySelect', {
-      jurisdiction: 'browservm',
+      jurisdiction: entity.jurisdiction || 'browservm',
       signerId,
-      entityId
+      entityId: entity.entityId
     });
     open = false;
   }
@@ -210,7 +221,7 @@
     else await vaultOperations.selectRuntime(group.runtimeId);
     if (group.selfEntity) {
       dispatch('entitySelect', {
-        jurisdiction: 'browservm',
+        jurisdiction: group.selfEntity.jurisdiction || 'browservm',
         signerId: group.signerId,
         entityId: group.selfEntity.entityId
       });
@@ -246,11 +257,21 @@
     data-entity-id={tab.entityId || ''}
     data-signer-id={tab.signerId || ''}
   >
-    {#if currentAvatar}
-      <img src={currentAvatar} alt="" class="pill-avatar" />
-    {:else}
-      <span class="pill-avatar placeholder">◎</span>
-    {/if}
+    <span class="pill-avatar-wrap">
+      {#if currentAvatar}
+        <img src={currentAvatar} alt="" class="pill-avatar" />
+      {:else}
+        <span class="pill-avatar placeholder">◎</span>
+      {/if}
+      {#if currentJurisdictionBadge}
+        <span
+          class={`jurisdiction-badge ${currentJurisdictionBadge.className}`}
+          title={currentJurisdictionBadge.title}
+        >
+          {currentJurisdictionBadge.symbol}
+        </span>
+      {/if}
+    </span>
     <span class="pill-copy">
       <span class="pill-title">{currentTitle}</span>
       <span class="pill-subtitle">{currentSubtitle}</span>
@@ -293,12 +314,22 @@
           {#if group.derivedEntities.length > 0}
             <div class="derived-list">
               {#each group.derivedEntities as entity (entity.entityId)}
-                <button class="entity-row" on:click={() => selectRuntimeEntity(group.runtimeId, group.signerId, entity.entityId)}>
-                  {#if entity.avatar}
-                    <img src={entity.avatar} alt="" class="entity-avatar" />
-                  {:else}
-                    <span class="entity-avatar placeholder">◌</span>
-                  {/if}
+                <button class="entity-row" on:click={() => selectRuntimeEntity(group.runtimeId, group.signerId, entity)}>
+                  <span class="entity-avatar-wrap">
+                    {#if entity.avatar}
+                      <img src={entity.avatar} alt="" class="entity-avatar" />
+                    {:else}
+                      <span class="entity-avatar placeholder">◌</span>
+                    {/if}
+                    {#if entity.jurisdictionBadge}
+                      <span
+                        class={`jurisdiction-badge ${entity.jurisdictionBadge.className}`}
+                        title={entity.jurisdictionBadge.title}
+                      >
+                        {entity.jurisdictionBadge.symbol}
+                      </span>
+                    {/if}
+                  </span>
                   <span class="entity-copy">
                     <span class="entity-name">{isOpaqueIdLabel(entity.name) ? truncateMiddle(entity.entityId) : entity.name}</span>
                     <span class="entity-meta">{formatEntityMeta(entity.entityId)}</span>
@@ -376,6 +407,57 @@
     width: 22px;
     height: 22px;
     border-radius: 7px;
+  }
+
+  .pill-avatar-wrap,
+  .entity-avatar-wrap {
+    position: relative;
+    flex-shrink: 0;
+  }
+
+  .pill-avatar-wrap {
+    width: 28px;
+    height: 28px;
+  }
+
+  .entity-avatar-wrap {
+    width: 22px;
+    height: 22px;
+  }
+
+  .jurisdiction-badge {
+    position: absolute;
+    right: -4px;
+    bottom: -4px;
+    width: 12px;
+    height: 12px;
+    border-radius: 5px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 7px;
+    font-weight: 800;
+    color: #fff;
+    border: 1px solid rgba(24, 20, 18, 0.98);
+    line-height: 1;
+  }
+
+  .jurisdiction-badge.ethereum,
+  .jurisdiction-badge.sepolia {
+    background: #3b82f6;
+  }
+
+  .jurisdiction-badge.base {
+    background: #0052ff;
+  }
+
+  .jurisdiction-badge.tron {
+    background: #ef4444;
+  }
+
+  .jurisdiction-badge.local,
+  .jurisdiction-badge.generic {
+    background: #52525b;
   }
 
   .placeholder {

@@ -277,15 +277,24 @@
     return Array.from(jReplicas.keys());
   }
 
-  function findReplicaBySigner(env: RuntimeFrame | null | undefined, signerId: string): EntityReplica | null {
+  function getReplicaJurisdiction(replica: EntityReplica | null | undefined): string {
+    return String(replica?.state?.config?.jurisdiction?.name || '').trim().toLowerCase();
+  }
+
+  function findReplicaBySigner(
+    env: RuntimeFrame | null | undefined,
+    signerId: string,
+    jurisdictionName?: string | null,
+  ): EntityReplica | null {
     const reps = env?.eReplicas;
     if (!reps) return null;
     const replicas = reps instanceof Map ? reps : new Map<string, EntityReplica>(Object.entries(reps || {}) as Array<[string, EntityReplica]>);
     const signerLower = signerId.toLowerCase();
+    const jurisdictionLower = String(jurisdictionName || '').trim().toLowerCase();
     for (const [key, replica] of replicas) {
       const [, signerFromKey] = String(key).split(':');
       const replicaSigner = String(replica?.signerId || signerFromKey || '').toLowerCase();
-      if (replicaSigner === signerLower) {
+      if (replicaSigner === signerLower && (!jurisdictionLower || getReplicaJurisdiction(replica) === jurisdictionLower)) {
         return replica;
       }
     }
@@ -364,14 +373,15 @@
 
       if (!signerAddress) continue;
       if (signerAddress.toLowerCase() !== activeRuntimeSigner) continue;
-      if (selfEntityChecked.has(signerAddress) || selfEntityInFlight.has(signerAddress)) continue;
+      const selfEntityKey = `${signerAddress.toLowerCase()}:${jurisdiction || ''}`;
+      if (selfEntityChecked.has(selfEntityKey) || selfEntityInFlight.has(selfEntityKey)) continue;
 
-      const existing = findReplicaBySigner(env, signerAddress);
+      const existing = findReplicaBySigner(env, signerAddress, jurisdiction);
       if (existing) {
         if (!signerEntry.entityId && existing.entityId) {
           vaultOperations.setSignerEntity(signerEntry.index, existing.entityId);
         }
-        selfEntityChecked.add(signerAddress);
+        selfEntityChecked.add(selfEntityKey);
 
         // Auto-select first entity if none selected
         if (!selectedEntityId && existing.entityId) {
@@ -383,15 +393,24 @@
         continue;
       }
 
-      selfEntityInFlight.add(signerAddress);
+      const otherJurisdictionEntity = findReplicaBySigner(env, signerAddress);
+      if (otherJurisdictionEntity && jurisdiction) {
+        const otherJurisdiction = getReplicaJurisdiction(otherJurisdictionEntity);
+        if (otherJurisdiction && otherJurisdiction !== jurisdiction.toLowerCase()) {
+          selfEntityChecked.add(selfEntityKey);
+          continue;
+        }
+      }
+
+      selfEntityInFlight.add(selfEntityKey);
       try {
         // Re-check right before creation to avoid duplicate create on reactive races.
-        const alreadyNow = findReplicaBySigner(env, signerAddress);
+        const alreadyNow = findReplicaBySigner(env, signerAddress, jurisdiction);
         if (alreadyNow?.entityId) {
           if (!signerEntry.entityId) {
             vaultOperations.setSignerEntity(signerEntry.index, alreadyNow.entityId);
           }
-          selfEntityChecked.add(signerAddress);
+          selfEntityChecked.add(selfEntityKey);
           if (!selectedEntityId) {
             viewMode = 'entity';
             selectedEntityId = alreadyNow.entityId;
@@ -404,12 +423,12 @@
         if (runEpoch !== ensureSelfEntitiesEpoch) return;
         if (entityId) {
           // Resolve canonical entity by signer after create to prevent duplicate/late-selection drift.
-          const canonical = findReplicaBySigner(env, signerAddress);
+          const canonical = findReplicaBySigner(env, signerAddress, jurisdiction);
           const finalEntityId = canonical?.entityId || entityId;
           console.log(`[ensureSelfEntities] ✅ Entity created: ${finalEntityId.slice(0, 10)} for signer ${signerAddress.slice(0, 10)}`);
           vaultOperations.setSignerEntity(signerEntry.index, finalEntityId);
           isolatedEnv.set(env);
-          selfEntityChecked.add(signerAddress);
+          selfEntityChecked.add(selfEntityKey);
 
           // Auto-select entity after creation
           viewMode = 'entity';
@@ -422,7 +441,7 @@
       } catch (err) {
         console.error('[ensureSelfEntities] ❌ ERROR:', err);
       } finally {
-        selfEntityInFlight.delete(signerAddress);
+        selfEntityInFlight.delete(selfEntityKey);
       }
     }
   }
@@ -588,6 +607,12 @@
 
       isolatedEnv.set(env);
       selectedJurisdictionName = name;
+      const signerForJurisdiction = vaultOperations.addSigner(`${name} signer`, name);
+      if (signerForJurisdiction?.address) {
+        vaultOperations.selectSigner(signerForJurisdiction.index);
+        selectedSignerId = signerForJurisdiction.address;
+        selectedEntityId = null;
+      }
       activeInlinePanel = 'none';
       isCreatingJMachine = false;
     } catch (err) {

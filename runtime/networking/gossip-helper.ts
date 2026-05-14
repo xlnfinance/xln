@@ -5,10 +5,17 @@
 
 import { ethers } from 'ethers';
 import type { EntityState, Env } from '../types';
-import type { BoardMetadata, Profile, ProfileAccount, ProfileTokenCapacity } from './gossip';
+import type {
+  BoardMetadata,
+  Profile,
+  ProfileAccount,
+  ProfileJurisdiction,
+  ProfileMirror,
+  ProfileTokenCapacity,
+} from './gossip';
 import { deriveDelta, isLeft } from '../account-utils';
 import { compareStableText, safeStringify } from '../serialization-utils';
-import { deriveSignerAddressSync, getSignerAddress, getSignerPublicKey } from '../account-crypto';
+import { deriveSignerAddressSync, getSignerAddress, getSignerPrivateKey, getSignerPublicKey } from '../account-crypto';
 import { deriveEncryptionKeyPair, pubKeyToHex } from './p2p-crypto';
 
 type BuiltProfile = Omit<Profile, 'runtimeId' | 'runtimeEncPubKey'>;
@@ -26,6 +33,37 @@ const normalizeX25519Hex = (raw: unknown): string | null => {
   if (!trimmed) return null;
   const prefixed = trimmed.startsWith('0x') ? trimmed : `0x${trimmed}`;
   return /^0x[0-9a-fA-F]{64}$/.test(prefixed) ? prefixed.toLowerCase() : null;
+};
+
+const buildProfileJurisdiction = (state: EntityState): ProfileJurisdiction | undefined => {
+  const jurisdiction = state.config?.jurisdiction;
+  const name = typeof jurisdiction?.name === 'string' ? jurisdiction.name.trim() : '';
+  if (!jurisdiction || !name) return undefined;
+  return {
+    name,
+    ...(jurisdiction.chainId !== undefined ? { chainId: jurisdiction.chainId } : {}),
+    ...(jurisdiction.entityProviderAddress ? { entityProviderAddress: jurisdiction.entityProviderAddress } : {}),
+    ...(jurisdiction.depositoryAddress ? { depositoryAddress: jurisdiction.depositoryAddress } : {}),
+  };
+};
+
+const buildProfileMirrors = (env: Env, entityState: EntityState): ProfileMirror[] => {
+  const mirrors = new Map<string, ProfileMirror>();
+  for (const replica of env.eReplicas?.values?.() || []) {
+    const entityId = String(replica?.state?.entityId || replica?.entityId || '').trim();
+    if (!entityId || entityId.toLowerCase() === entityState.entityId.toLowerCase()) continue;
+    try {
+      getSignerPrivateKey(env, replica.signerId);
+    } catch {
+      continue;
+    }
+    const jurisdiction = buildProfileJurisdiction(replica.state);
+    if (!jurisdiction) continue;
+    mirrors.set(entityId.toLowerCase(), { entityId, jurisdiction });
+  }
+  return Array.from(mirrors.values()).sort((a, b) =>
+    compareStableText(a.jurisdiction.name, b.jurisdiction.name) || compareStableText(a.entityId, b.entityId),
+  );
 };
 
 export type ProfileSignerResolver = {
@@ -208,8 +246,15 @@ export const buildLocalEntityProfile = (
   }
   const profileTimestamp = Math.max(1, timestamp);
   const profile = buildEntityProfile(entityState, profileTimestamp, createProfileSignerResolver(env));
+  const jurisdiction = buildProfileJurisdiction(entityState);
+  const mirrors = buildProfileMirrors(env, entityState);
   return {
     ...profile,
+    metadata: {
+      ...profile.metadata,
+      ...(jurisdiction ? { jurisdiction } : {}),
+      ...(mirrors.length > 0 ? { mirrors } : {}),
+    },
     runtimeId: resolveProfileRuntimeId(env, entityState.entityId),
     runtimeEncPubKey: pubKeyToHex(deriveEncryptionKeyPair(runtimeSeed).publicKey),
   };

@@ -18,6 +18,7 @@
     EnvSnapshot,
     JAdapter,
     JBatch,
+    XLNModule,
     Profile as GossipProfile,
     RoutedEntityInput,
     EntityTx,
@@ -38,6 +39,7 @@
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming';
   import { entityAvatar as resolveEntityAvatar } from '$lib/utils/avatar';
+  import { getJurisdictionBadgeInfo } from '$lib/utils/jurisdictionBadge';
   import { formatEntityId } from '$lib/utils/format';
   import { resetEverything } from '$lib/utils/resetEverything';
 
@@ -515,6 +517,21 @@
     return typeof env.activeJurisdiction === 'string' && env.activeJurisdiction.length > 0
       ? env.activeJurisdiction
       : null;
+  }
+
+  function getCurrentEntityJurisdictionName(env: Env | EnvSnapshot | null | undefined): string | null {
+    const configured = String(replica?.state?.config?.jurisdiction?.name || '').trim();
+    return configured || getActiveJurisdictionName(env);
+  }
+
+  function getCurrentEntityJAdapter(xln: XLNModule, env: Env, context: string): JAdapter {
+    const entityId = String(replica?.state?.entityId || tab.entityId || '').trim();
+    const signerId = String(currentSignerId || tab.signerId || '').trim();
+    const jadapter = entityId && xln.getEntityJAdapter
+      ? xln.getEntityJAdapter(env, entityId, signerId || undefined)
+      : xln.getActiveJAdapter?.(env);
+    if (!jadapter) throw new Error(`J-adapter not available for ${context}`);
+    return jadapter;
   }
 
   function getGossipProfiles(env: Env | EnvSnapshot | null | undefined): GossipProfile[] {
@@ -1411,6 +1428,10 @@
     const gossip = (gossipName ?? '').trim();
     return gossip && !isPlaceholderName(gossip) ? gossip : fallbackId;
   })();
+  $: entityJurisdictionBadge = getJurisdictionBadgeInfo(
+    replica?.state?.config?.jurisdiction?.name || selectedJurisdictionName || tab.jurisdiction || null,
+    replica?.state?.config?.jurisdiction?.chainId ?? null,
+  );
 
   // Format short address for display
   function formatAddress(addr: string): string {
@@ -1978,8 +1999,7 @@
   }> {
     const env = requireRuntimeEnv(activeEnv, context);
     const xln = await getXLN();
-    const jadapter = xln.getActiveJAdapter?.(env);
-    if (!jadapter) throw new Error('J-adapter not available');
+    const jadapter = getCurrentEntityJAdapter(xln, env, context);
     const owner = resolveSelfEoaAddress();
     if (!isAddress(owner)) throw new Error('Active signer EOA missing');
     const spender = String(jadapter.addresses.depository || '').trim();
@@ -2409,7 +2429,7 @@
       console.log('[EntityPanel] Offchain faucet success:', result);
       pendingOffchainFaucets = pendingOffchainFaucets.map((req) =>
         faucetPendingKey(req.hubEntityId, req.tokenId) === pendingKey
-          ? { ...req, requestId: result?.requestId }
+          ? { ...req, ...(result?.requestId ? { requestId: result.requestId } : {}) }
           : req,
       );
     } catch (err) {
@@ -2870,7 +2890,7 @@
       const signerId = String(currentSignerId || '').trim();
       const owner = resolveSelfEoaAddress();
       const runtimeId = String(getRuntimeId(activeEnv) || '').trim();
-      const jurisdiction = String(getActiveJurisdictionName(activeEnv) || '').trim();
+      const jurisdiction = String(getCurrentEntityJurisdictionName(activeEnv) || '').trim();
       const fetchKey = `${owner}|${runtimeId}|${jurisdiction}`;
       externalTokensLoading = true;
       if (!signerId || !isAddress(owner)) {
@@ -2887,7 +2907,7 @@
       try {
         const xln = await getXLN();
         const envAtStart = getRuntimeEnv(activeEnv);
-        const jadapter = xln.getActiveJAdapter?.(envAtStart ?? null);
+        const jadapter = envAtStart ? getCurrentEntityJAdapter(xln, envAtStart, 'fetch-external-tokens') : null;
         const tokenList = await getTokenList(jadapter, runtimeId, jurisdiction);
         const allowanceToken = moveAllowanceRouteEnabled
           ? tokenList.find((token) =>
@@ -2944,7 +2964,7 @@
         });
 
         const runtimeIdNow = getRuntimeId(activeEnv);
-        const jurisdictionNow = String(getActiveJurisdictionName(activeEnv) || '');
+        const jurisdictionNow = String(getCurrentEntityJurisdictionName(activeEnv) || '');
         const currentKey = `${resolveSelfEoaAddress()}|${String(runtimeIdNow || '').trim()}|${jurisdictionNow.trim()}`;
         if (currentKey === fetchKey) {
           externalTokens = sortExternalTokens([
@@ -2996,8 +3016,7 @@
     if (!isAddress(recipient)) throw new Error('Recipient must be a valid EOA address');
     const amount = parsePositiveAssetAmount(sendAssetAmount, token, token.balance);
     const xln = await getXLN();
-    const jadapter = xln.getActiveJAdapter?.(requireRuntimeEnv(activeEnv, 'send-external-asset'));
-    if (!jadapter) throw new Error('J-adapter not available');
+    const jadapter = getCurrentEntityJAdapter(xln, requireRuntimeEnv(activeEnv, 'send-external-asset'), 'send-external-asset');
     const privKey = await getActiveSignerPrivateKey();
     sendingExternalToken = token.symbol;
     try {
@@ -3825,7 +3844,13 @@
     debtEnforcingTokenId = tokenId;
     try {
       const xln = await getXLN();
-      await xln.submitDebtEnforcement(requireRuntimeEnv(activeEnv, 'debt-enforcement'), entityId, tokenId, maxIterations);
+      await xln.submitDebtEnforcement(
+        requireRuntimeEnv(activeEnv, 'debt-enforcement'),
+        entityId,
+        tokenId,
+        maxIterations,
+        currentSignerId || tab.signerId || undefined,
+      );
       const token = getTokenInfo(tokenId);
       const tokenLabel = symbol || token.symbol || `Token #${tokenId}`;
       const amountLabel = `${formatAmount(payableAmount, token.decimals)} ${tokenLabel}`;
@@ -5219,13 +5244,24 @@
       <section class="hero">
         <div class="hero-left" class:user-mode={userModeHeader}>
           {#if !userModeHeader}
-            {#if avatar}
-              <img src={avatar} alt="Entity avatar" class="hero-avatar" />
-            {:else}
-              <div class="hero-avatar placeholder">
-                {activeXlnFunctions?.getEntityShortId?.(tab.entityId)?.slice(0,2) || '??'}
-              </div>
-            {/if}
+            <div class="hero-avatar-wrap">
+              {#if avatar}
+                <img src={avatar} alt="Entity avatar" class="hero-avatar" />
+              {:else}
+                <div class="hero-avatar placeholder">
+                  {activeXlnFunctions?.getEntityShortId?.(tab.entityId)?.slice(0,2) || '??'}
+                </div>
+              {/if}
+              {#if entityJurisdictionBadge}
+                <span
+                  class={`jurisdiction-avatar-badge ${entityJurisdictionBadge.className}`}
+                  title={entityJurisdictionBadge.title}
+                  aria-label={entityJurisdictionBadge.title}
+                >
+                  {entityJurisdictionBadge.symbol}
+                </span>
+              {/if}
+            </div>
           {/if}
           <div class="hero-identity" class:user-mode={userModeHeader}>
             {#if userModeHeader}
@@ -6453,6 +6489,13 @@
     flex-shrink: 0;
   }
 
+  .hero-avatar-wrap {
+    position: relative;
+    width: 48px;
+    height: 48px;
+    flex-shrink: 0;
+  }
+
   .hero-avatar.placeholder {
     background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 100%);
     box-shadow: 0 2px 8px rgba(251, 191, 36, 0.2);
@@ -6463,6 +6506,42 @@
     font-size: 14px;
     font-weight: 700;
     color: #0c0a09;
+  }
+
+  .jurisdiction-avatar-badge {
+    position: absolute;
+    right: -4px;
+    bottom: -4px;
+    width: 19px;
+    height: 19px;
+    border-radius: 7px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 10px;
+    font-weight: 800;
+    line-height: 1;
+    color: #fff;
+    border: 2px solid var(--theme-card-bg, var(--theme-surface, #18181b));
+    box-shadow: 0 2px 8px color-mix(in srgb, #000 22%, transparent);
+  }
+
+  .jurisdiction-avatar-badge.ethereum,
+  .jurisdiction-avatar-badge.sepolia {
+    background: #3b82f6;
+  }
+
+  .jurisdiction-avatar-badge.base {
+    background: #0052ff;
+  }
+
+  .jurisdiction-avatar-badge.tron {
+    background: #ef4444;
+  }
+
+  .jurisdiction-avatar-badge.local,
+  .jurisdiction-avatar-badge.generic {
+    background: #52525b;
   }
 
   .hero-identity {

@@ -1,5 +1,5 @@
 import { writable, get, derived } from 'svelte/store';
-import { HDNodeWallet, Mnemonic, getAddress, getIndexedAccountPath } from 'ethers';
+import { HDNodeWallet, Mnemonic, getAddress, getIndexedAccountPath, keccak256, toUtf8Bytes } from 'ethers';
 import type { Env, JurisdictionConfig, PersistedFrameJournal, RoutedEntityInput, RuntimeInput, XLNModule } from '@xln/runtime/xln-api';
 import { runtimeOperations, runtimes, activeRuntimeId } from './runtimeStore';
 import { xlnEnvironment, setXlnEnvironment, isFinancialRestoreFailure, resolveRelayUrls, getXLN } from './xlnStore';
@@ -13,10 +13,12 @@ import { isInactiveTabStandby } from '$lib/utils/activeTabLock';
 
 // Types
 export interface Signer {
-  index: number;
+  index: number; // signer list index
+  derivationIndex?: number; // HD account index; defaults to index for legacy signers
   address: string;
   name: string;
   entityId?: string; // Auto-created entity for this signer
+  jurisdiction?: string; // Preferred jurisdiction for this signer/runtime lane
 }
 
 export interface Runtime {
@@ -172,6 +174,21 @@ function derivePrivateKey(seed: string, index: number): string {
   const mnemonic = Mnemonic.fromPhrase(seed);
   const hdNode = HDNodeWallet.fromMnemonic(mnemonic, getIndexedAccountPath(index));
   return hdNode.privateKey;
+}
+
+const normalizeJurisdictionKey = (value: string | null | undefined): string =>
+  String(value || '').trim().toLowerCase();
+
+function deriveJurisdictionSignerIndex(jurisdiction: string): number {
+  const key = normalizeJurisdictionKey(jurisdiction);
+  if (!key) throw new Error('Jurisdiction is required for jurisdiction signer derivation');
+  const digest = keccak256(toUtf8Bytes(`xln:jurisdiction-signer:v1:${key}`));
+  const bucket = Number(BigInt(digest) % 1_000_000n);
+  return 100_000 + bucket;
+}
+
+function getSignerDerivationIndex(signer: Signer | null | undefined): number {
+  return Number.isInteger(signer?.derivationIndex) ? Number(signer!.derivationIndex) : Number(signer?.index ?? 0);
 }
 
 const findRuntimeByIdCaseInsensitive = (
@@ -628,7 +645,7 @@ function runtimeToEntry(runtime: Runtime, env: Env) {
 
 async function registerRuntimeSignerKeys(runtime: Runtime, xln: XLNModule): Promise<void> {
   for (const signer of runtime.signers) {
-    const privateKey = derivePrivateKey(runtime.seed, signer.index);
+    const privateKey = derivePrivateKey(runtime.seed, getSignerDerivationIndex(signer));
     const privateKeyBytes = new Uint8Array(
       privateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))
     );
@@ -1613,7 +1630,7 @@ export const vaultOperations = {
       const xln = await getXLN();
 
       for (const signer of runtime.signers) {
-        const privateKey = derivePrivateKey(runtime.seed, signer.index);
+        const privateKey = derivePrivateKey(runtime.seed, getSignerDerivationIndex(signer));
         const privateKeyBytes = new Uint8Array(
           privateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))
         );
@@ -1643,20 +1660,29 @@ export const vaultOperations = {
   },
 
   // Add signer to active runtime
-  addSigner(name?: string): Signer | null {
+  addSigner(name?: string, jurisdiction?: string): Signer | null {
     const current = get(runtimesState);
     if (!current.activeRuntimeId) return null;
 
     const runtime = current.runtimes[current.activeRuntimeId];
     if (!runtime) return null;
 
+    const jurisdictionKey = normalizeJurisdictionKey(jurisdiction);
+    if (jurisdictionKey) {
+      const existing = runtime.signers.find((signer) => normalizeJurisdictionKey(signer.jurisdiction) === jurisdictionKey);
+      if (existing) return existing;
+    }
+
     const nextIndex = runtime.signers.length;
-    const address = deriveAddress(runtime.seed, nextIndex);
+    const derivationIndex = jurisdictionKey ? deriveJurisdictionSignerIndex(jurisdictionKey) : nextIndex;
+    const address = deriveAddress(runtime.seed, derivationIndex);
 
     const newSigner: Signer = {
       index: nextIndex,
+      ...(derivationIndex !== nextIndex ? { derivationIndex } : {}),
       address,
-      name: name || `Signer ${nextIndex + 1}`
+      name: name || `Signer ${nextIndex + 1}`,
+      ...(jurisdiction ? { jurisdiction } : {}),
     };
 
     runtimesState.update(state => ({
@@ -1677,7 +1703,7 @@ export const vaultOperations = {
     // Without this, hanko verification fails (signature from wrong key)
     import('./xlnStore').then(async ({ getXLN }) => {
       const xln = await getXLN();
-      const privateKey = derivePrivateKey(runtime.seed, nextIndex);
+      const privateKey = derivePrivateKey(runtime.seed, derivationIndex);
       const privateKeyBytes = new Uint8Array(
         privateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))
       );
@@ -1686,7 +1712,7 @@ export const vaultOperations = {
 
       // Now create entity (key is registered, signing will work)
       const { autoCreateEntityForSigner } = await import('../utils/entityFactory');
-      const entityId = await autoCreateEntityForSigner(address);
+      const entityId = await autoCreateEntityForSigner(address, jurisdiction);
       if (entityId) {
         this.setSignerEntity(nextIndex, entityId);
         console.log(`[VaultStore] ✅ Entity created for signer ${address.slice(0, 10)}`);
@@ -1807,7 +1833,9 @@ export const vaultOperations = {
     const runtime = current.runtimes[current.activeRuntimeId];
     if (!runtime) return null;
 
-    return derivePrivateKey(runtime.seed, runtime.activeSignerIndex);
+    const signer = runtime.signers[runtime.activeSignerIndex];
+    if (!signer) return null;
+    return derivePrivateKey(runtime.seed, getSignerDerivationIndex(signer));
   },
 
   // Get private key for specific signer
@@ -1818,7 +1846,7 @@ export const vaultOperations = {
     const runtime = current.runtimes[current.activeRuntimeId];
     if (!runtime || signerIndex >= runtime.signers.length) return null;
 
-    return derivePrivateKey(runtime.seed, signerIndex);
+    return derivePrivateKey(runtime.seed, getSignerDerivationIndex(runtime.signers[signerIndex]));
   },
 
   // Check if runtime exists
@@ -1941,7 +1969,9 @@ export const vaultOperations = {
       const { getXLN } = await import('./xlnStore');
       const xln = await getXLN();
       const env = get(xlnEnvironment);
-      const jadapter = xln.getActiveJAdapter?.(env);
+      const jadapter = env
+        ? xln.getEntityJAdapter?.(env, signer.entityId, signer.address) ?? xln.getActiveJAdapter?.(env)
+        : null;
       if (!jadapter?.getReserves) return 0n;
 
       return await jadapter.getReserves(signer.entityId, tokenId);
