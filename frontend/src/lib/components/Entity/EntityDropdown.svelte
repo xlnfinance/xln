@@ -10,6 +10,7 @@
   import type { EntityReplica, Tab } from '$lib/types/ui';
   import type { FrontendXlnFunctions } from '$lib/stores/xlnStore';
   import { entityAvatar, preferredAvatar } from '$lib/utils/avatar';
+  import { getJurisdictionBadgeInfo, type JurisdictionBadgeInfo } from '$lib/utils/jurisdictionBadge';
   import { resolveEntityName, scheduleGossipProfileFetch } from '$lib/utils/entityNaming';
 
   export let tab: Tab;
@@ -44,6 +45,8 @@
     shortId: string;
     avatar: string;
     signerId: string;
+    jurisdiction: string;
+    jurisdictionBadge: JurisdictionBadgeInfo | null;
   }
 
   interface JMachineNode {
@@ -109,7 +112,12 @@
           name: displayName,
           shortId,
           avatar: entityAvatar(xlnFuncs, entityId),
-          signerId
+          signerId,
+          jurisdiction: String(replica.state?.config?.jurisdiction?.name || replica.position?.jurisdiction || '').trim(),
+          jurisdictionBadge: getJurisdictionBadgeInfo(
+            replica.state?.config?.jurisdiction?.name || replica.position?.jurisdiction || null,
+            replica.state?.config?.jurisdiction?.chainId ?? null,
+          ),
         });
       }
 
@@ -160,9 +168,9 @@
     searchTerm = '';
   }
 
-  function selectEntity(signerId: string, entityId: string) {
+  function selectEntity(signerId: string, entityId: string, jurisdiction: string) {
     dispatch('entitySelect', {
-      jurisdiction: 'browservm',
+      jurisdiction: jurisdiction || 'browservm',
       signerId,
       entityId
     });
@@ -255,12 +263,22 @@
               <button
                 class="signer-item"
                 class:last={i === signer.entities.length - 1}
-                on:click={() => selectEntity(entity.signerId, entity.entityId)}
+                on:click={() => selectEntity(entity.signerId, entity.entityId, entity.jurisdiction)}
               >
                 <span class="tree-branch">{i === signer.entities.length - 1 ? '└─' : '├─'}</span>
-                {#if entity.avatar}
-                  <img src={entity.avatar} alt="" class="avatar-sm" />
-                {/if}
+                <span class="avatar-sm-wrap">
+                  {#if entity.avatar}
+                    <img src={entity.avatar} alt="" class="avatar-sm" />
+                  {/if}
+                  {#if entity.jurisdictionBadge}
+                    <span
+                      class={`jurisdiction-badge ${entity.jurisdictionBadge.className}`}
+                      title={entity.jurisdictionBadge.title}
+                    >
+                      {entity.jurisdictionBadge.symbol}
+                    </span>
+                  {/if}
+                </span>
                 <span class="signer-addr">{entity.name}</span>
               </button>
             {/each}
@@ -447,6 +465,48 @@
     width: 16px;
     height: 16px;
     border-radius: 3px;
+  }
+
+  .avatar-sm-wrap {
+    position: relative;
+    width: 16px;
+    height: 16px;
+    flex-shrink: 0;
+  }
+
+  .jurisdiction-badge {
+    position: absolute;
+    right: -4px;
+    bottom: -4px;
+    width: 10px;
+    height: 10px;
+    border-radius: 4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 6px;
+    font-weight: 800;
+    color: #fff;
+    border: 1px solid #18181b;
+    line-height: 1;
+  }
+
+  .jurisdiction-badge.ethereum,
+  .jurisdiction-badge.sepolia {
+    background: #3b82f6;
+  }
+
+  .jurisdiction-badge.base {
+    background: #0052ff;
+  }
+
+  .jurisdiction-badge.tron {
+    background: #ef4444;
+  }
+
+  .jurisdiction-badge.local,
+  .jurisdiction-badge.generic {
+    background: #52525b;
   }
 
   .entity-name {

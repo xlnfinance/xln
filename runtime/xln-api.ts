@@ -216,7 +216,14 @@ export interface XLNModule {
   registerEnvChangeCallback: (env: Env, callback: (env: Env) => void) => (() => void);
   getEnv: (env?: Env | null) => Env | null;
   getActiveJAdapter?: (env: Env | null) => JAdapter | null;
-  submitDebtEnforcement: (env: Env, entityId: string, tokenId: number) => Promise<void>;
+  getEntityJAdapter?: (env: Env, entityId: string, signerId?: string) => JAdapter | null;
+  submitDebtEnforcement: (
+    env: Env,
+    entityId: string,
+    tokenId: number,
+    maxIterations?: number | bigint,
+    signerId?: string,
+  ) => Promise<void>;
   processJBlockEvents?: (env: Env) => Promise<void>;
   queueEntityInput?: (env: Env, entityId: string, signerId: string, txData: QueueEntityInputPayload) => Promise<void>;
   setDeltaTransformerAddress?: (address: string) => void;

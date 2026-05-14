@@ -114,9 +114,14 @@ export async function createEphemeralEntity(
   return entityId;
 }
 
-function findReplicaBySigner(env: Env, signerId: string): EntityReplica | null {
+function findReplicaBySigner(env: Env, signerId: string, jurisdictionName?: string | null): EntityReplica | null {
+  const jurisdictionLower = String(jurisdictionName || '').trim().toLowerCase();
   for (const replica of env.eReplicas.values()) {
-    if (replica.signerId.toLowerCase() === signerId.toLowerCase()) {
+    const replicaJurisdiction = String(replica.state?.config?.jurisdiction?.name || '').trim().toLowerCase();
+    if (
+      replica.signerId.toLowerCase() === signerId.toLowerCase() &&
+      (!jurisdictionLower || replicaJurisdiction === jurisdictionLower)
+    ) {
       return replica;
     }
   }
@@ -247,14 +252,14 @@ export async function autoCreateEntityForSigner(
         return null;
       }
 
-      const existing = findReplicaBySigner(env, signerAddress);
-      if (existing?.entityId) return existing.entityId;
-
       const names = listJMachineNames(env);
       const targetJurisdiction =
         (jurisdiction && jurisdiction !== 'default' && names.includes(jurisdiction))
           ? jurisdiction
           : (env.activeJurisdiction || names[0] || null);
+
+      const existing = findReplicaBySigner(env, signerAddress, targetJurisdiction);
+      if (existing?.entityId) return existing.entityId;
 
       return await createSelfEntity(env, signerAddress, targetJurisdiction || undefined);
     } catch (error) {

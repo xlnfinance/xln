@@ -2,7 +2,10 @@ import type { EntityInput, EntityState, EntityTx, Env, HashType, JInput, JTx } f
 import { requireUsableContractAddress } from '../../contract-address';
 import { addMessage, cloneEntityState } from '../../state-helpers';
 import { batchOpCount, cloneJBatch, computeBatchHankoHash, encodeJBatch, isBatchEmpty } from '../../j-batch';
-import { resolveRuntimeJurisdictionConfig } from '../../jurisdiction-runtime';
+import {
+  getJurisdictionConfigName,
+  requireRuntimeJurisdictionConfigByName,
+} from '../../jurisdiction-runtime';
 import type { ApplyEntityTxResult } from '../apply';
 
 const MIN_GAS_BUMP_BPS = 0;
@@ -42,9 +45,22 @@ export async function handleJRebroadcast(
   }
 
   const gasBumpBps = normalizeGasBumpBps(entityTx.data.gasBumpBps);
-  const jurisdiction = resolveRuntimeJurisdictionConfig(env, newState.config.jurisdiction);
-  if (!jurisdiction) {
+  const configuredJurisdictionName = getJurisdictionConfigName(newState.config.jurisdiction);
+  if (!configuredJurisdictionName) {
     const msg = '❌ No jurisdiction configured for j_rebroadcast';
+    addMessage(newState, msg);
+    return { newState, outputs, jOutputs };
+  }
+
+  let jurisdiction;
+  try {
+    jurisdiction = requireRuntimeJurisdictionConfigByName(
+      env,
+      configuredJurisdictionName,
+      newState.config.jurisdiction,
+    );
+  } catch (error) {
+    const msg = `❌ Jurisdiction unavailable for j_rebroadcast: ${error instanceof Error ? error.message : String(error)}`;
     addMessage(newState, msg);
     return { newState, outputs, jOutputs };
   }
@@ -55,7 +71,7 @@ export async function handleJRebroadcast(
     addMessage(newState, msg);
     return { newState, outputs, jOutputs };
   }
-  const jurisdictionName = jurisdiction.name || env.activeJurisdiction || 'default';
+  const jurisdictionName = jurisdiction.name;
   // j_rebroadcast must stay dumb on purpose:
   // resend the current sentBatch exactly as stored, without revalidation, filtering,
   // or any state-dependent mutation. Stale cleanup belongs to the transition paths

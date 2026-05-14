@@ -28,6 +28,40 @@ function resolveLocalRpcUrl(): string {
 
 export const POPULAR_NETWORKS: NetworkConfig[] = [
   {
+    chainId: 1,
+    name: 'Ethereum',
+    ticker: 'ETH',
+    icon: '⟠',
+    rpcs: ['https://ethereum-rpc.publicnode.com'],
+    explorer: 'https://etherscan.io',
+  },
+  {
+    chainId: 8453,
+    name: 'Base',
+    ticker: 'ETH',
+    icon: '🔵',
+    rpcs: ['https://mainnet.base.org'],
+    explorer: 'https://basescan.org',
+  },
+  {
+    chainId: 11155111,
+    name: 'Sepolia',
+    ticker: 'ETH',
+    icon: '🧪',
+    rpcs: ['https://ethereum-sepolia-rpc.publicnode.com'],
+    explorer: 'https://sepolia.etherscan.io',
+    testnet: true,
+  },
+  {
+    chainId: 84532,
+    name: 'Base Sepolia',
+    ticker: 'ETH',
+    icon: '🟦',
+    rpcs: ['https://sepolia.base.org'],
+    explorer: 'https://sepolia.basescan.org',
+    testnet: true,
+  },
+  {
     chainId: 31337,
     name: 'Localhost',
     ticker: 'ETH',
