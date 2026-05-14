@@ -58,6 +58,7 @@ export interface EntityProviderInterface extends Interface {
       | "batchVerifyHankoSignatures"
       | "cancelBoardProposal"
       | "entities"
+      | "entityActionNonces"
       | "entityTransferTokens"
       | "foundationRegisterEntity"
       | "getEntityFromToken"
@@ -146,6 +147,10 @@ export interface EntityProviderInterface extends Interface {
     values: [BytesLike, BigNumberish, EntityProvider.EntityArticlesStruct]
   ): string;
   encodeFunctionData(functionFragment: "entities", values: [BytesLike]): string;
+  encodeFunctionData(
+    functionFragment: "entityActionNonces",
+    values: [BytesLike]
+  ): string;
   encodeFunctionData(
     functionFragment: "entityTransferTokens",
     values: [
@@ -321,6 +326,10 @@ export interface EntityProviderInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "entities", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "entityActionNonces",
+    data: BytesLike
+  ): Result;
   decodeFunctionResult(
     functionFragment: "entityTransferTokens",
     data: BytesLike
@@ -785,6 +794,8 @@ export interface EntityProvider extends BaseContract {
     "view"
   >;
 
+  entityActionNonces: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
+
   entityTransferTokens: TypedContractMethod<
     [
       entityNumber: BigNumberish,
@@ -1058,6 +1069,9 @@ export interface EntityProvider extends BaseContract {
     ],
     "view"
   >;
+  getFunction(
+    nameOrSignature: "entityActionNonces"
+  ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
   getFunction(
     nameOrSignature: "entityTransferTokens"
   ): TypedContractMethod<

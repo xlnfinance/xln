@@ -48,6 +48,10 @@ library Account {
   error E7(); // InvalidParty
   error E8(); // LengthMismatch
   error E9(); // HashMismatch
+  error E10(); // BatchTooLarge
+
+  uint256 private constant MAX_SETTLEMENT_DIFFS = 32;
+  uint256 private constant MAX_SETTLEMENT_FORGIVENESS_IDS = 32;
 
   // ========== PURE HELPERS ==========
 
@@ -259,6 +263,14 @@ library Account {
 
     bytes memory acct_key = _accountKey(leftEntity, rightEntity);
     bytes32 counterparty = (initiator == leftEntity) ? rightEntity : leftEntity;
+
+    if (s.diffs.length > MAX_SETTLEMENT_DIFFS) revert E10();
+    if (s.forgiveDebtsInTokenIds.length > MAX_SETTLEMENT_FORGIVENESS_IDS) revert E10();
+    for (uint j = 0; j < s.diffs.length; j++) {
+      for (uint k = 0; k < j; k++) {
+        if (s.diffs[j].tokenId == s.diffs[k].tokenId) revert E2();
+      }
+    }
 
     // NONCE CHECK: signedNonce > storedNonce (strictly greater)
     if (s.nonce <= _accounts[acct_key].nonce) revert E2();
