@@ -311,7 +311,7 @@ PY
   nginx -t
   systemctl reload nginx
 
-  if ! curl -ksSI --max-time 10 'https://xln.finance/resetdb?returnTo=%2Fapp' | grep -iq '^clear-site-data: "\*"$'; then
+  if ! curl -ksSI --max-time 10 'https://xln.finance/resetdb?returnTo=%2Fapp' | tr -d '\r' | grep -iq '^clear-site-data: "\*"$'; then
     echo "[deploy] /resetdb Clear-Site-Data header not visible on public endpoint" >&2
     return 1
   fi
