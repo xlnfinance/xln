@@ -16,6 +16,27 @@ type ApiTrafficEntry = {
   durationMs?: number;
 };
 
+type HealthPayload = {
+  hubMesh?: {
+    hubIds?: string[];
+  };
+  hubs?: Array<{
+    entityId?: string;
+    name?: string;
+    online?: boolean;
+  }>;
+};
+
+type DebugEntity = {
+  entityId?: string;
+  name?: string;
+  isHub?: boolean;
+  online?: boolean;
+  metadata?: {
+    isHub?: boolean;
+  };
+};
+
 const baseUrl = String(process.env.PROD_BASE_URL || process.env.E2E_BASE_URL || 'https://xln.finance')
   .replace(/\/+$/, '');
 const headless = process.env.HEADFUL !== '1';
@@ -56,6 +77,26 @@ async function getTokenId(symbol: string): Promise<number> {
   return token.tokenId;
 }
 
+async function resolvePrimaryHubId(health: HealthPayload | null): Promise<string> {
+  const healthHub = health?.hubMesh?.hubIds?.find((id) => /^0x[a-fA-F0-9]{64}$/.test(String(id || '')));
+  if (healthHub) return healthHub;
+
+  const namedHealthHub = health?.hubs?.find((hub) =>
+    hub.online !== false && /^0x[a-fA-F0-9]{64}$/.test(String(hub.entityId || '')),
+  )?.entityId;
+  if (namedHealthHub) return namedHealthHub;
+
+  const debug = await fetchJson<{ entities?: DebugEntity[] }>('/api/debug/entities?online=true&limit=100');
+  const hub = (debug.entities || []).find((entity) =>
+    (entity.isHub === true || entity.metadata?.isHub === true) &&
+    /^0x[a-fA-F0-9]{64}$/.test(String(entity.entityId || '')),
+  );
+  if (!hub?.entityId) {
+    throw new Error('Primary hub id is missing from /api/health and /api/debug/entities');
+  }
+  return hub.entityId;
+}
+
 async function readRenderedAccountTokenOut(page: import('playwright').Page, hubId: string, symbol: string): Promise<number> {
   return await page.evaluate(({ hubId, symbol }) => {
     const preview = document.querySelector(`.account-preview[data-counterparty-id="${String(hubId).toLowerCase()}"]`);
@@ -77,25 +118,6 @@ async function readRenderedAccountTokenOut(page: import('playwright').Page, hubI
     }
     return Number.NaN;
   }, { hubId, symbol });
-}
-
-async function waitForRenderedOutAbove(
-  page: import('playwright').Page,
-  hubId: string,
-  symbol: string,
-  baselineOut: number,
-  timeoutMs: number,
-): Promise<{ value: number; elapsedMs: number }> {
-  const startedAt = Date.now();
-  const deadline = startedAt + timeoutMs;
-  while (Date.now() <= deadline) {
-    const value = await readRenderedAccountTokenOut(page, hubId, symbol);
-    if (Number.isFinite(value) && value > baselineOut) {
-      return { value, elapsedMs: Date.now() - startedAt };
-    }
-    await page.waitForTimeout(25);
-  }
-  throw new Error(`Timed out waiting for rendered ${symbol} out capacity to exceed ${baselineOut}`);
 }
 
 const browser = await chromium.launch({ headless });
@@ -149,8 +171,7 @@ try {
     fetchJson<{ version?: string }>('/_app/version.json'),
     getTokenId(tokenSymbol),
   ]);
-  const hubId = health?.hubMesh?.hubIds?.[0];
-  if (!hubId) throw new Error('Primary hub id is missing from /api/health');
+  const hubId = await resolvePrimaryHubId(health as HealthPayload | null);
 
   console.log(`[prod-faucet] base=${baseUrl} app=${appVersion.version || 'n/a'} network=${jurisdictions.deployVersion || jurisdictions.networkVersion || jurisdictions.version || 'n/a'}`);
   console.log(`[prod-faucet] creating ${label} and connecting to hub ${hubId.slice(0, 10)}... token=${tokenSymbol}#${tokenId}`);
@@ -177,21 +198,36 @@ try {
   await faucetButton.click();
 
   let clickToVisibleFeedbackMs: number | null = null;
-  const feedbackDeadline = Date.now() + 1_500;
-  while (Date.now() <= feedbackDeadline) {
-    const [buttonText, disabled, renderedOut] = await Promise.all([
-      faucetButton.textContent().catch(() => ''),
-      faucetButton.isDisabled().catch(() => false),
+  let clickToDomVisibleMs: number | null = null;
+  let finalOut = Number.NaN;
+  const deadline = clickEpochMs + 15_000;
+  while (Date.now() <= deadline) {
+    const [buttonState, renderedOut] = await Promise.all([
+      row.evaluate((element) => {
+        const buttons = Array.from(element.querySelectorAll('button'));
+        return {
+          hasFundingText: buttons.some((button) => /Funding/i.test(String(button.textContent || ''))),
+          anyDisabled: buttons.some((button) => button.disabled),
+        };
+      }).catch(() => ({ hasFundingText: false, anyDisabled: false })),
       readRenderedAccountTokenOut(page, hubId, tokenSymbol),
     ]);
-    if (/Funding/i.test(String(buttonText || '')) || disabled || renderedOut > baselineOut) {
+    if (
+      clickToVisibleFeedbackMs === null &&
+      (buttonState.hasFundingText || buttonState.anyDisabled || renderedOut > baselineOut)
+    ) {
       clickToVisibleFeedbackMs = Date.now() - clickEpochMs;
+    }
+    if (Number.isFinite(renderedOut) && renderedOut > baselineOut) {
+      finalOut = renderedOut;
+      clickToDomVisibleMs = Date.now() - clickEpochMs;
       break;
     }
     await page.waitForTimeout(25);
   }
-
-  const visible = await waitForRenderedOutAbove(page, hubId, tokenSymbol, baselineOut, 15_000);
+  if (!Number.isFinite(finalOut) || clickToDomVisibleMs === null) {
+    throw new Error(`Timed out waiting for rendered ${tokenSymbol} out capacity to exceed ${baselineOut}`);
+  }
   await page.waitForTimeout(250);
 
   const apiTrafficAfterClick = traffic
@@ -215,15 +251,15 @@ try {
     tokenSymbol,
     tokenId,
     baselineOut,
-    finalOut: visible.value,
-    gained: visible.value - baselineOut,
+    finalOut,
+    gained: finalOut - baselineOut,
     clickToVisibleFeedbackMs,
     clickToFaucetRequestMs: faucetRequestStartedAt === null ? null : faucetRequestStartedAt - clickEpochMs,
     faucetApiRoundtripMs:
       faucetRequestStartedAt === null || faucetResponseAt === null ? null : faucetResponseAt - faucetRequestStartedAt,
     faucetServerDurationMs: faucetResponseBody?.serverDurationMs ?? null,
     faucetRequestId: faucetResponseBody?.requestId ?? null,
-    clickToDomVisibleMs: visible.elapsedMs,
+    clickToDomVisibleMs,
     apiRequestsAfterClick: apiTrafficAfterClick.length,
     endpointCounts,
   };

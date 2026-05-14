@@ -20,6 +20,9 @@ const CASES = [
   { name: 'vault beta', passphrase: 'mango-river-77', shards: 7 },
   { name: 'vault gamma', passphrase: 'linen-fox-88', shards: 8 },
 ];
+const APP_HOST = new URL(APP_BASE_URL).hostname;
+const REQUIRE_BROWSER_RUNTIME_GLOBALS =
+  APP_HOST === 'localhost' || APP_HOST === '127.0.0.1' || APP_HOST === '::1';
 
 function normalizeMnemonic(value: string): string {
   return value.trim().split(/\s+/).join(' ');
@@ -196,7 +199,9 @@ test.describe('brainvault parity', () => {
 
     await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 250 });
 
-    const oldRuntime = await createRuntimeIdentity(page, 'alice', selectDemoMnemonic('alice'));
+    const oldRuntime = await createRuntimeIdentity(page, 'alice', selectDemoMnemonic('alice'), {
+      requireOnline: REQUIRE_BROWSER_RUNTIME_GLOBALS,
+    });
     expect(await readRuntimeCount(page)).toBe(1);
 
     await openAddRuntimePanel(page);
