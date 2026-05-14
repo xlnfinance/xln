@@ -1589,8 +1589,15 @@ const buildAggregatedHealthResponse = async (): Promise<AggregatedHealth> => {
     return health;
   }
 
+  const degraded = health.degraded.filter((entry) => entry !== 'custody');
+  const systemOk = health.coreOk &&
+    health.marketMaker.ok === true &&
+    health.bootstrapReserves.ok === true;
+
   return {
     ...health,
+    systemOk,
+    degraded,
     custody: {
       ...health.custody,
       ok: true,
