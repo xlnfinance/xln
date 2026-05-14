@@ -608,7 +608,7 @@ run_local_deploy() {
   fi
 
   echo "[deploy] installing root dependencies"
-  bun install
+  bun install --frozen-lockfile
 
   echo "[deploy] syncing contract artifacts"
   ./scripts/sync-contract-artifacts.sh
@@ -625,7 +625,7 @@ run_local_deploy() {
     echo "[deploy] frontend version $DEPLOY_BUILD_NUMBER"
     (
       cd frontend
-      bun install
+      bun install --frozen-lockfile
       XLN_BUILD_NUMBER="$DEPLOY_BUILD_NUMBER" bun run build
     )
   else
