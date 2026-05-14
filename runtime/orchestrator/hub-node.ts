@@ -6,7 +6,7 @@ import { dirname } from 'node:path';
 import type {
   ContractRunner as JurisdictionContractRunner,
   Signer as JurisdictionSigner,
-} from '../../jurisdictions/node_modules/ethers/lib.esm/ethers';
+} from 'ethers';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { createExternalWalletApi } from '../api/external-wallet-api';
 import { createDirectRuntimeWsRoute } from '../networking/direct-runtime-bun';
