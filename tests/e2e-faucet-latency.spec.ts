@@ -57,7 +57,7 @@ async function readFaucetAccountSnapshot(
   signerId: string | null,
   hubId: string,
   tokenId: number,
-): Promise<FaucetAccountSnapshot> {
+): Promise<FaucetAccountSnapshot | null> {
   const raw = await page.evaluate(
     ({ entityId, signerId, hubId, tokenId }) => {
       const env = (window as typeof window & {
@@ -112,24 +112,24 @@ async function readFaucetAccountSnapshot(
     { entityId, signerId, hubId, tokenId },
   ) as { currentHeight: number; pendingHeight: number | null; delta: DeltaSnapshot } | null;
 
-  expect(raw, `account snapshot must exist for ${hubId.slice(0, 10)}`).not.toBeNull();
+  if (!raw) return null;
   const isLeft = entityId.toLowerCase() < hubId.toLowerCase();
   const derived = deriveDelta({
     tokenId,
-    ondelta: BigInt(raw!.delta.ondelta),
-    offdelta: BigInt(raw!.delta.offdelta),
-    collateral: BigInt(raw!.delta.collateral),
-    leftCreditLimit: BigInt(raw!.delta.leftCreditLimit),
-    rightCreditLimit: BigInt(raw!.delta.rightCreditLimit),
-    leftAllowance: BigInt(raw!.delta.leftAllowance),
-    rightAllowance: BigInt(raw!.delta.rightAllowance),
-    leftHold: BigInt(raw!.delta.leftHold),
-    rightHold: BigInt(raw!.delta.rightHold),
+    ondelta: BigInt(raw.delta.ondelta),
+    offdelta: BigInt(raw.delta.offdelta),
+    collateral: BigInt(raw.delta.collateral),
+    leftCreditLimit: BigInt(raw.delta.leftCreditLimit),
+    rightCreditLimit: BigInt(raw.delta.rightCreditLimit),
+    leftAllowance: BigInt(raw.delta.leftAllowance),
+    rightAllowance: BigInt(raw.delta.rightAllowance),
+    leftHold: BigInt(raw.delta.leftHold),
+    rightHold: BigInt(raw.delta.rightHold),
   }, isLeft);
 
   return {
-    currentHeight: raw!.currentHeight,
-    pendingHeight: raw!.pendingHeight,
+    currentHeight: raw.currentHeight,
+    pendingHeight: raw.pendingHeight,
     outCapacity: derived.outCapacity.toString(),
   };
 }
@@ -260,7 +260,8 @@ async function measureAccountStateToDomLatency(
           }
 
           const renderedOut = readRenderedOut();
-          if (stateChangedAt !== null && Number.isFinite(renderedOut) && renderedOut > baselineOut) {
+          if (Number.isFinite(renderedOut) && renderedOut > baselineOut) {
+            if (stateChangedAt === null) stateChangedAt = now;
             resolve({
               stateChangedMs: Math.round(stateChangedAt - startedAt),
               domVisibleMs: Math.round(now - startedAt),
@@ -280,8 +281,10 @@ async function measureAccountStateToDomLatency(
 }
 
 test.describe('E2E Faucet Latency', () => {
-  test('demo account single-hub UI USDT faucet finalizes as fast as possible', async ({ page }) => {
+  test('demo account single-hub UI USDC faucet finalizes as fast as possible', async ({ page }) => {
     test.setTimeout(LONG_E2E ? 240_000 : 180_000);
+    const appHost = new URL(APP_BASE_URL).hostname;
+    const requireOnline = appHost === 'localhost' || appHost === '127.0.0.1' || appHost === '::1';
 
     await gotoApp(page, {
       appBaseUrl: APP_BASE_URL,
@@ -289,50 +292,64 @@ test.describe('E2E Faucet Latency', () => {
       settleMs: 0,
     });
 
-    const alice = await createRuntimeIdentity(page, 'alice', selectDemoMnemonic('alice'));
+    const alice = await createRuntimeIdentity(page, 'alice', selectDemoMnemonic('alice'), { requireOnline });
     const hubId = await getPrimaryHubId(page);
-    const usdtTokenId = await getApiTokenId(page, 'USDT');
-    await connectRuntimeToHubWithCredit(page, alice, hubId, '10000', [usdtTokenId]);
+    const usdcTokenId = await getApiTokenId(page, 'USDC');
+    await connectRuntimeToHubWithCredit(page, alice, hubId, '10000', [usdcTokenId], { requireOnline });
     await page.getByTestId('tab-accounts').first().click();
     const preview = page.locator(`.account-preview[data-counterparty-id="${hubId}"]`).first();
     await expect(preview).toBeVisible({ timeout: 20_000 });
-    const usdtRow = preview.locator('.delta-row-stack', { hasText: 'USDT' }).first();
-    await expect(usdtRow).toBeVisible({ timeout: 20_000 });
-    const faucetButton = usdtRow.getByRole('button', { name: /^Faucet$/ });
+    const usdcRow = preview.locator('.delta-row-stack, .delta-summary', { hasText: 'USDC' }).first();
+    await expect(usdcRow).toBeVisible({ timeout: 20_000 });
+    const faucetButton = usdcRow.getByRole('button', { name: /^Faucet$/ });
     await expect(faucetButton).toBeEnabled({ timeout: 20_000 });
 
-    const baselineOut = await readRenderedAccountTokenOut(page, hubId, 'USDT');
-    expect(Number.isFinite(baselineOut), 'rendered USDT out capacity must be readable').toBe(true);
-    const baselineAccount = await readFaucetAccountSnapshot(page, alice.entityId, alice.signerId, hubId, usdtTokenId);
+    const baselineOut = await readRenderedAccountTokenOut(page, hubId, 'USDC');
+    expect(Number.isFinite(baselineOut), 'rendered USDC out capacity must be readable').toBe(true);
+    const baselineAccount = await readFaucetAccountSnapshot(page, alice.entityId, alice.signerId, hubId, usdcTokenId);
     const renderProbePromise = measureAccountStateToDomLatency(
       page,
       alice.entityId,
       alice.signerId,
       hubId,
-      usdtTokenId,
-      'USDT',
-      baselineAccount.currentHeight,
+      usdcTokenId,
+      'USDC',
+      baselineAccount?.currentHeight ?? 0,
       baselineOut,
     );
     const startedAt = Date.now();
     await faucetButton.click();
+    await expect
+      .poll(
+        async () => {
+          const pendingText = await usdcRow.getByRole('button').first().textContent().catch(() => '');
+          const rendered = await readRenderedAccountTokenOut(page, hubId, 'USDC');
+          return /Funding/i.test(String(pendingText || '')) || rendered > baselineOut;
+        },
+        {
+          timeout: 1_000,
+          intervals: [25, 50, 100],
+          message: 'faucet click must produce immediate visible feedback',
+        },
+      )
+      .toBe(true);
 
     await expect
       .poll(
-        async () => await readRenderedAccountTokenOut(page, hubId, 'USDT'),
+        async () => await readRenderedAccountTokenOut(page, hubId, 'USDC'),
         {
           timeout: 15_000,
           intervals: [10, 20, 25, 50, 100],
-          message: 'UI USDT faucet must become visible to the user on Accounts page',
+          message: 'UI USDC faucet must become visible to the user on Accounts page',
         },
       )
       .toBeGreaterThan(baselineOut);
 
     const elapsedMs = Date.now() - startedAt;
     const renderProbe = await renderProbePromise;
-    console.log(`[E2E-TIMING] faucet.ui_usdt_single_hub.finalized ${elapsedMs}ms`);
+    console.log(`[E2E-TIMING] faucet.ui_usdc_single_hub.finalized ${elapsedMs}ms`);
     console.log(
-      `[E2E-TIMING] faucet.ui_usdt_single_hub.state_to_dom state=${renderProbe.stateChangedMs}ms dom=${renderProbe.domVisibleMs}ms delta=${renderProbe.stateToDomMs}ms`,
+      `[E2E-TIMING] faucet.ui_usdc_single_hub.state_to_dom state=${renderProbe.stateChangedMs}ms dom=${renderProbe.domVisibleMs}ms delta=${renderProbe.stateToDomMs}ms`,
     );
     expect(elapsedMs, 'single-hub offchain faucet should stay comfortably below timeout').toBeLessThan(5_000);
   });

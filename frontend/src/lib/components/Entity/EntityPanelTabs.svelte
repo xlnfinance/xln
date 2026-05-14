@@ -459,6 +459,8 @@
     error?: string;
     code?: string;
     details?: unknown;
+    requestId?: string;
+    serverDurationMs?: number;
   };
 
   type TokenCatalogItem = {
@@ -1652,6 +1654,22 @@
     symbol: string;
   }> = [];
   const RESERVE_FAUCET_TIMEOUT_MS = 15000;
+  let pendingOffchainFaucets: Array<{
+    hubEntityId: string;
+    tokenId: number;
+    amount: bigint;
+    baselineOut: bigint;
+    expectedOut: bigint;
+    startedAt: number;
+    symbol: string;
+    requestId?: string;
+  }> = [];
+  const OFFCHAIN_FAUCET_TIMEOUT_MS = 15000;
+  const faucetPendingKey = (hubEntityId: string, tokenId: number): string =>
+    `${String(hubEntityId || '').toLowerCase()}:${Math.floor(Number(tokenId) || 0)}`;
+  $: pendingOffchainFaucetKeys = new Set(
+    pendingOffchainFaucets.map((req) => faucetPendingKey(req.hubEntityId, req.tokenId)),
+  );
 
   // External tokens (ERC20 balances held by signer EOA)
   interface ExternalToken {
@@ -2297,11 +2315,30 @@
       if (!hubEntityId) {
         throw new Error('Offchain faucet requires a target hub account.');
       }
+      const pendingKey = faucetPendingKey(hubEntityId, tokenMeta.tokenId);
+      if (pendingOffchainFaucetKeys.has(pendingKey)) {
+        toasts.info(`${tokenMeta.symbol} faucet is already in flight.`);
+        return;
+      }
+      const amountWei = parseTokenAmount(amountStr, tokenMeta.decimals);
+      const baselineOut = getDerivedDeltaForAccount(hubEntityId, tokenMeta.tokenId)?.outCapacity ?? 0n;
+      const pendingRequest = {
+        hubEntityId,
+        tokenId: tokenMeta.tokenId,
+        amount: amountWei,
+        baselineOut,
+        expectedOut: baselineOut + amountWei,
+        startedAt: Date.now(),
+        symbol: tokenMeta.symbol,
+      };
+      pendingOffchainFaucets = [...pendingOffchainFaucets, pendingRequest];
+      toasts.info(`Funding ${tokenMeta.symbol} account...`);
 
       const requestTimeoutMs = 12000;
       let response: Response | null = null;
       let result: ApiResult | null = null;
       let timeout: ReturnType<typeof setTimeout> | null = null;
+      const requestStartedAt = performance.now();
       try {
         const controller = new AbortController();
         timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
@@ -2332,6 +2369,11 @@
           })
         });
         result = await readJsonResponse<ApiResult>(response);
+        console.log('[EntityPanel] Offchain faucet API response timing:', {
+          requestId: result?.requestId || null,
+          clientMs: Math.round(performance.now() - requestStartedAt),
+          serverMs: result?.serverDurationMs ?? null,
+        });
       } catch (error: unknown) {
         const aborted = error instanceof DOMException && error.name === 'AbortError';
         const message = aborted
@@ -2355,8 +2397,16 @@
       }
 
       console.log('[EntityPanel] Offchain faucet success:', result);
+      pendingOffchainFaucets = pendingOffchainFaucets.map((req) =>
+        faucetPendingKey(req.hubEntityId, req.tokenId) === pendingKey
+          ? { ...req, requestId: result?.requestId }
+          : req,
+      );
     } catch (err) {
       console.error('[EntityPanel] Offchain faucet failed:', err);
+      pendingOffchainFaucets = pendingOffchainFaucets.filter(
+        (req) => faucetPendingKey(req.hubEntityId, req.tokenId) !== faucetPendingKey(hubEntityId, tokenId),
+      );
       toasts.error(`Offchain faucet failed: ${(err as Error).message}`);
     }
   }
@@ -2742,6 +2792,41 @@
     }
     if (remaining.length !== pendingReserveFaucets.length) {
       pendingReserveFaucets = remaining;
+    }
+  }
+
+  $: if (pendingOffchainFaucets.length > 0) {
+    const now = Date.now();
+    const accountStateSignal = [
+      Number(replica?.state?.height ?? 0),
+      accountSpendableByToken.size,
+      assetLedgerGrandTotal,
+    ].join(':');
+    void accountStateSignal;
+    const remaining: typeof pendingOffchainFaucets = [];
+    for (const req of pendingOffchainFaucets) {
+      const currentOut = getDerivedDeltaForAccount(req.hubEntityId, req.tokenId)?.outCapacity ?? req.baselineOut;
+      if (currentOut >= req.expectedOut || currentOut > req.baselineOut) {
+        const elapsedMs = now - req.startedAt;
+        toasts.success(
+          `Received ${formatAmount(req.amount, getTokenInfo(req.tokenId).decimals)} ${req.symbol} in account (${(elapsedMs / 1000).toFixed(1)}s).`,
+        );
+        console.log('[EntityPanel] Offchain faucet visible in account:', {
+          requestId: req.requestId || null,
+          hubEntityId: req.hubEntityId,
+          tokenId: req.tokenId,
+          elapsedMs,
+          baselineOut: req.baselineOut.toString(),
+          currentOut: currentOut.toString(),
+        });
+      } else if (now - req.startedAt > OFFCHAIN_FAUCET_TIMEOUT_MS) {
+        toasts.error(`Account faucet timed out for ${req.symbol}. Check server logs.`);
+      } else {
+        remaining.push(req);
+      }
+    }
+    if (remaining.length !== pendingOffchainFaucets.length) {
+      pendingOffchainFaucets = remaining;
     }
   }
 
@@ -5104,6 +5189,7 @@
           entityId={tab.entityId}
           {replica}
           env={activeEnv}
+          pendingFaucetKeys={pendingOffchainFaucetKeys}
           on:back={handleBackToAccounts}
           on:faucet={handleAccountFaucet}
           on:goToOpenAccounts={handleAccountPanelGoToOpenAccounts}
@@ -5484,6 +5570,7 @@
           <AccountList
             {replica}
             {selectedAccountId}
+            pendingFaucetKeys={pendingOffchainFaucetKeys}
             on:select={handleAccountSelect}
             on:faucet={handleAccountFaucet}
             on:settleApprove={handleQuickSettleApprove}

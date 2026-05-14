@@ -16,6 +16,7 @@
   export let entityId: string;
   export let replica: EntityReplica | null = null;
   export let env: Env | EnvSnapshot;
+  export let pendingFaucetKeys: Set<string> = new Set();
 
   const dispatch = createEventDispatcher();
 
@@ -83,6 +84,7 @@
   $: relayStatus = $p2pState.connected ? 'connected' : reconnectCountdown ? 'reconnecting' : 'disconnected';
 
   $: counterpartyName = resolveEntityName(counterpartyId, activeEnv);
+  $: counterpartyKeyBase = String(counterpartyId || '').toLowerCase();
 
   $: tokenDetails = buildAccountTokenDetails(account, entityId, activeXlnFunctions);
   $: hasCommittedFrame = Number(account.currentFrame?.height ?? account.currentHeight ?? 0) > 0;
@@ -435,6 +437,7 @@
   }
 
   function handleFaucet(tokenId: number): void {
+    if (pendingFaucetKeys.has(`${counterpartyKeyBase}:${tokenId}`)) return;
     dispatch('faucet', { counterpartyId, tokenId });
   }
 
@@ -498,6 +501,7 @@
     {#if showTokenDetails}
       {#each tokenDetails as td (td.tokenId)}
         {@const isExpanded = expandedTokenIds.has(td.tokenId)}
+        {@const faucetPending = pendingFaucetKeys.has(`${counterpartyKeyBase}:${td.tokenId}`)}
         <div class="delta-card">
           <div class="delta-card-toggle">
             <DeltaTokenSummary
@@ -515,7 +519,14 @@
               on:bartoggle={() => toggleTokenDetails(td.tokenId)}
             >
               <svelte:fragment slot="actions">
-                <button class="delta-faucet" on:click|stopPropagation={() => handleFaucet(td.tokenId)}>Faucet</button>
+                <button
+                  class="delta-faucet"
+                  class:pending={faucetPending}
+                  disabled={faucetPending}
+                  on:click|stopPropagation={() => handleFaucet(td.tokenId)}
+                >
+                  {faucetPending ? 'Funding...' : 'Faucet'}
+                </button>
               </svelte:fragment>
             </DeltaTokenSummary>
           </div>
@@ -754,6 +765,13 @@
     cursor: pointer;
     font-size: 11px;
     line-height: 1;
+  }
+
+  .delta-faucet.pending,
+  .delta-faucet:disabled {
+    opacity: 0.65;
+    cursor: wait;
+    color: var(--account-panel-text-secondary);
   }
 
   .delta-details {

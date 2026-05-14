@@ -42,7 +42,7 @@ import {
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const MAX_QUEUE_PER_RUNTIME = 100; // Prevent memory exhaustion (DoS protection)
-const MIN_GOSSIP_POLL_MS = 1000;
+const MIN_GOSSIP_POLL_MS = 250;
 const SLOW_BROWSER_TIMER_MS = 32;
 
 export type P2PConfig = {
@@ -212,7 +212,7 @@ const getReplicaSignerId = (replicaKey: string): string => {
   return idx === -1 ? '' : replicaKey.slice(idx + 1);
 };
 
-const GOSSIP_POLL_MS = 1000; // Keep every runtime synced to relay at least once per second
+const GOSSIP_POLL_MS = 250; // Keep interactive account flows responsive without waiting on second-long ticks.
 const PROFILE_ANNOUNCE_DEBOUNCE_MS = 25;
 const PROFILE_HEARTBEAT_MS = 15_000;
 const GOSSIP_FETCH_RETRY_DELAYS_MS = [40, 80, 160];

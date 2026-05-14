@@ -89,7 +89,7 @@ const defaultState: RuntimesState = {
 
 // Storage key
 const VAULT_STORAGE_KEY = 'xln-vaults';
-const BROWSER_GOSSIP_POLL_MS = 1000;
+const BROWSER_GOSSIP_POLL_MS = 250;
 const normalizeRuntimeId = (value: string | null | undefined): string => {
   const raw = String(value || '').trim();
   if (!raw) return '';
