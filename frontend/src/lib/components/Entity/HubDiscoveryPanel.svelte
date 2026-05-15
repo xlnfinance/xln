@@ -37,7 +37,7 @@
     metadata: {
       description?: string;
       website?: string;
-      jurisdiction?: { name?: string; chainId?: number | string };
+      jurisdiction?: { name?: string; chainId?: number | string; depositoryAddress?: string };
       fee: number;
       peerCount: number;
     };
@@ -54,6 +54,7 @@
   type JurisdictionLike = {
     name?: unknown;
     chainId?: unknown;
+    depositoryAddress?: unknown;
   };
 
   const normalizeJurisdiction = (value: unknown): string => String(value || '').trim().toLowerCase();
@@ -61,6 +62,8 @@
     if (value && typeof value === 'object') {
       const jurisdiction = value as JurisdictionLike;
       const chainId = String(jurisdiction.chainId ?? '').trim();
+      const depository = String(jurisdiction.depositoryAddress ?? '').trim().toLowerCase();
+      if (chainId && depository) return `dep:${chainId}:${depository}`;
       if (chainId) return `chain:${chainId}`;
       return normalizeJurisdiction(jurisdiction.name);
     }
@@ -92,7 +95,7 @@
       metadata?: {
         isHub?: boolean;
         routingFeePPM?: number;
-        jurisdiction?: { name?: string; chainId?: number | string };
+        jurisdiction?: { name?: string; chainId?: number | string; depositoryAddress?: string };
       };
       lastUpdated?: number;
       online?: boolean;

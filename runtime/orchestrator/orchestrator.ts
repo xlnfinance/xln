@@ -856,6 +856,32 @@ const isRpc2Jurisdiction = (key: string, jurisdiction: ShardJurisdictionEntry): 
   return Boolean(args.rpc2Url && normalizeLoopbackUrl(rpc) === normalizeLoopbackUrl(args.rpc2Url));
 };
 
+const resolvePrimaryHubJurisdictionFallback = (): {
+  name: string;
+  chainId?: number;
+  depositoryAddress?: string;
+  entityProviderAddress?: string;
+} | null => {
+  if (!existsSync(shardJurisdictionsPath)) return null;
+  try {
+    const payload = JSON.parse(readFileSync(shardJurisdictionsPath, 'utf8')) as ShardJurisdictionsFile;
+    const entries = Object.entries(payload.jurisdictions ?? {});
+    const match = entries.find(([key, jurisdiction]) => !isRpc2Jurisdiction(key, jurisdiction)) ?? entries[0];
+    if (!match) return null;
+    const [, jurisdiction] = match;
+    const name = String(jurisdiction.name || '').trim();
+    if (!name) return null;
+    return {
+      name,
+      ...(jurisdiction.chainId !== undefined ? { chainId: jurisdiction.chainId } : {}),
+      ...(jurisdiction.contracts?.depository ? { depositoryAddress: jurisdiction.contracts.depository } : {}),
+      ...(jurisdiction.contracts?.entityProvider ? { entityProviderAddress: jurisdiction.contracts.entityProvider } : {}),
+    };
+  } catch {
+    return null;
+  }
+};
+
 const readRpcChainId = async (rpcUrl: string): Promise<number> => {
   const response = await fetch(rpcUrl, {
     method: 'POST',
@@ -957,8 +983,12 @@ const seedShardJurisdictions = (): void => {
 
 const pollHubHealth = async (child: HubChild): Promise<void> => {
   const apiBase = `http://${args.host}:${child.apiPort}`;
-  child.lastInfo = await fetchJson<HubInfoPayload>(`${apiBase}/api/info`, 1_500);
-  child.lastHealth = await fetchJson<HubHealthPayload>(`${apiBase}/api/health`, 1_500);
+  const [info, health] = await Promise.all([
+    fetchJson<HubInfoPayload>(`${apiBase}/api/info`, 1_500),
+    fetchJson<HubHealthPayload>(`${apiBase}/api/health`, 1_500),
+  ]);
+  if (info) child.lastInfo = info;
+  if (health) child.lastHealth = health;
   const entityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '').toLowerCase();
   if (entityId) {
     relayStore.activeHubEntityIds = Array.from(
@@ -1833,19 +1863,29 @@ const buildPublicHubDiscoveryPayload = (): {
   }>;
 } => {
   const serverTime = Date.now();
+  const primaryJurisdictionFallback = resolvePrimaryHubJurisdictionFallback();
   const hubs = hubChildren
     .flatMap((child) => {
       const entityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '').trim();
       const runtimeId = String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || '').trim();
       const normalizedRuntimeId = normalizeRuntimeKey(runtimeId);
       const directWsUrl = String(child.lastHealth?.directWsUrl || '').trim();
+      const apiReachable = Boolean(child.lastInfo || child.lastHealth);
       const online =
         child.proc?.exitCode === null
-        && child.lastHealth?.ok === true
-        && Boolean(normalizedRuntimeId && relayStore.clients.has(normalizedRuntimeId));
+        && apiReachable
+        && Boolean(normalizedRuntimeId)
+        && (relayStore.clients.has(normalizedRuntimeId) || Boolean(directWsUrl));
       const hubEntities = child.lastInfo?.hubEntities?.length
         ? child.lastInfo.hubEntities
-        : [{ entityId, name: child.name, jurisdictionName: '' }];
+        : [{
+          entityId,
+          name: child.name,
+          jurisdictionName: primaryJurisdictionFallback?.name || '',
+          ...(primaryJurisdictionFallback?.chainId !== undefined ? { chainId: primaryJurisdictionFallback.chainId } : {}),
+          ...(primaryJurisdictionFallback?.depositoryAddress ? { depositoryAddress: primaryJurisdictionFallback.depositoryAddress } : {}),
+          ...(primaryJurisdictionFallback?.entityProviderAddress ? { entityProviderAddress: primaryJurisdictionFallback.entityProviderAddress } : {}),
+        }];
       return hubEntities
         .map((entry) => {
           const entryEntityId = String(entry?.entityId || '').trim();

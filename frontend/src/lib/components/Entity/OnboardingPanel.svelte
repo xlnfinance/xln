@@ -78,6 +78,7 @@
   type JurisdictionLike = {
     name?: unknown;
     chainId?: unknown;
+    depositoryAddress?: unknown;
   };
 
   const normalizeJurisdiction = (value: unknown): string => String(value || '').trim().toLowerCase();
@@ -85,6 +86,8 @@
     if (value && typeof value === 'object') {
       const jurisdiction = value as JurisdictionLike;
       const chainId = String(jurisdiction.chainId ?? '').trim();
+      const depository = String(jurisdiction.depositoryAddress ?? '').trim().toLowerCase();
+      if (chainId && depository) return `dep:${chainId}:${depository}`;
       if (chainId) return `chain:${chainId}`;
       return normalizeJurisdiction(jurisdiction.name);
     }
