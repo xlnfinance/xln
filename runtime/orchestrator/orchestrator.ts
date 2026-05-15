@@ -42,6 +42,7 @@ type Args = {
   nodeApiPortBase: number;
   nodePublicPortBase: number;
   rpcUrl: string;
+  rpc2Url: string;
   dbRoot: string;
   mmEnabled: boolean;
   resetAllowed: boolean;
@@ -475,6 +476,7 @@ const parseArgs = (): Args => {
     nodeApiPortBase,
     nodePublicPortBase,
     rpcUrl: normalizeLoopbackUrl(getArg('--rpc-url', process.env['ANVIL_RPC'] || 'http://localhost:8545')),
+    rpc2Url: normalizeLoopbackUrl(getArg('--rpc2-url', process.env['ANVIL_RPC2'] || '')),
     dbRoot: resolve(getArg('--db-root', join(process.cwd(), '.e2e-mesh-db'))),
     mmEnabled: hasFlag('--mm'),
     resetAllowed: hasFlag('--allow-reset') || process.env['XLN_MESH_RESET_ALLOWED'] === '1',
@@ -803,14 +805,112 @@ const readShardJurisdictions = (): string => {
   return shard;
 };
 
+type ShardJurisdictionEntry = {
+  name?: string;
+  chainId?: number;
+  rpc?: unknown;
+  explorer?: string;
+  currency?: string;
+  status?: string;
+  description?: string;
+  contracts?: {
+    account?: string;
+    depository?: string;
+    entityProvider?: string;
+    deltaTransformer?: string;
+  };
+  rebalancePolicyUsd?: unknown;
+};
+
+type ShardJurisdictionsFile = {
+  version?: unknown;
+  deployVersion?: unknown;
+  networkVersion?: unknown;
+  lastUpdated?: unknown;
+  jurisdictions?: Record<string, ShardJurisdictionEntry>;
+  defaults?: Record<string, unknown>;
+};
+
+const isRpc2Jurisdiction = (key: string, jurisdiction: ShardJurisdictionEntry): boolean => {
+  const normalizedKey = String(key || '').trim().toLowerCase();
+  if (normalizedKey === 'tron' || normalizedKey === 'rpc2' || normalizedKey === 'localhost2') return true;
+  const name = String(jurisdiction.name || '').trim().toLowerCase();
+  if (name.includes('tron')) return true;
+  const rpc = String(jurisdiction.rpc || '').trim();
+  return Boolean(args.rpc2Url && normalizeLoopbackUrl(rpc) === normalizeLoopbackUrl(args.rpc2Url));
+};
+
+const readRpcChainId = async (rpcUrl: string): Promise<number> => {
+  const response = await fetch(rpcUrl, {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
+  });
+  if (!response.ok) {
+    throw new Error(`RPC_CHAIN_ID_HTTP_${response.status}`);
+  }
+  const payload = await response.json() as { result?: unknown; error?: { message?: string } };
+  if (payload.error) throw new Error(`RPC_CHAIN_ID_ERROR:${payload.error.message || 'unknown'}`);
+  const result = String(payload.result || '').trim();
+  const chainId = result.startsWith('0x') ? Number.parseInt(result.slice(2), 16) : Number(result);
+  if (!Number.isFinite(chainId) || chainId <= 0) throw new Error(`RPC_CHAIN_ID_INVALID:${result || 'empty'}`);
+  return Math.floor(chainId);
+};
+
+const deployRpc2JurisdictionStack = async (): Promise<void> => {
+  if (!args.rpc2Url) return;
+  const startedAt = Date.now();
+  const chainId = await readRpcChainId(args.rpc2Url);
+  const { createJAdapter } = await import('../jadapter');
+  const jadapter = await createJAdapter({
+    mode: 'rpc',
+    chainId,
+    rpcUrl: args.rpc2Url,
+  });
+  await jadapter.deployStack();
+
+  const current: ShardJurisdictionsFile = existsSync(shardJurisdictionsPath)
+    ? JSON.parse(readFileSync(shardJurisdictionsPath, 'utf8'))
+    : {};
+  const jurisdictions = current.jurisdictions ?? {};
+  const updatedAt = new Date().toISOString();
+  const networkVersion = String(Date.parse(updatedAt));
+  jurisdictions['tron'] = {
+    ...(jurisdictions['tron'] ?? {}),
+    name: 'Tron (Local Anvil)',
+    chainId,
+    rpc: toPublicRpcUrl(args.rpc2Url, '/rpc2'),
+    explorer: '',
+    currency: 'TRX',
+    status: 'active',
+    description: 'Second local Anvil used to simulate Tron/EVM cross-jurisdiction swaps',
+    contracts: {
+      ...(jurisdictions['tron']?.contracts ?? {}),
+      account: jadapter.addresses.account,
+      depository: jadapter.addresses.depository,
+      entityProvider: jadapter.addresses.entityProvider,
+      deltaTransformer: jadapter.addresses.deltaTransformer,
+    },
+  };
+  const nextPayload: ShardJurisdictionsFile = {
+    version: String(current.version || '').trim() || '3',
+    deployVersion: networkVersion,
+    networkVersion,
+    lastUpdated: updatedAt,
+    jurisdictions,
+    defaults: current.defaults ?? {
+      timeout: 30000,
+      retryAttempts: 3,
+      gasLimit: 1000000,
+    },
+  };
+  writeFileSync(shardJurisdictionsPath, JSON.stringify(nextPayload, null, 2) + '\n', 'utf8');
+  console.log(`[MESH] rpc2 jurisdiction ready chainId=${chainId} rpc=${args.rpc2Url} ms=${Date.now() - startedAt}`);
+};
+
 const toPublicJurisdictionsPayload = (raw: string): string => {
   try {
-    const parsed = JSON.parse(raw) as {
-      deployVersion?: unknown;
-      networkVersion?: unknown;
-      lastUpdated?: unknown;
-      jurisdictions?: Record<string, { rpc?: unknown }>;
-    };
+    const parsed = JSON.parse(raw) as ShardJurisdictionsFile;
     if (!parsed || typeof parsed !== 'object' || !parsed.jurisdictions) return raw;
     const explicitNetworkVersion = String(parsed.deployVersion || parsed.networkVersion || '').trim();
     const lastUpdatedMs = Date.parse(String(parsed.lastUpdated || ''));
@@ -819,9 +919,10 @@ const toPublicJurisdictionsPayload = (raw: string): string => {
       parsed.deployVersion = networkVersion;
       parsed.networkVersion = networkVersion;
     }
-    for (const jurisdiction of Object.values(parsed.jurisdictions)) {
+    for (const [key, jurisdiction] of Object.entries(parsed.jurisdictions)) {
       if (!jurisdiction || typeof jurisdiction !== 'object') continue;
-      jurisdiction.rpc = toPublicRpcUrl(String(jurisdiction.rpc || '/rpc'));
+      const fallback = isRpc2Jurisdiction(key, jurisdiction) ? '/rpc2' : '/rpc';
+      jurisdiction.rpc = toPublicRpcUrl(String(jurisdiction.rpc || fallback), fallback);
     }
     return `${JSON.stringify(parsed, null, 2)}\n`;
   } catch {
@@ -1172,6 +1273,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
       XLN_DB_PATH: child.dbPath,
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
       ANVIL_RPC: args.rpcUrl,
+      ANVIL_RPC2: args.rpc2Url,
       USE_ANVIL: 'true',
       XLN_RADAPTER_AUTH_SEED: child.authSeed,
       XLN_ORCHESTRATOR_PID: String(process.pid),
@@ -1240,6 +1342,7 @@ const spawnMarketMaker = async (): Promise<void> => {
       XLN_DB_PATH: marketMakerChild.dbPath,
       XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
       ANVIL_RPC: args.rpcUrl,
+      ANVIL_RPC2: args.rpc2Url,
       USE_ANVIL: 'true',
       XLN_RADAPTER_AUTH_SEED: marketMakerChild.authSeed,
       XLN_ORCHESTRATOR_PID: String(process.pid),
@@ -1982,6 +2085,7 @@ const runReset = async (): Promise<void> => {
     }
     mkdirSync(args.dbRoot, { recursive: true });
     seedShardJurisdictions();
+    await deployRpc2JurisdictionStack();
     finishTiming('reset_clear_state', clearStartedAt);
 
     const h1 = hubChildren[0]!;
@@ -2054,16 +2158,22 @@ const ensureReset = async (): Promise<void> => {
   await resetPromise;
 };
 
-const proxyRpc = async (request: Request): Promise<Response> => {
+const proxyRpc = async (request: Request, upstreamRpcUrl = args.rpcUrl): Promise<Response> => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Methods': '*',
     'Access-Control-Allow-Headers': '*',
     'Content-Type': 'application/json',
   };
+  if (!upstreamRpcUrl) {
+    return new Response(
+      JSON.stringify({ error: 'RPC upstream is not configured' }),
+      { status: 503, headers },
+    );
+  }
   try {
     const bodyText = await request.text();
-    const response = await fetch(args.rpcUrl, {
+    const response = await fetch(upstreamRpcUrl, {
       method: 'POST',
       headers: {
         'content-type': request.headers.get('content-type') || 'application/json',
@@ -2080,7 +2190,7 @@ const proxyRpc = async (request: Request): Promise<Response> => {
     });
   } catch (error) {
     return new Response(
-      JSON.stringify({ error: serializeError(error), upstream: args.rpcUrl }),
+      JSON.stringify({ error: serializeError(error), upstream: upstreamRpcUrl }),
       { status: 502, headers },
     );
   }
@@ -2270,6 +2380,10 @@ const server = Bun.serve({
 
     if ((pathname === '/rpc' || pathname === '/api/rpc') && request.method === 'POST') {
       return await proxyRpc(request);
+    }
+
+    if ((pathname === '/rpc2' || pathname === '/api/rpc2') && request.method === 'POST') {
+      return await proxyRpc(request, args.rpc2Url);
     }
 
     if (pathname === '/api/faucet/offchain' && request.method === 'POST') {

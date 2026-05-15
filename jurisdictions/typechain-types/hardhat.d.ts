@@ -94,6 +94,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.Console__factory>;
     getContractFactory(
+      name: "CrossSwapPull",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.CrossSwapPull__factory>;
+    getContractFactory(
       name: "DeltaTransformer",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.DeltaTransformer__factory>;
@@ -130,6 +134,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.ERC721Mock__factory>;
     getContractFactory(
+      name: "HashLadder",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.HashLadder__factory>;
+    getContractFactory(
       name: "IDeltaTransformer",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.IDeltaTransformer__factory>;
@@ -141,6 +149,10 @@ declare module "hardhat/types/runtime" {
       name: "IEntityProvider",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.IEntityProvider__factory>;
+    getContractFactory(
+      name: "HashLadderHarness",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.HashLadderHarness__factory>;
     getContractFactory(
       name: "MockEntityProvider",
       signerOrOptions?: ethers.Signer | FactoryOptions
@@ -251,6 +263,11 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.Console>;
     getContractAt(
+      name: "CrossSwapPull",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.CrossSwapPull>;
+    getContractAt(
       name: "DeltaTransformer",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
@@ -296,6 +313,11 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.ERC721Mock>;
     getContractAt(
+      name: "HashLadder",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.HashLadder>;
+    getContractAt(
       name: "IDeltaTransformer",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
@@ -310,6 +332,11 @@ declare module "hardhat/types/runtime" {
       address: string | ethers.Addressable,
       signer?: ethers.Signer
     ): Promise<Contracts.IEntityProvider>;
+    getContractAt(
+      name: "HashLadderHarness",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.HashLadderHarness>;
     getContractAt(
       name: "MockEntityProvider",
       address: string | ethers.Addressable,
@@ -402,6 +429,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.Console>;
     deployContract(
+      name: "CrossSwapPull",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.CrossSwapPull>;
+    deployContract(
       name: "DeltaTransformer",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.DeltaTransformer>;
@@ -438,6 +469,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.ERC721Mock>;
     deployContract(
+      name: "HashLadder",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.HashLadder>;
+    deployContract(
       name: "IDeltaTransformer",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.IDeltaTransformer>;
@@ -449,6 +484,10 @@ declare module "hardhat/types/runtime" {
       name: "IEntityProvider",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.IEntityProvider>;
+    deployContract(
+      name: "HashLadderHarness",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.HashLadderHarness>;
     deployContract(
       name: "MockEntityProvider",
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -559,6 +598,11 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.Console>;
     deployContract(
+      name: "CrossSwapPull",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.CrossSwapPull>;
+    deployContract(
       name: "DeltaTransformer",
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -604,6 +648,11 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.ERC721Mock>;
     deployContract(
+      name: "HashLadder",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.HashLadder>;
+    deployContract(
       name: "IDeltaTransformer",
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -618,6 +667,11 @@ declare module "hardhat/types/runtime" {
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.IEntityProvider>;
+    deployContract(
+      name: "HashLadderHarness",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.HashLadderHarness>;
     deployContract(
       name: "MockEntityProvider",
       args: any[],

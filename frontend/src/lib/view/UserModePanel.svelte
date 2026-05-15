@@ -55,6 +55,7 @@
       account?: string;
       deltaTransformer?: string;
     } | undefined;
+    deploy?: boolean;
   };
 
   interface Props {

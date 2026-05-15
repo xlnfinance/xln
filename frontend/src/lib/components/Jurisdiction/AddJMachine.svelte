@@ -25,6 +25,7 @@
       rpcs: string[];
       ticker: string;
       contracts?: JMachineConfig['contracts'];
+      deploy?: boolean;
     };
     cancel: void;
   }>();
@@ -41,6 +42,8 @@
   let advancedError = '';
   let advancedJsonDirty = false;
   let advancedContracts: JMachineConfig['contracts'] | undefined;
+  let deploySelectedNetworkId: number | null = null;
+  let deployNotice = '';
 
   // Separate mainnets and testnets
   $: mainnets = POPULAR_NETWORKS.filter(n => !n.testnet);
@@ -103,12 +106,30 @@
       }
       if (net) {
         error = '';
+        deployNotice = '';
+        deploySelectedNetworkId = null;
         rpcTextarea = net.rpcs.join('\n');
         name = net.name.toLowerCase().replace(/\s+/g, '-');
       }
     } else {
       error = '';
+      deployNotice = '';
+      deploySelectedNetworkId = null;
     }
+  }
+
+  function requestDeployNetwork(chainIdValue: number) {
+    const net = POPULAR_NETWORKS.find(n => n.chainId === chainIdValue);
+    if (!net) return;
+    mode = 'rpc';
+    selectedNetworkId = net.chainId;
+    rpcTextarea = net.rpcs.join('\n');
+    name = net.name.toLowerCase().replace(/\s+/g, '-');
+    advancedContracts = undefined;
+    deploySelectedNetworkId = net.chainId;
+    advancedJsonDirty = false;
+    error = '';
+    deployNotice = `Deploy XLN contracts to ${net.name}. Requires DEPLOYER_PRIVATE_KEY or JADAPTER_DEPLOYER_PRIVATE_KEY in the runtime environment.`;
   }
 
   function applyAdvancedJson() {
@@ -149,7 +170,13 @@
       return;
     }
     const preset = POPULAR_NETWORKS.find(net => net.chainId === config.chainId);
-    if (config.mode === 'rpc' && preset?.disabledReason && !config.contracts?.depository) {
+    const deployRequested = Boolean(
+      config.mode === 'rpc'
+      && preset?.disabledReason
+      && !config.contracts?.depository
+      && deploySelectedNetworkId === config.chainId,
+    );
+    if (config.mode === 'rpc' && preset?.disabledReason && !config.contracts?.depository && !deployRequested) {
       error = preset.disabledReason;
       return;
     }
@@ -163,6 +190,7 @@
         rpcs: config.rpcs,
         ticker: config.ticker,
         ...(config.contracts ? { contracts: config.contracts } : {}),
+        ...(deployRequested ? { deploy: true } : {}),
       });
     } catch (err) {
       error = err instanceof Error ? err.message : 'Failed to create J-Machine';
@@ -207,6 +235,7 @@
       <label>Network</label>
       <div class="network-grid">
         {#each mainnets as net}
+          <div class="network-card" class:selected={selectedNetworkId === net.chainId}>
             <button
               class="network-btn"
               class:selected={selectedNetworkId === net.chainId}
@@ -215,9 +244,15 @@
               title={net.disabledReason || net.name}
               on:click={() => selectNetwork(net.chainId)}
             >
-            <span class="net-icon">{net.icon}</span>
-            <span class="net-name">{net.name}</span>
-          </button>
+              <span class="net-icon">{net.icon}</span>
+              <span class="net-name">{net.name}</span>
+            </button>
+            {#if net.disabledReason}
+              <button class="network-deploy-btn" type="button" on:click={() => requestDeployNetwork(net.chainId)}>
+                Deploy
+              </button>
+            {/if}
+          </div>
         {/each}
         <button
           class="network-btn custom"
@@ -235,17 +270,24 @@
         <summary>Testnets</summary>
         <div class="network-grid">
           {#each testnets as net}
-            <button
-              class="network-btn testnet"
-              class:selected={selectedNetworkId === net.chainId}
-              class:disabled={!!net.disabledReason}
-              disabled={!!net.disabledReason}
-              title={net.disabledReason || net.name}
-              on:click={() => selectNetwork(net.chainId)}
-            >
-              <span class="net-icon">{net.icon}</span>
-              <span class="net-name">{net.name}</span>
-            </button>
+            <div class="network-card" class:selected={selectedNetworkId === net.chainId}>
+              <button
+                class="network-btn testnet"
+                class:selected={selectedNetworkId === net.chainId}
+                class:disabled={!!net.disabledReason}
+                disabled={!!net.disabledReason}
+                title={net.disabledReason || net.name}
+                on:click={() => selectNetwork(net.chainId)}
+              >
+                <span class="net-icon">{net.icon}</span>
+                <span class="net-name">{net.name}</span>
+              </button>
+              {#if net.disabledReason}
+                <button class="network-deploy-btn" type="button" on:click={() => requestDeployNetwork(net.chainId)}>
+                  Deploy
+                </button>
+              {/if}
+            </div>
           {/each}
         </div>
       </details>
@@ -330,6 +372,9 @@
   {#if error}
     <div class="error">{error}</div>
   {/if}
+  {#if deployNotice}
+    <div class="deploy-notice">{deployNotice}</div>
+  {/if}
 
   <!-- Actions -->
   <div class="actions">
@@ -338,9 +383,9 @@
     </button>
     <button class="btn primary" on:click={handleCreate} disabled={isCreating} data-testid="add-jmachine-create">
       {#if isCreating}
-        Creating...
+        {deploySelectedNetworkId === chainId ? 'Deploying...' : 'Creating...'}
       {:else}
-        Create J-Machine
+        {deploySelectedNetworkId === chainId ? 'Deploy Contracts' : 'Create J-Machine'}
       {/if}
     </button>
   </div>
@@ -425,10 +470,24 @@
     gap: 0.4rem;
   }
 
+  .network-card {
+    display: grid;
+    gap: 0.35rem;
+    min-width: 0;
+  }
+
+  .network-card.selected {
+    outline: 1px solid var(--accent, #6366f1);
+    outline-offset: 2px;
+    border-radius: 8px;
+  }
+
   .network-btn {
     display: flex;
     flex-direction: column;
     align-items: center;
+    width: 100%;
+    min-height: 62px;
     padding: 0.5rem;
     background: var(--bg-secondary, #1a1a2e);
     border: 1px solid var(--border-color, #333);
@@ -459,6 +518,23 @@
 
   .network-btn.testnet {
     opacity: 0.8;
+  }
+
+  .network-deploy-btn {
+    width: 100%;
+    height: 28px;
+    border: 1px solid rgba(99, 102, 241, 0.45);
+    border-radius: 6px;
+    background: rgba(99, 102, 241, 0.12);
+    color: #c7d2fe;
+    font-size: 0.72rem;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .network-deploy-btn:hover {
+    border-color: rgba(129, 140, 248, 0.75);
+    background: rgba(99, 102, 241, 0.18);
   }
 
   .net-icon {
@@ -541,6 +617,16 @@
     background: rgba(239, 68, 68, 0.1);
     border: 1px solid rgba(239, 68, 68, 0.3);
     color: #ef4444;
+    padding: 0.5rem;
+    border-radius: 4px;
+    font-size: 0.8rem;
+    margin-bottom: 1rem;
+  }
+
+  .deploy-notice {
+    background: rgba(99, 102, 241, 0.1);
+    border: 1px solid rgba(99, 102, 241, 0.3);
+    color: #c7d2fe;
     padding: 0.5rem;
     border-radius: 4px;
     font-size: 0.8rem;

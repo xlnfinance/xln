@@ -69,6 +69,12 @@ export default defineConfig({
         changeOrigin: true,
         secure: false,
       },
+      '/rpc2': {
+        target: API_PROXY_TARGET,
+        ws: true,
+        changeOrigin: true,
+        secure: false,
+      },
     },
     headers: {
       'Cache-Control': 'no-cache, no-store, must-revalidate',

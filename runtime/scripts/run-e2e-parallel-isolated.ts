@@ -1,6 +1,6 @@
 /**
  * Parallel Playwright runner with fully isolated local stacks per shard:
- * - dedicated anvil RPC
+ * - dedicated anvil RPCs (/rpc + /rpc2)
  * - dedicated runtime server
  * - dedicated vite preview server (single frontend build shared by all shards)
  *
@@ -874,7 +874,7 @@ const fetchWithTimeout = async (url: string, init: RequestInit = {}, timeoutMs =
   }
 };
 
-const waitForRpcReady = async (rpcUrl: string, timeoutMs: number): Promise<void> => {
+const waitForRpcReady = async (rpcUrl: string, timeoutMs: number, expectedChainId: number): Promise<void> => {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     try {
@@ -890,14 +890,14 @@ const waitForRpcReady = async (rpcUrl: string, timeoutMs: number): Promise<void>
       if (res.ok) {
         const body = (await res.json()) as any;
         const chainId = Number.parseInt(String(body?.result || '0x0'), 16);
-        if (chainId === 31337) return;
+        if (chainId === expectedChainId) return;
       }
     } catch {
       // retry
     }
     await delay(200);
   }
-  throw new Error(`RPC not ready at ${rpcUrl}`);
+  throw new Error(`RPC not ready at ${rpcUrl} for chain ${expectedChainId}`);
 };
 
 const waitForHttpReady = async (url: string, timeoutMs: number): Promise<void> => {
@@ -1154,18 +1154,22 @@ const runShard = async (
   const log = createWriteStream(logPath, { flags: 'w' });
 
   let anvil: ManagedChildProcess | null = null;
+  let anvil2: ManagedChildProcess | null = null;
   let api: ManagedChildProcess | null = null;
   let vite: ManagedChildProcess | null = null;
   let teardownReason: string | null = null;
   const rpcPort = args.basePort + shard * 20 + 0;
+  const rpc2Port = args.basePort + shard * 20 + 1;
   const apiPort = args.basePort + shard * 20 + 2;
   const webPort = args.basePort + shard * 20 + 4;
   const rpcUrl = `http://127.0.0.1:${rpcPort}`;
+  const rpc2Url = `http://127.0.0.1:${rpc2Port}`;
   const apiUrl = `http://127.0.0.1:${apiPort}`;
   const webUrl = `https://localhost:${webPort}`;
   const dbPath = join(logsDir, `db-e2e-shard-${shard}`);
   // Keep anvil's live state outside orchestrator dbRoot. Reset intentionally rm -rf's dbRoot.
   const anvilStatePath = join(logsDir, `anvil-state-shard-${shard}.json`);
+  const anvil2StatePath = join(logsDir, `anvil2-state-shard-${shard}.json`);
   mkdirSync(dbPath, { recursive: true });
   let baselineHealth: unknown | null = null;
 
@@ -1188,18 +1192,20 @@ const runShard = async (
   };
 
   try {
-    log.write(`shard=${shard}/${totalShards}\nrpc=${rpcUrl}\napi=${apiUrl}\nweb=${webUrl}\ndb=${dbPath}\n\n`);
+    log.write(`shard=${shard}/${totalShards}\nrpc=${rpcUrl}\nrpc2=${rpc2Url}\napi=${apiUrl}\nweb=${webUrl}\ndb=${dbPath}\n\n`);
     throwIfAborted();
 
     // Hard preflight: kill stale processes that kept shard ports occupied
     // from previous crashed/aborted runs.
     // Layout:
     // - rpc: anvil
+    // - rpc2: secondary anvil for cross-j local simulation
     // - api: production runtime/server.ts on an isolated shard port
     // - web: vite preview
     // - extra reserved ports kept for any local child APIs the server may spawn
     const preflightStart = Date.now();
     await freePort(rpcPort, log);
+    await freePort(rpc2Port, log);
     await freePort(apiPort, log);
     await freePort(webPort, log);
     await freePort(apiPort + 10, log);
@@ -1231,7 +1237,31 @@ const runShard = async (
     );
     anvil.stdout.on('data', c => log.write(`[anvil] ${c.toString()}`));
     anvil.stderr.on('data', c => log.write(`[anvil:err] ${c.toString()}`));
-    await waitForRpcReady(rpcUrl, args.stackTimeoutMs);
+    anvil2 = spawn(
+      args.anvilBin,
+      [
+        '--host',
+        '127.0.0.1',
+        '--port',
+        String(rpc2Port),
+        '--chain-id',
+        '31338',
+        '--block-gas-limit',
+        '60000000',
+        '--code-size-limit',
+        '65536',
+        '--state',
+        anvil2StatePath,
+        '--silent',
+      ],
+      { stdio: ['ignore', 'pipe', 'pipe'], env: sanitizeChildEnv(process.env) },
+    );
+    anvil2.stdout.on('data', c => log.write(`[anvil2] ${c.toString()}`));
+    anvil2.stderr.on('data', c => log.write(`[anvil2:err] ${c.toString()}`));
+    await Promise.all([
+      waitForRpcReady(rpcUrl, args.stackTimeoutMs, 31337),
+      waitForRpcReady(rpc2Url, args.stackTimeoutMs, 31338),
+    ]);
     markPhase('anvilBoot', anvilStart);
     throwIfAborted();
 
@@ -1248,6 +1278,8 @@ const runShard = async (
         `ws://127.0.0.1:${apiPort}`,
         '--rpc-url',
         rpcUrl,
+        '--rpc2-url',
+        rpc2Url,
         '--db-root',
         dbPath,
         '--allow-reset',
@@ -1260,6 +1292,7 @@ const runShard = async (
           ...process.env,
           USE_ANVIL: 'true',
           ANVIL_RPC: rpcUrl,
+          ANVIL_RPC2: rpc2Url,
           XLN_SKIP_STALE_REAP: '1',
           XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS: String(args.stackTimeoutMs),
         }),
@@ -1315,7 +1348,9 @@ const runShard = async (
         env: sanitizeChildEnv({
           ...process.env,
           ANVIL_RPC: rpcUrl,
+          ANVIL_RPC2: rpc2Url,
           RPC_ETHEREUM: rpcUrl,
+          RPC_TRON: rpc2Url,
           VITE_DEV_PORT: String(webPort),
           VITE_API_PROXY_TARGET: apiUrl,
           VITE_CACHE_DIR: shardViteCacheDir,
@@ -1369,6 +1404,7 @@ const runShard = async (
         E2E_BASE_URL: webUrl,
         E2E_API_BASE_URL: apiUrl,
         E2E_ANVIL_RPC: rpcUrl,
+        E2E_ANVIL_RPC2: rpc2Url,
         E2E_RESET_BASE_URL: apiUrl,
         E2E_BASELINE_HEALTH_JSON: baselineHealth ? JSON.stringify(baselineHealth) : '',
         E2E_FAST: process.env['E2E_FAST'] ?? '1',
@@ -1440,7 +1476,7 @@ const runShard = async (
       const teardownLabel = phaseMs.apiHealthy > 0 ? 'shard teardown' : 'startup failure';
       log.write(`[runner] ${teardownLabel} -> SIGTERM api pid=${api.pid} reason=${teardownReason.split('\n')[0]}\n`);
     }
-    await Promise.all([stopProcess(vite), stopProcess(api), stopProcess(anvil)]);
+    await Promise.all([stopProcess(vite), stopProcess(api), stopProcess(anvil), stopProcess(anvil2)]);
     log.end();
   }
 };
