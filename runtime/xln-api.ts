@@ -50,6 +50,8 @@ export type {
   RoutedEntityInput,
   AccountTx,
   SettlementDiff,
+  CrossJurisdictionSwapOrder,
+  CrossJurisdictionSwapBook,
 } from './types';
 export type { PersistedFrameJournal } from './wal/store';
 export type { StorageFrameRecord, StorageHead } from './storage/types';
@@ -106,6 +108,7 @@ import type {
   EntityProfile,
   JurisdictionConfig,
   ConsensusConfig,
+  CrossJurisdictionSwapOrder,
   RuntimeInput,
   EntityInput,
   EntityState,
@@ -164,6 +167,40 @@ export type P2PConfig = {
   advertiseEntityIds?: string[];
   isHub?: boolean;
   gossipPollMs?: number;
+};
+
+export type CrossJurisdictionSwapSubmitParams = {
+  orderId?: string;
+  sourceUserEntityId: string;
+  sourceHubEntityId: string;
+  targetHubEntityId: string;
+  targetUserEntityId: string;
+  sourceTokenId: number;
+  sourceAmount: bigint;
+  targetTokenId: number;
+  targetAmount: bigint;
+  bookHubEntityId?: string;
+  sourceUserSignerId?: string;
+  sourceHubSignerId?: string;
+  targetHubSignerId?: string;
+  targetUserSignerId?: string;
+  bookHubSignerId?: string;
+  secret?: string;
+  hashlock?: string;
+  sourceLockId?: string;
+  targetLockId?: string;
+  expiresInMs?: number;
+  revealBeforeHeightDelta?: number;
+  priceTicks?: bigint;
+  memo?: string;
+};
+
+export type CrossJurisdictionSwapSubmitResult = {
+  order: CrossJurisdictionSwapOrder;
+  secret: string;
+  hashlock: string;
+  sourceLockId: string;
+  targetLockId: string;
 };
 
 /**
@@ -226,6 +263,14 @@ export interface XLNModule {
   ) => Promise<void>;
   processJBlockEvents?: (env: Env) => Promise<void>;
   queueEntityInput?: (env: Env, entityId: string, signerId: string, txData: QueueEntityInputPayload) => Promise<void>;
+  submitCrossJurisdictionSwap?: (
+    env: Env,
+    params: CrossJurisdictionSwapSubmitParams,
+  ) => Promise<CrossJurisdictionSwapSubmitResult>;
+  submitCrossJurisdictionSwapClaims?: (
+    env: Env,
+    params: { order: CrossJurisdictionSwapOrder; secret: string; sourceHubSignerId?: string; targetUserSignerId?: string; bookHubSignerId?: string },
+  ) => Promise<void>;
   setDeltaTransformerAddress?: (address: string) => void;
 
   // Identity system (from ids.ts)
