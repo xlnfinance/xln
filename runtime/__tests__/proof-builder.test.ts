@@ -80,4 +80,64 @@ describe('proof-builder dispute hash', () => {
 
     expect(() => buildAccountProofBody(accountMachine)).toThrow('MISSING_DELTA_TRANSFORMER_ADDRESS');
   });
+
+  test('builds transformer allowances for payments, swaps, and pulls', () => {
+    setDeltaTransformerAddress(DEPOSITORY);
+    const accountMachine = {
+      deltas: new Map([
+        [1, { offdelta: 0n }],
+        [2, { offdelta: 0n }],
+        [3, { offdelta: 0n }],
+      ]),
+      locks: new Map([
+        ['lock-left-sends', {
+          tokenId: 1,
+          senderIsLeft: true,
+          amount: 11n,
+          revealBeforeHeight: 123,
+          hashlock: '0x' + '11'.repeat(32),
+        }],
+        ['lock-right-sends', {
+          tokenId: 2,
+          senderIsLeft: false,
+          amount: 13n,
+          revealBeforeHeight: 123,
+          hashlock: '0x' + '22'.repeat(32),
+        }],
+      ]),
+      swapOffers: new Map([
+        ['swap-1', {
+          makerIsLeft: true,
+          giveTokenId: 1,
+          giveAmount: 17n,
+          wantTokenId: 2,
+          wantAmount: 19n,
+        }],
+      ]),
+      pulls: new Map([
+        ['pull-positive', {
+          tokenId: 3,
+          amount: 23n,
+          revealedUntilTimestamp: Date.now() + 60_000,
+          fullHash: '0x' + '33'.repeat(32),
+          partialRoot: '0x' + '44'.repeat(32),
+        }],
+        ['pull-negative', {
+          tokenId: 1,
+          amount: -29n,
+          revealedUntilTimestamp: Date.now() + 60_000,
+          fullHash: '0x' + '55'.repeat(32),
+          partialRoot: '0x' + '66'.repeat(32),
+        }],
+      ]),
+    } as any;
+
+    const proof = buildAccountProofBody(accountMachine);
+    const allowances = proof.runtimeProofBody.transformers[0]?.allowances;
+    expect(allowances).toEqual([
+      { deltaIndex: 0, rightAllowance: 29n, leftAllowance: 28n },
+      { deltaIndex: 1, rightAllowance: 32n, leftAllowance: 0n },
+      { deltaIndex: 2, rightAllowance: 0n, leftAllowance: 23n },
+    ]);
+  });
 });

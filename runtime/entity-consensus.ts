@@ -33,7 +33,12 @@ import type { OrderbookExtState } from './orderbook';
 import { replaceOrderbookPair } from './orderbook';
 import { executeCrontab, initCrontab, scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from './entity-crontab';
 import { ethers } from 'ethers';
-import { buildCrossJurisdictionPullReveal } from './cross-jurisdiction';
+import {
+  buildCrossJurisdictionPullReveal,
+  isCrossJurisdictionPullExpired,
+  isCrossJurisdictionRouteExpired,
+  withCanonicalCrossJurisdictionRouteHash,
+} from './cross-jurisdiction';
 
 const compareNumericKey = (
   left: string | number,
@@ -72,6 +77,7 @@ const isCrossJurisdictionReadinessTx = (tx: unknown): boolean => {
   const typed = tx as { type?: string; data?: { crossJurisdiction?: unknown } } | null | undefined;
   return typed?.type === 'pull_lock' ||
     typed?.type === 'pull_resolve' ||
+    typed?.type === 'cross_swap_fill_ack' ||
     (typed?.type === 'swap_offer' && Boolean(typed.data?.crossJurisdiction));
 };
 
@@ -96,6 +102,7 @@ const collectSiblingCrossJurisdictionOffers = (
   currentEntityState: EntityState,
 ): OrderbookOfferForMatch[] => {
   const currentId = normalizeEntityRef(currentEntityState.entityId);
+  const now = Number(currentEntityState.timestamp || env.timestamp || Date.now());
   const offers: OrderbookOfferForMatch[] = [];
   for (const replica of env.eReplicas?.values?.() || []) {
     const siblingState = replica?.state;
@@ -104,6 +111,14 @@ const collectSiblingCrossJurisdictionOffers = (
     for (const [accountId, account] of siblingState.accounts.entries()) {
       for (const [offerId, offer] of account.swapOffers.entries()) {
         if (!offer?.crossJurisdiction) continue;
+        let route;
+        try {
+          route = withCanonicalCrossJurisdictionRouteHash(offer.crossJurisdiction);
+        } catch {
+          continue;
+        }
+        if (route.status !== 'resting') continue;
+        if (isCrossJurisdictionRouteExpired(route, now) || isCrossJurisdictionPullExpired(route, 'source', now)) continue;
         offers.push(normalizeSwapOfferForOrderbook(
           {
             offerId: String(offerId),
@@ -118,7 +133,7 @@ const collectSiblingCrossJurisdictionOffers = (
             priceTicks: offer.priceTicks,
             timeInForce: offer.timeInForce,
             minFillRatio: offer.minFillRatio,
-            crossJurisdiction: offer.crossJurisdiction,
+            crossJurisdiction: route,
           },
           String(accountId),
         ));
@@ -131,10 +146,19 @@ const collectSiblingCrossJurisdictionOffers = (
 const collectLocalCrossJurisdictionOffers = (
   currentEntityState: EntityState,
 ): OrderbookOfferForMatch[] => {
+  const now = Number(currentEntityState.timestamp || Date.now());
   const offers: OrderbookOfferForMatch[] = [];
   for (const [accountId, account] of currentEntityState.accounts.entries()) {
     for (const [offerId, offer] of account.swapOffers.entries()) {
       if (!offer?.crossJurisdiction) continue;
+      let route;
+      try {
+        route = withCanonicalCrossJurisdictionRouteHash(offer.crossJurisdiction);
+      } catch {
+        continue;
+      }
+      if (route.status !== 'resting') continue;
+      if (isCrossJurisdictionRouteExpired(route, now) || isCrossJurisdictionPullExpired(route, 'source', now)) continue;
       offers.push(normalizeSwapOfferForOrderbook(
         {
           offerId: String(offerId),
@@ -149,7 +173,7 @@ const collectLocalCrossJurisdictionOffers = (
           priceTicks: offer.priceTicks,
           timeInForce: offer.timeInForce,
           minFillRatio: offer.minFillRatio,
-          crossJurisdiction: offer.crossJurisdiction,
+          crossJurisdiction: route,
         },
         String(accountId),
       ));
@@ -176,8 +200,18 @@ const findSwapOfferOwnerState = (
   return null;
 };
 
-const crossJurisdictionPullsReady = (env: Env, route: NonNullable<OrderbookOfferForMatch['crossJurisdiction']>): boolean => {
+const crossJurisdictionPullsReady = (
+  env: Env,
+  route: NonNullable<OrderbookOfferForMatch['crossJurisdiction']>,
+  now: number,
+): boolean => {
   if (!route.sourcePull || !route.targetPull) return false;
+  if (isCrossJurisdictionRouteExpired(route, now)) return false;
+  if (isCrossJurisdictionPullExpired(route, 'source', now) || isCrossJurisdictionPullExpired(route, 'target', now)) return false;
+  // The orderbook runs in hub runtimes. Remote user sibling entities usually
+  // are not present in this env, so readiness is checked against the hub-side
+  // account state. A pull is present there only after the bilateral frame was
+  // accepted/acked by the user side.
   const sourceHubState = findEntityStateById(env, route.source.counterpartyEntityId);
   const targetHubState = findEntityStateById(env, route.target.entityId);
   const sourceAccount = findAccountByCounterparty(sourceHubState, route.source.entityId);
@@ -1620,7 +1654,11 @@ export const applyEntityFrame = async (
     for (const offer of [...enrichedOffers, ...siblingOffers]) {
       const key = swapKey(offer.accountId, offer.offerId);
       if (seenOfferKeys.has(key)) continue;
-      if (offer.crossJurisdiction && !crossJurisdictionPullsReady(env, offer.crossJurisdiction)) {
+      if (offer.crossJurisdiction && !crossJurisdictionPullsReady(
+        env,
+        offer.crossJurisdiction,
+        Number(currentEntityState.timestamp || env.timestamp || Date.now()),
+      )) {
         waitingForCrossPullCommitments = true;
         console.warn(`🌉 ORDERBOOK CROSS-J: offer ${offer.offerId} waiting for prepared pull commitments`);
         continue;
@@ -1699,8 +1737,34 @@ export const applyEntityFrame = async (
         console.warn(`🌉 ORDERBOOK CROSS-J FILL skipped: unprepared pull route=${route.orderId}`);
         continue;
       }
-      if (!crossJurisdictionPullsReady(env, route)) {
+      if (!crossJurisdictionPullsReady(env, route, Number(currentEntityState.timestamp || env.timestamp || Date.now()))) {
         console.warn(`🌉 ORDERBOOK CROSS-J FILL skipped: pull commitments not committed route=${route.orderId}`);
+        continue;
+      }
+      const sourceHubId = normalizeEntityRef(route.source.counterpartyEntityId);
+      const currentHubOwnsSourceLeg = sourceHubId === normalizeEntityRef(currentEntityState.entityId);
+      if (!currentHubOwnsSourceLeg) {
+        allOutputs.push({
+          entityId: route.source.counterpartyEntityId,
+          entityTxs: [{
+            type: 'crossJurisdictionFillRequest',
+            data: {
+              routeId: route.orderId,
+              fillRatio: fill.fillRatio,
+              requestedByEntityId: currentEntityState.entityId,
+              sourceAmount: fill.sourceAmount,
+              targetAmount: fill.targetAmount,
+            },
+          }],
+        });
+        console.log(
+          `🌉 ORDERBOOK CROSS-J FILL REQUEST: ${route.orderId} ratio=${fill.fillRatio}/65535 ` +
+          `sourceHub=${route.source.counterpartyEntityId.slice(-4)} requestedBy=${currentEntityState.entityId.slice(-4)}`,
+        );
+        continue;
+      }
+      if (!route.hashLadderPrivateSeed) {
+        console.warn(`🌉 ORDERBOOK CROSS-J FILL skipped: source hub private seed missing route=${route.orderId}`);
         continue;
       }
       let reveal;

@@ -225,6 +225,7 @@ describe("DeltaTransformer", function () {
         {
           deltaIndex: 0,
           amount: MAX_FILL_RATIO,
+          claimedRatio: 0,
           revealedUntilTimestamp: deadline,
           fullHash: partialProof.fullHash,
           partialRoot: partialProof.partialRoot,
@@ -232,6 +233,7 @@ describe("DeltaTransformer", function () {
         {
           deltaIndex: 1,
           amount: -1234,
+          claimedRatio: 0,
           revealedUntilTimestamp: deadline,
           fullHash: fullProof.fullHash,
           partialRoot: fullProof.partialRoot,
@@ -246,6 +248,23 @@ describe("DeltaTransformer", function () {
 
     expect(result[0]).to.equal(BigInt(partialRatio));
     expect(result[1]).to.equal(-1234n);
+
+    const previouslyClaimed = 0x1000;
+    const cumulativeBatch = {
+      payment: [],
+      swap: [],
+      pull: [{
+        deltaIndex: 0,
+        amount: MAX_FILL_RATIO,
+        claimedRatio: previouslyClaimed,
+        revealedUntilTimestamp: deadline,
+        fullHash: partialProof.fullHash,
+        partialRoot: partialProof.partialRoot,
+      }],
+    };
+    const encodedCumulativeBatch = await transformer.encodeBatch(cumulativeBatch);
+    const cumulative = await transformer.applyBatch.staticCall([0], encodedCumulativeBatch, leftArguments, "0x");
+    expect(cumulative[0]).to.equal(BigInt(partialRatio - previouslyClaimed));
   });
 
   it("stores the first secret reveal block and rejects later overwrites", async function () {

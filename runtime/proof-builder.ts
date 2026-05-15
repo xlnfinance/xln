@@ -19,6 +19,7 @@ import type {
   RuntimePayment,
   RuntimePull,
   RuntimeSwap,
+  RuntimeAllowance,
   ProofBodyResult,
   DisputeConfig,
 } from './proof-body-types.ts';
@@ -42,6 +43,41 @@ const requireContractAddress = (label: string, address: string | null | undefine
   }
   return address;
 };
+
+const addDeltaAllowance = (
+  allowances: Map<number, { leftAllowance: bigint; rightAllowance: bigint }>,
+  deltaIndex: number,
+  signedDiff: bigint,
+): void => {
+  if (signedDiff === 0n) return;
+  const entry = allowances.get(deltaIndex) ?? { leftAllowance: 0n, rightAllowance: 0n };
+  if (signedDiff > 0n) entry.leftAllowance += signedDiff;
+  else entry.rightAllowance += -signedDiff;
+  allowances.set(deltaIndex, entry);
+};
+
+function buildTransformerAllowances(batch: RuntimeBatch): RuntimeAllowance[] {
+  const allowances = new Map<number, { leftAllowance: bigint; rightAllowance: bigint }>();
+
+  for (const payment of batch.payments) {
+    addDeltaAllowance(allowances, payment.deltaIndex, payment.amount);
+  }
+  for (const swap of batch.swaps) {
+    addDeltaAllowance(allowances, swap.addDeltaIndex, swap.addAmount);
+    addDeltaAllowance(allowances, swap.subDeltaIndex, -swap.subAmount);
+  }
+  for (const pull of batch.pulls) {
+    addDeltaAllowance(allowances, pull.deltaIndex, pull.amount);
+  }
+
+  return Array.from(allowances.entries())
+    .sort(([a], [b]) => a - b)
+    .map(([deltaIndex, allowance]) => ({
+      deltaIndex,
+      rightAllowance: allowance.rightAllowance,
+      leftAllowance: allowance.leftAllowance,
+    }));
+}
 
 // Set by BrowserVM / RPC adapter after real deployment or real connect.
 let deltaTransformerAddress = '';
@@ -125,6 +161,7 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
   const sortedSwaps = sortTransformerEntries(accountMachine.swapOffers.entries());
 
   for (const [offerId, offer] of sortedSwaps) {
+    if (offer.crossJurisdiction) continue;
     const addDeltaIndex = tokenIds.indexOf(offer.giveTokenId);
     const subDeltaIndex = tokenIds.indexOf(offer.wantTokenId);
 
@@ -152,6 +189,7 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
     pulls.push({
       deltaIndex,
       amount: pull.amount,
+      claimedRatio: Math.max(0, Math.min(65_535, Math.floor(Number(pull.claimedRatio ?? 0)))),
       revealedUntilTimestamp: pull.revealedUntilTimestamp,
       fullHash: pull.fullHash,
       partialRoot: pull.partialRoot,
@@ -175,7 +213,7 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
     transformers.push({
       transformerAddress,
       batch,
-      allowances: [], // Phase 2: Stub with empty array
+      allowances: buildTransformerAllowances(batch),
     });
   }
 
@@ -239,6 +277,7 @@ function runtimeToProofBodyStruct(runtime: RuntimeProofBody): ProofBodyStruct {
       pull: t.batch.pulls.map(p => ({
         deltaIndex: BigInt(p.deltaIndex),
         amount: p.amount,
+        claimedRatio: p.claimedRatio,
         revealedUntilTimestamp: BigInt(Math.floor(p.revealedUntilTimestamp / 1000)),
         fullHash: p.fullHash,
         partialRoot: p.partialRoot,

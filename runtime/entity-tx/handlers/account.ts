@@ -199,6 +199,18 @@ function hasQueuedSwapResolveForEntityState(
   return false;
 }
 
+function hasQueuedCrossSwapAckForEntityState(
+  hubState: EntityState,
+  accountId: string,
+  offerId: string,
+): boolean {
+  const accountMachine = hubState.accounts.get(accountId);
+  if (!accountMachine) return false;
+  if ((accountMachine.mempool ?? []).some((tx) => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId)) return true;
+  if ((accountMachine.pendingFrame?.accountTxs ?? []).some((tx) => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId)) return true;
+  return false;
+}
+
 function queueUniqueSwapResolveForEntityState(
   mempoolOps: MempoolOp[],
   hubState: EntityState,
@@ -585,7 +597,10 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                       },
                     }],
                   });
-                  route.status = 'source_claimed';
+                  route.claimedRatio = Math.max(Number(route.claimedRatio || 0), fillRatio);
+                  route.sourceClaimed = (BigInt(route.source.amount) * BigInt(route.claimedRatio)) / 65_535n;
+                  route.targetClaimed = (BigInt(route.target.amount) * BigInt(route.claimedRatio)) / 65_535n;
+                  if (fillRatio >= 65_535) route.status = 'source_claimed';
                   route.updatedAt = newState.timestamp;
                   console.log(
                     `🌉 PULL: Relaying cross-j ratio route=${route.orderId} ` +
@@ -599,10 +614,13 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                   normalizeEntityRef(route.target.counterpartyEntityId) === normalizeEntityRef(newState.entityId) &&
                   normalizeEntityRef(route.target.entityId) === normalizeEntityRef(counterpartyId)
                 ) {
-                  route.status = 'settled';
+                  route.claimedRatio = Math.max(Number(route.claimedRatio || 0), fillRatio);
+                  route.sourceClaimed = (BigInt(route.source.amount) * BigInt(route.claimedRatio)) / 65_535n;
+                  route.targetClaimed = (BigInt(route.target.amount) * BigInt(route.claimedRatio)) / 65_535n;
+                  if (fillRatio >= 65_535) route.status = 'settled';
                   route.updatedAt = newState.timestamp;
-                  route.settledAt = newState.timestamp;
-                  console.log(`🌉 PULL: Cross-j route settled ${route.orderId}`);
+                  if (fillRatio >= 65_535) route.settledAt = newState.timestamp;
+                  console.log(`🌉 PULL: Cross-j route ${fillRatio >= 65_535 ? 'settled' : 'partially claimed'} ${route.orderId}`);
                 }
               }
             }
@@ -1906,7 +1924,7 @@ export function processOrderbookSwaps(
         if (lastColon === -1) continue;
         const accountId = namespacedOrderId.slice(0, lastColon);
         const offerId = namespacedOrderId.slice(lastColon + 1);
-        if (hasQueuedSwapResolveForEntityState(hubState, queuedSwapResolutions, accountId, offerId)) continue;
+        if (hasQueuedCrossSwapAckForEntityState(hubState, accountId, offerId)) continue;
 
         const filledLotsBig = BigInt(fill.filledLots);
         if (filledLotsBig <= 0n || fill.weightedCost <= 0n) continue;
@@ -1914,39 +1932,51 @@ export function processOrderbookSwaps(
         const executionQuoteWei = (fill.weightedCost * SWAP_LOT_SCALE) / ORDERBOOK_PRICE_SCALE;
         const sourceAmount = meta.side === 1 ? executionBaseWei : executionQuoteWei;
         const targetAmount = meta.side === 1 ? executionQuoteWei : executionBaseWei;
-        const fillRatio = deriveCanonicalSwapFillRatio(meta.offer.giveAmount, sourceAmount);
-        if (fillRatio <= 0 || sourceAmount <= 0n || targetAmount <= 0n) continue;
+        if (sourceAmount <= 0n || targetAmount <= 0n) continue;
+        const previousRatio = Math.max(0, Math.min(65_535, Math.floor(Number(meta.route.claimedRatio ?? 0) || 0)));
+        const sourceTotal = BigInt(meta.route.source.amount);
+        const targetTotal = BigInt(meta.route.target.amount);
+        const previousSourceClaimed =
+          meta.route.sourceClaimed ?? ((sourceTotal * BigInt(previousRatio)) / 65_535n);
+        const desiredSourceClaimed = previousSourceClaimed + sourceAmount;
+        const cappedSourceClaimed = desiredSourceClaimed >= sourceTotal ? sourceTotal : desiredSourceClaimed;
+        const fillRatio = cappedSourceClaimed >= sourceTotal
+          ? 65_535
+          : deriveCanonicalSwapFillRatio(sourceTotal, cappedSourceClaimed);
+        if (fillRatio <= previousRatio) continue;
+        const settlementSourceAmount =
+          (sourceTotal * BigInt(fillRatio)) / 65_535n - previousSourceClaimed;
+        const previousTargetClaimed =
+          meta.route.targetClaimed ?? ((targetTotal * BigInt(previousRatio)) / 65_535n);
+        const settlementTargetAmount =
+          (targetTotal * BigInt(fillRatio)) / 65_535n - previousTargetClaimed;
+        if (settlementSourceAmount <= 0n || settlementTargetAmount <= 0n) continue;
 
         crossJurisdictionFills.push({
           accountId,
           offerId,
           route: meta.route,
           fillRatio,
-          cancelRemainder: true,
-          sourceAmount,
-          targetAmount,
+          cancelRemainder: fillRatio >= 65_535,
+          sourceAmount: settlementSourceAmount,
+          targetAmount: settlementTargetAmount,
           priceTicks: meta.priceTicks,
           pairId: meta.pairId,
           orderId: namespacedOrderId,
         });
-
-        const existingOrder = getBookOrder(book, namespacedOrderId);
-        if (existingOrder) {
-          const cancelResult = applyCommand(book, {
-            kind: 1,
-            ownerId: meta.makerId,
-            orderId: namespacedOrderId,
-          });
-          book = cancelResult.state;
-          bookCache.set(meta.pairId, book);
-          bookUpdates.push({ pairId: meta.pairId, book });
-        }
-
-        queueUniqueSwapResolveForEntityState(mempoolOps, hubState, queuedSwapResolutions, accountId, {
-          offerId,
-          fillRatio: 0,
-          cancelRemainder: true,
-          comment: `cross-j-hashledger-fill:${fillRatio}`,
+        mempoolOps.push({
+          accountId,
+          tx: {
+            type: 'cross_swap_fill_ack',
+            data: {
+              offerId,
+              cumulativeFillRatio: fillRatio,
+              executionSourceAmount: settlementSourceAmount,
+              executionTargetAmount: settlementTargetAmount,
+              cancelRemainder: fillRatio >= 65_535,
+              comment: `cross-j-hashledger-fill:${fillRatio}`,
+            },
+          },
         });
       }
     }

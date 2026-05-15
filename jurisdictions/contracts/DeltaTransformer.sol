@@ -54,6 +54,7 @@ contract DeltaTransformer {
   struct Pull {
     uint deltaIndex;
     int amount;
+    uint16 claimedRatio;
     uint revealedUntilTimestamp;
     bytes32 fullHash;
     bytes32 partialRoot;
@@ -206,10 +207,13 @@ contract DeltaTransformer {
     if (pull.deltaIndex >= deltas.length) revert InvalidDeltaIndex();
 
     uint16 fillRatio = verifiedPullFillRatio(pull, pullArg, argumentsTimestamp);
-    if (fillRatio == 0) return;
+    if (fillRatio == 0 || fillRatio <= pull.claimedRatio) return;
 
     uint absAmount = pull.amount >= 0 ? uint(pull.amount) : uint(-pull.amount);
-    int applied = int(absAmount * fillRatio / MAX_FILL_RATIO);
+    uint newClaim = absAmount * uint(fillRatio) / MAX_FILL_RATIO;
+    uint previousClaim = absAmount * uint(pull.claimedRatio) / MAX_FILL_RATIO;
+    if (newClaim <= previousClaim) return;
+    int applied = int(newClaim - previousClaim);
     if (pull.amount >= 0) {
       deltas[pull.deltaIndex] += applied;
     } else {
