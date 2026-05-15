@@ -63,14 +63,23 @@ async function openRuntimeDropdown(page: Page): Promise<void> {
 async function ensureRuntimeCreationView(page: Page, label: string): Promise<void> {
   const mnemonicTab = page.getByRole('button', { name: 'Mnemonic', exact: true });
   const quickLoginButton = page.getByRole('button', { name: new RegExp(`^${escapeRegex(label)}$`, 'i') });
+  const createWalletHeading = page.getByRole('heading', { name: /Create XLN wallet/i }).first();
 
-  if (await mnemonicTab.isVisible().catch(() => false) || await quickLoginButton.isVisible().catch(() => false)) {
+  if (
+    await mnemonicTab.isVisible().catch(() => false) ||
+    await quickLoginButton.isVisible().catch(() => false) ||
+    await createWalletHeading.isVisible().catch(() => false)
+  ) {
     return;
   }
 
   const creationBackButton = page.getByRole('button', { name: /Back/i }).first();
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    if (await mnemonicTab.isVisible().catch(() => false) || await quickLoginButton.isVisible().catch(() => false)) {
+    if (
+      await mnemonicTab.isVisible().catch(() => false) ||
+      await quickLoginButton.isVisible().catch(() => false) ||
+      await createWalletHeading.isVisible().catch(() => false)
+    ) {
       return;
     }
     if (await creationBackButton.isVisible().catch(() => false)) {
@@ -81,7 +90,11 @@ async function ensureRuntimeCreationView(page: Page, label: string): Promise<voi
     break;
   }
 
-  if (await mnemonicTab.isVisible().catch(() => false) || await quickLoginButton.isVisible().catch(() => false)) {
+  if (
+    await mnemonicTab.isVisible().catch(() => false) ||
+    await quickLoginButton.isVisible().catch(() => false) ||
+    await createWalletHeading.isVisible().catch(() => false)
+  ) {
     return;
   }
 
@@ -91,7 +104,11 @@ async function ensureRuntimeCreationView(page: Page, label: string): Promise<voi
   await addRuntimeItem.click();
 
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    if (await mnemonicTab.isVisible().catch(() => false) || await quickLoginButton.isVisible().catch(() => false)) {
+    if (
+      await mnemonicTab.isVisible().catch(() => false) ||
+      await quickLoginButton.isVisible().catch(() => false) ||
+      await createWalletHeading.isVisible().catch(() => false)
+    ) {
       return;
     }
     if (await creationBackButton.isVisible().catch(() => false)) {
@@ -104,7 +121,8 @@ async function ensureRuntimeCreationView(page: Page, label: string): Promise<voi
     .poll(
       async () =>
         await mnemonicTab.isVisible().catch(() => false) ||
-        await quickLoginButton.isVisible().catch(() => false),
+        await quickLoginButton.isVisible().catch(() => false) ||
+        await createWalletHeading.isVisible().catch(() => false),
       { timeout: 15_000, intervals: [200, 400, 600] },
     )
     .toBe(true);
@@ -562,12 +580,17 @@ export async function createRuntime(
     runtimeId = await waitForNextRuntimeReady(page, previousRuntimeId);
   } else {
     const mnemonicTab = page.getByRole('button', { name: 'Mnemonic', exact: true });
+    if (!await mnemonicTab.isVisible().catch(() => false)) {
+      const importToggle = page.locator('details.import-options summary').first();
+      await expect(importToggle).toBeVisible({ timeout: 15_000 });
+      await importToggle.click();
+    }
     await expect(mnemonicTab).toBeVisible({ timeout: 15_000 });
     await mnemonicTab.click();
     const mnemonicInput = page.locator('#mnemonic');
     await expect(mnemonicInput).toBeVisible({ timeout: 15_000 });
     await mnemonicInput.fill(normalizeMnemonic(mnemonic));
-    const openVaultButton = page.getByRole('button', { name: /Open (Wallet|Vault)/, exact: false });
+    const openVaultButton = page.getByRole('button', { name: /(Create XLN wallet|Open (Wallet|Vault))/, exact: false });
     await expect(openVaultButton).toBeEnabled({ timeout: 15_000 });
     await openVaultButton.click();
     runtimeId = await waitForRuntimeBootstrap(page, runtimeId, previousRuntimeId);

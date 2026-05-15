@@ -75,6 +75,34 @@
 
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  type JurisdictionLike = {
+    name?: unknown;
+    chainId?: unknown;
+  };
+
+  const normalizeJurisdiction = (value: unknown): string => String(value || '').trim().toLowerCase();
+  const jurisdictionKey = (value: unknown): string => {
+    if (value && typeof value === 'object') {
+      const jurisdiction = value as JurisdictionLike;
+      const chainId = String(jurisdiction.chainId ?? '').trim();
+      if (chainId) return `chain:${chainId}`;
+      return normalizeJurisdiction(jurisdiction.name);
+    }
+    return normalizeJurisdiction(value);
+  };
+
+  function getEntityJurisdictionKey(currentEnv: Env | undefined, targetEntityId: string): string {
+    const normalizedEntityId = normalizeEntityId(targetEntityId);
+    if (!normalizedEntityId || !currentEnv?.eReplicas) return '';
+    for (const [key, replica] of currentEnv.eReplicas.entries()) {
+      const [replicaEntityId] = String(key || '').split(':');
+      if (normalizeEntityId(replicaEntityId) !== normalizedEntityId) continue;
+      return jurisdictionKey(replica?.state?.config?.jurisdiction)
+        || jurisdictionKey(replica?.position?.jurisdiction);
+    }
+    return '';
+  }
+
   const hasSavedHubJoinPreference = (): boolean =>
     typeof localStorage !== 'undefined' && localStorage.getItem(HUB_JOIN_STORAGE_KEY) !== null;
 
@@ -136,6 +164,7 @@
 
   function getHubEntityIds(currentEnv: Env): string[] {
     const discovered: string[] = [];
+    const entityJurisdiction = getEntityJurisdictionKey(currentEnv, entityId);
     const add = (value: unknown) => {
       const id = String(value || '').trim();
       if (!id) return;
@@ -147,7 +176,9 @@
 
     const profiles = currentEnv?.gossip?.getProfiles?.() || [];
     for (const profile of profiles) {
-      if (profile.metadata.isHub === true) add(profile.entityId);
+      if (profile.metadata.isHub !== true) continue;
+      if (entityJurisdiction && jurisdictionKey(profile.metadata?.jurisdiction) !== entityJurisdiction) continue;
+      add(profile.entityId);
     }
 
     return discovered;

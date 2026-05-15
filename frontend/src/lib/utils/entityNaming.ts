@@ -81,9 +81,17 @@ export function getGossipProfile(entityId: string, source: GossipSource): Gossip
   return found || null;
 }
 
+export function sanitizeEntityDisplayName(value: string): string {
+  return String(value || '')
+    .replace(/\s*\((?:local\s+)?anvil\)\s*/gi, ' ')
+    .replace(/\s+local\s+anvil\s*/gi, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 export function resolveEntityName(entityId: string, source: GossipSource): string {
   const profile = getGossipProfile(entityId, source);
-  return profile ? profile.name.trim() : '';
+  return profile ? sanitizeEntityDisplayName(profile.name) : '';
 }
 
 type EntityNameOptions = {

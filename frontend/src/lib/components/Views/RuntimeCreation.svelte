@@ -957,12 +957,7 @@
     entityId = generateLazyEntityId([ethereumAddress], 1n);
 
     phase = 'complete';
-
-    // Demo quick-login still opens an XLN runtime immediately; normal BrainVault
-    // derivation remains a standalone seed/address export until the user opts in.
-    if (createLoginType === 'demo') {
-      await createXlnWalletFromCurrentVault(name.trim() || `Runtime ${ethereumAddress.slice(0, 6)}`);
-    }
+    await createXlnWalletFromCurrentVault(name.trim() || `Wallet ${ethereumAddress.slice(0, 6)}`);
   }
 
   function terminateWorkers() {
@@ -1084,7 +1079,7 @@
     <HierarchicalNav />
   {/if}
 
-  <!-- Main BrainVault Content -->
+	    <!-- Main Wallet Content -->
   <div class="brainvault-container" class:deriving={phase === 'deriving'} class:complete={phase === 'complete'}>
     <!-- Ambient particles disabled for minimalist mode -->
 
@@ -1107,9 +1102,15 @@
           </div>
         {/if}
 
-        <!-- Quick Login (Demo Accounts) -->
-        <div class="quick-login-section">
-          <div class="quick-login-header">Quick Login (Testnet)</div>
+	        <div class="wallet-create-title">
+	          <div>
+	            <h2>Create XLN wallet</h2>
+	            <p>Choose a name and passphrase. The wallet opens automatically when derivation finishes.</p>
+	          </div>
+	        </div>
+
+	        <div class="quick-login-section">
+	          <div class="quick-login-header">Quick Login (Testnet)</div>
           <div class="quick-login-grid">
             {#each DEMO_ACCOUNTS as account}
               <button
@@ -1130,30 +1131,35 @@
           </div>
         </div>
 
-        <!-- Input Mode Tabs -->
-        <div class="input-mode-tabs">
-          <button
-            class="tab-btn"
-            class:active={inputMode === 'brainvault'}
-            on:click={() => inputMode = 'brainvault'}
-          >
-            BrainVault
-          </button>
-          <button
-            class="tab-btn"
-            class:active={inputMode === 'mnemonic'}
-            on:click={() => inputMode = 'mnemonic'}
-          >
-            Mnemonic
-          </button>
-        </div>
+	        <details class="import-options">
+	          <summary>
+	            <span>Import or recover</span>
+	            <small>Mnemonic, deterministic passphrase settings, and export tools</small>
+	          </summary>
+	          <div class="input-mode-tabs">
+	            <button
+	              class="tab-btn"
+	              class:active={inputMode === 'brainvault'}
+	              on:click={() => inputMode = 'brainvault'}
+	            >
+	              Passphrase
+	            </button>
+	            <button
+	              class="tab-btn"
+	              class:active={inputMode === 'mnemonic'}
+	              on:click={() => inputMode = 'mnemonic'}
+	            >
+	              Mnemonic
+	            </button>
+	          </div>
+	        </details>
 
 
         {#if inputMode === 'brainvault'}
         <!-- Name Input -->
         <div class="input-group">
           <label for="name">{t('vault.name.label')}</label>
-          <span class="input-hint">{t('vault.name.hint')}</span>
+	          <span class="input-hint">This becomes the wallet and public entity name.</span>
           <div class="input-wrapper">
             <input
               type="text"
@@ -1169,7 +1175,7 @@
         <!-- Passphrase Input -->
         <div class="input-group">
           <label for="passphrase">{t('vault.password.label')}</label>
-          <span class="input-hint">{t('vault.password.hint')}</span>
+	          <span class="input-hint">Used locally to derive the wallet seed.</span>
           <div class="input-wrapper">
             <input
               type={showPassphrase ? 'text' : 'password'}
@@ -1222,7 +1228,7 @@
 
         <!-- Security Factor -->
         <div class="input-group factor-group">
-          <label for="shards">{t('vault.factor.label')}</label>
+	          <label for="shards">Security work factor</label>
 
           <div class="factor-buttons">
             {#each FACTOR_INFO as info, i}
@@ -1269,7 +1275,7 @@
         </div>
 
         <!-- Warning (subtle) -->
-        <p class="warning-text">Your inputs generate a unique wallet. No recovery if forgotten.</p>
+	        <p class="warning-text">Your inputs generate a unique wallet. No recovery if forgotten.</p>
         {:else}
         <!-- Mnemonic Input Mode -->
         <div class="input-group">
@@ -1308,7 +1314,7 @@
             disabled={!canDerive}
             on:click={startDerivation}
           >
-            {t('vault.derive')}
+	            Create XLN wallet
           </button>
           {#if derivationError}
             <div class="matrix-status error">{derivationError}</div>
@@ -1420,7 +1426,7 @@
                 </svg>
               </div>
             </div>
-            <h2>{activeRuntimeMatchesDerived ? 'XLN Wallet Ready' : 'BrainVault Ready'}</h2>
+	            <h2>{activeRuntimeMatchesDerived ? 'XLN Wallet Ready' : 'Wallet Seed Ready'}</h2>
             <p class="success-stats">{formatRuntimeDurationRounded(elapsedMs)} <span class="stat-divider">·</span> {shardCount} shards</p>
           </div>
         {/if}
@@ -1515,9 +1521,9 @@
               <div class="recovery-identity">
                 <img src={currentSignerAvatar} alt="" class="context-avatar" />
                 <div>
-                  <h3>{derivedRuntime ? 'XLN wallet available' : 'Create XLN wallet'}</h3>
-                  <p class="muted-tight">
-                    {derivedRuntime ? 'Open the existing XLN wallet for this signer.' : 'Use this BrainVault as your XLN account seed.'}
+	                  <h3>{derivedRuntime ? 'XLN wallet available' : 'Create XLN wallet'}</h3>
+	                  <p class="muted-tight">
+	                    {derivedRuntime ? 'Open the existing XLN wallet for this signer.' : 'Use this seed as your XLN account.'}
                   </p>
                   <p class="muted-tight">Entity {displayEntityId}</p>
                   <p class="muted-tight">Signer {currentSignerAddress || ethereumAddress}</p>
@@ -1538,7 +1544,7 @@
             <details class="brainvault-export-details" data-testid="brainvault-export-details">
               <summary data-testid="brainvault-export-toggle">
                 <span>
-                  <strong>BrainVault export</strong>
+	                  <strong>Recovery export</strong>
                   <small>Show EOA addresses and recovery phrases</small>
                 </span>
                 <span class="export-chevron">⌄</span>
@@ -1630,7 +1636,7 @@
             <div class="modal-overlay" on:click={() => showSaveVaultModal = false}>
               <div class="modal-content" on:click|stopPropagation>
                 <h3>Create XLN Wallet</h3>
-                <p class="modal-desc">Name the XLN wallet created from this BrainVault.</p>
+	                <p class="modal-desc">Name the XLN wallet created from this seed.</p>
                 <input
                   type="text"
                   class="vault-name-input"
@@ -1659,12 +1665,78 @@
 
 <style>
   /* Quick Login */
+  .wallet-create-title {
+    display: flex;
+    align-items: flex-start;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 14px;
+  }
+
+  .wallet-create-title h2 {
+    margin: 0 0 6px;
+    color: rgba(255, 255, 255, 0.94);
+    font-size: 24px;
+    line-height: 1.12;
+    letter-spacing: 0;
+  }
+
+  .wallet-create-title p {
+    margin: 0;
+    max-width: 560px;
+    color: rgba(255, 255, 255, 0.54);
+    font-size: 13px;
+    line-height: 1.45;
+  }
+
+  .import-options {
+    margin-bottom: 16px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.02);
+    overflow: hidden;
+  }
+
+  .import-options summary {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    padding: 10px 12px;
+    cursor: pointer;
+    list-style: none;
+    color: rgba(255, 255, 255, 0.82);
+    font-size: 13px;
+    font-weight: 650;
+  }
+
+  .import-options summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .import-options summary small {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    color: rgba(255, 255, 255, 0.42);
+    font-size: 11px;
+    font-weight: 500;
+  }
+
+  .import-options .input-mode-tabs {
+    margin: 0;
+    border-top: 1px solid rgba(255, 255, 255, 0.06);
+    border-radius: 0;
+    background: rgba(0, 0, 0, 0.16);
+  }
+
   .quick-login-section {
-    margin-bottom: 20px;
-    padding: 16px;
+    margin-bottom: 12px;
+    padding: 10px 12px;
     background: rgba(255, 255, 255, 0.018);
     border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 12px;
+    border-radius: 8px;
     width: 100%;
     box-sizing: border-box;
   }
@@ -1674,7 +1746,7 @@
     color: rgba(156, 163, 175, 0.78);
     text-transform: uppercase;
     letter-spacing: 0.08em;
-    margin-bottom: 12px;
+    margin-bottom: 8px;
   }
   .quick-login-grid {
     display: grid;
@@ -1683,7 +1755,7 @@
     width: 100%;
   }
   .quick-login-btn {
-    padding: 10px 12px;
+    padding: 8px 10px;
     background: rgba(255, 255, 255, 0.06);
     border: 1px solid rgba(255, 255, 255, 0.08);
     border-radius: 8px;
@@ -1693,7 +1765,7 @@
     cursor: pointer;
     transition: background 0.15s ease, border-color 0.15s ease, color 0.15s ease;
     text-transform: capitalize;
-    min-height: 40px;
+    min-height: 34px;
   }
   .quick-login-btn:hover {
     background: rgba(255, 255, 255, 0.1);
@@ -1935,7 +2007,7 @@
 
   .header {
     text-align: center;
-    margin-bottom: 24px;
+    margin-bottom: 0;
     position: relative;
     z-index: 1;
     flex-shrink: 0;

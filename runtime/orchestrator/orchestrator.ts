@@ -179,6 +179,16 @@ type HubHealthPayload = {
 type HubInfoPayload = {
   name?: string;
   entityId?: string;
+  hubEntities?: Array<{
+    entityId?: string;
+    signerId?: string;
+    name?: string;
+    jurisdictionName?: string;
+    chainId?: number;
+    depositoryAddress?: string;
+    entityProviderAddress?: string;
+    primary?: boolean;
+  }>;
   runtimeId?: string;
   apiUrl?: string;
   relayUrl?: string;
@@ -739,9 +749,13 @@ const postJson = async (url: string, timeoutMs = 1_000): Promise<void> => {
 const getHubChildByEntityId = (hubEntityId: string): HubChild | null => {
   const normalized = String(hubEntityId || '').trim().toLowerCase();
   if (!normalized) return null;
-  return hubChildren.find((child) =>
-    String(child.lastInfo?.entityId || child.lastHealth?.entityId || '').trim().toLowerCase() === normalized
-  ) || null;
+  return hubChildren.find((child) => {
+    const primaryEntityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '').trim().toLowerCase();
+    if (primaryEntityId === normalized) return true;
+    return (child.lastInfo?.hubEntities || []).some((entry) =>
+      String(entry?.entityId || '').trim().toLowerCase() === normalized
+    );
+  }) || null;
 };
 
 const fetchHubMarketSnapshots = async (
@@ -879,14 +893,14 @@ const deployRpc2JurisdictionStack = async (): Promise<void> => {
   const networkVersion = String(Date.parse(updatedAt));
   jurisdictions['tron'] = {
     ...(jurisdictions['tron'] ?? {}),
-    name: 'Tron (Local Anvil)',
+    name: 'Tron',
     chainId,
     rpc: toPublicRpcUrl(args.rpc2Url, '/rpc2'),
     blockTimeMs: 1_000,
     explorer: '',
     currency: 'TRX',
     status: 'active',
-    description: 'Second local Anvil used to simulate Tron/EVM cross-jurisdiction swaps',
+    description: 'Second local EVM chain used to simulate Tron cross-jurisdiction swaps',
     contracts: {
       ...(jurisdictions['tron']?.contracts ?? {}),
       account: jadapter.addresses.account,
@@ -1805,16 +1819,23 @@ const buildPublicHubDiscoveryPayload = (): {
     website: null;
     wsUrl: string | null;
     publicAccounts: [];
-    metadata: { isHub: true };
+    metadata: {
+      isHub: true;
+      jurisdiction?: {
+        name: string;
+        chainId?: number;
+        depositoryAddress?: string;
+        entityProviderAddress?: string;
+      };
+    };
     lastUpdated: number;
     online: boolean;
   }>;
 } => {
   const serverTime = Date.now();
   const hubs = hubChildren
-    .map((child) => {
+    .flatMap((child) => {
       const entityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '').trim();
-      if (!entityId) return null;
       const runtimeId = String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || '').trim();
       const normalizedRuntimeId = normalizeRuntimeKey(runtimeId);
       const directWsUrl = String(child.lastHealth?.directWsUrl || '').trim();
@@ -1822,21 +1843,44 @@ const buildPublicHubDiscoveryPayload = (): {
         child.proc?.exitCode === null
         && child.lastHealth?.ok === true
         && Boolean(normalizedRuntimeId && relayStore.clients.has(normalizedRuntimeId));
-      return {
-        entityId,
-        runtimeId: runtimeId || null,
-        name: child.name,
-        bio: null,
-        website: null,
-        wsUrl: directWsUrl || null,
-        publicAccounts: [] as [],
-        metadata: { isHub: true as const },
-        lastUpdated: serverTime,
-        online,
-      };
+      const hubEntities = child.lastInfo?.hubEntities?.length
+        ? child.lastInfo.hubEntities
+        : [{ entityId, name: child.name, jurisdictionName: '' }];
+      return hubEntities
+        .map((entry) => {
+          const entryEntityId = String(entry?.entityId || '').trim();
+          if (!entryEntityId) return null;
+          const jurisdictionName = String(entry?.jurisdictionName || '').trim();
+          return {
+            entityId: entryEntityId,
+            runtimeId: runtimeId || null,
+            name: String(entry?.name || child.name || entryEntityId).trim(),
+            bio: null,
+            website: null,
+            wsUrl: directWsUrl || null,
+            publicAccounts: [] as [],
+            metadata: {
+              isHub: true as const,
+              ...(jurisdictionName ? {
+                jurisdiction: {
+                  name: jurisdictionName,
+                  ...(entry.chainId !== undefined ? { chainId: entry.chainId } : {}),
+                  ...(entry.depositoryAddress ? { depositoryAddress: entry.depositoryAddress } : {}),
+                  ...(entry.entityProviderAddress ? { entityProviderAddress: entry.entityProviderAddress } : {}),
+                },
+              } : {}),
+            },
+            lastUpdated: serverTime,
+            online,
+          };
+        })
+        .filter((hub): hub is NonNullable<typeof hub> => Boolean(hub));
     })
     .filter((hub): hub is NonNullable<typeof hub> => Boolean(hub?.online))
-    .sort((left, right) => compareStableText(left.name, right.name));
+    .sort((left, right) =>
+      compareStableText(String(left.metadata.jurisdiction?.name || ''), String(right.metadata.jurisdiction?.name || '')) ||
+      compareStableText(left.name, right.name)
+    );
 
   return {
     ok: true,
@@ -2279,10 +2323,7 @@ const proxyHubApi = async (
 
   await pollAllHubHealth();
   const requestedHubId = String(bodyJson?.hubEntityId || '').toLowerCase();
-  const child = hubChildren.find((candidate) => {
-    const entityId = String(candidate.lastInfo?.entityId || candidate.lastHealth?.entityId || '').toLowerCase();
-    return entityId.length > 0 && entityId === requestedHubId;
-  });
+  const child = getHubChildByEntityId(requestedHubId);
   if (!child) {
     return new Response(safeStringify({
       success: false,

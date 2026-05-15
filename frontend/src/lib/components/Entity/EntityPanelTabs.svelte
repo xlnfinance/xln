@@ -519,9 +519,69 @@
       : null;
   }
 
+  type JurisdictionLike = {
+    name?: unknown;
+    chainId?: unknown;
+  };
+
+  function jurisdictionKey(value: unknown): string {
+    if (value && typeof value === 'object') {
+      const jurisdiction = value as JurisdictionLike;
+      const chainId = String(jurisdiction.chainId ?? '').trim();
+      if (chainId) return `chain:${chainId}`;
+      return String(jurisdiction.name || '').trim().toLowerCase();
+    }
+    return String(value || '').trim().toLowerCase();
+  }
+
   function getCurrentEntityJurisdictionName(env: Env | EnvSnapshot | null | undefined): string | null {
     const configured = String(replica?.state?.config?.jurisdiction?.name || '').trim();
     return configured || getActiveJurisdictionName(env);
+  }
+
+  function getCurrentEntityJurisdictionKey(env: Env | EnvSnapshot | null | undefined): string {
+    return jurisdictionKey(replica?.state?.config?.jurisdiction)
+      || jurisdictionKey(replica?.position?.jurisdiction)
+      || jurisdictionKey(getActiveJurisdictionName(env));
+  }
+
+  function getEntityJurisdictionKey(entityId: string): string {
+    const normalized = String(entityId || '').trim().toLowerCase();
+    if (!normalized) return '';
+    if (activeEnv?.eReplicas) {
+      for (const [key, candidate] of activeEnv.eReplicas.entries()) {
+        const [candidateEntityId] = String(key || '').split(':');
+        const stateEntityId = String(candidate?.entityId || candidate?.state?.entityId || '').trim().toLowerCase();
+        if (String(candidateEntityId || '').trim().toLowerCase() !== normalized && stateEntityId !== normalized) continue;
+        return jurisdictionKey(candidate?.state?.config?.jurisdiction)
+          || jurisdictionKey(candidate?.position?.jurisdiction);
+      }
+    }
+    const gossip = activeEnv?.gossip as {
+      getProfiles?: () => Array<{ entityId?: string; metadata?: { jurisdiction?: unknown } }>;
+      profiles?: Array<{ entityId?: string; metadata?: { jurisdiction?: unknown } }>;
+    } | undefined;
+    const profiles = typeof gossip?.getProfiles === 'function'
+      ? gossip.getProfiles()
+      : (Array.isArray(gossip?.profiles) ? gossip.profiles : []);
+    const profile = profiles.find((candidate) =>
+      String(candidate?.entityId || '').trim().toLowerCase() === normalized
+    );
+    return jurisdictionKey(profile?.metadata?.jurisdiction);
+  }
+
+  function isSameJurisdictionEntity(leftEntityId: string, rightEntityId: string): boolean {
+    const currentEntityId = String(replica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
+    const normalizedLeftEntityId = String(leftEntityId || '').trim().toLowerCase();
+    const normalizedRightEntityId = String(rightEntityId || '').trim().toLowerCase();
+    const leftJurisdiction = normalizedLeftEntityId === currentEntityId
+      ? getCurrentEntityJurisdictionKey(activeEnv)
+      : getEntityJurisdictionKey(leftEntityId);
+    const rightJurisdiction = normalizedRightEntityId === currentEntityId
+      ? getCurrentEntityJurisdictionKey(activeEnv)
+      : getEntityJurisdictionKey(rightEntityId);
+    if (!leftJurisdiction && !rightJurisdiction) return true;
+    return Boolean(leftJurisdiction && rightJurisdiction && leftJurisdiction === rightJurisdiction);
   }
 
   function getCurrentEntityJAdapter(xln: XLNModule, env: Env, context: string): JAdapter {
@@ -2328,13 +2388,17 @@
     }
   }
 
-  async function faucetOffchain(hubEntityId: string, tokenId: number = 1) {
-    const entityId = replica?.state?.entityId || tab.entityId;
-    if (!entityId) {
-      notifyUserActionError('offchain-faucet', 'Active entity missing for offchain faucet');
-      return;
-    }
-    try {
+	  async function faucetOffchain(hubEntityId: string, tokenId: number = 1) {
+	    const entityId = replica?.state?.entityId || tab.entityId;
+	    if (!entityId) {
+	      notifyUserActionError('offchain-faucet', 'Active entity missing for offchain faucet');
+	      return;
+	    }
+	    if (!isSameJurisdictionEntity(entityId, hubEntityId)) {
+	      toasts.error('Switch to the matching jurisdiction entity before funding that account.');
+	      return;
+	    }
+	    try {
       const requestApiBase = resolveApiBase();
       const tokenMeta = resolveReserveTokenMeta(tokenId);
       const amountStr = tokenMeta.symbol === 'WETH' || tokenMeta.symbol === 'ETH' ? '0.2' : '100';
@@ -3694,13 +3758,17 @@
       toasts.error('Full entity ID required (0x + 64 hex chars)');
       return;
     }
-    if (trimmed === String(entityId).toLowerCase()) {
-      toasts.error('Cannot open account with yourself');
+	    if (trimmed === String(entityId).toLowerCase()) {
+	      toasts.error('Cannot open account with yourself');
+	      return;
+	    }
+    if (!isSameJurisdictionEntity(entityId, trimmed)) {
+      toasts.error('Accounts can only be opened inside the same jurisdiction');
       return;
     }
-    if (accountIds.some((id) => String(id).toLowerCase() === trimmed)) {
-      toasts.info('Account with this entity already exists');
-      return;
+	    if (accountIds.some((id) => String(id).toLowerCase() === trimmed)) {
+	      toasts.info('Account with this entity already exists');
+	      return;
     }
     if (!activeIsLive) {
       toasts.error('Open account requires LIVE mode');
@@ -5316,15 +5384,19 @@
           <div class="hero-identity" class:user-mode={userModeHeader}>
             {#if userModeHeader}
               <div class="hero-context-switcher">
-                <ContextSwitcher
-                  {tab}
-                  allowAddRuntime={allowHeaderAddRuntime}
-                  allowDeleteRuntime={allowHeaderDeleteRuntime}
-                  addRuntimeLabel={headerRuntimeAddLabel}
-                  on:addRuntime={handleHeaderAddRuntime}
-                  on:deleteRuntime={handleHeaderDeleteRuntime}
-                  on:entitySelect={handleEntitySelect}
-                />
+	                <ContextSwitcher
+	                  {tab}
+	                  allowAddRuntime={allowHeaderAddRuntime}
+	                  allowDeleteRuntime={allowHeaderDeleteRuntime}
+	                  allowAddJurisdiction={true}
+	                  allowAddEntity={true}
+	                  addRuntimeLabel={headerRuntimeAddLabel}
+	                  on:addRuntime={handleHeaderAddRuntime}
+	                  on:deleteRuntime={handleHeaderDeleteRuntime}
+	                  on:addJurisdiction={handleHeaderAddJurisdiction}
+	                  on:addEntity={handleHeaderAddEntity}
+	                  on:entitySelect={handleEntitySelect}
+	                />
               </div>
             {:else}
               <span class="hero-name">{heroDisplayName}</span>

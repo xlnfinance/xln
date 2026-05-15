@@ -19,6 +19,7 @@ export const sleep = async (ms: number): Promise<void> => {
 
 export const hasPendingRuntimeWork = (env: Env): boolean => {
   if (env.pendingOutputs?.length) return true;
+  if (env.pendingNetworkOutputs?.length) return true;
   if (env.networkInbox?.length) return true;
   if (env.runtimeInput?.runtimeTxs?.length) return true;
   if (env.runtimeMempool?.entityInputs?.length) return true;

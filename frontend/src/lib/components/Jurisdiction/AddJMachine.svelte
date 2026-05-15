@@ -32,11 +32,11 @@
   }>();
 
   // Form state
-  let mode: 'browservm' | 'rpc' = 'browservm';
-  let selectedNetworkId: number | 'custom' = 'custom';
+  let mode: 'browservm' | 'rpc' = 'rpc';
+  let selectedNetworkId: number | 'custom' = 31338;
   let customChainId = 31337;
-  let rpcTextarea = '';
-  let name = '';
+  let rpcTextarea = POPULAR_NETWORKS.find((network) => network.chainId === 31338)?.rpcs.join('\n') || '';
+  let name = 'tron';
   let isCreating = false;
   let error = '';
   let advancedJson = '';

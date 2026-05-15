@@ -268,10 +268,17 @@
   });
 
   // Get selected account
-  const selectedAccount = $derived.by(() => {
-    if (!selectedReplica || !selectedAccountId) return null;
-    return selectedReplica.state?.accounts?.get(selectedAccountId) || null;
-  });
+	  const selectedAccount = $derived.by(() => {
+	    if (!selectedReplica || !selectedAccountId) return null;
+	    return selectedReplica.state?.accounts?.get(selectedAccountId) || null;
+	  });
+
+	  const selectedReplicaJurisdiction = $derived.by(() => String(
+	    selectedReplica?.state?.config?.jurisdiction?.name
+	      || selectedReplica?.position?.jurisdiction
+	      || selectedJurisdictionName
+	      || '',
+	  ).trim());
 
   function listJMachineNames(env: RuntimeFrame | null | undefined): string[] {
     const jReplicas = env?.jReplicas;
@@ -364,19 +371,20 @@
       jurisdiction = names[0] || null;
     }
 
-    const activeRuntimeSigner = typeof env.runtimeId === 'string' ? env.runtimeId.toLowerCase() : '';
-    if (!activeRuntimeSigner) {
-      console.warn('[ensureSelfEntities] Missing env.runtimeId - skip auto-entity ensure');
-      return;
-    }
+    const selectedSignerLower = String(selectedSignerId || '').trim().toLowerCase();
+    const activeSignerIndex = Number(vault.activeSignerIndex ?? 0);
+    const targetSigners = selectedSignerLower
+      ? vault.signers.filter((entry) => String(entry.address || '').trim().toLowerCase() === selectedSignerLower)
+      : [vault.signers[activeSignerIndex] || vault.signers[0]].filter(
+        (entry): entry is NonNullable<typeof entry> => Boolean(entry),
+      );
 
-    for (const signerEntry of vault.signers) {
+    for (const signerEntry of targetSigners) {
       if (runEpoch !== ensureSelfEntitiesEpoch) return;
       const signerAddress = signerEntry.address;
 
-      if (!signerAddress) continue;
-      if (signerAddress.toLowerCase() !== activeRuntimeSigner) continue;
-      const selfEntityKey = `${signerAddress.toLowerCase()}:${jurisdiction || ''}`;
+	      if (!signerAddress) continue;
+	      const selfEntityKey = `${signerAddress.toLowerCase()}:${jurisdiction || ''}`;
       if (selfEntityChecked.has(selfEntityKey) || selfEntityInFlight.has(selfEntityKey)) continue;
 
       const existing = findReplicaBySigner(env, signerAddress, jurisdiction);
@@ -478,13 +486,13 @@
 
   // Tab for EntityPanel
   const entityTab: Tab = $derived({
-    id: 'user-entity',
-    title: selectedEntityId ? `Entity ${selectedEntityId}` : 'Entity',
-    entityId: selectedEntityId || '',
-    signerId: selectedSignerId || '',
-    jurisdiction: 'browservm',
-    isActive: true,
-  });
+	    id: 'user-entity',
+	    title: selectedEntityId ? `Entity ${selectedEntityId}` : 'Entity',
+	    entityId: selectedEntityId || '',
+	    signerId: selectedSignerId || '',
+	    jurisdiction: selectedReplicaJurisdiction || selectedJurisdictionName || 'browservm',
+	    isActive: true,
+	  });
 
   function handleSignerSelect(event: CustomEvent<{ signerId: string }>) {
     viewMode = 'entity';
