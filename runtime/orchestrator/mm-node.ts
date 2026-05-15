@@ -34,7 +34,7 @@ import {
   listPersistedEntityIdsAtHeight,
   registerEnvChangeCallback,
 } from '../runtime.ts';
-import type { AccountMachine, EntityInput, Env } from '../types';
+import type { AccountMachine, CrossJurisdictionSwapRoute, EntityInput, Env } from '../types';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import {
   BOOTSTRAP_POLL_MS,
@@ -92,6 +92,9 @@ type JurisdictionConfig = {
 type HubProfile = {
   name: string;
   entityId: string;
+  signerId?: string;
+  jurisdictionName?: string;
+  chainId?: number;
 };
 
 type MarketMakerOfferSpec = {
@@ -103,6 +106,14 @@ type MarketMakerOfferSpec = {
   wantTokenId: number;
   wantAmount: bigint;
   minFillRatio: number;
+  crossJurisdiction?: CrossJurisdictionSwapRoute;
+};
+
+type MarketMakerEntityContext = {
+  entityId: string;
+  signerId: string;
+  jurisdictionName: string;
+  chainId: number;
 };
 
 type MarketMakerHealth = {
@@ -153,6 +164,14 @@ const MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK = Math.max(
 const MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK = Math.max(
   4,
   Number(process.env['MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK'] || '12'),
+);
+const MARKET_MAKER_CROSS_LEVELS_PER_PAIR = Math.max(
+  1,
+  Math.min(8, Number(process.env['MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '4')),
+);
+const MARKET_MAKER_CROSS_EXPIRY_MS = Math.max(
+  60_000,
+  Number(process.env['MARKET_MAKER_CROSS_EXPIRY_MS'] || String(24 * 60 * 60 * 1000)),
 );
 const MARKET_MAKER_LEVEL_OFFSETS_BPS = [2, 4, 6, 8, 10, 12, 15, 20, 25, 32, 40, 50, 65, 80, 100] as const;
 const MARKET_MAKER_LEVEL_BASE_SIZES = [
@@ -225,6 +244,19 @@ const parseArgs = (): Args => {
 
 const resolvedArgs = parseArgs();
 const apiUrl = `http://${resolvedArgs.apiHost}:${resolvedArgs.apiPort}`;
+const resolveLocalApiUrl = (value: string): string => {
+  const raw = String(value || '').trim();
+  if (!raw.startsWith('/')) return raw;
+  if (raw === '/rpc2' || raw.startsWith('/rpc2?') || raw.startsWith('/api/rpc2')) {
+    const rpc2 = String(process.env['ANVIL_RPC2'] || process.env['RPC_TRON'] || '').trim();
+    if (rpc2) return rpc2;
+  }
+  if (raw === '/rpc' || raw.startsWith('/rpc?') || raw.startsWith('/api/rpc')) {
+    const rpc = String(process.env['ANVIL_RPC'] || resolvedArgs.rpcUrl || '').trim();
+    if (rpc) return rpc;
+  }
+  return new URL(raw, apiUrl).toString();
+};
 const directWsUrl = String(resolvedArgs.directWsUrl || '').trim();
 if (!directWsUrl) {
   throw new Error('[MESH-MM] Missing required --direct-ws-url');
@@ -247,6 +279,110 @@ const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig =
   return {
     ...(arrakis as JurisdictionConfig),
     rpc: rpcUrlOverride || (arrakis as JurisdictionConfig).rpc,
+  };
+};
+
+const isSecondaryJurisdictionConfig = (key: string, jurisdiction: JurisdictionConfig, primaryRpc: string): boolean => {
+  const normalizedKey = String(key || '').trim().toLowerCase();
+  const normalizedName = String(jurisdiction.name || '').trim().toLowerCase();
+  const normalizedRpc = String(jurisdiction.rpc || '').trim();
+  if (primaryRpc && normalizedRpc === primaryRpc) return false;
+  return normalizedKey === 'tron' || normalizedKey === 'rpc2' || normalizedName.includes('tron') || normalizedRpc.includes('/rpc2');
+};
+
+const resolveSecondaryJurisdictions = (primaryRpc: string): JurisdictionConfig[] => {
+  clearJurisdictionsCache();
+  const data = loadJurisdictions();
+  const entries = Object.entries(data.jurisdictions ?? {});
+  return entries
+    .filter(([, jurisdiction]) => Boolean(jurisdiction?.rpc && jurisdiction?.contracts?.depository && jurisdiction?.contracts?.entityProvider))
+    .filter(([key, jurisdiction]) => isSecondaryJurisdictionConfig(key, jurisdiction as JurisdictionConfig, primaryRpc))
+    .map(([, jurisdiction]) => jurisdiction as JurisdictionConfig);
+};
+
+const resolveImportedJurisdictionRpc = (jurisdiction: JurisdictionConfig): string =>
+  resolveLocalApiUrl(jurisdiction.rpc);
+
+const toEntityJurisdictionConfig = (jurisdiction: JurisdictionConfig) => ({
+  name: jurisdiction.name,
+  address: resolveImportedJurisdictionRpc(jurisdiction),
+  entityProviderAddress: jurisdiction.contracts.entityProvider,
+  depositoryAddress: jurisdiction.contracts.depository,
+  chainId: jurisdiction.chainId,
+});
+
+const hasJurisdictionReplica = (env: Env, name: string): boolean => {
+  const normalized = String(name || '').trim().toLowerCase();
+  if (!normalized) return false;
+  for (const existing of env.jReplicas?.keys?.() || []) {
+    if (String(existing || '').trim().toLowerCase() === normalized) return true;
+  }
+  return false;
+};
+
+const importJurisdictionIfNeeded = async (
+  env: Env,
+  jurisdiction: JurisdictionConfig,
+  rounds = 35,
+): Promise<void> => {
+  if (hasJurisdictionReplica(env, jurisdiction.name)) return;
+  enqueueRuntimeInput(env, {
+    runtimeTxs: [{
+      type: 'importJ',
+      data: {
+        name: jurisdiction.name,
+        chainId: jurisdiction.chainId,
+        ticker: 'XLN',
+        rpcs: [resolveImportedJurisdictionRpc(jurisdiction)],
+        contracts: jurisdiction.contracts,
+      },
+    }],
+    entityInputs: [],
+  });
+  await settleRuntimeFor(env, rounds);
+};
+
+const createMarketMakerEntityContext = async (
+  env: Env,
+  jurisdiction: JurisdictionConfig,
+  signerLabel: string,
+  profileName: string,
+  position: { x: number; y: number; z: number; jurisdiction?: string },
+): Promise<MarketMakerEntityContext> => {
+  const privateKey = deriveSignerKeySync(resolvedArgs.seed, signerLabel);
+  const signerId = deriveSignerAddressSync(resolvedArgs.seed, signerLabel).toLowerCase();
+  registerSignerKey(signerId, privateKey);
+  const consensusConfig = {
+    mode: 'proposer-based' as const,
+    threshold: 1n,
+    validators: [signerId],
+    shares: { [signerId]: 1n },
+    jurisdiction: toEntityJurisdictionConfig(jurisdiction),
+  };
+  const entityId = hashBoard(encodeBoard(consensusConfig)).toLowerCase();
+  if (!getEntityReplicaById(env, entityId)) {
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importReplica',
+        entityId,
+        signerId,
+        data: {
+          config: consensusConfig,
+          isProposer: true,
+          profileName,
+          position,
+        },
+      }],
+      entityInputs: [],
+    });
+    await settleRuntimeFor(env, 35);
+    await waitForReplicaReady(env, entityId);
+  }
+  return {
+    entityId,
+    signerId,
+    jurisdictionName: jurisdiction.name,
+    chainId: Number(jurisdiction.chainId || 0),
   };
 };
 
@@ -295,7 +431,16 @@ const ensureJurisdictionReplica = (env: Env, jadapter: JAdapter, rpcUrl: string)
   replica.jadapter = jadapter;
 };
 
-const readVisibleHubProfiles = (env: Env): HubProfile[] => {
+const hubBaseName = (name: string): string => String(name || '').trim().split(/\s+/)[0]?.toLowerCase() || '';
+
+const readHubSignerId = (profile: { metadata?: any }): string => {
+  const validators = profile.metadata?.board?.validators;
+  if (!Array.isArray(validators) || validators.length === 0) return '';
+  const first = validators[0] || {};
+  return String(first.signerId || first.signer || '').trim().toLowerCase();
+};
+
+const readVisibleHubProfiles = (env: Env, includeSiblings = false): HubProfile[] => {
   const required = new Set(resolvedArgs.meshHubNames.map((name) => name.toLowerCase()));
   return (env.gossip?.getProfiles?.() || [])
     .filter(profile =>
@@ -303,12 +448,24 @@ const readVisibleHubProfiles = (env: Env): HubProfile[] => {
       typeof profile?.entityId === 'string' &&
       profile.metadata?.isHub === true,
     )
-    .filter(profile => required.has(profile.name.toLowerCase()))
+    .filter(profile => {
+      const name = String(profile.name || '').trim();
+      const lower = name.toLowerCase();
+      if (required.has(lower)) return true;
+      return includeSiblings && required.has(hubBaseName(name));
+    })
     .map(profile => ({
-      name: profile.name,
-      entityId: profile.entityId.toLowerCase(),
+      name: String(profile.name || '').trim(),
+      entityId: String(profile.entityId || '').toLowerCase(),
+      signerId: readHubSignerId(profile),
+      jurisdictionName: String(profile.metadata?.jurisdiction?.name || '').trim(),
+      chainId: Number(profile.metadata?.jurisdiction?.chainId || 0),
     }))
-    .sort((left, right) => compareStableText(left.name, right.name));
+    .sort((left, right) =>
+      compareStableText(hubBaseName(left.name), hubBaseName(right.name)) ||
+      (Number(left.chainId || 0) - Number(right.chainId || 0)) ||
+      compareStableText(left.entityId, right.entityId),
+    );
 };
 
 const parseMeshHubIdentities = (raw: string): MeshHubIdentity[] => {
@@ -466,6 +623,141 @@ const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: number[]):
       }
     }
   }
+  return specs;
+};
+
+const sameJurisdiction = (
+  left: Pick<MarketMakerEntityContext | HubProfile, 'jurisdictionName' | 'chainId'>,
+  right: Pick<MarketMakerEntityContext | HubProfile, 'jurisdictionName' | 'chainId'>,
+): boolean => {
+  const leftName = String(left.jurisdictionName || '').trim().toLowerCase();
+  const rightName = String(right.jurisdictionName || '').trim().toLowerCase();
+  if (leftName && rightName) return leftName === rightName;
+  const leftChain = Number(left.chainId || 0);
+  const rightChain = Number(right.chainId || 0);
+  return leftChain > 0 && leftChain === rightChain;
+};
+
+const buildMarketMakerCrossOfferSpecs = (
+  env: Env,
+  sourceContext: MarketMakerEntityContext,
+  targetContext: MarketMakerEntityContext,
+  sourceHubs: HubProfile[],
+  targetHubs: HubProfile[],
+  tokenIds: number[],
+): MarketMakerOfferSpec[] => {
+  if (sourceContext.entityId === targetContext.entityId || sameJurisdiction(sourceContext, targetContext)) return [];
+  const specs: MarketMakerOfferSpec[] = [];
+  const defaultPairs = buildDefaultEntitySwapPairs(tokenIds);
+  const targetByBaseName = new Map(targetHubs.map(hub => [hubBaseName(hub.name), hub] as const));
+  const now = Number(env.timestamp || Date.now());
+
+  for (const sourceHub of sourceHubs) {
+    const targetHub = targetByBaseName.get(hubBaseName(sourceHub.name));
+    if (!targetHub || sameJurisdiction(sourceHub, targetHub)) continue;
+    const sourceHubSuffix = sourceHub.entityId.slice(-6).toLowerCase();
+    const targetHubSuffix = targetHub.entityId.slice(-6).toLowerCase();
+
+    for (const pair of defaultPairs) {
+      const pairPolicy = getSwapPairPolicyByBaseQuote(pair.baseTokenId, pair.quoteTokenId);
+      const levelProfile = getMarketMakerLevelProfile(pair.baseTokenId, pair.quoteTokenId);
+      const levelCount = Math.min(MARKET_MAKER_CROSS_LEVELS_PER_PAIR, levelProfile.offsetsBps.length);
+
+      for (let level = 0; level < levelCount; level += 1) {
+        const offsetBps = levelProfile.offsetsBps[level]!;
+        const baseSize = levelProfile.baseSizes[level]!;
+        const askRaw = (pairPolicy.mmMidPriceTicks * BigInt(10_000 + offsetBps)) / 10_000n;
+        const bidRaw = (pairPolicy.mmMidPriceTicks * BigInt(Math.max(1, 10_000 - offsetBps))) / 10_000n;
+        const askPriceTicks = snapPriceTicks(askRaw, pairPolicy.priceStepTicks, 'up');
+        let bidPriceTicks = snapPriceTicks(bidRaw, pairPolicy.priceStepTicks, 'down');
+        const stepTicksBig = BigInt(Math.max(1, pairPolicy.priceStepTicks));
+        if (bidPriceTicks >= askPriceTicks) {
+          bidPriceTicks = askPriceTicks > stepTicksBig ? askPriceTicks - stepTicksBig : 1n;
+        }
+        if (!isWithinPairBand(pairPolicy.mmMidPriceTicks, askPriceTicks)) continue;
+        if (!isWithinPairBand(pairPolicy.mmMidPriceTicks, bidPriceTicks)) continue;
+
+        const askWantAmount = (baseSize * askPriceTicks) / ORDERBOOK_PRICE_SCALE;
+        const bidGiveAmount = (baseSize * bidPriceTicks) / ORDERBOOK_PRICE_SCALE;
+        const levelId = level + 1;
+        const routeBase = {
+          makerEntityId: sourceContext.entityId,
+          hubEntityId: sourceHub.entityId,
+          status: 'resting' as const,
+          createdAt: now,
+          updatedAt: now,
+          expiresAt: now + MARKET_MAKER_CROSS_EXPIRY_MS,
+        };
+
+        if (askWantAmount > 0n) {
+          const offerId = `mmx-${sourceHubSuffix}-${targetHubSuffix}-${pair.baseTokenId}-${pair.quoteTokenId}-ask-${levelId}`;
+          specs.push({
+            offerId,
+            pairId: `cross:${sourceContext.chainId}:${pair.baseTokenId}/${targetContext.chainId}:${pair.quoteTokenId}`,
+            hubEntityId: sourceHub.entityId,
+            giveTokenId: pair.baseTokenId,
+            giveAmount: baseSize,
+            wantTokenId: pair.quoteTokenId,
+            wantAmount: askWantAmount,
+            minFillRatio: 0,
+            crossJurisdiction: {
+              ...routeBase,
+              orderId: offerId,
+              priceTicks: askPriceTicks,
+              source: {
+                jurisdiction: sourceContext.jurisdictionName,
+                entityId: sourceContext.entityId,
+                counterpartyEntityId: sourceHub.entityId,
+                tokenId: pair.baseTokenId,
+                amount: baseSize,
+              },
+              target: {
+                jurisdiction: targetContext.jurisdictionName,
+                entityId: targetHub.entityId,
+                counterpartyEntityId: targetContext.entityId,
+                tokenId: pair.quoteTokenId,
+                amount: askWantAmount,
+              },
+            },
+          });
+        }
+
+        if (bidGiveAmount > 0n) {
+          const offerId = `mmx-${sourceHubSuffix}-${targetHubSuffix}-${pair.baseTokenId}-${pair.quoteTokenId}-bid-${levelId}`;
+          specs.push({
+            offerId,
+            pairId: `cross:${sourceContext.chainId}:${pair.quoteTokenId}/${targetContext.chainId}:${pair.baseTokenId}`,
+            hubEntityId: sourceHub.entityId,
+            giveTokenId: pair.quoteTokenId,
+            giveAmount: bidGiveAmount,
+            wantTokenId: pair.baseTokenId,
+            wantAmount: baseSize,
+            minFillRatio: 0,
+            crossJurisdiction: {
+              ...routeBase,
+              orderId: offerId,
+              priceTicks: bidPriceTicks,
+              source: {
+                jurisdiction: sourceContext.jurisdictionName,
+                entityId: sourceContext.entityId,
+                counterpartyEntityId: sourceHub.entityId,
+                tokenId: pair.quoteTokenId,
+                amount: bidGiveAmount,
+              },
+              target: {
+                jurisdiction: targetContext.jurisdictionName,
+                entityId: targetHub.entityId,
+                counterpartyEntityId: targetContext.entityId,
+                tokenId: pair.baseTokenId,
+                amount: baseSize,
+              },
+            },
+          });
+        }
+      }
+    }
+  }
+
   return specs;
 };
 
@@ -682,6 +974,165 @@ const maintainMarketMakerQuotes = async (
   }
 };
 
+const hasCrossRouteRegistered = (env: Env, entityId: string, orderId: string): boolean => {
+  const replica = getEntityReplicaById(env, entityId);
+  return Boolean(replica?.state?.crossJurisdictionSwaps?.has(orderId));
+};
+
+const pushEntityTx = (
+  inputsByEntity: Map<string, EntityInput>,
+  entityId: string,
+  signerId: string,
+  tx: NonNullable<EntityInput['entityTxs']>[number],
+): void => {
+  const key = `${entityId}:${signerId}`;
+  const input = inputsByEntity.get(key) ?? {
+    entityId,
+    signerId,
+    entityTxs: [],
+  };
+  const entityTxs = input.entityTxs ?? (input.entityTxs = []);
+  entityTxs.push(tx);
+  inputsByEntity.set(key, input);
+};
+
+const maintainMarketMakerCrossQuotes = async (
+  env: Env,
+  sourceContext: MarketMakerEntityContext,
+  targetContext: MarketMakerEntityContext,
+  sourceHubs: HubProfile[],
+  targetHubs: HubProfile[],
+  hubSignerIdsByEntityId: ReadonlyMap<string, string>,
+  tokenIds: number[],
+  maxOffersPerAccount = Math.max(2, Math.floor(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK / 2)),
+  maxNewOffersTotal = Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK / 2)),
+): Promise<void> => {
+  if (
+    sourceHubs.length === 0 ||
+    targetHubs.length === 0 ||
+    tokenIds.length < 3 ||
+    sourceContext.entityId === targetContext.entityId ||
+    sameJurisdiction(sourceContext, targetContext)
+  ) {
+    return;
+  }
+
+  const sourceHubEntityIds = sourceHubs.map(profile => profile.entityId);
+  const targetHubEntityIds = targetHubs.map(profile => profile.entityId);
+  await ensureMarketMakerHubConnectivity(
+    env,
+    sourceContext.entityId,
+    sourceContext.signerId,
+    sourceHubEntityIds,
+    hubSignerIdsByEntityId,
+    tokenIds,
+  );
+  await ensureMarketMakerHubConnectivity(
+    env,
+    targetContext.entityId,
+    targetContext.signerId,
+    targetHubEntityIds,
+    hubSignerIdsByEntityId,
+    tokenIds,
+  );
+
+  if (!isMarketMakerConnectivityReady(env, sourceContext.entityId, sourceHubEntityIds, tokenIds)) return;
+  if (!isMarketMakerConnectivityReady(env, targetContext.entityId, targetHubEntityIds, tokenIds)) return;
+
+  const desiredOffers = buildMarketMakerCrossOfferSpecs(
+    env,
+    sourceContext,
+    targetContext,
+    sourceHubs,
+    targetHubs,
+    tokenIds,
+  );
+  if (desiredOffers.length === 0) return;
+
+  const grouped = new Map<string, MarketMakerOfferSpec[]>();
+  for (const spec of desiredOffers) {
+    const arr = grouped.get(spec.hubEntityId) ?? [];
+    arr.push(spec);
+    grouped.set(spec.hubEntityId, arr);
+  }
+
+  const inputsByEntity = new Map<string, EntityInput>();
+  let remainingNewOffers = Math.max(1, Math.floor(maxNewOffersTotal));
+  for (const [sourceHubEntityId, specs] of grouped.entries()) {
+    const account = getAccountMachine(env, sourceContext.entityId, sourceHubEntityId);
+    if (!account) continue;
+    if (String(account.status || 'active') !== 'active') continue;
+    if (!isAccountConsensusReady(account)) continue;
+
+    const existingOfferIds = collectOfferIdsForAccount(account);
+    for (const spec of specs) {
+      const route = spec.crossJurisdiction;
+      if (!route) continue;
+      if (!existingOfferIds.has(spec.offerId)) continue;
+      if (!hasCrossRouteRegistered(env, route.target.counterpartyEntityId, route.orderId)) {
+        pushEntityTx(inputsByEntity, route.target.counterpartyEntityId, targetContext.signerId, {
+          type: 'registerCrossJurisdictionSwap',
+          data: { route },
+        });
+      }
+    }
+
+    if (remainingNewOffers <= 0) continue;
+    const remainingOpenSlots = Math.max(0, LIMITS.MAX_ACCOUNT_SWAP_OFFERS - existingOfferIds.size);
+    const allowedNewOffers = Math.min(
+      Math.max(1, Math.floor(maxOffersPerAccount)),
+      remainingOpenSlots,
+      remainingNewOffers,
+    );
+    if (allowedNewOffers <= 0) continue;
+
+    const missing = specs
+      .filter(spec => spec.crossJurisdiction && !existingOfferIds.has(spec.offerId))
+      .filter(spec => {
+        const route = spec.crossJurisdiction!;
+        return (
+          hasPairMutualCredit(env, sourceContext.entityId, route.source.counterpartyEntityId, route.source.tokenId, route.source.amount) &&
+          hasPairMutualCredit(env, targetContext.entityId, route.target.entityId, route.target.tokenId, route.target.amount)
+        );
+      })
+      .slice(0, allowedNewOffers);
+    if (missing.length === 0) continue;
+
+    for (const spec of missing) {
+      const route = spec.crossJurisdiction!;
+      pushEntityTx(inputsByEntity, sourceContext.entityId, sourceContext.signerId, {
+        type: 'placeSwapOffer',
+        data: {
+          counterpartyEntityId: spec.hubEntityId,
+          offerId: spec.offerId,
+          giveTokenId: spec.giveTokenId,
+          giveAmount: spec.giveAmount,
+          wantTokenId: spec.wantTokenId,
+          wantAmount: spec.wantAmount,
+          ...(route.priceTicks !== undefined ? { priceTicks: route.priceTicks } : {}),
+          minFillRatio: spec.minFillRatio,
+          crossJurisdiction: route,
+        },
+      });
+      if (!hasCrossRouteRegistered(env, route.target.counterpartyEntityId, route.orderId)) {
+        pushEntityTx(inputsByEntity, route.target.counterpartyEntityId, targetContext.signerId, {
+          type: 'registerCrossJurisdictionSwap',
+          data: { route },
+        });
+      }
+    }
+    remainingNewOffers -= missing.length;
+  }
+
+  const entityInputs = Array.from(inputsByEntity.values()).filter(input => (input.entityTxs?.length || 0) > 0);
+  if (entityInputs.length > 0) {
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs,
+    });
+  }
+};
+
 const getMarketMakerHealth = (
   env: Env,
   mmEntityId: string | null,
@@ -777,6 +1228,7 @@ const run = async (): Promise<void> => {
   startRuntimeLoop(env);
   let startupPhase = 'boot';
   let activeMmEntityId: string | null = null;
+  let mmContexts: MarketMakerEntityContext[] = [];
 
   const jurisdiction = resolveJurisdictionConfig(resolvedArgs.rpcUrl);
   nodeLog.info('startup phase', { phase: startupPhase });
@@ -926,7 +1378,7 @@ const run = async (): Promise<void> => {
         name: jurisdiction.name,
         chainId: jurisdiction.chainId,
         ticker: 'XLN',
-        rpcs: [jurisdiction.rpc],
+        rpcs: [resolveImportedJurisdictionRpc(jurisdiction)],
         contracts: jurisdiction.contracts,
       },
     }],
@@ -935,58 +1387,51 @@ const run = async (): Promise<void> => {
   await settleRuntimeFor(env, 35);
 
   const jadapter = await waitForActiveJAdapter(env);
-  ensureJurisdictionReplica(env, jadapter, resolvedArgs.rpcUrl);
+  ensureJurisdictionReplica(env, jadapter, resolveImportedJurisdictionRpc(jurisdiction));
   startupPhase = 'token-catalog';
   const tokenCatalog = await waitForTokenCatalog(jadapter);
   const tokenIds = normalizeTokenIdsForMm(tokenCatalog);
   const meshHubIdentities = parseMeshHubIdentities(resolvedArgs.meshHubIdentitiesJson);
-  const hubSignerIdsByEntityId = new Map(
+  const configuredHubSignerIdsByEntityId = new Map(
     meshHubIdentities.map((hub) => [hub.entityId.toLowerCase(), hub.signerId.toLowerCase()] as const),
   );
 
-  const mmPrivateKey = deriveSignerKeySync(resolvedArgs.seed, resolvedArgs.signerLabel);
-  const mmSignerId = deriveSignerAddressSync(resolvedArgs.seed, resolvedArgs.signerLabel);
-  registerSignerKey(mmSignerId, mmPrivateKey);
-  const consensusConfig = {
-    mode: 'proposer-based' as const,
-    threshold: 1n,
-    validators: [mmSignerId],
-    shares: { [mmSignerId]: 1n },
-    jurisdiction: {
-      name: jurisdiction.name,
-      chainId: jurisdiction.chainId,
-      address: jurisdiction.rpc,
-      entityProviderAddress: jurisdiction.contracts.entityProvider,
-      depositoryAddress: jurisdiction.contracts.depository,
-    },
-  };
-  const mmEntityId = hashBoard(encodeBoard(consensusConfig)).toLowerCase();
-  activeMmEntityId = mmEntityId;
-  if (!getEntityReplicaById(env, mmEntityId)) {
-    startupPhase = 'import-replica';
-    enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importReplica',
-        entityId: mmEntityId,
-        signerId: mmSignerId,
-        data: {
-          config: consensusConfig,
-          isProposer: true,
-          profileName: resolvedArgs.name,
-          position: { x: 0, y: -40, z: 120 },
-        },
-      }],
-      entityInputs: [],
-    });
-    await settleRuntimeFor(env, 35);
-    await waitForReplicaReady(env, mmEntityId);
+  startupPhase = 'import-replica';
+  const primaryMmContext = await createMarketMakerEntityContext(
+    env,
+    jurisdiction,
+    resolvedArgs.signerLabel,
+    resolvedArgs.name,
+    { x: 0, y: -40, z: 120, jurisdiction: jurisdiction.name },
+  );
+  activeMmEntityId = primaryMmContext.entityId;
+  mmContexts = [primaryMmContext];
+
+  const secondaryJurisdictions = resolveSecondaryJurisdictions(jurisdiction.rpc);
+  for (const [index, secondary] of secondaryJurisdictions.entries()) {
+    const secondaryName = String(secondary.name || `Secondary ${index + 1}`).trim();
+    if (!secondaryName) continue;
+    startupPhase = `import-jurisdiction-${secondaryName}`;
+    await importJurisdictionIfNeeded(env, secondary);
+    startupPhase = `import-replica-${secondaryName}`;
+    const siblingContext = await createMarketMakerEntityContext(
+      env,
+      secondary,
+      `${resolvedArgs.signerLabel}:${secondaryName}`,
+      `${resolvedArgs.name} ${secondaryName}`,
+      { x: 160 + index * 80, y: -40, z: 120, jurisdiction: secondaryName },
+    );
+    mmContexts.push(siblingContext);
+    console.log(
+      `[MESH-MM] Sibling MM ready jurisdiction=${secondaryName} entity=${siblingContext.entityId.slice(0, 12)}`,
+    );
   }
 
   startupPhase = 'start-p2p';
   const p2p = startP2P(env, {
     relayUrls: [resolvedArgs.relayUrl],
     wsUrl: directWsUrl,
-    advertiseEntityIds: [mmEntityId],
+    advertiseEntityIds: mmContexts.map(context => context.entityId),
     gossipPollMs: BOOTSTRAP_POLL_MS * 5 || 250,
   });
   if (!p2p) throw new Error('P2P_START_FAILED');
@@ -997,25 +1442,67 @@ const run = async (): Promise<void> => {
     if (loopInFlight) return;
     loopInFlight = true;
     try {
-      const visibleHubs = readVisibleHubProfiles(env);
-      const hubEntityIds = visibleHubs.map(profile => profile.entityId);
-      if (hubEntityIds.length === 0) return;
-      const desiredOfferCount = buildMarketMakerOfferSpecs(hubEntityIds, tokenIds).length;
-      const expectedOffersPerHub = Math.max(1, Math.ceil(desiredOfferCount / Math.max(1, hubEntityIds.length)));
-      await maintainMarketMakerQuotes(
-        env,
-        mmEntityId,
-        mmSignerId,
-        hubEntityIds,
-        hubSignerIdsByEntityId,
-        tokenIds,
-        mode === 'bootstrap'
-          ? Math.max(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK, expectedOffersPerHub)
-          : MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
-        mode === 'bootstrap'
-          ? Math.max(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK, desiredOfferCount)
-          : MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
-      );
+      const visibleHubs = readVisibleHubProfiles(env, true);
+      if (visibleHubs.length === 0) return;
+      const hubSignerIdsByEntityId = new Map(configuredHubSignerIdsByEntityId);
+      for (const profile of visibleHubs) {
+        if (profile.signerId) hubSignerIdsByEntityId.set(profile.entityId.toLowerCase(), profile.signerId.toLowerCase());
+      }
+
+      for (const context of mmContexts) {
+        const sameJurisdictionHubs = visibleHubs.filter(profile => sameJurisdiction(context, profile));
+        const hubEntityIds = sameJurisdictionHubs.map(profile => profile.entityId);
+        if (hubEntityIds.length === 0) continue;
+        const desiredOfferCount = buildMarketMakerOfferSpecs(hubEntityIds, tokenIds).length;
+        const expectedOffersPerHub = Math.max(1, Math.ceil(desiredOfferCount / Math.max(1, hubEntityIds.length)));
+        await maintainMarketMakerQuotes(
+          env,
+          context.entityId,
+          context.signerId,
+          hubEntityIds,
+          hubSignerIdsByEntityId,
+          tokenIds,
+          mode === 'bootstrap'
+            ? Math.max(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK, expectedOffersPerHub)
+            : MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
+          mode === 'bootstrap'
+            ? Math.max(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK, desiredOfferCount)
+            : MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK,
+        );
+      }
+
+      for (const sourceContext of mmContexts) {
+        const sourceHubs = visibleHubs.filter(profile => sameJurisdiction(sourceContext, profile));
+        if (sourceHubs.length === 0) continue;
+        for (const targetContext of mmContexts) {
+          if (sourceContext.entityId === targetContext.entityId || sameJurisdiction(sourceContext, targetContext)) continue;
+          const targetHubs = visibleHubs.filter(profile => sameJurisdiction(targetContext, profile));
+          if (targetHubs.length === 0) continue;
+          const desiredCrossOfferCount = buildMarketMakerCrossOfferSpecs(
+            env,
+            sourceContext,
+            targetContext,
+            sourceHubs,
+            targetHubs,
+            tokenIds,
+          ).length;
+          await maintainMarketMakerCrossQuotes(
+            env,
+            sourceContext,
+            targetContext,
+            sourceHubs,
+            targetHubs,
+            hubSignerIdsByEntityId,
+            tokenIds,
+            mode === 'bootstrap'
+              ? Math.max(MARKET_MAKER_CROSS_LEVELS_PER_PAIR * buildDefaultEntitySwapPairs(tokenIds).length * 2, MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK)
+              : Math.max(2, Math.floor(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK / 2)),
+            mode === 'bootstrap'
+              ? Math.max(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK, desiredCrossOfferCount)
+              : Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK / 2)),
+          );
+        }
+      }
       await settleRuntimeFor(env, 45);
     } finally {
       loopInFlight = false;
@@ -1026,7 +1513,7 @@ const run = async (): Promise<void> => {
     if (startupPhase === 'offers-ready') return;
     startupPhase = 'offers-ready';
     console.log(
-      `[MESH-MM] OFFERS_READY entityId=${mmEntityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
+      `[MESH-MM] OFFERS_READY entityId=${primaryMmContext.entityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
     );
   };
 
@@ -1035,12 +1522,12 @@ const run = async (): Promise<void> => {
     while (!shuttingDown && Date.now() < deadline) {
       await driveQuotes('bootstrap');
       const visibleHubs = readVisibleHubProfiles(env);
-      const health = getMarketMakerHealth(env, mmEntityId, visibleHubs.map(profile => profile.entityId), tokenIds);
+      const health = getMarketMakerHealth(env, primaryMmContext.entityId, visibleHubs.map(profile => profile.entityId), tokenIds);
       if (health.ok) return true;
       await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
     }
     const visibleHubs = readVisibleHubProfiles(env);
-    const health = getMarketMakerHealth(env, mmEntityId, visibleHubs.map(profile => profile.entityId), tokenIds);
+    const health = getMarketMakerHealth(env, primaryMmContext.entityId, visibleHubs.map(profile => profile.entityId), tokenIds);
     console.warn(
       `[MESH-MM] BOOTSTRAP_TIMEOUT visibleHubs=${visibleHubs.length} offers=${safeStringify(health.hubs.map(hub => ({ hubEntityId: hub.hubEntityId, offers: hub.offers })))}`,
     );
@@ -1050,7 +1537,7 @@ const run = async (): Promise<void> => {
   let loop: ReturnType<typeof setInterval> | null = null;
   startupPhase = 'runtime-ready';
   console.log(
-    `[MESH-MM] RUNTIME_READY entityId=${mmEntityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
+    `[MESH-MM] RUNTIME_READY entityId=${primaryMmContext.entityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
   );
 
   startupPhase = 'bootstrap-offers';
@@ -1065,7 +1552,7 @@ const run = async (): Promise<void> => {
       await driveQuotes();
       if (startupPhase !== 'offers-ready') {
         const visibleHubs = readVisibleHubProfiles(env);
-        const health = getMarketMakerHealth(env, mmEntityId, visibleHubs.map(profile => profile.entityId), tokenIds);
+        const health = getMarketMakerHealth(env, primaryMmContext.entityId, visibleHubs.map(profile => profile.entityId), tokenIds);
         if (health.ok) {
           markOffersReady();
         }

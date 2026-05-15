@@ -70,6 +70,63 @@ const findAccountByCounterparty = (state: EntityState | null | undefined, counte
   return null;
 };
 
+type OrderbookOfferForMatch = ReturnType<typeof normalizeSwapOfferForOrderbook>;
+
+const collectSiblingCrossJurisdictionOffers = (
+  env: Env,
+  currentEntityState: EntityState,
+): OrderbookOfferForMatch[] => {
+  const currentId = normalizeEntityRef(currentEntityState.entityId);
+  const offers: OrderbookOfferForMatch[] = [];
+  for (const replica of env.eReplicas?.values?.() || []) {
+    const siblingState = replica?.state;
+    if (!siblingState?.orderbookExt) continue;
+    if (normalizeEntityRef(siblingState.entityId) === currentId) continue;
+    for (const [accountId, account] of siblingState.accounts.entries()) {
+      for (const [offerId, offer] of account.swapOffers.entries()) {
+        if (!offer?.crossJurisdiction) continue;
+        offers.push(normalizeSwapOfferForOrderbook(
+          {
+            offerId: String(offerId),
+            makerIsLeft: offer.makerIsLeft,
+            fromEntity: account.leftEntity,
+            toEntity: account.rightEntity,
+            createdHeight: offer.createdHeight,
+            giveTokenId: offer.giveTokenId,
+            giveAmount: offer.giveAmount,
+            wantTokenId: offer.wantTokenId,
+            wantAmount: offer.wantAmount,
+            priceTicks: offer.priceTicks,
+            timeInForce: offer.timeInForce,
+            minFillRatio: offer.minFillRatio,
+            crossJurisdiction: offer.crossJurisdiction,
+          },
+          String(accountId),
+        ));
+      }
+    }
+  }
+  return offers;
+};
+
+const findSwapOfferOwnerState = (
+  env: Env,
+  currentEntityState: EntityState,
+  accountId: string,
+  offerId: string,
+): EntityState | null => {
+  const account = findAccountByCounterparty(currentEntityState, accountId);
+  if (account?.swapOffers?.has(offerId)) return currentEntityState;
+  const currentId = normalizeEntityRef(currentEntityState.entityId);
+  for (const replica of env.eReplicas?.values?.() || []) {
+    const state = replica?.state;
+    if (!state || normalizeEntityRef(state.entityId) === currentId) continue;
+    const remoteAccount = findAccountByCounterparty(state, accountId);
+    if (remoteAccount?.swapOffers?.has(offerId)) return state;
+  }
+  return null;
+};
+
 const getCapacityForEntityPerspective = (
   state: EntityState | null | undefined,
   counterpartyId: string,
@@ -1529,15 +1586,71 @@ export const applyEntityFrame = async (
       const counterparty = fromEntity === hubEntity ? toEntity : fromEntity;
       return normalizeSwapOfferForOrderbook(offer, counterparty);
     });
-    console.log(`📊 ENTITY-ORCHESTRATOR: Enriched ${enrichedOffers.length} offers with accountId`);
+    const hasCrossJurisdictionOffer = enrichedOffers.some(offer => !!offer.crossJurisdiction);
+    const siblingOffers = hasCrossJurisdictionOffer
+      ? collectSiblingCrossJurisdictionOffers(env, currentEntityState)
+      : [];
+    const seenOfferKeys = new Set<string>();
+    const offersToMatch: OrderbookOfferForMatch[] = [];
+    for (const offer of [...enrichedOffers, ...siblingOffers]) {
+      const key = swapKey(offer.accountId, offer.offerId);
+      if (seenOfferKeys.has(key)) continue;
+      seenOfferKeys.add(key);
+      offersToMatch.push(offer);
+    }
+    console.log(
+      `📊 ENTITY-ORCHESTRATOR: Enriched ${enrichedOffers.length} offers with accountId` +
+      (siblingOffers.length > 0 ? `, included ${siblingOffers.length} sibling cross-j offers` : ''),
+    );
 
-    const matchResult = processOrderbookSwaps(currentEntityState, enrichedOffers);
+    const matchResult = processOrderbookSwaps(currentEntityState, offersToMatch);
 
     // Orderbook matching returns pure mempoolOps/book updates. Applying the
     // returned account txs here is still orchestrator-owned mutation of the
     // cloned working state, not handler-side in-place state injection.
     for (const { accountId, tx } of matchResult.mempoolOps) {
       const account = currentEntityState.accounts.get(accountId);
+
+      if (tx.type === 'swap_resolve') {
+        const localOwnsOffer = Boolean(account?.swapOffers?.has(tx.data.offerId));
+        if (account && localOwnsOffer) {
+          if (!queueUniqueAccountMempoolTx(account, tx)) {
+            continue;
+          }
+          proposableAccounts.add(accountId);
+          markStorageAccountDirty(env, currentEntityState.entityId, accountId);
+          markStorageEntityDirty(env, currentEntityState.entityId);
+          currentEntityState.pendingSwapFillRatios ||= new Map();
+          const key = swapKey(accountId, tx.data.offerId);
+          currentEntityState.pendingSwapFillRatios.set(key, tx.data.fillRatio);
+          console.log(`📊   → ${accountId.slice(-8)}: ${tx.type}`);
+        } else {
+          const ownerState = findSwapOfferOwnerState(env, currentEntityState, accountId, tx.data.offerId);
+          const firstValidator = ownerState?.config?.validators?.[0];
+          if (!ownerState || !firstValidator) {
+            console.warn(
+              `📊 ORDERBOOK: unable to route sibling swap_resolve offer=${tx.data.offerId} account=${accountId.slice(-8)}`,
+            );
+            continue;
+          }
+          allOutputs.push({
+            entityId: ownerState.entityId,
+            signerId: firstValidator,
+            entityTxs: [{
+              type: 'resolveSwap',
+              data: {
+                counterpartyEntityId: accountId,
+                ...tx.data,
+              },
+            }],
+          });
+          console.log(
+            `📊   → ${ownerState.entityId.slice(-8)}/${accountId.slice(-8)}: ${tx.type} (sibling cross-j route)`,
+          );
+        }
+        continue;
+      }
+
       if (account) {
         if (!queueUniqueAccountMempoolTx(account, tx)) {
           continue;
@@ -1546,12 +1659,6 @@ export const applyEntityFrame = async (
         markStorageAccountDirty(env, currentEntityState.entityId, accountId);
         markStorageEntityDirty(env, currentEntityState.entityId);
         console.log(`📊   → ${accountId.slice(-8)}: ${tx.type}`);
-      }
-
-      if (tx.type === 'swap_resolve') {
-        currentEntityState.pendingSwapFillRatios ||= new Map();
-        const key = swapKey(accountId, tx.data.offerId);
-        currentEntityState.pendingSwapFillRatios.set(key, tx.data.fillRatio);
       }
     }
 
@@ -1563,17 +1670,18 @@ export const applyEntityFrame = async (
         continue;
       }
       const now = currentEntityState.timestamp || env.timestamp;
-      const sourceRevealHeight = Number(currentEntityState.lastFinalizedJHeight ?? 0) + 50;
-      const targetRevealHeight = Number(currentEntityState.lastFinalizedJHeight ?? 0) + 52;
+      const sourceHubState = findEntityStateById(env, route.source.counterpartyEntityId) ?? currentEntityState;
+      const targetHubState = findEntityStateById(env, route.target.entityId);
+      const sourceRevealHeight = Number(sourceHubState.lastFinalizedJHeight ?? currentEntityState.lastFinalizedJHeight ?? 0) + 50;
+      const targetRevealHeight = Number(targetHubState?.lastFinalizedJHeight ?? currentEntityState.lastFinalizedJHeight ?? 0) + 52;
       const sourceTimelock = BigInt(route.expiresAt ?? (now + 120_000));
       const targetTimelock = BigInt((route.expiresAt ?? (now + 120_000)) + 5_000);
       const sourceCapacity = getCapacityForEntityPerspective(
-        currentEntityState,
+        sourceHubState,
         route.source.entityId,
         route.source.tokenId,
         'in',
       );
-      const targetHubState = findEntityStateById(env, route.target.entityId);
       const targetCapacity = getCapacityForEntityPerspective(
         targetHubState,
         route.target.counterpartyEntityId,
@@ -1609,7 +1717,7 @@ export const applyEntityFrame = async (
         if (targetAmount <= 0n) continue;
         const secret = deriveCrossJurisdictionFillSecret(
           env,
-          currentEntityState,
+          sourceHubState,
           fill,
           sourcePart.bit,
           targetCounterBase + BigInt(index),

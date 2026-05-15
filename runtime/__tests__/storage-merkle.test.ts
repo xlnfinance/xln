@@ -4,7 +4,7 @@ import {
   buildHexKeyedMerkle,
   buildHexKeyedMerkleMaterialized,
 } from '../storage/merkle';
-import { storageCanonicalHashEnabled } from '../storage/hashes';
+import { storageCanonicalHashEnabled, storageMerkleCellHexKey } from '../storage/hashes';
 import { buildBookDeletionsFromOverlay, storageRefsFromOverlay } from '../storage/overlay-docs';
 import {
   KEY_MERKLE_BRANCH,
@@ -181,4 +181,13 @@ test('deleted book overlay produces a deletion ref without a put ref', () => {
   expect(refs.touchedBooks.size).toBe(0);
   expect(dels).toHaveLength(1);
   expect(dels[0]).toMatchObject({ family: 'book', entityId, pairId: '1/2' });
+});
+
+test('storage merkle book key supports cross-jurisdiction pair ids', () => {
+  const numeric = storageMerkleCellHexKey('books/1/2');
+  const cross = storageMerkleCellHexKey('books/cross:testnet:2/tron-local-anvil:1');
+
+  expect(numeric).toMatch(/^0x[0-9a-f]{66}$/);
+  expect(cross).toMatch(/^0x[0-9a-f]{66}$/);
+  expect(cross).not.toBe(numeric);
 });

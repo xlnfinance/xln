@@ -287,6 +287,19 @@ const parseSupportPeerIdentities = (raw: string): SupportPeerIdentity[] => {
 const resolvedArgs = parseArgs();
 const supportPeerIdentities = parseSupportPeerIdentities(resolvedArgs.supportPeerIdentitiesJson);
 const apiUrl = `http://${resolvedArgs.apiHost}:${resolvedArgs.apiPort}`;
+const resolveLocalApiUrl = (value: string): string => {
+  const raw = String(value || '').trim();
+  if (!raw.startsWith('/')) return raw;
+  if (raw === '/rpc2' || raw.startsWith('/rpc2?') || raw.startsWith('/api/rpc2')) {
+    const rpc2 = String(process.env['ANVIL_RPC2'] || process.env['RPC_TRON'] || '').trim();
+    if (rpc2) return rpc2;
+  }
+  if (raw === '/rpc' || raw.startsWith('/rpc?') || raw.startsWith('/api/rpc')) {
+    const rpc = String(process.env['ANVIL_RPC'] || resolvedArgs.rpcUrl || '').trim();
+    if (rpc) return rpc;
+  }
+  return new URL(raw, apiUrl).toString();
+};
 const directWsUrl = String(resolvedArgs.directWsUrl || '').trim();
 if (!directWsUrl) {
   throw new Error(`[MESH-HUB] Missing required --direct-ws-url for ${resolvedArgs.name}`);
@@ -346,6 +359,24 @@ const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig =
     ...(arrakis as JurisdictionConfig),
     rpc: rpcUrlOverride || (arrakis as JurisdictionConfig).rpc,
   };
+};
+
+const isSecondaryJurisdictionConfig = (key: string, jurisdiction: JurisdictionConfig, primaryRpc: string): boolean => {
+  const normalizedKey = String(key || '').trim().toLowerCase();
+  const normalizedName = String(jurisdiction.name || '').trim().toLowerCase();
+  const normalizedRpc = String(jurisdiction.rpc || '').trim();
+  if (primaryRpc && normalizedRpc === primaryRpc) return false;
+  return normalizedKey === 'tron' || normalizedKey === 'rpc2' || normalizedName.includes('tron') || normalizedRpc.includes('/rpc2');
+};
+
+const resolveSecondaryJurisdictions = (primaryRpc: string): JurisdictionConfig[] => {
+  clearJurisdictionsCache();
+  const data = loadJurisdictions();
+  const entries = Object.entries(data.jurisdictions ?? {});
+  return entries
+    .filter(([, jurisdiction]) => Boolean(jurisdiction?.rpc && jurisdiction?.contracts?.depository && jurisdiction?.contracts?.entityProvider))
+    .filter(([key, jurisdiction]) => isSecondaryJurisdictionConfig(key, jurisdiction as JurisdictionConfig, primaryRpc))
+    .map(([, jurisdiction]) => jurisdiction as JurisdictionConfig);
 };
 
 const REQUIRED_RPC_CONTRACT_KEYS = ['account', 'depository', 'entityProvider', 'deltaTransformer'] as const;
@@ -865,10 +896,21 @@ const ensurePeerBootstrapReserves = async (
   await settleRuntimeFor(env, 20);
 };
 
-const readVisibleHubProfiles = (env: Env): Array<{ name: string; entityId: string }> => {
+const getEntityJurisdictionName = (env: Env, entityId: string | null): string => {
+  if (!entityId) return '';
+  const replica = getEntityReplicaById(env, entityId);
+  return String(replica?.state?.config?.jurisdiction?.name || '').trim().toLowerCase();
+};
+
+const readVisibleHubProfiles = (env: Env, jurisdictionName: string): Array<{ name: string; entityId: string }> => {
+  const normalizedJurisdiction = String(jurisdictionName || '').trim().toLowerCase();
   const profiles = env.gossip?.getProfiles?.() || [];
   return profiles
     .filter(profile => profile.metadata?.isHub === true)
+    .filter(profile => {
+      if (!normalizedJurisdiction) return true;
+      return String(profile.metadata?.jurisdiction?.name || '').trim().toLowerCase() === normalizedJurisdiction;
+    })
     .map(profile => ({
       name: String(profile.name || '').trim(),
       entityId: String(profile.entityId || '').toLowerCase(),
@@ -898,7 +940,8 @@ const buildLocalHealth = (
   tokenCatalog: JTokenInfo[],
   jadapter: JAdapter | null,
 ): LocalHealthResponse => {
-  const visibleHubProfiles = readVisibleHubProfiles(env);
+  const selfJurisdictionName = getEntityJurisdictionName(env, entityId);
+  const visibleHubProfiles = readVisibleHubProfiles(env, selfJurisdictionName);
   const visibleNames = visibleHubProfiles.map(profile => profile.name);
   const visibleIds = visibleHubProfiles.map(profile => profile.entityId);
   const requiredNames = resolvedArgs.meshHubNames;
@@ -951,6 +994,7 @@ const run = async (): Promise<void> => {
   finishTiming('runtime_boot', runtimeBootStartedAt);
 
   let bootstrap: { entityId: string; signerId: string } | null = null;
+  const hubBootstraps: Array<{ entityId: string; signerId: string; name: string; jurisdictionName: string; primary: boolean }> = [];
   let activeJAdapter: JAdapter | null = null;
   let activeTokenCatalog: JTokenInfo[] = [];
   let meshLoop: ReturnType<typeof setInterval> | null = null;
@@ -1030,6 +1074,7 @@ const run = async (): Promise<void> => {
         return new Response(safeStringify({
           name: resolvedArgs.name,
           entityId: bootstrap?.entityId ?? null,
+          hubEntities: hubBootstraps,
           runtimeId: env.runtimeId,
           apiUrl,
           relayUrl: resolvedArgs.relayUrl,
@@ -1222,17 +1267,30 @@ const run = async (): Promise<void> => {
         const requestStartedAt = Date.now();
         const body = await request.json() as {
           userEntityId?: string;
+          hubEntityId?: string;
           tokenId?: number;
           amount?: string;
         };
         const userEntityId = String(body.userEntityId || '').toLowerCase();
+        const requestedHubEntityId = String(body.hubEntityId || '').toLowerCase();
+        const faucetHubEntityId = requestedHubEntityId || String(readyBootstrap.entityId || '').toLowerCase();
         if (!userEntityId) {
           return new Response(safeStringify({ success: false, error: 'Missing userEntityId' }), {
             status: 400,
             headers,
           });
         }
-        if (!hasAccount(env, readyBootstrap.entityId, userEntityId)) {
+        if (!getEntityReplicaById(env, faucetHubEntityId)) {
+          return new Response(safeStringify({
+            success: false,
+            code: 'FAUCET_HUB_NOT_FOUND',
+            error: 'Requested hub entity is not available on this hub runtime.',
+          }), {
+            status: 404,
+            headers,
+          });
+        }
+        if (!hasAccount(env, faucetHubEntityId, userEntityId)) {
           return new Response(safeStringify({
             success: false,
             code: 'FAUCET_ACCOUNT_NOT_OPEN',
@@ -1248,15 +1306,15 @@ const run = async (): Promise<void> => {
         enqueueRuntimeInput(env, {
           runtimeTxs: [],
           entityInputs: [{
-            entityId: readyBootstrap.entityId,
-            signerId: resolveEntityProposerId(env, readyBootstrap.entityId, 'hub-offchain-faucet'),
+            entityId: faucetHubEntityId,
+            signerId: resolveEntityProposerId(env, faucetHubEntityId, 'hub-offchain-faucet'),
             entityTxs: [{
               type: 'directPayment',
               data: {
                 targetEntityId: userEntityId,
                 tokenId,
                 amount: ethers.parseUnits(amount, 18),
-                route: [readyBootstrap.entityId, userEntityId],
+                route: [faucetHubEntityId, userEntityId],
                 description: 'faucet-offchain',
               },
             }],
@@ -1265,6 +1323,7 @@ const run = async (): Promise<void> => {
         return new Response(safeStringify({
           success: true,
           accepted: true,
+          hubEntityId: faucetHubEntityId,
           serverDurationMs: Date.now() - requestStartedAt,
         }), { headers });
       }
@@ -1354,9 +1413,76 @@ const run = async (): Promise<void> => {
     port: resolvedArgs.apiPort,
   });
   if (!bootstrap?.entityId) throw new Error('HUB_BOOTSTRAP_FAILED');
+  hubBootstraps.push({
+    entityId: bootstrap.entityId,
+    signerId: bootstrap.signerId,
+    name: resolvedArgs.name,
+    jurisdictionName: jurisdiction.name,
+    primary: true,
+  });
   finishTiming('hub_bootstrap', hubBootstrapStartedAt);
 
   await ensureOrderbook(env, bootstrap.entityId, bootstrap.signerId);
+
+  const primaryJurisdictionName = jurisdiction.name;
+  const secondaryJurisdictions = resolveSecondaryJurisdictions(jurisdiction.rpc);
+  for (const [index, secondary] of secondaryJurisdictions.entries()) {
+    const secondaryName = String(secondary.name || `Secondary ${index + 1}`).trim();
+    if (!secondaryName || env.jReplicas.has(secondaryName)) continue;
+    console.log(`[${resolvedArgs.name}] Importing sibling hub jurisdiction ${secondaryName} (${secondary.rpc})`);
+    const secondaryRpcUrl = resolveLocalApiUrl(secondary.rpc);
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importJ',
+        data: {
+          name: secondaryName,
+          chainId: secondary.chainId,
+          ticker: 'XLN',
+          rpcs: [secondaryRpcUrl],
+          ...(secondary.contracts ? { contracts: secondary.contracts } : {}),
+        },
+      }],
+      entityInputs: [],
+    });
+    await runtimeProcess(env);
+
+    const priorActiveJurisdiction = env.activeJurisdiction;
+    env.activeJurisdiction = secondaryName;
+    const sibling = await bootstrapHub(env, {
+      name: `${resolvedArgs.name} ${secondaryName}`,
+      region: resolvedArgs.region,
+      signerId: `${resolvedArgs.signerLabel}:${secondaryName}`,
+      seed: resolvedArgs.seed,
+      routingFeePPM: 1,
+      baseFee: 0n,
+      swapTakerFeeBps: 1,
+      disputeAutoFinalizeMode: resolvedArgs.name.toLowerCase() === 'h2' ? 'ignore' : 'auto',
+      rebalanceBaseFee: 10n ** 17n,
+      rebalanceLiquidityFeeBps: 1n,
+      rebalanceGasFee: 0n,
+      rebalanceTimeoutMs: 10 * 60 * 1000,
+      relayUrl: resolvedArgs.relayUrl,
+      rpcUrl: secondaryRpcUrl,
+      httpUrl: apiUrl,
+      port: resolvedArgs.apiPort,
+      jurisdictionName: secondaryName,
+      position: { x: 160 + index * 80, y: 0, z: 120, jurisdiction: secondaryName },
+    });
+    env.activeJurisdiction = priorActiveJurisdiction || primaryJurisdictionName;
+    if (!sibling?.entityId) throw new Error(`HUB_SIBLING_BOOTSTRAP_FAILED: ${secondaryName}`);
+    hubBootstraps.push({
+      entityId: sibling.entityId,
+      signerId: sibling.signerId,
+      name: `${resolvedArgs.name} ${secondaryName}`,
+      jurisdictionName: secondaryName,
+      primary: false,
+    });
+    await ensureOrderbook(env, sibling.entityId, sibling.signerId);
+    console.log(
+      `[${resolvedArgs.name}] Sibling hub ready jurisdiction=${secondaryName} entity=${sibling.entityId.slice(0, 12)}`,
+    );
+  }
+  env.activeJurisdiction = primaryJurisdictionName;
 
   const jadapter = getActiveJAdapter(env);
   if (!jadapter) throw new Error('ACTIVE_JADAPTER_MISSING_AFTER_IMPORT');
@@ -1375,7 +1501,7 @@ const run = async (): Promise<void> => {
   const p2p = startP2P(env, {
     relayUrls: [resolvedArgs.relayUrl],
     wsUrl: directWsUrl,
-    advertiseEntityIds: [bootstrap.entityId],
+    advertiseEntityIds: hubBootstraps.map((entry) => entry.entityId),
     isHub: true,
     gossipPollMs: BOOTSTRAP_POLL_MS * 5,
   });

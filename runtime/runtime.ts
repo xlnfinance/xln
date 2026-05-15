@@ -167,7 +167,7 @@ import {
   BigIntMath,
   FINANCIAL_CONSTANTS,
 } from './financial-utils';
-import { resolveEntityProposerId } from './state-helpers';
+import { resolveEntityProposerId, txFingerprint } from './state-helpers';
 import { getEntityShortId, formatEntityId } from './utils';
 import { deserializeTaggedJson, serializeTaggedJson, safeStringify } from './serialization-utils';
 import { computeCanonicalStateHashFromEnv } from './storage/canonical-hash';
@@ -215,8 +215,8 @@ import {
   validateEntityOutput,
 } from './validation-utils';
 import {
-  assertEntityJurisdictionBinding,
-  mergeRuntimeJurisdictionConfig,
+  backfillEntityJurisdictionBinding,
+  requireBoundEntityConfig,
   requireEntityRuntimeJurisdictionConfig,
 } from './jurisdiction-runtime';
 import type {
@@ -1269,21 +1269,7 @@ export const enqueueRuntimeInput = (env: Env, runtimeInput: RuntimeInput): void 
 
 const buildRouteOutputKey = (output: RoutedEntityInput): string => {
   const txPart = (output.entityTxs || [])
-    .map(tx => {
-      const data = tx.data as Record<string, unknown> | undefined;
-      const height = typeof data?.['height'] === 'number' ? data['height'] : '';
-      const from = typeof data?.['fromEntityId'] === 'string' ? data['fromEntityId'] : '';
-      const to = typeof data?.['toEntityId'] === 'string' ? data['toEntityId'] : '';
-      // Handles both field names: settle_propose uses counterpartyEntityId,
-      // r2c uses counterpartyId — both must produce unique keys.
-      const cp =
-        typeof data?.['counterpartyEntityId'] === 'string'
-          ? data['counterpartyEntityId']
-          : typeof data?.['counterpartyId'] === 'string'
-            ? data['counterpartyId']
-            : '';
-      return `${tx.type}:${height}:${from}:${to}:${cp}`;
-    })
+    .map(tx => txFingerprint(tx))
     .join('|');
   return `${output.entityId}:${output.signerId || ''}:${txPart}`;
 };
@@ -2771,10 +2757,8 @@ const applyRuntimeInput = async (
 
         const replicaKey = `${runtimeTx.entityId}:${runtimeTx.signerId}`;
         const existingReplica = env.eReplicas.get(replicaKey);
-        const config = runtimeTx.data.config
-          ? mergeRuntimeJurisdictionConfig(runtimeTx.data.config, env)
-          : runtimeTx.data.config;
-        assertEntityJurisdictionBinding(env, runtimeTx.entityId, config?.jurisdiction);
+        const config = requireBoundEntityConfig(env, runtimeTx.entityId, runtimeTx.data.config);
+        backfillEntityJurisdictionBinding(env, runtimeTx.entityId, config.jurisdiction!);
         if (existingReplica) {
           // Persistence safety: never overwrite restored replica state on re-import.
           existingReplica.isProposer = runtimeTx.data.isProposer;

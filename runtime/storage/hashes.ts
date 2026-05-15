@@ -85,15 +85,25 @@ const encodeMerkleUint64 = (value: string, label: string): Buffer => {
 };
 
 const bookPairMerklePayload = (pairId: string): Buffer => {
-  const [baseTokenId, quoteTokenId, extra] = String(pairId || '').split('/');
-  if (baseTokenId === undefined || quoteTokenId === undefined || extra !== undefined) {
+  const normalized = String(pairId || '').trim();
+  const [baseTokenId, quoteTokenId, extra] = normalized.split('/');
+  const numericPair =
+    baseTokenId !== undefined &&
+    quoteTokenId !== undefined &&
+    extra === undefined &&
+    /^\d+$/.test(baseTokenId) &&
+    /^\d+$/.test(quoteTokenId);
+  if (numericPair) {
+    return Buffer.concat([
+      encodeMerkleUint64(baseTokenId, 'BOOK_BASE'),
+      encodeMerkleUint64(quoteTokenId, 'BOOK_QUOTE'),
+      Buffer.alloc(16),
+    ]);
+  }
+  if (!normalized) {
     throw new Error(`STORAGE_INVALID_BOOK_MERKLE_PATH: ${pairId}`);
   }
-  return Buffer.concat([
-    encodeMerkleUint64(baseTokenId, 'BOOK_BASE'),
-    encodeMerkleUint64(quoteTokenId, 'BOOK_QUOTE'),
-    Buffer.alloc(16),
-  ]);
+  return hashToBytes(ethers.keccak256(ethers.toUtf8Bytes(`xln:book-pair:${normalized}`)));
 };
 
 const storageMerklePath = (key: string): string => {

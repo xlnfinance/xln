@@ -209,11 +209,15 @@ select {
   background: var(--dropdown-bg);
   border: 1px solid var(--dropdown-border);
   color: var(--dropdown-text);
+  color-scheme: dark;
   border-radius: var(--dropdown-radius);
   padding: 6px 10px;
   font-size: 0.85rem;
   line-height: 1.2;
   backdrop-filter: blur(var(--blur-sm));
+  min-width: 0;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 select:focus {
@@ -225,6 +229,12 @@ select:focus {
 select:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+select option,
+select optgroup {
+  background: var(--dropdown-menu-bg);
+  color: var(--dropdown-text);
 }
 
 /* Glass card */
