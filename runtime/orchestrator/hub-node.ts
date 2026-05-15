@@ -1428,23 +1428,27 @@ const run = async (): Promise<void> => {
   const secondaryJurisdictions = resolveSecondaryJurisdictions(jurisdiction.rpc);
   for (const [index, secondary] of secondaryJurisdictions.entries()) {
     const secondaryName = String(secondary.name || `Secondary ${index + 1}`).trim();
-    if (!secondaryName || env.jReplicas.has(secondaryName)) continue;
-    console.log(`[${resolvedArgs.name}] Importing sibling hub jurisdiction ${secondaryName} (${secondary.rpc})`);
+    if (!secondaryName) continue;
     const secondaryRpcUrl = resolveLocalApiUrl(secondary.rpc);
-    enqueueRuntimeInput(env, {
-      runtimeTxs: [{
-        type: 'importJ',
-        data: {
-          name: secondaryName,
-          chainId: secondary.chainId,
-          ticker: 'XLN',
-          rpcs: [secondaryRpcUrl],
-          ...(secondary.contracts ? { contracts: secondary.contracts } : {}),
-        },
-      }],
-      entityInputs: [],
-    });
-    await runtimeProcess(env);
+    if (!env.jReplicas.has(secondaryName)) {
+      console.log(`[${resolvedArgs.name}] Importing sibling hub jurisdiction ${secondaryName} (${secondary.rpc})`);
+      enqueueRuntimeInput(env, {
+        runtimeTxs: [{
+          type: 'importJ',
+          data: {
+            name: secondaryName,
+            chainId: secondary.chainId,
+            ticker: 'XLN',
+            rpcs: [secondaryRpcUrl],
+            ...(secondary.contracts ? { contracts: secondary.contracts } : {}),
+          },
+        }],
+        entityInputs: [],
+      });
+      await runtimeProcess(env);
+    } else {
+      console.log(`[${resolvedArgs.name}] Reusing sibling hub jurisdiction ${secondaryName}`);
+    }
 
     const priorActiveJurisdiction = env.activeJurisdiction;
     env.activeJurisdiction = secondaryName;
@@ -1519,7 +1523,7 @@ const run = async (): Promise<void> => {
     if (!bootstrap || meshLoopInFlight) return;
     meshLoopInFlight = true;
     try {
-      const visibleHubProfiles = readVisibleHubProfiles(env);
+      const visibleHubProfiles = readVisibleHubProfiles(env, primaryJurisdictionName);
       const requiredHubProfiles = resolvedArgs.meshHubNames
         .map(name => visibleHubProfiles.find(profile => profile.name === name) || null)
         .filter((profile): profile is { name: string; entityId: string } => profile !== null);

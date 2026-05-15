@@ -17,6 +17,7 @@ import type {
   RuntimeTransformerClause,
   RuntimeBatch,
   RuntimePayment,
+  RuntimePull,
   RuntimeSwap,
   ProofBodyResult,
   DisputeConfig,
@@ -93,6 +94,7 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
 
   const payments: RuntimePayment[] = [];
   const swaps: RuntimeSwap[] = [];
+  const pulls: RuntimePull[] = [];
 
   // Convert HTLC locks to Payment structs
   // DETERMINISTIC: Sort by lockId for consistent ordering
@@ -140,6 +142,22 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
     });
   }
 
+  const sortedPulls = sortTransformerEntries((accountMachine.pulls ?? new Map()).entries());
+  for (const [pullId, pull] of sortedPulls) {
+    const deltaIndex = tokenIds.indexOf(pull.tokenId);
+    if (deltaIndex === -1) {
+      console.warn(`[ProofBuilder] Pull ${pullId} references unknown tokenId ${pull.tokenId}`);
+      continue;
+    }
+    pulls.push({
+      deltaIndex,
+      amount: pull.amount,
+      revealedUntilBlock: pull.revealedUntilBlock,
+      fullHash: pull.fullHash,
+      partialRoot: pull.partialRoot,
+    });
+  }
+
   // ═══════════════════════════════════════════════════════════════════════════
   // Step 3: Build RuntimeBatch and RuntimeTransformerClause
   // ═══════════════════════════════════════════════════════════════════════════
@@ -147,11 +165,12 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
   const batch: RuntimeBatch = {
     payments,
     swaps,
+    pulls,
   };
 
-  // Only include transformer if there are HTLCs or swaps
+  // Only include transformer if there are active programmable commitments.
   const transformers: RuntimeTransformerClause[] = [];
-  if (payments.length > 0 || swaps.length > 0) {
+  if (payments.length > 0 || swaps.length > 0 || pulls.length > 0) {
     const transformerAddress = requireContractAddress('delta_transformer', deltaTransformerAddress);
     transformers.push({
       transformerAddress,
@@ -216,6 +235,13 @@ function runtimeToProofBodyStruct(runtime: RuntimeProofBody): ProofBodyStruct {
         addAmount: s.addAmount,
         subDeltaIndex: BigInt(s.subDeltaIndex),
         subAmount: s.subAmount,
+      })),
+      pull: t.batch.pulls.map(p => ({
+        deltaIndex: BigInt(p.deltaIndex),
+        amount: p.amount,
+        revealedUntilBlock: BigInt(p.revealedUntilBlock),
+        fullHash: p.fullHash,
+        partialRoot: p.partialRoot,
       })),
     };
 

@@ -27,7 +27,8 @@ import {
 } from '../../proof-builder';
 import { inspectHankoForHash, verifyHankoForHash } from '../../hanko/signing';
 import { asOfferId, swapKey, type OfferId } from '../../swap-keys';
-import { buildPositionalSwapFillRatioBuckets } from '../../transformer-ordering';
+import { buildPositionalSwapFillRatioBuckets, sortTransformerEntries } from '../../transformer-ordering';
+import { decodeHashLadderBinary } from '../../hashladder';
 
 // === Delta Transformer Arguments (inlined from transformer-args.ts) ===
 const MAX_FILL_RATIO = 0xffff;
@@ -37,6 +38,12 @@ type BuildArgsOptions = {
   overrideArguments?: string;
   leftSecrets?: string[];
   rightSecrets?: string[];
+  leftPulls?: PullArgumentBuckets;
+  rightPulls?: PullArgumentBuckets;
+};
+
+type PullArgumentBuckets = {
+  binaries: string[];
 };
 
 const isProofBodyStruct = (value: unknown): value is ProofBodyStruct => {
@@ -127,10 +134,21 @@ function clampFillRatio(value: number): number {
   return Math.floor(value);
 }
 
-function encodeDeltaTransformerArgs(fillRatios: number[], secrets: string[]): string {
+function emptyPullArgumentBuckets(): PullArgumentBuckets {
+  return { binaries: [] };
+}
+
+function encodeDeltaTransformerArgs(fillRatios: number[], secrets: string[], pulls: PullArgumentBuckets = emptyPullArgumentBuckets()): string {
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   const ratios = fillRatios.map(r => BigInt(clampFillRatio(r)));
-  return abiCoder.encode(['uint16[]', 'bytes32[]'], [ratios, secrets]);
+  return abiCoder.encode(
+    ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
+    [{
+      fillRatios: ratios,
+      secrets,
+      pulls: pulls.binaries,
+    }],
+  );
 }
 
 function wrapTransformerArgs(args: string): string {
@@ -162,17 +180,64 @@ function buildDeltaTransformerArguments(
 
   const leftSecrets = options.leftSecrets ?? [];
   const rightSecrets = options.rightSecrets ?? [];
+  const leftPulls = options.leftPulls ?? emptyPullArgumentBuckets();
+  const rightPulls = options.rightPulls ?? emptyPullArgumentBuckets();
 
-  const leftArgs = encodeDeltaTransformerArgs(leftFillRatios, leftSecrets);
-  const rightArgs = encodeDeltaTransformerArgs(rightFillRatios, rightSecrets);
+  const leftArgs = encodeDeltaTransformerArgs(leftFillRatios, leftSecrets, leftPulls);
+  const rightArgs = encodeDeltaTransformerArgs(rightFillRatios, rightSecrets, rightPulls);
 
-  const hasLeftData = leftSecrets.length > 0 || leftFillRatios.some(r => r > 0);
-  const hasRightData = rightSecrets.length > 0 || rightFillRatios.some(r => r > 0);
+  const hasLeftData =
+    leftSecrets.length > 0 ||
+    leftFillRatios.some(r => r > 0) ||
+    leftPulls.binaries.some(binary => binary !== '0x');
+  const hasRightData =
+    rightSecrets.length > 0 ||
+    rightFillRatios.some(r => r > 0) ||
+    rightPulls.binaries.some(binary => binary !== '0x');
 
   return {
     leftArguments: hasLeftData ? wrapTransformerArgs(leftArgs) : '0x',
     rightArguments: hasRightData ? wrapTransformerArgs(rightArgs) : '0x',
   };
+}
+
+function collectPullArgumentBuckets(account: AccountMachine): {
+  leftPulls: PullArgumentBuckets;
+  rightPulls: PullArgumentBuckets;
+  hasLeftReveal: boolean;
+  hasRightReveal: boolean;
+} {
+  const leftPulls = emptyPullArgumentBuckets();
+  const rightPulls = emptyPullArgumentBuckets();
+  const resolves = new Map<string, Extract<AccountMachine['mempool'][number], { type: 'pull_resolve' }>>();
+  const candidates = [
+    ...(account.pendingFrame?.accountTxs ?? []),
+    ...(account.mempool ?? []),
+  ];
+  for (const tx of candidates) {
+    if (tx.type === 'pull_resolve') resolves.set(tx.data.pullId, tx as Extract<typeof tx, { type: 'pull_resolve' }>);
+  }
+
+  let hasLeftReveal = false;
+  let hasRightReveal = false;
+  for (const [pullId, pull] of sortTransformerEntries((account.pulls ?? new Map()).entries())) {
+    const bucket = pull.amount >= 0n ? leftPulls : rightPulls;
+    const tx = resolves.get(pullId);
+    const binary = tx?.data.binary || '0x';
+    let ratio = 0;
+    try {
+      ratio = decodeHashLadderBinary(binary).fillRatio;
+    } catch {
+      ratio = 0;
+    }
+    bucket.binaries.push(ratio > 0 ? binary : '0x');
+    if (ratio > 0) {
+      if (pull.amount >= 0n) hasLeftReveal = true;
+      else hasRightReveal = true;
+    }
+  }
+
+  return { leftPulls, rightPulls, hasLeftReveal, hasRightReveal };
 }
 
 function buildPendingSwapFillRatios(
@@ -286,6 +351,7 @@ export async function handleDisputeStart(
 
   const fillRatiosByOfferId = buildPendingSwapFillRatios(newState, counterpartyEntityId, account);
   const htlcSecrets = collectHtlcSecrets(newState, counterpartyEntityId);
+  const pullArgs = collectPullArgumentBuckets(account);
   const { leftArguments, rightArguments } = buildDeltaTransformerArguments(account, {
     fillRatiosByOfferId,
     ...(overrideInitialArguments && overrideInitialArguments !== '0x'
@@ -295,9 +361,15 @@ export async function handleDisputeStart(
     // Keep secrets on the same side that we commit as initialArguments.
     leftSecrets: counterpartyIsLeft ? htlcSecrets : [],
     rightSecrets: counterpartyIsLeft ? [] : htlcSecrets,
+    leftPulls: pullArgs.leftPulls,
+    rightPulls: pullArgs.rightPulls,
   });
 
-  const initialArguments = counterpartyIsLeft ? leftArguments : rightArguments;
+  const starterIsLeft = account.leftEntity === newState.entityId;
+  const starterHasPullReveal = starterIsLeft ? pullArgs.hasLeftReveal : pullArgs.hasRightReveal;
+  const initialArguments = starterHasPullReveal
+    ? (starterIsLeft ? leftArguments : rightArguments)
+    : (counterpartyIsLeft ? leftArguments : rightArguments);
 
   // Use stored counterparty dispute hanko AND proofBodyHash (exchanged during bilateral consensus)
   // CRITICAL: Must use the SAME proofBodyHash that the hanko signed, not a fresh one!
@@ -623,10 +695,13 @@ export async function handleDisputeFinalize(
   const callerIsLeft = account.leftEntity === newState.entityId;
   const fillRatiosByOfferId = buildPendingSwapFillRatios(newState, counterpartyEntityId, account);
   const htlcSecrets = collectHtlcSecrets(newState, counterpartyEntityId);
+  const pullArgs = collectPullArgumentBuckets(account);
   const { leftArguments, rightArguments } = buildDeltaTransformerArguments(account, {
     fillRatiosByOfferId,
     leftSecrets: callerIsLeft ? htlcSecrets : [],
     rightSecrets: callerIsLeft ? [] : htlcSecrets,
+    leftPulls: pullArgs.leftPulls,
+    rightPulls: pullArgs.rightPulls,
   });
 
   const finalArguments = callerIsLeft ? leftArguments : rightArguments;

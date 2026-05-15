@@ -154,7 +154,7 @@ import {
   getDefaultCreditLimit,
 } from './account-utils';
 import { computeSwapPriceTicks, prepareSwapOrder, quantizeSwapOrder } from './orderbook';
-import { generateLockId, hashHtlcSecret } from './htlc-utils';
+import { hashHtlcSecret } from './htlc-utils';
 import { getRuntimeJurisdictionHeight } from './j-height';
 import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
 import {
@@ -5234,13 +5234,6 @@ export async function submitCrossJurisdictionSwap(
     throw new Error(`CROSS_SWAP_TARGET_ACCOUNT_MISSING: user=${params.targetUserEntityId} hub=${params.targetHubEntityId}`);
   }
 
-  const secret = params.secret;
-  const hashlock = params.hashlock || (secret ? hashHtlcSecret(secret) : undefined);
-  if (secret && params.hashlock && params.hashlock !== hashHtlcSecret(secret)) {
-    throw new Error('CROSS_SWAP_SECRET_HASHLOCK_MISMATCH');
-  }
-  const sourceLockId = params.sourceLockId || (hashlock ? generateLockId(hashlock, env.height, 1, now) : undefined);
-  const targetLockId = params.targetLockId || (hashlock ? generateLockId(hashlock, env.height, 2, now) : undefined);
   const expiresInMs = Math.max(30_000, Math.floor(params.expiresInMs ?? 120_000));
 
   const route: CrossJurisdictionSwapRoute = {
@@ -5253,7 +5246,6 @@ export async function submitCrossJurisdictionSwap(
       counterpartyEntityId: params.sourceHubEntityId,
       tokenId: Number(params.sourceTokenId),
       amount: BigInt(params.sourceAmount),
-      ...(sourceLockId ? { lockId: sourceLockId } : {}),
     },
     target: {
       jurisdiction: targetHubJ.name,
@@ -5261,11 +5253,9 @@ export async function submitCrossJurisdictionSwap(
       counterpartyEntityId: params.targetUserEntityId,
       tokenId: Number(params.targetTokenId),
       amount: BigInt(params.targetAmount),
-      ...(targetLockId ? { lockId: targetLockId } : {}),
     },
-    ...(hashlock ? { hashlock } : {}),
     ...(params.priceTicks !== undefined ? { priceTicks: params.priceTicks } : {}),
-    status: 'resting',
+    status: 'intent',
     createdAt: now,
     updatedAt: now,
     expiresAt: now + expiresInMs,
@@ -5279,26 +5269,7 @@ export async function submitCrossJurisdictionSwap(
         entityId: params.sourceUserEntityId,
         signerId: sourceUserSignerId,
         entityTxs: [{
-          type: 'placeSwapOffer',
-          data: {
-            counterpartyEntityId: params.sourceHubEntityId,
-            offerId: orderId,
-            giveTokenId: Number(params.sourceTokenId),
-            giveAmount: BigInt(params.sourceAmount),
-            wantTokenId: Number(params.targetTokenId),
-            wantAmount: BigInt(params.targetAmount),
-            ...(params.priceTicks !== undefined ? { priceTicks: params.priceTicks } : {}),
-            timeInForce: 0,
-            minFillRatio: 0,
-            crossJurisdiction: route,
-          },
-        }],
-      },
-      {
-        entityId: params.targetUserEntityId,
-        signerId: targetUserSignerId,
-        entityTxs: [{
-          type: 'registerCrossJurisdictionSwap',
+          type: 'requestCrossJurisdictionSwap',
           data: { route },
         }],
       },
@@ -5308,10 +5279,6 @@ export async function submitCrossJurisdictionSwap(
 
   return {
     route,
-    ...(secret ? { secret } : {}),
-    ...(hashlock ? { hashlock } : {}),
-    ...(sourceLockId ? { sourceLockId } : {}),
-    ...(targetLockId ? { targetLockId } : {}),
   };
 }
 

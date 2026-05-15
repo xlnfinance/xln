@@ -1113,7 +1113,6 @@
     if (!Number.isFinite(input.giveToken) || !Number.isFinite(input.wantToken) || input.giveToken <= 0 || input.wantToken <= 0) {
       return 'Select valid Sell and Buy tokens.';
     }
-    if (input.giveToken === input.wantToken) return 'Sell token and Buy token must be different.';
     if (input.giveAmount <= 0n) return 'Enter amount to sell.';
     if (!input.limitPriceTicks || input.limitPriceTicks <= 0n) return 'Price is too small.';
     if (input.referencePriceTicks && input.referencePriceTicks > 0n) {
@@ -2031,7 +2030,7 @@
       if (!Number.isFinite(wantToken) || !allowedSwapTokenIds.has(wantToken)) {
         throw new Error('Invalid want token');
       }
-      if (giveToken === wantToken) {
+      if (giveToken === wantToken && swapRouteMode !== 'cross') {
         throw new Error('Give token and want token must be different');
       }
       const liveValidation = buildSwapValidationInput(
@@ -2116,7 +2115,7 @@
             amount: effectiveWantAmount,
           },
           priceTicks: canonicalPriceTicks,
-          status: 'resting',
+          status: 'intent',
           createdAt: now,
           updatedAt: now,
           expiresAt: now + 24 * 60 * 60 * 1000,
@@ -2133,27 +2132,9 @@
           },
         });
       }
-      entityTxs.push({
-        type: 'placeSwapOffer' as const,
-        data: {
-          offerId,
-          counterpartyEntityId: resolvedCounterparty,
-          giveTokenId: giveToken,
-          giveAmount: effectiveGiveAmount,
-          wantTokenId: wantToken,
-          wantAmount: effectiveWantAmount,
-          priceTicks: canonicalPriceTicks,
-          minFillRatio,
-          ...(crossJurisdiction ? { crossJurisdiction } : {}),
-        },
-      });
 
-      const inputs: RoutedEntityInput[] = [{
-        entityId: sourceEntityId,
-        signerId,
-        entityTxs,
-      }];
       if (crossJurisdiction && targetRoute) {
+        const inputs: RoutedEntityInput[] = [];
         const targetEntityTxs = [];
         if (shouldAutoPrepareCrossInbound && requiredTargetInboundCreditLimit !== null) {
           targetEntityTxs.push({
@@ -2165,22 +2146,46 @@
             },
           });
         }
-        targetEntityTxs.push({
-          type: 'registerCrossJurisdictionSwap' as const,
-          data: { route: crossJurisdiction },
-        });
+        if (targetEntityTxs.length > 0) {
+          inputs.push({
+            entityId: targetRoute.targetEntityId,
+            signerId: targetRoute.targetSignerId,
+            entityTxs: targetEntityTxs,
+          });
+        }
         inputs.push({
-          entityId: targetRoute.targetEntityId,
-          signerId: targetRoute.targetSignerId,
-          entityTxs: targetEntityTxs,
+          entityId: sourceEntityId,
+          signerId,
+          entityTxs: [{
+            type: 'requestCrossJurisdictionSwap' as const,
+            data: { route: crossJurisdiction },
+          }],
         });
+        await enqueueEntityInputs(env, inputs);
+      } else {
+        entityTxs.push({
+          type: 'placeSwapOffer' as const,
+          data: {
+            offerId,
+            counterpartyEntityId: resolvedCounterparty,
+            giveTokenId: giveToken,
+            giveAmount: effectiveGiveAmount,
+            wantTokenId: wantToken,
+            wantAmount: effectiveWantAmount,
+            priceTicks: canonicalPriceTicks,
+            minFillRatio,
+          },
+        });
+        await enqueueEntityInputs(env, [{
+          entityId: sourceEntityId,
+          signerId,
+          entityTxs,
+        }]);
       }
-
-      await enqueueEntityInputs(env, inputs);
 
       orderbookRefreshNonce += 1;
       pendingSwapFeedbackOfferId = offerId;
-      toasts.success(crossJurisdiction ? 'Cross-j swap offer submitted' : 'Swap offer submitted');
+      toasts.success(crossJurisdiction ? 'Cross-j swap preparation submitted' : 'Swap offer submitted');
 
       // Reset form
       orderPercent = 100;

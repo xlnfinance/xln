@@ -396,11 +396,12 @@ function isValidScheduledHookType(value: unknown): value is ScheduledHookType {
     value === 'htlc_timeout' ||
     value === 'dispute_deadline' ||
     value === 'htlc_secret_ack_timeout' ||
-    value === 'settlement_window' ||
-    value === 'watchdog' ||
-    value === 'hub_rebalance_kick'
-  );
-}
+	    value === 'settlement_window' ||
+	    value === 'watchdog' ||
+	    value === 'hub_rebalance_kick' ||
+	    value === 'cross_j_orderbook_sweep'
+	  );
+	}
 
 function rejectUnexpectedKeys(
   obj: Record<string, unknown>,
@@ -490,20 +491,31 @@ function validateScheduledHook(value: unknown, fieldName: string): ScheduledHook
         data: {},
       };
     }
-    case 'hub_rebalance_kick': {
-      rejectUnexpectedKeys(data, ['reason', 'counterpartyId'], `${fieldName}.data`);
-      return {
+	    case 'hub_rebalance_kick': {
+	      rejectUnexpectedKeys(data, ['reason', 'counterpartyId'], `${fieldName}.data`);
+	      return {
         id,
         triggerAt,
         type: hookType,
         data: {
           reason: validateString(data['reason'], `${fieldName}.data.reason`),
           counterpartyId: validateString(data['counterpartyId'], `${fieldName}.data.counterpartyId`),
-        },
-      };
-    }
-  }
-}
+	        },
+	      };
+	    }
+	    case 'cross_j_orderbook_sweep': {
+	      rejectUnexpectedKeys(data, ['reason'], `${fieldName}.data`);
+	      return {
+	        id,
+	        triggerAt,
+	        type: hookType,
+	        data: {
+	          reason: validateString(data['reason'], `${fieldName}.data.reason`),
+	        },
+	      };
+	    }
+	  }
+	}
 
 function validateCrontabState(value: unknown, fieldName: string): CrontabState {
   const obj = validateObject(value, fieldName);
@@ -607,6 +619,9 @@ export function validateAccountMachine(value: unknown, context = 'AccountMachine
   validateMapInstance(obj['deltas'], `${context}.deltas`);
   validateMapInstance(obj['locks'], `${context}.locks`);
   validateMapInstance(obj['swapOffers'], `${context}.swapOffers`);
+  if (obj['pulls'] !== undefined) {
+    validateMapInstance(obj['pulls'], `${context}.pulls`);
+  }
   if (obj['swapOrderHistory'] !== undefined) {
     validateMapInstance(obj['swapOrderHistory'], `${context}.swapOrderHistory`);
   }

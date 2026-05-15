@@ -643,6 +643,31 @@ export type EntityTx =
       };
     }
   | {
+      // Create a ratio-gated pull commitment in a bilateral account.
+      // The side losing funds proposes it; the beneficiary resolves it with
+      // hashladder ratio secrets.
+      type: 'pullLock';
+      data: {
+        counterpartyEntityId: string;
+        pullId: string;
+        tokenId: number;
+        amount: bigint;
+        revealedUntilBlock: number;
+        fullHash: string;
+        partialRoot: string;
+        description?: string;
+      };
+    }
+  | {
+      type: 'resolvePull';
+      data: {
+        counterpartyEntityId: string;
+        pullId: string;
+        binary: string;
+        description?: string;
+      };
+    }
+  | {
       // Request hub collateralization on a bilateral account (prepaid fee model)
       type: 'requestCollateral';
       data: {
@@ -692,19 +717,43 @@ export type EntityTx =
       };
     }
   | {
-      type: 'crossJurisdictionSalvage';
+      type: 'requestCrossJurisdictionSwap';
       data: {
-        routeId: string;
-        initialArguments: string;
-        fillRatio: number;
-        sourceEntityId: string;
-        sourceCounterpartyEntityId: string;
-        observedAt?: number;
+        route: CrossJurisdictionSwapRoute;
       };
     }
   | {
-      type: 'disputeFinalize';
+      type: 'prepareCrossJurisdictionSwap';
       data: {
+        route: CrossJurisdictionSwapRoute;
+      };
+    }
+  | {
+      type: 'commitCrossJurisdictionSwap';
+      data: {
+        route: CrossJurisdictionSwapRoute;
+      };
+    }
+	  | {
+	      type: 'crossJurisdictionSalvage';
+	      data: {
+	        routeId: string;
+        binary: string;
+        fillRatio: number;
+        sourceEntityId: string;
+        sourceCounterpartyEntityId: string;
+	        observedAt?: number;
+	      };
+	    }
+	  | {
+	      type: 'orderbookSweepCrossJurisdiction';
+	      data: {
+	        reason?: string;
+	      };
+	    }
+	  | {
+	      type: 'disputeFinalize';
+	      data: {
         counterpartyEntityId: string;
         cooperative?: boolean;  // Ignored compatibility flag. disputeFinalize is unilateral-only.
         useOnchainRegistry?: boolean; // Optional HTLC reveal via on-chain registry
@@ -1073,6 +1122,17 @@ export interface HtlcLock {
   envelope?: import('./htlc-envelope-types').HtlcEnvelope | string;
 }
 
+export interface PullCommitment {
+  pullId: string;
+  tokenId: number;
+  amount: bigint;
+  revealedUntilBlock: number;
+  fullHash: string;
+  partialRoot: string;
+  createdHeight: number;
+  createdTimestamp: number;
+}
+
 // Swap offer (limit order) in bilateral account
 export interface SwapOffer {
   offerId: string;              // UUID for this offer
@@ -1179,6 +1239,7 @@ export interface AccountMachine {
 
   // Swap offers (limit orders)
   swapOffers: Map<string, SwapOffer>; // offerId → offer details
+  pulls?: Map<string, PullCommitment>; // pullId → ratio-gated pull details
   // Durable local lifecycle log for swap UI/history.
   // Keep this in account state so closed/partial orders do not disappear
   // when the short bilateral frameHistory ring buffer prunes old frames.
@@ -1632,6 +1693,24 @@ export type AccountTx =
         reason?: string;  // when outcome='error': no_account, no_capacity, timeout, amount_too_small, etc.
       };
     }
+  | {
+      type: 'pull_lock';
+      data: {
+        pullId: string;
+        tokenId: number;
+        amount: bigint;
+        revealedUntilBlock: number;
+        fullHash: string;
+        partialRoot: string;
+      };
+    }
+  | {
+      type: 'pull_resolve';
+      data: {
+        pullId: string;
+        binary: string;
+      };
+    }
   // === SWAP TRANSACTION TYPES ===
   | {
       type: 'swap_offer';
@@ -1855,6 +1934,9 @@ export type DebtStatus = 'open' | 'paid' | 'forgiven';
 export type DebtEventType = 'DebtCreated' | 'DebtEnforced' | 'DebtForgiven';
 
 export type CrossJurisdictionSwapStatus =
+  | 'intent'
+  | 'target_prepared'
+  | 'source_committed'
   | 'resting'
   | 'target_locked'
   | 'source_locked'
@@ -1873,12 +1955,25 @@ export interface CrossJurisdictionSwapLeg {
   lockId?: string;
 }
 
+export interface CrossJurisdictionPullLeg {
+  pullId: string;
+  tokenId: number;
+  amount: bigint;
+  signedAmount: bigint;
+  revealedUntilBlock: number;
+  fullHash: string;
+  partialRoot: string;
+}
+
 export interface CrossJurisdictionSwapRoute {
   orderId: string;
   makerEntityId: string;
   hubEntityId: string;
   source: CrossJurisdictionSwapLeg;
   target: CrossJurisdictionSwapLeg;
+  sourcePull?: CrossJurisdictionPullLeg;
+  targetPull?: CrossJurisdictionPullLeg;
+  hashLadderSeedHash?: string;
   hashlock?: string;
   priceTicks?: bigint;
   status: CrossJurisdictionSwapStatus;

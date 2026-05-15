@@ -17,6 +17,7 @@ import {
   normalizeJurisdictionEvent,
   normalizeJurisdictionEvents,
 } from '../j-event-normalization';
+import { decodeHashLadderBinary, encodeHashLadderBinaryFromParts } from '../hashladder';
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
@@ -323,6 +324,20 @@ function decodeDisputeInitialSecrets(initialArgumentsRaw: unknown): string[] {
   for (const arg of argArray) {
     if (!arg || arg === '0x') continue;
     try {
+      const [decoded] = abiCoder.decode(
+        ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
+        arg,
+      ) as unknown as [{ secrets?: Array<string> }];
+      for (const secret of decoded.secrets || []) {
+        if (ethers.isHexString(secret, 32)) {
+          secrets.add(String(secret).toLowerCase());
+        }
+      }
+      continue;
+    } catch {
+      // Try legacy [fillRatios, secrets] format below.
+    }
+    try {
       const [, decodedSecrets] = abiCoder.decode(['uint16[]', 'bytes32[]'], arg) as unknown as [Array<bigint>, Array<string>];
       for (const secret of decodedSecrets) {
         if (ethers.isHexString(secret, 32)) {
@@ -337,7 +352,7 @@ function decodeDisputeInitialSecrets(initialArgumentsRaw: unknown): string[] {
   return Array.from(secrets);
 }
 
-function decodeDisputeCrossPullFillRatios(initialArgumentsRaw: unknown): number[] {
+function decodeDisputeCrossPullBinaries(initialArgumentsRaw: unknown): Array<{ fillRatio: number; binary: string }> {
   const initialArguments = String(initialArgumentsRaw || '0x');
   if (initialArguments === '0x') return [];
 
@@ -349,23 +364,50 @@ function decodeDisputeCrossPullFillRatios(initialArgumentsRaw: unknown): number[
     return [];
   }
 
-  const ratios: number[] = [];
+  const binaries: Array<{ fillRatio: number; binary: string }> = [];
   for (const arg of argArray) {
     if (!arg || arg === '0x') continue;
     try {
       const [decoded] = abiCoder.decode(
+        ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
+        arg,
+      ) as unknown as [{ pulls?: Array<string> }];
+      for (const binary of decoded.pulls || []) {
+        try {
+          const decodedBinary = decodeHashLadderBinary(binary);
+          if (decodedBinary.fillRatio > 0) binaries.push({ fillRatio: decodedBinary.fillRatio, binary });
+        } catch {
+          // Ignore malformed pull args inside otherwise valid transformer args.
+        }
+      }
+      continue;
+    } catch {
+      // Try legacy standalone CrossSwapPull argument format below.
+    }
+    try {
+      const [decoded] = abiCoder.decode(
         ['tuple(uint16[] fillRatios, bytes32[] fullSecrets, bytes32[4][] reveals)'],
         arg,
-      ) as unknown as [{ fillRatios: Array<bigint | number> }];
-      for (const raw of decoded.fillRatios || []) {
-        const ratio = Number(raw);
-        if (Number.isInteger(ratio) && ratio > 0 && ratio <= 0xffff) ratios.push(ratio);
+      ) as unknown as [{ fillRatios: Array<bigint | number>; fullSecrets?: Array<string>; reveals?: Array<[string, string, string, string]> }];
+      for (let index = 0; index < (decoded.fillRatios || []).length; index += 1) {
+        const ratio = Number(decoded.fillRatios[index]);
+        if (!Number.isInteger(ratio) || ratio <= 0 || ratio > 0xffff) continue;
+        try {
+          const binary = encodeHashLadderBinaryFromParts(
+            ratio,
+            decoded.fullSecrets?.[index],
+            decoded.reveals?.[index],
+          );
+          binaries.push({ fillRatio: ratio, binary });
+        } catch {
+          // Ignore incomplete legacy pull args.
+        }
       }
     } catch {
       // Ignore non-CrossSwapPull transformer argument formats.
     }
   }
-  return ratios;
+  return binaries;
 }
 
 function findCrossJurisdictionRouteForSourceDispute(
@@ -394,8 +436,8 @@ function queueCrossJurisdictionSalvageFromDispute(
 ): boolean {
   const initialArguments = String(initialArgumentsRaw || '0x');
   if (!initialArguments || initialArguments === '0x') return false;
-  const fillRatios = decodeDisputeCrossPullFillRatios(initialArguments);
-  if (fillRatios.length === 0) return false;
+  const pullBinaries = decodeDisputeCrossPullBinaries(initialArguments);
+  if (pullBinaries.length === 0) return false;
 
   const route = findCrossJurisdictionRouteForSourceDispute(state, counterpartyId);
   if (!route) {
@@ -405,15 +447,15 @@ function queueCrossJurisdictionSalvageFromDispute(
     return false;
   }
 
-  const fillRatio = Math.max(...fillRatios);
+  const best = pullBinaries.reduce((acc, item) => item.fillRatio > acc.fillRatio ? item : acc, pullBinaries[0]!);
   outputs.push({
     entityId: route.target.counterpartyEntityId,
     entityTxs: [{
       type: 'crossJurisdictionSalvage',
       data: {
         routeId: route.orderId,
-        initialArguments,
-        fillRatio,
+        binary: best.binary,
+        fillRatio: best.fillRatio,
         sourceEntityId: route.source.entityId,
         sourceCounterpartyEntityId: route.source.counterpartyEntityId,
         observedAt: blockNumber,
@@ -422,7 +464,7 @@ function queueCrossJurisdictionSalvageFromDispute(
   });
   addMessage(state, `🌉 Cross-j pull args observed for ${route.orderId}; target salvage queued`);
   console.log(
-    `🌉 CROSS-J: queued salvage route=${route.orderId} fill=${fillRatio}/65535 ` +
+    `🌉 CROSS-J: queued salvage route=${route.orderId} fill=${best.fillRatio}/65535 ` +
     `target=${route.target.counterpartyEntityId.slice(-4)}`,
   );
   return true;

@@ -683,7 +683,7 @@ const buildMarketMakerCrossOfferSpecs = (
         const routeBase = {
           makerEntityId: sourceContext.entityId,
           hubEntityId: sourceHub.entityId,
-          status: 'resting' as const,
+          status: 'intent' as const,
           createdAt: now,
           updatedAt: now,
           expiresAt: now + MARKET_MAKER_CROSS_EXPIRY_MS,
@@ -1065,18 +1065,6 @@ const maintainMarketMakerCrossQuotes = async (
     if (!isAccountConsensusReady(account)) continue;
 
     const existingOfferIds = collectOfferIdsForAccount(account);
-    for (const spec of specs) {
-      const route = spec.crossJurisdiction;
-      if (!route) continue;
-      if (!existingOfferIds.has(spec.offerId)) continue;
-      if (!hasCrossRouteRegistered(env, route.target.counterpartyEntityId, route.orderId)) {
-        pushEntityTx(inputsByEntity, route.target.counterpartyEntityId, targetContext.signerId, {
-          type: 'registerCrossJurisdictionSwap',
-          data: { route },
-        });
-      }
-    }
-
     if (remainingNewOffers <= 0) continue;
     const remainingOpenSlots = Math.max(0, LIMITS.MAX_ACCOUNT_SWAP_OFFERS - existingOfferIds.size);
     const allowedNewOffers = Math.min(
@@ -1091,6 +1079,7 @@ const maintainMarketMakerCrossQuotes = async (
       .filter(spec => {
         const route = spec.crossJurisdiction!;
         return (
+          !hasCrossRouteRegistered(env, route.source.counterpartyEntityId, route.orderId) &&
           hasPairMutualCredit(env, sourceContext.entityId, route.source.counterpartyEntityId, route.source.tokenId, route.source.amount) &&
           hasPairMutualCredit(env, targetContext.entityId, route.target.entityId, route.target.tokenId, route.target.amount)
         );
@@ -1100,26 +1089,10 @@ const maintainMarketMakerCrossQuotes = async (
 
     for (const spec of missing) {
       const route = spec.crossJurisdiction!;
-      pushEntityTx(inputsByEntity, sourceContext.entityId, sourceContext.signerId, {
-        type: 'placeSwapOffer',
-        data: {
-          counterpartyEntityId: spec.hubEntityId,
-          offerId: spec.offerId,
-          giveTokenId: spec.giveTokenId,
-          giveAmount: spec.giveAmount,
-          wantTokenId: spec.wantTokenId,
-          wantAmount: spec.wantAmount,
-          ...(route.priceTicks !== undefined ? { priceTicks: route.priceTicks } : {}),
-          minFillRatio: spec.minFillRatio,
-          crossJurisdiction: route,
-        },
+      pushEntityTx(inputsByEntity, route.source.entityId, sourceContext.signerId, {
+        type: 'requestCrossJurisdictionSwap',
+        data: { route },
       });
-      if (!hasCrossRouteRegistered(env, route.target.counterpartyEntityId, route.orderId)) {
-        pushEntityTx(inputsByEntity, route.target.counterpartyEntityId, targetContext.signerId, {
-          type: 'registerCrossJurisdictionSwap',
-          data: { route },
-        });
-      }
     }
     remainingNewOffers -= missing.length;
   }

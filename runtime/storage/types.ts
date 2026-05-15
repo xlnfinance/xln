@@ -114,6 +114,7 @@ export type StorageAccountDoc = {
   deltas: Map<number, Delta>;
   locks: Map<string, HtlcLock>;
   swapOffers: Map<string, SwapOffer>;
+  pulls?: AccountMachine['pulls'];
   globalCreditLimits: AccountMachine['globalCreditLimits'];
   currentHeight: number;
   pendingFrame?: AccountMachine['pendingFrame'];

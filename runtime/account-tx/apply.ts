@@ -14,6 +14,7 @@ import { handleRequestCollateral } from './handlers/request-collateral';
 import { handleReopenDisputed } from './handlers/reopen-disputed';
 import { handleHtlcLock } from './handlers/htlc-lock';
 import { handleHtlcResolve } from './handlers/htlc-resolve';
+import { handlePullLock, handlePullResolve } from './handlers/pull';
 import { handleSwapOffer } from './handlers/swap-offer';
 import { handleSwapResolve } from './handlers/swap-resolve';
 import { handleSwapCancelRequest } from './handlers/swap-cancel';
@@ -46,6 +47,7 @@ type ProcessAccountTxResult = {
   };
   swapOfferCancelRequested?: { offerId: string };
   swapOfferCancelled?: { offerId: string; accountId: string; makerId?: string };
+  pullResolved?: { pullId: string; fillRatio: number };
 };
 
 type DebugEventEmitter = {
@@ -222,6 +224,23 @@ export async function processAccountTx(
       if (resolveResult.outcome === 'error' && resolveResult.hashlock) ret.timedOutHashlock = resolveResult.hashlock;
       return ret;
     }
+
+    case 'pull_lock':
+      return await handlePullLock(
+        accountMachine,
+        accountTx as Extract<AccountTx, { type: 'pull_lock' }>,
+        byLeft,
+        currentHeight,
+        currentTimestamp,
+      );
+
+    case 'pull_resolve':
+      return await handlePullResolve(
+        accountMachine,
+        accountTx as Extract<AccountTx, { type: 'pull_resolve' }>,
+        byLeft,
+        currentHeight,
+      );
 
     // === SWAP HANDLERS ===
     case 'swap_offer':

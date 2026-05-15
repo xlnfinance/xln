@@ -14,6 +14,7 @@ interface IDeltaTransformer {
   struct Batch {
     Payment[] payment;
     Swap[] swap;
+    Pull[] pull;
   }
 
   struct Payment {
@@ -29,6 +30,14 @@ interface IDeltaTransformer {
     uint addAmount;
     uint subDeltaIndex;
     uint subAmount;
+  }
+
+  struct Pull {
+    uint deltaIndex;
+    int amount;
+    uint revealedUntilBlock;
+    bytes32 fullHash;
+    bytes32 partialRoot;
   }
 
   // ========== CORE FUNCTIONS ==========

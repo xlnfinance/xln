@@ -72,6 +72,8 @@ export type E2EHubHealth = {
   name?: string;
   online?: boolean;
   runtimeId?: string;
+  apiUrl?: string;
+  apiPort?: number;
   activeClients?: string[];
 };
 

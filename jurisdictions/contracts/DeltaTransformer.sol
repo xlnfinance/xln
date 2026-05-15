@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
 import "./Token.sol";
+import "./HashLadder.sol";
 
 import "./ECDSA.sol";
 /* 
@@ -29,6 +30,7 @@ contract DeltaTransformer {
   struct Batch {
     Payment[] payment;
     Swap[] swap;
+    Pull[] pull;
   }
 
   // actual subcontract structs
@@ -49,6 +51,20 @@ contract DeltaTransformer {
     uint subAmount;
   }
 
+  struct Pull {
+    uint deltaIndex;
+    int amount;
+    uint revealedUntilBlock;
+    bytes32 fullHash;
+    bytes32 partialRoot;
+  }
+
+  struct Arguments {
+    uint16[] fillRatios;
+    bytes32[] secrets;
+    bytes[] pulls;
+  }
+
   function encodeBatch (Batch memory b) public pure returns (bytes memory) {
     return abi.encode(b);
   }
@@ -62,28 +78,39 @@ contract DeltaTransformer {
     bytes calldata leftArguments,
     bytes calldata rightArguments
   ) public view returns (int[] memory) {
+    return _applyBatch(deltas, encodedBatch, leftArguments, rightArguments, block.number, block.number);
+  }
 
+  function supportsArgumentBlocks() external pure returns (bool) {
+    return true;
+  }
+
+  function applyBatchWithArgumentBlocks(
+    int[] memory deltas,
+    bytes calldata encodedBatch,
+    bytes calldata leftArguments,
+    bytes calldata rightArguments,
+    uint leftArgumentsBlock,
+    uint rightArgumentsBlock
+  ) external view returns (int[] memory) {
+    return _applyBatch(deltas, encodedBatch, leftArguments, rightArguments, leftArgumentsBlock, rightArgumentsBlock);
+  }
+
+  function _applyBatch(
+    int[] memory deltas,
+    bytes calldata encodedBatch,
+    bytes calldata leftArguments,
+    bytes calldata rightArguments,
+    uint leftArgumentsBlock,
+    uint rightArgumentsBlock
+  ) private view returns (int[] memory) {
     Batch memory decodedBatch = abi.decode(encodedBatch, (Batch));
 
-    uint16[] memory lFillRatios;
-    uint16[] memory rFillRatios;
-    bytes32[] memory lSecrets;
-    bytes32[] memory rSecrets;
-    if (leftArguments.length > 0) {
-      (lFillRatios, lSecrets) = abi.decode(leftArguments, (uint16[], bytes32[]));
-    } else {
-      lFillRatios = new uint16[](0);
-      lSecrets = new bytes32[](0);
-    }
-    if (rightArguments.length > 0) {
-      (rFillRatios, rSecrets) = abi.decode(rightArguments, (uint16[], bytes32[]));
-    } else {
-      rFillRatios = new uint16[](0);
-      rSecrets = new bytes32[](0);
-    }
+    Arguments memory left = _decodeArguments(leftArguments);
+    Arguments memory right = _decodeArguments(rightArguments);
     
     for (uint i = 0; i < decodedBatch.payment.length; i++) {
-      applyPayment(deltas, decodedBatch.payment[i], lSecrets, rSecrets);
+      applyPayment(deltas, decodedBatch.payment[i], left.secrets, right.secrets);
     }
 
     uint leftSwaps = 0;
@@ -95,10 +122,10 @@ contract DeltaTransformer {
       // Left-owned swap -> use right arguments; Right-owned swap -> use left arguments.
       uint16 fillRatio = 0;
       if (swap.ownerIsLeft) {
-        if (rightSwaps < rFillRatios.length) fillRatio = rFillRatios[rightSwaps];
+        if (rightSwaps < right.fillRatios.length) fillRatio = right.fillRatios[rightSwaps];
         rightSwaps++;
       } else {
-        if (leftSwaps < lFillRatios.length) fillRatio = lFillRatios[leftSwaps];
+        if (leftSwaps < left.fillRatios.length) fillRatio = left.fillRatios[leftSwaps];
         leftSwaps++;
       }
 
@@ -106,7 +133,35 @@ contract DeltaTransformer {
       //logDeltas("Deltas after swap", deltas);
     }
 
+    uint leftPulls = 0;
+    uint rightPulls = 0;
+    for (uint i = 0; i < decodedBatch.pull.length; i++) {
+      Pull memory pull = decodedBatch.pull[i];
+
+      // Pull args must come from the beneficiary side:
+      // positive amount credits left; negative amount credits right.
+      if (pull.amount >= 0) {
+        bytes memory pullArg = leftPulls < left.pulls.length ? left.pulls[leftPulls] : bytes("");
+        applyPull(deltas, pull, pullArg, leftArgumentsBlock);
+        leftPulls++;
+      } else {
+        bytes memory pullArg = rightPulls < right.pulls.length ? right.pulls[rightPulls] : bytes("");
+        applyPull(deltas, pull, pullArg, rightArgumentsBlock);
+        rightPulls++;
+      }
+    }
+
     return deltas;
+  }
+
+  function _decodeArguments(bytes calldata encoded) private pure returns (Arguments memory args) {
+    if (encoded.length == 0) {
+      args.fillRatios = new uint16[](0);
+      args.secrets = new bytes32[](0);
+      args.pulls = new bytes[](0);
+      return args;
+    }
+    return abi.decode(encoded, (Arguments));
   }
 
   function applyPayment(int[] memory deltas, Payment memory payment, bytes32[] memory lSecrets, bytes32[] memory rSecrets) private view {
@@ -140,6 +195,59 @@ contract DeltaTransformer {
     if (swap.addDeltaIndex >= deltas.length || swap.subDeltaIndex >= deltas.length) revert InvalidDeltaIndex();
     deltas[swap.addDeltaIndex] += int(swap.addAmount * fillRatio / MAX_FILL_RATIO);
     deltas[swap.subDeltaIndex] -= int(swap.subAmount * fillRatio / MAX_FILL_RATIO);
+  }
+
+  function applyPull(
+    int[] memory deltas,
+    Pull memory pull,
+    bytes memory pullArg,
+    uint argumentsBlock
+  ) private pure {
+    if (pull.deltaIndex >= deltas.length) revert InvalidDeltaIndex();
+
+    uint16 fillRatio = verifiedPullFillRatio(pull, pullArg, argumentsBlock);
+    if (fillRatio == 0) return;
+
+    uint absAmount = pull.amount >= 0 ? uint(pull.amount) : uint(-pull.amount);
+    int applied = int(absAmount * fillRatio / MAX_FILL_RATIO);
+    if (pull.amount >= 0) {
+      deltas[pull.deltaIndex] += applied;
+    } else {
+      deltas[pull.deltaIndex] -= applied;
+    }
+  }
+
+  function verifiedPullFillRatio(
+    Pull memory pull,
+    bytes memory pullArg,
+    uint argumentsBlock
+  ) private pure returns (uint16) {
+    if (pullArg.length == 0) return 0;
+    if (argumentsBlock > pull.revealedUntilBlock) return 0;
+
+    if (pullArg.length == 32) {
+      bytes32 fullSecret;
+      assembly ("memory-safe") {
+        fullSecret := mload(add(pullArg, 0x20))
+      }
+      if (!HashLadder.verifyFull(pull.fullHash, fullSecret)) return 0;
+      return type(uint16).max;
+    }
+
+    if (pullArg.length != 130) return 0;
+    uint16 fillRatio = (uint16(uint8(pullArg[0])) << 8) | uint16(uint8(pullArg[1]));
+    if (fillRatio == 0 || fillRatio == type(uint16).max) return 0;
+
+    bytes32[4] memory reveals;
+    assembly ("memory-safe") {
+      let data := add(pullArg, 0x22)
+      mstore(reveals, mload(data))
+      mstore(add(reveals, 0x20), mload(add(data, 0x20)))
+      mstore(add(reveals, 0x40), mload(add(data, 0x40)))
+      mstore(add(reveals, 0x60), mload(add(data, 0x60)))
+    }
+    if (!HashLadder.verifyPartial(pull.partialRoot, fillRatio, reveals)) return 0;
+    return fillRatio;
   }
 
 

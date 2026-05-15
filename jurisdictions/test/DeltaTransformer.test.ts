@@ -76,8 +76,59 @@ function makeProofAccountMachine(swaps: Array<[string, SwapOffer]>): AccountMach
 }
 
 function encodeWrappedDisputeArguments(fillRatios: number[]): string {
-  const inner = ethers.AbiCoder.defaultAbiCoder().encode(["uint16[]", "bytes32[]"], [fillRatios, []]);
+  const inner = encodeTransformerArguments(fillRatios);
   return ethers.AbiCoder.defaultAbiCoder().encode(["bytes[]"], [[inner]]);
+}
+
+function encodeTransformerArguments(fillRatios: number[], secrets: string[] = [], pulls: string[] = []): string {
+  return ethers.AbiCoder.defaultAbiCoder().encode(
+    ["tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)"],
+    [{
+      fillRatios,
+      secrets,
+      pulls,
+    }],
+  );
+}
+
+function secret(label: string): string {
+  return ethers.keccak256(ethers.toUtf8Bytes(label));
+}
+
+function hashNode(node: string): string {
+  return ethers.keccak256(node);
+}
+
+function hashSteps(node: string, steps: number): string {
+  let current = node;
+  for (let i = 0; i < steps; i++) current = hashNode(current);
+  return current;
+}
+
+function nibbles(fillRatio: number): number[] {
+  return [
+    (fillRatio >> 12) & 0x0f,
+    (fillRatio >> 8) & 0x0f,
+    (fillRatio >> 4) & 0x0f,
+    fillRatio & 0x0f,
+  ];
+}
+
+function buildPullProof(label: string, fillRatio: number) {
+  const fullSecret = secret(`${label}:full`);
+  const bases = [0, 1, 2, 3].map((index) => secret(`${label}:n${index}`));
+  const roots = bases.map((base) => hashSteps(base, 15));
+  const reveals = nibbles(fillRatio).map((digit, index) => hashSteps(bases[index], 15 - digit));
+  return {
+    fullSecret,
+    fullHash: hashNode(fullSecret),
+    partialRoot: ethers.keccak256(ethers.solidityPacked(["bytes32", "bytes32", "bytes32", "bytes32"], roots)),
+    reveals,
+  };
+}
+
+function encodePartialPullBinary(fillRatio: number, reveals: string[]): string {
+  return `0x${fillRatio.toString(16).padStart(4, "0")}${reveals.map((reveal) => reveal.slice(2)).join("")}`;
 }
 
 function unwrapWrappedDisputeArguments(wrapped: string): string {
@@ -125,10 +176,10 @@ describe("DeltaTransformer", function () {
           subAmount: 2_000,
         },
       ],
+      pull: [],
     };
     const encodedBatch = await transformer.encodeBatch(batch);
-    const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-    const rightArguments = abiCoder.encode(["uint16[]", "bytes32[]"], [[32767], []]);
+    const rightArguments = encodeTransformerArguments([32767]);
 
     const result = await transformer.applyBatch.staticCall([0, 0], encodedBatch, "0x", rightArguments);
 
@@ -150,14 +201,51 @@ describe("DeltaTransformer", function () {
           subAmount: 1,
         },
       ],
+      pull: [],
     };
     const encodedBatch = await transformer.encodeBatch(batch);
-    const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-    const rightArguments = abiCoder.encode(["uint16[]", "bytes32[]"], [[65535], []]);
+    const rightArguments = encodeTransformerArguments([65535]);
 
     await expect(
       transformer.applyBatch.staticCall([0], encodedBatch, "0x", rightArguments),
     ).to.be.reverted;
+  });
+
+  it("applies compact pull binaries for partial and full hash-ladder fills", async function () {
+    const { transformer } = await loadFixture(deployFixture);
+    const partialRatio = 0x1234;
+    const partialProof = buildPullProof("delta-partial", partialRatio);
+    const fullProof = buildPullProof("delta-full", 0xffff);
+    const deadline = (await ethers.provider.getBlockNumber()) + 10;
+
+    const batch = {
+      payment: [],
+      swap: [],
+      pull: [
+        {
+          deltaIndex: 0,
+          amount: MAX_FILL_RATIO,
+          revealedUntilBlock: deadline,
+          fullHash: partialProof.fullHash,
+          partialRoot: partialProof.partialRoot,
+        },
+        {
+          deltaIndex: 1,
+          amount: -1234,
+          revealedUntilBlock: deadline,
+          fullHash: fullProof.fullHash,
+          partialRoot: fullProof.partialRoot,
+        },
+      ],
+    };
+    const encodedBatch = await transformer.encodeBatch(batch);
+    const leftArguments = encodeTransformerArguments([], [], [encodePartialPullBinary(partialRatio, partialProof.reveals)]);
+    const rightArguments = encodeTransformerArguments([], [], [fullProof.fullSecret]);
+
+    const result = await transformer.applyBatch.staticCall([0, 0], encodedBatch, leftArguments, rightArguments);
+
+    expect(result[0]).to.equal(BigInt(partialRatio));
+    expect(result[1]).to.equal(-1234n);
   });
 
   it("stores the first secret reveal block and rejects later overwrites", async function () {
@@ -210,14 +298,14 @@ describe("DeltaTransformer", function () {
           subAmount: 8000,
         },
       ],
+      pull: [],
     };
 
     const encodedBatch = await transformer.encodeBatch(batch);
-    const abiCoder = ethers.AbiCoder.defaultAbiCoder();
     const leftFillRatios = [16384, 8192];
     const rightFillRatios = [65535, 32768];
-    const leftArguments = abiCoder.encode(["uint16[]", "bytes32[]"], [leftFillRatios, []]);
-    const rightArguments = abiCoder.encode(["uint16[]", "bytes32[]"], [rightFillRatios, []]);
+    const leftArguments = encodeTransformerArguments(leftFillRatios);
+    const rightArguments = encodeTransformerArguments(rightFillRatios);
 
     const result = await transformer.applyBatch.staticCall([0, 0], encodedBatch, leftArguments, rightArguments);
 

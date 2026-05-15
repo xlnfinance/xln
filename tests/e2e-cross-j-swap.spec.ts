@@ -57,8 +57,7 @@ function getPrimaryHubApiBaseUrl(health: E2EHealthResponse, primaryHubId: string
   if (hub?.apiUrl) return String(hub.apiUrl).replace(/\/$/, '');
   const apiPort = Number(hub?.apiPort);
   expect(Number.isFinite(apiPort) && apiPort > 0, `primary hub API port missing: ${JSON.stringify(hub || null)}`).toBe(true);
-  const base = new URL(API_BASE_URL);
-  return `${base.protocol}//${base.hostname}:${apiPort}`;
+  return `http://127.0.0.1:${apiPort}`;
 }
 
 function getPrimaryHubName(health: E2EHealthResponse, primaryHubId: string): string {
@@ -632,8 +631,9 @@ async function readCrossState(
 ): Promise<{
   offers: number;
   routes: number;
-  relayRoutes: number;
-  locks: number;
+  pulls: number;
+  settledRoutes: number;
+  claimedRoutes: number;
   replicaFound: boolean;
   accountFound: boolean;
   accountKeys: string[];
@@ -678,15 +678,19 @@ async function readCrossState(
     for (const offer of account?.swapOffers?.values?.() || []) {
       if (offer?.crossJurisdiction) offers += 1;
     }
-    let relayRoutes = 0;
-    for (const route of state?.htlcRoutes?.values?.() || []) {
-      if (route?.crossJurisdictionRelay) relayRoutes += 1;
+    let settledRoutes = 0;
+    let claimedRoutes = 0;
+    for (const route of state?.crossJurisdictionSwaps?.values?.() || []) {
+      const status = String(route?.status || '');
+      if (status === 'settled') settledRoutes += 1;
+      if (status === 'source_claimed' || status === 'target_claimed' || status === 'settled') claimedRoutes += 1;
     }
     return {
       offers,
       routes: Number(state?.crossJurisdictionSwaps?.size || 0),
-      relayRoutes,
-      locks: Number(account?.locks?.size || 0),
+      pulls: Number(account?.pulls?.size || 0),
+      settledRoutes,
+      claimedRoutes,
       replicaFound: Boolean(replica),
       accountFound: Boolean(account),
       accountKeys: Array.from(state?.accounts?.keys?.() || []).map((key: unknown) => String(key)),
@@ -695,23 +699,33 @@ async function readCrossState(
   }, { identity, hubId });
 }
 
-async function waitForCrossLocks(
+async function waitForCrossPullFlow(
   page: Page,
   source: RuntimeIdentity,
   target: RuntimeIdentity,
   sourceHubId: string,
   targetHubId: string,
-  minimumSourceRelayRoutes: number,
-  minimumTargetLocks: number,
 ): Promise<void> {
   await expect.poll(
     async () => {
       const sourceState = await readCrossState(page, source, sourceHubId);
       const targetState = await readCrossState(page, target, targetHubId);
       return {
-        ok: sourceState.relayRoutes >= minimumSourceRelayRoutes && targetState.locks >= minimumTargetLocks,
-        sourceRelayRoutes: sourceState.relayRoutes,
-        targetLocks: targetState.locks,
+        ok: (
+          (sourceState.routes > 0 && targetState.routes > 0) &&
+          (
+            sourceState.pulls > 0 ||
+            targetState.pulls > 0 ||
+            sourceState.claimedRoutes > 0 ||
+            targetState.claimedRoutes > 0
+          )
+        ),
+        sourceRoutes: sourceState.routes,
+        targetRoutes: targetState.routes,
+        sourcePulls: sourceState.pulls,
+        targetPulls: targetState.pulls,
+        sourceClaimed: sourceState.claimedRoutes,
+        targetClaimed: targetState.claimedRoutes,
         sourceReplicaFound: sourceState.replicaFound,
         sourceAccountFound: sourceState.accountFound,
         targetReplicaFound: targetState.replicaFound,
@@ -723,7 +737,7 @@ async function waitForCrossLocks(
     {
       timeout: 60_000,
       intervals: [250, 500, 1000],
-      message: 'cross-j match must materialize source relay routes and target locks',
+      message: 'cross-j match must materialize prepared pull routes or settled pull claims',
     },
   ).toMatchObject({ ok: true });
 }
@@ -734,22 +748,72 @@ async function waitForCrossOffersCleared(
   hubId: string,
   label: string,
 ): Promise<void> {
-  await expect.poll(
-    async () => {
-      const state = await readCrossState(page, identity, hubId);
-      return {
-        offers: state.offers,
-        replicaFound: state.replicaFound,
-        accountFound: state.accountFound,
-        accountKeys: state.accountKeys,
-      };
-    },
-    {
-      timeout: 45_000,
-      intervals: [250, 500, 1000],
-      message: `${label} cross order should resolve/cancel after match`,
-    },
-  ).toMatchObject({ offers: 0 });
+  try {
+    await expect.poll(
+      async () => {
+        const state = await readCrossState(page, identity, hubId);
+        return {
+          offers: state.offers,
+          replicaFound: state.replicaFound,
+          accountFound: state.accountFound,
+          accountKeys: state.accountKeys,
+        };
+      },
+      {
+        timeout: 45_000,
+        intervals: [250, 500, 1000],
+        message: `${label} cross order should resolve/cancel after match`,
+      },
+    ).toMatchObject({ offers: 0 });
+  } catch (error) {
+    const debug = await page.evaluate(({ identity, hubId }) => {
+      const env = (window as CrossRuntimeWindow).isolatedEnv;
+      const out: any[] = [];
+      for (const [key, replica] of env?.eReplicas?.entries?.() || []) {
+        const state = replica?.state;
+        const entityId = String(state?.entityId || replica?.entityId || '').toLowerCase();
+        if (
+          entityId !== String(identity.entityId).toLowerCase() &&
+          !Array.from(state?.accounts?.keys?.() || []).some((accountId) => String(accountId).toLowerCase() === String(hubId).toLowerCase())
+        ) {
+          continue;
+        }
+        out.push({
+          key: String(key),
+          entityId,
+          signerId: String(replica?.signerId || ''),
+          profileName: String(state?.profile?.name || ''),
+          jurisdiction: String(state?.config?.jurisdiction?.name || ''),
+          messages: Array.from(state?.messages || []).slice(-12).map(String),
+          routes: Array.from(state?.crossJurisdictionSwaps?.entries?.() || []).map(([routeId, route]: [string, any]) => ({
+            routeId,
+            status: String(route?.status || ''),
+            source: String(route?.source?.entityId || '').slice(0, 10),
+            sourceHub: String(route?.source?.counterpartyEntityId || '').slice(0, 10),
+            targetHub: String(route?.target?.entityId || '').slice(0, 10),
+            target: String(route?.target?.counterpartyEntityId || '').slice(0, 10),
+            sourcePull: Boolean(route?.sourcePull),
+            targetPull: Boolean(route?.targetPull),
+          })),
+          accounts: Array.from(state?.accounts?.entries?.() || []).map(([accountId, account]: [string, any]) => ({
+            accountId,
+            currentHeight: Number(account?.currentHeight || 0),
+            mempool: Array.from(account?.mempool || []).map((tx: any) => String(tx?.type || '')),
+            pendingFrame: Array.from(account?.pendingFrame?.accountTxs || []).map((tx: any) => String(tx?.type || '')),
+            offers: Array.from(account?.swapOffers?.entries?.() || []).map(([offerId, offer]: [string, any]) => ({
+              offerId,
+              cross: Boolean(offer?.crossJurisdiction),
+              status: String(offer?.crossJurisdiction?.status || ''),
+            })),
+            pulls: Array.from(account?.pulls?.keys?.() || []),
+          })),
+        });
+      }
+      return out;
+    }, { identity, hubId });
+    console.log(`[E2E ${label} offer debug]`, JSON.stringify(debug, null, 2));
+    throw error;
+  }
 }
 
 async function readFirstCrossRouteId(page: Page, identity: RuntimeIdentity): Promise<string> {
@@ -786,9 +850,15 @@ async function triggerSourceDisputeArguments(
 ): Promise<void> {
   const routeId = await readFirstCrossRouteId(page, source);
   const abi = AbiCoder.defaultAbiCoder();
+  const partialBinary = `0x${(0x8000).toString(16).padStart(4, '0')}${[
+    `0x${'91'.repeat(32)}`,
+    `0x${'92'.repeat(32)}`,
+    `0x${'93'.repeat(32)}`,
+    `0x${'94'.repeat(32)}`,
+  ].map(node => node.slice(2)).join('')}`;
   const crossPullArgs = abi.encode(
-    ['tuple(uint16[] fillRatios, bytes32[] fullSecrets, bytes32[4][] reveals)'],
-    [{ fillRatios: [0x8000], fullSecrets: [], reveals: [] }],
+    ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
+    [{ fillRatios: [], secrets: [], pulls: [partialBinary] }],
   );
   const initialArguments = abi.encode(['bytes[]'], [[crossPullArgs]]);
   const suffix = routeId.replace(/[^a-fA-F0-9]/g, '').padEnd(64, '0').slice(0, 64);
@@ -908,8 +978,8 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       }));
 
       await Promise.all([
-        waitForCrossLocks(alicePage, alice, aliceRpc2, hubId, targetHubId, 16, 16),
-        waitForCrossLocks(bobPage, bobRpc2, bob, targetHubId, hubId, 16, 16),
+        waitForCrossPullFlow(alicePage, alice, aliceRpc2, hubId, targetHubId),
+        waitForCrossPullFlow(bobPage, bobRpc2, bob, targetHubId, hubId),
       ]);
 
       await Promise.all([
@@ -948,15 +1018,15 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
           const aliceState = await readCrossState(alicePage, alice, hubId);
           const bobState = await readCrossState(bobPage, bobRpc2, targetHubId);
           const value = {
-            aliceRelayRoutes: aliceState.relayRoutes,
-            bobRelayRoutes: bobState.relayRoutes,
+            aliceReady: aliceState.routes > 0 && (aliceState.pulls > 0 || aliceState.claimedRoutes > 0),
+            bobReady: bobState.routes > 0 && (bobState.pulls > 0 || bobState.claimedRoutes > 0),
           };
-          return value.aliceRelayRoutes > 16 && value.bobRelayRoutes > 16;
+          return value.aliceReady && value.bobReady;
         },
         {
           timeout: 60_000,
           intervals: [250, 500, 1000],
-          message: 'partial cross-j fill must add hashledger relay routes',
+          message: 'partial cross-j fill must use prepared pull routes',
         },
       ).toBe(true);
 

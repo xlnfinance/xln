@@ -28,12 +28,6 @@ contract CrossSwapPull {
     bytes32 partialRoot;
   }
 
-  struct PullArguments {
-    uint16[] fillRatios;
-    bytes32[] fullSecrets;
-    bytes32[4][] reveals;
-  }
-
   function encodeBatch(Batch memory b) public pure returns (bytes memory) {
     return abi.encode(b);
   }
@@ -79,18 +73,20 @@ contract CrossSwapPull {
     uint rightArgumentsBlock
   ) private pure returns (int[] memory) {
     Batch memory decodedBatch = abi.decode(encodedBatch, (Batch));
-    PullArguments memory left = _decodeArguments(leftArguments);
-    PullArguments memory right = _decodeArguments(rightArguments);
+    bytes[] memory left = _decodeArguments(leftArguments);
+    bytes[] memory right = _decodeArguments(rightArguments);
 
     uint leftPulls = 0;
     uint rightPulls = 0;
     for (uint i = 0; i < decodedBatch.pulls.length; i++) {
       Pull memory pull = decodedBatch.pulls[i];
       if (pull.ownerIsLeft) {
-        _applyPull(deltas, pull, right, rightPulls, rightArgumentsBlock);
+        bytes memory pullArg = rightPulls < right.length ? right[rightPulls] : bytes("");
+        _applyPull(deltas, pull, pullArg, rightArgumentsBlock);
         rightPulls++;
       } else {
-        _applyPull(deltas, pull, left, leftPulls, leftArgumentsBlock);
+        bytes memory pullArg = leftPulls < left.length ? left[leftPulls] : bytes("");
+        _applyPull(deltas, pull, pullArg, leftArgumentsBlock);
         leftPulls++;
       }
     }
@@ -98,27 +94,24 @@ contract CrossSwapPull {
     return deltas;
   }
 
-  function _decodeArguments(bytes calldata encoded) private pure returns (PullArguments memory args) {
+  function _decodeArguments(bytes calldata encoded) private pure returns (bytes[] memory args) {
     if (encoded.length > 0) {
-      return abi.decode(encoded, (PullArguments));
+      return abi.decode(encoded, (bytes[]));
     }
-    args.fillRatios = new uint16[](0);
-    args.fullSecrets = new bytes32[](0);
-    args.reveals = new bytes32[4][](0);
+    return new bytes[](0);
   }
 
   function _applyPull(
     int[] memory deltas,
     Pull memory pull,
-    PullArguments memory args,
-    uint argIndex,
+    bytes memory pullArg,
     uint argumentsBlock
   ) private pure {
     if (pull.addDeltaIndex >= deltas.length || pull.subDeltaIndex >= deltas.length) {
       revert InvalidDeltaIndex();
     }
 
-    uint16 fillRatio = _verifiedFillRatio(pull, args, argIndex, argumentsBlock);
+    uint16 fillRatio = _verifiedFillRatio(pull, pullArg, argumentsBlock);
     if (fillRatio == 0) return;
 
     uint amount = pull.amount * fillRatio / MAX_FILL_RATIO;
@@ -128,25 +121,33 @@ contract CrossSwapPull {
 
   function _verifiedFillRatio(
     Pull memory pull,
-    PullArguments memory args,
-    uint argIndex,
+    bytes memory pullArg,
     uint argumentsBlock
   ) private pure returns (uint16) {
-    if (argIndex >= args.fillRatios.length) return 0;
-
-    uint16 fillRatio = args.fillRatios[argIndex];
-    if (fillRatio == 0) return 0;
+    if (pullArg.length == 0) return 0;
     if (argumentsBlock > pull.revealedUntilBlock) return 0;
 
-    if (fillRatio == type(uint16).max) {
-      if (argIndex >= args.fullSecrets.length) return 0;
-      bytes32 fullSecret = args.fullSecrets[argIndex];
+    if (pullArg.length == 32) {
+      bytes32 fullSecret;
+      assembly ("memory-safe") {
+        fullSecret := mload(add(pullArg, 0x20))
+      }
       if (!HashLadder.verifyFull(pull.fullHash, fullSecret)) return 0;
-      return fillRatio;
+      return type(uint16).max;
     }
 
-    if (argIndex >= args.reveals.length) return 0;
-    bytes32[4] memory reveals = args.reveals[argIndex];
+    if (pullArg.length != 130) return 0;
+    uint16 fillRatio = (uint16(uint8(pullArg[0])) << 8) | uint16(uint8(pullArg[1]));
+    if (fillRatio == 0 || fillRatio == type(uint16).max) return 0;
+
+    bytes32[4] memory reveals;
+    assembly ("memory-safe") {
+      let data := add(pullArg, 0x22)
+      mstore(reveals, mload(data))
+      mstore(add(reveals, 0x20), mload(add(data, 0x20)))
+      mstore(add(reveals, 0x40), mload(add(data, 0x40)))
+      mstore(add(reveals, 0x60), mload(add(data, 0x60)))
+    }
     if (!HashLadder.verifyPartial(pull.partialRoot, fillRatio, reveals)) return 0;
     return fillRatio;
   }

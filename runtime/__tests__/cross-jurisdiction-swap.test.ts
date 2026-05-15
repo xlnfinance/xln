@@ -5,16 +5,20 @@ import { applyEntityTx } from '../entity-tx/apply';
 import {
   createEmptyEnv,
   submitCrossJurisdictionSwap,
-  submitCrossJurisdictionSourceLock,
-  submitCrossJurisdictionTargetLock,
 } from '../runtime';
 import { hashHtlcSecret } from '../htlc-utils';
 import type { AccountMachine, ConsensusConfig, EntityReplica, EntityState, Env, JurisdictionConfig } from '../types';
 import { createDefaultDelta } from '../validation-utils';
+import {
+  CROSS_J_REVEAL_SAFETY_BLOCKS,
+  buildPreparedCrossJurisdictionRoute,
+} from '../cross-jurisdiction';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 const secret = (byte: string): string => `0x${byte.repeat(32)}`;
+const partialBinary = (ratio: number): string =>
+  `0x${ratio.toString(16).padStart(4, '0')}${[secret('a1'), secret('a2'), secret('a3'), secret('a4')].map(node => node.slice(2)).join('')}`;
 
 const makeJurisdiction = (name: string, chainId: number, depByte: string, epByte: string): JurisdictionConfig => ({
   name,
@@ -148,7 +152,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(result.newState.lockBook.get(`0x${'55'.repeat(32)}`)?.direction).toBe('outgoing');
   });
 
-  test('submitCrossJurisdictionSwap queues a normal swap offer and keeps source lock behind a separate step', async () => {
+  test('submitCrossJurisdictionSwap queues hub prepare, then prepare builds symmetric pull commitments', async () => {
     const env = createEmptyEnv('cross-submit');
     env.scenarioMode = true;
     env.timestamp = 10_000;
@@ -183,7 +187,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     addReplica(env, makeState(targetHub, targetHubSigner, base, targetUser), targetHubSigner);
     addReplica(env, makeState(targetUser, targetUserSigner, base, targetHub), targetUserSigner);
 
-    const swapSecret = secret('66');
     const result = await submitCrossJurisdictionSwap(env, {
       orderId: 'cross-test-1',
       sourceUserEntityId: sourceUser,
@@ -206,66 +209,29 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(result.secret).toBeUndefined();
     expect(result.route.source.jurisdiction).toBe('Ethereum');
     expect(result.route.target.jurisdiction).toBe('Base');
-    expect(queued).toHaveLength(2);
+    expect(queued).toHaveLength(1);
     expect(queued[0]?.entityId).toBe(sourceUser);
-    expect(queued[0]?.entityTxs?.[0]?.type).toBe('placeSwapOffer');
-    expect(queued[1]?.entityId).toBe(targetUser);
-    expect(queued[1]?.entityTxs?.[0]?.type).toBe('registerCrossJurisdictionSwap');
+    expect(queued[0]?.entityTxs?.[0]?.type).toBe('requestCrossJurisdictionSwap');
 
-    const offerData = queued[0]?.entityTxs?.[0]?.data as any;
-    expect(offerData.counterpartyEntityId).toBe(sourceHub);
-    expect(offerData.crossJurisdiction?.orderId).toBe('cross-test-1');
-    expect(offerData.crossJurisdiction?.hashlock).toBeUndefined();
-    expect((queued[1]?.entityTxs?.[0]?.data as any).route.orderId).toBe('cross-test-1');
-
-    const preparedHashlock = hashHtlcSecret(swapSecret);
-    const preparedRoute = {
-      ...result.route,
-      hashlock: preparedHashlock,
-      source: { ...result.route.source, lockId: secret('51') },
-      target: { ...result.route.target, lockId: secret('52') },
-    };
-
-    env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
-    env.runtimeInput = env.runtimeMempool;
-    await submitCrossJurisdictionSourceLock(env, {
-      route: preparedRoute,
-      sourceUserSignerId: sourceUserSigner,
-      fillRatio: 32_768,
-    });
-    const sourceQueued = env.runtimeMempool?.entityInputs ?? [];
-    expect(sourceQueued).toHaveLength(1);
-    expect(sourceQueued[0]?.entityId).toBe(sourceUser);
-    expect(sourceQueued[0]?.entityTxs?.[0]?.type).toBe('hashlockPayment');
-    const sourceData = sourceQueued[0]?.entityTxs?.[0]?.data as any;
-    expect(sourceData.targetEntityId).toBe(sourceHub);
-    expect(sourceData.hashlock).toBe(preparedHashlock);
-    expect(sourceData.amount).toBe(50n);
-    expect(sourceData.crossJurisdictionRelay?.routeId).toBe('cross-test-1');
-    expect(sourceData.crossJurisdictionRelay?.fillRatio).toBe(32_768);
-    expect(sourceData.crossJurisdictionRelay?.sourceAmount).toBe(50n);
-    expect(sourceData.crossJurisdictionRelay?.targetAmount).toBe(45n);
-    expect(sourceData.crossJurisdictionRelay?.targetEntityId).toBe(targetUser);
-    expect(sourceData.crossJurisdictionRelay?.targetCounterpartyEntityId).toBe(targetHub);
-    expect(sourceData.crossJurisdictionRelay?.targetLockId).toBe(preparedRoute.target.lockId);
-
-    env.runtimeMempool = { runtimeTxs: [], entityInputs: [] };
-    env.runtimeInput = env.runtimeMempool;
-    await submitCrossJurisdictionTargetLock(env, {
-      route: preparedRoute,
-      targetHubSignerId: targetHubSigner,
-      fillRatio: 32_768,
-    });
-    const targetQueued = env.runtimeMempool?.entityInputs ?? [];
-    expect(targetQueued).toHaveLength(1);
-    expect(targetQueued[0]?.entityId).toBe(targetHub);
-    expect(targetQueued[0]?.entityTxs?.[0]?.type).toBe('hashlockPayment');
-    const targetData = targetQueued[0]?.entityTxs?.[0]?.data as any;
-    expect(targetData.targetEntityId).toBe(targetUser);
-    expect(targetData.hashlock).toBe(preparedHashlock);
-    expect(targetData.amount).toBe(45n);
-    expect(targetData.revealBeforeHeight).toBeGreaterThan(sourceData.revealBeforeHeight);
-    expect(targetData.timelock).toBeGreaterThan(sourceData.timelock);
+    const sourceUserState = (env.eReplicas.get(`${sourceUser}:${sourceUserSigner}`) as EntityReplica).state;
+    const requested = await applyEntityTx(env, sourceUserState, queued[0]!.entityTxs![0]!);
+    expect(requested.outputs).toHaveLength(1);
+    expect(requested.outputs[0]?.entityId).toBe(sourceHub);
+    expect(requested.outputs[0]?.entityTxs?.[0]?.type).toBe('prepareCrossJurisdictionSwap');
+    const sourceHubState = (env.eReplicas.get(`${sourceHub}:${sourceHubSigner}`) as EntityReplica).state;
+    const prepared = await applyEntityTx(env, sourceHubState, requested.outputs[0]!.entityTxs![0]!);
+    expect(prepared.outputs).toHaveLength(3);
+    const targetHubOutput = prepared.outputs.find(output => output.entityId === targetHub);
+    const targetUserOutput = prepared.outputs.find(output => output.entityId === targetUser);
+    const sourceUserOutput = prepared.outputs.find(output => output.entityId === sourceUser);
+    expect(targetHubOutput?.entityTxs?.map(tx => tx.type)).toEqual(['registerCrossJurisdictionSwap', 'pullLock']);
+    expect(targetUserOutput?.entityTxs?.[0]?.type).toBe('registerCrossJurisdictionSwap');
+    expect(sourceUserOutput?.entityTxs?.[0]?.type).toBe('commitCrossJurisdictionSwap');
+    const preparedRoute = (sourceUserOutput?.entityTxs?.[0]?.data as any).route;
+    expect(preparedRoute.sourcePull.fullHash).toBe(preparedRoute.targetPull.fullHash);
+    expect(preparedRoute.sourcePull.partialRoot).toBe(preparedRoute.targetPull.partialRoot);
+    expect(preparedRoute.targetPull.revealedUntilBlock - preparedRoute.sourcePull.revealedUntilBlock)
+      .toBeGreaterThanOrEqual(CROSS_J_REVEAL_SAFETY_BLOCKS);
   });
 
   test('submitCrossJurisdictionSwap rejects missing target receiving account', async () => {
@@ -354,7 +320,10 @@ describe('cross-jurisdiction hashledger swap', () => {
     });
 
     const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-    const paymentArgs = abiCoder.encode(['uint16[]', 'bytes32[]'], [[], [revealedSecret]]);
+    const paymentArgs = abiCoder.encode(
+      ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
+      [{ fillRatios: [], secrets: [revealedSecret], pulls: [] }],
+    );
     const initialArguments = abiCoder.encode(['bytes[]'], [[paymentArgs]]);
     const result = await applyEntityTx(env, state, {
       type: 'j_event',
@@ -401,7 +370,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const targetUser = entity('34');
     const signer = addr('61');
     const state = makeState(sourceUser, signer, eth, sourceHub);
-    const route = {
+    const route = buildPreparedCrossJurisdictionRoute({
       orderId: 'cross-pull-dispute',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
@@ -422,13 +391,14 @@ describe('cross-jurisdiction hashledger swap', () => {
       status: 'resting' as const,
       createdAt: env.timestamp,
       updatedAt: env.timestamp,
-    };
+    }, { runtimeSeed: 'test-seed', sourceJHeight: 1, targetJHeight: 1, now: env.timestamp });
     state.crossJurisdictionSwaps?.set(route.orderId, route);
 
     const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+    const binary = partialBinary(0x1234);
     const crossPullArgs = abiCoder.encode(
-      ['tuple(uint16[] fillRatios, bytes32[] fullSecrets, bytes32[4][] reveals)'],
-      [{ fillRatios: [0x1234], fullSecrets: [], reveals: [] }],
+      ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
+      [{ fillRatios: [], secrets: [], pulls: [binary] }],
     );
     const initialArguments = abiCoder.encode(['bytes[]'], [[crossPullArgs]]);
     const result = await applyEntityTx(env, state, {
@@ -459,7 +429,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(result.outputs?.[0]?.entityTxs?.[0]?.type).toBe('crossJurisdictionSalvage');
     const data = result.outputs?.[0]?.entityTxs?.[0]?.data as any;
     expect(data.routeId).toBe(route.orderId);
-    expect(data.initialArguments).toBe(initialArguments);
+    expect(data.binary).toBe(binary);
     expect(data.fillRatio).toBe(0x1234);
   });
 
@@ -476,7 +446,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const targetUser = entity('44');
     const signer = addr('71');
     const state = makeState(targetUser, signer, base, targetHub);
-    const route = {
+    const route = buildPreparedCrossJurisdictionRoute({
       orderId: 'cross-salvage-action',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
@@ -497,15 +467,15 @@ describe('cross-jurisdiction hashledger swap', () => {
       status: 'resting' as const,
       createdAt: env.timestamp,
       updatedAt: env.timestamp,
-    };
+    }, { runtimeSeed: 'test-seed', sourceJHeight: 1, targetJHeight: 1, now: env.timestamp });
     state.crossJurisdictionSwaps?.set(route.orderId, route);
-    const initialArguments = ethers.AbiCoder.defaultAbiCoder().encode(['bytes[]'], [['0x1234']]);
+    const binary = partialBinary(0x1234);
 
     const result = await applyEntityTx(env, state, {
       type: 'crossJurisdictionSalvage',
       data: {
         routeId: route.orderId,
-        initialArguments,
+        binary,
         fillRatio: 0x1234,
         sourceEntityId: sourceUser,
         sourceCounterpartyEntityId: sourceHub,
@@ -515,10 +485,13 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     expect(result.outputs).toHaveLength(1);
     expect(result.outputs?.[0]?.entityId).toBe(targetUser);
-    expect(result.outputs?.[0]?.entityTxs).toHaveLength(2);
-    expect(result.outputs?.[0]?.entityTxs?.[0]?.type).toBe('disputeStart');
-    expect(result.outputs?.[0]?.entityTxs?.[1]?.type).toBe('j_broadcast');
+    expect(result.outputs?.[0]?.entityTxs).toHaveLength(3);
+    expect(result.outputs?.[0]?.entityTxs?.[0]?.type).toBe('resolvePull');
+    expect(result.outputs?.[0]?.entityTxs?.[1]?.type).toBe('disputeStart');
+    expect(result.outputs?.[0]?.entityTxs?.[2]?.type).toBe('j_broadcast');
     expect((result.outputs?.[0]?.entityTxs?.[0]?.data as any).counterpartyEntityId).toBe(targetHub);
-    expect((result.outputs?.[0]?.entityTxs?.[0]?.data as any).initialArguments).toBe(initialArguments);
+    expect((result.outputs?.[0]?.entityTxs?.[0]?.data as any).binary).toBe(binary);
+    expect((result.outputs?.[0]?.entityTxs?.[1]?.data as any).counterpartyEntityId).toBe(targetHub);
+    expect((result.outputs?.[0]?.entityTxs?.[1]?.data as any).initialArguments).toBeUndefined();
   });
 });

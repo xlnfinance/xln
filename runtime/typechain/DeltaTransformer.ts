@@ -65,17 +65,42 @@ export declare namespace DeltaTransformer {
     subAmount: bigint;
   };
 
+  export type PullStruct = {
+    deltaIndex: BigNumberish;
+    amount: BigNumberish;
+    revealedUntilBlock: BigNumberish;
+    fullHash: BytesLike;
+    partialRoot: BytesLike;
+  };
+
+  export type PullStructOutput = [
+    deltaIndex: bigint,
+    amount: bigint,
+    revealedUntilBlock: bigint,
+    fullHash: string,
+    partialRoot: string
+  ] & {
+    deltaIndex: bigint;
+    amount: bigint;
+    revealedUntilBlock: bigint;
+    fullHash: string;
+    partialRoot: string;
+  };
+
   export type BatchStruct = {
     payment: DeltaTransformer.PaymentStruct[];
     swap: DeltaTransformer.SwapStruct[];
+    pull: DeltaTransformer.PullStruct[];
   };
 
   export type BatchStructOutput = [
     payment: DeltaTransformer.PaymentStructOutput[],
-    swap: DeltaTransformer.SwapStructOutput[]
+    swap: DeltaTransformer.SwapStructOutput[],
+    pull: DeltaTransformer.PullStructOutput[]
   ] & {
     payment: DeltaTransformer.PaymentStructOutput[];
     swap: DeltaTransformer.SwapStructOutput[];
+    pull: DeltaTransformer.PullStructOutput[];
   };
 }
 
