@@ -12,6 +12,8 @@ import { createDefaultDelta } from '../validation-utils';
 import {
   CROSS_J_TARGET_REVEAL_SAFETY_MS,
   buildPreparedCrossJurisdictionRoute,
+  deriveCrossJurisdictionRouteHash,
+  withCanonicalCrossJurisdictionRouteHash,
 } from '../cross-jurisdiction';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -212,6 +214,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const queued = env.runtimeMempool?.entityInputs ?? [];
     expect(result.hashlock).toBeUndefined();
     expect(result.secret).toBeUndefined();
+    expect(result.route.routeHash).toMatch(/^0x[0-9a-f]{64}$/);
     expect(result.route.source.jurisdiction).toBe('Ethereum');
     expect(result.route.target.jurisdiction).toBe('Base');
     expect(queued).toHaveLength(1);
@@ -233,11 +236,53 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(targetUserOutput?.entityTxs?.[0]?.type).toBe('registerCrossJurisdictionSwap');
     expect(sourceUserOutput?.entityTxs?.[0]?.type).toBe('commitCrossJurisdictionSwap');
     const preparedRoute = (sourceUserOutput?.entityTxs?.[0]?.data as any).route;
+    expect(preparedRoute.routeHash).toBe(result.route.routeHash);
+    expect(deriveCrossJurisdictionRouteHash(preparedRoute)).toBe(preparedRoute.routeHash);
     expect(preparedRoute.sourcePull.fullHash).toBe(preparedRoute.targetPull.fullHash);
     expect(preparedRoute.sourcePull.partialRoot).toBe(preparedRoute.targetPull.partialRoot);
     expect(preparedRoute.hashLadderPrivateSeed).toBeUndefined();
     expect(preparedRoute.targetPull.revealedUntilTimestamp - preparedRoute.sourcePull.revealedUntilTimestamp)
       .toBeGreaterThanOrEqual(5_000 + CROSS_J_TARGET_REVEAL_SAFETY_MS);
+  });
+
+  test('canonical route hash binds cross-j economic terms and terminal states reject overwrite', async () => {
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('61');
+    const sourceHub = entity('62');
+    const targetHub = entity('63');
+    const targetUser = entity('64');
+    const signer = addr('65');
+    const baseRoute = withCanonicalCrossJurisdictionRouteHash({
+      orderId: 'route-hash-test',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 100n },
+      target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 2, amount: 90n },
+      priceTicks: 2500n,
+      status: 'resting',
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      expiresAt: 61_000,
+    });
+    const { routeHash: _routeHash, ...baseRouteWithoutHash } = baseRoute;
+    const changedTerms = withCanonicalCrossJurisdictionRouteHash({
+      ...baseRouteWithoutHash,
+      target: { ...baseRoute.target, amount: 91n },
+    });
+    expect(changedTerms.routeHash).not.toBe(baseRoute.routeHash);
+
+    const existingState = makeState(targetUser, signer, base, targetHub);
+    existingState.crossJurisdictionSwaps?.set(baseRoute.orderId, { ...baseRoute, status: 'settled' });
+    const env = createEmptyEnv('cross-terminal-overwrite');
+    env.timestamp = 10_000;
+    const result = await applyEntityTx(env, existingState, {
+      type: 'registerCrossJurisdictionSwap',
+      data: { route: { ...baseRoute, status: 'target_prepared' } },
+    } as any);
+
+    expect(result.newState.crossJurisdictionSwaps?.get(baseRoute.orderId)?.status).toBe('settled');
+    expect(result.newState.messages.some(message => message.includes('terminal state settled'))).toBe(true);
   });
 
   test('submitCrossJurisdictionSwap rejects missing target receiving account', async () => {

@@ -154,6 +154,7 @@ import {
   getDefaultCreditLimit,
 } from './account-utils';
 import { computeSwapPriceTicks, prepareSwapOrder, quantizeSwapOrder } from './orderbook';
+import { withCanonicalCrossJurisdictionRouteHash } from './cross-jurisdiction';
 import { hashHtlcSecret } from './htlc-utils';
 import { getRuntimeJurisdictionHeight } from './j-height';
 import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
@@ -5237,7 +5238,7 @@ export async function submitCrossJurisdictionSwap(
 
   const expiresInMs = Math.max(30_000, Math.floor(params.expiresInMs ?? 120_000));
 
-  const route: CrossJurisdictionSwapRoute = {
+  const route: CrossJurisdictionSwapRoute = withCanonicalCrossJurisdictionRouteHash({
     orderId,
     makerEntityId: params.sourceUserEntityId,
     hubEntityId: bookHubEntityId,
@@ -5261,7 +5262,7 @@ export async function submitCrossJurisdictionSwap(
     updatedAt: now,
     expiresAt: now + expiresInMs,
     ...(params.memo ? { memo: params.memo } : {}),
-  };
+  });
 
   enqueueRuntimeInput(env, {
     runtimeTxs: [],

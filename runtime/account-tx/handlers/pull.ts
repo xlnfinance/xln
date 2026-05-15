@@ -79,6 +79,8 @@ export async function handlePullLock(
     pullId,
     tokenId,
     amount,
+    claimedRatio: 0,
+    claimedAmount: 0n,
     revealedUntilTimestamp,
     fullHash,
     partialRoot,
@@ -112,10 +114,15 @@ export async function handlePullResolve(
   } catch (error) {
     return { success: false, error: `Invalid pull binary: ${error instanceof Error ? error.message : String(error)}`, events };
   }
-  const ratio = Math.max(0, Math.min(HASHLADDER_MAX_FILL_RATIO, Math.floor(Number(decoded.fillRatio) || 0)));
   const beneficiaryIsLeft = pull.amount > 0n;
   if (byLeft !== beneficiaryIsLeft) {
     return { success: false, error: `Only the pull beneficiary can resolve`, events };
+  }
+  const ratio = Math.max(0, Math.min(HASHLADDER_MAX_FILL_RATIO, Math.floor(Number(decoded.fillRatio) || 0)));
+  const previousRatio = Math.max(0, Math.min(HASHLADDER_MAX_FILL_RATIO, Math.floor(Number(pull.claimedRatio ?? 0) || 0)));
+  if (ratio <= previousRatio) {
+    events.push(`🪝 Pull resolve ignored: ${pullId.slice(0, 8)}... fill ${ratio}/65535 already claimed ${previousRatio}/65535`);
+    return { success: true, events, pullResolved: { pullId, fillRatio: previousRatio } };
   }
   if (ratio > 0 && currentTimestamp > pull.revealedUntilTimestamp) {
     return { success: false, error: `Pull reveal deadline expired`, events };
@@ -130,21 +137,34 @@ export async function handlePullResolve(
   delta.rightHold ??= 0n;
 
   const absAmount = absBigInt(pull.amount);
-  const applied = (absAmount * BigInt(ratio)) / BigInt(HASHLADDER_MAX_FILL_RATIO);
+  const previousClaimed = pull.claimedAmount ?? ((absAmount * BigInt(previousRatio)) / BigInt(HASHLADDER_MAX_FILL_RATIO));
+  const cumulativeClaimed = (absAmount * BigInt(ratio)) / BigInt(HASHLADDER_MAX_FILL_RATIO);
+  const applied = cumulativeClaimed - previousClaimed;
+  if (applied <= 0n) {
+    pull.claimedRatio = ratio;
+    pull.claimedAmount = previousClaimed;
+    events.push(`🪝 Pull resolve ignored: ${pullId.slice(0, 8)}... no incremental claim`);
+    return { success: true, events, pullResolved: { pullId, fillRatio: ratio } };
+  }
   const loserIsLeft = !beneficiaryIsLeft;
   if (loserIsLeft) {
-    if ((delta.leftHold || 0n) < absAmount) return { success: false, error: `Pull left hold underflow`, events };
-    delta.leftHold -= absAmount;
+    if ((delta.leftHold || 0n) < applied) return { success: false, error: `Pull left hold underflow`, events };
+    delta.leftHold -= applied;
   } else {
-    if ((delta.rightHold || 0n) < absAmount) return { success: false, error: `Pull right hold underflow`, events };
-    delta.rightHold -= absAmount;
+    if ((delta.rightHold || 0n) < applied) return { success: false, error: `Pull right hold underflow`, events };
+    delta.rightHold -= applied;
   }
 
   if (applied > 0n) {
     if (pull.amount > 0n) delta.offdelta += applied;
     else delta.offdelta -= applied;
   }
-  accountMachine.pulls?.delete(pullId);
+  if (ratio >= HASHLADDER_MAX_FILL_RATIO) {
+    accountMachine.pulls?.delete(pullId);
+  } else {
+    pull.claimedRatio = ratio;
+    pull.claimedAmount = cumulativeClaimed;
+  }
   events.push(`🪝 Pull resolved: ${pullId.slice(0, 8)}... fill ${ratio}/65535 amount ${applied}`);
   return { success: true, events, pullResolved: { pullId, fillRatio: ratio } };
 }

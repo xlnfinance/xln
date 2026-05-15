@@ -35,6 +35,7 @@ interface IDeltaTransformer {
   struct Pull {
     uint deltaIndex;
     int amount;
+    uint16 claimedRatio;
     uint revealedUntilTimestamp;
     bytes32 fullHash;
     bytes32 partialRoot;

@@ -703,6 +703,7 @@ describe("Depository", function () {
       pull: [{
         deltaIndex: 1,
         amount: -MAX_FILL_RATIO,
+        claimedRatio: 0,
         revealedUntilTimestamp: revealDeadline,
         fullHash: pullProof.fullHash,
         partialRoot: pullProof.partialRoot,

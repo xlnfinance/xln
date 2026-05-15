@@ -738,6 +738,16 @@ export type EntityTx =
         route: CrossJurisdictionSwapRoute;
       };
     }
+  | {
+      type: 'crossJurisdictionFillRequest';
+      data: {
+        routeId: string;
+        fillRatio: number;
+        requestedByEntityId?: string;
+        sourceAmount?: bigint;
+        targetAmount?: bigint;
+      };
+    }
 	  | {
 	      type: 'crossJurisdictionSalvage';
 	      data: {
@@ -1130,6 +1140,8 @@ export interface PullCommitment {
   pullId: string;
   tokenId: number;
   amount: bigint;
+  claimedRatio?: number;
+  claimedAmount?: bigint;
   revealedUntilTimestamp: number;
   fullHash: string;
   partialRoot: string;
@@ -1765,6 +1777,17 @@ export type AccountTx =
         restingQuantizedWant?: bigint;
       };
     }
+  | {
+      type: 'cross_swap_fill_ack';
+      data: {
+        offerId: string;
+        cumulativeFillRatio: number;
+        executionSourceAmount?: bigint;
+        executionTargetAmount?: bigint;
+        cancelRemainder?: boolean;
+        comment?: string;
+      };
+    }
   // === SETTLEMENT HOLD TYPES (ring-fencing via bilateral consensus) ===
   | {
       type: 'settle_hold';
@@ -1971,6 +1994,7 @@ export interface CrossJurisdictionPullLeg {
 
 export interface CrossJurisdictionSwapRoute {
   orderId: string;
+  routeHash?: string;
   makerEntityId: string;
   hubEntityId: string;
   source: CrossJurisdictionSwapLeg;
@@ -1980,6 +2004,9 @@ export interface CrossJurisdictionSwapRoute {
   hashLadderPrivateSeed?: string;
   hashlock?: string;
   priceTicks?: bigint;
+  claimedRatio?: number;
+  sourceClaimed?: bigint;
+  targetClaimed?: bigint;
   status: CrossJurisdictionSwapStatus;
   createdAt: number;
   updatedAt: number;

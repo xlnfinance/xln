@@ -17,6 +17,7 @@ import { handleHtlcResolve } from './handlers/htlc-resolve';
 import { handlePullLock, handlePullResolve } from './handlers/pull';
 import { handleSwapOffer } from './handlers/swap-offer';
 import { handleSwapResolve } from './handlers/swap-resolve';
+import { handleCrossSwapFillAck } from './handlers/cross-swap-fill-ack';
 import { handleSwapCancelRequest } from './handlers/swap-cancel';
 import { handleSettleHold, handleSettleRelease } from './handlers/settle-hold';
 import { handleJEventClaim } from './handlers/j-event-claim';
@@ -259,6 +260,14 @@ export async function processAccountTx(
         byLeft,
         currentHeight,
         isValidation,
+      );
+
+    case 'cross_swap_fill_ack':
+      return await handleCrossSwapFillAck(
+        accountMachine,
+        accountTx as Extract<AccountTx, { type: 'cross_swap_fill_ack' }>,
+        byLeft,
+        currentHeight,
       );
 
     case 'swap_cancel_request':

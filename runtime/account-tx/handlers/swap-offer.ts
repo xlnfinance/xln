@@ -160,6 +160,22 @@ export async function handleSwapOffer(
       events,
     };
   }
+  if (crossJurisdiction) {
+    if (effectiveGiveAmount !== BigInt(crossJurisdiction.source.amount)) {
+      return {
+        success: false,
+        error: `Cross-j source amount changed by quantization: route=${crossJurisdiction.source.amount} offer=${effectiveGiveAmount}`,
+        events,
+      };
+    }
+    if (effectiveWantAmount !== BigInt(crossJurisdiction.target.amount)) {
+      return {
+        success: false,
+        error: `Cross-j target amount changed by quantization: route=${crossJurisdiction.target.amount} offer=${effectiveWantAmount}`,
+        events,
+      };
+    }
+  }
 
   // 5. Get or create delta for giveToken (the token being locked)
   let delta = accountMachine.deltas.get(giveTokenId);
@@ -172,14 +188,18 @@ export async function handleSwapOffer(
   delta.leftHold ??= 0n;
   delta.rightHold ??= 0n;
 
-  // 6. Check capacity (deriveDelta should account for all holds)
-  const derived = deriveDelta(delta, makerIsLeft);
-  if (effectiveGiveAmount > derived.outCapacity) {
-    return {
-      success: false,
-      error: `Insufficient capacity: need ${effectiveGiveAmount}, available ${derived.outCapacity}`,
-      events,
-    };
+  // Cross-j source funds are already locked by the paired pull_lock in the same
+  // account. The swap_offer is the order/audit object for the book, not a second
+  // economic hold. Same-account swaps still lock capacity here.
+  if (!crossJurisdiction) {
+    const derived = deriveDelta(delta, makerIsLeft);
+    if (effectiveGiveAmount > derived.outCapacity) {
+      return {
+        success: false,
+        error: `Insufficient capacity: need ${effectiveGiveAmount}, available ${derived.outCapacity}`,
+        events,
+      };
+    }
   }
 
   // 7. Create offer (stored amounts are already quantized for deterministic matching)
@@ -202,10 +222,12 @@ export async function handleSwapOffer(
   // 8. Lock capacity (CRITICAL PER CODEX: Apply during BOTH validation and commit!)
   // Holds ARE consensus-critical - included in AccountFrame.deltas hash.
   // Must be in BOTH validation (for hash) and commit (for real state) to match
-  if (makerIsLeft) {
-    delta.leftHold += effectiveGiveAmount;
-  } else {
-    delta.rightHold += effectiveGiveAmount;
+  if (!crossJurisdiction) {
+    if (makerIsLeft) {
+      delta.leftHold += effectiveGiveAmount;
+    } else {
+      delta.rightHold += effectiveGiveAmount;
+    }
   }
 
   // 9. Store offer (proofBody includes swapOffers, so keep validation+commit aligned)
