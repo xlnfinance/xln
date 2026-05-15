@@ -91,6 +91,12 @@ const proxyConfig = {
 		changeOrigin: true,
 		secure: false,
 	},
+	'/rpc2': {
+		target: API_PROXY_TARGET,
+		ws: true,
+		changeOrigin: true,
+		secure: false,
+	},
 	// Relay Proxy - Forward WebSocket to relay server for P2P
 	'/relay': {
 		target: API_PROXY_TARGET,

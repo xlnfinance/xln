@@ -2678,6 +2678,12 @@ const applyRuntimeInput = async (
             const rpcUrl = runtimeTx.data.rpcs[0];
             if (!rpcUrl) throw new Error(`IMPORT_J_RPC_MISSING: name=${runtimeTx.data.name}`);
             adapterConfig.rpcUrl = rpcUrl;
+            if (!fromReplica) {
+              const deployerPrivateKey =
+                globalThis.process?.env?.['JADAPTER_DEPLOYER_PRIVATE_KEY'] ||
+                globalThis.process?.env?.['DEPLOYER_PRIVATE_KEY'];
+              if (deployerPrivateKey) adapterConfig.privateKey = deployerPrivateKey;
+            }
           }
           if (fromReplica) adapterConfig.fromReplica = fromReplica; // Pass pre-deployed addresses (skips deployment)
 

@@ -34,7 +34,7 @@ export {
  * Set of chain IDs treated as local dev chains.
  * Used to gate mint/debugFundReserves and disable confirmation depth.
  */
-export const DEV_CHAIN_IDS = new Set<number>([31337]);
+export const DEV_CHAIN_IDS = new Set<number>([31337, 31338]);
 const DEFAULT_RPC_POLLING_INTERVAL_MS = 100;
 
 const configureFastRpcPolling = (provider: ethers.JsonRpcProvider): void => {

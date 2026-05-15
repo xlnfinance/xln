@@ -1,6 +1,6 @@
   <script lang="ts">
     import type { AccountMachine, EntityReplica, Tab } from '$lib/types/ui';
-  import type { Delta, Env, EnvSnapshot } from '@xln/runtime/xln-api';
+  import type { CrossJurisdictionSwapRoute, Delta, Env, EnvSnapshot, RoutedEntityInput } from '@xln/runtime/xln-api';
   import { getBestAsk, getBestBid } from '@xln/runtime/xln-api';
   import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import type { SwapBookEntry } from '@xln/runtime/xln-api';
@@ -166,6 +166,7 @@
   let orderMode: 'buy-base' | 'sell-base' | 'none' = 'none';
   let limitPriceTicks: bigint | null = null;
   let orderListTab: 'open' | 'closed' = 'open';
+  let orderRouteFilter: 'all' | 'same' | 'cross' = 'all';
   let closedOrderStatusFilter: 'all' | ClosedOrderStatus = 'all';
   let offerLifecycles: OfferLifecycle[] = [];
   let closedOfferLifecycles: OfferLifecycle[] = [];
@@ -179,6 +180,17 @@
   let formattedAvailableWantIn = '0';
   let autoInboundCreditIncrease = 0n;
   let canAutoPrepareInboundCapacity = false;
+  let swapRouteMode: 'same' | 'cross' = 'same';
+  let selectedRouteValue = 'same';
+  let selectedCrossTargetValue = '';
+  let crossTargetOptions: CrossTargetOption[] = [];
+  let routeOptions: SwapRouteOption[] = [];
+  let selectedCrossTarget: CrossTargetOption | null = null;
+  let autoExtendCrossInbound = true;
+  let crossTargetInCapacity = 0n;
+  let crossAutoInboundCreditTarget: bigint | null = null;
+  let crossCurrentPeerCreditLimit = 0n;
+  let canAutoPrepareCrossInboundCapacity = false;
   const MIN_ORDER_NOTIONAL_USD = 10;
   const FILLED_DISPLAY_PPM_THRESHOLD = 999_950n;
 
@@ -249,6 +261,22 @@
     return resolved || formatEntityId(accountIdValue);
   }
   $: selectedHubOptions = hubAccountIds.map((id) => ({ value: id, label: accountLabel(id) }));
+  $: crossTargetOptions = buildCrossTargetOptions();
+  $: routeOptions = buildRouteOptions();
+  $: if (!routeOptions.some((option) => option.value === selectedRouteValue)) {
+    selectedRouteValue = 'same';
+  }
+  $: swapRouteMode = selectedRouteValue === 'same' ? 'same' : 'cross';
+  $: selectedCrossTargetValue = swapRouteMode === 'cross' ? selectedRouteValue : '';
+  $: selectedCrossTarget = crossTargetOptions.find((option) => option.value === selectedCrossTargetValue) || null;
+  $: sourceJurisdictionLabel = getReplicaJurisdictionName(currentReplica) || 'Current';
+  $: targetJurisdictionLabel = swapRouteMode === 'cross' && selectedCrossTarget
+    ? selectedCrossTarget.targetJurisdiction
+    : sourceJurisdictionLabel;
+  $: sourceRouteEntityLabel = `${accountLabel(String(tab.entityId || ''))} -> ${accountLabel(String(activeOrderAccountId || ''))}`;
+  $: targetRouteEntityLabel = swapRouteMode === 'cross' && selectedCrossTarget
+    ? `${accountLabel(selectedCrossTarget.targetHubEntityId)} -> ${accountLabel(selectedCrossTarget.targetEntityId)}`
+    : `${accountLabel(String(activeOrderAccountId || ''))} -> ${accountLabel(String(tab.entityId || ''))}`;
   $: orderbookSourceLabels = Object.fromEntries(
     orderbookHubIds.map((id) => [id, accountLabel(id)]),
   );
@@ -257,6 +285,25 @@
   );
 
   type TokenKeyedMap<V> = Map<number, V> | Map<string, V>;
+  type CrossTargetOption = {
+    value: string;
+    label: string;
+    targetEntityId: string;
+    targetSignerId: string;
+    targetHubEntityId: string;
+    targetJurisdiction: string;
+  };
+  type SwapRouteOption = {
+    value: string;
+    label: string;
+    mode: 'same' | 'cross';
+    sourceJurisdiction: string;
+    targetJurisdiction: string;
+    sourceEntityId: string;
+    sourceHubEntityId: string;
+    targetEntityId: string;
+    targetHubEntityId: string;
+  };
   type OfferLike = {
     giveTokenId: number;
     wantTokenId: number;
@@ -288,6 +335,145 @@
       delta,
       isLeft: String(tab.entityId).toLowerCase() < String(resolvedCounterparty).toLowerCase(),
     };
+  }
+
+  function getReplicaJurisdictionName(candidate: EntityReplica | null | undefined): string {
+    const state = candidate?.state as { config?: { jurisdiction?: { name?: unknown } } } | undefined;
+    const byConfig = String(state?.config?.jurisdiction?.name || '').trim();
+    if (byConfig) return byConfig;
+    const byPosition = String(candidate?.position?.jurisdiction || '').trim();
+    if (byPosition) return byPosition;
+    return '';
+  }
+
+  function getAccountDeltaForReplica(
+    candidate: EntityReplica | null | undefined,
+    ownerEntityId: string,
+    counterpartyEntityId: string,
+    tokenIdValue: number,
+  ): { delta: Delta; isLeft: boolean } | null {
+    const owner = String(ownerEntityId || '').trim();
+    const counterparty = String(counterpartyEntityId || '').trim();
+    if (!candidate || !owner || !counterparty || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return null;
+    const account = candidate.state?.accounts?.get?.(counterparty);
+    const deltas = account?.deltas as TokenKeyedMap<Delta> | undefined;
+    if (!(deltas instanceof Map)) return null;
+    const delta = getTokenMapValue(deltas, tokenIdValue);
+    if (!delta) return null;
+    return {
+      delta,
+      isLeft: owner.toLowerCase() < counterparty.toLowerCase(),
+    };
+  }
+
+  function hasTokenInReplicaAccount(
+    candidate: EntityReplica | null | undefined,
+    ownerEntityId: string,
+    counterpartyEntityId: string,
+    tokenIdValue: number,
+  ): boolean {
+    if (!candidate || !counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return false;
+    const account = candidate.state?.accounts?.get?.(counterpartyEntityId);
+    const deltas = account?.deltas as TokenKeyedMap<Delta> | undefined;
+    if (!(deltas instanceof Map)) return false;
+    return getTokenMapValue(deltas, tokenIdValue) !== undefined;
+  }
+
+  function readInCapacityForReplica(
+    candidate: EntityReplica | null | undefined,
+    ownerEntityId: string,
+    counterpartyEntityId: string,
+    tokenIdValue: number,
+  ): bigint {
+    const accountDelta = getAccountDeltaForReplica(candidate, ownerEntityId, counterpartyEntityId, tokenIdValue);
+    if (!accountDelta || !activeXlnFunctions?.deriveDelta) return 0n;
+    try {
+      const derived = activeXlnFunctions.deriveDelta(accountDelta.delta, accountDelta.isLeft);
+      const inCapacityRaw = (derived as { inCapacity?: unknown })?.inCapacity;
+      if (typeof inCapacityRaw === 'bigint') return inCapacityRaw;
+      return toBigIntSafe(inCapacityRaw) ?? 0n;
+    } catch {
+      return 0n;
+    }
+  }
+
+  function localEntityReplicas(): EntityReplica[] {
+    if (!(activeFrame?.eReplicas instanceof Map)) return [];
+    const seen = new Set<string>();
+    const out: EntityReplica[] = [];
+    for (const [key, candidate] of activeFrame.eReplicas.entries()) {
+      if (!candidate?.state) continue;
+      const entityId = String(candidate.entityId || key.split(':')[0] || candidate.state.entityId || '').trim().toLowerCase();
+      if (!entityId || seen.has(entityId)) continue;
+      seen.add(entityId);
+      out.push(candidate);
+    }
+    return out;
+  }
+
+  function buildCrossTargetOptions(): CrossTargetOption[] {
+    const sourceEntityId = String(tab.entityId || '').trim().toLowerCase();
+    const sourceJurisdiction = getReplicaJurisdictionName(currentReplica);
+    if (!sourceEntityId || !sourceJurisdiction) return [];
+    const options: CrossTargetOption[] = [];
+    for (const candidate of localEntityReplicas()) {
+      const targetEntityId = String(candidate.entityId || candidate.state?.entityId || '').trim().toLowerCase();
+      if (!targetEntityId || targetEntityId === sourceEntityId) continue;
+      const targetJurisdiction = getReplicaJurisdictionName(candidate);
+      if (!targetJurisdiction || targetJurisdiction === sourceJurisdiction) continue;
+      const targetSignerId = String(candidate.signerId || '').trim();
+      if (!targetSignerId) continue;
+      const targetHubIds = Array.from(candidate.state?.accounts?.keys?.() || [])
+        .map((id) => String(id || '').trim())
+        .filter((id) => id && isHubAccount(id))
+        .sort(compareStableText);
+      for (const targetHubEntityId of targetHubIds) {
+        options.push({
+          value: `${targetEntityId}:${targetHubEntityId}`,
+          label: `${targetJurisdiction} · ${accountLabel(targetHubEntityId)}`,
+          targetEntityId,
+          targetSignerId,
+          targetHubEntityId,
+          targetJurisdiction,
+        });
+      }
+    }
+    return options.sort((a, b) => compareStableText(a.label, b.label));
+  }
+
+  function buildRouteOptions(): SwapRouteOption[] {
+    const sourceJurisdiction = getReplicaJurisdictionName(currentReplica) || 'Current';
+    const sourceEntityId = String(tab.entityId || '').trim().toLowerCase();
+    const sourceHubEntityId = String(activeOrderAccountId || '').trim().toLowerCase();
+    const sameLabel = sourceHubEntityId
+      ? `${sourceJurisdiction} · ${accountLabel(sourceHubEntityId)}`
+      : `${sourceJurisdiction} · select hub`;
+    const options: SwapRouteOption[] = [{
+      value: 'same',
+      label: `Same account · ${sameLabel}`,
+      mode: 'same',
+      sourceJurisdiction,
+      targetJurisdiction: sourceJurisdiction,
+      sourceEntityId,
+      sourceHubEntityId,
+      targetEntityId: sourceEntityId,
+      targetHubEntityId: sourceHubEntityId,
+    }];
+
+    for (const target of crossTargetOptions) {
+      options.push({
+        value: target.value,
+        label: `Cross-j · ${sourceJurisdiction} -> ${target.targetJurisdiction} · ${accountLabel(target.targetHubEntityId)}`,
+        mode: 'cross',
+        sourceJurisdiction,
+        targetJurisdiction: target.targetJurisdiction,
+        sourceEntityId,
+        sourceHubEntityId,
+        targetEntityId: target.targetEntityId,
+        targetHubEntityId: target.targetHubEntityId,
+      });
+    }
+    return options;
   }
 
   type PairOption = {
@@ -534,6 +720,32 @@
     return nonNegative(toBigIntSafe(raw) ?? 0n);
   }
 
+  function findReplicaByEntityId(entityId: string): EntityReplica | null {
+    const normalized = String(entityId || '').trim().toLowerCase();
+    if (!normalized) return null;
+    return localEntityReplicas().find((candidate) =>
+      String(candidate.entityId || candidate.state?.entityId || '').trim().toLowerCase() === normalized,
+    ) || null;
+  }
+
+  function hasReplicaAccount(candidate: EntityReplica | null | undefined, counterpartyEntityId: string): boolean {
+    const counterparty = String(counterpartyEntityId || '').trim();
+    if (!candidate || !counterparty) return false;
+    return candidate.state?.accounts instanceof Map && candidate.state.accounts.has(counterparty);
+  }
+
+  function readPeerCreditLimitForReplica(
+    candidate: EntityReplica | null | undefined,
+    ownerEntityId: string,
+    counterpartyEntityId: string,
+    tokenIdValue: number,
+  ): bigint {
+    const accountDelta = getAccountDeltaForReplica(candidate, ownerEntityId, counterpartyEntityId, tokenIdValue);
+    if (!accountDelta) return 0n;
+    const raw = accountDelta.isLeft ? accountDelta.delta.rightCreditLimit : accountDelta.delta.leftCreditLimit;
+    return nonNegative(toBigIntSafe(raw) ?? 0n);
+  }
+
   function computeAutoInboundCreditTarget(
     counterpartyEntityId: string,
     tokenIdValue: number,
@@ -567,6 +779,39 @@
     }
   }
 
+  function computeAutoInboundCreditTargetForReplica(
+    candidate: EntityReplica | null | undefined,
+    ownerEntityId: string,
+    counterpartyEntityId: string,
+    tokenIdValue: number,
+    desiredInboundAmount: bigint,
+  ): bigint | null {
+    if (!hasReplicaAccount(candidate, counterpartyEntityId)) return null;
+    if (!Number.isFinite(tokenIdValue) || tokenIdValue <= 0 || desiredInboundAmount <= 0n) return null;
+    const accountDelta = getAccountDeltaForReplica(candidate, ownerEntityId, counterpartyEntityId, tokenIdValue);
+    if (!accountDelta || !activeXlnFunctions?.deriveDelta) return desiredInboundAmount;
+    try {
+      const derived = activeXlnFunctions.deriveDelta(accountDelta.delta, accountDelta.isLeft) as {
+        inCapacity?: unknown;
+        inPeerCredit?: unknown;
+        outPeerCredit?: unknown;
+      };
+      const inCapacity = nonNegative(toBigIntSafe(derived.inCapacity) ?? 0n);
+      if (inCapacity >= desiredInboundAmount) return null;
+
+      const inPeerCredit = nonNegative(toBigIntSafe(derived.inPeerCredit) ?? 0n);
+      const inWithoutPeerCredit = inCapacity > inPeerCredit ? inCapacity - inPeerCredit : 0n;
+      const neededPeerCredit = desiredInboundAmount > inWithoutPeerCredit ? desiredInboundAmount - inWithoutPeerCredit : 0n;
+      const currentPeerLimit = readPeerCreditLimitForReplica(candidate, ownerEntityId, counterpartyEntityId, tokenIdValue);
+      const outPeerDebt = nonNegative(toBigIntSafe(derived.outPeerCredit) ?? 0n);
+      const targetPeerLimit = outPeerDebt + neededPeerCredit;
+      if (targetPeerLimit > currentPeerLimit) return targetPeerLimit;
+      return null;
+    } catch {
+      return desiredInboundAmount;
+    }
+  }
+
   function isInboundCapacityValidationError(reason: string): boolean {
     if (!reason) return false;
     return reason.startsWith('Inbound token is not active in this account.')
@@ -582,6 +827,30 @@
     availableWantInCapacity = readInCapacity(activeOrderAccountId, wantToken);
     autoInboundCreditTarget = computeAutoInboundCreditTarget(activeOrderAccountId, wantToken, canonicalWantAmount);
     currentPeerCreditLimit = readPeerCreditLimit(activeOrderAccountId, wantToken);
+  }
+  $: {
+    const targetReplica = selectedCrossTarget ? findReplicaByEntityId(selectedCrossTarget.targetEntityId) : null;
+    crossTargetInCapacity = selectedCrossTarget
+      ? readInCapacityForReplica(targetReplica, selectedCrossTarget.targetEntityId, selectedCrossTarget.targetHubEntityId, wantToken)
+      : 0n;
+    crossAutoInboundCreditTarget = selectedCrossTarget
+      ? computeAutoInboundCreditTargetForReplica(
+          targetReplica,
+          selectedCrossTarget.targetEntityId,
+          selectedCrossTarget.targetHubEntityId,
+          wantToken,
+          canonicalWantAmount,
+        )
+      : null;
+    crossCurrentPeerCreditLimit = selectedCrossTarget
+      ? readPeerCreditLimitForReplica(targetReplica, selectedCrossTarget.targetEntityId, selectedCrossTarget.targetHubEntityId, wantToken)
+      : 0n;
+    canAutoPrepareCrossInboundCapacity = Boolean(
+      swapRouteMode === 'cross'
+      && selectedCrossTarget
+      && crossAutoInboundCreditTarget !== null
+      && crossAutoInboundCreditTarget > crossCurrentPeerCreditLimit,
+    );
   }
   $: formattedAvailableGive = Number.isFinite(giveToken) && giveToken > 0
     ? `${formatAmount(availableGiveCapacity, giveToken)} ${giveTokenSymbol}`
@@ -697,6 +966,66 @@
     return '';
   }
 
+  function validateCrossSwapForm(
+    input: SwapFormValidationInput,
+    target: CrossTargetOption | null,
+    allowAutoPrepareTargetInbound: boolean,
+  ): string {
+    if (!target) return 'Select target jurisdiction account.';
+    if (!input.isLive) return 'Switch to LIVE mode to place swap orders.';
+    if (!input.entityId) return 'Entity is not selected.';
+    if (!input.counterpartyId) return 'Select source account (hub) first.';
+    const hasSourceAccount = input.accountIds.some(
+      (id) => String(id || '').toLowerCase() === String(input.counterpartyId || '').toLowerCase(),
+    );
+    if (!hasSourceAccount) return 'Selected source account is not active.';
+    if (!Number.isFinite(input.giveToken) || !Number.isFinite(input.wantToken) || input.giveToken <= 0 || input.wantToken <= 0) {
+      return 'Select valid Sell and Buy tokens.';
+    }
+    if (input.giveToken === input.wantToken) return 'Sell token and Buy token must be different.';
+    if (input.giveAmount <= 0n) return 'Enter amount to sell.';
+    if (!input.limitPriceTicks || input.limitPriceTicks <= 0n) return 'Price is too small.';
+    if (input.referencePriceTicks && input.referencePriceTicks > 0n) {
+      const deviationBps = computePriceDeviationBps(input.limitPriceTicks, input.referencePriceTicks);
+      if (deviationBps > MAX_PRICE_DEVIATION_BPS) {
+        return 'Price must stay within 30% of the current orderbook.';
+      }
+    }
+    if (input.wantAmount <= 0n) return 'Amount to receive is too small for selected price.';
+    if (input.notionalUsd < MIN_ORDER_NOTIONAL_USD) {
+      return `Minimum order size is ~$${MIN_ORDER_NOTIONAL_USD}.`;
+    }
+    if (input.giveAmount > input.availableGiveCapacity) {
+      return `Insufficient source outbound capacity (${input.formattedAvailableGive}).`;
+    }
+
+    const targetReplica = findReplicaByEntityId(target.targetEntityId);
+    if (!hasReplicaAccount(targetReplica, target.targetHubEntityId)) {
+      return 'Target entity must already have an account with the hub.';
+    }
+    const targetHasToken = hasTokenInReplicaAccount(
+      targetReplica,
+      target.targetEntityId,
+      target.targetHubEntityId,
+      input.wantToken,
+    );
+    if (!targetHasToken && !allowAutoPrepareTargetInbound) return 'Target inbound token is not active. Enable auto-extend.';
+    const targetInCapacity = readInCapacityForReplica(
+      targetReplica,
+      target.targetEntityId,
+      target.targetHubEntityId,
+      input.wantToken,
+    );
+    if (input.wantAmount > targetInCapacity) {
+      if (allowAutoPrepareTargetInbound) return '';
+      const formattedTargetIn = Number.isFinite(input.wantToken) && input.wantToken > 0
+        ? `${formatAmount(targetInCapacity, input.wantToken)} ${tokenSymbol(input.wantToken)}`
+        : targetInCapacity.toString();
+      return `Insufficient target inbound capacity (${formattedTargetIn}).`;
+    }
+    return '';
+  }
+
   function computeOrderNotionalUsd(
     mode: 'buy-base' | 'sell-base' | 'none',
     giveTokenValue: number,
@@ -757,26 +1086,51 @@
     && parsedOrderbookPair
     && !preparedOrder
   ) ? 'Order does not fit canonical lot/tick constraints.' : '';
-  $: swapDisabledReason = swapPreparationError || validateSwapForm(
-    buildSwapValidationInput(
-      String(activeOrderAccountId || ''),
-      giveToken,
-      wantToken,
-      canonicalGiveAmount,
-      canonicalWantAmount,
-      canonicalPriceTicks,
-    ),
+  $: swapDisabledReason = swapPreparationError || (
+    swapRouteMode === 'cross'
+      ? validateCrossSwapForm(
+          buildSwapValidationInput(
+            String(activeOrderAccountId || ''),
+            giveToken,
+            wantToken,
+            canonicalGiveAmount,
+            canonicalWantAmount,
+            canonicalPriceTicks,
+          ),
+          selectedCrossTarget,
+          autoExtendCrossInbound && canAutoPrepareCrossInboundCapacity,
+        )
+      : validateSwapForm(
+          buildSwapValidationInput(
+            String(activeOrderAccountId || ''),
+            giveToken,
+            wantToken,
+            canonicalGiveAmount,
+            canonicalWantAmount,
+            canonicalPriceTicks,
+          ),
+        )
   );
   $: swapActionDisabledReason = (
-    isInboundCapacityValidationError(swapDisabledReason) && canAutoPrepareInboundCapacity
+    swapRouteMode === 'same' && isInboundCapacityValidationError(swapDisabledReason) && canAutoPrepareInboundCapacity
       ? ''
       : swapDisabledReason
   );
   $: autoCapacityNote = (() => {
+    if (swapRouteMode !== 'same') return '';
     if (!canAutoPrepareInboundCapacity) return '';
     const targetLabel = formatAmount(autoInboundCreditTarget ?? 0n, wantToken);
     const increaseLabel = formatAmount(autoInboundCreditIncrease, wantToken);
     return `Placing this swap will auto-activate ${wantTokenSymbol} and set inbound capacity to ${targetLabel} ${wantTokenSymbol} (+${increaseLabel}).`;
+  })();
+  $: crossAutoCapacityNote = (() => {
+    if (swapRouteMode !== 'cross' || !selectedCrossTarget || !canAutoPrepareCrossInboundCapacity) return '';
+    const targetLabel = formatAmount(crossAutoInboundCreditTarget ?? 0n, wantToken);
+    const increase = (crossAutoInboundCreditTarget ?? 0n) > crossCurrentPeerCreditLimit
+      ? (crossAutoInboundCreditTarget ?? 0n) - crossCurrentPeerCreditLimit
+      : 0n;
+    const increaseLabel = formatAmount(increase, wantToken);
+    return `Target side needs inbound capacity. I will extend ${wantTokenSymbol} to ${targetLabel} on ${selectedCrossTarget.targetJurisdiction} before registering the cross-j route (+${increaseLabel}).`;
   })();
   $: leftoverGiveNote = giveAmountLeftover > 0n
     ? `Canonical order leaves ${leftoverGiveLabel} unspent after lot quantization.`
@@ -1084,7 +1438,12 @@
     return remainingUsd > 0 && remainingUsd < MIN_ORDER_NOTIONAL_USD;
   }
 
-  $: openOrders = [...activeOffers].sort((a: SwapOfferLike, b: SwapOfferLike) => {
+  $: routeFilteredOpenOffers = activeOffers.filter((offer: SwapOfferLike) => {
+    if (orderRouteFilter === 'all') return true;
+    const isCross = Boolean(offer.crossJurisdiction);
+    return orderRouteFilter === 'cross' ? isCross : !isCross;
+  });
+  $: openOrders = [...routeFilteredOpenOffers].sort((a: SwapOfferLike, b: SwapOfferLike) => {
     const aDust = isDustOpenOffer(a);
     const bDust = isDustOpenOffer(b);
     if (aDust !== bDust) return aDust ? 1 : -1;
@@ -1509,8 +1868,13 @@
         effectiveWantAmount,
         canonicalPriceTicks,
       );
-      const liveValidationReason = validateSwapForm(liveValidation);
-      if (liveValidationReason && !(isInboundCapacityValidationError(liveValidationReason) && canAutoPrepareInboundCapacity)) {
+      const liveValidationReason = swapRouteMode === 'cross'
+      ? validateCrossSwapForm(liveValidation, selectedCrossTarget, autoExtendCrossInbound && canAutoPrepareCrossInboundCapacity)
+        : validateSwapForm(liveValidation);
+      if (
+        liveValidationReason
+        && !(swapRouteMode === 'same' && isInboundCapacityValidationError(liveValidationReason) && canAutoPrepareInboundCapacity)
+      ) {
         throw new Error(liveValidationReason);
       }
 
@@ -1523,10 +1887,67 @@
       );
       const currentInboundCreditLimit = readPeerCreditLimit(resolvedCounterparty, wantToken);
       const shouldAutoPrepareInbound = (
+        swapRouteMode === 'same'
+        &&
         requiredInboundCreditLimit !== null
         && requiredInboundCreditLimit > currentInboundCreditLimit
         && isInboundCapacityValidationError(liveValidationReason)
       );
+      const targetRoute = selectedCrossTarget;
+      const targetReplica = targetRoute ? findReplicaByEntityId(targetRoute.targetEntityId) : null;
+      const requiredTargetInboundCreditLimit = targetRoute
+        ? computeAutoInboundCreditTargetForReplica(
+            targetReplica,
+            targetRoute.targetEntityId,
+            targetRoute.targetHubEntityId,
+            wantToken,
+            effectiveWantAmount,
+          )
+        : null;
+      const currentTargetInboundCreditLimit = targetRoute
+        ? readPeerCreditLimitForReplica(targetReplica, targetRoute.targetEntityId, targetRoute.targetHubEntityId, wantToken)
+        : 0n;
+      const shouldAutoPrepareCrossInbound = Boolean(
+        swapRouteMode === 'cross'
+        && autoExtendCrossInbound
+        && requiredTargetInboundCreditLimit !== null
+        && requiredTargetInboundCreditLimit > currentTargetInboundCreditLimit,
+      );
+      const now = Date.now();
+      const crossJurisdiction = (() => {
+        if (swapRouteMode !== 'cross') return null;
+        if (!targetRoute) throw new Error('Select target jurisdiction account.');
+        const sourceJurisdiction = getReplicaJurisdictionName(currentReplica);
+        if (!sourceJurisdiction) throw new Error('Source jurisdiction is not available.');
+        if (!targetRoute.targetJurisdiction) throw new Error('Target jurisdiction is not available.');
+        if (sourceJurisdiction === targetRoute.targetJurisdiction) {
+          throw new Error('Cross-j route requires different jurisdictions.');
+        }
+        return {
+          orderId: offerId,
+          makerEntityId: tab.entityId,
+          hubEntityId: resolvedCounterparty,
+          source: {
+            jurisdiction: sourceJurisdiction,
+            entityId: tab.entityId,
+            counterpartyEntityId: resolvedCounterparty,
+            tokenId: giveToken,
+            amount: effectiveGiveAmount,
+          },
+          target: {
+            jurisdiction: targetRoute.targetJurisdiction,
+            entityId: targetRoute.targetHubEntityId,
+            counterpartyEntityId: targetRoute.targetEntityId,
+            tokenId: wantToken,
+            amount: effectiveWantAmount,
+          },
+          priceTicks: canonicalPriceTicks,
+          status: 'resting',
+          createdAt: now,
+          updatedAt: now,
+          expiresAt: now + 24 * 60 * 60 * 1000,
+        } satisfies CrossJurisdictionSwapRoute;
+      })();
       const entityTxs = [];
       if (shouldAutoPrepareInbound) {
         entityTxs.push({
@@ -1549,18 +1970,43 @@
           wantAmount: effectiveWantAmount,
           priceTicks: canonicalPriceTicks,
           minFillRatio,
+          ...(crossJurisdiction ? { crossJurisdiction } : {}),
         },
       });
 
-      await enqueueEntityInputs(env, [{
+      const inputs: RoutedEntityInput[] = [{
         entityId: tab.entityId,
         signerId,
         entityTxs,
-      }]);
+      }];
+      if (crossJurisdiction && targetRoute) {
+        const targetEntityTxs = [];
+        if (shouldAutoPrepareCrossInbound && requiredTargetInboundCreditLimit !== null) {
+          targetEntityTxs.push({
+            type: 'extendCredit' as const,
+            data: {
+              counterpartyEntityId: targetRoute.targetHubEntityId,
+              tokenId: wantToken,
+              amount: requiredTargetInboundCreditLimit,
+            },
+          });
+        }
+        targetEntityTxs.push({
+          type: 'registerCrossJurisdictionSwap' as const,
+          data: { route: crossJurisdiction },
+        });
+        inputs.push({
+          entityId: targetRoute.targetEntityId,
+          signerId: targetRoute.targetSignerId,
+          entityTxs: targetEntityTxs,
+        });
+      }
+
+      await enqueueEntityInputs(env, inputs);
 
       orderbookRefreshNonce += 1;
       pendingSwapFeedbackOfferId = offerId;
-      toasts.success('Swap offer submitted');
+      toasts.success(crossJurisdiction ? 'Cross-j swap offer submitted' : 'Swap offer submitted');
 
       // Reset form
       orderPercent = 100;
@@ -1794,6 +2240,43 @@
         <span class="input-suffix">{wantTokenSymbol}</span>
       </label>
 
+      <div class="route-builder" data-testid="swap-route-picker">
+        <label class="route-select-row">
+          <span>Route</span>
+          <select
+            class="route-select"
+            bind:value={selectedRouteValue}
+            data-testid="swap-route-select"
+            on:change={() => { submitError = ''; }}
+          >
+            {#each routeOptions as option}
+              <option value={option.value}>{option.label}</option>
+            {/each}
+          </select>
+        </label>
+        <div class="route-flow" data-testid="swap-route-flow">
+          <div class="route-node">
+            <span class="route-node-kicker">Sell</span>
+            <strong>{sourceJurisdictionLabel}</strong>
+            <span>{sourceRouteEntityLabel}</span>
+            <em>{estimatedSpendLabel}</em>
+          </div>
+          <span class="route-arrow">-&gt;</span>
+          <div class="route-node">
+            <span class="route-node-kicker">Buy</span>
+            <strong>{targetJurisdictionLabel}</strong>
+            <span>{targetRouteEntityLabel}</span>
+            <em>{estimatedReceiveLabel}</em>
+          </div>
+        </div>
+        {#if swapRouteMode === 'cross' && canAutoPrepareCrossInboundCapacity}
+          <label class="route-checkbox" data-testid="swap-cross-auto-extend">
+            <input type="checkbox" bind:checked={autoExtendCrossInbound} />
+            <span>Auto-extend target inbound capacity</span>
+          </label>
+        {/if}
+      </div>
+
       <div class="avbl-row size-stats">
         <span data-testid="swap-available-stat">Available: <strong>{formattedAvailableGive}</strong></span>
         {#if capacityWarning}
@@ -1803,6 +2286,9 @@
 
       {#if autoCapacityNote}
         <p class="auto-capacity-note" data-testid="swap-auto-capacity-note">{autoCapacityNote}</p>
+      {/if}
+      {#if crossAutoCapacityNote && autoExtendCrossInbound}
+        <p class="auto-capacity-note" data-testid="swap-cross-auto-capacity-note">{crossAutoCapacityNote}</p>
       {/if}
 
       {#if selectedOrderLevel}
@@ -1853,6 +2339,14 @@
           >Closed ({closedOrderViews.length})</button>
         </div>
       </div>
+      <label class="closed-status-filter" class:is-hidden={orderListTab !== 'open'}>
+        <span>Route</span>
+        <select bind:value={orderRouteFilter} disabled={orderListTab !== 'open'} data-testid="swap-orders-route-filter">
+          <option value="all">All</option>
+          <option value="same">Same</option>
+          <option value="cross">Cross-j</option>
+        </select>
+      </label>
       <label class="closed-status-filter" class:is-hidden={orderListTab !== 'closed'}>
         <span>Status</span>
         <select bind:value={closedOrderStatusFilter} disabled={orderListTab !== 'closed'}>
@@ -1896,7 +2390,12 @@
                   <td>
                     <span class:side-ask={side === 'Ask'} class:side-bid={side === 'Bid'} class="side-badge">{side}</span>
                   </td>
-                  <td>{tokenSymbol(pairView.baseTokenId)}/{tokenSymbol(pairView.quoteTokenId)}</td>
+                  <td>
+                    <span>{tokenSymbol(pairView.baseTokenId)}/{tokenSymbol(pairView.quoteTokenId)}</span>
+                    {#if offer.crossJurisdiction}
+                      <span class="route-badge">Cross-j</span>
+                    {/if}
+                  </td>
                   <td>{formatPriceTicks(offerPriceTicks(offer))}</td>
                   <td>
                     {#if isDust}
@@ -2123,6 +2622,120 @@
     flex-shrink: 0;
   }
 
+  .route-builder {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .route-select-row {
+    display: grid;
+    grid-template-columns: 52px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    padding: 0 10px;
+    height: 36px;
+    background: #111217;
+    border: 1px solid #1e2028;
+    border-radius: 6px;
+    box-sizing: border-box;
+  }
+
+  .route-select-row span {
+    color: #7c8597;
+    font-size: 12px;
+    font-weight: 600;
+  }
+
+  .route-select {
+    width: 100%;
+    height: 100%;
+    min-width: 0;
+    padding: 0;
+    color: #d1d5db;
+    background: transparent;
+    border: 0;
+    border-radius: 0;
+    font-size: 12px;
+    box-sizing: border-box;
+  }
+
+  .route-flow {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr);
+    align-items: stretch;
+    gap: 6px;
+  }
+
+  .route-node {
+    display: grid;
+    gap: 3px;
+    min-width: 0;
+    padding: 8px;
+    background: #0c0d12;
+    border: 1px solid #1e2028;
+    border-radius: 6px;
+  }
+
+  .route-node-kicker {
+    color: #6b7280;
+    font-size: 10px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .route-node strong,
+  .route-node span,
+  .route-node em {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .route-node strong {
+    color: #e5e7eb;
+    font-size: 12px;
+  }
+
+  .route-node span {
+    color: #9ca3af;
+    font-size: 11px;
+  }
+
+  .route-node em {
+    color: #fbbf24;
+    font-size: 11px;
+    font-style: normal;
+    font-weight: 700;
+  }
+
+  .route-arrow {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    color: #6b7280;
+    font-size: 12px;
+    font-weight: 700;
+  }
+
+  .route-checkbox {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    color: #a7f3d0;
+    font-size: 12px;
+  }
+
+  .route-checkbox input {
+    width: 14px;
+    height: 14px;
+    margin: 0;
+    accent-color: #22c55e;
+  }
+
   .step-btn {
     display: flex;
     align-items: center;
@@ -2235,6 +2848,21 @@
   .capacity-warn {
     color: #f59e0b;
     font-size: 11px;
+  }
+
+  .route-badge {
+    display: inline-flex;
+    align-items: center;
+    height: 18px;
+    margin-left: 6px;
+    padding: 0 6px;
+    border-radius: 999px;
+    border: 1px solid rgba(96, 165, 250, 0.35);
+    background: rgba(59, 130, 246, 0.1);
+    color: #93c5fd;
+    font-size: 10px;
+    font-weight: 700;
+    vertical-align: middle;
   }
 
   .scope-btn {

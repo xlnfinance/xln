@@ -79,6 +79,7 @@ contract Depository is ReentrancyGuardLite {
 
   address public immutable admin;
   uint256 private constant LOCAL_DEV_CHAIN_ID = 31337;
+  uint256 private constant SECONDARY_LOCAL_DEV_CHAIN_ID = 31338;
   uint256 private constant DEBT_ENFORCEMENT_CHUNK = 32;
   uint256 private constant MAX_BATCH_FLASHLOANS = 8;
   uint256 private constant MAX_BATCH_RESERVE_TO_RESERVE = 64;
@@ -99,7 +100,10 @@ contract Depository is ReentrancyGuardLite {
   event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
 
   modifier onlyLocalDevAdmin() {
-    if (msg.sender != admin || block.chainid != LOCAL_DEV_CHAIN_ID) revert E2();
+    if (
+      msg.sender != admin ||
+      (block.chainid != LOCAL_DEV_CHAIN_ID && block.chainid != SECONDARY_LOCAL_DEV_CHAIN_ID)
+    ) revert E2();
     _;
   }
 
@@ -224,7 +228,7 @@ contract Depository is ReentrancyGuardLite {
 
   /**
    * @notice Mint reserves for multiple entity/token pairs in a single local dev tx.
-   * @dev Local Anvil bootstrap helper. Disabled outside chain id 31337.
+   * @dev Local Anvil bootstrap helper. Disabled outside configured local dev chain IDs.
    */
   function mintToReserveBatch(ReserveMint[] calldata mints) external onlyLocalDevAdmin {
     uint len = mints.length;

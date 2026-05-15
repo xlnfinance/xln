@@ -424,6 +424,7 @@
     rpcs: string[];
     ticker: string;
     contracts?: JMachineConfig['contracts'];
+    deploy?: boolean;
   }>) {
     const config: JMachineConfig = {
       name: event.detail.name,

@@ -14,4 +14,6 @@ exec bun runtime/scripts/dev-anvil-stack.ts \
   --spawn-anvil \
   --keep-alive \
   --port "$RPC_PORT" \
-  --name "Localhost 2"
+  --chain-id 31338 \
+  --ticker TRX \
+  --name "Local Tron"
