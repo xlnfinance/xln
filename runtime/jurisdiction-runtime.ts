@@ -81,11 +81,15 @@ export function resolveRuntimeJurisdictionConfig(
       ? Number(rawChainId)
       : (typeof rawChainId === 'number' && Number.isFinite(rawChainId) ? rawChainId : undefined);
 
-  const name = firstDefined(current?.name, replica?.name, env.activeJurisdiction);
+  const currentName = current?.name?.trim() || undefined;
+  const currentAddress = current?.address?.trim() || undefined;
+  const replicaAddress = replica?.rpcs?.[0]?.trim() || undefined;
+  const name = firstDefined(currentName, replica?.name, env.activeJurisdiction);
   const address = firstDefined(
-    current?.address,
-    replica?.rpcs?.[0],
+    currentAddress,
+    replicaAddress,
     browserVm ? 'browservm://' : undefined,
+    name ? `jreplica://${name}` : undefined,
   );
 
   if (!name || !address || !depositoryAddress || !entityProviderAddress) {
@@ -172,7 +176,9 @@ export function assertEntityJurisdictionBinding(
   incomingJurisdiction?: JurisdictionConfig | null,
 ): void {
   const incomingName = getJurisdictionConfigName(incomingJurisdiction);
-  if (!incomingName) return;
+  if (!incomingName) {
+    throw new Error(`ENTITY_JURISDICTION_MISSING: entity=${entityId}`);
+  }
   for (const replica of env.eReplicas?.values?.() || []) {
     if (!sameEntity(replica, entityId)) continue;
     const existingName = getJurisdictionConfigName(replica.state?.config?.jurisdiction);
@@ -182,6 +188,42 @@ export function assertEntityJurisdictionBinding(
         `ENTITY_JURISDICTION_CONFLICT: entity=${entityId} existing=${existingName} incoming=${incomingName}`,
       );
     }
+  }
+}
+
+export function requireBoundEntityConfig(
+  env: Env,
+  entityId: string,
+  config: ConsensusConfig,
+): ConsensusConfig {
+  const resolved = mergeRuntimeJurisdictionConfig(config, env);
+  const jurisdictionName = getJurisdictionConfigName(resolved.jurisdiction);
+  if (!jurisdictionName) {
+    throw new Error(`ENTITY_JURISDICTION_MISSING: entity=${entityId}`);
+  }
+  const jurisdiction = requireRuntimeJurisdictionConfigByName(env, jurisdictionName, resolved.jurisdiction);
+  assertEntityJurisdictionBinding(env, entityId, jurisdiction);
+  return {
+    ...resolved,
+    jurisdiction,
+  };
+}
+
+export function backfillEntityJurisdictionBinding(
+  env: Env,
+  entityId: string,
+  jurisdiction: JurisdictionConfig,
+): void {
+  const jurisdictionName = getJurisdictionConfigName(jurisdiction);
+  if (!jurisdictionName) return;
+  for (const replica of env.eReplicas?.values?.() || []) {
+    if (!sameEntity(replica, entityId)) continue;
+    const existingName = getJurisdictionConfigName(replica.state?.config?.jurisdiction);
+    if (existingName) continue;
+    replica.state.config = {
+      ...replica.state.config,
+      jurisdiction,
+    };
   }
 }
 

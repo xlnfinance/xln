@@ -1,6 +1,6 @@
   <script lang="ts">
     import type { AccountMachine, EntityReplica, Tab } from '$lib/types/ui';
-  import type { CrossJurisdictionSwapRoute, Delta, Env, EnvSnapshot, RoutedEntityInput } from '@xln/runtime/xln-api';
+  import type { CrossJurisdictionSwapRoute, Delta, EntityState, Env, EnvSnapshot, RoutedEntityInput } from '@xln/runtime/xln-api';
   import { getBestAsk, getBestBid } from '@xln/runtime/xln-api';
   import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import type { SwapBookEntry } from '@xln/runtime/xln-api';
@@ -9,7 +9,6 @@
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import { amountToUsd } from '$lib/utils/assetPricing';
   import OrderbookPanel from '../Trading/OrderbookPanel.svelte';
-  import SwapOrderModeRail from './SwapOrderModeRail.svelte';
   import SwapPairToolbar from './SwapPairToolbar.svelte';
   import { resolveEntityName } from '$lib/utils/entityNaming';
   import { formatEntityId } from '$lib/utils/format';
@@ -72,6 +71,7 @@
     sourceCount: number;
     updatedAt: number;
   };
+  type FrameLike = Env | EnvSnapshot | EntityState | null | undefined;
   type ClosedOrderStatus = 'filled' | 'partial' | 'canceled' | 'closed';
   type ResolveRecord = {
     fillRatio: number;
@@ -187,6 +187,8 @@
   let routeOptions: SwapRouteOption[] = [];
   let selectedCrossTarget: CrossTargetOption | null = null;
   let autoExtendCrossInbound = true;
+  let selectedSourceEntityValue = '';
+  let routeDetailsOpen = false;
   let crossTargetInCapacity = 0n;
   let crossAutoInboundCreditTarget: bigint | null = null;
   let crossCurrentPeerCreditLimit = 0n;
@@ -198,7 +200,17 @@
     $: activeFrame = env;
     $: runtimeEnv = isRuntimeEnv(activeFrame) ? activeFrame : null;
     $: activeIsLive = isLive;
-    $: currentReplica = replica;
+    $: sourceEntityOptions = buildSourceEntityOptions(activeFrame, tab.entityId);
+    $: if (!sourceEntityOptions.some((option) => option.value === selectedSourceEntityValue)) {
+      const tabEntityId = String(tab.entityId || '').trim().toLowerCase();
+      selectedSourceEntityValue = sourceEntityOptions.find((option) => option.value === tabEntityId)?.value
+        || sourceEntityOptions[0]?.value
+        || '';
+    }
+    $: selectedSourceEntity = sourceEntityOptions.find((option) => option.value === selectedSourceEntityValue) || null;
+    $: currentReplica = selectedSourceEntity?.replica || replica;
+    $: sourceEntityIdValue = String(currentReplica?.entityId || currentReplica?.state?.entityId || tab.entityId || '').trim().toLowerCase();
+    $: sourceSignerIdValue = String(currentReplica?.signerId || tab.signerId || '').trim().toLowerCase();
 
     // Get available accounts (counterparties)
   $: accounts = currentReplica?.state?.accounts
@@ -261,8 +273,8 @@
     return resolved || formatEntityId(accountIdValue);
   }
   $: selectedHubOptions = hubAccountIds.map((id) => ({ value: id, label: accountLabel(id) }));
-  $: crossTargetOptions = buildCrossTargetOptions();
-  $: routeOptions = buildRouteOptions();
+  $: crossTargetOptions = buildCrossTargetOptions(activeFrame, sourceEntityIdValue, currentReplica);
+  $: routeOptions = buildRouteOptions(sourceEntityIdValue, currentReplica, activeOrderAccountId, crossTargetOptions);
   $: if (!routeOptions.some((option) => option.value === selectedRouteValue)) {
     selectedRouteValue = 'same';
   }
@@ -273,10 +285,24 @@
   $: targetJurisdictionLabel = swapRouteMode === 'cross' && selectedCrossTarget
     ? selectedCrossTarget.targetJurisdiction
     : sourceJurisdictionLabel;
-  $: sourceRouteEntityLabel = `${accountLabel(String(tab.entityId || ''))} -> ${accountLabel(String(activeOrderAccountId || ''))}`;
+  $: sourceRouteEntityLabel = `${accountLabel(sourceEntityIdValue)} -> ${accountLabel(String(activeOrderAccountId || ''))}`;
   $: targetRouteEntityLabel = swapRouteMode === 'cross' && selectedCrossTarget
     ? `${accountLabel(selectedCrossTarget.targetHubEntityId)} -> ${accountLabel(selectedCrossTarget.targetEntityId)}`
-    : `${accountLabel(String(activeOrderAccountId || ''))} -> ${accountLabel(String(tab.entityId || ''))}`;
+    : `${accountLabel(String(activeOrderAccountId || ''))} -> ${accountLabel(sourceEntityIdValue)}`;
+  $: sourceChainLabel = selectedSourceEntity?.jurisdiction || sourceJurisdictionLabel;
+  $: selectedRouteOption = routeOptions.find((option) => option.value === selectedRouteValue) || routeOptions[0] || null;
+  $: routeVenueLabel = activeOrderAccountId ? accountLabel(activeOrderAccountId) : 'Select venue';
+  $: targetAccountReady = swapRouteMode !== 'cross' || Boolean(selectedCrossTarget && hasReplicaAccount(
+    findReplicaByEntityId(selectedCrossTarget.targetEntityId),
+    selectedCrossTarget.targetHubEntityId,
+  ));
+  $: canCreateTargetAccount = Boolean(
+    swapRouteMode === 'cross'
+    && selectedCrossTarget
+    && selectedCrossTarget.targetHubEntityId
+    && !targetAccountReady
+    && activeIsLive
+  );
   $: orderbookSourceLabels = Object.fromEntries(
     orderbookHubIds.map((id) => [id, accountLabel(id)]),
   );
@@ -292,6 +318,15 @@
     targetSignerId: string;
     targetHubEntityId: string;
     targetJurisdiction: string;
+    hasTargetAccount: boolean;
+  };
+  type SourceEntityOption = {
+    value: string;
+    label: string;
+    entityId: string;
+    signerId: string;
+    jurisdiction: string;
+    replica: EntityReplica;
   };
   type SwapRouteOption = {
     value: string;
@@ -303,6 +338,8 @@
     sourceHubEntityId: string;
     targetEntityId: string;
     targetHubEntityId: string;
+    targetLabel: string;
+    disabled?: boolean;
   };
   type OfferLike = {
     giveTokenId: number;
@@ -324,7 +361,7 @@
   }
 
   function getAccountDelta(counterpartyEntityId: string, tokenIdValue: number): { delta: Delta; isLeft: boolean } | null {
-    if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0 || !tab.entityId) return null;
+    if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0 || !sourceEntityIdValue) return null;
     const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
     const account = currentReplica?.state?.accounts?.get?.(resolvedCounterparty);
     const deltas = account?.deltas as TokenKeyedMap<Delta> | undefined;
@@ -333,7 +370,7 @@
     if (!delta) return null;
     return {
       delta,
-      isLeft: String(tab.entityId).toLowerCase() < String(resolvedCounterparty).toLowerCase(),
+      isLeft: sourceEntityIdValue < String(resolvedCounterparty).toLowerCase(),
     };
   }
 
@@ -397,11 +434,11 @@
     }
   }
 
-  function localEntityReplicas(): EntityReplica[] {
-    if (!(activeFrame?.eReplicas instanceof Map)) return [];
+  function localEntityReplicas(frame: FrameLike = activeFrame): EntityReplica[] {
+    if (!frame || !('eReplicas' in frame) || !(frame.eReplicas instanceof Map)) return [];
     const seen = new Set<string>();
     const out: EntityReplica[] = [];
-    for (const [key, candidate] of activeFrame.eReplicas.entries()) {
+    for (const [key, candidate] of frame.eReplicas.entries()) {
       if (!candidate?.state) continue;
       const entityId = String(candidate.entityId || key.split(':')[0] || candidate.state.entityId || '').trim().toLowerCase();
       if (!entityId || seen.has(entityId)) continue;
@@ -411,40 +448,92 @@
     return out;
   }
 
-  function buildCrossTargetOptions(): CrossTargetOption[] {
-    const sourceEntityId = String(tab.entityId || '').trim().toLowerCase();
-    const sourceJurisdiction = getReplicaJurisdictionName(currentReplica);
+  function buildSourceEntityOptions(
+    frame: FrameLike = activeFrame,
+    currentEntityId = String(tab.entityId || '').trim().toLowerCase(),
+  ): SourceEntityOption[] {
+    const options = localEntityReplicas(frame)
+      .map((candidate) => {
+        const entityId = String(candidate.entityId || candidate.state?.entityId || '').trim().toLowerCase();
+        const signerId = String(candidate.signerId || '').trim().toLowerCase();
+        const jurisdiction = getReplicaJurisdictionName(candidate);
+        if (!entityId || !signerId || !jurisdiction) return null;
+        return {
+          value: entityId,
+          label: `${jurisdiction} · ${accountLabel(entityId)}`,
+          entityId,
+          signerId,
+          jurisdiction,
+          replica: candidate,
+        } satisfies SourceEntityOption;
+      })
+      .filter((option): option is SourceEntityOption => option !== null);
+    return options.sort((a, b) => {
+      const current = String(currentEntityId || '').trim().toLowerCase();
+      if (a.entityId === current && b.entityId !== current) return -1;
+      if (b.entityId === current && a.entityId !== current) return 1;
+      return compareStableText(a.label, b.label);
+    });
+  }
+
+  function getProfileJurisdictionName(profile: GossipProfile | undefined | null): string {
+    return String(profile?.metadata?.jurisdiction?.name || '').trim();
+  }
+
+  function findHubProfileForJurisdiction(jurisdictionName: string): GossipProfile | null {
+    const normalized = String(jurisdictionName || '').trim().toLowerCase();
+    if (!normalized) return null;
+    const profiles = getGossipProfiles()
+      .filter((profile) => profile?.metadata?.isHub === true)
+      .filter((profile) => getProfileJurisdictionName(profile).toLowerCase() === normalized);
+    return profiles.sort((a, b) => compareStableText(String(a.name || a.entityId), String(b.name || b.entityId)))[0] || null;
+  }
+
+  function buildCrossTargetOptions(
+    frame: FrameLike = activeFrame,
+    sourceEntityId = sourceEntityIdValue,
+    sourceReplica: EntityReplica | null | undefined = currentReplica,
+  ): CrossTargetOption[] {
+    const sourceJurisdiction = getReplicaJurisdictionName(sourceReplica);
     if (!sourceEntityId || !sourceJurisdiction) return [];
     const options: CrossTargetOption[] = [];
-    for (const candidate of localEntityReplicas()) {
+    for (const candidate of localEntityReplicas(frame)) {
       const targetEntityId = String(candidate.entityId || candidate.state?.entityId || '').trim().toLowerCase();
       if (!targetEntityId || targetEntityId === sourceEntityId) continue;
       const targetJurisdiction = getReplicaJurisdictionName(candidate);
       if (!targetJurisdiction || targetJurisdiction === sourceJurisdiction) continue;
       const targetSignerId = String(candidate.signerId || '').trim();
       if (!targetSignerId) continue;
-      const targetHubIds = Array.from(candidate.state?.accounts?.keys?.() || [])
+      const accountHubIds = Array.from(candidate.state?.accounts?.keys?.() || [])
         .map((id) => String(id || '').trim())
         .filter((id) => id && isHubAccount(id))
         .sort(compareStableText);
+      const fallbackHub = findHubProfileForJurisdiction(targetJurisdiction)?.entityId || '';
+      const targetHubIds = accountHubIds.length > 0 ? accountHubIds : (fallbackHub ? [fallbackHub] : []);
       for (const targetHubEntityId of targetHubIds) {
+        const hasTargetAccount = accountHubIds.some((id) => id.toLowerCase() === targetHubEntityId.toLowerCase());
         options.push({
           value: `${targetEntityId}:${targetHubEntityId}`,
-          label: `${targetJurisdiction} · ${accountLabel(targetHubEntityId)}`,
+          label: `${targetJurisdiction} · ${accountLabel(targetHubEntityId)}${hasTargetAccount ? '' : ' · setup required'}`,
           targetEntityId,
           targetSignerId,
           targetHubEntityId,
           targetJurisdiction,
+          hasTargetAccount,
         });
       }
     }
     return options.sort((a, b) => compareStableText(a.label, b.label));
   }
 
-  function buildRouteOptions(): SwapRouteOption[] {
-    const sourceJurisdiction = getReplicaJurisdictionName(currentReplica) || 'Current';
-    const sourceEntityId = String(tab.entityId || '').trim().toLowerCase();
-    const sourceHubEntityId = String(activeOrderAccountId || '').trim().toLowerCase();
+  function buildRouteOptions(
+    sourceEntityId = sourceEntityIdValue,
+    sourceReplica: EntityReplica | null | undefined = currentReplica,
+    selectedHubEntityId = activeOrderAccountId,
+    targets: CrossTargetOption[] = crossTargetOptions,
+  ): SwapRouteOption[] {
+    const sourceJurisdiction = getReplicaJurisdictionName(sourceReplica) || 'Current';
+    const sourceHubEntityId = String(selectedHubEntityId || '').trim().toLowerCase();
     const sameLabel = sourceHubEntityId
       ? `${sourceJurisdiction} · ${accountLabel(sourceHubEntityId)}`
       : `${sourceJurisdiction} · select hub`;
@@ -458,9 +547,10 @@
       sourceHubEntityId,
       targetEntityId: sourceEntityId,
       targetHubEntityId: sourceHubEntityId,
+      targetLabel: sameLabel,
     }];
 
-    for (const target of crossTargetOptions) {
+    for (const target of targets) {
       options.push({
         value: target.value,
         label: `Cross-j · ${sourceJurisdiction} -> ${target.targetJurisdiction} · ${accountLabel(target.targetHubEntityId)}`,
@@ -471,6 +561,7 @@
         sourceHubEntityId,
         targetEntityId: target.targetEntityId,
         targetHubEntityId: target.targetHubEntityId,
+        targetLabel: target.label,
       });
     }
     return options;
@@ -579,6 +670,9 @@
     }
     return tokenIds;
   })();
+  $: swapTokenOptions = Array.from(allowedSwapTokenIds)
+    .sort((a, b) => tokenSymbol(a).localeCompare(tokenSymbol(b)))
+    .map((tokenId) => ({ tokenId, symbol: tokenSymbol(tokenId) }));
   $: if (pairOptions.length > 0) {
     const hasSelected = pairOptions.some((option) => option.value === selectedPairValue);
     if (!hasSelected) {
@@ -590,6 +684,43 @@
   function setTradeSide(next: 'buy-base' | 'sell-base'): void {
     tradeSide = next;
     selectedOrderLevel = null;
+  }
+
+  function setSwapTokens(nextGiveToken: number, nextWantToken: number): void {
+    if (!Number.isFinite(nextGiveToken) || !Number.isFinite(nextWantToken)) return;
+    if (nextGiveToken <= 0 || nextWantToken <= 0 || nextGiveToken === nextWantToken) {
+      giveTokenId = String(nextGiveToken || '');
+      wantTokenId = String(nextWantToken || '');
+      selectedOrderLevel = null;
+      submitError = '';
+      return;
+    }
+    const oriented = resolvePairOrientation(nextGiveToken, nextWantToken);
+    const pairValue = `${oriented.baseTokenId}/${oriented.quoteTokenId}`;
+    if (pairOptions.some((option) => option.value === pairValue)) {
+      selectedPairValue = pairValue;
+    }
+    tradeSide = nextGiveToken === oriented.baseTokenId ? 'sell-base' : 'buy-base';
+    giveTokenId = String(nextGiveToken);
+    wantTokenId = String(nextWantToken);
+    selectedOrderLevel = null;
+    submitError = '';
+  }
+
+  function handleSourceEntityChange(event: Event): void {
+    selectedSourceEntityValue = String((event.currentTarget as HTMLSelectElement | null)?.value || '');
+    selectedOrderLevel = null;
+    submitError = '';
+  }
+
+  function handleGiveTokenChange(event: Event): void {
+    const nextGive = Number.parseInt(String((event.currentTarget as HTMLSelectElement | null)?.value || ''), 10);
+    setSwapTokens(nextGive, wantToken);
+  }
+
+  function handleWantTokenChange(event: Event): void {
+    const nextWant = Number.parseInt(String((event.currentTarget as HTMLSelectElement | null)?.value || ''), 10);
+    setSwapTokens(giveToken, nextWant);
   }
 
   $: if (selectedPair) {
@@ -714,8 +845,8 @@
 
   function readPeerCreditLimit(counterpartyEntityId: string, tokenIdValue: number): bigint {
     const delta = readAccountDelta(counterpartyEntityId, tokenIdValue);
-    if (!delta || !tab.entityId) return 0n;
-    const isLeft = String(tab.entityId).toLowerCase() < String(resolveCounterpartyId(counterpartyEntityId)).toLowerCase();
+    if (!delta || !sourceEntityIdValue) return 0n;
+    const isLeft = sourceEntityIdValue < String(resolveCounterpartyId(counterpartyEntityId)).toLowerCase();
     const raw = isLeft ? delta.rightCreditLimit : delta.leftCreditLimit;
     return nonNegative(toBigIntSafe(raw) ?? 0n);
   }
@@ -752,7 +883,7 @@
     desiredInboundAmount: bigint,
   ): bigint | null {
     if (!counterpartyEntityId || !Number.isFinite(tokenIdValue) || tokenIdValue <= 0 || desiredInboundAmount <= 0n) return null;
-    if (!activeXlnFunctions?.deriveDelta || !tab.entityId) return desiredInboundAmount;
+    if (!activeXlnFunctions?.deriveDelta || !sourceEntityIdValue) return desiredInboundAmount;
     const accountDelta = getAccountDelta(counterpartyEntityId, tokenIdValue);
     if (!accountDelta) return desiredInboundAmount;
     const resolvedCounterparty = resolveCounterpartyId(counterpartyEntityId);
@@ -1061,7 +1192,7 @@
       : liveAvailableWantInCapacity.toString();
     return {
       isLive: activeIsLive,
-      entityId: String(tab.entityId || ''),
+      entityId: sourceEntityIdValue,
       counterpartyId: String(candidateCounterpartyId || ''),
       accountIds,
       giveToken: candidateGiveToken,
@@ -1223,6 +1354,47 @@
   function handlePairChange(): void {
     selectedOrderLevel = null;
     submitError = '';
+  }
+
+  function defaultCreditLimitForToken(tokenIdValue: number): bigint {
+    const decimals = BigInt(Math.max(0, getTokenDecimals(tokenIdValue)));
+    return 10_000n * 10n ** decimals;
+  }
+
+  async function prepareSelectedTargetAccount(): Promise<void> {
+    submitError = '';
+    try {
+      const env = runtimeEnv;
+      if (!env) throw new Error('XLN environment not ready');
+      if (!activeIsLive) throw new Error('Target account setup requires LIVE mode');
+      const target = selectedCrossTarget;
+      if (!target) throw new Error('Select target network first');
+      if (!target.targetHubEntityId) throw new Error('No hub is available for target network');
+      const targetReplica = findReplicaByEntityId(target.targetEntityId);
+      if (!targetReplica) throw new Error('Target sibling entity is not available in this runtime');
+      const targetSignerId = String(target.targetSignerId || targetReplica.signerId || '').trim().toLowerCase();
+      if (!targetSignerId) throw new Error('Target signer is not available');
+      const desiredCredit = crossAutoInboundCreditTarget && crossAutoInboundCreditTarget > 0n
+        ? crossAutoInboundCreditTarget
+        : defaultCreditLimitForToken(wantToken);
+      await enqueueEntityInputs(env, [{
+        entityId: target.targetEntityId,
+        signerId: targetSignerId,
+        entityTxs: [{
+          type: 'openAccount' as const,
+          data: {
+            targetEntityId: target.targetHubEntityId,
+            tokenId: wantToken,
+            creditAmount: desiredCredit,
+          },
+        }],
+      }]);
+      toasts.success(`Target account setup queued on ${target.targetJurisdiction}`);
+    } catch (error) {
+      const message = (error as Error)?.message || 'Unknown error';
+      submitError = `Target account setup failed: ${message}`;
+      toasts.error(submitError);
+    }
   }
 
   function setOrderListTab(nextTab: 'open' | 'closed'): void {
@@ -1822,8 +1994,10 @@
       const env = runtimeEnv;
       if (!env) throw new Error('XLN environment not ready');
       if (!activeIsLive) throw new Error('Swap actions are only available in LIVE mode');
-      const signerId = resolveSignerId(tab.entityId);
+      const sourceEntityId = sourceEntityIdValue;
+      const signerId = sourceSignerIdValue || resolveSignerId(sourceEntityId);
       if (!signerId) throw new Error('No signer available for selected entity');
+      if (!sourceEntityId) throw new Error('No source entity selected');
 
       const resolvedCounterparty = resolveCounterpartyId(activeOrderAccountId);
       if (!resolvedCounterparty) {
@@ -1925,11 +2099,11 @@
         }
         return {
           orderId: offerId,
-          makerEntityId: tab.entityId,
+          makerEntityId: sourceEntityId,
           hubEntityId: resolvedCounterparty,
           source: {
             jurisdiction: sourceJurisdiction,
-            entityId: tab.entityId,
+            entityId: sourceEntityId,
             counterpartyEntityId: resolvedCounterparty,
             tokenId: giveToken,
             amount: effectiveGiveAmount,
@@ -1975,7 +2149,7 @@
       });
 
       const inputs: RoutedEntityInput[] = [{
-        entityId: tab.entityId,
+        entityId: sourceEntityId,
         signerId,
         entityTxs,
       }];
@@ -2020,17 +2194,18 @@
   }
 
   async function cancelSwapOffer(offerId: string, accountId: string) {
-    if (!tab.entityId) return;
+    const sourceEntityId = sourceEntityIdValue;
+    if (!sourceEntityId) return;
 
     try {
       const env = runtimeEnv;
       if (!env) throw new Error('XLN environment not ready');
       if (!activeIsLive) throw new Error('Swap actions are only available in LIVE mode');
-      const signerId = resolveSignerId(tab.entityId);
+      const signerId = sourceSignerIdValue || resolveSignerId(sourceEntityId);
       if (!signerId) throw new Error('No signer available for selected entity');
 
       await enqueueEntityInputs(env, [{
-        entityId: tab.entityId,
+        entityId: sourceEntityId,
         signerId,
         entityTxs: [{
           type: 'proposeCancelSwap',
@@ -2174,22 +2349,114 @@
       {/if}
     </div>
     <div class="section section-order">
-      <SwapOrderModeRail
-        tradeSide={tradeSide}
-        selectedHubOptions={selectedHubOptions}
-        selectedHubValue={createOrderAccountId}
-        on:tradesidechange={(event) => setTradeSide(event.detail)}
-        on:hubchange={(event) => handleSelectedHubChange(event.detail)}
-      />
+      <div class="anyswap-builder" data-testid="swap-any-builder">
+        <div class="swap-leg-card">
+          <div class="leg-header">
+            <span>From</span>
+            <select
+              class="chain-select"
+              value={selectedSourceEntityValue}
+              data-testid="swap-from-chain-select"
+              on:change={handleSourceEntityChange}
+            >
+              {#each sourceEntityOptions as option}
+                <option value={option.value}>{option.jurisdiction}</option>
+              {/each}
+            </select>
+          </div>
+          <div class="leg-main">
+            <input
+              type="text"
+              bind:value={orderAmountInput}
+              inputmode="decimal"
+              data-testid="swap-order-amount"
+              aria-label="Swap from amount"
+            />
+            <select
+              class="token-select"
+              value={String(giveToken)}
+              data-testid="swap-from-token-select"
+              aria-label="Swap from token"
+              on:change={handleGiveTokenChange}
+            >
+              {#each swapTokenOptions as token}
+                <option value={token.tokenId}>{token.symbol}</option>
+              {/each}
+            </select>
+          </div>
+          <div class="leg-meta">
+            <span>{sourceRouteEntityLabel}</span>
+            <strong>{formattedAvailableGive}</strong>
+          </div>
+        </div>
 
-      <div class="order-input-row">
-        <span class="input-label">Price</span>
+        <div class="swap-leg-divider">
+          <button
+            type="button"
+            class="direction-chip"
+            on:click={() => setSwapTokens(wantToken, giveToken)}
+            title="Swap selected tokens"
+          >⇅</button>
+          <button
+            type="button"
+            class="side-compat"
+            data-testid="swap-side-buy"
+            on:click={() => setTradeSide('buy-base')}
+            title="Use buy-base direction"
+          >Buy</button>
+          <button
+            type="button"
+            class="side-compat"
+            data-testid="swap-side-sell"
+            on:click={() => setTradeSide('sell-base')}
+            title="Use sell-base direction"
+          >Sell</button>
+        </div>
+
+        <div class="swap-leg-card">
+          <div class="leg-header">
+            <span>To</span>
+            <select
+              class="chain-select"
+              bind:value={selectedRouteValue}
+              data-testid="swap-route-select"
+              aria-label="Swap to network"
+              on:change={() => { submitError = ''; }}
+            >
+              {#each routeOptions as option}
+                <option value={option.value} disabled={option.disabled}>{option.targetJurisdiction}</option>
+              {/each}
+            </select>
+          </div>
+          <div class="leg-main">
+            <input type="text" readonly value={formatAmount(wantAmount, wantToken)} class="readonly-input receive-amount" aria-label="Estimated receive amount" />
+            <select
+              class="token-select"
+              value={String(wantToken)}
+              data-testid="swap-to-token-select"
+              aria-label="Swap to token"
+              on:change={handleWantTokenChange}
+            >
+              {#each swapTokenOptions as token}
+                <option value={token.tokenId}>{token.symbol}</option>
+              {/each}
+            </select>
+          </div>
+          <div class="leg-meta">
+            <span>{targetRouteEntityLabel}</span>
+            <strong>{targetAccountReady ? estimatedReceiveLabel : 'Account setup required'}</strong>
+          </div>
+        </div>
+      </div>
+
+      <div class="quote-row">
+        <span class="input-label">Limit rate</span>
         <input
           type="text"
           bind:value={priceRatioInput}
           inputmode="decimal"
           data-testid="swap-order-price"
-          aria-label="Swap order price"
+          aria-label="Swap limit rate"
           on:input={handlePriceRatioInput}
         />
         <span class="input-suffix">{quoteTokenSymbol}</span>
@@ -2199,14 +2466,17 @@
         </div>
       </div>
 
-      <div class="order-input-row">
-        <span class="input-label">Amount</span>
-        <input type="text" bind:value={orderAmountInput} inputmode="decimal" data-testid="swap-order-amount" aria-label="Swap order amount" />
-        <span class="input-suffix">{giveTokenSymbol}</span>
-        <div class="input-steppers">
-          <button type="button" class="step-btn" on:click={() => stepAmount(1)}>▲</button>
-          <button type="button" class="step-btn" on:click={() => stepAmount(-1)}>▼</button>
-        </div>
+      <div class="venue-row">
+        <span>Venue</span>
+        <select
+          value={createOrderAccountId}
+          data-testid="swap-account-select"
+          on:change={(event) => handleSelectedHubChange((event.currentTarget as HTMLSelectElement).value)}
+        >
+          {#each selectedHubOptions as hub (hub.value)}
+            <option value={hub.value}>{hub.label}</option>
+          {/each}
+        </select>
       </div>
 
       <div class="size-slider-row">
@@ -2234,26 +2504,12 @@
         </div>
       </div>
 
-      <label class="order-input-row">
-        <span class="input-label">Total</span>
-        <input type="text" readonly value={formatAmount(wantAmount, wantToken)} class="readonly-input" />
-        <span class="input-suffix">{wantTokenSymbol}</span>
-      </label>
-
       <div class="route-builder" data-testid="swap-route-picker">
-        <label class="route-select-row">
-          <span>Route</span>
-          <select
-            class="route-select"
-            bind:value={selectedRouteValue}
-            data-testid="swap-route-select"
-            on:change={() => { submitError = ''; }}
-          >
-            {#each routeOptions as option}
-              <option value={option.value}>{option.label}</option>
-            {/each}
-          </select>
-        </label>
+        <button type="button" class="route-summary" on:click={() => routeDetailsOpen = !routeDetailsOpen}>
+          <span>Best route</span>
+          <strong>{selectedRouteOption?.mode === 'cross' ? 'XLN cross-j' : 'XLN same-j'}</strong>
+          <em>{routeVenueLabel}</em>
+        </button>
         <div class="route-flow" data-testid="swap-route-flow">
           <div class="route-node">
             <span class="route-node-kicker">Sell</span>
@@ -2274,6 +2530,13 @@
             <input type="checkbox" bind:checked={autoExtendCrossInbound} />
             <span>Auto-extend target inbound capacity</span>
           </label>
+        {/if}
+        {#if routeDetailsOpen}
+          <div class="route-details">
+            <span>Source account: {sourceRouteEntityLabel}</span>
+            <span>Target account: {targetRouteEntityLabel}</span>
+            <span>Venue/orderbook: {routeVenueLabel}</span>
+          </div>
         {/if}
       </div>
 
@@ -2308,8 +2571,18 @@
         on:click={placeSwapOffer}
         disabled={Boolean(swapActionDisabledReason)}
       >
-        {tradeSide === 'buy-base' ? `Buy ${baseTokenSymbol.replace(/^W/, '')}` : `Sell ${baseTokenSymbol.replace(/^W/, '')}`}
+        Swap {giveTokenSymbol} to {wantTokenSymbol}
       </button>
+      {#if canCreateTargetAccount}
+        <button
+          type="button"
+          class="secondary-setup-btn"
+          data-testid="swap-create-target-account"
+          on:click={prepareSelectedTargetAccount}
+        >
+          Create target account
+        </button>
+      {/if}
       {#if swapActionDisabledReason || submitError}
         <p class="form-error" data-testid="swap-form-error">{submitError || swapActionDisabledReason}</p>
       {/if}
@@ -2606,6 +2879,182 @@
     border: none;
   }
 
+  .anyswap-builder {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .swap-leg-card {
+    display: grid;
+    gap: 8px;
+    padding: 10px;
+    background: #0c0d12;
+    border: 1px solid #20232c;
+    border-radius: 8px;
+  }
+
+  .leg-header,
+  .leg-main,
+  .leg-meta,
+  .venue-row,
+  .quote-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+  }
+
+  .leg-header {
+    justify-content: space-between;
+  }
+
+  .leg-header span,
+  .venue-row span {
+    color: #8b94a7;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .chain-select,
+  .token-select,
+  .venue-row select {
+    min-width: 0;
+    border: 1px solid #232631;
+    border-radius: 7px;
+    background: #111217;
+    color: #e5e7eb;
+    font-size: 12px;
+    font-weight: 700;
+    color-scheme: dark;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .chain-select {
+    width: min(220px, 68%);
+    max-width: 220px;
+    height: 30px;
+    padding: 0 8px;
+  }
+
+  .token-select {
+    width: 96px;
+    height: 40px;
+    padding: 0 8px;
+    flex-shrink: 0;
+  }
+
+  .leg-main input {
+    flex: 1;
+    min-width: 0;
+    height: 42px;
+    padding: 0;
+    border: none;
+    background: transparent;
+    color: #f3f4f6;
+    font-size: 22px;
+    font-weight: 700;
+    text-align: left;
+  }
+
+  .leg-main input:focus {
+    outline: none;
+  }
+
+  .leg-main .receive-amount {
+    color: #9ca3af;
+  }
+
+  .leg-meta {
+    justify-content: space-between;
+    color: #7c8597;
+    font-size: 11px;
+  }
+
+  .leg-meta span,
+  .leg-meta strong {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .leg-meta strong {
+    color: #d1d5db;
+    font-weight: 700;
+    text-align: right;
+  }
+
+  .swap-leg-divider {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    min-height: 28px;
+  }
+
+  .direction-chip,
+  .side-compat {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 24px;
+    border-radius: 7px;
+    border: 1px solid #252936;
+    background: #141720;
+    color: #a7afbd;
+    font-size: 11px;
+    font-weight: 800;
+  }
+
+  .direction-chip {
+    width: 32px;
+    color: #fbbf24;
+  }
+
+  .side-compat {
+    min-width: 42px;
+    padding: 0 8px;
+  }
+
+  .quote-row,
+  .venue-row {
+    min-height: 36px;
+    padding: 0 10px;
+    margin-bottom: 8px;
+    background: #111217;
+    border: 1px solid #1e2028;
+    border-radius: 6px;
+    box-sizing: border-box;
+  }
+
+  .quote-row input {
+    flex: 1;
+    min-width: 0;
+    height: 100%;
+    border: none;
+    background: transparent;
+    color: #e5e7eb;
+    text-align: right;
+  }
+
+  .quote-row input:focus {
+    outline: none;
+  }
+
+  .venue-row {
+    justify-content: space-between;
+  }
+
+  .venue-row select {
+    width: min(240px, 70%);
+    height: 30px;
+    padding: 0 8px;
+  }
+
   .input-suffix {
     color: #6b7280;
     font-size: 12px;
@@ -2627,6 +3076,42 @@
     grid-template-columns: minmax(0, 1fr);
     gap: 8px;
     margin-bottom: 10px;
+  }
+
+  .route-summary {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    min-height: 34px;
+    padding: 0 10px;
+    background: #101116;
+    border: 1px solid #1e2028;
+    border-radius: 6px;
+    color: #d1d5db;
+    text-align: left;
+  }
+
+  .route-summary span {
+    color: #7c8597;
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+  }
+
+  .route-summary strong,
+  .route-summary em {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 12px;
+  }
+
+  .route-summary em {
+    color: #9ca3af;
+    font-style: normal;
+    text-align: right;
   }
 
   .route-select-row {
@@ -2734,6 +3219,32 @@
     height: 14px;
     margin: 0;
     accent-color: #22c55e;
+  }
+
+  .route-details {
+    display: grid;
+    gap: 4px;
+    padding: 8px 10px;
+    background: #0c0d12;
+    border: 1px solid #1e2028;
+    border-radius: 6px;
+    color: #8b94a7;
+    font-size: 11px;
+  }
+
+  .secondary-setup-btn {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 100%;
+    height: 34px;
+    margin-top: 8px;
+    border-radius: 7px;
+    border: 1px solid rgba(251, 191, 36, 0.35);
+    background: rgba(251, 191, 36, 0.12);
+    color: #fde68a;
+    font-size: 12px;
+    font-weight: 800;
   }
 
   .step-btn {

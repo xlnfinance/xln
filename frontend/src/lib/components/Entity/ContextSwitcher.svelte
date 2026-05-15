@@ -39,6 +39,7 @@
 
   type EntitySummary = {
     entityId: string;
+    signerId: string;
     name: string;
     avatar: string;
     jurisdiction: string;
@@ -89,6 +90,7 @@
         source: 'browser',
         selfEntity: selfEntity || (selfEntityId ? {
           entityId: signer?.entityId || '',
+          signerId,
           name: signer?.entityId || 'Entity',
           avatar: entityAvatar(activeXlnFunctions, signer?.entityId || ''),
           jurisdiction: signer?.jurisdiction || '',
@@ -124,18 +126,17 @@
     if (!env) return [];
     const entries = Array.from(env.eReplicas.values());
 
-    const signerLower = normalizeId(signerId);
     const seen = new Set<string>();
     const entities: EntitySummary[] = [];
 
     for (const replica of entries) {
-      if (signerLower && normalizeId(replica.signerId) !== signerLower) continue;
       const entityId = replica.entityId || '';
       const normalizedEntityId = normalizeId(entityId);
       if (!normalizedEntityId || seen.has(normalizedEntityId)) continue;
       seen.add(normalizedEntityId);
       entities.push({
         entityId,
+        signerId: replica.signerId || signerId,
         name: getEntityLabel(entityId, env, replica),
         avatar: entityAvatar(activeXlnFunctions, entityId),
         jurisdiction: String(replica.state?.config?.jurisdiction?.name || replica.position?.jurisdiction || '').trim(),
@@ -210,7 +211,7 @@
     else await vaultOperations.selectRuntime(runtimeId);
     dispatch('entitySelect', {
       jurisdiction: entity.jurisdiction || 'browservm',
-      signerId,
+      signerId: entity.signerId || signerId,
       entityId: entity.entityId
     });
     open = false;
@@ -222,7 +223,7 @@
     if (group.selfEntity) {
       dispatch('entitySelect', {
         jurisdiction: group.selfEntity.jurisdiction || 'browservm',
-        signerId: group.signerId,
+        signerId: group.selfEntity.signerId || group.signerId,
         entityId: group.selfEntity.entityId
       });
     }
@@ -284,7 +285,14 @@
       {#each runtimeGroups as group (group.runtimeId)}
         <section class="runtime-group" class:active={group.runtimeId === currentGroup?.runtimeId}>
           <div class="runtime-row">
-            <button class="runtime-main" on:click={() => selectRuntimeSelf(group)}>
+            <button
+              class="runtime-main"
+              data-testid="context-entity-row"
+              data-entity-id={normalizeId(group.selfEntity?.entityId)}
+              data-signer-id={normalizeId(group.selfEntity?.signerId || group.signerId)}
+              data-jurisdiction={group.selfEntity?.jurisdiction || ''}
+              on:click={() => selectRuntimeSelf(group)}
+            >
               {#if group.avatar}
                 <img src={group.avatar} alt="" class="runtime-avatar" />
               {:else}
@@ -314,7 +322,14 @@
           {#if group.derivedEntities.length > 0}
             <div class="derived-list">
               {#each group.derivedEntities as entity (entity.entityId)}
-                <button class="entity-row" on:click={() => selectRuntimeEntity(group.runtimeId, group.signerId, entity)}>
+                <button
+                  class="entity-row"
+                  data-testid="context-entity-row"
+                  data-entity-id={normalizeId(entity.entityId)}
+                  data-signer-id={normalizeId(entity.signerId)}
+                  data-jurisdiction={entity.jurisdiction || ''}
+                  on:click={() => selectRuntimeEntity(group.runtimeId, group.signerId, entity)}
+                >
                   <span class="entity-avatar-wrap">
                     {#if entity.avatar}
                       <img src={entity.avatar} alt="" class="entity-avatar" />

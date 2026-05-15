@@ -1,0 +1,972 @@
+import { test, expect, type BrowserContext, type Page } from '@playwright/test';
+import { AbiCoder, HDNodeWallet, Mnemonic, getIndexedAccountPath, keccak256, toUtf8Bytes } from 'ethers';
+import { deriveDelta } from '../runtime/account-utils';
+import { ensureE2EBaseline, type E2EHealthResponse } from './utils/e2e-baseline';
+import { connectRuntimeToHubWithCredit } from './utils/e2e-connect';
+import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
+import { enqueueEntityTxs } from './utils/e2e-runtime-input';
+import { requireIsolatedBaseUrl } from './utils/e2e-isolated-env';
+import { timedStep } from './utils/e2e-timing';
+
+const INIT_TIMEOUT = 30_000;
+const APP_BASE_URL = requireIsolatedBaseUrl('E2E_BASE_URL');
+const API_BASE_URL = requireIsolatedBaseUrl('E2E_API_BASE_URL');
+const SWAP_TOKENS = [1, 2] as const;
+const CREDIT_AMOUNT = 10_000n * 10n ** 18n;
+const USDC = 1;
+const WETH = 2;
+
+type RuntimeIdentity = {
+  entityId: string;
+  signerId: string;
+  runtimeId: string;
+};
+
+type JurisdictionIdentity = RuntimeIdentity & {
+  jurisdictionName: string;
+};
+
+type HubEntityInfo = {
+  entityId: string;
+  signerId: string;
+  name?: string;
+  jurisdictionName: string;
+  primary: boolean;
+};
+
+type CrossRuntimeWindow = Window & {
+  isolatedEnv?: {
+    runtimeId?: string;
+    eReplicas?: Map<string, any>;
+    jReplicas?: Map<string, any>;
+  };
+  XLN?: any;
+  __xln_instance?: any;
+};
+
+function getPrimaryHubId(health: E2EHealthResponse): string {
+  const hubId = health.hubMesh?.hubIds?.[0];
+  expect(hubId, `hub mesh must expose a primary hub: ${JSON.stringify(health.hubMesh || {})}`).toMatch(/^0x[a-fA-F0-9]{64}$/);
+  return hubId!;
+}
+
+function getPrimaryHubApiBaseUrl(health: E2EHealthResponse, primaryHubId: string): string {
+  const hub = (health.hubs || []).find((entry) => normalizeId(entry.entityId) === normalizeId(primaryHubId)) as
+    | (E2EHealthResponse['hubs'][number] & { apiPort?: number; apiUrl?: string })
+    | undefined;
+  if (hub?.apiUrl) return String(hub.apiUrl).replace(/\/$/, '');
+  const apiPort = Number(hub?.apiPort);
+  expect(Number.isFinite(apiPort) && apiPort > 0, `primary hub API port missing: ${JSON.stringify(hub || null)}`).toBe(true);
+  const base = new URL(API_BASE_URL);
+  return `${base.protocol}//${base.hostname}:${apiPort}`;
+}
+
+function getPrimaryHubName(health: E2EHealthResponse, primaryHubId: string): string {
+  return String((health.hubs || []).find((entry) => normalizeId(entry.entityId) === normalizeId(primaryHubId))?.name || '').trim();
+}
+
+async function getSecondaryHubInfo(
+  page: Page,
+  primaryHubId: string,
+  primaryHubName: string,
+  hubApiBaseUrl: string,
+): Promise<HubEntityInfo> {
+  let found: HubEntityInfo | null = null;
+  const normalizedPrimaryName = String(primaryHubName || '').trim().toLowerCase();
+  await expect.poll(
+    async () => {
+      const response = await page.request.get(`${hubApiBaseUrl}/api/info`, {
+        headers: { 'Cache-Control': 'no-store' },
+        timeout: 5_000,
+      }).catch(() => null);
+      if (!response?.ok()) return false;
+      const body = await response.json().catch(() => null) as { hubEntities?: HubEntityInfo[] } | null;
+      const hubEntities = Array.isArray(body?.hubEntities) ? body!.hubEntities : [];
+      found = hubEntities.find((hub) =>
+        normalizeId(hub.entityId) !== normalizeId(primaryHubId) &&
+        hub.primary !== true &&
+        (!normalizedPrimaryName || String(hub.name || '').trim().toLowerCase().startsWith(normalizedPrimaryName)) &&
+        /tron|rpc2|local/i.test(String(hub.jurisdictionName || '')),
+      ) || hubEntities.find((hub) =>
+        normalizeId(hub.entityId) !== normalizeId(primaryHubId) &&
+        hub.primary !== true &&
+        (!normalizedPrimaryName || String(hub.name || '').trim().toLowerCase().startsWith(normalizedPrimaryName)),
+      ) || null;
+      return Boolean(found?.entityId);
+    },
+    {
+      timeout: 60_000,
+      intervals: [250, 500, 1000],
+      message: 'primary hub node must expose a secondary jurisdiction hub entity',
+    },
+  ).toBe(true);
+  return found!;
+}
+
+function normalizeId(value: string): string {
+  return String(value || '').trim().toLowerCase();
+}
+
+function deriveJurisdictionSignerIndex(jurisdiction: string): number {
+  const key = String(jurisdiction || '').trim().toLowerCase();
+  const digest = keccak256(toUtf8Bytes(`xln:jurisdiction-signer:v1:${key}`));
+  return 100_000 + Number(BigInt(digest) % 1_000_000n);
+}
+
+function deriveSigner(mnemonic: string, jurisdictionName: string): { address: string; privateKey: string } {
+  const hd = HDNodeWallet.fromMnemonic(
+    Mnemonic.fromPhrase(mnemonic.trim().split(/\s+/).join(' ')),
+    getIndexedAccountPath(deriveJurisdictionSignerIndex(jurisdictionName)),
+  );
+  return { address: hd.address.toLowerCase(), privateKey: hd.privateKey };
+}
+
+async function importRpc2SiblingEntity(
+  page: Page,
+  mnemonic: string,
+  label: string,
+): Promise<JurisdictionIdentity> {
+  const result = await page.evaluate(async ({ mnemonic, label }) => {
+    const view = window as CrossRuntimeWindow;
+    const env = view.isolatedEnv;
+    if (!env) throw new Error('isolatedEnv missing');
+
+    const response = await fetch(`/api/jurisdictions?ts=${Date.now()}`, { cache: 'no-store' });
+    if (!response.ok) throw new Error(`jurisdictions fetch failed: ${response.status}`);
+    const body = await response.json() as { jurisdictions?: Record<string, any> };
+    const entries = Object.entries(body.jurisdictions || {});
+    const rpc2 = entries.find(([key, item]) => {
+      const haystack = `${key} ${item?.name || ''} ${item?.rpc || ''}`.toLowerCase();
+      return haystack.includes('tron') || haystack.includes('rpc2');
+    });
+    if (!rpc2) throw new Error(`rpc2/tron jurisdiction missing: ${entries.map(([key]) => key).join(',')}`);
+    const [jurisdictionKey, jurisdictionRaw] = rpc2;
+    const jurisdictionName = String(jurisdictionRaw.name || jurisdictionKey);
+    const rpc = String(jurisdictionRaw.rpc || '').startsWith('/')
+      ? new URL(String(jurisdictionRaw.rpc), window.location.origin).toString()
+      : String(jurisdictionRaw.rpc || '');
+    const contracts = jurisdictionRaw.contracts || {};
+    if (!rpc || !contracts.depository || !contracts.entityProvider) {
+      throw new Error(`rpc2 jurisdiction incomplete: ${JSON.stringify(jurisdictionRaw)}`);
+    }
+
+    const runtimeModule = view.XLN
+      ?? view.__xln_instance
+      ?? await import(/* @vite-ignore */ new URL('/runtime.js', window.location.origin).href) as any;
+    view.XLN = runtimeModule;
+    view.__xln_instance = runtimeModule;
+
+    if (!env.jReplicas?.has(jurisdictionName)) {
+      runtimeModule.enqueueRuntimeInput(env, {
+        runtimeTxs: [{
+          type: 'importJ',
+          data: {
+            name: jurisdictionName,
+            chainId: Number(jurisdictionRaw.chainId || 31338),
+            ticker: String(jurisdictionRaw.currency || 'TRX'),
+            rpcs: [rpc],
+            contracts: {
+              depository: String(contracts.depository),
+              entityProvider: String(contracts.entityProvider),
+              account: String(contracts.account || ''),
+              deltaTransformer: String(contracts.deltaTransformer || ''),
+            },
+          },
+        }],
+        entityInputs: [],
+      });
+    }
+
+    return {
+      runtimeId: String(env.runtimeId || ''),
+      jurisdictionName,
+      jurisdiction: {
+        name: jurisdictionName,
+        address: rpc,
+        chainId: Number(jurisdictionRaw.chainId || 31338),
+        depositoryAddress: String(contracts.depository),
+        entityProviderAddress: String(contracts.entityProvider),
+      },
+    };
+  }, { mnemonic, label });
+
+  await expect.poll(
+    async () => page.evaluate((jurisdictionName) => {
+      const env = (window as CrossRuntimeWindow).isolatedEnv;
+      return Boolean(env?.jReplicas?.has(jurisdictionName));
+    }, result.jurisdictionName),
+    {
+      timeout: 60_000,
+      intervals: [250, 500, 1000],
+      message: `${label} runtime must import rpc2 jurisdiction`,
+    },
+  ).toBe(true);
+
+  const signer = deriveSigner(mnemonic, result.jurisdictionName);
+  const sibling = await page.evaluate(async ({ signer, label, jurisdiction }) => {
+    const view = window as CrossRuntimeWindow;
+    const env = view.isolatedEnv;
+    if (!env) throw new Error('isolatedEnv missing');
+    const runtimeModule = view.XLN
+      ?? view.__xln_instance
+      ?? await import(/* @vite-ignore */ new URL('/runtime.js', window.location.origin).href) as any;
+    view.XLN = runtimeModule;
+    view.__xln_instance = runtimeModule;
+    const privateKeyBytes = new Uint8Array(
+      signer.privateKey.slice(2).match(/.{2}/g).map((byte: string) => Number.parseInt(byte, 16)),
+    );
+    runtimeModule.registerSignerKey(signer.address, privateKeyBytes);
+    const entityId = runtimeModule.generateLazyEntityId([signer.address], 1n).toLowerCase();
+    const { config } = runtimeModule.createLazyEntity(`${label}-rpc2`, [signer.address], 1n, jurisdiction);
+    const replicaKey = `${entityId}:${signer.address}`.toLowerCase();
+    if (!env.eReplicas?.has(replicaKey)) {
+      runtimeModule.enqueueRuntimeInput(env, {
+        runtimeTxs: [{
+          type: 'importReplica',
+          entityId,
+          signerId: signer.address,
+          data: {
+            isProposer: true,
+            config,
+            profileName: `${label}-rpc2`,
+            position: { x: 240, y: 0, z: 0, jurisdiction: jurisdiction.name },
+          },
+        }],
+        entityInputs: [],
+      });
+    }
+    return { entityId, signerId: signer.address };
+  }, { signer, label, jurisdiction: result.jurisdiction });
+
+  await expect.poll(
+    async () => page.evaluate(({ entityId, signerId }) => {
+      const env = (window as CrossRuntimeWindow).isolatedEnv;
+      return Boolean(env?.eReplicas?.has(`${entityId}:${signerId}`.toLowerCase()));
+    }, sibling),
+    {
+      timeout: 60_000,
+      intervals: [250, 500, 1000],
+      message: `${label} rpc2 sibling entity must hydrate`,
+    },
+  ).toBe(true);
+
+  return {
+    entityId: sibling.entityId,
+    signerId: sibling.signerId,
+    runtimeId: String(result.runtimeId || ''),
+    jurisdictionName: String(result.jurisdictionName || ''),
+  };
+}
+
+async function waitForAccountReady(
+  page: Page,
+  identity: RuntimeIdentity,
+  hubId: string,
+  tokenIds: readonly number[],
+  timeoutMs = 75_000,
+): Promise<void> {
+  await expect.poll(
+    async () => page.evaluate(({ identity, hubId, tokenIds }) => {
+      const env = (window as CrossRuntimeWindow).isolatedEnv;
+      const replica = env?.eReplicas?.get(`${identity.entityId}:${identity.signerId}`.toLowerCase());
+      const account = replica?.state?.accounts?.get(hubId);
+      if (!account || Number(account.currentHeight || 0) <= 0 || account.pendingFrame) return false;
+      return tokenIds.every((tokenId: number) => account.deltas instanceof Map && account.deltas.has(tokenId));
+    }, { identity, hubId, tokenIds: Array.from(tokenIds) }),
+    {
+      timeout: timeoutMs,
+      intervals: [250, 500, 1000],
+      message: `${identity.entityId.slice(0, 10)} account with hub must activate tokens ${tokenIds.join(',')}`,
+    },
+  ).toBe(true);
+}
+
+async function waitForHubProfile(page: Page, hubId: string): Promise<void> {
+  await expect.poll(
+    async () => page.evaluate((targetHubId) => {
+      const view = window as CrossRuntimeWindow & {
+        XLN?: { refreshGossip?: (env: unknown) => void };
+        p2p?: { refreshGossip?: () => void };
+      };
+      const env = view.isolatedEnv;
+      view.XLN?.refreshGossip?.(env);
+      view.p2p?.refreshGossip?.();
+      const target = String(targetHubId || '').toLowerCase();
+      const profiles = env?.gossip?.getProfiles?.() || [];
+      return profiles.some((profile: any) =>
+        String(profile?.entityId || '').toLowerCase() === target &&
+        profile?.metadata?.isHub === true &&
+        typeof profile?.runtimeId === 'string' &&
+        profile.runtimeId.length > 0,
+      );
+    }, hubId),
+    {
+      timeout: 60_000,
+      intervals: [250, 500, 1000],
+      message: `hub profile must be visible before opening account: ${hubId.slice(0, 10)}`,
+    },
+  ).toBe(true);
+}
+
+async function flushRuntime(page: Page, rounds = 3): Promise<void> {
+  await page.evaluate(async (roundsToRun) => {
+    const view = window as CrossRuntimeWindow;
+    const env = view.isolatedEnv;
+    if (!env) throw new Error('isolatedEnv missing');
+    const runtimeModule = view.XLN
+      ?? view.__xln_instance
+      ?? await import(/* @vite-ignore */ new URL('/runtime.js', window.location.origin).href) as {
+        process?: (env: unknown, inputs?: unknown[], runtimeDelay?: number) => Promise<unknown>;
+      };
+    view.XLN = runtimeModule;
+    view.__xln_instance = runtimeModule;
+    if (typeof runtimeModule.process !== 'function') return;
+    for (let index = 0; index < Math.max(1, Number(roundsToRun) || 1); index += 1) {
+      await runtimeModule.process(env, [], 0);
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    try {
+      const runtimeStore = await import(/* @vite-ignore */ new URL('/src/lib/stores/runtimeStore.ts', window.location.origin).href);
+      runtimeStore.runtimeOperations?.updateLocalEnv?.(env as never);
+    } catch {
+      // Dev-only e2e synchronization; the app store may not be importable in every build mode.
+    }
+  }, rounds);
+}
+
+async function ensureDirectHubAccount(
+  page: Page,
+  identity: RuntimeIdentity,
+  hubId: string,
+  tokenIds: readonly number[],
+): Promise<void> {
+  await waitForHubProfile(page, hubId);
+  const hasAccount = await page.evaluate(({ identity, hubId }) => {
+    const env = (window as CrossRuntimeWindow).isolatedEnv;
+    const replica = env?.eReplicas?.get(`${identity.entityId}:${identity.signerId}`.toLowerCase());
+    return Boolean(replica?.state?.accounts?.get(hubId));
+  }, { identity, hubId });
+
+  if (!hasAccount) {
+    await enqueueEntityTxs(page, identity.entityId, identity.signerId, [{
+      type: 'openAccount',
+      data: {
+        targetEntityId: hubId,
+        tokenId: USDC,
+        creditAmount: CREDIT_AMOUNT,
+      },
+    }]);
+    await flushRuntime(page, 4);
+  }
+  await waitForAccountReady(page, identity, hubId, [USDC]);
+
+  for (const tokenId of tokenIds) {
+    const hasToken = await page.evaluate(({ identity, hubId, tokenId }) => {
+      const env = (window as CrossRuntimeWindow).isolatedEnv;
+      const replica = env?.eReplicas?.get(`${identity.entityId}:${identity.signerId}`.toLowerCase());
+      const account = replica?.state?.accounts?.get(hubId);
+      return Boolean(account?.deltas instanceof Map && account.deltas.has(tokenId));
+    }, { identity, hubId, tokenId });
+    if (hasToken) continue;
+    await enqueueEntityTxs(page, identity.entityId, identity.signerId, [{
+      type: 'extendCredit',
+      data: {
+        counterpartyEntityId: hubId,
+        tokenId,
+        amount: CREDIT_AMOUNT,
+      },
+    }]);
+    await flushRuntime(page, 4);
+    await waitForAccountReady(page, identity, hubId, [tokenId]);
+  }
+}
+
+async function faucetOffchain(
+  page: Page,
+  apiBaseUrl: string,
+  entityId: string,
+  hubEntityId: string,
+  tokenId: number,
+  amount: string,
+): Promise<void> {
+  const response = await page.request.post(`${apiBaseUrl.replace(/\/$/, '')}/api/faucet/offchain`, {
+    data: {
+      userEntityId: entityId,
+      userRuntimeId: await page.evaluate(() => String((window as CrossRuntimeWindow).isolatedEnv?.runtimeId || '')),
+      hubEntityId,
+      tokenId,
+      amount,
+    },
+    timeout: 30_000,
+  });
+  expect(response.ok(), `offchain faucet failed: ${response.status()} ${await response.text().catch(() => '')}`).toBe(true);
+}
+
+async function outCap(page: Page, entityId: string, counterpartyId: string, tokenId: number): Promise<bigint> {
+  const delta = await page.evaluate(({ entityId, counterpartyId, tokenId }) => {
+    const env = (window as CrossRuntimeWindow).isolatedEnv;
+    if (!env?.eReplicas) return null;
+    const readBig = (value: unknown): string => {
+      if (typeof value === 'bigint') return value.toString();
+      if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) return String(value);
+      if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return value.trim();
+      return '0';
+    };
+    for (const [replicaKey, replica] of env.eReplicas.entries()) {
+      if (!String(replicaKey).toLowerCase().startsWith(`${String(entityId).toLowerCase()}:`)) continue;
+      const account = replica.state?.accounts?.get(counterpartyId);
+      const raw = account?.deltas?.get(tokenId);
+      if (!account || !raw || typeof raw !== 'object') return null;
+      const record = raw as Record<string, unknown>;
+      return {
+        ondelta: readBig(record.ondelta),
+        offdelta: readBig(record.offdelta),
+        collateral: readBig(record.collateral),
+        leftCreditLimit: readBig(record.leftCreditLimit),
+        rightCreditLimit: readBig(record.rightCreditLimit),
+        leftAllowance: readBig(record.leftAllowance),
+        rightAllowance: readBig(record.rightAllowance),
+        leftHold: readBig(record.leftHold),
+        rightHold: readBig(record.rightHold),
+      };
+    }
+    return null;
+  }, { entityId, counterpartyId, tokenId });
+  if (!delta) return 0n;
+  return deriveDelta({
+    tokenId,
+    ondelta: BigInt(delta.ondelta),
+    offdelta: BigInt(delta.offdelta),
+    collateral: BigInt(delta.collateral),
+    leftCreditLimit: BigInt(delta.leftCreditLimit),
+    rightCreditLimit: BigInt(delta.rightCreditLimit),
+    leftAllowance: BigInt(delta.leftAllowance),
+    rightAllowance: BigInt(delta.rightAllowance),
+    leftHold: BigInt(delta.leftHold),
+    rightHold: BigInt(delta.rightHold),
+  }, normalizeId(entityId) < normalizeId(counterpartyId)).outCapacity;
+}
+
+async function waitForOutCapAtLeast(
+  page: Page,
+  entityId: string,
+  counterpartyId: string,
+  tokenId: number,
+  minimum: bigint,
+): Promise<void> {
+  await expect.poll(
+    async () => (await outCap(page, entityId, counterpartyId, tokenId)) >= minimum,
+    {
+      timeout: 45_000,
+      intervals: [250, 500, 1000],
+      message: `${entityId.slice(0, 10)} outCap token=${tokenId} must reach ${minimum}`,
+    },
+  ).toBe(true);
+}
+
+async function selectContextEntity(page: Page, identity: RuntimeIdentity): Promise<void> {
+  const trigger = page.getByTestId('context-current').first();
+  await expect(trigger).toBeVisible({ timeout: 20_000 });
+  if (normalizeId(await trigger.getAttribute('data-entity-id') || '') === normalizeId(identity.entityId)) return;
+  await trigger.click();
+  const row = page.locator(
+    `[data-testid="context-entity-row"][data-entity-id="${normalizeId(identity.entityId)}"]`,
+  ).first();
+  await expect(row).toBeVisible({ timeout: 20_000 });
+  await row.click();
+  await expect.poll(
+    async () => ({
+      entityId: normalizeId(await trigger.getAttribute('data-entity-id') || ''),
+      signerId: normalizeId(await trigger.getAttribute('data-signer-id') || ''),
+    }),
+    {
+      timeout: 20_000,
+      intervals: [100, 250, 500],
+      message: `context must switch to ${identity.entityId.slice(0, 10)}`,
+    },
+  ).toEqual({ entityId: normalizeId(identity.entityId), signerId: normalizeId(identity.signerId) });
+}
+
+async function openSwapWorkspace(page: Page): Promise<void> {
+  const accountsTab = page.getByTestId('tab-accounts').first();
+  await expect(accountsTab).toBeVisible({ timeout: 20_000 });
+  await accountsTab.click();
+  const swapTab = page.getByTestId('account-workspace-tab-swap').first();
+  await expect(swapTab).toBeVisible({ timeout: 20_000 });
+  await swapTab.click();
+  await expect(page.locator('.swap-panel').first()).toBeVisible({ timeout: 15_000 });
+}
+
+async function selectSourceChainInSwap(page: Page, sourceEntityId: string): Promise<void> {
+  const sourceSelect = page.getByTestId('swap-from-chain-select').first();
+  await expect(sourceSelect).toBeVisible({ timeout: 20_000 });
+  await expect.poll(
+    async () => sourceSelect.locator('option').evaluateAll((options, source) =>
+      options.some((option) => String((option as HTMLOptionElement).value || '').toLowerCase() === String(source).toLowerCase()),
+      sourceEntityId,
+    ),
+    {
+      timeout: 30_000,
+      intervals: [250, 500, 1000],
+      message: `source chain option for ${sourceEntityId.slice(0, 10)} must appear`,
+    },
+  ).toBe(true);
+  await sourceSelect.selectOption(sourceEntityId.toLowerCase());
+}
+
+async function selectCounterpartyInSwap(page: Page, hubId: string): Promise<void> {
+  const createSelect = page.getByTestId('swap-create-account-select').first();
+  const select = await createSelect.isVisible({ timeout: 1500 }).catch(() => false)
+    ? createSelect
+    : page.getByTestId('swap-account-select').first();
+  await expect(select).toBeVisible({ timeout: 20_000 });
+  await expect.poll(async () => select.locator('option').count(), {
+    timeout: 30_000,
+    intervals: [250, 500, 1000],
+  }).toBeGreaterThan(0);
+  await select.selectOption(hubId);
+}
+
+async function configurePair(page: Page, side: 'buy' | 'sell'): Promise<void> {
+  const pairSelect = page.getByTestId('swap-pair-select').first();
+  await expect(pairSelect).toBeVisible({ timeout: 20_000 });
+  await pairSelect.selectOption({ label: 'WETH/USDC' });
+  const sideButton = side === 'buy'
+    ? page.getByTestId('swap-side-buy').first()
+    : page.getByTestId('swap-side-sell').first();
+  await expect(sideButton).toBeVisible({ timeout: 20_000 });
+  await sideButton.click();
+}
+
+async function selectCrossRoute(page: Page, targetEntityId: string): Promise<void> {
+  const routeSelect = page.getByTestId('swap-route-select').first();
+  await expect(routeSelect).toBeVisible({ timeout: 20_000 });
+  try {
+    await expect.poll(
+      async () => routeSelect.locator('option').evaluateAll((options, target) =>
+        options.some((option) => String((option as HTMLOptionElement).value || '').toLowerCase().startsWith(`${String(target).toLowerCase()}:`)),
+        targetEntityId,
+      ),
+      {
+        timeout: 30_000,
+        intervals: [250, 500, 1000],
+        message: `cross route to ${targetEntityId.slice(0, 10)} must appear`,
+      },
+    ).toBe(true);
+  } catch (error) {
+    const debug = await page.evaluate(() => {
+      const view = window as CrossRuntimeWindow;
+      const env = view.isolatedEnv;
+      const routeOptions = Array.from(document.querySelectorAll('[data-testid="swap-route-select"] option')).map((option) => ({
+        value: (option as HTMLOptionElement).value,
+        text: option.textContent,
+        disabled: (option as HTMLOptionElement).disabled,
+      }));
+      const sourceOptions = Array.from(document.querySelectorAll('[data-testid="swap-from-chain-select"] option')).map((option) => ({
+        value: (option as HTMLOptionElement).value,
+        text: option.textContent,
+      }));
+      const profiles = env?.gossip?.getProfiles?.() || [];
+      const hubProfiles = profiles
+        .filter((profile: any) => profile?.metadata?.isHub === true)
+        .map((profile: any) => ({
+          entityId: String(profile?.entityId || '').slice(0, 10),
+          name: String(profile?.name || ''),
+          jurisdiction: String(profile?.metadata?.jurisdiction?.name || ''),
+        }));
+      const replicas = Array.from(env?.eReplicas?.entries?.() || []).map(([key, replica]: [string, any]) => ({
+        key: String(key).slice(0, 22),
+        entityId: String(replica?.entityId || replica?.state?.entityId || '').slice(0, 10),
+        signerId: String(replica?.signerId || '').slice(0, 10),
+        profileName: String(replica?.state?.profile?.name || ''),
+        jurisdiction: String(replica?.state?.config?.jurisdiction?.name || replica?.position?.jurisdiction || ''),
+        accounts: Array.from(replica?.state?.accounts?.keys?.() || []).map((id) => String(id).slice(0, 10)),
+      }));
+      return { routeOptions, sourceOptions, hubProfiles, replicas };
+    });
+    console.log('[E2E cross route debug]', JSON.stringify(debug, null, 2));
+    throw error;
+  }
+  const value = await routeSelect.locator('option').evaluateAll((options, target) => {
+    const found = options.find((option) =>
+      String((option as HTMLOptionElement).value || '').toLowerCase().startsWith(`${String(target).toLowerCase()}:`),
+    ) as HTMLOptionElement | undefined;
+    return String(found?.value || '');
+  }, targetEntityId);
+  expect(value, 'cross route value must be present').toBeTruthy();
+  await routeSelect.selectOption(value);
+  await expect(page.getByTestId('swap-route-flow').first()).toContainText(/->|Tron|Local/i, { timeout: 10_000 });
+}
+
+async function placeCrossOrder(
+  page: Page,
+  params: {
+    source: RuntimeIdentity;
+    hubId: string;
+    targetEntityId: string;
+    side: 'buy' | 'sell';
+    amount: string;
+    price: string;
+  },
+): Promise<void> {
+  await openSwapWorkspace(page);
+  await selectSourceChainInSwap(page, params.source.entityId);
+  await selectCounterpartyInSwap(page, params.hubId);
+  await configurePair(page, params.side);
+  await selectCrossRoute(page, params.targetEntityId);
+  const amountInput = page.getByTestId('swap-order-amount').first();
+  const priceInput = page.getByTestId('swap-order-price').first();
+  const submit = page.getByTestId('swap-submit-order').first();
+  await expect(amountInput).toBeVisible({ timeout: 20_000 });
+  await expect(priceInput).toBeVisible({ timeout: 20_000 });
+  await amountInput.fill(params.amount);
+  await priceInput.fill(params.price);
+  await expect(submit).toBeEnabled({ timeout: 30_000 });
+  await submit.click();
+}
+
+async function readCrossState(
+  page: Page,
+  identity: RuntimeIdentity,
+  hubId: string,
+): Promise<{
+  offers: number;
+  routes: number;
+  relayRoutes: number;
+  locks: number;
+  replicaFound: boolean;
+  accountFound: boolean;
+  accountKeys: string[];
+  messages: string[];
+}> {
+  return await page.evaluate(({ identity, hubId }) => {
+    const env = (window as CrossRuntimeWindow).isolatedEnv;
+    const entityNeedle = String(identity.entityId || '').toLowerCase();
+    const signerNeedle = String(identity.signerId || '').toLowerCase();
+    const hubNeedle = String(hubId || '').toLowerCase();
+    let replica = env?.eReplicas?.get(`${entityNeedle}:${signerNeedle}`);
+    if (!replica && env?.eReplicas instanceof Map) {
+      for (const [key, candidate] of env.eReplicas.entries()) {
+        const keyText = String(key || '').toLowerCase();
+        const candidateEntity = String(candidate?.state?.entityId || candidate?.entityId || '').toLowerCase();
+        const candidateSigner = String(candidate?.signerId || '').toLowerCase();
+        if (
+          candidateEntity === entityNeedle ||
+          keyText.startsWith(`${entityNeedle}:`) ||
+          (keyText.includes(entityNeedle) && (!signerNeedle || keyText.includes(signerNeedle) || candidateSigner === signerNeedle))
+        ) {
+          replica = candidate;
+          break;
+        }
+      }
+    }
+    const state = replica?.state;
+    let account = state?.accounts?.get(hubId) || state?.accounts?.get(hubNeedle);
+    if (!account && state?.accounts instanceof Map) {
+      for (const [key, candidate] of state.accounts.entries()) {
+        const keyText = String(key || '').toLowerCase();
+        const left = String(candidate?.leftEntity || '').toLowerCase();
+        const right = String(candidate?.rightEntity || '').toLowerCase();
+        const cp = String(candidate?.counterpartyEntityId || '').toLowerCase();
+        if (keyText === hubNeedle || cp === hubNeedle || left === hubNeedle || right === hubNeedle) {
+          account = candidate;
+          break;
+        }
+      }
+    }
+    let offers = 0;
+    for (const offer of account?.swapOffers?.values?.() || []) {
+      if (offer?.crossJurisdiction) offers += 1;
+    }
+    let relayRoutes = 0;
+    for (const route of state?.htlcRoutes?.values?.() || []) {
+      if (route?.crossJurisdictionRelay) relayRoutes += 1;
+    }
+    return {
+      offers,
+      routes: Number(state?.crossJurisdictionSwaps?.size || 0),
+      relayRoutes,
+      locks: Number(account?.locks?.size || 0),
+      replicaFound: Boolean(replica),
+      accountFound: Boolean(account),
+      accountKeys: Array.from(state?.accounts?.keys?.() || []).map((key: unknown) => String(key)),
+      messages: Array.from(state?.messages || []).map((message: unknown) => String(message)),
+    };
+  }, { identity, hubId });
+}
+
+async function waitForCrossLocks(
+  page: Page,
+  source: RuntimeIdentity,
+  target: RuntimeIdentity,
+  sourceHubId: string,
+  targetHubId: string,
+  minimumSourceRelayRoutes: number,
+  minimumTargetLocks: number,
+): Promise<void> {
+  await expect.poll(
+    async () => {
+      const sourceState = await readCrossState(page, source, sourceHubId);
+      const targetState = await readCrossState(page, target, targetHubId);
+      return {
+        ok: sourceState.relayRoutes >= minimumSourceRelayRoutes && targetState.locks >= minimumTargetLocks,
+        sourceRelayRoutes: sourceState.relayRoutes,
+        targetLocks: targetState.locks,
+        sourceReplicaFound: sourceState.replicaFound,
+        sourceAccountFound: sourceState.accountFound,
+        targetReplicaFound: targetState.replicaFound,
+        targetAccountFound: targetState.accountFound,
+        sourceAccountKeys: sourceState.accountKeys,
+        targetAccountKeys: targetState.accountKeys,
+      };
+    },
+    {
+      timeout: 60_000,
+      intervals: [250, 500, 1000],
+      message: 'cross-j match must materialize source relay routes and target locks',
+    },
+  ).toMatchObject({ ok: true });
+}
+
+async function waitForCrossOffersCleared(
+  page: Page,
+  identity: RuntimeIdentity,
+  hubId: string,
+  label: string,
+): Promise<void> {
+  await expect.poll(
+    async () => {
+      const state = await readCrossState(page, identity, hubId);
+      return {
+        offers: state.offers,
+        replicaFound: state.replicaFound,
+        accountFound: state.accountFound,
+        accountKeys: state.accountKeys,
+      };
+    },
+    {
+      timeout: 45_000,
+      intervals: [250, 500, 1000],
+      message: `${label} cross order should resolve/cancel after match`,
+    },
+  ).toMatchObject({ offers: 0 });
+}
+
+async function readFirstCrossRouteId(page: Page, identity: RuntimeIdentity): Promise<string> {
+  const routeId = await page.evaluate((identity) => {
+    const env = (window as CrossRuntimeWindow).isolatedEnv;
+    const entityNeedle = String(identity.entityId || '').toLowerCase();
+    const signerNeedle = String(identity.signerId || '').toLowerCase();
+    let replica = env?.eReplicas?.get(`${entityNeedle}:${signerNeedle}`);
+    if (!replica && env?.eReplicas instanceof Map) {
+      for (const [key, candidate] of env.eReplicas.entries()) {
+        const keyText = String(key || '').toLowerCase();
+        const candidateEntity = String(candidate?.state?.entityId || candidate?.entityId || '').toLowerCase();
+        const candidateSigner = String(candidate?.signerId || '').toLowerCase();
+        if (
+          candidateEntity === entityNeedle ||
+          keyText.startsWith(`${entityNeedle}:`) ||
+          (keyText.includes(entityNeedle) && (!signerNeedle || keyText.includes(signerNeedle) || candidateSigner === signerNeedle))
+        ) {
+          replica = candidate;
+          break;
+        }
+      }
+    }
+    return String(replica?.state?.crossJurisdictionSwaps?.keys?.().next?.().value || '');
+  }, identity);
+  expect(routeId, `${identity.entityId.slice(0, 10)} must have a registered cross-j route`).toBeTruthy();
+  return routeId;
+}
+
+async function triggerSourceDisputeArguments(
+  page: Page,
+  source: RuntimeIdentity,
+  hubId: string,
+): Promise<void> {
+  const routeId = await readFirstCrossRouteId(page, source);
+  const abi = AbiCoder.defaultAbiCoder();
+  const crossPullArgs = abi.encode(
+    ['tuple(uint16[] fillRatios, bytes32[] fullSecrets, bytes32[4][] reveals)'],
+    [{ fillRatios: [0x8000], fullSecrets: [], reveals: [] }],
+  );
+  const initialArguments = abi.encode(['bytes[]'], [[crossPullArgs]]);
+  const suffix = routeId.replace(/[^a-fA-F0-9]/g, '').padEnd(64, '0').slice(0, 64);
+  await enqueueEntityTxs(page, source.entityId, source.signerId, [{
+    type: 'j_event',
+    data: {
+      from: source.signerId,
+      event: {
+        type: 'DisputeStarted',
+        data: {
+          sender: hubId,
+          counterentity: source.entityId,
+          nonce: '1',
+          proofbodyHash: `0x${suffix}`,
+          initialArguments,
+          disputeTimeout: 100,
+          onChainNonce: 1,
+        },
+      },
+      observedAt: Date.now(),
+      blockNumber: 9001,
+      blockHash: `0x${'ab'.repeat(32)}`,
+      transactionHash: `0x${'cd'.repeat(32)}`,
+    },
+  }]);
+}
+
+async function waitForCrossSalvageQueued(page: Page, target: RuntimeIdentity, hubId: string): Promise<void> {
+  await expect.poll(
+    async () => {
+      const state = await readCrossState(page, target, hubId);
+      return state.messages.some((message) => /Cross-j salvage queued/i.test(message));
+    },
+    {
+      timeout: 45_000,
+      intervals: [250, 500, 1000],
+      message: 'target sibling must queue cross-j salvage after source dispute arguments',
+    },
+  ).toBe(true);
+}
+
+test.describe('E2E Cross-J Swap Isolated Flow', () => {
+  test.setTimeout(360_000);
+
+  test('two users can place full, partial, and disputed cross-j swaps through the shared swap builder', async ({ browser, page }) => {
+    let aliceContext: BrowserContext | null = null;
+    let bobContext: BrowserContext | null = null;
+
+    try {
+      const baseline = await timedStep('cross_j_swap.ensure_baseline', () => ensureE2EBaseline(page, {
+        apiBaseUrl: API_BASE_URL,
+        requireMarketMaker: false,
+        requireHubMesh: true,
+        minHubCount: 3,
+      }));
+      const hubId = getPrimaryHubId(baseline);
+      const primaryHubApiBaseUrl = getPrimaryHubApiBaseUrl(baseline, hubId);
+      const primaryHubName = getPrimaryHubName(baseline, hubId);
+      const targetHub = await timedStep('cross_j_swap.resolve_rpc2_hub', () =>
+        getSecondaryHubInfo(page, hubId, primaryHubName, primaryHubApiBaseUrl),
+      );
+      const targetHubId = targetHub.entityId;
+
+      aliceContext = await browser.newContext({ ignoreHTTPSErrors: true });
+      bobContext = await browser.newContext({ ignoreHTTPSErrors: true });
+      const alicePage = await aliceContext.newPage();
+      const bobPage = await bobContext.newPage();
+
+      await Promise.all([
+        timedStep('cross_j_swap.alice.goto', () => gotoApp(alicePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 })),
+        timedStep('cross_j_swap.bob.goto', () => gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 })),
+      ]);
+
+      const aliceMnemonic = selectDemoMnemonic('alice');
+      const bobMnemonic = selectDemoMnemonic('bob');
+      const alice = await timedStep('cross_j_swap.alice.create_runtime', () => createRuntimeIdentity(alicePage, 'alice-cross', aliceMnemonic));
+      const bob = await timedStep('cross_j_swap.bob.create_runtime', () => createRuntimeIdentity(bobPage, 'bob-cross', bobMnemonic));
+
+      const [aliceRpc2, bobRpc2] = await Promise.all([
+        timedStep('cross_j_swap.alice.import_rpc2_sibling', () => importRpc2SiblingEntity(alicePage, aliceMnemonic, 'alice')),
+        timedStep('cross_j_swap.bob.import_rpc2_sibling', () => importRpc2SiblingEntity(bobPage, bobMnemonic, 'bob')),
+      ]);
+
+      await Promise.all([
+        timedStep('cross_j_swap.alice.connect_primary', () => connectRuntimeToHubWithCredit(alicePage, alice, hubId, '10000', SWAP_TOKENS)),
+        timedStep('cross_j_swap.bob.connect_primary', () => connectRuntimeToHubWithCredit(bobPage, bob, hubId, '10000', SWAP_TOKENS)),
+      ]);
+      await Promise.all([
+        timedStep('cross_j_swap.alice.connect_rpc2', () => ensureDirectHubAccount(alicePage, aliceRpc2, targetHubId, SWAP_TOKENS)),
+        timedStep('cross_j_swap.bob.connect_rpc2', () => ensureDirectHubAccount(bobPage, bobRpc2, targetHubId, SWAP_TOKENS)),
+      ]);
+
+      await Promise.all([
+        faucetOffchain(alicePage, primaryHubApiBaseUrl, alice.entityId, hubId, WETH, '1'),
+        faucetOffchain(bobPage, primaryHubApiBaseUrl, bobRpc2.entityId, targetHubId, USDC, '200'),
+      ]);
+      await Promise.all([
+        waitForOutCapAtLeast(alicePage, alice.entityId, hubId, WETH, 3n * 10n ** 16n),
+        waitForOutCapAtLeast(bobPage, bobRpc2.entityId, targetHubId, USDC, 75n * 10n ** 18n),
+      ]);
+
+      await timedStep('cross_j_swap.full.alice_offer', () => placeCrossOrder(alicePage, {
+        source: alice,
+        hubId,
+        targetEntityId: aliceRpc2.entityId,
+        side: 'sell',
+        amount: '0.03',
+        price: '2500',
+      }));
+      await timedStep('cross_j_swap.full.bob_offer', () => placeCrossOrder(bobPage, {
+        source: bobRpc2,
+        hubId: targetHubId,
+        targetEntityId: bob.entityId,
+        side: 'buy',
+        amount: '75',
+        price: '2500',
+      }));
+
+      await Promise.all([
+        waitForCrossLocks(alicePage, alice, aliceRpc2, hubId, targetHubId, 16, 16),
+        waitForCrossLocks(bobPage, bobRpc2, bob, targetHubId, hubId, 16, 16),
+      ]);
+
+      await Promise.all([
+        waitForCrossOffersCleared(alicePage, alice, hubId, 'Alice full'),
+        waitForCrossOffersCleared(bobPage, bobRpc2, targetHubId, 'Bob full'),
+      ]);
+
+      await Promise.all([
+        faucetOffchain(alicePage, primaryHubApiBaseUrl, alice.entityId, hubId, WETH, '1'),
+        faucetOffchain(bobPage, primaryHubApiBaseUrl, bobRpc2.entityId, targetHubId, USDC, '100'),
+      ]);
+      await Promise.all([
+        waitForOutCapAtLeast(alicePage, alice.entityId, hubId, WETH, 4n * 10n ** 16n),
+        waitForOutCapAtLeast(bobPage, bobRpc2.entityId, targetHubId, USDC, 50n * 10n ** 18n),
+      ]);
+
+      await timedStep('cross_j_swap.partial.alice_offer', () => placeCrossOrder(alicePage, {
+        source: alice,
+        hubId,
+        targetEntityId: aliceRpc2.entityId,
+        side: 'sell',
+        amount: '0.04',
+        price: '2500',
+      }));
+      await timedStep('cross_j_swap.partial.bob_offer', () => placeCrossOrder(bobPage, {
+        source: bobRpc2,
+        hubId: targetHubId,
+        targetEntityId: bob.entityId,
+        side: 'buy',
+        amount: '50',
+        price: '2500',
+      }));
+
+      await expect.poll(
+        async () => {
+          const aliceState = await readCrossState(alicePage, alice, hubId);
+          const bobState = await readCrossState(bobPage, bobRpc2, targetHubId);
+          const value = {
+            aliceRelayRoutes: aliceState.relayRoutes,
+            bobRelayRoutes: bobState.relayRoutes,
+          };
+          return value.aliceRelayRoutes > 16 && value.bobRelayRoutes > 16;
+        },
+        {
+          timeout: 60_000,
+          intervals: [250, 500, 1000],
+          message: 'partial cross-j fill must add hashledger relay routes',
+        },
+      ).toBe(true);
+
+      await timedStep('cross_j_swap.dispute.source_args', () => triggerSourceDisputeArguments(alicePage, alice, hubId));
+      await timedStep('cross_j_swap.dispute.target_salvage', () => waitForCrossSalvageQueued(alicePage, aliceRpc2, targetHubId));
+    } finally {
+      await Promise.all([
+        aliceContext ? aliceContext.close().catch(() => {}) : Promise.resolve(),
+        bobContext ? bobContext.close().catch(() => {}) : Promise.resolve(),
+      ]);
+    }
+  });
+});

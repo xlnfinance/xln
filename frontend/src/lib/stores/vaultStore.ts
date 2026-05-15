@@ -1,6 +1,6 @@
 import { writable, get, derived } from 'svelte/store';
 import { HDNodeWallet, Mnemonic, getAddress, getIndexedAccountPath, keccak256, toUtf8Bytes } from 'ethers';
-import type { Env, JurisdictionConfig, PersistedFrameJournal, RoutedEntityInput, RuntimeInput, XLNModule } from '@xln/runtime/xln-api';
+import type { ConsensusConfig, Env, JurisdictionConfig, PersistedFrameJournal, RoutedEntityInput, RuntimeInput, XLNModule } from '@xln/runtime/xln-api';
 import { runtimeOperations, runtimes, activeRuntimeId } from './runtimeStore';
 import { xlnEnvironment, setXlnEnvironment, isFinancialRestoreFailure, resolveRelayUrls, getXLN } from './xlnStore';
 import { settings } from './settingsStore';
@@ -178,6 +178,100 @@ function derivePrivateKey(seed: string, index: number): string {
 
 const normalizeJurisdictionKey = (value: string | null | undefined): string =>
   String(value || '').trim().toLowerCase();
+
+type RuntimeJReplica = Env['jReplicas'] extends Map<string, infer T> ? T : never;
+type RuntimeEntityReplica = Env['eReplicas'] extends Map<string, infer T> ? T : never;
+
+const getJReplicaJurisdictionName = (replica: RuntimeJReplica | null | undefined, fallback = ''): string =>
+  String(replica?.name || fallback || '').trim();
+
+const findJReplicaByName = (env: Env, name: string): RuntimeJReplica | undefined => {
+  const normalized = normalizeJurisdictionKey(name);
+  if (!normalized) return undefined;
+  const direct = env.jReplicas?.get(name);
+  if (direct) return direct;
+  for (const replica of env.jReplicas?.values?.() || []) {
+    if (normalizeJurisdictionKey(replica?.name) === normalized) return replica;
+  }
+  return undefined;
+};
+
+const getEntityReplicaJurisdictionName = (replica: RuntimeEntityReplica | null | undefined): string =>
+  String(replica?.state?.config?.jurisdiction?.name || '').trim();
+
+const getEntityReplicaEntityId = (key: string, replica: RuntimeEntityReplica | null | undefined): string =>
+  String(replica?.entityId || replica?.state?.entityId || String(key || '').split(':')[0] || '').trim().toLowerCase();
+
+const findEntityReplicaByEntityId = (env: Env, entityId: string): RuntimeEntityReplica | undefined => {
+  const target = normalizeEntityId(entityId);
+  if (!target) return undefined;
+  for (const [key, replica] of env.eReplicas?.entries?.() || []) {
+    if (getEntityReplicaEntityId(String(key), replica) === target) return replica;
+  }
+  return undefined;
+};
+
+const findEntityReplicaByEntityAndSigner = (
+  env: Env,
+  entityId: string,
+  signerId: string,
+): RuntimeEntityReplica | undefined => {
+  const targetEntity = normalizeEntityId(entityId);
+  const targetSigner = normalizeRuntimeId(signerId);
+  if (!targetEntity || !targetSigner) return undefined;
+  for (const [key, replica] of env.eReplicas?.entries?.() || []) {
+    const [keyEntityId, keySignerId] = String(key || '').split(':');
+    const replicaEntity = getEntityReplicaEntityId(String(key), replica);
+    const replicaSigner = normalizeRuntimeId(replica?.signerId || keySignerId || '');
+    if ((replicaEntity || normalizeEntityId(keyEntityId)) === targetEntity && replicaSigner === targetSigner) {
+      return replica;
+    }
+  }
+  return undefined;
+};
+
+const getJReplicaContractAddress = (
+  replica: RuntimeJReplica,
+  label: 'depository' | 'entity_provider',
+): string => {
+  const contractKey = label === 'entity_provider' ? 'entityProvider' : 'depository';
+  return requireContractAddress(
+    replica[`${contractKey}Address` as keyof RuntimeJReplica] as string | undefined
+      || replica.contracts?.[contractKey]
+      || replica.jadapter?.addresses?.[contractKey],
+    label,
+  );
+};
+
+const buildSignerEntityConfig = (
+  signerAddress: string,
+  jReplica: RuntimeJReplica,
+  preferredJurisdictionName: string,
+  fallbackChainId: number,
+): ConsensusConfig => {
+  const jurisdictionName = getJReplicaJurisdictionName(jReplica, preferredJurisdictionName);
+  if (!jurisdictionName) throw new Error('ENTITY_JURISDICTION_MISSING');
+  const depositoryAddress = getJReplicaContractAddress(jReplica, 'depository');
+  const entityProviderAddress = getJReplicaContractAddress(jReplica, 'entity_provider');
+  const rpcAddress = String(jReplica.rpcs?.[0] || '').trim();
+  const chainId = Number(jReplica.chainId ?? jReplica.jadapter?.chainId ?? fallbackChainId);
+  if (!Number.isFinite(chainId) || chainId <= 0) {
+    throw new Error(`ENTITY_JURISDICTION_CHAIN_ID_MISSING: ${jurisdictionName}`);
+  }
+  return {
+    mode: 'proposer-based',
+    threshold: 1n,
+    validators: [signerAddress],
+    shares: { [signerAddress]: 1n },
+    jurisdiction: {
+      address: rpcAddress || `jreplica://${jurisdictionName}`,
+      name: jurisdictionName,
+      chainId,
+      entityProviderAddress,
+      depositoryAddress,
+    },
+  };
+};
 
 function deriveJurisdictionSignerIndex(jurisdiction: string): number {
   const key = normalizeJurisdictionKey(jurisdiction);
@@ -940,68 +1034,71 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
 
   ensureRuntimeLoopRunning(env, xln, `post-restore:${runtimeIdLower.slice(0, 12)}`);
 
-  if (runtime.signers[0]?.entityId) {
-    const entityId = runtime.signers[0].entityId;
-    const signerAddress = runtime.signers[0].address;
-    const entityIdNorm = String(entityId).toLowerCase();
-    const hasEntityAlready = !!(
-      env.eReplicas &&
-      [...env.eReplicas.keys()].some((k: string) => String(k).split(':')[0]?.toLowerCase() === entityIdNorm)
-    );
-    if (hasEntityAlready) {
-      console.log('[VaultStore] ✅ Entity already present in restored env:', entityId.slice(0, 18));
-    }
-    const jReplica = env.jReplicas?.get('Testnet');
-    if (jReplica && !hasEntityAlready) {
-      if (strictRestore) {
-        throw new Error(
-          `[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: entity missing after restore ${entityId.slice(0, 12)}`
-        );
-      }
-      const entityConfig = {
-        mode: 'proposer-based' as const,
-        threshold: 1n,
-        validators: [signerAddress],
-        shares: { [signerAddress]: 1n },
-        jurisdiction: {
-          address: requireContractAddress(jReplica.depositoryAddress, 'depository'),
-          name: 'Testnet',
-          chainId: Number(jReplica.chainId ?? chainId ?? 31337),
-          entityProviderAddress: requireContractAddress(jReplica.entityProviderAddress, 'entity_provider'),
-          depositoryAddress: requireContractAddress(jReplica.depositoryAddress, 'depository'),
-        }
-      };
+  for (const signer of runtime.signers || []) {
+    const entityId = normalizeEntityId(signer?.entityId);
+    const signerAddress = normalizeRuntimeId(signer?.address);
+    if (!entityId || !signerAddress) continue;
 
-      await enqueueAndAwait(
-        xln,
-        env,
-        {
-          runtimeTxs: [{
-            type: 'importReplica',
-            entityId,
-            signerId: signerAddress,
-              data: {
-              isProposer: true,
-              config: entityConfig,
-              profileName: runtime.label,
-            }
-          }],
-          entityInputs: []
-        },
-        () => {
-          const reps = env?.eReplicas;
-          if (!reps?.keys) return false;
-          const entityIdNorm = String(entityId).toLowerCase();
-          for (const key of reps.keys()) {
-            const [repEntityId] = String(key).split(':');
-            if (String(repEntityId || '').toLowerCase() === entityIdNorm) return true;
-          }
-          return false;
-        },
-        `importReplica(${entityId.slice(0, 12)})`,
-      );
-      console.log('[VaultStore] ✅ Entity ensured:', entityId.slice(0, 18));
+    const preferredJurisdictionName = String(signer.jurisdiction || 'Testnet').trim();
+    const jReplica = findJReplicaByName(env, preferredJurisdictionName);
+    if (!jReplica) {
+      const message =
+        `[VaultStore] Missing signer jurisdiction ${preferredJurisdictionName} for entity ${entityId.slice(0, 12)}`;
+      if (normalizeJurisdictionKey(preferredJurisdictionName) === 'testnet') {
+        throw new Error(message);
+      }
+      console.warn(`${message}; waiting for jurisdiction import`);
+      continue;
     }
+
+    const targetJurisdictionName = getJReplicaJurisdictionName(jReplica, preferredJurisdictionName);
+    const targetJurisdictionKey = normalizeJurisdictionKey(targetJurisdictionName);
+    const exactReplica = findEntityReplicaByEntityAndSigner(env, entityId, signerAddress);
+    const anyEntityReplica = exactReplica || findEntityReplicaByEntityId(env, entityId);
+    const existingJurisdictionName = getEntityReplicaJurisdictionName(anyEntityReplica);
+    if (existingJurisdictionName && normalizeJurisdictionKey(existingJurisdictionName) !== targetJurisdictionKey) {
+      throw new Error(
+        `ENTITY_JURISDICTION_CONFLICT: entity=${entityId} existing=${existingJurisdictionName} incoming=${targetJurisdictionName}`,
+      );
+    }
+
+    if (exactReplica && normalizeJurisdictionKey(getEntityReplicaJurisdictionName(exactReplica)) === targetJurisdictionKey) {
+      console.log(
+        `[VaultStore] ✅ Entity jurisdiction bound: ${entityId.slice(0, 18)} @ ${targetJurisdictionName}`,
+      );
+      continue;
+    }
+
+    if (strictRestore && !anyEntityReplica) {
+      throw new Error(
+        `[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: entity missing after restore ${entityId.slice(0, 12)}`,
+      );
+    }
+
+    const entityConfig = buildSignerEntityConfig(signerAddress, jReplica, preferredJurisdictionName, chainId);
+    await enqueueAndAwait(
+      xln,
+      env,
+      {
+        runtimeTxs: [{
+          type: 'importReplica',
+          entityId,
+          signerId: signerAddress,
+          data: {
+            isProposer: true,
+            config: entityConfig,
+            profileName: runtime.label,
+          }
+        }],
+        entityInputs: []
+      },
+      () => {
+        const repaired = findEntityReplicaByEntityAndSigner(env!, entityId, signerAddress);
+        return normalizeJurisdictionKey(getEntityReplicaJurisdictionName(repaired)) === targetJurisdictionKey;
+      },
+      `importReplica(${entityId.slice(0, 12)}@${targetJurisdictionName})`,
+    );
+    console.log('[VaultStore] ✅ Entity ensured:', entityId.slice(0, 18), '@', targetJurisdictionName);
   }
 
   if (xln.startP2P) {

@@ -45,7 +45,8 @@ export type HubConfig = {
   httpUrl?: string;
   port?: number;
   serverId?: string;
-  position?: { x: number; y: number; z: number };
+  position?: { x: number; y: number; z: number; jurisdiction?: string };
+  jurisdictionName?: string;
 };
 
 const defaultPort = Number(getArg('--port', process.env['PORT'] ?? '0')) || undefined;
@@ -79,8 +80,13 @@ const ensureRuntimeInput = (env: Env) => {
   }
 };
 
-const resolveJurisdiction = (env: Env) => {
-  const name = env.activeJurisdiction || (env.jReplicas ? Array.from(env.jReplicas.keys())[0] : undefined);
+const resolveJurisdiction = (env: Env, requestedName?: string) => {
+  const normalizedRequested = String(requestedName || '').trim().toLowerCase();
+  const name = (normalizedRequested && env.jReplicas
+      ? Array.from(env.jReplicas.keys()).find((key) => key.toLowerCase() === normalizedRequested)
+      : undefined)
+    || env.activeJurisdiction
+    || (env.jReplicas ? Array.from(env.jReplicas.keys())[0] : undefined);
   if (!name || !env.jReplicas) return null;
   const jr = env.jReplicas.get(name);
   if (!jr) return null;
@@ -107,7 +113,7 @@ export async function bootstrapHub(env?: Env, config?: Partial<HubConfig>): Prom
     env = await main();
   }
 
-  const jurisdiction = resolveJurisdiction(env);
+  const jurisdiction = resolveJurisdiction(env, hubConfig.jurisdictionName);
   const consensusConfig: ConsensusConfig = {
     mode: 'proposer-based',
     threshold: 1n,
