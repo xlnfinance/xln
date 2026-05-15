@@ -21,6 +21,7 @@ import {
   main,
   enqueueRuntimeInput,
   handleInboundP2PEntityInput,
+  sendEntityInput,
   startP2P,
   stopP2P,
   startRuntimeLoop,
@@ -805,7 +806,8 @@ const ensureMarketMakerHubConnectivity = async (
   tokenIds: number[],
 ): Promise<void> => {
   const accountOpenInputs: EntityInput[] = [];
-  const creditInputsByEntity = new Map<string, EntityInput>();
+  const localCreditInputsByEntity = new Map<string, EntityInput>();
+  const remoteCreditInputsByEntity = new Map<string, EntityInput>();
 
   for (const hubEntityId of hubEntityIds) {
     const hubSignerId = String(hubSignerIdsByEntityId.get(hubEntityId.toLowerCase()) || '');
@@ -851,7 +853,7 @@ const ensureMarketMakerHubConnectivity = async (
       const hubOutCapacity = getEntityOutCapacity(mmAccount, hubEntityId, tokenId);
 
       if (mmOutCapacity < MARKET_MAKER_CREDIT_AMOUNT) {
-        const input = creditInputsByEntity.get(hubEntityId) ?? {
+        const input = remoteCreditInputsByEntity.get(hubEntityId) ?? {
           entityId: hubEntityId,
           signerId: hubSignerId,
           entityTxs: [],
@@ -865,11 +867,11 @@ const ensureMarketMakerHubConnectivity = async (
             amount: MARKET_MAKER_CREDIT_AMOUNT,
           },
         });
-        creditInputsByEntity.set(hubEntityId, input);
+        remoteCreditInputsByEntity.set(hubEntityId, input);
       }
 
       if (hubOutCapacity < MARKET_MAKER_CREDIT_AMOUNT) {
-        const input = creditInputsByEntity.get(mmEntityId) ?? {
+        const input = localCreditInputsByEntity.get(mmEntityId) ?? {
           entityId: mmEntityId,
           signerId: mmSignerId,
           entityTxs: [],
@@ -883,13 +885,27 @@ const ensureMarketMakerHubConnectivity = async (
             amount: MARKET_MAKER_CREDIT_AMOUNT,
           },
         });
-        creditInputsByEntity.set(mmEntityId, input);
+        localCreditInputsByEntity.set(mmEntityId, input);
       }
     }
   }
 
-  if (creditInputsByEntity.size > 0) {
-    enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: Array.from(creditInputsByEntity.values()) });
+  const localCreditInputs = Array.from(localCreditInputsByEntity.values());
+  if (localCreditInputs.length > 0) {
+    enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: localCreditInputs });
+    await settleRuntimeFor(env, 45);
+  }
+
+  const remoteCreditInputs = Array.from(remoteCreditInputsByEntity.values());
+  for (const input of remoteCreditInputs) {
+    const result = sendEntityInput(env, input);
+    if (result.deferred) {
+      console.warn(
+        `[MESH-MM] deferred hub credit request entity=${input.entityId.slice(-6)} txs=${input.entityTxs?.length || 0}`,
+      );
+    }
+  }
+  if (remoteCreditInputs.length > 0) {
     await settleRuntimeFor(env, 45);
   }
 };

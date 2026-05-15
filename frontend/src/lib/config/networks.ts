@@ -91,7 +91,7 @@ export const POPULAR_NETWORKS: NetworkConfig[] = [
   },
   {
     chainId: 31338,
-    name: 'Local Tron',
+    name: 'Tron',
     ticker: 'TRX',
     icon: 'T',
     rpcs: [resolveLocalRpc2Url()],

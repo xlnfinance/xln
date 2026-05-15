@@ -20,6 +20,8 @@
   export let tab: Tab;
   export let allowAddRuntime = false;
   export let allowDeleteRuntime = false;
+  export let allowAddJurisdiction = false;
+  export let allowAddEntity = false;
   export let addRuntimeLabel = '+ Add Runtime';
 
   const dispatch = createEventDispatcher();
@@ -235,6 +237,16 @@
     open = false;
   }
 
+  function handleAddJurisdiction() {
+    dispatch('addJurisdiction');
+    open = false;
+  }
+
+  function handleAddEntity() {
+    dispatch('addEntity');
+    open = false;
+  }
+
   function handleDeleteRuntime(event: MouseEvent, runtimeId: string) {
     event.stopPropagation();
     dispatch('deleteRuntime', { runtimeId });
@@ -358,6 +370,12 @@
     </div>
 
     <div class="menu-footer">
+      {#if allowAddJurisdiction}
+        <button class="add-runtime-btn" on:click={handleAddJurisdiction}>+ Add Jurisdiction</button>
+      {/if}
+      {#if allowAddEntity}
+        <button class="add-runtime-btn secondary-action" on:click={handleAddEntity}>+ Add Entity</button>
+      {/if}
       {#if allowAddRuntime}
         <button class="add-runtime-btn" on:click={handleAddRuntime}>{addRuntimeLabel}</button>
       {/if}
@@ -663,6 +681,12 @@
     background: rgba(251, 191, 36, 0.12);
     color: #fde68a;
     font-weight: 600;
+  }
+
+  .add-runtime-btn.secondary-action {
+    background: rgba(120, 113, 108, 0.12);
+    border-color: rgba(120, 113, 108, 0.28);
+    color: #d6d3d1;
   }
 
   .reset-btn {

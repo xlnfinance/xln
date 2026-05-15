@@ -77,11 +77,53 @@ export let pendingFaucetKeys: Set<string> = new Set();
     );
   };
 
-  function isFinalizedDisputed(account: AccountView): boolean {
-    const status = String(account.status || '');
-    const activeDispute = !!account.activeDispute;
-    return status === 'disputed' && !activeDispute;
+	  function isFinalizedDisputed(account: AccountView): boolean {
+	    const status = String(account.status || '');
+	    const activeDispute = !!account.activeDispute;
+	    return status === 'disputed' && !activeDispute;
+	  }
+
+  type JurisdictionLike = {
+    name?: unknown;
+    chainId?: unknown;
+  };
+
+  function normalizeJurisdiction(value: unknown): string {
+    return String(value || '').trim().toLowerCase();
   }
+
+  function jurisdictionKey(value: unknown): string {
+    if (value && typeof value === 'object') {
+      const jurisdiction = value as JurisdictionLike;
+      const chainId = String(jurisdiction.chainId ?? '').trim();
+      if (chainId) return `chain:${chainId}`;
+      return normalizeJurisdiction(jurisdiction.name);
+    }
+    return normalizeJurisdiction(value);
+  }
+
+  function getReplicaJurisdictionByEntityId(entityId: string): string {
+    const normalized = normalizeId(entityId);
+    if (!normalized || !$replicas) return '';
+    for (const [key, replica] of $replicas.entries()) {
+      const [replicaEntityId] = String(key || '').split(':');
+      if (normalizeId(replicaEntityId || replica?.entityId || '') !== normalized) continue;
+      return jurisdictionKey(replica?.state?.config?.jurisdiction)
+        || jurisdictionKey(replica?.position?.jurisdiction);
+    }
+    const gossip = $xlnEnvironment?.gossip as {
+      getProfiles?: () => Array<{ entityId?: string; metadata?: { jurisdiction?: unknown } }>;
+      profiles?: Array<{ entityId?: string; metadata?: { jurisdiction?: unknown } }>;
+    } | undefined;
+    const profiles = typeof gossip?.getProfiles === 'function'
+      ? gossip.getProfiles()
+      : (Array.isArray(gossip?.profiles) ? gossip.profiles : []);
+    const profile = profiles.find((candidate) => normalizeId(candidate?.entityId || '') === normalized);
+    return jurisdictionKey(profile?.metadata?.jurisdiction);
+  }
+
+  $: currentJurisdiction = jurisdictionKey(replica?.state?.config?.jurisdiction)
+    || jurisdictionKey(replica?.position?.jurisdiction);
 
   $: rankedAccounts = accounts
     .map(([counterpartyId, account]) => ({
@@ -89,7 +131,11 @@ export let pendingFaucetKeys: Set<string> = new Set();
       account,
     }))
     // Preserve Map insertion order so the UI stays stable by first account appearance.
-    .filter((entry) => !isFinalizedDisputed(entry.account));
+    .filter((entry) => !isFinalizedDisputed(entry.account))
+    .filter((entry) => {
+      const counterpartyJurisdiction = getReplicaJurisdictionByEntityId(entry.counterpartyId);
+      return !currentJurisdiction || !counterpartyJurisdiction || currentJurisdiction === counterpartyJurisdiction;
+    });
 
   $: visibleAccounts = showAllAccounts ? rankedAccounts : rankedAccounts.slice(0, 5);
   $: hiddenAccountsCount = Math.max(0, rankedAccounts.length - visibleAccounts.length);

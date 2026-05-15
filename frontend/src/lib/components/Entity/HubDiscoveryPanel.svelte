@@ -37,6 +37,7 @@
     metadata: {
       description?: string;
       website?: string;
+      jurisdiction?: { name?: string; chainId?: number | string };
       fee: number;
       peerCount: number;
     };
@@ -49,6 +50,34 @@
 
   let hubs: Hub[] = [];
   const DISCOVERY_TIMEOUT_MS = 8000;
+
+  type JurisdictionLike = {
+    name?: unknown;
+    chainId?: unknown;
+  };
+
+  const normalizeJurisdiction = (value: unknown): string => String(value || '').trim().toLowerCase();
+  const jurisdictionKey = (value: unknown): string => {
+    if (value && typeof value === 'object') {
+      const jurisdiction = value as JurisdictionLike;
+      const chainId = String(jurisdiction.chainId ?? '').trim();
+      if (chainId) return `chain:${chainId}`;
+      return normalizeJurisdiction(jurisdiction.name);
+    }
+    return normalizeJurisdiction(value);
+  };
+
+  function getEntityJurisdictionKey(currentEnv: Env | undefined, targetEntityId: string): string {
+    const normalizedEntityId = normalizeEntityId(targetEntityId);
+    if (!normalizedEntityId || !currentEnv?.eReplicas) return '';
+    for (const [key, replica] of currentEnv.eReplicas.entries()) {
+      const [replicaEntityId] = String(key || '').split(':');
+      if (normalizeEntityId(replicaEntityId) !== normalizedEntityId) continue;
+      return jurisdictionKey(replica?.state?.config?.jurisdiction)
+        || jurisdictionKey(replica?.position?.jurisdiction);
+    }
+    return '';
+  }
 
   type PublicHubResponse = {
     ok: boolean;
@@ -63,6 +92,7 @@
       metadata?: {
         isHub?: boolean;
         routingFeePPM?: number;
+        jurisdiction?: { name?: string; chainId?: number | string };
       };
       lastUpdated?: number;
       online?: boolean;
@@ -114,8 +144,13 @@
       if (!response.ok) return [];
       const payload = await response.json() as PublicHubResponse;
       const serverHubs = Array.isArray(payload.hubs) ? payload.hubs : [];
+      const entityJurisdiction = getEntityJurisdictionKey(env, entityId);
       return serverHubs
         .filter((hub) => hub?.entityId && hub?.metadata?.isHub === true)
+        .filter((hub) => {
+          if (!entityJurisdiction) return true;
+          return jurisdictionKey(hub.metadata?.jurisdiction) === entityJurisdiction;
+        })
         .map((hub) => {
           const fullEntityId = hub.entityId.startsWith('0x') ? hub.entityId : `0x${hub.entityId}`;
           const peerCount = Array.isArray(hub.publicAccounts) ? hub.publicAccounts.length : 0;
@@ -126,6 +161,7 @@
             metadata: {
               description: hub.bio || 'Payment hub',
               ...(hub.website ? { website: hub.website } : {}),
+              ...(hub.metadata?.jurisdiction ? { jurisdiction: hub.metadata.jurisdiction } : {}),
               fee: feePpm,
               peerCount,
             },

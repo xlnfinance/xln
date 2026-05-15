@@ -1002,7 +1002,16 @@ const run = async (): Promise<void> => {
   finishTiming('runtime_boot', runtimeBootStartedAt);
 
   let bootstrap: { entityId: string; signerId: string } | null = null;
-  const hubBootstraps: Array<{ entityId: string; signerId: string; name: string; jurisdictionName: string; primary: boolean }> = [];
+  const hubBootstraps: Array<{
+    entityId: string;
+    signerId: string;
+    name: string;
+    jurisdictionName: string;
+    chainId?: number;
+    depositoryAddress?: string;
+    entityProviderAddress?: string;
+    primary: boolean;
+  }> = [];
   let activeJAdapter: JAdapter | null = null;
   let activeTokenCatalog: JTokenInfo[] = [];
   let meshLoop: ReturnType<typeof setInterval> | null = null;
@@ -1427,6 +1436,9 @@ const run = async (): Promise<void> => {
     signerId: bootstrap.signerId,
     name: resolvedArgs.name,
     jurisdictionName: jurisdiction.name,
+    chainId: jurisdiction.chainId,
+    ...(jurisdiction.contracts?.depository ? { depositoryAddress: jurisdiction.contracts.depository } : {}),
+    ...(jurisdiction.contracts?.entityProvider ? { entityProviderAddress: jurisdiction.contracts.entityProvider } : {}),
     primary: true,
   });
   finishTiming('hub_bootstrap', hubBootstrapStartedAt);
@@ -1489,6 +1501,9 @@ const run = async (): Promise<void> => {
       signerId: sibling.signerId,
       name: `${resolvedArgs.name} ${secondaryName}`,
       jurisdictionName: secondaryName,
+      chainId: secondary.chainId,
+      ...(secondary.contracts?.depository ? { depositoryAddress: secondary.contracts.depository } : {}),
+      ...(secondary.contracts?.entityProvider ? { entityProviderAddress: secondary.contracts.entityProvider } : {}),
       primary: false,
     });
     await ensureOrderbook(env, sibling.entityId, sibling.signerId);
