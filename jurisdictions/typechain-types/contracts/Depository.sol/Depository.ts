@@ -650,10 +650,11 @@ export interface Depository extends BaseContract {
   _accounts: TypedContractMethod<
     [arg0: BytesLike],
     [
-      [bigint, string, bigint] & {
+      [bigint, string, bigint, bigint] & {
         nonce: bigint;
         disputeHash: string;
         disputeTimeout: bigint;
+        disputeStartTimestamp: bigint;
       }
     ],
     "view"
@@ -833,10 +834,11 @@ export interface Depository extends BaseContract {
   ): TypedContractMethod<
     [arg0: BytesLike],
     [
-      [bigint, string, bigint] & {
+      [bigint, string, bigint, bigint] & {
         nonce: bigint;
         disputeHash: string;
         disputeTimeout: bigint;
+        disputeStartTimestamp: bigint;
       }
     ],
     "view"

@@ -8,7 +8,6 @@ export type { consoleSol };
 import type * as mocks from "./mocks";
 export type { mocks };
 export type { Account } from "./Account";
-export type { CrossSwapPull } from "./CrossSwapPull";
 export type { DeltaTransformer } from "./DeltaTransformer";
 export type { ERC1155Mock } from "./ERC1155Mock";
 export type { ERC20Mock } from "./ERC20Mock";

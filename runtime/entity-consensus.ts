@@ -1693,7 +1693,8 @@ export const applyEntityFrame = async (
     }
 
 	    for (const fill of matchResult.crossJurisdictionFills) {
-	      const route = fill.route;
+      const publicRoute = fill.route;
+      const route = currentEntityState.crossJurisdictionSwaps?.get(publicRoute.orderId) ?? publicRoute;
       if (!route.sourcePull || !route.targetPull) {
         console.warn(`🌉 ORDERBOOK CROSS-J FILL skipped: unprepared pull route=${route.orderId}`);
         continue;
@@ -1705,7 +1706,6 @@ export const applyEntityFrame = async (
       let reveal;
       try {
         reveal = buildCrossJurisdictionPullReveal(
-          (env as { runtimeSeed?: string }).runtimeSeed,
           route,
           fill.fillRatio,
         );

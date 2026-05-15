@@ -9,6 +9,7 @@ export interface NetworkConfig {
   ticker: string;
   icon: string;
   rpcs: string[];
+  blockTimeMs: number;
   explorer?: string;
   contracts?: {
     depository?: string;
@@ -42,6 +43,7 @@ export const POPULAR_NETWORKS: NetworkConfig[] = [
     ticker: 'ETH',
     icon: '⟠',
     rpcs: ['https://ethereum-rpc.publicnode.com'],
+    blockTimeMs: 12_000,
     explorer: 'https://etherscan.io',
     disabledReason: 'XLN contracts are not configured on Ethereum yet',
   },
@@ -51,6 +53,7 @@ export const POPULAR_NETWORKS: NetworkConfig[] = [
     ticker: 'ETH',
     icon: '🔵',
     rpcs: ['https://mainnet.base.org'],
+    blockTimeMs: 2_000,
     explorer: 'https://basescan.org',
     disabledReason: 'XLN contracts are not configured on Base yet',
   },
@@ -60,6 +63,7 @@ export const POPULAR_NETWORKS: NetworkConfig[] = [
     ticker: 'ETH',
     icon: '🧪',
     rpcs: ['https://ethereum-sepolia-rpc.publicnode.com'],
+    blockTimeMs: 12_000,
     explorer: 'https://sepolia.etherscan.io',
     testnet: true,
     disabledReason: 'XLN contracts are not configured on Sepolia yet',
@@ -70,6 +74,7 @@ export const POPULAR_NETWORKS: NetworkConfig[] = [
     ticker: 'ETH',
     icon: '🟦',
     rpcs: ['https://sepolia.base.org'],
+    blockTimeMs: 2_000,
     explorer: 'https://sepolia.basescan.org',
     testnet: true,
     disabledReason: 'XLN contracts are not configured on Base Sepolia yet',
@@ -80,6 +85,7 @@ export const POPULAR_NETWORKS: NetworkConfig[] = [
     ticker: 'ETH',
     icon: '🏠',
     rpcs: [resolveLocalRpcUrl()],
+    blockTimeMs: 1_000,
     explorer: '',
     testnet: true,
   },
@@ -89,6 +95,7 @@ export const POPULAR_NETWORKS: NetworkConfig[] = [
     ticker: 'TRX',
     icon: 'T',
     rpcs: [resolveLocalRpc2Url()],
+    blockTimeMs: 1_000,
     explorer: '',
     testnet: true,
   },

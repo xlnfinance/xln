@@ -117,6 +117,7 @@ async function loadJurisdictionConfigs(): Promise<Map<string, JurisdictionConfig
       jurisdictions.set(key, {
         name: jData['name'] as string,
         chainId: jData['chainId'] as number,
+        blockTimeMs: Number(jData['blockTimeMs']),
         address: rpcUrl,
         entityProviderAddress,
         depositoryAddress,

@@ -239,7 +239,7 @@ export async function processAccountTx(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'pull_resolve' }>,
         byLeft,
-        currentHeight,
+        currentTimestamp,
       );
 
     // === SWAP HANDLERS ===

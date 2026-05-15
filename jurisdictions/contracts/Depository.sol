@@ -92,9 +92,9 @@ contract Depository is ReentrancyGuardLite {
   uint256 private constant MAX_BATCH_RESERVE_TO_EXTERNAL = 64;
   uint256 private constant MAX_BATCH_SECRET_REVEALS = 32;
   uint256 private constant MAX_RESERVE_TO_COLLATERAL_PAIRS = 64;
-  bytes4 private constant SUPPORTS_ARGUMENT_BLOCKS_SELECTOR = bytes4(keccak256("supportsArgumentBlocks()"));
-  bytes4 private constant APPLY_BATCH_WITH_ARGUMENT_BLOCKS_SELECTOR =
-    bytes4(keccak256("applyBatchWithArgumentBlocks(int256[],bytes,bytes,bytes,uint256,uint256)"));
+  bytes4 private constant SUPPORTS_ARGUMENT_TIMESTAMPS_SELECTOR = bytes4(keccak256("supportsArgumentTimestamps()"));
+  bytes4 private constant APPLY_BATCH_WITH_ARGUMENT_TIMESTAMPS_SELECTOR =
+    bytes4(keccak256("applyBatchWithArgumentTimestamps(int256[],bytes,bytes,bytes,uint256,uint256)"));
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex);
   event DebtEnforced(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountPaid, uint256 remainingAmount, uint256 newDebtIndex);
   event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
@@ -761,14 +761,14 @@ contract Depository is ReentrancyGuardLite {
       }
     }
 
-    uint256 initialArgumentsBlock = block.number;
+    uint256 initialArgumentsTimestamp = block.timestamp;
     if (!params.cooperative) {
-      uint256 disputeTimeout = _accounts[acct_key].disputeTimeout;
-      initialArgumentsBlock = disputeTimeout > defaultDisputeDelay ? disputeTimeout - defaultDisputeDelay : 0;
+      initialArgumentsTimestamp = _accounts[acct_key].disputeStartTimestamp;
     }
 
     _accounts[acct_key].disputeHash = bytes32(0);
     _accounts[acct_key].disputeTimeout = 0;
+    _accounts[acct_key].disputeStartTimestamp = 0;
 
     bool ok = _finalizeAccount(
       entityId,
@@ -776,8 +776,8 @@ contract Depository is ReentrancyGuardLite {
       params.finalProofbody,
       params.finalArguments,
       params.initialArguments,
-      block.number,
-      initialArgumentsBlock
+      block.timestamp,
+      initialArgumentsTimestamp
     );
     if (ok) {
       // SET nonce based on finalization path
@@ -807,8 +807,8 @@ contract Depository is ReentrancyGuardLite {
     ProofBody memory proofbody,
     bytes memory arguments1,
     bytes memory arguments2,
-    uint256 arguments1Block,
-    uint256 arguments2Block
+    uint256 arguments1Timestamp,
+    uint256 arguments2Timestamp
   ) internal returns (bool) {
     if (proofbody.tokenIds.length != proofbody.offdeltas.length) revert E8();
 
@@ -816,8 +816,8 @@ contract Depository is ReentrancyGuardLite {
     bytes32 rightAddr = entity1 < entity2 ? entity2 : entity1;
     bytes memory leftArgs = entity1 < entity2 ? arguments1 : arguments2;
     bytes memory rightArgs = entity1 < entity2 ? arguments2 : arguments1;
-    uint256 leftArgsBlock = entity1 < entity2 ? arguments1Block : arguments2Block;
-    uint256 rightArgsBlock = entity1 < entity2 ? arguments2Block : arguments1Block;
+    uint256 leftArgsTimestamp = entity1 < entity2 ? arguments1Timestamp : arguments2Timestamp;
+    uint256 rightArgsTimestamp = entity1 < entity2 ? arguments2Timestamp : arguments1Timestamp;
     bytes memory acct_key = accountKey(leftAddr, rightAddr);
 
     // NOTE: On-chain settlement must apply TOTAL delta (ondelta + offdelta).
@@ -846,8 +846,8 @@ contract Depository is ReentrancyGuardLite {
         tc,
         i < decodedLeft.length ? decodedLeft[i] : bytes(""),
         i < decodedRight.length ? decodedRight[i] : bytes(""),
-        leftArgsBlock,
-        rightArgsBlock
+        leftArgsTimestamp,
+        rightArgsTimestamp
       );
       if (newDeltas.length != deltas.length) revert E8();
 
@@ -885,22 +885,22 @@ contract Depository is ReentrancyGuardLite {
     TransformerClause memory tc,
     bytes memory leftArguments,
     bytes memory rightArguments,
-    uint256 leftArgumentsBlock,
-    uint256 rightArgumentsBlock
+    uint256 leftArgumentsTimestamp,
+    uint256 rightArgumentsTimestamp
   ) internal view returns (int[] memory) {
     (bool supportOk, bytes memory supportData) = tc.transformerAddress.staticcall(
-      abi.encodeWithSelector(SUPPORTS_ARGUMENT_BLOCKS_SELECTOR)
+      abi.encodeWithSelector(SUPPORTS_ARGUMENT_TIMESTAMPS_SELECTOR)
     );
     if (supportOk && supportData.length >= 32 && abi.decode(supportData, (bool))) {
       (bool applyOk, bytes memory applyData) = tc.transformerAddress.staticcall(
         abi.encodeWithSelector(
-          APPLY_BATCH_WITH_ARGUMENT_BLOCKS_SELECTOR,
+          APPLY_BATCH_WITH_ARGUMENT_TIMESTAMPS_SELECTOR,
           deltas,
           tc.encodedBatch,
           leftArguments,
           rightArguments,
-          leftArgumentsBlock,
-          rightArgumentsBlock
+          leftArgumentsTimestamp,
+          rightArgumentsTimestamp
         )
       );
       if (!applyOk) _revertWithData(applyData);

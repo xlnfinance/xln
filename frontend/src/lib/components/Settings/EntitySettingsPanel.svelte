@@ -417,21 +417,23 @@
     }
   }
 
-  async function handleJMachineCreate(event: CustomEvent<{
-    name: string;
-    mode: 'browservm' | 'rpc';
-    chainId: number;
-    rpcs: string[];
-    ticker: string;
-    contracts?: JMachineConfig['contracts'];
-    deploy?: boolean;
-  }>) {
+	  async function handleJMachineCreate(event: CustomEvent<{
+	    name: string;
+	    mode: 'browservm' | 'rpc';
+	    chainId: number;
+	    rpcs: string[];
+	    blockTimeMs: number;
+	    ticker: string;
+	    contracts?: JMachineConfig['contracts'];
+	    deploy?: boolean;
+	  }>) {
     const config: JMachineConfig = {
       name: event.detail.name,
-      mode: event.detail.mode,
-      chainId: event.detail.chainId,
-      rpcs: event.detail.rpcs,
-      ticker: event.detail.ticker,
+	      mode: event.detail.mode,
+	      chainId: event.detail.chainId,
+	      rpcs: event.detail.rpcs,
+	      blockTimeMs: event.detail.blockTimeMs,
+	      ticker: event.detail.ticker,
       ...(event.detail.contracts ? { contracts: event.detail.contracts } : {}),
       createdAt: Date.now(),
     };

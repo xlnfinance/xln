@@ -68,7 +68,7 @@ export declare namespace DeltaTransformer {
   export type PullStruct = {
     deltaIndex: BigNumberish;
     amount: BigNumberish;
-    revealedUntilBlock: BigNumberish;
+    revealedUntilTimestamp: BigNumberish;
     fullHash: BytesLike;
     partialRoot: BytesLike;
   };
@@ -76,13 +76,13 @@ export declare namespace DeltaTransformer {
   export type PullStructOutput = [
     deltaIndex: bigint,
     amount: bigint,
-    revealedUntilBlock: bigint,
+    revealedUntilTimestamp: bigint,
     fullHash: string,
     partialRoot: string
   ] & {
     deltaIndex: bigint;
     amount: bigint;
-    revealedUntilBlock: bigint;
+    revealedUntilTimestamp: bigint;
     fullHash: string;
     partialRoot: string;
   };

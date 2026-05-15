@@ -46,8 +46,6 @@ export type { Account } from "./contracts/Account";
 export { Account__factory } from "./factories/contracts/Account__factory";
 export type { Console } from "./contracts/console.sol/Console";
 export { Console__factory } from "./factories/contracts/console.sol/Console__factory";
-export type { CrossSwapPull } from "./contracts/CrossSwapPull";
-export { CrossSwapPull__factory } from "./factories/contracts/CrossSwapPull__factory";
 export type { DeltaTransformer } from "./contracts/DeltaTransformer";
 export { DeltaTransformer__factory } from "./factories/contracts/DeltaTransformer__factory";
 export type { Depository } from "./contracts/Depository.sol/Depository";

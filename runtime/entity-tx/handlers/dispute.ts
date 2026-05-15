@@ -169,7 +169,8 @@ function buildDeltaTransformerArguments(
 
   const hasLocks = accountMachine.locks?.size ? accountMachine.locks.size > 0 : false;
   const hasSwaps = accountMachine.swapOffers?.size ? accountMachine.swapOffers.size > 0 : false;
-  if (!hasLocks && !hasSwaps) {
+  const hasPulls = accountMachine.pulls?.size ? accountMachine.pulls.size > 0 : false;
+  if (!hasLocks && !hasSwaps && !hasPulls) {
     return { leftArguments: '0x', rightArguments: '0x' };
   }
 
@@ -240,6 +241,54 @@ function collectPullArgumentBuckets(account: AccountMachine): {
   return { leftPulls, rightPulls, hasLeftReveal, hasRightReveal };
 }
 
+function hasNonZeroPullArgument(initialArguments?: string): boolean {
+  const raw = String(initialArguments || '0x');
+  if (!raw || raw === '0x') return false;
+  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+  let argArray: string[];
+  try {
+    [argArray] = abiCoder.decode(['bytes[]'], raw) as unknown as [string[]];
+  } catch {
+    return false;
+  }
+  for (const arg of argArray) {
+    if (!arg || arg === '0x') continue;
+    try {
+      const [decoded] = abiCoder.decode(
+        ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
+        arg,
+      ) as unknown as [{ pulls?: Array<string> }];
+      for (const binary of decoded.pulls || []) {
+        try {
+          if (decodeHashLadderBinary(binary).fillRatio > 0) return true;
+        } catch {
+          // Ignore malformed pull arguments here; the transformer will reject them later.
+        }
+      }
+    } catch {
+      // Ignore non-DeltaTransformer argument payloads.
+    }
+  }
+  return false;
+}
+
+function targetCrossPullRiskAmount(state: EntityState, counterpartyEntityId: string, account: AccountMachine): bigint {
+  const self = String(state.entityId || '').toLowerCase();
+  const counterparty = String(counterpartyEntityId || '').toLowerCase();
+  let total = 0n;
+  for (const route of state.crossJurisdictionSwaps?.values() ?? []) {
+    if (
+      String(route.target.counterpartyEntityId || '').toLowerCase() === self &&
+      String(route.target.entityId || '').toLowerCase() === counterparty &&
+      route.targetPull?.pullId &&
+      account.pulls?.has(route.targetPull.pullId)
+    ) {
+      total += BigInt(route.target.amount);
+    }
+  }
+  return total;
+}
+
 function buildPendingSwapFillRatios(
   entityState: EntityState,
   counterpartyEntityId: string,
@@ -308,7 +357,13 @@ export async function handleDisputeStart(
   entityTx: Extract<EntityTx, { type: 'disputeStart' }>,
   env: Env
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> {
-  const { counterpartyEntityId, description, initialArguments: overrideInitialArguments } = entityTx.data;
+  const {
+    counterpartyEntityId,
+    description,
+    initialArguments: overrideInitialArguments,
+    allowUnsafeCrossJTargetDispute,
+    acceptedCrossJTargetLossAmount,
+  } = entityTx.data;
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
 
@@ -352,6 +407,21 @@ export async function handleDisputeStart(
   const fillRatiosByOfferId = buildPendingSwapFillRatios(newState, counterpartyEntityId, account);
   const htlcSecrets = collectHtlcSecrets(newState, counterpartyEntityId);
   const pullArgs = collectPullArgumentBuckets(account);
+  const targetCrossRiskAmount = targetCrossPullRiskAmount(newState, counterpartyEntityId, account);
+  if (targetCrossRiskAmount > 0n && !pullArgs.hasLeftReveal && !pullArgs.hasRightReveal && !hasNonZeroPullArgument(overrideInitialArguments)) {
+    const acceptedLoss = BigInt(acceptedCrossJTargetLossAmount ?? 0n);
+    if (!allowUnsafeCrossJTargetDispute || acceptedLoss < targetCrossRiskAmount) {
+      addMessage(
+        newState,
+        `❌ Cross-j target dispute blocked: source pull arguments missing; accept possible loss up to ${targetCrossRiskAmount} or start source dispute first`,
+      );
+      return { newState, outputs };
+    }
+    addMessage(
+      newState,
+      `⚠️ Unsafe cross-j target dispute accepted: pull arguments missing, possible loss up to ${targetCrossRiskAmount}`,
+    );
+  }
   const { leftArguments, rightArguments } = buildDeltaTransformerArguments(account, {
     fillRatiosByOfferId,
     ...(overrideInitialArguments && overrideInitialArguments !== '0x'

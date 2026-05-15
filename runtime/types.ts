@@ -250,6 +250,7 @@ export interface JurisdictionConfig {
   entityProviderAddress: string;
   depositoryAddress: string;
   chainId?: number;
+  blockTimeMs?: number;
   // Optional per-jurisdiction onboarding defaults (USD whole units).
   rebalancePolicyUsd?: {
     r2cRequestSoftLimit: number;
@@ -299,6 +300,7 @@ export type RuntimeTx =
         chainId: number;        // 1=ETH, 8453=Base, 1001+=BrowserVM
         ticker: string;         // "ETH", "MATIC", "SIM"
         rpcs: string[];         // [] = BrowserVM, [...urls] = RPC
+        blockTimeMs?: number;   // Expected settlement-chain block time for wall-clock safety windows
         rpcPolicy?: 'single' | 'failover' | { mode: 'quorum'; min: number };
         contracts?: {
           depository?: string;
@@ -652,7 +654,7 @@ export type EntityTx =
         pullId: string;
         tokenId: number;
         amount: bigint;
-        revealedUntilBlock: number;
+        revealedUntilTimestamp: number;
         fullHash: string;
         partialRoot: string;
         description?: string;
@@ -708,6 +710,8 @@ export type EntityTx =
         counterpartyEntityId: string;
         initialArguments?: string;
         description?: string;
+        allowUnsafeCrossJTargetDispute?: boolean;
+        acceptedCrossJTargetLossAmount?: bigint;
       };
     }
   | {
@@ -1126,7 +1130,7 @@ export interface PullCommitment {
   pullId: string;
   tokenId: number;
   amount: bigint;
-  revealedUntilBlock: number;
+  revealedUntilTimestamp: number;
   fullHash: string;
   partialRoot: string;
   createdHeight: number;
@@ -1699,7 +1703,7 @@ export type AccountTx =
         pullId: string;
         tokenId: number;
         amount: bigint;
-        revealedUntilBlock: number;
+        revealedUntilTimestamp: number;
         fullHash: string;
         partialRoot: string;
       };
@@ -1960,7 +1964,7 @@ export interface CrossJurisdictionPullLeg {
   tokenId: number;
   amount: bigint;
   signedAmount: bigint;
-  revealedUntilBlock: number;
+  revealedUntilTimestamp: number;
   fullHash: string;
   partialRoot: string;
 }
@@ -1973,7 +1977,7 @@ export interface CrossJurisdictionSwapRoute {
   target: CrossJurisdictionSwapLeg;
   sourcePull?: CrossJurisdictionPullLeg;
   targetPull?: CrossJurisdictionPullLeg;
-  hashLadderSeedHash?: string;
+  hashLadderPrivateSeed?: string;
   hashlock?: string;
   priceTicks?: bigint;
   status: CrossJurisdictionSwapStatus;
@@ -2353,6 +2357,7 @@ export interface JReplica {
   // Block creation delay (ms-based for universal timing)
   // Creates visual delay where batches sit in mempool as yellow cubes
   blockDelayMs: number;                   // Delay in ms before processing mempool (default: 300)
+  blockTimeMs?: number;                   // Settlement-chain block time estimate used for cross-j wall-clock deadlines
   lastBlockTimestamp: number;             // Timestamp (ms) of last block creation
   blockReady?: boolean;                   // True when mempool has items and blockDelayMs elapsed
 

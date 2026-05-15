@@ -1,4 +1,4 @@
-import { loadFixture, mine } from "@nomicfoundation/hardhat-toolbox/network-helpers.js";
+import { loadFixture, mine, time } from "@nomicfoundation/hardhat-toolbox/network-helpers.js";
 import { expect } from "chai";
 import hre from "hardhat";
 const { ethers } = hre;
@@ -170,8 +170,11 @@ function buildHashLadderProof(label: string, fillRatio: number): {
   };
 }
 
-function encodeCrossSwapPullArguments(binaries: string[]): string {
-  return abi.encode(["bytes[]"], [binaries]);
+function encodeDeltaTransformerArguments(fillRatios: number[] = [], secrets: string[] = [], pulls: string[] = []): string {
+  return abi.encode(
+    ["tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)"],
+    [{ fillRatios, secrets, pulls }],
+  );
 }
 
 function encodePartialPullBinary(fillRatio: number, reveals: string[]): string {
@@ -659,10 +662,10 @@ describe("Depository", function () {
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(200n);
   });
 
-  it("passes dispute argument block timestamps into CrossSwapPull without storing secrets", async function () {
+  it("passes dispute argument timestamps into DeltaTransformer pull without storing secrets", async function () {
     const { depository } = await loadFixture(deployFixture);
-    const CrossSwapPull = await ethers.getContractFactory("CrossSwapPull");
-    const transformer = await CrossSwapPull.deploy();
+    const DeltaTransformer = await ethers.getContractFactory("DeltaTransformer");
+    const transformer = await DeltaTransformer.deploy();
     await transformer.waitForDeployment();
 
     const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
@@ -693,14 +696,14 @@ describe("Depository", function () {
 
     const fillRatio = 0x0123;
     const pullProof = buildHashLadderProof("depository-cross-pull", fillRatio);
-    const revealDeadline = (await ethers.provider.getBlockNumber()) + 10;
+    const revealDeadline = (await time.latest()) + 10;
     const encodedPullBatch = await transformer.encodeBatch({
-      pulls: [{
-        ownerIsLeft: true,
-        addDeltaIndex: 0,
-        amount: MAX_FILL_RATIO,
-        subDeltaIndex: 1,
-        revealedUntilBlock: revealDeadline,
+      payment: [],
+      swap: [],
+      pull: [{
+        deltaIndex: 1,
+        amount: -MAX_FILL_RATIO,
+        revealedUntilTimestamp: revealDeadline,
         fullHash: pullProof.fullHash,
         partialRoot: pullProof.partialRoot,
       }],
@@ -712,13 +715,12 @@ describe("Depository", function () {
         transformerAddress: await transformer.getAddress(),
         encodedBatch: encodedPullBatch,
         allowances: [
-          { deltaIndex: 0n, rightAllowance: 0n, leftAllowance: BigInt(fillRatio) },
           { deltaIndex: 1n, rightAllowance: BigInt(fillRatio), leftAllowance: 0n },
         ],
       }],
     );
     const proofbodyHash = proofBodyHash(proofbody);
-    const rightTransformerArgs = encodeCrossSwapPullArguments([encodePartialPullBinary(fillRatio, pullProof.reveals)]);
+    const rightTransformerArgs = encodeDeltaTransformerArguments([], [], [encodePartialPullBinary(fillRatio, pullProof.reveals)]);
     const initialArguments = abi.encode(["bytes[]"], [[rightTransformerArgs]]);
     const disputeNonce = 1n;
     const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
@@ -737,7 +739,7 @@ describe("Depository", function () {
     await depository.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
 
     const startedAccount = await depository._accounts(acctKey);
-    expect(startedAccount.disputeTimeout - await depository.defaultDisputeDelay()).to.be.lessThanOrEqual(BigInt(revealDeadline));
+    expect(startedAccount.disputeStartTimestamp).to.be.lessThanOrEqual(BigInt(revealDeadline));
     await mine(Number(await depository.defaultDisputeDelay()));
 
     const finalization = {
@@ -758,8 +760,6 @@ describe("Depository", function () {
     await depository.connect(left.signer).processBatch(final.encodedBatch, final.hankoData, final.nonce);
 
     expect(await transformer.hashToBlock(hashNode(pullProof.reveals[3]))).to.equal(0n);
-    expect(await depository._reserves(left.entityId, tokenA)).to.equal(BigInt(fillRatio));
-    expect(await depository._reserves(right.entityId, tokenA)).to.equal(1_000n - BigInt(fillRatio));
     expect(await depository._reserves(left.entityId, tokenB)).to.equal(1_000n - BigInt(fillRatio));
     expect(await depository._reserves(right.entityId, tokenB)).to.equal(BigInt(fillRatio));
   });

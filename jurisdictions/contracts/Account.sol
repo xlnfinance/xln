@@ -390,6 +390,7 @@ library Account {
       timeout, params.proofbodyHash, params.initialArguments
     );
     _accounts[acct_key].disputeTimeout = timeout;
+    _accounts[acct_key].disputeStartTimestamp = block.timestamp;
 
     // SET nonce = signedNonce (any settlement signed at ≤ this nonce is now dead)
     _accounts[acct_key].nonce = params.nonce;

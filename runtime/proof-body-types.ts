@@ -86,7 +86,7 @@ export interface RuntimeSwap {
 export interface RuntimePull {
   deltaIndex: number;
   amount: bigint;
-  revealedUntilBlock: number;
+  revealedUntilTimestamp: number;
   fullHash: string;
   partialRoot: string;
 }
@@ -187,7 +187,7 @@ export const BATCH_ABI = {
       components: [
         { name: 'deltaIndex', type: 'uint256' },
         { name: 'amount', type: 'int256' },
-        { name: 'revealedUntilBlock', type: 'uint256' },
+        { name: 'revealedUntilTimestamp', type: 'uint256' },
         { name: 'fullHash', type: 'bytes32' },
         { name: 'partialRoot', type: 'bytes32' },
       ],

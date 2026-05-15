@@ -15,6 +15,7 @@ export interface JMachineConfig {
   chainId: number;
   ticker: string;
   rpcs: string[];
+  blockTimeMs: number;
   contracts?: {
     depository?: string;
     entityProvider?: string;
@@ -62,6 +63,15 @@ const normalizeChainId = (value: unknown): number | null => {
   return Math.floor(numeric);
 };
 
+const normalizeBlockTimeMs = (value: unknown, chainId: number): number => {
+  const numeric = Number(value);
+  if (Number.isFinite(numeric) && numeric > 0) return Math.floor(numeric);
+  if (chainId === 1 || chainId === 11155111) return 12_000;
+  if (chainId === 8453 || chainId === 84532) return 2_000;
+  if (chainId === 31337 || chainId === 31338) return 1_000;
+  throw new Error(`J_MACHINE_BLOCK_TIME_REQUIRED:${chainId}`);
+};
+
 const normalizeContracts = (value: unknown): JMachineConfig['contracts'] | undefined => {
   if (!isRecord(value)) return undefined;
   const depository = normalizeAddress(value['depository']);
@@ -88,12 +98,14 @@ export function normalizeJMachineConfig(raw: unknown): JMachineConfig | null {
   const createdAtRaw = Number(raw['createdAt']);
   if (!name || !ticker || chainId === null) return null;
   if (mode === 'rpc' && rpcs.length === 0) return null;
+  const blockTimeMs = normalizeBlockTimeMs(raw['blockTimeMs'], chainId);
   return {
     name,
     mode,
     chainId,
     ticker,
     rpcs: mode === 'browservm' ? [] : rpcs,
+    blockTimeMs,
     ...(contracts ? { contracts } : {}),
     createdAt: Number.isFinite(createdAtRaw) && createdAtRaw > 0 ? Math.floor(createdAtRaw) : Date.now(),
   };

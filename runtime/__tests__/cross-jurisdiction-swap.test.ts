@@ -10,7 +10,7 @@ import { hashHtlcSecret } from '../htlc-utils';
 import type { AccountMachine, ConsensusConfig, EntityReplica, EntityState, Env, JurisdictionConfig } from '../types';
 import { createDefaultDelta } from '../validation-utils';
 import {
-  CROSS_J_REVEAL_SAFETY_BLOCKS,
+  CROSS_J_TARGET_REVEAL_SAFETY_MS,
   buildPreparedCrossJurisdictionRoute,
 } from '../cross-jurisdiction';
 
@@ -24,6 +24,7 @@ const makeJurisdiction = (name: string, chainId: number, depByte: string, epByte
   name,
   address: `rpc://${name}`,
   chainId,
+  blockTimeMs: 1_000,
   depositoryAddress: addr(depByte),
   entityProviderAddress: addr(epByte),
 });
@@ -165,6 +166,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       rpcs: [eth.address],
       depositoryAddress: eth.depositoryAddress,
       entityProviderAddress: eth.entityProviderAddress,
+      blockTimeMs: eth.blockTimeMs,
+      defaultDisputeDelayBlocks: 5,
     } as any);
     env.jReplicas.set(base.name, {
       name: base.name,
@@ -172,6 +175,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       rpcs: [base.address],
       depositoryAddress: base.depositoryAddress,
       entityProviderAddress: base.entityProviderAddress,
+      blockTimeMs: 200,
+      defaultDisputeDelayBlocks: 7,
     } as any);
 
     const sourceUser = entity('01');
@@ -230,8 +235,9 @@ describe('cross-jurisdiction hashledger swap', () => {
     const preparedRoute = (sourceUserOutput?.entityTxs?.[0]?.data as any).route;
     expect(preparedRoute.sourcePull.fullHash).toBe(preparedRoute.targetPull.fullHash);
     expect(preparedRoute.sourcePull.partialRoot).toBe(preparedRoute.targetPull.partialRoot);
-    expect(preparedRoute.targetPull.revealedUntilBlock - preparedRoute.sourcePull.revealedUntilBlock)
-      .toBeGreaterThanOrEqual(CROSS_J_REVEAL_SAFETY_BLOCKS);
+    expect(preparedRoute.hashLadderPrivateSeed).toBeUndefined();
+    expect(preparedRoute.targetPull.revealedUntilTimestamp - preparedRoute.sourcePull.revealedUntilTimestamp)
+      .toBeGreaterThanOrEqual(5_000 + CROSS_J_TARGET_REVEAL_SAFETY_MS);
   });
 
   test('submitCrossJurisdictionSwap rejects missing target receiving account', async () => {
@@ -247,6 +253,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       rpcs: [eth.address],
       depositoryAddress: eth.depositoryAddress,
       entityProviderAddress: eth.entityProviderAddress,
+      blockTimeMs: eth.blockTimeMs,
+      defaultDisputeDelayBlocks: 5,
     } as any);
     env.jReplicas.set(base.name, {
       name: base.name,
@@ -254,6 +262,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       rpcs: [base.address],
       depositoryAddress: base.depositoryAddress,
       entityProviderAddress: base.entityProviderAddress,
+      blockTimeMs: base.blockTimeMs,
+      defaultDisputeDelayBlocks: 5,
     } as any);
 
     const sourceUser = entity('11');
@@ -391,7 +401,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       status: 'resting' as const,
       createdAt: env.timestamp,
       updatedAt: env.timestamp,
-    }, { runtimeSeed: 'test-seed', sourceJHeight: 1, targetJHeight: 1, now: env.timestamp });
+    }, { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.timestamp });
     state.crossJurisdictionSwaps?.set(route.orderId, route);
 
     const abiCoder = ethers.AbiCoder.defaultAbiCoder();
@@ -467,7 +477,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       status: 'resting' as const,
       createdAt: env.timestamp,
       updatedAt: env.timestamp,
-    }, { runtimeSeed: 'test-seed', sourceJHeight: 1, targetJHeight: 1, now: env.timestamp });
+    }, { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.timestamp });
     state.crossJurisdictionSwaps?.set(route.orderId, route);
     const binary = partialBinary(0x1234);
 
@@ -493,5 +503,74 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect((result.outputs?.[0]?.entityTxs?.[0]?.data as any).binary).toBe(binary);
     expect((result.outputs?.[0]?.entityTxs?.[1]?.data as any).counterpartyEntityId).toBe(targetHub);
     expect((result.outputs?.[0]?.entityTxs?.[1]?.data as any).initialArguments).toBeUndefined();
+  });
+
+  test('target DisputeStarted without pull args forces source dispute first', async () => {
+    const env = createEmptyEnv('cross-target-dispute-forces-source');
+    env.scenarioMode = true;
+    env.timestamp = 50_000;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('51');
+    const sourceHub = entity('52');
+    const targetHub = entity('53');
+    const targetUser = entity('54');
+    const sourceSigner = addr('81');
+    const targetSigner = addr('82');
+    const sourceState = makeState(sourceUser, sourceSigner, eth, sourceHub);
+    const targetState = makeState(targetUser, targetSigner, base, targetHub);
+    addReplica(env, sourceState, sourceSigner);
+    addReplica(env, targetState, targetSigner);
+    const route = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-target-dispute-force-source',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      source: {
+        jurisdiction: eth.name,
+        entityId: sourceUser,
+        counterpartyEntityId: sourceHub,
+        tokenId: 1,
+        amount: 100n,
+      },
+      target: {
+        jurisdiction: base.name,
+        entityId: targetHub,
+        counterpartyEntityId: targetUser,
+        tokenId: 1,
+        amount: 90n,
+      },
+      status: 'resting' as const,
+      createdAt: env.timestamp,
+      updatedAt: env.timestamp,
+    }, { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.timestamp });
+    targetState.crossJurisdictionSwaps?.set(route.orderId, { ...route, hashLadderPrivateSeed: undefined });
+
+    const result = await applyEntityTx(env, targetState, {
+      type: 'j_event',
+      data: {
+        from: targetSigner,
+        event: {
+          type: 'DisputeStarted',
+          data: {
+            sender: targetHub,
+            counterentity: targetUser,
+            nonce: '1',
+            proofbodyHash: secret('9a'),
+            initialArguments: '0x',
+            disputeTimeout: 100,
+            onChainNonce: 1,
+          },
+        },
+        observedAt: env.timestamp,
+        blockNumber: 2,
+        blockHash: secret('9b'),
+        transactionHash: secret('9c'),
+      },
+    });
+
+    const sourceOutput = result.outputs.find(output => output.entityId === sourceUser);
+    expect(sourceOutput?.entityTxs?.map(tx => tx.type)).toEqual(['disputeStart', 'j_broadcast']);
+    expect((sourceOutput?.entityTxs?.[0]?.data as any).counterpartyEntityId).toBe(sourceHub);
   });
 });

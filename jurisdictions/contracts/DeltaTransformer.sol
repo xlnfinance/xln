@@ -54,7 +54,7 @@ contract DeltaTransformer {
   struct Pull {
     uint deltaIndex;
     int amount;
-    uint revealedUntilBlock;
+    uint revealedUntilTimestamp;
     bytes32 fullHash;
     bytes32 partialRoot;
   }
@@ -78,22 +78,22 @@ contract DeltaTransformer {
     bytes calldata leftArguments,
     bytes calldata rightArguments
   ) public view returns (int[] memory) {
-    return _applyBatch(deltas, encodedBatch, leftArguments, rightArguments, block.number, block.number);
+    return _applyBatch(deltas, encodedBatch, leftArguments, rightArguments, block.timestamp, block.timestamp);
   }
 
-  function supportsArgumentBlocks() external pure returns (bool) {
+  function supportsArgumentTimestamps() external pure returns (bool) {
     return true;
   }
 
-  function applyBatchWithArgumentBlocks(
+  function applyBatchWithArgumentTimestamps(
     int[] memory deltas,
     bytes calldata encodedBatch,
     bytes calldata leftArguments,
     bytes calldata rightArguments,
-    uint leftArgumentsBlock,
-    uint rightArgumentsBlock
+    uint leftArgumentsTimestamp,
+    uint rightArgumentsTimestamp
   ) external view returns (int[] memory) {
-    return _applyBatch(deltas, encodedBatch, leftArguments, rightArguments, leftArgumentsBlock, rightArgumentsBlock);
+    return _applyBatch(deltas, encodedBatch, leftArguments, rightArguments, leftArgumentsTimestamp, rightArgumentsTimestamp);
   }
 
   function _applyBatch(
@@ -101,8 +101,8 @@ contract DeltaTransformer {
     bytes calldata encodedBatch,
     bytes calldata leftArguments,
     bytes calldata rightArguments,
-    uint leftArgumentsBlock,
-    uint rightArgumentsBlock
+    uint leftArgumentsTimestamp,
+    uint rightArgumentsTimestamp
   ) private view returns (int[] memory) {
     Batch memory decodedBatch = abi.decode(encodedBatch, (Batch));
 
@@ -142,11 +142,11 @@ contract DeltaTransformer {
       // positive amount credits left; negative amount credits right.
       if (pull.amount >= 0) {
         bytes memory pullArg = leftPulls < left.pulls.length ? left.pulls[leftPulls] : bytes("");
-        applyPull(deltas, pull, pullArg, leftArgumentsBlock);
+        applyPull(deltas, pull, pullArg, leftArgumentsTimestamp);
         leftPulls++;
       } else {
         bytes memory pullArg = rightPulls < right.pulls.length ? right.pulls[rightPulls] : bytes("");
-        applyPull(deltas, pull, pullArg, rightArgumentsBlock);
+        applyPull(deltas, pull, pullArg, rightArgumentsTimestamp);
         rightPulls++;
       }
     }
@@ -201,11 +201,11 @@ contract DeltaTransformer {
     int[] memory deltas,
     Pull memory pull,
     bytes memory pullArg,
-    uint argumentsBlock
+    uint argumentsTimestamp
   ) private pure {
     if (pull.deltaIndex >= deltas.length) revert InvalidDeltaIndex();
 
-    uint16 fillRatio = verifiedPullFillRatio(pull, pullArg, argumentsBlock);
+    uint16 fillRatio = verifiedPullFillRatio(pull, pullArg, argumentsTimestamp);
     if (fillRatio == 0) return;
 
     uint absAmount = pull.amount >= 0 ? uint(pull.amount) : uint(-pull.amount);
@@ -220,10 +220,10 @@ contract DeltaTransformer {
   function verifiedPullFillRatio(
     Pull memory pull,
     bytes memory pullArg,
-    uint argumentsBlock
+    uint argumentsTimestamp
   ) private pure returns (uint16) {
     if (pullArg.length == 0) return 0;
-    if (argumentsBlock > pull.revealedUntilBlock) return 0;
+    if (argumentsTimestamp > pull.revealedUntilTimestamp) return 0;
 
     if (pullArg.length == 32) {
       bytes32 fullSecret;

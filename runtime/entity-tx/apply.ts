@@ -44,9 +44,10 @@ import { initJBatch, batchAddSettlement } from '../j-batch';
 import { handleR2E } from './handlers/r2e';
 import { handleHtlcPayment } from './handlers/htlc-payment';
 import { generateLockId, hashHtlcSecret } from '../htlc-utils';
-import { getRuntimeJurisdictionHeight } from '../j-height';
+import { getRuntimeJurisdictionHeight, requireRuntimeJurisdictionDisputeDelayMs } from '../j-height';
 import {
   buildPreparedCrossJurisdictionRoute,
+  stripCrossJurisdictionPrivateData,
 } from '../cross-jurisdiction';
 import { decodeHashLadderBinary } from '../hashladder';
 import { handleR2C } from './handlers/r2c';
@@ -101,17 +102,6 @@ const findAccountKey = (state: EntityState, counterpartyId: string): string | nu
   const target = normalizeEntityRef(counterpartyId);
   for (const key of state.accounts.keys()) {
     if (normalizeEntityRef(key) === target) return key;
-  }
-  return null;
-};
-
-const findEntityStateInEnv = (env: Env, entityId: string): EntityState | null => {
-  const target = normalizeEntityRef(entityId);
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
-    const [keyEntity] = String(replicaKey).split(':');
-    if (normalizeEntityRef(replica.entityId || keyEntity || '') === target || normalizeEntityRef(keyEntity || '') === target) {
-      return replica.state;
-    }
   }
   return null;
 };
@@ -1297,7 +1287,7 @@ export const applyEntityTx = async (
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
       const mempoolOps: MempoolOp[] = [];
-      const { counterpartyEntityId, pullId, tokenId, amount, revealedUntilBlock, fullHash, partialRoot } = entityTx.data;
+      const { counterpartyEntityId, pullId, tokenId, amount, revealedUntilTimestamp, fullHash, partialRoot } = entityTx.data;
       const normalizedCounterparty = findAccountKey(newState, counterpartyEntityId);
       if (!normalizedCounterparty) {
         addMessage(newState, `❌ Pull lock failed: no account with ${formatEntityId(counterpartyEntityId)}`);
@@ -1311,7 +1301,7 @@ export const applyEntityTx = async (
             pullId,
             tokenId: Number(tokenId),
             amount: BigInt(amount),
-            revealedUntilBlock: Number(revealedUntilBlock),
+            revealedUntilTimestamp: Number(revealedUntilTimestamp),
             fullHash,
             partialRoot,
           },
@@ -1394,12 +1384,9 @@ export const applyEntityTx = async (
         addMessage(newState, `❌ Cross-j prepare ${route.orderId} wrong source hub`);
         return { newState, outputs };
       }
-      const sourceUserState = findEntityStateInEnv(env, route.source.entityId);
-      const targetHubState = findEntityStateInEnv(env, route.target.entityId);
       const preparedRoute = buildPreparedCrossJurisdictionRoute(route, {
         runtimeSeed: (env as { runtimeSeed?: string }).runtimeSeed,
-        sourceJHeight: Number(sourceUserState?.lastFinalizedJHeight ?? newState.lastFinalizedJHeight ?? 0),
-        targetJHeight: Number(targetHubState?.lastFinalizedJHeight ?? newState.lastFinalizedJHeight ?? 0),
+        sourceDisputeDelayMs: requireRuntimeJurisdictionDisputeDelayMs(env, route.source.jurisdiction),
         now: newState.timestamp || env.timestamp,
       });
       if (!preparedRoute.targetPull || !preparedRoute.sourcePull) {
@@ -1413,33 +1400,34 @@ export const applyEntityTx = async (
         return { newState, outputs };
       }
       newState.crossJurisdictionSwaps.set(preparedRoute.orderId, preparedRoute);
+      const publicPreparedRoute = stripCrossJurisdictionPrivateData(preparedRoute);
 
       outputs.push({
-        entityId: preparedRoute.target.entityId,
+        entityId: publicPreparedRoute.target.entityId,
         entityTxs: [
-          { type: 'registerCrossJurisdictionSwap', data: { route: preparedRoute } },
+          { type: 'registerCrossJurisdictionSwap', data: { route: publicPreparedRoute } },
           {
             type: 'pullLock',
             data: {
-              counterpartyEntityId: preparedRoute.target.counterpartyEntityId,
-              pullId: preparedRoute.targetPull.pullId,
-              tokenId: preparedRoute.targetPull.tokenId,
-              amount: preparedRoute.targetPull.signedAmount,
-              revealedUntilBlock: preparedRoute.targetPull.revealedUntilBlock,
-              fullHash: preparedRoute.targetPull.fullHash,
-              partialRoot: preparedRoute.targetPull.partialRoot,
-              description: preparedRoute.memo || `Cross-j target pull ${preparedRoute.orderId}`,
+              counterpartyEntityId: publicPreparedRoute.target.counterpartyEntityId,
+              pullId: publicPreparedRoute.targetPull!.pullId,
+              tokenId: publicPreparedRoute.targetPull!.tokenId,
+              amount: publicPreparedRoute.targetPull!.signedAmount,
+              revealedUntilTimestamp: publicPreparedRoute.targetPull!.revealedUntilTimestamp,
+              fullHash: publicPreparedRoute.targetPull!.fullHash,
+              partialRoot: publicPreparedRoute.targetPull!.partialRoot,
+              description: publicPreparedRoute.memo || `Cross-j target pull ${publicPreparedRoute.orderId}`,
             },
           },
         ],
       });
       outputs.push({
-        entityId: preparedRoute.target.counterpartyEntityId,
-        entityTxs: [{ type: 'registerCrossJurisdictionSwap', data: { route: preparedRoute } }],
+        entityId: publicPreparedRoute.target.counterpartyEntityId,
+        entityTxs: [{ type: 'registerCrossJurisdictionSwap', data: { route: publicPreparedRoute } }],
       });
       outputs.push({
-        entityId: preparedRoute.source.entityId,
-        entityTxs: [{ type: 'commitCrossJurisdictionSwap', data: { route: preparedRoute } }],
+        entityId: publicPreparedRoute.source.entityId,
+        entityTxs: [{ type: 'commitCrossJurisdictionSwap', data: { route: publicPreparedRoute } }],
       });
       addMessage(newState, `🌉 Cross-j swap ${preparedRoute.orderId} prepared by hub`);
       return { newState, outputs };
@@ -1480,7 +1468,7 @@ export const applyEntityTx = async (
               pullId: sourcePull.pullId,
               tokenId: sourcePull.tokenId,
               amount: sourcePull.signedAmount,
-              revealedUntilBlock: sourcePull.revealedUntilBlock,
+              revealedUntilTimestamp: sourcePull.revealedUntilTimestamp,
               fullHash: sourcePull.fullHash,
               partialRoot: sourcePull.partialRoot,
               description: restingRoute.memo || `Cross-j source pull ${restingRoute.orderId}`,

@@ -17,7 +17,7 @@ import {
   normalizeJurisdictionEvent,
   normalizeJurisdictionEvents,
 } from '../j-event-normalization';
-import { decodeHashLadderBinary, encodeHashLadderBinaryFromParts } from '../hashladder';
+import { decodeHashLadderBinary } from '../hashladder';
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
@@ -308,6 +308,27 @@ function findAccountByCounterparty(state: EntityState, counterpartyEntityId: str
   return null;
 }
 
+function findEntityStateById(env: Env, entityId: string): EntityState | null {
+  const target = String(entityId || '').toLowerCase();
+  if (!target) return null;
+  for (const replica of env.eReplicas?.values?.() || []) {
+    const state = replica?.state;
+    if (state && String(state.entityId || '').toLowerCase() === target) return state;
+  }
+  return null;
+}
+
+function hasQueuedDisputeStart(state: EntityState | null, counterpartyEntityId: string): boolean {
+  if (!state) return false;
+  const target = String(counterpartyEntityId || '').toLowerCase();
+  const draft = state.jBatchState?.batch?.disputeStarts || [];
+  const sent = state.jBatchState?.sentBatch?.batch?.disputeStarts || [];
+  return (
+    draft.some((op) => String(op?.counterentity || '').toLowerCase() === target) ||
+    sent.some((op) => String(op?.counterentity || '').toLowerCase() === target)
+  );
+}
+
 function decodeDisputeInitialSecrets(initialArgumentsRaw: unknown): string[] {
   const initialArguments = String(initialArgumentsRaw || '0x');
   if (initialArguments === '0x') return [];
@@ -382,29 +403,7 @@ function decodeDisputeCrossPullBinaries(initialArgumentsRaw: unknown): Array<{ f
       }
       continue;
     } catch {
-      // Try legacy standalone CrossSwapPull argument format below.
-    }
-    try {
-      const [decoded] = abiCoder.decode(
-        ['tuple(uint16[] fillRatios, bytes32[] fullSecrets, bytes32[4][] reveals)'],
-        arg,
-      ) as unknown as [{ fillRatios: Array<bigint | number>; fullSecrets?: Array<string>; reveals?: Array<[string, string, string, string]> }];
-      for (let index = 0; index < (decoded.fillRatios || []).length; index += 1) {
-        const ratio = Number(decoded.fillRatios[index]);
-        if (!Number.isInteger(ratio) || ratio <= 0 || ratio > 0xffff) continue;
-        try {
-          const binary = encodeHashLadderBinaryFromParts(
-            ratio,
-            decoded.fullSecrets?.[index],
-            decoded.reveals?.[index],
-          );
-          binaries.push({ fillRatio: ratio, binary });
-        } catch {
-          // Ignore incomplete legacy pull args.
-        }
-      }
-    } catch {
-      // Ignore non-CrossSwapPull transformer argument formats.
+      // Ignore non-DeltaTransformer argument formats.
     }
   }
   return binaries;
@@ -420,6 +419,23 @@ function findCrossJurisdictionRouteForSourceDispute(
     if (
       String(route.source.entityId || '').toLowerCase() === self &&
       String(route.source.counterpartyEntityId || '').toLowerCase() === counterparty
+    ) {
+      return route;
+    }
+  }
+  return null;
+}
+
+function findCrossJurisdictionRouteForTargetDispute(
+  state: EntityState,
+  counterpartyId: string,
+): CrossJurisdictionSwapRoute | null {
+  const self = String(state.entityId || '').toLowerCase();
+  const counterparty = String(counterpartyId || '').toLowerCase();
+  for (const route of state.crossJurisdictionSwaps?.values() ?? []) {
+    if (
+      String(route.target.counterpartyEntityId || '').toLowerCase() === self &&
+      String(route.target.entityId || '').toLowerCase() === counterparty
     ) {
       return route;
     }
@@ -466,6 +482,48 @@ function queueCrossJurisdictionSalvageFromDispute(
   console.log(
     `🌉 CROSS-J: queued salvage route=${route.orderId} fill=${best.fillRatio}/65535 ` +
     `target=${route.target.counterpartyEntityId.slice(-4)}`,
+  );
+  return true;
+}
+
+function queueCrossJurisdictionSourceDisputeFromTargetDispute(
+  env: Env,
+  state: EntityState,
+  outputs: EntityInput[],
+  counterpartyId: string,
+  initialArgumentsRaw: unknown,
+): boolean {
+  if (decodeDisputeCrossPullBinaries(initialArgumentsRaw).length > 0) return false;
+  const route = findCrossJurisdictionRouteForTargetDispute(state, counterpartyId);
+  if (!route) return false;
+
+  const sourceUserState = findEntityStateById(env, route.source.entityId);
+  const sourceAccount = sourceUserState
+    ? findAccountByCounterparty(sourceUserState, route.source.counterpartyEntityId)
+    : null;
+  if (!sourceUserState || !sourceAccount) {
+    console.warn(`🌉 CROSS-J: target dispute ${route.orderId} observed but source account is unavailable`);
+    return false;
+  }
+  if ((sourceAccount.status ?? 'active') === 'disputed' || sourceAccount.activeDispute) return false;
+  if (hasQueuedDisputeStart(sourceUserState, route.source.counterpartyEntityId)) return false;
+
+  outputs.push({
+    entityId: route.source.entityId,
+    entityTxs: [
+      {
+        type: 'disputeStart',
+        data: {
+          counterpartyEntityId: route.source.counterpartyEntityId,
+          description: `Cross-j target dispute ${route.orderId} forces source pull reveal`,
+        },
+      },
+      { type: 'j_broadcast', data: {} },
+    ],
+  });
+  addMessage(
+    state,
+    `🌉 Target dispute for ${route.orderId} has no pull args; source dispute queued to force hub reveal`,
   );
   return true;
 }
@@ -1491,6 +1549,13 @@ async function applyFinalizedJEvent(
         counterpartyId,
         event.data.initialArguments || '0x',
         blockNumber,
+      );
+      queueCrossJurisdictionSourceDisputeFromTargetDispute(
+        env,
+        newState,
+        outputs,
+        counterpartyId,
+        event.data.initialArguments || '0x',
       );
 
       addMessage(newState, `⚔️ DISPUTE ${weAreStarter ? 'STARTED' : 'vs us'} with ${counterpartyId.slice(-4)}, timeout: block ${account.activeDispute.disputeTimeout}`);

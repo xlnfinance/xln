@@ -1,4 +1,5 @@
 import type { RequestHandler } from './$types';
+import { findForbiddenRpcProxyMethod, isLocalProxyRequest } from '../rpc-proxy-safety';
 
 const DEFAULT_LOCAL_RPC2_URL = 'http://localhost:8546';
 
@@ -28,6 +29,15 @@ const getRpc2Url = (requestUrl: string): string => {
 export const POST: RequestHandler = async ({ request }) => {
   try {
     const body = await request.text();
+    if (!isLocalProxyRequest(request.url)) {
+      const forbidden = findForbiddenRpcProxyMethod(body);
+      if (forbidden) {
+        return new Response(
+          JSON.stringify({ error: 'RPC2 proxy method is not allowed', method: forbidden }),
+          { status: forbidden.startsWith('invalid') || forbidden === 'empty-batch' ? 400 : 403, headers: { 'Content-Type': 'application/json' } },
+        );
+      }
+    }
     const upstream = await fetch(getRpc2Url(request.url), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },

@@ -120,7 +120,7 @@ const _abi = [
               },
               {
                 internalType: "uint256",
-                name: "revealedUntilBlock",
+                name: "revealedUntilTimestamp",
                 type: "uint256",
               },
               {

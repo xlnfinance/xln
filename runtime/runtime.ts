@@ -2724,6 +2724,7 @@ const applyRuntimeInput = async (
             stateRoot: new Uint8Array(32),
             mempool: [],
             blockDelayMs: 300,
+            ...(runtimeTx.data.blockTimeMs ? { blockTimeMs: runtimeTx.data.blockTimeMs } : {}),
             lastBlockTimestamp: env.timestamp,
             position: { x: 0, y: 50, z: 0 }, // Default position for J-machine
             depositoryAddress: resolvedDepositoryAddress,
