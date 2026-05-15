@@ -43,6 +43,8 @@ import { normalizeRebalanceMatchingStrategy } from '../rebalance-policy';
 import { initJBatch, batchAddSettlement } from '../j-batch';
 import { handleR2E } from './handlers/r2e';
 import { handleHtlcPayment } from './handlers/htlc-payment';
+import { generateLockId, hashHtlcSecret } from '../htlc-utils';
+import { getRuntimeJurisdictionHeight } from '../j-height';
 import { handleR2C } from './handlers/r2c';
 import { handleE2R } from './handlers/e2r';
 import { handleR2R } from './handlers/r2r';
@@ -63,6 +65,7 @@ import { handleDisputeFinalize, handleDisputeStart } from './handlers/dispute';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
+const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 const isEntityId32 = (value: unknown): value is string => typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
 const USD_SCALE = 10n ** 18n;
 const toUsdWei = (value: number): bigint => BigInt(Math.max(0, Math.floor(value))) * USD_SCALE;
@@ -96,6 +99,52 @@ const findAccountKey = (state: EntityState, counterpartyId: string): string | nu
     if (normalizeEntityRef(key) === target) return key;
   }
   return null;
+};
+
+const normalizeCrossSwapPairId = (
+  sourceJurisdiction: string,
+  sourceTokenId: number,
+  targetJurisdiction: string,
+  targetTokenId: number,
+): string => [
+  String(sourceJurisdiction || '').trim().toLowerCase(),
+  String(sourceTokenId),
+  String(targetJurisdiction || '').trim().toLowerCase(),
+  String(targetTokenId),
+].join('/');
+
+const addCrossSwapOrderToBook = (
+  state: EntityState,
+  order: import('../types').CrossJurisdictionSwapOrder,
+): void => {
+  state.crossJurisdictionSwapBook ||= { orders: new Map(), byPair: new Map() };
+  const book = state.crossJurisdictionSwapBook;
+  const previous = book.orders.get(order.orderId);
+  if (previous) {
+    const previousPair = normalizeCrossSwapPairId(
+      previous.source.jurisdiction,
+      previous.source.tokenId,
+      previous.target.jurisdiction,
+      previous.target.tokenId,
+    );
+    const nextIds = (book.byPair.get(previousPair) || []).filter((id) => id !== order.orderId);
+    if (nextIds.length > 0) book.byPair.set(previousPair, nextIds);
+    else book.byPair.delete(previousPair);
+  }
+  book.orders.set(order.orderId, {
+    ...order,
+    source: { ...order.source },
+    target: { ...order.target },
+  });
+  const pairId = normalizeCrossSwapPairId(
+    order.source.jurisdiction,
+    order.source.tokenId,
+    order.target.jurisdiction,
+    order.target.tokenId,
+  );
+  const orderIds = book.byPair.get(pairId) || [];
+  if (!orderIds.includes(order.orderId)) orderIds.push(order.orderId);
+  book.byPair.set(pairId, orderIds);
 };
 
 export const applyEntityTx = async (
@@ -511,6 +560,191 @@ export const applyEntityTx = async (
 
     if (entityTx.type === 'htlcPayment') {
       return await handleHtlcPayment(entityState, entityTx, env);
+    }
+
+    if (entityTx.type === 'hashlockPayment') {
+      const newState = cloneEntityState(entityState);
+      const outputs: EntityInput[] = [];
+      const mempoolOps: MempoolOp[] = [];
+      const {
+        targetEntityId,
+        tokenId,
+        amount,
+        hashlock,
+        description,
+      } = entityTx.data;
+      const normalizedTarget = findAccountKey(newState, targetEntityId);
+      if (!normalizedTarget) {
+        addMessage(newState, `❌ Hashlock payment failed: no account with ${formatEntityId(targetEntityId)}`);
+        return { newState, outputs, mempoolOps };
+      }
+      const amountBig = typeof amount === 'bigint' ? amount : BigInt(String(amount));
+      if (amountBig <= 0n) {
+        addMessage(newState, '❌ Hashlock payment failed: invalid amount');
+        return { newState, outputs, mempoolOps };
+      }
+      if (!HEX_32_RE.test(hashlock)) {
+        addMessage(newState, '❌ Hashlock payment failed: invalid hashlock');
+        return { newState, outputs, mempoolOps };
+      }
+
+      const accountMachine = newState.accounts.get(normalizedTarget);
+      const preparedLockId = typeof entityTx.data.lockId === 'string' ? entityTx.data.lockId : '';
+      const lockId = HEX_32_RE.test(preparedLockId)
+        ? preparedLockId
+        : generateLockId(
+            hashlock,
+            newState.height,
+            (accountMachine?.currentHeight ?? 0) + (accountMachine?.mempool?.length ?? 0),
+            newState.timestamp,
+          );
+      const timelock = entityTx.data.timelock !== undefined
+        ? BigInt(entityTx.data.timelock)
+        : BigInt(newState.timestamp + 120_000);
+      const revealBeforeHeight = entityTx.data.revealBeforeHeight !== undefined
+        ? Number(entityTx.data.revealBeforeHeight)
+        : getRuntimeJurisdictionHeight(env, newState.lastFinalizedJHeight || 0) + 50;
+      if (timelock <= BigInt(newState.timestamp) || !Number.isFinite(revealBeforeHeight) || revealBeforeHeight <= newState.lastFinalizedJHeight) {
+        addMessage(newState, '❌ Hashlock payment failed: invalid deadline');
+        return { newState, outputs, mempoolOps };
+      }
+
+      mempoolOps.push({
+        accountId: normalizedTarget,
+        tx: {
+          type: 'htlc_lock',
+          data: {
+            lockId,
+            hashlock,
+            timelock,
+            revealBeforeHeight,
+            amount: amountBig,
+            tokenId: Number(tokenId),
+          },
+        },
+      });
+
+      const startedAtMs = typeof entityTx.data.startedAtMs === 'number'
+        ? entityTx.data.startedAtMs
+        : newState.timestamp;
+      newState.htlcRoutes.set(hashlock, {
+        hashlock,
+        tokenId: Number(tokenId),
+        amount: amountBig,
+        startedAtMs,
+        outboundEntity: normalizedTarget,
+        outboundLockId: lockId,
+        createdTimestamp: newState.timestamp,
+      });
+      newState.lockBook.set(lockId, {
+        lockId,
+        accountId: normalizedTarget,
+        tokenId: Number(tokenId),
+        amount: amountBig,
+        hashlock,
+        timelock,
+        direction: 'outgoing',
+        createdAt: BigInt(newState.timestamp),
+      });
+      if (description && typeof description === 'string') {
+        if (!(newState.htlcNotes instanceof Map)) newState.htlcNotes = new Map();
+        newState.htlcNotes.set(`hashlock:${hashlock}`, description);
+        newState.htlcNotes.set(`lock:${lockId}`, description);
+      }
+      addMessage(newState, `🔒 Hashlock payment locked ${amountBig} token ${tokenId} to ${formatEntityId(normalizedTarget)}`);
+
+      const firstValidator = entityState.config.validators[0];
+      if (firstValidator) outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
+      return { newState, outputs, mempoolOps };
+    }
+
+    if (entityTx.type === 'resolveHtlcLock') {
+      const newState = cloneEntityState(entityState);
+      const outputs: EntityInput[] = [];
+      const mempoolOps: MempoolOp[] = [];
+      const { counterpartyEntityId, lockId, secret } = entityTx.data;
+      const normalizedCounterparty = findAccountKey(newState, counterpartyEntityId);
+      if (!normalizedCounterparty) {
+        addMessage(newState, `❌ HTLC resolve failed: no account with ${formatEntityId(counterpartyEntityId)}`);
+        return { newState, outputs, mempoolOps };
+      }
+      if (!HEX_32_RE.test(lockId)) {
+        addMessage(newState, '❌ HTLC resolve failed: invalid lock id');
+        return { newState, outputs, mempoolOps };
+      }
+      let expectedHashlock: string | null = null;
+      try {
+        expectedHashlock = hashHtlcSecret(secret);
+      } catch {
+        addMessage(newState, '❌ HTLC resolve failed: invalid secret');
+        return { newState, outputs, mempoolOps };
+      }
+      const account = newState.accounts.get(normalizedCounterparty);
+      const lock = account?.locks?.get(lockId);
+      if (lock && lock.hashlock !== expectedHashlock) {
+        addMessage(newState, '❌ HTLC resolve failed: secret/hashlock mismatch');
+        return { newState, outputs, mempoolOps };
+      }
+      mempoolOps.push({
+        accountId: normalizedCounterparty,
+        tx: {
+          type: 'htlc_resolve',
+          data: {
+            lockId,
+            outcome: 'secret',
+            secret,
+          },
+        },
+      });
+      addMessage(newState, `🔓 HTLC resolve queued for ${formatEntityId(normalizedCounterparty)}`);
+      const firstValidator = entityState.config.validators[0];
+      if (firstValidator) outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
+      return { newState, outputs, mempoolOps };
+    }
+
+    if (entityTx.type === 'placeCrossJurisdictionSwapOrder') {
+      const newState = cloneEntityState(entityState);
+      const order = entityTx.data;
+      if (!order.orderId || !HEX_32_RE.test(order.hashlock)) {
+        addMessage(newState, '❌ Cross-jurisdiction swap rejected: invalid order/hashlock');
+        return { newState, outputs: [] };
+      }
+      addCrossSwapOrderToBook(newState, {
+        ...order,
+        status: order.status || 'resting',
+        createdAt: Number(order.createdAt || newState.timestamp),
+        updatedAt: Number(order.updatedAt || newState.timestamp),
+      });
+      addMessage(newState, `🌉 Cross-jurisdiction swap resting: ${order.orderId}`);
+      return { newState, outputs: [] };
+    }
+
+    if (entityTx.type === 'updateCrossJurisdictionSwapOrder') {
+      const newState = cloneEntityState(entityState);
+      const book = newState.crossJurisdictionSwapBook;
+      const current = book?.orders?.get(entityTx.data.orderId);
+      if (!book || !current) {
+        addMessage(newState, `❌ Cross-jurisdiction swap update failed: ${entityTx.data.orderId} not found`);
+        return { newState, outputs: [] };
+      }
+      const updated = {
+        ...current,
+        status: entityTx.data.status,
+        updatedAt: newState.timestamp,
+        source: {
+          ...current.source,
+          ...(entityTx.data.sourceLockId ? { lockId: entityTx.data.sourceLockId } : {}),
+        },
+        target: {
+          ...current.target,
+          ...(entityTx.data.targetLockId ? { lockId: entityTx.data.targetLockId } : {}),
+        },
+        ...(entityTx.data.settledAt !== undefined ? { settledAt: entityTx.data.settledAt } : {}),
+        ...(entityTx.data.error !== undefined ? { error: entityTx.data.error } : {}),
+      };
+      addCrossSwapOrderToBook(newState, updated);
+      addMessage(newState, `🌉 Cross-jurisdiction swap ${entityTx.data.orderId} → ${entityTx.data.status}`);
+      return { newState, outputs: [] };
     }
 
     if (entityTx.type === 'processHtlcTimeouts') {

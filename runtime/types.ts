@@ -616,6 +616,49 @@ export type EntityTx =
       };
     }
   | {
+      // Direct hashlock-only HTLC. Used for cross-jurisdiction swaps where
+      // the sender must not know the preimage at lock time.
+      type: 'hashlockPayment';
+      data: {
+        targetEntityId: string;
+        tokenId: number;
+        amount: bigint;
+        hashlock: string;
+        lockId?: string;
+        timelock?: bigint;
+        revealBeforeHeight?: number;
+        description?: string;
+        startedAtMs?: number;
+      };
+    }
+  | {
+      // Resolve a direct/account HTLC when the preimage is known.
+      type: 'resolveHtlcLock';
+      data: {
+        counterpartyEntityId: string;
+        lockId: string;
+        secret: string;
+        description?: string;
+      };
+    }
+  | {
+      // Hub-owned canonical record for a cross-jurisdiction swap. Runtime
+      // orchestration can cache around it, but this is the durable order source.
+      type: 'placeCrossJurisdictionSwapOrder';
+      data: CrossJurisdictionSwapOrder;
+    }
+  | {
+      type: 'updateCrossJurisdictionSwapOrder';
+      data: {
+        orderId: string;
+        status: CrossJurisdictionSwapStatus;
+        sourceLockId?: string;
+        targetLockId?: string;
+        settledAt?: number;
+        error?: string;
+      };
+    }
+  | {
       // Request hub collateralization on a bilateral account (prepaid fee model)
       type: 'requestCollateral';
       data: {
@@ -1780,6 +1823,10 @@ export interface EntityState {
   // Kept in entity state so UI and runtime use one source of truth.
   swapTradingPairs?: EntitySwapPair[];
 
+  // Cross-jurisdiction swap orders. Canonical orders live on the hub entity;
+  // runtime-level caches may derive from this, but must not be the source of truth.
+  crossJurisdictionSwapBook?: CrossJurisdictionSwapBook;
+
   // 📈 Pending swap fill ratios (orderbook → dispute arguments)
   pendingSwapFillRatios?: Map<SwapKey, number>; // key = "accountId:offerId"
 
@@ -1790,6 +1837,47 @@ export interface EntityState {
 export type DebtStatus = 'open' | 'paid' | 'forgiven';
 
 export type DebtEventType = 'DebtCreated' | 'DebtEnforced' | 'DebtForgiven';
+
+export type CrossJurisdictionSwapStatus =
+  | 'resting'
+  | 'target_locked'
+  | 'source_locked'
+  | 'source_claimed'
+  | 'target_claimed'
+  | 'settled'
+  | 'cancelled'
+  | 'failed';
+
+export interface CrossJurisdictionSwapLeg {
+  jurisdiction: string;
+  entityId: string;
+  counterpartyEntityId: string;
+  tokenId: number;
+  amount: bigint;
+  lockId?: string;
+}
+
+export interface CrossJurisdictionSwapOrder {
+  orderId: string;
+  makerEntityId: string;
+  hubEntityId: string;
+  source: CrossJurisdictionSwapLeg;
+  target: CrossJurisdictionSwapLeg;
+  hashlock: string;
+  priceTicks?: bigint;
+  status: CrossJurisdictionSwapStatus;
+  createdAt: number;
+  updatedAt: number;
+  expiresAt?: number;
+  settledAt?: number;
+  error?: string;
+  memo?: string;
+}
+
+export interface CrossJurisdictionSwapBook {
+  orders: Map<string, CrossJurisdictionSwapOrder>;
+  byPair: Map<string, string[]>;
+}
 
 export interface DebtUpdate {
   eventType: DebtEventType;
