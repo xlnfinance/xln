@@ -25,7 +25,7 @@ export async function handleSwapOffer(
   currentHeight: number,
   isValidation: boolean = false
 ): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCreated?: SwapOfferEvent }> {
-  const { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks: inputPriceTicks, timeInForce, minFillRatio } = accountTx.data;
+  const { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks: inputPriceTicks, timeInForce, minFillRatio, crossJurisdiction } = accountTx.data;
   const events: string[] = [];
   const LOT_SCALE = SWAP_LOT_SCALE;
 
@@ -65,7 +65,7 @@ export async function handleSwapOffer(
       events,
     };
   }
-  if (giveTokenId === wantTokenId) {
+  if (giveTokenId === wantTokenId && !crossJurisdiction) {
     return { success: false, error: `Cannot swap same token: ${giveTokenId}`, events };
   }
   if (minFillRatio < 0 || minFillRatio > 65535) {
@@ -187,6 +187,7 @@ export async function handleSwapOffer(
     createdHeight: currentHeight,
     quantizedGive: effectiveGiveAmount,
     quantizedWant: effectiveWantAmount,
+    ...(crossJurisdiction ? { crossJurisdiction } : {}),
   };
 
   // 8. Lock capacity (CRITICAL PER CODEX: Apply during BOTH validation and commit!)
@@ -226,6 +227,7 @@ export async function handleSwapOffer(
       priceTicks,
       ...(timeInForce !== undefined ? { timeInForce } : {}),
       minFillRatio,
+      ...(crossJurisdiction ? { crossJurisdiction } : {}),
     },
   };
 }

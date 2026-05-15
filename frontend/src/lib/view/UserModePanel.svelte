@@ -393,15 +393,6 @@
         continue;
       }
 
-      const otherJurisdictionEntity = findReplicaBySigner(env, signerAddress);
-      if (otherJurisdictionEntity && jurisdiction) {
-        const otherJurisdiction = getReplicaJurisdiction(otherJurisdictionEntity);
-        if (otherJurisdiction && otherJurisdiction !== jurisdiction.toLowerCase()) {
-          selfEntityChecked.add(selfEntityKey);
-          continue;
-        }
-      }
-
       selfEntityInFlight.add(selfEntityKey);
       try {
         // Re-check right before creation to avoid duplicate create on reactive races.

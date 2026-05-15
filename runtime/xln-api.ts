@@ -50,8 +50,7 @@ export type {
   RoutedEntityInput,
   AccountTx,
   SettlementDiff,
-  CrossJurisdictionSwapOrder,
-  CrossJurisdictionSwapBook,
+  CrossJurisdictionSwapRoute,
 } from './types';
 export type { PersistedFrameJournal } from './wal/store';
 export type { StorageFrameRecord, StorageHead } from './storage/types';
@@ -108,7 +107,7 @@ import type {
   EntityProfile,
   JurisdictionConfig,
   ConsensusConfig,
-  CrossJurisdictionSwapOrder,
+  CrossJurisdictionSwapRoute,
   RuntimeInput,
   EntityInput,
   EntityState,
@@ -196,11 +195,11 @@ export type CrossJurisdictionSwapSubmitParams = {
 };
 
 export type CrossJurisdictionSwapSubmitResult = {
-  order: CrossJurisdictionSwapOrder;
-  secret: string;
-  hashlock: string;
-  sourceLockId: string;
-  targetLockId: string;
+  route: CrossJurisdictionSwapRoute;
+  secret?: string;
+  hashlock?: string;
+  sourceLockId?: string;
+  targetLockId?: string;
 };
 
 /**
@@ -253,7 +252,7 @@ export interface XLNModule {
   registerEnvChangeCallback: (env: Env, callback: (env: Env) => void) => (() => void);
   getEnv: (env?: Env | null) => Env | null;
   getActiveJAdapter?: (env: Env | null) => JAdapter | null;
-  getEntityJAdapter?: (env: Env, entityId: string, signerId?: string) => JAdapter | null;
+  getEntityJAdapter: (env: Env, entityId: string, signerId?: string) => JAdapter | null;
   submitDebtEnforcement: (
     env: Env,
     entityId: string,
@@ -269,7 +268,15 @@ export interface XLNModule {
   ) => Promise<CrossJurisdictionSwapSubmitResult>;
   submitCrossJurisdictionSwapClaims?: (
     env: Env,
-    params: { order: CrossJurisdictionSwapOrder; secret: string; sourceHubSignerId?: string; targetUserSignerId?: string; bookHubSignerId?: string },
+    params: { route: CrossJurisdictionSwapRoute; secret: string; sourceHubSignerId?: string; targetUserSignerId?: string },
+  ) => Promise<void>;
+  submitCrossJurisdictionSourceLock?: (
+    env: Env,
+    params: { route: CrossJurisdictionSwapRoute; sourceUserSignerId?: string; sourceAmount?: bigint; targetAmount?: bigint; fillRatio?: number },
+  ) => Promise<void>;
+  submitCrossJurisdictionTargetLock?: (
+    env: Env,
+    params: { route: CrossJurisdictionSwapRoute; targetHubSignerId?: string; targetAmount?: bigint; fillRatio?: number },
   ) => Promise<void>;
   setDeltaTransformerAddress?: (address: string) => void;
 

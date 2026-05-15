@@ -1969,9 +1969,7 @@ export const vaultOperations = {
       const { getXLN } = await import('./xlnStore');
       const xln = await getXLN();
       const env = get(xlnEnvironment);
-      const jadapter = env
-        ? xln.getEntityJAdapter?.(env, signer.entityId, signer.address) ?? xln.getActiveJAdapter?.(env)
-        : null;
+      const jadapter = env ? xln.getEntityJAdapter(env, signer.entityId, signer.address) : null;
       if (!jadapter?.getReserves) return 0n;
 
       return await jadapter.getReserves(signer.entityId, tokenId);

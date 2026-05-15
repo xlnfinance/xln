@@ -19,6 +19,7 @@ const abi = ethers.AbiCoder.defaultAbiCoder();
 const COOPERATIVE_UPDATE = 0;
 const DISPUTE_PROOF = 1;
 const COOPERATIVE_DISPUTE_PROOF = 3;
+const MAX_FILL_RATIO = 65535n;
 
 const SETTLEMENT_DIFFS_ABI = "tuple(uint256 tokenId,int256 leftDiff,int256 rightDiff,int256 collateralDiff,int256 ondeltaDiff)[]";
 const PROOF_BODY_ABI =
@@ -116,12 +117,64 @@ function proofBodyHash(proofbody: Record<string, unknown>): string {
   return ethers.keccak256(abi.encode([PROOF_BODY_ABI], [proofbody]));
 }
 
-function proofBody(offdeltas: bigint[], tokenIds: bigint[]): Record<string, unknown> {
+function proofBody(offdeltas: bigint[], tokenIds: bigint[], transformers: unknown[] = []): Record<string, unknown> {
   return {
     offdeltas,
     tokenIds,
-    transformers: [],
+    transformers,
   };
+}
+
+function secret(label: string): string {
+  return ethers.keccak256(ethers.toUtf8Bytes(label));
+}
+
+function hashNode(node: string): string {
+  return ethers.keccak256(abi.encode(["bytes32"], [node]));
+}
+
+function hashSteps(node: string, steps: number): string {
+  let current = node;
+  for (let i = 0; i < steps; i++) current = hashNode(current);
+  return current;
+}
+
+function nibbles(fillRatio: number): number[] {
+  return [
+    (fillRatio >> 12) & 0x0f,
+    (fillRatio >> 8) & 0x0f,
+    (fillRatio >> 4) & 0x0f,
+    fillRatio & 0x0f,
+  ];
+}
+
+function partialRoot(roots: string[]): string {
+  return ethers.keccak256(ethers.solidityPacked(["bytes32", "bytes32", "bytes32", "bytes32"], roots));
+}
+
+function buildHashLadderProof(label: string, fillRatio: number): {
+  fullSecret: string;
+  fullHash: string;
+  partialRoot: string;
+  reveals: string[];
+} {
+  const fullSecret = secret(`${label}:full`);
+  const bases = [0, 1, 2, 3].map((index) => secret(`${label}:n${index}`));
+  const roots = bases.map((base) => hashSteps(base, 15));
+  const reveals = nibbles(fillRatio).map((digit, index) => hashSteps(bases[index], 15 - digit));
+  return {
+    fullSecret,
+    fullHash: hashNode(fullSecret),
+    partialRoot: partialRoot(roots),
+    reveals,
+  };
+}
+
+function encodeCrossSwapPullArguments(fillRatios: number[], fullSecrets: string[], reveals: string[][]): string {
+  return abi.encode(
+    ["tuple(uint16[] fillRatios, bytes32[] fullSecrets, bytes32[4][] reveals)"],
+    [{ fillRatios, fullSecrets, reveals }],
+  );
 }
 
 describe("Depository", function () {
@@ -603,6 +656,111 @@ describe("Depository", function () {
     expect(collateralAfter.ondelta).to.equal(0n);
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(800n);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(200n);
+  });
+
+  it("passes dispute argument block timestamps into CrossSwapPull without storing secrets", async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const CrossSwapPull = await ethers.getContractFactory("CrossSwapPull");
+    const transformer = await CrossSwapPull.deploy();
+    await transformer.waitForDeployment();
+
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const tokenA = 1n;
+    const tokenB = 2n;
+    await depository.mintToReserve(right.entityId, tokenA, 1_000n);
+    await depository.mintToReserve(left.entityId, tokenB, 1_000n);
+
+    const fundRightCollateral = emptyBatch({
+      reserveToCollateral: [{
+        tokenId: tokenA,
+        receivingEntity: right.entityId,
+        pairs: [{ entity: left.entityId, amount: 1_000n }],
+      }],
+    });
+    const rightFund = await signDepositoryBatch(depository, right.entityId, right.privateKey, fundRightCollateral);
+    await depository.connect(right.signer).processBatch(rightFund.encodedBatch, rightFund.hankoData, rightFund.nonce);
+
+    const fundLeftCollateral = emptyBatch({
+      reserveToCollateral: [{
+        tokenId: tokenB,
+        receivingEntity: left.entityId,
+        pairs: [{ entity: right.entityId, amount: 1_000n }],
+      }],
+    });
+    const leftFund = await signDepositoryBatch(depository, left.entityId, left.privateKey, fundLeftCollateral);
+    await depository.connect(left.signer).processBatch(leftFund.encodedBatch, leftFund.hankoData, leftFund.nonce);
+
+    const fillRatio = 0x0123;
+    const pullProof = buildHashLadderProof("depository-cross-pull", fillRatio);
+    const revealDeadline = (await ethers.provider.getBlockNumber()) + 10;
+    const encodedPullBatch = await transformer.encodeBatch({
+      pulls: [{
+        ownerIsLeft: true,
+        addDeltaIndex: 0,
+        amount: MAX_FILL_RATIO,
+        subDeltaIndex: 1,
+        revealedUntilBlock: revealDeadline,
+        fullHash: pullProof.fullHash,
+        partialRoot: pullProof.partialRoot,
+      }],
+    });
+    const proofbody = proofBody(
+      [0n, 0n],
+      [tokenA, tokenB],
+      [{
+        transformerAddress: await transformer.getAddress(),
+        encodedBatch: encodedPullBatch,
+        allowances: [
+          { deltaIndex: 0n, rightAllowance: 0n, leftAllowance: BigInt(fillRatio) },
+          { deltaIndex: 1n, rightAllowance: BigInt(fillRatio), leftAllowance: 0n },
+        ],
+      }],
+    );
+    const proofbodyHash = proofBodyHash(proofbody);
+    const rightTransformerArgs = encodeCrossSwapPullArguments([fillRatio], [], [pullProof.reveals]);
+    const initialArguments = abi.encode(["bytes[]"], [[rightTransformerArgs]]);
+    const disputeNonce = 1n;
+    const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+    const startHash = await disputeProofHash(depository, acctKey, disputeNonce, proofbodyHash);
+    const startSig = signEntityHash(right.entityId, startHash, right.privateKey);
+    const startBatch = emptyBatch({
+      disputeStarts: [{
+        counterentity: right.entityId,
+        nonce: disputeNonce,
+        proofbodyHash,
+        sig: startSig,
+        initialArguments,
+      }],
+    });
+    const start = await signDepositoryBatch(depository, left.entityId, left.privateKey, startBatch);
+    await depository.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
+
+    const startedAccount = await depository._accounts(acctKey);
+    expect(startedAccount.disputeTimeout - await depository.defaultDisputeDelay()).to.be.lessThanOrEqual(BigInt(revealDeadline));
+    await mine(Number(await depository.defaultDisputeDelay()));
+
+    const finalization = {
+      counterentity: right.entityId,
+      initialNonce: disputeNonce,
+      finalNonce: disputeNonce,
+      initialProofbodyHash: proofbodyHash,
+      finalProofbody: proofbody,
+      finalArguments: "0x",
+      initialArguments,
+      sig: "0x",
+      startedByLeft: true,
+      disputeUntilBlock: 0,
+      cooperative: false,
+    };
+    const finalBatch = emptyBatch({ disputeFinalizations: [finalization] });
+    const final = await signDepositoryBatch(depository, left.entityId, left.privateKey, finalBatch);
+    await depository.connect(left.signer).processBatch(final.encodedBatch, final.hankoData, final.nonce);
+
+    expect(await transformer.hashToBlock(hashNode(pullProof.reveals[3]))).to.equal(0n);
+    expect(await depository._reserves(left.entityId, tokenA)).to.equal(BigInt(fillRatio));
+    expect(await depository._reserves(right.entityId, tokenA)).to.equal(1_000n - BigInt(fillRatio));
+    expect(await depository._reserves(left.entityId, tokenB)).to.equal(1_000n - BigInt(fillRatio));
+    expect(await depository._reserves(right.entityId, tokenB)).to.equal(BigInt(fillRatio));
   });
 
   it("locks outstanding debt before reserve outflows and pays FIFO debt in bounded chunks", async function () {

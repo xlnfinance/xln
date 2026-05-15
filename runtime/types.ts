@@ -629,6 +629,7 @@ export type EntityTx =
         revealBeforeHeight?: number;
         description?: string;
         startedAtMs?: number;
+        crossJurisdictionRelay?: CrossJurisdictionSecretRelay;
       };
     }
   | {
@@ -639,23 +640,6 @@ export type EntityTx =
         lockId: string;
         secret: string;
         description?: string;
-      };
-    }
-  | {
-      // Hub-owned canonical record for a cross-jurisdiction swap. Runtime
-      // orchestration can cache around it, but this is the durable order source.
-      type: 'placeCrossJurisdictionSwapOrder';
-      data: CrossJurisdictionSwapOrder;
-    }
-  | {
-      type: 'updateCrossJurisdictionSwapOrder';
-      data: {
-        orderId: string;
-        status: CrossJurisdictionSwapStatus;
-        sourceLockId?: string;
-        targetLockId?: string;
-        settledAt?: number;
-        error?: string;
       };
     }
   | {
@@ -697,7 +681,25 @@ export type EntityTx =
       type: 'disputeStart';
       data: {
         counterpartyEntityId: string;
+        initialArguments?: string;
         description?: string;
+      };
+    }
+  | {
+      type: 'registerCrossJurisdictionSwap';
+      data: {
+        route: CrossJurisdictionSwapRoute;
+      };
+    }
+  | {
+      type: 'crossJurisdictionSalvage';
+      data: {
+        routeId: string;
+        initialArguments: string;
+        fillRatio: number;
+        sourceEntityId: string;
+        sourceCounterpartyEntityId: string;
+        observedAt?: number;
       };
     }
   | {
@@ -841,6 +843,7 @@ export type EntityTx =
         priceTicks?: bigint;
         timeInForce?: 0 | 1 | 2; // 0 = GTC, 1 = IOC, 2 = FOK
         minFillRatio: number; // 0-65535
+        crossJurisdiction?: CrossJurisdictionSwapRoute;
       };
     }
   | {
@@ -1086,6 +1089,7 @@ export interface SwapOffer {
   // These ensure fill ratios computed from lots match settlement amounts exactly
   quantizedGive?: bigint;       // giveAmount rounded to LOT_SCALE multiple
   quantizedWant?: bigint;       // wantAmount scaled proportionally
+  crossJurisdiction?: CrossJurisdictionSwapRoute;
 }
 
 export interface SwapOrderResolveHistoryEntry {
@@ -1107,6 +1111,7 @@ export interface SwapOrderHistoryEntry {
   wantAmount: bigint;
   priceTicks?: bigint;
   createdHeight: number;
+  crossJurisdiction?: CrossJurisdictionSwapRoute;
   cancelRequested: boolean;
   lastUpdatedHeight: number;
   resolves: SwapOrderResolveHistoryEntry[];
@@ -1138,7 +1143,18 @@ export interface HtlcRoute {
   secretAckDeadlineAt?: number;
   secretAckedAt?: number;
   pendingFee?: bigint; // Fee to accrue on successful reveal (not on forward)
+  crossJurisdictionRelay?: CrossJurisdictionSecretRelay;
   createdTimestamp: number;
+}
+
+export interface CrossJurisdictionSecretRelay {
+  routeId: string;
+  fillRatio: number;
+  sourceAmount: bigint;
+  targetAmount: bigint;
+  targetEntityId: string;
+  targetCounterpartyEntityId: string;
+  targetLockId: string;
 }
 
 /** End-to-end payment notes stored locally by hashlock/lockId for activity rendering. */
@@ -1542,7 +1558,7 @@ export interface DerivedDelta {
  */
 export type AccountEvent =
   | { type: 'htlc_revealed'; hashlock: string; secret: string }
-  | { type: 'swap_offer_created'; offerId: string; makerId: string; accountId: string; giveTokenId: number; giveAmount: bigint; wantTokenId: number; wantAmount: bigint; timeInForce?: 0 | 1 | 2; minFillRatio: number }
+  | { type: 'swap_offer_created'; offerId: string; makerId: string; accountId: string; giveTokenId: number; giveAmount: bigint; wantTokenId: number; wantAmount: bigint; timeInForce?: 0 | 1 | 2; minFillRatio: number; crossJurisdiction?: CrossJurisdictionSwapRoute }
   | { type: 'swap_offer_cancelled'; offerId: string; accountId: string };
 
 // Account transaction types
@@ -1630,6 +1646,7 @@ export type AccountTx =
         priceTicks?: bigint;
         timeInForce?: 0 | 1 | 2;  // 0 = GTC, 1 = IOC, 2 = FOK
         minFillRatio: number;     // 0-65535 (uint16), minimum partial fill
+        crossJurisdiction?: CrossJurisdictionSwapRoute;
       };
     }
   | {
@@ -1823,12 +1840,11 @@ export interface EntityState {
   // Kept in entity state so UI and runtime use one source of truth.
   swapTradingPairs?: EntitySwapPair[];
 
-  // Cross-jurisdiction swap orders. Canonical orders live on the hub entity;
-  // runtime-level caches may derive from this, but must not be the source of truth.
-  crossJurisdictionSwapBook?: CrossJurisdictionSwapBook;
-
   // 📈 Pending swap fill ratios (orderbook → dispute arguments)
   pendingSwapFillRatios?: Map<SwapKey, number>; // key = "accountId:offerId"
+  // Cross-jurisdiction swap routes are duplicated into sibling entities so
+  // target-side dispute salvage does not depend on relay/profile gossip.
+  crossJurisdictionSwaps?: Map<string, CrossJurisdictionSwapRoute>;
 
   // 🔄 Rebalance Configuration - Hub-level matching strategy
   hubRebalanceConfig?: HubRebalanceConfig;
@@ -1857,13 +1873,13 @@ export interface CrossJurisdictionSwapLeg {
   lockId?: string;
 }
 
-export interface CrossJurisdictionSwapOrder {
+export interface CrossJurisdictionSwapRoute {
   orderId: string;
   makerEntityId: string;
   hubEntityId: string;
   source: CrossJurisdictionSwapLeg;
   target: CrossJurisdictionSwapLeg;
-  hashlock: string;
+  hashlock?: string;
   priceTicks?: bigint;
   status: CrossJurisdictionSwapStatus;
   createdAt: number;
@@ -1872,11 +1888,6 @@ export interface CrossJurisdictionSwapOrder {
   settledAt?: number;
   error?: string;
   memo?: string;
-}
-
-export interface CrossJurisdictionSwapBook {
-  orders: Map<string, CrossJurisdictionSwapOrder>;
-  byPair: Map<string, string[]>;
 }
 
 export interface DebtUpdate {
@@ -1973,6 +1984,7 @@ export interface SwapBookEntry {
   minFillRatio: number;
   createdHeight: number;
   priceTicks: bigint;
+  crossJurisdiction?: CrossJurisdictionSwapRoute;
 }
 
 /** Aggregated HTLC lock entry at E-Machine level */
@@ -2105,6 +2117,7 @@ export interface Env {
     minFrameDelayMs?: number; // Minimum delay between runtime frames
     loopIntervalMs?: number;  // Loop interval for runtime processing
     snapshotIntervalFrames?: number;
+    advertiseProfileMirrors?: boolean; // Opt-in only; otherwise profiles do not correlate sibling entities.
     storage?: {
       enabled?: boolean;
       snapshotPeriodFrames?: number;

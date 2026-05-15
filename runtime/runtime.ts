@@ -234,7 +234,7 @@ import type {
   RuntimeOverlayRecord,
   RuntimeInput,
   RuntimeTx,
-  CrossJurisdictionSwapOrder,
+  CrossJurisdictionSwapRoute,
 } from './types';
 import {
   clearDatabase,
@@ -5176,11 +5176,11 @@ export type CrossJurisdictionSwapSubmitParams = {
 };
 
 export type CrossJurisdictionSwapSubmitResult = {
-  order: CrossJurisdictionSwapOrder;
-  secret: string;
-  hashlock: string;
-  sourceLockId: string;
-  targetLockId: string;
+  route: CrossJurisdictionSwapRoute;
+  secret?: string;
+  hashlock?: string;
+  sourceLockId?: string;
+  targetLockId?: string;
 };
 
 const normalizeRuntimeEntityId = (entityId: string): string => String(entityId || '').toLowerCase();
@@ -5199,24 +5199,15 @@ const findEntityStateForRuntime = (env: Env, entityId: string, signerId?: string
   return null;
 };
 
-const deriveCrossJurisdictionSecret = (
-  env: Env,
-  params: CrossJurisdictionSwapSubmitParams,
-  orderId: string,
-): string => {
-  const targetHubState = findEntityStateForRuntime(env, params.targetHubEntityId, params.targetHubSignerId);
-  const targetAccount = targetHubState?.accounts?.get(params.targetUserEntityId);
-  const accountCounter = BigInt(targetAccount?.currentHeight ?? 0) + BigInt(targetAccount?.mempool?.length ?? 0) + 1n;
-  return ethers.keccak256(ethers.toUtf8Bytes([
-    'xln:cross-jurisdiction-swap-secret:v1',
-    env.runtimeId || '',
-    orderId,
-    params.sourceUserEntityId,
-    params.sourceHubEntityId,
-    params.targetHubEntityId,
-    params.targetUserEntityId,
-    accountCounter.toString(),
-  ].join(':')));
+const hasRuntimeAccountWith = (state: EntityState | null, counterpartyId: string): boolean => {
+  const counterparty = normalizeRuntimeEntityId(counterpartyId);
+  if (!state || !counterparty) return false;
+  for (const [accountId, account] of state.accounts.entries()) {
+    if (normalizeRuntimeEntityId(accountId) === counterparty) return true;
+    if (normalizeRuntimeEntityId(account.leftEntity) === counterparty) return true;
+    if (normalizeRuntimeEntityId(account.rightEntity) === counterparty) return true;
+  }
+  return false;
 };
 
 export async function submitCrossJurisdictionSwap(
@@ -5226,14 +5217,15 @@ export async function submitCrossJurisdictionSwap(
   const now = env.scenarioMode ? env.timestamp : getWallClockMs();
   const orderId = params.orderId || `cross-${now}-${ethers.hexlify(ethers.randomBytes(4)).slice(2)}`;
   const sourceUserSignerId = params.sourceUserSignerId || resolveEntityProposerId(env, params.sourceUserEntityId, 'cross-swap.source-user');
+  const sourceHubSignerId = params.sourceHubSignerId || resolveEntityProposerId(env, params.sourceHubEntityId, 'cross-swap.source-hub');
   const targetHubSignerId = params.targetHubSignerId || resolveEntityProposerId(env, params.targetHubEntityId, 'cross-swap.target-hub');
+  const targetUserSignerId = params.targetUserSignerId || resolveEntityProposerId(env, params.targetUserEntityId, 'cross-swap.target-user');
   const bookHubEntityId = params.bookHubEntityId || params.sourceHubEntityId;
-  const bookHubSignerId = params.bookHubSignerId || params.sourceHubSignerId || resolveEntityProposerId(env, bookHubEntityId, 'cross-swap.book-hub');
 
   const sourceUserJ = requireEntityRuntimeJurisdictionConfig(env, params.sourceUserEntityId, sourceUserSignerId);
-  const sourceHubJ = requireEntityRuntimeJurisdictionConfig(env, params.sourceHubEntityId, params.sourceHubSignerId);
+  const sourceHubJ = requireEntityRuntimeJurisdictionConfig(env, params.sourceHubEntityId, sourceHubSignerId);
   const targetHubJ = requireEntityRuntimeJurisdictionConfig(env, params.targetHubEntityId, targetHubSignerId);
-  const targetUserJ = requireEntityRuntimeJurisdictionConfig(env, params.targetUserEntityId, params.targetUserSignerId);
+  const targetUserJ = requireEntityRuntimeJurisdictionConfig(env, params.targetUserEntityId, targetUserSignerId);
   if (sourceUserJ.name !== sourceHubJ.name) {
     throw new Error(`CROSS_SWAP_SOURCE_JURISDICTION_MISMATCH: user=${sourceUserJ.name} hub=${sourceHubJ.name}`);
   }
@@ -5243,22 +5235,25 @@ export async function submitCrossJurisdictionSwap(
   if (sourceUserJ.name === targetHubJ.name) {
     throw new Error(`CROSS_SWAP_REQUIRES_DISTINCT_JURISDICTIONS: ${sourceUserJ.name}`);
   }
+  const sourceUserState = findEntityStateForRuntime(env, params.sourceUserEntityId, sourceUserSignerId);
+  const targetUserState = findEntityStateForRuntime(env, params.targetUserEntityId, targetUserSignerId);
+  if (!hasRuntimeAccountWith(sourceUserState, params.sourceHubEntityId)) {
+    throw new Error(`CROSS_SWAP_SOURCE_ACCOUNT_MISSING: user=${params.sourceUserEntityId} hub=${params.sourceHubEntityId}`);
+  }
+  if (!hasRuntimeAccountWith(targetUserState, params.targetHubEntityId)) {
+    throw new Error(`CROSS_SWAP_TARGET_ACCOUNT_MISSING: user=${params.targetUserEntityId} hub=${params.targetHubEntityId}`);
+  }
 
-  const secret = params.secret || deriveCrossJurisdictionSecret(env, params, orderId);
-  const hashlock = params.hashlock || hashHtlcSecret(secret);
-  if (params.hashlock && params.hashlock !== hashHtlcSecret(secret)) {
+  const secret = params.secret;
+  const hashlock = params.hashlock || (secret ? hashHtlcSecret(secret) : undefined);
+  if (secret && params.hashlock && params.hashlock !== hashHtlcSecret(secret)) {
     throw new Error('CROSS_SWAP_SECRET_HASHLOCK_MISMATCH');
   }
-  const sourceLockId = params.sourceLockId || generateLockId(hashlock, env.height, 1, now);
-  const targetLockId = params.targetLockId || generateLockId(hashlock, env.height, 2, now);
+  const sourceLockId = params.sourceLockId || (hashlock ? generateLockId(hashlock, env.height, 1, now) : undefined);
+  const targetLockId = params.targetLockId || (hashlock ? generateLockId(hashlock, env.height, 2, now) : undefined);
   const expiresInMs = Math.max(30_000, Math.floor(params.expiresInMs ?? 120_000));
-  const revealBeforeHeightDelta = Math.max(5, Math.floor(params.revealBeforeHeightDelta ?? 50));
-  const targetRevealHeight = getRuntimeJurisdictionHeight(env, findEntityStateForRuntime(env, params.targetHubEntityId)?.lastFinalizedJHeight || 0) + revealBeforeHeightDelta;
-  const sourceRevealHeight = targetRevealHeight + 2;
-  const targetTimelock = BigInt(now + expiresInMs);
-  const sourceTimelock = BigInt(now + expiresInMs + 5_000);
 
-  const order: CrossJurisdictionSwapOrder = {
+  const route: CrossJurisdictionSwapRoute = {
     orderId,
     makerEntityId: params.sourceUserEntityId,
     hubEntityId: bookHubEntityId,
@@ -5268,7 +5263,7 @@ export async function submitCrossJurisdictionSwap(
       counterpartyEntityId: params.sourceHubEntityId,
       tokenId: Number(params.sourceTokenId),
       amount: BigInt(params.sourceAmount),
-      lockId: sourceLockId,
+      ...(sourceLockId ? { lockId: sourceLockId } : {}),
     },
     target: {
       jurisdiction: targetHubJ.name,
@@ -5276,11 +5271,11 @@ export async function submitCrossJurisdictionSwap(
       counterpartyEntityId: params.targetUserEntityId,
       tokenId: Number(params.targetTokenId),
       amount: BigInt(params.targetAmount),
-      lockId: targetLockId,
+      ...(targetLockId ? { lockId: targetLockId } : {}),
     },
-    hashlock,
+    ...(hashlock ? { hashlock } : {}),
     ...(params.priceTicks !== undefined ? { priceTicks: params.priceTicks } : {}),
-    status: 'source_locked',
+    status: 'resting',
     createdAt: now,
     updatedAt: now,
     expiresAt: now + expiresInMs,
@@ -5291,80 +5286,187 @@ export async function submitCrossJurisdictionSwap(
     runtimeTxs: [],
     entityInputs: [
       {
-        entityId: bookHubEntityId,
-        signerId: bookHubSignerId,
-        entityTxs: [{ type: 'placeCrossJurisdictionSwapOrder', data: order }],
-      },
-      {
-        entityId: params.targetHubEntityId,
-        signerId: targetHubSignerId,
+        entityId: params.sourceUserEntityId,
+        signerId: sourceUserSignerId,
         entityTxs: [{
-          type: 'hashlockPayment',
+          type: 'placeSwapOffer',
           data: {
-            targetEntityId: params.targetUserEntityId,
-            tokenId: Number(params.targetTokenId),
-            amount: BigInt(params.targetAmount),
-            hashlock,
-            lockId: targetLockId,
-            timelock: targetTimelock,
-            revealBeforeHeight: targetRevealHeight,
-            description: params.memo || `Cross swap ${orderId} target leg`,
-            startedAtMs: now,
+            counterpartyEntityId: params.sourceHubEntityId,
+            offerId: orderId,
+            giveTokenId: Number(params.sourceTokenId),
+            giveAmount: BigInt(params.sourceAmount),
+            wantTokenId: Number(params.targetTokenId),
+            wantAmount: BigInt(params.targetAmount),
+            ...(params.priceTicks !== undefined ? { priceTicks: params.priceTicks } : {}),
+            timeInForce: 0,
+            minFillRatio: 0,
+            crossJurisdiction: route,
           },
         }],
       },
       {
-        entityId: params.sourceUserEntityId,
-        signerId: sourceUserSignerId,
+        entityId: params.targetUserEntityId,
+        signerId: targetUserSignerId,
         entityTxs: [{
-          type: 'hashlockPayment',
-          data: {
-            targetEntityId: params.sourceHubEntityId,
-            tokenId: Number(params.sourceTokenId),
-            amount: BigInt(params.sourceAmount),
-            hashlock,
-            lockId: sourceLockId,
-            timelock: sourceTimelock,
-            revealBeforeHeight: sourceRevealHeight,
-            description: params.memo || `Cross swap ${orderId} source leg`,
-            startedAtMs: now,
-          },
+          type: 'registerCrossJurisdictionSwap',
+          data: { route },
         }],
       },
     ],
     timestamp: now,
   });
 
-  return { order, secret, hashlock, sourceLockId, targetLockId };
+  return {
+    route,
+    ...(secret ? { secret } : {}),
+    ...(hashlock ? { hashlock } : {}),
+    ...(sourceLockId ? { sourceLockId } : {}),
+    ...(targetLockId ? { targetLockId } : {}),
+  };
+}
+
+export type CrossJurisdictionSourceLockParams = {
+  route: CrossJurisdictionSwapRoute;
+  sourceUserSignerId?: string;
+  sourceAmount?: bigint;
+  targetAmount?: bigint;
+  fillRatio?: number;
+};
+
+export async function submitCrossJurisdictionSourceLock(
+  env: Env,
+  params: CrossJurisdictionSourceLockParams,
+): Promise<void> {
+  const { route } = params;
+  if (!route.source.lockId || !route.target.lockId || !route.hashlock) {
+    throw new Error('CROSS_SWAP_SOURCE_LOCK_ROUTE_INCOMPLETE');
+  }
+  const sourceUserSignerId = params.sourceUserSignerId || resolveEntityProposerId(env, route.source.entityId, 'cross-swap.source-lock');
+  const now = env.scenarioMode ? env.timestamp : getWallClockMs();
+  const fillRatio = params.fillRatio !== undefined
+    ? Math.max(0, Math.min(65_535, Math.floor(params.fillRatio)))
+    : 65_535;
+  const amount = params.sourceAmount ?? (
+    BigInt(route.source.amount) * BigInt(fillRatio) / 65_535n
+  );
+  if (amount <= 0n) {
+    throw new Error(`CROSS_SWAP_SOURCE_LOCK_ZERO_AMOUNT: fillRatio=${fillRatio}`);
+  }
+  const revealBeforeHeightDelta = 50;
+  const sourceRevealHeight = getRuntimeJurisdictionHeight(env, findEntityStateForRuntime(env, route.source.entityId)?.lastFinalizedJHeight || 0) + revealBeforeHeightDelta;
+  const sourceTimelock = BigInt(route.expiresAt ?? (now + 120_000));
+
+  enqueueRuntimeInput(env, {
+    runtimeTxs: [],
+    entityInputs: [{
+      entityId: route.source.entityId,
+      signerId: sourceUserSignerId,
+      entityTxs: [{
+        type: 'hashlockPayment',
+        data: {
+          targetEntityId: route.source.counterpartyEntityId,
+          tokenId: Number(route.source.tokenId),
+          amount,
+          hashlock: route.hashlock,
+          lockId: route.source.lockId,
+          timelock: sourceTimelock,
+          revealBeforeHeight: sourceRevealHeight,
+          description: route.memo || `Cross swap ${route.orderId} source leg ${fillRatio}/65535`,
+          startedAtMs: now,
+          crossJurisdictionRelay: {
+            routeId: route.orderId,
+            fillRatio,
+            sourceAmount: amount,
+            targetAmount: params.targetAmount ?? (BigInt(route.target.amount) * BigInt(fillRatio) / 65_535n),
+            targetEntityId: route.target.counterpartyEntityId,
+            targetCounterpartyEntityId: route.target.entityId,
+            targetLockId: route.target.lockId,
+          },
+        },
+      }],
+    }],
+    timestamp: now,
+  });
+}
+
+export type CrossJurisdictionTargetLockParams = {
+  route: CrossJurisdictionSwapRoute;
+  targetHubSignerId?: string;
+  targetAmount?: bigint;
+  fillRatio?: number;
+};
+
+export async function submitCrossJurisdictionTargetLock(
+  env: Env,
+  params: CrossJurisdictionTargetLockParams,
+): Promise<void> {
+  const { route } = params;
+  if (!route.target.lockId || !route.hashlock) {
+    throw new Error('CROSS_SWAP_TARGET_LOCK_ROUTE_INCOMPLETE');
+  }
+  const targetHubSignerId = params.targetHubSignerId || resolveEntityProposerId(env, route.target.entityId, 'cross-swap.target-lock');
+  const now = env.scenarioMode ? env.timestamp : getWallClockMs();
+  const fillRatio = params.fillRatio !== undefined
+    ? Math.max(0, Math.min(65_535, Math.floor(params.fillRatio)))
+    : 65_535;
+  const amount = params.targetAmount ?? (
+    BigInt(route.target.amount) * BigInt(fillRatio) / 65_535n
+  );
+  if (amount <= 0n) {
+    throw new Error(`CROSS_SWAP_TARGET_LOCK_ZERO_AMOUNT: fillRatio=${fillRatio}`);
+  }
+  const revealBeforeHeightDelta = 52;
+  const targetRevealHeight = getRuntimeJurisdictionHeight(env, findEntityStateForRuntime(env, route.target.entityId)?.lastFinalizedJHeight || 0) + revealBeforeHeightDelta;
+  const targetTimelock = BigInt((route.expiresAt ?? (now + 120_000)) + 5_000);
+
+  enqueueRuntimeInput(env, {
+    runtimeTxs: [],
+    entityInputs: [{
+      entityId: route.target.entityId,
+      signerId: targetHubSignerId,
+      entityTxs: [{
+        type: 'hashlockPayment',
+        data: {
+          targetEntityId: route.target.counterpartyEntityId,
+          tokenId: Number(route.target.tokenId),
+          amount,
+          hashlock: route.hashlock,
+          lockId: route.target.lockId,
+          timelock: targetTimelock,
+          revealBeforeHeight: targetRevealHeight,
+          description: route.memo || `Cross swap ${route.orderId} target leg ${fillRatio}/65535`,
+          startedAtMs: now,
+        },
+      }],
+    }],
+    timestamp: now,
+  });
 }
 
 export type CrossJurisdictionSwapClaimParams = {
-  order: CrossJurisdictionSwapOrder;
+  route: CrossJurisdictionSwapRoute;
   secret: string;
   sourceHubSignerId?: string;
   targetUserSignerId?: string;
-  bookHubSignerId?: string;
 };
 
 export async function submitCrossJurisdictionSwapClaims(
   env: Env,
   params: CrossJurisdictionSwapClaimParams,
 ): Promise<void> {
-  const { order, secret } = params;
-  if (hashHtlcSecret(secret) !== order.hashlock) {
+  const { route, secret } = params;
+  if (!route.hashlock || hashHtlcSecret(secret) !== route.hashlock) {
     throw new Error('CROSS_SWAP_CLAIM_SECRET_MISMATCH');
   }
-  if (!order.source.lockId || !order.target.lockId) {
+  if (!route.source.lockId || !route.target.lockId) {
     throw new Error('CROSS_SWAP_CLAIM_LOCKS_MISSING');
   }
-  const sourceHubEntityId = order.source.counterpartyEntityId;
-  const sourceUserEntityId = order.source.entityId;
-  const targetHubEntityId = order.target.entityId;
-  const targetUserEntityId = order.target.counterpartyEntityId;
+  const sourceHubEntityId = route.source.counterpartyEntityId;
+  const sourceUserEntityId = route.source.entityId;
+  const targetHubEntityId = route.target.entityId;
+  const targetUserEntityId = route.target.counterpartyEntityId;
   const sourceHubSignerId = params.sourceHubSignerId || resolveEntityProposerId(env, sourceHubEntityId, 'cross-swap.claim-source');
   const targetUserSignerId = params.targetUserSignerId || resolveEntityProposerId(env, targetUserEntityId, 'cross-swap.claim-target');
-  const bookHubSignerId = params.bookHubSignerId || resolveEntityProposerId(env, order.hubEntityId, 'cross-swap.claim-book');
-  const now = env.scenarioMode ? env.timestamp : getWallClockMs();
 
   enqueueRuntimeInput(env, {
     runtimeTxs: [],
@@ -5376,9 +5478,9 @@ export async function submitCrossJurisdictionSwapClaims(
           type: 'resolveHtlcLock',
           data: {
             counterpartyEntityId: sourceUserEntityId,
-            lockId: order.source.lockId,
+            lockId: route.source.lockId,
             secret,
-            description: `Claim cross swap ${order.orderId} source leg`,
+            description: `Claim cross swap ${route.orderId} source leg`,
           },
         }],
       },
@@ -5389,26 +5491,14 @@ export async function submitCrossJurisdictionSwapClaims(
           type: 'resolveHtlcLock',
           data: {
             counterpartyEntityId: targetHubEntityId,
-            lockId: order.target.lockId,
+            lockId: route.target.lockId,
             secret,
-            description: `Claim cross swap ${order.orderId} target leg`,
-          },
-        }],
-      },
-      {
-        entityId: order.hubEntityId,
-        signerId: bookHubSignerId,
-        entityTxs: [{
-          type: 'updateCrossJurisdictionSwapOrder',
-          data: {
-            orderId: order.orderId,
-            status: 'settled',
-            settledAt: now,
+            description: `Claim cross swap ${route.orderId} target leg`,
           },
         }],
       },
     ],
-    timestamp: now,
+    timestamp: env.scenarioMode ? env.timestamp : getWallClockMs(),
   });
 }
 

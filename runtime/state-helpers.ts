@@ -8,8 +8,6 @@ import type {
   AccountMachine,
   AccountSettleAction,
   AccountTx,
-  CrossJurisdictionSwapBook,
-  CrossJurisdictionSwapOrder,
   DebtEntry,
   EntityReplica,
   EntityState,
@@ -347,9 +345,6 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
     // Orderbook extension (hub-only, contains TypedArrays)
     // Must manually clone since structuredClone failed (we're in fallback path)
     ...(entityState.orderbookExt && { orderbookExt: cloneOrderbookExt(entityState.orderbookExt) }),
-    ...(entityState.crossJurisdictionSwapBook
-      ? { crossJurisdictionSwapBook: cloneCrossJurisdictionSwapBook(entityState.crossJurisdictionSwapBook) }
-      : {}),
     lockBook: new Map(
       Array.from((entityState.lockBook || new Map()).entries()).map(([id, entry]) => [
         id,
@@ -362,31 +357,9 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
     ...(entityState.pendingSwapFillRatios
       ? { pendingSwapFillRatios: new Map(Array.from(entityState.pendingSwapFillRatios.entries())) }
       : {}),
-  };
-}
-
-function cloneCrossJurisdictionSwapOrder(order: CrossJurisdictionSwapOrder): CrossJurisdictionSwapOrder {
-  return {
-    ...order,
-    source: { ...order.source },
-    target: { ...order.target },
-  };
-}
-
-function cloneCrossJurisdictionSwapBook(book: CrossJurisdictionSwapBook): CrossJurisdictionSwapBook {
-  return {
-    orders: new Map(
-      Array.from((book.orders || new Map()).entries()).map(([orderId, order]) => [
-        orderId,
-        cloneCrossJurisdictionSwapOrder(order),
-      ]),
-    ),
-    byPair: new Map(
-      Array.from((book.byPair || new Map()).entries()).map(([pairId, orderIds]) => [
-        pairId,
-        [...orderIds],
-      ]),
-    ),
+    ...(entityState.crossJurisdictionSwaps
+      ? { crossJurisdictionSwaps: new Map(Array.from(entityState.crossJurisdictionSwaps.entries()).map(([id, route]) => [id, { ...route }])) }
+      : {}),
   };
 }
 

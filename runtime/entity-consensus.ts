@@ -5,6 +5,7 @@
 
 import { applyEntityTx } from './entity-tx';
 import { isLeftEntity } from './entity-id-utils';
+import { deriveDelta } from './account-utils';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env, HankoString, HashType, JInput, JurisdictionEvent, JurisdictionEventData, RoutedEntityInput } from './types';
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, formatSignerDisplay, log } from './utils';
 import { safeStringify } from './serialization-utils';
@@ -33,6 +34,7 @@ import type { OrderbookExtState } from './orderbook';
 import { replaceOrderbookPair } from './orderbook';
 import { executeCrontab, initCrontab, scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from './entity-crontab';
 import { ethers } from 'ethers';
+import { generateLockId, hashHtlcSecret } from './htlc-utils';
 
 const compareNumericKey = (
   left: string | number,
@@ -47,6 +49,83 @@ const compareNumericKey = (
 };
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
+const CROSS_J_HASHLEDGER_DENOMINATOR = 65_535;
+const CROSS_J_HASHLEDGER_BITS = 16;
+
+const findEntityStateById = (env: Env, entityId: string): EntityState | null => {
+  const target = normalizeEntityRef(entityId);
+  for (const replica of env.eReplicas?.values?.() || []) {
+    const candidate = normalizeEntityRef(replica?.state?.entityId || replica?.entityId || '');
+    if (candidate === target) return replica.state;
+  }
+  return null;
+};
+
+const findAccountByCounterparty = (state: EntityState | null | undefined, counterpartyId: string) => {
+  if (!state?.accounts) return null;
+  const target = normalizeEntityRef(counterpartyId);
+  for (const [accountId, account] of state.accounts.entries()) {
+    if (normalizeEntityRef(accountId) === target) return account;
+  }
+  return null;
+};
+
+const getCapacityForEntityPerspective = (
+  state: EntityState | null | undefined,
+  counterpartyId: string,
+  tokenId: number,
+  direction: 'in' | 'out',
+): bigint | null => {
+  const account = findAccountByCounterparty(state, counterpartyId);
+  const delta = account?.deltas?.get(Number(tokenId));
+  if (!state || !account || !delta) return null;
+  const selfIsLeft = isLeftEntity(state.entityId, counterpartyId);
+  const derived = deriveDelta(delta, selfIsLeft);
+  return direction === 'out' ? derived.outCapacity : derived.inCapacity;
+};
+
+const splitFillRatioBits = (fillRatio: number): number[] => {
+  const ratio = Math.max(0, Math.min(CROSS_J_HASHLEDGER_DENOMINATOR, Math.floor(Number(fillRatio) || 0)));
+  const bits: number[] = [];
+  for (let bit = 0; bit < CROSS_J_HASHLEDGER_BITS; bit += 1) {
+    if ((ratio & (1 << bit)) !== 0) bits.push(bit);
+  }
+  return bits;
+};
+
+const splitAmountByBits = (amount: bigint, bits: readonly number[]): Array<{ bit: number; amount: bigint }> => {
+  if (amount <= 0n || bits.length === 0) return [];
+  const weights = bits.map(bit => ({ bit, weight: 1n << BigInt(bit) }));
+  const totalWeight = weights.reduce((sum, entry) => sum + entry.weight, 0n);
+  if (totalWeight <= 0n) return [];
+  let remaining = amount;
+  return weights.flatMap((entry, index) => {
+    const part = index === weights.length - 1
+      ? remaining
+      : (amount * entry.weight) / totalWeight;
+    remaining -= part;
+    return part > 0n ? [{ bit: entry.bit, amount: part }] : [];
+  });
+};
+
+const deriveCrossJurisdictionFillSecret = (
+  env: Env,
+  hubState: EntityState,
+  fill: { accountId: string; offerId: string; fillRatio: number; sourceAmount: bigint; targetAmount: bigint },
+  bit: number,
+  sequence: bigint,
+): string => ethers.keccak256(ethers.toUtf8Bytes([
+  'xln:cross-j-hashledger-secret:v1',
+  String(env.runtimeSeed || env.runtimeId || ''),
+  hubState.entityId,
+  fill.accountId,
+  fill.offerId,
+  String(fill.fillRatio),
+  fill.sourceAmount.toString(),
+  fill.targetAmount.toString(),
+  String(bit),
+  sequence.toString(),
+].join(':')));
 
 function queueUniqueAccountMempoolTx(
   account: EntityState['accounts'] extends Map<string, infer T> ? T : never,
@@ -1474,6 +1553,119 @@ export const applyEntityFrame = async (
         const key = swapKey(accountId, tx.data.offerId);
         currentEntityState.pendingSwapFillRatios.set(key, tx.data.fillRatio);
       }
+    }
+
+    for (const fill of matchResult.crossJurisdictionFills) {
+      const route = fill.route;
+      const bits = splitFillRatioBits(fill.fillRatio);
+      if (bits.length === 0) {
+        console.warn(`🌉 ORDERBOOK CROSS-J FILL skipped: empty hashledger route=${route.orderId}`);
+        continue;
+      }
+      const now = currentEntityState.timestamp || env.timestamp;
+      const sourceRevealHeight = Number(currentEntityState.lastFinalizedJHeight ?? 0) + 50;
+      const targetRevealHeight = Number(currentEntityState.lastFinalizedJHeight ?? 0) + 52;
+      const sourceTimelock = BigInt(route.expiresAt ?? (now + 120_000));
+      const targetTimelock = BigInt((route.expiresAt ?? (now + 120_000)) + 5_000);
+      const sourceCapacity = getCapacityForEntityPerspective(
+        currentEntityState,
+        route.source.entityId,
+        route.source.tokenId,
+        'in',
+      );
+      const targetHubState = findEntityStateById(env, route.target.entityId);
+      const targetCapacity = getCapacityForEntityPerspective(
+        targetHubState,
+        route.target.counterpartyEntityId,
+        route.target.tokenId,
+        'out',
+      );
+      if (sourceCapacity === null || sourceCapacity < fill.sourceAmount) {
+        console.warn(
+          `🌉 ORDERBOOK CROSS-J FILL skipped: source capacity ${sourceCapacity?.toString() ?? 'missing'} < ${fill.sourceAmount.toString()} route=${route.orderId}`,
+        );
+        continue;
+      }
+      if (targetCapacity === null || targetCapacity < fill.targetAmount) {
+        console.warn(
+          `🌉 ORDERBOOK CROSS-J FILL skipped: target capacity ${targetCapacity?.toString() ?? 'missing'} < ${fill.targetAmount.toString()} route=${route.orderId}`,
+        );
+        continue;
+      }
+      const sourceParts = splitAmountByBits(fill.sourceAmount, bits);
+      const targetPartsByBit = new Map(splitAmountByBits(fill.targetAmount, bits).map(part => [part.bit, part.amount]));
+      if (sourceParts.length === 0 || targetPartsByBit.size === 0) {
+        console.warn(`🌉 ORDERBOOK CROSS-J FILL skipped: zero hashledger parts route=${route.orderId}`);
+        continue;
+      }
+      const targetAccount = findAccountByCounterparty(targetHubState, route.target.counterpartyEntityId);
+      const targetCounterBase =
+        BigInt(targetAccount?.currentHeight ?? 0) +
+        BigInt(targetAccount?.mempool?.length ?? 0) +
+        1n;
+
+      for (const [index, sourcePart] of sourceParts.entries()) {
+        const targetAmount = targetPartsByBit.get(sourcePart.bit) ?? 0n;
+        if (targetAmount <= 0n) continue;
+        const secret = deriveCrossJurisdictionFillSecret(
+          env,
+          currentEntityState,
+          fill,
+          sourcePart.bit,
+          targetCounterBase + BigInt(index),
+        );
+        const hashlock = hashHtlcSecret(secret);
+        const sourceLockId = generateLockId(hashlock, currentEntityState.height, sourcePart.bit * 2 + 1, now);
+        const targetLockId = generateLockId(hashlock, currentEntityState.height, sourcePart.bit * 2 + 2, now);
+        const bitRouteId = `${route.orderId}:${sourcePart.bit}`;
+        allOutputs.push({
+          entityId: route.target.entityId,
+          entityTxs: [{
+            type: 'hashlockPayment',
+            data: {
+              targetEntityId: route.target.counterpartyEntityId,
+              tokenId: route.target.tokenId,
+              amount: targetAmount,
+              hashlock,
+              lockId: targetLockId,
+              timelock: targetTimelock,
+              revealBeforeHeight: targetRevealHeight,
+              description: route.memo || `Cross-j fill ${route.orderId} bit ${sourcePart.bit} target`,
+              startedAtMs: now,
+            },
+          }],
+        });
+        allOutputs.push({
+          entityId: route.source.entityId,
+          entityTxs: [{
+            type: 'hashlockPayment',
+            data: {
+              targetEntityId: route.source.counterpartyEntityId,
+              tokenId: route.source.tokenId,
+              amount: sourcePart.amount,
+              hashlock,
+              lockId: sourceLockId,
+              timelock: sourceTimelock,
+              revealBeforeHeight: sourceRevealHeight,
+              description: route.memo || `Cross-j fill ${route.orderId} bit ${sourcePart.bit} source`,
+              startedAtMs: now,
+              crossJurisdictionRelay: {
+                routeId: bitRouteId,
+                fillRatio: 1 << sourcePart.bit,
+                sourceAmount: sourcePart.amount,
+                targetAmount,
+                targetEntityId: route.target.counterpartyEntityId,
+                targetCounterpartyEntityId: route.target.entityId,
+                targetLockId,
+              },
+            },
+          }],
+        });
+      }
+      console.log(
+        `🌉 ORDERBOOK CROSS-J FILL: ${route.orderId} ratio=${fill.fillRatio}/65535 ` +
+        `source=${fill.sourceAmount.toString()} target=${fill.targetAmount.toString()} bits=${bits.join(',')}`,
+      );
     }
 
     // Apply book updates

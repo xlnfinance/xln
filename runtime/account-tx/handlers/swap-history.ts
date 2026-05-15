@@ -33,6 +33,7 @@ export function recordSwapOfferLifecycle(
     wantAmount: offer.wantAmount,
     ...(offer.priceTicks !== undefined ? { priceTicks: offer.priceTicks } : {}),
     createdHeight: offer.createdHeight,
+    ...(offer.crossJurisdiction ? { crossJurisdiction: offer.crossJurisdiction } : {}),
     cancelRequested: false,
     lastUpdatedHeight: offer.createdHeight,
     resolves: [],

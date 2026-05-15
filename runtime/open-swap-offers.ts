@@ -17,6 +17,7 @@ export function listOpenSwapOffers(state: Pick<EntityState, 'accounts'>): SwapBo
         minFillRatio: offer.minFillRatio,
         createdHeight,
         priceTicks: offer.priceTicks ?? 0n,
+        ...(offer.crossJurisdiction ? { crossJurisdiction: offer.crossJurisdiction } : {}),
       });
     }
   }
