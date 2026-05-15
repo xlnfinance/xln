@@ -1012,6 +1012,44 @@ const run = async (): Promise<void> => {
     entityProviderAddress?: string;
     primary: boolean;
   }> = [];
+  const getImportedJurisdictionContracts = (
+    jurisdictionName: string,
+    fallback?: JurisdictionConfig['contracts'],
+  ): {
+    chainId?: number;
+    depositoryAddress?: string;
+    entityProviderAddress?: string;
+  } => {
+    const replica = env.jReplicas?.get(jurisdictionName) as
+      | {
+          chainId?: number;
+          depositoryAddress?: string;
+          entityProviderAddress?: string;
+          contracts?: { depository?: string; entityProvider?: string };
+          jadapter?: { chainId?: number; addresses?: { depository?: string; entityProvider?: string } };
+        }
+      | undefined;
+    const depositoryAddress = String(
+      replica?.jadapter?.addresses?.depository ||
+      replica?.depositoryAddress ||
+      replica?.contracts?.depository ||
+      fallback?.depository ||
+      '',
+    ).trim();
+    const entityProviderAddress = String(
+      replica?.jadapter?.addresses?.entityProvider ||
+      replica?.entityProviderAddress ||
+      replica?.contracts?.entityProvider ||
+      fallback?.entityProvider ||
+      '',
+    ).trim();
+    const chainId = Number(replica?.chainId ?? replica?.jadapter?.chainId);
+    return {
+      ...(Number.isFinite(chainId) && chainId > 0 ? { chainId: Math.floor(chainId) } : {}),
+      ...(depositoryAddress ? { depositoryAddress } : {}),
+      ...(entityProviderAddress ? { entityProviderAddress } : {}),
+    };
+  };
   let activeJAdapter: JAdapter | null = null;
   let activeTokenCatalog: JTokenInfo[] = [];
   let meshLoop: ReturnType<typeof setInterval> | null = null;
@@ -1431,14 +1469,15 @@ const run = async (): Promise<void> => {
     port: resolvedArgs.apiPort,
   });
   if (!bootstrap?.entityId) throw new Error('HUB_BOOTSTRAP_FAILED');
+  const primaryContracts = getImportedJurisdictionContracts(jurisdiction.name, jurisdiction.contracts);
   hubBootstraps.push({
     entityId: bootstrap.entityId,
     signerId: bootstrap.signerId,
     name: resolvedArgs.name,
     jurisdictionName: jurisdiction.name,
-    chainId: jurisdiction.chainId,
-    ...(jurisdiction.contracts?.depository ? { depositoryAddress: jurisdiction.contracts.depository } : {}),
-    ...(jurisdiction.contracts?.entityProvider ? { entityProviderAddress: jurisdiction.contracts.entityProvider } : {}),
+    chainId: primaryContracts.chainId ?? jurisdiction.chainId,
+    ...(primaryContracts.depositoryAddress ? { depositoryAddress: primaryContracts.depositoryAddress } : {}),
+    ...(primaryContracts.entityProviderAddress ? { entityProviderAddress: primaryContracts.entityProviderAddress } : {}),
     primary: true,
   });
   finishTiming('hub_bootstrap', hubBootstrapStartedAt);
@@ -1496,14 +1535,15 @@ const run = async (): Promise<void> => {
     });
     env.activeJurisdiction = priorActiveJurisdiction || primaryJurisdictionName;
     if (!sibling?.entityId) throw new Error(`HUB_SIBLING_BOOTSTRAP_FAILED: ${secondaryName}`);
+    const secondaryContracts = getImportedJurisdictionContracts(secondaryName, secondary.contracts);
     hubBootstraps.push({
       entityId: sibling.entityId,
       signerId: sibling.signerId,
       name: `${resolvedArgs.name} ${secondaryName}`,
       jurisdictionName: secondaryName,
-      chainId: secondary.chainId,
-      ...(secondary.contracts?.depository ? { depositoryAddress: secondary.contracts.depository } : {}),
-      ...(secondary.contracts?.entityProvider ? { entityProviderAddress: secondary.contracts.entityProvider } : {}),
+      chainId: secondaryContracts.chainId ?? secondary.chainId,
+      ...(secondaryContracts.depositoryAddress ? { depositoryAddress: secondaryContracts.depositoryAddress } : {}),
+      ...(secondaryContracts.entityProviderAddress ? { entityProviderAddress: secondaryContracts.entityProviderAddress } : {}),
       primary: false,
     });
     await ensureOrderbook(env, sibling.entityId, sibling.signerId);

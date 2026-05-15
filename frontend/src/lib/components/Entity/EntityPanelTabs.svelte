@@ -522,12 +522,15 @@
   type JurisdictionLike = {
     name?: unknown;
     chainId?: unknown;
+    depositoryAddress?: unknown;
   };
 
   function jurisdictionKey(value: unknown): string {
     if (value && typeof value === 'object') {
       const jurisdiction = value as JurisdictionLike;
       const chainId = String(jurisdiction.chainId ?? '').trim();
+      const depository = String(jurisdiction.depositoryAddress ?? '').trim().toLowerCase();
+      if (chainId && depository) return `dep:${chainId}:${depository}`;
       if (chainId) return `chain:${chainId}`;
       return String(jurisdiction.name || '').trim().toLowerCase();
     }

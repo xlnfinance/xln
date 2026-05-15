@@ -86,6 +86,7 @@ export let pendingFaucetKeys: Set<string> = new Set();
   type JurisdictionLike = {
     name?: unknown;
     chainId?: unknown;
+    depositoryAddress?: unknown;
   };
 
   function normalizeJurisdiction(value: unknown): string {
@@ -96,6 +97,8 @@ export let pendingFaucetKeys: Set<string> = new Set();
     if (value && typeof value === 'object') {
       const jurisdiction = value as JurisdictionLike;
       const chainId = String(jurisdiction.chainId ?? '').trim();
+      const depository = String(jurisdiction.depositoryAddress ?? '').trim().toLowerCase();
+      if (chainId && depository) return `dep:${chainId}:${depository}`;
       if (chainId) return `chain:${chainId}`;
       return normalizeJurisdiction(jurisdiction.name);
     }
