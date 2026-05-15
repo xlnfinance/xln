@@ -62,17 +62,42 @@ export declare namespace IDeltaTransformer {
     subAmount: bigint;
   };
 
+  export type PullStruct = {
+    deltaIndex: BigNumberish;
+    amount: BigNumberish;
+    revealedUntilBlock: BigNumberish;
+    fullHash: BytesLike;
+    partialRoot: BytesLike;
+  };
+
+  export type PullStructOutput = [
+    deltaIndex: bigint,
+    amount: bigint,
+    revealedUntilBlock: bigint,
+    fullHash: string,
+    partialRoot: string
+  ] & {
+    deltaIndex: bigint;
+    amount: bigint;
+    revealedUntilBlock: bigint;
+    fullHash: string;
+    partialRoot: string;
+  };
+
   export type BatchStruct = {
     payment: IDeltaTransformer.PaymentStruct[];
     swap: IDeltaTransformer.SwapStruct[];
+    pull: IDeltaTransformer.PullStruct[];
   };
 
   export type BatchStructOutput = [
     payment: IDeltaTransformer.PaymentStructOutput[],
-    swap: IDeltaTransformer.SwapStructOutput[]
+    swap: IDeltaTransformer.SwapStructOutput[],
+    pull: IDeltaTransformer.PullStructOutput[]
   ] & {
     payment: IDeltaTransformer.PaymentStructOutput[];
     swap: IDeltaTransformer.SwapStructOutput[];
+    pull: IDeltaTransformer.PullStructOutput[];
   };
 }
 

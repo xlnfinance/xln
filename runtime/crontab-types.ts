@@ -16,7 +16,8 @@ export type ScheduledHookType =
   | 'htlc_secret_ack_timeout'
   | 'settlement_window'
   | 'watchdog'
-  | 'hub_rebalance_kick';
+  | 'hub_rebalance_kick'
+  | 'cross_j_orderbook_sweep';
 
 type ScheduledHookBase<TType extends ScheduledHookType, TData extends Record<string, unknown>> = {
   id: string;
@@ -49,13 +50,18 @@ export type HubRebalanceKickHook = ScheduledHookBase<'hub_rebalance_kick', {
   counterpartyId: string;
 }>;
 
+export type CrossJurisdictionOrderbookSweepHook = ScheduledHookBase<'cross_j_orderbook_sweep', {
+  reason: string;
+}>;
+
 export type ScheduledHook =
   | HtlcTimeoutHook
   | DisputeDeadlineHook
   | HtlcSecretAckTimeoutHook
   | SettlementWindowHook
   | WatchdogHook
-  | HubRebalanceKickHook;
+  | HubRebalanceKickHook
+  | CrossJurisdictionOrderbookSweepHook;
 
 export interface CrontabState {
   tasks: Map<CrontabTaskMethod, CrontabTaskState>;

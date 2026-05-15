@@ -170,11 +170,12 @@ function buildHashLadderProof(label: string, fillRatio: number): {
   };
 }
 
-function encodeCrossSwapPullArguments(fillRatios: number[], fullSecrets: string[], reveals: string[][]): string {
-  return abi.encode(
-    ["tuple(uint16[] fillRatios, bytes32[] fullSecrets, bytes32[4][] reveals)"],
-    [{ fillRatios, fullSecrets, reveals }],
-  );
+function encodeCrossSwapPullArguments(binaries: string[]): string {
+  return abi.encode(["bytes[]"], [binaries]);
+}
+
+function encodePartialPullBinary(fillRatio: number, reveals: string[]): string {
+  return `0x${fillRatio.toString(16).padStart(4, "0")}${reveals.map((reveal) => reveal.slice(2)).join("")}`;
 }
 
 describe("Depository", function () {
@@ -717,7 +718,7 @@ describe("Depository", function () {
       }],
     );
     const proofbodyHash = proofBodyHash(proofbody);
-    const rightTransformerArgs = encodeCrossSwapPullArguments([fillRatio], [], [pullProof.reveals]);
+    const rightTransformerArgs = encodeCrossSwapPullArguments([encodePartialPullBinary(fillRatio, pullProof.reveals)]);
     const initialArguments = abi.encode(["bytes[]"], [[rightTransformerArgs]]);
     const disputeNonce = 1n;
     const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);

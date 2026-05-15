@@ -53,6 +53,7 @@ export interface RuntimeTransformerClause {
 export interface RuntimeBatch {
   payments: RuntimePayment[];
   swaps: RuntimeSwap[];
+  pulls: RuntimePull[];
 }
 
 /**
@@ -76,6 +77,18 @@ export interface RuntimeSwap {
   addAmount: bigint;             // Amount to add
   subDeltaIndex: number;         // Token to subtract (want token)
   subAmount: bigint;             // Amount to subtract
+}
+
+/**
+ * Runtime-friendly Pull
+ * Maps to DeltaTransformer.PullStruct
+ */
+export interface RuntimePull {
+  deltaIndex: number;
+  amount: bigint;
+  revealedUntilBlock: number;
+  fullHash: string;
+  partialRoot: string;
 }
 
 /**
@@ -166,6 +179,17 @@ export const BATCH_ABI = {
         { name: 'addAmount', type: 'uint256' },
         { name: 'subDeltaIndex', type: 'uint256' },
         { name: 'subAmount', type: 'uint256' },
+      ],
+    },
+    {
+      name: 'pull',
+      type: 'tuple[]',
+      components: [
+        { name: 'deltaIndex', type: 'uint256' },
+        { name: 'amount', type: 'int256' },
+        { name: 'revealedUntilBlock', type: 'uint256' },
+        { name: 'fullHash', type: 'bytes32' },
+        { name: 'partialRoot', type: 'bytes32' },
       ],
     },
   ],

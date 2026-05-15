@@ -68,6 +68,15 @@ export async function handleSwapOffer(
   if (giveTokenId === wantTokenId && !crossJurisdiction) {
     return { success: false, error: `Cannot swap same token: ${giveTokenId}`, events };
   }
+  if (crossJurisdiction) {
+    if (
+      crossJurisdiction.status !== 'resting' ||
+      !crossJurisdiction.sourcePull ||
+      !crossJurisdiction.targetPull
+    ) {
+      return { success: false, error: `Cross-j swap must be prepared before entering the book`, events };
+    }
+  }
   if (minFillRatio < 0 || minFillRatio > 65535) {
     return { success: false, error: `Invalid minFillRatio: ${minFillRatio}`, events };
   }

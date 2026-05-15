@@ -47,11 +47,12 @@ function buildProof(label: string, fillRatio: number) {
   };
 }
 
-function encodePullArguments(fillRatios: number[], fullSecrets: string[], reveals: string[][]): string {
-  return abiCoder.encode(
-    ["tuple(uint16[] fillRatios, bytes32[] fullSecrets, bytes32[4][] reveals)"],
-    [{ fillRatios, fullSecrets, reveals }],
-  );
+function encodePartialBinary(fillRatio: number, reveals: string[]): string {
+  return `0x${fillRatio.toString(16).padStart(4, "0")}${reveals.map((reveal) => reveal.slice(2)).join("")}`;
+}
+
+function encodePullArguments(binaries: string[]): string {
+  return abiCoder.encode(["bytes[]"], [binaries]);
 }
 
 describe("CrossSwapPull", function () {
@@ -90,7 +91,7 @@ describe("CrossSwapPull", function () {
     const fillRatio = 0x0123;
     const deadline = (await ethers.provider.getBlockNumber()) + 10;
     const { proof, encodedBatch } = await encodeSinglePull(transformer, fillRatio, MAX_FILL_RATIO, deadline);
-    const rightArguments = encodePullArguments([fillRatio], [], [proof.reveals]);
+    const rightArguments = encodePullArguments([encodePartialBinary(fillRatio, proof.reveals)]);
 
     const result = await transformer.applyBatch.staticCall([0, 0], encodedBatch, "0x", rightArguments);
 
@@ -102,7 +103,7 @@ describe("CrossSwapPull", function () {
     const { transformer } = await loadFixture(deployFixture);
     const deadline = (await ethers.provider.getBlockNumber()) + 10;
     const { proof, encodedBatch } = await encodeSinglePull(transformer, 0xffff, 1234n, deadline);
-    const rightArguments = encodePullArguments([0xffff], [proof.fullSecret], []);
+    const rightArguments = encodePullArguments([proof.fullSecret]);
 
     const result = await transformer.applyBatch.staticCall([0, 0], encodedBatch, "0x", rightArguments);
 
@@ -117,7 +118,7 @@ describe("CrossSwapPull", function () {
     const { proof, encodedBatch } = await encodeSinglePull(transformer, fillRatio, MAX_FILL_RATIO, deadline);
     await mine(2);
 
-    const rightArguments = encodePullArguments([fillRatio], [], [proof.reveals]);
+    const rightArguments = encodePullArguments([encodePartialBinary(fillRatio, proof.reveals)]);
     const result = await transformer.applyBatch.staticCall([0, 0], encodedBatch, "0x", rightArguments);
 
     expect(result[0]).to.equal(0n);
@@ -132,7 +133,7 @@ describe("CrossSwapPull", function () {
     const { proof, encodedBatch } = await encodeSinglePull(transformer, fillRatio, MAX_FILL_RATIO, deadline);
     await mine(5);
 
-    const rightArguments = encodePullArguments([fillRatio], [], [proof.reveals]);
+    const rightArguments = encodePullArguments([encodePartialBinary(fillRatio, proof.reveals)]);
     const result = await transformer.applyBatchWithArgumentBlocks.staticCall(
       [0, 0],
       encodedBatch,
@@ -184,7 +185,7 @@ describe("CrossSwapPull", function () {
         },
       ],
     });
-    const argumentsForBothLegs = encodePullArguments([fillRatio], [], [proof.reveals]);
+    const argumentsForBothLegs = encodePullArguments([encodePartialBinary(fillRatio, proof.reveals)]);
 
     const sourceArgumentBlock = sourceDeadline;
     await mine(6);

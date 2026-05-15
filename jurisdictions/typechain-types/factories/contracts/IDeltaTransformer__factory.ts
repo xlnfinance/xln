@@ -106,6 +106,38 @@ const _abi = [
             name: "swap",
             type: "tuple[]",
           },
+          {
+            components: [
+              {
+                internalType: "uint256",
+                name: "deltaIndex",
+                type: "uint256",
+              },
+              {
+                internalType: "int256",
+                name: "amount",
+                type: "int256",
+              },
+              {
+                internalType: "uint256",
+                name: "revealedUntilBlock",
+                type: "uint256",
+              },
+              {
+                internalType: "bytes32",
+                name: "fullHash",
+                type: "bytes32",
+              },
+              {
+                internalType: "bytes32",
+                name: "partialRoot",
+                type: "bytes32",
+              },
+            ],
+            internalType: "struct IDeltaTransformer.Pull[]",
+            name: "pull",
+            type: "tuple[]",
+          },
         ],
         internalType: "struct IDeltaTransformer.Batch",
         name: "b",

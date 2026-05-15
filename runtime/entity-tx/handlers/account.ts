@@ -36,6 +36,7 @@ import {
   scheduleHook as scheduleCrontabHook,
   HTLC_SECRET_ACK_TIMEOUT_MS,
 } from '../../entity-crontab';
+import { decodeHashLadderBinary } from '../../hashladder';
 import { NobleCryptoProvider } from '../../crypto-noble';
 import { unwrapEnvelope, validateEnvelope } from '../../htlc-envelope-types';
 import { terminateHtlcRoute } from '../htlc-route-lifecycle';
@@ -391,6 +392,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       rebalancePolicy: new Map(), // Rebalance: per-token soft/hard/maxFee
       locks: new Map(), // HTLC: Empty locks map
       swapOffers: new Map(), // Swap: Empty offers map
+      pulls: new Map(), // Pull: Empty ratio-gated pull map
       swapOrderHistory: new Map(),
       swapClosedOrders: new Map(),
       // Bilateral J-event consensus
@@ -553,6 +555,59 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       if (justCommittedFrame?.accountTxs) {
         for (const accountTx of justCommittedFrame.accountTxs) {
           if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: Checking committed tx type=${accountTx.type}`);
+
+          if (accountTx.type === 'pull_resolve') {
+            let fillRatio = 0;
+            try {
+              fillRatio = decodeHashLadderBinary(accountTx.data.binary).fillRatio;
+            } catch {
+              fillRatio = 0;
+            }
+            if (fillRatio > 0 && newState.crossJurisdictionSwaps?.size) {
+              for (const route of newState.crossJurisdictionSwaps.values()) {
+                const isSourceResolve =
+                  route.sourcePull?.pullId === accountTx.data.pullId &&
+                  route.targetPull?.pullId !== undefined &&
+                  normalizeEntityRef(route.source.entityId) === normalizeEntityRef(newState.entityId) &&
+                  normalizeEntityRef(route.source.counterpartyEntityId) === normalizeEntityRef(counterpartyId);
+                if (isSourceResolve) {
+                  const targetPull = route.targetPull;
+                  if (!targetPull) continue;
+                  outputs.push({
+                    entityId: route.target.counterpartyEntityId,
+                    entityTxs: [{
+                      type: 'resolvePull',
+                      data: {
+                        counterpartyEntityId: route.target.entityId,
+                        pullId: targetPull.pullId,
+                        binary: accountTx.data.binary,
+                        description: `Cross-j ${route.orderId} target pull ${fillRatio}/65535`,
+                      },
+                    }],
+                  });
+                  route.status = 'source_claimed';
+                  route.updatedAt = newState.timestamp;
+                  console.log(
+                    `🌉 PULL: Relaying cross-j ratio route=${route.orderId} ` +
+                    `target=${route.target.counterpartyEntityId.slice(-4)} ratio=${fillRatio}/65535`,
+                  );
+                  continue;
+                }
+
+                if (
+                  route.targetPull?.pullId === accountTx.data.pullId &&
+                  normalizeEntityRef(route.target.counterpartyEntityId) === normalizeEntityRef(newState.entityId) &&
+                  normalizeEntityRef(route.target.entityId) === normalizeEntityRef(counterpartyId)
+                ) {
+                  route.status = 'settled';
+                  route.updatedAt = newState.timestamp;
+                  route.settledAt = newState.timestamp;
+                  console.log(`🌉 PULL: Cross-j route settled ${route.orderId}`);
+                }
+              }
+            }
+            continue;
+          }
 
           if (accountTx.type === 'htlc_resolve' || accountTx.type === 'j_event_claim' || accountTx.type === 'swap_resolve') {
             continue;
@@ -1739,6 +1794,12 @@ export function processOrderbookSwaps(
   }
 
   const processCrossJurisdictionOffers = (): void => {
+    for (const rawOffer of crossJurisdictionSwapOffers) {
+      const marketOffer = buildCrossMarketOffer(rawOffer);
+      if (!marketOffer) continue;
+      crossLiveOfferMeta.set(`${rawOffer.accountId}:${rawOffer.offerId}`, marketOffer);
+    }
+
     for (const rawOffer of sortSwapOffersForOrderbook(crossJurisdictionSwapOffers)) {
       const currentAccountId = rawOffer.accountId;
       const marketOffer = buildCrossMarketOffer(rawOffer);
@@ -1758,9 +1819,23 @@ export function processOrderbookSwaps(
 
       const currentNamespacedOrderId = `${currentAccountId}:${rawOffer.offerId}`;
       crossLiveOfferMeta.set(currentNamespacedOrderId, marketOffer);
+      if (hasQueuedSwapResolveForEntityState(hubState, queuedSwapResolutions, currentAccountId, rawOffer.offerId)) {
+        continue;
+      }
       let book = bookCache.get(marketOffer.pairId) || ext.books.get(marketOffer.pairId);
       if (!book) {
         book = createOrRepairPairBook(getSwapPairPolicyByBaseQuote(rawOffer.giveTokenId, rawOffer.wantTokenId).bookBucketWidthTicks);
+      }
+      const existingOrder = getBookOrder(book, currentNamespacedOrderId);
+      if (existingOrder) {
+        const refreshResult = applyCommand(book, {
+          kind: 1,
+          ownerId: marketOffer.makerId,
+          orderId: currentNamespacedOrderId,
+        });
+        book = refreshResult.state;
+        bookCache.set(marketOffer.pairId, book);
+        bookUpdates.push({ pairId: marketOffer.pairId, book });
       }
 
       let result: ReturnType<typeof applyCommand>;

@@ -348,6 +348,7 @@ type AggregatedHealth = {
     selfRelayPresence: boolean;
     pid: number | null;
     apiPort: number;
+    apiUrl: string;
     dbPath: string;
     startedAt: number | null;
     exitedAt: number | null;
@@ -1505,6 +1506,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       selfRelayPresence: relayOnline,
       pid: child.proc?.pid ?? null,
       apiPort: child.apiPort,
+      apiUrl: String(child.lastInfo?.apiUrl || `http://${args.host}:${child.apiPort}`),
       dbPath: child.dbPath,
       startedAt: child.startedAt,
       exitedAt: child.exitedAt,
@@ -2641,7 +2643,7 @@ const server = Bun.serve({
       try {
         const msg = JSON.parse(msgStr);
         if (isMarketMessageType(msg?.type)) {
-          Promise.resolve(marketSubscriptionStack.handleMessage(ws, msg as Record<string, unknown>)).catch(error => {
+          Promise.resolve(marketSubscriptionStack.handleMessage(ws as OrchestratorWebSocket, msg as Record<string, unknown>)).catch(error => {
             const reason = serializeError(error);
             pushDebugEvent(relayStore, {
               event: 'error',
@@ -2654,7 +2656,7 @@ const server = Bun.serve({
           });
           return;
         }
-        Promise.resolve(relayRoute(routerConfig, ws, msg)).catch(error => {
+        Promise.resolve(relayRoute(routerConfig, ws as OrchestratorWebSocket, msg)).catch(error => {
           const reason = serializeError(error);
           pushDebugEvent(relayStore, {
             event: 'error',
@@ -2677,9 +2679,10 @@ const server = Bun.serve({
       }
     },
     close(ws) {
-      cleanupRpcMarketSubscription(ws);
-      forgetRelaySocketRuntimeId(ws);
-      removeClient(relayStore, ws);
+      const relayWs = ws as OrchestratorWebSocket;
+      cleanupRpcMarketSubscription(relayWs);
+      forgetRelaySocketRuntimeId(relayWs);
+      removeClient(relayStore, relayWs);
     },
   },
 });

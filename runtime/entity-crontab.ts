@@ -374,6 +374,17 @@ async function processDueHooks(
           }
         }
         break;
+
+      case 'cross_j_orderbook_sweep':
+        outputs.push({
+          entityId: replica.entityId,
+          signerId: firstValidator,
+          entityTxs: [{
+            type: 'orderbookSweepCrossJurisdiction',
+            data: { reason: String(hook.data.reason || 'cross-j-orderbook-sweep') },
+          }],
+        });
+        break;
     }
   }
 

@@ -400,6 +400,8 @@ function cloneScheduledHook(hook: ScheduledHook): ScheduledHook {
       return { ...hook, data: {} };
     case 'hub_rebalance_kick':
       return { ...hook, data: { ...hook.data } };
+    case 'cross_j_orderbook_sweep':
+      return { ...hook, data: { ...hook.data } };
   }
 }
 
@@ -557,6 +559,7 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
     deltas: new Map(Array.from(account.deltas.entries()).map(([key, delta]) => [key, { ...delta }])),
     locks: new Map(Array.from(account.locks.entries()).map(([key, lock]) => [key, { ...lock }])),
     swapOffers: new Map(Array.from(account.swapOffers.entries()).map(([key, offer]) => [key, { ...offer }])),
+    pulls: new Map(Array.from((account.pulls ?? new Map()).entries()).map(([key, pull]) => [key, { ...pull }])),
     ...(account.swapOrderHistory instanceof Map
       ? {
           swapOrderHistory: new Map(
@@ -737,6 +740,13 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
       offerId,
       { ...offer } // Clone offer object
     ])
+  );
+
+  result.pulls = new Map(
+    Array.from((account.pulls || new Map()).entries()).map(([pullId, pull]) => [
+      pullId,
+      { ...pull },
+    ]),
   );
 
   if (account.swapOrderHistory instanceof Map) {

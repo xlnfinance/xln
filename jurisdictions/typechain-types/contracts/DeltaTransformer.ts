@@ -62,17 +62,42 @@ export declare namespace DeltaTransformer {
     subAmount: bigint;
   };
 
+  export type PullStruct = {
+    deltaIndex: BigNumberish;
+    amount: BigNumberish;
+    revealedUntilBlock: BigNumberish;
+    fullHash: BytesLike;
+    partialRoot: BytesLike;
+  };
+
+  export type PullStructOutput = [
+    deltaIndex: bigint,
+    amount: bigint,
+    revealedUntilBlock: bigint,
+    fullHash: string,
+    partialRoot: string
+  ] & {
+    deltaIndex: bigint;
+    amount: bigint;
+    revealedUntilBlock: bigint;
+    fullHash: string;
+    partialRoot: string;
+  };
+
   export type BatchStruct = {
     payment: DeltaTransformer.PaymentStruct[];
     swap: DeltaTransformer.SwapStruct[];
+    pull: DeltaTransformer.PullStruct[];
   };
 
   export type BatchStructOutput = [
     payment: DeltaTransformer.PaymentStructOutput[],
-    swap: DeltaTransformer.SwapStructOutput[]
+    swap: DeltaTransformer.SwapStructOutput[],
+    pull: DeltaTransformer.PullStructOutput[]
   ] & {
     payment: DeltaTransformer.PaymentStructOutput[];
     swap: DeltaTransformer.SwapStructOutput[];
+    pull: DeltaTransformer.PullStructOutput[];
   };
 }
 
@@ -80,16 +105,29 @@ export interface DeltaTransformerInterface extends Interface {
   getFunction(
     nameOrSignature:
       | "applyBatch"
+      | "applyBatchWithArgumentBlocks"
       | "cleanSecret"
       | "encodeBatch"
       | "hashRevealed"
       | "hashToBlock"
       | "revealSecret"
+      | "supportsArgumentBlocks"
   ): FunctionFragment;
 
   encodeFunctionData(
     functionFragment: "applyBatch",
     values: [BigNumberish[], BytesLike, BytesLike, BytesLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "applyBatchWithArgumentBlocks",
+    values: [
+      BigNumberish[],
+      BytesLike,
+      BytesLike,
+      BytesLike,
+      BigNumberish,
+      BigNumberish
+    ]
   ): string;
   encodeFunctionData(
     functionFragment: "cleanSecret",
@@ -111,8 +149,16 @@ export interface DeltaTransformerInterface extends Interface {
     functionFragment: "revealSecret",
     values: [BytesLike]
   ): string;
+  encodeFunctionData(
+    functionFragment: "supportsArgumentBlocks",
+    values?: undefined
+  ): string;
 
   decodeFunctionResult(functionFragment: "applyBatch", data: BytesLike): Result;
+  decodeFunctionResult(
+    functionFragment: "applyBatchWithArgumentBlocks",
+    data: BytesLike
+  ): Result;
   decodeFunctionResult(
     functionFragment: "cleanSecret",
     data: BytesLike
@@ -131,6 +177,10 @@ export interface DeltaTransformerInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "revealSecret",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "supportsArgumentBlocks",
     data: BytesLike
   ): Result;
 }
@@ -189,6 +239,19 @@ export interface DeltaTransformer extends BaseContract {
     "view"
   >;
 
+  applyBatchWithArgumentBlocks: TypedContractMethod<
+    [
+      deltas: BigNumberish[],
+      encodedBatch: BytesLike,
+      leftArguments: BytesLike,
+      rightArguments: BytesLike,
+      leftArgumentsBlock: BigNumberish,
+      rightArgumentsBlock: BigNumberish
+    ],
+    [bigint[]],
+    "view"
+  >;
+
   cleanSecret: TypedContractMethod<[hash: BytesLike], [void], "nonpayable">;
 
   encodeBatch: TypedContractMethod<
@@ -203,6 +266,8 @@ export interface DeltaTransformer extends BaseContract {
 
   revealSecret: TypedContractMethod<[secret: BytesLike], [void], "nonpayable">;
 
+  supportsArgumentBlocks: TypedContractMethod<[], [boolean], "view">;
+
   getFunction<T extends ContractMethod = ContractMethod>(
     key: string | FunctionFragment
   ): T;
@@ -215,6 +280,20 @@ export interface DeltaTransformer extends BaseContract {
       encodedBatch: BytesLike,
       leftArguments: BytesLike,
       rightArguments: BytesLike
+    ],
+    [bigint[]],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "applyBatchWithArgumentBlocks"
+  ): TypedContractMethod<
+    [
+      deltas: BigNumberish[],
+      encodedBatch: BytesLike,
+      leftArguments: BytesLike,
+      rightArguments: BytesLike,
+      leftArgumentsBlock: BigNumberish,
+      rightArgumentsBlock: BigNumberish
     ],
     [bigint[]],
     "view"
@@ -234,6 +313,9 @@ export interface DeltaTransformer extends BaseContract {
   getFunction(
     nameOrSignature: "revealSecret"
   ): TypedContractMethod<[secret: BytesLike], [void], "nonpayable">;
+  getFunction(
+    nameOrSignature: "supportsArgumentBlocks"
+  ): TypedContractMethod<[], [boolean], "view">;
 
   filters: {};
 }

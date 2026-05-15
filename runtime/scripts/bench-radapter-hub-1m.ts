@@ -1108,8 +1108,8 @@ async function main() {
     if (cli.rssCapBytes > 0 && peakRss > cli.rssCapBytes) {
       throw new Error(`RSS_CAP_EXCEEDED: peak=${peakRss} cap=${cli.rssCapBytes}`);
     }
-    assertMetricCap('READ_P99_MS', readLatencySummary.p99 ?? 0, cli.maxReadP99Ms);
-    assertMetricCap('DURABLE_P99_MS', touchDurableSummary.p99 ?? 0, cli.maxDurableP99Ms);
+    assertMetricCap('READ_P99_MS', readLatencySummary['p99'] ?? 0, cli.maxReadP99Ms);
+    assertMetricCap('DURABLE_P99_MS', touchDurableSummary['p99'] ?? 0, cli.maxDurableP99Ms);
     assertMetricCap('COLD_OPEN_MS', coldRestartOpenMs, cli.maxColdOpenMs);
     assertMetricCap('COLD_READ_MS', coldRestartReadMs, cli.maxColdReadMs);
     console.log('');
