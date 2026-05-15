@@ -161,6 +161,79 @@ export interface BatchOpBreakdown {
   revealSecrets: number;
 }
 
+export const J_BATCH_CONTRACT_LIMITS = {
+  maxTotalOps: 50,
+  maxFlashloans: 8,
+  maxSettlements: 32,
+  maxSettlementDiffs: 32,
+  maxDisputeStarts: 8,
+  maxDisputeFinalizations: 8,
+  maxReserveToCollateralPairs: 64,
+} as const;
+
+const requireBatchRoom = (
+  batch: JBatch,
+  operation: string,
+  addedOps = 1,
+): void => {
+  const nextSize = getBatchSize(batch) + Math.max(0, addedOps);
+  if (nextSize > J_BATCH_CONTRACT_LIMITS.maxTotalOps) {
+    throw new Error(
+      `J_BATCH_LIMIT_EXCEEDED: ${operation} would exceed total ops ` +
+      `${nextSize}/${J_BATCH_CONTRACT_LIMITS.maxTotalOps}`,
+    );
+  }
+};
+
+const requireArrayRoom = (
+  name: string,
+  currentLength: number,
+  added: number,
+  max: number,
+): void => {
+  const nextLength = currentLength + Math.max(0, added);
+  if (nextLength > max) {
+    throw new Error(`J_BATCH_LIMIT_EXCEEDED: ${name} ${nextLength}/${max}`);
+  }
+};
+
+export function getJBatchContractLimitIssue(batch: JBatch): string | null {
+  const totalOps = getBatchSize(batch);
+  if (totalOps > J_BATCH_CONTRACT_LIMITS.maxTotalOps) {
+    return `total ops ${totalOps}/${J_BATCH_CONTRACT_LIMITS.maxTotalOps}`;
+  }
+  if (batch.flashloans.length > J_BATCH_CONTRACT_LIMITS.maxFlashloans) {
+    return `flashloans ${batch.flashloans.length}/${J_BATCH_CONTRACT_LIMITS.maxFlashloans}`;
+  }
+  if (batch.settlements.length > J_BATCH_CONTRACT_LIMITS.maxSettlements) {
+    return `settlements ${batch.settlements.length}/${J_BATCH_CONTRACT_LIMITS.maxSettlements}`;
+  }
+  if (batch.disputeStarts.length > J_BATCH_CONTRACT_LIMITS.maxDisputeStarts) {
+    return `disputeStarts ${batch.disputeStarts.length}/${J_BATCH_CONTRACT_LIMITS.maxDisputeStarts}`;
+  }
+  if (batch.disputeFinalizations.length > J_BATCH_CONTRACT_LIMITS.maxDisputeFinalizations) {
+    return `disputeFinalizations ${batch.disputeFinalizations.length}/${J_BATCH_CONTRACT_LIMITS.maxDisputeFinalizations}`;
+  }
+  for (const [index, op] of batch.reserveToCollateral.entries()) {
+    if (op.pairs.length > J_BATCH_CONTRACT_LIMITS.maxReserveToCollateralPairs) {
+      return `reserveToCollateral[${index}].pairs ${op.pairs.length}/${J_BATCH_CONTRACT_LIMITS.maxReserveToCollateralPairs}`;
+    }
+  }
+  for (const [index, settlement] of batch.settlements.entries()) {
+    if (settlement.diffs.length > J_BATCH_CONTRACT_LIMITS.maxSettlementDiffs) {
+      return `settlements[${index}].diffs ${settlement.diffs.length}/${J_BATCH_CONTRACT_LIMITS.maxSettlementDiffs}`;
+    }
+  }
+  return null;
+}
+
+export function assertJBatchWithinContractLimits(batch: JBatch, context = 'jBatch'): void {
+  const issue = getJBatchContractLimitIssue(batch);
+  if (issue) {
+    throw new Error(`J_BATCH_LIMIT_EXCEEDED: ${context}: ${issue}`);
+  }
+}
+
 /** Completed batch record (stored in entity state history) */
 export interface CompletedBatch {
   batchHash: string;
@@ -668,16 +741,28 @@ export function batchOpBreakdown(batch: JBatch): BatchOpBreakdown {
  * Used by failure/abort recovery flows when moving sentBatch ops back to current.
  */
 export function mergeBatchOps(target: JBatch, source: JBatch): void {
-  target.flashloans.push(...source.flashloans);
-  target.reserveToReserve.push(...source.reserveToReserve);
-  target.reserveToCollateral.push(...source.reserveToCollateral);
-  target.collateralToReserve.push(...source.collateralToReserve);
-  target.settlements.push(...source.settlements);
-  target.disputeStarts.push(...source.disputeStarts);
-  target.disputeFinalizations.push(...source.disputeFinalizations);
-  target.externalTokenToReserve.push(...source.externalTokenToReserve);
-  target.reserveToExternalToken.push(...source.reserveToExternalToken);
-  target.revealSecrets.push(...source.revealSecrets);
+  const merged = cloneJBatch(target);
+  merged.flashloans.push(...source.flashloans);
+  merged.reserveToReserve.push(...source.reserveToReserve);
+  merged.reserveToCollateral.push(...source.reserveToCollateral);
+  merged.collateralToReserve.push(...source.collateralToReserve);
+  merged.settlements.push(...source.settlements);
+  merged.disputeStarts.push(...source.disputeStarts);
+  merged.disputeFinalizations.push(...source.disputeFinalizations);
+  merged.externalTokenToReserve.push(...source.externalTokenToReserve);
+  merged.reserveToExternalToken.push(...source.reserveToExternalToken);
+  merged.revealSecrets.push(...source.revealSecrets);
+  assertJBatchWithinContractLimits(merged, 'mergeBatchOps');
+  target.flashloans = merged.flashloans;
+  target.reserveToReserve = merged.reserveToReserve;
+  target.reserveToCollateral = merged.reserveToCollateral;
+  target.collateralToReserve = merged.collateralToReserve;
+  target.settlements = merged.settlements;
+  target.disputeStarts = merged.disputeStarts;
+  target.disputeFinalizations = merged.disputeFinalizations;
+  target.externalTokenToReserve = merged.externalTokenToReserve;
+  target.reserveToExternalToken = merged.reserveToExternalToken;
+  target.revealSecrets = merged.revealSecrets;
 }
 
 /**
@@ -705,9 +790,16 @@ export function batchAddReserveToCollateral(
     if (pair) {
       pair.amount += amount; // Aggregate
     } else {
+      requireArrayRoom(
+        'reserveToCollateral.pairs',
+        existing.pairs.length,
+        1,
+        J_BATCH_CONTRACT_LIMITS.maxReserveToCollateralPairs,
+      );
       existing.pairs.push({ entity: counterpartyId, amount });
     }
   } else {
+    requireBatchRoom(jBatchState.batch, 'reserveToCollateral');
     // Create new entry
     jBatchState.batch.reserveToCollateral.push({
       tokenId,
@@ -796,6 +888,7 @@ export function batchAddSettlement(
 ): void {
   // Block if batch has pending broadcast
   assertBatchNotPending(jBatchState, 'settlement');
+  requireArrayRoom('settlement.diffs', 0, diffs.length, J_BATCH_CONTRACT_LIMITS.maxSettlementDiffs);
 
   // Validate entities are in canonical order
   if (leftEntity >= rightEntity) {
@@ -817,6 +910,7 @@ export function batchAddSettlement(
     if (initiatorEntity && normalizeEntityId(initiatorEntity) !== normalizeEntityId(withdrawerEntity)) {
       // Initiator isn't the withdrawer; keep full settlement to avoid C2R signature mismatch.
     } else {
+      requireBatchRoom(jBatchState.batch, 'collateralToReserve');
       jBatchState.batch.collateralToReserve.push({
         counterparty,
         tokenId: c2rResult.tokenId,
@@ -840,6 +934,9 @@ export function batchAddSettlement(
     if (existing.diffs.length > 0 && hasChanges) {
       throw new Error(`Settlement ${leftEntity.slice(-4)}↔${rightEntity.slice(-4)} already queued - refuse to merge diffs without a fresh signature`);
     }
+    const newTokenIds = new Set(existing.diffs.map(diff => diff.tokenId));
+    for (const diff of diffs) newTokenIds.add(diff.tokenId);
+    requireArrayRoom('settlement.diffs', 0, newTokenIds.size, J_BATCH_CONTRACT_LIMITS.maxSettlementDiffs);
     // Aggregate diffs by token
     for (const newDiff of diffs) {
       const existingDiff = existing.diffs.find(d => d.tokenId === newDiff.tokenId);
@@ -865,6 +962,13 @@ export function batchAddSettlement(
       existing.nonce = nonce;
     }
   } else {
+    requireArrayRoom(
+      'settlements',
+      jBatchState.batch.settlements.length,
+      1,
+      J_BATCH_CONTRACT_LIMITS.maxSettlements,
+    );
+    requireBatchRoom(jBatchState.batch, 'settlement');
     jBatchState.batch.settlements.push({
       leftEntity,
       rightEntity,
@@ -892,6 +996,7 @@ export function batchAddReserveToReserve(
 ): void {
   // Block if batch has pending broadcast
   assertBatchNotPending(jBatchState, 'R2R');
+  requireBatchRoom(jBatchState.batch, 'reserveToReserve');
 
   jBatchState.batch.reserveToReserve.push({
     receivingEntity,
@@ -917,6 +1022,7 @@ export function batchAddExternalTokenToReserve(
   internalTokenId: number = 0,
 ): void {
   assertBatchNotPending(jBatchState, 'E2R');
+  requireBatchRoom(jBatchState.batch, 'externalTokenToReserve');
 
   jBatchState.batch.externalTokenToReserve.push({
     entity: entityId,
@@ -942,6 +1048,7 @@ export function batchAddReserveToExternal(
   amount: bigint
 ): void {
   assertBatchNotPending(jBatchState, 'R2E');
+  requireBatchRoom(jBatchState.batch, 'reserveToExternalToken');
 
   jBatchState.batch.reserveToExternalToken.push({
     receivingEntity,
@@ -970,6 +1077,7 @@ export function batchAddRevealSecret(
   if (exists) {
     return;
   }
+  requireBatchRoom(jBatchState.batch, 'revealSecret');
   jBatchState.batch.revealSecrets.push({ transformer, secret });
   if (jBatchState.status === 'empty') jBatchState.status = 'accumulating';
   console.log(`📦 jBatch: Added secret reveal ${secret.slice(0, 10)}... via ${transformer.slice(0, 10)}...`);
@@ -1010,8 +1118,13 @@ export function shouldBroadcastBatch(
   }
 
   const batchSize = getBatchSize(jBatchState.batch);
-  const MAX_BATCH_SIZE = 50; // Max operations per batch
+  const MAX_BATCH_SIZE = J_BATCH_CONTRACT_LIMITS.maxTotalOps; // Max operations per batch
   const BATCH_TIMEOUT_MS = 5000; // Broadcast every 5s even if not full
+  const limitIssue = getJBatchContractLimitIssue(jBatchState.batch);
+  if (limitIssue) {
+    console.warn(`📦 jBatch: contract limit exceeded (${limitIssue}) - refusing auto-broadcast until split`);
+    return false;
+  }
 
   // Trigger 1: Batch is full
   if (batchSize >= MAX_BATCH_SIZE) {

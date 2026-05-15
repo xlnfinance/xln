@@ -18,7 +18,7 @@ import type { EntityState, EntityTx, EntityInput, Env, AccountMachine } from '..
 import type { ProofBodyStruct } from '../../typechain/Depository';
 import { isUsableContractAddress } from '../../contract-address';
 import { cloneEntityState, addMessage } from '../../state-helpers';
-import { initJBatch, batchAddRevealSecret } from '../../j-batch';
+import { initJBatch, batchAddRevealSecret, J_BATCH_CONTRACT_LIMITS, getBatchSize } from '../../j-batch';
 import { getDeltaTransformerAddress } from '../../proof-builder';
 import { getRuntimeJurisdictionDefaultDisputeDelayBlocks, getRuntimeJurisdictionHeight } from '../../j-height';
 import {
@@ -34,6 +34,7 @@ const MAX_FILL_RATIO = 0xffff;
 
 type BuildArgsOptions = {
   fillRatiosByOfferId: ReadonlyMap<OfferId, number>;
+  overrideArguments?: string;
   leftSecrets?: string[];
   rightSecrets?: string[];
 };
@@ -141,6 +142,13 @@ function buildDeltaTransformerArguments(
   accountMachine: AccountMachine,
   options: BuildArgsOptions,
 ): { leftArguments: string; rightArguments: string } {
+  if (options.overrideArguments && options.overrideArguments !== '0x') {
+    const counterpartyIsLeft = accountMachine.leftEntity !== accountMachine.proofHeader.fromEntity;
+    return counterpartyIsLeft
+      ? { leftArguments: options.overrideArguments, rightArguments: '0x' }
+      : { leftArguments: '0x', rightArguments: options.overrideArguments };
+  }
+
   const hasLocks = accountMachine.locks?.size ? accountMachine.locks.size > 0 : false;
   const hasSwaps = accountMachine.swapOffers?.size ? accountMachine.swapOffers.size > 0 : false;
   if (!hasLocks && !hasSwaps) {
@@ -235,7 +243,7 @@ export async function handleDisputeStart(
   entityTx: Extract<EntityTx, { type: 'disputeStart' }>,
   env: Env
 ): Promise<{ newState: EntityState; outputs: EntityInput[] }> {
-  const { counterpartyEntityId, description } = entityTx.data;
+  const { counterpartyEntityId, description, initialArguments: overrideInitialArguments } = entityTx.data;
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
 
@@ -280,6 +288,9 @@ export async function handleDisputeStart(
   const htlcSecrets = collectHtlcSecrets(newState, counterpartyEntityId);
   const { leftArguments, rightArguments } = buildDeltaTransformerArguments(account, {
     fillRatiosByOfferId,
+    ...(overrideInitialArguments && overrideInitialArguments !== '0x'
+      ? { overrideArguments: overrideInitialArguments }
+      : {}),
     // disputeStart commits the argument blob later replayed as activeDispute.initialArguments
     // Keep secrets on the same side that we commit as initialArguments.
     leftSecrets: counterpartyIsLeft ? htlcSecrets : [],
@@ -455,6 +466,12 @@ export async function handleDisputeStart(
   // On-chain nonce starts at 0 and increments via settlements/disputes.
   // signedNonce must be strictly greater than latest on-chain nonce.
   // CRITICAL: Do NOT add +1 — the hanko was signed over this exact nonce.
+  if (newState.jBatchState.batch.disputeStarts.length >= J_BATCH_CONTRACT_LIMITS.maxDisputeStarts) {
+    throw new Error(`J_BATCH_LIMIT_EXCEEDED: disputeStarts ${newState.jBatchState.batch.disputeStarts.length + 1}/${J_BATCH_CONTRACT_LIMITS.maxDisputeStarts}`);
+  }
+  if (getBatchSize(newState.jBatchState.batch) + 1 > J_BATCH_CONTRACT_LIMITS.maxTotalOps) {
+    throw new Error(`J_BATCH_LIMIT_EXCEEDED: disputeStart would exceed total ops ${getBatchSize(newState.jBatchState.batch) + 1}/${J_BATCH_CONTRACT_LIMITS.maxTotalOps}`);
+  }
   newState.jBatchState.batch.disputeStarts.push({
     counterentity: counterpartyEntityId,
     nonce: signedNonce,
@@ -691,6 +708,12 @@ export async function handleDisputeFinalize(
   }
 
   // Add to jBatch
+  if (newState.jBatchState.batch.disputeFinalizations.length >= J_BATCH_CONTRACT_LIMITS.maxDisputeFinalizations) {
+    throw new Error(`J_BATCH_LIMIT_EXCEEDED: disputeFinalizations ${newState.jBatchState.batch.disputeFinalizations.length + 1}/${J_BATCH_CONTRACT_LIMITS.maxDisputeFinalizations}`);
+  }
+  if (getBatchSize(newState.jBatchState.batch) + 1 > J_BATCH_CONTRACT_LIMITS.maxTotalOps) {
+    throw new Error(`J_BATCH_LIMIT_EXCEEDED: disputeFinalize would exceed total ops ${getBatchSize(newState.jBatchState.batch) + 1}/${J_BATCH_CONTRACT_LIMITS.maxTotalOps}`);
+  }
   newState.jBatchState.batch.disputeFinalizations.push(finalProof);
   account.activeDispute.finalizeQueued = true;
 

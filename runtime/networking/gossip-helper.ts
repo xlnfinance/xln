@@ -247,7 +247,9 @@ export const buildLocalEntityProfile = (
   const profileTimestamp = Math.max(1, timestamp);
   const profile = buildEntityProfile(entityState, profileTimestamp, createProfileSignerResolver(env));
   const jurisdiction = buildProfileJurisdiction(entityState);
-  const mirrors = buildProfileMirrors(env, entityState);
+  const mirrors = env.runtimeConfig?.advertiseProfileMirrors === true
+    ? buildProfileMirrors(env, entityState)
+    : [];
   return {
     ...profile,
     metadata: {

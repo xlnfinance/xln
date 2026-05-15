@@ -1,4 +1,4 @@
-import type { EntityState, JBlockObservation, JBlockFinalized, JurisdictionEvent, Env, DebtEntry, DebtEventType } from '../types';
+import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, JBlockObservation, JBlockFinalized, JurisdictionEvent, Env, DebtEntry, DebtEventType } from '../types';
 import type { CompletedBatch } from '../j-batch';
 import { ethers } from 'ethers';
 import { cloneEntityState, addMessage } from '../state-helpers';
@@ -337,6 +337,97 @@ function decodeDisputeInitialSecrets(initialArgumentsRaw: unknown): string[] {
   return Array.from(secrets);
 }
 
+function decodeDisputeCrossPullFillRatios(initialArgumentsRaw: unknown): number[] {
+  const initialArguments = String(initialArgumentsRaw || '0x');
+  if (initialArguments === '0x') return [];
+
+  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
+  let argArray: string[];
+  try {
+    [argArray] = abiCoder.decode(['bytes[]'], initialArguments) as unknown as [string[]];
+  } catch {
+    return [];
+  }
+
+  const ratios: number[] = [];
+  for (const arg of argArray) {
+    if (!arg || arg === '0x') continue;
+    try {
+      const [decoded] = abiCoder.decode(
+        ['tuple(uint16[] fillRatios, bytes32[] fullSecrets, bytes32[4][] reveals)'],
+        arg,
+      ) as unknown as [{ fillRatios: Array<bigint | number> }];
+      for (const raw of decoded.fillRatios || []) {
+        const ratio = Number(raw);
+        if (Number.isInteger(ratio) && ratio > 0 && ratio <= 0xffff) ratios.push(ratio);
+      }
+    } catch {
+      // Ignore non-CrossSwapPull transformer argument formats.
+    }
+  }
+  return ratios;
+}
+
+function findCrossJurisdictionRouteForSourceDispute(
+  state: EntityState,
+  counterpartyId: string,
+): CrossJurisdictionSwapRoute | null {
+  const self = String(state.entityId || '').toLowerCase();
+  const counterparty = String(counterpartyId || '').toLowerCase();
+  for (const route of state.crossJurisdictionSwaps?.values() ?? []) {
+    if (
+      String(route.source.entityId || '').toLowerCase() === self &&
+      String(route.source.counterpartyEntityId || '').toLowerCase() === counterparty
+    ) {
+      return route;
+    }
+  }
+  return null;
+}
+
+function queueCrossJurisdictionSalvageFromDispute(
+  state: EntityState,
+  outputs: EntityInput[],
+  counterpartyId: string,
+  initialArgumentsRaw: unknown,
+  blockNumber: number,
+): boolean {
+  const initialArguments = String(initialArgumentsRaw || '0x');
+  if (!initialArguments || initialArguments === '0x') return false;
+  const fillRatios = decodeDisputeCrossPullFillRatios(initialArguments);
+  if (fillRatios.length === 0) return false;
+
+  const route = findCrossJurisdictionRouteForSourceDispute(state, counterpartyId);
+  if (!route) {
+    console.warn(
+      `🌉 CROSS-J: non-zero pull args observed but no local route for source=${state.entityId.slice(-4)} counterparty=${counterpartyId.slice(-4)}`,
+    );
+    return false;
+  }
+
+  const fillRatio = Math.max(...fillRatios);
+  outputs.push({
+    entityId: route.target.counterpartyEntityId,
+    entityTxs: [{
+      type: 'crossJurisdictionSalvage',
+      data: {
+        routeId: route.orderId,
+        initialArguments,
+        fillRatio,
+        sourceEntityId: route.source.entityId,
+        sourceCounterpartyEntityId: route.source.counterpartyEntityId,
+        observedAt: blockNumber,
+      },
+    }],
+  });
+  addMessage(state, `🌉 Cross-j pull args observed for ${route.orderId}; target salvage queued`);
+  console.log(
+    `🌉 CROSS-J: queued salvage route=${route.orderId} fill=${fillRatio}/65535 ` +
+    `target=${route.target.counterpartyEntityId.slice(-4)}`,
+  );
+  return true;
+}
+
 function queueInboundResolvesByHashlock(
   newState: EntityState,
   mempoolOps: Array<{ accountId: string; tx: any }>,
@@ -370,6 +461,7 @@ function queueInboundResolvesByHashlock(
 function applyKnownHtlcSecret(
   newState: EntityState,
   mempoolOps: Array<{ accountId: string; tx: any }>,
+  outputs: EntityInput[],
   hashlockRaw: string,
   secretRaw: string,
   blockNumber: number,
@@ -435,6 +527,24 @@ function applyKnownHtlcSecret(
       },
     });
     console.log(`⬅️ HTLC: ${source} secret propagated to ${route.inboundEntity.slice(-4)}`);
+  } else if (route.crossJurisdictionRelay) {
+    const relay = route.crossJurisdictionRelay;
+    outputs.push({
+      entityId: relay.targetEntityId,
+      entityTxs: [{
+        type: 'resolveHtlcLock',
+        data: {
+          counterpartyEntityId: relay.targetCounterpartyEntityId,
+          lockId: relay.targetLockId,
+          secret,
+          description: `Cross-j ${relay.routeId} target claim ${relay.fillRatio}/65535`,
+        },
+      }],
+    });
+    console.log(
+      `🌉 HTLC: ${source} relayed cross-j secret route=${relay.routeId} ` +
+      `target=${relay.targetEntityId.slice(-4)} ratio=${relay.fillRatio}/65535`,
+    );
   } else {
     console.log(`✅ HTLC: ${source} reveal complete (no inbound hop)`);
   }
@@ -470,7 +580,7 @@ function applyKnownHtlcSecret(
  * @param env - Runtime environment
  * @returns Updated state (may include finalized events if threshold met)
  */
-export const handleJEvent = async (entityState: EntityState, entityTxData: JEventEntityTxData, env: Env): Promise<{ newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }> }> => {
+export const handleJEvent = async (entityState: EntityState, entityTxData: JEventEntityTxData, env: Env): Promise<{ newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }>; outputs: EntityInput[] }> => {
   const { from: signerId, observedAt, blockNumber, blockHash } = entityTxData;
   type RawJEventBatchData = JEventEntityTxData & {
     events?: unknown[];
@@ -498,14 +608,14 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
       );
     }
     console.log(`   ⏭️ SKIP: block ${blockNumber} already finalized`);
-    return { newState: entityState, mempoolOps: [] };
+    return { newState: entityState, mempoolOps: [], outputs: [] };
   }
 
   // Skip blocks at or below lastFinalizedJHeight (monotonic progress only)
   // Note: The == case is already handled above with hash conflict detection.
   if (blockNumber <= entityState.lastFinalizedJHeight) {
     console.log(`   ⏭️ SKIP: stale block (${blockNumber} <= finalized ${entityState.lastFinalizedJHeight})`);
-    return { newState: entityState, mempoolOps: [] };
+    return { newState: entityState, mempoolOps: [], outputs: [] };
   }
 
   // Convert raw events to canonical JurisdictionEvent format
@@ -528,7 +638,7 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
   }
   if (jEvents.length === 0) {
     console.warn(`⚠️ No valid j-events after normalization for block ${blockNumber}; skipping observation`);
-    return { newState: entityState, mempoolOps: [] };
+    return { newState: entityState, mempoolOps: [], outputs: [] };
   }
 
   // Clone state and create observation with ALL events from this batch
@@ -547,7 +657,7 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
 
   // Try to finalize - with batching, single-signer entities finalize immediately
   // with ALL events from the block (no more race condition)
-  const { newState, mempoolOps } = await tryFinalizeJBlocks(newEntityState, entityState.config.threshold, env);
+  const { newState, mempoolOps, outputs } = await tryFinalizeJBlocks(newEntityState, entityState.config.threshold, env);
   newEntityState = newState;
 
   // DEBUG: Dump account mempools after j-event processing
@@ -563,7 +673,7 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
   }
 
   // Return both newState and mempoolOps
-  return { newState: newEntityState, mempoolOps };
+  return { newState: newEntityState, mempoolOps, outputs };
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -902,8 +1012,9 @@ async function tryFinalizeJBlocks(
   state: EntityState,
   threshold: bigint,
   env: Env
-): Promise<{ newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }> }> {
+): Promise<{ newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }>; outputs: EntityInput[] }> {
   const allMempoolOps: Array<{ accountId: string; tx: any }> = [];
+  const allOutputs: EntityInput[] = [];
 
   // ─────────────────────────────────────────────────────────────────────────────
   // Step 1: Group observations by (height, hash)
@@ -999,9 +1110,10 @@ async function tryFinalizeJBlocks(
       console.log(`      Event types:`, events.map(e => e.type));
       for (const event of events) {
         console.log(`      🔧 Applying event: ${event.type}`);
-        const { newState, mempoolOps } = await applyFinalizedJEvent(state, event, env);
+        const { newState, mempoolOps, outputs } = await applyFinalizedJEvent(state, event, env);
         state = newState;
         allMempoolOps.push(...mempoolOps);
+        allOutputs.push(...outputs);
         // applyFinalizedJEvent clones state - ensure jBlockChain preserved
         if (!state.jBlockChain.some(b => b.jHeight === jHeight)) {
           console.log(`   ⚠️  CLONE LOST jBlockChain - restoring block ${jHeight}`);
@@ -1040,7 +1152,7 @@ async function tryFinalizeJBlocks(
     console.log(`   🧹 Pruned finalized heights [${finalizedHeights.join(',')}] (${state.jBlockObservations.length} pending)`);
   }
 
-  return { newState: state, mempoolOps: allMempoolOps };
+  return { newState: state, mempoolOps: allMempoolOps, outputs: allOutputs };
 }
 
 /**
@@ -1099,7 +1211,7 @@ async function applyFinalizedJEvent(
   entityState: EntityState,
   event: JurisdictionEvent,
   env: Env
-): Promise<{ newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }> }> {
+): Promise<{ newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }>; outputs: EntityInput[] }> {
   console.log(`🔧🔧 applyFinalizedJEvent: entityId=${entityState.entityId.slice(-4)}, event.type=${event.type}`);
 
   const entityShort = entityState.entityId.slice(-4);
@@ -1110,6 +1222,7 @@ async function applyFinalizedJEvent(
   // Clone state for mutation
   const newState = cloneEntityState(entityState);
   const mempoolOps: Array<{ accountId: string; tx: any }> = [];
+  const outputs: EntityInput[] = [];
 
   // ═══════════════════════════════════════════════════════════════════════════
   // CANONICAL J-EVENTS
@@ -1134,7 +1247,7 @@ async function applyFinalizedJEvent(
 
   } else if (event.type === 'SecretRevealed') {
     const { hashlock, secret } = event.data;
-    applyKnownHtlcSecret(newState, mempoolOps, String(hashlock), String(secret), blockNumber, 'SecretRevealed');
+    applyKnownHtlcSecret(newState, mempoolOps, outputs, String(hashlock), String(secret), blockNumber, 'SecretRevealed');
 
   } else if (event.type === 'AccountSettled') {
     // Universal settlement event (covers R2C, C2R, settle, rebalance)
@@ -1147,7 +1260,7 @@ async function applyFinalizedJEvent(
     const myIsRight = myEntityId === rightId;
     if (!myIsLeft && !myIsRight) {
       console.warn(`   ⚠️ AccountSettled not for this entity: me=${entityState.entityId.slice(-4)} left=${leftId.slice(-4)} right=${rightId.slice(-4)}`);
-      return { newState, mempoolOps };
+      return { newState, mempoolOps, outputs };
     }
     const counterpartyEntityId = myIsLeft ? rightEntity : leftEntity;
     const cpShort = String(counterpartyEntityId).slice(-4);
@@ -1172,7 +1285,7 @@ async function applyFinalizedJEvent(
     const account = newState.accounts.get(counterpartyEntityId as string);
     if (!account) {
       console.warn(`   ⚠️ No account for ${cpShort}`);
-      return { newState, mempoolOps };
+      return { newState, mempoolOps, outputs };
     }
 
     // Initialize consensus fields (claims are stored ONLY via bilateral account frames).
@@ -1195,7 +1308,7 @@ async function applyFinalizedJEvent(
       console.warn(
         `⚠️ AccountSettled normalization failed for claim enqueue: token=${tokenIdNum} cp=${cpShort} block=${blockNumber}`,
       );
-      return { newState, mempoolOps };
+      return { newState, mempoolOps, outputs };
     }
     const eventCopy = structuredClone(normalizedClaimEvents[0]);
     const observedAt = entityState.timestamp || 0;
@@ -1327,9 +1440,16 @@ async function applyFinalizedJEvent(
         console.log(`🔓 DISPUTE-ARGS: ${disputeSecrets.length} secret(s) decoded from initialArguments`);
         for (const disputeSecret of disputeSecrets) {
           const hashlock = hashHtlcSecret(disputeSecret);
-          applyKnownHtlcSecret(newState, mempoolOps, hashlock, disputeSecret, blockNumber, 'DisputeStarted');
+          applyKnownHtlcSecret(newState, mempoolOps, outputs, hashlock, disputeSecret, blockNumber, 'DisputeStarted');
         }
       }
+      queueCrossJurisdictionSalvageFromDispute(
+        newState,
+        outputs,
+        counterpartyId,
+        event.data.initialArguments || '0x',
+        blockNumber,
+      );
 
       addMessage(newState, `⚔️ DISPUTE ${weAreStarter ? 'STARTED' : 'vs us'} with ${counterpartyId.slice(-4)}, timeout: block ${account.activeDispute.disputeTimeout}`);
       console.log(`⚔️ activeDispute stored: hash=${account.activeDispute.initialProofbodyHash.slice(0,10)}..., timeout=${account.activeDispute.disputeTimeout}`);
@@ -1574,7 +1694,7 @@ async function applyFinalizedJEvent(
     // Only process if this is our batch (case-insensitive: adapters may normalize differently).
     if (String(batchEntityId || '').toLowerCase() !== String(newState.entityId || '').toLowerCase()) {
       console.log(`   ⏭️ HankoBatchProcessed: Not our batch (${String(batchEntityId).slice(-4)} != ${entityShort})`);
-      return { newState, mempoolOps };
+      return { newState, mempoolOps, outputs };
     }
 
     console.log(`📦 HankoBatchProcessed: nonce=${nonce}, success=${success}, hanko=${String(hankoHash).slice(0, 10)}...`);
@@ -1596,7 +1716,7 @@ async function applyFinalizedJEvent(
           console.warn(
             `⚠️ HankoBatchProcessed duplicate ignored (nonce ${nonce}, opCount=0, pending=false)`,
           );
-          return { newState, mempoolOps };
+          return { newState, mempoolOps, outputs };
         }
 
         // Record completed batch in history (keep last 20)
@@ -1698,5 +1818,5 @@ async function applyFinalizedJEvent(
     console.warn(`⚠️ Unknown j-event type: ${event.type}. Canonical events: ${CANONICAL_J_EVENTS.join(', ')}`);
   }
 
-  return { newState, mempoolOps };
+  return { newState, mempoolOps, outputs };
 }

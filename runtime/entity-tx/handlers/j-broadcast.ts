@@ -19,6 +19,7 @@ import { cloneEntityState, addMessage } from '../../state-helpers';
 import {
   isBatchEmpty, getBatchSize, cloneJBatch, encodeJBatch,
   computeBatchHankoHash, batchOpCount, createEmptyBatch,
+  assertJBatchWithinContractLimits,
 } from '../../j-batch';
 import {
   getJurisdictionConfigName,
@@ -106,6 +107,7 @@ export async function handleJBroadcast(
       settlement.entityProvider = entityProviderAddress;
     }
   }
+  assertJBatchWithinContractLimits(newState.jBatchState.batch, 'j_broadcast');
 
   const encodedBatch = encodeJBatch(newState.jBatchState.batch);
   const batchHash = computeBatchHankoHash(chainId, depositoryAddress, encodedBatch, nextNonce);

@@ -99,6 +99,7 @@ export type StorageEntityCoreDoc = {
   lockBook: Map<string, LockBookEntry>;
   swapTradingPairs?: EntitySwapPair[];
   pendingSwapFillRatios?: Map<SwapKey, number>;
+  crossJurisdictionSwaps?: EntityState['crossJurisdictionSwaps'];
   hubRebalanceConfig?: HubRebalanceConfig;
   orderbookHubProfile?: HubProfile;
   orderbookReferrals?: Map<string, EntityReferral>;

@@ -1606,7 +1606,7 @@
 
   $: {
     if (showJurisdiction && availableJurisdictions.length > 0 && !selectedJurisdictionName) {
-      selectedJurisdictionName = getActiveJurisdictionName(activeEnv) ?? availableJurisdictions[0]?.name ?? null;
+      selectedJurisdictionName = getCurrentEntityJurisdictionName(activeEnv) ?? availableJurisdictions[0]?.name ?? null;
     }
   }
 
@@ -3998,7 +3998,7 @@
     } else {
       const signerId = String(currentSignerId || '').trim();
       const runtimeId = String(getRuntimeId(activeEnv) || '').trim();
-      const jurisdiction = String(getActiveJurisdictionName(activeEnv) || '').trim();
+      const jurisdiction = String(getCurrentEntityJurisdictionName(activeEnv) || getActiveJurisdictionName(activeEnv) || '').trim();
       const refreshMs = 1_000;
       const nextKey = `${signerId}|${runtimeId}|${jurisdiction}|${activeIsLive ? 'live' : 'history'}|${refreshMs}`;
       if (nextKey !== externalBalancePollKey) {

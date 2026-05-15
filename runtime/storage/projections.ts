@@ -42,6 +42,7 @@ export const projectEntityCoreDoc = (
   ...withProp('inDebtsByToken', state.inDebtsByToken),
   ...withProp('swapTradingPairs', state.swapTradingPairs),
   ...withProp('pendingSwapFillRatios', state.pendingSwapFillRatios),
+  ...withProp('crossJurisdictionSwaps', state.crossJurisdictionSwaps),
   ...withProp('hubRebalanceConfig', state.hubRebalanceConfig),
   ...withProp('orderbookHubProfile', state.orderbookExt?.hubProfile),
   ...withProp('orderbookReferrals', state.orderbookExt?.referrals),
@@ -261,6 +262,7 @@ export const hydrateEntityStateFromStorage = (options: {
     ...withProp('orderbookExt', orderbookExt),
     ...withProp('swapTradingPairs', core.swapTradingPairs),
     ...withProp('pendingSwapFillRatios', core.pendingSwapFillRatios),
+    ...withProp('crossJurisdictionSwaps', core.crossJurisdictionSwaps),
     ...withProp('hubRebalanceConfig', core.hubRebalanceConfig),
   };
 };

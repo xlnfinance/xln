@@ -1,5 +1,6 @@
 import { asOfferId, compareCanonicalText, swapKey, type OfferId, type SwapKey } from './swap-keys.ts';
 import { deriveSide } from './orderbook/types.ts';
+import type { CrossJurisdictionSwapRoute } from './types';
 
 export const MAX_SWAP_FILL_RATIO = 65535;
 
@@ -21,6 +22,7 @@ export interface NormalizedOrderbookOffer extends SwapOfferLike {
   timeInForce: 0 | 1 | 2;
   minFillRatio: number;
   createdHeight: number;
+  crossJurisdiction?: CrossJurisdictionSwapRoute;
 }
 
 export { asOfferId, compareCanonicalText, swapKey, type OfferId, type SwapKey };

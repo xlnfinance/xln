@@ -15,6 +15,7 @@ export interface NetworkConfig {
     entityProvider?: string;
   };
   testnet?: boolean;
+  disabledReason?: string;
 }
 
 const DEFAULT_LOCAL_RPC_URL = 'http://localhost:8545';
@@ -34,6 +35,7 @@ export const POPULAR_NETWORKS: NetworkConfig[] = [
     icon: '⟠',
     rpcs: ['https://ethereum-rpc.publicnode.com'],
     explorer: 'https://etherscan.io',
+    disabledReason: 'XLN contracts are not configured on Ethereum yet',
   },
   {
     chainId: 8453,
@@ -42,6 +44,7 @@ export const POPULAR_NETWORKS: NetworkConfig[] = [
     icon: '🔵',
     rpcs: ['https://mainnet.base.org'],
     explorer: 'https://basescan.org',
+    disabledReason: 'XLN contracts are not configured on Base yet',
   },
   {
     chainId: 11155111,
@@ -51,6 +54,7 @@ export const POPULAR_NETWORKS: NetworkConfig[] = [
     rpcs: ['https://ethereum-sepolia-rpc.publicnode.com'],
     explorer: 'https://sepolia.etherscan.io',
     testnet: true,
+    disabledReason: 'XLN contracts are not configured on Sepolia yet',
   },
   {
     chainId: 84532,
@@ -60,6 +64,7 @@ export const POPULAR_NETWORKS: NetworkConfig[] = [
     rpcs: ['https://sepolia.base.org'],
     explorer: 'https://sepolia.basescan.org',
     testnet: true,
+    disabledReason: 'XLN contracts are not configured on Base Sepolia yet',
   },
   {
     chainId: 31337,

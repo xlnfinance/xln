@@ -97,10 +97,17 @@
     selectedNetworkId = networkOrCustom;
     if (typeof networkOrCustom === 'number') {
       const net = POPULAR_NETWORKS.find(n => n.chainId === networkOrCustom);
+      if (net?.disabledReason) {
+        error = net.disabledReason;
+        return;
+      }
       if (net) {
+        error = '';
         rpcTextarea = net.rpcs.join('\n');
         name = net.name.toLowerCase().replace(/\s+/g, '-');
       }
+    } else {
+      error = '';
     }
   }
 
@@ -139,6 +146,11 @@
     }
     if (!config.name.trim()) {
       error = 'Name is required';
+      return;
+    }
+    const preset = POPULAR_NETWORKS.find(net => net.chainId === config.chainId);
+    if (config.mode === 'rpc' && preset?.disabledReason && !config.contracts?.depository) {
+      error = preset.disabledReason;
       return;
     }
 
@@ -195,11 +207,14 @@
       <label>Network</label>
       <div class="network-grid">
         {#each mainnets as net}
-          <button
-            class="network-btn"
-            class:selected={selectedNetworkId === net.chainId}
-            on:click={() => selectNetwork(net.chainId)}
-          >
+            <button
+              class="network-btn"
+              class:selected={selectedNetworkId === net.chainId}
+              class:disabled={!!net.disabledReason}
+              disabled={!!net.disabledReason}
+              title={net.disabledReason || net.name}
+              on:click={() => selectNetwork(net.chainId)}
+            >
             <span class="net-icon">{net.icon}</span>
             <span class="net-name">{net.name}</span>
           </button>
@@ -223,6 +238,9 @@
             <button
               class="network-btn testnet"
               class:selected={selectedNetworkId === net.chainId}
+              class:disabled={!!net.disabledReason}
+              disabled={!!net.disabledReason}
+              title={net.disabledReason || net.name}
               on:click={() => selectNetwork(net.chainId)}
             >
               <span class="net-icon">{net.icon}</span>
@@ -421,6 +439,17 @@
 
   .network-btn:hover {
     border-color: var(--accent-dim, #4a4a6a);
+  }
+
+  .network-btn:disabled,
+  .network-btn.disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .network-btn:disabled:hover,
+  .network-btn.disabled:hover {
+    border-color: var(--border-color, #333);
   }
 
   .network-btn.selected {
