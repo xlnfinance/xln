@@ -152,7 +152,7 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
     pulls.push({
       deltaIndex,
       amount: pull.amount,
-      revealedUntilBlock: pull.revealedUntilBlock,
+      revealedUntilTimestamp: pull.revealedUntilTimestamp,
       fullHash: pull.fullHash,
       partialRoot: pull.partialRoot,
     });
@@ -239,7 +239,7 @@ function runtimeToProofBodyStruct(runtime: RuntimeProofBody): ProofBodyStruct {
       pull: t.batch.pulls.map(p => ({
         deltaIndex: BigInt(p.deltaIndex),
         amount: p.amount,
-        revealedUntilBlock: BigInt(p.revealedUntilBlock),
+        revealedUntilTimestamp: BigInt(Math.floor(p.revealedUntilTimestamp / 1000)),
         fullHash: p.fullHash,
         partialRoot: p.partialRoot,
       })),

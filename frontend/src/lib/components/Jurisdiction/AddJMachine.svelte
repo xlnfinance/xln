@@ -23,6 +23,7 @@
       mode: 'browservm' | 'rpc';
       chainId: number;
       rpcs: string[];
+      blockTimeMs: number;
       ticker: string;
       contracts?: JMachineConfig['contracts'];
       deploy?: boolean;
@@ -62,6 +63,10 @@
     ? 'SIM'
     : (selectedNetwork?.ticker ?? 'ETH');
 
+  $: blockTimeMs = mode === 'browservm'
+    ? 1_000
+    : (selectedNetwork?.blockTimeMs ?? 1_000);
+
   $: rpcs = mode === 'browservm'
     ? []
     : (selectedNetwork?.rpcs ?? parseRpcList(rpcTextarea));
@@ -81,6 +86,7 @@
     chainId,
     ticker,
     rpcs,
+    blockTimeMs,
     ...(advancedContracts ? { contracts: advancedContracts } : {}),
     createdAt: Date.now(),
   });
@@ -140,6 +146,7 @@
       customChainId = parsed.chainId;
       rpcTextarea = parsed.rpcs.join('\n');
       name = parsed.name;
+      // Custom advanced JSON can carry a chain-specific value even when no preset exists.
       advancedContracts = parsed.contracts;
       advancedError = '';
       advancedJsonDirty = false;
@@ -188,6 +195,7 @@
         mode: config.mode,
         chainId: config.chainId,
         rpcs: config.rpcs,
+        blockTimeMs: config.blockTimeMs,
         ticker: config.ticker,
         ...(config.contracts ? { contracts: config.contracts } : {}),
         ...(deployRequested ? { deploy: true } : {}),

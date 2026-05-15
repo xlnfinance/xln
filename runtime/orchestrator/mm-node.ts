@@ -81,6 +81,7 @@ type JurisdictionConfig = {
   name: string;
   chainId: number;
   rpc: string;
+  blockTimeMs?: number;
   contracts: {
     depository: string;
     entityProvider: string;
@@ -282,6 +283,12 @@ const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig =
   };
 };
 
+const requireJurisdictionBlockTimeMs = (jurisdiction: JurisdictionConfig): number => {
+  const value = Number(jurisdiction.blockTimeMs);
+  if (Number.isFinite(value) && value > 0) return Math.floor(value);
+  throw new Error(`JURISDICTION_BLOCK_TIME_MISSING:${jurisdiction.name}`);
+};
+
 const isSecondaryJurisdictionConfig = (key: string, jurisdiction: JurisdictionConfig, primaryRpc: string): boolean => {
   const normalizedKey = String(key || '').trim().toLowerCase();
   const normalizedName = String(jurisdiction.name || '').trim().toLowerCase();
@@ -334,6 +341,7 @@ const importJurisdictionIfNeeded = async (
         chainId: jurisdiction.chainId,
         ticker: 'XLN',
         rpcs: [resolveImportedJurisdictionRpc(jurisdiction)],
+        blockTimeMs: requireJurisdictionBlockTimeMs(jurisdiction),
         contracts: jurisdiction.contracts,
       },
     }],
@@ -1349,10 +1357,11 @@ const run = async (): Promise<void> => {
       type: 'importJ',
       data: {
         name: jurisdiction.name,
-        chainId: jurisdiction.chainId,
-        ticker: 'XLN',
-        rpcs: [resolveImportedJurisdictionRpc(jurisdiction)],
-        contracts: jurisdiction.contracts,
+            chainId: jurisdiction.chainId,
+            ticker: 'XLN',
+            rpcs: [resolveImportedJurisdictionRpc(jurisdiction)],
+            blockTimeMs: requireJurisdictionBlockTimeMs(jurisdiction),
+            contracts: jurisdiction.contracts,
       },
     }],
     entityInputs: [],

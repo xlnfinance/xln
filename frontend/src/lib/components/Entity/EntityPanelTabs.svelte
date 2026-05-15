@@ -3739,9 +3739,48 @@
     );
   }
 
-  async function confirmAndQueueDisputeStart(counterpartyEntityId: string, description = 'dispute-from-configure') {
+  let unsafeCrossJTargetDisputeAccepted = false;
+  let unsafeCrossJTargetDisputeAccountId = '';
+  $: if (workspaceAccountId !== unsafeCrossJTargetDisputeAccountId) {
+    unsafeCrossJTargetDisputeAccepted = false;
+    unsafeCrossJTargetDisputeAccountId = workspaceAccountId;
+  }
+
+  function getCrossJTargetDisputeRisk(counterpartyEntityId: string): { amount: bigint; tokenId: number } | null {
+    const state = replica?.state;
+    const account = state?.accounts?.get?.(counterpartyEntityId);
+    if (!state || !account) return null;
+    const self = String(state.entityId || '').toLowerCase();
+    const counterparty = String(counterpartyEntityId || '').toLowerCase();
+    let amount = 0n;
+    let tokenId = 0;
+    for (const route of state.crossJurisdictionSwaps?.values?.() || []) {
+      if (
+        String(route?.target?.counterpartyEntityId || '').toLowerCase() === self &&
+        String(route?.target?.entityId || '').toLowerCase() === counterparty &&
+        route?.targetPull?.pullId &&
+        account.pulls?.has?.(route.targetPull.pullId)
+      ) {
+        amount += BigInt(route.target.amount || 0n);
+        tokenId = Number(route.target.tokenId || tokenId);
+      }
+    }
+    return amount > 0n ? { amount, tokenId } : null;
+  }
+
+  function formatCrossJTargetDisputeRisk(risk: { amount: bigint; tokenId: number }): string {
+    const token = resolveReserveTokenMeta(risk.tokenId);
+    const amount = formatTokenInputAmount(risk.amount, token.decimals) || '0';
+    return `${amount} ${token.symbol}`;
+  }
+
+  async function confirmAndQueueDisputeStart(
+    counterpartyEntityId: string,
+    description = 'dispute-from-configure',
+    options: { allowUnsafeCrossJTargetDispute?: boolean; acceptedCrossJTargetLossAmount?: bigint } = {},
+  ) {
     if (!confirmDisputeAction('start', counterpartyEntityId)) return;
-    await queueDisputeStart(counterpartyEntityId, description);
+    await queueDisputeStart(counterpartyEntityId, description, options);
   }
 
   async function confirmAndQueueDisputeFinalize(counterpartyEntityId: string, description = 'dispute-finalize-from-configure') {
@@ -3749,7 +3788,11 @@
     await queueDisputeFinalize(counterpartyEntityId, description);
   }
 
-  async function queueDisputeStart(counterpartyEntityId: string, description = 'dispute-from-configure') {
+  async function queueDisputeStart(
+    counterpartyEntityId: string,
+    description = 'dispute-from-configure',
+    options: { allowUnsafeCrossJTargetDispute?: boolean; acceptedCrossJTargetLossAmount?: bigint } = {},
+  ) {
     const entityId = replica?.state?.entityId || tab.entityId;
     const signerId = resolveEntitySigner(entityId, 'dispute-start');
     if (!entityId) {
@@ -3765,7 +3808,14 @@
       const env = requireRuntimeEnv(activeEnv, 'dispute-start');
       await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
         type: 'disputeStart' as const,
-        data: { counterpartyEntityId, description },
+        data: {
+          counterpartyEntityId,
+          description,
+          ...(options.allowUnsafeCrossJTargetDispute ? { allowUnsafeCrossJTargetDispute: true } : {}),
+          ...(options.acceptedCrossJTargetLossAmount !== undefined
+            ? { acceptedCrossJTargetLossAmount: options.acceptedCrossJTargetLossAmount }
+            : {}),
+        },
       }])]);
       toasts.success('Dispute queued — will be submitted on next batch broadcast');
     } catch (err) {
@@ -5889,6 +5939,7 @@
                   />
                 {:else if configureWorkspaceTab === 'dispute'}
                   {@const configureAccount = replica?.state?.accounts?.get?.(workspaceAccountId)}
+                  {@const crossJTargetRisk = getCrossJTargetDisputeRisk(workspaceAccountId)}
                   <div class="configure-token-card danger-card">
                     <h4 class="section-head">Dispute Account</h4>
                     <p class="muted">
@@ -5910,10 +5961,31 @@
                       <p class="danger-note">
                         Starting a dispute freezes normal use of this account and should only be used for recovery or adversarial settlement.
                       </p>
+                      {#if crossJTargetRisk}
+                        <label class="danger-confirm-row">
+                          <input
+                            type="checkbox"
+                            bind:checked={unsafeCrossJTargetDisputeAccepted}
+                          />
+                          <span>
+                            I accept possible cross-jurisdiction loss up to {formatCrossJTargetDisputeRisk(crossJTargetRisk)}
+                            if the hub pulls source funds before the target account has pull arguments.
+                          </span>
+                        </label>
+                      {/if}
                       <button
                         class="btn-danger-batch"
                         data-testid="configure-dispute-start"
-                        on:click={() => confirmAndQueueDisputeStart(workspaceAccountId, 'dispute-start-from-configure')}
+                        on:click={() => confirmAndQueueDisputeStart(
+                          workspaceAccountId,
+                          'dispute-start-from-configure',
+                          crossJTargetRisk
+                            ? {
+                                allowUnsafeCrossJTargetDispute: unsafeCrossJTargetDisputeAccepted,
+                                acceptedCrossJTargetLossAmount: unsafeCrossJTargetDisputeAccepted ? crossJTargetRisk.amount : 0n,
+                              }
+                            : {},
+                        )}
                         disabled={!activeIsLive}
                       >
                         Add Dispute Start To Batch
@@ -6825,6 +6897,21 @@
     font-size: 12px;
     line-height: 1.45;
     color: #fecaca;
+  }
+
+  .danger-confirm-row {
+    display: flex;
+    align-items: flex-start;
+    gap: 8px;
+    margin: 10px 0 14px;
+    font-size: 12px;
+    line-height: 1.4;
+    color: #fee2e2;
+  }
+
+  .danger-confirm-row input {
+    margin-top: 2px;
+    flex: 0 0 auto;
   }
 
   .account-appearance-panel {

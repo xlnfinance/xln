@@ -48,6 +48,7 @@
     mode: 'browservm' | 'rpc';
     chainId: number;
     rpcs: string[];
+    blockTimeMs: number;
     ticker: string;
     contracts?: {
       depository?: string;
@@ -324,6 +325,7 @@
             chainId: 31337,
             ticker: 'SIM',
             rpcs: [],
+            blockTimeMs: 1_000,
           }
         }],
         entityInputs: []
@@ -571,7 +573,7 @@
   }
 
   async function handleJMachineCreate(event: CustomEvent<JMachineCreateDetail>) {
-    const { name, mode, chainId, rpcs, ticker, contracts } = event.detail;
+    const { name, mode, chainId, rpcs, blockTimeMs, ticker, contracts } = event.detail;
     const env = get(isolatedEnv);
     if (!env) return;
 
@@ -581,7 +583,7 @@
       await enqueueAndProcess(env, {
         runtimeTxs: [{
           type: 'importJ',
-          data: { name, chainId, ticker, rpcs, ...(contracts ? { contracts } : {}) }
+          data: { name, chainId, ticker, rpcs, blockTimeMs, ...(contracts ? { contracts } : {}) }
         }],
         entityInputs: []
       });
@@ -590,10 +592,11 @@
       jmachineOperations.upsert({
         name,
         mode,
-        chainId,
-        ticker,
-        rpcs,
-        ...(contracts ? { contracts } : {}),
+	        chainId,
+	        ticker,
+	        rpcs,
+	        blockTimeMs,
+	        ...(contracts ? { contracts } : {}),
         createdAt: Date.now(),
       });
 

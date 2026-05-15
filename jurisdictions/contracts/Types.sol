@@ -12,6 +12,7 @@ struct AccountInfo {
   uint nonce;              // Unified monotonic nonce: signed nonce must be strictly greater than stored nonce
   bytes32 disputeHash;
   uint256 disputeTimeout;
+  uint256 disputeStartTimestamp;
 }
 
 struct AccountCollateral {

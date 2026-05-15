@@ -21,7 +21,7 @@ export async function handlePullLock(
   currentHeight: number,
   currentTimestamp: number,
 ): Promise<{ success: boolean; events: string[]; error?: string }> {
-  const { pullId, tokenId, amount, revealedUntilBlock, fullHash, partialRoot } = accountTx.data;
+  const { pullId, tokenId, amount, revealedUntilTimestamp, fullHash, partialRoot } = accountTx.data;
   const events: string[] = [];
 
   if (!pullId || pullId.includes(':')) {
@@ -47,10 +47,9 @@ export async function handlePullLock(
   if (absAmount < FINANCIAL.MIN_PAYMENT_AMOUNT || absAmount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
     return { success: false, error: `Pull amount out of bounds: ${absAmount}`, events };
   }
-  // currentHeight is the account frame's jurisdiction height, not the bilateral
-  // account-frame number. On-chain DeltaTransformer enforces the same value
-  // against block.number during dispute finalization.
-  if (!Number.isFinite(revealedUntilBlock) || revealedUntilBlock <= currentHeight) {
+  // Pull deadlines are absolute wall-clock milliseconds. Cross-jurisdiction
+  // legs cannot compare local block numbers across chains with different block times.
+  if (!Number.isFinite(revealedUntilTimestamp) || revealedUntilTimestamp <= currentTimestamp) {
     return { success: false, error: `Invalid pull reveal deadline`, events };
   }
 
@@ -80,7 +79,7 @@ export async function handlePullLock(
     pullId,
     tokenId,
     amount,
-    revealedUntilBlock,
+    revealedUntilTimestamp,
     fullHash,
     partialRoot,
     createdHeight: currentHeight,
@@ -95,7 +94,7 @@ export async function handlePullResolve(
   accountMachine: AccountMachine,
   accountTx: PullResolveTx,
   byLeft: boolean,
-  currentHeight: number,
+  currentTimestamp: number,
 ): Promise<{ success: boolean; events: string[]; error?: string; pullResolved?: { pullId: string; fillRatio: number } }> {
   const { pullId, binary } = accountTx.data;
   const events: string[] = [];
@@ -118,7 +117,7 @@ export async function handlePullResolve(
   if (byLeft !== beneficiaryIsLeft) {
     return { success: false, error: `Only the pull beneficiary can resolve`, events };
   }
-  if (ratio > 0 && currentHeight > pull.revealedUntilBlock) {
+  if (ratio > 0 && currentTimestamp > pull.revealedUntilTimestamp) {
     return { success: false, error: `Pull reveal deadline expired`, events };
   }
 

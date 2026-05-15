@@ -9,7 +9,6 @@ const files = [
   { src: '../jurisdictions/artifacts/contracts/Depository.sol/Depository.json', dest: 'static/contracts/Depository.json' },
   { src: '../jurisdictions/artifacts/contracts/EntityProvider.sol/EntityProvider.json', dest: 'static/contracts/EntityProvider.json' },
   { src: '../jurisdictions/artifacts/contracts/DeltaTransformer.sol/DeltaTransformer.json', dest: 'static/contracts/DeltaTransformer.json' },
-  { src: '../jurisdictions/artifacts/contracts/CrossSwapPull.sol/CrossSwapPull.json', dest: 'static/contracts/CrossSwapPull.json' },
   { src: '../jurisdictions/artifacts/contracts/ERC20Mock.sol/ERC20Mock.json', dest: 'static/contracts/ERC20Mock.json' }
 ];
 

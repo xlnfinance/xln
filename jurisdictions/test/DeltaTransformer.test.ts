@@ -1,4 +1,4 @@
-import { loadFixture } from "@nomicfoundation/hardhat-toolbox/network-helpers.js";
+import { loadFixture, time } from "@nomicfoundation/hardhat-toolbox/network-helpers.js";
 import { expect } from "chai";
 import hre from "hardhat";
 import type { DeltaTransformer } from "../typechain-types/index.js";
@@ -216,7 +216,7 @@ describe("DeltaTransformer", function () {
     const partialRatio = 0x1234;
     const partialProof = buildPullProof("delta-partial", partialRatio);
     const fullProof = buildPullProof("delta-full", 0xffff);
-    const deadline = (await ethers.provider.getBlockNumber()) + 10;
+    const deadline = (await time.latest()) + 10;
 
     const batch = {
       payment: [],
@@ -225,14 +225,14 @@ describe("DeltaTransformer", function () {
         {
           deltaIndex: 0,
           amount: MAX_FILL_RATIO,
-          revealedUntilBlock: deadline,
+          revealedUntilTimestamp: deadline,
           fullHash: partialProof.fullHash,
           partialRoot: partialProof.partialRoot,
         },
         {
           deltaIndex: 1,
           amount: -1234,
-          revealedUntilBlock: deadline,
+          revealedUntilTimestamp: deadline,
           fullHash: fullProof.fullHash,
           partialRoot: fullProof.partialRoot,
         },

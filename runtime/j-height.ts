@@ -34,3 +34,22 @@ export function getRuntimeJurisdictionDefaultDisputeDelayBlocks(
     ? Math.floor(fallbackBlocks)
     : PRODUCTION_DISPUTE_DELAY_BLOCKS;
 }
+
+export function requireRuntimeJurisdictionBlockTimeMs(env: Env, jurisdictionName?: string): number {
+  const preferred =
+    (jurisdictionName && env.jReplicas?.get(jurisdictionName)) ||
+    (env.activeJurisdiction ? env.jReplicas?.get(env.activeJurisdiction) : undefined);
+  const raw = Number(preferred?.blockTimeMs ?? NaN);
+  if (Number.isFinite(raw) && raw > 0) return Math.floor(raw);
+  throw new Error(`JURISDICTION_BLOCK_TIME_MISSING:${jurisdictionName || env.activeJurisdiction || 'active'}`);
+}
+
+export function requireRuntimeJurisdictionDisputeDelayMs(
+  env: Env,
+  jurisdictionName?: string,
+  fallbackBlocks = PRODUCTION_DISPUTE_DELAY_BLOCKS,
+): number {
+  const blocks = getRuntimeJurisdictionDefaultDisputeDelayBlocks(env, jurisdictionName, fallbackBlocks);
+  const blockTimeMs = requireRuntimeJurisdictionBlockTimeMs(env, jurisdictionName);
+  return blocks * blockTimeMs;
+}

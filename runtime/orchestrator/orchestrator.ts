@@ -810,6 +810,7 @@ type ShardJurisdictionEntry = {
   name?: string;
   chainId?: number;
   rpc?: unknown;
+  blockTimeMs?: number;
   explorer?: string;
   currency?: string;
   status?: string;
@@ -881,6 +882,7 @@ const deployRpc2JurisdictionStack = async (): Promise<void> => {
     name: 'Tron (Local Anvil)',
     chainId,
     rpc: toPublicRpcUrl(args.rpc2Url, '/rpc2'),
+    blockTimeMs: 1_000,
     explorer: '',
     currency: 'TRX',
     status: 'active',
@@ -2160,6 +2162,52 @@ const ensureReset = async (): Promise<void> => {
   await resetPromise;
 };
 
+const FORBIDDEN_RPC_PROXY_METHODS = new Set([
+  'eth_accounts',
+  'eth_coinbase',
+  'eth_sendTransaction',
+  'eth_sign',
+  'eth_signTransaction',
+  'eth_submitHashrate',
+  'eth_submitWork',
+]);
+
+const FORBIDDEN_RPC_PROXY_PREFIXES = [
+  'admin_',
+  'anvil_',
+  'debug_',
+  'evm_',
+  'hardhat_',
+  'miner_',
+  'personal_',
+  'txpool_',
+  'wallet_',
+];
+
+const findForbiddenRpcProxyMethod = (bodyText: string): string | null => {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(bodyText);
+  } catch {
+    return 'invalid-json';
+  }
+
+  const calls = Array.isArray(parsed) ? parsed : [parsed];
+  if (calls.length === 0) return 'empty-batch';
+
+  for (const call of calls) {
+    if (!call || typeof call !== 'object' || typeof (call as { method?: unknown }).method !== 'string') {
+      return 'invalid-json-rpc';
+    }
+    const method = (call as { method: string }).method;
+    if (FORBIDDEN_RPC_PROXY_METHODS.has(method) || FORBIDDEN_RPC_PROXY_PREFIXES.some(prefix => method.startsWith(prefix))) {
+      return method;
+    }
+  }
+
+  return null;
+};
+
 const proxyRpc = async (request: Request, upstreamRpcUrl = args.rpcUrl): Promise<Response> => {
   const headers = {
     'Access-Control-Allow-Origin': '*',
@@ -2175,6 +2223,15 @@ const proxyRpc = async (request: Request, upstreamRpcUrl = args.rpcUrl): Promise
   }
   try {
     const bodyText = await request.text();
+    if (!isLocalOperatorRequest(request)) {
+      const forbidden = findForbiddenRpcProxyMethod(bodyText);
+      if (forbidden) {
+        return new Response(
+          JSON.stringify({ error: 'RPC proxy method is not allowed', method: forbidden }),
+          { status: forbidden.startsWith('invalid') || forbidden === 'empty-batch' ? 400 : 403, headers },
+        );
+      }
+    }
     const response = await fetch(upstreamRpcUrl, {
       method: 'POST',
       headers: {

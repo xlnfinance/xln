@@ -169,6 +169,7 @@ type JurisdictionConfig = {
   name: string;
   chainId: number;
   rpc: string;
+  blockTimeMs?: number;
   contracts?: {
     depository: string;
     entityProvider: string;
@@ -186,6 +187,7 @@ type JurisdictionsFile = {
     name?: string;
     chainId?: number;
     rpc?: string;
+    blockTimeMs?: number;
     explorer?: string;
     currency?: string;
     status?: string;
@@ -359,6 +361,12 @@ const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig =
     ...(arrakis as JurisdictionConfig),
     rpc: rpcUrlOverride || (arrakis as JurisdictionConfig).rpc,
   };
+};
+
+const requireJurisdictionBlockTimeMs = (jurisdiction: JurisdictionConfig): number => {
+  const value = Number(jurisdiction.blockTimeMs);
+  if (Number.isFinite(value) && value > 0) return Math.floor(value);
+  throw new Error(`JURISDICTION_BLOCK_TIME_MISSING:${jurisdiction.name}`);
 };
 
 const isSecondaryJurisdictionConfig = (key: string, jurisdiction: JurisdictionConfig, primaryRpc: string): boolean => {
@@ -1385,6 +1393,7 @@ const run = async (): Promise<void> => {
         chainId: jurisdiction.chainId,
         ticker: 'XLN',
         rpcs: [jurisdiction.rpc],
+        blockTimeMs: requireJurisdictionBlockTimeMs(jurisdiction),
         ...(jurisdiction.contracts ? { contracts: jurisdiction.contracts } : {}),
       },
     }],
@@ -1440,6 +1449,7 @@ const run = async (): Promise<void> => {
             chainId: secondary.chainId,
             ticker: 'XLN',
             rpcs: [secondaryRpcUrl],
+            blockTimeMs: requireJurisdictionBlockTimeMs(secondary),
             ...(secondary.contracts ? { contracts: secondary.contracts } : {}),
           },
         }],

@@ -94,10 +94,6 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.Console__factory>;
     getContractFactory(
-      name: "CrossSwapPull",
-      signerOrOptions?: ethers.Signer | FactoryOptions
-    ): Promise<Contracts.CrossSwapPull__factory>;
-    getContractFactory(
       name: "DeltaTransformer",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.DeltaTransformer__factory>;
@@ -263,11 +259,6 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.Console>;
     getContractAt(
-      name: "CrossSwapPull",
-      address: string | ethers.Addressable,
-      signer?: ethers.Signer
-    ): Promise<Contracts.CrossSwapPull>;
-    getContractAt(
       name: "DeltaTransformer",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
@@ -428,10 +419,6 @@ declare module "hardhat/types/runtime" {
       name: "Console",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.Console>;
-    deployContract(
-      name: "CrossSwapPull",
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.CrossSwapPull>;
     deployContract(
       name: "DeltaTransformer",
       signerOrOptions?: ethers.Signer | DeployContractOptions
@@ -597,11 +584,6 @@ declare module "hardhat/types/runtime" {
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.Console>;
-    deployContract(
-      name: "CrossSwapPull",
-      args: any[],
-      signerOrOptions?: ethers.Signer | DeployContractOptions
-    ): Promise<Contracts.CrossSwapPull>;
     deployContract(
       name: "DeltaTransformer",
       args: any[],

@@ -11,6 +11,7 @@ import { resolveJurisdictionsJsonPath } from './jurisdictions-path';
 interface JurisdictionConfig {
   name: string;
   chainId: number;
+  blockTimeMs: number;
   rpc: string;
   rebalancePolicyUsd?: {
     r2cRequestSoftLimit: number;

@@ -48,6 +48,7 @@ type ImportedJMachineConfig = {
   chainId: number;
   ticker: string;
   rpcs: string[];
+  blockTimeMs: number;
   contracts?: {
     depository?: string;
     entityProvider?: string;
@@ -946,6 +947,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
             chainId,
             ticker: 'USDC',
             rpcs: [rpcUrl],
+            blockTimeMs: 1_000,
             contracts: arrakisConfig.contracts,
           }
         }],
@@ -1015,6 +1017,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
             chainId,
             ticker: 'USDC',
             rpcs: [rpcUrl],
+            blockTimeMs: 1_000,
             contracts: arrakisConfig.contracts,
           }
         }],
@@ -1266,6 +1269,7 @@ export const vaultOperations = {
             chainId: config.chainId,
             ticker: config.ticker,
             rpcs: config.mode === 'browservm' ? [] : config.rpcs,
+            blockTimeMs: config.blockTimeMs,
             ...(config.contracts ? { contracts: config.contracts } : {}),
           }
         }],
@@ -1524,6 +1528,7 @@ export const vaultOperations = {
             chainId,
             ticker: 'USDC',
             rpcs: [rpcUrl],
+            blockTimeMs: 1_000,
             contracts: arrakisConfig.contracts, // Use pre-deployed addresses
           }
         }],
