@@ -1,6 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { createEmptyEnv, enqueueRuntimeInput, process, submitDebtEnforcement } from '../runtime';
+import { applyEntityTx } from '../entity-tx/apply';
 import type { JAdapter } from '../jadapter/types';
 import { canonicalizeProfile, parseProfile } from '../networking/gossip';
 import type { ConsensusConfig, Env, JReplica, JurisdictionConfig } from '../types';
@@ -56,6 +57,30 @@ const makeEnv = (label: string): Env => {
 };
 
 describe('multi-jurisdiction entity binding', () => {
+  const importEntity = async (
+    env: Env,
+    entityId: string,
+    signerId: string,
+    jurisdiction: JurisdictionConfig,
+  ): Promise<void> => {
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importReplica',
+        entityId,
+        signerId,
+        data: {
+          isProposer: true,
+          config: makeConfig(signerId, jurisdiction),
+        },
+      }],
+      entityInputs: [],
+    });
+    await process(env);
+  };
+
+  const findState = (env: Env, entityId: string) =>
+    Array.from(env.eReplicas.values()).find((replica) => replica.state.entityId === entityId)?.state;
+
   test('rejects importing the same entity into a second jurisdiction', async () => {
     const env = makeEnv('multi-jurisdiction-conflict');
     const j1 = makeJurisdiction('J1', 31337, '11', '12');
@@ -93,6 +118,93 @@ describe('multi-jurisdiction entity binding', () => {
       entityInputs: [],
     });
     await expect(process(env)).rejects.toThrow('ENTITY_JURISDICTION_CONFLICT');
+  });
+
+  test('openAccount permits only same-jurisdiction counterparties', async () => {
+    const env = makeEnv('multi-jurisdiction-open-ok');
+    const j1 = makeJurisdiction('J1', 31337, '11', '12');
+    installJurisdiction(env, j1);
+    env.activeJurisdiction = 'J1';
+
+    const entityA = entity('05');
+    const entityB = entity('06');
+    const signerA = '35';
+    const signerB = '36';
+    await importEntity(env, entityA, signerA, j1);
+    await importEntity(env, entityB, signerB, j1);
+
+    const result = await applyEntityTx(env, findState(env, entityA)!, {
+      type: 'openAccount',
+      data: { targetEntityId: entityB },
+    });
+
+    expect(result.newState.accounts.has(entityB.toLowerCase())).toBe(true);
+  });
+
+  test('openAccount rejects a local counterparty from another jurisdiction', async () => {
+    const env = makeEnv('multi-jurisdiction-open-cross');
+    const j1 = makeJurisdiction('J1', 31337, '11', '12');
+    const j2 = makeJurisdiction('J2', 31338, '21', '22');
+    installJurisdiction(env, j1);
+    installJurisdiction(env, j2);
+
+    const entityA = entity('07');
+    const entityB = entity('08');
+    const signerA = '37';
+    const signerB = '38';
+    await importEntity(env, entityA, signerA, j1);
+    await importEntity(env, entityB, signerB, j2);
+
+    const result = await applyEntityTx(env, findState(env, entityA)!, {
+      type: 'openAccount',
+      data: { targetEntityId: entityB },
+    });
+
+    expect(result.newState.accounts.has(entityB.toLowerCase())).toBe(false);
+  });
+
+  test('accountInput cannot auto-create a cross-jurisdiction account', async () => {
+    const env = makeEnv('multi-jurisdiction-account-input-cross');
+    const j1 = makeJurisdiction('J1', 31337, '11', '12');
+    const j2 = makeJurisdiction('J2', 31338, '21', '22');
+    installJurisdiction(env, j1);
+    installJurisdiction(env, j2);
+
+    const entityA = entity('0b');
+    const entityB = entity('0c');
+    await importEntity(env, entityA, '40', j1);
+    await importEntity(env, entityB, '41', j2);
+
+    const result = await applyEntityTx(env, findState(env, entityA)!, {
+      type: 'accountInput',
+      data: {
+        kind: 'ack',
+        fromEntityId: entityB,
+        toEntityId: entityA,
+        height: 0,
+        prevHanko: '0x',
+      },
+    } as never);
+
+    expect(result.newState.accounts.has(entityB.toLowerCase())).toBe(false);
+  });
+
+  test('openAccount rejects unknown jurisdiction for a bound entity', async () => {
+    const env = makeEnv('multi-jurisdiction-open-unknown');
+    const j1 = makeJurisdiction('J1', 31337, '11', '12');
+    installJurisdiction(env, j1);
+
+    const entityA = entity('09');
+    const signerA = '39';
+    await importEntity(env, entityA, signerA, j1);
+
+    const targetEntityId = entity('0a');
+    const result = await applyEntityTx(env, findState(env, entityA)!, {
+      type: 'openAccount',
+      data: { targetEntityId },
+    });
+
+    expect(result.newState.accounts.has(targetEntityId.toLowerCase())).toBe(false);
   });
 
   test('debt enforcement uses the entity jurisdiction instead of active jurisdiction', async () => {

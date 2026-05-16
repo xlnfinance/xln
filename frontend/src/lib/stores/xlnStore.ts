@@ -429,8 +429,32 @@ const accountCounterpartyId = (entityId: string, doc: StorageAccountDoc): string
 const withDefinedProp = <K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> =>
   value === undefined ? {} : ({ [key]: value } as Record<K, V>);
 
-const buildRemotePlaceholderCore = (entityId: string, label: string, height: number): StorageEntityCoreDoc => {
+type RemoteJurisdictionSummary = {
+  name?: string;
+  address?: string;
+  chainId?: number | string;
+  depositoryAddress?: string;
+  entityProviderAddress?: string;
+};
+
+const buildRemotePlaceholderCore = (
+  entityId: string,
+  label: string,
+  height: number,
+  isHub = false,
+  jurisdiction?: RemoteJurisdictionSummary,
+): StorageEntityCoreDoc => {
   const signerId = normalizeEntityIdForView(entityId);
+  const chainId = Number(jurisdiction?.chainId);
+  const configJurisdiction = jurisdiction?.name && jurisdiction.depositoryAddress && jurisdiction.entityProviderAddress
+    ? {
+        name: jurisdiction.name,
+        address: jurisdiction.address || 'remote://runtime-adapter',
+        entityProviderAddress: jurisdiction.entityProviderAddress,
+        depositoryAddress: jurisdiction.depositoryAddress,
+        ...(Number.isFinite(chainId) ? { chainId } : {}),
+      }
+    : undefined;
   return {
     entityId,
     signerId,
@@ -445,6 +469,7 @@ const buildRemotePlaceholderCore = (entityId: string, label: string, height: num
       threshold: 1n,
       validators: [signerId],
       shares: { [signerId]: 1n },
+      ...(configJurisdiction ? { jurisdiction: configJurisdiction } : {}),
     },
     reserves: new Map(),
     lastFinalizedJHeight: 0,
@@ -452,7 +477,7 @@ const buildRemotePlaceholderCore = (entityId: string, label: string, height: num
     jBlockChain: [],
     entityEncPubKey: '',
     entityEncPrivKey: '',
-    profile: { name: label, isHub: false, avatar: '', bio: '', website: '' },
+    profile: { name: label, isHub, avatar: '', bio: '', website: '' },
     htlcRoutes: new Map(),
     htlcFeesEarned: 0n,
     lockBook: new Map(),
@@ -646,7 +671,13 @@ const buildRemoteAdapterEnvSnapshot = async (
     const entityId = normalizeEntityIdForView(summary.entityId);
     if (!entityId) continue;
     if (activeEntityId && entityId === activeEntityId) continue;
-    const core = buildRemotePlaceholderCore(entityId, summary.label || entityId, Math.max(0, Math.floor(Number(summary.height ?? atHeight))));
+    const core = buildRemotePlaceholderCore(
+      entityId,
+      summary.label || entityId,
+      Math.max(0, Math.floor(Number(summary.height ?? atHeight))),
+      summary.isHub === true,
+      summary.jurisdiction,
+    );
     addRemoteReplicaFromCore(xln, env, core, new Map(), new Map());
   }
 
@@ -678,7 +709,23 @@ const buildRemoteAdapterEnvSnapshot = async (
     for (const item of active.books.items) {
       books.set(String(item.pairId), item.book);
     }
-    addRemoteReplicaFromCore(xln, env, { ...active.core, entityId }, accounts, books);
+    const activeIsHub = active.summary?.isHub === true ||
+      active.core.profile?.isHub === true ||
+      Boolean(active.core.orderbookHubProfile);
+    addRemoteReplicaFromCore(
+      xln,
+      env,
+      {
+        ...active.core,
+        entityId,
+        profile: {
+          ...active.core.profile,
+          isHub: activeIsHub,
+        },
+      },
+      accounts,
+      books,
+    );
   }
 
   return env;

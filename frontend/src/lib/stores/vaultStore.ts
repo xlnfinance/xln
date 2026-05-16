@@ -331,7 +331,7 @@ const getRuntimeFatalDiagnostics = (env: Env): string => {
       timestamp: entry.timestamp ?? null,
     }));
   const recentLogs = cleanLogs.slice(-8);
-  const replica = env.jReplicas.get('Testnet');
+  const replica = env.jReplicas.values().next().value;
   const jState = replica
     ? {
         name: replica.name ?? null,
@@ -488,15 +488,15 @@ const listDefaultJurisdictionImports = (jurisdictions: JurisdictionsPayload): Ar
     });
   if (entries.length === 0) return [];
   const primary = resolveJurisdictionConfig(jurisdictions);
-  const primaryKey = entries.find(([, config]) => config === primary)?.[0] || 'testnet';
+  const primaryKey = entries.find(([, config]) => config === primary)?.[0] || 'primary';
   const ordered = [
     [primaryKey, primary] as const,
     ...entries.filter(([key, config]) => key !== primaryKey && config !== primary),
   ];
   const seen = new Set<string>();
   return ordered.flatMap(([key, config], index) => {
-    const rawName = index === 0 ? 'Testnet' : stripLocalJurisdictionSuffix(config.name || key);
-    const name = rawName || (index === 0 ? 'Testnet' : `Jurisdiction ${index + 1}`);
+    const rawName = stripLocalJurisdictionSuffix(config.name || key);
+    const name = rawName || (index === 0 ? 'primary' : `Jurisdiction ${index + 1}`);
     const normalized = normalizeJurisdictionKey(name);
     if (!normalized || seen.has(normalized)) return [];
     seen.add(normalized);
@@ -944,6 +944,11 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
   const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
   const jurisdictions = await fetchJurisdictions(baseOrigin);
   const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
+  const defaultJurisdictionImports = listDefaultJurisdictionImports(jurisdictions);
+  const primaryJurisdictionName =
+    defaultJurisdictionImports[0]?.name ||
+    stripLocalJurisdictionSuffix(arrakisConfig.name || 'primary') ||
+    'primary';
   const rpcUrl = resolveRpcUrl(resolveJurisdictionRpc(arrakisConfig), baseOrigin);
   const canonicalDeltaTransformerAddress = requireContractAddress(
     arrakisConfig.contracts?.deltaTransformer,
@@ -959,7 +964,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     env.dbNamespace = runtimeIdLower;
     ensureRuntimeLoopRunning(env, xln, `fresh-env:${runtimeIdLower.slice(0, 12)}`);
 
-    console.log('[VaultStore] Importing testnet anvil...');
+    console.log(`[VaultStore] Importing ${primaryJurisdictionName}...`);
     await enqueueAndAwait(
       xln,
       env,
@@ -967,7 +972,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
         runtimeTxs: [{
           type: 'importJ',
           data: {
-            name: 'Testnet',
+            name: primaryJurisdictionName,
             chainId,
             ticker: 'USDC',
             rpcs: [rpcUrl],
@@ -977,16 +982,16 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
         }],
         entityInputs: []
       },
-      () => hasConnectedJurisdictionAdapter(env?.jReplicas?.get?.('Testnet')),
-      'importJ(Testnet)',
+      () => hasConnectedJurisdictionAdapter(findJReplicaByName(env!, primaryJurisdictionName)),
+      `importJ(${primaryJurisdictionName})`,
       45_000,
     );
     await waitForCondition(
-      () => hasRuntimeJurisdictionAddresses(env?.jReplicas?.get?.('Testnet')),
-      'importJ(Testnet).addresses',
+      () => hasRuntimeJurisdictionAddresses(findJReplicaByName(env!, primaryJurisdictionName)),
+      `importJ(${primaryJurisdictionName}).addresses`,
       45_000,
     );
-    console.log('[VaultStore] ✅ Testnet imported');
+    console.log(`[VaultStore] ✅ ${primaryJurisdictionName} imported`);
   } else {
     applyRuntimeLogPreference(env);
     env.runtimeSeed = runtimeSeed;
@@ -1029,7 +1034,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
 
   if (!hasLiveJAdapter(env)) {
     ensureRuntimeLoopRunning(env, xln, `repair-import-j:${runtimeIdLower.slice(0, 12)}`);
-    console.warn('[VaultStore] ⚠️ Restored env has no live J-adapter; re-importing Testnet jurisdiction');
+    console.warn(`[VaultStore] ⚠️ Restored env has no live J-adapter; re-importing ${primaryJurisdictionName} jurisdiction`);
     await enqueueAndAwait(
       xln,
       env,
@@ -1037,7 +1042,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
         runtimeTxs: [{
           type: 'importJ',
           data: {
-            name: 'Testnet',
+            name: primaryJurisdictionName,
             chainId,
             ticker: 'USDC',
             rpcs: [rpcUrl],
@@ -1047,16 +1052,16 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
         }],
         entityInputs: []
       },
-      () => hasConnectedJurisdictionAdapter(env?.jReplicas?.get?.('Testnet')),
-      'repairImportJ(Testnet)',
+      () => hasConnectedJurisdictionAdapter(findJReplicaByName(env, primaryJurisdictionName)),
+      `repairImportJ(${primaryJurisdictionName})`,
       45_000,
     );
     await waitForCondition(
-      () => hasRuntimeJurisdictionAddresses(env?.jReplicas?.get?.('Testnet')),
-      'repairImportJ(Testnet).addresses',
+      () => hasRuntimeJurisdictionAddresses(findJReplicaByName(env, primaryJurisdictionName)),
+      `repairImportJ(${primaryJurisdictionName}).addresses`,
       45_000,
     );
-    console.log('[VaultStore] ✅ Testnet repaired');
+    console.log(`[VaultStore] ✅ ${primaryJurisdictionName} repaired`);
   }
 
   ensureRuntimeLoopRunning(env, xln, `post-restore:${runtimeIdLower.slice(0, 12)}`);
@@ -1066,12 +1071,17 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     const signerAddress = normalizeRuntimeId(signer?.address);
     if (!entityId || !signerAddress) continue;
 
-    const preferredJurisdictionName = String(signer.jurisdiction || 'Testnet').trim();
-    const jReplica = findJReplicaByName(env, preferredJurisdictionName);
+    let preferredJurisdictionName = String(signer.jurisdiction || primaryJurisdictionName).trim();
+    let jReplica = findJReplicaByName(env, preferredJurisdictionName);
+    if (!jReplica && normalizeJurisdictionKey(preferredJurisdictionName) === 'testnet') {
+      preferredJurisdictionName = primaryJurisdictionName;
+      signer.jurisdiction = primaryJurisdictionName;
+      jReplica = findJReplicaByName(env, preferredJurisdictionName);
+    }
     if (!jReplica) {
       const message =
         `[VaultStore] Missing signer jurisdiction ${preferredJurisdictionName} for entity ${entityId.slice(0, 12)}`;
-      if (normalizeJurisdictionKey(preferredJurisdictionName) === 'testnet') {
+      if (normalizeJurisdictionKey(preferredJurisdictionName) === normalizeJurisdictionKey(primaryJurisdictionName)) {
         throw new Error(message);
       }
       console.warn(`${message}; waiting for jurisdiction import`);
@@ -1533,13 +1543,17 @@ export const vaultOperations = {
     markPerf('fetch_jurisdictions');
     const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
     const defaultJurisdictionImports = listDefaultJurisdictionImports(jurisdictions);
+    const primaryJurisdictionName =
+      defaultJurisdictionImports[0]?.name ||
+      stripLocalJurisdictionSuffix(arrakisConfig.name || 'primary') ||
+      'primary';
     const secondaryJurisdictionImports = defaultJurisdictionImports.slice(1);
     console.log('[VaultStore.createRuntime] Loaded contracts:', arrakisConfig.contracts);
     const rpcUrl = resolveRpcUrl(resolveJurisdictionRpc(arrakisConfig), baseOrigin);
     const chainId = resolveJurisdictionChainId(arrakisConfig, 'VaultStore.createRuntime');
 
-    // Import testnet J-machine (shared anvil on xln.finance)
-    console.log('[VaultStore.createRuntime] Importing testnet anvil...');
+    // Import the same primary jurisdiction name that hub profiles advertise.
+    console.log(`[VaultStore.createRuntime] Importing ${primaryJurisdictionName}...`);
     if (xln.startRuntimeLoop) {
       xln.startRuntimeLoop(newEnv);
     }
@@ -1550,7 +1564,7 @@ export const vaultOperations = {
         runtimeTxs: [{
           type: 'importJ',
           data: {
-            name: 'Testnet',
+            name: primaryJurisdictionName,
             chainId,
             ticker: 'USDC',
             rpcs: [rpcUrl],
@@ -1561,23 +1575,23 @@ export const vaultOperations = {
         entityInputs: []
       },
       () => {
-        const replica = newEnv?.jReplicas?.get?.('Testnet');
+        const replica = findJReplicaByName(newEnv, primaryJurisdictionName);
         if (hasConnectedJurisdictionAdapter(replica)) return true;
         if (newEnv?.runtimeState?.loopActive === false) {
-          throw new Error(`createRuntime.importJ(Testnet) failed: runtime loop halted\n${getRuntimeFatalDiagnostics(newEnv)}`);
+          throw new Error(`createRuntime.importJ(${primaryJurisdictionName}) failed: runtime loop halted\n${getRuntimeFatalDiagnostics(newEnv)}`);
         }
         return false;
       },
-      'createRuntime.importJ(Testnet)',
+      `createRuntime.importJ(${primaryJurisdictionName})`,
       45_000,
     );
     await waitForCondition(
-      () => hasRuntimeJurisdictionAddresses(newEnv?.jReplicas?.get?.('Testnet')),
-      'createRuntime.importJ(Testnet).addresses',
+      () => hasRuntimeJurisdictionAddresses(findJReplicaByName(newEnv, primaryJurisdictionName)),
+      `createRuntime.importJ(${primaryJurisdictionName}).addresses`,
       45_000,
     );
     markPerf('import_j_testnet');
-    console.log('[VaultStore.createRuntime] ✅ Testnet imported');
+    console.log(`[VaultStore.createRuntime] ✅ ${primaryJurisdictionName} imported`);
 
     for (const secondary of secondaryJurisdictionImports) {
       const secondaryRpcUrl = resolveRpcUrl(resolveJurisdictionRpc(secondary.config), baseOrigin);
@@ -1620,9 +1634,9 @@ export const vaultOperations = {
     const signerAddress = firstAddress;
 
     // Get contract addresses from imported J-machine
-    const jReplica = newEnv.jReplicas?.get('Testnet');
+    const jReplica = findJReplicaByName(newEnv, primaryJurisdictionName);
     if (!jReplica) {
-      throw new Error('Testnet J-machine not found after import');
+      throw new Error(`${primaryJurisdictionName} J-machine not found after import`);
     }
     const depositoryAddress = requireContractAddress(jReplica.depositoryAddress, 'depository');
     const entityProviderAddress = requireContractAddress(jReplica.entityProviderAddress, 'entity_provider');
@@ -1640,7 +1654,7 @@ export const vaultOperations = {
       shares: { [signerAddress]: 1n },
       jurisdiction: {
         address: depositoryAddress,
-        name: 'Testnet',
+        name: primaryJurisdictionName,
         chainId: Number(jReplica.chainId ?? chainId ?? 31337),
         entityProviderAddress: entityProviderAddress,
         depositoryAddress: depositoryAddress,
@@ -1692,7 +1706,7 @@ export const vaultOperations = {
 
     // Store entityId in signer
     runtime.signers[0]!.entityId = entityId;
-    runtime.signers[0]!.jurisdiction = 'Testnet';
+    runtime.signers[0]!.jurisdiction = primaryJurisdictionName;
     void fundSignerWalletViaFaucet(signerAddress);
     console.log('[VaultStore.createRuntime] ✅ Entity ready; signer faucet funding queued');
 
