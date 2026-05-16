@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 import { ethers } from 'ethers';
 
 import { applyEntityTx } from '../entity-tx/apply';
+import { processAccountTx } from '../account-tx/apply';
 import {
   createEmptyEnv,
   submitCrossJurisdictionSwap,
@@ -283,6 +284,178 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     expect(result.newState.crossJurisdictionSwaps?.get(baseRoute.orderId)?.status).toBe('settled');
     expect(result.newState.messages.some(message => message.includes('terminal state settled'))).toBe(true);
+  });
+
+  test('partial cross-j fill ack is delayed-clearing and keeps order/pulls open', async () => {
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('71');
+    const sourceHub = entity('72');
+    const targetHub = entity('73');
+    const targetUser = entity('74');
+    const account = makeAccount(sourceHub, sourceUser);
+    const route = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-partial-delayed',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      status: 'resting',
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      expiresAt: 61_000,
+    }, { runtimeSeed: 'cross-partial-delayed-seed', sourceDisputeDelayMs: 5_000, now: 1_000 });
+    account.swapOffers.set(route.orderId, {
+      offerId: route.orderId,
+      giveTokenId: 1,
+      giveAmount: 1_000n,
+      wantTokenId: 1,
+      wantAmount: 900n,
+      priceTicks: 900n,
+      timeInForce: 0,
+      minFillRatio: 0,
+      makerIsLeft: account.leftEntity === sourceUser,
+      createdHeight: 0,
+      crossJurisdiction: { ...route, status: 'resting' },
+    });
+    account.pulls = new Map([[route.sourcePull!.pullId, {
+      pullId: route.sourcePull!.pullId,
+      tokenId: 1,
+      amount: route.sourcePull!.signedAmount,
+      claimedRatio: 0,
+      claimedAmount: 0n,
+      revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
+      fullHash: route.sourcePull!.fullHash,
+      partialRoot: route.sourcePull!.partialRoot,
+      createdHeight: 0,
+      createdTimestamp: 1_000,
+    }]]);
+
+    const result = await processAccountTx(account, {
+      type: 'cross_swap_fill_ack',
+      data: {
+        offerId: route.orderId,
+        fillSeq: 1,
+        incrementalSourceAmount: 500n,
+        incrementalTargetAmount: 450n,
+        cumulativeSourceAmount: 500n,
+        cumulativeTargetAmount: 450n,
+        cumulativeFillRatio: 32_768,
+        executionSourceAmount: 500n,
+        executionTargetAmount: 450n,
+        cancelRemainder: false,
+        pairId: 'cross:ethereum:1/base:1',
+      },
+    }, account.leftEntity === sourceHub, 2_000, 1);
+
+    expect(result.success).toBe(true);
+    expect(account.swapOffers.has(route.orderId)).toBe(true);
+    expect(account.pulls?.has(route.sourcePull!.pullId)).toBe(true);
+    const updatedRoute = account.swapOffers.get(route.orderId)?.crossJurisdiction;
+    expect(updatedRoute?.status).toBe('partially_filled');
+    expect(updatedRoute?.fillSeq).toBe(1);
+    expect(updatedRoute?.filledSourceAmount).toBe(500n);
+    expect(account.mempool.some(tx => tx.type === 'pull_resolve')).toBe(false);
+  });
+
+  test('payer can cancel expired pull and releases only remaining hold', async () => {
+    const payer = entity('75');
+    const beneficiary = entity('76');
+    const account = makeAccount(beneficiary, payer);
+    const delta = account.deltas.get(1)!;
+    const beneficiaryIsLeft = account.leftEntity === beneficiary;
+    const payerIsLeft = !beneficiaryIsLeft;
+    const pullId = secret('77');
+    const amount = 1_000n;
+    if (payerIsLeft) delta.leftHold = 750n;
+    else delta.rightHold = 750n;
+    account.pulls = new Map([[pullId, {
+      pullId,
+      tokenId: 1,
+      amount: beneficiaryIsLeft ? amount : -amount,
+      claimedRatio: 16_384,
+      claimedAmount: 250n,
+      revealedUntilTimestamp: 10_000,
+      fullHash: secret('78'),
+      partialRoot: secret('79'),
+      createdHeight: 1,
+      createdTimestamp: 1_000,
+    }]]);
+
+    const early = await processAccountTx(account, {
+      type: 'pull_cancel',
+      data: { pullId, reason: 'expired' },
+    }, payerIsLeft, 9_999, 2);
+    expect(early.success).toBe(false);
+    expect(account.pulls.has(pullId)).toBe(true);
+
+    const expired = await processAccountTx(account, {
+      type: 'pull_cancel',
+      data: { pullId, reason: 'expired' },
+    }, payerIsLeft, 10_001, 3);
+    expect(expired.success).toBe(true);
+    expect(account.pulls.has(pullId)).toBe(false);
+    expect(payerIsLeft ? delta.leftHold : delta.rightHold).toBe(0n);
+  });
+
+  test('clear request reveals one source pull binary and can cancel remainder', async () => {
+    const env = createEmptyEnv('cross-clear-request');
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('81');
+    const sourceHub = entity('82');
+    const targetHub = entity('83');
+    const targetUser = entity('84');
+    const sourceHubSigner = addr('85');
+    const state = makeState(sourceHub, sourceHubSigner, eth, sourceUser);
+    const prepared = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-clear-delayed',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      status: 'resting',
+      createdAt: env.timestamp,
+      updatedAt: env.timestamp,
+      expiresAt: 70_000,
+    }, { runtimeSeed: 'cross-clear-delayed-seed', sourceDisputeDelayMs: 5_000, now: env.timestamp });
+    const route = {
+      ...prepared,
+      status: 'partially_filled' as const,
+      fillSeq: 1,
+      cumulativeFillRatio: 32_768,
+      claimedRatio: 32_768,
+      filledSourceAmount: 500n,
+      filledTargetAmount: 450n,
+      sourceClaimed: 500n,
+      targetClaimed: 450n,
+    };
+    state.crossJurisdictionSwaps?.set(route.orderId, route);
+    const account = state.accounts.get(sourceUser)!;
+    account.pulls = new Map([[route.sourcePull!.pullId, {
+      pullId: route.sourcePull!.pullId,
+      tokenId: 1,
+      amount: route.sourcePull!.signedAmount,
+      claimedRatio: 0,
+      claimedAmount: 0n,
+      revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
+      fullHash: route.sourcePull!.fullHash,
+      partialRoot: route.sourcePull!.partialRoot,
+      createdHeight: 0,
+      createdTimestamp: env.timestamp,
+    }]]);
+
+    const result = await applyEntityTx(env, state, {
+      type: 'requestCrossJurisdictionClear',
+      data: { orderId: route.orderId, cancelRemainder: true },
+    });
+
+    expect(result.mempoolOps?.map(op => op.tx.type)).toEqual(['pull_resolve', 'pull_cancel']);
+    expect(result.mempoolOps?.[0]?.accountId).toBe(sourceUser);
+    expect((result.mempoolOps?.[0]?.tx as any).data.binary).toMatch(/^0x/);
+    expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('clearing');
   });
 
   test('submitCrossJurisdictionSwap rejects missing target receiving account', async () => {

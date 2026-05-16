@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountInput, AccountTx, EntityState, Env, EntityInput, HtlcRoute, AccountMachine, HtlcNoteKey, CrossJurisdictionSwapRoute } from '../../types';
+import type { AccountFrame, AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx, HtlcRoute, AccountMachine, HtlcNoteKey, CrossJurisdictionSwapRoute } from '../../types';
 import { markStorageAccountDirty, markStorageEntityDirty } from '../../env-events';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { addMessage, addMessages, emitScopedEvents } from '../../state-helpers';
@@ -585,22 +585,40 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                 if (isSourceResolve) {
                   const targetPull = route.targetPull;
                   if (!targetPull) continue;
-                  outputs.push({
-                    entityId: route.target.counterpartyEntityId,
-                    entityTxs: [{
-                      type: 'resolvePull',
+                  const targetEntityTxs: EntityTx[] = [{
+                    type: 'resolvePull',
+                    data: {
+                      counterpartyEntityId: route.target.entityId,
+                      pullId: targetPull.pullId,
+                      binary: accountTx.data.binary,
+                      description: `Cross-j ${route.orderId} target pull ${fillRatio}/65535`,
+                    },
+                  }];
+                  if (
+                    fillRatio >= 65_535 ||
+                    route.clearingPolicy === 'cancel_and_clear' ||
+                    route.clearingPolicy === 'full_fill'
+                  ) {
+                    targetEntityTxs.push({
+                      type: 'cancelPull',
                       data: {
                         counterpartyEntityId: route.target.entityId,
                         pullId: targetPull.pullId,
-                        binary: accountTx.data.binary,
-                        description: `Cross-j ${route.orderId} target pull ${fillRatio}/65535`,
+                        description: `Cross-j ${route.orderId} release target remainder`,
                       },
-                    }],
+                    });
+                  }
+                  outputs.push({
+                    entityId: route.target.counterpartyEntityId,
+                    entityTxs: targetEntityTxs,
                   });
                   route.claimedRatio = Math.max(Number(route.claimedRatio || 0), fillRatio);
+                  route.cumulativeFillRatio = Math.max(Number(route.cumulativeFillRatio || 0), fillRatio);
                   route.sourceClaimed = (BigInt(route.source.amount) * BigInt(route.claimedRatio)) / 65_535n;
                   route.targetClaimed = (BigInt(route.target.amount) * BigInt(route.claimedRatio)) / 65_535n;
-                  if (fillRatio >= 65_535) route.status = 'source_claimed';
+                  route.filledSourceAmount = route.sourceClaimed;
+                  route.filledTargetAmount = route.targetClaimed;
+                  route.status = 'source_claimed';
                   route.updatedAt = newState.timestamp;
                   console.log(
                     `🌉 PULL: Relaying cross-j ratio route=${route.orderId} ` +
@@ -615,13 +633,48 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                   normalizeEntityRef(route.target.entityId) === normalizeEntityRef(counterpartyId)
                 ) {
                   route.claimedRatio = Math.max(Number(route.claimedRatio || 0), fillRatio);
+                  route.cumulativeFillRatio = Math.max(Number(route.cumulativeFillRatio || 0), fillRatio);
                   route.sourceClaimed = (BigInt(route.source.amount) * BigInt(route.claimedRatio)) / 65_535n;
                   route.targetClaimed = (BigInt(route.target.amount) * BigInt(route.claimedRatio)) / 65_535n;
-                  if (fillRatio >= 65_535) route.status = 'settled';
+                  route.filledSourceAmount = route.sourceClaimed;
+                  route.filledTargetAmount = route.targetClaimed;
+                  route.status = 'settled';
                   route.updatedAt = newState.timestamp;
-                  if (fillRatio >= 65_535) route.settledAt = newState.timestamp;
-                  console.log(`🌉 PULL: Cross-j route ${fillRatio >= 65_535 ? 'settled' : 'partially claimed'} ${route.orderId}`);
+                  route.settledAt = newState.timestamp;
+                  console.log(`🌉 PULL: Cross-j route settled ${route.orderId} ratio=${fillRatio}/65535`);
                 }
+              }
+            }
+            continue;
+          }
+
+          if (accountTx.type === 'cross_swap_fill_ack') {
+            const ratio = Math.max(0, Math.min(65_535, Math.floor(Number(accountTx.data.cumulativeFillRatio) || 0)));
+            const route = newState.crossJurisdictionSwaps?.get(accountTx.data.offerId);
+            if (route) {
+              route.fillSeq = Math.max(Number(route.fillSeq || 0), Math.floor(Number(accountTx.data.fillSeq ?? ((route.fillSeq || 0) + 1))));
+              route.cumulativeFillRatio = Math.max(Number(route.cumulativeFillRatio || 0), ratio);
+              route.claimedRatio = route.cumulativeFillRatio;
+              route.filledSourceAmount = accountTx.data.cumulativeSourceAmount ?? ((BigInt(route.source.amount) * BigInt(route.cumulativeFillRatio)) / 65_535n);
+              route.filledTargetAmount = accountTx.data.cumulativeTargetAmount ?? ((BigInt(route.target.amount) * BigInt(route.cumulativeFillRatio)) / 65_535n);
+              route.sourceClaimed = route.filledSourceAmount;
+              route.targetClaimed = route.filledTargetAmount;
+              route.status = ratio >= 65_535 || accountTx.data.cancelRemainder ? 'clear_requested' : 'partially_filled';
+              route.updatedAt = newState.timestamp;
+              if (
+                (ratio >= 65_535 || accountTx.data.cancelRemainder) &&
+                normalizeEntityRef(newState.entityId) === normalizeEntityRef(route.source.counterpartyEntityId)
+              ) {
+                outputs.push({
+                  entityId: newState.entityId,
+                  entityTxs: [{
+                    type: 'requestCrossJurisdictionClear',
+                    data: {
+                      orderId: route.orderId,
+                      cancelRemainder: Boolean(accountTx.data.cancelRemainder),
+                    },
+                  }],
+                });
               }
             }
             continue;
@@ -1340,6 +1393,13 @@ export function processOrderbookSwaps(
     quarantinedOffers.push({ accountId, offerId, reason });
     return true;
   };
+  const rejectInvalidCrossOffer = (accountId: string, offerId: string, reason: string): void => {
+    // Cross-j orders settle through fill notices and pull clearing. A malformed
+    // or temporarily unmatchable cross route must not be closed by the plain
+    // same-account swap_resolve path.
+    quarantineOffer(accountId, offerId, reason);
+    console.warn(`⚠️ ORDERBOOK CROSS-J: skipped offer=${offerId} account=${accountId.slice(-8)} reason=${reason}`);
+  };
   const rejectInvalidOffer = (accountId: string, offerId: string, reason: string): void => {
     if (rehydrateOnly) {
       quarantineOffer(accountId, offerId, reason);
@@ -1762,6 +1822,9 @@ export function processOrderbookSwaps(
   const buildCrossMarketOffer = (offer: NormalizedOrderbookOffer): CrossMarketOffer | null => {
     const route = offer.crossJurisdiction;
     if (!route) return null;
+    const bookOwner = normalizeEntityRef(route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId);
+    if (bookOwner && bookOwner !== normalizeEntityRef(hubState.entityId)) return null;
+    if (route.status !== 'resting' && route.status !== 'partially_filled') return null;
     const sourceKey = crossAssetKey(route.source.jurisdiction, route.source.tokenId);
     const targetKey = crossAssetKey(route.target.jurisdiction, route.target.tokenId);
     if (!sourceKey || !targetKey || sourceKey === targetKey) return null;
@@ -1822,16 +1885,16 @@ export function processOrderbookSwaps(
       const currentAccountId = rawOffer.accountId;
       const marketOffer = buildCrossMarketOffer(rawOffer);
       if (!marketOffer) {
-        rejectInvalidOffer(currentAccountId, rawOffer.offerId, 'invalid-cross-j-route');
-        continue;
-      }
-      if (marketOffer.baseAmount % SWAP_LOT_SCALE !== 0n) {
-        rejectInvalidOffer(currentAccountId, rawOffer.offerId, `cross-lot-misaligned:${marketOffer.baseAmount.toString()}`);
+        rejectInvalidCrossOffer(currentAccountId, rawOffer.offerId, 'invalid-cross-j-route');
         continue;
       }
       const qtyLots = marketOffer.baseAmount / SWAP_LOT_SCALE;
-      if (qtyLots <= 0n || qtyLots > 0xFFFFFFFFn) {
-        rejectInvalidOffer(currentAccountId, rawOffer.offerId, `invalid-cross-qty:${qtyLots.toString()}`);
+      if (qtyLots <= 0n) {
+        rejectInvalidCrossOffer(currentAccountId, rawOffer.offerId, `cross-dust-remainder:${marketOffer.baseAmount.toString()}`);
+        continue;
+      }
+      if (qtyLots > 0xFFFFFFFFn) {
+        rejectInvalidCrossOffer(currentAccountId, rawOffer.offerId, `invalid-cross-qty:${qtyLots.toString()}`);
         continue;
       }
 
@@ -1840,7 +1903,10 @@ export function processOrderbookSwaps(
       if (hasQueuedSwapResolveForEntityState(hubState, queuedSwapResolutions, currentAccountId, rawOffer.offerId)) {
         continue;
       }
-      let book = bookCache.get(marketOffer.pairId) || ext.books.get(marketOffer.pairId);
+      // Cross-j routes carry delayed clearing state outside the plain book.
+      // Rebuild the in-memory book from live account offers on every sweep so
+      // terminal or pending-cleared routes cannot be matched from stale storage.
+      let book = bookCache.get(marketOffer.pairId);
       if (!book) {
         book = createOrRepairPairBook(getSwapPairPolicyByBaseQuote(rawOffer.giveTokenId, rawOffer.wantTokenId).bookBucketWidthTicks);
       }
@@ -1870,7 +1936,7 @@ export function processOrderbookSwaps(
           minFillRatio: rawOffer.minFillRatio,
         });
       } catch (error) {
-        rejectInvalidOffer(currentAccountId, rawOffer.offerId, `cross-pair-error:${error instanceof Error ? error.message : String(error)}`);
+        rejectInvalidCrossOffer(currentAccountId, rawOffer.offerId, `cross-pair-error:${error instanceof Error ? error.message : String(error)}`);
         continue;
       }
 
@@ -1886,16 +1952,7 @@ export function processOrderbookSwaps(
         (event): event is Extract<typeof result.events[number], { type: 'TRADE' }> => event.type === 'TRADE',
       );
       if (rejectEvents.length > 0 && tradeEvents.length === 0) {
-        if (rehydrateOnly) {
-          quarantineOffer(currentAccountId, rawOffer.offerId, `cross-post-only-reject:${rejectEvents.map(event => event.reason).join(',')}`);
-          continue;
-        }
-        queueUniqueSwapResolveForEntityState(mempoolOps, hubState, queuedSwapResolutions, currentAccountId, {
-          offerId: rawOffer.offerId,
-          fillRatio: 0,
-          cancelRemainder: true,
-          comment: 'cross-j-reject',
-        });
+        rejectInvalidCrossOffer(currentAccountId, rawOffer.offerId, `cross-post-only-reject:${rejectEvents.map(event => event.reason).join(',')}`);
         continue;
       }
       if (rehydrateOnly) continue;
@@ -1934,20 +1991,21 @@ export function processOrderbookSwaps(
         const targetAmount = meta.side === 1 ? executionQuoteWei : executionBaseWei;
         if (sourceAmount <= 0n || targetAmount <= 0n) continue;
         const previousRatio = Math.max(0, Math.min(65_535, Math.floor(Number(meta.route.claimedRatio ?? 0) || 0)));
+        const previousCumulativeRatio = Math.max(previousRatio, Math.max(0, Math.min(65_535, Math.floor(Number(meta.route.cumulativeFillRatio ?? 0) || 0))));
         const sourceTotal = BigInt(meta.route.source.amount);
         const targetTotal = BigInt(meta.route.target.amount);
         const previousSourceClaimed =
-          meta.route.sourceClaimed ?? ((sourceTotal * BigInt(previousRatio)) / 65_535n);
+          meta.route.filledSourceAmount ?? meta.route.sourceClaimed ?? ((sourceTotal * BigInt(previousCumulativeRatio)) / 65_535n);
         const desiredSourceClaimed = previousSourceClaimed + sourceAmount;
         const cappedSourceClaimed = desiredSourceClaimed >= sourceTotal ? sourceTotal : desiredSourceClaimed;
         const fillRatio = cappedSourceClaimed >= sourceTotal
           ? 65_535
           : deriveCanonicalSwapFillRatio(sourceTotal, cappedSourceClaimed);
-        if (fillRatio <= previousRatio) continue;
+        if (fillRatio <= previousCumulativeRatio) continue;
         const settlementSourceAmount =
           (sourceTotal * BigInt(fillRatio)) / 65_535n - previousSourceClaimed;
         const previousTargetClaimed =
-          meta.route.targetClaimed ?? ((targetTotal * BigInt(previousRatio)) / 65_535n);
+          meta.route.filledTargetAmount ?? meta.route.targetClaimed ?? ((targetTotal * BigInt(previousCumulativeRatio)) / 65_535n);
         const settlementTargetAmount =
           (targetTotal * BigInt(fillRatio)) / 65_535n - previousTargetClaimed;
         if (settlementSourceAmount <= 0n || settlementTargetAmount <= 0n) continue;
@@ -1970,11 +2028,18 @@ export function processOrderbookSwaps(
             type: 'cross_swap_fill_ack',
             data: {
               offerId,
+              fillSeq: Math.max(0, Math.floor(Number(meta.route.fillSeq ?? 0) || 0)) + 1,
+              incrementalSourceAmount: settlementSourceAmount,
+              incrementalTargetAmount: settlementTargetAmount,
+              cumulativeSourceAmount: previousSourceClaimed + settlementSourceAmount,
+              cumulativeTargetAmount: previousTargetClaimed + settlementTargetAmount,
               cumulativeFillRatio: fillRatio,
               executionSourceAmount: settlementSourceAmount,
               executionTargetAmount: settlementTargetAmount,
               cancelRemainder: fillRatio >= 65_535,
               comment: `cross-j-hashledger-fill:${fillRatio}`,
+              priceTicks: meta.priceTicks,
+              pairId: meta.pairId,
             },
           },
         });

@@ -298,6 +298,11 @@ const isSecondaryJurisdictionConfig = (key: string, jurisdiction: JurisdictionCo
   return normalizedKey === 'tron' || normalizedKey === 'rpc2' || normalizedName.includes('tron') || normalizedRpc.includes('/rpc2');
 };
 
+const formatJurisdictionDisplayName = (name: string): string =>
+  String(name || '')
+    .replace(/\s*\((?:local|shared)\s+anvil\)\s*$/i, '')
+    .trim();
+
 const resolveSecondaryJurisdictions = (primaryRpc: string): JurisdictionConfig[] => {
   clearJurisdictionsCache();
   const data = loadJurisdictions();
@@ -1408,6 +1413,7 @@ const run = async (): Promise<void> => {
   const secondaryJurisdictions = resolveSecondaryJurisdictions(jurisdiction.rpc);
   for (const [index, secondary] of secondaryJurisdictions.entries()) {
     const secondaryName = String(secondary.name || `Secondary ${index + 1}`).trim();
+    const secondaryDisplayName = formatJurisdictionDisplayName(secondaryName) || secondaryName;
     if (!secondaryName) continue;
     startupPhase = `import-jurisdiction-${secondaryName}`;
     await importJurisdictionIfNeeded(env, secondary);
@@ -1416,7 +1422,7 @@ const run = async (): Promise<void> => {
       env,
       secondary,
       `${resolvedArgs.signerLabel}:${secondaryName}`,
-      `${resolvedArgs.name} ${secondaryName}`,
+      `${resolvedArgs.name} ${secondaryDisplayName}`,
       { x: 160 + index * 80, y: -40, z: 120, jurisdiction: secondaryName },
     );
     mmContexts.push(siblingContext);

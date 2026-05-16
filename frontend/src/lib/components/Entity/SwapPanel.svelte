@@ -787,6 +787,39 @@
     return left < right ? -1 : 1;
   }
 
+  function crossAssetKey(jurisdiction: string, tokenId: number): string {
+    return `${String(jurisdiction || '').trim().toLowerCase()}:${Math.floor(Number(tokenId) || 0)}`;
+  }
+
+  function canonicalCrossVenueId(
+    sourceJurisdiction: string,
+    sourceTokenId: number,
+    targetJurisdiction: string,
+    targetTokenId: number,
+  ): string {
+    const sourceKey = crossAssetKey(sourceJurisdiction, sourceTokenId);
+    const targetKey = crossAssetKey(targetJurisdiction, targetTokenId);
+    const [baseKey, quoteKey] = compareStableText(sourceKey, targetKey) <= 0
+      ? [sourceKey, targetKey]
+      : [targetKey, sourceKey];
+    return `cross:${baseKey}/${quoteKey}`;
+  }
+
+  function canonicalCrossBookOwner(
+    sourceJurisdiction: string,
+    sourceTokenId: number,
+    sourceHubEntityId: string,
+    targetJurisdiction: string,
+    targetTokenId: number,
+    targetHubEntityId: string,
+  ): string {
+    const sourceKey = crossAssetKey(sourceJurisdiction, sourceTokenId);
+    const targetKey = crossAssetKey(targetJurisdiction, targetTokenId);
+    return compareStableText(sourceKey, targetKey) <= 0
+      ? sourceHubEntityId
+      : targetHubEntityId;
+  }
+
   function handlePriceRatioInput(event: Event): void {
     const target = event.currentTarget as HTMLInputElement | null;
     hasUserEditedPriceInput = true;
@@ -2096,10 +2129,20 @@
         if (sourceJurisdiction === targetRoute.targetJurisdiction) {
           throw new Error('Cross-j route requires different jurisdictions.');
         }
+        const bookOwnerEntityId = canonicalCrossBookOwner(
+          sourceJurisdiction,
+          giveToken,
+          resolvedCounterparty,
+          targetRoute.targetJurisdiction,
+          wantToken,
+          targetRoute.targetHubEntityId,
+        );
         return {
           orderId: offerId,
+          bookOwnerEntityId,
+          venueId: canonicalCrossVenueId(sourceJurisdiction, giveToken, targetRoute.targetJurisdiction, wantToken),
           makerEntityId: sourceEntityId,
-          hubEntityId: resolvedCounterparty,
+          hubEntityId: bookOwnerEntityId,
           source: {
             jurisdiction: sourceJurisdiction,
             entityId: sourceEntityId,
@@ -2228,6 +2271,40 @@
       const message = (error as Error)?.message || 'Unknown error';
       submitError = `Failed to cancel: ${message}`;
       toasts.error(`Cancel failed: ${message}`);
+    }
+  }
+
+  async function requestCrossClear(offerId: string, cancelRemainder = false, reopenRemainder = false) {
+    const sourceEntityId = sourceEntityIdValue;
+    if (!sourceEntityId) return;
+
+    try {
+      const env = runtimeEnv;
+      if (!env) throw new Error('XLN environment not ready');
+      if (!activeIsLive) throw new Error('Swap actions are only available in LIVE mode');
+      const signerId = sourceSignerIdValue || resolveSignerId(sourceEntityId);
+      if (!signerId) throw new Error('No signer available for selected entity');
+
+      await enqueueEntityInputs(env, [{
+        entityId: sourceEntityId,
+        signerId,
+        entityTxs: [{
+          type: 'requestCrossJurisdictionClear',
+          data: {
+            orderId: offerId,
+            cancelRemainder,
+            reopenRemainder,
+          },
+        }],
+      }]);
+
+      orderbookRefreshNonce += 1;
+      toasts.info(cancelRemainder ? 'Cross-j cancel + clear requested' : 'Cross-j clear requested');
+    } catch (error) {
+      console.error('Failed to clear cross-j swap:', error);
+      const message = (error as Error)?.message || 'Unknown error';
+      submitError = `Failed to clear cross-j swap: ${message}`;
+      toasts.error(`Clear failed: ${message}`);
     }
   }
 
@@ -2689,13 +2766,37 @@
                     {:else}
                       {formatAmount(toBigIntSafe(offer.giveAmount) ?? 0n, Number(offer.giveTokenId || 0))} {tokenSymbol(Number(offer.giveTokenId || 0))}
                     {/if}
+                    {#if offer.crossJurisdiction}
+                      {@const route = offer.crossJurisdiction}
+                      {@const pendingAmount = toBigIntSafe(route.filledSourceAmount ?? route.sourceClaimed ?? 0n) ?? 0n}
+                      {@const settledAmount = String(route.status || '') === 'settled' ? pendingAmount : 0n}
+                      <div class="cross-fill-meta">
+                        <span>{String(route.status || 'resting').replace(/_/g, ' ')}</span>
+                        <span>pending {formatAmount(pendingAmount, Number(offer.giveTokenId || 0))}</span>
+                        <span>settled {formatAmount(settledAmount, Number(offer.giveTokenId || 0))}</span>
+                      </div>
+                    {/if}
                   </td>
                   <td>{formatPriceImprovement(offerImprovement.amount, offerImprovement.tokenId)}</td>
                   <td>{String(offer.accountId || '').slice(0, 10)}...</td>
                   <td>
-                    <button class="cancel-btn" data-testid="swap-open-order-cancel" on:click={() => cancelSwapOffer(String(offer.offerId || ''), String(offer.accountId || ''))}>
-                      Request Cancel
-                    </button>
+                    {#if offer.crossJurisdiction}
+                      <div class="cross-order-actions">
+                        <button class="cancel-btn" data-testid="cross-swap-clear" on:click={() => requestCrossClear(String(offer.offerId || ''), false, false)}>
+                          Clear
+                        </button>
+                        <button class="cancel-btn" data-testid="cross-swap-cancel-clear" on:click={() => requestCrossClear(String(offer.offerId || ''), true, false)}>
+                          Cancel + Clear
+                        </button>
+                        <button class="cancel-btn" data-testid="cross-swap-reopen" on:click={() => requestCrossClear(String(offer.offerId || ''), true, true)}>
+                          Reopen Remainder
+                        </button>
+                      </div>
+                    {:else}
+                      <button class="cancel-btn" data-testid="swap-open-order-cancel" on:click={() => cancelSwapOffer(String(offer.offerId || ''), String(offer.accountId || ''))}>
+                        Request Cancel
+                      </button>
+                    {/if}
                   </td>
                 </tr>
               {/each}
@@ -2934,21 +3035,21 @@
     font-size: 12px;
     font-weight: 700;
     color-scheme: dark;
-    text-overflow: ellipsis;
+    text-overflow: clip;
     white-space: nowrap;
   }
 
   .chain-select {
-    width: min(220px, 68%);
-    max-width: 220px;
+    width: min(340px, 72%);
+    max-width: 340px;
     height: 30px;
-    padding: 0 8px;
+    padding: 0 34px 0 10px;
   }
 
   .token-select {
-    width: 96px;
+    width: 120px;
     height: 40px;
-    padding: 0 8px;
+    padding: 0 34px 0 10px;
     flex-shrink: 0;
   }
 
@@ -3055,9 +3156,9 @@
   }
 
   .venue-row select {
-    width: min(240px, 70%);
+    width: min(360px, 76%);
     height: 30px;
-    padding: 0 8px;
+    padding: 0 34px 0 10px;
   }
 
   .input-suffix {
@@ -3142,7 +3243,7 @@
     width: 100%;
     height: 100%;
     min-width: 0;
-    padding: 0;
+    padding: 0 34px 0 12px;
     color: #d1d5db;
     background: transparent;
     border: 0;
@@ -3379,6 +3480,16 @@
     font-size: 10px;
     font-weight: 700;
     vertical-align: middle;
+  }
+
+  .cross-fill-meta {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 4px;
+    color: #8b93a5;
+    font-size: 10px;
+    text-transform: capitalize;
   }
 
   .scope-btn {
@@ -3696,6 +3807,19 @@
   .cancel-btn:hover {
     background: rgba(239, 68, 68, 0.18);
     border-color: rgba(239, 68, 68, 0.6);
+  }
+
+  .cross-order-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    justify-content: flex-end;
+  }
+
+  .cross-order-actions .cancel-btn:first-child {
+    background: rgba(34, 197, 94, 0.1);
+    border-color: rgba(34, 197, 94, 0.35);
+    color: #86efac;
   }
 
   .improvement-summary {

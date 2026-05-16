@@ -119,6 +119,11 @@ const _abi = [
                 type: "int256",
               },
               {
+                internalType: "uint16",
+                name: "claimedRatio",
+                type: "uint16",
+              },
+              {
                 internalType: "uint256",
                 name: "revealedUntilTimestamp",
                 type: "uint256",

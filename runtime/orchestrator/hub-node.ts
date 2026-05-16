@@ -377,6 +377,11 @@ const isSecondaryJurisdictionConfig = (key: string, jurisdiction: JurisdictionCo
   return normalizedKey === 'tron' || normalizedKey === 'rpc2' || normalizedName.includes('tron') || normalizedRpc.includes('/rpc2');
 };
 
+const formatJurisdictionDisplayName = (name: string): string =>
+  String(name || '')
+    .replace(/\s*\((?:local|shared)\s+anvil\)\s*$/i, '')
+    .trim();
+
 const resolveSecondaryJurisdictions = (primaryRpc: string): JurisdictionConfig[] => {
   clearJurisdictionsCache();
   const data = loadJurisdictions();
@@ -1488,6 +1493,7 @@ const run = async (): Promise<void> => {
   const secondaryJurisdictions = resolveSecondaryJurisdictions(jurisdiction.rpc);
   for (const [index, secondary] of secondaryJurisdictions.entries()) {
     const secondaryName = String(secondary.name || `Secondary ${index + 1}`).trim();
+    const secondaryDisplayName = formatJurisdictionDisplayName(secondaryName) || secondaryName;
     if (!secondaryName) continue;
     const secondaryRpcUrl = resolveLocalApiUrl(secondary.rpc);
     if (!env.jReplicas.has(secondaryName)) {
@@ -1514,7 +1520,7 @@ const run = async (): Promise<void> => {
     const priorActiveJurisdiction = env.activeJurisdiction;
     env.activeJurisdiction = secondaryName;
     const sibling = await bootstrapHub(env, {
-      name: `${resolvedArgs.name} ${secondaryName}`,
+      name: `${resolvedArgs.name} ${secondaryDisplayName}`,
       region: resolvedArgs.region,
       signerId: `${resolvedArgs.signerLabel}:${secondaryName}`,
       seed: resolvedArgs.seed,
@@ -1539,7 +1545,7 @@ const run = async (): Promise<void> => {
     hubBootstraps.push({
       entityId: sibling.entityId,
       signerId: sibling.signerId,
-      name: `${resolvedArgs.name} ${secondaryName}`,
+      name: `${resolvedArgs.name} ${secondaryDisplayName}`,
       jurisdictionName: secondaryName,
       chainId: secondaryContracts.chainId ?? secondary.chainId,
       ...(secondaryContracts.depositoryAddress ? { depositoryAddress: secondaryContracts.depositoryAddress } : {}),

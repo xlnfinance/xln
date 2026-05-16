@@ -128,6 +128,29 @@
     mnemonicInput = await entropyToMnemonic(entropy);
   }
 
+  function downloadBrainVaultSheet(): void {
+    if (typeof window === 'undefined') return;
+    const lines = [
+      'XLN BrainVault setup sheet',
+      '',
+      `Display name: ${name.trim() || '________________'}`,
+      'Passphrase hint: ________________________________',
+      `Work factor: ${String(shardInput || 3)}`,
+      '',
+      'Do not write the full passphrase here unless this sheet is stored offline.',
+      'Same display name + passphrase + work factor derives the same wallet.',
+      'Import/recovery with a mnemonic is available from the advanced wallet screen.',
+      '',
+    ];
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'xln-brainvault-sheet.txt';
+    link.click();
+    URL.revokeObjectURL(url);
+  }
+
   // ============================================================================
   // STATE
   // ============================================================================
@@ -1104,8 +1127,10 @@
 
 	        <div class="wallet-create-title">
 	          <div>
-	            <h2>Create XLN wallet</h2>
-	            <p>Choose a name and passphrase. The wallet opens automatically when derivation finishes.</p>
+	            <h2>{inputMode === 'mnemonic' ? 'Import XLN wallet' : 'Create XLN wallet'}</h2>
+	            <p>{inputMode === 'mnemonic'
+	              ? 'Recover from an existing mnemonic. New wallets start from the main creation form.'
+	              : 'Enter a display name and secret. The wallet opens automatically when derivation finishes.'}</p>
 	          </div>
 	        </div>
 
@@ -1131,25 +1156,20 @@
           </div>
         </div>
 
-	        <details class="import-options">
+	        <details class="brainvault-strip import-options">
 	          <summary>
-	            <span>Import or recover</span>
-	            <small>Mnemonic, deterministic passphrase settings, and export tools</small>
+	            <span>BrainVault</span>
+	            <small>Download sheet, read safety notes, or open import/recovery</small>
 	          </summary>
-	          <div class="input-mode-tabs">
-	            <button
-	              class="tab-btn"
-	              class:active={inputMode === 'brainvault'}
-	              on:click={() => inputMode = 'brainvault'}
-	            >
-	              Passphrase
+	          <div class="brainvault-strip-panel">
+	            <button type="button" class="strip-action" on:click={downloadBrainVaultSheet}>
+	              Download sheet
 	            </button>
-	            <button
-	              class="tab-btn"
-	              class:active={inputMode === 'mnemonic'}
-	              on:click={() => inputMode = 'mnemonic'}
-	            >
-	              Mnemonic
+	            <a class="strip-action" href="/docs-static/faq.md" target="_blank" rel="noreferrer">
+	              Read notes
+	            </a>
+	            <button type="button" class="strip-action" on:click={() => inputMode = 'mnemonic'}>
+	              Import / recover
 	            </button>
 	          </div>
 	        </details>
@@ -1158,7 +1178,7 @@
         {#if inputMode === 'brainvault'}
         <!-- Name Input -->
         <div class="input-group">
-          <label for="name">{t('vault.name.label')}</label>
+          <label for="name">Display name</label>
 	          <span class="input-hint">This becomes the wallet and public entity name.</span>
           <div class="input-wrapper">
             <input
@@ -1278,6 +1298,9 @@
 	        <p class="warning-text">Your inputs generate a unique wallet. No recovery if forgotten.</p>
         {:else}
         <!-- Mnemonic Input Mode -->
+        <button type="button" class="back-to-create" on:click={() => inputMode = 'brainvault'}>
+          Back to wallet creation
+        </button>
         <div class="input-group">
           <label for="mnemonic">Mnemonic (12 or 24 words)</label>
           <span class="input-hint">Enter your BIP39 mnemonic phrase</span>
@@ -1689,7 +1712,7 @@
     line-height: 1.45;
   }
 
-  .import-options {
+  .brainvault-strip {
     margin-bottom: 16px;
     border: 1px solid rgba(255, 255, 255, 0.07);
     border-radius: 8px;
@@ -1697,7 +1720,7 @@
     overflow: hidden;
   }
 
-  .import-options summary {
+  .brainvault-strip summary {
     display: flex;
     align-items: center;
     justify-content: space-between;
@@ -1710,11 +1733,11 @@
     font-weight: 650;
   }
 
-  .import-options summary::-webkit-details-marker {
+  .brainvault-strip summary::-webkit-details-marker {
     display: none;
   }
 
-  .import-options summary small {
+  .brainvault-strip summary small {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1724,11 +1747,43 @@
     font-weight: 500;
   }
 
-  .import-options .input-mode-tabs {
-    margin: 0;
+  .brainvault-strip-panel {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    padding: 10px 12px 12px;
     border-top: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 0;
     background: rgba(0, 0, 0, 0.16);
+  }
+
+  .strip-action,
+  .back-to-create {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-height: 34px;
+    padding: 8px 10px;
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 7px;
+    background: rgba(255, 255, 255, 0.04);
+    color: rgba(255, 255, 255, 0.84);
+    font-size: 12px;
+    font-weight: 650;
+    text-decoration: none;
+    cursor: pointer;
+    box-sizing: border-box;
+  }
+
+  .strip-action:hover,
+  .back-to-create:hover {
+    border-color: rgba(255, 200, 100, 0.24);
+    color: rgba(255, 200, 100, 0.95);
+    background: rgba(255, 200, 100, 0.08);
+  }
+
+  .back-to-create {
+    width: 100%;
+    margin-bottom: 14px;
   }
 
   .quick-login-section {

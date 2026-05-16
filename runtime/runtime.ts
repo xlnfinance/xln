@@ -2209,6 +2209,15 @@ const planEntityOutputs = (
       deferredOutputs.push(output);
       continue;
     }
+    const localRuntimeId = normalizeRuntimeId(String(env.runtimeId || ''));
+    if (localRuntimeId && targetRuntimeId === localRuntimeId) {
+      env.warn('network', 'ROUTE_DEFER_STALE_SELF_HINT', {
+        entityId: output.entityId,
+        runtimeId: targetRuntimeId,
+      });
+      deferredOutputs.push(output);
+      continue;
+    }
     remoteOutputs.push({ output: toDeliverableEntityInput(output, targetRuntimeId), targetRuntimeId });
   }
 
@@ -2752,50 +2761,74 @@ const applyRuntimeInput = async (
           throw error;
         }
       } else if (runtimeTx.type === 'importReplica') {
+        const importedEntityId = String(runtimeTx.entityId || '').toLowerCase();
+        const importedSignerId =
+          normalizeRuntimeId(String(runtimeTx.signerId || '')) ||
+          String(runtimeTx.signerId || '').trim().toLowerCase();
+        if (!importedEntityId || !importedSignerId) {
+          throw new Error(`IMPORT_REPLICA_INVALID_ID: entity=${runtimeTx.entityId} signer=${runtimeTx.signerId}`);
+        }
         if (DEBUG)
           console.log(
-            `Importing replica Entity #${formatEntityDisplay(runtimeTx.entityId)}:${formatSignerDisplay(runtimeTx.signerId)} (proposer: ${runtimeTx.data.isProposer})`,
+            `Importing replica Entity #${formatEntityDisplay(importedEntityId)}:${formatSignerDisplay(importedSignerId)} (proposer: ${runtimeTx.data.isProposer})`,
           );
 
-        const replicaKey = `${runtimeTx.entityId}:${runtimeTx.signerId}`;
-        const existingReplica = env.eReplicas.get(replicaKey);
-        const config = requireBoundEntityConfig(env, runtimeTx.entityId, runtimeTx.data.config);
-        backfillEntityJurisdictionBinding(env, runtimeTx.entityId, config.jurisdiction!);
+        const replicaKey = `${importedEntityId}:${importedSignerId}`;
+        let existingReplicaKey = replicaKey;
+        let existingReplica = env.eReplicas.get(replicaKey);
+        if (!existingReplica) {
+          for (const [key, candidate] of env.eReplicas.entries()) {
+            const [candidateEntity, candidateSigner] = String(key).split(':');
+            if (String(candidateEntity || '').toLowerCase() !== importedEntityId) continue;
+            if (String(candidateSigner || '').toLowerCase() !== importedSignerId) continue;
+            existingReplicaKey = String(key);
+            existingReplica = candidate;
+            break;
+          }
+        }
+        const config = requireBoundEntityConfig(env, importedEntityId, runtimeTx.data.config);
+        backfillEntityJurisdictionBinding(env, importedEntityId, config.jurisdiction!);
         if (existingReplica) {
           // Persistence safety: never overwrite restored replica state on re-import.
           existingReplica.isProposer = runtimeTx.data.isProposer;
+          existingReplica.entityId = importedEntityId;
+          existingReplica.signerId = importedSignerId;
+          existingReplica.state.entityId = importedEntityId;
           if (config) {
             existingReplica.state.config = config;
           }
-          if (hasLocalSignerKey(env, runtimeTx.signerId)) {
-            const expectedKeys = deriveLocalEntityCryptoKeys(env, runtimeTx.entityId, runtimeTx.signerId);
+          if (hasLocalSignerKey(env, importedSignerId)) {
+            const expectedKeys = deriveLocalEntityCryptoKeys(env, importedEntityId, importedSignerId);
             if (
               existingReplica.state.entityEncPubKey !== expectedKeys.publicKey ||
               existingReplica.state.entityEncPrivKey !== expectedKeys.privateKey
             ) {
               throw new Error(
-                `ENTITY_CRYPTO_KEY_MISMATCH: entity=${runtimeTx.entityId} signer=${runtimeTx.signerId}`,
+                `ENTITY_CRYPTO_KEY_MISMATCH: entity=${importedEntityId} signer=${importedSignerId}`,
               );
             }
           }
           normalizeEntitySwapTradingPairs(existingReplica.state);
+          if (existingReplicaKey !== replicaKey) {
+            env.eReplicas.delete(existingReplicaKey);
+          }
           env.eReplicas.set(replicaKey, existingReplica);
           markStorageEntityDirty(env, existingReplica.state.entityId);
           if (DEBUG) {
             console.log(
-              `Skipping fresh replica init for restored entity #${formatEntityDisplay(runtimeTx.entityId)}:${formatSignerDisplay(runtimeTx.signerId)}`,
+              `Skipping fresh replica init for restored entity #${formatEntityDisplay(importedEntityId)}:${formatSignerDisplay(importedSignerId)}`,
             );
           }
           continue;
         }
-        const replicaKeys = resolveReplicaEntityCryptoKeys(env, runtimeTx.entityId, runtimeTx.signerId);
+        const replicaKeys = resolveReplicaEntityCryptoKeys(env, importedEntityId, importedSignerId);
         const replica: EntityReplica = {
-          entityId: runtimeTx.entityId,
-          signerId: runtimeTx.signerId,
+          entityId: importedEntityId,
+          signerId: importedSignerId,
           mempool: [],
           isProposer: runtimeTx.data.isProposer,
           state: {
-            entityId: runtimeTx.entityId, // Store entityId in state
+            entityId: importedEntityId, // Store entityId in state
             height: 0,
             timestamp: env.timestamp,
             nonces: new Map(),
@@ -2819,7 +2852,7 @@ const applyRuntimeInput = async (
               name:
                 typeof runtimeTx.data.profileName === 'string' && runtimeTx.data.profileName.trim().length > 0
                   ? runtimeTx.data.profileName.trim()
-                  : `Entity ${runtimeTx.entityId.slice(-4)}`,
+                  : `Entity ${importedEntityId.slice(-4)}`,
               isHub: false,
               avatar: '',
               bio: '',
@@ -2856,7 +2889,7 @@ const applyRuntimeInput = async (
         const validators = runtimeTx.data.config.validators;
         const threshold = runtimeTx.data.config.threshold;
         if (validators.length === 1 && threshold === 1n) {
-          const signerId = validators[0];
+          const signerId = normalizeRuntimeId(String(validators[0] || '')) || importedSignerId;
           if (!signerId) continue;
           try {
             const privateKey = getSignerPrivateKey(env, signerId);
@@ -2864,7 +2897,7 @@ const applyRuntimeInput = async (
               .map(b => b.toString(16).padStart(2, '0'))
               .join('')}`;
             for (const jReplica of env.jReplicas?.values?.() ?? []) {
-              jReplica.jadapter?.registerEntityWallet?.(runtimeTx.entityId, privateKeyHex);
+              jReplica.jadapter?.registerEntityWallet?.(importedEntityId, privateKeyHex);
             }
           } catch (_error) {
             console.warn(
@@ -5212,7 +5245,6 @@ export async function submitCrossJurisdictionSwap(
   const sourceHubSignerId = params.sourceHubSignerId || resolveEntityProposerId(env, params.sourceHubEntityId, 'cross-swap.source-hub');
   const targetHubSignerId = params.targetHubSignerId || resolveEntityProposerId(env, params.targetHubEntityId, 'cross-swap.target-hub');
   const targetUserSignerId = params.targetUserSignerId || resolveEntityProposerId(env, params.targetUserEntityId, 'cross-swap.target-user');
-  const bookHubEntityId = params.bookHubEntityId || params.sourceHubEntityId;
 
   const sourceUserJ = requireEntityRuntimeJurisdictionConfig(env, params.sourceUserEntityId, sourceUserSignerId);
   const sourceHubJ = requireEntityRuntimeJurisdictionConfig(env, params.sourceHubEntityId, sourceHubSignerId);
@@ -5237,9 +5269,16 @@ export async function submitCrossJurisdictionSwap(
   }
 
   const expiresInMs = Math.max(30_000, Math.floor(params.expiresInMs ?? 120_000));
+  const sourceMarketKey = `${String(sourceUserJ.name || '').trim().toLowerCase()}:${Number(params.sourceTokenId)}`;
+  const targetMarketKey = `${String(targetHubJ.name || '').trim().toLowerCase()}:${Number(params.targetTokenId)}`;
+  const defaultBookHubEntityId = sourceMarketKey <= targetMarketKey
+    ? params.sourceHubEntityId
+    : params.targetHubEntityId;
+  const bookHubEntityId = params.bookHubEntityId || defaultBookHubEntityId;
 
   const route: CrossJurisdictionSwapRoute = withCanonicalCrossJurisdictionRouteHash({
     orderId,
+    bookOwnerEntityId: bookHubEntityId,
     makerEntityId: params.sourceUserEntityId,
     hubEntityId: bookHubEntityId,
     source: {

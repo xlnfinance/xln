@@ -50,6 +50,7 @@
 
   let hubs: Hub[] = [];
   const DISCOVERY_TIMEOUT_MS = 8000;
+  const DISCOVERY_POLL_MS = 350;
 
   type JurisdictionLike = {
     name?: unknown;
@@ -132,8 +133,11 @@
     expandedHub = expandedHub === hubId ? null : hubId;
   }
 
+  const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
   async function fetchPublicHubs(timeoutMs = DISCOVERY_TIMEOUT_MS): Promise<Hub[]> {
     if (typeof window === 'undefined') return [];
+    if (entityId && !getEntityJurisdictionKey(env, entityId)) return [];
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), timeoutMs);
     try {
@@ -182,16 +186,27 @@
     }
   }
 
+  async function fetchPublicHubsUntilReady(timeoutMs = DISCOVERY_TIMEOUT_MS): Promise<Hub[]> {
+    const startedAt = Date.now();
+    let last: Hub[] = [];
+    while (Date.now() - startedAt <= timeoutMs) {
+      last = await fetchPublicHubs(Math.min(2000, timeoutMs));
+      if (last.length > 0) return last;
+      await sleep(DISCOVERY_POLL_MS);
+    }
+    return last;
+  }
+
   // Discover hubs from gossip network
   async function discoverHubs() {
     loading = true;
     error = '';
 
     try {
-      const fetchedHubs = await fetchPublicHubs();
+      const fetchedHubs = await fetchPublicHubsUntilReady();
       hubs = fetchedHubs;
       if (hubs.length === 0) {
-        error = 'No public hubs discovered yet. Try Refresh; if it persists, check relay connectivity.';
+        error = 'No public hubs discovered for this jurisdiction yet. Refresh after the relay and hub runtimes are online.';
       }
 
     } catch (err) {

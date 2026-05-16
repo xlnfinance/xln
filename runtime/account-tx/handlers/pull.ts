@@ -9,6 +9,7 @@ import {
 
 type PullLockTx = Extract<AccountTx, { type: 'pull_lock' }>;
 type PullResolveTx = Extract<AccountTx, { type: 'pull_resolve' }>;
+type PullCancelTx = Extract<AccountTx, { type: 'pull_cancel' }>;
 
 const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 
@@ -167,4 +168,51 @@ export async function handlePullResolve(
   }
   events.push(`🪝 Pull resolved: ${pullId.slice(0, 8)}... fill ${ratio}/65535 amount ${applied}`);
   return { success: true, events, pullResolved: { pullId, fillRatio: ratio } };
+}
+
+export async function handlePullCancel(
+  accountMachine: AccountMachine,
+  accountTx: PullCancelTx,
+  byLeft: boolean,
+  currentTimestamp: number,
+): Promise<{ success: boolean; events: string[]; error?: string }> {
+  const { pullId, reason } = accountTx.data;
+  const events: string[] = [];
+  const pull = accountMachine.pulls?.get(pullId);
+  if (!pull) {
+    return { success: true, events: [`🪝 Pull cancel ignored: ${pullId.slice(0, 8)}... already closed`] };
+  }
+
+  const beneficiaryIsLeft = pull.amount > 0n;
+  const payerIsLeft = !beneficiaryIsLeft;
+  const beneficiaryRelease = byLeft === beneficiaryIsLeft;
+  const expiredPayerCancel = byLeft === payerIsLeft && currentTimestamp > pull.revealedUntilTimestamp;
+  if (!beneficiaryRelease && !expiredPayerCancel) {
+    return { success: false, error: `Only beneficiary can release an active pull, payer can cancel only after expiry`, events };
+  }
+
+  let delta = accountMachine.deltas.get(pull.tokenId);
+  if (!delta) {
+    delta = createDefaultDelta(pull.tokenId);
+    accountMachine.deltas.set(pull.tokenId, delta);
+  }
+  delta.leftHold ??= 0n;
+  delta.rightHold ??= 0n;
+
+  const absAmount = absBigInt(pull.amount);
+  const claimedAmount = pull.claimedAmount ?? ((absAmount * BigInt(pull.claimedRatio ?? 0)) / BigInt(HASHLADDER_MAX_FILL_RATIO));
+  const remainingHold = absAmount > claimedAmount ? absAmount - claimedAmount : 0n;
+  if (remainingHold > 0n) {
+    if (payerIsLeft) {
+      if ((delta.leftHold || 0n) < remainingHold) return { success: false, error: `Pull left hold underflow`, events };
+      delta.leftHold -= remainingHold;
+    } else {
+      if ((delta.rightHold || 0n) < remainingHold) return { success: false, error: `Pull right hold underflow`, events };
+      delta.rightHold -= remainingHold;
+    }
+  }
+
+  accountMachine.pulls?.delete(pullId);
+  events.push(`🪝 Pull cancelled: ${pullId.slice(0, 8)}... released ${remainingHold}${reason ? ` (${reason})` : ''}`);
+  return { success: true, events };
 }
