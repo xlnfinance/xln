@@ -1,5 +1,6 @@
 import { rebuildOrderbookPairIndex, type BookState, type OrderbookExtState } from '../orderbook';
 import type { AccountMachine, EntityReplica, EntityState } from '../types';
+import { stripCrossJurisdictionPrivateData } from '../cross-jurisdiction';
 import { encodeBuffer } from './codec';
 import { DEFAULT_ACCOUNT_MERKLE_RADIX, normalizeEntityId } from './keys';
 import { buildHexKeyedMerkle, type RadixMerkleRadix } from './merkle';
@@ -7,6 +8,9 @@ import type { StorageAccountDoc, StorageEntityCoreDoc, StorageReplicaMeta } from
 
 const withProp = <K extends string, V>(key: K, value: V | undefined): Partial<Record<K, V>> =>
   value === undefined ? {} : ({ [key]: value } as Record<K, V>);
+
+const publicCrossJurisdictionSwaps = (swaps: EntityState['crossJurisdictionSwaps']): EntityState['crossJurisdictionSwaps'] | undefined =>
+  swaps ? new Map(Array.from(swaps.entries()).map(([id, route]) => [id, stripCrossJurisdictionPrivateData({ ...route })])) : undefined;
 
 export const projectEntityCoreDoc = (
   state: EntityState,
@@ -42,7 +46,7 @@ export const projectEntityCoreDoc = (
   ...withProp('inDebtsByToken', state.inDebtsByToken),
   ...withProp('swapTradingPairs', state.swapTradingPairs),
   ...withProp('pendingSwapFillRatios', state.pendingSwapFillRatios),
-  ...withProp('crossJurisdictionSwaps', state.crossJurisdictionSwaps),
+  ...withProp('crossJurisdictionSwaps', publicCrossJurisdictionSwaps(state.crossJurisdictionSwaps)),
   ...withProp('hubRebalanceConfig', state.hubRebalanceConfig),
   ...withProp('orderbookHubProfile', state.orderbookExt?.hubProfile),
   ...withProp('orderbookReferrals', state.orderbookExt?.referrals),
@@ -264,7 +268,7 @@ export const hydrateEntityStateFromStorage = (options: {
     ...withProp('orderbookExt', orderbookExt),
     ...withProp('swapTradingPairs', core.swapTradingPairs),
     ...withProp('pendingSwapFillRatios', core.pendingSwapFillRatios),
-    ...withProp('crossJurisdictionSwaps', core.crossJurisdictionSwaps),
+    ...withProp('crossJurisdictionSwaps', publicCrossJurisdictionSwaps(core.crossJurisdictionSwaps)),
     ...withProp('hubRebalanceConfig', core.hubRebalanceConfig),
   };
 };

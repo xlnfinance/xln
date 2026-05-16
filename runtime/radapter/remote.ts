@@ -29,6 +29,12 @@ const nextBackoff = (attempt: number, maxMs: number): number =>
 const isTerminalAuthFailure = (error: unknown): boolean =>
   error instanceof RuntimeAdapterError && error.code === 'E_UNAUTHORIZED' && error.retryable !== true;
 
+const toWebSocketBuffer = (bytes: Uint8Array): ArrayBuffer => {
+  const buffer = new ArrayBuffer(bytes.byteLength);
+  new Uint8Array(buffer).set(bytes);
+  return buffer;
+};
+
 export class RemoteRuntimeAdapter implements RuntimeAdapter {
   readonly mode = 'remote' as const;
 
@@ -233,7 +239,7 @@ export class RemoteRuntimeAdapter implements RuntimeAdapter {
       };
       this.pending.set(id, pending);
       try {
-        this.ws?.send(encodeRuntimeAdapterMessage(payload));
+        this.ws?.send(toWebSocketBuffer(encodeRuntimeAdapterMessage(payload)));
       } catch (error) {
         this.pending.delete(id);
         clearTimeout(timer);

@@ -45,6 +45,7 @@ import {
   buildHtlcFinalizedEventPayload,
   buildHtlcReceivedEventPayload,
 } from '../../htlc-events';
+import { deriveCanonicalCrossJurisdictionMarket } from '../../cross-jurisdiction';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const getJurisdictionId = (state: EntityState, env: Env): string => {
@@ -1809,8 +1810,6 @@ export function processOrderbookSwaps(
     priceTicks: bigint;
     makerId: string;
   };
-  const crossAssetKey = (jurisdiction: string, tokenId: number): string =>
-    `${String(jurisdiction || '').trim().toLowerCase()}:${Number(tokenId)}`;
   const computeCrossPriceTicks = (side: 0 | 1, baseAmount: bigint, quoteAmount: bigint): bigint => {
     if (baseAmount <= 0n || quoteAmount <= 0n) return 0n;
     const scaledQuote = quoteAmount * ORDERBOOK_PRICE_SCALE;
@@ -1825,13 +1824,9 @@ export function processOrderbookSwaps(
     const bookOwner = normalizeEntityRef(route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId);
     if (bookOwner && bookOwner !== normalizeEntityRef(hubState.entityId)) return null;
     if (route.status !== 'resting' && route.status !== 'partially_filled') return null;
-    const sourceKey = crossAssetKey(route.source.jurisdiction, route.source.tokenId);
-    const targetKey = crossAssetKey(route.target.jurisdiction, route.target.tokenId);
-    if (!sourceKey || !targetKey || sourceKey === targetKey) return null;
-    const sourceIsBase = sourceKey < targetKey;
-    const baseKey = sourceIsBase ? sourceKey : targetKey;
-    const quoteKey = sourceIsBase ? targetKey : sourceKey;
-    const side: 0 | 1 = sourceIsBase ? 1 : 0;
+    const market = deriveCanonicalCrossJurisdictionMarket(route);
+    if (!market.sourceKey || !market.targetKey || market.sourceKey === market.targetKey) return null;
+    const side: 0 | 1 = market.sourceIsBase ? 1 : 0;
     const baseAmount = side === 1 ? offer.giveAmount : offer.wantAmount;
     const quoteAmount = side === 1 ? offer.wantAmount : offer.giveAmount;
     const priceTicks = offer.priceTicks > 0n ? offer.priceTicks : computeCrossPriceTicks(side, baseAmount, quoteAmount);
@@ -1839,7 +1834,7 @@ export function processOrderbookSwaps(
     return {
       offer,
       route,
-      pairId: `cross:${baseKey}/${quoteKey}`,
+      pairId: market.venueId,
       side,
       baseAmount,
       quoteAmount,
@@ -2529,6 +2524,47 @@ export function processOrderbookCancels(
       console.error(
         `❌ ORDERBOOK: duplicate order ids across pair books order=${namespacedOrderId} matches=${duplicateCount}`,
       );
+    }
+
+    const offer = accountMachine?.swapOffers?.get(offerId);
+    if (offer?.crossJurisdiction) {
+      const route = offer.crossJurisdiction;
+      const currentRatio = Math.max(
+        0,
+        Math.min(65_535, Math.floor(Number(route.cumulativeFillRatio ?? route.claimedRatio ?? 0) || 0)),
+      );
+      const sourceTotal = BigInt(route.source.amount);
+      const targetTotal = BigInt(route.target.amount);
+      const cumulativeSourceAmount =
+        route.filledSourceAmount ??
+        route.sourceClaimed ??
+        ((sourceTotal * BigInt(currentRatio)) / 65_535n);
+      const cumulativeTargetAmount =
+        route.filledTargetAmount ??
+        route.targetClaimed ??
+        ((targetTotal * BigInt(currentRatio)) / 65_535n);
+      mempoolOps.push({
+        accountId,
+        tx: {
+          type: 'cross_swap_fill_ack',
+          data: {
+            offerId,
+            fillSeq: Math.max(0, Math.floor(Number(route.fillSeq ?? 0) || 0)),
+            incrementalSourceAmount: 0n,
+            incrementalTargetAmount: 0n,
+            cumulativeSourceAmount,
+            cumulativeTargetAmount,
+            cumulativeFillRatio: currentRatio,
+            executionSourceAmount: 0n,
+            executionTargetAmount: 0n,
+            cancelRemainder: true,
+            comment: 'cross-j-cancel-request',
+            pairId: route.venueId || '',
+          },
+        },
+      });
+      console.log(`🌉 ORDERBOOK CROSS-J: queued clear/cancel ack for ${offerId.slice(-8)}`);
+      continue;
     }
 
     // Finalize cancellation at account level (releases hold + removes offer) via hub decision.

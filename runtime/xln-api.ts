@@ -68,6 +68,10 @@ export type {
   RuntimeAdapterStatus,
 } from './radapter';
 export { getBestBid, getBestAsk, getBookSideLevels } from './orderbook';
+export {
+  deriveCanonicalCrossJurisdictionBookOwnerForLegs,
+  deriveCanonicalCrossJurisdictionVenueIdForLegs,
+} from './cross-jurisdiction';
 
 // Re-export identity functions types
 export {
