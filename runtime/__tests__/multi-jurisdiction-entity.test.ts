@@ -284,6 +284,70 @@ describe('multi-jurisdiction entity binding', () => {
     expect(result.newState.accounts.has(targetEntityId.toLowerCase())).toBe(false);
   });
 
+  test('local counterparty without jurisdiction does not fall back to gossip metadata', async () => {
+    const env = makeEnv('multi-jurisdiction-local-missing-fail-closed');
+    const j1 = makeJurisdiction('J1', 31337, '11', '12');
+    installJurisdiction(env, j1);
+
+    const entityA = entity('13');
+    const targetEntityId = entity('14');
+    await importEntity(env, entityA, '55', j1);
+
+    env.eReplicas.set(targetEntityId, {
+      entityId: targetEntityId,
+      signerId: '56',
+      state: {
+        entityId: targetEntityId,
+        config: {
+          mode: 'proposer-based',
+          threshold: 1n,
+          validators: ['56'],
+          shares: { '56': 1n },
+        },
+      },
+    } as never);
+
+    env.gossip.announce(parseProfile({
+      entityId: targetEntityId,
+      name: 'Stale local target profile',
+      avatar: '',
+      bio: '',
+      website: '',
+      lastUpdated: 1,
+      runtimeId: addr('57'),
+      runtimeEncPubKey: `0x${'58'.repeat(32)}`,
+      publicAccounts: [],
+      wsUrl: null,
+      relays: [],
+      metadata: {
+        entityEncPubKey: `0x${'59'.repeat(32)}`,
+        isHub: false,
+        routingFeePPM: 0,
+        baseFee: 0n,
+        jurisdiction: {
+          name: j1.name,
+          chainId: j1.chainId,
+          entityProviderAddress: j1.entityProviderAddress,
+          depositoryAddress: j1.depositoryAddress,
+        },
+        board: {
+          threshold: 1,
+          validators: [{
+            signer: addr('5a'),
+            signerId: addr('5a'),
+            weight: 1,
+            publicKey: `0x${'5b'.repeat(32)}`,
+          }],
+        },
+      },
+      accounts: [],
+    }));
+
+    expect(() =>
+      assertSameJurisdictionAccount(env, entityA, findState(env, entityA)!.config.jurisdiction, targetEntityId),
+    ).toThrow('ACCOUNT_JURISDICTION_UNKNOWN');
+  });
+
   test('debt enforcement uses the entity jurisdiction instead of active jurisdiction', async () => {
     const env = makeEnv('multi-jurisdiction-debt');
     const j1 = makeJurisdiction('J1', 31337, '11', '12');

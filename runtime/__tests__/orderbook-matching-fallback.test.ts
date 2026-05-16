@@ -1745,6 +1745,204 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(() => processOrderbookSwaps(entityState, [takerOffer] as any)).toThrow(/ORDERBOOK_CACHE_MISMATCH/);
   });
 
+  test('fails fast when a stale persisted cross-j book order has no live route', () => {
+    const lot = SWAP_LOT_SCALE;
+    const pairId = 'cross:base:1/tron:1';
+    let staleBook = createBook({
+      bucketWidthTicks: 10_000n,
+      maxOrders: 10_000,
+      stpPolicy: 1,
+    });
+    staleBook = applyCommand(staleBook, {
+      kind: 0,
+      ownerId: 'maker-entity',
+      orderId: 'maker-account:maker-cross',
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 10_000n,
+      qtyLots: 1,
+    }).state;
+
+    const route = {
+      orderId: 'taker-cross',
+      bookOwnerEntityId: 'hub-entity',
+      venueId: pairId,
+      makerEntityId: 'taker-entity',
+      hubEntityId: 'hub-entity',
+      source: {
+        jurisdiction: 'base',
+        entityId: 'taker-entity',
+        counterpartyEntityId: 'hub-entity',
+        tokenId: 1,
+        amount: lot,
+      },
+      target: {
+        jurisdiction: 'tron',
+        entityId: 'taker-entity',
+        counterpartyEntityId: 'hub-entity',
+        tokenId: 1,
+        amount: lot,
+      },
+      status: 'resting',
+      createdAt: 1,
+      updatedAt: 1,
+    };
+
+    const takerOffer = {
+      offerId: 'taker-cross',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'taker-entity',
+      accountId: 'taker-account',
+      createdHeight: 2,
+      giveTokenId: 1,
+      giveAmount: lot,
+      wantTokenId: 1,
+      wantAmount: lot,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 10_000n,
+      crossJurisdiction: route,
+    };
+
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([
+        ['maker-account', { swapOffers: new Map() }],
+        ['taker-account', { swapOffers: new Map([['taker-cross', takerOffer]]) }],
+      ]),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 1,
+          supportedPairs: [pairId],
+        },
+        books: new Map([[pairId, staleBook]]),
+        pairConfig: new Map(),
+      } as any,
+    } as any;
+
+    expect(() => processOrderbookSwaps(entityState, [takerOffer] as any)).toThrow(/ORDERBOOK_CROSS_J_ORPHAN_BOOK_ORDER/);
+  });
+
+  test('refreshes a persisted cross-j book order after a committed partial fill ack', () => {
+    const lot = SWAP_LOT_SCALE;
+    const sourceTotal = 40_000n * lot;
+    const targetTotal = 100_000n * lot;
+    const filledSourceAmount = 10000152590218966n;
+    const filledTargetAmount = (targetTotal * 16384n) / 65_535n;
+    const remainingSource = sourceTotal - filledSourceAmount;
+    const remainingTarget = targetTotal - filledTargetAmount;
+    const pairId = 'cross:testnet:2/tron:1';
+    const namespacedOrderId = 'maker-account:maker-cross-partial';
+    let staleBook = createBook({
+      bucketWidthTicks: 10_000n,
+      maxOrders: 10_000,
+      stpPolicy: 1,
+    });
+    staleBook = applyCommand(staleBook, {
+      kind: 0,
+      ownerId: 'maker-entity',
+      orderId: namespacedOrderId,
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 25_000_000n,
+      qtyLots: 30_000,
+    }).state;
+
+    const route = {
+      orderId: 'maker-cross-partial',
+      bookOwnerEntityId: 'hub-entity',
+      venueId: pairId,
+      makerEntityId: 'maker-entity',
+      hubEntityId: 'hub-entity',
+      source: {
+        jurisdiction: 'testnet',
+        entityId: 'maker-entity',
+        counterpartyEntityId: 'hub-entity',
+        tokenId: 2,
+        amount: sourceTotal,
+      },
+      target: {
+        jurisdiction: 'tron',
+        entityId: 'maker-entity',
+        counterpartyEntityId: 'hub-entity',
+        tokenId: 1,
+        amount: targetTotal,
+      },
+      fillSeq: 1,
+      cumulativeFillRatio: 16_384,
+      claimedRatio: 16_384,
+      filledSourceAmount,
+      filledTargetAmount,
+      sourceClaimed: filledSourceAmount,
+      targetClaimed: filledTargetAmount,
+      status: 'partially_filled',
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    const offer = {
+      offerId: 'maker-cross-partial',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'maker-entity',
+      accountId: 'maker-account',
+      createdHeight: 2,
+      giveTokenId: 2,
+      giveAmount: remainingSource,
+      quantizedGive: remainingSource,
+      wantTokenId: 1,
+      wantAmount: remainingTarget,
+      quantizedWant: remainingTarget,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 25_000_000n,
+      crossJurisdiction: route,
+    };
+
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([
+        ['maker-account', { swapOffers: new Map([['maker-cross-partial', offer]]) }],
+      ]),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 1,
+          supportedPairs: [pairId],
+        },
+        books: new Map([[pairId, staleBook]]),
+        pairConfig: new Map(),
+      } as any,
+    } as any;
+
+    const result = processOrderbookSwaps(entityState, [offer] as any);
+    const finalBook = result.bookUpdates.at(-1)?.book;
+
+    expect(finalBook).toBeDefined();
+    expect(getBookOrder(finalBook!, namespacedOrderId)?.qtyLots).toBe(Number(remainingSource / lot));
+  });
+
   test('fails fast when persisted book price diverges from account offer', () => {
     const lot = SWAP_LOT_SCALE;
     const makerAsk = {

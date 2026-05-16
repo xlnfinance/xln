@@ -1675,8 +1675,19 @@ export const applyEntityFrame = async (
   // 1. MempoolOps now applied inline (see above in the loop) to fix simultaneous payment bug
   // This section removed - mempoolOps are applied immediately after each applyEntityTx
 
+  // Committed account-level cancels must be reflected in the persisted book
+  // before the next matching pass. Otherwise a restored book can still expose
+  // an order that the account frame has already removed.
+  if (allSwapOffersCancelled.length > 0) {
+    applyCommittedSwapCancelsToOrderbook(env, currentEntityState, allSwapOffersCancelled);
+  }
+
   // 2. Run orderbook matching on aggregated swap offers (batch matching)
-  if ((allSwapOffersCreated.length > 0 || crossJurisdictionReadinessChanged) && currentEntityState.orderbookExt) {
+  const hasPersistedCrossJurisdictionBook = Boolean(
+    currentEntityState.orderbookExt &&
+    Array.from(currentEntityState.orderbookExt.books?.keys?.() || []).some((pairId) => String(pairId).startsWith('cross:')),
+  );
+  if ((allSwapOffersCreated.length > 0 || crossJurisdictionReadinessChanged || hasPersistedCrossJurisdictionBook) && currentEntityState.orderbookExt) {
     console.log(`📊 ENTITY-ORCHESTRATOR: Batch matching ${allSwapOffersCreated.length} swap offers`);
 
     // AUDIT FIX (CRITICAL-1): Enrich SwapOfferEvent with accountId from Hub's perspective
@@ -1703,6 +1714,7 @@ export const applyEntityFrame = async (
       enrichedOffers.push(...collectLocalCrossJurisdictionOffers(currentEntityState));
     }
     const hasCrossJurisdictionOffer =
+      hasPersistedCrossJurisdictionBook ||
       crossJurisdictionReadinessChanged ||
       enrichedOffers.some(offer => !!offer.crossJurisdiction);
     const siblingOffers = hasCrossJurisdictionOffer
@@ -1878,10 +1890,6 @@ export const applyEntityFrame = async (
   }
 
   // 3. Process swap cancel requests through hub orderbook
-  if (allSwapOffersCancelled.length > 0) {
-    applyCommittedSwapCancelsToOrderbook(env, currentEntityState, allSwapOffersCancelled);
-  }
-
   if (allSwapCancelRequests.length > 0) {
     console.log(`📊 ENTITY-ORCHESTRATOR: Processing ${allSwapCancelRequests.length} swap cancel requests`);
 
