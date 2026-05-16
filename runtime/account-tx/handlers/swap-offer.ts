@@ -204,6 +204,9 @@ export async function handleSwapOffer(
   }
 
   // 7. Create offer (stored amounts are already quantized for deterministic matching)
+  const publicCrossJurisdiction = crossJurisdiction
+    ? stripCrossJurisdictionPrivateData({ ...crossJurisdiction })
+    : undefined;
   const offer: SwapOffer = {
     offerId,
     giveTokenId,
@@ -217,7 +220,7 @@ export async function handleSwapOffer(
     createdHeight: currentHeight,
     quantizedGive: effectiveGiveAmount,
     quantizedWant: effectiveWantAmount,
-    ...(crossJurisdiction ? { crossJurisdiction: stripCrossJurisdictionPrivateData({ ...crossJurisdiction }) } : {}),
+    ...(publicCrossJurisdiction ? { crossJurisdiction: publicCrossJurisdiction } : {}),
   };
 
   // 8. Lock capacity (CRITICAL PER CODEX: Apply during BOTH validation and commit!)
@@ -259,7 +262,7 @@ export async function handleSwapOffer(
       priceTicks,
       ...(timeInForce !== undefined ? { timeInForce } : {}),
       minFillRatio,
-      ...(crossJurisdiction ? { crossJurisdiction } : {}),
+      ...(publicCrossJurisdiction ? { crossJurisdiction: publicCrossJurisdiction } : {}),
     },
   };
 }

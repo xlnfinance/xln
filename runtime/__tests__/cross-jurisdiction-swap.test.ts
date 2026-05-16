@@ -322,6 +322,10 @@ describe('cross-jurisdiction hashledger swap', () => {
     const projectedAccount = projectAccountDoc(account) as any;
     expect(clonedRoute.hashLadderPrivateSeed).toBeUndefined();
     expect(projectedRoute.hashLadderPrivateSeed).toBeUndefined();
+    expect(clonedRoute.source).toEqual(route.source);
+    expect(clonedRoute.target).toEqual(route.target);
+    expect(projectedRoute.source).toEqual(route.source);
+    expect(projectedRoute.target).toEqual(route.target);
     expect(clonedAccount.swapOffers.get(route.orderId).crossJurisdiction.hashLadderPrivateSeed).toBeUndefined();
     expect(clonedAccount.mempool[0].data.crossJurisdiction.hashLadderPrivateSeed).toBeUndefined();
     expect(clonedAccount.swapOrderHistory.get(route.orderId).crossJurisdiction.hashLadderPrivateSeed).toBeUndefined();
@@ -378,6 +382,47 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect((result.newState.crossJurisdictionSwaps?.get(route.orderId) as any)?.hashLadderPrivateSeed).toBeUndefined();
   });
 
+  test('swap_offer created event carries only public cross-j route', async () => {
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('d1');
+    const sourceHub = entity('d2');
+    const targetHub = entity('d3');
+    const targetUser = entity('d4');
+    const account = makeAccount(sourceHub, sourceUser);
+    const route = {
+      ...buildPreparedCrossJurisdictionRoute({
+        orderId: 'cross-public-created-event',
+        makerEntityId: sourceUser,
+        hubEntityId: sourceHub,
+        source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000_000_000_000_000_000n },
+        target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 2, amount: 1_000_000_000_000_000_000n },
+        status: 'resting',
+        createdAt: 1_000,
+        updatedAt: 1_000,
+        expiresAt: 61_000,
+      }, { runtimeSeed: 'cross-public-created-event', sourceDisputeDelayMs: 5_000, now: 1_000 }),
+      status: 'resting' as const,
+      hashLadderPrivateSeed: secret('d5'),
+    } as any;
+    const result = await processAccountTx(account, {
+      type: 'swap_offer',
+      data: {
+        offerId: route.orderId,
+        giveTokenId: route.source.tokenId,
+        giveAmount: route.source.amount,
+        wantTokenId: route.target.tokenId,
+        wantAmount: route.target.amount,
+        minFillRatio: 0,
+        crossJurisdiction: route,
+      },
+    }, account.leftEntity === sourceUser, 1_000, 1);
+
+    expect(result.success).toBe(true);
+    expect((result.swapOfferCreated as any).crossJurisdiction.hashLadderPrivateSeed).toBeUndefined();
+    expect((account.swapOffers.get(route.orderId)?.crossJurisdiction as any).hashLadderPrivateSeed).toBeUndefined();
+  });
+
   test('canonical route hash binds cross-j economic terms and terminal states reject overwrite', async () => {
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const base = makeJurisdiction('Base', 8453, '21', '22');
@@ -416,6 +461,37 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     expect(result.newState.crossJurisdictionSwaps?.get(baseRoute.orderId)?.status).toBe('settled');
     expect(result.newState.messages.some(message => message.includes('terminal state settled'))).toBe(true);
+  });
+
+  test('route hash ignores mutable clearing policy but still binds economic terms', () => {
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('66');
+    const sourceHub = entity('67');
+    const targetHub = entity('68');
+    const targetUser = entity('69');
+    const route = withCanonicalCrossJurisdictionRouteHash({
+      orderId: 'route-clearing-policy-mutable',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 100n },
+      target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 2, amount: 90n },
+      priceTicks: 2500n,
+      status: 'resting',
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      expiresAt: 61_000,
+    });
+
+    const clearingRoute = {
+      ...route,
+      status: 'clearing' as const,
+      clearingPolicy: 'cancel_and_clear' as const,
+    };
+    expect(withCanonicalCrossJurisdictionRouteHash(clearingRoute).routeHash).toBe(route.routeHash);
+
+    const changedTerms = { ...route, target: { ...route.target, amount: 91n } };
+    expect(() => withCanonicalCrossJurisdictionRouteHash(changedTerms)).toThrow(/CROSS_J_ROUTE_HASH_MISMATCH/);
   });
 
   test('partial cross-j fill ack is delayed-clearing and keeps order/pulls open', async () => {
@@ -588,6 +664,78 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(result.mempoolOps?.[0]?.accountId).toBe(sourceUser);
     expect((result.mempoolOps?.[0]?.tx as any).data.binary).toMatch(/^0x/);
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('clearing');
+  });
+
+  test('clear request closes live cross-j offer before revealing pull', async () => {
+    const env = createEmptyEnv('cross-clear-closes-offer-first');
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('86');
+    const sourceHub = entity('87');
+    const targetHub = entity('88');
+    const targetUser = entity('89');
+    const state = makeState(sourceHub, addr('8a'), eth, sourceUser);
+    const prepared = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-clear-offer-first',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      status: 'resting',
+      createdAt: env.timestamp,
+      updatedAt: env.timestamp,
+      expiresAt: 70_000,
+    }, { runtimeSeed: 'cross-clear-offer-first', sourceDisputeDelayMs: 5_000, now: env.timestamp });
+    const route = {
+      ...prepared,
+      status: 'partially_filled' as const,
+      fillSeq: 1,
+      cumulativeFillRatio: 32_768,
+      claimedRatio: 32_768,
+      filledSourceAmount: 500n,
+      filledTargetAmount: 450n,
+      sourceClaimed: 500n,
+      targetClaimed: 450n,
+    };
+    state.crossJurisdictionSwaps?.set(route.orderId, route);
+    const account = state.accounts.get(sourceUser)!;
+    account.swapOffers.set(route.orderId, {
+      offerId: route.orderId,
+      giveTokenId: 1,
+      giveAmount: 500n,
+      wantTokenId: 1,
+      wantAmount: 450n,
+      priceTicks: 900n,
+      timeInForce: 0,
+      minFillRatio: 0,
+      makerIsLeft: account.leftEntity === sourceUser,
+      createdHeight: 0,
+      crossJurisdiction: { ...route },
+    });
+    account.pulls = new Map([[route.sourcePull!.pullId, {
+      pullId: route.sourcePull!.pullId,
+      tokenId: 1,
+      amount: route.sourcePull!.signedAmount,
+      claimedRatio: 0,
+      claimedAmount: 0n,
+      revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
+      fullHash: route.sourcePull!.fullHash,
+      partialRoot: route.sourcePull!.partialRoot,
+      createdHeight: 0,
+      createdTimestamp: env.timestamp,
+    }]]);
+
+    const result = await applyEntityTx(env, state, {
+      type: 'requestCrossJurisdictionClear',
+      data: { orderId: route.orderId, cancelRemainder: true },
+    });
+
+    expect(result.mempoolOps?.map(op => op.tx.type)).toEqual(['cross_swap_fill_ack']);
+    expect((result.mempoolOps?.[0]?.tx as any).data.cancelRemainder).toBe(true);
+    expect(result.mempoolOps?.some(op => op.tx.type === 'pull_resolve')).toBe(false);
+    expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('clear_requested');
   });
 
   test('cross-j cancel requests do not emit plain swap_resolve', () => {
