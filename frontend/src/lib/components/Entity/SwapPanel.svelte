@@ -192,6 +192,7 @@
   let routeOptions: SwapRouteOption[] = [];
   let selectedCrossTarget: CrossTargetOption | null = null;
   let autoExtendCrossInbound = true;
+  let crossPriceImprovementMode: 'source_savings' | 'target_bonus' = 'source_savings';
   let selectedSourceEntityValue = '';
   let routeDetailsOpen = false;
   let crossTargetInCapacity = 0n;
@@ -2130,6 +2131,7 @@
             amount: effectiveWantAmount,
           },
           priceTicks: canonicalPriceTicks,
+          priceImprovementMode: crossPriceImprovementMode,
           status: 'intent',
           createdAt: now,
           updatedAt: now,
@@ -2582,6 +2584,15 @@
           <label class="route-checkbox" data-testid="swap-cross-auto-extend">
             <input type="checkbox" bind:checked={autoExtendCrossInbound} />
             <span>Auto-extend target inbound capacity</span>
+          </label>
+        {/if}
+        {#if swapRouteMode === 'cross'}
+          <label class="route-select-row" data-testid="swap-cross-improvement-mode">
+            <span>Price improvement</span>
+            <select class="route-select" bind:value={crossPriceImprovementMode}>
+              <option value="source_savings">Spend less source</option>
+              <option value="target_bonus">Receive more target</option>
+            </select>
           </label>
         {/if}
         {#if routeDetailsOpen}
@@ -3187,11 +3198,11 @@
 
   .route-select-row {
     display: grid;
-    grid-template-columns: 52px minmax(0, 1fr);
+    grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
     align-items: center;
     gap: 8px;
     padding: 0 10px;
-    height: 36px;
+    min-height: 36px;
     background: #111217;
     border: 1px solid #1e2028;
     border-radius: 6px;

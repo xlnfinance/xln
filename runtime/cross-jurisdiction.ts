@@ -483,9 +483,7 @@ export function deriveCrossJurisdictionRouteHash(route: CrossJurisdictionSwapRou
       BigInt(route.priceTicks ?? 0n),
       BigInt(Math.floor(Number(route.expiresAt ?? 0))),
       String(route.riskMode || ''),
-      // clearingPolicy is lifecycle state, not order identity. Binding it into
-      // routeHash makes a valid route hash-invalid after clear/cancel updates.
-      '',
+      String(route.priceImprovementMode || ''),
     ],
   ));
 }

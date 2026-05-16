@@ -726,6 +726,15 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                   throw new Error(`CROSS_J_COMMITTED_FILL_ACK_INVALID: ${validatedFill.error}`);
                 }
                 Object.assign(route, withCrossJurisdictionFillProgress(route, validatedFill.value, newState.timestamp));
+                if ((accountTx.data.priceImprovementAmount ?? 0n) > 0n) {
+                  if (accountTx.data.priceImprovementMode === 'source_savings') {
+                    route.priceImprovementSourceAmount =
+                      (route.priceImprovementSourceAmount ?? 0n) + accountTx.data.priceImprovementAmount!;
+                  } else if (accountTx.data.priceImprovementMode === 'target_bonus') {
+                    route.priceImprovementTargetAmount =
+                      (route.priceImprovementTargetAmount ?? 0n) + accountTx.data.priceImprovementAmount!;
+                  }
+                }
                 if (accountTx.data.cancelRemainder) {
                   route.status = 'clear_requested';
                   route.clearingPolicy = 'cancel_and_clear';
@@ -1765,7 +1774,19 @@ export function processOrderbookSwaps(
 
   const crossLiveOfferMeta = new Map<string, CrossMarketOffer>();
   const assertedCrossJurisdictionPairs = new Set<string>();
-  const crossPairsBlockedByPendingAck = new Set<string>();
+  const crossPendingAckOrderIdsByPair = new Map<string, Set<string>>();
+  const suspendCrossOrderForPendingAck = (pairId: string, orderId: string): void => {
+    let orders = crossPendingAckOrderIdsByPair.get(pairId);
+    if (!orders) {
+      orders = new Set();
+      crossPendingAckOrderIdsByPair.set(pairId, orders);
+    }
+    orders.add(orderId);
+  };
+  const suspendedCrossOrdersForPair = (pairId: string): ReadonlySet<string> | undefined => {
+    const orders = crossPendingAckOrderIdsByPair.get(pairId);
+    return orders && orders.size > 0 ? orders : undefined;
+  };
 
   const refreshExistingCrossBookOrder = (
     pairId: string,
@@ -1825,7 +1846,7 @@ export function processOrderbookSwaps(
       const meta = crossLiveOfferMeta.get(orderId) ?? buildCrossMarketOfferFromBookOrder(orderId);
       if (!meta) {
         if (pendingAck) {
-          crossPairsBlockedByPendingAck.add(pairId);
+          suspendCrossOrderForPendingAck(pairId, orderId);
           continue;
         }
         throw new Error(`ORDERBOOK_CROSS_J_ORPHAN_BOOK_ORDER: pair=${pairId} order=${orderId}`);
@@ -1847,7 +1868,7 @@ export function processOrderbookSwaps(
             `storedQty=${order.qtyLots.toString()} canonicalQty=${canonicalQtyLots.toString()}`,
           );
         }
-        crossPairsBlockedByPendingAck.add(pairId);
+        suspendCrossOrderForPendingAck(pairId, orderId);
         continue;
       }
       if (
@@ -1909,12 +1930,8 @@ export function processOrderbookSwaps(
 
       const currentNamespacedOrderId = swapKey(currentAccountId, rawOffer.offerId);
       crossLiveOfferMeta.set(currentNamespacedOrderId, marketOffer);
-      if (crossPairsBlockedByPendingAck.has(marketOffer.pairId)) {
-        console.log(
-          `🌉 ORDERBOOK CROSS-J: pair ${marketOffer.pairId} waiting for pending fill ack before matching ${rawOffer.offerId.slice(-8)}`,
-        );
-        continue;
-      }
+      const suspendedOrderIds = suspendedCrossOrdersForPair(marketOffer.pairId);
+      if (suspendedOrderIds?.has(currentNamespacedOrderId)) continue;
       if (hasQueuedSwapResolveForEntityState(hubState, queuedSwapResolutions, currentAccountId, rawOffer.offerId)) {
         continue;
       }
@@ -1951,7 +1968,7 @@ export function processOrderbookSwaps(
           priceTicks: marketOffer.priceTicks,
           qtyLots: Number(qtyLots),
           minFillRatio: rawOffer.minFillRatio,
-        });
+        }, suspendedOrderIds ? { suspendedOrderIds } : undefined);
       } catch (error) {
         rejectInvalidCrossOffer(currentAccountId, rawOffer.offerId, `cross-pair-error:${error instanceof Error ? error.message : String(error)}`);
         continue;

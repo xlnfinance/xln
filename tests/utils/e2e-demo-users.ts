@@ -565,17 +565,17 @@ export async function createRuntime(
   mnemonic: string,
   options: CreateRuntimeOptions = {},
 ): Promise<void> {
-  const quickLoginLabel = label.toLowerCase();
-  const isQuickLoginDemo =
-    (quickLoginLabel === 'alice' || quickLoginLabel === 'bob' || quickLoginLabel === 'carol' || quickLoginLabel === 'dave')
-    && normalizeMnemonic(mnemonic) === normalizeMnemonic(selectDemoMnemonic(quickLoginLabel as DemoUserName));
+  const normalizedMnemonic = normalizeMnemonic(mnemonic);
+  const quickLoginLabel = (['alice', 'bob', 'carol', 'dave'] as const)
+    .find((demoLabel) => normalizedMnemonic === normalizeMnemonic(selectDemoMnemonic(demoLabel)));
+  const isQuickLoginDemo = Boolean(quickLoginLabel);
   let runtimeId = deriveRuntimeIdFromMnemonic(mnemonic);
   const previousRuntimeId = await getActiveEntity(page).then((entity) => entity?.runtimeId ?? null);
 
   await ensureRuntimeCreationView(page, label);
 
   if (isQuickLoginDemo) {
-    const quickLoginButton = page.getByRole('button', { name: new RegExp(`^${escapeRegex(label)}$`, 'i') });
+    const quickLoginButton = page.getByRole('button', { name: new RegExp(`^${escapeRegex(quickLoginLabel!)}$`, 'i') });
     await expect(quickLoginButton).toBeVisible({ timeout: 15_000 });
     await quickLoginButton.click();
     runtimeId = await waitForNextRuntimeReady(page, previousRuntimeId);
