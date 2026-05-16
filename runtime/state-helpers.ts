@@ -20,6 +20,7 @@ import { safeStringify } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
 import { getAccountFrameHistoryView, setAccountFrameHistoryView } from './env-events';
 import { cloneJBatch, type CompletedBatch, type JBatchState } from './j-batch';
+import { stripCrossJurisdictionPrivateData } from './cross-jurisdiction';
 import type { CrontabState, ScheduledHook } from './crontab-types';
 import type { Profile } from './networking/gossip';
 import type {
@@ -30,6 +31,16 @@ import type {
   PriceBucketState,
   PriceLevelState,
 } from './orderbook';
+
+const stripCrossJurisdictionRoutePrivateDataFromState = (state: EntityState): void => {
+  if (!state.crossJurisdictionSwaps) return;
+  state.crossJurisdictionSwaps = new Map(
+    Array.from(state.crossJurisdictionSwaps.entries()).map(([id, route]) => [
+      id,
+      stripCrossJurisdictionPrivateData({ ...route }),
+    ]),
+  );
+};
 
 // Message size limit for snapshot efficiency
 const MESSAGE_LIMIT = 10;
@@ -281,6 +292,7 @@ export function cloneEntityState(entityState: EntityState, forSnapshot: boolean 
     if (entityState.jBatchState && !cloned.jBatchState) {
       cloned.jBatchState = cloneJBatchState(entityState.jBatchState);
     }
+    stripCrossJurisdictionRoutePrivateDataFromState(cloned);
 
     // VALIDATE AT SOURCE: Guarantee type safety from this point forward
     return validateEntityState(cloned, 'cloneEntityState.structuredClone');
@@ -358,7 +370,7 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
       ? { pendingSwapFillRatios: new Map(Array.from(entityState.pendingSwapFillRatios.entries())) }
       : {}),
     ...(entityState.crossJurisdictionSwaps
-      ? { crossJurisdictionSwaps: new Map(Array.from(entityState.crossJurisdictionSwaps.entries()).map(([id, route]) => [id, { ...route }])) }
+      ? { crossJurisdictionSwaps: new Map(Array.from(entityState.crossJurisdictionSwaps.entries()).map(([id, route]) => [id, stripCrossJurisdictionPrivateData({ ...route })])) }
       : {}),
   };
 }

@@ -63,6 +63,9 @@ export async function handleSwapResolve(
   if (!offer) {
     return { success: false, error: `Offer ${offerId} not found`, events };
   }
+  if (offer.crossJurisdiction) {
+    return { success: false, error: `Cross-jurisdiction offers must use cross_swap_fill_ack/requestCrossJurisdictionClear`, events };
+  }
 
   const canonicalGiveAmount = restingGiveAmount ?? offer.giveAmount;
   const canonicalWantAmount = restingWantAmount ?? offer.wantAmount;

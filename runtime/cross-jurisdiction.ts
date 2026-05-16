@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 import { isLeftEntity } from './entity-id-utils';
-import type { CrossJurisdictionSwapRoute, CrossJurisdictionSwapStatus } from './types';
+import type { CrossJurisdictionSwapRoute, CrossJurisdictionSwapStatus, Env } from './types';
 import {
   buildHashLadderProof,
   revealHashLadder,
@@ -10,6 +10,7 @@ import {
 export const CROSS_J_DEFAULT_SOURCE_REVEAL_WINDOW_MS = 60_000;
 export const CROSS_J_TARGET_REVEAL_SAFETY_MS = 60_000;
 export const CROSS_J_MIN_TARGET_RESPONSE_WINDOW_MS = 24 * 60 * 60 * 1000;
+export const CROSS_J_MAX_FILL_RATIO = 65_535;
 
 const CROSS_J_STATUS_RANK: Record<CrossJurisdictionSwapStatus, number> = {
   intent: 10,
@@ -45,6 +46,118 @@ export function isCrossJurisdictionRouteExpired(route: CrossJurisdictionSwapRout
   return Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= now;
 }
 
+export type CrossJurisdictionFillProgressInput = {
+  fillSeq?: number | undefined;
+  cumulativeFillRatio: number;
+  incrementalSourceAmount?: bigint | undefined;
+  incrementalTargetAmount?: bigint | undefined;
+  cumulativeSourceAmount?: bigint | undefined;
+  cumulativeTargetAmount?: bigint | undefined;
+};
+
+export type CrossJurisdictionFillProgress = {
+  fillSeq: number;
+  previousRatio: number;
+  nextRatio: number;
+  previousSourceAmount: bigint;
+  previousTargetAmount: bigint;
+  cumulativeSourceAmount: bigint;
+  cumulativeTargetAmount: bigint;
+  incrementalSourceAmount: bigint;
+  incrementalTargetAmount: bigint;
+};
+
+const clampFillRatio = (value: unknown): number =>
+  Math.max(0, Math.min(CROSS_J_MAX_FILL_RATIO, Math.floor(Number(value) || 0)));
+
+export function validateCrossJurisdictionFillProgress(
+  route: CrossJurisdictionSwapRoute,
+  input: CrossJurisdictionFillProgressInput,
+): { ok: true; value: CrossJurisdictionFillProgress } | { ok: false; error: string } {
+  const previousSeq = Math.max(0, Math.floor(Number(route.fillSeq ?? 0) || 0));
+  const nextSeq = input.fillSeq === undefined ? previousSeq + 1 : Math.floor(Number(input.fillSeq));
+  if (!Number.isInteger(nextSeq) || nextSeq !== previousSeq + 1) {
+    return { ok: false, error: `bad seq ${input.fillSeq}, expected ${previousSeq + 1}` };
+  }
+
+  const previousRatio = Math.max(clampFillRatio(route.cumulativeFillRatio), clampFillRatio(route.claimedRatio));
+  const nextRatio = clampFillRatio(input.cumulativeFillRatio);
+  if (nextRatio <= previousRatio) {
+    return { ok: false, error: `non-monotonic ratio ${nextRatio} <= ${previousRatio}` };
+  }
+
+  const sourceTotal = BigInt(route.source.amount);
+  const targetTotal = BigInt(route.target.amount);
+  if (sourceTotal <= 0n || targetTotal <= 0n) {
+    return { ok: false, error: 'invalid route amount' };
+  }
+
+  const previousSourceAmount =
+    route.filledSourceAmount ??
+    route.sourceClaimed ??
+    ((sourceTotal * BigInt(previousRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO));
+  const previousTargetAmount =
+    route.filledTargetAmount ??
+    route.targetClaimed ??
+    ((targetTotal * BigInt(previousRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO));
+  const cumulativeSourceAmount =
+    (sourceTotal * BigInt(nextRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO);
+  const cumulativeTargetAmount =
+    (targetTotal * BigInt(nextRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO);
+  const incrementalSourceAmount = cumulativeSourceAmount - previousSourceAmount;
+  const incrementalTargetAmount = cumulativeTargetAmount - previousTargetAmount;
+  if (incrementalSourceAmount <= 0n || incrementalTargetAmount <= 0n) {
+    return { ok: false, error: 'no incremental amount' };
+  }
+
+  if (input.cumulativeSourceAmount !== undefined && input.cumulativeSourceAmount !== cumulativeSourceAmount) {
+    return { ok: false, error: `cumulative source mismatch: expected ${cumulativeSourceAmount}, got ${input.cumulativeSourceAmount}` };
+  }
+  if (input.cumulativeTargetAmount !== undefined && input.cumulativeTargetAmount !== cumulativeTargetAmount) {
+    return { ok: false, error: `cumulative target mismatch: expected ${cumulativeTargetAmount}, got ${input.cumulativeTargetAmount}` };
+  }
+  if (input.incrementalSourceAmount !== undefined && input.incrementalSourceAmount !== incrementalSourceAmount) {
+    return { ok: false, error: `incremental source mismatch: expected ${incrementalSourceAmount}, got ${input.incrementalSourceAmount}` };
+  }
+  if (input.incrementalTargetAmount !== undefined && input.incrementalTargetAmount !== incrementalTargetAmount) {
+    return { ok: false, error: `incremental target mismatch: expected ${incrementalTargetAmount}, got ${input.incrementalTargetAmount}` };
+  }
+
+  return {
+    ok: true,
+    value: {
+      fillSeq: nextSeq,
+      previousRatio,
+      nextRatio,
+      previousSourceAmount,
+      previousTargetAmount,
+      cumulativeSourceAmount,
+      cumulativeTargetAmount,
+      incrementalSourceAmount,
+      incrementalTargetAmount,
+    },
+  };
+}
+
+export function withCrossJurisdictionFillProgress(
+  route: CrossJurisdictionSwapRoute,
+  fill: CrossJurisdictionFillProgress,
+  updatedAt: number,
+): CrossJurisdictionSwapRoute {
+  return {
+    ...route,
+    fillSeq: fill.fillSeq,
+    cumulativeFillRatio: fill.nextRatio,
+    claimedRatio: fill.nextRatio,
+    filledSourceAmount: fill.cumulativeSourceAmount,
+    filledTargetAmount: fill.cumulativeTargetAmount,
+    sourceClaimed: fill.cumulativeSourceAmount,
+    targetClaimed: fill.cumulativeTargetAmount,
+    status: fill.nextRatio >= CROSS_J_MAX_FILL_RATIO ? 'clear_requested' : 'partially_filled',
+    updatedAt,
+  };
+}
+
 export function isCrossJurisdictionPullExpired(
   route: CrossJurisdictionSwapRoute,
   leg: 'source' | 'target',
@@ -60,22 +173,88 @@ const normalizeJurisdiction = (value: string): string => String(value || '').tri
 const crossJurisdictionAssetKey = (jurisdiction: string, tokenId: number): string =>
   `${normalizeJurisdiction(jurisdiction)}:${Math.floor(Number(tokenId) || 0)}`;
 
+export type CanonicalCrossJurisdictionMarket = {
+  sourceKey: string;
+  targetKey: string;
+  baseKey: string;
+  quoteKey: string;
+  sourceIsBase: boolean;
+  venueId: string;
+};
+
+export function deriveCanonicalCrossJurisdictionMarket(route: CrossJurisdictionSwapRoute): CanonicalCrossJurisdictionMarket {
+  return deriveCanonicalCrossJurisdictionMarketForLegs(
+    route.source.jurisdiction,
+    route.source.tokenId,
+    route.target.jurisdiction,
+    route.target.tokenId,
+  );
+}
+
+export function deriveCanonicalCrossJurisdictionMarketForLegs(
+  sourceJurisdiction: string,
+  sourceTokenId: number,
+  targetJurisdiction: string,
+  targetTokenId: number,
+): CanonicalCrossJurisdictionMarket {
+  const sourceKey = crossJurisdictionAssetKey(sourceJurisdiction, sourceTokenId);
+  const targetKey = crossJurisdictionAssetKey(targetJurisdiction, targetTokenId);
+  const sourceIsBase = sourceKey <= targetKey;
+  const baseKey = sourceIsBase ? sourceKey : targetKey;
+  const quoteKey = sourceIsBase ? targetKey : sourceKey;
+  return {
+    sourceKey,
+    targetKey,
+    baseKey,
+    quoteKey,
+    sourceIsBase,
+    venueId: `cross:${baseKey}/${quoteKey}`,
+  };
+}
+
 export function deriveCanonicalCrossJurisdictionVenueId(route: CrossJurisdictionSwapRoute): string {
-  const sourceKey = crossJurisdictionAssetKey(route.source.jurisdiction, route.source.tokenId);
-  const targetKey = crossJurisdictionAssetKey(route.target.jurisdiction, route.target.tokenId);
-  const [baseKey, quoteKey] = sourceKey <= targetKey
-    ? [sourceKey, targetKey]
-    : [targetKey, sourceKey];
-  return `cross:${baseKey}/${quoteKey}`;
+  return deriveCanonicalCrossJurisdictionMarket(route).venueId;
+}
+
+export function deriveCanonicalCrossJurisdictionVenueIdForLegs(
+  sourceJurisdiction: string,
+  sourceTokenId: number,
+  targetJurisdiction: string,
+  targetTokenId: number,
+): string {
+  return deriveCanonicalCrossJurisdictionMarketForLegs(
+    sourceJurisdiction,
+    sourceTokenId,
+    targetJurisdiction,
+    targetTokenId,
+  ).venueId;
 }
 
 export function deriveCanonicalCrossJurisdictionBookOwner(route: CrossJurisdictionSwapRoute): string {
-  const sourceKey = crossJurisdictionAssetKey(route.source.jurisdiction, route.source.tokenId);
-  const targetKey = crossJurisdictionAssetKey(route.target.jurisdiction, route.target.tokenId);
+  return deriveCanonicalCrossJurisdictionBookOwnerForLegs(
+    route.source.jurisdiction,
+    route.source.tokenId,
+    route.source.counterpartyEntityId,
+    route.target.jurisdiction,
+    route.target.tokenId,
+    route.target.entityId,
+  );
+}
+
+export function deriveCanonicalCrossJurisdictionBookOwnerForLegs(
+  sourceJurisdiction: string,
+  sourceTokenId: number,
+  sourceHubEntityId: string,
+  targetJurisdiction: string,
+  targetTokenId: number,
+  targetHubEntityId: string,
+): string {
+  const sourceKey = crossJurisdictionAssetKey(sourceJurisdiction, sourceTokenId);
+  const targetKey = crossJurisdictionAssetKey(targetJurisdiction, targetTokenId);
   return normalizeEntityId(
     sourceKey <= targetKey
-      ? route.source.counterpartyEntityId
-      : route.target.entityId,
+      ? sourceHubEntityId
+      : targetHubEntityId,
   );
 }
 const ROUTE_HASH_ABI_TYPES = [
@@ -122,8 +301,43 @@ export function deriveCrossJurisdictionPrivateSeed(
   ].join(':')));
 }
 
+type LegacyPrivateRoute = CrossJurisdictionSwapRoute & { hashLadderPrivateSeed?: string };
+
+const routePrivateSeedKey = (route: CrossJurisdictionSwapRoute): string =>
+  (route.routeHash || deriveCrossJurisdictionRouteHash(route)).toLowerCase();
+
+export function rememberCrossJurisdictionPrivateSeed(
+  env: Pick<Env, 'crossJurisdictionPrivateSeeds'>,
+  route: CrossJurisdictionSwapRoute,
+  privateSeed: string,
+): string {
+  const seed = String(privateSeed || '').trim();
+  if (!seed) throw new Error(`CROSS_J_HASHLADDER_PRIVATE_SEED_EMPTY:${route.orderId}`);
+  env.crossJurisdictionPrivateSeeds ||= new Map();
+  env.crossJurisdictionPrivateSeeds.set(routePrivateSeedKey(route), seed);
+  return seed;
+}
+
+export function getCrossJurisdictionPrivateSeed(
+  env: Pick<Env, 'crossJurisdictionPrivateSeeds' | 'runtimeSeed'>,
+  route: CrossJurisdictionSwapRoute,
+): string {
+  const key = routePrivateSeedKey(route);
+  const stored = env.crossJurisdictionPrivateSeeds?.get(key);
+  if (stored) return stored;
+
+  const legacySeed = String((route as LegacyPrivateRoute).hashLadderPrivateSeed || '').trim();
+  if (legacySeed) return rememberCrossJurisdictionPrivateSeed(env, route, legacySeed);
+
+  return rememberCrossJurisdictionPrivateSeed(
+    env,
+    route,
+    deriveCrossJurisdictionPrivateSeed(env.runtimeSeed, route),
+  );
+}
+
 export function stripCrossJurisdictionPrivateData(route: CrossJurisdictionSwapRoute): CrossJurisdictionSwapRoute {
-  const { hashLadderPrivateSeed: _privateSeed, ...publicRoute } = route;
+  const { hashLadderPrivateSeed: _privateSeed, ...publicRoute } = route as LegacyPrivateRoute;
   return publicRoute;
 }
 
@@ -187,10 +401,11 @@ export function deriveCrossJurisdictionPullId(route: CrossJurisdictionSwapRoute,
 
 export function deriveCrossJurisdictionHashLadderProof(
   route: CrossJurisdictionSwapRoute,
+  privateSeed: string,
 ) {
-  const privateSeed = String(route.hashLadderPrivateSeed || '').trim();
-  if (!privateSeed) throw new Error(`CROSS_J_HASHLADDER_PRIVATE_SEED_MISSING:${route.orderId}`);
-  return buildHashLadderProof(privateSeed);
+  const seed = String(privateSeed || '').trim();
+  if (!seed) throw new Error(`CROSS_J_HASHLADDER_PRIVATE_SEED_MISSING:${route.orderId}`);
+  return buildHashLadderProof(seed);
 }
 
 function signedAmountForBeneficiary(beneficiaryEntityId: string, counterpartyEntityId: string, amount: bigint): bigint {
@@ -221,9 +436,8 @@ export function buildPreparedCrossJurisdictionRoute(
     ...route,
     expiresAt: route.expiresAt ?? sourceRevealUntilTimestamp,
   });
-  const hashLadderPrivateSeed = canonicalRoute.hashLadderPrivateSeed || deriveCrossJurisdictionPrivateSeed(options.runtimeSeed, canonicalRoute);
-  const seededRoute = { ...canonicalRoute, hashLadderPrivateSeed };
-  const proof = deriveCrossJurisdictionHashLadderProof(seededRoute);
+  const hashLadderPrivateSeed = deriveCrossJurisdictionPrivateSeed(options.runtimeSeed, canonicalRoute);
+  const proof = deriveCrossJurisdictionHashLadderProof(canonicalRoute, hashLadderPrivateSeed);
   const sourceAmount = BigInt(canonicalRoute.source.amount);
   const targetAmount = BigInt(canonicalRoute.target.amount);
   const sourcePullId = deriveCrossJurisdictionPullId(canonicalRoute, 'source');
@@ -232,7 +446,6 @@ export function buildPreparedCrossJurisdictionRoute(
   const targetRevealUntilTimestamp = sourceRevealUntilTimestamp + targetResponseWindowMs + CROSS_J_TARGET_REVEAL_SAFETY_MS;
   return {
     ...canonicalRoute,
-    hashLadderPrivateSeed,
     sourcePull: {
       pullId: sourcePullId,
       tokenId: Number(route.source.tokenId),
@@ -260,7 +473,8 @@ export function buildPreparedCrossJurisdictionRoute(
 export function buildCrossJurisdictionPullReveal(
   route: CrossJurisdictionSwapRoute,
   fillRatio: number,
+  privateSeed: string,
 ): HashLadderReveal {
-  const proof = deriveCrossJurisdictionHashLadderProof(route);
+  const proof = deriveCrossJurisdictionHashLadderProof(route, privateSeed);
   return revealHashLadder(proof, fillRatio);
 }

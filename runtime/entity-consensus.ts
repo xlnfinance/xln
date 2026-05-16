@@ -1857,6 +1857,38 @@ export const applyEntityFrame = async (
       for (const { accountId, offerId } of allSwapCancelRequests) {
         const account = currentEntityState.accounts.get(accountId);
         if (!account?.swapOffers?.has(offerId)) continue;
+        const offer = account.swapOffers.get(offerId);
+        if (offer?.crossJurisdiction) {
+          const route = offer.crossJurisdiction;
+          const currentRatio = Math.max(
+            0,
+            Math.min(65_535, Math.floor(Number(route.cumulativeFillRatio ?? route.claimedRatio ?? 0) || 0)),
+          );
+          const sourceTotal = BigInt(route.source.amount);
+          const targetTotal = BigInt(route.target.amount);
+          if (!queueUniqueAccountMempoolTx(account, {
+            type: 'cross_swap_fill_ack',
+            data: {
+              offerId,
+              fillSeq: Math.max(0, Math.floor(Number(route.fillSeq ?? 0) || 0)),
+              incrementalSourceAmount: 0n,
+              incrementalTargetAmount: 0n,
+              cumulativeSourceAmount: route.filledSourceAmount ?? route.sourceClaimed ?? ((sourceTotal * BigInt(currentRatio)) / 65_535n),
+              cumulativeTargetAmount: route.filledTargetAmount ?? route.targetClaimed ?? ((targetTotal * BigInt(currentRatio)) / 65_535n),
+              cumulativeFillRatio: currentRatio,
+              executionSourceAmount: 0n,
+              executionTargetAmount: 0n,
+              cancelRemainder: true,
+              comment: 'cross-j-cancel-request',
+              pairId: route.venueId || '',
+            },
+          })) {
+            continue;
+          }
+          proposableAccounts.add(accountId);
+          console.log(`🌉   → ${accountId.slice(-8)}: cross_swap_fill_ack (fallback cross-j cancel)`);
+          continue;
+        }
         // Fallback cancel resolution is synthesized by the orchestrator itself.
         // It must land in the same working-state mempool so the later account
         // proposal step sees it in this frame.

@@ -46,17 +46,20 @@ import { handleHtlcPayment } from './handlers/htlc-payment';
 import { generateLockId, hashHtlcSecret } from '../htlc-utils';
 import { getRuntimeJurisdictionHeight, requireRuntimeJurisdictionDisputeDelayMs } from '../j-height';
 import {
-  buildCrossJurisdictionPullReveal,
-  buildPreparedCrossJurisdictionRoute,
-  compareCrossJurisdictionRouteStatus,
-  isCrossJurisdictionPullExpired,
-  isCrossJurisdictionRouteExpired,
-  isCrossJurisdictionTerminalStatus,
-  stripCrossJurisdictionPrivateData,
-  withCanonicalCrossJurisdictionRouteHash,
+	buildCrossJurisdictionPullReveal,
+	buildPreparedCrossJurisdictionRoute,
+	compareCrossJurisdictionRouteStatus,
+	getCrossJurisdictionPrivateSeed,
+	isCrossJurisdictionPullExpired,
+	isCrossJurisdictionRouteExpired,
+	isCrossJurisdictionTerminalStatus,
+	rememberCrossJurisdictionPrivateSeed,
+	stripCrossJurisdictionPrivateData,
+	validateCrossJurisdictionFillProgress,
+	withCanonicalCrossJurisdictionRouteHash,
+	withCrossJurisdictionFillProgress,
 } from '../cross-jurisdiction';
 import { decodeHashLadderBinary } from '../hashladder';
-import { deriveCanonicalSwapFillRatio } from '../swap-execution';
 import { handleR2C } from './handlers/r2c';
 import { handleE2R } from './handlers/e2r';
 import { handleR2R } from './handlers/r2r';
@@ -128,11 +131,9 @@ const mergeCrossJurisdictionRoute = (
   existing: CrossJurisdictionSwapRoute | undefined,
   next: CrossJurisdictionSwapRoute,
 ): CrossJurisdictionSwapRoute => {
-  const privateSeed = existing?.hashLadderPrivateSeed ?? next.hashLadderPrivateSeed;
   return {
-    ...existing,
-    ...next,
-    ...(privateSeed ? { hashLadderPrivateSeed: privateSeed } : {}),
+    ...stripCrossJurisdictionPrivateData(existing ?? next),
+    ...stripCrossJurisdictionPrivateData(next),
   };
 };
 
@@ -1381,6 +1382,15 @@ export const applyEntityTx = async (
         addMessage(newState, `❌ Pull resolve failed: no account with ${formatEntityId(counterpartyEntityId)}`);
         return { newState, outputs, mempoolOps };
       }
+      const crossSourceRoute = [...(newState.crossJurisdictionSwaps?.values?.() ?? [])].find(route =>
+        route.sourcePull?.pullId === pullId &&
+        normalizeEntityRef(route.source.counterpartyEntityId) === normalizeEntityRef(newState.entityId) &&
+        normalizeEntityRef(route.source.entityId) === normalizeEntityRef(counterpartyEntityId),
+      );
+      if (crossSourceRoute && crossSourceRoute.status !== 'clearing') {
+        addMessage(newState, `❌ Cross-j source pull ${pullId.slice(0, 8)} resolve blocked: use requestCrossJurisdictionClear`);
+        return { newState, outputs, mempoolOps };
+      }
       mempoolOps.push({
         accountId: normalizedCounterparty,
         tx: {
@@ -1491,6 +1501,11 @@ export const applyEntityTx = async (
         sourceDisputeDelayMs: requireRuntimeJurisdictionDisputeDelayMs(env, route.source.jurisdiction),
         now: newState.timestamp || env.timestamp,
       });
+      rememberCrossJurisdictionPrivateSeed(
+        env,
+        preparedRoute,
+        getCrossJurisdictionPrivateSeed(env, preparedRoute),
+      );
       if (!preparedRoute.targetPull || !preparedRoute.sourcePull) {
         addMessage(newState, `❌ Cross-j prepare ${route.orderId} failed: pull commitments missing`);
         return { newState, outputs };
@@ -1682,30 +1697,19 @@ export const applyEntityTx = async (
         addMessage(newState, `❌ Cross-j fill notice ${orderId} blocked in status ${route.status}`);
         return { newState, outputs, mempoolOps };
       }
-      const previousSeq = Math.max(0, Math.floor(Number(route.fillSeq ?? 0) || 0));
-      if (Math.floor(Number(fillSeq)) !== previousSeq + 1) {
-        addMessage(newState, `❌ Cross-j fill notice ${orderId} bad seq ${fillSeq}, expected ${previousSeq + 1}`);
+      const validatedFill = validateCrossJurisdictionFillProgress(route, {
+        fillSeq,
+        cumulativeFillRatio,
+        incrementalSourceAmount,
+        incrementalTargetAmount,
+        cumulativeSourceAmount,
+        cumulativeTargetAmount,
+      });
+      if (!validatedFill.ok) {
+        addMessage(newState, `❌ Cross-j fill notice ${orderId} blocked: ${validatedFill.error}`);
         return { newState, outputs, mempoolOps };
       }
-      const ratio = Math.max(0, Math.min(65_535, Math.floor(Number(cumulativeFillRatio) || 0)));
-      const previousRatio = Math.max(0, Math.min(65_535, Math.floor(Number(route.cumulativeFillRatio ?? route.claimedRatio ?? 0) || 0)));
-      if (ratio <= previousRatio) {
-        addMessage(newState, `❌ Cross-j fill notice ${orderId} non-monotonic ratio`);
-        return { newState, outputs, mempoolOps };
-      }
-      const sourceTotal = BigInt(route.source.amount);
-      const targetTotal = BigInt(route.target.amount);
-      if (BigInt(cumulativeSourceAmount) > sourceTotal || BigInt(cumulativeTargetAmount) > targetTotal) {
-        addMessage(newState, `❌ Cross-j fill notice ${orderId} exceeds route amount`);
-        return { newState, outputs, mempoolOps };
-      }
-      const expectedRatio = BigInt(cumulativeSourceAmount) >= sourceTotal
-        ? 65_535
-        : deriveCanonicalSwapFillRatio(sourceTotal, BigInt(cumulativeSourceAmount));
-      if (ratio !== expectedRatio) {
-        addMessage(newState, `❌ Cross-j fill notice ${orderId} ratio mismatch`);
-        return { newState, outputs, mempoolOps };
-      }
+      const fill = validatedFill.value;
       const accountId = findAccountKey(newState, route.source.entityId);
       if (!accountId) {
         addMessage(newState, `❌ Cross-j fill notice ${orderId} blocked: no source account`);
@@ -1717,158 +1721,33 @@ export const applyEntityTx = async (
           type: 'cross_swap_fill_ack',
           data: {
             offerId: orderId,
-            fillSeq,
-            incrementalSourceAmount,
-            incrementalTargetAmount,
-            cumulativeSourceAmount,
-            cumulativeTargetAmount,
-            cumulativeFillRatio: ratio,
-            executionSourceAmount: incrementalSourceAmount,
-            executionTargetAmount: incrementalTargetAmount,
-            cancelRemainder: ratio >= 65_535,
+            fillSeq: fill.fillSeq,
+            incrementalSourceAmount: fill.incrementalSourceAmount,
+            incrementalTargetAmount: fill.incrementalTargetAmount,
+            cumulativeSourceAmount: fill.cumulativeSourceAmount,
+            cumulativeTargetAmount: fill.cumulativeTargetAmount,
+            cumulativeFillRatio: fill.nextRatio,
+            executionSourceAmount: fill.incrementalSourceAmount,
+            executionTargetAmount: fill.incrementalTargetAmount,
+            cancelRemainder: fill.nextRatio >= 65_535,
             ...(priceTicks !== undefined ? { priceTicks } : {}),
             pairId,
-            comment: `cross-j-fill-notice:${ratio}`,
+            comment: `cross-j-fill-notice:${fill.nextRatio}`,
           },
         },
       });
-      route.fillSeq = fillSeq;
-      route.cumulativeFillRatio = ratio;
-      route.claimedRatio = ratio;
-      route.filledSourceAmount = cumulativeSourceAmount;
-      route.filledTargetAmount = cumulativeTargetAmount;
-      route.sourceClaimed = cumulativeSourceAmount;
-      route.targetClaimed = cumulativeTargetAmount;
-      route.status = ratio >= 65_535 ? 'clear_requested' : 'partially_filled';
-      route.updatedAt = newState.timestamp || env.timestamp;
+      route = withCrossJurisdictionFillProgress(route, fill, newState.timestamp || env.timestamp);
       newState.crossJurisdictionSwaps?.set(orderId, route);
       const firstValidator = entityState.config.validators[0];
       if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
-      addMessage(newState, `🌉 Cross-j fill notice ${orderId} recorded ${ratio}/65535`);
+      addMessage(newState, `🌉 Cross-j fill notice ${orderId} recorded ${fill.nextRatio}/65535`);
       return { newState, outputs, mempoolOps };
     }
 
     if (entityTx.type === 'crossJurisdictionFillRequest') {
-      const { routeId, fillRatio, requestedByEntityId, sourceAmount, targetAmount } = entityTx.data;
       const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
-      const mempoolOps: MempoolOp[] = [];
-      const route = newState.crossJurisdictionSwaps?.get(routeId);
-      if (!route) {
-        addMessage(newState, `❌ Cross-j fill ${routeId} missing source-hub route`);
-        return { newState, outputs, mempoolOps };
-      }
-      const now = Number(newState.timestamp || env.timestamp || Date.now());
-      let canonicalRoute: CrossJurisdictionSwapRoute;
-      try {
-        canonicalRoute = withCanonicalCrossJurisdictionRouteHash(route);
-      } catch (error) {
-        addMessage(newState, `❌ Cross-j fill ${routeId} invalid route: ${error instanceof Error ? error.message : String(error)}`);
-        return { newState, outputs, mempoolOps };
-      }
-      if (normalizeEntityRef(newState.entityId) !== normalizeEntityRef(canonicalRoute.source.counterpartyEntityId)) {
-        addMessage(newState, `❌ Cross-j fill ${routeId} routed to wrong source hub`);
-        return { newState, outputs, mempoolOps };
-      }
-      if (isCrossJurisdictionTerminalStatus(canonicalRoute.status)) {
-        addMessage(newState, `🌉 Cross-j fill ${routeId} ignored: route is ${canonicalRoute.status}`);
-        return { newState, outputs, mempoolOps };
-      }
-      if (!canonicalRoute.sourcePull || !canonicalRoute.targetPull) {
-        addMessage(newState, `❌ Cross-j fill ${routeId} blocked: pull commitments missing`);
-        return { newState, outputs, mempoolOps };
-      }
-      if (
-        isCrossJurisdictionRouteExpired(canonicalRoute, now) ||
-        isCrossJurisdictionPullExpired(canonicalRoute, 'source', now) ||
-        isCrossJurisdictionPullExpired(canonicalRoute, 'target', now)
-      ) {
-        addMessage(newState, `❌ Cross-j fill ${routeId} blocked: route or pull deadline expired`);
-        return { newState, outputs, mempoolOps };
-      }
-      const ratio = Math.max(0, Math.min(65_535, Math.floor(Number(fillRatio) || 0)));
-      if (ratio <= 0) {
-        addMessage(newState, `🌉 Cross-j fill ${routeId} ignored: zero fill ratio`);
-        return { newState, outputs, mempoolOps };
-      }
-      const previousRatio = Math.max(
-        0,
-        Math.min(65_535, Math.floor(Number(canonicalRoute.cumulativeFillRatio ?? canonicalRoute.claimedRatio ?? 0) || 0)),
-      );
-      if (ratio <= previousRatio) {
-        addMessage(newState, `🌉 Cross-j fill ${routeId} ignored: stale ratio ${ratio}/65535 <= ${previousRatio}/65535`);
-        return { newState, outputs, mempoolOps };
-      }
-      const accountId = findAccountKey(newState, canonicalRoute.source.entityId);
-      const account = accountId ? newState.accounts.get(accountId) : undefined;
-      if (!accountId || !account) {
-        addMessage(newState, `❌ Cross-j fill ${routeId} blocked: no source account with ${formatEntityId(canonicalRoute.source.entityId)}`);
-        return { newState, outputs, mempoolOps };
-      }
-      const sourceTotal = BigInt(canonicalRoute.source.amount);
-      const targetTotal = BigInt(canonicalRoute.target.amount);
-      const previousSource = canonicalRoute.filledSourceAmount ?? canonicalRoute.sourceClaimed ?? ((sourceTotal * BigInt(previousRatio)) / 65_535n);
-      const previousTarget = canonicalRoute.filledTargetAmount ?? canonicalRoute.targetClaimed ?? ((targetTotal * BigInt(previousRatio)) / 65_535n);
-      const cumulativeSource = (sourceTotal * BigInt(ratio)) / 65_535n;
-      const cumulativeTarget = (targetTotal * BigInt(ratio)) / 65_535n;
-      const incrementalSource = cumulativeSource - previousSource;
-      const incrementalTarget = cumulativeTarget - previousTarget;
-      if (incrementalSource <= 0n || incrementalTarget <= 0n) {
-        addMessage(newState, `🌉 Cross-j fill ${routeId} ignored: no incremental amount`);
-        return { newState, outputs, mempoolOps };
-      }
-      if (sourceAmount !== undefined && BigInt(sourceAmount) !== incrementalSource) {
-        addMessage(newState, `❌ Cross-j fill ${routeId} source mismatch`);
-        return { newState, outputs, mempoolOps };
-      }
-      if (targetAmount !== undefined && BigInt(targetAmount) !== incrementalTarget) {
-        addMessage(newState, `❌ Cross-j fill ${routeId} target mismatch`);
-        return { newState, outputs, mempoolOps };
-      }
-      mempoolOps.push({
-        accountId,
-        tx: {
-          type: 'cross_swap_fill_ack',
-          data: {
-            offerId: canonicalRoute.orderId,
-            fillSeq: Math.max(0, Math.floor(Number(canonicalRoute.fillSeq ?? 0) || 0)) + 1,
-            incrementalSourceAmount: incrementalSource,
-            incrementalTargetAmount: incrementalTarget,
-            cumulativeSourceAmount: cumulativeSource,
-            cumulativeTargetAmount: cumulativeTarget,
-            cumulativeFillRatio: ratio,
-            executionSourceAmount: incrementalSource,
-            executionTargetAmount: incrementalTarget,
-            cancelRemainder: ratio >= 65_535,
-            ...(canonicalRoute.priceTicks !== undefined ? { priceTicks: canonicalRoute.priceTicks } : {}),
-            pairId: canonicalRoute.venueId || '',
-            comment: `cross-j-fill-notice:${ratio}`,
-          },
-        },
-      });
-      canonicalRoute.fillSeq = Math.max(0, Math.floor(Number(canonicalRoute.fillSeq ?? 0) || 0)) + 1;
-      canonicalRoute.cumulativeFillRatio = ratio;
-      canonicalRoute.claimedRatio = ratio;
-      canonicalRoute.filledSourceAmount = cumulativeSource;
-      canonicalRoute.filledTargetAmount = cumulativeTarget;
-      canonicalRoute.sourceClaimed = cumulativeSource;
-      canonicalRoute.targetClaimed = cumulativeTarget;
-      canonicalRoute.status = ratio >= 65_535 ? 'clear_requested' : 'partially_filled';
-      canonicalRoute.updatedAt = newState.timestamp || env.timestamp;
-      newState.crossJurisdictionSwaps?.set(canonicalRoute.orderId, canonicalRoute);
-      const firstValidator = entityState.config.validators[0];
-      if (firstValidator) {
-        outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
-      }
-      addMessage(
-        newState,
-        `🌉 Cross-j fill ${routeId} recorded ratio=${ratio}/65535` +
-          (requestedByEntityId ? ` via ${formatEntityId(requestedByEntityId)}` : '') +
-          (sourceAmount !== undefined && targetAmount !== undefined
-            ? ` source=${sourceAmount.toString()} target=${targetAmount.toString()}`
-            : ''),
-      );
-      return { newState, outputs, mempoolOps };
+      addMessage(newState, '❌ crossJurisdictionFillRequest is deprecated; matching must emit crossJurisdictionFillNotice');
+      return { newState, outputs: [], mempoolOps: [] };
     }
 
     if (entityTx.type === 'requestCrossJurisdictionClear') {
@@ -1876,6 +1755,10 @@ export const applyEntityTx = async (
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
       const mempoolOps: MempoolOp[] = [];
+      if (reopenRemainder) {
+        addMessage(newState, `❌ Cross-j clear ${orderId} blocked: reopenRemainder is not implemented in V1`);
+        return { newState, outputs, mempoolOps };
+      }
       const route = newState.crossJurisdictionSwaps?.get(orderId);
       if (!route) {
         addMessage(newState, `❌ Cross-j clear ${orderId} missing route`);
@@ -1892,7 +1775,7 @@ export const applyEntityTx = async (
         });
         route.status = 'clear_requested';
         route.pendingClearRequestedAt = Number(newState.timestamp || env.timestamp || Date.now());
-        route.clearingPolicy = reopenRemainder ? 'reopen_remainder' : cancelRemainder ? 'cancel_and_clear' : 'manual';
+        route.clearingPolicy = cancelRemainder ? 'cancel_and_clear' : 'manual';
         route.updatedAt = newState.timestamp || env.timestamp;
         newState.crossJurisdictionSwaps?.set(orderId, route);
         addMessage(newState, `🌉 Cross-j clear ${orderId} requested from source hub`);
@@ -1915,11 +1798,43 @@ export const applyEntityTx = async (
         Math.min(65_535, Math.floor(Number(canonicalRoute.cumulativeFillRatio ?? canonicalRoute.claimedRatio ?? 0) || 0)),
       );
       if (ratio <= 0) {
-        addMessage(newState, `🌉 Cross-j clear ${orderId} ignored: no pending fill`);
-        return { newState, outputs, mempoolOps };
-      }
-      if (!canonicalRoute.hashLadderPrivateSeed) {
-        addMessage(newState, `❌ Cross-j clear ${orderId} blocked: source hub has no private seed`);
+        if (!cancelRemainder) {
+          addMessage(newState, `🌉 Cross-j clear ${orderId} ignored: no pending fill`);
+          return { newState, outputs, mempoolOps };
+        }
+        const accountId = findAccountKey(newState, canonicalRoute.source.entityId);
+        const account = accountId ? newState.accounts.get(accountId) : undefined;
+        if (accountId && account?.pulls?.has(canonicalRoute.sourcePull.pullId)) {
+          mempoolOps.push({
+            accountId,
+            tx: {
+              type: 'pull_cancel',
+              data: {
+                pullId: canonicalRoute.sourcePull.pullId,
+                reason: 'cross_j_cancel_no_fill',
+              },
+            },
+          });
+        }
+        outputs.push({
+          entityId: canonicalRoute.target.counterpartyEntityId,
+          entityTxs: [{
+            type: 'cancelPull',
+            data: {
+              counterpartyEntityId: canonicalRoute.target.entityId,
+              pullId: canonicalRoute.targetPull.pullId,
+              description: `Cross-j ${orderId} cancel target pull without fill`,
+            },
+          }],
+        });
+        canonicalRoute.status = 'cancelled';
+        canonicalRoute.pendingClearRequestedAt = Number(newState.timestamp || env.timestamp || Date.now());
+        canonicalRoute.clearingPolicy = 'cancel_and_clear';
+        canonicalRoute.updatedAt = newState.timestamp || env.timestamp;
+        newState.crossJurisdictionSwaps?.set(orderId, canonicalRoute);
+        const firstValidator = entityState.config.validators[0];
+        if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
+        addMessage(newState, `🌉 Cross-j clear ${orderId} cancelled without fill`);
         return { newState, outputs, mempoolOps };
       }
       const accountId = findAccountKey(newState, canonicalRoute.source.entityId);
@@ -1938,7 +1853,11 @@ export const applyEntityTx = async (
       }
       let reveal;
       try {
-        reveal = buildCrossJurisdictionPullReveal(canonicalRoute, ratio);
+        reveal = buildCrossJurisdictionPullReveal(
+          canonicalRoute,
+          ratio,
+          getCrossJurisdictionPrivateSeed(env, canonicalRoute),
+        );
       } catch (error) {
         addMessage(newState, `❌ Cross-j clear ${orderId} reveal failed: ${error instanceof Error ? error.message : String(error)}`);
         return { newState, outputs, mempoolOps };
@@ -1953,7 +1872,8 @@ export const applyEntityTx = async (
           },
         },
       });
-      if (cancelRemainder || ratio >= 65_535) {
+      const closeRemainder = cancelRemainder || ratio < 65_535;
+      if (closeRemainder || ratio >= 65_535) {
         mempoolOps.push({
           accountId,
           tx: {
@@ -1967,7 +1887,7 @@ export const applyEntityTx = async (
       }
       canonicalRoute.status = 'clearing';
       canonicalRoute.pendingClearRequestedAt = Number(newState.timestamp || env.timestamp || Date.now());
-      canonicalRoute.clearingPolicy = reopenRemainder ? 'reopen_remainder' : cancelRemainder ? 'cancel_and_clear' : ratio >= 65_535 ? 'full_fill' : 'manual';
+      canonicalRoute.clearingPolicy = closeRemainder ? 'cancel_and_clear' : ratio >= 65_535 ? 'full_fill' : 'manual';
       canonicalRoute.updatedAt = newState.timestamp || env.timestamp;
       newState.crossJurisdictionSwaps?.set(orderId, canonicalRoute);
       const firstValidator = entityState.config.validators[0];
@@ -2142,6 +2062,10 @@ export const applyEntityTx = async (
       if (!accountMachine) {
         console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for swap resolve`);
         return { newState: entityState, outputs: [] };
+      }
+      if (accountMachine.swapOffers.get(offerId)?.crossJurisdiction) {
+        addMessage(newState, `❌ Cross-j offer ${offerId} cannot be resolved through plain swap_resolve`);
+        return { newState, outputs, mempoolOps };
       }
 
       const accountTx: AccountTx = {

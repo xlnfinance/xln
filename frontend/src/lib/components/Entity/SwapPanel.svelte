@@ -1,7 +1,12 @@
   <script lang="ts">
     import type { AccountMachine, EntityReplica, Tab } from '$lib/types/ui';
   import type { CrossJurisdictionSwapRoute, Delta, EntityState, Env, EnvSnapshot, RoutedEntityInput } from '@xln/runtime/xln-api';
-  import { getBestAsk, getBestBid } from '@xln/runtime/xln-api';
+  import {
+    deriveCanonicalCrossJurisdictionBookOwnerForLegs,
+    deriveCanonicalCrossJurisdictionVenueIdForLegs,
+    getBestAsk,
+    getBestBid,
+  } from '@xln/runtime/xln-api';
   import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import type { SwapBookEntry } from '@xln/runtime/xln-api';
   import { enqueueEntityInputs, xlnFunctions } from '../../stores/xlnStore';
@@ -787,22 +792,18 @@
     return left < right ? -1 : 1;
   }
 
-  function crossAssetKey(jurisdiction: string, tokenId: number): string {
-    return `${String(jurisdiction || '').trim().toLowerCase()}:${Math.floor(Number(tokenId) || 0)}`;
-  }
-
   function canonicalCrossVenueId(
     sourceJurisdiction: string,
     sourceTokenId: number,
     targetJurisdiction: string,
     targetTokenId: number,
   ): string {
-    const sourceKey = crossAssetKey(sourceJurisdiction, sourceTokenId);
-    const targetKey = crossAssetKey(targetJurisdiction, targetTokenId);
-    const [baseKey, quoteKey] = compareStableText(sourceKey, targetKey) <= 0
-      ? [sourceKey, targetKey]
-      : [targetKey, sourceKey];
-    return `cross:${baseKey}/${quoteKey}`;
+    return deriveCanonicalCrossJurisdictionVenueIdForLegs(
+      sourceJurisdiction,
+      sourceTokenId,
+      targetJurisdiction,
+      targetTokenId,
+    );
   }
 
   function canonicalCrossBookOwner(
@@ -813,11 +814,14 @@
     targetTokenId: number,
     targetHubEntityId: string,
   ): string {
-    const sourceKey = crossAssetKey(sourceJurisdiction, sourceTokenId);
-    const targetKey = crossAssetKey(targetJurisdiction, targetTokenId);
-    return compareStableText(sourceKey, targetKey) <= 0
-      ? sourceHubEntityId
-      : targetHubEntityId;
+    return deriveCanonicalCrossJurisdictionBookOwnerForLegs(
+      sourceJurisdiction,
+      sourceTokenId,
+      sourceHubEntityId,
+      targetJurisdiction,
+      targetTokenId,
+      targetHubEntityId,
+    );
   }
 
   function handlePriceRatioInput(event: Event): void {
@@ -2782,14 +2786,8 @@
                   <td>
                     {#if offer.crossJurisdiction}
                       <div class="cross-order-actions">
-                        <button class="cancel-btn" data-testid="cross-swap-clear" on:click={() => requestCrossClear(String(offer.offerId || ''), false, false)}>
-                          Clear
-                        </button>
-                        <button class="cancel-btn" data-testid="cross-swap-cancel-clear" on:click={() => requestCrossClear(String(offer.offerId || ''), true, false)}>
-                          Cancel + Clear
-                        </button>
-                        <button class="cancel-btn" data-testid="cross-swap-reopen" on:click={() => requestCrossClear(String(offer.offerId || ''), true, true)}>
-                          Reopen Remainder
+                        <button class="cancel-btn" data-testid="cross-swap-clear" on:click={() => requestCrossClear(String(offer.offerId || ''), true, false)}>
+                          Clear + Close
                         </button>
                       </div>
                     {:else}
