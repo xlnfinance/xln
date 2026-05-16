@@ -148,7 +148,7 @@ export interface MatchResult {
     pairId: string;
     book: BookState;
   }[];
-  quarantinedOffers: Array<{
+  debugProjectionRejects: Array<{
     offerId: string;
     accountId: string;
     reason: string;
@@ -156,7 +156,7 @@ export interface MatchResult {
 }
 
 type OrderbookProcessOptions = {
-  rehydrateOnly?: boolean;
+  debugRebuildProjectionOnly?: boolean;
 };
 
 type SwapResolveEnqueueData = {
@@ -1366,10 +1366,10 @@ export function processOrderbookSwaps(
   const mempoolOps: MempoolOp[] = [];
   const crossJurisdictionFills: CrossJurisdictionFillInstruction[] = [];
   const bookUpdates: { pairId: string; book: BookState }[] = [];
-  const quarantinedOffers: Array<{ offerId: string; accountId: string; reason: string }> = [];
+  const debugProjectionRejects: Array<{ offerId: string; accountId: string; reason: string }> = [];
   const ext = hubState.orderbookExt as OrderbookExtState | undefined;
-  if (!ext) return { mempoolOps, crossJurisdictionFills, bookUpdates, quarantinedOffers };
-  const rehydrateOnly = options.rehydrateOnly === true;
+  if (!ext) return { mempoolOps, crossJurisdictionFills, bookUpdates, debugProjectionRejects };
+  const debugRebuildProjectionOnly = options.debugRebuildProjectionOnly === true;
   const sameAccountSwapOffers = swapOffers.filter((offer) => !offer.crossJurisdiction);
   const crossJurisdictionSwapOffers = swapOffers.filter((offer) => !!offer.crossJurisdiction);
   const minTradeSize = ext.hubProfile?.minTradeSize ?? 0n;
@@ -1377,27 +1377,29 @@ export function processOrderbookSwaps(
   const swapTakerFeeBps = Number.isFinite(Number(swapTakerFeeBpsRaw))
     ? Math.max(0, Math.min(10_000, Math.floor(Number(swapTakerFeeBpsRaw))))
     : 0;
-  const quarantinedOfferKeys = new Set<string>();
-  const canonicalInputOfferKeys = new Set(
-    sameAccountSwapOffers.map((offer) => swapKey(String(offer.accountId || ''), String(offer.offerId || ''))),
-  );
-  const quarantineOffer = (accountId: string, offerId: string, reason: string): true => {
+  const debugProjectionRejectKeys = new Set<string>();
+  const recordDebugProjectionReject = (accountId: string, offerId: string, reason: string): true => {
+    if (!debugRebuildProjectionOnly) {
+      throw new Error(
+        `ORDERBOOK_LIVE_PROJECTION_REJECT: account=${accountId} offer=${offerId} reason=${reason}`,
+      );
+    }
     const key = swapKey(accountId, offerId);
-    if (quarantinedOfferKeys.has(key)) return true;
-    quarantinedOfferKeys.add(key);
-    quarantinedOffers.push({ accountId, offerId, reason });
+    if (debugProjectionRejectKeys.has(key)) return true;
+    debugProjectionRejectKeys.add(key);
+    debugProjectionRejects.push({ accountId, offerId, reason });
     return true;
   };
   const rejectInvalidCrossOffer = (accountId: string, offerId: string, reason: string): void => {
-    // Cross-j orders settle through fill notices and pull clearing. A malformed
-    // or temporarily unmatchable cross route must not be closed by the plain
-    // same-account swap_resolve path.
-    quarantineOffer(accountId, offerId, reason);
+    // Cross-j orders settle through fill notices and pull clearing. Rehydrate
+    // can report debug projection rejects; live matching must surface malformed
+    // routes as invariant failures instead of silently cancelling liquidity.
+    recordDebugProjectionReject(accountId, offerId, reason);
     console.warn(`⚠️ ORDERBOOK CROSS-J: skipped offer=${offerId} account=${accountId.slice(-8)} reason=${reason}`);
   };
   const rejectInvalidOffer = (accountId: string, offerId: string, reason: string): void => {
-    if (rehydrateOnly) {
-      quarantineOffer(accountId, offerId, reason);
+    if (debugRebuildProjectionOnly) {
+      recordDebugProjectionReject(accountId, offerId, reason);
       return;
     }
     queueUniqueSwapResolveForEntityState(mempoolOps, hubState, queuedSwapResolutions, accountId, {
@@ -1409,11 +1411,9 @@ export function processOrderbookSwaps(
   };
 
   // Pair books stay hot within this pass so same-tick offers see each other's exact fills.
-  // Canonical order truth still lives in swapOffers, not in the cached grid.
+  // The book is a deterministic projection of account swapOffers, not a second owner of order lifecycle.
   const bookCache = new Map<string, BookState>();
   const orderbookOfferMeta = new Map<string, NormalizedOrderbookOffer>();
-  let staleBookMismatchCount = 0;
-  let pairRepairCount = 0;
   let pairSweepCount = 0;
   const queuedSwapResolutions = new Set<string>();
   const sweptPairs = new Set<string>();
@@ -1472,8 +1472,8 @@ export function processOrderbookSwaps(
       {
         offerId,
         makerIsLeft: liveOffer.makerIsLeft,
-        fromEntity: account.leftEntity,
-        toEntity: account.rightEntity,
+        fromEntity: account.leftEntity || (liveOffer as any).fromEntity || '',
+        toEntity: account.rightEntity || (liveOffer as any).toEntity || '',
         createdHeight: liveOffer.createdHeight,
         giveTokenId: liveOffer.giveTokenId,
         giveAmount: liveOffer.giveAmount,
@@ -1547,101 +1547,25 @@ export function processOrderbookSwaps(
     return { anchor: pairPolicy.mmMidPriceTicks, label: 'policyMid' };
   };
 
-  const liveOffersByPair = new Map<string, NormalizedOrderbookOffer[]>();
-  for (const [accountId, account] of hubState.accounts.entries()) {
-    for (const [offerId, offer] of account.swapOffers.entries()) {
-      if (offer?.crossJurisdiction) continue;
-      if (
-        !offer ||
-        typeof offer.giveTokenId !== 'number' ||
-        typeof offer.wantTokenId !== 'number' ||
-        typeof offer.giveAmount !== 'bigint' ||
-        typeof offer.wantAmount !== 'bigint'
-      ) {
-        if (canonicalInputOfferKeys.has(swapKey(accountId, String(offerId)))) {
-          continue;
-        }
-        rejectInvalidOffer(accountId, String(offerId), 'invalid-structure');
-        continue;
-      }
-      const liveOffer = normalizeSwapOfferForOrderbook(
-        {
-          offerId: String(offerId),
-          makerIsLeft: offer.makerIsLeft,
-          fromEntity: account.leftEntity,
-          toEntity: account.rightEntity,
-          createdHeight: offer.createdHeight,
-          giveTokenId: offer.giveTokenId,
-          giveAmount: offer.giveAmount,
-          wantTokenId: offer.wantTokenId,
-          wantAmount: offer.wantAmount,
-          priceTicks: offer.priceTicks,
-          timeInForce: offer.timeInForce,
-          minFillRatio: offer.minFillRatio,
-          ...(offer.crossJurisdiction ? { crossJurisdiction: offer.crossJurisdiction } : {}),
-        },
-        accountId,
-      );
-    const { pairId } = canonicalPair(liveOffer.giveTokenId, liveOffer.wantTokenId);
-    const existing = liveOffersByPair.get(pairId);
-    if (existing) existing.push(liveOffer);
-    else liveOffersByPair.set(pairId, [liveOffer]);
-    }
-  }
-
-  const getLiveOffersForPair = (pairId: string): NormalizedOrderbookOffer[] =>
-    (liveOffersByPair.get(pairId) ?? []).filter((liveOffer) =>
-      !hasQueuedSwapResolveForEntityState(hubState, queuedSwapResolutions, liveOffer.accountId, liveOffer.offerId),
-    );
-
-  const getLiveOffersForPairExcluding = (
-    pairId: string,
-    excludedAccountId: string,
-    excludedOfferId: string,
-  ): NormalizedOrderbookOffer[] =>
-    getLiveOffersForPair(pairId).filter((liveOffer) =>
-      !(liveOffer.accountId === excludedAccountId && liveOffer.offerId === excludedOfferId),
-    );
-
   const containCurrentOfferPairFailure = (
     pairId: string,
     currentAccountId: string,
     currentOfferId: string,
-    bucketWidthTicks: number,
     message: string,
   ): void => {
     console.error(
       `❌ ORDERBOOK: pair-local failure pair=${pairId} offer=${currentOfferId} account=${currentAccountId.slice(-8)} error=${message}`,
     );
-    let repairedBook = createOrRepairPairBook(bucketWidthTicks);
-    try {
-      const rebuilt = materializePairBookFromOffers(
-        getLiveOffersForPairExcluding(pairId, currentAccountId, currentOfferId),
-        bucketWidthTicks,
-      );
-      handleRebuildRejections(rebuilt.rejected);
-      repairedBook = rebuilt.book;
-    } catch (rebuildError) {
-      const rebuildMessage = rebuildError instanceof Error ? rebuildError.message : String(rebuildError);
-      console.error(
-        `❌ ORDERBOOK: pair rebuild failed after pair-local failure pair=${pairId} error=${rebuildMessage}`,
-      );
-    }
-    bookCache.set(pairId, repairedBook);
-    bookUpdates.push({ pairId, book: repairedBook });
-    if (rehydrateOnly) {
-      quarantineOffer(currentAccountId, currentOfferId, `pair-error:${message}`);
+    if (debugRebuildProjectionOnly) {
+      recordDebugProjectionReject(currentAccountId, currentOfferId, `pair-error:${message}`);
       return;
     }
-    queueUniqueSwapResolveForEntityState(mempoolOps, hubState, queuedSwapResolutions, currentAccountId, {
-      offerId: currentOfferId,
-      fillRatio: 0,
-      cancelRemainder: true,
-      comment: `pair-error:${message}`,
-    });
+    throw new Error(
+      `ORDERBOOK_PAIR_COMMAND_FAILED: pair=${pairId} account=${currentAccountId} offer=${currentOfferId} error=${message}`,
+    );
   };
 
-  const createOrRepairPairBook = (
+  const createEmptyPairBook = (
     bucketWidthTicks: number,
   ): BookState => createBook({
     bucketWidthTicks: BigInt(Math.max(1, bucketWidthTicks)),
@@ -1649,87 +1573,12 @@ export function processOrderbookSwaps(
     stpPolicy: 1,
   });
 
-  type MaterializedPairBookResult = {
-    book: BookState;
-    rejected: Array<{ offer: NormalizedOrderbookOffer; reason: string }>;
-  };
-
-  const handleRebuildRejections = (
-    rejectedOffers: Array<{ offer: NormalizedOrderbookOffer; reason: string }>,
-  ): void => {
-    for (const rejected of rejectedOffers) {
-      console.warn(
-        `⚠️ ORDERBOOK: canonical rebuild rejected offer=${rejected.offer.offerId} account=${rejected.offer.accountId.slice(-8)} reason=${rejected.reason}`,
-      );
-      if (rehydrateOnly) {
-        quarantineOffer(rejected.offer.accountId, rejected.offer.offerId, `rebuild-reject:${rejected.reason}`);
-        continue;
-      }
-      queueUniqueSwapResolveForEntityState(mempoolOps, hubState, queuedSwapResolutions, rejected.offer.accountId, {
-        offerId: rejected.offer.offerId,
-        fillRatio: 0,
-        cancelRemainder: true,
-        comment: `rebuild-reject:${rejected.reason}`,
-      });
-    }
-  };
-
-  const materializePairBookFromOffers = (
-    liveOffersForPair: NormalizedOrderbookOffer[],
-    bucketWidthTicks: number,
-  ): MaterializedPairBookResult => {
-    let rebuiltBook = createOrRepairPairBook(bucketWidthTicks);
-    const rejected: Array<{ offer: NormalizedOrderbookOffer; reason: string }> = [];
-    for (const liveOffer of liveOffersForPair) {
-      const activeSide = deriveSide(liveOffer.giveTokenId, liveOffer.wantTokenId);
-      const activeBaseAmount = activeSide === 1 ? liveOffer.giveAmount : liveOffer.wantAmount;
-      const activeQtyLots = activeBaseAmount / SWAP_LOT_SCALE;
-      if (activeQtyLots <= 0n) continue;
-      const activeMakerId = liveOffer.makerIsLeft ? liveOffer.fromEntity : liveOffer.toEntity;
-      const activeOrderId = `${liveOffer.accountId}:${liveOffer.offerId}`;
-      const rebuildResult = applyCommand(rebuiltBook, {
-        kind: 0,
-        ownerId: activeMakerId,
-        orderId: activeOrderId,
-        side: activeSide,
-        tif: liveOffer.timeInForce,
-        postOnly: true,
-        priceTicks: liveOffer.priceTicks,
-        qtyLots: Number(activeQtyLots),
-        minFillRatio: liveOffer.minFillRatio,
-      });
-      const reject = rebuildResult.events.find((event) => event.type === 'REJECT');
-      if (reject) {
-        rejected.push({ offer: liveOffer, reason: reject.reason });
-        continue;
-      }
-      rebuiltBook = rebuildResult.state;
-    }
-
-    return { book: rebuiltBook, rejected };
-  };
-
-  const rebuildPairBookFromCanonicalOffers = (
-    pairId: string,
-    bucketWidthTicks: number,
-  ): BookState | null => {
-    const liveOffersForPair = getLiveOffersForPair(pairId);
-    if (liveOffersForPair.length === 0) return null;
-    const rebuilt = materializePairBookFromOffers(liveOffersForPair, bucketWidthTicks);
-    handleRebuildRejections(rebuilt.rejected);
-    return rebuilt.book;
-  };
-
   const sweepPairOutOfBandOffers = (
     pairId: string,
     pairPolicy: SwapPairPolicy,
     hasExplicitPairPolicy: boolean,
     currentBook: BookState,
-    bucketWidthTicks: number,
   ): BookState => {
-    const liveOffersForPair = getLiveOffersForPair(pairId);
-    if (liveOffersForPair.length === 0) return currentBook;
-
     const REJECT_BPS = SWAP_CONSTANTS.PRICE_REJECT_BPS;
     const BPS_BASE = SWAP_CONSTANTS.BPS_BASE;
     const bestBid = getBestBid(currentBook);
@@ -1739,19 +1588,30 @@ export function processOrderbookSwaps(
 
     const minAllowed = bandAnchor - ((bandAnchor * BigInt(REJECT_BPS)) / BigInt(BPS_BASE));
     const maxAllowed = bandAnchor + ((bandAnchor * BigInt(REJECT_BPS)) / BigInt(BPS_BASE));
-    const keptOffers: NormalizedOrderbookOffer[] = [];
     let removed = 0;
+    let nextBook = currentBook;
 
-    for (const liveOffer of liveOffersForPair) {
-      if (liveOffer.priceTicks < minAllowed || liveOffer.priceTicks > maxAllowed) {
+    for (const order of currentBook.orders.values()) {
+      const liveOffer = buildLiveOfferMeta(order.orderId);
+      if (!liveOffer) {
+        if (debugRebuildProjectionOnly) continue;
+        throw new Error(`ORDERBOOK_ORPHAN_BOOK_ORDER: pair=${pairId} order=${order.orderId}`);
+      }
+      if (order.priceTicks < minAllowed || order.priceTicks > maxAllowed) {
         removed += 1;
         console.warn(
-          `⚠️ ORDERBOOK: sweeping out-of-band resting offer=${liveOffer.offerId} pair=${pairId} price=${liveOffer.priceTicks.toString()} ` +
+          `⚠️ ORDERBOOK: sweeping out-of-band resting offer=${liveOffer.offerId} pair=${pairId} price=${order.priceTicks.toString()} ` +
           `outside ±${REJECT_BPS / 100}% of ${bandLabel} ${bandAnchor.toString()}`,
         );
-        if (rehydrateOnly) {
-          quarantineOffer(liveOffer.accountId, liveOffer.offerId, `outside-anchor-band:${liveOffer.priceTicks.toString()}`);
+        if (debugRebuildProjectionOnly) {
+          recordDebugProjectionReject(liveOffer.accountId, liveOffer.offerId, `outside-anchor-band:${order.priceTicks.toString()}`);
         } else {
+          const cancelResult = applyCommand(nextBook, {
+            kind: 1,
+            ownerId: order.ownerId,
+            orderId: order.orderId,
+          });
+          nextBook = cancelResult.state;
           queueUniqueSwapResolveForEntityState(mempoolOps, hubState, queuedSwapResolutions, liveOffer.accountId, {
             offerId: liveOffer.offerId,
             fillRatio: 0,
@@ -1760,69 +1620,74 @@ export function processOrderbookSwaps(
         }
         continue;
       }
-      keptOffers.push(liveOffer);
     }
 
     if (removed === 0) return currentBook;
     pairSweepCount += 1;
-    const rebuilt = materializePairBookFromOffers(keptOffers, bucketWidthTicks);
-    handleRebuildRejections(rebuilt.rejected);
-    return rebuilt.book;
+    return nextBook;
   };
 
-  const bookRequiresCanonicalRebuild = (pairId: string, book: BookState): boolean => {
+  const assertBookMatchesKnownAccountOffers = (pairId: string, book: BookState): void => {
     for (const order of book.orders.values()) {
       const orderId = order.orderId;
       const meta = orderbookOfferMeta.get(orderId) ?? buildLiveOfferMeta(orderId);
-      if (!meta) continue;
+      if (!meta) {
+        throw new Error(`ORDERBOOK_ORPHAN_BOOK_ORDER: pair=${pairId} order=${orderId}`);
+      }
       if (hasQueuedSwapResolveForEntityState(hubState, queuedSwapResolutions, meta.accountId, meta.offerId)) {
-        staleBookMismatchCount += 1;
-        console.warn(
-          `⚠️ ORDERBOOK: pending resolution still present in cached pair=${pairId} order=${orderId} — rebuilding from canonical live offers`,
-        );
-        return true;
+        throw new Error(`ORDERBOOK_PENDING_RESOLUTION_STILL_IN_BOOK: pair=${pairId} order=${orderId}`);
       }
       orderbookOfferMeta.set(orderId, meta);
-      if (order.priceTicks !== meta.priceTicks || order.ownerId !== (meta.makerIsLeft ? meta.fromEntity : meta.toEntity) || BigInt(order.qtyLots) !== (deriveSide(meta.giveTokenId, meta.wantTokenId) === 1 ? meta.giveAmount : meta.wantAmount) / SWAP_LOT_SCALE) {
-        staleBookMismatchCount += 1;
-        console.warn(
-          `⚠️ ORDERBOOK: stale pair mismatch pair=${pairId} order=${orderId} storedPrice=${order.priceTicks.toString()} canonicalPrice=${meta.priceTicks.toString()} — rebuilding from canonical live offers`,
+      const metaSide = deriveSide(meta.giveTokenId, meta.wantTokenId);
+      const metaBaseAmount = metaSide === 1
+        ? (meta.quantizedGive ?? meta.giveAmount)
+        : meta.wantAmount;
+      if (
+        order.priceTicks !== meta.priceTicks ||
+        order.ownerId !== (meta.makerIsLeft ? meta.fromEntity : meta.toEntity) ||
+        BigInt(order.qtyLots) !== metaBaseAmount / SWAP_LOT_SCALE
+      ) {
+        throw new Error(
+          `ORDERBOOK_CACHE_MISMATCH: pair=${pairId} order=${orderId} ` +
+          `storedPrice=${order.priceTicks.toString()} canonicalPrice=${meta.priceTicks.toString()}`,
         );
-        return true;
       }
     }
-    return false;
   };
 
   const buildCrossMarketOffer = (offer: NormalizedOrderbookOffer): CrossMarketOffer | null => {
     return buildCrossJurisdictionMarketOffer(offer, hubState.entityId);
   };
 
+  const buildCrossMarketOfferFromBookOrder = (namespacedOrderId: string): CrossMarketOffer | null => {
+    const lastColon = namespacedOrderId.lastIndexOf(':');
+    if (lastColon === -1) return null;
+    const accountId = namespacedOrderId.slice(0, lastColon);
+    const offerId = namespacedOrderId.slice(lastColon + 1);
+    const account = hubState.accounts.get(accountId);
+    const offer = account?.swapOffers?.get(offerId);
+    if (!account || !offer?.crossJurisdiction) return null;
+    return buildCrossMarketOffer(normalizeSwapOfferForOrderbook(
+      {
+        offerId,
+        makerIsLeft: offer.makerIsLeft,
+        fromEntity: account.leftEntity || (offer as any).fromEntity || '',
+        toEntity: account.rightEntity || (offer as any).toEntity || '',
+        createdHeight: offer.createdHeight,
+        giveTokenId: offer.giveTokenId,
+        giveAmount: offer.giveAmount,
+        wantTokenId: offer.wantTokenId,
+        wantAmount: offer.wantAmount,
+        priceTicks: offer.priceTicks,
+        timeInForce: offer.timeInForce,
+        minFillRatio: offer.minFillRatio,
+        crossJurisdiction: offer.crossJurisdiction,
+      },
+      accountId,
+    ));
+  };
+
   const crossLiveOfferMeta = new Map<string, CrossMarketOffer>();
-  for (const [accountId, account] of hubState.accounts.entries()) {
-    for (const [offerId, offer] of account.swapOffers.entries()) {
-      if (!offer?.crossJurisdiction) continue;
-      const live = buildCrossMarketOffer(normalizeSwapOfferForOrderbook(
-        {
-          offerId: String(offerId),
-          makerIsLeft: offer.makerIsLeft,
-          fromEntity: account.leftEntity,
-          toEntity: account.rightEntity,
-          createdHeight: offer.createdHeight,
-          giveTokenId: offer.giveTokenId,
-          giveAmount: offer.giveAmount,
-          wantTokenId: offer.wantTokenId,
-          wantAmount: offer.wantAmount,
-          priceTicks: offer.priceTicks,
-          timeInForce: offer.timeInForce,
-          minFillRatio: offer.minFillRatio,
-          crossJurisdiction: offer.crossJurisdiction,
-        },
-        accountId,
-      ));
-      if (live) crossLiveOfferMeta.set(swapKey(accountId, String(offerId)), live);
-    }
-  }
 
   const processCrossJurisdictionOffers = (): void => {
     for (const rawOffer of crossJurisdictionSwapOffers) {
@@ -1854,11 +1719,11 @@ export function processOrderbookSwaps(
         continue;
       }
       // Cross-j routes carry delayed clearing state outside the plain book.
-      // Rebuild the in-memory book from live account offers on every sweep so
-      // terminal or pending-cleared routes cannot be matched from stale storage.
-      let book = bookCache.get(marketOffer.pairId);
+      // The book itself is loaded from the persisted snapshot and updated by
+      // normal order commands, never rebuilt from an account scan in live mode.
+      let book = bookCache.get(marketOffer.pairId) || ext.books.get(marketOffer.pairId);
       if (!book) {
-        book = createOrRepairPairBook(getSwapPairPolicyByBaseQuote(rawOffer.giveTokenId, rawOffer.wantTokenId).bookBucketWidthTicks);
+        book = createEmptyPairBook(getSwapPairPolicyByBaseQuote(rawOffer.giveTokenId, rawOffer.wantTokenId).bookBucketWidthTicks);
       }
       const existingOrder = getBookOrder(book, currentNamespacedOrderId);
       if (existingOrder) {
@@ -1880,7 +1745,7 @@ export function processOrderbookSwaps(
           orderId: currentNamespacedOrderId,
           side: marketOffer.side,
           tif: rawOffer.timeInForce,
-          postOnly: rehydrateOnly,
+          postOnly: debugRebuildProjectionOnly,
           priceTicks: marketOffer.priceTicks,
           qtyLots: Number(qtyLots),
           minFillRatio: rawOffer.minFillRatio,
@@ -1905,9 +1770,9 @@ export function processOrderbookSwaps(
         rejectInvalidCrossOffer(currentAccountId, rawOffer.offerId, `cross-post-only-reject:${rejectEvents.map(event => event.reason).join(',')}`);
         continue;
       }
-      if (rehydrateOnly) {
+      if (debugRebuildProjectionOnly) {
         if (tradeEvents.length > 0) {
-          quarantineOffer(currentAccountId, rawOffer.offerId, `rehydrate-cross-trade:${tradeEvents.length}`);
+          recordDebugProjectionReject(currentAccountId, rawOffer.offerId, `debug-rebuild-cross-trade:${tradeEvents.length}`);
         }
         continue;
       }
@@ -1927,10 +1792,9 @@ export function processOrderbookSwaps(
       }
 
       for (const [namespacedOrderId, fill] of fillsPerOrder) {
-        const meta = crossLiveOfferMeta.get(namespacedOrderId);
+        const meta = crossLiveOfferMeta.get(namespacedOrderId) ?? buildCrossMarketOfferFromBookOrder(namespacedOrderId);
         if (!meta) {
-          console.warn(`⚠️ ORDERBOOK CROSS-J: missing live metadata for ${namespacedOrderId}`);
-          continue;
+          throw new Error(`ORDERBOOK_CROSS_J_FILL_META_MISSING: order=${namespacedOrderId}`);
         }
         const lastColon = namespacedOrderId.lastIndexOf(':');
         if (lastColon === -1) continue;
@@ -1991,10 +1855,10 @@ export function processOrderbookSwaps(
     if (minTradeSize > 0n && quoteAmount < minTradeSize) {
       console.warn(
         `⚠️ ORDERBOOK: Offer below minTradeSize=${minTradeSize.toString()} quote=${quoteAmount.toString()} offer=${offer.offerId}` +
-        (rehydrateOnly ? '; quarantined during rehydrate' : '; cancelling remainder'),
+        (debugRebuildProjectionOnly ? '; rejected from debug projection rebuild' : '; cancelling remainder'),
       );
-      if (rehydrateOnly) {
-        quarantineOffer(currentAccountId, offer.offerId, `below-minTradeSize:${quoteAmount.toString()}`);
+      if (debugRebuildProjectionOnly) {
+        recordDebugProjectionReject(currentAccountId, offer.offerId, `below-minTradeSize:${quoteAmount.toString()}`);
         continue;
       }
       queueUniqueSwapResolveForEntityState(mempoolOps, hubState, queuedSwapResolutions, currentAccountId, {
@@ -2022,22 +1886,18 @@ export function processOrderbookSwaps(
       continue;
     }
 
-    // ext.books is a persisted hot cache. If this pair violates canonical price invariants,
-    // repair only that pair from live offers and keep the rest of the cache untouched.
+    // ext.books is the persisted hot book snapshot. Live mode must not rebuild
+    // it by scanning accounts; mismatches are bugs that need a root-cause fix.
     let book = bookCache.get(bookKey) || ext.books.get(bookKey);
     if (!book) {
-      book = createOrRepairPairBook(bucketWidthTicks);
-    } else if (bookRequiresCanonicalRebuild(bookKey, book)) {
-      const rebuiltFromCanonical = rebuildPairBookFromCanonicalOffers(bookKey, bucketWidthTicks);
-      book = rebuiltFromCanonical ?? createOrRepairPairBook(bucketWidthTicks);
-      pairRepairCount += 1;
-      bookCache.set(bookKey, book);
-      bookUpdates.push({ pairId: bookKey, book });
+      book = createEmptyPairBook(bucketWidthTicks);
+    } else {
+      assertBookMatchesKnownAccountOffers(bookKey, book);
     }
 
     if (!sweptPairs.has(bookKey)) {
       sweptPairs.add(bookKey);
-      const sweptBook = sweepPairOutOfBandOffers(bookKey, pairPolicy, hasExplicitPairPolicy, book, bucketWidthTicks);
+      const sweptBook = sweepPairOutOfBandOffers(bookKey, pairPolicy, hasExplicitPairPolicy, book);
       if (sweptBook !== book) {
         book = sweptBook;
         bookCache.set(bookKey, book);
@@ -2060,8 +1920,8 @@ export function processOrderbookSwaps(
           `around ${marketAnchorLabel} ${marketAnchor.toString()} (bestBid=${String(bestBid)} bestAsk=${String(bestAsk)}) ` +
           `— auto-canceling offer=${offer.offerId}`,
         );
-        if (rehydrateOnly) {
-          quarantineOffer(currentAccountId, offer.offerId, `outside-anchor-band:${priceTicks.toString()}`);
+        if (debugRebuildProjectionOnly) {
+          recordDebugProjectionReject(currentAccountId, offer.offerId, `outside-anchor-band:${priceTicks.toString()}`);
           continue;
         }
         queueUniqueSwapResolveForEntityState(mempoolOps, hubState, queuedSwapResolutions, currentAccountId, {
@@ -2114,16 +1974,9 @@ export function processOrderbookSwaps(
       console.warn(
         `⚠️ ORDERBOOK: cached order mismatch for live offer=${offer.offerId} account=${currentAccountId.slice(-8)} ` +
         `storedPrice=${existingOrder.priceTicks.toString()} canonicalPrice=${priceTicks.toString()} ` +
-        `storedQty=${existingOrder.qtyLots.toString()} canonicalQty=${qtyLots.toString()} — rebuilding pair from canonical offers`,
+        `storedQty=${existingOrder.qtyLots.toString()} canonicalQty=${qtyLots.toString()}`,
       );
-      const rebuiltBook = rebuildPairBookFromCanonicalOffers(bookKey, bucketWidthTicks);
-      if (!rebuiltBook) {
-        throw new Error(`ORDERBOOK_REBUILD_FAILED: cannot repair cached order mismatch for ${currentNamespacedOrderId}`);
-      }
-      book = rebuiltBook;
-      pairRepairCount += 1;
-      bookCache.set(bookKey, book);
-      bookUpdates.push({ pairId: bookKey, book });
+      throw new Error(`ORDERBOOK_CACHE_MISMATCH: pair=${bookKey} order=${currentNamespacedOrderId}`);
     }
     console.log(`📊 ORDERBOOK ADD: maker=${formatEntityId(makerId)}, orderId=${currentNamespacedOrderId.slice(-20)}, side=${side}, price=${priceTicks}, qty=${qtyLots}`);
 
@@ -2135,7 +1988,7 @@ export function processOrderbookSwaps(
         orderId: currentNamespacedOrderId,
         side,
         tif: offer.timeInForce,
-        postOnly: rehydrateOnly,
+        postOnly: debugRebuildProjectionOnly,
         priceTicks,
         qtyLots: Number(qtyLots),
         minFillRatio: offer.minFillRatio,
@@ -2146,8 +1999,8 @@ export function processOrderbookSwaps(
         console.warn(
           `⚠️ ORDERBOOK FULL: pair=${bookKey} maxOrders=${book.params.maxOrders} offer=${offer.offerId} account=${currentAccountId.slice(-8)}`,
         );
-        if (rehydrateOnly) {
-          quarantineOffer(currentAccountId, offer.offerId, `book-full:${book.params.maxOrders}`);
+        if (debugRebuildProjectionOnly) {
+          recordDebugProjectionReject(currentAccountId, offer.offerId, `book-full:${book.params.maxOrders}`);
           continue;
         }
         if (queueUniqueSwapResolveForEntityState(mempoolOps, hubState, queuedSwapResolutions, currentAccountId, {
@@ -2159,7 +2012,7 @@ export function processOrderbookSwaps(
         }
         continue;
       }
-      containCurrentOfferPairFailure(bookKey, currentAccountId, offer.offerId, bucketWidthTicks, message);
+      containCurrentOfferPairFailure(bookKey, currentAccountId, offer.offerId, message);
       continue;
     }
 
@@ -2186,8 +2039,8 @@ export function processOrderbookSwaps(
         console.warn(
           `⚠️ ORDERBOOK REJECT: offer=${offer.offerId} account=${currentAccountId.slice(-8)} side=${side} price=${priceTicks.toString()} qty=${qtyLots.toString()} bestBid=${String(bestBid)} bestAsk=${String(bestAsk)} reason=${rejectReasons || 'unknown'}`,
         );
-        if (rehydrateOnly) {
-          quarantineOffer(currentAccountId, offer.offerId, `post-only-reject:${rejectReasons || 'unknown'}`);
+        if (debugRebuildProjectionOnly) {
+          recordDebugProjectionReject(currentAccountId, offer.offerId, `post-only-reject:${rejectReasons || 'unknown'}`);
           continue;
         }
         if (queueUniqueSwapResolveForEntityState(mempoolOps, hubState, queuedSwapResolutions, currentAccountId, {
@@ -2201,7 +2054,7 @@ export function processOrderbookSwaps(
         continue;
       }
 
-      if (rehydrateOnly) {
+      if (debugRebuildProjectionOnly) {
         continue;
       }
 
@@ -2367,18 +2220,18 @@ export function processOrderbookSwaps(
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
-      containCurrentOfferPairFailure(bookKey, currentAccountId, offer.offerId, bucketWidthTicks, message);
+      containCurrentOfferPairFailure(bookKey, currentAccountId, offer.offerId, message);
       continue;
     }
   }
 
-  if (staleBookMismatchCount > 0 || pairRepairCount > 0 || pairSweepCount > 0) {
+  if (pairSweepCount > 0) {
     console.log(
-      `📈 ORDERBOOK PASS: staleMismatch=${staleBookMismatchCount} pairRepair=${pairRepairCount} pairSweep=${pairSweepCount}`,
+      `📈 ORDERBOOK PASS: pairSweep=${pairSweepCount}`,
     );
   }
 
-  return { mempoolOps, crossJurisdictionFills, bookUpdates, quarantinedOffers };
+  return { mempoolOps, crossJurisdictionFills, bookUpdates, debugProjectionRejects };
 }
 
 /**
@@ -2391,10 +2244,10 @@ export function processOrderbookCancels(
   const mempoolOps: MempoolOp[] = [];
   const crossJurisdictionFills: CrossJurisdictionFillInstruction[] = [];
   const bookUpdates: { pairId: string; book: BookState }[] = [];
-  const quarantinedOffers: MatchResult['quarantinedOffers'] = [];
+  const debugProjectionRejects: MatchResult['debugProjectionRejects'] = [];
   const queuedSwapResolutions = new Set<string>();
   const ext = hubState.orderbookExt as OrderbookExtState | undefined;
-  if (!ext) return { mempoolOps, crossJurisdictionFills, bookUpdates, quarantinedOffers };
+  if (!ext) return { mempoolOps, crossJurisdictionFills, bookUpdates, debugProjectionRejects };
 
   for (const { offerId, accountId } of cancels) {
     const accountMachine = hubState.accounts.get(accountId);
@@ -2452,5 +2305,5 @@ export function processOrderbookCancels(
     }
   }
 
-  return { mempoolOps, crossJurisdictionFills, bookUpdates, quarantinedOffers };
+  return { mempoolOps, crossJurisdictionFills, bookUpdates, debugProjectionRejects };
 }

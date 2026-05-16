@@ -3,13 +3,21 @@ import { requireUsableContractAddress } from '../contract-address';
 import { isLeftEntity } from '../entity-id-utils';
 import { formatEntityId } from '../utils';
 import { normalizeEntityName } from '../networking/gossip';
-import { createOrderbookExtState, validateSpreadDistribution } from '../orderbook';
+import {
+  applyCommand,
+  createOrderbookExtState,
+  getBookOrder,
+  getOrderbookPairsForOrder,
+  replaceOrderbookPair,
+  validateSpreadDistribution,
+  type OrderbookExtState,
+} from '../orderbook';
 import type { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput, JInput, HashType, CrossJurisdictionSwapRoute } from '../types';
 import { DEFAULT_SOFT_LIMIT, DEFAULT_HARD_LIMIT, DEFAULT_MAX_FEE } from '../types';
 import { DEBUG, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
 import { announceLocalEntityProfile } from '../networking/gossip-helper';
-import { markStorageAccountDirty, markStorageEntityDirty } from '../env-events';
+import { markStorageAccountDirty, markStorageEntityDirty, recordOrderbookPairUpdate } from '../env-events';
 import { upsertSortedStringMapEntry } from '../sorted-index';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
 import {
@@ -81,6 +89,38 @@ import { buildCrossJurisdictionCancelAck } from '../cross-jurisdiction-orderbook
 import { assertSameJurisdictionAccount } from '../jurisdiction-runtime';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
+const deterministicEntityTimestamp = (state: EntityState, env: Env): number =>
+  Number(state.timestamp || env.timestamp || 0);
+const cancelOrderbookOfferIfPresent = (
+  env: Env,
+  state: EntityState,
+  accountId: string,
+  offerId: string,
+): boolean => {
+  const ext = state.orderbookExt as OrderbookExtState | undefined;
+  if (!ext) return false;
+  const namespacedOrderId = `${accountId}:${offerId}`;
+  let removed = false;
+  for (const pairId of getOrderbookPairsForOrder(ext, namespacedOrderId)) {
+    const book = ext.books.get(pairId);
+    if (!book) continue;
+    const order = getBookOrder(book, namespacedOrderId);
+    if (!order) continue;
+    const result = applyCommand(book, {
+      kind: 1,
+      ownerId: order.ownerId,
+      orderId: namespacedOrderId,
+    });
+    replaceOrderbookPair(ext, pairId, result.state);
+    recordOrderbookPairUpdate(env, {
+      entityId: state.entityId,
+      pairId,
+      book: result.state,
+    });
+    removed = true;
+  }
+  return removed;
+};
 const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 const isEntityId32 = (value: unknown): value is string => typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
@@ -1459,7 +1499,7 @@ export const applyEntityTx = async (
         addMessage(newState, `❌ Cross-j request invalid route: ${error instanceof Error ? error.message : String(error)}`);
         return { newState, outputs };
       }
-      const now = Number(newState.timestamp || env.timestamp || Date.now());
+      const now = deterministicEntityTimestamp(newState, env);
       if (isCrossJurisdictionRouteExpired(route, now)) {
         addMessage(newState, `❌ Cross-j request ${route.orderId} expired`);
         return { newState, outputs };
@@ -1574,7 +1614,7 @@ export const applyEntityTx = async (
         addMessage(newState, `❌ Cross-j commit invalid route: ${error instanceof Error ? error.message : String(error)}`);
         return { newState, outputs };
       }
-      const now = Number(newState.timestamp || env.timestamp || Date.now());
+      const now = deterministicEntityTimestamp(newState, env);
       if (isCrossJurisdictionRouteExpired(route, now) || isCrossJurisdictionPullExpired(route, 'source', now)) {
         addMessage(newState, `❌ Cross-j commit ${route.orderId} expired`);
         return { newState, outputs };
@@ -1757,21 +1797,11 @@ export const applyEntityTx = async (
       return { newState, outputs, mempoolOps };
     }
 
-    if (entityTx.type === 'crossJurisdictionFillRequest') {
-      const newState = cloneEntityState(entityState);
-      addMessage(newState, '❌ crossJurisdictionFillRequest is deprecated; matching must emit crossJurisdictionFillNotice');
-      return { newState, outputs: [], mempoolOps: [] };
-    }
-
     if (entityTx.type === 'requestCrossJurisdictionClear') {
-      const { orderId, cancelRemainder = false, reopenRemainder = false } = entityTx.data;
+      const { orderId, cancelRemainder = false } = entityTx.data;
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
       const mempoolOps: MempoolOp[] = [];
-      if (reopenRemainder) {
-        addMessage(newState, `❌ Cross-j clear ${orderId} blocked: reopenRemainder is not implemented in V1`);
-        return { newState, outputs, mempoolOps };
-      }
       let route = newState.crossJurisdictionSwaps?.get(orderId);
       if (!route) {
         addMessage(newState, `❌ Cross-j clear ${orderId} missing route`);
@@ -1793,11 +1823,11 @@ export const applyEntityTx = async (
           entityId: route.source.counterpartyEntityId,
           entityTxs: [{
             type: 'requestCrossJurisdictionClear',
-            data: { orderId, cancelRemainder, reopenRemainder },
+            data: { orderId, cancelRemainder },
           }],
         });
         route.status = 'clear_requested';
-        route.pendingClearRequestedAt = Number(newState.timestamp || env.timestamp || Date.now());
+        route.pendingClearRequestedAt = deterministicEntityTimestamp(newState, env);
         route.clearingPolicy = cancelRemainder ? 'cancel_and_clear' : 'manual';
         route.updatedAt = newState.timestamp || env.timestamp;
         newState.crossJurisdictionSwaps?.set(orderId, route);
@@ -1832,18 +1862,24 @@ export const applyEntityTx = async (
           addMessage(newState, `🌉 Cross-j clear ${orderId} waiting for account offer close ack`);
           return { newState, outputs, mempoolOps };
         }
+        const removedFromBook = cancelOrderbookOfferIfPresent(env, newState, accountId, orderId);
         mempoolOps.push({
           accountId,
           tx: buildCrossJurisdictionCancelAck(orderId, canonicalRoute),
         });
         canonicalRoute.status = 'clear_requested';
-        canonicalRoute.pendingClearRequestedAt = Number(newState.timestamp || env.timestamp || Date.now());
+        canonicalRoute.pendingClearRequestedAt = deterministicEntityTimestamp(newState, env);
         canonicalRoute.clearingPolicy = 'cancel_and_clear';
         canonicalRoute.updatedAt = newState.timestamp || env.timestamp;
         newState.crossJurisdictionSwaps?.set(orderId, canonicalRoute);
         const firstValidator = entityState.config.validators[0];
         if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
-        addMessage(newState, `🌉 Cross-j clear ${orderId} queued account offer close before pull reveal`);
+        addMessage(
+          newState,
+          removedFromBook
+            ? `🌉 Cross-j clear ${orderId} removed live book order and queued account offer close before pull reveal`
+            : `🌉 Cross-j clear ${orderId} queued account offer close before pull reveal`,
+        );
         return { newState, outputs, mempoolOps };
       }
       if (ratio <= 0) {
@@ -1875,7 +1911,7 @@ export const applyEntityTx = async (
           }],
         });
         canonicalRoute.status = 'cancelled';
-        canonicalRoute.pendingClearRequestedAt = Number(newState.timestamp || env.timestamp || Date.now());
+        canonicalRoute.pendingClearRequestedAt = deterministicEntityTimestamp(newState, env);
         canonicalRoute.clearingPolicy = 'cancel_and_clear';
         canonicalRoute.updatedAt = newState.timestamp || env.timestamp;
         newState.crossJurisdictionSwaps?.set(orderId, canonicalRoute);
@@ -1931,7 +1967,7 @@ export const applyEntityTx = async (
         });
       }
       canonicalRoute.status = 'clearing';
-      canonicalRoute.pendingClearRequestedAt = Number(newState.timestamp || env.timestamp || Date.now());
+      canonicalRoute.pendingClearRequestedAt = deterministicEntityTimestamp(newState, env);
       canonicalRoute.clearingPolicy = closeRemainder ? 'cancel_and_clear' : ratio >= 65_535 ? 'full_fill' : 'manual';
       canonicalRoute.updatedAt = newState.timestamp || env.timestamp;
       newState.crossJurisdictionSwaps?.set(orderId, canonicalRoute);
@@ -1968,7 +2004,7 @@ export const applyEntityTx = async (
         addMessage(newState, `❌ Cross-j salvage ${routeId} missing target pull commitment`);
         return { newState, outputs };
       }
-      if (isCrossJurisdictionPullExpired(route, 'target', Number(newState.timestamp || env.timestamp || Date.now()))) {
+      if (isCrossJurisdictionPullExpired(route, 'target', deterministicEntityTimestamp(newState, env))) {
         addMessage(newState, `❌ Cross-j salvage ${routeId} target pull expired`);
         return { newState, outputs };
       }
@@ -2049,7 +2085,7 @@ export const applyEntityTx = async (
         const route = publicCrossJurisdiction;
         const existing = newState.crossJurisdictionSwaps?.get(route.orderId);
         const transitionError = validateCrossJurisdictionRouteTransition(existing, route);
-        if (transitionError || isCrossJurisdictionRouteExpired(route, Number(newState.timestamp || env.timestamp || Date.now()))) {
+        if (transitionError || isCrossJurisdictionRouteExpired(route, deterministicEntityTimestamp(newState, env))) {
           addMessage(newState, `❌ Cross-j offer ${route.orderId} blocked: ${transitionError || 'expired'}`);
           return { newState, outputs: [] };
         }

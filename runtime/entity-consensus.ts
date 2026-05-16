@@ -25,12 +25,13 @@ import {
   normalizeSwapOfferForOrderbook,
   processOrderbookSwaps,
   processOrderbookCancels,
+  type SwapCancelEvent,
   type SwapCancelRequestEvent,
   type SwapOfferEvent,
 } from './entity-tx/handlers/account';
 import { compareCanonicalText, swapKey } from './swap-execution';
 import type { OrderbookExtState } from './orderbook';
-import { replaceOrderbookPair } from './orderbook';
+import { applyCommand, getBookOrder, getOrderbookPairsForOrder, replaceOrderbookPair } from './orderbook';
 import { executeCrontab, initCrontab, scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from './entity-crontab';
 import { ethers } from 'ethers';
 import {
@@ -38,7 +39,6 @@ import {
   isCrossJurisdictionRouteExpired,
   withCanonicalCrossJurisdictionRouteHash,
 } from './cross-jurisdiction';
-import { buildCrossJurisdictionCancelAck } from './cross-jurisdiction-orderbook';
 
 const compareNumericKey = (
   left: string | number,
@@ -53,6 +53,40 @@ const compareNumericKey = (
 };
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
+const deterministicEntityTimestamp = (state: EntityState, env?: Env): number =>
+  Number(state.timestamp || env?.timestamp || 0);
+const applyCommittedSwapCancelsToOrderbook = (
+  env: Env,
+  state: EntityState,
+  cancels: SwapCancelEvent[],
+): void => {
+  if (cancels.length === 0) return;
+  const ext = state.orderbookExt as OrderbookExtState | undefined;
+  if (!ext) return;
+  console.log(`📊 ENTITY-ORCHESTRATOR: Applying ${cancels.length} committed swap cancels to orderbook`);
+  for (const { accountId, offerId } of cancels) {
+    const namespacedOrderId = `${accountId}:${offerId}`;
+    for (const pairId of getOrderbookPairsForOrder(ext, namespacedOrderId)) {
+      const book = ext.books.get(pairId);
+      if (!book) continue;
+      const existingOrder = getBookOrder(book, namespacedOrderId);
+      if (!existingOrder) continue;
+      const result = applyCommand(book, {
+        kind: 1,
+        ownerId: existingOrder.ownerId,
+        orderId: namespacedOrderId,
+      });
+      replaceOrderbookPair(ext, pairId, result.state);
+      recordOrderbookPairUpdate(env, {
+        entityId: state.entityId,
+        pairId,
+        book: result.state,
+      });
+      markStorageEntityDirty(env, state.entityId);
+      console.log(`📊 ORDERBOOK: Removed committed cancelled order ${offerId.slice(-8)} from ${pairId}`);
+    }
+  }
+};
 const findEntityStateById = (env: Env, entityId: string): EntityState | null => {
   const target = normalizeEntityRef(entityId);
   for (const replica of env.eReplicas?.values?.() || []) {
@@ -112,7 +146,7 @@ const collectSiblingCrossJurisdictionOffers = (
   currentEntityState: EntityState,
 ): OrderbookOfferForMatch[] => {
   const currentId = normalizeEntityRef(currentEntityState.entityId);
-  const now = Number(currentEntityState.timestamp || env.timestamp || Date.now());
+  const now = deterministicEntityTimestamp(currentEntityState, env);
   const offers: OrderbookOfferForMatch[] = [];
   for (const replica of env.eReplicas?.values?.() || []) {
     const siblingState = replica?.state;
@@ -158,7 +192,7 @@ const collectSiblingCrossJurisdictionOffers = (
 const collectLocalCrossJurisdictionOffers = (
   currentEntityState: EntityState,
 ): OrderbookOfferForMatch[] => {
-  const now = Number(currentEntityState.timestamp || Date.now());
+  const now = deterministicEntityTimestamp(currentEntityState);
   const offers: OrderbookOfferForMatch[] = [];
   for (const [accountId, account] of currentEntityState.accounts.entries()) {
     for (const [offerId, offer] of account.swapOffers.entries()) {
@@ -1452,6 +1486,7 @@ export const applyEntityFrame = async (
   // === AGGREGATE PURE EVENTS FROM ALL HANDLERS ===
   const allSwapOffersCreated: SwapOfferEvent[] = [];
   const allSwapCancelRequests: SwapCancelRequestEvent[] = [];
+  const allSwapOffersCancelled: SwapCancelEvent[] = [];
   let crossJurisdictionReadinessChanged = false;
 
   // Preserve WAL transaction order exactly during live processing and replay.
@@ -1469,6 +1504,7 @@ export const applyEntityFrame = async (
       mempoolOps,
       swapOffersCreated,
       swapCancelRequests,
+      swapOffersCancelled,
     } = await applyEntityTx(env, currentEntityState, entityTx);
     currentEntityState = newState;
     if (
@@ -1503,6 +1539,15 @@ export const applyEntityFrame = async (
       for (const { accountId, tx } of mempoolOps) {
         const account = currentEntityState.accounts.get(accountId);
         if (account) {
+          if (
+            tx.type === 'swap_cancel_request' &&
+            account.swapOffers?.get(tx.data.offerId)?.crossJurisdiction &&
+            !currentEntityState.orderbookExt
+          ) {
+            throw new Error(
+              `CROSS_J_ORDERBOOK_EXT_REQUIRED: cancel for ${String(tx.data.offerId).slice(-8)} cannot use fallback swap_resolve`,
+            );
+          }
           if (!queueUniqueAccountMempoolTx(account, tx)) {
             continue;
           }
@@ -1539,6 +1584,7 @@ export const applyEntityFrame = async (
 
     if (swapOffersCreated) allSwapOffersCreated.push(...swapOffersCreated);
     if (swapCancelRequests) allSwapCancelRequests.push(...swapCancelRequests);
+    if (swapOffersCancelled) allSwapOffersCancelled.push(...swapOffersCancelled);
 
     if (HEAVY_LOGS && entityTx.type === 'extendCredit') {
       console.log(`💳 POST-EXTEND-CREDIT: Checking all account mempools:`);
@@ -1671,7 +1717,7 @@ export const applyEntityFrame = async (
       if (offer.crossJurisdiction && !crossJurisdictionPullsReady(
         env,
         offer.crossJurisdiction,
-        Number(currentEntityState.timestamp || env.timestamp || Date.now()),
+        deterministicEntityTimestamp(currentEntityState, env),
       )) {
         waitingForCrossPullCommitments = true;
         console.warn(`🌉 ORDERBOOK CROSS-J: offer ${offer.offerId} waiting for prepared pull commitments`);
@@ -1797,88 +1843,11 @@ export const applyEntityFrame = async (
       }
     }
 
-    if (matchResult.quarantinedOffers.length > 0) {
-      console.warn(
-        `📊 ORDERBOOK: repairing ${matchResult.quarantinedOffers.length} quarantined offer(s) at account level`,
-      );
-    }
-
-    for (const { accountId, offerId, reason } of matchResult.quarantinedOffers) {
-      const account = currentEntityState.accounts.get(accountId);
-      const offer = account?.swapOffers?.get(offerId);
-
-      if (account && offer) {
-        const tx = offer.crossJurisdiction
-          ? buildCrossJurisdictionCancelAck(offerId, offer.crossJurisdiction)
-          : {
-              type: 'swap_resolve' as const,
-              data: {
-                offerId,
-                fillRatio: 0,
-                cancelRemainder: true,
-                comment: `orderbook-quarantine:${reason}`,
-              },
-            };
-        if (!queueUniqueAccountMempoolTx(account, tx)) {
-          continue;
-        }
-        proposableAccounts.add(accountId);
-        markStorageAccountDirty(env, currentEntityState.entityId, accountId);
-        markStorageEntityDirty(env, currentEntityState.entityId);
-        console.warn(
-          `📊 ORDERBOOK: queued quarantine repair offer=${offerId.slice(-8)} account=${accountId.slice(-8)} reason=${reason}`,
-        );
-        continue;
-      }
-
-      const ownerState = findSwapOfferOwnerState(env, currentEntityState, accountId, offerId);
-      const ownerAccount = findAccountByCounterparty(ownerState, accountId);
-      const ownerOffer = ownerAccount?.swapOffers?.get(offerId);
-      const firstValidator = ownerState?.config?.validators?.[0];
-      if (!ownerState || !firstValidator) {
-        console.warn(
-          `📊 ORDERBOOK: unable to route quarantine repair offer=${offerId.slice(-8)} account=${accountId.slice(-8)} reason=${reason}`,
-        );
-        continue;
-      }
-
-      if (ownerOffer?.crossJurisdiction) {
-        allOutputs.push({
-          entityId: ownerState.entityId,
-          signerId: firstValidator,
-          entityTxs: [{
-            type: 'requestCrossJurisdictionClear',
-            data: {
-              orderId: offerId,
-              cancelRemainder: true,
-            },
-          }],
-        });
-        console.warn(
-          `🌉 ORDERBOOK CROSS-J: routed quarantine clear to ${ownerState.entityId.slice(-8)} ` +
-          `offer=${offerId.slice(-8)} reason=${reason}`,
-        );
-        continue;
-      }
-
-      allOutputs.push({
-        entityId: ownerState.entityId,
-        signerId: firstValidator,
-        entityTxs: [{
-          type: 'resolveSwap',
-          data: {
-            counterpartyEntityId: accountId,
-            offerId,
-            fillRatio: 0,
-            cancelRemainder: true,
-            comment: `orderbook-quarantine:${reason}`,
-          },
-        }],
-      });
-      console.warn(
-        `📊 ORDERBOOK: routed quarantine cancel to ${ownerState.entityId.slice(-8)} ` +
-        `offer=${offerId.slice(-8)} reason=${reason}`,
-      );
+    if (matchResult.debugProjectionRejects.length > 0) {
+      const detail = matchResult.debugProjectionRejects
+        .map(({ accountId, offerId, reason }) => `${accountId.slice(-8)}:${offerId.slice(-8)}:${reason}`)
+        .join(', ');
+      throw new Error(`ORDERBOOK_LIVE_PROJECTION_REJECT: ${detail}`);
     }
 
 	    if (matchResult.crossJurisdictionFills.length > 0) {
@@ -1890,7 +1859,7 @@ export const applyEntityFrame = async (
 	    if (waitingForCrossPullCommitments && currentEntityState.crontabState) {
 	      scheduleCrontabHook(currentEntityState.crontabState, {
 	        id: `cross-j-orderbook-sweep:${currentEntityState.entityId}`,
-	        triggerAt: Number(currentEntityState.timestamp || env.timestamp || Date.now()) + 500,
+        triggerAt: deterministicEntityTimestamp(currentEntityState, env) + 500,
 	        type: 'cross_j_orderbook_sweep',
 	        data: { reason: 'pull-commitment-wait' },
 	      });
@@ -1909,6 +1878,10 @@ export const applyEntityFrame = async (
   }
 
   // 3. Process swap cancel requests through hub orderbook
+  if (allSwapOffersCancelled.length > 0) {
+    applyCommittedSwapCancelsToOrderbook(env, currentEntityState, allSwapOffersCancelled);
+  }
+
   if (allSwapCancelRequests.length > 0) {
     console.log(`📊 ENTITY-ORCHESTRATOR: Processing ${allSwapCancelRequests.length} swap cancel requests`);
 
@@ -1944,10 +1917,9 @@ export const applyEntityFrame = async (
         if (!account?.swapOffers?.has(offerId)) continue;
         const offer = account.swapOffers.get(offerId);
         if (offer?.crossJurisdiction) {
-          console.error(
-            `🌉 ORDERBOOK CROSS-J: cancel for ${offerId.slice(-8)} requires orderbookExt; fail-closed without fallback ack`,
+          throw new Error(
+            `CROSS_J_ORDERBOOK_EXT_REQUIRED: cancel for ${offerId.slice(-8)} cannot use fallback swap_resolve`,
           );
-          continue;
         }
         // Fallback cancel resolution is synthesized by the orchestrator itself.
         // It must land in the same working-state mempool so the later account
@@ -2009,9 +1981,16 @@ export const applyEntityFrame = async (
           console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME: leftJObs=${accountMachine.leftJObservations?.length || 0}, rightJObs=${accountMachine.rightJObservations?.length || 0}`);
           console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME: Full mempool details:`, accountMachine.mempool.map((tx, i) => `${i}:${tx.type}`).join(', '));
         }
-        const proposal = await proposeAccountFrame(env, accountMachine, false, currentEntityState.lastFinalizedJHeight);
+	        const proposal = await proposeAccountFrame(env, accountMachine, false, currentEntityState.lastFinalizedJHeight);
+	        if (proposal.swapOffersCancelled && proposal.swapOffersCancelled.length > 0) {
+	          const normalizedCancels = proposal.swapOffersCancelled.map(({ offerId }) => ({
+	            accountId: accountKey,
+	            offerId,
+	          }));
+	          applyCommittedSwapCancelsToOrderbook(env, currentEntityState, normalizedCancels);
+	        }
 
-        if (env.quietRuntimeLogs !== true) {
+	        if (env.quietRuntimeLogs !== true) {
           console.log(`📤 PROPOSE-RESULT for ${cpId.slice(-4)}: success=${proposal.success}, hasAccountInput=${!!proposal.accountInput}, error=${proposal.error || 'none'}`);
         }
 

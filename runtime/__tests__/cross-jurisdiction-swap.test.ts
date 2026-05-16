@@ -4,10 +4,13 @@ import { ethers } from 'ethers';
 import { applyEntityTx } from '../entity-tx/apply';
 import { processAccountTx } from '../account-tx/apply';
 import { processOrderbookCancels } from '../entity-tx/handlers/account';
+import { applyEntityInput } from '../entity-consensus';
 import {
   createEmptyEnv,
   submitCrossJurisdictionSwap,
 } from '../runtime';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
+import { generateLazyEntityId } from '../entity-factory';
 import { hashHtlcSecret } from '../htlc-utils';
 import type { AccountMachine, ConsensusConfig, EntityReplica, EntityState, Env, JurisdictionConfig } from '../types';
 import { createDefaultDelta } from '../validation-utils';
@@ -791,6 +794,62 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(result.mempoolOps.some(op => op.tx.type === 'swap_resolve')).toBe(false);
   });
 
+  test('cross-j cancel fails closed when orderbook extension is missing', async () => {
+    const env = createEmptyEnv('cross-cancel-no-orderbook-ext');
+    env.scenarioMode = true;
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceHub = entity('9b');
+    const targetHub = entity('9c');
+    const targetUser = entity('9d');
+    const seed = 'cross-cancel-no-orderbook-ext seed alpha beta gamma';
+    env.runtimeSeed = seed;
+    const signer = deriveSignerAddressSync(seed, '1');
+    registerSignerKey(signer, deriveSignerKeySync(seed, '1'));
+    const sourceUser = generateLazyEntityId([signer], 1n).toLowerCase();
+    const state = makeState(sourceUser, signer, eth, sourceHub);
+    const route = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-cancel-no-orderbook-ext',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      status: 'resting',
+      createdAt: env.timestamp,
+      updatedAt: env.timestamp,
+      expiresAt: 70_000,
+    }, { runtimeSeed: 'cross-cancel-no-orderbook-ext', sourceDisputeDelayMs: 5_000, now: env.timestamp });
+    const account = state.accounts.get(sourceHub)!;
+    account.currentFrame.prevFrameHash = 'genesis';
+    account.swapOffers.set(route.orderId, {
+      offerId: route.orderId,
+      giveTokenId: 1,
+      giveAmount: 1_000n,
+      wantTokenId: 1,
+      wantAmount: 900n,
+      priceTicks: 900n,
+      timeInForce: 0,
+      minFillRatio: 0,
+      makerIsLeft: account.leftEntity === sourceUser,
+      createdHeight: 0,
+      crossJurisdiction: { ...route, status: 'resting' },
+    });
+    addReplica(env, state, signer);
+    const replica = env.eReplicas.get(`${state.entityId}:${signer}`)!;
+
+    await expect(applyEntityInput(env, replica, {
+      entityId: sourceUser,
+      signerId: signer,
+      entityTxs: [{
+        type: 'proposeCancelSwap',
+        data: { counterpartyEntityId: sourceHub, offerId: route.orderId },
+      }],
+    })).rejects.toThrow('CROSS_J_ORDERBOOK_EXT_REQUIRED');
+    expect(account.mempool.some(tx => tx.type === 'swap_resolve')).toBe(false);
+  });
+
   test('fill notice validates target-side economics before mutating route', async () => {
     const env = createEmptyEnv('cross-fill-notice-invalid-target');
     env.timestamp = 10_000;
@@ -833,43 +892,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(result.mempoolOps ?? []).toHaveLength(0);
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('resting');
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.fillSeq).toBeUndefined();
-  });
-
-  test('reopenRemainder is rejected in V1 instead of pretending to re-open', async () => {
-    const env = createEmptyEnv('cross-reopen-rejected');
-    env.timestamp = 10_000;
-    env.quietRuntimeLogs = true;
-    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
-    const base = makeJurisdiction('Base', 8453, '21', '22');
-    const sourceUser = entity('a5');
-    const sourceHub = entity('a6');
-    const targetHub = entity('a7');
-    const targetUser = entity('a8');
-    const state = makeState(sourceHub, addr('93'), eth, sourceUser);
-    const route = buildPreparedCrossJurisdictionRoute({
-      orderId: 'cross-reopen-rejected',
-      makerEntityId: sourceUser,
-      hubEntityId: sourceHub,
-      source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
-      target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
-      status: 'partially_filled',
-      cumulativeFillRatio: 32_768,
-      filledSourceAmount: 500n,
-      filledTargetAmount: 450n,
-      createdAt: env.timestamp,
-      updatedAt: env.timestamp,
-      expiresAt: 70_000,
-    }, { runtimeSeed: 'cross-reopen-rejected', sourceDisputeDelayMs: 5_000, now: env.timestamp });
-    state.crossJurisdictionSwaps?.set(route.orderId, route);
-
-    const result = await applyEntityTx(env, state, {
-      type: 'requestCrossJurisdictionClear',
-      data: { orderId: route.orderId, cancelRemainder: true, reopenRemainder: true },
-    });
-
-    expect(result.mempoolOps ?? []).toHaveLength(0);
-    expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('target_prepared');
-    expect(result.newState.messages.some(message => message.includes('reopenRemainder is not implemented'))).toBe(true);
   });
 
   test('submitCrossJurisdictionSwap rejects missing target receiving account', async () => {

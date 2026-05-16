@@ -64,7 +64,7 @@ function makeAccountMachine(offer: SwapOffer): AccountMachine {
 }
 
 describe('orderbook matching fallback execution mapping', () => {
-  test('generates execution amounts even when account state does not contain the offer yet', () => {
+  test('generates execution amounts from a persisted book backed by account offers', () => {
     let book = createBook({
       bucketWidthTicks: 100n,
       maxOrders: 10_000,
@@ -111,12 +111,42 @@ describe('orderbook matching fallback execution mapping', () => {
       timeInForce: 0,
       priceTicks: 1100n,
     };
+    const makerOffer1 = {
+      offerId: 'maker-ask-1',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'maker1',
+      accountId: 'maker1',
+      giveTokenId: 4,
+      giveAmount: lot,
+      wantTokenId: 6,
+      wantAmount: 1000n * lot / 10_000n,
+      createdHeight: 1,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 1000n,
+    };
+    const makerOffer2 = {
+      offerId: 'maker-ask-2',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'maker2',
+      accountId: 'maker2',
+      giveTokenId: 4,
+      giveAmount: lot,
+      wantTokenId: 6,
+      wantAmount: 1100n * lot / 10_000n,
+      createdHeight: 1,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 1100n,
+    };
 
     const entityState = {
       entityId: 'hub-entity',
       accounts: new Map([
-        ['maker1', { swapOffers: new Map() }],
-        ['maker2', { swapOffers: new Map() }],
+        ['maker1', { swapOffers: new Map([['maker-ask-1', makerOffer1]]) }],
+        ['maker2', { swapOffers: new Map([['maker-ask-2', makerOffer2]]) }],
         ['alice', { swapOffers: new Map() }],
       ]),
       orderbookExt: {
@@ -148,7 +178,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(op!.tx.data.executionWantAmount).toBe(baseQty);
   });
 
-  test('synthesizes missing maker execution from book-side state instead of reusing the taker offer', () => {
+  test('uses maker execution terms instead of reusing the taker offer', () => {
     const lot = SWAP_LOT_SCALE;
     const makerBaseQty = lot;
     const makerPriceTicks = 1000n;
@@ -191,7 +221,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const entityState = {
       entityId: 'hub-entity',
       accounts: new Map([
-        ['maker-account', { swapOffers: new Map() }],
+        ['maker-account', { swapOffers: new Map([['maker-ask', makerOffer]]) }],
         ['taker-account', { swapOffers: new Map() }],
       ]),
       orderbookExt: {
@@ -762,7 +792,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(getBookOrder(finalBook!, 'taker-account:taker-sell-between-sides')).not.toBeNull();
   });
 
-  test('rebuilds a cached pair from canonical live offers before matching historical resting orders', () => {
+  test('matches persisted book orders after snapshot restore without rebuilding the book', () => {
     const lot = SWAP_LOT_SCALE;
     let historicalBook = createBook({
       bucketWidthTicks: 10_000n,
@@ -782,7 +812,7 @@ describe('orderbook matching fallback execution mapping', () => {
     }).state;
 
     const takerOffer = {
-      offerId: 'taker-buy-rebuild',
+      offerId: 'taker-buy-restored-book',
       makerIsLeft: false,
       fromEntity: 'hub-entity',
       toEntity: 'taker',
@@ -1254,7 +1284,30 @@ describe('orderbook matching fallback execution mapping', () => {
           referenceTokenId: 1,
           supportedPairs: ['1/2'],
         },
-        books: new Map(),
+        books: new Map([['1/2', (() => {
+          let book = createBook({ bucketWidthTicks: 10_000n, maxOrders: 10_000, stpPolicy: 1 });
+          book = applyCommand(book, {
+            kind: 0,
+            ownerId: 'near-maker',
+            orderId: 'near-maker-account:near-ask',
+            side: 1,
+            tif: 0,
+            postOnly: false,
+            priceTicks: nearAskPriceTicks,
+            qtyLots: 1,
+          }).state;
+          book = applyCommand(book, {
+            kind: 0,
+            ownerId: 'far-maker',
+            orderId: 'far-maker-account:far-ask',
+            side: 1,
+            tif: 0,
+            postOnly: false,
+            priceTicks: farAskPriceTicks,
+            qtyLots: 1,
+          }).state;
+          return book;
+        })()]]),
         pairConfig: new Map(),
       } as any,
     } as any;
@@ -1436,7 +1489,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(getBookSideLevels(finalBook!, 1, 1)[0]?.orderIds[0]).toBe('alice:offer-a');
   });
 
-  test('rehydrate inserts open offers into an exact pair book without emitting swap_resolve side effects', () => {
+  test('debug projection rebuild reports crossed offers without emitting swap_resolve side effects', () => {
     const entityState = {
       entityId: 'hub-entity',
       accounts: new Map([
@@ -1496,11 +1549,11 @@ describe('orderbook matching fallback execution mapping', () => {
       },
     ];
 
-    const result = processOrderbookSwaps(entityState, offers as any, { rehydrateOnly: true });
+    const result = processOrderbookSwaps(entityState, offers as any, { debugRebuildProjectionOnly: true });
     expect(result.mempoolOps).toHaveLength(0);
     expect(result.bookUpdates.length).toBeGreaterThan(0);
-    expect(result.quarantinedOffers.map((offer) => `${offer.accountId}:${offer.offerId}`)).toEqual(['bob:offer-b']);
-    expect(result.quarantinedOffers[0]?.reason).toBe('post-only-reject:postOnly would cross');
+    expect(result.debugProjectionRejects.map((offer) => `${offer.accountId}:${offer.offerId}`)).toEqual(['bob:offer-b']);
+    expect(result.debugProjectionRejects[0]?.reason).toBe('post-only-reject:postOnly would cross');
   });
 
   test('preserves exact aligned price when creating an exact book', () => {
@@ -1612,7 +1665,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(getBookOrder(finalBook!, 'alice:offer-c')?.priceTicks).toBe(25_262_625n);
   });
 
-  test('rebuilds stale persisted pair books from canonical live offers before matching', () => {
+  test('fails fast when a stale persisted pair book diverges from account offers', () => {
     const askPriceTicks = 25_000_002n;
     const bidPriceTicks = 24_999_998n;
     const lot = SWAP_LOT_SCALE;
@@ -1689,18 +1742,10 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [takerOffer] as any);
-    expect(result.mempoolOps).toHaveLength(0);
-
-    const finalBook = result.bookUpdates.at(-1)?.book;
-    expect(finalBook).toBeDefined();
-    expect(getBestAsk(finalBook!)).toBe(askPriceTicks);
-    expect(getBestBid(finalBook!)).toBe(bidPriceTicks);
-    expect(getBookOrder(finalBook!, 'maker-account:maker-ask')).not.toBeNull();
-    expect(getBookOrder(finalBook!, 'taker-account:taker-bid')).not.toBeNull();
+    expect(() => processOrderbookSwaps(entityState, [takerOffer] as any)).toThrow(/ORDERBOOK_CACHE_MISMATCH/);
   });
 
-  test('contains crossed canonical rebuild offers and cancels only the rejected resting offer', () => {
+  test('fails fast when persisted book price diverges from account offer', () => {
     const lot = SWAP_LOT_SCALE;
     const makerAsk = {
       offerId: 'maker-ask',
@@ -1791,26 +1836,10 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [takerBid] as any);
-    const rebuildReject = result.mempoolOps.find((item) =>
-      item.accountId === 'crossed-account'
-      && item.tx.type === 'swap_resolve'
-      && item.tx.data.cancelRemainder === true
-      && String(item.tx.data.comment || '').includes('rebuild-reject:postOnly would cross'),
-    );
-
-    expect(rebuildReject).toBeDefined();
-
-    const finalBook = result.bookUpdates.at(-1)?.book;
-    expect(finalBook).toBeDefined();
-    expect(getBestAsk(finalBook!)).toBe(25_000_000n);
-    expect(getBestBid(finalBook!)).toBe(24_999_900n);
-    expect(getBookOrder(finalBook!, 'maker-account:maker-ask')).not.toBeNull();
-    expect(getBookOrder(finalBook!, 'taker-account:taker-bid')).not.toBeNull();
-    expect(getBookOrder(finalBook!, 'crossed-account:crossed-bid')).toBeNull();
+    expect(() => processOrderbookSwaps(entityState, [takerBid] as any)).toThrow(/ORDERBOOK_CACHE_MISMATCH/);
   });
 
-  test('repairs only the mismatched cached pair price while preserving other canonical resting orders', () => {
+  test('fails fast instead of auto-fixing a mismatched cached pair', () => {
     const firstAskPriceTicks = 25_000_002n;
     const secondAskPriceTicks = 25_000_006n;
     const bidPriceTicks = 24_999_998n;
@@ -1901,18 +1930,10 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [takerOffer] as any);
-    expect(result.mempoolOps).toHaveLength(0);
-
-    const finalBook = result.bookUpdates.at(-1)?.book;
-    expect(finalBook).toBeDefined();
-    expect(getBestAsk(finalBook!)).toBe(firstAskPriceTicks);
-    expect(getBestBid(finalBook!)).toBe(bidPriceTicks);
-    expect(getBookOrder(finalBook!, 'maker-account:maker-ask-a')?.priceTicks).toBe(firstAskPriceTicks);
-    expect(getBookOrder(finalBook!, 'maker-account:maker-ask-b')?.priceTicks).toBe(secondAskPriceTicks);
+    expect(() => processOrderbookSwaps(entityState, [takerOffer] as any)).toThrow(/ORDERBOOK_CACHE_MISMATCH/);
   });
 
-  test('repairs a cached pair by dropping offers that already have pending swap resolution', () => {
+  test('fails fast when pending swap resolution is still present in persisted book', () => {
     const askPriceTicks = 25_000_000n;
     const bidPriceTicks = 25_000_000n;
     const lot = SWAP_LOT_SCALE;
@@ -1991,13 +2012,9 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [takerOffer] as any);
-    expect(result.mempoolOps).toHaveLength(0);
-
-    const finalBook = result.bookUpdates.at(-1)?.book;
-    expect(finalBook).toBeDefined();
-    expect(getBookOrder(finalBook!, 'maker-account:maker-ask')).toBeNull();
-    expect(getBookOrder(finalBook!, 'taker-account:taker-bid')).not.toBeNull();
+    expect(() => processOrderbookSwaps(entityState, [takerOffer] as any)).toThrow(
+      /ORDERBOOK_PENDING_RESOLUTION_STILL_IN_BOOK/,
+    );
   });
 
   test('accepts wide-range resting orders without mutating the existing anchor order price', () => {
@@ -2132,7 +2149,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(cancelOp!.tx.data.fillRatio).toBe(0);
   });
 
-  test('contains pair-local book corruption and cancels only the offending taker', () => {
+  test('fails fast on pair-local persisted book corruption', () => {
     const lot = SWAP_LOT_SCALE;
     const makerOffer = {
       offerId: 'maker-ask',
@@ -2214,15 +2231,7 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [takerOffer] as any);
-    const takerResolve = result.mempoolOps.find((item) => item.accountId === 'taker-account' && item.tx.type === 'swap_resolve');
-    const repairedBook = result.bookUpdates.at(-1)?.book;
-
-    expect(takerResolve).toBeDefined();
-    expect(takerResolve!.tx.data.cancelRemainder).toBe(true);
-    expect(String(takerResolve!.tx.data.comment || '')).toContain('pair-error:');
-    expect(repairedBook).toBeDefined();
-    expect(getBookOrder(repairedBook!, 'maker-account:maker-ask')).not.toBeNull();
+    expect(() => processOrderbookSwaps(entityState, [takerOffer] as any)).toThrow(/ORDERBOOK_PAIR_COMMAND_FAILED/);
   });
 
   test('processOrderbookCancels queues account-level cancel once for an active orderbook order', () => {
@@ -2366,7 +2375,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(result.mempoolOps).toHaveLength(0);
   });
 
-  test('contains malformed maker order ids at pair scope instead of throwing the whole pass', () => {
+  test('fails fast on malformed persisted book order ids', () => {
     let book = createBook({
       bucketWidthTicks: 10_000n,
       maxOrders: 10_000,
@@ -2427,15 +2436,7 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [takerOffer] as any);
-    const takerResolve = result.mempoolOps.find((item) => item.accountId === 'taker-account' && item.tx.type === 'swap_resolve');
-    const finalBook = result.bookUpdates.at(-1)?.book;
-
-    expect(takerResolve).toBeDefined();
-    expect(takerResolve!.tx.data.cancelRemainder).toBe(true);
-    expect(String(takerResolve!.tx.data.comment || '')).toContain('pair-error:ORDERBOOK_FILL_LOOKUP_FAILED: malformed namespacedOrderId=malformed');
-    expect(finalBook).toBeDefined();
-    expect(getBookOrder(finalBook!, 'malformed')).toBeNull();
+    expect(() => processOrderbookSwaps(entityState, [takerOffer] as any)).toThrow(/ORDERBOOK_ORPHAN_BOOK_ORDER/);
   });
 
   test('processOrderbookCancels removes duplicate stale copies across all pair books', () => {

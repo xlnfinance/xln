@@ -4,6 +4,8 @@ import { validateCrossJurisdictionFillProgress, withCrossJurisdictionFillProgres
 import { recordSwapClosedLifecycle, recordSwapResolveLifecycle } from './swap-history';
 
 type CrossSwapFillAckTx = Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;
+const deterministicAccountTimestamp = (accountMachine: AccountMachine): number =>
+  Number(accountMachine.pendingFrame?.timestamp ?? accountMachine.currentFrame?.timestamp ?? 0);
 
 export async function handleCrossSwapFillAck(
   accountMachine: AccountMachine,
@@ -56,7 +58,7 @@ export async function handleCrossSwapFillAck(
     }
     route.status = 'clear_requested';
     route.clearingPolicy = 'cancel_and_clear';
-    route.updatedAt = accountMachine.currentFrame?.timestamp ?? Date.now();
+    route.updatedAt = deterministicAccountTimestamp(accountMachine);
     offer.crossJurisdiction = route;
     accountMachine.swapOffers?.delete(offerId);
     recordSwapClosedLifecycle(accountMachine, offerId);
@@ -98,7 +100,7 @@ export async function handleCrossSwapFillAck(
   const nextRoute = withCrossJurisdictionFillProgress(
     route,
     fill,
-    accountMachine.currentFrame?.timestamp ?? Date.now(),
+    deterministicAccountTimestamp(accountMachine),
   );
   Object.assign(route, nextRoute);
   if (priceTicks !== undefined) route.priceTicks = priceTicks;

@@ -26,6 +26,7 @@ import { KEY_HEAD, keyDiff, keyFrame, keySnapshotEntity, keySnapshotManifest } f
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { generateLazyEntityId } from '../entity-factory';
 import type { StorageFrameRecord } from '../storage/types';
+import type { JReplica, JurisdictionConfig } from '../types';
 
 describe('storage frame journal retention', () => {
   const cleanupRuntimeStorage = (dbRoot: string, runtimeId: string): void => {
@@ -53,6 +54,27 @@ describe('storage frame journal retention', () => {
     env.quietRuntimeLogs = true;
     await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
     return env;
+  };
+
+  const installTestJurisdiction = (env: ReturnType<typeof createEmptyEnv>, jurisdiction: JurisdictionConfig): void => {
+    env.activeJurisdiction = jurisdiction.name;
+    env.jReplicas.set(jurisdiction.name, {
+      name: jurisdiction.name,
+      blockNumber: 0n,
+      stateRoot: new Uint8Array(32),
+      mempool: [],
+      blockDelayMs: 0,
+      lastBlockTimestamp: 0,
+      rpcs: [jurisdiction.address || `jreplica://${jurisdiction.name}`],
+      chainId: jurisdiction.chainId,
+      depositoryAddress: jurisdiction.depositoryAddress,
+      entityProviderAddress: jurisdiction.entityProviderAddress,
+      position: { x: 0, y: 0, z: 0 },
+      contracts: {
+        depository: jurisdiction.depositoryAddress,
+        entityProvider: jurisdiction.entityProviderAddress,
+      },
+    } as JReplica);
   };
 
   test('refuses to overwrite an already persisted runtime frame', async () => {
@@ -132,10 +154,12 @@ describe('storage frame journal retention', () => {
     const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
     const jurisdiction = {
       name: 'epoch-rotation-tail-test',
+      address: 'browservm://epoch-rotation-tail-test',
       depositoryAddress: '0x000000000000000000000000000000000000dEaD',
       entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
       chainId: 31337,
     };
+    installTestJurisdiction(env, jurisdiction);
 
     enqueueRuntimeInput(env, {
       runtimeTxs: [{
@@ -371,10 +395,12 @@ describe('storage frame journal retention', () => {
     const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
     const jurisdiction = {
       name: 'storage-crash-frame-db-loss-test',
+      address: 'browservm://storage-crash-frame-db-loss-test',
       depositoryAddress: '0x000000000000000000000000000000000000dEaD',
       entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
       chainId: 31337,
     };
+    installTestJurisdiction(env, jurisdiction);
 
     enqueueRuntimeInput(env, {
       runtimeTxs: [{
@@ -589,10 +615,12 @@ describe('storage frame journal retention', () => {
     const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
     const jurisdiction = {
       name: 'storage-crash-torn-snapshot-docs-test',
+      address: 'browservm://storage-crash-torn-snapshot-docs-test',
       depositoryAddress: '0x000000000000000000000000000000000000dEaD',
       entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
       chainId: 31337,
     };
+    installTestJurisdiction(env, jurisdiction);
 
     enqueueRuntimeInput(env, {
       runtimeTxs: [{
@@ -662,10 +690,12 @@ describe('storage frame journal retention', () => {
     const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
     const jurisdiction = {
       name: 'storage-overlay-restart-test',
+      address: 'browservm://storage-overlay-restart-test',
       depositoryAddress: '0x000000000000000000000000000000000000dEaD',
       entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
       chainId: 31337,
     };
+    installTestJurisdiction(env, jurisdiction);
 
     enqueueRuntimeInput(env, {
       runtimeTxs: [{
