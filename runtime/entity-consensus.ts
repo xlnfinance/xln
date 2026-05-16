@@ -38,6 +38,7 @@ import {
   isCrossJurisdictionRouteExpired,
   withCanonicalCrossJurisdictionRouteHash,
 } from './cross-jurisdiction';
+import { buildCrossJurisdictionCancelAck } from './cross-jurisdiction-orderbook';
 
 const compareNumericKey = (
   left: string | number,
@@ -1796,6 +1797,90 @@ export const applyEntityFrame = async (
       }
     }
 
+    if (matchResult.quarantinedOffers.length > 0) {
+      console.warn(
+        `📊 ORDERBOOK: repairing ${matchResult.quarantinedOffers.length} quarantined offer(s) at account level`,
+      );
+    }
+
+    for (const { accountId, offerId, reason } of matchResult.quarantinedOffers) {
+      const account = currentEntityState.accounts.get(accountId);
+      const offer = account?.swapOffers?.get(offerId);
+
+      if (account && offer) {
+        const tx = offer.crossJurisdiction
+          ? buildCrossJurisdictionCancelAck(offerId, offer.crossJurisdiction)
+          : {
+              type: 'swap_resolve' as const,
+              data: {
+                offerId,
+                fillRatio: 0,
+                cancelRemainder: true,
+                comment: `orderbook-quarantine:${reason}`,
+              },
+            };
+        if (!queueUniqueAccountMempoolTx(account, tx)) {
+          continue;
+        }
+        proposableAccounts.add(accountId);
+        markStorageAccountDirty(env, currentEntityState.entityId, accountId);
+        markStorageEntityDirty(env, currentEntityState.entityId);
+        console.warn(
+          `📊 ORDERBOOK: queued quarantine repair offer=${offerId.slice(-8)} account=${accountId.slice(-8)} reason=${reason}`,
+        );
+        continue;
+      }
+
+      const ownerState = findSwapOfferOwnerState(env, currentEntityState, accountId, offerId);
+      const ownerAccount = findAccountByCounterparty(ownerState, accountId);
+      const ownerOffer = ownerAccount?.swapOffers?.get(offerId);
+      const firstValidator = ownerState?.config?.validators?.[0];
+      if (!ownerState || !firstValidator) {
+        console.warn(
+          `📊 ORDERBOOK: unable to route quarantine repair offer=${offerId.slice(-8)} account=${accountId.slice(-8)} reason=${reason}`,
+        );
+        continue;
+      }
+
+      if (ownerOffer?.crossJurisdiction) {
+        allOutputs.push({
+          entityId: ownerState.entityId,
+          signerId: firstValidator,
+          entityTxs: [{
+            type: 'requestCrossJurisdictionClear',
+            data: {
+              orderId: offerId,
+              cancelRemainder: true,
+            },
+          }],
+        });
+        console.warn(
+          `🌉 ORDERBOOK CROSS-J: routed quarantine clear to ${ownerState.entityId.slice(-8)} ` +
+          `offer=${offerId.slice(-8)} reason=${reason}`,
+        );
+        continue;
+      }
+
+      allOutputs.push({
+        entityId: ownerState.entityId,
+        signerId: firstValidator,
+        entityTxs: [{
+          type: 'resolveSwap',
+          data: {
+            counterpartyEntityId: accountId,
+            offerId,
+            fillRatio: 0,
+            cancelRemainder: true,
+            comment: `orderbook-quarantine:${reason}`,
+          },
+        }],
+      });
+      console.warn(
+        `📊 ORDERBOOK: routed quarantine cancel to ${ownerState.entityId.slice(-8)} ` +
+        `offer=${offerId.slice(-8)} reason=${reason}`,
+      );
+    }
+
 	    if (matchResult.crossJurisdictionFills.length > 0) {
 	      console.log(
 	        `🌉 ORDERBOOK CROSS-J: recorded ${matchResult.crossJurisdictionFills.length} firm fill notice(s); clearing waits for full fill or explicit clear`,
@@ -1859,34 +1944,9 @@ export const applyEntityFrame = async (
         if (!account?.swapOffers?.has(offerId)) continue;
         const offer = account.swapOffers.get(offerId);
         if (offer?.crossJurisdiction) {
-          const route = offer.crossJurisdiction;
-          const currentRatio = Math.max(
-            0,
-            Math.min(65_535, Math.floor(Number(route.cumulativeFillRatio ?? route.claimedRatio ?? 0) || 0)),
+          console.error(
+            `🌉 ORDERBOOK CROSS-J: cancel for ${offerId.slice(-8)} requires orderbookExt; fail-closed without fallback ack`,
           );
-          const sourceTotal = BigInt(route.source.amount);
-          const targetTotal = BigInt(route.target.amount);
-          if (!queueUniqueAccountMempoolTx(account, {
-            type: 'cross_swap_fill_ack',
-            data: {
-              offerId,
-              fillSeq: Math.max(0, Math.floor(Number(route.fillSeq ?? 0) || 0)),
-              incrementalSourceAmount: 0n,
-              incrementalTargetAmount: 0n,
-              cumulativeSourceAmount: route.filledSourceAmount ?? route.sourceClaimed ?? ((sourceTotal * BigInt(currentRatio)) / 65_535n),
-              cumulativeTargetAmount: route.filledTargetAmount ?? route.targetClaimed ?? ((targetTotal * BigInt(currentRatio)) / 65_535n),
-              cumulativeFillRatio: currentRatio,
-              executionSourceAmount: 0n,
-              executionTargetAmount: 0n,
-              cancelRemainder: true,
-              comment: 'cross-j-cancel-request',
-              pairId: route.venueId || '',
-            },
-          })) {
-            continue;
-          }
-          proposableAccounts.add(accountId);
-          console.log(`🌉   → ${accountId.slice(-8)}: cross_swap_fill_ack (fallback cross-j cancel)`);
           continue;
         }
         // Fallback cancel resolution is synthesized by the orchestrator itself.

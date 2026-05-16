@@ -1499,6 +1499,8 @@ describe('orderbook matching fallback execution mapping', () => {
     const result = processOrderbookSwaps(entityState, offers as any, { rehydrateOnly: true });
     expect(result.mempoolOps).toHaveLength(0);
     expect(result.bookUpdates.length).toBeGreaterThan(0);
+    expect(result.quarantinedOffers.map((offer) => `${offer.accountId}:${offer.offerId}`)).toEqual(['bob:offer-b']);
+    expect(result.quarantinedOffers[0]?.reason).toBe('post-only-reject:postOnly would cross');
   });
 
   test('preserves exact aligned price when creating an exact book', () => {

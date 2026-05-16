@@ -139,7 +139,7 @@
       const profile = state?.profile;
       if (!replica?.entityId || profile?.isHub !== true) continue;
       const hubJurisdiction = jurisdictionKey(state?.config?.jurisdiction);
-      if (entityJurisdiction && hubJurisdiction && hubJurisdiction !== entityJurisdiction) continue;
+      if (entityJurisdiction && (!hubJurisdiction || hubJurisdiction !== entityJurisdiction)) continue;
       const fullEntityId = replica.entityId.startsWith('0x') ? replica.entityId : `0x${replica.entityId}`;
       result.push({
         entityId: replica.entityId,
