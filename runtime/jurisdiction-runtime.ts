@@ -258,14 +258,18 @@ function sameAccountJurisdiction(sourceJurisdiction: unknown, targetJurisdiction
   const sourceDepository = readJurisdictionDepository(sourceJurisdiction);
   const targetDepository = readJurisdictionDepository(targetJurisdiction);
 
-  if (sourceChainId !== null && targetChainId !== null) {
-    if (sourceChainId !== targetChainId) return false;
-    if (sourceDepository && targetDepository && sourceDepository !== targetDepository) return false;
-    return true;
+  if (sourceChainId !== null || targetChainId !== null) {
+    return (
+      sourceChainId !== null &&
+      targetChainId !== null &&
+      sourceChainId === targetChainId &&
+      Boolean(sourceDepository && targetDepository) &&
+      sourceDepository === targetDepository
+    );
   }
 
-  if (sourceDepository && targetDepository) {
-    return sourceDepository === targetDepository;
+  if (sourceDepository || targetDepository) {
+    return Boolean(sourceDepository && targetDepository && sourceDepository === targetDepository);
   }
 
   const sourceName = readJurisdictionName(sourceJurisdiction);
@@ -298,7 +302,12 @@ export function assertSameJurisdictionAccount(
   sourceJurisdiction: JurisdictionConfig | unknown | null | undefined,
   counterpartyEntityId: string,
 ): void {
-  if (!sourceJurisdiction) return;
+  if (!sourceJurisdiction) {
+    throw new Error(
+      `ACCOUNT_SOURCE_JURISDICTION_UNKNOWN: entity=${formatEntityId(sourceEntityId)} ` +
+      `counterparty=${formatEntityId(counterpartyEntityId)}`,
+    );
+  }
 
   const targetJurisdiction =
     findLocalEntityJurisdiction(env, counterpartyEntityId) ??

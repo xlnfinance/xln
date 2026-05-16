@@ -2,6 +2,7 @@ import { describe, expect, test } from 'bun:test';
 
 import { createEmptyEnv, enqueueRuntimeInput, process, submitDebtEnforcement } from '../runtime';
 import { applyEntityTx } from '../entity-tx/apply';
+import { assertSameJurisdictionAccount } from '../jurisdiction-runtime';
 import type { JAdapter } from '../jadapter/types';
 import { canonicalizeProfile, parseProfile } from '../networking/gossip';
 import type { ConsensusConfig, Env, JReplica, JurisdictionConfig } from '../types';
@@ -155,12 +156,80 @@ describe('multi-jurisdiction entity binding', () => {
     await importEntity(env, entityA, signerA, j1);
     await importEntity(env, entityB, signerB, j2);
 
+    expect(() =>
+      assertSameJurisdictionAccount(env, entityA, findState(env, entityA)!.config.jurisdiction, entityB),
+    ).toThrow('ACCOUNT_CROSS_JURISDICTION_FORBIDDEN');
+
     const result = await applyEntityTx(env, findState(env, entityA)!, {
       type: 'openAccount',
       data: { targetEntityId: entityB },
     });
 
     expect(result.newState.accounts.has(entityB.toLowerCase())).toBe(false);
+  });
+
+  test('account boundary fails closed when source jurisdiction is missing', () => {
+    const env = makeEnv('multi-jurisdiction-source-missing');
+
+    expect(() =>
+      assertSameJurisdictionAccount(env, entity('0d'), null, entity('0e')),
+    ).toThrow('ACCOUNT_SOURCE_JURISDICTION_UNKNOWN');
+  });
+
+  test('account boundary rejects same-chain metadata without depository binding', async () => {
+    const env = makeEnv('multi-jurisdiction-chain-only');
+    const j1 = makeJurisdiction('J1', 31337, '11', '12');
+    installJurisdiction(env, j1);
+
+    const entityA = entity('0f');
+    const targetEntityId = entity('10');
+    await importEntity(env, entityA, '42', j1);
+
+    env.gossip.announce(parseProfile({
+      entityId: targetEntityId,
+      name: 'Stale chain-only target',
+      avatar: '',
+      bio: '',
+      website: '',
+      lastUpdated: 1,
+      runtimeId: addr('50'),
+      runtimeEncPubKey: `0x${'51'.repeat(32)}`,
+      publicAccounts: [],
+      wsUrl: null,
+      relays: [],
+      metadata: {
+        entityEncPubKey: `0x${'52'.repeat(32)}`,
+        isHub: false,
+        routingFeePPM: 0,
+        baseFee: 0n,
+        jurisdiction: {
+          name: 'J1 stale metadata',
+          chainId: 31337,
+          entityProviderAddress: addr('12'),
+        } as never,
+        board: {
+          threshold: 1,
+          validators: [{
+            signer: addr('53'),
+            signerId: addr('53'),
+            weight: 1,
+            publicKey: `0x${'54'.repeat(32)}`,
+          }],
+        },
+      },
+      accounts: [],
+    }));
+
+    expect(() =>
+      assertSameJurisdictionAccount(env, entityA, findState(env, entityA)!.config.jurisdiction, targetEntityId),
+    ).toThrow('ACCOUNT_CROSS_JURISDICTION_FORBIDDEN');
+
+    const result = await applyEntityTx(env, findState(env, entityA)!, {
+      type: 'openAccount',
+      data: { targetEntityId },
+    });
+
+    expect(result.newState.accounts.has(targetEntityId.toLowerCase())).toBe(false);
   });
 
   test('accountInput cannot auto-create a cross-jurisdiction account', async () => {
@@ -174,6 +243,10 @@ describe('multi-jurisdiction entity binding', () => {
     const entityB = entity('0c');
     await importEntity(env, entityA, '40', j1);
     await importEntity(env, entityB, '41', j2);
+
+    expect(() =>
+      assertSameJurisdictionAccount(env, entityA, findState(env, entityA)!.config.jurisdiction, entityB),
+    ).toThrow('ACCOUNT_CROSS_JURISDICTION_FORBIDDEN');
 
     const result = await applyEntityTx(env, findState(env, entityA)!, {
       type: 'accountInput',
@@ -199,6 +272,10 @@ describe('multi-jurisdiction entity binding', () => {
     await importEntity(env, entityA, signerA, j1);
 
     const targetEntityId = entity('0a');
+    expect(() =>
+      assertSameJurisdictionAccount(env, entityA, findState(env, entityA)!.config.jurisdiction, targetEntityId),
+    ).toThrow('ACCOUNT_JURISDICTION_UNKNOWN');
+
     const result = await applyEntityTx(env, findState(env, entityA)!, {
       type: 'openAccount',
       data: { targetEntityId },

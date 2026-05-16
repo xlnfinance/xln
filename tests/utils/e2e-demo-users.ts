@@ -590,11 +590,14 @@ export async function createRuntime(
 
     let mnemonicInput = page.locator('#mnemonic');
     if (!await mnemonicInput.isVisible().catch(() => false)) {
-      const importAction = page.getByRole('button', { name: /Import \/ recover|Mnemonic/i }).first();
+      const importAction = page.locator('details.brainvault-strip button.strip-action', {
+        hasText: 'Import / recover',
+      }).first();
       if (!await importAction.isVisible().catch(() => false)) {
         const importToggle = page.locator('details.brainvault-strip summary, details.import-options summary').first();
         await expect(importToggle).toBeVisible({ timeout: 15_000 });
-        await importToggle.click();
+        const isOpen = await importToggle.evaluate((node) => Boolean(node.closest('details')?.open)).catch(() => false);
+        if (!isOpen) await importToggle.click();
       }
       await expect(importAction).toBeVisible({ timeout: 15_000 });
       await importAction.click();
