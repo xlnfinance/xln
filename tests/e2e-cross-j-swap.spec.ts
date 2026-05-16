@@ -1041,14 +1041,13 @@ async function requestCrossClear(
   page: Page,
   identity: RuntimeIdentity,
   orderId: string,
-  options: { cancelRemainder?: boolean; reopenRemainder?: boolean } = {},
+  options: { cancelRemainder?: boolean } = {},
 ): Promise<void> {
   await enqueueEntityTxs(page, identity.entityId, identity.signerId, [{
     type: 'requestCrossJurisdictionClear',
     data: {
       orderId,
       cancelRemainder: Boolean(options.cancelRemainder),
-      reopenRemainder: Boolean(options.reopenRemainder),
     },
   }]);
   await flushRuntime(page, 5);

@@ -676,7 +676,7 @@
     return tokenIds;
   })();
   $: swapTokenOptions = Array.from(allowedSwapTokenIds)
-    .sort((a, b) => tokenSymbol(a).localeCompare(tokenSymbol(b)))
+    .sort((a, b) => compareStableText(tokenSymbol(a), tokenSymbol(b)))
     .map((tokenId) => ({ tokenId, symbol: tokenSymbol(tokenId) }));
   $: if (pairOptions.length > 0) {
     const hasSelected = pairOptions.some((option) => option.value === selectedPairValue);
@@ -790,38 +790,6 @@
   function compareStableText(left: string, right: string): number {
     if (left === right) return 0;
     return left < right ? -1 : 1;
-  }
-
-  function canonicalCrossVenueId(
-    sourceJurisdiction: string,
-    sourceTokenId: number,
-    targetJurisdiction: string,
-    targetTokenId: number,
-  ): string {
-    return deriveCanonicalCrossJurisdictionVenueIdForLegs(
-      sourceJurisdiction,
-      sourceTokenId,
-      targetJurisdiction,
-      targetTokenId,
-    );
-  }
-
-  function canonicalCrossBookOwner(
-    sourceJurisdiction: string,
-    sourceTokenId: number,
-    sourceHubEntityId: string,
-    targetJurisdiction: string,
-    targetTokenId: number,
-    targetHubEntityId: string,
-  ): string {
-    return deriveCanonicalCrossJurisdictionBookOwnerForLegs(
-      sourceJurisdiction,
-      sourceTokenId,
-      sourceHubEntityId,
-      targetJurisdiction,
-      targetTokenId,
-      targetHubEntityId,
-    );
   }
 
   function handlePriceRatioInput(event: Event): void {
@@ -2133,7 +2101,7 @@
         if (sourceJurisdiction === targetRoute.targetJurisdiction) {
           throw new Error('Cross-j route requires different jurisdictions.');
         }
-        const bookOwnerEntityId = canonicalCrossBookOwner(
+        const bookOwnerEntityId = deriveCanonicalCrossJurisdictionBookOwnerForLegs(
           sourceJurisdiction,
           giveToken,
           resolvedCounterparty,
@@ -2144,7 +2112,7 @@
         return {
           orderId: offerId,
           bookOwnerEntityId,
-          venueId: canonicalCrossVenueId(sourceJurisdiction, giveToken, targetRoute.targetJurisdiction, wantToken),
+          venueId: deriveCanonicalCrossJurisdictionVenueIdForLegs(sourceJurisdiction, giveToken, targetRoute.targetJurisdiction, wantToken),
           makerEntityId: sourceEntityId,
           hubEntityId: bookOwnerEntityId,
           source: {
@@ -2278,7 +2246,7 @@
     }
   }
 
-  async function requestCrossClear(offerId: string, cancelRemainder = false, reopenRemainder = false) {
+  async function requestCrossClear(offerId: string, cancelRemainder = false) {
     const sourceEntityId = sourceEntityIdValue;
     if (!sourceEntityId) return;
 
@@ -2297,7 +2265,6 @@
           data: {
             orderId: offerId,
             cancelRemainder,
-            reopenRemainder,
           },
         }],
       }]);
@@ -2786,7 +2753,7 @@
                   <td>
                     {#if offer.crossJurisdiction}
                       <div class="cross-order-actions">
-                        <button class="cancel-btn" data-testid="cross-swap-clear" on:click={() => requestCrossClear(String(offer.offerId || ''), true, false)}>
+                        <button class="cancel-btn" data-testid="cross-swap-clear" on:click={() => requestCrossClear(String(offer.offerId || ''), true)}>
                           Clear + Close
                         </button>
                       </div>

@@ -755,16 +755,6 @@ export type EntityTx =
       };
     }
   | {
-      type: 'crossJurisdictionFillRequest';
-      data: {
-        routeId: string;
-        fillRatio: number;
-        requestedByEntityId?: string;
-        sourceAmount?: bigint;
-        targetAmount?: bigint;
-      };
-    }
-  | {
       type: 'crossJurisdictionFillNotice';
       data: {
         orderId: string;
@@ -783,7 +773,6 @@ export type EntityTx =
       data: {
         orderId: string;
         cancelRemainder?: boolean;
-        reopenRemainder?: boolean;
       };
     }
 	  | {
@@ -2066,7 +2055,7 @@ export interface CrossJurisdictionSwapRoute {
   filledSourceAmount?: bigint;
   filledTargetAmount?: bigint;
   pendingClearRequestedAt?: number;
-  clearingPolicy?: 'manual' | 'full_fill' | 'cancel_and_clear' | 'reopen_remainder';
+  clearingPolicy?: 'manual' | 'full_fill' | 'cancel_and_clear';
   riskMode?: 'fully_collateralized' | 'partially_collateralized' | 'credit_line' | 'unsecured_internalized';
   claimedRatio?: number;
   sourceClaimed?: bigint;

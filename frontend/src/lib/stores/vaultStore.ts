@@ -479,6 +479,27 @@ const resolveJurisdictionConfig = (jurisdictions: JurisdictionsPayload): ApiJuri
 const stripLocalJurisdictionSuffix = (name: string): string =>
   String(name || '').replace(/\s*\((?:shared|local)\s+anvil\)\s*$/i, '').trim();
 
+const resolveDefaultJurisdictionImportName = (
+  key: string,
+  config: ApiJurisdictionConfig,
+  index: number,
+): string => {
+  const rawName = stripLocalJurisdictionSuffix(config.name || key);
+  const normalizedKey = normalizeJurisdictionKey(key);
+  const normalizedName = normalizeJurisdictionKey(rawName);
+  const chainId = Number(config.chainId || 0);
+  if (
+    index === 0 &&
+    (normalizedKey === 'arrakis' || normalizedName === 'arrakis' || normalizedName === 'localhost' || chainId === 31337)
+  ) {
+    return 'Testnet';
+  }
+  if (normalizedKey === 'tron' || normalizedKey === 'rpc2' || normalizedName === 'tron') {
+    return 'Tron';
+  }
+  return rawName || (index === 0 ? 'primary' : `Jurisdiction ${index + 1}`);
+};
+
 const listDefaultJurisdictionImports = (jurisdictions: JurisdictionsPayload): Array<{ key: string; name: string; config: ApiJurisdictionConfig }> => {
   const entries = Object.entries(jurisdictions.jurisdictions || {})
     .filter(([, config]) => {
@@ -495,8 +516,7 @@ const listDefaultJurisdictionImports = (jurisdictions: JurisdictionsPayload): Ar
   ];
   const seen = new Set<string>();
   return ordered.flatMap(([key, config], index) => {
-    const rawName = stripLocalJurisdictionSuffix(config.name || key);
-    const name = rawName || (index === 0 ? 'primary' : `Jurisdiction ${index + 1}`);
+    const name = resolveDefaultJurisdictionImportName(key, config, index);
     const normalized = normalizeJurisdictionKey(name);
     if (!normalized || seen.has(normalized)) return [];
     seen.add(normalized);

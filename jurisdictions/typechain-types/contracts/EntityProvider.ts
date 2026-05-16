@@ -56,9 +56,11 @@ export interface EntityProviderInterface extends Interface {
       | "balanceOf"
       | "balanceOfBatch"
       | "batchVerifyHankoSignatures"
+      | "boardHashToEntityId"
       | "cancelBoardProposal"
       | "entities"
       | "entityActionNonces"
+      | "entityIdToNumber"
       | "entityTransferTokens"
       | "foundationRegisterEntity"
       | "getEntityFromToken"
@@ -143,12 +145,20 @@ export interface EntityProviderInterface extends Interface {
     values: [BytesLike[], BytesLike[]]
   ): string;
   encodeFunctionData(
+    functionFragment: "boardHashToEntityId",
+    values: [BytesLike]
+  ): string;
+  encodeFunctionData(
     functionFragment: "cancelBoardProposal",
     values: [BytesLike, BigNumberish, EntityProvider.EntityArticlesStruct]
   ): string;
   encodeFunctionData(functionFragment: "entities", values: [BytesLike]): string;
   encodeFunctionData(
     functionFragment: "entityActionNonces",
+    values: [BytesLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "entityIdToNumber",
     values: [BytesLike]
   ): string;
   encodeFunctionData(
@@ -322,12 +332,20 @@ export interface EntityProviderInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
+    functionFragment: "boardHashToEntityId",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
     functionFragment: "cancelBoardProposal",
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "entities", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "entityActionNonces",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "entityIdToNumber",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -769,6 +787,8 @@ export interface EntityProvider extends BaseContract {
     "view"
   >;
 
+  boardHashToEntityId: TypedContractMethod<[arg0: BytesLike], [string], "view">;
+
   cancelBoardProposal: TypedContractMethod<
     [
       entityId: BytesLike,
@@ -795,6 +815,8 @@ export interface EntityProvider extends BaseContract {
   >;
 
   entityActionNonces: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
+
+  entityIdToNumber: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
 
   entityTransferTokens: TypedContractMethod<
     [
@@ -1043,6 +1065,9 @@ export interface EntityProvider extends BaseContract {
     "view"
   >;
   getFunction(
+    nameOrSignature: "boardHashToEntityId"
+  ): TypedContractMethod<[arg0: BytesLike], [string], "view">;
+  getFunction(
     nameOrSignature: "cancelBoardProposal"
   ): TypedContractMethod<
     [
@@ -1071,6 +1096,9 @@ export interface EntityProvider extends BaseContract {
   >;
   getFunction(
     nameOrSignature: "entityActionNonces"
+  ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "entityIdToNumber"
   ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
   getFunction(
     nameOrSignature: "entityTransferTokens"
