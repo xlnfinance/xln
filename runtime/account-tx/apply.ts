@@ -14,7 +14,7 @@ import { handleRequestCollateral } from './handlers/request-collateral';
 import { handleReopenDisputed } from './handlers/reopen-disputed';
 import { handleHtlcLock } from './handlers/htlc-lock';
 import { handleHtlcResolve } from './handlers/htlc-resolve';
-import { handlePullLock, handlePullResolve } from './handlers/pull';
+import { handlePullCancel, handlePullLock, handlePullResolve } from './handlers/pull';
 import { handleSwapOffer } from './handlers/swap-offer';
 import { handleSwapResolve } from './handlers/swap-resolve';
 import { handleCrossSwapFillAck } from './handlers/cross-swap-fill-ack';
@@ -239,6 +239,14 @@ export async function processAccountTx(
       return await handlePullResolve(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'pull_resolve' }>,
+        byLeft,
+        currentTimestamp,
+      );
+
+    case 'pull_cancel':
+      return await handlePullCancel(
+        accountMachine,
+        accountTx as Extract<AccountTx, { type: 'pull_cancel' }>,
         byLeft,
         currentTimestamp,
       );

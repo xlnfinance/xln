@@ -15,11 +15,18 @@ export async function handleCrossSwapFillAck(
 ): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCancelled?: { offerId: string; accountId: string } }> {
   const {
     offerId,
+    fillSeq,
     cumulativeFillRatio,
+    incrementalSourceAmount,
+    incrementalTargetAmount,
+    cumulativeSourceAmount,
+    cumulativeTargetAmount,
     executionSourceAmount,
     executionTargetAmount,
     cancelRemainder = false,
     comment,
+    priceTicks,
+    pairId,
   } = accountTx.data;
   const events: string[] = [];
   const offer = accountMachine.swapOffers?.get(offerId);
@@ -34,7 +41,15 @@ export async function handleCrossSwapFillAck(
   }
 
   const route = offer.crossJurisdiction;
-  const previousRatio = clampRatio(route.claimedRatio);
+  const previousSeq = Math.max(0, Math.floor(Number(route.fillSeq ?? 0) || 0));
+  if (fillSeq !== undefined && Math.floor(Number(fillSeq)) !== previousSeq + 1) {
+    return {
+      success: false,
+      error: `Cross-j fill sequence mismatch: expected ${previousSeq + 1}, got ${fillSeq}`,
+      events,
+    };
+  }
+  const previousRatio = Math.max(clampRatio(route.claimedRatio), clampRatio(route.cumulativeFillRatio));
   const nextRatio = clampRatio(cumulativeFillRatio);
   if (nextRatio < previousRatio) {
     return {
@@ -54,12 +69,40 @@ export async function handleCrossSwapFillAck(
   const previousTarget = route.targetClaimed ?? ((targetTotal * BigInt(previousRatio)) / BigInt(MAX_SWAP_FILL_RATIO));
   const nextSource = (sourceTotal * BigInt(nextRatio)) / BigInt(MAX_SWAP_FILL_RATIO);
   const nextTarget = (targetTotal * BigInt(nextRatio)) / BigInt(MAX_SWAP_FILL_RATIO);
+  if (cumulativeSourceAmount !== undefined && cumulativeSourceAmount !== nextSource) {
+    return {
+      success: false,
+      error: `Cross-j cumulative source mismatch: expected ${nextSource}, got ${cumulativeSourceAmount}`,
+      events,
+    };
+  }
+  if (cumulativeTargetAmount !== undefined && cumulativeTargetAmount !== nextTarget) {
+    return {
+      success: false,
+      error: `Cross-j cumulative target mismatch: expected ${nextTarget}, got ${cumulativeTargetAmount}`,
+      events,
+    };
+  }
   if (nextSource < previousSource || nextTarget < previousTarget) {
     return { success: false, error: `Cross-j cumulative claim regression`, events };
   }
   const deltaSource = nextSource - previousSource;
   const deltaTarget = nextTarget - previousTarget;
 
+  if (incrementalSourceAmount !== undefined && incrementalSourceAmount !== deltaSource) {
+    return {
+      success: false,
+      error: `Cross-j incremental source mismatch: expected ${deltaSource}, got ${incrementalSourceAmount}`,
+      events,
+    };
+  }
+  if (incrementalTargetAmount !== undefined && incrementalTargetAmount !== deltaTarget) {
+    return {
+      success: false,
+      error: `Cross-j incremental target mismatch: expected ${deltaTarget}, got ${incrementalTargetAmount}`,
+      events,
+    };
+  }
   if (executionSourceAmount !== undefined && executionSourceAmount !== deltaSource) {
     return {
       success: false,
@@ -76,9 +119,16 @@ export async function handleCrossSwapFillAck(
   }
 
   route.claimedRatio = nextRatio;
+  route.cumulativeFillRatio = nextRatio;
+  route.fillSeq = fillSeq !== undefined ? Math.floor(Number(fillSeq)) : previousSeq + 1;
   route.sourceClaimed = nextSource;
   route.targetClaimed = nextTarget;
+  route.filledSourceAmount = nextSource;
+  route.filledTargetAmount = nextTarget;
+  if (priceTicks !== undefined) route.priceTicks = priceTicks;
+  if (pairId) route.venueId ||= pairId;
   route.updatedAt = accountMachine.currentFrame?.timestamp ?? Date.now();
+  route.status = nextRatio >= MAX_SWAP_FILL_RATIO ? 'clear_requested' : 'partially_filled';
   offer.crossJurisdiction = route;
 
   const full = nextRatio >= MAX_SWAP_FILL_RATIO || nextSource >= sourceTotal || nextTarget >= targetTotal;

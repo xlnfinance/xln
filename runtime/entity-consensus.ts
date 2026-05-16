@@ -34,7 +34,6 @@ import { replaceOrderbookPair } from './orderbook';
 import { executeCrontab, initCrontab, scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from './entity-crontab';
 import { ethers } from 'ethers';
 import {
-  buildCrossJurisdictionPullReveal,
   isCrossJurisdictionPullExpired,
   isCrossJurisdictionRouteExpired,
   withCanonicalCrossJurisdictionRouteHash,
@@ -77,6 +76,7 @@ const isCrossJurisdictionReadinessTx = (tx: unknown): boolean => {
   const typed = tx as { type?: string; data?: { crossJurisdiction?: unknown } } | null | undefined;
   return typed?.type === 'pull_lock' ||
     typed?.type === 'pull_resolve' ||
+    typed?.type === 'pull_cancel' ||
     typed?.type === 'cross_swap_fill_ack' ||
     (typed?.type === 'swap_offer' && Boolean(typed.data?.crossJurisdiction));
 };
@@ -97,6 +97,15 @@ const accountInputCommitsCrossJurisdictionReadiness = (
   return Boolean(account?.pendingFrame?.accountTxs?.some(isCrossJurisdictionReadinessTx));
 };
 
+const accountHasPendingCrossSwapAck = (
+  account: ReturnType<typeof findAccountByCounterparty>,
+  offerId: string,
+): boolean => {
+  if (!account) return false;
+  return (account.mempool ?? []).some(tx => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId) ||
+    (account.pendingFrame?.accountTxs ?? []).some(tx => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId);
+};
+
 const collectSiblingCrossJurisdictionOffers = (
   env: Env,
   currentEntityState: EntityState,
@@ -111,13 +120,15 @@ const collectSiblingCrossJurisdictionOffers = (
     for (const [accountId, account] of siblingState.accounts.entries()) {
       for (const [offerId, offer] of account.swapOffers.entries()) {
         if (!offer?.crossJurisdiction) continue;
+        if (accountHasPendingCrossSwapAck(account, String(offerId))) continue;
         let route;
         try {
           route = withCanonicalCrossJurisdictionRouteHash(offer.crossJurisdiction);
         } catch {
           continue;
         }
-        if (route.status !== 'resting') continue;
+        if (normalizeEntityRef(route.bookOwnerEntityId || route.source.counterpartyEntityId) !== currentId) continue;
+        if (route.status !== 'resting' && route.status !== 'partially_filled') continue;
         if (isCrossJurisdictionRouteExpired(route, now) || isCrossJurisdictionPullExpired(route, 'source', now)) continue;
         offers.push(normalizeSwapOfferForOrderbook(
           {
@@ -151,13 +162,15 @@ const collectLocalCrossJurisdictionOffers = (
   for (const [accountId, account] of currentEntityState.accounts.entries()) {
     for (const [offerId, offer] of account.swapOffers.entries()) {
       if (!offer?.crossJurisdiction) continue;
+      if (accountHasPendingCrossSwapAck(account, String(offerId))) continue;
       let route;
       try {
         route = withCanonicalCrossJurisdictionRouteHash(offer.crossJurisdiction);
       } catch {
         continue;
       }
-      if (route.status !== 'resting') continue;
+      if (normalizeEntityRef(route.bookOwnerEntityId || route.source.counterpartyEntityId) !== normalizeEntityRef(currentEntityState.entityId)) continue;
+      if (route.status !== 'resting' && route.status !== 'partially_filled') continue;
       if (isCrossJurisdictionRouteExpired(route, now) || isCrossJurisdictionPullExpired(route, 'source', now)) continue;
       offers.push(normalizeSwapOfferForOrderbook(
         {
@@ -1681,6 +1694,13 @@ export const applyEntityFrame = async (
 
       if (tx.type === 'swap_resolve') {
         const localOwnsOffer = Boolean(account?.swapOffers?.has(tx.data.offerId));
+        const localOffer = account?.swapOffers?.get(tx.data.offerId);
+        if (localOffer?.crossJurisdiction) {
+          console.warn(
+            `🌉 ORDERBOOK CROSS-J: blocked plain swap_resolve for cross-j offer=${tx.data.offerId} account=${accountId.slice(-8)}`,
+          );
+          continue;
+        }
         if (account && localOwnsOffer) {
           if (!queueUniqueAccountMempoolTx(account, tx)) {
             continue;
@@ -1694,6 +1714,14 @@ export const applyEntityFrame = async (
           console.log(`📊   → ${accountId.slice(-8)}: ${tx.type}`);
         } else {
           const ownerState = findSwapOfferOwnerState(env, currentEntityState, accountId, tx.data.offerId);
+          const ownerAccount = findAccountByCounterparty(ownerState, accountId);
+          const ownerOffer = ownerAccount?.swapOffers?.get(tx.data.offerId);
+          if (ownerOffer?.crossJurisdiction) {
+            console.warn(
+              `🌉 ORDERBOOK CROSS-J: blocked routed plain swap_resolve for cross-j offer=${tx.data.offerId} account=${accountId.slice(-8)}`,
+            );
+            continue;
+          }
           const firstValidator = ownerState?.config?.validators?.[0];
           if (!ownerState || !firstValidator) {
             console.warn(
@@ -1727,74 +1755,50 @@ export const applyEntityFrame = async (
         markStorageAccountDirty(env, currentEntityState.entityId, accountId);
         markStorageEntityDirty(env, currentEntityState.entityId);
         console.log(`📊   → ${accountId.slice(-8)}: ${tx.type}`);
-      }
-    }
-
-	    for (const fill of matchResult.crossJurisdictionFills) {
-      const publicRoute = fill.route;
-      const route = currentEntityState.crossJurisdictionSwaps?.get(publicRoute.orderId) ?? publicRoute;
-      if (!route.sourcePull || !route.targetPull) {
-        console.warn(`🌉 ORDERBOOK CROSS-J FILL skipped: unprepared pull route=${route.orderId}`);
-        continue;
-      }
-      if (!crossJurisdictionPullsReady(env, route, Number(currentEntityState.timestamp || env.timestamp || Date.now()))) {
-        console.warn(`🌉 ORDERBOOK CROSS-J FILL skipped: pull commitments not committed route=${route.orderId}`);
-        continue;
-      }
-      const sourceHubId = normalizeEntityRef(route.source.counterpartyEntityId);
-      const currentHubOwnsSourceLeg = sourceHubId === normalizeEntityRef(currentEntityState.entityId);
-      if (!currentHubOwnsSourceLeg) {
+      } else if (tx.type === 'cross_swap_fill_ack') {
+        const ownerState = findSwapOfferOwnerState(env, currentEntityState, accountId, tx.data.offerId);
+        const firstValidator = ownerState?.config?.validators?.[0];
+        if (!ownerState || !firstValidator) {
+          console.warn(
+            `🌉 ORDERBOOK CROSS-J: unable to route sibling fill notice offer=${tx.data.offerId} account=${accountId.slice(-8)}`,
+          );
+          continue;
+        }
+        const fillSeq = Math.floor(Number(tx.data.fillSeq ?? 0));
+        const cumulativeFillRatio = Math.floor(Number(tx.data.cumulativeFillRatio ?? 0));
+        if (fillSeq <= 0 || cumulativeFillRatio <= 0) {
+          console.warn(
+            `🌉 ORDERBOOK CROSS-J: invalid sibling fill notice offer=${tx.data.offerId} seq=${fillSeq} ratio=${cumulativeFillRatio}`,
+          );
+          continue;
+        }
         allOutputs.push({
-          entityId: route.source.counterpartyEntityId,
+          entityId: ownerState.entityId,
+          signerId: firstValidator,
           entityTxs: [{
-            type: 'crossJurisdictionFillRequest',
+            type: 'crossJurisdictionFillNotice',
             data: {
-              routeId: route.orderId,
-              fillRatio: fill.fillRatio,
-              requestedByEntityId: currentEntityState.entityId,
-              sourceAmount: fill.sourceAmount,
-              targetAmount: fill.targetAmount,
+              orderId: tx.data.offerId,
+              fillSeq,
+              incrementalSourceAmount: tx.data.incrementalSourceAmount ?? tx.data.executionSourceAmount ?? 0n,
+              incrementalTargetAmount: tx.data.incrementalTargetAmount ?? tx.data.executionTargetAmount ?? 0n,
+              cumulativeSourceAmount: tx.data.cumulativeSourceAmount ?? 0n,
+              cumulativeTargetAmount: tx.data.cumulativeTargetAmount ?? 0n,
+              cumulativeFillRatio,
+              ...(tx.data.priceTicks !== undefined ? { priceTicks: tx.data.priceTicks } : {}),
+              pairId: String(tx.data.pairId || ''),
             },
           }],
         });
         console.log(
-          `🌉 ORDERBOOK CROSS-J FILL REQUEST: ${route.orderId} ratio=${fill.fillRatio}/65535 ` +
-          `sourceHub=${route.source.counterpartyEntityId.slice(-4)} requestedBy=${currentEntityState.entityId.slice(-4)}`,
+          `🌉 ORDERBOOK CROSS-J: routed sibling fill notice to ${ownerState.entityId.slice(-8)}/${accountId.slice(-8)}`,
         );
-        continue;
       }
-      if (!route.hashLadderPrivateSeed) {
-        console.warn(`🌉 ORDERBOOK CROSS-J FILL skipped: source hub private seed missing route=${route.orderId}`);
-        continue;
-      }
-      let reveal;
-      try {
-        reveal = buildCrossJurisdictionPullReveal(
-          route,
-          fill.fillRatio,
-        );
-      } catch (error) {
-        console.warn(
-          `🌉 ORDERBOOK CROSS-J FILL skipped: ${error instanceof Error ? error.message : String(error)}`,
-        );
-        continue;
-      }
-      const resolveData = {
-        counterpartyEntityId: route.source.entityId,
-        pullId: route.sourcePull.pullId,
-        binary: reveal.binary,
-        description: route.memo || `Cross-j source pull ${route.orderId}`,
-      };
-      allOutputs.push({
-        entityId: route.source.counterpartyEntityId,
-        entityTxs: [{
-          type: 'resolvePull',
-          data: resolveData,
-        }],
-      });
-      console.log(
-        `🌉 ORDERBOOK CROSS-J FILL: ${route.orderId} ratio=${fill.fillRatio}/65535 ` +
-	        `source=${fill.sourceAmount.toString()} target=${fill.targetAmount.toString()} pull=${route.sourcePull.pullId.slice(0, 10)}`,
+    }
+
+	    if (matchResult.crossJurisdictionFills.length > 0) {
+	      console.log(
+	        `🌉 ORDERBOOK CROSS-J: recorded ${matchResult.crossJurisdictionFills.length} firm fill notice(s); clearing waits for full fill or explicit clear`,
 	      );
 	    }
 

@@ -168,7 +168,7 @@ const getReplayMeta = (env: Env): unknown | null => {
 function deriveAddress(seed: string, index: number): string {
   const mnemonic = Mnemonic.fromPhrase(seed);
   const hdNode = HDNodeWallet.fromMnemonic(mnemonic, getIndexedAccountPath(index));
-  return hdNode.address;
+  return hdNode.address.toLowerCase();
 }
 
 function derivePrivateKey(seed: string, index: number): string {
@@ -476,6 +476,34 @@ const resolveJurisdictionConfig = (jurisdictions: JurisdictionsPayload): ApiJuri
   return first;
 };
 
+const stripLocalJurisdictionSuffix = (name: string): string =>
+  String(name || '').replace(/\s*\((?:shared|local)\s+anvil\)\s*$/i, '').trim();
+
+const listDefaultJurisdictionImports = (jurisdictions: JurisdictionsPayload): Array<{ key: string; name: string; config: ApiJurisdictionConfig }> => {
+  const entries = Object.entries(jurisdictions.jurisdictions || {})
+    .filter(([, config]) => {
+      const status = String((config as { status?: unknown })?.status || 'active').trim().toLowerCase();
+      return status === 'active' &&
+        Boolean(config?.contracts?.depository && config?.contracts?.entityProvider && resolveJurisdictionRpc(config));
+    });
+  if (entries.length === 0) return [];
+  const primary = resolveJurisdictionConfig(jurisdictions);
+  const primaryKey = entries.find(([, config]) => config === primary)?.[0] || 'testnet';
+  const ordered = [
+    [primaryKey, primary] as const,
+    ...entries.filter(([key, config]) => key !== primaryKey && config !== primary),
+  ];
+  const seen = new Set<string>();
+  return ordered.flatMap(([key, config], index) => {
+    const rawName = index === 0 ? 'Testnet' : stripLocalJurisdictionSuffix(config.name || key);
+    const name = rawName || (index === 0 ? 'Testnet' : `Jurisdiction ${index + 1}`);
+    const normalized = normalizeJurisdictionKey(name);
+    if (!normalized || seen.has(normalized)) return [];
+    seen.add(normalized);
+    return [{ key, name, config }];
+  });
+};
+
 const resolveJurisdictionRpc = (config: ApiJurisdictionConfig): string =>
   config.rpc ?? config.rpcs?.[0] ?? '';
 
@@ -527,16 +555,12 @@ const summarizeHealth = (payload: HealthPayload | null): Record<string, unknown>
   };
 };
 
-const assertAnvilChain = (chainId: number, context: string): void => {
-  if (chainId !== 31337) {
-    throw new Error(`[${context}] CHAIN_ID_MISMATCH: expected=31337 actual=${chainId}`);
-  }
-};
-
-const resolveCanonicalTestnetChainId = (config: JurisdictionConfig, context: string): number => {
+const resolveJurisdictionChainId = (config: JurisdictionConfig, context: string): number => {
   const chainId = Number(config.chainId || 31337);
-  assertAnvilChain(chainId, context);
-  return chainId;
+  if (!Number.isFinite(chainId) || chainId <= 0) {
+    throw new Error(`[${context}] CHAIN_ID_INVALID: ${String(config.chainId)}`);
+  }
+  return Math.floor(chainId);
 };
 
 const fetchJurisdictions = async (baseOrigin?: string): Promise<JurisdictionsPayload> => {
@@ -926,7 +950,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     'delta_transformer',
   );
   xln.setDeltaTransformerAddress?.(canonicalDeltaTransformerAddress);
-  const chainId = resolveCanonicalTestnetChainId(arrakisConfig, 'VaultStore.restore');
+  const chainId = resolveJurisdictionChainId(arrakisConfig, 'VaultStore.restore');
 
   if (!env) {
     env = xln.createEmptyEnv(runtimeSeed);
@@ -1508,9 +1532,11 @@ export const vaultOperations = {
     const jurisdictions = await fetchJurisdictions(baseOrigin);
     markPerf('fetch_jurisdictions');
     const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
+    const defaultJurisdictionImports = listDefaultJurisdictionImports(jurisdictions);
+    const secondaryJurisdictionImports = defaultJurisdictionImports.slice(1);
     console.log('[VaultStore.createRuntime] Loaded contracts:', arrakisConfig.contracts);
     const rpcUrl = resolveRpcUrl(resolveJurisdictionRpc(arrakisConfig), baseOrigin);
-    const chainId = resolveCanonicalTestnetChainId(arrakisConfig, 'VaultStore.createRuntime');
+    const chainId = resolveJurisdictionChainId(arrakisConfig, 'VaultStore.createRuntime');
 
     // Import testnet J-machine (shared anvil on xln.finance)
     console.log('[VaultStore.createRuntime] Importing testnet anvil...');
@@ -1552,6 +1578,39 @@ export const vaultOperations = {
     );
     markPerf('import_j_testnet');
     console.log('[VaultStore.createRuntime] ✅ Testnet imported');
+
+    for (const secondary of secondaryJurisdictionImports) {
+      const secondaryRpcUrl = resolveRpcUrl(resolveJurisdictionRpc(secondary.config), baseOrigin);
+      const secondaryChainId = resolveJurisdictionChainId(secondary.config, `VaultStore.createRuntime.${secondary.name}`);
+      console.log(`[VaultStore.createRuntime] Importing ${secondary.name}...`);
+      await enqueueAndAwait(
+        xln,
+        newEnv,
+        {
+          runtimeTxs: [{
+            type: 'importJ',
+            data: {
+              name: secondary.name,
+              chainId: secondaryChainId,
+              ticker: String((secondary.config as { currency?: unknown }).currency || 'USDC'),
+              rpcs: [secondaryRpcUrl],
+              blockTimeMs: secondary.config.blockTimeMs ?? 1_000,
+              contracts: secondary.config.contracts,
+            },
+          }],
+          entityInputs: [],
+        },
+        () => hasConnectedJurisdictionAdapter(newEnv?.jReplicas?.get?.(secondary.name)),
+        `createRuntime.importJ(${secondary.name})`,
+        45_000,
+      );
+      await waitForCondition(
+        () => hasRuntimeJurisdictionAddresses(newEnv?.jReplicas?.get?.(secondary.name)),
+        `createRuntime.importJ(${secondary.name}).addresses`,
+        45_000,
+      );
+      console.log(`[VaultStore.createRuntime] ✅ ${secondary.name} imported`);
+    }
 
     // === MVP: Create entity ===
     console.log('[VaultStore.createRuntime] Creating user entity...');
@@ -1633,8 +1692,58 @@ export const vaultOperations = {
 
     // Store entityId in signer
     runtime.signers[0]!.entityId = entityId;
+    runtime.signers[0]!.jurisdiction = 'Testnet';
     void fundSignerWalletViaFaucet(signerAddress);
     console.log('[VaultStore.createRuntime] ✅ Entity ready; signer faucet funding queued');
+
+    for (const secondary of secondaryJurisdictionImports) {
+      const jReplicaSecondary = findJReplicaByName(newEnv, secondary.name);
+      if (!jReplicaSecondary) throw new Error(`${secondary.name} J-machine not found after import`);
+      const derivationIndex = deriveJurisdictionSignerIndex(secondary.name);
+      const secondaryAddress = deriveAddress(seed, derivationIndex);
+      const secondaryPrivateKey = derivePrivateKey(seed, derivationIndex);
+      const secondaryPrivateKeyBytes = new Uint8Array(
+        secondaryPrivateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))
+      );
+      xln.registerSignerKey(secondaryAddress, secondaryPrivateKeyBytes);
+      const secondaryEntityId = generateLazyEntityId([secondaryAddress], 1n);
+      const secondaryChainId = Number(jReplicaSecondary.chainId ?? secondary.config.chainId ?? chainId);
+      const secondaryEntityConfig = buildSignerEntityConfig(
+        secondaryAddress,
+        jReplicaSecondary,
+        secondary.name,
+        Number.isFinite(secondaryChainId) && secondaryChainId > 0 ? secondaryChainId : chainId,
+      );
+      await enqueueAndAwait(
+        xln,
+        newEnv,
+        {
+          runtimeTxs: [{
+            type: 'importReplica',
+            entityId: secondaryEntityId,
+            signerId: secondaryAddress,
+            data: {
+              isProposer: true,
+              config: secondaryEntityConfig,
+              profileName: `${name} ${secondary.name}`,
+            },
+          }],
+          entityInputs: [],
+        },
+        () => Boolean(findEntityReplicaByEntityAndSigner(newEnv, secondaryEntityId, secondaryAddress)),
+        `createRuntime.importReplica(${secondary.name}:${secondaryEntityId.slice(0, 12)})`,
+      );
+      runtime.signers.push({
+        index: runtime.signers.length,
+        derivationIndex,
+        address: secondaryAddress,
+        name: `${secondary.name} Signer`,
+        jurisdiction: secondary.name,
+        entityId: secondaryEntityId,
+      });
+      void fundSignerWalletViaFaucet(secondaryAddress);
+      console.log(`[VaultStore.createRuntime] ✅ ${secondary.name} entity ready: ${secondaryEntityId.slice(0, 18)}`);
+    }
     if (!requiresOnboarding) {
       writeSavedCollateralPolicy({
         mode: 'autopilot',
@@ -2118,3 +2227,16 @@ export const vaultOperations = {
     return signer?.entityId || null;
   }
 };
+
+if (typeof window !== 'undefined') {
+  const isLocalDev =
+    import.meta.env.DEV ||
+    window.location.hostname === 'localhost' ||
+    window.location.hostname === '127.0.0.1';
+  if (isLocalDev) {
+    Object.defineProperty(window, '__xlnVaultOperations', {
+      value: vaultOperations,
+      configurable: true,
+    });
+  }
+}

@@ -989,11 +989,18 @@ const pollHubHealth = async (child: HubChild): Promise<void> => {
   ]);
   if (info) child.lastInfo = info;
   if (health) child.lastHealth = health;
-  const entityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '').toLowerCase();
-  if (entityId) {
-    relayStore.activeHubEntityIds = Array.from(
-      new Set([...relayStore.activeHubEntityIds, entityId]),
-    );
+  const entityIds = new Set<string>();
+  const primaryEntityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '').trim().toLowerCase();
+  if (primaryEntityId) entityIds.add(primaryEntityId);
+  for (const entry of child.lastInfo?.hubEntities || []) {
+    const entityId = String(entry?.entityId || '').trim().toLowerCase();
+    if (entityId) entityIds.add(entityId);
+  }
+  if (entityIds.size > 0) {
+    relayStore.activeHubEntityIds = Array.from(new Set([
+      ...relayStore.activeHubEntityIds,
+      ...entityIds,
+    ]));
   }
 };
 
@@ -1864,7 +1871,37 @@ const buildPublicHubDiscoveryPayload = (): {
 } => {
   const serverTime = Date.now();
   const primaryJurisdictionFallback = resolvePrimaryHubJurisdictionFallback();
-  const hubs = hubChildren
+  type PublicHubDiscoveryHub = {
+    entityId: string;
+    runtimeId: string | null;
+    name: string;
+    bio: null;
+    website: null;
+    wsUrl: string | null;
+    publicAccounts: [];
+    metadata: {
+      isHub: true;
+      jurisdiction?: {
+        name: string;
+        chainId?: number;
+        depositoryAddress?: string;
+        entityProviderAddress?: string;
+      };
+    };
+    lastUpdated: number;
+    online: boolean;
+  };
+  const hubsByEntityId = new Map<string, PublicHubDiscoveryHub>();
+  const addHub = (hub: PublicHubDiscoveryHub): void => {
+    const key = String(hub.entityId || '').trim().toLowerCase();
+    if (!key || !hub.online) return;
+    const existing = hubsByEntityId.get(key);
+    if (!existing || (hub.metadata.jurisdiction && !existing.metadata.jurisdiction)) {
+      hubsByEntityId.set(key, hub);
+    }
+  };
+
+  hubChildren
     .flatMap((child) => {
       const entityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '').trim();
       const runtimeId = String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || '').trim();
@@ -1916,7 +1953,42 @@ const buildPublicHubDiscoveryPayload = (): {
         })
         .filter((hub): hub is NonNullable<typeof hub> => Boolean(hub));
     })
-    .filter((hub): hub is NonNullable<typeof hub> => Boolean(hub?.online))
+    .forEach(addHub);
+
+  for (const entry of relayStore.gossipProfiles.values()) {
+    const profile = entry.profile;
+    if (profile?.metadata?.isHub !== true) continue;
+    const runtimeId = normalizeRuntimeKey(profile.runtimeId);
+    const online = Boolean(runtimeId && relayStore.clients.has(runtimeId));
+    const jurisdiction = profile.metadata?.jurisdiction as
+      | { name?: string; chainId?: number; depositoryAddress?: string; entityProviderAddress?: string }
+      | undefined;
+    const jurisdictionName = String(jurisdiction?.name || '').trim();
+    addHub({
+      entityId: profile.entityId,
+      runtimeId: runtimeId || profile.runtimeId || null,
+      name: String(profile.name || profile.entityId).trim(),
+      bio: null,
+      website: null,
+      wsUrl: String(profile.wsUrl || '').trim() || null,
+      publicAccounts: [],
+      metadata: {
+        isHub: true,
+        ...(jurisdictionName ? {
+          jurisdiction: {
+            name: jurisdictionName,
+            ...(jurisdiction?.chainId !== undefined ? { chainId: jurisdiction.chainId } : {}),
+            ...(jurisdiction?.depositoryAddress ? { depositoryAddress: jurisdiction.depositoryAddress } : {}),
+            ...(jurisdiction?.entityProviderAddress ? { entityProviderAddress: jurisdiction.entityProviderAddress } : {}),
+          },
+        } : {}),
+      },
+      lastUpdated: Number(profile.lastUpdated || entry.timestamp || serverTime),
+      online,
+    });
+  }
+
+  const hubs = Array.from(hubsByEntityId.values())
     .sort((left, right) =>
       compareStableText(String(left.metadata.jurisdiction?.name || ''), String(right.metadata.jurisdiction?.name || '')) ||
       compareStableText(left.name, right.name)

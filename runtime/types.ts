@@ -670,6 +670,22 @@ export type EntityTx =
       };
     }
   | {
+      type: 'cancelPull';
+      data: {
+        counterpartyEntityId: string;
+        pullId: string;
+        description?: string;
+      };
+    }
+  | {
+      type: 'pullCancelExpired';
+      data: {
+        counterpartyEntityId: string;
+        pullId: string;
+        description?: string;
+      };
+    }
+  | {
       // Request hub collateralization on a bilateral account (prepaid fee model)
       type: 'requestCollateral';
       data: {
@@ -746,6 +762,28 @@ export type EntityTx =
         requestedByEntityId?: string;
         sourceAmount?: bigint;
         targetAmount?: bigint;
+      };
+    }
+  | {
+      type: 'crossJurisdictionFillNotice';
+      data: {
+        orderId: string;
+        fillSeq: number;
+        incrementalSourceAmount: bigint;
+        incrementalTargetAmount: bigint;
+        cumulativeSourceAmount: bigint;
+        cumulativeTargetAmount: bigint;
+        cumulativeFillRatio: number;
+        priceTicks?: bigint;
+        pairId: string;
+      };
+    }
+  | {
+      type: 'requestCrossJurisdictionClear';
+      data: {
+        orderId: string;
+        cancelRemainder?: boolean;
+        reopenRemainder?: boolean;
       };
     }
 	  | {
@@ -1727,6 +1765,13 @@ export type AccountTx =
         binary: string;
       };
     }
+  | {
+      type: 'pull_cancel';
+      data: {
+        pullId: string;
+        reason?: 'beneficiary_release' | 'expired';
+      };
+    }
   // === SWAP TRANSACTION TYPES ===
   | {
       type: 'swap_offer';
@@ -1781,11 +1826,18 @@ export type AccountTx =
       type: 'cross_swap_fill_ack';
       data: {
         offerId: string;
+        fillSeq?: number;
+        incrementalSourceAmount?: bigint;
+        incrementalTargetAmount?: bigint;
+        cumulativeSourceAmount?: bigint;
+        cumulativeTargetAmount?: bigint;
         cumulativeFillRatio: number;
         executionSourceAmount?: bigint;
         executionTargetAmount?: bigint;
         cancelRemainder?: boolean;
         comment?: string;
+        priceTicks?: bigint;
+        pairId?: string;
       };
     }
   // === SETTLEMENT HOLD TYPES (ring-fencing via bilateral consensus) ===
@@ -1965,12 +2017,16 @@ export type CrossJurisdictionSwapStatus =
   | 'target_prepared'
   | 'source_committed'
   | 'resting'
+  | 'partially_filled'
+  | 'clear_requested'
+  | 'clearing'
   | 'target_locked'
   | 'source_locked'
   | 'source_claimed'
   | 'target_claimed'
   | 'settled'
   | 'cancelled'
+  | 'expired'
   | 'failed';
 
 export interface CrossJurisdictionSwapLeg {
@@ -1995,6 +2051,8 @@ export interface CrossJurisdictionPullLeg {
 export interface CrossJurisdictionSwapRoute {
   orderId: string;
   routeHash?: string;
+  bookOwnerEntityId?: string;
+  venueId?: string;
   makerEntityId: string;
   hubEntityId: string;
   source: CrossJurisdictionSwapLeg;
@@ -2004,6 +2062,13 @@ export interface CrossJurisdictionSwapRoute {
   hashLadderPrivateSeed?: string;
   hashlock?: string;
   priceTicks?: bigint;
+  fillSeq?: number;
+  cumulativeFillRatio?: number;
+  filledSourceAmount?: bigint;
+  filledTargetAmount?: bigint;
+  pendingClearRequestedAt?: number;
+  clearingPolicy?: 'manual' | 'full_fill' | 'cancel_and_clear' | 'reopen_remainder';
+  riskMode?: 'fully_collateralized' | 'partially_collateralized' | 'credit_line' | 'unsecured_internalized';
   claimedRatio?: number;
   sourceClaimed?: bigint;
   targetClaimed?: bigint;

@@ -16,17 +16,21 @@ const CROSS_J_STATUS_RANK: Record<CrossJurisdictionSwapStatus, number> = {
   target_prepared: 20,
   source_committed: 30,
   resting: 40,
-  target_locked: 50,
-  source_locked: 60,
-  source_claimed: 70,
-  target_claimed: 80,
-  settled: 100,
-  cancelled: 100,
-  failed: 100,
+  partially_filled: 50,
+  clear_requested: 60,
+  clearing: 70,
+  target_locked: 80,
+  source_locked: 90,
+  source_claimed: 100,
+  target_claimed: 110,
+  settled: 120,
+  cancelled: 120,
+  expired: 120,
+  failed: 120,
 };
 
 export function isCrossJurisdictionTerminalStatus(status: CrossJurisdictionSwapStatus | undefined): boolean {
-  return status === 'settled' || status === 'cancelled' || status === 'failed';
+  return status === 'settled' || status === 'cancelled' || status === 'expired' || status === 'failed';
 }
 
 export function compareCrossJurisdictionRouteStatus(
@@ -53,7 +57,30 @@ export function isCrossJurisdictionPullExpired(
 
 const normalizeEntityId = (value: string): string => String(value || '').toLowerCase();
 const normalizeJurisdiction = (value: string): string => String(value || '').trim().toLowerCase();
+const crossJurisdictionAssetKey = (jurisdiction: string, tokenId: number): string =>
+  `${normalizeJurisdiction(jurisdiction)}:${Math.floor(Number(tokenId) || 0)}`;
+
+export function deriveCanonicalCrossJurisdictionVenueId(route: CrossJurisdictionSwapRoute): string {
+  const sourceKey = crossJurisdictionAssetKey(route.source.jurisdiction, route.source.tokenId);
+  const targetKey = crossJurisdictionAssetKey(route.target.jurisdiction, route.target.tokenId);
+  const [baseKey, quoteKey] = sourceKey <= targetKey
+    ? [sourceKey, targetKey]
+    : [targetKey, sourceKey];
+  return `cross:${baseKey}/${quoteKey}`;
+}
+
+export function deriveCanonicalCrossJurisdictionBookOwner(route: CrossJurisdictionSwapRoute): string {
+  const sourceKey = crossJurisdictionAssetKey(route.source.jurisdiction, route.source.tokenId);
+  const targetKey = crossJurisdictionAssetKey(route.target.jurisdiction, route.target.tokenId);
+  return normalizeEntityId(
+    sourceKey <= targetKey
+      ? route.source.counterpartyEntityId
+      : route.target.entityId,
+  );
+}
 const ROUTE_HASH_ABI_TYPES = [
+  'string',
+  'string',
   'string',
   'string',
   'string',
@@ -70,6 +97,8 @@ const ROUTE_HASH_ABI_TYPES = [
   'bool',
   'int256',
   'uint256',
+  'string',
+  'string',
 ] as const;
 
 function requireRuntimeSeed(runtimeSeed: string | undefined): string {
@@ -104,6 +133,8 @@ export function deriveCrossJurisdictionRouteHash(route: CrossJurisdictionSwapRou
     ROUTE_HASH_ABI_TYPES,
     [
       String(route.orderId || ''),
+      normalizeEntityId(route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId),
+      String(route.venueId || ''),
       normalizeEntityId(route.makerEntityId),
       normalizeEntityId(route.hubEntityId),
       normalizeJurisdiction(route.source.jurisdiction),
@@ -119,16 +150,30 @@ export function deriveCrossJurisdictionRouteHash(route: CrossJurisdictionSwapRou
       route.priceTicks !== undefined,
       BigInt(route.priceTicks ?? 0n),
       BigInt(Math.floor(Number(route.expiresAt ?? 0))),
+      String(route.riskMode || ''),
+      String(route.clearingPolicy || ''),
     ],
   ));
 }
 
+export function withCrossJurisdictionVenueDefaults(route: CrossJurisdictionSwapRoute): CrossJurisdictionSwapRoute {
+  const bookOwnerEntityId = normalizeEntityId(route.bookOwnerEntityId || deriveCanonicalCrossJurisdictionBookOwner(route));
+  const venueId = route.venueId || deriveCanonicalCrossJurisdictionVenueId(route);
+  return {
+    ...route,
+    bookOwnerEntityId,
+    venueId,
+    hubEntityId: route.hubEntityId || bookOwnerEntityId,
+  };
+}
+
 export function withCanonicalCrossJurisdictionRouteHash(route: CrossJurisdictionSwapRoute): CrossJurisdictionSwapRoute {
-  const routeHash = deriveCrossJurisdictionRouteHash(route);
-  if (route.routeHash && String(route.routeHash).toLowerCase() !== routeHash.toLowerCase()) {
+  const withDefaults = withCrossJurisdictionVenueDefaults(route);
+  const routeHash = deriveCrossJurisdictionRouteHash(withDefaults);
+  if (withDefaults.routeHash && String(withDefaults.routeHash).toLowerCase() !== routeHash.toLowerCase()) {
     throw new Error(`CROSS_J_ROUTE_HASH_MISMATCH:${route.orderId}`);
   }
-  return { ...route, routeHash };
+  return { ...withDefaults, routeHash };
 }
 
 export function deriveCrossJurisdictionPullId(route: CrossJurisdictionSwapRoute, leg: 'source' | 'target'): string {

@@ -8,11 +8,14 @@ export type JurisdictionBadgeInfo = {
 const normalize = (value: unknown): string =>
   String(value || '').trim().toLowerCase();
 
+const displayName = (value: string): string =>
+  value.replace(/\s*\((?:local|shared)\s+anvil\)\s*$/i, '').trim() || value;
+
 export function getJurisdictionBadgeInfo(
   jurisdictionName?: string | null,
   chainId?: number | null,
 ): JurisdictionBadgeInfo | null {
-  const name = String(jurisdictionName || '').trim();
+  const name = displayName(String(jurisdictionName || '').trim());
   const normalized = normalize(name);
   if (!name && !chainId) return null;
 

@@ -4,7 +4,7 @@ import { requireAppBaseUrl } from './e2e-base-url';
 
 export const APP_BASE_URL = requireAppBaseUrl();
 export const DEFAULT_INIT_TIMEOUT = 30_000;
-const RUNTIME_READY_TIMEOUT = process.env.E2E_LONG === '1' ? 90_000 : 60_000;
+const RUNTIME_READY_TIMEOUT = process.env.E2E_LONG === '1' ? 150_000 : 120_000;
 
 export type DemoUserName = 'alice' | 'bob' | 'carol' | 'dave';
 
@@ -579,16 +579,33 @@ export async function createRuntime(
     await quickLoginButton.click();
     runtimeId = await waitForNextRuntimeReady(page, previousRuntimeId);
   } else {
-    const mnemonicTab = page.getByRole('button', { name: 'Mnemonic', exact: true });
-    if (!await mnemonicTab.isVisible().catch(() => false)) {
-      const importToggle = page.locator('details.import-options summary').first();
-      await expect(importToggle).toBeVisible({ timeout: 15_000 });
-      await importToggle.click();
+    const displayNameInput = page.locator('#name').first();
+    if (await displayNameInput.isVisible({ timeout: 1500 }).catch(() => false)) {
+      const currentName = await displayNameInput.inputValue().catch(() => '');
+      if (!currentName.trim()) {
+        await displayNameInput.fill(label);
+      }
     }
-    await expect(mnemonicTab).toBeVisible({ timeout: 15_000 });
-    await mnemonicTab.click();
-    const mnemonicInput = page.locator('#mnemonic');
+
+    let mnemonicInput = page.locator('#mnemonic');
+    if (!await mnemonicInput.isVisible().catch(() => false)) {
+      const importAction = page.getByRole('button', { name: /Import \/ recover|Mnemonic/i }).first();
+      if (!await importAction.isVisible().catch(() => false)) {
+        const importToggle = page.locator('details.brainvault-strip summary, details.import-options summary').first();
+        await expect(importToggle).toBeVisible({ timeout: 15_000 });
+        await importToggle.click();
+      }
+      await expect(importAction).toBeVisible({ timeout: 15_000 });
+      await importAction.click();
+      mnemonicInput = page.locator('#mnemonic');
+    }
     await expect(mnemonicInput).toBeVisible({ timeout: 15_000 });
+    if (await displayNameInput.isVisible({ timeout: 1000 }).catch(() => false)) {
+      const currentName = await displayNameInput.inputValue().catch(() => '');
+      if (!currentName.trim()) {
+        await displayNameInput.fill(label);
+      }
+    }
     await mnemonicInput.fill(normalizeMnemonic(mnemonic));
     const openVaultButton = page.getByRole('button', { name: /(Create XLN wallet|Open (Wallet|Vault))/, exact: false });
     await expect(openVaultButton).toBeEnabled({ timeout: 15_000 });

@@ -346,6 +346,22 @@ select optgroup {
   align-items: center;
 }
 
+/* Native selects need explicit dark popup styling and enough inline space.
+   Otherwise macOS/WebKit renders unreadable clipped dropdown text in the app. */
+select {
+  color-scheme: dark;
+  min-width: 0;
+  max-width: 100%;
+  box-sizing: border-box;
+  text-overflow: clip;
+}
+
+select option {
+  background: #0f1117;
+  color: #f3f4f6;
+  font: inherit;
+}
+
 /* ============================================================================
    ANIMATIONS
    ============================================================================ */

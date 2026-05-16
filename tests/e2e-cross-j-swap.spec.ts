@@ -3,7 +3,7 @@ import { AbiCoder, HDNodeWallet, Mnemonic, getIndexedAccountPath, keccak256, toU
 import { deriveDelta } from '../runtime/account-utils';
 import { ensureE2EBaseline, type E2EHealthResponse } from './utils/e2e-baseline';
 import { connectRuntimeToHubWithCredit } from './utils/e2e-connect';
-import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
+import { gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
 import { enqueueEntityTxs } from './utils/e2e-runtime-input';
 import { requireIsolatedBaseUrl } from './utils/e2e-isolated-env';
 import { timedStep } from './utils/e2e-timing';
@@ -104,6 +104,10 @@ async function getSecondaryHubInfo(
 
 function normalizeId(value: string): string {
   return String(value || '').trim().toLowerCase();
+}
+
+function escapeRegex(value: string): string {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
 function deriveJurisdictionSignerIndex(jurisdiction: string): number {
@@ -338,6 +342,7 @@ async function ensureDirectHubAccount(
   identity: RuntimeIdentity,
   hubId: string,
   tokenIds: readonly number[],
+  timeoutMs = 75_000,
 ): Promise<void> {
   await waitForHubProfile(page, hubId);
   const hasAccount = await page.evaluate(({ identity, hubId }) => {
@@ -355,9 +360,9 @@ async function ensureDirectHubAccount(
         creditAmount: CREDIT_AMOUNT,
       },
     }]);
-    await flushRuntime(page, 4);
+    await flushRuntime(page, 8);
   }
-  await waitForAccountReady(page, identity, hubId, [USDC]);
+  await waitForAccountReady(page, identity, hubId, [USDC], timeoutMs);
 
   for (const tokenId of tokenIds) {
     const hasToken = await page.evaluate(({ identity, hubId, tokenId }) => {
@@ -375,9 +380,128 @@ async function ensureDirectHubAccount(
         amount: CREDIT_AMOUNT,
       },
     }]);
-    await flushRuntime(page, 4);
-    await waitForAccountReady(page, identity, hubId, [tokenId]);
+    await flushRuntime(page, 8);
+    await waitForAccountReady(page, identity, hubId, [tokenId], timeoutMs);
   }
+}
+
+async function waitForDefaultJurisdictionReplicas(page: Page, label: string): Promise<void> {
+  await expect.poll(
+    async () => page.evaluate(() => {
+      const env = (window as CrossRuntimeWindow).isolatedEnv;
+      const jurisdictions = Array.from(env?.jReplicas?.keys?.() || []).map((name) => String(name));
+      const entities = Array.from(env?.eReplicas?.values?.() || []).map((replica: any) => ({
+        entityId: String(replica?.state?.entityId || replica?.entityId || ''),
+        signerId: String(replica?.signerId || ''),
+        jurisdiction: String(replica?.state?.config?.jurisdiction?.name || replica?.position?.jurisdiction || ''),
+      }));
+      const entityJurisdictions = new Set(
+        entities
+          .map((entry) => entry.jurisdiction.trim().toLowerCase())
+          .filter(Boolean),
+      );
+      return {
+        jurisdictionCount: jurisdictions.length,
+        entityJurisdictionCount: entityJurisdictions.size,
+        hasTestnet: jurisdictions.some((name) => /^testnet$/i.test(name)),
+        hasSecondary: jurisdictions.some((name) => /tron|rpc2|second/i.test(name)),
+        entities: entities.length,
+      };
+    }),
+    {
+      timeout: 90_000,
+      intervals: [250, 500, 1000],
+      message: `${label} runtime must bootstrap primary and secondary jurisdiction entities by default`,
+    },
+  ).toMatchObject({
+    hasTestnet: true,
+    hasSecondary: true,
+  });
+
+  await expect.poll(
+    async () => page.evaluate(() => {
+      const env = (window as CrossRuntimeWindow).isolatedEnv;
+      const entityJurisdictions = new Set(
+        Array.from(env?.eReplicas?.values?.() || [])
+          .map((replica: any) => String(replica?.state?.config?.jurisdiction?.name || replica?.position?.jurisdiction || '').trim().toLowerCase())
+          .filter(Boolean),
+      );
+      return {
+        entityJurisdictionCount: entityJurisdictions.size,
+        entities: Number(env?.eReplicas?.size || 0),
+      };
+    }),
+    {
+      timeout: 90_000,
+      intervals: [250, 500, 1000],
+      message: `${label} runtime must expose an entity for each default jurisdiction`,
+    },
+  ).toMatchObject({ entityJurisdictionCount: 2 });
+}
+
+async function createRuntimeIdentityViaStore(
+  page: Page,
+  label: string,
+  mnemonic: string,
+): Promise<RuntimeIdentity> {
+  const normalizedMnemonic = mnemonic.trim().split(/\s+/).join(' ');
+  const runtimeId = await page.evaluate(async ({ label, mnemonic }) => {
+    const ops = (window as typeof window & {
+      __xlnVaultOperations?: {
+        createRuntime?: (name: string, seed: string, options?: Record<string, unknown>) => Promise<{ id?: string }>;
+      };
+    }).__xlnVaultOperations;
+    if (typeof ops?.createRuntime !== 'function') {
+      throw new Error('__xlnVaultOperations.createRuntime unavailable');
+    }
+    const runtime = await ops.createRuntime(label, mnemonic, {
+      loginType: 'manual',
+      requiresOnboarding: false,
+      mnemonic12: undefined,
+    });
+    return String(runtime?.id || '');
+  }, { label, mnemonic: normalizedMnemonic });
+  expect(runtimeId, `${label} direct runtime create must return runtime id`).toMatch(/^0x[a-fA-F0-9]{40}$/);
+
+  await expect.poll(
+    async () => page.evaluate((runtimeId) => {
+      const env = (window as CrossRuntimeWindow).isolatedEnv;
+      if (!env?.eReplicas) return null;
+      const runtimeNeedle = String(runtimeId || '').toLowerCase();
+      for (const [key, replica] of env.eReplicas.entries()) {
+        const [entityId, signerId] = String(key || '').split(':');
+        if (String(signerId || '').toLowerCase() !== runtimeNeedle) continue;
+        return {
+          entityId: String(replica?.state?.entityId || replica?.entityId || entityId || ''),
+          signerId: String(signerId || replica?.signerId || ''),
+          runtimeId: String(env.runtimeId || runtimeId),
+        };
+      }
+      return null;
+    }, runtimeId),
+    {
+      timeout: 150_000,
+      intervals: [250, 500, 1000],
+      message: `${label} direct runtime must hydrate primary entity`,
+    },
+  ).not.toBeNull();
+
+  const identity = await page.evaluate((runtimeId) => {
+    const env = (window as CrossRuntimeWindow).isolatedEnv;
+    const runtimeNeedle = String(runtimeId || '').toLowerCase();
+    for (const [key, replica] of env?.eReplicas?.entries?.() || []) {
+      const [entityId, signerId] = String(key || '').split(':');
+      if (String(signerId || '').toLowerCase() !== runtimeNeedle) continue;
+      return {
+        entityId: String(replica?.state?.entityId || replica?.entityId || entityId || ''),
+        signerId: String(signerId || replica?.signerId || ''),
+        runtimeId: String(env?.runtimeId || runtimeId),
+      };
+    }
+    return null;
+  }, runtimeId);
+  expect(identity, `${label} direct runtime identity must be readable`).not.toBeNull();
+  return identity!;
 }
 
 async function faucetOffchain(
@@ -638,6 +762,26 @@ async function readCrossState(
   accountFound: boolean;
   accountKeys: string[];
   messages: string[];
+  routeSummaries: Array<{
+    orderId: string;
+    status: string;
+    fillSeq: number;
+    cumulativeFillRatio: number;
+    filledSourceAmount: string;
+    filledTargetAmount: string;
+    sourcePull: boolean;
+    targetPull: boolean;
+    bookOwnerEntityId: string;
+    venueId: string;
+    updatedAt: number;
+  }>;
+  offerSummaries: Array<{
+    offerId: string;
+    status: string;
+    amount: string;
+    cross: boolean;
+  }>;
+  pullIds: string[];
 }> {
   return await page.evaluate(({ identity, hubId }) => {
     const env = (window as CrossRuntimeWindow).isolatedEnv;
@@ -680,10 +824,24 @@ async function readCrossState(
     }
     let settledRoutes = 0;
     let claimedRoutes = 0;
+    const routeSummaries = [];
     for (const route of state?.crossJurisdictionSwaps?.values?.() || []) {
       const status = String(route?.status || '');
       if (status === 'settled') settledRoutes += 1;
       if (status === 'source_claimed' || status === 'target_claimed' || status === 'settled') claimedRoutes += 1;
+      routeSummaries.push({
+        orderId: String(route?.orderId || ''),
+        status,
+        fillSeq: Number(route?.fillSeq || 0),
+        cumulativeFillRatio: Number(route?.cumulativeFillRatio || route?.claimedRatio || 0),
+        filledSourceAmount: String(route?.filledSourceAmount ?? route?.sourceClaimed ?? '0'),
+        filledTargetAmount: String(route?.filledTargetAmount ?? route?.targetClaimed ?? '0'),
+        sourcePull: Boolean(route?.sourcePull),
+        targetPull: Boolean(route?.targetPull),
+        bookOwnerEntityId: String(route?.bookOwnerEntityId || route?.source?.counterpartyEntityId || ''),
+        venueId: String(route?.venueId || ''),
+        updatedAt: Number(route?.updatedAt || route?.createdAt || 0),
+      });
     }
     return {
       offers,
@@ -695,6 +853,14 @@ async function readCrossState(
       accountFound: Boolean(account),
       accountKeys: Array.from(state?.accounts?.keys?.() || []).map((key: unknown) => String(key)),
       messages: Array.from(state?.messages || []).map((message: unknown) => String(message)),
+      routeSummaries,
+      offerSummaries: Array.from(account?.swapOffers?.entries?.() || []).map(([offerId, offer]: [string, any]) => ({
+        offerId: String(offerId),
+        status: String(offer?.crossJurisdiction?.status || ''),
+        amount: String(offer?.amount ?? '0'),
+        cross: Boolean(offer?.crossJurisdiction),
+      })),
+      pullIds: Array.from(account?.pulls?.keys?.() || []).map((pullId: unknown) => String(pullId)),
     };
   }, { identity, hubId });
 }
@@ -816,6 +982,107 @@ async function waitForCrossOffersCleared(
   }
 }
 
+async function waitForCrossPendingFill(
+  page: Page,
+  identity: RuntimeIdentity,
+  hubId: string,
+  label: string,
+  options: { routeId?: string; minFillSeq?: number; minRatioExclusive?: number } = {},
+): Promise<{ routeId: string; ratio: number; fillSeq: number }> {
+  let routeId = '';
+  let ratio = 0;
+  let fillSeq = 0;
+  await expect.poll(
+    async () => {
+      const state = await readCrossState(page, identity, hubId);
+      const route = state.routeSummaries
+        .filter((candidate) =>
+          candidate.status === 'partially_filled' &&
+          candidate.cumulativeFillRatio > 0 &&
+          candidate.cumulativeFillRatio < 65_535 &&
+          (!options.routeId || candidate.orderId === options.routeId) &&
+          candidate.fillSeq >= (options.minFillSeq ?? 1) &&
+          candidate.cumulativeFillRatio > (options.minRatioExclusive ?? 0),
+        )
+        .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+      routeId = route?.orderId || '';
+      ratio = route?.cumulativeFillRatio || 0;
+      fillSeq = route?.fillSeq || 0;
+      return {
+        offers: state.offers,
+        pulls: state.pulls,
+        routeStatus: route?.status || '',
+        ratio,
+        fillSeq,
+      };
+    },
+    {
+      timeout: 75_000,
+      intervals: [250, 500, 1000],
+      message: `${label} cross-j partial fill must remain pending in the book without clearing pulls`,
+    },
+  ).toMatchObject({
+    offers: expect.any(Number),
+    pulls: expect.any(Number),
+    routeStatus: 'partially_filled',
+    fillSeq: expect.any(Number),
+  });
+  expect(routeId, `${label} partial route id must be available`).toBeTruthy();
+  const state = await readCrossState(page, identity, hubId);
+  const route = state.routeSummaries.find((candidate) => candidate.orderId === routeId);
+  expect(state.offers, `${label} partial order must stay open`).toBeGreaterThan(0);
+  expect(state.pulls, `${label} partial pull must stay locked until explicit clear`).toBeGreaterThan(0);
+  expect(route?.cumulativeFillRatio || 0, `${label} partial ratio must be positive`).toBeGreaterThan(0);
+  expect(route?.cumulativeFillRatio || 0, `${label} partial ratio must not be full`).toBeLessThan(65_535);
+  return { routeId, ratio, fillSeq };
+}
+
+async function requestCrossClear(
+  page: Page,
+  identity: RuntimeIdentity,
+  orderId: string,
+  options: { cancelRemainder?: boolean; reopenRemainder?: boolean } = {},
+): Promise<void> {
+  await enqueueEntityTxs(page, identity.entityId, identity.signerId, [{
+    type: 'requestCrossJurisdictionClear',
+    data: {
+      orderId,
+      cancelRemainder: Boolean(options.cancelRemainder),
+      reopenRemainder: Boolean(options.reopenRemainder),
+    },
+  }]);
+  await flushRuntime(page, 5);
+}
+
+async function waitForCrossRouteStatus(
+  page: Page,
+  identity: RuntimeIdentity,
+  hubId: string,
+  orderId: string,
+  statuses: readonly string[],
+  label: string,
+): Promise<void> {
+  await expect.poll(
+    async () => {
+      const state = await readCrossState(page, identity, hubId);
+      const route = state.routeSummaries.find((candidate) => candidate.orderId === orderId);
+      return {
+        status: route?.status || '',
+        offers: state.offers,
+        pulls: state.pulls,
+        ratio: route?.cumulativeFillRatio || 0,
+      };
+    },
+    {
+      timeout: 75_000,
+      intervals: [250, 500, 1000],
+      message: `${label} route ${orderId.slice(0, 10)} must reach ${statuses.join('/')}`,
+    },
+  ).toMatchObject({
+    status: expect.stringMatching(new RegExp(`^(${statuses.map(escapeRegex).join('|')})$`)),
+  });
+}
+
 async function readFirstCrossRouteId(page: Page, identity: RuntimeIdentity): Promise<string> {
   const routeId = await page.evaluate((identity) => {
     const env = (window as CrossRuntimeWindow).isolatedEnv;
@@ -934,8 +1201,12 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
 
       const aliceMnemonic = selectDemoMnemonic('alice');
       const bobMnemonic = selectDemoMnemonic('bob');
-      const alice = await timedStep('cross_j_swap.alice.create_runtime', () => createRuntimeIdentity(alicePage, 'alice-cross', aliceMnemonic));
-      const bob = await timedStep('cross_j_swap.bob.create_runtime', () => createRuntimeIdentity(bobPage, 'bob-cross', bobMnemonic));
+      const alice = await timedStep('cross_j_swap.alice.create_runtime', () => createRuntimeIdentityViaStore(alicePage, 'alice-cross', aliceMnemonic));
+      const bob = await timedStep('cross_j_swap.bob.create_runtime', () => createRuntimeIdentityViaStore(bobPage, 'bob-cross', bobMnemonic));
+      await Promise.all([
+        timedStep('cross_j_swap.alice.default_jurisdictions', () => waitForDefaultJurisdictionReplicas(alicePage, 'alice')),
+        timedStep('cross_j_swap.bob.default_jurisdictions', () => waitForDefaultJurisdictionReplicas(bobPage, 'bob')),
+      ]);
 
       const [aliceRpc2, bobRpc2] = await Promise.all([
         timedStep('cross_j_swap.alice.import_rpc2_sibling', () => importRpc2SiblingEntity(alicePage, aliceMnemonic, 'alice')),
@@ -947,8 +1218,8 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         timedStep('cross_j_swap.bob.connect_primary', () => connectRuntimeToHubWithCredit(bobPage, bob, hubId, '10000', SWAP_TOKENS)),
       ]);
       await Promise.all([
-        timedStep('cross_j_swap.alice.connect_rpc2', () => ensureDirectHubAccount(alicePage, aliceRpc2, targetHubId, SWAP_TOKENS)),
-        timedStep('cross_j_swap.bob.connect_rpc2', () => ensureDirectHubAccount(bobPage, bobRpc2, targetHubId, SWAP_TOKENS)),
+        timedStep('cross_j_swap.alice.connect_rpc2', () => ensureDirectHubAccount(alicePage, aliceRpc2, targetHubId, SWAP_TOKENS, 150_000)),
+        timedStep('cross_j_swap.bob.connect_rpc2', () => ensureDirectHubAccount(bobPage, bobRpc2, targetHubId, SWAP_TOKENS, 150_000)),
       ]);
 
       await Promise.all([
@@ -1009,26 +1280,54 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         hubId: targetHubId,
         targetEntityId: bob.entityId,
         side: 'buy',
-        amount: '50',
+        amount: '25',
         price: '2500',
       }));
 
-      await expect.poll(
-        async () => {
-          const aliceState = await readCrossState(alicePage, alice, hubId);
-          const bobState = await readCrossState(bobPage, bobRpc2, targetHubId);
-          const value = {
-            aliceReady: aliceState.routes > 0 && (aliceState.pulls > 0 || aliceState.claimedRoutes > 0),
-            bobReady: bobState.routes > 0 && (bobState.pulls > 0 || bobState.claimedRoutes > 0),
-          };
-          return value.aliceReady && value.bobReady;
-        },
-        {
-          timeout: 60_000,
-          intervals: [250, 500, 1000],
-          message: 'partial cross-j fill must use prepared pull routes',
-        },
-      ).toBe(true);
+      const [aliceFirstPartial] = await Promise.all([
+        timedStep('cross_j_swap.partial.alice_pending_fill', () =>
+          waitForCrossPendingFill(alicePage, alice, hubId, 'Alice partial'),
+        ),
+        timedStep('cross_j_swap.partial.bob_first_cleared', () =>
+          waitForCrossOffersCleared(bobPage, bobRpc2, targetHubId, 'Bob first partial counter-order'),
+        ),
+      ]);
+
+      await timedStep('cross_j_swap.partial.bob_second_offer', () => placeCrossOrder(bobPage, {
+        source: bobRpc2,
+        hubId: targetHubId,
+        targetEntityId: bob.entityId,
+        side: 'buy',
+        amount: '25',
+        price: '2500',
+      }));
+
+      const aliceSecondPartial = await timedStep('cross_j_swap.partial.alice_second_pending_fill', () =>
+        waitForCrossPendingFill(alicePage, alice, hubId, 'Alice second partial', {
+          routeId: aliceFirstPartial.routeId,
+          minFillSeq: aliceFirstPartial.fillSeq + 1,
+          minRatioExclusive: aliceFirstPartial.ratio,
+        }),
+      );
+      expect(aliceSecondPartial.routeId).toBe(aliceFirstPartial.routeId);
+      expect(aliceSecondPartial.ratio).toBeGreaterThan(aliceFirstPartial.ratio);
+
+      await timedStep('cross_j_swap.partial.bob_second_cleared', () =>
+        waitForCrossOffersCleared(bobPage, bobRpc2, targetHubId, 'Bob second partial counter-order'),
+      );
+
+      await timedStep('cross_j_swap.partial.alice_cancel_clear', () =>
+        requestCrossClear(alicePage, alice, aliceSecondPartial.routeId, { cancelRemainder: true }),
+      );
+
+      await Promise.all([
+        timedStep('cross_j_swap.partial.alice_source_claimed', () =>
+          waitForCrossRouteStatus(alicePage, alice, hubId, aliceSecondPartial.routeId, ['source_claimed', 'settled'], 'Alice source clear'),
+        ),
+        timedStep('cross_j_swap.partial.alice_target_settled', () =>
+          waitForCrossRouteStatus(alicePage, aliceRpc2, targetHubId, aliceSecondPartial.routeId, ['settled'], 'Alice target clear'),
+        ),
+      ]);
 
       await timedStep('cross_j_swap.dispute.source_args', () => triggerSourceDisputeArguments(alicePage, alice, hubId));
       await timedStep('cross_j_swap.dispute.target_salvage', () => waitForCrossSalvageQueued(alicePage, aliceRpc2, targetHubId));

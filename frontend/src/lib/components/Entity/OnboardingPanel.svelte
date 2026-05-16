@@ -9,7 +9,7 @@
   import { onMount } from 'svelte';
   import { createEventDispatcher } from 'svelte';
   import type { Env } from '@xln/runtime/xln-api';
-  import { enqueueEntityInputs, getEnv, xlnFunctions } from '../../stores/xlnStore';
+  import { enqueueEntityInputs, getEnv, resolveConfiguredApiBase, xlnFunctions } from '../../stores/xlnStore';
   import { activeRuntime } from '../../stores/vaultStore';
   import { entityAvatar } from '../../utils/avatar';
   import {
@@ -74,6 +74,17 @@
   };
 
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+  type PublicHubResponse = {
+    ok: boolean;
+    hubs?: Array<{
+      entityId?: string;
+      metadata?: {
+        isHub?: boolean;
+        jurisdiction?: { name?: string; chainId?: number | string; depositoryAddress?: string };
+      };
+    }>;
+  };
 
   type JurisdictionLike = {
     name?: unknown;
@@ -168,6 +179,7 @@
   function getHubEntityIds(currentEnv: Env): string[] {
     const discovered: string[] = [];
     const entityJurisdiction = getEntityJurisdictionKey(currentEnv, entityId);
+    if (!entityJurisdiction) return discovered;
     const add = (value: unknown) => {
       const id = String(value || '').trim();
       if (!id) return;
@@ -187,6 +199,35 @@
     return discovered;
   }
 
+  async function fetchPublicHubEntityIds(currentEnv: Env): Promise<string[]> {
+    if (typeof window === 'undefined') return [];
+    const entityJurisdiction = getEntityJurisdictionKey(currentEnv, entityId);
+    if (!entityJurisdiction) return [];
+    const controller = new AbortController();
+    const timer = setTimeout(() => controller.abort(), 2000);
+    try {
+      const apiBase = resolveConfiguredApiBase(window.location.origin);
+      const url = new URL('/api/hubs', apiBase);
+      url.searchParams.set('ts', String(Date.now()));
+      const response = await fetch(url.toString(), { cache: 'no-store', signal: controller.signal });
+      if (!response.ok) return [];
+      const payload = await response.json() as PublicHubResponse;
+      const out: string[] = [];
+      for (const hub of payload.hubs || []) {
+        if (!hub?.entityId || hub.metadata?.isHub !== true) continue;
+        if (jurisdictionKey(hub.metadata?.jurisdiction) !== entityJurisdiction) continue;
+        const normalized = normalizeEntityId(hub.entityId);
+        if (!normalized || normalized === normalizeEntityId(entityId)) continue;
+        if (!out.some(existing => normalizeEntityId(existing) === normalized)) out.push(hub.entityId);
+      }
+      return out;
+    } catch {
+      return [];
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+
   async function queueAutoHubJoins(joinCount: number): Promise<number> {
     if (joinCount <= 0 || !entityId || !signerId) return 0;
 
@@ -199,7 +240,12 @@
       while (Date.now() - startedAt < timeoutMs) {
         const currentEnv = getEnv();
         if (currentEnv) {
-          const currentCandidates = shuffle(getHubEntityIds(currentEnv))
+          const ids = [
+            ...getHubEntityIds(currentEnv),
+            ...await fetchPublicHubEntityIds(currentEnv),
+          ];
+          const uniqueIds = Array.from(new Map(ids.map(id => [normalizeEntityId(id), id])).values());
+          const currentCandidates = shuffle(uniqueIds)
             .filter((hubId) => !hasCounterpartyAccount(currentEnv, entityId, hubId));
           if (currentCandidates.length > best.length) best = currentCandidates;
           if (currentCandidates.length >= joinCount) return currentCandidates.slice(0, joinCount);
