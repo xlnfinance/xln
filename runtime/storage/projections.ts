@@ -1,6 +1,13 @@
 import { rebuildOrderbookPairIndex, type BookState, type OrderbookExtState } from '../orderbook';
 import type { AccountMachine, EntityReplica, EntityState } from '../types';
-import { stripCrossJurisdictionPrivateData } from '../cross-jurisdiction';
+import {
+  stripCrossJurisdictionAccountFramePrivateData,
+  stripCrossJurisdictionAccountInputPrivateData,
+  stripCrossJurisdictionAccountTxPrivateData,
+  stripCrossJurisdictionPrivateData,
+  stripCrossJurisdictionSwapHistoryPrivateData,
+  stripCrossJurisdictionSwapOfferPrivateData,
+} from '../cross-jurisdiction';
 import { encodeBuffer } from './codec';
 import { DEFAULT_ACCOUNT_MERKLE_RADIX, normalizeEntityId } from './keys';
 import { buildHexKeyedMerkle, type RadixMerkleRadix } from './merkle';
@@ -11,6 +18,20 @@ const withProp = <K extends string, V>(key: K, value: V | undefined): Partial<Re
 
 const publicCrossJurisdictionSwaps = (swaps: EntityState['crossJurisdictionSwaps']): EntityState['crossJurisdictionSwaps'] | undefined =>
   swaps ? new Map(Array.from(swaps.entries()).map(([id, route]) => [id, stripCrossJurisdictionPrivateData({ ...route })])) : undefined;
+
+const publicSwapOffers = (offers: AccountMachine['swapOffers']): AccountMachine['swapOffers'] =>
+  new Map(Array.from((offers ?? new Map()).entries()).map(([id, offer]) => [
+    id,
+    stripCrossJurisdictionSwapOfferPrivateData(offer),
+  ]));
+
+const publicSwapHistory = (history: AccountMachine['swapOrderHistory']): AccountMachine['swapOrderHistory'] =>
+  history instanceof Map
+    ? new Map(Array.from(history.entries()).map(([id, entry]) => [
+        id,
+        stripCrossJurisdictionSwapHistoryPrivateData(entry),
+      ]))
+    : history;
 
 export const projectEntityCoreDoc = (
   state: EntityState,
@@ -81,11 +102,11 @@ const projectAccountDocFull = (account: AccountMachine): StorageAccountDoc => ({
   leftEntity: account.leftEntity,
   rightEntity: account.rightEntity,
   status: account.status,
-  mempool: account.mempool,
-  currentFrame: account.currentFrame,
+  mempool: account.mempool.map(stripCrossJurisdictionAccountTxPrivateData),
+  currentFrame: stripCrossJurisdictionAccountFramePrivateData(account.currentFrame),
   deltas: account.deltas,
   locks: account.locks,
-  swapOffers: account.swapOffers,
+  swapOffers: publicSwapOffers(account.swapOffers),
   pulls: account.pulls,
   globalCreditLimits: account.globalCreditLimits,
   currentHeight: account.currentHeight,
@@ -103,8 +124,8 @@ const projectAccountDocFull = (account: AccountMachine): StorageAccountDoc => ({
   requestedRebalance: account.requestedRebalance,
   requestedRebalanceFeeState: account.requestedRebalanceFeeState,
   rebalancePolicy: account.rebalancePolicy,
-  ...withProp('pendingFrame', account.pendingFrame),
-  ...withProp('pendingAccountInput', account.pendingAccountInput),
+  ...withProp('pendingFrame', account.pendingFrame ? stripCrossJurisdictionAccountFramePrivateData(account.pendingFrame) : undefined),
+  ...withProp('pendingAccountInput', account.pendingAccountInput ? stripCrossJurisdictionAccountInputPrivateData(account.pendingAccountInput) : undefined),
   ...withProp('lastRollbackFrameHash', account.lastRollbackFrameHash),
   ...withProp('abiProofBody', account.abiProofBody),
   ...withProp('currentFrameHanko', account.currentFrameHanko),
@@ -122,8 +143,8 @@ const projectAccountDocFull = (account: AccountMachine): StorageAccountDoc => ({
   ...withProp('disputeProofBodiesByHash', account.disputeProofBodiesByHash),
   ...withProp('settlementWorkspace', account.settlementWorkspace),
   ...withProp('activeDispute', account.activeDispute),
-  ...withProp('swapOrderHistory', account.swapOrderHistory),
-  ...withProp('swapClosedOrders', account.swapClosedOrders),
+  ...withProp('swapOrderHistory', publicSwapHistory(account.swapOrderHistory)),
+  ...withProp('swapClosedOrders', publicSwapHistory(account.swapClosedOrders)),
   ...withProp('counterpartyRebalanceFeePolicy', account.counterpartyRebalanceFeePolicy),
   ...withProp('activeRebalanceQuote', account.activeRebalanceQuote),
   ...withProp('pendingRebalanceRequest', account.pendingRebalanceRequest),

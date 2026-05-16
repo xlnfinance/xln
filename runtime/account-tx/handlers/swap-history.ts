@@ -4,6 +4,7 @@ import type {
   SwapOrderHistoryEntry,
   SwapOrderResolveHistoryEntry,
 } from '../../types';
+import { stripCrossJurisdictionPrivateData } from '../../cross-jurisdiction';
 
 function ensureSwapOrderHistory(accountMachine: AccountMachine): Map<string, SwapOrderHistoryEntry> {
   if (!(accountMachine.swapOrderHistory instanceof Map)) {
@@ -33,7 +34,7 @@ export function recordSwapOfferLifecycle(
     wantAmount: offer.wantAmount,
     ...(offer.priceTicks !== undefined ? { priceTicks: offer.priceTicks } : {}),
     createdHeight: offer.createdHeight,
-    ...(offer.crossJurisdiction ? { crossJurisdiction: offer.crossJurisdiction } : {}),
+    ...(offer.crossJurisdiction ? { crossJurisdiction: stripCrossJurisdictionPrivateData({ ...offer.crossJurisdiction }) } : {}),
     cancelRequested: false,
     lastUpdatedHeight: offer.createdHeight,
     resolves: [],
