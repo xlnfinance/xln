@@ -56,10 +56,10 @@ import { getRuntimeJurisdictionHeight, requireRuntimeJurisdictionDisputeDelayMs 
 import {
 	buildCrossJurisdictionPullReveal,
 	buildPreparedCrossJurisdictionRoute,
-	compareCrossJurisdictionRouteStatus,
 	getCrossJurisdictionPrivateSeed,
 	isCrossJurisdictionPullExpired,
 	isCrossJurisdictionRouteExpired,
+	isCrossJurisdictionRouteTransitionAllowed,
 	isCrossJurisdictionTerminalStatus,
 	rememberCrossJurisdictionPrivateSeed,
 	stripCrossJurisdictionPrivateData,
@@ -190,10 +190,25 @@ const validateCrossJurisdictionRouteTransition = (
   if (isCrossJurisdictionTerminalStatus(existing.status)) {
     return `terminal state ${existing.status}`;
   }
-  if (compareCrossJurisdictionRouteStatus(existing.status, next.status) < 0) {
-    return `non-monotonic transition ${existing.status}->${next.status}`;
+  if (!isCrossJurisdictionRouteTransitionAllowed(existing.status, next.status)) {
+    return `invalid transition ${existing.status}->${next.status}`;
   }
   return null;
+};
+
+const isCrossJurisdictionRouteParticipant = (
+  entityId: string,
+  route: CrossJurisdictionSwapRoute,
+): boolean => {
+  const current = normalizeEntityRef(entityId);
+  return [
+    route.source.entityId,
+    route.source.counterpartyEntityId,
+    route.target.entityId,
+    route.target.counterpartyEntityId,
+    route.bookOwnerEntityId,
+    route.hubEntityId,
+  ].some(candidate => candidate && normalizeEntityRef(candidate) === current);
 };
 
 const accountHasPullResolveQueued = (
@@ -1692,6 +1707,10 @@ export const applyEntityTx = async (
         addMessage(newState, `❌ Cross-j register invalid route: ${error instanceof Error ? error.message : String(error)}`);
         return { newState, outputs: [] };
       }
+      if (!isCrossJurisdictionRouteParticipant(newState.entityId, route)) {
+        addMessage(newState, `❌ Cross-j register ${route.orderId} routed to non-participant entity`);
+        return { newState, outputs: [] };
+      }
       newState.crossJurisdictionSwaps ||= new Map();
       const existing = newState.crossJurisdictionSwaps.get(route.orderId);
       const transitionError = validateCrossJurisdictionRouteTransition(existing, route);
@@ -2018,7 +2037,9 @@ export const applyEntityTx = async (
         addMessage(newState, `❌ Cross-j salvage ${routeId} blocked: no target account with ${targetHubEntityId.slice(-4)}`);
         return { newState, outputs };
       }
-      route.updatedAt = newState.timestamp;
+      route.status = 'clearing';
+      route.pendingClearRequestedAt = deterministicEntityTimestamp(newState, env);
+      route.updatedAt = newState.timestamp || env.timestamp;
       newState.crossJurisdictionSwaps ||= new Map();
       newState.crossJurisdictionSwaps.set(route.orderId, route);
       const firstValidator = entityState.config.validators[0];
