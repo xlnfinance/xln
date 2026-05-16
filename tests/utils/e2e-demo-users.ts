@@ -456,6 +456,7 @@ export async function gotoApp(
   const appBaseUrl = options.appBaseUrl ?? APP_BASE_URL;
   const initTimeoutMs = options.initTimeoutMs ?? DEFAULT_INIT_TIMEOUT;
   const settleMs = options.settleMs ?? 500;
+  const navigationTimeoutMs = Math.max(15_000, initTimeoutMs);
   // Browser flows must stay same-origin in E2E and go through the preview /api proxy.
   // Directly injecting the raw shard API URL into the page makes browser-only paths
   // diverge from production and can bypass normal origin/proxy behavior.
@@ -524,9 +525,9 @@ export async function gotoApp(
     }
     const attemptUrl = page.url();
     if (attemptUrl.includes('/app')) {
-      await page.reload({ waitUntil: 'domcontentloaded' });
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: navigationTimeoutMs });
     } else {
-      await page.goto(`${appBaseUrl}/app`, { waitUntil: 'domcontentloaded' });
+      await page.goto(`${appBaseUrl}/app`, { waitUntil: 'commit', timeout: navigationTimeoutMs });
     }
     if (await waitForAppReady()) {
       if (settleMs > 0) await page.waitForTimeout(settleMs);
