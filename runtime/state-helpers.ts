@@ -20,7 +20,14 @@ import { safeStringify } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
 import { getAccountFrameHistoryView, setAccountFrameHistoryView } from './env-events';
 import { cloneJBatch, type CompletedBatch, type JBatchState } from './j-batch';
-import { stripCrossJurisdictionPrivateData } from './cross-jurisdiction';
+import {
+  stripCrossJurisdictionAccountFramePrivateData,
+  stripCrossJurisdictionAccountTxPrivateData,
+  stripCrossJurisdictionAccountInputPrivateData,
+  stripCrossJurisdictionPrivateData,
+  stripCrossJurisdictionSwapHistoryPrivateData,
+  stripCrossJurisdictionSwapOfferPrivateData,
+} from './cross-jurisdiction';
 import type { CrontabState, ScheduledHook } from './crontab-types';
 import type { Profile } from './networking/gossip';
 import type {
@@ -40,6 +47,35 @@ const stripCrossJurisdictionRoutePrivateDataFromState = (state: EntityState): vo
       stripCrossJurisdictionPrivateData({ ...route }),
     ]),
   );
+};
+
+const stripCrossJurisdictionRoutePrivateDataFromAccount = (account: AccountMachine): void => {
+  account.mempool = account.mempool.map(stripCrossJurisdictionAccountTxPrivateData);
+  account.currentFrame = stripCrossJurisdictionAccountFramePrivateData(account.currentFrame);
+  if (account.pendingFrame) account.pendingFrame = stripCrossJurisdictionAccountFramePrivateData(account.pendingFrame);
+  if (account.pendingAccountInput) account.pendingAccountInput = stripCrossJurisdictionAccountInputPrivateData(account.pendingAccountInput);
+  account.swapOffers = new Map(
+    Array.from((account.swapOffers ?? new Map()).entries()).map(([id, offer]) => [
+      id,
+      stripCrossJurisdictionSwapOfferPrivateData(offer),
+    ]),
+  );
+  if (account.swapOrderHistory instanceof Map) {
+    account.swapOrderHistory = new Map(
+      Array.from(account.swapOrderHistory.entries()).map(([id, entry]) => [
+        id,
+        stripCrossJurisdictionSwapHistoryPrivateData(entry),
+      ]),
+    );
+  }
+  if (account.swapClosedOrders instanceof Map) {
+    account.swapClosedOrders = new Map(
+      Array.from(account.swapClosedOrders.entries()).map(([id, entry]) => [
+        id,
+        stripCrossJurisdictionSwapHistoryPrivateData(entry),
+      ]),
+    );
+  }
 };
 
 // Message size limit for snapshot efficiency
@@ -293,6 +329,9 @@ export function cloneEntityState(entityState: EntityState, forSnapshot: boolean 
       cloned.jBatchState = cloneJBatchState(entityState.jBatchState);
     }
     stripCrossJurisdictionRoutePrivateDataFromState(cloned);
+    for (const account of cloned.accounts.values()) {
+      stripCrossJurisdictionRoutePrivateDataFromAccount(account);
+    }
 
     // VALIDATE AT SOURCE: Guarantee type safety from this point forward
     return validateEntityState(cloned, 'cloneEntityState.structuredClone');
@@ -551,6 +590,7 @@ export function cloneAccountMachine(account: AccountMachine, forSnapshot: boolea
   try {
     const cloned = structuredClone(account);
     setAccountFrameHistoryView(cloned, getAccountFrameHistoryView(account));
+    stripCrossJurisdictionRoutePrivateDataFromAccount(cloned);
     return cloned;
   } catch (error) {
     if (HEAVY_LOGS) {
@@ -789,5 +829,6 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
     );
   }
 
+  stripCrossJurisdictionRoutePrivateDataFromAccount(result);
   return result;
 }
