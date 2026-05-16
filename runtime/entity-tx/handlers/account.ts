@@ -55,9 +55,43 @@ import { assertSameJurisdictionAccount } from '../../jurisdiction-runtime';
 import {
   validateCrossJurisdictionFillProgress,
   withCrossJurisdictionFillProgress,
+  isCrossJurisdictionTerminalStatus,
 } from '../../cross-jurisdiction';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
+
+const clampCrossJurisdictionFillRatio = (value: unknown): number =>
+  Math.max(0, Math.min(MAX_SWAP_FILL_RATIO, Math.floor(Number(value) || 0)));
+
+const committedCrossJurisdictionRatio = (route: CrossJurisdictionSwapRoute): number =>
+  Math.max(clampCrossJurisdictionFillRatio(route.cumulativeFillRatio), clampCrossJurisdictionFillRatio(route.claimedRatio));
+
+const assertCrossJurisdictionPullResolveAllowed = (
+  route: CrossJurisdictionSwapRoute,
+  fillRatio: number,
+  leg: 'source' | 'target',
+): void => {
+  if (fillRatio <= 0) return;
+  if (isCrossJurisdictionTerminalStatus(route.status)) {
+    throw new Error(`CROSS_J_PULL_RESOLVE_STATE_INVALID: route=${route.orderId} status=${route.status}`);
+  }
+  if (leg === 'source' && route.status !== 'clearing' && route.status !== 'clear_requested') {
+    throw new Error(`CROSS_J_PULL_RESOLVE_STATE_INVALID: route=${route.orderId} leg=source status=${route.status}`);
+  }
+  if (leg === 'target' && route.status !== 'clearing' && route.status !== 'source_claimed') {
+    throw new Error(`CROSS_J_PULL_RESOLVE_STATE_INVALID: route=${route.orderId} leg=target status=${route.status}`);
+  }
+  const committedRatio = committedCrossJurisdictionRatio(route);
+  if (leg === 'source' && committedRatio <= 0) {
+    throw new Error(`CROSS_J_PULL_RESOLVE_NO_COMMITTED_FILL: route=${route.orderId}`);
+  }
+  if (committedRatio > 0 && fillRatio > committedRatio) {
+    throw new Error(
+      `CROSS_J_PULL_RESOLVE_OVER_COMMITTED: route=${route.orderId} ` +
+      `ratio=${fillRatio} committed=${committedRatio}`,
+    );
+  }
+};
 const getJurisdictionId = (state: EntityState, env: Env): string => {
   return String(state.config?.jurisdiction?.name || env.activeJurisdiction || '').trim();
 };
@@ -181,6 +215,8 @@ type SwapResolveEnqueueData = {
   restingQuantizedWant?: bigint;
 };
 
+type CrossSwapFillAckTx = Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;
+
 function hasQueuedSwapResolveForEntityState(
   hubState: EntityState,
   queuedSwapResolutions: Set<string>,
@@ -207,6 +243,23 @@ function hasQueuedCrossSwapAckForEntityState(
   if ((accountMachine.mempool ?? []).some((tx) => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId)) return true;
   if ((accountMachine.pendingFrame?.accountTxs ?? []).some((tx) => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId)) return true;
   return false;
+}
+
+function findQueuedCrossSwapAckForEntityState(
+  hubState: EntityState,
+  accountId: string,
+  offerId: string,
+): CrossSwapFillAckTx | null {
+  const accountMachine = hubState.accounts.get(accountId);
+  if (!accountMachine) return null;
+  const mempoolAck = (accountMachine.mempool ?? []).find(
+    (tx): tx is CrossSwapFillAckTx => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId,
+  );
+  if (mempoolAck) return mempoolAck;
+  const pendingAck = (accountMachine.pendingFrame?.accountTxs ?? []).find(
+    (tx): tx is CrossSwapFillAckTx => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId,
+  );
+  return pendingAck ?? null;
 }
 
 function queueUniqueSwapResolveForEntityState(
@@ -582,6 +635,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                   normalizeEntityRef(route.source.entityId) === normalizeEntityRef(newState.entityId) &&
                   normalizeEntityRef(route.source.counterpartyEntityId) === normalizeEntityRef(counterpartyId);
                 if (isSourceResolve) {
+                  assertCrossJurisdictionPullResolveAllowed(route, fillRatio, 'source');
                   const targetPull = route.targetPull;
                   if (!targetPull) continue;
                   const targetEntityTxs: EntityTx[] = [{
@@ -631,6 +685,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                   normalizeEntityRef(route.target.counterpartyEntityId) === normalizeEntityRef(newState.entityId) &&
                   normalizeEntityRef(route.target.entityId) === normalizeEntityRef(counterpartyId)
                 ) {
+                  assertCrossJurisdictionPullResolveAllowed(route, fillRatio, 'target');
                   route.claimedRatio = Math.max(Number(route.claimedRatio || 0), fillRatio);
                   route.cumulativeFillRatio = Math.max(Number(route.cumulativeFillRatio || 0), fillRatio);
                   route.sourceClaimed = (BigInt(route.source.amount) * BigInt(route.claimedRatio)) / 65_535n;
@@ -1710,6 +1765,7 @@ export function processOrderbookSwaps(
 
   const crossLiveOfferMeta = new Map<string, CrossMarketOffer>();
   const assertedCrossJurisdictionPairs = new Set<string>();
+  const crossPairsBlockedByPendingAck = new Set<string>();
 
   const refreshExistingCrossBookOrder = (
     pairId: string,
@@ -1759,23 +1815,41 @@ export function processOrderbookSwaps(
 
     for (const order of book.orders.values()) {
       const orderId = order.orderId;
-      const meta = crossLiveOfferMeta.get(orderId) ?? buildCrossMarketOfferFromBookOrder(orderId);
-      if (!meta) {
-        throw new Error(`ORDERBOOK_CROSS_J_ORPHAN_BOOK_ORDER: pair=${pairId} order=${orderId}`);
-      }
-
       const lastColon = orderId.lastIndexOf(':');
       if (lastColon === -1) {
         throw new Error(`ORDERBOOK_CROSS_J_MALFORMED_BOOK_ORDER: pair=${pairId} order=${orderId}`);
       }
       const accountId = orderId.slice(0, lastColon);
       const offerId = orderId.slice(lastColon + 1);
-      if (hasQueuedCrossSwapAckForEntityState(hubState, accountId, offerId)) {
-        throw new Error(`ORDERBOOK_CROSS_J_PENDING_ACK_STILL_IN_BOOK: pair=${pairId} order=${orderId}`);
+      const pendingAck = findQueuedCrossSwapAckForEntityState(hubState, accountId, offerId);
+      const meta = crossLiveOfferMeta.get(orderId) ?? buildCrossMarketOfferFromBookOrder(orderId);
+      if (!meta) {
+        if (pendingAck) {
+          crossPairsBlockedByPendingAck.add(pairId);
+          continue;
+        }
+        throw new Error(`ORDERBOOK_CROSS_J_ORPHAN_BOOK_ORDER: pair=${pairId} order=${orderId}`);
       }
 
       crossLiveOfferMeta.set(orderId, meta);
       const canonicalQtyLots = meta.baseAmount / SWAP_LOT_SCALE;
+      if (pendingAck) {
+        const pendingRatio = Math.max(
+          0,
+          Math.min(MAX_SWAP_FILL_RATIO, Math.floor(Number(pendingAck.data.cumulativeFillRatio ?? 0) || 0)),
+        );
+        if (pendingAck.data.cancelRemainder || pendingRatio >= MAX_SWAP_FILL_RATIO) {
+          throw new Error(`ORDERBOOK_CROSS_J_PENDING_TERMINAL_ACK_STILL_IN_BOOK: pair=${pairId} order=${orderId}`);
+        }
+        if (BigInt(order.qtyLots) > canonicalQtyLots) {
+          throw new Error(
+            `ORDERBOOK_CROSS_J_PENDING_ACK_QTY_INVALID: pair=${pairId} order=${orderId} ` +
+            `storedQty=${order.qtyLots.toString()} canonicalQty=${canonicalQtyLots.toString()}`,
+          );
+        }
+        crossPairsBlockedByPendingAck.add(pairId);
+        continue;
+      }
       if (
         meta.pairId !== pairId ||
         order.priceTicks !== meta.priceTicks ||
@@ -1835,6 +1909,12 @@ export function processOrderbookSwaps(
 
       const currentNamespacedOrderId = swapKey(currentAccountId, rawOffer.offerId);
       crossLiveOfferMeta.set(currentNamespacedOrderId, marketOffer);
+      if (crossPairsBlockedByPendingAck.has(marketOffer.pairId)) {
+        console.log(
+          `🌉 ORDERBOOK CROSS-J: pair ${marketOffer.pairId} waiting for pending fill ack before matching ${rawOffer.offerId.slice(-8)}`,
+        );
+        continue;
+      }
       if (hasQueuedSwapResolveForEntityState(hubState, queuedSwapResolutions, currentAccountId, rawOffer.offerId)) {
         continue;
       }
@@ -2378,16 +2458,23 @@ export function processOrderbookCancels(
 
     const namespacedOrderId = `${accountId}:${offerId}`;
     let orderbookCancelled = false;
-    let duplicateCount = 0;
+    const matchingBooks: Array<{ bookKey: string; book: BookState; ownerId: string }> = [];
 
     for (const bookKey of getOrderbookPairsForOrder(ext, namespacedOrderId)) {
       const book = ext.books.get(bookKey);
       if (!book) continue;
       const existingOrder = getBookOrder(book, namespacedOrderId);
       if (!existingOrder) continue;
-      duplicateCount += 1;
-      const ownerId = existingOrder.ownerId;
+      matchingBooks.push({ bookKey, book, ownerId: existingOrder.ownerId });
+    }
 
+    if (matchingBooks.length > 1) {
+      throw new Error(
+        `ORDERBOOK_DUPLICATE_BOOK_ORDER: order=${namespacedOrderId} matches=${matchingBooks.length}`,
+      );
+    }
+
+    for (const { bookKey, book, ownerId } of matchingBooks) {
       const result = applyCommand(book, {
         kind: 1,  // CANCEL command - only needs ownerId and orderId
         ownerId,
@@ -2397,12 +2484,6 @@ export function processOrderbookCancels(
       bookUpdates.push({ pairId: bookKey, book: result.state });
       console.log(`📊 ORDERBOOK: Cancelled order ${offerId.slice(-8)}`);
       orderbookCancelled = true;
-    }
-
-    if (duplicateCount > 1) {
-      console.error(
-        `❌ ORDERBOOK: duplicate order ids across pair books order=${namespacedOrderId} matches=${duplicateCount}`,
-      );
     }
 
     const offer = accountMachine?.swapOffers?.get(offerId);

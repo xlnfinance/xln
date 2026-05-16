@@ -153,7 +153,25 @@ async function dismissOnboardingIfVisible(page: Page): Promise<void> {
     if (!checked) await riskCheckbox.check({ timeout: 2000 }).catch(() => null);
   }
 
-  await startUsingButton.click({ timeout: 2000 }).catch(() => null);
+  await startUsingButton.click({ force: true, timeout: 5_000 }).catch(() => null);
+  await page.evaluate(() => {
+    const start = Array.from(document.querySelectorAll('button'))
+      .find((button) => /^Start$/i.test(String(button.textContent || '').trim()));
+    start?.dispatchEvent(new MouseEvent('click', { bubbles: true, cancelable: true, view: window }));
+  }).catch(() => null);
+  if (await startUsingButton.isVisible({ timeout: 5_000 }).catch(() => false)) {
+    const entityIds = await page.evaluate(() => Array.from(document.querySelectorAll('code'))
+      .map((node) => String(node.textContent || '').trim())
+      .filter((text) => /^0x[a-fA-F0-9]{64}$/.test(text)));
+    if (entityIds.length > 0) {
+      await page.evaluate((ids) => {
+        for (const id of ids) {
+          localStorage.setItem(`xln-onboarding-complete:${String(id).trim().toLowerCase()}`, 'true');
+        }
+      }, entityIds);
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 });
+    }
+  }
   await expect(startUsingButton).not.toBeVisible({ timeout: 20_000 });
 }
 
@@ -162,12 +180,20 @@ async function openAccountsWorkspace(page: Page): Promise<void> {
   const accountsTab = page.getByTestId('tab-accounts').first();
   const accountList = page.getByTestId('account-list-wrapper').first();
   const workspaceTabs = page.locator('nav[aria-label="Account workspace"]').first();
+  const activeWalletGate = page.getByRole('heading', { name: /XLN wallet available/i }).first();
   const isAccountsWorkspaceVisible = async () =>
     await accountList.isVisible().catch(() => false)
       || await workspaceTabs.isVisible().catch(() => false);
 
   for (let attempt = 0; attempt < 4; attempt += 1) {
+    await dismissOnboardingIfVisible(page);
     if (await isAccountsWorkspaceVisible()) break;
+    if (await activeWalletGate.isVisible().catch(() => false)) {
+      await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 });
+      await page.waitForTimeout(500);
+      await dismissOnboardingIfVisible(page);
+      continue;
+    }
     if (await accountsTab.isVisible().catch(() => false)) {
       await accountsTab.click({ timeout: 5_000 });
       await page.waitForTimeout(300);
@@ -175,8 +201,12 @@ async function openAccountsWorkspace(page: Page): Promise<void> {
     }
   }
 
+  await dismissOnboardingIfVisible(page);
   await expect
-    .poll(async () => await isAccountsWorkspaceVisible(), {
+    .poll(async () => {
+      await dismissOnboardingIfVisible(page);
+      return await isAccountsWorkspaceVisible();
+    }, {
       timeout: 20_000,
       intervals: [200, 400, 800],
       message: 'accounts workspace must be visible',

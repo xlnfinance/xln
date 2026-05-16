@@ -99,7 +99,7 @@
       const chainId = String(jurisdiction.chainId ?? '').trim();
       const depository = String(jurisdiction.depositoryAddress ?? '').trim().toLowerCase();
       if (chainId && depository) return `dep:${chainId}:${depository}`;
-      if (chainId) return `chain:${chainId}`;
+      if (chainId) return '';
       return normalizeJurisdiction(jurisdiction.name);
     }
     return normalizeJurisdiction(value);

@@ -56,6 +56,8 @@ import { getRuntimeJurisdictionHeight, requireRuntimeJurisdictionDisputeDelayMs 
 import {
 	buildCrossJurisdictionPullReveal,
 	buildPreparedCrossJurisdictionRoute,
+	deriveCanonicalCrossJurisdictionBookOwner,
+	deriveCanonicalCrossJurisdictionVenueId,
 	getCrossJurisdictionPrivateSeed,
 	isCrossJurisdictionPullExpired,
 	isCrossJurisdictionRouteExpired,
@@ -66,7 +68,7 @@ import {
 	validateCrossJurisdictionFillProgress,
 	withCanonicalCrossJurisdictionRouteHash,
 } from '../cross-jurisdiction';
-import { decodeHashLadderBinary } from '../hashladder';
+import { decodeHashLadderBinary, verifyHashLadderBinary } from '../hashladder';
 import { handleR2C } from './handlers/r2c';
 import { handleE2R } from './handlers/e2r';
 import { handleR2R } from './handlers/r2r';
@@ -85,9 +87,11 @@ import {
 } from './handlers/settle';
 import { handleDisputeFinalize, handleDisputeStart } from './handlers/dispute';
 import { buildCrossJurisdictionCancelAck } from '../cross-jurisdiction-orderbook';
-import { assertSameJurisdictionAccount } from '../jurisdiction-runtime';
+import { assertSameJurisdictionAccount, requireRuntimeJurisdictionConfigByName } from '../jurisdiction-runtime';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
+const normalizeAddress = (value: unknown): string => String(value || '').trim().toLowerCase();
+const normalizeJurisdictionLabel = (value: unknown): string => String(value || '').trim().toLowerCase();
 const deterministicEntityTimestamp = (state: EntityState, env: Env): number =>
   Number(state.timestamp || env.timestamp || 0);
 const cancelOrderbookOfferIfPresent = (
@@ -178,12 +182,46 @@ const mergeCrossJurisdictionRoute = (
   };
 };
 
+const sameCrossJurisdictionIntentTerms = (
+  existing: CrossJurisdictionSwapRoute,
+  next: CrossJurisdictionSwapRoute,
+): boolean => {
+  const sameBigInt = (left: unknown, right: unknown): boolean => {
+    try {
+      return BigInt(left as any) === BigInt(right as any);
+    } catch {
+      return false;
+    }
+  };
+  return (
+    String(existing.orderId || '') === String(next.orderId || '') &&
+    normalizeEntityRef(existing.makerEntityId) === normalizeEntityRef(next.makerEntityId) &&
+    normalizeEntityRef(existing.source.entityId) === normalizeEntityRef(next.source.entityId) &&
+    normalizeEntityRef(existing.source.counterpartyEntityId) === normalizeEntityRef(next.source.counterpartyEntityId) &&
+    normalizeEntityRef(existing.target.entityId) === normalizeEntityRef(next.target.entityId) &&
+    normalizeEntityRef(existing.target.counterpartyEntityId) === normalizeEntityRef(next.target.counterpartyEntityId) &&
+    Number(existing.source.tokenId) === Number(next.source.tokenId) &&
+    Number(existing.target.tokenId) === Number(next.target.tokenId) &&
+    sameBigInt(existing.source.amount, next.source.amount) &&
+    sameBigInt(existing.target.amount, next.target.amount) &&
+    sameBigInt(existing.priceTicks ?? 0n, next.priceTicks ?? 0n) &&
+    Number(existing.expiresAt ?? 0) === Number(next.expiresAt ?? 0) &&
+    String(existing.riskMode || '') === String(next.riskMode || '')
+  );
+};
+
 const validateCrossJurisdictionRouteTransition = (
   existing: CrossJurisdictionSwapRoute | undefined,
   next: CrossJurisdictionSwapRoute,
 ): string | null => {
   if (!existing) return null;
   if (existing.routeHash && next.routeHash && existing.routeHash.toLowerCase() !== next.routeHash.toLowerCase()) {
+    const preparedIntentCommit =
+      existing.status === 'intent' &&
+      Boolean(next.sourcePull && next.targetPull) &&
+      (next.status === 'resting' || next.status === 'target_prepared' || next.status === 'source_committed') &&
+      sameCrossJurisdictionIntentTerms(existing, next);
+    if (preparedIntentCommit) return null;
     return 'route hash mismatch';
   }
   if (isCrossJurisdictionTerminalStatus(existing.status)) {
@@ -208,6 +246,116 @@ const isCrossJurisdictionRouteParticipant = (
     route.bookOwnerEntityId,
     route.hubEntityId,
   ].some(candidate => candidate && normalizeEntityRef(candidate) === current);
+};
+
+const findKnownEntityJurisdictionName = (
+  env: Env,
+  state: EntityState,
+  entityId: string,
+): string => {
+  const target = normalizeEntityRef(entityId);
+  if (normalizeEntityRef(state.entityId) === target) {
+    return String(state.config?.jurisdiction?.name || '').trim();
+  }
+  for (const replica of env.eReplicas?.values?.() || []) {
+    const candidate = normalizeEntityRef(replica?.state?.entityId || replica?.entityId || '');
+    if (candidate === target) {
+      return String(replica?.state?.config?.jurisdiction?.name || '').trim();
+    }
+  }
+  return '';
+};
+
+const canonicalizeCrossJurisdictionRouteForKnownEntities = (
+  env: Env,
+  state: EntityState,
+  route: CrossJurisdictionSwapRoute,
+): CrossJurisdictionSwapRoute => {
+  if (route.routeHash && (route.sourcePull || route.targetPull)) {
+    return route;
+  }
+  const sourceJurisdiction =
+    findKnownEntityJurisdictionName(env, state, route.source.counterpartyEntityId) ||
+    findKnownEntityJurisdictionName(env, state, route.source.entityId);
+  const targetJurisdiction =
+    findKnownEntityJurisdictionName(env, state, route.target.entityId) ||
+    findKnownEntityJurisdictionName(env, state, route.target.counterpartyEntityId);
+  const sourceChanged = Boolean(sourceJurisdiction && sourceJurisdiction !== route.source.jurisdiction);
+  const targetChanged = Boolean(targetJurisdiction && targetJurisdiction !== route.target.jurisdiction);
+  if (!sourceChanged && !targetChanged) return route;
+  const { routeHash: _staleRouteHash, venueId: _staleVenueId, bookOwnerEntityId: _staleBookOwner, hubEntityId: _staleHub, ...rest } = route;
+  const canonicalRoute: CrossJurisdictionSwapRoute = {
+    ...rest,
+    hubEntityId: route.hubEntityId,
+    source: sourceChanged ? { ...route.source, jurisdiction: sourceJurisdiction } : route.source,
+    target: targetChanged ? { ...route.target, jurisdiction: targetJurisdiction } : route.target,
+  };
+  const bookOwnerEntityId = deriveCanonicalCrossJurisdictionBookOwner(canonicalRoute);
+  return {
+    ...canonicalRoute,
+    bookOwnerEntityId,
+    hubEntityId: bookOwnerEntityId,
+    venueId: deriveCanonicalCrossJurisdictionVenueId(canonicalRoute),
+  };
+};
+
+const jurisdictionIdentityKey = (jurisdiction: { name?: string; chainId?: number; depositoryAddress?: string } | undefined | null): string => {
+  if (!jurisdiction) return '';
+  const chainId = Number(jurisdiction.chainId ?? 0);
+  const depository = normalizeAddress(jurisdiction.depositoryAddress);
+  if (Number.isFinite(chainId) && chainId > 0 && depository) return `chain:${Math.floor(chainId)}:${depository}`;
+  if (depository) return `depository:${depository}`;
+  return `name:${normalizeJurisdictionLabel(jurisdiction.name)}`;
+};
+
+const routeJurisdictionMatchesLocal = (
+  env: Env,
+  state: EntityState,
+  routeJurisdictionName: string,
+): boolean => {
+  const local = state.config?.jurisdiction;
+  if (!local) return false;
+  if (normalizeJurisdictionLabel(local.name) === normalizeJurisdictionLabel(routeJurisdictionName)) {
+    return true;
+  }
+  let routeJurisdiction: typeof local | undefined;
+  try {
+    routeJurisdiction = requireRuntimeJurisdictionConfigByName(env, routeJurisdictionName);
+  } catch {
+    routeJurisdiction = undefined;
+  }
+  const localKey = jurisdictionIdentityKey(local);
+  const routeKey = jurisdictionIdentityKey(routeJurisdiction);
+  return Boolean(localKey && routeKey && localKey === routeKey);
+};
+
+const validateCrossJurisdictionLocalBinding = (
+  env: Env,
+  state: EntityState,
+  route: CrossJurisdictionSwapRoute,
+): string | null => {
+  const local = normalizeEntityRef(state.entityId);
+  if (!state.config?.jurisdiction) return 'local jurisdiction unknown';
+
+  const sourceParticipant =
+    normalizeEntityRef(route.source.entityId) === local ||
+    normalizeEntityRef(route.source.counterpartyEntityId) === local;
+  const targetParticipant =
+    normalizeEntityRef(route.target.entityId) === local ||
+    normalizeEntityRef(route.target.counterpartyEntityId) === local;
+  if (!sourceParticipant && !targetParticipant) return null;
+
+  const expected = sourceParticipant
+    ? String(route.source.jurisdiction || '').trim()
+    : String(route.target.jurisdiction || '').trim();
+  if (!expected) return 'route jurisdiction missing';
+  if (!routeJurisdictionMatchesLocal(env, state, expected)) {
+    if (route.routeHash && route.sourcePull && route.targetPull) {
+      return null;
+    }
+    return `route jurisdiction ${expected} does not match local jurisdiction ${state.config.jurisdiction.name}`;
+  }
+  return null;
 };
 
 const accountHasPullResolveQueued = (
@@ -1458,6 +1606,39 @@ export const applyEntityTx = async (
         addMessage(newState, `❌ Cross-j source pull ${pullId.slice(0, 8)} resolve blocked: use requestCrossJurisdictionClear`);
         return { newState, outputs, mempoolOps };
       }
+      const crossTargetRoute = [...(newState.crossJurisdictionSwaps?.values?.() ?? [])].find(route =>
+        route.targetPull?.pullId === pullId &&
+        normalizeEntityRef(route.target.counterpartyEntityId) === normalizeEntityRef(newState.entityId) &&
+        normalizeEntityRef(route.target.entityId) === normalizeEntityRef(counterpartyEntityId),
+      );
+      if (crossTargetRoute) {
+        if (isCrossJurisdictionTerminalStatus(crossTargetRoute.status)) {
+          addMessage(newState, `❌ Cross-j target pull ${pullId.slice(0, 8)} resolve blocked: route ${crossTargetRoute.status}`);
+          return { newState, outputs, mempoolOps };
+        }
+        if (!crossTargetRoute.targetPull) {
+          addMessage(newState, `❌ Cross-j target pull ${pullId.slice(0, 8)} resolve blocked: missing commitment`);
+          return { newState, outputs, mempoolOps };
+        }
+        let decodedRatio = 0;
+        try {
+          decodedRatio = verifyHashLadderBinary({
+            fullHash: crossTargetRoute.targetPull.fullHash,
+            partialRoot: crossTargetRoute.targetPull.partialRoot,
+          }, binary).fillRatio;
+        } catch (error) {
+          addMessage(newState, `❌ Cross-j target pull ${pullId.slice(0, 8)} resolve blocked: ${error instanceof Error ? error.message : String(error)}`);
+          return { newState, outputs, mempoolOps };
+        }
+        if (decodedRatio <= 0) {
+          addMessage(newState, `❌ Cross-j target pull ${pullId.slice(0, 8)} resolve blocked: empty reveal`);
+          return { newState, outputs, mempoolOps };
+        }
+        crossTargetRoute.status = 'clearing';
+        crossTargetRoute.pendingClearRequestedAt ||= deterministicEntityTimestamp(newState, env);
+        crossTargetRoute.updatedAt = newState.timestamp || env.timestamp;
+        newState.crossJurisdictionSwaps?.set(crossTargetRoute.orderId, crossTargetRoute);
+      }
       mempoolOps.push({
         accountId: normalizedCounterparty,
         tx: {
@@ -1508,7 +1689,9 @@ export const applyEntityTx = async (
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
       try {
-        route = withCanonicalCrossJurisdictionRouteHash(entityTx.data.route);
+        route = withCanonicalCrossJurisdictionRouteHash(
+          canonicalizeCrossJurisdictionRouteForKnownEntities(env, newState, entityTx.data.route),
+        );
       } catch (error) {
         addMessage(newState, `❌ Cross-j request invalid route: ${error instanceof Error ? error.message : String(error)}`);
         return { newState, outputs };
@@ -1516,6 +1699,11 @@ export const applyEntityTx = async (
       const now = deterministicEntityTimestamp(newState, env);
       if (isCrossJurisdictionRouteExpired(route, now)) {
         addMessage(newState, `❌ Cross-j request ${route.orderId} expired`);
+        return { newState, outputs };
+      }
+      const bindingError = validateCrossJurisdictionLocalBinding(env, newState, route);
+      if (bindingError) {
+        addMessage(newState, `❌ Cross-j request ${route.orderId} blocked: ${bindingError}`);
         return { newState, outputs };
       }
       if (normalizeEntityRef(newState.entityId) !== normalizeEntityRef(route.source.entityId)) {
@@ -1554,13 +1742,20 @@ export const applyEntityTx = async (
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
       try {
-        route = withCanonicalCrossJurisdictionRouteHash(entityTx.data.route);
+        route = withCanonicalCrossJurisdictionRouteHash(
+          canonicalizeCrossJurisdictionRouteForKnownEntities(env, newState, entityTx.data.route),
+        );
       } catch (error) {
         addMessage(newState, `❌ Cross-j prepare invalid route: ${error instanceof Error ? error.message : String(error)}`);
         return { newState, outputs };
       }
       if (normalizeEntityRef(newState.entityId) !== normalizeEntityRef(route.source.counterpartyEntityId)) {
         addMessage(newState, `❌ Cross-j prepare ${route.orderId} wrong source hub`);
+        return { newState, outputs };
+      }
+      const bindingError = validateCrossJurisdictionLocalBinding(env, newState, route);
+      if (bindingError) {
+        addMessage(newState, `❌ Cross-j prepare ${route.orderId} blocked: ${bindingError}`);
         return { newState, outputs };
       }
       const preparedRoute = buildPreparedCrossJurisdictionRoute(route, {
@@ -1623,7 +1818,9 @@ export const applyEntityTx = async (
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
       try {
-        route = withCanonicalCrossJurisdictionRouteHash(entityTx.data.route);
+        route = withCanonicalCrossJurisdictionRouteHash(
+          canonicalizeCrossJurisdictionRouteForKnownEntities(env, newState, entityTx.data.route),
+        );
       } catch (error) {
         addMessage(newState, `❌ Cross-j commit invalid route: ${error instanceof Error ? error.message : String(error)}`);
         return { newState, outputs };
@@ -1635,6 +1832,11 @@ export const applyEntityTx = async (
       }
       if (normalizeEntityRef(newState.entityId) !== normalizeEntityRef(route.source.entityId)) {
         addMessage(newState, `❌ Cross-j commit ${route.orderId} routed to wrong source entity`);
+        return { newState, outputs };
+      }
+      const bindingError = validateCrossJurisdictionLocalBinding(env, newState, route);
+      if (bindingError) {
+        addMessage(newState, `❌ Cross-j commit ${route.orderId} blocked: ${bindingError}`);
         return { newState, outputs };
       }
       if (!route.sourcePull || !route.targetPull) {
@@ -1701,13 +1903,20 @@ export const applyEntityTx = async (
       let route: CrossJurisdictionSwapRoute;
       const newState = cloneEntityState(entityState);
       try {
-        route = withCanonicalCrossJurisdictionRouteHash(entityTx.data.route);
+        route = withCanonicalCrossJurisdictionRouteHash(
+          canonicalizeCrossJurisdictionRouteForKnownEntities(env, newState, entityTx.data.route),
+        );
       } catch (error) {
         addMessage(newState, `❌ Cross-j register invalid route: ${error instanceof Error ? error.message : String(error)}`);
         return { newState, outputs: [] };
       }
       if (!isCrossJurisdictionRouteParticipant(newState.entityId, route)) {
         addMessage(newState, `❌ Cross-j register ${route.orderId} routed to non-participant entity`);
+        return { newState, outputs: [] };
+      }
+      const bindingError = validateCrossJurisdictionLocalBinding(env, newState, route);
+      if (bindingError) {
+        addMessage(newState, `❌ Cross-j register ${route.orderId} blocked: ${bindingError}`);
         return { newState, outputs: [] };
       }
       newState.crossJurisdictionSwaps ||= new Map();
@@ -1739,12 +1948,8 @@ export const applyEntityTx = async (
       const mempoolOps: MempoolOp[] = [];
       let route = newState.crossJurisdictionSwaps?.get(orderId);
       if (!route) {
-        const offerRoute = findCrossJurisdictionOfferRoute(newState, orderId);
-        if (!offerRoute) {
-          addMessage(newState, `❌ Cross-j fill notice ${orderId} missing route`);
-          return { newState, outputs, mempoolOps };
-        }
-        route = offerRoute.route;
+        addMessage(newState, `❌ Cross-j fill notice ${orderId} missing entity-level route`);
+        return { newState, outputs, mempoolOps };
       }
       const offerRoute = findCrossJurisdictionOfferRoute(newState, orderId);
       if (offerRoute) {

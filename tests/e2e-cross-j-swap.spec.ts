@@ -992,41 +992,66 @@ async function waitForCrossPendingFill(
   let routeId = '';
   let ratio = 0;
   let fillSeq = 0;
-  await expect.poll(
-    async () => {
-      const state = await readCrossState(page, identity, hubId);
-      const route = state.routeSummaries
-        .filter((candidate) =>
-          candidate.status === 'partially_filled' &&
-          candidate.cumulativeFillRatio > 0 &&
-          candidate.cumulativeFillRatio < 65_535 &&
-          (!options.routeId || candidate.orderId === options.routeId) &&
-          candidate.fillSeq >= (options.minFillSeq ?? 1) &&
-          candidate.cumulativeFillRatio > (options.minRatioExclusive ?? 0),
-        )
-        .sort((a, b) => b.updatedAt - a.updatedAt)[0];
-      routeId = route?.orderId || '';
-      ratio = route?.cumulativeFillRatio || 0;
-      fillSeq = route?.fillSeq || 0;
-      return {
-        offers: state.offers,
-        pulls: state.pulls,
-        routeStatus: route?.status || '',
-        ratio,
-        fillSeq,
-      };
-    },
-    {
-      timeout: 75_000,
-      intervals: [250, 500, 1000],
-      message: `${label} cross-j partial fill must remain pending in the book without clearing pulls`,
-    },
-  ).toMatchObject({
-    offers: expect.any(Number),
-    pulls: expect.any(Number),
-    routeStatus: 'partially_filled',
-    fillSeq: expect.any(Number),
-  });
+  try {
+    await expect.poll(
+      async () => {
+        const state = await readCrossState(page, identity, hubId);
+        const route = state.routeSummaries
+          .filter((candidate) =>
+            candidate.status === 'partially_filled' &&
+            candidate.cumulativeFillRatio > 0 &&
+            candidate.cumulativeFillRatio < 65_535 &&
+            (!options.routeId || candidate.orderId === options.routeId) &&
+            candidate.fillSeq >= (options.minFillSeq ?? 1) &&
+            candidate.cumulativeFillRatio > (options.minRatioExclusive ?? 0),
+          )
+          .sort((a, b) => b.updatedAt - a.updatedAt)[0];
+        routeId = route?.orderId || '';
+        ratio = route?.cumulativeFillRatio || 0;
+        fillSeq = route?.fillSeq || 0;
+        return {
+          offers: state.offers,
+          pulls: state.pulls,
+          routeStatus: route?.status || '',
+          ratio,
+          fillSeq,
+        };
+      },
+      {
+        timeout: 75_000,
+        intervals: [250, 500, 1000],
+        message: `${label} cross-j partial fill must remain pending in the book without clearing pulls`,
+      },
+    ).toMatchObject({
+      offers: expect.any(Number),
+      pulls: expect.any(Number),
+      routeStatus: 'partially_filled',
+      fillSeq: expect.any(Number),
+    });
+  } catch (error) {
+    const state = await readCrossState(page, identity, hubId);
+    console.log(`[E2E ${label} pending fill debug]`, JSON.stringify({
+      offers: state.offers,
+      pulls: state.pulls,
+      routes: state.routeSummaries.map((candidate: any) => ({
+        orderId: String(candidate.orderId || ''),
+        status: candidate.status,
+        ratio: candidate.cumulativeFillRatio,
+        fillSeq: candidate.fillSeq,
+        filledSourceAmount: candidate.filledSourceAmount,
+        filledTargetAmount: candidate.filledTargetAmount,
+        sourcePull: candidate.sourcePull,
+        targetPull: candidate.targetPull,
+        bookOwnerEntityId: candidate.bookOwnerEntityId,
+        venueId: candidate.venueId,
+      })),
+      offerSummaries: state.offerSummaries,
+      pullIds: state.pullIds,
+      accountKeys: state.accountKeys,
+      messages: state.messages.slice(-20),
+    }, null, 2));
+    throw error;
+  }
   expect(routeId, `${label} partial route id must be available`).toBeTruthy();
   const state = await readCrossState(page, identity, hubId);
   const route = state.routeSummaries.find((candidate) => candidate.orderId === routeId);
@@ -1061,25 +1086,40 @@ async function waitForCrossRouteStatus(
   statuses: readonly string[],
   label: string,
 ): Promise<void> {
-  await expect.poll(
-    async () => {
-      const state = await readCrossState(page, identity, hubId);
-      const route = state.routeSummaries.find((candidate) => candidate.orderId === orderId);
-      return {
-        status: route?.status || '',
-        offers: state.offers,
-        pulls: state.pulls,
-        ratio: route?.cumulativeFillRatio || 0,
-      };
-    },
-    {
-      timeout: 75_000,
-      intervals: [250, 500, 1000],
-      message: `${label} route ${orderId.slice(0, 10)} must reach ${statuses.join('/')}`,
-    },
-  ).toMatchObject({
-    status: expect.stringMatching(new RegExp(`^(${statuses.map(escapeRegex).join('|')})$`)),
-  });
+  try {
+    await expect.poll(
+      async () => {
+        const state = await readCrossState(page, identity, hubId);
+        const route = state.routeSummaries.find((candidate) => candidate.orderId === orderId);
+        return {
+          status: route?.status || '',
+          offers: state.offers,
+          pulls: state.pulls,
+          ratio: route?.cumulativeFillRatio || 0,
+        };
+      },
+      {
+        timeout: 75_000,
+        intervals: [250, 500, 1000],
+        message: `${label} route ${orderId.slice(0, 10)} must reach ${statuses.join('/')}`,
+      },
+    ).toMatchObject({
+      status: expect.stringMatching(new RegExp(`^(${statuses.map(escapeRegex).join('|')})$`)),
+    });
+  } catch (error) {
+    const state = await readCrossState(page, identity, hubId);
+    console.log(`[E2E ${label} route status debug]`, JSON.stringify({
+      orderId,
+      expected: statuses,
+      offers: state.offers,
+      pulls: state.pulls,
+      route: state.routeSummaries.find((candidate) => candidate.orderId === orderId),
+      offerSummaries: state.offerSummaries,
+      pullIds: state.pullIds,
+      messages: state.messages.slice(-24),
+    }, null, 2));
+    throw error;
+  }
 }
 
 async function readFirstCrossRouteId(page: Page, identity: RuntimeIdentity): Promise<string> {

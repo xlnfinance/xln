@@ -16,8 +16,7 @@ function resolveLocalRpcUrlFromRequest(requestUrl: string): string {
 
 const getRpcUrl = (requestUrl: string): string => {
   const url = new URL(requestUrl);
-  const isLocalHost = url.hostname === 'localhost';
-  if (isLocalHost) {
+  if (isLocalProxyRequest(requestUrl)) {
     return resolveLocalRpcUrlFromRequest(requestUrl);
   }
   const rpcUrl = process.env['RPC_ETHEREUM'] ?? process.env['ANVIL_RPC'];
@@ -30,14 +29,12 @@ const getRpcUrl = (requestUrl: string): string => {
 export const POST: RequestHandler = async ({ request }) => {
   try {
     const body = await request.text();
-    if (!isLocalProxyRequest(request.url)) {
-      const forbidden = findForbiddenRpcProxyMethod(body);
-      if (forbidden) {
-        return new Response(
-          JSON.stringify({ error: 'RPC proxy method is not allowed', method: forbidden }),
-          { status: forbidden.startsWith('invalid') || forbidden === 'empty-batch' ? 400 : 403, headers: { 'Content-Type': 'application/json' } },
-        );
-      }
+    const forbidden = findForbiddenRpcProxyMethod(body);
+    if (forbidden) {
+      return new Response(
+        JSON.stringify({ error: 'RPC proxy method is not allowed', method: forbidden }),
+        { status: forbidden.startsWith('invalid') || forbidden === 'empty-batch' ? 400 : 403, headers: { 'Content-Type': 'application/json' } },
+      );
     }
     const upstream = await fetch(getRpcUrl(request.url), {
       method: 'POST',

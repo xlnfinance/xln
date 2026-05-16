@@ -65,7 +65,7 @@
       const chainId = String(jurisdiction.chainId ?? '').trim();
       const depository = String(jurisdiction.depositoryAddress ?? '').trim().toLowerCase();
       if (chainId && depository) return `dep:${chainId}:${depository}`;
-      if (chainId) return `chain:${chainId}`;
+      if (chainId) return '';
       return normalizeJurisdiction(jurisdiction.name);
     }
     return normalizeJurisdiction(value);
@@ -133,6 +133,7 @@
     const replicas = env?.eReplicas;
     if (!replicas) return [];
     const entityJurisdiction = getEntityJurisdictionKey(env, entityId);
+    if (!entityJurisdiction) return [];
     const result: Hub[] = [];
     for (const replica of replicas.values()) {
       const state = replica?.state;
@@ -194,7 +195,7 @@
       return serverHubs
         .filter((hub) => hub?.entityId && hub?.metadata?.isHub === true)
         .filter((hub) => {
-          if (!entityJurisdiction) return true;
+          if (!entityJurisdiction) return false;
           return jurisdictionKey(hub.metadata?.jurisdiction) === entityJurisdiction;
         })
         .map((hub) => {

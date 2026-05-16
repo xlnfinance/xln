@@ -270,6 +270,38 @@ const crossJurisdictionPullsReady = (
   );
 };
 
+const crossJurisdictionBookOwnerRef = (
+  route: NonNullable<OrderbookOfferForMatch['crossJurisdiction']>,
+): string => normalizeEntityRef(route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId || '');
+
+const queueCrossJurisdictionBookOwnerWake = (
+  env: Env,
+  outputs: EntityInput[],
+  ownerRef: string,
+  reason: string,
+): void => {
+  if (!ownerRef) return;
+  const ownerState = findEntityStateById(env, ownerRef);
+  const firstValidator = ownerState?.config?.validators?.[0];
+  if (!ownerState || !firstValidator) {
+    console.warn(`🌉 ORDERBOOK CROSS-J: unable to wake book owner ${ownerRef.slice(-8)} reason=${reason}`);
+    return;
+  }
+  const alreadyQueued = outputs.some(output =>
+    normalizeEntityRef(output.entityId) === normalizeEntityRef(ownerState.entityId) &&
+    output.entityTxs?.some(tx => tx.type === 'orderbookSweepCrossJurisdiction'),
+  );
+  if (alreadyQueued) return;
+  outputs.push({
+    entityId: ownerState.entityId,
+    signerId: firstValidator,
+    entityTxs: [{
+      type: 'orderbookSweepCrossJurisdiction',
+      data: { reason },
+    }],
+  });
+};
+
 function queueUniqueAccountMempoolTx(
   account: EntityState['accounts'] extends Map<string, infer T> ? T : never,
   tx: EntityState['accounts'] extends Map<string, infer T>
@@ -1723,17 +1755,29 @@ export const applyEntityFrame = async (
     const seenOfferKeys = new Set<string>();
     const offersToMatch: OrderbookOfferForMatch[] = [];
     let waitingForCrossPullCommitments = false;
+    const currentEntityRef = normalizeEntityRef(currentEntityState.entityId);
+    const crossJurisdictionOwnerWakes = new Set<string>();
     for (const offer of [...enrichedOffers, ...siblingOffers]) {
       const key = swapKey(offer.accountId, offer.offerId);
       if (seenOfferKeys.has(key)) continue;
-      if (offer.crossJurisdiction && !crossJurisdictionPullsReady(
-        env,
-        offer.crossJurisdiction,
-        deterministicEntityTimestamp(currentEntityState, env),
-      )) {
-        waitingForCrossPullCommitments = true;
-        console.warn(`🌉 ORDERBOOK CROSS-J: offer ${offer.offerId} waiting for prepared pull commitments`);
-        continue;
+      if (offer.crossJurisdiction) {
+        const bookOwnerRef = crossJurisdictionBookOwnerRef(offer.crossJurisdiction);
+        if (bookOwnerRef && bookOwnerRef !== currentEntityRef) {
+          crossJurisdictionOwnerWakes.add(bookOwnerRef);
+          console.log(
+            `🌉 ORDERBOOK CROSS-J: waking book owner ${bookOwnerRef.slice(-8)} for offer ${offer.offerId.slice(-8)}`,
+          );
+          continue;
+        }
+        if (!crossJurisdictionPullsReady(
+          env,
+          offer.crossJurisdiction,
+          deterministicEntityTimestamp(currentEntityState, env),
+        )) {
+          waitingForCrossPullCommitments = true;
+          console.warn(`🌉 ORDERBOOK CROSS-J: offer ${offer.offerId} waiting for prepared pull commitments`);
+          continue;
+        }
       }
       seenOfferKeys.add(key);
       offersToMatch.push(offer);
@@ -1876,6 +1920,14 @@ export const applyEntityFrame = async (
 	        data: { reason: 'pull-commitment-wait' },
 	      });
 	    }
+    for (const ownerRef of crossJurisdictionOwnerWakes) {
+      queueCrossJurisdictionBookOwnerWake(
+        env,
+        allOutputs,
+        ownerRef,
+        `cross-j-book-owner-wake:${currentEntityState.entityId.slice(-8)}`,
+      );
+    }
 
 	    // Apply book updates
     const ext = currentEntityState.orderbookExt as OrderbookExtState;
