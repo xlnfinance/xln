@@ -52,6 +52,32 @@ export function compareCrossJurisdictionRouteStatus(
   return (CROSS_J_STATUS_RANK[next || 'intent'] ?? 0) - (CROSS_J_STATUS_RANK[current || 'intent'] ?? 0);
 }
 
+const CROSS_J_ALLOWED_TRANSITIONS: Record<CrossJurisdictionSwapStatus, ReadonlySet<CrossJurisdictionSwapStatus>> = {
+  intent: new Set(['intent', 'target_prepared', 'resting', 'cancelled', 'expired', 'failed']),
+  target_prepared: new Set(['target_prepared', 'source_committed', 'target_locked', 'resting', 'clearing', 'cancelled', 'expired', 'failed']),
+  source_committed: new Set(['source_committed', 'source_locked', 'resting', 'cancelled', 'expired', 'failed']),
+  target_locked: new Set(['target_locked', 'source_locked', 'resting', 'clearing', 'cancelled', 'expired', 'failed']),
+  source_locked: new Set(['source_locked', 'resting', 'cancelled', 'expired', 'failed']),
+  resting: new Set(['resting', 'partially_filled', 'clear_requested', 'clearing', 'cancelled', 'expired', 'failed']),
+  partially_filled: new Set(['partially_filled', 'clear_requested', 'clearing', 'cancelled', 'expired', 'failed']),
+  clear_requested: new Set(['clear_requested', 'clearing', 'cancelled', 'expired', 'failed']),
+  clearing: new Set(['clearing', 'source_claimed', 'target_claimed', 'settled', 'cancelled', 'expired', 'failed']),
+  source_claimed: new Set(['source_claimed', 'target_claimed', 'settled', 'failed']),
+  target_claimed: new Set(['target_claimed', 'settled', 'failed']),
+  settled: new Set(['settled']),
+  cancelled: new Set(['cancelled']),
+  expired: new Set(['expired']),
+  failed: new Set(['failed']),
+};
+
+export function isCrossJurisdictionRouteTransitionAllowed(
+  current: CrossJurisdictionSwapStatus | undefined,
+  next: CrossJurisdictionSwapStatus | undefined,
+): boolean {
+  if (!current || !next) return true;
+  return Boolean(CROSS_J_ALLOWED_TRANSITIONS[current]?.has(next));
+}
+
 export function isCrossJurisdictionRouteExpired(route: CrossJurisdictionSwapRoute, now: number): boolean {
   const expiresAt = Number(route.expiresAt || 0);
   return Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= now;

@@ -466,6 +466,45 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(result.newState.messages.some(message => message.includes('terminal state settled'))).toBe(true);
   });
 
+  test('cross-j register enforces participant and explicit lifecycle transitions', async () => {
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('71');
+    const sourceHub = entity('72');
+    const targetHub = entity('73');
+    const targetUser = entity('74');
+    const signer = addr('75');
+    const route = withCanonicalCrossJurisdictionRouteHash({
+      orderId: 'cross-register-fsm',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 100n },
+      target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 2, amount: 90n },
+      priceTicks: 2500n,
+      status: 'resting',
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      expiresAt: 61_000,
+    });
+
+    const targetState = makeState(targetUser, signer, base, targetHub);
+    targetState.crossJurisdictionSwaps?.set(route.orderId, route);
+    const invalidTransition = await applyEntityTx(createEmptyEnv('cross-register-fsm'), targetState, {
+      type: 'registerCrossJurisdictionSwap',
+      data: { route: { ...route, status: 'settled' } },
+    } as any);
+    expect(invalidTransition.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('resting');
+    expect(invalidTransition.newState.messages.some(message => message.includes('invalid transition resting->settled'))).toBe(true);
+
+    const outsiderState = makeState(entity('76'), signer, base, targetHub);
+    const nonParticipant = await applyEntityTx(createEmptyEnv('cross-register-outsider'), outsiderState, {
+      type: 'registerCrossJurisdictionSwap',
+      data: { route: { ...route, status: 'target_prepared' } },
+    } as any);
+    expect(nonParticipant.newState.crossJurisdictionSwaps?.has(route.orderId)).toBe(false);
+    expect(nonParticipant.newState.messages.some(message => message.includes('non-participant entity'))).toBe(true);
+  });
+
   test('route hash ignores mutable clearing policy but still binds economic terms', () => {
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const base = makeJurisdiction('Base', 8453, '21', '22');
