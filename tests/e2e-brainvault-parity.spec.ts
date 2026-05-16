@@ -51,18 +51,14 @@ function runBrainvaultCli(name: string, passphrase: string, shards: number): Bra
   };
 }
 
-async function readMnemonicWords(page: Page, testId: string): Promise<string> {
-  const box = page.getByTestId(testId);
-  await expect(box).toBeVisible({ timeout: 120_000 });
-  const words = await box.locator('.word').allTextContents();
-  return normalizeMnemonic(words.map((word) => word.replace(/^\d+\.\s*/, '').trim()).join(' '));
-}
-
-async function openBrainvaultExport(page: Page): Promise<void> {
-  const toggle = page.getByTestId('brainvault-export-toggle');
-  await expect(toggle).toBeVisible({ timeout: 120_000 });
-  await toggle.click();
-  await expect(page.getByTestId('brainvault-mnemonic-24')).toBeVisible({ timeout: 15_000 });
+async function waitForBrainvaultCreateForm(page: Page): Promise<void> {
+  const legacyTab = page.getByRole('button', { name: 'BrainVault', exact: true });
+  if (await legacyTab.isVisible().catch(() => false)) {
+    await legacyTab.click();
+  }
+  await expect(page.getByRole('heading', { name: /Create XLN wallet/i }).first()).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('#name')).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('#passphrase')).toBeVisible({ timeout: 15_000 });
 }
 
 async function readRuntimeCount(page: Page): Promise<number> {
@@ -93,7 +89,7 @@ async function openAddRuntimePanel(page: Page): Promise<void> {
   const addRuntimeItem = page.locator('.switcher-menu .add-runtime-btn').filter({ hasText: /Add Runtime/i }).first();
   await expect(addRuntimeItem).toBeVisible({ timeout: 10_000 });
   await addRuntimeItem.click();
-  await expect(page.getByRole('button', { name: 'BrainVault', exact: true })).toBeVisible({ timeout: 15_000 });
+  await waitForBrainvaultCreateForm(page);
 }
 
 async function waitForRuntimeWithSeed(page: Page, seed: string): Promise<StoredRuntime> {
@@ -115,9 +111,26 @@ async function waitForRuntimeWithSeed(page: Page, seed: string): Promise<StoredR
   return await handle.jsonValue() as StoredRuntime;
 }
 
+async function waitForRuntimeWithLabel(page: Page, label: string): Promise<StoredRuntime> {
+  const handle = await page.waitForFunction((expectedLabel: string) => {
+    try {
+      const raw = localStorage.getItem('xln-vaults');
+      if (!raw) return null;
+      const parsed = JSON.parse(raw) as {
+        activeRuntimeId?: string;
+        runtimes?: Record<string, { label?: string; seed?: string; mnemonic12?: string }>;
+      };
+      const runtimes = Object.values(parsed.runtimes ?? {});
+      return runtimes.find((runtime) => runtime.label === expectedLabel && runtime.seed) ?? null;
+    } catch {
+      return null;
+    }
+  }, label, { timeout: 120_000 });
+  return await handle.jsonValue() as StoredRuntime;
+}
+
 async function deriveBrainvaultInUi(page: Page, name: string, passphrase: string, shards: number): Promise<BrainvaultCliOutput> {
-  await expect(page.getByRole('button', { name: 'BrainVault', exact: true })).toBeVisible({ timeout: 15_000 });
-  await page.getByRole('button', { name: 'BrainVault', exact: true }).click();
+  await waitForBrainvaultCreateForm(page);
 
   await page.locator('#name').fill(name);
   await page.locator('#passphrase').fill(passphrase);
@@ -125,15 +138,13 @@ async function deriveBrainvaultInUi(page: Page, name: string, passphrase: string
   await page.getByRole('button', { name: /Custom/i }).click();
   await page.locator('#shards').fill(String(shards));
 
-  const openVaultButton = page.getByRole('button', { name: /Open (Wallet|Vault)/, exact: false });
+  const openVaultButton = page.getByRole('button', { name: /(Create XLN wallet|Open (Wallet|Vault))/, exact: false });
   await expect(openVaultButton).toBeEnabled({ timeout: 15_000 });
   await openVaultButton.click();
-  await openBrainvaultExport(page);
 
-  const [mnemonic12, mnemonic24] = await Promise.all([
-    readMnemonicWords(page, 'brainvault-mnemonic-12'),
-    readMnemonicWords(page, 'brainvault-mnemonic-24'),
-  ]);
+  const runtime = await waitForRuntimeWithLabel(page, name);
+  const mnemonic24 = normalizeMnemonic(runtime.seed || '');
+  const mnemonic12 = normalizeMnemonic(runtime.mnemonic12 || '');
 
   return { mnemonic12, mnemonic24 };
 }
@@ -153,44 +164,24 @@ test.describe('brainvault parity', () => {
     });
   }
 
-  test('standalone BrainVault exports seed and addresses before XLN wallet opt-in', async ({ page }) => {
+  test('standalone BrainVault creates the XLN wallet with deterministic seed material', async ({ page }) => {
     test.slow();
 
     await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 250 });
 
-    await expect(page.getByRole('button', { name: 'BrainVault', exact: true })).toBeVisible({ timeout: 15_000 });
-    await page.getByRole('button', { name: 'BrainVault', exact: true }).click();
+    const cli = runBrainvaultCli('standalone vault', 'ced-export-42', 1);
+    await waitForBrainvaultCreateForm(page);
     await page.locator('#name').fill('standalone vault');
     await page.locator('#passphrase').fill('ced-export-42');
     await page.getByRole('button', { name: /^1\s+Test$/ }).click();
 
-    const openVaultButton = page.getByRole('button', { name: /Open (Wallet|Vault)/, exact: false });
+    const openVaultButton = page.getByRole('button', { name: /(Create XLN wallet|Open (Wallet|Vault))/, exact: false });
     await expect(openVaultButton).toBeEnabled({ timeout: 15_000 });
     await openVaultButton.click();
 
-    const createWalletButton = page.getByRole('button', { name: 'Create XLN wallet' });
-    await expect(createWalletButton).toBeEnabled({ timeout: 120_000 });
-    await expect(page.getByTestId('brainvault-export-toggle')).toBeVisible();
-    await expect(page.getByTestId('brainvault-mnemonic-24')).toBeHidden();
-    expect(await readRuntimeCount(page)).toBe(0);
-
-    await openBrainvaultExport(page);
-
-    const [mnemonic12, mnemonic24] = await Promise.all([
-      readMnemonicWords(page, 'brainvault-mnemonic-12'),
-      readMnemonicWords(page, 'brainvault-mnemonic-24'),
-    ]);
-
-    await expect(page.getByTestId('brainvault-eoa-address-0')).toBeVisible({ timeout: 15_000 });
-    await expect(page.getByTestId('brainvault-eoa-address-1')).toBeVisible();
-    await expect(page.getByTestId('brainvault-eoa-address-2')).toBeVisible();
-    expect(await readRuntimeCount(page)).toBe(0);
-
-    await createWalletButton.click();
-
-    const runtime = await waitForRuntimeWithSeed(page, mnemonic24);
+    const runtime = await waitForRuntimeWithSeed(page, cli.mnemonic24);
     expect(runtime.label).toBe('standalone vault');
-    expect(normalizeMnemonic(runtime.mnemonic12 || '')).toBe(mnemonic12);
+    expect(normalizeMnemonic(runtime.mnemonic12 || '')).toBe(cli.mnemonic12);
     expect(await readRuntimeCount(page)).toBe(1);
   });
 
@@ -206,11 +197,6 @@ test.describe('brainvault parity', () => {
 
     await openAddRuntimePanel(page);
     const derived = await deriveBrainvaultInUi(page, 'embedded add runtime', 'ced-add-runtime-42', 1);
-
-    await expect(page.getByRole('heading', { name: 'BrainVault Ready' })).toBeVisible({ timeout: 15_000 });
-    expect(await readActiveRuntimeId(page)).toBe(oldRuntime.runtimeId);
-
-    await page.getByRole('button', { name: 'Create XLN wallet' }).click();
 
     const runtime = await waitForRuntimeWithSeed(page, derived.mnemonic24);
     expect(runtime.label).toBe('embedded add runtime');

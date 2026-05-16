@@ -50,10 +50,10 @@ export async function handleCrossSwapFillAck(
     const targetTotal = BigInt(route.target.amount);
     const currentSource = route.filledSourceAmount ?? route.sourceClaimed ?? ((sourceTotal * BigInt(currentRatio)) / BigInt(MAX_SWAP_FILL_RATIO));
     const currentTarget = route.filledTargetAmount ?? route.targetClaimed ?? ((targetTotal * BigInt(currentRatio)) / BigInt(MAX_SWAP_FILL_RATIO));
-    if (cumulativeSourceAmount !== undefined && cumulativeSourceAmount !== currentSource) {
+    if (cumulativeSourceAmount === undefined || cumulativeSourceAmount !== currentSource) {
       return { success: false, error: `Cross-j cancel source mismatch: expected ${currentSource}, got ${cumulativeSourceAmount}`, events };
     }
-    if (cumulativeTargetAmount !== undefined && cumulativeTargetAmount !== currentTarget) {
+    if (cumulativeTargetAmount === undefined || cumulativeTargetAmount !== currentTarget) {
       return { success: false, error: `Cross-j cancel target mismatch: expected ${currentTarget}, got ${cumulativeTargetAmount}`, events };
     }
     route.status = 'clear_requested';

@@ -27,7 +27,7 @@ const isRecord = (value: unknown): value is Record<string, unknown> =>
 
 export function isLocalProxyRequest(requestUrl: string): boolean {
   const hostname = new URL(requestUrl).hostname;
-  return LOCAL_HOSTNAMES.has(hostname);
+  return process.env['NODE_ENV'] !== 'production' && LOCAL_HOSTNAMES.has(hostname);
 }
 
 export function findForbiddenRpcProxyMethod(bodyText: string): string | null {

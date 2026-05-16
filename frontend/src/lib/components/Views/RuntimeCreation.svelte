@@ -3,6 +3,7 @@
   import { locale, translations$, initI18n, loadTranslations } from '$lib/i18n';
   // Removed WalletView - Entity = Wallet, no separate signer wallet view
   import HierarchicalNav from '$lib/components/Navigation/HierarchicalNav.svelte';
+  import { appStateOperations } from '$lib/stores/appStateStore';
   import { vaultOperations, activeRuntime, activeSigner, allRuntimes } from '$lib/stores/vaultStore';
   import { deriveRequestSignal, showVaultPanel, vaultUiOperations } from '$lib/stores/vaultUiStore';
   import { xlnFunctions } from '$lib/stores/xlnStore';
@@ -498,8 +499,10 @@
       createLoginType = 'manual';
       showSaveVaultModal = false;
       vaultNameInput = '';
-      if (embedded) {
-        vaultUiOperations.hideVault();
+      vaultUiOperations.hideVault();
+      if (!embedded) {
+        appStateOperations.setMode('user');
+        appStateOperations.setViewMode('home');
       }
     } catch (err) {
       runtimeCreateError = err instanceof Error ? err.message : 'Failed to create XLN wallet';

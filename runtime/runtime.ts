@@ -155,8 +155,6 @@ import {
 } from './account-utils';
 import { computeSwapPriceTicks, prepareSwapOrder, quantizeSwapOrder } from './orderbook';
 import { withCanonicalCrossJurisdictionRouteHash } from './cross-jurisdiction';
-import { hashHtlcSecret } from './htlc-utils';
-import { getRuntimeJurisdictionHeight } from './j-height';
 import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
 import {
   formatTokenAmount,
@@ -2060,6 +2058,22 @@ export const handleInboundP2PEntityInput = (
   enqueueRuntimeInputs(env, [input], undefined, undefined, ingressTimestamp);
   console.log(`📥 RUNTIME-MEMPOOL: Added inbound, size=${ensureRuntimeMempool(env).entityInputs.length}`);
   env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
+  const runtimeState = ensureRuntimeState(env) as ReturnType<typeof ensureRuntimeState> & {
+    inboundP2PProcessScheduled?: boolean;
+  };
+  if (!runtimeState.loopActive && !env.scenarioMode) {
+    startRuntimeLoop(env);
+  }
+  if (!runtimeState.inboundP2PProcessScheduled && !env.scenarioMode) {
+    runtimeState.inboundP2PProcessScheduled = true;
+    queueMicrotask(() => {
+      runtimeState.inboundP2PProcessScheduled = false;
+      void process(env).catch((error) => {
+        const message = error instanceof Error ? error.message : String(error);
+        env.error?.('network', 'INBOUND_ENTITY_PROCESS_FAILED', { message }, input.entityId);
+      });
+    });
+  }
 };
 
 type PlannedRemoteOutput = {
@@ -5336,56 +5350,9 @@ export async function submitCrossJurisdictionSourceLock(
   env: Env,
   params: CrossJurisdictionSourceLockParams,
 ): Promise<void> {
-  const { route } = params;
-  if (!route.source.lockId || !route.target.lockId || !route.hashlock) {
-    throw new Error('CROSS_SWAP_SOURCE_LOCK_ROUTE_INCOMPLETE');
-  }
-  const sourceUserSignerId = params.sourceUserSignerId || resolveEntityProposerId(env, route.source.entityId, 'cross-swap.source-lock');
-  const now = env.scenarioMode ? env.timestamp : getWallClockMs();
-  const fillRatio = params.fillRatio !== undefined
-    ? Math.max(0, Math.min(65_535, Math.floor(params.fillRatio)))
-    : 65_535;
-  const amount = params.sourceAmount ?? (
-    BigInt(route.source.amount) * BigInt(fillRatio) / 65_535n
-  );
-  if (amount <= 0n) {
-    throw new Error(`CROSS_SWAP_SOURCE_LOCK_ZERO_AMOUNT: fillRatio=${fillRatio}`);
-  }
-  const revealBeforeHeightDelta = 50;
-  const sourceRevealHeight = getRuntimeJurisdictionHeight(env, findEntityStateForRuntime(env, route.source.entityId)?.lastFinalizedJHeight || 0) + revealBeforeHeightDelta;
-  const sourceTimelock = BigInt(route.expiresAt ?? (now + 120_000));
-
-  enqueueRuntimeInput(env, {
-    runtimeTxs: [],
-    entityInputs: [{
-      entityId: route.source.entityId,
-      signerId: sourceUserSignerId,
-      entityTxs: [{
-        type: 'hashlockPayment',
-        data: {
-          targetEntityId: route.source.counterpartyEntityId,
-          tokenId: Number(route.source.tokenId),
-          amount,
-          hashlock: route.hashlock,
-          lockId: route.source.lockId,
-          timelock: sourceTimelock,
-          revealBeforeHeight: sourceRevealHeight,
-          description: route.memo || `Cross swap ${route.orderId} source leg ${fillRatio}/65535`,
-          startedAtMs: now,
-          crossJurisdictionRelay: {
-            routeId: route.orderId,
-            fillRatio,
-            sourceAmount: amount,
-            targetAmount: params.targetAmount ?? (BigInt(route.target.amount) * BigInt(fillRatio) / 65_535n),
-            targetEntityId: route.target.counterpartyEntityId,
-            targetCounterpartyEntityId: route.target.entityId,
-            targetLockId: route.target.lockId,
-          },
-        },
-      }],
-    }],
-    timestamp: now,
-  });
+  void env;
+  void params;
+  throw new Error('CROSS_J_LEGACY_HTLC_API_DISABLED: use submitCrossJurisdictionSwap delayed-clearing hash-ledger flow');
 }
 
 export type CrossJurisdictionTargetLockParams = {
@@ -5399,47 +5366,9 @@ export async function submitCrossJurisdictionTargetLock(
   env: Env,
   params: CrossJurisdictionTargetLockParams,
 ): Promise<void> {
-  const { route } = params;
-  if (!route.target.lockId || !route.hashlock) {
-    throw new Error('CROSS_SWAP_TARGET_LOCK_ROUTE_INCOMPLETE');
-  }
-  const targetHubSignerId = params.targetHubSignerId || resolveEntityProposerId(env, route.target.entityId, 'cross-swap.target-lock');
-  const now = env.scenarioMode ? env.timestamp : getWallClockMs();
-  const fillRatio = params.fillRatio !== undefined
-    ? Math.max(0, Math.min(65_535, Math.floor(params.fillRatio)))
-    : 65_535;
-  const amount = params.targetAmount ?? (
-    BigInt(route.target.amount) * BigInt(fillRatio) / 65_535n
-  );
-  if (amount <= 0n) {
-    throw new Error(`CROSS_SWAP_TARGET_LOCK_ZERO_AMOUNT: fillRatio=${fillRatio}`);
-  }
-  const revealBeforeHeightDelta = 52;
-  const targetRevealHeight = getRuntimeJurisdictionHeight(env, findEntityStateForRuntime(env, route.target.entityId)?.lastFinalizedJHeight || 0) + revealBeforeHeightDelta;
-  const targetTimelock = BigInt((route.expiresAt ?? (now + 120_000)) + 5_000);
-
-  enqueueRuntimeInput(env, {
-    runtimeTxs: [],
-    entityInputs: [{
-      entityId: route.target.entityId,
-      signerId: targetHubSignerId,
-      entityTxs: [{
-        type: 'hashlockPayment',
-        data: {
-          targetEntityId: route.target.counterpartyEntityId,
-          tokenId: Number(route.target.tokenId),
-          amount,
-          hashlock: route.hashlock,
-          lockId: route.target.lockId,
-          timelock: targetTimelock,
-          revealBeforeHeight: targetRevealHeight,
-          description: route.memo || `Cross swap ${route.orderId} target leg ${fillRatio}/65535`,
-          startedAtMs: now,
-        },
-      }],
-    }],
-    timestamp: now,
-  });
+  void env;
+  void params;
+  throw new Error('CROSS_J_LEGACY_HTLC_API_DISABLED: use submitCrossJurisdictionSwap delayed-clearing hash-ledger flow');
 }
 
 export type CrossJurisdictionSwapClaimParams = {
@@ -5453,52 +5382,9 @@ export async function submitCrossJurisdictionSwapClaims(
   env: Env,
   params: CrossJurisdictionSwapClaimParams,
 ): Promise<void> {
-  const { route, secret } = params;
-  if (!route.hashlock || hashHtlcSecret(secret) !== route.hashlock) {
-    throw new Error('CROSS_SWAP_CLAIM_SECRET_MISMATCH');
-  }
-  if (!route.source.lockId || !route.target.lockId) {
-    throw new Error('CROSS_SWAP_CLAIM_LOCKS_MISSING');
-  }
-  const sourceHubEntityId = route.source.counterpartyEntityId;
-  const sourceUserEntityId = route.source.entityId;
-  const targetHubEntityId = route.target.entityId;
-  const targetUserEntityId = route.target.counterpartyEntityId;
-  const sourceHubSignerId = params.sourceHubSignerId || resolveEntityProposerId(env, sourceHubEntityId, 'cross-swap.claim-source');
-  const targetUserSignerId = params.targetUserSignerId || resolveEntityProposerId(env, targetUserEntityId, 'cross-swap.claim-target');
-
-  enqueueRuntimeInput(env, {
-    runtimeTxs: [],
-    entityInputs: [
-      {
-        entityId: sourceHubEntityId,
-        signerId: sourceHubSignerId,
-        entityTxs: [{
-          type: 'resolveHtlcLock',
-          data: {
-            counterpartyEntityId: sourceUserEntityId,
-            lockId: route.source.lockId,
-            secret,
-            description: `Claim cross swap ${route.orderId} source leg`,
-          },
-        }],
-      },
-      {
-        entityId: targetUserEntityId,
-        signerId: targetUserSignerId,
-        entityTxs: [{
-          type: 'resolveHtlcLock',
-          data: {
-            counterpartyEntityId: targetHubEntityId,
-            lockId: route.target.lockId,
-            secret,
-            description: `Claim cross swap ${route.orderId} target leg`,
-          },
-        }],
-      },
-    ],
-    timestamp: env.scenarioMode ? env.timestamp : getWallClockMs(),
-  });
+  void env;
+  void params;
+  throw new Error('CROSS_J_LEGACY_HTLC_API_DISABLED: use submitCrossJurisdictionSwap delayed-clearing hash-ledger flow');
 }
 
 export async function submitDebtEnforcement(

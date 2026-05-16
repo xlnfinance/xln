@@ -54,7 +54,8 @@ import {
 } from './mesh-common';
 import { buildDefaultEntitySwapPairs, getSwapPairPolicyByBaseQuote } from '../account-utils';
 import { LIMITS, SWAP as SWAP_CONSTANTS } from '../constants';
-import { ORDERBOOK_PRICE_SCALE } from '../orderbook';
+import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
+import { deriveCanonicalCrossJurisdictionMarketForLegs } from '../cross-jurisdiction';
 import { startParentLivenessWatch } from './parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 
@@ -175,6 +176,8 @@ const MARKET_MAKER_CROSS_EXPIRY_MS = Math.max(
   60_000,
   Number(process.env['MARKET_MAKER_CROSS_EXPIRY_MS'] || String(24 * 60 * 60 * 1000)),
 );
+const ORDERBOOK_MAX_QTY_LOTS = 0xFFFFFFFFn;
+const ORDERBOOK_MAX_BASE_AMOUNT = ORDERBOOK_MAX_QTY_LOTS * SWAP_LOT_SCALE;
 const MARKET_MAKER_LEVEL_OFFSETS_BPS = [2, 4, 6, 8, 10, 12, 15, 20, 25, 32, 40, 50, 65, 80, 100] as const;
 const MARKET_MAKER_LEVEL_BASE_SIZES = [
   120n * 10n ** 18n,
@@ -520,6 +523,33 @@ const snapPriceTicks = (ticks: bigint, stepTicks: number, mode: 'up' | 'down'): 
   return (ticks / step) * step;
 };
 
+const fitCrossAmountsToOrderbook = (
+  sourceJurisdiction: string,
+  sourceTokenId: number,
+  sourceAmount: bigint,
+  targetJurisdiction: string,
+  targetTokenId: number,
+  targetAmount: bigint,
+  priceTicks: bigint,
+): { sourceAmount: bigint; targetAmount: bigint } | null => {
+  if (sourceAmount <= 0n || targetAmount <= 0n || priceTicks <= 0n) return null;
+  const market = deriveCanonicalCrossJurisdictionMarketForLegs(
+    sourceJurisdiction,
+    sourceTokenId,
+    targetJurisdiction,
+    targetTokenId,
+  );
+  const baseAmount = market.sourceIsBase ? sourceAmount : targetAmount;
+  if (baseAmount <= ORDERBOOK_MAX_BASE_AMOUNT) return { sourceAmount, targetAmount };
+
+  const cappedBase = ORDERBOOK_MAX_BASE_AMOUNT;
+  const cappedQuote = (cappedBase * priceTicks) / ORDERBOOK_PRICE_SCALE;
+  if (cappedQuote <= 0n) return null;
+  return market.sourceIsBase
+    ? { sourceAmount: cappedBase, targetAmount: cappedQuote }
+    : { sourceAmount: cappedQuote, targetAmount: cappedBase };
+};
+
 const isWithinPairBand = (anchorTicks: bigint, priceTicks: bigint): boolean => {
   if (anchorTicks <= 0n || priceTicks <= 0n) return false;
   const rejectDelta = (anchorTicks * BigInt(SWAP_CONSTANTS.PRICE_REJECT_BPS)) / BigInt(SWAP_CONSTANTS.BPS_BASE);
@@ -703,16 +733,25 @@ const buildMarketMakerCrossOfferSpecs = (
           expiresAt: now + MARKET_MAKER_CROSS_EXPIRY_MS,
         };
 
-        if (askWantAmount > 0n) {
+        const askAmounts = fitCrossAmountsToOrderbook(
+          sourceContext.jurisdictionName,
+          pair.baseTokenId,
+          baseSize,
+          targetContext.jurisdictionName,
+          pair.quoteTokenId,
+          askWantAmount,
+          askPriceTicks,
+        );
+        if (askAmounts) {
           const offerId = `mmx-${sourceHubSuffix}-${targetHubSuffix}-${pair.baseTokenId}-${pair.quoteTokenId}-ask-${levelId}`;
           specs.push({
             offerId,
             pairId: `cross:${sourceContext.chainId}:${pair.baseTokenId}/${targetContext.chainId}:${pair.quoteTokenId}`,
             hubEntityId: sourceHub.entityId,
             giveTokenId: pair.baseTokenId,
-            giveAmount: baseSize,
+            giveAmount: askAmounts.sourceAmount,
             wantTokenId: pair.quoteTokenId,
-            wantAmount: askWantAmount,
+            wantAmount: askAmounts.targetAmount,
             minFillRatio: 0,
             crossJurisdiction: {
               ...routeBase,
@@ -723,29 +762,38 @@ const buildMarketMakerCrossOfferSpecs = (
                 entityId: sourceContext.entityId,
                 counterpartyEntityId: sourceHub.entityId,
                 tokenId: pair.baseTokenId,
-                amount: baseSize,
+                amount: askAmounts.sourceAmount,
               },
               target: {
                 jurisdiction: targetContext.jurisdictionName,
                 entityId: targetHub.entityId,
                 counterpartyEntityId: targetContext.entityId,
                 tokenId: pair.quoteTokenId,
-                amount: askWantAmount,
+                amount: askAmounts.targetAmount,
               },
             },
           });
         }
 
-        if (bidGiveAmount > 0n) {
+        const bidAmounts = fitCrossAmountsToOrderbook(
+          sourceContext.jurisdictionName,
+          pair.quoteTokenId,
+          bidGiveAmount,
+          targetContext.jurisdictionName,
+          pair.baseTokenId,
+          baseSize,
+          bidPriceTicks,
+        );
+        if (bidAmounts) {
           const offerId = `mmx-${sourceHubSuffix}-${targetHubSuffix}-${pair.baseTokenId}-${pair.quoteTokenId}-bid-${levelId}`;
           specs.push({
             offerId,
             pairId: `cross:${sourceContext.chainId}:${pair.quoteTokenId}/${targetContext.chainId}:${pair.baseTokenId}`,
             hubEntityId: sourceHub.entityId,
             giveTokenId: pair.quoteTokenId,
-            giveAmount: bidGiveAmount,
+            giveAmount: bidAmounts.sourceAmount,
             wantTokenId: pair.baseTokenId,
-            wantAmount: baseSize,
+            wantAmount: bidAmounts.targetAmount,
             minFillRatio: 0,
             crossJurisdiction: {
               ...routeBase,
@@ -756,14 +804,14 @@ const buildMarketMakerCrossOfferSpecs = (
                 entityId: sourceContext.entityId,
                 counterpartyEntityId: sourceHub.entityId,
                 tokenId: pair.quoteTokenId,
-                amount: bidGiveAmount,
+                amount: bidAmounts.sourceAmount,
               },
               target: {
                 jurisdiction: targetContext.jurisdictionName,
                 entityId: targetHub.entityId,
                 counterpartyEntityId: targetContext.entityId,
                 tokenId: pair.baseTokenId,
-                amount: baseSize,
+                amount: bidAmounts.targetAmount,
               },
             },
           });

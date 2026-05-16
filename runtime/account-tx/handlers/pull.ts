@@ -14,6 +14,8 @@ type PullCancelTx = Extract<AccountTx, { type: 'pull_cancel' }>;
 const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 
 const absBigInt = (value: bigint): bigint => value >= 0n ? value : -value;
+const isPullRevealExpired = (deadline: number, currentTimestamp: number): boolean =>
+  Number.isFinite(deadline) && deadline > 0 && currentTimestamp >= deadline;
 
 export async function handlePullLock(
   accountMachine: AccountMachine,
@@ -125,7 +127,7 @@ export async function handlePullResolve(
     events.push(`🪝 Pull resolve ignored: ${pullId.slice(0, 8)}... fill ${ratio}/65535 already claimed ${previousRatio}/65535`);
     return { success: true, events, pullResolved: { pullId, fillRatio: previousRatio } };
   }
-  if (ratio > 0 && currentTimestamp > pull.revealedUntilTimestamp) {
+  if (ratio > 0 && isPullRevealExpired(pull.revealedUntilTimestamp, currentTimestamp)) {
     return { success: false, error: `Pull reveal deadline expired`, events };
   }
 
@@ -186,7 +188,7 @@ export async function handlePullCancel(
   const beneficiaryIsLeft = pull.amount > 0n;
   const payerIsLeft = !beneficiaryIsLeft;
   const beneficiaryRelease = byLeft === beneficiaryIsLeft;
-  const expiredPayerCancel = byLeft === payerIsLeft && currentTimestamp > pull.revealedUntilTimestamp;
+  const expiredPayerCancel = byLeft === payerIsLeft && isPullRevealExpired(pull.revealedUntilTimestamp, currentTimestamp);
   if (!beneficiaryRelease && !expiredPayerCancel) {
     return { success: false, error: `Only beneficiary can release an active pull, payer can cancel only after expiry`, events };
   }
