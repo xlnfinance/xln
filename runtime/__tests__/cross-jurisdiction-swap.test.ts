@@ -702,7 +702,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       data: { orderId: route.orderId, cancelRemainder: true },
     });
 
-    expect(result.mempoolOps?.map(op => op.tx.type)).toEqual(['pull_resolve', 'pull_cancel']);
+    expect(result.mempoolOps?.map(op => op.tx.type)).toEqual(['pull_resolve']);
     expect(result.mempoolOps?.[0]?.accountId).toBe(sourceUser);
     expect((result.mempoolOps?.[0]?.tx as any).data.binary).toMatch(/^0x/);
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('clearing');
@@ -931,6 +931,121 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(result.mempoolOps ?? []).toHaveLength(0);
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('resting');
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.fillSeq).toBeUndefined();
+  });
+
+  test('valid fill notice only queues account ack and does not mutate canonical route before commit', async () => {
+    const env = createEmptyEnv('cross-fill-notice-delayed-commit');
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('a1');
+    const sourceHub = entity('a2');
+    const targetHub = entity('a3');
+    const targetUser = entity('a4');
+    const state = makeState(sourceHub, addr('a2'), eth, sourceUser);
+    const route = {
+      ...buildPreparedCrossJurisdictionRoute({
+        orderId: 'cross-fill-delayed-commit',
+        makerEntityId: sourceUser,
+        hubEntityId: sourceHub,
+        source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+        target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+        status: 'resting',
+        createdAt: env.timestamp,
+        updatedAt: env.timestamp,
+        expiresAt: 70_000,
+      }, { runtimeSeed: 'cross-fill-delayed-commit', sourceDisputeDelayMs: 5_000, now: env.timestamp }),
+      status: 'resting' as const,
+    };
+    state.crossJurisdictionSwaps?.set(route.orderId, route);
+
+    const result = await applyEntityTx(env, state, {
+      type: 'crossJurisdictionFillNotice',
+      data: {
+        orderId: route.orderId,
+        fillSeq: 1,
+        incrementalSourceAmount: 500n,
+        incrementalTargetAmount: 450n,
+        cumulativeSourceAmount: 500n,
+        cumulativeTargetAmount: 450n,
+        cumulativeFillRatio: 32_768,
+        pairId: route.venueId || '',
+      },
+    });
+
+    expect(result.mempoolOps?.map(op => op.tx.type)).toEqual(['cross_swap_fill_ack']);
+    const canonical = result.newState.crossJurisdictionSwaps?.get(route.orderId);
+    expect(canonical?.status).toBe('resting');
+    expect(canonical?.fillSeq).toBeUndefined();
+    expect(canonical?.cumulativeFillRatio).toBeUndefined();
+  });
+
+  test('cross-j orderbook sweep closes expired unfilled route instead of being a no-op', async () => {
+    const env = createEmptyEnv('cross-sweep-expired');
+    env.timestamp = 100_000;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('b1');
+    const sourceHub = entity('b2');
+    const targetHub = entity('b3');
+    const targetUser = entity('b4');
+    const state = makeState(sourceHub, addr('b2'), eth, sourceUser);
+    state.timestamp = env.timestamp;
+    const route = {
+      ...buildPreparedCrossJurisdictionRoute({
+        orderId: 'cross-sweep-expired',
+        makerEntityId: sourceUser,
+        hubEntityId: sourceHub,
+        source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+        target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+        status: 'resting',
+        createdAt: 1_000,
+        updatedAt: 1_000,
+        expiresAt: 70_000,
+      }, { runtimeSeed: 'cross-sweep-expired', sourceDisputeDelayMs: 5_000, now: 1_000 }),
+      status: 'resting' as const,
+    };
+    state.crossJurisdictionSwaps?.set(route.orderId, route);
+    const account = state.accounts.get(sourceUser)!;
+    account.swapOffers.set(route.orderId, {
+      offerId: route.orderId,
+      giveTokenId: 1,
+      giveAmount: 1_000n,
+      wantTokenId: 1,
+      wantAmount: 900n,
+      priceTicks: 900n,
+      timeInForce: 0,
+      minFillRatio: 0,
+      makerIsLeft: account.leftEntity === sourceUser,
+      createdHeight: 0,
+      crossJurisdiction: { ...route },
+    });
+    account.pulls = new Map([[route.sourcePull!.pullId, {
+      pullId: route.sourcePull!.pullId,
+      tokenId: 1,
+      amount: route.sourcePull!.signedAmount,
+      claimedRatio: 0,
+      claimedAmount: 0n,
+      revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
+      fullHash: route.sourcePull!.fullHash,
+      partialRoot: route.sourcePull!.partialRoot,
+      createdHeight: 0,
+      createdTimestamp: 1_000,
+    }]]);
+
+    const result = await applyEntityTx(env, state, {
+      type: 'orderbookSweepCrossJurisdiction',
+      data: { reason: 'test-expired' },
+    });
+
+    expect(result.mempoolOps?.map(op => op.tx.type)).toEqual(['cross_swap_fill_ack', 'pull_cancel']);
+    expect(result.outputs.some(output =>
+      output.entityId === targetUser &&
+      output.entityTxs?.some(tx => tx.type === 'cancelPull'),
+    )).toBe(true);
+    expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('expired');
   });
 
   test('submitCrossJurisdictionSwap rejects missing target receiving account', async () => {

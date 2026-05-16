@@ -65,7 +65,6 @@ import {
 	stripCrossJurisdictionPrivateData,
 	validateCrossJurisdictionFillProgress,
 	withCanonicalCrossJurisdictionRouteHash,
-	withCrossJurisdictionFillProgress,
 } from '../cross-jurisdiction';
 import { decodeHashLadderBinary } from '../hashladder';
 import { handleR2C } from './handlers/r2c';
@@ -1808,11 +1807,9 @@ export const applyEntityTx = async (
           },
         },
       });
-      route = withCrossJurisdictionFillProgress(route, fill, newState.timestamp || env.timestamp);
-      newState.crossJurisdictionSwaps?.set(orderId, route);
       const firstValidator = entityState.config.validators[0];
       if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
-      addMessage(newState, `🌉 Cross-j fill notice ${orderId} recorded ${fill.nextRatio}/65535`);
+      addMessage(newState, `🌉 Cross-j fill notice ${orderId} queued account ack ${fill.nextRatio}/65535`);
       return { newState, outputs, mempoolOps };
     }
 
@@ -1973,18 +1970,6 @@ export const applyEntityTx = async (
         },
       });
       const closeRemainder = cancelRemainder || ratio < 65_535;
-      if (closeRemainder || ratio >= 65_535) {
-        mempoolOps.push({
-          accountId,
-          tx: {
-            type: 'pull_cancel',
-            data: {
-              pullId: canonicalRoute.sourcePull.pullId,
-              reason: 'beneficiary_release',
-            },
-          },
-        });
-      }
       canonicalRoute.status = 'clearing';
       canonicalRoute.pendingClearRequestedAt = deterministicEntityTimestamp(newState, env);
       canonicalRoute.clearingPolicy = closeRemainder ? 'cancel_and_clear' : ratio >= 65_535 ? 'full_fill' : 'manual';
@@ -2077,8 +2062,111 @@ export const applyEntityTx = async (
 
 	    if (entityTx.type === 'orderbookSweepCrossJurisdiction') {
 	      const newState = cloneEntityState(entityState);
-	      addMessage(newState, `🌉 Cross-j orderbook sweep${entityTx.data?.reason ? `: ${entityTx.data.reason}` : ''}`);
-	      return { newState, outputs: [] };
+      const outputs: EntityInput[] = [];
+      const mempoolOps: MempoolOp[] = [];
+      const now = deterministicEntityTimestamp(newState, env);
+      let expiredRoutes = 0;
+      let closedOffers = 0;
+      let waitingRoutes = 0;
+
+      for (const [orderId, storedRoute] of [...(newState.crossJurisdictionSwaps?.entries?.() ?? [])]) {
+        let route = storedRoute;
+        const offerRoute = findCrossJurisdictionOfferRoute(newState, orderId);
+        if (offerRoute) {
+          try {
+            route = mergeCrossJurisdictionRoute(route, withCanonicalCrossJurisdictionRouteHash(offerRoute.route));
+            newState.crossJurisdictionSwaps?.set(orderId, route);
+          } catch {
+            // The expiry cleanup below will still fail closed on the entity-level route.
+          }
+        }
+        if (isCrossJurisdictionTerminalStatus(route.status)) continue;
+        const routeExpired = isCrossJurisdictionRouteExpired(route, now);
+        const sourceExpired = isCrossJurisdictionPullExpired(route, 'source', now);
+        const targetExpired = isCrossJurisdictionPullExpired(route, 'target', now);
+        if (!routeExpired && !sourceExpired && !targetExpired) {
+          waitingRoutes++;
+          continue;
+        }
+
+        expiredRoutes++;
+        const sourceEntityId = (route.source as { entityId?: string } | undefined)?.entityId;
+        if (!sourceEntityId) {
+          route.status = 'failed';
+          route.updatedAt = now;
+          newState.crossJurisdictionSwaps?.set(orderId, route);
+          addMessage(newState, `🌉 Cross-j sweep ${orderId}: failed malformed route without source entity`);
+          continue;
+        }
+
+        const accountId = findAccountKey(newState, sourceEntityId);
+        const account = accountId ? newState.accounts.get(accountId) : undefined;
+        const hasFilledAmount =
+          Number(route.cumulativeFillRatio || route.claimedRatio || 0) > 0 ||
+          (route.filledSourceAmount ?? route.sourceClaimed ?? 0n) > 0n ||
+          (route.filledTargetAmount ?? route.targetClaimed ?? 0n) > 0n;
+
+        if (accountId && account?.swapOffers?.has(orderId)) {
+          cancelOrderbookOfferIfPresent(env, newState, accountId, orderId);
+          if (!accountHasCrossSwapAckQueued(account, orderId)) {
+            mempoolOps.push({
+              accountId,
+              tx: buildCrossJurisdictionCancelAck(orderId, route),
+            });
+            closedOffers++;
+          }
+        } else if (!accountId) {
+          addMessage(newState, `🌉 Cross-j sweep ${orderId}: no source account for ${formatEntityId(sourceEntityId)}`);
+        } else {
+          addMessage(newState, `🌉 Cross-j sweep ${orderId}: no live source offer in ${formatEntityId(accountId)}`);
+        }
+
+        if (!hasFilledAmount) {
+          if (accountId && account?.pulls?.has(route.sourcePull?.pullId || '')) {
+            const sourcePullId = route.sourcePull!.pullId;
+            mempoolOps.push({
+              accountId,
+              tx: {
+                type: 'pull_cancel',
+                data: {
+                  pullId: sourcePullId,
+                  reason: 'expired',
+                },
+              },
+            });
+          }
+          if (route.targetPull && route.target?.counterpartyEntityId && route.target?.entityId) {
+            outputs.push({
+              entityId: route.target.counterpartyEntityId,
+              entityTxs: [{
+                type: 'cancelPull',
+                data: {
+                  counterpartyEntityId: route.target.entityId,
+                  pullId: route.targetPull.pullId,
+                  description: `Cross-j ${orderId} sweep cancel target pull`,
+                },
+              }],
+            });
+          }
+          route.status = 'expired';
+        } else {
+          route.status = 'failed';
+        }
+        route.updatedAt = now;
+        route.clearingPolicy = hasFilledAmount ? 'manual' : 'cancel_and_clear';
+        newState.crossJurisdictionSwaps?.set(orderId, route);
+      }
+
+      if (expiredRoutes > 0) {
+        const firstValidator = entityState.config.validators[0];
+        if (firstValidator) outputs.push({ entityId: newState.entityId, signerId: firstValidator, entityTxs: [] });
+      }
+	      addMessage(
+        newState,
+        `🌉 Cross-j orderbook sweep${entityTx.data?.reason ? `: ${entityTx.data.reason}` : ''} ` +
+        `expired=${expiredRoutes} closedOffers=${closedOffers} waiting=${waitingRoutes}`,
+      );
+	      return { newState, outputs, mempoolOps };
 	    }
 
 	    if (entityTx.type === 'placeSwapOffer') {
