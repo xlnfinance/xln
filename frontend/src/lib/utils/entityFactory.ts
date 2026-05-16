@@ -20,6 +20,9 @@ const inflightAutoCreates = new Map<string, Promise<string | null>>();
 let warnedMissingEnv = false;
 let isCreatingJMachine = false;
 
+const normalizeJurisdictionKey = (value: string | null | undefined): string =>
+  String(value || '').trim().toLowerCase();
+
 async function waitForCondition(
   check: () => boolean,
   label: string,
@@ -60,6 +63,14 @@ export async function createEphemeralEntity(
   jurisdictionName: string,
   env: Env
 ): Promise<string> {
+  const existing = findReplicaBySigner(env, signerId);
+  const existingJurisdiction = String(existing?.state?.config?.jurisdiction?.name || '').trim();
+  if (existing?.entityId && normalizeJurisdictionKey(existingJurisdiction) !== normalizeJurisdictionKey(jurisdictionName)) {
+    throw new Error(
+      `SIGNER_JURISDICTION_CONFLICT: signer=${signerId} entity=${existing.entityId} existing=${existingJurisdiction} incoming=${jurisdictionName}`,
+    );
+  }
+
   const jurisdiction = buildJurisdictionConfig(env, jurisdictionName);
   if (!jurisdiction) {
     throw new Error(`No jurisdiction config for ${jurisdictionName}`);
@@ -133,8 +144,14 @@ function listJMachineNames(env: Env): string[] {
 }
 
 function getJReplica(env: Env, name?: string): JReplica | null {
+  const normalized = normalizeJurisdictionKey(name);
   if (name) {
-    return env.jReplicas.get(name) ?? null;
+    const direct = env.jReplicas.get(name);
+    if (direct) return direct;
+    for (const replica of env.jReplicas.values()) {
+      if (normalizeJurisdictionKey(replica?.name) === normalized) return replica;
+    }
+    return null;
   }
   return env.jReplicas.values().next().value ?? null;
 }
@@ -175,34 +192,12 @@ async function ensureJMachine(env: Env): Promise<string | null> {
 
   const names = listJMachineNames(env);
   if (names.length > 0) {
-    return env.activeJurisdiction || names[0]!;
+    return names[0] || env.activeJurisdiction || null;
   }
 
   isCreatingJMachine = true;
   try {
-    const { getXLN } = await import('$lib/stores/xlnStore');
-    const xln = await getXLN();
-
-    // Use Testnet from VaultStore (no xlnomy1)
-    const testnetName = 'Testnet';
-    const jReplica = getJReplica(env, testnetName);
-
-    if (!jReplica) {
-      throw new Error('Testnet J-machine not found - VaultStore should have imported it');
-    }
-
-    // Verify contracts exist
-    const depository = jReplica?.depositoryAddress;
-    const entityProvider = jReplica?.entityProviderAddress;
-
-    if (!depository || !entityProvider) {
-      console.error('[ensureJMachine] ❌ Testnet contracts missing');
-      console.error('   Depository:', depository || 'MISSING');
-      console.error('   EntityProvider:', entityProvider || 'MISSING');
-      throw new Error('Testnet contracts not deployed');
-    }
-
-    return testnetName;
+    throw new Error('No jurisdiction machine found - VaultStore should import the default jurisdictions first');
   } catch (err) {
     console.error('[ensureJMachine] ❌ Failed:', err);
     throw err;
@@ -219,7 +214,7 @@ export async function createSelfEntity(
   signerAddress: string,
   jurisdictionName?: string
 ): Promise<string | null> {
-  const jName = jurisdictionName || env.activeJurisdiction || await ensureJMachine(env);
+  const jName = jurisdictionName || await ensureJMachine(env);
   if (!jName) return null;
 
   return await createEphemeralEntity(signerAddress, jName, env);
@@ -234,8 +229,9 @@ export async function autoCreateEntityForSigner(
   jurisdiction: string = 'default'
 ): Promise<string | null> {
   if (!signerAddress) return null;
-  if (inflightAutoCreates.has(signerAddress)) {
-    return inflightAutoCreates.get(signerAddress) || null;
+  const inflightKey = `${signerAddress.toLowerCase()}:${normalizeJurisdictionKey(jurisdiction || 'default')}`;
+  if (inflightAutoCreates.has(inflightKey)) {
+    return inflightAutoCreates.get(inflightKey) || null;
   }
 
   const task = (async () => {
@@ -256,10 +252,23 @@ export async function autoCreateEntityForSigner(
       const targetJurisdiction =
         (jurisdiction && jurisdiction !== 'default' && names.includes(jurisdiction))
           ? jurisdiction
-          : (env.activeJurisdiction || names[0] || null);
+          : (names[0] || env.activeJurisdiction || null);
 
       const existing = findReplicaBySigner(env, signerAddress, targetJurisdiction);
       if (existing?.entityId) return existing.entityId;
+      const existingForSigner = findReplicaBySigner(env, signerAddress);
+      const existingJurisdiction = String(existingForSigner?.state?.config?.jurisdiction?.name || '').trim();
+      if (
+        existingForSigner?.entityId &&
+        targetJurisdiction &&
+        normalizeJurisdictionKey(existingJurisdiction) !== normalizeJurisdictionKey(targetJurisdiction)
+      ) {
+        console.warn(
+          `[EntityFactory] Refusing to create signer entity in another jurisdiction: ` +
+          `signer=${signerAddress.slice(0, 10)} existing=${existingJurisdiction} incoming=${targetJurisdiction}`,
+        );
+        return null;
+      }
 
       return await createSelfEntity(env, signerAddress, targetJurisdiction || undefined);
     } catch (error) {
@@ -268,10 +277,10 @@ export async function autoCreateEntityForSigner(
     }
   })();
 
-  inflightAutoCreates.set(signerAddress, task);
+  inflightAutoCreates.set(inflightKey, task);
   try {
     return await task;
   } finally {
-    inflightAutoCreates.delete(signerAddress);
+    inflightAutoCreates.delete(inflightKey);
   }
 }

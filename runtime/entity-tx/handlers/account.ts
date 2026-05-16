@@ -51,6 +51,7 @@ import {
   type CrossJurisdictionFillInstruction,
   type CrossMarketOffer,
 } from '../../cross-jurisdiction-orderbook';
+import { assertSameJurisdictionAccount } from '../../jurisdiction-runtime';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const getJurisdictionId = (state: EntityState, env: Env): string => {
@@ -345,6 +346,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
   markStorageAccountDirty(env, newState.entityId, counterpartyId);
   const existingAccountKey = findAccountKeyInsensitive(newState.accounts, counterpartyId);
   let accountMachine = existingAccountKey ? newState.accounts.get(existingAccountKey) : undefined;
+  assertSameJurisdictionAccount(env, newState.entityId, newState.config?.jurisdiction, counterpartyId);
   let isNewAccount = false;
   if (!accountMachine) {
     isNewAccount = true;
@@ -1818,7 +1820,7 @@ export function processOrderbookSwaps(
         },
         accountId,
       ));
-      if (live) crossLiveOfferMeta.set(`${accountId}:${offerId}`, live);
+      if (live) crossLiveOfferMeta.set(swapKey(accountId, String(offerId)), live);
     }
   }
 
@@ -1826,7 +1828,7 @@ export function processOrderbookSwaps(
     for (const rawOffer of crossJurisdictionSwapOffers) {
       const marketOffer = buildCrossMarketOffer(rawOffer);
       if (!marketOffer) continue;
-      crossLiveOfferMeta.set(`${rawOffer.accountId}:${rawOffer.offerId}`, marketOffer);
+      crossLiveOfferMeta.set(swapKey(rawOffer.accountId, rawOffer.offerId), marketOffer);
     }
 
     for (const rawOffer of sortSwapOffersForOrderbook(crossJurisdictionSwapOffers)) {
@@ -1846,7 +1848,7 @@ export function processOrderbookSwaps(
         continue;
       }
 
-      const currentNamespacedOrderId = `${currentAccountId}:${rawOffer.offerId}`;
+      const currentNamespacedOrderId = swapKey(currentAccountId, rawOffer.offerId);
       crossLiveOfferMeta.set(currentNamespacedOrderId, marketOffer);
       if (hasQueuedSwapResolveForEntityState(hubState, queuedSwapResolutions, currentAccountId, rawOffer.offerId)) {
         continue;
@@ -1903,7 +1905,12 @@ export function processOrderbookSwaps(
         rejectInvalidCrossOffer(currentAccountId, rawOffer.offerId, `cross-post-only-reject:${rejectEvents.map(event => event.reason).join(',')}`);
         continue;
       }
-      if (rehydrateOnly) continue;
+      if (rehydrateOnly) {
+        if (tradeEvents.length > 0) {
+          quarantineOffer(currentAccountId, rawOffer.offerId, `rehydrate-cross-trade:${tradeEvents.length}`);
+        }
+        continue;
+      }
 
       const fillsPerOrder = new Map<string, { filledLots: number; weightedCost: bigint }>();
       for (const event of tradeEvents) {

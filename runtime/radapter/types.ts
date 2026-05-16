@@ -79,4 +79,12 @@ export type RuntimeAdapterEntitySummary = {
   entityId: string;
   label: string;
   height: number;
+  isHub?: boolean;
+  jurisdiction?: {
+    name?: string;
+    address?: string;
+    chainId?: number | string;
+    depositoryAddress?: string;
+    entityProviderAddress?: string;
+  };
 };

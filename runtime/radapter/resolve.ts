@@ -115,6 +115,33 @@ const labelForState = (state: EntityState): string => {
   return name || state.entityId;
 };
 
+const isHubState = (state: EntityState): boolean =>
+  state.profile?.isHub === true || Boolean(state.orderbookExt?.hubProfile);
+
+const jurisdictionSummary = (jurisdiction: unknown): RuntimeAdapterEntitySummary['jurisdiction'] | undefined => {
+  if (!jurisdiction || typeof jurisdiction !== 'object') return undefined;
+  const value = jurisdiction as {
+    name?: unknown;
+    address?: unknown;
+    chainId?: unknown;
+    depositoryAddress?: unknown;
+    entityProviderAddress?: unknown;
+  };
+  const name = String(value.name ?? '').trim();
+  const address = String(value.address ?? '').trim();
+  const chainId = value.chainId as number | string | undefined;
+  const depositoryAddress = String(value.depositoryAddress ?? '').trim();
+  const entityProviderAddress = String(value.entityProviderAddress ?? '').trim();
+  if (!name && !address && chainId === undefined && !depositoryAddress && !entityProviderAddress) return undefined;
+  return {
+    ...(name ? { name } : {}),
+    ...(address ? { address } : {}),
+    ...(chainId !== undefined ? { chainId } : {}),
+    ...(depositoryAddress ? { depositoryAddress } : {}),
+    ...(entityProviderAddress ? { entityProviderAddress } : {}),
+  };
+};
+
 const headFromEnv = (env: Env): StorageHead => {
   const storage = env.runtimeConfig?.storage;
   const height = envHeight(env);
@@ -175,21 +202,33 @@ const listEntitySummaries = async (
         throw new RuntimeAdapterError('E_NOT_FOUND', `entity summary not found at height ${height}: ${normalizeEntityId(id)}`);
       }
       const profileName = loadedView ? String(loadedView.core.profile?.name || '').trim() : '';
+      const isHub = loadedView
+        ? loadedView.core.profile?.isHub === true || Boolean(loadedView.core.orderbookHubProfile)
+        : loaded ? isHubState(loaded) : false;
+      const jurisdiction = jurisdictionSummary(loadedView?.core.config?.jurisdiction ?? loaded?.config?.jurisdiction);
       summaries.push({
         entityId: normalizeEntityId(id),
         label: profileName || (loaded ? labelForState(loaded) : normalizeEntityId(id)),
         height: loadedView?.core.height ?? loaded?.height ?? height,
+        ...(isHub ? { isHub: true } : {}),
+        ...(jurisdiction ? { jurisdiction } : {}),
       });
     }
     return summaries.sort((left, right) => compareAscii(left.entityId, right.entityId));
   }
 
   return Array.from(ctx.env.eReplicas?.values?.() ?? [])
-    .map((replica) => ({
-      entityId: normalizeEntityId(replica.entityId),
-      label: labelForState(replica.state),
-      height: Math.max(0, Math.floor(Number(replica.state.height ?? 0))),
-    }))
+    .map((replica) => {
+      const isHub = isHubState(replica.state);
+      const jurisdiction = jurisdictionSummary(replica.state.config?.jurisdiction);
+      return {
+        entityId: normalizeEntityId(replica.entityId),
+        label: labelForState(replica.state),
+        height: Math.max(0, Math.floor(Number(replica.state.height ?? 0))),
+        ...(isHub ? { isHub: true } : {}),
+        ...(jurisdiction ? { jurisdiction } : {}),
+      };
+    })
     .sort((left, right) => compareAscii(left.entityId, right.entityId));
 };
 
@@ -387,10 +426,13 @@ const projectViewFrame = async (
   const stored = isCurrentHeight
     ? projectLiveEntityViewPage(ctx, activeEntityId, storedQuery)
     : await loadRequiredEntityViewPage(ctx, activeEntityId, height, storedQuery);
+  const fallbackJurisdiction = jurisdictionSummary(stored.core.config?.jurisdiction);
   const summary = entities.find((entity) => normalizeEntityId(entity.entityId) === activeEntityId) ?? {
     entityId: activeEntityId,
     label: String(stored.core.profile?.name || '').trim() || activeEntityId,
     height: Math.max(0, Math.floor(Number(stored.core.height ?? height))),
+    ...(stored.core.profile?.isHub === true || Boolean(stored.core.orderbookHubProfile) ? { isHub: true } : {}),
+    ...(fallbackJurisdiction ? { jurisdiction: fallbackJurisdiction } : {}),
   };
 
   return {

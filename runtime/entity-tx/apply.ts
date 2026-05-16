@@ -78,6 +78,7 @@ import {
 } from './handlers/settle';
 import { handleDisputeFinalize, handleDisputeStart } from './handlers/dispute';
 import { buildCrossJurisdictionCancelAck } from '../cross-jurisdiction-orderbook';
+import { assertSameJurisdictionAccount } from '../jurisdiction-runtime';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
@@ -404,6 +405,7 @@ export const applyEntityTx = async (
       // Account keyed by counterparty ID (simpler than canonical)
       const counterpartyId = normalizeEntityRef(targetEntityId);
       const isLeft = isLeftEntity(entityState.entityId, targetEntityId);
+      assertSameJurisdictionAccount(env, entityState.entityId, entityState.config?.jurisdiction, targetEntityId);
 
       if (findAccountKey(entityState, counterpartyId)) {
         const error =

@@ -486,19 +486,31 @@ function parseUiAmount(text: string): number {
 
 async function ensureEntityWorkspaceVisible(page: Page, entityId?: string): Promise<void> {
   if (!entityId) return;
+  const canonicalEntityId = entityId.toLowerCase();
+  const compactEntityId = /^0x[0-9a-f]{64}$/.test(canonicalEntityId)
+    ? `${canonicalEntityId.slice(0, 10)}...${canonicalEntityId.slice(-6)}`
+    : canonicalEntityId;
+  const matchesEntityId = (text: string) => {
+    const normalized = String(text || '').toLowerCase();
+    return normalized.includes(canonicalEntityId) || normalized.includes(compactEntityId);
+  };
   const entityTrigger = page.locator('.hero-context-switcher .dropdown-trigger, .context-switcher .dropdown-trigger, .entity-slot .dropdown-trigger').first();
   const triggerVisible = await entityTrigger.isVisible({ timeout: 5_000 }).catch(() => false);
   if (!triggerVisible) {
     return;
   }
   const currentLabel = String((await entityTrigger.textContent()) || '');
-  if (currentLabel.toLowerCase().includes(entityId.toLowerCase())) {
+  if (matchesEntityId(currentLabel)) {
     return;
   }
   await entityTrigger.click();
   let entityOption = page.locator('.entity-row, .signer-item, .dropdown-item').filter({ hasText: entityId }).first();
   const exactVisible = await entityOption.isVisible({ timeout: 1_000 }).catch(() => false);
   if (!exactVisible) {
+    entityOption = page.locator('.entity-row, .signer-item, .dropdown-item').filter({ hasText: compactEntityId }).first();
+  }
+  const compactVisible = await entityOption.isVisible({ timeout: 1_000 }).catch(() => false);
+  if (!compactVisible) {
     entityOption = page.locator('.entity-row, .signer-item, .dropdown-item').first();
   }
   const optionVisible = await entityOption.isVisible({ timeout: 2_000 }).catch(() => false);
@@ -509,8 +521,8 @@ async function ensureEntityWorkspaceVisible(page: Page, entityId?: string): Prom
   await entityOption.click();
   await expect.poll(async () => {
     const text = await entityTrigger.textContent();
-    return String(text || '').toLowerCase();
-  }, { timeout: 20_000, intervals: [250, 500, 1000] }).toContain(entityId.toLowerCase());
+    return matchesEntityId(String(text || ''));
+  }, { timeout: 20_000, intervals: [250, 500, 1000] }).toBe(true);
 }
 
 async function ensureAccountWorkspaceVisible(page: Page, counterpartyId?: string, entityId?: string): Promise<void> {

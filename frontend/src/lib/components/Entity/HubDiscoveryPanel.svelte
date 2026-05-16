@@ -129,6 +129,45 @@
     }
   };
 
+  function collectLocalHubs(): Hub[] {
+    const replicas = env?.eReplicas;
+    if (!replicas) return [];
+    const entityJurisdiction = getEntityJurisdictionKey(env, entityId);
+    const result: Hub[] = [];
+    for (const replica of replicas.values()) {
+      const state = replica?.state;
+      const profile = state?.profile;
+      if (!replica?.entityId || profile?.isHub !== true) continue;
+      const hubJurisdiction = jurisdictionKey(state?.config?.jurisdiction);
+      if (entityJurisdiction && hubJurisdiction && hubJurisdiction !== entityJurisdiction) continue;
+      const fullEntityId = replica.entityId.startsWith('0x') ? replica.entityId : `0x${replica.entityId}`;
+      result.push({
+        entityId: replica.entityId,
+        name: String(profile.name || replica.entityId),
+        metadata: {
+          description: String(profile.bio || 'Payment hub'),
+          ...(profile.website ? { website: String(profile.website) } : {}),
+          ...(state?.config?.jurisdiction ? { jurisdiction: state.config.jurisdiction } : {}),
+          fee: Number((profile as { routingFeePPM?: number })?.routingFeePPM ?? 0),
+          peerCount: state?.accounts?.size ?? 0,
+        },
+        runtimeId: String(env.runtimeId || ''),
+        wsUrl: null,
+        lastSeen: Number(state?.timestamp || Date.now()),
+        raw: formatRawProfile(profile),
+        avatar: entityAvatar(activeFunctions, fullEntityId),
+      });
+    }
+    return result;
+  }
+
+  function mergeHubs(primary: Hub[], secondary: Hub[]): Hub[] {
+    const byId = new Map<string, Hub>();
+    for (const hub of secondary) byId.set(normalizeEntityId(hub.entityId), hub);
+    for (const hub of primary) byId.set(normalizeEntityId(hub.entityId), hub);
+    return Array.from(byId.values());
+  }
+
   function toggleExpand(hubId: string) {
     expandedHub = expandedHub === hubId ? null : hubId;
   }
@@ -203,8 +242,10 @@
     error = '';
 
     try {
+      const localHubs = collectLocalHubs();
+      if (localHubs.length > 0) hubs = localHubs;
       const fetchedHubs = await fetchPublicHubsUntilReady();
-      hubs = fetchedHubs;
+      hubs = mergeHubs(fetchedHubs, localHubs);
       if (hubs.length === 0) {
         error = 'No public hubs discovered for this jurisdiction yet. Refresh after the relay and hub runtimes are online.';
       }

@@ -197,18 +197,27 @@
     return typeof frame.activeJurisdiction === 'string' ? frame.activeJurisdiction : null;
   }
 
+  function getActiveSignerJurisdictionName(names: string[]): string | null {
+    const vault = $activeRuntimeStore;
+    const activeSignerIndex = Number(vault?.activeSignerIndex ?? 0);
+    const activeSigner = vault?.signers?.[activeSignerIndex] || vault?.signers?.[0] || null;
+    return resolveJMachineName(names, activeSigner?.jurisdiction) || null;
+  }
+
   // Auto-select jurisdiction when available (but NOT when entity is selected)
   $effect(() => {
     if (!availableJurisdictions.length) return;
     // Don't auto-set jurisdiction if user has selected an entity
     if (selectedEntityId) return;
+    const names = availableJurisdictions.map((j) => j.name).filter(Boolean);
+    const activeSignerJurisdiction = getActiveSignerJurisdictionName(names);
     if (!selectedJurisdictionName) {
-      const active = getFrameActiveJurisdiction(currentFrame) || availableJurisdictions[0]?.name;
-      if (active) selectedJurisdictionName = active;
+      const primary = activeSignerJurisdiction || resolveJMachineName(names, getFrameActiveJurisdiction(currentFrame)) || availableJurisdictions[0]?.name;
+      if (primary) selectedJurisdictionName = primary;
       return;
     }
     if (!availableJurisdictions.find((j) => j.name === selectedJurisdictionName)) {
-      selectedJurisdictionName = availableJurisdictions[0]?.name || null;
+      selectedJurisdictionName = activeSignerJurisdiction || availableJurisdictions[0]?.name || null;
     }
   });
 
@@ -286,6 +295,12 @@
     return Array.from(jReplicas.keys());
   }
 
+  function resolveJMachineName(names: string[], candidate: string | null | undefined): string | null {
+    const normalized = String(candidate || '').trim().toLowerCase();
+    if (!normalized) return null;
+    return names.find((name) => name.trim().toLowerCase() === normalized) || null;
+  }
+
   function getReplicaJurisdiction(replica: EntityReplica | null | undefined): string {
     return String(replica?.state?.config?.jurisdiction?.name || '').trim().toLowerCase();
   }
@@ -357,34 +372,34 @@
 
     const names = listJMachineNames(env);
 
-    // DISABLED: Don't auto-create J-machine (VaultStore imports Testnet)
-    // User must explicitly create J-machine via UI if needed
+    // VaultStore imports the default jurisdiction set; user-created jurisdictions stay explicit.
     if (names.length === 0) {
-      console.warn('[ensureSelfEntities] No J-machines - VaultStore should import Testnet');
+      console.warn('[ensureSelfEntities] No J-machines - VaultStore should import default jurisdictions');
       return; // Don't auto-create xlnomy1
-    }
-
-    let jurisdiction: string | null = selectedJurisdictionName && names.includes(selectedJurisdictionName)
-      ? selectedJurisdictionName
-      : (env.activeJurisdiction ?? null);
-    if (!jurisdiction) {
-      jurisdiction = names[0] || null;
     }
 
     const selectedSignerLower = String(selectedSignerId || '').trim().toLowerCase();
     const activeSignerIndex = Number(vault.activeSignerIndex ?? 0);
+    const selectedJurisdictionKey = String(selectedJurisdictionName || '').trim().toLowerCase();
+    const jurisdictionSigner = selectedJurisdictionKey
+      ? vault.signers.find((entry) => String(entry?.jurisdiction || '').trim().toLowerCase() === selectedJurisdictionKey)
+      : null;
     const targetSigners = selectedSignerLower
       ? vault.signers.filter((entry) => String(entry.address || '').trim().toLowerCase() === selectedSignerLower)
-      : [vault.signers[activeSignerIndex] || vault.signers[0]].filter(
+      : [jurisdictionSigner || vault.signers[activeSignerIndex] || vault.signers[0]].filter(
         (entry): entry is NonNullable<typeof entry> => Boolean(entry),
       );
 
     for (const signerEntry of targetSigners) {
       if (runEpoch !== ensureSelfEntitiesEpoch) return;
       const signerAddress = signerEntry.address;
+      const selectedJurisdiction = resolveJMachineName(names, selectedJurisdictionName);
+      const signerJurisdiction = resolveJMachineName(names, signerEntry.jurisdiction);
+      const activeJurisdiction = resolveJMachineName(names, env.activeJurisdiction);
+      const jurisdiction = signerJurisdiction || selectedJurisdiction || names[0] || activeJurisdiction;
 
-	      if (!signerAddress) continue;
-	      const selfEntityKey = `${signerAddress.toLowerCase()}:${jurisdiction || ''}`;
+      if (!signerAddress || !jurisdiction) continue;
+      const selfEntityKey = `${signerAddress.toLowerCase()}:${jurisdiction}`;
       if (selfEntityChecked.has(selfEntityKey) || selfEntityInFlight.has(selfEntityKey)) continue;
 
       const existing = findReplicaBySigner(env, signerAddress, jurisdiction);
