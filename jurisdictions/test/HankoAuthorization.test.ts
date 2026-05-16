@@ -15,6 +15,9 @@ import {
 } from "./helpers/hanko.ts";
 
 const HANKO_ABI = ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'];
+const BOARD_ABI = [
+  'tuple(uint16 votingThreshold, bytes32[] entityIds, uint16[] votingPowers, uint32 boardChangeDelay, uint32 controlChangeDelay, uint32 dividendChangeDelay)'
+];
 const SECP256K1_N = BigInt("0xfffffffffffffffffffffffffffffffebaaedce6af48a03bbfd25e8cd0364141");
 
 function buildHighSHanko(entityId: string, hash: string, privateKey: string): string {
@@ -29,6 +32,28 @@ function buildHighSHanko(entityId: string, hash: string, privateKey: string): st
     packedSig,
     [[ethers.zeroPadValue(entityId, 32), [0], [1], 1]],
   ]]);
+}
+
+function buildRecoverEntityInputs(signerAddress: string, hash: string, privateKey: string): { encodedBoard: string; encodedSignature: string; boardHash: string } {
+  const signerEntityId = ethers.zeroPadValue(signerAddress, 32);
+  const encodedBoard = ethers.AbiCoder.defaultAbiCoder().encode(BOARD_ABI, [[
+    1,
+    [signerEntityId],
+    [1],
+    0,
+    0,
+    0,
+  ]]);
+  const signingKey = new ethers.SigningKey(privateKey);
+  const signature = signingKey.sign(ethers.getBytes(hash));
+  const vBit = signature.v === 28 ? 1 : 0;
+  const packedSig = ethers.concat([signature.r, signature.s, ethers.toBeHex(vBit, 1)]);
+  const encodedSignature = ethers.AbiCoder.defaultAbiCoder().encode(['bytes[]'], [[packedSig]]);
+  return {
+    encodedBoard,
+    encodedSignature,
+    boardHash: ethers.keccak256(encodedBoard),
+  };
 }
 
 /**
@@ -144,6 +169,43 @@ describe("Hanko Authorization", function () {
     expect(await depository.entityNonces(entity1Id)).to.equal(0n);
     expect(await depository._reserves(entity1Id, tokenId)).to.equal(1_000n);
     expect(await depository._reserves(entity2Id, tokenId)).to.equal(0n);
+  });
+
+  it("recoverEntity uses the board hash index for registered entities", async function () {
+    const { entityProvider, entity1 } = await loadFixture(deployFixture);
+    const hash = ethers.keccak256(ethers.toUtf8Bytes("indexed recovery"));
+    const { encodedBoard, encodedSignature, boardHash } = buildRecoverEntityInputs(
+      entity1.address,
+      hash,
+      deriveHardhatPrivateKey(1),
+    );
+
+    const tx = await entityProvider.registerNumberedEntity(boardHash);
+    const receipt = await tx.wait();
+    const event = receipt?.logs
+      .map((log) => {
+        try {
+          return entityProvider.interface.parseLog(log);
+        } catch {
+          return null;
+        }
+      })
+      .find((log) => log?.name === "EntityRegistered");
+    const entityNumber = event?.args?.entityNumber as bigint;
+    const entityId = ethers.zeroPadValue(ethers.toBeHex(entityNumber), 32);
+
+    expect(await entityProvider.boardHashToEntityId(boardHash)).to.equal(entityId);
+    expect(await entityProvider.entityIdToNumber(entityId)).to.equal(entityNumber);
+    expect(await entityProvider.recoverEntity(encodedBoard, encodedSignature, hash)).to.equal(entityNumber);
+  });
+
+  it("rejects duplicate active board hashes instead of making recoverEntity ambiguous", async function () {
+    const { entityProvider, entity1 } = await loadFixture(deployFixture);
+    const hash = ethers.keccak256(ethers.toUtf8Bytes("duplicate board"));
+    const { boardHash } = buildRecoverEntityInputs(entity1.address, hash, deriveHardhatPrivateKey(1));
+
+    await expect(entityProvider.registerNumberedEntity(boardHash)).to.not.be.reverted;
+    await expect(entityProvider.registerNumberedEntity(boardHash)).to.be.revertedWith("Board hash already registered");
   });
 
   it("does not expose unsafeProcessBatch", async function () {
