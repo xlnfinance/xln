@@ -46,6 +46,8 @@ contract EntityProvider is ERC1155 {
   
   // Sequential numbering for registered entities
   uint256 public nextNumber = 1;
+  mapping(bytes32 => bytes32) public boardHashToEntityId;
+  mapping(bytes32 => uint256) public entityIdToNumber;
   
 
   
@@ -104,6 +106,8 @@ contract EntityProvider is ERC1155 {
         controlThreshold: 51
       })))
     });
+    boardHashToEntityId[foundationQuorum] = foundationId;
+    entityIdToNumber[foundationId] = FOUNDATION_ENTITY;
     
     // Setup governance for foundation entity
     (uint256 controlTokenId, uint256 dividendTokenId) = getTokenIds(FOUNDATION_ENTITY);
@@ -134,6 +138,9 @@ contract EntityProvider is ERC1155 {
    * @return entityNumber The assigned entity number
    */
   function registerNumberedEntity(bytes32 boardHash) external returns (uint256 entityNumber) {
+    require(boardHash != bytes32(0), "Invalid board hash");
+    require(boardHashToEntityId[boardHash] == bytes32(0), "Board hash already registered");
+
     entityNumber = nextNumber++;
     bytes32 entityId = bytes32(entityNumber);
 
@@ -163,6 +170,8 @@ contract EntityProvider is ERC1155 {
 
     totalControlSupply[entityId] = TOTAL_CONTROL_SUPPLY;
     totalDividendSupply[entityId] = TOTAL_DIVIDEND_SUPPLY;
+    boardHashToEntityId[boardHash] = entityId;
+    entityIdToNumber[entityId] = entityNumber;
 
     emit EntityRegistered(entityId, entityNumber, boardHash);
     emit GovernanceEnabled(entityId, controlTokenId, dividendTokenId);
@@ -188,6 +197,9 @@ contract EntityProvider is ERC1155 {
     bytes32 articlesHash = keccak256(abi.encode(defaultArticles));
 
     for (uint256 i = 0; i < boardHashes.length; i++) {
+      require(boardHashes[i] != bytes32(0), "Invalid board hash");
+      require(boardHashToEntityId[boardHashes[i]] == bytes32(0), "Board hash already registered");
+
       uint256 entityNumber = nextNumber++;
       bytes32 entityId = bytes32(entityNumber);
 
@@ -209,6 +221,8 @@ contract EntityProvider is ERC1155 {
 
       totalControlSupply[entityId] = TOTAL_CONTROL_SUPPLY;
       totalDividendSupply[entityId] = TOTAL_DIVIDEND_SUPPLY;
+      boardHashToEntityId[boardHashes[i]] = entityId;
+      entityIdToNumber[entityId] = entityNumber;
 
       emit EntityRegistered(entityId, entityNumber, boardHashes[i]);
       emit GovernanceEnabled(entityId, controlTokenId, dividendTokenId);
@@ -276,6 +290,9 @@ contract EntityProvider is ERC1155 {
     EntityArticles memory articles
   ) external {
     require(entities[entityId].currentBoardHash != bytes32(0), "Entity doesn't exist");
+    require(newBoardHash != bytes32(0), "Invalid board hash");
+    bytes32 existingEntityForBoard = boardHashToEntityId[newBoardHash];
+    require(existingEntityForBoard == bytes32(0) || existingEntityForBoard == entityId, "Board hash already registered");
     require(keccak256(abi.encode(articles)) == entities[entityId].articlesHash, "Invalid articles");
     
     uint32 delay = _getDelayForProposer(articles, proposerType);
@@ -304,8 +321,13 @@ contract EntityProvider is ERC1155 {
     require(entities[entityId].currentBoardHash != bytes32(0), "Entity doesn't exist");
     require(entities[entityId].proposedBoardHash != bytes32(0), "No proposed board");
     require(block.number >= entities[entityId].activateAtBlock, "Delay period not met");
+    bytes32 proposedBoardHash = entities[entityId].proposedBoardHash;
+    bytes32 existingEntityForBoard = boardHashToEntityId[proposedBoardHash];
+    require(existingEntityForBoard == bytes32(0) || existingEntityForBoard == entityId, "Board hash already registered");
     
-    entities[entityId].currentBoardHash = entities[entityId].proposedBoardHash;
+    delete boardHashToEntityId[entities[entityId].currentBoardHash];
+    entities[entityId].currentBoardHash = proposedBoardHash;
+    boardHashToEntityId[proposedBoardHash] = entityId;
     entities[entityId].proposedBoardHash = bytes32(0);
     entities[entityId].activateAtBlock = 0;
     
@@ -354,16 +376,13 @@ contract EntityProvider is ERC1155 {
   ) public view returns (uint256 entityId) {
     bytes32 boardHash = keccak256(encodedBoard);
     
-    // First try to find registered entity with this board hash
-    for (uint256 i = 1; i < nextNumber; i++) {
-      bytes32 candidateEntityId = bytes32(i);
-      if (entities[candidateEntityId].currentBoardHash != bytes32(0) && entities[candidateEntityId].currentBoardHash == boardHash) {
-        // Verify signature for this registered entity
-        uint16 boardResult = _verifyBoard(hash, encodedBoard, encodedSignature);
-        if (boardResult > 0) {
-          return i; // Return entity number
-        }
+    bytes32 registeredEntityId = boardHashToEntityId[boardHash];
+    if (registeredEntityId != bytes32(0)) {
+      uint16 boardResult = _verifyBoard(hash, encodedBoard, encodedSignature);
+      if (boardResult > 0) {
+        return entityIdToNumber[registeredEntityId];
       }
+      return 0;
     }
     
     // If no registered entity found, try as lazy entity
@@ -1033,6 +1052,9 @@ contract EntityProvider is ERC1155 {
     bytes32 boardHash,
     EntityArticles memory articles
   ) external onlyFoundation returns (uint256 entityNumber) {
+    require(boardHash != bytes32(0), "Invalid board hash");
+    require(boardHashToEntityId[boardHash] == bytes32(0), "Board hash already registered");
+
     entityNumber = nextNumber++;
     bytes32 entityId = bytes32(entityNumber);
     
@@ -1054,6 +1076,8 @@ contract EntityProvider is ERC1155 {
     
     totalControlSupply[entityId] = TOTAL_CONTROL_SUPPLY;
     totalDividendSupply[entityId] = TOTAL_DIVIDEND_SUPPLY;
+    boardHashToEntityId[boardHash] = entityId;
+    entityIdToNumber[entityId] = entityNumber;
     
     emit EntityRegistered(entityId, entityNumber, boardHash);
     emit GovernanceEnabled(entityId, controlTokenId, dividendTokenId);
