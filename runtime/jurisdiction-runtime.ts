@@ -277,15 +277,15 @@ function sameAccountJurisdiction(sourceJurisdiction: unknown, targetJurisdiction
   return Boolean(sourceName && targetName && sourceName === targetName);
 }
 
-const findLocalEntityJurisdiction = (env: Env, entityId: string): unknown | null => {
+const findLocalEntityJurisdiction = (env: Env, entityId: string): { found: boolean; jurisdiction: unknown | null } => {
   const target = normalizeEntityRef(entityId);
   for (const [replicaKey, replica] of env.eReplicas?.entries?.() || []) {
     const replicaEntityId = normalizeEntityRef(replica?.state?.entityId || replica?.entityId || replicaKey);
     if (replicaEntityId === target) {
-      return replica?.state?.config?.jurisdiction ?? null;
+      return { found: true, jurisdiction: replica?.state?.config?.jurisdiction ?? null };
     }
   }
-  return null;
+  return { found: false, jurisdiction: null };
 };
 
 const findProfileJurisdiction = (env: Env, entityId: string): unknown | null => {
@@ -309,9 +309,16 @@ export function assertSameJurisdictionAccount(
     );
   }
 
-  const targetJurisdiction =
-    findLocalEntityJurisdiction(env, counterpartyEntityId) ??
-    findProfileJurisdiction(env, counterpartyEntityId);
+  const localTarget = findLocalEntityJurisdiction(env, counterpartyEntityId);
+  if (localTarget.found && !localTarget.jurisdiction) {
+    throw new Error(
+      `ACCOUNT_JURISDICTION_UNKNOWN: entity=${formatEntityId(sourceEntityId)} ` +
+      `counterparty=${formatEntityId(counterpartyEntityId)}`,
+    );
+  }
+  const targetJurisdiction = localTarget.found
+    ? localTarget.jurisdiction
+    : findProfileJurisdiction(env, counterpartyEntityId);
 
   if (!targetJurisdiction) {
     throw new Error(

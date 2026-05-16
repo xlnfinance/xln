@@ -1688,12 +1688,111 @@ export function processOrderbookSwaps(
   };
 
   const crossLiveOfferMeta = new Map<string, CrossMarketOffer>();
+  const assertedCrossJurisdictionPairs = new Set<string>();
+
+  const refreshExistingCrossBookOrder = (
+    pairId: string,
+    namespacedOrderId: string,
+    meta: CrossMarketOffer,
+  ): void => {
+    let book = bookCache.get(pairId) || ext.books.get(pairId);
+    if (!book || !getBookOrder(book, namespacedOrderId)) return;
+
+    const cancelResult = applyCommand(book, {
+      kind: 1,
+      ownerId: meta.makerId,
+      orderId: namespacedOrderId,
+    });
+    book = cancelResult.state;
+
+    const qtyLots = meta.baseAmount / SWAP_LOT_SCALE;
+    if (qtyLots > 0n) {
+      if (qtyLots > 0xFFFFFFFFn) {
+        throw new Error(`ORDERBOOK_CROSS_J_REFRESH_QTY_INVALID: pair=${pairId} order=${namespacedOrderId} qty=${qtyLots.toString()}`);
+      }
+      const addResult = applyCommand(book, {
+        kind: 0,
+        ownerId: meta.makerId,
+        orderId: namespacedOrderId,
+        side: meta.side,
+        tif: meta.offer.timeInForce,
+        postOnly: true,
+        priceTicks: meta.priceTicks,
+        qtyLots: Number(qtyLots),
+        minFillRatio: meta.offer.minFillRatio,
+      });
+      const rejected = addResult.events.some((event) => event.type === 'REJECT' && event.orderId === namespacedOrderId);
+      if (rejected || addResult.events.some((event) => event.type === 'TRADE')) {
+        throw new Error(`ORDERBOOK_CROSS_J_REFRESH_REJECT: pair=${pairId} order=${namespacedOrderId}`);
+      }
+      book = addResult.state;
+    }
+
+    bookCache.set(pairId, book);
+    bookUpdates.push({ pairId, book });
+  };
+
+  const assertCrossBookMatchesKnownRoutes = (pairId: string, book: BookState): void => {
+    if (assertedCrossJurisdictionPairs.has(pairId)) return;
+    assertedCrossJurisdictionPairs.add(pairId);
+
+    for (const order of book.orders.values()) {
+      const orderId = order.orderId;
+      const meta = crossLiveOfferMeta.get(orderId) ?? buildCrossMarketOfferFromBookOrder(orderId);
+      if (!meta) {
+        throw new Error(`ORDERBOOK_CROSS_J_ORPHAN_BOOK_ORDER: pair=${pairId} order=${orderId}`);
+      }
+
+      const lastColon = orderId.lastIndexOf(':');
+      if (lastColon === -1) {
+        throw new Error(`ORDERBOOK_CROSS_J_MALFORMED_BOOK_ORDER: pair=${pairId} order=${orderId}`);
+      }
+      const accountId = orderId.slice(0, lastColon);
+      const offerId = orderId.slice(lastColon + 1);
+      if (hasQueuedCrossSwapAckForEntityState(hubState, accountId, offerId)) {
+        throw new Error(`ORDERBOOK_CROSS_J_PENDING_ACK_STILL_IN_BOOK: pair=${pairId} order=${orderId}`);
+      }
+
+      crossLiveOfferMeta.set(orderId, meta);
+      const canonicalQtyLots = meta.baseAmount / SWAP_LOT_SCALE;
+      if (
+        meta.pairId !== pairId ||
+        order.priceTicks !== meta.priceTicks ||
+        order.ownerId !== meta.makerId ||
+        BigInt(order.qtyLots) !== canonicalQtyLots
+      ) {
+        throw new Error(
+          `ORDERBOOK_CROSS_J_CACHE_MISMATCH: pair=${pairId} order=${orderId} ` +
+          `storedPrice=${order.priceTicks.toString()} canonicalPrice=${meta.priceTicks.toString()}`,
+        );
+      }
+    }
+  };
 
   const processCrossJurisdictionOffers = (): void => {
     for (const rawOffer of crossJurisdictionSwapOffers) {
       const marketOffer = buildCrossMarketOffer(rawOffer);
       if (!marketOffer) continue;
       crossLiveOfferMeta.set(swapKey(rawOffer.accountId, rawOffer.offerId), marketOffer);
+    }
+
+    for (const rawOffer of sortSwapOffersForOrderbook(crossJurisdictionSwapOffers)) {
+      const marketOffer = buildCrossMarketOffer(rawOffer);
+      if (!marketOffer) continue;
+      refreshExistingCrossBookOrder(
+        marketOffer.pairId,
+        swapKey(rawOffer.accountId, rawOffer.offerId),
+        marketOffer,
+      );
+    }
+
+    for (const [pairId, book] of ext.books) {
+      if (!String(pairId).startsWith('cross:')) continue;
+      const currentBook = bookCache.get(pairId) || book;
+      assertCrossBookMatchesKnownRoutes(pairId, currentBook);
+      if (currentBook !== book) {
+        bookCache.set(pairId, currentBook);
+      }
     }
 
     for (const rawOffer of sortSwapOffersForOrderbook(crossJurisdictionSwapOffers)) {
@@ -1724,6 +1823,8 @@ export function processOrderbookSwaps(
       let book = bookCache.get(marketOffer.pairId) || ext.books.get(marketOffer.pairId);
       if (!book) {
         book = createEmptyPairBook(getSwapPairPolicyByBaseQuote(rawOffer.giveTokenId, rawOffer.wantTokenId).bookBucketWidthTicks);
+      } else {
+        assertCrossBookMatchesKnownRoutes(marketOffer.pairId, book);
       }
       const existingOrder = getBookOrder(book, currentNamespacedOrderId);
       if (existingOrder) {
