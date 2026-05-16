@@ -52,6 +52,10 @@ import {
   type CrossMarketOffer,
 } from '../../cross-jurisdiction-orderbook';
 import { assertSameJurisdictionAccount } from '../../jurisdiction-runtime';
+import {
+  validateCrossJurisdictionFillProgress,
+  withCrossJurisdictionFillProgress,
+} from '../../cross-jurisdiction';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const getJurisdictionId = (state: EntityState, env: Env): string => {
@@ -647,14 +651,31 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             const ratio = Math.max(0, Math.min(65_535, Math.floor(Number(accountTx.data.cumulativeFillRatio) || 0)));
             const route = newState.crossJurisdictionSwaps?.get(accountTx.data.offerId);
             if (route) {
-              route.fillSeq = Math.max(Number(route.fillSeq || 0), Math.floor(Number(accountTx.data.fillSeq ?? ((route.fillSeq || 0) + 1))));
-              route.cumulativeFillRatio = Math.max(Number(route.cumulativeFillRatio || 0), ratio);
-              route.claimedRatio = route.cumulativeFillRatio;
-              route.filledSourceAmount = accountTx.data.cumulativeSourceAmount ?? ((BigInt(route.source.amount) * BigInt(route.cumulativeFillRatio)) / 65_535n);
-              route.filledTargetAmount = accountTx.data.cumulativeTargetAmount ?? ((BigInt(route.target.amount) * BigInt(route.cumulativeFillRatio)) / 65_535n);
-              route.sourceClaimed = route.filledSourceAmount;
-              route.targetClaimed = route.filledTargetAmount;
-              route.status = ratio >= 65_535 || accountTx.data.cancelRemainder ? 'clear_requested' : 'partially_filled';
+              const currentRatio = Math.max(
+                0,
+                Math.min(65_535, Math.floor(Number(route.cumulativeFillRatio ?? route.claimedRatio ?? 0) || 0)),
+              );
+              if (accountTx.data.cancelRemainder && ratio <= currentRatio) {
+                route.status = 'clear_requested';
+                route.clearingPolicy = 'cancel_and_clear';
+              } else {
+                const validatedFill = validateCrossJurisdictionFillProgress(route, {
+                  fillSeq: accountTx.data.fillSeq,
+                  cumulativeFillRatio: ratio,
+                  incrementalSourceAmount: accountTx.data.incrementalSourceAmount,
+                  incrementalTargetAmount: accountTx.data.incrementalTargetAmount,
+                  cumulativeSourceAmount: accountTx.data.cumulativeSourceAmount,
+                  cumulativeTargetAmount: accountTx.data.cumulativeTargetAmount,
+                });
+                if (!validatedFill.ok) {
+                  throw new Error(`CROSS_J_COMMITTED_FILL_ACK_INVALID: ${validatedFill.error}`);
+                }
+                Object.assign(route, withCrossJurisdictionFillProgress(route, validatedFill.value, newState.timestamp));
+                if (accountTx.data.cancelRemainder) {
+                  route.status = 'clear_requested';
+                  route.clearingPolicy = 'cancel_and_clear';
+                }
+              }
               route.updatedAt = newState.timestamp;
               if (
                 (ratio >= 65_535 || accountTx.data.cancelRemainder) &&
