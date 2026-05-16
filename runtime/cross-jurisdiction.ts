@@ -4,6 +4,8 @@ import type {
   AccountFrame,
   AccountInput,
   AccountTx,
+  CrossJurisdictionPullLeg,
+  CrossJurisdictionSwapLeg,
   CrossJurisdictionSwapRoute,
   CrossJurisdictionSwapStatus,
   Env,
@@ -312,6 +314,32 @@ export function deriveCrossJurisdictionPrivateSeed(
 
 type LegacyPrivateRoute = CrossJurisdictionSwapRoute & { hashLadderPrivateSeed?: string };
 
+const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
+  value !== null && typeof value === 'object';
+
+const isCrossJurisdictionSwapLegLike = (value: unknown): value is CrossJurisdictionSwapLeg =>
+  isObjectRecord(value) &&
+  typeof value['jurisdiction'] === 'string' &&
+  typeof value['entityId'] === 'string' &&
+  typeof value['counterpartyEntityId'] === 'string' &&
+  typeof value['tokenId'] === 'number' &&
+  typeof value['amount'] === 'bigint';
+
+const cloneCrossJurisdictionSwapLeg = (
+  value: unknown,
+  fallback?: unknown,
+): CrossJurisdictionSwapLeg => {
+  const leg = isCrossJurisdictionSwapLegLike(value)
+    ? value
+    : isCrossJurisdictionSwapLegLike(fallback)
+      ? fallback
+      : value;
+  return { ...(isObjectRecord(leg) ? leg : {}) } as unknown as CrossJurisdictionSwapLeg;
+};
+
+const cloneCrossJurisdictionPullLeg = (value: unknown): CrossJurisdictionPullLeg | undefined =>
+  isObjectRecord(value) ? ({ ...value } as unknown as CrossJurisdictionPullLeg) : undefined;
+
 const routePrivateSeedKey = (route: CrossJurisdictionSwapRoute): string =>
   (route.routeHash || deriveCrossJurisdictionRouteHash(route)).toLowerCase();
 
@@ -347,7 +375,22 @@ export function getCrossJurisdictionPrivateSeed(
 
 export function stripCrossJurisdictionPrivateData(route: CrossJurisdictionSwapRoute): CrossJurisdictionSwapRoute {
   const { hashLadderPrivateSeed: _privateSeed, ...publicRoute } = route as LegacyPrivateRoute;
-  return publicRoute;
+  const malformedSourceRoute = isObjectRecord(publicRoute.source)
+    ? (publicRoute.source['crossJurisdiction'] as CrossJurisdictionSwapRoute | undefined)
+    : undefined;
+  const malformedTargetRoute = isObjectRecord(publicRoute.target)
+    ? (publicRoute.target['crossJurisdiction'] as CrossJurisdictionSwapRoute | undefined)
+    : undefined;
+  const fallbackRoute = malformedSourceRoute || malformedTargetRoute;
+  const sourcePull = cloneCrossJurisdictionPullLeg(publicRoute.sourcePull ?? fallbackRoute?.sourcePull);
+  const targetPull = cloneCrossJurisdictionPullLeg(publicRoute.targetPull ?? fallbackRoute?.targetPull);
+  return {
+    ...publicRoute,
+    source: cloneCrossJurisdictionSwapLeg(publicRoute.source, fallbackRoute?.source),
+    target: cloneCrossJurisdictionSwapLeg(publicRoute.target, fallbackRoute?.target),
+    ...(sourcePull ? { sourcePull } : {}),
+    ...(targetPull ? { targetPull } : {}),
+  };
 }
 
 export function stripCrossJurisdictionCarrierPrivateData<T extends { crossJurisdiction?: CrossJurisdictionSwapRoute }>(value: T): T {
@@ -414,7 +457,9 @@ export function deriveCrossJurisdictionRouteHash(route: CrossJurisdictionSwapRou
       BigInt(route.priceTicks ?? 0n),
       BigInt(Math.floor(Number(route.expiresAt ?? 0))),
       String(route.riskMode || ''),
-      String(route.clearingPolicy || ''),
+      // clearingPolicy is lifecycle state, not order identity. Binding it into
+      // routeHash makes a valid route hash-invalid after clear/cancel updates.
+      '',
     ],
   ));
 }
