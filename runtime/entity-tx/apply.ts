@@ -1577,7 +1577,7 @@ export const applyEntityTx = async (
       const sourcePull = route.sourcePull;
       const targetPull = route.targetPull;
       const restingRoute = {
-        ...route,
+        ...stripCrossJurisdictionPrivateData(route),
         sourcePull,
         targetPull,
         status: 'resting' as const,
@@ -1621,7 +1621,7 @@ export const applyEntityTx = async (
               ...(restingRoute.priceTicks !== undefined ? { priceTicks: restingRoute.priceTicks } : {}),
               timeInForce: 0,
               minFillRatio: 0,
-              crossJurisdiction: restingRoute,
+              crossJurisdiction: stripCrossJurisdictionPrivateData(restingRoute),
             },
           },
         ],
@@ -1997,8 +1997,11 @@ export const applyEntityTx = async (
         console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for swap offer`);
         return { newState: entityState, outputs: [] };
       }
-      if (crossJurisdiction) {
-        const route = withCanonicalCrossJurisdictionRouteHash(crossJurisdiction);
+      const publicCrossJurisdiction = crossJurisdiction
+        ? stripCrossJurisdictionPrivateData(withCanonicalCrossJurisdictionRouteHash(crossJurisdiction))
+        : undefined;
+      if (publicCrossJurisdiction) {
+        const route = publicCrossJurisdiction;
         const existing = newState.crossJurisdictionSwaps?.get(route.orderId);
         const transitionError = validateCrossJurisdictionRouteTransition(existing, route);
         if (transitionError || isCrossJurisdictionRouteExpired(route, Number(newState.timestamp || env.timestamp || Date.now()))) {
@@ -2020,7 +2023,7 @@ export const applyEntityTx = async (
           ...(priceTicks !== undefined ? { priceTicks } : {}),
           ...(timeInForce !== undefined ? { timeInForce } : {}),
           minFillRatio,
-          ...(crossJurisdiction ? { crossJurisdiction: withCanonicalCrossJurisdictionRouteHash(crossJurisdiction) } : {}),
+          ...(publicCrossJurisdiction ? { crossJurisdiction: publicCrossJurisdiction } : {}),
         },
       };
 

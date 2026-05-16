@@ -1,0 +1,14 @@
+{
+  "name": "xln-debates",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "bun server.ts",
+    "start": "bun server.ts",
+    "test:e2e": "bunx playwright test --config=playwright.config.ts --project=chromium",
+    "check": "bunx tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {},
+  "devDependencies": {}
+}

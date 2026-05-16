@@ -330,6 +330,54 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(projectedAccount.swapOrderHistory.get(route.orderId).crossJurisdiction.hashLadderPrivateSeed).toBeUndefined();
   });
 
+  test('placeSwapOffer emits only public cross-j route into account tx', async () => {
+    const env = createEmptyEnv('cross-place-offer-public-route');
+    env.scenarioMode = true;
+    env.timestamp = 1_000;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('c1');
+    const sourceHub = entity('c2');
+    const targetHub = entity('c3');
+    const targetUser = entity('c4');
+    const sourceHubState = makeState(sourceHub, addr('c5'), eth, sourceUser);
+    const route = {
+      ...buildPreparedCrossJurisdictionRoute({
+        orderId: 'cross-public-account-tx',
+        makerEntityId: sourceUser,
+        hubEntityId: sourceHub,
+        source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+        target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+        status: 'resting',
+        createdAt: 1_000,
+        updatedAt: 1_000,
+        expiresAt: 61_000,
+      }, { runtimeSeed: 'cross-public-account-tx', sourceDisputeDelayMs: 5_000, now: 1_000 }),
+      status: 'resting' as const,
+      hashLadderPrivateSeed: secret('c6'),
+    } as any;
+
+    const result = await applyEntityTx(env, sourceHubState, {
+      type: 'placeSwapOffer',
+      data: {
+        counterpartyEntityId: sourceUser,
+        offerId: route.orderId,
+        giveTokenId: route.source.tokenId,
+        giveAmount: route.source.amount,
+        wantTokenId: route.target.tokenId,
+        wantAmount: route.target.amount,
+        minFillRatio: 0,
+        crossJurisdiction: route,
+      },
+    });
+
+    const accountTx = result.mempoolOps?.[0]?.tx as any;
+    expect(accountTx?.type).toBe('swap_offer');
+    expect(accountTx.data.crossJurisdiction.hashLadderPrivateSeed).toBeUndefined();
+    expect((result.newState.crossJurisdictionSwaps?.get(route.orderId) as any)?.hashLadderPrivateSeed).toBeUndefined();
+  });
+
   test('canonical route hash binds cross-j economic terms and terminal states reject overwrite', async () => {
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const base = makeJurisdiction('Base', 8453, '21', '22');
