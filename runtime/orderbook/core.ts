@@ -72,6 +72,10 @@ export interface BookState {
   readonly eventHash: bigint;
 }
 
+export interface ApplyCommandOptions {
+  suspendedOrderIds?: ReadonlySet<string>;
+}
+
 const MAX_QTY = 0xFFFFFFFF;
 const PRIME = 0x1_0000_01n;
 
@@ -254,6 +258,31 @@ function getTopLevel(
   return null;
 }
 
+function getTopLevelIgnoringSuspended(
+  state: Pick<BookState, 'orders' | 'bidBuckets' | 'askBuckets' | 'bidBucketIdsDesc' | 'askBucketIdsAsc'>,
+  side: Side,
+  suspendedOrderIds?: ReadonlySet<string>,
+): OrderedLevelView | null {
+  if (!suspendedOrderIds || suspendedOrderIds.size === 0) return getTopLevel(state, side);
+  for (const view of iterateOrderedLevels(state, side)) {
+    for (const orderId of view.level.orderIds) {
+      if (suspendedOrderIds.has(orderId)) continue;
+      const order = state.orders.get(orderId);
+      if (order && order.qtyLots > 0) return view;
+    }
+  }
+  return null;
+}
+
+function getBestPriceIgnoringSuspended(
+  state: Pick<BookState, 'orders' | 'bidBuckets' | 'askBuckets' | 'bidBucketIdsDesc' | 'askBucketIdsAsc'>,
+  side: Side,
+  suspendedOrderIds?: ReadonlySet<string>,
+): bigint | null {
+  const first = getTopLevelIgnoringSuspended(state, side, suspendedOrderIds);
+  return first?.level.priceTicks ?? null;
+}
+
 function getOrderedLevels(state: Pick<BookState, 'bidBuckets' | 'askBuckets' | 'bidBucketIdsDesc' | 'askBucketIdsAsc'>, side: Side): OrderedLevelView[] {
   return Array.from(iterateOrderedLevels(state, side));
 }
@@ -274,12 +303,14 @@ function estimateImmediateFill(
   takerOwnerId: string,
   takerPriceTicks: bigint,
   qtyLots: number,
+  suspendedOrderIds?: ReadonlySet<string>,
 ): { filledQty: number; blockingOrderId?: string } {
   let remaining = qtyLots;
   const oppositeSide: Side = takerSide === 0 ? 1 : 0;
   for (const view of iterateOrderedLevels(state, oppositeSide)) {
     if (!crosses(takerSide, takerPriceTicks, view.level.priceTicks)) break;
     for (const makerOrderId of view.level.orderIds) {
+      if (suspendedOrderIds?.has(makerOrderId)) continue;
       const maker = state.orders.get(makerOrderId);
       if (!maker || maker.qtyLots <= 0) continue;
       if (maker.ownerId === takerOwnerId && state.params.stpPolicy === 1) {
@@ -294,6 +325,28 @@ function estimateImmediateFill(
   return { filledQty: qtyLots - remaining };
 }
 
+function findBestMatchableMaker(
+  state: MutableBookState,
+  takerSide: Side,
+  takerPriceTicks: bigint,
+  suspendedOrderIds?: ReadonlySet<string>,
+): { bucketId: bigint; level: PriceLevelState; makerOrderId: string; maker: BookOrderState | null } | null {
+  const oppositeSide: Side = takerSide === 0 ? 1 : 0;
+  for (const view of iterateOrderedLevels(state, oppositeSide)) {
+    if (!crosses(takerSide, takerPriceTicks, view.level.priceTicks)) break;
+    for (const makerOrderId of view.level.orderIds) {
+      if (suspendedOrderIds?.has(makerOrderId)) continue;
+      return {
+        bucketId: view.bucketId,
+        level: view.level,
+        makerOrderId,
+        maker: state.orders.get(makerOrderId) ?? null,
+      };
+    }
+  }
+  return null;
+}
+
 function matchAgainstBook(
   state: MutableBookState,
   takerSide: Side,
@@ -302,24 +355,22 @@ function matchAgainstBook(
   takerPriceTicks: bigint,
   takerQtyLots: number,
   events: BookEvent[],
+  suspendedOrderIds?: ReadonlySet<string>,
 ): { remaining: number; blockingOrderId?: string } {
   let remaining = takerQtyLots;
-  const oppositeSide: Side = takerSide === 0 ? 1 : 0;
 
   while (remaining > 0) {
-    const best = getTopLevel(state, oppositeSide);
+    const best = findBestMatchableMaker(state, takerSide, takerPriceTicks, suspendedOrderIds);
     if (!best) break;
-    if (!crosses(takerSide, takerPriceTicks, best.level.priceTicks)) break;
-
-    const makerOrderId = best.level.orderIds[0];
-    if (!makerOrderId) break;
-    const maker = state.orders.get(makerOrderId);
+    const { makerOrderId } = best;
+    const maker = best.maker;
     if (!maker || maker.qtyLots <= 0) {
       if (!removeOrderId(best.level.orderIds, makerOrderId)) {
         throw new Error(`BOOK_CORRUPTION: top-of-book order ${makerOrderId} missing from level queue`);
       }
       state.orders.delete(makerOrderId);
       if (best.level.orderIds.length === 0) {
+        const oppositeSide: Side = takerSide === 0 ? 1 : 0;
         const bucket = sideBucketMap(state, oppositeSide).get(bucketKey(best.bucketId));
         if (bucket) {
           bucket.levels.delete(priceKey(best.level.priceTicks));
@@ -401,7 +452,7 @@ export function createBook(params: BookParams): BookState {
   };
 }
 
-export function applyCommand(state: BookState, cmd: OrderCmd): { state: BookState; events: BookEvent[] } {
+export function applyCommand(state: BookState, cmd: OrderCmd, options: ApplyCommandOptions = {}): { state: BookState; events: BookEvent[] } {
   /**
    * Hot-path note:
    *
@@ -467,8 +518,9 @@ export function applyCommand(state: BookState, cmd: OrderCmd): { state: BookStat
     return { state, events };
   }
 
-  const bestBid = getBestBid(m as BookState);
-  const bestAsk = getBestAsk(m as BookState);
+  const suspendedOrderIds = options.suspendedOrderIds;
+  const bestBid = getBestPriceIgnoringSuspended(m as BookState, 0, suspendedOrderIds);
+  const bestAsk = getBestPriceIgnoringSuspended(m as BookState, 1, suspendedOrderIds);
 
   if (postOnly) {
     if (side === 0 && bestAsk !== null && bestAsk <= priceTicks) {
@@ -481,7 +533,7 @@ export function applyCommand(state: BookState, cmd: OrderCmd): { state: BookStat
     }
   }
 
-  const estimate = estimateImmediateFill(m as BookState, side, ownerId, priceTicks, qtyLots);
+  const estimate = estimateImmediateFill(m as BookState, side, ownerId, priceTicks, qtyLots, suspendedOrderIds);
   if (tif === 2 && estimate.filledQty < qtyLots) {
     events.push({ type: 'REJECT', orderId, ownerId, reason: 'FOK cannot fill entirely' });
     return { state, events };
@@ -494,7 +546,7 @@ export function applyCommand(state: BookState, cmd: OrderCmd): { state: BookStat
     }
   }
 
-  const match = matchAgainstBook(m, side, ownerId, orderId, priceTicks, qtyLots, events);
+  const match = matchAgainstBook(m, side, ownerId, orderId, priceTicks, qtyLots, events, suspendedOrderIds);
   const remaining = match.remaining;
   const filledQty = qtyLots - remaining;
   const stpBlocked = match.blockingOrderId !== undefined;

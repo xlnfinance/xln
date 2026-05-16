@@ -206,7 +206,8 @@ const sameCrossJurisdictionIntentTerms = (
     sameBigInt(existing.target.amount, next.target.amount) &&
     sameBigInt(existing.priceTicks ?? 0n, next.priceTicks ?? 0n) &&
     Number(existing.expiresAt ?? 0) === Number(next.expiresAt ?? 0) &&
-    String(existing.riskMode || '') === String(next.riskMode || '')
+    String(existing.riskMode || '') === String(next.riskMode || '') &&
+    String(existing.priceImprovementMode || '') === String(next.priceImprovementMode || '')
   );
 };
 
@@ -1940,6 +1941,9 @@ export const applyEntityTx = async (
         cumulativeSourceAmount,
         cumulativeTargetAmount,
         cumulativeFillRatio,
+        priceImprovementMode,
+        priceImprovementAmount,
+        priceImprovementTokenId,
         priceTicks,
         pairId,
       } = entityTx.data;
@@ -2003,8 +2007,15 @@ export const applyEntityTx = async (
             cumulativeSourceAmount: fill.cumulativeSourceAmount,
             cumulativeTargetAmount: fill.cumulativeTargetAmount,
             cumulativeFillRatio: fill.nextRatio,
-            executionSourceAmount: fill.incrementalSourceAmount,
-            executionTargetAmount: fill.incrementalTargetAmount,
+            executionSourceAmount: priceImprovementMode === 'source_savings' && (priceImprovementAmount ?? 0n) > 0n
+              ? fill.incrementalSourceAmount - (priceImprovementAmount ?? 0n)
+              : fill.incrementalSourceAmount,
+            executionTargetAmount: priceImprovementMode === 'target_bonus' && (priceImprovementAmount ?? 0n) > 0n
+              ? fill.incrementalTargetAmount + (priceImprovementAmount ?? 0n)
+              : fill.incrementalTargetAmount,
+            ...(priceImprovementMode ? { priceImprovementMode } : {}),
+            ...(priceImprovementAmount !== undefined ? { priceImprovementAmount } : {}),
+            ...(priceImprovementTokenId !== undefined ? { priceImprovementTokenId } : {}),
             cancelRemainder: fill.nextRatio >= 65_535,
             ...(priceTicks !== undefined ? { priceTicks } : {}),
             pairId,
@@ -2174,6 +2185,23 @@ export const applyEntityTx = async (
           },
         },
       });
+      const sourceSavingsAmount = canonicalRoute.priceImprovementSourceAmount ?? 0n;
+      if (sourceSavingsAmount > 0n) {
+        mempoolOps.push({
+          accountId,
+          tx: {
+            type: 'direct_payment',
+            data: {
+              tokenId: Number(canonicalRoute.source.tokenId),
+              amount: sourceSavingsAmount,
+              route: [],
+              description: `cross-j-source-savings:${orderId}`,
+              fromEntityId: canonicalRoute.source.counterpartyEntityId,
+              toEntityId: canonicalRoute.source.entityId,
+            },
+          },
+        });
+      }
       const closeRemainder = cancelRemainder || ratio < 65_535;
       canonicalRoute.status = 'clearing';
       canonicalRoute.pendingClearRequestedAt = deterministicEntityTimestamp(newState, env);

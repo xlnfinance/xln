@@ -764,6 +764,9 @@ export type EntityTx =
         cumulativeSourceAmount: bigint;
         cumulativeTargetAmount: bigint;
         cumulativeFillRatio: number;
+        priceImprovementMode?: 'source_savings' | 'target_bonus' | 'none';
+        priceImprovementAmount?: bigint;
+        priceImprovementTokenId?: number;
         priceTicks?: bigint;
         pairId: string;
       };
@@ -1823,6 +1826,9 @@ export type AccountTx =
         cumulativeFillRatio: number;
         executionSourceAmount?: bigint;
         executionTargetAmount?: bigint;
+        priceImprovementMode?: 'source_savings' | 'target_bonus' | 'none';
+        priceImprovementAmount?: bigint;
+        priceImprovementTokenId?: number;
         cancelRemainder?: boolean;
         comment?: string;
         priceTicks?: bigint;
@@ -2054,8 +2060,11 @@ export interface CrossJurisdictionSwapRoute {
   cumulativeFillRatio?: number;
   filledSourceAmount?: bigint;
   filledTargetAmount?: bigint;
+  priceImprovementSourceAmount?: bigint;
+  priceImprovementTargetAmount?: bigint;
   pendingClearRequestedAt?: number;
   clearingPolicy?: 'manual' | 'full_fill' | 'cancel_and_clear';
+  priceImprovementMode?: 'source_savings' | 'target_bonus' | 'none';
   riskMode?: 'fully_collateralized' | 'partially_collateralized' | 'credit_line' | 'unsecured_internalized';
   claimedRatio?: number;
   sourceClaimed?: bigint;

@@ -754,6 +754,69 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(account.mempool.some(tx => tx.type === 'pull_resolve')).toBe(false);
   });
 
+  test('cross-j fill ack records source-savings price improvement without changing hashledger ratio', async () => {
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('79');
+    const sourceHub = entity('7a');
+    const targetHub = entity('7b');
+    const targetUser = entity('7c');
+    const account = makeAccount(sourceHub, sourceUser);
+    const route = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-source-savings',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      priceImprovementMode: 'source_savings',
+      status: 'resting',
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      expiresAt: 61_000,
+    }, { runtimeSeed: 'cross-source-savings-seed', sourceDisputeDelayMs: 5_000, now: 1_000 });
+    account.swapOffers.set(route.orderId, {
+      offerId: route.orderId,
+      giveTokenId: 1,
+      giveAmount: 1_000n,
+      wantTokenId: 1,
+      wantAmount: 900n,
+      priceTicks: 900n,
+      timeInForce: 0,
+      minFillRatio: 0,
+      makerIsLeft: account.leftEntity === sourceUser,
+      createdHeight: 0,
+      crossJurisdiction: { ...route, status: 'resting' },
+    });
+
+    const result = await processAccountTx(account, {
+      type: 'cross_swap_fill_ack',
+      data: {
+        offerId: route.orderId,
+        fillSeq: 1,
+        incrementalSourceAmount: 500n,
+        incrementalTargetAmount: 450n,
+        cumulativeSourceAmount: 500n,
+        cumulativeTargetAmount: 450n,
+        cumulativeFillRatio: 32_768,
+        executionSourceAmount: 475n,
+        executionTargetAmount: 450n,
+        priceImprovementMode: 'source_savings',
+        priceImprovementAmount: 25n,
+        priceImprovementTokenId: 1,
+        cancelRemainder: false,
+        pairId: 'cross:ethereum:1/base:1',
+      },
+    }, account.leftEntity === sourceHub, 2_000, 1);
+
+    expect(result.success).toBe(true);
+    const updatedRoute = account.swapOffers.get(route.orderId)?.crossJurisdiction;
+    expect(updatedRoute?.filledSourceAmount).toBe(500n);
+    expect(updatedRoute?.priceImprovementSourceAmount).toBe(25n);
+    const history = account.swapOrderHistory?.get(route.orderId);
+    expect(history?.resolves.at(-1)?.executionGiveAmount).toBe(475n);
+    expect(history?.resolves.at(-1)?.executionWantAmount).toBe(450n);
+  });
+
   test('payer can cancel expired pull and releases only remaining hold', async () => {
     const payer = entity('75');
     const beneficiary = entity('76');
@@ -903,25 +966,58 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('clearing');
   });
 
-  test('legacy HTLC cross-j API is disabled in favor of hash-ledger flow', async () => {
-    const env = createEmptyEnv('cross-legacy-disabled');
+  test('legacy HTLC cross-j API remains available alongside hash-ledger flow', async () => {
+    const env = createEmptyEnv('cross-legacy-available');
+    env.scenarioMode = true;
+    env.timestamp = 10_000;
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('91');
+    const sourceHub = entity('92');
+    const targetHub = entity('93');
+    const targetUser = entity('94');
+    const sourceUserSigner = addr('91');
+    const sourceHubSigner = addr('92');
+    const targetHubSigner = addr('93');
+    const targetUserSigner = addr('94');
+    addReplica(env, makeState(sourceUser, sourceUserSigner, eth, sourceHub), sourceUserSigner);
+    addReplica(env, makeState(sourceHub, sourceHubSigner, eth, sourceUser), sourceHubSigner);
+    addReplica(env, makeState(targetHub, targetHubSigner, base, targetUser), targetHubSigner);
+    addReplica(env, makeState(targetUser, targetUserSigner, base, targetHub), targetUserSigner);
+    const revealedSecret = secret('95');
     const route = buildPreparedCrossJurisdictionRoute({
-      orderId: 'cross-legacy-disabled',
-      makerEntityId: entity('91'),
-      hubEntityId: entity('92'),
-      source: { jurisdiction: eth.name, entityId: entity('91'), counterpartyEntityId: entity('92'), tokenId: 1, amount: 100n },
-      target: { jurisdiction: base.name, entityId: entity('93'), counterpartyEntityId: entity('94'), tokenId: 1, amount: 90n },
+      orderId: 'cross-legacy-available',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 100n, lockId: `0x${'81'.repeat(32)}` },
+      target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 90n, lockId: `0x${'82'.repeat(32)}` },
+      hashlock: hashHtlcSecret(revealedSecret),
       status: 'resting',
       createdAt: 1,
       updatedAt: 1,
       expiresAt: 70_000,
-    }, { runtimeSeed: 'cross-legacy-disabled-seed', sourceDisputeDelayMs: 5_000, now: 1 });
+    }, { runtimeSeed: 'cross-legacy-available-seed', sourceDisputeDelayMs: 5_000, now: 1 });
 
-    await expect(submitCrossJurisdictionSourceLock(env, { route })).rejects.toThrow('CROSS_J_LEGACY_HTLC_API_DISABLED');
-    await expect(submitCrossJurisdictionTargetLock(env, { route })).rejects.toThrow('CROSS_J_LEGACY_HTLC_API_DISABLED');
-    await expect(submitCrossJurisdictionSwapClaims(env, { route, secret: secret('95') })).rejects.toThrow('CROSS_J_LEGACY_HTLC_API_DISABLED');
+    await submitCrossJurisdictionSourceLock(env, { route, sourceUserSignerId: sourceUserSigner });
+    await submitCrossJurisdictionTargetLock(env, { route, targetHubSignerId: targetHubSigner });
+    await submitCrossJurisdictionSwapClaims(env, {
+      route,
+      secret: revealedSecret,
+      sourceHubSignerId: sourceHubSigner,
+      targetUserSignerId: targetUserSigner,
+    });
+
+    const queued = env.runtimeMempool?.entityInputs ?? [];
+    expect(queued.map(input => input.entityTxs?.[0]?.type)).toEqual([
+      'hashlockPayment',
+      'hashlockPayment',
+      'resolveHtlcLock',
+      'resolveHtlcLock',
+    ]);
+    expect(queued[0]?.entityId).toBe(sourceUser);
+    expect(queued[1]?.entityId).toBe(targetHub);
+    expect(queued[2]?.entityId).toBe(sourceHub);
+    expect(queued[3]?.entityId).toBe(targetUser);
   });
 
   test('clear request closes live cross-j offer before revealing pull', async () => {

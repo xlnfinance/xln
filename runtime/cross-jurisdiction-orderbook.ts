@@ -21,6 +21,11 @@ export interface CrossJurisdictionFillInstruction {
   cancelRemainder: boolean;
   sourceAmount: bigint;
   targetAmount: bigint;
+  executionSourceAmount: bigint;
+  executionTargetAmount: bigint;
+  priceImprovementMode: 'source_savings' | 'target_bonus' | 'none';
+  priceImprovementAmount: bigint;
+  priceImprovementTokenId: number | null;
   priceTicks: bigint;
   pairId: string;
   orderId: string;
@@ -131,6 +136,25 @@ export const buildCrossJurisdictionFillAck = (
   const settlementTargetAmount =
     (targetTotal * BigInt(fillRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO) - previousTargetClaimed;
   if (settlementSourceAmount <= 0n || settlementTargetAmount <= 0n) return null;
+  const priceImprovementMode = meta.route.priceImprovementMode ?? 'source_savings';
+  const sourceSavings = settlementSourceAmount > sourceAmount ? settlementSourceAmount - sourceAmount : 0n;
+  const targetBonus = targetAmount > settlementTargetAmount ? targetAmount - settlementTargetAmount : 0n;
+  const priceImprovementAmount = priceImprovementMode === 'source_savings'
+    ? sourceSavings
+    : priceImprovementMode === 'target_bonus'
+      ? targetBonus
+      : 0n;
+  const priceImprovementTokenId = priceImprovementAmount > 0n
+    ? priceImprovementMode === 'source_savings'
+      ? Number(meta.route.source.tokenId)
+      : Number(meta.route.target.tokenId)
+    : null;
+  const executionSourceAmount = priceImprovementMode === 'source_savings' && sourceSavings > 0n
+    ? settlementSourceAmount - sourceSavings
+    : settlementSourceAmount;
+  const executionTargetAmount = priceImprovementMode === 'target_bonus' && targetBonus > 0n
+    ? settlementTargetAmount + targetBonus
+    : settlementTargetAmount;
 
   const instruction: CrossJurisdictionFillInstruction = {
     accountId,
@@ -140,6 +164,11 @@ export const buildCrossJurisdictionFillAck = (
     cancelRemainder: fillRatio >= CROSS_J_MAX_FILL_RATIO,
     sourceAmount: settlementSourceAmount,
     targetAmount: settlementTargetAmount,
+    executionSourceAmount,
+    executionTargetAmount,
+    priceImprovementMode,
+    priceImprovementAmount,
+    priceImprovementTokenId,
     priceTicks: meta.priceTicks,
     pairId: meta.pairId,
     orderId: namespacedOrderId,
@@ -154,8 +183,11 @@ export const buildCrossJurisdictionFillAck = (
       cumulativeSourceAmount: previousSourceClaimed + settlementSourceAmount,
       cumulativeTargetAmount: previousTargetClaimed + settlementTargetAmount,
       cumulativeFillRatio: fillRatio,
-      executionSourceAmount: settlementSourceAmount,
-      executionTargetAmount: settlementTargetAmount,
+      executionSourceAmount,
+      executionTargetAmount,
+      priceImprovementMode,
+      ...(priceImprovementAmount > 0n ? { priceImprovementAmount } : {}),
+      ...(priceImprovementTokenId !== null ? { priceImprovementTokenId } : {}),
       cancelRemainder: fillRatio >= CROSS_J_MAX_FILL_RATIO,
       comment: `cross-j-hashledger-fill:${fillRatio}`,
       priceTicks: meta.priceTicks,

@@ -23,6 +23,9 @@ export async function handleCrossSwapFillAck(
     cumulativeTargetAmount,
     executionSourceAmount,
     executionTargetAmount,
+    priceImprovementMode = 'source_savings',
+    priceImprovementAmount = 0n,
+    priceImprovementTokenId,
     cancelRemainder = false,
     comment,
     priceTicks,
@@ -90,11 +93,32 @@ export async function handleCrossSwapFillAck(
     return { success: false, error: `Cross-j fill ack invalid: ${validatedFill.error}`, events };
   }
   const fill = validatedFill.value;
-  if (executionSourceAmount !== undefined && executionSourceAmount !== fill.incrementalSourceAmount) {
-    return { success: false, error: `Cross-j source execution mismatch: expected ${fill.incrementalSourceAmount}, got ${executionSourceAmount}`, events };
+  const expectedExecutionSource = priceImprovementMode === 'source_savings' && priceImprovementAmount > 0n
+    ? fill.incrementalSourceAmount - priceImprovementAmount
+    : fill.incrementalSourceAmount;
+  const expectedExecutionTarget = priceImprovementMode === 'target_bonus' && priceImprovementAmount > 0n
+    ? fill.incrementalTargetAmount + priceImprovementAmount
+    : fill.incrementalTargetAmount;
+  if (priceImprovementAmount < 0n) {
+    return { success: false, error: `Cross-j price improvement must be non-negative`, events };
   }
-  if (executionTargetAmount !== undefined && executionTargetAmount !== fill.incrementalTargetAmount) {
-    return { success: false, error: `Cross-j target execution mismatch: expected ${fill.incrementalTargetAmount}, got ${executionTargetAmount}`, events };
+  if (priceImprovementAmount > 0n && priceImprovementMode === 'none') {
+    return { success: false, error: `Cross-j price improvement disabled`, events };
+  }
+  if (priceImprovementAmount > 0n && priceImprovementMode === 'source_savings' && priceImprovementTokenId !== route.source.tokenId) {
+    return { success: false, error: `Cross-j source savings token mismatch`, events };
+  }
+  if (priceImprovementAmount > 0n && priceImprovementMode === 'target_bonus' && priceImprovementTokenId !== route.target.tokenId) {
+    return { success: false, error: `Cross-j target bonus token mismatch`, events };
+  }
+  if (expectedExecutionSource <= 0n || expectedExecutionTarget <= 0n) {
+    return { success: false, error: `Cross-j execution amount after improvement must be positive`, events };
+  }
+  if (executionSourceAmount !== undefined && executionSourceAmount !== expectedExecutionSource) {
+    return { success: false, error: `Cross-j source execution mismatch: expected ${expectedExecutionSource}, got ${executionSourceAmount}`, events };
+  }
+  if (executionTargetAmount !== undefined && executionTargetAmount !== expectedExecutionTarget) {
+    return { success: false, error: `Cross-j target execution mismatch: expected ${expectedExecutionTarget}, got ${executionTargetAmount}`, events };
   }
 
   const nextRoute = withCrossJurisdictionFillProgress(
@@ -103,6 +127,13 @@ export async function handleCrossSwapFillAck(
     deterministicAccountTimestamp(accountMachine),
   );
   Object.assign(route, nextRoute);
+  if (priceImprovementAmount > 0n) {
+    if (priceImprovementMode === 'source_savings') {
+      route.priceImprovementSourceAmount = (route.priceImprovementSourceAmount ?? 0n) + priceImprovementAmount;
+    } else if (priceImprovementMode === 'target_bonus') {
+      route.priceImprovementTargetAmount = (route.priceImprovementTargetAmount ?? 0n) + priceImprovementAmount;
+    }
+  }
   if (priceTicks !== undefined) route.priceTicks = priceTicks;
   if (pairId) route.venueId ||= pairId;
   offer.crossJurisdiction = route;
@@ -138,9 +169,16 @@ export async function handleCrossSwapFillAck(
     fillRatio: fill.nextRatio,
     cancelRemainder: shouldClose,
     height: currentHeight,
-    executionGiveAmount: fill.incrementalSourceAmount,
-    executionWantAmount: fill.incrementalTargetAmount,
+    executionGiveAmount: executionSourceAmount ?? fill.incrementalSourceAmount,
+    executionWantAmount: executionTargetAmount ?? fill.incrementalTargetAmount,
     ...(comment ? { comment } : {}),
+  }, {
+    giveTokenId: offer.giveTokenId,
+    giveAmount: sourceTotal,
+    wantTokenId: offer.wantTokenId,
+    wantAmount: targetTotal,
+    ...(offer.priceTicks !== undefined ? { priceTicks: offer.priceTicks } : {}),
+    createdHeight: offer.createdHeight,
   });
 
   return {

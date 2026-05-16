@@ -1888,6 +1888,9 @@ export const applyEntityFrame = async (
               cumulativeSourceAmount: tx.data.cumulativeSourceAmount ?? 0n,
               cumulativeTargetAmount: tx.data.cumulativeTargetAmount ?? 0n,
               cumulativeFillRatio,
+              ...(tx.data.priceImprovementMode ? { priceImprovementMode: tx.data.priceImprovementMode } : {}),
+              ...(tx.data.priceImprovementAmount !== undefined ? { priceImprovementAmount: tx.data.priceImprovementAmount } : {}),
+              ...(tx.data.priceImprovementTokenId !== undefined ? { priceImprovementTokenId: tx.data.priceImprovementTokenId } : {}),
               ...(tx.data.priceTicks !== undefined ? { priceTicks: tx.data.priceTicks } : {}),
               pairId: String(tx.data.pairId || ''),
             },
@@ -1910,6 +1913,33 @@ export const applyEntityFrame = async (
 	      console.log(
 	        `🌉 ORDERBOOK CROSS-J: recorded ${matchResult.crossJurisdictionFills.length} firm fill notice(s); clearing waits for full fill or explicit clear`,
 	      );
+        for (const fill of matchResult.crossJurisdictionFills) {
+          if (fill.priceImprovementMode !== 'target_bonus' || fill.priceImprovementAmount <= 0n || fill.priceImprovementTokenId === null) {
+            continue;
+          }
+          const targetHubState = findEntityStateById(env, fill.route.target.entityId);
+          const targetSigner = targetHubState?.config?.validators?.[0];
+          if (!targetHubState || !targetSigner) {
+            console.warn(
+              `🌉 ORDERBOOK CROSS-J: unable to route target price improvement order=${fill.offerId} targetHub=${fill.route.target.entityId.slice(-8)}`,
+            );
+            continue;
+          }
+          allOutputs.push({
+            entityId: targetHubState.entityId,
+            signerId: targetSigner,
+            entityTxs: [{
+              type: 'directPayment',
+              data: {
+                targetEntityId: fill.route.target.counterpartyEntityId,
+                tokenId: fill.priceImprovementTokenId,
+                amount: fill.priceImprovementAmount,
+                route: [fill.route.target.entityId, fill.route.target.counterpartyEntityId],
+                description: `cross-j-target-bonus:${fill.offerId}`,
+              },
+            }],
+          });
+        }
 	    }
 
 	    if (waitingForCrossPullCommitments && currentEntityState.crontabState) {

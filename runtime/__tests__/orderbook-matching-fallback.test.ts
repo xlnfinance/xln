@@ -1943,7 +1943,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(getBookOrder(finalBook!, namespacedOrderId)?.qtyLots).toBe(Number(remainingSource / lot));
   });
 
-  test('freezes a cross-j pair while a partial fill ack is pending', () => {
+  test('skips a cross-j order while its partial fill ack is pending', () => {
     const lot = SWAP_LOT_SCALE;
     const sourceTotal = 40_000n * lot;
     const targetTotal = 100_000n * lot;
@@ -2099,7 +2099,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(getBookOrder(book, makerOrderId)?.qtyLots).toBe(Number(remainingSource / lot));
   });
 
-  test('freezes a cross-j pair when pending fill ack has already moved the account offer view', () => {
+  test('skips a cross-j order when pending fill ack has already moved the account offer view', () => {
     const lot = SWAP_LOT_SCALE;
     const sourceTotal = 40_000n * lot;
     const targetTotal = 100_000n * lot;
@@ -2215,6 +2215,176 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(result.mempoolOps).toEqual([]);
     expect(result.crossJurisdictionFills).toEqual([]);
     expect(getBookOrder(book, makerOrderId)?.qtyLots).toBe(Number(remainingSource / lot));
+  });
+
+  test('keeps matching committed cross-j orders while another order has a pending fill ack', () => {
+    const lot = SWAP_LOT_SCALE;
+    const pairId = 'cross:base:1/tron:1';
+    const pendingOrderId = 'maker-pending-account:maker-cross-pending';
+    const committedOrderId = 'maker-committed-account:maker-cross-committed';
+    let book = createBook({
+      bucketWidthTicks: 10_000n,
+      maxOrders: 10_000,
+      stpPolicy: 1,
+    });
+    book = applyCommand(book, {
+      kind: 0,
+      ownerId: 'maker-pending',
+      orderId: pendingOrderId,
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 10_000n,
+      qtyLots: 2,
+    }).state;
+    book = applyCommand(book, {
+      kind: 0,
+      ownerId: 'maker-committed',
+      orderId: committedOrderId,
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 10_000n,
+      qtyLots: 2,
+    }).state;
+
+    const committedRoute = {
+      orderId: 'maker-cross-committed',
+      bookOwnerEntityId: 'hub-entity',
+      venueId: pairId,
+      makerEntityId: 'maker-committed',
+      hubEntityId: 'hub-entity',
+      source: {
+        jurisdiction: 'base',
+        entityId: 'maker-committed',
+        counterpartyEntityId: 'hub-entity',
+        tokenId: 1,
+        amount: 2n * lot,
+      },
+      target: {
+        jurisdiction: 'tron',
+        entityId: 'maker-committed',
+        counterpartyEntityId: 'hub-entity',
+        tokenId: 1,
+        amount: 2n * lot,
+      },
+      status: 'resting',
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const committedOffer = {
+      offerId: 'maker-cross-committed',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'maker-committed',
+      accountId: 'maker-committed-account',
+      createdHeight: 1,
+      giveTokenId: 1,
+      giveAmount: 2n * lot,
+      quantizedGive: 2n * lot,
+      wantTokenId: 1,
+      wantAmount: 2n * lot,
+      quantizedWant: 2n * lot,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 10_000n,
+      crossJurisdiction: committedRoute,
+    };
+    const takerRoute = {
+      ...committedRoute,
+      orderId: 'taker-cross',
+      makerEntityId: 'taker',
+      source: {
+        jurisdiction: 'tron',
+        entityId: 'taker',
+        counterpartyEntityId: 'hub-entity',
+        tokenId: 1,
+        amount: 2n * lot,
+      },
+      target: {
+        jurisdiction: 'base',
+        entityId: 'taker',
+        counterpartyEntityId: 'hub-entity',
+        tokenId: 1,
+        amount: 2n * lot,
+      },
+      status: 'resting',
+    };
+    const takerOffer = {
+      offerId: 'taker-cross',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'taker',
+      accountId: 'taker-account',
+      createdHeight: 2,
+      giveTokenId: 1,
+      giveAmount: 2n * lot,
+      quantizedGive: 2n * lot,
+      wantTokenId: 1,
+      wantAmount: 2n * lot,
+      quantizedWant: 2n * lot,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 10_000n,
+      crossJurisdiction: takerRoute,
+    };
+
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([
+        ['maker-pending-account', {
+          swapOffers: new Map(),
+          pendingFrame: {
+            accountTxs: [{
+              type: 'cross_swap_fill_ack',
+              data: {
+                offerId: 'maker-cross-pending',
+                fillSeq: 1,
+                incrementalSourceAmount: 2n * lot,
+                incrementalTargetAmount: 2n * lot,
+                cumulativeSourceAmount: 2n * lot,
+                cumulativeTargetAmount: 2n * lot,
+                cumulativeFillRatio: 65_535,
+                cancelRemainder: true,
+              },
+            }],
+          },
+        }],
+        ['maker-committed-account', { swapOffers: new Map([['maker-cross-committed', committedOffer]]) }],
+        ['taker-account', { swapOffers: new Map([['taker-cross', takerOffer]]) }],
+      ]),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 1,
+          supportedPairs: [pairId],
+        },
+        books: new Map([[pairId, book]]),
+        pairConfig: new Map(),
+      } as any,
+    } as any;
+
+    const result = processOrderbookSwaps(entityState, [takerOffer] as any);
+
+    expect(getBookOrder(book, pendingOrderId)?.qtyLots).toBe(2);
+    expect(getBookOrder(book, committedOrderId)).toBeNull();
+    expect(result.crossJurisdictionFills.map((fill) => fill.offerId).sort()).toEqual([
+      'maker-cross-committed',
+      'taker-cross',
+    ]);
+    expect(result.mempoolOps.map((op) => `${op.accountId}:${op.tx.type}`).sort()).toEqual([
+      'maker-committed-account:cross_swap_fill_ack',
+      'taker-account:cross_swap_fill_ack',
+    ]);
   });
 
   test('fails fast when persisted book price diverges from account offer', () => {

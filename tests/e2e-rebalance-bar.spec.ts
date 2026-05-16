@@ -694,6 +694,35 @@ async function waitForOutCapacityIncrease(
   );
 }
 
+async function waitForFundingLiquidityReady(
+  page: Page,
+  counterpartyId: string,
+  baselineOutCapacity: bigint,
+  timeoutMs = 180_000,
+) {
+  const start = Date.now();
+  let last: Awaited<ReturnType<typeof readPairState>> = null;
+  while (Date.now() - start < timeoutMs) {
+    last = await readPairState(page, counterpartyId);
+    const outCapacity = BigInt(last?.outCapacity || '0');
+    const requested = BigInt(last?.requested || '0');
+    if (
+      last
+      && outCapacity > baselineOutCapacity
+      && Number(last.pendingHeight || 0) === 0
+      && Number(last.mempoolLen || 0) === 0
+      && requested === 0n
+    ) {
+      return last;
+    }
+    await page.waitForTimeout(800);
+  }
+  throw new Error(
+    `funding liquidity not ready for ${counterpartyId.slice(0, 12)}: ` +
+      `baselineOut=${baselineOutCapacity} last=${JSON.stringify(last, null, 2)}`,
+  );
+}
+
 async function waitForRebalanceReceiveReady(
   page: Page,
   opts: {
@@ -2069,19 +2098,34 @@ test.describe('Rebalance E2E', () => {
     await waitForHubProfile(page, h2);
 
     // Recipient runtime: small credit on H2 so second 550 should fail pre-rebalance.
+    await markE2EPhase(page, 'rebalance_h2.connect_recipient_start', {
+      entityId: rt2.entityId,
+      details: { hub: h2.slice(0, 10) },
+    });
     await connectHubWithCredit(page, rt2.entityId, rt2.signerId, h2, 1_000n);
     await setRebalancePolicy(page, rt2.entityId, rt2.signerId, h2, 500n, 10_000n, 20n);
     await waitForPairIdle(page, h2);
+    await markE2EPhase(page, 'rebalance_h2.connect_recipient_done', {
+      entityId: rt2.entityId,
+      details: { hub: h2.slice(0, 10) },
+    });
 
     await switchRuntime(page, rt1Label);
     // Sender runtime: liquidity source through H1.
+    await markE2EPhase(page, 'rebalance_h2.connect_sender_start', {
+      entityId: rt1.entityId,
+      details: { hub: h1.slice(0, 10) },
+    });
     await connectHubWithCredit(page, rt1.entityId, rt1.signerId, h1, 10_000n);
     const senderBeforeFaucet = await readPairState(page, h1);
     expect(senderBeforeFaucet, 'rt1-h1 pair must exist before faucet').toBeTruthy();
     const senderOutBaseline = BigInt(senderBeforeFaucet?.outCapacity || '0');
     await faucetAmount(page, rt1.entityId, h1, '2000');
-    await waitForOutCapacityIncrease(page, h1, senderOutBaseline);
-    await waitForPairIdle(page, h1, 60_000);
+    await waitForFundingLiquidityReady(page, h1, senderOutBaseline);
+    await markE2EPhase(page, 'rebalance_h2.connect_sender_done', {
+      entityId: rt1.entityId,
+      details: { hub: h1.slice(0, 10) },
+    });
 
     await switchRuntime(page, rt2Label);
     const baseline = await readPairState(page, h2);
@@ -2095,6 +2139,10 @@ test.describe('Rebalance E2E', () => {
     await waitForPairIdle(page, h1, 60_000);
     const senderBeforeP1 = await readPairState(page, h1);
     const senderP1LockBaseline = Number(senderBeforeP1?.recentHtlcLockCount || 0);
+    await markE2EPhase(page, 'rebalance_h2.payment1_submit', {
+      entityId: rt1.entityId,
+      details: { senderHub: h1.slice(0, 10), receiverHub: h2.slice(0, 10) },
+    });
     const p1 = await sendRoutedHtlcPayment(
       page,
       rt1.entityId,
@@ -2105,6 +2153,10 @@ test.describe('Rebalance E2E', () => {
       'rt1->rt2 via h1,h2 htlc #1',
     );
     await waitForSenderHtlcLock(page, h1, p1.hashlock, senderP1LockBaseline);
+    await markE2EPhase(page, 'rebalance_h2.payment1_sender_lock', {
+      entityId: rt1.entityId,
+      details: { hashlock: p1.hashlock.slice(0, 12) },
+    });
 
     await switchRuntime(page, rt2Label);
     const p1Start = Date.now();
@@ -2139,6 +2191,10 @@ test.describe('Rebalance E2E', () => {
     await switchRuntime(page, rt1Label);
     await waitForPairIdle(page, h1, 60_000);
     const senderBeforeP2 = await readPairState(page, h1);
+    await markE2EPhase(page, 'rebalance_h2.payment2_submit', {
+      entityId: rt1.entityId,
+      details: { senderHub: h1.slice(0, 10), receiverHub: h2.slice(0, 10) },
+    });
     const p2 = await sendRoutedHtlcPayment(
       page,
       rt1.entityId,
@@ -2155,6 +2211,10 @@ test.describe('Rebalance E2E', () => {
       Number(senderBeforeP2?.recentHtlcLockCount || 0),
       25_000,
     ).catch(() => null);
+    await markE2EPhase(page, 'rebalance_h2.payment2_pre_rebalance_checked', {
+      entityId: rt1.entityId,
+      details: { hashlock: p2.hashlock.slice(0, 12) },
+    });
 
     await switchRuntime(page, rt2Label);
     const beforeP2Debt = BigInt(afterP1?.hubExposure || afterP1?.hubDebt || '0');
@@ -2183,8 +2243,29 @@ test.describe('Rebalance E2E', () => {
     const h2SettledDuringP2 = h2SettledEarly || h2SettlesAfterP2 > h2SettlesBeforeP2;
     const p2Received = await hasDebugHtlcEvent(page, p2.hashlock, 'HtlcReceived', scenarioStartedAt);
     if (p2HashSeen || p2Received) {
+      let observedH2SettledDuringP2 = h2SettledDuringP2;
+      if (!observedH2SettledDuringP2) {
+        const settleDeadline = Date.now() + 8_000;
+        while (Date.now() < settleDeadline) {
+          const retryEvents = await readPersistedFrameEventsSinceCursor(page, {
+            cursor: rt2P2Cursor,
+            eventNames: ['account_settled_finalized_bilateral'],
+          });
+          const settledByEvent = retryEvents.events.some((event) =>
+            event.message === 'account_settled_finalized_bilateral' && persistedEventHasAccount(event, h2),
+          );
+          const settledByDebugStep = countRebalanceStepEvents(
+            await readRebalanceStepEvents(page, scenarioStartedAt),
+            'account_settled_finalized_bilateral',
+            (step) => String(step?.accountId || '').toLowerCase() === h2Lower,
+          ) > h2SettlesBeforeP2;
+          observedH2SettledDuringP2 = settledByEvent || settledByDebugStep;
+          if (observedH2SettledDuringP2) break;
+          await page.waitForTimeout(400);
+        }
+      }
       expect(
-        h2SettledDuringP2,
+        observedH2SettledDuringP2,
         `payment#2 passed too early without persisted rebalance finalize evidence: ${JSON.stringify(rt2P2Events.events.slice(-24), null, 2)}`,
       ).toBe(true);
     } else {
@@ -2197,6 +2278,10 @@ test.describe('Rebalance E2E', () => {
     // Wait for H2 R2C rebalance pipeline only if the post-cursor slice has not already
     // captured the bilateral finalize event that allowed payment #2 through.
     if (!h2SettledDuringP2) {
+      await markE2EPhase(page, 'rebalance_h2.wait_rebalance_finalize', {
+        entityId: rt2.entityId,
+        details: { hub: h2.slice(0, 10) },
+      });
       await expect.poll(async () => {
         const steps = await readRebalanceStepEvents(page, scenarioStartedAt);
         return countRebalanceStepEvents(
@@ -2220,6 +2305,10 @@ test.describe('Rebalance E2E', () => {
     await switchRuntime(page, rt1Label);
     await waitForPairIdle(page, h1);
     const senderBeforeP3 = await readPairState(page, h1);
+    await markE2EPhase(page, 'rebalance_h2.payment3_submit', {
+      entityId: rt1.entityId,
+      details: { senderHub: h1.slice(0, 10), receiverHub: h2.slice(0, 10) },
+    });
     const p3 = await sendRoutedHtlcPayment(
       page,
       rt1.entityId,
@@ -2230,6 +2319,10 @@ test.describe('Rebalance E2E', () => {
       'rt1->rt2 via h1,h2 htlc #3 post-rebalance',
     );
     await waitForSenderHtlcLock(page, h1, p3.hashlock, Number(senderBeforeP3?.recentHtlcLockCount || 0));
+    await markE2EPhase(page, 'rebalance_h2.payment3_sender_lock', {
+      entityId: rt1.entityId,
+      details: { hashlock: p3.hashlock.slice(0, 12) },
+    });
 
     await switchRuntime(page, rt2Label);
     const debtBeforeP3 = BigInt(rebDone.hubExposure || rebDone.hubDebt || '0');
@@ -2302,8 +2395,7 @@ test.describe('Rebalance E2E', () => {
     const h3BeforeFaucet = await readPairState(page, h3);
     expect(h3BeforeFaucet, 'runtime1-h3 pair must exist before faucet').toBeTruthy();
     await faucetAmount(page, rt1.entityId, h3, '2000');
-    await waitForOutCapacityIncrease(page, h3, BigInt(h3BeforeFaucet?.outCapacity || '0'));
-    await waitForPairIdle(page, h3, 60_000);
+    await waitForFundingLiquidityReady(page, h3, BigInt(h3BeforeFaucet?.outCapacity || '0'));
 
     // Step 5: switch to runtime2 and capture baseline on H3.
     await switchRuntime(page, rt2Label);
@@ -2402,8 +2494,29 @@ test.describe('Rebalance E2E', () => {
     const payment2Received = await hasDebugHtlcEvent(page, payment2.hashlock, 'HtlcReceived', scenarioStartedAt);
     const debtAfterP2 = BigInt(afterP2.hubDebt || '0');
     if (hasPayment2PreRebalance || payment2Received) {
+      let observedH3SettledDuringP2 = h3SettledDuringP2;
+      if (!observedH3SettledDuringP2) {
+        const settleDeadline = Date.now() + 8_000;
+        while (Date.now() < settleDeadline) {
+          const retryEvents = await readPersistedFrameEventsSinceCursor(page, {
+            cursor: rt2P2Cursor,
+            eventNames: ['account_settled_finalized_bilateral'],
+          });
+          const settledByEvent = retryEvents.events.some((event) =>
+            event.message === 'account_settled_finalized_bilateral' && persistedEventHasAccount(event, h3),
+          );
+          const settledByDebugStep = countRebalanceStepEvents(
+            await readRebalanceStepEvents(page, scenarioStartedAt),
+            'account_settled_finalized_bilateral',
+            (step) => String(step?.accountId || '').toLowerCase() === h3Lower,
+          ) > h3SettlesBeforeP2;
+          observedH3SettledDuringP2 = settledByEvent || settledByDebugStep;
+          if (observedH3SettledDuringP2) break;
+          await page.waitForTimeout(400);
+        }
+      }
       expect(
-        h3SettledDuringP2,
+        observedH3SettledDuringP2,
         `payment2 passed too early without rebalance finalize evidence: ${JSON.stringify(rt2P2Events.events.slice(-24), null, 2)}`,
       ).toBe(true);
     } else {
