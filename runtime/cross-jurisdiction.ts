@@ -1,6 +1,15 @@
 import { ethers } from 'ethers';
 import { isLeftEntity } from './entity-id-utils';
-import type { CrossJurisdictionSwapRoute, CrossJurisdictionSwapStatus, Env } from './types';
+import type {
+  AccountFrame,
+  AccountInput,
+  AccountTx,
+  CrossJurisdictionSwapRoute,
+  CrossJurisdictionSwapStatus,
+  Env,
+  SwapOffer,
+  SwapOrderHistoryEntry,
+} from './types';
 import {
   buildHashLadderProof,
   revealHashLadder,
@@ -339,6 +348,46 @@ export function getCrossJurisdictionPrivateSeed(
 export function stripCrossJurisdictionPrivateData(route: CrossJurisdictionSwapRoute): CrossJurisdictionSwapRoute {
   const { hashLadderPrivateSeed: _privateSeed, ...publicRoute } = route as LegacyPrivateRoute;
   return publicRoute;
+}
+
+export function stripCrossJurisdictionCarrierPrivateData<T extends { crossJurisdiction?: CrossJurisdictionSwapRoute }>(value: T): T {
+  if (!value.crossJurisdiction) return value;
+  return {
+    ...value,
+    crossJurisdiction: stripCrossJurisdictionPrivateData({ ...value.crossJurisdiction }),
+  };
+}
+
+export const stripCrossJurisdictionSwapOfferPrivateData = (offer: SwapOffer): SwapOffer =>
+  stripCrossJurisdictionCarrierPrivateData({ ...offer });
+
+export const stripCrossJurisdictionSwapHistoryPrivateData = (entry: SwapOrderHistoryEntry): SwapOrderHistoryEntry =>
+  stripCrossJurisdictionCarrierPrivateData({ ...entry });
+
+export function stripCrossJurisdictionAccountTxPrivateData(tx: AccountTx): AccountTx {
+  if (tx.type !== 'swap_offer' || !tx.data.crossJurisdiction) return tx;
+  return {
+    ...tx,
+    data: {
+      ...tx.data,
+      crossJurisdiction: stripCrossJurisdictionPrivateData({ ...tx.data.crossJurisdiction }),
+    },
+  };
+}
+
+export function stripCrossJurisdictionAccountFramePrivateData(frame: AccountFrame): AccountFrame {
+  return {
+    ...frame,
+    accountTxs: frame.accountTxs.map(stripCrossJurisdictionAccountTxPrivateData),
+  };
+}
+
+export function stripCrossJurisdictionAccountInputPrivateData(input: AccountInput): AccountInput {
+  if (input.kind !== 'frame' && input.kind !== 'frame_ack') return input;
+  return {
+    ...input,
+    newAccountFrame: stripCrossJurisdictionAccountFramePrivateData(input.newAccountFrame),
+  } as AccountInput;
 }
 
 export function deriveCrossJurisdictionRouteHash(route: CrossJurisdictionSwapRoute): string {

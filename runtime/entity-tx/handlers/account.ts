@@ -25,7 +25,6 @@ import {
   buildSwapResolveDataFromOrderbookFill,
   calculateSwapTakerFeeAmount,
   compareCanonicalText,
-  deriveCanonicalSwapFillRatio,
   MAX_SWAP_FILL_RATIO,
   type NormalizedOrderbookOffer,
   swapKey,
@@ -45,7 +44,13 @@ import {
   buildHtlcFinalizedEventPayload,
   buildHtlcReceivedEventPayload,
 } from '../../htlc-events';
-import { deriveCanonicalCrossJurisdictionMarket } from '../../cross-jurisdiction';
+import {
+  buildCrossJurisdictionCancelAck,
+  buildCrossJurisdictionFillAck,
+  buildCrossJurisdictionMarketOffer,
+  type CrossJurisdictionFillInstruction,
+  type CrossMarketOffer,
+} from '../../cross-jurisdiction-orderbook';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const getJurisdictionId = (state: EntityState, env: Env): string => {
@@ -147,19 +152,6 @@ export interface MatchResult {
     accountId: string;
     reason: string;
   }>;
-}
-
-export interface CrossJurisdictionFillInstruction {
-  accountId: string;
-  offerId: string;
-  route: CrossJurisdictionSwapRoute;
-  fillRatio: number;
-  cancelRemainder: boolean;
-  sourceAmount: bigint;
-  targetAmount: bigint;
-  priceTicks: bigint;
-  pairId: string;
-  orderId: string;
 }
 
 type OrderbookProcessOptions = {
@@ -1800,47 +1792,8 @@ export function processOrderbookSwaps(
     return false;
   };
 
-  type CrossMarketOffer = {
-    offer: NormalizedOrderbookOffer;
-    route: CrossJurisdictionSwapRoute;
-    pairId: string;
-    side: 0 | 1;
-    baseAmount: bigint;
-    quoteAmount: bigint;
-    priceTicks: bigint;
-    makerId: string;
-  };
-  const computeCrossPriceTicks = (side: 0 | 1, baseAmount: bigint, quoteAmount: bigint): bigint => {
-    if (baseAmount <= 0n || quoteAmount <= 0n) return 0n;
-    const scaledQuote = quoteAmount * ORDERBOOK_PRICE_SCALE;
-    const remainder = scaledQuote % baseAmount;
-    let priceTicks = scaledQuote / baseAmount;
-    if (side === 1 && remainder > 0n) priceTicks += 1n;
-    return priceTicks > 0n ? priceTicks : 0n;
-  };
   const buildCrossMarketOffer = (offer: NormalizedOrderbookOffer): CrossMarketOffer | null => {
-    const route = offer.crossJurisdiction;
-    if (!route) return null;
-    const bookOwner = normalizeEntityRef(route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId);
-    if (bookOwner && bookOwner !== normalizeEntityRef(hubState.entityId)) return null;
-    if (route.status !== 'resting' && route.status !== 'partially_filled') return null;
-    const market = deriveCanonicalCrossJurisdictionMarket(route);
-    if (!market.sourceKey || !market.targetKey || market.sourceKey === market.targetKey) return null;
-    const side: 0 | 1 = market.sourceIsBase ? 1 : 0;
-    const baseAmount = side === 1 ? offer.giveAmount : offer.wantAmount;
-    const quoteAmount = side === 1 ? offer.wantAmount : offer.giveAmount;
-    const priceTicks = offer.priceTicks > 0n ? offer.priceTicks : computeCrossPriceTicks(side, baseAmount, quoteAmount);
-    if (baseAmount <= 0n || quoteAmount <= 0n || priceTicks <= 0n) return null;
-    return {
-      offer,
-      route,
-      pairId: market.venueId,
-      side,
-      baseAmount,
-      quoteAmount,
-      priceTicks,
-      makerId: offer.makerIsLeft ? offer.fromEntity : offer.toEntity,
-    };
+    return buildCrossJurisdictionMarketOffer(offer, hubState.entityId);
   };
 
   const crossLiveOfferMeta = new Map<string, CrossMarketOffer>();
@@ -1978,66 +1931,10 @@ export function processOrderbookSwaps(
         const offerId = namespacedOrderId.slice(lastColon + 1);
         if (hasQueuedCrossSwapAckForEntityState(hubState, accountId, offerId)) continue;
 
-        const filledLotsBig = BigInt(fill.filledLots);
-        if (filledLotsBig <= 0n || fill.weightedCost <= 0n) continue;
-        const executionBaseWei = filledLotsBig * SWAP_LOT_SCALE;
-        const executionQuoteWei = (fill.weightedCost * SWAP_LOT_SCALE) / ORDERBOOK_PRICE_SCALE;
-        const sourceAmount = meta.side === 1 ? executionBaseWei : executionQuoteWei;
-        const targetAmount = meta.side === 1 ? executionQuoteWei : executionBaseWei;
-        if (sourceAmount <= 0n || targetAmount <= 0n) continue;
-        const previousRatio = Math.max(0, Math.min(65_535, Math.floor(Number(meta.route.claimedRatio ?? 0) || 0)));
-        const previousCumulativeRatio = Math.max(previousRatio, Math.max(0, Math.min(65_535, Math.floor(Number(meta.route.cumulativeFillRatio ?? 0) || 0))));
-        const sourceTotal = BigInt(meta.route.source.amount);
-        const targetTotal = BigInt(meta.route.target.amount);
-        const previousSourceClaimed =
-          meta.route.filledSourceAmount ?? meta.route.sourceClaimed ?? ((sourceTotal * BigInt(previousCumulativeRatio)) / 65_535n);
-        const desiredSourceClaimed = previousSourceClaimed + sourceAmount;
-        const cappedSourceClaimed = desiredSourceClaimed >= sourceTotal ? sourceTotal : desiredSourceClaimed;
-        const fillRatio = cappedSourceClaimed >= sourceTotal
-          ? 65_535
-          : deriveCanonicalSwapFillRatio(sourceTotal, cappedSourceClaimed);
-        if (fillRatio <= previousCumulativeRatio) continue;
-        const settlementSourceAmount =
-          (sourceTotal * BigInt(fillRatio)) / 65_535n - previousSourceClaimed;
-        const previousTargetClaimed =
-          meta.route.filledTargetAmount ?? meta.route.targetClaimed ?? ((targetTotal * BigInt(previousCumulativeRatio)) / 65_535n);
-        const settlementTargetAmount =
-          (targetTotal * BigInt(fillRatio)) / 65_535n - previousTargetClaimed;
-        if (settlementSourceAmount <= 0n || settlementTargetAmount <= 0n) continue;
-
-        crossJurisdictionFills.push({
-          accountId,
-          offerId,
-          route: meta.route,
-          fillRatio,
-          cancelRemainder: fillRatio >= 65_535,
-          sourceAmount: settlementSourceAmount,
-          targetAmount: settlementTargetAmount,
-          priceTicks: meta.priceTicks,
-          pairId: meta.pairId,
-          orderId: namespacedOrderId,
-        });
-        mempoolOps.push({
-          accountId,
-          tx: {
-            type: 'cross_swap_fill_ack',
-            data: {
-              offerId,
-              fillSeq: Math.max(0, Math.floor(Number(meta.route.fillSeq ?? 0) || 0)) + 1,
-              incrementalSourceAmount: settlementSourceAmount,
-              incrementalTargetAmount: settlementTargetAmount,
-              cumulativeSourceAmount: previousSourceClaimed + settlementSourceAmount,
-              cumulativeTargetAmount: previousTargetClaimed + settlementTargetAmount,
-              cumulativeFillRatio: fillRatio,
-              executionSourceAmount: settlementSourceAmount,
-              executionTargetAmount: settlementTargetAmount,
-              cancelRemainder: fillRatio >= 65_535,
-              comment: `cross-j-hashledger-fill:${fillRatio}`,
-              priceTicks: meta.priceTicks,
-              pairId: meta.pairId,
-            },
-          },
-        });
+        const ack = buildCrossJurisdictionFillAck(accountId, offerId, namespacedOrderId, meta, fill);
+        if (!ack) continue;
+        crossJurisdictionFills.push(ack.instruction);
+        mempoolOps.push({ accountId, tx: ack.tx });
       }
     }
   };
@@ -2528,41 +2425,7 @@ export function processOrderbookCancels(
 
     const offer = accountMachine?.swapOffers?.get(offerId);
     if (offer?.crossJurisdiction) {
-      const route = offer.crossJurisdiction;
-      const currentRatio = Math.max(
-        0,
-        Math.min(65_535, Math.floor(Number(route.cumulativeFillRatio ?? route.claimedRatio ?? 0) || 0)),
-      );
-      const sourceTotal = BigInt(route.source.amount);
-      const targetTotal = BigInt(route.target.amount);
-      const cumulativeSourceAmount =
-        route.filledSourceAmount ??
-        route.sourceClaimed ??
-        ((sourceTotal * BigInt(currentRatio)) / 65_535n);
-      const cumulativeTargetAmount =
-        route.filledTargetAmount ??
-        route.targetClaimed ??
-        ((targetTotal * BigInt(currentRatio)) / 65_535n);
-      mempoolOps.push({
-        accountId,
-        tx: {
-          type: 'cross_swap_fill_ack',
-          data: {
-            offerId,
-            fillSeq: Math.max(0, Math.floor(Number(route.fillSeq ?? 0) || 0)),
-            incrementalSourceAmount: 0n,
-            incrementalTargetAmount: 0n,
-            cumulativeSourceAmount,
-            cumulativeTargetAmount,
-            cumulativeFillRatio: currentRatio,
-            executionSourceAmount: 0n,
-            executionTargetAmount: 0n,
-            cancelRemainder: true,
-            comment: 'cross-j-cancel-request',
-            pairId: route.venueId || '',
-          },
-        },
-      });
+      mempoolOps.push({ accountId, tx: buildCrossJurisdictionCancelAck(offerId, offer.crossJurisdiction) });
       console.log(`🌉 ORDERBOOK CROSS-J: queued clear/cancel ack for ${offerId.slice(-8)}`);
       continue;
     }
