@@ -12,7 +12,7 @@ import { hashHtlcSecret } from '../htlc-utils';
 import type { AccountMachine, ConsensusConfig, EntityReplica, EntityState, Env, JurisdictionConfig } from '../types';
 import { createDefaultDelta } from '../validation-utils';
 import { cloneEntityState } from '../state-helpers';
-import { projectEntityCoreDoc } from '../storage/projections';
+import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
 import {
   CROSS_J_TARGET_REVEAL_SAFETY_MS,
   buildPreparedCrossJurisdictionRoute,
@@ -273,11 +273,61 @@ describe('cross-jurisdiction hashledger swap', () => {
       ...route,
       hashLadderPrivateSeed: secret('b6'),
     } as any);
+    const account = state.accounts.get(sourceUser)!;
+    account.swapOffers.set(route.orderId, {
+      offerId: route.orderId,
+      giveTokenId: 1,
+      giveAmount: 1_000n,
+      wantTokenId: 1,
+      wantAmount: 900n,
+      priceTicks: 900n,
+      timeInForce: 0,
+      minFillRatio: 0,
+      makerIsLeft: account.leftEntity === sourceUser,
+      createdHeight: 0,
+      crossJurisdiction: { ...route, hashLadderPrivateSeed: secret('b7') } as any,
+    });
+    account.mempool.push({
+      type: 'swap_offer',
+      data: {
+        offerId: `${route.orderId}-mempool`,
+        giveTokenId: 1,
+        giveAmount: 1_000n,
+        wantTokenId: 1,
+        wantAmount: 900n,
+        minFillRatio: 0,
+        crossJurisdiction: { ...route, hashLadderPrivateSeed: secret('b8') } as any,
+      },
+    });
+    account.swapOrderHistory = new Map([[
+      route.orderId,
+      {
+        offerId: route.orderId,
+        giveTokenId: 1,
+        giveAmount: 1_000n,
+        wantTokenId: 1,
+        wantAmount: 900n,
+        priceTicks: 900n,
+        createdHeight: 0,
+        crossJurisdiction: { ...route, hashLadderPrivateSeed: secret('b9') },
+        cancelRequested: false,
+        lastUpdatedHeight: 0,
+        resolves: [],
+      } as any,
+    ]]);
 
     const clonedRoute = cloneEntityState(state).crossJurisdictionSwaps?.get(route.orderId) as any;
     const projectedRoute = projectEntityCoreDoc(state).crossJurisdictionSwaps?.get(route.orderId) as any;
+    const clonedAccount = cloneEntityState(state).accounts.get(sourceUser)! as any;
+    const projectedAccount = projectAccountDoc(account) as any;
     expect(clonedRoute.hashLadderPrivateSeed).toBeUndefined();
     expect(projectedRoute.hashLadderPrivateSeed).toBeUndefined();
+    expect(clonedAccount.swapOffers.get(route.orderId).crossJurisdiction.hashLadderPrivateSeed).toBeUndefined();
+    expect(clonedAccount.mempool[0].data.crossJurisdiction.hashLadderPrivateSeed).toBeUndefined();
+    expect(clonedAccount.swapOrderHistory.get(route.orderId).crossJurisdiction.hashLadderPrivateSeed).toBeUndefined();
+    expect(projectedAccount.swapOffers.get(route.orderId).crossJurisdiction.hashLadderPrivateSeed).toBeUndefined();
+    expect(projectedAccount.mempool[0].data.crossJurisdiction.hashLadderPrivateSeed).toBeUndefined();
+    expect(projectedAccount.swapOrderHistory.get(route.orderId).crossJurisdiction.hashLadderPrivateSeed).toBeUndefined();
   });
 
   test('canonical route hash binds cross-j economic terms and terminal states reject overwrite', async () => {

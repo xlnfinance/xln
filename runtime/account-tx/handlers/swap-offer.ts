@@ -17,6 +17,7 @@ import { createDefaultDelta } from '../../validation-utils';
 import { deriveSide, SWAP_LOT_SCALE, ORDERBOOK_PRICE_SCALE, prepareSwapOrder } from '../../orderbook';
 import { FINANCIAL, LIMITS } from '../../constants';
 import { recordSwapOfferLifecycle } from './swap-history';
+import { stripCrossJurisdictionPrivateData } from '../../cross-jurisdiction';
 
 export async function handleSwapOffer(
   accountMachine: AccountMachine,
@@ -216,7 +217,7 @@ export async function handleSwapOffer(
     createdHeight: currentHeight,
     quantizedGive: effectiveGiveAmount,
     quantizedWant: effectiveWantAmount,
-    ...(crossJurisdiction ? { crossJurisdiction } : {}),
+    ...(crossJurisdiction ? { crossJurisdiction: stripCrossJurisdictionPrivateData({ ...crossJurisdiction }) } : {}),
   };
 
   // 8. Lock capacity (CRITICAL PER CODEX: Apply during BOTH validation and commit!)
