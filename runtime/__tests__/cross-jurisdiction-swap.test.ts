@@ -25,6 +25,7 @@ import {
   deriveCrossJurisdictionRouteHash,
   isCrossJurisdictionRouteTransitionAllowed,
   withCanonicalCrossJurisdictionRouteHash,
+  cloneCrossJurisdictionRoute,
 } from '../cross-jurisdiction';
 import { verifyHashLadderBinary } from '../hashladder';
 
@@ -268,7 +269,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(deriveCrossJurisdictionRouteHash(preparedRoute)).toBe(preparedRoute.routeHash);
     expect(preparedRoute.sourcePull.fullHash).toBe(preparedRoute.targetPull.fullHash);
     expect(preparedRoute.sourcePull.partialRoot).toBe(preparedRoute.targetPull.partialRoot);
-    expect('hashLadderPrivateSeed' in preparedRoute).toBe(false);
 	    expect(preparedRoute.targetPull.revealedUntilTimestamp - preparedRoute.sourcePull.revealedUntilTimestamp)
 	      .toBeGreaterThanOrEqual(5_000 + CROSS_J_TARGET_REVEAL_SAFETY_MS);
 	  });
@@ -414,7 +414,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(isCrossJurisdictionRouteTransitionAllowed('clear_requested', 'settled')).toBe(false);
   });
 
-  test('cross-j private seed stays out of route clones and storage projection', () => {
+  test('cross-j route clones and storage projection keep only public route fields', () => {
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const base = makeJurisdiction('Base', 8453, '21', '22');
     const sourceUser = entity('b1');
@@ -423,7 +423,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const targetUser = entity('b4');
     const state = makeState(sourceHub, addr('b5'), eth, sourceUser);
     const route = buildPreparedCrossJurisdictionRoute({
-      orderId: 'cross-private-seed-public-shape',
+      orderId: 'cross-public-route-shape',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
       source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
@@ -432,10 +432,10 @@ describe('cross-jurisdiction hashledger swap', () => {
       createdAt: 1_000,
       updatedAt: 1_000,
       expiresAt: 61_000,
-    }, { runtimeSeed: 'cross-private-seed-public-shape', sourceDisputeDelayMs: 5_000, now: 1_000 });
+    }, { runtimeSeed: 'cross-public-route-shape', sourceDisputeDelayMs: 5_000, now: 1_000 });
     state.crossJurisdictionSwaps?.set(route.orderId, {
       ...route,
-      hashLadderPrivateSeed: secret('b6'),
+      __debugOnly: secret('b6'),
     } as any);
     const account = state.accounts.get(sourceUser)!;
     account.swapOffers.set(route.orderId, {
@@ -449,7 +449,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       minFillRatio: 0,
       makerIsLeft: account.leftEntity === sourceUser,
       createdHeight: 0,
-      crossJurisdiction: { ...route, hashLadderPrivateSeed: secret('b7') } as any,
+      crossJurisdiction: { ...route, __debugOnly: secret('b7') } as any,
     });
     account.mempool.push({
       type: 'swap_offer',
@@ -460,7 +460,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         wantTokenId: 1,
         wantAmount: 900n,
         minFillRatio: 0,
-        crossJurisdiction: { ...route, hashLadderPrivateSeed: secret('b8') } as any,
+        crossJurisdiction: { ...route, __debugOnly: secret('b8') } as any,
       },
     });
     account.swapOrderHistory = new Map([[
@@ -473,7 +473,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         wantAmount: 900n,
         priceTicks: 900n,
         createdHeight: 0,
-        crossJurisdiction: { ...route, hashLadderPrivateSeed: secret('b9') },
+        crossJurisdiction: { ...route, __debugOnly: secret('b9') },
         cancelRequested: false,
         lastUpdatedHeight: 0,
         resolves: [],
@@ -484,18 +484,19 @@ describe('cross-jurisdiction hashledger swap', () => {
     const projectedRoute = projectEntityCoreDoc(state).crossJurisdictionSwaps?.get(route.orderId) as any;
     const clonedAccount = cloneEntityState(state).accounts.get(sourceUser)! as any;
     const projectedAccount = projectAccountDoc(account) as any;
-    expect(clonedRoute.hashLadderPrivateSeed).toBeUndefined();
-    expect(projectedRoute.hashLadderPrivateSeed).toBeUndefined();
+    expect('__debugOnly' in cloneCrossJurisdictionRoute({ ...route, __debugOnly: secret('ba') } as any)).toBe(false);
+    expect(clonedRoute.__debugOnly).toBeUndefined();
+    expect(projectedRoute.__debugOnly).toBeUndefined();
     expect(clonedRoute.source).toEqual(route.source);
     expect(clonedRoute.target).toEqual(route.target);
     expect(projectedRoute.source).toEqual(route.source);
     expect(projectedRoute.target).toEqual(route.target);
-    expect(clonedAccount.swapOffers.get(route.orderId).crossJurisdiction.hashLadderPrivateSeed).toBeUndefined();
-    expect(clonedAccount.mempool[0].data.crossJurisdiction.hashLadderPrivateSeed).toBeUndefined();
-    expect(clonedAccount.swapOrderHistory.get(route.orderId).crossJurisdiction.hashLadderPrivateSeed).toBeUndefined();
-    expect(projectedAccount.swapOffers.get(route.orderId).crossJurisdiction.hashLadderPrivateSeed).toBeUndefined();
-    expect(projectedAccount.mempool[0].data.crossJurisdiction.hashLadderPrivateSeed).toBeUndefined();
-    expect(projectedAccount.swapOrderHistory.get(route.orderId).crossJurisdiction.hashLadderPrivateSeed).toBeUndefined();
+    expect(clonedAccount.swapOffers.get(route.orderId).crossJurisdiction.__debugOnly).toBeUndefined();
+    expect(clonedAccount.mempool[0].data.crossJurisdiction.__debugOnly).toBeUndefined();
+    expect(clonedAccount.swapOrderHistory.get(route.orderId).crossJurisdiction.__debugOnly).toBeUndefined();
+    expect(projectedAccount.swapOffers.get(route.orderId).crossJurisdiction.__debugOnly).toBeUndefined();
+    expect(projectedAccount.mempool[0].data.crossJurisdiction.__debugOnly).toBeUndefined();
+    expect(projectedAccount.swapOrderHistory.get(route.orderId).crossJurisdiction.__debugOnly).toBeUndefined();
   });
 
   test('placeSwapOffer emits only public cross-j route into account tx', async () => {
@@ -523,8 +524,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         expiresAt: 61_000,
       }, { runtimeSeed: 'cross-public-account-tx', sourceDisputeDelayMs: 5_000, now: 1_000 }),
       status: 'resting' as const,
-      hashLadderPrivateSeed: secret('c6'),
-    } as any;
+    };
 
     const result = await applyEntityTx(env, sourceHubState, {
       type: 'placeSwapOffer',
@@ -542,8 +542,8 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     const accountTx = result.mempoolOps?.[0]?.tx as any;
     expect(accountTx?.type).toBe('swap_offer');
-    expect(accountTx.data.crossJurisdiction.hashLadderPrivateSeed).toBeUndefined();
-    expect((result.newState.crossJurisdictionSwaps?.get(route.orderId) as any)?.hashLadderPrivateSeed).toBeUndefined();
+    expect(accountTx.data.crossJurisdiction).toEqual(route);
+    expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)).toEqual(route);
   });
 
   test('swap_offer created event carries only public cross-j route', async () => {
@@ -567,8 +567,7 @@ describe('cross-jurisdiction hashledger swap', () => {
         expiresAt: 61_000,
       }, { runtimeSeed: 'cross-public-created-event', sourceDisputeDelayMs: 5_000, now: 1_000 }),
       status: 'resting' as const,
-      hashLadderPrivateSeed: secret('d5'),
-    } as any;
+    };
     const result = await processAccountTx(account, {
       type: 'swap_offer',
       data: {
@@ -583,8 +582,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     }, account.leftEntity === sourceUser, 1_000, 1);
 
     expect(result.success).toBe(true);
-    expect((result.swapOfferCreated as any).crossJurisdiction.hashLadderPrivateSeed).toBeUndefined();
-    expect((account.swapOffers.get(route.orderId)?.crossJurisdiction as any).hashLadderPrivateSeed).toBeUndefined();
+    expect(result.swapOfferCreated?.crossJurisdiction).toEqual(route);
+    expect(account.swapOffers.get(route.orderId)?.crossJurisdiction).toEqual(route);
   });
 
   test('canonical route hash binds cross-j economic terms and terminal states reject overwrite', async () => {

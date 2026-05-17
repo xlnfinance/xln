@@ -30,8 +30,8 @@ import {
   type SwapOfferEvent,
 } from './entity-tx/handlers/account';
 import { compareCanonicalText, swapKey } from './swap-execution';
-import type { OrderbookExtState } from './orderbook';
-import { applyCommand, getBookOrder, getOrderbookPairsForOrder, replaceOrderbookPair } from './orderbook';
+import { replaceOrderbookPair, type OrderbookExtState } from './orderbook';
+import { removeBookOrderById } from './orderbook/cross-j';
 import { executeCrontab, initCrontab, scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from './entity-crontab';
 import { ethers } from 'ethers';
 import {
@@ -66,24 +66,8 @@ const applyCommittedSwapCancelsToOrderbook = (
   console.log(`📊 ENTITY-ORCHESTRATOR: Applying ${cancels.length} committed swap cancels to orderbook`);
   for (const { accountId, offerId } of cancels) {
     const namespacedOrderId = `${accountId}:${offerId}`;
-    for (const pairId of getOrderbookPairsForOrder(ext, namespacedOrderId)) {
-      const book = ext.books.get(pairId);
-      if (!book) continue;
-      const existingOrder = getBookOrder(book, namespacedOrderId);
-      if (!existingOrder) continue;
-      const result = applyCommand(book, {
-        kind: 1,
-        ownerId: existingOrder.ownerId,
-        orderId: namespacedOrderId,
-      });
-      replaceOrderbookPair(ext, pairId, result.state);
-      recordOrderbookPairUpdate(env, {
-        entityId: state.entityId,
-        pairId,
-        book: result.state,
-      });
-      markStorageEntityDirty(env, state.entityId);
-      console.log(`📊 ORDERBOOK: Removed committed cancelled order ${offerId.slice(-8)} from ${pairId}`);
+    if (removeBookOrderById(env, state, namespacedOrderId)) {
+      console.log(`📊 ORDERBOOK: Removed committed cancelled order ${offerId.slice(-8)}`);
     }
   }
 };

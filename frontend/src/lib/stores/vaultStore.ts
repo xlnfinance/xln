@@ -15,7 +15,7 @@ import { unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
 // Types
 export interface Signer {
   index: number; // signer list index
-  derivationIndex?: number; // HD account index; defaults to index for legacy signers
+  derivationIndex?: number; // HD account index; defaults to the visible signer index when absent
   address: string;
   name: string;
   entityId?: string; // Auto-created entity for this signer
@@ -308,16 +308,24 @@ async function waitForCondition(
   label: string,
   timeoutMs = 30_000,
   intervalMs = 50,
+  describeTimeout?: () => string,
 ): Promise<void> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
     if (check()) return;
     await new Promise((resolve) => setTimeout(resolve, intervalMs));
   }
-  throw new Error(`[VaultStore] Timeout waiting for condition: ${label}`);
+  const details = describeTimeout?.();
+  throw new Error(`[VaultStore] Timeout waiting for condition: ${label}${details ? `\n${details}` : ''}`);
 }
 
-const getRuntimeFatalDiagnostics = (env: Env): string => {
+const getLiveRuntimeEnvForId = (runtimeId: string, fallback?: Env | null): Env | null => {
+  const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
+  const latest = normalizedRuntimeId ? get(runtimes).get(normalizedRuntimeId)?.env : null;
+  return unwrapLiveRuntimeEnv(latest) ?? unwrapLiveRuntimeEnv(fallback) ?? fallback ?? null;
+};
+
+const getRuntimeFatalDiagnostics = (env: Env, replicaName?: string): string => {
   const frameLogs = env.frameLogs;
   const cleanLogs = Array.isArray(env.runtimeState?.cleanLogs) ? env.runtimeState.cleanLogs : [];
   const recentErrors = frameLogs
@@ -332,14 +340,17 @@ const getRuntimeFatalDiagnostics = (env: Env): string => {
       timestamp: entry.timestamp ?? null,
     }));
   const recentLogs = cleanLogs.slice(-8);
-  const replica = env.jReplicas.values().next().value;
+  const replica = replicaName ? env.jReplicas.get(replicaName) : env.jReplicas.values().next().value;
   const jState = replica
     ? {
         name: replica.name ?? null,
         chainId: replica.chainId ?? null,
         depositoryAddress: replica.depositoryAddress ?? null,
         entityProviderAddress: replica.entityProviderAddress ?? null,
+        contracts: replica.contracts ?? null,
+        rpcs: replica.rpcs ?? null,
         hasAdapter: hasConnectedJurisdictionAdapter(replica),
+        hasAddresses: hasRuntimeJurisdictionAddresses(replica),
       }
     : null;
   return JSON.stringify(
@@ -364,10 +375,11 @@ async function enqueueAndAwait(
   ready: () => boolean,
   label: string,
   timeoutMs = 30_000,
+  describeTimeout?: () => string,
 ): Promise<void> {
   const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
   xln.enqueueRuntimeInput(runtimeEnv, runtimeInput);
-  await waitForCondition(ready, label, timeoutMs);
+  await waitForCondition(ready, label, timeoutMs, 50, describeTimeout);
 }
 
 async function ensureRuntimePipelineAlive(runtime: Runtime | null, xln: XLNModule): Promise<void> {
@@ -1309,9 +1321,15 @@ export const vaultOperations = {
       });
       registerRuntimeEnvChange(runtimeId, env, xln);
     }
+    const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
+    const getLatestEnv = (): Env => {
+      const latest = getLiveRuntimeEnvForId(runtimeId, runtimeEnv);
+      if (!latest) throw new Error(`Runtime env not found: ${runtimeId}`);
+      return latest;
+    };
 
-    if (env.jReplicas?.has(config.name)) {
-      const existing = env.jReplicas.get(config.name);
+    if (getLatestEnv().jReplicas?.has(config.name)) {
+      const existing = getLatestEnv().jReplicas.get(config.name);
       return {
         ...config,
         contracts: {
@@ -1323,10 +1341,10 @@ export const vaultOperations = {
       };
     }
 
-    ensureRuntimeLoopRunning(env, xln, `import-jmachine:${config.name}`);
+    ensureRuntimeLoopRunning(runtimeEnv, xln, `import-jmachine:${config.name}`);
     await enqueueAndAwait(
       xln,
-      env,
+      runtimeEnv,
       {
         runtimeTxs: [{
           type: 'importJ',
@@ -1341,25 +1359,35 @@ export const vaultOperations = {
         }],
         entityInputs: []
       },
-      () => hasConnectedJurisdictionAdapter(env?.jReplicas?.get?.(config.name)),
+      () => {
+        const latestEnv = getLatestEnv();
+        if (latestEnv.runtimeState?.loopActive === false) {
+          throw new Error(`importJ(${config.name}) failed: runtime loop halted\n${getRuntimeFatalDiagnostics(latestEnv, config.name)}`);
+        }
+        return hasConnectedJurisdictionAdapter(latestEnv.jReplicas?.get?.(config.name));
+      },
       `importJ(${config.name})`,
       45_000,
+      () => getRuntimeFatalDiagnostics(getLatestEnv(), config.name),
     );
     await waitForCondition(
-      () => hasRuntimeJurisdictionAddresses(env?.jReplicas?.get?.(config.name)),
+      () => hasRuntimeJurisdictionAddresses(getLatestEnv().jReplicas?.get?.(config.name)),
       `importJ(${config.name}).addresses`,
       45_000,
+      50,
+      () => getRuntimeFatalDiagnostics(getLatestEnv(), config.name),
     );
 
+    const finalEnv = getLatestEnv();
     runtimes.update((currentRuntimes) => {
       const updated = new Map(currentRuntimes);
-      updated.set(runtimeId, runtimeToEntry(runtime, env!));
+      updated.set(runtimeId, runtimeToEntry(runtime, finalEnv));
       return updated;
     });
     if (normalizeRuntimeId(get(activeRuntimeId)) === runtimeId) {
-      setXlnEnvironment(env);
+      setXlnEnvironment(finalEnv);
     }
-    const imported = env.jReplicas?.get(config.name);
+    const imported = finalEnv.jReplicas?.get(config.name);
     return {
       ...config,
       contracts: {

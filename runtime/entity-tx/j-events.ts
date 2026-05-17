@@ -356,16 +356,6 @@ function decodeDisputeInitialSecrets(initialArgumentsRaw: unknown): string[] {
       }
       continue;
     } catch {
-      // Try legacy [fillRatios, secrets] format below.
-    }
-    try {
-      const [, decodedSecrets] = abiCoder.decode(['uint16[]', 'bytes32[]'], arg) as unknown as [Array<bigint>, Array<string>];
-      for (const secret of decodedSecrets) {
-        if (ethers.isHexString(secret, 32)) {
-          secrets.add(String(secret).toLowerCase());
-        }
-      }
-    } catch {
       // Ignore non-HTLC transformer argument formats.
     }
   }

@@ -4,20 +4,15 @@ import { isLeftEntity } from '../entity-id-utils';
 import { formatEntityId } from '../utils';
 import { normalizeEntityName } from '../networking/gossip';
 import {
-  applyCommand,
   createOrderbookExtState,
-  getBookOrder,
-  getOrderbookPairsForOrder,
-  replaceOrderbookPair,
   validateSpreadDistribution,
-  type OrderbookExtState,
 } from '../orderbook';
 import type { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput, JInput, HashType, CrossJurisdictionSwapRoute } from '../types';
 import { DEFAULT_SOFT_LIMIT, DEFAULT_HARD_LIMIT, DEFAULT_MAX_FEE } from '../types';
 import { DEBUG, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
 import { announceLocalEntityProfile } from '../networking/gossip-helper';
-import { markStorageAccountDirty, markStorageEntityDirty, recordOrderbookPairUpdate } from '../env-events';
+import { markStorageAccountDirty, markStorageEntityDirty } from '../env-events';
 import { upsertSortedStringMapEntry } from '../sorted-index';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
 import {
@@ -61,7 +56,7 @@ import {
 	isCrossJurisdictionRouteExpired,
 	isCrossJurisdictionRouteTransitionAllowed,
 	isCrossJurisdictionTerminalStatus,
-	stripCrossJurisdictionPrivateData,
+	cloneCrossJurisdictionRoute,
 	validateCrossJurisdictionFillProgress,
 	withCanonicalCrossJurisdictionRouteHash,
 } from '../cross-jurisdiction';
@@ -84,6 +79,7 @@ import {
 } from './handlers/settle';
 import { handleDisputeFinalize, handleDisputeStart } from './handlers/dispute';
 import { buildCrossJurisdictionCancelAck } from '../cross-jurisdiction-orderbook';
+import { removeBookOrderById } from '../orderbook/cross-j';
 import {
   assertSameJurisdictionAccount,
   getJurisdictionStackId,
@@ -101,31 +97,7 @@ const cancelOrderbookOfferIfPresent = (
   state: EntityState,
   accountId: string,
   offerId: string,
-): boolean => {
-  const ext = state.orderbookExt as OrderbookExtState | undefined;
-  if (!ext) return false;
-  const namespacedOrderId = `${accountId}:${offerId}`;
-  let removed = false;
-  for (const pairId of getOrderbookPairsForOrder(ext, namespacedOrderId)) {
-    const book = ext.books.get(pairId);
-    if (!book) continue;
-    const order = getBookOrder(book, namespacedOrderId);
-    if (!order) continue;
-    const result = applyCommand(book, {
-      kind: 1,
-      ownerId: order.ownerId,
-      orderId: namespacedOrderId,
-    });
-    replaceOrderbookPair(ext, pairId, result.state);
-    recordOrderbookPairUpdate(env, {
-      entityId: state.entityId,
-      pairId,
-      book: result.state,
-    });
-    removed = true;
-  }
-  return removed;
-};
+): boolean => removeBookOrderById(env, state, `${accountId}:${offerId}`);
 const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 const isEntityId32 = (value: unknown): value is string => typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
@@ -179,8 +151,8 @@ const mergeCrossJurisdictionRoute = (
   next: CrossJurisdictionSwapRoute,
 ): CrossJurisdictionSwapRoute => {
   return {
-    ...stripCrossJurisdictionPrivateData(existing ?? next),
-    ...stripCrossJurisdictionPrivateData(next),
+    ...cloneCrossJurisdictionRoute(existing ?? next),
+    ...cloneCrossJurisdictionRoute(next),
   };
 };
 
@@ -1756,7 +1728,7 @@ export const applyEntityTx = async (
         return { newState, outputs };
       }
       newState.crossJurisdictionSwaps.set(preparedRoute.orderId, mergeCrossJurisdictionRoute(existing, preparedRoute));
-      const publicPreparedRoute = stripCrossJurisdictionPrivateData(preparedRoute);
+      const publicPreparedRoute = cloneCrossJurisdictionRoute(preparedRoute);
 
       outputs.push({
         entityId: publicPreparedRoute.target.entityId,
@@ -1822,7 +1794,7 @@ export const applyEntityTx = async (
       const sourcePull = route.sourcePull;
       const targetPull = route.targetPull;
       const restingRoute = {
-        ...stripCrossJurisdictionPrivateData(route),
+        ...cloneCrossJurisdictionRoute(route),
         sourcePull,
         targetPull,
         status: 'resting' as const,
@@ -1866,7 +1838,7 @@ export const applyEntityTx = async (
               ...(restingRoute.priceTicks !== undefined ? { priceTicks: restingRoute.priceTicks } : {}),
               timeInForce: 0,
               minFillRatio: 0,
-              crossJurisdiction: stripCrossJurisdictionPrivateData(restingRoute),
+              crossJurisdiction: cloneCrossJurisdictionRoute(restingRoute),
             },
           },
         ],
@@ -2396,7 +2368,7 @@ export const applyEntityTx = async (
         return { newState: entityState, outputs: [] };
       }
       const publicCrossJurisdiction = crossJurisdiction
-        ? stripCrossJurisdictionPrivateData(withCanonicalCrossJurisdictionRouteHash(crossJurisdiction))
+        ? cloneCrossJurisdictionRoute(withCanonicalCrossJurisdictionRouteHash(crossJurisdiction))
         : undefined;
       if (publicCrossJurisdiction) {
         const route = publicCrossJurisdiction;
