@@ -8,6 +8,7 @@
 import { logDebug } from '../logger';
 import { buildNetworkGraph } from '../routing/graph';
 import { PathFinder } from '../routing/pathfinding';
+import { compareCanonicalText } from '../swap-keys';
 import type { PaymentRoute } from '../routing/pathfinding';
 
 export type BoardValidator = {
@@ -408,7 +409,10 @@ const parseProfileMirrors = (raw: unknown, entityId: string): ProfileMirror[] | 
     }
     mirrors.push({ entityId: mirrorEntityId, jurisdiction });
   }
-  mirrors.sort((a, b) => a.entityId.localeCompare(b.entityId) || a.jurisdiction.name.localeCompare(b.jurisdiction.name));
+  mirrors.sort((a, b) =>
+    compareCanonicalText(a.entityId, b.entityId) ||
+    compareCanonicalText(a.jurisdiction.name, b.jurisdiction.name)
+  );
   return mirrors;
 };
 

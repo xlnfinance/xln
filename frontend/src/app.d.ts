@@ -6,7 +6,7 @@ declare global {
 
 	interface Window {
 		__xln_instance?: import('@xln/runtime/xln-api').XLNModule | null;
-		__xln_env?: import('@xln/runtime').Env | null;
+		__xln_env?: import('@xln/runtime/xln-api').Env | null;
 	}
 
 	interface ImportMeta {

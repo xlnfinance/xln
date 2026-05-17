@@ -1,4 +1,5 @@
 import type { RoutedEntityInput } from '../types';
+import { compareCanonicalText } from '../swap-keys';
 import { decryptJSON, deriveEncryptionKeyPair, encryptJSON, hexToPubKey, pubKeyToHex } from './p2p-crypto';
 import { deserializeWsMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
 import { isRuntimeId, normalizeRuntimeId } from './runtime-id';
@@ -125,7 +126,7 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
           lastSeen: session.lastSeen,
         }))
         .filter(session => session.runtimeId.length > 0)
-        .sort((left, right) => left.runtimeId.localeCompare(right.runtimeId));
+        .sort((left, right) => compareCanonicalText(left.runtimeId, right.runtimeId));
     },
     sendEntityInput(targetRuntimeId: string, input: RoutedEntityInput, ingressTimestamp?: number): boolean {
       const targetKey = normalizeRuntimeId(targetRuntimeId);

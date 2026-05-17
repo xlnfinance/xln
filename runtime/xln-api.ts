@@ -71,7 +71,11 @@ export { getBestBid, getBestAsk, getBookSideLevels } from './orderbook';
 export {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
   deriveCanonicalCrossJurisdictionVenueIdForLegs,
-} from './cross-jurisdiction';
+} from './cross-jurisdiction-market';
+export {
+  getJurisdictionStackId,
+  isJurisdictionStackRef,
+} from './jurisdiction-stack';
 
 // Re-export identity functions types
 export {
@@ -188,22 +192,14 @@ export type CrossJurisdictionSwapSubmitParams = {
   targetHubSignerId?: string;
   targetUserSignerId?: string;
   bookHubSignerId?: string;
-  secret?: string;
-  hashlock?: string;
-  sourceLockId?: string;
-  targetLockId?: string;
   expiresInMs?: number;
-  revealBeforeHeightDelta?: number;
   priceTicks?: bigint;
+  priceImprovementMode?: CrossJurisdictionSwapRoute['priceImprovementMode'];
   memo?: string;
 };
 
 export type CrossJurisdictionSwapSubmitResult = {
   route: CrossJurisdictionSwapRoute;
-  secret?: string;
-  hashlock?: string;
-  sourceLockId?: string;
-  targetLockId?: string;
 };
 
 /**
@@ -270,18 +266,6 @@ export interface XLNModule {
     env: Env,
     params: CrossJurisdictionSwapSubmitParams,
   ) => Promise<CrossJurisdictionSwapSubmitResult>;
-  submitCrossJurisdictionSwapClaims?: (
-    env: Env,
-    params: { route: CrossJurisdictionSwapRoute; secret: string; sourceHubSignerId?: string; targetUserSignerId?: string },
-  ) => Promise<void>;
-  submitCrossJurisdictionSourceLock?: (
-    env: Env,
-    params: { route: CrossJurisdictionSwapRoute; sourceUserSignerId?: string; sourceAmount?: bigint; targetAmount?: bigint; fillRatio?: number },
-  ) => Promise<void>;
-  submitCrossJurisdictionTargetLock?: (
-    env: Env,
-    params: { route: CrossJurisdictionSwapRoute; targetHubSignerId?: string; targetAmount?: bigint; fillRatio?: number },
-  ) => Promise<void>;
   setDeltaTransformerAddress?: (address: string) => void;
 
   // Identity system (from ids.ts)

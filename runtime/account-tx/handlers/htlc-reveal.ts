@@ -13,14 +13,14 @@
 import type { AccountMachine } from '../../types';
 import { hashHtlcSecret } from '../../htlc-utils';
 
-type LegacyHtlcRevealTx = {
+type HtlcRevealTx = {
   type: 'htlc_reveal';
   data: { lockId: string; secret: string };
 };
 
 export async function handleHtlcReveal(
   accountMachine: AccountMachine,
-  accountTx: LegacyHtlcRevealTx,
+  accountTx: HtlcRevealTx,
   currentHeight: number,
   currentTimestamp: number
 ): Promise<{

@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountInput, AccountTx, EntityState, Env, EntityInput, EntityTx, HtlcRoute, AccountMachine, HtlcNoteKey, CrossJurisdictionSwapRoute } from '../../types';
+import type { AccountFrame, AccountInput, AccountTx, EntityState, Env, EntityInput, HtlcRoute, AccountMachine, HtlcNoteKey, CrossJurisdictionSwapRoute } from '../../types';
 import { markStorageAccountDirty, markStorageEntityDirty } from '../../env-events';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { addMessage, addMessages, emitScopedEvents } from '../../state-helpers';
@@ -35,7 +35,6 @@ import {
   scheduleHook as scheduleCrontabHook,
   HTLC_SECRET_ACK_TIMEOUT_MS,
 } from '../../entity-crontab';
-import { decodeHashLadderBinary } from '../../hashladder';
 import { NobleCryptoProvider } from '../../crypto-noble';
 import { unwrapEnvelope, validateEnvelope } from '../../htlc-envelope-types';
 import { terminateHtlcRoute } from '../htlc-route-lifecycle';
@@ -52,46 +51,10 @@ import {
   type CrossMarketOffer,
 } from '../../cross-jurisdiction-orderbook';
 import { assertSameJurisdictionAccount } from '../../jurisdiction-runtime';
-import {
-  validateCrossJurisdictionFillProgress,
-  withCrossJurisdictionFillProgress,
-  isCrossJurisdictionTerminalStatus,
-} from '../../cross-jurisdiction';
+import { applyCommittedCrossJurisdictionAccountTxFollowup } from './account-cross-j-followups';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 
-const clampCrossJurisdictionFillRatio = (value: unknown): number =>
-  Math.max(0, Math.min(MAX_SWAP_FILL_RATIO, Math.floor(Number(value) || 0)));
-
-const committedCrossJurisdictionRatio = (route: CrossJurisdictionSwapRoute): number =>
-  Math.max(clampCrossJurisdictionFillRatio(route.cumulativeFillRatio), clampCrossJurisdictionFillRatio(route.claimedRatio));
-
-const assertCrossJurisdictionPullResolveAllowed = (
-  route: CrossJurisdictionSwapRoute,
-  fillRatio: number,
-  leg: 'source' | 'target',
-): void => {
-  if (fillRatio <= 0) return;
-  if (isCrossJurisdictionTerminalStatus(route.status)) {
-    throw new Error(`CROSS_J_PULL_RESOLVE_STATE_INVALID: route=${route.orderId} status=${route.status}`);
-  }
-  if (leg === 'source' && route.status !== 'clearing' && route.status !== 'clear_requested') {
-    throw new Error(`CROSS_J_PULL_RESOLVE_STATE_INVALID: route=${route.orderId} leg=source status=${route.status}`);
-  }
-  if (leg === 'target' && route.status !== 'clearing' && route.status !== 'source_claimed') {
-    throw new Error(`CROSS_J_PULL_RESOLVE_STATE_INVALID: route=${route.orderId} leg=target status=${route.status}`);
-  }
-  const committedRatio = committedCrossJurisdictionRatio(route);
-  if (leg === 'source' && committedRatio <= 0) {
-    throw new Error(`CROSS_J_PULL_RESOLVE_NO_COMMITTED_FILL: route=${route.orderId}`);
-  }
-  if (committedRatio > 0 && fillRatio > committedRatio) {
-    throw new Error(
-      `CROSS_J_PULL_RESOLVE_OVER_COMMITTED: route=${route.orderId} ` +
-      `ratio=${fillRatio} committed=${committedRatio}`,
-    );
-  }
-};
 const getJurisdictionId = (state: EntityState, env: Env): string => {
   return String(state.config?.jurisdiction?.name || env.activeJurisdiction || '').trim();
 };
@@ -592,171 +555,38 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         allHashesToSign.push(...result.hashesToSign);
       }
 
-      // === HTLC LOCK PROCESSING: Check if we need to forward ===
-      // CRITICAL: process committed-frame side effects for both:
-      // 1) receiver-side newAccountFrame commits
-      // 2) proposer-side pendingFrame commits on ACK (prevHanko)
-      const justCommittedFrame =
-        input.newAccountFrame && input.newAccountFrame.height > currentHeightBefore
-          ? input.newAccountFrame
-          : input.prevHanko && pendingFrameBefore && accountMachine.currentHeight > currentHeightBefore
-            ? pendingFrameBefore
-            : undefined;
-      const committedViaNewFrame = Boolean(justCommittedFrame && input.newAccountFrame);
+      // === COMMITTED FRAME PROCESSING: Check if account-level commits need entity side effects ===
+      // Account consensus returns the committed frames explicitly. This avoids
+      // guessing from input shape, especially for batched ACK + new-frame flows.
+      const committedFrameEntries =
+        result.committedFrames && result.committedFrames.length > 0
+          ? result.committedFrames
+          : (() => {
+              const justCommittedFrame =
+                input.newAccountFrame && input.newAccountFrame.height > currentHeightBefore
+                  ? input.newAccountFrame
+                  : input.prevHanko && pendingFrameBefore && accountMachine.currentHeight > currentHeightBefore
+                    ? pendingFrameBefore
+                    : undefined;
+              return justCommittedFrame
+                ? [{ frame: justCommittedFrame, committedViaNewFrame: Boolean(input.newAccountFrame) }]
+                : [];
+            })();
 
-      if (justCommittedFrame?.accountTxs) {
+      for (const { frame: committedFrame, committedViaNewFrame } of committedFrameEntries) {
+        if (!committedFrame?.accountTxs) continue;
         if (HEAVY_LOGS) console.log(
-          `🔍 HTLC-CHECK: commitMode=${committedViaNewFrame ? 'newFrame' : 'ack'}, inputHeight=${justCommittedFrame.height}, currentHeight=${accountMachine.currentHeight}`,
+          `🔍 HTLC-CHECK: commitMode=${committedViaNewFrame ? 'newFrame' : 'ack'}, inputHeight=${committedFrame.height}, currentHeight=${accountMachine.currentHeight}`,
         );
         if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: accountMachine.locks.size=${accountMachine.locks.size}`);
-        if (HEAVY_LOGS) console.log(`🔍 FRAME-TXS: ${justCommittedFrame.accountTxs.length} txs in frame:`, justCommittedFrame.accountTxs.map(tx => tx.type));
-      }
+        if (HEAVY_LOGS) console.log(`🔍 FRAME-TXS: ${committedFrame.accountTxs.length} txs in frame:`, committedFrame.accountTxs.map(tx => tx.type));
 
-      if (justCommittedFrame?.accountTxs) {
-        applyCommittedAccountFrameFollowups(newState, counterpartyId, justCommittedFrame);
-      }
+        applyCommittedAccountFrameFollowups(newState, counterpartyId, committedFrame);
 
-      if (justCommittedFrame?.accountTxs) {
-        for (const accountTx of justCommittedFrame.accountTxs) {
+        for (const accountTx of committedFrame.accountTxs) {
           if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: Checking committed tx type=${accountTx.type}`);
 
-          if (accountTx.type === 'pull_resolve') {
-            let fillRatio = 0;
-            try {
-              fillRatio = decodeHashLadderBinary(accountTx.data.binary).fillRatio;
-            } catch {
-              fillRatio = 0;
-            }
-            if (fillRatio > 0 && newState.crossJurisdictionSwaps?.size) {
-              for (const route of newState.crossJurisdictionSwaps.values()) {
-                const isSourceResolve =
-                  route.sourcePull?.pullId === accountTx.data.pullId &&
-                  route.targetPull?.pullId !== undefined &&
-                  normalizeEntityRef(route.source.entityId) === normalizeEntityRef(newState.entityId) &&
-                  normalizeEntityRef(route.source.counterpartyEntityId) === normalizeEntityRef(counterpartyId);
-                if (isSourceResolve) {
-                  assertCrossJurisdictionPullResolveAllowed(route, fillRatio, 'source');
-                  const targetPull = route.targetPull;
-                  if (!targetPull) continue;
-                  const targetEntityTxs: EntityTx[] = [{
-                    type: 'resolvePull',
-                    data: {
-                      counterpartyEntityId: route.target.entityId,
-                      pullId: targetPull.pullId,
-                      binary: accountTx.data.binary,
-                      description: `Cross-j ${route.orderId} target pull ${fillRatio}/65535`,
-                    },
-                  }];
-                  if (
-                    fillRatio >= 65_535 ||
-                    route.clearingPolicy === 'cancel_and_clear' ||
-                    route.clearingPolicy === 'full_fill'
-                  ) {
-                    targetEntityTxs.push({
-                      type: 'cancelPull',
-                      data: {
-                        counterpartyEntityId: route.target.entityId,
-                        pullId: targetPull.pullId,
-                        description: `Cross-j ${route.orderId} release target remainder`,
-                      },
-                    });
-                  }
-                  outputs.push({
-                    entityId: route.target.counterpartyEntityId,
-                    entityTxs: targetEntityTxs,
-                  });
-                  route.claimedRatio = Math.max(Number(route.claimedRatio || 0), fillRatio);
-                  route.cumulativeFillRatio = Math.max(Number(route.cumulativeFillRatio || 0), fillRatio);
-                  route.sourceClaimed = (BigInt(route.source.amount) * BigInt(route.claimedRatio)) / 65_535n;
-                  route.targetClaimed = (BigInt(route.target.amount) * BigInt(route.claimedRatio)) / 65_535n;
-                  route.filledSourceAmount = route.sourceClaimed;
-                  route.filledTargetAmount = route.targetClaimed;
-                  route.status = 'source_claimed';
-                  route.updatedAt = newState.timestamp;
-                  console.log(
-                    `🌉 PULL: Relaying cross-j ratio route=${route.orderId} ` +
-                    `target=${route.target.counterpartyEntityId.slice(-4)} ratio=${fillRatio}/65535`,
-                  );
-                  continue;
-                }
-
-                if (
-                  route.targetPull?.pullId === accountTx.data.pullId &&
-                  normalizeEntityRef(route.target.counterpartyEntityId) === normalizeEntityRef(newState.entityId) &&
-                  normalizeEntityRef(route.target.entityId) === normalizeEntityRef(counterpartyId)
-                ) {
-                  assertCrossJurisdictionPullResolveAllowed(route, fillRatio, 'target');
-                  route.claimedRatio = Math.max(Number(route.claimedRatio || 0), fillRatio);
-                  route.cumulativeFillRatio = Math.max(Number(route.cumulativeFillRatio || 0), fillRatio);
-                  route.sourceClaimed = (BigInt(route.source.amount) * BigInt(route.claimedRatio)) / 65_535n;
-                  route.targetClaimed = (BigInt(route.target.amount) * BigInt(route.claimedRatio)) / 65_535n;
-                  route.filledSourceAmount = route.sourceClaimed;
-                  route.filledTargetAmount = route.targetClaimed;
-                  route.status = 'settled';
-                  route.updatedAt = newState.timestamp;
-                  route.settledAt = newState.timestamp;
-                  console.log(`🌉 PULL: Cross-j route settled ${route.orderId} ratio=${fillRatio}/65535`);
-                }
-              }
-            }
-            continue;
-          }
-
-          if (accountTx.type === 'cross_swap_fill_ack') {
-            const ratio = Math.max(0, Math.min(65_535, Math.floor(Number(accountTx.data.cumulativeFillRatio) || 0)));
-            const route = newState.crossJurisdictionSwaps?.get(accountTx.data.offerId);
-            if (route) {
-              const currentRatio = Math.max(
-                0,
-                Math.min(65_535, Math.floor(Number(route.cumulativeFillRatio ?? route.claimedRatio ?? 0) || 0)),
-              );
-              if (accountTx.data.cancelRemainder && ratio <= currentRatio) {
-                route.status = 'clear_requested';
-                route.clearingPolicy = 'cancel_and_clear';
-              } else {
-                const validatedFill = validateCrossJurisdictionFillProgress(route, {
-                  fillSeq: accountTx.data.fillSeq,
-                  cumulativeFillRatio: ratio,
-                  incrementalSourceAmount: accountTx.data.incrementalSourceAmount,
-                  incrementalTargetAmount: accountTx.data.incrementalTargetAmount,
-                  cumulativeSourceAmount: accountTx.data.cumulativeSourceAmount,
-                  cumulativeTargetAmount: accountTx.data.cumulativeTargetAmount,
-                });
-                if (!validatedFill.ok) {
-                  throw new Error(`CROSS_J_COMMITTED_FILL_ACK_INVALID: ${validatedFill.error}`);
-                }
-                Object.assign(route, withCrossJurisdictionFillProgress(route, validatedFill.value, newState.timestamp));
-                if ((accountTx.data.priceImprovementAmount ?? 0n) > 0n) {
-                  if (accountTx.data.priceImprovementMode === 'source_savings') {
-                    route.priceImprovementSourceAmount =
-                      (route.priceImprovementSourceAmount ?? 0n) + accountTx.data.priceImprovementAmount!;
-                  } else if (accountTx.data.priceImprovementMode === 'target_bonus') {
-                    route.priceImprovementTargetAmount =
-                      (route.priceImprovementTargetAmount ?? 0n) + accountTx.data.priceImprovementAmount!;
-                  }
-                }
-                if (accountTx.data.cancelRemainder) {
-                  route.status = 'clear_requested';
-                  route.clearingPolicy = 'cancel_and_clear';
-                }
-              }
-              route.updatedAt = newState.timestamp;
-              if (
-                (ratio >= 65_535 || accountTx.data.cancelRemainder) &&
-                normalizeEntityRef(newState.entityId) === normalizeEntityRef(route.source.counterpartyEntityId)
-              ) {
-                outputs.push({
-                  entityId: newState.entityId,
-                  entityTxs: [{
-                    type: 'requestCrossJurisdictionClear',
-                    data: {
-                      orderId: route.orderId,
-                      cancelRemainder: Boolean(accountTx.data.cancelRemainder),
-                    },
-                  }],
-                });
-              }
-            }
+          if (applyCommittedCrossJurisdictionAccountTxFollowup(newState, counterpartyId, accountTx, outputs)) {
             continue;
           }
 
@@ -1773,6 +1603,14 @@ export function processOrderbookSwaps(
   };
 
   const crossLiveOfferMeta = new Map<string, CrossMarketOffer>();
+  const crossPendingAckInputs = new Map<
+    string,
+    NonNullable<NormalizedOrderbookOffer['pendingCrossSwapAck']>
+  >();
+  for (const rawOffer of crossJurisdictionSwapOffers) {
+    if (!rawOffer.pendingCrossSwapAck) continue;
+    crossPendingAckInputs.set(swapKey(rawOffer.accountId, rawOffer.offerId), rawOffer.pendingCrossSwapAck);
+  }
   const assertedCrossJurisdictionPairs = new Set<string>();
   const crossPendingAckOrderIdsByPair = new Map<string, Set<string>>();
   const suspendCrossOrderForPendingAck = (pairId: string, orderId: string): void => {
@@ -1842,7 +1680,8 @@ export function processOrderbookSwaps(
       }
       const accountId = orderId.slice(0, lastColon);
       const offerId = orderId.slice(lastColon + 1);
-      const pendingAck = findQueuedCrossSwapAckForEntityState(hubState, accountId, offerId);
+      const queuedPendingAck = findQueuedCrossSwapAckForEntityState(hubState, accountId, offerId);
+      const pendingAck = crossPendingAckInputs.get(orderId) ?? queuedPendingAck?.data ?? null;
       const meta = crossLiveOfferMeta.get(orderId) ?? buildCrossMarketOfferFromBookOrder(orderId);
       if (!meta) {
         if (pendingAck) {
@@ -1857,10 +1696,11 @@ export function processOrderbookSwaps(
       if (pendingAck) {
         const pendingRatio = Math.max(
           0,
-          Math.min(MAX_SWAP_FILL_RATIO, Math.floor(Number(pendingAck.data.cumulativeFillRatio ?? 0) || 0)),
+          Math.min(MAX_SWAP_FILL_RATIO, Math.floor(Number(pendingAck.cumulativeFillRatio ?? 0) || 0)),
         );
-        if (pendingAck.data.cancelRemainder || pendingRatio >= MAX_SWAP_FILL_RATIO) {
-          throw new Error(`ORDERBOOK_CROSS_J_PENDING_TERMINAL_ACK_STILL_IN_BOOK: pair=${pairId} order=${orderId}`);
+        if (pendingAck.cancelRemainder || pendingRatio >= MAX_SWAP_FILL_RATIO) {
+          suspendCrossOrderForPendingAck(pairId, orderId);
+          continue;
         }
         if (BigInt(order.qtyLots) > canonicalQtyLots) {
           throw new Error(
@@ -1893,6 +1733,7 @@ export function processOrderbookSwaps(
     }
 
     for (const rawOffer of sortSwapOffersForOrderbook(crossJurisdictionSwapOffers)) {
+      if (crossPendingAckInputs.has(swapKey(rawOffer.accountId, rawOffer.offerId))) continue;
       const marketOffer = buildCrossMarketOffer(rawOffer);
       if (!marketOffer) continue;
       refreshExistingCrossBookOrder(
@@ -1913,6 +1754,8 @@ export function processOrderbookSwaps(
 
     for (const rawOffer of sortSwapOffersForOrderbook(crossJurisdictionSwapOffers)) {
       const currentAccountId = rawOffer.accountId;
+      const currentNamespacedOrderId = swapKey(currentAccountId, rawOffer.offerId);
+      if (crossPendingAckInputs.has(currentNamespacedOrderId)) continue;
       const marketOffer = buildCrossMarketOffer(rawOffer);
       if (!marketOffer) {
         rejectInvalidCrossOffer(currentAccountId, rawOffer.offerId, 'invalid-cross-j-route');
@@ -1928,7 +1771,6 @@ export function processOrderbookSwaps(
         continue;
       }
 
-      const currentNamespacedOrderId = swapKey(currentAccountId, rawOffer.offerId);
       crossLiveOfferMeta.set(currentNamespacedOrderId, marketOffer);
       const suspendedOrderIds = suspendedCrossOrdersForPair(marketOffer.pairId);
       if (suspendedOrderIds?.has(currentNamespacedOrderId)) continue;

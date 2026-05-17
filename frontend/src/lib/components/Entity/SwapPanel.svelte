@@ -4,6 +4,7 @@
   import {
     deriveCanonicalCrossJurisdictionBookOwnerForLegs,
     deriveCanonicalCrossJurisdictionVenueIdForLegs,
+    getJurisdictionStackId,
     getBestAsk,
     getBestBid,
   } from '@xln/runtime/xln-api';
@@ -324,6 +325,7 @@
     targetSignerId: string;
     targetHubEntityId: string;
     targetJurisdiction: string;
+    targetJurisdictionRef: string;
     hasTargetAccount: boolean;
   };
   type SourceEntityOption = {
@@ -344,6 +346,8 @@
     sourceHubEntityId: string;
     targetEntityId: string;
     targetHubEntityId: string;
+    sourceJurisdictionRef: string;
+    targetJurisdictionRef: string;
     targetLabel: string;
     disabled?: boolean;
   };
@@ -387,6 +391,15 @@
     const byPosition = String(candidate?.position?.jurisdiction || '').trim();
     if (byPosition) return byPosition;
     return '';
+  }
+
+  function getReplicaJurisdictionRef(candidate: EntityReplica | null | undefined): string {
+    const state = candidate?.state as {
+      config?: { jurisdiction?: { chainId?: unknown; depositoryAddress?: unknown; name?: unknown } };
+    } | undefined;
+    const stackId = getJurisdictionStackId(state?.config?.jurisdiction);
+    if (stackId) return stackId;
+    return getReplicaJurisdictionName(candidate);
   }
 
   function getAccountDeltaForReplica(
@@ -501,13 +514,15 @@
     sourceReplica: EntityReplica | null | undefined = currentReplica,
   ): CrossTargetOption[] {
     const sourceJurisdiction = getReplicaJurisdictionName(sourceReplica);
-    if (!sourceEntityId || !sourceJurisdiction) return [];
+    const sourceJurisdictionRef = getReplicaJurisdictionRef(sourceReplica);
+    if (!sourceEntityId || !sourceJurisdiction || !sourceJurisdictionRef) return [];
     const options: CrossTargetOption[] = [];
     for (const candidate of localEntityReplicas(frame)) {
       const targetEntityId = String(candidate.entityId || candidate.state?.entityId || '').trim().toLowerCase();
       if (!targetEntityId || targetEntityId === sourceEntityId) continue;
       const targetJurisdiction = getReplicaJurisdictionName(candidate);
-      if (!targetJurisdiction || targetJurisdiction === sourceJurisdiction) continue;
+      const targetJurisdictionRef = getReplicaJurisdictionRef(candidate);
+      if (!targetJurisdiction || !targetJurisdictionRef || targetJurisdictionRef === sourceJurisdictionRef) continue;
       const targetSignerId = String(candidate.signerId || '').trim();
       if (!targetSignerId) continue;
       const accountHubIds = Array.from(candidate.state?.accounts?.keys?.() || [])
@@ -525,6 +540,7 @@
           targetSignerId,
           targetHubEntityId,
           targetJurisdiction,
+          targetJurisdictionRef,
           hasTargetAccount,
         });
       }
@@ -539,6 +555,7 @@
     targets: CrossTargetOption[] = crossTargetOptions,
   ): SwapRouteOption[] {
     const sourceJurisdiction = getReplicaJurisdictionName(sourceReplica) || 'Current';
+    const sourceJurisdictionRef = getReplicaJurisdictionRef(sourceReplica) || sourceJurisdiction;
     const sourceHubEntityId = String(selectedHubEntityId || '').trim().toLowerCase();
     const sameLabel = sourceHubEntityId
       ? `${sourceJurisdiction} · ${accountLabel(sourceHubEntityId)}`
@@ -553,6 +570,8 @@
       sourceHubEntityId,
       targetEntityId: sourceEntityId,
       targetHubEntityId: sourceHubEntityId,
+      sourceJurisdictionRef,
+      targetJurisdictionRef: sourceJurisdictionRef,
       targetLabel: sameLabel,
     }];
 
@@ -563,6 +582,8 @@
         mode: 'cross',
         sourceJurisdiction,
         targetJurisdiction: target.targetJurisdiction,
+        sourceJurisdictionRef,
+        targetJurisdictionRef: target.targetJurisdictionRef,
         sourceEntityId,
         sourceHubEntityId,
         targetEntityId: target.targetEntityId,
@@ -2097,34 +2118,37 @@
         if (swapRouteMode !== 'cross') return null;
         if (!targetRoute) throw new Error('Select target jurisdiction account.');
         const sourceJurisdiction = getReplicaJurisdictionName(currentReplica);
+        const sourceJurisdictionRef = getReplicaJurisdictionRef(currentReplica);
         if (!sourceJurisdiction) throw new Error('Source jurisdiction is not available.');
+        if (!sourceJurisdictionRef) throw new Error('Source jurisdiction stack is not available.');
         if (!targetRoute.targetJurisdiction) throw new Error('Target jurisdiction is not available.');
-        if (sourceJurisdiction === targetRoute.targetJurisdiction) {
+        if (!targetRoute.targetJurisdictionRef) throw new Error('Target jurisdiction stack is not available.');
+        if (sourceJurisdictionRef === targetRoute.targetJurisdictionRef) {
           throw new Error('Cross-j route requires different jurisdictions.');
         }
         const bookOwnerEntityId = deriveCanonicalCrossJurisdictionBookOwnerForLegs(
-          sourceJurisdiction,
+          sourceJurisdictionRef,
           giveToken,
           resolvedCounterparty,
-          targetRoute.targetJurisdiction,
+          targetRoute.targetJurisdictionRef,
           wantToken,
           targetRoute.targetHubEntityId,
         );
         return {
           orderId: offerId,
           bookOwnerEntityId,
-          venueId: deriveCanonicalCrossJurisdictionVenueIdForLegs(sourceJurisdiction, giveToken, targetRoute.targetJurisdiction, wantToken),
+          venueId: deriveCanonicalCrossJurisdictionVenueIdForLegs(sourceJurisdictionRef, giveToken, targetRoute.targetJurisdictionRef, wantToken),
           makerEntityId: sourceEntityId,
           hubEntityId: bookOwnerEntityId,
           source: {
-            jurisdiction: sourceJurisdiction,
+            jurisdiction: sourceJurisdictionRef,
             entityId: sourceEntityId,
             counterpartyEntityId: resolvedCounterparty,
             tokenId: giveToken,
             amount: effectiveGiveAmount,
           },
           target: {
-            jurisdiction: targetRoute.targetJurisdiction,
+            jurisdiction: targetRoute.targetJurisdictionRef,
             entityId: targetRoute.targetHubEntityId,
             counterpartyEntityId: targetRoute.targetEntityId,
             tokenId: wantToken,

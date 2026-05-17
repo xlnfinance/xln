@@ -14,9 +14,9 @@ function resolveLocalRpcUrlFromRequest(requestUrl: string): string {
   return `http://localhost:${shiftedRpcPort}`;
 }
 
-const getRpcUrl = (requestUrl: string): string => {
+const getRpcUrl = (requestUrl: string, clientAddress?: string): string => {
   const url = new URL(requestUrl);
-  if (isLocalProxyRequest(requestUrl)) {
+  if (isLocalProxyRequest(requestUrl, clientAddress)) {
     return resolveLocalRpcUrlFromRequest(requestUrl);
   }
   const rpcUrl = process.env['RPC_ETHEREUM'] ?? process.env['ANVIL_RPC'];
@@ -26,7 +26,7 @@ const getRpcUrl = (requestUrl: string): string => {
   return rpcUrl;
 };
 
-export const POST: RequestHandler = async ({ request }) => {
+export const POST: RequestHandler = async ({ request, getClientAddress }) => {
   try {
     const body = await request.text();
     const forbidden = findForbiddenRpcProxyMethod(body);
@@ -36,7 +36,7 @@ export const POST: RequestHandler = async ({ request }) => {
         { status: forbidden.startsWith('invalid') || forbidden === 'empty-batch' ? 400 : 403, headers: { 'Content-Type': 'application/json' } },
       );
     }
-    const upstream = await fetch(getRpcUrl(request.url), {
+    const upstream = await fetch(getRpcUrl(request.url, getClientAddress()), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body,

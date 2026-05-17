@@ -1,6 +1,15 @@
 import type { ConsensusConfig, Env, EntityReplica, JReplica, JurisdictionConfig } from './types';
 import { firstUsableContractAddress } from './contract-address';
 import { formatEntityId } from './utils';
+import {
+  getJurisdictionStackId,
+  isJurisdictionStackRef,
+  normalizeStackChainId,
+} from './jurisdiction-stack';
+export {
+  getJurisdictionStackId,
+  isJurisdictionStackRef,
+} from './jurisdiction-stack';
 
 type BrowserVmLike = {
   getDepositoryAddress?: () => string;
@@ -22,6 +31,20 @@ export const normalizeJurisdictionName = (value: unknown): string =>
 export const getJurisdictionConfigName = (jurisdiction?: Pick<JurisdictionConfig, 'name'> | null): string =>
   typeof jurisdiction?.name === 'string' ? jurisdiction.name.trim() : '';
 
+const getJReplicaStackId = (replica: JReplica | undefined): string => {
+  if (!replica) return '';
+  const depository = firstUsableContractAddress(
+    replica.jadapter?.addresses?.depository,
+    replica.depositoryAddress,
+    replica.contracts?.depository,
+  );
+  const chainId = normalizeStackChainId(replica.chainId ?? replica.jadapter?.chainId);
+  return getJurisdictionStackId({
+    depositoryAddress: depository || '',
+    ...(chainId !== null ? { chainId } : {}),
+  });
+};
+
 export const getJReplicaByName = (env: Env, name?: string | null): JReplica | undefined => {
   const normalized = normalizeJurisdictionName(name);
   if (!normalized) return undefined;
@@ -31,6 +54,19 @@ export const getJReplicaByName = (env: Env, name?: string | null): JReplica | un
     if (normalizeJurisdictionName(replica?.name) === normalized) {
       return replica;
     }
+  }
+  return undefined;
+};
+
+export const getJReplicaByJurisdictionRef = (env: Env, ref?: string | null): JReplica | undefined => {
+  const raw = String(ref || '').trim();
+  if (!raw) return undefined;
+  const byName = getJReplicaByName(env, raw);
+  if (byName) return byName;
+  if (!isJurisdictionStackRef(raw)) return undefined;
+  const wanted = raw.toLowerCase();
+  for (const replica of env.jReplicas?.values?.() || []) {
+    if (getJReplicaStackId(replica) === wanted) return replica;
   }
   return undefined;
 };
@@ -117,7 +153,7 @@ export function requireRuntimeJurisdictionConfigByName(
     throw new Error('ENTITY_JURISDICTION_MISSING');
   }
 
-  const replica = getJReplicaByName(env, configuredName);
+  const replica = getJReplicaByJurisdictionRef(env, configuredName);
   if (!replica) {
     throw new Error(`ENTITY_JURISDICTION_UNAVAILABLE: ${configuredName}`);
   }
@@ -154,7 +190,12 @@ export function requireRuntimeJurisdictionConfigByName(
     name: replica.name || configuredName,
   });
   const resolvedName = getJurisdictionConfigName(resolved);
-  if (!resolved || normalizeJurisdictionName(resolvedName) !== normalizeJurisdictionName(configuredName)) {
+  const requestedStackId = isJurisdictionStackRef(configuredName) ? configuredName.toLowerCase() : '';
+  const resolvedStackId = getJurisdictionStackId(resolved);
+  const sameRequestedRef = requestedStackId
+    ? resolvedStackId === requestedStackId
+    : normalizeJurisdictionName(resolvedName) === normalizeJurisdictionName(configuredName);
+  if (!resolved || !sameRequestedRef) {
     throw new Error(`ENTITY_JURISDICTION_RESOLVE_FAILED: ${configuredName}`);
   }
   if (!resolved.depositoryAddress || !resolved.entityProviderAddress || !resolved.chainId) {

@@ -691,15 +691,18 @@ export async function getActiveEntity(page: Page): Promise<{ entityId: string; s
     }).isolatedEnv;
     if (!env?.eReplicas) return null;
     const runtimeId = String(env.runtimeId || '').toLowerCase();
+    const validReplicas: Array<{ entityId: string; signerId: string }> = [];
     for (const replicaKey of env.eReplicas.keys()) {
       const [entityId, signerId] = String(replicaKey).split(':');
       const normalizedSignerId = String(signerId || '').toLowerCase();
       if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;
-      if (runtimeId && normalizedSignerId !== runtimeId) continue;
-      if (entityId && signerId) {
+      validReplicas.push({ entityId, signerId });
+      if (runtimeId && normalizedSignerId === runtimeId) {
         return { entityId, signerId, runtimeId: String(env.runtimeId || '') };
       }
     }
+    const firstReplica = validReplicas[0];
+    if (firstReplica) return { ...firstReplica, runtimeId: String(env.runtimeId || '') };
     return null;
   });
 }

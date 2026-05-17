@@ -5,7 +5,7 @@
 
 import { applyEntityTx } from './entity-tx';
 import { isLeftEntity } from './entity-id-utils';
-import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env, HankoString, HashType, JInput, JurisdictionEvent, JurisdictionEventData, RoutedEntityInput } from './types';
+import type { AccountTx, ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env, HankoString, HashType, JInput, JurisdictionEvent, JurisdictionEventData, RoutedEntityInput } from './types';
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, formatSignerDisplay, log } from './utils';
 import { safeStringify } from './serialization-utils';
 import { logError } from './logger';
@@ -132,13 +132,17 @@ const accountInputCommitsCrossJurisdictionReadiness = (
   return Boolean(account?.pendingFrame?.accountTxs?.some(isCrossJurisdictionReadinessTx));
 };
 
-const accountHasPendingCrossSwapAck = (
+type PendingCrossSwapAckData = Extract<AccountTx, { type: 'cross_swap_fill_ack' }>['data'];
+
+const findPendingCrossSwapAckData = (
   account: ReturnType<typeof findAccountByCounterparty>,
   offerId: string,
-): boolean => {
-  if (!account) return false;
-  return (account.mempool ?? []).some(tx => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId) ||
-    (account.pendingFrame?.accountTxs ?? []).some(tx => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId);
+): PendingCrossSwapAckData | null => {
+  if (!account) return null;
+  const mempoolAck = (account.mempool ?? []).find(tx => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId);
+  if (mempoolAck?.type === 'cross_swap_fill_ack') return mempoolAck.data;
+  const pendingAck = (account.pendingFrame?.accountTxs ?? []).find(tx => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId);
+  return pendingAck?.type === 'cross_swap_fill_ack' ? pendingAck.data : null;
 };
 
 const collectSiblingCrossJurisdictionOffers = (
@@ -150,12 +154,12 @@ const collectSiblingCrossJurisdictionOffers = (
   const offers: OrderbookOfferForMatch[] = [];
   for (const replica of env.eReplicas?.values?.() || []) {
     const siblingState = replica?.state;
-    if (!siblingState?.orderbookExt) continue;
+    if (!siblingState?.accounts) continue;
     if (normalizeEntityRef(siblingState.entityId) === currentId) continue;
     for (const [accountId, account] of siblingState.accounts.entries()) {
       for (const [offerId, offer] of account.swapOffers.entries()) {
         if (!offer?.crossJurisdiction) continue;
-        if (accountHasPendingCrossSwapAck(account, String(offerId))) continue;
+        const pendingCrossSwapAck = findPendingCrossSwapAckData(account, String(offerId));
         let route;
         try {
           route = withCanonicalCrossJurisdictionRouteHash(offer.crossJurisdiction);
@@ -165,7 +169,7 @@ const collectSiblingCrossJurisdictionOffers = (
         if (normalizeEntityRef(route.bookOwnerEntityId || route.source.counterpartyEntityId) !== currentId) continue;
         if (route.status !== 'resting' && route.status !== 'partially_filled') continue;
         if (isCrossJurisdictionRouteExpired(route, now) || isCrossJurisdictionPullExpired(route, 'source', now)) continue;
-        offers.push(normalizeSwapOfferForOrderbook(
+        const normalizedOffer = normalizeSwapOfferForOrderbook(
           {
             offerId: String(offerId),
             makerIsLeft: offer.makerIsLeft,
@@ -182,7 +186,8 @@ const collectSiblingCrossJurisdictionOffers = (
             crossJurisdiction: route,
           },
           String(accountId),
-        ));
+        );
+        offers.push(pendingCrossSwapAck ? { ...normalizedOffer, pendingCrossSwapAck } : normalizedOffer);
       }
     }
   }
@@ -197,7 +202,7 @@ const collectLocalCrossJurisdictionOffers = (
   for (const [accountId, account] of currentEntityState.accounts.entries()) {
     for (const [offerId, offer] of account.swapOffers.entries()) {
       if (!offer?.crossJurisdiction) continue;
-      if (accountHasPendingCrossSwapAck(account, String(offerId))) continue;
+      const pendingCrossSwapAck = findPendingCrossSwapAckData(account, String(offerId));
       let route;
       try {
         route = withCanonicalCrossJurisdictionRouteHash(offer.crossJurisdiction);
@@ -207,7 +212,7 @@ const collectLocalCrossJurisdictionOffers = (
       if (normalizeEntityRef(route.bookOwnerEntityId || route.source.counterpartyEntityId) !== normalizeEntityRef(currentEntityState.entityId)) continue;
       if (route.status !== 'resting' && route.status !== 'partially_filled') continue;
       if (isCrossJurisdictionRouteExpired(route, now) || isCrossJurisdictionPullExpired(route, 'source', now)) continue;
-      offers.push(normalizeSwapOfferForOrderbook(
+      const normalizedOffer = normalizeSwapOfferForOrderbook(
         {
           offerId: String(offerId),
           makerIsLeft: offer.makerIsLeft,
@@ -224,7 +229,8 @@ const collectLocalCrossJurisdictionOffers = (
           crossJurisdiction: route,
         },
         String(accountId),
-      ));
+      );
+      offers.push(pendingCrossSwapAck ? { ...normalizedOffer, pendingCrossSwapAck } : normalizedOffer);
     }
   }
   return offers;

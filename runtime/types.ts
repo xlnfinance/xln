@@ -2030,7 +2030,6 @@ export interface CrossJurisdictionSwapLeg {
   counterpartyEntityId: string;
   tokenId: number;
   amount: bigint;
-  lockId?: string;
 }
 
 export interface CrossJurisdictionPullLeg {
@@ -2054,7 +2053,6 @@ export interface CrossJurisdictionSwapRoute {
   target: CrossJurisdictionSwapLeg;
   sourcePull?: CrossJurisdictionPullLeg;
   targetPull?: CrossJurisdictionPullLeg;
-  hashlock?: string;
   priceTicks?: bigint;
   fillSeq?: number;
   cumulativeFillRatio?: number;
@@ -2294,9 +2292,6 @@ export interface Env {
   height: number;
   timestamp: number;
   runtimeSeed?: string | undefined; // BrainVault seed backing this runtime (plaintext, dev mode)
-  // Runtime-local cross-jurisdiction hash-ladder seeds. This is intentionally
-  // not part of entity state or EnvSnapshot; public routes must never carry it.
-  crossJurisdictionPrivateSeeds?: Map<string, string>;
   runtimeId?: string | undefined; // Runtime identity (usually signer1 address)
   lastProcessEnteredAt?: number; // Wall-clock timestamp of most recent process() entry
   dbNamespace?: string; // DB namespace for per-runtime persistence (defaults to runtimeId)

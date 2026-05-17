@@ -941,6 +941,7 @@ export async function handleAccountInput(
   swapCancelRequests?: Array<{ offerId: string; accountId: string }>;
   swapOffersCancelled?: Array<{ offerId: string; accountId: string }>;
   timedOutHashlocks?: string[];
+  committedFrames?: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }>;
   // MULTI-SIGNER: Hashes that need entity-quorum signing
   hashesToSign?: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }>;
 }> {
@@ -950,6 +951,7 @@ export async function handleAccountInput(
     return { success: false, error: `Invalid account input height: ${String(input.height)}`, events: [] };
   }
   const quiet = env.quietRuntimeLogs === true;
+  const committedFrames: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }> = [];
   console.log(
     `📨 A-MACHINE: Received AccountInput from ${input.fromEntityId.slice(-4)}, pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}, currentHeight=${accountMachine.currentHeight}`,
   );
@@ -1135,6 +1137,7 @@ export async function handleAccountInput(
         }
 
 	        const committedFrame = cloneAccountFrame(accountMachine.pendingFrame);
+        committedFrames.push({ frame: committedFrame, committedViaNewFrame: false });
         recordAccountFrameHistory(env, {
           entityId: accountMachine.proofHeader.fromEntity,
           counterpartyId: input.fromEntityId,
@@ -1201,6 +1204,7 @@ export async function handleAccountInput(
               response: proposeResult.accountInput,
               events: [...events, ...proposeResult.events],
               timedOutHashlocks,
+              ...(committedFrames.length > 0 && { committedFrames }),
               ...(proposeResult.revealedSecrets && { revealedSecrets: proposeResult.revealedSecrets }),
               ...(proposeResult.swapOffersCreated && { swapOffersCreated: proposeResult.swapOffersCreated }),
               ...(proposeResult.swapCancelRequests && { swapCancelRequests: proposeResult.swapCancelRequests }),
@@ -1211,7 +1215,7 @@ export async function handleAccountInput(
           }
         }
         if (HEAVY_LOGS) console.log(`🔍 RETURN-ACK-ONLY: frame ${ackHeight} ACKed, no new frame bundled`);
-        return { success: true, events, timedOutHashlocks };
+        return { success: true, events, timedOutHashlocks, ...(committedFrames.length > 0 && { committedFrames }) };
       }
       // Fall through to process newAccountFrame below
       console.log(`📦 BATCHED-MESSAGE: ACK processed, now processing bundled new frame...`);
@@ -1240,7 +1244,7 @@ export async function handleAccountInput(
       events.push(
         `ℹ️ Ignored stale ACK for frame ${String(normalizedInputHeight)} (current=${String(accountMachine.currentHeight ?? 0)}, pending=${String(pending)})`,
       );
-      return { success: true, events };
+      return { success: true, events, ...(committedFrames.length > 0 && { committedFrames }) };
     }
     return {
       success: false,
@@ -1283,7 +1287,7 @@ export async function handleAccountInput(
       events.push(
         `ℹ️ Ignored stale frame ${String(receivedFrame.height)} (current=${String(accountMachine.currentHeight ?? 0)})`,
       );
-      return { success: true, events };
+      return { success: true, events, ...(committedFrames.length > 0 && { committedFrames }) };
     }
 
     // Validate frame with timestamp checks (HTLC safety)
@@ -1355,7 +1359,7 @@ export async function handleAccountInput(
         // Shared-state inputs are allowed to advance only through committed frames.
 
         // This is NOT an error - it's correct consensus behavior (Channel.ts handlePendingBlock)
-        return { success: true, events };
+        return { success: true, events, ...(committedFrames.length > 0 && { committedFrames }) };
       } else {
         // We are RIGHT - rollback our frame, accept theirs
         // DEDUPLICATION: Check if we already rolled back this exact frame
@@ -1741,6 +1745,7 @@ export async function handleAccountInput(
     }
 
     const committedFrame = cloneAccountFrame(receivedFrame);
+    committedFrames.push({ frame: committedFrame, committedViaNewFrame: true });
     recordAccountFrameHistory(env, {
       entityId: accountMachine.proofHeader.fromEntity,
       counterpartyId: input.fromEntityId,
@@ -1948,6 +1953,7 @@ export async function handleAccountInput(
       swapCancelRequests: allSwapCancelRequests,
       swapOffersCancelled: allSwapOffersCancelled,
       timedOutHashlocks,
+      ...(committedFrames.length > 0 && { committedFrames }),
       ...(hashesToSign.length > 0 && { hashesToSign }),
     };
   }
@@ -1963,7 +1969,7 @@ export async function handleAccountInput(
       events.push(
         `ℹ️ Ignored stale ACK for frame ${String(normalizedInputHeight)} (current=${String(accountMachine.currentHeight ?? 0)}, pending=${String(pending)})`,
       );
-      return { success: true, events };
+      return { success: true, events, ...(committedFrames.length > 0 && { committedFrames }) };
     }
     return {
       success: false,
@@ -1973,7 +1979,15 @@ export async function handleAccountInput(
   }
 
   if (HEAVY_LOGS) console.log(`🔍 RETURN-NO-RESPONSE: No response object`);
-  return { success: true, events, swapOffersCreated: [], swapCancelRequests: [], swapOffersCancelled: [], timedOutHashlocks };
+  return {
+    success: true,
+    events,
+    swapOffersCreated: [],
+    swapCancelRequests: [],
+    swapOffersCancelled: [],
+    timedOutHashlocks,
+    ...(committedFrames.length > 0 && { committedFrames }),
+  };
 }
 
 // === E-MACHINE INTEGRATION ===
