@@ -1,7 +1,8 @@
 <script lang="ts">
+  import type { AccountMachine } from '@xln/runtime/xln-api';
   import type { EntityReplica } from '$lib/types/ui';
   import { createEventDispatcher } from 'svelte';
-  import { replicas, xlnFunctions, xlnEnvironment } from '../../stores/xlnStore';
+  import { xlnEnvironment } from '../../stores/xlnStore';
   import AccountPreview from './AccountPreview.svelte';
   import { getEntityDisplayName } from '$lib/utils/entityNaming';
   import { compareStableText } from '$lib/utils/stableSort';
@@ -14,13 +15,12 @@ export let pendingFaucetKeys: Set<string> = new Set();
   $: runtimeHeight = Number($xlnEnvironment?.height ?? 0);
 
   const dispatch = createEventDispatcher();
-  let showAllAccounts = false;
-
-  // Get accounts from entity state - DIRECT references (no shallow copy!)
-  // CRITICAL: Don't spread account object - it creates stale snapshot
-  $: accounts = (replica?.state?.accounts && replica.state.accounts instanceof Map)
-    ? Array.from(replica.state.accounts.entries())
-    : [];
+  let accountBrowserOpen = false;
+  let accountPage = 0;
+  let accountSearch = '';
+  let lastAccountSearchKey = '';
+  const COLLAPSED_ACCOUNT_LIMIT = 5;
+  const ACCOUNT_PAGE_SIZE = 50;
 
   type AccountView = {
     status?: string;
@@ -57,6 +57,20 @@ export let pendingFaucetKeys: Set<string> = new Set();
     subtitle: string;
   };
 
+  type AccountListEntry = {
+    counterpartyId: string;
+    account: AccountMachine;
+  };
+
+  type AccountPageView = {
+    entries: AccountListEntry[];
+    page: number;
+    pageSize: number;
+    hasPrevious: boolean;
+    hasNext: boolean;
+    isSearching: boolean;
+  };
+
   const isLockBookEntryView = (value: unknown): value is LockBookEntryView => {
     if (typeof value !== 'object' || value === null) return false;
     const candidate = value as Partial<LockBookEntryView>;
@@ -83,100 +97,78 @@ export let pendingFaucetKeys: Set<string> = new Set();
 	    return status === 'disputed' && !activeDispute;
 	  }
 
-  type JurisdictionLike = {
-    name?: unknown;
-    chainId?: unknown;
-    depositoryAddress?: unknown;
-  };
-
-  function normalizeJurisdiction(value: unknown): string {
-    return String(value || '').trim().toLowerCase();
+  function getAccountsMap(sourceReplica: EntityReplica | null): Map<string, AccountMachine> | null {
+    const accounts = sourceReplica?.state?.accounts;
+    return accounts instanceof Map ? (accounts as Map<string, AccountMachine>) : null;
   }
 
-  function jurisdictionKey(value: unknown): string {
-    if (value && typeof value === 'object') {
-      const jurisdiction = value as JurisdictionLike;
-      const chainId = String(jurisdiction.chainId ?? '').trim();
-      const depository = String(jurisdiction.depositoryAddress ?? '').trim().toLowerCase();
-      if (chainId && depository) return `dep:${chainId}:${depository}`;
-      if (chainId) return `chain:${chainId}`;
-      return normalizeJurisdiction(jurisdiction.name);
-    }
-    return normalizeJurisdiction(value);
-  }
-
-  function getReplicaJurisdictionByEntityId(entityId: string): string {
-    const normalized = normalizeId(entityId);
-    if (!normalized || !$replicas) return '';
-    for (const [key, replica] of $replicas.entries()) {
-      const [replicaEntityId] = String(key || '').split(':');
-      if (normalizeId(replicaEntityId || replica?.entityId || '') !== normalized) continue;
-      return jurisdictionKey(replica?.state?.config?.jurisdiction)
-        || jurisdictionKey(replica?.position?.jurisdiction);
-    }
-    const gossip = $xlnEnvironment?.gossip as {
-      getProfiles?: () => Array<{ entityId?: string; metadata?: { jurisdiction?: unknown } }>;
-      profiles?: Array<{ entityId?: string; metadata?: { jurisdiction?: unknown } }>;
-    } | undefined;
-    const profiles = typeof gossip?.getProfiles === 'function'
-      ? gossip.getProfiles()
-      : (Array.isArray(gossip?.profiles) ? gossip.profiles : []);
-    const profile = profiles.find((candidate) => normalizeId(candidate?.entityId || '') === normalized);
-    return jurisdictionKey(profile?.metadata?.jurisdiction);
-  }
-
-  $: currentJurisdiction = jurisdictionKey(replica?.state?.config?.jurisdiction)
-    || jurisdictionKey(replica?.position?.jurisdiction);
-
-  $: rankedAccounts = accounts
-    .map(([counterpartyId, account]) => ({
+  function accountMatchesSearch(counterpartyId: string, account: AccountMachine, query: string): boolean {
+    if (!query) return true;
+    const fields = [
       counterpartyId,
-      account,
-    }))
-    // Preserve Map insertion order so the UI stays stable by first account appearance.
-    .filter((entry) => !isFinalizedDisputed(entry.account))
-    .filter((entry) => {
-      const counterpartyJurisdiction = getReplicaJurisdictionByEntityId(entry.counterpartyId);
-      return !currentJurisdiction || !counterpartyJurisdiction || currentJurisdiction === counterpartyJurisdiction;
-    });
+      account.leftEntity,
+      account.rightEntity,
+      account.status,
+    ];
+    return fields.some((field) => String(field || '').toLowerCase().includes(query));
+  }
 
-  $: visibleAccounts = showAllAccounts ? rankedAccounts : rankedAccounts.slice(0, 5);
-  $: hiddenAccountsCount = Math.max(0, rankedAccounts.length - visibleAccounts.length);
-  $: activeAccountsCount = rankedAccounts.length;
+  function buildAccountPageView(
+    sourceReplica: EntityReplica | null,
+    browserOpen: boolean,
+    pageIndex: number,
+    searchRaw: string,
+  ): AccountPageView {
+    const accounts = getAccountsMap(sourceReplica);
+    const pageSize = browserOpen ? ACCOUNT_PAGE_SIZE : COLLAPSED_ACCOUNT_LIMIT;
+    const page = browserOpen ? Math.max(0, pageIndex) : 0;
+    const start = page * pageSize;
+    const query = searchRaw.trim().toLowerCase();
+    const entries: AccountListEntry[] = [];
+    let matched = 0;
+    let hasNext = false;
 
-  // Safety guard for XLN functions
-
-  // Get ALL entities in the system (excluding self) - reactive to accounts changes
-  // This will recompute whenever accounts or replicas change
-  $: allEntities = replica && $replicas && accounts ? getAllEntities() : [];
-
-  function getAllEntities() {
-    if (!replica || !$replicas || !$xlnFunctions) return [];
-
-    const currentEntityId = replica.entityId;
-    const existingAccountIds = new Set((replica.state?.accounts && replica.state.accounts instanceof Map) ? Array.from(replica.state.accounts.keys()) : []);
-
-    // Get unique entities from replicas, excluding only current entity
-    const entitySet = new Set<string>();
-    for (const [replicaKey] of $replicas.entries()) {
-      const [entityId] = replicaKey.split(':');
-      if (entityId !== currentEntityId) {
-        entitySet.add(entityId);
-      }
+    if (!accounts) {
+      return { entries, page, pageSize, hasPrevious: page > 0, hasNext, isSearching: Boolean(query) };
     }
 
-    return Array.from(entitySet).map(entityId => {
-      const hasAccount = existingAccountIds.has(entityId);
-      return {
-        entityId,
-        displayName: entityId,
-        shortId: entityId,
-        hasAccount
-      };
-    }).sort((a, b) => {
-      return compareStableText(a.entityId, b.entityId);
-    });
+    // Preserve Map insertion order so the UI stays stable by first account appearance.
+    // The loop stops after the current page plus one sentinel row; a hub with a large
+    // account map must not force Svelte to allocate every account just to render a list.
+    for (const [counterpartyId, account] of accounts.entries()) {
+      if (isFinalizedDisputed(account)) continue;
+      if (!accountMatchesSearch(String(counterpartyId), account, query)) continue;
+      if (matched < start) {
+        matched += 1;
+        continue;
+      }
+      if (entries.length >= pageSize) {
+        hasNext = true;
+        break;
+      }
+      entries.push({ counterpartyId: String(counterpartyId), account });
+      matched += 1;
+    }
+
+    return {
+      entries,
+      page,
+      pageSize,
+      hasPrevious: page > 0,
+      hasNext,
+      isSearching: Boolean(query),
+    };
   }
+
+  $: accountSearchKey = accountSearch.trim().toLowerCase();
+  $: if (accountSearchKey !== lastAccountSearchKey) {
+    lastAccountSearchKey = accountSearchKey;
+    accountPage = 0;
+  }
+  $: if (!accountBrowserOpen && accountPage !== 0) accountPage = 0;
+  $: accountPageView = buildAccountPageView(replica, accountBrowserOpen, accountPage, accountSearch);
+  $: visibleAccounts = accountPageView.entries;
+  $: hasAccountsToShow = visibleAccounts.length > 0;
 
   function selectAccount(event: CustomEvent) {
     dispatch('select', event.detail);
@@ -313,21 +305,67 @@ export let pendingFaucetKeys: Set<string> = new Set();
   <div class="accounts-list-view">
 
 
-      {#if activeAccountsCount === 0}
+      {#if !hasAccountsToShow}
         <div class="no-accounts">
-          <p>No accounts established</p>
-          <small>Select an entity below to open an account</small>
+          <p>{accountPageView.isSearching ? 'No matching accounts' : 'No accounts established'}</p>
+          <small>{accountPageView.isSearching ? 'Refine the search or clear it' : 'Select an entity below to open an account'}</small>
+          {#if accountPageView.isSearching || accountPageView.hasPrevious}
+            <div class="empty-actions">
+              {#if accountPageView.isSearching}
+                <button class="list-toggle" on:click={() => accountSearch = ''}>Clear search</button>
+              {/if}
+              {#if accountPageView.hasPrevious}
+                <button class="list-toggle" on:click={() => accountPage = Math.max(0, accountPage - 1)}>Previous page</button>
+              {/if}
+            </div>
+          {/if}
         </div>
       {:else}
         <div class="list-header">
           <div class="list-controls">
-            {#if activeAccountsCount > 5}
+            {#if accountBrowserOpen}
+              <input
+                class="account-search"
+                type="search"
+                bind:value={accountSearch}
+                placeholder="Search account"
+                aria-label="Search account"
+              />
+              <span class="page-label">Page {accountPageView.page + 1}</span>
               <button
                 class="list-toggle"
-                on:click={() => showAllAccounts = !showAllAccounts}
-                title={showAllAccounts ? 'Show first 5 only' : 'Show all accounts'}
+                on:click={() => accountPage = Math.max(0, accountPage - 1)}
+                disabled={!accountPageView.hasPrevious}
+                title="Previous accounts page"
               >
-                {showAllAccounts ? 'Collapse' : `Show All (${activeAccountsCount})`}
+                Prev
+              </button>
+              <button
+                class="list-toggle"
+                on:click={() => accountPage = accountPage + 1}
+                disabled={!accountPageView.hasNext}
+                title="Next accounts page"
+              >
+                Next
+              </button>
+              <button
+                class="list-toggle"
+                on:click={() => {
+                  accountBrowserOpen = false;
+                  accountSearch = '';
+                  accountPage = 0;
+                }}
+                title="Close account browser"
+              >
+                Close
+              </button>
+            {:else if accountPageView.hasNext}
+              <button
+                class="list-toggle"
+                on:click={() => accountBrowserOpen = true}
+                title="Browse accounts"
+              >
+                Browse accounts
               </button>
             {/if}
           </div>
@@ -402,6 +440,12 @@ export let pendingFaucetKeys: Set<string> = new Set();
     color: var(--theme-text-muted, #9d9d9d);
   }
 
+  .empty-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 14px;
+  }
+
   .accounts-list {
     display: flex;
     flex-direction: column;
@@ -419,6 +463,7 @@ export let pendingFaucetKeys: Set<string> = new Set();
     display: flex;
     align-items: center;
     gap: 6px;
+    min-width: 0;
   }
 
   .list-toggle {
@@ -437,6 +482,33 @@ export let pendingFaucetKeys: Set<string> = new Set();
     color: var(--theme-text-primary, #e7e5e4);
   }
 
+  .list-toggle:disabled {
+    opacity: 0.42;
+    cursor: not-allowed;
+  }
+
+  .account-search {
+    width: min(260px, 42vw);
+    min-height: 32px;
+    border-radius: 6px;
+    border: 1px solid color-mix(in srgb, var(--theme-card-border, var(--theme-border, #27272a)) 88%, transparent);
+    background: color-mix(in srgb, var(--theme-surface, #101014) 92%, transparent);
+    color: var(--theme-text-primary, #e4e4e7);
+    padding: 0 10px;
+    font-size: 12px;
+    outline: none;
+  }
+
+  .account-search:focus {
+    border-color: color-mix(in srgb, var(--theme-accent, #facc15) 72%, transparent);
+  }
+
+  .page-label {
+    color: var(--theme-text-muted, #8f8f96);
+    font-size: 11px;
+    white-space: nowrap;
+  }
+
   @media (max-width: 760px) {
     .accounts-list {
       gap: 10px;
@@ -447,10 +519,18 @@ export let pendingFaucetKeys: Set<string> = new Set();
       padding: 0 0 6px;
     }
 
-    .list-toggle {
+    .list-controls {
       width: 100%;
+      flex-wrap: wrap;
+    }
+
+    .list-toggle {
       min-height: 34px;
       font-size: 11px;
+    }
+
+    .account-search {
+      width: 100%;
     }
   }
 </style>

@@ -37,6 +37,7 @@
   import { toasts } from '../../stores/toastStore';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
+  import { isRuntimeLikeEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
   import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming';
   import { entityAvatar as resolveEntityAvatar } from '$lib/utils/avatar';
   import { getJurisdictionBadgeInfo } from '$lib/utils/jurisdictionBadge';
@@ -82,6 +83,7 @@
   export let headerRuntimeAddLabel: string = '+ Add Runtime';
   export let initialAction: 'r2r' | 'r2c' | undefined = undefined;
   export let env: Env | EnvSnapshot;
+  export let envRevision: string = '';
   export let history: EnvSnapshot[];
   export let timeIndex: number;
   export let isLive: boolean;
@@ -164,7 +166,10 @@
     return new Map(source);
   }
 
-  function getEnvReplicaMap(sourceEnv: Env | EnvSnapshot | null | undefined): Map<string, EntityReplica> | null {
+  function getEnvReplicaMap(
+    sourceEnv: Env | EnvSnapshot | null | undefined,
+    _revision = '',
+  ): Map<string, EntityReplica> | null {
     if (!sourceEnv) return null;
     return materializeReplicaMap(sourceEnv.eReplicas as Map<string, EntityReplica>);
   }
@@ -440,14 +445,8 @@
     settingsOperations.setAccountBarUsdPer100Px(clampAccountBarUsdPer100Px(target.value));
   }
 
-  function isRuntimeEnv(value: unknown): value is Env {
-    if (!value || typeof value !== 'object') return false;
-    const obj = value as { eReplicas?: unknown; jReplicas?: unknown };
-    return obj.eReplicas instanceof Map && obj.jReplicas instanceof Map;
-  }
-
   function getRuntimeEnv(env: Env | EnvSnapshot | null | undefined): Env | null {
-    return isRuntimeEnv(env) ? env : null;
+    return unwrapLiveRuntimeEnv(env);
   }
 
   function requireRuntimeEnv(env: Env | EnvSnapshot | null | undefined, context: string): Env {
@@ -1420,8 +1419,9 @@
   }
 
   function getP2PRelayUrls(env: Env | EnvSnapshot | null | undefined): string[] {
-    const p2p = isRuntimeEnv(env)
-      ? (env.runtimeState?.p2p as { relayUrls?: string[] } | null | undefined)
+    const runtimeEnv = unwrapLiveRuntimeEnv(env);
+    const p2p = isRuntimeLikeEnv(runtimeEnv)
+      ? (runtimeEnv.runtimeState?.p2p as { relayUrls?: string[] } | null | undefined)
       : null;
     const relayUrls = p2p?.relayUrls;
     return Array.isArray(relayUrls) ? relayUrls : [];
@@ -1503,7 +1503,7 @@
     return `${addr.slice(0, 10)}...${addr.slice(-6)}`;
   }
 
-  $: activeReplicas = getEnvReplicaMap(activeEnv);
+  $: activeReplicas = getEnvReplicaMap(activeEnv, envRevision);
   $: activeXlnFunctions = $xlnFunctions;
   $: activeHistory = history;
   $: activeTimeIndex = timeIndex;

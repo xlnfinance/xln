@@ -31,6 +31,7 @@
   import type { EnvSnapshot, EntityReplica } from '$types';
   import { createSelfEntity } from '$lib/utils/entityFactory';
   import { readOnboardingComplete, writeOnboardingComplete } from '$lib/utils/onboardingState';
+  import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
 
   import EntityPanelTabs from '$lib/components/Entity/EntityPanelTabs.svelte';
   import OnboardingPanel from '$lib/components/Entity/OnboardingPanel.svelte';
@@ -61,6 +62,7 @@
 
   interface Props {
     isolatedEnv: Writable<Env | null>;
+    isolatedRevision?: Writable<number>;
     isolatedHistory?: Writable<EnvSnapshot[]>;
     isolatedTimeIndex?: Writable<number>;
     isolatedIsLive?: Writable<boolean>;
@@ -68,21 +70,23 @@
 
   let {
     isolatedEnv,
+    isolatedRevision = writable(0),
     isolatedHistory = writable([]),
     isolatedTimeIndex = writable(-1),
     isolatedIsLive = writable(true)
   }: Props = $props();
+
+  function publishIsolatedEnv(env: Env | null) {
+    isolatedEnv.set(env ? createRuntimeViewEnv(unwrapLiveRuntimeEnv(env) ?? env) : null);
+    isolatedRevision.update((revision) => revision + 1);
+  }
 
   function isLiveRuntimeFrame(frame: RuntimeFrame): frame is Env {
     return frame.jReplicas instanceof Map;
   }
 
   function cloneLiveEnv(frame: Env): Env {
-    return {
-      ...frame,
-      eReplicas: new Map(frame.eReplicas),
-      jReplicas: new Map(frame.jReplicas),
-    };
+    return createRuntimeViewEnv(unwrapLiveRuntimeEnv(frame) ?? frame);
   }
 
   function cloneEnvSnapshot(frame: EnvSnapshot): EnvSnapshot {
@@ -96,6 +100,30 @@
   function cloneRuntimeFrame(frame: RuntimeFrame | null | undefined): RuntimeFrame | null {
     if (!frame) return null;
     return isLiveRuntimeFrame(frame) ? cloneLiveEnv(frame) : cloneEnvSnapshot(frame);
+  }
+
+  function runtimeFrameRevision(frame: RuntimeFrame | null | undefined): string {
+    if (!frame) return 'none';
+    let accountCount = 0;
+    let accountHeightTotal = 0;
+    let pendingFrameCount = 0;
+    for (const replica of frame.eReplicas?.values?.() || []) {
+      for (const account of replica?.state?.accounts?.values?.() || []) {
+        accountCount += 1;
+        accountHeightTotal += Number(account.currentHeight ?? account.currentFrame?.height ?? 0);
+        if (account.pendingFrame) pendingFrameCount += 1;
+      }
+    }
+    return [
+      String(frame.runtimeId || ''),
+      String(frame.height || 0),
+      String(frame.timestamp || 0),
+      String(frame.eReplicas?.size || 0),
+      String(accountCount),
+      String(accountHeightTotal),
+      String(pendingFrameCount),
+      String('frameLogs' in frame ? frame.frameLogs?.length || 0 : 0),
+    ].join(':');
   }
 
   onMount(async () => {
@@ -177,13 +205,18 @@
     const timeIdx = $isolatedTimeIndex;
     const hist = $isolatedHistory;
     const env = $isolatedEnv;
+    const revision = $isolatedRevision;
+    void revision;
 
     if (!isLive && timeIdx != null && timeIdx >= 0 && hist && hist.length > 0) {
       const idx = Math.min(timeIdx, hist.length - 1);
       return cloneRuntimeFrame(hist[idx] ?? null);
     }
+    // Publish a fresh frame object for Svelte on every runtime revision, while
+    // retaining a hidden live-env handle for runtime actions.
     return cloneRuntimeFrame(env);
   });
+  const currentFrameRevision = $derived.by(() => `${$isolatedRevision}:${runtimeFrameRevision(currentFrame)}`);
 
   // Available jurisdictions (time-aware)
   const availableJurisdictions = $derived.by(() => {
@@ -353,7 +386,7 @@
         entityInputs: []
       });
 
-      isolatedEnv.set(env);
+      publishIsolatedEnv(env);
       isCreatingJMachine = false; // Only reset on success
       return name;
     } catch (err) {
@@ -444,7 +477,7 @@
           const finalEntityId = canonical?.entityId || entityId;
           console.log(`[ensureSelfEntities] ✅ Entity created: ${finalEntityId.slice(0, 10)} for signer ${signerAddress.slice(0, 10)}`);
           vaultOperations.setSignerEntity(signerEntry.index, finalEntityId);
-          isolatedEnv.set(env);
+          publishIsolatedEnv(env);
           selfEntityChecked.add(selfEntityKey);
 
           // Auto-select entity after creation
@@ -623,7 +656,7 @@
         createdAt: Date.now(),
       });
 
-      isolatedEnv.set(env);
+      publishIsolatedEnv(env);
       selectedJurisdictionName = name;
       const signerForJurisdiction = vaultOperations.addSigner(`${name} signer`, name);
       if (signerForJurisdiction?.address) {
@@ -702,6 +735,7 @@
     allowHeaderDeleteRuntime={true}
     headerRuntimeAddLabel="+ Add Runtime"
     env={currentFrame}
+    envRevision={currentFrameRevision}
     history={$isolatedHistory}
     timeIndex={$isolatedTimeIndex}
     isLive={$isolatedIsLive}

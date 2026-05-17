@@ -42,6 +42,8 @@
   let error = '';
   let hasPersistedPolicy = false;
   let avatar = '';
+  let revealBrainVaultSeed = false;
+  let copiedBrainVaultField = '';
 
   const HUB_JOIN_OPTIONS: Array<{ value: HubJoinPreference; label: string }> = [
     { value: 'manual', label: 'Join hubs manually' },
@@ -135,6 +137,54 @@
   };
 
   $: avatar = entityAvatar($xlnFunctions, entityId);
+  $: brainVaultSeed = String($activeRuntime?.seed || '').trim();
+  $: brainVaultMnemonic12 = String($activeRuntime?.mnemonic12 || '').trim();
+  $: brainVaultSigner = $activeRuntime?.signers?.[0] ?? null;
+  $: brainVaultSignerAddress = String(brainVaultSigner?.address || '').trim();
+  $: brainVaultWordCount = brainVaultSeed ? brainVaultSeed.split(/\s+/).filter(Boolean).length : 0;
+  $: brainVaultRuntimeLabel = String($activeRuntime?.label || 'BrainVault').trim();
+
+  const shortValue = (value: string): string => {
+    const text = String(value || '').trim();
+    if (text.length <= 18) return text || '-';
+    return `${text.slice(0, 10)}...${text.slice(-6)}`;
+  };
+
+  async function copyBrainVaultValue(value: string, field: string): Promise<void> {
+    const text = String(value || '').trim();
+    if (!text || typeof navigator === 'undefined' || !navigator.clipboard) return;
+    await navigator.clipboard.writeText(text);
+    copiedBrainVaultField = field;
+    setTimeout(() => {
+      if (copiedBrainVaultField === field) copiedBrainVaultField = '';
+    }, 1200);
+  }
+
+  function downloadBrainVaultSheet(): void {
+    if (typeof window === 'undefined') return;
+    const lines = [
+      'XLN BrainVault recovery sheet',
+      '',
+      `Wallet: ${brainVaultRuntimeLabel || '-'}`,
+      `Runtime ID: ${$activeRuntime?.id || '-'}`,
+      `Entity ID: ${entityId || '-'}`,
+      `Signer: ${brainVaultSignerAddress || '-'}`,
+      `Seed words: ${brainVaultWordCount || '-'}`,
+      '',
+      '24-word recovery phrase:',
+      brainVaultSeed || '-',
+      '',
+      ...(brainVaultMnemonic12 ? ['12-word compatibility phrase:', brainVaultMnemonic12, ''] : []),
+      'Store offline. Anyone with these words can control this wallet.',
+    ];
+    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = 'xln-brainvault-recovery.txt';
+    link.click();
+    URL.revokeObjectURL(url);
+  }
 
   $: canFinish =
     termsAccepted &&
@@ -360,6 +410,59 @@
 
 <div class="onboarding">
   <div class="setup-card">
+    <section class="setup-section brainvault-section">
+      <details class="brainvault-details">
+        <summary>
+          <span>
+            <strong>BrainVault recovery</strong>
+            <small>{brainVaultWordCount ? `${brainVaultWordCount} words` : 'Seed not loaded'} · {shortValue(brainVaultSignerAddress)}</small>
+          </span>
+          <span class="brainvault-chevron">⌄</span>
+        </summary>
+
+        <div class="brainvault-panel">
+          <div class="brainvault-row">
+            <span>Wallet</span>
+            <code>{brainVaultRuntimeLabel || '-'}</code>
+          </div>
+          <div class="brainvault-row">
+            <span>Signer</span>
+            <code>{brainVaultSignerAddress || '-'}</code>
+          </div>
+          <div class="brainvault-actions">
+            <button type="button" class="mini-action" on:click={downloadBrainVaultSheet}>
+              Download sheet
+            </button>
+            <button
+              type="button"
+              class="mini-action"
+              disabled={!brainVaultSeed}
+              on:click={() => revealBrainVaultSeed = !revealBrainVaultSeed}
+            >
+              {revealBrainVaultSeed ? 'Hide seed' : 'Show seed'}
+            </button>
+            <button
+              type="button"
+              class="mini-action"
+              disabled={!brainVaultSeed}
+              on:click={() => copyBrainVaultValue(brainVaultSeed, 'seed')}
+            >
+              {copiedBrainVaultField === 'seed' ? 'Copied' : 'Copy seed'}
+            </button>
+          </div>
+          {#if revealBrainVaultSeed}
+            <div class="seed-box">
+              {#each brainVaultSeed.split(/\s+/) as word, index}
+                {#if word}
+                  <span><b>{index + 1}</b>{word}</span>
+                {/if}
+              {/each}
+            </div>
+          {/if}
+        </div>
+      </details>
+    </section>
+
     <section class="setup-section">
       <label class="form-label" for="display-name">Display name</label>
       <input
@@ -483,6 +586,119 @@
     border: 1px solid #2f2620;
     border-radius: 14px;
     padding: 16px;
+  }
+
+  .brainvault-section {
+    padding: 0;
+    overflow: hidden;
+  }
+
+  .brainvault-details summary {
+    min-height: 52px;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    cursor: pointer;
+    list-style: none;
+  }
+
+  .brainvault-details summary::-webkit-details-marker {
+    display: none;
+  }
+
+  .brainvault-details summary span:first-child {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+
+  .brainvault-details summary strong {
+    color: #f5f5f4;
+    font-size: 14px;
+  }
+
+  .brainvault-details summary small {
+    color: #78716c;
+    font-size: 11px;
+    overflow-wrap: anywhere;
+  }
+
+  .brainvault-chevron {
+    color: #a8a29e;
+    transition: transform 0.15s ease;
+  }
+
+  .brainvault-details[open] .brainvault-chevron {
+    transform: rotate(180deg);
+  }
+
+  .brainvault-panel {
+    padding: 0 16px 16px;
+    border-top: 1px solid #27211c;
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+  }
+
+  .brainvault-row {
+    display: grid;
+    grid-template-columns: 92px minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+    color: #78716c;
+    font-size: 12px;
+  }
+
+  .brainvault-actions {
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 8px;
+  }
+
+  .mini-action {
+    min-height: 34px;
+    padding: 0 12px;
+    border-radius: 9px;
+    border: 1px solid #322821;
+    background: #0f0b09;
+    color: #e7e5e4;
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .mini-action:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .seed-box {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 6px;
+    padding: 10px;
+    border-radius: 10px;
+    background: #0f0b09;
+    border: 1px solid #322821;
+  }
+
+  .seed-box span {
+    min-width: 0;
+    display: flex;
+    gap: 5px;
+    align-items: baseline;
+    color: #f5f5f4;
+    font-size: 12px;
+    overflow-wrap: anywhere;
+  }
+
+  .seed-box b {
+    color: #78716c;
+    font-size: 10px;
   }
 
   .profile-preview-avatar {
@@ -689,6 +905,15 @@
     }
 
     .policy-grid {
+      grid-template-columns: 1fr;
+    }
+
+    .brainvault-row {
+      grid-template-columns: 1fr;
+      gap: 4px;
+    }
+
+    .seed-box {
       grid-template-columns: 1fr;
     }
 

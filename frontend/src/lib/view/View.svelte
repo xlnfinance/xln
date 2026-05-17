@@ -12,6 +12,7 @@
   import { panelBridge } from './utils/panelBridge';
   import { activeRuntimeId, runtimes } from '$lib/stores/runtimeStore';
   import { getXLN, xlnEnvironment, xlnInstance } from '$lib/stores/xlnStore';
+  import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
 
   let commandPaletteOpen = false;
 
@@ -50,6 +51,7 @@
   };
 
   const localEnvStore = writable<Env | null>(null);
+  const localEnvRevisionStore = writable<number>(0);
   const localHistoryStore = writable<EnvSnapshot[]>([]);
   const localTimeIndex = writable<number>(-1);
   const localIsLive = writable<boolean>(true);
@@ -61,6 +63,12 @@
   const lastToastAtByKey = new Map<string, number>();
   const PAYMENT_SPOTLIGHT_COOLDOWN_MS = 60000;
   const lastPaymentSpotlightAtByKey = new Map<string, number>();
+
+  const publishLocalEnv = (env: Env | null) => {
+    const runtimeEnv = env ? (unwrapLiveRuntimeEnv(env) ?? env) : null;
+    localEnvStore.set(runtimeEnv ? createRuntimeViewEnv(runtimeEnv) : null);
+    localEnvRevisionStore.update((revision) => revision + 1);
+  };
 
   const formatSpotlightAmount = (tokenIdRaw: unknown, amountRaw: unknown): string => {
     const tokenId = Number(tokenIdRaw || 0);
@@ -194,23 +202,25 @@
       }
 
       const registerEnvChanges = (envToRegister: Env | null) => {
-        if (!envToRegister || !XLN.registerEnvChangeCallback) return;
-        const runtimeKey = envToRegister.runtimeId || null;
+        const runtimeEnv = envToRegister ? (unwrapLiveRuntimeEnv(envToRegister) ?? envToRegister) : null;
+        if (!runtimeEnv || !XLN.registerEnvChangeCallback) return;
+        const runtimeKey = runtimeEnv.runtimeId || null;
         if (envChangeRegisteredFor === runtimeKey) return;
         if (unregisterEnvChange) {
           unregisterEnvChange();
           unregisterEnvChange = null;
         }
-        unregisterEnvChange = XLN.registerEnvChangeCallback(envToRegister, (nextEnv: Env) => {
-          localEnvStore.set(nextEnv);
-          localHistoryStore.set(nextEnv.history || []);
+        unregisterEnvChange = XLN.registerEnvChangeCallback(runtimeEnv, (nextEnv: Env) => {
+          publishLocalEnv(nextEnv);
+          const nextRuntimeEnv = unwrapLiveRuntimeEnv(nextEnv) ?? nextEnv;
+          localHistoryStore.set(nextRuntimeEnv.history || []);
         });
         envChangeRegisteredFor = runtimeKey;
       };
 
       if (env) {
-        localEnvStore.set(env);
-        localHistoryStore.set(env.history || []);
+        publishLocalEnv(env);
+        localHistoryStore.set((unwrapLiveRuntimeEnv(env) ?? env).history || []);
         localIsLive.set(true);
         localTimeIndex.set(-1);
         registerEnvChanges(env);
@@ -222,8 +232,8 @@
         const runtime = allRuntimes.get(runtimeId);
         if (!runtime?.env) return;
 
-        localEnvStore.set(runtime.env);
-        localHistoryStore.set(runtime.env.history || []);
+        publishLocalEnv(runtime.env);
+        localHistoryStore.set((unwrapLiveRuntimeEnv(runtime.env) ?? runtime.env).history || []);
         localIsLive.set(true);
         localTimeIndex.set(-1);
         registerEnvChanges(runtime.env);
@@ -233,9 +243,11 @@
         if (!nextEnv) return;
         const runtimeId = get(activeRuntimeId);
         const activeRuntime = runtimeId ? get(runtimes).get(runtimeId) : null;
-        if (activeRuntime?.env && activeRuntime.env !== nextEnv) return;
-        localEnvStore.set(nextEnv);
-        localHistoryStore.set(nextEnv.history || []);
+        const activeLiveEnv = activeRuntime?.env ? (unwrapLiveRuntimeEnv(activeRuntime.env) ?? activeRuntime.env) : null;
+        const nextLiveEnv = unwrapLiveRuntimeEnv(nextEnv) ?? nextEnv;
+        if (activeLiveEnv && activeLiveEnv !== nextLiveEnv) return;
+        publishLocalEnv(nextEnv);
+        localHistoryStore.set(nextLiveEnv.history || []);
         localIsLive.set(true);
         localTimeIndex.set(-1);
         registerEnvChanges(nextEnv);
@@ -268,6 +280,7 @@
 {#if userMode}
   <UserModePanel
     isolatedEnv={localEnvStore}
+    isolatedRevision={localEnvRevisionStore}
     isolatedHistory={localHistoryStore}
     isolatedTimeIndex={localTimeIndex}
     isolatedIsLive={localIsLive}

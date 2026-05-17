@@ -12,7 +12,6 @@
   import { createEventDispatcher } from 'svelte';
   import {
     parseJMachineConfigJson,
-    stringifyJMachineConfig,
     type JMachineConfig,
   } from '$lib/stores/jmachineStore';
   import { POPULAR_NETWORKS, isBrowserVMChainId, BROWSERVM_CHAIN_START, type NetworkConfig } from '$lib/config/networks';
@@ -91,8 +90,13 @@
     createdAt: Date.now(),
   });
 
+  const stringifyDraftConfig = (config: JMachineConfig): string => {
+    const { createdAt: _createdAt, ...publicConfig } = config;
+    return JSON.stringify(publicConfig, null, 2);
+  };
+
   $: if (!advancedJsonDirty) {
-    advancedJson = stringifyJMachineConfig(buildDraftConfig());
+    advancedJson = stringifyDraftConfig(buildDraftConfig());
   }
 
   function parseRpcList(text: string): string[] {

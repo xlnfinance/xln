@@ -5,6 +5,7 @@
 import { get } from 'svelte/store';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import type { Env, EntityReplica } from '@xln/runtime/xln-api';
+import { unwrapLiveRuntimeEnv } from './liveRuntimeEnv';
 
 type JurisdictionConfig = {
   name: string;
@@ -63,7 +64,8 @@ export async function createEphemeralEntity(
   jurisdictionName: string,
   env: Env
 ): Promise<string> {
-  const existing = findReplicaBySigner(env, signerId);
+  const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
+  const existing = findReplicaBySigner(runtimeEnv, signerId);
   const existingJurisdiction = String(existing?.state?.config?.jurisdiction?.name || '').trim();
   if (existing?.entityId && normalizeJurisdictionKey(existingJurisdiction) !== normalizeJurisdictionKey(jurisdictionName)) {
     throw new Error(
@@ -71,7 +73,7 @@ export async function createEphemeralEntity(
     );
   }
 
-  const jurisdiction = buildJurisdictionConfig(env, jurisdictionName);
+  const jurisdiction = buildJurisdictionConfig(runtimeEnv, jurisdictionName);
   if (!jurisdiction) {
     throw new Error(`No jurisdiction config for ${jurisdictionName}`);
   }
@@ -109,11 +111,11 @@ export async function createEphemeralEntity(
   };
 
   // Apply runtime input
-  xln.enqueueRuntimeInput(env, runtimeInput);
+  xln.enqueueRuntimeInput(runtimeEnv, runtimeInput);
   await waitForCondition(
     () => {
       const expected = String(entityId).toLowerCase();
-      for (const key of env.eReplicas.keys()) {
+      for (const key of runtimeEnv.eReplicas.keys()) {
         const repEntity = String(key).split(':')[0];
         if (String(repEntity || '').toLowerCase() === expected) return true;
       }
@@ -214,10 +216,11 @@ export async function createSelfEntity(
   signerAddress: string,
   jurisdictionName?: string
 ): Promise<string | null> {
-  const jName = jurisdictionName || await ensureJMachine(env);
+  const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
+  const jName = jurisdictionName || await ensureJMachine(runtimeEnv);
   if (!jName) return null;
 
-  return await createEphemeralEntity(signerAddress, jName, env);
+  return await createEphemeralEntity(signerAddress, jName, runtimeEnv);
 }
 
 /**
@@ -238,7 +241,7 @@ export async function autoCreateEntityForSigner(
     try {
       const { xlnEnvironment } = await import('$lib/stores/xlnStore');
       const { activeEnv } = await import('$lib/stores/runtimeStore');
-      const env = get(xlnEnvironment) || get(activeEnv);
+      const env = unwrapLiveRuntimeEnv(get(xlnEnvironment) || get(activeEnv));
 
       if (!env) {
         if (!warnedMissingEnv) {
