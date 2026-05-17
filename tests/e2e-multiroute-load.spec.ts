@@ -122,19 +122,32 @@ type Entity = { entityId: string; signerId: string; label: string; mnemonic: str
 type UserName = 'alice' | 'bob' | 'carol' | 'dave' | 'eve' | 'frank';
 
 async function waitForEntityAdvertised(page: Page, entityId: string, timeoutMs = 25_000) {
-  const ok = await page.evaluate(async ({ entityId, timeoutMs }) => {
+  const apiBase = await getActiveApiBase(page);
+  const ok = await page.evaluate(async ({ entityId, timeoutMs, apiBase }) => {
     const start = Date.now();
+    const target = entityId.toLowerCase();
     while (Date.now() - start < timeoutMs) {
+      try {
+        const res = await fetch(`${apiBase}/api/debug/entities?limit=5000&q=${encodeURIComponent(entityId)}`);
+        if (res.ok) {
+          const body = await res.json();
+          const entities = Array.isArray(body?.entities) ? body.entities : [];
+          const hit = entities.find((e: any) => String(e?.entityId || '').toLowerCase() === target);
+          if (hit && hit.runtimeId) return true;
+        }
+      } catch {
+        // fall back to the local gossip cache below
+      }
       const env = (window as any).isolatedEnv;
       const profiles = env?.gossip?.getProfiles?.() ?? [];
-      if (profiles.some((p: any) => String(p?.entityId || '').toLowerCase() === entityId.toLowerCase())) return true;
+      if (profiles.some((p: any) => String(p?.entityId || '').toLowerCase() === target)) return true;
       const p2p = env?.runtimeState?.p2p;
       if (typeof p2p?.refreshGossip === 'function') try { await p2p.refreshGossip(); } catch {}
       await new Promise(r => setTimeout(r, 400));
     }
     return false;
-  }, { entityId, timeoutMs });
-  expect(ok, `Entity ${entityId.slice(0, 10)} not advertised`).toBe(true);
+  }, { entityId, timeoutMs, apiBase });
+  expect(ok, `Entity ${entityId.slice(0, 10)} not advertised in relay debug registry or local gossip`).toBe(true);
 }
 
 async function discoverHubs(page: Page): Promise<string[]> {

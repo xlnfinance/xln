@@ -13,14 +13,14 @@
 
 import type { AccountMachine } from '../../types';
 
-type LegacyHtlcCancelTx = {
+type HtlcCancelTx = {
   type: 'htlc_cancel';
   data: { lockId: string; reason: string };
 };
 
 export async function handleHtlcCancel(
   accountMachine: AccountMachine,
-  accountTx: LegacyHtlcCancelTx,
+  accountTx: HtlcCancelTx,
 ): Promise<{ success: boolean; events: string[]; error?: string; cancelledHashlock?: string; cancelReason?: string }> {
   const { lockId, reason } = accountTx.data;
   const events: string[] = [];

@@ -10,7 +10,7 @@
   } from '$lib/stores/runtimeStore';
   import { resetEverything } from '$lib/utils/resetEverything';
   import { xlnFunctions, xlnInstance } from '$lib/stores/xlnStore';
-  import type { Env } from '@xln/runtime';
+  import type { Env } from '@xln/runtime/xln-api';
   import type { Tab, EntityReplica } from '$lib/types/ui';
   import { entityAvatar, preferredAvatar } from '$lib/utils/avatar';
   import { getJurisdictionBadgeInfo, type JurisdictionBadgeInfo } from '$lib/utils/jurisdictionBadge';

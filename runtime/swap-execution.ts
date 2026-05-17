@@ -23,6 +23,10 @@ export interface NormalizedOrderbookOffer extends SwapOfferLike {
   minFillRatio: number;
   createdHeight: number;
   crossJurisdiction?: CrossJurisdictionSwapRoute;
+  pendingCrossSwapAck?: {
+    cancelRemainder?: boolean;
+    cumulativeFillRatio?: number;
+  };
 }
 
 export { asOfferId, compareCanonicalText, swapKey, type OfferId, type SwapKey };

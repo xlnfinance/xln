@@ -17,6 +17,20 @@ import {
   revealHashLadder,
   type HashLadderReveal,
 } from './hashladder';
+import {
+  deriveCanonicalCrossJurisdictionBookOwner,
+  deriveCanonicalCrossJurisdictionVenueId,
+} from './cross-jurisdiction-market';
+
+export {
+  deriveCanonicalCrossJurisdictionBookOwner,
+  deriveCanonicalCrossJurisdictionBookOwnerForLegs,
+  deriveCanonicalCrossJurisdictionMarket,
+  deriveCanonicalCrossJurisdictionMarketForLegs,
+  deriveCanonicalCrossJurisdictionVenueId,
+  deriveCanonicalCrossJurisdictionVenueIdForLegs,
+  type CanonicalCrossJurisdictionMarket,
+} from './cross-jurisdiction-market';
 
 export const CROSS_J_DEFAULT_SOURCE_REVEAL_WINDOW_MS = 60_000;
 export const CROSS_J_TARGET_REVEAL_SAFETY_MS = 60_000;
@@ -60,7 +74,7 @@ const CROSS_J_ALLOWED_TRANSITIONS: Record<CrossJurisdictionSwapStatus, ReadonlyS
   source_locked: new Set(['source_locked', 'resting', 'cancelled', 'expired', 'failed']),
   resting: new Set(['resting', 'partially_filled', 'clear_requested', 'clearing', 'cancelled', 'expired', 'failed']),
   partially_filled: new Set(['partially_filled', 'clear_requested', 'clearing', 'cancelled', 'expired', 'failed']),
-  clear_requested: new Set(['clear_requested', 'clearing', 'cancelled', 'expired', 'failed']),
+  clear_requested: new Set(['clear_requested', 'clearing', 'source_claimed', 'cancelled', 'expired', 'failed']),
   clearing: new Set(['clearing', 'source_claimed', 'target_claimed', 'settled', 'cancelled', 'expired', 'failed']),
   source_claimed: new Set(['source_claimed', 'target_claimed', 'settled', 'failed']),
   target_claimed: new Set(['target_claimed', 'settled', 'failed']),
@@ -205,95 +219,8 @@ export function isCrossJurisdictionPullExpired(
   return Number.isFinite(deadline) && deadline > 0 && deadline <= now;
 }
 
-const normalizeEntityId = (value: string): string => String(value || '').toLowerCase();
 const normalizeJurisdiction = (value: string): string => String(value || '').trim().toLowerCase();
-const crossJurisdictionAssetKey = (jurisdiction: string, tokenId: number): string =>
-  `${normalizeJurisdiction(jurisdiction)}:${Math.floor(Number(tokenId) || 0)}`;
-
-export type CanonicalCrossJurisdictionMarket = {
-  sourceKey: string;
-  targetKey: string;
-  baseKey: string;
-  quoteKey: string;
-  sourceIsBase: boolean;
-  venueId: string;
-};
-
-export function deriveCanonicalCrossJurisdictionMarket(route: CrossJurisdictionSwapRoute): CanonicalCrossJurisdictionMarket {
-  return deriveCanonicalCrossJurisdictionMarketForLegs(
-    route.source.jurisdiction,
-    route.source.tokenId,
-    route.target.jurisdiction,
-    route.target.tokenId,
-  );
-}
-
-export function deriveCanonicalCrossJurisdictionMarketForLegs(
-  sourceJurisdiction: string,
-  sourceTokenId: number,
-  targetJurisdiction: string,
-  targetTokenId: number,
-): CanonicalCrossJurisdictionMarket {
-  const sourceKey = crossJurisdictionAssetKey(sourceJurisdiction, sourceTokenId);
-  const targetKey = crossJurisdictionAssetKey(targetJurisdiction, targetTokenId);
-  const sourceIsBase = sourceKey <= targetKey;
-  const baseKey = sourceIsBase ? sourceKey : targetKey;
-  const quoteKey = sourceIsBase ? targetKey : sourceKey;
-  return {
-    sourceKey,
-    targetKey,
-    baseKey,
-    quoteKey,
-    sourceIsBase,
-    venueId: `cross:${baseKey}/${quoteKey}`,
-  };
-}
-
-export function deriveCanonicalCrossJurisdictionVenueId(route: CrossJurisdictionSwapRoute): string {
-  return deriveCanonicalCrossJurisdictionMarket(route).venueId;
-}
-
-export function deriveCanonicalCrossJurisdictionVenueIdForLegs(
-  sourceJurisdiction: string,
-  sourceTokenId: number,
-  targetJurisdiction: string,
-  targetTokenId: number,
-): string {
-  return deriveCanonicalCrossJurisdictionMarketForLegs(
-    sourceJurisdiction,
-    sourceTokenId,
-    targetJurisdiction,
-    targetTokenId,
-  ).venueId;
-}
-
-export function deriveCanonicalCrossJurisdictionBookOwner(route: CrossJurisdictionSwapRoute): string {
-  return deriveCanonicalCrossJurisdictionBookOwnerForLegs(
-    route.source.jurisdiction,
-    route.source.tokenId,
-    route.source.counterpartyEntityId,
-    route.target.jurisdiction,
-    route.target.tokenId,
-    route.target.entityId,
-  );
-}
-
-export function deriveCanonicalCrossJurisdictionBookOwnerForLegs(
-  sourceJurisdiction: string,
-  sourceTokenId: number,
-  sourceHubEntityId: string,
-  targetJurisdiction: string,
-  targetTokenId: number,
-  targetHubEntityId: string,
-): string {
-  const sourceKey = crossJurisdictionAssetKey(sourceJurisdiction, sourceTokenId);
-  const targetKey = crossJurisdictionAssetKey(targetJurisdiction, targetTokenId);
-  return normalizeEntityId(
-    sourceKey <= targetKey
-      ? sourceHubEntityId
-      : targetHubEntityId,
-  );
-}
+const normalizeEntityId = (value: string): string => String(value || '').toLowerCase();
 const ROUTE_HASH_ABI_TYPES = [
   'string',
   'string',
@@ -338,7 +265,7 @@ export function deriveCrossJurisdictionPrivateSeed(
   ].join(':')));
 }
 
-type LegacyPrivateRoute = CrossJurisdictionSwapRoute & { hashLadderPrivateSeed?: string };
+type PrivateSeedCarrier = CrossJurisdictionSwapRoute & { hashLadderPrivateSeed?: string };
 
 const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
   value !== null && typeof value === 'object';
@@ -366,41 +293,15 @@ const cloneCrossJurisdictionSwapLeg = (
 const cloneCrossJurisdictionPullLeg = (value: unknown): CrossJurisdictionPullLeg | undefined =>
   isObjectRecord(value) ? ({ ...value } as unknown as CrossJurisdictionPullLeg) : undefined;
 
-const routePrivateSeedKey = (route: CrossJurisdictionSwapRoute): string =>
-  (route.routeHash || deriveCrossJurisdictionRouteHash(route)).toLowerCase();
-
-export function rememberCrossJurisdictionPrivateSeed(
-  env: Pick<Env, 'crossJurisdictionPrivateSeeds'>,
-  route: CrossJurisdictionSwapRoute,
-  privateSeed: string,
-): string {
-  const seed = String(privateSeed || '').trim();
-  if (!seed) throw new Error(`CROSS_J_HASHLADDER_PRIVATE_SEED_EMPTY:${route.orderId}`);
-  env.crossJurisdictionPrivateSeeds ||= new Map();
-  env.crossJurisdictionPrivateSeeds.set(routePrivateSeedKey(route), seed);
-  return seed;
-}
-
 export function getCrossJurisdictionPrivateSeed(
-  env: Pick<Env, 'crossJurisdictionPrivateSeeds' | 'runtimeSeed'>,
+  env: Pick<Env, 'runtimeSeed'>,
   route: CrossJurisdictionSwapRoute,
 ): string {
-  const key = routePrivateSeedKey(route);
-  const stored = env.crossJurisdictionPrivateSeeds?.get(key);
-  if (stored) return stored;
-
-  const legacySeed = String((route as LegacyPrivateRoute).hashLadderPrivateSeed || '').trim();
-  if (legacySeed) return rememberCrossJurisdictionPrivateSeed(env, route, legacySeed);
-
-  return rememberCrossJurisdictionPrivateSeed(
-    env,
-    route,
-    deriveCrossJurisdictionPrivateSeed(env.runtimeSeed, route),
-  );
+  return deriveCrossJurisdictionPrivateSeed(env.runtimeSeed, route);
 }
 
 export function stripCrossJurisdictionPrivateData(route: CrossJurisdictionSwapRoute): CrossJurisdictionSwapRoute {
-  const { hashLadderPrivateSeed: _privateSeed, ...publicRoute } = route as LegacyPrivateRoute;
+  const { hashLadderPrivateSeed: _privateSeed, ...publicRoute } = route as PrivateSeedCarrier;
   const malformedSourceRoute = isObjectRecord(publicRoute.source)
     ? (publicRoute.source['crossJurisdiction'] as CrossJurisdictionSwapRoute | undefined)
     : undefined;

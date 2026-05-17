@@ -1,7 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
 import type { TimeState } from '$lib/types/ui';
 import type { GossipLayer, Profile as GossipProfile } from '@xln/runtime/xln-api';
-import type { Env, EnvSnapshot, EntityReplica } from '@xln/runtime';
+import type { Env, EnvSnapshot, EntityReplica } from '@xln/runtime/xln-api';
 import { xlnEnvironment, history } from './xlnStore';
 
 const defaultTimeState: TimeState = {

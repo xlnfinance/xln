@@ -1,4 +1,5 @@
 import type { Env } from './types';
+import { getJReplicaByJurisdictionRef } from './jurisdiction-runtime';
 
 export const PRODUCTION_DISPUTE_DELAY_BLOCKS = 5_760;
 
@@ -21,7 +22,7 @@ export function getRuntimeJurisdictionDefaultDisputeDelayBlocks(
   fallbackBlocks = PRODUCTION_DISPUTE_DELAY_BLOCKS,
 ): number {
   const preferred =
-    (jurisdictionName && env.jReplicas?.get(jurisdictionName)) ||
+    getJReplicaByJurisdictionRef(env, jurisdictionName) ||
     (env.activeJurisdiction ? env.jReplicas?.get(env.activeJurisdiction) : undefined);
   const candidates = preferred
     ? [preferred, ...Array.from(env.jReplicas?.values?.() || [])]
@@ -37,7 +38,7 @@ export function getRuntimeJurisdictionDefaultDisputeDelayBlocks(
 
 export function requireRuntimeJurisdictionBlockTimeMs(env: Env, jurisdictionName?: string): number {
   const preferred =
-    (jurisdictionName && env.jReplicas?.get(jurisdictionName)) ||
+    getJReplicaByJurisdictionRef(env, jurisdictionName) ||
     (env.activeJurisdiction ? env.jReplicas?.get(env.activeJurisdiction) : undefined);
   const raw = Number(preferred?.blockTimeMs ?? NaN);
   if (Number.isFinite(raw) && raw > 0) return Math.floor(raw);

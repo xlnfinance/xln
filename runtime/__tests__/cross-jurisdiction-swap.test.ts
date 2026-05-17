@@ -8,13 +8,11 @@ import { applyEntityInput } from '../entity-consensus';
 import {
   createEmptyEnv,
   submitCrossJurisdictionSwap,
-  submitCrossJurisdictionSourceLock,
-  submitCrossJurisdictionSwapClaims,
-  submitCrossJurisdictionTargetLock,
 } from '../runtime';
+import { hashHtlcSecret } from '../htlc-utils';
+import { getJurisdictionStackId } from '../jurisdiction-runtime';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { generateLazyEntityId } from '../entity-factory';
-import { hashHtlcSecret } from '../htlc-utils';
 import type { AccountMachine, ConsensusConfig, EntityReplica, EntityState, Env, JurisdictionConfig } from '../types';
 import { createDefaultDelta } from '../validation-utils';
 import { cloneEntityState } from '../state-helpers';
@@ -25,6 +23,7 @@ import {
   buildPreparedCrossJurisdictionRoute,
   deriveCrossJurisdictionPrivateSeed,
   deriveCrossJurisdictionRouteHash,
+  isCrossJurisdictionRouteTransitionAllowed,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../cross-jurisdiction';
 import { verifyHashLadderBinary } from '../hashladder';
@@ -43,6 +42,8 @@ const makeJurisdiction = (name: string, chainId: number, depByte: string, epByte
   depositoryAddress: addr(depByte),
   entityProviderAddress: addr(epByte),
 });
+
+const jref = (jurisdiction: JurisdictionConfig): string => getJurisdictionStackId(jurisdiction);
 
 const makeConfig = (signerId: string, jurisdiction: JurisdictionConfig): ConsensusConfig => ({
   mode: 'proposer-based',
@@ -133,6 +134,20 @@ const addReplica = (env: Env, state: EntityState, signerId: string, isProposer =
     mempool: [],
     isProposer,
   } as EntityReplica);
+};
+
+const installJurisdictions = (env: Env, ...jurisdictions: JurisdictionConfig[]): void => {
+  for (const jurisdiction of jurisdictions) {
+    env.jReplicas.set(jurisdiction.name, {
+      name: jurisdiction.name,
+      chainId: jurisdiction.chainId,
+      rpcs: [jurisdiction.address],
+      depositoryAddress: jurisdiction.depositoryAddress,
+      entityProviderAddress: jurisdiction.entityProviderAddress,
+      blockTimeMs: jurisdiction.blockTimeMs,
+      defaultDisputeDelayBlocks: 5,
+    } as any);
+  }
 };
 
 describe('cross-jurisdiction hashledger swap', () => {
@@ -228,8 +243,8 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(result.hashlock).toBeUndefined();
     expect(result.secret).toBeUndefined();
     expect(result.route.routeHash).toMatch(/^0x[0-9a-f]{64}$/);
-    expect(result.route.source.jurisdiction).toBe('Ethereum');
-    expect(result.route.target.jurisdiction).toBe('Base');
+    expect(result.route.source.jurisdiction).toBe(jref(eth));
+    expect(result.route.target.jurisdiction).toBe(jref(base));
     expect(queued).toHaveLength(1);
     expect(queued[0]?.entityId).toBe(sourceUser);
     expect(queued[0]?.entityTxs?.[0]?.type).toBe('requestCrossJurisdictionSwap');
@@ -254,12 +269,11 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(preparedRoute.sourcePull.fullHash).toBe(preparedRoute.targetPull.fullHash);
     expect(preparedRoute.sourcePull.partialRoot).toBe(preparedRoute.targetPull.partialRoot);
     expect('hashLadderPrivateSeed' in preparedRoute).toBe(false);
-    expect(env.crossJurisdictionPrivateSeeds?.has(preparedRoute.routeHash.toLowerCase())).toBe(true);
 	    expect(preparedRoute.targetPull.revealedUntilTimestamp - preparedRoute.sourcePull.revealedUntilTimestamp)
 	      .toBeGreaterThanOrEqual(5_000 + CROSS_J_TARGET_REVEAL_SAFETY_MS);
 	  });
 
-  test('request canonicalizes route jurisdiction labels from bound entity config before hashing', async () => {
+  test('request rejects route jurisdiction labels that are not bound to the local entity', async () => {
     const env = createEmptyEnv('cross-route-jurisdiction-canonical');
     env.timestamp = 10_000;
     env.quietRuntimeLogs = true;
@@ -292,11 +306,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       data: { route: staleRoute },
     });
 
-    const preparedRoute = (result.outputs?.[0]?.entityTxs?.[0]?.data as any)?.route;
-    expect(preparedRoute.source.jurisdiction).toBe(actualSourceJurisdiction.name);
-    expect(preparedRoute.target.jurisdiction).toBe(targetJurisdiction.name);
-    expect(preparedRoute.routeHash).toBe(deriveCrossJurisdictionRouteHash(preparedRoute));
-    expect(preparedRoute.routeHash).not.toBe(staleRoute.routeHash);
+    expect(result.outputs).toHaveLength(0);
+    expect(result.newState.messages.at(-1)).toContain('route jurisdiction must be stack ref');
   });
 
   test('prepared cross-j route keeps immutable routeHash through alias-named source commit and clear', async () => {
@@ -329,8 +340,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       orderId: 'cross-prepared-routehash-immutable',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
-      source: { jurisdiction: sourceUserAliasJurisdiction.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 2, amount: 1_000n },
-      target: { jurisdiction: targetJurisdiction.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      source: { jurisdiction: jref(sourceUserAliasJurisdiction), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 2, amount: 1_000n },
+      target: { jurisdiction: jref(targetJurisdiction), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
       status: 'intent',
       createdAt: env.timestamp,
       updatedAt: env.timestamp,
@@ -342,12 +353,11 @@ describe('cross-jurisdiction hashledger swap', () => {
       data: { route: staleIntent },
     });
     const preparedRoute = (preparedResult.outputs.find(output => output.entityId === sourceUser)?.entityTxs?.[0]?.data as any)?.route;
-    expect(preparedRoute.source.jurisdiction).toBe(sourceHubJurisdiction.name);
-    expect(preparedRoute.routeHash).not.toBe(staleIntent.routeHash);
+    expect(preparedRoute.source.jurisdiction).toBe(jref(sourceUserAliasJurisdiction));
+    expect(preparedRoute.routeHash).toBe(staleIntent.routeHash);
     expect(preparedRoute.sourcePull.fullHash).toBe(preparedRoute.targetPull.fullHash);
 
     sourceUserState.crossJurisdictionSwaps?.set(staleIntent.orderId, staleIntent);
-    env.jReplicas.delete(sourceHubJurisdiction.name);
     const commitResult = await applyEntityTx(env, sourceUserState, {
       type: 'commitCrossJurisdictionSwap',
       data: { route: preparedRoute },
@@ -356,7 +366,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       .flatMap(output => output.entityTxs ?? [])
       .find(tx => tx.type === 'placeSwapOffer') as any;
     expect(placeSwapOfferTx?.data.crossJurisdiction.routeHash).toBe(preparedRoute.routeHash);
-    expect(placeSwapOfferTx?.data.crossJurisdiction.source.jurisdiction).toBe(sourceHubJurisdiction.name);
+    expect(placeSwapOfferTx?.data.crossJurisdiction.source.jurisdiction).toBe(jref(sourceUserAliasJurisdiction));
     expect(placeSwapOfferTx?.data.crossJurisdiction.sourcePull.fullHash).toBe(preparedRoute.sourcePull.fullHash);
 
     const clearingHubState = preparedResult.newState;
@@ -399,6 +409,11 @@ describe('cross-jurisdiction hashledger swap', () => {
     }, resolveTx.data.binary)).not.toThrow();
   });
 
+  test('cross-j clear request can advance directly to source claimed after committed pull resolve', () => {
+    expect(isCrossJurisdictionRouteTransitionAllowed('clear_requested', 'source_claimed')).toBe(true);
+    expect(isCrossJurisdictionRouteTransitionAllowed('clear_requested', 'settled')).toBe(false);
+  });
+
   test('cross-j private seed stays out of route clones and storage projection', () => {
     const eth = makeJurisdiction('Ethereum', 1, '11', '12');
     const base = makeJurisdiction('Base', 8453, '21', '22');
@@ -411,8 +426,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       orderId: 'cross-private-seed-public-shape',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
-      source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
-      target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
       status: 'resting',
       createdAt: 1_000,
       updatedAt: 1_000,
@@ -500,8 +515,8 @@ describe('cross-jurisdiction hashledger swap', () => {
         orderId: 'cross-public-account-tx',
         makerEntityId: sourceUser,
         hubEntityId: sourceHub,
-        source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
-        target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+        source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+        target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
         status: 'resting',
         createdAt: 1_000,
         updatedAt: 1_000,
@@ -544,8 +559,8 @@ describe('cross-jurisdiction hashledger swap', () => {
         orderId: 'cross-public-created-event',
         makerEntityId: sourceUser,
         hubEntityId: sourceHub,
-        source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000_000_000_000_000_000n },
-        target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 2, amount: 1_000_000_000_000_000_000n },
+        source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000_000_000_000_000_000n },
+        target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 2, amount: 1_000_000_000_000_000_000n },
         status: 'resting',
         createdAt: 1_000,
         updatedAt: 1_000,
@@ -584,8 +599,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       orderId: 'route-hash-test',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
-      source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 100n },
-      target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 2, amount: 90n },
+      source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 100n },
+      target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 2, amount: 90n },
       priceTicks: 2500n,
       status: 'resting',
       createdAt: 1_000,
@@ -603,6 +618,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     existingState.crossJurisdictionSwaps?.set(baseRoute.orderId, { ...baseRoute, status: 'settled' });
     const env = createEmptyEnv('cross-terminal-overwrite');
     env.timestamp = 10_000;
+    installJurisdictions(env, eth, base);
     const result = await applyEntityTx(env, existingState, {
       type: 'registerCrossJurisdictionSwap',
       data: { route: { ...baseRoute, status: 'target_prepared' } },
@@ -624,8 +640,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       orderId: 'cross-register-fsm',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
-      source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 100n },
-      target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 2, amount: 90n },
+      source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 100n },
+      target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 2, amount: 90n },
       priceTicks: 2500n,
       status: 'resting',
       createdAt: 1_000,
@@ -635,7 +651,9 @@ describe('cross-jurisdiction hashledger swap', () => {
 
     const targetState = makeState(targetUser, signer, base, targetHub);
     targetState.crossJurisdictionSwaps?.set(route.orderId, route);
-    const invalidTransition = await applyEntityTx(createEmptyEnv('cross-register-fsm'), targetState, {
+    const transitionEnv = createEmptyEnv('cross-register-fsm');
+    installJurisdictions(transitionEnv, eth, base);
+    const invalidTransition = await applyEntityTx(transitionEnv, targetState, {
       type: 'registerCrossJurisdictionSwap',
       data: { route: { ...route, status: 'settled' } },
     } as any);
@@ -643,7 +661,9 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(invalidTransition.newState.messages.some(message => message.includes('invalid transition resting->settled'))).toBe(true);
 
     const outsiderState = makeState(entity('76'), signer, base, targetHub);
-    const nonParticipant = await applyEntityTx(createEmptyEnv('cross-register-outsider'), outsiderState, {
+    const outsiderEnv = createEmptyEnv('cross-register-outsider');
+    installJurisdictions(outsiderEnv, eth, base);
+    const nonParticipant = await applyEntityTx(outsiderEnv, outsiderState, {
       type: 'registerCrossJurisdictionSwap',
       data: { route: { ...route, status: 'target_prepared' } },
     } as any);
@@ -662,8 +682,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       orderId: 'route-clearing-policy-mutable',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
-      source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 100n },
-      target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 2, amount: 90n },
+      source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 100n },
+      target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 2, amount: 90n },
       priceTicks: 2500n,
       status: 'resting',
       createdAt: 1_000,
@@ -694,8 +714,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       orderId: 'cross-partial-delayed',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
-      source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
-      target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
       status: 'resting',
       createdAt: 1_000,
       updatedAt: 1_000,
@@ -766,8 +786,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       orderId: 'cross-source-savings',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
-      source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
-      target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
       priceImprovementMode: 'source_savings',
       status: 'resting',
       createdAt: 1_000,
@@ -873,8 +893,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       orderId: 'cross-clear-delayed',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
-      source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
-      target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
       status: 'resting',
       createdAt: env.timestamp,
       updatedAt: env.timestamp,
@@ -932,8 +952,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       orderId: 'cross-target-resolve-guard',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
-      source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
-      target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
       status: 'resting',
       createdAt: env.timestamp,
       updatedAt: env.timestamp,
@@ -966,60 +986,6 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('clearing');
   });
 
-  test('legacy HTLC cross-j API remains available alongside hash-ledger flow', async () => {
-    const env = createEmptyEnv('cross-legacy-available');
-    env.scenarioMode = true;
-    env.timestamp = 10_000;
-    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
-    const base = makeJurisdiction('Base', 8453, '21', '22');
-    const sourceUser = entity('91');
-    const sourceHub = entity('92');
-    const targetHub = entity('93');
-    const targetUser = entity('94');
-    const sourceUserSigner = addr('91');
-    const sourceHubSigner = addr('92');
-    const targetHubSigner = addr('93');
-    const targetUserSigner = addr('94');
-    addReplica(env, makeState(sourceUser, sourceUserSigner, eth, sourceHub), sourceUserSigner);
-    addReplica(env, makeState(sourceHub, sourceHubSigner, eth, sourceUser), sourceHubSigner);
-    addReplica(env, makeState(targetHub, targetHubSigner, base, targetUser), targetHubSigner);
-    addReplica(env, makeState(targetUser, targetUserSigner, base, targetHub), targetUserSigner);
-    const revealedSecret = secret('95');
-    const route = buildPreparedCrossJurisdictionRoute({
-      orderId: 'cross-legacy-available',
-      makerEntityId: sourceUser,
-      hubEntityId: sourceHub,
-      source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 100n, lockId: `0x${'81'.repeat(32)}` },
-      target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 90n, lockId: `0x${'82'.repeat(32)}` },
-      hashlock: hashHtlcSecret(revealedSecret),
-      status: 'resting',
-      createdAt: 1,
-      updatedAt: 1,
-      expiresAt: 70_000,
-    }, { runtimeSeed: 'cross-legacy-available-seed', sourceDisputeDelayMs: 5_000, now: 1 });
-
-    await submitCrossJurisdictionSourceLock(env, { route, sourceUserSignerId: sourceUserSigner });
-    await submitCrossJurisdictionTargetLock(env, { route, targetHubSignerId: targetHubSigner });
-    await submitCrossJurisdictionSwapClaims(env, {
-      route,
-      secret: revealedSecret,
-      sourceHubSignerId: sourceHubSigner,
-      targetUserSignerId: targetUserSigner,
-    });
-
-    const queued = env.runtimeMempool?.entityInputs ?? [];
-    expect(queued.map(input => input.entityTxs?.[0]?.type)).toEqual([
-      'hashlockPayment',
-      'hashlockPayment',
-      'resolveHtlcLock',
-      'resolveHtlcLock',
-    ]);
-    expect(queued[0]?.entityId).toBe(sourceUser);
-    expect(queued[1]?.entityId).toBe(targetHub);
-    expect(queued[2]?.entityId).toBe(sourceHub);
-    expect(queued[3]?.entityId).toBe(targetUser);
-  });
-
   test('clear request closes live cross-j offer before revealing pull', async () => {
     const env = createEmptyEnv('cross-clear-closes-offer-first');
     env.timestamp = 10_000;
@@ -1035,8 +1001,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       orderId: 'cross-clear-offer-first',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
-      source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
-      target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
       status: 'resting',
       createdAt: env.timestamp,
       updatedAt: env.timestamp,
@@ -1117,8 +1083,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       orderId: 'cross-cancel-no-swap-resolve',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
-      source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
-      target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
       status: 'resting',
       createdAt: 1_000,
       updatedAt: 1_000,
@@ -1165,8 +1131,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       orderId: 'cross-cancel-no-orderbook-ext',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
-      source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
-      target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
       status: 'resting',
       createdAt: env.timestamp,
       updatedAt: env.timestamp,
@@ -1216,8 +1182,8 @@ describe('cross-jurisdiction hashledger swap', () => {
       orderId: 'cross-fill-invalid-target',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
-      source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
-      target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
       status: 'resting',
       createdAt: env.timestamp,
       updatedAt: env.timestamp,
@@ -1261,8 +1227,8 @@ describe('cross-jurisdiction hashledger swap', () => {
         orderId: 'cross-fill-delayed-commit',
         makerEntityId: sourceUser,
         hubEntityId: sourceHub,
-        source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
-        target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+        source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+        target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
         status: 'resting',
         createdAt: env.timestamp,
         updatedAt: env.timestamp,
@@ -1310,8 +1276,8 @@ describe('cross-jurisdiction hashledger swap', () => {
         orderId: 'cross-sweep-expired',
         makerEntityId: sourceUser,
         hubEntityId: sourceHub,
-        source: { jurisdiction: eth.name, entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
-        target: { jurisdiction: base.name, entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+        source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+        target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
         status: 'resting',
         createdAt: 1_000,
         updatedAt: 1_000,
@@ -1505,14 +1471,14 @@ describe('cross-jurisdiction hashledger swap', () => {
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
       source: {
-        jurisdiction: eth.name,
+        jurisdiction: jref(eth),
         entityId: sourceUser,
         counterpartyEntityId: sourceHub,
         tokenId: 1,
         amount: 100n,
       },
       target: {
-        jurisdiction: base.name,
+        jurisdiction: jref(base),
         entityId: targetHub,
         counterpartyEntityId: targetUser,
         tokenId: 1,
@@ -1581,14 +1547,14 @@ describe('cross-jurisdiction hashledger swap', () => {
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
       source: {
-        jurisdiction: eth.name,
+        jurisdiction: jref(eth),
         entityId: sourceUser,
         counterpartyEntityId: sourceHub,
         tokenId: 1,
         amount: 100n,
       },
       target: {
-        jurisdiction: base.name,
+        jurisdiction: jref(base),
         entityId: targetHub,
         counterpartyEntityId: targetUser,
         tokenId: 1,
@@ -1647,14 +1613,14 @@ describe('cross-jurisdiction hashledger swap', () => {
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
       source: {
-        jurisdiction: eth.name,
+        jurisdiction: jref(eth),
         entityId: sourceUser,
         counterpartyEntityId: sourceHub,
         tokenId: 1,
         amount: 100n,
       },
       target: {
-        jurisdiction: base.name,
+        jurisdiction: jref(base),
         entityId: targetHub,
         counterpartyEntityId: targetUser,
         tokenId: 1,
@@ -1692,5 +1658,13 @@ describe('cross-jurisdiction hashledger swap', () => {
     const sourceOutput = result.outputs.find(output => output.entityId === sourceUser);
     expect(sourceOutput?.entityTxs?.map(tx => tx.type)).toEqual(['disputeStart', 'j_broadcast']);
     expect((sourceOutput?.entityTxs?.[0]?.data as any).counterpartyEntityId).toBe(sourceHub);
+  });
+
+  test('production cross-j API exposes only hashledger orderbook flow', async () => {
+    const runtime = await import('../runtime');
+    expect(typeof runtime.submitCrossJurisdictionSwap).toBe('function');
+    expect('submitCrossJurisdictionSourceLock' in runtime).toBe(false);
+    expect('submitCrossJurisdictionTargetLock' in runtime).toBe(false);
+    expect('submitCrossJurisdictionSwapClaims' in runtime).toBe(false);
   });
 });

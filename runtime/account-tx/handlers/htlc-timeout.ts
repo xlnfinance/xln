@@ -10,14 +10,14 @@
 
 import type { AccountMachine } from '../../types';
 
-type LegacyHtlcTimeoutTx = {
+type HtlcTimeoutTx = {
   type: 'htlc_timeout';
   data: { lockId: string };
 };
 
 export async function handleHtlcTimeout(
   accountMachine: AccountMachine,
-  accountTx: LegacyHtlcTimeoutTx,
+  accountTx: HtlcTimeoutTx,
   currentHeight: number,
   currentTimestamp: number
 ): Promise<{ success: boolean; events: string[]; error?: string; timedOutHashlock?: string }> {

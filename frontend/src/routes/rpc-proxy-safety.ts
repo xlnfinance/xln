@@ -25,9 +25,17 @@ const FORBIDDEN_RPC_PREFIXES = [
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null;
 
-export function isLocalProxyRequest(requestUrl: string): boolean {
+const LOOPBACK_CLIENTS = new Set(['localhost', '127.0.0.1', '::1', '::ffff:127.0.0.1']);
+
+const normalizeClientAddress = (value: string | undefined): string =>
+  String(value || '').trim().replace(/^\[(.*)\]$/, '$1').toLowerCase();
+
+export function isLocalProxyRequest(requestUrl: string, clientAddress?: string): boolean {
   const hostname = new URL(requestUrl).hostname;
-  return process.env['NODE_ENV'] !== 'production' && LOCAL_HOSTNAMES.has(hostname);
+  if (process.env['NODE_ENV'] === 'production') return false;
+  if (!LOCAL_HOSTNAMES.has(hostname)) return false;
+  if (process.env['XLN_ALLOW_LOCAL_RPC_PROXY'] === '1') return true;
+  return LOOPBACK_CLIENTS.has(normalizeClientAddress(clientAddress));
 }
 
 export function findForbiddenRpcProxyMethod(bodyText: string): string | null {

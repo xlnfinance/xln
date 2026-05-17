@@ -56,6 +56,7 @@ import { buildDefaultEntitySwapPairs, getSwapPairPolicyByBaseQuote } from '../ac
 import { LIMITS, SWAP as SWAP_CONSTANTS } from '../constants';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
 import { deriveCanonicalCrossJurisdictionMarketForLegs } from '../cross-jurisdiction';
+import { getJurisdictionStackId } from '../jurisdiction-stack';
 import { startParentLivenessWatch } from './parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 
@@ -98,6 +99,8 @@ type HubProfile = {
   signerId?: string;
   jurisdictionName?: string;
   chainId?: number;
+  depositoryAddress?: string;
+  jurisdictionRef?: string;
 };
 
 type MarketMakerOfferSpec = {
@@ -117,6 +120,8 @@ type MarketMakerEntityContext = {
   signerId: string;
   jurisdictionName: string;
   chainId: number;
+  depositoryAddress?: string;
+  jurisdictionRef: string;
 };
 
 type MarketMakerHealth = {
@@ -400,6 +405,11 @@ const createMarketMakerEntityContext = async (
     signerId,
     jurisdictionName: jurisdiction.name,
     chainId: Number(jurisdiction.chainId || 0),
+    depositoryAddress: jurisdiction.contracts.depository,
+    jurisdictionRef: getJurisdictionStackId({
+      chainId: jurisdiction.chainId,
+      depositoryAddress: jurisdiction.contracts.depository,
+    }),
   };
 };
 
@@ -477,6 +487,11 @@ const readVisibleHubProfiles = (env: Env, includeSiblings = false): HubProfile[]
       signerId: readHubSignerId(profile),
       jurisdictionName: String(profile.metadata?.jurisdiction?.name || '').trim(),
       chainId: Number(profile.metadata?.jurisdiction?.chainId || 0),
+      depositoryAddress: String(profile.metadata?.jurisdiction?.depositoryAddress || '').trim(),
+      jurisdictionRef: getJurisdictionStackId({
+        chainId: Number(profile.metadata?.jurisdiction?.chainId || 0),
+        depositoryAddress: String(profile.metadata?.jurisdiction?.depositoryAddress || '').trim(),
+      }),
     }))
     .sort((left, right) =>
       compareStableText(hubBaseName(left.name), hubBaseName(right.name)) ||
@@ -671,9 +686,10 @@ const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: number[]):
 };
 
 const sameJurisdiction = (
-  left: Pick<MarketMakerEntityContext | HubProfile, 'jurisdictionName' | 'chainId'>,
-  right: Pick<MarketMakerEntityContext | HubProfile, 'jurisdictionName' | 'chainId'>,
+  left: Pick<MarketMakerEntityContext | HubProfile, 'jurisdictionName' | 'chainId' | 'jurisdictionRef'>,
+  right: Pick<MarketMakerEntityContext | HubProfile, 'jurisdictionName' | 'chainId' | 'jurisdictionRef'>,
 ): boolean => {
+  if (left.jurisdictionRef && right.jurisdictionRef) return left.jurisdictionRef === right.jurisdictionRef;
   const leftName = String(left.jurisdictionName || '').trim().toLowerCase();
   const rightName = String(right.jurisdictionName || '').trim().toLowerCase();
   if (leftName && rightName) return leftName === rightName;
@@ -691,6 +707,9 @@ const buildMarketMakerCrossOfferSpecs = (
   tokenIds: number[],
 ): MarketMakerOfferSpec[] => {
   if (sourceContext.entityId === targetContext.entityId || sameJurisdiction(sourceContext, targetContext)) return [];
+  const sourceJurisdictionRef = sourceContext.jurisdictionRef;
+  const targetJurisdictionRef = targetContext.jurisdictionRef;
+  if (!sourceJurisdictionRef || !targetJurisdictionRef) return [];
   const specs: MarketMakerOfferSpec[] = [];
   const defaultPairs = buildDefaultEntitySwapPairs(tokenIds);
   const targetByBaseName = new Map(targetHubs.map(hub => [hubBaseName(hub.name), hub] as const));
@@ -734,10 +753,10 @@ const buildMarketMakerCrossOfferSpecs = (
         };
 
         const askAmounts = fitCrossAmountsToOrderbook(
-          sourceContext.jurisdictionName,
+          sourceJurisdictionRef,
           pair.baseTokenId,
           baseSize,
-          targetContext.jurisdictionName,
+          targetJurisdictionRef,
           pair.quoteTokenId,
           askWantAmount,
           askPriceTicks,
@@ -746,7 +765,12 @@ const buildMarketMakerCrossOfferSpecs = (
           const offerId = `mmx-${sourceHubSuffix}-${targetHubSuffix}-${pair.baseTokenId}-${pair.quoteTokenId}-ask-${levelId}`;
           specs.push({
             offerId,
-            pairId: `cross:${sourceContext.chainId}:${pair.baseTokenId}/${targetContext.chainId}:${pair.quoteTokenId}`,
+            pairId: deriveCanonicalCrossJurisdictionMarketForLegs(
+              sourceJurisdictionRef,
+              pair.baseTokenId,
+              targetJurisdictionRef,
+              pair.quoteTokenId,
+            ).venueId,
             hubEntityId: sourceHub.entityId,
             giveTokenId: pair.baseTokenId,
             giveAmount: askAmounts.sourceAmount,
@@ -758,14 +782,14 @@ const buildMarketMakerCrossOfferSpecs = (
               orderId: offerId,
               priceTicks: askPriceTicks,
               source: {
-                jurisdiction: sourceContext.jurisdictionName,
+                jurisdiction: sourceJurisdictionRef,
                 entityId: sourceContext.entityId,
                 counterpartyEntityId: sourceHub.entityId,
                 tokenId: pair.baseTokenId,
                 amount: askAmounts.sourceAmount,
               },
               target: {
-                jurisdiction: targetContext.jurisdictionName,
+                jurisdiction: targetJurisdictionRef,
                 entityId: targetHub.entityId,
                 counterpartyEntityId: targetContext.entityId,
                 tokenId: pair.quoteTokenId,
@@ -776,10 +800,10 @@ const buildMarketMakerCrossOfferSpecs = (
         }
 
         const bidAmounts = fitCrossAmountsToOrderbook(
-          sourceContext.jurisdictionName,
+          sourceJurisdictionRef,
           pair.quoteTokenId,
           bidGiveAmount,
-          targetContext.jurisdictionName,
+          targetJurisdictionRef,
           pair.baseTokenId,
           baseSize,
           bidPriceTicks,
@@ -788,7 +812,12 @@ const buildMarketMakerCrossOfferSpecs = (
           const offerId = `mmx-${sourceHubSuffix}-${targetHubSuffix}-${pair.baseTokenId}-${pair.quoteTokenId}-bid-${levelId}`;
           specs.push({
             offerId,
-            pairId: `cross:${sourceContext.chainId}:${pair.quoteTokenId}/${targetContext.chainId}:${pair.baseTokenId}`,
+            pairId: deriveCanonicalCrossJurisdictionMarketForLegs(
+              sourceJurisdictionRef,
+              pair.quoteTokenId,
+              targetJurisdictionRef,
+              pair.baseTokenId,
+            ).venueId,
             hubEntityId: sourceHub.entityId,
             giveTokenId: pair.quoteTokenId,
             giveAmount: bidAmounts.sourceAmount,
@@ -800,14 +829,14 @@ const buildMarketMakerCrossOfferSpecs = (
               orderId: offerId,
               priceTicks: bidPriceTicks,
               source: {
-                jurisdiction: sourceContext.jurisdictionName,
+                jurisdiction: sourceJurisdictionRef,
                 entityId: sourceContext.entityId,
                 counterpartyEntityId: sourceHub.entityId,
                 tokenId: pair.quoteTokenId,
                 amount: bidAmounts.sourceAmount,
               },
               target: {
-                jurisdiction: targetContext.jurisdictionName,
+                jurisdiction: targetJurisdictionRef,
                 entityId: targetHub.entityId,
                 counterpartyEntityId: targetContext.entityId,
                 tokenId: pair.baseTokenId,
