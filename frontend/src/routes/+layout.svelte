@@ -56,7 +56,7 @@
 				version?: unknown;
 			};
 			const version = String(payload?.deployVersion || payload?.networkVersion || payload?.version || '').trim();
-			deployLabel = version;
+			deployLabel = /^\d{10,}$/.test(version) ? '' : version;
 		} catch {
 			deployLabel = '';
 		}
@@ -76,7 +76,7 @@
 {/if}
 
 <Toast />
-{#if deployLabel}
+{#if deployLabel && chromeMode === 'site' && !isEmbed}
 	<div class="build-badge">{deployLabel}</div>
 {/if}
 

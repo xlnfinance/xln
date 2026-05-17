@@ -15,7 +15,9 @@
   import {
     normalizeEntityId,
     requireSignerIdForEntity,
-    getConnectedCounterpartyIds,
+    getCounterpartyAccount,
+    isCommittedAccount,
+    isOpeningAccount,
   } from '$lib/utils/entityReplica';
   import { compareStableText } from '$lib/utils/stableSort';
   import { RefreshCw, ChevronDown, ChevronUp, Plus, Check, AlertTriangle } from 'lucide-svelte';
@@ -103,13 +105,22 @@
     }>;
   };
 
-  $: connectedHubIds = getConnectedCounterpartyIds(env, entityId);
+  function isHubConnected(currentEnv: Env, ownerEntityId: string, hubId: string): boolean {
+    const entry = getCounterpartyAccount(currentEnv, ownerEntityId, hubId);
+    return isCommittedAccount(entry?.account);
+  }
+
+  function isHubOpening(currentEnv: Env, ownerEntityId: string, hubId: string): boolean {
+    const entry = getCounterpartyAccount(currentEnv, ownerEntityId, hubId);
+    return isOpeningAccount(entry?.account);
+  }
 
   // Sorted hubs (with live connection status from current account state)
   $: sortedHubs = hubs
     .map((hub) => ({
       ...hub,
-      isConnected: connectedHubIds.has(normalizeEntityId(hub.entityId)),
+      isConnected: isHubConnected(env, entityId, hub.entityId),
+      isOpening: isHubOpening(env, entityId, hub.entityId),
     }))
     .sort((a, b) => compareStableText(a.name, b.name));
 
@@ -386,6 +397,8 @@
             <div class="hub-actions">
               {#if hub.isConnected}
                 <span class="connection-state"><Check size={12} /> Open</span>
+              {:else if hub.isOpening || connectingHubIds.has(normalizeEntityId(hub.entityId))}
+                <span class="connection-state opening"><span class="opening-icon"><RefreshCw size={12} /></span> Opening</span>
               {:else if entityId}
                 <button
                   class="btn-connect"
@@ -696,6 +709,17 @@
     align-items: center;
     gap: 4px;
     font-weight: 700;
+  }
+
+  .connection-state.opening {
+    border-color: color-mix(in srgb, var(--hub-accent) 22%, transparent);
+    color: color-mix(in srgb, var(--hub-accent) 72%, white 28%);
+    background: color-mix(in srgb, var(--hub-accent) 10%, transparent);
+  }
+
+  .opening-icon {
+    display: inline-flex;
+    animation: spin 1s linear infinite;
   }
 
   .hub-subline {

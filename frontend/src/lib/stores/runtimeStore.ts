@@ -1,5 +1,6 @@
 import { writable, derived, get } from 'svelte/store';
 import type { Env } from '@xln/runtime/xln-api';
+import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
 
 export interface Runtime {
   id: string;                    // Runtime identifier (EOA for local runtimes)
@@ -35,8 +36,24 @@ export const activeEnv = derived(
 );
 
 const getEnvRuntimeId = (env: Env | null | undefined): string => {
-  const runtimeId = typeof env?.runtimeId === 'string' ? env.runtimeId.trim() : '';
+  const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
+  const runtimeId = typeof runtimeEnv?.runtimeId === 'string' ? runtimeEnv.runtimeId.trim() : '';
   return runtimeId.toLowerCase();
+};
+
+const publishRuntimeEnvView = (env: Env): Env => {
+  const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
+  return createRuntimeViewEnv(runtimeEnv);
+};
+
+const setRuntimeEntry = (
+  current: Map<string, Runtime>,
+  id: string,
+  next: Runtime,
+): Map<string, Runtime> => {
+  const updated = new Map(current);
+  updated.set(id, next);
+  return updated;
 };
 
 // Operations
@@ -50,17 +67,14 @@ export const runtimeOperations = {
     const { getXLN } = await import('./xlnStore');
     const xln = await getXLN();
 
-    runtimes.update(r => {
-      r.set(id, {
+    runtimes.update(r => setRuntimeEntry(r, id, {
         id,
         type: 'local',
         label,
-        env: xln.createEmptyEnv(),
+        env: publishRuntimeEnvView(xln.createEmptyEnv()),
         permissions: 'write',
         status: 'connected'
-      });
-      return r;
-    });
+      }));
 
     return id;
   },
@@ -78,12 +92,13 @@ export const runtimeOperations = {
       if (msg.type === 'state_update') {
         runtimes.update(r => {
           const runtime = r.get(uri);
-          if (runtime) {
-            runtime.env = msg.env;
-            runtime.lastSynced = Date.now();
-            runtime.status = 'connected';
-          }
-          return r;
+          if (!runtime) return r;
+          return setRuntimeEntry(r, uri, {
+            ...runtime,
+            env: publishRuntimeEnvView(msg.env),
+            lastSynced: Date.now(),
+            status: 'connected',
+          });
         });
       }
     };
@@ -92,25 +107,20 @@ export const runtimeOperations = {
       console.error('WebSocket error:', err);
       runtimes.update(r => {
         const runtime = r.get(uri);
-        if (runtime) {
-          runtime.status = 'error';
-        }
-        return r;
+        if (!runtime) return r;
+        return setRuntimeEntry(r, uri, { ...runtime, status: 'error' });
       });
     };
 
     ws.onclose = () => {
       runtimes.update(r => {
         const runtime = r.get(uri);
-        if (runtime) {
-          runtime.status = 'disconnected';
-        }
-        return r;
+        if (!runtime) return r;
+        return setRuntimeEntry(r, uri, { ...runtime, status: 'disconnected' });
       });
     };
 
-    runtimes.update(r => {
-      r.set(uri, {
+    runtimes.update(r => setRuntimeEntry(r, uri, {
         id: uri,
         type: 'remote',
         label: uri,
@@ -119,9 +129,7 @@ export const runtimeOperations = {
         apiKey,
         permissions: 'read', // Default to read-only
         status: 'syncing'
-      });
-      return r;
-    });
+      }));
   },
 
   // Switch active runtime
@@ -136,8 +144,9 @@ export const runtimeOperations = {
       if (runtime?.connection) {
         runtime.connection.close();
       }
-      r.delete(id);
-      return r;
+      const updated = new Map(r);
+      updated.delete(id);
+      return updated;
     });
 
     // If we just deleted the active runtime, clear selection.
@@ -157,14 +166,23 @@ export const runtimeOperations = {
   },
 
   // Update active runtime env.
+  createRuntimeEnvView(env: Env) {
+    return publishRuntimeEnvView(env);
+  },
+
+  // Update active runtime env.
   updateLocalEnv(env: Env) {
+    const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
+    const viewEnv = publishRuntimeEnvView(runtimeEnv);
     runtimes.update(r => {
-      const envRuntimeId = getEnvRuntimeId(env);
+      const envRuntimeId = getEnvRuntimeId(runtimeEnv);
       if (envRuntimeId && r.has(envRuntimeId)) {
         const runtime = r.get(envRuntimeId)!;
-        runtime.env = env;
-        runtime.lastSynced = Date.now();
-        return r;
+        return setRuntimeEntry(r, envRuntimeId, {
+          ...runtime,
+          env: viewEnv,
+          lastSynced: Date.now(),
+        });
       }
 
       const activeId = String(get(activeRuntimeId) || '').toLowerCase();
@@ -172,8 +190,11 @@ export const runtimeOperations = {
         const runtime = r.get(activeId)!;
         const activeEnvRuntimeId = getEnvRuntimeId(runtime.env);
         if (!activeEnvRuntimeId || (envRuntimeId && activeEnvRuntimeId === envRuntimeId)) {
-          runtime.env = env;
-          runtime.lastSynced = Date.now();
+          return setRuntimeEntry(r, activeId, {
+            ...runtime,
+            env: viewEnv,
+            lastSynced: Date.now(),
+          });
         } else {
           console.error(
             `[runtimeStore] Refusing cross-runtime env overwrite: active=${activeId} activeEnv=${activeEnvRuntimeId} incoming=${envRuntimeId}`
@@ -190,9 +211,12 @@ export const runtimeOperations = {
       const activeId = get(activeRuntimeId);
       if (activeId && r.has(activeId)) {
         const runtime = r.get(activeId)!;
-        if (meta.label !== undefined) runtime.label = meta.label;
-        if (meta.seed !== undefined) runtime.seed = meta.seed;
-        if (meta.vaultId !== undefined) runtime.vaultId = meta.vaultId;
+        return setRuntimeEntry(r, activeId, {
+          ...runtime,
+          ...(meta.label !== undefined ? { label: meta.label } : {}),
+          ...(meta.seed !== undefined ? { seed: meta.seed } : {}),
+          ...(meta.vaultId !== undefined ? { vaultId: meta.vaultId } : {}),
+        });
       }
       return r;
     });
@@ -200,13 +224,15 @@ export const runtimeOperations = {
 
   // Update specific runtime's env
   updateRuntimeEnv(runtimeId: string, env: Env) {
+    const viewEnv = publishRuntimeEnvView(env);
     runtimes.update(r => {
       const runtime = r.get(runtimeId);
-      if (runtime) {
-        runtime.env = env;
-        runtime.lastSynced = Date.now();
-      }
-      return r;
+      if (!runtime) return r;
+      return setRuntimeEntry(r, runtimeId, {
+        ...runtime,
+        env: viewEnv,
+        lastSynced: Date.now(),
+      });
     });
   },
 

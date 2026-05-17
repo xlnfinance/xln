@@ -59,6 +59,7 @@ import {
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from './relay-router';
 import { createLocalDeliveryHandler } from './relay-local-delivery';
 import { resolveJurisdictionsJsonPath } from './jurisdictions-path';
+import { computeJurisdictionsNetworkVersion } from './jurisdictions-version';
 import {
   buildMarketSnapshotForReplica,
   type MarketSnapshotPayload,
@@ -1188,10 +1189,7 @@ const updateJurisdictionsJson = async (
       data = {};
     }
     const updatedAt = new Date().toISOString();
-    const networkVersion = String(Date.parse(updatedAt));
     data['version'] = String(data['version'] || '').trim() || '1';
-    data['deployVersion'] = networkVersion;
-    data['networkVersion'] = networkVersion;
     data['lastUpdated'] = updatedAt;
     const defaults = data.defaults ?? {
       timeout: 30000,
@@ -1229,6 +1227,9 @@ const updateJurisdictionsJson = async (
       },
     };
     data.jurisdictions = jurisdictions;
+    const networkVersion = computeJurisdictionsNetworkVersion(data, String(data['version'] || '1'));
+    data['deployVersion'] = networkVersion;
+    data['networkVersion'] = networkVersion;
 
     const payload = JSON.stringify(data, null, 2);
     await fs.writeFile(canonicalPath, payload);
@@ -1260,10 +1261,7 @@ const readCanonicalNetworkVersion = async (): Promise<string> => {
     networkVersion?: unknown;
     lastUpdated?: unknown;
   };
-  const explicit = String(parsed.deployVersion || parsed.networkVersion || '').trim();
-  if (explicit) return explicit;
-  const lastUpdated = Date.parse(String(parsed.lastUpdated || ''));
-  return Number.isFinite(lastUpdated) ? String(lastUpdated) : readCanonicalJurisdictionsVersion();
+  return computeJurisdictionsNetworkVersion(parsed, await readCanonicalJurisdictionsVersion());
 };
 
 const buildRuntimeJurisdictionsJson = async (env?: Env | null): Promise<string | null> => {

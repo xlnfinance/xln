@@ -5,6 +5,7 @@ import { activeRuntimeId, runtimes, runtimeOperations } from './runtimeStore';
 import { toasts } from './toastStore';
 import { resetEverything } from '$lib/utils/resetEverything';
 import { normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
+import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
 import type {
   XLNModule,
   Env,
@@ -169,23 +170,29 @@ export const xlnEnvironment = derived(
 );
 
 export function setXlnEnvironment(env: Env | null): void {
-  bootstrapEnvironment.set(env);
+  const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
+  const viewEnv = runtimeEnv ? createRuntimeViewEnv(runtimeEnv) : null;
+  bootstrapEnvironment.set(viewEnv);
   if (typeof window !== 'undefined') {
-    window.__xln_env = env;
+    window.__xln_env = runtimeEnv;
   }
-  if (!env) return;
+  if (!runtimeEnv || !viewEnv) return;
 
   const selectedRuntimeId = String(get(activeRuntimeId) || '').toLowerCase();
-  const envRuntimeId = String(env.runtimeId || '').toLowerCase();
+  const envRuntimeId = String(runtimeEnv.runtimeId || '').toLowerCase();
   const targetRuntimeId = envRuntimeId || selectedRuntimeId;
   if (!targetRuntimeId) return;
 
   runtimes.update((map) => {
     const runtimeEntry = map.get(targetRuntimeId);
     if (!runtimeEntry) return map;
-    runtimeEntry.env = env;
-    runtimeEntry.lastSynced = Date.now();
-    return map;
+    const updated = new Map(map);
+    updated.set(targetRuntimeId, {
+      ...runtimeEntry,
+      env: viewEnv,
+      lastSynced: Date.now(),
+    });
+    return updated;
   });
 }
 
@@ -619,19 +626,21 @@ const upsertRuntimeSnapshot = (
 ): void => {
   const runtimeId = String(env.runtimeId || '').toLowerCase();
   if (!runtimeId) return;
+  const viewEnv = createRuntimeViewEnv(unwrapLiveRuntimeEnv(env) ?? env);
   runtimes.update((map) => {
-    map.set(runtimeId, {
+    const updated = new Map(map);
+    updated.set(runtimeId, {
       id: runtimeId,
       type: config.mode === 'remote' ? 'remote' : 'local',
       label: config.mode === 'remote' ? `Remote ${config.wsUrl || 'runtime'}` : 'Embedded runtime',
-      env,
+      env: viewEnv,
       ...(config.seed ? { seed: config.seed } : {}),
       ...(config.authKey ? { apiKey: config.authKey } : {}),
       permissions: config.mode === 'remote' && !config.authKey ? 'read' : 'write',
       status: status === 'connected' ? 'connected' : status === 'connecting' ? 'syncing' : status,
       lastSynced: Date.now(),
     });
-    return new Map(map);
+    return updated;
   });
   activeRuntimeId.set(runtimeId);
 };
@@ -971,14 +980,18 @@ export function getEnv(): Env | null {
 }
 
 const routeRuntimeInput = async (xln: XLNModule, env: Env, input: RuntimeInput): Promise<Env> => {
+  const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
   const { runtimeAdapter } = await import('./runtimeAdapterStore');
   const adapter = get(runtimeAdapter);
   if (adapter?.mode === 'remote') {
     await adapter.send(input);
-    return (await refreshRuntimeAdapterEnvironment()) ?? env;
+    return (await refreshRuntimeAdapterEnvironment()) ?? runtimeEnv;
   }
-  xln.enqueueRuntimeInput(env, input);
-  return env;
+  xln.enqueueRuntimeInput(runtimeEnv, input);
+  if (!runtimeEnv.scenarioMode && typeof xln.startRuntimeLoop === 'function') {
+    xln.startRuntimeLoop(runtimeEnv);
+  }
+  return runtimeEnv;
 };
 
 // Enqueue entity inputs into runtime mempool (processed on next tick)

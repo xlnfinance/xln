@@ -3,6 +3,8 @@ import { describe, expect, test } from 'bun:test';
 import { createEmptyEnv, enqueueRuntimeInput, process, submitDebtEnforcement } from '../runtime';
 import { applyEntityTx } from '../entity-tx/apply';
 import { assertSameJurisdictionAccount } from '../jurisdiction-runtime';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
+import { generateLazyEntityId } from '../entity-factory';
 import type { JAdapter } from '../jadapter/types';
 import { canonicalizeProfile, parseProfile } from '../networking/gossip';
 import type { ConsensusConfig, Env, JReplica, JurisdictionConfig } from '../types';
@@ -140,6 +142,50 @@ describe('multi-jurisdiction entity binding', () => {
     });
 
     expect(result.newState.accounts.has(entityB.toLowerCase())).toBe(true);
+  });
+
+  test('openAccount commits the first bilateral frame for local same-jurisdiction entities', async () => {
+    const env = makeEnv('multi-jurisdiction-open-handshake');
+    env.scenarioMode = true;
+    const j1 = makeJurisdiction('J1', 31337, '11', '12');
+    installJurisdiction(env, j1);
+    env.activeJurisdiction = 'J1';
+
+    const seed = `multi-jurisdiction-open-handshake-${Date.now()}`;
+    const signerA = deriveSignerAddressSync(seed, '1');
+    const signerB = deriveSignerAddressSync(seed, '2');
+    registerSignerKey(signerA, deriveSignerKeySync(seed, '1'));
+    registerSignerKey(signerB, deriveSignerKeySync(seed, '2'));
+    const entityA = generateLazyEntityId([signerA], 1n).toLowerCase();
+    const entityB = generateLazyEntityId([signerB], 1n).toLowerCase();
+    await importEntity(env, entityA, signerA, j1);
+    await importEntity(env, entityB, signerB, j1);
+
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [],
+      entityInputs: [{
+        entityId: entityA,
+        signerId: signerA,
+        entityTxs: [{
+          type: 'openAccount',
+          data: { targetEntityId: entityB, tokenId: 1, creditAmount: 1_000n },
+        }],
+      }],
+    });
+
+    for (let i = 0; i < 6; i += 1) {
+      await process(env);
+      const accountA = findState(env, entityA)?.accounts.get(entityB);
+      const accountB = findState(env, entityB)?.accounts.get(entityA);
+      if (Number(accountA?.currentHeight ?? 0) > 0 && Number(accountB?.currentHeight ?? 0) > 0) break;
+    }
+
+    const accountA = findState(env, entityA)?.accounts.get(entityB);
+    const accountB = findState(env, entityB)?.accounts.get(entityA);
+    expect(accountA?.currentHeight).toBe(1);
+    expect(accountB?.currentHeight).toBe(1);
+    expect(accountA?.pendingFrame).toBeUndefined();
+    expect(accountB?.pendingFrame).toBeUndefined();
   });
 
   test('openAccount rejects a local counterparty from another jurisdiction', async () => {

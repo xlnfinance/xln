@@ -11,6 +11,7 @@ import { encodeBoard, hashBoard } from '../entity-factory';
 import { compareStableText, safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
 import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
+import { computeJurisdictionsNetworkVersion } from '../jurisdictions-version';
 import { deriveSignerAddressSync } from '../account-crypto';
 import {
   startCustodySupport,
@@ -916,7 +917,6 @@ const deployRpc2JurisdictionStack = async (): Promise<void> => {
     : {};
   const jurisdictions = current.jurisdictions ?? {};
   const updatedAt = new Date().toISOString();
-  const networkVersion = String(Date.parse(updatedAt));
   jurisdictions['tron'] = {
     ...(jurisdictions['tron'] ?? {}),
     name: 'Tron',
@@ -937,8 +937,6 @@ const deployRpc2JurisdictionStack = async (): Promise<void> => {
   };
   const nextPayload: ShardJurisdictionsFile = {
     version: String(current.version || '').trim() || '3',
-    deployVersion: networkVersion,
-    networkVersion,
     lastUpdated: updatedAt,
     jurisdictions,
     defaults: current.defaults ?? {
@@ -947,6 +945,9 @@ const deployRpc2JurisdictionStack = async (): Promise<void> => {
       gasLimit: 1000000,
     },
   };
+  const networkVersion = computeJurisdictionsNetworkVersion(nextPayload, String(nextPayload.version || '3'));
+  nextPayload.deployVersion = networkVersion;
+  nextPayload.networkVersion = networkVersion;
   writeFileSync(shardJurisdictionsPath, JSON.stringify(nextPayload, null, 2) + '\n', 'utf8');
   console.log(`[MESH] rpc2 jurisdiction ready chainId=${chainId} rpc=${args.rpc2Url} ms=${Date.now() - startedAt}`);
 };
@@ -955,13 +956,9 @@ const toPublicJurisdictionsPayload = (raw: string): string => {
   try {
     const parsed = JSON.parse(raw) as ShardJurisdictionsFile;
     if (!parsed || typeof parsed !== 'object' || !parsed.jurisdictions) return raw;
-    const explicitNetworkVersion = String(parsed.deployVersion || parsed.networkVersion || '').trim();
-    const lastUpdatedMs = Date.parse(String(parsed.lastUpdated || ''));
-    const networkVersion = explicitNetworkVersion || (Number.isFinite(lastUpdatedMs) ? String(lastUpdatedMs) : '');
-    if (networkVersion) {
-      parsed.deployVersion = networkVersion;
-      parsed.networkVersion = networkVersion;
-    }
+    const networkVersion = computeJurisdictionsNetworkVersion(parsed, String(parsed.version || '3'));
+    parsed.deployVersion = networkVersion;
+    parsed.networkVersion = networkVersion;
     for (const [key, jurisdiction] of Object.entries(parsed.jurisdictions)) {
       if (!jurisdiction || typeof jurisdiction !== 'object') continue;
       const fallback = isRpc2Jurisdiction(key, jurisdiction) ? '/rpc2' : '/rpc';
