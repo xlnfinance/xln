@@ -40,22 +40,22 @@ export async function handleMintReserves(
     timestamp: newState.timestamp, // Entity-level timestamp for determinism
   };
 
-  // Route to the entity-bound J-machine when configured. The active
-  // jurisdiction remains only a legacy fallback for old dev/test entities.
   const configuredJurisdictionName = getJurisdictionConfigName(newState.config.jurisdiction);
-  let jurisdictionName = env.activeJurisdiction || 'default';
-  if (configuredJurisdictionName) {
-    try {
-      jurisdictionName = requireRuntimeJurisdictionConfigByName(
-        env,
-        configuredJurisdictionName,
-        newState.config.jurisdiction,
-      ).name;
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      addMessage(newState, `❌ Jurisdiction unavailable for mint: ${message}`);
-      return { newState, outputs, jOutputs: [] };
-    }
+  if (!configuredJurisdictionName) {
+    addMessage(newState, '❌ Jurisdiction unavailable for mint: entity jurisdiction is not configured');
+    return { newState, outputs, jOutputs: [] };
+  }
+  let jurisdictionName = configuredJurisdictionName;
+  try {
+    jurisdictionName = requireRuntimeJurisdictionConfigByName(
+      env,
+      configuredJurisdictionName,
+      newState.config.jurisdiction,
+    ).name;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    addMessage(newState, `❌ Jurisdiction unavailable for mint: ${message}`);
+    return { newState, outputs, jOutputs: [] };
   }
   const jOutputs: JInput[] = [{
     jurisdictionName,

@@ -265,33 +265,40 @@ export function deriveCrossJurisdictionPrivateSeed(
   ].join(':')));
 }
 
-type PrivateSeedCarrier = CrossJurisdictionSwapRoute & { hashLadderPrivateSeed?: string };
-
-const isObjectRecord = (value: unknown): value is Record<string, unknown> =>
-  value !== null && typeof value === 'object';
-
-const isCrossJurisdictionSwapLegLike = (value: unknown): value is CrossJurisdictionSwapLeg =>
-  isObjectRecord(value) &&
-  typeof value['jurisdiction'] === 'string' &&
-  typeof value['entityId'] === 'string' &&
-  typeof value['counterpartyEntityId'] === 'string' &&
-  typeof value['tokenId'] === 'number' &&
-  typeof value['amount'] === 'bigint';
-
-const cloneCrossJurisdictionSwapLeg = (
-  value: unknown,
-  fallback?: unknown,
-): CrossJurisdictionSwapLeg => {
-  const leg = isCrossJurisdictionSwapLegLike(value)
-    ? value
-    : isCrossJurisdictionSwapLegLike(fallback)
-      ? fallback
-      : value;
-  return { ...(isObjectRecord(leg) ? leg : {}) } as unknown as CrossJurisdictionSwapLeg;
+const optionalString = (value: unknown): string | undefined => {
+  const text = String(value ?? '').trim();
+  return text ? text : undefined;
 };
 
-const cloneCrossJurisdictionPullLeg = (value: unknown): CrossJurisdictionPullLeg | undefined =>
-  isObjectRecord(value) ? ({ ...value } as unknown as CrossJurisdictionPullLeg) : undefined;
+const optionalNumber = (value: unknown): number | undefined =>
+  value === undefined || value === null ? undefined : Number(value);
+
+const optionalBigInt = (value: unknown): bigint | undefined =>
+  value === undefined || value === null ? undefined : BigInt(value as bigint | number | string);
+
+const optionalStatus = (value: unknown): CrossJurisdictionSwapStatus | undefined =>
+  typeof value === 'string' ? (value as CrossJurisdictionSwapStatus) : undefined;
+
+const cloneCrossJurisdictionSwapLeg = (value: CrossJurisdictionSwapLeg): CrossJurisdictionSwapLeg => ({
+  jurisdiction: String(value.jurisdiction || ''),
+  entityId: String(value.entityId || ''),
+  counterpartyEntityId: String(value.counterpartyEntityId || ''),
+  tokenId: Number(value.tokenId),
+  amount: BigInt(value.amount),
+});
+
+const cloneCrossJurisdictionPullLeg = (value: CrossJurisdictionPullLeg | undefined): CrossJurisdictionPullLeg | undefined => {
+  if (!value) return undefined;
+  return {
+    pullId: String(value.pullId || ''),
+    tokenId: Number(value.tokenId),
+    amount: BigInt(value.amount),
+    signedAmount: BigInt(value.signedAmount),
+    revealedUntilTimestamp: Number(value.revealedUntilTimestamp),
+    fullHash: String(value.fullHash || ''),
+    partialRoot: String(value.partialRoot || ''),
+  };
+};
 
 export function getCrossJurisdictionPrivateSeed(
   env: Pick<Env, 'runtimeSeed'>,
@@ -300,63 +307,101 @@ export function getCrossJurisdictionPrivateSeed(
   return deriveCrossJurisdictionPrivateSeed(env.runtimeSeed, route);
 }
 
-export function stripCrossJurisdictionPrivateData(route: CrossJurisdictionSwapRoute): CrossJurisdictionSwapRoute {
-  const { hashLadderPrivateSeed: _privateSeed, ...publicRoute } = route as PrivateSeedCarrier;
-  const malformedSourceRoute = isObjectRecord(publicRoute.source)
-    ? (publicRoute.source['crossJurisdiction'] as CrossJurisdictionSwapRoute | undefined)
-    : undefined;
-  const malformedTargetRoute = isObjectRecord(publicRoute.target)
-    ? (publicRoute.target['crossJurisdiction'] as CrossJurisdictionSwapRoute | undefined)
-    : undefined;
-  const fallbackRoute = malformedSourceRoute || malformedTargetRoute;
-  const sourcePull = cloneCrossJurisdictionPullLeg(publicRoute.sourcePull ?? fallbackRoute?.sourcePull);
-  const targetPull = cloneCrossJurisdictionPullLeg(publicRoute.targetPull ?? fallbackRoute?.targetPull);
-  return {
-    ...publicRoute,
-    source: cloneCrossJurisdictionSwapLeg(publicRoute.source, fallbackRoute?.source),
-    target: cloneCrossJurisdictionSwapLeg(publicRoute.target, fallbackRoute?.target),
-    ...(sourcePull ? { sourcePull } : {}),
-    ...(targetPull ? { targetPull } : {}),
+export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): CrossJurisdictionSwapRoute {
+  const clone: CrossJurisdictionSwapRoute = {
+    orderId: String(route.orderId || ''),
+    makerEntityId: String(route.makerEntityId || ''),
+    hubEntityId: String(route.hubEntityId || ''),
+    source: cloneCrossJurisdictionSwapLeg(route.source),
+    target: cloneCrossJurisdictionSwapLeg(route.target),
+    status: optionalStatus(route.status) ?? 'intent',
+    createdAt: Number(route.createdAt || 0),
+    updatedAt: Number(route.updatedAt || 0),
   };
+  const routeHash = optionalString(route.routeHash);
+  const bookOwnerEntityId = optionalString(route.bookOwnerEntityId);
+  const venueId = optionalString(route.venueId);
+  const sourcePull = cloneCrossJurisdictionPullLeg(route.sourcePull);
+  const targetPull = cloneCrossJurisdictionPullLeg(route.targetPull);
+  const priceTicks = optionalBigInt(route.priceTicks);
+  const fillSeq = optionalNumber(route.fillSeq);
+  const cumulativeFillRatio = optionalNumber(route.cumulativeFillRatio);
+  const filledSourceAmount = optionalBigInt(route.filledSourceAmount);
+  const filledTargetAmount = optionalBigInt(route.filledTargetAmount);
+  const priceImprovementSourceAmount = optionalBigInt(route.priceImprovementSourceAmount);
+  const priceImprovementTargetAmount = optionalBigInt(route.priceImprovementTargetAmount);
+  const pendingClearRequestedAt = optionalNumber(route.pendingClearRequestedAt);
+  const claimedRatio = optionalNumber(route.claimedRatio);
+  const sourceClaimed = optionalBigInt(route.sourceClaimed);
+  const targetClaimed = optionalBigInt(route.targetClaimed);
+  const expiresAt = optionalNumber(route.expiresAt);
+  const settledAt = optionalNumber(route.settledAt);
+  const error = optionalString(route.error);
+  const memo = optionalString(route.memo);
+
+  if (routeHash) clone.routeHash = routeHash;
+  if (bookOwnerEntityId) clone.bookOwnerEntityId = bookOwnerEntityId;
+  if (venueId) clone.venueId = venueId;
+  if (sourcePull) clone.sourcePull = sourcePull;
+  if (targetPull) clone.targetPull = targetPull;
+  if (priceTicks !== undefined) clone.priceTicks = priceTicks;
+  if (fillSeq !== undefined) clone.fillSeq = fillSeq;
+  if (cumulativeFillRatio !== undefined) clone.cumulativeFillRatio = cumulativeFillRatio;
+  if (filledSourceAmount !== undefined) clone.filledSourceAmount = filledSourceAmount;
+  if (filledTargetAmount !== undefined) clone.filledTargetAmount = filledTargetAmount;
+  if (priceImprovementSourceAmount !== undefined) clone.priceImprovementSourceAmount = priceImprovementSourceAmount;
+  if (priceImprovementTargetAmount !== undefined) clone.priceImprovementTargetAmount = priceImprovementTargetAmount;
+  if (pendingClearRequestedAt !== undefined) clone.pendingClearRequestedAt = pendingClearRequestedAt;
+  if (route.clearingPolicy) clone.clearingPolicy = route.clearingPolicy;
+  if (route.priceImprovementMode) clone.priceImprovementMode = route.priceImprovementMode;
+  if (route.riskMode) clone.riskMode = route.riskMode;
+  if (claimedRatio !== undefined) clone.claimedRatio = claimedRatio;
+  if (sourceClaimed !== undefined) clone.sourceClaimed = sourceClaimed;
+  if (targetClaimed !== undefined) clone.targetClaimed = targetClaimed;
+  if (expiresAt !== undefined) clone.expiresAt = expiresAt;
+  if (settledAt !== undefined) clone.settledAt = settledAt;
+  if (error) clone.error = error;
+  if (memo) clone.memo = memo;
+  return clone;
 }
 
-export function stripCrossJurisdictionCarrierPrivateData<T extends { crossJurisdiction?: CrossJurisdictionSwapRoute }>(value: T): T {
+export function cloneCrossJurisdictionCarrierRoute<T extends { crossJurisdiction?: CrossJurisdictionSwapRoute }>(value: T): T {
   if (!value.crossJurisdiction) return value;
   return {
     ...value,
-    crossJurisdiction: stripCrossJurisdictionPrivateData({ ...value.crossJurisdiction }),
+    crossJurisdiction: cloneCrossJurisdictionRoute(value.crossJurisdiction),
   };
 }
 
-export const stripCrossJurisdictionSwapOfferPrivateData = (offer: SwapOffer): SwapOffer =>
-  stripCrossJurisdictionCarrierPrivateData({ ...offer });
+export const cloneCrossJurisdictionSwapOfferRoute = (offer: SwapOffer): SwapOffer =>
+  cloneCrossJurisdictionCarrierRoute({ ...offer });
 
-export const stripCrossJurisdictionSwapHistoryPrivateData = (entry: SwapOrderHistoryEntry): SwapOrderHistoryEntry =>
-  stripCrossJurisdictionCarrierPrivateData({ ...entry });
+export const cloneCrossJurisdictionSwapHistoryRoute = (entry: SwapOrderHistoryEntry): SwapOrderHistoryEntry =>
+  cloneCrossJurisdictionCarrierRoute({ ...entry });
 
-export function stripCrossJurisdictionAccountTxPrivateData(tx: AccountTx): AccountTx {
+export function cloneCrossJurisdictionAccountTxRoute(tx: AccountTx): AccountTx {
   if (tx.type !== 'swap_offer' || !tx.data.crossJurisdiction) return tx;
   return {
     ...tx,
     data: {
       ...tx.data,
-      crossJurisdiction: stripCrossJurisdictionPrivateData({ ...tx.data.crossJurisdiction }),
+      crossJurisdiction: cloneCrossJurisdictionRoute(tx.data.crossJurisdiction),
     },
   };
 }
 
-export function stripCrossJurisdictionAccountFramePrivateData(frame: AccountFrame): AccountFrame {
+export function cloneCrossJurisdictionAccountFrameRoute(frame: AccountFrame): AccountFrame {
   return {
     ...frame,
-    accountTxs: frame.accountTxs.map(stripCrossJurisdictionAccountTxPrivateData),
+    accountTxs: frame.accountTxs.map(cloneCrossJurisdictionAccountTxRoute),
   };
 }
 
-export function stripCrossJurisdictionAccountInputPrivateData(input: AccountInput): AccountInput {
+export function cloneCrossJurisdictionAccountInputRoute(input: AccountInput): AccountInput {
   if (input.kind !== 'frame' && input.kind !== 'frame_ack') return input;
   return {
     ...input,
-    newAccountFrame: stripCrossJurisdictionAccountFramePrivateData(input.newAccountFrame),
+    newAccountFrame: cloneCrossJurisdictionAccountFrameRoute(input.newAccountFrame),
   } as AccountInput;
 }
 
@@ -455,8 +500,8 @@ export function buildPreparedCrossJurisdictionRoute(
     ...route,
     expiresAt: route.expiresAt ?? sourceRevealUntilTimestamp,
   });
-  const hashLadderPrivateSeed = deriveCrossJurisdictionPrivateSeed(options.runtimeSeed, canonicalRoute);
-  const proof = deriveCrossJurisdictionHashLadderProof(canonicalRoute, hashLadderPrivateSeed);
+  const privateSeed = deriveCrossJurisdictionPrivateSeed(options.runtimeSeed, canonicalRoute);
+  const proof = deriveCrossJurisdictionHashLadderProof(canonicalRoute, privateSeed);
   const sourceAmount = BigInt(canonicalRoute.source.amount);
   const targetAmount = BigInt(canonicalRoute.target.amount);
   const sourcePullId = deriveCrossJurisdictionPullId(canonicalRoute, 'source');

@@ -52,9 +52,9 @@ function runBrainvaultCli(name: string, passphrase: string, shards: number): Bra
 }
 
 async function waitForBrainvaultCreateForm(page: Page): Promise<void> {
-  const legacyTab = page.getByRole('button', { name: 'BrainVault', exact: true });
-  if (await legacyTab.isVisible().catch(() => false)) {
-    await legacyTab.click();
+  const brainVaultTab = page.getByRole('button', { name: 'BrainVault', exact: true });
+  if (await brainVaultTab.isVisible().catch(() => false)) {
+    await brainVaultTab.click();
   }
   await expect(page.getByRole('heading', { name: /Create XLN wallet/i }).first()).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('#name')).toBeVisible({ timeout: 15_000 });

@@ -21,12 +21,12 @@ import { isLeftEntity } from './entity-id-utils';
 import { getAccountFrameHistoryView, setAccountFrameHistoryView } from './env-events';
 import { cloneJBatch, type CompletedBatch, type JBatchState } from './j-batch';
 import {
-  stripCrossJurisdictionAccountFramePrivateData,
-  stripCrossJurisdictionAccountTxPrivateData,
-  stripCrossJurisdictionAccountInputPrivateData,
-  stripCrossJurisdictionPrivateData,
-  stripCrossJurisdictionSwapHistoryPrivateData,
-  stripCrossJurisdictionSwapOfferPrivateData,
+  cloneCrossJurisdictionAccountFrameRoute,
+  cloneCrossJurisdictionAccountTxRoute,
+  cloneCrossJurisdictionAccountInputRoute,
+  cloneCrossJurisdictionRoute,
+  cloneCrossJurisdictionSwapHistoryRoute,
+  cloneCrossJurisdictionSwapOfferRoute,
 } from './cross-jurisdiction';
 import type { CrontabState, ScheduledHook } from './crontab-types';
 import type { Profile } from './networking/gossip';
@@ -39,32 +39,32 @@ import type {
   PriceLevelState,
 } from './orderbook';
 
-const stripCrossJurisdictionRoutePrivateDataFromState = (state: EntityState): void => {
+const cloneCrossJurisdictionRoutesInState = (state: EntityState): void => {
   if (!state.crossJurisdictionSwaps) return;
   state.crossJurisdictionSwaps = new Map(
     Array.from(state.crossJurisdictionSwaps.entries()).map(([id, route]) => [
       id,
-      stripCrossJurisdictionPrivateData({ ...route }),
+      cloneCrossJurisdictionRoute(route),
     ]),
   );
 };
 
-const stripCrossJurisdictionRoutePrivateDataFromAccount = (account: AccountMachine): void => {
-  account.mempool = account.mempool.map(stripCrossJurisdictionAccountTxPrivateData);
-  account.currentFrame = stripCrossJurisdictionAccountFramePrivateData(account.currentFrame);
-  if (account.pendingFrame) account.pendingFrame = stripCrossJurisdictionAccountFramePrivateData(account.pendingFrame);
-  if (account.pendingAccountInput) account.pendingAccountInput = stripCrossJurisdictionAccountInputPrivateData(account.pendingAccountInput);
+const cloneCrossJurisdictionRoutesInAccount = (account: AccountMachine): void => {
+  account.mempool = account.mempool.map(cloneCrossJurisdictionAccountTxRoute);
+  account.currentFrame = cloneCrossJurisdictionAccountFrameRoute(account.currentFrame);
+  if (account.pendingFrame) account.pendingFrame = cloneCrossJurisdictionAccountFrameRoute(account.pendingFrame);
+  if (account.pendingAccountInput) account.pendingAccountInput = cloneCrossJurisdictionAccountInputRoute(account.pendingAccountInput);
   account.swapOffers = new Map(
     Array.from((account.swapOffers ?? new Map()).entries()).map(([id, offer]) => [
       id,
-      stripCrossJurisdictionSwapOfferPrivateData(offer),
+      cloneCrossJurisdictionSwapOfferRoute(offer),
     ]),
   );
   if (account.swapOrderHistory instanceof Map) {
     account.swapOrderHistory = new Map(
       Array.from(account.swapOrderHistory.entries()).map(([id, entry]) => [
         id,
-        stripCrossJurisdictionSwapHistoryPrivateData(entry),
+        cloneCrossJurisdictionSwapHistoryRoute(entry),
       ]),
     );
   }
@@ -72,7 +72,7 @@ const stripCrossJurisdictionRoutePrivateDataFromAccount = (account: AccountMachi
     account.swapClosedOrders = new Map(
       Array.from(account.swapClosedOrders.entries()).map(([id, entry]) => [
         id,
-        stripCrossJurisdictionSwapHistoryPrivateData(entry),
+        cloneCrossJurisdictionSwapHistoryRoute(entry),
       ]),
     );
   }
@@ -328,9 +328,9 @@ export function cloneEntityState(entityState: EntityState, forSnapshot: boolean 
     if (entityState.jBatchState && !cloned.jBatchState) {
       cloned.jBatchState = cloneJBatchState(entityState.jBatchState);
     }
-    stripCrossJurisdictionRoutePrivateDataFromState(cloned);
+    cloneCrossJurisdictionRoutesInState(cloned);
     for (const account of cloned.accounts.values()) {
-      stripCrossJurisdictionRoutePrivateDataFromAccount(account);
+      cloneCrossJurisdictionRoutesInAccount(account);
     }
 
     // VALIDATE AT SOURCE: Guarantee type safety from this point forward
@@ -409,7 +409,7 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
       ? { pendingSwapFillRatios: new Map(Array.from(entityState.pendingSwapFillRatios.entries())) }
       : {}),
     ...(entityState.crossJurisdictionSwaps
-      ? { crossJurisdictionSwaps: new Map(Array.from(entityState.crossJurisdictionSwaps.entries()).map(([id, route]) => [id, stripCrossJurisdictionPrivateData({ ...route })])) }
+      ? { crossJurisdictionSwaps: new Map(Array.from(entityState.crossJurisdictionSwaps.entries()).map(([id, route]) => [id, cloneCrossJurisdictionRoute(route)])) }
       : {}),
   };
 }
@@ -590,7 +590,7 @@ export function cloneAccountMachine(account: AccountMachine, forSnapshot: boolea
   try {
     const cloned = structuredClone(account);
     setAccountFrameHistoryView(cloned, getAccountFrameHistoryView(account));
-    stripCrossJurisdictionRoutePrivateDataFromAccount(cloned);
+    cloneCrossJurisdictionRoutesInAccount(cloned);
     return cloned;
   } catch (error) {
     if (HEAVY_LOGS) {
@@ -829,6 +829,6 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
     );
   }
 
-  stripCrossJurisdictionRoutePrivateDataFromAccount(result);
+  cloneCrossJurisdictionRoutesInAccount(result);
   return result;
 }

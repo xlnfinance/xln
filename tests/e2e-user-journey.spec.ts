@@ -23,6 +23,10 @@ import { getPersistedReceiptCursor } from './utils/e2e-runtime-receipts';
 
 const INIT_TIMEOUT = 30_000;
 const LONG_E2E = process.env.E2E_LONG === '1';
+const USER_JOURNEY_TIMEOUT = Math.max(
+  Number(process.env.PW_TEST_TIMEOUT || 0) || 0,
+  LONG_E2E ? 240_000 : 180_000,
+);
 
 type AccountProgress = {
   entityId: string;
@@ -156,7 +160,7 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<void> {
 
 test.describe('E2E User Journey', () => {
   test('demo runtime -> open hub account -> offchain faucet pipeline', async ({ page }) => {
-    test.setTimeout(LONG_E2E ? 240_000 : 60_000);
+    test.setTimeout(USER_JOURNEY_TIMEOUT);
 
     await gotoApp(page);
     await dismissOnboardingIfVisible(page);

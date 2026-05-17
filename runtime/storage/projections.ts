@@ -1,12 +1,12 @@
 import { rebuildOrderbookPairIndex, type BookState, type OrderbookExtState } from '../orderbook';
 import type { AccountMachine, EntityReplica, EntityState } from '../types';
 import {
-  stripCrossJurisdictionAccountFramePrivateData,
-  stripCrossJurisdictionAccountInputPrivateData,
-  stripCrossJurisdictionAccountTxPrivateData,
-  stripCrossJurisdictionPrivateData,
-  stripCrossJurisdictionSwapHistoryPrivateData,
-  stripCrossJurisdictionSwapOfferPrivateData,
+  cloneCrossJurisdictionAccountFrameRoute,
+  cloneCrossJurisdictionAccountInputRoute,
+  cloneCrossJurisdictionAccountTxRoute,
+  cloneCrossJurisdictionRoute,
+  cloneCrossJurisdictionSwapHistoryRoute,
+  cloneCrossJurisdictionSwapOfferRoute,
 } from '../cross-jurisdiction';
 import { encodeBuffer } from './codec';
 import { DEFAULT_ACCOUNT_MERKLE_RADIX, normalizeEntityId } from './keys';
@@ -17,19 +17,19 @@ const withProp = <K extends string, V>(key: K, value: V | undefined): Partial<Re
   value === undefined ? {} : ({ [key]: value } as Record<K, V>);
 
 const publicCrossJurisdictionSwaps = (swaps: EntityState['crossJurisdictionSwaps']): EntityState['crossJurisdictionSwaps'] | undefined =>
-  swaps ? new Map(Array.from(swaps.entries()).map(([id, route]) => [id, stripCrossJurisdictionPrivateData({ ...route })])) : undefined;
+  swaps ? new Map(Array.from(swaps.entries()).map(([id, route]) => [id, cloneCrossJurisdictionRoute(route)])) : undefined;
 
 const publicSwapOffers = (offers: AccountMachine['swapOffers']): AccountMachine['swapOffers'] =>
   new Map(Array.from((offers ?? new Map()).entries()).map(([id, offer]) => [
     id,
-    stripCrossJurisdictionSwapOfferPrivateData(offer),
+    cloneCrossJurisdictionSwapOfferRoute(offer),
   ]));
 
 const publicSwapHistory = (history: AccountMachine['swapOrderHistory']): AccountMachine['swapOrderHistory'] =>
   history instanceof Map
     ? new Map(Array.from(history.entries()).map(([id, entry]) => [
         id,
-        stripCrossJurisdictionSwapHistoryPrivateData(entry),
+        cloneCrossJurisdictionSwapHistoryRoute(entry),
       ]))
     : history;
 
@@ -102,8 +102,8 @@ const projectAccountDocFull = (account: AccountMachine): StorageAccountDoc => ({
   leftEntity: account.leftEntity,
   rightEntity: account.rightEntity,
   status: account.status,
-  mempool: account.mempool.map(stripCrossJurisdictionAccountTxPrivateData),
-  currentFrame: stripCrossJurisdictionAccountFramePrivateData(account.currentFrame),
+  mempool: account.mempool.map(cloneCrossJurisdictionAccountTxRoute),
+  currentFrame: cloneCrossJurisdictionAccountFrameRoute(account.currentFrame),
   deltas: account.deltas,
   locks: account.locks,
   swapOffers: publicSwapOffers(account.swapOffers),
@@ -124,8 +124,8 @@ const projectAccountDocFull = (account: AccountMachine): StorageAccountDoc => ({
   requestedRebalance: account.requestedRebalance,
   requestedRebalanceFeeState: account.requestedRebalanceFeeState,
   rebalancePolicy: account.rebalancePolicy,
-  ...withProp('pendingFrame', account.pendingFrame ? stripCrossJurisdictionAccountFramePrivateData(account.pendingFrame) : undefined),
-  ...withProp('pendingAccountInput', account.pendingAccountInput ? stripCrossJurisdictionAccountInputPrivateData(account.pendingAccountInput) : undefined),
+  ...withProp('pendingFrame', account.pendingFrame ? cloneCrossJurisdictionAccountFrameRoute(account.pendingFrame) : undefined),
+  ...withProp('pendingAccountInput', account.pendingAccountInput ? cloneCrossJurisdictionAccountInputRoute(account.pendingAccountInput) : undefined),
   ...withProp('lastRollbackFrameHash', account.lastRollbackFrameHash),
   ...withProp('abiProofBody', account.abiProofBody),
   ...withProp('currentFrameHanko', account.currentFrameHanko),

@@ -1,6 +1,7 @@
-import type { AccountTx, CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx } from '../../types';
+import type { AccountTx, CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, Env } from '../../types';
 import { CROSS_J_MAX_FILL_RATIO, isCrossJurisdictionRouteTransitionAllowed, isCrossJurisdictionTerminalStatus, validateCrossJurisdictionFillProgress, withCrossJurisdictionFillProgress } from '../../cross-jurisdiction';
 import { decodeHashLadderBinary } from '../../hashladder';
+import { removeCrossJurisdictionBookOrder } from '../../orderbook/cross-j';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 
@@ -64,6 +65,7 @@ const applyClaimedRatio = (
 };
 
 const applyPullResolveFollowup = (
+  env: Env,
   newState: EntityState,
   counterpartyId: string,
   accountTx: Extract<AccountTx, { type: 'pull_resolve' }>,
@@ -116,6 +118,7 @@ const applyPullResolveFollowup = (
       });
       applyClaimedRatio(route, fillRatio);
       setCrossJurisdictionStatus(route, 'source_claimed', newState.timestamp);
+      removeCrossJurisdictionBookOrder(env, newState, route);
       console.log(
         `🌉 PULL: Relaying cross-j ratio route=${route.orderId} ` +
         `target=${route.target.counterpartyEntityId.slice(-4)} ratio=${fillRatio}/65535`,
@@ -132,6 +135,7 @@ const applyPullResolveFollowup = (
       applyClaimedRatio(route, fillRatio);
       setCrossJurisdictionStatus(route, 'settled', newState.timestamp);
       route.settledAt = newState.timestamp;
+      removeCrossJurisdictionBookOrder(env, newState, route);
       console.log(`🌉 PULL: Cross-j route settled ${route.orderId} ratio=${fillRatio}/65535`);
     }
   }
@@ -139,6 +143,7 @@ const applyPullResolveFollowup = (
 };
 
 const applyFillAckFollowup = (
+  env: Env,
   newState: EntityState,
   accountTx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>,
   outputs: EntityInput[],
@@ -190,6 +195,7 @@ const applyFillAckFollowup = (
     (ratio >= CROSS_J_MAX_FILL_RATIO || accountTx.data.cancelRemainder) &&
     normalizeEntityRef(newState.entityId) === normalizeEntityRef(route.source.counterpartyEntityId)
   ) {
+    removeCrossJurisdictionBookOrder(env, newState, route);
     outputs.push({
       entityId: newState.entityId,
       entityTxs: [{
@@ -205,16 +211,17 @@ const applyFillAckFollowup = (
 };
 
 export function applyCommittedCrossJurisdictionAccountTxFollowup(
+  env: Env,
   newState: EntityState,
   counterpartyId: string,
   accountTx: AccountTx,
   outputs: EntityInput[],
 ): boolean {
   if (accountTx.type === 'pull_resolve') {
-    return applyPullResolveFollowup(newState, counterpartyId, accountTx, outputs);
+    return applyPullResolveFollowup(env, newState, counterpartyId, accountTx, outputs);
   }
   if (accountTx.type === 'cross_swap_fill_ack') {
-    return applyFillAckFollowup(newState, accountTx, outputs);
+    return applyFillAckFollowup(env, newState, accountTx, outputs);
   }
   return false;
 }

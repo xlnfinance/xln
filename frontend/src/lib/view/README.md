@@ -92,6 +92,6 @@ panelBridge.on('entity:selected', ({ entityId }) => {
 # Run new view in isolation
 bun run dev:view
 
-# Compare with old NetworkTopology
-bun run dev:legacy
+# Run the production Svelte app
+bun run dev
 ```

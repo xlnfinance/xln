@@ -17,7 +17,7 @@ import { createDefaultDelta } from '../../validation-utils';
 import { deriveSide, SWAP_LOT_SCALE, ORDERBOOK_PRICE_SCALE, prepareSwapOrder } from '../../orderbook';
 import { FINANCIAL, LIMITS } from '../../constants';
 import { recordSwapOfferLifecycle } from './swap-history';
-import { stripCrossJurisdictionPrivateData } from '../../cross-jurisdiction';
+import { cloneCrossJurisdictionRoute } from '../../cross-jurisdiction';
 
 export async function handleSwapOffer(
   accountMachine: AccountMachine,
@@ -205,7 +205,7 @@ export async function handleSwapOffer(
 
   // 7. Create offer (stored amounts are already quantized for deterministic matching)
   const publicCrossJurisdiction = crossJurisdiction
-    ? stripCrossJurisdictionPrivateData({ ...crossJurisdiction })
+    ? cloneCrossJurisdictionRoute(crossJurisdiction)
     : undefined;
   const offer: SwapOffer = {
     offerId,

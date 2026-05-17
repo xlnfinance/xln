@@ -586,7 +586,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         for (const accountTx of committedFrame.accountTxs) {
           if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: Checking committed tx type=${accountTx.type}`);
 
-          if (applyCommittedCrossJurisdictionAccountTxFollowup(newState, counterpartyId, accountTx, outputs)) {
+          if (applyCommittedCrossJurisdictionAccountTxFollowup(env, newState, counterpartyId, accountTx, outputs)) {
             continue;
           }
 
