@@ -129,29 +129,6 @@
     mnemonicInput = await entropyToMnemonic(entropy);
   }
 
-  function downloadBrainVaultSheet(): void {
-    if (typeof window === 'undefined') return;
-    const lines = [
-      'XLN BrainVault setup sheet',
-      '',
-      `Display name: ${name.trim() || '________________'}`,
-      'Passphrase hint: ________________________________',
-      `Work factor: ${String(shardInput || 3)}`,
-      '',
-      'Do not write the full passphrase here unless this sheet is stored offline.',
-      'Same display name + passphrase + work factor derives the same wallet.',
-      'Import/recovery with a mnemonic is available from the advanced wallet screen.',
-      '',
-    ];
-    const blob = new Blob([lines.join('\n')], { type: 'text/plain;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement('a');
-    link.href = url;
-    link.download = 'xln-brainvault-sheet.txt';
-    link.click();
-    URL.revokeObjectURL(url);
-  }
-
   // ============================================================================
   // STATE
   // ============================================================================
@@ -1128,24 +1105,6 @@
           </div>
         {/if}
 
-        <details class="brainvault-strip import-options" data-testid="brainvault-create-details">
-          <summary data-testid="brainvault-create-toggle">
-            <span>BrainVault recovery</span>
-            <small>Seed sheet, safety notes, and import/recovery</small>
-          </summary>
-          <div class="brainvault-strip-panel">
-            <button type="button" class="strip-action" on:click={downloadBrainVaultSheet}>
-              Download seed sheet
-            </button>
-            <a class="strip-action" href="/docs-static/faq.md" target="_blank" rel="noreferrer">
-              Read safety notes
-            </a>
-            <button type="button" class="strip-action" on:click={() => inputMode = 'mnemonic'}>
-              Import / recover wallet
-            </button>
-          </div>
-        </details>
-
         <div class="wallet-create-title">
           <div>
             <h2>{inputMode === 'mnemonic' ? 'Import XLN wallet' : 'Create XLN wallet'}</h2>
@@ -1714,51 +1673,6 @@
     line-height: 1.45;
   }
 
-  .brainvault-strip {
-    margin-bottom: 16px;
-    border: 1px solid rgba(255, 255, 255, 0.07);
-    border-radius: 8px;
-    background: rgba(255, 255, 255, 0.02);
-    overflow: hidden;
-  }
-
-  .brainvault-strip summary {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 14px;
-    padding: 10px 12px;
-    cursor: pointer;
-    list-style: none;
-    color: rgba(255, 255, 255, 0.82);
-    font-size: 13px;
-    font-weight: 650;
-  }
-
-  .brainvault-strip summary::-webkit-details-marker {
-    display: none;
-  }
-
-  .brainvault-strip summary small {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    color: rgba(255, 255, 255, 0.42);
-    font-size: 11px;
-    font-weight: 500;
-  }
-
-  .brainvault-strip-panel {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
-    padding: 10px 12px 12px;
-    border-top: 1px solid rgba(255, 255, 255, 0.06);
-    background: rgba(0, 0, 0, 0.16);
-  }
-
-  .strip-action,
   .back-to-create {
     display: inline-flex;
     align-items: center;
@@ -1776,7 +1690,6 @@
     box-sizing: border-box;
   }
 
-  .strip-action:hover,
   .back-to-create:hover {
     border-color: rgba(255, 200, 100, 0.24);
     color: rgba(255, 200, 100, 0.95);

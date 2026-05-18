@@ -411,28 +411,26 @@
 <div class="onboarding">
   <div class="setup-card">
     <section class="setup-section brainvault-section">
-      <details class="brainvault-details">
-        <summary>
-          <span>
+      <details class="brainvault-details" data-testid="brainvault-onboarding-recovery">
+        <summary data-testid="brainvault-onboarding-recovery-toggle">
+          <span class="brainvault-summary-copy">
             <strong>BrainVault recovery</strong>
-            <small>{brainVaultWordCount ? `${brainVaultWordCount} words` : 'Seed not loaded'} · {shortValue(brainVaultSignerAddress)}</small>
+            <small>Export the seed sheet or reveal the words before continuing.</small>
           </span>
-          <span class="brainvault-chevron">⌄</span>
+          <span class="brainvault-summary-meta">
+            {brainVaultWordCount ? `${brainVaultWordCount} words` : 'Seed not loaded'} · {shortValue(brainVaultSignerAddress)}
+          </span>
+          <span class="brainvault-chevron" aria-hidden="true">⌄</span>
         </summary>
 
         <div class="brainvault-panel">
-          <div class="brainvault-row">
-            <span>Wallet</span>
-            <code>{brainVaultRuntimeLabel || '-'}</code>
-          </div>
-          <div class="brainvault-row">
-            <span>Signer</span>
-            <code>{brainVaultSignerAddress || '-'}</code>
-          </div>
           <div class="brainvault-actions">
             <button type="button" class="mini-action" on:click={downloadBrainVaultSheet}>
               Download sheet
             </button>
+            <a class="mini-action" href="/docs-static/faq.md" target="_blank" rel="noreferrer">
+              Read safety notes
+            </a>
             <button
               type="button"
               class="mini-action"
@@ -450,6 +448,14 @@
               {copiedBrainVaultField === 'seed' ? 'Copied' : 'Copy seed'}
             </button>
           </div>
+          <div class="brainvault-row">
+            <span>Wallet</span>
+            <code>{brainVaultRuntimeLabel || '-'}</code>
+          </div>
+          <div class="brainvault-row">
+            <span>Signer</span>
+            <code>{brainVaultSignerAddress || '-'}</code>
+          </div>
           {#if revealBrainVaultSeed}
             <div class="seed-box">
               {#each brainVaultSeed.split(/\s+/) as word, index}
@@ -461,6 +467,9 @@
           {/if}
         </div>
       </details>
+      <p class="brainvault-continue" data-testid="brainvault-continue-copy">
+        Or continue creating the XLN account with these data.
+      </p>
     </section>
 
     <section class="setup-section">
@@ -591,14 +600,15 @@
   .brainvault-section {
     padding: 0;
     overflow: hidden;
+    background: linear-gradient(180deg, #18130f 0%, #100d0b 100%);
   }
 
   .brainvault-details summary {
-    min-height: 52px;
-    padding: 14px 16px;
-    display: flex;
+    min-height: 58px;
+    padding: 14px 16px 12px;
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto auto;
     align-items: center;
-    justify-content: space-between;
     gap: 12px;
     cursor: pointer;
     list-style: none;
@@ -608,7 +618,7 @@
     display: none;
   }
 
-  .brainvault-details summary span:first-child {
+  .brainvault-summary-copy {
     min-width: 0;
     display: flex;
     flex-direction: column;
@@ -617,13 +627,26 @@
 
   .brainvault-details summary strong {
     color: #f5f5f4;
-    font-size: 14px;
+    font-size: 15px;
+    line-height: 1.2;
   }
 
   .brainvault-details summary small {
+    color: #a8a29e;
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
+  .brainvault-summary-meta {
+    max-width: 240px;
+    min-width: 0;
     color: #78716c;
+    font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
-    overflow-wrap: anywhere;
+    text-align: right;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .brainvault-chevron {
@@ -636,11 +659,12 @@
   }
 
   .brainvault-panel {
-    padding: 0 16px 16px;
+    padding: 14px 16px 16px;
     border-top: 1px solid #27211c;
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 12px;
+    background: rgba(0, 0, 0, 0.16);
   }
 
   .brainvault-row {
@@ -653,13 +677,15 @@
   }
 
   .brainvault-actions {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
     gap: 8px;
   }
 
   .mini-action {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
     min-height: 34px;
     padding: 0 12px;
     border-radius: 9px;
@@ -668,6 +694,8 @@
     color: #e7e5e4;
     font-size: 12px;
     font-weight: 700;
+    text-align: center;
+    text-decoration: none;
     cursor: pointer;
   }
 
@@ -699,6 +727,15 @@
   .seed-box b {
     color: #78716c;
     font-size: 10px;
+  }
+
+  .brainvault-continue {
+    margin: 0;
+    padding: 11px 16px 14px;
+    border-top: 1px solid #27211c;
+    color: #a8a29e;
+    font-size: 13px;
+    line-height: 1.45;
   }
 
   .profile-preview-avatar {
@@ -918,6 +955,20 @@
     .brainvault-row {
       grid-template-columns: 1fr;
       gap: 4px;
+    }
+
+    .brainvault-details summary {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .brainvault-summary-meta {
+      grid-column: 1 / -1;
+      max-width: none;
+      text-align: left;
+    }
+
+    .brainvault-actions {
+      grid-template-columns: repeat(2, minmax(0, 1fr));
     }
 
     .seed-box {
