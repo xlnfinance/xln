@@ -1264,7 +1264,7 @@ export function processOrderbookSwaps(
     // can report debug projection rejects; live matching must surface malformed
     // routes as invariant failures instead of silently cancelling liquidity.
     recordDebugProjectionReject(accountId, offerId, reason);
-    console.warn(`⚠️ ORDERBOOK CROSS-J: skipped offer=${offerId} account=${accountId.slice(-8)} reason=${reason}`);
+    orderbookLog.warn('crossj.offer_skipped', { offer: shortOrder(offerId, 8), account: shortId(accountId, 8), reason });
   };
   const rejectInvalidOffer = (accountId: string, offerId: string, reason: string): void => {
     if (debugRebuildProjectionOnly) {

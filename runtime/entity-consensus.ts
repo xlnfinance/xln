@@ -428,7 +428,13 @@ export const applyEntityInput = async (
   const frameHash = entityInput.proposedFrame?.hash?.slice(0, 10) || 'none';
 
   if (!quietRuntimeLogs) {
-    entityLog.info('input.received', {
+    const hasInputActivity = Boolean(
+      (entityInput.entityTxs?.length ?? 0) > 0 ||
+      entityInput.proposedFrame ||
+      entityInput.hashPrecommits?.size,
+    );
+    const logInputReceived = hasInputActivity ? entityLog.info : entityLog.debug;
+    logInputReceived('input.received', {
       entity: entityDisplay,
       signer: shortId(workingReplica.signerId),
       ts: timestamp,
@@ -480,7 +486,7 @@ export const applyEntityInput = async (
     manualBroadcastInInput: hasManualBroadcast,
   });
   if (crontabOutputs.length > 0) {
-    console.log(`⏰ CRONTAB: Generated ${crontabOutputs.length} outputs from periodic tasks`);
+    entityLog.debug('crontab.outputs', { count: crontabOutputs.length });
     entityOutbox.push(...crontabOutputs);
   }
 
@@ -528,7 +534,7 @@ export const applyEntityInput = async (
       entityTxs: [...workingReplica.mempool],
     });
 
-    console.log(`📊 Forwarded ${txCount} txs to proposer (will clear on commit)`);
+    entityLog.debug('mempool.forwarded_to_proposer', { txs: txCount, proposer: shortId(proposerId) });
   }
 
   // Handle commit notifications AFTER forwarding (when receiving finalized frame from proposer)
@@ -549,7 +555,7 @@ export const applyEntityInput = async (
           logError("FRAME_CONSENSUS", `   Commit: ${entityInput.proposedFrame.hash}`);
           return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
         }
-        console.log(`✅ Commit validation: matches locked frame ${workingReplica.lockedFrame.hash.slice(0,10)}`);
+        entityLog.debug('commit.locked_frame_verified', { frame: shortHash(workingReplica.lockedFrame.hash) });
       }
 
       // SECURITY: Verify first signature (entityFrame hash) from each signer
@@ -560,7 +566,7 @@ export const applyEntityInput = async (
           return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
         }
       }
-      console.log(`✅ All ${frameCollectedSigs.size} signatures validated for frame ${entityInput.proposedFrame.hash.slice(0,10)}`);
+      entityLog.debug('commit.signatures_verified', { count: frameCollectedSigs.size, frame: shortHash(entityInput.proposedFrame.hash) });
 
       // Apply the committed frame
       // CATCH-UP FIX: Use proposedFrame.height (not +1 from local) to handle offline validators
@@ -571,7 +577,7 @@ export const applyEntityInput = async (
       // couldn't verify - this is safe because up-to-date validators provided the quorum
       const stateToApply = workingReplica.validatorComputedState || entityInput.proposedFrame.newState;
       if (!workingReplica.validatorComputedState) {
-        console.log(`⚠️ CATCH-UP: Using proposer's state (validator was behind and couldn't verify)`);
+        entityLog.warn('commit.catch_up_state_used', { height: entityInput.proposedFrame.height });
       }
       workingReplica.state = {
         ...stateToApply,
@@ -585,9 +591,9 @@ export const applyEntityInput = async (
       // This avoids dropping fresh inputs merged into the same tick (e.g., accountInput ACKs).
       const committedTxs = entityInput.proposedFrame.txs;
       if (committedTxs.length > 0) {
-        console.log(`📊 Clearing ${committedTxs.length} committed txs from mempool (${workingReplica.mempool.length} total)`);
+        entityLog.debug('mempool.clear_committed', { committed: committedTxs.length, before: workingReplica.mempool.length });
         workingReplica.mempool = removeCommittedTxsFromMempool(workingReplica.mempool, committedTxs);
-        console.log(`📊 Mempool after commit: ${workingReplica.mempool.length} txs remaining`);
+        entityLog.debug('mempool.after_commit', { remaining: workingReplica.mempool.length });
       }
 
       delete workingReplica.lockedFrame; // Release lock after commit
@@ -1262,10 +1268,12 @@ export const applyEntityFrame = async (
   // Hashes emitted during frame processing that need entity-quorum signing
   collectedHashes?: Array<{ hash: string; type: 'accountFrame' | 'dispute' | 'profile' | 'settlement'; context: string }>;
 }> => {
-  console.log(`🎯 APPLY-ENTITY-FRAME: Processing ${entityTxs.length} transactions`);
-  entityTxs.forEach((tx, index) => {
-    console.log(`🎯 Transaction ${index}: type="${tx.type}", data=`, tx.data);
-  });
+  entityLog.info('frame.apply', { txs: entityTxs.map(tx => tx.type) });
+  if (shouldLogFullPayloads()) {
+    entityTxs.forEach((tx, index) => {
+      entityLog.trace('frame.tx_payload', { index, type: tx.type, data: tx.data });
+    });
+  }
 
   // CRITICAL: Clone state to avoid mutating the input (determinism fix)
   // Without this, proposer and validator can end up with different states
@@ -1537,9 +1545,7 @@ export const applyEntityFrame = async (
         const bookOwnerRef = crossJurisdictionBookOwnerRef(offer.crossJurisdiction);
         if (bookOwnerRef && bookOwnerRef !== currentEntityRef) {
           crossJurisdictionOwnerWakes.add(bookOwnerRef);
-          console.log(
-            `🌉 ORDERBOOK CROSS-J: waking book owner ${bookOwnerRef.slice(-8)} for offer ${offer.offerId.slice(-8)}`,
-          );
+          entityLog.debug('crossj.wake_book_owner', { owner: shortId(bookOwnerRef, 8), offer: shortOrder(offer.offerId, 8) });
           continue;
         }
         if (!crossJurisdictionPullsReady(
@@ -1555,10 +1561,10 @@ export const applyEntityFrame = async (
       seenOfferKeys.add(key);
       offersToMatch.push(offer);
     }
-    console.log(
-      `📊 ENTITY-ORCHESTRATOR: Enriched ${enrichedOffers.length} offers with accountId` +
-      (siblingOffers.length > 0 ? `, included ${siblingOffers.length} sibling cross-j offers` : ''),
-    );
+    entityLog.debug('orderbook.offers_enriched', {
+      local: enrichedOffers.length,
+      siblingCrossJ: siblingOffers.length,
+    });
 
     const matchResult = processOrderbookSwaps(currentEntityState, offersToMatch);
 
@@ -1572,9 +1578,7 @@ export const applyEntityFrame = async (
         const localOwnsOffer = Boolean(account?.swapOffers?.has(tx.data.offerId));
         const localOffer = account?.swapOffers?.get(tx.data.offerId);
         if (localOffer?.crossJurisdiction) {
-          console.warn(
-            `🌉 ORDERBOOK CROSS-J: blocked plain swap_resolve for cross-j offer=${tx.data.offerId} account=${accountId.slice(-8)}`,
-          );
+          entityLog.warn('crossj.block_plain_swap_resolve', { offer: shortOrder(tx.data.offerId, 8), account: shortId(accountId, 8) });
           continue;
         }
         if (account && localOwnsOffer) {
@@ -1587,15 +1591,13 @@ export const applyEntityFrame = async (
           currentEntityState.pendingSwapFillRatios ||= new Map();
           const key = swapKey(accountId, tx.data.offerId);
           currentEntityState.pendingSwapFillRatios.set(key, tx.data.fillRatio);
-          console.log(`📊   → ${accountId.slice(-8)}: ${tx.type}`);
+          entityLog.debug('orderbook.account_tx_queued', { account: shortId(accountId, 8), tx: tx.type });
         } else {
           const ownerState = findSwapOfferOwnerState(env, currentEntityState, accountId, tx.data.offerId);
           const ownerAccount = findAccountByCounterparty(ownerState, accountId);
           const ownerOffer = ownerAccount?.swapOffers?.get(tx.data.offerId);
           if (ownerOffer?.crossJurisdiction) {
-            console.warn(
-              `🌉 ORDERBOOK CROSS-J: blocked routed plain swap_resolve for cross-j offer=${tx.data.offerId} account=${accountId.slice(-8)}`,
-            );
+            entityLog.warn('crossj.block_routed_plain_swap_resolve', { offer: shortOrder(tx.data.offerId, 8), account: shortId(accountId, 8) });
             continue;
           }
           const firstValidator = ownerState?.config?.validators?.[0];
@@ -1616,9 +1618,11 @@ export const applyEntityFrame = async (
               },
             }],
           });
-          console.log(
-            `📊   → ${ownerState.entityId.slice(-8)}/${accountId.slice(-8)}: ${tx.type} (sibling cross-j route)`,
-          );
+          entityLog.debug('orderbook.sibling_tx_routed', {
+            owner: shortId(ownerState.entityId, 8),
+            account: shortId(accountId, 8),
+            tx: tx.type,
+          });
         }
         continue;
       }
@@ -1630,22 +1634,22 @@ export const applyEntityFrame = async (
         proposableAccounts.add(accountId);
         markStorageAccountDirty(env, currentEntityState.entityId, accountId);
         markStorageEntityDirty(env, currentEntityState.entityId);
-        console.log(`📊   → ${accountId.slice(-8)}: ${tx.type}`);
+        entityLog.debug('orderbook.account_tx_queued', { account: shortId(accountId, 8), tx: tx.type });
       } else if (tx.type === 'cross_swap_fill_ack') {
         const ownerState = findSwapOfferOwnerState(env, currentEntityState, accountId, tx.data.offerId);
         const firstValidator = ownerState?.config?.validators?.[0];
         if (!ownerState || !firstValidator) {
-          console.warn(
-            `🌉 ORDERBOOK CROSS-J: unable to route sibling fill notice offer=${tx.data.offerId} account=${accountId.slice(-8)}`,
-          );
+          entityLog.warn('crossj.sibling_fill_notice_unroutable', { offer: shortOrder(tx.data.offerId, 8), account: shortId(accountId, 8) });
           continue;
         }
         const fillSeq = Math.floor(Number(tx.data.fillSeq ?? 0));
         const cumulativeFillRatio = Math.floor(Number(tx.data.cumulativeFillRatio ?? 0));
         if (fillSeq <= 0 || cumulativeFillRatio <= 0) {
-          console.warn(
-            `🌉 ORDERBOOK CROSS-J: invalid sibling fill notice offer=${tx.data.offerId} seq=${fillSeq} ratio=${cumulativeFillRatio}`,
-          );
+          entityLog.warn('crossj.sibling_fill_notice_invalid', {
+            offer: shortOrder(tx.data.offerId, 8),
+            fillSeq,
+            cumulativeFillRatio,
+          });
           continue;
         }
         allOutputs.push({
@@ -1669,9 +1673,11 @@ export const applyEntityFrame = async (
             },
           }],
         });
-        console.log(
-          `🌉 ORDERBOOK CROSS-J: routed sibling fill notice to ${ownerState.entityId.slice(-8)}/${accountId.slice(-8)}`,
-        );
+        entityLog.info('crossj.sibling_fill_notice_routed', {
+          owner: shortId(ownerState.entityId, 8),
+          account: shortId(accountId, 8),
+          offer: shortOrder(tx.data.offerId, 8),
+        });
       }
     }
 
@@ -1682,10 +1688,8 @@ export const applyEntityFrame = async (
       throw new Error(`ORDERBOOK_LIVE_PROJECTION_REJECT: ${detail}`);
     }
 
-	    if (matchResult.crossJurisdictionFills.length > 0) {
-	      console.log(
-	        `🌉 ORDERBOOK CROSS-J: recorded ${matchResult.crossJurisdictionFills.length} firm fill notice(s); clearing waits for full fill or explicit clear`,
-	      );
+    if (matchResult.crossJurisdictionFills.length > 0) {
+      entityLog.info('crossj.firm_fills_recorded', { count: matchResult.crossJurisdictionFills.length });
         for (const fill of matchResult.crossJurisdictionFills) {
           if (fill.priceImprovementMode !== 'target_bonus' || fill.priceImprovementAmount <= 0n || fill.priceImprovementTokenId === null) {
             continue;
@@ -1693,9 +1697,10 @@ export const applyEntityFrame = async (
           const targetHubState = findEntityStateById(env, fill.route.target.entityId);
           const targetSigner = targetHubState?.config?.validators?.[0];
           if (!targetHubState || !targetSigner) {
-            console.warn(
-              `🌉 ORDERBOOK CROSS-J: unable to route target price improvement order=${fill.offerId} targetHub=${fill.route.target.entityId.slice(-8)}`,
-            );
+            entityLog.warn('crossj.target_price_improvement_unroutable', {
+              offer: shortOrder(fill.offerId, 8),
+              targetHub: shortId(fill.route.target.entityId, 8),
+            });
             continue;
           }
           allOutputs.push({

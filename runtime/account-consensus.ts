@@ -59,6 +59,18 @@ const isDebugEventEmitter = (value: unknown): value is DebugEventEmitter =>
   'sendDebugEvent' in value &&
   typeof value.sendDebugEvent === 'function';
 
+const summarizeDeltasForLog = (deltas: Map<number, Delta>) =>
+  Array.from(deltas.entries()).map(([tokenId, delta]) => ({
+    tokenId,
+    collateral: delta.collateral?.toString(),
+    ondelta: delta.ondelta?.toString(),
+    offdelta: delta.offdelta?.toString(),
+    leftCreditLimit: delta.leftCreditLimit?.toString(),
+    rightCreditLimit: delta.rightCreditLimit?.toString(),
+    leftHold: delta.leftHold?.toString(),
+    rightHold: delta.rightHold?.toString(),
+  }));
+
 /**
  * Get depositoryAddress from environment (BrowserVM or active J-replica)
  * CRITICAL for replay protection - domain separator for signatures
@@ -1099,17 +1111,19 @@ export async function handleAccountInput(
           }
         }
 
-        console.log(
-          `💳 PROPOSER-COMMIT COMPLETE: Deltas after re-execution for ${cpForLog.slice(-4)}:`,
-          Array.from(accountMachine.deltas.entries()).map(([tokenId, delta]) => ({
-            tokenId,
-            collateral: delta.collateral?.toString(),
-            ondelta: delta.ondelta?.toString(),
-            offdelta: delta.offdelta?.toString(),
-            leftCreditLimit: delta.leftCreditLimit?.toString(),
-            rightCreditLimit: delta.rightCreditLimit?.toString(),
-          })),
-        );
+        accountLog.info('frame.commit.complete', {
+          side: 'proposer',
+          counterparty: shortId(cpForLog),
+          height: accountMachine.pendingFrame.height,
+          tokens: accountMachine.deltas.size,
+        });
+        if (shouldLogFullPayloads()) {
+          accountLog.trace('frame.commit.deltas', {
+            side: 'proposer',
+            counterparty: shortId(cpForLog),
+            deltas: summarizeDeltasForLog(accountMachine.deltas),
+          });
+        }
 
         // Clean up clone (no longer needed with re-execution)
         delete accountMachine.clonedForValidation;
@@ -1145,7 +1159,7 @@ export async function handleAccountInput(
                 }
                 accountMachine.disputeProofNoncesByHash[input.newDisputeProofBodyHash] = signedCooperativeNonce;
               }
-              console.log(`✅ Stored counterparty dispute hanko from ACK (verified)`);
+              accountLog.debug('hanko.dispute_ack_stored', { nonce: signedCooperativeNonce, from: shortId(input.fromEntityId) });
             }
           }
         }
@@ -1162,7 +1176,7 @@ export async function handleAccountInput(
         // Past bilateral frames are not future-consensus state. Keep only a
         // non-enumerable UI/debug view; durable history lives in the frame DB.
         appendAccountFrameHistoryView(accountMachine, committedFrame);
-        console.log(`📚 Frame ${accountMachine.pendingFrame.height} indexed in frame DB`);
+        accountLog.debug('frame.indexed', { source: 'ackCommit', height: accountMachine.pendingFrame.height });
 
       }
 
@@ -1481,15 +1495,15 @@ export async function handleAccountInput(
     const clonedMachine = cloneAccountMachine(accountMachine);
     const processEvents: string[] = [];
 
-    // DEBUG: Log initial state and txs
-    console.log(`🔍 FRAME-${receivedFrame.height} RECEIVER DEBUG:`);
-    console.log(
-      `   TXs to process: ${receivedFrame.accountTxs.length} - [${receivedFrame.accountTxs.map(tx => tx.type).join(', ')}]`,
-    );
-    for (const [tokenId, delta] of clonedMachine.deltas.entries()) {
-      console.log(
-        `   Initial delta[${tokenId}]: ondelta=${delta.ondelta}, offdelta=${delta.offdelta}, collateral=${delta.collateral}`,
-      );
+    accountLog.debug('frame.receiver_validate', {
+      height: receivedFrame.height,
+      txs: receivedFrame.accountTxs.map(tx => tx.type),
+    });
+    if (shouldLogFullPayloads()) {
+      accountLog.trace('frame.receiver_initial_deltas', {
+        height: receivedFrame.height,
+        deltas: summarizeDeltasForLog(clonedMachine.deltas),
+      });
     }
     const revealedSecrets: Array<{ secret: string; hashlock: string }> = [];
     // AUDIT FIX (CRITICAL-1): SwapOfferEvent carries makerIsLeft + fromEntity/toEntity
@@ -1587,16 +1601,22 @@ export async function handleAccountInput(
     const ourComputedState = Buffer.from(ourOffdeltas.map(d => d.toString()).join(',')).toString('hex');
     const theirClaimedState = Buffer.from(theirOffdeltas.map(d => d.toString()).join(',')).toString('hex');
 
-    // DEBUG: Show actual delta values
-    console.log(`🔍 STATE-VERIFY Frame ${receivedFrame.height}:`);
-    console.log(
-      `   Our tokenIds: [${ourFinalTokenIds.join(', ')}], offdeltas: [${ourOffdeltas.map(d => d.toString()).join(', ')}]`,
-    );
-    console.log(
-      `   Their tokenIds: [${deriveAccountFrameTokenIds(receivedFrame).join(', ')}], offdeltas: [${theirOffdeltas.map(d => d.toString()).join(', ')}]`,
-    );
-    console.log(`  Our computed:  ${ourComputedState.slice(0, 32)}...`);
-    console.log(`  Their claimed: ${theirClaimedState.slice(0, 32)}...`);
+    accountLog.debug('frame.state_verify', {
+      height: receivedFrame.height,
+      ourTokens: ourFinalTokenIds.length,
+      theirTokens: deriveAccountFrameTokenIds(receivedFrame).length,
+      our: shortHash(ourComputedState),
+      their: shortHash(theirClaimedState),
+    });
+    if (shouldLogFullPayloads()) {
+      accountLog.trace('frame.state_verify_payload', {
+        height: receivedFrame.height,
+        ourTokenIds: ourFinalTokenIds,
+        ourOffdeltas: ourOffdeltas.map(d => d.toString()),
+        theirTokenIds: deriveAccountFrameTokenIds(receivedFrame),
+        theirOffdeltas: theirOffdeltas.map(d => d.toString()),
+      });
+    }
 
     if (ourComputedState !== theirClaimedState) {
       // Compact error - full dump only if DEBUG enabled
@@ -1669,7 +1689,11 @@ export async function handleAccountInput(
       return { success: false, error: `Frame hash verification failed - dispute proof mismatch`, events };
     }
 
-    console.log(`✅ CONSENSUS-SUCCESS: Both sides computed identical state for frame ${receivedFrame.height}`);
+    accountLog.info('frame.accept', {
+      height: receivedFrame.height,
+      from: shortId(input.fromEntityId),
+      txs: receivedFrame.accountTxs.map(tx => tx.type),
+    });
 
     // ═══════════════════════════════════════════════════════════════════════════
     // CONSENSUS PRINCIPLE: strict on bilateral fields, tolerant on unilateral lag
@@ -1712,17 +1736,19 @@ export async function handleAccountInput(
       assertNoUnilateralSettlementMutation(accountMachine, beforeSettlement, tx, 'receiver/commit');
     }
 
-    console.log(
-      `💳 RECEIVER-COMMIT COMPLETE: Deltas after re-execution for ${cpForCommitLog.slice(-4)}:`,
-      Array.from(accountMachine.deltas.entries()).map(([tokenId, delta]) => ({
-        tokenId,
-        collateral: delta.collateral?.toString(),
-        leftCreditLimit: delta.leftCreditLimit?.toString(),
-        rightCreditLimit: delta.rightCreditLimit?.toString(),
-        ondelta: delta.ondelta?.toString(),
-        offdelta: delta.offdelta?.toString(),
-      })),
-    );
+    accountLog.info('frame.commit.complete', {
+      side: 'receiver',
+      counterparty: shortId(cpForCommitLog),
+      height: receivedFrame.height,
+      tokens: accountMachine.deltas.size,
+    });
+    if (shouldLogFullPayloads()) {
+      accountLog.trace('frame.commit.deltas', {
+        side: 'receiver',
+        counterparty: shortId(cpForCommitLog),
+        deltas: summarizeDeltasForLog(accountMachine.deltas),
+      });
+    }
 
     // CRITICAL: Copy pendingForward for multi-hop routing
     if (clonedMachine.pendingForward) {
@@ -1754,7 +1780,7 @@ export async function handleAccountInput(
           if (!accountMachine.disputeProofNoncesByHash) accountMachine.disputeProofNoncesByHash = {};
           accountMachine.disputeProofNoncesByHash[input.newDisputeProofBodyHash] = input.disputeProofNonce;
         }
-        console.log(`✅ Stored counterparty dispute hanko on commit (frame ${receivedFrame.height})`);
+        accountLog.debug('hanko.dispute_frame_stored', { height: receivedFrame.height, from: shortId(input.fromEntityId) });
       } else {
         console.warn(`⚠️ Dispute hanko verification failed on commit — skipping dispute metadata`);
       }
@@ -1772,7 +1798,7 @@ export async function handleAccountInput(
     // Past bilateral frames are not future-consensus state. Keep only a
     // non-enumerable UI/debug view; durable history lives in the frame DB.
     appendAccountFrameHistoryView(accountMachine, committedFrame);
-    console.log(`📚 Frame ${receivedFrame.height} accepted and indexed in frame DB`);
+    accountLog.debug('frame.indexed', { source: 'peerCommit', height: receivedFrame.height });
 
     events.push(...processEvents);
     events.push(`🤝 Accepted frame ${receivedFrame.height} from Entity ${input.fromEntityId.slice(-4)}`);

@@ -7,6 +7,8 @@
     "contracts:sync": "./scripts/sync-contract-artifacts.sh",
     "dev:setup": "./scripts/dev/clean-slate.sh && ./scripts/sync-contract-artifacts.sh",
     "dev": "bun run dev:setup && RUNTIME_VERBOSE_LOGS=0 DEV_VERBOSE=0 ./scripts/dev/run-dev.sh",
+    "dev:debug": "bun run dev:setup && XLN_LOG_LEVEL=debug XLN_LOG_SCOPES=entity,account,account.handler,orderbook,p2p RUNTIME_VERBOSE_LOGS=0 DEV_VERBOSE=0 ./scripts/dev/run-dev.sh",
+    "dev:trace": "bun run dev:setup && XLN_LOG_LEVEL=trace XLN_LOG_FULL_PAYLOADS=1 RUNTIME_VERBOSE_LOGS=0 DEV_VERBOSE=0 ./scripts/dev/run-dev.sh",
     "dev:verbose": "bun run dev:setup && RUNTIME_VERBOSE_LOGS=1 DEV_VERBOSE=1 ./scripts/dev/run-dev.sh",
     "dev:anvil2": "./scripts/dev/run-anvil2.sh",
     "dev:no-relay": "cd frontend && vite dev",
