@@ -22,6 +22,7 @@ import {
   type SwapCancelEvent,
   type SwapCancelRequestEvent,
 } from './handlers/account';
+import { pushCrossJurisdictionEntityOutput } from './cross-j-outputs';
 import { handleJEvent } from './j-events';
 
 // Extended return type including pure events from handlers
@@ -31,12 +32,33 @@ export interface ApplyEntityTxResult {
   jOutputs?: JInput[];
   // Pure events for entity-level orchestration
   mempoolOps?: MempoolOp[];
+  dirtyAccounts?: string[];
   swapOffersCreated?: SwapOfferEvent[];
   swapCancelRequests?: SwapCancelRequestEvent[];
   swapOffersCancelled?: SwapCancelEvent[];
   // Multi-signer: Hashes that need entity-quorum signing
   hashesToSign?: Array<{ hash: string; type: HashType; context: string }>;
 }
+
+const ENTITY_TX_INVARIANT_ERROR_PREFIXES = [
+  'FRAME_CONSENSUS_FAILED',
+  'ORDERBOOK_',
+  'STORAGE_',
+  'REPLAY_INVARIANT_FAILED',
+  'ROUTE_DISCOVERY_INVARIANT',
+  'CROSS_J_BOOK_OWNER_UNREACHABLE',
+  'CROSS_J_REMOTE_TOPOLOGY_INVALID',
+  'CROSS_J_COMMITTED_FILL_ACK_INVALID',
+  'CROSS_J_PULL_RESOLVE_OVER_COMMITTED',
+  'CROSS_J_PULL_RESOLVE_NO_COMMITTED_FILL',
+  'CROSS_J_PULL_RESOLVE_STATE_INVALID',
+  'CROSS_J_FILLED_ROUTE_SOURCE_PULL_EXPIRED',
+];
+
+const shouldRethrowEntityTxError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  return ENTITY_TX_INVARIANT_ERROR_PREFIXES.some(prefix => message.startsWith(prefix));
+};
 import { executeProposal, generateProposalId } from './proposals';
 import { validateMessage } from './validation';
 import { cloneEntityState, addMessage } from '../state-helpers';
@@ -79,7 +101,7 @@ import {
 } from './handlers/settle';
 import { handleDisputeFinalize, handleDisputeStart } from './handlers/dispute';
 import { buildCrossJurisdictionCancelAck } from '../cross-jurisdiction-orderbook';
-import { removeBookOrderById } from '../orderbook/cross-j';
+import { removeBookOrderById, removeCrossJurisdictionBookOrderByRouteId } from '../orderbook/cross-j';
 import {
   assertSameJurisdictionAccount,
   getJurisdictionStackId,
@@ -135,6 +157,15 @@ const findAccountKey = (state: EntityState, counterpartyId: string): string | nu
   return null;
 };
 
+const pushCrossJOutput = (
+  env: Env,
+  outputs: EntityInput[],
+  entityId: string,
+  entityTxs: EntityTx[],
+): void => {
+  pushCrossJurisdictionEntityOutput(env, outputs, entityId, entityTxs);
+};
+
 const findCrossJurisdictionOfferRoute = (
   state: EntityState,
   orderId: string,
@@ -160,9 +191,18 @@ const sameCrossJurisdictionIntentTerms = (
   existing: CrossJurisdictionSwapRoute,
   next: CrossJurisdictionSwapRoute,
 ): boolean => {
+  const toBigInt = (value: unknown): bigint => {
+    if (typeof value === 'bigint') return value;
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value) || !Number.isInteger(value)) throw new Error('non-integer bigint term');
+      return BigInt(value);
+    }
+    if (typeof value === 'string') return BigInt(value);
+    throw new Error('unsupported bigint term');
+  };
   const sameBigInt = (left: unknown, right: unknown): boolean => {
     try {
-      return BigInt(left as any) === BigInt(right as any);
+      return toBigInt(left) === toBigInt(right);
     } catch {
       return false;
     }
@@ -222,6 +262,37 @@ const isCrossJurisdictionRouteParticipant = (
     route.hubEntityId,
   ].some(candidate => candidate && normalizeEntityRef(candidate) === current);
 };
+
+const findCrossJurisdictionPullRoute = (
+  state: EntityState,
+  pullId: string,
+): { route: CrossJurisdictionSwapRoute; leg: 'source' | 'target' } | null => {
+  for (const route of state.crossJurisdictionSwaps?.values() ?? []) {
+    if (route.sourcePull?.pullId === pullId) return { route, leg: 'source' };
+    if (route.targetPull?.pullId === pullId) return { route, leg: 'target' };
+  }
+  return null;
+};
+
+const hasCommittedCrossJurisdictionFill = (route: CrossJurisdictionSwapRoute): boolean => (
+  Math.max(
+    Math.floor(Number(route.cumulativeFillRatio ?? 0) || 0),
+    Math.floor(Number(route.claimedRatio ?? 0) || 0),
+  ) > 0 ||
+  (route.filledSourceAmount ?? 0n) > 0n ||
+  (route.filledTargetAmount ?? 0n) > 0n ||
+  (route.sourceClaimed ?? 0n) > 0n ||
+  (route.targetClaimed ?? 0n) > 0n
+);
+
+const isCrossJurisdictionPullCancelWithinClear = (route: CrossJurisdictionSwapRoute): boolean => (
+  route.status === 'clearing' ||
+  route.status === 'source_claimed' ||
+  route.status === 'target_claimed' ||
+  route.status === 'settled' ||
+  route.clearingPolicy === 'cancel_and_clear' ||
+  route.clearingPolicy === 'full_fill'
+);
 
 const canonicalizeCrossJurisdictionRouteForKnownEntities = (
   env: Env,
@@ -514,8 +585,8 @@ export const applyEntityTx = async (
         blockNumber: jEventData.blockNumber,
         txHash: jEventData.transactionHash,
       });
-      const { newState, mempoolOps, outputs } = await handleJEvent(entityState, entityTx.data, env);
-      return { newState, outputs: outputs || [], mempoolOps: mempoolOps || [] };
+      const { newState, mempoolOps, outputs, dirtyAccounts } = await handleJEvent(entityState, entityTx.data, env);
+      return { newState, outputs: outputs || [], mempoolOps: mempoolOps || [], dirtyAccounts };
     }
 
     if (entityTx.type === 'accountInput') {
@@ -1619,6 +1690,19 @@ export const applyEntityTx = async (
         addMessage(newState, `❌ Pull cancel failed: no account with ${formatEntityId(counterpartyEntityId)}`);
         return { newState, outputs, mempoolOps };
       }
+      const crossPullRoute = findCrossJurisdictionPullRoute(newState, pullId);
+      if (
+        crossPullRoute &&
+        hasCommittedCrossJurisdictionFill(crossPullRoute.route) &&
+        !isCrossJurisdictionPullCancelWithinClear(crossPullRoute.route)
+      ) {
+        addMessage(
+          newState,
+          `❌ Cross-j ${crossPullRoute.leg} pull ${pullId.slice(0, 8)} cancel blocked: ` +
+          `route ${crossPullRoute.route.orderId} must clear through requestCrossJurisdictionClear`,
+        );
+        return { newState, outputs, mempoolOps };
+      }
       mempoolOps.push({
         accountId: normalizedCounterparty,
         tx: {
@@ -1679,13 +1763,10 @@ export const applyEntityTx = async (
         updatedAt: newState.timestamp || env.timestamp,
       };
       newState.crossJurisdictionSwaps.set(intentRoute.orderId, intentRoute);
-      outputs.push({
-        entityId: intentRoute.source.counterpartyEntityId,
-        entityTxs: [{
+      pushCrossJOutput(env, outputs, intentRoute.source.counterpartyEntityId, [{
           type: 'prepareCrossJurisdictionSwap',
           data: { route: intentRoute },
-        }],
-      });
+        }]);
       addMessage(newState, `🌉 Cross-j swap ${intentRoute.orderId} requested`);
       return { newState, outputs };
     }
@@ -1730,9 +1811,7 @@ export const applyEntityTx = async (
       newState.crossJurisdictionSwaps.set(preparedRoute.orderId, mergeCrossJurisdictionRoute(existing, preparedRoute));
       const publicPreparedRoute = cloneCrossJurisdictionRoute(preparedRoute);
 
-      outputs.push({
-        entityId: publicPreparedRoute.target.entityId,
-        entityTxs: [
+      pushCrossJOutput(env, outputs, publicPreparedRoute.target.entityId, [
           { type: 'registerCrossJurisdictionSwap', data: { route: publicPreparedRoute } },
           {
             type: 'pullLock',
@@ -1747,16 +1826,13 @@ export const applyEntityTx = async (
               description: publicPreparedRoute.memo || `Cross-j target pull ${publicPreparedRoute.orderId}`,
             },
           },
-        ],
-      });
-      outputs.push({
-        entityId: publicPreparedRoute.target.counterpartyEntityId,
-        entityTxs: [{ type: 'registerCrossJurisdictionSwap', data: { route: publicPreparedRoute } }],
-      });
-      outputs.push({
-        entityId: publicPreparedRoute.source.entityId,
-        entityTxs: [{ type: 'commitCrossJurisdictionSwap', data: { route: publicPreparedRoute } }],
-      });
+        ]);
+      pushCrossJOutput(env, outputs, publicPreparedRoute.target.counterpartyEntityId, [
+        { type: 'registerCrossJurisdictionSwap', data: { route: publicPreparedRoute } },
+      ]);
+      pushCrossJOutput(env, outputs, publicPreparedRoute.source.entityId, [
+        { type: 'commitCrossJurisdictionSwap', data: { route: publicPreparedRoute } },
+      ]);
       addMessage(newState, `🌉 Cross-j swap ${preparedRoute.orderId} prepared by hub`);
       return { newState, outputs };
     }
@@ -1998,13 +2074,10 @@ export const applyEntityTx = async (
       }
       const sourceHubId = normalizeEntityRef(route.source.counterpartyEntityId);
       if (normalizeEntityRef(newState.entityId) !== sourceHubId) {
-        outputs.push({
-          entityId: route.source.counterpartyEntityId,
-          entityTxs: [{
+        pushCrossJOutput(env, outputs, route.source.counterpartyEntityId, [{
             type: 'requestCrossJurisdictionClear',
-            data: { orderId, cancelRemainder },
-          }],
-        });
+            data: { orderId, cancelRemainder, route: cloneCrossJurisdictionRoute(route) },
+          }]);
         route.status = 'clear_requested';
         route.pendingClearRequestedAt = deterministicEntityTimestamp(newState, env);
         route.clearingPolicy = cancelRemainder ? 'cancel_and_clear' : 'manual';
@@ -2078,17 +2151,14 @@ export const applyEntityTx = async (
             },
           });
         }
-        outputs.push({
-          entityId: canonicalRoute.target.counterpartyEntityId,
-          entityTxs: [{
+        pushCrossJOutput(env, outputs, canonicalRoute.target.counterpartyEntityId, [{
             type: 'cancelPull',
             data: {
               counterpartyEntityId: canonicalRoute.target.entityId,
               pullId: canonicalRoute.targetPull.pullId,
               description: `Cross-j ${orderId} cancel target pull without fill`,
             },
-          }],
-        });
+          }]);
         canonicalRoute.status = 'cancelled';
         canonicalRoute.pendingClearRequestedAt = deterministicEntityTimestamp(newState, env);
         canonicalRoute.clearingPolicy = 'cancel_and_clear';
@@ -2316,20 +2386,20 @@ export const applyEntityTx = async (
             });
           }
           if (route.targetPull && route.target?.counterpartyEntityId && route.target?.entityId) {
-            outputs.push({
-              entityId: route.target.counterpartyEntityId,
-              entityTxs: [{
+            pushCrossJOutput(env, outputs, route.target.counterpartyEntityId, [{
                 type: 'cancelPull',
                 data: {
                   counterpartyEntityId: route.target.entityId,
                   pullId: route.targetPull.pullId,
                   description: `Cross-j ${orderId} sweep cancel target pull`,
                 },
-              }],
-            });
+              }]);
           }
           route.status = 'expired';
         } else {
+          if (sourceExpired) {
+            throw new Error(`CROSS_J_FILLED_ROUTE_SOURCE_PULL_EXPIRED: route=${orderId}`);
+          }
           route.status = 'failed';
         }
         route.updatedAt = now;
@@ -2347,6 +2417,22 @@ export const applyEntityTx = async (
         `expired=${expiredRoutes} closedOffers=${closedOffers} waiting=${waitingRoutes}`,
       );
 	      return { newState, outputs, mempoolOps };
+	    }
+
+	    if (entityTx.type === 'removeCrossJurisdictionBookOrder') {
+	      const newState = cloneEntityState(entityState);
+      const removed = removeCrossJurisdictionBookOrderByRouteId(
+        env,
+        newState,
+        entityTx.data.sourceEntityId,
+        entityTx.data.orderId,
+      );
+      addMessage(
+        newState,
+        `🌉 Cross-j book remove ${entityTx.data.orderId}${entityTx.data.reason ? `: ${entityTx.data.reason}` : ''} ` +
+        `${removed ? 'removed' : 'not-present'}`,
+      );
+	      return { newState, outputs: [] };
 	    }
 
 	    if (entityTx.type === 'placeSwapOffer') {
@@ -2614,6 +2700,9 @@ export const applyEntityTx = async (
   } catch (error) {
     console.error(`❌ Transaction execution error:`, error);
     log.error(`❌ Transaction execution error: ${error}`);
+    if (shouldRethrowEntityTxError(error)) {
+      throw error;
+    }
     return { newState: entityState, outputs: [], jOutputs: [] }; // Return unchanged state on error
   }
 };

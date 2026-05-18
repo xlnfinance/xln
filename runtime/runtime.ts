@@ -155,6 +155,11 @@ import {
 } from './account-utils';
 import { computeSwapPriceTicks, prepareSwapOrder, quantizeSwapOrder } from './orderbook';
 import { withCanonicalCrossJurisdictionRouteHash } from './cross-jurisdiction';
+import {
+  entityInputHasCrossJurisdictionIntraRuntimeTx,
+  extractCrossJurisdictionRouteFromTx,
+  isCrossJurisdictionEntityInputRemoteHopAllowed,
+} from './cross-jurisdiction-boundary';
 import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
 import {
   formatTokenAmount,
@@ -169,7 +174,7 @@ import {
 import { resolveEntityProposerId, txFingerprint } from './state-helpers';
 import { getEntityShortId, formatEntityId } from './utils';
 import { deserializeTaggedJson, serializeTaggedJson, safeStringify } from './serialization-utils';
-import { computeCanonicalStateHashFromEnv } from './storage/canonical-hash';
+import { computeCanonicalEntityHashesFromEnv, computeCanonicalStateHashFromEnv } from './storage/canonical-hash';
 import {
   computeStorageStateRoot,
   findStorageLatestSnapshotAtOrBelow,
@@ -2002,6 +2007,23 @@ const resolveRuntimeIdForEntity = (env: Env, entityId: string): string | null =>
   return null;
 };
 
+const hasLocalEntityReplica = (env: Env, entityId: string): boolean => {
+  const target = normalizeEntityKey(entityId);
+  return Array.from(env.eReplicas.keys()).some(key => {
+    try {
+      return normalizeEntityKey(extractEntityId(key)) === target;
+    } catch {
+      return false;
+    }
+  });
+};
+
+const resolveRuntimeIdForCrossJurisdictionEntity = (env: Env, entityId: string): string | null => {
+  const localRuntimeId = normalizeRuntimeId(String(env.runtimeId || ''));
+  if (localRuntimeId && hasLocalEntityReplica(env, entityId)) return localRuntimeId;
+  return resolveRuntimeIdForEntity(env, entityId);
+};
+
 export const registerEntityRuntimeHint = (env: Env, entityId: string, runtimeId: string): void => {
   if (!entityId || !runtimeId) return;
   const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
@@ -2022,6 +2044,32 @@ const collectSenderEntityHints = (input: RoutedEntityInput): string[] => {
     const fromEntityId = data['fromEntityId'];
     if (typeof fromEntityId === 'string' && fromEntityId.length > 0) {
       hints.add(fromEntityId);
+    }
+  }
+  return [...hints];
+};
+
+const collectCrossJurisdictionRemoteEntityHints = (env: Env, input: RoutedEntityInput, fromRuntimeId: string): string[] => {
+  const localRuntimeId = normalizeRuntimeId(String(env.runtimeId || ''));
+  const from = normalizeRuntimeId(fromRuntimeId);
+  if (!localRuntimeId || !from || localRuntimeId === from) return [];
+  const hints = new Set<string>();
+  for (const tx of input.entityTxs || []) {
+    const route = extractCrossJurisdictionRouteFromTx(tx);
+    if (!route) continue;
+    const sourceUserId = String(route.source?.entityId || '').toLowerCase();
+    const targetUserId = String(route.target?.counterpartyEntityId || '').toLowerCase();
+    const sourceHubId = String(route.source?.counterpartyEntityId || '').toLowerCase();
+    const targetHubId = String(route.target?.entityId || '').toLowerCase();
+    const localIsHubSide = [sourceHubId, targetHubId].some(entityId => entityId && hasLocalEntityReplica(env, entityId));
+    const localIsUserSide = [sourceUserId, targetUserId].some(entityId => entityId && hasLocalEntityReplica(env, entityId));
+    const remoteIds = localIsHubSide && !localIsUserSide
+      ? [sourceUserId, targetUserId]
+      : localIsUserSide && !localIsHubSide
+        ? [sourceHubId, targetHubId]
+        : [];
+    for (const entityId of remoteIds) {
+      if (entityId) hints.add(entityId);
     }
   }
   return [...hints];
@@ -2054,6 +2102,9 @@ export const handleInboundP2PEntityInput = (
     return;
   }
   for (const hintedEntityId of collectSenderEntityHints(input)) {
+    registerEntityRuntimeHint(env, hintedEntityId, from);
+  }
+  for (const hintedEntityId of collectCrossJurisdictionRemoteEntityHints(env, input, from)) {
     registerEntityRuntimeHint(env, hintedEntityId, from);
   }
   enqueueRuntimeInputs(env, [input], undefined, undefined, ingressTimestamp);
@@ -2232,6 +2283,20 @@ const planEntityOutputs = (
       });
       deferredOutputs.push(output);
       continue;
+    }
+    if (
+      entityInputHasCrossJurisdictionIntraRuntimeTx(output) &&
+      !isCrossJurisdictionEntityInputRemoteHopAllowed(
+        output,
+        env.runtimeId,
+        targetRuntimeId,
+        entityId => resolveRuntimeIdForCrossJurisdictionEntity(env, entityId),
+      )
+    ) {
+      throw new Error(
+        `CROSS_J_REMOTE_TOPOLOGY_INVALID: entity=${String(output.entityId || '').toLowerCase()} ` +
+        `targetRuntime=${targetRuntimeId} txTypes=${(output.entityTxs || []).map(tx => tx.type).join(',')}`,
+      );
     }
     remoteOutputs.push({ output: toDeliverableEntityInput(output, targetRuntimeId), targetRuntimeId });
   }
@@ -2964,6 +3029,38 @@ const applyRuntimeInput = async (
             `signer=${String(entityInput.signerId ?? '')} txs=${entityInput.entityTxs?.length ?? 0} ` +
             `types=${(entityInput.entityTxs ?? []).map(tx => tx.type).join(',')}`,
         );
+      }
+      if (entityInput.from) {
+        for (const hintedEntityId of collectCrossJurisdictionRemoteEntityHints(env, entityInput, entityInput.from)) {
+          registerEntityRuntimeHint(env, hintedEntityId, entityInput.from);
+        }
+      }
+      if (
+        entityInput.from &&
+        entityInputHasCrossJurisdictionIntraRuntimeTx(entityInput) &&
+        !isCrossJurisdictionEntityInputRemoteHopAllowed(
+          entityInput,
+          env.runtimeId,
+          entityInput.from,
+          entityId => resolveRuntimeIdForCrossJurisdictionEntity(env, entityId),
+        )
+      ) {
+        const dropDetails = {
+          entityId: entityInput.entityId,
+          from: entityInput.from,
+          txTypes: (entityInput.entityTxs || []).map(tx => tx.type),
+        };
+        if (env.scenarioMode || isReplay) {
+          failfastAssert(
+            false,
+            'RUNTIME_CROSS_J_TOPOLOGY_INVALID',
+            'Cross-j system inputs must stay inside their two-runtime route topology',
+            dropDetails,
+          );
+        }
+        console.error('❌ DROP_CROSS_J_TOPOLOGY_INVALID', dropDetails);
+        env.error('network', 'DROP_CROSS_J_TOPOLOGY_INVALID', dropDetails, entityInput.entityId);
+        continue;
       }
       // Track j-events in this input - entityInput.entityTxs guaranteed by validateEntityInput above
       // J-EVENT logging removed - too verbose
@@ -4601,7 +4698,7 @@ const loadEnvFromStorage = async (
     const frame = await readPersistedStorageFrameRecord(env, targetHeight);
     env.height = targetHeight;
 	    env.timestamp = frame?.timestamp ?? Math.max(...Array.from(restoredStates.values()).map((state) => Number(state.timestamp ?? 0)), 0);
-	    env.runtimeInput = { runtimeTxs: [], entityInputs: [] };
+    env.runtimeInput = { runtimeTxs: [], entityInputs: [] };
 	    env.runtimeMempool = undefined;
     await restoreOverlayFromFrameLog(env, targetHeight);
 	    await hydrateAccountFrameHistoryViews(env);
@@ -4616,6 +4713,29 @@ const loadEnvFromStorage = async (
     }
     env.frameLogs = restoredFrameLogs;
     rebuildPersistedJurisdictions(env);
+    if (frame && !frame.canonicalStateHash && runtimeProcessEnv?.['XLN_STORAGE_REQUIRE_CANONICAL_HASH'] !== '0') {
+      throw new Error(`STORAGE_RESTORE_CANONICAL_HASH_MISSING: height=${targetHeight}`);
+    }
+    if (frame?.canonicalStateHash) {
+      const restoredCanonicalStateHash = computeCanonicalStateHashFromEnv(env);
+      if (restoredCanonicalStateHash !== frame.canonicalStateHash) {
+        const expectedEntities = new Map((frame.canonicalEntityHashes || []).map((entry) => [entry.entityId, entry.hash]));
+        const actualEntities = computeCanonicalEntityHashesFromEnv(env);
+        const mismatch = actualEntities.find((entry) => expectedEntities.get(entry.entityId) !== entry.hash);
+        const missing = (frame.canonicalEntityHashes || []).find(
+          (entry) => !actualEntities.some((actual) => actual.entityId === entry.entityId),
+        );
+        const mismatchDetail = mismatch
+          ? ` entity=${mismatch.entityId} expectedEntity=${expectedEntities.get(mismatch.entityId) || 'missing'} actualEntity=${mismatch.hash}`
+          : missing
+            ? ` entity=${missing.entityId} expectedEntity=${missing.hash} actualEntity=missing`
+            : '';
+        throw new Error(
+          `STORAGE_RESTORE_CANONICAL_HASH_MISMATCH: height=${targetHeight} ` +
+            `expected=${frame.canonicalStateHash} actual=${restoredCanonicalStateHash}${mismatchDetail}`,
+        );
+      }
+    }
     envRecord(env)['__replayMeta'] = {
       checkpointHeight: selectedSnapshotHeight,
       selectedSnapshotHeight,

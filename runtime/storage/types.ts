@@ -53,6 +53,12 @@ export type StorageRuntimeConfig = {
   frameDbMaxBytes?: number;
   frameDbRetainFrames?: number;
   materializePeriodFrames?: number;
+  /**
+   * Canonical runtime-state commitment.
+   * 0 disables it; any positive value stores and verifies a full canonical hash
+   * every frame. Sparse cadences are intentionally not used for restore safety.
+   */
+  canonicalHashPeriodFrames?: number;
   accountMerkleRadix?: RadixMerkleRadix;
 };
 
@@ -120,6 +126,9 @@ export type StorageAccountDoc = {
   pendingFrame?: AccountMachine['pendingFrame'];
   pendingSignatures: string[];
   pendingAccountInput?: AccountMachine['pendingAccountInput'];
+  lastOutboundFrameAck?: AccountMachine['lastOutboundFrameAck'];
+  pendingForward?: AccountMachine['pendingForward'];
+  hankoSignature?: AccountMachine['hankoSignature'];
   rollbackCount: number;
   lastRollbackFrameHash?: string;
   leftJObservations?: Array<{ jHeight: number; jBlockHash: string; events: JurisdictionEvent[]; observedAt: number }>;

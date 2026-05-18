@@ -1,20 +1,15 @@
 import { test, expect, type Page } from '@playwright/test';
-import { Wallet } from 'ethers';
 import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
-import path from 'node:path';
 
 import {
   gotoApp as gotoSharedApp,
   createRuntime as createSharedRuntime,
+  selectDemoMnemonic,
 } from './utils/e2e-demo-users';
 import { requireIsolatedBaseUrl } from './utils/e2e-isolated-env';
 
 const APP_BASE_URL = requireIsolatedBaseUrl('E2E_BASE_URL');
 const INIT_TIMEOUT = 30_000;
-
-function randomMnemonic(): string {
-  return Wallet.createRandom().mnemonic!.phrase;
-}
 
 async function gotoApp(page: Page): Promise<void> {
   await gotoSharedApp(page, {
@@ -99,14 +94,25 @@ test('settings can add custom jurisdiction from canonical JSON and import it int
   const extra = await startExtraJurisdiction(helperName, port);
 
   try {
+    console.log('[J-SETTINGS] open app');
     await gotoApp(page);
     await dismissOnboardingIfVisible(page);
-    await createSharedRuntime(page, `settings-${Date.now()}`, randomMnemonic());
+    console.log('[J-SETTINGS] create runtime');
+    await createSharedRuntime(page, 'settings', selectDemoMnemonic('alice'));
 
+    console.log('[J-SETTINGS] open network settings');
+    await page.goto(`${APP_BASE_URL}/app#settings/network`, { waitUntil: 'domcontentloaded' });
+    await expect(page.getByTestId('tab-settings')).toBeVisible({ timeout: INIT_TIMEOUT });
+    await page.waitForTimeout(250);
     await page.getByTestId('tab-settings').click();
-    await page.getByRole('button', { name: 'Network' }).click();
+    const networkButton = page.getByRole('button', { name: 'Network' });
+    if (await networkButton.isVisible({ timeout: 2_000 }).catch(() => false)) {
+      await networkButton.click();
+    }
+    await expect(page.getByTestId('settings-network-add-jmachine-toggle')).toBeVisible({ timeout: INIT_TIMEOUT });
     await page.getByTestId('settings-network-add-jmachine-toggle').click();
 
+    console.log('[J-SETTINGS] import jurisdiction json');
     await page.getByTestId('add-jmachine-advanced-toggle').click();
     const jsonInput = page.getByTestId('add-jmachine-json');
     await expect(jsonInput).toBeVisible({ timeout: 10_000 });
@@ -114,6 +120,7 @@ test('settings can add custom jurisdiction from canonical JSON and import it int
     await page.getByTestId('add-jmachine-json-apply').click();
     await page.getByTestId('add-jmachine-create').click();
 
+    console.log('[J-SETTINGS] wait for import');
     await expect(page.getByText('Imported into active runtime')).toBeVisible({ timeout: 45_000 });
 
     await expect

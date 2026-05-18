@@ -712,6 +712,71 @@ async function ensureDeterministicSwapAccounts(
   };
 }
 
+async function faucetSwapTokenUntilOutCapacity(
+  page: Page,
+  runtimeRef: {
+    entityId: string;
+    signerId: string;
+    runtimeId: string;
+  },
+  hubId: string,
+  funding: { tokenId: number; amount: string },
+): Promise<void> {
+  const deadline = Date.now() + 75_000;
+  let attempts = 0;
+  let lastCapacity = 0;
+  let lastBody: unknown = null;
+  let lastStatus = 0;
+
+  while (Date.now() < deadline) {
+    lastCapacity = await readAccountTokenOutCapacity(
+      page,
+      runtimeRef.entityId,
+      runtimeRef.signerId,
+      hubId,
+      funding.tokenId,
+    ).catch(() => 0);
+    if (lastCapacity > 0) return;
+
+    attempts += 1;
+    const faucetResponse = await page.request.post(`${API_BASE_URL}/api/faucet/offchain`, {
+      data: {
+        userEntityId: runtimeRef.entityId,
+        userRuntimeId: runtimeRef.runtimeId,
+        hubEntityId: hubId,
+        tokenId: funding.tokenId,
+        amount: funding.amount,
+      },
+    });
+    lastStatus = faucetResponse.status();
+    lastBody = await faucetResponse.json().catch(() => ({}));
+    if (!faucetResponse.ok()) {
+      const code = String((lastBody as any)?.code || '');
+      if (code !== 'FAUCET_ACCOUNT_PENDING_FRAME' && code !== 'FAUCET_CLIENT_PENDING_FRAME') {
+        break;
+      }
+    }
+
+    const settleStartedAt = Date.now();
+    while (Date.now() - settleStartedAt < 12_000) {
+      lastCapacity = await readAccountTokenOutCapacity(
+        page,
+        runtimeRef.entityId,
+        runtimeRef.signerId,
+        hubId,
+        funding.tokenId,
+      ).catch(() => 0);
+      if (lastCapacity > 0) return;
+      await page.waitForTimeout(350);
+    }
+  }
+
+  throw new Error(
+    `swap click faucet did not produce outCapacity for hub ${hubId} token ${funding.tokenId}: ` +
+      `attempts=${attempts} lastCapacity=${lastCapacity} status=${lastStatus} body=${JSON.stringify(lastBody)}`,
+  );
+}
+
 async function readSwapState(
   page: Page,
   entityId: string,
@@ -1773,27 +1838,8 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
         { tokenId: 1, amount: '100' },
         { tokenId: 2, amount: '1' },
       ]) {
-        const faucetResponse = await page.request.post(`${API_BASE_URL}/api/faucet/offchain`, {
-          data: {
-            userEntityId: runtimeRef.entityId,
-            userRuntimeId: runtimeRef.runtimeId,
-            hubEntityId: hubId,
-            tokenId: funding.tokenId,
-            amount: funding.amount,
-          },
-        });
-        const faucetBody = await faucetResponse.json().catch(() => ({}));
-        expect(
-          faucetResponse.ok(),
-          `swap click faucet failed for hub ${hubId} token ${funding.tokenId}: ${JSON.stringify(faucetBody)}`,
-        ).toBe(true);
+        await faucetSwapTokenUntilOutCapacity(page, runtimeRef, hubId, funding);
       }
-    }
-
-    for (const hubId of runtimeRef.hubIds) {
-      await expect.poll(async () => {
-        return await readAccountTokenOutCapacity(page, runtimeRef.entityId, runtimeRef.signerId, hubId, 2);
-      }, { timeout: 60_000, intervals: [250, 500, 1000] }).toBeGreaterThan(0);
     }
 
     await timedStep('swap_click.open_workspace', () => openSwapWorkspace(page));

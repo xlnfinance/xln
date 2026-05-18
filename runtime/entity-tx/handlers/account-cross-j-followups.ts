@@ -1,7 +1,9 @@
 import type { AccountTx, CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, Env } from '../../types';
 import { CROSS_J_MAX_FILL_RATIO, isCrossJurisdictionRouteTransitionAllowed, isCrossJurisdictionTerminalStatus, validateCrossJurisdictionFillProgress, withCrossJurisdictionFillProgress } from '../../cross-jurisdiction';
+import { deriveCanonicalCrossJurisdictionBookOwner } from '../../cross-jurisdiction-market';
 import { decodeHashLadderBinary } from '../../hashladder';
 import { removeCrossJurisdictionBookOrder } from '../../orderbook/cross-j';
+import { buildCrossJurisdictionEntityOutput, findLocalEntityState } from '../cross-j-outputs';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 
@@ -64,6 +66,53 @@ const applyClaimedRatio = (
   route.filledTargetAmount = route.targetClaimed;
 };
 
+const routeBookOwnerEntityId = (route: CrossJurisdictionSwapRoute): string =>
+  normalizeEntityRef(route.bookOwnerEntityId || deriveCanonicalCrossJurisdictionBookOwner(route));
+
+const resolveLocalBookOwner = (
+  env: Env,
+  newState: EntityState,
+  route: CrossJurisdictionSwapRoute,
+): { ownerId: string; ownerState: EntityState | null; signerId: string | null; isCurrent: boolean } => {
+  const ownerId = routeBookOwnerEntityId(route);
+  const currentId = normalizeEntityRef(newState.entityId);
+  if (!ownerId || ownerId === currentId) {
+    return {
+      ownerId: newState.entityId,
+      ownerState: newState,
+      signerId: newState.config?.validators?.[0] || null,
+      isCurrent: true,
+    };
+  }
+  const ownerState = findLocalEntityState(env, ownerId);
+  const signerId = ownerState?.config?.validators?.[0];
+  return { ownerId: ownerState?.entityId || ownerId, ownerState, signerId: signerId || null, isCurrent: false };
+};
+
+const removeOrRouteCrossJurisdictionBookOrder = (
+  env: Env,
+  newState: EntityState,
+  route: CrossJurisdictionSwapRoute,
+  outputs: EntityInput[],
+  reason: string,
+): void => {
+  const owner = resolveLocalBookOwner(env, newState, route);
+  if (owner.isCurrent) {
+    removeCrossJurisdictionBookOrder(env, newState, route);
+    return;
+  }
+
+  outputs.push(buildCrossJurisdictionEntityOutput(env, owner.ownerId, [{
+      type: 'removeCrossJurisdictionBookOrder',
+      data: {
+        orderId: route.orderId,
+        sourceEntityId: route.source.entityId,
+        route,
+        reason,
+      },
+    }]));
+};
+
 const applyPullResolveFollowup = (
   env: Env,
   newState: EntityState,
@@ -79,14 +128,36 @@ const applyPullResolveFollowup = (
   }
   if (fillRatio <= 0 || !newState.crossJurisdictionSwaps?.size) return true;
 
+  const currentEntityId = normalizeEntityRef(newState.entityId);
+  const counterpartyEntityId = normalizeEntityRef(counterpartyId);
+
   for (const route of newState.crossJurisdictionSwaps.values()) {
-    const isSourceResolve =
+    const sourceUserId = normalizeEntityRef(route.source.entityId);
+    const sourceHubId = normalizeEntityRef(route.source.counterpartyEntityId);
+    const targetHubId = normalizeEntityRef(route.target.entityId);
+    const targetUserId = normalizeEntityRef(route.target.counterpartyEntityId);
+    const isSourceHubResolve =
       route.sourcePull?.pullId === accountTx.data.pullId &&
       route.targetPull?.pullId !== undefined &&
-      normalizeEntityRef(route.source.entityId) === normalizeEntityRef(newState.entityId) &&
-      normalizeEntityRef(route.source.counterpartyEntityId) === normalizeEntityRef(counterpartyId);
-    if (isSourceResolve) {
+      currentEntityId === sourceHubId &&
+      counterpartyEntityId === sourceUserId;
+    const isSourceUserResolve =
+      route.sourcePull?.pullId === accountTx.data.pullId &&
+      currentEntityId === sourceUserId &&
+      counterpartyEntityId === sourceHubId;
+
+    if (isSourceHubResolve || isSourceUserResolve) {
       assertPullResolveAllowed(route, fillRatio, 'source');
+      applyClaimedRatio(route, fillRatio);
+      setCrossJurisdictionStatus(route, 'source_claimed', newState.timestamp);
+
+      // The same account frame commits on both source participants. Only the hub
+      // side is allowed to relay the binary to the target leg; the user side
+      // still has to mirror the route lifecycle for local UI/storage convergence.
+      if (isSourceUserResolve) {
+        continue;
+      }
+
       const targetPull = route.targetPull;
       if (!targetPull) continue;
       const targetEntityTxs: EntityTx[] = [{
@@ -112,13 +183,8 @@ const applyPullResolveFollowup = (
           },
         });
       }
-      outputs.push({
-        entityId: route.target.counterpartyEntityId,
-        entityTxs: targetEntityTxs,
-      });
-      applyClaimedRatio(route, fillRatio);
-      setCrossJurisdictionStatus(route, 'source_claimed', newState.timestamp);
-      removeCrossJurisdictionBookOrder(env, newState, route);
+      outputs.push(buildCrossJurisdictionEntityOutput(env, route.target.counterpartyEntityId, targetEntityTxs));
+      removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'source_claimed');
       console.log(
         `🌉 PULL: Relaying cross-j ratio route=${route.orderId} ` +
         `target=${route.target.counterpartyEntityId.slice(-4)} ratio=${fillRatio}/65535`,
@@ -128,14 +194,14 @@ const applyPullResolveFollowup = (
 
     if (
       route.targetPull?.pullId === accountTx.data.pullId &&
-      normalizeEntityRef(route.target.counterpartyEntityId) === normalizeEntityRef(newState.entityId) &&
-      normalizeEntityRef(route.target.entityId) === normalizeEntityRef(counterpartyId)
+      currentEntityId === targetUserId &&
+      counterpartyEntityId === targetHubId
     ) {
       assertPullResolveAllowed(route, fillRatio, 'target');
       applyClaimedRatio(route, fillRatio);
       setCrossJurisdictionStatus(route, 'settled', newState.timestamp);
       route.settledAt = newState.timestamp;
-      removeCrossJurisdictionBookOrder(env, newState, route);
+      removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'settled');
       console.log(`🌉 PULL: Cross-j route settled ${route.orderId} ratio=${fillRatio}/65535`);
     }
   }
@@ -195,7 +261,7 @@ const applyFillAckFollowup = (
     (ratio >= CROSS_J_MAX_FILL_RATIO || accountTx.data.cancelRemainder) &&
     normalizeEntityRef(newState.entityId) === normalizeEntityRef(route.source.counterpartyEntityId)
   ) {
-    removeCrossJurisdictionBookOrder(env, newState, route);
+    removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'fill_ack_closed');
     outputs.push({
       entityId: newState.entityId,
       entityTxs: [{

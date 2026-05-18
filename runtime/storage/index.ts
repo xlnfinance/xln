@@ -17,7 +17,6 @@ import {
   computeStorageFrameHash,
   prepareStorageCanonicalStateHashes,
   prepareStorageStateHashes,
-  storageCanonicalHashEnabled,
 } from './hashes';
 import {
   createSnapshot,
@@ -159,6 +158,11 @@ const runtimeConfigFromEnv = (env: Env): Required<StorageRuntimeConfig> => ({
     1,
     Number(env.runtimeConfig?.storage?.materializePeriodFrames ?? DEFAULT_MATERIALIZE_PERIOD_FRAMES),
   ),
+  canonicalHashPeriodFrames: Number(
+    env.runtimeConfig?.storage?.canonicalHashPeriodFrames ??
+      process.env['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'] ??
+      (process.env['XLN_STORAGE_VERIFY_CANONICAL'] === '0' ? 0 : 1),
+  ) > 0 ? 1 : 0,
   accountMerkleRadix: env.runtimeConfig?.storage?.accountMerkleRadix === 256 ? 256 : DEFAULT_ACCOUNT_MERKLE_RADIX,
 });
 
@@ -374,11 +378,9 @@ export const saveRuntimeFrameToStorage = async (options: {
         ...(cachedEntityHashDocs ? { entityHashDocs: cachedEntityHashDocs } : {}),
       })
     : null;
-  const materializedEntities = materializedTouched
-    ? Array.from(materializedTouched.touchedEntities.values()).sort()
-    : [];
-  const canonicalHashes = shouldMaterialize && storageCanonicalHashEnabled()
-    ? prepareStorageCanonicalStateHashes(options.env, materializedEntities, previousFrame, replicaLookup)
+  const canonicalHashEnabled = config.canonicalHashPeriodFrames > 0;
+  const canonicalHashes = canonicalHashEnabled
+    ? prepareStorageCanonicalStateHashes(options.env, [], previousFrame, replicaLookup)
     : null;
   const frameRecordBase: StorageFrameRecord = {
     height: options.env.height,

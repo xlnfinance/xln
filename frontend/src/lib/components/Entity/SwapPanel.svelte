@@ -13,6 +13,7 @@
   import { enqueueEntityInputs, xlnFunctions } from '../../stores/xlnStore';
   import { toasts } from '../../stores/toastStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
+  import { unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
   import { amountToUsd } from '$lib/utils/assetPricing';
   import OrderbookPanel from '../Trading/OrderbookPanel.svelte';
   import SwapPairToolbar from './SwapPairToolbar.svelte';
@@ -205,7 +206,7 @@
 
     $: activeXlnFunctions = $xlnFunctions;
     $: activeFrame = env;
-    $: runtimeEnv = isRuntimeEnv(activeFrame) ? activeFrame : null;
+    $: runtimeEnv = unwrapLiveRuntimeEnv(activeFrame);
     $: activeIsLive = isLive;
     $: sourceEntityOptions = buildSourceEntityOptions(activeFrame, tab.entityId);
     $: if (!sourceEntityOptions.some((option) => option.value === selectedSourceEntityValue)) {
@@ -1557,12 +1558,6 @@
     } catch {
       return null;
     }
-  }
-
-  function isRuntimeEnv(value: unknown): value is Env {
-    if (!value || typeof value !== 'object') return false;
-    const obj = value as { eReplicas?: unknown; jReplicas?: unknown };
-    return obj.eReplicas instanceof Map && obj.jReplicas instanceof Map;
   }
 
   function toBigIntSafe(value: unknown): bigint | null {
@@ -3014,7 +3009,9 @@
 
   .leg-header {
     display: grid;
-    grid-template-columns: auto minmax(220px, 1fr);
+    grid-template-columns: auto minmax(280px, 1fr);
+    gap: 12px;
+    align-items: center;
     justify-content: space-between;
   }
 
@@ -3037,6 +3034,7 @@
     font-size: 12px;
     font-weight: 700;
     color-scheme: dark;
+    line-height: 1.25;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
@@ -3044,6 +3042,7 @@
   .chain-select {
     width: 100%;
     max-width: none;
+    min-width: 260px;
     min-height: 38px;
     padding: 0 34px 0 10px;
   }
@@ -3162,6 +3161,7 @@
     flex: 1 1 220px;
     width: auto;
     max-width: none;
+    min-width: 260px;
     min-height: 38px;
     padding: 0 34px 0 10px;
   }
@@ -3247,7 +3247,7 @@
   .route-select {
     width: 100%;
     min-height: 38px;
-    min-width: 0;
+    min-width: 220px;
     padding: 0 34px 0 12px;
     color: #d1d5db;
     background: #0c0d11;
@@ -3255,6 +3255,7 @@
     border-radius: 7px;
     font-size: 12px;
     box-sizing: border-box;
+    color-scheme: dark;
   }
 
   .route-flow {
@@ -3703,7 +3704,7 @@
   }
 
   .closed-status-filter select {
-    min-width: 148px;
+    min-width: 180px;
     height: 34px;
     border-radius: 10px;
     border: 1px solid rgba(255, 255, 255, 0.08);
@@ -3713,6 +3714,27 @@
     font-size: 12px;
     font-weight: 600;
     padding: 0 10px;
+    color-scheme: dark;
+  }
+
+  @media (max-width: 720px) {
+    .leg-header {
+      grid-template-columns: minmax(0, 1fr);
+      align-items: stretch;
+    }
+
+    .chain-select,
+    .venue-row select,
+    .route-select {
+      min-width: 0;
+      width: 100%;
+    }
+
+    .venue-row {
+      align-items: stretch;
+      flex-direction: column;
+      padding: 8px 10px;
+    }
   }
 
   .orders-empty {

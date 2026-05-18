@@ -271,51 +271,20 @@ export function backfillEntityJurisdictionBinding(
 
 const normalizeEntityRef = (value: unknown): string => String(value || '').toLowerCase();
 
-const normalizeJurisdictionChainId = (value: unknown): number | null => {
-  if (value === undefined || value === null) return null;
-  const numeric = Number(value);
-  if (!Number.isFinite(numeric) || numeric <= 0) return null;
-  return Math.floor(numeric);
-};
-
-const readJurisdictionName = (jurisdiction: unknown): string => {
+const readStrictJurisdictionStackId = (jurisdiction: unknown): string => {
   if (!jurisdiction || typeof jurisdiction !== 'object') return '';
-  return normalizeJurisdictionName((jurisdiction as { name?: unknown }).name);
-};
-
-const readJurisdictionChainId = (jurisdiction: unknown): number | null => {
-  if (!jurisdiction || typeof jurisdiction !== 'object') return null;
-  return normalizeJurisdictionChainId((jurisdiction as { chainId?: unknown }).chainId);
-};
-
-const readJurisdictionDepository = (jurisdiction: unknown): string => {
-  if (!jurisdiction || typeof jurisdiction !== 'object') return '';
-  return String((jurisdiction as { depositoryAddress?: unknown }).depositoryAddress || '').trim().toLowerCase();
+  const chainId = normalizeStackChainId((jurisdiction as { chainId?: unknown }).chainId);
+  const depositoryAddress = firstUsableContractAddress(
+    (jurisdiction as { depositoryAddress?: unknown }).depositoryAddress,
+  );
+  if (chainId === null || !depositoryAddress) return '';
+  return getJurisdictionStackId({ chainId, depositoryAddress });
 };
 
 function sameAccountJurisdiction(sourceJurisdiction: unknown, targetJurisdiction: unknown): boolean {
-  const sourceChainId = readJurisdictionChainId(sourceJurisdiction);
-  const targetChainId = readJurisdictionChainId(targetJurisdiction);
-  const sourceDepository = readJurisdictionDepository(sourceJurisdiction);
-  const targetDepository = readJurisdictionDepository(targetJurisdiction);
-
-  if (sourceChainId !== null || targetChainId !== null) {
-    return (
-      sourceChainId !== null &&
-      targetChainId !== null &&
-      sourceChainId === targetChainId &&
-      Boolean(sourceDepository && targetDepository) &&
-      sourceDepository === targetDepository
-    );
-  }
-
-  if (sourceDepository || targetDepository) {
-    return Boolean(sourceDepository && targetDepository && sourceDepository === targetDepository);
-  }
-
-  const sourceName = readJurisdictionName(sourceJurisdiction);
-  const targetName = readJurisdictionName(targetJurisdiction);
-  return Boolean(sourceName && targetName && sourceName === targetName);
+  const sourceStackId = readStrictJurisdictionStackId(sourceJurisdiction);
+  const targetStackId = readStrictJurisdictionStackId(targetJurisdiction);
+  return Boolean(sourceStackId && targetStackId && sourceStackId === targetStackId);
 }
 
 const findLocalEntityJurisdiction = (env: Env, entityId: string): { found: boolean; jurisdiction: unknown | null } => {

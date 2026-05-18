@@ -66,6 +66,7 @@ import {
 } from './market-snapshot';
 import { createMarketSubscriptionStack, isMarketMessageType } from './relay/market-subscriptions';
 import { isLocalOperatorRequest, publicRuntimeHealthBody } from './health-redaction';
+import { findForbiddenRpcProxyMethod } from './rpc-proxy-safety';
 import { ethers } from 'ethers';
 import { ERC20Mock__factory } from '../jurisdictions/typechain-types/index.ts';
 import {
@@ -2285,6 +2286,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     const jMachineRpc = env?.activeJurisdiction ? env.jReplicas.get(env.activeJurisdiction)?.rpcs?.[0] : undefined;
     const upstream = explicitUpstream || jMachineRpc || '';
     const isLocal = isLoopbackUrl(upstream);
+    const isProduction = process.env['NODE_ENV'] === 'production';
 
     if (!upstream) {
       pushDebugEvent(relayStore, {
@@ -2294,7 +2296,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       });
       return new Response(safeStringify({ error: 'RPC upstream not configured' }), { status: 503, headers });
     }
-    if (isLocal && blockLocal) {
+    if (isLocal && (blockLocal || (isProduction && process.env['XLN_ALLOW_LOCAL_RPC_PROXY'] !== '1'))) {
       pushDebugEvent(relayStore, {
         event: 'error',
         reason: 'RPC_PROXY_LOCAL_BLOCKED',
@@ -2311,6 +2313,15 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
     try {
       const bodyText = await req.text();
+      if (!(process.env['XLN_ALLOW_UNSAFE_RPC_PROXY'] === '1' || (!isProduction && isLocalOperatorRequest(req)))) {
+        const forbidden = findForbiddenRpcProxyMethod(bodyText);
+        if (forbidden) {
+          return new Response(
+            safeStringify({ error: 'RPC proxy method is not allowed', method: forbidden }),
+            { status: forbidden.startsWith('invalid') || forbidden === 'empty-batch' ? 400 : 403, headers },
+          );
+        }
+      }
       const rpcRes = await fetch(upstream, {
         method: 'POST',
         headers: {

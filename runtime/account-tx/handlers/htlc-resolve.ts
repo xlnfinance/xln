@@ -15,6 +15,7 @@ import { hashHtlcSecret } from '../../htlc-utils';
 export async function handleHtlcResolve(
   accountMachine: AccountMachine,
   accountTx: Extract<AccountTx, { type: 'htlc_resolve' }>,
+  byLeft: boolean,
   currentHeight: number,
   currentTimestamp: number,
 ): Promise<{
@@ -77,13 +78,32 @@ export async function handleHtlcResolve(
 
     events.push(`🔓 HTLC resolved (secret): ${lock.amount} token ${lock.tokenId}`);
   } else {
-    // === ERROR PATH: Just release hold ===
+    // === ERROR PATH: Release hold without paying the beneficiary ===
+    //
+    // Safety rule:
+    // - Beneficiary may release an active HTLC when downstream failed.
+    // - Payer may reclaim only after expiry.
+    //
+    // Without the side check, the payer could submit outcome=error with an
+    // arbitrary reason before expiry and cancel an active conditional payment.
+    const beneficiaryIsLeft = !lock.senderIsLeft;
+    const callerIsBeneficiary = byLeft === beneficiaryIsLeft;
+    const callerIsPayer = byLeft === lock.senderIsLeft;
+    const heightExpired = currentHeight > 0 && currentHeight > lock.revealBeforeHeight;
+    const timestampExpired = currentTimestamp > Number(lock.timelock);
+    const expired = heightExpired || timestampExpired;
+    if (!callerIsBeneficiary && !(callerIsPayer && expired)) {
+      return {
+        success: false,
+        error: `Only beneficiary can release an active HTLC; payer can cancel only after expiry`,
+        events,
+      };
+    }
 
-    // For timeout-type errors, verify expiry
+    // For timeout-type errors, verify expiry regardless of caller side. A
+    // beneficiary-initiated active release must use a non-timeout reason.
     if (reason === 'timeout') {
-      const heightExpired = currentHeight > 0 && currentHeight > lock.revealBeforeHeight;
-      const timestampExpired = currentTimestamp > Number(lock.timelock);
-      if (!heightExpired && !timestampExpired) {
+      if (!expired) {
         return { success: false, error: `Lock not expired yet`, events };
       }
     }
@@ -95,10 +115,24 @@ export async function handleHtlcResolve(
   // 3. Release hold (common to both paths)
   if (lock.senderIsLeft) {
     const currentHold = delta.leftHold || 0n;
-    delta.leftHold = currentHold < lock.amount ? 0n : currentHold - lock.amount;
+    if (currentHold < lock.amount) {
+      return {
+        success: false,
+        error: `HTLC_RESOLVE_HOLD_UNDERFLOW:left hold=${currentHold.toString()} amount=${lock.amount.toString()}`,
+        events,
+      };
+    }
+    delta.leftHold = currentHold - lock.amount;
   } else {
     const currentHold = delta.rightHold || 0n;
-    delta.rightHold = currentHold < lock.amount ? 0n : currentHold - lock.amount;
+    if (currentHold < lock.amount) {
+      return {
+        success: false,
+        error: `HTLC_RESOLVE_HOLD_UNDERFLOW:right hold=${currentHold.toString()} amount=${lock.amount.toString()}`,
+        events,
+      };
+    }
+    delta.rightHold = currentHold - lock.amount;
   }
 
   // 4. Remove lock

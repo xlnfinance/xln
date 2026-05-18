@@ -746,6 +746,63 @@ async function placeCrossOrder(
   await priceInput.fill(params.price);
   await expect(submit).toBeEnabled({ timeout: 30_000 });
   await submit.click();
+  let lastSubmitState: unknown = null;
+  try {
+    await expect.poll(
+      async () => {
+      const state = await readCrossState(page, params.source, params.hubId);
+      const formError = await page.getByTestId('swap-form-error').first().textContent().catch(() => '');
+      const formValues = await page.evaluate(() => {
+        const amount = document.querySelector<HTMLInputElement>('[data-testid="swap-order-amount"]')?.value || '';
+        const price = document.querySelector<HTMLInputElement>('[data-testid="swap-order-price"]')?.value || '';
+        const view = window as CrossRuntimeWindow & { __xln_env?: any };
+        const summarizeEnv = (env: any) => ({
+          runtimeId: String(env?.runtimeId || ''),
+          height: Number(env?.height || 0),
+          timestamp: Number(env?.timestamp || 0),
+          scenarioMode: Boolean(env?.scenarioMode),
+          loopActive: Boolean(env?.runtimeState?.loopActive),
+          wakeRequested: Boolean(env?.runtimeState?.wakeRequested),
+          processing: Boolean(env?.runtimeState?.processingPromise),
+          lastProcessEnteredAt: Number(env?.lastProcessEnteredAt || 0),
+          lastFrameAt: Number(env?.runtimeState?.lastFrameAt || 0),
+          minFrameDelayMs: Number(env?.runtimeConfig?.minFrameDelayMs || 0),
+          queuedAt: Number(env?.runtimeMempool?.queuedAt || 0),
+          runtimeInputTypes: Array.from(env?.runtimeInput?.entityInputs || []).map((input: any) => ({
+            entityId: String(input?.entityId || '').slice(-8),
+            txTypes: Array.from(input?.entityTxs || []).map((tx: any) => String(tx?.type || '')),
+          })),
+          mempoolTypes: Array.from(env?.runtimeMempool?.entityInputs || []).map((input: any) => ({
+            entityId: String(input?.entityId || '').slice(-8),
+            txTypes: Array.from(input?.entityTxs || []).map((tx: any) => String(tx?.type || '')),
+          })),
+        });
+        return {
+          amount,
+          price,
+          isolated: summarizeEnv(view.isolatedEnv),
+          live: summarizeEnv(view.__xln_env),
+        };
+      });
+      lastSubmitState = {
+        ok: state.routes > 0 || state.offers > 0 || state.messages.some((message) => /Cross-j swap/i.test(message)),
+        routes: state.routes,
+        offers: state.offers,
+        formError: String(formError || '').trim(),
+        formValues,
+        recentMessages: state.messages.slice(-8),
+      };
+      return lastSubmitState;
+      },
+      {
+        message: 'cross-j order submit must create a route or a cross-j offer in live runtime',
+        timeout: 30_000,
+        intervals: [500, 1_000, 2_000],
+      },
+    ).toMatchObject({ ok: true });
+  } catch (error) {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\nlastSubmitState=${JSON.stringify(lastSubmitState, null, 2)}`);
+  }
 }
 
 async function readCrossState(
@@ -872,40 +929,103 @@ async function waitForCrossPullFlow(
   sourceHubId: string,
   targetHubId: string,
 ): Promise<void> {
-  await expect.poll(
-    async () => {
-      const sourceState = await readCrossState(page, source, sourceHubId);
-      const targetState = await readCrossState(page, target, targetHubId);
-      return {
-        ok: (
-          (sourceState.routes > 0 && targetState.routes > 0) &&
-          (
-            sourceState.pulls > 0 ||
-            targetState.pulls > 0 ||
-            sourceState.claimedRoutes > 0 ||
-            targetState.claimedRoutes > 0
-          )
-        ),
-        sourceRoutes: sourceState.routes,
-        targetRoutes: targetState.routes,
-        sourcePulls: sourceState.pulls,
-        targetPulls: targetState.pulls,
-        sourceClaimed: sourceState.claimedRoutes,
-        targetClaimed: targetState.claimedRoutes,
-        sourceReplicaFound: sourceState.replicaFound,
-        sourceAccountFound: sourceState.accountFound,
-        targetReplicaFound: targetState.replicaFound,
-        targetAccountFound: targetState.accountFound,
-        sourceAccountKeys: sourceState.accountKeys,
-        targetAccountKeys: targetState.accountKeys,
-      };
-    },
-    {
-      timeout: 60_000,
-      intervals: [250, 500, 1000],
-      message: 'cross-j match must materialize prepared pull routes or settled pull claims',
-    },
-  ).toMatchObject({ ok: true });
+  try {
+    await expect.poll(
+      async () => {
+        const sourceState = await readCrossState(page, source, sourceHubId);
+        const targetState = await readCrossState(page, target, targetHubId);
+        return {
+          ok: (
+            (sourceState.routes > 0 && targetState.routes > 0) &&
+            (
+              sourceState.pulls > 0 ||
+              targetState.pulls > 0 ||
+              sourceState.claimedRoutes > 0 ||
+              targetState.claimedRoutes > 0
+            )
+          ),
+          sourceRoutes: sourceState.routes,
+          targetRoutes: targetState.routes,
+          sourcePulls: sourceState.pulls,
+          targetPulls: targetState.pulls,
+          sourceClaimed: sourceState.claimedRoutes,
+          targetClaimed: targetState.claimedRoutes,
+          sourceReplicaFound: sourceState.replicaFound,
+          sourceAccountFound: sourceState.accountFound,
+          targetReplicaFound: targetState.replicaFound,
+          targetAccountFound: targetState.accountFound,
+          sourceAccountKeys: sourceState.accountKeys,
+          targetAccountKeys: targetState.accountKeys,
+        };
+      },
+      {
+        timeout: 60_000,
+        intervals: [250, 500, 1000],
+        message: 'cross-j match must materialize prepared pull routes or settled pull claims',
+      },
+    ).toMatchObject({ ok: true });
+  } catch (error) {
+    const [sourceState, targetState] = await Promise.all([
+      readCrossState(page, source, sourceHubId),
+      readCrossState(page, target, targetHubId),
+    ]);
+    const replicas = await page.evaluate(() => {
+      const env = (window as CrossRuntimeWindow).isolatedEnv;
+      return Array.from(env?.eReplicas?.entries?.() || []).map(([key, replica]: [string, any]) => {
+        const state = replica?.state;
+        return {
+          key: String(key || ''),
+          entityId: String(state?.entityId || replica?.entityId || ''),
+          signerId: String(replica?.signerId || ''),
+          profileName: String(state?.profile?.name || ''),
+          jurisdiction: String(state?.config?.jurisdiction?.name || ''),
+          accounts: Array.from(state?.accounts?.entries?.() || []).map(([accountId, account]: [string, any]) => ({
+            accountId: String(accountId || ''),
+            currentHeight: Number(account?.currentHeight || 0),
+            mempool: Array.from(account?.mempool || []).map((tx: any) => String(tx?.type || '')),
+            pendingFrame: Array.from(account?.pendingFrame?.accountTxs || []).map((tx: any) => String(tx?.type || '')),
+            offers: Array.from(account?.swapOffers?.entries?.() || []).map(([offerId, offer]: [string, any]) => ({
+              offerId: String(offerId || ''),
+              cross: Boolean(offer?.crossJurisdiction),
+              status: String(offer?.crossJurisdiction?.status || ''),
+            })),
+            pulls: Array.from(account?.pulls?.keys?.() || []).map(String),
+          })),
+          routes: Array.from(state?.crossJurisdictionSwaps?.entries?.() || []).map(([orderId, route]: [string, any]) => ({
+            orderId: String(orderId || ''),
+            status: String(route?.status || ''),
+            source: String(route?.source?.entityId || ''),
+            sourceHub: String(route?.source?.counterpartyEntityId || ''),
+            targetHub: String(route?.target?.entityId || ''),
+            target: String(route?.target?.counterpartyEntityId || ''),
+          })),
+          messages: Array.from(state?.messages || []).slice(-20).map(String),
+        };
+      });
+    });
+    console.log('[E2E cross pull flow debug]', JSON.stringify({
+      source: {
+        entityId: source.entityId,
+        hubId: sourceHubId,
+        routes: sourceState.routeSummaries,
+        offers: sourceState.offerSummaries,
+        pulls: sourceState.pullIds,
+        accountKeys: sourceState.accountKeys,
+        messages: sourceState.messages.slice(-20),
+      },
+      target: {
+        entityId: target.entityId,
+        hubId: targetHubId,
+        routes: targetState.routeSummaries,
+        offers: targetState.offerSummaries,
+        pulls: targetState.pullIds,
+        accountKeys: targetState.accountKeys,
+        messages: targetState.messages.slice(-20),
+      },
+      replicas,
+    }, null, 2));
+    throw error;
+  }
 }
 
 async function waitForCrossOffersCleared(

@@ -776,6 +776,7 @@ export type EntityTx =
       data: {
         orderId: string;
         cancelRemainder?: boolean;
+        route?: CrossJurisdictionSwapRoute;
       };
     }
 	  | {
@@ -792,6 +793,15 @@ export type EntityTx =
 	  | {
 	      type: 'orderbookSweepCrossJurisdiction';
 	      data: {
+	        reason?: string;
+	      };
+	    }
+	  | {
+	      type: 'removeCrossJurisdictionBookOrder';
+	      data: {
+	        orderId: string;
+	        sourceEntityId: string;
+	        route?: CrossJurisdictionSwapRoute;
 	        reason?: string;
 	      };
 	    }
@@ -1898,6 +1908,7 @@ export interface JBlockObservation {
   signerId: string;              // Who observed this
   jHeight: number;               // J-machine block number
   jBlockHash: string;            // EVM block hash (or BrowserVM frame hash)
+  eventsHash: string;            // Canonical hash of normalized relevant events
   events: JurisdictionEvent[];   // Events relevant to this entity in this block
   observedAt: number;            // When signer observed this (for timeout detection)
 }
@@ -2312,6 +2323,7 @@ export interface Env {
       frameDbMaxBytes?: number;
       frameDbRetainFrames?: number;
       materializePeriodFrames?: number;
+      canonicalHashPeriodFrames?: number;
       accountMerkleRadix?: 16 | 256;
     };
   } | undefined;

@@ -47,12 +47,20 @@ type SoundcheckResult = {
 const CODE_EXTENSIONS = new Set(['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs', '.svelte', '.md']);
 const IGNORED_DIRS = new Set([
   '.git',
+  '.archive',
   'node_modules',
   '.svelte-kit',
   'build',
   'dist',
   '.logs',
   'coverage',
+  'docs-static',
+]);
+const IGNORED_FILES = new Set([
+  // Generated browser bundle; soundcheck must scan source, not emitted code.
+  'frontend/static/runtime.js',
+  // Historical test-status note, not executable coverage.
+  'tests/final_status.md',
 ]);
 
 const ORDERBOOK_MARKERS = [
@@ -105,6 +113,8 @@ function isCodeFile(file: string): boolean {
 function walkTarget(target: string, out: string[]) {
   const abs = resolve(target);
   if (!existsSync(abs)) return;
+  const rel = relative(process.cwd(), abs).replace(/\\/g, '/');
+  if (IGNORED_FILES.has(rel)) return;
   const stat = lstatSync(abs);
   if (stat.isFile()) {
     if (isCodeFile(abs)) out.push(abs);
@@ -114,6 +124,8 @@ function walkTarget(target: string, out: string[]) {
   for (const entry of readdirSync(abs, { withFileTypes: true })) {
     if (IGNORED_DIRS.has(entry.name)) continue;
     const entryPath = resolve(abs, entry.name);
+    const entryRel = relative(process.cwd(), entryPath).replace(/\\/g, '/');
+    if (IGNORED_FILES.has(entryRel)) continue;
     if (entry.isDirectory()) walkTarget(entryPath, out);
     else if (entry.isFile() && isCodeFile(entryPath)) out.push(entryPath);
   }

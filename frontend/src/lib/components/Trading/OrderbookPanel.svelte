@@ -929,7 +929,7 @@
   }
 
   .price-step select {
-    min-width: 110px;
+    min-width: 140px;
     height: 28px;
     border-radius: 8px;
     border: 1px solid rgba(255, 255, 255, 0.08);

@@ -56,9 +56,21 @@ async function waitForBrainvaultCreateForm(page: Page): Promise<void> {
   if (await brainVaultTab.isVisible().catch(() => false)) {
     await brainVaultTab.click();
   }
+  const recoveryDetails = page.getByTestId('brainvault-create-details');
+  await expect(recoveryDetails).toBeVisible({ timeout: 15_000 });
+  await expect(page.getByTestId('brainvault-create-toggle')).toContainText(/BrainVault recovery/i);
   await expect(page.getByRole('heading', { name: /Create XLN wallet/i }).first()).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('#name')).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('#passphrase')).toBeVisible({ timeout: 15_000 });
+  const detailsBox = await recoveryDetails.boundingBox();
+  const nameBox = await page.locator('#name').boundingBox();
+  expect(
+    detailsBox && nameBox && detailsBox.y < nameBox.y,
+    'BrainVault recovery controls must sit above the wallet creation form',
+  ).toBeTruthy();
+  await page.getByTestId('brainvault-create-toggle').click();
+  await expect(page.getByRole('button', { name: /Download seed sheet/i })).toBeVisible({ timeout: 5_000 });
+  await page.getByTestId('brainvault-create-toggle').click();
 }
 
 async function readRuntimeCount(page: Page): Promise<number> {

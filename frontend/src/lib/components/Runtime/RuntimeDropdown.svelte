@@ -138,7 +138,7 @@
   }
 </script>
 
-<Dropdown bind:open={isOpen} minWidth={180} maxWidth={260}>
+<Dropdown bind:open={isOpen} minWidth={320} maxWidth={560}>
   <span slot="trigger" class="trigger-content">
     <span class="conn-dot {connStatus}"></span>
     <span class="trigger-icon">🧭</span>
@@ -259,7 +259,7 @@
 
   .menu-item {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 8px;
     width: 100%;
     padding: 8px 12px;
@@ -284,15 +284,17 @@
 
   .menu-label {
     flex: 1;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    min-width: 0;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
   }
 
   .menu-meta {
+    flex-shrink: 0;
     font-size: 11px;
     color: #7aa8ff;
     margin-right: 4px;
+    line-height: 1.25;
   }
 
   .delete-btn {
@@ -386,8 +388,9 @@
   }
 
   .status-row {
-    display: flex;
-    align-items: center;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: start;
     gap: 8px;
     font-size: 11px;
   }
@@ -401,12 +404,11 @@
     color: #a1a1aa;
     font-family: 'SF Mono', monospace;
     font-size: 10px;
+    min-width: 0;
+    overflow-wrap: anywhere;
   }
 
   .status-value.url {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    max-width: 160px;
+    max-width: none;
   }
 </style>

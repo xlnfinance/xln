@@ -18,6 +18,7 @@ import {
   normalizeJurisdictionEvents,
 } from '../j-event-normalization';
 import { decodeHashLadderBinary } from '../hashladder';
+import { markStorageEntityDirty } from '../env-events';
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
@@ -54,6 +55,50 @@ export interface JEventEntityTxData {
   blockHash: string;    // Block hash for JBlock consensus
   transactionHash: string;  // Blockchain transaction hash
 }
+
+type JEventApplyResult = {
+  newState: EntityState;
+  mempoolOps: Array<{ accountId: string; tx: any }>;
+  outputs: EntityInput[];
+  dirtyAccounts: string[];
+};
+
+const normalizeSignerId = (value: unknown): string => String(value || '').trim().toLowerCase();
+
+const signerVotingPower = (state: EntityState, signers: Iterable<string>): bigint => {
+  let total = 0n;
+  const seen = new Set<string>();
+  const sharesByNormalized = new Map<string, bigint>();
+  for (const [signerId, shares] of Object.entries(state.config.shares || {})) {
+    sharesByNormalized.set(normalizeSignerId(signerId), BigInt(shares));
+  }
+  for (const signerId of signers) {
+    const normalized = normalizeSignerId(signerId);
+    if (!normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    total += sharesByNormalized.get(normalized) ?? 0n;
+  }
+  return total;
+};
+
+const isValidatorSigner = (state: EntityState, signerId: string): boolean => {
+  const normalized = normalizeSignerId(signerId);
+  return (state.config.validators || []).some((validatorId) => normalizeSignerId(validatorId) === normalized);
+};
+
+const canonicalJurisdictionEventsHash = (events: JurisdictionEvent[]): string => {
+  const keys = normalizeJurisdictionEvents(events)
+    .map((event) => canonicalJurisdictionEventKey(event))
+    .sort();
+  return ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(keys)));
+};
+
+const observationEventsHash = (observation: JBlockObservation): string => {
+  const existing = typeof observation.eventsHash === 'string' && observation.eventsHash.trim()
+    ? observation.eventsHash.toLowerCase()
+    : '';
+  return existing || canonicalJurisdictionEventsHash(observation.events || []);
+};
 
 const getTokenSymbol = (tokenId: number): string => {
   return getTokenInfo(tokenId).symbol;
@@ -294,7 +339,7 @@ function applyDebtForgiven(state: EntityState, event: Extract<JurisdictionEvent,
   });
 }
 
-function findAccountByCounterparty(state: EntityState, counterpartyEntityId: string) {
+function findAccountEntryByCounterparty(state: EntityState, counterpartyEntityId: string): [string, any] | null {
   const normalized = String(counterpartyEntityId || '').toLowerCase();
   if (!normalized) return null;
   for (const [accountId, account] of state.accounts.entries()) {
@@ -302,10 +347,14 @@ function findAccountByCounterparty(state: EntityState, counterpartyEntityId: str
     const leftNorm = String(account.leftEntity || '').toLowerCase();
     const rightNorm = String(account.rightEntity || '').toLowerCase();
     if (accountIdNorm === normalized || leftNorm === normalized || rightNorm === normalized) {
-      return account;
+      return [accountId, account];
     }
   }
   return null;
+}
+
+function findAccountByCounterparty(state: EntityState, counterpartyEntityId: string) {
+  return findAccountEntryByCounterparty(state, counterpartyEntityId)?.[1] ?? null;
 }
 
 function findEntityStateById(env: Env, entityId: string): EntityState | null {
@@ -670,8 +719,11 @@ function applyKnownHtlcSecret(
  * @param env - Runtime environment
  * @returns Updated state (may include finalized events if threshold met)
  */
-export const handleJEvent = async (entityState: EntityState, entityTxData: JEventEntityTxData, env: Env): Promise<{ newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }>; outputs: EntityInput[] }> => {
+export const handleJEvent = async (entityState: EntityState, entityTxData: JEventEntityTxData, env: Env): Promise<JEventApplyResult> => {
   const { from: signerId, observedAt, blockNumber, blockHash } = entityTxData;
+  if (!isValidatorSigner(entityState, signerId)) {
+    throw new Error(`j_event rejected: non-validator signer ${String(signerId)}`);
+  }
   type RawJEventBatchData = JEventEntityTxData & {
     events?: unknown[];
     event?: unknown;
@@ -698,14 +750,14 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
       );
     }
     console.log(`   ⏭️ SKIP: block ${blockNumber} already finalized`);
-    return { newState: entityState, mempoolOps: [], outputs: [] };
+    return { newState: entityState, mempoolOps: [], outputs: [], dirtyAccounts: [] };
   }
 
   // Skip blocks at or below lastFinalizedJHeight (monotonic progress only)
   // Note: The == case is already handled above with hash conflict detection.
   if (blockNumber <= entityState.lastFinalizedJHeight) {
     console.log(`   ⏭️ SKIP: stale block (${blockNumber} <= finalized ${entityState.lastFinalizedJHeight})`);
-    return { newState: entityState, mempoolOps: [], outputs: [] };
+    return { newState: entityState, mempoolOps: [], outputs: [], dirtyAccounts: [] };
   }
 
   // Convert raw events to canonical JurisdictionEvent format
@@ -728,16 +780,17 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
   }
   if (jEvents.length === 0) {
     console.warn(`⚠️ No valid j-events after normalization for block ${blockNumber}; skipping observation`);
-    return { newState: entityState, mempoolOps: [], outputs: [] };
+    return { newState: entityState, mempoolOps: [], outputs: [], dirtyAccounts: [] };
   }
 
   // Clone state and create observation with ALL events from this batch
   let newEntityState = cloneEntityState(entityState);
 
   const observation: JBlockObservation = {
-    signerId,
+    signerId: normalizeSignerId(signerId),
     jHeight: blockNumber,
     jBlockHash: blockHash,
+    eventsHash: canonicalJurisdictionEventsHash(jEvents),
     events: jEvents,
     observedAt,
   };
@@ -747,7 +800,7 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
 
   // Try to finalize - with batching, single-signer entities finalize immediately
   // with ALL events from the block (no more race condition)
-  const { newState, mempoolOps, outputs } = await tryFinalizeJBlocks(newEntityState, entityState.config.threshold, env);
+  const { newState, mempoolOps, outputs, dirtyAccounts } = await tryFinalizeJBlocks(newEntityState, entityState.config.threshold, env);
   newEntityState = newState;
 
   // DEBUG: Dump account mempools after j-event processing
@@ -763,7 +816,7 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
   }
 
   // Return both newState and mempoolOps
-  return { newState: newEntityState, mempoolOps, outputs };
+  return { newState: newEntityState, mempoolOps, outputs, dirtyAccounts };
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -1017,14 +1070,16 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
  * This batches multiple AccountSettled events from the same settlement tx so
  * tryFinalizeAccountJEvents can process all token updates atomically.
  */
-function mergeAccountJObservations(observations: Array<{ jHeight: number; jBlockHash: string; events: JurisdictionEvent[] }>): void {
-  if (observations.length <= 1) return;
+function mergeAccountJObservations(observations: Array<{ jHeight: number; jBlockHash: string; events: JurisdictionEvent[] }>): boolean {
+  if (observations.length <= 1) return false;
   const groups = new Map<string, number>(); // key → index in observations[]
+  let changed = false;
   let i = 0;
   while (i < observations.length) {
     const obs = observations[i];
     if (!obs) {
       observations.splice(i, 1);
+      changed = true;
       continue;
     }
     const key = `${obs.jHeight}:${obs.jBlockHash}`;
@@ -1041,14 +1096,19 @@ function mergeAccountJObservations(observations: Array<{ jHeight: number; jBlock
       for (const ev of normalizedEvents) {
         const evKey = canonicalJurisdictionEventKey(ev);
         const alreadyHas = target.events.some((e: JurisdictionEvent) => canonicalJurisdictionEventKey(e) === evKey);
-        if (!alreadyHas) target.events.push(ev);
+        if (!alreadyHas) {
+          target.events.push(ev);
+          changed = true;
+        }
       }
       observations.splice(i, 1); // Remove merged obs
+      changed = true;
     } else {
       groups.set(key, i);
       i++;
     }
   }
+  return changed;
 }
 
 /**
@@ -1102,23 +1162,41 @@ async function tryFinalizeJBlocks(
   state: EntityState,
   threshold: bigint,
   env: Env
-): Promise<{ newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }>; outputs: EntityInput[] }> {
+): Promise<JEventApplyResult> {
   const allMempoolOps: Array<{ accountId: string; tx: any }> = [];
   const allOutputs: EntityInput[] = [];
+  const dirtyAccounts = new Set<string>();
 
   // ─────────────────────────────────────────────────────────────────────────────
-  // Step 1: Group observations by (height, hash)
+  // Step 1: Group observations by (height, hash, canonical events)
   // ─────────────────────────────────────────────────────────────────────────────
-  // Multiple signers may observe the same block - group them together.
-  // Key format: "height:hash" e.g. "100:0xabc123..."
+  // Multiple signers may observe the same block - group them together only if
+  // they also agree on the relevant event set. A block hash quorum is not enough:
+  // a Byzantine signer must not be able to union fake events into a finalized
+  // J-block after honest signers agreed only on the block hash.
+  // Key format: "height:hash:eventsHash".
   const observationGroups = new Map<string, JBlockObservation[]>();
+  const signerObservationHashes = new Map<string, string>();
 
   for (const obs of state.jBlockObservations) {
-    const key = `${obs.jHeight}:${obs.jBlockHash}`;
+    if (!isValidatorSigner(state, obs.signerId)) {
+      throw new Error(`j_event rejected: non-validator signer ${String(obs.signerId)}`);
+    }
+    const signerId = normalizeSignerId(obs.signerId);
+    const eventsHash = observationEventsHash(obs);
+    const signerKey = `${obs.jHeight}:${obs.jBlockHash}:${signerId}`;
+    const previousEventsHash = signerObservationHashes.get(signerKey);
+    if (previousEventsHash && previousEventsHash !== eventsHash) {
+      throw new Error(
+        `j_event conflict: signer ${signerId} submitted multiple event sets for block ${obs.jHeight}:${obs.jBlockHash}`,
+      );
+    }
+    signerObservationHashes.set(signerKey, eventsHash);
+    const key = `${obs.jHeight}:${obs.jBlockHash}:${eventsHash}`;
     if (!observationGroups.has(key)) {
       observationGroups.set(key, []);
     }
-    observationGroups.get(key)!.push(obs);
+    observationGroups.get(key)!.push({ ...obs, signerId, eventsHash });
   }
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -1128,11 +1206,13 @@ async function tryFinalizeJBlocks(
   console.log(`   📊 OBSERVATION-GROUPS: ${observationGroups.size} groups, keys=[${Array.from(observationGroups.keys()).join(', ')}]`);
 
   const thresholdHashesByHeight = new Map<number, Set<string>>();
+  const thresholdEventHashesByBlock = new Map<string, Set<string>>();
   for (const observations of observationGroups.values()) {
-    const uniqueSigners = new Set(observations.map(o => o.signerId));
-    if (BigInt(uniqueSigners.size) < threshold) continue;
+    const uniqueSigners = new Set(observations.map(o => normalizeSignerId(o.signerId)));
+    if (signerVotingPower(state, uniqueSigners) < threshold) continue;
     const jHeight = observations[0]!.jHeight;
     const jBlockHash = observations[0]!.jBlockHash;
+    const eventsHash = observationEventsHash(observations[0]!);
     const hashes = thresholdHashesByHeight.get(jHeight) ?? new Set<string>();
     hashes.add(jBlockHash);
     thresholdHashesByHeight.set(jHeight, hashes);
@@ -1141,15 +1221,25 @@ async function tryFinalizeJBlocks(
         `j_event conflict: multiple threshold hashes for block ${jHeight}: ${Array.from(hashes).join(', ')}`,
       );
     }
+    const blockKey = `${jHeight}:${jBlockHash}`;
+    const eventHashes = thresholdEventHashesByBlock.get(blockKey) ?? new Set<string>();
+    eventHashes.add(eventsHash);
+    thresholdEventHashesByBlock.set(blockKey, eventHashes);
+    if (eventHashes.size > 1) {
+      throw new Error(
+        `j_event conflict: multiple threshold event sets for block ${blockKey}: ${Array.from(eventHashes).join(', ')}`,
+      );
+    }
   }
 
   for (const [_key, observations] of observationGroups) {
     // Count UNIQUE signers (ignore duplicate submissions from same signer)
-    const uniqueSigners = new Set(observations.map(o => o.signerId));
+    const uniqueSigners = new Set(observations.map(o => normalizeSignerId(o.signerId)));
     const signerCount = uniqueSigners.size;
+    const signerPower = signerVotingPower(state, uniqueSigners);
 
     // Does this group meet the threshold?
-    if (BigInt(signerCount) >= threshold) {
+    if (signerPower >= threshold) {
       const jHeight = observations[0]!.jHeight;
       const jBlockHash = observations[0]!.jBlockHash;
 
@@ -1200,10 +1290,11 @@ async function tryFinalizeJBlocks(
       console.log(`      Event types:`, events.map(e => e.type));
       for (const event of events) {
         console.log(`      🔧 Applying event: ${event.type}`);
-        const { newState, mempoolOps, outputs } = await applyFinalizedJEvent(state, event, env);
+        const { newState, mempoolOps, outputs, dirtyAccounts: eventDirtyAccounts } = await applyFinalizedJEvent(state, event, env);
         state = newState;
         allMempoolOps.push(...mempoolOps);
         allOutputs.push(...outputs);
+        for (const accountId of eventDirtyAccounts) dirtyAccounts.add(accountId);
         // applyFinalizedJEvent clones state - ensure jBlockChain preserved
         if (!state.jBlockChain.some(b => b.jHeight === jHeight)) {
           console.log(`   ⚠️  CLONE LOST jBlockChain - restoring block ${jHeight}`);
@@ -1220,9 +1311,10 @@ async function tryFinalizeJBlocks(
       // Multiple AccountSettled events from the same batch create separate observations
       // and j_event_claims per token. Merge them so tryFinalizeAccountJEvents processes
       // all token updates atomically in one bilateral consensus round.
-      for (const [_cpId, account] of state.accounts) {
-        mergeAccountJObservations(account.leftJObservations);
-        mergeAccountJObservations(account.rightJObservations);
+      for (const [cpId, account] of state.accounts) {
+        const leftChanged = mergeAccountJObservations(account.leftJObservations);
+        const rightChanged = mergeAccountJObservations(account.rightJObservations);
+        if (leftChanged || rightChanged) dirtyAccounts.add(String(cpId).toLowerCase());
       }
       mergeJEventClaimOps(allMempoolOps);
     }
@@ -1242,7 +1334,7 @@ async function tryFinalizeJBlocks(
     console.log(`   🧹 Pruned finalized heights [${finalizedHeights.join(',')}] (${state.jBlockObservations.length} pending)`);
   }
 
-  return { newState: state, mempoolOps: allMempoolOps, outputs: allOutputs };
+  return { newState: state, mempoolOps: allMempoolOps, outputs: allOutputs, dirtyAccounts: Array.from(dirtyAccounts) };
 }
 
 /**
@@ -1301,7 +1393,7 @@ async function applyFinalizedJEvent(
   entityState: EntityState,
   event: JurisdictionEvent,
   env: Env
-): Promise<{ newState: EntityState; mempoolOps: Array<{ accountId: string; tx: any }>; outputs: EntityInput[] }> {
+): Promise<JEventApplyResult> {
   console.log(`🔧🔧 applyFinalizedJEvent: entityId=${entityState.entityId.slice(-4)}, event.type=${event.type}`);
 
   const entityShort = entityState.entityId.slice(-4);
@@ -1313,6 +1405,13 @@ async function applyFinalizedJEvent(
   const newState = cloneEntityState(entityState);
   const mempoolOps: Array<{ accountId: string; tx: any }> = [];
   const outputs: EntityInput[] = [];
+  const dirtyAccounts = new Set<string>();
+  const done = (): JEventApplyResult => ({
+    newState,
+    mempoolOps,
+    outputs,
+    dirtyAccounts: Array.from(dirtyAccounts),
+  });
 
   // ═══════════════════════════════════════════════════════════════════════════
   // CANONICAL J-EVENTS
@@ -1350,7 +1449,7 @@ async function applyFinalizedJEvent(
     const myIsRight = myEntityId === rightId;
     if (!myIsLeft && !myIsRight) {
       console.warn(`   ⚠️ AccountSettled not for this entity: me=${entityState.entityId.slice(-4)} left=${leftId.slice(-4)} right=${rightId.slice(-4)}`);
-      return { newState, mempoolOps, outputs };
+      return done();
     }
     const counterpartyEntityId = myIsLeft ? rightEntity : leftEntity;
     const cpShort = String(counterpartyEntityId).slice(-4);
@@ -1375,8 +1474,9 @@ async function applyFinalizedJEvent(
     const account = newState.accounts.get(counterpartyEntityId as string);
     if (!account) {
       console.warn(`   ⚠️ No account for ${cpShort}`);
-      return { newState, mempoolOps, outputs };
+      return done();
     }
+    dirtyAccounts.add(String(counterpartyEntityId).toLowerCase());
 
     // Initialize consensus fields (claims are stored ONLY via bilateral account frames).
     // IMPORTANT: Do NOT mutate left/right observations here.
@@ -1398,7 +1498,7 @@ async function applyFinalizedJEvent(
       console.warn(
         `⚠️ AccountSettled normalization failed for claim enqueue: token=${tokenIdNum} cp=${cpShort} block=${blockNumber}`,
       );
-      return { newState, mempoolOps, outputs };
+      return done();
     }
     const eventCopy = structuredClone(normalizedClaimEvents[0]);
     const observedAt = entityState.timestamp || 0;
@@ -1484,6 +1584,7 @@ async function applyFinalizedJEvent(
     }
 
     if (account) {
+      dirtyAccounts.add(counterpartyId.toLowerCase());
       account.status = 'disputed';
       const weAreStarter = senderStr === entityIdNorm;
       const disputeEventData = event.data as typeof event.data & {
@@ -1600,6 +1701,7 @@ async function applyFinalizedJEvent(
           type: 'dispute_deadline',
           data: { accountId: counterpartyId },
         });
+        markStorageEntityDirty(env, newState.entityId);
       }
     } else {
       console.warn(`⚠️ DisputeStarted: account ${candidateCounterpartyId.slice(-4)} not found for entity ${entityIdNorm.slice(-4)}`);
@@ -1628,6 +1730,7 @@ async function applyFinalizedJEvent(
     }
 
     if (account) {
+      dirtyAccounts.add(counterpartyId.toLowerCase());
       const weAreFinalizer = senderStr === entityIdNorm;
       const finalProofbodyHash = String(event.data.finalProofbodyHash || '0x');
       const finalizedOnChainNonce = Math.max(
@@ -1641,6 +1744,7 @@ async function applyFinalizedJEvent(
         console.log(`✅ activeDispute cleared for ${counterpartyId.slice(-4)} (proof=${String(initialProofbodyHash).slice(0, 10)}...)`);
         if (newState.crontabState) {
           cancelCrontabHook(newState.crontabState, `dispute-deadline:${counterpartyId.toLowerCase()}`);
+          markStorageEntityDirty(env, newState.entityId);
         }
       } else {
         console.warn(`⚠️ DisputeFinalized: No activeDispute for ${counterpartyId.slice(-4)}`);
@@ -1791,7 +1895,7 @@ async function applyFinalizedJEvent(
     // Only process if this is our batch (case-insensitive: adapters may normalize differently).
     if (String(batchEntityId || '').toLowerCase() !== String(newState.entityId || '').toLowerCase()) {
       console.log(`   ⏭️ HankoBatchProcessed: Not our batch (${String(batchEntityId).slice(-4)} != ${entityShort})`);
-      return { newState, mempoolOps, outputs };
+      return done();
     }
 
     console.log(`📦 HankoBatchProcessed: nonce=${nonce}, success=${success}, hanko=${String(hankoHash).slice(0, 10)}...`);
@@ -1813,7 +1917,7 @@ async function applyFinalizedJEvent(
           console.warn(
             `⚠️ HankoBatchProcessed duplicate ignored (nonce ${nonce}, opCount=0, pending=false)`,
           );
-          return { newState, mempoolOps, outputs };
+          return done();
         }
 
         // Record completed batch in history (keep last 20)
@@ -1880,15 +1984,19 @@ async function applyFinalizedJEvent(
           }
           mergeBatchOps(newState.jBatchState.batch, requeueBatch);
           for (const fin of requeueBatch.disputeFinalizations || []) {
-            const account = findAccountByCounterparty(newState, String(fin.counterentity || ''));
+            const accountEntry = findAccountEntryByCounterparty(newState, String(fin.counterentity || ''));
+            const account = accountEntry?.[1];
             if (account?.activeDispute) {
               account.activeDispute.finalizeQueued = false;
+              dirtyAccounts.add(String(accountEntry?.[0] || fin.counterentity || '').toLowerCase());
             }
           }
           for (const counterpartyId of droppedCounterparties) {
-            const account = findAccountByCounterparty(newState, counterpartyId);
+            const accountEntry = findAccountEntryByCounterparty(newState, counterpartyId);
+            const account = accountEntry?.[1];
             if (account?.activeDispute) {
               account.activeDispute.finalizeQueued = false;
+              dirtyAccounts.add(String(accountEntry?.[0] || counterpartyId).toLowerCase());
             }
           }
         }
@@ -1897,11 +2005,12 @@ async function applyFinalizedJEvent(
       }
       // Batch is atomic on-chain; success=false means none of its ops applied.
       // Unfreeze submitted rebalance requests so hub can retry in next crontab tick.
-      for (const account of newState.accounts.values()) {
+      for (const [accountId, account] of newState.accounts.entries()) {
         if (!account.requestedRebalanceFeeState) continue;
         for (const feeState of account.requestedRebalanceFeeState.values()) {
           if ((feeState.jBatchSubmittedAt || 0) > 0) {
             feeState.jBatchSubmittedAt = 0;
+            dirtyAccounts.add(String(accountId).toLowerCase());
           }
         }
       }
@@ -1915,5 +2024,5 @@ async function applyFinalizedJEvent(
     console.warn(`⚠️ Unknown j-event type: ${event.type}. Canonical events: ${CANONICAL_J_EVENTS.join(', ')}`);
   }
 
-  return { newState, mempoolOps, outputs };
+  return done();
 }

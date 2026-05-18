@@ -39,7 +39,7 @@
  */
 
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
-import { Wallet, ethers } from 'ethers';
+import { ethers } from 'ethers';
 import { resetProdServer as resetSharedProdServer } from './utils/e2e-baseline';
 import { APP_BASE_URL, API_BASE_URL } from './utils/e2e-baseline';
 import { timedStep } from './utils/e2e-timing';
@@ -51,6 +51,7 @@ import { outCap, waitForOutCapDelta } from './utils/e2e-derived-capacity';
 import {
   createRuntimeIdentity,
   gotoApp,
+  selectDemoMnemonic,
 } from './utils/e2e-demo-users';
 import { connectRuntimeToHub as connectRuntimeToSharedHub } from './utils/e2e-connect';
 import { enqueueEntityTxs } from './utils/e2e-runtime-input';
@@ -97,7 +98,14 @@ function calcSenderSpend(
 
 function toWei(n: number): bigint { return BigInt(Math.round(n * 100)) * 10n ** 16n; }
 function formatUsd(wei: bigint): string { return `$${Number(wei / (10n ** 16n)) / 100}`; }
-function randomMnemonic(): string { return Wallet.createRandom().mnemonic!.phrase; }
+const MULTIROUTE_MNEMONICS: Record<UserName, string> = {
+  alice: selectDemoMnemonic('alice'),
+  bob: selectDemoMnemonic('bob'),
+  carol: selectDemoMnemonic('carol'),
+  dave: selectDemoMnemonic('dave'),
+  eve: 'candy maple cake sugar pudding cream honey rich smooth crumble sweet treat',
+  frank: 'all all all all all all all all all all all all',
+};
 
 function relayToApiBase(relayUrl: string | null | undefined): string | null {
   if (!relayUrl) return null;
@@ -384,7 +392,7 @@ test.describe('E2E Multi-Route Load: 6 users x 3 hubs x 19 test cases', () => {
     // Create 6 users
     const users: Record<UserName, Entity> = {} as Record<UserName, Entity>;
     for (const name of userNames) {
-      const mnemonic = randomMnemonic();
+      const mnemonic = MULTIROUTE_MNEMONICS[name];
       const entity = await createRuntimeIdentity(pageFor(name), name, mnemonic);
       await waitForEntityAdvertised(pageFor(name), entity.entityId);
       users[name] = { entityId: entity.entityId, signerId: entity.signerId, label: name, mnemonic };

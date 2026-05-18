@@ -19,7 +19,7 @@ import {
   verifyRuntimeChain,
 } from '../runtime.ts';
 import { markStorageEntityDirty } from '../env-events';
-import { readFrameDbRuntimeActivity, readStorageHead, verifyStorageTailIntegrity } from '../storage';
+import { readFrameDbRuntimeActivity, readStorageFrameRecord, readStorageHead, verifyStorageTailIntegrity } from '../storage';
 import { decodeBuffer, encodeBuffer } from '../storage/codec';
 import { readRawOrNull } from '../storage/level';
 import { KEY_HEAD, keyDiff, keyFrame, keySnapshotEntity, keySnapshotManifest } from '../storage/keys';
@@ -119,6 +119,83 @@ describe('storage frame journal retention', () => {
 
     await closeRuntimeDb(env);
     await closeInfraDb(env);
+  });
+
+  test('canonical frame hash fails restore when snapshot body loses state', async () => {
+    const seed = `canonical-snapshot-restore ${Date.now()} alpha beta gamma`;
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+    const namespacePath = join(dbRoot, runtimeId);
+
+    rmSync(namespacePath, { recursive: true, force: true });
+    rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-events`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
+    mkdirSync(dbRoot, { recursive: true });
+
+    const env = createEmptyEnv(seed);
+    env.runtimeId = runtimeId;
+    env.dbNamespace = runtimeId;
+    env.quietRuntimeLogs = true;
+    env.runtimeConfig = {
+      ...(env.runtimeConfig || {}),
+      storage: {
+        ...(env.runtimeConfig?.storage || {}),
+        snapshotPeriodFrames: 1,
+        materializePeriodFrames: 1,
+        canonicalHashPeriodFrames: 1,
+      },
+    };
+
+    const signer = deriveSignerAddressSync(seed, '1');
+    registerSignerKey(signer, deriveSignerKeySync(seed, '1'));
+    registerSignerKey(signer.slice(-4).toLowerCase(), deriveSignerKeySync(seed, '1'));
+    const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
+    const jurisdiction = {
+      name: 'canonical-snapshot-restore-test',
+      address: 'browservm://canonical-snapshot-restore-test',
+      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
+      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      chainId: 31337,
+    };
+    installTestJurisdiction(env, jurisdiction);
+
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importReplica',
+        entityId,
+        signerId: signer,
+        data: {
+          isProposer: true,
+          config: {
+            mode: 'proposer-based',
+            threshold: 1n,
+            validators: [signer],
+            shares: { [signer]: 1n },
+            jurisdiction,
+          },
+        },
+      }],
+      entityInputs: [],
+    });
+    await processRuntime(env, []);
+
+    const latestHeight = await getPersistedLatestHeight(env);
+    const frame = await readStorageFrameRecord(getFrameDb(env), latestHeight);
+    expect(frame?.canonicalStateHash).toMatch(/^0x[0-9a-f]{64}$/);
+
+    const snapshotKey = keySnapshotEntity(latestHeight, entityId);
+    const raw = await getFrameDb(env).get(snapshotKey);
+    const corrupted = decodeBuffer<any>(raw);
+    corrupted.messages = [...(Array.isArray(corrupted.messages) ? corrupted.messages : []), 'corrupted snapshot body'];
+    await getFrameDb(env).put(snapshotKey, encodeBuffer(corrupted));
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+
+    await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow('STORAGE_RESTORE_CANONICAL_HASH_MISMATCH');
   });
 
   test('rotates current storage epoch after byte-threshold snapshot and keeps frame tail usable', async () => {

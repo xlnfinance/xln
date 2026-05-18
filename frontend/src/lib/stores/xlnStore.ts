@@ -540,6 +540,7 @@ const hydrateRemoteAccountDoc = (doc: StorageAccountDoc): AccountMachine => ({
   swapClosedOrders: doc.swapClosedOrders ?? new Map(),
   ...withDefinedProp('pendingFrame', doc.pendingFrame),
   ...withDefinedProp('pendingAccountInput', doc.pendingAccountInput),
+  ...withDefinedProp('lastOutboundFrameAck', doc.lastOutboundFrameAck),
   ...withDefinedProp('lastRollbackFrameHash', doc.lastRollbackFrameHash),
   ...withDefinedProp('abiProofBody', doc.abiProofBody),
   ...withDefinedProp('currentFrameHanko', doc.currentFrameHanko),
@@ -979,6 +980,49 @@ export function getEnv(): Env | null {
   return get(xlnEnvironment);
 }
 
+const hasMeaningfulEntityInput = (input: RoutedEntityInput | null | undefined): boolean => Boolean(
+  input &&
+  (
+    (input.entityTxs?.length ?? 0) > 0 ||
+    Boolean(input.proposedFrame) ||
+    ((input.hashPrecommits as Map<unknown, unknown> | undefined)?.size ?? 0) > 0
+  ),
+);
+
+const hasMeaningfulRuntimeInputItems = (input: RuntimeInput | null | undefined): boolean => Boolean(
+  input &&
+  (
+    (input.runtimeTxs?.length ?? 0) > 0 ||
+    (input.jInputs?.length ?? 0) > 0 ||
+    (input.entityInputs ?? []).some(hasMeaningfulEntityInput)
+  ),
+);
+
+const hasMeaningfulQueuedLocalRuntimeWork = (env: Env): boolean => Boolean(
+  hasMeaningfulRuntimeInputItems(env.runtimeMempool) ||
+  (env.pendingOutputs ?? []).some(hasMeaningfulEntityInput) ||
+  (env.networkInbox ?? []).some(hasMeaningfulEntityInput)
+);
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+const drainLocalRuntimeInput = async (xln: XLNModule, env: Env): Promise<void> => {
+  const startedAt = Date.now();
+  for (let i = 0; i < 80 && hasMeaningfulQueuedLocalRuntimeWork(env); i += 1) {
+    const beforeHeight = Number(env.height || 0);
+    await xln.process(env, undefined, 0);
+    setXlnEnvironment(env);
+    if (!hasMeaningfulQueuedLocalRuntimeWork(env)) return;
+    if (Number(env.height || 0) === beforeHeight) {
+      await sleep(25);
+    }
+    if (Date.now() - startedAt > 4_000) break;
+  }
+  if (hasMeaningfulQueuedLocalRuntimeWork(env)) {
+    throw new Error('LOCAL_RUNTIME_DRAIN_TIMEOUT: submitted runtime input did not commit within 4s');
+  }
+};
+
 const routeRuntimeInput = async (xln: XLNModule, env: Env, input: RuntimeInput): Promise<Env> => {
   const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
   const { runtimeAdapter } = await import('./runtimeAdapterStore');
@@ -987,10 +1031,12 @@ const routeRuntimeInput = async (xln: XLNModule, env: Env, input: RuntimeInput):
     await adapter.send(input);
     return (await refreshRuntimeAdapterEnvironment()) ?? runtimeEnv;
   }
-  xln.enqueueRuntimeInput(runtimeEnv, input);
   if (!runtimeEnv.scenarioMode && typeof xln.startRuntimeLoop === 'function') {
     xln.startRuntimeLoop(runtimeEnv);
   }
+  xln.enqueueRuntimeInput(runtimeEnv, input);
+  await drainLocalRuntimeInput(xln, runtimeEnv);
+  setXlnEnvironment(runtimeEnv);
   return runtimeEnv;
 };
 

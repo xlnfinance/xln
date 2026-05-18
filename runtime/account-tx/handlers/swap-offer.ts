@@ -178,6 +178,32 @@ export async function handleSwapOffer(
     }
   }
 
+  if (crossJurisdiction) {
+    const sourcePull = crossJurisdiction.sourcePull;
+    const pairedPull = sourcePull ? accountMachine.pulls?.get(sourcePull.pullId) : undefined;
+    if (!sourcePull || !pairedPull) {
+      return {
+        success: false,
+        error: `Cross-j swap offer requires paired source pull lock`,
+        events,
+      };
+    }
+    if (
+      pairedPull.tokenId !== sourcePull.tokenId ||
+      pairedPull.tokenId !== giveTokenId ||
+      pairedPull.amount !== sourcePull.signedAmount ||
+      (pairedPull.fullHash || '').toLowerCase() !== sourcePull.fullHash.toLowerCase() ||
+      (pairedPull.partialRoot || '').toLowerCase() !== sourcePull.partialRoot.toLowerCase() ||
+      pairedPull.revealedUntilTimestamp !== sourcePull.revealedUntilTimestamp
+    ) {
+      return {
+        success: false,
+        error: `Cross-j swap offer source pull mismatch`,
+        events,
+      };
+    }
+  }
+
   // 5. Get or create delta for giveToken (the token being locked)
   let delta = accountMachine.deltas.get(giveTokenId);
   if (!delta) {

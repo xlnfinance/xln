@@ -1282,7 +1282,13 @@ test.describe('E2E Dispute Flow', () => {
       }
     });
 
-    const disputedState = await readAccountState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
+    let disputedState = await readAccountState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
+    await timedStep('dispute.wait_active_dispute', async () => {
+      await expect.poll(async () => {
+        disputedState = await readAccountState(page, accountRef.entityId, accountRef.signerId, accountRef.counterpartyId);
+        return disputedState.activeDispute;
+      }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(true);
+    });
     expect(disputedState.activeDispute, 'dispute must become active after disputeStart broadcast').toBe(true);
 
     const currentChainBlock = await readCurrentChainBlock(page);

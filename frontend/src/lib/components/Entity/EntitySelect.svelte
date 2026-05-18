@@ -127,7 +127,7 @@
 <style>
   .entity-select {
     position: relative;
-    min-width: 130px;
+    min-width: min(100%, 180px);
   }
 
   .es-trigger {
@@ -208,8 +208,9 @@
     position: absolute;
     top: calc(100% + 4px);
     left: 0;
-    right: 0;
-    min-width: 280px;
+    min-width: min(420px, calc(100vw - 24px));
+    width: max-content;
+    max-width: calc(100vw - 24px);
     background: #18181b;
     border: 1px solid #27272a;
     border-radius: 10px;
@@ -222,7 +223,7 @@
 
   .es-option {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 8px;
     width: 100%;
     padding: 8px 10px;
@@ -274,15 +275,15 @@
     color: #e4e4e7;
     font-size: 12px;
     line-height: 1.2;
+    overflow-wrap: anywhere;
   }
 
   .es-id-full {
     font-family: 'JetBrains Mono', 'SF Mono', monospace;
     font-size: 10px;
     color: #52525b;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+    white-space: normal;
+    word-break: break-all;
   }
 
   .es-copy {

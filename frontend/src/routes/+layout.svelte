@@ -4,6 +4,7 @@
 	import { page } from '$app/stores';
 	import Topbar from '$lib/components/Topbar.svelte';
 	import Toast from '$lib/components/Toast.svelte';
+	import { initializeNativeShell } from '$lib/native/capacitor';
 	import { installRangeSliderProgress } from '$lib/utils/rangeSliderProgress';
 	import '$lib/styles/apple-glass.css';
 	import '$lib/styles/checkbox-controls.css';
@@ -14,6 +15,7 @@
 	onMount(() => {
 		if (!browser) return;
 		const disposeRangeSliderProgress = installRangeSliderProgress();
+		void initializeNativeShell();
 		void loadDeployLabel();
 		return () => {
 			disposeRangeSliderProgress();

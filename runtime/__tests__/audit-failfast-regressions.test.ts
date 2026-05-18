@@ -3,19 +3,26 @@ import { describe, expect, test } from 'bun:test';
 import { handleAccountInput, proposeAccountFrame } from '../account-consensus';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { handleHtlcLock } from '../account-tx/handlers/htlc-lock';
+import { handleHtlcResolve } from '../account-tx/handlers/htlc-resolve';
 import { checkAutoRebalance, handleRequestCollateral } from '../account-tx/handlers/request-collateral';
 import { handleSwapOffer } from '../account-tx/handlers/swap-offer';
 import { LIMITS } from '../constants';
 import { ACCOUNT_PENDING_RESEND_AFTER_MS, executeCrontab, initCrontab } from '../entity-crontab';
 import { generateLazyEntityId } from '../entity-factory';
+import { isLeftEntity } from '../entity-id-utils';
 import { applyEntityInput } from '../entity-consensus';
+import { applyEntityTx } from '../entity-tx/apply';
+import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity-tx/handlers/account-cross-j-followups';
 import { handleJAbortSentBatch } from '../entity-tx/handlers/j-abort-sent-batch';
 import { handleJRebroadcast } from '../entity-tx/handlers/j-rebroadcast';
 import { handleJEvent } from '../entity-tx/j-events';
 import { createEmptyBatch } from '../j-batch';
-import { process, createEmptyEnv } from '../runtime';
+import { applyCommand, createBook, getBookOrder, type OrderbookExtState } from '../orderbook';
+import { process, createEmptyEnv, registerEntityRuntimeHint, sendEntityInput } from '../runtime';
 import { safeStringify } from '../serialization-utils';
-import type { AccountMachine, AccountTx, ConsensusConfig, EntityInput, EntityReplica, EntityState } from '../types';
+import { projectAccountDoc } from '../storage/projections';
+import { createDefaultDelta } from '../validation-utils';
+import type { AccountMachine, AccountTx, ConsensusConfig, CrossJurisdictionSwapRoute, EntityInput, EntityReplica, EntityState } from '../types';
 
 const makeSingleSignerConfig = (): ConsensusConfig => ({
   mode: 'proposer-based',
@@ -180,6 +187,39 @@ const makeEntityState = (entityId: string): EntityState => ({
 });
 
 describe('audit fail-fast regressions', () => {
+  test('cross-j system entity txs reject remote hops outside the two-runtime route topology', async () => {
+    const env = createEmptyEnv('cross-j-intra-runtime-boundary');
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    const remoteRuntime = `0x${'99'.repeat(20)}`;
+
+    await expect(process(env, [{
+      from: remoteRuntime,
+      entityId: `0x${'11'.repeat(32)}`,
+      entityTxs: [{
+        type: 'requestCrossJurisdictionSwap',
+        data: { route: {} },
+      } as any],
+    }])).rejects.toThrow('RUNTIME_CROSS_J_TOPOLOGY_INVALID');
+
+    expect(() => sendEntityInput(env, {
+      entityId: `0x${'22'.repeat(32)}`,
+      entityTxs: [{
+        type: 'registerCrossJurisdictionSwap',
+        data: { route: {} },
+      } as any],
+    })).not.toThrow();
+
+    registerEntityRuntimeHint(env, `0x${'22'.repeat(32)}`, remoteRuntime);
+    expect(() => sendEntityInput(env, {
+      entityId: `0x${'22'.repeat(32)}`,
+      entityTxs: [{
+        type: 'registerCrossJurisdictionSwap',
+        data: { route: {} },
+      } as any],
+    })).toThrow('CROSS_J_REMOTE_TOPOLOGY_INVALID');
+  });
+
   test('process requeues oversized runtime input instead of silently dropping it', async () => {
     const env = createEmptyEnv('audit-regression-seed');
     env.scenarioMode = true;
@@ -197,6 +237,236 @@ describe('audit fail-fast regressions', () => {
 
   test('safeStringify throws instead of hashing a placeholder string', () => {
     expect(() => safeStringify({ bad: new Date(Number.NaN) })).toThrow('SAFE_STRINGIFY_FAILED');
+  });
+
+  test('j_event rejects non-validator signer ids before observation aggregation', async () => {
+    const state = makeEntityState(`0x${'11'.repeat(32)}`);
+    const env = createEmptyEnv('j-event-non-validator');
+
+    await expect(handleJEvent(state, {
+      from: 'not-a-validator',
+      observedAt: 1_000,
+      blockNumber: 1,
+      blockHash: `0x${'22'.repeat(32)}`,
+      transactionHash: `0x${'33'.repeat(32)}`,
+      event: {
+        type: 'ReserveUpdated',
+        data: {
+          entity: state.entityId,
+          tokenId: 1,
+          newBalance: '100',
+        },
+      },
+    }, env)).rejects.toThrow('j_event rejected: non-validator signer');
+  });
+
+  test('j_event finality requires quorum on canonical event set, not only block hash', async () => {
+    const entityId = `0x${'44'.repeat(32)}`;
+    let state = makeEntityState(entityId);
+    state.config = {
+      mode: 'proposer-based',
+      threshold: 2n,
+      validators: ['1', '2', '3'],
+      shares: { '1': 1n, '2': 1n, '3': 1n },
+    };
+    const env = createEmptyEnv('j-event-events-hash-quorum');
+    const common = {
+      observedAt: 1_000,
+      blockNumber: 7,
+      blockHash: `0x${'55'.repeat(32)}`,
+      transactionHash: `0x${'66'.repeat(32)}`,
+    };
+    const honestEvent = {
+      type: 'ReserveUpdated',
+      data: { entity: entityId, tokenId: 1, newBalance: '100' },
+    };
+    const fakeEvent = {
+      type: 'ReserveUpdated',
+      data: { entity: entityId, tokenId: 1, newBalance: '999' },
+    };
+
+    state = (await handleJEvent(state, { ...common, from: '1', event: honestEvent }, env)).newState;
+    state = (await handleJEvent(state, { ...common, from: '2', event: fakeEvent }, env)).newState;
+    expect(state.jBlockChain.length).toBe(0);
+    expect(state.reserves.get(1)).toBeUndefined();
+
+    state = (await handleJEvent(state, { ...common, from: '3', event: honestEvent }, env)).newState;
+    expect(state.jBlockChain.length).toBe(1);
+    expect(state.reserves.get(1)).toBe(100n);
+  });
+
+  test('htlc_resolve(error) cannot be used by payer to cancel an active lock before expiry', async () => {
+    const account = makeProposalAccount([], 'alice', 'hub');
+    const amount = 1000n;
+    const delta = createDefaultDelta(1);
+    delta.leftHold = amount;
+    account.deltas.set(1, delta);
+    account.locks.set('lock-1', {
+      lockId: 'lock-1',
+      hashlock: `0x${'77'.repeat(32)}`,
+      timelock: 10_000n,
+      revealBeforeHeight: 100,
+      amount,
+      tokenId: 1,
+      senderIsLeft: true,
+      createdHeight: 0,
+      createdTimestamp: 0,
+    });
+
+    const payerResult = await handleHtlcResolve(
+      account,
+      { type: 'htlc_resolve', data: { lockId: 'lock-1', outcome: 'error', reason: 'downstream_error' } },
+      true,
+      1,
+      1_000,
+    );
+    expect(payerResult.success).toBe(false);
+    expect(account.locks.has('lock-1')).toBe(true);
+    expect(account.deltas.get(1)?.leftHold).toBe(amount);
+
+    const beneficiaryResult = await handleHtlcResolve(
+      account,
+      { type: 'htlc_resolve', data: { lockId: 'lock-1', outcome: 'error', reason: 'downstream_error' } },
+      false,
+      1,
+      1_000,
+    );
+    expect(beneficiaryResult.success).toBe(true);
+    expect(account.locks.has('lock-1')).toBe(false);
+    expect(account.deltas.get(1)?.leftHold).toBe(0n);
+  });
+
+  test('entity frame commits mark the entity core doc dirty for storage replay', async () => {
+    const seed = 'entity-frame-storage-mark seed alpha beta gamma';
+    const env = createEmptyEnv(seed);
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    env.timestamp = 10_000;
+    const { signerId, entityId } = registerLazySigner(seed, '1');
+    const replica = {
+      entityId,
+      signerId,
+      mempool: [],
+      isProposer: true,
+      state: makeEntityState(entityId),
+    } as EntityReplica;
+    replica.state.config = makeSingleSignerConfigFor(signerId);
+
+    await applyEntityInput(env, replica, {
+      entityId,
+      signerId,
+      entityTxs: [{
+        type: 'profile-update',
+        data: {
+          profile: {
+            entityId,
+            name: 'Storage Marked',
+          },
+        },
+      } as any],
+    });
+
+    const marks = env.runtimeState?.currentStorageOverlayMarks ?? [];
+    expect(marks.some((record) => record.family === 'entity' && record.entityId === entityId)).toBe(true);
+  });
+
+  test('crontab-only canonical mutations mark entity docs dirty for storage replay', async () => {
+    const seed = 'crontab-storage-mark seed alpha beta gamma';
+    const env = createEmptyEnv(seed);
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    const { signerId, entityId } = registerLazySigner(seed, '1');
+    const state = makeEntityState(entityId);
+    state.config = makeSingleSignerConfigFor(signerId);
+    state.timestamp = 50_000;
+    state.crontabState = initCrontab();
+    state.crontabState.tasks.clear();
+    state.crontabState.hooks.set('test-settlement-window', {
+      id: 'test-settlement-window',
+      triggerAt: 49_000,
+      type: 'settlement_window',
+      data: {},
+    });
+    const replica = {
+      entityId,
+      signerId,
+      mempool: [],
+      isProposer: true,
+      state,
+    } as EntityReplica;
+
+    await executeCrontab(env, replica, state.crontabState, { manualBroadcastInInput: false });
+
+    const marks = env.runtimeState?.currentStorageOverlayMarks ?? [];
+    expect(state.crontabState.hooks.has('test-settlement-window')).toBe(false);
+    expect(marks.some((record) => record.family === 'entity' && record.entityId === entityId)).toBe(true);
+  });
+
+  test('finalized j-events mark mutated account docs dirty for storage replay', async () => {
+    const seed = 'j-event-account-storage-mark seed alpha beta gamma';
+    const env = createEmptyEnv(seed);
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    env.timestamp = 20_000;
+    const { signerId, entityId } = registerLazySigner(seed, '1');
+    const counterpartyId = `0x${'34'.repeat(32)}`;
+    const state = makeEntityState(entityId);
+    state.config = makeSingleSignerConfigFor(signerId);
+    const entityIsLeft = isLeftEntity(entityId, counterpartyId);
+    const account = makeProposalAccount(
+      [],
+      entityIsLeft ? entityId : counterpartyId,
+      entityIsLeft ? counterpartyId : entityId,
+    );
+    account.activeDispute = {
+      startedByLeft: true,
+      initialProofbodyHash: `0x${'56'.repeat(32)}`,
+      initialNonce: 7,
+      disputeTimeout: 22,
+      onChainNonce: 7,
+      initialArguments: '0x',
+      finalizeQueued: true,
+    };
+    state.accounts.set(counterpartyId, account);
+    const replica = {
+      entityId,
+      signerId,
+      mempool: [],
+      isProposer: true,
+      state,
+    } as EntityReplica;
+
+    await applyEntityInput(env, replica, {
+      entityId,
+      signerId,
+      entityTxs: [{
+        type: 'j_event',
+        data: {
+          from: signerId,
+          observedAt: 20_000,
+          blockNumber: 22,
+          blockHash: `0x${'99'.repeat(32)}`,
+          transactionHash: `0x${'88'.repeat(32)}`,
+          event: {
+            type: 'DisputeFinalized',
+            data: {
+              sender: entityId,
+              counterentity: counterpartyId,
+              initialNonce: 7,
+              initialProofbodyHash: `0x${'56'.repeat(32)}`,
+              finalProofbodyHash: `0x${'57'.repeat(32)}`,
+            },
+          },
+        },
+      } as any],
+    });
+
+    const marks = env.runtimeState?.currentStorageOverlayMarks ?? [];
+    expect(marks.some((record) =>
+      record.family === 'account' &&
+      record.entityId === entityId &&
+      record.counterpartyId === counterpartyId.toLowerCase(),
+    )).toBe(true);
   });
 
   test('j_abort_sent_batch does not requeue dispute finalize after on-chain finalize already cleared activeDispute', async () => {
@@ -642,6 +912,28 @@ describe('audit fail-fast regressions', () => {
     expect(accountMachine.pendingAccountInput?.kind).toBe('frame_ack');
   });
 
+  test('account storage keeps last outbound ACK so restored runtimes can bundle the next frame', () => {
+    const accountMachine = makeProposalAccount([], hex20('11'), hex20('22'));
+    accountMachine.lastOutboundFrameAck = {
+      height: 8,
+      counterpartyEntityId: hex20('22'),
+      prevHanko: `0x${'aa'.repeat(65)}`,
+    };
+    accountMachine.hankoSignature = `0x${'bb'.repeat(65)}`;
+    accountMachine.pendingForward = {
+      route: [hex20('33'), hex20('44')],
+      tokenId: 1,
+      amount: 123n,
+      description: 'pending-forward-storage',
+    };
+
+    const doc = projectAccountDoc(accountMachine);
+
+    expect(doc.lastOutboundFrameAck).toEqual(accountMachine.lastOutboundFrameAck);
+    expect(doc.hankoSignature).toBe(accountMachine.hankoSignature);
+    expect(doc.pendingForward).toEqual(accountMachine.pendingForward);
+  });
+
   test('crontab resends bundled ACK plus pending frame after relay loss', async () => {
     const env = createEmptyEnv('account-frame-bundled-resend');
     env.quietRuntimeLogs = true;
@@ -839,7 +1131,7 @@ describe('audit fail-fast regressions', () => {
 
     const env = createEmptyEnv('dispute-finalize-scrub-seed');
     const finalized = await handleJEvent(state, {
-      from: `0x${'aa'.repeat(20)}`,
+      from: '1',
       observedAt: 2000,
       blockNumber: 22,
       blockHash: `0x${'99'.repeat(32)}`,
@@ -861,7 +1153,7 @@ describe('audit fail-fast regressions', () => {
     expect(finalized.newState.jBatchState?.sentBatch?.batch.disputeFinalizations.length).toBe(0);
 
     const failed = await handleJEvent(finalized.newState, {
-      from: `0x${'aa'.repeat(20)}`,
+      from: '1',
       observedAt: 3000,
       blockNumber: 23,
       blockHash: `0x${'77'.repeat(32)}`,
@@ -1019,7 +1311,7 @@ describe('audit fail-fast regressions', () => {
     } as EntityState['jBatchState'];
 
     const failed = await handleJEvent(state, {
-      from: `0x${'aa'.repeat(20)}`,
+      from: '1',
       observedAt: 3000,
       blockNumber: 23,
       blockHash: `0x${'96'.repeat(32)}`,
@@ -1069,5 +1361,129 @@ describe('audit fail-fast regressions', () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain(`max ${LIMITS.MAX_ACCOUNT_HTLC_LOCKS}`);
     expect(accountMachine.locks.size).toBe(LIMITS.MAX_ACCOUNT_HTLC_LOCKS);
+  });
+
+  test('cross-j source fill ack routes book removal to canonical sibling owner', async () => {
+    const env = createEmptyEnv('cross-book-owner-removal');
+    const sourceUser = `0x${'10'.repeat(32)}`;
+    const sourceHub = `0x${'20'.repeat(32)}`;
+    const targetHub = `0x${'30'.repeat(32)}`;
+    const orderId = 'cross-owner-full-fill';
+    const pairId = 'cross:stack:1:0xdep:1/stack:2:0xdep:1';
+    const namespacedOrderId = `${sourceUser}:${orderId}`;
+
+    const sourceState = makeEntityState(sourceHub);
+    sourceState.config = makeSingleSignerConfigFor('source-signer');
+    const route: CrossJurisdictionSwapRoute = {
+      orderId,
+      bookOwnerEntityId: targetHub,
+      venueId: pairId,
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      source: {
+        jurisdiction: 'stack:2:0xdep',
+        entityId: sourceUser,
+        counterpartyEntityId: sourceHub,
+        tokenId: 1,
+        amount: 1_000n,
+      },
+      target: {
+        jurisdiction: 'stack:1:0xdep',
+        entityId: targetHub,
+        counterpartyEntityId: `0x${'40'.repeat(32)}`,
+        tokenId: 1,
+        amount: 1_000n,
+      },
+      status: 'partially_filled',
+      fillSeq: 1,
+      cumulativeFillRatio: 100,
+      filledSourceAmount: 1n,
+      filledTargetAmount: 1n,
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    sourceState.crossJurisdictionSwaps = new Map([
+      [orderId, route],
+    ]);
+
+    let book = createBook({ bucketWidthTicks: 10_000n, maxOrders: 10_000, stpPolicy: 1 });
+    book = applyCommand(book, {
+      kind: 0,
+      ownerId: sourceUser,
+      orderId: namespacedOrderId,
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 10_000n,
+      qtyLots: 1,
+    }).state;
+    const targetState = makeEntityState(targetHub);
+    targetState.config = makeSingleSignerConfigFor('target-signer');
+    targetState.orderbookExt = {
+      books: new Map([[pairId, book]]),
+      orderPairs: new Map([[namespacedOrderId, [pairId]]]),
+      referrals: new Map(),
+      hubProfile: {
+        entityId: targetHub,
+        name: 'Target hub',
+        spreadDistribution: { makerBps: 0, takerBps: 10_000, hubBps: 0, makerReferrerBps: 0, takerReferrerBps: 0 },
+        referenceTokenId: 1,
+        minTradeSize: 0n,
+        supportedPairs: [pairId],
+      },
+    } satisfies OrderbookExtState;
+    env.eReplicas.set(`${sourceHub}:source-signer`, {
+      entityId: sourceHub,
+      signerId: 'source-signer',
+      mempool: [],
+      isProposer: true,
+      state: sourceState,
+    } satisfies EntityReplica);
+    env.eReplicas.set(`${targetHub}:target-signer`, {
+      entityId: targetHub,
+      signerId: 'target-signer',
+      mempool: [],
+      isProposer: true,
+      state: targetState,
+    } satisfies EntityReplica);
+
+    const outputs: EntityInput[] = [];
+    const ackTx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }> = {
+      type: 'cross_swap_fill_ack',
+      data: {
+        offerId: orderId,
+        fillSeq: 1,
+        incrementalSourceAmount: 0n,
+        incrementalTargetAmount: 0n,
+        cumulativeSourceAmount: 1n,
+        cumulativeTargetAmount: 1n,
+        cumulativeFillRatio: 100,
+        cancelRemainder: true,
+      },
+    };
+    const applied = applyCommittedCrossJurisdictionAccountTxFollowup(
+      env,
+      sourceState,
+      sourceUser,
+      ackTx,
+      outputs,
+    );
+
+    expect(applied).toBe(true);
+    const removal = outputs.find(output => output.entityId === targetHub && output.entityTxs?.[0]?.type === 'removeCrossJurisdictionBookOrder');
+    expect(removal?.signerId).toBe('target-signer');
+    expect(removal?.entityTxs?.[0]).toMatchObject({
+      type: 'removeCrossJurisdictionBookOrder',
+      data: {
+        orderId,
+        sourceEntityId: sourceUser,
+        reason: 'fill_ack_closed',
+      },
+    });
+    expect((removal?.entityTxs?.[0] as any)?.data?.route?.orderId).toBe(orderId);
+
+    const removed = await applyEntityTx(env, targetState, removal!.entityTxs![0]!);
+    const nextBook = removed.newState.orderbookExt?.books.get(pairId);
+    expect(nextBook ? getBookOrder(nextBook, namespacedOrderId) : null).toBeNull();
   });
 });

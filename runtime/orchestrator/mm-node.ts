@@ -55,7 +55,11 @@ import {
 import { buildDefaultEntitySwapPairs, getSwapPairPolicyByBaseQuote } from '../account-utils';
 import { LIMITS, SWAP as SWAP_CONSTANTS } from '../constants';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
-import { deriveCanonicalCrossJurisdictionMarketForLegs } from '../cross-jurisdiction';
+import {
+  deriveCanonicalCrossJurisdictionMarketForLegs,
+  withCanonicalCrossJurisdictionRouteHash,
+} from '../cross-jurisdiction';
+import { resolveCrossJurisdictionRuntimeTopology } from '../cross-jurisdiction-boundary';
 import { getJurisdictionStackId } from '../jurisdiction-stack';
 import { startParentLivenessWatch } from './parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
@@ -97,6 +101,7 @@ type HubProfile = {
   name: string;
   entityId: string;
   signerId?: string;
+  runtimeId?: string;
   jurisdictionName?: string;
   chainId?: number;
   depositoryAddress?: string;
@@ -485,6 +490,7 @@ const readVisibleHubProfiles = (env: Env, includeSiblings = false): HubProfile[]
       name: String(profile.name || '').trim(),
       entityId: String(profile.entityId || '').toLowerCase(),
       signerId: readHubSignerId(profile),
+      runtimeId: String(profile.runtimeId || '').trim().toLowerCase(),
       jurisdictionName: String(profile.metadata?.jurisdiction?.name || '').trim(),
       chainId: Number(profile.metadata?.jurisdiction?.chainId || 0),
       depositoryAddress: String(profile.metadata?.jurisdiction?.depositoryAddress || '').trim(),
@@ -689,13 +695,43 @@ const sameJurisdiction = (
   left: Pick<MarketMakerEntityContext | HubProfile, 'jurisdictionName' | 'chainId' | 'jurisdictionRef'>,
   right: Pick<MarketMakerEntityContext | HubProfile, 'jurisdictionName' | 'chainId' | 'jurisdictionRef'>,
 ): boolean => {
-  if (left.jurisdictionRef && right.jurisdictionRef) return left.jurisdictionRef === right.jurisdictionRef;
-  const leftName = String(left.jurisdictionName || '').trim().toLowerCase();
-  const rightName = String(right.jurisdictionName || '').trim().toLowerCase();
-  if (leftName && rightName) return leftName === rightName;
-  const leftChain = Number(left.chainId || 0);
-  const rightChain = Number(right.chainId || 0);
-  return leftChain > 0 && leftChain === rightChain;
+  return Boolean(left.jurisdictionRef && right.jurisdictionRef && left.jurisdictionRef === right.jurisdictionRef);
+};
+
+const normalizeEntityRef = (value: string): string => String(value || '').trim().toLowerCase();
+
+const resolveEntityRuntimeIdForCrossJ = (env: Env, routeEntityIds: string[], entityId: string): string | null => {
+  const target = normalizeEntityRef(entityId);
+  const localRuntimeId = String(env.runtimeId || '').trim().toLowerCase();
+  if (localRuntimeId && getEntityReplicaById(env, target)) return localRuntimeId;
+  const profile = (env.gossip?.getProfiles?.() || []).find(item => normalizeEntityRef(item.entityId) === target);
+  const runtimeId = String(profile?.runtimeId || '').trim().toLowerCase();
+  if (runtimeId) return runtimeId;
+  return routeEntityIds.includes(target) && localRuntimeId ? null : null;
+};
+
+const isCrossJurisdictionRouteTwoRuntime = (env: Env, route: CrossJurisdictionSwapRoute): boolean => {
+  const canonical = withCanonicalCrossJurisdictionRouteHash(route);
+  const requiredEntityIds = [
+    canonical.source.entityId,
+    canonical.source.counterpartyEntityId,
+    canonical.target.entityId,
+    canonical.target.counterpartyEntityId,
+    canonical.bookOwnerEntityId || '',
+    canonical.hubEntityId || '',
+  ].map(normalizeEntityRef).filter(Boolean);
+  return Boolean(resolveCrossJurisdictionRuntimeTopology(
+    canonical,
+    entityId => resolveEntityRuntimeIdForCrossJ(env, requiredEntityIds, entityId),
+  ));
+};
+
+const canonicalizeLocalCrossJurisdictionRoute = (
+  env: Env,
+  route: CrossJurisdictionSwapRoute,
+): CrossJurisdictionSwapRoute | null => {
+  const canonical = withCanonicalCrossJurisdictionRouteHash(route);
+  return isCrossJurisdictionRouteTwoRuntime(env, canonical) ? canonical : null;
 };
 
 const buildMarketMakerCrossOfferSpecs = (
@@ -763,6 +799,26 @@ const buildMarketMakerCrossOfferSpecs = (
         );
         if (askAmounts) {
           const offerId = `mmx-${sourceHubSuffix}-${targetHubSuffix}-${pair.baseTokenId}-${pair.quoteTokenId}-ask-${levelId}`;
+          const route = canonicalizeLocalCrossJurisdictionRoute(env, {
+            ...routeBase,
+            orderId: offerId,
+            priceTicks: askPriceTicks,
+            source: {
+              jurisdiction: sourceJurisdictionRef,
+              entityId: sourceContext.entityId,
+              counterpartyEntityId: sourceHub.entityId,
+              tokenId: pair.baseTokenId,
+              amount: askAmounts.sourceAmount,
+            },
+            target: {
+              jurisdiction: targetJurisdictionRef,
+              entityId: targetHub.entityId,
+              counterpartyEntityId: targetContext.entityId,
+              tokenId: pair.quoteTokenId,
+              amount: askAmounts.targetAmount,
+            },
+          });
+          if (!route) continue;
           specs.push({
             offerId,
             pairId: deriveCanonicalCrossJurisdictionMarketForLegs(
@@ -777,25 +833,7 @@ const buildMarketMakerCrossOfferSpecs = (
             wantTokenId: pair.quoteTokenId,
             wantAmount: askAmounts.targetAmount,
             minFillRatio: 0,
-            crossJurisdiction: {
-              ...routeBase,
-              orderId: offerId,
-              priceTicks: askPriceTicks,
-              source: {
-                jurisdiction: sourceJurisdictionRef,
-                entityId: sourceContext.entityId,
-                counterpartyEntityId: sourceHub.entityId,
-                tokenId: pair.baseTokenId,
-                amount: askAmounts.sourceAmount,
-              },
-              target: {
-                jurisdiction: targetJurisdictionRef,
-                entityId: targetHub.entityId,
-                counterpartyEntityId: targetContext.entityId,
-                tokenId: pair.quoteTokenId,
-                amount: askAmounts.targetAmount,
-              },
-            },
+            crossJurisdiction: route,
           });
         }
 
@@ -810,6 +848,26 @@ const buildMarketMakerCrossOfferSpecs = (
         );
         if (bidAmounts) {
           const offerId = `mmx-${sourceHubSuffix}-${targetHubSuffix}-${pair.baseTokenId}-${pair.quoteTokenId}-bid-${levelId}`;
+          const route = canonicalizeLocalCrossJurisdictionRoute(env, {
+            ...routeBase,
+            orderId: offerId,
+            priceTicks: bidPriceTicks,
+            source: {
+              jurisdiction: sourceJurisdictionRef,
+              entityId: sourceContext.entityId,
+              counterpartyEntityId: sourceHub.entityId,
+              tokenId: pair.quoteTokenId,
+              amount: bidAmounts.sourceAmount,
+            },
+            target: {
+              jurisdiction: targetJurisdictionRef,
+              entityId: targetHub.entityId,
+              counterpartyEntityId: targetContext.entityId,
+              tokenId: pair.baseTokenId,
+              amount: bidAmounts.targetAmount,
+            },
+          });
+          if (!route) continue;
           specs.push({
             offerId,
             pairId: deriveCanonicalCrossJurisdictionMarketForLegs(
@@ -824,25 +882,7 @@ const buildMarketMakerCrossOfferSpecs = (
             wantTokenId: pair.baseTokenId,
             wantAmount: bidAmounts.targetAmount,
             minFillRatio: 0,
-            crossJurisdiction: {
-              ...routeBase,
-              orderId: offerId,
-              priceTicks: bidPriceTicks,
-              source: {
-                jurisdiction: sourceJurisdictionRef,
-                entityId: sourceContext.entityId,
-                counterpartyEntityId: sourceHub.entityId,
-                tokenId: pair.quoteTokenId,
-                amount: bidAmounts.sourceAmount,
-              },
-              target: {
-                jurisdiction: targetJurisdictionRef,
-                entityId: targetHub.entityId,
-                counterpartyEntityId: targetContext.entityId,
-                tokenId: pair.baseTokenId,
-                amount: bidAmounts.targetAmount,
-              },
-            },
+            crossJurisdiction: route,
           });
         }
       }

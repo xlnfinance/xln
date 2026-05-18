@@ -12,6 +12,7 @@ import {
   getBestAsk,
   getBestBid,
   getOrderbookPairsForOrder,
+  refreshRestingOrder,
   ORDERBOOK_PRICE_SCALE,
   SWAP_LOT_SCALE,
   type BookState,
@@ -548,6 +549,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             counterpartyId,
           },
         });
+        markStorageEntityDirty(env, newState.entityId);
       }
 
       // Multi-signer: Collect hashes from result during processing
@@ -1158,6 +1160,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                   inboundLockId: route.inboundLockId,
                 },
               });
+              markStorageEntityDirty(env, newState.entityId);
             }
             console.log(`⬅️ HTLC: Propagating secret to ${route.inboundEntity.slice(-4)}`);
           } else {
@@ -1613,6 +1616,7 @@ export function processOrderbookSwaps(
   }
   const assertedCrossJurisdictionPairs = new Set<string>();
   const crossPendingAckOrderIdsByPair = new Map<string, Set<string>>();
+  const crossAggregatedFills = new Map<string, { filledLots: number; weightedCost: bigint }>();
   const suspendCrossOrderForPendingAck = (pairId: string, orderId: string): void => {
     let orders = crossPendingAckOrderIdsByPair.get(pairId);
     if (!orders) {
@@ -1634,34 +1638,25 @@ export function processOrderbookSwaps(
     let book = bookCache.get(pairId) || ext.books.get(pairId);
     if (!book || !getBookOrder(book, namespacedOrderId)) return;
 
-    const cancelResult = applyCommand(book, {
-      kind: 1,
-      ownerId: meta.makerId,
-      orderId: namespacedOrderId,
-    });
-    book = cancelResult.state;
-
     const qtyLots = meta.baseAmount / SWAP_LOT_SCALE;
+    if (qtyLots > 0xFFFFFFFFn) {
+      throw new Error(`ORDERBOOK_CROSS_J_REFRESH_QTY_INVALID: pair=${pairId} order=${namespacedOrderId} qty=${qtyLots.toString()}`);
+    }
     if (qtyLots > 0n) {
-      if (qtyLots > 0xFFFFFFFFn) {
-        throw new Error(`ORDERBOOK_CROSS_J_REFRESH_QTY_INVALID: pair=${pairId} order=${namespacedOrderId} qty=${qtyLots.toString()}`);
-      }
-      const addResult = applyCommand(book, {
-        kind: 0,
+      book = refreshRestingOrder(book, {
         ownerId: meta.makerId,
         orderId: namespacedOrderId,
         side: meta.side,
-        tif: meta.offer.timeInForce,
-        postOnly: true,
         priceTicks: meta.priceTicks,
         qtyLots: Number(qtyLots),
-        minFillRatio: meta.offer.minFillRatio,
       });
-      const rejected = addResult.events.some((event) => event.type === 'REJECT' && event.orderId === namespacedOrderId);
-      if (rejected || addResult.events.some((event) => event.type === 'TRADE')) {
-        throw new Error(`ORDERBOOK_CROSS_J_REFRESH_REJECT: pair=${pairId} order=${namespacedOrderId}`);
-      }
-      book = addResult.state;
+    } else {
+      const cancelResult = applyCommand(book, {
+        kind: 1,
+        ownerId: meta.makerId,
+        orderId: namespacedOrderId,
+      });
+      book = cancelResult.state;
     }
 
     bookCache.set(pairId, book);
@@ -1862,12 +1857,35 @@ export function processOrderbookSwaps(
         const accountId = namespacedOrderId.slice(0, lastColon);
         const offerId = namespacedOrderId.slice(lastColon + 1);
         if (hasQueuedCrossSwapAckForEntityState(hubState, accountId, offerId)) continue;
-
-        const ack = buildCrossJurisdictionFillAck(accountId, offerId, namespacedOrderId, meta, fill);
-        if (!ack) continue;
-        crossJurisdictionFills.push(ack.instruction);
-        mempoolOps.push({ accountId, tx: ack.tx });
+        const aggregatedFill = crossAggregatedFills.get(namespacedOrderId);
+        if (aggregatedFill) {
+          aggregatedFill.filledLots += fill.filledLots;
+          aggregatedFill.weightedCost += fill.weightedCost;
+        } else {
+          crossAggregatedFills.set(namespacedOrderId, {
+            filledLots: fill.filledLots,
+            weightedCost: fill.weightedCost,
+          });
+        }
       }
+    }
+
+    for (const namespacedOrderId of [...crossAggregatedFills.keys()].sort(compareCanonicalText)) {
+      const fill = crossAggregatedFills.get(namespacedOrderId);
+      if (!fill) continue;
+      const meta = crossLiveOfferMeta.get(namespacedOrderId) ?? buildCrossMarketOfferFromBookOrder(namespacedOrderId);
+      if (!meta) {
+        throw new Error(`ORDERBOOK_CROSS_J_FILL_META_MISSING: order=${namespacedOrderId}`);
+      }
+      const lastColon = namespacedOrderId.lastIndexOf(':');
+      if (lastColon === -1) continue;
+      const accountId = namespacedOrderId.slice(0, lastColon);
+      const offerId = namespacedOrderId.slice(lastColon + 1);
+      if (hasQueuedCrossSwapAckForEntityState(hubState, accountId, offerId)) continue;
+      const ack = buildCrossJurisdictionFillAck(accountId, offerId, namespacedOrderId, meta, fill);
+      if (!ack) continue;
+      crossJurisdictionFills.push(ack.instruction);
+      mempoolOps.push({ accountId, tx: ack.tx });
     }
   };
 
