@@ -23,6 +23,7 @@ const BUILD_NUMBER = (() => {
 const DEV_PORT_RAW = Number(process.env['VITE_DEV_PORT'] || '8081');
 const DEV_PORT = Number.isFinite(DEV_PORT_RAW) && DEV_PORT_RAW > 0 ? Math.floor(DEV_PORT_RAW) : 8081;
 const API_PROXY_TARGET = process.env['VITE_API_PROXY_TARGET'] || 'http://localhost:8082';
+const TYPECHAIN_INDEX = fileURLToPath(new URL('../jurisdictions/typechain-types/index.ts', import.meta.url));
 
 const ENABLE_HMR = (() => {
   const value = String(process.env['VITE_ENABLE_HMR'] || '').toLowerCase();
@@ -92,6 +93,8 @@ export default defineConfig({
   resolve: {
     alias: {
       $types: '../src/types.ts',
+      '../jurisdictions/typechain-types/index.ts': TYPECHAIN_INDEX,
+      '../../jurisdictions/typechain-types/index.ts': TYPECHAIN_INDEX,
     },
   },
 });

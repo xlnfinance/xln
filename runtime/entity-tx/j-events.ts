@@ -1,4 +1,16 @@
-import type { CrossJurisdictionSwapRoute, EntityInput, EntityState, JBlockObservation, JBlockFinalized, JurisdictionEvent, Env, DebtEntry, DebtEventType } from '../types';
+import type {
+  AccountMachine,
+  AccountTx,
+  CrossJurisdictionSwapRoute,
+  EntityInput,
+  EntityState,
+  JBlockObservation,
+  JBlockFinalized,
+  JurisdictionEvent,
+  Env,
+  DebtEntry,
+  DebtEventType,
+} from '../types';
 import type { CompletedBatch } from '../j-batch';
 import { ethers } from 'ethers';
 import { cloneEntityState, addMessage } from '../state-helpers';
@@ -58,10 +70,21 @@ export interface JEventEntityTxData {
 
 type JEventApplyResult = {
   newState: EntityState;
-  mempoolOps: Array<{ accountId: string; tx: any }>;
+  mempoolOps: JEventMempoolOp[];
   outputs: EntityInput[];
   dirtyAccounts: string[];
 };
+
+type JEventMempoolOp = {
+  accountId: string;
+  tx: AccountTx;
+};
+
+type JEventClaimTx = Extract<AccountTx, { type: 'j_event_claim' }>;
+type AccountJObservation = AccountMachine['leftJObservations'][number];
+
+const isJEventClaimOp = (op: JEventMempoolOp): op is { accountId: string; tx: JEventClaimTx } =>
+  op.tx.type === 'j_event_claim';
 
 const normalizeSignerId = (value: unknown): string => String(value || '').trim().toLowerCase();
 
@@ -339,7 +362,7 @@ function applyDebtForgiven(state: EntityState, event: Extract<JurisdictionEvent,
   });
 }
 
-function findAccountEntryByCounterparty(state: EntityState, counterpartyEntityId: string): [string, any] | null {
+function findAccountEntryByCounterparty(state: EntityState, counterpartyEntityId: string): [string, AccountMachine] | null {
   const normalized = String(counterpartyEntityId || '').toLowerCase();
   if (!normalized) return null;
   for (const [accountId, account] of state.accounts.entries()) {
@@ -353,7 +376,7 @@ function findAccountEntryByCounterparty(state: EntityState, counterpartyEntityId
   return null;
 }
 
-function findAccountByCounterparty(state: EntityState, counterpartyEntityId: string) {
+function findAccountByCounterparty(state: EntityState, counterpartyEntityId: string): AccountMachine | null {
   return findAccountEntryByCounterparty(state, counterpartyEntityId)?.[1] ?? null;
 }
 
@@ -569,7 +592,7 @@ function queueCrossJurisdictionSourceDisputeFromTargetDispute(
 
 function queueInboundResolvesByHashlock(
   newState: EntityState,
-  mempoolOps: Array<{ accountId: string; tx: any }>,
+  mempoolOps: JEventMempoolOp[],
   hashlock: string,
   secret: string,
 ): number {
@@ -599,7 +622,7 @@ function queueInboundResolvesByHashlock(
 
 function applyKnownHtlcSecret(
   newState: EntityState,
-  mempoolOps: Array<{ accountId: string; tx: any }>,
+  mempoolOps: JEventMempoolOp[],
   outputs: EntityInput[],
   hashlockRaw: string,
   secretRaw: string,
@@ -806,7 +829,7 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
   // DEBUG: Dump account mempools after j-event processing
   for (const [cpId, account] of newEntityState.accounts) {
     if (account.mempool.length > 0 || account.leftJObservations.length > 0 || account.rightJObservations.length > 0) {
-      console.log(`🔍 AFTER-J-EVENT: Account ${cpId.slice(-4)} mempool=${account.mempool.length} txs:`, account.mempool.map((tx: any) => tx.type));
+      console.log(`🔍 AFTER-J-EVENT: Account ${cpId.slice(-4)} mempool=${account.mempool.length} txs:`, account.mempool.map((tx) => tx.type));
       console.log(`🔍 AFTER-J-EVENT: leftJObs=${account.leftJObservations?.length || 0}, rightJObs=${account.rightJObservations?.length || 0}`);
     }
   }
@@ -826,8 +849,8 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
  * Finalize AccountSettled when BOTH entities agree (2-of-2).
  * Called after receiving j_event_claim from counterparty.
  */
-export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, opts: { timestamp: number }): void {
-  const normalizeObsEvents = (obs: any): JurisdictionEvent[] => {
+export function tryFinalizeAccountJEvents(account: AccountMachine, counterpartyId: string, opts: { timestamp: number }): void {
+  const normalizeObsEvents = (obs: AccountJObservation): JurisdictionEvent[] => {
     const raw = obs?.events;
     if (!Array.isArray(raw)) return [];
     return normalizeJurisdictionEvents(raw);
@@ -853,8 +876,8 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
   };
 
   // Find matching (jHeight, jBlockHash) in left + right observations
-  const leftMap = new Map();
-  const rightMap = new Map();
+  const leftMap = new Map<string, AccountJObservation>();
+  const rightMap = new Map<string, AccountJObservation>();
 
   for (const obs of account.leftJObservations) {
     leftMap.set(`${obs.jHeight}:${obs.jBlockHash}`, obs);
@@ -880,7 +903,7 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
 
     // Skip already finalized
     if (account.lastFinalizedJHeight >= jHeight) continue;
-    if (account.jEventChain.some((b: any) => b.jHeight === jHeight)) continue;
+    if (account.jEventChain.some((b) => b.jHeight === jHeight)) continue;
 
     // Require both sides to agree on canonical settlement payload.
     const leftRawLen = Array.isArray(leftObs?.events) ? leftObs.events.length : 0;
@@ -1029,10 +1052,10 @@ export function tryFinalizeAccountJEvents(account: any, counterpartyId: string, 
 
   // Prune finalized
   account.leftJObservations = account.leftJObservations.filter(
-    (o: any) => !finalizedKeys.has(`${o.jHeight}:${o.jBlockHash}`),
+    (o) => !finalizedKeys.has(`${o.jHeight}:${o.jBlockHash}`),
   );
   account.rightJObservations = account.rightJObservations.filter(
-    (o: any) => !finalizedKeys.has(`${o.jHeight}:${o.jBlockHash}`),
+    (o) => !finalizedKeys.has(`${o.jHeight}:${o.jBlockHash}`),
   );
   console.log(
     `   🧹 Pruned ${finalizedKeys.size} finalized (left=${account.leftJObservations.length}, right=${account.rightJObservations.length} pending)`,
@@ -1115,7 +1138,7 @@ function mergeAccountJObservations(observations: Array<{ jHeight: number; jBlock
  * Merge j_event_claim mempoolOps targeting the same (accountId, jHeight, jBlockHash)
  * into a single op with all events batched.
  */
-function mergeJEventClaimOps(ops: Array<{ accountId: string; tx: any }>): void {
+function mergeJEventClaimOps(ops: JEventMempoolOp[]): void {
   const groups = new Map<string, number>(); // key → index in ops[]
   let i = 0;
   while (i < ops.length) {
@@ -1124,13 +1147,13 @@ function mergeJEventClaimOps(ops: Array<{ accountId: string; tx: any }>): void {
       ops.splice(i, 1);
       continue;
     }
-    if (op.tx.type !== 'j_event_claim') { i++; continue; }
+    if (!isJEventClaimOp(op)) { i++; continue; }
     const key = `${op.accountId}:${op.tx.data.jHeight}:${op.tx.data.jBlockHash}`;
     const existing = groups.get(key);
     if (existing !== undefined) {
       // Merge events into existing op
       const target = ops[existing];
-      if (!target) {
+      if (!target || !isJEventClaimOp(target)) {
         groups.delete(key);
         i++;
         continue;
@@ -1163,7 +1186,7 @@ async function tryFinalizeJBlocks(
   threshold: bigint,
   env: Env
 ): Promise<JEventApplyResult> {
-  const allMempoolOps: Array<{ accountId: string; tx: any }> = [];
+  const allMempoolOps: JEventMempoolOp[] = [];
   const allOutputs: EntityInput[] = [];
   const dirtyAccounts = new Set<string>();
 
@@ -1403,7 +1426,7 @@ async function applyFinalizedJEvent(
 
   // Clone state for mutation
   const newState = cloneEntityState(entityState);
-  const mempoolOps: Array<{ accountId: string; tx: any }> = [];
+  const mempoolOps: JEventMempoolOp[] = [];
   const outputs: EntityInput[] = [];
   const dirtyAccounts = new Set<string>();
   const done = (): JEventApplyResult => ({
@@ -1500,7 +1523,9 @@ async function applyFinalizedJEvent(
       );
       return done();
     }
-    const eventCopy = structuredClone(normalizedClaimEvents[0]);
+    const normalizedClaimEvent = normalizedClaimEvents[0];
+    if (!normalizedClaimEvent) return done();
+    const eventCopy = structuredClone(normalizedClaimEvent);
     const observedAt = entityState.timestamp || 0;
     mempoolOps.push({
       accountId: counterpartyEntityId as string,

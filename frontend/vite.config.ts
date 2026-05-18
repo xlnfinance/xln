@@ -51,6 +51,7 @@ const DEV_PORT = Number.isFinite(DEV_PORT_RAW) && DEV_PORT_RAW > 0 ? Math.floor(
 const API_PROXY_TARGET = process.env['VITE_API_PROXY_TARGET'] || 'http://localhost:8082';
 const VITE_CACHE_DIR = process.env['VITE_CACHE_DIR'] || 'node_modules/.vite';
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
+const TYPECHAIN_INDEX = fileURLToPath(new URL('../jurisdictions/typechain-types/index.ts', import.meta.url));
 const BUILD_NUMBER = (() => {
   const explicit = String(process.env['XLN_BUILD_NUMBER'] || '').trim();
   if (explicit) return explicit;
@@ -248,7 +249,12 @@ export default defineConfig(async ({ command }) => {
 	resolve: {
 		alias: {
 			// Direct import from source types - single source of truth
-			'$types': '../src/types.ts'
+			'$types': '../src/types.ts',
+			// Runtime files are imported from multiple depths during SSR bundling.
+			// Keep TypeChain resolution anchored to the repo root instead of
+			// relying on fragile relative traversal from the importer path.
+			'../jurisdictions/typechain-types/index.ts': TYPECHAIN_INDEX,
+			'../../jurisdictions/typechain-types/index.ts': TYPECHAIN_INDEX,
 		}
 	}
 	};
