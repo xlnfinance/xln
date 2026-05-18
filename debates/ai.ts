@@ -28,6 +28,21 @@ export type JudgeInput = {
   transcript: DebateMessageForJudge[];
 };
 
+export type DebateTurnInput = {
+  statement: string;
+  side: DebateSide;
+  sideALabel: string;
+  sideBLabel: string;
+  roundNumber: number;
+  roundsTotal: number;
+  context: unknown;
+  transcript: DebateMessageForJudge[];
+  messageLimitChars: number;
+  persona: string;
+  model: string;
+  provider: JudgeConfig['provider'];
+};
+
 export type JudgeVerdict = {
   winner: JudgeWinner;
   confidence: number;
@@ -54,8 +69,30 @@ export type AggregatedVerdict = {
 const AI_SERVER_URL = String(process.env['DEBATES_AI_SERVER_URL'] || 'http://127.0.0.1:3031').replace(/\/+$/, '');
 const AI_MODEL = String(process.env['DEBATES_AI_MODEL'] || 'gemma3-27b-mlx');
 const AI_FALLBACK = process.env['DEBATES_AI_FALLBACK'] !== '0';
+const AI_TIMEOUT_MS = Math.max(100, Number(process.env['DEBATES_AI_TIMEOUT_MS'] || '15000'));
 
 const clampScore = (value: number): number => Math.max(1, Math.min(10, Math.round(value)));
+
+export const alignScoresWithWinner = (
+  winner: JudgeWinner,
+  scores: { A?: number | null; B?: number | null },
+  minimumMargin = 7,
+): { A: number; B: number; margin: number } => {
+  let A = Math.max(0, Math.min(1000, Math.round(Number(scores.A ?? 0))));
+  let B = Math.max(0, Math.min(1000, Math.round(Number(scores.B ?? 0))));
+  if (winner === 'A' && A <= B) {
+    if (B + minimumMargin <= 1000) A = B + minimumMargin;
+    else B = Math.max(0, A - minimumMargin);
+  } else if (winner === 'B' && B <= A) {
+    if (A + minimumMargin <= 1000) B = A + minimumMargin;
+    else A = Math.max(0, B - minimumMargin);
+  } else if (winner === 'draw') {
+    const center = Math.round((A + B) / 2);
+    A = center;
+    B = center;
+  }
+  return { A, B, margin: Math.abs(A - B) };
+};
 
 const hashNumber = (value: string): number => {
   const digest = createHash('sha256').update(value).digest();
@@ -86,8 +123,11 @@ export const placeholderJudge = async (input: JudgeInput, judge: JudgeConfig): P
   const delta = scoreA - scoreB;
   const winner: JudgeWinner = Math.abs(delta) < 8 ? 'draw' : delta > 0 ? 'A' : 'B';
   const confidence = Math.min(0.94, 0.56 + Math.abs(delta) / 140);
-  const normalizedA = Math.max(1, Math.min(1000, Math.round(520 + scoreA * 2.8)));
-  const normalizedB = Math.max(1, Math.min(1000, Math.round(520 + scoreB * 2.8)));
+  let normalizedA = Math.max(1, Math.min(985, Math.round(650 + scoreA * 0.65)));
+  let normalizedB = Math.max(1, Math.min(985, Math.round(650 + scoreB * 0.65)));
+  const aligned = alignScoresWithWinner(winner, { A: normalizedA, B: normalizedB }, 12);
+  normalizedA = aligned.A;
+  normalizedB = aligned.B;
   const logicA = clampScore(5 + a.rebuttal + a.evidence + bias / 2);
   const logicB = clampScore(5 + b.rebuttal + b.evidence - bias / 2);
   const evidenceA = clampScore(4 + a.evidence * 1.5 + Math.min(a.words, 180) / 80);
@@ -107,7 +147,7 @@ export const placeholderJudge = async (input: JudgeInput, judge: JudgeConfig): P
       B: Math.max(1, Math.min(100, Math.round(50 + scoreB / 12))),
     },
     scores1000: { A: normalizedA, B: normalizedB },
-    margin: Math.abs(normalizedA - normalizedB),
+    margin: aligned.margin,
     criteria: {
       logic: { A: logicA, B: logicB },
       evidence: { A: evidenceA, B: evidenceB },
@@ -125,6 +165,36 @@ export const placeholderJudge = async (input: JudgeInput, judge: JudgeConfig): P
       },
     ],
   };
+};
+
+const trimTurn = (value: string, limit: number): string => {
+  const clean = String(value || '').replace(/\s+/g, ' ').trim();
+  if (clean.length <= limit) return clean;
+  return `${clean.slice(0, Math.max(0, limit - 1)).trim()}...`;
+};
+
+export const placeholderDebateTurn = async (input: DebateTurnInput): Promise<string> => {
+  const ownLabel = input.side === 'A' ? input.sideALabel : input.sideBLabel;
+  const opposingLabel = input.side === 'A' ? input.sideBLabel : input.sideALabel;
+  const previousOpposing = input.transcript.filter(message => message.side !== input.side).at(-1)?.body || '';
+  const contextText = typeof input.context === 'object' && input.context && 'text' in input.context
+    ? String((input.context as { text?: unknown }).text || '')
+    : String(input.context || '');
+  const stage = input.roundNumber === 1
+    ? 'opening standard'
+    : input.roundNumber === input.roundsTotal
+      ? 'closing decision rule'
+      : 'rebuttal standard';
+  const evidenceHook = contextText
+    ? `The supplied context matters because ${contextText.slice(0, 180)}.`
+    : 'The practical comparison should focus on user cost, risk, reversibility, and operational evidence.';
+  const rebuttal = previousOpposing
+    ? `The opposing side says "${previousOpposing.slice(0, 130)}", but that misses the core decision point.`
+    : `The opposing position, ${opposingLabel}, has to prove its benefits survive real-world constraints.`;
+  const close = input.roundNumber === input.roundsTotal
+    ? `Therefore judges should score Side ${input.side} higher: ${ownLabel} gives the clearer rule, lower hidden cost, and stronger fit to the stated claim.`
+    : `That is why Side ${input.side} should lead this ${stage}: ${ownLabel} better explains what changes in practice and why the tradeoff is worth it.`;
+  return trimTurn(`${ownLabel} is the stronger side on "${input.statement}". ${evidenceHook} ${rebuttal} Because the best argument is not just preference but a repeatable decision rule, Side ${input.side} ties the claim to incentives, failure modes, examples, and implementation cost. ${close}`, input.messageLimitChars);
 };
 
 const extractJsonObject = (raw: string): unknown => {
@@ -171,17 +241,20 @@ const normalizeAiVerdict = (raw: unknown, judge: JudgeConfig): JudgeVerdict => {
     normalizedCriteria['clarity'] = { A: 5, B: 5 };
     normalizedCriteria['rule_compliance'] = { A: 10, B: 10 };
   }
-  const scoreA1000 = Math.max(0, Math.min(1000, Math.round(Number(rawScores1000['A'] || Number(scores['A'] || 50) * 10))));
-  const scoreB1000 = Math.max(0, Math.min(1000, Math.round(Number(rawScores1000['B'] || Number(scores['B'] || 50) * 10))));
+  const winner = normalizeWinner(source['winner']);
+  const alignedScores = alignScoresWithWinner(winner, {
+    A: Math.max(0, Math.min(1000, Math.round(Number(rawScores1000['A'] || Number(scores['A'] || 50) * 10)))),
+    B: Math.max(0, Math.min(1000, Math.round(Number(rawScores1000['B'] || Number(scores['B'] || 50) * 10)))),
+  });
   return {
-    winner: normalizeWinner(source['winner']),
+    winner,
     confidence: Math.max(0, Math.min(1, Number(source['confidence'] || 0.5))),
     scores: {
       A: Math.max(0, Math.min(100, Math.round(Number(scores['A'] || 50)))),
       B: Math.max(0, Math.min(100, Math.round(Number(scores['B'] || 50)))),
     },
-    scores1000: { A: scoreA1000, B: scoreB1000 },
-    margin: Math.abs(scoreA1000 - scoreB1000),
+    scores1000: { A: alignedScores.A, B: alignedScores.B },
+    margin: alignedScores.margin,
     criteria: normalizedCriteria,
     ruleViolations: Array.isArray(source['ruleViolations']) ? source['ruleViolations'].map(String) : [],
     reasoning: String(source['reasoning'] || `${judge.label} returned a structured verdict.`).slice(0, 4000),
@@ -194,7 +267,7 @@ const normalizeAiVerdict = (raw: unknown, judge: JudgeConfig): JudgeVerdict => {
           summary: String(entry['summary'] || 'Decisive exchange in the transcript.').slice(0, 500),
         };
       })
-      : [{ round: 1, side: normalizeWinner(source['winner']) === 'B' ? 'B' : 'A', summary: 'The judge identified the stronger cumulative case.' }],
+      : [{ round: 1, side: winner === 'B' ? 'B' : 'A', summary: 'The judge identified the stronger cumulative case.' }],
   };
 };
 
@@ -248,11 +321,78 @@ Return exactly this JSON shape:
   ]
 }`;
 
+const buildDebaterPrompt = (input: DebateTurnInput): string => `You are an AI debater in XLN Debates.
+
+Persona:
+${input.persona}
+
+Task:
+- Argue for Side ${input.side} only.
+- Keep the response under ${input.messageLimitChars} characters.
+- This is round ${input.roundNumber} of ${input.roundsTotal}.
+- Be specific, direct, and adversarial without personal attacks.
+- Address the strongest opposing point already in the transcript.
+- Do not mention that you are following a prompt.
+- Return only the debate turn text.
+
+Statement:
+${input.statement}
+
+Side A:
+${input.sideALabel}
+
+Side B:
+${input.sideBLabel}
+
+Context:
+${JSON.stringify(input.context, null, 2)}
+
+Transcript so far:
+${input.transcript.length ? input.transcript.map(message => `Round ${message.roundNumber} Side ${message.side}: ${message.body}`).join('\n\n') : 'No transcript yet.'}`;
+
+export const localGemmaDebateTurn = async (input: DebateTurnInput): Promise<string> => {
+  const response = await fetch(`${AI_SERVER_URL}/api/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(AI_TIMEOUT_MS),
+    body: JSON.stringify({
+      model: input.model === 'placeholder-v1' ? AI_MODEL : input.model,
+      stream: false,
+      messages: [
+        { role: 'system', content: 'You are a concise competitive debate agent. Return only the argument text.' },
+        { role: 'user', content: buildDebaterPrompt(input) },
+      ],
+    }),
+  });
+  if (!response.ok) {
+    throw new Error(`Local AI server failed: ${response.status} ${await response.text()}`);
+  }
+  const data = await response.json() as { content?: string; error?: string };
+  if (data.error) throw new Error(data.error);
+  const content = trimTurn(String(data.content || ''), input.messageLimitChars);
+  if (content.length < 40) throw new Error('AI response was too short');
+  return content;
+};
+
+export const generateDebateTurn = async (input: DebateTurnInput): Promise<string> => {
+  if (input.provider === 'local-gemma' || input.provider === 'local-council') {
+    try {
+      return await localGemmaDebateTurn(input);
+    } catch (error) {
+      if (!AI_FALLBACK) throw error;
+      const fallback = await placeholderDebateTurn(input);
+      return `${fallback} [local-ai-fallback: ${error instanceof Error ? error.message : String(error)}]`;
+    }
+  }
+  return await placeholderDebateTurn(input);
+};
+
 export const localGemmaJudge = async (input: JudgeInput, judge: JudgeConfig): Promise<JudgeVerdict> => {
   const model = judge.model === 'placeholder-v1' ? AI_MODEL : judge.model;
   const response = await fetch(`${AI_SERVER_URL}/api/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
+    signal: AbortSignal.timeout(AI_TIMEOUT_MS),
     body: JSON.stringify({
       model,
       stream: false,
@@ -303,18 +443,19 @@ export const aggregateVerdicts = (verdicts: JudgeVerdict[]): AggregatedVerdict =
         B: Math.round(verdicts.reduce((sum, verdict) => sum + (verdict.scores1000?.B ?? verdict.scores.B * 10), 0) / verdicts.length),
       }
     : { A: 0, B: 0 };
-  const margin = Math.abs(scores1000.A - scores1000.B);
+  const alignedScores = alignScoresWithWinner(winner, scores1000);
+  const margin = alignedScores.margin;
   return {
     winner,
     method: 'majority',
     judgeCount: verdicts.length,
     votes,
     confidence: Number(confidence.toFixed(2)),
-    scores1000,
+    scores1000: { A: alignedScores.A, B: alignedScores.B },
     margin,
     summary: winner === 'draw'
-      ? `The judge board found the debate too close to award a single winner: ${scores1000.A}-${scores1000.B}.`
-      : `Side ${winner} wins ${scores1000.A}-${scores1000.B} by a ${margin}-point margin and ${votes[winner]} of ${verdicts.length} judge votes.`,
+      ? `The judge board found the debate too close to award a single winner: ${alignedScores.A}-${alignedScores.B}.`
+      : `Side ${winner} wins ${alignedScores.A}-${alignedScores.B} by a ${margin}-point margin and ${votes[winner]} of ${verdicts.length} judge votes.`,
   };
 };
 

@@ -6,6 +6,7 @@ const DB_PATH = process.env['DEBATES_DB_PATH'] || './db-tmp/debates-e2e.sqlite';
 
 export default defineConfig({
   testDir: './tests',
+  testMatch: '**/*.spec.ts',
   timeout: 45_000,
   workers: 1,
   reporter: [['list']],
@@ -26,7 +27,7 @@ export default defineConfig({
     },
   ],
   webServer: {
-    command: `rm -f ${DB_PATH} ${DB_PATH}-wal ${DB_PATH}-shm; DEBATES_PORT=${PORT} DEBATES_DB_PATH=${DB_PATH} DEBATES_DEV_MODE=1 DEBATES_OFFLINE_XLN=1 DEBATES_AI_SERVER_URL=http://127.0.0.1:1 bun server.ts`,
+    command: `rm -f ${DB_PATH} ${DB_PATH}-wal ${DB_PATH}-shm; DEBATES_PORT=${PORT} DEBATES_DB_PATH=${DB_PATH} DEBATES_DEV_MODE=1 DEBATES_OFFLINE_XLN=1 DEBATES_AI_SERVER_URL=http://127.0.0.1:1 DEBATES_AI_TIMEOUT_MS=250 bun server.ts`,
     url: BASE_URL,
     reuseExistingServer: false,
     timeout: 20_000,

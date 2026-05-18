@@ -6,6 +6,12 @@ let dashboard = null;
 let currentChallenge = null;
 let errorText = '';
 let depositInfo = null;
+const liveRoundScores = new Map();
+const pendingRoundScores = new Set();
+let pollTimer = null;
+let eventSource = null;
+let eventSourceSlug = '';
+let eventVersion = '';
 
 async function api(path, options = {}) {
   const response = await fetch(path, {
@@ -38,13 +44,99 @@ function shortId(value) {
   return raw.length > 14 ? `${raw.slice(0, 8)}...${raw.slice(-4)}` : raw;
 }
 
+function shortProofId(value) {
+  return shortId(String(value || '').replace(/^sha256:/i, ''));
+}
+
+async function copyText(value) {
+  if (navigator.clipboard?.writeText) {
+    await navigator.clipboard.writeText(value);
+    return;
+  }
+  const input = document.createElement('textarea');
+  input.value = value;
+  input.setAttribute('readonly', 'readonly');
+  input.style.position = 'fixed';
+  input.style.left = '-9999px';
+  document.body.appendChild(input);
+  input.select();
+  document.execCommand('copy');
+  input.remove();
+}
+
+async function shareText({ title = 'XLN Debates', text = '', url = location.href } = {}) {
+  if (navigator.share) {
+    await navigator.share({ title, text, url });
+    return 'shared';
+  }
+  await copyText(url);
+  return 'copied';
+}
+
 function routeSlug() {
-  const match = location.pathname.match(/^\/c\/([^/]+)/);
+  const match = location.pathname.match(/^\/[cv]\/([^/]+)/);
   return match ? decodeURIComponent(match[1]) : null;
 }
 
+function spectatorCount(seed = '') {
+  let hash = 17;
+  for (const char of String(seed || dashboard?.session?.userId || 'arena')) hash = (hash * 31 + char.charCodeAt(0)) >>> 0;
+  return 24 + (hash % 76);
+}
+
+function userPrediction(slug) {
+  try {
+    return localStorage.getItem(`xln-predict:${slug}`) || '';
+  } catch {
+    return '';
+  }
+}
+
+function setPrediction(slug, side) {
+  try {
+    localStorage.setItem(`xln-predict:${slug}`, side);
+  } catch {
+    // no-op in private/restricted storage
+  }
+}
+
+function bottomNav() {
+  const onVerdict = !!currentChallenge;
+  return `
+    <nav class="bottom-tabbar" aria-label="Mobile navigation">
+      <a href="/" class="${!onVerdict ? 'active' : ''}">Arena</a>
+      <a href="${currentChallenge ? `/v/${encodeURIComponent(currentChallenge.slug)}` : '/#arena-builder'}" class="${onVerdict ? 'active' : ''}">Live</a>
+      <a href="${currentChallenge ? '#predict' : '/#arena-builder'}">Predict</a>
+      <a href="/#creator">Create</a>
+      <button type="button" data-action="deposit-instructions">Wallet</button>
+    </nav>
+  `;
+}
+
+function stickyActionBar() {
+  if (!currentChallenge) {
+    return `
+      <div class="sticky-cta">
+        <a class="primary-link" href="/#arena-builder">Create verdict</a>
+        <button type="button" data-action="daily-match">Daily match</button>
+      </div>
+    `;
+  }
+  const shareUrl = `${location.origin}/v/${currentChallenge.slug}`;
+  return `
+    <div class="sticky-cta">
+      ${currentChallenge.verdict ? `<button type="button" class="primary" data-action="native-share" data-url="${escapeHtml(shareUrl)}">Share verdict</button>` : '<a class="primary-link" href="#predict">Predict</a>'}
+      ${currentChallenge.verdict ? '<button type="button" data-action="rematch">Challenge verdict</button>' : `<button type="button" data-action="native-share" data-url="${escapeHtml(shareUrl)}">Share case</button>`}
+    </div>
+  `;
+}
+
 async function load() {
-  const me = await api('/api/me');
+  const [me, modelRegistry] = await Promise.all([
+    api('/api/me'),
+    api('/api/ai/models').catch(() => null),
+  ]);
+  if (modelRegistry?.models?.length) me.modelCatalog = modelRegistry.models;
   dashboard = me;
   const slug = routeSlug();
   if (slug) {
@@ -100,18 +192,21 @@ function shell(main) {
           </div>
         </a>
         <div class="top-metrics">${balances}</div>
-        <div class="session-chip"><span class="dot"></span>${dashboard.service.offlineXln ? 'offline XLN' : 'XLN live'} · ${escapeHtml(shortId(dashboard.session.userId))}</div>
+        <div class="top-actions">
+          <a class="primary-link top-create" href="/#arena-builder">Create verdict</a>
+          <div class="session-chip"><span class="dot"></span>${dashboard.service.offlineXln ? 'XLN dev rail' : 'XLN live rail'} · ${escapeHtml(shortId(dashboard.session.userId))}</div>
+        </div>
       </header>
       <div class="workspace">
         <main class="main">${main}</main>
         <aside class="side">
           <section class="surface tight">
             <div class="section-title">
-              <h2>XLN Wallet</h2>
-              <span class="pill">${dashboard.service.daemonEnabled ? 'daemon' : 'dev'}</span>
+              <h2>XLN Payments</h2>
+              <span class="pill">${dashboard.service.daemonEnabled ? 'live daemon' : 'dev rail'}</span>
             </div>
             <div class="wallet-command">
-              <button class="primary" data-action="deposit-instructions" data-testid="deposit-instructions">Deposit via XLN</button>
+              <button class="primary" data-action="deposit-instructions" data-testid="deposit-instructions">Deposit / connect XLN</button>
               ${dashboard.service.devMode ? '<button data-action="dev-fund" data-testid="dev-fund">Dev credit +250 USDC</button>' : ''}
               ${dashboard.service.devMode ? '<button data-action="seed-demo" data-testid="seed-demo">Load 5 finalized debates</button>' : ''}
               ${depositInfo ? `
@@ -122,7 +217,7 @@ function shell(main) {
                   <div class="mono">${escapeHtml(depositInfo.description)}</div>
                 </div>
               ` : ''}
-              <div class="tiny">daemon ${dashboard.service.daemonConnected ? 'connected' : 'not connected'} · ${dashboard.service.offlineXln ? 'offline mode' : 'live XLN'}</div>
+              <div class="tiny">${dashboard.service.offlineXln ? 'Dev mode simulates HTLC settlement. Live mode uses the same deposit, escrow, route, and withdraw calls through the XLN daemon.' : 'Live XLN daemon connected for deposits, escrow settlement, and withdrawals.'}</div>
             </div>
           </section>
           <section class="surface tight">
@@ -156,24 +251,634 @@ function shell(main) {
           </section>
         </aside>
       </div>
+      ${bottomNav()}
+      ${stickyActionBar()}
     </div>
+  `;
+}
+
+const topicTemplates = [
+  {
+    id: 'linux-windows',
+    label: 'Developer Platforms',
+    statement: 'Linux is better than Windows for professional developers.',
+    sideA: 'Linux is the stronger professional workstation',
+    sideB: 'Windows is the stronger professional workstation',
+    context: 'Compare production parity, developer tooling, security posture, cost, enterprise support, gaming, and hardware compatibility.',
+    rounds: '3',
+    stake: '10',
+  },
+  {
+    id: 'stable-native',
+    label: 'Crypto Rails',
+    statement: 'Stablecoins are better than volatile native assets for application escrow.',
+    sideA: 'Stablecoin escrow gives users predictable stakes and payouts',
+    sideB: 'Native assets give deeper liquidity and simpler chain economics',
+    context: 'Evaluate accounting, volatility, routing, liquidity, custody, compliance, and product comprehension.',
+    rounds: '3',
+    stake: '25',
+  },
+  {
+    id: 'open-closed-ai',
+    label: 'AI Strategy',
+    statement: 'Open-source AI models will dominate private enterprise inference.',
+    sideA: 'Open models win through control, privacy, and cost curves',
+    sideB: 'Closed frontier models keep winning on quality and support',
+    context: 'Evaluate deployment control, privacy, model quality, support, procurement, compliance, and total cost.',
+    rounds: '5',
+    stake: '0',
+  },
+  {
+    id: 'remote-office',
+    label: 'Work Design',
+    statement: 'Remote-first companies outperform office-first companies for senior engineering teams.',
+    sideA: 'Remote-first maximizes deep work and global hiring quality',
+    sideB: 'Office-first creates faster trust and coordination',
+    context: 'Compare productivity, hiring, onboarding, coordination, retention, management overhead, and decision quality.',
+    rounds: '3',
+    stake: '10',
+  },
+];
+
+const fallbackModelOptions = [
+  ['gemma3-27b-mlx', 'Gemma 3 27B local'],
+  ['qwen3-235b-mlx', 'Qwen 3 235B MLX'],
+  ['gpt-oss-heretic-mlx', 'GPT-OSS 120B Heretic MLX'],
+  ['deepseek-v3.2-speciale-mlx', 'DeepSeek V3.2 Speciale MLX'],
+  ['kimi-vl-mlx', 'Kimi-VL A3B MLX'],
+  ['qwen3-coder:latest', 'Qwen 3 Coder Ollama'],
+  ['gpt-oss:120b', 'GPT-OSS 120B Ollama'],
+  ['huihui_ai/qwen3-abliterated:235b', 'Qwen 3 235B Ollama'],
+  ['openrouter/anthropic/claude-sonnet', 'Claude via OpenRouter'],
+  ['openrouter/openai/gpt-4o', 'GPT via OpenRouter'],
+  ['openrouter/google/gemini-pro', 'Gemini via OpenRouter'],
+];
+
+const fallbackSkillOptions = [
+  ['logic', 'Skeptical Logician'],
+  ['evidence', 'Evidence Auditor'],
+  ['product', 'Product Pragmatist'],
+  ['security', 'Adversarial Reviewer'],
+  ['economics', 'Cost Economist'],
+  ['clarity', 'Clarity Editor'],
+  ['philosopher', 'Steelman Philosopher'],
+];
+
+function modelOptionsList() {
+  const live = dashboard?.modelCatalog || [];
+  const options = live.length
+    ? live.map(model => [model.id, `${model.name || model.id}${model.available === false ? ' unavailable' : ''}`])
+    : fallbackModelOptions;
+  return [...options, ['custom', 'Custom local model id']];
+}
+
+function skillOptionsList() {
+  const live = dashboard?.skillOptions || [];
+  const options = live.length
+    ? live.map(skill => [skill.value || skill.id, skill.custom ? `${skill.label} custom` : skill.label])
+    : fallbackSkillOptions;
+  return [...options, ['custom', 'Inline custom prompt']];
+}
+
+function selectOptions(options, selected) {
+  return options.map(([value, label]) => `
+    <option value="${escapeHtml(value)}" ${value === selected ? 'selected' : ''}>${escapeHtml(label)}</option>
+  `).join('');
+}
+
+function modelSelect(name, selected = 'gemma3-27b-mlx') {
+  return `
+    <select name="${escapeHtml(name)}">${selectOptions(modelOptionsList(), selected)}</select>
+    <input class="model-custom" name="${escapeHtml(name)}Custom" placeholder="Optional exact model id, e.g. gemma4-27b-mlx" />
+  `;
+}
+
+function skillSelect(name, selected = 'logic') {
+  return `<select name="${escapeHtml(name)}">${selectOptions(skillOptionsList(), selected)}</select>`;
+}
+
+function inlineSkillFields(prefixOrLabelName, promptName = '') {
+  const labelName = promptName ? prefixOrLabelName : `${prefixOrLabelName}CustomSkillLabel`;
+  const bodyName = promptName || `${prefixOrLabelName}CustomSkillPrompt`;
+  return `
+    <details class="inline-skill">
+      <summary>Custom skill prompt</summary>
+      <input name="${escapeHtml(labelName)}" placeholder="Skill name, e.g. Startup Shark" />
+      <textarea name="${escapeHtml(bodyName)}" placeholder="Prompt: score like a strict startup investor. Reward traction, distribution, margin, clarity, and refusal to dodge hard tradeoffs."></textarea>
+    </details>
+  `;
+}
+
+function councilBuilder(prefix = '') {
+  const defaults = [
+    ['gemma3-27b-mlx', 'logic', 'Skeptical Logician'],
+    ['gemma3-27b-mlx', 'evidence', 'Evidence Auditor'],
+    ['gemma3-27b-mlx', 'product', 'Product Pragmatist'],
+    ['gemma3-27b-mlx', 'security', 'Adversarial Reviewer'],
+    ['gemma3-27b-mlx', 'clarity', 'Clarity Editor'],
+  ];
+  return `
+    <div class="council-builder">
+      <div class="council-head">
+        <div>
+          <strong>AI Council</strong>
+          <span>Each judge is model + skill/persona prompt.</span>
+        </div>
+        <label>Council size
+          <select name="${prefix}councilSize">
+            <option value="3" selected>3 judges</option>
+            <option value="5">5 judges</option>
+          </select>
+        </label>
+      </div>
+      <div class="council-rows">
+        ${defaults.map(([model, skill, title], index) => {
+          const row = index + 1;
+          return `
+            <div class="council-row">
+              <span>${row}</span>
+              <label>Model ${modelSelect(`${prefix}councilModel${row}`, model)}</label>
+              <label>Skill ${skillSelect(`${prefix}councilSkill${row}`, skill)}</label>
+              <input type="hidden" name="${prefix}councilProvider${row}" value="local-gemma" />
+              <em>${escapeHtml(title)}</em>
+              ${inlineSkillFields(`${prefix}councilCustomSkillLabel${row}`, `${prefix}councilCustomSkillPrompt${row}`)}
+            </div>
+          `;
+        }).join('')}
+      </div>
+    </div>
+  `;
+}
+
+const judgeMeta = {
+  logic: { icon: 'OWL', color: 'indigo', line: 'Sees through fallacies' },
+  evidence: { icon: 'LENS', color: 'amber', line: 'Demands proof' },
+  clarity: { icon: 'PRISM', color: 'cyan', line: 'Cuts through fog' },
+  systems: { icon: 'TEMPLE', color: 'slate', line: 'Reads the architecture' },
+  security: { icon: 'SHIELD', color: 'red', line: 'Models adversaries' },
+  product: { icon: 'TARGET', color: 'green', line: 'Scores usefulness' },
+  cost: { icon: 'COIN', color: 'gold', line: 'Counts hidden cost' },
+  chair: { icon: 'SCALES', color: 'violet', line: 'Casts final weight' },
+};
+
+function metaForJudge(id = '') {
+  const key = Object.keys(judgeMeta).find(name => id.toLowerCase().includes(name));
+  return judgeMeta[key] || { icon: 'JUDGE', color: 'slate', line: 'Independent vote' };
+}
+
+function categoryPill(category) {
+  const id = category?.id || 'culture';
+  const label = category?.label || 'Culture';
+  return `<span class="category-pill ${escapeHtml(id)}">${escapeHtml(label)}</span>`;
+}
+
+function verdictKindLabel(kind) {
+  if (kind === 'unanimous') return 'UNANIMOUS';
+  if (kind === 'split') return 'SPLIT DECISION';
+  if (kind === 'hung') return 'HUNG COURT';
+  return 'PENDING';
+}
+
+function scoreSnapshot(verdict) {
+  const scores = verdict?.payout?.scores1000 || verdict?.scores1000 || {};
+  return {
+    A: Number(scores.A || 0),
+    B: Number(scores.B || 0),
+    margin: Number(verdict?.payout?.margin ?? verdict?.margin ?? Math.abs(Number(scores.A || 0) - Number(scores.B || 0))),
+    winner: verdict?.winner || '-',
+  };
+}
+
+function winnerLabel(verdict) {
+  if (!verdict) return 'Awaiting verdict';
+  if (verdict.winner === 'draw') return 'Hung court';
+  if (verdict.winner === 'invalid') return 'Invalidated';
+  return `Side ${verdict.winner} wins`;
+}
+
+function voteSummary(votes = {}) {
+  const a = Number(votes.A || 0);
+  const b = Number(votes.B || 0);
+  const draw = Number(votes.draw || 0);
+  const invalid = Number(votes.invalid || 0);
+  if (draw || invalid) return `${a}-${b}, ${draw} draw`;
+  return `${a}-${b} judges`;
+}
+
+function councilVoteLabel(verdict) {
+  const votes = verdict?.votes || {};
+  const a = Number(votes.A || 0);
+  const b = Number(votes.B || 0);
+  const draw = Number(votes.draw || 0);
+  if (verdict?.winner === 'A') return `${a}-${b} judges`;
+  if (verdict?.winner === 'B') return `${b}-${a} judges`;
+  return `${draw || 0} draw votes`;
+}
+
+function votePattern(challenge) {
+  const votes = challenge.verdict?.votes || {};
+  const total = Object.values(votes).reduce((sum, value) => sum + Number(value || 0), 0) || challenge.judgeBoard?.length || 3;
+  const winner = challenge.verdict?.winner;
+  return Array.from({ length: total }).map((_, index) => {
+    return `<span class="vote-chip ${winner === 'B' ? 'b' : 'a'}">J${index + 1} ${winner || '-'}</span>`;
+  }).join('');
+}
+
+function cleanArgumentBody(body) {
+  return String(body || '')
+    .replace(/\s*\[local-ai-fallback:[^\]]+\]\s*/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function electionMeter(verdict, sideALabel, sideBLabel, label = 'Winning margin') {
+  const score = scoreSnapshot(verdict);
+  const winner = score.winner;
+  const side = winner === 'A' ? 'a' : winner === 'B' ? 'b' : 'draw';
+  const direction = winner === 'A' ? -1 : winner === 'B' ? 1 : 0;
+  const swing = direction === 0 ? 50 : Math.max(8, Math.min(92, 50 + direction * Math.max(5, Math.min(42, score.margin / 4))));
+  return `
+    <div class="election-meter ${side}">
+      <div class="meter-head">
+        <span>${escapeHtml(label)}</span>
+        <strong>${winner === 'draw' ? 'Draw' : `${escapeHtml(winnerLabel(verdict))} +${escapeHtml(score.margin)}`}</strong>
+      </div>
+      <div class="meter-track" aria-label="Verdict swing meter">
+        <div class="meter-a" style="width:${escapeHtml(swing)}%"></div>
+        <div class="meter-pin" style="left:${escapeHtml(swing)}%"></div>
+      </div>
+      <div class="meter-labels">
+        <span>A · ${escapeHtml(sideALabel)}</span>
+        <b>${winner === 'draw' ? 'even case' : `${escapeHtml(score.margin)} point edge`}</b>
+        <span>B · ${escapeHtml(sideBLabel)}</span>
+      </div>
+    </div>
+  `;
+}
+
+function counselStage(challenge, verdict = challenge.verdict, variant = '') {
+  const score = verdict ? scoreSnapshot(verdict) : null;
+  const winner = score?.winner || verdict?.winner || '';
+  const totalFilings = (challenge.roundsTotal || 0) * 2;
+  const boardSize = challenge.judgeBoard?.length || 3;
+  const stageClass = `${variant ? ` ${variant}` : ''}${winner === 'A' ? ' a-wins' : winner === 'B' ? ' b-wins' : ''}`;
+  const centerTitle = verdict
+    ? (winner === 'draw' ? 'No majority' : winnerLabel(verdict))
+    : 'Council watching';
+  const centerMeta = verdict
+    ? (winner === 'draw' ? councilVoteLabel(verdict) : `+${score.margin} margin · ${councilVoteLabel(verdict)}`)
+    : `${challenge.messages.length}/${totalFilings || '?'} filings · ${boardSize} judges`;
+  const renderBot = (side, label) => {
+    const isWinner = winner === side;
+    const role = score
+      ? (isWinner ? 'winner' : winner === 'draw' ? 'no edge' : 'counter case')
+      : (side === challenge.expectedSide ? 'filing now' : 'standing by');
+    return `
+      <div class="counsel-bot side-${side.toLowerCase()} ${isWinner ? 'winner' : ''}">
+        <div class="robot-shell" aria-hidden="true">
+          <div class="robot-antenna"></div>
+          <div class="robot-head"><span></span><span></span><i></i></div>
+          <div class="robot-neck"></div>
+          <div class="robot-body"><b></b><b></b><b></b></div>
+        </div>
+        <div class="bot-caption">
+          <span>Side ${side}</span>
+          <strong>${escapeHtml(label)}</strong>
+          <em>${escapeHtml(role)}</em>
+        </div>
+      </div>
+    `;
+  };
+  return `
+    <div class="counsel-stage${stageClass}">
+      ${renderBot('A', challenge.sideALabel)}
+      <div class="council-dais">
+        <span>AI council</span>
+        <strong>${escapeHtml(centerTitle)}</strong>
+        <em>${escapeHtml(centerMeta)}</em>
+      </div>
+      ${renderBot('B', challenge.sideBLabel)}
+    </div>
+  `;
+}
+
+function roundScoreKey(challenge) {
+  return `${challenge.slug}:${challenge.messages.length}`;
+}
+
+function roundScorePanel(challenge) {
+  if (challenge.verdict || challenge.messages.length < 2) return '';
+  const key = roundScoreKey(challenge);
+  const score = liveRoundScores.get(key);
+  const pending = pendingRoundScores.has(key);
+  const judgeRows = score?.judges?.map(run => `
+    <div class="round-judge">
+      <strong>${escapeHtml(run.label || run.judgeId)}</strong>
+      <span>${escapeHtml(winnerLabel(run.verdict))}</span>
+      <p>${escapeHtml(run.verdict?.decisiveMoments?.[0]?.summary || run.verdict?.reasoning || 'No comment yet.')}</p>
+    </div>
+  `).join('') || '';
+  return `
+    <section class="round-score-panel">
+      <div class="section-title">
+        <h3>Live Council Score</h3>
+        <span class="pill">after round ${Math.ceil(challenge.messages.length / 2)}</span>
+      </div>
+      ${score ? electionMeter(score.aggregate, challenge.sideALabel, challenge.sideBLabel, 'Current swing') : `
+        <div class="score-placeholder">${pending ? 'Council is scoring the latest exchange...' : 'Both sides filed. Ask the council for a live score before the next round.'}</div>
+      `}
+      ${judgeRows ? `<div class="round-judges">${judgeRows}</div>` : ''}
+      <button type="button" data-action="round-score" ${pending ? 'disabled' : ''}>${pending ? 'Scoring...' : 'Update live score'}</button>
+    </section>
+  `;
+}
+
+function predictionPanel(challenge) {
+  const pick = userPrediction(challenge.slug);
+  if (challenge.verdict) {
+    const hit = pick && pick === challenge.verdict.winner;
+    return `
+      <section class="predict-panel ${hit ? 'hit' : pick ? 'miss' : ''}" id="predict">
+        <div>
+          <span>${spectatorCount(challenge.slug)} watching</span>
+          <strong>${pick ? (hit ? 'You called it' : 'Your prediction missed') : 'Predict next time'}</strong>
+        </div>
+        <p>${pick ? `You picked Side ${escapeHtml(pick)}. Final: ${escapeHtml(winnerLabel(challenge.verdict))}.` : 'Predictions are free, no stake, and can become a retention loop without gambling risk.'}</p>
+      </section>
+    `;
+  }
+  return `
+    <section class="predict-panel" id="predict">
+      <div>
+        <span>${spectatorCount(challenge.slug)} watching</span>
+        <strong>${pick ? `You picked Side ${escapeHtml(pick)}` : 'Predict the verdict'}</strong>
+      </div>
+      <div class="predict-actions">
+        <button type="button" class="${pick === 'A' ? 'active' : ''}" data-action="predict" data-side="A">Side A wins</button>
+        <button type="button" class="${pick === 'B' ? 'active' : ''}" data-action="predict" data-side="B">Side B wins</button>
+      </div>
+    </section>
+  `;
+}
+
+function formatArgumentBody(body) {
+  const clean = cleanArgumentBody(body);
+  const sentences = clean.match(/[^.!?]+[.!?]+(?:["”])?|[^.!?]+$/g) || [clean];
+  const blocks = [];
+  for (let index = 0; index < sentences.length; index += 2) {
+    blocks.push(sentences.slice(index, index + 2).join(' ').trim());
+  }
+  return blocks.filter(Boolean).slice(0, 5).map(block => `<p>${escapeHtml(block)}</p>`).join('');
+}
+
+function mainEventCard() {
+  const event = dashboard.publicChallenges.find(challenge => challenge.verdict) || dashboard.publicChallenges[0];
+  if (!event) {
+    return `
+      <section class="main-event empty-main">
+        <div class="event-copy">
+          <div class="status">today's main event</div>
+          <h2>No verdicts yet.</h2>
+          <p>Generate an AI match or seed the demo wall to turn the homepage into a live arena.</p>
+        </div>
+      </section>
+    `;
+  }
+  const verdict = event.verdict;
+  const resultLabel = winnerLabel(verdict);
+  return `
+    <section class="main-event ${escapeHtml(verdict?.decisionKind || 'pending')}">
+      <div class="event-copy">
+        <div class="event-kicker">
+          <span>today's main event</span>
+          ${categoryPill(event.category)}
+          <span>${escapeHtml(verdictKindLabel(verdict?.decisionKind))}</span>
+          <span>${event.mode === 'ai_gladiator' ? 'AI ARENA' : 'HUMAN COURT'}</span>
+        </div>
+        <div class="main-winner">${escapeHtml(resultLabel)}</div>
+        <h2>${escapeHtml(event.statement)}</h2>
+        <div class="event-actions">
+          <a class="primary-link" href="/v/${encodeURIComponent(event.slug)}">Open verdict</a>
+          <button type="button" data-action="daily-match" data-testid="daily-match">Generate daily match</button>
+          <a href="#creator" class="quiet-link">Create human challenge</a>
+        </div>
+      </div>
+      <a class="event-scoreboard" href="/v/${encodeURIComponent(event.slug)}">
+        <div class="decision-banner">
+          <span>${escapeHtml(verdictKindLabel(verdict?.decisionKind))}</span>
+          <strong>${escapeHtml(resultLabel)}</strong>
+        </div>
+        ${counselStage(event, verdict, 'compact')}
+        ${electionMeter(verdict, event.sideALabel, event.sideBLabel)}
+        <div class="vote-pattern">${votePattern(event)}</div>
+        <blockquote>${escapeHtml(verdict?.decisiveMoment || 'Judges publish decisive moments, criteria, and receipts.')}</blockquote>
+        <div class="receipt-strip">XLN settlement rail · ${escapeHtml(event.stakeDisplay)} ${escapeHtml(event.tokenSymbol)}</div>
+      </a>
+    </section>
+  `;
+}
+
+function modelLeaderboard() {
+  const rows = dashboard.modelLeaderboard || [];
+  if (!rows.length) {
+    return '<div class="empty">Run an AI Gladiator match to start the model Elo board.</div>';
+  }
+  return rows.map((row, index) => `
+    <div class="leader-row">
+      <span>${index + 1}</span>
+      <strong>${escapeHtml(row.model)}</strong>
+      <em>${escapeHtml(row.wins)}-${escapeHtml(row.losses)}-${escapeHtml(row.draws)}</em>
+      <b>${escapeHtml(row.elo)}</b>
+    </div>
+  `).join('');
+}
+
+function productModeCards() {
+  const modes = [
+    ['AI Arena', 'Model-vs-model matches, verdict cards, Elo board, daily main event.', 'Live now'],
+    ['Human Court', 'Two-party disputes, invite link, escrow, 1000-point judge board.', 'Advanced'],
+    ['Verdict API', 'B2B judge endpoint for marketplaces, DAOs, moderation, and disputes.', 'Design target'],
+    ['XLN Proof', 'Every card is an ad for instant settlement and receipt verification.', 'Marketing'],
+  ];
+  return modes.map(([title, body, tag]) => `
+    <div class="mode-card">
+      <span>${escapeHtml(tag)}</span>
+      <strong>${escapeHtml(title)}</strong>
+      <p>${escapeHtml(body)}</p>
+    </div>
+  `).join('');
+}
+
+function featuredVerdictCards() {
+  const featured = dashboard.publicChallenges
+    .filter(challenge => challenge.verdictSummary)
+    .slice(0, 6);
+  if (!featured.length) {
+    return `
+      <div class="empty arena-empty">
+        Seed finalized debates or create a new challenge. The arena becomes a public verdict wall once judges settle cases.
+      </div>
+    `;
+  }
+  return featured.map(challenge => `
+    <a class="featured-card ${escapeHtml(challenge.verdict?.decisionKind || 'pending')}" href="/v/${encodeURIComponent(challenge.slug)}">
+      <div class="featured-top">
+        ${categoryPill(challenge.category)}
+        <span class="pill">${escapeHtml(challenge.stakeDisplay)} ${escapeHtml(challenge.tokenSymbol)}</span>
+      </div>
+      <strong>${escapeHtml(challenge.statement)}</strong>
+      <div class="featured-score">
+        <span>${escapeHtml(winnerLabel(challenge.verdict))}</span>
+        <b>${escapeHtml(challenge.verdict?.scores1000?.A ?? '-')}—${escapeHtml(challenge.verdict?.scores1000?.B ?? '-')}</b>
+        <em>+${escapeHtml(challenge.verdict?.margin ?? '-')}</em>
+      </div>
+      <div class="vote-pattern">${votePattern(challenge)}</div>
+      <p>${escapeHtml(challenge.verdict?.decisiveMoment || 'Open the verdict for the decisive moment.')}</p>
+      <div class="featured-foot">
+        <span>${escapeHtml(verdictKindLabel(challenge.verdict?.decisionKind))}</span>
+        <span>XLN receipt</span>
+      </div>
+    </a>
+  `).join('');
+}
+
+function templateCards() {
+  return topicTemplates.map(template => `
+    <button class="template-card" type="button" data-action="use-template" data-template="${escapeHtml(template.id)}">
+      <span>${escapeHtml(template.label)}</span>
+      <strong>${escapeHtml(template.statement)}</strong>
+      <small>${escapeHtml(template.rounds)} rounds · ${escapeHtml(template.stake)} USDC</small>
+    </button>
+  `).join('');
+}
+
+function verdictFirstHero(challenge) {
+  if (!challenge.verdict) return '';
+  const verdict = challenge.verdict;
+  const kind = verdict.payout?.decisionKind || verdict.decisionKind || 'pending';
+  const decisive = verdict.decisiveMoment || challenge.judgeRuns?.map(run => run.verdict?.decisiveMoments?.[0]?.summary).find(Boolean);
+  return `
+    <section class="verdict-first ${escapeHtml(kind)}" data-testid="verdict-panel">
+      <div class="verdict-first-top">
+        <div>
+          <div class="status">boardroom verdict</div>
+          <h2>Winner: ${escapeHtml(winnerLabel(verdict))} · ${escapeHtml(verdictKindLabel(kind))}</h2>
+        </div>
+        ${categoryPill(challenge.category)}
+      </div>
+      ${counselStage(challenge, verdict, 'hero-stage')}
+      ${electionMeter(verdict, challenge.sideALabel, challenge.sideBLabel)}
+      <div class="vote-pattern">${votePattern(challenge)}</div>
+      <blockquote>${escapeHtml(decisive || verdict.summary)}</blockquote>
+      <div class="receipt-strip">XLN rail · ${escapeHtml(challenge.stakeDisplay)} ${escapeHtml(challenge.tokenSymbol)} stake · receipt available</div>
+    </section>
   `;
 }
 
 function homeView() {
   return shell(`
-    <div class="toolbar">
-      <div>
-        <div class="status">challenge composer</div>
-        <h2 style="font-size:24px;margin:4px 0 0">Create Debate</h2>
+    ${mainEventCard()}
+    <section class="surface arena-control" id="arena-builder">
+      <div class="section-title">
+        <h2>Create New Verdict</h2>
+        <span class="pill">AI council builder</span>
       </div>
-      <a class="pill" href="/">debates.xln.finance</a>
-    </div>
-    <section class="surface composer">
+      <div class="control-grid">
+        <form class="gladiator-form control-card" data-action="gladiator">
+          <div class="status">AI vs AI gladiator verdict</div>
+          <h3>Pick debaters, skills, and a judge council</h3>
+          <label>Topic
+            <textarea data-testid="gladiator-topic" name="statement">Local open-source AI will beat closed frontier APIs for most enterprise workflows.</textarea>
+          </label>
+          <div class="grid-2">
+            <label>Side A model
+              ${modelSelect('sideAModel', 'gemma3-27b-mlx')}
+            </label>
+            <label>Side B model
+              ${modelSelect('sideBModel', 'gemma3-27b-mlx')}
+            </label>
+          </div>
+          <div class="grid-2">
+            <label>Side A skill
+              ${skillSelect('sideASkill', 'product')}
+              ${inlineSkillFields('sideA')}
+            </label>
+            <label>Side B skill
+              ${skillSelect('sideBSkill', 'security')}
+              ${inlineSkillFields('sideB')}
+            </label>
+          </div>
+          <div class="grid-2">
+            <label>Side A
+              <input name="sideALabel" value="Open local models win" />
+            </label>
+            <label>Side B
+              <input name="sideBLabel" value="Closed frontier APIs keep winning" />
+            </label>
+          </div>
+          ${councilBuilder()}
+          <button class="primary" data-testid="run-gladiator">Create AI verdict</button>
+        </form>
+        <form class="control-card settle-card" data-action="settle-url">
+          <div class="status">settle a post</div>
+          <h3>Paste a tweet, post, or article</h3>
+          <p class="tiny">Creates a public AI match around the central claim. Use it as a reply card or embed.</p>
+          <label>URL
+            <input data-testid="settle-url" name="url" value="https://example.com/post/claim" />
+          </label>
+          <button data-testid="settle-post">Settle post</button>
+        </form>
+        <section class="control-card leaderboard-card">
+          <div class="status">model elo</div>
+          <h3>Leaderboard</h3>
+          <div class="leaderboard">${modelLeaderboard()}</div>
+        </section>
+        <form class="control-card skill-card" data-action="custom-skill">
+          <div class="status">skill library</div>
+          <h3>Add a judging skill</h3>
+          <label>Name
+            <input data-testid="custom-skill-label" name="label" value="Startup Shark" />
+          </label>
+          <label>Prompt
+            <textarea data-testid="custom-skill-prompt" name="prompt">Judge like a strict startup investor. Reward distribution, urgency, margins, customer pain, proof, and the ability to answer hard objections directly.</textarea>
+          </label>
+          <button data-testid="save-custom-skill">Save skill</button>
+        </form>
+      </div>
+    </section>
+    <section class="surface featured-arena">
+      <div class="section-title">
+        <h2>Recent Verdicts</h2>
+        <span class="pill">SportsCenter cards</span>
+      </div>
+      <div class="featured-grid">${featuredVerdictCards()}</div>
+    </section>
+    <section class="surface mode-panel">
+      <div class="section-title">
+        <h2>Product Superset</h2>
+        <span class="pill">choose later</span>
+      </div>
+      <div class="mode-grid">${productModeCards()}</div>
+    </section>
+    <section class="surface template-panel">
+      <div class="section-title">
+        <h2>Challenge Templates</h2>
+        <span class="pill">one tap setup</span>
+      </div>
+      <div class="template-grid">${templateCards()}</div>
+    </section>
+    <section class="surface composer" id="creator">
+      <div class="composer-head">
+        <div>
+          <div class="status">human court</div>
+          <h2>Create Human Challenge</h2>
+        </div>
+        <span class="pill">advanced rail</span>
+      </div>
       <form data-action="create-challenge">
         <div class="court-banner">
           <strong>Two-party court mode</strong>
-          <span>Side A files the claim. Side B joins from the invite link. Judges score each side out of 1000 and decide by margin.</span>
+          <span>Simple by default: claim, Side A, Side B. Everything else stays in advanced for power users and XLN demos.</span>
         </div>
         <label>Statement
           <textarea data-testid="statement" name="statement">Linux is better than Windows for professional developers.</textarea>
@@ -189,45 +894,52 @@ function homeView() {
         <label>Context
           <textarea data-testid="context" name="contextText">Compare reliability, developer tooling, security posture, cost, gaming, enterprise support, and hardware compatibility.</textarea>
         </label>
-        <div class="grid-3">
-          <label>Stake
-            <input data-testid="stake" name="stake" value="10" />
+        <details class="advanced-box" open>
+          <summary>Advanced XLN / court settings</summary>
+          <div class="grid-3">
+            <label>Stake
+              <input data-testid="stake" name="stake" value="10" />
+            </label>
+            <label>Token
+              <select data-testid="token" name="tokenId">
+                <option value="1">USDC</option>
+                <option value="3">USDT</option>
+              </select>
+            </label>
+            <label>Rounds
+              <select data-testid="rounds" name="roundsTotal">
+                <option>1</option>
+                <option selected>3</option>
+                <option>5</option>
+              </select>
+            </label>
+          </div>
+          <div class="grid-3">
+            <label>Message limit
+              <input data-testid="limit" name="messageLimitChars" value="1200" />
+            </label>
+            <label>Judge board
+              <select data-testid="board" name="boardId">
+                <option value="classic3">Classic 3</option>
+                <option value="technical5">Technical 5</option>
+              </select>
+            </label>
+            <label>Rules
+              <select name="rulesTemplate">
+                <option>General Debate</option>
+                <option>Technical Comparison</option>
+                <option>Product Decision</option>
+              </select>
+            </label>
+          </div>
+          <label>Side A automatic payout XLN entity
+            <input data-testid="auto-payout-a" name="sideAPayoutEntityId" placeholder="0x... winner receives payout automatically" />
           </label>
-          <label>Token
-            <select data-testid="token" name="tokenId">
-              <option value="1">USDC</option>
-              <option value="3">USDT</option>
-            </select>
+          ${councilBuilder()}
+          <label>Custom rules
+            <textarea name="customRules">No personal attacks. Judge only the claims made in the transcript and supplied context.</textarea>
           </label>
-          <label>Rounds
-            <select data-testid="rounds" name="roundsTotal">
-              <option>1</option>
-              <option selected>3</option>
-              <option>5</option>
-            </select>
-          </label>
-        </div>
-        <div class="grid-3">
-          <label>Message limit
-            <input data-testid="limit" name="messageLimitChars" value="1200" />
-          </label>
-          <label>Judge board
-            <select data-testid="board" name="boardId">
-              <option value="classic3">Classic 3</option>
-              <option value="technical5">Technical 5</option>
-            </select>
-          </label>
-          <label>Rules
-            <select name="rulesTemplate">
-              <option>General Debate</option>
-              <option>Technical Comparison</option>
-              <option>Product Decision</option>
-            </select>
-          </label>
-        </div>
-        <label>Custom rules
-          <textarea name="customRules">No personal attacks. Judge only the claims made in the transcript and supplied context.</textarea>
-        </label>
+        </details>
         <button class="primary" data-testid="create-challenge">Create challenge</button>
         <div class="error">${escapeHtml(errorText)}</div>
       </form>
@@ -239,13 +951,29 @@ function challengeView(challenge) {
   const invite = challenge.inviteUrl
     ? `${location.origin}${challenge.inviteUrl}`
     : '';
-  const messages = challenge.messages.map(message => `
-    <article class="message ${message.side.toLowerCase()}">
-      <div class="message-head">
-        <span>Round ${message.roundNumber} · Side ${message.side}</span>
-        <span>${escapeHtml(shortId(message.bodyHash))}</span>
+  const verdictUrl = `${location.origin}/v/${challenge.slug}`;
+  const cardUrl = `/api/challenges/${encodeURIComponent(challenge.slug)}/card.svg`;
+  const transcriptProof = challenge.messages.length ? `
+    <details class="proof-drawer">
+      <summary>Transcript proof</summary>
+      <div class="proof-list">
+        ${challenge.messages.map(message => `
+          <div><span>R${message.roundNumber} Side ${message.side}</span><code>${escapeHtml(shortProofId(message.bodyHash))}</code></div>
+        `).join('')}
       </div>
-      <div class="message-body">${escapeHtml(message.body)}</div>
+    </details>
+  ` : '';
+  const messages = challenge.messages.map(message => `
+    <article class="message-row ${message.side.toLowerCase()}">
+      <div class="message-avatar">${escapeHtml(message.side)}</div>
+      <div class="message-bubble">
+        <div class="message-head">
+          <span>Round ${message.roundNumber}</span>
+          <strong>${escapeHtml(message.side === 'A' ? challenge.sideALabel : challenge.sideBLabel)}</strong>
+        </div>
+        <div class="message-body">${formatArgumentBody(message.body)}</div>
+        ${/\[local-ai-fallback:/i.test(message.body) ? '<div class="message-foot">local fallback used while model was loading</div>' : ''}
+      </div>
     </article>
   `).join('');
   const judges = challenge.judgeBoard.map(judge => `
@@ -259,43 +987,111 @@ function challengeView(challenge) {
     if (!verdict) return '';
     const a = verdict.scores1000?.A ?? (verdict.scores?.A || 0) * 10;
     const b = verdict.scores1000?.B ?? (verdict.scores?.B || 0) * 10;
+    const moment = verdict.decisiveMoments?.[0];
+    const criteria = Object.entries(verdict.criteria || {}).slice(0, 5).map(([name, score]) => `
+      <span>${escapeHtml(name)} ${escapeHtml(score?.A ?? '-')}/${escapeHtml(score?.B ?? '-')}</span>
+    `).join('');
     return `
-      <div class="score-row">
-        <strong>${escapeHtml(run.judgeId)}</strong>
-        <span>Side A ${escapeHtml(a)} · Side B ${escapeHtml(b)} · margin ${escapeHtml(Math.abs(a - b))}</span>
+      <div class="judge-result-card">
+        <div class="score-row">
+          <strong>${escapeHtml(run.judgeId)}</strong>
+          <span>Side A ${escapeHtml(a)} · Side B ${escapeHtml(b)} · margin ${escapeHtml(Math.abs(a - b))}</span>
+        </div>
+        ${moment ? `<div class="decisive-line"><strong>Decisive moment</strong> · Round ${escapeHtml(moment.round)} · Side ${escapeHtml(moment.side)}: ${escapeHtml(moment.summary)}</div>` : ''}
+        <div class="criteria-strip">${criteria}</div>
       </div>
     `;
   }).join('') : '';
   const verdict = challenge.verdict ? `
-    <section class="surface judge-panel verdict" data-testid="verdict-panel">
-      <div class="status">final verdict</div>
-      <h2>Winner: Side ${escapeHtml(challenge.verdict.winner)}</h2>
+    <section class="surface judge-panel verdict">
+      <div class="status">judge breakdown</div>
+      <h2>Why ${escapeHtml(winnerLabel(challenge.verdict))}</h2>
       <p>${escapeHtml(challenge.verdict.summary)}</p>
       <div class="score-card">
         <div><span>Side A</span><strong>${escapeHtml(challenge.verdict.payout?.scores1000?.A ?? '-')}</strong></div>
         <div><span>Side B</span><strong>${escapeHtml(challenge.verdict.payout?.scores1000?.B ?? '-')}</strong></div>
         <div><span>Margin</span><strong>${escapeHtml(challenge.verdict.payout?.margin ?? '-')}</strong></div>
       </div>
-      <div class="tiny">confidence ${escapeHtml(challenge.verdict.confidence)} · votes ${escapeHtml(JSON.stringify(challenge.verdict.votes))}</div>
+      <div class="tiny">confidence ${escapeHtml(challenge.verdict.confidence)} · vote ${escapeHtml(voteSummary(challenge.verdict.votes))}</div>
       <div class="judge-results">${judgeResults}</div>
+      <div class="verdict-share-grid">
+        <div class="verdict-card-frame">
+          <img class="verdict-card-image" data-testid="verdict-card" src="${escapeHtml(cardUrl)}" alt="Shareable XLN Debates verdict card" />
+        </div>
+        <div class="share-panel">
+          <div class="status">distribution</div>
+          <h3>Public verdict card</h3>
+          <p class="tiny">Use /v/ for the public case page and the SVG card for social previews, threads, and receipts.</p>
+          <div class="verdict-actions">
+            <button data-action="copy-verdict-url" data-url="${escapeHtml(verdictUrl)}">Copy verdict URL</button>
+            <button data-action="copy-card-url" data-url="${escapeHtml(`${location.origin}${cardUrl}`)}">Copy card URL</button>
+            <button class="primary" data-action="rematch" data-testid="rematch">Challenge verdict</button>
+          </div>
+        </div>
+      </div>
     </section>
   ` : '';
   const accept = challenge.canAccept ? `
-    <button class="primary" data-action="accept" data-testid="accept-challenge">Accept and lock ${escapeHtml(challenge.stakeDisplay)} ${escapeHtml(challenge.tokenSymbol)}</button>
+    <form class="accept-panel" data-action="accept-challenge">
+      <label>Side B automatic payout XLN entity
+        <input data-testid="auto-payout-b" name="sideBPayoutEntityId" placeholder="0x... optional, used if Side B wins" />
+      </label>
+      <button class="primary" data-testid="accept-challenge">Accept and lock ${escapeHtml(challenge.stakeDisplay)} ${escapeHtml(challenge.tokenSymbol)}</button>
+    </form>
   ` : '';
-  const submit = challenge.canSubmit ? `
-    <section class="turn-box">
-      <div class="status">court filing · your turn as side ${escapeHtml(challenge.userSide)}</div>
-      <form data-action="submit-message">
-        <textarea data-testid="message-body" name="body" placeholder="File your argument for Side ${escapeHtml(challenge.userSide)}. Address the prior filing directly, cite context, and ask the judge board for a score out of 1000."></textarea>
-        <button class="primary" data-testid="submit-message">Submit turn</button>
-      </form>
+  const submit = challenge.status === 'active' ? `
+    <section class="round-console">
+      <div class="section-title">
+        <h3>Round ${Math.floor(challenge.messages.length / 2) + 1} Filing Console</h3>
+        <span class="pill">live court</span>
+      </div>
+      ${['A', 'B'].map(side => {
+        const active = challenge.canSubmit && challenge.userSide === side;
+        const waiting = challenge.expectedSide === side;
+        return `
+          <div class="filing-panel ${side.toLowerCase()} ${active ? 'active' : ''}">
+            <div class="filing-head">
+              <span>Side ${side}</span>
+              <strong>${escapeHtml(side === 'A' ? challenge.sideALabel : challenge.sideBLabel)}</strong>
+            </div>
+            ${active ? `
+              <form data-action="submit-message">
+                <div class="ai-counsel-row">
+                  <label>AI counsel model ${modelSelect('draftModel', 'gemma3-27b-mlx')}</label>
+                  <label>Skill ${skillSelect('draftSkill', side === 'A' ? 'product' : 'security')}${inlineSkillFields('draft')}</label>
+                  <button type="button" data-action="draft-turn">Draft with AI</button>
+                </div>
+                <textarea data-testid="message-body" name="body" maxlength="${escapeHtml(challenge.messageLimitChars)}" placeholder="File Side ${side}'s point. Max ${escapeHtml(challenge.messageLimitChars)} chars. Keep claims concrete, cite context, and rebut the previous filing."></textarea>
+                <div class="filing-actions">
+                  <span class="tiny">${escapeHtml(challenge.messageLimitChars)} character limit</span>
+                  <button class="primary" data-testid="submit-message">Submit Side ${side}</button>
+                </div>
+              </form>
+            ` : `<div class="empty">${waiting ? `Waiting for Side ${side} to file.` : `Side ${side} filing opens on their turn.`}</div>`}
+          </div>
+        `;
+      }).join('')}
     </section>
   ` : `<div class="turn-box tiny">Waiting for Side ${escapeHtml(challenge.expectedSide || '-')} counsel to file the next argument.</div>`;
   const judgeButton = challenge.status === 'ready_for_judging' ? `
     <button class="primary" data-action="judge" data-testid="run-judges">Run judge board</button>
   ` : '';
-  const withdraw = challenge.verdict && challenge.userSide === challenge.verdict.winner ? `
+  const autoPayout = challenge.verdict?.payout?.autoPayout;
+  const autoPayoutSettled = autoPayout && ['submitting', 'sent', 'finalized'].includes(String(autoPayout.status || ''));
+  const autoPayoutPanel = challenge.verdict && challenge.userSide === challenge.verdict.winner && autoPayout ? `
+    <section class="surface wallet-panel">
+      <div class="status">winner payout</div>
+      <h2>Automatic XLN payout</h2>
+      <div class="payout-status" data-testid="auto-payout-status">
+        <strong>${escapeHtml(autoPayout.status)}</strong>
+        <span>${escapeHtml(autoPayout.amountMinor || '')} minor units${autoPayout.hashlock ? ` · ${escapeHtml(shortProofId(autoPayout.hashlock))}` : ''}</span>
+        ${autoPayout.targetEntityId ? `<code>${escapeHtml(shortId(autoPayout.targetEntityId))}</code>` : ''}
+        ${autoPayout.error ? `<p>${escapeHtml(autoPayout.error)}</p>` : ''}
+      </div>
+      ${autoPayout.status === 'failed' || autoPayout.status === 'not_configured' ? '<p class="tiny">Automatic payout did not complete. Manual withdrawal remains available below.</p>' : ''}
+    </section>
+  ` : '';
+  const manualWithdrawPanel = challenge.verdict && challenge.userSide === challenge.verdict.winner && !autoPayoutSettled ? `
     <section class="surface wallet-panel">
       <div class="status">winner payout</div>
       <h2>Withdraw winnings to XLN wallet</h2>
@@ -315,8 +1111,26 @@ function challengeView(challenge) {
       </form>
     </section>
   ` : '';
+  const withdraw = `${autoPayoutPanel}${manualWithdrawPanel}`;
+  const transcriptVerdict = challenge.verdict ? `
+    <div class="transcript-verdict">
+      <div>
+        <span>Final ruling</span>
+        <strong>${escapeHtml(winnerLabel(challenge.verdict))}</strong>
+      </div>
+      <div>
+        <span>Score</span>
+        <strong>${escapeHtml(challenge.verdict.payout?.scores1000?.A ?? '-')}—${escapeHtml(challenge.verdict.payout?.scores1000?.B ?? '-')}</strong>
+      </div>
+      <div>
+        <span>Vote</span>
+        <strong>${escapeHtml(voteSummary(challenge.verdict.votes))}</strong>
+      </div>
+    </div>
+  ` : '';
 
   return shell(`
+    ${verdictFirstHero(challenge)}
     <section class="surface hero">
       <div class="hero-top">
         <div class="hero-meta">
@@ -331,13 +1145,9 @@ function challengeView(challenge) {
         <div class="market-cell"><span>Stake</span><strong>${escapeHtml(challenge.stakeDisplay)} ${escapeHtml(challenge.tokenSymbol)}</strong></div>
         <div class="market-cell"><span>Rounds</span><strong>${challenge.messages.length}/${challenge.roundsTotal * 2}</strong></div>
         <div class="market-cell"><span>Current Turn</span><strong>Side ${escapeHtml(challenge.expectedSide || '-')}</strong></div>
-        <div class="market-cell"><span>Payout</span><strong>${challenge.verdict ? `Side ${escapeHtml(challenge.verdict.winner)} +${escapeHtml(challenge.verdict.payout?.margin ?? 0)}` : 'Winner takes all'}</strong></div>
+        <div class="market-cell"><span>Payout</span><strong>${challenge.verdict ? `${escapeHtml(winnerLabel(challenge.verdict))} +${escapeHtml(challenge.verdict.payout?.margin ?? 0)}` : 'Winner takes all'}</strong></div>
       </div>
-      <div class="sides">
-        <div class="side-box a"><div class="side-label">Side A · affirmative</div><strong>${escapeHtml(challenge.sideALabel)}</strong></div>
-        <div class="versus">VS</div>
-        <div class="side-box b"><div class="side-label">Side B · counterparty</div><strong>${escapeHtml(challenge.sideBLabel)}</strong></div>
-      </div>
+      ${counselStage(challenge, challenge.verdict, 'case-stage')}
       ${invite ? `
         <div class="invite-dock">
           <div class="section-title"><h3>Invite link</h3><span class="tiny">share with counterparty</span></div>
@@ -357,13 +1167,17 @@ function challengeView(challenge) {
       </div>
       <div class="judge-grid">${judges}</div>
     </section>
+    ${roundScorePanel(challenge)}
+    ${predictionPanel(challenge)}
     ${verdict}
     <section class="surface transcript">
       <div class="section-title">
         <h3>Transcript</h3>
         <span class="pill">${challenge.messages.length}/${challenge.roundsTotal * 2}</span>
       </div>
+      ${transcriptVerdict}
       ${messages || '<div class="empty">No arguments submitted yet.</div>'}
+      ${transcriptProof}
       ${challenge.status === 'active' ? submit : ''}
     </section>
     ${withdraw}
@@ -372,6 +1186,7 @@ function challengeView(challenge) {
 
 function render() {
   app.innerHTML = currentChallenge ? challengeView(currentChallenge) : homeView();
+  afterRender();
 }
 
 async function refreshChallenge() {
@@ -385,6 +1200,81 @@ async function refreshChallenge() {
   const me = await api('/api/me');
   dashboard = me;
   render();
+}
+
+function afterRender() {
+  scheduleRealtimeStream();
+  schedulePoll();
+  scheduleLiveRoundScore();
+}
+
+function scheduleRealtimeStream() {
+  if (!currentChallenge || !window.EventSource) {
+    if (eventSource) eventSource.close();
+    eventSource = null;
+    eventSourceSlug = '';
+    return;
+  }
+  if (eventSource && eventSourceSlug === currentChallenge.slug) return;
+  if (eventSource) eventSource.close();
+  eventSourceSlug = currentChallenge.slug;
+  eventVersion = `${currentChallenge.status}:${currentChallenge.messages.length}:${currentChallenge.finalizedAt || 0}`;
+  eventSource = new EventSource(`/api/challenges/${encodeURIComponent(currentChallenge.slug)}/events`);
+  eventSource.onmessage = async event => {
+    try {
+      const payload = JSON.parse(event.data || '{}');
+      const nextVersion = `${payload.status}:${payload.messageCount}:${payload.finalizedAt || 0}`;
+      if (nextVersion === eventVersion) return;
+      eventVersion = nextVersion;
+      if (!document.activeElement?.matches('textarea,input,select')) await refreshChallenge();
+    } catch {
+      // Ignore malformed keepalive frames.
+    }
+  };
+  eventSource.onerror = () => {
+    eventSource?.close();
+    eventSource = null;
+    eventSourceSlug = '';
+    schedulePoll();
+  };
+}
+
+function schedulePoll() {
+  if (pollTimer) clearTimeout(pollTimer);
+  pollTimer = null;
+  if (window.EventSource && eventSource) return;
+  if (!currentChallenge || !['active', 'ready_for_judging', 'judging'].includes(currentChallenge.status)) return;
+  pollTimer = setTimeout(async () => {
+    if (document.activeElement?.matches('textarea,input,select')) {
+      schedulePoll();
+      return;
+    }
+    try {
+      await refreshChallenge();
+    } catch {
+      schedulePoll();
+    }
+  }, 3500);
+}
+
+function scheduleLiveRoundScore() {
+  if (!currentChallenge || currentChallenge.verdict) return;
+  if (currentChallenge.messages.length < 2 || currentChallenge.messages.length % 2 !== 0) return;
+  const key = roundScoreKey(currentChallenge);
+  if (liveRoundScores.has(key) || pendingRoundScores.has(key)) return;
+  pendingRoundScores.add(key);
+  render();
+  api(`/api/challenges/${encodeURIComponent(currentChallenge.slug)}/round-score`, { method: 'POST', body: {} })
+    .then(result => {
+      liveRoundScores.set(key, result.score);
+      pendingRoundScores.delete(key);
+      if (!document.activeElement?.matches('textarea,input,select')) render();
+    })
+    .catch(error => {
+      pendingRoundScores.delete(key);
+      console.warn('round score failed', error);
+      if (!document.activeElement?.matches('textarea,input,select')) render();
+    });
 }
 
 document.addEventListener('click', async event => {
@@ -407,6 +1297,26 @@ document.addEventListener('click', async event => {
       await api('/api/dev/seed-demo', { method: 'POST', body: {} });
       await load();
     }
+    if (action === 'daily-match') {
+      target.textContent = 'Generating...';
+      const created = await api('/api/daily-match', { method: 'POST', body: {} });
+      history.pushState({}, '', `/v/${created.challenge.slug}`);
+      currentChallenge = created.challenge;
+      dashboard = created.dashboard || await api('/api/me');
+      render();
+    }
+    if (action === 'use-template') {
+      const template = topicTemplates.find(item => item.id === target.dataset.template);
+      if (template) {
+        document.querySelector('[name="statement"]').value = template.statement;
+        document.querySelector('[name="sideALabel"]').value = template.sideA;
+        document.querySelector('[name="sideBLabel"]').value = template.sideB;
+        document.querySelector('[name="contextText"]').value = template.context;
+        document.querySelector('[name="stake"]').value = template.stake;
+        document.querySelector('[name="roundsTotal"]').value = template.rounds;
+        document.querySelector('#creator')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    }
     if (action === 'accept') {
       await api(`/api/challenges/${encodeURIComponent(currentChallenge.slug)}/accept`, { method: 'POST', body: {} });
       await refreshChallenge();
@@ -416,10 +1326,53 @@ document.addEventListener('click', async event => {
       await api(`/api/challenges/${encodeURIComponent(currentChallenge.slug)}/judge`, { method: 'POST', body: {} });
       await refreshChallenge();
     }
+    if (action === 'round-score') {
+      const key = roundScoreKey(currentChallenge);
+      pendingRoundScores.add(key);
+      render();
+      const result = await api(`/api/challenges/${encodeURIComponent(currentChallenge.slug)}/round-score`, { method: 'POST', body: {} });
+      liveRoundScores.set(key, result.score);
+      pendingRoundScores.delete(key);
+      render();
+    }
+    if (action === 'predict') {
+      setPrediction(currentChallenge.slug, target.dataset.side || '');
+      render();
+    }
+    if (action === 'native-share') {
+      const result = await shareText({
+        title: 'XLN Debates verdict',
+        text: currentChallenge?.verdict?.summary || currentChallenge?.statement || 'AI court verdict',
+        url: target.dataset.url || location.href,
+      });
+      target.textContent = result === 'shared' ? 'Shared' : 'Copied';
+    }
+    if (action === 'draft-turn') {
+      const form = target.closest('form');
+      const textarea = form?.querySelector('[data-testid="message-body"]');
+      if (!textarea) return;
+      target.textContent = 'Drafting...';
+      const formData = Object.fromEntries(new FormData(form).entries());
+      const result = await api(`/api/challenges/${encodeURIComponent(currentChallenge.slug)}/draft`, { method: 'POST', body: formData });
+      textarea.value = result.draft || '';
+      target.textContent = 'Draft with AI';
+    }
     if (action === 'copy-invite') {
       const input = document.querySelector('[data-testid="invite-link"]');
       input?.select();
-      await navigator.clipboard.writeText(input?.value || '');
+      await copyText(input?.value || '');
+    }
+    if (action === 'copy-verdict-url' || action === 'copy-card-url') {
+      await copyText(target.dataset.url || location.href);
+      target.textContent = 'Copied';
+    }
+    if (action === 'rematch') {
+      target.textContent = 'Creating rematch...';
+      const created = await api(`/api/challenges/${encodeURIComponent(currentChallenge.slug)}/rematch`, { method: 'POST', body: {} });
+      history.pushState({}, '', `/c/${created.challenge.slug}`);
+      currentChallenge = created.challenge;
+      dashboard = created.dashboard || await api('/api/me');
+      render();
     }
   } catch (error) {
     errorText = error.message || String(error);
@@ -435,12 +1388,38 @@ document.addEventListener('submit', async event => {
   const data = Object.fromEntries(new FormData(form).entries());
   try {
     errorText = '';
+    if (action === 'custom-skill') {
+      await api('/api/skills', { method: 'POST', body: data });
+      await load();
+    }
+    if (action === 'accept-challenge') {
+      await api(`/api/challenges/${encodeURIComponent(currentChallenge.slug)}/accept`, { method: 'POST', body: data });
+      await refreshChallenge();
+    }
     if (action === 'create-challenge') {
       const created = await api('/api/challenges', { method: 'POST', body: data });
       history.pushState({}, '', `/c/${created.challenge.slug}`);
       currentChallenge = created.challenge;
       const me = await api('/api/me');
       dashboard = me;
+      render();
+    }
+    if (action === 'gladiator') {
+      const button = form.querySelector('[data-testid="run-gladiator"]');
+      if (button) button.textContent = 'Generating match...';
+      const created = await api('/api/gladiator', { method: 'POST', body: data });
+      history.pushState({}, '', `/v/${created.challenge.slug}`);
+      currentChallenge = created.challenge;
+      dashboard = created.dashboard || await api('/api/me');
+      render();
+    }
+    if (action === 'settle-url') {
+      const button = form.querySelector('[data-testid="settle-post"]');
+      if (button) button.textContent = 'Settling...';
+      const created = await api('/api/settle-url', { method: 'POST', body: data });
+      history.pushState({}, '', `/v/${created.challenge.slug}`);
+      currentChallenge = created.challenge;
+      dashboard = created.dashboard || await api('/api/me');
       render();
     }
     if (action === 'submit-message') {
