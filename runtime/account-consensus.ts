@@ -37,6 +37,7 @@ import { validateAccountFrame as validateAccountFrameStrict } from './validation
 import { processAccountTx } from './account-tx/apply';
 import { appendAccountFrameHistoryView, getAccountFrameHistoryView, markStorageAccountDirty, recordAccountFrameHistory } from './env-events';
 import { assertAccountFrameDeltaIntegrity, deriveAccountFrameOffdeltas, deriveAccountFrameTokenIds } from './account-frame';
+import { createStructuredLogger, shortHash, shortId, shouldLogFullPayloads } from './logger';
 // NOTE: Settlements now use SettlementWorkspace flow (see entity-tx/handlers/settle.ts)
 
 // Removed createValidAccountSnapshot - using simplified AccountSnapshot interface
@@ -44,6 +45,7 @@ import { assertAccountFrameDeltaIntegrity, deriveAccountFrameOffdeltas, deriveAc
 // === CONSTANTS ===
 const MEMPOOL_LIMIT = 1000;
 const MAX_ACCOUNT_FRAME_TXS = 100;
+const accountLog = createStructuredLogger('account');
 const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 const ADDRESS_HEX_20_RE = /^0x[0-9a-fA-F]{40}$/;
 const isEntityId32 = (value: unknown): value is string => typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
@@ -434,29 +436,30 @@ export async function proposeAccountFrame(
   const { counterparty } = getAccountPerspective(accountMachine, myEntityId);
   const quiet = env.quietRuntimeLogs === true;
   if (!quiet) {
-    console.log(`🚀 E-MACHINE: Proposing account frame for ${counterparty.slice(-4)}`);
-    console.log(
-      `🚀 E-MACHINE: Account state - mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}, currentHeight=${accountMachine.currentHeight}`,
-    );
+    accountLog.debug('proposal.start', {
+      counterparty: shortId(counterparty),
+      mempool: accountMachine.mempool.length,
+      pendingFrame: Boolean(accountMachine.pendingFrame),
+      height: accountMachine.currentHeight,
+    });
   }
 
   const events: string[] = [];
 
   // Mempool size validation
   if (accountMachine.mempool.length > MEMPOOL_LIMIT) {
-    console.log(`❌ E-MACHINE: Mempool overflow ${accountMachine.mempool.length} > ${MEMPOOL_LIMIT}`);
+    accountLog.warn('proposal.mempool_overflow', { mempool: accountMachine.mempool.length, limit: MEMPOOL_LIMIT });
     return { success: false, error: `Mempool overflow: ${accountMachine.mempool.length} > ${MEMPOOL_LIMIT}`, events };
   }
 
   if (accountMachine.mempool.length === 0) {
-    console.log(`❌ E-MACHINE: No transactions in mempool to propose`);
+    accountLog.debug('proposal.empty_mempool');
     return { success: false, error: 'No transactions to propose', events };
   }
 
   // Check if we have a pending frame waiting for ACK
   if (accountMachine.pendingFrame) {
-    if (!quiet)
-      console.log(`⏳ E-MACHINE: Still waiting for ACK on pending frame #${accountMachine.pendingFrame.height}`);
+    if (!quiet) accountLog.debug('proposal.waiting_ack', { pendingHeight: accountMachine.pendingFrame.height });
     return { success: false, error: 'Waiting for ACK on pending frame', events };
   }
 
@@ -479,9 +482,11 @@ export async function proposeAccountFrame(
 
   const proposalWindow = accountMachine.mempool.slice(0, MAX_ACCOUNT_FRAME_TXS);
   if (!quiet) {
-    console.log(
-      `✅ E-MACHINE: Creating frame from ${proposalWindow.length} queued txs (mempool=${accountMachine.mempool.length}, frameMax=${MAX_ACCOUNT_FRAME_TXS})...`,
-    );
+    accountLog.info('proposal.frame_create', {
+      txs: proposalWindow.map(tx => tx.type),
+      mempool: accountMachine.mempool.length,
+      frameMax: MAX_ACCOUNT_FRAME_TXS,
+    });
   }
   if (HEAVY_LOGS)
     console.log(
@@ -757,9 +762,7 @@ export async function proposeAccountFrame(
     return { success: false, error: `Entity ${signingEntityId.slice(-4)} has no validators`, events };
   }
 
-  if (!quiet) {
-    console.log(`🔐 HANKO-SIGN: entityId=${signingEntityId.slice(-4)} → signerId=${signingSignerId.slice(-4)}`);
-  }
+  if (!quiet) accountLog.debug('hanko.sign', { entity: shortId(signingEntityId), signer: shortId(signingSignerId) });
 
   // Build hanko for account frame
   const { signEntityHashes } = await import('./hanko/signing');
@@ -1024,7 +1027,7 @@ export async function handleAccountInput(
     }
 
     const expectedAckEntity = accountMachine.proofHeader.toEntity;
-    console.log(`🔐 HANKO-ACK-VERIFY: Verifying ACK hanko for our pending frame`);
+    accountLog.debug('hanko.ack.verify', { height: ackHeight, frame: shortHash(frameHash) });
     const { verifyHankoForHash } = await import('./hanko/signing');
     const verifyResult = await verifyHankoForHash(ackHanko, frameHash, expectedAckEntity, env);
     const valid = verifyResult.valid;
@@ -1040,26 +1043,35 @@ export async function handleAccountInput(
         events,
       };
     }
-    console.log(`✅ HANKO-ACK-VERIFIED: ACK from ${(recoveredEntityId ?? expectedAckEntity).slice(-4)}`);
+    accountLog.debug('hanko.ack.verified', { from: shortId(recoveredEntityId ?? expectedAckEntity), height: ackHeight });
 
     // ACK is valid - proceed
     ackProcessed = true;
     {
-      // CRITICAL DEBUG: Log what we're committing
-      console.log(`🔒 COMMIT: Frame ${accountMachine.pendingFrame.height}`);
-      console.log(`  Transactions: ${accountMachine.pendingFrame.accountTxs.length}`);
-      console.log(`  Transactions detail:`, accountMachine.pendingFrame.accountTxs);
-      console.log(`  TokenIds: ${deriveAccountFrameTokenIds(accountMachine.pendingFrame).join(',')}`);
-      console.log(`  Offdeltas: ${deriveAccountFrameOffdeltas(accountMachine.pendingFrame).map(d => `${d}`).join(',')}`);
-      console.log(`  StateHash: ${frameHash.slice(0, 16)}...`);
+      const tokenIds = deriveAccountFrameTokenIds(accountMachine.pendingFrame);
+      const txTypes = accountMachine.pendingFrame.accountTxs.map(tx => tx.type);
+      accountLog.info('frame.commit', {
+        height: accountMachine.pendingFrame.height,
+        txs: txTypes,
+        tokens: tokenIds,
+        state: shortHash(frameHash),
+      });
+      if (shouldLogFullPayloads()) {
+        accountLog.trace('frame.commit.payload', {
+          txs: accountMachine.pendingFrame.accountTxs,
+          offdeltas: deriveAccountFrameOffdeltas(accountMachine.pendingFrame).map(d => d.toString()),
+        });
+      }
 
       // PROPOSER COMMIT: Re-execute txs on REAL state (Channel.ts pattern)
       // This eliminates fragile manual field copying
       {
         const { counterparty: cpForLog } = getAccountPerspective(accountMachine, accountMachine.proofHeader.fromEntity);
-        console.log(
-          `🔓 PROPOSER-COMMIT: Re-executing ${accountMachine.pendingFrame.accountTxs.length} txs for ${cpForLog.slice(-4)}`,
-        );
+        accountLog.debug('frame.reexecute', {
+          height: accountMachine.pendingFrame.height,
+          counterparty: shortId(cpForLog),
+          txs: accountMachine.pendingFrame.accountTxs.length,
+        });
 
         // Re-execute all frame txs on REAL accountMachine (deterministic)
         // CRITICAL: Use frame.timestamp for determinism (HTLC validation must use agreed consensus time)
@@ -1437,9 +1449,7 @@ export async function handleAccountInput(
       return { success: false, error: 'SECURITY: Frame must have hanko signature', events };
     }
 
-    console.log(
-      `🔐 HANKO-VERIFY: Verifying hanko for frame ${receivedFrame.height} from ${input.fromEntityId.slice(-4)}`,
-    );
+    accountLog.debug('hanko.frame.verify', { height: receivedFrame.height, from: shortId(input.fromEntityId) });
 
     // Verify hanko - CRITICAL: Must verify fromEntityId is the signer with board validation
     const { verifyHankoForHash } = await import('./hanko/signing');
@@ -1454,7 +1464,7 @@ export async function handleAccountInput(
       return { success: false, error: `Invalid hanko signature from ${input.fromEntityId.slice(-4)}`, events };
     }
 
-    console.log(`✅ HANKO-VERIFIED: Frame from ${recoveredEntityId.slice(-4)}`);
+    accountLog.debug('hanko.frame.verified', { height: receivedFrame.height, from: shortId(recoveredEntityId) });
 
     // Store counterparty's frame hanko
     accountMachine.counterpartyFrameHanko = hankoToVerify;
@@ -1800,7 +1810,7 @@ export async function handleAccountInput(
       return { success: false, error: `Cannot find signerId for ACK from ${ackEntityId.slice(-4)}`, events };
     }
 
-    console.log(`🔐 HANKO-ACK: entityId=${ackEntityId.slice(-4)} → signerId=${ackSignerId.slice(-4)}`);
+    accountLog.debug('hanko.ack.sign', { entity: shortId(ackEntityId), signer: shortId(ackSignerId), height: receivedFrame.height });
 
     // Build ACK hanko
     const { signEntityHashes } = await import('./hanko/signing');
