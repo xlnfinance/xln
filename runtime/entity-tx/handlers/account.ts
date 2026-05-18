@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountInput, AccountTx, EntityState, Env, EntityInput, HtlcRoute, AccountMachine, HtlcNoteKey, CrossJurisdictionSwapRoute } from '../../types';
+import type { AccountFrame, AccountInput, EntityState, Env, EntityInput, HtlcRoute, AccountMachine, HtlcNoteKey, CrossJurisdictionSwapRoute, SwapOffer } from '../../types';
 import { markStorageAccountDirty, markStorageEntityDirty } from '../../env-events';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { addMessage, addMessages, emitScopedEvents } from '../../state-helpers';
@@ -53,8 +53,34 @@ import {
 } from '../../cross-jurisdiction-orderbook';
 import { assertSameJurisdictionAccount } from '../../jurisdiction-runtime';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from './account-cross-j-followups';
+import {
+  findQueuedCrossSwapAckForEntityState,
+  hasQueuedCrossSwapAckForEntityState,
+  hasQueuedSwapResolveForEntityState,
+  queueUniqueSwapResolveForEntityState,
+  type MempoolOp,
+  type SwapResolveEnqueueData,
+} from './account/orderbook-queue';
+
+export type { MempoolOp } from './account/orderbook-queue';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
+
+type StoredOfferEntityRefs = {
+  fromEntity?: string;
+  toEntity?: string;
+};
+
+const resolveStoredOfferEntityRefs = (
+  account: AccountMachine,
+  offer: SwapOffer,
+): { fromEntity: string; toEntity: string } => {
+  const persistedRefs = offer as SwapOffer & StoredOfferEntityRefs;
+  return {
+    fromEntity: account.leftEntity || persistedRefs.fromEntity || '',
+    toEntity: account.rightEntity || persistedRefs.toEntity || '',
+  };
+};
 
 const getJurisdictionId = (state: EntityState, env: Env): string => {
   return String(state.config?.jurisdiction?.name || env.activeJurisdiction || '').trim();
@@ -111,11 +137,6 @@ const findAccountKeyInsensitive = (accounts: Map<string, AccountMachine>, counte
 // === PURE EVENT TYPES ===
 // Events returned by handlers, applied by entity orchestrator
 
-export interface MempoolOp {
-  accountId: string;
-  tx: AccountTx;
-}
-
 export interface SwapOfferEvent {
   offerId: string;
   makerIsLeft: boolean;     // Simple boolean (account-level context)
@@ -160,92 +181,6 @@ export interface MatchResult {
 type OrderbookProcessOptions = {
   debugRebuildProjectionOnly?: boolean;
 };
-
-type SwapResolveEnqueueData = {
-  offerId: string;
-  fillRatio: number;
-  cancelRemainder: boolean;
-  comment?: string;
-  feeTokenId?: number;
-  feeAmount?: bigint;
-  executionGiveAmount?: bigint;
-  executionWantAmount?: bigint;
-  restingGiveTokenId?: number;
-  restingWantTokenId?: number;
-  restingPriceTicks?: bigint;
-  restingGiveAmount?: bigint;
-  restingWantAmount?: bigint;
-  restingQuantizedGive?: bigint;
-  restingQuantizedWant?: bigint;
-};
-
-type CrossSwapFillAckTx = Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;
-
-function hasQueuedSwapResolveForEntityState(
-  hubState: EntityState,
-  queuedSwapResolutions: Set<string>,
-  accountId: string,
-  offerId: string,
-): boolean {
-  const key = swapKey(accountId, offerId);
-  if (queuedSwapResolutions.has(key)) return true;
-  if (hubState.pendingSwapFillRatios?.has(key) === true) return true;
-  const accountMachine = hubState.accounts.get(accountId);
-  if (!accountMachine) return false;
-  if ((accountMachine.mempool ?? []).some((tx) => tx.type === 'swap_resolve' && tx.data.offerId === offerId)) return true;
-  if ((accountMachine.pendingFrame?.accountTxs ?? []).some((tx) => tx.type === 'swap_resolve' && tx.data.offerId === offerId)) return true;
-  return false;
-}
-
-function hasQueuedCrossSwapAckForEntityState(
-  hubState: EntityState,
-  accountId: string,
-  offerId: string,
-): boolean {
-  const accountMachine = hubState.accounts.get(accountId);
-  if (!accountMachine) return false;
-  if ((accountMachine.mempool ?? []).some((tx) => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId)) return true;
-  if ((accountMachine.pendingFrame?.accountTxs ?? []).some((tx) => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId)) return true;
-  return false;
-}
-
-function findQueuedCrossSwapAckForEntityState(
-  hubState: EntityState,
-  accountId: string,
-  offerId: string,
-): CrossSwapFillAckTx | null {
-  const accountMachine = hubState.accounts.get(accountId);
-  if (!accountMachine) return null;
-  const mempoolAck = (accountMachine.mempool ?? []).find(
-    (tx): tx is CrossSwapFillAckTx => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId,
-  );
-  if (mempoolAck) return mempoolAck;
-  const pendingAck = (accountMachine.pendingFrame?.accountTxs ?? []).find(
-    (tx): tx is CrossSwapFillAckTx => tx.type === 'cross_swap_fill_ack' && tx.data.offerId === offerId,
-  );
-  return pendingAck ?? null;
-}
-
-function queueUniqueSwapResolveForEntityState(
-  mempoolOps: MempoolOp[],
-  hubState: EntityState,
-  queuedSwapResolutions: Set<string>,
-  accountId: string,
-  data: SwapResolveEnqueueData,
-): boolean {
-  if (hasQueuedSwapResolveForEntityState(hubState, queuedSwapResolutions, accountId, data.offerId)) {
-    return false;
-  }
-  queuedSwapResolutions.add(swapKey(accountId, data.offerId));
-  mempoolOps.push({
-    accountId,
-    tx: {
-      type: 'swap_resolve',
-      data,
-    },
-  });
-  return true;
-}
 
 export const normalizeSwapOfferForOrderbook = (
   offer: SwapOfferEvent,
@@ -1386,12 +1321,13 @@ export function processOrderbookSwaps(
     const liveOffer = account?.swapOffers?.get(offerId);
     if (!account || !liveOffer) return null;
     if (liveOffer.crossJurisdiction) return null;
+    const entityRefs = resolveStoredOfferEntityRefs(account, liveOffer);
     return normalizeSwapOfferForOrderbook(
       {
         offerId,
         makerIsLeft: liveOffer.makerIsLeft,
-        fromEntity: account.leftEntity || (liveOffer as any).fromEntity || '',
-        toEntity: account.rightEntity || (liveOffer as any).toEntity || '',
+        fromEntity: entityRefs.fromEntity,
+        toEntity: entityRefs.toEntity,
         createdHeight: liveOffer.createdHeight,
         giveTokenId: liveOffer.giveTokenId,
         giveAmount: liveOffer.giveAmount,
@@ -1585,12 +1521,13 @@ export function processOrderbookSwaps(
     const account = hubState.accounts.get(accountId);
     const offer = account?.swapOffers?.get(offerId);
     if (!account || !offer?.crossJurisdiction) return null;
+    const entityRefs = resolveStoredOfferEntityRefs(account, offer);
     return buildCrossMarketOffer(normalizeSwapOfferForOrderbook(
       {
         offerId,
         makerIsLeft: offer.makerIsLeft,
-        fromEntity: account.leftEntity || (offer as any).fromEntity || '',
-        toEntity: account.rightEntity || (offer as any).toEntity || '',
+        fromEntity: entityRefs.fromEntity,
+        toEntity: entityRefs.toEntity,
         createdHeight: offer.createdHeight,
         giveTokenId: offer.giveTokenId,
         giveAmount: offer.giveAmount,

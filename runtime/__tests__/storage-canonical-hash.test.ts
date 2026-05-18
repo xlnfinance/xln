@@ -119,6 +119,13 @@ test('storage projection round-trip preserves canonical account optional-field s
   const replica = Array.from(env.eReplicas.values())[0]!;
   const state = replica.state;
   const account = state.accounts.get(counterpartyId)!;
+  account.hankoSignature = '0xaccount-proof-hanko';
+  account.pendingForward = {
+    tokenId: 1,
+    amount: 25n,
+    route: [entityId, counterpartyId],
+    description: 'projection-round-trip',
+  };
 
   expect(account.pulls).toBeUndefined();
   expect(account.swapOrderHistory).toBeUndefined();
@@ -136,5 +143,7 @@ test('storage projection round-trip preserves canonical account optional-field s
   expect(hydratedState.accounts.get(counterpartyId)?.pulls).toBeUndefined();
   expect(hydratedState.accounts.get(counterpartyId)?.swapOrderHistory).toBeUndefined();
   expect(hydratedState.accounts.get(counterpartyId)?.swapClosedOrders).toBeUndefined();
+  expect(hydratedState.accounts.get(counterpartyId)?.hankoSignature).toBe(account.hankoSignature);
+  expect(hydratedState.accounts.get(counterpartyId)?.pendingForward).toEqual(account.pendingForward);
   expect(after.hash).toBe(before.hash);
 });
