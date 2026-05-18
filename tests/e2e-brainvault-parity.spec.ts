@@ -56,21 +56,23 @@ async function waitForBrainvaultCreateForm(page: Page): Promise<void> {
   if (await brainVaultTab.isVisible().catch(() => false)) {
     await brainVaultTab.click();
   }
-  const recoveryDetails = page.getByTestId('brainvault-create-details');
-  await expect(recoveryDetails).toBeVisible({ timeout: 15_000 });
-  await expect(page.getByTestId('brainvault-create-toggle')).toContainText(/BrainVault recovery/i);
   await expect(page.getByRole('heading', { name: /Create XLN wallet/i }).first()).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('#name')).toBeVisible({ timeout: 15_000 });
   await expect(page.locator('#passphrase')).toBeVisible({ timeout: 15_000 });
-  const detailsBox = await recoveryDetails.boundingBox();
-  const nameBox = await page.locator('#name').boundingBox();
-  expect(
-    detailsBox && nameBox && detailsBox.y < nameBox.y,
-    'BrainVault recovery controls must sit above the wallet creation form',
-  ).toBeTruthy();
-  await page.getByTestId('brainvault-create-toggle').click();
-  await expect(page.getByRole('button', { name: /Download seed sheet/i })).toBeVisible({ timeout: 5_000 });
-  await page.getByTestId('brainvault-create-toggle').click();
+  await expect(
+    page.getByTestId('brainvault-create-details'),
+    'BrainVault recovery controls belong to the post-create setup screen, not the initial wallet form',
+  ).toHaveCount(0);
+}
+
+async function expectPostCreateBrainvaultRecovery(page: Page): Promise<void> {
+  const recoveryDetails = page.getByTestId('brainvault-onboarding-recovery');
+  await expect(recoveryDetails).toBeVisible({ timeout: 30_000 });
+  await expect(page.getByTestId('brainvault-onboarding-recovery-toggle')).toContainText(/BrainVault recovery/i);
+  await expect(page.getByTestId('brainvault-continue-copy')).toContainText(/continue creating the XLN account/i);
+  await page.getByTestId('brainvault-onboarding-recovery-toggle').click();
+  await expect(page.getByRole('button', { name: /Download sheet/i })).toBeVisible({ timeout: 5_000 });
+  await expect(page.getByRole('link', { name: /Read safety notes/i })).toBeVisible({ timeout: 5_000 });
 }
 
 async function readRuntimeCount(page: Page): Promise<number> {
@@ -195,6 +197,7 @@ test.describe('brainvault parity', () => {
     expect(runtime.label).toBe('standalone vault');
     expect(normalizeMnemonic(runtime.mnemonic12 || '')).toBe(cli.mnemonic12);
     expect(await readRuntimeCount(page)).toBe(1);
+    await expectPostCreateBrainvaultRecovery(page);
   });
 
   test('embedded BrainVault add-runtime flow does not fall back to the active wallet', async ({ page }) => {
