@@ -20,6 +20,14 @@ export type UserRecord = {
   lastSeenAt: number;
 };
 
+export type CustomSkillRecord = {
+  id: string;
+  userId: string;
+  label: string;
+  prompt: string;
+  createdAt: number;
+};
+
 export type BalanceRecord = {
   tokenId: number;
   availableMinor: bigint;
@@ -225,6 +233,15 @@ export class DebatesStore {
         FOREIGN KEY (user_id) REFERENCES users(id)
       );
 
+      CREATE TABLE IF NOT EXISTS custom_skills (
+        id TEXT PRIMARY KEY,
+        user_id TEXT NOT NULL,
+        label TEXT NOT NULL,
+        prompt TEXT NOT NULL,
+        created_at INTEGER NOT NULL,
+        FOREIGN KEY (user_id) REFERENCES users(id)
+      );
+
       CREATE TABLE IF NOT EXISTS challenges (
         id TEXT PRIMARY KEY,
         slug TEXT UNIQUE NOT NULL,
@@ -325,6 +342,7 @@ export class DebatesStore {
       CREATE INDEX IF NOT EXISTS idx_messages_challenge_order ON debate_messages(challenge_id, round_number, side);
       CREATE INDEX IF NOT EXISTS idx_locks_challenge ON challenge_locks(challenge_id);
       CREATE INDEX IF NOT EXISTS idx_withdrawals_user_time ON withdrawals(user_id, created_at DESC);
+      CREATE INDEX IF NOT EXISTS idx_custom_skills_user_time ON custom_skills(user_id, created_at DESC);
     `);
   }
 
@@ -387,8 +405,66 @@ export class DebatesStore {
     } : null;
   }
 
+  updateUserEntity(userId: string, entityId: string | null): UserRecord {
+    const at = now();
+    this.db.query(`
+      UPDATE users SET entity_id = ?2, last_seen_at = ?3 WHERE id = ?1
+    `).run(userId, entityId, at);
+    const user = this.getUser(userId);
+    if (!user) throw new Error('User not found');
+    return user;
+  }
+
   userExists(userId: string): boolean {
     return !!this.db.query<{ found: number }>('SELECT 1 AS found FROM users WHERE id = ?1 LIMIT 1').get(userId)?.found;
+  }
+
+  createCustomSkill(input: { userId: string; label: string; prompt: string }): CustomSkillRecord {
+    const at = now();
+    const skill: CustomSkillRecord = {
+      id: id('skl'),
+      userId: input.userId,
+      label: input.label,
+      prompt: input.prompt,
+      createdAt: at,
+    };
+    this.db.query(`
+      INSERT INTO custom_skills (id, user_id, label, prompt, created_at)
+      VALUES (?1, ?2, ?3, ?4, ?5)
+    `).run(skill.id, skill.userId, skill.label, skill.prompt, skill.createdAt);
+    return skill;
+  }
+
+  listCustomSkills(userId: string, limit = 30): CustomSkillRecord[] {
+    return this.db.query<{ id: string; user_id: string; label: string; prompt: string; created_at: number }>(`
+      SELECT id, user_id, label, prompt, created_at
+      FROM custom_skills
+      WHERE user_id = ?1
+      ORDER BY created_at DESC
+      LIMIT ?2
+    `).all(userId, limit).map(row => ({
+      id: row.id,
+      userId: row.user_id,
+      label: row.label,
+      prompt: row.prompt,
+      createdAt: row.created_at,
+    }));
+  }
+
+  getCustomSkill(userId: string, skillId: string): CustomSkillRecord | null {
+    const row = this.db.query<{ id: string; user_id: string; label: string; prompt: string; created_at: number }>(`
+      SELECT id, user_id, label, prompt, created_at
+      FROM custom_skills
+      WHERE id = ?1 AND user_id = ?2
+      LIMIT 1
+    `).get(skillId, userId);
+    return row ? {
+      id: row.id,
+      userId: row.user_id,
+      label: row.label,
+      prompt: row.prompt,
+      createdAt: row.created_at,
+    } : null;
   }
 
   getBalances(userId: string): BalanceRecord[] {
@@ -674,6 +750,13 @@ export class DebatesStore {
     return slug ? this.getChallengeBySlug(slug) : null;
   }
 
+  updateChallengeContext(challengeId: string, context: unknown): ChallengeRecord {
+    this.db.query('UPDATE challenges SET context_json = ?2 WHERE id = ?1').run(challengeId, JSON.stringify(context));
+    const challenge = this.getChallengeById(challengeId);
+    if (!challenge) throw new Error('Challenge not found');
+    return challenge;
+  }
+
   listPublicChallenges(limit = 40): ChallengeRecord[] {
     return this.db.query<ChallengeRow>(`
       SELECT
@@ -909,6 +992,11 @@ export class DebatesStore {
       SELECT id, challenge_id, winner, method, votes_json, confidence, payout_json, summary, created_at
       FROM verdicts WHERE challenge_id = ?1
     `).get(challengeId);
+  }
+
+  updateVerdictPayoutJson(challengeId: string, payout: unknown): void {
+    this.db.query('UPDATE verdicts SET payout_json = ?2 WHERE challenge_id = ?1')
+      .run(challengeId, JSON.stringify(payout));
   }
 
   getJudgeRuns(challengeId: string) {

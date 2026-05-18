@@ -32,6 +32,7 @@ test('paid XLN Debate lifecycle: create, accept, argue, judge, withdraw', async 
   await pageA.getByTestId('stake').fill('10');
   await pageA.getByTestId('rounds').selectOption('3');
   await pageA.getByTestId('board').selectOption('classic3');
+  await pageA.getByTestId('auto-payout-a').fill('0x1111111111111111111111111111111111111111111111111111111111111111');
   await pageA.getByTestId('create-challenge').click();
 
   await expect(pageA.getByTestId('challenge-status')).toHaveText('waiting_for_counterparty');
@@ -41,8 +42,12 @@ test('paid XLN Debate lifecycle: create, accept, argue, judge, withdraw', async 
   await pageB.goto(invite.replace(baseURL || 'http://127.0.0.1:8097', ''));
   await pageB.getByTestId('dev-fund').click();
   await expect(pageB.getByTestId('balance-USDC')).toHaveText('250 USDC');
+  await pageB.getByTestId('auto-payout-b').fill('0x2222222222222222222222222222222222222222222222222222222222222222');
   await pageB.getByTestId('accept-challenge').click();
   await expect(pageB.getByTestId('challenge-status')).toHaveText('active');
+  const acceptedSlug = new URL(pageB.url()).pathname.split('/').pop();
+  const acceptedDetail = await pageB.request.get(`/api/challenges/${acceptedSlug}`);
+  expect((await acceptedDetail.json()).challenge.context.payoutTargets.B).toBe('0x2222222222222222222222222222222222222222222222222222222222222222');
 
   await pageA.reload();
   await expect(pageA.getByTestId('challenge-status')).toHaveText('active');
@@ -64,15 +69,7 @@ test('paid XLN Debate lifecycle: create, accept, argue, judge, withdraw', async 
   await pageA.getByTestId('run-judges').click();
   await expect(pageA.getByTestId('verdict-panel')).toBeVisible();
   await expect(pageA.getByText('Winner: Side A')).toBeVisible();
-
-  pageA.once('dialog', async dialog => {
-    expect(dialog.message()).toContain('Withdrawal finalized');
-    await dialog.accept();
-  });
-  await pageA.getByTestId('target-entity').fill('0x1111111111111111111111111111111111111111111111111111111111111111');
-  await pageA.getByTestId('withdraw-amount').fill('20');
-  await pageA.getByTestId('withdraw').click();
-
+  await expect(pageA.getByTestId('auto-payout-status')).toContainText('finalized');
   await pageA.getByText('withdrawal_reserved').waitFor({ timeout: 10_000 });
 
   await creator.close();

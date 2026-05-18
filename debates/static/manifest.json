@@ -1,0 +1,17 @@
+{
+  "name": "XLN Debates",
+  "short_name": "Debates",
+  "description": "AI court verdicts settled through XLN.",
+  "start_url": "/",
+  "display": "standalone",
+  "background_color": "#080b12",
+  "theme_color": "#080b12",
+  "icons": [
+    {
+      "src": "/api/arena/card.svg",
+      "sizes": "512x512",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    }
+  ]
+}

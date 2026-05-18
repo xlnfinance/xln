@@ -6,6 +6,7 @@
   "scripts": {
     "dev": "bun server.ts",
     "start": "bun server.ts",
+    "test:unit": "bun test tests/unit",
     "test:e2e": "bunx playwright test --config=playwright.config.ts --project=chromium",
     "check": "bunx tsc -p tsconfig.json --noEmit"
   },
