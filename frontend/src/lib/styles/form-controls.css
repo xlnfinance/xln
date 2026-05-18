@@ -1,0 +1,120 @@
+body.xln-user-mode input:not([type='range']):not([type='checkbox']),
+body.xln-user-mode select,
+body.xln-user-mode textarea {
+  box-sizing: border-box;
+  min-width: 0;
+  max-width: 100%;
+  color: var(--theme-input-text, var(--theme-text-primary, #f4f4f5));
+  background-color: var(--theme-input-bg, #09090b);
+  border-color: var(--theme-input-border, rgba(255, 255, 255, 0.14));
+  line-height: 1.25;
+  letter-spacing: 0;
+  color-scheme: dark;
+}
+
+body.xln-user-mode select {
+  min-height: var(--ui-control-height, 42px);
+  padding-inline: 12px 34px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+body.xln-user-mode select option,
+body.xln-user-mode select optgroup {
+  color: #f8fafc;
+  background: #101216;
+  font-size: 14px;
+  line-height: 1.45;
+}
+
+body.xln-user-mode select option:disabled {
+  color: #71717a;
+}
+
+body.xln-user-mode input:not([type='range']):not([type='checkbox'])::placeholder,
+body.xln-user-mode textarea::placeholder {
+  color: color-mix(in srgb, var(--theme-text-secondary, #a1a1aa) 62%, transparent);
+}
+
+body.xln-user-mode select:disabled,
+body.xln-user-mode input:not([type='range']):not([type='checkbox']):disabled,
+body.xln-user-mode textarea:disabled {
+  color: color-mix(in srgb, var(--theme-text-secondary, #a1a1aa) 58%, transparent);
+  opacity: 1;
+}
+
+body.xln-user-mode select:focus,
+body.xln-user-mode input:not([type='range']):not([type='checkbox']):focus,
+body.xln-user-mode textarea:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) 74%, transparent);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--theme-accent, #fbbf24) 12%, transparent);
+}
+
+body.xln-user-mode .readable-select,
+body.xln-user-mode .chain-select,
+body.xln-user-mode .route-select,
+body.xln-user-mode .token-select,
+body.xln-user-mode .hub-join-select,
+body.xln-user-mode .configure-token-select,
+body.xln-user-mode .entity-activity-filter select,
+body.xln-user-mode .closed-status-filter select,
+body.xln-user-mode .venue-row select {
+  min-height: var(--ui-control-height, 42px);
+  line-height: 1.25;
+  text-overflow: ellipsis;
+}
+
+body.xln-user-mode .dropdown-menu {
+  max-width: min(640px, calc(100vw - 16px)) !important;
+}
+
+body.xln-user-mode .dropdown-menu button,
+body.xln-user-mode .es-option {
+  min-height: 38px;
+  white-space: normal;
+  line-height: 1.35;
+}
+
+body.xln-user-mode .dropdown-menu .menu-label,
+body.xln-user-mode .dropdown-menu .entity-name,
+body.xln-user-mode .dropdown-menu .runtime-name,
+body.xln-user-mode .dropdown-menu .entity-meta,
+body.xln-user-mode .dropdown-menu .runtime-meta,
+body.xln-user-mode .dropdown-menu .trigger-text,
+body.xln-user-mode .dropdown-menu .signer-addr,
+body.xln-user-mode .dropdown-menu .account-name,
+body.xln-user-mode .dropdown-menu .account-id,
+body.xln-user-mode .dropdown-menu .token-symbol,
+body.xln-user-mode .dropdown-menu .token-name,
+body.xln-user-mode .es-name,
+body.xln-user-mode .es-id-full,
+body.xln-user-mode .es-value-main,
+body.xln-user-mode .es-value-id {
+  overflow: visible;
+  text-overflow: clip;
+  white-space: normal;
+  overflow-wrap: anywhere;
+}
+
+body.xln-user-mode .entity-select .es-panel {
+  right: auto;
+  width: max-content;
+  min-width: min(420px, calc(100vw - 24px));
+  max-width: min(640px, calc(100vw - 24px));
+}
+
+@media (max-width: 720px) {
+  body.xln-user-mode select {
+    min-height: 44px;
+    font-size: max(14px, calc(13px * var(--ui-font-scale, 1)));
+  }
+
+  body.xln-user-mode .dropdown-menu,
+  body.xln-user-mode .entity-select .es-panel {
+    width: calc(100vw - 24px);
+    min-width: 0;
+    max-width: calc(100vw - 24px) !important;
+  }
+}
