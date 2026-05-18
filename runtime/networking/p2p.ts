@@ -39,8 +39,10 @@ import {
   selectProfileBatch,
   type GossipProfileBatchRequest,
 } from '../relay/profile-batch';
+import { createStructuredLogger, shortId } from '../logger';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
+const p2pLog = createStructuredLogger('p2p');
 const MAX_QUEUE_PER_RUNTIME = 100; // Prevent memory exhaustion (DoS protection)
 const MIN_GOSSIP_POLL_MS = 250;
 const SLOW_BROWSER_TIMER_MS = 32;
@@ -932,7 +934,11 @@ export class RuntimeP2P {
     for (const seedId of this.seedRuntimeIds) {
       this.announceProfilesTo(seedId, profiles);
     }
-    console.log(`P2P_PROFILE_ANNOUNCE: reason=${reason} count=${profiles.length}`);
+    p2pLog.debug('profile.announce', {
+      reason,
+      count: profiles.length,
+      entities: profiles.map(profile => shortId(profile.entityId)),
+    });
   }
 
   private async getLocalProfilesForEntities(entityIds?: string[]): Promise<Profile[]> {

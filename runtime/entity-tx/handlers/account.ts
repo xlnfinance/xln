@@ -20,7 +20,8 @@ import {
 } from '../../orderbook';
 import { HTLC, LIMITS, SWAP as SWAP_CONSTANTS } from '../../constants';
 import { getSwapPairPolicyByBaseQuote, hasSwapPairPolicyByBaseQuote, type SwapPairPolicy } from '../../account-utils';
-import { formatEntityId, HEAVY_LOGS } from '../../utils';
+import { HEAVY_LOGS } from '../../utils';
+import { createStructuredLogger, shortId, shortOrder, shouldLogFullPayloads } from '../../logger';
 import { isLeftEntity } from '../../entity-id-utils';
 import {
   buildSwapResolveDataFromOrderbookFill,
@@ -65,6 +66,8 @@ import {
 export type { MempoolOp } from './account/orderbook-queue';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
+const accountHandlerLog = createStructuredLogger('account.handler');
+const orderbookLog = createStructuredLogger('orderbook');
 
 type StoredOfferEntityRefs = {
   fromEntity?: string;
@@ -280,8 +283,13 @@ export interface AccountHandlerResult {
 }
 
 export async function handleAccountInput(state: EntityState, input: AccountInput, env: Env): Promise<AccountHandlerResult> {
-  console.log(`🚀 APPLY accountInput: ${input.fromEntityId.slice(-4)} → ${input.toEntityId.slice(-4)}`);
-  console.log(`🚀 APPLY accountInput details: height=${input.height}, hasNewFrame=${!!input.newAccountFrame}, hasPrevHanko=${!!input.prevHanko}`);
+  accountHandlerLog.info('input.apply', {
+    from: shortId(input.fromEntityId),
+    to: shortId(input.toEntityId),
+    height: input.height,
+    frame: Boolean(input.newAccountFrame),
+    prevHanko: Boolean(input.prevHanko),
+  });
 
   // CRITICAL: Don't clone here - state already cloned at entity level (applyEntityTx)
   const newState: EntityState = state;  // Use state directly
@@ -306,7 +314,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
   let isNewAccount = false;
   if (!accountMachine) {
     isNewAccount = true;
-    console.log(`💳 Creating new account machine for ${counterpartyId.slice(-4)} (counterparty: ${counterpartyId.slice(-4)})`);
+    accountHandlerLog.debug('machine.create', { counterparty: shortId(counterpartyId) });
 
     // CONSENSUS FIX: Start with empty deltas (Channel.ts pattern)
     const initialDeltas = new Map();
@@ -375,7 +383,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
     // Store with counterparty ID as key (simpler than canonical)
     // Type assertion safe: accountMachine was just created above in this block
     upsertSortedStringMapEntry(newState.accounts, counterpartyId, accountMachine as AccountMachine);
-    console.log(`✅ Account created with counterparty key: ${counterpartyId.slice(-4)}`);
+    accountHandlerLog.debug('machine.created', { counterparty: shortId(counterpartyId) });
   }
 
   if (isNewAccount && input.prevHanko && !input.newAccountFrame) {
@@ -449,7 +457,10 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
   // CHANNEL.TS PATTERN: Process frame-level consensus ONLY
   if (input.height !== undefined || input.newAccountFrame) {
-    console.log(`🤝 Processing frame from ${input.fromEntityId.slice(-4)}, accountMachine.pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}`);
+    accountHandlerLog.debug('frame.process', {
+      from: shortId(input.fromEntityId),
+      pending: accountMachine.pendingFrame ? accountMachine.pendingFrame.height : null,
+    });
 
     const currentHeightBefore = accountMachine.currentHeight;
     const pendingFrameBefore = accountMachine.pendingFrame;
@@ -1145,13 +1156,13 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       // === COLLECT SWAP EVENTS (deferred to entity-level orchestration) ===
       const swapOffersCreated = result.swapOffersCreated || [];
       if (swapOffersCreated.length > 0) {
-        console.log(`📊 SWAP-EVENTS: Collected ${swapOffersCreated.length} swap offers for entity-level matching`);
+        accountHandlerLog.debug('swap.offers_created', { count: swapOffersCreated.length });
         allSwapOffersCreated.push(...swapOffersCreated);
       }
 
       const swapCancelRequests = result.swapCancelRequests || [];
       if (swapCancelRequests.length > 0) {
-        console.log(`📊 SWAP-EVENTS: Collected ${swapCancelRequests.length} swap cancel requests`);
+        accountHandlerLog.debug('swap.cancel_requests', { count: swapCancelRequests.length });
         const normalizedCancelRequests = swapCancelRequests.map(({ offerId }) => ({
           offerId,
           accountId: counterpartyId,
@@ -1161,7 +1172,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
       const swapOffersCancelled = result.swapOffersCancelled || [];
       if (swapOffersCancelled.length > 0) {
-        console.log(`📊 SWAP-EVENTS: Collected ${swapOffersCancelled.length} swap cancels`);
+        accountHandlerLog.debug('swap.offers_cancelled', { count: swapOffersCancelled.length });
         // Normalize to local counterparty key for this account machine.
         const normalizedCancels = swapOffersCancelled.map(({ offerId }) => ({ offerId, accountId: counterpartyId }));
         allSwapOffersCancelled.push(...normalizedCancels);
@@ -1169,7 +1180,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
       // Send response (ACK + optional new frame)
       if (result.response) {
-        console.log(`📤 Sending response to ${result.response.toEntityId.slice(-4)}`);
+        accountHandlerLog.debug('response.send', { to: shortId(result.response.toEntityId), height: result.response.height });
 
         // Get target proposer
         // IMPORTANT: Send only to PROPOSER - bilateral consensus between entity proposers
@@ -1182,7 +1193,12 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           }]
         });
 
-        console.log(`✅ ACK-RESPONSE queued: ${state.entityId.slice(-4)} → ${result.response.toEntityId.slice(-4)}, height=${result.response.height}, hasPrevHanko=${!!result.response.prevHanko}`);
+        accountHandlerLog.info('response.queued', {
+          from: shortId(state.entityId),
+          to: shortId(result.response.toEntityId),
+          height: result.response.height,
+          prevHanko: Boolean(result.response.prevHanko),
+        });
       }
     } else {
       console.error(`❌ Frame consensus failed: ${result.error}`);
@@ -1834,7 +1850,7 @@ export function processOrderbookSwaps(
     if (hasQueuedSwapResolveForEntityState(hubState, queuedSwapResolutions, currentAccountId, offer.offerId)) {
       continue;
     }
-    console.log(`📊 ORDERBOOK-PROCESS: offerId=${offer.offerId}, accountId=${currentAccountId.slice(-8)}`);
+    orderbookLog.debug('offer.process', { offer: shortOrder(offer.offerId), account: shortId(currentAccountId, 8) });
 
     const { pairId, base, quote } = canonicalPair(offer.giveTokenId, offer.wantTokenId);
     const bookKey = pairId;
@@ -1994,7 +2010,13 @@ export function processOrderbookSwaps(
       );
       throw new Error(`ORDERBOOK_CACHE_MISMATCH: pair=${bookKey} order=${currentNamespacedOrderId}`);
     }
-    console.log(`📊 ORDERBOOK ADD: maker=${formatEntityId(makerId)}, orderId=${currentNamespacedOrderId.slice(-20)}, side=${side}, price=${priceTicks}, qty=${qtyLots}`);
+    orderbookLog.debug('order.add', {
+      maker: shortId(makerId),
+      order: shortOrder(currentNamespacedOrderId, 20),
+      side,
+      price: priceTicks.toString(),
+      qty: qtyLots.toString(),
+    });
 
     let result: ReturnType<typeof applyCommand>;
     try {
@@ -2024,7 +2046,7 @@ export function processOrderbookSwaps(
           fillRatio: 0,
           cancelRemainder: true,
         })) {
-          console.log(`📤 ORDERBOOK: Queued swap_resolve(cancelRemainder) for full book offer ${offer.offerId.slice(-8)}`);
+          orderbookLog.debug('resolve.queued_cancel_full_book', { offer: shortOrder(offer.offerId, 8), account: shortId(currentAccountId, 8) });
         }
         continue;
       }
@@ -2065,7 +2087,7 @@ export function processOrderbookSwaps(
           cancelRemainder: true,
           ...(resolveComment ? { comment: resolveComment } : {}),
         })) {
-          console.log(`📤 ORDERBOOK: Queued swap_resolve(cancelRemainder) for rejected offer ${offer.offerId.slice(-8)}`);
+          orderbookLog.debug('resolve.queued_cancel_reject', { offer: shortOrder(offer.offerId, 8), account: shortId(currentAccountId, 8) });
         }
         continue;
       }
@@ -2112,7 +2134,12 @@ export function processOrderbookSwaps(
           takerEntry.weightedCost += tradeCost;
         }
 
-        console.log(`📊 ORDERBOOK TRADE: ${extractOfferId(event.makerOrderId)} ↔ ${extractOfferId(event.takerOrderId)} @ ${event.price}, qty=${event.qty}`);
+        orderbookLog.debug('trade', {
+          maker: shortOrder(extractOfferId(event.makerOrderId)),
+          taker: shortOrder(extractOfferId(event.takerOrderId)),
+          price: event.price.toString(),
+          qty: event.qty,
+        });
       }
 
       // Emit swap_resolve for each filled order
@@ -2130,16 +2157,20 @@ export function processOrderbookSwaps(
       }
 
       // Verify account exists in hub's state
-      if (HEAVY_LOGS) console.log(`🔍 ORDERBOOK-LOOKUP: Looking for accountId="${accountId}"`);
-      if (HEAVY_LOGS) console.log(`🔍 ORDERBOOK-LOOKUP: Hub accounts:`, Array.from(hubState.accounts.keys()));
-      if (HEAVY_LOGS) console.log(`🔍 ORDERBOOK-LOOKUP: Match found:`, hubState.accounts.has(accountId));
+      if (HEAVY_LOGS) {
+        orderbookLog.trace('lookup', {
+          account: shortId(accountId, 8),
+          known: Array.from(hubState.accounts.keys()).map((id) => shortId(id, 8)),
+          found: hubState.accounts.has(accountId),
+        });
+      }
       if (!hubState.accounts.has(accountId)) {
         throw new Error(
           `ORDERBOOK_ACCOUNT_LOOKUP_FAILED: offer=${offerId} accountId=${accountId} ` +
           `known=[${Array.from(hubState.accounts.keys()).join(',')}]`,
         );
       }
-      console.log(`✅ ORDERBOOK-LOOKUP: Found account for ${accountId.slice(-8)}, generating swap_resolve`);
+      orderbookLog.debug('lookup.found', { account: shortId(accountId, 8), offer: shortOrder(offerId, 8) });
 
       const filledBig = BigInt(filledLots);
       const isCurrentTakerOrder = namespacedOrderId === currentNamespacedOrderId;
@@ -2210,11 +2241,15 @@ export function processOrderbookSwaps(
         }
       }
       if (queueUniqueSwapResolveForEntityState(mempoolOps, hubState, queuedSwapResolutions, accountId, resolveEnqueueData)) {
-        console.log(
-          `📤 ORDERBOOK: Queued swap_resolve for ${offerId.slice(-8)}, fill=${(resolveData.fillRatio / MAX_SWAP_FILL_RATIO * 100).toFixed(1)}%, cancel=${!orderStillInBook}, source=${offerSource}`,
-        );
+        orderbookLog.debug('resolve.queued', {
+          offer: shortOrder(offerId, 8),
+          fillPct: (resolveData.fillRatio / MAX_SWAP_FILL_RATIO * 100).toFixed(1),
+          cancel: !orderStillInBook,
+          source: offerSource,
+        });
       }
-        console.log('📤 ORDERBOOK RESOLVE DETAIL', {
+      if (shouldLogFullPayloads()) {
+        orderbookLog.trace('resolve.payload', {
           accountId,
           offerId,
           namespacedOrderId,
@@ -2234,6 +2269,7 @@ export function processOrderbookSwaps(
           offerQuantizedGive: (offerForExecution.quantizedGive ?? offerForExecution.giveAmount).toString(),
         });
       }
+      }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       containCurrentOfferPairFailure(bookKey, currentAccountId, offer.offerId, message);
@@ -2242,9 +2278,7 @@ export function processOrderbookSwaps(
   }
 
   if (pairSweepCount > 0) {
-    console.log(
-      `📈 ORDERBOOK PASS: pairSweep=${pairSweepCount}`,
-    );
+    orderbookLog.debug('pass.summary', { pairSweep: pairSweepCount });
   }
 
   return { mempoolOps, crossJurisdictionFills, bookUpdates, debugProjectionRejects };
@@ -2296,14 +2330,14 @@ export function processOrderbookCancels(
       });
 
       bookUpdates.push({ pairId: bookKey, book: result.state });
-      console.log(`📊 ORDERBOOK: Cancelled order ${offerId.slice(-8)}`);
+      orderbookLog.debug('order.cancelled', { offer: shortOrder(offerId, 8), account: shortId(accountId, 8), pair: bookKey });
       orderbookCancelled = true;
     }
 
     const offer = accountMachine?.swapOffers?.get(offerId);
     if (offer?.crossJurisdiction) {
       mempoolOps.push({ accountId, tx: buildCrossJurisdictionCancelAck(offerId, offer.crossJurisdiction) });
-      console.log(`🌉 ORDERBOOK CROSS-J: queued clear/cancel ack for ${offerId.slice(-8)}`);
+      orderbookLog.debug('crossj.cancel_ack_queued', { offer: shortOrder(offerId, 8), account: shortId(accountId, 8) });
       continue;
     }
 
@@ -2315,9 +2349,9 @@ export function processOrderbookCancels(
       cancelRemainder: true,
     })) {
       if (!orderbookCancelled) {
-        console.log(`📊 ORDERBOOK: Offer ${offerId.slice(-8)} not active in book, forcing account-level cancel`);
+        orderbookLog.debug('resolve.queued_cancel_missing_book_order', { offer: shortOrder(offerId, 8), account: shortId(accountId, 8) });
       } else {
-        console.log(`📤 ORDERBOOK: Queued swap_resolve(cancelRemainder) for ${offerId.slice(-8)}`);
+        orderbookLog.debug('resolve.queued_cancel', { offer: shortOrder(offerId, 8), account: shortId(accountId, 8) });
       }
     }
   }

@@ -72,11 +72,12 @@ export function shouldLog(category: keyof LogConfig): boolean {
 }
 
 // Log levels for structured logging
-export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
+export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
 
 export type StructuredLogFields = Record<string, unknown>;
 
 const LOG_LEVEL_ORDER: Record<LogLevel, number> = {
+  trace: 0,
   debug: 10,
   info: 20,
   warn: 30,
@@ -85,12 +86,57 @@ const LOG_LEVEL_ORDER: Record<LogLevel, number> = {
 
 const configuredLevel = (): LogLevel => {
   const raw = String(process.env['XLN_LOG_LEVEL'] || 'info').trim().toLowerCase();
-  if (raw === 'debug' || raw === 'info' || raw === 'warn' || raw === 'error') return raw;
+  if (raw === 'trace' || raw === 'debug' || raw === 'info' || raw === 'warn' || raw === 'error') return raw;
   return 'info';
 };
 
 const shouldEmitLevel = (level: LogLevel): boolean =>
   LOG_LEVEL_ORDER[level] >= LOG_LEVEL_ORDER[configuredLevel()];
+
+const configuredScopes = (): Set<string> | null => {
+  const raw = String(process.env['XLN_LOG_SCOPES'] || '').trim().toLowerCase();
+  if (!raw) return null;
+  const scopes = raw.split(',').map(scope => scope.trim()).filter(Boolean);
+  return scopes.length > 0 ? new Set(scopes) : null;
+};
+
+const shouldEmitScope = (scope: string): boolean => {
+  const scopes = configuredScopes();
+  if (!scopes) return true;
+  const normalized = String(scope || '').trim().toLowerCase();
+  if (scopes.has(normalized)) return true;
+  const [root] = normalized.split(/[.:]/);
+  return Boolean(root && scopes.has(root));
+};
+
+export const shouldLogFullPayloads = (): boolean =>
+  configuredLevel() === 'trace' || String(process.env['XLN_LOG_FULL_PAYLOADS'] || '').trim() === '1';
+
+export const shortId = (value: unknown, chars = 4): string => {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (text.startsWith('0x') && text.length > 2 + chars) return text.slice(-chars);
+  return text.length > chars ? text.slice(-chars) : text;
+};
+
+export const shortHash = (value: unknown, head = 10): string => {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  if (text.length <= head + 2) return text;
+  return `${text.slice(0, head)}..`;
+};
+
+export const shortOrder = (value: unknown, chars = 10): string => {
+  const text = String(value || '').trim();
+  if (!text) return '';
+  return text.length > chars ? text.slice(-chars) : text;
+};
+
+export const formatAmount = (value: unknown): string => {
+  if (typeof value === 'bigint') return value.toString();
+  if (typeof value === 'number') return Number.isFinite(value) ? String(value) : 'NaN';
+  return String(value ?? '');
+};
 
 export const emitStructuredLog = (
   level: LogLevel,
@@ -99,6 +145,7 @@ export const emitStructuredLog = (
   fields: StructuredLogFields = {},
 ): void => {
   if (!shouldEmitLevel(level)) return;
+  if (!shouldEmitScope(scope)) return;
   const payload = {
     ts: new Date().toISOString(),
     level,
@@ -115,6 +162,8 @@ export const emitStructuredLog = (
 };
 
 export const createStructuredLogger = (scope: string, baseFields: StructuredLogFields = {}) => ({
+  trace: (message: string, fields: StructuredLogFields = {}) =>
+    emitStructuredLog('trace', scope, message, { ...baseFields, ...fields }),
   debug: (message: string, fields: StructuredLogFields = {}) =>
     emitStructuredLog('debug', scope, message, { ...baseFields, ...fields }),
   info: (message: string, fields: StructuredLogFields = {}) =>

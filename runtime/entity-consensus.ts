@@ -8,7 +8,7 @@ import { isLeftEntity } from './entity-id-utils';
 import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env, HankoString, HashType, JInput, JurisdictionEvent, JurisdictionEventData, RoutedEntityInput } from './types';
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, formatSignerDisplay, log } from './utils';
 import { safeStringify } from './serialization-utils';
-import { logError } from './logger';
+import { createStructuredLogger, logError, shortHash, shortId, shortOrder, shouldLogFullPayloads } from './logger';
 import {
   addMessages,
   cloneEntityReplica,
@@ -60,6 +60,7 @@ const compareNumericKey = (
   }
   return compareCanonicalText(String(left), String(right));
 };
+const entityLog = createStructuredLogger('entity');
 
 function queueUniqueAccountMempoolTx(
   account: EntityState['accounts'] extends Map<string, infer T> ? T : never,
@@ -427,19 +428,21 @@ export const applyEntityInput = async (
   const frameHash = entityInput.proposedFrame?.hash?.slice(0, 10) || 'none';
 
   if (!quietRuntimeLogs) {
-    console.log(
-      `🔍 INPUT-RECEIVED: [${timestamp}] Processing input for Entity #${entityDisplay}`,
-    );
-    console.log(
-      `🔍 INPUT-STATE: Current proposal: ${currentProposalHash}, Mempool: ${workingReplica.mempool.length}, isProposer: ${workingReplica.isProposer}`,
-    );
-    console.log(
-      `🔍 INPUT-DETAILS: txs=${entityInput.entityTxs?.length || 0}, hashPrecommits=${entityInput.hashPrecommits?.size || 0}, frame=${frameHash}`,
-    );
+    entityLog.info('input.received', {
+      entity: entityDisplay,
+      signer: shortId(workingReplica.signerId),
+      ts: timestamp,
+      txs: entityInput.entityTxs?.map(tx => tx.type) ?? [],
+      mempool: workingReplica.mempool.length,
+      proposer: workingReplica.isProposer,
+      proposal: currentProposalHash,
+      frame: frameHash,
+      precommits: entityInput.hashPrecommits?.size || 0,
+    });
   }
   if (entityInput.hashPrecommits?.size) {
     const precommitSigners = Array.from(entityInput.hashPrecommits.keys());
-    if (HEAVY_LOGS) console.log(`🔍 INPUT-PRECOMMITS: Received hashPrecommits from: ${precommitSigners.join(', ')}`);
+    if (HEAVY_LOGS) entityLog.debug('input.precommits', { signers: precommitSigners.map(shortId) });
   }
 
   // SECURITY: Validate all inputs
@@ -486,15 +489,15 @@ export const applyEntityInput = async (
     // DEBUG: Track vote transactions specifically
     const voteTransactions = entityInput.entityTxs.filter(tx => tx.type === 'vote');
     if (voteTransactions.length > 0) {
-      console.log(`🗳️ VOTE-MEMPOOL: ${workingReplica.signerId} receiving ${voteTransactions.length} vote transactions`);
-      voteTransactions.forEach(tx => {
-        console.log(`🗳️ VOTE-TX:`, tx);
-      });
+      entityLog.debug('vote.mempool', { signer: shortId(workingReplica.signerId), count: voteTransactions.length });
+      if (shouldLogFullPayloads()) entityLog.trace('vote.payload', { txs: voteTransactions });
     }
 
     // Log details of each EntityTx
-    for (const tx of entityInput.entityTxs) {
-      console.log(`🏛️ E-MACHINE: - EntityTx type="${tx.type}", data=`, safeStringify(tx.data, 2));
+    if (shouldLogFullPayloads()) {
+      for (const tx of entityInput.entityTxs) {
+        entityLog.trace('tx.payload', { type: tx.type, data: tx.data });
+      }
     }
     workingReplica.mempool.push(...entityInput.entityTxs);
     if (DEBUG)
@@ -831,7 +834,7 @@ export const applyEntityInput = async (
               if (frameHankoEntry) {
                 accountInput.newHanko = frameHankoEntry.hanko;
                 attachedCount++;
-                console.log(`🔐 ATTACH-HANKO: frame for ${accountInput.toEntityId?.slice(-4)}`);
+                entityLog.debug('hanko.attach.frame', { to: shortId(accountInput.toEntityId), hash: shortHash(accountInput.newAccountFrame.stateHash) });
               }
             }
             // Attach quorum hanko for dispute proof (replaces single-signer hanko)
@@ -840,7 +843,7 @@ export const applyEntityInput = async (
               if (disputeHankoEntry) {
                 accountInput.newDisputeHanko = disputeHankoEntry.hanko;
                 attachedCount++;
-                console.log(`🔐 ATTACH-HANKO: dispute for ${accountInput.toEntityId?.slice(-4)}`);
+                entityLog.debug('hanko.attach.dispute', { to: shortId(accountInput.toEntityId), hash: shortHash(accountInput.newDisputeHash) });
               }
             }
             // Attach quorum hanko for settlement approval (find by type in hankoWitness)
@@ -849,7 +852,7 @@ export const applyEntityInput = async (
                 if (entry.type === 'settlement' && entry.entityHeight === (workingReplica.state.height + 1)) {
                   accountInput.settleAction.hanko = entry.hanko;
                   attachedCount++;
-                  console.log(`🔐 ATTACH-HANKO: settlement for ${accountInput.toEntityId?.slice(-4)}`);
+                  entityLog.debug('hanko.attach.settlement', { to: shortId(accountInput.toEntityId) });
                   break;
                 }
               }
@@ -866,7 +869,7 @@ export const applyEntityInput = async (
             if (batchHankoEntry) {
               jTx.data.hankoSignature = batchHankoEntry.hanko;
               attachedCount++;
-              console.log(`🔐 ATTACH-HANKO: jBatch for ${jTx.entityId.slice(-4)} hash=${jTx.data.batchHash.slice(0, 10)}...`);
+              entityLog.debug('hanko.attach.jBatch', { entity: shortId(jTx.entityId), hash: shortHash(jTx.data.batchHash) });
             }
           }
         }
@@ -874,7 +877,7 @@ export const applyEntityInput = async (
 
       entityOutbox.push(...commitOutputs);
       jOutbox.push(...commitJOutputs);
-      console.log(`🔐 ENTITY-COMMIT: ${commitOutputs.length} stored outputs, attached ${attachedCount} hankos`);
+      entityLog.info('commit.outputs', { outputs: commitOutputs.length, jOutputs: commitJOutputs.length, hankos: attachedCount });
 
       // Step 4: Update state with incremented height + chain linkage
       // SECURITY NOTE: For PROPOSER, proposal.newState IS our own computed state
@@ -934,16 +937,14 @@ export const applyEntityInput = async (
 
   // Debug consensus trigger conditions
   if (!quietRuntimeLogs) {
-    console.log(`🎯 CONSENSUS-CHECK: Entity ${workingReplica.entityId}:${workingReplica.signerId}`);
-    console.log(`🎯   isProposer: ${workingReplica.isProposer}`);
-    console.log(`🎯   mempool.length: ${workingReplica.mempool.length}`);
-    console.log(`🎯   hasProposal: ${!!workingReplica.proposal}`);
-    if (workingReplica.mempool.length > 0) {
-      console.log(
-        `🎯   mempoolTypes:`,
-        workingReplica.mempool.map(tx => tx.type),
-      );
-    }
+    entityLog.debug('consensus.check', {
+      entity: shortId(workingReplica.entityId),
+      signer: shortId(workingReplica.signerId),
+      proposer: workingReplica.isProposer,
+      mempool: workingReplica.mempool.length,
+      hasProposal: Boolean(workingReplica.proposal),
+      txs: workingReplica.mempool.map(tx => tx.type),
+    });
   }
 
   const isSingleSigner = (() => {
@@ -1547,7 +1548,7 @@ export const applyEntityFrame = async (
           deterministicEntityTimestamp(currentEntityState, env),
         )) {
           waitingForCrossPullCommitments = true;
-          console.warn(`🌉 ORDERBOOK CROSS-J: offer ${offer.offerId} waiting for prepared pull commitments`);
+          entityLog.info('crossj.waiting_pull_commitments', { offer: shortOrder(offer.offerId) });
           continue;
         }
       }
