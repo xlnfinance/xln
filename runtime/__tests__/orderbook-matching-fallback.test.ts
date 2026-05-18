@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { createBook, applyCommand, getBestAsk, getBestBid, getBookOrder, getBookSideLevels } from '../orderbook/core';
+import { createBook, applyCommand, getBestAsk, getBestBid, getBookOrder, getBookSideLevels, refreshRestingOrder } from '../orderbook/core';
 import { SWAP_LOT_SCALE } from '../orderbook/types';
 import { processOrderbookCancels, processOrderbookSwaps } from '../entity-tx/handlers/account';
 import { handleSwapResolve } from '../account-tx/handlers/swap-resolve';
@@ -64,6 +64,79 @@ function makeAccountMachine(offer: SwapOffer): AccountMachine {
 }
 
 describe('orderbook matching fallback execution mapping', () => {
+  test('refreshRestingOrder updates persisted order metadata without matching', () => {
+    let book = createBook({
+      bucketWidthTicks: 100n,
+      maxOrders: 10_000,
+      stpPolicy: 1,
+    });
+
+    book = applyCommand(book, {
+      kind: 0,
+      ownerId: 'bidder',
+      orderId: 'bid-1',
+      side: 0,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 1000n,
+      qtyLots: 4,
+    }).state;
+    book = applyCommand(book, {
+      kind: 0,
+      ownerId: 'asker',
+      orderId: 'ask-1',
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 1200n,
+      qtyLots: 4,
+    }).state;
+
+    book = refreshRestingOrder(book, {
+      ownerId: 'asker',
+      orderId: 'ask-1',
+      side: 1,
+      priceTicks: 900n,
+      qtyLots: 2,
+    });
+
+    expect(book.tradeCount).toBe(0);
+    expect(getBookOrder(book, 'ask-1')).toMatchObject({
+      ownerId: 'asker',
+      priceTicks: 900n,
+      qtyLots: 2,
+    });
+    expect(getBestBid(book)).toBe(1000n);
+    expect(getBestAsk(book)).toBe(900n);
+  });
+
+  test('refreshRestingOrder rejects side drift instead of moving a live order', () => {
+    let book = createBook({
+      bucketWidthTicks: 100n,
+      maxOrders: 10_000,
+      stpPolicy: 1,
+    });
+
+    book = applyCommand(book, {
+      kind: 0,
+      ownerId: 'asker',
+      orderId: 'ask-1',
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 1200n,
+      qtyLots: 4,
+    }).state;
+
+    expect(() => refreshRestingOrder(book, {
+      ownerId: 'asker',
+      orderId: 'ask-1',
+      side: 0,
+      priceTicks: 1200n,
+      qtyLots: 4,
+    })).toThrow('BOOK_REFRESH_SIDE_MISMATCH');
+  });
+
   test('generates execution amounts from a persisted book backed by account offers', () => {
     let book = createBook({
       bucketWidthTicks: 100n,
@@ -882,7 +955,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(makerResolve!.tx.data.executionWantAmount).toBe(1000n * lot / 10_000n);
   });
 
-  test('passes canonical resting offer state into swap_resolve for snapped resting makers', async () => {
+  test('swap_resolve rejects caller-supplied resting terms that differ from the live offer', async () => {
     const lot = SWAP_LOT_SCALE;
     const makerOffer = {
       offerId: 'maker-snapped',
@@ -915,14 +988,13 @@ describe('orderbook matching fallback execution mapping', () => {
     };
 
     const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
-    expect(resolveResult.success).toBe(true);
+    expect(resolveResult.success).toBe(false);
+    expect(resolveResult.error).toContain('Resting swap terms mismatch');
     const remaining = accountMachine.swapOffers.get('maker-snapped');
     expect(remaining).toBeDefined();
-    expect(remaining!.priceTicks).toBe(1000n);
-    expect(remaining!.giveAmount).toBe(lot);
-    expect(remaining!.wantAmount).toBe(1000n * lot / 10_000n);
-    expect(remaining!.quantizedGive).toBe(lot);
-    expect(remaining!.quantizedWant).toBe(1000n * lot / 10_000n);
+    expect(remaining!.priceTicks).toBe(1003n);
+    expect(remaining!.giveAmount).toBe(2n * lot);
+    expect(remaining!.wantAmount).toBe((2006n * lot) / 10_000n);
   });
 
   test('accepts resting offers with priceTicks above qty-lot limits', () => {
@@ -2385,6 +2457,135 @@ describe('orderbook matching fallback execution mapping', () => {
       'maker-committed-account:cross_swap_fill_ack',
       'taker-account:cross_swap_fill_ack',
     ]);
+  });
+
+  test('aggregates multiple same-pass cross-j fills into one ack per order', () => {
+    const lot = SWAP_LOT_SCALE;
+    const pairId = 'cross:base:1/tron:1';
+    const baseRoute = {
+      bookOwnerEntityId: 'hub-entity',
+      venueId: pairId,
+      hubEntityId: 'hub-entity',
+      createdAt: 1,
+      updatedAt: 1,
+      status: 'resting',
+    };
+    const makerRoute = {
+      ...baseRoute,
+      orderId: 'maker-cross',
+      makerEntityId: 'maker-entity',
+      source: {
+        jurisdiction: 'base',
+        entityId: 'maker-entity',
+        counterpartyEntityId: 'hub-entity',
+        tokenId: 1,
+        amount: 2n * lot,
+      },
+      target: {
+        jurisdiction: 'tron',
+        entityId: 'maker-entity',
+        counterpartyEntityId: 'hub-entity',
+        tokenId: 1,
+        amount: 2n * lot,
+      },
+    };
+    const makerOffer = {
+      offerId: 'maker-cross',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'maker-entity',
+      accountId: 'maker-account',
+      createdHeight: 1,
+      giveTokenId: 1,
+      giveAmount: 2n * lot,
+      quantizedGive: 2n * lot,
+      wantTokenId: 1,
+      wantAmount: 2n * lot,
+      quantizedWant: 2n * lot,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 10_000n,
+      crossJurisdiction: makerRoute,
+    };
+    const takerOffer = (id: string) => {
+      const route = {
+        ...baseRoute,
+        orderId: id,
+        makerEntityId: id,
+        source: {
+          jurisdiction: 'tron',
+          entityId: id,
+          counterpartyEntityId: 'hub-entity',
+          tokenId: 1,
+          amount: lot,
+        },
+        target: {
+          jurisdiction: 'base',
+          entityId: id,
+          counterpartyEntityId: 'hub-entity',
+          tokenId: 1,
+          amount: lot,
+        },
+      };
+      return {
+        offerId: id,
+        makerIsLeft: false,
+        fromEntity: 'hub-entity',
+        toEntity: id,
+        accountId: `${id}-account`,
+        createdHeight: 2,
+        giveTokenId: 1,
+        giveAmount: lot,
+        quantizedGive: lot,
+        wantTokenId: 1,
+        wantAmount: lot,
+        quantizedWant: lot,
+        minFillRatio: 0,
+        timeInForce: 0,
+        priceTicks: 10_000n,
+        crossJurisdiction: route,
+      };
+    };
+    const takerOne = takerOffer('taker-one');
+    const takerTwo = takerOffer('taker-two');
+
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([
+        ['maker-account', { swapOffers: new Map([['maker-cross', makerOffer]]) }],
+        ['taker-one-account', { swapOffers: new Map([['taker-one', takerOne]]) }],
+        ['taker-two-account', { swapOffers: new Map([['taker-two', takerTwo]]) }],
+      ]),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 1,
+          supportedPairs: [pairId],
+        },
+        books: new Map(),
+        pairConfig: new Map(),
+      },
+    };
+
+    const result = processOrderbookSwaps(entityState as any, [makerOffer, takerOne, takerTwo] as any);
+    const makerAcks = result.mempoolOps.filter(
+      (op) => op.accountId === 'maker-account' && op.tx.type === 'cross_swap_fill_ack',
+    );
+
+    expect(makerAcks).toHaveLength(1);
+    expect(makerAcks[0]?.tx.data.fillSeq).toBe(1);
+    expect(makerAcks[0]?.tx.data.cumulativeFillRatio).toBe(65_535);
+    expect(makerAcks[0]?.tx.data.incrementalSourceAmount).toBe(2n * lot);
+    expect(result.mempoolOps.filter((op) => op.tx.type === 'cross_swap_fill_ack')).toHaveLength(3);
   });
 
   test('fails fast when persisted book price diverges from account offer', () => {

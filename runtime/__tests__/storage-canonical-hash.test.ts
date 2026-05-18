@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 
-import { computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
+import { computeCanonicalEntityHash, computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
+import { hydrateEntityStateFromStorage, projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
 import type { AccountMachine, EntityReplica, Env } from '../types';
 
 const entityId = `0x${'11'.repeat(32)}`;
@@ -111,4 +112,29 @@ test('canonical storage hash ignores UI frameHistory and reacts to consensus sta
 
   expect(changedHistory).toBe(base);
   expect(changedReserve).not.toBe(base);
+});
+
+test('storage projection round-trip preserves canonical account optional-field shape', () => {
+  const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
+  const replica = Array.from(env.eReplicas.values())[0]!;
+  const state = replica.state;
+  const account = state.accounts.get(counterpartyId)!;
+
+  expect(account.pulls).toBeUndefined();
+  expect(account.swapOrderHistory).toBeUndefined();
+  expect(account.swapClosedOrders).toBeUndefined();
+
+  const hydratedState = hydrateEntityStateFromStorage({
+    core: projectEntityCoreDoc(state, replica),
+    accounts: new Map([[counterpartyId, projectAccountDoc(account)]]),
+    books: new Map(),
+  });
+
+  const before = computeCanonicalEntityHash(replica);
+  const after = computeCanonicalEntityHash({ ...replica, state: hydratedState });
+
+  expect(hydratedState.accounts.get(counterpartyId)?.pulls).toBeUndefined();
+  expect(hydratedState.accounts.get(counterpartyId)?.swapOrderHistory).toBeUndefined();
+  expect(hydratedState.accounts.get(counterpartyId)?.swapClosedOrders).toBeUndefined();
+  expect(after.hash).toBe(before.hash);
 });

@@ -57,6 +57,7 @@ import { TIMING } from './constants';
 import { DEFAULT_SOFT_LIMIT } from './types';
 import { terminateHtlcRoute } from './entity-tx/htlc-route-lifecycle';
 import { getRuntimeJurisdictionHeight } from './j-height';
+import { markStorageAccountDirty, markStorageEntityDirty } from './env-events';
 
 // Configuration constants
 export const ACCOUNT_TIMEOUT_MS = 30000; // 30 seconds (configurable)
@@ -126,6 +127,14 @@ const CRONTAB_TASK_HANDLERS: Record<CrontabTaskMethod, CrontabTaskHandler> = {
   hubRebalance: hubRebalanceHandler,
 };
 
+const markEntityCrontabDirty = (env: Env, replica: EntityReplica): void => {
+  markStorageEntityDirty(env, replica.state.entityId || replica.entityId);
+};
+
+const markEntityAccountDirty = (env: Env, replica: EntityReplica, counterpartyId: string): void => {
+  markStorageAccountDirty(env, replica.state.entityId || replica.entityId, counterpartyId);
+};
+
 // ═══════════════════════════════════════════════════════════════════════
 // Scheduled Hooks API (setTimeout-like)
 // ═══════════════════════════════════════════════════════════════════════
@@ -184,6 +193,7 @@ export async function executeCrontab(
     }
 
     if (dueHooks.length > 0) {
+      markEntityCrontabDirty(env, replica);
       console.log(`⏰ HOOKS: ${dueHooks.length} hooks fired (entity ${replica.entityId.slice(-4)}, timestamp=${now})`);
       const hookOutputs = await processDueHooks(env, dueHooks, replica, context);
       allOutputs.push(...hookOutputs);
@@ -202,6 +212,7 @@ export async function executeCrontab(
         const outputs = await handler(env, replica, task, context);
         allOutputs.push(...outputs);
         task.lastRun = now;
+        markEntityCrontabDirty(env, replica);
         if (outputs.length > 0) {
           console.log(`✅ CRONTAB: Task "${task.method}" generated ${outputs.length} outputs`);
         }
@@ -275,6 +286,7 @@ async function processDueHooks(
                 type: 'dispute_deadline',
                 data: { accountId },
               });
+              markEntityCrontabDirty(env, replica);
             }
             console.log(
               `⏰ HOOK: dispute_deadline retry for ${accountId.slice(-4)} ` +
@@ -295,6 +307,7 @@ async function processDueHooks(
 
           if (sentHasFinalize || replica.state.jBatchState?.sentBatch) {
             account.activeDispute.finalizeQueued = sentHasFinalize || (account.activeDispute.finalizeQueued ?? false);
+            markEntityAccountDirty(env, replica, accountId);
             const retryMs = 1000;
             if (replica.state.crontabState) {
               scheduleHook(replica.state.crontabState, {
@@ -303,6 +316,7 @@ async function processDueHooks(
                 type: 'dispute_deadline',
                 data: { accountId },
               });
+              markEntityCrontabDirty(env, replica);
             }
             console.log(
               `⏰ HOOK: dispute_deadline deferred for ${accountId.slice(-4)} ` +
@@ -313,6 +327,7 @@ async function processDueHooks(
 
           if (draftHasFinalize) {
             account.activeDispute.finalizeQueued = true;
+            markEntityAccountDirty(env, replica, accountId);
             shouldBroadcastQueuedDisputeFinalizations = true;
             break;
           }
@@ -320,6 +335,7 @@ async function processDueHooks(
           if (account.activeDispute.finalizeQueued) {
             // Recover from stale local latch (e.g. after abort/drop of previous finalize batch).
             account.activeDispute.finalizeQueued = false;
+            markEntityAccountDirty(env, replica, accountId);
           }
 
           disputeFinalizeCounterparties.add(accountId);
@@ -339,6 +355,7 @@ async function processDueHooks(
           // ACK already finalized (lock removed) — clear latch and skip.
           if (inboundLockId && !account.locks?.has(inboundLockId)) {
             terminateHtlcRoute(replica.state, hashlock, replica.state.timestamp);
+            markEntityCrontabDirty(env, replica);
             break;
           }
 
@@ -370,6 +387,7 @@ async function processDueHooks(
           const task = replica.state.crontabState?.tasks?.get('hubRebalance');
           if (task) {
             task.lastRun = 0;
+            markEntityCrontabDirty(env, replica);
             console.log(`⏰ HOOK: hub_rebalance_kick — forcing next global hubRebalance pass`);
           }
         }
@@ -658,6 +676,7 @@ async function hubRebalanceHandler(
   if (!replica.state.jBatchState) {
     const { initJBatch } = await import('./j-batch');
     replica.state.jBatchState = initJBatch();
+    markEntityCrontabDirty(_env, replica);
   }
 
   // Pending broadcast blocks direct jBatch mutations (R→C/C→R execute), but we can still
@@ -732,6 +751,7 @@ async function hubRebalanceHandler(
           tokenId,
         });
         accountMachine.requestedRebalance.delete(tokenId);
+        markEntityAccountDirty(_env, replica, counterpartyId);
         continue;
       }
       const prepaidFee = feeState.feePaidUpfront;
@@ -775,6 +795,7 @@ async function hubRebalanceHandler(
         feeState.jBatchSubmittedAt = 0;
         jBatchSubmittedAt = 0;
         submittedBatchStale = false;
+        markEntityAccountDirty(_env, replica, counterpartyId);
         emitRebalanceDebug({
           step: 2,
           status: 'retry',
@@ -834,6 +855,7 @@ async function hubRebalanceHandler(
         });
         accountMachine.requestedRebalance.delete(tokenId);
         accountMachine.requestedRebalanceFeeState?.delete(tokenId);
+        markEntityAccountDirty(_env, replica, counterpartyId);
         continue;
       }
 
@@ -897,10 +919,12 @@ async function hubRebalanceHandler(
           target.tokenId,
           target.amount,
         );
+        markEntityCrontabDirty(_env, replica);
         const targetAccount = replica.state.accounts.get(target.counterpartyId);
         const targetFeeState = targetAccount?.requestedRebalanceFeeState?.get(target.tokenId);
         if (targetFeeState && (targetFeeState.jBatchSubmittedAt || 0) <= 0) {
           targetFeeState.jBatchSubmittedAt = now;
+          markEntityAccountDirty(_env, replica, target.counterpartyId);
         }
         queuedCount += 1;
         console.log(

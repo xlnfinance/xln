@@ -5,8 +5,11 @@ import { markStorageEntityDirty, recordOrderbookPairUpdate } from '../env-events
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 
+export const crossJurisdictionBookOrderIdFor = (sourceEntityId: string, orderId: string): string =>
+  `${normalizeEntityRef(sourceEntityId)}:${String(orderId)}`;
+
 export const crossJurisdictionBookOrderId = (route: CrossJurisdictionSwapRoute): string =>
-  `${normalizeEntityRef(route.source.entityId)}:${String(route.orderId)}`;
+  crossJurisdictionBookOrderIdFor(route.source.entityId, route.orderId);
 
 export const removeBookOrderById = (
   env: Env,
@@ -48,8 +51,33 @@ export const removeBookOrderById = (
   return true;
 };
 
+export const hasBookOrderById = (
+  state: EntityState,
+  namespacedOrderId: string,
+): boolean => {
+  const ext = state.orderbookExt as OrderbookExtState | undefined;
+  if (!ext) return false;
+  return getOrderbookPairsForOrder(ext, namespacedOrderId)
+    .some((pairId) => {
+      const book = ext.books.get(pairId);
+      return Boolean(book && getBookOrder(book, namespacedOrderId));
+    });
+};
+
 export const removeCrossJurisdictionBookOrder = (
   env: Env,
   state: EntityState,
   route: CrossJurisdictionSwapRoute,
 ): boolean => removeBookOrderById(env, state, crossJurisdictionBookOrderId(route));
+
+export const hasCrossJurisdictionBookOrder = (
+  state: EntityState,
+  route: CrossJurisdictionSwapRoute,
+): boolean => hasBookOrderById(state, crossJurisdictionBookOrderId(route));
+
+export const removeCrossJurisdictionBookOrderByRouteId = (
+  env: Env,
+  state: EntityState,
+  sourceEntityId: string,
+  orderId: string,
+): boolean => removeBookOrderById(env, state, crossJurisdictionBookOrderIdFor(sourceEntityId, orderId));

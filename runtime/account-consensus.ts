@@ -489,7 +489,7 @@ export async function proposeAccountFrame(
     );
 
   // Clone account machine for validation
-  const clonedMachine = cloneAccountMachine(accountMachine);
+  let clonedMachine = cloneAccountMachine(accountMachine);
   // NOTE: proofHeader.nonce is NOT set here — it's incremented per-message, not per-frame
 
   // Deterministic J-height for account frame hashing:
@@ -535,9 +535,10 @@ export async function proposeAccountFrame(
     // Use normalized ordering helper (not raw string equality) to avoid casing-induced
     // divergence during WAL replay.
     const proposerByLeft = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
-    const beforeSettlement = captureSettlementVector(clonedMachine);
+    const txMachine = cloneAccountMachine(clonedMachine);
+    const beforeSettlement = captureSettlementVector(txMachine);
     const result = await processAccountTx(
-      clonedMachine,
+      txMachine,
       accountTx,
       proposerByLeft,
       env.timestamp, // Will be replaced by frame.timestamp during commit
@@ -561,7 +562,8 @@ export async function proposeAccountFrame(
       }
       continue; // Skip to next tx
     }
-    assertNoUnilateralSettlementMutation(clonedMachine, beforeSettlement, accountTx, 'propose/validate');
+    assertNoUnilateralSettlementMutation(txMachine, beforeSettlement, accountTx, 'propose/validate');
+    clonedMachine = txMachine;
 
     validTxs.push(accountTx);
     allEvents.push(...result.events);
@@ -1617,13 +1619,17 @@ export async function handleAccountInput(
         ours.leftCreditLimit !== theirs.leftCreditLimit ||
         ours.rightCreditLimit !== theirs.rightCreditLimit ||
         ours.leftAllowance !== theirs.leftAllowance ||
-        ours.rightAllowance !== theirs.rightAllowance;
+        ours.rightAllowance !== theirs.rightAllowance ||
+        (ours.leftHold ?? 0n) !== (theirs.leftHold ?? 0n) ||
+        (ours.rightHold ?? 0n) !== (theirs.rightHold ?? 0n);
 
       if (bilateralMismatch) {
         console.warn(`⚠️ SECURITY: Bilateral field mismatch at token ${ours.tokenId}:`);
         console.warn(`   offdelta: our=${ours.offdelta}, their=${theirs.offdelta}`);
         console.warn(`   leftCreditLimit: our=${ours.leftCreditLimit}, their=${theirs.leftCreditLimit}`);
         console.warn(`   rightCreditLimit: our=${ours.rightCreditLimit}, their=${theirs.rightCreditLimit}`);
+        console.warn(`   leftHold: our=${ours.leftHold ?? 0n}, their=${theirs.leftHold ?? 0n}`);
+        console.warn(`   rightHold: our=${ours.rightHold ?? 0n}, their=${theirs.rightHold ?? 0n}`);
         return { success: false, error: `Bilateral state injection detected - credit/allowance mismatch`, events };
       }
     }

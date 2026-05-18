@@ -18,6 +18,7 @@ export type DemoUserIdentity = {
 
 type CreateRuntimeOptions = {
   requireOnline?: boolean;
+  workFactor?: number;
 };
 
 const DEFAULT_DEMO_MNEMONICS: Record<DemoUserName, string> = {
@@ -48,6 +49,12 @@ const deriveRuntimeIdFromMnemonic = (mnemonic: string): string =>
   deriveSignerAddressFromMnemonic(mnemonic, 0);
 
 const escapeRegex = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+async function selectBrainvaultWorkFactor(page: Page, factor = 1): Promise<void> {
+  const factorButton = page.getByRole('button', { name: new RegExp(`^${factor}\\s+`, 'i') }).first();
+  if (!await factorButton.isVisible({ timeout: 1_000 }).catch(() => false)) return;
+  await factorButton.click();
+}
 
 async function openRuntimeDropdown(page: Page): Promise<void> {
   const trigger = page.locator('button:has([data-testid="context-current"]), .context-switcher .dropdown-trigger').first();
@@ -130,6 +137,16 @@ async function ensureRuntimeCreationView(page: Page, label: string): Promise<voi
 
 async function waitForRuntimeReady(page: Page, runtimeId: string): Promise<void> {
   await page.waitForFunction(({ targetRuntimeId }) => {
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        runtimeId?: string;
+        eReplicas?: Map<string, unknown>;
+      };
+    }).isolatedEnv;
+    const envRuntimeId = String(env?.runtimeId || '').toLowerCase();
+    const envReady = envRuntimeId === String(targetRuntimeId || '').toLowerCase()
+      && Number(env?.eReplicas?.size || 0) > 0;
+
     const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
     const selectedRuntimeId = String(selectedTrigger?.dataset?.runtimeId || '').toLowerCase();
     const selectedEntityId = String(selectedTrigger?.dataset?.entityId || '');
@@ -138,16 +155,7 @@ async function waitForRuntimeReady(page: Page, runtimeId: string): Promise<void>
       selectedRuntimeId === String(targetRuntimeId || '').toLowerCase()
       && /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
       && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId);
-    if (selectedReady) return true;
-
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        runtimeId?: string;
-        eReplicas?: Map<string, unknown>;
-      };
-    }).isolatedEnv;
-    return String(env?.runtimeId || '').toLowerCase() === String(targetRuntimeId || '').toLowerCase()
-      && Number(env?.eReplicas?.size || 0) > 0;
+    return envReady && (!selectedRuntimeId || selectedReady);
   }, { targetRuntimeId: runtimeId }, { timeout: RUNTIME_READY_TIMEOUT });
 }
 
@@ -162,28 +170,29 @@ async function waitForRuntimeBootstrap(
   await expect
     .poll(async () => {
       return await page.evaluate(({ expectedRuntimeId, previousRuntimeId }) => {
-        const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
-        const selectedRuntimeId = String(selectedTrigger?.dataset?.runtimeId || '').toLowerCase();
-        const selectedEntityId = String(selectedTrigger?.dataset?.entityId || '');
-        const selectedSignerId = String(selectedTrigger?.dataset?.signerId || '');
-        if (
-          selectedRuntimeId
-          && selectedRuntimeId !== String(previousRuntimeId || '').toLowerCase()
-          && /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
-          && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId)
-        ) {
-          return selectedRuntimeId;
-        }
-
         const env = (window as typeof window & {
           isolatedEnv?: {
             runtimeId?: string;
             eReplicas?: Map<string, unknown>;
           };
         }).isolatedEnv;
-
         const runtimeId = String(env?.runtimeId || '').toLowerCase();
         const replicaCount = Number(env?.eReplicas?.size || 0);
+
+        const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
+        const selectedRuntimeId = String(selectedTrigger?.dataset?.runtimeId || '').toLowerCase();
+        const selectedEntityId = String(selectedTrigger?.dataset?.entityId || '');
+        const selectedSignerId = String(selectedTrigger?.dataset?.signerId || '');
+        const selectedReady =
+          selectedRuntimeId
+          && selectedRuntimeId === runtimeId
+          && selectedRuntimeId !== String(previousRuntimeId || '').toLowerCase()
+          && /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
+          && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId);
+        if (runtimeId && replicaCount > 0 && selectedReady) {
+          return runtimeId;
+        }
+
         const onboardingVisible =
           Boolean(document.querySelector('#display-name'))
           || Array.from(document.querySelectorAll('button')).some((button) => {
@@ -191,9 +200,6 @@ async function waitForRuntimeBootstrap(
             return label === 'start' || label === 'start using xln' || label === 'continue';
           });
 
-        if (runtimeId && replicaCount > 0 && runtimeId !== String(previousRuntimeId || '').toLowerCase()) {
-          return runtimeId;
-        }
         if (onboardingVisible) {
           return runtimeId || String(expectedRuntimeId || '').toLowerCase() || 'onboarding-visible';
         }
@@ -206,14 +212,15 @@ async function waitForRuntimeBootstrap(
     .not.toBe('');
 
   const activeRuntimeId = await page.evaluate(() => {
-    const selectedRuntimeId = document.querySelector<HTMLElement>('[data-testid="context-current"]')?.dataset?.runtimeId;
-    if (selectedRuntimeId) return String(selectedRuntimeId).toLowerCase();
     const env = (window as typeof window & {
       isolatedEnv?: {
         runtimeId?: string;
       };
     }).isolatedEnv;
-    return String(env?.runtimeId || '').toLowerCase();
+    const envRuntimeId = String(env?.runtimeId || '').toLowerCase();
+    if (envRuntimeId) return envRuntimeId;
+    const selectedRuntimeId = document.querySelector<HTMLElement>('[data-testid="context-current"]')?.dataset?.runtimeId;
+    return String(selectedRuntimeId || '').toLowerCase();
   }).catch(() => '');
 
   return activeRuntimeId || expected;
@@ -222,13 +229,19 @@ async function waitForRuntimeBootstrap(
 async function waitForActiveRuntimeId(page: Page, runtimeId: string): Promise<void> {
   await page.waitForFunction(({ targetRuntimeId }) => {
     const selectedRuntimeId = document.querySelector<HTMLElement>('[data-testid="context-current"]')?.dataset?.runtimeId;
-    if (String(selectedRuntimeId || '').toLowerCase() === String(targetRuntimeId || '').toLowerCase()) return true;
     const env = (window as typeof window & {
       isolatedEnv?: {
         runtimeId?: string;
+        eReplicas?: Map<string, unknown>;
       };
     }).isolatedEnv;
-    return String(env?.runtimeId || '').toLowerCase() === String(targetRuntimeId || '').toLowerCase();
+    const envRuntimeId = String(env?.runtimeId || '').toLowerCase();
+    if (envRuntimeId) {
+      return envRuntimeId === String(targetRuntimeId || '').toLowerCase()
+        && Number(env?.eReplicas?.size || 0) > 0
+        && (!selectedRuntimeId || String(selectedRuntimeId || '').toLowerCase() === envRuntimeId);
+    }
+    return String(selectedRuntimeId || '').toLowerCase() === String(targetRuntimeId || '').toLowerCase();
   }, { targetRuntimeId: runtimeId }, { timeout: 15_000 });
 }
 
@@ -265,20 +278,6 @@ async function waitForAnyRuntimeReady(page: Page): Promise<string> {
 
 async function waitForNextRuntimeReady(page: Page, previousRuntimeId: string | null): Promise<string> {
   return await page.waitForFunction(({ priorRuntimeId }) => {
-    const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
-    const selectedRuntimeId = String(selectedTrigger?.dataset?.runtimeId || '').toLowerCase();
-    const selectedEntityId = String(selectedTrigger?.dataset?.entityId || '');
-    const selectedSignerId = String(selectedTrigger?.dataset?.signerId || '');
-    const previous = String(priorRuntimeId || '').toLowerCase();
-    if (
-      selectedRuntimeId
-      && selectedRuntimeId !== previous
-      && /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
-      && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId)
-    ) {
-      return selectedRuntimeId;
-    }
-
     const env = (window as typeof window & {
       isolatedEnv?: {
         runtimeId?: string;
@@ -286,6 +285,22 @@ async function waitForNextRuntimeReady(page: Page, previousRuntimeId: string | n
       };
     }).isolatedEnv;
     const runtimeId = String(env?.runtimeId || '').toLowerCase();
+    const previous = String(priorRuntimeId || '').toLowerCase();
+
+    const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
+    const selectedRuntimeId = String(selectedTrigger?.dataset?.runtimeId || '').toLowerCase();
+    const selectedEntityId = String(selectedTrigger?.dataset?.entityId || '');
+    const selectedSignerId = String(selectedTrigger?.dataset?.signerId || '');
+    if (
+      runtimeId
+      && selectedRuntimeId === runtimeId
+      && selectedRuntimeId !== previous
+      && /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
+      && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId)
+      && Number(env?.eReplicas?.size || 0) > 0
+    ) {
+      return runtimeId;
+    }
     if (!runtimeId || Number(env?.eReplicas?.size || 0) <= 0) return null;
     if (previous && runtimeId === previous) return null;
     return runtimeId;
@@ -610,6 +625,7 @@ export async function createRuntime(
         await displayNameInput.fill(label);
       }
     }
+    await selectBrainvaultWorkFactor(page, options.workFactor ?? 1);
     await mnemonicInput.fill(normalizeMnemonic(mnemonic));
     const openVaultButton = page.getByRole('button', { name: /(Create XLN wallet|Open (Wallet|Vault))/, exact: false });
     await expect(openVaultButton).toBeEnabled({ timeout: 15_000 });

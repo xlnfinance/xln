@@ -42,7 +42,7 @@
   $: canAdd = allowAdd && !!activeEnv;
 </script>
 
-<Dropdown bind:open={isOpen} minWidth={200} maxWidth={320}>
+<Dropdown bind:open={isOpen} minWidth={280} maxWidth={560}>
   <span slot="trigger" class="trigger-content">
     <span class="trigger-icon">⚖️</span>
     <span class="trigger-text">{displayText}</span>
@@ -125,7 +125,7 @@
 
   .menu-item {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 8px;
     width: 100%;
     padding: 8px 12px;
@@ -149,6 +149,9 @@
 
   .menu-label {
     flex: 1;
+    min-width: 0;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
   }
 
   .menu-meta {

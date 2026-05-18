@@ -173,7 +173,9 @@
     position: absolute;
     top: 100%;
     left: 0;
-    right: 0;
+    min-width: 180px;
+    width: max-content;
+    max-width: min(260px, calc(100vw - 24px));
     margin-top: 4px;
     background: #1c1917;
     border: 1px solid #292524;
@@ -210,10 +212,13 @@
     display: flex;
     flex-direction: column;
     gap: 2px;
+    min-width: 0;
   }
 
   .token-name {
     font-size: 11px;
     color: #78716c;
+    white-space: normal;
+    overflow-wrap: anywhere;
   }
 </style>

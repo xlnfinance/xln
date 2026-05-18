@@ -761,12 +761,19 @@
   .hub-join-select {
     width: 100%;
     box-sizing: border-box;
+    min-height: 48px;
     padding: 12px 14px;
     background: #0f0b09;
     border: 1px solid #322821;
     border-radius: 10px;
     color: #e7e5e4;
     font-size: 15px;
+    color-scheme: dark;
+  }
+
+  .hub-join-select option {
+    background: #0f0b09;
+    color: #e7e5e4;
   }
 
   .form-input:focus,

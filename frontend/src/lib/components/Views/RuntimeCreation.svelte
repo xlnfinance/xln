@@ -1128,17 +1128,35 @@
           </div>
         {/if}
 
-	        <div class="wallet-create-title">
-	          <div>
-	            <h2>{inputMode === 'mnemonic' ? 'Import XLN wallet' : 'Create XLN wallet'}</h2>
-	            <p>{inputMode === 'mnemonic'
-	              ? 'Recover from an existing mnemonic. New wallets start from the main creation form.'
-	              : 'Enter a display name and secret. The wallet opens automatically when derivation finishes.'}</p>
-	          </div>
-	        </div>
+        <details class="brainvault-strip import-options" data-testid="brainvault-create-details">
+          <summary data-testid="brainvault-create-toggle">
+            <span>BrainVault recovery</span>
+            <small>Seed sheet, safety notes, and import/recovery</small>
+          </summary>
+          <div class="brainvault-strip-panel">
+            <button type="button" class="strip-action" on:click={downloadBrainVaultSheet}>
+              Download seed sheet
+            </button>
+            <a class="strip-action" href="/docs-static/faq.md" target="_blank" rel="noreferrer">
+              Read safety notes
+            </a>
+            <button type="button" class="strip-action" on:click={() => inputMode = 'mnemonic'}>
+              Import / recover wallet
+            </button>
+          </div>
+        </details>
 
-	        <div class="quick-login-section">
-	          <div class="quick-login-header">Quick Login (Testnet)</div>
+        <div class="wallet-create-title">
+          <div>
+            <h2>{inputMode === 'mnemonic' ? 'Import XLN wallet' : 'Create XLN wallet'}</h2>
+            <p>{inputMode === 'mnemonic'
+              ? 'Recover from an existing mnemonic. New wallets start from the main creation form.'
+              : 'Enter a display name and secret. The wallet opens automatically when derivation finishes.'}</p>
+          </div>
+        </div>
+
+        <div class="quick-login-section">
+          <div class="quick-login-header">Quick Login (Testnet)</div>
           <div class="quick-login-grid">
             {#each DEMO_ACCOUNTS as account}
               <button
@@ -1158,25 +1176,6 @@
             {/each}
           </div>
         </div>
-
-	        <details class="brainvault-strip import-options">
-	          <summary>
-	            <span>BrainVault</span>
-	            <small>Download sheet, read safety notes, or open import/recovery</small>
-	          </summary>
-	          <div class="brainvault-strip-panel">
-	            <button type="button" class="strip-action" on:click={downloadBrainVaultSheet}>
-	              Download sheet
-	            </button>
-	            <a class="strip-action" href="/docs-static/faq.md" target="_blank" rel="noreferrer">
-	              Read notes
-	            </a>
-	            <button type="button" class="strip-action" on:click={() => inputMode = 'mnemonic'}>
-	              Import / recover
-	            </button>
-	          </div>
-	        </details>
-
 
         {#if inputMode === 'brainvault'}
         <!-- Name Input -->
@@ -3219,39 +3218,6 @@
     word-break: break-all;
   }
 
-  .xln-wallet-cta {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 16px;
-    margin-top: 20px;
-    padding: 16px;
-    border: 1px solid rgba(180, 140, 80, 0.2);
-    border-radius: 12px;
-    background: rgba(180, 140, 80, 0.06);
-  }
-
-  .xln-wallet-cta h3 {
-    margin: 0 0 6px;
-    font-size: 16px;
-    color: rgba(255, 255, 255, 0.94);
-  }
-
-  .xln-wallet-cta p {
-    margin: 0;
-    font-size: 13px;
-    line-height: 1.45;
-    color: rgba(255, 255, 255, 0.58);
-  }
-
-  .xln-wallet-cta .derive-btn.network-btn {
-    width: auto;
-    min-width: 170px;
-    margin: 0;
-    padding: 14px 18px;
-    font-size: 14px;
-  }
-
   .muted-tight {
     margin: 0;
     font-size: 12px;
@@ -3271,6 +3237,7 @@
 
   .context-label {
     flex: 1;
+    min-width: 0;
     text-align: left;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -3298,7 +3265,9 @@
     position: absolute;
     top: 100%;
     left: 0;
-    right: 0;
+    min-width: min(420px, calc(100vw - 24px));
+    width: max-content;
+    max-width: calc(100vw - 24px);
     margin-top: 4px;
     background: rgba(20, 20, 30, 0.98);
     border: 1px solid rgba(180, 140, 80, 0.2);
@@ -3307,11 +3276,12 @@
     z-index: 100;
     max-height: 340px;
     overflow-y: auto;
+    overflow-x: hidden;
     box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
   }
 
   .context-menu.cascading {
-    min-width: 260px;
+    min-width: min(420px, calc(100vw - 24px));
   }
 
   .menu-section-label {
@@ -3345,7 +3315,7 @@
   .menu-item {
     width: 100%;
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 10px;
     padding: 10px 12px;
     background: transparent;
@@ -3433,17 +3403,23 @@
   .menu-item-label {
     font-size: 13px;
     color: inherit;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
   }
 
   .menu-item-addr {
     font-family: 'SF Mono', 'Monaco', monospace;
     font-size: 10px;
     color: rgba(255, 255, 255, 0.4);
+    line-height: 1.25;
+    word-break: break-all;
   }
 
   .menu-item-meta {
     font-size: 11px;
     color: rgba(255, 255, 255, 0.4);
+    line-height: 1.25;
+    overflow-wrap: anywhere;
   }
 
   /* Wallet Tabs */
@@ -5163,282 +5139,6 @@
     font-style: normal;
   }
 
-  /* ═══════════════════════════════════════════════════════════════════════════
-     VAULT & SIGNER SELECTOR - MetaMask-style account management
-     ═══════════════════════════════════════════════════════════════════════════ */
-
-  .vault-signer-bar {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-    padding: 12px 16px;
-    background: rgba(255, 255, 255, 0.02);
-    border-bottom: 1px solid rgba(180, 140, 80, 0.1);
-    margin: -24px -32px 24px;
-  }
-
-  /* Vault Dropdown */
-  .vault-dropdown {
-    position: relative;
-    flex: 1;
-  }
-
-  .vault-trigger {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    padding: 10px 14px;
-    background: rgba(180, 140, 80, 0.08);
-    border: 1px solid rgba(180, 140, 80, 0.2);
-    border-radius: 10px;
-    color: rgba(255, 255, 255, 0.9);
-    font-size: 13px;
-    font-weight: 500;
-    cursor: pointer;
-    transition: all 0.2s ease;
-  }
-
-  .vault-trigger:hover {
-    background: rgba(180, 140, 80, 0.12);
-    border-color: rgba(180, 140, 80, 0.3);
-  }
-
-  .vault-trigger .vault-icon {
-    font-size: 16px;
-  }
-
-  .vault-trigger .vault-name {
-    flex: 1;
-    text-align: left;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .vault-trigger .chevron {
-    color: rgba(180, 140, 80, 0.6);
-    font-size: 10px;
-    transition: transform 0.2s ease;
-  }
-
-  .vault-dropdown.open .vault-trigger {
-    border-color: rgba(180, 140, 80, 0.5);
-    background: rgba(180, 140, 80, 0.15);
-  }
-
-  .vault-dropdown.open .vault-trigger .chevron {
-    transform: rotate(180deg);
-  }
-
-  .vault-menu {
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 0;
-    right: 0;
-    background: rgba(15, 12, 10, 0.98);
-    border: 1px solid rgba(180, 140, 80, 0.25);
-    border-radius: 12px;
-    padding: 8px;
-    z-index: 100;
-    backdrop-filter: blur(20px);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
-    max-height: 280px;
-    overflow-y: auto;
-  }
-
-  .vault-menu-header {
-    padding: 8px 10px 12px;
-    font-size: 10px;
-    font-weight: 600;
-    color: rgba(180, 140, 80, 0.6);
-    text-transform: uppercase;
-    letter-spacing: 0.1em;
-    border-bottom: 1px solid rgba(180, 140, 80, 0.1);
-    margin-bottom: 8px;
-  }
-
-  .vault-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    padding: 10px 12px;
-    background: transparent;
-    border: none;
-    border-radius: 8px;
-    color: rgba(255, 255, 255, 0.8);
-    font-size: 13px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    text-align: left;
-  }
-
-  .vault-item:hover {
-    background: rgba(180, 140, 80, 0.1);
-    color: rgba(255, 255, 255, 1);
-  }
-
-  .vault-item.active {
-    background: rgba(180, 140, 80, 0.15);
-    color: rgba(255, 200, 100, 1);
-  }
-
-  .vault-item.save-new {
-    border-top: 1px solid rgba(180, 140, 80, 0.1);
-    margin-top: 8px;
-    padding-top: 12px;
-    color: rgba(180, 140, 80, 0.8);
-  }
-
-  .vault-item.save-new:hover {
-    color: rgba(255, 200, 100, 1);
-  }
-
-  .vault-item-icon {
-    font-size: 14px;
-  }
-
-  /* Signer Dropdown */
-  .signer-dropdown {
-    position: relative;
-  }
-
-  .signer-trigger {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 10px 14px;
-    background: rgba(255, 255, 255, 0.04);
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 10px;
-    color: rgba(255, 255, 255, 0.9);
-    font-size: 13px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-  }
-
-  .signer-trigger:hover {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(255, 255, 255, 0.2);
-  }
-
-  .signer-trigger .signer-avatar {
-    width: 24px;
-    height: 24px;
-    border-radius: 6px;
-    border: 1px solid rgba(180, 140, 80, 0.3);
-  }
-
-  .signer-trigger .signer-info {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-  }
-
-  .signer-trigger .signer-name {
-    font-weight: 500;
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.9);
-  }
-
-  .signer-trigger .signer-address {
-    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
-    font-size: 10px;
-    color: rgba(180, 140, 80, 0.7);
-  }
-
-  .signer-dropdown.open .signer-trigger {
-    border-color: rgba(180, 140, 80, 0.4);
-    background: rgba(180, 140, 80, 0.1);
-  }
-
-  .signer-menu {
-    position: absolute;
-    top: calc(100% + 6px);
-    right: 0;
-    min-width: 220px;
-    background: rgba(15, 12, 10, 0.98);
-    border: 1px solid rgba(180, 140, 80, 0.25);
-    border-radius: 12px;
-    padding: 8px;
-    z-index: 100;
-    backdrop-filter: blur(20px);
-    box-shadow: 0 12px 40px rgba(0, 0, 0, 0.5);
-    max-height: 300px;
-    overflow-y: auto;
-  }
-
-  .signer-item {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    width: 100%;
-    padding: 10px 12px;
-    background: transparent;
-    border: none;
-    border-radius: 8px;
-    color: rgba(255, 255, 255, 0.8);
-    font-size: 12px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    text-align: left;
-  }
-
-  .signer-item:hover {
-    background: rgba(180, 140, 80, 0.1);
-  }
-
-  .signer-item.active {
-    background: rgba(180, 140, 80, 0.15);
-    color: rgba(255, 200, 100, 1);
-  }
-
-  .signer-item .signer-avatar {
-    width: 28px;
-    height: 28px;
-    border-radius: 6px;
-    border: 1px solid rgba(180, 140, 80, 0.2);
-  }
-
-  .signer-item .signer-details {
-    flex: 1;
-  }
-
-  .signer-item .signer-name {
-    font-weight: 500;
-    color: inherit;
-  }
-
-  .signer-item .signer-address {
-    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
-    font-size: 10px;
-    color: rgba(180, 140, 80, 0.6);
-    margin-top: 2px;
-  }
-
-  .signer-item.add-new {
-    border-top: 1px solid rgba(180, 140, 80, 0.1);
-    margin-top: 8px;
-    padding-top: 12px;
-    color: rgba(180, 140, 80, 0.8);
-    justify-content: center;
-  }
-
-  .signer-item.add-new:hover {
-    color: rgba(255, 200, 100, 1);
-  }
-
-  /* Context bar networth display */
-  .context-networth {
-    font-family: 'SF Mono', 'Monaco', 'Consolas', monospace;
-    font-size: 11px;
-    font-weight: 600;
-    color: rgba(100, 200, 100, 0.9);
-    margin-left: auto;
-    padding-left: 8px;
-  }
-
   /* Save Vault Modal */
   .modal-overlay {
     position: fixed;
@@ -5550,19 +5250,6 @@
       gap: 14px;
     }
 
-    .seed-input-wrapper {
-      gap: 16px;
-    }
-
-    .seed-input {
-      font-size: 20px;
-      padding: 20px 28px;
-    }
-
-    .vault-signer-bar {
-      padding: 16px 24px;
-    }
-
     .derive-btn {
       font-size: 18px;
       padding: 20px 48px;
@@ -5612,21 +5299,6 @@
       font-size: 32px;
     }
 
-    .vault-signer-bar {
-      flex-direction: column;
-      gap: 8px;
-      margin: -20px -20px 20px;
-    }
-
-    .vault-dropdown {
-      width: 100%;
-    }
-
-    .signer-menu {
-      left: 0;
-      right: 0;
-    }
-
     .eoa-row {
       grid-template-columns: 1fr;
       align-items: stretch;
@@ -5636,14 +5308,12 @@
       width: 100%;
     }
 
-    .wallet-ready-head,
-    .xln-wallet-cta {
+    .wallet-ready-head {
       flex-direction: column;
       align-items: stretch;
     }
 
-    .wallet-ready-head .derive-btn.network-btn,
-    .xln-wallet-cta .derive-btn.network-btn {
+    .wallet-ready-head .derive-btn.network-btn {
       width: 100%;
     }
 

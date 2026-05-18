@@ -67,11 +67,29 @@ export async function handleSwapResolve(
     return { success: false, error: `Cross-jurisdiction offers must use cross_swap_fill_ack/requestCrossJurisdictionClear`, events };
   }
 
-  const canonicalGiveAmount = restingGiveAmount ?? offer.giveAmount;
-  const canonicalWantAmount = restingWantAmount ?? offer.wantAmount;
-  const canonicalQuantizedGive = restingQuantizedGive ?? offer.quantizedGive ?? canonicalGiveAmount;
-  const canonicalQuantizedWant = restingQuantizedWant ?? offer.quantizedWant ?? canonicalWantAmount;
-  const canonicalPriceTicks = restingPriceTicks ?? offer.priceTicks;
+  const canonicalGiveAmount = offer.giveAmount;
+  const canonicalWantAmount = offer.wantAmount;
+  const canonicalQuantizedGive = offer.quantizedGive ?? canonicalGiveAmount;
+  const canonicalQuantizedWant = offer.quantizedWant ?? canonicalWantAmount;
+  const canonicalPriceTicks = offer.priceTicks;
+
+  // The maker's resting terms are consensus state. Older orderbook plumbing may
+  // still attach resting* fields for diagnostics, but account settlement must
+  // never trust caller-supplied limits. If a caller sends them, they are allowed
+  // only as an exact assertion against the live offer.
+  if (
+    (restingGiveAmount !== undefined && restingGiveAmount !== canonicalGiveAmount) ||
+    (restingWantAmount !== undefined && restingWantAmount !== canonicalWantAmount) ||
+    (restingQuantizedGive !== undefined && restingQuantizedGive !== canonicalQuantizedGive) ||
+    (restingQuantizedWant !== undefined && restingQuantizedWant !== canonicalQuantizedWant) ||
+    (restingPriceTicks !== undefined && canonicalPriceTicks !== undefined && restingPriceTicks !== canonicalPriceTicks)
+  ) {
+    return {
+      success: false,
+      error: `Resting swap terms mismatch live offer`,
+      events,
+    };
+  }
 
   if (canonicalGiveAmount <= 0n || canonicalWantAmount <= 0n) {
     return { success: false, error: `Canonical resting offer amounts must be positive`, events };

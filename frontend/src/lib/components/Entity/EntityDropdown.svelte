@@ -97,8 +97,8 @@
       for (const replica of entityReplicas) {
         const entityId = replica.entityId;
         const name = getEntityName(replica);
-        const shortId = entityId;
-        const displayName = name || `Entity ${entityId}`;
+        const shortId = shortEntity(entityId);
+        const displayName = name || `Entity ${shortId}`;
 
         // Filter by search - match against entityId, signerId, or shortId
         if (search &&
@@ -141,6 +141,12 @@
     return name || '';
   }
 
+  function shortEntity(id: string): string {
+    const raw = String(id || '').trim();
+    if (raw.length <= 14) return raw;
+    return `${raw.slice(0, 6)}...${raw.slice(-4)}`;
+  }
+
   // Current selection display
   $: displayText = getDisplayText(tab, activeReplicas, activeXlnFunctions);
 
@@ -157,9 +163,9 @@
 
     if (replica) {
       const name = getEntityName(replica);
-      return name ? `${name} (${entityNum})` : `Entity ${entityNum}`;
+      return name ? `${name} · ${shortEntity(entityNum)}` : `Entity ${shortEntity(entityNum)}`;
     }
-    return `Entity ${entityNum}`;
+    return `Entity ${shortEntity(entityNum)}`;
   }
 
   function selectSigner(signerId: string) {
@@ -279,7 +285,10 @@
                     </span>
                   {/if}
                 </span>
-                <span class="signer-addr">{entity.name}</span>
+                <span class="signer-meta">
+                  <span class="signer-name">{entity.name}</span>
+                  <span class="signer-id">{entity.entityId}</span>
+                </span>
               </button>
             {/each}
           </div>
@@ -518,7 +527,7 @@
 
   .signer-item {
     display: flex;
-    align-items: center;
+    align-items: flex-start;
     gap: 6px;
     width: 100%;
     padding: 6px 12px 6px 20px;
@@ -526,7 +535,7 @@
     border: none;
     color: #ccc;
     font-size: 12px;
-    font-family: 'SF Mono', Consolas, monospace;
+    font-family: inherit;
     cursor: pointer;
     transition: background 0.1s;
     text-align: left;
@@ -540,10 +549,31 @@
     color: #555;
     font-size: 11px;
     width: 20px;
+    flex-shrink: 0;
+    padding-top: 3px;
   }
 
-  .signer-addr {
+  .signer-meta {
     flex: 1;
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+  }
+
+  .signer-name {
+    color: #e5e7eb;
+    font-weight: 600;
+    line-height: 1.25;
+    overflow-wrap: anywhere;
+  }
+
+  .signer-id {
+    color: #7a7f8c;
+    font-family: 'SF Mono', Consolas, monospace;
+    font-size: 10px;
+    line-height: 1.25;
+    word-break: break-all;
   }
 
   .menu-divider {

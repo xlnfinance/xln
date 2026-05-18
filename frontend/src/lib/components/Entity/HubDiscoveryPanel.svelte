@@ -3,8 +3,8 @@
   Compact sortable list with expandable details.
 -->
 <script lang="ts">
-  import { onMount } from 'svelte';
   import type { Env } from '@xln/runtime/xln-api';
+  import { getJurisdictionStackId } from '@xln/runtime/xln-api';
   import {
     xlnFunctions,
     enqueueEntityInputs,
@@ -60,17 +60,15 @@
     depositoryAddress?: unknown;
   };
 
-  const normalizeJurisdiction = (value: unknown): string => String(value || '').trim().toLowerCase();
   const jurisdictionKey = (value: unknown): string => {
     if (value && typeof value === 'object') {
       const jurisdiction = value as JurisdictionLike;
-      const chainId = String(jurisdiction.chainId ?? '').trim();
+      const chainId = Number(jurisdiction.chainId);
       const depository = String(jurisdiction.depositoryAddress ?? '').trim().toLowerCase();
-      if (chainId && depository) return `dep:${chainId}:${depository}`;
-      if (chainId) return '';
-      return normalizeJurisdiction(jurisdiction.name);
+      if (!Number.isFinite(chainId) || chainId <= 0 || !depository) return '';
+      return getJurisdictionStackId({ chainId, depositoryAddress: depository });
     }
-    return normalizeJurisdiction(value);
+    return '';
   };
 
   function getEntityJurisdictionKey(currentEnv: Env | undefined, targetEntityId: string): string {
@@ -83,6 +81,13 @@
         || jurisdictionKey(replica?.position?.jurisdiction);
     }
     return '';
+  }
+
+  function getDiscoveryKey(currentEnv: Env | undefined, targetEntityId: string): string {
+    const normalizedEntityId = normalizeEntityId(targetEntityId);
+    const jurisdiction = getEntityJurisdictionKey(currentEnv, targetEntityId);
+    if (!normalizedEntityId || !jurisdiction) return '';
+    return `${String(currentEnv?.runtimeId || '')}:${normalizedEntityId}:${jurisdiction}`;
   }
 
   type PublicHubResponse = {
@@ -283,6 +288,12 @@
     try {
       const currentEnv = env;
       if (!currentEnv) throw new Error('Environment not ready');
+      const entityJurisdiction = getEntityJurisdictionKey(currentEnv, entityId);
+      const hubJurisdiction = jurisdictionKey(hub.metadata?.jurisdiction);
+      if (!entityJurisdiction) throw new Error('Entity jurisdiction is still loading');
+      if (!hubJurisdiction || hubJurisdiction !== entityJurisdiction) {
+        throw new Error('Hub belongs to a different or unknown jurisdiction');
+      }
 
       // Find signer for our entity
       const signerId = requireSignerIdForEntity(currentEnv, entityId, 'hub-connect');
@@ -322,20 +333,20 @@
 
   // Track if we've already discovered (prevent repeated auto-fetch loops)
   let hasDiscoveredOnce = false;
+  let activeDiscoveryKey = '';
 
-  // Auto-load once on mount. No background retries; user can press Refresh.
-  onMount(() => {
-    if (env) {
-      hasDiscoveredOnce = true;
-      (async () => {
-        await discoverHubs();
-      })();
-    }
-    return () => {};
-  });
+  $: currentDiscoveryKey = getDiscoveryKey(env, entityId);
+  $: if (currentDiscoveryKey !== activeDiscoveryKey) {
+    activeDiscoveryKey = currentDiscoveryKey;
+    hubs = [];
+    error = '';
+    expandedHub = null;
+    connectingHubIds = new Set();
+    hasDiscoveredOnce = false;
+  }
 
   // Also refresh when env becomes available (only once)
-  $: if (env && hubs.length === 0 && !loading && !hasDiscoveredOnce) {
+  $: if (env && currentDiscoveryKey && hubs.length === 0 && !loading && !hasDiscoveredOnce) {
     hasDiscoveredOnce = true;
     (async () => {
       await discoverHubs();

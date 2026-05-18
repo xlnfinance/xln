@@ -209,6 +209,7 @@ export async function processAccountTx(
       const resolveResult = await handleHtlcResolve(
         accountMachine,
         accountTx as Extract<AccountTx, { type: 'htlc_resolve' }>,
+        byLeft,
         currentHeight,
         currentTimestamp,
       );

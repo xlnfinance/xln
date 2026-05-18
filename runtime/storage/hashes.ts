@@ -2,10 +2,8 @@ import { ethers } from 'ethers';
 import { compareStableText, serializeTaggedJson } from '../serialization-utils';
 import type { Env } from '../types';
 import {
-  computeCanonicalEntityHash,
   computeCanonicalEntityHashesFromEnv,
   computeCanonicalRuntimeStateHash,
-  type CanonicalFrameEntityHash,
 } from './canonical-hash';
 import { encodeBuffer } from './codec';
 import {
@@ -41,7 +39,7 @@ import {
   type RadixMerkleRootKind,
   EMPTY_RADIX_MERKLE_ROOT,
 } from './merkle';
-import { buildReplicaLookup, findReplicaForEntity } from './replicas';
+import { buildReplicaLookup } from './replicas';
 import type {
   RuntimeDbLike,
   StorageDoc,
@@ -180,35 +178,10 @@ export const prepareStorageCanonicalStateHashes = (
   previousFrame: StorageFrameRecord | null,
   replicaLookup = buildReplicaLookup(env),
 ): { canonicalStateHash: string; canonicalEntityHashes: StorageFrameEntityHash[] } => {
-  const liveEntityIds = new Set(Array.from(env.eReplicas.values()).map((replica) => normalizeEntityId(replica.entityId)));
-  const previousHashes = Array.isArray(previousFrame?.canonicalEntityHashes)
-    ? normalizeFrameEntityHashes(previousFrame.canonicalEntityHashes)
-    : [];
-  const canonicalHashByEntity = new Map<string, CanonicalFrameEntityHash>();
-
-  if (previousHashes.length > 0) {
-    for (const entry of previousHashes) {
-      if (liveEntityIds.has(entry.entityId)) canonicalHashByEntity.set(entry.entityId, entry);
-    }
-  } else {
-    // This is the bootstrap frame path. After the first persisted frame, callers must
-    // pass previous canonical hashes so canonical hashing stays touched-entity scoped.
-    for (const entry of computeCanonicalEntityHashesFromEnv(env)) {
-      canonicalHashByEntity.set(entry.entityId, entry);
-    }
-  }
-
-  for (const entityId of touchedEntities) {
-    const normalized = normalizeEntityId(entityId);
-    const replica = findReplicaForEntity(env, normalized, replicaLookup)?.replica;
-    if (replica) {
-      canonicalHashByEntity.set(normalized, computeCanonicalEntityHash(replica));
-    } else {
-      canonicalHashByEntity.delete(normalized);
-    }
-  }
-
-  const canonicalEntityHashes = Array.from(canonicalHashByEntity.values())
+  void touchedEntities;
+  void previousFrame;
+  void replicaLookup;
+  const canonicalEntityHashes = computeCanonicalEntityHashesFromEnv(env)
     .sort((left, right) => compareStableText(left.entityId, right.entityId));
   return {
     canonicalEntityHashes,

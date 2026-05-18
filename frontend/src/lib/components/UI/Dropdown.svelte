@@ -51,7 +51,9 @@
   function updatePosition() {
     if (!triggerEl) return;
     const rect = triggerEl.getBoundingClientRect();
-    const cap = maxWidth > 0 ? Math.max(minWidth, maxWidth) : minWidth;
+    const viewportWidth = typeof window !== 'undefined' ? Math.max(0, window.innerWidth - 16) : maxWidth;
+    const configuredCap = maxWidth > 0 ? Math.max(minWidth, maxWidth) : viewportWidth;
+    const cap = Math.max(minWidth, Math.min(configuredCap, viewportWidth));
     width = Math.min(Math.max(rect.width, minWidth), cap);
     if (local) {
       top = rect.height + 4;
@@ -144,8 +146,8 @@
       class:local-menu={local}
       style="
         {local ? '' : `top: ${top}px; left: ${left}px;`}
-        min-width: {width}px;
-        max-width: {maxWidth}px;
+        width: {width}px;
+        max-width: calc(100vw - 16px);
       "
       role="menu"
     >
@@ -158,6 +160,7 @@
   .dropdown-wrapper {
     display: inline-block;
     width: 100%;
+    min-width: 0;
     position: relative;
   }
 
@@ -188,6 +191,11 @@
     border-color: var(--dropdown-border-hover, rgba(255, 255, 255, 0.2));
   }
 
+  .dropdown-trigger :global(.trigger-content),
+  .dropdown-trigger :global(.trigger-text) {
+    min-width: 0;
+  }
+
   .dropdown-menu {
     position: fixed;
     z-index: 9999;
@@ -196,6 +204,8 @@
     border-radius: var(--dropdown-radius, 8px);
     box-shadow: var(--shadow-lg, 0 8px 32px rgba(0, 0, 0, 0.4));
     max-height: 60vh;
+    box-sizing: border-box;
+    overflow-x: hidden;
     overflow-y: auto;
     animation: dropdown-fade 0.05s ease-out;
     backdrop-filter: blur(var(--blur-sm, 16px));
