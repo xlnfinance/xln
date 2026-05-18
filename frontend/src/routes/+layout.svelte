@@ -7,6 +7,7 @@
 	import { installRangeSliderProgress } from '$lib/utils/rangeSliderProgress';
 	import '$lib/styles/apple-glass.css';
 	import '$lib/styles/checkbox-controls.css';
+	import '$lib/styles/form-controls.css';
 	import '$lib/styles/range-sliders.css';
 	let { children } = $props();
 

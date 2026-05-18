@@ -58,6 +58,9 @@
   $: currentEntity = resolveCurrentEntity();
   $: currentAvatar = currentEntity?.avatar || currentGroup?.avatar || '';
   $: currentJurisdictionBadge = currentEntity?.jurisdictionBadge || null;
+  $: currentRuntimeId = currentGroup?.runtimeId || $activeRuntime?.id || '';
+  $: currentEntityId = currentEntity?.entityId || tab.entityId || currentGroup?.selfEntity?.entityId || '';
+  $: currentSignerId = currentEntity?.signerId || tab.signerId || currentGroup?.signerId || '';
   $: currentTitle = resolveCurrentTitle();
   $: currentSubtitle = currentEntity?.entityId
     ? formatEntityMeta(currentEntity.entityId)
@@ -261,14 +264,14 @@
 </script>
 
 <div class="context-switcher">
-<Dropdown bind:open minWidth={300} maxWidth={380} local={true}>
+<Dropdown bind:open minWidth={300} maxWidth={620} local={true}>
   <span
     slot="trigger"
     class="pill-trigger"
     data-testid="context-current"
-    data-runtime-id={currentGroup?.runtimeId || $activeRuntime?.id || ''}
-    data-entity-id={tab.entityId || ''}
-    data-signer-id={tab.signerId || ''}
+    data-runtime-id={currentRuntimeId}
+    data-entity-id={currentEntityId}
+    data-signer-id={currentSignerId}
   >
     <span class="pill-avatar-wrap">
       {#if currentAvatar}
@@ -413,7 +416,7 @@
 
   .context-switcher :global(.dropdown-menu) {
     width: auto;
-    max-width: min(380px, calc(100vw - 24px)) !important;
+    max-width: min(620px, calc(100vw - 24px)) !important;
     box-shadow: 0 18px 40px rgba(0, 0, 0, 0.38);
   }
 

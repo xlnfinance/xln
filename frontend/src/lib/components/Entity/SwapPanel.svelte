@@ -2439,7 +2439,7 @@
               on:change={handleSourceEntityChange}
             >
               {#each sourceEntityOptions as option}
-                <option value={option.value}>{option.jurisdiction}</option>
+                <option value={option.value}>{option.label}</option>
               {/each}
             </select>
           </div>
@@ -2503,7 +2503,7 @@
               on:change={() => { submitError = ''; }}
             >
               {#each routeOptions as option}
-                <option value={option.value} disabled={option.disabled}>{option.targetJurisdiction}</option>
+                <option value={option.value} disabled={option.disabled}>{option.label}</option>
               {/each}
             </select>
           </div>
@@ -3013,6 +3013,8 @@
   }
 
   .leg-header {
+    display: grid;
+    grid-template-columns: auto minmax(220px, 1fr);
     justify-content: space-between;
   }
 
@@ -3035,20 +3037,21 @@
     font-size: 12px;
     font-weight: 700;
     color-scheme: dark;
-    text-overflow: clip;
+    text-overflow: ellipsis;
     white-space: nowrap;
   }
 
   .chain-select {
-    width: min(340px, 72%);
-    max-width: 340px;
-    height: 30px;
+    width: 100%;
+    max-width: none;
+    min-height: 38px;
     padding: 0 34px 0 10px;
   }
 
   .token-select {
-    width: 120px;
-    height: 40px;
+    width: 144px;
+    min-width: 120px;
+    min-height: 40px;
     padding: 0 34px 0 10px;
     flex-shrink: 0;
   }
@@ -3156,8 +3159,10 @@
   }
 
   .venue-row select {
-    width: min(360px, 76%);
-    height: 30px;
+    flex: 1 1 220px;
+    width: auto;
+    max-width: none;
+    min-height: 38px;
     padding: 0 34px 0 10px;
   }
 
@@ -3222,7 +3227,7 @@
 
   .route-select-row {
     display: grid;
-    grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
+    grid-template-columns: minmax(120px, auto) minmax(220px, 1fr);
     align-items: center;
     gap: 8px;
     padding: 0 10px;
@@ -3241,13 +3246,13 @@
 
   .route-select {
     width: 100%;
-    height: 100%;
+    min-height: 38px;
     min-width: 0;
     padding: 0 34px 0 12px;
     color: #d1d5db;
-    background: transparent;
-    border: 0;
-    border-radius: 0;
+    background: #0c0d11;
+    border: 1px solid #232631;
+    border-radius: 7px;
     font-size: 12px;
     box-sizing: border-box;
   }
@@ -3892,6 +3897,29 @@
 
     .section-orders {
       margin-top: 6px;
+    }
+  }
+
+  @media (max-width: 720px) {
+    .leg-header,
+    .route-select-row {
+      grid-template-columns: 1fr;
+      align-items: stretch;
+    }
+
+    .chain-select,
+    .route-select,
+    .venue-row select {
+      width: 100%;
+    }
+
+    .leg-main {
+      flex-wrap: wrap;
+    }
+
+    .token-select {
+      flex: 1 1 120px;
+      width: auto;
     }
   }
 
