@@ -501,26 +501,6 @@
     background: rgba(0, 122, 255, 0.25);
   }
 
-  .settings-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    background: rgba(128, 128, 128, 0.15);
-    border: none;
-    color: rgba(200, 200, 200, 1);
-    width: 32px;
-    height: 32px;
-    border-radius: 6px;
-    cursor: pointer;
-    transition: all 0.15s;
-    flex-shrink: 0;
-    font-size: 14px;
-  }
-
-  .settings-btn:hover {
-    background: rgba(128, 128, 128, 0.25);
-  }
-
   /* Scrubber Container */
   .scrubber-container {
     flex: 1;
@@ -646,11 +626,6 @@
     cursor: not-allowed;
   }
 
-  /* Dropdown */
-  .dropdown {
-    position: relative;
-  }
-
   .menu {
     position: absolute;
     bottom: 100%;
@@ -665,10 +640,6 @@
     min-width: 100px;
     box-shadow: var(--shadow-lg, 0 4px 16px rgba(0, 0, 0, 0.5));
     z-index: 1000;
-  }
-
-  .menu.wide {
-    min-width: 160px;
   }
 
   .menu-section {
@@ -714,34 +685,6 @@
   .menu button:disabled {
     opacity: 0.4;
     cursor: not-allowed;
-  }
-
-  /* Settings Button */
-  .settings-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 4px;
-    background: rgba(255, 255, 255, 0.05);
-    border: none;
-    color: rgba(255, 255, 255, 0.7);
-    padding: 0 10px;
-    height: 28px;
-    border-radius: 4px;
-    cursor: pointer;
-    transition: all 0.15s;
-    flex-shrink: 0;
-  }
-
-  .settings-btn:hover {
-    background: rgba(255, 255, 255, 0.1);
-    color: white;
-  }
-
-  .speed-value {
-    font-family: 'SF Mono', monospace;
-    font-size: 0.6875rem;
-    font-weight: 500;
   }
 
   /* Mega Menu */
