@@ -63,6 +63,14 @@ async function waitForBrainvaultCreateForm(page: Page): Promise<void> {
     page.getByTestId('brainvault-create-details'),
     'BrainVault recovery controls belong to the post-create setup screen, not the initial wallet form',
   ).toHaveCount(0);
+  await expect(
+    page.getByText('BrainVault recovery'),
+    'BrainVault recovery belongs to the next screen after wallet creation',
+  ).toHaveCount(0);
+  await expect(
+    page.getByRole('button', { name: /Download sheet/i }),
+    'Seed sheet download belongs to the post-create recovery panel',
+  ).toHaveCount(0);
 }
 
 async function expectPostCreateBrainvaultRecovery(page: Page): Promise<void> {

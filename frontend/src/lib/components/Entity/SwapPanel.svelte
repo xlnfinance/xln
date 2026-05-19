@@ -1,6 +1,6 @@
   <script lang="ts">
     import type { AccountMachine, EntityReplica, Tab } from '$lib/types/ui';
-  import type { CrossJurisdictionSwapRoute, Delta, EntityState, Env, EnvSnapshot, RoutedEntityInput } from '@xln/runtime/xln-api';
+  import type { BookState, CrossJurisdictionSwapRoute, Delta, EntityState, Env, EnvSnapshot, RoutedEntityInput } from '@xln/runtime/xln-api';
   import {
     deriveCanonicalCrossJurisdictionBookOwnerForLegs,
     deriveCanonicalCrossJurisdictionVenueIdForLegs,
@@ -281,6 +281,7 @@
     return resolved || formatEntityId(accountIdValue);
   }
   $: selectedHubOptions = hubAccountIds.map((id) => ({ value: id, label: accountLabel(id) }));
+  $: selectedHubOption = selectedHubOptions.find((hub) => hub.value === createOrderAccountId) || null;
   $: crossTargetOptions = buildCrossTargetOptions(activeFrame, sourceEntityIdValue, currentReplica);
   $: routeOptions = buildRouteOptions(sourceEntityIdValue, currentReplica, activeOrderAccountId, crossTargetOptions);
   $: if (!routeOptions.some((option) => option.value === selectedRouteValue)) {
@@ -300,6 +301,9 @@
   $: sourceChainLabel = selectedSourceEntity?.jurisdiction || sourceJurisdictionLabel;
   $: selectedRouteOption = routeOptions.find((option) => option.value === selectedRouteValue) || routeOptions[0] || null;
   $: routeVenueLabel = activeOrderAccountId ? accountLabel(activeOrderAccountId) : 'Select venue';
+  $: selectedSourceEntityLabel = selectedSourceEntity?.label || sourceChainLabel || '';
+  $: selectedRouteLabel = selectedRouteOption?.label || '';
+  $: selectedHubLabel = selectedHubOption?.label || routeVenueLabel || '';
   $: targetAccountReady = swapRouteMode !== 'cross' || Boolean(selectedCrossTarget && hasReplicaAccount(
     findReplicaByEntityId(selectedCrossTarget.targetEntityId),
     selectedCrossTarget.targetHubEntityId,
@@ -1071,7 +1075,7 @@
     return readCurrentHubBestPriceTicks(bookSide, activeOrderAccountId);
   }
 
-  function readCurrentHubPairBook(hubEntityId: string): any | null {
+  function readCurrentHubPairBook(hubEntityId: string): BookState | null {
     if (!(activeFrame?.eReplicas instanceof Map) || !hubEntityId) return null;
     const normalizedHubId = String(hubEntityId).trim().toLowerCase();
     if (!normalizedHubId) return null;
@@ -2431,10 +2435,12 @@
               class="chain-select"
               value={selectedSourceEntityValue}
               data-testid="swap-from-chain-select"
+              title={selectedSourceEntityLabel}
+              aria-label="Swap from account and network"
               on:change={handleSourceEntityChange}
             >
               {#each sourceEntityOptions as option}
-                <option value={option.value}>{option.label}</option>
+                <option value={option.value} title={option.label}>{option.label}</option>
               {/each}
             </select>
           </div>
@@ -2495,10 +2501,11 @@
               bind:value={selectedRouteValue}
               data-testid="swap-route-select"
               aria-label="Swap to network"
+              title={selectedRouteLabel}
               on:change={() => { submitError = ''; }}
             >
               {#each routeOptions as option}
-                <option value={option.value} disabled={option.disabled}>{option.label}</option>
+                <option value={option.value} disabled={option.disabled} title={option.label}>{option.label}</option>
               {/each}
             </select>
           </div>
@@ -2545,10 +2552,12 @@
         <select
           value={createOrderAccountId}
           data-testid="swap-account-select"
+          title={selectedHubLabel}
+          aria-label="Swap venue"
           on:change={(event) => handleSelectedHubChange((event.currentTarget as HTMLSelectElement).value)}
         >
           {#each selectedHubOptions as hub (hub.value)}
-            <option value={hub.value}>{hub.label}</option>
+            <option value={hub.value} title={hub.label}>{hub.label}</option>
           {/each}
         </select>
       </div>
@@ -2579,7 +2588,7 @@
       </div>
 
       <div class="route-builder" data-testid="swap-route-picker">
-        <button type="button" class="route-summary" on:click={() => routeDetailsOpen = !routeDetailsOpen}>
+        <button type="button" class="route-summary" title={`${selectedRouteLabel} · ${routeVenueLabel}`} on:click={() => routeDetailsOpen = !routeDetailsOpen}>
           <span>Best route</span>
           <strong>{selectedRouteOption?.mode === 'cross' ? 'XLN cross-j' : 'XLN same-j'}</strong>
           <em>{routeVenueLabel}</em>
@@ -2608,7 +2617,7 @@
         {#if swapRouteMode === 'cross'}
           <label class="route-select-row" data-testid="swap-cross-improvement-mode">
             <span>Price improvement</span>
-            <select class="route-select" bind:value={crossPriceImprovementMode}>
+            <select class="route-select" bind:value={crossPriceImprovementMode} title="Price improvement">
               <option value="source_savings">Spend less source</option>
               <option value="target_bonus">Receive more target</option>
             </select>
@@ -3009,10 +3018,9 @@
 
   .leg-header {
     display: grid;
-    grid-template-columns: auto minmax(280px, 1fr);
-    gap: 12px;
-    align-items: center;
-    justify-content: space-between;
+    grid-template-columns: minmax(0, 1fr);
+    gap: 6px;
+    align-items: stretch;
   }
 
   .leg-header span,
@@ -3021,6 +3029,7 @@
     font-size: 11px;
     font-weight: 700;
     text-transform: uppercase;
+    line-height: 1.2;
   }
 
   .chain-select,
@@ -3037,13 +3046,14 @@
     line-height: 1.25;
     text-overflow: ellipsis;
     white-space: nowrap;
+    box-sizing: border-box;
   }
 
   .chain-select {
     width: 100%;
     max-width: none;
-    min-width: 260px;
-    min-height: 38px;
+    min-width: 0;
+    min-height: 42px;
     padding: 0 34px 0 10px;
   }
 
@@ -3154,15 +3164,16 @@
   }
 
   .venue-row {
-    justify-content: space-between;
+    display: grid;
+    grid-template-columns: minmax(80px, auto) minmax(0, 1fr);
+    justify-content: stretch;
   }
 
   .venue-row select {
-    flex: 1 1 220px;
-    width: auto;
+    width: 100%;
     max-width: none;
-    min-width: 260px;
-    min-height: 38px;
+    min-width: 0;
+    min-height: 42px;
     padding: 0 34px 0 10px;
   }
 
@@ -3227,7 +3238,7 @@
 
   .route-select-row {
     display: grid;
-    grid-template-columns: minmax(120px, auto) minmax(220px, 1fr);
+    grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
     align-items: center;
     gap: 8px;
     padding: 0 10px;
@@ -3247,7 +3258,7 @@
   .route-select {
     width: 100%;
     min-height: 38px;
-    min-width: 220px;
+    min-width: 0;
     padding: 0 34px 0 12px;
     color: #d1d5db;
     background: #0c0d11;
@@ -3256,6 +3267,14 @@
     font-size: 12px;
     box-sizing: border-box;
     color-scheme: dark;
+  }
+
+  .chain-select option,
+  .token-select option,
+  .venue-row select option,
+  .route-select option {
+    background: #0f1117;
+    color: #f3f4f6;
   }
 
   .route-flow {

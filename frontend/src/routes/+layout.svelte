@@ -179,6 +179,24 @@
 		font-size: calc(13px * var(--ui-font-scale, 1)) !important;
 	}
 
+	:global(body.xln-user-mode select) {
+		max-width: 100% !important;
+		min-width: 0;
+		min-height: calc(var(--ui-control-height, 44px) - 2px);
+		box-sizing: border-box;
+		padding-inline: 12px 36px !important;
+		color: var(--theme-text-primary, #f3f4f6) !important;
+		background-color: var(--theme-input-bg, #09090b) !important;
+		border-color: var(--theme-input-border, rgba(255, 255, 255, 0.12)) !important;
+		line-height: 1.25 !important;
+		color-scheme: dark;
+	}
+
+	:global(body.xln-user-mode select option) {
+		background: var(--theme-input-bg, #09090b);
+		color: var(--theme-text-primary, #f3f4f6);
+	}
+
 	:global(html[data-ui-tabs='minimal'] body.xln-user-mode .account-workspace-tabs),
 	:global(html[data-ui-tabs='minimal'] body.xln-user-mode .configure-tabs),
 	:global(html[data-ui-tabs='minimal'] body.xln-user-mode .settings-tabs),
