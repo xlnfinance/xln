@@ -39,7 +39,6 @@ import {
 } from './wal/snapshot';
 import { computePersistedEnvStateHash } from './wal/hash';
 import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
-import { isLeftEntity } from './entity-id-utils';
 import type { JAdapter } from './jadapter';
 import {
   createLazyEntity,
@@ -162,6 +161,7 @@ import {
 } from './cross-jurisdiction-boundary';
 import { normalizeEntitySwapTradingPairs } from './runtime-swap-pairs';
 import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
+import { calculateSolvency, verifySolvency } from './solvency';
 import {
   formatTokenAmount,
   formatTokenAmount as formatTokenAmountEthers,
@@ -3474,63 +3474,6 @@ const getSnapshot = (env: Env, index: number) => {
   return index >= 0 && index < history.length ? history[index] : null;
 };
 const getCurrentHistoryIndex = (env: Env) => (env.history || []).length - 1;
-
-// === SYSTEM SOLVENCY CHECK ===
-// Total tokens in system: reserves + collateral must equal minted supply
-interface Solvency {
-  reserves: bigint;
-  collateral: bigint;
-  total: bigint;
-  byToken: Map<number, { reserves: bigint; collateral: bigint; total: bigint }>;
-}
-
-const calculateSolvency = (env: Env, snapshot?: Env): Solvency => {
-  const targetEnv = snapshot || env;
-  const byToken = new Map<number, { reserves: bigint; collateral: bigint; total: bigint }>();
-
-  let reserves = 0n;
-  let collateral = 0n;
-
-  for (const [_replicaKey, replica] of targetEnv.eReplicas) {
-    // Sum reserves
-    for (const [tokenId, amount] of replica.state.reserves) {
-      reserves += amount;
-      const existing = byToken.get(tokenId) || { reserves: 0n, collateral: 0n, total: 0n };
-      existing.reserves += amount;
-      existing.total = existing.reserves + existing.collateral;
-      byToken.set(tokenId, existing);
-    }
-
-    // Sum collateral (left entity only to avoid double-counting)
-    for (const [counterpartyId, account] of replica.state.accounts) {
-      if (isLeftEntity(replica.state.entityId, counterpartyId)) {
-        for (const [tokenId, delta] of account.deltas) {
-          collateral += delta.collateral;
-          const existing = byToken.get(tokenId) || { reserves: 0n, collateral: 0n, total: 0n };
-          existing.collateral += delta.collateral;
-          existing.total = existing.reserves + existing.collateral;
-          byToken.set(tokenId, existing);
-        }
-      }
-    }
-  }
-
-  return { reserves, collateral, total: reserves + collateral, byToken };
-};
-
-const verifySolvency = (env: Env, expected?: bigint, label?: string): boolean => {
-  const s = calculateSolvency(env);
-  const prefix = label ? `[${label}] ` : '';
-
-  if (expected !== undefined && s.total !== expected) {
-    console.error(`❌ ${prefix}SOLVENCY VIOLATION: Expected ${expected}, got ${s.total}`);
-    console.error(`   Reserves: ${s.reserves}, Collateral: ${s.collateral}`);
-    throw new Error(`Solvency check failed: ${s.total} !== ${expected}`);
-  }
-
-  console.log(`✅ ${prefix}Solvency: ${s.total} (R:${s.reserves} + C:${s.collateral})`);
-  return true;
-};
 
 // Clear database for a specific runtime and return a fresh env
 const clearDatabaseAndHistory = async (env: Env): Promise<Env> => {
