@@ -1761,9 +1761,6 @@
   const OFFCHAIN_FAUCET_TIMEOUT_MS = 15000;
   const faucetPendingKey = (hubEntityId: string, tokenId: number): string =>
     `${String(hubEntityId || '').toLowerCase()}:${Math.floor(Number(tokenId) || 0)}`;
-  $: pendingOffchainFaucetKeys = new Set(
-    pendingOffchainFaucets.map((req) => faucetPendingKey(req.hubEntityId, req.tokenId)),
-  );
 
   // External tokens (ERC20 balances held by signer EOA)
   interface ExternalToken {
@@ -2413,10 +2410,6 @@
         throw new Error('Offchain faucet requires a target hub account.');
       }
       const pendingKey = faucetPendingKey(hubEntityId, tokenMeta.tokenId);
-      if (pendingOffchainFaucetKeys.has(pendingKey)) {
-        toasts.info(`${tokenMeta.symbol} faucet is already in flight.`);
-        return;
-      }
       const amountWei = parseTokenAmount(amountStr, tokenMeta.decimals);
       const baselineOut = getDerivedDeltaForAccount(hubEntityId, tokenMeta.tokenId)?.outCapacity ?? 0n;
       const pendingRequest = {
@@ -5352,7 +5345,6 @@
           entityId={tab.entityId}
           {replica}
           env={activeEnv}
-          pendingFaucetKeys={pendingOffchainFaucetKeys}
           on:back={handleBackToAccounts}
           on:faucet={handleAccountFaucet}
           on:goToOpenAccounts={handleAccountPanelGoToOpenAccounts}
@@ -5748,7 +5740,6 @@
           <AccountList
             {replica}
             {selectedAccountId}
-            pendingFaucetKeys={pendingOffchainFaucetKeys}
             on:select={handleAccountSelect}
             on:faucet={handleAccountFaucet}
             on:settleApprove={handleQuickSettleApprove}
