@@ -132,7 +132,6 @@
 	:global(body.xln-user-mode .compact-btn),
 	:global(body.xln-user-mode .expand-btn),
 	:global(body.xln-user-mode .refresh-btn),
-	:global(body.xln-user-mode .move-max-chip),
 	:global(body.xln-user-mode .summary-action),
 	:global(body.xln-user-mode .summary-action-inline),
 	:global(body.xln-user-mode .hub-primary),
