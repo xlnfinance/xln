@@ -43,7 +43,6 @@
   export let moveDisplayBalances: MoveDisplayBalances = { external: 0n, reserve: 0n, account: 0n };
   export let moveDisplayDecimals = 18;
   export let moveSourceAvailableBalance = 0n;
-  export let fillMoveMax: () => void;
   export let setMoveSource: (endpoint: MoveEndpoint) => void;
   export let setMoveTarget: (endpoint: MoveEndpoint) => void;
   export let beginMoveDrag: (endpoint: MoveEndpoint, event: PointerEvent | MouseEvent) => void;
@@ -52,8 +51,6 @@
     start: { x: number; y: number } | null,
     end: { x: number; y: number } | null,
   ) => string;
-  export let moveRouteExecutionLabel: (from: MoveEndpoint, to: MoveEndpoint) => string;
-  export let moveRouteMeta: (from: MoveEndpoint, to: MoveEndpoint) => string;
   export let moveRouteSteps: (from: MoveEndpoint, to: MoveEndpoint) => string[];
   export let canAddMoveToExistingBatch: () => boolean;
   export let submitMovePrimaryAction: () => Promise<void>;
@@ -76,7 +73,6 @@
   export let moveEndpointLabels: Record<MoveEndpoint, string>;
   export let moveEndpoints: MoveEndpoint[] = ['external', 'reserve', 'account'];
   export let formatAmount: (amount: bigint, decimals?: number) => string;
-  export let formatInlineFillAmount: (amount: bigint, decimals?: number) => string;
   export let onMoveVisualRoot: (node: HTMLDivElement | null) => void = () => undefined;
   export let toastMoveError: (error: unknown) => void = () => undefined;
 
@@ -845,10 +841,6 @@
     background: color-mix(in srgb, var(--move-accent) 8%, transparent);
   }
 
-  .move-summary-status.neutral {
-    color: var(--move-text-secondary);
-  }
-
   .move-summary-status.warning {
     color: color-mix(in srgb, var(--theme-warning, #f59e0b) 74%, white 26%);
     border-color: color-mix(in srgb, var(--theme-warning, #f59e0b) 22%, transparent);
@@ -957,8 +949,7 @@
   }
 
   @media (max-width: 900px) {
-    .move-detail-grid,
-    .move-summary-grid {
+    .move-detail-grid {
       grid-template-columns: 1fr;
     }
 
@@ -1037,25 +1028,9 @@
       padding: 14px;
     }
 
-    .move-step-row {
-      grid-template-columns: 22px minmax(0, 1fr);
-      gap: 8px;
-      padding: 8px 10px;
-    }
-
-    .move-step-index {
-      width: 22px;
-      height: 22px;
-      font-size: 11px;
-    }
   }
 
   @media (max-width: 520px) {
-    .move-max-chip {
-      width: 100%;
-      justify-content: space-between;
-    }
-
     .move-asset-select {
       width: 100%;
       min-width: 0;

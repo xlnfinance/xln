@@ -85,7 +85,6 @@
   } from './account-faucet';
   import {
     buildMoveArrowPath,
-    buildMoveRouteMeta,
     buildMoveRouteSteps,
     getMoveRouteKey,
     isMoveRouteSupported,
@@ -93,7 +92,6 @@
     moveNeedsReserveRecipient,
     MOVE_ENDPOINT_LABEL,
     MOVE_ENDPOINTS,
-    moveRouteExecutionLabel,
     type MoveEndpoint,
   } from './move-routes';
   import {
@@ -707,16 +705,6 @@
       reserveRecipientLabel,
       hasRemoteReserveRecipient: Boolean(
         moveReserveRecipientEntityId && moveReserveRecipientEntityId !== resolveSelfEntityId(),
-      ),
-    });
-  }
-
-  function moveRouteMeta(from: MoveEndpoint, to: MoveEndpoint): string {
-    return buildMoveRouteMeta(from, to, {
-      hasRemoteReserveRecipient: Boolean(
-        moveNeedsReserveRecipient(from, to)
-          && moveReserveRecipientEntityId.trim()
-          && moveReserveRecipientEntityId !== resolveSelfEntityId(),
       ),
     });
   }
@@ -1907,11 +1895,6 @@
     return `${whole.toString()}.${frac.toString().padStart(decimals, '0').replace(/0+$/, '')}`;
   }
 
-  function formatInlineFillAmount(amount: bigint, decimals?: number): string {
-    if (amount <= 0n) return '0';
-    return formatTokenInputAmount(amount, Math.max(0, Math.floor(Number(decimals ?? getMoveDisplayDecimals()) || 0)));
-  }
-
   async function resolveCurrentExternalAddress(): Promise<string> {
     const signerId = String(currentSignerId || '').trim();
     if (isAddress(signerId)) return signerId;
@@ -2838,11 +2821,6 @@
       console.error('[EntityPanel] Collateral → Reserve failed:', err);
       toasts.error(`Collateral → Reserve failed: ${(err as Error).message}`);
     }
-  }
-
-  function fillMoveMax(): void {
-    const decimals = getMoveDisplayDecimals();
-    moveAmount = formatTokenInputAmount(getCurrentMoveSourceAvailableBalance(), decimals);
   }
 
   function clearMoveComposer(): void {
@@ -5352,14 +5330,11 @@
                 moveDisplayBalances={moveUiState.displayBalances}
                 moveDisplayDecimals={moveUiState.displayDecimals}
                 moveSourceAvailableBalance={moveUiState.sourceAvailableBalance}
-                {fillMoveMax}
                 {setMoveSource}
                 {setMoveTarget}
                 {beginMoveDrag}
                 {getMoveNodeAnchor}
                 {buildMoveArrowPath}
-                {moveRouteExecutionLabel}
-                {moveRouteMeta}
                 {moveRouteSteps}
                 {canAddMoveToExistingBatch}
                 {submitMovePrimaryAction}
@@ -5381,7 +5356,6 @@
                 moveEndpointLabels={MOVE_ENDPOINT_LABEL}
                 moveEndpoints={MOVE_ENDPOINTS}
                 {formatAmount}
-                {formatInlineFillAmount}
                 movePrimaryActionLabel={getMovePrimaryActionLabel()}
                 onMoveVisualRoot={(node) => moveVisualRoot = node}
                 toastMoveError={handleMoveWorkspaceError}
@@ -5533,14 +5507,11 @@
                 moveDisplayBalances={moveUiState.displayBalances}
                 moveDisplayDecimals={moveUiState.displayDecimals}
                 moveSourceAvailableBalance={moveUiState.sourceAvailableBalance}
-                {fillMoveMax}
                 {setMoveSource}
                 {setMoveTarget}
                 {beginMoveDrag}
                 {getMoveNodeAnchor}
                 {buildMoveArrowPath}
-                {moveRouteExecutionLabel}
-                {moveRouteMeta}
                 {moveRouteSteps}
                 {canAddMoveToExistingBatch}
                 {submitMovePrimaryAction}
@@ -5562,7 +5533,6 @@
                 moveEndpointLabels={MOVE_ENDPOINT_LABEL}
                 moveEndpoints={MOVE_ENDPOINTS}
                 {formatAmount}
-                {formatInlineFillAmount}
                 movePrimaryActionLabel={getMovePrimaryActionLabel()}
                 onMoveVisualRoot={(node) => moveVisualRoot = node}
                 toastMoveError={handleMoveWorkspaceError}
@@ -7184,7 +7154,7 @@
     color: var(--theme-text-muted, #71717a) !important;
   }
 
-  .content :global(button:not(.tab):not(.toggle):not(.back-btn):not(.btn-add):not(.btn-live):not(.c-delete):not(.account-workspace-tab):not(.configure-tab):not(.btn-add-token):not(.scope-btn):not(.primary-btn):not(.cancel-btn):not(.summary-action):not(.summary-action-inline):not(.delta-faucet):not(.delta-expand):not(.step-btn):not(.step-auto-btn):not(.move-node):not(.move-primary-cta):not(.move-max-chip):not(.refresh-btn):not(.hub-primary):not(.btn-connect):not(.expand-toggle):not(.closed-trigger):not(.dropdown-toggle):not(.dropdown-item):not(.settings-tab):not(.compact-btn):not(.pill):not(.theme-swatch):not(.icon-btn):not(.danger-icon):not(.close-btn):not(.file-btn):not(.danger-btn)) {
+  .content :global(button:not(.tab):not(.toggle):not(.back-btn):not(.btn-add):not(.btn-live):not(.c-delete):not(.account-workspace-tab):not(.configure-tab):not(.btn-add-token):not(.scope-btn):not(.primary-btn):not(.cancel-btn):not(.summary-action):not(.summary-action-inline):not(.delta-faucet):not(.delta-expand):not(.step-btn):not(.step-auto-btn):not(.move-node):not(.move-primary-cta):not(.refresh-btn):not(.hub-primary):not(.btn-connect):not(.expand-toggle):not(.closed-trigger):not(.dropdown-toggle):not(.dropdown-item):not(.settings-tab):not(.compact-btn):not(.pill):not(.theme-swatch):not(.icon-btn):not(.danger-icon):not(.close-btn):not(.file-btn):not(.danger-btn)) {
     background: color-mix(in srgb, var(--theme-surface, #18181b) 88%, transparent) !important;
     border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) 76%, transparent) !important;
     border-radius: 6px !important;
