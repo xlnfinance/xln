@@ -29,6 +29,11 @@ import {
   normalizeJurisdictionEvent,
   normalizeJurisdictionEvents,
 } from '../j-event-normalization';
+import {
+  buildJEventObservationDigest,
+  canonicalJurisdictionEventsHash,
+} from '../j-event-observation';
+import { verifyAccountSignature } from '../account-crypto';
 import { decodeHashLadderBinary } from '../hashladder';
 import { markStorageEntityDirty } from '../env-events';
 
@@ -66,6 +71,8 @@ export interface JEventEntityTxData {
   blockNumber: number;  // Blockchain block number where event occurred
   blockHash: string;    // Block hash for JBlock consensus
   transactionHash: string;  // Blockchain transaction hash
+  eventsHash?: string;
+  signature?: string;
 }
 
 type JEventApplyResult = {
@@ -107,13 +114,6 @@ const signerVotingPower = (state: EntityState, signers: Iterable<string>): bigin
 const isValidatorSigner = (state: EntityState, signerId: string): boolean => {
   const normalized = normalizeSignerId(signerId);
   return (state.config.validators || []).some((validatorId) => normalizeSignerId(validatorId) === normalized);
-};
-
-const canonicalJurisdictionEventsHash = (events: JurisdictionEvent[]): string => {
-  const keys = normalizeJurisdictionEvents(events)
-    .map((event) => canonicalJurisdictionEventKey(event))
-    .sort();
-  return ethers.keccak256(ethers.toUtf8Bytes(JSON.stringify(keys)));
 };
 
 const observationEventsHash = (observation: JBlockObservation): string => {
@@ -751,6 +751,8 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
     events?: unknown[];
     event?: unknown;
     transactionHash?: string;
+    eventsHash?: string;
+    signature?: string;
   };
   const batchData = entityTxData as RawJEventBatchData;
   const rawEvents = Array.isArray(batchData.events)
@@ -805,6 +807,33 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
     console.warn(`⚠️ No valid j-events after normalization for block ${blockNumber}; skipping observation`);
     return { newState: entityState, mempoolOps: [], outputs: [], dirtyAccounts: [] };
   }
+  const canonicalEventsHash = canonicalJurisdictionEventsHash(jEvents);
+  const suppliedEventsHash = typeof batchData.eventsHash === 'string' ? batchData.eventsHash.toLowerCase() : '';
+  if (suppliedEventsHash && suppliedEventsHash !== canonicalEventsHash) {
+    throw new Error(
+      `j_event rejected: eventsHash mismatch for signer ${String(signerId)} block ${blockNumber}`,
+    );
+  }
+
+  const requiresSignedObservation =
+    (entityState.config.validators || []).length > 1 || BigInt(entityState.config.threshold || 0n) > 1n;
+  if (requiresSignedObservation) {
+    const signature = typeof batchData.signature === 'string' ? batchData.signature : '';
+    if (!signature) {
+      throw new Error(`j_event rejected: missing observation signature for signer ${String(signerId)}`);
+    }
+    const digest = buildJEventObservationDigest({
+      entityId: entityState.entityId,
+      signerId: String(signerId),
+      blockNumber,
+      blockHash,
+      transactionHash: batchData.transactionHash || '',
+      eventsHash: canonicalEventsHash,
+    });
+    if (!verifyAccountSignature(env, String(signerId), digest, signature)) {
+      throw new Error(`j_event rejected: invalid observation signature for signer ${String(signerId)}`);
+    }
+  }
 
   // Clone state and create observation with ALL events from this batch
   let newEntityState = cloneEntityState(entityState);
@@ -813,7 +842,7 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
     signerId: normalizeSignerId(signerId),
     jHeight: blockNumber,
     jBlockHash: blockHash,
-    eventsHash: canonicalJurisdictionEventsHash(jEvents),
+    eventsHash: canonicalEventsHash,
     events: jEvents,
     observedAt,
   };
