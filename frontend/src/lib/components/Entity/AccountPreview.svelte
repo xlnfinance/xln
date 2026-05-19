@@ -355,7 +355,7 @@
   <!-- Row 1: Entity name + status dot -->
   <div class="row-header">
     <div class="entity-col">
-      <EntityIdentity entityId={counterpartyId} name={counterpartyName} size={30} clickable={false} compact={false} copyable={false} showAddress={false} />
+      <EntityIdentity entityId={counterpartyId} name={counterpartyName} size={30} clickable={false} copyable={false} showAddress={false} />
     </div>
     <div class="status-col">
       <div class="status-dot-wrap">
