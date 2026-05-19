@@ -3566,7 +3566,7 @@ export const queueEntityInput = async (
   env: Env,
   entityId: string,
   signerId: string,
-  txData: { type: string; [key: string]: any },
+  txData: { type: EntityTx['type'] } & Record<string, unknown>,
 ): Promise<void> => {
   enqueueRuntimeInputs(
     env,
