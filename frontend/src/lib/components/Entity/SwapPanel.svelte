@@ -19,6 +19,14 @@
   import SwapPairToolbar from './SwapPairToolbar.svelte';
   import { resolveEntityName } from '$lib/utils/entityNaming';
   import { formatEntityId } from '$lib/utils/format';
+  import {
+    compareStableText,
+    decimalPlacesFromScale,
+    normalizeDecimalInput,
+    normalizeDisplayPriceForInput,
+    parseDecimalAmountToBigInt,
+    toBigIntSafe,
+  } from './swap-formatting';
 
   export let replica: EntityReplica | null;
   export let tab: Tab;
@@ -42,10 +50,6 @@
     effectiveWant: bigint;
     unspentGiveAmount: bigint;
   };
-  function decimalPlacesFromScale(scale: bigint): number {
-    const s = scale.toString();
-    return /^10*$/.test(s) ? Math.max(0, s.length - 1) : 0;
-  }
   const ORDERBOOK_PRICE_DECIMALS = decimalPlacesFromScale(ORDERBOOK_PRICE_SCALE);
   const MAX_PRICE_DEVIATION_BPS = 3000n; // 30%
   type BookSide = 'bid' | 'ask';
@@ -787,36 +791,6 @@
     if (!Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return 'Token';
     const info = activeXlnFunctions?.getTokenInfo?.(tokenIdValue);
     return String(info?.symbol || `Token #${tokenIdValue}`).trim();
-  }
-
-  function parseDecimalAmountToBigInt(raw: string, decimals: number): bigint {
-    const trimmed = String(raw || '').trim();
-    if (!trimmed) return 0n;
-    if (!/^\d+(\.\d+)?$/.test(trimmed)) return 0n;
-    const [wholeRaw, fracRaw = ''] = trimmed.split('.');
-    const whole = BigInt(wholeRaw || '0');
-    const scale = 10n ** BigInt(Math.max(0, Math.floor(decimals || 0)));
-    const fracPadded = (fracRaw + '0'.repeat(Math.max(0, decimals))).slice(0, Math.max(0, decimals));
-    const frac = fracPadded ? BigInt(fracPadded) : 0n;
-    return whole * scale + frac;
-  }
-
-  function normalizeDecimalInput(raw: string, maxDecimals: number): string {
-    const prepared = String(raw || '').replace(',', '.').replace(/[^\d.]/g, '');
-    if (!prepared) return '';
-    const dotIndex = prepared.indexOf('.');
-    const hasDot = dotIndex >= 0;
-    const wholeRaw = hasDot ? prepared.slice(0, dotIndex) : prepared;
-    const fracRaw = hasDot ? prepared.slice(dotIndex + 1).replace(/\./g, '') : '';
-    const whole = wholeRaw === '' ? '0' : wholeRaw.replace(/^0+(?=\d)/, '');
-    const frac = fracRaw.slice(0, Math.max(0, maxDecimals));
-    if (hasDot) return `${whole}.${frac}`;
-    return whole;
-  }
-
-  function compareStableText(left: string, right: string): number {
-    if (left === right) return 0;
-    return left < right ? -1 : 1;
   }
 
   function handlePriceRatioInput(event: Event): void {
@@ -1562,13 +1536,6 @@
     } catch {
       return null;
     }
-  }
-
-  function toBigIntSafe(value: unknown): bigint | null {
-    if (typeof value === 'bigint') return value;
-    if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) return BigInt(value);
-    if (typeof value === 'string' && /^\d+$/.test(value.trim())) return BigInt(value.trim());
-    return null;
   }
 
   $: parsedOrderbookPair = selectedPair
@@ -2323,10 +2290,6 @@
     const whole = full.slice(0, dotIndex);
     const frac = full.slice(dotIndex + 1, dotIndex + 1 + maxDecimals).replace(/0+$/, '');
     return frac.length > 0 ? `${whole}.${frac}` : whole;
-  }
-
-  function normalizeDisplayPriceForInput(value: string): string {
-    return String(value || '').replace(/,/g, '').trim();
   }
 
   function requantizeAtLimitPrice(remainingGiveAmount: bigint, priceTicks: bigint): PreparedSwapOrderLike | null {
