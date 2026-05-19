@@ -132,7 +132,7 @@
         } else if (options.name === 'gossip') {
           component = mount(GossipPanel, {
             target: div,
-            props: { isolatedEnv, isolatedHistory, isolatedTimeIndex },
+            props: { isolatedEnv },
           });
         }
 

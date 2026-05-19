@@ -7,8 +7,6 @@
   import type { Env, Profile as GossipProfile } from '@xln/runtime/xln-api';
 
   export let isolatedEnv: Writable<Env | null> | undefined = undefined;
-  export let isolatedHistory: Writable<unknown[]> | undefined = undefined;
-  export let isolatedTimeIndex: Writable<number> | undefined = undefined;
 
   $: env = isolatedEnv ? $isolatedEnv : null;
   $: profiles = env?.gossip?.getProfiles?.() || [];
