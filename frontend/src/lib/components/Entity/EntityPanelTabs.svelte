@@ -72,6 +72,17 @@
   import RuntimeDropdown from '$lib/components/Runtime/RuntimeDropdown.svelte';
   import ContextSwitcher from './ContextSwitcher.svelte';
   import RuntimeStateCard from '../shared/RuntimeStateCard.svelte';
+  import {
+    attachOffchainFaucetRequestId,
+    faucetPendingKey,
+    type FaucetApiResult,
+    type PendingOffchainFaucet,
+    type PendingReserveFaucet,
+    readJsonResponse,
+    reconcilePendingOffchainFaucets,
+    reconcilePendingReserveFaucets,
+    removeOffchainFaucet,
+  } from './account-faucet';
 
   export let tab: Tab;
   export let hideHeader: boolean = false;
@@ -454,25 +465,6 @@
     if (!runtimeEnv) throw new Error(`${context} requires live runtime environment`);
     return runtimeEnv;
   }
-
-  async function readJsonResponse<T = unknown>(response: Response): Promise<T | null> {
-    const raw = await response.text();
-    if (!raw) return null;
-    try {
-      return JSON.parse(raw) as T;
-    } catch {
-      return null;
-    }
-  }
-
-  type ApiResult = {
-    success?: boolean;
-    error?: string;
-    code?: string;
-    details?: unknown;
-    requestId?: string;
-    serverDurationMs?: number;
-  };
 
   type TokenCatalogItem = {
     symbol: string;
@@ -1740,27 +1732,8 @@
 
   // On-chain reserves are derived directly from replica.state.reserves.
   let onchainReserves: Map<number, bigint> = new Map();
-  let pendingReserveFaucets: Array<{
-    tokenId: number;
-    amount: bigint;
-    expectedBalance: bigint;
-    startedAt: number;
-    symbol: string;
-  }> = [];
-  const RESERVE_FAUCET_TIMEOUT_MS = 15000;
-  let pendingOffchainFaucets: Array<{
-    hubEntityId: string;
-    tokenId: number;
-    amount: bigint;
-    baselineOut: bigint;
-    expectedOut: bigint;
-    startedAt: number;
-    symbol: string;
-    requestId?: string;
-  }> = [];
-  const OFFCHAIN_FAUCET_TIMEOUT_MS = 15000;
-  const faucetPendingKey = (hubEntityId: string, tokenId: number): string =>
-    `${String(hubEntityId || '').toLowerCase()}:${Math.floor(Number(tokenId) || 0)}`;
+  let pendingReserveFaucets: PendingReserveFaucet[] = [];
+  let pendingOffchainFaucets: PendingOffchainFaucet[] = [];
 
   // External tokens (ERC20 balances held by signer EOA)
   interface ExternalToken {
@@ -2082,7 +2055,7 @@
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ userAddress: owner, amount }),
     });
-    const result = await readJsonResponse<ApiResult>(response);
+    const result = await readJsonResponse<FaucetApiResult>(response);
     if (!response.ok || !result?.success) {
       throw new Error(result?.error || `Gas faucet failed (${response.status})`);
     }
@@ -2368,7 +2341,7 @@
         })
       });
 
-      const result = await readJsonResponse<ApiResult>(response);
+      const result = await readJsonResponse<FaucetApiResult>(response);
       if (!response.ok || !result?.success) {
         throw new Error(result?.error || `Faucet failed (${response.status})`);
       }
@@ -2426,7 +2399,7 @@
 
       const requestTimeoutMs = 12000;
       let response: Response | null = null;
-      let result: ApiResult | null = null;
+      let result: FaucetApiResult | null = null;
       let timeout: ReturnType<typeof setTimeout> | null = null;
       const requestStartedAt = performance.now();
       try {
@@ -2458,7 +2431,7 @@
             amount: amountStr,
           })
         });
-        result = await readJsonResponse<ApiResult>(response);
+        result = await readJsonResponse<FaucetApiResult>(response);
         console.log('[EntityPanel] Offchain faucet API response timing:', {
           requestId: result?.requestId || null,
           clientMs: Math.round(performance.now() - requestStartedAt),
@@ -2487,16 +2460,14 @@
       }
 
       console.log('[EntityPanel] Offchain faucet success:', result);
-      pendingOffchainFaucets = pendingOffchainFaucets.map((req) =>
-        faucetPendingKey(req.hubEntityId, req.tokenId) === pendingKey
-          ? { ...req, ...(result?.requestId ? { requestId: result.requestId } : {}) }
-          : req,
+      pendingOffchainFaucets = attachOffchainFaucetRequestId(
+        pendingOffchainFaucets,
+        pendingKey,
+        result?.requestId,
       );
     } catch (err) {
       console.error('[EntityPanel] Offchain faucet failed:', err);
-      pendingOffchainFaucets = pendingOffchainFaucets.filter(
-        (req) => faucetPendingKey(req.hubEntityId, req.tokenId) !== faucetPendingKey(hubEntityId, tokenId),
-      );
+      pendingOffchainFaucets = removeOffchainFaucet(pendingOffchainFaucets, hubEntityId, tokenId);
       toasts.error(`Offchain faucet failed: ${(err as Error).message}`);
     }
   }
@@ -2869,16 +2840,16 @@
 
   $: if (pendingReserveFaucets.length > 0) {
     const now = Date.now();
-    const remaining: typeof pendingReserveFaucets = [];
-    for (const req of pendingReserveFaucets) {
-      const current = onchainReserves.get(req.tokenId) ?? 0n;
-      if (current >= req.expectedBalance) {
-        toasts.success(`Received ${formatAmount(req.amount, getTokenInfo(req.tokenId).decimals)} ${req.symbol} in reserves!`);
-      } else if (now - req.startedAt > RESERVE_FAUCET_TIMEOUT_MS) {
-        toasts.error(`Reserve faucet timed out for ${req.symbol}. Check server logs.`);
-      } else {
-        remaining.push(req);
-      }
+    const { remaining, received, timedOut } = reconcilePendingReserveFaucets(
+      pendingReserveFaucets,
+      now,
+      (tokenId) => onchainReserves.get(tokenId) ?? 0n,
+    );
+    for (const { req } of received) {
+      toasts.success(`Received ${formatAmount(req.amount, getTokenInfo(req.tokenId).decimals)} ${req.symbol} in reserves!`);
+    }
+    for (const req of timedOut) {
+      toasts.error(`Reserve faucet timed out for ${req.symbol}. Check server logs.`);
     }
     if (remaining.length !== pendingReserveFaucets.length) {
       pendingReserveFaucets = remaining;
@@ -2893,27 +2864,27 @@
       assetLedgerGrandTotal,
     ].join(':');
     void accountStateSignal;
-    const remaining: typeof pendingOffchainFaucets = [];
-    for (const req of pendingOffchainFaucets) {
-      const currentOut = getDerivedDeltaForAccount(req.hubEntityId, req.tokenId)?.outCapacity ?? req.baselineOut;
-      if (currentOut >= req.expectedOut || currentOut > req.baselineOut) {
-        const elapsedMs = now - req.startedAt;
-        toasts.success(
-          `Received ${formatAmount(req.amount, getTokenInfo(req.tokenId).decimals)} ${req.symbol} in account (${(elapsedMs / 1000).toFixed(1)}s).`,
-        );
-        console.log('[EntityPanel] Offchain faucet visible in account:', {
-          requestId: req.requestId || null,
-          hubEntityId: req.hubEntityId,
-          tokenId: req.tokenId,
-          elapsedMs,
-          baselineOut: req.baselineOut.toString(),
-          currentOut: currentOut.toString(),
-        });
-      } else if (now - req.startedAt > OFFCHAIN_FAUCET_TIMEOUT_MS) {
-        toasts.error(`Account faucet timed out for ${req.symbol}. Check server logs.`);
-      } else {
-        remaining.push(req);
-      }
+    const { remaining, received, timedOut } = reconcilePendingOffchainFaucets(
+      pendingOffchainFaucets,
+      now,
+      (req) => getDerivedDeltaForAccount(req.hubEntityId, req.tokenId)?.outCapacity ?? req.baselineOut,
+    );
+    for (const { req, currentOut } of received) {
+      const elapsedMs = now - req.startedAt;
+      toasts.success(
+        `Received ${formatAmount(req.amount, getTokenInfo(req.tokenId).decimals)} ${req.symbol} in account (${(elapsedMs / 1000).toFixed(1)}s).`,
+      );
+      console.log('[EntityPanel] Offchain faucet visible in account:', {
+        requestId: req.requestId || null,
+        hubEntityId: req.hubEntityId,
+        tokenId: req.tokenId,
+        elapsedMs,
+        baselineOut: req.baselineOut.toString(),
+        currentOut: currentOut.toString(),
+      });
+    }
+    for (const req of timedOut) {
+      toasts.error(`Account faucet timed out for ${req.symbol}. Check server logs.`);
     }
     if (remaining.length !== pendingOffchainFaucets.length) {
       pendingOffchainFaucets = remaining;
@@ -4043,7 +4014,7 @@
         body: JSON.stringify(payload),
       });
 
-      const result = await readJsonResponse<ApiResult>(response);
+      const result = await readJsonResponse<FaucetApiResult>(response);
       if (!response.ok || !result?.success) {
         throw new Error(result?.error || `Faucet failed (${response.status})`);
       }

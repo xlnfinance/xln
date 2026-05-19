@@ -1,14 +1,14 @@
 <script lang="ts">
-  import type { AccountMachine } from '@xln/runtime/xln-api';
   import type { EntityReplica } from '$lib/types/ui';
   import { createEventDispatcher } from 'svelte';
   import { xlnEnvironment } from '../../stores/xlnStore';
   import AccountPreview from './AccountPreview.svelte';
   import { getEntityDisplayName } from '$lib/utils/entityNaming';
   import { compareStableText } from '$lib/utils/stableSort';
+  import { buildAccountPageView } from './account-list-view';
 
-export let replica: EntityReplica | null;
-export let selectedAccountId: string | null = null;
+  export let replica: EntityReplica | null;
+  export let selectedAccountId: string | null = null;
 
   $: entityHeight = Number(replica?.state?.height ?? 0);
   $: runtimeHeight = Number($xlnEnvironment?.height ?? 0);
@@ -18,13 +18,6 @@ export let selectedAccountId: string | null = null;
   let accountPage = 0;
   let accountSearch = '';
   let lastAccountSearchKey = '';
-  const COLLAPSED_ACCOUNT_LIMIT = 5;
-  const ACCOUNT_PAGE_SIZE = 50;
-
-  type AccountView = {
-    status?: string;
-    activeDispute?: unknown;
-  };
 
   type LockDirection = 'incoming' | 'outgoing';
 
@@ -56,20 +49,6 @@ export let selectedAccountId: string | null = null;
     subtitle: string;
   };
 
-  type AccountListEntry = {
-    counterpartyId: string;
-    account: AccountMachine;
-  };
-
-  type AccountPageView = {
-    entries: AccountListEntry[];
-    page: number;
-    pageSize: number;
-    hasPrevious: boolean;
-    hasNext: boolean;
-    isSearching: boolean;
-  };
-
   const isLockBookEntryView = (value: unknown): value is LockBookEntryView => {
     if (typeof value !== 'object' || value === null) return false;
     const candidate = value as Partial<LockBookEntryView>;
@@ -89,75 +68,6 @@ export let selectedAccountId: string | null = null;
       typeof candidate.outboundLockId === 'string'
     );
   };
-
-	  function isFinalizedDisputed(account: AccountView): boolean {
-	    const status = String(account.status || '');
-	    const activeDispute = !!account.activeDispute;
-	    return status === 'disputed' && !activeDispute;
-	  }
-
-  function getAccountsMap(sourceReplica: EntityReplica | null): Map<string, AccountMachine> | null {
-    const accounts = sourceReplica?.state?.accounts;
-    return accounts instanceof Map ? (accounts as Map<string, AccountMachine>) : null;
-  }
-
-  function accountMatchesSearch(counterpartyId: string, account: AccountMachine, query: string): boolean {
-    if (!query) return true;
-    const fields = [
-      counterpartyId,
-      account.leftEntity,
-      account.rightEntity,
-      account.status,
-    ];
-    return fields.some((field) => String(field || '').toLowerCase().includes(query));
-  }
-
-  function buildAccountPageView(
-    sourceReplica: EntityReplica | null,
-    browserOpen: boolean,
-    pageIndex: number,
-    searchRaw: string,
-  ): AccountPageView {
-    const accounts = getAccountsMap(sourceReplica);
-    const pageSize = browserOpen ? ACCOUNT_PAGE_SIZE : COLLAPSED_ACCOUNT_LIMIT;
-    const page = browserOpen ? Math.max(0, pageIndex) : 0;
-    const start = page * pageSize;
-    const query = searchRaw.trim().toLowerCase();
-    const entries: AccountListEntry[] = [];
-    let matched = 0;
-    let hasNext = false;
-
-    if (!accounts) {
-      return { entries, page, pageSize, hasPrevious: page > 0, hasNext, isSearching: Boolean(query) };
-    }
-
-    // Preserve Map insertion order so the UI stays stable by first account appearance.
-    // The loop stops after the current page plus one sentinel row; a hub with a large
-    // account map must not force Svelte to allocate every account just to render a list.
-    for (const [counterpartyId, account] of accounts.entries()) {
-      if (isFinalizedDisputed(account)) continue;
-      if (!accountMatchesSearch(String(counterpartyId), account, query)) continue;
-      if (matched < start) {
-        matched += 1;
-        continue;
-      }
-      if (entries.length >= pageSize) {
-        hasNext = true;
-        break;
-      }
-      entries.push({ counterpartyId: String(counterpartyId), account });
-      matched += 1;
-    }
-
-    return {
-      entries,
-      page,
-      pageSize,
-      hasPrevious: page > 0,
-      hasNext,
-      isSearching: Boolean(query),
-    };
-  }
 
   $: accountSearchKey = accountSearch.trim().toLowerCase();
   $: if (accountSearchKey !== lastAccountSearchKey) {
