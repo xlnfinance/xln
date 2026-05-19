@@ -111,6 +111,18 @@
     materializeReplicaView,
     requireRuntimeEnv,
   } from './entity-panel-model';
+  import {
+    buildEntityPanelHashRouteFromState,
+    canonicalizeEntityPanelRoute,
+    getLocationHashParams,
+    getLocationHashRoute,
+    getLocationParamValue,
+    type AccountWorkspaceTab,
+    type AssetWorkspaceTab,
+    type ConfigureWorkspaceTab,
+    type SettingsSubview,
+    type ViewTab,
+  } from './entity-panel-routing';
 
   export let tab: Tab;
   export let hideHeader: boolean = false;
@@ -130,12 +142,6 @@
 
   const dispatch = createEventDispatcher();
 
-  // Tab types
-  type ViewTab = 'assets' | 'accounts' | 'settings';
-  type SettingsSubview = 'wallet' | 'display' | 'network' | 'data' | 'log' | 'entity';
-  type AccountWorkspaceTab = 'send' | 'receive' | 'swap' | 'open' | 'activity' | 'move' | 'history' | 'configure' | 'appearance';
-  type AssetWorkspaceTab = 'move' | 'history';
-  type ConfigureWorkspaceTab = 'extend-credit' | 'request-credit' | 'collateral' | 'token' | 'dispute';
   type DebtDrainRequest = {
     tokenId: number;
     symbol: string;
@@ -192,125 +198,32 @@
 
   function getUrlHashRoute(): string | null {
     if (typeof window === 'undefined') return null;
-    const hashRaw = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
-    if (!hashRaw) return null;
-    const queryIndex = hashRaw.indexOf('?');
-    const routePart = queryIndex >= 0 ? hashRaw.slice(0, queryIndex) : hashRaw;
-    if (!routePart || routePart.includes('=')) return null;
-    return routePart.trim().toLowerCase() || null;
+    return getLocationHashRoute(window.location);
   }
 
   function getUrlHashParams(): URLSearchParams | null {
     if (typeof window === 'undefined') return null;
-    const hashRaw = window.location.hash.startsWith('#') ? window.location.hash.slice(1) : window.location.hash;
-    if (!hashRaw) return null;
-    const queryIndex = hashRaw.indexOf('?');
-    if (queryIndex >= 0) {
-      const routePart = hashRaw.slice(0, queryIndex);
-      if (!routePart.includes('=')) {
-        return new URLSearchParams(hashRaw.slice(queryIndex + 1));
-      }
-    }
-    return hashRaw.includes('=') ? new URLSearchParams(hashRaw) : null;
+    return getLocationHashParams(window.location);
   }
 
   function getUrlParamValue(keys: string[]): string | null {
     if (typeof window === 'undefined') return null;
-    const searchParams = new URLSearchParams(window.location.search);
-    const hashParams = getUrlHashParams();
-    for (const key of keys) {
-      const hashValue = hashParams?.get(key);
-      if (typeof hashValue === 'string' && hashValue.length > 0) return hashValue;
-      const queryValue = searchParams.get(key);
-      if (typeof queryValue === 'string' && queryValue.length > 0) return queryValue;
-    }
-    return null;
-  }
-
-  function canonicalizeHashRoute(routeRaw: string | null): string | null {
-    const route = String(routeRaw || '').trim().toLowerCase().replace(/^\/+|\/+$/g, '');
-    if (!route) return null;
-    if (route.startsWith('pay/')) return 'accounts/send';
-    switch (route) {
-      case 'assets':
-      case 'assets/move':
-      case 'external':
-      case 'reserves':
-        return 'assets';
-      case 'assets/history':
-        return 'assets/history';
-      case 'accounts':
-      case 'accounts/open':
-      case 'open':
-        return 'accounts/open';
-      case 'accounts/send':
-      case 'pay':
-      case 'send':
-        return 'accounts/send';
-      case 'accounts/receive':
-      case 'receive':
-        return 'accounts/receive';
-      case 'accounts/swap':
-      case 'swap':
-        return 'accounts/swap';
-      case 'accounts/move':
-      case 'move':
-        return 'accounts/move';
-      case 'accounts/history':
-      case 'history':
-        return 'accounts/history';
-      case 'accounts/configure':
-      case 'configure':
-        return 'accounts/configure';
-      case 'accounts/activity':
-      case 'activity':
-        return 'accounts/activity';
-      case 'accounts/appearance':
-      case 'appearance':
-        return 'accounts/appearance';
-      case 'settings':
-      case 'settings/wallet':
-      case 'wallet':
-        return 'settings';
-      case 'settings/display':
-      case 'display':
-        return 'settings/display';
-      case 'settings/network':
-      case 'network':
-      case 'gossip':
-        return 'settings/network';
-      case 'settings/data':
-      case 'data':
-        return 'settings/data';
-      case 'settings/log':
-      case 'log':
-      case 'chat':
-        return 'settings/log';
-      case 'settings/entity':
-      case 'entity':
-      case 'governance':
-      case 'create':
-        return 'settings/entity';
-      default:
-        return null;
-    }
+    return getLocationParamValue(window.location, keys);
   }
 
   function buildHashRouteFromState(): string {
-    if (activeTab === 'assets') {
-      return assetWorkspaceTab === 'history' ? 'assets/history' : 'assets';
-    }
-    if (activeTab === 'settings') {
-      return settingsSubview === 'wallet' ? 'settings' : `settings/${settingsSubview}`;
-    }
-    if (accountWorkspaceTab === 'open') return 'accounts';
-    return `accounts/${accountWorkspaceTab}`;
+    return buildEntityPanelHashRouteFromState({
+      activeTab,
+      assetWorkspaceTab,
+      settingsSubview,
+      accountWorkspaceTab,
+    });
   }
 
   function applyDeepLinkViewFromUrl(): void {
     if (typeof window === 'undefined') return;
 
-    const hashRoute = canonicalizeHashRoute(getUrlHashRoute());
+    const hashRoute = canonicalizeEntityPanelRoute(getUrlHashRoute());
     const view = String(getUrlParamValue(['view']) || hashRoute || '').trim().toLowerCase();
     const subview = String(getUrlParamValue(['subview', 'sub']) || '').trim().toLowerCase();
     const jurisdiction = String(getUrlParamValue(['jId', 'jurisdiction', 'j']) || '').trim();
@@ -418,7 +331,7 @@
     if (typeof window === 'undefined') return;
     const nextRoute = buildHashRouteFromState();
     const currentRoute = getUrlHashRoute();
-    const currentCanonical = canonicalizeHashRoute(currentRoute);
+    const currentCanonical = canonicalizeEntityPanelRoute(currentRoute);
     if (typeof currentRoute === 'string' && currentRoute.toLowerCase().startsWith('pay/') && nextRoute === 'accounts/send') {
       return;
     }
