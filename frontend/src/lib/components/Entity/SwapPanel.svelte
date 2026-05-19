@@ -2910,46 +2910,12 @@
     line-height: 1.2;
   }
 
-  .order-input-row {
-    display: flex;
-    align-items: center;
-    gap: 0;
-    margin-bottom: 8px;
-    padding: 0 10px;
-    height: 40px;
-    background: #111217 !important;
-    border: 1px solid #1e2028 !important;
-    border-radius: 6px;
-    font-size: 13px;
-    box-sizing: border-box;
-  }
-
-  .order-input-row:focus-within {
-    border-color: rgba(251, 191, 36, 0.5);
-  }
-
   .input-label {
     color: #6b7280;
     font-size: 12px;
     font-weight: 500;
     min-width: 48px;
     flex-shrink: 0;
-  }
-
-  .order-input-row input {
-    flex: 1;
-    min-width: 0;
-    border: none;
-    background: none;
-    padding: 0 8px;
-    height: 100%;
-    font-size: 14px;
-    text-align: right;
-  }
-
-  .order-input-row input:focus {
-    outline: none;
-    border: none;
   }
 
   .anyswap-builder {
@@ -3588,13 +3554,6 @@
   .size-hint {
     margin: 8px 0 0;
     color: #9ca3af;
-    font-size: 11px;
-    line-height: 1.4;
-  }
-
-  .size-warning {
-    margin: 6px 0 0;
-    color: #fca5a5;
     font-size: 11px;
     line-height: 1.4;
   }
