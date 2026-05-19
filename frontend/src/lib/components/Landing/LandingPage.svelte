@@ -828,43 +828,6 @@
     color: #000;
   }
 
-  /* Landing Controls (top-right) */
-  .landing-controls {
-    position: fixed;
-    top: 20px;
-    right: 20px;
-    display: flex;
-    gap: 8px;
-    z-index: 100;
-  }
-
-  .theme-toggle {
-    background: rgba(0, 0, 0, 0.7);
-    color: #fff;
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    padding: 8px 16px;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 12px;
-    font-family: inherit;
-  }
-
-  .theme-toggle:hover {
-    background: rgba(0, 0, 0, 0.9);
-    border-color: #007acc;
-  }
-
-  :global(.light-mode) .theme-toggle {
-    background: rgba(255, 255, 255, 0.9);
-    color: #000;
-    border-color: rgba(0, 0, 0, 0.2);
-  }
-
-  :global(.light-mode) .theme-toggle:hover {
-    background: rgba(255, 255, 255, 1);
-    border-color: #007acc;
-  }
-
   .landing {
     min-height: 100vh;
     background: transparent; /* Let canvas show through */
@@ -879,13 +842,6 @@
     line-height: 1.6;
     position: relative;
     z-index: 1; /* Above canvas */
-  }
-
-  .landing-lang-switcher {
-    position: fixed;
-    top: 16px;
-    right: 16px;
-    z-index: 1000;
   }
 
   .content {
@@ -997,89 +953,6 @@
   :global(.light-mode) .founder-link:hover {
     color: #2a8a5f;
     border-bottom-color: #2a8a5f;
-  }
-
-  /* Credibility Badge */
-  .credibility-badge {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    gap: 0.5rem;
-    padding: 1rem 1.5rem;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 8px;
-    margin-bottom: 2rem;
-    max-width: 600px;
-    text-align: center;
-  }
-
-  .credibility-main {
-    font-size: 0.95rem;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.9);
-  }
-
-  .sakurity-link {
-    color: #4fd18b;
-    text-decoration: none;
-    position: relative;
-    font-weight: 600;
-    transition: color 0.2s ease;
-  }
-
-  .sakurity-link::after {
-    content: '';
-    position: absolute;
-    bottom: -2px;
-    left: 0;
-    width: 100%;
-    height: 1px;
-    background: #4fd18b;
-    opacity: 0.4;
-    transition: opacity 0.2s ease, transform 0.2s ease;
-    transform: scaleX(0);
-    transform-origin: left;
-  }
-
-  .sakurity-link:hover {
-    color: #5fe19b;
-  }
-
-  .sakurity-link:hover::after {
-    opacity: 1;
-    transform: scaleX(1);
-  }
-
-  .credibility-sub {
-    font-size: 0.8rem;
-    color: rgba(255, 255, 255, 0.85);
-  }
-
-  .landing.light-mode .credibility-badge {
-    background: rgba(0, 0, 0, 0.03);
-    border-color: rgba(0, 0, 0, 0.15);
-  }
-
-  .landing.light-mode .credibility-main {
-    color: rgba(0, 0, 0, 0.9);
-  }
-
-  .landing.light-mode .sakurity-link {
-    color: #2a9d5f;
-  }
-
-  .landing.light-mode .sakurity-link::after {
-    background: #2a9d5f;
-  }
-
-  .landing.light-mode .sakurity-link:hover {
-    color: #1f8a50;
-  }
-
-  .landing.light-mode .credibility-sub {
-    color: rgba(0, 0, 0, 0.6);
   }
 
   /* Urgency Section */
