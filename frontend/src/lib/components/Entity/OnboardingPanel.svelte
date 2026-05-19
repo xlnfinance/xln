@@ -487,7 +487,6 @@
         placeholder="e.g. Alice, CryptoShop, MyExchange"
         bind:value={displayName}
         maxlength="32"
-        autofocus
       />
       <p class="form-hint compact">Visible in gossip, account lists, and routing flows.</p>
       <div class="profile-preview-card">
@@ -771,9 +770,8 @@
     font-weight: 700;
   }
 
-  h2, h3 {
+  h3 {
     margin: 0;
-    letter-spacing: -0.02em;
   }
 
   .section-headline p {
@@ -781,14 +779,6 @@
     color: #a8a29e;
     font-size: 14px;
     line-height: 1.55;
-  }
-
-  .meta-chip {
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    text-transform: uppercase;
-    color: #78716c;
   }
 
   code {
@@ -975,13 +965,11 @@
       padding-right: 12px;
     }
 
-    .setup-header,
     .setup-section {
       padding: 14px;
       border-radius: 12px;
     }
 
-    .identity-block,
     .profile-preview-card {
       align-items: flex-start;
     }
