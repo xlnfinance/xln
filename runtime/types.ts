@@ -505,6 +505,8 @@ export interface JurisdictionEventData {
   from: string;
   event: JurisdictionEvent;
   events?: JurisdictionEvent[]; // Batched events from same block
+  eventsHash?: string;
+  signature?: string;
   observedAt: number;
   blockNumber: number;
   blockHash: string;  // Block hash for JBlock consensus

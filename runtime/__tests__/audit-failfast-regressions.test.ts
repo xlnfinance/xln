@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test';
 
 import { handleAccountInput, proposeAccountFrame } from '../account-consensus';
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account-crypto';
 import { handleHtlcLock } from '../account-tx/handlers/htlc-lock';
 import { handleHtlcResolve } from '../account-tx/handlers/htlc-resolve';
 import { checkAutoRebalance, handleRequestCollateral } from '../account-tx/handlers/request-collateral';
@@ -16,13 +16,17 @@ import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity-tx/h
 import { handleJAbortSentBatch } from '../entity-tx/handlers/j-abort-sent-batch';
 import { handleJRebroadcast } from '../entity-tx/handlers/j-rebroadcast';
 import { handleJEvent } from '../entity-tx/j-events';
+import {
+  buildJEventObservationDigest,
+  canonicalJurisdictionEventsHash,
+} from '../j-event-observation';
 import { createEmptyBatch } from '../j-batch';
 import { applyCommand, createBook, getBookOrder, type OrderbookExtState } from '../orderbook';
 import { process, createEmptyEnv, registerEntityRuntimeHint, sendEntityInput } from '../runtime';
 import { safeStringify } from '../serialization-utils';
 import { projectAccountDoc } from '../storage/projections';
 import { createDefaultDelta } from '../validation-utils';
-import type { AccountMachine, AccountTx, ConsensusConfig, CrossJurisdictionSwapRoute, EntityInput, EntityReplica, EntityState } from '../types';
+import type { AccountMachine, AccountTx, ConsensusConfig, CrossJurisdictionSwapRoute, EntityInput, EntityReplica, EntityState, JurisdictionEvent } from '../types';
 
 const makeSingleSignerConfig = (): ConsensusConfig => ({
   mode: 'proposer-based',
@@ -115,6 +119,33 @@ const registerLazySigner = (
     signerId,
     entityId: generateLazyEntityId([signerId], 1n).toLowerCase(),
   };
+};
+
+const signJEventObservation = (
+  env: ReturnType<typeof createEmptyEnv>,
+  entityId: string,
+  signerId: string,
+  input: {
+    blockNumber: number;
+    blockHash: string;
+    transactionHash: string;
+    events: JurisdictionEvent[];
+  },
+): { eventsHash: string; signature: string } => {
+  const eventsHash = canonicalJurisdictionEventsHash(input.events);
+  const signature = signAccountFrame(
+    env,
+    signerId,
+    buildJEventObservationDigest({
+      entityId,
+      signerId,
+      blockNumber: input.blockNumber,
+      blockHash: input.blockHash,
+      transactionHash: input.transactionHash,
+      eventsHash,
+    }),
+  );
+  return { eventsHash, signature };
 };
 
 const makeReplicaMissingPrevFrameHash = (): EntityReplica => ({
@@ -284,15 +315,69 @@ describe('audit fail-fast regressions', () => {
       type: 'ReserveUpdated',
       data: { entity: entityId, tokenId: 1, newBalance: '999' },
     };
+    const signedHonest1 = signJEventObservation(env, entityId, '1', {
+      blockNumber: common.blockNumber,
+      blockHash: common.blockHash,
+      transactionHash: common.transactionHash,
+      events: [honestEvent],
+    });
+    const signedFake = signJEventObservation(env, entityId, '2', {
+      blockNumber: common.blockNumber,
+      blockHash: common.blockHash,
+      transactionHash: common.transactionHash,
+      events: [fakeEvent],
+    });
+    const signedHonest3 = signJEventObservation(env, entityId, '3', {
+      blockNumber: common.blockNumber,
+      blockHash: common.blockHash,
+      transactionHash: common.transactionHash,
+      events: [honestEvent],
+    });
 
-    state = (await handleJEvent(state, { ...common, from: '1', event: honestEvent }, env)).newState;
-    state = (await handleJEvent(state, { ...common, from: '2', event: fakeEvent }, env)).newState;
+    state = (await handleJEvent(state, { ...common, from: '1', event: honestEvent, ...signedHonest1 }, env)).newState;
+    state = (await handleJEvent(state, { ...common, from: '2', event: fakeEvent, ...signedFake }, env)).newState;
     expect(state.jBlockChain.length).toBe(0);
     expect(state.reserves.get(1)).toBeUndefined();
 
-    state = (await handleJEvent(state, { ...common, from: '3', event: honestEvent }, env)).newState;
+    state = (await handleJEvent(state, { ...common, from: '3', event: honestEvent, ...signedHonest3 }, env)).newState;
     expect(state.jBlockChain.length).toBe(1);
     expect(state.reserves.get(1)).toBe(100n);
+  });
+
+  test('multi-validator j_event observations must be signed by the claimed signer', async () => {
+    const entityId = `0x${'4a'.repeat(32)}`;
+    const state = makeEntityState(entityId);
+    state.config = {
+      mode: 'proposer-based',
+      threshold: 2n,
+      validators: ['1', '2', '3'],
+      shares: { '1': 1n, '2': 1n, '3': 1n },
+    };
+    const env = createEmptyEnv('j-event-observation-signature');
+    const event: JurisdictionEvent = {
+      type: 'ReserveUpdated',
+      data: { entity: entityId, tokenId: 1, newBalance: '100' },
+    };
+    const common = {
+      observedAt: 1_000,
+      blockNumber: 8,
+      blockHash: `0x${'5a'.repeat(32)}`,
+      transactionHash: `0x${'6a'.repeat(32)}`,
+      event,
+    };
+    const signerOne = signJEventObservation(env, entityId, '1', {
+      blockNumber: common.blockNumber,
+      blockHash: common.blockHash,
+      transactionHash: common.transactionHash,
+      events: [event],
+    });
+
+    await expect(handleJEvent(state, { ...common, from: '1' }, env)).rejects.toThrow(
+      'missing observation signature',
+    );
+    await expect(handleJEvent(state, { ...common, from: '2', ...signerOne }, env)).rejects.toThrow(
+      'invalid observation signature',
+    );
   });
 
   test('htlc_resolve(error) cannot be used by payer to cancel an active lock before expiry', async () => {
@@ -334,6 +419,56 @@ describe('audit fail-fast regressions', () => {
     expect(beneficiaryResult.success).toBe(true);
     expect(account.locks.has('lock-1')).toBe(false);
     expect(account.deltas.get(1)?.leftHold).toBe(0n);
+  });
+
+  test('failed account tx mutations do not leak into later valid txs in the same proposal', async () => {
+    const env = createEmptyEnv('account-tx-atomicity');
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    env.timestamp = 1_000;
+    env.browserVM = { getDepositoryAddress: () => hex20('dd') } as any;
+    const { signerId, entityId: left } = registerLazySigner('account-tx-atomicity', '1');
+    attachSigningReplica(env, left, signerId);
+    const right = `0x${'ff'.repeat(32)}`;
+    const account = makeProposalAccount([
+      {
+        type: 'direct_payment',
+        data: {
+          tokenId: 1,
+          amount: 100n,
+          fromEntityId: right,
+          toEntityId: left,
+          route: [''],
+        },
+      },
+      {
+        type: 'set_credit_limit',
+        data: {
+          tokenId: 1,
+          amount: 500n,
+        },
+      },
+    ], left, right);
+    account.deltas.set(1, {
+      tokenId: 1,
+      collateral: 0n,
+      ondelta: 0n,
+      offdelta: 0n,
+      leftCreditLimit: 0n,
+      rightCreditLimit: 1_000n,
+      leftAllowance: 0n,
+      rightAllowance: 0n,
+      leftHold: 0n,
+      rightHold: 0n,
+    });
+
+    const result = await proposeAccountFrame(env, account);
+
+    expect(result.success).toBe(true);
+    expect(result.accountInput?.newAccountFrame?.accountTxs.map((tx) => tx.type)).toEqual(['set_credit_limit']);
+    const frameDelta = result.accountInput?.newAccountFrame?.deltas.find((delta) => delta.tokenId === 1);
+    expect(frameDelta?.offdelta).toBe(0n);
+    expect(frameDelta?.rightCreditLimit).toBe(500n);
   });
 
   test('entity frame commits mark the entity core doc dirty for storage replay', async () => {
