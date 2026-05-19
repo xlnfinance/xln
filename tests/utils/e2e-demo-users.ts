@@ -604,21 +604,16 @@ export async function createRuntime(
     }
 
     let mnemonicInput = page.locator('#mnemonic');
-    if (!await mnemonicInput.isVisible().catch(() => false)) {
-      const importAction = page.locator('details.brainvault-strip button.strip-action', {
-        hasText: 'Import / recover',
-      }).first();
-      if (!await importAction.isVisible().catch(() => false)) {
-        const importToggle = page.locator('details.brainvault-strip summary, details.import-options summary').first();
-        await expect(importToggle).toBeVisible({ timeout: 15_000 });
-        const isOpen = await importToggle.evaluate((node) => Boolean(node.closest('details')?.open)).catch(() => false);
-        if (!isOpen) await importToggle.click();
-      }
-      await expect(importAction).toBeVisible({ timeout: 15_000 });
-      await importAction.click();
-      mnemonicInput = page.locator('#mnemonic');
+    const normalizedSecret = normalizeMnemonic(mnemonic);
+    const usingMnemonicImport = await mnemonicInput.isVisible({ timeout: 1000 }).catch(() => false);
+    if (usingMnemonicImport) {
+      await expect(mnemonicInput).toBeVisible({ timeout: 15_000 });
+      await mnemonicInput.fill(normalizedSecret);
+    } else {
+      const passphraseInput = page.locator('#passphrase').first();
+      await expect(passphraseInput).toBeVisible({ timeout: 15_000 });
+      await passphraseInput.fill(normalizedSecret);
     }
-    await expect(mnemonicInput).toBeVisible({ timeout: 15_000 });
     if (await displayNameInput.isVisible({ timeout: 1000 }).catch(() => false)) {
       const currentName = await displayNameInput.inputValue().catch(() => '');
       if (!currentName.trim()) {
@@ -626,11 +621,12 @@ export async function createRuntime(
       }
     }
     await selectBrainvaultWorkFactor(page, options.workFactor ?? 1);
-    await mnemonicInput.fill(normalizeMnemonic(mnemonic));
     const openVaultButton = page.getByRole('button', { name: /(Create XLN wallet|Open (Wallet|Vault))/, exact: false });
     await expect(openVaultButton).toBeEnabled({ timeout: 15_000 });
     await openVaultButton.click();
-    runtimeId = await waitForRuntimeBootstrap(page, runtimeId, previousRuntimeId);
+    runtimeId = usingMnemonicImport
+      ? await waitForRuntimeBootstrap(page, runtimeId, previousRuntimeId)
+      : await waitForNextRuntimeReady(page, previousRuntimeId);
   }
   runtimeIdsByLabel.set(label.toLowerCase(), runtimeId);
   await dismissOnboardingIfVisible(page);
