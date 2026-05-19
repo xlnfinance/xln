@@ -1,8 +1,8 @@
 <script lang="ts">
   import { onDestroy } from 'svelte';
   import EntityInput from '../shared/EntityInput.svelte';
+  import type { MoveEndpoint } from './move-routes';
 
-  type MoveEndpoint = 'external' | 'reserve' | 'account';
   type MoveEntityInputEvent = CustomEvent<{ value?: string }>;
   type MoveDisplayBalances = Record<MoveEndpoint, bigint>;
   type MoveNodeAction = (

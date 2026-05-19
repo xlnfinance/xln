@@ -83,6 +83,19 @@
     reconcilePendingReserveFaucets,
     removeOffchainFaucet,
   } from './account-faucet';
+  import {
+    buildMoveArrowPath,
+    buildMoveRouteMeta,
+    buildMoveRouteSteps,
+    getMoveRouteKey,
+    isMoveRouteSupported,
+    moveNeedsExternalRecipient,
+    moveNeedsReserveRecipient,
+    MOVE_ENDPOINT_LABEL,
+    MOVE_ENDPOINTS,
+    moveRouteExecutionLabel,
+    type MoveEndpoint,
+  } from './move-routes';
 
   export let tab: Tab;
   export let hideHeader: boolean = false;
@@ -633,12 +646,6 @@
     return { entityId, signerId, entityTxs };
   }
 
-  const MOVE_ENDPOINT_LABEL: Record<MoveEndpoint, string> = {
-    external: 'External',
-    reserve: 'Reserve',
-    account: 'Account',
-  };
-  const MOVE_ENDPOINTS: MoveEndpoint[] = ['external', 'reserve', 'account'];
   let moveNodeLayoutVersion = 0;
   let moveNodeLayoutRaf: number | null = null;
   let moveNodeLayoutSettleRaf: number | null = null;
@@ -782,18 +789,6 @@
     };
   }
 
-  function buildMoveArrowPath(
-    start: { x: number; y: number } | null,
-    end: { x: number; y: number } | null,
-  ): string {
-    if (!start || !end) return '';
-    const distance = Math.abs(end.x - start.x);
-    const curve = Math.max(22, Math.min(68, distance * 0.2));
-    const control1X = start.x + curve;
-    const control2X = end.x - curve;
-    return `M ${start.x} ${start.y} C ${control1X} ${start.y} ${control2X} ${end.y} ${end.x} ${end.y}`;
-  }
-
   function beginMoveDrag(endpoint: MoveEndpoint, event: PointerEvent | MouseEvent): void {
     event.preventDefault();
     moveDragSource = endpoint;
@@ -885,27 +880,6 @@
     bumpMoveNodeLayout();
   }
 
-  function getMoveRouteKey(from: MoveEndpoint, to: MoveEndpoint): string {
-    return `${from}->${to}`;
-  }
-
-  function isMoveRouteSupported(from: MoveEndpoint, to: MoveEndpoint): boolean {
-    switch (getMoveRouteKey(from, to)) {
-      case 'external->external':
-      case 'external->reserve':
-      case 'external->account':
-      case 'reserve->external':
-      case 'reserve->reserve':
-      case 'reserve->account':
-      case 'account->external':
-      case 'account->reserve':
-      case 'account->account':
-        return true;
-      default:
-        return false;
-    }
-  }
-
   function moveRouteSteps(from: MoveEndpoint, to: MoveEndpoint): string[] {
     const targetEntity = getCurrentMoveTargetEntityId();
     const targetHub = getCurrentMoveTargetHubId();
@@ -914,111 +888,24 @@
     const reserveRecipientLabel = moveReserveRecipientEntityId
       ? formatAddress(moveReserveRecipientEntityId)
       : 'recipient reserve';
-    switch (getMoveRouteKey(from, to)) {
-      case 'external->reserve':
-        return moveReserveRecipientEntityId && moveReserveRecipientEntityId !== resolveSelfEntityId()
-          ? [
-            '1. Approve Depository from your wallet if needed',
-            '2. Deposit from your wallet into reserve',
-            `3. Forward reserve to ${reserveRecipientLabel}`,
-          ]
-          : [
-            '1. Approve Depository from your wallet if needed',
-            '2. Deposit from your wallet into reserve',
-          ];
-      case 'reserve->reserve':
-        return [`1. Send reserve batch to ${reserveRecipientLabel}`];
-      case 'reserve->account':
-        return [`1. Fund ${targetEntityLabel} through ${targetHubLabel}`];
-      case 'account->reserve':
-        return moveReserveRecipientEntityId && moveReserveRecipientEntityId !== resolveSelfEntityId()
-          ? [
-            '1. Settle funds back into your reserve',
-            `2. Forward reserve to ${reserveRecipientLabel}`,
-          ]
-          : ['1. Settle funds back into your reserve'];
-      case 'reserve->external':
-        return ['1. Withdraw reserve to recipient wallet'];
-      case 'external->external':
-        return ['1. Send directly from wallet to wallet'];
-      case 'external->account':
-        return [
-          '1. Approve Depository from your wallet if needed',
-          '2. Deposit from your wallet into reserve',
-          `3. Fund ${targetEntityLabel} through ${targetHubLabel}`,
-        ];
-      case 'account->external':
-        return [
-          '1. Settle funds back into your reserve',
-          '2. Withdraw reserve to recipient wallet',
-        ];
-      case 'account->account':
-        return [
-          '1. Settle funds back into your reserve',
-          `2. Fund ${targetEntityLabel} through ${targetHubLabel}`,
-        ];
-      default:
-        return ['Route not available'];
-    }
-  }
-
-  function moveRouteExecutionLabel(from: MoveEndpoint, to: MoveEndpoint): string {
-    switch (getMoveRouteKey(from, to)) {
-      case 'external->reserve':
-        return 'Deposit into reserve';
-      case 'reserve->external':
-        return 'Withdraw to wallet';
-      case 'reserve->account':
-        return 'Fund account';
-      case 'external->external':
-        return 'Send to wallet';
-      case 'external->account':
-        return 'Deposit and fund account';
-      case 'reserve->reserve':
-        return 'Move between reserves';
-      case 'account->reserve':
-        return 'Return funds to reserve';
-      case 'account->external':
-        return 'Withdraw from account';
-      case 'account->account':
-        return 'Move between accounts';
-      default:
-        return 'Unavailable';
-    }
+    return buildMoveRouteSteps(from, to, {
+      targetEntityLabel,
+      targetHubLabel,
+      reserveRecipientLabel,
+      hasRemoteReserveRecipient: Boolean(
+        moveReserveRecipientEntityId && moveReserveRecipientEntityId !== resolveSelfEntityId(),
+      ),
+    });
   }
 
   function moveRouteMeta(from: MoveEndpoint, to: MoveEndpoint): string {
-    const reserveRemote = moveNeedsReserveRecipient(from, to) && moveReserveRecipientEntityId.trim() && moveReserveRecipientEntityId !== resolveSelfEntityId();
-    switch (getMoveRouteKey(from, to)) {
-      case 'external->reserve':
-        return reserveRemote ? '2 steps • ~300k gas' : 'On-chain batch • ~140k gas';
-      case 'reserve->reserve':
-        return '1 batch • ~160k gas';
-      case 'reserve->account':
-        return '1 batch • ~180k gas';
-      case 'account->reserve':
-        return reserveRemote ? '2 steps • ~200k gas' : '2 steps • ~120k gas';
-      case 'reserve->external':
-        return '1 batch • ~140k gas';
-      case 'external->external':
-        return '1 wallet transfer';
-      case 'external->account':
-        return '2 steps • ~320k gas';
-      case 'account->external':
-        return '2 steps • ~260k gas';
-      case 'account->account':
-        return '2 steps • ~300k gas';
-      default:
-        return '';
-    }
-  }
-
-  function moveNeedsExternalRecipient(from: MoveEndpoint, to: MoveEndpoint): boolean {
-    return to === 'external';
-  }
-
-  function moveNeedsReserveRecipient(from: MoveEndpoint, to: MoveEndpoint): boolean {
-    return to === 'reserve';
+    return buildMoveRouteMeta(from, to, {
+      hasRemoteReserveRecipient: Boolean(
+        moveNeedsReserveRecipient(from, to)
+          && moveReserveRecipientEntityId.trim()
+          && moveReserveRecipientEntityId !== resolveSelfEntityId(),
+      ),
+    });
   }
 
   function isMoveAwaitingCounterparty(): boolean {
@@ -1777,7 +1664,6 @@
   let sendAssetSymbol = 'USDC';
   let sendAssetAmount = '';
   let sendAssetRecipient = '';
-  type MoveEndpoint = 'external' | 'reserve' | 'account';
   let moveFromEndpoint: MoveEndpoint = 'external';
   let moveToEndpoint: MoveEndpoint = 'reserve';
   let moveAssetSymbol = 'USDC';
