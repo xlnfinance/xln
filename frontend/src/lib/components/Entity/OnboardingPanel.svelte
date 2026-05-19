@@ -143,6 +143,7 @@
   $: brainVaultSignerAddress = String(brainVaultSigner?.address || '').trim();
   $: brainVaultWordCount = brainVaultSeed ? brainVaultSeed.split(/\s+/).filter(Boolean).length : 0;
   $: brainVaultRuntimeLabel = String($activeRuntime?.label || 'BrainVault').trim();
+  $: hasBrainVaultRecovery = Boolean(brainVaultSeed || brainVaultMnemonic12);
 
   const shortValue = (value: string): string => {
     const text = String(value || '').trim();
@@ -410,67 +411,72 @@
 
 <div class="onboarding">
   <div class="setup-card">
-    <section class="setup-section brainvault-section">
-      <details class="brainvault-details" data-testid="brainvault-onboarding-recovery">
-        <summary data-testid="brainvault-onboarding-recovery-toggle">
-          <span class="brainvault-summary-copy">
-            <strong>BrainVault recovery</strong>
-            <small>Export the seed sheet or reveal the words before continuing.</small>
-          </span>
-          <span class="brainvault-summary-meta">
-            {brainVaultWordCount ? `${brainVaultWordCount} words` : 'Seed not loaded'} · {shortValue(brainVaultSignerAddress)}
-          </span>
-          <span class="brainvault-chevron" aria-hidden="true">⌄</span>
-        </summary>
+    {#if hasBrainVaultRecovery}
+      <section class="setup-section brainvault-section">
+        <details class="brainvault-details" data-testid="brainvault-onboarding-recovery">
+          <summary data-testid="brainvault-onboarding-recovery-toggle">
+            <span class="brainvault-summary-copy">
+              <strong>BrainVault recovery</strong>
+              <small>Download the seed sheet, then continue with account setup.</small>
+            </span>
+            <span class="brainvault-summary-meta">
+              <span>{brainVaultWordCount ? `${brainVaultWordCount} words` : 'Seed ready'}</span>
+              {#if brainVaultSignerAddress}
+                <code title={brainVaultSignerAddress}>{shortValue(brainVaultSignerAddress)}</code>
+              {/if}
+            </span>
+            <span class="brainvault-chevron" aria-hidden="true">⌄</span>
+          </summary>
 
-        <div class="brainvault-panel">
-          <div class="brainvault-actions">
-            <button type="button" class="mini-action" on:click={downloadBrainVaultSheet}>
-              Download sheet
-            </button>
-            <a class="mini-action" href="/docs-static/faq.md" target="_blank" rel="noreferrer">
-              Read safety notes
-            </a>
-            <button
-              type="button"
-              class="mini-action"
-              disabled={!brainVaultSeed}
-              on:click={() => revealBrainVaultSeed = !revealBrainVaultSeed}
-            >
-              {revealBrainVaultSeed ? 'Hide seed' : 'Show seed'}
-            </button>
-            <button
-              type="button"
-              class="mini-action"
-              disabled={!brainVaultSeed}
-              on:click={() => copyBrainVaultValue(brainVaultSeed, 'seed')}
-            >
-              {copiedBrainVaultField === 'seed' ? 'Copied' : 'Copy seed'}
-            </button>
-          </div>
-          <div class="brainvault-row">
-            <span>Wallet</span>
-            <code>{brainVaultRuntimeLabel || '-'}</code>
-          </div>
-          <div class="brainvault-row">
-            <span>Signer</span>
-            <code>{brainVaultSignerAddress || '-'}</code>
-          </div>
-          {#if revealBrainVaultSeed}
-            <div class="seed-box">
-              {#each brainVaultSeed.split(/\s+/) as word, index}
-                {#if word}
-                  <span><b>{index + 1}</b>{word}</span>
-                {/if}
-              {/each}
+          <div class="brainvault-panel">
+            <div class="brainvault-actions">
+              <button type="button" class="mini-action" on:click={downloadBrainVaultSheet}>
+                Download sheet
+              </button>
+              <a class="mini-action" href="/docs-static/faq.md" target="_blank" rel="noreferrer">
+                Read safety notes
+              </a>
+              <button
+                type="button"
+                class="mini-action"
+                disabled={!brainVaultSeed}
+                on:click={() => revealBrainVaultSeed = !revealBrainVaultSeed}
+              >
+                {revealBrainVaultSeed ? 'Hide seed' : 'Show seed'}
+              </button>
+              <button
+                type="button"
+                class="mini-action"
+                disabled={!brainVaultSeed}
+                on:click={() => copyBrainVaultValue(brainVaultSeed, 'seed')}
+              >
+                {copiedBrainVaultField === 'seed' ? 'Copied' : 'Copy seed'}
+              </button>
             </div>
-          {/if}
-        </div>
-      </details>
-      <p class="brainvault-continue" data-testid="brainvault-continue-copy">
-        Or continue creating the XLN account with these data.
-      </p>
-    </section>
+            <div class="brainvault-row">
+              <span>Wallet</span>
+              <code>{brainVaultRuntimeLabel || '-'}</code>
+            </div>
+            <div class="brainvault-row">
+              <span>Signer</span>
+              <code>{brainVaultSignerAddress || '-'}</code>
+            </div>
+            {#if revealBrainVaultSeed}
+              <div class="seed-box">
+                {#each brainVaultSeed.split(/\s+/) as word, index}
+                  {#if word}
+                    <span><b>{index + 1}</b>{word}</span>
+                  {/if}
+                {/each}
+              </div>
+            {/if}
+          </div>
+        </details>
+        <p class="brainvault-continue" data-testid="brainvault-continue-copy">
+          Or continue creating the XLN account with these data.
+        </p>
+      </section>
+    {/if}
 
     <section class="setup-section">
       <label class="form-label" for="display-name">Display name</label>
@@ -607,7 +613,7 @@
     min-height: 58px;
     padding: 14px 16px 12px;
     display: grid;
-    grid-template-columns: minmax(0, 1fr) auto auto;
+    grid-template-columns: minmax(0, 1fr) minmax(120px, auto) auto;
     align-items: center;
     gap: 12px;
     cursor: pointer;
@@ -638,12 +644,21 @@
   }
 
   .brainvault-summary-meta {
-    max-width: 240px;
     min-width: 0;
     color: #78716c;
     font-family: 'JetBrains Mono', monospace;
     font-size: 11px;
     text-align: right;
+    display: inline-flex;
+    align-items: center;
+    justify-content: flex-end;
+    gap: 8px;
+  }
+
+  .brainvault-summary-meta span,
+  .brainvault-summary-meta code {
+    min-width: 0;
+    max-width: 160px;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -678,7 +693,7 @@
 
   .brainvault-actions {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
     gap: 8px;
   }
 
@@ -697,6 +712,7 @@
     text-align: center;
     text-decoration: none;
     cursor: pointer;
+    line-height: 1.25;
   }
 
   .mini-action:disabled {
@@ -847,6 +863,28 @@
     display: grid;
     grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 10px;
+  }
+
+  @media (max-width: 640px) {
+    .brainvault-details summary {
+      grid-template-columns: minmax(0, 1fr) auto;
+    }
+
+    .brainvault-summary-meta {
+      grid-column: 1 / -1;
+      justify-content: flex-start;
+      text-align: left;
+    }
+
+    .brainvault-actions,
+    .policy-grid {
+      grid-template-columns: minmax(0, 1fr);
+    }
+
+    .brainvault-row {
+      grid-template-columns: minmax(0, 1fr);
+      gap: 4px;
+    }
   }
 
   .policy-field {
