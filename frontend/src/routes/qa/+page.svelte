@@ -749,7 +749,6 @@
   .detail-meta,
   .suite-list-meta,
   .suite-row-title code,
-  .suite-row-title span,
   small,
   p {
     color: #9b978a;
@@ -859,11 +858,6 @@
     font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
     font-size: 0.76rem;
     overflow-wrap: anywhere;
-  }
-
-  .suite-row-title span {
-    font-size: 0.78rem;
-    white-space: nowrap;
   }
 
   .suite-row-main p {

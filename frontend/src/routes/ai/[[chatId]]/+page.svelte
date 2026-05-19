@@ -1636,10 +1636,6 @@ Help the user understand this entity's state, suggest actions, or answer questio
     cursor: pointer;
   }
 
-  .council-toggle input:checked + * {
-    color: #00ff88;
-  }
-
   .agent-toggle {
     display: flex;
     align-items: center;
