@@ -1391,13 +1391,6 @@
     color: rgba(255, 255, 255, 0.9);
   }
 
-  .footnote {
-    font-size: 0.85rem;
-    color: rgba(255, 255, 255, 0.7);
-    margin-top: 1.5rem;
-    font-style: italic;
-  }
-
   .technical-context {
     margin-top: 2rem;
     padding-top: 2rem;
@@ -1458,14 +1451,6 @@
     font-size: 2rem;
     color: rgba(255, 255, 255, 0.7);
     font-weight: 300;
-  }
-
-  .formula-note {
-    text-align: center;
-    font-size: 0.85rem;
-    color: rgba(255, 255, 255, 0.8);
-    margin: -1rem 0 1.5rem;
-    font-style: italic;
   }
 
   /* Triple-S First Principles */
@@ -1846,26 +1831,6 @@
     font-family: 'JetBrains Mono', monospace;
   }
 
-  :global(.light-mode) .contract-core {
-    background: linear-gradient(135deg, rgba(79,209,139,0.12), rgba(79,209,139,0.06));
-    border-color: rgba(79,209,139,0.5);
-  }
-
-  :global(.light-mode) .contract-module {
-    background: rgba(0,0,0,0.02);
-    border-color: rgba(0,0,0,0.15);
-  }
-
-  :global(.light-mode) .contract-name-large,
-  :global(.light-mode) .contract-name {
-    color: rgba(0,0,0,0.95);
-  }
-
-  :global(.light-mode) .contract-desc-large,
-  :global(.light-mode) .contract-desc {
-    color: rgba(0,0,0,0.7);
-  }
-
   .plot-twist {
     margin-top: 4rem;
     padding: 2rem;
@@ -1969,48 +1934,6 @@
 
   .roadmap-text strong {
     color: #4fd18b;
-  }
-
-  .endgame-box {
-    margin-top: 2rem;
-    padding: 1.5rem;
-    background: rgba(0, 0, 0, 0.3);
-    border-left: 3px solid #00d1ff;
-    border-radius: 4px;
-  }
-
-  .endgame-text {
-    margin: 0 0 1rem;
-    font-size: 1.05rem;
-    line-height: 1.7;
-    color: rgba(255, 255, 255, 0.9);
-  }
-
-  .endgame-text:last-child {
-    margin-bottom: 0;
-    font-style: italic;
-    color: #00d1ff;
-  }
-
-  .invariant-box {
-    margin: 2rem 0;
-    padding: 1.5rem;
-    background: rgba(79, 209, 139, 0.05);
-    border: 1px solid rgba(79, 209, 139, 0.2);
-    border-radius: 8px;
-  }
-
-  .tickers-grid {
-    display: grid;
-    grid-template-columns: 1fr auto;
-    gap: 2rem;
-    align-items: center;
-  }
-
-  .tickers-column {
-    display: flex;
-    flex-direction: column;
-    gap: 1.5rem;
   }
 
   /* Simple Linear Evolution Timeline - FULL WIDTH */
@@ -2194,74 +2117,6 @@
 
   .evo-item-branch {
     position: relative;
-  }
-
-  .evo-branch-line {
-    /* HIDDEN - was causing green artifact above timeline */
-    display: none;
-  }
-
-  .evo-dot {
-    width: 100px;
-    height: 100px;
-    border-radius: 50%;
-    background: radial-gradient(circle, #fff 0%, #ffd700 35%, #ff8844 70%, #ff6b6b 100%);
-    box-shadow:
-      0 0 30px rgba(255, 255, 255, 0.9),
-      0 0 60px rgba(255, 215, 0, 0.6),
-      0 0 100px rgba(255, 136, 68, 0.4);
-    animation: bang-pulse 3s ease-in-out infinite;
-  }
-
-  @keyframes bang-pulse {
-    0%, 100% {
-      transform: scale(1);
-      box-shadow:
-        0 0 30px rgba(255, 255, 255, 0.9),
-        0 0 60px rgba(255, 215, 0, 0.6),
-        0 0 90px rgba(255, 107, 107, 0.4);
-    }
-    50% {
-      transform: scale(1.15);
-      box-shadow:
-        0 0 40px rgba(255, 255, 255, 1),
-        0 0 80px rgba(255, 215, 0, 0.8),
-        0 0 120px rgba(255, 107, 107, 0.6);
-    }
-  }
-
-  .evo-line {
-    flex-shrink: 0;
-    position: relative;
-    z-index: 1;
-  }
-
-  .evo-line-thick {
-    width: 100px;
-    height: 3px;
-    background: linear-gradient(to right, rgba(255,255,255,0.2), rgba(200,200,200,0.3));
-  }
-
-  .evo-line-finale {
-    width: 80px;
-    height: 4px;
-    background: linear-gradient(to right, rgba(79,209,139,0.4), rgba(79,209,139,0.6));
-    box-shadow: 0 0 32px rgba(79,209,139,0.6);
-    animation: pulse-glow 2s ease-in-out infinite;
-  }
-
-  @keyframes pulse-glow {
-    0%, 100% { box-shadow: 0 0 32px rgba(79,209,139,0.6); }
-    50% { box-shadow: 0 0 48px rgba(79,209,139,0.85); }
-  }
-
-  .evo-line-future {
-    display: none; /* Removed - no line after RCPAN */
-  }
-
-  .evo-merge {
-    /* OLD BUTTON STYLE - replaced by evo-merge-flow */
-    display: none;
   }
 
   .evo-merge-flow {
@@ -2603,12 +2458,6 @@
     color: rgba(0, 0, 0, 0.85);
   }
 
-  :global(.light-mode) .evo-merge {
-    background: rgba(79, 209, 139, 0.2);
-    border-color: rgba(79, 209, 139, 0.6);
-    color: #2a8a5f;
-  }
-
   /* Color Legend */
   .color-legend {
     display: flex;
@@ -2667,100 +2516,7 @@
     color: rgba(0, 0, 0, 0.7);
   }
 
-  .visual-column {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    justify-content: center;
-    min-width: 300px;
-    gap: 0.75rem;
-  }
-
-  .rcpan-visual {
-    width: 85%;
-    max-width: 340px;
-    height: auto;
-    display: block;
-    filter: drop-shadow(0 0 20px rgba(79, 209, 139, 0.3));
-    transition: filter 0.3s ease;
-  }
-
-  .rcpan-visual:hover {
-    filter: drop-shadow(0 0 30px rgba(79, 209, 139, 0.5));
-  }
-
-  .visual-caption {
-    font-size: 0.8rem;
-    color: rgba(255, 255, 255, 0.85);
-    text-align: center;
-    font-style: italic;
-    max-width: 340px;
-  }
-
-  .visualization-link-section {
-    width: 100%;
-    max-width: 800px;
-    margin: 2rem 0;
-  }
-
-  .viz-link-card {
-    display: block;
-    padding: 2rem;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.15);
-    border-radius: 8px;
-    text-decoration: none;
-    transition: all 0.3s ease;
-  }
-
-  .viz-link-card:hover {
-    background: rgba(255, 255, 255, 0.05);
-    border-color: rgba(79, 209, 139, 0.4);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 20px rgba(79, 209, 139, 0.15);
-  }
-
-  .viz-link-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 0.5rem;
-  }
-
-  .viz-link-header h3 {
-    margin: 0;
-    font-size: 1.2rem;
-    font-weight: 600;
-    color: #fff;
-  }
-
-  .arrow {
-    font-size: 1.5rem;
-    color: rgba(79, 209, 139, 0.6);
-    transition: transform 0.3s ease;
-  }
-
-  .viz-link-card:hover .arrow {
-    transform: translateX(5px);
-    color: rgba(79, 209, 139, 1);
-  }
-
-  .viz-link-desc {
-    margin: 0;
-    font-size: 0.95rem;
-    color: rgba(255, 255, 255, 0.85);
-    line-height: 1.6;
-  }
-
   @media (max-width: 1024px) {
-    .tickers-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .visual-column {
-      margin-top: 1rem;
-    }
-
     .principles-grid {
       grid-template-columns: repeat(2, 1fr);
     }
@@ -2787,28 +2543,6 @@
     color: rgba(255, 255, 255, 0.7);
     margin: 0 0 1.5rem;
     line-height: 1.6;
-  }
-
-  .superprompt-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: flex-start;
-    gap: 2rem;
-    flex-wrap: wrap;
-    margin-bottom: 1.5rem;
-  }
-
-  .superprompt-header h2 {
-    font-size: 1.4rem;
-    font-weight: 600;
-    margin: 0 0 0.5rem;
-    color: #4fd18b;
-  }
-
-  .superprompt-header p {
-    font-size: 0.9rem;
-    color: rgba(255, 255, 255, 0.7);
-    margin: 0;
   }
 
   .superprompt-actions {
@@ -2968,29 +2702,10 @@
     min-width: 300px;
   }
 
-  .label-title {
-    font-size: 1.1rem;
-    font-weight: 600;
-    margin-bottom: 0.75rem;
-    color: rgba(255, 255, 255, 0.95);
-  }
-
   .label-subtitle {
     font-size: 0.9rem;
     line-height: 1.7;
     color: rgba(255, 255, 255, 0.85);
-  }
-
-  .context-inline {
-    color: rgba(255, 255, 255, 0.8);
-    text-decoration: none;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.3);
-    transition: all 0.2s;
-  }
-
-  .context-inline:hover {
-    color: rgba(255, 255, 255, 1);
-    border-bottom-color: rgba(255, 255, 255, 0.8);
   }
 
   .copy-all-btn {
@@ -3106,53 +2821,6 @@
     gap: 1.5rem;
     font-size: 0.85rem;
     margin-top: 4rem;
-  }
-
-  .context-highlight {
-    width: 100%;
-    max-width: 700px;
-  }
-
-  .context-link {
-    display: block;
-    padding: 1.5rem 2rem;
-    background: rgba(79, 209, 139, 0.08);
-    border: 2px solid rgba(79, 209, 139, 0.3);
-    border-radius: 8px;
-    text-decoration: none;
-    transition: all 0.3s ease;
-  }
-
-  .context-link:hover {
-    background: rgba(79, 209, 139, 0.12);
-    border-color: rgba(79, 209, 139, 0.5);
-    transform: translateY(-2px);
-    box-shadow: 0 4px 20px rgba(79, 209, 139, 0.2);
-  }
-
-  .context-header {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-    margin-bottom: 0.5rem;
-  }
-
-  .context-icon {
-    font-size: 1.5rem;
-  }
-
-  .context-title {
-    font-size: 1.2rem;
-    font-weight: 600;
-    color: #4fd18b;
-    font-family: 'JetBrains Mono', monospace;
-  }
-
-  .context-desc {
-    font-size: 0.9rem;
-    color: rgba(255, 255, 255, 0.8);
-    line-height: 1.6;
-    margin: 0;
   }
 
   .footer-links {
@@ -3271,19 +2939,6 @@
     color: rgba(0, 0, 0, 0.6);
   }
 
-  .landing.light-mode .endgame-box {
-    background: rgba(0, 0, 0, 0.05);
-    border-left-color: #007acc;
-  }
-
-  .landing.light-mode .endgame-text {
-    color: rgba(0, 0, 0, 0.85);
-  }
-
-  .landing.light-mode .endgame-text:last-child {
-    color: #007acc;
-  }
-
   .landing.light-mode .plot-twist {
     background: rgba(0, 122, 204, 0.05);
     border-color: rgba(0, 122, 204, 0.3);
@@ -3322,24 +2977,6 @@
   .landing.light-mode code {
     background: rgba(0, 0, 0, 0.08);
     color: #2a9d5f;
-  }
-
-  .landing.light-mode .context-link {
-    background: rgba(79, 209, 139, 0.12);
-    border-color: rgba(79, 209, 139, 0.4);
-  }
-
-  .landing.light-mode .context-link:hover {
-    background: rgba(79, 209, 139, 0.18);
-    border-color: rgba(79, 209, 139, 0.6);
-  }
-
-  .landing.light-mode .context-title {
-    color: #2a9d5f;
-  }
-
-  .landing.light-mode .context-desc {
-    color: rgba(0, 0, 0, 0.75);
   }
 
   .landing.light-mode .footer-link {
@@ -3410,16 +3047,6 @@
   .landing.light-mode .label-subtitle,
   .landing.light-mode .section-desc {
     color: rgba(0, 0, 0, 0.6);
-  }
-
-  .landing.light-mode .context-inline {
-    color: rgba(0, 0, 0, 0.8);
-    border-bottom-color: rgba(0, 0, 0, 0.3);
-  }
-
-  .landing.light-mode .context-inline:hover {
-    color: rgba(0, 0, 0, 1);
-    border-bottom-color: rgba(0, 0, 0, 0.8);
   }
 
   .landing.light-mode .form-input,
@@ -3505,11 +3132,6 @@
     background-clip: text;
   }
 
-  .landing.light-mode .invariant-box {
-    background: rgba(79, 209, 139, 0.08);
-    border-color: rgba(79, 209, 139, 0.3);
-  }
-
   .landing.light-mode .formula-divider {
     color: rgba(0, 0, 0, 0.4);
   }
@@ -3572,16 +3194,8 @@
       padding: 0.75rem;
     }
 
-    .label-title {
-      font-size: 1rem;
-    }
-
     .label-subtitle {
       font-size: 0.85rem;
-    }
-
-    .properties-grid {
-      grid-template-columns: 1fr;
     }
   }
 </style>
