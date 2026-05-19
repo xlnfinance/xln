@@ -341,45 +341,6 @@
     border-color: #007acc;
   }
 
-  .hub-details-section {
-    margin-top: 16px;
-    padding-top: 16px;
-    border-top: 1px solid #3e3e3e;
-  }
-
-  .hub-details-header {
-    margin: 0 0 16px 0;
-    font-size: 1.1em;
-    color: #007acc;
-    font-weight: 500;
-  }
-
-  .checkbox-label {
-    display: flex !important;
-    align-items: center;
-    gap: 8px;
-    cursor: pointer;
-    margin-bottom: 0 !important;
-  }
-
-  .form-checkbox {
-    width: auto !important;
-    margin: 0;
-  }
-
-  .checkbox-text {
-    font-size: 0.9em;
-    color: #d4d4d4;
-  }
-
-  .form-hint {
-    display: block;
-    margin-top: 4px;
-    font-size: 0.8em;
-    color: #9d9d9d;
-    line-height: 1.3;
-  }
-
   .form-actions {
     display: flex;
     flex-direction: column;

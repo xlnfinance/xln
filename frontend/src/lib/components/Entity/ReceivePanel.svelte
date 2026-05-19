@@ -206,8 +206,7 @@
   }
 
   .entity-id-card code,
-  .invoice-string code,
-  .wallet-fallback code {
+  .invoice-string code {
     font-family: 'JetBrains Mono', monospace;
     color: #f5efe6;
     word-break: break-all;

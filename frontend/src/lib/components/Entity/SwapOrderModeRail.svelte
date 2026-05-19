@@ -134,8 +134,7 @@
       width: 100%;
     }
 
-    .side-tab,
-    .type-tab-text {
+    .side-tab {
       width: 100%;
     }
 
