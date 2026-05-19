@@ -520,11 +520,6 @@
     color: var(--hub-text);
   }
 
-  .panel-note {
-    font-size: 12px;
-    color: var(--hub-text-muted);
-  }
-
   .header-controls {
     display: flex;
     align-items: center;
@@ -733,73 +728,12 @@
     animation: spin 1s linear infinite;
   }
 
-  .hub-subline {
-    display: flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 8px;
-    min-width: 0;
-    color: var(--hub-text-muted);
-    font-size: 11px;
-  }
-
-  .hub-id {
-    color: var(--hub-text-secondary);
-    max-width: 100%;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .hub-dot {
-    width: 3px;
-    height: 3px;
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--hub-text-muted) 72%, transparent);
-    flex: 0 0 auto;
-  }
-
-  .hub-inline-meta {
-    color: var(--hub-text-muted);
-  }
-
   .hub-actions {
     display: flex;
     align-items: center;
     gap: 8px;
     flex-wrap: wrap;
     justify-content: flex-end;
-  }
-
-  .badge {
-    border-radius: 999px;
-    border: 1px solid color-mix(in srgb, var(--hub-border) 56%, transparent);
-    padding: 4px 9px;
-    font-size: 10px;
-    letter-spacing: 0.06em;
-    text-transform: uppercase;
-    color: var(--hub-text-secondary);
-    background: color-mix(in srgb, var(--hub-elevated) 100%, transparent);
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    font-weight: 700;
-  }
-
-  .badge.verified {
-    color: var(--hub-accent);
-    background: color-mix(in srgb, var(--hub-accent) 10%, transparent);
-    border-color: color-mix(in srgb, var(--hub-accent) 18%, transparent);
-  }
-
-  .badge.score {
-    color: var(--hub-text);
-  }
-
-  .badge.open {
-    color: color-mix(in srgb, var(--theme-credit, #22c55e) 72%, white 28%);
-    background: color-mix(in srgb, var(--theme-credit, #22c55e) 10%, transparent);
-    border-color: color-mix(in srgb, var(--theme-credit, #22c55e) 18%, transparent);
   }
 
   .btn-connect {
@@ -975,10 +909,6 @@
       gap: 10px;
     }
 
-    .hub-subline {
-      gap: 5px 6px;
-    }
-
     .hub-card-top,
     .row-details {
       padding-left: 14px;
@@ -992,11 +922,6 @@
     .panel-kicker {
       font-size: 9px;
       letter-spacing: 0.08em;
-    }
-
-    .panel-note {
-      font-size: 11px;
-      line-height: 1.35;
     }
 
     .refresh-btn {
