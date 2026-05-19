@@ -1497,21 +1497,6 @@
     margin-bottom: 8px;
   }
 
-  .btn-refresh-gas {
-    border: 1px solid #3f3f46;
-    background: #18181b;
-    color: #d6d3d1;
-    border-radius: 6px;
-    padding: 4px 8px;
-    font-size: 11px;
-    cursor: pointer;
-  }
-
-  .btn-refresh-gas:disabled {
-    opacity: 0.6;
-    cursor: not-allowed;
-  }
-
   .gas-presets {
     display: grid;
     grid-template-columns: repeat(4, minmax(0, 1fr));
@@ -1732,10 +1717,6 @@
     margin: 8px 0 0;
     color: #fda4af;
     font-size: 12px;
-  }
-
-  .dispute-state.finalized {
-    color: #fb7185;
   }
 
   .action-tabs {
