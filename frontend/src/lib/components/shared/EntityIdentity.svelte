@@ -8,7 +8,6 @@
   export let copyable: boolean = true;
   export let clickable: boolean = true;
   export let showAddress: boolean = true;
-  export let compact: boolean = false;
 
   let copied = false;
   $: activeXlnFunctions = $xlnFunctions;

@@ -484,7 +484,6 @@
           entityId={counterpartyId}
           name={counterpartyName}
           showAddress={true}
-          compact={false}
         />
       </div>
 

@@ -1547,7 +1547,6 @@
                       <EntityIdentity
                         entityId={hopId}
                         name={getEntityName(hopId)}
-                        compact={true}
                         clickable={false}
                         copyable={false}
                         showAddress={false}

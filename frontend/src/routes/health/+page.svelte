@@ -407,7 +407,6 @@
                 size={28}
                 copyable={true}
                 clickable={true}
-                compact={false}
               />
               <div class="entity-tags">
                 <span class="chip" class:ok={hub.online === true} class:bad={hub.online === false}>{hub.online ? 'online' : 'offline'}</span>
@@ -441,7 +440,6 @@
                 size={24}
                 copyable={true}
                 clickable={false}
-                compact={true}
               />
               <div class="entity-tags">
                 <span class="chip">age:{Math.round(client.ageMs / 1000)}s</span>
@@ -493,7 +491,6 @@
                 size={28}
                 copyable={true}
                 clickable={true}
-                compact={false}
               />
               <div class="entity-tags">
                 <span class="chip" class:ok={entity.online} class:bad={!entity.online}>{entity.online ? 'online' : 'offline'}</span>
