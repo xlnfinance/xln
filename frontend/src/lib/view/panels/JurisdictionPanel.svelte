@@ -1318,19 +1318,6 @@
     font-style: normal;
   }
 
-  .empty.history-notice {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    color: #8b949e;
-    font-style: normal;
-  }
-
-  .empty.history-notice .subtext {
-    font-size: 9px;
-    color: #6e7681;
-  }
-
   .info-grid {
     padding: 8px;
   }
@@ -1517,39 +1504,6 @@
     font-size: 12px;
   }
 
-  .account-key {
-    color: #d29922;
-    font-size: 9px;
-    min-width: 80px;
-  }
-
-  .token-id {
-    color: #8b949e;
-    font-size: 9px;
-    min-width: 30px;
-  }
-
-  .collateral-value {
-    color: #7ee787;
-    font-weight: 600;
-    min-width: 60px;
-    text-align: right;
-  }
-
-  .ondelta-value {
-    color: #8b949e;
-    min-width: 60px;
-    text-align: right;
-  }
-
-  .ondelta-value.positive {
-    color: #7ee787;
-  }
-
-  .ondelta-value.negative {
-    color: #f85149;
-  }
-
   /* Accounts table styles */
   .accounts-table {
     width: 100%;
@@ -1646,19 +1600,9 @@
     min-width: 70px;
   }
 
-  .tx-from, .tx-to {
-    color: #58a6ff;
-    font-size: 9px;
-  }
-
   .tx-arrow {
     color: #8b949e;
     font-size: 10px;
   }
 
-  .tx-amount {
-    color: #7ee787;
-    font-weight: 600;
-    margin-left: auto;
-  }
 </style>
