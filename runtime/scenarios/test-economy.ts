@@ -37,8 +37,7 @@ export async function createEconomy(
   env: Env,
   config: EconomyConfig
 ): Promise<{ hubs: EconomyEntity[]; users: EconomyEntity[][]; all: EconomyEntity[] }> {
-  const { applyRuntimeInput } = await import('../runtime');
-  const { getProcess } = await import('./helpers');
+  const { commitRuntimeInput, getProcess } = await import('./helpers');
   const process = await getProcess();
 
   console.log(`🏗️  Creating economy: ${config.numHubs} hubs × ${config.usersPerHub} users/hub\n`);
@@ -81,7 +80,7 @@ export async function createEconomy(
 
   // Batch import all entities
   console.log(`   Creating ${all.length} entities...`);
-  await applyRuntimeInput(env, {
+  await commitRuntimeInput(env, {
     runtimeTxs: all.map(e => ({
       type: 'importReplica' as const,
       entityId: e.id,
@@ -142,7 +141,14 @@ export async function openAccount(
     signerId: entityA.signer,
     entityTxs: [{
       type: 'openAccount',
-      data: { targetEntityId: entityB.id }
+      data: {
+        targetEntityId: entityB.id,
+        rebalancePolicy: {
+          r2cRequestSoftLimit: creditLimit,
+          hardLimit: creditLimit,
+          maxAcceptableFee: 0n,
+        },
+      }
     }]
   }]);
 

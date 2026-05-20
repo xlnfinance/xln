@@ -175,8 +175,9 @@ export async function htlc4hop(env: Env): Promise<void> {
   const feeDelta = abs(spread - totalFeesEarned);
   assert(bobReceived > 0n, `Bob received a positive amount: ${bobReceived}`);
   assert(bobReceived <= totalPaymentAmount, `Bob received no more than the quoted amount: ${bobReceived} <= ${totalPaymentAmount}`);
-  assert(alicePaid <= totalPaymentAmount, `Alice paid no more than the quoted amount: ${alicePaid} <= ${totalPaymentAmount}`);
-  assert(alicePaid >= bobReceived, `Alice covered Bob's received amount: ${alicePaid} >= ${bobReceived}`);
+  assert(bobReceived === totalPaymentAmount, `Bob received the exact quoted amount: ${bobReceived} === ${totalPaymentAmount}`);
+  assert(alicePaid >= totalPaymentAmount, `Alice paid at least the quoted amount plus route fees: ${alicePaid} >= ${totalPaymentAmount}`);
+  assert(alicePaid >= bobReceived, `Alice covered Bob's received amount and fees: ${alicePaid} >= ${bobReceived}`);
   assert(totalFeesEarned > 0n, `Intermediaries earned non-zero fees: ${totalFeesEarned}`);
   assert(feeDelta <= feeRoundingTolerance, `Fee spread matches earned fees within rounding: |${spread} - ${totalFeesEarned}| <= ${feeRoundingTolerance}`);
 
