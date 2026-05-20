@@ -1456,10 +1456,10 @@
 
                 {#if derivedEoaAddresses.length > 0}
                   <div class="result-section">
-                    <label>
+                    <div class="result-label">
                       EOA Addresses
                       <span class="label-hint">(standard derivation)</span>
-                    </label>
+                    </div>
                     <div class="eoa-grid">
                       {#each derivedEoaAddresses as item}
                         <div class="eoa-row" data-testid={`brainvault-eoa-address-${item.index}`}>
@@ -1479,10 +1479,10 @@
 
                 {#if recoveryMnemonic12}
                   <div class="result-section">
-                    <label>
+                    <div class="result-label">
                       Recovery Phrase
                       <span class="label-hint">(12 words)</span>
-                    </label>
+                    </div>
                     <div class="result-box mnemonic" data-testid="brainvault-mnemonic-12">
                       <div class="mnemonic-words compact">
                         {#each recoveryMnemonic12.split(' ') as word, i}
@@ -1499,10 +1499,10 @@
                 {/if}
 
                 <div class="result-section">
-                  <label>
+                  <div class="result-label">
                     Recovery Phrase
                     <span class="label-hint">(24 words)</span>
-                  </label>
+                  </div>
                   <div class="result-box mnemonic" data-testid="brainvault-mnemonic-24">
                     <div class="mnemonic-words">
                       {#each recoveryMnemonic24.split(' ') as word, i}
@@ -1524,7 +1524,6 @@
             </button>
           </section>
 
-          <!-- Save Vault Modal -->
           {#if showSaveVaultModal}
             <div class="modal-overlay" on:click={() => showSaveVaultModal = false}>
               <div class="modal-content" on:click|stopPropagation>
@@ -3008,12 +3007,11 @@
     margin: 0 4px;
   }
 
-  /* Result Sections */
   .result-section {
     margin-bottom: 28px;
   }
 
-  .result-section > label {
+  .result-label {
     display: flex;
     align-items: baseline;
     gap: 8px;
@@ -3148,7 +3146,6 @@
     opacity: 0.7;
   }
 
-  /* Save Vault Modal */
   .modal-overlay {
     position: fixed;
     inset: 0;
