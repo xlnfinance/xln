@@ -320,7 +320,7 @@
   </div>
 
   <div class="field">
-    <label>Entity Name</label>
+    <div class="field-label">Entity Name</div>
     <input
       type="text"
       bind:value={entityName}
@@ -386,7 +386,7 @@
 
   {#if validators.length > 1}
     <div class="field">
-      <label>Threshold</label>
+      <div class="field-label">Threshold</div>
       <div class="threshold-selector">
         <input
           type="range"
@@ -512,7 +512,7 @@
     gap: 8px;
   }
 
-  .field label, .field-label {
+  .field-label {
     font-size: 11px;
     font-weight: 500;
     color: var(--theme-text-secondary, #a1a1aa);

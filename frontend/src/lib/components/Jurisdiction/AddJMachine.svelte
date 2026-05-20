@@ -303,7 +303,7 @@
     </div>
 
     <div class="field">
-      <label>Chain ID</label>
+      <div class="field-label">Chain ID</div>
       {#if selectedNetworkId === 'custom'}
         <input
           type="number"
@@ -317,7 +317,7 @@
     </div>
 
     <div class="field">
-      <label>RPC URLs <span class="hint">(one per line)</span></label>
+      <div class="field-label">RPC URLs <span class="hint">(one per line)</span></div>
       <textarea
         bind:value={rpcTextarea}
         placeholder="https://rpc.example.com&#10;https://backup.example.com"
@@ -341,7 +341,7 @@
   {/if}
 
   <div class="field">
-    <label>Name</label>
+    <div class="field-label">Name</div>
     <input
       type="text"
       bind:value={name}
@@ -411,7 +411,7 @@
     margin-bottom: 1rem;
   }
 
-  label, .field-label {
+  .field-label {
     display: block;
     font-size: 0.8rem;
     color: var(--text-secondary, #888);
