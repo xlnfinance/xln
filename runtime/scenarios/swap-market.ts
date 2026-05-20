@@ -17,18 +17,16 @@
 
 import type { Env, EntityInput } from '../types';
 import { ensureJAdapter, getJAdapterMode, createJReplica } from './boot';
-import { findReplica, converge, assert, assertRuntimeIdle, processUntil, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
+import { commitRuntimeInput, findReplica, converge, assert, assertRuntimeIdle, processUntil, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 import { createGossipLayer } from '../networking/gossip';
 import { getAccountFrameHistoryView } from '../env-events';
 import { getBookOrders } from '../orderbook/core';
 
-type ApplyRuntimeInputFn = typeof import('../runtime').applyRuntimeInput;
 type MarketHub = { name: string; id: string; signer: string; role: string; pairs: string[] };
 type MarketTrader = { name: string; id: string; signer: string; role: string };
 
 // Lazy-loaded runtime functions
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
-let _applyRuntimeInput: ApplyRuntimeInputFn | null = null;
 
 const getProcess = async () => {
   if (!_process) {
@@ -36,18 +34,6 @@ const getProcess = async () => {
     _process = runtime.process;
   }
   return _process;
-};
-
-const getApplyRuntimeInput = async () => {
-  if (!_applyRuntimeInput) {
-    const runtime = await import('../runtime');
-    _applyRuntimeInput = runtime.applyRuntimeInput;
-  }
-  const applyRuntimeInput = _applyRuntimeInput;
-  if (!applyRuntimeInput) {
-    throw new Error('SWAP_MARKET_APPLY_RUNTIME_INPUT_UNAVAILABLE');
-  }
-  return applyRuntimeInput;
 };
 
 const requireDefined = <T>(value: T | undefined, label: string): T => {
@@ -92,7 +78,6 @@ export async function swapMarket(env: Env): Promise<void> {
   requireRuntimeSeed(env, 'Swap Market');
   ensureSignerKeysFromSeed(env, ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10'], 'Swap Market');
   const process = await getProcess();
-  const applyRuntimeInput = await getApplyRuntimeInput();
 
   if (env.scenarioMode && env.height === 0) {
     env.timestamp = 1;
@@ -241,7 +226,7 @@ export async function swapMarket(env: Env): Promise<void> {
     },
   }));
 
-  await applyRuntimeInput(env, { runtimeTxs: createEntityTxs, entityInputs: [] });
+  await commitRuntimeInput(env, { runtimeTxs: createEntityTxs, entityInputs: [] });
   console.log(`  ✅ Created: ${entities.map(e => e.name).join(', ')}\n`);
 
   const hubEth = requireDefined(hubs[0], 'HubETH');
@@ -849,7 +834,6 @@ export async function swapMarketStress(env: Env): Promise<void> {
   requireRuntimeSeed(env, 'Swap Market Stress');
   ensureSignerKeysFromSeed(env, ['1', '2', '3', '4', '5', '6', '7', '8', '9', '10', '11'], 'Swap Market Stress');
   const process = await getProcess();
-  const applyRuntimeInput = await getApplyRuntimeInput();
 
   if (env.scenarioMode && env.height === 0) {
     env.timestamp = 1;
@@ -908,7 +892,7 @@ export async function swapMarketStress(env: Env): Promise<void> {
     },
   }));
 
-  await applyRuntimeInput(env, { runtimeTxs: createEntityTxs, entityInputs: [] });
+  await commitRuntimeInput(env, { runtimeTxs: createEntityTxs, entityInputs: [] });
   console.log(`✅ Created ${allEntities.length} entities\n`);
 
   // Initialize hub orderbook
