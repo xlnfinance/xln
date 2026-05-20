@@ -152,11 +152,10 @@
         <div class="disabled-message">Open /app for the panel workspace</div>
       </div>
 
-      <!-- YouTube-style controls -->
       <div class="controls">
-        <div class="progress-bar" on:click={handleProgressClick}>
+        <button type="button" class="progress-bar" on:click={handleProgressClick} aria-label="Seek scenario frame">
           <div class="progress-fill" style="width: {progress}%"></div>
-        </div>
+        </button>
 
         <div class="control-row">
           <div class="control-group">
@@ -238,6 +237,10 @@
   }
 
   .progress-bar {
+    display: block;
+    width: 100%;
+    border: 0;
+    padding: 0;
     height: 4px;
     background: var(--bg);
     border-radius: 2px;
