@@ -83,9 +83,6 @@ export async function createEphemeralEntity(
 
   // Lazy entities are addressed by the EntityProvider board hash.
   const entityId = xln.generateLazyEntityId([signerId], 1n);
-  console.log(`[EntityFactory] Entity ID: ${entityId.slice(0, 18)}...`);
-  console.log(`[EntityFactory]   signer: ${signerId}`);
-  console.log(`[EntityFactory]   provider: ${jurisdiction.entityProviderAddress}`);
 
   // Use createLazyEntity from runtime for proper config structure
   const { config } = xln.createLazyEntity(

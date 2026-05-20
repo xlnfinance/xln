@@ -6,41 +6,13 @@ export function formatTimestamp(timestamp: number): string {
 }
 
 export function getRuntimeFrames(history: Snapshot[], replica: EntityReplica | null): RuntimeFrame[] {
-  console.log(`🔍 [RuntimeFrameProcessor] getRuntimeFrames called:`, {
-    historyLength: history?.length || 0,
-    historyExists: !!history,
-    replicaExists: !!replica,
-    replicaId: replica?.signerId + ':' + replica?.entityId,
-  });
-
   if (!history || history.length === 0) {
-    console.log(`❌ [RuntimeFrameProcessor] No server history available:`, { 
-      history, 
-      historyLength: history?.length 
-    });
     return [];
   }
 
   if (!replica) {
-    console.log(`❌ [RuntimeFrameProcessor] No replica provided`);
     return [];
   }
-
-  console.log(
-    `🗂️ [RuntimeFrameProcessor] Processing history for replica ${replica.signerId}:${replica.entityId}, total frames: ${history.length}`,
-  );
-  
-  console.log(
-    `🗂️ [RuntimeFrameProcessor] First few snapshots:`,
-    history.slice(0, 3).map((s, i) => ({
-      frame: i,
-      keys: Object.keys(s),
-      runtimeInput: s.runtimeInput ? Object.keys(s.runtimeInput) : 'missing',
-      entityInputsCount: s.runtimeInput?.entityInputs?.length || 0,
-      runtimeOutputsCount: s.runtimeOutputs?.length || 0,
-      timestamp: s.timestamp,
-    })),
-  );
 
   return history.map((snapshot, frameIndex) => {
     const entityInputs = snapshot.runtimeInput?.entityInputs || [];

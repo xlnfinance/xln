@@ -1,17 +1,13 @@
 import { writable, get } from 'svelte/store';
 import type { Tab } from '$lib/types/ui';
 
-// Tab System State
 export const tabs = writable<Tab[]>([]);
 export const activeTabId = writable<string | null>(null);
 export const nextTabId = writable<number>(1);
 
-// Storage key for persistence
 const STORAGE_KEY = 'xln-entity-tabs';
 
-// Tab Operations
 const tabOperations = {
-  // Load tabs from localStorage
   loadFromStorage() {
     try {
       if (typeof localStorage === 'undefined') return;
@@ -22,7 +18,6 @@ const tabOperations = {
         tabs.set(tabData.tabs || []);
         activeTabId.set(tabData.activeTabId || null);
         nextTabId.set(tabData.nextTabId || 1);
-        console.log('📁 Tabs loaded from localStorage:', tabData);
       }
     } catch (error) {
       console.error('❌ Failed to load tabs (clearing corrupted storage):', error);
@@ -33,7 +28,6 @@ const tabOperations = {
     }
   },
 
-  // Save tabs to localStorage
   saveToStorage() {
     try {
       if (typeof localStorage === 'undefined') return;
@@ -44,20 +38,17 @@ const tabOperations = {
         nextTabId: get(nextTabId)
       };
       localStorage.setItem(STORAGE_KEY, JSON.stringify(tabData));
-      console.log('💾 Tabs saved to localStorage:', tabData);
     } catch (error) {
       console.error('❌ Failed to save tabs:', error);
     }
   },
 
-  // Generate unique tab ID
   generateTabId(): string {
     const current = get(nextTabId);
     nextTabId.set(current + 1);
     return `tab-${current}`;
   },
 
-  // Add new tab
   addTab(entityId?: string, signerId?: string, jurisdiction?: string): Tab {
     const currentTabs = get(tabs);
     const panelNumber = currentTabs.length + 1;
@@ -75,17 +66,13 @@ const tabOperations = {
     this.setActiveTab(newTab.id);
     this.saveToStorage();
 
-    console.log('➕ Added new panel:', newTab);
     return newTab;
   },
 
-  // Close tab
   closeTab(tabId: string) {
     const currentTabs = get(tabs);
-    console.log('❌ Closing tab:', tabId);
     
     if (currentTabs.length <= 1) {
-      console.log('⚠️ Cannot close last tab');
       return; // Keep at least one tab
     }
 
@@ -104,10 +91,7 @@ const tabOperations = {
     this.saveToStorage();
   },
 
-  // Set active tab
   setActiveTab(tabId: string) {
-    console.log('🎯 Setting active tab:', tabId);
-    
     tabs.update(currentTabs => 
       currentTabs.map(tab => ({
         ...tab,
@@ -119,14 +103,12 @@ const tabOperations = {
     this.saveToStorage();
   },
 
-  // Get active tab
   getActiveTab(): Tab | null {
     const currentTabs = get(tabs);
     const currentActiveId = get(activeTabId);
     return currentTabs.find(tab => tab.id === currentActiveId) || null;
   },
 
-  // Update tab data
   updateTab(tabId: string, updates: Partial<Omit<Tab, 'id'>>) {
     tabs.update(currentTabs => 
       currentTabs.map(tab => 
@@ -136,19 +118,14 @@ const tabOperations = {
     this.saveToStorage();
   },
 
-  // Get tab by ID
   getTab(tabId: string): Tab | null {
     const currentTabs = get(tabs);
     return currentTabs.find(tab => tab.id === tabId) || null;
   },
 
-  // Initialize with default tabs
   initializeDefaultTabs() {
-    // Start with 0 panels - user creates entities to get panels
-    console.log('📋 Starting with 0 panels by default');
   },
 
-  // Clear all tabs and reset
   clearAllTabs() {
     tabs.set([]);
     activeTabId.set(null);
@@ -157,5 +134,4 @@ const tabOperations = {
   }
 };
 
-// Export stores and operations
 export { tabOperations };
