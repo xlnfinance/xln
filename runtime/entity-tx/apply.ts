@@ -24,41 +24,7 @@ import {
 } from './handlers/account';
 import { pushCrossJurisdictionEntityOutput } from './cross-j-outputs';
 import { handleJEvent } from './j-events';
-
-// Extended return type including pure events from handlers
-export interface ApplyEntityTxResult {
-  newState: EntityState;
-  outputs: EntityInput[];
-  jOutputs?: JInput[];
-  // Pure events for entity-level orchestration
-  mempoolOps?: MempoolOp[];
-  dirtyAccounts?: string[];
-  swapOffersCreated?: SwapOfferEvent[];
-  swapCancelRequests?: SwapCancelRequestEvent[];
-  swapOffersCancelled?: SwapCancelEvent[];
-  // Multi-signer: Hashes that need entity-quorum signing
-  hashesToSign?: Array<{ hash: string; type: HashType; context: string }>;
-}
-
-const ENTITY_TX_INVARIANT_ERROR_PREFIXES = [
-  'FRAME_CONSENSUS_FAILED',
-  'ORDERBOOK_',
-  'STORAGE_',
-  'REPLAY_INVARIANT_FAILED',
-  'ROUTE_DISCOVERY_INVARIANT',
-  'CROSS_J_BOOK_OWNER_UNREACHABLE',
-  'CROSS_J_REMOTE_TOPOLOGY_INVALID',
-  'CROSS_J_COMMITTED_FILL_ACK_INVALID',
-  'CROSS_J_PULL_RESOLVE_OVER_COMMITTED',
-  'CROSS_J_PULL_RESOLVE_NO_COMMITTED_FILL',
-  'CROSS_J_PULL_RESOLVE_STATE_INVALID',
-  'CROSS_J_FILLED_ROUTE_SOURCE_PULL_EXPIRED',
-];
-
-const shouldRethrowEntityTxError = (error: unknown): boolean => {
-  const message = error instanceof Error ? error.message : String(error);
-  return ENTITY_TX_INVARIANT_ERROR_PREFIXES.some(prefix => message.startsWith(prefix));
-};
+import { shouldRethrowEntityTxError } from './invariant-errors';
 import { executeProposal, generateProposalId } from './proposals';
 import { validateMessage } from './validation';
 import { cloneEntityState, addMessage } from '../state-helpers';
@@ -116,6 +82,21 @@ import {
   validateCrossJurisdictionLocalBinding,
   validateCrossJurisdictionRouteTransition,
 } from './cross-jurisdiction-helpers';
+
+// Extended return type including pure events from handlers
+export interface ApplyEntityTxResult {
+  newState: EntityState;
+  outputs: EntityInput[];
+  jOutputs?: JInput[];
+  // Pure events for entity-level orchestration
+  mempoolOps?: MempoolOp[];
+  dirtyAccounts?: string[];
+  swapOffersCreated?: SwapOfferEvent[];
+  swapCancelRequests?: SwapCancelRequestEvent[];
+  swapOffersCancelled?: SwapCancelEvent[];
+  // Multi-signer: Hashes that need entity-quorum signing
+  hashesToSign?: Array<{ hash: string; type: HashType; context: string }>;
+}
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const deterministicEntityTimestamp = (state: EntityState, env: Env): number =>
