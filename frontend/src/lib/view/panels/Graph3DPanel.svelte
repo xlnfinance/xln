@@ -5882,11 +5882,9 @@
 
 </script>
 
-<!-- Graph3D Panel - Pure 3D rendering (no sidebar) -->
 <div class="graph3d-wrapper">
   <div bind:this={container} class="graph3d-panel"></div>
 
-  <!-- Entity Mini Panel (on click) - TIME-TRAVEL AWARE -->
   {#if showMiniPanel}
     <EntityMiniPanel
       entityId={miniPanelEntityId}
@@ -5900,8 +5898,6 @@
       on:openFull={handleOpenFullPanel}
     />
   {/if}
-  <!-- FPS Overlay (outside container so canvas doesn't cover it) -->
-  <!-- FPS + Network Stats Overlay - controlled by settings -->
   {#if showFpsOverlay}
   <div class="fps-overlay">
     <div class="fps-stat" class:fps-good={renderFps >= 55} class:fps-ok={renderFps >= 30 && renderFps < 55} class:fps-bad={renderFps < 30}>
@@ -5939,7 +5935,6 @@
   </div>
   {/if}
 
-  <!-- VR Controls HUD (for first-time Vision Pro users) -->
   <VRControlsHUD
     isVRActive={isVRActive}
     entityCount={entities.length}

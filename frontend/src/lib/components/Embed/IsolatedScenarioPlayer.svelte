@@ -10,7 +10,6 @@
   export let slice: string = '';
   export let speed: number = 1.0;
 
-  // Isolated state (NOT global stores)
   let localEnv: any = null;
   let localHistory: any[] = [];
   let currentFrame = 0;
@@ -19,7 +18,6 @@
   let loaded = false;
   let error: string | null = null;
 
-  // Three.js objects
   let container: HTMLDivElement;
   let scene: THREE.Scene;
   let camera: THREE.PerspectiveCamera;
@@ -43,40 +41,33 @@
         scenarioText = await response.text();
       }
 
-      // Parse slice
       if (slice) {
         const parts = slice.split(':').map(Number);
         sliceStart = parts[0] || 0;
         sliceEnd = parts[1] || -1;
       }
 
-      // Create ISOLATED environment (no global state)
       const runtimeUrl = new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href;
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
-      // Create fresh environment (NOT from global store)
       localEnv = XLN.createEmptyEnv();
 
-      // Parse and execute scenario
       const parsed = XLN.parseScenario(scenarioText);
       if (parsed.errors.length > 0) {
         throw new Error(`Parse error: ${parsed.errors[0].message}`);
       }
 
-      // Fast execution for embeds (no delays)
       await XLN.executeScenario(localEnv, parsed.scenario, {
         tickInterval: 0,  // Skip setTimeout delays
         maxTimestamp: 1000
       });
 
-      // Capture history snapshots locally
       localHistory = [...(localEnv.history || [])];
       totalFrames = localHistory.length;
       currentFrame = sliceStart;
 
       loaded = true;
 
-      // Wait for Svelte to render container div, then init Three.js
       await new Promise(resolve => setTimeout(resolve, 50));
 
       if (container) {
@@ -99,11 +90,9 @@
       return;
     }
 
-    // Create scene
     scene = new THREE.Scene();
     scene.background = new THREE.Color(0x0a0a0a);
 
-    // Create camera
     const width = container.clientWidth || 800;
     const height = container.clientHeight || 600;
 
@@ -112,12 +101,10 @@
     camera.position.set(80, 80, 80);  // Pull back further
     camera.lookAt(20, 20, 20);  // Look at grid center, not origin
 
-    // Create renderer
     renderer = new THREE.WebGLRenderer({ antialias: true });
     renderer.setSize(width, height);
     container.appendChild(renderer.domElement);
 
-    // Add OrbitControls for dragging
     import('three/examples/jsm/controls/OrbitControls.js').then(module => {
       controls = new module.OrbitControls(camera, renderer.domElement);
       controls.target.set(20, 20, 20);  // Orbit around grid center
@@ -126,7 +113,6 @@
       controls.update();
     });
 
-    // Add lights
     const ambientLight = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambientLight);
 
@@ -134,7 +120,6 @@
     directionalLight.position.set(50, 100, 50);
     scene.add(directionalLight);
 
-    // Start animation loop
     animate();
   }
 
@@ -143,11 +128,9 @@
 
     const frameState = localHistory[frameIndex];
 
-    // Clear existing entities
     entities.forEach(mesh => scene.remove(mesh));
     entities.clear();
 
-    // Render entities from frame state
     if (frameState.eReplicas) {
       frameState.eReplicas.forEach((replica: any, key: string) => {
         const [entityId] = key.split(':');
@@ -173,7 +156,6 @@
         if (position) {
           mesh.position.set(position.x, position.y, position.z);
         } else {
-          // Fallback: radial layout
           const replicaKeys = Array.from(frameState.eReplicas.keys());
           const index = replicaKeys.indexOf(key);
           const angle = (index / replicaKeys.length) * Math.PI * 2;
@@ -186,23 +168,19 @@
       });
     }
 
-    // Render account connections (lines between entities with accounts)
     if (frameState.eReplicas) {
       frameState.eReplicas.forEach((replica: any, key: string) => {
         const entityMesh = entities.get(key);
         if (!entityMesh) return;
 
-        // Get accounts from this entity
         const accounts = replica.state?.accounts;
         if (!accounts) return;
 
         accounts.forEach((_account: any, counterpartyId: string) => {
-          // Find counterparty mesh
           const counterpartyKey = (Array.from(frameState.eReplicas.keys()) as string[]).find(k => k.startsWith(counterpartyId));
           const counterpartyMesh = counterpartyKey ? entities.get(counterpartyKey) : null;
 
           if (counterpartyMesh && entityMesh) {
-            // Draw line between entities
             const geometry = new THREE.BufferGeometry().setFromPoints([
               entityMesh.position,
               counterpartyMesh.position

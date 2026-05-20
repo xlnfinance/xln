@@ -1974,7 +1974,6 @@
   <div class="mode-selector">
     <select bind:value={currentMode} class="mode-dropdown">
       <option value="economy">Economy</option>
-      <!-- Other modes not implemented yet - removed to reduce clutter -->
     </select>
   </div>
 
@@ -1987,9 +1986,6 @@
           ⏳ Initializing XLN environment...
         </div>
       {:else}
-        <!-- ============================================================ -->
-        <!-- SCENARIOS (Flat List) -->
-        <!-- ============================================================ -->
         <div class="preset-system">
           <div class="scenarios-header">
             <h5>Scenarios</h5>
@@ -1998,7 +1994,6 @@
             </button>
           </div>
           <div class="preset-list">
-            <!-- AHB FIRST with glow - recommended starting point -->
             <button class="preset-item recommended" on:click={startAHBTutorial} disabled={loading}>
               <span class="icon">ahb</span>
               <div class="info">
@@ -2039,14 +2034,6 @@
               </div>
             </button>
 
-            <button class="preset-item" on:click={startSwapTutorial} disabled={loading}>
-              <span class="icon">⇄</span>
-              <div class="info">
-                <strong>Token Swaps</strong>
-                <p>Bilateral · Partial fills</p>
-              </div>
-            </button>
-
             <button class="preset-item" on:click={startGridScenario} disabled={loading}>
               <span class="icon">2³</span>
               <div class="info">
@@ -2081,7 +2068,6 @@
           </div>
         </div>
 
-        <!-- SCENARIO CODE - Shows current tutorial code with frame markers -->
         {#if $isolatedHistory && $isolatedHistory.length > 0}
           <div class="scenario-code-section">
             <h5>Scenario Code (Frame {$isolatedTimeIndex >= 0 ? $isolatedTimeIndex : 'LIVE'})</h5>
@@ -2097,12 +2083,10 @@
         <div class="action-section">
           <h5>Jurisdiction (EVM Instance)</h5>
 
-          <!-- Prominent Create Button -->
           <button class="action-btn create-xlnomy-btn" on:click={() => showCreateXlnomyModal = true}>
             + Create Jurisdiction Here
           </button>
 
-          <!-- Dropdown for switching (only visible if jurisdictions exist) -->
           {#if jurisdictions?.length > 0}
             <div class="xlnomy-selector">
               <label for="xlnomy-switch">Switch to:</label>

@@ -1,9 +1,3 @@
-<!--
-  EntityPanelTabs.svelte - Rabby-style tabbed Entity interface
-
-  Single scroll container, no nested scrollbars.
-  Clean fintech design with proper form inputs.
--->
 <script lang="ts">
   import { createEventDispatcher } from 'svelte';
   import { onDestroy, onMount } from 'svelte';
@@ -44,14 +38,12 @@
   import { formatEntityId } from '$lib/utils/format';
   import { resetEverything } from '$lib/utils/resetEverything';
 
-  // Icons
   import {
     ArrowUpRight, ArrowDownLeft, Repeat, Landmark, Users, Activity,
     Settings as SettingsIcon,
     ChevronDown, AlertTriangle, PlusCircle, Copy, Check, Trash2, SlidersHorizontal
   } from 'lucide-svelte';
 
-  // Child components
   import EntityDropdown from './EntityDropdown.svelte';
   import AccountDropdown from './AccountDropdown.svelte';
   import AccountPanel from './AccountPanel.svelte';
@@ -4819,7 +4811,6 @@
 </script>
 
 <div class="entity-panel" data-panel-id={tab.id}>
-  <!-- Header -->
   {#if !hideHeader && !userModeHeader}
     <header class="header" class:user-mode-header={userModeHeader}>
       {#if showJurisdiction}
@@ -4835,7 +4826,6 @@
     </header>
   {/if}
 
-  <!-- Historical Mode Warning -->
   {#if !activeIsLive}
     <button type="button" class="history-warning" on:click={goToLive}>
       <AlertTriangle size={14} />
@@ -4843,7 +4833,6 @@
     </button>
   {/if}
 
-  <!-- Main Content - SINGLE SCROLL -->
   <main class="main-scroll">
     {#if !tab.entityId || !tab.signerId}
       <div class="empty-state">
@@ -4876,7 +4865,6 @@
       </div>
 
     {:else if activeEnv && replica}
-      <!-- Hero: Entity + Net Worth -->
       <section class="hero">
         <div class="hero-left" class:user-mode={userModeHeader}>
           {#if !userModeHeader}
@@ -4943,7 +4931,6 @@
         </div>
       </section>
 
-      <!-- Tab Bar -->
       <nav class="tabs">
         {#each tabs as t}
           <button
@@ -4961,7 +4948,6 @@
         {/each}
       </nav>
 
-      <!-- Tab Content -->
       <section class="content">
         {#if activeTab === 'assets'}
           <div class="tab-header-row">
