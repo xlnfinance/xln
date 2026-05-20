@@ -456,8 +456,6 @@
   let rotationY: number = savedSettings.rotationY; // 0-10000 (0 = stopped, 10000 = fast)
   let rotationZ: number = savedSettings.rotationZ; // 0-10000 (0 = stopped, 10000 = fast)
   let availableTokens: number[] = []; // Will be populated from actual token data
-  let showPanel: boolean = true; // Mobile-friendly panel toggle - start visible
-  // Settings (managed by SettingsPanel, updated via panelBridge)
   // Settings (managed by SettingsPanel, updated via panelBridge)
   let rendererMode: RendererMode = 'webgl';
   let labelScale: number = 2.0;
@@ -598,9 +596,6 @@
     const activeJurisdiction = jurisdictionsArray.find(x => x.name === activeJurisdictionName);
     const activeJMachine = activeJurisdiction ? jMachines.get(activeJurisdiction.name) : undefined;
     if (activeJurisdiction && activeJMachine) {
-      // Read mempool size directly from jReplica snapshot (canonical source of truth)
-      const mempoolSize = activeJurisdiction.jMachine.mempool?.length || 0;
-
       // Get PREVIOUS frame for broadcast detection
       const timeIdx = $isolatedTimeIndex;
       const historyFrames = $isolatedHistory;
@@ -1118,7 +1113,6 @@
   // VR state
   let isVRSupported: boolean = false;
   let isVRActive: boolean = false;
-  let passthroughEnabled: boolean = false;
 
   // Hand tracking controller (Vision Pro + Quest)
   let handTrackingController: VRHandTrackingController | null = null;
@@ -3626,11 +3620,6 @@
 
     return group;
   }
-
-  // Bar labels removed per user request - shown only on hover tooltips
-  // function createBarLabel(group: THREE.Group, position: THREE.Vector3, value: number, _barType: string) {
-  //   ...
-  // }
 
   function createEntityLabel(entityId: string): THREE.Sprite {
     // Create canvas for entity name - extra wide for emoji + bank names
