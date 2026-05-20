@@ -1,0 +1,19 @@
+const ENTITY_TX_INVARIANT_ERROR_PREFIXES = [
+  'FRAME_CONSENSUS_FAILED',
+  'ORDERBOOK_',
+  'STORAGE_',
+  'REPLAY_INVARIANT_FAILED',
+  'ROUTE_DISCOVERY_INVARIANT',
+  'CROSS_J_BOOK_OWNER_UNREACHABLE',
+  'CROSS_J_REMOTE_TOPOLOGY_INVALID',
+  'CROSS_J_COMMITTED_FILL_ACK_INVALID',
+  'CROSS_J_PULL_RESOLVE_OVER_COMMITTED',
+  'CROSS_J_PULL_RESOLVE_NO_COMMITTED_FILL',
+  'CROSS_J_PULL_RESOLVE_STATE_INVALID',
+  'CROSS_J_FILLED_ROUTE_SOURCE_PULL_EXPIRED',
+];
+
+export const shouldRethrowEntityTxError = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  return ENTITY_TX_INVARIANT_ERROR_PREFIXES.some(prefix => message.startsWith(prefix));
+};
