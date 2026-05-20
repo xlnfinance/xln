@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountInput, EntityState, Env, EntityInput, HtlcRoute, AccountMachine, HtlcNoteKey, CrossJurisdictionSwapRoute, SwapOffer } from '../../types';
+import type { AccountFrame, AccountInput, EntityState, Env, EntityInput, HtlcRoute, AccountMachine, HtlcNoteKey } from '../../types';
 import { markStorageAccountDirty, markStorageEntityDirty } from '../../env-events';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { addMessage, addMessages, emitScopedEvents } from '../../state-helpers';
@@ -6,7 +6,6 @@ import {
   applyCommand,
   createBook,
   canonicalPair,
-  computeSwapPriceTicks,
   deriveSide,
   getBookOrder,
   getBestAsk,
@@ -62,28 +61,33 @@ import {
   type MempoolOp,
   type SwapResolveEnqueueData,
 } from './account/orderbook-queue';
+import {
+  normalizeSwapOfferForOrderbook,
+  resolveStoredOfferEntityRefs,
+  sortSwapOffersForOrderbook,
+  type MatchResult,
+  type SwapCancelEvent,
+  type SwapCancelRequestEvent,
+  type SwapOfferEvent,
+} from './account/orderbook-offers';
 
 export type { MempoolOp } from './account/orderbook-queue';
+export {
+  collectOpenSwapOffersForOrderbook,
+  compareSwapOffersForOrderbook,
+  normalizeSwapOfferForOrderbook,
+  sortSwapOffersForOrderbook,
+} from './account/orderbook-offers';
+export type {
+  MatchResult,
+  SwapCancelEvent,
+  SwapCancelRequestEvent,
+  SwapOfferEvent,
+} from './account/orderbook-offers';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const accountHandlerLog = createStructuredLogger('account.handler');
 const orderbookLog = createStructuredLogger('orderbook');
-
-type StoredOfferEntityRefs = {
-  fromEntity?: string;
-  toEntity?: string;
-};
-
-const resolveStoredOfferEntityRefs = (
-  account: AccountMachine,
-  offer: SwapOffer,
-): { fromEntity: string; toEntity: string } => {
-  const persistedRefs = offer as SwapOffer & StoredOfferEntityRefs;
-  return {
-    fromEntity: account.leftEntity || persistedRefs.fromEntity || '',
-    toEntity: account.rightEntity || persistedRefs.toEntity || '',
-  };
-};
 
 const getJurisdictionId = (state: EntityState, env: Env): string => {
   return String(state.config?.jurisdiction?.name || env.activeJurisdiction || '').trim();
@@ -137,138 +141,9 @@ const findAccountKeyInsensitive = (accounts: Map<string, AccountMachine>, counte
   return null;
 };
 
-// === PURE EVENT TYPES ===
-// Events returned by handlers, applied by entity orchestrator
-
-export interface SwapOfferEvent {
-  offerId: string;
-  makerIsLeft: boolean;     // Simple boolean (account-level context)
-  fromEntity: string;       // Account pair (left entity)
-  toEntity: string;         // Account pair (right entity)
-  accountId?: string;       // Added by entity handler (Hub's Map key for this account)
-  createdHeight?: number;
-  giveTokenId: number;
-  giveAmount: bigint;
-  wantTokenId: number;
-  wantAmount: bigint;
-  priceTicks?: bigint | undefined;
-  timeInForce?: 0 | 1 | 2 | undefined;
-  minFillRatio: number;
-  crossJurisdiction?: CrossJurisdictionSwapRoute;
-}
-
-export interface SwapCancelEvent {
-  offerId: string;
-  accountId: string;
-}
-
-export interface SwapCancelRequestEvent {
-  offerId: string;
-  accountId: string;
-}
-
-export interface MatchResult {
-  mempoolOps: MempoolOp[];       // swap_resolve txs to push
-  crossJurisdictionFills: CrossJurisdictionFillInstruction[];
-  bookUpdates: {                 // orderbook state mutations
-    pairId: string;
-    book: BookState;
-  }[];
-  debugProjectionRejects: Array<{
-    offerId: string;
-    accountId: string;
-    reason: string;
-  }>;
-}
-
 type OrderbookProcessOptions = {
   debugRebuildProjectionOnly?: boolean;
 };
-
-export const normalizeSwapOfferForOrderbook = (
-  offer: SwapOfferEvent,
-  accountId: string,
-): NormalizedOrderbookOffer => {
-  const priceTicks = typeof offer.priceTicks === 'bigint' && offer.priceTicks > 0n
-    ? offer.priceTicks
-    : computeSwapPriceTicks(
-        offer.giveTokenId,
-        offer.wantTokenId,
-        offer.giveAmount,
-        offer.wantAmount,
-      );
-  if (priceTicks <= 0n) {
-    throw new Error(`ORDERBOOK_NORMALIZE_INVALID_PRICE: offer=${offer.offerId}`);
-  }
-
-  return {
-    offerId: String(offer.offerId),
-    accountId: String(accountId),
-    makerIsLeft: !!offer.makerIsLeft,
-    fromEntity: String(offer.fromEntity),
-    toEntity: String(offer.toEntity),
-    createdHeight: Number(offer.createdHeight ?? 0),
-    giveTokenId: Number(offer.giveTokenId),
-    giveAmount: BigInt(offer.giveAmount),
-    wantTokenId: Number(offer.wantTokenId),
-    wantAmount: BigInt(offer.wantAmount),
-    priceTicks,
-    timeInForce: offer.timeInForce ?? 0,
-    minFillRatio: Number(offer.minFillRatio ?? 0),
-    ...(offer.crossJurisdiction ? { crossJurisdiction: offer.crossJurisdiction } : {}),
-  };
-};
-
-export const compareSwapOffersForOrderbook = (left: NormalizedOrderbookOffer, right: NormalizedOrderbookOffer): number => {
-  const leftHeight = left.createdHeight;
-  const rightHeight = right.createdHeight;
-  if (leftHeight !== rightHeight) return leftHeight - rightHeight;
-  const leftAccountId = left.accountId;
-  const rightAccountId = right.accountId;
-  const accountCmp = compareCanonicalText(leftAccountId, rightAccountId);
-  if (accountCmp !== 0) return accountCmp;
-  return compareCanonicalText(left.offerId, right.offerId);
-};
-
-export const sortSwapOffersForOrderbook = (swapOffers: NormalizedOrderbookOffer[]): NormalizedOrderbookOffer[] =>
-  [...swapOffers].sort(compareSwapOffersForOrderbook);
-
-export const collectOpenSwapOffersForOrderbook = (hubState: EntityState): NormalizedOrderbookOffer[] =>
-  sortSwapOffersForOrderbook(
-    Array.from(hubState.accounts.entries()).flatMap(([accountId, account]) =>
-      Array.from(account.swapOffers.entries()).flatMap(([offerId, offer]) => {
-        if (
-          !offer ||
-          typeof offer.giveTokenId !== 'number' ||
-          typeof offer.wantTokenId !== 'number' ||
-          typeof offer.giveAmount !== 'bigint' ||
-          typeof offer.wantAmount !== 'bigint'
-        ) {
-          return [];
-        }
-        return [
-          normalizeSwapOfferForOrderbook(
-            {
-              offerId: String(offerId),
-              makerIsLeft: offer.makerIsLeft,
-              fromEntity: account.leftEntity,
-              toEntity: account.rightEntity,
-              createdHeight: offer.createdHeight,
-              giveTokenId: offer.giveTokenId,
-              giveAmount: offer.giveAmount,
-              wantTokenId: offer.wantTokenId,
-              wantAmount: offer.wantAmount,
-              priceTicks: offer.priceTicks,
-              timeInForce: offer.timeInForce,
-              minFillRatio: offer.minFillRatio,
-              ...(offer.crossJurisdiction ? { crossJurisdiction: offer.crossJurisdiction } : {}),
-            },
-            accountId,
-          ),
-        ];
-      }),
-    ),
-  );
 
 export interface AccountHandlerResult {
   newState: EntityState;
