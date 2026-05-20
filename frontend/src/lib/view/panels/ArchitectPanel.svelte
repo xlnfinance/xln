@@ -2328,7 +2328,7 @@
       </div>
 
       <div class="form-group">
-        <label>EVM Type:</label>
+        <span class="form-label">EVM Type:</span>
         <div class="radio-group">
           <label class="radio-label">
             <input type="radio" bind:group={newXlnomyEvmType} value="browservm" />
@@ -2581,7 +2581,7 @@
     margin-bottom: 12px;
   }
 
-  .form-group label {
+  .form-group label, .form-label {
     display: block;
     margin-bottom: 4px;
     font-size: 11px;
