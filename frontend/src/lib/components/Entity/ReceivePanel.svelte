@@ -101,17 +101,17 @@
   <div class="receive-grid">
     <section class="invoice-builder">
       <div class="field">
-        <label>Amount</label>
+        <div class="field-label">Amount</div>
         <input type="text" bind:value={amount} data-testid="receive-invoice-amount" aria-label="Invoice amount" />
       </div>
       <div class="field">
-        <label>Asset</label>
+        <div class="field-label">Asset</div>
         <div class="token-field">
           <TokenSelect value={tokenId} compact={true} on:change={(event) => tokenId = event.detail.value} />
         </div>
       </div>
       <div class="field">
-        <label>Description</label>
+        <div class="field-label">Description</div>
         <input type="text" bind:value={description} data-testid="receive-invoice-description" aria-label="Invoice description" />
       </div>
       <div class="invoice-actions">
@@ -145,7 +145,7 @@
         <div class="invoice-error">{qrError}</div>
       {/if}
       <div class="invoice-string">
-        <label>Invoice</label>
+        <div class="field-label">Invoice</div>
         <code>{invoicePreview}</code>
       </div>
     </section>
@@ -197,7 +197,7 @@
   }
 
   .entity-id-label,
-  label {
+  .field-label {
     color: #8d857d;
     text-transform: uppercase;
     letter-spacing: 0.08em;
