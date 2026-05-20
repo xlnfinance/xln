@@ -2,6 +2,20 @@ import type { OrderbookExtState } from './orderbook';
 import type { SwapKey } from './swap-keys';
 import type { Level } from 'level';
 import type { RuntimeP2P } from './networking/p2p';
+import type { CrossJurisdictionSwapRoute } from './types/cross-jurisdiction';
+import type { DebtEntry } from './types/debt';
+export type {
+  CrossJurisdictionPullLeg,
+  CrossJurisdictionSwapLeg,
+  CrossJurisdictionSwapRoute,
+  CrossJurisdictionSwapStatus,
+} from './types/cross-jurisdiction';
+export type {
+  DebtEntry,
+  DebtEventType,
+  DebtStatus,
+  DebtUpdate,
+} from './types/debt';
 
 /**
  * XLN Type Definitions
@@ -2014,109 +2028,6 @@ export interface EntityState {
 
   // 🔄 Rebalance Configuration - Hub-level matching strategy
   hubRebalanceConfig?: HubRebalanceConfig;
-}
-
-export type DebtStatus = 'open' | 'paid' | 'forgiven';
-
-export type DebtEventType = 'DebtCreated' | 'DebtEnforced' | 'DebtForgiven';
-
-export type CrossJurisdictionSwapStatus =
-  | 'intent'
-  | 'target_prepared'
-  | 'source_committed'
-  | 'resting'
-  | 'partially_filled'
-  | 'clear_requested'
-  | 'clearing'
-  | 'target_locked'
-  | 'source_locked'
-  | 'source_claimed'
-  | 'target_claimed'
-  | 'settled'
-  | 'cancelled'
-  | 'expired'
-  | 'failed';
-
-export interface CrossJurisdictionSwapLeg {
-  jurisdiction: string;
-  entityId: string;
-  counterpartyEntityId: string;
-  tokenId: number;
-  amount: bigint;
-}
-
-export interface CrossJurisdictionPullLeg {
-  pullId: string;
-  tokenId: number;
-  amount: bigint;
-  signedAmount: bigint;
-  revealedUntilTimestamp: number;
-  fullHash: string;
-  partialRoot: string;
-}
-
-export interface CrossJurisdictionSwapRoute {
-  orderId: string;
-  routeHash?: string;
-  bookOwnerEntityId?: string;
-  venueId?: string;
-  makerEntityId: string;
-  hubEntityId: string;
-  source: CrossJurisdictionSwapLeg;
-  target: CrossJurisdictionSwapLeg;
-  sourcePull?: CrossJurisdictionPullLeg;
-  targetPull?: CrossJurisdictionPullLeg;
-  priceTicks?: bigint;
-  fillSeq?: number;
-  cumulativeFillRatio?: number;
-  filledSourceAmount?: bigint;
-  filledTargetAmount?: bigint;
-  priceImprovementSourceAmount?: bigint;
-  priceImprovementTargetAmount?: bigint;
-  pendingClearRequestedAt?: number;
-  clearingPolicy?: 'manual' | 'full_fill' | 'cancel_and_clear';
-  priceImprovementMode?: 'source_savings' | 'target_bonus' | 'none';
-  riskMode?: 'fully_collateralized' | 'partially_collateralized' | 'credit_line' | 'unsecured_internalized';
-  claimedRatio?: number;
-  sourceClaimed?: bigint;
-  targetClaimed?: bigint;
-  status: CrossJurisdictionSwapStatus;
-  createdAt: number;
-  updatedAt: number;
-  expiresAt?: number;
-  settledAt?: number;
-  error?: string;
-  memo?: string;
-}
-
-export interface DebtUpdate {
-  eventType: DebtEventType;
-  blockNumber: number;
-  transactionHash: string;
-  amountDelta: bigint;
-  remainingAmount: bigint;
-}
-
-export interface DebtEntry {
-  debtId: string;
-  tokenId: number;
-  debtor: string;
-  creditor: string;
-  counterparty: string;
-  direction: 'out' | 'in';
-  createdAmount: bigint;
-  paidAmount: bigint;
-  remainingAmount: bigint;
-  forgivenAmount: bigint;
-  createdDebtIndex: number;
-  currentDebtIndex?: number | null;
-  status: DebtStatus;
-  createdAtBlock: number;
-  createdTxHash: string;
-  lastUpdatedBlock: number;
-  lastUpdatedTxHash: string;
-  lastEventType: DebtEventType;
-  updates: DebtUpdate[];
 }
 
 /** Hub-level config: rebalance strategy + routing fees. Set via setHubConfig EntityTx. */
