@@ -35,7 +35,7 @@ import type { AccountMachine, DeliverableEntityInput, EntityReplica, Env, Entity
 import type { HubHealth } from './health';
 import { createExternalWalletApi } from './api/external-wallet-api';
 import { maybeHandleQaRequest } from './qa/api';
-import { getStorageHealthSnapshotSync, type StorageHealth } from './orchestrator/storage-monitor';
+import { getStorageHealthSnapshotSync } from './orchestrator/storage-monitor';
 import { registerSignerKey } from './account-crypto';
 import { createJAdapter, DEV_CHAIN_IDS, type JAdapter } from './jadapter';
 import type { JAdapterConfig, JTokenInfo } from './jadapter/types';
@@ -67,6 +67,18 @@ import {
 import { createMarketSubscriptionStack, isMarketMessageType } from './relay/market-subscriptions';
 import { isLocalOperatorRequest, publicRuntimeHealthBody } from './health-redaction';
 import { findForbiddenRpcProxyMethod } from './rpc-proxy-safety';
+import {
+  DEBUG_DUMPS_DIR,
+  JSON_HEADERS,
+  buildDebugDumpFileName,
+  buildDiskSummary,
+  ensureDebugDumpDir,
+  formatTimingMs,
+  getErrorMessage,
+  isEntityId32,
+  isRecord,
+  resolveRequiredAnvilRpc,
+} from './server-utils';
 import { ethers } from 'ethers';
 import { ERC20Mock__factory } from '../jurisdictions/typechain-types/index.ts';
 import {
@@ -83,8 +95,7 @@ import {
 } from './radapter/auth';
 import { decodeRuntimeAdapterMessage, runtimeAdapterMessageByteLength } from './radapter/codec';
 import type { RuntimeAdapterAuthLevel } from './radapter/types';
-import { mkdir, readdir, readFile, writeFile } from 'fs/promises';
-import { join } from 'path';
+import { readdir, readFile, writeFile } from 'fs/promises';
 import type { ServerWebSocket } from 'bun';
 
 // Global J-adapter instance (set during startup)
@@ -106,62 +117,9 @@ let cachedHealthInFlight: Promise<{ fullBody: string; publicBody: string }> | nu
 let tokenCatalogCache: JTokenInfo[] | null = null;
 let tokenCatalogPromise: Promise<JTokenInfo[]> | null = null;
 let processGuardsInstalled = false;
-const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 type RelaySocketData = { type: 'relay' | 'rpc'; clientIp: string };
 type RelaySocket = ServerWebSocket<RelaySocketData>;
-const isEntityId32 = (value: unknown): value is string => typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
-const JSON_HEADERS = {
-  'Access-Control-Allow-Origin': '*',
-  'Access-Control-Allow-Methods': '*',
-  'Access-Control-Allow-Headers': '*',
-  'Content-Type': 'application/json',
-} as const;
-const getErrorMessage = (error: unknown, fallback = 'Unknown error'): string =>
-  error instanceof Error ? error.message : typeof error === 'string' && error.length > 0 ? error : fallback;
-const isRecord = (value: unknown): value is Record<string, unknown> =>
-  typeof value === 'object' && value !== null;
-const DEBUG_DUMPS_DIR = join(process.cwd(), '.logs', 'debug-dumps');
-const formatTimingMs = (value: number): string => value.toFixed(2);
 const STACK_COMPATIBILITY_PROBE_ENTITY = `0x${'11'.repeat(32)}`;
-const resolveRequiredAnvilRpc = (): string => {
-  const rpcUrl = String(process.env['ANVIL_RPC'] || '').trim();
-  if (!rpcUrl) {
-    throw new Error('ANVIL_RPC is required for server RPC operations');
-  }
-  return rpcUrl;
-};
-
-const ensureDebugDumpDir = async (): Promise<void> => {
-  await mkdir(DEBUG_DUMPS_DIR, { recursive: true });
-};
-
-const buildDebugDumpFileName = (reason: string | undefined, runtimeId: string | undefined): string => {
-  const iso = new Date().toISOString().replace(/[:.]/g, '-');
-  const reasonPart = String(reason || 'dump')
-    .toLowerCase()
-    .replace(/[^a-z0-9_-]+/g, '-')
-    .slice(0, 48) || 'dump';
-  const runtimePart = String(runtimeId || 'runtime').replace(/[^a-zA-Z0-9_-]+/g, '').slice(-16) || 'runtime';
-  return `${iso}-${reasonPart}-${runtimePart}.json`;
-};
-
-const buildDiskSummary = (storage: StorageHealth) => {
-  const totalBytes = Number(storage.disk.totalBytes || 0);
-  const usedBytes = Number(storage.disk.usedBytes || 0);
-  const freeBytes = Number(storage.disk.freeBytes || 0);
-  const toGiB = (value: number): number => Math.round((value / 1024 ** 3) * 100) / 100;
-  return {
-    ok: storage.ok,
-    minFreeBytes: storage.minFreeBytes,
-    freeBytes,
-    usedBytes,
-    totalBytes,
-    freeGiB: toGiB(freeBytes),
-    usedGiB: toGiB(usedBytes),
-    totalGiB: toGiB(totalBytes),
-    usedPct: totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 10000) / 100 : 0,
-  };
-};
 
 const probeLocalAnvilContractStack = async (adapter: JAdapter): Promise<{ ok: boolean; reason: string }> => {
   const depositoryAddress = String(adapter.addresses?.depository || '').trim();
@@ -2719,7 +2677,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       ? String((payload['runtimeState'] as Record<string, unknown>)['runtimeId'])
       : undefined;
     const fileName = buildDebugDumpFileName(reason, runtimeId);
-    const filePath = join(DEBUG_DUMPS_DIR, fileName);
+    const filePath = `${DEBUG_DUMPS_DIR}/${fileName}`;
     await writeFile(filePath, safeStringify(payload, 2), 'utf8');
 
     let preview: unknown = undefined;
