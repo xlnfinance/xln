@@ -69,7 +69,6 @@
     if (graph3dApi) {
       const widthPercent = showSidebarInEmbed ? 0.70 : 1.0;
       graph3dApi.api.setSize({ width: window.innerWidth * widthPercent });
-      console.log(`[DockRoot] Embed sidebar ${showSidebarInEmbed ? 'shown' : 'hidden'}`);
     }
   }
 

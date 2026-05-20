@@ -786,7 +786,6 @@ export async function initializeXLN(): Promise<Env> {
   if (isInitialized) {
     const currentEnv = get(xlnEnvironment);
     if (currentEnv && currentEnv.eReplicas.size > 0) {
-      console.log('🛑 PREVENTED RE-INITIALIZATION: XLN already has data, keeping existing state');
       error.set(null);
       isLoading.set(false);
       return currentEnv;
@@ -884,9 +883,6 @@ export async function initializeXLN(): Promise<Env> {
             const jurisdiction = pos.jurisdiction || pos.xlnomy || env.activeJurisdiction || 'default';
             currentPositions.set(entityId, { x: pos.x, y: pos.y, z: pos.z, jurisdiction });
             hasChanges = true;
-            console.log(
-              `[xlnStore] 📍 Captured relative position for ${entityId.slice(0, 10)}: (${pos.x}, ${pos.y}, ${pos.z}) in jurisdiction=${jurisdiction}`,
-            );
           }
         }
         return hasChanges ? new Map(currentPositions) : currentPositions;
@@ -928,9 +924,6 @@ export async function initializeXLN(): Promise<Env> {
         // Store relative position + jReplica reference (defaults to activeJurisdiction)
         const jurisdiction = pos.jurisdiction || pos.xlnomy || env.activeJurisdiction || 'default';
         initialPositions.set(entityId, { x: pos.x, y: pos.y, z: pos.z, jurisdiction });
-        console.log(
-          `[xlnStore] 📍 Initial relative position for ${entityId.slice(0, 10)}: (${pos.x}, ${pos.y}, ${pos.z}) in jurisdiction=${jurisdiction}`,
-        );
       }
     }
     if (initialPositions.size > 0) {

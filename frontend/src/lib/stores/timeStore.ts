@@ -266,7 +266,6 @@ const timeOperations = {
 
       // Wait for history to be properly loaded before initializing
       if (!hasInitialized && $history.length > 0) {
-        console.log('🕰️ SEQUENTIAL-LOAD: First-time initialization with populated history');
         hasInitialized = true;
         timeOperations.updateMaxTimeIndex();
       } else if (hasInitialized) {
@@ -276,10 +275,8 @@ const timeOperations = {
           // Only update max index when in live mode to prevent time machine corruption
           timeOperations.updateMaxTimeIndex();
         } else {
-          console.log(`🕰️ TIME-MACHINE: Ignoring history update while in historical mode (index: ${currentState.currentTimeIndex})`);
         }
       } else {
-        console.log('🕰️ SEQUENTIAL-LOAD: Waiting for history to be populated...');
       }
     });
   }

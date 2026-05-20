@@ -89,7 +89,6 @@ export class VRHandTrackingController {
   init(): void {
     this.detectDevice();
     this.setupHands();
-    console.log(`🖐️ Hand tracking: ${this.isVisionPro ? 'Vision Pro (passthrough)' : 'Quest (mesh rendering)'}`);
   }
 
   private detectDevice(): void {

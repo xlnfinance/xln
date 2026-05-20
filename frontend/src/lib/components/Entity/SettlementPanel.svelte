@@ -729,7 +729,6 @@
         signerId,
         entityTxs,
       }]);
-      console.log('[On-J] j_broadcast queued');
     } catch (error) {
       console.error('[On-J] Batch failed:', error);
       alert(`Batch failed: ${(error as Error)?.message}`);
@@ -753,7 +752,6 @@
         signerId,
         entityTxs: [{ type: 'j_rebroadcast', data: { gasBumpBps } }],
       }]);
-      console.log(`[On-J] j_rebroadcast queued (bump=${gasBumpBps}bps)`);
     } catch (error) {
       console.error('[On-J] Rebroadcast failed:', error);
       alert(`Rebroadcast failed: ${(error as Error)?.message}`);

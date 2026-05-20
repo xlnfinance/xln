@@ -72,7 +72,6 @@
           try {
             await browserVM.restoreState(browserVMState);
             if (nonce !== timeTravelNonce) return;
-            console.log(`[TimeMachine] EVM restored (full state) to frame ${targetIndex}`);
             panelBridge.emit('time:changed', { frame: targetIndex, block: Number(jReplicas[0]?.blockNumber || 0) });
           } catch (e: any) {
             console.warn('[TimeMachine] restoreState failed:', e);
@@ -80,7 +79,6 @@
               browserVM.timeTravel(new Uint8Array(stateRoot))
                 .then(() => {
                   if (nonce !== timeTravelNonce) return;
-                  console.log(`[TimeMachine] EVM restored (stateRoot) to frame ${targetIndex}`);
                   panelBridge.emit('time:changed', { frame: targetIndex, block: Number(jReplicas[0]?.blockNumber || 0) });
                 })
                 .catch((err: any) => console.warn('[TimeMachine] timeTravel failed:', err));
@@ -90,7 +88,6 @@
           browserVM.timeTravel(new Uint8Array(stateRoot))
             .then(() => {
               if (nonce !== timeTravelNonce) return;
-              console.log(`[TimeMachine] EVM restored to frame ${targetIndex}`);
               panelBridge.emit('time:changed', { frame: targetIndex, block: Number(jReplicas[0]?.blockNumber || 0) });
             })
             .catch((e: any) => console.warn('[TimeMachine] timeTravel failed:', e));

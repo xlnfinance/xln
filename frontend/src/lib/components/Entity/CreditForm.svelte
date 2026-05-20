@@ -75,7 +75,6 @@
       };
 
       await enqueueEntityInputs(env, [input]);
-      console.log(successMessage);
       creditAmountBigInt = 0n;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';
@@ -107,10 +106,6 @@
       if (!response.ok || result.success !== true) {
         throw new Error(result.error || `Credit request failed (${response.status})`);
       }
-      console.log(
-        `Credit requested: ${activeXlnFunctions?.formatTokenAmount(selectedTokenId, creditAmountBigInt)} ` +
-          `(approved=${result.approvedAmount ?? 'unknown'})`,
-      );
       creditAmountBigInt = 0n;
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Unknown error';

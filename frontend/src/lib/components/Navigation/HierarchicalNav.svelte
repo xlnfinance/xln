@@ -118,13 +118,11 @@
 
   // Auto-select signer when vault becomes active
   $: if ($activeSigner && !$appState.navigation.signer) {
-    console.log('[HierarchicalNav] Auto-selecting signer:', $activeSigner.address.slice(0, 10));
     appStateOperations.navigate('signer', $activeSigner.address);
   }
 
   // Auto-select entity when signer has one
   $: if ($activeSigner?.entityId && !$appState.navigation.entity) {
-    console.log('[HierarchicalNav] Auto-selecting entity:', $activeSigner.entityId.slice(0, 10));
     appStateOperations.navigate('entity', $activeSigner.entityId);
   }
 </script>

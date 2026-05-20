@@ -262,7 +262,6 @@
       const res = await fetch(`${API_URL}/api/xln/tools`);
       const data = await res.json();
       availableTools = data.tools || [];
-      console.log(`Loaded ${availableTools.length} xln tools for agent mode`);
     } catch (e) {
       console.warn('Failed to load xln tools:', e);
     }
@@ -740,7 +739,6 @@ Help the user understand this entity's state, suggest actions, or answer questio
       // Fallback: Try to request microphone permission to trigger browser dialog
       try {
         micStream = await navigator.mediaDevices.getUserMedia({ audio: true });
-        console.log('Microphone available but Web Speech API not supported');
       } catch (e) {
         console.error('Microphone also unavailable:', e);
       }
@@ -808,7 +806,6 @@ Help the user understand this entity's state, suggest actions, or answer questio
     try {
       speechRecognition.start();
       isListening = true;
-      console.log('Voice activated - say "hello" followed by your command');
     } catch (e) {
       console.error('Failed to start speech recognition:', e);
     }
