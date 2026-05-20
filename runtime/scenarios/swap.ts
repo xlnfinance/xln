@@ -19,21 +19,16 @@
 
 import type { AccountMachine, Env, EntityInput } from '../types';
 import { ethers } from 'ethers';
-import { getBestAsk } from '../orderbook/core';
+import { getBestAsk, SWAP_LOT_SCALE } from '../orderbook';
 import { getOpenSwapOfferEntries } from '../open-swap-offers';
 import { ensureJAdapter, getScenarioJAdapter, createJReplica, createJurisdictionConfig } from './boot';
 import type { JAdapter } from '../jadapter/types';
 import { formatRuntime } from '../runtime-ascii';
-import { enableStrictScenario, processUntil, ensureSignerKeysFromSeed, requireRuntimeSeed, converge } from './helpers';
+import { enableStrictScenario, processUntil, ensureSignerKeysFromSeed, requireRuntimeSeed, converge, commitRuntimeInput } from './helpers';
 import { createGossipLayer } from '../networking/gossip';
 import { swapKey } from '../swap-execution';
 
-// Lazy-loaded runtime functions
-type ApplyRuntimeInputFn = typeof import('../runtime').applyRuntimeInput;
-
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
-let _applyRuntimeInput: ApplyRuntimeInputFn | null = null;
-
 let _processWithStep: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
 
 const getProcess = async () => {
@@ -53,14 +48,6 @@ const getProcess = async () => {
   return _processWithStep;
 };
 
-const getApplyRuntimeInput = async (): Promise<ApplyRuntimeInputFn> => {
-  if (!_applyRuntimeInput) {
-    const runtime = await import('../runtime');
-    _applyRuntimeInput = runtime.applyRuntimeInput;
-  }
-  return _applyRuntimeInput;
-};
-
 async function processJEvents(env: Env): Promise<void> {
   // RPC watcher is polling-based; force immediate poll in scenarios to avoid
   // relying on wall-clock interval timing between submit and assertions.
@@ -73,8 +60,7 @@ async function processJEvents(env: Env): Promise<void> {
   if (pending === 0) return;
   const inputs = [...env.runtimeInput.entityInputs];
   env.runtimeInput.entityInputs = [];
-  const applyRuntimeInput = await getApplyRuntimeInput();
-  await applyRuntimeInput(env, { runtimeTxs: [], entityInputs: inputs });
+  await commitRuntimeInput(env, { runtimeTxs: [], entityInputs: inputs });
 }
 
 // Token IDs (aligned with runtime TOKEN_REGISTRY)
@@ -127,7 +113,6 @@ const SWAP_POSITIONS: Record<string, { x: number; y: number; z: number }> = {
 
 // Fill ratio constants (uint16)
 const MAX_FILL_RATIO = 65535;
-const FILL_10 = 6553;
 const FILL_50 = 32768;
 const FILL_75 = 49152;
 const FILL_80 = 52428;
@@ -331,7 +316,7 @@ export async function swap(env: Env): Promise<void> {
   const offerId1 = 'order-001';
 
   // Alice places swap offer
-  console.log(`📊 Alice: swap_offer (${TRADE_ETH} ETH → ${TRADE_USDC_MAIN_UNITS} USDC, min 50%)`);
+  console.log(`📊 Alice: swap_offer (${TRADE_ETH} ETH → ${TRADE_USDC_MAIN_UNITS} USDC, GTC)`);
   await process(env, [{
     entityId: alice.id,
     signerId: alice.signer,
@@ -344,7 +329,7 @@ export async function swap(env: Env): Promise<void> {
         giveAmount: eth(TRADE_ETH),
         wantTokenId: USDC_TOKEN_ID,
         wantAmount: usdc(TRADE_USDC_MAIN_UNITS),
-        minFillRatio: FILL_50, // 50% minimum
+        minFillRatio: 0,
       },
     }],
   }]);
@@ -405,9 +390,10 @@ export async function swap(env: Env): Promise<void> {
   const aliceHubAccount2 = aliceRep2.state.accounts.get(hub.id);
   const offer2 = aliceHubAccount2?.swapOffers?.get(offerId1);
 
-  // After 50% fill: deterministic remaining based on fillRatio
+  // The orderbook stores remaining quantity in fixed lots, so exact wei can
+  // differ from ratio math by at most one lot after a partial fill.
   const expectedRemaining = eth(TRADE_ETH) - (eth(TRADE_ETH) * BigInt(FILL_50)) / BigInt(MAX_FILL_RATIO);
-  assert(offer2?.giveAmount === expectedRemaining, `Remaining amount = ${expectedRemaining} (got ${offer2?.giveAmount})`);
+  assertQuantizedRemaining(offer2?.giveAmount, expectedRemaining, eth(TRADE_ETH), 'Remaining amount');
 
   // Check offdelta changes
   const ethDelta2 = aliceHubAccount2?.deltas.get(ETH_TOKEN_ID);
@@ -467,8 +453,16 @@ export async function swap(env: Env): Promise<void> {
   const ethDelta3 = aliceHubAccount3?.deltas.get(ETH_TOKEN_ID);
   assert(ethDelta3?.leftHold === 0n, 'ETH hold released');
 
-  // Verify final deltas (deterministic)
-  assert(ethDelta3?.offdelta === -eth(TRADE_ETH), `Final ETH delta = -${TRADE_ETH} (Alice gave ${TRADE_ETH} ETH total)`);
+  // Verify final deltas. The first leg is ratio-derived and the second leg
+  // consumes the canonical lot-quantized remainder, so total executed ETH can
+  // be one lot below the original human-readable order size.
+  const totalExecutedEth = filledEth + offer2.giveAmount;
+  const totalEthDrift = eth(TRADE_ETH) - totalExecutedEth;
+  assert(ethDelta3?.offdelta === -totalExecutedEth, `Final ETH delta = -${totalExecutedEth} (got ${ethDelta3?.offdelta})`);
+  assert(
+    totalEthDrift >= 0n && totalEthDrift <= SWAP_LOT_SCALE,
+    `Final executed ETH is within one orderbook lot of ${TRADE_ETH} ETH (drift=${totalEthDrift})`,
+  );
   const usdcDelta3 = aliceHubAccount3?.deltas.get(USDC_TOKEN_ID);
   const finalUsdcNet = usdcDelta3?.offdelta ?? 0n;
   assert(
@@ -584,6 +578,7 @@ export async function swap(env: Env): Promise<void> {
         giveAmount: eth(TRADE_ETH_HALF),
         wantTokenId: USDC_TOKEN_ID,
         wantAmount: usdc(TRADE_USDC_HALF_UNITS),
+        timeInForce: 1, // IOC permits minFillRatio; resting GTC offers must use 0.
         minFillRatio: MIN_75_PERCENT,
       },
     }],
@@ -666,6 +661,24 @@ export async function swap(env: Env): Promise<void> {
   }
 }
 
+function assertQuantizedRemaining(
+  actual: bigint | undefined,
+  expected: bigint,
+  original: bigint,
+  label: string,
+): void {
+  if (actual === undefined) {
+    assert(false, `${label} is present`);
+    return;
+  }
+  const drift = actual > expected ? actual - expected : expected - actual;
+  assert(actual > 0n && actual < original, `${label} stays open with reduced quantity (got ${actual})`);
+  assert(
+    drift <= SWAP_LOT_SCALE,
+    `${label} matches expected remaining within one orderbook lot: expected ${expected}, got ${actual}, drift=${drift}`,
+  );
+}
+
 // ============================================================================
 // PHASE 2: OrderbookExtension - Hub-based matching
 // ============================================================================
@@ -679,7 +692,6 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
     env.quietRuntimeLogs = true;
   }
   const process = await getProcess();
-  const applyRuntimeInput = await getApplyRuntimeInput();
   const jadapter = getScenarioJAdapter(env);
   const runDisputePhase = Boolean((env as any).scenarioSwapRunDisputePhase);
   console.log('═══════════════════════════════════════════════════════════════');
@@ -722,7 +734,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   console.log('📦 Adding Bob...');
   const bob = { id: getRegisteredEntityId('3'), signer: '3' };
 
-  await applyRuntimeInput(env, { runtimeTxs: [{
+  await commitRuntimeInput(env, { runtimeTxs: [{
     type: 'importReplica' as const,
     entityId: bob.id,
     signerId: bob.signer,
@@ -785,7 +797,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
         giveAmount: eth(TRADE_ETH),
         wantTokenId: USDC_TOKEN_ID,
         wantAmount: usdc(TRADE_USDC_MAIN_UNITS),
-        minFillRatio: FILL_10, // 10% min
+        minFillRatio: 0,
       },
     }],
   }]);
@@ -947,8 +959,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   const aliceOfferRemaining = aliceAccount?.swapOffers?.get('alice-sell-001');
   if (aliceOfferRemaining) {
     const expectedRemaining = eth(TRADE_ETH) - aliceFilled.filledGive;
-    assert(aliceOfferRemaining.giveAmount === expectedRemaining,
-      `Alice remaining ETH = ${expectedRemaining} (got ${aliceOfferRemaining.giveAmount})`);
+    assertQuantizedRemaining(aliceOfferRemaining.giveAmount, expectedRemaining, eth(TRADE_ETH), 'Alice remaining ETH');
   }
 
   console.log('  ✅ Phase 2 assertions passed');

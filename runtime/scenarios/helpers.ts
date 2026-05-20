@@ -10,7 +10,6 @@ import { getCachedSignerPrivateKey, deriveSignerKeySync, registerSignerKey } fro
 
 // Lazy-loaded process to avoid circular deps
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
-let _applyRuntimeInput: ((env: Env, runtimeInput: RuntimeInput) => Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[] }>) | null = null;
 
 export const getProcess = async () => {
   if (!_process) {
@@ -18,14 +17,6 @@ export const getProcess = async () => {
     _process = runtime.process;
   }
   return _process;
-};
-
-export const getApplyRuntimeInput = async () => {
-  if (!_applyRuntimeInput) {
-    const runtime = await import('../runtime');
-    _applyRuntimeInput = runtime.applyRuntimeInput;
-  }
-  return _applyRuntimeInput;
 };
 
 // Preferred scenario ingress for anything that should become a durable
