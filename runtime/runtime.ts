@@ -8,27 +8,20 @@ import { Level } from 'level';
 import { ethers } from 'ethers';
 import type { Provider } from 'ethers';
 import type { JAdapterConfig } from './jadapter/types';
+import {
+  DEFAULT_SNAPSHOT_INTERVAL_FRAMES,
+  dbRootPath,
+  isProductionRuntime,
+  nodeProcess,
+  runtimeIsBrowser,
+  runtimeProcessEnv,
+} from './runtime-platform';
 
 // Bump this on runtime bundle changes that must be reflected in frontend immediately.
 const RUNTIME_BUILD_ID = '2026-03-23-19:35Z';
 // Bump this only on breaking persistence/replay format or invariants.
 export const RUNTIME_SCHEMA_VERSION = 5;
 export const RUNTIME_BUILD = RUNTIME_BUILD_ID;
-type RuntimeProcessLike = { env?: Record<string, string | undefined> };
-const readRuntimeEnv = (name: string): string | undefined => {
-  try {
-    const proc = (globalThis as typeof globalThis & { process?: RuntimeProcessLike }).process;
-    const value = proc?.env?.[name];
-    return typeof value === 'string' ? value : undefined;
-  } catch {
-    return undefined;
-  }
-};
-const DEFAULT_SNAPSHOT_INTERVAL_FRAMES = (() => {
-  const parsed = Number(readRuntimeEnv('XLN_SNAPSHOT_INTERVAL_FRAMES') ?? '5');
-  if (!Number.isFinite(parsed) || parsed < 1) return 5;
-  return Math.floor(parsed);
-})();
 
 import { getPerfMs, getWallClockMs } from './utils';
 import { listOpenSwapOffers } from './open-swap-offers';
@@ -258,60 +251,6 @@ import {
 import { logError } from './logger';
 import type { PersistedFrameJournal } from './wal/store';
 import { rehydrateRestoredRuntimeInfra } from './runtime-infra';
-
-const runtimeIsBrowser = typeof window !== 'undefined';
-
-if (runtimeIsBrowser && typeof globalThis.process === 'undefined') {
-  const nowMs = () => (typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now());
-  const hrtime = (prev?: [number, number]) => {
-    const ms = nowMs();
-    const sec = Math.floor(ms / 1000);
-    const ns = Math.floor((ms - sec * 1000) * 1e6);
-    if (prev) {
-      let secDiff = sec - prev[0];
-      let nsDiff = ns - prev[1];
-      if (nsDiff < 0) {
-        secDiff -= 1;
-        nsDiff += 1e9;
-      }
-      return [secDiff, nsDiff] as [number, number];
-    }
-    return [sec, ns] as [number, number];
-  };
-  type BrowserProcessShim = {
-    env: Record<string, string | undefined>;
-    browser: true;
-    version: string;
-    versions: { node: string };
-    nextTick: (cb: (...args: unknown[]) => void, ...args: unknown[]) => void;
-    hrtime: (prev?: [number, number]) => [number, number];
-    uptime: () => number;
-    cwd: () => string;
-  };
-  const processShim: BrowserProcessShim = {
-    env: {},
-    browser: true,
-    version: '0',
-    versions: { node: '0' },
-    nextTick: (cb: (...args: unknown[]) => void, ...args: unknown[]) => {
-      if (typeof queueMicrotask === 'function') {
-        queueMicrotask(() => cb(...args));
-      } else {
-        Promise.resolve().then(() => cb(...args));
-      }
-    },
-    hrtime,
-    uptime: () => nowMs() / 1000,
-    cwd: () => '/',
-  };
-  Object.assign(globalThis, { process: processShim });
-}
-
-// --- Database Setup ---
-// Level polyfill: Node.js uses filesystem, Browser uses IndexedDB
-const nodeProcess = !runtimeIsBrowser && typeof globalThis.process !== 'undefined' ? globalThis.process : undefined;
-const defaultDbPath = nodeProcess ? 'db-tmp/runtime' : 'db';
-const dbRootPath = nodeProcess?.env?.['XLN_DB_PATH'] || defaultDbPath;
 
 const DEFAULT_DB_NAMESPACE = 'default';
 
@@ -1135,12 +1074,6 @@ export async function tryOpenInfraDb(env: Env): Promise<boolean> {
 
 const INFRA_GOSSIP_INDEX_KEY = 'gossip:index';
 const makeInfraGossipProfileKey = (entityId: string): string => `gossip:profile:${String(entityId).toLowerCase()}`;
-const runtimeProcessEnv =
-  typeof globalThis === 'object'
-    ? (globalThis as typeof globalThis & { process?: { env?: Record<string, string | undefined> } }).process?.env
-    : undefined;
-const isProductionRuntime = runtimeProcessEnv?.['NODE_ENV'] === 'production';
-
 const readInfraStringArray = async (db: Level<Buffer, Buffer>, key: string): Promise<string[]> => {
   try {
     const raw = await db.get(Buffer.from(key));
