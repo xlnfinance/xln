@@ -851,8 +851,6 @@ export async function proposeAccountFrame(
 
   // Settlements are handled via SettlementWorkspace flow (entity-tx/handlers/settle.ts).
 
-  console.log(`✅ Signed frame + dispute proof for account ${accountMachine.proofHeader.toEntity.slice(-4)}`);
-
   // Set pending state (no longer storing clone - re-execution on commit)
   accountMachine.pendingFrame = newFrame;
   markStorageAccountDirty(env, accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);

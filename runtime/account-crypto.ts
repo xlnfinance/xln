@@ -200,14 +200,11 @@ const cacheNumericSigner = (seed: Uint8Array | string, signerId: string): Uint8A
 
 const getOrDeriveKey = (envSeed: Uint8Array | string, signerId: string): Uint8Array => {
   const canonicalSignerId = signerId.toLowerCase();
-  console.log(`🔍 getOrDeriveKey: signerId=${canonicalSignerId.slice(-4)}`);
   const cached = signerKeys.get(signerId) || signerKeys.get(canonicalSignerId);
   if (cached) {
     assertSignerKeyMatchesId(canonicalSignerId, cached, 'getOrDeriveKey(cache)');
-    console.log(`✅ Found cached key for ${canonicalSignerId.slice(-4)}`);
     return cached;
   }
-  console.log(`⚠️ No cached key for ${canonicalSignerId.slice(-4)}`);
 
   if (envSeed === undefined || envSeed === null) {
     throw new Error(`CRYPTO_DETERMINISM_VIOLATION: getOrDeriveKey called without env.runtimeSeed for signer ${canonicalSignerId}`);
@@ -215,8 +212,6 @@ const getOrDeriveKey = (envSeed: Uint8Array | string, signerId: string): Uint8Ar
 
   const signerIndex = parseSignerIndex(canonicalSignerId);
   if (signerIndex !== null) {
-    const seedLen = typeof envSeed === 'string' ? envSeed.length : envSeed.length;
-    console.log(`✅ Deriving numeric signer key from env seed (${seedLen} bytes)`);
     return cacheNumericSigner(envSeed, canonicalSignerId);
   }
 
@@ -457,16 +452,10 @@ export function signAccountFrame(
     throw new Error(`CRYPTO_DETERMINISM_VIOLATION: signAccountFrame called without env.runtimeSeed for signer ${signerId}`);
   }
 
-  console.log(`🔑 signAccountFrame CALLED: signerId=${signerId.slice(-4)}, frameHash=${frameHash.slice(0, 10)}, source=env`);
-  console.log(`🔑 Available signerKeys:`, Array.from(signerKeys.keys()).map(k => k.slice(-4)));
-  console.log(`🔑 Available signerPublicKeys:`, Array.from(signerPublicKeys.keys()).map(k => k.slice(-4)));
-
   // CRITICAL: Sign raw hash - NO double hashing
   // On-chain _recoverSigner expects ecrecover(hash, sig) where hash is the raw 32-byte message
   // frameHash is already keccak256 output, sign it directly
-  const signature = signDigest(env.runtimeSeed, signerId, frameHash);
-  console.log(`✍️ Signed frame ${frameHash.slice(0, 10)} by ${signerId.slice(-4)}: ${signature.slice(0, 20)}...`);
-  return signature;
+  return signDigest(env.runtimeSeed, signerId, frameHash);
 }
 
 export function signDigest(seed: Uint8Array | string, signerId: string, digestHex: string): string {
