@@ -225,14 +225,12 @@
     mesh: THREE.Mesh;
     label?: THREE.Sprite; // Label sprite that follows entity
     profile?: any;
-    isHub?: boolean; // Hub entity (gets pulsing glow animation)
-    pulsePhase?: number;
+    isHub?: boolean;
     lastActivity?: number;
     isPinned?: boolean;  // User has manually positioned this entity
     isHovered?: boolean; // Mouse is over this entity
     isDragging?: boolean; // Currently being dragged
     activityRing?: THREE.Mesh | null; // Activity indicator ring
-    hubConnectedIds?: Set<string>; // PERF: Cache of connected entity IDs for hubs
     // NOTE: Entity sizes stored globally in lockedEntitySizes Map, not per-entity
     // NOTE: reserveLabel removed - too noisy
     mempoolIndicator?: THREE.Sprite; // Mempool count indicator
@@ -1120,45 +1118,6 @@
     }
   }
 
-  // Live command builder state
-  let commandAction: string = '';
-  let commandText: string = 'payRandom count=10 amount=100000 minHops=2 maxHops=4';
-
-  // Live activity log
-  let activityLog: string[] = [];
-
-  function logActivity(message: string) {
-    const timestamp = new Date().toLocaleTimeString();
-    activityLog = [...activityLog.slice(-100), `[${timestamp}] ${message}`];
-  }
-
-  // Performance metrics
-  let perfMetrics = {
-    fps: 0,
-    renderTime: 0,
-    entityCount: 0,
-    connectionCount: 0,
-    lastFrameTime: 0,
-    avgFrameTime: 0,
-  };
-  let frameTimeSamples: number[] = [];
-  let lastPerfUpdate = 0;
-
-  // Track logged entities to only log ONCE on first draw
-  let loggedGridPositions = new Set<string>();
-
-  // entitySizeCache removed - now using frame-locked entitySizesAtFrame
-
-  // Slice & export state
-  let sliceStart: number = 0;
-  let sliceEnd: number = 0;
-  let exportUrl: string = '';
-
-  // ASCII formation tool state
-  let asciiText: string = '';
-  let asciiScale: number = 100;
-  let asciiScenario: string = '';
-
   // VR state
   let isVRSupported: boolean = false;
   let isVRActive: boolean = false;
@@ -1166,9 +1125,6 @@
 
   // Hand tracking controller (Vision Pro + Quest)
   let handTrackingController: VRHandTrackingController | null = null;
-
-  // Visual effects toggles
-  let lightningEnabled: boolean = false; // Disabled by default (performance)
 
   // Ripple effects for balance changes
   interface Ripple {
@@ -2396,12 +2352,6 @@
         // Size was set when entity was first created, don't touch it
         // This prevents size jumps when reserves change during R2R transfers
 
-        // Update hub cache
-        if (existing.isHub && !existing.hubConnectedIds) {
-          existing.hubConnectedIds = new Set();
-        } else if (!existing.isHub && existing.hubConnectedIds) {
-          delete existing.hubConnectedIds;
-        }
       }
     });
 
@@ -2769,10 +2719,6 @@
         y = persistedPosition.y;
         z = persistedPosition.z;
       }
-      if (!loggedGridPositions.has(profile.entityId)) {
-        loggedGridPositions.add(profile.entityId);
-        logActivity(`📍 ${profile.entityId.slice(0,10)} @ (${x.toFixed(0)}, ${y.toFixed(0)}, ${z.toFixed(0)}) [relative to ${persistedPosition.jurisdiction}]`);
-      }
     } else if (replica?.position) {
       // Replica position is also RELATIVE to j-machine - compute world position
       const replicaJurisdiction = replica.position.jurisdiction || replica.position.xlnomy || env?.activeJurisdiction || 'default';
@@ -2787,21 +2733,11 @@
         y = replica.position.y;
         z = replica.position.z;
       }
-      // Only log ONCE on first draw
-      if (!loggedGridPositions.has(profile.entityId)) {
-        loggedGridPositions.add(profile.entityId);
-        logActivity(`📍 ${profile.entityId.slice(0,10)} @ (${x.toFixed(0)}, ${y.toFixed(0)}, ${z.toFixed(0)}) [relative to ${replicaJurisdiction}]`);
-      }
     } else if (profile.metadata?.position) {
       // Priority 2: Check gossip profile position
       x = profile.metadata.position.x;
       y = profile.metadata.position.y;
       z = profile.metadata.position.z;
-      // Only log ONCE on first draw
-      if (!loggedGridPositions.has(profile.entityId)) {
-        loggedGridPositions.add(profile.entityId);
-        logActivity(`📍 ${profile.entityId.slice(0,10)} @ (${x.toFixed(0)}, ${y.toFixed(0)}, ${z.toFixed(0)})`);
-      }
     } else if (forceLayoutPositions.has(profile.entityId) && forceLayoutEnabled) {
       // Priority 3: Use computed force-directed position (only if enabled)
       const pos = forceLayoutPositions.get(profile.entityId)!;
@@ -2859,8 +2795,6 @@
       glowRing.rotation.x = Math.PI / 2; // Horizontal ring
       mesh.add(glowRing);
 
-      // Store for animation
-      mesh.userData['glowRing'] = glowRing;
     }
 
     // GRID-POS-E removed - already logged in GRID-POS-D above
@@ -2869,13 +2803,6 @@
     mesh.userData['isHub'] = isHub;
     mesh.userData['isFed'] = isFed; // Used to skip color updates for Fed (always purple)
     mesh.userData['baseMaterial'] = material;
-
-    if (isHub) {
-      // Add lightning particles for hubs
-      const lightningGroup = new THREE.Group();
-      mesh.add(lightningGroup);
-      mesh.userData['lightningGroup'] = lightningGroup;
-    }
 
     scene.add(mesh);
 
@@ -2892,8 +2819,7 @@
       mesh,
       label: labelSprite, // Entity name
       profile,
-      isHub, // Store hub status for pulse animation
-      pulsePhase: Math.random() * Math.PI * 2, // Random start phase for pulse
+      isHub,
       lastActivity: 0
       // Size is calculated from reserves in applyPulseAnimation (pure function)
     });
@@ -2942,16 +2868,6 @@
     // Build connection index map for O(1) lookups
     buildConnectionIndexMap();
 
-    // PERF: Cache hub connections to avoid O(n × c) nested iteration
-    entities.forEach(entity => {
-      if (entity.isHub) {
-        entity.hubConnectedIds = new Set(
-          connections
-            .filter(c => c.from === entity.id || c.to === entity.id)
-            .map(c => c.from === entity.id ? c.to : c.from)
-        );
-      }
-    });
   }
 
   function buildConnectionIndexMap() {
@@ -4081,100 +3997,6 @@
       handTrackingController.update(grabbableEntities);
     }
 
-    // PERF: Pulse animations disabled for 60 FPS target
-    // Fed glow ring and hub aurora effects consume ~5-10 FPS
-    // Uncomment below to re-enable visual effects
-    /*
-    const time = Date.now() * 0.001;
-    entities.forEach(entity => {
-      if (entity.mesh.userData['glowRing']) {
-        const glowRing = entity.mesh.userData['glowRing'] as THREE.Mesh;
-        glowRing.rotation.z = time * 0.5;
-        const pulseMaterial = glowRing.material as THREE.MeshBasicMaterial;
-        pulseMaterial.opacity = 0.2 + Math.sin(time * 2) * 0.15;
-      }
-
-      if (entity.isHub && entity.mesh.material && entity.pulsePhase !== undefined) {
-        const material = entity.mesh.material as THREE.MeshLambertMaterial;
-        const slowPulse = Math.sin(time * 0.8 + entity.pulsePhase);
-        const fastShimmer = Math.sin(time * 3.5 + entity.pulsePhase * 0.7);
-        const wave = Math.sin(time * 0.3 + entity.pulsePhase * 1.3);
-        const pulseIntensity = 2.0 + 1.5 * slowPulse + 0.5 * fastShimmer + 0.3 * wave;
-        material.emissiveIntensity = pulseIntensity;
-        const colorShift = (slowPulse + 1) * 0.5;
-        const r = 0;
-        const g = Math.floor(255 * (0.8 + 0.2 * colorShift));
-        const b = Math.floor(255 * (0.5 + 0.5 * (1 - colorShift)));
-        material.emissive.setRGB(r / 255, g / 255, b / 255);
-
-        // Lightning bolts from hub to connected entities
-        const lightningGroup = entity.mesh.userData['lightningGroup'];
-        if (lightningEnabled && lightningGroup) {
-          // Clear old lightning every 150ms (faster refresh for more chaos)
-          if (Math.floor(time * 6.67) !== Math.floor((time - 0.016) * 6.67)) {
-            while (lightningGroup.children.length > 0) {
-              const child = lightningGroup.children[0];
-              if (child.geometry) child.geometry.dispose();
-              if (child.material) (child.material as any).dispose();
-              lightningGroup.remove(child);
-            }
-
-            // PERF: Use cached hub connections instead of nested filter+some
-            const connectedEntities = entity.hubConnectedIds
-              ? entities.filter(e => entity.hubConnectedIds!.has(e.id))
-              : [];
-
-            // Fire lightning to 1-3 random connected entities
-            const targetCount = Math.min(3, connectedEntities.length);
-            const shuffled = [...connectedEntities].sort(() => Math.random() - 0.5);
-            const targets = shuffled.slice(0, targetCount);
-
-            targets.forEach(target => {
-              // Calculate relative position
-              const hubPos = entity.mesh.position;
-              const targetPos = target.mesh.position;
-
-              const relX = targetPos.x - hubPos.x;
-              const relY = targetPos.y - hubPos.y;
-              const relZ = targetPos.z - hubPos.z;
-
-              // Create jagged lightning path
-              const points: THREE.Vector3[] = [];
-              points.push(new THREE.Vector3(0, 0, 0));
-
-              const segments = 8; // More segments = more jagged
-              for (let s = 1; s < segments; s++) {
-                const t = s / segments;
-                const jitterScale = 1.5; // Higher = more chaos
-                const jitterX = (Math.random() - 0.5) * jitterScale;
-                const jitterY = (Math.random() - 0.5) * jitterScale;
-                const jitterZ = (Math.random() - 0.5) * jitterScale;
-
-                points.push(new THREE.Vector3(
-                  relX * t + jitterX,
-                  relY * t + jitterY,
-                  relZ * t + jitterZ
-                ));
-              }
-              points.push(new THREE.Vector3(relX, relY, relZ));
-
-              const geometry = new THREE.BufferGeometry().setFromPoints(points);
-              const material = new THREE.LineBasicMaterial({
-                color: 0x00ffff,
-                opacity: 0.7 + Math.random() * 0.3,
-                transparent: true,
-                linewidth: 3
-              });
-
-              const lightning = new THREE.Line(geometry, material);
-              lightningGroup.add(lightning);
-            });
-          }
-        }
-      }
-    });
-    */ // End of disabled pulse animations
-
     // Auto-rotate (adjustable speed from slider 0-10000 per axis)
     if ((rotationX > 0 || rotationY > 0 || rotationZ > 0) && controls) {
       // Map slider value (0-10000) to rotation angle
@@ -4295,28 +4117,8 @@
     }
 
     if (renderer && camera) {
-      const renderStartTime = performance.now();
       renderer.render(scene, camera);
       perfMonitor.end(); // Complete FPS measurement
-
-      const renderEndTime = performance.now();
-
-      // Performance metrics update (every 500ms)
-      const frameTime = renderEndTime - renderStartTime;
-      frameTimeSamples.push(frameTime);
-      if (frameTimeSamples.length > 60) frameTimeSamples.shift();
-
-      if (renderEndTime - lastPerfUpdate > 500) {
-        perfMetrics = {
-          fps: Math.round(1000 / (frameTimeSamples.reduce((a, b) => a + b, 0) / frameTimeSamples.length)),
-          renderTime: Math.round(frameTime * 100) / 100,
-          entityCount: entities.length,
-          connectionCount: connections.length,
-          lastFrameTime: Math.round(frameTime * 100) / 100,
-          avgFrameTime: Math.round((frameTimeSamples.reduce((a, b) => a + b, 0) / frameTimeSamples.length) * 100) / 100,
-        };
-        lastPerfUpdate = renderEndTime;
-      }
     }
   }
 
@@ -5385,43 +5187,6 @@
     });
   }
 
-
-  // Helper to log frame commits (currently unused, will be called from frame processing)
-  // function logFrameCommit(entity1: string, entity2: string, frameId: number) {
-  //   const e1 = getEntityShortName(entity1);
-  //   const e2 = getEntityShortName(entity2);
-  //   recentActivity.unshift({
-  //     id: `commit-${Date.now()}-${Math.random()}`,
-  //     message: `✅ ${e1} ⟷ ${e2}: frame ${frameId} committed`,
-  //     timestamp: Date.now(),
-  //     type: 'commit'
-  //   });
-  //   if (recentActivity.length > 30) {
-  //     recentActivity = recentActivity.slice(0, 30);
-  //   }
-  // }
-
-  function update3DMode() {
-    if (!camera) return;
-
-    if (viewMode === '2d') {
-      // Switch to orthographic 2D view
-      camera.position.set(0, 0, 30);
-      camera.lookAt(0, 0, 0);
-      if (controls) {
-        controls.enableRotate = false;
-        controls.enablePan = true;
-      }
-    } else {
-      // Switch to 3D perspective view
-      camera.position.set(0, 0, 25);
-      if (controls) {
-        controls.enableRotate = true;
-        controls.enablePan = true;
-      }
-    }
-  }
-
   function updateAvailableTokens() {
     const currentReplicas = getTimeAwareReplicas();
     const tokenSet = new Set<number>();
@@ -5894,213 +5659,6 @@
       debug.error('Scenario failed: ' + (error as Error).message);
     } finally {
       isLoadingScenario = false;
-    }
-  }
-
-  async function executeLiveCommand() {
-    if (!commandText.trim()) {
-      debug.warn('No command entered');
-      return;
-    }
-
-    try {
-      // Ensure LIVE mode
-      if (!($isolatedTimeIndex === -1)) {
-        isolatedTimeIndex.set(-1)  // Go to live;
-      }
-
-
-      // Clear logged positions if this is a grid command (for fresh logs)
-      if (commandText.trim().startsWith('grid')) {
-        loggedGridPositions.clear();
-      }
-
-      // Parse as single-line scenario
-      const scenarioText = `SEED live-${Date.now()}\n\n0: Live Command\n${commandText}`;
-
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ runtimeUrl);
-
-      const parsed = XLN?.parseScenario(scenarioText);
-
-      if (parsed.errors.length > 0) {
-        console.error('Command parse errors:', parsed.errors);
-        debug.error('Invalid command syntax');
-        return;
-      }
-
-      // Execute command
-      const result = await XLN?.executeScenario($isolatedEnv, parsed.scenario);
-
-      if (result.success) {
-        commandText = ''; // Clear input
-      } else {
-        debug.error('Command execution failed');
-      }
-    } catch (error) {
-      console.error('Failed to execute command:', error);
-      debug.error('Command failed: ' + (error as Error).message);
-    }
-  }
-
-  function generateSliceURL() {
-    const currentHistory = get(isolatedHistory);
-    const start = Math.max(0, sliceStart);
-    const end = Math.min(currentHistory.length - 1, sliceEnd);
-
-    if (start >= end) {
-      debug.warn('Invalid slice range');
-      return;
-    }
-
-    // Build complete scenario from sliced frames
-    const scenarioLines: string[] = [];
-    scenarioLines.push(`SEED slice-${Date.now()}`);
-    scenarioLines.push('');
-
-    // Extract narrative and actions from each frame
-    for (let i = start; i <= end; i++) {
-      const frame = currentHistory[i];
-      if (!frame) continue;
-
-      const timestamp = i - start; // Relative time from slice start
-
-      const frameTitle = frame.meta?.title;
-      if (frameTitle || frame.narrative) {
-        scenarioLines.push(`${timestamp}: ${frameTitle || 'Frame ' + i}`);
-        if (frame.narrative) {
-          scenarioLines.push(frame.narrative);
-        }
-        scenarioLines.push('');
-        scenarioLines.push('===');
-        scenarioLines.push('');
-      }
-    }
-
-    // Encode complete scenario as base64
-    const scenarioText = scenarioLines.join('\n');
-    const base64Scenario = btoa(scenarioText);
-
-    // Build URL with encoded scenario and loop suggestion
-    const baseUrl = window.location.origin;
-    exportUrl = `${baseUrl}/?s=${base64Scenario}&loop=${start}:${end}`;
-
-  }
-
-  function generateASCIIScenario() {
-    if (!asciiText.trim()) {
-      debug.warn('No ASCII text entered');
-      return;
-    }
-
-    // Parse ASCII grid
-    const textLines = asciiText.split('\n');
-    const positions: Array<{x: number; y: number; char: string}> = [];
-
-    textLines.forEach((line, y) => {
-      [...line].forEach((char, x) => {
-        if (char !== ' ' && char.trim().length > 0) {
-          positions.push({ x, y, char });
-        }
-      });
-    });
-
-    if (positions.length === 0) {
-      debug.warn('No entities found in ASCII text');
-      return;
-    }
-
-    // Center the formation
-    const centerX = positions.reduce((sum, p) => sum + p.x, 0) / positions.length;
-    const centerY = positions.reduce((sum, p) => sum + p.y, 0) / positions.length;
-
-    // Convert to world coordinates
-    const entityPositions = positions.map((p, i) => ({
-      id: i + 1,
-      x: (p.x - centerX) * asciiScale,
-      y: (centerY - p.y) * asciiScale, // Flip Y for screen coords
-      z: 0
-    }));
-
-    // Generate connections (connect adjacent entities)
-    const connections: Array<{from: number; to: number}> = [];
-    entityPositions.forEach((p1, i) => {
-      entityPositions.forEach((p2, j) => {
-        if (i >= j) return;
-
-        const dx = p1.x - p2.x;
-        const dy = p1.y - p2.y;
-        const distance = Math.sqrt(dx*dx + dy*dy);
-
-        // Connect if distance ≈ 1 grid unit (with tolerance)
-        if (distance < asciiScale * 1.5) {
-          connections.push({ from: p1.id, to: p2.id });
-        }
-      });
-    });
-
-    // Build scenario text
-    const scenarioLines: string[] = [];
-    scenarioLines.push(`SEED ascii-${Date.now()}`);
-    scenarioLines.push('');
-    scenarioLines.push('0: ASCII Formation');
-    scenarioLines.push(`${entityPositions.length} entities form the pattern`);
-    scenarioLines.push(`import 1..${entityPositions.length}`);
-    scenarioLines.push('');
-    scenarioLines.push('===');
-    scenarioLines.push('');
-    scenarioLines.push('1: Position Entities');
-    scenarioLines.push('Entities placed in ASCII grid pattern');
-
-    // Add position data as VIEW param
-    const posStr = entityPositions
-      .map(p => `${p.id}:${p.x.toFixed(0)},${p.y.toFixed(0)},${p.z}`)
-      .join(';');
-    scenarioLines.push(`VIEW entity_positions="${posStr}"`);
-    scenarioLines.push('');
-    scenarioLines.push('===');
-    scenarioLines.push('');
-    scenarioLines.push('2: Link Structure');
-    scenarioLines.push(`${connections.length} connections form the shape`);
-
-    connections.forEach(c => {
-      scenarioLines.push(`${c.from} openAccount ${c.to}`);
-    });
-
-    asciiScenario = scenarioLines.join('\n');
-
-  }
-
-  async function executeASCIIScenario() {
-    if (!asciiScenario) {
-      debug.warn('No ASCII scenario generated');
-      return;
-    }
-
-    try {
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ runtimeUrl);
-
-      const parsed = XLN?.parseScenario(asciiScenario);
-
-      if (parsed.errors.length > 0) {
-        console.error('ASCII scenario parse errors:', parsed.errors);
-        debug.error('Failed to parse generated scenario');
-        return;
-      }
-
-      const result = await XLN?.executeScenario($isolatedEnv, parsed.scenario);
-
-      if (result.success) {
-        // timeOperations removed 0);
-        asciiText = ''; // Clear input
-        asciiScenario = ''; // Clear output
-      } else {
-        debug.error('ASCII formation failed');
-      }
-    } catch (error) {
-      console.error('Failed to execute ASCII formation:', error);
-      debug.error('Formation failed: ' + (error as Error).message);
     }
   }
 
