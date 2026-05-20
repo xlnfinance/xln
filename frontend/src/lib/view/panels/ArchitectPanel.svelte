@@ -45,9 +45,6 @@
   let numberedEntities = false; // Default: lazy (in-memory only, no blockchain needed)
   let newEntityName = 'alice'; // For manual entity creation in Build mode
 
-  // Topology selector
-  let selectedTopology: 'star' | 'mesh' | 'tiered' | 'correspondent' | 'hybrid' | 'sp500' = 'hybrid';
-
   // S&P 500 tickers (top 50)
   const SP500_TICKERS = [
     'AAPL', 'MSFT', 'GOOGL', 'AMZN', 'NVDA', 'META', 'TSLA',
@@ -65,7 +62,6 @@
   let newXlnomyEvmType: 'browservm' | 'reth' | 'erigon' | 'monad' = 'browservm';
   let newXlnomyRpcUrl = 'http://localhost:8545';
   let newXlnomyBlockTime = '1000';
-  let newXlnomyAutoGrid = false; // Removed from UI, always manual now
 
   // Get available Xlnomies from env
   $: jurisdictions = $isolatedEnv?.jReplicas ? Array.from($isolatedEnv.jReplicas.keys()) : [];
@@ -314,9 +310,6 @@
   // ============================================================================
 
   let tutorialActive = false;
-  let tutorialPaused = false;
-  let currentTutorialFrame = 0;
-
   // Scenario Code - shows actual scenarios/ahb.ts from /runtime (via Vite raw import)
   let scenarioCodeTextarea: HTMLTextAreaElement;
   const scenarioCode = ahbScenarioCode;
@@ -341,9 +334,6 @@
     const lineHeight = 18; // Approximate line height in pixels
     scenarioCodeTextarea.scrollTop = lineNumber * lineHeight - 50;
   }
-
-  // Expandable category state
-  let expandedCategory: 'elementary' | 'intermediate' | 'advanced' | null = 'elementary'; // Pre-expand Elementary on load
 
   /** Run preset by ID */
   async function runPreset(presetId: string) {
@@ -725,193 +715,6 @@
     }
   }
 
-  /** Start H-Topology Tutorial */
-  async function startHTopologyTutorial() {
-    loading = true;
-    tutorialActive = true;
-    try {
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ runtimeUrl);
-
-      // CRITICAL: Clear old state BEFORE running demo
-      ensureScenarioEnv(XLN, 'H-Topology');
-      $isolatedEnv.eReplicas.clear();
-      $isolatedEnv.history = [];
-      console.log('[H-Topology] Cleared old state');
-
-      await XLN.scenarios.ahb($isolatedEnv);
-
-      // CRITICAL: Set timeIndex BEFORE history to avoid race condition
-      const frames = $isolatedEnv.history || [];
-      isolatedIsLive.set(false);
-      isolatedTimeIndex.set(0);
-      isolatedHistory.set(frames);
-      isolatedEnv.set($isolatedEnv);
-
-      console.log('[H-Topology] Frames loaded:', frames.length);
-
-      lastAction = `H-Topology: ${frames.length} frames loaded`;
-
-      // Slower autopilot for more complex topology
-      startAutopilot([5, 6, 6, 7, 7, 8, 8, 10, 12]);
-    } catch (err: any) {
-      lastAction = ` ${err.message}`;
-      console.error('[Tutorial] H-Topology error:', err);
-      tutorialActive = false;
-    } finally {
-      loading = false;
-    }
-  }
-
-  /** Start Full Mechanics Tutorial (All 10) */
-  async function startFullMechanicsTutorial() {
-    loading = true;
-    tutorialActive = true;
-    try {
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ runtimeUrl);
-
-      // CRITICAL: Clear old state BEFORE running demo
-      ensureScenarioEnv(XLN, 'Full Mechanics');
-      $isolatedEnv.eReplicas.clear();
-      $isolatedEnv.history = [];
-      console.log('[Full Mechanics] Cleared old state');
-
-      await XLN.scenarios.fullMechanics($isolatedEnv);
-
-      // CRITICAL: Set timeIndex BEFORE history to avoid race condition
-      const frames = $isolatedEnv.history || [];
-      isolatedIsLive.set(false);
-      isolatedTimeIndex.set(0);
-      isolatedHistory.set(frames);
-      isolatedEnv.set($isolatedEnv);
-
-      console.log('[Full Mechanics] Frames loaded:', frames.length);
-
-      lastAction = `Full Mechanics: ${frames.length} frames loaded`;
-
-      // Moderate autopilot (15 frames, ~8 min total)
-      startAutopilot([4, 5, 5, 6, 6, 5, 5, 6, 5, 6, 6, 7, 5, 6, 10]);
-    } catch (err: any) {
-      lastAction = ` ${err.message}`;
-      console.error('[Tutorial] Full Mechanics error:', err);
-      tutorialActive = false;
-    } finally {
-      loading = false;
-    }
-  }
-
-  /** Autopilot playback with smart pauses */
-  let autopilotInterval: number | null = null;
-
-  function startAutopilot(pauseTimes: number[]) {
-    if (autopilotInterval) clearInterval(autopilotInterval);
-
-    currentTutorialFrame = 0;
-    let frameStartTime = Date.now();
-
-    autopilotInterval = window.setInterval(() => {
-      if (tutorialPaused) return;
-
-      const elapsed = (Date.now() - frameStartTime) / 1000;
-      const currentPause = pauseTimes[currentTutorialFrame] || 5;
-
-      if (elapsed >= currentPause) {
-        currentTutorialFrame++;
-
-        if (currentTutorialFrame >= ($isolatedHistory?.length || 0)) {
-          // Tutorial complete
-          stopAutopilot();
-          lastAction = ' Tutorial complete! Use arrow keys to review frames.';
-        } else {
-          // Move to next frame
-          isolatedTimeIndex.set(currentTutorialFrame);
-          frameStartTime = Date.now();
-        }
-      }
-    }, 100); // Check every 100ms
-  }
-
-  function stopAutopilot() {
-    if (autopilotInterval) {
-      clearInterval(autopilotInterval);
-      autopilotInterval = null;
-    }
-    tutorialActive = false;
-    tutorialPaused = false;
-  }
-
-  /** Quick mechanic demos (30 sec micro-demos) */
-  async function runMechanicDemo(mechanic: string) {
-    loading = true;
-    try {
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ runtimeUrl);
-
-      // Clear current state
-      $isolatedEnv.eReplicas.clear();
-      $isolatedEnv.history = [];
-
-      // Create micro-demo based on mechanic type
-      switch (mechanic) {
-        case 'r2r':
-          await demoR2R(XLN);
-          break;
-        case 'r2c':
-          await demoR2C(XLN);
-          break;
-        case 'c2r':
-          await demoC2R(XLN);
-          break;
-        case 'ondelta':
-          await demoOndelta(XLN);
-          break;
-        case 'credit':
-          await demoCreditExtension(XLN);
-          break;
-        default:
-          lastAction = `⚠️ Demo for "${mechanic}" not implemented yet`;
-          return;
-      }
-
-      // CRITICAL: Set timeIndex BEFORE history to avoid race condition
-      isolatedIsLive.set(false);
-      isolatedTimeIndex.set(0);
-      isolatedHistory.set($isolatedEnv.history || []);
-      isolatedEnv.set($isolatedEnv);
-
-      lastAction = ` ${mechanic.toUpperCase()} demo ready`;
-    } catch (err: any) {
-      lastAction = ` ${err.message}`;
-      console.error(`[Mechanic Demo] ${mechanic} error:`, err);
-    } finally {
-      loading = false;
-    }
-  }
-
-  // Micro-demo implementations (simplified versions)
-  async function demoR2R(XLN: any) {
-    // Create Alice + Bob, fund Alice, transfer to Bob
-    // (Placeholder - implement later)
-    lastAction = '⚠️ R2R micro-demo: Not implemented yet';
-  }
-
-  async function demoR2C(XLN: any) {
-    lastAction = '⚠️ R2C micro-demo: Not implemented yet';
-  }
-
-  async function demoC2R(XLN: any) {
-    lastAction = '⚠️ C2R micro-demo: Not implemented yet';
-  }
-
-  async function demoOndelta(XLN: any) {
-    lastAction = '⚠️ Ondelta micro-demo: Not implemented yet';
-  }
-
-  async function demoCreditExtension(XLN: any) {
-    lastAction = '⚠️ Credit Extension micro-demo: Not implemented yet';
-  }
-
   /** BANKER DEMO STEP 1: Create 3×3 Hub */
   async function createHub() {
     if (!requireLiveMode('create hub')) return;
@@ -1247,8 +1050,6 @@
 
       // Create 100 entities in 10x10 grid
       const entityInputs = [];
-      const entityPositions = new Map();
-      const createdIds = [];
 
       for (let row = 0; row < 10; row++) {
         for (let col = 0; col < 10; col++) {
@@ -1276,12 +1077,6 @@
 
       // Batch create all 100 entities in ONE frame
       XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: entityInputs });
-
-      // Get created entity IDs
-      const newReplicas = Array.from($isolatedEnv.eReplicas.entries()) as [string, any][];
-      const scaleTestIds = newReplicas
-        .filter(([key]: [string, any]) => key.includes('scale_test'))
-        .map(([key]: [string, any]) => key.split(':')[0]);
 
       lastAction = ` Created 100 entities! Check FPS overlay (should be 60+)`;
 
@@ -1990,99 +1785,6 @@
       clearInterval(fedPaymentInterval);
       fedPaymentInterval = null;
       console.log('[Fed Loop] ⏹️ Stopped payment loop');
-    }
-  }
-
-  /** Execute .scenario.txt file (text-based DSL) */
-  async function executeScenarioFile(filename: string) {
-    loading = true;
-    lastAction = `Loading ${filename}...`;
-
-    try {
-      // Fetch scenario text
-      const response = await fetch(`/scenarios/${filename}`);
-      if (!response.ok) {
-        throw new Error(`Failed to load: ${response.statusText}`);
-      }
-
-      let scenarioText = await response.text();
-      console.log(`[Architect] Loaded: ${filename}`);
-
-      // Inject entity registration type (numbered or lazy) into grid commands
-      const entityType = numberedEntities ? 'numbered' : 'lazy';
-      scenarioText = scenarioText.replace(
-        /^(grid\s+\d+(?:\s+\d+)?(?:\s+\d+)?)(\s+.*)?$/gm,
-        (match, gridCmd, rest) => {
-          // Remove existing type= parameter
-          const cleanRest = rest ? rest.replace(/\s+type=\w+/, '') : '';
-          return `${gridCmd}${cleanRest} type=${entityType}`;
-        }
-      );
-
-      console.log(`[Architect] Entity registration mode: ${entityType}`);
-
-      // Import runtime.js
-      const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-      const XLN = await import(/* @vite-ignore */ runtimeUrl);
-
-      // Parse scenario (text-based DSL)
-      const parsed = XLN.parseScenario(scenarioText);
-
-      if (parsed.errors.length > 0) {
-        throw new Error(`Parse errors: ${parsed.errors.join(', ')}`);
-      }
-
-      console.log(`[Architect] Executing ${parsed.scenario.events.length} events`);
-
-      // Get current env from props
-      const currentEnv = $isolatedEnv;
-      if (!currentEnv) {
-        throw new Error('View environment not initialized');
-      }
-
-      // Capture BEFORE state (clean slate) for frame 0
-      const emptyFrame = {
-        height: 0,
-        timestamp: Date.now(),
-        replicas: new Map(),
-        runtimeInput: { runtimeTxs: [], entityInputs: [] },
-        runtimeOutputs: [],
-        description: 'Frame 0: Clean slate (before scenario)',
-        title: 'Initial State'
-      };
-
-      console.log('[Architect] Executing on env:', currentEnv);
-
-      // Execute scenario on isolated env
-      const result = await XLN.executeScenario(currentEnv, parsed.scenario);
-
-      if (result.success) {
-        lastAction = ` Success! ${result.framesGenerated} frames generated.`;
-        console.log(`[Architect] ${filename}: ${result.framesGenerated} frames`);
-
-        // Prepend frame 0 (clean slate) to show progression from empty
-        const historyWithCleanSlate = [emptyFrame, ...(currentEnv.history || [])];
-
-        // Env is mutated in-place by executeScenario - trigger reactivity
-        isolatedEnv.set(currentEnv);
-        isolatedHistory.set(historyWithCleanSlate);
-
-        console.log('[Architect] History: Frame 0 (empty) + Frames 1-' + currentEnv.history.length + ' (scenario)');
-
-        // Start at frame 0 to show clean slate
-        isolatedTimeIndex.set(0);
-        isolatedIsLive.set(false);
-
-        // Notify panels
-        panelBridge.emit('entity:created', { entityId: 'scenario', type: 'grid' });
-      } else {
-        throw new Error(`Execution failed: ${result.errors?.join(', ')}`);
-      }
-    } catch (err: any) {
-      lastAction = ` ${err.message}`;
-      console.error('[Architect] Error:', err);
-    } finally {
-      loading = false;
     }
   }
 
