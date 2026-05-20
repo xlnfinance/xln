@@ -9,13 +9,40 @@
 
   import type { Writable } from 'svelte/store';
   import { shortAddress } from '$lib/utils/format';
+  import type { LogLevel, LogCategory, FrameLogEntry } from '$lib/types/ui';
+
+  type DeltaLike = { collateral?: unknown };
+  type AccountLike = { deltas?: Map<unknown, DeltaLike> | Record<string, DeltaLike> };
+  type EntityStateLike = {
+    height?: number;
+    lastFinalizedJHeight?: number;
+    reserves?: Map<unknown, unknown> | Record<string, unknown>;
+    accounts?: Map<string, AccountLike> | Record<string, AccountLike>;
+    debts?: unknown[];
+  };
+  type ReplicaLike = {
+    signerId?: string;
+    isProposer?: boolean;
+    mempool?: unknown[];
+    state?: EntityStateLike;
+  };
+  type JMachineLike = { blockNumber?: number; entities?: unknown[] };
+  type XlnomyLike = { name: string; jMachine?: JMachineLike };
+  type RuntimeFrameLike = {
+    height?: number;
+    logs?: FrameLogEntry[];
+    eReplicas?: Map<string, ReplicaLike>;
+    jReplicas?: Map<string, XlnomyLike>;
+    gossip?: { profiles?: unknown[] };
+    runtimeInput?: unknown;
+    runtimeOutputs?: unknown;
+  };
+  type RuntimeEnvLike = { history?: RuntimeFrameLike[] };
 
   // Receive isolated env as prop (passed from View.svelte)
-  export let isolatedEnv: Writable<any>;
-  export let isolatedHistory: Writable<any[]> | null = null;
+  export let isolatedEnv: Writable<RuntimeEnvLike | null>;
+  export let isolatedHistory: Writable<RuntimeFrameLike[]> | null = null;
   export let isolatedTimeIndex: Writable<number> | null = null;
-
-  import type { LogLevel, LogCategory, FrameLogEntry } from '$lib/types/ui';
 
   // Expandable sections
   let expandedReplicas: Set<string> = new Set();
@@ -99,39 +126,12 @@
   })();
 
   // Safe JSON stringify that handles BigInt and Map
-  function safeStringify(obj: any, indent = 2): string {
+  function safeStringify(obj: unknown, indent = 2): string {
     return JSON.stringify(obj, (key, value) => {
       if (typeof value === 'bigint') return value.toString() + 'n';
       if (value instanceof Map) return Object.fromEntries(value);
       return value;
     }, indent);
-  }
-
-  // Extract entity transaction type display name
-  function getTxTypeName(tx: any): string {
-    return tx.type || 'unknown';
-  }
-
-  // Get transaction summary for structured view
-  function getTxSummary(tx: any): string {
-    if (!tx.data) return '';
-
-    switch (tx.type) {
-      case 'chat':
-        return `"${tx.data.message}"`;
-      case 'directPayment':
-        return `${tx.data.amount}n tokens → ${shortAddress(tx.data.targetEntityId)}`;
-      case 'openAccount':
-        return `with ${shortAddress(tx.data.targetEntityId)}`;
-      case 'payFromReserve':
-        return `${tx.data.amount}n tokens → ${shortAddress(tx.data.targetEntityId)}`;
-      case 'payToReserve':
-        return `${tx.data.amount}n tokens`;
-      case 'accountInput':
-        return `height ${tx.data.height || '?'}`;
-      default:
-        return JSON.stringify(tx.data).slice(0, 60) + '...';
-    }
   }
 
   // Toggle replica expansion
@@ -145,15 +145,32 @@
   }
 
   // Convert Map to array for display
-  function mapToArray(map: Map<any, any> | undefined): Array<[string, any]> {
+  function mapToArray<T>(map: Map<unknown, T> | Record<string, T> | undefined): Array<[string, T]> {
     if (!map) return [];
-    if (map instanceof Map) return Array.from(map.entries());
-    if (typeof map === 'object') return Object.entries(map);
+    if (map instanceof Map) return Array.from(map.entries()).map(([key, value]) => [String(key), value]);
+    if (typeof map === 'object') return Object.entries(map) as Array<[string, T]>;
     return [];
   }
 
+  function valuesOf<T>(source: Map<unknown, T> | Record<string, T> | undefined): T[] {
+    if (!source) return [];
+    if (source instanceof Map) return Array.from(source.values());
+    return Object.values(source);
+  }
+
+  function toBigIntValue(value: unknown): bigint {
+    if (typeof value === 'bigint') return value;
+    if (typeof value === 'number') return BigInt(Math.trunc(value));
+    if (typeof value === 'string' && /^-?\d+$/.test(value)) return BigInt(value);
+    return 0n;
+  }
+
+  function getGossipProfiles(frame: RuntimeFrameLike): unknown[] {
+    return frame.gossip?.profiles ?? [];
+  }
+
   // Format bigint for display
-  function formatBigInt(val: any): string {
+  function formatBigInt(val: unknown): string {
     if (typeof val === 'bigint') return val.toString() + 'n';
     if (typeof val === 'number') return val.toString();
     return String(val);
@@ -168,7 +185,7 @@
   // Get xlnomies (J-Machine state) as array
   $: xlnomiesArray = (currentFrame?.jReplicas
     ? Array.from(currentFrame.jReplicas.values())
-    : []) as Array<{ name: string; jMachine?: { blockNumber?: number; entities?: any[] } }>;
+    : []) as XlnomyLike[];
 
   // Toggle xlnomy expansion
   function toggleXlnomy(name: string) {
@@ -223,13 +240,13 @@
           <h4>💰 Solvency Check (Conservation Law)</h4>
           <div class="solvency-content">
             {#if currentFrame}
-              {@const totalReserves = Array.from(currentFrame.eReplicas?.values() || []).reduce((sum: bigint, replica: any) => {
-                const reserves = Array.from(replica.state?.reserves?.values() || []).reduce((s: bigint, amt: any) => s + BigInt(amt), 0n);
+              {@const totalReserves = valuesOf<ReplicaLike>(currentFrame.eReplicas).reduce((sum: bigint, replica) => {
+                const reserves = valuesOf<unknown>(replica.state?.reserves).reduce((s: bigint, amt) => s + toBigIntValue(amt), 0n);
                 return sum + reserves;
               }, 0n)}
-              {@const totalCollateral = Array.from(currentFrame.eReplicas?.values() || []).reduce((sum: bigint, replica: any) => {
-                const collateral = Array.from(replica.state?.accounts?.values() || []).reduce((s: bigint, acct: any) => {
-                  return s + Array.from(acct.deltas?.values() || []).reduce((cs: bigint, delta: any) => cs + (delta.collateral || 0n), 0n);
+              {@const totalCollateral = valuesOf<ReplicaLike>(currentFrame.eReplicas).reduce((sum: bigint, replica) => {
+                const collateral = valuesOf<AccountLike>(replica.state?.accounts).reduce((s: bigint, acct) => {
+                  return s + valuesOf<DeltaLike>(acct.deltas).reduce((cs: bigint, delta) => cs + toBigIntValue(delta.collateral), 0n);
                 }, 0n);
                 return sum + collateral;
               }, 0n)}
@@ -365,16 +382,20 @@
         <!-- E-Replicas (Entity State) -->
         <div class="section">
           <h4>🏛️ E-Replicas ({replicaCount})</h4>
-            {#if replicasArray.length > 0}
-              {#each replicasArray as [entityId, replica]}
-                <div class="replica-card">
-                  <button class="replica-header" on:click={() => toggleReplica(entityId)}>
-                    <span class="expand-icon">{expandedReplicas.has(entityId) ? '▼' : '▶'}</span>
-                    <span class="entity-id mono">{shortAddress(entityId)}</span>
-                    <span class="replica-summary">
-                      h:{replica.state?.height || 0} |
-                      reserves:{mapToArray(replica.state?.reserves).length} |
-                      accounts:{mapToArray(replica.state?.accounts).length}
+              {#if replicasArray.length > 0}
+                {#each replicasArray as [entityId, replica]}
+                  {@const reserves = mapToArray(replica.state?.reserves)}
+                  {@const accounts = mapToArray(replica.state?.accounts)}
+                  {@const debts = replica.state?.debts ?? []}
+                  {@const mempool = replica.mempool ?? []}
+                  <div class="replica-card">
+                    <button class="replica-header" on:click={() => toggleReplica(entityId)}>
+                      <span class="expand-icon">{expandedReplicas.has(entityId) ? '▼' : '▶'}</span>
+                      <span class="entity-id mono">{shortAddress(entityId)}</span>
+                      <span class="replica-summary">
+                        h:{replica.state?.height || 0} |
+                      reserves:{reserves.length} |
+                      accounts:{accounts.length}
                     </span>
                   </button>
 
@@ -393,9 +414,9 @@
                       <!-- Reserves -->
                       <div class="replica-section">
                         <h5>💰 Reserves</h5>
-                        {#if mapToArray(replica.state?.reserves).length > 0}
+                        {#if reserves.length > 0}
                           <div class="data-table">
-                            {#each mapToArray(replica.state?.reserves) as [tokenId, amount]}
+                            {#each reserves as [tokenId, amount]}
                               <div class="data-row">
                                 <span>Token {tokenId}:</span>
                                 <code>{formatBigInt(amount)}</code>
@@ -410,8 +431,8 @@
                       <!-- Accounts (Bilateral) -->
                       <div class="replica-section">
                         <h5>🤝 Accounts (Bilateral)</h5>
-                        {#if mapToArray(replica.state?.accounts).length > 0}
-                          {#each mapToArray(replica.state?.accounts) as [counterparty, account]}
+                        {#if accounts.length > 0}
+                          {#each accounts as [counterparty, account]}
                             <div class="account-card">
                               <div class="account-header">↔ {shortAddress(counterparty)}</div>
                               <pre class="json-mini">{safeStringify(account)}</pre>
@@ -424,18 +445,18 @@
 
 
                       <!-- Debts -->
-                      {#if replica.state?.debts?.length > 0}
+                      {#if debts.length > 0}
                         <div class="replica-section">
                           <h5>💳 Debts</h5>
-                          <pre class="json-mini">{safeStringify(replica.state.debts)}</pre>
+                          <pre class="json-mini">{safeStringify(debts)}</pre>
                         </div>
                       {/if}
 
                       <!-- Mempool -->
-                      {#if replica.mempool?.length > 0}
+                      {#if mempool.length > 0}
                         <div class="replica-section">
-                          <h5>📦 Mempool ({replica.mempool.length} txs)</h5>
-                          <pre class="json-mini">{safeStringify(replica.mempool)}</pre>
+                          <h5>📦 Mempool ({mempool.length} txs)</h5>
+                          <pre class="json-mini">{safeStringify(mempool)}</pre>
                         </div>
                       {/if}
 
@@ -454,10 +475,10 @@
           </div>
 
           <!-- Gossip Profiles -->
-          {#if currentFrame.gossip?.profiles?.length > 0}
+          {#if getGossipProfiles(currentFrame).length > 0}
             <div class="section">
-              <h4>📡 Gossip Profiles ({currentFrame.gossip.profiles.length})</h4>
-              <pre class="json-block">{safeStringify(currentFrame.gossip.profiles)}</pre>
+              <h4>📡 Gossip Profiles ({getGossipProfiles(currentFrame).length})</h4>
+              <pre class="json-block">{safeStringify(getGossipProfiles(currentFrame))}</pre>
             </div>
           {/if}
 
@@ -524,33 +545,6 @@
     color: #fff;
   }
 
-  .controls {
-    display: flex;
-    gap: 4px;
-  }
-
-  .view-toggle {
-    padding: 4px 12px;
-    background: #252526;
-    border: 1px solid #3e3e3e;
-    color: #ccc;
-    border-radius: 4px;
-    cursor: pointer;
-    font-size: 11px;
-    transition: all 0.2s;
-  }
-
-  .view-toggle:hover {
-    background: #37373d;
-    border-color: #007acc;
-  }
-
-  .view-toggle.active {
-    background: #0e639c;
-    color: #fff;
-    border-color: #1177bb;
-  }
-
   .content {
     flex: 1;
     overflow-y: auto;
@@ -568,50 +562,6 @@
     font-size: 14px;
   }
 
-  .empty-state .hint {
-    font-size: 12px;
-    font-style: italic;
-  }
-
-  .frame-info {
-    display: flex;
-    gap: 12px;
-    align-items: center;
-    margin-bottom: 16px;
-    padding: 8px 12px;
-    background: #252526;
-    border-left: 3px solid #007acc;
-    border-radius: 4px;
-  }
-
-  .badge {
-    padding: 2px 8px;
-    background: #0e639c;
-    color: #fff;
-    border-radius: 3px;
-    font-size: 11px;
-    font-weight: 600;
-  }
-
-  .timestamp {
-    font-size: 11px;
-    color: #8b949e;
-    font-family: monospace;
-  }
-
-  .title {
-    font-size: 12px;
-    color: #fff;
-    font-weight: 500;
-  }
-
-  /* JSON View */
-  .json-view {
-    display: flex;
-    flex-direction: column;
-    gap: 16px;
-  }
-
   .json-block {
     background: #252526;
     border: 1px solid #3e3e3e;
@@ -624,13 +574,6 @@
     color: #d4d4d4;
     overflow-x: auto;
     white-space: pre;
-  }
-
-  /* Structured View */
-  .structured-view {
-    display: flex;
-    flex-direction: column;
-    gap: 24px;
   }
 
   .section {
@@ -669,151 +612,13 @@
     font-size: 10px;
   }
 
-  .subsection {
-    padding: 12px;
-    border-bottom: 1px solid #3e3e3e;
-  }
-
-  .subsection:last-child {
-    border-bottom: none;
-  }
-
-  .subsection h5 {
-    margin: 0 0 12px 0;
-    font-size: 12px;
-    font-weight: 500;
-    color: #8b949e;
-    text-transform: uppercase;
-    letter-spacing: 0.5px;
-  }
-
-  .empty-subsection {
-    padding: 24px;
-    text-align: center;
-    color: #6e7681;
-    font-size: 12px;
-    font-style: italic;
-  }
-
-  .tx-card {
-    background: #1e1e1e;
-    border: 1px solid #3e3e3e;
-    border-radius: 4px;
-    margin-bottom: 8px;
-    overflow: hidden;
-  }
-
-  .tx-card:last-child {
-    margin-bottom: 0;
-  }
-
-  .tx-header {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    padding: 8px 12px;
-    background: #2d2d30;
-    border-bottom: 1px solid #3e3e3e;
-  }
-
-  .tx-index {
-    padding: 2px 6px;
-    background: #3e3e3e;
-    color: #8b949e;
-    border-radius: 3px;
-    font-size: 10px;
-    font-weight: 600;
-    font-family: monospace;
-  }
-
-  .tx-type {
-    padding: 2px 8px;
-    background: #0e639c;
-    color: #fff;
-    border-radius: 3px;
-    font-size: 11px;
-    font-weight: 500;
-  }
-
   .entity-id {
     color: #79c0ff;
     font-size: 11px;
   }
 
-  .arrow {
-    color: #6e7681;
-    font-size: 12px;
-  }
-
-  .output-label {
-    color: #8b949e;
-    font-size: 11px;
-  }
-
-  .tx-body {
-    padding: 12px;
-  }
-
-  .tx-field {
-    display: flex;
-    gap: 8px;
-    margin-bottom: 8px;
-    font-size: 11px;
-  }
-
-  .tx-field:last-child {
-    margin-bottom: 0;
-  }
-
-  .tx-field .label {
-    color: #8b949e;
-    min-width: 80px;
-  }
-
-  .tx-field .value {
-    color: #d4d4d4;
-    flex: 1;
-  }
-
   .mono {
     font-family: monospace;
-  }
-
-  .entity-txs {
-    margin-top: 8px;
-    padding-left: 88px;
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  .entity-tx {
-    display: flex;
-    gap: 8px;
-    align-items: center;
-    padding: 6px 8px;
-    background: #252526;
-    border-left: 2px solid #007acc;
-    border-radius: 3px;
-    font-size: 11px;
-  }
-
-  .tx-type-small {
-    padding: 2px 6px;
-    background: #3e3e3e;
-    color: #79c0ff;
-    border-radius: 2px;
-    font-size: 10px;
-    font-weight: 500;
-    white-space: nowrap;
-  }
-
-  .tx-summary {
-    color: #8b949e;
-    font-size: 11px;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
   }
 
   /* Custom scrollbar */
@@ -837,24 +642,6 @@
   /* Full Data View Styles */
   .full-view {
     padding: 12px;
-  }
-
-  .metadata-grid {
-    display: grid;
-    grid-template-columns: repeat(2, 1fr);
-    gap: 8px;
-    background: #252526;
-    padding: 12px;
-    border-radius: 4px;
-  }
-
-  .meta-item {
-    font-size: 12px;
-  }
-
-  .meta-item .label {
-    color: #8b949e;
-    margin-right: 8px;
   }
 
   .replica-card {
