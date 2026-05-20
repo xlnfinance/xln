@@ -7,7 +7,8 @@
   },
   "scripts": {
     "compile": "bunx hardhat compile",
-    "test": "bunx hardhat test",
+    "test": "bunx hardhat test test/*.ts test/*.cjs",
+    "test:default": "bunx hardhat test",
     "deploy": "bunx hardhat ignition deploy ignition/modules/Depository.cjs --network ethereum",
     "console": "bunx hardhat console",
     "node": "anvil --host 0.0.0.0 --port 8545 --chain-id 31337 --block-gas-limit 60000000 --code-size-limit 65536"
