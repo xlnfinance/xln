@@ -132,7 +132,7 @@
                 width: {(score.avg / maxScore) * 100}%;
                 background: {solutionColor(score.solution)};
               "
-            />
+            ></div>
             <span class="bar-score">{score.avg}</span>
             {#if score.variance > 0}
               <span class="bar-variance">±{score.variance}</span>
