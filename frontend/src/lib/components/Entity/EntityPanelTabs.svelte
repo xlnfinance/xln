@@ -676,21 +676,6 @@
     if (moveLineReady) scheduleMoveCommittedLineReady();
   }
 
-  function resetMoveRoute(): void {
-    moveFromEndpoint = 'external';
-    moveToEndpoint = 'reserve';
-    moveSelectedSource = null;
-    moveSelectedTarget = null;
-    moveExternalRecipient = '';
-    moveReserveRecipientEntityId = resolveSelfEntityId();
-    moveSourceAccountId = workspaceAccountId || workspaceAccountIds[0] || '';
-    moveTargetEntityId = resolveSelfEntityId();
-    moveTargetHubEntityId = workspaceAccountId || moveHubEntityOptions[0] || '';
-    moveProgressLabel = '';
-    clearMoveDrag();
-    bumpMoveNodeLayout();
-  }
-
   function moveRouteSteps(from: MoveEndpoint, to: MoveEndpoint): string[] {
     const targetEntity = getCurrentMoveTargetEntityId();
     const targetHub = getCurrentMoveTargetHubId();
@@ -1001,19 +986,6 @@
     return String(moveTargetHubEntityId || workspaceAccountId || selectedAccountId || '').trim().toLowerCase();
   }
 
-  function getMoveAccountBalance(counterpartyEntityId: string): bigint {
-    if (!selectedMoveTransferToken || !counterpartyEntityId) return 0n;
-    return getAccountSpendableCapacity(counterpartyEntityId, selectedMoveTransferToken.tokenId);
-  }
-
-  function getMoveAggregateAccountBalance(): bigint {
-    const tokenId = selectedMoveTransferToken?.tokenId;
-    if (!tokenId) return 0n;
-    return workspaceAccountIds.reduce((total, accountId) => (
-      total + getAccountSpendableCapacity(accountId, tokenId)
-    ), 0n);
-  }
-
   function getRequestedMoveAmount(token: { decimals: number }): bigint {
     try {
       return moveAmount.trim() ? parsePositiveAssetAmount(moveAmount, token) : 0n;
@@ -1038,16 +1010,6 @@
       || workspaceAccountIds[0]
       || '';
     return preferred;
-  }
-
-  function getMoveDisplayDecimals(): number {
-    const row = moveUiState.ledgerRow;
-    if (row && typeof row.decimals === 'number' && row.decimals >= 0) return row.decimals;
-    const liveExternalToken = findExternalTokenBySymbol(moveAssetSymbol);
-    const liveTransferToken = findReserveTransferTokenBySymbol(moveAssetSymbol);
-    if (liveExternalToken && typeof liveExternalToken.decimals === 'number') return liveExternalToken.decimals;
-    if (liveTransferToken && typeof liveTransferToken.decimals === 'number') return liveTransferToken.decimals;
-    return 18;
   }
 
   function computeMoveSourceAvailableBalance(
@@ -1828,24 +1790,6 @@
     const delta = account.deltas?.get?.(tokenId);
     if (!delta) return null;
     return activeXlnFunctions.deriveDelta(delta, isAccountLeftPerspective(entityId, account));
-  }
-
-  function getWorkspaceDerivedDelta(tokenId: number) {
-    return getDerivedDeltaForAccount(workspaceAccountId, tokenId);
-  }
-
-  function getWorkspaceWithdrawableCollateral(tokenId: number): bigint {
-    const derived = getWorkspaceDerivedDelta(tokenId);
-    if (!derived) return 0n;
-    const hold = derived.outTotalHold ?? 0n;
-    return derived.outCollateral > hold ? derived.outCollateral - hold : 0n;
-  }
-
-  function getAccountWithdrawableCollateral(counterpartyEntityId: string, tokenId: number): bigint {
-    const derived = getDerivedDeltaForAccount(counterpartyEntityId, tokenId);
-    if (!derived) return 0n;
-    const hold = derived.outTotalHold ?? 0n;
-    return derived.outCollateral > hold ? derived.outCollateral - hold : 0n;
   }
 
   function getAccountSpendableCapacity(counterpartyEntityId: string, tokenId: number): bigint {
@@ -2742,22 +2686,6 @@
     }
   }
 
-  async function submitReserveToCollateral(): Promise<void> {
-    const token = findReserveTransferTokenBySymbol(reserveToCollateralSymbol);
-    if (!token) {
-      toasts.error('Select reserve asset first');
-      return;
-    }
-    try {
-      const reserveAmount = onchainReserves.get(token.tokenId) ?? 0n;
-      const amount = parsePositiveAssetAmount(reserveToCollateralAmount, token, reserveAmount);
-      await reserveToCollateral(token.tokenId, amount);
-      reserveToCollateralAmount = '';
-    } catch (err) {
-      toasts.error(`Reserve → Collateral failed: ${toErrorMessage(err, 'Unknown error')}`);
-    }
-  }
-
   async function collateralToReserve(
     tokenId: number,
     amount: bigint,
@@ -2817,10 +2745,6 @@
       console.error('[EntityPanel] Collateral → Reserve failed:', err);
       toasts.error(`Collateral → Reserve failed: ${(err as Error).message}`);
     }
-  }
-
-  function clearMoveComposer(): void {
-    resetMoveRoute();
   }
 
   function openAssetMoveWorkspace(): void {
@@ -3859,37 +3783,6 @@
     return '$' + value.toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
   }
 
-  function fillExternalToReserveMax(): void {
-    if (!selectedExternalToReserveToken) return;
-    externalToReserveAmount = formatTokenInputAmount(
-      selectedExternalToReserveToken.balance,
-      selectedExternalToReserveToken.decimals,
-    );
-  }
-
-  function fillReserveToCollateralMax(): void {
-    if (!selectedReserveToCollateralToken) return;
-    const reserveAmount = onchainReserves.get(selectedReserveToCollateralToken.tokenId) ?? 0n;
-    reserveToCollateralAmount = formatTokenInputAmount(reserveAmount, selectedReserveToCollateralToken.decimals);
-  }
-
-  function fillCollateralToReserveMax(): void {
-    if (!selectedCollateralToReserveToken) return;
-    const withdrawable = getWorkspaceWithdrawableCollateral(selectedCollateralToReserveToken.tokenId);
-    collateralToReserveAmount = formatTokenInputAmount(withdrawable, selectedCollateralToReserveToken.decimals);
-  }
-
-  function fillReserveToExternalMax(): void {
-    if (!selectedReserveToExternalToken) return;
-    const reserveAmount = onchainReserves.get(selectedReserveToExternalToken.tokenId) ?? 0n;
-    reserveToExternalAmount = formatTokenInputAmount(reserveAmount, selectedReserveToExternalToken.decimals);
-  }
-
-  function fillSendAssetMax(): void {
-    if (!selectedSendAssetToken) return;
-    sendAssetAmount = formatTokenInputAmount(selectedSendAssetToken.balance, selectedSendAssetToken.decimals);
-  }
-
   function getAssetPrice(symbol: string): number {
     return getAssetUsdPrice(symbol);
   }
@@ -4470,17 +4363,6 @@
     dispatch('entitySelect', event.detail);
     if (userModeHeader) return;
     tab = { ...tab, jurisdiction, signerId, entityId };
-  }
-
-  function handleSignerSelect(event: CustomEvent<{ signerId: string }>) {
-    selectedAccountId = null;
-    dispatch('signerSelect', event.detail);
-    if (userModeHeader) return;
-    tab = { ...tab, signerId: event.detail.signerId, entityId: '' };
-  }
-
-  function handleHeaderAddSigner() {
-    dispatch('addSigner');
   }
 
   function handleHeaderAddEntity() {
