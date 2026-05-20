@@ -13,8 +13,7 @@
 {#if spotlight}
   <!-- svelte-ignore a11y-click-events-have-key-events -->
   <div class="receipt-backdrop" in:fade={{ duration: 150 }} out:fade={{ duration: 120 }} on:click={dismiss} role="presentation">
-    <!-- svelte-ignore a11y-click-events-have-key-events -->
-    <div class="receipt-card" in:fly={{ y: 30, duration: 250 }} out:fly={{ y: -20, duration: 150 }} on:click|stopPropagation role="dialog">
+    <div class="receipt-card" in:fly={{ y: 30, duration: 250 }} out:fly={{ y: -20, duration: 150 }} on:click|stopPropagation role="dialog" tabindex="-1">
       <div class="receipt-check">
         <svg width="48" height="48" viewBox="0 0 48 48" fill="none">
           <circle cx="24" cy="24" r="24" fill="rgba(74, 222, 128, 0.12)" />

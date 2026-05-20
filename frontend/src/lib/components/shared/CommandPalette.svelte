@@ -277,8 +277,7 @@
 {#if isOpen}
   <!-- svelte-ignore a11y-click-events-have-key-events -->
   <div class="palette-backdrop" transition:fade={{ duration: 150 }} on:click={close} role="presentation">
-    <!-- svelte-ignore a11y-click-events-have-key-events -->
-    <div class="palette" transition:fly={{ y: -20, duration: 200 }} on:click|stopPropagation role="dialog" aria-label="Command palette">
+    <div class="palette" transition:fly={{ y: -20, duration: 200 }} on:click|stopPropagation role="dialog" aria-label="Command palette" tabindex="-1">
       <div class="palette-input-wrap">
         <span class="palette-icon">⌘</span>
         <input
