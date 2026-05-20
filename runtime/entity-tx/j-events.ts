@@ -761,9 +761,6 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
       ? [batchData.event]
       : [];
 
-  const entityShort = entityState.entityId.slice(-4);
-  console.log(`🏛️ [2/3] E-MACHINE: ${entityShort} ← ${rawEvents.length} events (block ${blockNumber})`);
-
   // ─────────────────────────────────────────────────────────────────────────────
   // Skip already-finalized blocks and reject same-height hash conflicts.
   // ─────────────────────────────────────────────────────────────────────────────
@@ -1255,7 +1252,6 @@ async function tryFinalizeJBlocks(
   // Step 2: Check each group for threshold agreement
   // ─────────────────────────────────────────────────────────────────────────────
   const finalizedHeights: number[] = [];
-  console.log(`   📊 OBSERVATION-GROUPS: ${observationGroups.size} groups, keys=[${Array.from(observationGroups.keys()).join(', ')}]`);
 
   const thresholdHashesByHeight = new Map<number, Set<string>>();
   const thresholdEventHashesByBlock = new Map<string, Set<string>>();
@@ -1302,14 +1298,10 @@ async function tryFinalizeJBlocks(
       // 1. Multiple observation groups exist for same height (different hashes)
       // 2. A previous iteration of this loop already finalized this height
       // 3. Block was finalized in a previous call (caught at handleJEvent entry)
-      console.log(`   🔍 CHECK-FINALIZE: jHeight=${jHeight}, jBlockChain.length=${state.jBlockChain.length}, heights=[${state.jBlockChain.map(b => b.jHeight).join(',')}]`);
       const alreadyInChain = state.jBlockChain.some(b => b.jHeight === jHeight);
       if (alreadyInChain) {
-        console.log(`   ⏭️ SKIP-FINALIZE: block ${jHeight} already in jBlockChain`);
         continue;
       }
-
-      console.log(`   ✅ J-BLOCK FINALIZED: height=${jHeight} (${signerCount}/${threshold} signers)`);
 
       // ─────────────────────────────────────────────────────────────────────────
       // Step 3: Merge events from all observations
@@ -1446,8 +1438,6 @@ async function applyFinalizedJEvent(
   event: JurisdictionEvent,
   env: Env
 ): Promise<JEventApplyResult> {
-  console.log(`🔧🔧 applyFinalizedJEvent: entityId=${entityState.entityId.slice(-4)}, event.type=${event.type}`);
-
   const entityShort = entityState.entityId.slice(-4);
   const blockNumber = event.blockNumber ?? 0;
   const transactionHash = event.transactionHash || 'unknown';
@@ -1477,11 +1467,7 @@ async function applyFinalizedJEvent(
     const balanceDisplay = (Number(newBalance) / (10 ** decimals)).toFixed(4);
 
     if (String(entity).toLowerCase() === String(entityState.entityId).toLowerCase()) {
-      const before = entityState.reserves.get(tokenIdNum) ?? 0n;
       newState.reserves.set(tokenIdNum, BigInt(newBalance as string | number | bigint));
-      console.log(`💰 ReserveUpdated APPLIED: entity=${entityShort} token=${tokenId} balance=${newBalance}`);
-      console.log(`   Before: ${before.toString()}`);
-      console.log(`   After: ${(newState.reserves.get(tokenIdNum) ?? 0n).toString()}`);
     }
 
     addMessage(newState, `📊 RESERVE: ${tokenSymbol} = ${balanceDisplay} | Block ${blockNumber} | Tx ${txHashShort}`);

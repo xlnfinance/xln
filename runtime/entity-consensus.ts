@@ -1073,7 +1073,6 @@ export const applyEntityInput = async (
       console.log(
         `    ⚡ Single signer entity: transactions applied directly, height: ${workingReplica.state.height}`,
       );
-    console.log(`🔥 SINGLE-SIGNER RETURN: entityOutbox=${entityOutbox.length}, jOutbox=${jOutbox.length}, frameHash=${singleSignerFrameHash.slice(0, 20)}...`);
     return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica }; // Skip the full consensus process
   }
 
@@ -1845,11 +1844,6 @@ export const applyEntityFrame = async (
       const { counterparty: cpId } = accountMachine ? getAccountPerspective(accountMachine, currentEntityState.entityId) : { counterparty: 'unknown' };
       if (HEAVY_LOGS) console.log(`🔍 [Frame ${env.height}] BEFORE-PROPOSE: Getting account for ${cpId.slice(-4)}`);
       if (accountMachine) {
-        if (env.quietRuntimeLogs !== true) {
-          console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME for ${cpId.slice(-4)}: mempool=${accountMachine.mempool.length} txs:`, accountMachine.mempool.map(tx => tx.type));
-          console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME: leftJObs=${accountMachine.leftJObservations?.length || 0}, rightJObs=${accountMachine.rightJObservations?.length || 0}`);
-          console.log(`📋 [Frame ${env.height}] PROPOSE-FRAME: Full mempool details:`, accountMachine.mempool.map((tx, i) => `${i}:${tx.type}`).join(', '));
-        }
 	        const proposal = await proposeAccountFrame(env, accountMachine, false, currentEntityState.lastFinalizedJHeight);
 	        if (proposal.swapOffersCancelled && proposal.swapOffersCancelled.length > 0) {
 	          const normalizedCancels = proposal.swapOffersCancelled.map(({ offerId }) => ({
