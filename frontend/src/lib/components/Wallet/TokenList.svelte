@@ -206,7 +206,6 @@
 </script>
 
 <div class="token-list">
-  <!-- Header -->
   <div class="list-header">
     <span class="header-title">Your Tokens</span>
     <button
@@ -219,7 +218,6 @@
     </button>
   </div>
 
-  <!-- Token Items -->
   <div class="tokens">
     {#if !enabled}
       <div class="empty-state">
@@ -228,7 +226,7 @@
       </div>
     {:else if loading && tokenBalances.length === 0}
       <div class="loading-state">
-        <div class="loading-spinner" />
+        <div class="loading-spinner"></div>
         <span>Loading balances...</span>
       </div>
     {:else if tokenBalances.length === 0}
@@ -240,7 +238,6 @@
     {:else}
       {#each tokenBalances as token}
         <div class="token-item" class:zero={parseFloat(token.balance) === 0}>
-          <!-- Token Icon -->
           <div class="token-icon" class:native={token.isNative}>
             {#if token.icon}
               <img src={token.icon} alt={token.symbol} />
@@ -249,13 +246,11 @@
             {/if}
           </div>
 
-          <!-- Token Info -->
           <div class="token-info">
             <span class="token-symbol">{token.symbol}</span>
             <span class="token-name">{token.name}</span>
           </div>
 
-          <!-- Balance -->
           <div class="token-balance">
             <span class="balance-amount">
               {formatBalance(token.balance, token.symbol)}
@@ -265,7 +260,6 @@
             </span>
           </div>
 
-          <!-- 24h Change (optional) -->
           {#if token.change24h !== undefined && token.balanceUSD > 0}
             <div class="token-change" class:positive={token.change24h >= 0} class:negative={token.change24h < 0}>
               {#if token.change24h >= 0}
@@ -281,7 +275,6 @@
     {/if}
   </div>
 
-  <!-- Last Updated -->
   {#if lastUpdated}
     <div class="last-updated">
       Last updated: {lastUpdated.toLocaleTimeString()}
