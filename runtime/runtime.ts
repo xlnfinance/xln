@@ -159,7 +159,7 @@ import {
   extractCrossJurisdictionRouteFromTx,
   isCrossJurisdictionEntityInputRemoteHopAllowed,
 } from './cross-jurisdiction-boundary';
-import { signatureMapSize } from './consensus-signatures';
+import { buildRouteOutputKey, mergeRoutedEntityOutput } from './runtime-output-routing';
 import { normalizeEntitySwapTradingPairs } from './runtime-swap-pairs';
 import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
 import { calculateSolvency, verifySolvency } from './solvency';
@@ -173,7 +173,7 @@ import {
   BigIntMath,
   FINANCIAL_CONSTANTS,
 } from './financial-utils';
-import { resolveEntityProposerId, txFingerprint } from './state-helpers';
+import { resolveEntityProposerId } from './state-helpers';
 import { getEntityShortId, formatEntityId } from './utils';
 import { deserializeTaggedJson, serializeTaggedJson, safeStringify } from './serialization-utils';
 import { computeCanonicalEntityHashesFromEnv, computeCanonicalStateHashFromEnv } from './storage/canonical-hash';
@@ -1230,37 +1230,6 @@ export const enqueueRuntimeInput = (env: Env, runtimeInput: RuntimeInput): void 
   );
 };
 
-const buildRouteOutputKey = (output: RoutedEntityInput): string => {
-  const txPart = (output.entityTxs || [])
-    .map(tx => txFingerprint(tx))
-    .join('|');
-  return `${output.entityId}:${output.signerId || ''}:${txPart}`;
-};
-
-const carriesEntityCommitNotification = (output: RoutedEntityInput): boolean =>
-  signatureMapSize(output.proposedFrame?.collectedSigs) > 0;
-
-const mergeRoutedEntityOutput = <T extends RoutedEntityInput>(existing: T, incoming: T): T => {
-  if (incoming.entityTxs?.length) {
-    existing.entityTxs = [...(existing.entityTxs || []), ...incoming.entityTxs];
-  }
-  if (incoming.hashPrecommits) {
-    const mergedPrecommits = existing.hashPrecommits || new Map<string, string[]>();
-    incoming.hashPrecommits.forEach((sigs, signerId) => {
-      mergedPrecommits.set(signerId, sigs);
-    });
-    existing.hashPrecommits = mergedPrecommits;
-  }
-  if (incoming.proposedFrame) {
-    const existingIsCommit = carriesEntityCommitNotification(existing);
-    const incomingIsCommit = carriesEntityCommitNotification(incoming);
-    if (!existing.proposedFrame || incomingIsCommit || !existingIsCommit) {
-      existing.proposedFrame = incoming.proposedFrame;
-    }
-  }
-  return existing;
-};
-
 const hasRuntimeWork = (env: Env): boolean => {
   const mempool = ensureRuntimeMempool(env);
   if (mempool.runtimeTxs.length > 0 || mempool.entityInputs.length > 0) return true;
@@ -1884,8 +1853,6 @@ export const deriveRuntimeId = (seed: string): string => {
 
 // scheduleNetworkProcess removed — loop is always-on via startRuntimeLoop()
 
-const outputDeferKey = (output: RoutedEntityInput): string => buildRouteOutputKey(output);
-
 const normalizeEntityKey = (value: string): string => value.toLowerCase();
 const bytesToHex = (bytes: Uint8Array): string =>
   `0x${Array.from(bytes)
@@ -2150,7 +2117,7 @@ const splitPendingOutputsByRetryWindow = (
   const waiting: RoutedEntityInput[] = [];
 
   for (const output of pending) {
-    const key = outputDeferKey(output);
+    const key = buildRouteOutputKey(output);
     const entry = meta.get(key);
     if (!entry || entry.nextRetryAt <= nowMs) {
       ready.push(output);
@@ -2173,14 +2140,14 @@ const rescheduleDeferredOutputs = (
 
   // Keep outputs still waiting for their retry window.
   for (const output of waiting) {
-    next.set(outputDeferKey(output), output);
+    next.set(buildRouteOutputKey(output), output);
   }
 
-  const failedKeys = new Set(failed.map(output => outputDeferKey(output)));
+  const failedKeys = new Set(failed.map(output => buildRouteOutputKey(output)));
 
   // Pending outputs that were retried and delivered can clear retry metadata.
   for (const output of attemptedPending) {
-    const key = outputDeferKey(output);
+    const key = buildRouteOutputKey(output);
     if (!failedKeys.has(key)) {
       meta.delete(key);
     }
@@ -2188,7 +2155,7 @@ const rescheduleDeferredOutputs = (
 
   // Failed attempts get bounded retry with fixed 5s delay.
   for (const output of failed) {
-    const key = outputDeferKey(output);
+    const key = buildRouteOutputKey(output);
     const entry = meta.get(key);
     const attempts = (entry?.attempts ?? 0) + 1;
     if (attempts >= DEFER_MAX_ATTEMPTS) {
@@ -2239,7 +2206,7 @@ const planEntityOutputs = (
   const remoteOutputs: PlannedRemoteOutput[] = [];
   const deduped = new Map<string, RoutedEntityInput>();
   for (const output of outputs) {
-    const key = outputDeferKey(output);
+    const key = buildRouteOutputKey(output);
     const existing = deduped.get(key);
     if (existing) {
       mergeRoutedEntityOutput(existing, output);
