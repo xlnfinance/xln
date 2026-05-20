@@ -214,9 +214,8 @@
 <div class="add-jmachine">
   <h3>Add Jurisdiction</h3>
 
-  <!-- Mode Selection -->
   <div class="field">
-    <label>Mode</label>
+    <div class="field-label">Mode</div>
     <div class="mode-toggle">
       <button
         class="mode-btn"
@@ -242,9 +241,8 @@
   </div>
 
   {#if mode === 'rpc'}
-    <!-- Network Selection -->
     <div class="field">
-      <label>Network</label>
+      <div class="field-label">Network</div>
       <div class="network-grid">
         {#each mainnets as net}
           <div class="network-card" class:selected={selectedNetworkId === net.chainId}>
@@ -277,7 +275,6 @@
         </button>
       </div>
 
-      <!-- Testnets collapsible -->
       <details class="testnets">
         <summary>Testnets</summary>
         <div class="network-grid">
@@ -305,7 +302,6 @@
       </details>
     </div>
 
-    <!-- Chain ID (editable for custom) -->
     <div class="field">
       <label>Chain ID</label>
       {#if selectedNetworkId === 'custom'}
@@ -320,7 +316,6 @@
       {/if}
     </div>
 
-    <!-- RPC URLs -->
     <div class="field">
       <label>RPC URLs <span class="hint">(one per line)</span></label>
       <textarea
@@ -334,7 +329,6 @@
       {/if}
     </div>
   {:else}
-    <!-- BrowserVM Info -->
     <div class="browservm-info">
       <p>Local EVM simulation in your browser.</p>
       <ul>
@@ -346,7 +340,6 @@
     </div>
   {/if}
 
-  <!-- Name -->
   <div class="field">
     <label>Name</label>
     <input
@@ -388,7 +381,6 @@
     <div class="deploy-notice">{deployNotice}</div>
   {/if}
 
-  <!-- Actions -->
   <div class="actions">
     <button class="btn secondary" on:click={() => dispatch('cancel')} disabled={isCreating}>
       Cancel
@@ -419,7 +411,7 @@
     margin-bottom: 1rem;
   }
 
-  label {
+  label, .field-label {
     display: block;
     font-size: 0.8rem;
     color: var(--text-secondary, #888);
@@ -431,7 +423,6 @@
     font-weight: normal;
   }
 
-  /* Mode Toggle */
   .mode-toggle {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -475,7 +466,6 @@
     color: var(--text-secondary, #888);
   }
 
-  /* Network Grid */
   .network-grid {
     display: grid;
     grid-template-columns: repeat(auto-fill, minmax(100px, 1fr));
@@ -570,7 +560,6 @@
     margin-bottom: 0.4rem;
   }
 
-  /* Inputs */
   input, textarea {
     width: 100%;
     padding: 0.5rem;
@@ -600,7 +589,6 @@
     display: block;
   }
 
-  /* BrowserVM Info */
   .browservm-info {
     background: var(--bg-secondary, #1a1a2e);
     border-radius: 8px;
@@ -624,7 +612,6 @@
     margin: 0.2rem 0;
   }
 
-  /* Error */
   .error {
     background: rgba(239, 68, 68, 0.1);
     border: 1px solid rgba(239, 68, 68, 0.3);
@@ -645,7 +632,6 @@
     margin-bottom: 1rem;
   }
 
-  /* Actions */
   .actions {
     display: flex;
     gap: 0.5rem;
