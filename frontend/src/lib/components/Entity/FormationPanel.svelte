@@ -286,9 +286,8 @@
     </div>
   {/if}
 
-  <!-- Entity Type -->
   <div class="field">
-    <label>Entity Type</label>
+    <div class="field-label">Entity Type</div>
     <div class="type-selector three-col">
       <button
         class="type-option"
@@ -320,7 +319,6 @@
     </div>
   </div>
 
-  <!-- Entity Name -->
   <div class="field">
     <label>Entity Name</label>
     <input
@@ -331,9 +329,8 @@
     <p class="field-hint">Display name for your entity</p>
   </div>
 
-  <!-- Jurisdiction -->
   <div class="field">
-    <label>Jurisdiction</label>
+    <div class="field-label">Jurisdiction</div>
     {#if jurisdictions.length === 0}
       <div class="empty-hint">No jurisdictions available. Add one first.</div>
     {:else}
@@ -355,9 +352,8 @@
     {/if}
   </div>
 
-  <!-- Validators -->
   <div class="field">
-    <label>Validators ({validators.length})</label>
+    <div class="field-label">Validators ({validators.length})</div>
     <div class="validators-list">
       {#each validators as v, idx}
         <div class="validator-row">
@@ -388,7 +384,6 @@
     </button>
   </div>
 
-  <!-- Threshold (only show for multi-validator) -->
   {#if validators.length > 1}
     <div class="field">
       <label>Threshold</label>
@@ -408,22 +403,19 @@
     </div>
   {/if}
 
-  <!-- Quorum Hash (lazy only) -->
   {#if entityType === 'lazy'}
     <div class="preview-box">
-      <label>Quorum Hash</label>
+      <div class="preview-label">Quorum Hash</div>
       <code>{quorumHash}</code>
       <small>This hash becomes your entity ID</small>
     </div>
   {/if}
 
-  <!-- Expected Entity ID -->
   <div class="preview-box">
-    <label>Expected Entity ID</label>
+    <div class="preview-label">Expected Entity ID</div>
     <code class="entity-id">{expectedEntityId}</code>
   </div>
 
-  <!-- Status Messages -->
   {#if error}
     <div class="message error">{error}</div>
   {/if}
@@ -431,7 +423,6 @@
     <div class="message success">{success}</div>
   {/if}
 
-  <!-- Actions -->
   <div class="actions">
     <button class="btn-secondary" on:click={resetForm}>Clear</button>
     <button
@@ -521,7 +512,7 @@
     gap: 8px;
   }
 
-  .field label {
+  .field label, .field-label {
     font-size: 11px;
     font-weight: 500;
     color: var(--theme-text-secondary, #a1a1aa);
@@ -551,7 +542,6 @@
     color: var(--theme-text-muted, #71717a);
   }
 
-  /* Type Selector */
   .type-selector {
     display: grid;
     grid-template-columns: 1fr 1fr;
@@ -596,7 +586,6 @@
     color: color-mix(in srgb, var(--theme-accent, #fbbf24) 78%, #7c2d12);
   }
 
-  /* Jurisdiction */
   .empty-hint {
     padding: 16px;
     text-align: center;
@@ -648,7 +637,6 @@
     color: var(--theme-text-muted, #71717a);
   }
 
-  /* Validators */
   .validators-list {
     display: flex;
     flex-direction: column;
@@ -742,7 +730,6 @@
     color: var(--theme-accent, #fbbf24);
   }
 
-  /* Threshold */
   .threshold-selector {
     display: flex;
     align-items: center;
@@ -771,7 +758,6 @@
     text-align: right;
   }
 
-  /* Preview Box */
   .preview-box {
     padding: 12px;
     background: color-mix(in srgb, var(--theme-surface, #18181b) 88%, transparent);
@@ -779,7 +765,7 @@
     border-radius: 8px;
   }
 
-  .preview-box label {
+  .preview-label {
     display: block;
     font-size: 10px;
     color: var(--theme-text-muted, #71717a);
@@ -806,7 +792,6 @@
     margin-top: 6px;
   }
 
-  /* Messages */
   .message {
     padding: 10px 12px;
     border-radius: 6px;
