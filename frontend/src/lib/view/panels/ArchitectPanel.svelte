@@ -166,7 +166,6 @@
 
   // Listen for VR payment gestures
   const handleVRPayment = async ({ from, to }: { from: string; to: string }) => {
-    console.log('[Architect] VR payment triggered:', from.slice(-4), '→', to.slice(-4));
     r2rFromEntity = from;
     r2rToEntity = to;
     r2rAmount = '500000'; // Default $500K
@@ -176,16 +175,13 @@
 
   // Auto-demo mode (triggered when entering VR for Bernanke wow)
   const handleAutoDemo = async () => {
-    console.log('[Architect]  Starting auto-demo for VR...');
 
     // Step 1: Fund all entities if not already funded
     if (entityIds.length > 0) {
-      console.log(' Funding all entities...');
       await fundAllEntities();
 
       // Step 2: Start payment loop after 2 seconds
       setTimeout(() => {
-        console.log(' Starting payment loop...');
         startFedPaymentLoop();
       }, 2000);
     }
@@ -211,7 +207,6 @@
 
     try {
       const amount = BigInt(mintAmount);
-      console.log(`[Architect] Calling debugFundReservesBatch: entity=${selectedEntityForMint}, tokenId=1, amount=${amount}`);
       await debugFundReservesBatch([{ entityId: selectedEntityForMint, tokenId: 1, amount }]);
 
       lastAction = `✅ Minted ${mintAmount} to entity (on-chain)`;
@@ -220,8 +215,6 @@
       isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
       isolatedHistory.set($isolatedEnv.history || []);
       isolatedEnv.set($isolatedEnv);
-
-      console.log('[Architect] Mint complete, new frame created');
     } catch (err: any) {
       lastAction = ` ${err.message}`;
       console.error('[Architect] Mint error:', err);
@@ -259,7 +252,6 @@
       // Debug: check reserves before R2R
       const amount = BigInt(r2rAmount);
       const fromReserve = await jadapter.getReserves(r2rFromEntity, 1);
-      console.log(`[Architect] DEBUG: fromEntity=${r2rFromEntity}, reserves=${fromReserve}, amount=${amount}`);
 
       if (fromReserve < amount) {
         throw new Error(`Insufficient reserves: have ${fromReserve}, need ${amount}`);
@@ -271,8 +263,6 @@
       if (!signerId) {
         throw new Error(`Missing signer for ${shortAddress(r2rFromEntity)}`);
       }
-
-      console.log(`[Architect] Queueing r2r: ${r2rFromEntity} → ${r2rToEntity}, amount=${amount}`);
       XLN.enqueueRuntimeInput($isolatedEnv, {
         runtimeTxs: [],
         entityInputs: [{
@@ -295,8 +285,6 @@
       isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
       isolatedHistory.set($isolatedEnv.history || []);
       isolatedEnv.set($isolatedEnv);
-
-      console.log('[Architect] R2R complete, new frame created');
     } catch (err: any) {
       lastAction = `❌ ${err.message}`;
       console.error('[Architect] R2R error:', err);
@@ -350,43 +338,30 @@
   /** Start AHB Tutorial with autopilot */
   let ahbRunning = false; // Guard against double execution
   async function startAHBTutorial() {
-    console.log('[AHB] ========== STARTING AHB ==========');
     if (ahbRunning) {
-      console.log('[AHB] Already running, skip');
       return;
     }
     ahbRunning = true;
     loading = true;
     tutorialActive = true;
     try {
-      console.log('[AHB] Loading runtime via getXLN()...');
       const XLN = await getXLN();
-      console.log('[AHB] Runtime loaded, keys:', Object.keys(XLN).slice(0, 10));
 
       // Ensure env exists with seed + eReplicas
       ensureScenarioEnv(XLN, 'AHB');
       const jadapter = await getJAdapterFromEnv();
-      console.log('[AHB] jadapter exists after ensureScenarioEnv?', !!jadapter);
 
       // CRITICAL: Clear old state BEFORE running demo
-      console.log('[Architect] BEFORE clear: eReplicas =', $isolatedEnv.eReplicas.size);
       $isolatedEnv.eReplicas.clear();
       $isolatedEnv.history = [];
-      console.log('[Architect] AFTER clear: eReplicas =', $isolatedEnv.eReplicas.size);
 
       // Run the ACTUAL AHB scenario (same code as CLI)
-      console.log('[Architect] Running scenarios/ahb.ts...');
       await XLN.scenarios.ahb($isolatedEnv);
-      console.log('[AHB] ✅ Scenario complete!');
-
-      console.log('[Architect] AFTER setup: eReplicas =', $isolatedEnv.eReplicas.size, 'history =', $isolatedEnv.history?.length);
 
       // Update isolated stores
       // CRITICAL: Set timeIndex BEFORE history to avoid race condition
       // When history triggers updateNetworkData, timeIndex must already be correct
       const frames = $isolatedEnv.history || [];
-      console.log('[Architect] Setting isolatedHistory with frames:', frames.length);
-      console.log('[Architect] Frame descriptions:', frames.map((f: any) => f.description));
 
       // Exit live mode and set timeIndex FIRST
       isolatedIsLive.set(false);
@@ -395,8 +370,6 @@
       // THEN set history and env (which trigger Graph3DPanel updates)
       isolatedHistory.set(frames);
       isolatedEnv.set($isolatedEnv);
-
-      console.log('[Architect] Frames in localHistory store:', frames.length);
 
       lastAction = `AHB: ${frames.length} frames loaded. Use TimeMachine to navigate.`;
 
@@ -407,7 +380,6 @@
       // CRITICAL: Still update history with frames created before error
       const frames = $isolatedEnv?.history || [];
       if (frames.length > 0) {
-        console.log('[Architect] Error occurred but have', frames.length, 'frames - showing them');
         isolatedIsLive.set(false);
         isolatedTimeIndex.set(Math.max(0, frames.length - 1));
         isolatedHistory.set(frames);
@@ -427,9 +399,7 @@
   /** Start HTLC Tutorial (lock-ahb scenario) */
   let htlcRunning = false;
   async function startHTLCTutorial() {
-    console.log('[HTLC] ========== STARTING HTLC ==========');
     if (htlcRunning) {
-      console.log('[HTLC] Already running, skip');
       return;
     }
     htlcRunning = true;
@@ -439,10 +409,7 @@
       ensureScenarioEnv(XLN, 'HTLC');
       $isolatedEnv.eReplicas.clear();
       $isolatedEnv.history = [];
-
-      console.log('[HTLC] Running scenarios/lock-ahb.ts...');
       await XLN.scenarios.lockAhb($isolatedEnv);
-      console.log('[HTLC] ✅ Scenario complete!');
 
       const frames = $isolatedEnv.history || [];
       isolatedIsLive.set(false);
@@ -471,9 +438,7 @@
   /** Start Swap Tutorial */
   let swapRunning = false;
   async function startSwapTutorial() {
-    console.log('[SWAP] ========== STARTING SWAP ==========');
     if (swapRunning) {
-      console.log('[SWAP] Already running, skip');
       return;
     }
     swapRunning = true;
@@ -483,10 +448,7 @@
       ensureScenarioEnv(XLN, 'Swap');
       $isolatedEnv.eReplicas.clear();
       $isolatedEnv.history = [];
-
-      console.log('[SWAP] Running scenarios/swap.ts...');
       await XLN.scenarios.swap($isolatedEnv);
-      console.log('[SWAP] ✅ Scenario complete!');
 
       const frames = $isolatedEnv.history || [];
       isolatedIsLive.set(false);
@@ -523,8 +485,6 @@
       ensureScenarioEnv(XLN, 'Swap Market');
       $isolatedEnv.eReplicas.clear();
       $isolatedEnv.history = [];
-
-      console.log('[SWAP-MARKET] Running...');
       await XLN.scenarios.swapMarket($isolatedEnv);
 
       const frames = $isolatedEnv.history || [];
@@ -552,8 +512,6 @@
       ensureScenarioEnv(XLN, 'Rapid Fire');
       $isolatedEnv.eReplicas.clear();
       $isolatedEnv.history = [];
-
-      console.log('[RAPID-FIRE] Running...');
       await XLN.scenarios.rapidFire($isolatedEnv);
 
       const frames = $isolatedEnv.history || [];
@@ -572,7 +530,6 @@
 
   /** Reset to fresh runtime instance */
   async function resetScenario() {
-    console.log('[Reset] Creating fresh runtime instance...');
     loading = true;
     try {
       const XLN = await getXLN();
@@ -586,8 +543,6 @@
       isolatedTimeIndex.set(0);
       isolatedIsLive.set(true);
       tutorialActive = false;
-
-      console.log('[Reset] ✅ Fresh runtime created');
       lastAction = 'Reset complete - ready for new scenario';
     } catch (err: any) {
       console.error('[Reset] Error:', err);
@@ -600,37 +555,27 @@
   /** Start Grid Scalability Scenario */
   let gridRunning = false;
   async function startGridScenario() {
-    console.log('[Grid] ========== STARTING GRID SCALABILITY ==========');
     if (gridRunning) {
-      console.log('[Grid] Already running, skip');
       return;
     }
     gridRunning = true;
     loading = true;
     tutorialActive = true;
     try {
-      console.log('[Grid] Loading runtime via getXLN()...');
       const XLN = await getXLN();
 
       ensureScenarioEnv(XLN, 'Grid');
 
       // Clear old state BEFORE running demo
-      console.log('[Grid] BEFORE clear: eReplicas =', $isolatedEnv.eReplicas.size);
       $isolatedEnv.eReplicas.clear();
       $isolatedEnv.jReplicas?.clear();
       $isolatedEnv.history = [];
-      console.log('[Grid] AFTER clear: eReplicas =', $isolatedEnv.eReplicas.size);
 
       // Run the grid scenario
-      console.log('[Grid] Running scenarios/grid.ts...');
       await XLN.scenarios.grid($isolatedEnv);
-      console.log('[Grid] ✅ Scenario complete!');
-
-      console.log('[Grid] AFTER setup: eReplicas =', $isolatedEnv.eReplicas.size, 'history =', $isolatedEnv.history?.length);
 
       // Update isolated stores
       const frames = $isolatedEnv.history || [];
-      console.log('[Grid] Setting isolatedHistory with frames:', frames.length);
 
       // Exit live mode and set timeIndex FIRST
       isolatedIsLive.set(false);
@@ -639,8 +584,6 @@
       // THEN set history and env
       isolatedHistory.set(frames);
       isolatedEnv.set($isolatedEnv);
-
-      console.log('[Grid] ✅ Isolated stores updated');
       lastAction = 'Grid Scalability scenario loaded';
     } catch (err: any) {
       if (err && typeof err === 'object' && 'message' in err) {
@@ -659,37 +602,27 @@
   /** Start Settlement Workspace Scenario */
   let settleRunning = false;
   async function startSettleScenario() {
-    console.log('[Settle] ========== STARTING SETTLEMENT WORKSPACE ==========');
     if (settleRunning) {
-      console.log('[Settle] Already running, skip');
       return;
     }
     settleRunning = true;
     loading = true;
     tutorialActive = true;
     try {
-      console.log('[Settle] Loading runtime via getXLN()...');
       const XLN = await getXLN();
 
       ensureScenarioEnv(XLN, 'Settle');
 
       // Clear old state BEFORE running demo
-      console.log('[Settle] BEFORE clear: eReplicas =', $isolatedEnv.eReplicas.size);
       $isolatedEnv.eReplicas.clear();
       $isolatedEnv.jReplicas?.clear();
       $isolatedEnv.history = [];
-      console.log('[Settle] AFTER clear: eReplicas =', $isolatedEnv.eReplicas.size);
 
       // Run the settle scenario
-      console.log('[Settle] Running scenarios/settle.ts...');
       await (XLN.scenarios as any).settle($isolatedEnv);
-      console.log('[Settle] ✅ Scenario complete!');
-
-      console.log('[Settle] AFTER setup: eReplicas =', $isolatedEnv.eReplicas.size, 'history =', $isolatedEnv.history?.length);
 
       // Update isolated stores
       const frames = $isolatedEnv.history || [];
-      console.log('[Settle] Setting isolatedHistory with frames:', frames.length);
 
       // Exit live mode and set timeIndex FIRST
       isolatedIsLive.set(false);
@@ -698,8 +631,6 @@
       // THEN set history and env
       isolatedHistory.set(frames);
       isolatedEnv.set($isolatedEnv);
-
-      console.log('[Settle] ✅ Isolated stores updated');
       lastAction = 'Settlement Workspace scenario loaded';
     } catch (err: any) {
       if (err && typeof err === 'object' && 'message' in err) {
@@ -747,8 +678,6 @@
           runtimeTxs: [],
           entityInputs: []
         });
-
-        console.log('[Architect] Auto-created demo jurisdiction');
       }
 
       if (entityIds.length > 0) {
@@ -811,8 +740,6 @@
       isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
       isolatedHistory.set($isolatedEnv.history || []);
       isolatedEnv.set($isolatedEnv);
-
-      console.log('[Architect] Hub created');
     } catch (err: any) {
       lastAction = ` ${err.message}`;
       console.error('[Architect] Create hub error:', err);
@@ -845,8 +772,6 @@
       isolatedEnv.set($isolatedEnv);
       isolatedHistory.set($isolatedEnv.history || []);
       isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
-
-      console.log('[Architect] All entities funded');
     } catch (err: any) {
       lastAction = ` ${err.message}`;
       console.error('[Architect] Fund all error:', err);
@@ -922,8 +847,6 @@
       isolatedEnv.set($isolatedEnv);
       isolatedHistory.set($isolatedEnv.history || []);
       isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
-
-      console.log('[Architect] Random payment sent');
     } catch (err: any) {
       lastAction = ` ${err.message}`;
       console.error('[Architect] Random payment error:', err);
@@ -1083,8 +1006,6 @@
       isolatedEnv.set($isolatedEnv);
       isolatedHistory.set($isolatedEnv.history || []);
       isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
-
-      console.log('[Scale Test]  100 entities created, FPS should remain high');
     } catch (err) {
       const error = err as Error;
       lastAction = ` ${error.message}`;
@@ -1206,7 +1127,6 @@
   /** CREATE ECONOMY WITH TOPOLOGY - Main entry point */
   async function createEconomyWithTopology(topologyType: 'star' | 'mesh' | 'tiered' | 'correspondent' | 'hybrid' | 'sp500' | 'ahb') {
     if (!requireLiveMode('create economy')) return;
-    console.log('[Architect] createEconomyWithTopology called with type:', topologyType);
 
     loading = true;
 
@@ -1230,20 +1150,14 @@
       }
 
       lastAction = `Creating ${topologyType.toUpperCase()} economy...`;
-      console.log('[Architect] Starting topology creation');
 
       // Get topology preset
-      console.log('[Architect] Getting topology preset...');
       const topology = getTopologyPresetInline(topologyType);
-      console.log('[Architect] Topology preset loaded:', topology.type, 'layers:', topology.layers.length);
 
       // Create entities based on topology layers
-      console.log('[Architect] Calling createEntitiesFromTopology...');
       await createEntitiesFromTopology(topology);
-      console.log('[Architect] createEntitiesFromTopology completed');
 
       // Start payment loop
-      console.log('[Architect] Starting payment loop in 2s...');
       setTimeout(() => startSmartPaymentLoop(topology), 2000);
 
       const totalEntities = topology.layers.reduce((sum: number, layer: any) => sum + layer.entityCount, 0);
@@ -1252,45 +1166,35 @@
       isolatedEnv.set($isolatedEnv);
       isolatedHistory.set($isolatedEnv.history || []);
       isolatedTimeIndex.set(($isolatedEnv.history?.length || 1) - 1);
-
-      console.log(`[Architect] ${topologyType.toUpperCase()} economy created successfully`);
     } catch (err: any) {
       lastAction = ` ${err.message}`;
       console.error('[Architect] Topology creation error:', err);
       console.error('[Architect] Full error stack:', err.stack);
     } finally {
       loading = false;
-      console.log('[Architect] loading=false');
     }
   }
 
   /** Create entities based on topology configuration */
   async function createEntitiesFromTopology(topology: any) {
     if (!requireLiveMode('create entities')) return;
-    console.log('[createEntities] START');
 
     const runtimeUrl = new URL('/runtime.js', window.location.origin).href;
-    console.log('[createEntities] Loading XLN from:', runtimeUrl);
     const XLN = await import(/* @vite-ignore */ runtimeUrl);
-    console.log('[createEntities] XLN loaded');
 
     const xlnomy = $isolatedEnv.jReplicas.get($isolatedEnv.activeJurisdiction);
     if (!xlnomy) {
       console.error('[createEntities] Active xlnomy not found:', $isolatedEnv.activeJurisdiction);
       throw new Error('Active xlnomy not found');
     }
-    console.log('[createEntities] Xlnomy found:', xlnomy.name);
 
     const jPos = xlnomy.jMachine.position;
-    console.log('[createEntities] J-Machine position:', jPos);
 
     const entities = [];
     const layerEntityIds: Map<string, string[]> = new Map(); // layerName → entityIds
 
     // Create entities for each layer
-    console.log('[createEntities] Processing', topology.layers.length, 'layers');
     for (const layer of topology.layers) {
-      console.log('[createEntities] Layer:', layer.name, 'count:', layer.entityCount, 'y:', layer.yPosition);
       const layerIds: string[] = [];
 
       for (let i = 0; i < layer.entityCount; i++) {
@@ -1343,19 +1247,15 @@
       }
 
       layerEntityIds.set(layer.name, layerIds);
-      console.log('[createEntities] Layer', layer.name, 'created', layerIds.length, 'entities');
     }
 
     // Import all entities
-    console.log('[createEntities] Importing', entities.length, 'entities via runtime ingress queue...');
     await ingressRuntimeInput(XLN, {
       runtimeTxs: entities,
       entityInputs: []
     });
-    console.log('[createEntities] Entities imported');
 
     // PERF FIX: Batch all funding into ONE process() call instead of 1 per entity
-    console.log('[createEntities] Batching funding for all entities...');
     const fundingMints: Array<{ entityId: string; tokenId: number; amount: bigint }> = [];
     for (const layer of topology.layers) {
       const ids = layerEntityIds.get(layer.name) || [];
@@ -1370,10 +1270,8 @@
     }
 
     await debugFundReservesBatch(fundingMints);
-    console.log('[createEntities]  Funded', fundingMints.length, 'entities through BrowserVM watcher');
 
     // PERF + REALISM: Proximity-based account creation (not all-to-all)
-    console.log('[createEntities] Batching account openings (proximity-based)...');
     const accountInputs = [];
     const accountsOpened = new Set<string>(); // Track to avoid duplicates
 
@@ -1442,10 +1340,7 @@
     // Single batch: all accounts opened in ONE frame
     if (accountInputs.length > 0) {
       XLN.enqueueRuntimeInput($isolatedEnv, { runtimeTxs: [], entityInputs: accountInputs });
-      console.log('[createEntities]  Opened', accountInputs.length, 'accounts in 1 frame');
     }
-
-    console.log('[createEntities]  COMPLETE - Created economy with', entities.length, 'entities in ~3 frames (was 466)');
   }
 
   /** Smart Payment Loop: 20% circular payments + Smart QE */
@@ -1478,8 +1373,6 @@
         console.error('[Smart Loop] Error:', err);
       }
     }, 5000); // Every 5 seconds (optimized for frame count)
-
-    console.log(`[Smart Loop]  Started (${topology.type} topology, 5s interval)`);
   }
 
   /** Smart QE: Fed mints based on system liquidity */
@@ -1523,8 +1416,6 @@
 
       if (fedReplica) {
         await debugFundReservesBatch([{ entityId: fedId, tokenId: 1, amount: mintAmount }]);
-
-        console.log(`[Smart QE] 💵 Fed printed $${(Number(mintAmount)/1000).toFixed(0)}K (avg: $${(Number(averageReserves)/1000).toFixed(0)}K → target: $${(Number(targetAverage)/1000).toFixed(0)}K)`);
       }
     }
   }
@@ -1629,7 +1520,6 @@
           const rescueAmount = targetReserves > reserves ? targetReserves - reserves : 0n;
           if (rescueAmount > 0n) {
             await debugFundReservesBatch([{ entityId: id, tokenId: 1, amount: rescueAmount }]);
-            console.log(`[Crisis] 🚨 Entity ${id.slice(0,10)} reserves ${ratio}% < 20%; injected $${(Number(rescueAmount) / 1000).toFixed(0)}K`);
           }
         }
       }
@@ -1653,7 +1543,6 @@
     });
 
     if (!fedId || bankEntityIds.length === 0) {
-      console.log('[Fed Loop] No Fed or banks found');
       return;
     }
 
@@ -1690,8 +1579,6 @@
                 }
               }]
             }] });
-
-            console.log(`[Fed Loop]  →  Fed lent $${(amount/1000).toFixed(0)}K to bank`);
           }
         } else if (action === 1) {
           // Random bank borrows from Fed (reverse direction)
@@ -1716,8 +1603,6 @@
                 }
               }]
             }] });
-
-            console.log(`[Fed Loop]  →  Bank repaid $${(amount/1000).toFixed(0)}K to Fed`);
           }
         } else {
           // Interbank payment (Bank → Bank)
@@ -1763,8 +1648,6 @@
                 }
               }]
             }] });
-
-            console.log(`[Fed Loop]  →  Interbank payment $${(amount/1000).toFixed(0)}K`);
           }
         }
 
@@ -1776,15 +1659,12 @@
         console.error('[Fed Loop] Payment error:', err);
       }
     }, 5000); // Every 5 seconds (reduced for performance)
-
-    console.log('[Fed Loop]  Started auto payment loop (5s interval)');
   }
 
   function stopFedPaymentLoop() {
     if (fedPaymentInterval) {
       clearInterval(fedPaymentInterval);
       fedPaymentInterval = null;
-      console.log('[Fed Loop] ⏹️ Stopped payment loop');
     }
   }
 
@@ -1828,8 +1708,6 @@
         runtimeTxs: [],
         entityInputs: []
       });
-
-      console.log('[Architect] Created Xlnomy with', $isolatedEnv.eReplicas.size, 'total entities');
 
       // Success message
       const createdName = newXlnomyName.toLowerCase();
