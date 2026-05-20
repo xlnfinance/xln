@@ -9,7 +9,7 @@ import { ethers } from 'ethers';
 import { getCachedSignerPrivateKey } from '../account-crypto';
 import { ensureLocalDisputeDelayConfigured } from '../jadapter/local-config';
 import { isLoopbackUrl } from '../loopback-url';
-import { ensureSignerKeysFromSeed, requireRuntimeSeed, processJEvents, converge } from './helpers';
+import { commitRuntimeInput, ensureSignerKeysFromSeed, requireRuntimeSeed, processJEvents, converge } from './helpers';
 
 export type { JAdapterMode };
 
@@ -334,8 +334,6 @@ export async function registerEntities(
   entities: EntityConfig[],
   jurisdiction: JurisdictionConfig,
 ): Promise<RegisteredEntity[]> {
-  const { applyRuntimeInput } = await import('../runtime');
-
   // 1. Compute board hashes and register on-chain
   const boardHashes = entities.map(e => computeBoardHash(e.signer));
   const nextEntityNumber = await jadapter.entityProvider.nextNumber();
@@ -358,7 +356,7 @@ export async function registerEntities(
   });
 
   // 3. Create eReplicas via importReplica
-  await applyRuntimeInput(env, {
+  await commitRuntimeInput(env, {
     runtimeTxs: result.map((r, i) => {
       const sourceEntity = entities[i];
       if (!sourceEntity) throw new Error(`REGISTER_ENTITY_SOURCE_MISSING: index=${i}`);
@@ -501,9 +499,7 @@ export async function createNumberedEntity(
   const entityId = '0x' + entityNumber.toString(16).padStart(64, '0');
   const signer = `${entityNumber}`;
 
-  const { applyRuntimeInput } = await import('../runtime');
-
-  await applyRuntimeInput(env, {
+  await commitRuntimeInput(env, {
     runtimeTxs: [{
       type: 'importReplica' as const,
       entityId,
