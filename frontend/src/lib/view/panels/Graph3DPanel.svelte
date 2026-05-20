@@ -215,36 +215,6 @@
     });
   }
 
-  // VR stubs (not used in /view isolated mode)
-  class SpatialHash {
-    cellSize: number;
-    constructor(cellSize: number) {
-      this.cellSize = cellSize;
-    }
-    clear() {}
-    update(entityIdOrEntities: string | EntityData[], position?: THREE.Vector3) {}
-  }
-  class GestureManager {
-    private callbacks: ((event: { type: string; entityId: string }) => void)[] = [];
-    on(callback: (event: { type: string; entityId: string }) => void) {
-      this.callbacks.push(callback);
-    }
-    clear() {
-      this.callbacks = [];
-    }
-    updateEntity(entityId: string, position: THREE.Vector3, timestamp: number) {}
-  }
-  interface VRHammerEvent {
-    fromEntityId: string;
-    toEntityId: string;
-  }
-  class VRHammer {
-    constructor() {}
-    attachToController(controller: THREE.XRTargetRaySpace) {}
-    onAccountHit(callback: (event: VRHammerEvent) => void) {}
-    update(connections: ConnectionData[]) {}
-  }
-
   // OrbitControls class (loaded dynamically in onMount)
   let OrbitControls: typeof OrbitControlsType;
 
@@ -326,10 +296,6 @@
   // Network3D managers
   let entityManager: EntityManager;
 
-  // Visual effects system
-  let spatialHash: SpatialHash;
-  let gestureManager: GestureManager;
-  let vrHammer: VRHammer | null = null;
   let entityMeshMap = new Map<string, THREE.Object3D | undefined>();
 
   // J-Machines (one per jurisdiction) - broadcast visualization
@@ -1109,10 +1075,9 @@
     }
   }
 
-  // ===== UPDATE SPATIAL HASH (when entities move) =====
-  $: if (spatialHash && entities.length > 0) {
+  // Keep a fast entity-id → mesh lookup in sync with rendered entities.
+  $: if (entities.length > 0) {
     entities.forEach(entity => {
-      spatialHash.update(entity.id, entity.position);
       entityMeshMap.set(entity.id, entity.mesh);
     });
   }
@@ -1449,13 +1414,6 @@
       controls = null;
     }
 
-    // Clean up visual effects
-    if (gestureManager) {
-      gestureManager.clear();
-    }
-    if (spatialHash) {
-      spatialHash.clear();
-    }
     entityMeshMap.clear();
 
     // Clean up active animations (prevent memory leak)
@@ -1872,17 +1830,6 @@
 
     // ===== INITIALIZE MANAGERS =====
     entityManager = new EntityManager(scene);
-    spatialHash = new SpatialHash(100);
-    gestureManager = new GestureManager();
-    vrHammer = new VRHammer();
-
-    // Register shake-to-rebalance callback
-    gestureManager.on((event: { type: string; entityId: string }) => {
-      if (event.type === 'shake-rebalance') {
-        handleRebalanceGesture(event.entityId);
-      }
-    });
-
   }
 
   /**
@@ -1896,29 +1843,6 @@
     controller1.addEventListener('selectstart', onVRSelectStart);
     controller1.addEventListener('selectend', onVRSelectEnd);
     scene.add(controller1);
-
-    // Attach hammer to right controller
-    if (vrHammer) {
-      vrHammer.attachToController(controller1);
-      vrHammer.onAccountHit((event) => {
-        // Find and break the connection visually
-        const conn = connections.find(c =>
-          (c.from === event.fromEntityId && c.to === event.toEntityId) ||
-          (c.from === event.toEntityId && c.to === event.fromEntityId)
-        );
-        if (conn) {
-          // Make connection red and break visual
-          const material = conn.line.material as THREE.LineDashedMaterial;
-          material.color.setHex(0xff0000);
-          material.opacity = 0.8;
-          // Remove bars to show "broken" state
-          if (conn.progressBars) {
-            scene.remove(conn.progressBars);
-            conn.progressBars = undefined;
-          }
-        }
-      });
-    }
 
     // Controller 2 (left hand)
     const controller2 = renderer.xr.getController(1);
@@ -2214,19 +2138,6 @@
       if (session) {
         await session.end();
       }
-    }
-  }
-
-  // ===== VISUAL EFFECTS HANDLERS =====
-
-  /**
-   * Handle shake-to-rebalance gesture
-   */
-  async function handleRebalanceGesture(entityId: string) {
-    try {
-      panelBridge.emit('rebalance:requested', { entityId });
-    } catch (error) {
-      console.error('❌ Rebalance gesture failed:', error);
     }
   }
 
@@ -4150,21 +4061,11 @@
       vrGrabbedEntity.mesh.position.copy(controllerPos);
       vrGrabbedEntity.position.copy(controllerPos);
 
-      // ===== UPDATE GESTURE DETECTOR =====
-      if (gestureManager) {
-        gestureManager.updateEntity(vrGrabbedEntity.id, vrGrabbedEntity.position, Date.now());
-      }
-
       // Update label position
       if (vrGrabbedEntity.label) {
         vrGrabbedEntity.label.position.copy(controllerPos);
         vrGrabbedEntity.label.position.y += 3;
       }
-    }
-
-    // ===== UPDATE VR HAMMER (hit detection) =====
-    if (isVRActive && vrHammer) {
-      vrHammer.update(connections);
     }
 
     // ===== UPDATE HAND TRACKING (Vision Pro + Quest) =====
