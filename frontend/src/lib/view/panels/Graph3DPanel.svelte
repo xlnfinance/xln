@@ -2189,8 +2189,6 @@
       });
     }
 
-    // FIXED: Removed excessive console.log
-
     // NO DEMO DATA - only show what actually exists
     if (entityData.length === 0) {
       debug.warn(`⚠️ No entity data found at frame ${timeIndex} - clearing network`);
@@ -4952,7 +4950,6 @@
   // Handle mini panel actions (R2R, R2C quick buttons)
   function handleMiniPanelAction(event: CustomEvent) {
     const { type, entityId } = event.detail;
-    console.log(`[Graph3D] Mini panel action: ${type} for entity ${entityId}`);
 
     // Get entity name for display
     const entityName = getEntityName(entityId);

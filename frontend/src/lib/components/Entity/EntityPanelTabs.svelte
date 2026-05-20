@@ -2,7 +2,6 @@
   import { createEventDispatcher } from 'svelte';
   import { onDestroy, onMount } from 'svelte';
   import type { ComponentType } from 'svelte';
-  import { get } from 'svelte/store';
   import { MaxUint256, Wallet as EthersWallet, hexlify, isAddress, parseEther, ZeroAddress, zeroPadValue } from 'ethers';
   import type {
     AccountMachine,
@@ -27,11 +26,10 @@
   import { settings, settingsOperations } from '../../stores/settingsStore';
   import { amountToUsd, getAssetUsdPrice } from '$lib/utils/assetPricing';
   import { activeRuntime, vaultOperations } from '$lib/stores/vaultStore';
-  import { xlnFunctions, entityPositions, enqueueEntityInputs, p2pState } from '../../stores/xlnStore';
+  import { xlnFunctions, entityPositions, enqueueEntityInputs } from '../../stores/xlnStore';
   import { toasts } from '../../stores/toastStore';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
-  import { isRuntimeLikeEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
   import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming';
   import { entityAvatar as resolveEntityAvatar } from '$lib/utils/avatar';
   import { getJurisdictionBadgeInfo } from '$lib/utils/jurisdictionBadge';
@@ -1052,15 +1050,6 @@
     return preferredWithBalance?.symbol ?? candidates[0]?.symbol ?? '';
   }
 
-  function getP2PRelayUrls(env: Env | EnvSnapshot | null | undefined): string[] {
-    const runtimeEnv = unwrapLiveRuntimeEnv(env);
-    const p2p = isRuntimeLikeEnv(runtimeEnv)
-      ? (runtimeEnv.runtimeState?.p2p as { relayUrls?: string[] } | null | undefined)
-      : null;
-    const relayUrls = p2p?.relayUrls;
-    return Array.isArray(relayUrls) ? relayUrls : [];
-  }
-
   function toErrorMessage(error: unknown, fallback: string): string {
     if (error instanceof Error && error.message) return error.message;
     return fallback;
@@ -1962,7 +1951,6 @@
         throw new Error(result?.error || `Faucet failed (${response.status})`);
       }
 
-      console.log('[EntityPanel] Reserve faucet request queued:', result);
       pendingReserveFaucets = [...pendingReserveFaucets, {
         tokenId: tokenMeta.tokenId,
         amount: amountWei,
@@ -2017,24 +2005,9 @@
       let response: Response | null = null;
       let result: FaucetApiResult | null = null;
       let timeout: ReturnType<typeof setTimeout> | null = null;
-      const requestStartedAt = performance.now();
       try {
         const controller = new AbortController();
         timeout = setTimeout(() => controller.abort(), requestTimeoutMs);
-        const p2p = get(p2pState);
-        const relayUrl = getP2PRelayUrls(activeEnv)[0] || $settings?.relayUrl || 'n/a';
-        const visibility =
-          typeof document !== 'undefined' ? document.visibilityState : 'server';
-        console.log('[EntityPanel] Offchain faucet request:', {
-          hubEntityId,
-          tokenId,
-          runtimeId,
-          relayUrl,
-          visibility,
-          p2pConnected: !!p2p?.connected,
-          p2pReconnect: p2p?.reconnect || null,
-          p2pQueue: p2p?.queue || null,
-        });
         response = await fetch(`${requestApiBase}/api/faucet/offchain`, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
@@ -2048,11 +2021,6 @@
           })
         });
         result = await readJsonResponse<FaucetApiResult>(response);
-        console.log('[EntityPanel] Offchain faucet API response timing:', {
-          requestId: result?.requestId || null,
-          clientMs: Math.round(performance.now() - requestStartedAt),
-          serverMs: result?.serverDurationMs ?? null,
-        });
       } catch (error: unknown) {
         const aborted = error instanceof DOMException && error.name === 'AbortError';
         const message = aborted
@@ -2075,7 +2043,6 @@
         throw new Error(result?.error || `Faucet failed (${status})`);
       }
 
-      console.log('[EntityPanel] Offchain faucet success:', result);
       pendingOffchainFaucets = attachOffchainFaucetRequestId(
         pendingOffchainFaucets,
         pendingKey,
@@ -2486,14 +2453,6 @@
       toasts.success(
         `Received ${formatAmount(req.amount, getTokenInfo(req.tokenId).decimals)} ${req.symbol} in account (${(elapsedMs / 1000).toFixed(1)}s).`,
       );
-      console.log('[EntityPanel] Offchain faucet visible in account:', {
-        requestId: req.requestId || null,
-        hubEntityId: req.hubEntityId,
-        tokenId: req.tokenId,
-        elapsedMs,
-        baselineOut: req.baselineOut.toString(),
-        currentOut: currentOut.toString(),
-      });
     }
     for (const req of timedOut) {
       toasts.error(`Account faucet timed out for ${req.symbol}. Check server logs.`);
@@ -3605,7 +3564,6 @@
         throw new Error(result?.error || `Faucet failed (${response.status})`);
       }
 
-      console.log('[EntityPanel] External faucet success:', result);
       toasts.success(`Received ${amount} ${tokenSymbol} in external!`);
 
       void fetchExternalTokens();
