@@ -242,7 +242,6 @@ export const jmachineOperations = {
           configs,
           activeJMachine: activeExists ? activeName : configs[0]?.name ?? null,
         });
-        console.log('⚖️ J-Machine configs loaded from localStorage');
       }
     } catch (error) {
       console.error('❌ Failed to load J-Machine configs (clearing corrupted storage):', error);
