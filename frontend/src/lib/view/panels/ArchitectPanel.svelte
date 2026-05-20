@@ -2691,25 +2691,6 @@
     font-size: 14px;
   }
 
-  .tutorial-btn {
-    padding: 6px 12px;
-    background: linear-gradient(135deg, #00ff41, #00cc33);
-    border: none;
-    border-radius: 4px;
-    color: #000;
-    font-size: 11px;
-    font-weight: 700;
-    cursor: pointer;
-    transition: all 0.2s;
-    box-shadow: 0 0 10px rgba(0, 255, 65, 0.3);
-  }
-
-  .tutorial-btn:hover {
-    background: linear-gradient(135deg, #00dd38, #00aa2a);
-    box-shadow: 0 0 20px rgba(0, 255, 65, 0.5);
-    transform: translateY(-1px);
-  }
-
   /* Scenario Code Section */
   .scenario-code-section {
     padding: 12px;
@@ -3035,63 +3016,6 @@
   }
 
   /* ============================================ */
-  /* J-MACHINE STATUS BANNER */
-  /* ============================================ */
-  .j-machine-status {
-    background: rgba(255, 100, 0, 0.1);
-    border: 2px solid rgba(255, 100, 0, 0.4);
-    border-radius: 12px;
-    padding: 16px 20px;
-    margin-bottom: 24px;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-  }
-
-  .j-machine-status.active {
-    background: rgba(0, 255, 100, 0.1);
-    border-color: rgba(0, 255, 100, 0.4);
-  }
-
-  .status-indicator {
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .status-icon {
-    font-size: 24px;
-  }
-
-  .status-text strong {
-    display: block;
-    font-size: 14px;
-    color: #ffffff;
-    margin-bottom: 2px;
-  }
-
-  .jurisdiction-name {
-    font-size: 13px;
-    color: #00ff66;
-    font-weight: 600;
-  }
-
-  .jurisdiction-hint {
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.6);
-  }
-
-  .quick-switch {
-    padding: 8px 12px;
-    background: rgba(0, 0, 0, 0.3);
-    border: 1px solid rgba(255, 255, 255, 0.2);
-    border-radius: 6px;
-    color: #ffffff;
-    font-size: 13px;
-    cursor: pointer;
-  }
-
-  /* ============================================ */
   /* 3-LEVEL PRESET SYSTEM (Game UI) */
   /* ============================================ */
   .preset-system {
@@ -3137,100 +3061,6 @@
   .reset-btn:disabled {
     opacity: 0.3;
     cursor: not-allowed;
-  }
-
-  .category-btn {
-    width: 100%;
-    background: linear-gradient(135deg, rgba(0, 20, 40, 0.8) 0%, rgba(0, 40, 80, 0.6) 100%);
-    border: 2px solid rgba(0, 122, 204, 0.4);
-    border-radius: 12px;
-    padding: 20px;
-    margin-bottom: 12px;
-    cursor: pointer;
-    transition: all 0.3s ease;
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    text-align: left;
-  }
-
-  .category-btn:hover:not(:disabled) {
-    background: linear-gradient(135deg, rgba(0, 40, 80, 0.9) 0%, rgba(0, 60, 120, 0.7) 100%);
-    border-color: rgba(0, 217, 255, 0.7);
-    transform: translateX(4px);
-    box-shadow: 0 4px 20px rgba(0, 217, 255, 0.3);
-  }
-
-  .category-btn.expanded {
-    border-color: rgba(0, 217, 255, 0.8);
-    background: linear-gradient(135deg, rgba(0, 60, 120, 0.9) 0%, rgba(0, 80, 160, 0.7) 100%);
-  }
-
-  .category-btn:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-
-  .category-btn.elementary {
-    border-color: rgba(0, 255, 100, 0.4);
-  }
-
-  .category-btn.intermediate {
-    border-color: rgba(255, 200, 0, 0.4);
-  }
-
-  .category-btn.advanced {
-    border-color: rgba(255, 50, 50, 0.4);
-  }
-
-  .category-main {
-    display: flex;
-    align-items: center;
-    gap: 16px;
-  }
-
-  .level {
-    font-size: 11px;
-    font-weight: 700;
-    padding: 6px 12px;
-    border-radius: 6px;
-    background: rgba(0, 217, 255, 0.15);
-    color: #00d9ff;
-    letter-spacing: 1px;
-  }
-
-  .category-btn.elementary .level {
-    background: rgba(0, 255, 100, 0.15);
-    color: #00ff66;
-  }
-
-  .category-btn.intermediate .level {
-    background: rgba(255, 200, 0, 0.15);
-    color: #ffc800;
-  }
-
-  .category-btn.advanced .level {
-    background: rgba(255, 50, 50, 0.15);
-    color: #ff3232;
-  }
-
-  .category-info h6 {
-    margin: 0 0 4px 0;
-    font-size: 18px;
-    font-weight: 700;
-    color: #ffffff;
-  }
-
-  .category-info p {
-    margin: 0;
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.6);
-  }
-
-  .arrow {
-    font-size: 20px;
-    color: rgba(255, 255, 255, 0.5);
-    transition: transform 0.3s ease;
   }
 
   .preset-list {
@@ -3308,125 +3138,6 @@
     50% { box-shadow: 0 0 25px rgba(0, 255, 136, 0.6), inset 0 0 15px rgba(0, 255, 136, 0.2); }
   }
 
-  .topology-builder {
-    background: rgba(0, 255, 65, 0.03);
-    border: 2px solid rgba(0, 255, 65, 0.3);
-    border-radius: 12px;
-    padding: 20px;
-    margin-bottom: 16px;
-  }
-
-  .topology-intro {
-    font-size: 13px;
-    color: #aaa;
-    margin: 8px 0 16px 0;
-    font-style: italic;
-  }
-
-  .topology-grid {
-    display: grid;
-    grid-template-columns: repeat(5, 1fr);
-    gap: 8px;
-    margin-bottom: 16px;
-  }
-
-  .topology-card {
-    position: relative;
-    background: rgba(255, 255, 255, 0.03);
-    border: 2px solid rgba(255, 255, 255, 0.1);
-    border-radius: 8px;
-    padding: 12px 8px;
-    cursor: pointer;
-    transition: all 0.2s;
-    text-align: center;
-  }
-
-  .topology-card:hover:not(:disabled) {
-    background: rgba(255, 255, 255, 0.08);
-    border-color: rgba(0, 255, 65, 0.5);
-    transform: translateY(-2px);
-  }
-
-  .topology-card.active {
-    background: rgba(0, 255, 65, 0.15);
-    border-color: #00ff41;
-    border-width: 3px;
-  }
-
-  .topology-card:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-
-  .badge-new {
-    position: absolute;
-    top: 4px;
-    right: 4px;
-    background: #ff6b6b;
-    color: #fff;
-    font-size: 9px;
-    font-weight: 700;
-    padding: 2px 6px;
-    border-radius: 4px;
-    animation: pulse 2s ease-in-out infinite;
-  }
-
-  .topology-icon {
-    font-size: 32px;
-    margin-bottom: 8px;
-  }
-
-  .topology-card h6 {
-    font-size: 13px;
-    font-weight: 700;
-    color: #fff;
-    margin: 4px 0;
-  }
-
-  .topology-model {
-    font-size: 10px;
-    color: #888;
-    margin: 4px 0 8px 0;
-  }
-
-  .topology-features {
-    list-style: none;
-    padding: 0;
-    margin: 0;
-    font-size: 9px;
-    color: #aaa;
-    text-align: left;
-  }
-
-  .topology-features li {
-    margin: 2px 0;
-    padding-left: 12px;
-    position: relative;
-  }
-
-  .topology-features li::before {
-    content: "▸";
-    position: absolute;
-    left: 0;
-    color: #00ff41;
-  }
-
-  .create-economy-btn {
-    background: linear-gradient(135deg, #00ff41 0%, #00cc33 100%);
-    border: none;
-    color: #000;
-    font-size: 16px;
-    font-weight: 700;
-    padding: 16px;
-    margin-bottom: 12px;
-  }
-
-  .create-economy-btn:hover:not(:disabled) {
-    background: linear-gradient(135deg, #00ff55 0%, #00ff41 100%);
-    transform: translateY(-2px);
-    box-shadow: 0 6px 20px rgba(0, 255, 65, 0.4);
-  }
-
   .banker-demo {
     background: rgba(0, 255, 65, 0.05);
     border: 2px solid rgba(0, 255, 65, 0.3);
@@ -3445,42 +3156,6 @@
     transition: all 0.2s;
   }
 
-  .demo-btn.fed-btn {
-    background: linear-gradient(135deg, #8b7fb8 0%, #6a5a8b 100%);
-    border: none;
-    color: #fff;
-    font-size: 16px;
-  }
-
-  .demo-btn.fed-btn:hover:not(:disabled) {
-    background: linear-gradient(135deg, #9a8ac4 0%, #8b7fb8 100%);
-    transform: translateY(-1px);
-    box-shadow: 0 4px 12px rgba(139, 127, 184, 0.3);
-  }
-
-  .demo-btn.stop-btn {
-    background: rgba(255, 70, 70, 0.2);
-    border: 1px solid #ff4646;
-    color: #ff4646;
-    font-size: 14px;
-    animation: pulse 2s ease-in-out infinite;
-  }
-
-  .demo-btn.stop-btn:hover {
-    background: rgba(255, 70, 70, 0.4);
-  }
-
-  .demo-btn.play-btn {
-    background: rgba(0, 255, 65, 0.2);
-    border: 1px solid #00ff41;
-    color: #00ff41;
-    font-size: 14px;
-  }
-
-  .demo-btn.play-btn:hover {
-    background: rgba(0, 255, 65, 0.3);
-  }
-
   .demo-btn.quick-action {
     background: linear-gradient(135deg, #FFD700 0%, #FFA500 100%);
     border: none;
@@ -3492,22 +3167,6 @@
     background: linear-gradient(135deg, #FFED4E 0%, #FFB84D 100%);
     transform: translateY(-1px);
     box-shadow: 0 4px 12px rgba(255, 215, 0, 0.5);
-  }
-
-  .live-indicator {
-    color: #ff4646;
-    font-weight: 700;
-    animation: blink 1.5s ease-in-out infinite;
-  }
-
-  @keyframes pulse {
-    0%, 100% { box-shadow: 0 0 0 0 rgba(255, 70, 70, 0.4); }
-    50% { box-shadow: 0 0 0 8px rgba(255, 70, 70, 0); }
-  }
-
-  @keyframes blink {
-    0%, 100% { opacity: 1; }
-    50% { opacity: 0.5; }
   }
 
   .demo-btn.step-1 {
