@@ -143,8 +143,8 @@
   }
 </script>
 
-<div class="modal-backdrop" onclick={onClose}>
-  <div class="modal" onclick={(e) => e.stopPropagation()}>
+<div class="modal-backdrop">
+  <div class="modal">
     <div class="modal-header">
       <h2>deriveDelta Visualizer</h2>
       <button class="close-btn" onclick={onClose}>×</button>

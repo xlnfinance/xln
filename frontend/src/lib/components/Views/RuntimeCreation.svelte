@@ -1513,8 +1513,8 @@
           </section>
 
           {#if showSaveVaultModal}
-            <div class="modal-overlay" on:click={() => showSaveVaultModal = false}>
-              <div class="modal-content" on:click|stopPropagation>
+            <div class="modal-overlay">
+              <div class="modal-content">
                 <h3>Create XLN Wallet</h3>
 	                <p class="modal-desc">Name the XLN wallet created from this seed.</p>
                 <input

@@ -2318,8 +2318,8 @@
 </div>
 
 {#if showCreateXlnomyModal}
-  <div class="modal-overlay" on:click={() => showCreateXlnomyModal = false}>
-    <div class="modal" on:click|stopPropagation>
+  <div class="modal-overlay">
+    <div class="modal">
       <h3>Create New Xlnomy</h3>
 
       <div class="form-group">

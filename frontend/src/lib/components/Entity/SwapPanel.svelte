@@ -2806,8 +2806,8 @@
   </div>
 
   {#if swapCompletionModal}
-    <div class="swap-modal-overlay" on:click={() => (swapCompletionModal = null)}>
-      <div class="swap-modal" on:click|stopPropagation>
+    <div class="swap-modal-overlay">
+      <div class="swap-modal">
         <div class="swap-modal-kicker">Swap Filled</div>
         <h3>{swapCompletionModal.side} {swapCompletionModal.pairLabel}</h3>
         <p class="swap-modal-copy">
