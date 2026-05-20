@@ -500,7 +500,7 @@
       </div>
 
       <div class="setting-group">
-        <label>Rotation Center X:</label>
+        <div class="setting-label">Rotation Center X:</div>
         <input
           type="number"
           bind:value={settings.cameraTarget.x}
@@ -509,7 +509,7 @@
       </div>
 
       <div class="setting-group">
-        <label>Rotation Center Y:</label>
+        <div class="setting-label">Rotation Center Y:</div>
         <input
           type="number"
           bind:value={settings.cameraTarget.y}
@@ -518,7 +518,7 @@
       </div>
 
       <div class="setting-group">
-        <label>Rotation Center Z:</label>
+        <div class="setting-label">Rotation Center Z:</div>
         <input
           type="number"
           bind:value={settings.cameraTarget.z}
