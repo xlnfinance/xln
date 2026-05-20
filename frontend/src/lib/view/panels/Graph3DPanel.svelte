@@ -26,7 +26,6 @@
   let miniPanelEntityName = '';
   let miniPanelPosition = { x: 0, y: 0 };
 
-  // Props - REQUIRED for /view isolation (dead props removed)
   export let isolatedEnv: Writable<any>;
   export let isolatedHistory: Writable<any[]>;
   export let isolatedTimeIndex: Writable<number>;
@@ -232,7 +231,6 @@
     isDragging?: boolean; // Currently being dragged
     activityRing?: THREE.Mesh | null; // Activity indicator ring
     // NOTE: Entity sizes stored globally in lockedEntitySizes Map, not per-entity
-    // NOTE: reserveLabel removed - too noisy
     mempoolIndicator?: THREE.Sprite; // Mempool count indicator
   }
 
@@ -350,7 +348,6 @@
   let animationId: number | null;
   let activeBroadcastSpheres: Array<{ sphere: THREE.Mesh; animationId: number }> = [];
   let hoveredObject: any = null;
-  // NOTE: hoveredEntity removed - reserve labels were removed
   let tooltip = { visible: false, x: 0, y: 0, content: '' };
 
   // Dual tooltip for connections (showing both perspectives)
@@ -1599,13 +1596,6 @@
     }, jProposalIntervalMs);
   }
 
-  function stopJAutoProposer() {
-    if (jAutoProposerInterval) {
-      clearInterval(jAutoProposerInterval);
-      jAutoProposerInterval = null;
-    }
-  }
-
   async function initThreeJS() {
     // Guard against multiple initializations
     if (renderer || scene) {
@@ -2797,9 +2787,6 @@
 
     }
 
-    // GRID-POS-E removed - already logged in GRID-POS-D above
-
-    // Store material for animation (hubs will pulse)
     mesh.userData['isHub'] = isHub;
     mesh.userData['isFed'] = isFed; // Used to skip color updates for Fed (always purple)
     mesh.userData['baseMaterial'] = material;
@@ -2810,8 +2797,6 @@
     const labelSprite = createEntityLabel(profile.entityId);
     labelSprite.position.set(0, 1.8, 0); // Local position above unit sphere (scales with mesh)
     mesh.add(labelSprite); // Child of mesh = auto-sync position
-
-    // NOTE: Reserve labels removed - too noisy, clutter the view
 
     entities.push({
       id: profile.entityId,
@@ -3751,8 +3736,6 @@
     // Don't add to scene here - will be added as child of mesh in createEntityNode
     return sprite;
   }
-
-  // NOTE: createReserveLabel removed - reserve labels were too noisy
 
   // Create mempool indicator sprite (shows inbox/outbox tx counts)
   function createMempoolIndicator(entityId: string): THREE.Sprite {
@@ -5646,11 +5629,7 @@
       // Execute scenario
       const result = await XLN?.executeScenario($isolatedEnv, parsed.scenario);
 
-      if (result.success) {
-
-        // Go to start of new frames to watch scenario unfold
-        // timeOperations removed 0);
-      } else {
+      if (!result.success) {
         console.error('Scenario execution errors:', result.errors);
         debug.error('Scenario execution failed - check console');
       }
