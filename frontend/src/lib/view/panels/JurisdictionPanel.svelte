@@ -140,7 +140,6 @@
   $effect(() => {
     if (jurisdictions.length > 0 && !selectedJurisdiction) {
       selectedJurisdiction = jurisdictions[0]?.name ?? null;
-      console.log(`[J-Panel] Auto-selected jurisdiction: ${selectedJurisdiction}`);
     }
     // Reset selection if current selection no longer exists
     if (selectedJurisdiction && !jurisdictions.find((j) => j.name === selectedJurisdiction)) {

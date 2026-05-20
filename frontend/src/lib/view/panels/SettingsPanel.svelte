@@ -116,7 +116,6 @@
       const stored = localStorage.getItem('xln-view-settings');
       if (stored) {
         settings = { ...DEFAULT_SETTINGS, ...JSON.parse(stored) };
-        console.log('[Settings] Loaded from localStorage:', settings);
       }
 
       // Auto-detect WebGPU if not explicitly set by user
@@ -124,7 +123,6 @@
         if (typeof navigator !== 'undefined' && navigator.gpu) {
           settings.rendererMode = 'webgpu';
           saveSettings();
-          console.log('[Settings] ✅ WebGPU detected - enabled by default');
         }
       }
     } catch (err) {
@@ -153,7 +151,6 @@
   function saveSettings() {
     try {
       localStorage.setItem('xln-view-settings', JSON.stringify(settings));
-      console.log('[Settings] Saved to localStorage');
     } catch (err) {
       console.error('[Settings] Failed to save:', err);
     }

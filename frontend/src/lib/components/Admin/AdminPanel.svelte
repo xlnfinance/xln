@@ -44,8 +44,6 @@
         }
       }
 
-      console.log(`🔄 Manual rebalance trigger for entity ${selectedEntityId} (signer: ${signerId})`);
-
       // Get entity state
       const replica = env.eReplicas.get(`${selectedEntityId}:${signerId}`);
       if (!replica) {

@@ -95,7 +95,6 @@ export class HandGesturePaymentController {
           handState.isGrabbing = true;
           handState.grabbedEntity = entity.id;
           handState.handPosition = indexPos.clone();
-          console.log(`[HandGesture] Grabbed: ${entity.id.slice(-4)}`);
 
           // Visual feedback: scale up entity
           entity.mesh.scale.multiplyScalar(1.2);
@@ -123,7 +122,6 @@ export class HandGesturePaymentController {
 
         if (targetEntity && grabbedEntityId && targetEntity.id !== grabbedEntityId) {
           // Trigger payment!
-          console.log(`[HandGesture] Payment: ${grabbedEntityId.slice(-4)} → ${targetEntity.id.slice(-4)}`);
           this.onPaymentTrigger(grabbedEntityId, targetEntity.id);
         }
       }

@@ -220,7 +220,6 @@
       };
 
       await enqueueEntityInputs(env, [collateralInput]);
-      console.log(`Collateral requested: ${activeXlnFunctions?.formatTokenAmount(selectedTokenId, collateralAmount)}`);
 
       collateralAmount = 0n;
     } catch (err) {

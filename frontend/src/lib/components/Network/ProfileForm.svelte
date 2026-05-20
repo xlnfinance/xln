@@ -72,8 +72,6 @@
         entityInputs: [entityInput],
       });
 
-      console.log('📡 Submitted profile update transaction:', profileUpdateTx);
-
       // Call the callback prop if provided
       onProfileAnnounced?.({
         entityId: currentEntityId,
@@ -105,7 +103,6 @@
 
   // Load existing profile for current entity
   async function loadExistingProfile(entityId: string) {
-    console.log("🚀 ~ loadExistingProfile ~ entityId:", entityId)
     if (!entityId) {
       existingProfile = null;
       clearForm();
@@ -129,11 +126,9 @@
       if (profile) {
         existingProfile = profile;
         populateFormFromProfile(profile);
-        console.log('📝 Loaded existing profile for entity:', entityId, profile);
       } else {
         existingProfile = null;
         clearForm();
-        console.log('📝 No existing profile found for entity:', entityId);
       }
     } catch (err) {
       console.error('❌ Failed to load existing profile:', err);

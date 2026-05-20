@@ -447,7 +447,6 @@
           viewMode = 'entity';
           selectedEntityId = existing.entityId;
           selectedSignerId = signerAddress;
-          console.log('[ensureSelfEntities] Auto-selected existing entity:', existing.entityId.slice(0, 10));
         }
         continue;
       }
@@ -475,7 +474,6 @@
           // Resolve canonical entity by signer after create to prevent duplicate/late-selection drift.
           const canonical = findReplicaBySigner(env, signerAddress, jurisdiction);
           const finalEntityId = canonical?.entityId || entityId;
-          console.log(`[ensureSelfEntities] ✅ Entity created: ${finalEntityId.slice(0, 10)} for signer ${signerAddress.slice(0, 10)}`);
           vaultOperations.setSignerEntity(signerEntry.index, finalEntityId);
           publishIsolatedEnv(env);
           selfEntityChecked.add(selfEntityKey);
@@ -484,7 +482,6 @@
           viewMode = 'entity';
           selectedEntityId = finalEntityId;
           selectedSignerId = signerAddress;
-          console.log('[ensureSelfEntities] Auto-selected entity:', finalEntityId.slice(0, 10));
         } else {
           console.error('[ensureSelfEntities] ❌ NULL entityId for signer:', signerAddress.slice(0, 10));
         }
@@ -615,8 +612,6 @@
       r.delete(runtimeId);
       return r;
     });
-
-    console.log('[UserModePanel] ✅ Runtime deleted:', runtimeId);
 
     // If last runtime, open creation screen
     if (isLast) {

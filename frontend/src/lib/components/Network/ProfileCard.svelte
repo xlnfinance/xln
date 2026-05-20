@@ -53,8 +53,6 @@
       isJoining = true;
       joinError = null;
 
-      console.log(`🚀 Joining hub: ${currentEntityId} → ${targetEntityId}`);
-
       const env = $xlnEnvironment;
 
       if (!env) {
@@ -78,8 +76,6 @@
           ],
         },
       ]);
-
-      console.log(`✅ Successfully sent join request to ${targetEntityId}`);
     } catch (err) {
       console.error('❌ Failed to join hub:', err);
       joinError = err instanceof Error ? err.message : 'Failed to join hub';

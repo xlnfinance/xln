@@ -304,7 +304,6 @@
 
       // Open account WITH credit extension (both in same frame)
       // Frame #1 will have: [add_delta, set_credit_limit] - order matters!
-      console.log('[HubDiscovery] Opening account + extending credit to', hub.entityId);
       await enqueueEntityInputs(currentEnv, [{
         entityId,
         signerId,

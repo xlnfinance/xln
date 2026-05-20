@@ -13,7 +13,6 @@ export const showVaultPanel = showVault;
 
 export const vaultUiOperations = {
   requestDeriveNewVault() {
-    console.log('[vaultUiOperations] requestDeriveNewVault CALLED - opening BrainVault');
     showVault.set(true);
     deriveRequest.update((n) => n + 1);
   },

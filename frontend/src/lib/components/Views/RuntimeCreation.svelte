@@ -257,7 +257,6 @@
       // Skip to complete phase
       phase = 'complete';
       showSuccessHeader = false; // Don't show success animation on reload
-      console.log('🔐 Vault restored from storage:', vault.id);
     }
   });
 
@@ -374,10 +373,8 @@
           devicePassphrase: devicePassphrase || undefined,
         });
         entityId = runtime.signers[0]?.entityId || entityId;
-        console.log('🔐 XLN runtime created from BrainVault:', runtimeId.slice(0, 10) + '...', `(${label})`);
       } else {
         await vaultOperations.selectRuntime(runtimeId);
-        console.log('🔐 Existing XLN runtime selected:', runtimeId.slice(0, 10) + '...');
       }
       createLoginType = 'manual';
       showSaveVaultModal = false;
@@ -637,10 +634,8 @@
           mnemonic12: undefined,
         });
         // entityId is set by createRuntime internally
-        console.log('🔐 Mnemonic runtime created:', runtimeId.slice(0, 10));
       } else {
         await vaultOperations.selectRuntime(runtimeId);
-        console.log('🔐 Mnemonic runtime selected:', runtimeId.slice(0, 10));
       }
 
       phase = 'complete';
@@ -672,7 +667,6 @@
 
     // Start with the exact worker count the UI is allowed to request.
     const cpuCores = navigator.hardwareConcurrency || 4;
-    console.log(`[BrainVault] Using ${initialWorkers} workers (${cpuCores} cores, cap ${usableWorkerCap}, requested ${effectiveTargetWorkerCount}, memory ${deviceMemoryGB}GB)`);
 
     try {
       let attempts = 0;
