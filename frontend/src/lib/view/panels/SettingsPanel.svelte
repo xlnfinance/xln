@@ -301,7 +301,6 @@
     <button class="reset-btn" on:click={resetToDefaults}>Reset All</button>
   </div>
 
-  <!-- Category Tabs -->
   <div class="category-tabs">
     <button
       class:active={activeCategory === 'scene'}
@@ -347,7 +346,6 @@
     </button>
   </div>
 
-  <!-- Settings Content -->
   <div class="settings-content">
     {#if activeCategory === 'scene'}
       <h4>Scene Configuration</h4>
@@ -487,7 +485,7 @@
       </div>
 
       <div class="setting-group">
-        <label>Quick View Presets:</label>
+        <div class="setting-label">Quick View Presets:</div>
         <div class="preset-buttons">
           <button class="preset-btn" on:click={() => { updateSetting('cameraPreset', 'top-down'); panelBridge.emit('camera:focus', { target: { x: 0, y: 150, z: 0 } }); }}>
             Top-Down
@@ -603,7 +601,7 @@
       </div>
 
       <div class="setting-group">
-        <label>Broadcast Style:</label>
+        <div class="setting-label">Broadcast Style:</div>
         <div class="radio-group">
           <label class="radio-label">
             <input
@@ -639,7 +637,7 @@
       <h4>Performance Settings</h4>
 
       <div class="setting-group">
-        <label>Renderer Mode:</label>
+        <div class="setting-label">Renderer Mode:</div>
         <div class="radio-group">
           <label class="radio-label">
             <input
@@ -726,7 +724,6 @@
         Real-time console output viewer (useful for VR browsers without DevTools)
       </p>
 
-      <!-- Embed ConsolePanel content here -->
       <div class="console-embed">
         <ConsolePanel
           {isolatedEnv}
@@ -741,7 +738,6 @@
         Export/import complete workspace configuration: panel sizes, tab order, camera position, and all settings.
       </p>
 
-      <!-- Action buttons -->
       <div class="layout-actions">
         <button class="action-btn primary" on:click={exportLayout}>
           📤 Export Current Layout
@@ -757,7 +753,6 @@
         </button>
       </div>
 
-      <!-- Status messages -->
       {#if layoutSuccess}
         <div class="status-message success">{layoutSuccess}</div>
       {/if}
@@ -765,7 +760,6 @@
         <div class="status-message error">{layoutError}</div>
       {/if}
 
-      <!-- Layout config textarea -->
       <div class="setting-group">
         <label>
           <span style="font-size: 13px; font-weight: 500;">Layout Configuration JSON</span>
@@ -781,7 +775,6 @@
         </label>
       </div>
 
-      <!-- What's included -->
       <div class="layout-info">
         <h5 style="font-size: 12px; color: #ccc; margin: 16px 0 8px;">Included in Layout:</h5>
         <ul style="font-size: 11px; color: #888; margin: 0; padding-left: 20px;">
@@ -823,7 +816,6 @@
     overflow: hidden;
   }
 
-  /* Layout Manager Styles */
   .layout-actions {
     display: flex;
     flex-wrap: wrap;
@@ -951,7 +943,7 @@
     margin-bottom: 20px;
   }
 
-  .setting-group label {
+  .setting-group label, .setting-label {
     display: flex;
     flex-direction: column;
     gap: 8px;
