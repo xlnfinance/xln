@@ -33,11 +33,9 @@
   } from '$lib/brainvault/workers';
   import {
     FACTOR_INFO,
-    FAQ_ITEMS,
     STRENGTH_COLORS,
     formatMemoryLabel,
     formatRuntimeDurationRounded,
-    formatUSD,
     generateBase58Secret,
   } from './runtime-creation-model';
 
@@ -231,9 +229,6 @@
   let creatingRuntime = false;
   let runtimeCreateError = '';
 
-  // FAQ state
-  let expandedFaq: number | null = null;
-
   // ============================================================================
   // LIFECYCLE - Load vault on mount
   // ============================================================================
@@ -292,12 +287,6 @@
       vaultDropdownOpen = false;
       signerDropdownOpen = false;
     }
-  }
-
-  // Portfolio total from WalletView
-  let portfolioTotal = 0;
-  function handlePortfolioUpdate(e: CustomEvent<{ total: number }>) {
-    portfolioTotal = e.detail.total;
   }
 
   let lastDeriveRequest = 0;
@@ -1341,7 +1330,6 @@
                       <span class="context-vault-name">{currentVault?.id || 'Vault'}</span>
                       <span class="context-signer-name">{currentSigner?.name || 'Signer 1'}</span>
                     </div>
-                    <span class="context-networth">{formatUSD(portfolioTotal)}</span>
                     <span class="dropdown-arrow">▼</span>
                   </button>
                   {#if vaultDropdownOpen}
@@ -2489,15 +2477,6 @@
     line-height: 1.5;
     color: rgba(255, 255, 255, 0.55);
     word-break: break-word;
-  }
-
-  .context-networth {
-    font-size: 13px;
-    font-weight: 600;
-    color: rgba(180, 140, 80, 0.9);
-    padding: 4px 10px;
-    background: rgba(180, 140, 80, 0.1);
-    border-radius: 12px;
   }
 
   .dropdown-arrow {
