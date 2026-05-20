@@ -176,11 +176,6 @@
     connectionColor: '#444444'
   });
   const settings = { theme: 'dark', portfolioScale: 5000, dollarsPerPx: 30000 };
-  const effectOperations = {
-    clear: () => {},
-    enqueue: (...args: unknown[]) => {},
-    process: (...args: unknown[]) => {}
-  };
   const createRenderer = async (mode: string, options: THREE.WebGLRendererParameters) => {
     if (mode === 'webgpu' && typeof navigator !== 'undefined' && navigator.gpu) {
       try {
@@ -220,10 +215,7 @@
     });
   }
 
-  // VR/Effects stubs (not used in /view isolated mode)
-  class RippleEffect {
-    constructor(...args: unknown[]) {}
-  }
+  // VR stubs (not used in /view isolated mode)
   class SpatialHash {
     cellSize: number;
     constructor(cellSize: number) {
@@ -335,11 +327,10 @@
   let entityManager: EntityManager;
 
   // Visual effects system
-let spatialHash: SpatialHash;
-let gestureManager: GestureManager;
-let vrHammer: VRHammer | null = null;
+  let spatialHash: SpatialHash;
+  let gestureManager: GestureManager;
+  let vrHammer: VRHammer | null = null;
   let entityMeshMap = new Map<string, THREE.Object3D | undefined>();
-  let lastJEventId: string | null = null;
 
   // J-Machines (one per jurisdiction) - broadcast visualization
   let jMachines: Map<string, THREE.Group> = new Map(); // jurisdiction name → J-Machine mesh
@@ -393,7 +384,6 @@ let vrHammer: VRHammer | null = null;
 
   // Animation frame and hover state
   let animationId: number | null;
-  let clock = new THREE.Clock();
   let activeBroadcastSpheres: Array<{ sphere: THREE.Mesh; animationId: number }> = [];
   let hoveredObject: any = null;
   // NOTE: hoveredEntity removed - reserve labels were removed
@@ -589,11 +579,6 @@ let vrHammer: VRHammer | null = null;
   // Auto-load and parse scenario when selected
   $: if (selectedScenarioFile) {
     loadScenarioSteps(selectedScenarioFile);
-  }
-
-  // ===== WATCH FOR J-EVENTS (auto-ripple on settlements) =====
-  $: if (env?.lastJEvent) {
-    handleJEventRipple(env.lastJEvent);
   }
 
   // ===== CREATE J-MACHINES FOR EACH JURISDICTION =====
@@ -1471,7 +1456,6 @@ let vrHammer: VRHammer | null = null;
     if (spatialHash) {
       spatialHash.clear();
     }
-    effectOperations.clear();
     entityMeshMap.clear();
 
     // Clean up active animations (prevent memory leak)
@@ -2240,54 +2224,10 @@ let vrHammer: VRHammer | null = null;
    */
   async function handleRebalanceGesture(entityId: string) {
     try {
-
       panelBridge.emit('rebalance:requested', { entityId });
-      if (spatialHash) {
-        const entity = entities.find(e => e.id === entityId);
-        if (entity) {
-          const ripple = new RippleEffect(
-            `rebalance-${Date.now()}`,
-            entity.position.clone(),
-            500n,
-            entityId,
-            spatialHash
-          );
-          effectOperations.enqueue(ripple);
-        }
-      }
     } catch (error) {
       console.error('❌ Rebalance gesture failed:', error);
     }
-  }
-
-  /**
-   * Handle j-event ripple effects (gas-weighted)
-   */
-  function handleJEventRipple(jEvent: any) {
-    if (!spatialHash || !jEvent) return;
-
-    // Deduplicate events
-    const eventId = `${jEvent.type}-${jEvent.blockNumber}-${jEvent.transactionHash}`;
-    if (lastJEventId === eventId) return;
-    lastJEventId = eventId;
-
-    const entity = entities.find(e => e.id === jEvent.entityId || jEvent.from === e.id);
-    if (!entity) return;
-
-    // Gas-weighted intensity
-    let gasUsed = 100n;
-    if (jEvent.type === 'TransferReserveToCollateral') gasUsed = 500n;
-    if (jEvent.type === 'ProcessBatch') gasUsed = BigInt(Math.min((jEvent.data?.batchSize || 1) * 100, 1000));
-    if (jEvent.type === 'Dispute') gasUsed = 200n;
-    if (jEvent.type === 'Settlement') gasUsed = 300n;
-
-    effectOperations.enqueue(new RippleEffect(
-      `jevent-${eventId}`,
-      entity.position.clone(),
-      gasUsed,
-      entity.id,
-      spatialHash
-    ));
   }
 
   /**
@@ -4198,12 +4138,6 @@ let vrHammer: VRHammer | null = null;
     }
 
     animateCallCount++;
-
-    // ===== PROCESS VISUAL EFFECTS QUEUE =====
-    if (scene && spatialHash && entityMeshMap) {
-      const deltaTime = clock.getDelta() * 1000; // to milliseconds
-      effectOperations.process(scene, entityMeshMap, deltaTime, 10);
-    }
 
     // ===== ANIMATE ENTITY INPUT STRIKES =====
     animateEntityInputStrikes();
