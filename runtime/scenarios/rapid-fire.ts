@@ -20,12 +20,9 @@
 import type { Env, EntityInput } from '../types';
 import { getPerfMs } from '../utils';
 import { ensureJAdapter, getJAdapterMode, createJReplica } from './boot';
-import { getOffdelta, converge, assert, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
-
-type ApplyRuntimeInputFn = typeof import('../runtime').applyRuntimeInput;
+import { commitRuntimeInput, getOffdelta, converge, assert, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed } from './helpers';
 
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
-let _applyRuntimeInput: ApplyRuntimeInputFn | null = null;
 
 const getProcess = async () => {
   if (!_process) {
@@ -33,14 +30,6 @@ const getProcess = async () => {
     _process = runtime.process;
   }
   return _process;
-};
-
-const getApplyRuntimeInput = async (): Promise<ApplyRuntimeInputFn> => {
-  if (!_applyRuntimeInput) {
-    const runtime = await import('../runtime');
-    _applyRuntimeInput = runtime.applyRuntimeInput;
-  }
-  return _applyRuntimeInput;
 };
 
 const USDC = 1;
@@ -58,7 +47,6 @@ export async function rapidFire(env: Env): Promise<void> {
   requireRuntimeSeed(env, 'Rapid Fire');
   ensureSignerKeysFromSeed(env, ['1', '2', '3'], 'Rapid Fire');
   const process = await getProcess();
-  const applyRuntimeInput = await getApplyRuntimeInput();
 
   if (env.scenarioMode && env.height === 0) {
     env.timestamp = 1;
@@ -91,7 +79,7 @@ export async function rapidFire(env: Env): Promise<void> {
   const bob = { name: 'Bob', id: '0x' + '3'.padStart(64, '0'), signer: '3' };
   const entities = [alice, hub, bob];
 
-  await applyRuntimeInput(env, {
+  await commitRuntimeInput(env, {
     runtimeTxs: entities.map(e => ({
       type: 'importReplica' as const,
       entityId: e.id,
