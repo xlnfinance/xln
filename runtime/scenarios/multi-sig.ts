@@ -17,7 +17,7 @@
 
 import type { Env } from '../types';
 import { ensureJAdapter, getJAdapterMode, createJReplica } from './boot';
-import { findReplica, assert, processWithOffline, convergeWithOffline, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, syncChain } from './helpers';
+import { findReplica, assert, processWithOffline, convergeWithOffline, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, syncChain, commitRuntimeInput } from './helpers';
 
 const USDC = 1;
 const ONE = 10n ** 18n;
@@ -35,8 +35,6 @@ export async function multiSig(env: Env): Promise<void> {
   clearSignerKeys();
   ensureSignerKeysFromSeed(env, ['1', '2', '3', '4', '5', '6', '7'], 'Multi-Sig');
 
-  const { applyRuntimeInput } = await import('../runtime');
-
   if (env.scenarioMode && env.height === 0) {
     env.timestamp = 1;
   }
@@ -52,10 +50,10 @@ export async function multiSig(env: Env): Promise<void> {
   const jMode = getJAdapterMode();
   const jadapter = await ensureJAdapter(env, jMode);
   const jReplica = createJReplica(env, 'MultiSig', jadapter.addresses.depository, { x: 0, y: 600, z: 0 }); // Match ahb.ts positioning
-  (jReplica as any).jadapter = jadapter;
-  (jReplica as any).depositoryAddress = jadapter.addresses.depository;
-  (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
-  (jReplica as any).contracts = {
+  jReplica.jadapter = jadapter;
+  jReplica.depositoryAddress = jadapter.addresses.depository;
+  jReplica.entityProviderAddress = jadapter.addresses.entityProvider;
+  jReplica.contracts = {
     depository: jadapter.addresses.depository,
     entityProvider: jadapter.addresses.entityProvider,
     account: jadapter.addresses.account,
@@ -79,7 +77,7 @@ export async function multiSig(env: Env): Promise<void> {
   };
 
   // CRITICAL: Multi-signer requires separate replica for EACH validator
-  await applyRuntimeInput(env, {
+  await commitRuntimeInput(env, {
     runtimeTxs: [
       // Alice validator 1 (proposer)
       {
@@ -158,8 +156,13 @@ export async function multiSig(env: Env): Promise<void> {
     const replica = env.eReplicas.get(key);
     const height = replica?.state.height || 0;
     const hasPending = Boolean(replica?.proposal || replica?.lockedFrame || (replica?.mempool.length || 0) > 0);
+    const pendingDetails = [
+      replica?.proposal ? `proposal=${replica.proposal.hash.slice(0, 10)}` : null,
+      replica?.lockedFrame ? `locked=${replica.lockedFrame.hash.slice(0, 10)}` : null,
+      replica?.mempool.length ? `mempool=[${replica.mempool.map(tx => tx.type).join(',')}]` : null,
+    ].filter(Boolean).join(' ');
     setupHeights.push(height);
-    console.log(`  ${validator}: height=${height}, pending=${hasPending ? 'yes' : 'no'}`);
+    console.log(`  ${validator}: height=${height}, pending=${hasPending ? pendingDetails || 'yes' : 'no'}`);
     assert(height > 0, `Validator ${validator} committed the initial multi-sig entity tx`);
     assert(!hasPending, `Validator ${validator} is idle after the initial multi-sig commit`);
   }
@@ -172,7 +175,7 @@ export async function multiSig(env: Env): Promise<void> {
   console.log('═══════════════════════════════════════════════════════════════\\n');
 
   console.log('🔒 Creating isolated 2-of-3 entity for negative test...');
-  const testEntity = { id: '0x' + 'F'.padStart(64, '0'), validators: ['5', '6', '7'] };
+  const testEntity = { id: ('0x' + 'F'.padStart(64, '0')).toLowerCase(), validators: ['5', '6', '7'] };
   const testConfig = {
     mode: 'proposer-based' as const,
     threshold: 2n,
@@ -181,7 +184,7 @@ export async function multiSig(env: Env): Promise<void> {
   };
 
   // Only create proposer replica (validators 6, 7 don't exist in network)
-  await applyRuntimeInput(env, {
+  await commitRuntimeInput(env, {
     runtimeTxs: [
       { type: 'importReplica', entityId: testEntity.id, signerId: '5', data: { isProposer: true, position: { x: 200, y: 0, z: 0 }, config: testConfig }},
     ],

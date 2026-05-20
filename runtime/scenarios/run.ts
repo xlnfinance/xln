@@ -62,6 +62,7 @@ const SMOKE_PARALLEL_SET = [
   'processbatch',
   'rebalance',
   'dispute-lifecycle',
+  'multi-sig',
 ];
 
 async function reserveFreeLocalPort(): Promise<number> {
