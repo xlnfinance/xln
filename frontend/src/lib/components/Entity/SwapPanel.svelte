@@ -1325,12 +1325,6 @@
       : formatPriceTicks(selectedOrderLevel.priceTicks);
   }
 
-  function handleOrderPercentInput(event: Event) {
-    const target = event.currentTarget as HTMLInputElement | null;
-    const value = Number.parseInt(String(target?.value || ''), 10);
-    applyOrderPercent(Number.isFinite(value) ? value : 0);
-  }
-
   function handleOrderbookSnapshot(event: CustomEvent<OrderbookSnapshot>) {
     orderbookSnapshot = event.detail;
   }
@@ -2338,13 +2332,6 @@
     selectedOrderLevel = null;
   }
 
-  function stepAmount(direction: 1 | -1): void {
-    const current = parseDecimalAmountToBigInt(orderAmountInput || '0', giveTokenDecimals);
-    const step = giveTokenDecimals >= 6 ? 10n ** BigInt(Math.max(0, giveTokenDecimals - 4)) : 1n;
-    const next = current + BigInt(direction) * step;
-    if (next <= 0n && direction < 0) return;
-    orderAmountInput = formatAmountForInput(next > 0n ? next : 0n, giveToken);
-  }
 </script>
 
 <div class="swap-panel">
