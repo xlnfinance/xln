@@ -10,7 +10,6 @@
 
   export let onUnlock: () => void;
 
-  // Reactive content based on locale (all 10 languages)
   $: c = content[$locale in content ? $locale as ContentLang : 'en'] as Content;
 
   let inviteCode = '';
@@ -18,8 +17,6 @@
   let expandedCard: number | null = null;
   let copiedCard: number | null = null;
 
-  // Collapsible section state (collapsed by default for lighter UX)
-  let broadcastCollapsed = true;
   let comparativeCollapsed = true;
   let promptsCollapsed = true;
 
@@ -29,14 +26,7 @@
   let submissionStatus = '';
   let superpromptText = '';
   let showInvite = true;
-  let darkMode = true; // Default to dark mode (black background)
-  let timelineVersion: 1 | 2 | 3 = 1; // Timeline visualization version
-
-  const SUPERPROMPT = {
-    persona: "ULTIMATE COMPARATIVE ANALYSIS",
-    task: "Compare xln against all major payment solutions (CEX, Lightning, Raiden, Plasma, Optimistic/ZK Rollups, Sharding, Big Blocks) across 6 dimensions. Output machine-parseable table with rankings.",
-    metrics: ["Innovation", "Scalability", "Security", "Decentralization", "UX", "Capital Efficiency"]
-  };
+  let darkMode = true;
 
   const PROMPTS = [
     {
@@ -116,7 +106,6 @@
       await navigator.clipboard.writeText(prompt);
       copiedCard = index;
 
-      // Trigger animation
       const btn = event?.target as HTMLElement;
       if (btn) {
         btn.style.animation = 'pulse 0.3s ease';
@@ -131,9 +120,8 @@
     const allPrompts = PROMPTS.map((p, i) => `# Prompt ${i + 1}: ${p.persona}\n\n${formatPrompt(p)}`).join('\n\n---\n\n');
     if (browser) {
       await navigator.clipboard.writeText(allPrompts);
-      copiedCard = -1; // Special value for "all"
+      copiedCard = -1;
 
-      // Trigger animation
       const btn = event?.target as HTMLElement;
       if (btn) {
         btn.style.animation = 'pulse 0.3s ease';
@@ -152,11 +140,10 @@
     if (browser) {
       const response = await fetch('/superprompt.txt');
       const text = await response.text();
-      superpromptText = text; // Store for preview
+      superpromptText = text;
       await navigator.clipboard.writeText(text);
-      copiedCard = -2; // Special value for superprompt
+      copiedCard = -2;
 
-      // Trigger animation
       const btn = event?.target as HTMLElement;
       if (btn) {
         btn.style.animation = 'pulse 0.3s ease';
@@ -167,7 +154,6 @@
     }
   }
 
-  // Load superprompt on mount for preview
   onMount(async () => {
     if (browser) {
       try {
@@ -177,10 +163,9 @@
         console.error('Failed to load superprompt:', error);
       }
 
-      // Check for #MML hash (fallback if +page.svelte didn't catch it)
       if (window.location.hash === '#MML') {
         localStorage.setItem('open', 'true');
-        window.location.hash = ''; // Remove hash after processing
+        window.location.hash = '';
         onUnlock();
       }
     }
@@ -740,10 +725,10 @@
           <div class="prompt-grid">
             {#each PROMPTS as prompt, i}
               <div class="prompt-card" class:expanded={expandedCard === i}>
-                <div class="card-header" on:click={() => toggleCard(i)}>
-                  <div class="persona-name">{prompt.persona}</div>
-                  <div class="expand-icon">{expandedCard === i ? '−' : '+'}</div>
-                </div>
+                <button type="button" class="card-header" on:click={() => toggleCard(i)}>
+                  <span class="persona-name">{prompt.persona}</span>
+                  <span class="expand-icon">{expandedCard === i ? '−' : '+'}</span>
+                </button>
                 {#if expandedCard === i}
                   <div class="card-content">
                     <pre class="prompt-text">{formatPrompt(prompt)}</pre>
@@ -2734,9 +2719,11 @@
   }
 
   .card-header {
+    all: unset;
     display: flex;
     justify-content: space-between;
     align-items: center;
+    width: 100%;
     padding: 1rem 1.25rem;
     cursor: pointer;
     user-select: none;
