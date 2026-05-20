@@ -278,7 +278,7 @@
               <div class="evo-item evo-item-fcuan" title="Full-Credit Unprovable Account Networks: Banking since ancient times">
                 <div class="evo-label-top">~5000 BC</div>
                 <div class="bike-container bike-container-shake">
-                  <img src="/bikes/fcuan.svg" class="evo-bike evo-bike-wobble" />
+                  <img src="/bikes/fcuan.svg" class="evo-bike evo-bike-wobble" alt="" />
                   <span class="crisis-badge">CRISIS</span>
                   <span class="dust-particle dust-1"></span>
                   <span class="dust-particle dust-2"></span>
@@ -296,7 +296,7 @@
               <div class="evo-item evo-item-branch" title="Fully-Reserved Provable Account Protocols: Lightning/PCNs - technically sound but lacks credit">
                 <div class="evo-label-top">2015-2025</div>
                 <div class="bike-container">
-                  <img src="/bikes/frpap.svg" class="evo-bike evo-bike-small evo-bike-locked" />
+                  <img src="/bikes/frpap.svg" class="evo-bike evo-bike-small evo-bike-locked" alt="" />
                   <div class="wall-stack">
                     <div class="wall-brick">Inbound</div>
                     <div class="wall-brick">Liquidity</div>
@@ -345,7 +345,7 @@
               <div class="evo-item evo-item-finale" title="Reserve-Credit Provable Account Network: The best of both worlds - provable AND credit-enabled">
                 <div class="evo-label-top">2026 →</div>
                 <div class="rcpan-container">
-                  <img src="/bikes/rcpan.svg" class="evo-bike evo-bike-finale evo-bike-flying" />
+                  <img src="/bikes/rcpan.svg" class="evo-bike evo-bike-finale evo-bike-flying" alt="" />
                   <span class="trail-particle trail-1"></span>
                   <span class="trail-particle trail-2"></span>
                   <span class="trail-particle trail-3"></span>
@@ -701,7 +701,7 @@
                   placeholder="Paste the full model response here (must include the table)"
                   rows="12"
                   class="form-textarea"
-                />
+                ></textarea>
               </div>
               {#if submissionStatus}
                 <div class="submission-status">{submissionStatus}</div>
@@ -1387,10 +1387,6 @@
     font-weight: bold;
   }
 
-  .section li strong {
-    color: rgba(255, 255, 255, 0.9);
-  }
-
   .technical-context {
     margin-top: 2rem;
     padding-top: 2rem;
@@ -1904,15 +1900,6 @@
     border-bottom-color: #00d1ff;
   }
 
-  .plot-twist code {
-    background: rgba(0, 0, 0, 0.4);
-    padding: 0.2em 0.5em;
-    border-radius: 3px;
-    font-family: 'JetBrains Mono', monospace;
-    color: #4fd18b;
-    font-size: 0.95em;
-  }
-
   .roadmap-box {
     margin: 1.5rem 0 2rem;
     padding: 1.5rem;
@@ -1930,10 +1917,6 @@
 
   .roadmap-text:last-child {
     margin-bottom: 0;
-  }
-
-  .roadmap-text strong {
-    color: #4fd18b;
   }
 
   /* Simple Linear Evolution Timeline - FULL WIDTH */
