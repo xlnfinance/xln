@@ -5,7 +5,7 @@
 
 import { applyEntityTx } from './entity-tx';
 import { isLeftEntity } from './entity-id-utils';
-import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env, HankoString, HashType, JInput, JurisdictionEvent, JurisdictionEventData, RoutedEntityInput } from './types';
+import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env, HankoString, HashType, JInput, JurisdictionEvent, JurisdictionEventData, ProposedEntityFrame, RoutedEntityInput } from './types';
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, formatSignerDisplay, log } from './utils';
 import { safeStringify } from './serialization-utils';
 import { createStructuredLogger, logError, shortHash, shortId, shortOrder, shouldLogFullPayloads } from './logger';
@@ -48,6 +48,7 @@ import {
   queueCrossJurisdictionBookOwnerWake,
   type OrderbookOfferForMatch,
 } from './entity-consensus/cross-j-orderbook';
+import { normalizeSignatureMap, signatureMapSize } from './consensus-signatures';
 
 const compareNumericKey = (
   left: string | number,
@@ -61,6 +62,12 @@ const compareNumericKey = (
   return compareCanonicalText(String(left), String(right));
 };
 const entityLog = createStructuredLogger('entity');
+
+const normalizeProposedFrameCollectedSigs = (frame?: ProposedEntityFrame): void => {
+  if (!frame?.collectedSigs) return;
+  const normalized = normalizeSignatureMap(frame.collectedSigs);
+  if (normalized) frame.collectedSigs = normalized;
+};
 
 function queueUniqueAccountMempoolTx(
   account: EntityState['accounts'] extends Map<string, infer T> ? T : never,
@@ -419,6 +426,7 @@ export const applyEntityInput = async (
   // IMMUTABILITY: Clone replica at function start (fintech-safe, hacker-proof)
   // Prevents state mutations from escaping function scope
   const workingReplica = cloneEntityReplica(entityReplica);
+  normalizeProposedFrameCollectedSigs(entityInput.proposedFrame);
 
   // Debug: Log every input being processed with deterministic timestamp
   const entityDisplay = formatEntityDisplay(entityInput.entityId);
@@ -2001,6 +2009,8 @@ export const mergeEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInpu
   const merged = new Map<string, RoutedEntityInput>();
   const conflicts: RoutedEntityInput[] = [];
   let duplicateCount = 0;
+  const isCommitNotificationFrame = (input: RoutedEntityInput): boolean =>
+    signatureMapSize(input.proposedFrame?.collectedSigs) > 0;
 
   for (const input of inputs) {
     const key = `${input.entityId}:${input.signerId || ''}`;
@@ -2052,8 +2062,16 @@ export const mergeEntityInputs = (inputs: RoutedEntityInput[]): RoutedEntityInpu
         if (HEAVY_LOGS) console.log(`🔍 MERGE-RESULT: Total ${existingPrecommits.size} hashPrecommits after merge`);
       }
 
-      // Keep the latest frame (simplified)
-      if (input.proposedFrame) existing.proposedFrame = input.proposedFrame;
+      // Same-hash proposal and commit notification can meet in one runtime
+      // tick. The commit notification carries quorum collectedSigs and is
+      // strictly more informative; never let an older plain proposal erase it.
+      if (input.proposedFrame) {
+        const existingIsCommit = isCommitNotificationFrame(existing);
+        const incomingIsCommit = isCommitNotificationFrame(input);
+        if (!existing.proposedFrame || incomingIsCommit || !existingIsCommit) {
+          existing.proposedFrame = input.proposedFrame;
+        }
+      }
 
       console.log(
         `    🔄 Merging inputs for ${key}: txs=${input.entityTxs?.length || 0}, hashPrecommits=${input.hashPrecommits?.size || 0}, frame=${!!input.proposedFrame}`,

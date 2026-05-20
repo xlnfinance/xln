@@ -159,6 +159,7 @@ import {
   extractCrossJurisdictionRouteFromTx,
   isCrossJurisdictionEntityInputRemoteHopAllowed,
 } from './cross-jurisdiction-boundary';
+import { signatureMapSize } from './consensus-signatures';
 import { normalizeEntitySwapTradingPairs } from './runtime-swap-pairs';
 import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
 import { calculateSolvency, verifySolvency } from './solvency';
@@ -1236,6 +1237,30 @@ const buildRouteOutputKey = (output: RoutedEntityInput): string => {
   return `${output.entityId}:${output.signerId || ''}:${txPart}`;
 };
 
+const carriesEntityCommitNotification = (output: RoutedEntityInput): boolean =>
+  signatureMapSize(output.proposedFrame?.collectedSigs) > 0;
+
+const mergeRoutedEntityOutput = <T extends RoutedEntityInput>(existing: T, incoming: T): T => {
+  if (incoming.entityTxs?.length) {
+    existing.entityTxs = [...(existing.entityTxs || []), ...incoming.entityTxs];
+  }
+  if (incoming.hashPrecommits) {
+    const mergedPrecommits = existing.hashPrecommits || new Map<string, string[]>();
+    incoming.hashPrecommits.forEach((sigs, signerId) => {
+      mergedPrecommits.set(signerId, sigs);
+    });
+    existing.hashPrecommits = mergedPrecommits;
+  }
+  if (incoming.proposedFrame) {
+    const existingIsCommit = carriesEntityCommitNotification(existing);
+    const incomingIsCommit = carriesEntityCommitNotification(incoming);
+    if (!existing.proposedFrame || incomingIsCommit || !existingIsCommit) {
+      existing.proposedFrame = incoming.proposedFrame;
+    }
+  }
+  return existing;
+};
+
 const hasRuntimeWork = (env: Env): boolean => {
   const mempool = ensureRuntimeMempool(env);
   if (mempool.runtimeTxs.length > 0 || mempool.entityInputs.length > 0) return true;
@@ -2214,7 +2239,13 @@ const planEntityOutputs = (
   const remoteOutputs: PlannedRemoteOutput[] = [];
   const deduped = new Map<string, RoutedEntityInput>();
   for (const output of outputs) {
-    deduped.set(outputDeferKey(output), output);
+    const key = outputDeferKey(output);
+    const existing = deduped.get(key);
+    if (existing) {
+      mergeRoutedEntityOutput(existing, output);
+    } else {
+      deduped.set(key, { ...output });
+    }
   }
   const allOutputs = [...deduped.values()];
   const deferredOutputs: RoutedEntityInput[] = [];
@@ -2270,21 +2301,7 @@ const batchOutputsByTarget = (outputs: DeliverableEntityInput[]): DeliverableEnt
     const existing = batched.get(key);
 
     if (existing) {
-      // Merge entityTxs
-      if (output.entityTxs?.length) {
-        existing.entityTxs = [...(existing.entityTxs || []), ...output.entityTxs];
-      }
-      // Keep latest proposedFrame (or first if only one has it)
-      if (output.proposedFrame) {
-        existing.proposedFrame = output.proposedFrame;
-      }
-      // Merge hashPrecommits
-      if (output.hashPrecommits) {
-        existing.hashPrecommits = existing.hashPrecommits || new Map();
-        output.hashPrecommits.forEach((sigs, signerId) => {
-          existing.hashPrecommits!.set(signerId, sigs);
-        });
-      }
+      mergeRoutedEntityOutput(existing, output);
       console.log(`📦 BATCH: Merged output into ${key} (now ${existing.entityTxs?.length || 0} txs)`);
     } else {
       batched.set(key, validateDeliverableEntityInput({ ...output }));
@@ -3201,14 +3218,23 @@ const applyRuntimeInput = async (
         // IMMUTABILITY: Update replica with new state from applyEntityInput
         // CRITICAL: Preserve proposal/lockedFrame from workingReplica (multi-signer consensus)
         // Only cleared when threshold reached and frame committed (handled in entity-consensus.ts)
+        const {
+          proposal: _oldProposal,
+          lockedFrame: _oldLockedFrame,
+          hankoWitness: _oldHankoWitness,
+          validatorComputedState: _oldValidatorComputedState,
+          ...replicaBase
+        } = entityReplica;
         const nextReplica: EntityReplica = {
-          ...entityReplica,
+          ...replicaBase,
           state: newState,
           mempool: workingReplica.mempool, // Preserve mempool state
         };
+        // Consensus artifacts are part of replica state. Rebuild them from the
+        // working replica instead of spreading stale optional fields from the
+        // previous replica; committed frames must be able to clear old locks.
         if (workingReplica.proposal !== undefined) nextReplica.proposal = workingReplica.proposal;
         if (workingReplica.lockedFrame !== undefined) nextReplica.lockedFrame = workingReplica.lockedFrame;
-        // Preserve multi-signer consensus artifacts across ticks.
         if (workingReplica.hankoWitness !== undefined) nextReplica.hankoWitness = workingReplica.hankoWitness;
         if (workingReplica.validatorComputedState !== undefined) {
           nextReplica.validatorComputedState = workingReplica.validatorComputedState;

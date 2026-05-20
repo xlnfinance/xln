@@ -28,6 +28,9 @@ export const getApplyRuntimeInput = async () => {
   return _applyRuntimeInput;
 };
 
+// Preferred scenario ingress for anything that should become a durable
+// runtime frame. Direct applyRuntimeInput is only for replay/debug code that is
+// intentionally bypassing WAL commit semantics.
 export const commitRuntimeInput = async (env: Env, runtimeInput: RuntimeInput): Promise<Env> => {
   const runtime = await import('../runtime');
   runtime.enqueueRuntimeInput(env, runtimeInput);

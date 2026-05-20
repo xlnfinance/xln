@@ -3,7 +3,7 @@
  * Single entry point for all scenarios — configurable backend (browservm | rpc)
  */
 
-import type { Env, JurisdictionConfig } from '../types';
+import type { Env, JReplica, JTx, JurisdictionConfig } from '../types';
 import type { JAdapter, JAdapterMode } from '../jadapter/types';
 import { ethers } from 'ethers';
 import { getCachedSignerPrivateKey } from '../account-crypto';
@@ -218,7 +218,7 @@ export async function ensureJAdapter(
   if (actualMode === 'browservm' && env) {
     const browserVM = jadapter.getBrowserVM();
     if (browserVM) {
-      (env as any).browserVM = browserVM;
+      env.browserVM = browserVM;
       setBrowserVMJurisdiction(env, jadapter.addresses.depository, browserVM);
     }
   }
@@ -257,14 +257,14 @@ export async function bootScenario(config: ScenarioConfig): Promise<ScenarioBoot
   const position = config.position ?? { x: 0, y: 600, z: 0 };
   const jReplica = createJReplica(env, jReplicaName, jadapter.addresses.depository, position);
   if (defaultDisputeDelayBlocks) {
-    (jReplica as any).defaultDisputeDelayBlocks = defaultDisputeDelayBlocks;
+    jReplica.defaultDisputeDelayBlocks = defaultDisputeDelayBlocks;
   }
 
   // 5. Attach jadapter to jReplica (all 4 contract addresses)
-  (jReplica as any).jadapter = jadapter;
-  (jReplica as any).depositoryAddress = jadapter.addresses.depository;
-  (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
-  (jReplica as any).contracts = {
+  jReplica.jadapter = jadapter;
+  jReplica.depositoryAddress = jadapter.addresses.depository;
+  jReplica.entityProviderAddress = jadapter.addresses.entityProvider;
+  jReplica.contracts = {
     depository: jadapter.addresses.depository,
     entityProvider: jadapter.addresses.entityProvider,
     account: jadapter.addresses.account,
@@ -415,11 +415,11 @@ export async function fundEntities(
  */
 export function getScenarioJAdapter(env: Env): JAdapter {
   const jReplica = env.jReplicas?.get(env.activeJurisdiction || '');
-  if (jReplica && (jReplica as any).jadapter) {
-    return (jReplica as any).jadapter;
+  if (jReplica?.jadapter) {
+    return jReplica.jadapter;
   }
   for (const jr of env.jReplicas?.values() || []) {
-    if ((jr as any).jadapter) return (jr as any).jadapter;
+    if (jr.jadapter) return jr.jadapter;
   }
   throw new Error('No JAdapter found on env — call bootScenario() first');
 }
@@ -436,7 +436,7 @@ export function createJReplica(
   name: string,
   depositoryAddress: string,
   position: { x: number; y: number; z: number } = { x: 0, y: 600, z: 0 }
-) {
+): JReplica {
   if (!env.jReplicas) {
     env.jReplicas = new Map();
   }
@@ -445,7 +445,7 @@ export function createJReplica(
     name,
     blockNumber: 0n,
     stateRoot: new Uint8Array(32),
-    mempool: [] as any[],
+    mempool: [] as JTx[],
     blockDelayMs: 300,
     lastBlockTimestamp: env.timestamp,
     position,

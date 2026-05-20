@@ -98,11 +98,19 @@ export const computeCanonicalEntityHash = (replica: EntityReplica): CanonicalFra
   };
 };
 
-export const computeCanonicalEntityHashesFromEnv = (env: Env): CanonicalFrameEntityHash[] =>
-  Array.from(env.eReplicas.values())
-    .filter((replica): replica is EntityReplica => Boolean(replica?.state))
-    .map((replica) => computeCanonicalEntityHash(replica))
+export const computeCanonicalEntityHashesFromEnv = (env: Env): CanonicalFrameEntityHash[] => {
+  const hashesByEntity = new Map<string, CanonicalFrameEntityHash>();
+  for (const replica of env.eReplicas.values()) {
+    if (!replica?.state) continue;
+    const hash = computeCanonicalEntityHash(replica);
+    // Storage materializes one entity document per entityId today. Mirror that
+    // exact last-writer model so the replay oracle checks what restore can
+    // actually reconstruct, not transient per-validator replica metadata.
+    hashesByEntity.set(hash.entityId, hash);
+  }
+  return Array.from(hashesByEntity.values())
     .sort((left, right) => compareStableText(left.entityId, right.entityId));
+};
 
 export const computeCanonicalRuntimeStateHash = (
   height: number,
