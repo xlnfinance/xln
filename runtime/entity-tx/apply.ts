@@ -52,6 +52,11 @@ import { decodeHashLadderBinary, verifyHashLadderBinary } from '../hashladder';
 import { handleR2C } from './handlers/r2c';
 import { handleE2R } from './handlers/e2r';
 import { handleR2R } from './handlers/r2r';
+import {
+  handleCancelSwapRequest,
+  handlePlaceSwapOfferRequest,
+  handleResolveSwapRequest,
+} from './handlers/swap-requests';
 import { handleJBroadcast } from './handlers/j-broadcast';
 import { handleJRebroadcast } from './handlers/j-rebroadcast';
 import { handleJAbortSentBatch } from './handlers/j-abort-sent-batch';
@@ -2205,156 +2210,15 @@ export const applyEntityTx = async (
 	    }
 
 	    if (entityTx.type === 'placeSwapOffer') {
-	      console.log(
-        `📊 PLACE-SWAP-OFFER: ${entityState.entityId.slice(-4)} placing offer with ${entityTx.data.counterpartyEntityId.slice(-4)}`,
-      );
-
-      const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
-      const mempoolOps: MempoolOp[] = [];
-      const { counterpartyEntityId, offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks, timeInForce, minFillRatio, crossJurisdiction } =
-        entityTx.data;
-
-      // Use canonical key for account lookup
-      // Account keyed by counterparty ID
-      const accountMachine = newState.accounts.get(counterpartyEntityId);
-      if (!accountMachine) {
-        console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for swap offer`);
-        return { newState: entityState, outputs: [] };
-      }
-      const publicCrossJurisdiction = crossJurisdiction
-        ? cloneCrossJurisdictionRoute(withCanonicalCrossJurisdictionRouteHash(crossJurisdiction))
-        : undefined;
-      if (publicCrossJurisdiction) {
-        const route = publicCrossJurisdiction;
-        const existing = newState.crossJurisdictionSwaps?.get(route.orderId);
-        const transitionError = validateCrossJurisdictionRouteTransition(existing, route);
-        if (transitionError || isCrossJurisdictionRouteExpired(route, deterministicEntityTimestamp(newState, env))) {
-          addMessage(newState, `❌ Cross-j offer ${route.orderId} blocked: ${transitionError || 'expired'}`);
-          return { newState, outputs: [] };
-        }
-        newState.crossJurisdictionSwaps ||= new Map();
-        newState.crossJurisdictionSwaps.set(route.orderId, mergeCrossJurisdictionRoute(existing, route));
-      }
-
-      const accountTx: AccountTx = {
-        type: 'swap_offer',
-        data: {
-          offerId,
-          giveTokenId,
-          giveAmount,
-          wantTokenId,
-          wantAmount,
-          ...(priceTicks !== undefined ? { priceTicks } : {}),
-          ...(timeInForce !== undefined ? { timeInForce } : {}),
-          minFillRatio,
-          ...(publicCrossJurisdiction ? { crossJurisdiction: publicCrossJurisdiction } : {}),
-        },
-      };
-
-      // Pure: return mempoolOp instead of mutating directly
-      mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
-      console.log(`📊 Added swap_offer to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
-
-      const firstValidator = entityState.config.validators[0];
-      if (firstValidator) {
-        outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
-      }
-
-      return { newState, outputs, mempoolOps };
-    }
+	      return handlePlaceSwapOfferRequest(env, entityState, entityTx);
+	    }
 
     if (entityTx.type === 'resolveSwap') {
-      console.log(
-        `💱 RESOLVE-SWAP: ${entityState.entityId.slice(-4)} resolving offer with ${entityTx.data.counterpartyEntityId.slice(-4)}`,
-      );
-
-      const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
-      const mempoolOps: MempoolOp[] = [];
-      const {
-        counterpartyEntityId,
-        offerId,
-        fillRatio,
-        cancelRemainder,
-        comment,
-        feeTokenId,
-        feeAmount,
-        executionGiveAmount,
-        executionWantAmount,
-      } = entityTx.data;
-
-      // Use canonical key for account lookup
-      // Account keyed by counterparty ID
-      const accountMachine = newState.accounts.get(counterpartyEntityId);
-      if (!accountMachine) {
-        console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for swap resolve`);
-        return { newState: entityState, outputs: [] };
-      }
-      if (accountMachine.swapOffers.get(offerId)?.crossJurisdiction) {
-        addMessage(newState, `❌ Cross-j offer ${offerId} cannot be resolved through plain swap_resolve`);
-        return { newState, outputs, mempoolOps };
-      }
-
-      const accountTx: AccountTx = {
-        type: 'swap_resolve',
-        data: {
-          offerId,
-          fillRatio,
-          cancelRemainder,
-          ...(comment !== undefined ? { comment } : {}),
-          ...(feeTokenId !== undefined ? { feeTokenId } : {}),
-          ...(feeAmount !== undefined ? { feeAmount } : {}),
-          ...(executionGiveAmount !== undefined ? { executionGiveAmount } : {}),
-          ...(executionWantAmount !== undefined ? { executionWantAmount } : {}),
-        },
-      };
-
-      // Pure: return mempoolOp instead of mutating directly (keyed by counterparty)
-      mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
-      console.log(`💱 Added swap_resolve to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
-
-      const firstValidator = entityState.config.validators[0];
-      if (firstValidator) {
-        outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
-      }
-
-      return { newState, outputs, mempoolOps };
+      return handleResolveSwapRequest(entityState, entityTx);
     }
 
     if (entityTx.type === 'cancelSwapOffer' || entityTx.type === 'cancelSwap' || entityTx.type === 'proposeCancelSwap') {
-      console.log(
-        `📊 CANCEL-SWAP-REQUEST: ${entityState.entityId.slice(-4)} requesting cancel with ${entityTx.data.counterpartyEntityId.slice(-4)}`,
-      );
-
-      const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
-      const mempoolOps: MempoolOp[] = [];
-      const { counterpartyEntityId, offerId } = entityTx.data;
-
-      // Use canonical key for account lookup
-      // Account keyed by counterparty ID
-      const accountMachine = newState.accounts.get(counterpartyEntityId);
-      if (!accountMachine) {
-        console.error(`❌ No account with ${counterpartyEntityId.slice(-4)} for swap cancel`);
-        return { newState: entityState, outputs: [] };
-      }
-
-      const accountTx: AccountTx = {
-        type: 'swap_cancel_request',
-        data: { offerId },
-      };
-
-      // Pure: return mempoolOp instead of mutating directly
-      mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
-      console.log(`📊 Added swap_cancel_request to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
-
-      const firstValidator = entityState.config.validators[0];
-      if (firstValidator) {
-        outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
-      }
-
-      return { newState, outputs, mempoolOps };
+      return handleCancelSwapRequest(entityState, entityTx);
     }
 
     if (entityTx.type === 'r2e') {
