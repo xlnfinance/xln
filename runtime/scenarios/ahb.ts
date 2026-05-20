@@ -17,7 +17,7 @@
 import type { Env, EntityInput, EntityReplica, Delta, JTx } from '../types';
 import { ensureJAdapter, getScenarioJAdapter, createJReplica } from './boot';
 import type { JAdapter } from '../jadapter/types';
-import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, syncChain } from './helpers';
+import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, syncChain, commitRuntimeInput } from './helpers';
 import { formatRuntime } from '../runtime-ascii';
 import { deriveDelta, isLeft } from '../account-utils';
 import { createGossipLayer } from '../networking/gossip';
@@ -27,7 +27,6 @@ import { ethers } from 'ethers';
 
 // Lazy-loaded runtime functions to avoid circular dependency (runtime.ts imports this file)
 let _process: ((env: Env, inputs?: EntityInput[], delay?: number, single?: boolean) => Promise<Env>) | null = null;
-let _applyRuntimeInput: ((env: Env, runtimeInput: any) => Promise<{ entityOutbox: EntityInput[]; mergedInputs: EntityInput[] }>) | null = null;
 
 const getProcess = async () => {
   if (!_process) {
@@ -35,14 +34,6 @@ const getProcess = async () => {
     _process = runtime.process;
   }
   return _process;
-};
-
-const getApplyRuntimeInput = async () => {
-  if (!_applyRuntimeInput) {
-    const runtime = await import('../runtime');
-    _applyRuntimeInput = runtime.applyRuntimeInput;
-  }
-  return _applyRuntimeInput;
 };
 
 const USDC_TOKEN_ID = 1;
@@ -520,8 +511,7 @@ export async function ahb(env: Env): Promise<void> {
       console.log(`${name}: Entity ${entityId.slice(0, 10)}... @ (${position.x}, ${position.y}, ${position.z})`);
     }
 
-    const applyRuntimeInput = await getApplyRuntimeInput();
-    await applyRuntimeInput(env, {
+    await commitRuntimeInput(env, {
       runtimeTxs: createEntityTxs,
       entityInputs: []
     });
@@ -2722,7 +2712,7 @@ export async function ahb(env: Env): Promise<void> {
     const carolEncodedBoard = encodeBoard(carolConfig);
     const carolBoardHash = hashBoard(carolEncodedBoard);
     carol = { id: carolBoardHash, signer: carolSigner, name: 'Carol', boardHash: carolBoardHash };
-    await applyRuntimeInput(env, {
+    await commitRuntimeInput(env, {
       runtimeTxs: [{
         type: 'importReplica',
         entityId: carol.id,

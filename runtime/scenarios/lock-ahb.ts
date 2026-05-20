@@ -17,7 +17,7 @@
 
 import type { Env, EntityInput } from '../types';
 import type { JAdapter } from '../jadapter/types';
-import { getProcess, getApplyRuntimeInput, usd, snap, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain } from './helpers';
+import { getProcess, usd, snap, assertRuntimeIdle, drainRuntime, enableStrictScenario, ensureSignerKeysFromSeed, requireRuntimeSeed, findReplica, assert, assertBilateralSync, getOffdelta, processJEvents, converge, syncChain, commitRuntimeInput } from './helpers';
 import { ensureJAdapter, registerEntities, createJReplica, createJurisdictionConfig, getScenarioJAdapter } from './boot';
 import { formatRuntime } from '../runtime-ascii';
 import { isLeft } from '../account-utils';
@@ -75,7 +75,6 @@ export async function lockAhb(env: Env): Promise<void> {
   ensureSignerKeysFromSeed(env, ['1', '2', '3', '4', '5', '6'], 'HTLC AHB');
   lockRuntimeSeedUpdates(true);
   const process = await getProcess();
-  const applyRuntimeInput = await getApplyRuntimeInput();
   env.scenarioMode = true; // Deterministic time control
   const rng = createRngFromEnv(env); // Deterministic RNG for HTLC secrets
 
@@ -1185,7 +1184,7 @@ export async function lockAhb(env: Env): Promise<void> {
     // Create HTLC that will timeout (Charlie doesn't reveal)
     console.log('📋 Creating test entity Charlie for timeout scenario...\n');
 
-    await applyRuntimeInput(env, {
+    await commitRuntimeInput(env, {
       runtimeTxs: [{
         type: 'importReplica' as const,
         entityId: '0x' + '6'.padStart(64, '0'),
@@ -1381,7 +1380,7 @@ export async function lockAhb(env: Env): Promise<void> {
     // Create Hub2 for 4-hop test (Alice → Hub → Hub2 → Bob)
     console.log('📋 Creating Hub2 for 4-hop test...\n');
 
-    await applyRuntimeInput(env, {
+    await commitRuntimeInput(env, {
       runtimeTxs: [{
         type: 'importReplica' as const,
         entityId: '0x' + '5'.padStart(64, '0'),

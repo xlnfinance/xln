@@ -18,7 +18,7 @@ import { namedParamsToObject, getPositionalParams } from './types.js';
 import { createNumberedEntity } from '../entity-factory.js';
 import { getAvailableJurisdictions } from '../jurisdiction-config.js';
 import { safeStringify } from '../serialization-utils.js';
-import { waitScenario } from './helpers';
+import { commitRuntimeInput, waitScenario } from './helpers';
 
 let payRandomCounter = 0;
 
@@ -323,8 +323,7 @@ async function handleImport(
 
   // Import all entities into EXISTING runtime state (additive!)
   if (runtimeTxs.length > 0) {
-    const { applyRuntimeInput } = await import('../runtime.js');
-    await applyRuntimeInput(env, {
+    await commitRuntimeInput(env, {
       runtimeTxs,
       entityInputs: [],
     });
@@ -469,8 +468,7 @@ async function handleGrid(
   });
 
   // Import into runtime state
-  const { applyRuntimeInput } = await import('../runtime.js');
-  await applyRuntimeInput(env, {
+  await commitRuntimeInput(env, {
     runtimeTxs,
     entityInputs: [],
   });
@@ -620,8 +618,7 @@ async function handleLazyGrid(
   }
 
   // Import all lazy entities into runtime state
-  const { applyRuntimeInput } = await import('../runtime.js');
-  await applyRuntimeInput(env, { runtimeTxs, entityInputs: [] });
+  await commitRuntimeInput(env, { runtimeTxs, entityInputs: [] });
 
   console.log(`  ⚡ LAZY: Created ${total} in-browser entities`);
 
