@@ -14,7 +14,7 @@
  */
 
 import type { Env, EntityReplica, AccountMachine } from '../types';
-import { getProcess, getApplyRuntimeInput, usd, ensureSignerKeysFromSeed, converge as _converge } from './helpers';
+import { commitRuntimeInput, getProcess, usd, ensureSignerKeysFromSeed, converge as _converge } from './helpers';
 import { formatRuntime } from '../runtime-ascii';
 import { deriveDelta } from '../account-utils';
 import { isLeftEntity } from '../entity-id-utils';
@@ -111,7 +111,6 @@ export async function runRebalanceScenario(): Promise<void> {
   console.log('═'.repeat(80));
 
   const process = await getProcess();
-  const applyRuntimeInput = await getApplyRuntimeInput();
 
   // ══════════════════════════════════════════════════════════════
   // SETUP: JAdapter (BrowserVM or RPC)
@@ -227,7 +226,7 @@ export async function runRebalanceScenario(): Promise<void> {
     });
   }
 
-  await applyRuntimeInput(env, { runtimeTxs: createEntityTxs, entityInputs: [] });
+  await commitRuntimeInput(env, { runtimeTxs: createEntityTxs, entityInputs: [] });
   const hub = requireEntity(entities[0], 'Hub');
   const alice = requireEntity(entities[1], 'Alice');
   const bob = requireEntity(entities[2], 'Bob');

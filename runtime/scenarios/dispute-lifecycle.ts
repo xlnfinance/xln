@@ -54,11 +54,12 @@ async function mineUntilHeight(jadapter: JAdapter, targetHeight: number): Promis
   }
   let current = Number(await jadapter.provider.getBlockNumber());
   let guard = 0;
+  const maxMines = Math.max(2000, targetHeight - current + 32);
   while (current < targetHeight) {
     await mineableProvider.send('evm_mine', []);
     current = Number(await jadapter.provider.getBlockNumber());
     guard += 1;
-    if (guard > 2000) {
+    if (guard > maxMines) {
       throw new Error(`mineUntilHeight guard tripped: current=${current}, target=${targetHeight}`);
     }
   }

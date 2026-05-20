@@ -28,6 +28,12 @@ export const getApplyRuntimeInput = async () => {
   return _applyRuntimeInput;
 };
 
+export const commitRuntimeInput = async (env: Env, runtimeInput: RuntimeInput): Promise<Env> => {
+  const runtime = await import('../runtime');
+  runtime.enqueueRuntimeInput(env, runtimeInput);
+  return runtime.process(env);
+};
+
 export { checkSolvency } from './solvency-check';
 
 export function requireRuntimeSeed(env: Env, label: string): string {
