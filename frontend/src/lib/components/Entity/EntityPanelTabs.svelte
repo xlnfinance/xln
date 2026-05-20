@@ -2243,9 +2243,7 @@
 
   $: onchainReserves = buildOnchainReserves(replica?.state?.reserves, externalTokens);
   $: {
-    if (!pendingAssetBridgeSync || resolvingAssetBridgeSync) {
-      // no-op
-    } else {
+    if (pendingAssetBridgeSync && !resolvingAssetBridgeSync) {
       const currentReserve = onchainReserves.get(pendingAssetBridgeSync.tokenId) ?? 0n;
       const reserveMoved = pendingAssetBridgeSync.direction === 'deposit'
         ? currentReserve > pendingAssetBridgeSync.baselineReserve
@@ -2268,9 +2266,7 @@
   }
   $: {
     const pending = pendingAssetAutoC2Rs[0];
-    if (!pending || resolvingAssetAutoC2R) {
-      // no-op
-    } else {
+    if (pending && !resolvingAssetAutoC2R) {
       const currentAccount =
         workspaceAccountId &&
         workspaceAccountId.toLowerCase() === pending.counterpartyEntityId.toLowerCase()
