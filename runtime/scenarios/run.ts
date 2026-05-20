@@ -59,6 +59,7 @@ const ALL_PARALLEL_SET = [
 ];
 
 const SMOKE_PARALLEL_SET = [
+  'processbatch',
   'rebalance',
   'dispute-lifecycle',
 ];
