@@ -1456,8 +1456,6 @@
   let moveVisualRoot: HTMLDivElement | null = null;
   let previousMoveVisualRoot: HTMLDivElement | null = null;
   const moveNodeRefs = new Map<string, HTMLButtonElement>();
-  let externalToReserveAmount = '';
-  let reserveToCollateralAmount = '';
   let collateralToReserveAmount = '';
   let reserveToExternalAmount = '';
   let sendingExternalToken: string | null = null;
@@ -3169,7 +3167,6 @@
       }
       const maxAmount = moveUiState.sourceAvailableBalance;
       const amount = parsePositiveAssetAmount(moveAmount, token, maxAmount ?? undefined);
-      const reserveBefore = onchainReserves.get(token.tokenId) ?? 0n;
       const selfEntityId = resolveSelfEntityId();
       const reserveRecipientIsSelf = !moveReserveRecipient || moveReserveRecipient === selfEntityId;
 
