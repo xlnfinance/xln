@@ -638,7 +638,6 @@ export async function proposeAccountFrame(
     return earlyResult;
   }
 
-  const finalTokenIds: number[] = [];
   const finalDeltas: Delta[] = [];
 
   // Sort by tokenId for deterministic ordering
@@ -662,25 +661,7 @@ export async function proposeAccountFrame(
       continue;
     }
 
-    finalTokenIds.push(tokenId);
     finalDeltas.push({ ...delta });
-  }
-
-  if (!quiet) {
-    console.log(`📊 Frame state after processing: ${finalTokenIds.length} tokens`);
-    if (HEAVY_LOGS) {
-      console.log(`📊 TokenIds: [${finalTokenIds.join(', ')}]`);
-      console.log(`📊 Offdeltas: [${deriveAccountFrameOffdeltas(finalDeltas).map(d => d.toString()).join(', ')}]`);
-      console.log(
-        `📊 Deltas:`,
-        finalDeltas.map(d => ({
-          tokenId: d.tokenId,
-          collateral: d.collateral?.toString(),
-          leftCreditLimit: d.leftCreditLimit?.toString(),
-          rightCreditLimit: d.rightCreditLimit?.toString(),
-        })),
-      );
-    }
   }
 
   // Determine if we're left entity (for byLeft field)
@@ -716,22 +697,6 @@ export async function proposeAccountFrame(
 
   // Calculate state hash (frameData is properly typed AccountFrame)
   frameData.stateHash = await createFrameHash(frameData as AccountFrame);
-
-  // Debug: log what's being hashed at creation time
-  if (HEAVY_LOGS && !quiet) {
-    console.log(`[HASH-DEBUG] Frame creation for ${accountMachine.proofHeader.toEntity.slice(-4)}:`);
-    console.log(`  height: ${frameData.height}`);
-    console.log(`  timestamp: ${frameData.timestamp}`);
-    console.log(`  jHeight: ${frameData.jHeight}`);
-    console.log(`  prevFrameHash: ${frameData.prevFrameHash?.slice(0, 20)}...`);
-    console.log(`  accountTxs count: ${frameData.accountTxs.length}`);
-    console.log(`  accountTxs types: [${frameData.accountTxs.map(tx => tx.type).join(', ')}]`);
-    console.log(`  tokenIds: [${deriveAccountFrameTokenIds(frameData).join(', ')}]`);
-    console.log(`  offdeltas: [${deriveAccountFrameOffdeltas(frameData.deltas).map(d => d.toString()).join(', ')}]`);
-    console.log(`  delta count: ${frameData.deltas.length}`);
-    console.log(`  byLeft: ${frameData.byLeft}`);
-    console.log(`  stateHash: ${frameData.stateHash}`);
-  }
 
   // VALIDATE AT SOURCE: Guaranteed type safety from this point forward
   let newFrame: AccountFrame;

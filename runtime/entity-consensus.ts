@@ -1345,7 +1345,6 @@ export const applyEntityFrame = async (
     // Apply returned mempoolOps immediately on the cloned working state so later
     // entityTxs in the same frame observe the same in-frame account state.
     if (mempoolOps && mempoolOps.length > 0) {
-      console.log(`📦 ENTITY-ORCHESTRATOR: Applying ${mempoolOps.length} mempoolOps (inline)`);
       for (const { accountId, tx } of mempoolOps) {
         const account = currentEntityState.accounts.get(accountId);
         if (account) {
@@ -1364,7 +1363,6 @@ export const applyEntityFrame = async (
           proposableAccounts.add(accountId);
           markStorageAccountDirty(env, currentEntityState.entityId, accountId);
           markStorageEntityDirty(env, currentEntityState.entityId);
-          console.log(`📦   → ${accountId.slice(-8)}: ${tx.type} (mempool now: ${account.mempool.length} txs, pendingFrame=${!!account.pendingFrame ? 'h'+account.pendingFrame.height : 'none'})`);
 
           // Schedule timeout hooks for HTLC locks (setTimeout-like)
           // When the lock's timelock expires, the runtime will ping this entity
@@ -1421,16 +1419,12 @@ export const applyEntityFrame = async (
       if (accountMachine) {
         // Add to proposable if:
         // - We have pending mempool items and no pending frame
-        const isAck = entityTx.data.height && entityTx.data.prevHanko;
         const hasPendingTxs = accountMachine.mempool.length > 0;
 
         // Only propose if we have something to send:
         // - Have transactions in mempool
         if (hasPendingTxs && !accountMachine.pendingFrame) {
           proposableAccounts.add(fromEntity); // counterparty ID
-          console.log(`🔄 Added ${fromEntity.slice(0,10)} to proposable - Pending:${hasPendingTxs}`);
-        } else if (isAck) {
-          console.log(`✅ Received ACK from ${fromEntity.slice(0,10)}, no action needed (mempool empty)`);
         }
       }
     } else if (entityTx.type === 'directPayment' && entityTx.data) {
@@ -1453,9 +1447,6 @@ export const applyEntityFrame = async (
         if (HEAVY_LOGS) console.log(`🔍 Checking account ${counterpartyId.slice(-10)}: mempool=${accountMachine.mempool.length}, isLeft=${isLeft}, pendingFrame=${!!accountMachine.pendingFrame}, mempoolTxs=[${accountMachine.mempool.map((tx) => tx.type).join(',')}]`);
         if (accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
           proposableAccounts.add(counterpartyId);
-          console.log(`🔄 ✅ Added ${counterpartyId.slice(-10)} to proposableAccounts (has ${accountMachine.mempool.length} mempool items)`);
-        } else if (accountMachine.pendingFrame) {
-          console.log(`🔄 ⏸️  SKIP: ${counterpartyId.slice(-10)} has pendingFrame h${accountMachine.pendingFrame.height} - will propose after ACK`);
         }
       }
     } else if (entityTx.type === 'openAccount' && entityTx.data) {
@@ -1465,7 +1456,6 @@ export const applyEntityFrame = async (
       if (accountMachine) {
         if (accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
           proposableAccounts.add(targetEntity);
-          console.log(`🔄 Added ${targetEntity.slice(0,10)} to proposable (account opened, mempool=${accountMachine.mempool.length})`);
         }
       }
     } else if (entityTx.type === 'extendCredit' && entityTx.data) {
@@ -1473,11 +1463,8 @@ export const applyEntityFrame = async (
       const counterpartyId = entityTx.data.counterpartyEntityId;
       // Account keyed by counterparty ID
       const accountMachine = currentEntityState.accounts.get(counterpartyId);
-      console.log(`💳 EXTEND-CREDIT: Checking account ${counterpartyId.slice(0,10)} for proposal`);
-      console.log(`💳 EXTEND-CREDIT: accountMachine exists: ${!!accountMachine}, mempool: ${accountMachine?.mempool?.length || 0}`);
       if (accountMachine && accountMachine.mempool.length > 0) {
         proposableAccounts.add(counterpartyId);
-        console.log(`💳 ✅ Added ${counterpartyId.slice(0,10)} to proposableAccounts (credit extension)`);
       }
     }
   }
@@ -1751,8 +1738,6 @@ export const applyEntityFrame = async (
 
   // 3. Process swap cancel requests through hub orderbook
   if (allSwapCancelRequests.length > 0) {
-    console.log(`📊 ENTITY-ORCHESTRATOR: Processing ${allSwapCancelRequests.length} swap cancel requests`);
-
     if (currentEntityState.orderbookExt) {
       // processOrderbookCancels imported at top level
       const cancelResult = processOrderbookCancels(currentEntityState, allSwapCancelRequests);
@@ -1766,7 +1751,6 @@ export const applyEntityFrame = async (
         proposableAccounts.add(accountId);
         markStorageAccountDirty(env, currentEntityState.entityId, accountId);
         markStorageEntityDirty(env, currentEntityState.entityId);
-        console.log(`📊   → ${accountId.slice(-8)}: ${tx.type} (cancel-request resolution)`);
       }
 
       const ext = currentEntityState.orderbookExt as OrderbookExtState;
@@ -1799,7 +1783,6 @@ export const applyEntityFrame = async (
           continue;
         }
         proposableAccounts.add(accountId);
-        console.log(`📊   → ${accountId.slice(-8)}: swap_resolve (fallback cancel-request resolution)`);
       }
     }
   }
@@ -1852,11 +1835,6 @@ export const applyEntityFrame = async (
 	          }));
 	          applyCommittedSwapCancelsToOrderbook(env, currentEntityState, normalizedCancels);
 	        }
-
-	        if (env.quietRuntimeLogs !== true) {
-          console.log(`📤 PROPOSE-RESULT for ${cpId.slice(-4)}: success=${proposal.success}, hasAccountInput=${!!proposal.accountInput}, error=${proposal.error || 'none'}`);
-        }
-
         // Collect hashes from proposal (multi-signer support)
         if (proposal.hashesToSign) {
           collectedHashes.push(...proposal.hashesToSign);
@@ -1884,7 +1862,6 @@ export const applyEntityFrame = async (
                     }
                   });
                   proposableAccounts.add(route.inboundEntity);
-                  console.log(`⬅️ HTLC-CANCEL-BACKWARD: hashlock=${hashlock.slice(0,12)}... → inbound ${route.inboundEntity.slice(-4)} (reason: ${reason})`);
                 }
               }
 
@@ -1907,10 +1884,6 @@ export const applyEntityFrame = async (
           };
           allOutputs.push(outputEntityInput);
 
-          if (env.quietRuntimeLogs !== true) {
-            console.log(`📮 ACCOUNT-FRAME-OUTPUT: frame ${proposal.accountInput.height} → Entity ${proposal.accountInput.toEntityId.slice(-4)} (${accountKey.slice(-8)} account)`);
-          }
-
           // Add events to entity messages with size limiting
           addMessages(currentEntityState, proposal.events);
           emitScopedEvents(
@@ -1929,11 +1902,6 @@ export const applyEntityFrame = async (
         }
       }
     }
-  }
-
-  if (collectedHashes.length > 0) {
-    console.log(`🔐 HASH-COLLECTION: Collected ${collectedHashes.length} hashes for entity signing`);
-    collectedHashes.forEach(h => console.log(`   → ${h.type}: ${h.hash.slice(0, 18)}... (${h.context})`));
   }
 
   return { newState: currentEntityState, deterministicState, outputs: allOutputs, jOutputs: allJOutputs, collectedHashes };
