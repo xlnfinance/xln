@@ -15,21 +15,21 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 type Platform = 'ios' | 'android' | 'desktop' | 'extension';
+type NativeBuildOptions = {
+	flags: Set<string>;
+	targets: Platform[];
+};
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const FRONTEND = path.join(ROOT, 'frontend');
 const BUILD_DIR = path.join(FRONTEND, 'build');
 const NATIVE_DIR = path.join(ROOT, 'native');
 
-const args = process.argv.slice(2);
-const flags = new Set(args.filter(arg => arg.startsWith('--')));
-const tokens = args.filter(arg => !arg.startsWith('--'));
-
 function printHelp(): void {
 	console.log(`XLN native build pipeline
 
 Usage:
-  bun scripts/native/build-platforms.ts [mobile|ios|android|desktop|extension|all] [--open] [--smoke] [--no-build]
+  bun scripts/native/build-platforms.ts [mobile|ios|android|desktop|extension|all] [--open] [--smoke] [--no-build] [--package]
 
 Targets:
   mobile     Build/sync iOS + Android from frontend/build
@@ -39,8 +39,15 @@ Targets:
   extension  Prepare browser companion extension in native/extension/dist
   all        mobile + desktop + extension
 
+Flags:
+  --no-build  Reuse an existing frontend/build artifact
+  --open      Open the native IDE/shell after sync
+  --smoke     Launch desktop shell once and exit
+  --package   Produce native debug packages when platform tooling is installed
+
 Examples:
   bun run native:mobile
+  bun run native:mobile -- --package
   bun run native:ios -- --open
   bun run native desktop --open
 `);
@@ -61,7 +68,7 @@ function run(command: string, commandArgs: string[], cwd: string, env: NodeJS.Pr
 	}
 }
 
-function expandTargets(input: string[]): Platform[] {
+export function expandTargets(input: string[]): Platform[] {
 	const selected = input.length === 0 ? ['mobile'] : input;
 	const platforms: Platform[] = [];
 	const add = (...items: Platform[]) => {
@@ -79,7 +86,42 @@ function expandTargets(input: string[]): Platform[] {
 	return platforms;
 }
 
-function ensureFrontendBuild(): void {
+export function parseNativeBuildOptions(argv: string[]): NativeBuildOptions {
+	const flags = new Set(argv.filter(arg => arg.startsWith('--')));
+	const tokens = argv.filter(arg => !arg.startsWith('--'));
+	return {
+		flags,
+		targets: expandTargets(tokens),
+	};
+}
+
+export function requiredNativeToolCommands(targets: Platform[], flags: Set<string>): string[] {
+	const required = new Set<string>();
+	if (flags.has('--open') && targets.includes('ios')) required.add('xcodebuild');
+	if (!flags.has('--package')) return [...required].sort();
+	if (targets.includes('android')) required.add('java');
+	if (targets.includes('ios')) required.add('xcodebuild');
+	return [...required].sort();
+}
+
+function commandAvailable(command: string): boolean {
+	const result = spawnSync(command, ['--version'], {
+		stdio: 'ignore',
+		shell: false,
+	});
+	return !result.error && result.status === 0;
+}
+
+function assertNativeToolingAvailable(targets: Platform[], flags: Set<string>): void {
+	const missing = requiredNativeToolCommands(targets, flags).filter(command => !commandAvailable(command));
+	if (missing.length === 0) return;
+	throw new Error(
+		`Missing native platform tooling: ${missing.join(', ')}. ` +
+		'Install Java for Android packaging and full Xcode for iOS packaging/opening, or rerun without --package/--open.',
+	);
+}
+
+function ensureFrontendBuild(flags: Set<string>): void {
 	if (flags.has('--no-build')) {
 		if (!existsSync(path.join(BUILD_DIR, 'index.html'))) {
 			throw new Error('--no-build was requested, but frontend/build/index.html does not exist');
@@ -137,6 +179,24 @@ function syncCapacitorPlatform(platform: 'ios' | 'android'): void {
 		: path.join(FRONTEND, 'android/app/src/main/assets/public'));
 }
 
+function packageCapacitorPlatform(platform: 'ios' | 'android'): void {
+	if (platform === 'android') {
+		run('./gradlew', ['assembleDebug'], path.join(FRONTEND, 'android'));
+		return;
+	}
+	run('xcodebuild', [
+		'-workspace',
+		'App.xcworkspace',
+		'-scheme',
+		'App',
+		'-configuration',
+		'Debug',
+		'-destination',
+		'generic/platform=iOS',
+		'build',
+	], path.join(FRONTEND, 'ios/App'));
+}
+
 function prepareDesktop(open: boolean, smoke: boolean): void {
 	const main = path.join(NATIVE_DIR, 'desktop/main.cjs');
 	if (!existsSync(main)) throw new Error(`Missing ${main}`);
@@ -173,18 +233,20 @@ function prepareExtension(): void {
 }
 
 async function main(): Promise<void> {
+	const { flags, targets } = parseNativeBuildOptions(process.argv.slice(2));
 	if (flags.has('--help') || flags.has('-h')) {
 		printHelp();
 		return;
 	}
 
-	const targets = expandTargets(tokens);
-	ensureFrontendBuild();
+	assertNativeToolingAvailable(targets, flags);
+	ensureFrontendBuild(flags);
 	sanitizeNativeWebBuild();
 
 	for (const target of targets) {
 		if (target === 'ios' || target === 'android') {
 			syncCapacitorPlatform(target);
+			if (flags.has('--package')) packageCapacitorPlatform(target);
 			if (flags.has('--open')) run('bunx', ['cap', 'open', target], FRONTEND);
 		} else if (target === 'desktop') {
 			prepareDesktop(flags.has('--open'), flags.has('--smoke'));
@@ -196,7 +258,9 @@ async function main(): Promise<void> {
 	console.log(`\nXLN native pipeline complete: ${targets.join(', ')}`);
 }
 
-main().catch(error => {
-	console.error(error instanceof Error ? error.message : error);
-	process.exit(1);
-});
+if (import.meta.main) {
+	main().catch(error => {
+		console.error(error instanceof Error ? error.message : error);
+		process.exit(1);
+	});
+}
