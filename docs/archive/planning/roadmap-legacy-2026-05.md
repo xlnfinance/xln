@@ -1,6 +1,6 @@
 # XLN Roadmap - Crisis-Driven Infrastructure
 
-**[← Index](readme.md)** | **[Related: Mainnet Status →](mainnet.md)**
+**[Live Index →](../../readme.md)** | **[Current Mainnet Bar →](../../mainnet.md)** | **[Current Roadmap →](../../roadmap.md)**
 
 **Vision:** Become the default bounded-risk alternative to centralized exchanges. Every CEX crisis drives irreversible adoption.
 

@@ -1,6 +1,6 @@
 # xln Mainnet Readiness Assessment
 
-**[← Index](readme.md)** | **[Related: Roadmap](roadmap.md)** | **[Implementation →](implementation/payment-spec.md)**
+**[Live Index →](../../readme.md)** | **[Current Mainnet Bar →](../../mainnet.md)** | **[Current Roadmap →](../../roadmap.md)** | **[Current Implementation →](../../implementation/payment-spec.md)**
 
 **Current Status: Phase 2 Complete (Testnet-Ready)**
 **Mainnet Readiness: 600/1000**
