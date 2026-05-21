@@ -1,4 +1,4 @@
-import { isCrossJurisdictionRouteTransitionAllowed, isCrossJurisdictionTerminalStatus } from '../../cross-jurisdiction';
+import { isCrossJurisdictionRouteTransitionAllowed, isCrossJurisdictionTerminalStatus, transitionCrossJurisdictionRouteStatus } from '../../cross-jurisdiction';
 import { verifyHashLadderBinary } from '../../hashladder';
 import { addMessage, cloneEntityState } from '../../state-helpers';
 import type { EntityInput, EntityState, EntityTx, Env } from '../../types';
@@ -82,9 +82,8 @@ const validateCrossTargetResolve = (result: PullResult, env: Env, pullId: string
   if (!isCrossJurisdictionRouteTransitionAllowed(route.status, 'clearing')) {
     return fail(result, `❌ Cross-j target pull ${shortPull} resolve blocked: route ${route.status}->clearing`);
   }
-  route.status = 'clearing';
   route.pendingClearRequestedAt ||= now(result.newState, env);
-  route.updatedAt = result.newState.timestamp || env.timestamp;
+  transitionCrossJurisdictionRouteStatus(route, 'clearing', result.newState.timestamp || env.timestamp);
   result.newState.crossJurisdictionSwaps?.set(route.orderId, route);
   return null;
 };
