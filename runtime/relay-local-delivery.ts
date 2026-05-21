@@ -14,6 +14,10 @@ import {
   pushDebugEvent,
 } from './relay-store';
 
+const relayLog = process.env['RELAY_VERBOSE_LOGS'] === '1'
+  ? (message: string): void => console.log(message)
+  : (_message: string): void => {};
+
 // ---------------------------------------------------------------------------
 // Factory
 // ---------------------------------------------------------------------------
@@ -41,7 +45,7 @@ export const createLocalDeliveryHandler = (
     if (!serverKeyPair || serverKeySeedFingerprint !== fingerprint) {
       serverKeyPair = deriveEncryptionKeyPair(env.runtimeSeed as Uint8Array | string);
       serverKeySeedFingerprint = fingerprint;
-      console.log(`[RELAY] Derived server decryption key`);
+      relayLog(`[RELAY] Derived server decryption key`);
     }
     return serverKeyPair;
   };
@@ -60,7 +64,7 @@ export const createLocalDeliveryHandler = (
     }
     const activeKeyPair = getServerKeyPair();
     input = decryptJSON<EntityInput>(payload, activeKeyPair.privateKey);
-    console.log(`[RELAY] → decrypted entity_input: entityId=${input.entityId?.slice(-8)} txs=${input.entityTxs?.length ?? 0}`);
+    relayLog(`[RELAY] → decrypted entity_input: entityId=${input.entityId?.slice(-8)} txs=${input.entityTxs?.length ?? 0}`);
 
     // Check if local replica exists
     const localReplicaExists = !!getEntityReplicaById(env, String(input.entityId || ''));
@@ -118,7 +122,7 @@ export const createLocalDeliveryHandler = (
     const routedInput: RoutedEntityInput = from ? { ...input, from } : { ...input };
     enqueueRuntimeInput(env, { runtimeTxs: [], entityInputs: [routedInput] });
     const queueSize = env.runtimeMempool?.entityInputs?.length ?? env.runtimeInput?.entityInputs?.length ?? 0;
-    console.log(`[RELAY] → enqueued to runtime (queue=${queueSize})`);
+    relayLog(`[RELAY] → enqueued to runtime (queue=${queueSize})`);
     pushDebugEvent(store, {
       event: 'delivery',
       from,
