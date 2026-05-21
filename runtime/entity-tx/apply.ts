@@ -23,7 +23,6 @@ import {
 	transitionCrossJurisdictionRouteStatus,
 	withCanonicalCrossJurisdictionRouteHash,
 } from '../cross-jurisdiction';
-import { decodeHashLadderBinary } from '../hashladder';
 import { handleR2C } from './handlers/r2c';
 import { handleE2R } from './handlers/e2r';
 import { handleR2R } from './handlers/r2r';
@@ -86,6 +85,7 @@ import {
 } from './handlers/cross-j-setup';
 import { handleCrossJurisdictionFillNoticeEntityTx } from './handlers/cross-j-fill';
 import { handleRequestCrossJurisdictionClearEntityTx } from './handlers/cross-j-clear';
+import { handleCrossJurisdictionSalvageEntityTx } from './handlers/cross-j-salvage';
 
 const entityTxLog = createStructuredLogger('entity.tx');
 import {
@@ -93,7 +93,7 @@ import {
   findCrossJurisdictionOfferRoute,
   mergeCrossJurisdictionRoute,
 } from './cross-jurisdiction-helpers';
-import { findAccountKey, normalizeEntityRef } from './account-key';
+import { findAccountKey } from './account-key';
 
 // Extended return type including pure events from handlers
 export interface ApplyEntityTxResult {
@@ -361,84 +361,9 @@ export const applyEntityTx = async (
       return handleRequestCrossJurisdictionClearEntityTx(env, entityState, entityTx);
     }
 
-	    if (entityTx.type === 'crossJurisdictionSalvage') {
-	      const { routeId, binary, fillRatio, sourceEntityId, sourceCounterpartyEntityId, observedAt } = entityTx.data;
-	      const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
-      if (!binary || binary === '0x' || fillRatio <= 0) {
-        addMessage(newState, `🌉 Cross-j salvage ignored for ${routeId}: empty pull args`);
-        return { newState, outputs };
-      }
-      try {
-        const decoded = decodeHashLadderBinary(binary);
-        if (decoded.fillRatio <= 0) {
-          addMessage(newState, `🌉 Cross-j salvage ignored for ${routeId}: zero pull binary`);
-          return { newState, outputs };
-        }
-      } catch (error) {
-        addMessage(newState, `❌ Cross-j salvage ${routeId} invalid pull binary: ${error instanceof Error ? error.message : String(error)}`);
-        return { newState, outputs };
-      }
-      const route = newState.crossJurisdictionSwaps?.get(routeId);
-      if (!route) {
-        addMessage(newState, `❌ Cross-j salvage ${routeId} missing local route`);
-        return { newState, outputs };
-      }
-      if (!route.targetPull) {
-        addMessage(newState, `❌ Cross-j salvage ${routeId} missing target pull commitment`);
-        return { newState, outputs };
-      }
-      if (isCrossJurisdictionPullExpired(route, 'target', deterministicEntityTimestamp(newState, env))) {
-        addMessage(newState, `❌ Cross-j salvage ${routeId} target pull expired`);
-        return { newState, outputs };
-      }
-      const targetUserEntityId = normalizeEntityRef(route.target.counterpartyEntityId);
-      const targetHubEntityId = normalizeEntityRef(route.target.entityId);
-      if (normalizeEntityRef(newState.entityId) !== targetUserEntityId) {
-        addMessage(newState, `❌ Cross-j salvage ${routeId} routed to wrong sibling entity`);
-        return { newState, outputs };
-      }
-      if (!newState.accounts.has(targetHubEntityId)) {
-        addMessage(newState, `❌ Cross-j salvage ${routeId} blocked: no target account with ${targetHubEntityId.slice(-4)}`);
-        return { newState, outputs };
-      }
-      const requestedAt = deterministicEntityTimestamp(newState, env);
-      transitionCrossJurisdictionRouteStatus(route, 'clearing', requestedAt);
-      route.pendingClearRequestedAt = requestedAt;
-      newState.crossJurisdictionSwaps ||= new Map();
-      newState.crossJurisdictionSwaps.set(route.orderId, route);
-      const firstValidator = entityState.config.validators[0];
-      outputs.push({
-        entityId: newState.entityId,
-        ...(firstValidator ? { signerId: firstValidator } : {}),
-        entityTxs: [
-          {
-            type: 'resolvePull',
-            data: {
-              counterpartyEntityId: targetHubEntityId,
-              pullId: route.targetPull.pullId,
-              binary,
-              description:
-                `Cross-j salvage resolve ${routeId} fill=${fillRatio}/65535 ` +
-                `source=${sourceEntityId.slice(-4)}:${sourceCounterpartyEntityId.slice(-4)}`,
-            },
-          },
-          {
-            type: 'disputeStart',
-            data: {
-              counterpartyEntityId: targetHubEntityId,
-              description:
-                `Cross-j salvage ${routeId} fill=${fillRatio}/65535 ` +
-                `source=${sourceEntityId.slice(-4)}:${sourceCounterpartyEntityId.slice(-4)}` +
-                (observedAt ? ` observed=${observedAt}` : ''),
-            },
-          },
-          { type: 'j_broadcast', data: {} },
-        ],
-      });
-      addMessage(newState, `🌉 Cross-j salvage queued for ${routeId}: target dispute vs ${targetHubEntityId.slice(-4)}`);
-	      return { newState, outputs };
-	    }
+    if (entityTx.type === 'crossJurisdictionSalvage') {
+      return handleCrossJurisdictionSalvageEntityTx(env, entityState, entityTx);
+    }
 
 	    if (entityTx.type === 'orderbookSweepCrossJurisdiction') {
 	      const newState = cloneEntityState(entityState);
