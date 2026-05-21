@@ -199,6 +199,12 @@ import {
   ensureRuntimeMempool,
   type RuntimeInputQueueDeps,
 } from './runtime-input-queue';
+import {
+  clearRuntimeCleanLogs,
+  copyRuntimeCleanLogs,
+  getRuntimeCleanLogs,
+  type RuntimeCleanLogDeps,
+} from './runtime-clean-logs';
 import { normalizeEntitySwapTradingPairs } from './runtime-swap-pairs';
 import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
 import { calculateSolvency, verifySolvency } from './solvency';
@@ -520,35 +526,18 @@ const failfastAssert: (
   throw new Error(`${code}: ${message}${detailText}`);
 };
 
-// --- Clean Log Capture (per-runtime, stored on env.runtimeState.cleanLogs) ---
-const getCleanLogBuffer = (env: Env): string[] => {
-  const state = ensureRuntimeState(env);
-  if (!state.cleanLogs) state.cleanLogs = [];
-  return state.cleanLogs;
-};
+export const getCleanLogs = (env: Env): string =>
+  getRuntimeCleanLogs(env, getRuntimeCleanLogDeps());
 
-/** Get all clean logs as text (no file:line references) */
-export const getCleanLogs = (env: Env): string => getCleanLogBuffer(env).join('\n');
+export const clearCleanLogs = (env: Env): void =>
+  clearRuntimeCleanLogs(env, getRuntimeCleanLogDeps());
 
-/** Clear clean logs buffer */
-export const clearCleanLogs = (env: Env): void => {
-  const buffer = getCleanLogBuffer(env);
-  buffer.length = 0;
-};
+export const copyCleanLogs = async (env: Env): Promise<string> =>
+  copyRuntimeCleanLogs(env, getRuntimeCleanLogDeps());
 
-/** Copy clean logs to clipboard (returns text if clipboard fails) */
-export const copyCleanLogs = async (env: Env): Promise<string> => {
-  const text = getCleanLogs(env);
-  if (runtimeIsBrowser && navigator.clipboard) {
-    try {
-      await navigator.clipboard.writeText(text);
-      console.log(`✅ Copied ${getCleanLogBuffer(env).length} log entries to clipboard`);
-    } catch {
-      // Clipboard fails when devtools focused - just return text
-    }
-  }
-  return text;
-};
+function getRuntimeCleanLogDeps(): RuntimeCleanLogDeps {
+  return { ensureRuntimeState };
+}
 
 const enqueueRuntimeInputs = (
   env: Env,
