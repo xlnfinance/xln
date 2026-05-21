@@ -155,7 +155,7 @@ export interface AccountHandlerResult {
 }
 
 export async function handleAccountInput(state: EntityState, input: AccountInput, env: Env): Promise<AccountHandlerResult> {
-  accountHandlerLog.info('input.apply', {
+  accountHandlerLog.debug('input.apply', {
     from: shortId(input.fromEntityId),
     to: shortId(input.toEntityId),
     height: input.height,
@@ -995,7 +995,7 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
           }]
         });
 
-        accountHandlerLog.info('response.queued', {
+        accountHandlerLog.debug('response.queued', {
           from: shortId(state.entityId),
           to: shortId(result.response.toEntityId),
           height: result.response.height,

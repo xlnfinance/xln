@@ -757,7 +757,7 @@ export async function handleAccountInput(
     {
       const tokenIds = deriveAccountFrameTokenIds(accountMachine.pendingFrame);
       const txTypes = accountMachine.pendingFrame.accountTxs.map(tx => tx.type);
-      accountLog.info('frame.commit', {
+      accountLog.debug('frame.commit', {
         height: accountMachine.pendingFrame.height,
         txs: txTypes,
         tokens: tokenIds,
@@ -806,7 +806,7 @@ export async function handleAccountInput(
           }
         }
 
-        accountLog.info('frame.commit.complete', {
+        accountLog.debug('frame.commit.complete', {
           side: 'proposer',
           counterparty: shortId(cpForLog),
           height: accountMachine.pendingFrame.height,
@@ -1363,7 +1363,7 @@ export async function handleAccountInput(
       return { success: false, error: `Frame hash verification failed - dispute proof mismatch`, events };
     }
 
-    accountLog.info('frame.accept', {
+    accountLog.debug('frame.accept', {
       height: receivedFrame.height,
       from: shortId(input.fromEntityId),
       txs: receivedFrame.accountTxs.map(tx => tx.type),
@@ -1410,7 +1410,7 @@ export async function handleAccountInput(
       assertNoUnilateralSettlementMutation(accountMachine, beforeSettlement, tx, 'receiver/commit');
     }
 
-    accountLog.info('frame.commit.complete', {
+    accountLog.debug('frame.commit.complete', {
       side: 'receiver',
       counterparty: shortId(cpForCommitLog),
       height: receivedFrame.height,

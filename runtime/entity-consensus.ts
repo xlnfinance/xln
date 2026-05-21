@@ -1274,7 +1274,7 @@ export const applyEntityFrame = async (
   // Hashes emitted during frame processing that need entity-quorum signing
   collectedHashes?: Array<{ hash: string; type: 'accountFrame' | 'dispute' | 'profile' | 'settlement'; context: string }>;
 }> => {
-  entityLog.info('frame.apply', { txs: entityTxs.map(tx => tx.type) });
+  entityLog.debug('frame.apply', { txs: entityTxs.map(tx => tx.type) });
   if (shouldLogFullPayloads()) {
     entityTxs.forEach((tx, index) => {
       entityLog.trace('frame.tx_payload', { index, type: tx.type, data: tx.data });
