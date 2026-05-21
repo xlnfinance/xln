@@ -20,6 +20,8 @@ import type {
 } from './types/account';
 import type { HubRebalanceConfig } from './types/rebalance';
 import type { EntityTx } from './types/entity-tx';
+import type { FrameLogEntry, LogCategory } from './types/logging';
+import type { JReplica, JTx } from './types/jurisdiction-runtime';
 export type {
   CrossJurisdictionPullLeg,
   CrossJurisdictionSwapLeg,
@@ -38,6 +40,12 @@ export type {
   JurisdictionEvent,
   JurisdictionEventData,
 } from './types/jurisdiction-events';
+export type {
+  FrameLogEntry,
+  LogCategory,
+  LogLevel,
+} from './types/logging';
+export type { JReplica, JTx } from './types/jurisdiction-runtime';
 export type {
   HankoBytes,
   HankoClaim,
@@ -96,8 +104,7 @@ export type {
  */
 
 import type { GossipLayer, Profile } from './networking/gossip';
-import type { JAdapter } from './jadapter/types';
-import type { CompletedBatch, JBatch, JBatchState } from './j-batch';
+import type { CompletedBatch, JBatchState } from './j-batch';
 import type { CrontabState } from './crontab-types';
 
 export type { Profile } from './networking/gossip';
@@ -459,34 +466,6 @@ export interface EntityReplica {
   }>;
 }
 
-// =============================================================================
-// STRUCTURED LOGGING SYSTEM
-// =============================================================================
-
-/** Log severity levels - ordered by priority */
-export type LogLevel = 'trace' | 'debug' | 'info' | 'warn' | 'error';
-
-/** Log categories for filtering */
-export type LogCategory =
-  | 'consensus'     // BFT entity consensus
-  | 'account'       // Bilateral account consensus
-  | 'jurisdiction'  // J-machine events
-  | 'evm'           // Blockchain interactions
-  | 'network'       // Routing/messaging
-  | 'ui'            // UI events
-  | 'system';       // System-level
-
-/** Single log entry attached to a frame */
-export interface FrameLogEntry {
-  id: number;
-  timestamp: number;
-  level: LogLevel;
-  category: LogCategory;
-  message: string;
-  entityId?: string;              // Associated entity (if applicable)
-  data?: Record<string, unknown>; // Structured data
-}
-
 export interface BrowserVMState {
   stateRoot: string;
   trieData: Array<[string, string]>;
@@ -645,82 +624,6 @@ export interface Env {
   error: (category: LogCategory, message: string, data?: Record<string, unknown>, entityId?: string) => void;
   emit: (eventName: string, data: Record<string, unknown>) => void; // Generic event emission
 }
-
-/**
- * JReplica = Jurisdiction replica (J-Machine EVM state)
- * Contains stateRoot for time travel + decoded contracts for UI
- */
-export interface JReplica {
-  name: string;                           // "ethereum", "base", "simnet"
-  blockNumber: bigint;                    // Current J-block height
-  stateRoot: Uint8Array;                  // 32 bytes - for time travel via setStateRoot()
-  mempool: JTx[];                         // Pending settlement txs
-
-  // Block creation delay (ms-based for universal timing)
-  // Creates visual delay where batches sit in mempool as yellow cubes
-  blockDelayMs: number;                   // Delay in ms before processing mempool (default: 300)
-  blockTimeMs?: number;                   // Settlement-chain block time estimate used for cross-j wall-clock deadlines
-  lastBlockTimestamp: number;             // Timestamp (ms) of last block creation
-  blockReady?: boolean;                   // True when mempool has items and blockDelayMs elapsed
-
-  // JAdapter instance (for balance queries, transactions, etc)
-  // Works with both browservm and rpc modes
-  jadapter?: JAdapter;
-  // RPC endpoints for this jurisdiction (preferred for j-watcher + batch broadcast)
-  rpcs?: string[];
-  // Chain id (optional, prefer jadapter.chainId when available)
-  chainId?: number;
-  // Persisted local view of depository.defaultDisputeDelay for deterministic handlers.
-  defaultDisputeDelayBlocks?: number;
-
-  // Visual position (for 3D rendering)
-  position: { x: number; y: number; z: number };
-
-  // Contract addresses (primary)
-  depositoryAddress?: string; // Primary depository address (for replay protection)
-  entityProviderAddress?: string; // Primary entity provider address
-
-  // Additional deployed contract addresses.
-  contracts?: {
-    depository?: string;
-    entityProvider?: string;
-    account?: string;
-    deltaTransformer?: string;
-  };
-}
-
-/** J-Machine transaction (settlement layer) */
-export type JTx =
-  | {
-      type: 'batch'; // ALL J-operations go through batch (matches Depository.processBatch)
-      entityId: string;
-      data: {
-        batch: JBatch;
-        hankoSignature?: string; // Quorum hanko (attached post-commit by entity consensus)
-        batchHash?: string; // Hash of encoded batch (for hanko signing)
-        encodedBatch?: string; // ABI-encoded batch (for on-chain submission)
-        entityNonce?: number; // Entity nonce used for this batch
-        feeOverrides?: {
-          gasBumpBps?: number;
-          maxFeePerGasWei?: string;
-          maxPriorityFeePerGasWei?: string;
-        };
-        batchSize: number;
-        signerId?: string;
-      };
-      timestamp: number;
-      expectedJBlock?: number; // Expected j-block height (for replay protection)
-    }
-  | {
-      type: 'mint'; // Admin/debug function for minting reserves
-      entityId: string;
-      data: {
-        entityId: string;
-        tokenId: number;
-        amount: bigint;
-      };
-      timestamp: number;
-    };
 
 export interface RuntimeSnapshot {
   height: number;
