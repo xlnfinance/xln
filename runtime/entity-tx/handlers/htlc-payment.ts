@@ -6,7 +6,7 @@
  * Reference: entity-tx/apply.ts:302-437 (directPayment handler)
  */
 
-import type { EntityState, EntityInput, AccountTx, Env, HtlcNoteKey } from '../../types';
+import type { EntityState, EntityInput, AccountTx, Env, EntityTx, HtlcNoteKey } from '../../types';
 import { cloneEntityState } from '../../state-helpers';
 import { generateLockId, calculateHopTimelock, calculateHopRevealHeight, hashHtlcSecret } from '../../htlc-utils';
 import { calculateRequiredInboundForDesiredForward } from '../../htlc-utils';
@@ -15,7 +15,7 @@ import { calculateDirectionalFeePPM, sanitizeBaseFee, sanitizeFeePPM } from '../
 import { getTokenCapacity } from '../../routing/capacity';
 import { deriveDelta } from '../../account-utils';
 import { NobleCryptoProvider } from '../../crypto-noble';
-import { createOnionEnvelopes } from '../../htlc-envelope-types';
+import { createOnionEnvelopes, type HtlcEnvelope } from '../../htlc-envelope-types';
 import { getRuntimeJurisdictionHeight } from '../../j-height';
 
 const formatEntityId = (id: string) => id.slice(-4);
@@ -41,9 +41,9 @@ const isHexValue = (value: string, expectedBytes: number): boolean => {
 
 export async function handleHtlcPayment(
   entityState: EntityState,
-  entityTx: Extract<any, { type: 'htlcPayment' }>,
+  entityTx: Extract<EntityTx, { type: 'htlcPayment' }>,
   env: Env
-): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: Array<{ accountId: string; tx: any }> }> {
+): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: Array<{ accountId: string; tx: AccountTx }> }> {
   if (env.quietRuntimeLogs !== true) {
     console.log(`🔒 HTLC-PAYMENT HANDLER: ${entityState.entityId.slice(-4)} → ${entityTx.data.targetEntityId.slice(-4)}`);
     console.log(`   Amount: ${entityTx.data.amount}, Route: ${entityTx.data.route?.map((r: string) => r.slice(-4)).join('→') || 'none'}`);
@@ -60,7 +60,7 @@ export async function handleHtlcPayment(
 
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
-  const mempoolOps: Array<{ accountId: string; tx: any }> = [];
+  const mempoolOps: Array<{ accountId: string; tx: AccountTx }> = [];
 
   // Extract payment details
   let { targetEntityId, tokenId, amount, route, description, secret, hashlock } = entityTx.data;
@@ -102,6 +102,13 @@ export async function handleHtlcPayment(
       return { newState, outputs: [], mempoolOps: [] };
     }
   }
+  if (!secret || !hashlock) {
+    logError("HTLC_PAYMENT", `❌ Missing finalized secret/hashlock after validation`);
+    addMessage(newState, `❌ HTLC payment failed: missing secret`);
+    return { newState, outputs: [], mempoolOps: [] };
+  }
+  const finalizedSecret = secret;
+  const finalizedHashlock = hashlock;
 
   // If no route provided, check for direct account or calculate route
   if (!route || route.length === 0) {
@@ -313,7 +320,7 @@ export async function handleHtlcPayment(
 
     timelock = calculateHopTimelock(baseTimelock, hopIndex, totalHops);
     revealBeforeHeight = calculateHopRevealHeight(baseHeight, hopIndex, totalHops);
-    lockId = generateLockId(hashlock, newState.height, 0, newState.timestamp);
+    lockId = generateLockId(finalizedHashlock, newState.height, 0, newState.timestamp);
 
     entityTx.data.preparedLockId = lockId;
     entityTx.data.preparedTimelock = timelock.toString();
@@ -331,8 +338,8 @@ export async function handleHtlcPayment(
   }
 
   // Store routing info (like 2024 hashlockMap)
-  newState.htlcRoutes.set(hashlock, {
-    hashlock,
+  newState.htlcRoutes.set(finalizedHashlock, {
+    hashlock: finalizedHashlock,
     tokenId,
     amount,
     startedAtMs: paymentStartedAtMs,
@@ -345,14 +352,19 @@ export async function handleHtlcPayment(
   const paymentDescription = rawPaymentDescription;
   if (paymentDescription) {
     if (!(newState.htlcNotes instanceof Map)) newState.htlcNotes = new Map<HtlcNoteKey, string>();
-    newState.htlcNotes.set(`hashlock:${hashlock}`, paymentDescription);
+    newState.htlcNotes.set(`hashlock:${finalizedHashlock}`, paymentDescription);
     newState.htlcNotes.set(`lock:${lockId}`, paymentDescription);
   }
 
   // Create encrypted onion envelope (privacy-preserving routing)
-  let envelope;
+  let envelope: HtlcEnvelope | string | undefined;
   if (preparedEnvelopeRaw !== undefined) {
-    envelope = preparedEnvelopeRaw;
+    if (typeof preparedEnvelopeRaw !== 'string' && !preparedEnvelopeRaw) {
+      logError("HTLC_PAYMENT", `❌ Invalid prepared envelope`);
+      addMessage(newState, `❌ HTLC payment failed: invalid prepared envelope`);
+      return { newState, outputs: [], mempoolOps: [] };
+    }
+    envelope = preparedEnvelopeRaw as HtlcEnvelope | string;
   } else try {
     const normalizeX25519Hex = (raw: unknown): string | null => {
       if (typeof raw !== 'string') return null;
@@ -450,7 +462,7 @@ export async function handleHtlcPayment(
 
     envelope = await createOnionEnvelopes(
       route,
-      secret,
+      finalizedSecret,
       entityPubKeys,
       crypto,
       hopForwardAmounts,
@@ -474,7 +486,7 @@ export async function handleHtlcPayment(
     type: 'htlc_lock',
     data: {
       lockId,
-      hashlock,
+      hashlock: finalizedHashlock,
       timelock,
       revealBeforeHeight,
       amount: finalizedSenderLockAmount,
@@ -496,7 +508,7 @@ export async function handleHtlcPayment(
       accountId: nextHop, // Use counterparty ID as key (simpler than canonical)
       tokenId,
       amount: finalizedSenderLockAmount,
-      hashlock,
+      hashlock: finalizedHashlock,
       timelock,
       direction: 'outgoing',
       createdAt: BigInt(newState.timestamp),
