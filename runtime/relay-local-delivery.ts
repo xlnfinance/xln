@@ -12,7 +12,6 @@ import {
   type RelayStore,
   normalizeRuntimeKey,
   pushDebugEvent,
-  enqueueMessage,
 } from './relay-store';
 
 // ---------------------------------------------------------------------------
@@ -64,28 +63,23 @@ export const createLocalDeliveryHandler = (
     console.log(`[RELAY] → decrypted entity_input: entityId=${input.entityId?.slice(-8)} txs=${input.entityTxs?.length ?? 0}`);
 
     // Check if local replica exists
-    const localRuntimeKey = normalizeRuntimeKey(env.runtimeId);
-    const targetIsServerRuntime = !!toKey && !!localRuntimeKey && toKey === localRuntimeKey;
     const localReplicaExists = !!getEntityReplicaById(env, String(input.entityId || ''));
 
     if (!localReplicaExists) {
-      const queueSize = enqueueMessage(store, toKey, msg);
+      const entityId = String(input.entityId || '');
       pushDebugEvent(store, {
         event: 'delivery',
         from,
         to: toKey,
         msgType: 'entity_input',
         encrypted: msg.encrypted === true,
-        status: targetIsServerRuntime ? 'queued-unknown-local-entity' : 'queued-nonlocal-target',
+        status: 'rejected-no-local-replica',
+        reason: 'NO_LOCAL_REPLICA',
         details: {
-          entityId: input.entityId,
-          queueSize,
-          targetIsServerRuntime,
+          entityId,
         },
       });
-      // Signal to router that we queued (not an error, but not delivered either)
-      // Router will send appropriate ack
-      return;
+      throw new Error(`NO_LOCAL_REPLICA: entityId=${entityId || 'unknown'} runtimeId=${toKey}`);
     }
 
     // Register sender runtime hint BEFORE processing so ACK/response can route back.

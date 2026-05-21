@@ -4,6 +4,9 @@ import { relayRoute } from '../relay-router';
 import { cacheEncryptionKey, createRelayStore, enqueueMessage, resolveEncryptionPublicKeyHex } from '../relay-store';
 import { hashHelloMessage, makeHelloNonce } from '../networking/ws-protocol';
 import { deriveSignerAddressSync, signDigest } from '../account-crypto';
+import { encryptJSON, deriveEncryptionKeyPair } from '../networking/p2p-crypto';
+import { createLocalDeliveryHandler } from '../relay-local-delivery';
+import { createEmptyEnv } from '../runtime';
 
 const SERVER_RUNTIME_ID = '0x9999999999999999999999999999999999999999';
 const SEED_A = 'relay-router-test-seed-a';
@@ -396,6 +399,29 @@ describe('relay-router gossip fanout', () => {
     });
     expect(store.pendingMessages.get(RUNTIME_B)).toBeUndefined();
     expect(store.debugEvents.some(event => event.reason === 'RUNTIME_INPUT_DISABLED')).toBe(true);
+  });
+
+  test('local delivery rejects unknown local entity instead of queueing forever', async () => {
+    const env = createEmptyEnv('relay-local-unknown-entity');
+    const store = createRelayStore(env.runtimeId);
+    const handler = createLocalDeliveryHandler(env, store, () => null);
+    const unknownEntityInput = {
+      entityId: ENTITY_C,
+      runtimeId: env.runtimeId,
+      signerId: env.runtimeId,
+      entityTxs: [],
+    };
+
+    await expect(handler(RUNTIME_A, {
+      to: env.runtimeId,
+      encrypted: true,
+      payload: encryptJSON(unknownEntityInput, deriveEncryptionKeyPair(env.runtimeSeed).publicKey),
+    })).rejects.toThrow('NO_LOCAL_REPLICA');
+
+    expect(store.pendingMessages.get(env.runtimeId)).toBeUndefined();
+    expect(store.debugEvents.some(event => {
+      return event.status === 'rejected-no-local-replica' && event.reason === 'NO_LOCAL_REPLICA';
+    })).toBe(true);
   });
 
   test('rejects unsigned hello by default', async () => {
