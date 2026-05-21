@@ -48,6 +48,7 @@ import {
   resetMarketMakerServerState,
 } from './server/market-maker-health';
 import { serveRuntimeBundle, serveStatic } from './server/static-assets';
+import { parseTaggedControlBody, requireDaemonControlAuth, requireDaemonRpcAuth } from './server/auth';
 import { encryptJSON, hexToPubKey } from './networking/p2p-crypto';
 import type { Profile } from './networking/gossip';
 import { encodeRebalancePolicyMemo } from './rebalance-policy';
@@ -93,14 +94,7 @@ import {
   forgetRuntimeAdapterClient,
   handleRuntimeAdapterMessage,
 } from './radapter/server';
-import {
-  resolveRuntimeAdapterAuthAudience,
-  resolveRuntimeAdapterAuthSeed,
-  runtimeAdapterRevokedTokenIds,
-  verifyRuntimeAdapterAuthCredential,
-} from './radapter/auth';
 import { decodeRuntimeAdapterMessage, runtimeAdapterMessageByteLength } from './radapter/codec';
-import type { RuntimeAdapterAuthLevel } from './radapter/types';
 import { readdir, readFile, writeFile } from 'fs/promises';
 import type { ServerWebSocket } from 'bun';
 
@@ -1425,72 +1419,6 @@ type ControlEntitySummary = {
   accountCount: number;
   publicAccountCount: number;
   accountEntityIds: string[];
-};
-
-const authLevelRank = (level: RuntimeAdapterAuthLevel): number => level === 'admin' ? 2 : 1;
-
-const extractBearerAuth = (header: string | null): string => {
-  const raw = String(header || '').trim();
-  const match = raw.match(/^Bearer\s+(.+)$/i);
-  return match ? match[1]!.trim() : '';
-};
-
-const verifyDaemonCapability = (
-  env: Env | null,
-  key: unknown,
-  requiredLevel: RuntimeAdapterAuthLevel,
-): boolean => {
-  if (!env) return false;
-  const auth = verifyRuntimeAdapterAuthCredential(resolveRuntimeAdapterAuthSeed(env), key, {
-    audience: resolveRuntimeAdapterAuthAudience(env),
-    revokedTokenIds: runtimeAdapterRevokedTokenIds(),
-  });
-  return !!auth && authLevelRank(auth.level) >= authLevelRank(requiredLevel);
-};
-
-const requireDaemonControlAuth = (
-  req: Request,
-  env: Env | null,
-  requiredLevel: RuntimeAdapterAuthLevel = 'admin',
-): Response | null => {
-  if (!env) {
-    return new Response(serializeTaggedJson({ ok: false, error: 'Runtime not ready' }), {
-      status: 503,
-      headers: { 'Content-Type': 'application/json' },
-    });
-  }
-  if (verifyDaemonCapability(env, extractBearerAuth(req.headers.get('authorization')), requiredLevel)) return null;
-  return new Response(serializeTaggedJson({ ok: false, error: 'Unauthorized' }), {
-    status: 401,
-    headers: { 'Content-Type': 'application/json' },
-  });
-};
-
-const requireDaemonRpcAuth = (
-  ws: RelaySocket,
-  id: unknown,
-  msg: Record<string, unknown>,
-  env: Env | null,
-  requiredLevel: RuntimeAdapterAuthLevel,
-): boolean => {
-  if (!env) {
-    ws.send(safeStringify({ type: 'error', inReplyTo: id, code: 'E_INTERNAL', error: 'Runtime not ready' }));
-    return false;
-  }
-  if (verifyDaemonCapability(env, msg['key'], requiredLevel)) return true;
-  ws.send(safeStringify({
-    type: 'error',
-    inReplyTo: id,
-    code: 'E_UNAUTHORIZED',
-    error: 'runtime adapter capability required',
-  }));
-  return false;
-};
-
-const parseTaggedControlBody = async <T>(req: Request): Promise<T> => {
-  const raw = await req.text();
-  if (!raw.trim()) return {} as T;
-  return deserializeTaggedJson<T>(raw);
 };
 
 const getProfileNameForEntity = (env: Env, entityId: string): string => {
