@@ -2,6 +2,14 @@
 
 > V1 — 2026-02-13
 
+Status: active product/spec document
+Scope: hub-driven collateral rebalance and quote flow
+Audience: account/entity-consensus, hub crontab, and wallet implementers
+
+This document defines the rebalance mechanism and quote semantics. It is not
+the current blocker list; use [status.md](status.md) and [mainnet.md](mainnet.md)
+for rollout sequencing.
+
 ## what
 
 Hub automatically manages on-chain collateral across all bilateral accounts:
