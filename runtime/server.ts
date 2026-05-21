@@ -50,7 +50,6 @@ import {
 import {
   getBootstrapReserveHealth,
   getHubMeshHealth,
-  getRequestCreditCap,
 } from './server/hub-health';
 import {
   createRuntimeIngressReceiptStore,
@@ -109,6 +108,8 @@ import { createTokenCatalogController } from './server/token-catalog';
 import { buildHubDiscoveryPayload } from './server/hub-discovery';
 import { buildDebugEntitiesPayload, buildKnownProfileBundle } from './server/gossip-profiles';
 import { maybeHandleDebugDumpsRequest } from './server/debug-dumps';
+import { getFaucetHubProfiles as selectFaucetHubProfiles } from './server/faucet-hubs';
+import { handleCreditRequest } from './server/credit-request';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
@@ -415,28 +416,8 @@ const externalWalletApi = createExternalWalletApi({
   },
 });
 
-const isHubProfile = (profile: Profile): boolean => {
-  return profile.metadata.isHub === true;
-};
-
-const isFaucetHubProfile = (profile: Profile): boolean => {
-  return relayStore.activeHubEntityIds.some(id => id.toLowerCase() === profile.entityId.toLowerCase());
-};
-
 const getFaucetHubProfiles = (env: Env): Profile[] => {
-  const profiles = env.gossip?.getProfiles?.() || [];
-  const selected: Profile[] = [];
-  for (const profile of profiles) {
-    if (!isHubProfile(profile) || !isFaucetHubProfile(profile)) continue;
-    selected.push(profile);
-  }
-  const activeSet = new Set(relayStore.activeHubEntityIds.map(id => id.toLowerCase()));
-  selected.sort((a, b) => {
-    const aActive = activeSet.has(String(a?.entityId || '').toLowerCase()) ? 1 : 0;
-    const bActive = activeSet.has(String(b?.entityId || '').toLowerCase()) ? 1 : 0;
-    return bActive - aActive;
-  });
-  return selected;
+  return selectFaucetHubProfiles(env, relayStore.activeHubEntityIds);
 };
 
 const stopMarketMakerLoop = (): void => {
@@ -1726,121 +1707,13 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   }
 
   if (pathname === '/api/credit/request' && req.method === 'POST') {
-    try {
-      if (!env) {
-        return new Response(safeStringify({ error: 'Runtime not initialized' }), { status: 503, headers });
-      }
-
-      const body = await req.json();
-      const userEntityId = typeof body?.userEntityId === 'string' ? body.userEntityId.toLowerCase() : '';
-      const requestedHubEntityId = typeof body?.hubEntityId === 'string' ? body.hubEntityId.toLowerCase() : '';
-      const tokenId = Number(body?.tokenId ?? 1);
-      const amountRaw = typeof body?.amount === 'string' ? body.amount.trim() : '';
-
-      if (!isEntityId32(userEntityId)) {
-        return new Response(safeStringify({ error: 'Invalid userEntityId' }), { status: 400, headers });
-      }
-      if (!isEntityId32(requestedHubEntityId)) {
-        return new Response(safeStringify({ error: 'Invalid hubEntityId' }), { status: 400, headers });
-      }
-      if (!/^\d+$/.test(amountRaw)) {
-        return new Response(safeStringify({ error: 'Invalid amount' }), { status: 400, headers });
-      }
-      if (!Number.isFinite(tokenId) || tokenId <= 0) {
-        return new Response(safeStringify({ error: 'Invalid tokenId' }), { status: 400, headers });
-      }
-
-      const hubs = getFaucetHubProfiles(env);
-      const hubProfile = hubs.find((profile) => profile.entityId.toLowerCase() === requestedHubEntityId);
-      if (!hubProfile) {
-        return new Response(
-          JSON.stringify({
-            error: 'Requested hub is not available',
-            knownHubEntityIds: hubs.map((profile) => profile.entityId),
-          }),
-          { status: 404, headers },
-        );
-      }
-
-      const hubEntityId = hubProfile.entityId;
-      const accountMachine = getAccountMachine(env, hubEntityId, userEntityId);
-      if (!accountMachine || !hasAccount(env, hubEntityId, userEntityId)) {
-        return new Response(
-          JSON.stringify({
-            error: 'No bilateral account with selected hub. Open account first.',
-            hubEntityId,
-            userEntityId,
-          }),
-          { status: 409, headers },
-        );
-      }
-
-      const requestedAmount = BigInt(amountRaw);
-      if (requestedAmount <= 0n) {
-        return new Response(safeStringify({ error: 'Amount must be positive' }), { status: 400, headers });
-      }
-
-      const approvedAmount = requestedAmount > getRequestCreditCap(tokenId)
-        ? getRequestCreditCap(tokenId)
-        : requestedAmount;
-      const currentOutCapacity = getEntityOutCapacity(accountMachine, hubEntityId, tokenId);
-      if (currentOutCapacity >= approvedAmount) {
-        return new Response(
-          JSON.stringify({
-            success: true,
-            hubEntityId,
-            userEntityId,
-            tokenId,
-            approvedAmount: currentOutCapacity.toString(),
-          }),
-          { status: 200, headers },
-        );
-      }
-
-      let hubSignerId: string;
-      try {
-        hubSignerId = resolveEntityProposerId(env, hubEntityId, 'credit-request');
-      } catch (error) {
-        return new Response(
-          JSON.stringify({ error: error instanceof Error ? error.message : 'Hub signer unavailable' }),
-          { status: 503, headers },
-        );
-      }
-
-      enqueueRuntimeInput(env, {
-        runtimeTxs: [],
-        entityInputs: [
-          {
-            entityId: hubEntityId,
-            signerId: hubSignerId,
-            entityTxs: [
-              {
-                type: 'extendCredit',
-                data: {
-                  counterpartyEntityId: userEntityId,
-                  tokenId,
-                  amount: approvedAmount,
-                },
-              },
-            ],
-          },
-        ],
-      });
-
-      return new Response(
-        JSON.stringify({
-          success: true,
-          hubEntityId,
-          userEntityId,
-          tokenId,
-          approvedAmount: approvedAmount.toString(),
-        }),
-        { status: 200, headers },
-      );
-    } catch (error) {
-      const message = error instanceof Error ? error.message : String(error);
-      return new Response(safeStringify({ error: message }), { status: 500, headers });
-    }
+    return handleCreditRequest({
+      req,
+      env,
+      headers,
+      activeHubEntityIds: relayStore.activeHubEntityIds,
+      enqueueRuntimeInput,
+    });
   }
 
   return new Response(safeStringify({ error: 'Not found' }), { status: 404, headers });
