@@ -110,6 +110,7 @@ import {
   updateJurisdictionsJson,
 } from './server/jurisdictions';
 import { createTokenCatalogController } from './server/token-catalog';
+import { buildHubDiscoveryPayload } from './server/hub-discovery';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
@@ -476,11 +477,6 @@ const getKnownProfileBundle = (env: Env | null, entityId: string): { profile: Pr
     if (peer) peers.push(peer);
   }
   return { profile, peers };
-};
-
-const compareText = (left: string, right: string): number => {
-  if (left === right) return 0;
-  return left < right ? -1 : 1;
 };
 
 const stopMarketMakerLoop = (): void => {
@@ -989,53 +985,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   if (qaResponse) return qaResponse;
 
   if (pathname === '/api/hubs') {
-    const relayHubProfiles = getAllGossipProfiles(relayStore).filter((profile: Profile) =>
-      profile.metadata.isHub === true,
-    );
-    const mergedHubProfiles = new Map<string, Profile>();
-    for (const profile of relayHubProfiles) {
-      mergedHubProfiles.set(String(profile.entityId || '').toLowerCase(), profile);
-    }
-    for (const profile of env?.gossip?.getHubs?.() || []) {
-      const entityId = String(profile.entityId || '').toLowerCase();
-      if (!entityId || mergedHubProfiles.has(entityId)) continue;
-      mergedHubProfiles.set(entityId, profile);
-    }
-
-    const hubs = Array.from(mergedHubProfiles.values())
-      .map((profile: Profile) => {
-        const runtimeId = normalizeRuntimeKey(profile.runtimeId);
-        return {
-          entityId: profile.entityId,
-          runtimeId: runtimeId || profile.runtimeId || null,
-          name: profile.name,
-          bio: profile.bio || null,
-          website: profile.website || null,
-          wsUrl: profile.wsUrl || null,
-          publicAccounts: profile.publicAccounts || [],
-          metadata: profile.metadata,
-          lastUpdated: profile.lastUpdated,
-          online: runtimeId ? relayStore.clients.has(runtimeId) : false,
-        };
-      })
-      .sort((left, right) => {
-        const leftName = String(left.name || '');
-        const rightName = String(right.name || '');
-        if (leftName && rightName && leftName !== rightName) {
-          return compareText(leftName, rightName);
-        }
-        return Number(right.lastUpdated || 0) - Number(left.lastUpdated || 0);
-      });
-
-    return new Response(
-      safeStringify({
-        ok: true,
-        count: hubs.length,
-        serverTime: Date.now(),
-        hubs,
-      }),
-      { headers },
-    );
+    return new Response(safeStringify(buildHubDiscoveryPayload({ env, relayStore })), { headers });
   }
 
   if (pathname === '/api/gossip/profile') {
