@@ -24,8 +24,7 @@ import { normalizeRebalanceMatchingStrategy } from '../rebalance-policy';
 import { initJBatch, batchAddSettlement } from '../j-batch';
 import { handleR2E } from './handlers/r2e';
 import { handleHtlcPayment } from './handlers/htlc-payment';
-import { generateLockId, hashHtlcSecret } from '../htlc-utils';
-import { getRuntimeJurisdictionHeight, requireRuntimeJurisdictionDisputeDelayMs } from '../j-height';
+import { requireRuntimeJurisdictionDisputeDelayMs } from '../j-height';
 import {
 	buildCrossJurisdictionPullReveal,
 	buildPreparedCrossJurisdictionRoute,
@@ -77,6 +76,13 @@ import {
   handleVoteEntityTx,
 } from './handlers/basic';
 import { handleOpenAccountEntityTx } from './handlers/open-account';
+import {
+  handleHashlockPaymentEntityTx,
+  handleManualHtlcLockEntityTx,
+  handleProcessHtlcTimeoutsEntityTx,
+  handleResolveHtlcLockEntityTx,
+  handleRollbackTimedOutFramesEntityTx,
+} from './handlers/htlc-direct';
 
 const entityTxLog = createStructuredLogger('entity.tx');
 import {
@@ -115,7 +121,6 @@ const cancelOrderbookOfferIfPresent = (
   accountId: string,
   offerId: string,
 ): boolean => removeBookOrderById(env, state, `${accountId}:${offerId}`);
-const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 
 const pushCrossJOutput = (
   env: Env,
@@ -207,283 +212,23 @@ export const applyEntityTx = async (
     }
 
     if (entityTx.type === 'hashlockPayment') {
-      const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
-      const mempoolOps: MempoolOp[] = [];
-      const {
-        targetEntityId,
-        tokenId,
-        amount,
-        hashlock,
-        description,
-      } = entityTx.data;
-      const normalizedTarget = findAccountKey(newState, targetEntityId);
-      if (!normalizedTarget) {
-        addMessage(newState, `❌ Hashlock payment failed: no account with ${formatEntityId(targetEntityId)}`);
-        return { newState, outputs, mempoolOps };
-      }
-      const amountBig = typeof amount === 'bigint' ? amount : BigInt(String(amount));
-      if (amountBig <= 0n) {
-        addMessage(newState, '❌ Hashlock payment failed: invalid amount');
-        return { newState, outputs, mempoolOps };
-      }
-      if (!HEX_32_RE.test(hashlock)) {
-        addMessage(newState, '❌ Hashlock payment failed: invalid hashlock');
-        return { newState, outputs, mempoolOps };
-      }
-
-      const accountMachine = newState.accounts.get(normalizedTarget);
-      const preparedLockId = typeof entityTx.data.lockId === 'string' ? entityTx.data.lockId : '';
-      const explicitLockId = HEX_32_RE.test(preparedLockId);
-      let lockNonce = (accountMachine?.currentHeight ?? 0) + (accountMachine?.mempool?.length ?? 0);
-      let lockId = explicitLockId
-        ? preparedLockId
-        : generateLockId(hashlock, newState.height, lockNonce, newState.timestamp);
-      while (
-        !explicitLockId &&
-        (
-          accountMachine?.locks?.has(lockId) ||
-          (accountMachine?.mempool ?? []).some((tx) => tx.type === 'htlc_lock' && tx.data.lockId === lockId) ||
-          (accountMachine?.pendingFrame?.accountTxs ?? []).some((tx) => tx.type === 'htlc_lock' && tx.data.lockId === lockId)
-        )
-      ) {
-        lockNonce += 1;
-        lockId = generateLockId(hashlock, newState.height, lockNonce, newState.timestamp);
-      }
-      const timelock = entityTx.data.timelock !== undefined
-        ? BigInt(entityTx.data.timelock)
-        : BigInt(newState.timestamp + 120_000);
-      const revealBeforeHeight = entityTx.data.revealBeforeHeight !== undefined
-        ? Number(entityTx.data.revealBeforeHeight)
-        : getRuntimeJurisdictionHeight(env, newState.lastFinalizedJHeight || 0) + 50;
-      if (timelock <= BigInt(newState.timestamp) || !Number.isFinite(revealBeforeHeight) || revealBeforeHeight <= newState.lastFinalizedJHeight) {
-        addMessage(newState, '❌ Hashlock payment failed: invalid deadline');
-        return { newState, outputs, mempoolOps };
-      }
-
-      mempoolOps.push({
-        accountId: normalizedTarget,
-        tx: {
-          type: 'htlc_lock',
-          data: {
-            lockId,
-            hashlock,
-            timelock,
-            revealBeforeHeight,
-            amount: amountBig,
-            tokenId: Number(tokenId),
-          },
-        },
-      });
-
-      const startedAtMs = typeof entityTx.data.startedAtMs === 'number'
-        ? entityTx.data.startedAtMs
-        : newState.timestamp;
-      newState.htlcRoutes.set(hashlock, {
-        hashlock,
-        tokenId: Number(tokenId),
-        amount: amountBig,
-        startedAtMs,
-        outboundEntity: normalizedTarget,
-        outboundLockId: lockId,
-        ...(entityTx.data.crossJurisdictionRelay ? { crossJurisdictionRelay: entityTx.data.crossJurisdictionRelay } : {}),
-        createdTimestamp: newState.timestamp,
-      });
-      newState.lockBook.set(lockId, {
-        lockId,
-        accountId: normalizedTarget,
-        tokenId: Number(tokenId),
-        amount: amountBig,
-        hashlock,
-        timelock,
-        direction: 'outgoing',
-        createdAt: BigInt(newState.timestamp),
-      });
-      if (description && typeof description === 'string') {
-        if (!(newState.htlcNotes instanceof Map)) newState.htlcNotes = new Map();
-        newState.htlcNotes.set(`hashlock:${hashlock}`, description);
-        newState.htlcNotes.set(`lock:${lockId}`, description);
-      }
-      addMessage(newState, `🔒 Hashlock payment locked ${amountBig} token ${tokenId} to ${formatEntityId(normalizedTarget)}`);
-
-      const firstValidator = entityState.config.validators[0];
-      if (firstValidator) outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
-      return { newState, outputs, mempoolOps };
+      return handleHashlockPaymentEntityTx(env, entityState, entityTx);
     }
 
     if (entityTx.type === 'resolveHtlcLock') {
-      const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
-      const mempoolOps: MempoolOp[] = [];
-      const { counterpartyEntityId, lockId, secret } = entityTx.data;
-      const normalizedCounterparty = findAccountKey(newState, counterpartyEntityId);
-      if (!normalizedCounterparty) {
-        addMessage(newState, `❌ HTLC resolve failed: no account with ${formatEntityId(counterpartyEntityId)}`);
-        return { newState, outputs, mempoolOps };
-      }
-      if (!HEX_32_RE.test(lockId)) {
-        addMessage(newState, '❌ HTLC resolve failed: invalid lock id');
-        return { newState, outputs, mempoolOps };
-      }
-      let expectedHashlock: string | null = null;
-      try {
-        expectedHashlock = hashHtlcSecret(secret);
-      } catch {
-        addMessage(newState, '❌ HTLC resolve failed: invalid secret');
-        return { newState, outputs, mempoolOps };
-      }
-      const account = newState.accounts.get(normalizedCounterparty);
-      const lock = account?.locks?.get(lockId);
-      if (lock && lock.hashlock !== expectedHashlock) {
-        addMessage(newState, '❌ HTLC resolve failed: secret/hashlock mismatch');
-        return { newState, outputs, mempoolOps };
-      }
-      mempoolOps.push({
-        accountId: normalizedCounterparty,
-        tx: {
-          type: 'htlc_resolve',
-          data: {
-            lockId,
-            outcome: 'secret',
-            secret,
-          },
-        },
-      });
-      addMessage(newState, `🔓 HTLC resolve queued for ${formatEntityId(normalizedCounterparty)}`);
-      const firstValidator = entityState.config.validators[0];
-      if (firstValidator) outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
-      return { newState, outputs, mempoolOps };
+      return handleResolveHtlcLockEntityTx(entityState, entityTx);
     }
 
     if (entityTx.type === 'processHtlcTimeouts') {
-      console.log(`⏰ PROCESS-HTLC-TIMEOUTS: Processing ${entityTx.data.expiredLocks?.length || 0} expired locks`);
-
-      const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
-      const mempoolOps: MempoolOp[] = [];
-
-      // Convert expired locks to htlc_resolve(error:timeout)
-      for (const { accountId, lockId } of entityTx.data.expiredLocks || []) {
-        mempoolOps.push({
-          accountId,
-          tx: {
-            type: 'htlc_resolve',
-            data: { lockId, outcome: 'error' as const, reason: 'timeout' },
-          },
-        });
-        console.log(`⏰   Queued timeout for lock ${lockId.slice(0, 16)}... on account ${accountId.slice(-4)}`);
-      }
-
-      return { newState, outputs, mempoolOps };
+      return handleProcessHtlcTimeoutsEntityTx(entityState, entityTx);
     }
 
     if (entityTx.type === 'rollbackTimedOutFrames') {
-      console.log(
-        `⏰ ROLLBACK-TIMED-OUT-FRAMES: Processing ${entityTx.data.timedOutAccounts.length} timed-out accounts`,
-      );
-
-      const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
-      const mempoolOps: MempoolOp[] = [];
-
-      for (const { counterpartyId, frameHeight } of entityTx.data.timedOutAccounts) {
-        const accountMachine = newState.accounts.get(counterpartyId);
-        if (!accountMachine?.pendingFrame) {
-          console.log(`⏰   Account ${counterpartyId.slice(-4)}: no pendingFrame (already resolved)`);
-          continue;
-        }
-
-        // Verify the frame height matches (avoid stale rollback)
-        if (accountMachine.pendingFrame.height !== frameHeight) {
-          console.log(
-            `⏰   Account ${counterpartyId.slice(-4)}: frame height mismatch (pending=${accountMachine.pendingFrame.height}, expected=${frameHeight})`,
-          );
-          continue;
-        }
-
-        console.log(`⏰   Rolling back pendingFrame h${frameHeight} for account ${counterpartyId.slice(-4)}`);
-
-        // Scan pending frame for HTLC locks that need backward cancellation
-        for (const tx of accountMachine.pendingFrame.accountTxs) {
-          if (tx.type === 'htlc_lock') {
-            const hashlock = tx.data.hashlock;
-            // Look up htlcRoute for backward cancellation
-            const route = newState.htlcRoutes.get(hashlock);
-            if (route && route.inboundEntity && route.inboundLockId) {
-              mempoolOps.push({
-                accountId: route.inboundEntity,
-                tx: {
-                  type: 'htlc_resolve',
-                  data: {
-                    lockId: route.inboundLockId,
-                    outcome: 'error' as const,
-                    reason: 'ack_timeout',
-                  },
-                },
-              });
-              console.log(
-                `⬅️   HTLC cancel backward: hashlock=${hashlock.slice(0, 12)}... → inbound ${route.inboundEntity.slice(-4)}`,
-              );
-              newState.htlcRoutes.delete(hashlock);
-            }
-            // Don't re-add htlc_lock to mempool (it's being cancelled)
-          } else {
-            // Rollback path: these txs were already part of the failed pending
-            // account frame. Restoring them to the same account mempool is the
-            // inverse of that failed proposal, not a new handler-originated
-            // mutation.
-            accountMachine.mempool.push(tx);
-            console.log(`📥   Restored ${tx.type} to mempool`);
-          }
-        }
-
-        // Clear pending state (same as rollback in account-consensus.ts)
-        delete accountMachine.pendingFrame;
-        delete accountMachine.pendingAccountInput;
-        delete accountMachine.clonedForValidation;
-        console.log(
-          `⏰   Account ${counterpartyId.slice(-4)}: pendingFrame cleared, mempool=${accountMachine.mempool.length}`,
-        );
-      }
-
-      return { newState, outputs, mempoolOps };
+      return handleRollbackTimedOutFramesEntityTx(entityState, entityTx);
     }
 
     if (entityTx.type === 'manualHtlcLock') {
-      console.log(`🔒 MANUAL-HTLC-LOCK: Creating lock without envelope (timeout test)`);
-
-      const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
-      const mempoolOps: MempoolOp[] = [];
-
-      const { counterpartyId, lockId, hashlock } = entityTx.data;
-      // Type coercion: page.evaluate passes strings, htlc_lock needs bigint/number
-      const timelock = BigInt(entityTx.data.timelock);
-      const revealBeforeHeight = Number(entityTx.data.revealBeforeHeight);
-      const amount = BigInt(entityTx.data.amount);
-      const tokenId = Number(entityTx.data.tokenId);
-
-      mempoolOps.push({
-        accountId: counterpartyId,
-        tx: {
-          type: 'htlc_lock',
-          data: {
-            lockId,
-            hashlock,
-            timelock,
-            revealBeforeHeight,
-            amount,
-            tokenId,
-            // NO envelope - for timeout testing
-          },
-        },
-      });
-
-      console.log(
-        `🔒   Queued htlc_lock for ${counterpartyId.slice(-4)}, lockId=${lockId.slice(0, 16)}..., amount=${amount}, timelock=${timelock}`,
-      );
-
-      return { newState, outputs, mempoolOps };
+      return handleManualHtlcLockEntityTx(entityState, entityTx);
     }
 
     if (entityTx.type === 'directPayment') {
