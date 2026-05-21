@@ -14,9 +14,9 @@
  * Each frame includes Fed-style subtitles explaining what/why/tradfi-parallel
  */
 
-import type { Env, EntityInput, EntityReplica, Delta, JTx } from '../types';
+import type { Env, EntityInput, EntityReplica, Delta, FrameLogEntry, JTx } from '../types';
 import { ensureJAdapter, getScenarioJAdapter, createJReplica } from './boot';
-import type { JAdapter } from '../jadapter/types';
+import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import { snap, checkSolvency, assertRuntimeIdle, enableStrictScenario, advanceScenarioTime, ensureSignerKeysFromSeed, requireRuntimeSeed, formatUSD, syncChain, commitRuntimeInput } from './helpers';
 import { formatRuntime } from '../runtime-ascii';
 import { deriveDelta, isLeft } from '../account-utils';
@@ -39,10 +39,12 @@ const getProcess = async () => {
 const USDC_TOKEN_ID = 1;
 const DECIMALS = 18n;
 
-// BrowserVM with required methods for this scenario (all optional methods are used)
+type ExternalTokenToReserveOptions = NonNullable<Parameters<JAdapter['externalTokenToReserve']>[4]>;
+type SnapshotLogs = { logs?: FrameLogEntry[]; frameLogs?: FrameLogEntry[] };
+
 type RequiredBrowserVM = {
   getReserves: (entityId: string, tokenId: number) => Promise<bigint>;
-  externalTokenToReserve: (privKey: Uint8Array, entityId: string, tokenAddress: string, amount: bigint, opts?: any) => Promise<any[]>;
+  externalTokenToReserve: (privKey: Uint8Array, entityId: string, tokenAddress: string, amount: bigint, opts?: ExternalTokenToReserveOptions) => Promise<unknown[]>;
   getBlockNumber: () => bigint;
   getBlockHash: () => string;
   getChainId: () => bigint;
@@ -50,16 +52,16 @@ type RequiredBrowserVM = {
   getEntityProviderAddress: () => string;
   getEntityNonce: (entityId: string) => Promise<bigint>;
   getAccountInfo: (entityId: string, counterpartyId: string) => Promise<{ nonce: bigint; disputeHash: string; disputeTimeout: bigint }>;
-  onAny: (callback: (events: any[]) => void) => () => void;
-  getTokenRegistry: () => any[];
+  onAny: (callback: (events: unknown[]) => void) => () => void;
+  getTokenRegistry: () => JTokenInfo[];
   getTokenAddress: (symbol: string) => string | null;
   fundSignerWallet: (address: string, amount?: bigint) => Promise<void>;
   approveErc20: (privKey: Uint8Array, tokenAddress: string, spender: string, amount: bigint) => Promise<string>;
-  reserveToReserve?: (from: string, to: string, tokenId: number, amount: bigint) => Promise<any[]>;
-  debugFundReserves?: (entityId: string, tokenId: number, amount: bigint) => Promise<any[]>;
+  reserveToReserve?: (from: string, to: string, tokenId: number, amount: bigint) => Promise<unknown[]>;
+  debugFundReserves?: (entityId: string, tokenId: number, amount: bigint) => Promise<unknown[]>;
   captureStateRoot?: () => Promise<Uint8Array>;
   timeTravel?: (stateRoot: Uint8Array) => Promise<void>;
-  processBatch?: (encodedBatch: string, hankoData: string, nonce: bigint) => Promise<any[]>;
+  processBatch?: (encodedBatch: string, hankoData: string, nonce: bigint) => Promise<unknown[]>;
 };
 const ONE_TOKEN = 10n ** DECIMALS;
 
@@ -157,7 +159,7 @@ function getDerivedOutCapacity(env: Env, entityId: string, counterpartyId: strin
 
 
 /**
- * Process any pending j_events from BrowserVM operations
+ * Process pending j_events from BrowserVM operations
  * This is the proper R→E→A flow: BrowserVM emits → j-watcher queues → processJEvents runs
  */
 async function processJEvents(env: Env): Promise<void> {
@@ -170,7 +172,6 @@ async function processJEvents(env: Env): Promise<void> {
   } catch {
     // Scenario may call this before adapter is attached.
   }
-  // Check if j-watcher queued any events
   const pendingInputs = env.runtimeInput?.entityInputs || [];
   if (!env.quietRuntimeLogs) {
     console.log(`🔄 processJEvents CALLED: ${pendingInputs.length} pending in queue`);
@@ -390,7 +391,7 @@ export async function ahb(env: Env): Promise<void> {
     env.pendingNetworkOutputs = [];
     env.frameLogs = [];
     env.gossip = createGossipLayer();
-    (env as any).activeJurisdiction = undefined;
+    env.activeJurisdiction = undefined;
     if (env.scenarioMode) {
       env.timestamp = 1;
     }
@@ -400,20 +401,18 @@ export async function ahb(env: Env): Promise<void> {
     console.log('[AHB] BEFORE: eReplicas =', env.eReplicas.size, 'history =', env.history?.length || 0);
     console.log('[AHB] ========================================');
 
-    // Setup JAdapter (browservm or rpc, depending on JADAPTER_MODE)
     let jadapter: JAdapter;
     try {
       jadapter = getScenarioJAdapter(env);
     } catch {
       jadapter = await ensureJAdapter(env);
       const jReplica = createJReplica(env, 'AHB Demo', jadapter.addresses.depository);
-      (jReplica as any).jadapter = jadapter;
-      (jReplica as any).depositoryAddress = jadapter.addresses.depository;
-      (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
+      jReplica.jadapter = jadapter;
+      jReplica.depositoryAddress = jadapter.addresses.depository;
+      jReplica.entityProviderAddress = jadapter.addresses.entityProvider;
       jadapter.startWatching(env);
     }
 
-    // BrowserVM handle (for mode-specific calls — null in RPC mode)
     const browserVM = jadapter.getBrowserVM();
     const vm = browserVM as unknown as (RequiredBrowserVM | null);
 
@@ -439,8 +438,8 @@ export async function ahb(env: Env): Promise<void> {
     snap(env, 'Jurisdiction Machine Deployed', {
       description: 'Frame 0: Clean Slate - J-Machine Ready',
       what: 'The J-Machine (Jurisdiction Machine) is deployed on-chain. It represents the EVM smart contracts (Depository.sol, EntityProvider.sol) that will process settlements.',
-      why: 'Before any entities exist, the jurisdiction infrastructure must be in place. Think of this as deploying the central bank\'s core settlement system.',
-      tradfiParallel: 'Like the Federal Reserve deploying its Fedwire Funds Service before any banks can participate.',
+      why: 'Before entities exist, the jurisdiction infrastructure must be in place. Think of this as deploying the central bank\'s core settlement system.',
+      tradfiParallel: 'Like the Federal Reserve deploying its Fedwire Funds Service before banks can participate.',
       keyMetrics: [
         'J-Machine: Deployed at origin',
         'Entities: 0 (none created yet)',
@@ -1588,7 +1587,6 @@ export async function ahb(env: Env): Promise<void> {
     // Wait for batch mining + watcher delivery + bilateral apply (RPC/BVM parity)
     await syncChain(env, 5);
 
-    // Frame 23: Process any pending outputs
     console.log('\n🏦 FRAME 23: Alice-Hub Settlement completes');
     await process(env);
     logPending();
@@ -1713,7 +1711,6 @@ export async function ahb(env: Env): Promise<void> {
     // Wait for batch mining + watcher delivery + bilateral apply (RPC/BVM parity)
     await syncChain(env, 5);
 
-    // Frame 25: Process any pending outputs
     console.log('\n🏦 FRAME 25: Hub-Bob Settlement completes');
     await process(env);
     logPending();
@@ -1886,10 +1883,10 @@ export async function ahb(env: Env): Promise<void> {
   console.log(`   Hub's view:   mempool=${hubAccountAfterSubmit?.mempool.length || 0}, pending=${hubAccountAfterSubmit?.pendingFrame ? 'h' + hubAccountAfterSubmit.pendingFrame.height : 'none'}`);
 
   if (aliceAccountAfterSubmit?.mempool) {
-    console.log(`   Alice mempool txs: [${aliceAccountAfterSubmit.mempool.map((t: any) => t.type).join(', ')}]`);
+    console.log(`   Alice mempool txs: [${aliceAccountAfterSubmit.mempool.map((t) => t.type).join(', ')}]`);
   }
   if (hubAccountAfterSubmit?.mempool) {
-    console.log(`   Hub mempool txs: [${hubAccountAfterSubmit.mempool.map((t: any) => t.type).join(', ')}]`);
+    console.log(`   Hub mempool txs: [${hubAccountAfterSubmit.mempool.map((t) => t.type).join(', ')}]`);
   }
 
   logPending();
@@ -1915,7 +1912,7 @@ export async function ahb(env: Env): Promise<void> {
     if (afterRound > beforeRound) {
       for (let i = beforeRound; i < afterRound; i++) {
         const snapshot = env.history![i];
-        const frameLogs = (snapshot as any)?.logs || (snapshot as any)?.frameLogs || [];
+        const frameLogs = (snapshot as SnapshotLogs | undefined)?.logs ?? (snapshot as SnapshotLogs | undefined)?.frameLogs ?? [];
         for (const entry of frameLogs) {
           if (entry.category !== 'consensus') continue;
           const msg = entry.message || '';
@@ -1937,7 +1934,7 @@ export async function ahb(env: Env): Promise<void> {
 
     if (currentNet === targetNet) {
       console.log(`   ✅ Both payments settled after ${rounds} rounds`);
-      // Ensure any pending ACKs are processed before final sync checks.
+      // Ensure pending ACKs are processed before final sync checks.
       await processUntil(env, () => {
         const [, aliceRep] = findReplica(env, alice.id);
         const [, hubRep] = findReplica(env, hub.id);
