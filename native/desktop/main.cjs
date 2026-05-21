@@ -2,6 +2,11 @@ const { app, BrowserWindow, Menu, Notification, ipcMain, shell } = require('elec
 const fs = require('node:fs');
 const http = require('node:http');
 const path = require('node:path');
+const {
+	isAllowedExternalUrl,
+	sanitizeNotificationPayload,
+	setDesktopSecurityHeaders,
+} = require('./security.cjs');
 
 const ROOT = path.resolve(__dirname, '../..');
 const WEB_DIR = path.resolve(process.env.XLN_DESKTOP_WEB_DIR || path.join(ROOT, 'frontend/build'));
@@ -72,9 +77,9 @@ function startStaticServer() {
 					res.end('Not found');
 					return;
 				}
-				res.setHeader('Content-Type', mimeTypes.get(path.extname(filePath)) || 'application/octet-stream');
 				res.setHeader('Cache-Control', 'no-store');
-				res.setHeader('X-Content-Type-Options', 'nosniff');
+				res.setHeader('Content-Type', mimeTypes.get(path.extname(filePath)) || 'application/octet-stream');
+				setDesktopSecurityHeaders(res);
 				res.end(data);
 			});
 		});
@@ -172,13 +177,24 @@ function createWindow(baseUrl) {
 	});
 
 	mainWindow.once('ready-to-show', () => showMainWindow());
+	// The wallet UI is local. External navigation is a trust boundary: keep it
+	// out of the privileged app window and only hand safe web/mail URLs to OS.
 	mainWindow.webContents.setWindowOpenHandler(({ url }) => {
 		if (url.startsWith('xln://')) {
 			sendDeepLink(url);
 			return { action: 'deny' };
 		}
-		shell.openExternal(url);
+		if (isAllowedExternalUrl(url)) shell.openExternal(url);
 		return { action: 'deny' };
+	});
+	mainWindow.webContents.on('will-navigate', (event, url) => {
+		if (url === baseUrl || url.startsWith(`${baseUrl}/`)) return;
+		event.preventDefault();
+		if (url.startsWith('xln://')) {
+			sendDeepLink(url);
+			return;
+		}
+		if (isAllowedExternalUrl(url)) shell.openExternal(url);
 	});
 	mainWindow.webContents.once('did-finish-load', () => {
 		if (pendingDeepLink) {
@@ -218,6 +234,10 @@ if (!gotLock) {
 
 	app.whenReady().then(async () => {
 		app.name = APP_NAME;
+		app.on('web-contents-created', (_event, contents) => {
+			contents.session.setPermissionRequestHandler((_webContents, _permission, callback) => callback(false));
+			contents.session.setPermissionCheckHandler(() => false);
+		});
 		installProtocolHandler();
 		createMenu();
 		const baseUrl = await startStaticServer();
@@ -236,9 +256,10 @@ if (!gotLock) {
 
 ipcMain.handle('xln-desktop-notify-payment-wake', (_event, payload = {}) => {
 	if (!Notification.isSupported()) return { ok: false, reason: 'notifications-unsupported' };
+	const safePayload = sanitizeNotificationPayload(payload);
 	const notification = new Notification({
-		title: String(payload.title || 'XLN payment'),
-		body: String(payload.body || 'Open XLN Wallet to review.'),
+		title: safePayload.title,
+		body: safePayload.body,
 		silent: false,
 	});
 	notification.on('click', showMainWindow);
