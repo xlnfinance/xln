@@ -103,6 +103,7 @@ export interface ApplyEntityTxResult {
   swapOffersCancelled?: SwapCancelEvent[];
   // Multi-signer: Hashes that need entity-quorum signing
   hashesToSign?: Array<{ hash: string; type: HashType; context: string }>;
+  skippedError?: string;
 }
 
 const deterministicEntityTimestamp = (state: EntityState, env: Env): number =>
@@ -2174,14 +2175,16 @@ export const applyEntityTx = async (
       return await handleDisputeFinalize(entityState, entityTx, env);
     }
 
-    console.warn(`⚠️ Unhandled EntityTx type: ${entityTx.type}`);
-    return { newState: entityState, outputs: [], jOutputs: [] };
+    const skippedError = `ENTITY_TX_UNHANDLED: type=${String(entityTx.type)}`;
+    console.warn(`⚠️ ${skippedError}`);
+    return { newState: entityState, outputs: [], jOutputs: [], skippedError };
   } catch (error) {
     console.error(`❌ Transaction execution error:`, error);
     log.error(`❌ Transaction execution error: ${error}`);
     if (shouldRethrowEntityTxError(error)) {
       throw error;
     }
-    return { newState: entityState, outputs: [], jOutputs: [] }; // Return unchanged state on error
+    const message = error instanceof Error ? error.message : String(error);
+    return { newState: entityState, outputs: [], jOutputs: [], skippedError: message };
   }
 };

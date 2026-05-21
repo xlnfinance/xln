@@ -121,6 +121,83 @@ describe('storage frame journal retention', () => {
     await closeInfraDb(env);
   });
 
+  test('production refuses storage safety override flags', async () => {
+    const env = await createSavedEmptyEnv('storage-production-safety-flags');
+    const runtimeId = env.runtimeId!;
+    const seed = env.runtimeSeed!;
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+
+    const previousNodeEnv = process.env['NODE_ENV'];
+    const previousSkip = process.env['XLN_STORAGE_SKIP_VERIFY_ON_OPEN'];
+    const previousForce = process.env['XLN_STORAGE_FORCE_RESTORE'];
+
+    try {
+      process.env['NODE_ENV'] = 'production';
+      for (const flag of ['XLN_STORAGE_SKIP_VERIFY_ON_OPEN', 'XLN_STORAGE_FORCE_RESTORE'] as const) {
+        delete process.env['XLN_STORAGE_SKIP_VERIFY_ON_OPEN'];
+        delete process.env['XLN_STORAGE_FORCE_RESTORE'];
+        process.env[flag] = '1';
+
+        await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow(
+          `STORAGE_SAFETY_OVERRIDE_FORBIDDEN_IN_PRODUCTION: flags=${flag}`,
+        );
+      }
+    } finally {
+      if (previousNodeEnv === undefined) delete process.env['NODE_ENV'];
+      else process.env['NODE_ENV'] = previousNodeEnv;
+      if (previousSkip === undefined) delete process.env['XLN_STORAGE_SKIP_VERIFY_ON_OPEN'];
+      else process.env['XLN_STORAGE_SKIP_VERIFY_ON_OPEN'] = previousSkip;
+      if (previousForce === undefined) delete process.env['XLN_STORAGE_FORCE_RESTORE'];
+      else process.env['XLN_STORAGE_FORCE_RESTORE'] = previousForce;
+    }
+  });
+
+  test('production refuses disabled canonical storage hashes', async () => {
+    const previousNodeEnv = process.env['NODE_ENV'];
+    const previousVerifyCanonical = process.env['XLN_STORAGE_VERIFY_CANONICAL'];
+    const previousPeriod = process.env['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'];
+
+    try {
+      process.env['NODE_ENV'] = 'production';
+      process.env['XLN_STORAGE_VERIFY_CANONICAL'] = '0';
+
+      const envFromFlag = createEmptyEnv(`storage-prod-canonical-flag ${Date.now()}`);
+      envFromFlag.quietRuntimeLogs = true;
+      envFromFlag.runtimeId = deriveSignerAddressSync(envFromFlag.runtimeSeed!, '1').toLowerCase();
+      envFromFlag.dbNamespace = envFromFlag.runtimeId;
+      envFromFlag.height = 1;
+      envFromFlag.timestamp = 1_000;
+
+      await expect(saveEnvToDB(envFromFlag, { runtimeTxs: [], entityInputs: [] }, []))
+        .rejects.toThrow('STORAGE_CANONICAL_HASH_REQUIRED_IN_PRODUCTION');
+      await closeRuntimeDb(envFromFlag);
+      await closeInfraDb(envFromFlag);
+
+      delete process.env['XLN_STORAGE_VERIFY_CANONICAL'];
+      process.env['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'] = '0';
+      const envFromPeriod = createEmptyEnv(`storage-prod-canonical-period ${Date.now()}`);
+      envFromPeriod.quietRuntimeLogs = true;
+      envFromPeriod.runtimeId = deriveSignerAddressSync(envFromPeriod.runtimeSeed!, '1').toLowerCase();
+      envFromPeriod.dbNamespace = envFromPeriod.runtimeId;
+      envFromPeriod.height = 1;
+      envFromPeriod.timestamp = 1_000;
+
+      await expect(saveEnvToDB(envFromPeriod, { runtimeTxs: [], entityInputs: [] }, []))
+        .rejects.toThrow('STORAGE_CANONICAL_HASH_REQUIRED_IN_PRODUCTION');
+      await closeRuntimeDb(envFromPeriod);
+      await closeInfraDb(envFromPeriod);
+    } finally {
+      if (previousNodeEnv === undefined) delete process.env['NODE_ENV'];
+      else process.env['NODE_ENV'] = previousNodeEnv;
+      if (previousVerifyCanonical === undefined) delete process.env['XLN_STORAGE_VERIFY_CANONICAL'];
+      else process.env['XLN_STORAGE_VERIFY_CANONICAL'] = previousVerifyCanonical;
+      if (previousPeriod === undefined) delete process.env['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'];
+      else process.env['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'] = previousPeriod;
+    }
+  });
+
   test('canonical frame hash fails restore when snapshot body loses state', async () => {
     const seed = `canonical-snapshot-restore ${Date.now()} alpha beta gamma`;
     const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
@@ -196,6 +273,86 @@ describe('storage frame journal retention', () => {
     await closeInfraDb(env);
 
     await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow('STORAGE_RESTORE_CANONICAL_HASH_MISMATCH');
+  });
+
+  test('fails closed when a replay diff is missing after the latest snapshot', async () => {
+    const seed = `storage-missing-replay-diff ${Date.now()} alpha beta gamma`;
+    const runtimeId = deriveSignerAddressSync(seed, '1').toLowerCase();
+    const dbRoot = process.env.XLN_DB_PATH || 'db-tmp/runtime';
+    const namespacePath = join(dbRoot, runtimeId);
+
+    rmSync(namespacePath, { recursive: true, force: true });
+    rmSync(`${namespacePath}-storage-current`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-storage-previous`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-frames`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-events`, { recursive: true, force: true });
+    rmSync(`${namespacePath}-infra`, { recursive: true, force: true });
+    mkdirSync(dbRoot, { recursive: true });
+
+    const env = createEmptyEnv(seed);
+    env.runtimeId = runtimeId;
+    env.dbNamespace = runtimeId;
+    env.quietRuntimeLogs = true;
+    env.runtimeConfig = {
+      ...(env.runtimeConfig || {}),
+      storage: {
+        ...(env.runtimeConfig?.storage || {}),
+        materializePeriodFrames: 100,
+        snapshotPeriodFrames: 100,
+      },
+    };
+
+    const signer = deriveSignerAddressSync(seed, '1');
+    registerSignerKey(signer, deriveSignerKeySync(seed, '1'));
+    registerSignerKey(signer.slice(-4).toLowerCase(), deriveSignerKeySync(seed, '1'));
+    const entityId = generateLazyEntityId([signer], 1n).toLowerCase();
+    const jurisdiction = {
+      name: 'storage-missing-replay-diff-test',
+      address: 'browservm://storage-missing-replay-diff-test',
+      depositoryAddress: '0x000000000000000000000000000000000000dEaD',
+      entityProviderAddress: '0x000000000000000000000000000000000000bEEF',
+      chainId: 31337,
+    };
+    installTestJurisdiction(env, jurisdiction);
+
+    enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importReplica',
+        entityId,
+        signerId: signer,
+        data: {
+          isProposer: true,
+          config: {
+            mode: 'proposer-based',
+            threshold: 1n,
+            validators: [signer],
+            shares: { [signer]: 1n },
+            jurisdiction,
+          },
+        },
+      }],
+      entityInputs: [],
+    });
+    await processRuntime(env, []);
+
+    const replica = Array.from(env.eReplicas.values()).find((item) => item.entityId === entityId);
+    if (!replica) throw new Error('TEST_REPLICA_MISSING');
+    env.height = 2;
+    env.timestamp += 1;
+    replica.state.messages.push('requires replay diff');
+    markStorageEntityDirty(env, entityId);
+    await saveEnvToDB(env, { runtimeTxs: [], entityInputs: [] }, []);
+
+    const historyDb = getFrameDb(env);
+    expect(await readRawOrNull(historyDb, keyDiff(2))).toBeTruthy();
+    const batch = historyDb.batch();
+    batch.del?.(keyDiff(2));
+    await batch.write({ sync: true });
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
+
+    await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow('STORAGE_DIFF_MISSING: height=2');
   });
 
   test('rotates current storage epoch after byte-threshold snapshot and keeps frame tail usable', async () => {

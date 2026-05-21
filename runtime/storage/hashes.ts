@@ -191,6 +191,7 @@ export const prepareStorageCanonicalStateHashes = (
 
 export const storageCanonicalHashEnabled = (): boolean => {
   if (typeof process === 'undefined') return false;
+  if (String(process.env['NODE_ENV'] ?? '').trim().toLowerCase() === 'production') return true;
   const raw = String(process.env['XLN_STORAGE_VERIFY_CANONICAL'] || '').trim().toLowerCase();
   return raw === '1' || raw === 'true' || raw === 'yes' || raw === 'on';
 };

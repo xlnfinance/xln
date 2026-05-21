@@ -128,6 +128,21 @@ export type {
   StorageSnapshotManifest,
 } from './types';
 
+const isProductionStorageRuntime = (): boolean =>
+  String(process.env['NODE_ENV'] ?? '').trim().toLowerCase() === 'production';
+
+const resolveCanonicalHashPeriodFrames = (env: Env): 0 | 1 => {
+  const raw =
+    env.runtimeConfig?.storage?.canonicalHashPeriodFrames ??
+    process.env['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'] ??
+    (process.env['XLN_STORAGE_VERIFY_CANONICAL'] === '0' ? 0 : 1);
+  const enabled = Number(raw) > 0;
+  if (!enabled && isProductionStorageRuntime()) {
+    throw new Error('STORAGE_CANONICAL_HASH_REQUIRED_IN_PRODUCTION');
+  }
+  return enabled ? 1 : 0;
+};
+
 const runtimeConfigFromEnv = (env: Env): Required<StorageRuntimeConfig> => ({
   enabled: env.runtimeConfig?.storage?.enabled ?? true,
   snapshotPeriodFrames: Math.max(
@@ -158,11 +173,7 @@ const runtimeConfigFromEnv = (env: Env): Required<StorageRuntimeConfig> => ({
     1,
     Number(env.runtimeConfig?.storage?.materializePeriodFrames ?? DEFAULT_MATERIALIZE_PERIOD_FRAMES),
   ),
-  canonicalHashPeriodFrames: Number(
-    env.runtimeConfig?.storage?.canonicalHashPeriodFrames ??
-      process.env['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'] ??
-      (process.env['XLN_STORAGE_VERIFY_CANONICAL'] === '0' ? 0 : 1),
-  ) > 0 ? 1 : 0,
+  canonicalHashPeriodFrames: resolveCanonicalHashPeriodFrames(env),
   accountMerkleRadix: env.runtimeConfig?.storage?.accountMerkleRadix === 256 ? 256 : DEFAULT_ACCOUNT_MERKLE_RADIX,
 });
 
