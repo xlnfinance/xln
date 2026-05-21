@@ -9,10 +9,12 @@ import net from 'net';
 import path from 'path';
 import { deriveSignerAddressSync } from '../account-crypto';
 import { createJAdapter } from '../jadapter';
+import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import { loadJurisdictions } from '../jurisdiction-loader';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from '../jadapter/default-tokens';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { ethers } from 'ethers';
+import type { JReplica } from '../types';
 
 const args = globalThis.process.argv.slice(2);
 const hasFlag = (name: string) => args.includes(name);
@@ -41,7 +43,7 @@ type ProcInfo = {
   stdoutBuffer: string[];  // Buffer all stdout for retrospective matching
 };
 
-const ensureTokenCatalog = async (jadapter: any) => {
+const ensureTokenCatalog = async (jadapter: JAdapter): Promise<JTokenInfo[]> => {
   const current = await jadapter.getTokenRegistry().catch(() => []);
   if (current.length > 0) {
     return current;
@@ -53,7 +55,7 @@ const ensureTokenCatalog = async (jadapter: any) => {
   }
 
   console.log('[P2P] Deploying default tokens (prefund step)...');
-  const erc20Factory = new ERC20Mock__factory(jadapter.signer as any);
+  const erc20Factory = new ERC20Mock__factory(jadapter.signer);
   for (const token of DEFAULT_TOKENS) {
     const tokenContract = await erc20Factory.deploy(token.name, token.symbol, DEFAULT_TOKEN_SUPPLY);
     await tokenContract.waitForDeployment();
@@ -63,7 +65,7 @@ const ensureTokenCatalog = async (jadapter: any) => {
     const approveTx = await tokenContract.approve(depositoryAddress, TOKEN_REGISTRATION_AMOUNT);
     await approveTx.wait();
 
-    const registerTx = await (jadapter.depository.connect(jadapter.signer as any) as any).adminRegisterExternalToken({
+    const registerTx = await jadapter.depository.connect(jadapter.signer).adminRegisterExternalToken({
       entity: ethers.ZeroHash,
       contractAddress: tokenAddress,
       externalTokenId: 0,
@@ -92,16 +94,25 @@ const prefundRpcWallets = async (): Promise<void> => {
     throw new Error(`JURISDICTION_CONTRACTS_MISSING: ${jurisdictionName}`);
   }
 
+  const fromReplica: JReplica = {
+    name: jurisdictionName,
+    blockNumber: 0n,
+    stateRoot: new Uint8Array(32),
+    mempool: [],
+    blockDelayMs: 0,
+    lastBlockTimestamp: 0,
+    position: { x: 0, y: 0, z: 0 },
+    depositoryAddress: entry.contracts.depository,
+    entityProviderAddress: entry.contracts.entityProvider,
+    contracts: entry.contracts,
+    chainId: entry.chainId,
+  };
+
   const jadapter = await createJAdapter({
     mode: 'rpc',
     chainId: entry.chainId,
     rpcUrl,
-    fromReplica: {
-      depositoryAddress: entry.contracts.depository,
-      entityProviderAddress: entry.contracts.entityProvider,
-      contracts: entry.contracts,
-      chainId: entry.chainId,
-    } as any,
+    fromReplica,
   });
 
   const tokenCatalog = await ensureTokenCatalog(jadapter);
@@ -135,7 +146,7 @@ const prefundRpcWallets = async (): Promise<void> => {
     const erc20 = new ethers.Contract(
       token.address,
       ['function balanceOf(address owner) view returns (uint256)', 'function transfer(address to, uint256 amount) returns (bool)'],
-      jadapter.signer as any
+      jadapter.signer
     );
     for (const wallet of wallets) {
       const address = deriveSignerAddressSync(wallet.seed, wallet.signerId);
