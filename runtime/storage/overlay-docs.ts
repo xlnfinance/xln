@@ -78,7 +78,7 @@ export const readStorageOverlayRecordsFromDiffs = async (
   const end = Math.floor(targetHeight);
   for (let height = start; height <= end; height += 1) {
     const diff = await readJsonOrNull<StorageDiffRecord>(db, keyDiff(height));
-    if (!diff) continue;
+    if (!diff) throw new Error(`STORAGE_DIFF_MISSING: height=${height} scope=overlay`);
     records = mergeStorageOverlayRecords(records, overlayRecordsFromDocs(diff.puts, diff.dels));
   }
   return records;
