@@ -60,6 +60,50 @@ const accountLog = createStructuredLogger('account');
 const MAX_FRAME_TIMESTAMP_DRIFT_MS = 300000; // 5 minutes
 const MAX_FRAME_SIZE_BYTES = 1048576; // 1MB frame size limit (Bitcoin block size standard)
 
+export type AccountConsensusHashToSign = {
+  hash: string;
+  type: 'accountFrame' | 'dispute';
+  context: string;
+};
+
+export type AccountSwapOfferCreated = {
+  offerId: string;
+  makerIsLeft: boolean;
+  fromEntity: string;
+  toEntity: string;
+  accountId?: string;
+  giveTokenId: number;
+  giveAmount: bigint;
+  wantTokenId: number;
+  wantAmount: bigint;
+  priceTicks?: bigint | undefined;
+  timeInForce?: 0 | 1 | 2 | undefined;
+  minFillRatio: number;
+};
+
+export type AccountConsensusFrameResult = {
+  success: boolean;
+  events: string[];
+  error?: string;
+  revealedSecrets?: Array<{ secret: string; hashlock: string }>;
+  swapOffersCreated?: AccountSwapOfferCreated[];
+  swapCancelRequests?: Array<{ offerId: string; accountId: string }>;
+  swapOffersCancelled?: Array<{ offerId: string; accountId: string }>;
+  hashesToSign?: AccountConsensusHashToSign[];
+};
+
+export type ProposeAccountFrameResult = AccountConsensusFrameResult & {
+  accountInput?: AccountInput;
+  failedHtlcLocks?: Array<{ hashlock: string; reason: string }>;
+};
+
+export type HandleAccountInputResult = AccountConsensusFrameResult & {
+  response?: AccountInput;
+  approvalNeeded?: AccountTx;
+  timedOutHashlocks?: string[];
+  committedFrames?: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }>;
+};
+
 // === VALIDATION ===
 
 /**
@@ -163,33 +207,7 @@ export async function proposeAccountFrame(
   accountMachine: AccountMachine,
   skipNonceIncrement: boolean = false,
   entityJHeight?: number, // Optional: J-height from entity state for HTLC consensus
-): Promise<{
-  success: boolean;
-  accountInput?: AccountInput;
-  events: string[];
-  error?: string;
-  revealedSecrets?: Array<{ secret: string; hashlock: string }>;
-  swapOffersCreated?: Array<{
-    offerId: string;
-    makerIsLeft: boolean;
-    fromEntity: string;
-    toEntity: string;
-    accountId?: string;
-    giveTokenId: number;
-    giveAmount: bigint;
-	    wantTokenId: number;
-	    wantAmount: bigint;
-	    priceTicks?: bigint | undefined;
-	    timeInForce?: 0 | 1 | 2 | undefined;
-	    minFillRatio: number;
-	  }>;
-  swapCancelRequests?: Array<{ offerId: string; accountId: string }>;
-  swapOffersCancelled?: Array<{ offerId: string; accountId: string }>;
-  // MULTI-SIGNER: Hashes that need entity-quorum signing
-  hashesToSign?: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }>;
-  // Failed HTLC locks that need backward cancellation via htlcRoutes
-  failedHtlcLocks?: Array<{ hashlock: string; reason: string }>;
-}> {
+): Promise<ProposeAccountFrameResult> {
   // Derive counterparty from canonical left/right
   const myEntityId = accountMachine.proofHeader.fromEntity;
   const { counterparty } = getAccountPerspective(accountMachine, myEntityId);
@@ -266,20 +284,7 @@ export async function proposeAccountFrame(
   const revealedSecrets: Array<{ secret: string; hashlock: string }> = [];
   // AUDIT FIX (CRITICAL-1): SwapOfferEvent carries makerIsLeft + fromEntity/toEntity
   // Entity handler will enrich with accountId based on its own perspective
-  const swapOffersCreated: Array<{
-    offerId: string;
-    makerIsLeft: boolean;
-    fromEntity: string;
-    toEntity: string;
-    accountId?: string; // Enriched by entity handler
-	    giveTokenId: number;
-	    giveAmount: bigint;
-	    wantTokenId: number;
-	    wantAmount: bigint;
-	    priceTicks?: bigint | undefined;
-	    timeInForce?: 0 | 1 | 2 | undefined;
-	    minFillRatio: number;
-	  }> = [];
+  const swapOffersCreated: AccountSwapOfferCreated[] = [];
   const swapCancelRequests: Array<{ offerId: string; accountId: string }> = [];
   const swapOffersCancelled: Array<{ offerId: string; accountId: string }> = [];
 
@@ -609,7 +614,7 @@ export async function proposeAccountFrame(
   accountMachine.pendingAccountInput = structuredClone(accountInput);
 
   // Collect hashes for entity-quorum signing (multi-signer support)
-  const hashesToSign: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }> = [
+  const hashesToSign: AccountConsensusHashToSign[] = [
     {
       hash: newFrame.stateHash,
       type: 'accountFrame',
@@ -618,7 +623,7 @@ export async function proposeAccountFrame(
     { hash: disputeHash, type: 'dispute', context: `account:${counterparty.slice(-8)}:dispute` },
   ];
 
-  const finalResult: Awaited<ReturnType<typeof proposeAccountFrame>> = {
+  const finalResult: ProposeAccountFrameResult = {
     success: true,
     accountInput,
     events,
@@ -639,32 +644,7 @@ export async function handleAccountInput(
   env: Env,
   accountMachine: AccountMachine,
   input: AccountInput,
-): Promise<{
-  success: boolean;
-  response?: AccountInput;
-  events: string[];
-  error?: string;
-  approvalNeeded?: AccountTx;
-  revealedSecrets?: Array<{ secret: string; hashlock: string }>;
-  swapOffersCreated?: Array<{
-    offerId: string;
-    makerIsLeft: boolean;
-    fromEntity: string;
-    toEntity: string;
-    accountId?: string;
-    giveTokenId: number;
-    giveAmount: bigint;
-    wantTokenId: number;
-    wantAmount: bigint;
-    minFillRatio: number;
-  }>;
-  swapCancelRequests?: Array<{ offerId: string; accountId: string }>;
-  swapOffersCancelled?: Array<{ offerId: string; accountId: string }>;
-  timedOutHashlocks?: string[];
-  committedFrames?: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }>;
-  // MULTI-SIGNER: Hashes that need entity-quorum signing
-  hashesToSign?: Array<{ hash: string; type: 'accountFrame' | 'dispute'; context: string }>;
-}> {
+): Promise<HandleAccountInputResult> {
   const normalizedInputHeight =
     input.height === undefined || input.height === null ? undefined : Number(input.height as number | string);
   if (normalizedInputHeight !== undefined && !Number.isFinite(normalizedInputHeight)) {
