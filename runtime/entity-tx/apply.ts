@@ -10,7 +10,6 @@ import {
 } from './handlers/account';
 import { handleJEvent } from './j-events';
 import { shouldRethrowEntityTxError } from './invariant-errors';
-import { cloneEntityState, addMessage } from '../state-helpers';
 import { createStructuredLogger, logError } from '../logger';
 import { handleR2E } from './handlers/r2e';
 import { handleHtlcPayment } from './handlers/htlc-payment';
@@ -41,7 +40,6 @@ import {
   handleSettleUpdate,
 } from './handlers/settle';
 import { handleDisputeFinalize, handleDisputeStart } from './handlers/dispute';
-import { removeCrossJurisdictionBookOrderByRouteId } from '../orderbook/cross-j';
 import {
   handleChatEntityTx,
   handleChatMessageEntityTx,
@@ -77,6 +75,7 @@ import { handleCrossJurisdictionFillNoticeEntityTx } from './handlers/cross-j-fi
 import { handleRequestCrossJurisdictionClearEntityTx } from './handlers/cross-j-clear';
 import { handleCrossJurisdictionSalvageEntityTx } from './handlers/cross-j-salvage';
 import { handleOrderbookSweepCrossJurisdictionEntityTx } from './handlers/cross-j-sweep';
+import { handleRemoveCrossJurisdictionBookOrderEntityTx } from './handlers/cross-j-book-order';
 
 const entityTxLog = createStructuredLogger('entity.tx');
 
@@ -336,21 +335,9 @@ export const applyEntityTx = async (
       return handleOrderbookSweepCrossJurisdictionEntityTx(env, entityState, entityTx);
     }
 
-	    if (entityTx.type === 'removeCrossJurisdictionBookOrder') {
-	      const newState = cloneEntityState(entityState);
-      const removed = removeCrossJurisdictionBookOrderByRouteId(
-        env,
-        newState,
-        entityTx.data.sourceEntityId,
-        entityTx.data.orderId,
-      );
-      addMessage(
-        newState,
-        `🌉 Cross-j book remove ${entityTx.data.orderId}${entityTx.data.reason ? `: ${entityTx.data.reason}` : ''} ` +
-        `${removed ? 'removed' : 'not-present'}`,
-      );
-	      return { newState, outputs: [] };
-	    }
+    if (entityTx.type === 'removeCrossJurisdictionBookOrder') {
+      return handleRemoveCrossJurisdictionBookOrderEntityTx(env, entityState, entityTx);
+    }
 
 	    if (entityTx.type === 'placeSwapOffer') {
 	      return handlePlaceSwapOfferRequest(env, entityState, entityTx);
