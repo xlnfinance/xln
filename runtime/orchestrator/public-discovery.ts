@@ -25,6 +25,26 @@ export type PublicHubDiscoveryHub = {
   online: boolean;
 };
 
+type RawHubJurisdiction = {
+  name?: string | undefined;
+  chainId?: number | undefined;
+  depositoryAddress?: string | undefined;
+  entityProviderAddress?: string | undefined;
+};
+
+const buildJurisdictionMetadata = (jurisdiction: RawHubJurisdiction | undefined): { jurisdiction?: PublicHubJurisdiction } => {
+  const name = String(jurisdiction?.name || '').trim();
+  if (!name) return {};
+  return {
+    jurisdiction: {
+      name,
+      ...(jurisdiction?.chainId !== undefined ? { chainId: jurisdiction.chainId } : {}),
+      ...(jurisdiction?.depositoryAddress ? { depositoryAddress: jurisdiction.depositoryAddress } : {}),
+      ...(jurisdiction?.entityProviderAddress ? { entityProviderAddress: jurisdiction.entityProviderAddress } : {}),
+    },
+  };
+};
+
 export const buildPublicHubDiscoveryPayload = (input: {
   hubChildren: HubChild[];
   relayStore: RelayStore;
@@ -74,7 +94,6 @@ export const buildPublicHubDiscoveryPayload = (input: {
         .map((entry) => {
           const entryEntityId = String(entry?.entityId || '').trim();
           if (!entryEntityId) return null;
-          const jurisdictionName = String(entry?.jurisdictionName || '').trim();
           return {
             entityId: entryEntityId,
             runtimeId: runtimeId || null,
@@ -85,14 +104,12 @@ export const buildPublicHubDiscoveryPayload = (input: {
             publicAccounts: [] as [],
             metadata: {
               isHub: true as const,
-              ...(jurisdictionName ? {
-                jurisdiction: {
-                  name: jurisdictionName,
-                  ...(entry.chainId !== undefined ? { chainId: entry.chainId } : {}),
-                  ...(entry.depositoryAddress ? { depositoryAddress: entry.depositoryAddress } : {}),
-                  ...(entry.entityProviderAddress ? { entityProviderAddress: entry.entityProviderAddress } : {}),
-                },
-              } : {}),
+              ...buildJurisdictionMetadata({
+                name: entry?.jurisdictionName,
+                chainId: entry.chainId,
+                depositoryAddress: entry.depositoryAddress,
+                entityProviderAddress: entry.entityProviderAddress,
+              }),
             },
             lastUpdated: serverTime,
             online,
@@ -107,10 +124,7 @@ export const buildPublicHubDiscoveryPayload = (input: {
     if (profile?.metadata?.isHub !== true) continue;
     const runtimeId = normalizeRuntimeKey(profile.runtimeId);
     const online = Boolean(runtimeId && relayStore.clients.has(runtimeId));
-    const jurisdiction = profile.metadata?.jurisdiction as
-      | { name?: string; chainId?: number; depositoryAddress?: string; entityProviderAddress?: string }
-      | undefined;
-    const jurisdictionName = String(jurisdiction?.name || '').trim();
+    const jurisdiction = profile.metadata?.jurisdiction as RawHubJurisdiction | undefined;
     addHub({
       entityId: profile.entityId,
       runtimeId: runtimeId || profile.runtimeId || null,
@@ -121,14 +135,7 @@ export const buildPublicHubDiscoveryPayload = (input: {
       publicAccounts: [],
       metadata: {
         isHub: true,
-        ...(jurisdictionName ? {
-          jurisdiction: {
-            name: jurisdictionName,
-            ...(jurisdiction?.chainId !== undefined ? { chainId: jurisdiction.chainId } : {}),
-            ...(jurisdiction?.depositoryAddress ? { depositoryAddress: jurisdiction.depositoryAddress } : {}),
-            ...(jurisdiction?.entityProviderAddress ? { entityProviderAddress: jurisdiction.entityProviderAddress } : {}),
-          },
-        } : {}),
+        ...buildJurisdictionMetadata(jurisdiction),
       },
       lastUpdated: Number(profile.lastUpdated || entry.timestamp || serverTime),
       online,
