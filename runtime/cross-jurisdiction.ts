@@ -209,6 +209,46 @@ export function withCrossJurisdictionFillProgress(
   };
 }
 
+export function withCrossJurisdictionClaimProgress(
+  route: CrossJurisdictionSwapRoute,
+  fillRatio: number,
+  updatedAt: number,
+): CrossJurisdictionSwapRoute {
+  const nextRatio = clampFillRatio(fillRatio);
+  const previousClaimedRatio = clampFillRatio(route.claimedRatio);
+  const committedRatio = Math.max(clampFillRatio(route.cumulativeFillRatio), previousClaimedRatio);
+  if (nextRatio <= 0) {
+    throw new Error(`CROSS_J_CLAIM_PROGRESS_INVALID: route=${route.orderId} zero ratio`);
+  }
+  if (committedRatio <= 0) {
+    throw new Error(`CROSS_J_CLAIM_PROGRESS_INVALID: route=${route.orderId} no committed fill`);
+  }
+  if (nextRatio < previousClaimedRatio) {
+    throw new Error(
+      `CROSS_J_CLAIM_PROGRESS_INVALID: route=${route.orderId} stale ratio ${nextRatio} < ${previousClaimedRatio}`,
+    );
+  }
+  if (nextRatio > committedRatio) {
+    throw new Error(
+      `CROSS_J_CLAIM_PROGRESS_INVALID: route=${route.orderId} ratio ${nextRatio} > committed ${committedRatio}`,
+    );
+  }
+
+  const claimedRatio = Math.max(previousClaimedRatio, nextRatio);
+  const sourceClaimed = (BigInt(route.source.amount) * BigInt(claimedRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO);
+  const targetClaimed = (BigInt(route.target.amount) * BigInt(claimedRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO);
+  return {
+    ...route,
+    claimedRatio,
+    cumulativeFillRatio: Math.max(clampFillRatio(route.cumulativeFillRatio), claimedRatio),
+    sourceClaimed,
+    targetClaimed,
+    filledSourceAmount: sourceClaimed,
+    filledTargetAmount: targetClaimed,
+    updatedAt,
+  };
+}
+
 export function isCrossJurisdictionPullExpired(
   route: CrossJurisdictionSwapRoute,
   leg: 'source' | 'target',

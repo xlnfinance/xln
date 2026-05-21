@@ -236,8 +236,7 @@ export const queueCrossJurisdictionBookOwnerWake = (
   const ownerState = findEntityStateById(env, ownerRef);
   const firstValidator = ownerState?.config?.validators?.[0];
   if (!ownerState || !firstValidator) {
-    console.warn(`🌉 ORDERBOOK CROSS-J: unable to wake book owner ${ownerRef.slice(-8)} reason=${reason}`);
-    return;
+    throw new Error(`CROSS_J_BOOK_OWNER_UNREACHABLE: owner=${ownerRef} reason=${reason}`);
   }
   const alreadyQueued = outputs.some(output =>
     normalizeEntityRef(output.entityId) === normalizeEntityRef(ownerState.entityId) &&

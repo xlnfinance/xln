@@ -11,6 +11,7 @@ import { ACCOUNT_PENDING_RESEND_AFTER_MS, executeCrontab, initCrontab } from '..
 import { generateLazyEntityId } from '../entity-factory';
 import { isLeftEntity } from '../entity-id-utils';
 import { applyEntityFrame, applyEntityInput } from '../entity-consensus';
+import { queueCrossJurisdictionBookOwnerWake } from '../entity-consensus/cross-j-orderbook';
 import { applyEntityTx } from '../entity-tx/apply';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity-tx/handlers/account-cross-j-followups';
 import { handleJAbortSentBatch } from '../entity-tx/handlers/j-abort-sent-batch';
@@ -368,6 +369,15 @@ describe('audit fail-fast regressions', () => {
 
     expect(state.messages).toHaveLength(0);
     expect(state.nonces.has(signer)).toBe(false);
+  });
+
+  test('missing cross-j book owner wake is fatal instead of a silent warn', () => {
+    const env = createEmptyEnv('cross-j-missing-owner-wake');
+    const outputs: EntityInput[] = [];
+
+    expect(() => queueCrossJurisdictionBookOwnerWake(env, outputs, `0x${'77'.repeat(32)}`, 'test-missing-owner'))
+      .toThrow('CROSS_J_BOOK_OWNER_UNREACHABLE');
+    expect(outputs).toHaveLength(0);
   });
 
   test('cross-j remote route cannot seed missing sibling runtime hints before topology validation', async () => {

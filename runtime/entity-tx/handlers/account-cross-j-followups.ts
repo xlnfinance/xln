@@ -1,5 +1,5 @@
 import type { AccountTx, CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, Env } from '../../types';
-import { CROSS_J_MAX_FILL_RATIO, isCrossJurisdictionRouteTransitionAllowed, isCrossJurisdictionTerminalStatus, validateCrossJurisdictionFillProgress, withCrossJurisdictionFillProgress } from '../../cross-jurisdiction';
+import { CROSS_J_MAX_FILL_RATIO, isCrossJurisdictionRouteTransitionAllowed, isCrossJurisdictionTerminalStatus, validateCrossJurisdictionFillProgress, withCrossJurisdictionClaimProgress, withCrossJurisdictionFillProgress } from '../../cross-jurisdiction';
 import { deriveCanonicalCrossJurisdictionBookOwner } from '../../cross-jurisdiction-market';
 import { decodeHashLadderBinary } from '../../hashladder';
 import { removeCrossJurisdictionBookOrder } from '../../orderbook/cross-j';
@@ -52,18 +52,6 @@ const assertPullResolveAllowed = (
       `ratio=${fillRatio} committed=${committedRatio}`,
     );
   }
-};
-
-const applyClaimedRatio = (
-  route: CrossJurisdictionSwapRoute,
-  fillRatio: number,
-): void => {
-  route.claimedRatio = Math.max(Number(route.claimedRatio || 0), fillRatio);
-  route.cumulativeFillRatio = Math.max(Number(route.cumulativeFillRatio || 0), fillRatio);
-  route.sourceClaimed = (BigInt(route.source.amount) * BigInt(route.claimedRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO);
-  route.targetClaimed = (BigInt(route.target.amount) * BigInt(route.claimedRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO);
-  route.filledSourceAmount = route.sourceClaimed;
-  route.filledTargetAmount = route.targetClaimed;
 };
 
 const routeBookOwnerEntityId = (route: CrossJurisdictionSwapRoute): string =>
@@ -148,7 +136,7 @@ const applyPullResolveFollowup = (
 
     if (isSourceHubResolve || isSourceUserResolve) {
       assertPullResolveAllowed(route, fillRatio, 'source');
-      applyClaimedRatio(route, fillRatio);
+      Object.assign(route, withCrossJurisdictionClaimProgress(route, fillRatio, newState.timestamp));
       setCrossJurisdictionStatus(route, 'source_claimed', newState.timestamp);
 
       // The same account frame commits on both source participants. Only the hub
@@ -198,7 +186,7 @@ const applyPullResolveFollowup = (
       counterpartyEntityId === targetHubId
     ) {
       assertPullResolveAllowed(route, fillRatio, 'target');
-      applyClaimedRatio(route, fillRatio);
+      Object.assign(route, withCrossJurisdictionClaimProgress(route, fillRatio, newState.timestamp));
       setCrossJurisdictionStatus(route, 'settled', newState.timestamp);
       route.settledAt = newState.timestamp;
       removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'settled');
