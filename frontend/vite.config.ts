@@ -223,7 +223,6 @@ export default defineConfig(async ({ command }) => {
 				},
 		},
 	],
-	publicDir: 'static',
 	cacheDir: VITE_CACHE_DIR,
 	server: {
 		host: DEV_HOST,
