@@ -57,12 +57,16 @@ export type JudgeVerdict = {
 
 export type AggregatedVerdict = {
   winner: JudgeWinner;
-  method: 'majority';
+  leader: JudgeWinner;
+  method: 'majority' | 'weighted_majority';
   judgeCount: number;
+  totalWeight: number;
   votes: Record<JudgeWinner, number>;
   confidence: number;
   scores1000: { A: number; B: number };
   margin: number;
+  threshold: number | null;
+  thresholdMet: boolean;
   summary: string;
 };
 
@@ -430,32 +434,61 @@ export const runJudge = async (input: JudgeInput, judge: JudgeConfig): Promise<J
 export const judgeDebate = async (input: JudgeInput, board: JudgeConfig[]) =>
   await Promise.all(board.map(async judge => ({ judge, verdict: await runJudge(input, judge) })));
 
-export const aggregateVerdicts = (verdicts: JudgeVerdict[]): AggregatedVerdict => {
+export const aggregateVerdicts = (
+  verdicts: JudgeVerdict[],
+  options: { judges?: Pick<JudgeConfig, 'weight'>[]; threshold?: number | null } = {},
+): AggregatedVerdict => {
   const votes: Record<JudgeWinner, number> = { A: 0, B: 0, draw: 0, invalid: 0 };
-  for (const verdict of verdicts) votes[verdict.winner] += 1;
-  const winner = (Object.entries(votes).sort((a, b) => b[1] - a[1])[0]?.[0] || 'draw') as JudgeWinner;
-  const confidence = verdicts.length
-    ? verdicts.reduce((sum, verdict) => sum + verdict.confidence, 0) / verdicts.length
+  const weights = verdicts.map((_, index) =>
+    Math.max(1, Math.min(9, Math.round(Number(options.judges?.[index]?.weight || 1)))),
+  );
+  const totalWeight = weights.reduce((sum, weight) => sum + weight, 0);
+  verdicts.forEach((verdict, index) => {
+    votes[verdict.winner] += weights[index] || 1;
+  });
+  const voteLeader = (Object.entries(votes).sort((a, b) => b[1] - a[1])[0]?.[0] || 'draw') as JudgeWinner;
+  const confidence = totalWeight
+    ? verdicts.reduce((sum, verdict, index) => sum + verdict.confidence * (weights[index] || 1), 0) / totalWeight
     : 0;
-  const scores1000 = verdicts.length
+  const scores1000 = totalWeight
     ? {
-        A: Math.round(verdicts.reduce((sum, verdict) => sum + (verdict.scores1000?.A ?? verdict.scores.A * 10), 0) / verdicts.length),
-        B: Math.round(verdicts.reduce((sum, verdict) => sum + (verdict.scores1000?.B ?? verdict.scores.B * 10), 0) / verdicts.length),
+        A: Math.round(verdicts.reduce((sum, verdict, index) => sum + (verdict.scores1000?.A ?? verdict.scores.A * 10) * (weights[index] || 1), 0) / totalWeight),
+        B: Math.round(verdicts.reduce((sum, verdict, index) => sum + (verdict.scores1000?.B ?? verdict.scores.B * 10) * (weights[index] || 1), 0) / totalWeight),
       }
     : { A: 0, B: 0 };
-  const alignedScores = alignScoresWithWinner(winner, scores1000);
+  const scoreLeader: JudgeWinner = scores1000.A === scores1000.B ? 'draw' : scores1000.A > scores1000.B ? 'A' : 'B';
+  const leader: JudgeWinner = voteLeader === 'draw' || voteLeader === 'invalid' ? voteLeader : scoreLeader === 'draw' ? voteLeader : voteLeader;
+  const threshold = options.threshold
+    ? Math.max(501, Math.min(1000, Math.round(Number(options.threshold))))
+    : null;
+  const leaderScores = leader === 'A' || leader === 'B'
+    ? alignScoresWithWinner(leader, scores1000)
+    : alignScoresWithWinner(voteLeader, scores1000);
+  const thresholdMet = !!threshold && (leader === 'A' || leader === 'B') && leaderScores[leader] >= threshold;
+  const winner = threshold && (leader === 'A' || leader === 'B') && !thresholdMet
+    ? 'draw'
+    : leader;
+  const alignedScores = winner === 'draw' && leader !== 'draw'
+    ? leaderScores
+    : alignScoresWithWinner(winner, scores1000);
   const margin = alignedScores.margin;
   return {
     winner,
-    method: 'majority',
+    leader,
+    method: totalWeight === verdicts.length ? 'majority' : 'weighted_majority',
     judgeCount: verdicts.length,
+    totalWeight,
     votes,
     confidence: Number(confidence.toFixed(2)),
     scores1000: { A: alignedScores.A, B: alignedScores.B },
     margin,
+    threshold,
+    thresholdMet,
     summary: winner === 'draw'
-      ? `The judge board found the debate too close to award a single winner: ${alignedScores.A}-${alignedScores.B}.`
-      : `Side ${winner} wins ${alignedScores.A}-${alignedScores.B} by a ${margin}-point margin and ${votes[winner]} of ${verdicts.length} judge votes.`,
+      ? threshold && leader !== 'draw'
+        ? `Side ${leader} leads ${alignedScores.A}-${alignedScores.B}, but did not reach the ${threshold}-point threshold. No winner is awarded.`
+        : `The judge board found the debate too close to award a single winner: ${alignedScores.A}-${alignedScores.B}.`
+      : `Side ${winner} wins ${alignedScores.A}-${alignedScores.B} by a ${margin}-point margin with ${votes[winner]} of ${totalWeight} weighted judge points${threshold ? ` and clears the ${threshold}-point threshold` : ''}.`,
   };
 };
 
