@@ -19,7 +19,6 @@ import { handleJEvent } from './j-events';
 import { shouldRethrowEntityTxError } from './invariant-errors';
 import { cloneEntityState, addMessage } from '../state-helpers';
 import { createStructuredLogger, logError } from '../logger';
-import { FINANCIAL } from '../constants';
 import { normalizeRebalanceMatchingStrategy } from '../rebalance-policy';
 import { initJBatch, batchAddSettlement } from '../j-batch';
 import { handleR2E } from './handlers/r2e';
@@ -83,6 +82,7 @@ import {
   handleResolveHtlcLockEntityTx,
   handleRollbackTimedOutFramesEntityTx,
 } from './handlers/htlc-direct';
+import { handleDirectPaymentEntityTx } from './handlers/direct-payment';
 
 const entityTxLog = createStructuredLogger('entity.tx');
 import {
@@ -232,189 +232,7 @@ export const applyEntityTx = async (
     }
 
     if (entityTx.type === 'directPayment') {
-      const verbose = env.quietRuntimeLogs !== true;
-      env.emit('HtlcInitiated', {
-        fromEntity: entityState.entityId,
-        toEntity: entityTx.data.targetEntityId,
-        tokenId: entityTx.data.tokenId,
-        amount: entityTx.data.amount.toString(),
-        route: entityTx.data.route,
-      });
-      if (verbose) {
-        console.log(`💸 ═════════════════════════════════════════════════════════════`);
-        console.log(
-          `💸 DIRECT-PAYMENT HANDLER: ${entityState.entityId.slice(-4)} → ${entityTx.data.targetEntityId.slice(-4)}`,
-        );
-        console.log(`💸 Amount: ${entityTx.data.amount}, TokenId: ${entityTx.data.tokenId}`);
-        console.log(`💸 Route: ${entityTx.data.route?.map(r => r.slice(-4)).join('→') || 'NONE (will calculate)'}`);
-        console.log(`💸 Description: ${entityTx.data.description || 'none'}`);
-      }
-
-      const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
-      const mempoolOps: MempoolOp[] = [];
-      if (verbose) console.log(`💸 Initialized: outputs=[], mempoolOps=[]`);
-
-      // Extract payment details
-      let { targetEntityId, tokenId, amount, route, description } = entityTx.data;
-      if (amount < FINANCIAL.MIN_PAYMENT_AMOUNT || amount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
-        logError(
-          'ENTITY_TX',
-          `❌ Payment amount out of bounds: ${amount.toString()} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT.toString()}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT.toString()})`,
-        );
-        addMessage(newState, `❌ Payment failed: amount out of bounds`);
-        return { newState, outputs: [] };
-      }
-
-      // If no route provided, check for direct account or calculate route
-      if (!route || route.length === 0) {
-        // Check if we have a direct account with target
-        // Account keyed by counterparty ID
-        if (newState.accounts.has(targetEntityId)) {
-          if (verbose) console.log(`💸 Direct account exists with ${formatEntityId(targetEntityId)}`);
-          route = [entityState.entityId, targetEntityId];
-        } else {
-          // Find route through network using gossip
-          if (verbose) console.log(`💸 No direct account, finding route to ${formatEntityId(targetEntityId)}`);
-
-          // Try to find a route through the network
-          if (env.gossip) {
-            const networkGraph = env.gossip.getNetworkGraph();
-            const paths = await networkGraph.findPaths(entityState.entityId, targetEntityId, amount, tokenId);
-
-            if (paths.length > 0) {
-              // Use the shortest path
-              const firstPath = paths[0];
-              if (!firstPath) {
-                throw new Error('ROUTE_DISCOVERY_INVARIANT: paths.length > 0 but paths[0] is missing');
-              }
-              route = firstPath.path;
-              if (verbose) console.log(`💸 Found route: ${route.map(e => formatEntityId(e)).join(' → ')}`);
-            } else {
-              logError('ENTITY_TX', `❌ No route found to ${formatEntityId(targetEntityId)}`);
-              addMessage(newState, `❌ Payment failed: No route to ${formatEntityId(targetEntityId)}`);
-              return { newState, outputs: [] };
-            }
-          } else {
-            logError('ENTITY_TX', `❌ Cannot find route: Gossip layer not available`);
-            addMessage(newState, `❌ Payment failed: Network routing unavailable`);
-            return { newState, outputs: [] };
-          }
-        }
-      }
-
-      // Validate route starts with current entity
-      if (route.length < 1 || route[0] !== entityState.entityId) {
-        console.error(
-          `❌ ROUTE VALIDATION FAILED: route.length=${route.length}, route[0]=${route[0]?.slice(-4)}, entityId=${entityState.entityId.slice(-4)}`,
-        );
-        logError('ENTITY_TX', `❌ Invalid route: doesn't start with current entity`);
-        return { newState: entityState, outputs: [] };
-      }
-
-      // Validate route ends with targetEntityId
-      if (route[route.length - 1] !== targetEntityId) {
-        console.error(
-          `❌ ROUTE VALIDATION FAILED: route ends with ${route[route.length - 1]?.slice(-4)}, expected targetEntityId=${targetEntityId.slice(-4)}`,
-        );
-        logError('ENTITY_TX', `❌ Invalid route: route end must match targetEntityId`);
-        return { newState: entityState, outputs: [] };
-      }
-
-      // Check if we're the final destination (route.length === 1)
-      if (route.length === 1 && route[0] === targetEntityId) {
-        console.error(`✅ FINAL DESTINATION: Entity ${entityState.entityId.slice(-4)} is the final recipient`);
-        // This is a payment TO us (final hop) - handle as received payment
-        // The payment was already applied in the bilateral consensus
-        // Just add a message and return
-        addMessage(newState, `💰 Received payment of ${amount} (token ${tokenId})`);
-        return { newState, outputs: [] };
-      }
-
-      // Determine next hop (for intermediate forwarding)
-      const nextHop = route[1];
-      if (!nextHop) {
-        console.error(`❌ ROUTE ERROR: No next hop in route=[${route.map(r => r.slice(-4)).join(',')}]`);
-        logError('ENTITY_TX', `❌ Invalid route: no next hop specified in route`);
-        return { newState, outputs: [] };
-      }
-
-      // Check if we have an account with next hop
-      // Account keyed by counterparty ID
-      const accountMachine = newState.accounts.get(nextHop);
-      if (!accountMachine) {
-        logError('ENTITY_TX', `❌ No account with next hop: ${nextHop}`);
-        addMessage(newState, `❌ Payment failed: No account with ${formatEntityId(nextHop)}`);
-        return { newState, outputs: [] };
-      }
-
-      // Capacity validation deferred to account-level (bilateral consensus)
-      // Entity-level state may be stale before bilateral frames settle
-
-      // Create AccountTx for the payment
-      // CRITICAL: ALWAYS include fromEntityId/toEntityId for deterministic consensus
-      const accountTx: AccountTx = {
-        type: 'direct_payment',
-        data: {
-          tokenId,
-          amount,
-          route: route.slice(1), // Remove sender from route (next hop needs to see themselves in route[0])
-          description: description || `Payment to ${formatEntityId(targetEntityId)}`,
-          fromEntityId: entityState.entityId, // ✅ EXPLICIT direction
-          toEntityId: nextHop, // ✅ EXPLICIT direction
-        },
-      };
-
-      // Add to account machine mempool via pure mempoolOps
-      if (accountMachine) {
-        // Pure: return mempoolOp instead of mutating directly
-        mempoolOps.push({ accountId: nextHop, tx: accountTx });
-        if (verbose) {
-          console.log(`💸 QUEUED TO MEMPOOL: account=${formatEntityId(nextHop)}`);
-          console.log(`💸   AccountTx type: ${accountTx.type}`);
-          console.log(`💸   Amount: ${accountTx.data.amount}`);
-          console.log(`💸   From: ${accountTx.data.fromEntityId?.slice(-4)}`);
-          console.log(`💸   To: ${accountTx.data.toEntityId?.slice(-4)}`);
-          console.log(
-            `💸   Route after slice: [${accountTx.data.route?.map((r: string) => r.slice(-4)).join(',') || 'none'}]`,
-          );
-          console.log(`💸 mempoolOps.length: ${mempoolOps.length}`);
-        }
-
-        const isLeft = isLeftEntity(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
-        if (verbose) console.log(`💸 Account state: isLeft=${isLeft}, hasPendingFrame=${!!accountMachine.pendingFrame}`);
-
-        // Message about payment initiation
-        addMessage(
-          newState,
-          `💸 Sending ${amount} (token ${tokenId}) to ${formatEntityId(targetEntityId)} via ${route.length - 1} hops`,
-        );
-
-        // The payment is now queued for entity-level orchestration
-        // Entity-consensus will apply mempoolOps and add to proposableAccounts
-        if (verbose) {
-          console.log(`💸 Payment queued for bilateral consensus with ${formatEntityId(nextHop)}`);
-          console.log(`💸 Account ${formatEntityId(nextHop)} will be added to proposableAccounts`);
-        }
-
-        // Return a trigger output to ensure process() continues
-        // This ensures the AUTO-PROPOSE logic runs to process the payment
-        const firstValidator = entityState.config.validators[0];
-        if (firstValidator) {
-          outputs.push({
-            entityId: entityState.entityId,
-            signerId: firstValidator,
-            entityTxs: [], // Empty transaction array - just triggers processing
-          });
-          if (verbose) console.log(`💸 Added processing trigger: outputs.length=${outputs.length}`);
-        }
-        if (verbose) {
-          console.log(`💸 DIRECT-PAYMENT COMPLETE: mempoolOps=${mempoolOps.length}, outputs=${outputs.length}`);
-          console.log(`💸 ═════════════════════════════════════════════════════════════`);
-        }
-      }
-
-      return { newState, outputs, mempoolOps };
+      return await handleDirectPaymentEntityTx(env, entityState, entityTx);
     }
 
     if (entityTx.type === 'r2c') {
