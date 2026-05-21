@@ -1,4 +1,5 @@
 import { resolveEntityProposerId } from '../state-helpers';
+import { compareStableText } from '../serialization-utils';
 import type { Env } from '../types';
 
 export type ControlEntitySummary = {
@@ -11,9 +12,6 @@ export type ControlEntitySummary = {
   publicAccountCount: number;
   accountEntityIds: string[];
 };
-
-const compareText = (left: string, right: string): number =>
-  left.localeCompare(right, undefined, { numeric: true, sensitivity: 'base' });
 
 const getProfileNameForEntity = (
   env: Env,
@@ -54,9 +52,9 @@ export const listLocalControlEntities = (
       accountCount: replica?.state?.accounts instanceof Map ? replica.state.accounts.size : 0,
       publicAccountCount: Array.isArray(profile?.publicAccounts) ? profile.publicAccounts.length : 0,
       accountEntityIds: replica?.state?.accounts instanceof Map
-        ? Array.from(replica.state.accounts.keys()).map(value => String(value).toLowerCase()).sort()
+        ? Array.from(replica.state.accounts.keys()).map(value => String(value).toLowerCase()).sort(compareStableText)
         : [],
     });
   }
-  return entities.sort((left, right) => compareText(left.name, right.name));
+  return entities.sort((left, right) => compareStableText(left.name, right.name));
 };
