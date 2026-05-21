@@ -10,6 +10,7 @@ import { writeOnboardingComplete } from '$lib/utils/onboardingState';
 import { tabOperations } from './tabStore';
 import { isInactiveTabStandby } from '$lib/utils/activeTabLock';
 import { unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
+import { generateLazyEntityIdPreview } from '$lib/utils/lazyEntityId';
 
 // Types
 export interface Signer {
@@ -1586,8 +1587,6 @@ export const vaultOperations = {
     }
 
     // === MVP: Create entity ===
-    const { generateLazyEntityId } = await import('@xln/runtime/entity-factory');
-
     // Create entity config (single-signer, threshold 1)
     const signerAddress = firstAddress;
 
@@ -1600,7 +1599,7 @@ export const vaultOperations = {
     const entityProviderAddress = requireContractAddress(jReplica.entityProviderAddress, 'entity_provider');
 
     // Lazy entity IDs are board hashes generated from the sorted validator set.
-    const entityId = generateLazyEntityId([signerAddress], 1n);
+    const entityId = generateLazyEntityIdPreview([signerAddress], 1n);
 
     const entityConfig = {
       mode: 'proposer-based' as const,
@@ -1673,7 +1672,7 @@ export const vaultOperations = {
         secondaryPrivateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))
       );
       xln.registerSignerKey(secondaryAddress, secondaryPrivateKeyBytes);
-      const secondaryEntityId = generateLazyEntityId([secondaryAddress], 1n);
+      const secondaryEntityId = generateLazyEntityIdPreview([secondaryAddress], 1n);
       const secondaryChainId = Number(jReplicaSecondary.chainId ?? secondary.config.chainId ?? chainId);
       const secondaryEntityConfig = buildSignerEntityConfig(
         secondaryAddress,
