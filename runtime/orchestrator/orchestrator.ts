@@ -73,6 +73,7 @@ import {
   toPublicJurisdictionsPayload,
   type OrchestratorJurisdictionsConfig,
 } from './jurisdictions';
+import { createOrchestratorProxyHandlers } from './proxy';
 
 const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
   const totalBytes = Number(storage.disk.totalBytes || 0);
@@ -353,6 +354,9 @@ const getHubChildByEntityId = (hubEntityId: string): HubChild | null => {
     );
   }) || null;
 };
+
+const getHealthyHubChild = (): HubChild | null =>
+  hubChildren.find((candidate) => candidate.proc?.exitCode === null && candidate.lastHealth) || null;
 
 const fetchHubMarketSnapshots = async (
   child: HubChild,
@@ -1409,252 +1413,18 @@ const ensureReset = async (): Promise<void> => {
   });
   await resetPromise;
 };
-
-const FORBIDDEN_RPC_PROXY_METHODS = new Set([
-  'eth_accounts',
-  'eth_coinbase',
-  'eth_sendTransaction',
-  'eth_sign',
-  'eth_signTransaction',
-  'eth_submitHashrate',
-  'eth_submitWork',
-]);
-
-const FORBIDDEN_RPC_PROXY_PREFIXES = [
-  'admin_',
-  'anvil_',
-  'debug_',
-  'evm_',
-  'hardhat_',
-  'miner_',
-  'personal_',
-  'txpool_',
-  'wallet_',
-];
-
-const findForbiddenRpcProxyMethod = (bodyText: string): string | null => {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(bodyText);
-  } catch {
-    return 'invalid-json';
-  }
-
-  const calls = Array.isArray(parsed) ? parsed : [parsed];
-  if (calls.length === 0) return 'empty-batch';
-
-  for (const call of calls) {
-    if (!call || typeof call !== 'object' || typeof (call as { method?: unknown }).method !== 'string') {
-      return 'invalid-json-rpc';
-    }
-    const method = (call as { method: string }).method;
-    if (FORBIDDEN_RPC_PROXY_METHODS.has(method) || FORBIDDEN_RPC_PROXY_PREFIXES.some(prefix => method.startsWith(prefix))) {
-      return method;
-    }
-  }
-
-  return null;
-};
-
-const proxyRpc = async (request: Request, upstreamRpcUrl = args.rpcUrl): Promise<Response> => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': '*',
-    'Access-Control-Allow-Headers': '*',
-    'Content-Type': 'application/json',
-  };
-  if (!upstreamRpcUrl) {
-    return new Response(
-      JSON.stringify({ error: 'RPC upstream is not configured' }),
-      { status: 503, headers },
-    );
-  }
-  try {
-    const bodyText = await request.text();
-    if (!isLocalOperatorRequest(request)) {
-      const forbidden = findForbiddenRpcProxyMethod(bodyText);
-      if (forbidden) {
-        return new Response(
-          JSON.stringify({ error: 'RPC proxy method is not allowed', method: forbidden }),
-          { status: forbidden.startsWith('invalid') || forbidden === 'empty-batch' ? 400 : 403, headers },
-        );
-      }
-    }
-    const response = await fetch(upstreamRpcUrl, {
-      method: 'POST',
-      headers: {
-        'content-type': request.headers.get('content-type') || 'application/json',
-      },
-      body: bodyText,
-    });
-    const text = await response.text();
-    return new Response(text, {
-      status: response.status,
-      headers: {
-        ...headers,
-        'content-type': response.headers.get('content-type') || 'application/json',
-      },
-    });
-  } catch (error) {
-    return new Response(
-      JSON.stringify({ error: serializeError(error), upstream: upstreamRpcUrl }),
-      { status: 502, headers },
-    );
-  }
-};
-
-const proxyHubApi = async (
-  request: Request,
-  endpoint: '/api/faucet/offchain',
-): Promise<Response> => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': '*',
-    'Access-Control-Allow-Headers': '*',
-    'Content-Type': 'application/json',
-  };
-  let bodyText = '';
-  let bodyJson: { hubEntityId?: string } | null = null;
-  try {
-    bodyText = await request.text();
-    bodyJson = bodyText ? JSON.parse(bodyText) as { hubEntityId?: string } : {};
-  } catch (error) {
-    return new Response(safeStringify({ success: false, error: `Invalid JSON: ${serializeError(error)}` }), {
-      status: 400,
-      headers,
-    });
-  }
-
-  await pollAllHubHealth();
-  const requestedHubId = String(bodyJson?.hubEntityId || '').toLowerCase();
-  const child = getHubChildByEntityId(requestedHubId);
-  if (!child) {
-    return new Response(safeStringify({
-      success: false,
-      error: `Hub not found for hubEntityId=${requestedHubId || 'missing'}`,
-      code: 'FAUCET_HUB_NOT_FOUND',
-    }), {
-      status: 404,
-      headers,
-    });
-  }
-
-  try {
-    const response = await fetch(`http://${args.host}:${child.apiPort}${endpoint}`, {
-      method: 'POST',
-      headers: {
-        'content-type': request.headers.get('content-type') || 'application/json',
-      },
-      body: bodyText,
-    });
-    const text = await response.text();
-    return new Response(text, {
-      status: response.status,
-      headers: {
-        ...headers,
-        'content-type': response.headers.get('content-type') || 'application/json',
-      },
-    });
-  } catch (error) {
-    return new Response(safeStringify({
-      success: false,
-      error: serializeError(error),
-      code: 'FAUCET_PROXY_FAILED',
-    }), {
-      status: 502,
-      headers,
-    });
-  }
-};
-
-const proxyAnyHubGet = async (request: Request, endpointWithQuery: string): Promise<Response> => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': '*',
-    'Access-Control-Allow-Headers': '*',
-    'Content-Type': 'application/json',
-  };
-
-  await pollAllHubHealth();
-  const child = hubChildren.find((candidate) => candidate.proc?.exitCode === null && candidate.lastHealth);
-  if (!child) {
-    return new Response(safeStringify({ error: 'No healthy hub API available' }), {
-      status: 503,
-      headers,
-    });
-  }
-
-  try {
-    const response = await fetch(`http://${args.host}:${child.apiPort}${endpointWithQuery}`, {
-      method: 'GET',
-      headers: {
-        'content-type': request.headers.get('content-type') || 'application/json',
-      },
-    });
-    const text = await response.text();
-    return new Response(text, {
-      status: response.status,
-      headers: {
-        ...headers,
-        'content-type': response.headers.get('content-type') || 'application/json',
-      },
-    });
-  } catch (error) {
-    return new Response(safeStringify({ error: serializeError(error) }), {
-      status: 502,
-      headers,
-    });
-  }
-};
-
-const proxyAnyHubRequest = async (
-  request: Request,
-  endpointWithQuery: string,
-): Promise<Response> => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': '*',
-    'Access-Control-Allow-Headers': '*',
-    'Content-Type': 'application/json',
-  };
-
-  await pollAllHubHealth();
-  const child = hubChildren.find((candidate) => candidate.proc?.exitCode === null && candidate.lastHealth);
-  if (!child) {
-    return new Response(safeStringify({ error: 'No healthy hub API available' }), {
-      status: 503,
-      headers,
-    });
-  }
-
-  let bodyText = '';
-  if (request.method !== 'GET' && request.method !== 'HEAD') {
-    bodyText = await request.text();
-  }
-
-  try {
-    const response = await fetch(`http://${args.host}:${child.apiPort}${endpointWithQuery}`, {
-      method: request.method,
-      headers: {
-        'content-type': request.headers.get('content-type') || 'application/json',
-      },
-      ...(bodyText.length > 0 ? { body: bodyText } : {}),
-    });
-    const text = await response.text();
-    return new Response(text, {
-      status: response.status,
-      headers: {
-        ...headers,
-        'content-type': response.headers.get('content-type') || 'application/json',
-      },
-    });
-  } catch (error) {
-    return new Response(safeStringify({ error: serializeError(error) }), {
-      status: 502,
-      headers,
-    });
-  }
-};
+const {
+  proxyAnyHubGet,
+  proxyAnyHubRequest,
+  proxyHubApi,
+  proxyRpc,
+} = createOrchestratorProxyHandlers({
+  host: args.host,
+  defaultRpcUrl: args.rpcUrl,
+  pollAllHubHealth,
+  getHubChildByEntityId,
+  getHealthyHub: getHealthyHubChild,
+});
 
 const httpDrain = createHttpDrainTracker();
 const server = Bun.serve({
