@@ -1,5 +1,14 @@
 # The Inevitability of Provable Credit: Why XLN Represents the True Evolution of Finance
 
+**Role:** narrative and strategic explanation
+**Status:** active explanation doc; current execution state and launch blockers live
+in [status.md](status.md) and [mainnet.md](mainnet.md)
+**Audience:** investors, architects, and strong new readers who need the
+economic argument, not the implementation backlog
+
+This document argues *why* XLN should exist. It is not the canonical source for
+what is currently implemented or what blocks launch.
+
 The history of financial innovation is littered with false dichotomies. Centralized versus decentralized. Trustless versus efficient. Privacy versus transparency. These framings obscure a deeper truth that XLN illuminates: the fundamental structure of value transfer networks is not a choice between competing ideologies, but an inevitable convergence toward what has always worked, enhanced by what has always been missing.
 
 Consider the topology of every successful financial system in history. From medieval banking houses to modern central banks, from correspondent banking networks to cryptocurrency exchanges, the pattern is invariant: hubs emerge. This is not an artifact of regulatory capture or technological limitation. It is the natural consequence of liquidity concentration, credit assessment expertise, and the mathematical reality that not all economic actors are created equal. Some entities process millions of transactions. Others process dozens. The hub-and-spoke network is not a design choice. It is an emergent property of economic inequality and specialization.
