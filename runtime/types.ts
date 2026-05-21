@@ -11,6 +11,12 @@ import type {
   JurisdictionEventData,
 } from './types/jurisdiction-events';
 import type { HankoString } from './types/hanko';
+import type {
+  HubRebalanceConfig,
+  RebalancePolicy,
+  RebalanceQuote,
+  RebalanceRequestFeeState,
+} from './types/rebalance';
 export type {
   CrossJurisdictionPullLeg,
   CrossJurisdictionSwapLeg,
@@ -37,6 +43,19 @@ export type {
   HankoString,
   HankoVerificationResult,
 } from './types/hanko';
+export {
+  DEFAULT_HARD_LIMIT,
+  DEFAULT_MAX_FEE,
+  DEFAULT_SOFT_LIMIT,
+  QUOTE_EXPIRY_MS,
+  REFERENCE_TOKEN_ID,
+} from './types/rebalance';
+export type {
+  HubRebalanceConfig,
+  RebalancePolicy,
+  RebalanceQuote,
+  RebalanceRequestFeeState,
+} from './types/rebalance';
 
 /**
  * Shared XLN wire/state type barrel.
@@ -1685,59 +1704,6 @@ export interface EntityState {
   // 🔄 Rebalance Configuration - Hub-level matching strategy
   hubRebalanceConfig?: HubRebalanceConfig;
 }
-
-/** Hub-level config: rebalance strategy + routing fees. Set via setHubConfig EntityTx. */
-export interface HubRebalanceConfig {
-  matchingStrategy: 'amount' | 'time' | 'fee';
-  policyVersion: number;            // Monotonic version for rebalance fee policy
-  routingFeePPM: number;             // Routing fee in parts per million (0-10000 = 0%-1%)
-  baseFee: bigint;                   // Fixed fee per routed payment (smallest unit)
-  swapTakerFeeBps?: number;          // Explicit taker swap fee in bps
-  disputeAutoFinalizeMode?: 'auto' | 'ignore'; // Hub auto-dispute-finalize policy
-  minCollateralThreshold?: bigint;   // Reserved for future policy gates
-  c2rWithdrawSoftLimit?: bigint;             // Keep-buffer of hub-owned collateral before C→R pullback
-  minFeeBps?: bigint;                // Legacy fallback min-fee bps gate
-  rebalanceBaseFee?: bigint;         // Fixed rebalance fee component
-  rebalanceLiquidityFeeBps?: bigint; // Volume-based rebalance fee component (bps)
-  rebalanceGasFee?: bigint;          // Flat gas fee component
-  rebalanceTimeoutMs?: number;       // Auto-refund timeout for unfulfilled prepaid requests
-}
-
-/** Per-token rebalance policy (stored per-token in AccountMachine) */
-export interface RebalancePolicy {
-  r2cRequestSoftLimit: bigint;         // Trigger when uncollateralized credit > this
-  hardLimit: bigint;         // Max uncollateralized credit (emergency threshold)
-  maxAcceptableFee: bigint;  // Auto-accept quotes with fee ≤ this
-  setByLeft?: boolean;       // Who set the policy (for auth: fee-payer should set maxAcceptableFee)
-}
-
-/** Active rebalance quote (one per account, quoteId = env.timestamp) */
-export interface RebalanceQuote {
-  quoteId: number;      // = env.timestamp when quote frame was applied
-  tokenId: number;
-  amount: bigint;
-  feeTokenId: number;
-  feeAmount: bigint;
-  accepted: boolean;    // true if auto-accepted or manually accepted
-}
-
-/** Fee state for request_collateral (fee is prepaid in requester frame). */
-export interface RebalanceRequestFeeState {
-  feeTokenId: number;
-  feePaidUpfront: bigint; // Actual prepaid fee already debited from requester
-  requestedAmount: bigint; // Original request amount used for pro-rata timeout refunds
-  policyVersion: number; // Hub fee-policy version used by requester
-  requestedAt: number;    // Timestamp for FIFO/time-priority scheduling
-  requestedByLeft: boolean;
-  jBatchSubmittedAt: number; // 0 = not submitted, >0 = handed to J-batch (suppress timeout refund race)
-}
-
-// Rebalance constants (all amounts in 18-decimal base, matching TOKEN_REGISTRY)
-export const REFERENCE_TOKEN_ID = 1;                              // USDC (stable, 18 decimals in registry)
-export const DEFAULT_SOFT_LIMIT = 500n * 10n ** 18n;              // $500 uncollateralized credit trigger
-export const DEFAULT_HARD_LIMIT = 10_000n * 10n ** 18n;           // $10,000 max uncollateralized credit
-export const DEFAULT_MAX_FEE = 15n * 10n ** 18n;                  // $15 max acceptable fee
-export const QUOTE_EXPIRY_MS = 300_000;                           // 5 minutes
 
 /** Derived open swap order entry for UI/debug projections */
 export interface SwapBookEntry {
