@@ -391,10 +391,6 @@ export const applyEntityTx = async (
         throw new Error(error);
       }
 
-      console.log(
-        `💳 OPEN-ACCOUNT: Opening account with ${counterpartyId} (counterparty: ${counterpartyId.slice(-4)})`,
-      );
-
       const newState = cloneEntityState(entityState);
       const outputs: EntityInput[] = [];
 
@@ -410,7 +406,6 @@ export const applyEntityTx = async (
           entityId: entityState.entityId,
           counterpartyId: targetEntityId,
         });
-        console.log(`💳 LOCAL-ACCOUNT: Creating local account with Entity ${formatEntityId(counterpartyId)}...`);
 
         // CONSENSUS FIX: Start with empty deltas - let all delta creation happen through transactions
         // This ensures both sides have identical delta Maps (matches Channel.ts pattern)
@@ -484,8 +479,6 @@ export const applyEntityTx = async (
 
       // STEP 2: Add setup txs ONLY on LEFT side (Channel.ts pattern)
       // Right side waits for left's frame; otherwise it will re-propose add_delta and stall.
-      console.log(`💳 Preparing account setup for ${formatEntityId(entityTx.data.targetEntityId)} (left=${isLeft})`);
-
       const localAccount = newState.accounts.get(accountKey);
       if (!localAccount) {
         throw new Error(`CRITICAL: Account machine not found after creation`);
@@ -501,9 +494,6 @@ export const applyEntityTx = async (
         localAccount.mempool.push({ type: 'add_delta', data: { tokenId } });
         if (creditAmount && creditAmount > 0n) {
           localAccount.mempool.push({ type: 'set_credit_limit', data: { tokenId, amount: creditAmount } });
-          console.log(`📝 Initiator queued [add_delta, set_credit_limit] (credit=${creditAmount})`);
-        } else {
-          console.log(`📝 Initiator queued [add_delta] (no initial credit)`);
         }
 
         // Seed per-account rebalance policy from openAccount payload when provided.
@@ -530,10 +520,6 @@ export const applyEntityTx = async (
             maxAcceptableFee: autopilotMaxFee,
           },
         });
-        console.log(
-          `🔄 Autopilot: rebalance policy set for token ${tokenId} ` +
-          `(soft=${autopilotSoftLimit}, hard=${autopilotHardLimit}, maxFee=${autopilotMaxFee})`,
-        );
       } else {
         throw new Error(
           `OPEN_ACCOUNT_ALREADY_EXISTS_AFTER_CLONE: entity=${formatEntityId(entityState.entityId)} ` +
@@ -552,14 +538,7 @@ export const applyEntityTx = async (
 
       // Broadcast updated profile to gossip layer
       if (env.gossip) {
-        const profile = announceLocalEntityProfile(env, newState, env.timestamp);
-
-        console.log(
-          `🏗️ Built profile for ${newState.entityId.slice(-4)}: accounts=${profile.accounts.length} name=${profile.name}`,
-        );
-        console.log(
-          `📡 Announcing profile ${newState.entityId.slice(-4)} ts=${profile.lastUpdated} accounts=${profile.accounts.length}`,
-        );
+        announceLocalEntityProfile(env, newState, env.timestamp);
       }
 
       return { newState, outputs };

@@ -188,10 +188,6 @@ export async function runPostFrameAutoRebalanceCheck(
     const counterpartyReplica = Array.from(env.eReplicas.values()).find(r => r.state.entityId === counterpartyEntityId);
     const ourIsHub = !!ourReplica?.state?.hubRebalanceConfig;
     const emitSkip = (reason: string) => {
-      console.log(
-        `ℹ️ AUTO-REBALANCE: skipped (${reason}) after frame ${frameHeight} ` +
-        `(policyCount=${accountMachine.rebalancePolicy?.size || 0})`,
-      );
       emitRebalanceDebug({
         status: 'skipped',
         event: 'request_not_queued',
@@ -237,9 +233,6 @@ export async function runPostFrameAutoRebalanceCheck(
       gasFee,
     });
     if (rebalanceTxs.length > 0) {
-      console.log(
-        `🔄 AUTO-REBALANCE: Queued ${rebalanceTxs.length} request_collateral txs after frame ${frameHeight}`,
-      );
       emitRebalanceDebug({
         status: 'ok',
         event: 'request_queued',
