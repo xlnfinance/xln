@@ -29,6 +29,7 @@ const RUNTIME_CORE_TESTS = [
   'runtime/__tests__/p2p-direct-policy.test.ts',
   'runtime/__tests__/proof-builder.test.ts',
   'runtime/__tests__/transformer-ordering.test.ts',
+  'runtime/__tests__/server-ingress-receipts.test.ts',
   'native/__tests__/desktop-security.test.ts',
 ].join(' ');
 

@@ -50,6 +50,10 @@ import {
 import { serveRuntimeBundle, serveStatic } from './server/static-assets';
 import { parseTaggedControlBody, requireDaemonControlAuth, requireDaemonRpcAuth } from './server/auth';
 import { listLocalControlEntities } from './server/control-entities';
+import {
+  createRuntimeIngressReceiptStore,
+  type RuntimeIngressReceipt,
+} from './server/ingress-receipts';
 import { encryptJSON, hexToPubKey } from './networking/p2p-crypto';
 import type { Profile } from './networking/gossip';
 import { encodeRebalancePolicyMemo } from './rebalance-policy';
@@ -118,6 +122,7 @@ let cachedHealthInFlight: Promise<{ fullBody: string; publicBody: string }> | nu
 let tokenCatalogCache: JTokenInfo[] | null = null;
 let tokenCatalogPromise: Promise<JTokenInfo[]> | null = null;
 let processGuardsInstalled = false;
+const runtimeIngressReceipts = createRuntimeIngressReceiptStore();
 type RelaySocketData = { type: 'relay' | 'rpc'; clientIp: string };
 type RelaySocket = ServerWebSocket<RelaySocketData>;
 const STACK_COMPATIBILITY_PROBE_ENTITY = `0x${'11'.repeat(32)}`;
@@ -304,6 +309,12 @@ const waitForRuntimeIdle = async (env: Env, timeoutMs = 5000): Promise<boolean> 
   }
   return false;
 };
+
+const currentRuntimeHeight = (env: Env | null): number =>
+  Math.max(0, Math.floor(Number(env?.height ?? 0)));
+
+const runtimeInputStatusUrl = (id: string): string =>
+  `/api/control/runtime-input/${encodeURIComponent(id)}/status`;
 
 const waitForJBatchClear = async (env: Env, timeoutMs = 5000): Promise<boolean> => {
   const started = Date.now();
@@ -1777,14 +1788,25 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         entityInputs,
         ...(jInputs.length > 0 ? { jInputs } : {}),
       });
+      const receipt = runtimeIngressReceipts.register({
+        kind: 'control-runtime-input',
+        counts: {
+          runtimeTxs: runtimeTxs.length,
+          entityInputs: entityInputs.length,
+          jInputs: jInputs.length,
+        },
+        enqueuedHeight: currentRuntimeHeight(env),
+      });
       return new Response(
         serializeTaggedJson({
           ok: true,
-          queued: {
+          accepted: {
             runtimeTxs: runtimeTxs.length,
             entityInputs: entityInputs.length,
             jInputs: jInputs.length,
           },
+          receipt,
+          statusUrl: runtimeInputStatusUrl(receipt.id),
         }),
         { headers },
       );
@@ -1794,6 +1816,28 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         { status: 500, headers },
       );
     }
+  }
+
+  const runtimeInputStatusMatch = pathname.match(/^\/api\/control\/runtime-input\/([^/]+)\/status$/);
+  if (runtimeInputStatusMatch && req.method === 'GET') {
+    const authError = requireDaemonControlAuth(req, env);
+    if (authError) return authError;
+    const receiptId = decodeURIComponent(runtimeInputStatusMatch[1] || '');
+    const receipt = runtimeIngressReceipts.get(receiptId);
+    if (!receipt) {
+      return new Response(
+        serializeTaggedJson({ ok: false, error: 'Runtime input receipt not found' }),
+        { status: 404, headers },
+      );
+    }
+    return new Response(
+      serializeTaggedJson({
+        ok: true,
+        receipt,
+        currentHeight: currentRuntimeHeight(env),
+      }),
+      { headers },
+    );
   }
 
   if (pathname === '/api/control/p2p' && req.method === 'POST') {
@@ -2679,7 +2723,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         amount = '100',
         hubEntityId: requestedHubEntityId,
       } = body;
-      const requestId = `offchain_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+      const requestId = `offchain_${globalThis.crypto?.randomUUID?.() ?? `${Date.now()}_${Math.random().toString(36).slice(2, 8)}`}`;
 
       if (!userEntityId) {
         return new Response(safeStringify({ error: 'Missing userEntityId' }), { status: 400, headers });
@@ -2925,6 +2969,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       }
 
       // Single-writer invariant: enqueue only; runtime loop applies.
+      let receipt: RuntimeIngressReceipt | null = null;
       try {
         const hubPolicy = getEntityReplicaById(env, hubEntityId)?.state?.hubRebalanceConfig;
         const faucetDescription = encodeRebalancePolicyMemo('faucet-offchain', {
@@ -2956,12 +3001,28 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
             },
           ],
         });
+        receipt = runtimeIngressReceipts.register({
+          id: requestId,
+          kind: 'faucet-offchain',
+          counts: { runtimeTxs: 0, entityInputs: 1, jInputs: 0 },
+          enqueuedHeight: currentRuntimeHeight(env),
+          note: 'Faucet payment was accepted into the runtime queue; poll statusUrl and account state for settlement.',
+        });
       } catch (error) {
         return new Response(
           JSON.stringify({
             error: 'Failed to enqueue faucet payment',
             code: 'FAUCET_PAYMENT_ENQUEUE_FAILED',
             details: (error as Error).message,
+          }),
+          { status: 503, headers },
+        );
+      }
+      if (!receipt) {
+        return new Response(
+          JSON.stringify({
+            error: 'Failed to register faucet payment receipt',
+            code: 'FAUCET_PAYMENT_RECEIPT_FAILED',
           }),
           { status: 503, headers },
         );
@@ -2975,6 +3036,8 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           type: 'offchain',
           status: 'queued',
           requestId,
+          receipt,
+          statusUrl: runtimeInputStatusUrl(requestId),
           amount,
           tokenId,
           from: hubEntityId.slice(0, 16) + '...',
@@ -3340,6 +3403,9 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     console.log('[XLN] Initializing runtime...');
     env = await main(SERVER_RUNTIME_SEED);
     serverEnv = env;
+    registerEnvChangeCallback(env, (nextEnv) => {
+      runtimeIngressReceipts.observeHeight(currentRuntimeHeight(nextEnv));
+    });
     console.log('[XLN] Runtime initialized ✓');
     const runtimeEnv = env;
     const verboseRuntimeLogs = /^(1|true)$/i.test(process.env['RUNTIME_VERBOSE_LOGS'] ?? '');
