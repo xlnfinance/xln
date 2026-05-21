@@ -72,6 +72,7 @@ import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '
 import { createLocalDeliveryHandler } from './relay-local-delivery';
 import { resolveJurisdictionsJsonPath } from './jurisdictions-path';
 import { computeJurisdictionsNetworkVersion } from './jurisdictions-version';
+import { createStructuredLogger, shortId } from './logger';
 import {
   buildMarketSnapshotForReplica,
   type MarketSnapshotPayload,
@@ -126,6 +127,8 @@ const runtimeIngressReceipts = createRuntimeIngressReceiptStore();
 type RelaySocketData = { type: 'relay' | 'rpc'; clientIp: string };
 type RelaySocket = ServerWebSocket<RelaySocketData>;
 const STACK_COMPATIBILITY_PROBE_ENTITY = `0x${'11'.repeat(32)}`;
+const serverLog = createStructuredLogger('server');
+const faucetLog = createStructuredLogger('server.faucet');
 
 const probeLocalAnvilContractStack = async (adapter: JAdapter): Promise<{ ok: boolean; reason: string }> => {
   const depositoryAddress = String(adapter.addresses?.depository || '').trim();
@@ -280,7 +283,7 @@ const logOneShot = (key: string, message: string) => {
   const last = oneShotLogs.get(key) ?? 0;
   if (nowMs - last < ONE_SHOT_TTL_MS) return;
   oneShotLogs.set(key, nowMs);
-  console.warn(message);
+  serverLog.warn(message);
 };
 
 const hasPendingRuntimeWork = (env: Env): boolean => {
@@ -360,7 +363,7 @@ const waitForReserveUpdate = async (
       const current = await globalJAdapter.getReserves(entityId, tokenId);
       if (current >= expectedMin) return current;
     } catch (err) {
-      console.warn('[FAUCET] getReserves failed while waiting:', (err as Error).message);
+      faucetLog.debug('reserve.poll_failed', { error: (err as Error).message });
     }
     await new Promise(resolve => setTimeout(resolve, pollMs));
   }
@@ -383,7 +386,6 @@ const FAUCET_SIGNER_LABEL = process.env['FAUCET_SIGNER_LABEL'] ?? 'faucet-1';
 const FAUCET_SEED = process.env['FAUCET_SEED'] ?? `${SERVER_RUNTIME_SEED}:faucet`;
 const FAUCET_WALLET_ETH_TARGET = ethers.parseEther('100');
 const FAUCET_TOKEN_TARGET_UNITS = 1_000_000n;
-const INCLUDE_MARKET_MAKER_BY_DEFAULT = !/^(0|false)$/i.test(process.env['XLN_INCLUDE_MARKET_MAKER'] ?? '1');
 const SKIP_SERVER_BOOTSTRAP = /^(1|true)$/i.test(process.env['XLN_SKIP_SERVER_BOOTSTRAP'] ?? '');
 const readPositiveIntEnv = (name: string, fallback: number): number => {
   const value = Number(process.env[name] || '');
@@ -767,7 +769,7 @@ const deployDefaultTokensOnRpc = async (): Promise<void> => {
     throw new Error('Depository address not available for token deployment');
   }
 
-  console.log('[XLN] Deploying default ERC20 tokens to RPC...');
+  serverLog.info('tokens.deploy_defaults.start');
   const erc20Factory = new ethers.ContractFactory(
     ERC20Mock__factory.abi,
     ERC20Mock__factory.bytecode,
@@ -789,7 +791,7 @@ const deployDefaultTokensOnRpc = async (): Promise<void> => {
     };
     await tokenContract.waitForDeployment();
     const tokenAddress = await tokenContract.getAddress();
-    console.log(`[XLN] ${token.symbol} deployed at ${tokenAddress}`);
+    serverLog.info('tokens.deployed', { symbol: token.symbol, address: shortId(tokenAddress, 10) });
 
     const approveTx = await tokenContract.approve(depositoryAddress, TOKEN_REGISTRATION_AMOUNT);
     await approveTx.wait();
@@ -805,7 +807,7 @@ const deployDefaultTokensOnRpc = async (): Promise<void> => {
       amount: TOKEN_REGISTRATION_AMOUNT,
     });
     await registerTx.wait();
-    console.log(`[XLN] Token registered: ${token.symbol} @ ${tokenAddress.slice(0, 10)}...`);
+    serverLog.info('tokens.registered', { symbol: token.symbol, address: shortId(tokenAddress, 10) });
   }
 };
 
@@ -837,7 +839,7 @@ const ensureTokenCatalog = async (): Promise<JTokenInfo[]> => {
         'provider.getCode',
       );
     } catch (error) {
-      console.warn(`[ensureTokenCatalog] getCode failed: ${(error as Error).message}`);
+      serverLog.warn('token_catalog.get_code_failed', { error: (error as Error).message });
       return '0x';
     }
   };
@@ -849,7 +851,7 @@ const ensureTokenCatalog = async (): Promise<JTokenInfo[]> => {
         'getTokenRegistry',
       );
     } catch (error) {
-      console.warn(`[ensureTokenCatalog] getTokenRegistry failed: ${(error as Error).message}`);
+      serverLog.warn('token_catalog.registry_failed', { error: (error as Error).message });
       return fallbackTokens;
     }
   };
@@ -861,7 +863,7 @@ const ensureTokenCatalog = async (): Promise<JTokenInfo[]> => {
         if (code !== '0x' && code.length > 10) {
           return tokenCatalogCache;
         }
-        console.warn('[ensureTokenCatalog] Cached token registry appears stale - refreshing');
+        serverLog.warn('token_catalog.cache_stale');
         tokenCatalogCache = null;
       }
     } else {
@@ -880,13 +882,14 @@ const ensureTokenCatalog = async (): Promise<JTokenInfo[]> => {
       if (firstToken?.address) {
         const code = await safeGetCode(firstToken.address);
         if (code === '0x' || code.length < 10) {
-          console.warn(
-            `[ensureTokenCatalog] Token ${firstToken.symbol} at ${firstToken.address} has no code - deploying fresh tokens`,
-          );
+          serverLog.warn('token_catalog.token_code_missing', {
+            symbol: firstToken.symbol,
+            address: firstToken.address,
+          });
           try {
             await withTimeout(deployDefaultTokensOnRpc(), TOKEN_CATALOG_TIMEOUT_MS * 2, 'deployDefaultTokensOnRpc');
           } catch (error) {
-            console.warn(`[ensureTokenCatalog] Deploy fallback failed: ${(error as Error).message}`);
+            serverLog.warn('token_catalog.deploy_fallback_failed', { error: (error as Error).message });
             return current;
           }
           const refreshed = await safeGetRegistry();
@@ -897,7 +900,7 @@ const ensureTokenCatalog = async (): Promise<JTokenInfo[]> => {
         try {
           await withTimeout(deployDefaultTokensOnRpc(), TOKEN_CATALOG_TIMEOUT_MS * 2, 'deployMissingDefaultTokensOnRpc');
         } catch (error) {
-          console.warn(`[ensureTokenCatalog] Missing-token deploy fallback failed: ${(error as Error).message}`);
+          serverLog.warn('token_catalog.deploy_missing_failed', { error: (error as Error).message });
           return current;
         }
         const refreshed = await safeGetRegistry();
@@ -913,7 +916,7 @@ const ensureTokenCatalog = async (): Promise<JTokenInfo[]> => {
     try {
       await withTimeout(deployDefaultTokensOnRpc(), TOKEN_CATALOG_TIMEOUT_MS * 2, 'deployDefaultTokensOnRpc');
     } catch (error) {
-      console.warn(`[ensureTokenCatalog] Deploy fallback failed: ${(error as Error).message}`);
+      serverLog.warn('token_catalog.deploy_fallback_failed', { error: (error as Error).message });
       return current;
     }
     const refreshed = await safeGetRegistry();
@@ -994,9 +997,9 @@ const updateJurisdictionsJson = async (
 
     const payload = JSON.stringify(data, null, 2);
     await fs.writeFile(canonicalPath, payload);
-    console.log(`[XLN] Updated jurisdictions.json: ${canonicalPath}`);
+    serverLog.info('jurisdictions.updated', { path: canonicalPath });
   } catch (err) {
-    console.warn('[XLN] Failed to update jurisdictions.json:', (err as Error).message);
+    serverLog.warn('jurisdictions.update_failed', { error: (err as Error).message });
   }
 };
 
@@ -1085,15 +1088,10 @@ const buildRuntimeJurisdictionsJson = async (env?: Env | null): Promise<string |
   return JSON.stringify(payload);
 };
 
-// ============================================================================
-// SERVER OPTIONS
-// ============================================================================
-
 export type XlnServerOptions = {
   port: number;
   host?: string | undefined;
   staticDir?: string | undefined;
-  relaySeeds?: string[] | undefined;
   serverId?: string | undefined;
 };
 
@@ -1101,7 +1099,6 @@ const DEFAULT_OPTIONS: XlnServerOptions = {
   port: 8080,
   host: '127.0.0.1',
   staticDir: './frontend/build',
-  relaySeeds: [],
   serverId: 'xln-server',
 };
 const DEFAULT_TOKEN_CATALOG = DEFAULT_TOKENS.map(token => ({ ...token }));
@@ -1116,21 +1113,6 @@ const resolveConfiguredRelayUrl = (port?: number): string => {
     .filter(Boolean);
   return candidates[0] || fallback;
 };
-const resolveAdvertisedRelayUrl = (port?: number): string => {
-  const fallback = getDefaultLocalRelayUrl(port);
-  const candidates = [
-    process.env['PUBLIC_RELAY_URL'],
-    process.env['RELAY_URL'],
-    process.env['INTERNAL_RELAY_URL'],
-  ]
-    .map(value => String(value || '').trim())
-    .filter(Boolean);
-  return candidates[0] || fallback;
-};
-
-// ============================================================================
-// RELAY STATE (single store for all relay concerns)
-// ============================================================================
 
 let relayStore = createRelayStore(DEFAULT_OPTIONS.serverId ?? 'xln-server');
 type ServerBootPhase = 'starting' | 'runtime' | 'bootstrap' | 'ready' | 'failed';
@@ -1234,21 +1216,6 @@ const sendEntityInputDirectViaRelaySocket = (
   }
 };
 
-const bootstrapServerHubsAndReserves = async (
-  env: Env,
-  options: XlnServerOptions,
-  relayUrl: string,
-  anvilRpc: string,
-  bootstrapOptions: { includeMarketMaker?: boolean } = {},
-): Promise<string[]> => {
-  void env;
-  void options;
-  void relayUrl;
-  void anvilRpc;
-  void bootstrapOptions;
-  throw new Error('SHARED_HUB_BOOTSTRAP_REMOVED: use runtime/orchestrator/orchestrator.ts');
-};
-
 const installProcessSafetyGuards = (): void => {
   if (processGuardsInstalled) return;
   processGuardsInstalled = true;
@@ -1256,7 +1223,7 @@ const installProcessSafetyGuards = (): void => {
   process.on('unhandledRejection', reason => {
     const message = reason instanceof Error ? reason.message : String(reason);
     const stack = reason instanceof Error ? reason.stack : undefined;
-    console.error(`[PROCESS] Unhandled rejection: ${message}`);
+    serverLog.error('process.unhandled_rejection', { message });
     pushDebugEvent(relayStore, {
       event: 'error',
       reason: 'UNHANDLED_REJECTION',
@@ -1266,7 +1233,7 @@ const installProcessSafetyGuards = (): void => {
 
   process.on('uncaughtException', error => {
     const message = getErrorMessage(error, 'Unknown uncaught exception');
-    console.error(`[PROCESS] Uncaught exception: ${message}`);
+    serverLog.error('process.uncaught_exception', { message });
     pushDebugEvent(relayStore, {
       event: 'error',
       reason: 'UNCAUGHT_EXCEPTION',
@@ -1275,9 +1242,6 @@ const installProcessSafetyGuards = (): void => {
   });
 };
 
-// ============================================================================
-// FAUCET MUTEX (prevent nonce collisions from parallel requests)
-// ============================================================================
 const faucetLock = {
   locked: false,
   queue: [] as Array<() => void>,
@@ -1301,13 +1265,6 @@ const faucetLock = {
     }
   },
 };
-
-// ============================================================================
-// RELAY PROTOCOL (now delegated to relay-router + relay-local-delivery)
-// ============================================================================
-// ============================================================================
-// RPC PROTOCOL (for remote UI)
-// ============================================================================
 
 const buildMarketSnapshot = (
   env: Env,
@@ -1703,10 +1660,6 @@ const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, e
 
   ws.send(safeStringify({ type: 'error', error: `Unknown RPC type: ${type}` }));
 };
-
-// ============================================================================
-// REST API
-// ============================================================================
 
 const handleApi = async (req: Request, pathname: string, env: Env | null): Promise<Response> => {
   const headers = JSON_HEADERS;
@@ -2477,15 +2430,12 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
   // Faucet B: Hub reserve → user reserve via processBatch
   if (pathname === '/api/faucet/reserve' && req.method === 'POST') {
-    // Acquire mutex to prevent nonce collisions
     await faucetLock.acquire();
     try {
       if (!globalJAdapter) {
-        faucetLock.release();
         return new Response(safeStringify({ error: 'J-adapter not initialized' }), { status: 503, headers });
       }
       if (!env) {
-        faucetLock.release();
         return new Response(safeStringify({ error: 'Runtime not initialized' }), { status: 503, headers });
       }
 
@@ -2497,21 +2447,16 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const amount = typeof body?.amount === 'string' ? body.amount : String(body?.amount ?? '100');
       const requestId =
         globalThis.crypto?.randomUUID?.() ?? `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
-      const logPrefix = `FAUCET/RESERVE ${requestId}`;
 
       if (!userEntityId) {
-        faucetLock.release();
         return new Response(safeStringify({ error: 'Missing userEntityId' }), { status: 400, headers });
       }
       if (!Number.isFinite(tokenId)) {
-        faucetLock.release();
         return new Response(safeStringify({ error: 'Invalid tokenId' }), { status: 400, headers });
       }
 
-      // Get hub from server-authoritative hub set + gossip
       const hubs = getFaucetHubProfiles(env);
       if (hubs.length === 0) {
-        faucetLock.release();
         return new Response(
           JSON.stringify({
             error: 'No faucet hub available',
@@ -2534,7 +2479,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         }
       }
       if (!tokenMeta) {
-        faucetLock.release();
         return new Response(safeStringify({ error: `Unknown token for faucet`, tokenId, tokenSymbol }), {
           status: 400,
           headers,
@@ -2543,17 +2487,19 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const decimals = typeof tokenMeta.decimals === 'number' ? tokenMeta.decimals : 18;
       const amountWei = ethers.parseUnits(amount, decimals);
       const requestStartedAt = Date.now();
-      console.log(
-        `[${logPrefix}] Request: hub=${hubEntityId.slice(0, 16)}... signer=${hubSignerId} → user=${userEntityId.slice(0, 16)}... tokenId=${tokenId} symbol=${tokenMeta.symbol} amount=${amount} decimals=${decimals}`,
-      );
+      faucetLog.info('reserve.request', {
+        requestId,
+        hub: shortId(hubEntityId, 8),
+        user: shortId(userEntityId, 8),
+        tokenId,
+        amount,
+      });
 
       const prevUserReserve = await globalJAdapter.getReserves(userEntityId, tokenId).catch(() => 0n);
-      let hubReplicaKey = Array.from(env.eReplicas?.keys?.() || []).find(key => key.startsWith(`${hubEntityId}:`));
-      let hubReplica = hubReplicaKey ? env.eReplicas?.get(hubReplicaKey) : null;
+      const hubReplicaKey = Array.from(env.eReplicas?.keys?.() || []).find(key => key.startsWith(`${hubEntityId}:`));
+      const hubReplica = hubReplicaKey ? env.eReplicas?.get(hubReplicaKey) : null;
       const hubReserve = hubReplica?.state?.reserves?.get(tokenId) ?? 0n;
-      console.log(`[${logPrefix}] Hub reserve before R2R: token ${tokenId} = ${hubReserve.toString()}`);
       if (hubReserve < amountWei) {
-        faucetLock.release();
         return new Response(
           JSON.stringify({
             error: `Hub has insufficient reserves for token ${tokenId}`,
@@ -2601,39 +2547,19 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       };
 
       enqueueReserveTransfer();
-      // Log hub jBatchState summary after queuing
-      hubReplicaKey = Array.from(env.eReplicas?.keys?.() || []).find(key => key.startsWith(`${hubEntityId}:`));
-      hubReplica = hubReplicaKey ? env.eReplicas?.get(hubReplicaKey) : null;
-      if (hubReplica?.state?.jBatchState?.batch) {
-        const batch = hubReplica.state.jBatchState.batch;
-        console.log(
-          `[${logPrefix}] Hub jBatch: r2r=${batch.reserveToReserve.length}, r2c=${batch.reserveToCollateral.length}, c2r=${batch.collateralToReserve.length}, settlements=${batch.settlements.length}, sentPending=${hubReplica.state.jBatchState.sentBatch ? 'yes' : 'no'}`,
-        );
-      }
-      if (env.jReplicas) {
-        for (const [name, replica] of env.jReplicas.entries()) {
-          if ((replica.mempool?.length ?? 0) > 0) {
-            console.log(
-              `[${logPrefix}] J-mempool "${name}": size=${replica.mempool.length}, block=${replica.blockNumber ?? 0}, lastTs=${replica.lastBlockTimestamp ?? 0}`,
-            );
-          }
-        }
-      }
-      console.log(`[${logPrefix}] R2R queued (waiting for broadcast window)`);
       const runtimeIdleStartedAt = Date.now();
       const runtimeIdle = await waitForRuntimeIdle(env, 5000);
       const runtimeIdleMs = Date.now() - runtimeIdleStartedAt;
       if (!runtimeIdle) {
-        console.warn(
-          `[${logPrefix}] runtime idle wait timed out after ${runtimeIdleMs}ms (poll=${resolveRuntimeWaitPollMs()}ms)`,
-        );
+        faucetLog.warn('reserve.runtime_idle_timeout', {
+          requestId,
+          ms: runtimeIdleMs,
+          pollMs: resolveRuntimeWaitPollMs(),
+        });
       }
 
-      const broadcastWindowStartedAt = Date.now();
       const broadcastWindowReady = await waitForEntityBroadcastWindow(env, hubEntityId, 10000);
-      const broadcastWindowMs = Date.now() - broadcastWindowStartedAt;
       if (!broadcastWindowReady) {
-        faucetLock.release();
         return new Response(
           JSON.stringify({
             error: 'Hub sentBatch did not clear in time',
@@ -2648,16 +2574,15 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const broadcastIdle = await waitForRuntimeIdle(env, 5000);
       const broadcastIdleMs = Date.now() - broadcastIdleStartedAt;
       if (!broadcastIdle) {
-        console.warn(
-          `[${logPrefix}] runtime idle after broadcast timed out after ${broadcastIdleMs}ms (poll=${resolveRuntimeWaitPollMs()}ms)`,
-        );
+        faucetLog.warn('reserve.broadcast_idle_timeout', {
+          requestId,
+          ms: broadcastIdleMs,
+          pollMs: resolveRuntimeWaitPollMs(),
+        });
       }
 
-      const jBatchClearStartedAt = Date.now();
       const jBatchCleared = await waitForJBatchClear(env, 10000);
-      const jBatchClearMs = Date.now() - jBatchClearStartedAt;
       if (!jBatchCleared) {
-        faucetLock.release();
         return new Response(
           JSON.stringify({
             error: 'J-batch did not broadcast in time',
@@ -2668,11 +2593,8 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       }
 
       const expectedMin = prevUserReserve + amountWei;
-      const reserveWaitStartedAt = Date.now();
       const updatedReserve = await waitForReserveUpdate(userEntityId, tokenId, expectedMin, 10000);
-      const reserveWaitMs = Date.now() - reserveWaitStartedAt;
       if (updatedReserve === null) {
-        faucetLock.release();
         return new Response(
           JSON.stringify({
             error: 'Reserve update not confirmed on-chain',
@@ -2682,12 +2604,12 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         );
       }
       const totalMs = Date.now() - requestStartedAt;
-      console.log(
-        `[${logPrefix}] timings ms(runtimeIdle=${formatTimingMs(runtimeIdleMs)},broadcastWindow=${formatTimingMs(broadcastWindowMs)},broadcastIdle=${formatTimingMs(broadcastIdleMs)},jBatchClear=${formatTimingMs(jBatchClearMs)},reserve=${formatTimingMs(reserveWaitMs)},total=${formatTimingMs(totalMs)}) ` +
-          `polls(runtime=${resolveRuntimeWaitPollMs()}ms,reserve=${resolveReserveWaitPollMs()}ms) prevReserve=${prevUserReserve.toString()} updatedReserve=${updatedReserve.toString()}`,
-      );
+      faucetLog.info('reserve.accepted', {
+        requestId,
+        totalMs: formatTimingMs(totalMs),
+        updatedReserve: updatedReserve.toString(),
+      });
 
-      faucetLock.release();
       return new Response(
         JSON.stringify({
           success: true,
@@ -2701,9 +2623,10 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         { headers },
       );
     } catch (error: unknown) {
-      faucetLock.release();
-      console.error('[FAUCET/RESERVE] Error:', error);
+      faucetLog.error('reserve.error', { error: getErrorMessage(error) });
       return new Response(safeStringify({ error: getErrorMessage(error) }), { status: 500, headers });
+    } finally {
+      faucetLock.release();
     }
   }
 
@@ -2775,10 +2698,11 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         );
       }
       const normalizedRuntimeKey = normalizeRuntimeKey(normalizedUserRuntimeId);
-      console.log(
-        `[FAUCET/OFFCHAIN] req=${requestId} user=${normalizedUserEntityId.slice(-8)} runtime=${normalizedUserRuntimeId.slice(0, 10)} ` +
-          `clients=${relayStore.clients.size} activeHubs=${relayStore.activeHubEntityIds.length}`,
-      );
+      faucetLog.info('offchain.request', {
+        requestId,
+        user: shortId(normalizedUserEntityId, 8),
+        runtime: shortId(normalizedUserRuntimeId, 10),
+      });
       // Important: local relay client registry is authoritative only when faucet API
       // and relay endpoint are the same node. With external relay (e.g. wss://xln.finance/relay),
       // this process may not see the runtime socket directly. Treat local visibility as diagnostic,
@@ -2787,10 +2711,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const runtimePubKey = relayStore.runtimeEncryptionKeys.get(normalizedRuntimeKey);
       if (!runtimeSeenLocally || !runtimePubKey) {
         const activeRelayClients = Array.from(relayStore.clients.keys());
-        console.warn(
-          `[FAUCET/OFFCHAIN] runtime-local-miss req=${requestId} runtime=${normalizedUserRuntimeId.slice(0, 10)} ` +
-            `seen=${runtimeSeenLocally ? 1 : 0} pubKey=${runtimePubKey ? 1 : 0}`,
-        );
+        faucetLog.warn('offchain.runtime_local_miss', { requestId, runtime: shortId(normalizedUserRuntimeId, 10) });
         pushDebugEvent(relayStore, {
           event: 'debug_event',
           status: 'warning',
@@ -2865,9 +2786,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         );
       }
       const hubEntityId = requestedHub.entityId;
-      console.log(
-        `[FAUCET/OFFCHAIN] selectedHub=${hubEntityId.slice(-8)} requested=${requestedHubId.slice(-8)}`,
-      );
       if (!getEntityReplicaById(env, hubEntityId)) {
         return new Response(
           JSON.stringify({
@@ -2893,9 +2811,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
           { status: 503, headers },
         );
       }
-      console.log(
-        `[FAUCET/OFFCHAIN] hub=${hubEntityId.slice(-8)} signer=${hubSignerId.slice(-8)} amount=${amount} token=${tokenId}`,
-      );
       pushDebugEvent(relayStore, {
         event: 'debug_event',
         status: 'info',
@@ -3028,7 +2943,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         );
       }
       const serverDurationMs = Date.now() - requestStartedAt;
-      console.log(`[FAUCET/OFFCHAIN] ✅ Payment accepted req=${requestId} duration=${serverDurationMs}ms`);
+      faucetLog.info('offchain.accepted', { requestId, durationMs: serverDurationMs });
 
       return new Response(
         JSON.stringify({
@@ -3049,7 +2964,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         { headers },
       );
     } catch (error: unknown) {
-      console.error('[FAUCET/OFFCHAIN] Error:', error);
+      faucetLog.error('offchain.error', { error: getErrorMessage(error) });
       const message = getErrorMessage(error, 'Unknown faucet error');
       const status =
         message.includes('SIGNER_RESOLUTION_FAILED') || message.includes('RUNTIME_REPLICA_NOT_FOUND') ? 503 : 500;
@@ -3178,18 +3093,12 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   return new Response(safeStringify({ error: 'Not found' }), { status: 404, headers });
 };
 
-// ============================================================================
-// MAIN SERVER
-// ============================================================================
-
 export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Promise<void> {
   installProcessSafetyGuards();
-  console.log('═══ startXlnServer() CALLED ═══');
-  console.log('Options:', opts);
   const options = { ...DEFAULT_OPTIONS, ...opts };
+  serverLog.info('start', { port: options.port, host: options.host, staticDir: options.staticDir });
   relayStore = createRelayStore(options.serverId ?? DEFAULT_OPTIONS.serverId ?? 'xln-server');
   marketSubscriptionStack.clear();
-  const advertisedRelayUrl = resolveAdvertisedRelayUrl(options.port);
   const internalRelayUrl = resolveConfiguredRelayUrl(options.port);
   serverBootStartedAt = Date.now();
   serverBootCompletedAt = null;
@@ -3227,7 +3136,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
           return await handleApi(req, pathname, env);
         } catch (error) {
           const message = (error as Error)?.message || 'API handler failed';
-          console.error(`[API] Unhandled route error (${pathname}): ${message}`);
+          serverLog.error('api.unhandled_route_error', { pathname, message });
           pushDebugEvent(relayStore, {
             event: 'error',
             reason: 'API_HANDLER_EXCEPTION',
@@ -3264,7 +3173,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     websocket: {
       open(ws: RelaySocket) {
         const data = ws.data;
-        console.log(`[WS] New ${data.type} connection`);
+        serverLog.info('ws.open', { type: data.type });
         if (data.type === 'rpc' && env) {
           attachRuntimeAdapterTicker(env, registerEnvChangeCallback);
         }
@@ -3287,7 +3196,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
             }
             Promise.resolve(relayRoute(routerConfig, ws, msg)).catch(error => {
               const reason = (error as Error).message || 'relay handler error';
-              console.error(`[WS] Relay handler error: ${reason}`);
+              serverLog.error('ws.relay_handler_error', { reason, type: msg?.type });
               pushDebugEvent(relayStore, {
                 event: 'error',
                 reason: 'RELAY_HANDLER_EXCEPTION',
@@ -3309,7 +3218,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
             if (isMarketMessageType(msg?.type)) {
               Promise.resolve(marketSubscriptionStack.handleMessage(ws, msg as Record<string, unknown>)).catch(error => {
                 const reason = (error as Error).message || 'market handler error';
-                console.error(`[WS] Market handler error: ${reason}`);
+                serverLog.error('ws.market_handler_error', { reason, type: msg?.type });
                 pushDebugEvent(relayStore, {
                   event: 'error',
                   reason: 'MARKET_HANDLER_EXCEPTION',
@@ -3335,7 +3244,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
           } else if (data.type === 'rpc') {
             Promise.resolve(handleRpcMessage(ws, msg, env)).catch(error => {
               const reason = (error as Error).message || 'rpc handler error';
-              console.error(`[WS] RPC handler error: ${reason}`);
+              serverLog.error('ws.rpc_handler_error', { reason, type: msg?.type });
               pushDebugEvent(relayStore, {
                 event: 'error',
                 reason: 'RPC_HANDLER_EXCEPTION',
@@ -3350,7 +3259,11 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
           }
         } catch (error) {
           const byteLength = data.type === 'rpc' ? runtimeAdapterMessageByteLength(message) : message.toString().length;
-          console.error(`[WS] Parse error (type=${data.type}, len=${byteLength}):`, error);
+          serverLog.error('ws.parse_error', {
+            type: data.type,
+            len: byteLength,
+            error: getErrorMessage(error),
+          });
           pushDebugEvent(relayStore, {
             event: 'error',
             reason: data.type === 'rpc' ? 'Invalid runtime adapter message' : 'Invalid JSON',
@@ -3376,10 +3289,12 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
             : reason
               ? String(reason)
               : '';
-        console.warn(
-          `[WS] CLOSE wsType=${wsType} runtime=${removedId?.slice(0, 10) || 'unknown'} ` +
-          `code=${Number(code || 0)} reason="${reasonText || 'n/a'}"`,
-        );
+        serverLog.warn('ws.close', {
+          type: wsType,
+          runtime: removedId ? shortId(removedId, 10) : 'unknown',
+          code: Number(code || 0),
+          reason: reasonText || null,
+        });
         if (removedId) {
           pushDebugEvent(relayStore, {
             event: 'ws_close',
@@ -3400,36 +3315,32 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
   try {
     serverBootPhase = 'runtime';
-    console.log('[XLN] Initializing runtime...');
+    serverLog.info('runtime.init.start');
     env = await main(SERVER_RUNTIME_SEED);
     serverEnv = env;
     registerEnvChangeCallback(env, (nextEnv) => {
       runtimeIngressReceipts.observeHeight(currentRuntimeHeight(nextEnv));
     });
-    console.log('[XLN] Runtime initialized ✓');
+    serverLog.info('runtime.init.ready', { runtimeId: shortId(env.runtimeId, 10) });
     const runtimeEnv = env;
     const verboseRuntimeLogs = /^(1|true)$/i.test(process.env['RUNTIME_VERBOSE_LOGS'] ?? '');
     env.quietRuntimeLogs = !verboseRuntimeLogs;
-    console.log(
-      `[XLN] Runtime log mode: ${env.quietRuntimeLogs ? 'quiet' : 'verbose'} (set RUNTIME_VERBOSE_LOGS=1 for verbose)`,
-    );
+    serverLog.info('runtime.log_mode', { mode: env.quietRuntimeLogs ? 'quiet' : 'verbose' });
     env.runtimeState = env.runtimeState ?? {};
     env.runtimeState.directEntityInputDispatch = (targetRuntimeId, input, ingressTimestamp) =>
       sendEntityInputDirectViaRelaySocket(runtimeEnv, targetRuntimeId, input, ingressTimestamp);
     env.runtimeState.canUseConnectedRelayFallback = hasConnectedEncryptedRelayClient;
     startRuntimeLoop(env);
-    console.log('[XLN] Runtime event loop started ✓');
+    serverLog.info('runtime.loop.started');
 
     // Initialize J-adapter (anvil for testnet, browserVM for local)
     const useAnvil = process.env['USE_ANVIL'] === 'true';
     const anvilRpc = useAnvil ? resolveRequiredAnvilRpc() : '';
 
-    console.log('[XLN] J-adapter mode check:');
-    console.log('  USE_ANVIL =', useAnvil);
-    console.log('  ANVIL_RPC =', anvilRpc);
+    serverLog.info('jadapter.mode', { useAnvil, anvilRpc: useAnvil ? anvilRpc : null });
 
     if (useAnvil) {
-      console.log('[XLN] Connecting to Anvil testnet...');
+      serverLog.info('anvil.connect.start', { rpc: anvilRpc });
       const usePredeployedAddresses = process.env['XLN_USE_PREDEPLOYED_ADDRESSES'] === 'true';
 
     // Optional: reuse addresses from jurisdictions.json (disabled by default).
@@ -3438,7 +3349,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     if (usePredeployedAddresses) {
       try {
         const jurisdictionsPath = resolveJurisdictionsJsonPath();
-        console.log(`[XLN] Loading predeployed addresses from: ${jurisdictionsPath}`);
+        serverLog.info('anvil.predeployed.load', { path: jurisdictionsPath });
         const jurisdictionsData = await fs.readFile(jurisdictionsPath, 'utf-8');
         const jurisdictions = JSON.parse(jurisdictionsData);
         const arrakisConfig = jurisdictions?.jurisdictions?.arrakis;
@@ -3450,13 +3361,13 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
             contracts: arrakisConfig.contracts,
             chainId: arrakisConfig.chainId ?? 31337,
           } as JAdapterConfig['fromReplica'];
-          console.log('[XLN] Loaded predeployed contract addresses from jurisdictions.json');
+          serverLog.info('anvil.predeployed.loaded');
         }
       } catch (err) {
-        console.warn('[XLN] Could not load predeployed addresses, will deploy fresh:', (err as Error).message);
+        serverLog.warn('anvil.predeployed.load_failed', { error: (err as Error).message });
       }
     } else {
-      console.log('[XLN] Fresh deploy mode enabled (XLN_USE_PREDEPLOYED_ADDRESSES!=true)');
+      serverLog.info('anvil.fresh_deploy_mode');
     }
 
     // Wait for ANVIL to be ready (retry up to 30s)
@@ -3469,10 +3380,10 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         const network = await probe.getNetwork();
         if (network?.chainId) detectedChainId = Number(network.chainId);
         anvilReady = true;
-        console.log(`[XLN] ✅ ANVIL ready (chainId: ${detectedChainId})`);
+        serverLog.info('anvil.ready', { chainId: detectedChainId });
         break;
       } catch (err) {
-        if (i === 0) console.log(`[XLN] ⏳ Waiting for ANVIL at ${anvilRpc}...`);
+        if (i === 0) serverLog.info('anvil.wait', { rpc: anvilRpc });
         await new Promise(r => setTimeout(r, 1000));
       }
     }
@@ -3487,16 +3398,17 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
 
     // Ensure fromReplica carries correct chainId (override if stale)
     if (fromReplica && fromReplica.chainId !== detectedChainId) {
-      console.warn(
-        `[XLN] fromReplica chainId (${fromReplica.chainId}) does not match RPC chainId (${detectedChainId}) - overriding`,
-      );
+      serverLog.warn('anvil.from_replica_chainid_override', {
+        fromReplicaChainId: fromReplica.chainId,
+        detectedChainId,
+      });
       fromReplica.chainId = detectedChainId;
     }
 
     const fromReplicaDepositoryAddress = fromReplica?.depositoryAddress;
     const fromReplicaEntityProviderAddress = fromReplica?.entityProviderAddress;
     if (fromReplicaDepositoryAddress && fromReplicaEntityProviderAddress) {
-      console.log('[XLN] Pre-checking predeployed contract code...');
+      serverLog.info('anvil.predeployed.precheck.start');
       const [depositoryCode, entityProviderCode] = await withStartupStepTimeout(
         'precheckPredeployedCode',
         (async () => {
@@ -3505,13 +3417,14 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
           return [depCode, entityProviderCode] as const;
         })(),
       );
-      console.log('[XLN] Predeployed contract code pre-check complete');
+      serverLog.info('anvil.predeployed.precheck.complete');
       if (depositoryCode === '0x' || entityProviderCode === '0x') {
-        console.warn(
-          `[XLN] Ignoring stale jurisdictions addresses with no on-chain code: ` +
-            `depository=${fromReplicaDepositoryAddress} code=${depositoryCode} ` +
-            `entityProvider=${fromReplicaEntityProviderAddress} code=${entityProviderCode}`,
-        );
+        serverLog.warn('anvil.predeployed.stale_code', {
+          depository: fromReplicaDepositoryAddress,
+          depositoryCode,
+          entityProvider: fromReplicaEntityProviderAddress,
+          entityProviderCode,
+        });
         fromReplica = undefined;
       }
     }
@@ -3530,7 +3443,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     );
 
     const deployFreshLocalStack = async (reason: string): Promise<void> => {
-      console.warn(`[XLN] Existing anvil contract stack is incompatible (${reason}). Deploying fresh stack...`);
+      serverLog.warn('anvil.stack_incompatible', { reason });
       await globalJAdapter?.close().catch(() => undefined);
       globalJAdapter = await withStartupStepTimeout(
         'createJAdapter(rpc:fresh)',
@@ -3541,12 +3454,12 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         }),
       );
       await withStartupStepTimeout('deployStack', globalJAdapter.deployStack(), Math.max(STARTUP_STEP_TIMEOUT_MS, 60_000));
-      console.log('[XLN] Contracts deployed');
+      serverLog.info('anvil.contracts.deployed');
     };
 
     const hasAddresses = !!globalJAdapter.addresses?.depository && !!globalJAdapter.addresses?.entityProvider;
     if (!hasAddresses) {
-      console.log('[XLN] Deploying contracts to anvil (missing addresses)...');
+      serverLog.info('anvil.contracts.deploy_missing');
       await deployFreshLocalStack('MISSING_ADDRESSES');
     } else {
       const compatibility = await withStartupStepTimeout(
@@ -3556,14 +3469,14 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       if (!compatibility.ok) {
         await deployFreshLocalStack(compatibility.reason);
       } else if (fromReplica) {
-        console.log('[XLN] Using compatible contracts from jurisdictions.json');
+        serverLog.info('anvil.contracts.use_predeployed');
       } else {
-        console.log('[XLN] Using existing contracts on anvil');
+        serverLog.info('anvil.contracts.use_existing');
       }
     }
 
     const block = await withStartupStepTimeout('provider.getBlockNumber', globalJAdapter.provider.getBlockNumber());
-    console.log(`[XLN] Anvil connected (block: ${block})`);
+    serverLog.info('anvil.connected', { block });
 
     if (globalJAdapter.addresses?.depository && globalJAdapter.addresses?.entityProvider) {
       await withStartupStepTimeout(
@@ -3592,12 +3505,12 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
           chainId: globalJAdapter.chainId,
           jadapter: globalJAdapter,
         });
-        console.log(`[XLN] J-replica "${jName}" registered in env`);
+        serverLog.info('jreplica.registered', { name: jName });
       }
       if (!env.activeJurisdiction) env.activeJurisdiction = jName;
     }
     } else {
-      console.log('[XLN] Using BrowserVM (local mode)');
+      serverLog.info('browservm.start');
       globalJAdapter = await withStartupStepTimeout(
         'createJAdapter(browservm)',
         createJAdapter({
@@ -3625,7 +3538,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
             chainId: globalJAdapter.chainId,
             jadapter: globalJAdapter,
           });
-          console.log(`[XLN] J-replica "${jName}" registered in env`);
+          serverLog.info('jreplica.registered', { name: jName });
         }
         if (!env.activeJurisdiction) env.activeJurisdiction = jName;
       }
@@ -3652,16 +3565,15 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     };
 
     serverBootPhase = 'bootstrap';
-    const hubEntityIds = SKIP_SERVER_BOOTSTRAP
-      ? (() => {
-          console.log('[XLN] Skipping server bootstrap (XLN_SKIP_SERVER_BOOTSTRAP=1)');
-          relayStore.activeHubEntityIds = [];
-          stopMarketMakerLoop();
-          return [] as string[];
-        })()
-      : await bootstrapServerHubsAndReserves(env, options, advertisedRelayUrl, anvilRpc, {
-          includeMarketMaker: INCLUDE_MARKET_MAKER_BY_DEFAULT,
-        });
+    let hubEntityIds: string[];
+    if (SKIP_SERVER_BOOTSTRAP) {
+      serverLog.info('bootstrap.skip');
+      relayStore.activeHubEntityIds = [];
+      stopMarketMakerLoop();
+      hubEntityIds = [];
+    } else {
+      throw new Error('SHARED_HUB_BOOTSTRAP_REMOVED: use runtime/orchestrator/orchestrator.ts');
+    }
 
     // Start P2P overlay after WS /relay is actually listening.
     // Plain daemons stay connected even before they own a routing entity;
@@ -3682,47 +3594,23 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     serverBootPhase = 'failed';
     serverBootCompletedAt = Date.now();
     serverBootError = (error as Error)?.message || String(error);
-    console.error('[XLN] Startup failed after HTTP bind:', error);
+    serverLog.error('startup.failed_after_bind', { error: getErrorMessage(error) });
     return;
   } finally {
     resolveServerStartupBarrier?.();
     resolveServerStartupBarrier = null;
   }
 
-  console.log(`
-╔══════════════════════════════════════════════════════════════════╗
-║                      XLN Unified Server                          ║
-╠══════════════════════════════════════════════════════════════════╣
-║  Port: ${String(options.port).padEnd(10)}                                       ║
-║  Host: ${(options.host || '127.0.0.1').padEnd(10)}                                       ║
-║  Mode: ${(globalJAdapter ? globalJAdapter.mode : 'no-jadapter').padEnd(10)}                                       ║
-╠══════════════════════════════════════════════════════════════════╣
-║  Endpoints:                                                      ║
-║    GET  /                     → SPA                              ║
-║    WS   /relay                → P2P relay                        ║
-║    WS   /rpc                  → Remote UI                        ║
-║    GET  /api/health           → Health check                     ║
-║    GET  /api/state            → Runtime state                    ║
-║    GET  /api/clients          → Connected clients                ║
-║    POST /api/faucet/erc20     → Faucet A (wallet ERC20)          ║
-║    POST /api/faucet/reserve   → Faucet B (reserve transfer)      ║
-║    POST /api/faucet/offchain  → Faucet C (account payment)       ║
-╚══════════════════════════════════════════════════════════════════╝
-  `);
+  serverLog.info('ready', {
+    port: options.port,
+    host: options.host || '127.0.0.1',
+    mode: globalJAdapter ? globalJAdapter.mode : 'no-jadapter',
+  });
 
   return;
 }
 
-// ============================================================================
-// CLI ENTRY POINT
-// ============================================================================
-
 if (import.meta.main) {
-  console.log('═══ SERVER.TS ENTRY POINT ═══');
-  console.log('ENV: USE_ANVIL =', process.env['USE_ANVIL']);
-  console.log('ENV: ANVIL_RPC =', process.env['ANVIL_RPC']);
-  console.log('Args:', process.argv.slice(2));
-
   const args = process.argv.slice(2);
 
   const getArg = (name: string, fallback?: string): string | undefined => {
@@ -3738,22 +3626,25 @@ if (import.meta.main) {
     serverId: getArg('--server-id', 'xln-server'),
   };
 
-  console.log('Calling startXlnServer with options:', options);
+  serverLog.info('cli.start', {
+    useAnvil: process.env['USE_ANVIL'] === 'true',
+    anvilRpc: process.env['ANVIL_RPC'] || null,
+    args,
+  });
 
   startXlnServer(options)
     .then(() => {
       if (serverBootPhase === 'ready') {
-        console.log('[XLN] Server started successfully');
+        serverLog.info('cli.ready');
         return;
       }
-      console.warn(
-        `[XLN] Server HTTP is listening but startup is ${serverBootPhase}` +
-          (serverBootError ? `: ${serverBootError}` : ''),
-      );
+      serverLog.warn('cli.http_listening_startup_not_ready', {
+        phase: serverBootPhase,
+        error: serverBootError,
+      });
     })
     .catch(error => {
-      console.error('[XLN] Server failed:', error);
-      console.error('Stack:', error.stack);
+      serverLog.error('cli.failed', { error: getErrorMessage(error), stack: error.stack });
       process.exit(1);
     });
 }
