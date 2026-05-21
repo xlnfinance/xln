@@ -7,7 +7,6 @@
 import { Level } from 'level';
 import { ethers } from 'ethers';
 import type { Provider } from 'ethers';
-import type { JAdapterConfig } from './jadapter/types';
 import {
   DEFAULT_SNAPSHOT_INTERVAL_FRAMES,
   dbRootPath,
@@ -56,7 +55,6 @@ import {
   submitProcessBatch,
   transferNameBetweenEntities,
 } from './jadapter';
-import { ensureLocalDisputeDelayConfigured } from './jadapter/local-config';
 import { getAvailableJurisdictions } from './jurisdiction-config';
 import { createGossipLayer } from './networking/gossip';
 import {
@@ -65,7 +63,6 @@ import {
   dropPendingFrameDbRecords,
   dropOverlay,
   flushPendingAuditEvents,
-  markStorageEntityDirty,
   peekPendingFrameDbRecords,
   setAccountFrameHistoryView,
 } from './env-events';
@@ -76,12 +73,6 @@ import {
   prewarmSignerKeyCache,
 } from './account-crypto';
 import {
-  deriveLocalEntityCryptoKeys,
-  hasLocalSignerKey,
-  resolveReplicaEntityCryptoKeys,
-} from './runtime-entity-crypto';
-import {
-  announceLocalEntityProfile,
   buildEntityAdvertisedStateFingerprint,
   buildLocalEntityProfile,
   createProfileSignerResolver,
@@ -154,7 +145,6 @@ import {
   getTokenInfo,
   isLiquidSwapToken,
   getSwapPairOrientation,
-  buildDefaultEntitySwapPairs,
   getDefaultSwapTradingPairs,
   createDemoDelta,
   getDefaultCreditLimit,
@@ -205,7 +195,7 @@ import {
   getRuntimeCleanLogs,
   type RuntimeCleanLogDeps,
 } from './runtime-clean-logs';
-import { normalizeEntitySwapTradingPairs } from './runtime-swap-pairs';
+import { applyRuntimeTx } from './runtime-tx-handlers';
 import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
 import { calculateSolvency, verifySolvency } from './solvency';
 import {
@@ -263,10 +253,6 @@ import {
   validateEntityInput,
   validateEntityOutput,
 } from './validation-utils';
-import {
-  backfillEntityJurisdictionBinding,
-  requireBoundEntityConfig,
-} from './jurisdiction-runtime';
 import type {
   AccountFrame,
   EntityInput,
@@ -1222,287 +1208,12 @@ const applyRuntimeInput = async (
     const appliedEntityInputs: RoutedEntityInput[] = [];
     const jOutbox: JInput[] = [...earlyJOutbox]; // Seed with incoming jInputs, handler jOutputs added later
 
-    // Process runtime transactions (handle async operations properly)
+    // RuntimeTxs are infra bootstrap commands. Keep the tick engine focused on
+    // ordering and persistence; the per-command details live in runtime-tx-handlers.
     for (const runtimeTx of mergedRuntimeTxs) {
-      if (runtimeTx.type === 'importJ') {
-        console.log(`[Runtime] Importing J-machine "${runtimeTx.data.name}" (chain ${runtimeTx.data.chainId})...`);
-
-        try {
-          const { createJAdapter } = await import('./jadapter');
-          const isBrowserVM = runtimeTx.data.rpcs.length === 0;
-
-          // Create jurisdiction via unified JAdapter interface
-          // If contracts provided, use fromReplica (connect-only mode, no deploy)
-          const fromReplica = runtimeTx.data.contracts
-            ? ({
-                depositoryAddress: runtimeTx.data.contracts.depository,
-                entityProviderAddress: runtimeTx.data.contracts.entityProvider,
-                contracts: runtimeTx.data.contracts, // Pass all contract addresses
-                chainId: runtimeTx.data.chainId,
-              } as JReplica)
-            : undefined;
-
-          const adapterConfig: JAdapterConfig = {
-            mode: isBrowserVM ? 'browservm' : 'rpc',
-            chainId: runtimeTx.data.chainId,
-          };
-          if (!isBrowserVM) {
-            const rpcUrl = runtimeTx.data.rpcs[0];
-            if (!rpcUrl) throw new Error(`IMPORT_J_RPC_MISSING: name=${runtimeTx.data.name}`);
-            adapterConfig.rpcUrl = rpcUrl;
-            if (!fromReplica) {
-              const deployerPrivateKey =
-                globalThis.process?.env?.['JADAPTER_DEPLOYER_PRIVATE_KEY'] ||
-                globalThis.process?.env?.['DEPLOYER_PRIVATE_KEY'];
-              if (deployerPrivateKey) adapterConfig.privateKey = deployerPrivateKey;
-            }
-          }
-          if (fromReplica) adapterConfig.fromReplica = fromReplica; // Pass pre-deployed addresses (skips deployment)
-
-          const jadapter = await createJAdapter(adapterConfig);
-
-          // Deploy contracts only if fromReplica not provided
-          if (!fromReplica) {
-            await jadapter.deployStack();
-          }
-          const defaultDisputeDelayBlocks = await ensureLocalDisputeDelayConfigured(jadapter, runtimeTx.data.name);
-
-          // For BrowserVM, set as default jurisdiction in env
-          if (isBrowserVM) {
-            const browserVM = jadapter.getBrowserVM();
-            if (browserVM) {
-              setBrowserVMJurisdiction(env, jadapter.addresses.depository, browserVM);
-            }
-          }
-
-          // Initialize jReplicas Map if needed
-          if (!env.jReplicas) {
-            env.jReplicas = new Map();
-          }
-
-          const resolvedDepositoryAddress = jadapter.addresses.depository || '';
-          const resolvedEntityProviderAddress = jadapter.addresses.entityProvider || '';
-          const resolvedAccountAddress =
-            jadapter.addresses.account || runtimeTx.data.contracts?.account || '';
-          const resolvedDeltaTransformerAddress =
-            jadapter.addresses.deltaTransformer || runtimeTx.data.contracts?.deltaTransformer || '';
-          const resolvedContracts = {
-            account: resolvedAccountAddress,
-            depository: resolvedDepositoryAddress,
-            entityProvider: resolvedEntityProviderAddress,
-            deltaTransformer: resolvedDeltaTransformerAddress,
-          };
-
-          if (!resolvedDepositoryAddress || !resolvedEntityProviderAddress) {
-            throw new Error(
-              `IMPORT_J_ADDRESSES_MISSING: name=${runtimeTx.data.name} ` +
-                `depository=${resolvedDepositoryAddress || 'none'} ` +
-                `entityProvider=${resolvedEntityProviderAddress || 'none'} ` +
-                `adapterAddresses=${JSON.stringify(jadapter.addresses || {})} ` +
-                `contracts=${JSON.stringify(runtimeTx.data.contracts || {})}`,
-            );
-          }
-
-          // Create JReplica (store jadapter for later use)
-          const jReplica: JReplica = {
-            name: runtimeTx.data.name,
-            blockNumber: 0n,
-            stateRoot: new Uint8Array(32),
-            mempool: [],
-            blockDelayMs: 300,
-            ...(runtimeTx.data.blockTimeMs ? { blockTimeMs: runtimeTx.data.blockTimeMs } : {}),
-            lastBlockTimestamp: env.timestamp,
-            position: { x: 0, y: 50, z: 0 }, // Default position for J-machine
-            depositoryAddress: resolvedDepositoryAddress,
-            entityProviderAddress: resolvedEntityProviderAddress,
-            contracts: resolvedContracts,
-            rpcs: runtimeTx.data.rpcs,
-            chainId: runtimeTx.data.chainId,
-            ...(defaultDisputeDelayBlocks ? { defaultDisputeDelayBlocks } : {}),
-            jadapter, // Store for balance queries, faucets, etc
-          };
-          env.jReplicas.set(runtimeTx.data.name, jReplica);
-
-          // Set as active if first
-          if (!env.activeJurisdiction) {
-            env.activeJurisdiction = runtimeTx.data.name;
-          }
-
-          // J-event watching belongs to the unified runtime watcher path.
-          // Import wires the replica; startJurisdictionWatchers(env) owns startup.
-          startJurisdictionWatchers(env);
-          console.log(`[Runtime] ✅ JReplica "${runtimeTx.data.name}" ready`);
-        } catch (error) {
-          console.error(`[Runtime] ❌ Failed to import J-machine:`, error);
-          throw error;
-        }
-      } else if (runtimeTx.type === 'importReplica') {
-        const importedEntityId = String(runtimeTx.entityId || '').toLowerCase();
-        const importedSignerId =
-          normalizeRuntimeId(String(runtimeTx.signerId || '')) ||
-          String(runtimeTx.signerId || '').trim().toLowerCase();
-        if (!importedEntityId || !importedSignerId) {
-          throw new Error(`IMPORT_REPLICA_INVALID_ID: entity=${runtimeTx.entityId} signer=${runtimeTx.signerId}`);
-        }
-        if (DEBUG)
-          console.log(
-            `Importing replica Entity #${formatEntityDisplay(importedEntityId)}:${formatSignerDisplay(importedSignerId)} (proposer: ${runtimeTx.data.isProposer})`,
-          );
-
-        const replicaKey = `${importedEntityId}:${importedSignerId}`;
-        let existingReplicaKey = replicaKey;
-        let existingReplica = env.eReplicas.get(replicaKey);
-        if (!existingReplica) {
-          for (const [key, candidate] of env.eReplicas.entries()) {
-            const [candidateEntity, candidateSigner] = String(key).split(':');
-            if (String(candidateEntity || '').toLowerCase() !== importedEntityId) continue;
-            if (String(candidateSigner || '').toLowerCase() !== importedSignerId) continue;
-            existingReplicaKey = String(key);
-            existingReplica = candidate;
-            break;
-          }
-        }
-        const config = requireBoundEntityConfig(env, importedEntityId, runtimeTx.data.config);
-        backfillEntityJurisdictionBinding(env, importedEntityId, config.jurisdiction!);
-        if (existingReplica) {
-          // Persistence safety: never overwrite restored replica state on re-import.
-          existingReplica.isProposer = runtimeTx.data.isProposer;
-          existingReplica.entityId = importedEntityId;
-          existingReplica.signerId = importedSignerId;
-          existingReplica.state.entityId = importedEntityId;
-          if (config) {
-            existingReplica.state.config = config;
-          }
-          if (hasLocalSignerKey(env, importedSignerId)) {
-            const expectedKeys = deriveLocalEntityCryptoKeys(env, importedEntityId, importedSignerId);
-            if (
-              existingReplica.state.entityEncPubKey !== expectedKeys.publicKey ||
-              existingReplica.state.entityEncPrivKey !== expectedKeys.privateKey
-            ) {
-              throw new Error(
-                `ENTITY_CRYPTO_KEY_MISMATCH: entity=${importedEntityId} signer=${importedSignerId}`,
-              );
-            }
-          }
-          normalizeEntitySwapTradingPairs(existingReplica.state);
-          if (existingReplicaKey !== replicaKey) {
-            env.eReplicas.delete(existingReplicaKey);
-          }
-          env.eReplicas.set(replicaKey, existingReplica);
-          markStorageEntityDirty(env, existingReplica.state.entityId);
-          if (DEBUG) {
-            console.log(
-              `Skipping fresh replica init for restored entity #${formatEntityDisplay(importedEntityId)}:${formatSignerDisplay(importedSignerId)}`,
-            );
-          }
-          continue;
-        }
-        const replicaKeys = resolveReplicaEntityCryptoKeys(env, importedEntityId, importedSignerId);
-        const replica: EntityReplica = {
-          entityId: importedEntityId,
-          signerId: importedSignerId,
-          mempool: [],
-          isProposer: runtimeTx.data.isProposer,
-          state: {
-            entityId: importedEntityId, // Store entityId in state
-            height: 0,
-            timestamp: env.timestamp,
-            nonces: new Map(),
-            messages: [],
-            proposals: new Map(),
-            config,
-            // 💰 Initialize financial state
-            reserves: new Map(), // tokenId -> bigint amount
-            accounts: new Map(), // counterpartyEntityId -> AccountMachine
-            deferredAccountProposals: new Map(),
-
-            // 🔭 J-machine tracking (JBlock consensus)
-            lastFinalizedJHeight: 0,
-            jBlockObservations: [],
-            jBlockChain: [],
-
-            // Local entities derive deterministic keys; imported remote replicas stay keyless.
-            entityEncPubKey: replicaKeys.publicKey,
-            entityEncPrivKey: replicaKeys.privateKey,
-            profile: {
-              name:
-                typeof runtimeTx.data.profileName === 'string' && runtimeTx.data.profileName.trim().length > 0
-                  ? runtimeTx.data.profileName.trim()
-                  : `Entity ${importedEntityId.slice(-4)}`,
-              isHub: false,
-              avatar: '',
-              bio: '',
-              website: '',
-            },
-
-            // 🔒 HTLC routing and fee tracking
-            htlcRoutes: new Map(),
-            htlcFeesEarned: 0n,
-            htlcNotes: new Map(),
-
-            lockBook: new Map(),
-            swapTradingPairs: buildDefaultEntitySwapPairs(),
-            pendingSwapFillRatios: new Map(),
-          },
-        };
-        normalizeEntitySwapTradingPairs(replica.state);
-
-        // Only add position if it exists (exactOptionalPropertyTypes compliance)
-        if (runtimeTx.data.position) {
-          replica.position = {
-            ...runtimeTx.data.position,
-            jurisdiction:
-              runtimeTx.data.position.jurisdiction ||
-              runtimeTx.data.position.xlnomy ||
-              env.activeJurisdiction ||
-              'default',
-          };
-        }
-
-        env.eReplicas.set(replicaKey, replica);
-        markStorageEntityDirty(env, replica.state.entityId);
-
-        const validators = runtimeTx.data.config.validators;
-        const threshold = runtimeTx.data.config.threshold;
-        if (validators.length === 1 && threshold === 1n) {
-          const signerId = normalizeRuntimeId(String(validators[0] || '')) || importedSignerId;
-          if (!signerId) continue;
-          try {
-            const privateKey = getSignerPrivateKey(env, signerId);
-            const privateKeyHex = `0x${Array.from(privateKey)
-              .map(b => b.toString(16).padStart(2, '0'))
-              .join('')}`;
-            for (const jReplica of env.jReplicas?.values?.() ?? []) {
-              jReplica.jadapter?.registerEntityWallet?.(importedEntityId, privateKeyHex);
-            }
-          } catch (_error) {
-            console.warn(
-              `⚠️ Cannot derive private key for signer ${signerId} (no env.runtimeSeed), skipping entity wallet registration`,
-            );
-          }
-        }
-
-        // Validate jBlock immediately after creation
-        const createdReplica = env.eReplicas.get(replicaKey);
-        const actualJBlock = createdReplica?.state.lastFinalizedJHeight;
-        // REPLICA-DEBUG removed
-
-        // Broadcast initial profile to gossip layer
-        if (env.gossip && createdReplica && replicaKeys.isLocal) {
-          announceLocalEntityProfile(env, createdReplica.state, env.timestamp);
-        }
-
-        if (typeof actualJBlock !== 'number') {
-          logError('RUNTIME_TICK', `💥 ENTITY-CREATION-BUG: Just created entity with invalid jBlock!`);
-          logError('RUNTIME_TICK', `💥   Expected: 0 (number), Got: ${typeof actualJBlock}, Value: ${actualJBlock}`);
-          // Force fix immediately
-          if (createdReplica) {
-            createdReplica.state.lastFinalizedJHeight = 0;
-            console.log(`💥   FIXED: Set jBlock to 0 for replica ${replicaKey}`);
-          }
-        }
-      }
+      await applyRuntimeTx(env, runtimeTx, { onJurisdictionImported: startJurisdictionWatchers });
     }
+
     // REPLICA-DEBUG and SERVER-PROCESSING logs removed
     const findReplicaKeyInsensitive = (entityId: string, signerId?: string | null): string | null => {
       const entityNorm = String(entityId || '').toLowerCase();
