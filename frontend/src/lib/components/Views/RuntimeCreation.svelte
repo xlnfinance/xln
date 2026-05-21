@@ -23,8 +23,8 @@
     getShardCount,
     hexToBytes,
   } from '@xln/brainvault/core';
-  import { generateLazyEntityId } from '@xln/runtime/entity-factory';
   import { DEMO_ACCOUNTS } from '$lib/config/demo-accounts';
+  import { generateLazyEntityIdPreview } from '$lib/utils/lazyEntityId';
   import {
     BRAINVAULT_WORKER_CAP_STORAGE_KEY,
     computeBrainVaultWorkerCap,
@@ -849,7 +849,7 @@
     ethereumAddress = await deriveEthereumAddress(mnemonic24);
     await refreshDerivedEoaAddresses(mnemonic24);
     // Entity ID is a lazy entity ID for a single-signer quorum (matches runtime algorithm)
-    entityId = generateLazyEntityId([ethereumAddress], 1n);
+    entityId = generateLazyEntityIdPreview([ethereumAddress], 1n);
 
     phase = 'complete';
     await createXlnWalletFromCurrentVault(name.trim() || `Wallet ${ethereumAddress.slice(0, 6)}`);

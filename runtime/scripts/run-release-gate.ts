@@ -33,6 +33,7 @@ const RUNTIME_CORE_TESTS = [
   'native/__tests__/desktop-security.test.ts',
   'native/__tests__/capacitor-config.test.ts',
   'native/__tests__/native-build-options.test.ts',
+  'native/__tests__/lazy-entity-id.test.ts',
 ].join(' ');
 
 const SOUNDCHECK_TARGETS = [
