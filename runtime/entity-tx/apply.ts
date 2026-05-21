@@ -1,12 +1,11 @@
 import { requireUsableContractAddress } from '../contract-address';
 import { isLeftEntity } from '../entity-id-utils';
 import { formatEntityId } from '../utils';
-import type { EntityState, EntityTx, Env, Delta, AccountTx, EntityInput, JInput, HashType, CrossJurisdictionSwapRoute } from '../types';
-import { DEFAULT_SOFT_LIMIT, DEFAULT_HARD_LIMIT, DEFAULT_MAX_FEE } from '../types';
+import type { EntityState, EntityTx, Env, AccountTx, EntityInput, JInput, HashType, CrossJurisdictionSwapRoute } from '../types';
+import { DEFAULT_SOFT_LIMIT } from '../types';
 import { safeStringify } from '../serialization-utils';
 import { announceLocalEntityProfile } from '../networking/gossip-helper';
 import { markStorageAccountDirty, markStorageEntityDirty } from '../env-events';
-import { upsertSortedStringMapEntry } from '../sorted-index';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
 import {
   handleAccountInput,
@@ -69,7 +68,6 @@ import {
 import { handleDisputeFinalize, handleDisputeStart } from './handlers/dispute';
 import { buildCrossJurisdictionCancelAck } from '../cross-jurisdiction-orderbook';
 import { removeBookOrderById, removeCrossJurisdictionBookOrderByRouteId } from '../orderbook/cross-j';
-import { assertSameJurisdictionAccount } from '../jurisdiction-runtime';
 import {
   handleChatEntityTx,
   handleChatMessageEntityTx,
@@ -78,6 +76,7 @@ import {
   handleProposeEntityTx,
   handleVoteEntityTx,
 } from './handlers/basic';
+import { handleOpenAccountEntityTx } from './handlers/open-account';
 
 const entityTxLog = createStructuredLogger('entity.tx');
 import {
@@ -116,34 +115,7 @@ const cancelOrderbookOfferIfPresent = (
   accountId: string,
   offerId: string,
 ): boolean => removeBookOrderById(env, state, `${accountId}:${offerId}`);
-const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
-const isEntityId32 = (value: unknown): value is string => typeof value === 'string' && ENTITY_ID_HEX_32_RE.test(value);
-const USD_SCALE = 10n ** 18n;
-const toUsdWei = (value: number): bigint => BigInt(Math.max(0, Math.floor(value))) * USD_SCALE;
-const resolveJurisdictionRebalanceDefaults = (
-  entityState: EntityState,
-): { r2cRequestSoftLimit: bigint; hardLimit: bigint; maxAcceptableFee: bigint } => {
-  const raw = entityState.config?.jurisdiction?.rebalancePolicyUsd;
-  if (!raw) {
-    return {
-      r2cRequestSoftLimit: DEFAULT_SOFT_LIMIT,
-      hardLimit: DEFAULT_HARD_LIMIT,
-      maxAcceptableFee: DEFAULT_MAX_FEE,
-    };
-  }
-  const r2cRequestSoftLimit = toUsdWei(raw.r2cRequestSoftLimit);
-  const hardLimit = toUsdWei(raw.hardLimit);
-  const maxAcceptableFee = toUsdWei(raw.maxFee);
-  if (r2cRequestSoftLimit <= 0n || hardLimit < r2cRequestSoftLimit) {
-    return {
-      r2cRequestSoftLimit: DEFAULT_SOFT_LIMIT,
-      hardLimit: DEFAULT_HARD_LIMIT,
-      maxAcceptableFee: DEFAULT_MAX_FEE,
-    };
-  }
-  return { r2cRequestSoftLimit, hardLimit, maxAcceptableFee };
-};
 
 const pushCrossJOutput = (
   env: Env,
@@ -227,176 +199,7 @@ export const applyEntityTx = async (
     }
 
     if (entityTx.type === 'openAccount') {
-      const targetEntityId = entityTx.data.targetEntityId;
-      if (!isEntityId32(targetEntityId)) {
-        throw new Error(
-          `INVALID_ENTITY_ID: openAccount targetEntityId must be bytes32 hex, got "${String(targetEntityId)}"`,
-        );
-      }
-      // Account keyed by counterparty ID (simpler than canonical)
-      const counterpartyId = normalizeEntityRef(targetEntityId);
-      const isLeft = isLeftEntity(entityState.entityId, targetEntityId);
-      assertSameJurisdictionAccount(env, entityState.entityId, entityState.config?.jurisdiction, targetEntityId);
-
-      if (findAccountKey(entityState, counterpartyId)) {
-        const error =
-          `OPEN_ACCOUNT_ALREADY_EXISTS: entity=${formatEntityId(entityState.entityId)} ` +
-          `counterparty=${formatEntityId(counterpartyId)}`;
-        console.error(`❌ ${error}`);
-        throw new Error(error);
-      }
-
-      const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
-
-      // Add chat message about account opening
-      addMessage(newState, `💳 Opening account with Entity ${formatEntityId(entityTx.data.targetEntityId)}...`);
-
-      // STEP 1: Create local account machine (idempotent across replay/live)
-      const existingAccountKey = findAccountKey(newState, counterpartyId);
-      const createdLocalAccount = !existingAccountKey;
-      const accountKey = existingAccountKey ?? counterpartyId;
-      if (createdLocalAccount) {
-        env.emit('AccountOpening', {
-          entityId: entityState.entityId,
-          counterpartyId: targetEntityId,
-        });
-
-        // CONSENSUS FIX: Start with empty deltas - let all delta creation happen through transactions
-        // This ensures both sides have identical delta Maps (matches Channel.ts pattern)
-        const initialDeltas = new Map<number, Delta>();
-
-        // CANONICAL: Store leftEntity/rightEntity (sorted) for AccountMachine internals
-        const leftEntity = isLeft ? entityState.entityId : counterpartyId;
-        const rightEntity = isLeft ? counterpartyId : entityState.entityId;
-
-        upsertSortedStringMapEntry(newState.accounts, accountKey, {
-          leftEntity,
-          rightEntity,
-          status: 'active',
-          mempool: [],
-          currentFrame: {
-            height: 0,
-            // Deterministic account genesis: do not depend on mutable entity timestamp.
-            // First proposed frame will use env.timestamp via proposeAccountFrame().
-            timestamp: 0,
-            jHeight: 0,
-            accountTxs: [],
-            prevFrameHash: '',
-            deltas: [],
-            stateHash: '',
-            byLeft: isLeft,
-          },
-          deltas: initialDeltas,
-          globalCreditLimits: {
-            ownLimit: 0n, // Credit starts at 0 - must be explicitly extended via set_credit_limit
-            peerLimit: 0n, // Credit starts at 0 - must be explicitly extended via set_credit_limit
-          },
-          // Frame-based consensus fields
-          currentHeight: 0,
-          pendingSignatures: [],
-          rollbackCount: 0,
-          // CHANNEL.TS REFERENCE: Proper message counters (NOT timestamps!)
-          // Removed isProposer - use isLeft() function like old_src Channel.ts
-          proofHeader: {
-            fromEntity: entityState.entityId, // Perspective-dependent for signing
-            toEntity: counterpartyId,
-            nonce: 1, // Next unified on-chain nonce to use
-          },
-          proofBody: { tokenIds: [], deltas: [] },
-          // Dispute configuration values are encoded in 10-block units.
-          // 576 * 10 = 5760 blocks, roughly 24h at 15-second block time.
-          disputeConfig: {
-            leftDisputeDelay: 576,
-            rightDisputeDelay: 576,
-          },
-          pendingWithdrawals: new Map(),
-          requestedRebalance: new Map(),
-          requestedRebalanceFeeState: new Map(),
-          rebalancePolicy: new Map(),
-          locks: new Map(), // HTLC: Initialize empty locks
-          swapOffers: new Map(), // Swap: Initialize empty offers
-          pulls: new Map(), // Pull: Initialize empty ratio-gated pulls
-          swapOrderHistory: new Map(),
-          swapClosedOrders: new Map(),
-          // Bilateral J-event consensus
-          leftJObservations: [],
-          rightJObservations: [],
-          jEventChain: [],
-          lastFinalizedJHeight: 0,
-          // On-chain settlement nonce (starts at 0, incremented on settlement success)
-          // SYMMETRIC: Both sides increment via workspace status check in j-events.ts
-          onChainSettlementNonce: 0,
-        });
-        markStorageAccountDirty(env, newState.entityId, counterpartyId);
-        markStorageEntityDirty(env, newState.entityId);
-      }
-
-      // STEP 2: Add setup txs ONLY on LEFT side (Channel.ts pattern)
-      // Right side waits for left's frame; otherwise it will re-propose add_delta and stall.
-      const localAccount = newState.accounts.get(accountKey);
-      if (!localAccount) {
-        throw new Error(`CRITICAL: Account machine not found after creation`);
-      }
-
-      // Token for delta (default: 1 = USDC)
-      const tokenId = entityTx.data.tokenId ?? 1;
-      const creditAmount = entityTx.data.creditAmount;
-
-      if (createdLocalAccount) {
-        // INITIATOR: always emit at least add_delta so the counterparty can
-        // materialize the bilateral account via inbound accountInput.
-        localAccount.mempool.push({ type: 'add_delta', data: { tokenId } });
-        if (creditAmount && creditAmount > 0n) {
-          localAccount.mempool.push({ type: 'set_credit_limit', data: { tokenId, amount: creditAmount } });
-        }
-
-        // Seed per-account rebalance policy from openAccount payload when provided.
-        // Falls back to runtime defaults for compatibility.
-        const requestedPolicy = entityTx.data.rebalancePolicy;
-        const jurisdictionPolicyDefaults = resolveJurisdictionRebalanceDefaults(newState);
-        let autopilotSoftLimit = requestedPolicy?.r2cRequestSoftLimit ?? jurisdictionPolicyDefaults.r2cRequestSoftLimit;
-        let autopilotHardLimit = requestedPolicy?.hardLimit ?? jurisdictionPolicyDefaults.hardLimit;
-        let autopilotMaxFee = requestedPolicy?.maxAcceptableFee ?? jurisdictionPolicyDefaults.maxAcceptableFee;
-        if (autopilotSoftLimit <= 0n) autopilotSoftLimit = jurisdictionPolicyDefaults.r2cRequestSoftLimit;
-        if (autopilotHardLimit < autopilotSoftLimit) autopilotHardLimit = autopilotSoftLimit;
-        if (autopilotMaxFee < 0n) autopilotMaxFee = jurisdictionPolicyDefaults.maxAcceptableFee;
-        localAccount.rebalancePolicy.set(tokenId, {
-          r2cRequestSoftLimit: autopilotSoftLimit,
-          hardLimit: autopilotHardLimit,
-          maxAcceptableFee: autopilotMaxFee,
-        });
-        localAccount.mempool.push({
-          type: 'set_rebalance_policy',
-          data: {
-            tokenId,
-            r2cRequestSoftLimit: autopilotSoftLimit,
-            hardLimit: autopilotHardLimit,
-            maxAcceptableFee: autopilotMaxFee,
-          },
-        });
-      } else {
-        throw new Error(
-          `OPEN_ACCOUNT_ALREADY_EXISTS_AFTER_CLONE: entity=${formatEntityId(entityState.entityId)} ` +
-          `counterparty=${formatEntityId(counterpartyId)}`,
-        );
-      }
-
-      // Hub entities no longer auto-send faucet (use /api/faucet/offchain instead)
-
-      // Add success message to chat
-      addMessage(newState, `✅ Account opening request sent to Entity ${formatEntityId(counterpartyId)}`);
-
-      // Do not mirror openAccount back to counterparty.
-      // Counterparty account auto-creation happens on first inbound accountInput frame.
-      // Mirroring openAccount creates redundant replay ordering hazards.
-
-      // Broadcast updated profile to gossip layer
-      if (env.gossip) {
-        announceLocalEntityProfile(env, newState, env.timestamp);
-      }
-
-      return { newState, outputs };
+      return handleOpenAccountEntityTx(env, entityState, entityTx);
     }
 
     if (entityTx.type === 'htlcPayment') {
