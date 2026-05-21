@@ -6,12 +6,55 @@ import { initCrontab, scheduleHook } from '../entity-crontab';
 import { generateLazyEntityId } from '../entity-factory';
 import { processEventBatch } from '../jadapter/watcher';
 import { createEmptyEnv, enqueueRuntimeInput, entityNeedsPeriodicWake, process, startRuntimeLoop } from '../runtime';
-import type { AccountMachine, EntityReplica } from '../types';
+import type { AccountMachine, EntityReplica, Env, JurisdictionConfig } from '../types';
 
-const makeReplica = (entityId: string, timestamp: number): EntityReplica =>
+const TEST_JURISDICTION = {
+  address: `0x${'22'.repeat(20)}`,
+  name: 'Testnet',
+  entityProviderAddress: `0x${'22'.repeat(20)}`,
+  depositoryAddress: `0x${'11'.repeat(20)}`,
+  chainId: 31337,
+} satisfies JurisdictionConfig;
+const TEST_RUN_ID = `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+let testSeedCounter = 0;
+
+const uniqueSeed = (label: string): string => `${label}-${TEST_RUN_ID}-${++testSeedCounter}`;
+
+const createIsolatedEnv = (label: string): Env => createEmptyEnv(uniqueSeed(label));
+
+const testJurisdiction = (name = TEST_JURISDICTION.name): JurisdictionConfig => ({
+  ...TEST_JURISDICTION,
+  name,
+});
+
+const addTestJurisdiction = (env: Env, name = TEST_JURISDICTION.name, jadapter?: unknown): void => {
+  env.activeJurisdiction = env.activeJurisdiction || name;
+  env.jReplicas.set(name, {
+    name,
+    blockNumber: 0n,
+    stateRoot: new Uint8Array(32),
+    mempool: [],
+    blockDelayMs: 0,
+    lastBlockTimestamp: env.timestamp,
+    position: { x: 0, y: 0, z: 0 },
+    depositoryAddress: TEST_JURISDICTION.depositoryAddress,
+    entityProviderAddress: TEST_JURISDICTION.entityProviderAddress,
+    contracts: {
+      account: `0x${'33'.repeat(20)}`,
+      depository: TEST_JURISDICTION.depositoryAddress,
+      entityProvider: TEST_JURISDICTION.entityProviderAddress,
+      deltaTransformer: `0x${'44'.repeat(20)}`,
+    },
+    rpcs: ['http://localhost:8545'],
+    chainId: TEST_JURISDICTION.chainId,
+    ...(jadapter ? { jadapter: jadapter as never } : {}),
+  });
+};
+
+const makeReplica = (entityId: string, timestamp: number, signerId = '1'): EntityReplica =>
   ({
     entityId,
-    signerId: '1',
+    signerId,
     mempool: [],
     isProposer: true,
     state: {
@@ -24,8 +67,9 @@ const makeReplica = (entityId: string, timestamp: number): EntityReplica =>
       config: {
         mode: 'proposer-based',
         threshold: 1n,
-        validators: ['1'],
-        shares: { '1': 1n },
+        validators: [signerId],
+        shares: { [signerId]: 1n },
+        jurisdiction: testJurisdiction(),
       },
       reserves: new Map(),
       accounts: new Map(),
@@ -56,7 +100,7 @@ describe('runtime ingress timestamp', () => {
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   test('restored runtime does not fire future hooks without new ingress timestamp', async () => {
-    const env = createEmptyEnv('runtime-ingress-timestamp-seed');
+    const env = createIsolatedEnv('runtime-ingress-timestamp-seed');
     env.quietRuntimeLogs = true;
     env.timestamp = Date.now();
 
@@ -78,9 +122,10 @@ describe('runtime ingress timestamp', () => {
   });
 
   test('new ingress timestamp is clamped in live mode and still fires due hooks', async () => {
-    const env = createEmptyEnv('runtime-ingress-timestamp-seed');
+    const env = createIsolatedEnv('runtime-ingress-timestamp-seed');
     env.quietRuntimeLogs = true;
     env.timestamp = 1_000;
+    addTestJurisdiction(env);
 
     const existingEntityId = `0x${'11'.repeat(32)}`;
     const replica = makeReplica(existingEntityId, 1_000);
@@ -112,6 +157,7 @@ describe('runtime ingress timestamp', () => {
               threshold: 1n,
               validators: ['1'],
               shares: { '1': 1n },
+              jurisdiction: testJurisdiction(),
             },
             isProposer: true,
             profileName: 'Imported',
@@ -131,7 +177,7 @@ describe('runtime ingress timestamp', () => {
   });
 
   test('empty entity ingress advances runtime clock and fires due hooks', async () => {
-    const env = createEmptyEnv('runtime-ingress-timestamp-seed');
+    const env = createIsolatedEnv('runtime-ingress-timestamp-seed');
     env.quietRuntimeLogs = true;
     env.timestamp = 1_000;
 
@@ -160,7 +206,7 @@ describe('runtime ingress timestamp', () => {
   });
 
   test('idle runtime loop does not advance logical time from wall clock', async () => {
-    const env = createEmptyEnv('runtime-ingress-timestamp-seed');
+    const env = createIsolatedEnv('runtime-ingress-timestamp-seed');
     env.quietRuntimeLogs = true;
     env.timestamp = Date.now();
 
@@ -191,7 +237,7 @@ describe('runtime ingress timestamp', () => {
   });
 
   test('idle runtime loop advances to due hook timestamp once wall clock reaches it', async () => {
-    const env = createEmptyEnv('runtime-ingress-timestamp-seed');
+    const env = createIsolatedEnv('runtime-ingress-timestamp-seed');
     env.quietRuntimeLogs = true;
     env.timestamp = Date.now();
 
@@ -239,8 +285,9 @@ describe('runtime ingress timestamp', () => {
   });
 
   test('runtime loop waits for minFrameDelayMs between processed cycles', async () => {
-    const env = createEmptyEnv('runtime-frame-delay-seed');
+    const env = createIsolatedEnv('runtime-frame-delay-seed');
     env.quietRuntimeLogs = true;
+    addTestJurisdiction(env);
 
     const signerId = `0x${'ab'.repeat(20)}`;
     const firstEntityId = `0x${'91'.repeat(32)}`;
@@ -257,6 +304,7 @@ describe('runtime ingress timestamp', () => {
             threshold: 1n,
             validators: [signerId],
             shares: { [signerId]: 1n },
+            jurisdiction: testJurisdiction(),
           },
           isProposer: false,
           profileName: 'First Replica',
@@ -279,6 +327,7 @@ describe('runtime ingress timestamp', () => {
             threshold: 1n,
             validators: [signerId],
             shares: { [signerId]: 1n },
+            jurisdiction: testJurisdiction(),
           },
           isProposer: false,
           profileName: 'Delayed Replica',
@@ -300,7 +349,7 @@ describe('runtime ingress timestamp', () => {
   });
 
   test('runtime loop starts jurisdiction watchers exactly once per replica', async () => {
-    const env = createEmptyEnv('runtime-watcher-start-seed');
+    const env = createIsolatedEnv('runtime-watcher-start-seed');
     env.quietRuntimeLogs = true;
 
     let startCount = 0;
@@ -319,27 +368,7 @@ describe('runtime ingress timestamp', () => {
       },
     };
 
-    env.activeJurisdiction = 'Testnet';
-    env.jReplicas.set('Testnet', {
-      name: 'Testnet',
-      blockNumber: 0n,
-      stateRoot: new Uint8Array(32),
-      mempool: [],
-      blockDelayMs: 0,
-      lastBlockTimestamp: env.timestamp,
-      position: { x: 0, y: 0, z: 0 },
-      depositoryAddress: `0x${'11'.repeat(20)}`,
-      entityProviderAddress: `0x${'22'.repeat(20)}`,
-      contracts: {
-        account: `0x${'33'.repeat(20)}`,
-        depository: `0x${'11'.repeat(20)}`,
-        entityProvider: `0x${'22'.repeat(20)}`,
-        deltaTransformer: `0x${'44'.repeat(20)}`,
-      },
-      rpcs: ['http://localhost:8545'],
-      chainId: 31337,
-      jadapter: fakeJAdapter as never,
-    });
+    addTestJurisdiction(env, 'Testnet', fakeJAdapter);
 
     const stop = startRuntimeLoop(env, { tickDelayMs: 1 });
     try {
@@ -351,7 +380,7 @@ describe('runtime ingress timestamp', () => {
   });
 
   test('runtime loop starts watcher for jReplica added after loop start', async () => {
-    const env = createEmptyEnv('runtime-late-watcher-start-seed');
+    const env = createIsolatedEnv('runtime-late-watcher-start-seed');
     env.quietRuntimeLogs = true;
     env.timestamp = Date.now();
 
@@ -380,27 +409,7 @@ describe('runtime ingress timestamp', () => {
       await sleep(10);
       expect(startCount).toBe(0);
 
-      env.activeJurisdiction = 'Testnet';
-      env.jReplicas.set('Testnet', {
-        name: 'Testnet',
-        blockNumber: 0n,
-        stateRoot: new Uint8Array(32),
-        mempool: [],
-        blockDelayMs: 0,
-        lastBlockTimestamp: env.timestamp,
-        position: { x: 0, y: 0, z: 0 },
-        depositoryAddress: `0x${'11'.repeat(20)}`,
-        entityProviderAddress: `0x${'22'.repeat(20)}`,
-        contracts: {
-          account: `0x${'33'.repeat(20)}`,
-          depository: `0x${'11'.repeat(20)}`,
-          entityProvider: `0x${'22'.repeat(20)}`,
-          deltaTransformer: `0x${'44'.repeat(20)}`,
-        },
-        rpcs: ['http://localhost:8545'],
-        chainId: 31337,
-        jadapter: fakeJAdapter as never,
-      });
+      addTestJurisdiction(env, 'Testnet', fakeJAdapter);
 
       enqueueRuntimeInput(env, {
         runtimeTxs: [],
@@ -415,7 +424,7 @@ describe('runtime ingress timestamp', () => {
   });
 
   test('runtime loop starts exactly one watcher per rpc/depository per runtime', async () => {
-    const env = createEmptyEnv('runtime-watcher-dedup-seed');
+    const env = createIsolatedEnv('runtime-watcher-dedup-seed');
     env.quietRuntimeLogs = true;
     env.activeJurisdiction = 'J1';
 
@@ -468,35 +477,8 @@ describe('runtime ingress timestamp', () => {
       },
     };
 
-    const sharedReplicaState = {
-      blockNumber: 0n,
-      stateRoot: new Uint8Array(32),
-      mempool: [],
-      blockDelayMs: 0,
-      lastBlockTimestamp: env.timestamp,
-      position: { x: 0, y: 0, z: 0 },
-      depositoryAddress: `0x${'11'.repeat(20)}`,
-      entityProviderAddress: `0x${'22'.repeat(20)}`,
-      contracts: {
-        account: `0x${'33'.repeat(20)}`,
-        depository: `0x${'11'.repeat(20)}`,
-        entityProvider: `0x${'22'.repeat(20)}`,
-        deltaTransformer: `0x${'44'.repeat(20)}`,
-      },
-      rpcs: ['http://localhost:8545'],
-      chainId: 31337,
-    };
-
-    env.jReplicas.set('J1', {
-      name: 'J1',
-      ...sharedReplicaState,
-      jadapter: adapterA as never,
-    });
-    env.jReplicas.set('J2', {
-      name: 'J2',
-      ...sharedReplicaState,
-      jadapter: adapterB as never,
-    });
+    addTestJurisdiction(env, 'J1', adapterA);
+    addTestJurisdiction(env, 'J2', adapterB);
 
     const stop = startRuntimeLoop(env, { tickDelayMs: 1 });
     try {
@@ -508,15 +490,14 @@ describe('runtime ingress timestamp', () => {
   });
 
   test('watcher-fed j events wake idle runtime and apply reserve updates without manual polling', async () => {
-    const seed = 'runtime-watcher-wake-seed';
+    const seed = uniqueSeed('runtime-watcher-wake-seed');
     const env = createEmptyEnv(seed);
     env.quietRuntimeLogs = true;
     env.timestamp = 1_000;
 
     const signerId = deriveSignerAddressSync(seed, '1').toLowerCase();
     const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
-    const replica = makeReplica(entityId, 1_000);
-    replica.signerId = signerId;
+    const replica = makeReplica(entityId, 1_000, signerId);
     replica.isProposer = true;
     env.eReplicas.set(`${entityId}:${signerId}`, replica);
 
