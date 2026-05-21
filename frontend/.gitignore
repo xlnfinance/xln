@@ -25,4 +25,5 @@ vite.config.ts.timestamp-*
 
 # Generated docs (copied from /docs)
 static/docs-static/
+static/docs-catalog/
 frontend/src/lib/generated/version.ts
