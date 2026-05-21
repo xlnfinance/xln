@@ -1,8 +1,5 @@
-import { requireUsableContractAddress } from '../contract-address';
-import { isLeftEntity } from '../entity-id-utils';
 import { formatEntityId } from '../utils';
 import type { EntityState, EntityTx, Env, EntityInput, JInput, HashType, CrossJurisdictionSwapRoute } from '../types';
-import { safeStringify } from '../serialization-utils';
 import { markStorageAccountDirty, markStorageEntityDirty } from '../env-events';
 // import { addToReserves, subtractFromReserves } from './financial'; // Currently unused
 import {
@@ -17,7 +14,6 @@ import { handleJEvent } from './j-events';
 import { shouldRethrowEntityTxError } from './invariant-errors';
 import { cloneEntityState, addMessage } from '../state-helpers';
 import { createStructuredLogger, logError } from '../logger';
-import { initJBatch, batchAddSettlement } from '../j-batch';
 import { handleR2E } from './handlers/r2e';
 import { handleHtlcPayment } from './handlers/htlc-payment';
 import { requireRuntimeJurisdictionDisputeDelayMs } from '../j-height';
@@ -87,6 +83,7 @@ import {
   handleSetHubConfigEntityTx,
   handleSetRebalancePolicyEntityTx,
 } from './handlers/account-admin';
+import { handleSettleDiffsEntityTx } from './handlers/settle-diffs';
 
 const entityTxLog = createStructuredLogger('entity.tx');
 import {
@@ -1072,97 +1069,7 @@ export const applyEntityTx = async (
     }
 
     if (entityTx.type === 'settleDiffs') {
-      console.log(`🏦 SETTLE-DIFFS: Processing settlement with ${entityTx.data.counterpartyEntityId}`);
-
-      const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
-      const { counterpartyEntityId, diffs, description, sig } = entityTx.data;
-
-      // Step 1: Validate invariant for all diffs
-      for (const diff of diffs) {
-        const sum = diff.leftDiff + diff.rightDiff + diff.collateralDiff;
-        if (sum !== 0n) {
-          logError('ENTITY_TX', `❌ INVARIANT-VIOLATION: leftDiff + rightDiff + collateralDiff = ${sum} (must be 0)`);
-          throw new Error(`Settlement invariant violation: ${sum} !== 0`);
-        }
-      }
-
-      // Step 2: Validate account exists (keyed by counterparty ID)
-      if (!newState.accounts.has(counterpartyEntityId)) {
-        logError('ENTITY_TX', `❌ No account exists with ${formatEntityId(counterpartyEntityId)}`);
-        throw new Error(`No account with ${counterpartyEntityId}`);
-      }
-
-      // Step 3: Determine canonical left/right order
-      const isLeft = isLeftEntity(entityState.entityId, counterpartyEntityId);
-      const leftEntity = isLeft ? entityState.entityId : counterpartyEntityId;
-      const rightEntity = isLeft ? counterpartyEntityId : entityState.entityId;
-
-      console.log(`🏦 Canonical order: left=${leftEntity.slice(0, 10)}..., right=${rightEntity.slice(0, 10)}...`);
-      console.log(`🏦 We are: ${isLeft ? 'LEFT' : 'RIGHT'}`);
-
-      // Step 4: Get jurisdiction config
-      const jurisdiction = entityState.config.jurisdiction;
-      if (!jurisdiction) {
-        throw new Error('No jurisdiction configured for this entity');
-      }
-
-      // Step 5: Convert diffs to contract format (keep as bigint - ethers handles conversion)
-      const contractDiffs = diffs.map(d => ({
-        tokenId: d.tokenId,
-        leftDiff: d.leftDiff,
-        rightDiff: d.rightDiff,
-        collateralDiff: d.collateralDiff,
-        ondeltaDiff: d.ondeltaDiff || 0n,
-      }));
-
-      console.log(`🏦 Queueing settlement diff batch:`, safeStringify(contractDiffs, 2));
-
-      // Step 6: Add settlement to jBatch and trigger j_broadcast.
-      if (!sig || sig === '0x') {
-        throw new Error(
-          `Settlement ${entityState.entityId.slice(-4)}↔${counterpartyEntityId.slice(-4)} missing hanko signature`,
-        );
-      }
-
-      if (!newState.jBatchState) {
-        newState.jBatchState = initJBatch();
-      }
-      const entityProviderAddress = requireUsableContractAddress(
-        'entity_provider',
-        jurisdiction.entityProviderAddress,
-      );
-      batchAddSettlement(
-        newState.jBatchState,
-        leftEntity,
-        rightEntity,
-        contractDiffs,
-        [],
-        sig,
-        entityProviderAddress,
-        '0x',
-        0,
-        entityState.entityId,
-      );
-
-      const firstValidator = entityState.config.validators[0];
-      if (firstValidator) {
-        outputs.push({
-          entityId: entityState.entityId,
-          signerId: firstValidator,
-          entityTxs: [{
-            type: 'j_broadcast',
-            data: {},
-          }],
-        });
-      }
-
-      addMessage(
-        newState,
-        `🏦 ${description || 'Settlement'} queued to jBatch`,
-      );
-
-      return { newState, outputs };
+      return handleSettleDiffsEntityTx(entityState, entityTx);
     }
 
     // === DISPUTES ===
