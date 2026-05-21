@@ -9,8 +9,6 @@ import { setTimeout as delay } from 'node:timers/promises';
 import { encodeBoard, hashBoard } from '../entity-factory';
 import { compareStableText, safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
-import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
-import { computeJurisdictionsNetworkVersion } from '../jurisdictions-version';
 import { deriveSignerAddressSync } from '../account-crypto';
 import {
   startCustodySupport,
@@ -27,7 +25,6 @@ import {
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../relay-router';
 import { type MarketSnapshotPayload } from '../market-snapshot';
 import { createMarketSubscriptionStack, isMarketMessageType } from '../relay/market-subscriptions';
-import { normalizeLoopbackUrl, toPublicRpcUrl } from '../loopback-url';
 import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync, type StorageHealth } from './storage-monitor';
 import { maybeHandleQaRequest } from '../qa/api';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
@@ -68,6 +65,14 @@ import {
   buildPublicHubDiscoveryPayload,
   getDebugEntityEntries,
 } from './public-discovery';
+import {
+  deployRpc2JurisdictionStack,
+  readShardJurisdictions,
+  resolvePrimaryHubJurisdictionFallback,
+  seedShardJurisdictions,
+  toPublicJurisdictionsPayload,
+  type OrchestratorJurisdictionsConfig,
+} from './jurisdictions';
 
 const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
   const totalBytes = Number(storage.disk.totalBytes || 0);
@@ -99,6 +104,10 @@ const relayUrl = (() => {
 })();
 const shardJurisdictionsPath = join(args.dbRoot, 'jurisdictions.json');
 const controlPlaneDir = join(args.dbRoot, '.control-plane');
+const jurisdictionsConfig: OrchestratorJurisdictionsConfig = {
+  shardJurisdictionsPath,
+  rpc2Url: args.rpc2Url,
+};
 
 const relayStore: RelayStore = createRelayStore('mesh-relay');
 const routerConfig: RelayRouterConfig = {
@@ -380,189 +389,6 @@ const marketSubscriptionStack = createMarketSubscriptionStack<OrchestratorWebSoc
 });
 
 const cleanupRpcMarketSubscription = (ws: OrchestratorWebSocket): void => marketSubscriptionStack.cleanup(ws);
-
-const readShardJurisdictions = (): string => {
-  const canonicalPath = resolveJurisdictionsJsonPath();
-  if (!existsSync(canonicalPath)) {
-    throw new Error(`CANONICAL_JURISDICTIONS_MISSING path=${canonicalPath}`);
-  }
-  if (!existsSync(shardJurisdictionsPath)) {
-    throw new Error(`JURISDICTIONS_JSON_MISSING path=${shardJurisdictionsPath}`);
-  }
-  const canonical = readFileSync(canonicalPath, 'utf8');
-  const shard = readFileSync(shardJurisdictionsPath, 'utf8');
-  try {
-    const canonicalVersion = String((JSON.parse(canonical) as { version?: unknown }).version || '').trim() || '1';
-    const shardPayload = JSON.parse(shard) as { version?: unknown };
-    const shardVersion = String(shardPayload.version || '').trim();
-    if (shardVersion !== canonicalVersion) {
-      shardPayload.version = canonicalVersion;
-      const next = `${JSON.stringify(shardPayload, null, 2)}\n`;
-      writeFileSync(shardJurisdictionsPath, next, 'utf8');
-      return next;
-    }
-  } catch {
-    // If either payload is malformed, just return the shard payload unchanged.
-  }
-  return shard;
-};
-
-type ShardJurisdictionEntry = {
-  name?: string;
-  chainId?: number;
-  rpc?: unknown;
-  blockTimeMs?: number;
-  explorer?: string;
-  currency?: string;
-  status?: string;
-  description?: string;
-  contracts?: {
-    account?: string;
-    depository?: string;
-    entityProvider?: string;
-    deltaTransformer?: string;
-  };
-  rebalancePolicyUsd?: unknown;
-};
-
-type ShardJurisdictionsFile = {
-  version?: unknown;
-  deployVersion?: unknown;
-  networkVersion?: unknown;
-  lastUpdated?: unknown;
-  jurisdictions?: Record<string, ShardJurisdictionEntry>;
-  defaults?: Record<string, unknown>;
-};
-
-const isRpc2Jurisdiction = (key: string, jurisdiction: ShardJurisdictionEntry): boolean => {
-  const normalizedKey = String(key || '').trim().toLowerCase();
-  if (normalizedKey === 'tron' || normalizedKey === 'rpc2' || normalizedKey === 'localhost2') return true;
-  const name = String(jurisdiction.name || '').trim().toLowerCase();
-  if (name.includes('tron')) return true;
-  const rpc = String(jurisdiction.rpc || '').trim();
-  return Boolean(args.rpc2Url && normalizeLoopbackUrl(rpc) === normalizeLoopbackUrl(args.rpc2Url));
-};
-
-const resolvePrimaryHubJurisdictionFallback = (): {
-  name: string;
-  chainId?: number;
-  depositoryAddress?: string;
-  entityProviderAddress?: string;
-} | null => {
-  if (!existsSync(shardJurisdictionsPath)) return null;
-  try {
-    const payload = JSON.parse(readFileSync(shardJurisdictionsPath, 'utf8')) as ShardJurisdictionsFile;
-    const entries = Object.entries(payload.jurisdictions ?? {});
-    const match = entries.find(([key, jurisdiction]) => !isRpc2Jurisdiction(key, jurisdiction)) ?? entries[0];
-    if (!match) return null;
-    const [, jurisdiction] = match;
-    const name = String(jurisdiction.name || '').trim();
-    if (!name) return null;
-    return {
-      name,
-      ...(jurisdiction.chainId !== undefined ? { chainId: jurisdiction.chainId } : {}),
-      ...(jurisdiction.contracts?.depository ? { depositoryAddress: jurisdiction.contracts.depository } : {}),
-      ...(jurisdiction.contracts?.entityProvider ? { entityProviderAddress: jurisdiction.contracts.entityProvider } : {}),
-    };
-  } catch {
-    return null;
-  }
-};
-
-const readRpcChainId = async (rpcUrl: string): Promise<number> => {
-  const response = await fetch(rpcUrl, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
-  });
-  if (!response.ok) {
-    throw new Error(`RPC_CHAIN_ID_HTTP_${response.status}`);
-  }
-  const payload = await response.json() as { result?: unknown; error?: { message?: string } };
-  if (payload.error) throw new Error(`RPC_CHAIN_ID_ERROR:${payload.error.message || 'unknown'}`);
-  const result = String(payload.result || '').trim();
-  const chainId = result.startsWith('0x') ? Number.parseInt(result.slice(2), 16) : Number(result);
-  if (!Number.isFinite(chainId) || chainId <= 0) throw new Error(`RPC_CHAIN_ID_INVALID:${result || 'empty'}`);
-  return Math.floor(chainId);
-};
-
-const deployRpc2JurisdictionStack = async (): Promise<void> => {
-  if (!args.rpc2Url) return;
-  const startedAt = Date.now();
-  const chainId = await readRpcChainId(args.rpc2Url);
-  const { createJAdapter } = await import('../jadapter');
-  const jadapter = await createJAdapter({
-    mode: 'rpc',
-    chainId,
-    rpcUrl: args.rpc2Url,
-  });
-  await jadapter.deployStack();
-
-  const current: ShardJurisdictionsFile = existsSync(shardJurisdictionsPath)
-    ? JSON.parse(readFileSync(shardJurisdictionsPath, 'utf8'))
-    : {};
-  const jurisdictions = current.jurisdictions ?? {};
-  const updatedAt = new Date().toISOString();
-  jurisdictions['tron'] = {
-    ...(jurisdictions['tron'] ?? {}),
-    name: 'Tron',
-    chainId,
-    rpc: toPublicRpcUrl(args.rpc2Url, '/rpc2'),
-    blockTimeMs: 1_000,
-    explorer: '',
-    currency: 'TRX',
-    status: 'active',
-    description: 'Second local EVM chain used to simulate Tron cross-jurisdiction swaps',
-    contracts: {
-      ...(jurisdictions['tron']?.contracts ?? {}),
-      account: jadapter.addresses.account,
-      depository: jadapter.addresses.depository,
-      entityProvider: jadapter.addresses.entityProvider,
-      deltaTransformer: jadapter.addresses.deltaTransformer,
-    },
-  };
-  const nextPayload: ShardJurisdictionsFile = {
-    version: String(current.version || '').trim() || '3',
-    lastUpdated: updatedAt,
-    jurisdictions,
-    defaults: current.defaults ?? {
-      timeout: 30000,
-      retryAttempts: 3,
-      gasLimit: 1000000,
-    },
-  };
-  const networkVersion = computeJurisdictionsNetworkVersion(nextPayload, String(nextPayload.version || '3'));
-  nextPayload.deployVersion = networkVersion;
-  nextPayload.networkVersion = networkVersion;
-  writeFileSync(shardJurisdictionsPath, JSON.stringify(nextPayload, null, 2) + '\n', 'utf8');
-  console.log(`[MESH] rpc2 jurisdiction ready chainId=${chainId} rpc=${args.rpc2Url} ms=${Date.now() - startedAt}`);
-};
-
-const toPublicJurisdictionsPayload = (raw: string): string => {
-  try {
-    const parsed = JSON.parse(raw) as ShardJurisdictionsFile;
-    if (!parsed || typeof parsed !== 'object' || !parsed.jurisdictions) return raw;
-    const networkVersion = computeJurisdictionsNetworkVersion(parsed, String(parsed.version || '3'));
-    parsed.deployVersion = networkVersion;
-    parsed.networkVersion = networkVersion;
-    for (const [key, jurisdiction] of Object.entries(parsed.jurisdictions)) {
-      if (!jurisdiction || typeof jurisdiction !== 'object') continue;
-      const fallback = isRpc2Jurisdiction(key, jurisdiction) ? '/rpc2' : '/rpc';
-      jurisdiction.rpc = toPublicRpcUrl(String(jurisdiction.rpc || fallback), fallback);
-    }
-    return `${JSON.stringify(parsed, null, 2)}\n`;
-  } catch {
-    return raw;
-  }
-};
-
-const seedShardJurisdictions = (): void => {
-  const canonicalPath = resolveJurisdictionsJsonPath();
-  if (!existsSync(canonicalPath)) {
-    throw new Error(`CANONICAL_JURISDICTIONS_MISSING path=${canonicalPath}`);
-  }
-  writeFileSync(shardJurisdictionsPath, readFileSync(canonicalPath, 'utf8'), 'utf8');
-};
 
 const pollHubHealth = async (child: HubChild): Promise<void> => {
   const apiBase = `http://${args.host}:${child.apiPort}`;
@@ -1510,8 +1336,8 @@ const runReset = async (): Promise<void> => {
       rmSync(args.dbRoot, { recursive: true, force: true });
     }
     mkdirSync(args.dbRoot, { recursive: true });
-    seedShardJurisdictions();
-    await deployRpc2JurisdictionStack();
+    seedShardJurisdictions(jurisdictionsConfig);
+    await deployRpc2JurisdictionStack(jurisdictionsConfig);
     finishTiming('reset_clear_state', clearStartedAt);
 
     const h1 = hubChildren[0]!;
@@ -1904,7 +1730,7 @@ const server = Bun.serve({
       return new Response(safeStringify(buildPublicHubDiscoveryPayload({
         hubChildren,
         relayStore,
-        primaryJurisdictionFallback: resolvePrimaryHubJurisdictionFallback(),
+        primaryJurisdictionFallback: resolvePrimaryHubJurisdictionFallback(jurisdictionsConfig),
       })), { headers });
     }
 
@@ -2077,7 +1903,10 @@ const server = Bun.serve({
 
     if (pathname === '/api/jurisdictions') {
       try {
-        const payload = toPublicJurisdictionsPayload(readShardJurisdictions());
+        const payload = toPublicJurisdictionsPayload(
+          jurisdictionsConfig,
+          readShardJurisdictions(jurisdictionsConfig),
+        );
         return new Response(payload, {
           headers: {
             ...headers,
