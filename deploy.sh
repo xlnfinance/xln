@@ -529,7 +529,7 @@ EOF
   journalctl --vacuum-size=200M || true
 
   if command -v pm2 >/dev/null 2>&1; then
-    if ! pm2 module:list 2>/dev/null | grep -q 'pm2-logrotate'; then
+    if ! pm2 ls --no-color 2>/dev/null | grep -q 'pm2-logrotate'; then
       pm2 install pm2-logrotate || true
     fi
     pm2 set pm2-logrotate:max_size 5M >/dev/null || true
