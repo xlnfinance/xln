@@ -6,7 +6,6 @@ import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync 
 import { cpus, freemem, loadavg, totalmem } from 'node:os';
 import { join, resolve } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import type { ServerWebSocket } from 'bun';
 import { encodeBoard, hashBoard } from '../entity-factory';
 import { compareStableText, safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
@@ -16,8 +15,6 @@ import { deriveSignerAddressSync } from '../account-crypto';
 import {
   startCustodySupport,
   stopManagedChild,
-  type ManagedChild,
-  type ManagedIdentity,
 } from './custody-bootstrap';
 import {
   createRelayStore,
@@ -35,27 +32,22 @@ import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync, type
 import { maybeHandleQaRequest } from '../qa/api';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { isLocalOperatorRequest, publicAggregatedHealth } from '../health-redaction';
-
-type Args = {
-  host: string;
-  port: number;
-  publicWsBaseUrl: string;
-  nodeApiPortBase: number;
-  nodePublicPortBase: number;
-  rpcUrl: string;
-  rpc2Url: string;
-  dbRoot: string;
-  mmEnabled: boolean;
-  resetAllowed: boolean;
-  deferInitialReset: boolean;
-  custodyEnabled: boolean;
-  custodyPort: number;
-  custodyDaemonPort: number;
-  custodyDbRoot: string;
-  walletUrl: string;
-};
-
-type OrchestratorWebSocket = ServerWebSocket<{ type: 'relay'; clientIp: string }>;
+import type {
+  AggregatedHealth,
+  Args,
+  CustodySupportState,
+  HubChild,
+  HubHealthPayload,
+  HubInfoPayload,
+  ManagedRuntimeLease,
+  ManagedRuntimeSpec,
+  MarketMakerChild,
+  MarketMakerHealthPayload,
+  MarketMakerInfoPayload,
+  OrchestratorWebSocket,
+  ResetState,
+  TimingMap,
+} from './orchestrator-types';
 
 const readPositiveIntEnv = (name: string, fallback: number): number => {
   const value = Number(process.env[name] || '');
@@ -73,303 +65,6 @@ const RELAY_MARKET_MAX_SUBSCRIPTION_CELLS = readPositiveIntEnv('XLN_RELAY_MARKET
 const RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP = readPositiveIntEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP', 8);
 const CHILD_LOG_RING_MAX = 30;
 
-type StageTiming = {
-  startedAt: number | null;
-  completedAt: number | null;
-  ms: number | null;
-};
-
-type TimingMap = Record<string, StageTiming>;
-
-type ResetState = {
-  inProgress: boolean;
-  lastError: string | null;
-  startedAt: number | null;
-  completedAt: number | null;
-  failedAt: number | null;
-  resolvedAt: number | null;
-};
-
-type HubProcessSpec = {
-  name: 'H1' | 'H2' | 'H3';
-  region: string;
-  seed: string;
-  authSeed: string;
-  signerLabel: string;
-  apiPort: number;
-  publicPort: number;
-  dbPath: string;
-  deployTokens: boolean;
-};
-
-type HubChild = HubProcessSpec & {
-  proc: ChildProcess | null;
-  startedAt: number | null;
-  exitedAt: number | null;
-  exitCode: number | null;
-  restartTimer: ReturnType<typeof setTimeout> | null;
-  restartCount: number;
-  lastHealth: HubHealthPayload | null;
-  lastInfo: HubInfoPayload | null;
-  recentStdout: string[];
-  recentStderr: string[];
-};
-
-type HubHealthPayload = {
-  ok?: boolean;
-  name?: string;
-  entityId?: string | null;
-  runtimeId?: string | null;
-  relayUrl?: string;
-  apiUrl?: string;
-  directWsUrl?: string;
-  p2p?: {
-    directPeers?: Array<{ runtimeId: string; endpoint: string; open: boolean }>;
-  };
-  gossip?: {
-    visibleHubNames?: string[];
-    visibleHubIds?: string[];
-    ready?: boolean;
-  };
-  mesh?: {
-    ready?: boolean;
-    pairs?: Array<{
-      counterpartyId: string;
-      counterpartyName: string;
-      hasAccount: boolean;
-      grantedByMe: string;
-      grantedByPeer: string;
-      ready: boolean;
-    }>;
-  };
-  bootstrapReserves?: {
-    ok: boolean;
-    targetMet?: boolean;
-    tokens: Array<{
-      tokenId: number;
-      symbol: string;
-      decimals: number;
-      current: string;
-      expectedMin: string;
-      ready: boolean;
-      operational?: boolean;
-      targetMet?: boolean;
-    }>;
-  };
-  marketMaker?: {
-    enabled: boolean;
-    ok: boolean;
-    entityId: string | null;
-    startupPhase: string | null;
-    expectedOffersPerHub: number;
-    expectedOffersPerPair?: number;
-    hubs: Array<{
-      hubEntityId: string;
-      offers: number;
-      ready: boolean;
-      pairs?: Array<{
-        pairId: string;
-        offers: number;
-        ready: boolean;
-      }>;
-    }>;
-  };
-  timings?: TimingMap;
-};
-
-type HubInfoPayload = {
-  name?: string;
-  entityId?: string;
-  hubEntities?: Array<{
-    entityId?: string;
-    signerId?: string;
-    name?: string;
-    jurisdictionName?: string;
-    chainId?: number;
-    depositoryAddress?: string;
-    entityProviderAddress?: string;
-    primary?: boolean;
-  }>;
-  runtimeId?: string;
-  apiUrl?: string;
-  relayUrl?: string;
-  startupPhase?: string;
-};
-
-type MarketMakerHealthPayload = {
-  ok?: boolean;
-  name?: string;
-  entityId?: string | null;
-  runtimeId?: string | null;
-  relayUrl?: string;
-  apiUrl?: string;
-  directWsUrl?: string;
-  startupPhase?: string;
-  p2p?: {
-    directPeers?: Array<{ runtimeId: string; endpoint: string; open: boolean }>;
-  };
-  gossip?: {
-    visibleHubNames?: string[];
-    visibleHubIds?: string[];
-    ready?: boolean;
-  };
-  marketMaker?: {
-    enabled: boolean;
-    ok: boolean;
-    entityId: string | null;
-    expectedOffersPerHub: number;
-    expectedOffersPerPair?: number;
-    hubs: Array<{
-      hubEntityId: string;
-      offers: number;
-      ready: boolean;
-      pairs?: Array<{
-        pairId: string;
-        offers: number;
-        ready: boolean;
-      }>;
-    }>;
-  };
-};
-
-type MarketMakerInfoPayload = HubInfoPayload;
-
-type AggregatedHealth = {
-  timestamp: number;
-  coreOk: boolean;
-  systemOk: boolean;
-  degraded: string[];
-  reset: ResetState;
-  system: {
-    runtime: boolean;
-    relay: boolean;
-  };
-  relay: {
-    clientCount: number;
-    managedRuntimeIds: string[];
-    externalClientIds: string[];
-    marketSubscriptions: {
-      total: number;
-      byIp: Record<string, number>;
-      maxTotal: number;
-      maxPerIp: number;
-      maxCellsPerSubscription: number;
-    };
-  };
-  process: {
-    pid: number;
-    ownerId: string;
-    uptimeSec: number;
-    rssBytes: number;
-    heapUsedBytes: number;
-    loadavg: number[];
-    cpuCount: number;
-    memory: {
-      freeBytes: number;
-      totalBytes: number;
-      freePct: number;
-    };
-    children: Array<{
-      role: ManagedRuntimeRole;
-      name: string;
-      pid: number | null;
-      leasePid: number | null;
-      leaseOwnerId: string | null;
-      online: boolean;
-      exitCode: number | null;
-      exitSignal?: NodeJS.Signals | null;
-      startedAt: number | null;
-      exitedAt: number | null;
-      restartCount: number;
-      apiPort: number;
-      dbPath: string;
-      lastErrorLine: string | null;
-      recentStdout: string[];
-      recentStderr: string[];
-    }>;
-  };
-  disk: {
-    ok: boolean;
-    minFreeBytes: number;
-    freeBytes: number;
-    usedBytes: number;
-    totalBytes: number;
-    freeGiB: number;
-    usedGiB: number;
-    totalGiB: number;
-    usedPct: number;
-  };
-  storage: StorageHealth;
-  hubMesh: {
-    ok: boolean;
-    hubIds: string[];
-    pairs: Array<{ left: string; right: string; ok: boolean }>;
-    direct: {
-      openLinkCount: number;
-      links: Array<{ fromRuntimeId: string; toRuntimeId: string; endpoint: string }>;
-    };
-  };
-  marketMaker: {
-    enabled: boolean;
-    ok: boolean;
-    entityId: string | null;
-    startupPhase: string | null;
-    expectedOffersPerHub: number;
-    hubs: Array<{
-      hubEntityId: string;
-      offers: number;
-      ready: boolean;
-      pairs: Array<{ pairId: string; offers: number; ready: boolean }>;
-    }>;
-  };
-  custody: {
-    enabled: boolean;
-    ok: boolean;
-    entityId: string | null;
-    daemonPort: number | null;
-    servicePort: number | null;
-  };
-  bootstrapReserves: {
-    ok: boolean;
-    targetMet: boolean;
-    requiredTokenCount: number;
-    entityCount: number;
-    entities: Array<{
-      entityId: string;
-      role: 'hub' | 'market-maker';
-      ready: boolean;
-      targetMet: boolean;
-      tokens: Array<{
-        tokenId: number;
-        symbol: string;
-        decimals: number;
-        current: string;
-        expectedMin: string;
-        ready: boolean;
-        operational?: boolean;
-        targetMet?: boolean;
-      }>;
-    }>;
-  };
-  hubs: Array<{
-    entityId: string;
-    name: string;
-    online: boolean;
-    runtimeId: string;
-    selfRelayPresence: boolean;
-    pid: number | null;
-    apiPort: number;
-    apiUrl: string;
-    dbPath: string;
-    startedAt: number | null;
-    exitedAt: number | null;
-    exitCode: number | null;
-    restartCount: number;
-    lastErrorLine: string | null;
-  }>;
-  timings: TimingMap;
-};
-
 const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
   const totalBytes = Number(storage.disk.totalBytes || 0);
   const usedBytes = Number(storage.disk.usedBytes || 0);
@@ -386,54 +81,6 @@ const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
     totalGiB: toGiB(totalBytes),
     usedPct: totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 10000) / 100 : 0,
   };
-};
-
-type MarketMakerChild = {
-  name: 'MM';
-  seed: string;
-  authSeed: string;
-  signerLabel: string;
-  apiPort: number;
-  publicPort: number;
-  dbPath: string;
-  proc: ChildProcess | null;
-  startedAt: number | null;
-  exitedAt: number | null;
-  exitCode: number | null;
-  exitSignal: NodeJS.Signals | null;
-  restartTimer: ReturnType<typeof setTimeout> | null;
-  restartCount: number;
-  lastHealth: MarketMakerHealthPayload | null;
-  lastInfo: MarketMakerInfoPayload | null;
-  lastStartupPhase: string | null;
-  recentStdout: string[];
-  recentStderr: string[];
-};
-
-type CustodySupportState = {
-  daemonChild: ManagedChild;
-  custodyChild: ManagedChild;
-  identity: ManagedIdentity;
-  hubIds: string[];
-};
-
-type ManagedRuntimeRole = 'hub' | 'market-maker';
-
-type ManagedRuntimeSpec = {
-  role: ManagedRuntimeRole;
-  name: string;
-  script: 'runtime/orchestrator/hub-node.ts' | 'runtime/orchestrator/mm-node.ts';
-  apiPort: number;
-  dbPath: string;
-};
-
-type ManagedRuntimeLease = ManagedRuntimeSpec & {
-  ownerId: string;
-  orchestratorPid: number;
-  pid: number;
-  cwd: string;
-  startedAt: number;
-  updatedAt: number;
 };
 
 const HUB_NAMES = ['H1', 'H2', 'H3'] as const;
