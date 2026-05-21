@@ -1,6 +1,7 @@
 import { writable, derived, get } from 'svelte/store';
 import type { Env } from '@xln/runtime/xln-api';
 import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
+import { getXLN } from './xlnRuntimeLoader';
 
 export interface Runtime {
   id: string;                    // Runtime identifier (EOA for local runtimes)
@@ -63,8 +64,6 @@ export const runtimeOperations = {
     const currentRuntimes = get(runtimes);
     const id = `localhost:${8000 + currentRuntimes.size}`;
 
-    // Import runtime functions dynamically
-    const { getXLN } = await import('./xlnStore');
     const xln = await getXLN();
 
     runtimes.update(r => setRuntimeEntry(r, id, {

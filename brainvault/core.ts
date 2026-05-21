@@ -17,6 +17,7 @@
 
 import { blake3 } from '@noble/hashes/blake3.js';
 import { sha256 } from '@noble/hashes/sha2.js';
+import { HDNodeWallet } from 'ethers';
 
 // Constants - NEVER CHANGE THESE (changing = different wallet)
 export const BRAINVAULT_V1 = {
@@ -358,7 +359,6 @@ export async function deriveEthereumAddressAtPath(
   path: string,
   passphrase: string = ''
 ): Promise<string> {
-  const { HDNodeWallet } = await import('ethers');
   const wallet = HDNodeWallet.fromPhrase(mnemonic, passphrase, path);
   return wallet.address;
 }
@@ -372,7 +372,6 @@ export async function deriveEthereumPrivateKeyAtPath(
   path: string,
   passphrase: string = ''
 ): Promise<string> {
-  const { HDNodeWallet } = await import('ethers');
   const wallet = HDNodeWallet.fromPhrase(mnemonic, passphrase, path);
   return wallet.privateKey;
 }
@@ -391,7 +390,6 @@ export async function deriveEthereumAddressMatrix(
     throw new Error('Address matrix count must be a positive integer');
   }
 
-  const { HDNodeWallet } = await import('ethers');
   const standard: string[] = [];
   const ledgerLive: string[] = [];
 

@@ -6,6 +6,7 @@ import { toasts } from './toastStore';
 import { resetEverything } from '$lib/utils/resetEverything';
 import { normalizeWsUrl, sameWsEndpoint } from '$lib/utils/wsUrl';
 import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
+import { getXLN, xlnInstance } from './xlnRuntimeLoader';
 import type {
   XLNModule,
   Env,
@@ -30,10 +31,6 @@ import type {
 } from '@xln/runtime/xln-api';
 import type { StorageAccountDoc, StorageEntityCoreDoc } from '@xln/runtime/storage/types';
 
-// Direct import of XLN runtime module (no wrapper boilerplate needed)
-let XLN: XLNModule | null = null;
-let xlnLoadPromise: Promise<XLNModule> | null = null;
-export const xlnInstance = writable<XLNModule | null>(null);
 let unregisterEnvChange: (() => void) | null = null;
 let unregisterRuntimeAdapterChange: (() => void) | null = null;
 let remoteAdapterRefreshPromise: Promise<Env | null> | null = null;
@@ -93,37 +90,6 @@ export interface FrontendXlnFunctions {
   resolveEntityProposerId: XLNModule['resolveEntityProposerId'];
   ensureGossipProfiles?: XLNModule['ensureGossipProfiles'];
   isReady: boolean;
-}
-
-async function getXLN(): Promise<XLNModule> {
-  if (XLN) return XLN;
-  if (xlnLoadPromise) return xlnLoadPromise;
-
-  xlnLoadPromise = (async () => {
-    // Always cache-bust runtime module per page load; stale runtime.js caused prod-debug desync.
-    const runtimeUrl = new URL(`/runtime.js?v=${Date.now()}`, window.location.origin).href;
-    const loaded = (await import(/* @vite-ignore */ runtimeUrl)) as XLNModule;
-    const runtimeMeta = loaded as XLNModule & { RUNTIME_SCHEMA_VERSION?: number };
-    const loadedSchema = Number(runtimeMeta.RUNTIME_SCHEMA_VERSION ?? NaN);
-    if (!Number.isFinite(loadedSchema) || loadedSchema < 1) {
-      throw new Error(
-        `RUNTIME_VERSION_MISMATCH: invalid runtime schema=${String(runtimeMeta.RUNTIME_SCHEMA_VERSION ?? 'undefined')}`,
-      );
-    }
-    XLN = loaded;
-    xlnInstance.set(XLN);
-    if (typeof window !== 'undefined') {
-      window.__xln_instance = XLN;
-    }
-    return XLN;
-  })();
-
-  try {
-    return await xlnLoadPromise;
-  } catch (err) {
-    xlnLoadPromise = null;
-    throw err;
-  }
 }
 
 export function isFinancialRestoreFailure(error: unknown): boolean {
@@ -300,11 +266,12 @@ function startP2PPoll() {
   if (p2pPollTimer) return;
   const poll = () => {
     const startedAt = typeof performance !== 'undefined' ? performance.now() : 0;
-    if (!XLN) return;
+    const xln = get(xlnInstance);
+    if (!xln) return;
     const env = get(xlnEnvironment);
     if (!env) return;
     try {
-      const state = XLN.getP2PState(env);
+      const state = xln.getP2PState(env);
       if (state) {
         const previous = get(p2pState);
         if (!areP2PStatesEqual(previous, state)) {
@@ -966,7 +933,7 @@ export async function initializeXLN(): Promise<Env> {
 }
 
 // Export XLN for direct component access.
-export { getXLN };
+export { getXLN, xlnInstance };
 
 // Helper to get current environment
 export function getEnv(): Env | null {

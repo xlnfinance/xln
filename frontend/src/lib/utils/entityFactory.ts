@@ -6,6 +6,8 @@ import { get } from 'svelte/store';
 import { keccak256, toUtf8Bytes } from 'ethers';
 import type { Env, EntityReplica } from '@xln/runtime/xln-api';
 import { unwrapLiveRuntimeEnv } from './liveRuntimeEnv';
+import { xlnEnvironment, getXLN } from '$lib/stores/xlnStore';
+import { activeEnv } from '$lib/stores/runtimeStore';
 
 type JurisdictionConfig = {
   name: string;
@@ -78,7 +80,6 @@ export async function createEphemeralEntity(
     throw new Error(`No jurisdiction config for ${jurisdictionName}`);
   }
 
-  const { getXLN } = await import('$lib/stores/xlnStore');
   const xln = await getXLN();
 
   // Lazy entities are addressed by the EntityProvider board hash.
@@ -236,8 +237,6 @@ export async function autoCreateEntityForSigner(
 
   const task = (async () => {
     try {
-      const { xlnEnvironment } = await import('$lib/stores/xlnStore');
-      const { activeEnv } = await import('$lib/stores/runtimeStore');
       const env = unwrapLiveRuntimeEnv(get(xlnEnvironment) || get(activeEnv));
 
       if (!env) {
