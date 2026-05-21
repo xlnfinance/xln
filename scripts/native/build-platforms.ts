@@ -1,6 +1,16 @@
 #!/usr/bin/env bun
 import { spawnSync } from 'node:child_process';
-import { copyFileSync, cpSync, existsSync, mkdirSync, rmSync } from 'node:fs';
+import {
+	copyFileSync,
+	cpSync,
+	existsSync,
+	mkdirSync,
+	readdirSync,
+	readFileSync,
+	rmSync,
+	unlinkSync,
+	writeFileSync,
+} from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -79,13 +89,52 @@ function ensureFrontendBuild(): void {
 	run('bun', ['run', 'build'], FRONTEND);
 }
 
+function walkFiles(root: string): string[] {
+	if (!existsSync(root)) return [];
+	const files: string[] = [];
+	for (const entry of readdirSync(root, { withFileTypes: true })) {
+		const fullPath = path.join(root, entry.name);
+		if (entry.isDirectory()) files.push(...walkFiles(fullPath));
+		else if (entry.isFile()) files.push(fullPath);
+	}
+	return files;
+}
+
+function sanitizeNativeWebBuild(): void {
+	for (const file of walkFiles(BUILD_DIR)) {
+		if (path.basename(file) === '.DS_Store') {
+			unlinkSync(file);
+			continue;
+		}
+		if (path.extname(file) !== '.html') continue;
+		const source = readFileSync(file, 'utf8');
+		const sanitized = source.replace(
+			/\n\s*<!-- Plausible Analytics -->\s*<script async src="https:\/\/plausible\.io\/js\/[^"]+"><\/script>\s*<script>\s*window\.plausible[\s\S]*?plausible\.init\(\)\s*<\/script>/g,
+			'',
+		);
+		if (sanitized !== source) writeFileSync(file, sanitized);
+	}
+}
+
+function pruneGeneratedNoise(root: string): void {
+	for (const file of walkFiles(root)) {
+		if (path.basename(file) === '.DS_Store') unlinkSync(file);
+	}
+}
+
 function syncCapacitorPlatform(platform: 'ios' | 'android'): void {
 	const platformDir = path.join(FRONTEND, platform);
 	if (existsSync(platformDir)) {
 		run('bunx', ['cap', 'sync', platform], FRONTEND);
+		pruneGeneratedNoise(platform === 'ios'
+			? path.join(FRONTEND, 'ios/App/App/public')
+			: path.join(FRONTEND, 'android/app/src/main/assets/public'));
 		return;
 	}
 	run('bunx', ['cap', 'add', platform], FRONTEND);
+	pruneGeneratedNoise(platform === 'ios'
+		? path.join(FRONTEND, 'ios/App/App/public')
+		: path.join(FRONTEND, 'android/app/src/main/assets/public'));
 }
 
 function prepareDesktop(open: boolean, smoke: boolean): void {
@@ -119,6 +168,7 @@ function prepareExtension(): void {
 		recursive: true,
 		filter: source => !source.includes(`${path.sep}.DS_Store`),
 	});
+	pruneGeneratedNoise(distDir);
 	console.log('\nExtension companion ready: native/extension/dist');
 }
 
@@ -130,6 +180,7 @@ async function main(): Promise<void> {
 
 	const targets = expandTargets(tokens);
 	ensureFrontendBuild();
+	sanitizeNativeWebBuild();
 
 	for (const target of targets) {
 		if (target === 'ios' || target === 'android') {
