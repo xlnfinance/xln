@@ -25,7 +25,6 @@ import { safeStringify, serializeTaggedJson } from './serialization-utils';
 import type { DeliverableEntityInput, Env } from './types';
 import { createExternalWalletApi } from './api/external-wallet-api';
 import { maybeHandleQaRequest } from './qa/api';
-import { registerSignerKey } from './account-crypto';
 import { createJAdapter, type JAdapter } from './jadapter';
 import type { JAdapterConfig } from './jadapter/types';
 import {
@@ -90,6 +89,7 @@ import { handleRuntimeHealth, type RuntimeHealthCacheEntry } from './server/heal
 import { handleRuntimeRpcProxy } from './server/rpc-proxy';
 import { handleP2PControl } from './server/p2p-control';
 import { handleRuntimeInputControl, handleRuntimeInputStatus } from './server/runtime-input-control';
+import { handleSignerRegistration } from './server/signer-control';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
@@ -434,36 +434,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   if (pathname === '/api/control/signers/register' && req.method === 'POST') {
     const authError = requireDaemonControlAuth(req, env);
     if (authError) return authError;
-    try {
-      const body = await parseTaggedControlBody<{ signerId?: unknown; privateKeyHex?: unknown }>(req);
-      const signerId = typeof body?.signerId === 'string' ? body.signerId.trim().toLowerCase() : '';
-      const privateKeyHex = typeof body?.privateKeyHex === 'string' ? body.privateKeyHex.trim().toLowerCase() : '';
-      if (!ethers.isAddress(signerId)) {
-        return new Response(
-          serializeTaggedJson({ ok: false, error: 'signerId must be an EOA address' }),
-          { status: 400, headers },
-        );
-      }
-      if (!ethers.isHexString(privateKeyHex, 32)) {
-        return new Response(
-          serializeTaggedJson({ ok: false, error: 'privateKeyHex must be a 32-byte hex string' }),
-          { status: 400, headers },
-        );
-      }
-      registerSignerKey(signerId, ethers.getBytes(privateKeyHex));
-      return new Response(
-        serializeTaggedJson({
-          ok: true,
-          signerId,
-        }),
-        { headers },
-      );
-    } catch (error) {
-      return new Response(
-        serializeTaggedJson({ ok: false, error: (error as Error).message || 'Failed to register signer' }),
-        { status: 500, headers },
-      );
-    }
+    return handleSignerRegistration(req, headers, { parseTaggedControlBody });
   }
 
   if (pathname === '/api/control/runtime-input' && req.method === 'POST') {
