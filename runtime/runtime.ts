@@ -14,7 +14,6 @@ import {
   isProductionRuntime,
   nodeProcess,
   runtimeIsBrowser,
-  runtimeProcessEnv,
 } from './runtime-platform';
 
 // Bump this on runtime bundle changes that must be reflected in frontend immediately.
@@ -197,6 +196,11 @@ import {
   type StorageHead,
   verifyStorageTailIntegrity,
 } from './storage';
+import {
+  assertStorageSafetyOverridesAllowed,
+  storageForceRestoreEnabled,
+  storageVerifyOnOpenDisabled,
+} from './storage/safety';
 import { storageOverlayRecordKey } from './storage/overlay';
 import type { RuntimeAdapterReadQuery } from './radapter';
 export {
@@ -508,33 +512,6 @@ const recoverStorageEpochRotation = async (env: Env): Promise<void> => {
 const waitForStorageEpochRotation = async (env: Env): Promise<void> => {
   const pending = ensureRuntimeState(env).storageEpochRotatePromise;
   if (pending) await pending;
-};
-
-const storageVerifyOnOpenDisabled = (): boolean => {
-  const raw = String(runtimeProcessEnv?.['XLN_STORAGE_SKIP_VERIFY_ON_OPEN'] ?? '').trim().toLowerCase();
-  return raw === '1' || raw === 'true' || raw === 'yes';
-};
-
-const storageForceRestoreEnabled = (): boolean => {
-  const raw = String(runtimeProcessEnv?.['XLN_STORAGE_FORCE_RESTORE'] ?? '').trim().toLowerCase();
-  return raw === '1' || raw === 'true' || raw === 'yes';
-};
-
-const assertStorageSafetyOverridesAllowed = (): void => {
-  const nodeEnv = String(runtimeProcessEnv?.['NODE_ENV'] ?? '').trim().toLowerCase();
-  if (nodeEnv !== 'production') return;
-
-  const blockedFlags = [
-    'XLN_STORAGE_SKIP_VERIFY_ON_OPEN',
-    'XLN_STORAGE_FORCE_RESTORE',
-  ].filter((name) => {
-    const raw = String(runtimeProcessEnv?.[name] ?? '').trim().toLowerCase();
-    return raw === '1' || raw === 'true' || raw === 'yes';
-  });
-
-  if (blockedFlags.length > 0) {
-    throw new Error(`STORAGE_SAFETY_OVERRIDE_FORBIDDEN_IN_PRODUCTION: flags=${blockedFlags.join(',')}`);
-  }
 };
 
 const verifyOpenedStorageDb = async (
