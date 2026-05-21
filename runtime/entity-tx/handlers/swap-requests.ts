@@ -32,10 +32,6 @@ export const handlePlaceSwapOfferRequest = (
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'placeSwapOffer' }>,
 ): SwapRequestResult => {
-  console.log(
-    `📊 PLACE-SWAP-OFFER: ${entityState.entityId.slice(-4)} placing offer with ${entityTx.data.counterpartyEntityId.slice(-4)}`,
-  );
-
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
   const mempoolOps: MempoolOp[] = [];
@@ -78,7 +74,6 @@ export const handlePlaceSwapOfferRequest = (
   };
 
   mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
-  console.log(`📊 Added swap_offer to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
   wakeEntity(entityState, outputs);
 
   return { newState, outputs, mempoolOps };
@@ -88,10 +83,6 @@ export const handleResolveSwapRequest = (
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'resolveSwap' }>,
 ): SwapRequestResult => {
-  console.log(
-    `💱 RESOLVE-SWAP: ${entityState.entityId.slice(-4)} resolving offer with ${entityTx.data.counterpartyEntityId.slice(-4)}`,
-  );
-
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
   const mempoolOps: MempoolOp[] = [];
@@ -132,7 +123,6 @@ export const handleResolveSwapRequest = (
   };
 
   mempoolOps.push({ accountId: counterpartyEntityId, tx: accountTx });
-  console.log(`💱 Added swap_resolve to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
   wakeEntity(entityState, outputs);
 
   return { newState, outputs, mempoolOps };
@@ -142,10 +132,6 @@ export const handleCancelSwapRequest = (
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'cancelSwapOffer' | 'cancelSwap' | 'proposeCancelSwap' }>,
 ): SwapRequestResult => {
-  console.log(
-    `📊 CANCEL-SWAP-REQUEST: ${entityState.entityId.slice(-4)} requesting cancel with ${entityTx.data.counterpartyEntityId.slice(-4)}`,
-  );
-
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
   const mempoolOps: MempoolOp[] = [];
@@ -164,7 +150,6 @@ export const handleCancelSwapRequest = (
       data: { offerId },
     },
   });
-  console.log(`📊 Added swap_cancel_request to mempoolOps for account with ${counterpartyEntityId.slice(-4)}`);
   wakeEntity(entityState, outputs);
 
   return { newState, outputs, mempoolOps };

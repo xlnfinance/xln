@@ -116,7 +116,6 @@ export function applyCommittedAccountFrameFollowups(
       if (accountTx.data.outcome === 'secret') {
         for (const [hashlock, route] of newState.htlcRoutes.entries()) {
           if (route.inboundLockId !== accountTx.data.lockId) continue;
-          console.log(`✅ HTLC: secret ACK confirmed for hashlock ${route.hashlock.slice(0, 16)}...`);
           terminateHtlcRoute(newState, hashlock, newState.timestamp);
         }
       }
@@ -126,9 +125,7 @@ export function applyCommittedAccountFrameFollowups(
 
     if (accountTx.type === 'swap_resolve') {
       const key = swapKey(counterpartyId, accountTx.data.offerId);
-      if (newState.pendingSwapFillRatios?.delete(key)) {
-        console.log(`📉 Cleared pending fillRatio for ${key.slice(-12)}`);
-      }
+      newState.pendingSwapFillRatios?.delete(key);
     }
   }
 }
@@ -278,26 +275,21 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
   if ((accountMachine.status ?? 'active') === 'disputed') {
     const frameTxTypes = input.newAccountFrame?.accountTxs?.map((tx) => tx.type) || [];
     const allowedWhileDisputed = frameTxTypes.every((txType) => txType === 'j_event_claim' || txType === 'reopen_disputed');
-    if (allowedWhileDisputed) {
-      console.log(
-        `🔓 Disputed account input allowed for ${counterpartyId.slice(-4)} ` +
-        `(txs=[${frameTxTypes.join(',')}])`,
-      );
-    } else {
-    const dropMsg =
-      `🛑 Disputed account input dropped for ${counterpartyId.slice(-4)} ` +
-      `(height=${input.height ?? input.newAccountFrame?.height ?? 'n/a'}, txs=[${frameTxTypes.join(',')}], ack=${!!input.prevHanko})`;
-    console.error(dropMsg);
-    addMessage(newState, dropMsg);
-    return {
-      newState,
-      outputs,
-      mempoolOps,
-      swapOffersCreated: allSwapOffersCreated,
-      swapCancelRequests: allSwapCancelRequests,
-      swapOffersCancelled: allSwapOffersCancelled,
-      ...(allHashesToSign.length > 0 && { hashesToSign: allHashesToSign }),
-    };
+    if (!allowedWhileDisputed) {
+      const dropMsg =
+        `🛑 Disputed account input dropped for ${counterpartyId.slice(-4)} ` +
+        `(height=${input.height ?? input.newAccountFrame?.height ?? 'n/a'}, txs=[${frameTxTypes.join(',')}], ack=${!!input.prevHanko})`;
+      console.error(dropMsg);
+      addMessage(newState, dropMsg);
+      return {
+        newState,
+        outputs,
+        mempoolOps,
+        swapOffersCreated: allSwapOffersCreated,
+        swapCancelRequests: allSwapCancelRequests,
+        swapOffersCancelled: allSwapOffersCancelled,
+        ...(allHashesToSign.length > 0 && { hashesToSign: allHashesToSign }),
+      };
     }
   }
 
@@ -429,27 +421,15 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             const lock = accountMachine.locks.get(accountTx.data.lockId);
             if (HEAVY_LOGS) console.log(`🔍 HTLC-CHECK: lock found? ${!!lock}`);
             if (!lock) {
-              console.log(`❌ HTLC-CHECK: Lock not in accountMachine.locks (lockId=${accountTx.data.lockId.slice(0,16)}...)`);
               continue;
             }
 
             // Check envelope (onion routing)
             if (!lock.envelope) {
-              console.log(`⏭️ HTLC: No envelope, skipping forwarding`);
               continue;
             }
 
             let envelope = lock.envelope;
-            console.log(`🧅 ═════════════════════════════════════════════════════════════`);
-            console.log(`🧅 ENVELOPE RECEIVED at ${newState.entityId.slice(-4)}`);
-            console.log(`🧅 LockId: ${lock.lockId.slice(0,16)}...`);
-            console.log(`🧅 Hashlock: ${lock.hashlock.slice(0,16)}...`);
-            console.log(`🧅 Amount: ${lock.amount}`);
-            console.log(`🧅 Envelope type: ${typeof envelope}`);
-            if (typeof envelope !== 'string') {
-              console.log(`🧅 OUTER envelope: finalRecipient=${envelope.finalRecipient}, nextHop=${envelope.nextHop?.slice(-4)}`);
-            }
-            console.log(`🧅 OUTER envelope structure: ${JSON.stringify(envelope, null, 2).slice(0, 300)}...`);
 
             // CRITICAL: For onion routing, envelope can be:
             // 1. A string (encrypted payload for THIS hop - decrypt it directly)
@@ -457,7 +437,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
             // Case 1: Envelope is a string (encrypted FOR us)
             if (typeof envelope === 'string') {
-              console.log(`🔓 Envelope is encrypted string - decrypting for us...`);
               try {
                 let envelopeData: string = envelope;
 
@@ -475,7 +454,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                 if (newState.entityEncPrivKey) {
                   const crypto = new NobleCryptoProvider();
                   envelopeData = await crypto.decrypt(envelope as string, newState.entityEncPrivKey);
-                  console.log(`🔓 Decryption successful`);
                 } else {
                   env.error('network', 'MISSING_CRYPTO_KEY', {
                     lockId: lock.lockId,
@@ -488,8 +466,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
                 // Unwrap decrypted envelope
                 envelope = unwrapEnvelope(envelopeData);
-                console.log(`🔓 Unwrapped envelope: finalRecipient=${envelope.finalRecipient}, nextHop=${envelope.nextHop?.slice(-4)}`);
-                console.log(`🔓 Decrypted envelope structure: ${JSON.stringify(envelope, null, 2).slice(0, 300)}...`);
               } catch (e) {
                 console.log(`❌ HTLC-GATE: ENVELOPE_DECRYPT_FAIL - ${e instanceof Error ? e.message : String(e)} [lockId=${lock.lockId.slice(0,16)}]`);
                 env.error('network', 'ENVELOPE_DECRYPT_FAIL', {
@@ -503,7 +479,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             }
             // Case 2: Envelope has innerEnvelope (plaintext wrapper)
             else if (envelope.innerEnvelope && !envelope.finalRecipient) {
-              console.log(`🔓 Decrypting innerEnvelope to get routing instructions...`);
               try {
                 let envelopeData = envelope.innerEnvelope;
 
@@ -521,7 +496,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                 if (newState.entityEncPrivKey) {
                   const crypto = new NobleCryptoProvider();
                   envelopeData = await crypto.decrypt(envelope.innerEnvelope, newState.entityEncPrivKey);
-                  console.log(`🔓 Decryption successful`);
                 } else {
                   env.error('network', 'MISSING_CRYPTO_KEY', {
                     lockId: lock.lockId,
@@ -534,8 +508,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
                 // Unwrap decrypted envelope - THIS is our actual routing instruction
                 envelope = unwrapEnvelope(envelopeData);
-                console.log(`🔓 Unwrapped envelope: finalRecipient=${envelope.finalRecipient}, nextHop=${envelope.nextHop?.slice(-4)}`);
-                console.log(`🔓 Decrypted envelope structure: ${JSON.stringify(envelope, null, 2).slice(0, 300)}...`);
               } catch (e) {
                 console.log(`❌ HTLC-GATE: ENVELOPE_DECRYPT_FAIL - ${e instanceof Error ? e.message : String(e)} [lockId=${lock.lockId.slice(0,16)}]`);
                 env.error('network', 'ENVELOPE_DECRYPT_FAIL', {
@@ -551,10 +523,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             // Validate envelope structure (safety check)
             try {
               validateEnvelope(envelope);
-              console.log(`🧅 Envelope validation: PASSED`);
             } catch (e) {
               console.log(`❌ HTLC: Invalid envelope structure: ${e instanceof Error ? e.message : String(e)}`);
-              console.log(`🧅 ═════════════════════════════════════════════════════════════`);
               continue;
             }
 
@@ -563,12 +533,10 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
             // The envelope MUST match the lock that carries it
             if (lock.amount.toString() !== accountTx.data.amount.toString()) {
               console.log(`❌ HTLC: Envelope amount mismatch: lock=${lock.amount}, tx=${accountTx.data.amount}`);
-              console.log(`🧅 ═════════════════════════════════════════════════════════════`);
               continue;
             }
             if (lock.tokenId !== accountTx.data.tokenId) {
               console.log(`❌ HTLC: Envelope tokenId mismatch: lock=${lock.tokenId}, tx=${accountTx.data.tokenId}`);
-              console.log(`🧅 ═════════════════════════════════════════════════════════════`);
               continue;
             }
             if (lock.hashlock !== accountTx.data.hashlock) {
@@ -580,10 +548,8 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                 fromEntityId: input.fromEntityId,
                 toEntityId: input.toEntityId,
               }, state.entityId);
-              console.log(`🧅 ═════════════════════════════════════════════════════════════`);
               continue;
             }
-            console.log(`✅ HTLC: Envelope verified - matches lock parameters (amount, tokenId, hashlock)`);
 
             // For intermediary hops, verify nextHop is a valid entity
             if (envelope.nextHop && !envelope.finalRecipient) {
@@ -592,15 +558,12 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               if (!hasNextHopAccount) {
                 console.log(`❌ HTLC: Cannot forward - no account with nextHop ${envelope.nextHop.slice(-4)}`);
                 console.log(`❌ HTLC: Available accounts: [${Array.from(newState.accounts.keys()).map(k => k.slice(-4)).join(', ')}]`);
-                console.log(`🧅 ═════════════════════════════════════════════════════════════`);
                 continue;
               }
-              console.log(`✅ HTLC: NextHop ${envelope.nextHop.slice(-4)} validated - account exists`);
             }
 
             // Are we the final recipient?
             if (envelope.finalRecipient) {
-              console.log(`🎯 HTLC-ROUTING: WE ARE FINAL RECIPIENT!`);
               // Final recipient - reveal immediately
               if (envelope.secret) {
                 const inboundEntity = newState.entityId === accountMachine.leftEntity
@@ -649,24 +612,17 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                     }
                   }
                 });
-                console.log(`🎯 HTLC: Final recipient, revealing secret=${envelope.secret.slice(0,16)}...`);
-                console.log(`🧅 ═════════════════════════════════════════════════════════════`);
               } else {
                 console.log(`❌ HTLC: Final recipient envelope missing secret!`);
-                console.log(`🧅 ═════════════════════════════════════════════════════════════`);
               }
             } else if (envelope.nextHop) {
               // Intermediary - forward to next hop
               const nextHop = envelope.nextHop;
-              console.log(`➡️ HTLC-ROUTING: INTERMEDIARY HOP`);
-              console.log(`➡️ Forwarding to: ${nextHop.slice(-4)}`);
 
               // Register route for backward propagation
               const inboundEntity = newState.entityId === accountMachine.leftEntity
                 ? accountMachine.rightEntity
                 : accountMachine.leftEntity;
-
-              console.log(`➡️ Registering route: ${inboundEntity.slice(-4)} → ${newState.entityId.slice(-4)} → ${nextHop.slice(-4)}`);
 
               // Create route object (typed as HtlcRoute for pendingFee)
               const htlcRoute: HtlcRoute = {
@@ -686,7 +642,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
               // Helper: cancel inbound lock and propagate error backward
               const cancelInboundLock = (cancelReason: string) => {
-                console.log(`❌ HTLC-CANCEL: Cancelling inbound lock, reason=${cancelReason}`);
                 mempoolOps.push({
                   accountId: input.fromEntityId,
                   tx: {
@@ -745,7 +700,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                 // The envelope variable now contains OUR decrypted instructions
                 // envelope.innerEnvelope is the NEXT hop's encrypted payload
                 const innerEnvelope = envelope.innerEnvelope;
-                console.log(`📦 Inner envelope for next hop: ${innerEnvelope ? 'present' : 'missing'}`);
 
                 // Calculate forwarded timelock/height with safety checks
                 const forwardTimelock = lock.timelock - BigInt(HTLC.MIN_TIMELOCK_DELTA_MS); // Per-hop timelock delta
@@ -769,13 +723,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                 }
 
                 // Forward HTLC with reduced timelock/height and inner envelope
-                console.log(`➡️ HTLC-FORWARD: Creating outbound lock`);
-                console.log(`➡️ Outbound lockId: ${lock.lockId}-fwd`);
-                console.log(`➡️ Amount: ${lock.amount} → ${forwardAmount} (fee=${feeAmount})`);
-                console.log(`➡️ Timelock: ${lock.timelock} → ${forwardTimelock}`);
-                console.log(`➡️ Height: ${lock.revealBeforeHeight} → ${forwardHeight}`);
-                console.log(`➡️ Inner envelope: ${innerEnvelope ? JSON.stringify(innerEnvelope, null, 2).slice(0, 200) : 'NONE'}...`);
-
                 mempoolOps.push({
                   accountId: nextHop,
                   tx: {
@@ -791,9 +738,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
                     }
                   }
                 });
-                console.log(`🧅 ═════════════════════════════════════════════════════════════`);
-
-                console.log(`➡️ HTLC: Forwarding to ${nextHop.slice(-4)}, amount ${forwardAmount} (fee ${feeAmount})`);
               } else {
                 console.log(`❌ HTLC: No account found for nextHop ${nextHop.slice(-4)}`);
                 cancelInboundLock(`no_account:${nextHop.slice(-4)}`);
@@ -808,28 +752,15 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       // AUTO-PROPOSE deferred to Frame 13 when flag cleared
       if (accountMachine.pendingForward && !env.skipPendingForward) {
         const forward = accountMachine.pendingForward;
-        console.log(`💸 ═════════════════════════════════════════════════════════════`);
-        console.log(`💸 PROCESSING PENDING-FORWARD at ${state.entityId.slice(-4)}`);
-        console.log(`💸 Amount: ${forward.amount}, TokenId: ${forward.tokenId}`);
-        console.log(`💸 Route: [${forward.route.map(r => r.slice(-4)).join(',')}]`);
-        console.log(`💸 Description: ${forward.description || 'none'}`);
 
         const nextHop = forward.route.length > 1 ? forward.route[1] : null;
 
         if (nextHop) {
-          console.log(`💸 Next hop: ${nextHop.slice(-4)}`);
           const nextHopAccountKey = nextHop; // counterparty ID is key
           const nextHopAccount = newState.accounts.get(nextHopAccountKey);
           if (nextHopAccount) {
             // Forward full amount (no fees for simplicity)
             const forwardAmount = forward.amount;
-
-            console.log(`💸 FORWARDING TO NEXT HOP`);
-            console.log(`💸   Creating direct_payment AccountTx`);
-            console.log(`💸   Amount: ${forwardAmount}`);
-            console.log(`💸   From: ${state.entityId.slice(-4)}`);
-            console.log(`💸   To: ${nextHop.slice(-4)}`);
-            console.log(`💸   Route: [${forward.route.slice(1).map(r => r.slice(-4)).join(',')}]`);
 
             mempoolOps.push({
               accountId: nextHopAccountKey, // CRITICAL: Use canonical key, not entity ID!
@@ -846,15 +777,11 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
               }
             });
 
-            console.log(`💸 FORWARD QUEUED: mempoolOps.length=${mempoolOps.length}`);
-            console.log(`💸 ═════════════════════════════════════════════════════════════`);
           } else {
             console.log(`❌ No account found for next hop ${nextHop.slice(-4)}`);
-            console.log(`💸 ═════════════════════════════════════════════════════════════`);
           }
         } else {
           console.log(`❌ No next hop in forward route`);
-          console.log(`💸 ═════════════════════════════════════════════════════════════`);
         }
 
         delete accountMachine.pendingForward;
