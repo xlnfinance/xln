@@ -23,16 +23,13 @@ import {
 } from './runtime.ts';
 import { safeStringify, serializeTaggedJson } from './serialization-utils';
 import type { DeliverableEntityInput, Env, RuntimeInput } from './types';
-import type { HubHealth } from './health';
 import { createExternalWalletApi } from './api/external-wallet-api';
 import { maybeHandleQaRequest } from './qa/api';
-import { getStorageHealthSnapshotSync } from './orchestrator/storage-monitor';
 import { registerSignerKey } from './account-crypto';
 import { createJAdapter, type JAdapter } from './jadapter';
 import type { JAdapterConfig } from './jadapter/types';
 import {
   createMarketMakerServerState,
-  getMarketMakerHealth,
   resetMarketMakerServerState,
 } from './server/market-maker-health';
 import { serveRuntimeBundle, serveStatic } from './server/static-assets';
@@ -41,21 +38,12 @@ import { listLocalControlEntities } from './server/control-entities';
 import {
   getAccountMachine,
   getEntityReplicaById,
-  getReplicaAccountCount,
-  getReplicaReserveSnapshot,
 } from './server/entity-lookup';
-import {
-  getBootstrapReserveHealth,
-  getHubMeshHealth,
-} from './server/hub-health';
 import { createRuntimeIngressReceiptStore } from './server/ingress-receipts';
-import type { Profile } from './networking/gossip';
 import { isLoopbackUrl } from './loopback-url';
 import {
   createRelayStore,
-  normalizeRuntimeKey,
   pushDebugEvent,
-  getAllGossipProfiles,
   removeClient,
 } from './relay-store';
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from './relay-router';
@@ -67,11 +55,10 @@ import {
   type MarketSnapshotPayload,
 } from './market-snapshot';
 import { createMarketSubscriptionStack, isMarketMessageType } from './relay/market-subscriptions';
-import { isLocalOperatorRequest, publicRuntimeHealthBody } from './health-redaction';
+import { isLocalOperatorRequest } from './health-redaction';
 import { findForbiddenRpcProxyMethod } from './rpc-proxy-safety';
 import {
   JSON_HEADERS,
-  buildDiskSummary,
   getErrorMessage,
   resolveRequiredAnvilRpc,
 } from './server-utils';
@@ -102,6 +89,7 @@ import { maybeHandleDebugDumpsRequest } from './server/debug-dumps';
 import { handleCreditRequest } from './server/credit-request';
 import { handleOffchainFaucet } from './server/offchain-faucet';
 import { handleReserveFaucet } from './server/reserve-faucet';
+import { handleRuntimeHealth, type RuntimeHealthCacheEntry } from './server/health-api';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
@@ -111,11 +99,7 @@ let resolveServerStartupBarrier: (() => void) | null = null;
 // Server encryption keypair now managed by relay-local-delivery.ts
 const HEALTH_CACHE_TTL_MS = 10_000;
 let cachedHealthResponse:
-  | {
-      fullBody: string;
-      publicBody: string;
-      expiresAt: number;
-    }
+  | RuntimeHealthCacheEntry
   | null = null;
 let cachedHealthInFlight: Promise<{ fullBody: string; publicBody: string }> | null = null;
 
@@ -674,122 +658,24 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
 
   // Health check
   if (pathname === '/api/health') {
-    const now = Date.now();
-    const includeOperatorHealth = isLocalOperatorRequest(req);
-    if (cachedHealthResponse && cachedHealthResponse.expiresAt > now) {
-      return new Response(includeOperatorHealth ? cachedHealthResponse.fullBody : cachedHealthResponse.publicBody, {
-        headers: {
-          ...headers,
-          'Cache-Control': 'private, max-age=10',
-        },
-      });
-    }
-
-    if (!cachedHealthInFlight) {
-      cachedHealthInFlight = (async () => {
-        const { getHealthStatus } = await import('./health.ts');
-        const health = await getHealthStatus(env);
-        const storage = getStorageHealthSnapshotSync();
-        const activeClientRuntimeIds = Array.from(relayStore.clients.keys());
-        const activeClientsDetailed = Array.from(relayStore.clients.entries()).map(([runtimeId, client]) => ({
-          runtimeId,
-          lastSeen: client.lastSeen,
-          ageMs: Math.max(0, Date.now() - client.lastSeen),
-          topics: Array.from(client.topics || []),
-        }));
-        const relayHubProfiles = getAllGossipProfiles(relayStore).filter((profile: Profile) =>
-          profile.metadata.isHub === true,
-        );
-        const existing = new Set((health.hubs || []).map((hub) => String(hub.entityId).toLowerCase()));
-        for (const profile of relayHubProfiles) {
-          const entityId = profile.entityId;
-          if (existing.has(entityId.toLowerCase())) continue;
-          health.hubs.push({
-            entityId,
-            name: profile.name,
-            status: 'healthy',
-            reserves: env ? getReplicaReserveSnapshot(env, entityId) : undefined,
-            accounts: env ? getReplicaAccountCount(env, entityId) : undefined,
-          });
-          existing.add(entityId.toLowerCase());
-        }
-
-        const relayHubsByEntity = new Map<string, Profile>();
-        for (const profile of relayHubProfiles) {
-          relayHubsByEntity.set(profile.entityId.toLowerCase(), profile);
-        }
-        const relayProfiles = getAllGossipProfiles(relayStore);
-        const relayProfileSummaries = relayProfiles
-          .map((profile: Profile) => ({
-            entityId: profile.entityId,
-            runtimeId: profile.runtimeId || null,
-            name: profile.name,
-            isHub: profile.metadata.isHub === true,
-            lastUpdated: profile.lastUpdated,
-          }))
-          .sort((left, right) => right.lastUpdated - left.lastUpdated);
-        health.hubs = (health.hubs || []).map((hub: HubHealth) => {
-          const entityId = String(hub.entityId || '');
-          const profile = relayHubsByEntity.get(entityId.toLowerCase());
-          const runtimeId = profile?.runtimeId;
-          const normalizedRuntimeId = normalizeRuntimeKey(runtimeId);
-          const selfRelayPresence = Boolean(normalizedRuntimeId && relayStore.clients.has(normalizedRuntimeId));
-          const activeClients = activeClientRuntimeIds.filter((clientRuntimeId) => clientRuntimeId !== normalizedRuntimeId);
-          return {
-            ...hub,
-            runtimeId: normalizedRuntimeId || runtimeId,
-            online: selfRelayPresence,
-            selfRelayPresence,
-            activeClients,
-            reserves: env ? getReplicaReserveSnapshot(env, entityId) ?? hub.reserves : hub.reserves,
-            accounts: env ? getReplicaAccountCount(env, entityId) ?? hub.accounts : hub.accounts,
-          };
-        });
-        const bootstrapReserves = await getBootstrapReserveHealth(env, {
-          activeHubEntityIds: relayStore.activeHubEntityIds,
-          marketMakerEntityId: marketMakerState.entityId,
-          loadTokenCatalog: tokenCatalogController.ensureTokenCatalog,
-        });
-        const payload = {
-          ...health,
-          disk: buildDiskSummary(storage),
-          storage,
-          boot: {
-            phase: serverBootPhase,
-            startedAt: serverBootStartedAt || null,
-            completedAt: serverBootCompletedAt,
-            error: serverBootError,
-          },
-          hubMesh: getHubMeshHealth(env, relayStore.activeHubEntityIds),
-          marketMaker: getMarketMakerHealth(env, marketMakerState, getAccountMachine),
-          bootstrapReserves,
-          relay: {
-            activeClients: activeClientRuntimeIds,
-            activeClientCount: activeClientRuntimeIds.length,
-            clientsDetailed: activeClientsDetailed,
-            profileCount: relayProfiles.length,
-            profiles: relayProfileSummaries,
-          },
-        };
-        const fullBody = JSON.stringify(payload);
-        const publicBody = publicRuntimeHealthBody(payload);
-        cachedHealthResponse = {
-          fullBody,
-          publicBody,
-          expiresAt: Date.now() + HEALTH_CACHE_TTL_MS,
-        };
-        return { fullBody, publicBody };
-      })().finally(() => {
-        cachedHealthInFlight = null;
-      });
-    }
-
-    const body = await cachedHealthInFlight;
-    return new Response(includeOperatorHealth ? body.fullBody : body.publicBody, {
-      headers: {
-        ...headers,
-        'Cache-Control': 'private, max-age=10',
+    return handleRuntimeHealth(req, headers, {
+      env,
+      relayStore,
+      healthCacheTtlMs: HEALTH_CACHE_TTL_MS,
+      cachedHealthResponse,
+      setCachedHealthResponse: (entry) => { cachedHealthResponse = entry; },
+      cachedHealthInFlight,
+      setCachedHealthInFlight: (work) => { cachedHealthInFlight = work; },
+      boot: {
+        phase: serverBootPhase,
+        startedAt: serverBootStartedAt,
+        completedAt: serverBootCompletedAt,
+        error: serverBootError,
       },
+      activeHubEntityIds: relayStore.activeHubEntityIds,
+      marketMakerState,
+      getAccountMachine,
+      ensureTokenCatalog: () => tokenCatalogController.ensureTokenCatalog(),
     });
   }
 
