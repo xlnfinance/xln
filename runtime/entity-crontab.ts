@@ -58,6 +58,9 @@ import { DEFAULT_SOFT_LIMIT } from './types';
 import { terminateHtlcRoute } from './entity-tx/htlc-route-lifecycle';
 import { getRuntimeJurisdictionHeight } from './j-height';
 import { markStorageAccountDirty, markStorageEntityDirty } from './env-events';
+import { createStructuredLogger, shortHash, shortId } from './logger';
+
+const crontabLog = createStructuredLogger('entity.crontab');
 
 // Configuration constants
 export const ACCOUNT_TIMEOUT_MS = 30000; // 30 seconds (configurable)
@@ -143,14 +146,14 @@ const markEntityAccountDirty = (env: Env, replica: EntityReplica, counterpartyId
 export function scheduleHook(state: CrontabState, hook: ScheduledHook): void {
   if (!state.hooks) state.hooks = new Map();
   state.hooks.set(hook.id, hook);
-  console.log(`⏰ HOOK scheduled: ${hook.type} id=${hook.id.slice(0, 24)}... triggerAt=${hook.triggerAt}`);
+  crontabLog.debug('hook.scheduled', { type: hook.type, id: shortHash(hook.id), triggerAt: hook.triggerAt });
 }
 
 /** Cancel a previously scheduled hook (e.g., lock resolved before timeout) */
 export function cancelHook(state: CrontabState, hookId: string): void {
   if (!state.hooks) return;
   if (state.hooks.delete(hookId)) {
-    console.log(`⏰ HOOK cancelled: ${hookId.slice(0, 24)}...`);
+    crontabLog.debug('hook.cancelled', { id: shortHash(hookId) });
   }
 }
 
@@ -194,7 +197,7 @@ export async function executeCrontab(
 
     if (dueHooks.length > 0) {
       markEntityCrontabDirty(env, replica);
-      console.log(`⏰ HOOKS: ${dueHooks.length} hooks fired (entity ${replica.entityId.slice(-4)}, timestamp=${now})`);
+      crontabLog.debug('hooks.fired', { entity: shortId(replica.entityId), count: dueHooks.length, timestamp: now });
       const hookOutputs = await processDueHooks(env, dueHooks, replica, context);
       allOutputs.push(...hookOutputs);
     }
@@ -214,10 +217,10 @@ export async function executeCrontab(
         task.lastRun = now;
         markEntityCrontabDirty(env, replica);
         if (outputs.length > 0) {
-          console.log(`✅ CRONTAB: Task "${task.method}" generated ${outputs.length} outputs`);
+          crontabLog.debug('task.outputs', { method: task.method, outputs: outputs.length });
         }
       } catch (error) {
-        console.error(`❌ CRONTAB: Task "${task.method}" failed:`, error);
+        crontabLog.warn('task.failed', { method: task.method, error: (error as Error).message });
       }
     }
   }
@@ -248,7 +251,7 @@ async function processDueHooks(
   const currentJBlock = getRuntimeJurisdictionHeight(env, replica.state.lastFinalizedJHeight || 0);
 
   for (const hook of hooks) {
-    console.log(`⏰ HOOK FIRED: type=${hook.type} id=${hook.id.slice(0, 24)}...`);
+    crontabLog.debug('hook.fired', { type: hook.type, id: shortHash(hook.id) });
 
     switch (hook.type) {
       case 'htlc_timeout':
@@ -288,10 +291,12 @@ async function processDueHooks(
               });
               markEntityCrontabDirty(env, replica);
             }
-            console.log(
-              `⏰ HOOK: dispute_deadline retry for ${accountId.slice(-4)} ` +
-              `(current=${currentJBlock}, timeout=${timeoutBlock}, retryMs=${retryMs})`,
-            );
+            crontabLog.debug('dispute.retry_until_timeout', {
+              account: shortId(accountId),
+              currentJBlock,
+              timeoutBlock,
+              retryMs,
+            });
             break;
           }
 
@@ -318,10 +323,7 @@ async function processDueHooks(
               });
               markEntityCrontabDirty(env, replica);
             }
-            console.log(
-              `⏰ HOOK: dispute_deadline deferred for ${accountId.slice(-4)} ` +
-              `(sentBatch pending, retryMs=${retryMs})`,
-            );
+            crontabLog.debug('dispute.deferred_sent_batch', { account: shortId(accountId), retryMs });
             break;
           }
 
@@ -363,21 +365,21 @@ async function processDueHooks(
           if (account.activeDispute) break;
 
           disputeStartCounterparties.add(counterpartyEntityId);
-          console.warn(
-            `⏰ HOOK: htlc_secret_ack_timeout for ${counterpartyEntityId.slice(-4)} ` +
-            `(hashlock=${hashlock.slice(0, 12)}...) → queue disputeStart`,
-          );
+          crontabLog.warn('htlc_secret_ack_timeout', {
+            counterparty: shortId(counterpartyEntityId),
+            hashlock: shortHash(hashlock),
+          });
         }
         break;
 
       case 'settlement_window':
         // Future: auto-execute settlement after approval window
-        console.log(`⏰ HOOK: settlement_window — not yet implemented`);
+        crontabLog.debug('hook.unimplemented', { type: hook.type });
         break;
 
       case 'watchdog':
         // Future: detect unresponsive counterparty
-        console.log(`⏰ HOOK: watchdog — not yet implemented`);
+        crontabLog.debug('hook.unimplemented', { type: hook.type });
         break;
 
       case 'hub_rebalance_kick':
@@ -388,7 +390,7 @@ async function processDueHooks(
           if (task) {
             task.lastRun = 0;
             markEntityCrontabDirty(env, replica);
-            console.log(`⏰ HOOK: hub_rebalance_kick — forcing next global hubRebalance pass`);
+            crontabLog.debug('hub_rebalance.kick');
           }
         }
         break;
@@ -418,7 +420,7 @@ async function processDueHooks(
         },
       ],
     });
-    console.log(`⏰ HOOKS: Generated processHtlcTimeouts for ${htlcTimeoutLocks.length} expired locks`);
+    crontabLog.debug('htlc_timeout.queued', { locks: htlcTimeoutLocks.length });
   }
 
   if (disputeStartCounterparties.size > 0) {
@@ -434,10 +436,7 @@ async function processDueHooks(
       signerId: firstValidator,
       entityTxs: startTxs,
     });
-    console.log(
-      `⏰ HOOKS: auto disputeStart queued for ${disputeStartCounterparties.size} account(s) ` +
-      `(missing secret-return ACK)`,
-    );
+    crontabLog.debug('dispute_start.queued', { accounts: disputeStartCounterparties.size });
   }
 
   if (disputeFinalizeCounterparties.size > 0) {
@@ -456,9 +455,7 @@ async function processDueHooks(
         { type: 'j_broadcast', data: {} },
       ],
     });
-    console.log(
-      `⏰ HOOKS: auto disputeFinalize+j_broadcast queued for ${disputeFinalizeCounterparties.size} account(s)`,
-    );
+    crontabLog.debug('dispute_finalize.queued', { accounts: disputeFinalizeCounterparties.size });
   } else if (shouldBroadcastQueuedDisputeFinalizations) {
     if (!context.manualBroadcastInInput) {
       outputs.push({
@@ -466,7 +463,7 @@ async function processDueHooks(
         signerId: firstValidator,
         entityTxs: [{ type: 'j_broadcast', data: {} }],
       });
-      console.log('⏰ HOOKS: auto j_broadcast queued for already-drafted disputeFinalize');
+      crontabLog.debug('j_broadcast.queued_for_drafted_finalize');
     }
   }
 
@@ -927,12 +924,13 @@ async function hubRebalanceHandler(
           markEntityAccountDirty(_env, replica, target.counterpartyId);
         }
         queuedCount += 1;
-        console.log(
-          `✅ R→C queued: ${target.amount} token ${target.tokenId} → ${target.counterpartyId.slice(-4)} (direct jBatch, no quotes)`,
-        );
-        console.log(
-          `[REB][2][BATCH_ADD] hub=${hubId.slice(-8)} cp=${target.counterpartyId.slice(-8)} token=${target.tokenId} amount=${target.amount} requestedAt=${target.requestedAt}`,
-        );
+        crontabLog.debug('rebalance.r2c.batch_add', {
+          hub: shortId(hubId, 8),
+          counterparty: shortId(target.counterpartyId),
+          tokenId: target.tokenId,
+          amount: target.amount.toString(),
+          requestedAt: target.requestedAt,
+        });
         emitRebalanceDebug({
           step: 2,
           status: 'ok',
@@ -1055,9 +1053,11 @@ async function hubRebalanceHandler(
         memo: 'auto-c2r-rebalance',
       },
     });
-    console.log(
-      `🔄 C→R propose queued: cp=${plan.counterpartyId.slice(-4)} ops=${plan.ops.length} amount=${plan.totalAmount}`,
-    );
+    crontabLog.debug('rebalance.c2r.propose_queued', {
+      counterparty: shortId(plan.counterpartyId),
+      ops: plan.ops.length,
+      amount: plan.totalAmount.toString(),
+    });
     emitRebalanceDebug({
       step: 2,
       status: 'ok',
@@ -1079,7 +1079,7 @@ async function hubRebalanceHandler(
       type: 'settle_execute',
       data: { counterpartyEntityId: counterpartyId },
     });
-    console.log(`🔄 C→R execute queued: cp=${counterpartyId.slice(-4)} (signed workspace)`);
+    crontabLog.debug('rebalance.c2r.execute_queued', { counterparty: shortId(counterpartyId) });
     emitRebalanceDebug({
       step: 2,
       status: 'ok',
@@ -1095,9 +1095,12 @@ async function hubRebalanceHandler(
     (queuedCount > 0 || selectedC2RExec.length > 0);
   if (shouldBroadcast) {
     localEntityTxs.push({ type: 'j_broadcast', data: {} });
-    console.log(
-      `[REB][3][BROADCAST_ENTITY_TX_QUEUED] hub=${hubId.slice(-8)} sentPending=${!!replica.state.jBatchState.sentBatch} queuedR2C=${queuedCount} queuedC2RExec=${selectedC2RExec.length}`,
-    );
+    crontabLog.debug('rebalance.broadcast_queued', {
+      hub: shortId(hubId, 8),
+      sentPending: !!replica.state.jBatchState.sentBatch,
+      queuedR2C: queuedCount,
+      queuedC2RExec: selectedC2RExec.length,
+    });
     emitRebalanceDebug({
       step: 3,
       status: 'ok',
