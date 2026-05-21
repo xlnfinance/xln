@@ -320,7 +320,6 @@ export class RuntimeP2P {
   }
 
   connect() {
-    console.log(`[P2P] RuntimeP2P.connect() called, connecting to ${this.relayUrls.length} relays: ${this.relayUrls.join(', ')}`);
     this.closeClients();
     this.registerVisibilityReconnect();
     this.startPolling();
@@ -394,7 +393,6 @@ export class RuntimeP2P {
       // Already polling
       return;
     }
-    console.log(`[P2P] startPolling: Starting polling every ${this.gossipPollMs}ms`);
     // Request immediately, then periodically
     setTimeout(() => {
       const startedAt = typeof performance !== 'undefined' ? performance.now() : 0;
@@ -431,14 +429,9 @@ export class RuntimeP2P {
     if (this.visibilityHandler) return;
     const resume = () => {
       if (isInactiveTabStandby()) {
-        console.log('[P2P] Tab is in standby; suppressing visibility-triggered reconnect');
         return;
       }
       const activeClient = !!this.getActiveClient();
-      console.log(
-        `[P2P] visibilitychange state=${document.visibilityState} activeClient=${activeClient ? 1 : 0} ` +
-          `pendingTargets=${this.pendingByRuntime.size}`,
-      );
       if (document.visibilityState !== 'visible') {
         return;
       }
@@ -516,7 +509,6 @@ export class RuntimeP2P {
   }
 
   reconnect() {
-    console.log(`[P2P] reconnect() called — closing existing clients and reconnecting`);
     this.closeClients();
     this.connect();
   }
@@ -558,14 +550,10 @@ export class RuntimeP2P {
       'targetRuntimeId must be signer EOA',
       { targetRuntimeId },
     );
-    const { client, transport } = this.resolveTransportClient(normalizedTargetRuntimeId);
+    const { client } = this.resolveTransportClient(normalizedTargetRuntimeId);
     if (client && client.isOpen()) {
       try {
         const sent = client.sendEntityInput(normalizedTargetRuntimeId, input, ingressTimestamp);
-        console.log(
-          `[P2P] enqueueEntityInput attempt target=${normalizedTargetRuntimeId} entity=${input.entityId.slice(-4)} ` +
-            `transport=${transport} sent=${sent ? 1 : 0} open=${client.isOpen() ? 1 : 0}`,
-        );
         if (sent) return;
         console.warn(`P2P-SEND-FAILED: Client.send returned false for ${normalizedTargetRuntimeId}`);
       } catch (error) {
@@ -589,10 +577,6 @@ export class RuntimeP2P {
           });
         }
       }
-    } else {
-      console.warn(
-        `P2P-NO-CLIENT: No active ${transport} connection, queueing for ${normalizedTargetRuntimeId}`,
-      );
     }
 
     const queue = this.pendingByRuntime.get(normalizedTargetRuntimeId) || [];
@@ -614,7 +598,6 @@ export class RuntimeP2P {
       });
     }
     this.pendingByRuntime.set(normalizedTargetRuntimeId, queue);
-    console.log(`P2P-QUEUED: ${normalizedTargetRuntimeId}, queue size: ${queue.length}`);
   }
 
   requestGossip(runtimeId: string) {
@@ -679,16 +662,12 @@ export class RuntimeP2P {
 
   private flushPending() {
     for (const [targetRuntimeId, queue] of this.pendingByRuntime.entries()) {
-      const { client, transport } = this.resolveTransportClient(targetRuntimeId);
+      const { client } = this.resolveTransportClient(targetRuntimeId);
       if (!client || !client.isOpen()) continue;
       const remaining: { input: RoutedEntityInput, enqueuedAt: number, ingressTimestamp?: number }[] = [];
       for (const entry of queue) {
         try {
           const sent = client.sendEntityInput(targetRuntimeId, entry.input, entry.ingressTimestamp);
-          console.log(
-            `[P2P] flushPending target=${targetRuntimeId} entity=${entry.input.entityId.slice(-4)} ` +
-              `transport=${transport} sent=${sent ? 1 : 0} open=${client.isOpen() ? 1 : 0}`,
-          );
           if (!sent) remaining.push(entry);
         } catch {
           remaining.push(entry);
@@ -740,7 +719,6 @@ export class RuntimeP2P {
 
     const missingEntities = Array.from(entitiesToCheck).filter(entityId => !this.hasProfileForEntity(entityId));
     if (missingEntities.length === 0) return;
-    console.log(`P2P_FETCH_PROFILE: ${missingEntities.map(entityId => entityId.slice(-4)).join(',')} (not in cache)`);
     void this.ensureProfiles(missingEntities).catch(error => {
       console.warn(`P2P_FETCH_PROFILE_FAILED: ${(error as Error).message}`);
     });
@@ -759,7 +737,6 @@ export class RuntimeP2P {
   async ensureProfiles(entityIds: string[]): Promise<boolean> {
     const requestedEntityIds = unique(entityIds.map(normalizeId)).filter(Boolean);
     if (requestedEntityIds.length === 0) return true;
-    const startedAt = Date.now();
     let requiredEntityIds = this.expandRequiredProfileIds(requestedEntityIds);
     let missingEntityIds = requiredEntityIds.filter(entityId => !this.hasProfileForEntity(entityId));
 
@@ -787,11 +764,6 @@ export class RuntimeP2P {
     requiredEntityIds = this.expandRequiredProfileIds(requestedEntityIds);
     missingEntityIds = requiredEntityIds.filter(entityId => !this.hasProfileForEntity(entityId));
     const resolved = missingEntityIds.length === 0;
-    const hubCount = this.env.gossip?.getHubs?.().length || 0;
-    console.log(
-      `[P2P] ensureProfiles requested=${requestedEntityIds.length} required=${requiredEntityIds.length} ` +
-        `missing=${missingEntityIds.length} hubs=${hubCount} resolved=${resolved ? 1 : 0} elapsed=${Date.now() - startedAt}ms`,
-    );
     return resolved;
   }
 
@@ -857,14 +829,9 @@ export class RuntimeP2P {
       const profiles = this.env.gossip?.getProfiles?.() || [];
       const hasAllMissing = missingEntityIds.length > 0 && missingEntityIds.every((entityId) => this.hasProfileForEntity(entityId));
       if (profiles.length > startCount || hasAllMissing) {
-        console.log(
-          `P2P_FETCH: profiles=${profiles.length} delta=${profiles.length - startCount} ` +
-            `elapsed=${Date.now() - startedAt}ms`,
-        );
         return missingEntityIds.length === 0 ? profiles.length > startCount : hasAllMissing;
       }
     }
-    console.log(`P2P_FETCH: No new profiles after ${Date.now() - startedAt}ms (have ${startCount})`);
     if (missingEntityIds.length === 0) return false;
     if (missingEntityIds.length > 0) {
       this.env.warn('network', 'GOSSIP_PROFILE_MISS', {
