@@ -12,7 +12,7 @@ Historical planning snapshots were moved to `docs/archive/planning/`.
 
 ## Current Snapshot
 
-**Date:** 2026-05-21  
+**Date:** 2026-05-21
 **State:** pre-mainnet, testnet/prod-runtime hardening in progress
 
 What appears true from the current docs set:
@@ -32,8 +32,8 @@ When docs disagree, use this order:
 
 ## Non-Negotiable Current Assumptions
 
-These ideas were spread across `mvp.md`, `mainnet.md`, and older planning docs.
-They stay live here because they still define the shape of the system.
+These ideas were spread across older planning docs. They stay live here because
+they still define the shape of the system.
 
 ### Network shape
 
@@ -58,8 +58,7 @@ They stay live here because they still define the shape of the system.
 
 ## Blocker Order
 
-These are the highest-value unresolved items after deduping `todo.md`,
-`next.md`, `mvp.md`, and the old readiness note.
+These are the highest-value unresolved items after deduping older planning docs.
 
 ### P0 — launch blockers
 
@@ -155,7 +154,7 @@ These are the highest-value unresolved items after deduping `todo.md`,
 - keep dev/scenario surfaces out of the normal wallet path
 - make settlements/disputes/recovery visible enough for a serious demo and for support/debug use
 
-## Multisigner-First Direction
+### Multisigner-First Direction
 
 This remains active and should not disappear under status cleanup.
 
@@ -166,7 +165,7 @@ This remains active and should not disappear under status cleanup.
 - J-batch auth moves to strict entity quorum semantics
 - complex-board tests must exist, not just happy-path single-signer tests
 
-## AI / Auxiliary Work
+### AI / Auxiliary Work
 
 These are real backlog items, but not launch-defining:
 
