@@ -14,7 +14,7 @@ more L2", but a consequence of the scaling and enforcement constraints.
 2. [intro.md](intro.md) — XLN in 5 minutes
 3. [core/12_invariant.md](core/12_invariant.md) — the RCPAN invariant
 4. [core/rjea-architecture.md](core/rjea-architecture.md) — the runtime/entity/account/jurisdiction stack
-5. [mainnet.md](mainnet.md) — what is still blocking launch
+5. [status.md](status.md) — the current source of truth
 
 **Developers**
 
@@ -59,11 +59,9 @@ more L2", but a consequence of the scaling and enforcement constraints.
 
 | Document | Description |
 |----------|-------------|
-| [mainnet.md](mainnet.md) | launch blockers and readiness |
+| [status.md](status.md) | canonical current blockers and workstreams |
+| [mainnet.md](mainnet.md) | release bar for real-user-fund launch |
 | [roadmap.md](roadmap.md) | phased rollout and strategic direction |
-| [mvp.md](mvp.md) | current testnet/MVP target shape |
-| [next.md](next.md) | short blocker list |
-| [todo.md](todo.md) | wider backlog |
 
 ## Ops and Debugging
 
@@ -72,9 +70,7 @@ more L2", but a consequence of the scaling and enforcement constraints.
 | [debug.md](debug.md) | single-source event debugging |
 | [debugging/consensus-debugging-guide.md](debugging/consensus-debugging-guide.md) | consensus debugging patterns |
 | [e2e-debug-protocol.md](e2e-debug-protocol.md) | E2E triage protocol |
-| [deployment/server-setup.md](deployment/server-setup.md) | production server setup |
-| [deployment/relay-deployment.md](deployment/relay-deployment.md) | relay deployment |
-| [deployment/testnet-setup.md](deployment/testnet-setup.md) | testnet bootstrap |
+| [deployment/deployment.md](deployment/deployment.md) | canonical deploy surface |
 | [deployment/ops-runbook.md](deployment/ops-runbook.md) | health, alerts, recovery |
 
 ## Archive
