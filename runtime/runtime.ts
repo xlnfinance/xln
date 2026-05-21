@@ -60,7 +60,7 @@ import {
 import { ensureLocalDisputeDelayConfigured } from './jadapter/local-config';
 import { getAvailableJurisdictions } from './jurisdiction-config';
 import { TIMING } from './constants';
-import { canonicalizeProfile, createGossipLayer, parseProfile } from './networking/gossip';
+import { createGossipLayer } from './networking/gossip';
 import {
   attachEventEmitters,
   clearPendingAuditEvents,
@@ -172,7 +172,7 @@ import {
 } from './financial-utils';
 import { resolveEntityProposerId } from './state-helpers';
 import { getEntityShortId, formatEntityId } from './utils';
-import { deserializeTaggedJson, serializeTaggedJson, safeStringify } from './serialization-utils';
+import { safeStringify } from './serialization-utils';
 import { computeCanonicalEntityHashesFromEnv, computeCanonicalStateHashFromEnv } from './storage/canonical-hash';
 import {
   computeStorageStateRoot,
@@ -252,6 +252,11 @@ import {
 import { logError } from './logger';
 import type { PersistedFrameJournal } from './wal/store';
 import { rehydrateRestoredRuntimeInfra } from './runtime-infra';
+import {
+  clearInfraGossipProfiles,
+  loadGossipProfilesFromInfraDb,
+  persistGossipProfileToInfraDb,
+} from './runtime-infra-gossip-store';
 
 const DEFAULT_DB_NAMESPACE = 'default';
 
@@ -1073,83 +1078,7 @@ export async function tryOpenInfraDb(env: Env): Promise<boolean> {
   }
 }
 
-const INFRA_GOSSIP_INDEX_KEY = 'gossip:index';
-const makeInfraGossipProfileKey = (entityId: string): string => `gossip:profile:${String(entityId).toLowerCase()}`;
-const readInfraStringArray = async (db: Level<Buffer, Buffer>, key: string): Promise<string[]> => {
-  try {
-    const raw = await db.get(Buffer.from(key));
-    const parsed = deserializeTaggedJson<unknown>(raw.toString());
-    return Array.isArray(parsed) ? parsed.map((value) => String(value || '').toLowerCase()).filter(Boolean) : [];
-  } catch {
-    return [];
-  }
-};
-
-const pruneInfraGossipProfile = async (db: Level<Buffer, Buffer>, entityId: string): Promise<void> => {
-  const normalizedEntityId = String(entityId || '').toLowerCase();
-  if (!normalizedEntityId) return;
-  const existingIds = await readInfraStringArray(db, INFRA_GOSSIP_INDEX_KEY);
-  const nextIds = existingIds.filter((value) => value !== normalizedEntityId);
-  const batch = db.batch();
-  batch.del(Buffer.from(makeInfraGossipProfileKey(normalizedEntityId)));
-  if (nextIds.length > 0) {
-    batch.put(Buffer.from(INFRA_GOSSIP_INDEX_KEY), Buffer.from(serializeTaggedJson(nextIds)));
-  } else {
-    batch.del(Buffer.from(INFRA_GOSSIP_INDEX_KEY));
-  }
-  await batch.write();
-};
-
-const persistGossipProfileToInfraDb = async (env: Env, profile: Profile): Promise<void> => {
-  const dbReady = await tryOpenInfraDb(env);
-  if (!dbReady) return;
-  const db = getInfraDb(env);
-  const canonicalProfile = canonicalizeProfile(profile);
-  const entityId = canonicalProfile.entityId.toLowerCase();
-  if (!entityId) {
-    throw new Error('INFRA_GOSSIP_ENTITY_ID_REQUIRED');
-  }
-  const existingIds = await readInfraStringArray(db, INFRA_GOSSIP_INDEX_KEY);
-  const nextIds = existingIds.includes(entityId) ? existingIds : [...existingIds, entityId];
-  const batch = db.batch();
-  batch.put(Buffer.from(makeInfraGossipProfileKey(entityId)), Buffer.from(serializeTaggedJson(canonicalProfile)));
-  batch.put(Buffer.from(INFRA_GOSSIP_INDEX_KEY), Buffer.from(serializeTaggedJson(nextIds.sort())));
-  await batch.write();
-};
-
-const loadGossipProfilesFromInfraDb = async (env: Env): Promise<void> => {
-  const dbReady = await tryOpenInfraDb(env);
-  if (!dbReady) return;
-  const db = getInfraDb(env);
-  const entityIds = await readInfraStringArray(db, INFRA_GOSSIP_INDEX_KEY);
-  if (entityIds.length === 0) return;
-  for (const entityId of entityIds) {
-    try {
-      const raw = await db.get(Buffer.from(makeInfraGossipProfileKey(entityId)));
-      const profile = parseProfile(deserializeTaggedJson<unknown>(raw.toString()));
-      env.gossip.announce(profile);
-    } catch (error) {
-      console.warn(
-        `[infra-db] failed to restore gossip profile ${entityId.slice(-8)}:`,
-        error instanceof Error ? error.message : String(error),
-      );
-      await pruneInfraGossipProfile(db, entityId);
-    }
-  }
-};
-
-const clearInfraGossipProfiles = async (env: Env): Promise<void> => {
-  const dbReady = await tryOpenInfraDb(env);
-  if (!dbReady) return;
-  const db = getInfraDb(env);
-  const entityIds = await readInfraStringArray(db, INFRA_GOSSIP_INDEX_KEY);
-  const batch = db.batch();
-  for (const entityId of entityIds) {
-    batch.del(Buffer.from(makeInfraGossipProfileKey(entityId)));
-  }
-  batch.del(Buffer.from(INFRA_GOSSIP_INDEX_KEY));
-  await batch.write();
-};
+const infraGossipDbAccess = { tryOpenInfraDb, getInfraDb };
 
 export const enqueueRuntimeInput = (env: Env, runtimeInput: RuntimeInput): void => {
   const ingressTimestamp = env.scenarioMode
@@ -2445,7 +2374,7 @@ export const ensureGossipProfiles = async (env: Env, entityIds: string[]): Promi
 export const clearGossip = (env: Env): void => {
   if (!env.gossip?.profiles) return;
   env.gossip.profiles.clear();
-  void clearInfraGossipProfiles(env).catch((error) => {
+  void clearInfraGossipProfiles(env, infraGossipDbAccess).catch((error) => {
     console.warn(
       '[infra-db] failed to clear gossip profiles:',
       error instanceof Error ? error.message : String(error),
@@ -3362,7 +3291,7 @@ const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
   attachEventEmitters(env);
   if (!restoredFromCoreDb) {
     try {
-      await loadGossipProfilesFromInfraDb(env);
+      await loadGossipProfilesFromInfraDb(env, infraGossipDbAccess);
     } catch (error) {
       console.warn('[main] skipped infra gossip restore:', error instanceof Error ? error.message : String(error));
     }
@@ -3648,7 +3577,7 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
   const gossip = createGossipLayer({
     onAnnounce: (profile) => {
       if (!env) return;
-      void persistGossipProfileToInfraDb(env, profile).catch((error) => {
+      void persistGossipProfileToInfraDb(env, infraGossipDbAccess, profile).catch((error) => {
         console.warn(
           `[infra-db] failed to persist gossip profile ${String(profile?.entityId || '').slice(-8)}:`,
           error instanceof Error ? error.message : String(error),
@@ -4976,7 +4905,7 @@ export const loadEnvFromDB = async (
     if (latestEnv) {
       await rehydrateRestoredRuntimeInfra(latestEnv, {
         isBrowser: runtimeIsBrowser,
-        loadGossipProfiles: loadGossipProfilesFromInfraDb,
+        loadGossipProfiles: (targetEnv) => loadGossipProfilesFromInfraDb(targetEnv, infraGossipDbAccess),
         assertPersistedContractConfigReady,
         setBrowserVMJurisdiction,
       });
