@@ -276,18 +276,24 @@ async function resolveHubCardLabel(page: Page, hubId: string): Promise<string> {
   return resolved || compactEntityLabel(hubId);
 }
 
+async function resolveHubCardLocator(page: Page, hubId: string, root = page.locator('body')) {
+  const hubIdNorm = hubId.toLowerCase();
+  const exactHubCard = root.locator(`.hub-card[data-hub-entity-id="${hubIdNorm}"]`).first();
+  if (await exactHubCard.isVisible().catch(() => false)) return exactHubCard;
+
+  const hubCardLabel = await resolveHubCardLabel(page, hubId);
+  return root.locator('.hub-card').filter({ hasText: hubCardLabel }).first();
+}
+
 async function ensureHubCardVisible(page: Page, hubId: string): Promise<void> {
   await openWorkspaceTab(page, 'account-workspace-tab-open');
   const panel = page.locator('.hub-panel').first();
   await expect(panel).toBeVisible({ timeout: 20_000 });
-  const hubIdNorm = hubId.toLowerCase();
-  const hubCardLabel = await resolveHubCardLabel(page, hubId);
-  const exactHubCard = panel.locator(`.hub-card[data-hub-entity-id="${hubIdNorm}"]`).first();
-  const hubCard = exactHubCard.or(panel.locator('.hub-card').filter({ hasText: hubCardLabel }).first()).first();
   const refresh = panel.getByRole('button', { name: /^Refresh$/ }).first();
   const detailsButtons = panel.locator('.expand-toggle');
 
   for (let attempt = 0; attempt < 5; attempt += 1) {
+    const hubCard = await resolveHubCardLocator(page, hubId, panel);
     if (await hubCard.isVisible().catch(() => false)) return;
     const count = await detailsButtons.count();
     for (let index = 0; index < count; index += 1) {
@@ -302,19 +308,20 @@ async function ensureHubCardVisible(page: Page, hubId: string): Promise<void> {
     await page.waitForTimeout(1_000);
   }
 
+  const hubCard = await resolveHubCardLocator(page, hubId, panel);
   await expect(hubCard, `hub ${hubId} must appear in hub discovery`).toBeVisible({ timeout: 20_000 });
 }
 
 async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
   await ensureHubCardVisible(page, hubId);
-  const hubIdNorm = hubId.toLowerCase();
-  const hubCardLabel = await resolveHubCardLabel(page, hubId);
-  const exactHubCard = page.locator(`.hub-card[data-hub-entity-id="${hubIdNorm}"]`).first();
-  const hubCard = exactHubCard.or(page.locator('.hub-card').filter({ hasText: hubCardLabel }).first()).first();
+  const hubCard = await resolveHubCardLocator(page, hubId);
   const connectButton = hubCard.getByRole('button', { name: /Connect/i }).first();
   if (await connectButton.isVisible().catch(() => false)) {
     await connectButton.click({ timeout: 5_000 });
+    return;
   }
+  const openState = hubCard.getByText(/^Open$/i).first();
+  await expect(openState, `hub ${hubId} must expose Connect or already be Open`).toBeVisible({ timeout: 5_000 });
 }
 
 async function enqueueOpenAccount(
