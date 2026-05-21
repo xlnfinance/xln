@@ -1,7 +1,12 @@
 # XLN Payment System Specification
-## Version 1.1 - January 2026
 
-**Status:** Phase 1 (Direct Payments) complete. Phases 2-5 (HTLCs, onion routing, pathfinding) in design/partial implementation.
+**Role:** canonical payment-flow reference
+**Status:** live spec; implementation progress and launch blockers are tracked in [../status.md](../status.md) and [../mainnet.md](../mainnet.md)
+**Audience:** runtime, entity/account-consensus, routing, and wallet implementers
+
+This document explains the intended payment architecture and message flow. It
+should stay ahead of the code where necessary, but it should not try to be the
+current blocker dashboard.
 
 ## Architecture Overview
 
@@ -850,39 +855,30 @@ function buildNetworkGraph(env: Env, tokenId: number): NetworkGraph {
 3. Route finding with 10,000 nodes
 4. Onion encryption/decryption overhead
 
-## Implementation Status (2026-01-24)
+## Implementation Status
 
-### Phase 1: Direct Payments ✅ COMPLETE
-- [x] DirectPaymentEntityTx type
-- [x] E-Machine handler
-- [x] A-Machine processor
-- [x] Basic testing
+This section is intentionally coarse. Exact ordering and exit criteria live in
+`status.md`.
 
-### Phase 2: HTLCs 🟡 PARTIAL
-- [x] Hashlock data structures (see runtime/types.ts)
-- [x] Add/Settle/Cancel handlers (account-tx/htlc.ts)
-- [x] Secret management
-- [x] Timeout monitoring (crontab)
-- [ ] Envelope encryption (BLOCKING for mainnet)
+### Direct payments
 
-### Phase 3: Onion Routing 🟡 PARTIAL
-- [ ] Encryption utilities (ECIES or HMAC)
-- [x] Packet structure (cleartext in Phase 2)
-- [x] Forwarding logic (entity-tx/htlc.ts)
-- [ ] Privacy testing
+- account/entity flow exists conceptually and is treated as the stable baseline
+- this remains the reference path that all more complex payment types build on
 
-### Phase 4: Path Finding 🟡 PARTIAL
-- [x] Network graph builder (conceptual)
-- [x] BFS pathfinding (gossip-based)
-- [ ] Dijkstra implementation
-- [ ] Fee calculation
-- [ ] Route selection
+### HTLCs and routed payments
 
-### Phase 5: Integration 🟡 PARTIAL
-- [x] Multi-hop payments (4-hop tested)
-- [x] Error handling (basic)
-- [ ] Performance optimization
-- [ ] Comprehensive testing
+- hashlock mechanics, forwarding, and timeout handling exist conceptually and in partial implementation
+- routed payments are real enough to matter, but not yet at the “stop worrying” bar for production launch
+
+### Onion/privacy layer
+
+- cleartext routing is not a final answer
+- envelope encryption/privacy hardening remains a live launch concern
+
+### Pathfinding and fee logic
+
+- route selection exists conceptually
+- production-quality path quality, fee logic, and broader performance proof still need continued hardening
 
 ## Appendix A: Message Formats
 
