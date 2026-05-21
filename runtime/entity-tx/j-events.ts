@@ -340,10 +340,6 @@ function queueCrossJurisdictionSalvageFromDispute(
     }],
   });
   addMessage(state, `🌉 Cross-j pull args observed for ${route.orderId}; target salvage queued`);
-  console.log(
-    `🌉 CROSS-J: queued salvage route=${route.orderId} fill=${best.fillRatio}/65535 ` +
-    `target=${route.target.counterpartyEntityId.slice(-4)}`,
-  );
   return true;
 }
 
@@ -446,7 +442,6 @@ function applyKnownHtlcSecret(
   if (!route) {
     const recovered = queueInboundResolvesByHashlock(newState, mempoolOps, hashlock, secret);
     if (recovered > 0) {
-      console.log(`⬅️ HTLC: ${source} secret propagated via lock-scan (${recovered} lock${recovered > 1 ? 's' : ''})`);
       addMessage(newState, `🔓 HTLC reveal observed: ${hashlock.slice(0, 10)}... | Block ${blockNumber}`);
       return true;
     }
@@ -455,7 +450,6 @@ function applyKnownHtlcSecret(
   }
 
   if (route.secret) {
-    console.log(`✅ HTLC: Secret already stored for hashlock ${routeKey.slice(0, 16)}...`);
     addMessage(newState, `🔓 HTLC reveal observed: ${hashlock.slice(0, 10)}... | Block ${blockNumber}`);
     return true;
   }
@@ -464,7 +458,6 @@ function applyKnownHtlcSecret(
 
   if (route.pendingFee) {
     newState.htlcFeesEarned = (newState.htlcFeesEarned || 0n) + route.pendingFee;
-    console.log(`💰 HTLC: Fee earned on ${source}: ${route.pendingFee} (total: ${newState.htlcFeesEarned})`);
     delete route.pendingFee;
   }
 
@@ -487,7 +480,6 @@ function applyKnownHtlcSecret(
         },
       },
     });
-    console.log(`⬅️ HTLC: ${source} secret propagated to ${route.inboundEntity.slice(-4)}`);
   } else if (route.crossJurisdictionRelay) {
     const relay = route.crossJurisdictionRelay;
     outputs.push({
@@ -502,12 +494,6 @@ function applyKnownHtlcSecret(
         },
       }],
     });
-    console.log(
-      `🌉 HTLC: ${source} relayed cross-j secret route=${relay.routeId} ` +
-      `target=${relay.targetEntityId.slice(-4)} ratio=${relay.fillRatio}/65535`,
-    );
-  } else {
-    console.log(`✅ HTLC: ${source} reveal complete (no inbound hop)`);
   }
 
   addMessage(newState, `🔓 HTLC reveal observed: ${hashlock.slice(0, 10)}... | Block ${blockNumber}`);
@@ -570,14 +556,12 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
         `j_event conflict: block ${blockNumber} finalized as ${finalizedAtHeight.jBlockHash}, observed ${blockHash}`,
       );
     }
-    console.log(`   ⏭️ SKIP: block ${blockNumber} already finalized`);
     return { newState: entityState, mempoolOps: [], outputs: [], dirtyAccounts: [] };
   }
 
   // Skip blocks at or below lastFinalizedJHeight (monotonic progress only)
   // Note: The == case is already handled above with hash conflict detection.
   if (blockNumber <= entityState.lastFinalizedJHeight) {
-    console.log(`   ⏭️ SKIP: stale block (${blockNumber} <= finalized ${entityState.lastFinalizedJHeight})`);
     return { newState: entityState, mempoolOps: [], outputs: [], dirtyAccounts: [] };
   }
 
@@ -643,24 +627,11 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
   };
 
   newEntityState.jBlockObservations.push(observation);
-  console.log(`   📝 Observation from ${signerId}: ${jEvents.length} events for block ${blockNumber}`);
 
   // Try to finalize - with batching, single-signer entities finalize immediately
   // with ALL events from the block (no more race condition)
   const { newState, mempoolOps, outputs, dirtyAccounts } = await tryFinalizeJBlocks(newEntityState, entityState.config.threshold, env);
   newEntityState = newState;
-
-  // DEBUG: Dump account mempools after j-event processing
-  for (const [cpId, account] of newEntityState.accounts) {
-    if (account.mempool.length > 0 || account.leftJObservations.length > 0 || account.rightJObservations.length > 0) {
-      console.log(`🔍 AFTER-J-EVENT: Account ${cpId.slice(-4)} mempool=${account.mempool.length} txs:`, account.mempool.map((tx) => tx.type));
-      console.log(`🔍 AFTER-J-EVENT: leftJObs=${account.leftJObservations?.length || 0}, rightJObs=${account.rightJObservations?.length || 0}`);
-    }
-  }
-
-  if (mempoolOps.length > 0) {
-    console.log(`   📦 handleJEvent: Returning ${mempoolOps.length} mempoolOps for bilateral consensus`);
-  }
 
   // Return both newState and mempoolOps
   return { newState: newEntityState, mempoolOps, outputs, dirtyAccounts };
@@ -713,11 +684,9 @@ export function tryFinalizeAccountJEvents(account: AccountMachine, counterpartyI
   const matches = Array.from(leftMap.keys()).filter(k => rightMap.has(k));
 
   if (matches.length === 0) {
-    console.log(`   🔍 BILATERAL: left=${account.leftJObservations.length}, right=${account.rightJObservations.length}, matches=0`);
     return;
   }
 
-  console.log(`   🤝 BILATERAL-MATCH: ${matches.length} j-blocks agreed!`);
   const finalizedKeys = new Set<string>();
 
   for (const key of matches) {
@@ -758,8 +727,6 @@ export function tryFinalizeAccountJEvents(account: AccountMachine, counterpartyI
       );
       continue;
     }
-
-    console.log(`   ✅ BILATERAL-FINALIZE: jHeight=${jHeight}`);
 
     // Apply events (from left observation - both should be identical)
     for (const event of leftEvents) {
@@ -803,17 +770,9 @@ export function tryFinalizeAccountJEvents(account: AccountMachine, counterpartyI
                 feeState.jBatchSubmittedAt = 0;
               }
               // Keep fee metadata for audit/scheduling; fee is already prepaid.
-              console.log(
-                `   🔄 REBALANCE-REQUEST-PARTIAL: token=${tokenIdNum} request ${pendingRequest}→${remaining} ` +
-                `(credited=${fulfilledAmount})`,
-              );
             } else {
               account.requestedRebalance.delete(tokenIdNum);
               account.requestedRebalanceFeeState?.delete(tokenIdNum);
-              console.log(
-                `   ✅ REBALANCE-REQUEST-CLEARED: token=${tokenIdNum} request ${pendingRequest} fulfilled ` +
-                `(credited=${fulfilledAmount})`,
-              );
             }
           }
         }
@@ -827,10 +786,6 @@ export function tryFinalizeAccountJEvents(account: AccountMachine, counterpartyI
             account.onChainSettlementNonce = eventNonceNum;
           }
         }
-        console.log(`   💰 BILATERAL-APPLIED for ${counterpartyId.slice(-4)}: coll ${oldColl}→${delta.collateral}, ondelta=${delta.ondelta}`);
-        console.log(
-          `[REB][5][FINALIZED_IN_ACCOUNT] cp=${counterpartyId.slice(-8)} token=${tokenIdNum} collateral=${delta.collateral} ondelta=${delta.ondelta} jHeight=${jHeight}`,
-        );
       }
     }
 
@@ -855,7 +810,6 @@ export function tryFinalizeAccountJEvents(account: AccountMachine, counterpartyI
         account.currentDisputeProofBodyHash = postProof.proofBodyHash;
         account.counterpartyDisputeProofNonce = postProof.nonce;
         account.counterpartyDisputeProofBodyHash = postProof.proofBodyHash;
-        console.log(`   🔐 Post-settlement dispute proof activated (nonce=${postProof.nonce})`);
       }
 
       // Set on-chain nonce from event data (not +1 — handles nonce jumps from disputes)
@@ -867,10 +821,8 @@ export function tryFinalizeAccountJEvents(account: AccountMachine, counterpartyI
         // Fallback: use workspace's signed nonce (should match on-chain after settlement)
         account.onChainSettlementNonce = ws.nonceAtSign ?? ((account.onChainSettlementNonce || 0) + 1);
       }
-      console.log(`   💰 NONCE-SET: Settlement finalized → onChainNonce=${account.onChainSettlementNonce} (ws.status was '${ws.status}', eventNonce=${eventNonce})`);
       // Clear workspace after nonce increment — both sides (Hub + counterparty)
       delete account.settlementWorkspace;
-      console.log(`   🧹 WORKSPACE-CLEAR: Settlement completed`);
     }
   }
 
@@ -880,9 +832,6 @@ export function tryFinalizeAccountJEvents(account: AccountMachine, counterpartyI
   );
   account.rightJObservations = account.rightJObservations.filter(
     (o) => !finalizedKeys.has(`${o.jHeight}:${o.jBlockHash}`),
-  );
-  console.log(
-    `   🧹 Pruned ${finalizedKeys.size} finalized (left=${account.leftJObservations.length}, right=${account.rightJObservations.length} pending)`,
   );
 }
 
@@ -1122,16 +1071,11 @@ async function tryFinalizeJBlocks(
       state.jBlockChain.push(finalized);
       state.lastFinalizedJHeight = jHeight;
       finalizedHeights.push(jHeight);
-      console.log(`   ✅ Added block ${jHeight} to jBlockChain (length: ${state.jBlockChain.length})`);
-      console.log(`   🧭 J-HEIGHT: entity=${state.entityId} lastFinalizedJHeight=${state.lastFinalizedJHeight}`);
 
       // ─────────────────────────────────────────────────────────────────────────
       // Step 5: Apply all events from this finalized block
       // ─────────────────────────────────────────────────────────────────────────
-      console.log(`   📦 Applying ${events.length} events from block ${jHeight}`);
-      console.log(`      Event types:`, events.map(e => e.type));
       for (const event of events) {
-        console.log(`      🔧 Applying event: ${event.type}`);
         const { newState, mempoolOps, outputs, dirtyAccounts: eventDirtyAccounts } = await applyFinalizedJEvent(state, event, env);
         state = newState;
         allMempoolOps.push(...mempoolOps);
@@ -1139,13 +1083,11 @@ async function tryFinalizeJBlocks(
         for (const accountId of eventDirtyAccounts) dirtyAccounts.add(accountId);
         // applyFinalizedJEvent clones state - ensure jBlockChain preserved
         if (!state.jBlockChain.some(b => b.jHeight === jHeight)) {
-          console.log(`   ⚠️  CLONE LOST jBlockChain - restoring block ${jHeight}`);
+          console.warn(`   ⚠️  CLONE LOST jBlockChain - restoring block ${jHeight}`);
           state.jBlockChain.push(finalized);
           state.lastFinalizedJHeight = jHeight;
         }
       }
-
-      console.log(`   📦 Applied ${events.length} events from j-block ${jHeight}`);
 
       // ─────────────────────────────────────────────────────────────────────────
       // Step 5b: Merge AccountSettled observations + j_event_claims per account
@@ -1173,7 +1115,6 @@ async function tryFinalizeJBlocks(
     state.jBlockObservations = state.jBlockObservations.filter(
       obs => !finalizedSet.has(obs.jHeight)
     );
-    console.log(`   🧹 Pruned finalized heights [${finalizedHeights.join(',')}] (${state.jBlockObservations.length} pending)`);
   }
 
   return { newState: state, mempoolOps: allMempoolOps, outputs: allOutputs, dirtyAccounts: Array.from(dirtyAccounts) };
@@ -1236,7 +1177,6 @@ async function applyFinalizedJEvent(
   event: JurisdictionEvent,
   env: Env
 ): Promise<JEventApplyResult> {
-  const entityShort = entityState.entityId.slice(-4);
   const blockNumber = event.blockNumber ?? 0;
   const transactionHash = event.transactionHash || 'unknown';
   const txHashShort = transactionHash.slice(0, 10) + '...';
@@ -1294,14 +1234,11 @@ async function applyFinalizedJEvent(
     const decimals = getTokenDecimals(tokenIdNum);
 
     // Update own reserves (entity-level, unilateral OK)
-    const oldReserve = newState.reserves.get(tokenIdNum) || 0n;
-    console.log(`   💰 RESERVE-UPDATE: ownReserve=${ownReserve}, old=${oldReserve}, tokenId=${tokenId}`);
     if (ownReserve) {
       const newReserve = BigInt(ownReserve as string | number | bigint);
       newState.reserves.set(tokenIdNum, newReserve);
-      console.log(`   💰 RESERVE-SET: ${oldReserve} → ${newReserve}`);
     } else {
-      console.log(`   ⚠️ RESERVE-SKIP: ownReserve is falsy`);
+      console.warn(`   ⚠️ RESERVE-SKIP: ownReserve is falsy`);
     }
 
     // BILATERAL J-EVENT CONSENSUS: Need 2-of-2 agreement before applying to account
@@ -1344,10 +1281,6 @@ async function applyFinalizedJEvent(
       accountId: counterpartyEntityId as string,
       tx: { type: 'j_event_claim', data: { jHeight, jBlockHash, events: [eventCopy], observedAt } },
     });
-    console.log(`   📮 j_event_claim → mempoolOps[${mempoolOps.length}] (will auto-propose frame)`);
-    console.log(
-      `[REB][4][J_EVENT_CLAIM_QUEUED] entity=${entityState.entityId.slice(-8)} cp=${String(counterpartyEntityId).slice(-8)} token=${tokenIdNum} jHeight=${jHeight}`,
-    );
     const p2p = env.runtimeState?.p2p as { sendDebugEvent?: (payload: unknown) => boolean } | undefined;
     if (typeof p2p?.sendDebugEvent === 'function') {
       p2p.sendDebugEvent({
@@ -1398,8 +1331,6 @@ async function applyFinalizedJEvent(
     addMessage(newState, `🩶 DEBT FORGIVEN: ${forgivenDisplay} ${tokenSymbol} between ${(debtor as string).slice(-8)} and ${(creditor as string).slice(-8)} | Block ${blockNumber} · debt #${debtIndex}`);
 
   } else if (event.type === 'DisputeStarted') {
-    console.log(`🔍 DISPUTE-EVENT HANDLER: entityId=${newState.entityId.slice(-4)}`);
-
     // Dispute started on-chain - store dispute state from event
     const { sender, counterentity, nonce, proofbodyHash } = event.data as { sender: string; counterentity: string; nonce: string; proofbodyHash: string; initialArguments: string };
     const normalizeId = (id: string) => String(id).toLowerCase();
@@ -1460,13 +1391,10 @@ async function applyFinalizedJEvent(
         console.error(`   On-chain: ${account.activeDispute.initialProofbodyHash}`);
         console.error(`   This means bilateral state diverged - CRITICAL BUG!`);
         // Continue but log for audit
-      } else {
-        console.log(`✅ Proof hash verified: local matches on-chain`);
       }
 
       const disputeSecrets = decodeDisputeInitialSecrets(event.data.initialArguments || '0x');
       if (disputeSecrets.length > 0) {
-        console.log(`🔓 DISPUTE-ARGS: ${disputeSecrets.length} secret(s) decoded from initialArguments`);
         for (const disputeSecret of disputeSecrets) {
           const hashlock = hashHtlcSecret(disputeSecret);
           applyKnownHtlcSecret(newState, mempoolOps, outputs, hashlock, disputeSecret, blockNumber, 'DisputeStarted');
@@ -1488,7 +1416,6 @@ async function applyFinalizedJEvent(
       );
 
       addMessage(newState, `⚔️ DISPUTE ${weAreStarter ? 'STARTED' : 'vs us'} with ${counterpartyId.slice(-4)}, timeout: block ${account.activeDispute.disputeTimeout}`);
-      console.log(`⚔️ activeDispute stored: hash=${account.activeDispute.initialProofbodyHash.slice(0,10)}..., timeout=${account.activeDispute.disputeTimeout}`);
       if (!weAreStarter) {
         const ops = emptyOpBreakdown();
         ops.disputeStarts = 1;
@@ -1546,8 +1473,6 @@ async function applyFinalizedJEvent(
     }
 
   } else if (event.type === 'DisputeFinalized') {
-    console.log(`🔍 DISPUTE-FINALIZED HANDLER: entityId=${newState.entityId.slice(-4)}`);
-
     const { sender, counterentity, initialNonce, initialProofbodyHash } = event.data as { sender: string; counterentity: string; initialNonce: string; initialProofbodyHash: string; finalProofbodyHash: string };
     const normalizeId = (id: string) => String(id).toLowerCase();
     const senderStr = normalizeId(sender as string);
@@ -1579,7 +1504,6 @@ async function applyFinalizedJEvent(
       if (account.activeDispute) {
         delete account.activeDispute;
         addMessage(newState, `✅ DISPUTE FINALIZED with ${counterpartyId.slice(-4)} (nonce ${Number(initialNonce)})`);
-        console.log(`✅ activeDispute cleared for ${counterpartyId.slice(-4)} (proof=${String(initialProofbodyHash).slice(0, 10)}...)`);
         if (newState.crontabState) {
           cancelCrontabHook(newState.crontabState, `dispute-deadline:${counterpartyId.toLowerCase()}`);
           markStorageEntityDirty(env, newState.entityId);
@@ -1601,10 +1525,6 @@ async function applyFinalizedJEvent(
       delete account.counterpartyDisputeProofHanko;
       delete account.counterpartyDisputeProofNonce;
       delete account.counterpartyDisputeProofBodyHash;
-      console.log(
-        `✅ DisputeFinalized: account moved to finalized-disputed for ${counterpartyId.slice(-4)} ` +
-        `(onChainNonce=${finalizedOnChainNonce}, nextProofNonce=${account.proofHeader.nonce})`,
-      );
       if (!weAreFinalizer) {
         const ops = emptyOpBreakdown();
         ops.disputeFinalizations = 1;
@@ -1667,7 +1587,6 @@ async function applyFinalizedJEvent(
       const removed = removedDraft + removedSent;
       if (removed > 0) {
         addMessage(newState, `🧹 Removed ${removed} stale dispute-finalize op(s) for ${counterpartyId.slice(-4)}`);
-        console.log(`🧹 Cleared ${removed} stale disputeFinalizations for ${counterpartyId.slice(-4)}`);
       }
 
       // DisputeFinalized is authoritative. Clear the off-chain component and transient holds
@@ -1680,47 +1599,31 @@ async function applyFinalizedJEvent(
           const tokenId = Number(finalizedProofBody.tokenIds[i]);
           const delta = account.deltas.get(tokenId);
           if (!delta) continue;
-          const prevOffdelta = delta.offdelta;
           delta.offdelta = 0n;
           delta.leftHold = 0n;
           delta.rightHold = 0n;
           delta.leftAllowance = 0n;
           delta.rightAllowance = 0n;
-          if (prevOffdelta !== 0n) {
-            console.log(
-              `💰 DisputeFinalized local sync: ${counterpartyId.slice(-4)} token=${tokenId} offdelta ${prevOffdelta}→0`,
-            );
-          }
         }
       } else {
         console.warn(
           `⚠️ DisputeFinalized local sync missing proof body for ${counterpartyId.slice(-4)}; clearing all token deltas conservatively`,
         );
-        for (const [tokenId, delta] of account.deltas.entries()) {
-          const prevOffdelta = delta.offdelta;
+        for (const delta of account.deltas.values()) {
           delta.offdelta = 0n;
           delta.leftHold = 0n;
           delta.rightHold = 0n;
           delta.leftAllowance = 0n;
           delta.rightAllowance = 0n;
-          if (prevOffdelta !== 0n) {
-            console.log(
-              `💰 DisputeFinalized local sync: ${counterpartyId.slice(-4)} token=${tokenId} offdelta ${prevOffdelta}→0`,
-            );
-          }
         }
       }
 
       // Drop off-chain intents from pre-dispute epoch.
       if (account.swapOffers.size > 0) {
-        const staleOffers = account.swapOffers.size;
         account.swapOffers.clear();
-        console.log(`🧹 DisputeFinalized cleanup: cleared ${staleOffers} stale swap offer(s) for ${counterpartyId.slice(-4)}`);
       }
       if (account.locks.size > 0) {
-        const staleLocks = account.locks.size;
         account.locks.clear();
-        console.log(`🧹 DisputeFinalized cleanup: cleared ${staleLocks} stale lock(s) for ${counterpartyId.slice(-4)}`);
       }
     } else {
       console.warn(`⚠️ DisputeFinalized: account ${candidateCounterpartyId.slice(-4)} not found for entity ${entityIdNorm.slice(-4)}`);
@@ -1728,15 +1631,12 @@ async function applyFinalizedJEvent(
 
   } else if (event.type === 'HankoBatchProcessed') {
     // jBatch finalization event - confirms our batch was processed on-chain
-    const { entityId: batchEntityId, hankoHash, nonce, success } = event.data as { entityId: string; hankoHash: string; nonce: number; success: boolean };
+    const { entityId: batchEntityId, nonce, success } = event.data as { entityId: string; nonce: number; success: boolean };
 
     // Only process if this is our batch (case-insensitive: adapters may normalize differently).
     if (String(batchEntityId || '').toLowerCase() !== String(newState.entityId || '').toLowerCase()) {
-      console.log(`   ⏭️ HankoBatchProcessed: Not our batch (${String(batchEntityId).slice(-4)} != ${entityShort})`);
       return done();
     }
-
-    console.log(`📦 HankoBatchProcessed: nonce=${nonce}, success=${success}, hanko=${String(hankoHash).slice(0, 10)}...`);
 
     if (success) {
       if (newState.jBatchState) {
@@ -1781,7 +1681,6 @@ async function applyFinalizedJEvent(
         const currentNonce = Number(newState.jBatchState.entityNonce || 0);
         const eventNonceNum = Number(nonce || 0);
         newState.jBatchState.entityNonce = eventNonceNum > currentNonce ? eventNonceNum : currentNonce;
-        console.log(`   ✅ jBatch confirmed (nonce ${nonce}, ${opCount} ops)`);
       }
       addMessage(newState, `✅ jBatch finalized (nonce ${nonce}) | Block ${blockNumber}`);
     } else {
