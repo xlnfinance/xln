@@ -2,6 +2,14 @@
 
 > V1 — 2026-02-16
 
+Status: active product/spec document
+Scope: prepaid unilateral fee balance inside bilateral account state
+Audience: runtime, wallet, hub-fee, and rebalance implementers
+
+This document defines the custody-balance mechanism itself. It is not the
+canonical source for current launch sequencing; use [status.md](status.md) and
+[mainnet.md](mainnet.md) for that.
+
 ## what
 
 A per-account, per-token balance that the user deposits voluntarily
