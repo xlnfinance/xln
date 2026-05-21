@@ -22,7 +22,7 @@ import {
   registerEnvChangeCallback,
 } from './runtime.ts';
 import { safeStringify, serializeTaggedJson } from './serialization-utils';
-import type { DeliverableEntityInput, Env, RuntimeInput } from './types';
+import type { DeliverableEntityInput, Env } from './types';
 import { createExternalWalletApi } from './api/external-wallet-api';
 import { maybeHandleQaRequest } from './qa/api';
 import { registerSignerKey } from './account-crypto';
@@ -89,6 +89,7 @@ import { handleReserveFaucet } from './server/reserve-faucet';
 import { handleRuntimeHealth, type RuntimeHealthCacheEntry } from './server/health-api';
 import { handleRuntimeRpcProxy } from './server/rpc-proxy';
 import { handleP2PControl } from './server/p2p-control';
+import { handleRuntimeInputControl, handleRuntimeInputStatus } from './server/runtime-input-control';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
@@ -468,53 +469,13 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   if (pathname === '/api/control/runtime-input' && req.method === 'POST') {
     const authError = requireDaemonControlAuth(req, env);
     if (authError) return authError;
-    if (!env) {
-      return new Response(serializeTaggedJson({ ok: false, error: 'Runtime not ready' }), { status: 503, headers });
-    }
-    try {
-      const body = await parseTaggedControlBody<Partial<RuntimeInput>>(req);
-      const runtimeTxs = Array.isArray(body?.runtimeTxs) ? body.runtimeTxs : [];
-      const entityInputs = Array.isArray(body?.entityInputs) ? body.entityInputs : [];
-      const jInputs = Array.isArray(body?.jInputs) ? body.jInputs : [];
-      if (runtimeTxs.length === 0 && entityInputs.length === 0 && jInputs.length === 0) {
-        return new Response(
-          serializeTaggedJson({ ok: false, error: 'runtimeTxs, entityInputs, or jInputs are required' }),
-          { status: 400, headers },
-        );
-      }
-      enqueueRuntimeInput(env, {
-        runtimeTxs,
-        entityInputs,
-        ...(jInputs.length > 0 ? { jInputs } : {}),
-      });
-      const receipt = runtimeIngressReceipts.register({
-        kind: 'control-runtime-input',
-        counts: {
-          runtimeTxs: runtimeTxs.length,
-          entityInputs: entityInputs.length,
-          jInputs: jInputs.length,
-        },
-        enqueuedHeight: currentRuntimeHeight(env),
-      });
-      return new Response(
-        serializeTaggedJson({
-          ok: true,
-          accepted: {
-            runtimeTxs: runtimeTxs.length,
-            entityInputs: entityInputs.length,
-            jInputs: jInputs.length,
-          },
-          receipt,
-          statusUrl: runtimeInputStatusUrl(receipt.id),
-        }),
-        { headers },
-      );
-    } catch (error) {
-      return new Response(
-        serializeTaggedJson({ ok: false, error: (error as Error).message || 'Failed to queue runtime input' }),
-        { status: 500, headers },
-      );
-    }
+    return handleRuntimeInputControl(req, headers, env, {
+      enqueueRuntimeInput,
+      parseTaggedControlBody,
+      receipts: runtimeIngressReceipts,
+      getCurrentRuntimeHeight: currentRuntimeHeight,
+      buildStatusUrl: runtimeInputStatusUrl,
+    });
   }
 
   const runtimeInputStatusMatch = pathname.match(/^\/api\/control\/runtime-input\/([^/]+)\/status$/);
@@ -522,21 +483,10 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     const authError = requireDaemonControlAuth(req, env);
     if (authError) return authError;
     const receiptId = decodeURIComponent(runtimeInputStatusMatch[1] || '');
-    const receipt = runtimeIngressReceipts.get(receiptId);
-    if (!receipt) {
-      return new Response(
-        serializeTaggedJson({ ok: false, error: 'Runtime input receipt not found' }),
-        { status: 404, headers },
-      );
-    }
-    return new Response(
-      serializeTaggedJson({
-        ok: true,
-        receipt,
-        currentHeight: currentRuntimeHeight(env),
-      }),
-      { headers },
-    );
+    return handleRuntimeInputStatus(receiptId, headers, env, {
+      receipts: runtimeIngressReceipts,
+      getCurrentRuntimeHeight: currentRuntimeHeight,
+    });
   }
 
   if (pathname === '/api/control/p2p' && req.method === 'POST') {
