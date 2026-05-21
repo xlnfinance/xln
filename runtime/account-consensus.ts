@@ -26,8 +26,14 @@ import { safeStringify } from './serialization-utils';
 import { validateAccountFrame as validateAccountFrameStrict } from './validation-utils';
 import { processAccountTx } from './account-tx/apply';
 import { appendAccountFrameHistoryView, getAccountFrameHistoryView, markStorageAccountDirty, recordAccountFrameHistory } from './env-events';
-import { assertAccountFrameDeltaIntegrity, deriveAccountFrameOffdeltas, deriveAccountFrameTokenIds } from './account-frame';
+import { deriveAccountFrameOffdeltas, deriveAccountFrameTokenIds } from './account-frame';
 import { createStructuredLogger, shortHash, shortId, shouldLogFullPayloads } from './logger';
+import {
+  createFrameHash,
+  MAX_ACCOUNT_FRAME_TXS,
+  MAX_FRAME_SIZE_BYTES,
+  validateAccountFrame,
+} from './account-consensus-frame';
 import {
   assertNoUnilateralSettlementMutation,
   captureSettlementVector,
@@ -41,10 +47,9 @@ import {
   summarizeDeltasForLog,
 } from './account-consensus-helpers';
 const MEMPOOL_LIMIT = 1000;
-const MAX_ACCOUNT_FRAME_TXS = 100;
 const accountLog = createStructuredLogger('account');
-const MAX_FRAME_TIMESTAMP_DRIFT_MS = 300000; // 5 minutes
-const MAX_FRAME_SIZE_BYTES = 1048576; // 1MB frame size limit (Bitcoin block size standard)
+
+export { computeFrameHash, validateAccountFrame } from './account-consensus-frame';
 
 export type AccountConsensusHashToSign = {
   hash: string;
@@ -90,82 +95,8 @@ export type HandleAccountInputResult = AccountConsensusFrameResult & {
   committedFrames?: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }>;
 };
 
-export function validateAccountFrame(
-  frame: AccountFrame,
-  currentTimestamp?: number,
-  previousFrameTimestamp?: number,
-): boolean {
-  if (frame.height < 0) return false;
-  if (typeof frame.jHeight !== 'number' || frame.jHeight < 0) return false;
-  if (frame.accountTxs.length > MAX_ACCOUNT_FRAME_TXS) return false;
-  try {
-    assertAccountFrameDeltaIntegrity(frame, `AccountFrame#${frame.height}`);
-  } catch (error) {
-    console.warn(`❌ Invalid account frame delta integrity: ${(error as Error).message}`);
-    return false;
-  }
-
-  // CRITICAL: Timestamp validation for HTLC safety
-  if (currentTimestamp !== undefined) {
-    // Check drift (prevent clock manipulation)
-    if (Math.abs(frame.timestamp - currentTimestamp) > MAX_FRAME_TIMESTAMP_DRIFT_MS) {
-      console.log(`❌ Frame timestamp drift too large: ${frame.timestamp} vs ${currentTimestamp}`);
-      return false;
-    }
-
-    // Ensure non-decreasing timestamps (prevent time-travel attacks on HTLCs)
-    // Allow equal timestamps (batched frames), but reject backwards movement
-    if (previousFrameTimestamp !== undefined && frame.timestamp < previousFrameTimestamp) {
-      console.log(
-        `❌ Frame timestamp went backwards: ${frame.timestamp} < ${previousFrameTimestamp} (delta: ${previousFrameTimestamp - frame.timestamp}ms)`,
-      );
-      return false;
-    }
-  }
-
-  return true;
-}
-
 // Counter-based replay protection was intentionally replaced by the frame chain
 // (height + prevFrameHash). Nonces remain only for on-chain proof material.
-
-async function createFrameHash(frame: AccountFrame): Promise<string> {
-  assertAccountFrameDeltaIntegrity(frame, `AccountFrame#${frame.height}`);
-  const { ethers } = await import('ethers');
-
-  const frameData = {
-    height: frame.height,
-    timestamp: frame.timestamp,
-    jHeight: frame.jHeight,
-    prevFrameHash: frame.prevFrameHash, // Chain linkage
-    accountTxs: frame.accountTxs.map(tx => ({
-      type: tx.type,
-      data: tx.data,
-    })),
-    // Include full shared delta state in frame hash.
-    // collateral/ondelta are shared values and must stay identical across peers.
-    // If they diverge, frame consensus must fail hard.
-    deltas: frame.deltas.map(delta => ({
-      tokenId: delta.tokenId,
-      collateral: delta.collateral.toString(),
-      ondelta: delta.ondelta.toString(),
-      offdelta: delta.offdelta.toString(),
-      leftCreditLimit: delta.leftCreditLimit.toString(),
-      rightCreditLimit: delta.rightCreditLimit.toString(),
-      leftAllowance: delta.leftAllowance.toString(),
-      rightAllowance: delta.rightAllowance.toString(),
-      leftHold: (delta.leftHold || 0n).toString(),
-      rightHold: (delta.rightHold || 0n).toString(),
-    })),
-  };
-
-  const encoded = safeStringify(frameData);
-  return ethers.keccak256(ethers.toUtf8Bytes(encoded));
-}
-
-export async function computeFrameHash(frame: AccountFrame): Promise<string> {
-  return createFrameHash(frame);
-}
 
 export async function proposeAccountFrame(
   env: Env,
