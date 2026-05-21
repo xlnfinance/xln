@@ -1,4 +1,4 @@
-import type { AccountFrame, AccountInput, EntityState, Env, EntityInput, HtlcRoute, AccountMachine, HtlcNoteKey } from '../../types';
+import type { AccountInput, EntityState, Env, EntityInput, HtlcRoute, AccountMachine, HtlcNoteKey } from '../../types';
 import { markStorageAccountDirty, markStorageEntityDirty } from '../../env-events';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
 import { addMessage, addMessages, emitScopedEvents } from '../../state-helpers';
@@ -32,7 +32,6 @@ import {
 } from '../../swap-execution';
 import { sanitizeBaseFee } from '../../routing/fees';
 import {
-  cancelHook as cancelScheduledHook,
   scheduleHook as scheduleCrontabHook,
   HTLC_SECRET_ACK_TIMEOUT_MS,
 } from '../../entity-crontab';
@@ -53,6 +52,7 @@ import {
 } from '../../cross-jurisdiction-orderbook';
 import { assertSameJurisdictionAccount } from '../../jurisdiction-runtime';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from './account-cross-j-followups';
+import { applyCommittedAccountFrameFollowups } from './account/committed-frame-followups';
 import {
   findQueuedCrossSwapAckForEntityState,
   hasQueuedCrossSwapAckForEntityState,
@@ -93,42 +93,7 @@ const getJurisdictionId = (state: EntityState, env: Env): string => {
   return String(state.config?.jurisdiction?.name || env.activeJurisdiction || '').trim();
 };
 
-export function applyCommittedAccountFrameFollowups(
-  newState: EntityState,
-  counterpartyId: string,
-  committedFrame: AccountFrame,
-): void {
-  if (HEAVY_LOGS) {
-    console.log(
-      `🔍 FRAME-COMMIT-FOLLOWUPS: height=${committedFrame.height}, txs=${committedFrame.accountTxs.length}`,
-    );
-  }
-
-  for (const accountTx of committedFrame.accountTxs) {
-    if (HEAVY_LOGS) console.log(`🔍 FRAME-COMMIT-FOLLOWUPS: tx type=${accountTx.type}`);
-
-    // Keep lockBook aligned with finalized account-level HTLC lifecycle.
-    if (accountTx.type === 'htlc_resolve') {
-      newState.lockBook.delete(accountTx.data.lockId);
-      if (newState.crontabState) {
-        cancelScheduledHook(newState.crontabState, `htlc-timeout:${accountTx.data.lockId}`);
-      }
-      if (accountTx.data.outcome === 'secret') {
-        for (const [hashlock, route] of newState.htlcRoutes.entries()) {
-          if (route.inboundLockId !== accountTx.data.lockId) continue;
-          terminateHtlcRoute(newState, hashlock, newState.timestamp);
-        }
-      }
-    }
-
-    if (accountTx.type === 'j_event_claim') continue;
-
-    if (accountTx.type === 'swap_resolve') {
-      const key = swapKey(counterpartyId, accountTx.data.offerId);
-      newState.pendingSwapFillRatios?.delete(key);
-    }
-  }
-}
+export { applyCommittedAccountFrameFollowups } from './account/committed-frame-followups';
 
 const findAccountKeyInsensitive = (accounts: Map<string, AccountMachine>, counterpartyId: string): string | null => {
   const target = normalizeEntityRef(counterpartyId);
