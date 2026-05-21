@@ -4,6 +4,7 @@
  */
 
 import type { Provider, Signer } from 'ethers';
+import type { Address } from '@ethereumjs/util';
 import type { Account, Depository, EntityProvider, DeltaTransformer } from '../../jurisdictions/typechain-types/index.ts';
 import type { JReplica, JTx, BrowserVMState, Env } from '../types';
 
@@ -242,3 +243,32 @@ export interface BrowserVMProvider {
     forgiveDebtsInTokenIds?: number[]
   ): Promise<string>;
 }
+
+export type BrowserVmEthersProviderTarget = {
+  vm: {
+    stateManager: {
+      getAccount(address: Address): Promise<{ nonce?: bigint; balance?: bigint } | null | undefined>;
+      getCode(address: Address): Promise<Uint8Array>;
+    };
+    evm: {
+      runCall(request: {
+        to: Address;
+        caller: Address;
+        data: Uint8Array;
+        gasLimit: bigint;
+      }): Promise<{ execResult: { exceptionError?: unknown; returnValue: Uint8Array } }>;
+    };
+  };
+  deployerAddress: Address;
+  executeSignedTx(signedTransaction: string): Promise<string>;
+  getTransactionReceipt?(hash: string): {
+    to: string | null; from: string; contractAddress: string | null; transactionHash: string;
+    blockHash: string; blockNumber: number; status: number;
+    logs: Array<{ blockNumber: number; transactionHash: string; address: string; topics: string[]; data: string }>;
+  } | null;
+  getLogs?(filter: unknown): unknown[];
+  getBlockHash?(): string;
+  getBlockNumber?(): bigint | number;
+  getBlockTimestamp?(): number;
+  getChainId?(): bigint | number;
+};
