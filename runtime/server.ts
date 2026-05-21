@@ -21,7 +21,7 @@ import {
   ensureGossipProfiles,
   registerEnvChangeCallback,
 } from './runtime.ts';
-import { deserializeTaggedJson, safeStringify, serializeTaggedJson } from './serialization-utils';
+import { safeStringify, serializeTaggedJson } from './serialization-utils';
 import type { DeliverableEntityInput, Env, EntityTx, RuntimeInput } from './types';
 import type { HubHealth } from './health';
 import { createExternalWalletApi } from './api/external-wallet-api';
@@ -78,11 +78,8 @@ import { createMarketSubscriptionStack, isMarketMessageType } from './relay/mark
 import { isLocalOperatorRequest, publicRuntimeHealthBody } from './health-redaction';
 import { findForbiddenRpcProxyMethod } from './rpc-proxy-safety';
 import {
-  DEBUG_DUMPS_DIR,
   JSON_HEADERS,
-  buildDebugDumpFileName,
   buildDiskSummary,
-  ensureDebugDumpDir,
   formatTimingMs,
   getErrorMessage,
   isEntityId32,
@@ -95,7 +92,6 @@ import {
   forgetRuntimeAdapterClient,
 } from './radapter/server';
 import { decodeRuntimeAdapterMessage, runtimeAdapterMessageByteLength } from './radapter/codec';
-import { readdir, readFile, writeFile } from 'fs/promises';
 import {
   getRelayClientIp,
   hasConnectedEncryptedRelayClient as hasConnectedEncryptedRelayClientInStore,
@@ -112,6 +108,7 @@ import {
 import { createTokenCatalogController } from './server/token-catalog';
 import { buildHubDiscoveryPayload } from './server/hub-discovery';
 import { buildDebugEntitiesPayload, buildKnownProfileBundle } from './server/gossip-profiles';
+import { maybeHandleDebugDumpsRequest } from './server/debug-dumps';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
@@ -1113,88 +1110,8 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     );
   }
 
-  if (pathname === '/api/debug/dumps' && req.method === 'GET') {
-    await ensureDebugDumpDir();
-    const limit = Math.max(1, Math.min(200, Number(new URL(req.url).searchParams.get('last') || '50')));
-    const files = (await readdir(DEBUG_DUMPS_DIR).catch(() => []))
-      .filter((name) => name.endsWith('.json'))
-      .sort()
-      .slice(-limit)
-      .reverse();
-    return new Response(
-      safeStringify({
-        ok: true,
-        dir: DEBUG_DUMPS_DIR,
-        files,
-      }),
-      { headers },
-    );
-  }
-
-  if (pathname === '/api/debug/dumps' && req.method === 'POST') {
-    await ensureDebugDumpDir();
-    const rawBody = await req.text().catch(() => '');
-    const parsed = rawBody
-      ? deserializeTaggedJson<Record<string, unknown>>(rawBody)
-      : null;
-    const payload = parsed && typeof parsed === 'object'
-      ? parsed
-      : { rawBody };
-    const trigger = payload?.['trigger'] && typeof payload['trigger'] === 'object'
-      ? payload['trigger'] as Record<string, unknown>
-      : undefined;
-    const reason = typeof trigger?.['message'] === 'string'
-      ? trigger['message']
-      : typeof payload?.['reason'] === 'string'
-        ? payload['reason']
-        : 'debug-dump';
-    const runtimeId = typeof payload?.['runtimeState'] === 'object' && payload['runtimeState']
-      && typeof (payload['runtimeState'] as Record<string, unknown>)['runtimeId'] === 'string'
-      ? String((payload['runtimeState'] as Record<string, unknown>)['runtimeId'])
-      : undefined;
-    const fileName = buildDebugDumpFileName(reason, runtimeId);
-    const filePath = `${DEBUG_DUMPS_DIR}/${fileName}`;
-    await writeFile(filePath, safeStringify(payload, 2), 'utf8');
-
-    let preview: unknown = undefined;
-    try {
-      preview = JSON.parse(await readFile(filePath, 'utf8'));
-    } catch {
-      preview = undefined;
-    }
-
-    pushDebugEvent(relayStore, {
-      event: 'consensus_dump',
-      status: 'stored',
-      runtimeId,
-      reason: String(reason).slice(0, 240),
-      details: {
-        file: fileName,
-        trigger: trigger ?? null,
-        height: typeof payload?.['runtimeState'] === 'object' && payload['runtimeState']
-          ? (payload['runtimeState'] as Record<string, unknown>)['height']
-          : null,
-        persistedLatestHeight: typeof payload?.['persistedWal'] === 'object' && payload['persistedWal']
-          ? (payload['persistedWal'] as Record<string, unknown>)['latestHeight']
-          : null,
-        preview: preview && typeof preview === 'object'
-          ? {
-              timestamp: (preview as Record<string, unknown>)['timestamp'] ?? null,
-              url: (preview as Record<string, unknown>)['url'] ?? null,
-            }
-          : null,
-      },
-    });
-
-    return new Response(
-      safeStringify({
-        ok: true,
-        file: fileName,
-        path: filePath,
-      }),
-      { headers },
-    );
-  }
+  const debugDumpsResponse = await maybeHandleDebugDumpsRequest({ req, pathname, relayStore, headers });
+  if (debugDumpsResponse) return debugDumpsResponse;
 
   // Registered gossip entities (relay-authoritative public profile store)
   if (pathname === '/api/debug/entities') {
