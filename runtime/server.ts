@@ -41,7 +41,12 @@ import { createJAdapter, DEV_CHAIN_IDS, type JAdapter } from './jadapter';
 import type { JAdapterConfig, JTokenInfo } from './jadapter/types';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from './jadapter/default-tokens';
 import { resolveEntityProposerId } from './state-helpers';
-import { buildDefaultEntitySwapPairs, deriveDelta, getTokenInfo } from './account-utils';
+import { deriveDelta, getTokenInfo } from './account-utils';
+import {
+  createMarketMakerServerState,
+  getMarketMakerHealth,
+  resetMarketMakerServerState,
+} from './server-market-maker-health';
 import { encryptJSON, hexToPubKey } from './networking/p2p-crypto';
 import type { Profile } from './networking/gossip';
 import { encodeRebalancePolicyMemo } from './rebalance-policy';
@@ -380,72 +385,7 @@ const readPositiveIntEnv = (name: string, fallback: number): number => {
 const RELAY_MARKET_MAX_SUBSCRIPTIONS = readPositiveIntEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTIONS', 1000);
 const RELAY_MARKET_MAX_SUBSCRIPTION_CELLS = readPositiveIntEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTION_CELLS', 64);
 const RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP = readPositiveIntEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP', 8);
-const MARKET_MAKER_LEVEL_OFFSETS_BPS = [2, 4, 6, 8, 10, 12, 15, 20, 25, 32, 40, 50, 65, 80, 100] as const;
-const MARKET_MAKER_LEVEL_BASE_SIZES = [
-  120n * 10n ** 18n,
-  140n * 10n ** 18n,
-  160n * 10n ** 18n,
-  180n * 10n ** 18n,
-  210n * 10n ** 18n,
-  240n * 10n ** 18n,
-  270n * 10n ** 18n,
-  300n * 10n ** 18n,
-  360n * 10n ** 18n,
-  420n * 10n ** 18n,
-  500n * 10n ** 18n,
-  600n * 10n ** 18n,
-  720n * 10n ** 18n,
-  840n * 10n ** 18n,
-  960n * 10n ** 18n,
-] as const;
-const MARKET_MAKER_STABLE_LEVEL_OFFSETS_BPS = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 28, 36, 48] as const;
-const MARKET_MAKER_STABLE_LEVEL_BASE_SIZES = [
-  120n * 10n ** 18n,
-  140n * 10n ** 18n,
-  180n * 10n ** 18n,
-  210n * 10n ** 18n,
-  240n * 10n ** 18n,
-  300n * 10n ** 18n,
-  360n * 10n ** 18n,
-  420n * 10n ** 18n,
-  480n * 10n ** 18n,
-  560n * 10n ** 18n,
-  640n * 10n ** 18n,
-  720n * 10n ** 18n,
-  800n * 10n ** 18n,
-  900n * 10n ** 18n,
-  1_000n * 10n ** 18n,
-] as const;
-const MARKET_MAKER_MIN_READY_OFFERS_PER_PAIR = 30;
-type MarketMakerLevelProfile = {
-  offsetsBps: readonly number[];
-  baseSizes: readonly bigint[];
-};
-
-const getMarketMakerLevelProfile = (baseTokenId: number, quoteTokenId: number): MarketMakerLevelProfile => {
-  if (baseTokenId === 1 && quoteTokenId === 3) {
-    return {
-      offsetsBps: MARKET_MAKER_STABLE_LEVEL_OFFSETS_BPS,
-      baseSizes: MARKET_MAKER_STABLE_LEVEL_BASE_SIZES,
-    };
-  }
-  return {
-    offsetsBps: MARKET_MAKER_LEVEL_OFFSETS_BPS,
-    baseSizes: MARKET_MAKER_LEVEL_BASE_SIZES,
-  };
-};
-
-const getExpectedMarketMakerOffersForPair = (baseTokenId: number, quoteTokenId: number): number => {
-  return Math.min(
-    MARKET_MAKER_MIN_READY_OFFERS_PER_PAIR,
-    getMarketMakerLevelProfile(baseTokenId, quoteTokenId).offsetsBps.length * 2,
-  );
-};
-
-let marketMakerLoopTimer: ReturnType<typeof setInterval> | null = null;
-let marketMakerEntityId: string | null = null;
-let marketMakerTargetHubIds: string[] = [];
-let marketMakerTokenIds: number[] = [];
+const marketMakerState = createMarketMakerServerState();
 
 const externalWalletApi = createExternalWalletApi({
   getJAdapter: () => globalJAdapter,
@@ -759,7 +699,7 @@ const getBootstrapReserveHealth = async (env: Env | null): Promise<BootstrapRese
     new Set(
       [
         ...relayStore.activeHubEntityIds.map((entityId) => entityId.toLowerCase()),
-        ...(marketMakerEntityId ? [marketMakerEntityId.toLowerCase()] : []),
+        ...(marketMakerState.entityId ? [marketMakerState.entityId.toLowerCase()] : []),
       ].filter((entityId) => entityId.length > 0),
     ),
   );
@@ -767,7 +707,7 @@ const getBootstrapReserveHealth = async (env: Env | null): Promise<BootstrapRese
   const entities = entityIds.map<BootstrapReserveEntityHealth>((entityId) => {
     const replica = getEntityReplicaById(env, entityId);
     const role: 'hub' | 'market-maker' =
-      marketMakerEntityId && entityId === marketMakerEntityId.toLowerCase() ? 'market-maker' : 'hub';
+      marketMakerState.entityId && entityId === marketMakerState.entityId.toLowerCase() ? 'market-maker' : 'hub';
     const tokens = bootstrapTokens.map<BootstrapReserveTokenHealth>((token) => {
       const current = replica?.state?.reserves?.get(token.tokenId) ?? 0n;
       const expectedMin = HUB_RESERVE_TARGET_UNITS * 10n ** BigInt(token.decimals);
@@ -800,152 +740,7 @@ const getBootstrapReserveHealth = async (env: Env | null): Promise<BootstrapRese
 };
 
 const stopMarketMakerLoop = (): void => {
-  if (marketMakerLoopTimer) {
-    clearInterval(marketMakerLoopTimer);
-    marketMakerLoopTimer = null;
-  }
-  marketMakerEntityId = null;
-  marketMakerTargetHubIds = [];
-  marketMakerTokenIds = [];
-};
-
-const buildMarketMakerPairs = (tokenIds: number[]): Array<{ baseTokenId: number; quoteTokenId: number; pairId: string }> => {
-  return buildDefaultEntitySwapPairs(tokenIds);
-};
-const collectOfferIdsForAccount = (
-  account:
-    | Pick<AccountMachine, 'swapOffers' | 'mempool' | 'pendingFrame'>
-    | null
-    | undefined,
-): Set<string> => {
-  const ids = new Set<string>();
-  if (account?.swapOffers instanceof Map) {
-    for (const offerId of account.swapOffers.keys()) {
-      ids.add(String(offerId));
-    }
-  }
-  for (const tx of account?.mempool || []) {
-    if (tx?.type !== 'swap_offer') continue;
-    const offerId = String(tx?.data?.offerId || '');
-    if (offerId) ids.add(offerId);
-  }
-  for (const tx of account?.pendingFrame?.accountTxs || []) {
-    if (tx?.type !== 'swap_offer') continue;
-    const offerId = String(tx?.data?.offerId || '');
-    if (offerId) ids.add(offerId);
-  }
-  return ids;
-};
-
-const countMarketMakerOffersForHub = (
-  env: Env,
-  mmEntityId: string,
-  hubEntityId: string,
-): number => {
-  const account = getAccountMachine(env, mmEntityId, hubEntityId);
-  if (!account) return 0;
-  const prefix = `mm-${hubEntityId.slice(-6).toLowerCase()}-`;
-  let count = 0;
-  for (const offerId of collectOfferIdsForAccount(account)) {
-    if (offerId.startsWith(prefix)) count += 1;
-  }
-  return count;
-};
-
-const countMarketMakerOffersForHubPair = (
-  env: Env,
-  mmEntityId: string,
-  hubEntityId: string,
-  pair: { baseTokenId: number; quoteTokenId: number },
-): number => {
-  const account = getAccountMachine(env, mmEntityId, hubEntityId);
-  if (!account) return 0;
-  const prefix = `mm-${hubEntityId.slice(-6).toLowerCase()}-${pair.baseTokenId}-${pair.quoteTokenId}-`;
-  let count = 0;
-  for (const offerId of collectOfferIdsForAccount(account)) {
-    if (offerId.startsWith(prefix)) count += 1;
-  }
-  return count;
-};
-const getMarketMakerHealth = (env: Env | null): {
-  enabled: boolean;
-  ok: boolean;
-  entityId: string | null;
-  expectedOffersPerHub: number;
-  expectedOffersPerPair: number;
-  hubs: Array<{
-    hubEntityId: string;
-    offers: number;
-    ready: boolean;
-    pairs: Array<{ pairId: string; offers: number; ready: boolean }>;
-  }>;
-} => {
-  const entityId = marketMakerEntityId;
-  const hubs = [...marketMakerTargetHubIds];
-  const pairs = buildMarketMakerPairs(marketMakerTokenIds);
-  const expectedOffersPerHub = pairs.reduce(
-    (sum, pair) => sum + getExpectedMarketMakerOffersForPair(pair.baseTokenId, pair.quoteTokenId),
-    0,
-  );
-
-  if (!entityId || hubs.length === 0 || expectedOffersPerHub <= 0) {
-    return {
-      enabled: false,
-      ok: false,
-      entityId: entityId || null,
-      expectedOffersPerHub: Math.max(0, expectedOffersPerHub),
-      expectedOffersPerPair: Math.max(...pairs.map((pair) => getExpectedMarketMakerOffersForPair(pair.baseTokenId, pair.quoteTokenId)), 0),
-      hubs: [],
-    };
-  }
-
-  if (!env) {
-    return {
-      enabled: true,
-      ok: false,
-      entityId,
-      expectedOffersPerHub,
-      expectedOffersPerPair: Math.max(...pairs.map((pair) => getExpectedMarketMakerOffersForPair(pair.baseTokenId, pair.quoteTokenId)), 0),
-      hubs: hubs.map((hubEntityId) => ({
-        hubEntityId,
-        offers: 0,
-        ready: false,
-        pairs: pairs.map((pair) => ({
-          pairId: pair.pairId,
-          offers: 0,
-          ready: false,
-        })),
-      })),
-    };
-  }
-
-  const perHub = hubs.map((hubEntityId) => {
-    const offers = countMarketMakerOffersForHub(env, entityId, hubEntityId);
-    const pairHealth = pairs.map((pair) => {
-      const pairOffers = countMarketMakerOffersForHubPair(env, entityId, hubEntityId, pair);
-      const expectedPairOffers = getExpectedMarketMakerOffersForPair(pair.baseTokenId, pair.quoteTokenId);
-      return {
-        pairId: pair.pairId,
-        offers: pairOffers,
-        ready: pairOffers >= expectedPairOffers,
-      };
-    });
-    return {
-      hubEntityId,
-      offers,
-      ready: offers >= expectedOffersPerHub && pairHealth.every((pair) => pair.ready),
-      pairs: pairHealth,
-    };
-  });
-
-  return {
-    enabled: true,
-    ok: perHub.length > 0 && perHub.every((entry) => entry.ready),
-    entityId,
-    expectedOffersPerHub,
-    expectedOffersPerPair: Math.max(...pairs.map((pair) => getExpectedMarketMakerOffersForPair(pair.baseTokenId, pair.quoteTokenId)), 0),
-    hubs: perHub,
-  };
+  resetMarketMakerServerState(marketMakerState);
 };
 
 const deployDefaultTokensOnRpc = async (): Promise<void> => {
@@ -2390,7 +2185,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
             error: serverBootError,
           },
           hubMesh: getHubMeshHealth(env),
-          marketMaker: getMarketMakerHealth(env),
+          marketMaker: getMarketMakerHealth(env, marketMakerState, getAccountMachine),
           bootstrapReserves,
           relay: {
             activeClients: activeClientRuntimeIds,
@@ -3994,7 +3789,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     // routing capability is an entity-level setting announced later.
     const advertisedEntityIds = [
       ...hubEntityIds,
-      ...(marketMakerEntityId ? [marketMakerEntityId.toLowerCase()] : []),
+      ...(marketMakerState.entityId ? [marketMakerState.entityId.toLowerCase()] : []),
     ];
     startP2P(env, {
       relayUrls: [internalRelayUrl],
