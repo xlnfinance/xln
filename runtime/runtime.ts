@@ -196,11 +196,7 @@ import {
   type StorageHead,
   verifyStorageTailIntegrity,
 } from './storage';
-import {
-  assertStorageSafetyOverridesAllowed,
-  storageForceRestoreEnabled,
-  storageVerifyOnOpenDisabled,
-} from './storage/safety';
+import { assertStorageSafetyOverridesAllowed } from './storage/safety';
 import { storageOverlayRecordKey } from './storage/overlay';
 import type { RuntimeAdapterReadQuery } from './radapter';
 export {
@@ -520,25 +516,13 @@ const verifyOpenedStorageDb = async (
   db: Level<Buffer, Buffer>,
 ): Promise<void> => {
   assertStorageSafetyOverridesAllowed();
-  if (storageVerifyOnOpenDisabled()) return;
   const state = ensureRuntimeState(env);
   const verifiedField = role === 'current' ? 'storageVerifiedCurrentHeight' : 'storageVerifiedPreviousHeight';
   const previousVerifiedHeight = Number(state[verifiedField] ?? -1);
-  try {
-    const head = await readStorageHead(db);
-    const verified = { latestHeight: Math.max(0, Math.floor(Number(head?.latestHeight ?? 0))) };
-    if (verified.latestHeight <= previousVerifiedHeight) return;
-    state[verifiedField] = verified.latestHeight;
-  } catch (error) {
-    if (storageForceRestoreEnabled()) {
-      console.error(
-        `[storage] ${role} DB integrity verification failed but XLN_STORAGE_FORCE_RESTORE=1 is set:`,
-        error instanceof Error ? error.message : error,
-      );
-      return;
-    }
-    throw error;
-  }
+  const head = await readStorageHead(db);
+  const verified = { latestHeight: Math.max(0, Math.floor(Number(head?.latestHeight ?? 0))) };
+  if (verified.latestHeight <= previousVerifiedHeight) return;
+  state[verifiedField] = verified.latestHeight;
 };
 
 const tryOpenStorageDb = async (env: Env, role: StorageDbRole = 'current'): Promise<boolean> => {
@@ -752,12 +736,10 @@ export async function tryOpenFrameDb(env: Env): Promise<boolean> {
     state.frameDbOpenPromise = (async () => {
       try {
         await db.open();
-        if (!storageVerifyOnOpenDisabled()) {
-          const previousVerifiedHeight = Number(state.storageVerifiedHistoryHeight ?? -1);
-          const verified = await verifyStorageTailIntegrity(db, { tailFrames: 128 });
-          if (verified.latestHeight > previousVerifiedHeight) {
-            state.storageVerifiedHistoryHeight = verified.latestHeight;
-          }
+        const previousVerifiedHeight = Number(state.storageVerifiedHistoryHeight ?? -1);
+        const verified = await verifyStorageTailIntegrity(db, { tailFrames: 128 });
+        if (verified.latestHeight > previousVerifiedHeight) {
+          state.storageVerifiedHistoryHeight = verified.latestHeight;
         }
         return true;
       } catch (error) {

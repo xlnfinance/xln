@@ -5,12 +5,6 @@ const truthyEnv = (name: string): boolean => {
   return raw === '1' || raw === 'true' || raw === 'yes';
 };
 
-export const storageVerifyOnOpenDisabled = (): boolean =>
-  truthyEnv('XLN_STORAGE_SKIP_VERIFY_ON_OPEN');
-
-export const storageForceRestoreEnabled = (): boolean =>
-  truthyEnv('XLN_STORAGE_FORCE_RESTORE');
-
 export const assertStorageSafetyOverridesAllowed = (): void => {
   const nodeEnv = String(runtimeProcessEnv?.['NODE_ENV'] ?? '').trim().toLowerCase();
   if (nodeEnv !== 'production') return;
