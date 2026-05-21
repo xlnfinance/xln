@@ -158,7 +158,15 @@ import {
   type CrossJurisdictionSwapSubmitParams,
   type CrossJurisdictionSwapSubmitResult,
 } from './runtime-jurisdiction-api';
-import { buildRouteOutputKey, mergeRoutedEntityOutput } from './runtime-output-routing';
+import {
+  buildRouteOutputKey,
+  dispatchEntityOutputs,
+  planEntityOutputs,
+  rescheduleDeferredOutputs,
+  sendEntityInputWithRouting,
+  splitPendingOutputsByRetryWindow,
+  type RuntimeOutputRoutingDeps,
+} from './runtime-output-routing';
 import { normalizeEntitySwapTradingPairs } from './runtime-swap-pairs';
 import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
 import { calculateSolvency, verifySolvency } from './solvency';
@@ -216,7 +224,6 @@ import {
   validateAccountDeltas,
   createDefaultDelta,
   isDelta,
-  validateDeliverableEntityInput,
   validateEntityInput,
   validateEntityOutput,
 } from './validation-utils';
@@ -225,7 +232,6 @@ import {
   requireBoundEntityConfig,
 } from './jurisdiction-runtime';
 import type {
-  DeliverableEntityInput,
   AccountFrame,
   EntityInput,
   EntityReplica,
@@ -1858,341 +1864,24 @@ export const handleInboundP2PEntityInput = (
   }
 };
 
-type PlannedRemoteOutput = {
-  output: DeliverableEntityInput;
-  targetRuntimeId: string;
-};
-
-const DEFER_RETRY_DELAY_MS = 5_000;
-const DEFER_MAX_ATTEMPTS = 3;
-
-const getDeferredNetworkMeta = (env: Env): Map<string, { attempts: number; nextRetryAt: number }> => {
-  const state = ensureRuntimeState(env);
-  if (!state.deferredNetworkMeta) {
-    state.deferredNetworkMeta = new Map();
-  }
-  return state.deferredNetworkMeta;
-};
-
 const getRuntimeNowMs = (env: Env): number => env.timestamp ?? 0;
 
-const toDeliverableEntityInput = (
-  output: RoutedEntityInput,
-  targetRuntimeId: string,
-): DeliverableEntityInput => {
-  const deliverable: DeliverableEntityInput = {
-    ...output,
-    runtimeId: targetRuntimeId,
+function getRuntimeOutputRoutingDeps(): RuntimeOutputRoutingDeps {
+  return {
+    ensureRuntimeState,
+    getP2P,
+    enqueueRuntimeInputs,
+    extractEntityId,
+    resolveRuntimeIdForEntity,
+    resolveRuntimeIdForCrossJurisdictionEntity,
   };
-  return validateDeliverableEntityInput(deliverable);
-};
-
-const splitPendingOutputsByRetryWindow = (
-  env: Env,
-  pending: RoutedEntityInput[],
-): { ready: RoutedEntityInput[]; waiting: RoutedEntityInput[] } => {
-  if (pending.length === 0) return { ready: [], waiting: [] };
-  const nowMs = getRuntimeNowMs(env);
-  const meta = getDeferredNetworkMeta(env);
-  const ready: RoutedEntityInput[] = [];
-  const waiting: RoutedEntityInput[] = [];
-
-  for (const output of pending) {
-    const key = buildRouteOutputKey(output);
-    const entry = meta.get(key);
-    if (!entry || entry.nextRetryAt <= nowMs) {
-      ready.push(output);
-      continue;
-    }
-    waiting.push(output);
-  }
-  return { ready, waiting };
-};
-
-const rescheduleDeferredOutputs = (
-  env: Env,
-  attemptedPending: RoutedEntityInput[],
-  failed: RoutedEntityInput[],
-  waiting: RoutedEntityInput[],
-): RoutedEntityInput[] => {
-  const nowMs = getRuntimeNowMs(env);
-  const meta = getDeferredNetworkMeta(env);
-  const next = new Map<string, RoutedEntityInput>();
-
-  // Keep outputs still waiting for their retry window.
-  for (const output of waiting) {
-    next.set(buildRouteOutputKey(output), output);
-  }
-
-  const failedKeys = new Set(failed.map(output => buildRouteOutputKey(output)));
-
-  // Pending outputs that were retried and delivered can clear retry metadata.
-  for (const output of attemptedPending) {
-    const key = buildRouteOutputKey(output);
-    if (!failedKeys.has(key)) {
-      meta.delete(key);
-    }
-  }
-
-  // Failed attempts get bounded retry with fixed 5s delay.
-  for (const output of failed) {
-    const key = buildRouteOutputKey(output);
-    const entry = meta.get(key);
-    const attempts = (entry?.attempts ?? 0) + 1;
-    if (attempts >= DEFER_MAX_ATTEMPTS) {
-      meta.delete(key);
-      env.warn('network', 'ROUTE_DROP_MAX_RETRIES', {
-        entityId: output.entityId,
-        attempts,
-      });
-      continue;
-    }
-
-    meta.set(key, {
-      attempts,
-      nextRetryAt: nowMs + DEFER_RETRY_DELAY_MS,
-    });
-    next.set(key, output);
-
-    if (attempts === 1) {
-      env.warn('network', 'ROUTE_DEFER_RETRY', {
-        entityId: output.entityId,
-        retryInMs: DEFER_RETRY_DELAY_MS,
-        attemptsRemaining: DEFER_MAX_ATTEMPTS - attempts,
-      });
-    }
-  }
-
-  return [...next.values()];
-};
-
-const planEntityOutputs = (
-  env: Env,
-  outputs: RoutedEntityInput[],
-): {
-  localOutputs: RoutedEntityInput[];
-  remoteOutputs: PlannedRemoteOutput[];
-  deferredOutputs: RoutedEntityInput[];
-} => {
-  const localEntityIds = new Set<string>();
-  for (const replicaKey of env.eReplicas.keys()) {
-    try {
-      localEntityIds.add(extractEntityId(replicaKey));
-    } catch {
-      // Skip malformed replica keys
-    }
-  }
-
-  const localOutputs: RoutedEntityInput[] = [];
-  const remoteOutputs: PlannedRemoteOutput[] = [];
-  const deduped = new Map<string, RoutedEntityInput>();
-  for (const output of outputs) {
-    const key = buildRouteOutputKey(output);
-    const existing = deduped.get(key);
-    if (existing) {
-      mergeRoutedEntityOutput(existing, output);
-    } else {
-      deduped.set(key, { ...output });
-    }
-  }
-  const allOutputs = [...deduped.values()];
-  const deferredOutputs: RoutedEntityInput[] = [];
-
-  for (const output of allOutputs) {
-    if (localEntityIds.has(output.entityId)) {
-      localOutputs.push(output);
-      continue;
-    }
-    const targetRuntimeId = resolveRuntimeIdForEntity(env, output.entityId);
-    console.log(
-      `🔀 ROUTE: Output for entity ${output.entityId.slice(-4)} → runtimeId=${targetRuntimeId || 'UNKNOWN'}`,
-    );
-    if (!targetRuntimeId) {
-      deferredOutputs.push(output);
-      continue;
-    }
-    const localRuntimeId = normalizeRuntimeId(String(env.runtimeId || ''));
-    if (localRuntimeId && targetRuntimeId === localRuntimeId) {
-      env.warn('network', 'ROUTE_DEFER_STALE_SELF_HINT', {
-        entityId: output.entityId,
-        runtimeId: targetRuntimeId,
-      });
-      deferredOutputs.push(output);
-      continue;
-    }
-    if (
-      entityInputHasCrossJurisdictionIntraRuntimeTx(output) &&
-      !isCrossJurisdictionEntityInputRemoteHopAllowed(
-        output,
-        env.runtimeId,
-        targetRuntimeId,
-        entityId => resolveRuntimeIdForCrossJurisdictionEntity(env, entityId),
-      )
-    ) {
-      throw new Error(
-        `CROSS_J_REMOTE_TOPOLOGY_INVALID: entity=${String(output.entityId || '').toLowerCase()} ` +
-        `targetRuntime=${targetRuntimeId} txTypes=${(output.entityTxs || []).map(tx => tx.type).join(',')}`,
-      );
-    }
-    remoteOutputs.push({ output: toDeliverableEntityInput(output, targetRuntimeId), targetRuntimeId });
-  }
-
-  return { localOutputs, remoteOutputs, deferredOutputs };
-};
-
-// Batch multiple outputs to same entityId:signerId into one EntityInput
-const batchOutputsByTarget = (outputs: DeliverableEntityInput[]): DeliverableEntityInput[] => {
-  const batched = new Map<string, DeliverableEntityInput>();
-
-  for (const output of outputs) {
-    const key = `${output.runtimeId}:${output.entityId}:${output.signerId || ''}`;
-    const existing = batched.get(key);
-
-    if (existing) {
-      mergeRoutedEntityOutput(existing, output);
-      console.log(`📦 BATCH: Merged output into ${key} (now ${existing.entityTxs?.length || 0} txs)`);
-    } else {
-      batched.set(key, validateDeliverableEntityInput({ ...output }));
-    }
-  }
-
-  return Array.from(batched.values());
-};
-
-const hasDirectHubP2PEndpoint = (env: Env, targetRuntimeId: string): boolean => {
-  const normalizedTargetRuntimeId = normalizeRuntimeId(targetRuntimeId);
-  if (!normalizedTargetRuntimeId) return false;
-  const profiles = env.gossip?.getProfiles?.() || [];
-  return profiles.some((profile) => {
-    if (profile.metadata?.isHub !== true) return false;
-    if (normalizeRuntimeId(profile.runtimeId || '') !== normalizedTargetRuntimeId) return false;
-    if (typeof profile.wsUrl !== 'string') return false;
-    try {
-      const parsed = new URL(profile.wsUrl.trim());
-      return parsed.protocol === 'ws:' || parsed.protocol === 'wss:';
-    } catch {
-      return false;
-    }
-  });
-};
-
-const canUseRemoteEntityInputFallback = (
-  env: Env,
-  targetRuntimeId: string,
-  output: Pick<DeliverableEntityInput, 'entityTxs'>,
-): boolean => {
-  if (!entityInputHasCrossJurisdictionIntraRuntimeTx(output)) {
-    // Normal bilateral account traffic may use the encrypted relay. Cross-j
-    // control traffic is stricter because it is a system protocol between the
-    // two route runtimes, not arbitrary public P2P messaging.
-    return true;
-  }
-  const state = ensureRuntimeState(env);
-  if (state.canUseConnectedRelayFallback?.(targetRuntimeId) === true) {
-    // Browser/user runtimes do not expose hub direct sockets. They may still be
-    // attached to this exact server relay websocket. In that case the fallback
-    // remains encrypted local socket delivery, not a public relay queue.
-    return true;
-  }
-  return hasDirectHubP2PEndpoint(env, targetRuntimeId);
-};
-
-const dispatchEntityOutputs = (env: Env, outputs: PlannedRemoteOutput[]): RoutedEntityInput[] => {
-  const state = ensureRuntimeState(env);
-  const directDispatch = state.directEntityInputDispatch;
-  const p2p = getP2P(env);
-
-  // CRITICAL: Batch outputs to same target before sending
-  const groupedByRuntime = new Map<string, DeliverableEntityInput[]>();
-  for (const { output, targetRuntimeId } of outputs) {
-    const list = groupedByRuntime.get(targetRuntimeId) || [];
-    list.push(output);
-    groupedByRuntime.set(targetRuntimeId, list);
-  }
-
-  const batchedOutputs: PlannedRemoteOutput[] = [];
-  for (const [targetRuntimeId, grouped] of groupedByRuntime.entries()) {
-    const batchedGrouped = batchOutputsByTarget(grouped);
-    for (const output of batchedGrouped) {
-      batchedOutputs.push({ output, targetRuntimeId });
-    }
-  }
-  if (batchedOutputs.length < outputs.length) {
-    console.log(`📦 BATCH: Reduced ${outputs.length} outputs → ${batchedOutputs.length} batched messages`);
-  }
-
-  const deferredOutputs: RoutedEntityInput[] = [];
-  for (const { output, targetRuntimeId } of batchedOutputs) {
-    if (directDispatch) {
-      const deliveredDirect = directDispatch(targetRuntimeId, output, env.timestamp);
-      if (deliveredDirect) {
-        continue;
-      }
-      if (!canUseRemoteEntityInputFallback(env, targetRuntimeId, output)) {
-        env.warn('network', 'ROUTE_DEFER_DIRECT_SOCKET_REQUIRED', {
-          entityId: output.entityId,
-          runtimeId: targetRuntimeId,
-        });
-        deferredOutputs.push(output);
-        continue;
-      }
-    }
-    if (!p2p) {
-      env.warn('network', 'ROUTE_DROP_NO_P2P', {
-        entityId: output.entityId,
-        runtimeId: targetRuntimeId,
-      });
-      deferredOutputs.push(output);
-      continue;
-    }
-    if (env.quietRuntimeLogs !== true) {
-      console.log(
-        `📤 P2P-SEND: Enqueueing to runtimeId ${targetRuntimeId} for entity ${output.entityId.slice(-4)} (${output.entityTxs?.length || 0} txs)`,
-      );
-    }
-    try {
-      p2p.enqueueEntityInput(targetRuntimeId, output, env.timestamp);
-    } catch (error) {
-      env.warn('network', 'ROUTE_DEFER_SEND_FAILED', {
-        entityId: output.entityId,
-        runtimeId: targetRuntimeId,
-        error: (error as Error).message,
-      });
-      deferredOutputs.push(output);
-    }
-  }
-  return deferredOutputs;
-};
+}
 
 export const sendEntityInput = (
   env: Env,
   input: RoutedEntityInput,
 ): { sent: boolean; deferred: boolean; queuedLocal: boolean } => {
-  const pendingBeforePlan = env.pendingNetworkOutputs ?? [];
-  const { ready: readyPendingOutputs, waiting: waitingPendingOutputs } = splitPendingOutputsByRetryWindow(
-    env,
-    pendingBeforePlan,
-  );
-  const outputsToPlan = [...readyPendingOutputs, input];
-  const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, outputsToPlan);
-  env.pendingNetworkOutputs = [];
-  if (localOutputs.length > 0) {
-    enqueueRuntimeInputs(env, localOutputs, undefined, undefined, env.timestamp);
-  }
-  const deferred = dispatchEntityOutputs(env, remoteOutputs);
-  const remainingDeferred = [...deferredOutputs, ...deferred];
-  env.pendingNetworkOutputs = rescheduleDeferredOutputs(
-    env,
-    readyPendingOutputs,
-    remainingDeferred,
-    waitingPendingOutputs,
-  );
-
-  return {
-    sent: remoteOutputs.length > 0 && deferred.length === 0,
-    deferred: env.pendingNetworkOutputs.length > 0,
-    queuedLocal: localOutputs.length > 0,
-  };
+  return sendEntityInputWithRouting(env, input, getRuntimeOutputRoutingDeps());
 };
 
 export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null => {
@@ -3858,13 +3547,15 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
     }
 
     // Retry deferred network outputs only when their retry window is due.
+    const outputRoutingDeps = getRuntimeOutputRoutingDeps();
     const pendingBeforePlan = env.pendingNetworkOutputs ?? [];
     const { ready: readyPendingOutputs, waiting: waitingPendingOutputs } = splitPendingOutputsByRetryWindow(
       env,
       pendingBeforePlan,
+      outputRoutingDeps,
     );
     const outputsToPlan = readyPendingOutputs.length > 0 ? [...readyPendingOutputs, ...entityOutbox] : entityOutbox;
-    const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, outputsToPlan);
+    const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, outputsToPlan, outputRoutingDeps);
     env.pendingNetworkOutputs = [];
     if (localOutputs.length > 0) {
       enqueueRuntimeInputs(env, localOutputs, undefined, undefined, env.timestamp);
@@ -3949,10 +3640,16 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
     if (remoteOutputs.length > 0) {
       console.log(`📡 [SIDE-EFFECT] Dispatching ${remoteOutputs.length} remote entity outputs via P2P`);
     }
-    const dispatchDeferred = dispatchEntityOutputs(env, remoteOutputs);
+    const dispatchDeferred = dispatchEntityOutputs(env, remoteOutputs, outputRoutingDeps);
 
     const allDeferred = [...deferredOutputs, ...dispatchDeferred];
-    env.pendingNetworkOutputs = rescheduleDeferredOutputs(env, readyPendingOutputs, allDeferred, waitingPendingOutputs);
+    env.pendingNetworkOutputs = rescheduleDeferredOutputs(
+      env,
+      readyPendingOutputs,
+      allDeferred,
+      waitingPendingOutputs,
+      outputRoutingDeps,
+    );
 
     // 1b. Re-announce gossip profiles after account state changes (new accounts, capacity shifts)
     // Broadcast changed local entities so relay routing metadata stays fresh.
