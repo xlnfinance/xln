@@ -31,6 +31,11 @@ import type { RuntimeWsMessage } from './networking/ws-protocol';
 
 const SOCKET_RUNTIME_ID = Symbol.for('xln.relay.socketRuntimeId');
 type RememberedRelaySocket = object & { [SOCKET_RUNTIME_ID]?: string };
+const NON_RECOVERABLE_LOCAL_DELIVERY_ERRORS = [
+  'invalid tag',
+  'P2P_DECRYPT_ERROR',
+  'NO_LOCAL_REPLICA',
+];
 
 const rememberSocketRuntimeId = (ws: unknown, runtimeId: string): void => {
   if (!ws || (typeof ws !== 'object' && typeof ws !== 'function')) return;
@@ -562,7 +567,8 @@ export const relayRoute = async <Socket = RelaySocketLike>(
         // Non-recoverable decrypt/auth errors should be dropped immediately.
         // Re-queuing poisoned ciphertext for the same local runtime just causes
         // endless pending loops and hides the true root cause.
-        if (reason.includes('invalid tag') || reason.includes('P2P_DECRYPT_ERROR')) {
+        if (NON_RECOVERABLE_LOCAL_DELIVERY_ERRORS.some((part) => reason.includes(part))) {
+          send(ws, safeStringify({ type: 'error', error: reason }));
           return;
         }
         // Fall through to queue
