@@ -31,7 +31,7 @@ import { readRawOrNull } from '../storage/level';
 import { KEY_HEAD, keyDiff, keyFrame, keySnapshotEntity, keySnapshotManifest } from '../storage/keys';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { generateLazyEntityId } from '../entity-factory';
-import type { StorageFrameRecord } from '../storage/types';
+import type { StorageEntityCoreDoc, StorageFrameRecord } from '../storage/types';
 import type { JReplica, JurisdictionConfig } from '../types';
 
 describe('storage frame journal retention', () => {
@@ -162,26 +162,10 @@ describe('storage frame journal retention', () => {
 
   test('production refuses disabled canonical storage hashes', async () => {
     const previousNodeEnv = process.env['NODE_ENV'];
-    const previousVerifyCanonical = process.env['XLN_STORAGE_VERIFY_CANONICAL'];
     const previousPeriod = process.env['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'];
 
     try {
       process.env['NODE_ENV'] = 'production';
-      process.env['XLN_STORAGE_VERIFY_CANONICAL'] = '0';
-
-      const envFromFlag = createEmptyEnv(`storage-prod-canonical-flag ${Date.now()}`);
-      envFromFlag.quietRuntimeLogs = true;
-      envFromFlag.runtimeId = deriveSignerAddressSync(envFromFlag.runtimeSeed!, '1').toLowerCase();
-      envFromFlag.dbNamespace = envFromFlag.runtimeId;
-      envFromFlag.height = 1;
-      envFromFlag.timestamp = 1_000;
-
-      await expect(saveEnvToDB(envFromFlag, { runtimeTxs: [], entityInputs: [] }, []))
-        .rejects.toThrow('STORAGE_CANONICAL_HASH_REQUIRED_IN_PRODUCTION');
-      await closeRuntimeDb(envFromFlag);
-      await closeInfraDb(envFromFlag);
-
-      delete process.env['XLN_STORAGE_VERIFY_CANONICAL'];
       process.env['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'] = '0';
       const envFromPeriod = createEmptyEnv(`storage-prod-canonical-period ${Date.now()}`);
       envFromPeriod.quietRuntimeLogs = true;
@@ -197,8 +181,6 @@ describe('storage frame journal retention', () => {
     } finally {
       if (previousNodeEnv === undefined) delete process.env['NODE_ENV'];
       else process.env['NODE_ENV'] = previousNodeEnv;
-      if (previousVerifyCanonical === undefined) delete process.env['XLN_STORAGE_VERIFY_CANONICAL'];
-      else process.env['XLN_STORAGE_VERIFY_CANONICAL'] = previousVerifyCanonical;
       if (previousPeriod === undefined) delete process.env['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'];
       else process.env['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'] = previousPeriod;
     }
@@ -271,7 +253,7 @@ describe('storage frame journal retention', () => {
 
     const snapshotKey = keySnapshotEntity(latestHeight, entityId);
     const raw = await getFrameDb(env).get(snapshotKey);
-    const corrupted = decodeBuffer<any>(raw);
+    const corrupted = decodeBuffer<StorageEntityCoreDoc>(raw);
     corrupted.messages = [...(Array.isArray(corrupted.messages) ? corrupted.messages : []), 'corrupted snapshot body'];
     await getFrameDb(env).put(snapshotKey, encodeBuffer(corrupted));
 

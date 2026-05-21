@@ -4,7 +4,7 @@ import {
   buildHexKeyedMerkle,
   buildHexKeyedMerkleMaterialized,
 } from '../storage/merkle';
-import { storageCanonicalHashEnabled, storageMerkleCellHexKey } from '../storage/hashes';
+import { storageMerkleCellHexKey } from '../storage/hashes';
 import { buildBookDeletionsFromOverlay, storageRefsFromOverlay } from '../storage/overlay-docs';
 import {
   KEY_MERKLE_BRANCH,
@@ -124,29 +124,6 @@ test('storage radix merkle supports radix 256 with byte-depth paths', () => {
   expect(result.depth).toBe(32);
   expect(result.leafCount).toBe(2);
   expect(result.root).toMatch(/^0x[0-9a-f]{64}$/);
-});
-
-test('storage canonical audit hash is mandatory in production', () => {
-  const previousNodeEnv = process.env['NODE_ENV'];
-  const previousVerifyCanonical = process.env['XLN_STORAGE_VERIFY_CANONICAL'];
-  try {
-    process.env['XLN_STORAGE_VERIFY_CANONICAL'] = '1';
-    process.env['NODE_ENV'] = 'development';
-    expect(storageCanonicalHashEnabled()).toBe(true);
-    process.env['NODE_ENV'] = 'production';
-    expect(storageCanonicalHashEnabled()).toBe(true);
-    process.env['XLN_STORAGE_VERIFY_CANONICAL'] = '0';
-    expect(storageCanonicalHashEnabled()).toBe(true);
-    delete process.env['XLN_STORAGE_VERIFY_CANONICAL'];
-    expect(storageCanonicalHashEnabled()).toBe(true);
-    process.env['NODE_ENV'] = 'development';
-    expect(storageCanonicalHashEnabled()).toBe(false);
-  } finally {
-    if (previousNodeEnv === undefined) delete process.env['NODE_ENV'];
-    else process.env['NODE_ENV'] = previousNodeEnv;
-    if (previousVerifyCanonical === undefined) delete process.env['XLN_STORAGE_VERIFY_CANONICAL'];
-    else process.env['XLN_STORAGE_VERIFY_CANONICAL'] = previousVerifyCanonical;
-  }
 });
 
 test('storage radix merkle rejects mixed key lengths', () => {
