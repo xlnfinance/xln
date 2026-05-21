@@ -88,6 +88,7 @@ import { handleOffchainFaucet } from './server/offchain-faucet';
 import { handleReserveFaucet } from './server/reserve-faucet';
 import { handleRuntimeHealth, type RuntimeHealthCacheEntry } from './server/health-api';
 import { handleRuntimeRpcProxy } from './server/rpc-proxy';
+import { handleP2PControl } from './server/p2p-control';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
@@ -541,48 +542,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   if (pathname === '/api/control/p2p' && req.method === 'POST') {
     const authError = requireDaemonControlAuth(req, env);
     if (authError) return authError;
-    if (!env) {
-      return new Response(serializeTaggedJson({ ok: false, error: 'Runtime not ready' }), { status: 503, headers });
-    }
-    try {
-      const body = await parseTaggedControlBody<{
-        relayUrls?: unknown;
-        advertiseEntityIds?: unknown;
-        gossipPollMs?: unknown;
-      }>(req);
-      const relayUrls = Array.isArray(body?.relayUrls)
-        ? body.relayUrls.map(value => (typeof value === 'string' ? value.trim() : '')).filter(Boolean)
-        : undefined;
-      const advertiseEntityIds = Array.isArray(body?.advertiseEntityIds)
-        ? body.advertiseEntityIds.map(value => (typeof value === 'string' ? value.trim().toLowerCase() : '')).filter(Boolean)
-        : undefined;
-      const gossipPollMs = Number.isFinite(Number(body?.gossipPollMs))
-        ? Math.max(250, Math.floor(Number(body?.gossipPollMs)))
-        : undefined;
-
-      startP2P(env, {
-        ...(relayUrls ? { relayUrls } : {}),
-        ...(advertiseEntityIds ? { advertiseEntityIds } : {}),
-        ...(gossipPollMs !== undefined ? { gossipPollMs } : {}),
-      });
-
-      return new Response(
-        serializeTaggedJson({
-          ok: true,
-          config: {
-            relayUrls: relayUrls ?? null,
-            advertiseEntityIds: advertiseEntityIds ?? null,
-            gossipPollMs: gossipPollMs ?? null,
-          },
-        }),
-        { headers },
-      );
-    } catch (error) {
-      return new Response(
-        serializeTaggedJson({ ok: false, error: (error as Error).message || 'Failed to update P2P config' }),
-        { status: 500, headers },
-      );
-    }
+    return handleP2PControl(req, headers, env, { parseTaggedControlBody, startP2P });
   }
 
   // JSON-RPC proxy endpoint (single canonical path: /rpc).
