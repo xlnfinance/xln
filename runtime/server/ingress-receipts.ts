@@ -18,7 +18,7 @@ export type RuntimeIngressReceipt = {
   note?: string;
 };
 
-type RegisterReceiptOptions = {
+export type RegisterReceiptOptions = {
   id?: string;
   kind: string;
   counts: RuntimeIngressCounts;
