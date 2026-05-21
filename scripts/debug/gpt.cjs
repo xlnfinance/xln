@@ -39,7 +39,7 @@ const CORE_FILES = {
     'entity-tx/proposals.ts', // Proposal logic
     'entity-tx/j-events.ts',  // Jurisdiction event handling
     'entity-tx/handlers/account.ts',         // Account operations (openAccount, extendCredit)
-    'entity-tx/handlers/deposit-collateral.ts', // Deposit collateral (R2C)
+    'entity-tx/handlers/r2c.ts', // Deposit collateral / reserve-to-collateral flow (R2C)
     'entity-tx/handlers/htlc-payment.ts',    // HTLC payment routing
     'entity-tx/handlers/create-settlement.ts', // Settlement creation
     'entity-tx/handlers/mint-reserves.ts',   // Reserve minting (J-events)
@@ -58,16 +58,24 @@ const CORE_FILES = {
     // Utilities (support functions)
     'state-helpers.ts',      // Pure state management functions
     'snapshot-coder.ts',     // Deterministic state serialization (RLP encoding)
-    'evm.ts',                // Blockchain integration layer
+    'runtime-jurisdiction-api.ts', // J-adapter / on-chain integration surface
   ],
   docs: [
-    // Ordered by dependency - read in this order
-    'intro.md',                      // * 5-min overview (new reader onramp)
-    'essay.md',                      // * Core philosophy and vision (5min)
-    'core/12_invariant.md',          // * RCPAN vs FCUAN vs FRPAP (THE core innovation) (10min)
-    'core/rjea-architecture.md',     // * Runtime-Jurisdiction-Entity-Account 4-layer model (8min)
-    'core/11_Jurisdiction_Machine.md', // Architecture deep-dive
-    'architecture/bilaterality.md',  // Why bilateral > multilateral
+    // Canonical live docs only - theory, current status, and implementation-grade specs
+    'readme.md',                       // Docs map and current reading order
+    'constraints.md',                  // Why bilateral provable-credit settlement is necessary
+    'intro.md',                        // 5-minute overview
+    'core/12_invariant.md',            // RCPAN invariant
+    'core/rjea-architecture.md',       // Runtime -> Entity -> Account -> Jurisdiction model
+    'status.md',                       // Canonical current blockers/workstreams
+    'mainnet.md',                      // Release bar for real-user-fund launch
+    'roadmap.md',                      // Strategic direction, distinct from status
+    'consensus-invariants.md',         // Living bilateral-consensus bug-prevention rules
+    'merkle.md',                       // Durable state and integrity model
+    'radapter.md',                     // Canonical runtime adapter spec
+    'implementation/payment-spec.md',  // Payment and HTLC/onion system
+    'recovery-watchtower-protocol.md', // Recovery and offline dispute safety
+    'fintech-type-safety-protocol.md', // Type-safety rules for money-moving code
   ],
   frontend: [
     // Optional UI/UX architecture (use --frontend flag)
@@ -116,10 +124,12 @@ function generateSemanticOverview(contractsDir, runtimeDir, docsDir, frontendDir
   const gitCommit = execSync('git rev-parse HEAD', { encoding: 'utf8' }).trim().substring(0, 7);
   const timestamp = new Date().toISOString().replace('T', ' ').substring(0, 19);
 
-  return `# XLN: Bilateral Ethereum + Bank-Grade Credit + Instant Settlement
+  return `# XLN: Bilateral Settlement With Provable Credit
 # ~${Math.round(totalTokens / 1000)}k tokens | Generated: ${timestamp} | Git: ${gitCommit}
 
-**TL;DR**: Banks without bailouts. Lightning without the inbound capacity wall.
+**TL;DR**: XLN is a bilateral account network over EVM jurisdictions. The fast
+path is mutual signatures between counterparties. The chain is the settlement
+court, collateral anchor, and dispute enforcer.
 
 XLN (Cross-Local Network) achieves:
 - Sub-second finality without fraud periods
@@ -170,10 +180,17 @@ State N+1: Alice: +700, Bob: -700  [signed by Alice, Bob]
 Implications:
 - No fraud period -- can't submit old state without counterparty signature
 - Instant finality -- mutual signature IS consensus
-- No watchtowers -- nothing to watch for
 - Privacy -- only parties know intermediate states
 
-On-chain role: anchor collateral, enforce FIFO liquidation if entity fails.
+On-chain role: anchor collateral, enforce FIFO liquidation if entity fails, and
+resolve disputes when the off-chain path breaks.
+
+Recovery/watchtower note:
+- XLN does NOT need Lightning-style revoked-state watchtowers on the normal fast
+  path
+- XLN DOES need recovery and offline dispute protection for mainnet
+- treat \`docs/recovery-watchtower-protocol.md\` as a live mainnet-relevant spec,
+  not a side idea
 
 ## Failure Model: Diamond-Dybvig Without Bailouts
 
@@ -188,6 +205,22 @@ When an entity fails:
 4. No contagion -- your exposure is YOUR credit limit, not network-wide
 
 This requires EVM: FIFO debt iteration needs Turing-complete execution.
+
+## Current Project State
+
+Per the canonical docs set:
+- XLN is pre-mainnet and in testnet/prod-runtime hardening
+- the biggest remaining work is integration, replay/nonce safety, recovery,
+  dispute proofing, and ops
+- protocol invention is mostly done; correctness and operability are the
+  current bottlenecks
+
+When docs disagree, use this precedence:
+1. code + tests
+2. \`docs/status.md\`
+3. \`docs/mainnet.md\`
+4. protocol/spec docs
+5. archive docs
 
 ## Architecture Overview
 
@@ -249,33 +282,49 @@ One account, many subcontracts. All execute bilaterally, chain sees nothing unle
 - Credit != Debt. Credit is a LIMIT you set. Debt is what's currently owed.
 - Left/Right = deterministic from entityId (lower hex = left), not role-based
 - "Instant" = no fraud period, not just fast confirmation
+- Hub = normal entity, not a separate consensus species
+- Runtime is the source of truth; frontend is reader/controller, not authority
+- J-layer is court/settlement anchor, not the fast path
 
 **When users ask about XLN, emphasize:**
 1. It generalizes both banks AND Lightning into one primitive
 2. The inbound capacity solution (credit direction)
 3. 99.99% of txs never touch blockchain (bilateral consensus)
 4. Failures are localized, not systemic (no bailouts needed)
+5. Mainnet blockers are now recovery/integration/ops, not missing theory
 
 **Key questions users ask:**
 - "How is this different from Lightning?" -> Credit extension solves inbound capacity
 - "How is this different from banks?" -> Cryptographic proofs, no bailout requirement
 - "What happens if counterparty disappears?" -> On-chain settlement with your collateral
 - "What's the worst case?" -> Lose credit limit you extended, nothing more
+- "Is recovery optional?" -> No. Offline recovery/watchtower is a live mainnet requirement
+- "What doc is current?" -> \`docs/status.md\` for current truth, \`docs/mainnet.md\` for launch bar
 
 ## Token Budget Guide (~${Math.round(totalTokens / 1000)}k tokens total)
 
-**Critical path (read first, ~30min):**
-- intro.md (3min) - High-signal overview
-- essay.md (5min) - Core philosophy
-- docs/core/12_invariant.md (10min) - RCPAN derivation
-- docs/core/rjea-architecture.md (8min) - 4-layer architecture
-- Depository.sol (7min) - enforceDebts() FIFO
+**Conceptual path (read first, ~20min):**
+- docs/readme.md (2min) - live docs map
+- docs/constraints.md (8min) - why XLN exists
+- docs/intro.md (3min) - high-signal overview
+- docs/core/12_invariant.md (7min) - RCPAN derivation
 
-**Implementation (read second, ~45min):**
+**Architecture + current state (read second, ~25min):**
+- docs/core/rjea-architecture.md (10min) - 4-layer model
+- docs/status.md (6min) - current blockers and workstreams
+- docs/mainnet.md (4min) - release bar
+- docs/consensus-invariants.md (5min) - bilateral footguns
+
+**Implementation path (read third, ~45min):**
+- Depository.sol (7min) - enforceDebts() FIFO
 - types.ts - All TypeScript interfaces
 - entity-consensus.ts - BFT state machine
 - account-consensus.ts - Bilateral consensus
 - entity-tx/apply.ts - Transaction dispatcher
+- docs/implementation/payment-spec.md - payments/HTLC/onion
+- docs/merkle.md - durable integrity root
+- docs/radapter.md - runtime/frontend contract
+- docs/recovery-watchtower-protocol.md - offline recovery/dispute safety
 
 ## Codebase Structure
 
@@ -300,6 +349,7 @@ xln/
     account-utils.ts             ${fileSizes['runtime/account-utils.ts'] || '?'} lines - deriveDelta() RCPAN calculation
     serialization-utils.ts       ${fileSizes['runtime/serialization-utils.ts'] || '?'} lines - BigInt serialization
     account-crypto.ts            ${fileSizes['runtime/account-crypto.ts'] || '?'} lines - Signature verification
+    runtime-jurisdiction-api.ts  ${fileSizes['runtime/runtime-jurisdiction-api.ts'] || '?'} lines - J-adapter / on-chain integration
 
     entity-tx/
       index.ts                   ${fileSizes['runtime/entity-tx/index.ts'] || '?'} lines - Entity transaction types
@@ -309,7 +359,7 @@ xln/
       proposals.ts               ${fileSizes['runtime/entity-tx/proposals.ts'] || '?'} lines - Proposal logic
       j-events.ts                ${fileSizes['runtime/entity-tx/j-events.ts'] || '?'} lines - Jurisdiction events
       handlers/account.ts              ${fileSizes['runtime/entity-tx/handlers/account.ts'] || '?'} lines - Account operations
-      handlers/deposit-collateral.ts   ${fileSizes['runtime/entity-tx/handlers/deposit-collateral.ts'] || '?'} lines - R2C deposits
+      handlers/r2c.ts                  ${fileSizes['runtime/entity-tx/handlers/r2c.ts'] || '?'} lines - R2C deposits
       handlers/htlc-payment.ts         ${fileSizes['runtime/entity-tx/handlers/htlc-payment.ts'] || '?'} lines - HTLC routing
       handlers/create-settlement.ts    ${fileSizes['runtime/entity-tx/handlers/create-settlement.ts'] || '?'} lines - Settlement creation
       handlers/mint-reserves.ts        ${fileSizes['runtime/entity-tx/handlers/mint-reserves.ts'] || '?'} lines - Reserve minting
@@ -326,12 +376,20 @@ xln/
     state-helpers.ts             ${fileSizes['runtime/state-helpers.ts'] || '?'} lines - Pure state management
     snapshot-coder.ts            ${fileSizes['runtime/snapshot-coder.ts'] || '?'} lines - Deterministic RLP serialization
   docs/
-    intro.md                           ${fileSizes['docs/intro.md'] || '?'} lines - * 5-min overview (new reader onramp)
-    essay.md                            ${fileSizes['docs/essay.md'] || '?'} lines - * Core philosophy and vision (CRITICAL PATH)
-    core/12_invariant.md                ${fileSizes['docs/core/12_invariant.md'] || '?'} lines - * RCPAN innovation (CRITICAL PATH)
-    core/rjea-architecture.md           ${fileSizes['docs/core/rjea-architecture.md'] || '?'} lines - * RJEA 4-layer model (CRITICAL PATH)
-    core/11_Jurisdiction_Machine.md     ${fileSizes['docs/core/11_Jurisdiction_Machine.md'] || '?'} lines - Architecture deep-dive
-    architecture/bilaterality.md        ${fileSizes['docs/architecture/bilaterality.md'] || '?'} lines - Why bilateral > multilateral
+    readme.md                           ${fileSizes['docs/readme.md'] || '?'} lines - Live docs index and reading path
+    constraints.md                      ${fileSizes['docs/constraints.md'] || '?'} lines - Why bilateral provable-credit settlement is necessary
+    intro.md                            ${fileSizes['docs/intro.md'] || '?'} lines - 5-minute overview
+    core/12_invariant.md                ${fileSizes['docs/core/12_invariant.md'] || '?'} lines - RCPAN invariant
+    core/rjea-architecture.md           ${fileSizes['docs/core/rjea-architecture.md'] || '?'} lines - Runtime -> Entity -> Account -> Jurisdiction
+    status.md                           ${fileSizes['docs/status.md'] || '?'} lines - Canonical current blockers/workstreams
+    mainnet.md                          ${fileSizes['docs/mainnet.md'] || '?'} lines - Real-user-fund release bar
+    roadmap.md                          ${fileSizes['docs/roadmap.md'] || '?'} lines - Strategic direction
+    consensus-invariants.md             ${fileSizes['docs/consensus-invariants.md'] || '?'} lines - Living bilateral bug-prevention rules
+    merkle.md                           ${fileSizes['docs/merkle.md'] || '?'} lines - Durable state and integrity model
+    radapter.md                         ${fileSizes['docs/radapter.md'] || '?'} lines - Canonical runtime adapter spec
+    implementation/payment-spec.md      ${fileSizes['docs/implementation/payment-spec.md'] || '?'} lines - Payments, HTLCs, onion routing
+    recovery-watchtower-protocol.md     ${fileSizes['docs/recovery-watchtower-protocol.md'] || '?'} lines - Recovery and offline dispute safety
+    fintech-type-safety-protocol.md     ${fileSizes['docs/fintech-type-safety-protocol.md'] || '?'} lines - Type-safety rules for money-moving code
 
 ${includeFrontend ? `
   frontend/
@@ -346,15 +404,15 @@ ${includeFrontend ? `
 ` : ''}
 
 Reading Guide:
-1. Start with intro.md, then header sections (RCPAN invariant, competitive landscape, impossibilities)
+1. Start with docs/readme.md, then docs/constraints.md and docs/intro.md
 2. Follow the token budget guide for efficient learning:
-   - Critical path (30min): essay.md -> 12_invariant.md -> rjea-architecture.md -> Depository.sol
-   - Implementation (45min): types.ts -> entity-consensus.ts -> account-consensus.ts -> entity-tx/apply.ts
-   - Deep dives (60min): runtime.ts -> routing/pathfinding.ts -> bilaterality.md -> 11_Jurisdiction_Machine.md
-3. Verify claims using the Proof & Verification section
-4. Explore delta transformer examples for extensibility patterns
+   - Conceptual path (20min): readme.md -> constraints.md -> intro.md -> core/12_invariant.md
+   - Architecture/current state (25min): core/rjea-architecture.md -> status.md -> mainnet.md -> consensus-invariants.md
+   - Implementation (45min): Depository.sol -> types.ts -> entity-consensus.ts -> account-consensus.ts -> implementation/payment-spec.md -> merkle.md -> radapter.md -> recovery-watchtower-protocol.md
+3. Use status.md for "what is current" and mainnet.md for "what blocks launch"
+4. Use archive docs only when you explicitly need historical wording or superseded planning
 
-Suggested LLM prompt: "Read the critical path docs (30min budget), then explain how RCPAN enables instant settlement with partial collateral. Compare to Lightning and rollups."
+Suggested LLM prompt: "Read the conceptual and architecture paths, then explain how RCPAN, bilateral consensus, and EVM enforcement fit together. Separate current launch blockers from solved protocol ideas."
 
 `;
 }
