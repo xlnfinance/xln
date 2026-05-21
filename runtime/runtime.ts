@@ -29,7 +29,7 @@ import {
   buildRuntimeCheckpointSnapshot,
 } from './wal/snapshot';
 import { computePersistedEnvStateHash } from './wal/hash';
-import { applyEntityInput, mergeEntityInputs } from './entity-consensus';
+import { mergeEntityInputs } from './entity-consensus';
 import type { JAdapter } from './jadapter';
 import {
   createLazyEntity,
@@ -151,10 +151,6 @@ import {
 } from './account-utils';
 import { computeSwapPriceTicks, prepareSwapOrder, quantizeSwapOrder } from './orderbook';
 import {
-  entityInputHasCrossJurisdictionIntraRuntimeTx,
-  isCrossJurisdictionEntityInputRemoteHopAllowed,
-} from './cross-jurisdiction-boundary';
-import {
   buildCrossJurisdictionSwapSubmission,
   type CrossJurisdictionSwapSubmitParams,
   type CrossJurisdictionSwapSubmitResult,
@@ -169,11 +165,9 @@ import {
   type RuntimeOutputRoutingDeps,
 } from './runtime-output-routing';
 import {
-  collectCrossJurisdictionRemoteEntityHints,
   createRuntimeOutputRoutingDeps,
   handleInboundP2PEntityInput as routeInboundP2PEntityInput,
   registerEntityRuntimeHint as registerEntityRuntimeHintForRouting,
-  resolveRuntimeIdForCrossJurisdictionEntity,
   type RuntimeEntityRoutingDeps,
 } from './runtime-entity-routing';
 import {
@@ -196,6 +190,7 @@ import {
   type RuntimeCleanLogDeps,
 } from './runtime-clean-logs';
 import { applyRuntimeTx } from './runtime-tx-handlers';
+import { applyMergedEntityInputs } from './runtime-entity-inputs';
 import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
 import { calculateSolvency, verifySolvency } from './solvency';
 import {
@@ -251,12 +246,9 @@ import {
   createDefaultDelta,
   isDelta,
   validateEntityInput,
-  validateEntityOutput,
 } from './validation-utils';
 import type {
   AccountFrame,
-  EntityInput,
-  EntityReplica,
   EntityState,
   EntityTx,
   Env,
@@ -1180,12 +1172,9 @@ const applyRuntimeInput = async (
       rejectRuntimeInput(`Too many entity inputs: ${runtimeInput.entityInputs.length} > 10000`);
     }
 
-    // FINTECH-LEVEL TYPE SAFETY: Validate all inputs BEFORE mutating env
-    // Clone inputs to avoid mutating caller's data
     const validatedRuntimeTxs = [...runtimeInput.runtimeTxs];
     const validatedEntityInputs = [...runtimeInput.entityInputs];
 
-    // Validate entity inputs before merging
     validatedEntityInputs.forEach((input, i) => {
       try {
         validateEntityInput(input);
@@ -1199,14 +1188,7 @@ const applyRuntimeInput = async (
     });
 
     const mergedRuntimeTxs = [...validatedRuntimeTxs];
-    const mergedEntityInputs = [...validatedEntityInputs];
-
-    // Merge all entityInputs (already validated above)
-    const mergedInputs = mergeEntityInputs(mergedEntityInputs);
-
-    const entityOutbox: RoutedEntityInput[] = [];
-    const appliedEntityInputs: RoutedEntityInput[] = [];
-    const jOutbox: JInput[] = [...earlyJOutbox]; // Seed with incoming jInputs, handler jOutputs added later
+    const mergedInputs = mergeEntityInputs([...validatedEntityInputs]);
 
     // RuntimeTxs are infra bootstrap commands. Keep the tick engine focused on
     // ordering and persistence; the per-command details live in runtime-tx-handlers.
@@ -1214,329 +1196,18 @@ const applyRuntimeInput = async (
       await applyRuntimeTx(env, runtimeTx, { onJurisdictionImported: startJurisdictionWatchers });
     }
 
-    // REPLICA-DEBUG and SERVER-PROCESSING logs removed
-    const findReplicaKeyInsensitive = (entityId: string, signerId?: string | null): string | null => {
-      const entityNorm = String(entityId || '').toLowerCase();
-      const signerNorm = signerId ? String(signerId).toLowerCase() : null;
-      for (const key of env.eReplicas.keys()) {
-        const [repEntityId, repSignerId] = String(key).split(':');
-        if (!repEntityId || String(repEntityId).toLowerCase() !== entityNorm) continue;
-        if (!signerNorm) return key;
-        if (repSignerId && String(repSignerId).toLowerCase() === signerNorm) return key;
-      }
-      return null;
-    };
-
     const isReplay = envRecord(env)[ENV_REPLAY_MODE_KEY] === true;
+    const { entityOutbox, appliedEntityInputs, jOutbox } = await applyMergedEntityInputs(
+      env,
+      mergedInputs,
+      earlyJOutbox,
+      { isReplay, routingDeps: getRuntimeEntityRoutingDeps() },
+    );
 
-    for (const entityInput of mergedInputs) {
-      if (envRecord(env)[ENV_REPLAY_MODE_KEY] === true) {
-        console.log(
-          `[REPLAY][RUNTIME] merged input entity=${String(entityInput.entityId).slice(-8)} ` +
-            `signer=${String(entityInput.signerId ?? '')} txs=${entityInput.entityTxs?.length ?? 0} ` +
-            `types=${(entityInput.entityTxs ?? []).map(tx => tx.type).join(',')}`,
-        );
-      }
-      if (
-        entityInput.from &&
-        entityInputHasCrossJurisdictionIntraRuntimeTx(entityInput) &&
-        !isCrossJurisdictionEntityInputRemoteHopAllowed(
-          entityInput,
-          env.runtimeId,
-          entityInput.from,
-          entityId => resolveRuntimeIdForCrossJurisdictionEntity(env, entityId, getRuntimeEntityRoutingDeps()),
-        )
-      ) {
-        const dropDetails = {
-          entityId: entityInput.entityId,
-          from: entityInput.from,
-          txTypes: (entityInput.entityTxs || []).map(tx => tx.type),
-        };
-        if (env.scenarioMode || isReplay) {
-          failfastAssert(
-            false,
-            'RUNTIME_CROSS_J_TOPOLOGY_INVALID',
-            'Cross-j system inputs must stay inside their two-runtime route topology',
-            dropDetails,
-          );
-        }
-        console.error('❌ DROP_CROSS_J_TOPOLOGY_INVALID', dropDetails);
-        env.error('network', 'DROP_CROSS_J_TOPOLOGY_INVALID', dropDetails, entityInput.entityId);
-        continue;
-      }
-      if (entityInput.from) {
-        for (const hintedEntityId of collectCrossJurisdictionRemoteEntityHints(env, entityInput, entityInput.from, getRuntimeEntityRoutingDeps())) {
-          registerEntityRuntimeHint(env, hintedEntityId, entityInput.from);
-        }
-      }
-      // Track j-events in this input - entityInput.entityTxs guaranteed by validateEntityInput above
-      // J-EVENT logging removed - too verbose
-
-      // Ingress hard boundary: this runtime must never execute inputs for entities
-      // it does not host. Treat as malformed/poisoned external routing and drop.
-      const localEntityReplicaKey = findReplicaKeyInsensitive(entityInput.entityId, null);
-      if (!localEntityReplicaKey) {
-        const dropDetails = {
-          entityId: entityInput.entityId,
-          signerId: entityInput.signerId,
-          txTypes: (entityInput.entityTxs || []).map(tx => tx.type),
-          knownEntities: Array.from(env.eReplicas.keys()).map(k => String(k).split(':')[0]).filter(Boolean),
-        };
-        if (env.scenarioMode || isReplay) {
-          failfastAssert(
-            false,
-            'RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET',
-            'Entity input target does not exist in local runtime',
-            dropDetails,
-          );
-        }
-        console.error('❌ DROP_ENTITY_INPUT_UNKNOWN_ENTITY', dropDetails);
-        env.error('network', 'DROP_ENTITY_INPUT_UNKNOWN_ENTITY', dropDetails, entityInput.entityId);
-        continue;
-      }
-
-      // Routing boundary: resolve missing signerId to local proposer before REA apply.
-      // This keeps proposer lookup out of REA handlers and consensus logic.
-      let actualSignerId = entityInput.signerId;
-      const syntheticSignerHint = String(actualSignerId || '').toLowerCase();
-      if (
-        !actualSignerId ||
-        actualSignerId === '' ||
-        syntheticSignerHint === 'j-event' ||
-        syntheticSignerHint === 'system'
-      ) {
-        try {
-          actualSignerId = resolveEntityProposerId(env, entityInput.entityId, 'applyRuntimeInput');
-        } catch (error) {
-          if (env.scenarioMode || isReplay) {
-            throw error;
-          }
-          const message = error instanceof Error ? error.message : String(error);
-          env.error(
-            'network',
-            'DROP_ENTITY_INPUT_SIGNER_RESOLUTION_FAILED',
-            {
-              entityId: entityInput.entityId,
-              signerId: entityInput.signerId,
-              txTypes: (entityInput.entityTxs || []).map(tx => tx.type),
-              message,
-            },
-            entityInput.entityId,
-          );
-          console.error(
-            '❌ DROP_ENTITY_INPUT_SIGNER_RESOLUTION_FAILED',
-            {
-              entityId: entityInput.entityId,
-              signerId: entityInput.signerId,
-              txTypes: (entityInput.entityTxs || []).map(tx => tx.type),
-              message,
-            },
-          );
-          continue;
-        }
-      }
-      failfastAssert(
-        typeof actualSignerId === 'string' && actualSignerId.length > 0,
-        'RUNTIME_SIGNER_RESOLUTION_FAILED',
-        'Unable to resolve signerId for entity input',
-        { entityId: entityInput.entityId, providedSignerId: entityInput.signerId },
-      );
-
-      let replicaKey = `${entityInput.entityId}:${actualSignerId}`;
-      let entityReplica = env.eReplicas.get(replicaKey);
-      if (!entityReplica) {
-        // Recovery path for stale/misrouted signer hints: resolve to current proposer once.
-        // This preserves deterministic REA behavior while keeping signer resolution at ingress.
-        try {
-          const proposerSignerId = resolveEntityProposerId(env, entityInput.entityId, 'applyRuntimeInput.recovery');
-          if (proposerSignerId !== actualSignerId) {
-            actualSignerId = proposerSignerId;
-            replicaKey = `${entityInput.entityId}:${actualSignerId}`;
-            entityReplica = env.eReplicas.get(replicaKey);
-            if (!entityReplica) {
-              const insensitiveMatch = findReplicaKeyInsensitive(entityInput.entityId, actualSignerId);
-              if (insensitiveMatch) {
-                replicaKey = insensitiveMatch;
-                entityReplica = env.eReplicas.get(insensitiveMatch);
-              }
-            }
-          }
-        } catch (error) {
-          if (env.scenarioMode || isReplay) {
-            throw error;
-          }
-          const message = error instanceof Error ? error.message : String(error);
-          const localReplicaStillExists = !!findReplicaKeyInsensitive(entityInput.entityId, null);
-          if (!localReplicaStillExists) {
-            const dropDetails = {
-              entityId: entityInput.entityId,
-              signerId: entityInput.signerId,
-              txTypes: (entityInput.entityTxs || []).map(tx => tx.type),
-              message,
-            };
-            console.error('❌ DROP_ENTITY_INPUT_UNKNOWN_ENTITY', dropDetails);
-            env.error('network', 'DROP_ENTITY_INPUT_UNKNOWN_ENTITY', dropDetails, entityInput.entityId);
-            continue;
-          }
-          env.error(
-            'network',
-            'DROP_ENTITY_INPUT_SIGNER_RESOLUTION_FAILED',
-            {
-              entityId: entityInput.entityId,
-              signerId: entityInput.signerId,
-              txTypes: (entityInput.entityTxs || []).map(tx => tx.type),
-              message,
-            },
-            entityInput.entityId,
-          );
-          console.error(
-            '❌ DROP_ENTITY_INPUT_SIGNER_RESOLUTION_FAILED',
-            {
-              entityId: entityInput.entityId,
-              signerId: entityInput.signerId,
-              txTypes: (entityInput.entityTxs || []).map(tx => tx.type),
-              message,
-              stage: 'recovery',
-            },
-          );
-          continue;
-        }
-      }
-
-      if (!entityReplica) {
-        const insensitiveMatch = findReplicaKeyInsensitive(entityInput.entityId, actualSignerId);
-        if (insensitiveMatch) {
-          replicaKey = insensitiveMatch;
-          entityReplica = env.eReplicas.get(insensitiveMatch);
-        }
-      }
-
-      // REPLICA-LOOKUP logs removed - not consensus-critical
-
-      if (entityReplica) {
-        if (DEBUG) {
-          console.log(`Processing input for ${replicaKey}:`);
-          if (entityInput.entityTxs?.length) console.log(`  → ${entityInput.entityTxs.length} transactions`);
-          if (entityInput.proposedFrame) console.log(`  → Proposed frame: ${entityInput.proposedFrame.hash}`);
-          if (entityInput.hashPrecommits?.size) console.log(`  → ${entityInput.hashPrecommits.size} precommits`);
-        }
-
-        const normalizedInput: EntityInput = {
-          entityId: entityInput.entityId,
-          ...(entityInput.entityTxs ? { entityTxs: entityInput.entityTxs } : {}),
-          ...(entityInput.proposedFrame ? { proposedFrame: entityInput.proposedFrame } : {}),
-          ...(entityInput.hashPrecommits ? { hashPrecommits: entityInput.hashPrecommits } : {}),
-        };
-        const normalizedInputWithSigner: EntityInput = {
-          ...normalizedInput,
-          signerId: actualSignerId,
-        };
-        appliedEntityInputs.push({
-          ...normalizedInputWithSigner,
-          signerId: actualSignerId,
-        });
-        if (envRecord(env)[ENV_REPLAY_MODE_KEY] === true) {
-          console.log(
-            `[REPLAY][RUNTIME] applyEntityInput replica=${replicaKey.slice(0, 20)} ` +
-              `txs=${normalizedInput.entityTxs?.length ?? 0}`,
-          );
-        }
-        const { newState, outputs, jOutputs, workingReplica } = await applyEntityInput(
-          env,
-          entityReplica,
-          normalizedInputWithSigner,
-        );
-        // APPLY-ENTITY-INPUT-RESULT removed - too noisy
-
-        // IMMUTABILITY: Update replica with new state from applyEntityInput
-        // CRITICAL: Preserve proposal/lockedFrame from workingReplica (multi-signer consensus)
-        // Only cleared when threshold reached and frame committed (handled in entity-consensus.ts)
-        const {
-          proposal: _oldProposal,
-          lockedFrame: _oldLockedFrame,
-          hankoWitness: _oldHankoWitness,
-          validatorComputedState: _oldValidatorComputedState,
-          ...replicaBase
-        } = entityReplica;
-        const nextReplica: EntityReplica = {
-          ...replicaBase,
-          state: newState,
-          mempool: workingReplica.mempool, // Preserve mempool state
-        };
-        // Consensus artifacts are part of replica state. Rebuild them from the
-        // working replica instead of spreading stale optional fields from the
-        // previous replica; committed frames must be able to clear old locks.
-        if (workingReplica.proposal !== undefined) nextReplica.proposal = workingReplica.proposal;
-        if (workingReplica.lockedFrame !== undefined) nextReplica.lockedFrame = workingReplica.lockedFrame;
-        if (workingReplica.hankoWitness !== undefined) nextReplica.hankoWitness = workingReplica.hankoWitness;
-        if (workingReplica.validatorComputedState !== undefined) {
-          nextReplica.validatorComputedState = workingReplica.validatorComputedState;
-        }
-        env.eReplicas.set(replicaKey, nextReplica);
-
-        // FINTECH-LEVEL TYPE SAFETY: Validate all entity outputs before routing
-        outputs.forEach((output, index) => {
-          try {
-            validateEntityOutput(output);
-          } catch (error) {
-            logError(
-              'RUNTIME_TICK',
-              `🚨 CRITICAL FINANCIAL ERROR: Invalid EntityOutput[${index}] from ${replicaKey}!`,
-              {
-                error: (error as Error).message,
-                output,
-              },
-            );
-            throw error; // Fail fast to prevent financial routing corruption
-          }
-        });
-
-        entityOutbox.push(...outputs);
-
-        // Collect J-outputs (batch broadcasts)
-        if (jOutputs && jOutputs.length > 0) {
-          console.log(`📦 [2/6] Collecting ${jOutputs.length} jOutputs from ${replicaKey.slice(-10)}`);
-          jOutbox.push(...jOutputs);
-        }
-        // ENTITY-OUTBOX log removed - too noisy
-      } else {
-        const missingReplicaDetails = {
-          entityId: entityInput.entityId,
-          resolvedSignerId: actualSignerId,
-          inputSignerId: entityInput.signerId,
-          knownReplicas: Array.from(env.eReplicas.keys()).filter(k =>
-            String(k)
-              .toLowerCase()
-              .startsWith(`${String(entityInput.entityId).toLowerCase()}:`),
-          ),
-        };
-        if (env.scenarioMode || isReplay) {
-          failfastAssert(
-            false,
-            'RUNTIME_REPLICA_NOT_FOUND',
-            'Entity input target replica missing after signer resolution',
-            missingReplicaDetails,
-          );
-        }
-        env.error('network', 'DROP_ENTITY_INPUT_REPLICA_NOT_FOUND', missingReplicaDetails, entityInput.entityId);
-        throw new Error(
-          `RUNTIME_REPLICA_NOT_FOUND: entityId=${entityInput.entityId} resolvedSignerId=${actualSignerId}`,
-        );
-      }
-    }
-
-    // Log J-outputs — they stay in jOutbox and are returned to process() for post-save execution
     if (jOutbox.length > 0) {
-      const totalJTxs = jOutbox.reduce((n, ji) => n + ji.jTxs.length, 0);
-      console.log(
-        `📤 [J-OUTBOX] ${jOutbox.length} JInputs (${totalJTxs} JTxs) collected — will broadcast to JAdapter post-save`,
-      );
       for (const jInput of jOutbox) {
         for (const jTx of jInput.jTxs) {
           const jTxBatchSize = (jTx.data as { batchSize?: number } | undefined)?.batchSize;
-          console.log(
-            `  📋 [J-OUTBOX] ${jTx.type} from ${jTx.entityId.slice(-4)} → ${jInput.jurisdictionName} (batchSize=${jTxBatchSize ?? '?'})`,
-          );
           env.emit('JBatchQueued', {
             entityId: jTx.entityId,
             batchSize: jTxBatchSize,
@@ -1546,7 +1217,6 @@ const applyRuntimeInput = async (
       }
     }
 
-    // Only create runtime frame if there's actual work to do
     const hasRuntimeTxs = mergedRuntimeTxs.length > 0;
     const meaningfulEntityInputCount = appliedEntityInputs.reduce((count, input) => {
       const hasEntityTxs = (input.entityTxs?.length || 0) > 0;
@@ -1576,9 +1246,6 @@ const applyRuntimeInput = async (
       // IMPORTANT: Do NOT mutate env.timestamp here.
       // process() sets a single frame timestamp before applyRuntimeInput(),
       // and that exact value must be used both for frame hashing and WAL journal.
-
-      // NOTE: Snapshot creation moved to process() - single entry point
-      // applyRuntimeInput just processes inputs, process() handles snapshotting
     } else {
       if (env.quietRuntimeLogs !== true) {
         console.log(`⚪ SKIP-FRAME: No runtimeTxs, entityInputs, or outputs`);
@@ -1587,71 +1254,25 @@ const applyRuntimeInput = async (
       env.extra = undefined;
     }
 
-    // Notify Svelte about environment changes
-    // REPLICA-DEBUG and GOSSIP-DEBUG removed
-
-    // CRITICAL FIX: Initialize gossip layer if missing
     if (!env.gossip) {
       console.log(`🚨 CRITICAL: gossip layer missing from environment, creating new one`);
       env.gossip = createGossipLayer();
       console.log(`✅ Gossip layer created and added to environment`);
     }
 
-    // Compare old vs new entities
-    const oldEntityKeys = Array.from(env.eReplicas.keys()).filter(
-      key =>
-        key.startsWith('0x0000000000000000000000000000000000000000000000000000000000000001:') ||
-        key.startsWith('0x0000000000000000000000000000000000000000000000000000000000000002:'),
-    );
-    const newEntityKeys = Array.from(env.eReplicas.keys()).filter(
-      key =>
-        !key.startsWith('0x0000000000000000000000000000000000000000000000000000000000000001:') &&
-        !key.startsWith('0x0000000000000000000000000000000000000000000000000000000000000002:') &&
-        !key.startsWith('0x57e360b00f393ea6d898d6119f71db49241be80aec0fbdecf6358b0103d43a31:'),
-    );
-
-    // OLD/NEW-ENTITY-DEBUG removed - too noisy
-
-    if (oldEntityKeys.length > 0 && newEntityKeys.length > 0) {
-      const oldReplicaKey = oldEntityKeys[0];
-      const newReplicaKey = newEntityKeys[0];
-      if (!oldReplicaKey || !newReplicaKey) {
-        logError('RUNTIME_TICK', `❌ Invalid replica keys: old=${oldReplicaKey}, new=${newReplicaKey}`);
-        // Continue with empty outbox instead of crashing
-      } else {
-        // REPLICA-STRUCTURE logs removed - not consensus-critical
-      }
+    if (envRecord(env)[ENV_REPLAY_MODE_KEY] !== true) {
+      notifyEnvChange(env);
     }
 
     if (envRecord(env)[ENV_REPLAY_MODE_KEY] !== true) {
       notifyEnvChange(env);
     }
 
-    if (DEBUG && entityOutbox.length > 0) {
-      console.log(`📤 Outputs: ${entityOutbox.length} messages`);
-      entityOutbox.forEach((output, i) => {
-        console.log(
-          `  ${i + 1}. → ${output.entityId.slice(-6)} (${output.entityTxs ? `${output.entityTxs.length} txs` : ''}${output.proposedFrame ? ` proposal: ${output.proposedFrame.hash.slice(0, 10)}...` : ''}${output.hashPrecommits ? ` ${output.hashPrecommits.size} precommits` : ''})`,
-        );
-      });
-    } else if (DEBUG && entityOutbox.length === 0) {
-      console.log(`📤 No outputs generated`);
-    }
-
-    // Replica states dump removed - too verbose
-
-    // Always notify UI after processing a frame (this is the discrete simulation step)
-    if (envRecord(env)[ENV_REPLAY_MODE_KEY] !== true) {
-      notifyEnvChange(env);
-    }
-
-    // Performance logging
     const endTime = getPerfMs();
     if (DEBUG) {
       console.log(`⏱️  Tick ${env.height - 1} completed in ${endTime - startTime}ms`);
     }
 
-    // APPLY-SERVER-INPUT-FINAL-RETURN removed
     const appliedRuntimeInput: RuntimeInput = {
       runtimeTxs: mergedRuntimeTxs,
       entityInputs: appliedEntityInputs,
