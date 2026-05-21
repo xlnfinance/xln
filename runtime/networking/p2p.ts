@@ -22,6 +22,13 @@ import {
   type GossipProfileBatchRequest,
 } from '../relay/profile-batch';
 import { createStructuredLogger, shortId } from '../logger';
+import {
+  isBrowserDirectWsEndpointAllowed,
+  isSameWsUrlList,
+  normalizeOptionalWsUrl,
+  sameWsUrl,
+  uniqueTransportValues,
+} from './p2p-endpoints';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const p2pLog = createStructuredLogger('p2p');
@@ -65,60 +72,6 @@ const normalizeGossipPollMs = (value: number | undefined): number => {
   return Math.max(MIN_GOSSIP_POLL_MS, Math.floor(Number(value)));
 };
 
-const normalizeLoopbackHost = (host: string): string => {
-  const normalized = String(host || '').trim().toLowerCase();
-  if (normalized === '127.0.0.1' || normalized === '[::1]' || normalized === '::1') {
-    return 'localhost';
-  }
-  return normalized;
-};
-
-const parseWsUrl = (value: string): URL | null => {
-  try {
-    const parsed = new URL(String(value || '').trim());
-    if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') return null;
-    return parsed;
-  } catch {
-    return null;
-  }
-};
-
-const getWsUrlKey = (value: string, ignoreProtocol = false): string | null => {
-  const parsed = parseWsUrl(value);
-  if (!parsed) return null;
-  const host = normalizeLoopbackHost(parsed.hostname);
-  const port = parsed.port || (parsed.protocol === 'wss:' ? '443' : '80');
-  const pathname = parsed.pathname.replace(/\/+$/, '') || '/';
-  return `${ignoreProtocol ? 'ws*' : parsed.protocol}//${host}:${port}${pathname}`;
-};
-
-const unique = (items: string[]): string[] => {
-  const seen = new Set<string>();
-  const result: string[] = [];
-  for (const item of items) {
-    const trimmed = String(item || '').trim();
-    if (!trimmed) continue;
-    const key = getWsUrlKey(trimmed) || trimmed;
-    if (seen.has(key)) continue;
-    seen.add(key);
-    result.push(trimmed);
-  }
-  return result;
-};
-
-const normalizeOptionalWsUrl = (value: string | null | undefined): string | null => {
-  const trimmed = String(value || '').trim();
-  if (!trimmed) return null;
-  const parsed = parseWsUrl(trimmed);
-  return parsed ? trimmed : null;
-};
-
-const sameWsUrl = (left: string | null, right: string | null): boolean => {
-  if (!left && !right) return true;
-  if (!left || !right) return false;
-  return getWsUrlKey(left) === getWsUrlKey(right);
-};
-
 const logSlowBrowserTimer = (label: string, startedAt: number, extra = ''): void => {
   if (typeof window === 'undefined' || typeof performance === 'undefined') return;
   const elapsedMs = performance.now() - startedAt;
@@ -128,24 +81,6 @@ const logSlowBrowserTimer = (label: string, startedAt: number, extra = ''): void
     elapsedMs: Number(elapsedMs.toFixed(1)),
     ...(extra ? { extra } : {}),
   });
-};
-
-const isBrowserDirectWsEndpointAllowed = (endpoint: string): boolean => {
-  if (typeof window === 'undefined') return true;
-  const pageProtocol = String(window.location?.protocol || '').toLowerCase();
-  if (pageProtocol !== 'https:') return true;
-  try {
-    return new URL(endpoint).protocol === 'wss:';
-  } catch {
-    return false;
-  }
-};
-
-const isSameList = (a: string[], b: string[]): boolean => {
-  if (a.length !== b.length) return false;
-  const aSorted = [...a].map(value => getWsUrlKey(value) || value).sort();
-  const bSorted = [...b].map(value => getWsUrlKey(value) || value).sort();
-  return aSorted.every((value, index) => value === bSorted[index]);
 };
 
 const isHexPublicKey = (value: string): boolean => /^0x(?:[0-9a-fA-F]{66}|[0-9a-fA-F]{130})$/.test(value);
@@ -239,9 +174,9 @@ export class RuntimeP2P {
     failfastAssert(isRuntimeId(options.runtimeId), 'P2P_RUNTIME_ID_INVALID', 'RuntimeP2P runtimeId must be signer EOA');
     this.runtimeId = normalizeRuntimeId(options.runtimeId);
     this.signerId = options.signerId || '1';
-    this.relayUrls = unique(options.relayUrls || [DEFAULT_RELAY_URL]);
+    this.relayUrls = uniqueTransportValues(options.relayUrls || [DEFAULT_RELAY_URL]);
     this.wsUrl = normalizeOptionalWsUrl(options.wsUrl);
-    this.seedRuntimeIds = unique(options.seedRuntimeIds || []);
+    this.seedRuntimeIds = uniqueTransportValues(options.seedRuntimeIds || []);
     this.advertiseEntityIds = options.advertiseEntityIds || null;
     this.gossipPollMs = normalizeGossipPollMs(options.gossipPollMs);
     this.onEntityInput = options.onEntityInput;
@@ -263,7 +198,7 @@ export class RuntimeP2P {
 
   updateConfig(config: P2PConfig) {
     if (config.seedRuntimeIds) {
-      this.seedRuntimeIds = unique(config.seedRuntimeIds);
+      this.seedRuntimeIds = uniqueTransportValues(config.seedRuntimeIds);
     }
     if (Object.prototype.hasOwnProperty.call(config, 'wsUrl')) {
       const nextUrl = normalizeOptionalWsUrl(config.wsUrl);
@@ -287,8 +222,8 @@ export class RuntimeP2P {
       }
     }
     if (config.relayUrls) {
-      const nextUrls = unique(config.relayUrls);
-      if (!isSameList(nextUrls, this.relayUrls)) {
+      const nextUrls = uniqueTransportValues(config.relayUrls);
+      if (!isSameWsUrlList(nextUrls, this.relayUrls)) {
         this.relayUrls = nextUrls;
         this.reconnect();
         return;
@@ -709,7 +644,7 @@ export class RuntimeP2P {
   }
 
   async ensureProfiles(entityIds: string[]): Promise<boolean> {
-    const requestedEntityIds = unique(entityIds.map(normalizeId)).filter(Boolean);
+    const requestedEntityIds = uniqueTransportValues(entityIds.map(normalizeId)).filter(Boolean);
     if (requestedEntityIds.length === 0) return true;
     let requiredEntityIds = this.expandRequiredProfileIds(requestedEntityIds);
     let missingEntityIds = requiredEntityIds.filter(entityId => !this.hasProfileForEntity(entityId));
