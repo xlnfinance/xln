@@ -29,8 +29,7 @@ import { maybeHandleQaRequest } from './qa/api';
 import { getStorageHealthSnapshotSync } from './orchestrator/storage-monitor';
 import { registerSignerKey } from './account-crypto';
 import { createJAdapter, DEV_CHAIN_IDS, type JAdapter } from './jadapter';
-import type { JAdapterConfig, JTokenInfo } from './jadapter/types';
-import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from './jadapter/default-tokens';
+import type { JAdapterConfig } from './jadapter/types';
 import { resolveEntityProposerId } from './state-helpers';
 import {
   createMarketMakerServerState,
@@ -49,7 +48,6 @@ import {
   hasAccount,
 } from './server/entity-lookup';
 import {
-  HUB_REQUIRED_TOKEN_COUNT,
   getBootstrapReserveHealth,
   getHubMeshHealth,
   getRequestCreditCap,
@@ -91,7 +89,6 @@ import {
   resolveRequiredAnvilRpc,
 } from './server-utils';
 import { ethers } from 'ethers';
-import { ERC20Mock__factory } from '../jurisdictions/typechain-types/index.ts';
 import {
   attachRuntimeAdapterTicker,
   closeInvalidRuntimeAdapterMessage,
@@ -112,6 +109,7 @@ import {
   readCanonicalJurisdictionsJson,
   updateJurisdictionsJson,
 } from './server/jurisdictions';
+import { createTokenCatalogController } from './server/token-catalog';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
@@ -129,13 +127,14 @@ let cachedHealthResponse:
   | null = null;
 let cachedHealthInFlight: Promise<{ fullBody: string; publicBody: string }> | null = null;
 
-let tokenCatalogCache: JTokenInfo[] | null = null;
-let tokenCatalogPromise: Promise<JTokenInfo[]> | null = null;
 let processGuardsInstalled = false;
 const runtimeIngressReceipts = createRuntimeIngressReceiptStore();
 const STACK_COMPATIBILITY_PROBE_ENTITY = `0x${'11'.repeat(32)}`;
 const serverLog = createStructuredLogger('server');
 const faucetLog = createStructuredLogger('server.faucet');
+const tokenCatalogController = createTokenCatalogController({
+  getAdapter: () => globalJAdapter,
+});
 
 const probeLocalAnvilContractStack = async (adapter: JAdapter): Promise<{ ok: boolean; reason: string }> => {
   const depositoryAddress = String(adapter.addresses?.depository || '').trim();
@@ -401,7 +400,7 @@ const marketMakerState = createMarketMakerServerState();
 const externalWalletApi = createExternalWalletApi({
   getJAdapter: () => globalJAdapter,
   getRuntimeId: () => String(serverEnv?.runtimeId || ''),
-  getTokenCatalog: async () => ensureTokenCatalog(),
+  getTokenCatalog: async () => tokenCatalogController.ensureTokenCatalog(),
   jsonHeaders: JSON_HEADERS,
   faucetSeed: FAUCET_SEED,
   faucetSignerLabel: FAUCET_SIGNER_LABEL,
@@ -488,183 +487,6 @@ const stopMarketMakerLoop = (): void => {
   resetMarketMakerServerState(marketMakerState);
 };
 
-const deployDefaultTokensOnRpc = async (): Promise<void> => {
-  const adapter = globalJAdapter;
-  if (!adapter || adapter.mode === 'browservm') return;
-  const existing = await adapter.getTokenRegistry().catch(() => []);
-  const existingSymbols = new Set(
-    existing
-      .map(token => String(token.symbol || '').trim().toUpperCase())
-      .filter(symbol => symbol.length > 0),
-  );
-
-  const signer = adapter.signer;
-  const depository = adapter.depository;
-  const depositoryAddress = adapter.addresses?.depository;
-  if (!depositoryAddress) {
-    throw new Error('Depository address not available for token deployment');
-  }
-
-  serverLog.info('tokens.deploy_defaults.start');
-  const erc20Factory = new ethers.ContractFactory(
-    ERC20Mock__factory.abi,
-    ERC20Mock__factory.bytecode,
-    signer as ethers.ContractRunner,
-  );
-
-  for (const token of DEFAULT_TOKEN_CATALOG) {
-    if (existingSymbols.has(String(token.symbol || '').trim().toUpperCase())) {
-      continue;
-    }
-    const tokenContract = await erc20Factory.deploy(
-      token.name,
-      token.symbol,
-      DEFAULT_TOKEN_SUPPLY,
-    ) as unknown as {
-      waitForDeployment(): Promise<unknown>;
-      getAddress(): Promise<string>;
-      approve(spender: string, amount: bigint): Promise<{ wait(): Promise<unknown> }>;
-    };
-    await tokenContract.waitForDeployment();
-    const tokenAddress = await tokenContract.getAddress();
-    serverLog.info('tokens.deployed', { symbol: token.symbol, address: shortId(tokenAddress, 10) });
-
-    const approveTx = await tokenContract.approve(depositoryAddress, TOKEN_REGISTRATION_AMOUNT);
-    await approveTx.wait();
-
-    const registerTx = await depository
-      .connect(signer as unknown as Parameters<typeof depository.connect>[0])
-      .adminRegisterExternalToken({
-      entity: ethers.ZeroHash,
-      contractAddress: tokenAddress,
-      externalTokenId: 0,
-      tokenType: 0,
-      internalTokenId: 0,
-      amount: TOKEN_REGISTRATION_AMOUNT,
-    });
-    await registerTx.wait();
-    serverLog.info('tokens.registered', { symbol: token.symbol, address: shortId(tokenAddress, 10) });
-  }
-};
-
-const TOKEN_CATALOG_TIMEOUT_MS = Math.max(1000, Number(process.env['TOKEN_CATALOG_TIMEOUT_MS'] || '6000'));
-
-const withTimeout = async <T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> => {
-  let timer: ReturnType<typeof setTimeout> | null = null;
-  try {
-    return await Promise.race<T>([
-      promise,
-      new Promise<T>((_, reject) => {
-        timer = setTimeout(() => reject(new Error(`${label} timeout after ${timeoutMs}ms`)), timeoutMs);
-      }),
-    ]);
-  } finally {
-    if (timer) clearTimeout(timer);
-  }
-};
-
-const ensureTokenCatalog = async (): Promise<JTokenInfo[]> => {
-  const adapter = globalJAdapter;
-  if (!adapter) return [];
-  const fallbackTokens = tokenCatalogCache ?? [];
-  const safeGetCode = async (address: string): Promise<string> => {
-    try {
-      return await withTimeout(
-        adapter.provider.getCode(address).catch(() => '0x'),
-        TOKEN_CATALOG_TIMEOUT_MS,
-        'provider.getCode',
-      );
-    } catch (error) {
-      serverLog.warn('token_catalog.get_code_failed', { error: (error as Error).message });
-      return '0x';
-    }
-  };
-  const safeGetRegistry = async (): Promise<JTokenInfo[]> => {
-    try {
-      return await withTimeout(
-        adapter.getTokenRegistry().catch(() => []),
-        TOKEN_CATALOG_TIMEOUT_MS,
-        'getTokenRegistry',
-      );
-    } catch (error) {
-      serverLog.warn('token_catalog.registry_failed', { error: (error as Error).message });
-      return fallbackTokens;
-    }
-  };
-  if (tokenCatalogCache && tokenCatalogCache.length > 0) {
-    if (adapter.mode !== 'browservm') {
-      const firstToken = tokenCatalogCache[0];
-      if (firstToken?.address) {
-        const code = await safeGetCode(firstToken.address);
-        if (code !== '0x' && code.length > 10) {
-          return tokenCatalogCache;
-        }
-        serverLog.warn('token_catalog.cache_stale');
-        tokenCatalogCache = null;
-      }
-    } else {
-      return tokenCatalogCache;
-    }
-  }
-  if (tokenCatalogPromise) return tokenCatalogPromise;
-
-  tokenCatalogPromise = (async () => {
-    const current = await safeGetRegistry();
-    const needsMoreDefaultTokens = adapter.mode !== 'browservm' && current.length < HUB_REQUIRED_TOKEN_COUNT;
-
-    // Verify tokens have actual code on-chain (not stale addresses)
-    if (current.length > 0 && adapter.mode !== 'browservm') {
-      const firstToken = current[0];
-      if (firstToken?.address) {
-        const code = await safeGetCode(firstToken.address);
-        if (code === '0x' || code.length < 10) {
-          serverLog.warn('token_catalog.token_code_missing', {
-            symbol: firstToken.symbol,
-            address: firstToken.address,
-          });
-          try {
-            await withTimeout(deployDefaultTokensOnRpc(), TOKEN_CATALOG_TIMEOUT_MS * 2, 'deployDefaultTokensOnRpc');
-          } catch (error) {
-            serverLog.warn('token_catalog.deploy_fallback_failed', { error: (error as Error).message });
-            return current;
-          }
-          const refreshed = await safeGetRegistry();
-          return refreshed;
-        }
-      }
-      if (needsMoreDefaultTokens) {
-        try {
-          await withTimeout(deployDefaultTokensOnRpc(), TOKEN_CATALOG_TIMEOUT_MS * 2, 'deployMissingDefaultTokensOnRpc');
-        } catch (error) {
-          serverLog.warn('token_catalog.deploy_missing_failed', { error: (error as Error).message });
-          return current;
-        }
-        const refreshed = await safeGetRegistry();
-        return refreshed;
-      }
-      return current;
-    }
-
-    if (current.length > 0 || adapter.mode === 'browservm') {
-      return current;
-    }
-
-    try {
-      await withTimeout(deployDefaultTokensOnRpc(), TOKEN_CATALOG_TIMEOUT_MS * 2, 'deployDefaultTokensOnRpc');
-    } catch (error) {
-      serverLog.warn('token_catalog.deploy_fallback_failed', { error: (error as Error).message });
-      return current;
-    }
-    const refreshed = await safeGetRegistry();
-    return refreshed;
-  })();
-
-  const tokens = await tokenCatalogPromise;
-  tokenCatalogPromise = null;
-  if (tokens.length > 0) tokenCatalogCache = tokens;
-  return tokens;
-};
-
 export type XlnServerOptions = {
   port: number;
   host?: string | undefined;
@@ -678,7 +500,6 @@ const DEFAULT_OPTIONS: XlnServerOptions = {
   staticDir: './frontend/build',
   serverId: 'xln-server',
 };
-const DEFAULT_TOKEN_CATALOG = DEFAULT_TOKENS.map(token => ({ ...token }));
 const getDefaultLocalRelayUrl = (port?: number): string => `ws://localhost:${port ?? DEFAULT_OPTIONS.port}/relay`;
 const resolveConfiguredRelayUrl = (port?: number): string => {
   const fallback = getDefaultLocalRelayUrl(port);
@@ -1119,7 +940,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
         const bootstrapReserves = await getBootstrapReserveHealth(env, {
           activeHubEntityIds: relayStore.activeHubEntityIds,
           marketMakerEntityId: marketMakerState.entityId,
-          loadTokenCatalog: ensureTokenCatalog,
+          loadTokenCatalog: tokenCatalogController.ensureTokenCatalog,
         });
         const payload = {
           ...health,
@@ -1608,7 +1429,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       const hubEntityId = hubs[0]!.entityId;
 
       const hubSignerId = resolveEntityProposerId(env, hubEntityId, 'faucet-reserve');
-      const tokenCatalog = await ensureTokenCatalog();
+      const tokenCatalog = await tokenCatalogController.ensureTokenCatalog();
       let tokenMeta = tokenCatalog.find(t => Number(t.tokenId) === Number(tokenId));
       if (!tokenMeta && tokenSymbol) {
         tokenMeta = tokenCatalog.find(t => t.symbol?.toUpperCase?.() === tokenSymbol.toUpperCase());
