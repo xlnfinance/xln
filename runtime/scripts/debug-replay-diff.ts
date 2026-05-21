@@ -13,6 +13,16 @@ import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from 
 import { generateLazyEntityId } from '../entity-factory';
 import { buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
 import { serializeTaggedJson } from '../serialization-utils';
+import type { BrowserVMState, EntityReplica, JReplica } from '../types';
+
+type RuntimeCheckpointSnapshot = {
+  height?: number;
+  timestamp?: number;
+  activeJurisdiction?: string;
+  eReplicas: Array<[string, EntityReplica]>;
+  jReplicas: Array<[string, JReplica]>;
+  browserVMState?: BrowserVMState;
+};
 
 function assert(condition: unknown, message: string): asserts condition {
   if (!condition) throw new Error(`ASSERT: ${message}`);
@@ -22,6 +32,93 @@ const render = (value: unknown): string => serializeTaggedJson(value);
 
 const drainBackgroundPersistence = (): Promise<void> =>
   new Promise((resolve) => setTimeout(resolve, 50));
+
+const readReplicaEntries = <T>(value: unknown): Array<[string, T]> => {
+  if (!Array.isArray(value)) return [];
+  return value.flatMap((entry): Array<[string, T]> => {
+    if (!Array.isArray(entry) || entry.length !== 2 || typeof entry[0] !== 'string') return [];
+    return [[entry[0], entry[1] as T]];
+  });
+};
+
+const asRecord = (value: unknown): Record<string, unknown> =>
+  value && typeof value === 'object' ? value as Record<string, unknown> : {};
+
+const readString = (value: unknown): string | undefined =>
+  typeof value === 'string' ? value : undefined;
+
+const readNumber = (value: unknown): number | undefined =>
+  typeof value === 'number' ? value : undefined;
+
+const readBigInt = (value: unknown): bigint | undefined =>
+  typeof value === 'bigint' ? value : undefined;
+
+const readPosition = (value: unknown): JReplica['position'] => {
+  const record = asRecord(value);
+  return {
+    x: readNumber(record['x']) ?? 0,
+    y: readNumber(record['y']) ?? 0,
+    z: readNumber(record['z']) ?? 0,
+  };
+};
+
+const readJReplicaEntries = (value: unknown): Array<[string, JReplica]> =>
+  readReplicaEntries<Partial<JReplica>>(value).map(([key, replica]) => {
+    const contracts = asRecord(replica.contracts);
+    const blockTimeMs = readNumber(replica.blockTimeMs);
+    const defaultDisputeDelayBlocks = readNumber(replica.defaultDisputeDelayBlocks);
+    const chainId = readNumber(replica.chainId);
+    const depositoryAddress = readString(replica.depositoryAddress);
+    const entityProviderAddress = readString(replica.entityProviderAddress);
+    const depositoryContract = readString(contracts['depository']);
+    const entityProviderContract = readString(contracts['entityProvider']);
+    return [
+      key,
+      {
+        name: replica.name ?? key,
+        blockNumber: readBigInt(replica.blockNumber) ?? 0n,
+        stateRoot: replica.stateRoot instanceof Uint8Array && replica.stateRoot.length === 32
+          ? replica.stateRoot
+          : new Uint8Array(32),
+        mempool: Array.isArray(replica.mempool) ? replica.mempool : [],
+        blockDelayMs: readNumber(replica.blockDelayMs) ?? 0,
+        lastBlockTimestamp: readNumber(replica.lastBlockTimestamp) ?? 0,
+        ...(blockTimeMs !== undefined ? { blockTimeMs } : {}),
+        ...(defaultDisputeDelayBlocks !== undefined ? { defaultDisputeDelayBlocks } : {}),
+        ...(typeof replica.blockReady === 'boolean' ? { blockReady: replica.blockReady } : {}),
+        ...(Array.isArray(replica.rpcs) ? { rpcs: replica.rpcs.filter((rpc): rpc is string => typeof rpc === 'string') } : {}),
+        ...(chainId !== undefined ? { chainId } : {}),
+        position: readPosition(replica.position),
+        ...(depositoryAddress ? { depositoryAddress } : {}),
+        ...(entityProviderAddress ? { entityProviderAddress } : {}),
+        ...(Object.keys(contracts).length > 0
+          ? {
+              contracts: {
+                ...(depositoryContract ? { depository: depositoryContract } : {}),
+                ...(entityProviderContract ? { entityProvider: entityProviderContract } : {}),
+              },
+            }
+          : {}),
+      },
+    ];
+  });
+
+const readCheckpointSnapshot = (value: Record<string, unknown>): RuntimeCheckpointSnapshot => {
+  const height = value['height'];
+  const timestamp = value['timestamp'];
+  const activeJurisdiction = value['activeJurisdiction'];
+  const browserVMState = value['browserVMState'];
+  return {
+    ...(typeof height === 'number' ? { height } : {}),
+    ...(typeof timestamp === 'number' ? { timestamp } : {}),
+    ...(typeof activeJurisdiction === 'string' ? { activeJurisdiction } : {}),
+    eReplicas: readReplicaEntries<EntityReplica>(value['eReplicas']),
+    jReplicas: readJReplicaEntries(value['jReplicas']),
+    ...(browserVMState && typeof browserVMState === 'object'
+      ? { browserVMState: browserVMState as BrowserVMState }
+      : {}),
+  };
+};
 
 const collectDiffs = (
   left: unknown,
@@ -136,8 +233,14 @@ async function main() {
     chainId: 31337,
   };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, {
+  const jReplica: JReplica = {
     name: jurisdiction.name,
+    blockNumber: 0n,
+    stateRoot: new Uint8Array(32),
+    mempool: [],
+    blockDelayMs: 0,
+    lastBlockTimestamp: env.timestamp,
+    position: { x: 0, y: 0, z: 0 },
     depositoryAddress: jurisdiction.depositoryAddress,
     entityProviderAddress: jurisdiction.entityProviderAddress,
     chainId: jurisdiction.chainId,
@@ -145,7 +248,8 @@ async function main() {
       depository: jurisdiction.depositoryAddress,
       entityProvider: jurisdiction.entityProviderAddress,
     },
-  } as any);
+  };
+  env.jReplicas.set(jurisdiction.name, jReplica);
 
   enqueueRuntimeInput(env, {
     runtimeTxs: [
@@ -222,13 +326,14 @@ async function main() {
   const replayEnv = createEmptyEnv(seed);
   replayEnv.runtimeId = runtimeId;
   replayEnv.dbNamespace = runtimeId;
-  replayEnv.height = Number((checkpointSnapshot as any).height || 0);
-  replayEnv.timestamp = Number((checkpointSnapshot as any).timestamp || 0);
-  replayEnv.activeJurisdiction = (checkpointSnapshot as any).activeJurisdiction;
-  replayEnv.eReplicas = new Map((checkpointSnapshot as any).eReplicas || []);
-  replayEnv.jReplicas = new Map((checkpointSnapshot as any).jReplicas || []);
-  if ((checkpointSnapshot as any).browserVMState) {
-    replayEnv.browserVMState = (checkpointSnapshot as any).browserVMState;
+  const checkpoint = readCheckpointSnapshot(checkpointSnapshot);
+  replayEnv.height = checkpoint.height ?? 0;
+  replayEnv.timestamp = checkpoint.timestamp ?? 0;
+  replayEnv.activeJurisdiction = checkpoint.activeJurisdiction;
+  replayEnv.eReplicas = new Map(checkpoint.eReplicas);
+  replayEnv.jReplicas = new Map(checkpoint.jReplicas);
+  if (checkpoint.browserVMState) {
+    replayEnv.browserVMState = checkpoint.browserVMState;
   }
 
   const applyAllowedKey = Symbol.for('xln.runtime.env.apply.allowed');
@@ -264,7 +369,7 @@ async function main() {
         }
       : null;
   const liveReplica = Array.from(env.eReplicas.values()).find((replica) => replica.entityId === entityA);
-  const replayReplica = Array.from(replayEnv.eReplicas.values()).find((replica: any) => replica.entityId === entityA);
+  const replayReplica = Array.from(replayEnv.eReplicas.values()).find((replica) => replica.entityId === entityA);
   const liveAccounts = liveReplica
     ? Array.from(liveReplica.state.accounts.entries()).map(([key, account]) => ({
         key,
@@ -281,7 +386,7 @@ async function main() {
       }))
     : [];
   const replayAccounts = replayReplica
-    ? Array.from(replayReplica.state.accounts.entries()).map(([key, account]: [string, any]) => ({
+    ? Array.from(replayReplica.state.accounts.entries()).map(([key, account]) => ({
         key,
         hasPendingAccountInput: Boolean(account.pendingAccountInput),
         pendingAccountInputType: account.pendingAccountInput ? typeof account.pendingAccountInput : 'none',
@@ -298,8 +403,8 @@ async function main() {
 
   console.log(JSON.stringify({
     runtimeId,
-    liveHeight: (liveSnapshot as any).height,
-    replayHeight: (replaySnapshot as any).height,
+    liveHeight: liveSnapshot['height'],
+    replayHeight: replaySnapshot['height'],
     liveHash: (await import('../wal/hash')).computePersistedEnvStateHash(liveSnapshot),
     replayHash: (await import('../wal/hash')).computePersistedEnvStateHash(replaySnapshot),
     diffCount: diffs.length,
