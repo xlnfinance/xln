@@ -2,7 +2,14 @@ import { writable, get, derived } from 'svelte/store';
 import { HDNodeWallet, Mnemonic, getAddress, getIndexedAccountPath, keccak256, toUtf8Bytes } from 'ethers';
 import type { ConsensusConfig, Env, JurisdictionConfig, PersistedFrameJournal, RoutedEntityInput, RuntimeInput, XLNModule } from '@xln/runtime/xln-api';
 import { runtimeOperations, runtimes, activeRuntimeId } from './runtimeStore';
-import { xlnEnvironment, setXlnEnvironment, resolveRelayUrls, getXLN } from './xlnStore';
+import {
+  xlnEnvironment,
+  setXlnEnvironment,
+  resolveRelayUrls,
+  getXLN,
+  enqueueAndProcess,
+  enqueueEntityInputs as enqueueXlnEntityInputs,
+} from './xlnStore';
 import { settings } from './settingsStore';
 import { toasts } from './toastStore';
 import { writeSavedCollateralPolicy, writeHubJoinPreference } from '$lib/utils/onboardingPreferences';
@@ -666,7 +673,6 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
     if (!env) return;
     const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
 
-    const { getXLN } = await import('./xlnStore');
     const xln = await getXLN();
 
     // Stop WS/P2P first to avoid new inbound events while shutting down loop.
@@ -690,7 +696,6 @@ async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
 }
 
 async function stopRuntimeEnv(env: Env): Promise<void> {
-  const { getXLN } = await import('./xlnStore');
   const xln = await getXLN();
 
   for (const jReplica of env.jReplicas?.values?.() || []) {
@@ -1101,7 +1106,6 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
   }
 
   if (xln.startP2P) {
-    const { resolveRelayUrls } = await import('./xlnStore');
     xln.startP2P(env, {
       signerId: runtimeIdLower,
       relayUrls: resolveRelayUrls(),
@@ -1180,7 +1184,6 @@ export const vaultOperations = {
       const env = unwrapLiveRuntimeEnv(entryEnv) ?? entryEnv;
       if (!runtime || !env) return false;
 
-      const { getXLN } = await import('./xlnStore');
       const xln = await getXLN();
       if (typeof xln.getPersistedLatestHeight !== 'function') return false;
 
@@ -1211,7 +1214,6 @@ export const vaultOperations = {
   },
 
   async enqueueRuntimeInput(env: Env, input: RuntimeInput): Promise<Env> {
-    const { enqueueAndProcess } = await import('./xlnStore');
     return enqueueAndProcess(env, input);
   },
 
@@ -1223,7 +1225,6 @@ export const vaultOperations = {
     const runtime = state.runtimes[runtimeId];
     if (!runtime) throw new Error(`Runtime not found: ${runtimeId}`);
 
-    const { getXLN } = await import('./xlnStore');
     const xln = await getXLN();
     await registerRuntimeSignerKeys(runtime, xln);
 
@@ -1316,18 +1317,15 @@ export const vaultOperations = {
   },
 
   async enqueueEntityInputs(env: Env, inputs: RoutedEntityInput[]): Promise<Env> {
-    const { enqueueEntityInputs } = await import('./xlnStore');
-    return enqueueEntityInputs(env, inputs);
+    return enqueueXlnEntityInputs(env, inputs);
   },
 
   async getPersistedLatestHeight(env: Env): Promise<number> {
-    const { getXLN } = await import('./xlnStore');
     const xln = await getXLN();
     return xln.getPersistedLatestHeight(unwrapLiveRuntimeEnv(env) ?? env);
   },
 
   async listPersistedCheckpointHeights(env: Env): Promise<number[]> {
-    const { getXLN } = await import('./xlnStore');
     const xln = await getXLN();
     return xln.listPersistedCheckpointHeights(unwrapLiveRuntimeEnv(env) ?? env);
   },
@@ -1337,13 +1335,11 @@ export const vaultOperations = {
     runtimeSeed?: string | null,
     options?: { fromSnapshotHeight?: number },
   ) {
-    const { getXLN } = await import('./xlnStore');
     const xln = await getXLN();
     return xln.verifyRuntimeChain(runtimeId, runtimeSeed, options);
   },
 
   async readPersistedFrameJournal(env: Env, height: number): Promise<PersistedFrameJournal | null> {
-    const { getXLN } = await import('./xlnStore');
     const xln = await getXLN();
     return xln.readPersistedFrameJournal(unwrapLiveRuntimeEnv(env) ?? env, height);
   },
@@ -1489,7 +1485,6 @@ export const vaultOperations = {
     const runtimeId = normalizeRuntimeId(id); // Use normalized runtime ID key
 
     // Import XLN and create env BEFORE returning
-    const { getXLN } = await import('./xlnStore');
     const xln = await getXLN();
     markPerf('load_xln_runtime');
     const newEnv = xln.createEmptyEnv(seed);
@@ -1737,7 +1732,6 @@ export const vaultOperations = {
 
     // Start P2P for this runtime's env (one WS per runtime, stays alive across switches)
     if (xln.startP2P) {
-      const { resolveRelayUrls } = await import('./xlnStore');
       const relayUrls = resolveRelayUrls();
       xln.startP2P(newEnv, {
         signerId: runtimeId,
@@ -1791,8 +1785,6 @@ export const vaultOperations = {
       // CRITICAL: Re-register ALL signer private keys when switching runtimes
       // Keys are stored in memory (signerKeys Map), lost on page refresh
       // Must re-register from HD derivation to enable signing
-      const { getXLN } = await import('./xlnStore');
-      const { resolveRelayUrls } = await import('./xlnStore');
       const xln = await getXLN();
 
       for (const signer of runtime.signers) {
@@ -1867,7 +1859,7 @@ export const vaultOperations = {
     // CRITICAL: Register HD-derived private key with runtime BEFORE creating entity
     // Why: Runtime's deriveSignerKeySync uses different derivation than BIP44 HD
     // Without this, hanko verification fails (signature from wrong key)
-    import('./xlnStore').then(async ({ getXLN }) => {
+    void (async () => {
       const xln = await getXLN();
       const privateKey = derivePrivateKey(runtime.seed, derivationIndex);
       const privateKeyBytes = new Uint8Array(
@@ -1881,7 +1873,7 @@ export const vaultOperations = {
       if (entityId) {
         this.setSignerEntity(nextIndex, entityId);
       }
-    }).catch(err => {
+    })().catch(err => {
       console.warn('[VaultStore] Failed to register key/create entity:', err);
     });
     // Auto-faucet removed - user can request funds manually via XLNSend
@@ -2036,7 +2028,6 @@ export const vaultOperations = {
       let xln: XLNModule | null = null;
 
       if (all.length > 0) {
-        const { getXLN } = await import('./xlnStore');
         xln = await getXLN();
 
         for (const runtime of all) {
@@ -2119,7 +2110,6 @@ export const vaultOperations = {
     if (!signer?.entityId) return 0n;
 
     try {
-      const { getXLN } = await import('./xlnStore');
       const xln = await getXLN();
       const env = unwrapLiveRuntimeEnv(get(xlnEnvironment));
       const jadapter = env ? xln.getEntityJAdapter(env, signer.entityId, signer.address) : null;
@@ -2142,7 +2132,6 @@ export const vaultOperations = {
     if (!signer?.entityId) return { success: false, error: 'No entity for signer' };
 
     try {
-      const { getXLN } = await import('./xlnStore');
       const xln = await getXLN();
       if (!xln.queueEntityInput) return { success: false, error: 'XLN queueEntityInput unavailable' };
       const env = unwrapLiveRuntimeEnv(get(xlnEnvironment));

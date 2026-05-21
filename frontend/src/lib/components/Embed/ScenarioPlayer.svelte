@@ -2,6 +2,7 @@
   import { onMount, onDestroy } from 'svelte';
   import Graph3DPanel from '$lib/view/panels/Graph3DPanel.svelte';
   import { timeOperations, currentTimeIndex, maxTimeIndex } from '$lib/stores/timeStore';
+  import { getEnv } from '$lib/stores/xlnStore';
 
   export let scenario: string = 'phantom-grid';  // Scenario name or inline
   export let width: string = '100%';
@@ -52,7 +53,6 @@
       const XLN = await import(/* @vite-ignore */ runtimeUrl);
 
       // Get environment
-      const { getEnv } = await import('$lib/stores/xlnStore');
       const env = getEnv();
 
       if (!env) {
