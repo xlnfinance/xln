@@ -674,9 +674,9 @@ const stopProcess = async (proc: ChildProcess | null): Promise<void> => {
 const clearRelayState = (): void => {
   for (const [, client] of relayStore.clients.entries()) {
     try {
-      client.ws.close(4000, 'mesh-reset');
+      client.ws.close?.(4000, 'mesh-reset');
     } catch {
-      try { client.ws.close(); } catch {}
+      try { client.ws.close?.(); } catch {}
     }
   }
   relayStore.clients.clear();
