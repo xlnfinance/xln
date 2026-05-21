@@ -83,6 +83,19 @@ type RunTask = {
 };
 
 type ManagedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
+type JsonRecord = Record<string, unknown>;
+type HealthPayload = JsonRecord;
+
+const isRecord = (value: unknown): value is JsonRecord =>
+  typeof value === 'object' && value !== null;
+
+const recordOrEmpty = (value: unknown): JsonRecord => (isRecord(value) ? value : {});
+
+const arrayOf = (record: JsonRecord, key: string): unknown[] =>
+  Array.isArray(record[key]) ? record[key] : [];
+
+const recordArrayOf = (record: JsonRecord, key: string): JsonRecord[] =>
+  arrayOf(record, key).filter(isRecord);
 
 type RunnerLockPayload = {
   pid: number;
@@ -550,16 +563,17 @@ const buildGrepMatcher = (grep: string): ((entry: PlaywrightTarget) => boolean) 
 
 const escapeRegExp = (value: string): string => value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
-const collectSpecsFromSuite = (suite: any, out: Array<{ title: string; file?: string; line?: number }>): void => {
-  for (const spec of suite?.specs ?? []) {
-    const title = String(spec?.title || '').trim();
+const collectSpecsFromSuite = (suite: unknown, out: Array<{ title: string; file?: string; line?: number }>): void => {
+  const suiteRecord = recordOrEmpty(suite);
+  for (const spec of recordArrayOf(suiteRecord, 'specs')) {
+    const title = String(spec['title'] || '').trim();
     if (!title) continue;
     const entry: { title: string; file?: string; line?: number } = { title };
-    if (typeof spec?.file === 'string') entry.file = spec.file;
-    if (Number.isFinite(Number(spec?.line))) entry.line = Number(spec.line);
+    if (typeof spec['file'] === 'string') entry.file = spec['file'];
+    if (Number.isFinite(Number(spec['line']))) entry.line = Number(spec['line']);
     out.push(entry);
   }
-  for (const child of suite?.suites ?? []) collectSpecsFromSuite(child, out);
+  for (const child of arrayOf(suiteRecord, 'suites')) collectSpecsFromSuite(child, out);
 };
 
 const listDynamicPlaywrightTargets = (
@@ -586,7 +600,7 @@ const listDynamicPlaywrightTargets = (
     },
   );
   const stdout = String(res.stdout || '').trim();
-  let parsed: any = null;
+  let parsed: unknown = null;
   try {
     parsed = JSON.parse(stdout);
   } catch {
@@ -594,7 +608,7 @@ const listDynamicPlaywrightTargets = (
     throw new Error(`Failed to list tests for ${file}: ${stderr || stdout || `exit=${String(res.status)}`}`);
   }
   const specs: Array<{ title: string; file?: string; line?: number }> = [];
-  for (const suite of parsed?.suites ?? []) collectSpecsFromSuite(suite, specs);
+  for (const suite of arrayOf(recordOrEmpty(parsed), 'suites')) collectSpecsFromSuite(suite, specs);
   if (specs.length === 0) {
     throw new Error(`No isolated tests discovered for ${file}`);
   }
@@ -888,8 +902,8 @@ const waitForRpcReady = async (rpcUrl: string, timeoutMs: number, expectedChainI
         2_000,
       );
       if (res.ok) {
-        const body = (await res.json()) as any;
-        const chainId = Number.parseInt(String(body?.result || '0x0'), 16);
+        const body = recordOrEmpty(await res.json());
+        const chainId = Number.parseInt(String(body['result'] || '0x0'), 16);
         if (chainId === expectedChainId) return;
       }
     } catch {
@@ -914,20 +928,24 @@ const waitForHttpReady = async (url: string, timeoutMs: number): Promise<void> =
   throw new Error(`HTTP endpoint not ready: ${url}`);
 };
 
-const waitForServerHealthy = async (apiUrl: string, timeoutMs: number): Promise<any> => {
+const waitForServerHealthy = async (apiUrl: string, timeoutMs: number): Promise<HealthPayload> => {
   const deadline = Date.now() + timeoutMs;
-  let lastHealth: any = null;
+  let lastHealth: HealthPayload | null = null;
   while (Date.now() < deadline) {
     try {
       const res = await fetchWithTimeout(`${apiUrl}/api/health`, {}, 2_000);
       if (res.ok) {
-        const body = await res.json();
+        const body = recordOrEmpty(await res.json());
         lastHealth = body;
-        const resetDone = body?.reset?.inProgress !== true;
-        const meshReady = body?.hubMesh?.ok === true;
-        const mmReady = body?.marketMaker?.enabled === true ? body?.marketMaker?.ok === true : true;
-        const reservesReady = body?.bootstrapReserves?.ok === true;
-        const hasTs = typeof body?.timestamp === 'number';
+        const reset = recordOrEmpty(body['reset']);
+        const hubMesh = recordOrEmpty(body['hubMesh']);
+        const marketMaker = recordOrEmpty(body['marketMaker']);
+        const bootstrapReserves = recordOrEmpty(body['bootstrapReserves']);
+        const resetDone = reset['inProgress'] !== true;
+        const meshReady = hubMesh['ok'] === true;
+        const mmReady = marketMaker['enabled'] === true ? marketMaker['ok'] === true : true;
+        const reservesReady = bootstrapReserves['ok'] === true;
+        const hasTs = typeof body['timestamp'] === 'number';
         if (hasTs && resetDone && meshReady && mmReady && reservesReady) return body;
       }
     } catch {
@@ -936,21 +954,22 @@ const waitForServerHealthy = async (apiUrl: string, timeoutMs: number): Promise<
     await delay(250);
   }
   const marketMakerPhase =
-    typeof lastHealth?.marketMaker?.startupPhase === 'string' ? lastHealth.marketMaker.startupPhase : null;
+    typeof recordOrEmpty(lastHealth?.['marketMaker'])['startupPhase'] === 'string'
+      ? recordOrEmpty(lastHealth?.['marketMaker'])['startupPhase']
+      : null;
   const snapshot = lastHealth
     ? JSON.stringify(
         {
-          reset: lastHealth?.reset || null,
-          hubMesh: lastHealth?.hubMesh || null,
-          marketMaker: lastHealth?.marketMaker || null,
-          bootstrapReserves: lastHealth?.bootstrapReserves || null,
-          hubs: Array.isArray(lastHealth?.hubs)
-            ? lastHealth.hubs.map((h: any) => ({
-                entityId: h?.entityId,
-                name: h?.name,
-                online: h?.online,
+          reset: lastHealth['reset'] || null,
+          hubMesh: lastHealth['hubMesh'] || null,
+          marketMaker: lastHealth['marketMaker'] || null,
+          bootstrapReserves: lastHealth['bootstrapReserves'] || null,
+          hubs: recordArrayOf(lastHealth, 'hubs')
+            .map((h) => ({
+                entityId: h['entityId'],
+                name: h['name'],
+                online: h['online'],
               }))
-            : [],
         },
         null,
         2,
@@ -965,7 +984,7 @@ const hardResetShardBaseline = async (
   apiUrl: string,
   timeoutMs: number,
   requireMarketMaker: boolean,
-): Promise<any> => {
+): Promise<HealthPayload> => {
   const startedAt = Date.now();
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), timeoutMs);
