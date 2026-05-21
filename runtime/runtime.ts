@@ -1,9 +1,3 @@
-// for regular use > bun run runtime/runtime.ts
-// for debugging > bun repl
-// await import('./debug.js');
-
-// Import utilities and types
-// High-level database using Level polyfill (works in both Node.js and browser)
 import { Level } from 'level';
 import { ethers } from 'ethers';
 import type { Provider } from 'ethers';
@@ -137,7 +131,6 @@ import {
   resolveEntityName as resolveEntityNameOriginal,
   searchEntityNames as searchEntityNamesOriginal,
 } from './name-resolution';
-// import { runDemo } from './rundemo'; // REMOVED: Legacy demo replaced by scenarios/ahb
 import { decode, encode } from './snapshot-coder'; // encode used in exports
 import {
   deriveDelta,
@@ -304,9 +297,6 @@ const runtimeLog = createStructuredLogger('runtime');
 
 const formatPerfMs = (value: number): string => value.toFixed(2);
 
-// === ETHEREUM INTEGRATION ===
-
-// === SVELTE REACTIVITY INTEGRATION ===
 // Per-runtime state is stored on env.runtimeState/runtimeMempool/runtimeConfig.
 
 export const registerEnvChangeCallback = (env: Env, callback: (env: Env) => void): (() => void) => {
@@ -1087,19 +1077,8 @@ export const processJBlockEvents = async (env: Env): Promise<void> => {
   const pending = mempool.entityInputs.length;
   if (pending === 0) return;
 
-  // Never process directly from UI/helper paths. Runtime loop is the single
-  // state-mutating ingress executor and will consume mempool on its next tick.
-  console.log(`🔗 J-BLOCK: ${pending} j-events queued in mempool (runtime loop will process)`);
+  runtimeLog.debug('jblock.queued', { pending });
 };
-
-// Note: History is now stored in env.history (no global variable needed)
-
-// === SNAPSHOT UTILITIES ===
-// All cloning utilities now moved to state-helpers.ts
-
-// All snapshot functionality now moved to state-helpers.ts
-
-// === UTILITY FUNCTIONS ===
 
 const applyRuntimeInput = async (
   env: Env,
@@ -1306,9 +1285,7 @@ const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
       }
       env = loaded;
       restoredFromCoreDb = true;
-      console.log(
-        `[main] restored runtime=${String(env.runtimeId || '').slice(0, 12)} height=${env.height} from storage`,
-      );
+      runtimeLog.info('main.restored', { runtime: String(env.runtimeId || '').slice(0, 12), height: env.height });
     }
   }
 
@@ -1317,30 +1294,25 @@ const main = async (runtimeSeedOverride?: string | null): Promise<Env> => {
     try {
       await loadGossipProfilesFromInfraDb(env, infraGossipDbAccess);
     } catch (error) {
-      console.warn('[main] skipped infra gossip restore:', error instanceof Error ? error.message : String(error));
+      runtimeLog.warn('main.infra_gossip_restore_skipped', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
   if (!env.runtimeId && env.runtimeSeed) {
     try {
       env.runtimeId = deriveSignerAddressSync(env.runtimeSeed, '1');
-      console.log(`🔐 Derived runtimeId: ${env.runtimeId.slice(0, 12)}...`);
+      runtimeLog.debug('main.runtime_id_derived', { runtime: env.runtimeId.slice(0, 12) });
     } catch (error) {
-      console.warn('⚠️ Failed to derive runtimeId:', error);
+      runtimeLog.warn('main.runtime_id_derive_failed', {
+        error: error instanceof Error ? error.message : String(error),
+      });
     }
   }
 
-  if (env.runtimeSeed) {
-    try {
-      console.log('🔐 Prewarmed signer key cache (20 addresses)');
-    } catch (error) {
-      console.warn('⚠️ Failed to derive signer:', error);
-    }
-  }
-
-  // Start the runtime event loop (single async while-loop, never re-enters)
   if (runtimeIsBrowser) {
-    console.log('🔄 [LOOP] Starting runtime event loop (browser mode)');
+    runtimeLog.info('main.loop_start_browser');
     startRuntimeLoop(env);
   }
 
@@ -2187,11 +2159,11 @@ export const saveEnvToDB = async (
     tryOpenFrameDb,
     getFrameDb,
     rotateEpochDb: rotateStorageEpochDb,
-	    getPerfMs,
-	    formatPerfMs,
-	    frameDbRecords: pendingFrameDbRecords,
-	    ...(currentFrameInput === undefined ? {} : { currentFrameInput }),
-	  });
+    getPerfMs,
+    formatPerfMs,
+    frameDbRecords: pendingFrameDbRecords,
+    ...(currentFrameInput === undefined ? {} : { currentFrameInput }),
+  });
   if (saveResult.frameDbCommitted) {
     dropPendingFrameDbRecords(env, pendingFrameDbRecords.length);
   }
@@ -2414,7 +2386,7 @@ const loadEnvFromStorage = async (
   latestHeight: number;
   checkpointHeight: number;
   selectedSnapshotHeight: number;
-	} | null> => {
+} | null> => {
   const env = createPersistedStorageEnv(runtimeId, runtimeSeed);
   assertStorageSafetyOverridesAllowed();
   let returningEnv = false;
@@ -2462,12 +2434,12 @@ const loadEnvFromStorage = async (
       throw new Error(`STORAGE_RESTORE_FRAME_MISSING: height=${targetHeight}`);
     }
     env.height = targetHeight;
-	    env.timestamp = frame?.timestamp ?? Math.max(...Array.from(restoredStates.values()).map((state) => Number(state.timestamp ?? 0)), 0);
+    env.timestamp = frame.timestamp;
     env.runtimeInput = { runtimeTxs: [], entityInputs: [] };
-	    env.runtimeMempool = undefined;
+    env.runtimeMempool = undefined;
     await restoreOverlayFromFrameLog(env, targetHeight);
-	    await hydrateAccountFrameHistoryViews(env);
-	    let restoredFrameLogs: FrameLogEntry[] = [];
+    await hydrateAccountFrameHistoryViews(env);
+    let restoredFrameLogs: FrameLogEntry[] = [];
     try {
       if (await tryOpenFrameDb(env)) {
         const activity = await readFrameDbRuntimeActivity(getFrameDb(env), targetHeight);
@@ -2481,25 +2453,23 @@ const loadEnvFromStorage = async (
     if (!frame.canonicalStateHash) {
       throw new Error(`STORAGE_RESTORE_CANONICAL_HASH_MISSING: height=${targetHeight}`);
     }
-    if (frame.canonicalStateHash) {
-      const restoredCanonicalStateHash = computeCanonicalStateHashFromEnv(env);
-      if (restoredCanonicalStateHash !== frame.canonicalStateHash) {
-        const expectedEntities = new Map((frame.canonicalEntityHashes || []).map((entry) => [entry.entityId, entry.hash]));
-        const actualEntities = computeCanonicalEntityHashesFromEnv(env);
-        const mismatch = actualEntities.find((entry) => expectedEntities.get(entry.entityId) !== entry.hash);
-        const missing = (frame.canonicalEntityHashes || []).find(
-          (entry) => !actualEntities.some((actual) => actual.entityId === entry.entityId),
-        );
-        const mismatchDetail = mismatch
-          ? ` entity=${mismatch.entityId} expectedEntity=${expectedEntities.get(mismatch.entityId) || 'missing'} actualEntity=${mismatch.hash}`
-          : missing
-            ? ` entity=${missing.entityId} expectedEntity=${missing.hash} actualEntity=missing`
-            : '';
-        throw new Error(
-          `STORAGE_RESTORE_CANONICAL_HASH_MISMATCH: height=${targetHeight} ` +
-            `expected=${frame.canonicalStateHash} actual=${restoredCanonicalStateHash}${mismatchDetail}`,
-        );
-      }
+    const restoredCanonicalStateHash = computeCanonicalStateHashFromEnv(env);
+    if (restoredCanonicalStateHash !== frame.canonicalStateHash) {
+      const expectedEntities = new Map((frame.canonicalEntityHashes || []).map((entry) => [entry.entityId, entry.hash]));
+      const actualEntities = computeCanonicalEntityHashesFromEnv(env);
+      const mismatch = actualEntities.find((entry) => expectedEntities.get(entry.entityId) !== entry.hash);
+      const missing = (frame.canonicalEntityHashes || []).find(
+        (entry) => !actualEntities.some((actual) => actual.entityId === entry.entityId),
+      );
+      const mismatchDetail = mismatch
+        ? ` entity=${mismatch.entityId} expectedEntity=${expectedEntities.get(mismatch.entityId) || 'missing'} actualEntity=${mismatch.hash}`
+        : missing
+          ? ` entity=${missing.entityId} expectedEntity=${missing.hash} actualEntity=missing`
+          : '';
+      throw new Error(
+        `STORAGE_RESTORE_CANONICAL_HASH_MISMATCH: height=${targetHeight} ` +
+          `expected=${frame.canonicalStateHash} actual=${restoredCanonicalStateHash}${mismatchDetail}`,
+      );
     }
     envRecord(env)['__replayMeta'] = {
       checkpointHeight: selectedSnapshotHeight,
@@ -2514,7 +2484,7 @@ const loadEnvFromStorage = async (
     };
     env.history = [
       buildCanonicalEnvSnapshot(env, {
-        runtimeInput: frame?.runtimeInput ?? { runtimeTxs: [], entityInputs: [] },
+        runtimeInput: frame.runtimeInput ?? { runtimeTxs: [], entityInputs: [] },
         runtimeOutputs: [],
         description: `Persisted restore @ ${targetHeight}`,
         logs: env.frameLogs,
@@ -2923,7 +2893,7 @@ export const loadEnvFromDB = async (
     return latestEnv;
   } catch (err) {
     const message = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
-    console.error(`❌ loadEnvFromDB failed: ${message}`);
+    runtimeLog.error('load_env_from_db.failed', { error: message });
     throw err;
   }
 };
@@ -2938,9 +2908,9 @@ export const clearDB = async (env?: Env): Promise<void> => {
       const fs = await import('fs/promises');
       await fs.rm(dbRootPath, { recursive: true, force: true });
       await fs.mkdir(dbRootPath, { recursive: true });
-      console.log(`✅ Runtime DB root cleared (core + infra): ${dbRootPath}`);
+      runtimeLog.info('db.clear_root_complete', { path: dbRootPath });
     } catch (err) {
-      console.error(`❌ Failed to clear runtime DB root (${dbRootPath}):`, err);
+      runtimeLog.error('db.clear_root_failed', { path: dbRootPath, error: err instanceof Error ? err.message : String(err) });
     }
     return;
   }
@@ -2973,20 +2943,17 @@ export const clearDB = async (env?: Env): Promise<void> => {
       const frameDb = getFrameDb(targetEnv);
       await frameDb.clear();
     }
-    console.log('✅ LevelDB cleared (core + infra)');
+    runtimeLog.info('db.clear_complete');
   } catch (err) {
-    console.error('❌ Failed to clear LevelDB:', err);
+    runtimeLog.error('db.clear_failed', { error: err instanceof Error ? err.message : String(err) });
   }
 };
 
-// === SCENARIO SYSTEM ===
 export { scenarios } from './runtime-scenarios';
 export { parseScenario, mergeAndSortEvents } from './scenarios/parser.js';
 export { executeScenario } from './scenarios/executor.js';
-// NOTE: loadScenarioFromFile uses fs/promises - import directly from './scenarios/loader.js' in CLI only
 export { SCENARIOS, getScenario, getScenariosByTag, type ScenarioMetadata } from './scenarios/index.js';
 
-// === CRYPTOGRAPHIC SIGNATURES ===
 export {
   deriveSignerKey,
   deriveSignerKeySync,
