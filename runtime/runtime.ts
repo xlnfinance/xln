@@ -62,7 +62,6 @@ import {
 } from './env-events';
 import {
   deriveSignerAddressSync,
-  getCachedSignerPrivateKey,
   getSignerPrivateKey,
   prewarmSignerKeyCache,
 } from './account-crypto';
@@ -176,6 +175,7 @@ import {
   ensureRuntimeMempool,
   type RuntimeInputQueueDeps,
 } from './runtime-input-queue';
+import { submitRuntimeJOutbox } from './runtime-j-submit';
 import {
   clearRuntimeCleanLogs,
   copyRuntimeCleanLogs,
@@ -1243,10 +1243,6 @@ const applyRuntimeInput = async (
       notifyEnvChange(env);
     }
 
-    if (envRecord(env)[ENV_REPLAY_MODE_KEY] !== true) {
-      notifyEnvChange(env);
-    }
-
     const endTime = getPerfMs();
     if (DEBUG) {
       console.log(`⏱️  Tick ${env.height - 1} completed in ${endTime - startTime}ms`);
@@ -1979,135 +1975,7 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
     }
 
     // 2. Execute J-batches via JAdapter.submitTx (events arrive next frame via j-watcher)
-    if (jOutbox.length > 0) {
-      const totalJTxs = jOutbox.reduce((n, ji) => n + ji.jTxs.length, 0);
-      console.log(`⚡ [SIDE-EFFECT] Submitting ${totalJTxs} J-txs via JAdapter (${jOutbox.length} JInputs)`);
-
-      for (const jInput of jOutbox) {
-        const queueMissingInfraAbort = (reason: string) => {
-          const compactReason = String(reason || 'unknown').slice(0, 240);
-          for (const jTx of jInput.jTxs) {
-            if (jTx.type !== 'batch') continue;
-            const signerId = typeof jTx.data?.signerId === 'string' ? jTx.data.signerId : undefined;
-            enqueueRuntimeInputs(
-              env,
-              [
-                {
-                  entityId: jTx.entityId,
-                  ...(signerId ? { signerId } : {}),
-                  entityTxs: [
-                    {
-                      type: 'j_abort_sent_batch',
-                      data: {
-                        requeueToCurrent: true,
-                        reason: `submit_failed:${compactReason}`,
-                      },
-                    },
-                  ],
-                },
-              ],
-              undefined,
-              undefined,
-              env.timestamp,
-            );
-          }
-        };
-
-        const jReplica = env.jReplicas?.get(jInput.jurisdictionName);
-        if (!jReplica) {
-          console.error(`❌ [J-SUBMIT] Jurisdiction "${jInput.jurisdictionName}" not found — skipping`);
-          queueMissingInfraAbort(`missing_jReplica:${jInput.jurisdictionName}`);
-          continue;
-        }
-
-        const jAdapter = jReplica.jadapter;
-        if (!jAdapter) {
-          console.error(`❌ [J-SUBMIT] No JAdapter for jurisdiction "${jInput.jurisdictionName}" — skipping`);
-          queueMissingInfraAbort(`missing_jAdapter:${jInput.jurisdictionName}`);
-          continue;
-        }
-
-        for (const jTx of jInput.jTxs) {
-          console.log(`📤 [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} → ${jInput.jurisdictionName}`);
-          const queueAbortSentBatch = (reason: string) => {
-            if (jTx.type !== 'batch') return;
-            const signerId = typeof jTx.data?.signerId === 'string' ? jTx.data.signerId : undefined;
-            const compactReason = String(reason || 'unknown').slice(0, 240);
-            enqueueRuntimeInputs(
-              env,
-              [
-                {
-                  entityId: jTx.entityId,
-                  ...(signerId ? { signerId } : {}),
-                  entityTxs: [
-                    {
-                      type: 'j_abort_sent_batch',
-                      data: {
-                        requeueToCurrent: true,
-                        reason: `submit_failed:${compactReason}`,
-                      },
-                    },
-                  ],
-                },
-              ],
-              undefined,
-              undefined,
-              env.timestamp,
-            );
-            console.warn(
-              `⚠️ [J-SUBMIT] queued j_abort_sent_batch for ${jTx.entityId.slice(-4)} after failed batch submission`,
-            );
-          };
-          try {
-            const submitData = jTx.data as { signerId?: unknown } | undefined;
-            const submitSignerId = typeof submitData?.signerId === 'string' ? submitData.signerId : undefined;
-            const submitSignerPrivateKey = submitSignerId ? getCachedSignerPrivateKey(submitSignerId) : null;
-            const result = await jAdapter.submitTx(jTx, {
-              env,
-              ...(submitSignerId ? { signerId: submitSignerId } : {}),
-              ...(submitSignerPrivateKey ? { signerPrivateKey: submitSignerPrivateKey } : {}),
-              timestamp: jTx.timestamp ?? env.timestamp,
-            });
-
-            if (result.success) {
-              console.log(
-                `✅ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)}: ok (events=${result.events?.length ?? 0}, txHash=${result.txHash ?? 'n/a'})`,
-              );
-            } else {
-              console.error(`❌ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} FAILED: ${result.error}`);
-              if (!env.scenarioMode) {
-                queueAbortSentBatch(result.error || 'unknown');
-              }
-              if (env.scenarioMode) {
-                throw new Error(`J-SUBMIT FAILED: ${result.error || 'unknown'}`);
-              }
-            }
-          } catch (error) {
-            console.error(`❌ [J-SUBMIT] submitTx threw for ${jTx.entityId.slice(-4)}:`, error);
-            if (!env.scenarioMode) {
-              const msg = error instanceof Error ? error.message : String(error);
-              queueAbortSentBatch(msg);
-            }
-            if (env.scenarioMode) throw error;
-          }
-        }
-
-        // Submission does not own the watcher cursor.
-        // The only authoritative J-height/blockNumber advancement path is:
-        //   watcher poll -> processEventBatch -> updateWatcherJurisdictionCursor(...)
-        //
-        // Why this must stay watcher-owned:
-        // - submitTx success only proves the tx was accepted locally/by RPC, not that all
-        //   finalized J-events from the mined block were ingested into runtime state
-        // - persisting a speculative blockNumber here can make WAL/snapshots resume from
-        //   after a block whose events were never actually applied
-        // - after restart, getWatcherStartBlock() would then skip the missed finalized
-        //   range and one side can stay stale forever
-        //
-        // Keep only local submit timestamp metadata here. Let the watcher commit height.
-        jReplica.lastBlockTimestamp = env.timestamp;
-      }
-    }
+    await submitRuntimeJOutbox(env, jOutbox, { enqueueRuntimeInputs });
 
     state.lastFrameAt = getWallClockMs();
 
