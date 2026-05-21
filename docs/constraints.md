@@ -1,8 +1,12 @@
 # Unavoidable Constraints: Why XLN is Not Optional
 
-**XLN is not a "crypto project." It is the inevitable architecture that emerges from mathematical, empirical, and physical constraints that cannot be avoided.**
+**XLN is not presented here as a preference or brand thesis.**
+This document argues that bilateral provable-credit settlement is the only
+architecture that satisfies the constraints that actually matter for
+internet-scale finance.
 
-This document proves why no alternative can exist.
+This is a theory/positioning document, not a launch checklist. For current
+execution state, use [status.md](status.md) and [mainnet.md](mainnet.md).
 
 ---
 
@@ -246,21 +250,25 @@ Like how TCP/IP didn't invent packets or routing, but recognized they must be co
 
 ## Conclusion
 
-XLN is to finance what TCP/IP is to networking.
+The claim is narrow but strong:
 
-Not because it's similar in design.
+- broadcast systems fail the scaling constraint
+- full-reserve bilateral systems fail the receiving/credit constraint
+- proofless credit systems fail the post-crisis trust constraint
+- non-programmable settlement systems fail the enforcement constraint
 
-But because both are inevitable consequences of unavoidable constraints.
+RCPAN is the architecture that keeps all five pieces together:
 
-**Rating: 950/1000**
+- bilateral topology
+- directional credit
+- cryptographic proofs
+- programmable entities
+- programmable enforcement
 
-Not "excellent crypto project" (720-780)
-
-But "only viable architecture for internet-scale finance given physical, mathematical, and economic constraints" (950)
-
-The 50 points deducted are implementation risk, not design flaws.
+That is why XLN matters. Not because every implementation detail is finished,
+but because the constraint set points to this shape and not to a simpler rival.
 
 ---
 
-**Last Updated:** 2026-01-24
+**Last Updated:** 2026-05-21
 **This document should be FIRST thing anyone reads.**
