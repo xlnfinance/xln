@@ -204,12 +204,16 @@ export async function handlePullCancel(
   accountTx: PullCancelTx,
   byLeft: boolean,
   currentTimestamp: number,
-): Promise<{ success: boolean; events: string[]; error?: string }> {
+): Promise<{ success: boolean; events: string[]; error?: string; pullCancelled?: { pullId: string; status: 'cancelled' | 'already-closed' } }> {
   const { pullId, reason } = accountTx.data;
   const events: string[] = [];
   const pull = accountMachine.pulls?.get(pullId);
   if (!pull) {
-    return { success: true, events: [`🪝 Pull cancel ignored: ${pullId.slice(0, 8)}... already closed`] };
+    return {
+      success: true,
+      events: [`🪝 Pull cancel ignored: ${pullId.slice(0, 8)}... already closed`],
+      pullCancelled: { pullId, status: 'already-closed' },
+    };
   }
 
   const beneficiaryIsLeft = pull.amount > 0n;
@@ -255,5 +259,5 @@ export async function handlePullCancel(
 
   accountMachine.pulls?.delete(pullId);
   events.push(`🪝 Pull cancelled: ${pullId.slice(0, 8)}... released ${remainingHold}${reason ? ` (${reason})` : ''}`);
-  return { success: true, events };
+  return { success: true, events, pullCancelled: { pullId, status: 'cancelled' } };
 }

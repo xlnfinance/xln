@@ -1317,6 +1317,17 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(account.pulls?.has(route.sourcePull!.pullId)).toBe(true);
   });
 
+  test('pull_cancel reports already-closed pull status explicitly', async () => {
+    const account = makeAccount(entity('76'), entity('77'));
+    const result = await handlePullCancel(account, {
+      type: 'pull_cancel',
+      data: { pullId: 'missing-pull-id', reason: 'expired' },
+    }, true, 1_000);
+
+    expect(result.success).toBe(true);
+    expect(result.pullCancelled).toEqual({ pullId: 'missing-pull-id', status: 'already-closed' });
+  });
+
   test('target pull resolve verifies relay binary and enters clearing before account commit', async () => {
     const env = createEmptyEnv('cross-target-resolve-guard');
     env.timestamp = 10_000;

@@ -49,6 +49,7 @@ type ProcessAccountTxResult = {
   swapOfferCancelRequested?: { offerId: string };
   swapOfferCancelled?: { offerId: string; accountId: string; makerId?: string };
   pullResolved?: { pullId: string; fillRatio: number };
+  pullCancelled?: { pullId: string; status: 'cancelled' | 'already-closed' };
 };
 
 type DebugEventEmitter = {
