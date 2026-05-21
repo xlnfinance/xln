@@ -19,7 +19,13 @@ import {
   verifyRuntimeChain,
 } from '../runtime.ts';
 import { markStorageEntityDirty } from '../env-events';
-import { readFrameDbRuntimeActivity, readStorageFrameRecord, readStorageHead, verifyStorageTailIntegrity } from '../storage';
+import {
+  readFrameDbRuntimeActivity,
+  readStorageFrameRecord,
+  readStorageHead,
+  readStorageOverlayRecordsFromDiffs,
+  verifyStorageTailIntegrity,
+} from '../storage';
 import { decodeBuffer, encodeBuffer } from '../storage/codec';
 import { readRawOrNull } from '../storage/level';
 import { KEY_HEAD, keyDiff, keyFrame, keySnapshotEntity, keySnapshotManifest } from '../storage/keys';
@@ -353,6 +359,22 @@ describe('storage frame journal retention', () => {
     await closeInfraDb(env);
 
     await expect(loadEnvFromDB(runtimeId, seed)).rejects.toThrow('STORAGE_DIFF_MISSING: height=2');
+  });
+
+  test('fails closed when overlay replay diff is missing', async () => {
+    const env = await createSavedEmptyEnv('storage-missing-overlay-diff');
+    const frameDb = getFrameDb(env);
+
+    expect(await readRawOrNull(frameDb, keyDiff(1))).toBeTruthy();
+    const batch = frameDb.batch();
+    batch.del?.(keyDiff(1));
+    await batch.write({ sync: true });
+
+    await expect(readStorageOverlayRecordsFromDiffs(frameDb, 1, 1))
+      .rejects.toThrow('STORAGE_DIFF_MISSING: height=1 scope=overlay');
+
+    await closeRuntimeDb(env);
+    await closeInfraDb(env);
   });
 
   test('rotates current storage epoch after byte-threshold snapshot and keeps frame tail usable', async () => {
