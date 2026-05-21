@@ -150,7 +150,6 @@ import {
 import { computeSwapPriceTicks, prepareSwapOrder, quantizeSwapOrder } from './orderbook';
 import {
   entityInputHasCrossJurisdictionIntraRuntimeTx,
-  extractCrossJurisdictionRouteFromTx,
   isCrossJurisdictionEntityInputRemoteHopAllowed,
 } from './cross-jurisdiction-boundary';
 import {
@@ -167,6 +166,14 @@ import {
   splitPendingOutputsByRetryWindow,
   type RuntimeOutputRoutingDeps,
 } from './runtime-output-routing';
+import {
+  collectCrossJurisdictionRemoteEntityHints,
+  createRuntimeOutputRoutingDeps,
+  handleInboundP2PEntityInput as routeInboundP2PEntityInput,
+  registerEntityRuntimeHint as registerEntityRuntimeHintForRouting,
+  resolveRuntimeIdForCrossJurisdictionEntity,
+  type RuntimeEntityRoutingDeps,
+} from './runtime-entity-routing';
 import { normalizeEntitySwapTradingPairs } from './runtime-swap-pairs';
 import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
 import { calculateSolvency, verifySolvency } from './solvency';
@@ -1704,112 +1711,8 @@ export const deriveRuntimeId = (seed: string): string => {
 
 // scheduleNetworkProcess removed — loop is always-on via startRuntimeLoop()
 
-const normalizeEntityKey = (value: string): string => value.toLowerCase();
-
-const resolveRuntimeIdFromProfile = (profile: Profile | undefined): string | null => {
-  if (!profile) return null;
-  return normalizeRuntimeId(profile.runtimeId);
-};
-
-const RUNTIME_HINT_TTL_MS = 60_000;
-
-const resolveRuntimeIdForEntity = (env: Env, entityId: string): string | null => {
-  if (!entityId) return null;
-  const hints = ensureRuntimeState(env).entityRuntimeHints;
-  const target = normalizeEntityKey(entityId);
-  const now = Date.now();
-
-  const hinted = hints?.get(target);
-  if (
-    hinted &&
-    typeof hinted.runtimeId === 'string' &&
-    hinted.runtimeId.length > 0 &&
-    Number.isFinite(hinted.seenAt) &&
-    now - hinted.seenAt <= RUNTIME_HINT_TTL_MS
-  ) {
-    const normalizedHint = normalizeRuntimeId(hinted.runtimeId);
-    if (normalizedHint) return normalizedHint;
-  }
-
-  // Fallback to gossip profile runtimeId when we don't have a fresh inbound hint.
-  if (env.gossip?.getProfiles) {
-    const profiles = env.gossip.getProfiles() as Profile[];
-    const profile = profiles.find((p: Profile) => normalizeEntityKey(String(p.entityId || '')) === target);
-    const resolved = resolveRuntimeIdFromProfile(profile);
-    if (resolved && hints) {
-      hints.set(target, { runtimeId: resolved, seenAt: now });
-      return resolved;
-    }
-  }
-  return null;
-};
-
-const hasLocalEntityReplica = (env: Env, entityId: string): boolean => {
-  const target = normalizeEntityKey(entityId);
-  return Array.from(env.eReplicas.keys()).some(key => {
-    try {
-      return normalizeEntityKey(extractEntityId(key)) === target;
-    } catch {
-      return false;
-    }
-  });
-};
-
-const resolveRuntimeIdForCrossJurisdictionEntity = (env: Env, entityId: string): string | null => {
-  const localRuntimeId = normalizeRuntimeId(String(env.runtimeId || ''));
-  if (localRuntimeId && hasLocalEntityReplica(env, entityId)) return localRuntimeId;
-  return resolveRuntimeIdForEntity(env, entityId);
-};
-
 export const registerEntityRuntimeHint = (env: Env, entityId: string, runtimeId: string): void => {
-  if (!entityId || !runtimeId) return;
-  const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
-  if (!normalizedRuntimeId) return;
-  const state = ensureRuntimeState(env);
-  const hints = state.entityRuntimeHints!;
-  hints.set(normalizeEntityKey(entityId), {
-    runtimeId: normalizedRuntimeId,
-    seenAt: Date.now(),
-  });
-};
-
-const collectSenderEntityHints = (input: RoutedEntityInput): string[] => {
-  const hints = new Set<string>();
-  for (const tx of input.entityTxs || []) {
-    const data = tx.data as Record<string, unknown> | undefined;
-    if (!data || typeof data !== 'object') continue;
-    const fromEntityId = data['fromEntityId'];
-    if (typeof fromEntityId === 'string' && fromEntityId.length > 0) {
-      hints.add(fromEntityId);
-    }
-  }
-  return [...hints];
-};
-
-const collectCrossJurisdictionRemoteEntityHints = (env: Env, input: RoutedEntityInput, fromRuntimeId: string): string[] => {
-  const localRuntimeId = normalizeRuntimeId(String(env.runtimeId || ''));
-  const from = normalizeRuntimeId(fromRuntimeId);
-  if (!localRuntimeId || !from || localRuntimeId === from) return [];
-  const hints = new Set<string>();
-  for (const tx of input.entityTxs || []) {
-    const route = extractCrossJurisdictionRouteFromTx(tx);
-    if (!route) continue;
-    const sourceUserId = String(route.source?.entityId || '').toLowerCase();
-    const targetUserId = String(route.target?.counterpartyEntityId || '').toLowerCase();
-    const sourceHubId = String(route.source?.counterpartyEntityId || '').toLowerCase();
-    const targetHubId = String(route.target?.entityId || '').toLowerCase();
-    const localIsHubSide = [sourceHubId, targetHubId].some(entityId => entityId && hasLocalEntityReplica(env, entityId));
-    const localIsUserSide = [sourceUserId, targetUserId].some(entityId => entityId && hasLocalEntityReplica(env, entityId));
-    const remoteIds = localIsHubSide && !localIsUserSide
-      ? [sourceUserId, targetUserId]
-      : localIsUserSide && !localIsHubSide
-        ? [sourceHubId, targetHubId]
-        : [];
-    for (const entityId of remoteIds) {
-      if (entityId) hints.add(entityId);
-    }
-  }
-  return [...hints];
+  registerEntityRuntimeHintForRouting(env, entityId, runtimeId, getRuntimeEntityRoutingDeps());
 };
 
 export const handleInboundP2PEntityInput = (
@@ -1818,64 +1721,24 @@ export const handleInboundP2PEntityInput = (
   input: RoutedEntityInput,
   ingressTimestamp?: number,
 ): void => {
-  const txTypes = input.entityTxs?.map(tx => tx.type).join(',') || 'none';
-  console.log(`📨 P2P-RECEIVE: from=${from} entity=${input.entityId.slice(-4)} txTypes=[${txTypes}]`);
-  const targetEntityId = String(input.entityId || '').toLowerCase();
-  const localReplicaExists = Array.from(env.eReplicas.keys()).some(key => {
-    const [entityKey] = String(key).split(':');
-    return String(entityKey || '').toLowerCase() === targetEntityId;
-  });
-  if (!localReplicaExists) {
-    env.warn(
-      'network',
-      'INBOUND_ENTITY_UNKNOWN_TARGET',
-      {
-        fromRuntimeId: from,
-        entityId: input.entityId,
-        txTypes,
-      },
-      input.entityId,
-    );
-    return;
-  }
-  for (const hintedEntityId of collectSenderEntityHints(input)) {
-    registerEntityRuntimeHint(env, hintedEntityId, from);
-  }
-  for (const hintedEntityId of collectCrossJurisdictionRemoteEntityHints(env, input, from)) {
-    registerEntityRuntimeHint(env, hintedEntityId, from);
-  }
-  enqueueRuntimeInputs(env, [input], undefined, undefined, ingressTimestamp);
-  console.log(`📥 RUNTIME-MEMPOOL: Added inbound, size=${ensureRuntimeMempool(env).entityInputs.length}`);
-  env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
-  const runtimeState = ensureRuntimeState(env) as ReturnType<typeof ensureRuntimeState> & {
-    inboundP2PProcessScheduled?: boolean;
-  };
-  if (!runtimeState.loopActive && !env.scenarioMode) {
-    startRuntimeLoop(env);
-  }
-  if (!runtimeState.inboundP2PProcessScheduled && !env.scenarioMode) {
-    runtimeState.inboundP2PProcessScheduled = true;
-    queueMicrotask(() => {
-      runtimeState.inboundP2PProcessScheduled = false;
-      void process(env).catch((error) => {
-        const message = error instanceof Error ? error.message : String(error);
-        env.error?.('network', 'INBOUND_ENTITY_PROCESS_FAILED', { message }, input.entityId);
-      });
-    });
-  }
+  routeInboundP2PEntityInput(env, from, input, getRuntimeEntityRoutingDeps(), ingressTimestamp);
 };
 
 const getRuntimeNowMs = (env: Env): number => env.timestamp ?? 0;
 
-function getRuntimeOutputRoutingDeps(): RuntimeOutputRoutingDeps {
+function getRuntimeEntityRoutingDeps(): RuntimeEntityRoutingDeps {
   return {
     ensureRuntimeState,
-    getP2P,
     enqueueRuntimeInputs,
     extractEntityId,
-    resolveRuntimeIdForEntity,
-    resolveRuntimeIdForCrossJurisdictionEntity,
+    getP2P,
+    startRuntimeLoop,
+    processRuntime: (targetEnv) => process(targetEnv),
   };
+}
+
+function getRuntimeOutputRoutingDeps(): RuntimeOutputRoutingDeps {
+  return createRuntimeOutputRoutingDeps(getRuntimeEntityRoutingDeps());
 }
 
 export const sendEntityInput = (
@@ -2495,7 +2358,7 @@ const applyRuntimeInput = async (
           entityInput,
           env.runtimeId,
           entityInput.from,
-          entityId => resolveRuntimeIdForCrossJurisdictionEntity(env, entityId),
+          entityId => resolveRuntimeIdForCrossJurisdictionEntity(env, entityId, getRuntimeEntityRoutingDeps()),
         )
       ) {
         const dropDetails = {
@@ -2516,7 +2379,7 @@ const applyRuntimeInput = async (
         continue;
       }
       if (entityInput.from) {
-        for (const hintedEntityId of collectCrossJurisdictionRemoteEntityHints(env, entityInput, entityInput.from)) {
+        for (const hintedEntityId of collectCrossJurisdictionRemoteEntityHints(env, entityInput, entityInput.from, getRuntimeEntityRoutingDeps())) {
           registerEntityRuntimeHint(env, hintedEntityId, entityInput.from);
         }
       }
