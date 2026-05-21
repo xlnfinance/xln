@@ -31,8 +31,10 @@ const RUNTIME_CORE_TESTS = [
   'runtime/__tests__/transformer-ordering.test.ts',
   'runtime/__tests__/server-ingress-receipts.test.ts',
   'native/__tests__/desktop-security.test.ts',
+  'native/__tests__/extension-security.test.ts',
   'native/__tests__/capacitor-config.test.ts',
   'native/__tests__/native-build-options.test.ts',
+  'native/__tests__/native-deeplink.test.ts',
   'native/__tests__/lazy-entity-id.test.ts',
 ].join(' ');
 
