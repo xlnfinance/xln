@@ -65,10 +65,7 @@ import {
   type ManagedProcessTableEntry,
 } from './managed-runtime-leases';
 import { buildPrometheusMetrics } from './prometheus';
-import {
-  buildPublicHubDiscoveryPayload,
-  getDebugEntityEntries,
-} from './public-discovery';
+import { buildPublicHubDiscoveryPayload } from './public-discovery';
 import {
   deployRpc2JurisdictionStack,
   readShardJurisdictions,
@@ -78,6 +75,7 @@ import {
   type OrchestratorJurisdictionsConfig,
 } from './jurisdictions';
 import { createOrchestratorProxyHandlers } from './proxy';
+import { maybeHandleOrchestratorDebugApi } from './debug-api';
 
 const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
   const totalBytes = Number(storage.disk.totalBytes || 0);
@@ -1349,144 +1347,19 @@ const server = Bun.serve({
       })), { headers });
     }
 
-    if (pathname === '/api/debug/entities') {
-      await pollAllHubHealth();
-      await pollMarketMakerHealth();
-      const entities = getDebugEntityEntries({ requestUrl: url, relayStore, hubChildren }).map((entity) => {
-        const hubChild = hubChildren.find((child) => {
-          const childEntityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '').toLowerCase();
-          return childEntityId === entity.entityId.toLowerCase();
-        });
-        return {
-          ...entity,
-          apiPort: hubChild?.apiPort ?? null,
-          exitCode: hubChild?.exitCode ?? null,
-          dbPath: hubChild?.dbPath ?? null,
-        };
-      });
-      if (marketMakerChild.lastInfo?.entityId || marketMakerChild.lastHealth?.entityId) {
-        const entityId = String(marketMakerChild.lastInfo?.entityId || marketMakerChild.lastHealth?.entityId || '').toLowerCase();
-        const existing = entities.find(entry => String(entry.entityId || '').toLowerCase() === entityId);
-        if (!existing) {
-          entities.unshift({
-            entityId,
-            runtimeId: String(marketMakerChild.lastInfo?.runtimeId || marketMakerChild.lastHealth?.runtimeId || ''),
-            name: marketMakerChild.name,
-            isHub: false,
-            online: marketMakerChild.proc?.exitCode === null && Boolean(marketMakerChild.lastHealth),
-            lastUpdated: Date.now(),
-            accounts: [],
-            publicAccounts: [],
-            metadata: { isMarketMaker: true },
-            apiPort: marketMakerChild.apiPort,
-            exitCode: marketMakerChild.exitCode,
-            dbPath: marketMakerChild.dbPath,
-          });
-        }
-      }
-      return new Response(safeStringify({ entities }), { headers });
-    }
-
-    if (pathname === '/api/debug/reserve' && request.method === 'GET') {
-      return await proxyAnyHubGet(request, `${pathname}${url.search}`);
-    }
-
-    if (pathname === '/api/debug/events') {
-      const last = Math.max(1, Math.min(5000, Number(url.searchParams.get('last') || '200')));
-      const event = url.searchParams.get('event') || undefined;
-      const runtimeId = url.searchParams.get('runtimeId') || undefined;
-      const from = url.searchParams.get('from') || undefined;
-      const to = url.searchParams.get('to') || undefined;
-      const msgType = url.searchParams.get('msgType') || undefined;
-      const status = url.searchParams.get('status') || undefined;
-      const since = Number(url.searchParams.get('since') || '0');
-
-      let filtered = relayStore.debugEvents;
-      if (since > 0) filtered = filtered.filter((entry) => entry.ts >= since);
-      if (event) filtered = filtered.filter((entry) => entry.event === event);
-      if (runtimeId) {
-        filtered = filtered.filter((entry) =>
-          entry.runtimeId === runtimeId || entry.from === runtimeId || entry.to === runtimeId,
-        );
-      }
-      if (from) filtered = filtered.filter((entry) => entry.from === from);
-      if (to) filtered = filtered.filter((entry) => entry.to === to);
-      if (msgType) filtered = filtered.filter((entry) => entry.msgType === msgType);
-      if (status) filtered = filtered.filter((entry) => entry.status === status);
-
-      const events = filtered.slice(-last);
-      return new Response(safeStringify({
-        ok: true,
-        total: relayStore.debugEvents.length,
-        returned: events.length,
-        serverTime: Date.now(),
-        filters: {
-          last,
-          event,
-          runtimeId,
-          from,
-          to,
-          msgType,
-          status,
-          since: Number.isFinite(since) ? since : 0,
-        },
-        events,
-      }), { headers });
-    }
-
-    if (pathname === '/api/debug/events/mark' && request.method === 'POST') {
-      const body = await request.json().catch(() => ({} as Record<string, unknown>));
-      const label = typeof body?.label === 'string' ? body.label.trim() : '';
-      if (!label) {
-        return new Response(safeStringify({ ok: false, error: 'label is required' }), {
-          status: 400,
-          headers,
-        });
-      }
-      const runtimeId =
-        typeof body?.runtimeId === 'string' && body.runtimeId.trim().length > 0
-          ? body.runtimeId.trim()
-          : undefined;
-      const entityId =
-        typeof body?.entityId === 'string' && body.entityId.trim().length > 0
-          ? body.entityId.trim()
-          : undefined;
-      const phase =
-        typeof body?.phase === 'string' && body.phase.trim().length > 0
-          ? body.phase.trim()
-          : undefined;
-      const details =
-        body?.details && typeof body.details === 'object'
-          ? body.details
-          : undefined;
-      pushDebugEvent(relayStore, {
-        event: 'e2e_phase',
-        runtimeId,
-        status: 'marked',
-        details: {
-          label,
-          ...(entityId ? { entityId } : {}),
-          ...(phase ? { phase } : {}),
-          ...(details ? { details } : {}),
-        },
-      });
-      return new Response(safeStringify({ ok: true, label }), { headers });
-    }
-
-    if (pathname === '/api/debug/relay') {
-      return new Response(safeStringify({
-        clients: Array.from(relayStore.clients.keys()),
-        profiles: Array.from(relayStore.gossipProfiles.values()).map(entry => ({
-          entityId: entry.profile.entityId,
-          runtimeId: entry.profile.runtimeId,
-          name: entry.profile.name ?? null,
-          isHub: entry.profile.metadata?.isHub === true,
-          lastUpdated: entry.profile.lastUpdated ?? 0,
-        })),
-        activeHubEntityIds: relayStore.activeHubEntityIds,
-        debugEvents: relayStore.debugEvents.slice(-200),
-      }), { headers });
-    }
+    const debugResponse = await maybeHandleOrchestratorDebugApi({
+      request,
+      pathname,
+      url,
+      headers,
+      relayStore,
+      hubChildren,
+      marketMakerChild,
+      pollAllHubHealth,
+      pollMarketMakerHealth,
+      proxyAnyHubGet,
+    });
+    if (debugResponse) return debugResponse;
 
     if (pathname === '/api/reset' && request.method === 'POST') {
       if (!args.resetAllowed) {
