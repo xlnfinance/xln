@@ -31,8 +31,6 @@ export function handleSetCreditLimit(
   // Proposer extends credit → set counterparty's credit limit field
   const side = byLeft ? 'right' : 'left';
 
-  console.log(`💳 SET-CREDIT-LIMIT: tokenId=${tokenId}, amount=${amount.toString()}, side=${side} (byLeft=${byLeft})`);
-
   let delta = accountMachine.deltas.get(tokenId);
   if (!delta) {
     delta = {
@@ -57,6 +55,5 @@ export function handleSetCreditLimit(
     events.push(`💳 Right credit limit = ${amount.toString()} for token ${tokenId}`);
   }
 
-  console.log(`✅ Set credit limit for token ${tokenId}: left=${delta.leftCreditLimit}, right=${delta.rightCreditLimit}`);
   return { success: true, events };
 }

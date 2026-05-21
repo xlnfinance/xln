@@ -4,7 +4,6 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
-import { getAccountPerspective } from '../../state-helpers';
 
 export function handleAddDelta(
   accountMachine: AccountMachine,
@@ -15,7 +14,6 @@ export function handleAddDelta(
 
   // Check if delta already exists
   if (accountMachine.deltas.has(tokenId)) {
-    console.warn(`⚠️ Delta for token ${tokenId} already exists, skipping add_delta`);
     return { success: true, events }; // Idempotent - not an error
   }
 
@@ -32,8 +30,6 @@ export function handleAddDelta(
   };
 
   accountMachine.deltas.set(tokenId, newDelta);
-  const { counterparty } = getAccountPerspective(accountMachine, accountMachine.proofHeader.fromEntity);
-  console.log(`✅ Added delta for token ${tokenId} to account with ${counterparty.slice(-4)}`);
 
   events.push(`➕ Added token ${tokenId} to account`);
   return { success: true, events };

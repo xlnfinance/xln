@@ -23,13 +23,11 @@ export async function handleHtlcLock(
   currentHeight: number,
   isValidation: boolean = false
 ): Promise<{ success: boolean; events: string[]; error?: string }> {
-  console.log('🔒 handleHtlcLock CALLED');
   const { lockId, hashlock, timelock, revealBeforeHeight, amount, tokenId, envelope } = accountTx.data;
   const events: string[] = [];
 
   // Initialize locks Map if not present (defensive - should be initialized at account creation)
   if (!accountMachine.locks) {
-    console.log('⚠️ Initializing locks Map (should have been initialized at account creation)');
     accountMachine.locks = new Map();
   }
 
@@ -123,27 +121,21 @@ export async function handleHtlcLock(
   // Holds must be in frame hash to prevent same-frame over-commit attacks
   if (senderIsLeft) {
     delta.leftHold += amount;
-    if (!isValidation) console.log(`✅ Updated leftHold: ${delta.leftHold}`);
   } else {
     delta.rightHold += amount;
-    if (!isValidation) console.log(`✅ Updated rightHold: ${delta.rightHold}`);
   }
 
   // 9. Add lock to locks Map
   // CRITICAL CONSENSUS FIX: Add during validation too (prevents duplicate lockId in same frame)
   // BUT only on commit persist to real accountMachine (validation uses temporary clone)
   if (!isValidation) {
-    console.log(`🔒 COMMIT: Adding lock, lockId=${lockId.slice(0,16)}`);
     accountMachine.locks.set(lockId, lock);
-    console.log(`✅ Lock added to Map: ${lockId.slice(0,16)}..., locks.size=${accountMachine.locks.size}`);
   } else {
     // Validation: Add to clone to check duplicates, but clone is discarded
     accountMachine.locks.set(lockId, lock);
-    console.log(`⏭️ VALIDATION: Lock added to validation clone (dup check), size=${accountMachine.locks.size}`);
   }
 
   events.push(`🔒 HTLC locked: ${amount} token ${tokenId}, expires block ${revealBeforeHeight}, hash ${hashlock.slice(0,16)}...`);
 
-  console.log(`✅ handleHtlcLock SUCCESS, returning events: ${events.length}`);
   return { success: true, events };
 }
