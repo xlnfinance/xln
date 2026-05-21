@@ -338,19 +338,16 @@ export async function proposeAccountFrame(
         `🔍 TX-RESULT: type=${accountTx.type}, hasSecret=${!!result.secret}, hasHashlock=${!!result.hashlock}`,
       );
     if (result.secret && result.hashlock) {
-      if (!quiet) console.log(`✅ Collected secret from ${accountTx.type}`);
       revealedSecrets.push({ secret: result.secret, hashlock: result.hashlock });
     }
 
     // Collect swap offers for orderbook integration
     if (result.swapOfferCreated) {
-      if (!quiet) console.log(`📊 Collected swap offer: ${result.swapOfferCreated.offerId}`);
       swapOffersCreated.push(result.swapOfferCreated);
     }
 
     // Collect cancel requests for hub orderbook cancellation flow
     if (result.swapOfferCancelRequested) {
-      if (!quiet) console.log(`📊 Collected swap cancel request: ${result.swapOfferCancelRequested.offerId}`);
       swapCancelRequests.push({
         ...result.swapOfferCancelRequested,
         accountId: accountMachine.proofHeader.toEntity,
@@ -359,7 +356,6 @@ export async function proposeAccountFrame(
 
     // Collect finalized cancellations for open-offer/orderbook cleanup
     if (result.swapOfferCancelled) {
-      if (!quiet) console.log(`📊 Collected swap cancel: ${result.swapOfferCancelled.offerId}`);
       swapOffersCancelled.push(result.swapOfferCancelled);
     }
   }
@@ -566,9 +562,6 @@ export async function proposeAccountFrame(
   // Set pending state (no longer storing clone - re-execution on commit)
   accountMachine.pendingFrame = newFrame;
   markStorageAccountDirty(env, accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
-  console.log(
-    `🔒 PROPOSE: Account ${accountMachine.proofHeader.fromEntity.slice(-4)}:${accountMachine.proofHeader.toEntity.slice(-4)} pendingFrame=${newFrame.height}, txs=${newFrame.accountTxs.length}`,
-  );
 
   // Remove only the transactions that actually made it into the proposed frame.
   // This function is async and can yield while hashing/signing; late arrivals must
@@ -677,14 +670,7 @@ export async function handleAccountInput(
   if (normalizedInputHeight !== undefined && !Number.isFinite(normalizedInputHeight)) {
     return { success: false, error: `Invalid account input height: ${String(input.height)}`, events: [] };
   }
-  const quiet = env.quietRuntimeLogs === true;
   const committedFrames: Array<{ frame: AccountFrame; committedViaNewFrame: boolean }> = [];
-  console.log(
-    `📨 A-MACHINE: Received AccountInput from ${input.fromEntityId.slice(-4)}, pendingFrame=${accountMachine.pendingFrame ? `h${accountMachine.pendingFrame.height}` : 'none'}, currentHeight=${accountMachine.currentHeight}`,
-  );
-  console.log(
-    `📨 A-MACHINE INPUT: height=${normalizedInputHeight ?? 'none'}, hasACK=${!!input.prevHanko}, hasNewFrame=${!!input.newAccountFrame}`,
-  );
 
   const events: string[] = [];
   const timedOutHashlocks: string[] = [];
@@ -737,7 +723,6 @@ export async function handleAccountInput(
 
   // Handle pending frame confirmation
   if (accountMachine.pendingFrame && ackHeight === accountMachine.pendingFrame.height && input.prevHanko) {
-    if (!quiet) console.log(`✅ Received confirmation for pending frame ${ackHeight}`);
     if (HEAVY_LOGS) console.log(`✅ ACK-DEBUG: fromEntity=${input.fromEntityId.slice(-4)}, toEntity=${input.toEntityId.slice(-4)}`);
 
     const frameHash = accountMachine.pendingFrame.stateHash;
@@ -907,9 +892,6 @@ export async function handleAccountInput(
         delete accountMachine.lastRollbackFrameHash; // Reset deduplication on full resolution
       }
 
-      console.log(
-        `✅ PENDING-CLEARED: Frame ${ackHeight} confirmed, mempool now has ${accountMachine.mempool.length} txs: [${accountMachine.mempool.map(tx => tx.type).join(',')}]`,
-      );
       events.push(`✅ Frame ${ackHeight} confirmed and committed`);
 
       // Run auto-rebalance only after pending frame is cleared.
@@ -932,9 +914,6 @@ export async function handleAccountInput(
       // CRITICAL FIX: Chained Proposal - if mempool has items (e.g. j_event_claim), propose immediately
       if (!input.newAccountFrame) {
         if (accountMachine.mempool.length > 0) {
-          console.log(
-            `🚀 CHAINED-PROPOSAL: ACK received, mempool has ${accountMachine.mempool.length} txs - proposing next frame immediately`,
-          );
           const proposeResult = await proposeAccountFrame(env, accountMachine);
           if (proposeResult.success && proposeResult.accountInput) {
             return {
@@ -956,7 +935,6 @@ export async function handleAccountInput(
         return { success: true, events, timedOutHashlocks, ...(committedFrames.length > 0 && { committedFrames }) };
       }
       // Fall through to process newAccountFrame below
-      console.log(`📦 BATCHED-MESSAGE: ACK processed, now processing bundled new frame...`);
     }
   }
 
@@ -1062,13 +1040,9 @@ export async function handleAccountInput(
       };
     }
 
-    console.log(`✅ Frame chain verified: prevFrameHash matches frame ${accountMachine.currentHeight}`);
-
     // CHANNEL.TS REFERENCE: Lines 138-165 - Proper rollback logic for simultaneous proposals
     // Handle simultaneous proposals when both sides send same height
     if (accountMachine.pendingFrame && receivedFrame.height === accountMachine.pendingFrame.height) {
-      console.log(`🔄 SIMULTANEOUS-PROPOSALS: Both proposed frame ${receivedFrame.height}`);
-
       // Deterministic tiebreaker: Left always wins (CHANNEL.TS REFERENCE: Line 140-157)
       const isLeftEntity = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
       if (HEAVY_LOGS)
@@ -1078,16 +1052,11 @@ export async function handleAccountInput(
 
       if (isLeftEntity) {
         // We are LEFT - ignore their frame, keep ours (deterministic tiebreaker)
-        console.log(`📤 LEFT-WINS: Ignoring right's frame ${receivedFrame.height}, waiting for them to accept ours`);
-
         // EMIT EVENT: Track LEFT wins tiebreaker
         events.push(`📤 LEFT-WINS: Ignored RIGHT's frame ${receivedFrame.height} (waiting for their ACK)`);
         // CRITICAL FIX: Even though we ignore their frame, check mempool and send update if we have new txs
         // This prevents j_event_claims from getting stuck when both sides propose simultaneously
         if (accountMachine.mempool.length > 0) {
-          console.log(
-            `📤 LEFT-WINS-BUT-HAS-MEMPOOL: ${accountMachine.mempool.length} txs waiting - notifying counterparty`,
-          );
           events.push(`⚠️ LEFT has ${accountMachine.mempool.length} pending txs while waiting for RIGHT's ACK`);
         // The pending mempool remains local until RIGHT acknowledges our frame.
         }
@@ -1114,11 +1083,7 @@ export async function handleAccountInput(
           let restoredTxCount = 0;
           if (accountMachine.pendingFrame) {
             restoredTxCount = accountMachine.pendingFrame.accountTxs.length;
-            console.log(`📥 RIGHT-ROLLBACK: Restoring up to ${restoredTxCount} txs to mempool`);
             const uniqueRestored = prependUniqueMempoolTxs(accountMachine, accountMachine.pendingFrame.accountTxs);
-            console.log(
-              `📥 Mempool now has ${accountMachine.mempool.length} txs after rollback restore (unique added=${uniqueRestored})`,
-            );
 
             // EMIT EVENT: Track rollback for debugging
             events.push(
@@ -1132,7 +1097,6 @@ export async function handleAccountInput(
           markStorageAccountDirty(env, accountMachine.proofHeader.fromEntity, input.fromEntityId);
           accountMachine.rollbackCount = Math.max(1, accountMachine.rollbackCount + 1);
           accountMachine.lastRollbackFrameHash = receivedHash; // Track this rollback
-          console.log(`📥 RIGHT-ROLLBACK: Accepting left's frame (rollbacks: ${accountMachine.rollbackCount})`);
           if (accountMachine.rollbackCount > 1) {
             console.warn(
               `⚠️ ROLLBACK-RETRY: repeated RIGHT rollback count=${accountMachine.rollbackCount} (continuing deterministically)`,
@@ -1556,10 +1520,6 @@ export async function handleAccountInput(
       return { success: false, error: 'Failed to build ACK hanko', events };
     }
 
-    console.log(
-      `📤 ACK-SEND: Preparing ACK for frame ${receivedFrame.height} from ${accountMachine.proofHeader.fromEntity.slice(-4)} to ${input.fromEntityId.slice(-4)}`,
-    );
-
     // CHANNEL.TS PATTERN (Lines 576-612): Batch ACK + new frame in same message!
     // Check if we should batch BEFORE incrementing nonce
     let batchedWithNewFrame = false;
@@ -1606,8 +1566,6 @@ export async function handleAccountInput(
         `🔍 BATCH-CHECK for account ${input.fromEntityId.slice(-4)}: mempool=${accountMachine.mempool.length}, pendingFrame=${!!accountMachine.pendingFrame}, mempoolTxs=[${accountMachine.mempool.map(tx => tx.type).join(',')}]`,
       );
     if (accountMachine.mempool.length > 0 && !accountMachine.pendingFrame) {
-      console.log(`📦 BATCH-OPTIMIZATION: Sending ACK + new frame in single message (Channel.ts pattern)`);
-
       // Pass skipNonceIncrement=true since we'll increment for the whole batch below
       proposeResult = await proposeAccountFrame(env, accountMachine, true);
 
@@ -1647,7 +1605,6 @@ export async function handleAccountInput(
         }
 
         const newFrameId = proposeResult.accountInput.newAccountFrame?.height || 0;
-        console.log(`✅ Batched ACK for frame ${receivedFrame.height} + proposal for frame ${newFrameId}`);
         events.push(`📤 Batched ACK + frame ${newFrameId}`);
       }
     }
@@ -1666,7 +1623,6 @@ export async function handleAccountInput(
 
     // Increment nonce for this message (on-chain nonce for dispute proofs / settlements)
     ++accountMachine.proofHeader.nonce;
-    console.log(`🔢 nonce: ${accountMachine.proofHeader.nonce} (batched=${batchedWithNewFrame})`);
 
     // Merge revealed secrets from BOTH incoming frame AND proposed frame
     const allRevealedSecrets = [
@@ -1754,7 +1710,6 @@ export function addToAccountMempool(accountMachine: AccountMachine, accountTx: A
   }
 
   accountMachine.mempool.push(accountTx);
-  console.log(`📥 Added ${accountTx.type} to mempool (${accountMachine.mempool.length}/${MEMPOOL_LIMIT})`);
   return true;
 }
 
