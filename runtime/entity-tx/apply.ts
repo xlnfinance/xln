@@ -1,15 +1,8 @@
-import { calculateQuorumPower } from '../entity-consensus';
 import { requireUsableContractAddress } from '../contract-address';
 import { isLeftEntity } from '../entity-id-utils';
 import { formatEntityId } from '../utils';
-import { normalizeEntityName } from '../networking/gossip';
-import {
-  createOrderbookExtState,
-  validateSpreadDistribution,
-} from '../orderbook';
-import type { EntityState, EntityTx, Env, Proposal, Delta, AccountTx, EntityInput, JInput, HashType, CrossJurisdictionSwapRoute } from '../types';
+import type { EntityState, EntityTx, Env, Delta, AccountTx, EntityInput, JInput, HashType, CrossJurisdictionSwapRoute } from '../types';
 import { DEFAULT_SOFT_LIMIT, DEFAULT_HARD_LIMIT, DEFAULT_MAX_FEE } from '../types';
-import { DEBUG, log } from '../utils';
 import { safeStringify } from '../serialization-utils';
 import { announceLocalEntityProfile } from '../networking/gossip-helper';
 import { markStorageAccountDirty, markStorageEntityDirty } from '../env-events';
@@ -25,8 +18,6 @@ import {
 import { pushCrossJurisdictionEntityOutput } from './cross-j-outputs';
 import { handleJEvent } from './j-events';
 import { shouldRethrowEntityTxError } from './invariant-errors';
-import { executeProposal, generateProposalId } from './proposals';
-import { validateMessage } from './validation';
 import { cloneEntityState, addMessage } from '../state-helpers';
 import { createStructuredLogger, logError } from '../logger';
 import { FINANCIAL } from '../constants';
@@ -79,6 +70,14 @@ import { handleDisputeFinalize, handleDisputeStart } from './handlers/dispute';
 import { buildCrossJurisdictionCancelAck } from '../cross-jurisdiction-orderbook';
 import { removeBookOrderById, removeCrossJurisdictionBookOrderByRouteId } from '../orderbook/cross-j';
 import { assertSameJurisdictionAccount } from '../jurisdiction-runtime';
+import {
+  handleChatEntityTx,
+  handleChatMessageEntityTx,
+  handleInitOrderbookExtEntityTx,
+  handleProfileUpdateEntityTx,
+  handleProposeEntityTx,
+  handleVoteEntityTx,
+} from './handlers/basic';
 
 const entityTxLog = createStructuredLogger('entity.tx');
 import {
@@ -169,174 +168,27 @@ export const applyEntityTx = async (
     markStorageEntityDirty(env, entityState.entityId);
 
     if (entityTx.type === 'chat') {
-      const { from, message } = entityTx.data;
-
-      if (!validateMessage(message)) {
-        log.error(`❌ Invalid chat message from ${from}`);
-        return { newState: entityState, outputs: [] }; // Return unchanged state
-      }
-
-      const currentNonce = entityState.nonces.get(from) || 0;
-      const expectedNonce = currentNonce + 1;
-
-      const newEntityState = cloneEntityState(entityState);
-
-      newEntityState.nonces.set(from, expectedNonce);
-      addMessage(newEntityState, `${from}: ${message}`);
-
-      return { newState: newEntityState, outputs: [] };
+      return handleChatEntityTx(entityState, entityTx);
     }
 
     if (entityTx.type === 'chatMessage') {
-      // System-generated messages (e.g., from crontab dispute suggestions)
-      const { message } = entityTx.data;
-      const newEntityState = cloneEntityState(entityState);
-
-      addMessage(newEntityState, message);
-
-      return { newState: newEntityState, outputs: [] };
+      return handleChatMessageEntityTx(entityState, entityTx);
     }
 
     if (entityTx.type === 'propose') {
-      const { action, proposer } = entityTx.data;
-      const proposalId = generateProposalId(action, proposer, entityState);
-
-      if (DEBUG) console.log(`    📝 Creating proposal ${proposalId} by ${proposer}: ${action.data.message}`);
-
-      const proposal: Proposal = {
-        id: proposalId,
-        proposer,
-        action,
-        // explicitly type votes map to match Proposal.vote value type
-        votes: new Map<string, 'yes' | 'no' | 'abstain' | { choice: 'yes' | 'no' | 'abstain'; comment: string }>([
-          [proposer, 'yes'],
-        ]),
-        status: 'pending',
-        created: entityState.timestamp,
-      };
-
-      const proposerPower = entityState.config.shares[proposer] || BigInt(0);
-      const shouldExecuteImmediately = proposerPower >= entityState.config.threshold;
-
-      let newEntityState = cloneEntityState(entityState);
-
-      if (shouldExecuteImmediately) {
-        proposal.status = 'executed';
-        newEntityState = executeProposal(newEntityState, proposal);
-        if (DEBUG)
-          console.log(
-            `    ⚡ Proposal executed immediately - proposer has ${proposerPower} >= ${entityState.config.threshold} threshold`,
-          );
-      } else {
-        if (DEBUG)
-          console.log(
-            `    ⏳ Proposal pending votes - proposer has ${proposerPower} < ${entityState.config.threshold} threshold`,
-          );
-      }
-
-      newEntityState.proposals.set(proposalId, proposal);
-      return { newState: newEntityState, outputs: [] };
+      return handleProposeEntityTx(entityState, entityTx);
     }
 
     if (entityTx.type === 'vote') {
-      console.log(`🗳️ PROCESSING VOTE: entityTx.data=`, entityTx.data);
-      const { proposalId, voter, choice, comment } = entityTx.data;
-      const proposal = entityState.proposals.get(proposalId);
-
-      console.log(`🗳️ Vote lookup: proposalId=${proposalId}, found=${!!proposal}, status=${proposal?.status}`);
-      console.log(`🗳️ Available proposals:`, Array.from(entityState.proposals.keys()));
-
-      if (!proposal || proposal.status !== 'pending') {
-        console.log(`    ❌ Vote ignored - proposal ${proposalId.slice(0, 12)}... not found or not pending`);
-        return { newState: entityState, outputs: [] };
-      }
-
-      console.log(`    🗳️  Vote by ${voter}: ${choice} on proposal ${proposalId.slice(0, 12)}...`);
-
-      const newEntityState = cloneEntityState(entityState);
-
-      const updatedProposal = {
-        ...proposal,
-        votes: new Map(proposal.votes),
-      };
-      // Only create the object variant when comment is provided (comment must be string)
-      const voteData: 'yes' | 'no' | 'abstain' | { choice: 'yes' | 'no' | 'abstain'; comment: string } =
-        comment !== undefined ? ({ choice, comment } as { choice: 'yes' | 'no' | 'abstain'; comment: string }) : choice;
-      updatedProposal.votes.set(voter, voteData);
-
-      const yesVoters = Array.from(updatedProposal.votes.entries())
-        .filter(([_voter, voteData]) => {
-          const vote = typeof voteData === 'object' ? voteData.choice : voteData;
-          return vote === 'yes';
-        })
-        .map(([voter, _voteData]) => voter);
-
-      const totalYesPower = calculateQuorumPower(entityState.config, yesVoters);
-
-      if (DEBUG) {
-        const totalShares = Object.values(entityState.config.shares).reduce((sum, val) => sum + val, BigInt(0));
-        const percentage = ((Number(totalYesPower) / Number(entityState.config.threshold)) * 100).toFixed(1);
-        console.log(
-          `    🔍 Proposal votes: ${totalYesPower} / ${totalShares} [${percentage}% threshold${Number(totalYesPower) >= Number(entityState.config.threshold) ? '+' : ''}]`,
-        );
-      }
-
-      if (totalYesPower >= entityState.config.threshold) {
-        updatedProposal.status = 'executed';
-        const executedState = executeProposal(newEntityState, updatedProposal);
-        executedState.proposals.set(proposalId, updatedProposal);
-        return { newState: executedState, outputs: [] };
-      }
-
-      newEntityState.proposals.set(proposalId, updatedProposal);
-      return { newState: newEntityState, outputs: [] };
+      return handleVoteEntityTx(entityState, entityTx);
     }
 
     if (entityTx.type === 'profile-update') {
-      const profileData = entityTx.data.profile;
-      if (!profileData || profileData.entityId !== entityState.entityId) {
-        throw new Error(`PROFILE_UPDATE_INVALID_ENTITY: expected=${entityState.entityId} got=${String(profileData?.entityId || '')}`);
-      }
-      const newState = cloneEntityState(entityState);
-      newState.profile = {
-        name: normalizeEntityName(profileData.name ?? newState.profile?.name, newState.entityId),
-        isHub: newState.profile.isHub,
-        avatar: typeof profileData.avatar === 'string' ? profileData.avatar : (newState.profile?.avatar ?? ''),
-        bio: typeof profileData.bio === 'string' ? profileData.bio : (newState.profile?.bio ?? ''),
-        website: typeof profileData.website === 'string' ? profileData.website : (newState.profile?.website ?? ''),
-      };
-      newState.timestamp = env.timestamp;
-
-      if (env.gossip) {
-        announceLocalEntityProfile(env, newState, env.timestamp);
-      }
-
-      return { newState, outputs: [] };
+      return handleProfileUpdateEntityTx(env, entityState, entityTx);
     }
 
     if (entityTx.type === 'initOrderbookExt') {
-      if (entityState.orderbookExt) {
-        return { newState: entityState, outputs: [] };
-      }
-
-      if (!validateSpreadDistribution(entityTx.data.spreadDistribution)) {
-        log.error(`❌ Invalid spread distribution for initOrderbookExt on ${formatEntityId(entityState.entityId)}`);
-        return { newState: entityState, outputs: [] };
-      }
-
-      const hubProfile = {
-        entityId: entityState.entityId,
-        name: entityTx.data.name,
-        spreadDistribution: entityTx.data.spreadDistribution,
-        referenceTokenId: entityTx.data.referenceTokenId,
-        minTradeSize: entityTx.data.minTradeSize,
-        supportedPairs: [...entityTx.data.supportedPairs],
-      };
-
-      const newState = cloneEntityState(entityState);
-      newState.orderbookExt = createOrderbookExtState(hubProfile);
-
-      return { newState, outputs: [] };
+      return handleInitOrderbookExtEntityTx(entityState, entityTx);
     }
 
     if (entityTx.type === 'j_event') {
