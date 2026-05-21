@@ -2,6 +2,11 @@
 
 **Runtime-Entity-Account-Jurisdiction** is XLN's four-layer consensus architecture for deterministic, debuggable financial state machines.
 
+**Role:** canonical architecture reference
+**Status:** live architecture doc; use [../status.md](../status.md) for current
+blocker order and [../mainnet.md](../mainnet.md) for the release bar
+**Audience:** core runtime, consensus, and protocol implementers
+
 ## 🎯 Core Design Goals
 
 ### 1. Determinism (Same Inputs → Same Outputs, Always)
@@ -655,7 +660,12 @@ Delta objects should be shared between clonedMachine and accountMachine for vali
 - ⏳ BFT threshold consensus (code exists, not tested in scenarios)
 - ⏳ Validator signature aggregation
 
-**Hardening TODOs:**
+**Historical hardening notes:**
+- the current blocker order now lives in [../status.md](../status.md)
+- the launch bar now lives in [../mainnet.md](../mainnet.md)
+- the items below are still useful as local technical reminders, not as the
+  canonical launch checklist
+
 - Frame hash: Replace placeholder with Merkle root (entity-consensus.ts:596)
 - HTLC reveal: Complete secret propagation (lock-ahb.ts:995)
 - Swap matching: Debug converge hang (swap.ts)

@@ -1,5 +1,11 @@
 # 1.1 Jurisdiction Machine / J-machine
 
+**Role:** conceptual model
+**Status:** active explanation doc; XLN implementation still assumes
+EVM-compatible J-machines, while TradFi systems here are mental-model examples
+**Audience:** readers who need the bridge between TradFi settlement structure
+and XLN's jurisdiction layer
+
 **Note:** This chapter describes J-machines as a *conceptual model* for understanding financial systems. XLN implementation requires EVM-compatible J-machines (Ethereum, L2s, future CBDCs). TradFi J-machines (Fedwire, ECB TARGET2) are analyzed here as mental model, not integration targets until they deploy programmable settlement layers.
 
 ## 1.1.1 TradFi J-machine
@@ -18,10 +24,10 @@ For historical reasons, tradfi J-machines are fragmented:
 
 * the oldest component – Central Bank, where **the currency (fiat) token** is minted in a form of debt to commercial banks.
 * the second component, Real Time Gross Settlement (RTGS) appeared later with advances in computers and networking. It allows commercial banks to move high value instantly (real time) without trusting each other with netting accounts (ACH). Technically, an account in Fedwire is an account in Fed. Therefore RTGS === Central Bank.
-* the third is central securities depository. That's where other **tokens are minted and stored**. 
+* the third is central securities depository. That's where other **tokens are minted and stored**.
 * plus multiple land registries where non-fungible tokens such as land and apartments are assigned to entities
 
-This fragmentation brings nothing but pain and reconcillation hell. 
+This fragmentation brings nothing but pain and reconcillation hell.
 
 Storing fiat token in one ledger and security tokens in another is like keeping count of bananas in one spreadsheat and using a whole another book for other fruits. The benefits are marginal, the downsides are glorious. 
 
@@ -42,4 +48,3 @@ We generalize all layer2 actors bounded to specific J-machine as E-machines. Thi
 
 
 Namely, in TradFi we superset {RTGS, Central Banks and Central Securities Depositaries} as a single-signer J-machine. Likewise, we claim "blockchains" or "cryptocurrencies" should have never existed as buzzwords: it's a multi-signer J-machine.
- 
