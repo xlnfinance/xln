@@ -13,6 +13,6 @@
   "permissions": ["notifications", "storage"],
   "host_permissions": [],
   "externally_connectable": {
-    "matches": ["https://*/*", "http://localhost/*", "http://127.0.0.1/*"]
+    "matches": ["https://xln.finance/*", "http://localhost/*", "http://127.0.0.1/*"]
   }
 }
