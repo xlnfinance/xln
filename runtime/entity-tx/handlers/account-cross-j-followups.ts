@@ -2,8 +2,11 @@ import type { AccountTx, CrossJurisdictionSwapRoute, EntityInput, EntityState, E
 import { CROSS_J_MAX_FILL_RATIO, isCrossJurisdictionRouteTransitionAllowed, isCrossJurisdictionTerminalStatus, validateCrossJurisdictionFillProgress, withCrossJurisdictionClaimProgress, withCrossJurisdictionFillProgress } from '../../cross-jurisdiction';
 import { deriveCanonicalCrossJurisdictionBookOwner } from '../../cross-jurisdiction-market';
 import { decodeHashLadderBinary } from '../../hashladder';
+import { createStructuredLogger, shortId, shortOrder } from '../../logger';
 import { removeCrossJurisdictionBookOrder } from '../../orderbook/cross-j';
 import { buildCrossJurisdictionEntityOutput, findLocalEntityState } from '../cross-j-outputs';
+
+const crossJFollowupLog = createStructuredLogger('crossj.followup');
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 
@@ -173,10 +176,11 @@ const applyPullResolveFollowup = (
       }
       outputs.push(buildCrossJurisdictionEntityOutput(env, route.target.counterpartyEntityId, targetEntityTxs));
       removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'source_claimed');
-      console.log(
-        `🌉 PULL: Relaying cross-j ratio route=${route.orderId} ` +
-        `target=${route.target.counterpartyEntityId.slice(-4)} ratio=${fillRatio}/65535`,
-      );
+      crossJFollowupLog.debug('pull.resolve.relay_target', {
+        route: shortOrder(route.orderId, 12),
+        target: shortId(route.target.counterpartyEntityId),
+        ratio: fillRatio,
+      });
       continue;
     }
 
@@ -190,7 +194,10 @@ const applyPullResolveFollowup = (
       setCrossJurisdictionStatus(route, 'settled', newState.timestamp);
       route.settledAt = newState.timestamp;
       removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'settled');
-      console.log(`🌉 PULL: Cross-j route settled ${route.orderId} ratio=${fillRatio}/65535`);
+      crossJFollowupLog.debug('pull.resolve.settled', {
+        route: shortOrder(route.orderId, 12),
+        ratio: fillRatio,
+      });
     }
   }
   return true;

@@ -11,6 +11,9 @@
 
 import type { AccountMachine, AccountTx } from '../../types';
 import { hashHtlcSecret } from '../../htlc-utils';
+import { createStructuredLogger, shortHash } from '../../logger';
+
+const htlcResolveLog = createStructuredLogger('account.htlc');
 
 export async function handleHtlcResolve(
   accountMachine: AccountMachine,
@@ -108,7 +111,7 @@ export async function handleHtlcResolve(
       }
     }
 
-    console.log(`❌ HTLC-RESOLVE error: lockId=${lockId.slice(0,16)}..., reason=${reason || 'unknown'}`);
+    htlcResolveLog.debug('resolve.error_outcome', { lock: shortHash(lockId), reason: reason || 'unknown' });
     events.push(`❌ HTLC resolved (error): ${lock.amount} token ${lock.tokenId} returned — ${reason || 'unknown'}`);
   }
 

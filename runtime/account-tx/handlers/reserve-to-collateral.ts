@@ -25,6 +25,9 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
+import { createStructuredLogger } from '../../logger';
+
+const reserveToCollateralLog = createStructuredLogger('account.reserve');
 
 /**
  * SECURITY: This handler is DISABLED to prevent "God Mode" attacks.
@@ -52,10 +55,7 @@ export function handleReserveToCollateral(
 
   const { tokenId, collateral } = accountTx.data;
 
-  console.error(`❌ SECURITY: Blocked direct reserve_to_collateral tx`);
-  console.error(`   tokenId=${tokenId}, collateral=${collateral}`);
-  console.error(`   This tx type is DISABLED - use j_event_claim flow instead`);
-  console.error(`   See entity-tx/j-events.ts for proper L1→bilateral consensus`);
+  reserveToCollateralLog.debug('direct_tx_blocked', { tokenId, collateral: collateral.toString() });
 
   return {
     success: false,

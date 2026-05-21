@@ -12,7 +12,10 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
+import { createStructuredLogger, shortOrder } from '../../logger';
 import { recordSwapCancelRequested } from './swap-history';
+
+const swapCancelLog = createStructuredLogger('account.swap');
 
 export async function handleSwapCancelRequest(
   accountMachine: AccountMachine,
@@ -42,11 +45,7 @@ export async function handleSwapCancelRequest(
 
   // 3. Emit request event (used by hub orderbook cancel flow)
   events.push(`📨 Swap cancel requested: ${offerId.slice(0, 8)}...`);
-  if (isValidation) {
-    console.log(`📊 VALIDATION: swap_cancel_request accepted, offerId=${offerId.slice(0, 8)}`);
-  } else {
-    console.log(`📊 COMMIT: swap_cancel_request accepted, offerId=${offerId.slice(0, 8)}`);
-  }
+  swapCancelLog.debug('cancel_request.accepted', { offer: shortOrder(offerId, 8), phase: isValidation ? 'validation' : 'commit' });
   recordSwapCancelRequested(accountMachine, offerId, _currentHeight);
   return { success: true, events, swapOfferCancelRequested: { offerId } };
 }

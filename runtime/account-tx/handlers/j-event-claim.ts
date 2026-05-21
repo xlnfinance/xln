@@ -2,6 +2,9 @@ import type { AccountMachine, AccountTx, Env } from '../../types';
 import { getAccountPerspective } from '../../state-helpers';
 import { canonicalJurisdictionEventKey, normalizeJurisdictionEvents } from '../../j-event-normalization';
 import { tryFinalizeAccountJEvents } from '../../entity-tx/j-events';
+import { createStructuredLogger, shortHash } from '../../logger';
+
+const jEventClaimLog = createStructuredLogger('account.j_event');
 
 export function handleJEventClaim(
   accountMachine: AccountMachine,
@@ -14,7 +17,7 @@ export function handleJEventClaim(
   env?: Env,
 ): { success: boolean; events: string[]; error?: string } {
   const { jHeight, jBlockHash, events, observedAt } = accountTx.data;
-  console.log(`📥 j_event_claim: jHeight=${jHeight}, hash=${jBlockHash.slice(0, 10)}, byLeft=${byLeft}`);
+  jEventClaimLog.debug('claim.received', { jHeight, hash: shortHash(jBlockHash), byLeft });
 
   if (!accountMachine.leftJObservations) accountMachine.leftJObservations = [];
   if (!accountMachine.rightJObservations) accountMachine.rightJObservations = [];
@@ -22,9 +25,10 @@ export function handleJEventClaim(
   if (accountMachine.lastFinalizedJHeight === undefined) accountMachine.lastFinalizedJHeight = 0;
 
   if (jHeight <= accountMachine.lastFinalizedJHeight) {
-    console.log(
-      `   ℹ️ j_event_claim: jHeight ${jHeight} already finalized (lastFinalized=${accountMachine.lastFinalizedJHeight}) - skipping`,
-    );
+    jEventClaimLog.debug('claim.already_finalized', {
+      jHeight,
+      lastFinalized: accountMachine.lastFinalizedJHeight,
+    });
     return { success: true, events: [`ℹ️ j_event_claim skipped (already finalized)`] };
   }
 
@@ -59,19 +63,25 @@ export function handleJEventClaim(
       existingObs.observedAt = observedAt;
     }
     if (merged > 0) {
-      console.log(
-        `   🔁 j_event_claim MERGED: side=${claimIsFromLeft ? 'left' : 'right'} jHeight=${jHeight} ` +
-          `added=${merged} total=${existingObs.events.length}`,
-      );
+      jEventClaimLog.debug('claim.merged', {
+        side: claimIsFromLeft ? 'left' : 'right',
+        jHeight,
+        added: merged,
+        total: existingObs.events.length,
+      });
     } else {
-      console.log(
-        `   ℹ️ j_event_claim duplicate ignored: side=${claimIsFromLeft ? 'left' : 'right'} jHeight=${jHeight} ` +
-          `hash=${String(jBlockHash).slice(0, 10)}`,
-      );
+      jEventClaimLog.debug('claim.duplicate_ignored', {
+        side: claimIsFromLeft ? 'left' : 'right',
+        jHeight,
+        hash: shortHash(jBlockHash),
+      });
     }
   } else {
     sideObservations.push({ jHeight, jBlockHash, events: normalizedEvents, observedAt });
-    console.log(`   📝 Stored ${claimIsFromLeft ? 'LEFT' : 'RIGHT'} obs (${sideObservations.length} total)`);
+    jEventClaimLog.debug('claim.stored', {
+      side: claimIsFromLeft ? 'left' : 'right',
+      total: sideObservations.length,
+    });
   }
 
   if (!isValidation) {

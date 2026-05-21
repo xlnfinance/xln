@@ -10,6 +10,9 @@
  */
 
 import type { AccountMachine, AccountTx } from '../../types';
+import { createStructuredLogger } from '../../logger';
+
+const rebalancePolicyLog = createStructuredLogger('account.rebalance');
 
 export function handleSetRebalancePolicy(
   accountMachine: AccountMachine,
@@ -33,7 +36,11 @@ export function handleSetRebalancePolicy(
   let effectiveFee = maxAcceptableFee;
   if (existing?.setByLeft !== undefined && byLeft !== undefined && existing.setByLeft !== byLeft) {
     effectiveFee = existing.maxAcceptableFee;
-    console.log(`🔒 POLICY-AUTH: maxAcceptableFee preserved (set by ${existing.setByLeft ? 'LEFT' : 'RIGHT'}, caller is ${byLeft ? 'LEFT' : 'RIGHT'})`);
+    rebalancePolicyLog.debug('max_fee_preserved', {
+      tokenId,
+      setBy: existing.setByLeft ? 'left' : 'right',
+      caller: byLeft ? 'left' : 'right',
+    });
   }
 
   const policy: { r2cRequestSoftLimit: bigint; hardLimit: bigint; maxAcceptableFee: bigint; setByLeft?: boolean } = {

@@ -12,6 +12,9 @@
 
 import type { AccountMachine } from '../../types';
 import { hashHtlcSecret } from '../../htlc-utils';
+import { createStructuredLogger, shortHash } from '../../logger';
+
+const htlcRevealLog = createStructuredLogger('account.htlc');
 
 type HtlcRevealTx = {
   type: 'htlc_reveal';
@@ -30,17 +33,18 @@ export async function handleHtlcReveal(
   secret?: string;     // For backward propagation
   hashlock?: string;   // To identify route
 }> {
-  console.log('🔓 handleHtlcReveal CALLED');
   const { lockId, secret } = accountTx.data;
   const events: string[] = [];
 
-  console.log(`🔓 REVEAL: lockId=${lockId.slice(0,16)}..., locks.size=${accountMachine.locks.size}`);
-  console.log(`🔓 REVEAL: Available lockIds: ${Array.from(accountMachine.locks.keys()).map(k => k.slice(0,16)).join(', ')}`);
+  htlcRevealLog.debug('reveal.start', { lock: shortHash(lockId), locks: accountMachine.locks.size });
+  htlcRevealLog.trace('reveal.available_locks', {
+    locks: Array.from(accountMachine.locks.keys()).map(lock => shortHash(lock)),
+  });
 
   // 1. Find lock
   const lock = accountMachine.locks.get(lockId);
   if (!lock) {
-    console.log(`🔓 REVEAL FAIL: Lock ${lockId.slice(0,16)}... not found`);
+    htlcRevealLog.debug('reveal.missing_lock', { lock: shortHash(lockId) });
     return { success: false, error: `Lock ${lockId} not found`, events };
   }
 
@@ -115,10 +119,16 @@ export async function handleHtlcReveal(
   // If left sends → delta decreases (negative)
   // If right sends → delta increases (positive)
   const canonicalDelta = lock.senderIsLeft ? -lock.amount : lock.amount;
-  console.log(`🔓 REVEAL-DELTA: senderIsLeft=${lock.senderIsLeft}, amount=${lock.amount}, canonicalDelta=${canonicalDelta}`);
-  console.log(`🔓 REVEAL-DELTA: offdelta BEFORE=${delta.offdelta}`);
+  const offdeltaBefore = delta.offdelta;
   delta.offdelta += canonicalDelta;
-  console.log(`🔓 REVEAL-DELTA: offdelta AFTER=${delta.offdelta}`);
+  htlcRevealLog.debug('reveal.delta_applied', {
+    senderIsLeft: lock.senderIsLeft,
+    tokenId: lock.tokenId,
+    amount: lock.amount.toString(),
+    canonicalDelta: canonicalDelta.toString(),
+    offdeltaBefore: offdeltaBefore.toString(),
+    offdeltaAfter: delta.offdelta.toString(),
+  });
 
   // 7. Remove lock
   accountMachine.locks.delete(lockId);
