@@ -15,9 +15,12 @@
 import type { AccountMachine, AccountTx, SettlementDiff } from '../../types';
 import { compileOps } from '../../settlement-ops';
 import { deriveDelta } from '../../account-utils';
+import { createStructuredLogger } from '../../logger';
 
 type SettleHoldTx = Extract<AccountTx, { type: 'settle_hold' }>;
 type SettleReleaseTx = Extract<AccountTx, { type: 'settle_release' }>;
+
+const settlementHoldLog = createStructuredLogger('account.settle');
 
 /**
  * Handle settle_hold - set holds on deltas for pending settlement
@@ -38,7 +41,7 @@ export async function handleSettleHold(
 }> {
   const { workspaceVersion, diffs } = tx.data;
 
-  console.log(`🔒 SETTLE-HOLD: Setting holds for workspace v${workspaceVersion}`);
+  settlementHoldLog.debug('hold.start', { workspaceVersion, diffs: diffs.length });
 
   // ═══════════════════════════════════════════════════════════════════════════
   // SECURITY: Validate workspace exists and version matches
@@ -46,7 +49,7 @@ export async function handleSettleHold(
   // Prevents attackers from proposing arbitrary holds without a valid workspace
   const workspace = accountMachine.settlementWorkspace;
   if (!workspace) {
-    console.error(`❌ SECURITY: settle_hold without workspace`);
+    settlementHoldLog.debug('hold.missing_workspace', { workspaceVersion });
     return {
       success: false,
       events: [],
@@ -55,7 +58,7 @@ export async function handleSettleHold(
   }
 
   if (workspace.version !== workspaceVersion) {
-    console.error(`❌ SECURITY: settle_hold version mismatch: tx=${workspaceVersion}, workspace=${workspace.version}`);
+    settlementHoldLog.debug('hold.version_mismatch', { txVersion: workspaceVersion, workspaceVersion: workspace.version });
     return {
       success: false,
       events: [],
@@ -81,7 +84,7 @@ export async function handleSettleHold(
   }
 
   if (diffs.length !== workspaceDiffs.length) {
-    console.error(`❌ SECURITY: settle_hold diff count mismatch: tx=${diffs.length}, workspace=${workspaceDiffs.length}`);
+    settlementHoldLog.debug('hold.diff_count_mismatch', { txDiffs: diffs.length, workspaceDiffs: workspaceDiffs.length });
     return {
       success: false,
       events: [],
@@ -104,10 +107,15 @@ export async function handleSettleHold(
     if (txDiff.tokenId !== wsDiff.tokenId ||
         txDiff.leftWithdrawing !== expectedLeftWithdrawing ||
         txDiff.rightWithdrawing !== expectedRightWithdrawing) {
-      console.error(`❌ SECURITY: settle_hold diff[${i}] mismatch`);
-      console.error(`   tx: token=${txDiff.tokenId}, leftW=${txDiff.leftWithdrawing}, rightW=${txDiff.rightWithdrawing}`);
-      console.error(`   ws: token=${wsDiff.tokenId}, leftD=${wsDiff.leftDiff}, rightD=${wsDiff.rightDiff}`);
-      console.error(`   expected: leftW=${expectedLeftWithdrawing}, rightW=${expectedRightWithdrawing}`);
+      settlementHoldLog.debug('hold.diff_mismatch', {
+        index: i,
+        txToken: txDiff.tokenId,
+        workspaceToken: wsDiff.tokenId,
+        txLeftWithdrawing: txDiff.leftWithdrawing.toString(),
+        txRightWithdrawing: txDiff.rightWithdrawing.toString(),
+        expectedLeftWithdrawing: expectedLeftWithdrawing.toString(),
+        expectedRightWithdrawing: expectedRightWithdrawing.toString(),
+      });
       return {
         success: false,
         events: [],
@@ -134,7 +142,7 @@ export async function handleSettleHold(
   for (const diff of diffs) {
     const delta = accountMachine.deltas.get(diff.tokenId);
     if (!delta) {
-      console.warn(`⚠️ SETTLE-HOLD: No delta for tokenId ${diff.tokenId}`);
+      settlementHoldLog.debug('hold.missing_delta', { tokenId: diff.tokenId });
       continue;
     }
 
@@ -152,9 +160,11 @@ export async function handleSettleHold(
 
     // Check left capacity (skip for reserve-sourced deposits — L1 validates reserves)
     if (!isLeftDeposit && diff.leftWithdrawing > leftAvailable) {
-      console.error(`❌ SECURITY: settle_hold exceeds left capacity for token ${diff.tokenId}`);
-      console.error(`   requested: ${diff.leftWithdrawing}`);
-      console.error(`   capacity: ${leftAvailable}`);
+      settlementHoldLog.debug('hold.left_capacity_exceeded', {
+        tokenId: diff.tokenId,
+        requested: diff.leftWithdrawing.toString(),
+        capacity: leftAvailable.toString(),
+      });
       return {
         success: false,
         events: [],
@@ -164,9 +174,11 @@ export async function handleSettleHold(
 
     // Check right capacity (skip for reserve-sourced deposits — L1 validates reserves)
     if (!isRightDeposit && diff.rightWithdrawing > rightAvailable) {
-      console.error(`❌ SECURITY: settle_hold exceeds right capacity for token ${diff.tokenId}`);
-      console.error(`   requested: ${diff.rightWithdrawing}`);
-      console.error(`   capacity: ${rightAvailable}`);
+      settlementHoldLog.debug('hold.right_capacity_exceeded', {
+        tokenId: diff.tokenId,
+        requested: diff.rightWithdrawing.toString(),
+        capacity: rightAvailable.toString(),
+      });
       return {
         success: false,
         events: [],
@@ -182,7 +194,13 @@ export async function handleSettleHold(
     delta.leftHold += diff.leftWithdrawing;
     delta.rightHold += diff.rightWithdrawing;
 
-    console.log(`   Token ${diff.tokenId}: leftHold=${delta.leftHold}, rightHold=${delta.rightHold}${isLeftDeposit ? ' (L-deposit)' : ''}${isRightDeposit ? ' (R-deposit)' : ''}`);
+    settlementHoldLog.debug('hold.delta_updated', {
+      tokenId: diff.tokenId,
+      leftHold: delta.leftHold.toString(),
+      rightHold: delta.rightHold.toString(),
+      leftDeposit: isLeftDeposit,
+      rightDeposit: isRightDeposit,
+    });
   }
 
   return {
@@ -207,7 +225,7 @@ export async function handleSettleRelease(
 }> {
   const { workspaceVersion, diffs } = tx.data;
 
-  console.log(`🔓 SETTLE-RELEASE: Releasing holds for workspace v${workspaceVersion}`);
+  settlementHoldLog.debug('release.start', { workspaceVersion, diffs: diffs.length });
 
   const plannedReleases = new Map<number, { left: bigint; right: bigint }>();
   for (const diff of diffs) {
@@ -226,7 +244,7 @@ export async function handleSettleRelease(
   for (const [tokenId, planned] of plannedReleases) {
     const delta = accountMachine.deltas.get(tokenId);
     if (!delta) {
-      console.warn(`⚠️ SETTLE-RELEASE: No delta for tokenId ${tokenId}`);
+      settlementHoldLog.debug('release.missing_delta', { tokenId });
       continue;
     }
 
@@ -252,7 +270,7 @@ export async function handleSettleRelease(
   for (const diff of diffs) {
     const delta = accountMachine.deltas.get(diff.tokenId);
     if (!delta) {
-      console.warn(`⚠️ SETTLE-RELEASE: No delta for tokenId ${diff.tokenId}`);
+      settlementHoldLog.debug('release.missing_delta', { tokenId: diff.tokenId });
       continue;
     }
 
@@ -263,7 +281,11 @@ export async function handleSettleRelease(
     delta.leftHold -= diff.leftWithdrawing;
     delta.rightHold -= diff.rightWithdrawing;
 
-    console.log(`   Token ${diff.tokenId}: leftHold=${delta.leftHold}, rightHold=${delta.rightHold}`);
+    settlementHoldLog.debug('release.delta_updated', {
+      tokenId: diff.tokenId,
+      leftHold: delta.leftHold.toString(),
+      rightHold: delta.rightHold.toString(),
+    });
   }
 
   return {

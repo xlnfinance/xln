@@ -31,6 +31,9 @@ import {
   requantizeRemainingSwapAtPrice,
 } from '../../orderbook/types';
 import { recordSwapClosedLifecycle, recordSwapResolveLifecycle } from './swap-history';
+import { createStructuredLogger, shortOrder } from '../../logger';
+
+const swapResolveLog = createStructuredLogger('account.swap');
 
 export async function handleSwapResolve(
   accountMachine: AccountMachine,
@@ -196,8 +199,8 @@ export async function handleSwapResolve(
     if (filledWant * effectiveGive < filledGive * effectiveWant) {
       const limitLhs = filledWant * effectiveGive;
       const limitRhs = filledGive * effectiveWant;
-      console.error('❌ SWAP-RESOLVE MAKER LIMIT VIOLATION', {
-        offerId,
+      swapResolveLog.debug('maker_limit_violation', {
+        offer: shortOrder(offerId, 8),
         byLeft,
         makerIsLeft: offer.makerIsLeft,
         giveTokenId: offer.giveTokenId,

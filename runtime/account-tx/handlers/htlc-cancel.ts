@@ -12,6 +12,9 @@
  */
 
 import type { AccountMachine } from '../../types';
+import { createStructuredLogger, shortHash } from '../../logger';
+
+const htlcCancelLog = createStructuredLogger('account.htlc');
 
 type HtlcCancelTx = {
   type: 'htlc_cancel';
@@ -49,7 +52,7 @@ export async function handleHtlcCancel(
   // 4. Remove lock
   accountMachine.locks.delete(lockId);
 
-  console.log(`❌ HTLC-CANCEL: lockId=${lockId.slice(0,16)}..., reason=${reason}, amount=${lock.amount}`);
+  htlcCancelLog.debug('cancel', { lock: shortHash(lockId), reason, amount: lock.amount.toString() });
   events.push(`❌ HTLC cancelled: ${lock.amount} token ${lock.tokenId} returned (${reason})`);
 
   return {

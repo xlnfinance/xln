@@ -8,9 +8,11 @@ import type { AccountMachine, AccountTx } from '../../types';
 import { deriveDelta, getDefaultCreditLimit } from '../../account-utils';
 import { FINANCIAL } from '../../constants';
 import { isLeftEntity } from '../../entity-id-utils';
-import { safeStringify } from '../../serialization-utils';
+import { createStructuredLogger, shortId } from '../../logger';
 import { getAccountPerspective } from '../../state-helpers';
 import { decodeRebalancePolicyMemo } from '../../rebalance-policy';
+
+const directPaymentLog = createStructuredLogger('account.payment');
 
 export function handleDirectPayment(
   accountMachine: AccountMachine,
@@ -22,14 +24,14 @@ export function handleDirectPayment(
 
   if (amount < FINANCIAL.MIN_PAYMENT_AMOUNT || amount > FINANCIAL.MAX_PAYMENT_AMOUNT) {
     const error = `Invalid payment amount: ${amount.toString()} (min ${FINANCIAL.MIN_PAYMENT_AMOUNT.toString()}, max ${FINANCIAL.MAX_PAYMENT_AMOUNT.toString()})`;
-    console.error(`❌ DIRECT-PAYMENT: ${error}`);
+    directPaymentLog.debug('invalid_amount', { tokenId, amount: amount.toString() });
     return { success: false, error, events };
   }
 
   // H18 FIX: Validate route length to prevent DOS via excessive hops
   if (route && route.length > FINANCIAL.MAX_ROUTE_HOPS) {
     const error = `Route too long: ${route.length} hops (max ${FINANCIAL.MAX_ROUTE_HOPS})`;
-    console.error(`❌ DIRECT-PAYMENT: ${error}`);
+    directPaymentLog.debug('route_too_long', { hops: route.length, max: FINANCIAL.MAX_ROUTE_HOPS });
     return { success: false, error, events };
   }
 
@@ -63,8 +65,7 @@ export function handleDirectPayment(
   const paymentToEntity = accountTx.data.toEntityId;
 
   if (!paymentFromEntity || !paymentToEntity) {
-    console.error(`❌ CONSENSUS-FAILURE: Missing explicit payment direction`);
-    console.error(`  AccountTx:`, safeStringify(accountTx));
+    directPaymentLog.debug('missing_direction', { tokenId, amount: amount.toString() });
     return {
       success: false,
       error: 'FATAL: Payment must have explicit fromEntityId/toEntityId',
@@ -88,9 +89,12 @@ export function handleDirectPayment(
   let canonicalDelta: bigint;
 
   if (paymentFromEntity !== leftEntity && paymentFromEntity !== rightEntity) {
-    console.error(`❌ CONSENSUS-FAILURE: Payment entities don't match account`);
-    console.error(`  Account: ${leftEntity.slice(-4)} ↔ ${rightEntity.slice(-4)}`);
-    console.error(`  Payment: ${paymentFromEntity.slice(-4)} → ${paymentToEntity.slice(-4)}`);
+    directPaymentLog.debug('entity_mismatch', {
+      accountLeft: shortId(leftEntity),
+      accountRight: shortId(rightEntity),
+      from: shortId(paymentFromEntity),
+      to: shortId(paymentToEntity),
+    });
     return {
       success: false,
       error: 'FATAL: Payment entities must match account entities (no cross-account routing)',
@@ -229,7 +233,7 @@ export function handleDirectPayment(
     const finalTarget = route[route.length - 1];
 
     if (!currentEntityInRoute || !finalTarget) {
-      console.error(`❌ Empty route in payment - invalid payment routing`);
+      directPaymentLog.debug('empty_route', { routeLength: route.length });
       return { success: false, error: 'Invalid payment route', events };
     }
 
@@ -238,12 +242,12 @@ export function handleDirectPayment(
       const nextHop = route[1]; // Next entity after us
 
       if (!nextHop) {
-        console.error(`❌ No next hop in route for forwarding`);
+        directPaymentLog.debug('missing_next_hop', { routeLength: route.length });
         return { success: false, error: 'Invalid route: no next hop', events };
       }
 
       if (cpForEvent === nextHop) {
-        console.error(`❌ Routing error: received from ${nextHop} but should forward to them`);
+        directPaymentLog.debug('routing_loop', { nextHop: shortId(nextHop), counterparty: shortId(cpForEvent) });
       } else {
         // Add forwarding event
         events.push(
