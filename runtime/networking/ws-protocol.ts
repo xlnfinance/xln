@@ -22,7 +22,6 @@ import { keccak256, toUtf8Bytes } from 'ethers';
 
 export type RuntimeWsMessageType =
   | 'hello'
-  | 'runtime_input'
   | 'entity_input'
   | 'debug_event'
   | 'gossip_request'
