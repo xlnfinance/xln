@@ -77,8 +77,9 @@ import {
   prewarmSignerKeyCache,
 } from './account-crypto';
 import {
-  assertLocalEntityCryptoKeys, deriveLocalEntityCryptoKeys,
-  hasLocalSignerKey, resolveReplicaEntityCryptoKeys,
+  deriveLocalEntityCryptoKeys,
+  hasLocalSignerKey,
+  resolveReplicaEntityCryptoKeys,
 } from './runtime-entity-crypto';
 import {
   announceLocalEntityProfile,
@@ -87,8 +88,20 @@ import {
   createProfileSignerResolver,
 } from './networking/gossip-helper';
 import type { Profile } from './networking/gossip';
-import { RuntimeP2P, type P2PConfig } from './networking/p2p';
-import { isRuntimeId, normalizeRuntimeId } from './networking/runtime-id';
+import { normalizeRuntimeId } from './networking/runtime-id';
+import {
+  detachRuntimeP2P,
+  ensureRuntimeGossipProfiles,
+  getRuntimeP2P,
+  getRuntimeP2PState,
+  refreshRuntimeGossip,
+  startPendingRuntimeP2PIfReady,
+  startRuntimeP2P,
+  stopRuntimeP2P,
+  type P2PConfig,
+  type P2PConnectionState,
+  type RuntimeP2PLifecycleDeps,
+} from './runtime-p2p-lifecycle';
 import {
   parseReplicaKey,
   extractEntityId,
@@ -492,7 +505,6 @@ const waitForRuntimeLoopWakeOrTimeout = async (env: Env, timeoutMs: number): Pro
   });
 };
 
-const ENV_P2P_SINGLETON_KEY = Symbol.for('xln.runtime.env.p2p.singleton');
 const ENV_APPLY_ALLOWED_KEY = Symbol.for('xln.runtime.env.apply.allowed');
 const ENV_REPLAY_MODE_KEY = Symbol.for('xln.runtime.env.replay.mode');
 
@@ -512,14 +524,6 @@ const failfastAssert: (
   if (condition) return;
   const detailText = details ? ` ${safeStringify(details)}` : '';
   throw new Error(`${code}: ${message}${detailText}`);
-};
-
-type P2Pish = {
-  matchesIdentity?: (runtimeId: string, signerId?: string) => boolean;
-  updateConfig?: (config: P2PConfig) => void;
-  isConnected?: () => boolean;
-  connect?: () => void;
-  close?: () => void;
 };
 
 // --- Clean Log Capture (per-runtime, stored on env.runtimeState.cleanLogs) ---
@@ -999,18 +1003,7 @@ const stopJurisdictionWatchers = (env: Env): void => {
 const detachRuntimeEnv = (env: Env): void => {
   const state = env.runtimeState;
   state?.stopLoop?.();
-  if (state?.p2p) {
-    try {
-      state.p2p.close();
-    } catch (error) {
-      console.warn('⚠️ Failed to close P2P during runtime detach:', error instanceof Error ? error.message : error);
-    }
-    const singleton = envRecord(env)[ENV_P2P_SINGLETON_KEY];
-    if (singleton === state.p2p) {
-      delete envRecord(env)[ENV_P2P_SINGLETON_KEY];
-    }
-    state.p2p = null;
-  }
+  detachRuntimeP2P(env, getRuntimeP2PLifecycleDeps());
   if (state) {
     state.lastP2PConfig = null;
     state.pendingP2PConfig = null;
@@ -1059,13 +1052,7 @@ export const setRuntimeSeed = (env: Env, seed: string | null): void => {
   if (env.runtimeId) {
     env.dbNamespace = normalizeDbNamespace(env.runtimeId);
   }
-  const state = ensureRuntimeState(env);
-  if (state.pendingP2PConfig && env.runtimeId) {
-    console.log(`[P2P] pendingP2PConfig triggered, relayUrls=${state.pendingP2PConfig.relayUrls?.join(',')}`);
-    const config = state.pendingP2PConfig;
-    state.pendingP2PConfig = null;
-    startP2P(env, config);
-  }
+  startPendingRuntimeP2PIfReady(env, getRuntimeP2PLifecycleDeps());
 };
 
 export const setRuntimeId = (env: Env, id: string | null): void => {
@@ -1075,13 +1062,7 @@ export const setRuntimeId = (env: Env, id: string | null): void => {
   if (env.runtimeId) {
     env.dbNamespace = normalizeDbNamespace(env.runtimeId);
   }
-  const state = ensureRuntimeState(env);
-  if (state.pendingP2PConfig && env.runtimeId) {
-    console.log(`[P2P] pendingP2PConfig triggered, relayUrls=${state.pendingP2PConfig.relayUrls?.join(',')}`);
-    const config = state.pendingP2PConfig;
-    state.pendingP2PConfig = null;
-    startP2P(env, config);
-  }
+  startPendingRuntimeP2PIfReady(env, getRuntimeP2PLifecycleDeps());
 };
 
 // Derive runtimeId from seed (for isolated envs that need to set their own runtimeId)
@@ -1121,6 +1102,14 @@ function getRuntimeOutputRoutingDeps(): RuntimeOutputRoutingDeps {
   return createRuntimeOutputRoutingDeps(getRuntimeEntityRoutingDeps());
 }
 
+function getRuntimeP2PLifecycleDeps(): RuntimeP2PLifecycleDeps {
+  return {
+    ensureRuntimeState,
+    notifyEnvChange,
+    handleInboundP2PEntityInput,
+  };
+}
+
 export const sendEntityInput = (
   env: Env,
   input: RoutedEntityInput,
@@ -1128,145 +1117,23 @@ export const sendEntityInput = (
   return sendEntityInputWithRouting(env, input, getRuntimeOutputRoutingDeps());
 };
 
-export const startP2P = (env: Env, config: P2PConfig = {}): RuntimeP2P | null => {
-  console.log(
-    `[P2P] startP2P called, relayUrls=${config.relayUrls?.join(',')}, env.runtimeId=${env.runtimeId || 'NONE'}`,
-  );
-  const state = ensureRuntimeState(env);
-  state.lastP2PConfig = config;
-  assertLocalEntityCryptoKeys(env);
-  const resolvedRuntimeId = config.runtimeId || env.runtimeId;
-  if (!resolvedRuntimeId || !isRuntimeId(resolvedRuntimeId)) {
-    console.log(`[P2P] No runtimeId, storing as pendingP2PConfig`);
-    state.pendingP2PConfig = config;
-    return null;
-  }
+export const startP2P = (env: Env, config: P2PConfig = {}) =>
+  startRuntimeP2P(env, config, getRuntimeP2PLifecycleDeps());
 
-  const existingGlobalP2P = envRecord(env)[ENV_P2P_SINGLETON_KEY] as P2Pish | undefined;
-  if (existingGlobalP2P && existingGlobalP2P !== state.p2p) {
-    const canReuse =
-      typeof existingGlobalP2P.matchesIdentity === 'function' &&
-      existingGlobalP2P.matchesIdentity(resolvedRuntimeId, config.signerId);
-    if (!canReuse) {
-      throw new Error(
-        `P2P_SINGLETON_VIOLATION: attempted second p2p attachment for env runtimeId=${resolvedRuntimeId}`,
-      );
-    }
-    if (typeof existingGlobalP2P.updateConfig === 'function') {
-      existingGlobalP2P.updateConfig(config);
-    }
-    if (
-      typeof existingGlobalP2P.isConnected === 'function' &&
-      !existingGlobalP2P.isConnected() &&
-      typeof existingGlobalP2P.connect === 'function'
-    ) {
-      existingGlobalP2P.connect();
-    }
-    state.p2p = existingGlobalP2P as RuntimeP2P;
-    return state.p2p;
-  }
+export const stopP2P = (env: Env): void =>
+  stopRuntimeP2P(env, getRuntimeP2PLifecycleDeps());
 
-  if (state.p2p) {
-    if (state.p2p.matchesIdentity(resolvedRuntimeId, config.signerId)) {
-      state.p2p.updateConfig(config);
-      if (!state.p2p.isConnected()) {
-        state.p2p.connect();
-      }
-      return state.p2p;
-    }
-    state.p2p.close();
-  }
+export const getP2P = (env: Env) =>
+  getRuntimeP2P(env, getRuntimeP2PLifecycleDeps());
 
-  const p2pOptions: ConstructorParameters<typeof RuntimeP2P>[0] = {
-    env,
-    runtimeId: resolvedRuntimeId,
-    onEntityInput: (from, input, ingressTimestamp) => {
-      handleInboundP2PEntityInput(env, from, input, ingressTimestamp);
-    },
-    onGossipProfiles: (_from, profiles) => {
-      if (profiles.length === 0) return;
-      notifyEnvChange(env);
-      env.info('network', 'GOSSIP_PROFILE_UPDATE', {
-        count: profiles.length,
-        entityIds: profiles.map(profile => profile.entityId),
-      });
-      if (env.quietRuntimeLogs !== true) {
-        console.log(
-          `[P2P] gossip update accepted count=${profiles.length} ` +
-            `entities=${profiles.map(profile => profile.entityId.slice(-6)).join(',')}`,
-        );
-      }
-    },
-  };
-  if (config.signerId !== undefined) p2pOptions.signerId = config.signerId;
-  if (config.relayUrls !== undefined) p2pOptions.relayUrls = config.relayUrls;
-  const configuredWsUrl = (config as P2PConfig & { wsUrl?: string | null }).wsUrl;
-  if (configuredWsUrl !== undefined) p2pOptions.wsUrl = configuredWsUrl;
-  if (config.seedRuntimeIds !== undefined) p2pOptions.seedRuntimeIds = config.seedRuntimeIds;
-  if (config.advertiseEntityIds !== undefined) p2pOptions.advertiseEntityIds = config.advertiseEntityIds;
-  if (config.gossipPollMs !== undefined) p2pOptions.gossipPollMs = config.gossipPollMs;
+export const getP2PState = (env: Env): P2PConnectionState =>
+  getRuntimeP2PState(env, getRuntimeP2PLifecycleDeps());
 
-  state.p2p = new RuntimeP2P(p2pOptions);
+export const refreshGossip = (env: Env): void =>
+  refreshRuntimeGossip(env, getRuntimeP2PLifecycleDeps());
 
-  envRecord(env)[ENV_P2P_SINGLETON_KEY] = state.p2p;
-  state.p2p.connect();
-  return state.p2p;
-};
-
-export const stopP2P = (env: Env): void => {
-  const state = ensureRuntimeState(env);
-  if (state.p2p) {
-    state.p2p.close();
-    const singleton = envRecord(env)[ENV_P2P_SINGLETON_KEY];
-    if (singleton === state.p2p) {
-      delete envRecord(env)[ENV_P2P_SINGLETON_KEY];
-    }
-    state.p2p = null;
-  }
-  state.lastP2PConfig = null;
-};
-
-export const getP2P = (env: Env): RuntimeP2P | null => ensureRuntimeState(env).p2p ?? null;
-
-export type P2PConnectionState = {
-  connected: boolean;
-  reconnect: { attempt: number; nextAt: number } | null;
-  queue: { targetCount: number; totalMessages: number; oldestEntryAge: number; perTarget: Record<string, number> };
-  directPeers?: Array<{ runtimeId: string; endpoint: string; open: boolean }>;
-};
-
-export const getP2PState = (env: Env): P2PConnectionState => {
-  const p2p = getP2P(env);
-  if (!p2p) {
-    return {
-      connected: false,
-      reconnect: null,
-      queue: { targetCount: 0, totalMessages: 0, oldestEntryAge: 0, perTarget: {} },
-      directPeers: [],
-    };
-  }
-  return {
-    connected: p2p.isConnected(),
-    reconnect: p2p.getReconnectState(),
-    queue: p2p.getQueueState(),
-    directPeers: typeof (p2p as RuntimeP2P & { getDirectPeerState?: () => Array<{ runtimeId: string; endpoint: string; open: boolean }> }).getDirectPeerState === 'function'
-      ? (p2p as RuntimeP2P & { getDirectPeerState: () => Array<{ runtimeId: string; endpoint: string; open: boolean }> }).getDirectPeerState()
-      : [],
-  };
-};
-
-export const refreshGossip = (env: Env): void => {
-  const state = ensureRuntimeState(env);
-  if (state.p2p) {
-    state.p2p.refreshGossip();
-  }
-};
-
-export const ensureGossipProfiles = async (env: Env, entityIds: string[]): Promise<boolean> => {
-  const state = ensureRuntimeState(env);
-  if (!state.p2p) return false;
-  return state.p2p.ensureProfiles(entityIds);
-};
+export const ensureGossipProfiles = async (env: Env, entityIds: string[]): Promise<boolean> =>
+  ensureRuntimeGossipProfiles(env, getRuntimeP2PLifecycleDeps(), entityIds);
 
 export const clearGossip = (env: Env): void => {
   if (!env.gossip?.profiles) return;
