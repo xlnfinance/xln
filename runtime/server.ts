@@ -31,7 +31,7 @@ import {
   registerEnvChangeCallback,
 } from './runtime.ts';
 import { deserializeTaggedJson, safeStringify, serializeTaggedJson } from './serialization-utils';
-import type { AccountMachine, DeliverableEntityInput, EntityReplica, Env, EntityTx, RuntimeInput } from './types';
+import type { DeliverableEntityInput, Env, EntityTx, RuntimeInput } from './types';
 import type { HubHealth } from './health';
 import { createExternalWalletApi } from './api/external-wallet-api';
 import { maybeHandleQaRequest } from './qa/api';
@@ -41,7 +41,6 @@ import { createJAdapter, DEV_CHAIN_IDS, type JAdapter } from './jadapter';
 import type { JAdapterConfig, JTokenInfo } from './jadapter/types';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from './jadapter/default-tokens';
 import { resolveEntityProposerId } from './state-helpers';
-import { deriveDelta, getTokenInfo } from './account-utils';
 import {
   createMarketMakerServerState,
   getMarketMakerHealth,
@@ -50,6 +49,20 @@ import {
 import { serveRuntimeBundle, serveStatic } from './server/static-assets';
 import { parseTaggedControlBody, requireDaemonControlAuth, requireDaemonRpcAuth } from './server/auth';
 import { listLocalControlEntities } from './server/control-entities';
+import {
+  getAccountMachine,
+  getEntityOutCapacity,
+  getEntityReplicaById,
+  getReplicaAccountCount,
+  getReplicaReserveSnapshot,
+  hasAccount,
+} from './server/entity-lookup';
+import {
+  HUB_REQUIRED_TOKEN_COUNT,
+  getBootstrapReserveHealth,
+  getHubMeshHealth,
+  getRequestCreditCap,
+} from './server/hub-health';
 import {
   createRuntimeIngressReceiptStore,
   type RuntimeIngressReceipt,
@@ -377,11 +390,6 @@ const SERVER_RUNTIME_SEED = (() => {
   }
   return seed;
 })();
-const HUB_MESH_TOKEN_ID = 1;
-const HUB_MESH_CREDIT_AMOUNT = 1_000_000n * 10n ** 18n;
-const HUB_MESH_REQUIRED_HUBS = 3;
-const HUB_REQUIRED_TOKEN_COUNT = 3;
-const HUB_RESERVE_TARGET_UNITS = 1_000_000_000n;
 const FAUCET_SIGNER_LABEL = process.env['FAUCET_SIGNER_LABEL'] ?? 'faucet-1';
 const FAUCET_SEED = process.env['FAUCET_SEED'] ?? `${SERVER_RUNTIME_SEED}:faucet`;
 const FAUCET_WALLET_ETH_TARGET = ethers.parseEther('100');
@@ -477,275 +485,9 @@ const getKnownProfileBundle = (env: Env | null, entityId: string): { profile: Pr
   return { profile, peers };
 };
 
-const REQUEST_CREDIT_CAP_WHOLE = 1_000n;
-
-const getRequestCreditCap = (tokenId: number): bigint => {
-  const decimals = Number(getTokenInfo(tokenId).decimals);
-  const normalizedDecimals = Number.isFinite(decimals) && decimals >= 0 ? Math.floor(decimals) : 18;
-  return REQUEST_CREDIT_CAP_WHOLE * 10n ** BigInt(normalizedDecimals);
-};
-
-const getEntityReplicaById = (env: Env, entityId: string): EntityReplica | null => {
-  if (!env.eReplicas) return null;
-  const target = entityId.toLowerCase();
-  for (const [key, replica] of env.eReplicas.entries()) {
-    if (typeof key === 'string' && key.toLowerCase().startsWith(`${target}:`)) {
-      return replica;
-    }
-  }
-  return null;
-};
-
-const accountMatchesCounterparty = (
-  account: AccountMachine | null | undefined,
-  ownerEntityId: string,
-  counterpartyId: string,
-): boolean => {
-  const needle = String(counterpartyId || '').toLowerCase();
-  if (!needle) return false;
-
-  const me = String(ownerEntityId || '').toLowerCase();
-  const left = typeof account?.leftEntity === 'string' ? account.leftEntity.toLowerCase() : '';
-  const right = typeof account?.rightEntity === 'string' ? account.rightEntity.toLowerCase() : '';
-
-  if (left && right) {
-    if (left === me && right === needle) return true;
-    if (right === me && left === needle) return true;
-  }
-
-  return false;
-};
-
-const hasAccount = (env: Env, entityId: string, counterpartyId: string): boolean => {
-  const replica = getEntityReplicaById(env, entityId);
-  if (!replica?.state?.accounts) return false;
-  const needle = counterpartyId.toLowerCase();
-  for (const [key, account] of replica.state.accounts.entries()) {
-    if (typeof key === 'string' && key.toLowerCase() === needle) {
-      return true;
-    }
-    if (accountMatchesCounterparty(account, entityId, counterpartyId)) return true;
-  }
-  return false;
-};
-
-const getAccountMachine = (env: Env, entityId: string, counterpartyId: string): AccountMachine | null => {
-  const replica = getEntityReplicaById(env, entityId);
-  if (!replica?.state?.accounts) return null;
-  const needle = counterpartyId.toLowerCase();
-  for (const [key, account] of replica.state.accounts.entries()) {
-    if (typeof key === 'string' && key.toLowerCase() === needle) {
-      return account ?? null;
-    }
-    if (accountMatchesCounterparty(account, entityId, counterpartyId)) {
-      return account ?? null;
-    }
-  }
-  return null;
-};
-
-const getEntityOutCapacity = (
-  account: AccountMachine | null,
-  ownerEntityId: string,
-  tokenId: number,
-): bigint => {
-  if (!account) return 0n;
-  const delta = account.deltas.get(tokenId);
-  if (!delta) return 0n;
-  return deriveDelta(delta, account.leftEntity === ownerEntityId).outCapacity;
-};
-
-const getHubMeshHealth = (env: Env | null) => {
-  if (!env) {
-    return {
-      requiredHubCount: HUB_MESH_REQUIRED_HUBS,
-      tokenId: HUB_MESH_TOKEN_ID,
-      requiredCredit: HUB_MESH_CREDIT_AMOUNT.toString(),
-      hubIds: [] as string[],
-      pairs: [] as Array<{
-        left: string;
-        right: string;
-        tokenId: number;
-        requiredCredit: string;
-        leftHasAccount: boolean;
-        rightHasAccount: boolean;
-        leftOutCapacity: string;
-        rightOutCapacity: string;
-        ok: boolean;
-      }>,
-      ok: false,
-    };
-  }
-  const hubIds = relayStore.activeHubEntityIds.slice(0, HUB_MESH_REQUIRED_HUBS);
-  const pairStatuses: Array<{
-    left: string;
-    right: string;
-    tokenId: number;
-    requiredCredit: string;
-    leftHasAccount: boolean;
-    rightHasAccount: boolean;
-    leftOutCapacity: string;
-    rightOutCapacity: string;
-    ok: boolean;
-  }> = [];
-
-  for (let i = 0; i < hubIds.length; i++) {
-    for (let j = i + 1; j < hubIds.length; j++) {
-      const left = hubIds[i]!;
-      const right = hubIds[j]!;
-      const leftAccount = getAccountMachine(env, left, right);
-      const rightAccount = getAccountMachine(env, right, left);
-      const leftHasAccount = hasAccount(env, left, right);
-      const rightHasAccount = hasAccount(env, right, left);
-      const leftOutCapacity = getEntityOutCapacity(leftAccount, left, HUB_MESH_TOKEN_ID);
-      const rightOutCapacity = getEntityOutCapacity(rightAccount, right, HUB_MESH_TOKEN_ID);
-      const ok =
-        leftHasAccount &&
-        rightHasAccount &&
-        leftOutCapacity >= HUB_MESH_CREDIT_AMOUNT &&
-        rightOutCapacity >= HUB_MESH_CREDIT_AMOUNT;
-
-      pairStatuses.push({
-        left,
-        right,
-        tokenId: HUB_MESH_TOKEN_ID,
-        requiredCredit: HUB_MESH_CREDIT_AMOUNT.toString(),
-        leftHasAccount,
-        rightHasAccount,
-        leftOutCapacity: leftOutCapacity.toString(),
-        rightOutCapacity: rightOutCapacity.toString(),
-        ok,
-      });
-    }
-  }
-
-  const ok = hubIds.length >= HUB_MESH_REQUIRED_HUBS && pairStatuses.length > 0 && pairStatuses.every(p => p.ok);
-
-  return {
-    requiredHubCount: HUB_MESH_REQUIRED_HUBS,
-    tokenId: HUB_MESH_TOKEN_ID,
-    requiredCredit: HUB_MESH_CREDIT_AMOUNT.toString(),
-    hubIds,
-    pairs: pairStatuses,
-    ok,
-  };
-};
-
-type BootstrapReserveTokenHealth = {
-  tokenId: number;
-  symbol: string;
-  decimals: number;
-  current: string;
-  expectedMin: string;
-  ready: boolean;
-};
-
-type BootstrapReserveEntityHealth = {
-  entityId: string;
-  role: 'hub' | 'market-maker';
-  ready: boolean;
-  tokens: BootstrapReserveTokenHealth[];
-};
-
-type BootstrapReserveHealth = {
-  ok: boolean;
-  requiredTokenCount: number;
-  entityCount: number;
-  entities: BootstrapReserveEntityHealth[];
-};
-
 const compareText = (left: string, right: string): number => {
   if (left === right) return 0;
   return left < right ? -1 : 1;
-};
-
-const serializeReserveMap = (reserves: ReadonlyMap<string | number, bigint>): Record<string, string> => {
-  const entries = Array.from(reserves.entries())
-    .map(([tokenId, amount]) => [String(tokenId), amount.toString()] as const)
-    .sort(([left], [right]) => {
-      const leftNum = Number(left);
-      const rightNum = Number(right);
-      if (Number.isFinite(leftNum) && Number.isFinite(rightNum) && leftNum !== rightNum) {
-        return leftNum - rightNum;
-      }
-      return compareText(left, right);
-    });
-  return Object.fromEntries(entries);
-};
-
-const getReplicaReserveSnapshot = (env: Env, entityId: string): Record<string, string> | undefined => {
-  const replica = getEntityReplicaById(env, entityId);
-  if (!replica?.state?.reserves || replica.state.reserves.size === 0) return undefined;
-  return serializeReserveMap(replica.state.reserves);
-};
-
-const getReplicaAccountCount = (env: Env, entityId: string): number | undefined => {
-  const replica = getEntityReplicaById(env, entityId);
-  return replica?.state?.accounts?.size;
-};
-
-const getBootstrapReserveHealth = async (env: Env | null): Promise<BootstrapReserveHealth> => {
-  if (!env) {
-    return {
-      ok: false,
-      requiredTokenCount: HUB_REQUIRED_TOKEN_COUNT,
-      entityCount: 0,
-      entities: [],
-    };
-  }
-
-  const tokenCatalog = await ensureTokenCatalog().catch(() => []);
-  const bootstrapTokens = tokenCatalog
-    .slice(0, HUB_REQUIRED_TOKEN_COUNT)
-    .map((token) => ({
-      tokenId: Number(token.tokenId),
-      symbol: String(token.symbol || `token-${token.tokenId}`),
-      decimals: Number.isFinite(token.decimals) ? Number(token.decimals) : 18,
-    }))
-    .filter((token) => Number.isFinite(token.tokenId) && token.tokenId > 0);
-
-  const entityIds = Array.from(
-    new Set(
-      [
-        ...relayStore.activeHubEntityIds.map((entityId) => entityId.toLowerCase()),
-        ...(marketMakerState.entityId ? [marketMakerState.entityId.toLowerCase()] : []),
-      ].filter((entityId) => entityId.length > 0),
-    ),
-  );
-
-  const entities = entityIds.map<BootstrapReserveEntityHealth>((entityId) => {
-    const replica = getEntityReplicaById(env, entityId);
-    const role: 'hub' | 'market-maker' =
-      marketMakerState.entityId && entityId === marketMakerState.entityId.toLowerCase() ? 'market-maker' : 'hub';
-    const tokens = bootstrapTokens.map<BootstrapReserveTokenHealth>((token) => {
-      const current = replica?.state?.reserves?.get(token.tokenId) ?? 0n;
-      const expectedMin = HUB_RESERVE_TARGET_UNITS * 10n ** BigInt(token.decimals);
-      return {
-        tokenId: token.tokenId,
-        symbol: token.symbol,
-        decimals: token.decimals,
-        current: current.toString(),
-        expectedMin: expectedMin.toString(),
-        ready: current >= expectedMin,
-      };
-    });
-    return {
-      entityId,
-      role,
-      ready: tokens.length >= HUB_REQUIRED_TOKEN_COUNT && tokens.every((token) => token.ready),
-      tokens,
-    };
-  });
-
-  return {
-    ok:
-      bootstrapTokens.length >= HUB_REQUIRED_TOKEN_COUNT &&
-      entities.length > 0 &&
-      entities.every((entity) => entity.ready),
-    requiredTokenCount: HUB_REQUIRED_TOKEN_COUNT,
-    entityCount: entities.length,
-    entities,
-  };
 };
 
 const stopMarketMakerLoop = (): void => {
@@ -1982,7 +1724,11 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
             accounts: env ? getReplicaAccountCount(env, entityId) ?? hub.accounts : hub.accounts,
           };
         });
-        const bootstrapReserves = await getBootstrapReserveHealth(env);
+        const bootstrapReserves = await getBootstrapReserveHealth(env, {
+          activeHubEntityIds: relayStore.activeHubEntityIds,
+          marketMakerEntityId: marketMakerState.entityId,
+          loadTokenCatalog: ensureTokenCatalog,
+        });
         const payload = {
           ...health,
           disk: buildDiskSummary(storage),
@@ -1993,7 +1739,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
             completedAt: serverBootCompletedAt,
             error: serverBootError,
           },
-          hubMesh: getHubMeshHealth(env),
+          hubMesh: getHubMeshHealth(env, relayStore.activeHubEntityIds),
           marketMaker: getMarketMakerHealth(env, marketMakerState, getAccountMachine),
           bootstrapReserves,
           relay: {
