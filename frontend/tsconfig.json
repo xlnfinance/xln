@@ -33,16 +33,6 @@
 
 		// SAFETY
 		"allowUnreachableCode": false,
-		"allowUnusedLabels": false,
-		"paths": {
-			"$types": ["../runtime/types.ts"],
-			"$lib": ["./src/lib"],
-			"$lib/*": ["./src/lib/*"],
-			"$app/types": ["./.svelte-kit/types/index.d.ts"],
-			"@xln/runtime": ["../runtime/types.ts"],
-			"@xln/runtime/*": ["../runtime/*"],
-			"@xln/brainvault": ["../brainvault"],
-			"@xln/brainvault/*": ["../brainvault/*"]
-		}
+		"allowUnusedLabels": false
 	}
 }
