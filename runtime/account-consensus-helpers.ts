@@ -1,5 +1,8 @@
 import type { AccountMachine, AccountTx, Delta, Env } from './types';
+import { createStructuredLogger } from './logger';
 import { txFingerprint } from './state-helpers';
+
+const accountConsensusHelperLog = createStructuredLogger('account.consensus');
 
 export const ENTITY_ID_HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 export const ADDRESS_HEX_20_RE = /^0x[0-9a-fA-F]{40}$/;
@@ -79,7 +82,7 @@ export function getDepositoryAddress(env: Env): string {
     return browserVMAddress;
   }
 
-  console.warn('[account-consensus] ❌ No depositoryAddress found in env');
+  accountConsensusHelperLog.debug('depository.missing');
   return '';
 }
 
@@ -246,7 +249,7 @@ export async function runPostFrameAutoRebalanceCheck(
     emitSkip('fee-policy-or-threshold');
     return [];
   } catch (rebalanceErr) {
-    console.warn(`⚠️ Auto-rebalance check failed (non-fatal):`, (rebalanceErr as Error).message);
+    accountConsensusHelperLog.debug('auto_rebalance_check.failed', { error: (rebalanceErr as Error).message });
     return [];
   }
 }
