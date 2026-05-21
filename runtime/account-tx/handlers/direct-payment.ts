@@ -11,7 +11,6 @@ import { isLeftEntity } from '../../entity-id-utils';
 import { safeStringify } from '../../serialization-utils';
 import { getAccountPerspective } from '../../state-helpers';
 import { decodeRebalancePolicyMemo } from '../../rebalance-policy';
-import { HEAVY_LOGS } from '../../utils';
 
 export function handleDirectPayment(
   accountMachine: AccountMachine,
@@ -36,18 +35,7 @@ export function handleDirectPayment(
 
   // Get or create delta
   let delta = accountMachine.deltas.get(tokenId);
-  if (HEAVY_LOGS) {
-    console.log(`🔍 DIRECT-PAYMENT: accountMachine.deltas.has(${tokenId})=${accountMachine.deltas.has(tokenId)}`);
-  }
-  if (delta) {
-    if (HEAVY_LOGS) {
-      console.log(`🔍 DIRECT-PAYMENT: delta.collateral=${delta.collateral}, ondelta=${delta.ondelta}, offdelta=${delta.offdelta}`);
-    }
-  }
   if (!delta) {
-    if (HEAVY_LOGS) {
-      console.log(`🔍 DIRECT-PAYMENT: Creating NEW delta (collateral will be 0!)`);
-    }
     const defaultCreditLimit = getDefaultCreditLimit(tokenId);
     delta = {
       tokenId,
@@ -88,13 +76,6 @@ export function handleDirectPayment(
   // Determine if sender is left entity
   const senderIsLeft = paymentFromEntity === leftEntity;
 
-  // DEBUG: Log delta values before deriveDelta
-  if (HEAVY_LOGS) {
-    console.log(`🔍 PAYMENT-DEBUG: ${paymentFromEntity.slice(-4)}→${paymentToEntity.slice(-4)}`);
-    console.log(`   delta: collateral=${delta.collateral}, ondelta=${delta.ondelta}, offdelta=${delta.offdelta}`);
-    console.log(`   senderIsLeft=${senderIsLeft}`);
-  }
-
   // Derive capacity from sender's perspective
   const senderDerived = deriveDelta(delta, senderIsLeft);
 
@@ -127,7 +108,6 @@ export function handleDirectPayment(
     // RIGHT sends → delta INCREASES (RIGHT's outCapacity goes down)
     canonicalDelta = amount;
   }
-  console.log(`🔍 DELTA-SIGN: senderIsLeft=${senderIsLeft}, amount=${amount}, canonicalDelta=${canonicalDelta}`);
 
   if (amount > senderDerived.outCapacity) {
     return {
@@ -169,10 +149,7 @@ export function handleDirectPayment(
   }
 
   // Apply canonical delta (identical on both sides)
-  const oldOffdelta = delta.offdelta;
   delta.offdelta += canonicalDelta;
-  console.log(`🔍 OFFDELTA-UPDATE: ${oldOffdelta} + ${canonicalDelta} = ${delta.offdelta}`);
-  console.log(`🔍 NEW-TOTAL: ondelta=${delta.ondelta} + offdelta=${delta.offdelta} = ${delta.ondelta + delta.offdelta}`);
 
   const memoPolicy = decodeRebalancePolicyMemo(description);
   if (memoPolicy) {
@@ -245,11 +222,8 @@ export function handleDirectPayment(
 
   // Check if we need to forward the payment (multi-hop routing)
   const isOutgoing = paymentFromEntity === accountMachine.proofHeader.fromEntity;
-  console.log(`🔍 FORWARD-CHECK: route=${route ? `[${route.map(r => r.slice(-4)).join(',')}]` : 'null'}`);
-  console.log(`🔍 FORWARD-CHECK: isOutgoing=${isOutgoing}, paymentFrom=${paymentFromEntity.slice(-4)}, proofHeader.from=${accountMachine.proofHeader.fromEntity.slice(-4)}`);
 
   if (route && route.length > 0 && !isOutgoing) {
-    console.log(`🔍 FORWARD-CHECK: Passed first check (route.length=${route.length}, isOutgoing=${isOutgoing})`);
     // Check if we're intermediate hop: route[0] should be current entity
     const currentEntityInRoute = route[0];
     const finalTarget = route[route.length - 1];
@@ -258,9 +232,6 @@ export function handleDirectPayment(
       console.error(`❌ Empty route in payment - invalid payment routing`);
       return { success: false, error: 'Invalid payment route', events };
     }
-
-    console.log(`🔍 FORWARD-CHECK: currentInRoute=${currentEntityInRoute.slice(-4)}, proofHeader.from=${accountMachine.proofHeader.fromEntity.slice(-4)}, final=${finalTarget.slice(-4)}`);
-    console.log(`🔍 FORWARD-CHECK: Check result: ${currentEntityInRoute === accountMachine.proofHeader.fromEntity && currentEntityInRoute !== finalTarget}`);
 
     // If we're in the route but not the final destination, forward
     if (currentEntityInRoute === accountMachine.proofHeader.fromEntity && currentEntityInRoute !== finalTarget) {

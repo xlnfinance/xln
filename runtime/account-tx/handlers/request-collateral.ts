@@ -150,14 +150,6 @@ export function handleRequestCollateral(
       : `🔄 Collateral requested: ${effectiveRequest} token ${tokenId}${feeDisplay}, feeTopup=${feeTopup} (hub will deposit R→C)`,
   ];
 
-  console.log(
-    `🔄 request_collateral: token=${tokenId} requested=${amount} effective=${effectiveRequest} ` +
-    `previous=${existingRequest} prepaidFee=${effectiveFeeTarget} feeTopup=${feeTopup} byLeft=${byLeft}`,
-  );
-  console.log(
-    `[REB][1][REQUEST_COLLATERAL_COMMITTED] token=${tokenId} requested=${effectiveRequest} previous=${existingRequest} fee=${effectiveFeeTarget} feeTopup=${feeTopup} byLeft=${byLeft} requestedAt=${currentTimestamp}`,
-  );
-
   return { success: true, events };
 }
 
@@ -195,17 +187,11 @@ export function checkAutoRebalance(
   const settlementInFlight = !!accountMachine.settlementWorkspace;
 
   if (accountMachine.rebalancePolicy.size === 0) {
-    console.log(
-      `⏭️ Auto-rebalance skipped: no rebalancePolicy (our=${ourEntityId.slice(-4)}, cp=${counterpartyId.slice(-4)})`,
-    );
     return result;
   }
 
   const isLeft = isLeftEntity(ourEntityId, counterpartyId);
   if (!feePolicy) {
-    console.log(
-      `⏭️ Auto-rebalance skipped: missing hub fee policy (our=${ourEntityId.slice(-4)}, cp=${counterpartyId.slice(-4)})`,
-    );
     return result;
   }
 
@@ -237,15 +223,11 @@ export function checkAutoRebalance(
       (tx) => tx.type === 'request_collateral' && Number(tx.data?.tokenId) === Number(tokenId),
     );
     if (hasQueuedRequest) {
-      console.log(`⏭️ Auto-rebalance skipped: request already queued in mempool token=${tokenId}`);
       continue;
     }
 
     // Check if there's already a pending frame (don't pile up)
     if (accountMachine.pendingFrame) {
-      console.log(
-        `⏭️ Auto-rebalance skipped: pendingFrame exists (token=${tokenId}, h=${accountMachine.pendingFrame.height})`,
-      );
       continue;
     }
 
@@ -255,9 +237,6 @@ export function checkAutoRebalance(
 
       // Respect user policy ceiling for automated requests.
       if (feeAmount > policy.maxAcceptableFee) {
-        console.log(
-          `⏭️ Auto-rebalance skipped: token=${tokenId} fee=${feeAmount} > maxAcceptableFee=${policy.maxAcceptableFee}`,
-        );
         continue;
       }
 
@@ -266,28 +245,16 @@ export function checkAutoRebalance(
       // when fee token equals request token.
       const netRequestedTarget = outPeerCredit > feeAmount ? outPeerCredit - feeAmount : 0n;
       if (netRequestedTarget <= 0n) {
-        console.log(
-          `⏭️ Auto-rebalance skipped: token=${tokenId} netRequestedTarget<=0 (outPeerCredit=${outPeerCredit}, fee=${feeAmount})`,
-        );
         continue;
       }
       const existingRequest = accountMachine.requestedRebalance.get(tokenId);
       if (settlementInFlight && (!existingRequest || existingRequest <= 0n)) {
-        console.log(
-          `⏭️ Auto-rebalance skipped: settlement in flight without existing request token=${tokenId}`,
-        );
         continue;
       }
       if (existingRequest && existingRequest > 0n) {
         if (netRequestedTarget <= existingRequest) {
-          console.log(
-            `⏭️ Auto-rebalance skipped: existing pending request token=${tokenId} amount=${existingRequest} (netTarget=${netRequestedTarget})`,
-          );
           continue;
         }
-        console.log(
-          `🔄 Auto-rebalance topping up pending request token=${tokenId} amount=${existingRequest} → netTarget=${netRequestedTarget}`,
-        );
       }
 
       result.push({
@@ -300,12 +267,6 @@ export function checkAutoRebalance(
           policyVersion: feePolicy.policyVersion,
         },
       });
-
-      console.log(
-        `🔄 Auto-rebalance triggered: token=${tokenId} outPeerCredit=${rebalanceTrigger} ` +
-        `> r2cRequestSoftLimit=${effectiveSoftLimit}, requesting outPeerCredit=${outPeerCredit} with fee ${feeAmount} ` +
-        `(base=${feePolicy.baseFee}, gas=${feePolicy.gasFee}, liqBps=${feePolicy.liquidityFeeBps})`
-      );
     }
   }
 
