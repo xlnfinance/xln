@@ -111,6 +111,7 @@ import {
 } from './server/jurisdictions';
 import { createTokenCatalogController } from './server/token-catalog';
 import { buildHubDiscoveryPayload } from './server/hub-discovery';
+import { buildDebugEntitiesPayload, buildKnownProfileBundle } from './server/gossip-profiles';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
@@ -439,44 +440,6 @@ const getFaucetHubProfiles = (env: Env): Profile[] => {
     return bActive - aActive;
   });
   return selected;
-};
-
-const getMergedKnownGossipProfiles = (env: Env | null): Map<string, Profile> => {
-  const merged = new Map<string, Profile>();
-  for (const profile of getAllGossipProfiles(relayStore)) {
-    const entityId = String(profile?.entityId || '').trim().toLowerCase();
-    if (!entityId) continue;
-    merged.set(entityId, profile);
-  }
-  for (const profile of env?.gossip?.getProfiles?.() || []) {
-    const entityId = String(profile?.entityId || '').trim().toLowerCase();
-    if (!entityId) continue;
-    merged.set(entityId, profile);
-  }
-  return merged;
-};
-
-const getKnownProfileBundle = (env: Env | null, entityId: string): { profile: Profile | null; peers: Profile[] } => {
-  const target = String(entityId || '').trim().toLowerCase();
-  if (!target) return { profile: null, peers: [] };
-  const merged = getMergedKnownGossipProfiles(env);
-  const profile = merged.get(target) || null;
-  if (!profile) return { profile: null, peers: [] };
-  const peerIds = new Set<string>();
-  for (const peerId of Array.isArray(profile.publicAccounts) ? profile.publicAccounts : []) {
-    const normalized = String(peerId || '').trim().toLowerCase();
-    if (normalized) peerIds.add(normalized);
-  }
-  for (const account of Array.isArray(profile.accounts) ? profile.accounts : []) {
-    const normalized = String(account?.counterpartyId || '').trim().toLowerCase();
-    if (normalized) peerIds.add(normalized);
-  }
-  const peers: Profile[] = [];
-  for (const peerId of peerIds) {
-    const peer = merged.get(peerId);
-    if (peer) peers.push(peer);
-  }
-  return { profile, peers };
 };
 
 const stopMarketMakerLoop = (): void => {
@@ -1011,7 +974,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       // best effort only
     }
 
-    const bundle = getKnownProfileBundle(env, targetEntityId);
+    const bundle = buildKnownProfileBundle({ env, relayStore, entityId: targetEntityId });
     return new Response(
       safeStringify({
         ok: true,
@@ -1236,49 +1199,13 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   // Registered gossip entities (relay-authoritative public profile store)
   if (pathname === '/api/debug/entities') {
     const url = new URL(req.url);
-    const q = (url.searchParams.get('q') || '').trim().toLowerCase();
-    const limit = Math.max(1, Math.min(5000, Number(url.searchParams.get('limit') || '1000')));
-    const onlineOnly = url.searchParams.get('online') === 'true';
-    const entities = Array.from(relayStore.gossipProfiles.entries())
-      .map(([entityId, entry]) => {
-        const profile = entry.profile || {};
-        const runtimeId = typeof profile.runtimeId === 'string' ? profile.runtimeId : undefined;
-        const normalizedRuntimeId = normalizeRuntimeKey(runtimeId);
-        const name =
-          typeof profile.name === 'string' && profile.name.trim().length > 0
-            ? profile.name.trim()
-            : entityId;
-        const isHub = profile.metadata.isHub === true;
-        const online = normalizedRuntimeId ? relayStore.clients.has(normalizedRuntimeId) : false;
-        return {
-          entityId,
-          runtimeId: normalizedRuntimeId || runtimeId,
-          name,
-          isHub,
-          online,
-          lastUpdated: Number(profile.lastUpdated || entry.timestamp || 0),
-          accounts: profile.accounts,
-          publicAccounts: profile.publicAccounts,
-          metadata: profile.metadata,
-        };
-      })
-      .filter(e => {
-        if (onlineOnly && !e.online) return false;
-        if (!q) return true;
-        const blob = `${e.entityId} ${e.runtimeId || ''} ${e.name}`.toLowerCase();
-        return blob.includes(q);
-      })
-      .sort((a, b) => (b.lastUpdated || 0) - (a.lastUpdated || 0))
-      .slice(0, limit);
-
     return new Response(
-      safeStringify({
-        ok: true,
-        totalRegistered: relayStore.gossipProfiles.size,
-        returned: entities.length,
-        serverTime: Date.now(),
-        entities,
-      }),
+      safeStringify(buildDebugEntitiesPayload({
+        relayStore,
+        query: url.searchParams.get('q') || '',
+        limit: Number(url.searchParams.get('limit') || '1000'),
+        onlineOnly: url.searchParams.get('online') === 'true',
+      })),
       { headers },
     );
   }
