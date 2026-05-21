@@ -291,6 +291,75 @@ describe('audit fail-fast regressions', () => {
     }, env)).rejects.toThrow('j_event rejected: non-validator signer');
   });
 
+  test('single-validator j_event observations must still be signed by the claimed signer', async () => {
+    const seed = 'j-event-single-validator-signature';
+    const env = createEmptyEnv(seed);
+    const { signerId, entityId } = registerLazySigner(seed, '1');
+    const state = makeEntityState(entityId);
+    state.config = makeSingleSignerConfigFor(signerId);
+    const event: JurisdictionEvent = {
+      type: 'ReserveUpdated',
+      data: { entity: entityId, tokenId: 1, newBalance: '100' },
+    };
+    const common = {
+      from: signerId,
+      observedAt: 1_000,
+      blockNumber: 2,
+      blockHash: `0x${'12'.repeat(32)}`,
+      transactionHash: `0x${'13'.repeat(32)}`,
+      event,
+    };
+    const signed = signJEventObservation(env, entityId, signerId, {
+      blockNumber: common.blockNumber,
+      blockHash: common.blockHash,
+      transactionHash: common.transactionHash,
+      events: [event],
+    });
+
+    await expect(handleJEvent(state, { ...common } as any, env)).rejects.toThrow(
+      'missing eventsHash',
+    );
+    await expect(handleJEvent(state, { ...common, eventsHash: signed.eventsHash } as any, env)).rejects.toThrow(
+      'missing observation signature',
+    );
+
+    const result = await handleJEvent(state, { ...common, ...signed }, env);
+    expect(result.newState.jBlockChain.length).toBe(1);
+    expect(result.newState.reserves.get(1)).toBe(100n);
+  });
+
+  test('cross-j remote route cannot seed missing sibling runtime hints before topology validation', async () => {
+    const env = createEmptyEnv('cross-j-topology-hints');
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    const localRuntime = `0x${'10'.repeat(20)}`;
+    const remoteRuntime = `0x${'20'.repeat(20)}`;
+    env.runtimeId = localRuntime;
+    const sourceUserId = `0x${'31'.repeat(32)}`;
+    const targetUserId = `0x${'32'.repeat(32)}`;
+    const sourceHubId = `0x${'41'.repeat(32)}`;
+    const targetHubId = `0x${'42'.repeat(32)}`;
+    attachSigningReplica(env, sourceUserId, '1');
+    attachSigningReplica(env, targetUserId, '1');
+
+    await expect(process(env, [{
+      from: remoteRuntime,
+      entityId: sourceUserId,
+      entityTxs: [{
+        type: 'registerCrossJurisdictionSwap',
+        data: {
+          route: {
+            orderId: 'route-derived-hint-attack',
+            source: { entityId: sourceUserId, counterpartyEntityId: sourceHubId },
+            target: { entityId: targetHubId, counterpartyEntityId: targetUserId },
+            bookOwnerEntityId: sourceHubId,
+            hubEntityId: sourceHubId,
+          },
+        },
+      } as any],
+    }])).rejects.toThrow('RUNTIME_CROSS_J_TOPOLOGY_INVALID');
+  });
+
   test('j_event finality requires quorum on canonical event set, not only block hash', async () => {
     const entityId = `0x${'44'.repeat(32)}`;
     let state = makeEntityState(entityId);
@@ -372,7 +441,7 @@ describe('audit fail-fast regressions', () => {
       events: [event],
     });
 
-    await expect(handleJEvent(state, { ...common, from: '1' }, env)).rejects.toThrow(
+    await expect(handleJEvent(state, { ...common, from: '1', eventsHash: signerOne.eventsHash }, env)).rejects.toThrow(
       'missing observation signature',
     );
     await expect(handleJEvent(state, { ...common, from: '2', ...signerOne }, env)).rejects.toThrow(
@@ -570,6 +639,22 @@ describe('audit fail-fast regressions', () => {
       isProposer: true,
       state,
     } as EntityReplica;
+    const disputeFinalizedEvent: JurisdictionEvent = {
+      type: 'DisputeFinalized',
+      data: {
+        sender: entityId,
+        counterentity: counterpartyId,
+        initialNonce: 7,
+        initialProofbodyHash: `0x${'56'.repeat(32)}`,
+        finalProofbodyHash: `0x${'57'.repeat(32)}`,
+      },
+    };
+    const signed = signJEventObservation(env, entityId, signerId, {
+      blockNumber: 22,
+      blockHash: `0x${'99'.repeat(32)}`,
+      transactionHash: `0x${'88'.repeat(32)}`,
+      events: [disputeFinalizedEvent],
+    });
 
     await applyEntityInput(env, replica, {
       entityId,
@@ -582,16 +667,8 @@ describe('audit fail-fast regressions', () => {
           blockNumber: 22,
           blockHash: `0x${'99'.repeat(32)}`,
           transactionHash: `0x${'88'.repeat(32)}`,
-          event: {
-            type: 'DisputeFinalized',
-            data: {
-              sender: entityId,
-              counterentity: counterpartyId,
-              initialNonce: 7,
-              initialProofbodyHash: `0x${'56'.repeat(32)}`,
-              finalProofbodyHash: `0x${'57'.repeat(32)}`,
-            },
-          },
+          ...signed,
+          event: disputeFinalizedEvent,
         },
       } as any],
     });
@@ -1265,43 +1342,59 @@ describe('audit fail-fast regressions', () => {
     } as EntityState['jBatchState'];
 
     const env = createEmptyEnv('dispute-finalize-scrub-seed');
+    const disputeFinalizedEvent: JurisdictionEvent = {
+      type: 'DisputeFinalized',
+      data: {
+        sender: entityId,
+        counterentity: counterpartyId,
+        initialNonce: 7,
+        initialProofbodyHash: `0x${'56'.repeat(32)}`,
+        finalProofbodyHash: `0x${'57'.repeat(32)}`,
+      },
+    };
+    const signedDisputeFinalized = signJEventObservation(env, entityId, '1', {
+      blockNumber: 22,
+      blockHash: `0x${'99'.repeat(32)}`,
+      transactionHash: `0x${'88'.repeat(32)}`,
+      events: [disputeFinalizedEvent],
+    });
     const finalized = await handleJEvent(state, {
       from: '1',
       observedAt: 2000,
       blockNumber: 22,
       blockHash: `0x${'99'.repeat(32)}`,
       transactionHash: `0x${'88'.repeat(32)}`,
-      event: {
-        type: 'DisputeFinalized',
-        data: {
-          sender: entityId,
-          counterentity: counterpartyId,
-          initialNonce: 7,
-          initialProofbodyHash: `0x${'56'.repeat(32)}`,
-          finalProofbodyHash: `0x${'57'.repeat(32)}`,
-        },
-      },
+      ...signedDisputeFinalized,
+      event: disputeFinalizedEvent,
     }, env);
 
     expect(finalized.newState.accounts.get(counterpartyId)?.activeDispute).toBeUndefined();
     expect(finalized.newState.jBatchState?.batch.disputeFinalizations.length).toBe(0);
     expect(finalized.newState.jBatchState?.sentBatch?.batch.disputeFinalizations.length).toBe(0);
 
+    const failedBatchEvent: JurisdictionEvent = {
+      type: 'HankoBatchProcessed',
+      data: {
+        entityId,
+        hankoHash: `0x${'55'.repeat(32)}`,
+        nonce: 7,
+        success: false,
+      },
+    };
+    const signedFailedBatch = signJEventObservation(env, entityId, '1', {
+      blockNumber: 23,
+      blockHash: `0x${'77'.repeat(32)}`,
+      transactionHash: `0x${'66'.repeat(32)}`,
+      events: [failedBatchEvent],
+    });
     const failed = await handleJEvent(finalized.newState, {
       from: '1',
       observedAt: 3000,
       blockNumber: 23,
       blockHash: `0x${'77'.repeat(32)}`,
       transactionHash: `0x${'66'.repeat(32)}`,
-      event: {
-        type: 'HankoBatchProcessed',
-        data: {
-          entityId,
-          hankoHash: `0x${'55'.repeat(32)}`,
-          nonce: 7,
-          success: false,
-        },
-      },
+      ...signedFailedBatch,
+      event: failedBatchEvent,
     }, env);
 
     expect(failed.newState.jBatchState?.batch.disputeFinalizations.length).toBe(0);
@@ -1445,22 +1538,31 @@ describe('audit fail-fast regressions', () => {
       entityNonce: 7,
     } as EntityState['jBatchState'];
 
+    const env = createEmptyEnv('failed-batch-stale-finalize');
+    const failedBatchEvent: JurisdictionEvent = {
+      type: 'HankoBatchProcessed',
+      data: {
+        entityId,
+        hankoHash: `0x${'98'.repeat(32)}`,
+        nonce: 7,
+        success: false,
+      },
+    };
+    const signedFailedBatch = signJEventObservation(env, entityId, '1', {
+      blockNumber: 23,
+      blockHash: `0x${'96'.repeat(32)}`,
+      transactionHash: `0x${'97'.repeat(32)}`,
+      events: [failedBatchEvent],
+    });
     const failed = await handleJEvent(state, {
       from: '1',
       observedAt: 3000,
       blockNumber: 23,
       blockHash: `0x${'96'.repeat(32)}`,
       transactionHash: `0x${'97'.repeat(32)}`,
-      event: {
-        type: 'HankoBatchProcessed',
-        data: {
-          entityId,
-          hankoHash: `0x${'98'.repeat(32)}`,
-          nonce: 7,
-          success: false,
-        },
-      },
-    }, createEmptyEnv('failed-batch-stale-finalize'));
+      ...signedFailedBatch,
+      event: failedBatchEvent,
+    }, env);
 
     expect(failed.newState.jBatchState?.batch.disputeFinalizations.length).toBe(0);
   });

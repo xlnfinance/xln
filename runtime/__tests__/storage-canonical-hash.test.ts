@@ -1,6 +1,7 @@
 import { expect, test } from 'bun:test';
 
 import { computeCanonicalEntityHash, computeCanonicalStateHashFromEnv } from '../storage/canonical-hash';
+import { applyCommand, createBook, replaceOrderbookPair } from '../orderbook';
 import { hydrateEntityStateFromStorage, projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
 import type { AccountMachine, EntityReplica, Env } from '../types';
 
@@ -99,10 +100,54 @@ const makeEnv = (account: AccountMachine, reserves: Array<[number, bigint]>): En
     ]),
   }) as Env;
 
+const sharedOrderId = 'account:offer-1';
+
+const createBookWithSharedOrder = () => {
+  const book = createBook({ bucketWidthTicks: 1n, maxOrders: 10, stpPolicy: 0 });
+  return applyCommand(book, {
+    kind: 0,
+    ownerId: 'account',
+    orderId: sharedOrderId,
+    side: 0,
+    tif: 0,
+    postOnly: true,
+    priceTicks: 100n,
+    qtyLots: 1,
+  }).state;
+};
+
+const makeEnvWithOrderbookPairs = (pairIds: string[]): Env => {
+  const env = makeEnv(makeAccount('history-a'), [[1, 10n]]);
+  const replica = Array.from(env.eReplicas.values())[0]!;
+  const orderbookExt = {
+    books: new Map(),
+    orderPairs: new Map(),
+    referrals: new Map(),
+    hubProfile: {},
+  };
+  for (const pairId of pairIds) {
+    replaceOrderbookPair(orderbookExt as never, pairId, createBookWithSharedOrder());
+  }
+  replica.state.orderbookExt = orderbookExt as never;
+  return env;
+};
+
 test('canonical storage hash is deterministic across Map insertion order', () => {
   const left = computeCanonicalStateHashFromEnv(makeEnv(makeAccount('history-a'), [[2, 20n], [1, 10n]]));
   const right = computeCanonicalStateHashFromEnv(makeEnv(makeAccount('history-a'), [[1, 10n], [2, 20n]]));
   expect(left).toBe(right);
+});
+
+test('canonical storage hash is deterministic across orderbook pair index insertion order', () => {
+  const left = makeEnvWithOrderbookPairs(['b-pair', 'a-pair']);
+  const right = makeEnvWithOrderbookPairs(['a-pair', 'b-pair']);
+
+  const leftIndex = Array.from(left.eReplicas.values())[0]!.state.orderbookExt!.orderPairs.get(sharedOrderId);
+  const rightIndex = Array.from(right.eReplicas.values())[0]!.state.orderbookExt!.orderPairs.get(sharedOrderId);
+
+  expect(leftIndex).toEqual(['a-pair', 'b-pair']);
+  expect(rightIndex).toEqual(['a-pair', 'b-pair']);
+  expect(computeCanonicalStateHashFromEnv(left)).toBe(computeCanonicalStateHashFromEnv(right));
 });
 
 test('canonical storage hash ignores UI frameHistory and reacts to consensus state', () => {

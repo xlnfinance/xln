@@ -828,6 +828,7 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
       pendingP2PConfig: null,
       lastP2PConfig: null,
       directEntityInputDispatch: null,
+      canUseConnectedRelayFallback: null,
     };
   }
   if (!env.runtimeState.entityRuntimeHints) {
@@ -2098,6 +2099,27 @@ const hasDirectHubP2PEndpoint = (env: Env, targetRuntimeId: string): boolean => 
   });
 };
 
+const canUseRemoteEntityInputFallback = (
+  env: Env,
+  targetRuntimeId: string,
+  output: Pick<DeliverableEntityInput, 'entityTxs'>,
+): boolean => {
+  if (!entityInputHasCrossJurisdictionIntraRuntimeTx(output)) {
+    // Normal bilateral account traffic may use the encrypted relay. Cross-j
+    // control traffic is stricter because it is a system protocol between the
+    // two route runtimes, not arbitrary public P2P messaging.
+    return true;
+  }
+  const state = ensureRuntimeState(env);
+  if (state.canUseConnectedRelayFallback?.(targetRuntimeId) === true) {
+    // Browser/user runtimes do not expose hub direct sockets. They may still be
+    // attached to this exact server relay websocket. In that case the fallback
+    // remains encrypted local socket delivery, not a public relay queue.
+    return true;
+  }
+  return hasDirectHubP2PEndpoint(env, targetRuntimeId);
+};
+
 const dispatchEntityOutputs = (env: Env, outputs: PlannedRemoteOutput[]): RoutedEntityInput[] => {
   const state = ensureRuntimeState(env);
   const directDispatch = state.directEntityInputDispatch;
@@ -2129,7 +2151,7 @@ const dispatchEntityOutputs = (env: Env, outputs: PlannedRemoteOutput[]): Routed
       if (deliveredDirect) {
         continue;
       }
-      if (!hasDirectHubP2PEndpoint(env, targetRuntimeId)) {
+      if (!canUseRemoteEntityInputFallback(env, targetRuntimeId, output)) {
         env.warn('network', 'ROUTE_DEFER_DIRECT_SOCKET_REQUIRED', {
           entityId: output.entityId,
           runtimeId: targetRuntimeId,
@@ -2799,11 +2821,6 @@ const applyRuntimeInput = async (
             `types=${(entityInput.entityTxs ?? []).map(tx => tx.type).join(',')}`,
         );
       }
-      if (entityInput.from) {
-        for (const hintedEntityId of collectCrossJurisdictionRemoteEntityHints(env, entityInput, entityInput.from)) {
-          registerEntityRuntimeHint(env, hintedEntityId, entityInput.from);
-        }
-      }
       if (
         entityInput.from &&
         entityInputHasCrossJurisdictionIntraRuntimeTx(entityInput) &&
@@ -2830,6 +2847,11 @@ const applyRuntimeInput = async (
         console.error('❌ DROP_CROSS_J_TOPOLOGY_INVALID', dropDetails);
         env.error('network', 'DROP_CROSS_J_TOPOLOGY_INVALID', dropDetails, entityInput.entityId);
         continue;
+      }
+      if (entityInput.from) {
+        for (const hintedEntityId of collectCrossJurisdictionRemoteEntityHints(env, entityInput, entityInput.from)) {
+          registerEntityRuntimeHint(env, hintedEntityId, entityInput.from);
+        }
       }
       // Track j-events in this input - entityInput.entityTxs guaranteed by validateEntityInput above
       // J-EVENT logging removed - too verbose
@@ -4417,6 +4439,9 @@ const loadEnvFromStorage = async (
     }
 
     const frame = await readPersistedStorageFrameRecord(env, targetHeight);
+    if (!frame) {
+      throw new Error(`STORAGE_RESTORE_FRAME_MISSING: height=${targetHeight}`);
+    }
     env.height = targetHeight;
 	    env.timestamp = frame?.timestamp ?? Math.max(...Array.from(restoredStates.values()).map((state) => Number(state.timestamp ?? 0)), 0);
     env.runtimeInput = { runtimeTxs: [], entityInputs: [] };
@@ -4434,10 +4459,10 @@ const loadEnvFromStorage = async (
     }
     env.frameLogs = restoredFrameLogs;
     rebuildPersistedJurisdictions(env);
-    if (frame && !frame.canonicalStateHash && runtimeProcessEnv?.['XLN_STORAGE_REQUIRE_CANONICAL_HASH'] !== '0') {
+    if (!frame.canonicalStateHash) {
       throw new Error(`STORAGE_RESTORE_CANONICAL_HASH_MISSING: height=${targetHeight}`);
     }
-    if (frame?.canonicalStateHash) {
+    if (frame.canonicalStateHash) {
       const restoredCanonicalStateHash = computeCanonicalStateHashFromEnv(env);
       if (restoredCanonicalStateHash !== frame.canonicalStateHash) {
         const expectedEntities = new Map((frame.canonicalEntityHashes || []).map((entry) => [entry.entityId, entry.hash]));

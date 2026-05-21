@@ -322,6 +322,7 @@ const addPairToOrderIndex = (index: Map<string, string[]>, orderId: string, pair
     return;
   }
   if (!existing.includes(pairId)) existing.push(pairId);
+  existing.sort();
 };
 
 const removePairFromOrderIndex = (index: Map<string, string[]>, orderId: string, pairId: string): void => {
@@ -330,6 +331,13 @@ const removePairFromOrderIndex = (index: Map<string, string[]>, orderId: string,
   const filtered = existing.filter((entry) => entry !== pairId);
   if (filtered.length === 0) index.delete(orderId);
   else index.set(orderId, filtered);
+};
+
+const normalizeOrderPairIndex = (index: Map<string, string[]>): Map<string, string[]> => {
+  for (const [orderId, pairIds] of index.entries()) {
+    index.set(orderId, Array.from(new Set(pairIds)).sort());
+  }
+  return index;
 };
 
 export function rebuildOrderbookPairIndex(ext: OrderbookExtState): Map<string, string[]> {
@@ -347,7 +355,7 @@ export function ensureOrderbookPairIndex(ext: OrderbookExtState): Map<string, st
   if (!(ext.orderPairs instanceof Map)) {
     return rebuildOrderbookPairIndex(ext);
   }
-  return ext.orderPairs;
+  return normalizeOrderPairIndex(ext.orderPairs);
 }
 
 export function replaceOrderbookPair(ext: OrderbookExtState, pairId: string, book: BookState): void {
