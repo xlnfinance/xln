@@ -92,6 +92,21 @@ export function isCrossJurisdictionRouteTransitionAllowed(
   return Boolean(CROSS_J_ALLOWED_TRANSITIONS[current]?.has(next));
 }
 
+export function transitionCrossJurisdictionRouteStatus(
+  route: CrossJurisdictionSwapRoute,
+  nextStatus: CrossJurisdictionSwapStatus,
+  updatedAt: number,
+): CrossJurisdictionSwapRoute {
+  if (!isCrossJurisdictionRouteTransitionAllowed(route.status, nextStatus)) {
+    throw new Error(
+      `CROSS_J_ROUTE_TRANSITION_INVALID: route=${route.orderId} ${route.status || 'intent'}->${nextStatus}`,
+    );
+  }
+  route.status = nextStatus;
+  route.updatedAt = updatedAt;
+  return route;
+}
+
 export function isCrossJurisdictionRouteExpired(route: CrossJurisdictionSwapRoute, now: number): boolean {
   const expiresAt = Number(route.expiresAt || 0);
   return Number.isFinite(expiresAt) && expiresAt > 0 && expiresAt <= now;

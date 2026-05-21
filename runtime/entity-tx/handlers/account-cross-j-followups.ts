@@ -1,5 +1,5 @@
 import type { AccountTx, CrossJurisdictionSwapRoute, EntityInput, EntityState, EntityTx, Env } from '../../types';
-import { CROSS_J_MAX_FILL_RATIO, isCrossJurisdictionRouteTransitionAllowed, isCrossJurisdictionTerminalStatus, validateCrossJurisdictionFillProgress, withCrossJurisdictionClaimProgress, withCrossJurisdictionFillProgress } from '../../cross-jurisdiction';
+import { CROSS_J_MAX_FILL_RATIO, isCrossJurisdictionTerminalStatus, transitionCrossJurisdictionRouteStatus, validateCrossJurisdictionFillProgress, withCrossJurisdictionClaimProgress, withCrossJurisdictionFillProgress } from '../../cross-jurisdiction';
 import { deriveCanonicalCrossJurisdictionBookOwner } from '../../cross-jurisdiction-market';
 import { decodeHashLadderBinary } from '../../hashladder';
 import { createStructuredLogger, shortId, shortOrder } from '../../logger';
@@ -15,20 +15,6 @@ const clampFillRatio = (value: unknown): number =>
 
 const committedCrossJurisdictionRatio = (route: CrossJurisdictionSwapRoute): number =>
   Math.max(clampFillRatio(route.cumulativeFillRatio), clampFillRatio(route.claimedRatio));
-
-const setCrossJurisdictionStatus = (
-  route: CrossJurisdictionSwapRoute,
-  nextStatus: CrossJurisdictionSwapRoute['status'],
-  updatedAt: number,
-): void => {
-  if (!isCrossJurisdictionRouteTransitionAllowed(route.status, nextStatus)) {
-    throw new Error(
-      `CROSS_J_ROUTE_TRANSITION_INVALID: route=${route.orderId} ${route.status || 'intent'}->${nextStatus}`,
-    );
-  }
-  route.status = nextStatus;
-  route.updatedAt = updatedAt;
-};
 
 const assertPullResolveAllowed = (
   route: CrossJurisdictionSwapRoute,
@@ -140,7 +126,7 @@ const applyPullResolveFollowup = (
     if (isSourceHubResolve || isSourceUserResolve) {
       assertPullResolveAllowed(route, fillRatio, 'source');
       Object.assign(route, withCrossJurisdictionClaimProgress(route, fillRatio, newState.timestamp));
-      setCrossJurisdictionStatus(route, 'source_claimed', newState.timestamp);
+      transitionCrossJurisdictionRouteStatus(route, 'source_claimed', newState.timestamp);
 
       // The same account frame commits on both source participants. Only the hub
       // side is allowed to relay the binary to the target leg; the user side
@@ -191,7 +177,7 @@ const applyPullResolveFollowup = (
     ) {
       assertPullResolveAllowed(route, fillRatio, 'target');
       Object.assign(route, withCrossJurisdictionClaimProgress(route, fillRatio, newState.timestamp));
-      setCrossJurisdictionStatus(route, 'settled', newState.timestamp);
+      transitionCrossJurisdictionRouteStatus(route, 'settled', newState.timestamp);
       route.settledAt = newState.timestamp;
       removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'settled');
       crossJFollowupLog.debug('pull.resolve.settled', {
@@ -215,7 +201,7 @@ const applyFillAckFollowup = (
 
   const currentRatio = committedCrossJurisdictionRatio(route);
   if (accountTx.data.cancelRemainder && ratio <= currentRatio) {
-    setCrossJurisdictionStatus(route, 'clear_requested', newState.timestamp);
+    transitionCrossJurisdictionRouteStatus(route, 'clear_requested', newState.timestamp);
     route.clearingPolicy = 'cancel_and_clear';
   } else {
     const validatedFill = validateCrossJurisdictionFillProgress(route, {
@@ -230,11 +216,7 @@ const applyFillAckFollowup = (
       throw new Error(`CROSS_J_COMMITTED_FILL_ACK_INVALID: ${validatedFill.error}`);
     }
     const nextRoute = withCrossJurisdictionFillProgress(route, validatedFill.value, newState.timestamp);
-    if (!isCrossJurisdictionRouteTransitionAllowed(route.status, nextRoute.status)) {
-      throw new Error(
-        `CROSS_J_ROUTE_TRANSITION_INVALID: route=${route.orderId} ${route.status || 'intent'}->${nextRoute.status}`,
-      );
-    }
+    transitionCrossJurisdictionRouteStatus(route, nextRoute.status, newState.timestamp);
     Object.assign(route, nextRoute);
     if ((accountTx.data.priceImprovementAmount ?? 0n) > 0n) {
       if (accountTx.data.priceImprovementMode === 'source_savings') {
@@ -246,7 +228,7 @@ const applyFillAckFollowup = (
       }
     }
     if (accountTx.data.cancelRemainder) {
-      setCrossJurisdictionStatus(route, 'clear_requested', newState.timestamp);
+      transitionCrossJurisdictionRouteStatus(route, 'clear_requested', newState.timestamp);
       route.clearingPolicy = 'cancel_and_clear';
     }
   }
