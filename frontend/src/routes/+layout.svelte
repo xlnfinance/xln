@@ -16,7 +16,9 @@
 		if (!browser) return;
 		const disposeRangeSliderProgress = installRangeSliderProgress();
 		void initializeNativeShell();
-		void loadDeployLabel();
+		if (!skipDeployLabel) {
+			void loadDeployLabel();
+		}
 		return () => {
 			disposeRangeSliderProgress();
 		};
@@ -37,6 +39,11 @@
 		const pageData = $page.data as Record<string, unknown> | undefined;
 		const value = pageData?.['chrome'] ?? 'site';
 		return value === 'app' || value === 'hidden' ? value : 'site';
+	});
+
+	let skipDeployLabel = $derived.by<boolean>(() => {
+		const pageData = $page.data as Record<string, unknown> | undefined;
+		return pageData?.['skipDeployLabel'] === true;
 	});
 
 	let showTopbar = $derived(!isEmbed && chromeMode === 'site');
@@ -79,7 +86,7 @@
 {/if}
 
 <Toast />
-{#if deployLabel && chromeMode === 'site' && !isEmbed}
+{#if deployLabel && chromeMode === 'site' && !isEmbed && !skipDeployLabel}
 	<div class="build-badge">{deployLabel}</div>
 {/if}
 
