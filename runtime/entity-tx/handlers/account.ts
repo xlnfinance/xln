@@ -10,7 +10,6 @@ import {
   getBookOrder,
   getBestAsk,
   getBestBid,
-  getOrderbookPairsForOrder,
   refreshRestingOrder,
   ORDERBOOK_PRICE_SCALE,
   SWAP_LOT_SCALE,
@@ -44,7 +43,6 @@ import {
   buildHtlcReceivedEventPayload,
 } from '../../htlc-events';
 import {
-  buildCrossJurisdictionCancelAck,
   buildCrossJurisdictionFillAck,
   buildCrossJurisdictionMarketOffer,
   type CrossJurisdictionFillInstruction,
@@ -78,6 +76,7 @@ export {
   normalizeSwapOfferForOrderbook,
   sortSwapOffersForOrderbook,
 } from './account/orderbook-offers';
+export { processOrderbookCancels } from './account/orderbook-cancels';
 export type {
   MatchResult,
   SwapCancelEvent,
@@ -2046,81 +2045,6 @@ export function processOrderbookSwaps(
 
   if (pairSweepCount > 0) {
     orderbookLog.debug('pass.summary', { pairSweep: pairSweepCount });
-  }
-
-  return { mempoolOps, crossJurisdictionFills, bookUpdates, debugProjectionRejects };
-}
-
-/**
- * Process swap cancels through hub's orderbook
- */
-export function processOrderbookCancels(
-  hubState: EntityState,
-  cancels: SwapCancelRequestEvent[]
-): MatchResult {
-  const mempoolOps: MempoolOp[] = [];
-  const crossJurisdictionFills: CrossJurisdictionFillInstruction[] = [];
-  const bookUpdates: { pairId: string; book: BookState }[] = [];
-  const debugProjectionRejects: MatchResult['debugProjectionRejects'] = [];
-  const queuedSwapResolutions = new Set<string>();
-  const ext = hubState.orderbookExt as OrderbookExtState | undefined;
-  if (!ext) return { mempoolOps, crossJurisdictionFills, bookUpdates, debugProjectionRejects };
-
-  for (const { offerId, accountId } of cancels) {
-    const accountMachine = hubState.accounts.get(accountId);
-    const hasOffer = Boolean(accountMachine?.swapOffers?.has(offerId));
-    if (!hasOffer) continue;
-
-    const namespacedOrderId = `${accountId}:${offerId}`;
-    let orderbookCancelled = false;
-    const matchingBooks: Array<{ bookKey: string; book: BookState; ownerId: string }> = [];
-
-    for (const bookKey of getOrderbookPairsForOrder(ext, namespacedOrderId)) {
-      const book = ext.books.get(bookKey);
-      if (!book) continue;
-      const existingOrder = getBookOrder(book, namespacedOrderId);
-      if (!existingOrder) continue;
-      matchingBooks.push({ bookKey, book, ownerId: existingOrder.ownerId });
-    }
-
-    if (matchingBooks.length > 1) {
-      throw new Error(
-        `ORDERBOOK_DUPLICATE_BOOK_ORDER: order=${namespacedOrderId} matches=${matchingBooks.length}`,
-      );
-    }
-
-    for (const { bookKey, book, ownerId } of matchingBooks) {
-      const result = applyCommand(book, {
-        kind: 1,  // CANCEL command - only needs ownerId and orderId
-        ownerId,
-        orderId: namespacedOrderId,
-      });
-
-      bookUpdates.push({ pairId: bookKey, book: result.state });
-      orderbookLog.debug('order.cancelled', { offer: shortOrder(offerId, 8), account: shortId(accountId, 8), pair: bookKey });
-      orderbookCancelled = true;
-    }
-
-    const offer = accountMachine?.swapOffers?.get(offerId);
-    if (offer?.crossJurisdiction) {
-      mempoolOps.push({ accountId, tx: buildCrossJurisdictionCancelAck(offerId, offer.crossJurisdiction) });
-      orderbookLog.debug('crossj.cancel_ack_queued', { offer: shortOrder(offerId, 8), account: shortId(accountId, 8) });
-      continue;
-    }
-
-    // Finalize cancellation at account level (releases hold + removes offer) via hub decision.
-    // If order already gone from book but offer still exists in account, we still force cancelRemainder.
-    if (queueUniqueSwapResolveForEntityState(mempoolOps, hubState, queuedSwapResolutions, accountId, {
-      offerId,
-      fillRatio: 0,
-      cancelRemainder: true,
-    })) {
-      if (!orderbookCancelled) {
-        orderbookLog.debug('resolve.queued_cancel_missing_book_order', { offer: shortOrder(offerId, 8), account: shortId(accountId, 8) });
-      } else {
-        orderbookLog.debug('resolve.queued_cancel', { offer: shortOrder(offerId, 8), account: shortId(accountId, 8) });
-      }
-    }
   }
 
   return { mempoolOps, crossJurisdictionFills, bookUpdates, debugProjectionRejects };
