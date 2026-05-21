@@ -30,6 +30,13 @@ Required:
 - dispute path is proven end to end
 - J-side commitment/state-root quality is good enough for replay/dispute/debug use
 
+Executable checks:
+
+```bash
+bun run test:contracts:full
+bun run test:rpc-settlement
+```
+
 Why this gate exists:
 - if the court/settlement layer is wrong, every higher-layer success is fake
 
@@ -40,6 +47,13 @@ Required:
 - users/hubs can survive realistic offline and restart scenarios
 - persistence repair/recovery tooling is documented and usable
 
+Executable checks:
+
+```bash
+bun run test:persistence:cli
+bun run soak:quick
+```
+
 Why this gate exists:
 - an off-chain system without a credible recovery path is not safe for real funds
 
@@ -49,6 +63,13 @@ Required:
 - restart/crash recovery soak passes
 - long-running load soak passes
 - consensus invariants are still satisfied under ugly conditions
+
+Executable checks:
+
+```bash
+bun run gate:ci
+bun run soak:release
+```
 
 Why this gate exists:
 - a protocol that only works in short clean runs is not a payment system
@@ -62,6 +83,13 @@ Required:
 - alerting/metrics good enough to detect child/runtime/storage failure
 - backup/restore and storage incident drills exist
 
+Executable checks:
+
+```bash
+bun run prod:health
+bun run gate:release
+```
+
 Why this gate exists:
 - the system has to be operable, not just architecturally correct
 
@@ -72,6 +100,14 @@ Required:
 - custody/fee paths are coherent
 - destructive/reset/debug actions are strongly gated
 - normal user UX does not accidentally route through dev-only surfaces
+
+External audit handoff:
+
+```bash
+bun run security:audit-pack
+```
+
+Brief: [security/external-audit-brief.md](security/external-audit-brief.md) (`docs/security/external-audit-brief.md`)
 
 Why this gate exists:
 - production failures often come from boundary confusion, not just cryptography
@@ -95,6 +131,7 @@ The following files should stay aligned before launch:
 - [recovery-watchtower-protocol.md](recovery-watchtower-protocol.md)
 - [deployment/ops-runbook.md](deployment/ops-runbook.md)
 - [deployment/deployment.md](deployment/deployment.md)
+- [security/external-audit-brief.md](security/external-audit-brief.md)
 
 ## Historical Reference
 

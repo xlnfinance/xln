@@ -12,6 +12,7 @@ Quick checks:
 ```bash
 curl -fsS https://xln.finance/api/health | jq '{coreOk, systemOk, degraded, disk, storage, hubMesh, marketMaker, custody}'
 curl -fsS https://xln.finance/api/metrics | grep -E 'xln_(core_ok|system_ok|disk_free_bytes|process_rss_bytes|hub_online)'
+bun run prod:health
 ```
 
 ## Alert Rules
@@ -84,8 +85,17 @@ curl -fsS https://xln.finance/api/metrics | grep -E 'xln_(core_ok|system_ok|disk
 Before declaring a deploy healthy:
 
 ```bash
+bun run gate:ci
 bun run soundcheck runtime frontend/src package.json .github/workflows
 bun run test:e2e:fast
-curl -fsS https://xln.finance/api/health | jq -e '.coreOk == true and .systemOk == true'
-curl -fsS https://xln.finance/api/metrics | grep -q '^xln_system_ok 1'
+bun run test:rpc-settlement
+bun run security:audit-pack
+bun run prod:health
+```
+
+Before a public-net release candidate, also run:
+
+```bash
+bun run gate:release
+bun run soak:release
 ```
