@@ -5,7 +5,7 @@
 
 import { applyEntityTx } from './entity-tx';
 import { isLeftEntity } from './entity-id-utils';
-import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env, HankoString, HashType, JInput, ProposedEntityFrame } from './types';
+import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env, HankoString, HashToSign, HashType, JInput, ProposedEntityFrame } from './types';
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, formatSignerDisplay, log } from './utils';
 import { safeStringify } from './serialization-utils';
 import { createStructuredLogger, logError, shortHash, shortId, shortOrder, shouldLogFullPayloads } from './logger';
@@ -280,6 +280,32 @@ const attachHankoWitnessToOutputs = (
   }
 
   return attachedCount;
+};
+
+const buildEntityHashesToSign = (
+  entityId: string,
+  height: number,
+  frameHash: string,
+  collectedHashes: Array<{ hash: string; type: HashType | string; context: string }> = [],
+): HashToSign[] => {
+  const seenHashes = new Set<string>([frameHash]);
+  const additionalHashes = collectedHashes
+    .filter((hashInfo) => {
+      if (seenHashes.has(hashInfo.hash)) return false;
+      seenHashes.add(hashInfo.hash);
+      return true;
+    })
+    .map((hashInfo) => ({
+      hash: hashInfo.hash,
+      type: hashInfo.type as HashType,
+      context: hashInfo.context,
+    }))
+    .sort((a, b) => compareCanonicalText(a.hash, b.hash));
+  return [{
+    hash: frameHash,
+    type: 'entityFrame',
+    context: `entity:${entityId.slice(-4)}:frame:${height}`,
+  }, ...additionalHashes];
 };
 
 /**
@@ -835,60 +861,12 @@ export const applyEntityInput = async (
       const commitOutputs = proposal.outputs || [];
       const commitJOutputs = proposal.jOutputs || [];
 
-      // Step 3b: Attach quorum hankos to AccountInput outputs
-      // Covers: account frames, dispute proofs, settlements
-      let attachedCount = 0;
-      for (const output of commitOutputs) {
-        if (!output.entityTxs) continue;
-        for (const tx of output.entityTxs) {
-          if (tx.type === 'accountInput' && tx.data) {
-            const accountInput = tx.data as import('./types').AccountInput;
-            // Attach quorum hanko for new account frame
-            if (accountInput.newAccountFrame?.stateHash) {
-              const frameHankoEntry = workingReplica.hankoWitness?.get(accountInput.newAccountFrame.stateHash);
-              if (frameHankoEntry) {
-                accountInput.newHanko = frameHankoEntry.hanko;
-                attachedCount++;
-                entityLog.debug('hanko.attach.frame', { to: shortId(accountInput.toEntityId), hash: shortHash(accountInput.newAccountFrame.stateHash) });
-              }
-            }
-            // Attach quorum hanko for dispute proof (replaces single-signer hanko)
-            if (accountInput.newDisputeHash) {
-              const disputeHankoEntry = workingReplica.hankoWitness?.get(accountInput.newDisputeHash);
-              if (disputeHankoEntry) {
-                accountInput.newDisputeHanko = disputeHankoEntry.hanko;
-                attachedCount++;
-                entityLog.debug('hanko.attach.dispute', { to: shortId(accountInput.toEntityId), hash: shortHash(accountInput.newDisputeHash) });
-              }
-            }
-            // Attach quorum hanko for settlement approval (find by type in hankoWitness)
-            if (accountInput.settleAction?.type === 'approve' && accountInput.settleAction.hanko) {
-              for (const [, entry] of workingReplica.hankoWitness || []) {
-                if (entry.type === 'settlement' && entry.entityHeight === (workingReplica.state.height + 1)) {
-                  accountInput.settleAction.hanko = entry.hanko;
-                  attachedCount++;
-                  entityLog.debug('hanko.attach.settlement', { to: shortId(accountInput.toEntityId) });
-                  break;
-                }
-              }
-            }
-          }
-        }
-      }
-
-      // Step 3c: Attach quorum hanko to jBatch JTx outputs
-      for (const jInput of commitJOutputs) {
-        for (const jTx of jInput.jTxs) {
-          if (jTx.type === 'batch' && jTx.data?.batchHash) {
-            const batchHankoEntry = workingReplica.hankoWitness?.get(jTx.data.batchHash);
-            if (batchHankoEntry) {
-              jTx.data.hankoSignature = batchHankoEntry.hanko;
-              attachedCount++;
-              entityLog.debug('hanko.attach.jBatch', { entity: shortId(jTx.entityId), hash: shortHash(jTx.data.batchHash) });
-            }
-          }
-        }
-      }
+      const attachedCount = attachHankoWitnessToOutputs(
+        commitOutputs,
+        commitJOutputs,
+        workingReplica.hankoWitness,
+        workingReplica.state.height + 1,
+      );
 
       entityOutbox.push(...commitOutputs);
       jOutbox.push(...commitJOutputs);
@@ -1013,24 +991,12 @@ export const applyEntityInput = async (
       singleSignerNewState
     );
 
-    const entityFrameHashToSign: import('./types').HashToSign = {
-      hash: singleSignerFrameHash,
-      type: 'entityFrame',
-      context: `entity:${workingReplica.state.entityId.slice(-4)}:frame:${newHeight}`,
-    };
-    const seenHashes = new Set<string>([singleSignerFrameHash]);
-    const additionalHashesToSign: import('./types').HashToSign[] = [];
-    for (const hashInfo of collectedHashes || []) {
-      if (seenHashes.has(hashInfo.hash)) continue;
-      seenHashes.add(hashInfo.hash);
-      additionalHashesToSign.push({
-        hash: hashInfo.hash,
-        type: hashInfo.type as import('./types').HashType,
-        context: hashInfo.context,
-      });
-    }
-    additionalHashesToSign.sort((a, b) => compareCanonicalText(a.hash, b.hash));
-    const hashesToSign: import('./types').HashToSign[] = [entityFrameHashToSign, ...additionalHashesToSign];
+    const hashesToSign = buildEntityHashesToSign(
+      workingReplica.state.entityId,
+      newHeight,
+      singleSignerFrameHash,
+      collectedHashes,
+    );
 
     const { signEntityHashes } = await import('./hanko/signing');
     const hankos = await signEntityHashes(
@@ -1149,33 +1115,12 @@ export const applyEntityInput = async (
       workingReplica.mempool,
       deterministicForHash
     );
-    // Collect all hashes that need signing. The entity frame hash is the primary
-    // signature slot because validators read sigs[0] for frame acceptance.
-    const entityFrameHashToSign: import('./types').HashToSign = {
-      hash: frameHash,
-      type: 'entityFrame',
-      context: `entity:${workingReplica.state.entityId.slice(-4)}:frame:${newHeight}`,
-    };
-
-    // Dedupe and sort additional hashes (preserve type info)
-    const seenHashes = new Set<string>([frameHash]);
-    const additionalHashesToSign: import('./types').HashToSign[] = [];
-    if (collectedHashes) {
-      for (const h of collectedHashes) {
-        if (!seenHashes.has(h.hash)) {
-          seenHashes.add(h.hash);
-          additionalHashesToSign.push({
-            hash: h.hash,
-            type: h.type as import('./types').HashType,
-            context: h.context,
-          });
-        }
-      }
-      // Sort additional hashes by hash value for determinism
-      additionalHashesToSign.sort((a, b) => compareCanonicalText(a.hash, b.hash));
-    }
-
-    const hashesToSign: import('./types').HashToSign[] = [entityFrameHashToSign, ...additionalHashesToSign];
+    const hashesToSign = buildEntityHashesToSign(
+      workingReplica.state.entityId,
+      newHeight,
+      frameHash,
+      collectedHashes,
+    );
 
     // Sign ALL hashes (not just frame hash)
     const selfSigs = await Promise.all(
