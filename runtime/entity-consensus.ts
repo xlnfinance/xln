@@ -980,7 +980,7 @@ export const applyEntityInput = async (
       console.log(`🔥 AUTO-PROPOSE tx types:`, workingReplica.mempool.map(tx => tx.type));
     }
 
-    console.log(`🚀 SINGLE-SIGNER: Direct execution without consensus for single signer entity`);
+    entityLog.debug('single_signer.execute', { txs: workingReplica.mempool.map(tx => tx.type) });
     // For single signer entities, directly apply transactions without consensus
     // DETERMINISM: Proposer passes env.timestamp (their local time when creating the frame)
     const {
@@ -1061,9 +1061,7 @@ export const applyEntityInput = async (
       workingReplica.hankoWitness as Map<string, HankoWitnessEntry>,
       newHeight,
     );
-    if (attachedHankos > 0) {
-      console.log(`🔐 SINGLE-SIGNER: Attached ${attachedHankos} hankos to outputs`);
-    }
+    if (attachedHankos > 0) entityLog.debug('single_signer.hankos_attached', { count: attachedHankos });
 
     workingReplica.state = {
       ...singleSignerNewState,
