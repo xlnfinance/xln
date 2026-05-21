@@ -54,141 +54,19 @@ import {
 } from './watcher';
 import { DEV_CHAIN_IDS } from './index';
 import { preflightBatchForE2 } from '../j-batch';
-import { firstUsableContractAddress, requireUsableContractAddress } from '../contract-address';
+import { requireUsableContractAddress } from '../contract-address';
 import { setDeltaTransformerAddress } from '../proof-builder';
 import { prepareSignedBatch } from '../hanko/batch';
 import { resolveEntityProposerId } from '../state-helpers';
 import { BLOCKCHAIN } from '../constants';
-
-type DebugEventEmitter = {
-  sendDebugEvent(payload: Record<string, unknown>): void;
-};
-
-const isDebugEventEmitter = (value: unknown): value is DebugEventEmitter =>
-  typeof value === 'object' &&
-  value !== null &&
-  'sendDebugEvent' in value &&
-  typeof value.sendDebugEvent === 'function';
-
-const firstAddress = (...values: Array<unknown>): string => {
-  return firstUsableContractAddress(...values) ?? '';
-};
-
-const RPC_CODE_PROBE_TIMEOUT_MS = 10_000;
-
-const fetchRpcCode = async (rpcUrl: string, address: string, timeoutMs = RPC_CODE_PROBE_TIMEOUT_MS): Promise<string> => {
-  if (!ethers.isAddress(address)) {
-    throw new Error(`INVALID_CONTRACT_ADDRESS:${String(address)}`);
-  }
-
-  const controller = new AbortController();
-  const timeoutHandle = setTimeout(() => controller.abort(), timeoutMs);
-  try {
-    const response = await fetch(rpcUrl, {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        jsonrpc: '2.0',
-        id: 1,
-        method: 'eth_getCode',
-        params: [address, 'latest'],
-      }),
-      signal: controller.signal,
-    });
-    if (!response.ok) {
-      throw new Error(`ETH_GET_CODE_HTTP_${response.status}`);
-    }
-
-    const body = await response.json() as { result?: unknown; error?: { message?: string } };
-    if (body.error) {
-      throw new Error(`ETH_GET_CODE_RPC:${body.error.message || 'unknown'}`);
-    }
-    if (typeof body.result !== 'string') {
-      throw new Error('ETH_GET_CODE_INVALID_RESULT');
-    }
-    return body.result;
-  } catch (error) {
-    if ((error as Error)?.name === 'AbortError') {
-      throw new Error(`ETH_GET_CODE_TIMEOUT:${address}`);
-    }
-    throw error;
-  } finally {
-    clearTimeout(timeoutHandle);
-  }
-};
-
-const readContractCode = async (provider: Provider, rpcUrl: string | undefined, address: string): Promise<string> => {
-  const normalizedRpcUrl = String(rpcUrl || '').trim();
-  if (normalizedRpcUrl) {
-    try {
-      return await fetchRpcCode(normalizedRpcUrl, address);
-    } catch (error) {
-      console.warn(`[JAdapter:rpc] eth_getCode probe failed for ${address}: ${(error as Error).message}`);
-    }
-  }
-  return provider.getCode(address);
-};
-
-type RpcBatchRequest = {
-  id: number;
-  jsonrpc: '2.0';
-  method: string;
-  params: unknown[];
-};
-
-type RpcBatchResponse = {
-  id?: number;
-  result?: unknown;
-  error?: { message?: string };
-};
-
-const sendRpcBatch = async (rpcUrl: string, batch: RpcBatchRequest[]): Promise<Map<number, RpcBatchResponse>> => {
-  if (batch.length === 0) return new Map();
-  const response = await fetch(rpcUrl, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(batch),
-  });
-  if (!response.ok) {
-    throw new Error(`RPC_BATCH_HTTP_${response.status}`);
-  }
-  const json = await response.json();
-  if (!Array.isArray(json)) {
-    throw new Error('RPC_BATCH_INVALID_RESPONSE');
-  }
-  const byId = new Map<number, RpcBatchResponse>();
-  for (const item of json as RpcBatchResponse[]) {
-    if (item && typeof item.id === 'number') {
-      byId.set(item.id, item);
-    }
-  }
-  return byId;
-};
-
-const linkArtifactBytecode = (
-  bytecode: string,
-  libraries: Record<string, string>,
-): string => {
-  let linked = bytecode.startsWith('0x') ? bytecode.slice(2) : bytecode;
-  const unresolvedLibraryRef = /__\$[0-9a-fA-F]{34}\$__/g;
-
-  for (const [libraryName, address] of Object.entries(libraries)) {
-    if (!address) {
-      throw new Error(`Missing linked library address for ${libraryName}`);
-    }
-    const normalizedAddress = address.replace(/^0x/, '').toLowerCase();
-    if (!/^[0-9a-f]{40}$/.test(normalizedAddress)) {
-      throw new Error(`Invalid linked library address for ${libraryName}: ${address}`);
-    }
-    linked = linked.replace(unresolvedLibraryRef, normalizedAddress);
-  }
-
-  if (/__\$[0-9a-fA-F]{34}\$__/.test(linked)) {
-    throw new Error('Unresolved library placeholders remain in linked bytecode');
-  }
-
-  return `0x${linked}`;
-};
+import {
+  firstAddress,
+  isDebugEventEmitter,
+  linkArtifactBytecode,
+  readContractCode,
+  sendRpcBatch,
+  type RpcBatchRequest,
+} from './rpc-utils';
 
 /**
  * Create RPC adapter - works with any JSON-RPC provider
