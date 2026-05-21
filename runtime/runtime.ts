@@ -78,6 +78,10 @@ import {
   prewarmSignerKeyCache,
 } from './account-crypto';
 import {
+  assertLocalEntityCryptoKeys, deriveLocalEntityCryptoKeys,
+  hasLocalSignerKey, resolveReplicaEntityCryptoKeys,
+} from './runtime-entity-crypto';
+import {
   announceLocalEntityProfile,
   buildEntityAdvertisedStateFingerprint,
   buildLocalEntityProfile,
@@ -85,7 +89,6 @@ import {
 } from './networking/gossip-helper';
 import type { Profile } from './networking/gossip';
 import { RuntimeP2P, type P2PConfig } from './networking/p2p';
-import { deriveEncryptionKeyPair, pubKeyToHex } from './networking/p2p-crypto';
 import { isRuntimeId, normalizeRuntimeId } from './networking/runtime-id';
 import {
   parseReplicaKey,
@@ -1717,69 +1720,6 @@ export const deriveRuntimeId = (seed: string): string => {
 // scheduleNetworkProcess removed — loop is always-on via startRuntimeLoop()
 
 const normalizeEntityKey = (value: string): string => value.toLowerCase();
-const bytesToHex = (bytes: Uint8Array): string =>
-  `0x${Array.from(bytes)
-    .map(b => b.toString(16).padStart(2, '0'))
-    .join('')}`;
-
-const deriveEntityCryptoKeyPairHex = (material: Uint8Array | string): { publicKey: string; privateKey: string } => {
-  const pair = deriveEncryptionKeyPair(material);
-  return {
-    publicKey: pubKeyToHex(pair.publicKey),
-    privateKey: bytesToHex(pair.privateKey),
-  };
-};
-
-const hasLocalSignerKey = (env: Env, signerId: string): boolean => {
-  try {
-    getSignerPrivateKey(env, signerId);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const deriveLocalEntityCryptoKeys = (
-  env: Env,
-  entityId: string,
-  signerId: string,
-): { publicKey: string; privateKey: string } => {
-  const signerPriv = getSignerPrivateKey(env, signerId);
-  const signerMaterial = `${bytesToHex(signerPriv)}:${entityId}:htlc-v1`;
-  return deriveEntityCryptoKeyPairHex(signerMaterial);
-};
-
-const resolveReplicaEntityCryptoKeys = (
-  env: Env,
-  entityId: string,
-  signerId: string,
-  existing?: { publicKey?: string; privateKey?: string },
-): { publicKey: string; privateKey: string; isLocal: boolean } => {
-  if (hasLocalSignerKey(env, signerId)) {
-    const keys = deriveLocalEntityCryptoKeys(env, entityId, signerId);
-    return { ...keys, isLocal: true };
-  }
-  return {
-    publicKey: String(existing?.publicKey || ''),
-    privateKey: String(existing?.privateKey || ''),
-    isLocal: false,
-  };
-};
-
-const assertLocalEntityCryptoKeys = (env: Env): void => {
-  for (const [replicaKey, replica] of env.eReplicas.entries()) {
-    const signerId = extractSignerId(replicaKey);
-    if (!hasLocalSignerKey(env, signerId)) continue;
-    const keys = deriveLocalEntityCryptoKeys(env, replica.entityId, signerId);
-    const { publicKey, privateKey } = keys;
-    if (replica.state.entityEncPubKey !== publicKey || replica.state.entityEncPrivKey !== privateKey) {
-      throw new Error(
-        `ENTITY_CRYPTO_KEY_MISMATCH: entity=${replica.entityId} signer=${signerId} ` +
-        `expectedPub=${publicKey} actualPub=${String(replica.state.entityEncPubKey || '')}`,
-      );
-    }
-  }
-};
 
 const resolveRuntimeIdFromProfile = (profile: Profile | undefined): string | null => {
   if (!profile) return null;
