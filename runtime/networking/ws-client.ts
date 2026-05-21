@@ -1,4 +1,4 @@
-import type { RuntimeInput, RoutedEntityInput } from '../types';
+import type { RoutedEntityInput } from '../types';
 import { deserializeWsMessage, makeHelloNonce, hashHelloMessage, makeMessageId, serializeWsMessage, type RuntimeWsMessage } from './ws-protocol';
 import { signDigest } from '../account-crypto';
 import { encryptJSON, decryptJSON, pubKeyToHex } from './p2p-crypto';
@@ -90,7 +90,6 @@ export type RuntimeWsClientOptions = {
   encryptionKeyPair?: { publicKey: Uint8Array; privateKey: Uint8Array }; // For E2E encryption
   getTargetEncryptionKey?: (runtimeId: string) => Uint8Array | null; // Lookup target's pubkey
   onPeerEncryptionKey?: (runtimeId: string, pubKeyHex: string) => void;
-  onRuntimeInput?: (from: string, input: RuntimeInput, timestamp?: number) => Promise<void> | void;
   onEntityInput?: (from: string, input: RoutedEntityInput, timestamp?: number) => Promise<void> | void;
   onGossipRequest?: (from: string, payload: unknown) => Promise<void> | void;
   onGossipResponse?: (from: string, payload: unknown) => Promise<void> | void;
@@ -385,7 +384,8 @@ export class RuntimeWsClient {
       this.options.onPeerEncryptionKey?.(msg.from, msg.fromEncryptionPubKey);
     }
 
-    if (msg.type === 'runtime_input') {
+    const msgType = String((msg as { type?: unknown }).type);
+    if (msgType === 'runtime_input') {
       // runtime_input is not a public transport API. Runtime-level work is
       // enqueued locally by the owning process; cross-runtime delivery must use
       // encrypted entity_input so relay/P2P cannot become a plaintext control

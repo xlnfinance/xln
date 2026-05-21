@@ -140,7 +140,8 @@ export const relayRoute = async <Socket = RelaySocketLike>(
   }
 
   const msg = rawMsg as RuntimeWsMessage;
-  const { type, to, from, payload, id } = msg;
+  const type = String((rawMsg as { type: string }).type);
+  const { to, from, payload, id } = msg;
   const fromKey = normalizeRuntimeKey(from);
   const toKey = normalizeRuntimeKey(to);
   const traceId = typeof id === 'string' && id.length > 0
@@ -457,7 +458,7 @@ export const relayRoute = async <Socket = RelaySocketLike>(
     return;
   }
 
-  // ----- routable messages (entity_input, runtime_input, gossip_response) -----
+  // ----- routable messages (entity_input, legacy runtime_input reject, gossip_response) -----
   if (type === 'entity_input' || type === 'runtime_input' || type === 'gossip_response') {
     if (!toKey) {
       pushDebugEvent(store, {
@@ -472,10 +473,9 @@ export const relayRoute = async <Socket = RelaySocketLike>(
       return;
     }
 
-    // Runtime-level input over relay is intentionally disabled. Production
-    // control flow must go through encrypted entity_input or local in-process
-    // queues; keeping a plaintext runtime_input transport would create a
-    // second ingress path that bypasses those boundaries.
+    // Legacy runtime_input is intentionally not part of the advertised WS
+    // protocol. Keep this raw-string reject so old clients or hostile JSON
+    // cannot recreate a plaintext control plane by bypassing TypeScript.
     if (type === 'runtime_input') {
       pushDebugEvent(store, {
         event: 'error',
