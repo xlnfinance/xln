@@ -4,6 +4,12 @@ import type { Level } from 'level';
 import type { RuntimeP2P } from './networking/p2p';
 import type { CrossJurisdictionSwapRoute } from './types/cross-jurisdiction';
 import type { DebtEntry } from './types/debt';
+import type {
+  JBlockFinalized,
+  JBlockObservation,
+  JurisdictionEvent,
+  JurisdictionEventData,
+} from './types/jurisdiction-events';
 export type {
   CrossJurisdictionPullLeg,
   CrossJurisdictionSwapLeg,
@@ -16,6 +22,12 @@ export type {
   DebtStatus,
   DebtUpdate,
 } from './types/debt';
+export type {
+  JBlockFinalized,
+  JBlockObservation,
+  JurisdictionEvent,
+  JurisdictionEventData,
+} from './types/jurisdiction-events';
 
 /**
  * Shared XLN wire/state type barrel.
@@ -194,135 +206,6 @@ export interface VoteData {
   voter: string;
   choice: 'yes' | 'no' | 'abstain';
   comment?: string;
-}
-
-/**
- * Common metadata for all J-events (for JBlock tracking)
- */
-interface JEventMetadata {
-  blockNumber?: number;      // J-block number where event occurred
-  blockHash?: string;        // J-block hash for consensus
-  transactionHash?: string;  // On-chain transaction hash
-}
-
-/**
- * Jurisdiction event types - discriminated union for type safety
- * Each on-chain event has its own typed data structure
- */
-export type JurisdictionEvent =
-  | (JEventMetadata & {
-      type: 'ReserveUpdated';
-      data: {
-        entity: string;
-        tokenId: number;
-        newBalance: string;
-        symbol?: string;   // Optional - BrowserVM doesn't have token registry
-        decimals?: number; // Optional - use TOKEN_REGISTRY lookup if missing
-      };
-    })
-  | (JEventMetadata & {
-      type: 'SecretRevealed';
-      data: {
-        hashlock: string;
-        revealer: string;
-        secret: string;
-      };
-    })
-  | (JEventMetadata & {
-      type: 'AccountSettled';
-      data: {
-        leftEntity: string;
-        rightEntity: string;
-        tokenId: number;
-        leftReserve: string;
-        rightReserve: string;
-        collateral: string;
-        ondelta: string;
-        nonce: number;
-      };
-    })
-  | (JEventMetadata & {
-      type: 'GovernanceEnabled';
-      data: {
-        entityId: string;
-        proposalThreshold: number;
-      };
-    })
-  | (JEventMetadata & {
-      type: 'HankoBatchProcessed';
-      data: {
-        entityId: string;      // Entity that submitted the batch
-        hankoHash: string;     // Hash of hanko data for verification
-        nonce: number;         // Batch nonce (incrementing per entity)
-        success: boolean;      // Whether batch processing succeeded
-      };
-    })
-  | (JEventMetadata & {
-      type: 'DebtCreated';
-      data: {
-        debtor: string;
-        creditor: string;
-        tokenId: number;
-        amount: string;
-        debtIndex: number;
-      };
-    })
-  | (JEventMetadata & {
-      type: 'DisputeStarted';
-      data: {
-        sender: string;
-        counterentity: string;
-        nonce: string;
-        proofbodyHash: string;
-        initialArguments: string;
-      };
-    })
-  | (JEventMetadata & {
-      type: 'DisputeFinalized';
-      data: {
-        sender: string;
-        counterentity: string;
-        initialNonce: string;
-        initialProofbodyHash: string;
-        finalProofbodyHash: string;
-      };
-    })
-  | (JEventMetadata & {
-      type: 'DebtEnforced';
-      data: {
-        debtor: string;
-        creditor: string;
-        tokenId: number;
-        amountPaid: string;
-        remainingAmount: string;
-        newDebtIndex: number;
-      };
-    })
-  | (JEventMetadata & {
-      type: 'DebtForgiven';
-      data: {
-        debtor: string;
-        creditor: string;
-        tokenId: number;
-        amountForgiven: string;
-        debtIndex: number;
-      };
-    });
-
-/**
- * Jurisdiction event data for j_event transactions
- * Now with typed event discriminated union and JBlock consensus info
- */
-export interface JurisdictionEventData {
-  from: string;
-  event: JurisdictionEvent;
-  events?: JurisdictionEvent[]; // Batched events from same block
-  eventsHash?: string;
-  signature?: string;
-  observedAt: number;
-  blockNumber: number;
-  blockHash: string;  // Block hash for JBlock consensus
-  transactionHash: string;
 }
 
 export interface AccountTxInput {
@@ -1705,43 +1588,6 @@ export type AccountTx =
 // J-BLOCK CONSENSUS (Multi-signer agreement on J-machine state)
 // ═══════════════════════════════════════════════════════════════════════════
 //
-// Each signer independently observes J-machine blocks and submits observations.
-// Entity finalizes a JBlock when threshold signers agree on (jHeight, jBlockHash).
-// This ensures Byzantine-tolerant J-machine state tracking without extra signatures.
-//
-// Flow:
-// 1. Signer observes J-block N with events relevant to entity
-// 2. Signer submits JBlockObservation as EntityTx
-// 3. Entity collects observations from all signers
-// 4. When threshold agree on same (jHeight, jBlockHash) → finalize
-// 5. Apply events from finalized JBlock to entity state
-// ═══════════════════════════════════════════════════════════════════════════
-
-/**
- * Observation of a J-block by a single signer.
- * Submitted as j_event EntityTx, aggregated by entity consensus.
- */
-export interface JBlockObservation {
-  signerId: string;              // Who observed this
-  jHeight: number;               // J-machine block number
-  jBlockHash: string;            // EVM block hash (or BrowserVM frame hash)
-  eventsHash: string;            // Canonical hash of normalized relevant events
-  events: JurisdictionEvent[];   // Events relevant to this entity in this block
-  observedAt: number;            // When signer observed this (for timeout detection)
-}
-
-/**
- * Finalized J-block after threshold agreement.
- * Events from this block can be safely applied to entity state.
- */
-export interface JBlockFinalized {
-  jHeight: number;
-  jBlockHash: string;
-  events: JurisdictionEvent[];
-  finalizedAt: number;           // When consensus was reached
-  signerCount: number;           // How many signers agreed (for audit)
-}
-
 export interface EntitySwapPair {
   baseTokenId: number;
   quoteTokenId: number;
