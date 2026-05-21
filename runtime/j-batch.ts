@@ -687,7 +687,7 @@ export function assertBatchNotPending(jBatchState: JBatchState, operation: strin
 }
 
 /**
- * Check if batch has any operations
+ * Check whether the batch contains operations.
  */
 export function isBatchEmpty(batch: JBatch): boolean {
   return (
