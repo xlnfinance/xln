@@ -10,8 +10,11 @@ import {
   isCrossJurisdictionRouteExpired,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../cross-jurisdiction';
+import { createStructuredLogger, shortOrder } from '../logger';
 
 export type OrderbookOfferForMatch = ReturnType<typeof normalizeSwapOfferForOrderbook>;
+
+const crossJBookLog = createStructuredLogger('crossj.orderbook');
 
 export const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 
@@ -26,11 +29,11 @@ export const applyCommittedSwapCancelsToOrderbook = (
   if (cancels.length === 0) return;
   const ext = state.orderbookExt as OrderbookExtState | undefined;
   if (!ext) return;
-  console.log(`📊 ENTITY-ORCHESTRATOR: Applying ${cancels.length} committed swap cancels to orderbook`);
+  crossJBookLog.debug('committed_cancel.apply', { count: cancels.length });
   for (const { accountId, offerId } of cancels) {
     const namespacedOrderId = `${accountId}:${offerId}`;
     if (removeBookOrderById(env, state, namespacedOrderId)) {
-      console.log(`📊 ORDERBOOK: Removed committed cancelled order ${offerId.slice(-8)}`);
+      crossJBookLog.trace('committed_cancel.removed', { order: shortOrder(offerId) });
     }
   }
 };
