@@ -41,6 +41,7 @@
 
   <div class="topbar-links">
     <a href="/app" class="topbar-link" class:active={currentPath === '/app'}>App</a>
+    <a href="/docs" class="topbar-link" class:active={currentPath === '/docs'}>Docs</a>
     <div class="topbar-dropdown">
       <Dropdown bind:open={toolsDropdownOpen} minWidth={160} maxWidth={220}>
         <span slot="trigger" class="topbar-trigger">
