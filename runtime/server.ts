@@ -40,7 +40,6 @@ import {
   getEntityReplicaById,
 } from './server/entity-lookup';
 import { createRuntimeIngressReceiptStore } from './server/ingress-receipts';
-import { isLoopbackUrl } from './loopback-url';
 import {
   createRelayStore,
   pushDebugEvent,
@@ -55,8 +54,6 @@ import {
   type MarketSnapshotPayload,
 } from './market-snapshot';
 import { createMarketSubscriptionStack, isMarketMessageType } from './relay/market-subscriptions';
-import { isLocalOperatorRequest } from './health-redaction';
-import { findForbiddenRpcProxyMethod } from './rpc-proxy-safety';
 import {
   JSON_HEADERS,
   getErrorMessage,
@@ -90,6 +87,7 @@ import { handleCreditRequest } from './server/credit-request';
 import { handleOffchainFaucet } from './server/offchain-faucet';
 import { handleReserveFaucet } from './server/reserve-faucet';
 import { handleRuntimeHealth, type RuntimeHealthCacheEntry } from './server/health-api';
+import { handleRuntimeRpcProxy } from './server/rpc-proxy';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
@@ -590,70 +588,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   // JSON-RPC proxy endpoint (single canonical path: /rpc).
   // Keep /api/rpc for compatibility with older clients.
   if ((pathname === '/api/rpc' || pathname === '/rpc') && req.method === 'POST') {
-    const blockLocal = process.env['BLOCK_LOCAL_RPC_PROXY'] === 'true';
-    const explicitUpstream = process.env['RPC_UPSTREAM_URL'] || process.env['PUBLIC_RPC_URL'] || process.env['ANVIL_RPC'];
-    const jMachineRpc = env?.activeJurisdiction ? env.jReplicas.get(env.activeJurisdiction)?.rpcs?.[0] : undefined;
-    const upstream = explicitUpstream || jMachineRpc || '';
-    const isLocal = isLoopbackUrl(upstream);
-    const isProduction = process.env['NODE_ENV'] === 'production';
-
-    if (!upstream) {
-      pushDebugEvent(relayStore, {
-        event: 'error',
-        reason: 'RPC_PROXY_NO_UPSTREAM',
-        details: { path: pathname },
-      });
-      return new Response(safeStringify({ error: 'RPC upstream not configured' }), { status: 503, headers });
-    }
-    if (isLocal && (blockLocal || (isProduction && process.env['XLN_ALLOW_LOCAL_RPC_PROXY'] !== '1'))) {
-      pushDebugEvent(relayStore, {
-        event: 'error',
-        reason: 'RPC_PROXY_LOCAL_BLOCKED',
-        details: { upstream, path: pathname },
-      });
-      return new Response(
-        JSON.stringify({
-          error: 'Local RPC upstream is blocked in this environment',
-          upstream,
-        }),
-        { status: 503, headers },
-      );
-    }
-
-    try {
-      const bodyText = await req.text();
-      if (!(process.env['XLN_ALLOW_UNSAFE_RPC_PROXY'] === '1' || (!isProduction && isLocalOperatorRequest(req)))) {
-        const forbidden = findForbiddenRpcProxyMethod(bodyText);
-        if (forbidden) {
-          return new Response(
-            safeStringify({ error: 'RPC proxy method is not allowed', method: forbidden }),
-            { status: forbidden.startsWith('invalid') || forbidden === 'empty-batch' ? 400 : 403, headers },
-          );
-        }
-      }
-      const rpcRes = await fetch(upstream, {
-        method: 'POST',
-        headers: {
-          'content-type': req.headers.get('content-type') || 'application/json',
-        },
-        body: bodyText,
-      });
-      const respBody = await rpcRes.text();
-      return new Response(respBody, {
-        status: rpcRes.status,
-        headers: {
-          ...headers,
-          'Content-Type': rpcRes.headers.get('content-type') || 'application/json',
-        },
-      });
-    } catch (error: unknown) {
-      pushDebugEvent(relayStore, {
-        event: 'error',
-        reason: 'RPC_PROXY_FETCH_FAILED',
-        details: { upstream, path: pathname, error: getErrorMessage(error, String(error)) },
-      });
-      return new Response(safeStringify({ error: getErrorMessage(error, 'RPC proxy failed') }), { status: 502, headers });
-    }
+    return handleRuntimeRpcProxy({ req, pathname, env, relayStore, headers });
   }
 
   // Health check
