@@ -9,7 +9,7 @@ import type {
 } from 'ethers';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { createExternalWalletApi } from '../api/external-wallet-api';
-import { createDirectRuntimeWsRoute } from '../networking/direct-runtime-bun';
+import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../networking/direct-runtime-bun';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from '../jadapter/default-tokens';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
@@ -35,6 +35,7 @@ import {
   closeInvalidRuntimeAdapterMessage,
   forgetRuntimeAdapterClient,
   handleRuntimeAdapterMessage,
+  type RuntimeAdapterSocket,
 } from '../radapter/server';
 import {
   getActiveJAdapter,
@@ -80,6 +81,8 @@ import {
   sleep,
   waitUntil,
 } from './mesh-common';
+
+type HubServerSocket = DirectWebSocket & RuntimeAdapterSocket & { data?: { type?: string } };
 
 type Args = {
   name: string;
@@ -1088,7 +1091,7 @@ const run = async (): Promise<void> => {
   env.runtimeState = env.runtimeState ?? {};
   env.runtimeState.directEntityInputDispatch = (targetRuntimeId, input, ingressTimestamp) =>
     directRuntimeWs.sendEntityInput(targetRuntimeId, input, ingressTimestamp);
-  const handleRadapterWsMessage = (ws: any, raw: string | Buffer | ArrayBuffer): void => {
+  const handleRadapterWsMessage = (ws: HubServerSocket, raw: string | Buffer | ArrayBuffer): void => {
     let msg: Record<string, unknown>;
     try {
       msg = decodeRuntimeAdapterMessage<Record<string, unknown>>(raw);
@@ -1411,21 +1414,21 @@ const run = async (): Promise<void> => {
       }
 	    },
 	    websocket: {
-	      open(ws: any) {
+	      open(ws: HubServerSocket) {
 	        if (ws.data?.type === 'rpc') {
 	          attachRuntimeAdapterTicker(env, registerEnvChangeCallback);
 	          return;
 	        }
 	        directRuntimeWs.websocket.open(ws);
 	      },
-	      message(ws: any, raw: string | Buffer | ArrayBuffer) {
+	      message(ws: HubServerSocket, raw: string | Buffer | ArrayBuffer) {
 	        if (ws.data?.type === 'rpc') {
 	          handleRadapterWsMessage(ws, raw);
 	          return;
 	        }
 	        return directRuntimeWs.websocket.message(ws, raw);
 	      },
-	      close(ws: any) {
+	      close(ws: HubServerSocket) {
 	        if (ws.data?.type === 'rpc') {
 	          forgetRuntimeAdapterClient(ws);
 	          return;

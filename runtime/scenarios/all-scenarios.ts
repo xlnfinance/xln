@@ -81,14 +81,15 @@ async function runScenario(
       duration: getPerfMs() - start,
       status: 'pass',
     });
-  } catch (err: any) {
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : String(err);
     results.push({
       name: scenario.name,
       iteration,
       frames: env.history?.length || 0,
       duration: getPerfMs() - start,
       status: 'fail',
-      error: err?.message || String(err),
+      error: message,
     });
   }
 }

@@ -48,7 +48,7 @@ export async function executeScenario(
     tickInterval, // Pass tickInterval through context
   };
 
-  const errors: any[] = [];
+  const errors: ScenarioExecutionResult['errors'] = [];
 
   console.log(`🎬 SCENARIO: Starting execution with seed="${scenario.seed}"`);
   console.log(`📋 SCENARIO: ${allEvents.length} events to execute`);
@@ -84,9 +84,8 @@ export async function executeScenario(
       } catch (error) {
         console.error(`❌ Error executing event at t=${timestamp}:`, error);
         errors.push({
-          timestamp,
-          event,
-          error: (error as Error).message,
+          message: error instanceof Error ? error.message : String(error),
+          context: `timestamp=${timestamp} actions=${event.actions.map((action) => action.type).join(',')}`,
         });
       }
     }
