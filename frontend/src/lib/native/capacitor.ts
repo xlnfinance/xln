@@ -8,6 +8,7 @@ import { Preferences } from '@capacitor/preferences';
 import { PushNotifications } from '@capacitor/push-notifications';
 import { SplashScreen } from '@capacitor/splash-screen';
 import { StatusBar, Style } from '@capacitor/status-bar';
+import { normalizeNativeDeepLinkPath } from './deeplink';
 
 type NativeEventName =
 	| 'xln-native-ready'
@@ -30,28 +31,24 @@ const dispatchNativeEvent = (name: NativeEventName, detail: unknown = {}): void 
 	window.dispatchEvent(new CustomEvent(name, { detail }));
 };
 
-const normalizeDeepLinkPath = (url: string): string | null => {
-	try {
-		const parsed = new URL(url);
-		if (parsed.protocol !== 'xln:') return null;
-		const host = parsed.hostname.toLowerCase();
-		const params = parsed.search || '';
-		if (host === 'pay') return `/app#pay${params}`;
-		if (host === 'invoice') return `/app#invoice${params}`;
-		if (host === 'runtime') return `/app#runtime${params}`;
-		if (host === 'app') return `/app${params}${parsed.hash || ''}`;
-		return `/app#${host}${params}`;
-	} catch {
-		return null;
-	}
-};
+let desktopDeepLinkListenerInstalled = false;
 
 const routeDeepLink = (url: string): void => {
-	const next = normalizeDeepLinkPath(url);
+	const next = normalizeNativeDeepLinkPath(url);
 	dispatchNativeEvent('xln-native-deeplink', { url, next });
 	if (!next) return;
 	window.history.replaceState(window.history.state, '', next);
 	window.dispatchEvent(new HashChangeEvent('hashchange'));
+};
+
+const installDesktopDeepLinkListener = (): void => {
+	if (desktopDeepLinkListenerInstalled) return;
+	desktopDeepLinkListenerInstalled = true;
+	window.addEventListener('xln-native-deeplink', event => {
+		const detail = (event as CustomEvent<{ url?: unknown; next?: unknown }>).detail;
+		if (!detail || typeof detail.url !== 'string' || typeof detail.next === 'string') return;
+		routeDeepLink(detail.url);
+	});
 };
 
 const maybeRegisterPush = async (): Promise<void> => {
@@ -93,6 +90,7 @@ export const sendLocalPaymentWake = async (title: string, body: string, extra: R
 
 export const initializeNativeShell = async (): Promise<void> => {
 	if (window.xlnDesktop) {
+		installDesktopDeepLinkListener();
 		document.documentElement.classList.add('xln-native-shell', 'xln-desktop-shell');
 		document.body.classList.add('xln-native-shell', 'xln-desktop-shell');
 		dispatchNativeEvent('xln-native-ready', {
