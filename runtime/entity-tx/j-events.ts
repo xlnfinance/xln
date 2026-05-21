@@ -13,7 +13,6 @@ import type { CompletedBatch } from '../j-batch';
 import { ethers } from 'ethers';
 import { cloneEntityState, addMessage } from '../state-helpers';
 import { getDefaultCreditLimit, getTokenInfo } from '../account-utils';
-import { safeStringify } from '../serialization-utils';
 import { CANONICAL_J_EVENTS } from '../jadapter/helpers';
 import { hashHtlcSecret } from '../htlc-utils';
 import { scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from '../entity-crontab';
@@ -35,6 +34,9 @@ import { verifyAccountSignature } from '../account-crypto';
 import { decodeHashLadderBinary } from '../hashladder';
 import { markStorageEntityDirty } from '../env-events';
 import { applyDebtCreated, applyDebtEnforced, applyDebtForgiven } from './j-events-debt';
+import { createStructuredLogger, shortHash, shortId, shortOrder } from '../logger';
+
+const jEventLog = createStructuredLogger('j.event');
 
 /**
  * ═══════════════════════════════════════════════════════════════════════════
@@ -318,9 +320,7 @@ function queueCrossJurisdictionSalvageFromDispute(
 
   const route = findCrossJurisdictionRouteForSourceDispute(state, counterpartyId);
   if (!route) {
-    console.warn(
-      `🌉 CROSS-J: non-zero pull args observed but no local route for source=${state.entityId.slice(-4)} counterparty=${counterpartyId.slice(-4)}`,
-    );
+    jEventLog.warn('crossj.salvage_route_missing', { source: shortId(state.entityId), counterparty: shortId(counterpartyId) });
     return false;
   }
 
@@ -359,7 +359,7 @@ function queueCrossJurisdictionSourceDisputeFromTargetDispute(
     ? findAccountByCounterparty(sourceUserState, route.source.counterpartyEntityId)
     : null;
   if (!sourceUserState || !sourceAccount) {
-    console.warn(`🌉 CROSS-J: target dispute ${route.orderId} observed but source account is unavailable`);
+    jEventLog.warn('crossj.source_account_unavailable', { route: shortOrder(route.orderId), source: shortId(route.source.entityId), counterparty: shortId(route.source.counterpartyEntityId) });
     return false;
   }
   if ((sourceAccount.status ?? 'active') === 'disputed' || sourceAccount.activeDispute) return false;
@@ -445,7 +445,7 @@ function applyKnownHtlcSecret(
       addMessage(newState, `🔓 HTLC reveal observed: ${hashlock.slice(0, 10)}... | Block ${blockNumber}`);
       return true;
     }
-    console.log(`⚠️ HTLC: ${source} secret for unknown hashlock ${hashlock.slice(0, 16)}...`);
+    jEventLog.debug('htlc.secret_unknown', { source, hashlock: shortHash(hashlock) });
     return false;
   }
 
@@ -578,13 +578,14 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
           : batchData.transactionHash,
     });
     if (!normalized) {
-      console.warn(`⚠️ Dropping malformed j-event payload at block ${blockNumber}: ${safeStringify(raw)}`);
+      jEventLog.warn('observation.event_malformed', { block: blockNumber });
+      jEventLog.trace('observation.event_malformed_payload', { block: blockNumber, event: raw });
       continue;
     }
     jEvents.push(normalized);
   }
   if (jEvents.length === 0) {
-    console.warn(`⚠️ No valid j-events after normalization for block ${blockNumber}; skipping observation`);
+    jEventLog.warn('observation.empty_after_normalize', { block: blockNumber });
     return { newState: entityState, mempoolOps: [], outputs: [], dirtyAccounts: [] };
   }
   const canonicalEventsHash = canonicalJurisdictionEventsHash(jEvents);
@@ -704,27 +705,19 @@ export function tryFinalizeAccountJEvents(account: AccountMachine, counterpartyI
     const leftEvents = normalizeObsEvents(leftObs);
     const rightEvents = normalizeObsEvents(rightObs);
     if (leftEvents.length === 0 || rightEvents.length === 0) {
-      console.warn(
-        `   ⚠️ BILATERAL-MISMATCH: empty/non-array events at jHeight=${jHeight} hash=${leftObs.jBlockHash.slice(0, 10)}...`,
-      );
+      jEventLog.warn('bilateral.empty_events', { height: jHeight, block: shortHash(leftObs.jBlockHash) });
       continue;
     }
     if (leftEvents.length !== leftRawLen || rightEvents.length !== rightRawLen) {
-      console.warn(
-        `   ⚠️ BILATERAL-MISMATCH: malformed events dropped jHeight=${jHeight} hash=${leftObs.jBlockHash.slice(0, 10)}... ` +
-          `leftRawLen=${leftRawLen} leftNormLen=${leftEvents.length} rightRawLen=${rightRawLen} rightNormLen=${rightEvents.length}`,
-      );
+      jEventLog.warn('bilateral.malformed_events', { height: jHeight, block: shortHash(leftObs.jBlockHash), leftRawLen, leftNormLen: leftEvents.length, rightRawLen, rightNormLen: rightEvents.length });
       continue;
     }
 
     if (!sameEventMultiset(leftEvents, rightEvents)) {
       const leftKeys = leftEvents.map(canonicalJurisdictionEventKey);
       const rightKeys = rightEvents.map(canonicalJurisdictionEventKey);
-      console.warn(
-        `   ⚠️ BILATERAL-MISMATCH: jHeight=${jHeight} hash=${leftObs.jBlockHash.slice(0, 10)}... ` +
-        `leftKeys=${JSON.stringify(leftKeys)} rightKeys=${JSON.stringify(rightKeys)} ` +
-        `leftRaw=${safeStringify(leftObs.events)} rightRaw=${safeStringify(rightObs.events)}`,
-      );
+      jEventLog.warn('bilateral.event_mismatch', { height: jHeight, block: shortHash(leftObs.jBlockHash), leftKeys, rightKeys });
+      jEventLog.trace('bilateral.event_mismatch_payload', { height: jHeight, leftRaw: leftObs.events, rightRaw: rightObs.events });
       continue;
     }
 
@@ -1083,7 +1076,7 @@ async function tryFinalizeJBlocks(
         for (const accountId of eventDirtyAccounts) dirtyAccounts.add(accountId);
         // applyFinalizedJEvent clones state - ensure jBlockChain preserved
         if (!state.jBlockChain.some(b => b.jHeight === jHeight)) {
-          console.warn(`   ⚠️  CLONE LOST jBlockChain - restoring block ${jHeight}`);
+          jEventLog.warn('finalize.clone_lost_chain', { height: jHeight });
           state.jBlockChain.push(finalized);
           state.lastFinalizedJHeight = jHeight;
         }
@@ -1224,7 +1217,7 @@ async function applyFinalizedJEvent(
     const myIsLeft = myEntityId === leftId;
     const myIsRight = myEntityId === rightId;
     if (!myIsLeft && !myIsRight) {
-      console.warn(`   ⚠️ AccountSettled not for this entity: me=${entityState.entityId.slice(-4)} left=${leftId.slice(-4)} right=${rightId.slice(-4)}`);
+      jEventLog.warn('account_settled.wrong_entity', { entity: shortId(entityState.entityId), left: shortId(leftId), right: shortId(rightId) });
       return done();
     }
     const counterpartyEntityId = myIsLeft ? rightEntity : leftEntity;
@@ -1238,7 +1231,7 @@ async function applyFinalizedJEvent(
       const newReserve = BigInt(ownReserve as string | number | bigint);
       newState.reserves.set(tokenIdNum, newReserve);
     } else {
-      console.warn(`   ⚠️ RESERVE-SKIP: ownReserve is falsy`);
+      jEventLog.warn('account_settled.reserve_missing', { counterparty: shortId(cpShort), tokenId: tokenIdNum });
     }
 
     // BILATERAL J-EVENT CONSENSUS: Need 2-of-2 agreement before applying to account
@@ -1246,7 +1239,7 @@ async function applyFinalizedJEvent(
     // Account keyed by counterparty ID
     const account = newState.accounts.get(counterpartyEntityId as string);
     if (!account) {
-      console.warn(`   ⚠️ No account for ${cpShort}`);
+      jEventLog.warn('account_settled.account_missing', { counterparty: shortId(cpShort) });
       return done();
     }
     dirtyAccounts.add(String(counterpartyEntityId).toLowerCase());
@@ -1268,9 +1261,7 @@ async function applyFinalizedJEvent(
     // Use canonical normalized event payload so both sides hash the same data.
     const normalizedClaimEvents = normalizeJurisdictionEvents([event]);
     if (normalizedClaimEvents.length !== 1) {
-      console.warn(
-        `⚠️ AccountSettled normalization failed for claim enqueue: token=${tokenIdNum} cp=${cpShort} block=${blockNumber}`,
-      );
+      jEventLog.warn('account_settled.claim_normalize_failed', { tokenId: tokenIdNum, counterparty: shortId(cpShort), block: blockNumber });
       return done();
     }
     const normalizedClaimEvent = normalizedClaimEvents[0];
@@ -1386,10 +1377,7 @@ async function applyFinalizedJEvent(
       const { buildAccountProofBody } = await import('../proof-builder');
       const localProof = buildAccountProofBody(account);
       if (localProof.proofBodyHash !== account.activeDispute.initialProofbodyHash) {
-        console.error(`❌ CONSENSUS DIVERGENCE: Local proofBodyHash != on-chain`);
-        console.error(`   Local: ${localProof.proofBodyHash}`);
-        console.error(`   On-chain: ${account.activeDispute.initialProofbodyHash}`);
-        console.error(`   This means bilateral state diverged - CRITICAL BUG!`);
+        jEventLog.error('dispute.proof_hash_mismatch', { counterparty: shortId(counterpartyId), local: shortHash(localProof.proofBodyHash), onChain: shortHash(account.activeDispute.initialProofbodyHash) });
         // Continue but log for audit
       }
 
@@ -1469,7 +1457,7 @@ async function applyFinalizedJEvent(
         markStorageEntityDirty(env, newState.entityId);
       }
     } else {
-      console.warn(`⚠️ DisputeStarted: account ${candidateCounterpartyId.slice(-4)} not found for entity ${entityIdNorm.slice(-4)}`);
+      jEventLog.warn('dispute_started.account_missing', { account: shortId(candidateCounterpartyId), entity: shortId(entityIdNorm) });
     }
 
   } else if (event.type === 'DisputeFinalized') {
@@ -1509,7 +1497,7 @@ async function applyFinalizedJEvent(
           markStorageEntityDirty(env, newState.entityId);
         }
       } else {
-        console.warn(`⚠️ DisputeFinalized: No activeDispute for ${counterpartyId.slice(-4)}`);
+        jEventLog.warn('dispute_finalized.no_active_dispute', { counterparty: shortId(counterpartyId) });
       }
       // Dispute completed on-chain: keep finalized-disputed until explicit reopen.
       if (account.proofHeader.nonce <= finalizedOnChainNonce) {
@@ -1606,9 +1594,7 @@ async function applyFinalizedJEvent(
           delta.rightAllowance = 0n;
         }
       } else {
-        console.warn(
-          `⚠️ DisputeFinalized local sync missing proof body for ${counterpartyId.slice(-4)}; clearing all token deltas conservatively`,
-        );
+        jEventLog.warn('dispute_finalized.proof_body_missing', { counterparty: shortId(counterpartyId) });
         for (const delta of account.deltas.values()) {
           delta.offdelta = 0n;
           delta.leftHold = 0n;
@@ -1626,7 +1612,7 @@ async function applyFinalizedJEvent(
         account.locks.clear();
       }
     } else {
-      console.warn(`⚠️ DisputeFinalized: account ${candidateCounterpartyId.slice(-4)} not found for entity ${entityIdNorm.slice(-4)}`);
+      jEventLog.warn('dispute_finalized.account_missing', { account: shortId(candidateCounterpartyId), entity: shortId(entityIdNorm) });
     }
 
   } else if (event.type === 'HankoBatchProcessed') {
@@ -1652,9 +1638,7 @@ async function applyFinalizedJEvent(
           const currentNonce = Number(newState.jBatchState.entityNonce || 0);
           const eventNonceNum = Number(nonce || 0);
           newState.jBatchState.entityNonce = eventNonceNum > currentNonce ? eventNonceNum : currentNonce;
-          console.warn(
-            `⚠️ HankoBatchProcessed duplicate ignored (nonce ${nonce}, opCount=0, pending=false)`,
-          );
+          jEventLog.debug('hanko_batch.duplicate_ignored', { nonce, opCount, pending: false });
           return done();
         }
 
@@ -1751,14 +1735,14 @@ async function applyFinalizedJEvent(
           }
         }
       }
-      console.warn(`   ⚠️ jBatch FAILED on-chain (nonce ${nonce}) - not clearing`);
+      jEventLog.warn('jbatch.failed_on_chain', { nonce });
       addMessage(newState, `⚠️ jBatch failed (nonce ${nonce}) - use j_clear_batch to abort | Block ${blockNumber}`);
     }
 
   } else {
     // Unknown event - log but don't fail
     addMessage(newState, `⚠️ Unknown j-event: ${event.type} | Block ${blockNumber}`);
-    console.warn(`⚠️ Unknown j-event type: ${event.type}. Canonical events: ${CANONICAL_J_EVENTS.join(', ')}`);
+    jEventLog.warn('unknown_event', { type: event.type, canonical: CANONICAL_J_EVENTS });
   }
 
   return done();
