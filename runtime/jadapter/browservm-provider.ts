@@ -37,6 +37,33 @@ const BLOCK_GAS_LIMIT = 200_000_000n; // Simnet headroom for large deploys/batch
 // CONTRACT_VERSION - increment when contract ABI/encoding changes to invalidate cached EVM state
 // 2025-02-03: v3 - Token reference hashing + ExternalTokenToReserve struct update
 const CONTRACT_VERSION = 3;
+type EthereumVm = Awaited<ReturnType<typeof createVM>>;
+type EthereumCommon = ReturnType<typeof createCustomCommon>;
+type ContractArtifact = { abi: ethers.InterfaceAbi; bytecode: string };
+type EthereumLog = [Address | Uint8Array | string | { toBytes?: () => Uint8Array; toString(): string }, Uint8Array[], Uint8Array];
+type BrowserVmTrie = { database(): { db: unknown } };
+type BrowserVmStateManager = { _trie?: BrowserVmTrie };
+type BrowserVmRunTxResult = Awaited<ReturnType<typeof runTx>>;
+type BrowserVmTx = Parameters<typeof runTx>[1]['tx'];
+type TrieMapStore = { _database?: unknown; db?: unknown };
+
+const normalizeEvenHex = (hex: string): string => {
+  const raw = hex.startsWith('0x') || hex.startsWith('0X') ? hex.slice(2) : hex;
+  return raw.length % 2 === 1 ? `0${raw}` : raw;
+};
+
+const getBrowserVmTrieMap = (vm: EthereumVm, operation: string): Map<unknown, unknown> => {
+  const trie = (vm.stateManager as unknown as BrowserVmStateManager)._trie;
+  if (!trie) {
+    throw new Error(`BrowserVM ${operation}: unsupported state manager trie`);
+  }
+  const store = trie.database().db;
+  if (store instanceof Map) return store;
+  const record = store as TrieMapStore | null | undefined;
+  if (record?._database instanceof Map) return record._database;
+  if (record?.db instanceof Map) return record.db;
+  throw new Error(`BrowserVM ${operation}: unsupported trie db`);
+};
 
 /** EVM event emitted from the BrowserVM */
 export interface EVMEvent {
@@ -48,8 +75,8 @@ export interface EVMEvent {
 }
 
 export class BrowserVMProvider {
-  private vm: any;
-  private common: any;
+  private vm: EthereumVm = null as unknown as EthereumVm;
+  private common: EthereumCommon = null as unknown as EthereumCommon;
   private accountAddress: Address | null = null;
   private depositoryAddress: Address | null = null;
   private entityProviderAddress: Address | null = null;
@@ -57,11 +84,11 @@ export class BrowserVMProvider {
   private deployerPrivKey: Uint8Array;
   private deployerAddress: Address;
   private nonce = 0n;
-  private accountArtifact: any = null;
-  private depositoryArtifact: any = null;
-  private entityProviderArtifact: any = null;
-  private deltaTransformerArtifact: any = null;
-  private erc20Artifact: any = null;
+  private accountArtifact: ContractArtifact | null = null;
+  private depositoryArtifact: ContractArtifact | null = null;
+  private entityProviderArtifact: ContractArtifact | null = null;
+  private deltaTransformerArtifact: ContractArtifact | null = null;
+  private erc20Artifact: ContractArtifact | null = null;
   private depositoryInterface: ethers.Interface | null = null;
   private entityProviderInterface: ethers.Interface | null = null;
   private accountInterface: ethers.Interface | null = null;
@@ -172,8 +199,8 @@ export class BrowserVMProvider {
   async reset(): Promise<void> {
     console.log('[BrowserVM] Resetting to fresh state...');
     this.initialized = false;
-    this.vm = null;
-    this.common = null;
+    this.vm = null as unknown as EthereumVm;
+    this.common = null as unknown as EthereumCommon;
     this.accountAddress = null;
     this.depositoryAddress = null;
     this.entityProviderAddress = null;
@@ -193,7 +220,7 @@ export class BrowserVMProvider {
     const tx = createLegacyTx({
       gasLimit: 100000000n,
       gasPrice: 10n,
-      data: this.accountArtifact.bytecode,
+      data: this.accountArtifact!.bytecode as `0x${string}`,
       nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 
@@ -221,7 +248,7 @@ export class BrowserVMProvider {
 
     // Link Account library address into Depository bytecode
     // Replace placeholder __$...$__ with actual library address
-    let linkedBytecode = this.depositoryArtifact.bytecode;
+    let linkedBytecode = this.depositoryArtifact!.bytecode;
     const accountAddrHex = this.accountAddress.toString().slice(2).toLowerCase(); // Remove 0x prefix
 
     // Find and replace library placeholder (format: __$<hash>$__)
@@ -264,7 +291,7 @@ export class BrowserVMProvider {
     console.log(`[BrowserVM] Gas used: ${result.totalGasSpent}`);
 
     // Verify code exists
-    const code = await this.vm.stateManager.getCode(this.depositoryAddress);
+    const code = await this.vm.stateManager.getCode(this.depositoryAddress!);
     if (code.length === 0) {
       throw new Error('Depository deployment failed - no code at address');
     }
@@ -278,7 +305,7 @@ export class BrowserVMProvider {
     const tx = createLegacyTx({
       gasLimit: 100000000n,
       gasPrice: 10n,
-      data: this.entityProviderArtifact.bytecode,
+      data: this.entityProviderArtifact!.bytecode as `0x${string}`,
       nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 
@@ -301,7 +328,7 @@ export class BrowserVMProvider {
     const tx = createLegacyTx({
       gasLimit: 100000000n,
       gasPrice: 10n,
-      data: this.deltaTransformerArtifact.bytecode,
+      data: this.deltaTransformerArtifact!.bytecode as `0x${string}`,
       nonce: currentNonce,
     }, { common: this.common }).sign(this.deployerPrivKey);
 
@@ -396,7 +423,7 @@ export class BrowserVMProvider {
     const currentNonce = await this.getCurrentNonce();
     const abiCoder = ethers.AbiCoder.defaultAbiCoder();
     const constructorData = abiCoder.encode(['string', 'string', 'uint256'], [name, symbol, supply]);
-    const bytecode = `${this.erc20Artifact.bytecode}${constructorData.slice(2)}`;
+    const bytecode = `${this.erc20Artifact!.bytecode}${constructorData.slice(2)}`;
 
     const tx = createLegacyTx({
       gasLimit: 5_000_000n,
@@ -584,7 +611,7 @@ export class BrowserVMProvider {
     const fromAddress = createAddressFromPrivateKey(privKey);
     const currentNonce = await this.getNonceForAddress(fromAddress);
     const toAddress = txData.to ? createAddressFromString(txData.to) : undefined;
-    const txDataObj: any = {
+    const txDataObj: Parameters<typeof createLegacyTx>[0] & { to?: Address } = {
       gasLimit: txData.gasLimit ?? 1000000n,
       gasPrice: 10n,
       data: hexToBytes((txData.data || '0x') as `0x${string}`),
@@ -601,7 +628,7 @@ export class BrowserVMProvider {
     if (result.execResult.exceptionError) {
       const errObj = result.execResult.exceptionError;
       const errStr = errObj?.error || JSON.stringify(errObj);
-      // Log any events that were emitted before revert (won't persist but shows debug info)
+      // Log revert events before they are discarded by the failed transaction.
       if (result.execResult.logs && result.execResult.logs.length > 0) {
         console.log('[BrowserVM] Events before revert:', result.execResult.logs.length);
         const events = this.parseLogs(result.execResult.logs);
@@ -627,7 +654,8 @@ export class BrowserVMProvider {
 
     if (result.execResult.exceptionError) {
       const err = result.execResult.exceptionError;
-      const errMsg = typeof err === 'object' ? (err.error || err.message || JSON.stringify(err)) : String(err);
+      const errInfo = typeof err === 'object' && err ? err as { error?: string; message?: string } : null;
+      const errMsg = errInfo?.error || errInfo?.message || JSON.stringify(err);
       throw new Error(`executeSignedTx failed: ${errMsg}`);
     }
 
@@ -638,7 +666,7 @@ export class BrowserVMProvider {
 
     // Parse logs for receipt
     const rawLogs = result.execResult.logs || [];
-    const logs = rawLogs.map((log: any, index: number) => {
+    const logs = (rawLogs as EthereumLog[]).map((log, index) => {
       // log[0] is Address object or Uint8Array, log[1] is topics array, log[2] is data
       const addr = log[0];
       // Handle Address object (has toBytes method) or raw Uint8Array
@@ -647,7 +675,7 @@ export class BrowserVMProvider {
         addressHex = addr;
       } else if (addr instanceof Uint8Array) {
         addressHex = bytesToHex(addr);
-      } else if (typeof addr.toBytes === 'function') {
+      } else if (typeof addr === 'object' && addr && typeof addr.toBytes === 'function') {
         // ethereumjs Address object
         addressHex = bytesToHex(addr.toBytes());
       } else {
@@ -1152,7 +1180,10 @@ export class BrowserVMProvider {
     try {
       const decoded = this.depositoryInterface.decodeFunctionResult('getDebts', result.execResult.returnValue);
       // decoded[0] is the Debt[] array
-      return decoded[0].map((d: any) => ({ amount: d.amount, creditor: d.creditor }));
+      return (decoded[0] as Array<{ amount: bigint; creditor: string }>).map((d) => ({
+        amount: d.amount,
+        creditor: d.creditor,
+      }));
     } catch {
       return [];
     }
@@ -1238,7 +1269,7 @@ export class BrowserVMProvider {
           try {
             const parsed = this.depositoryInterface?.parseError(returnData);
             if (parsed) {
-              revertReason = `${parsed.name}(${parsed.args?.map((arg: any) => String(arg)).join(', ')})`;
+              revertReason = `${parsed.name}(${parsed.args?.map((arg: unknown) => String(arg)).join(', ')})`;
             }
           } catch {
             // fall through
@@ -1279,7 +1310,7 @@ export class BrowserVMProvider {
     // Log raw events before parsing
     const rawLogs = result.execResult.logs || [];
     console.log(`[BrowserVM] processBatch raw logs: ${rawLogs.length}`);
-    rawLogs.forEach((log: any, i: number) => {
+    (rawLogs as EthereumLog[]).forEach((log, i) => {
       console.log(`   Log ${i}: topics=${log[1]?.length || 0}, data=${log[2]?.length || 0} bytes`);
     });
 
@@ -1343,7 +1374,7 @@ export class BrowserVMProvider {
   /** Get chainId for batch hanko hashing */
   getChainId(): bigint {
     if (!this.common) return 31337n;
-    const id = (this.common as any).chainId?.();
+    const id = (this.common as EthereumCommon & { chainId?: () => bigint | number }).chainId?.();
     if (typeof id === 'bigint') return id;
     if (typeof id === 'number') return BigInt(id);
     return 31337n;
@@ -1376,7 +1407,7 @@ export class BrowserVMProvider {
 
   /**
    * Execute settlement.
-   * Signature is required for any state changes.
+   * Signature is required for state changes.
    *
    * @param leftEntity - The left entity (smaller entityId)
    * @param rightEntity - The right entity (larger entityId)
@@ -1394,7 +1425,7 @@ export class BrowserVMProvider {
     }>,
     forgiveDebtsInTokenIds: number[] = [],
     sig?: string
-  ): Promise<any[]> {
+  ): Promise<EVMEvent[]> {
     const hasChanges = diffs.length > 0 || forgiveDebtsInTokenIds.length > 0;
     const finalSig = sig || '0x';
     if (hasChanges && finalSig === '0x') {
@@ -1423,7 +1454,7 @@ export class BrowserVMProvider {
    *  Checks both Depository and Account library interfaces since library events
    *  (like Account.AccountSettled) have different topic signatures.
    */
-  private parseLogs(logs: any[]): EVMEvent[] {
+  private parseLogs(logs: EthereumLog[]): EVMEvent[] {
     // Collect all interfaces that can parse events
     const interfaces = [
       this.depositoryInterface,
@@ -1483,7 +1514,7 @@ export class BrowserVMProvider {
    * Emit events to all registered callbacks as a BATCH.
    * All events from one transaction are sent together, matching blockchain behavior.
    */
-  private emitEvents(logs: any[]): EVMEvent[] {
+  private emitEvents(logs: EthereumLog[]): EVMEvent[] {
     this.log(`🔊 [BrowserVM] emitEvents ENTRY: raw logs=${logs.length}, callbacks=${this.eventCallbacks.size}`);
     const events = this.parseLogs(logs);
     this.log(`🔊 [BrowserVM] emitEvents: parsed ${events.length} events`);
@@ -1575,36 +1606,18 @@ export class BrowserVMProvider {
 
     const stateRoot = await this.vm.stateManager.getStateRoot();
 
-    // Access internal trie database
-    const trie = (this.vm.stateManager as any)._trie;
-    const db = trie.database().db;
-
-    const getTrieMap = (store: any): Map<any, any> | null => {
-      if (store instanceof Map) return store;
-      if (store && store._database instanceof Map) return store._database;
-      if (store && store.db instanceof Map) return store.db;
-      return null;
-    };
-
     // Serialize all key-value pairs from the trie database
     const trieData: Array<[string, string]> = [];
-    const trieMap = getTrieMap(db);
-    if (!trieMap) {
-      throw new Error('BrowserVM serializeState: unsupported trie db');
-    }
-    const normalizeHex = (hex: string): string => {
-      const raw = hex.startsWith('0x') || hex.startsWith('0X') ? hex.slice(2) : hex;
-      return raw.length % 2 === 1 ? `0${raw}` : raw;
-    };
+    const trieMap = getBrowserVmTrieMap(this.vm, 'serializeState');
     for (const [key, value] of trieMap.entries()) {
       const keyHexRaw = typeof key === 'string'
         ? key
-        : Buffer.from(key).toString('hex');
+        : Buffer.from(key as Uint8Array).toString('hex');
       const valueHexRaw = typeof value === 'string'
         ? value
-        : Buffer.from(value).toString('hex');
-      const keyHex = normalizeHex(keyHexRaw);
-      const valueHex = normalizeHex(valueHexRaw);
+        : Buffer.from(value as Uint8Array).toString('hex');
+      const keyHex = normalizeEvenHex(keyHexRaw);
+      const valueHex = normalizeEvenHex(valueHexRaw);
       trieData.push([keyHex, valueHex]);
     }
 
@@ -1634,7 +1647,7 @@ export class BrowserVMProvider {
       if (typeof value === 'string') {
         const raw = value.startsWith('0x') ? value.slice(2) : value;
         if (raw.length === 0) return '';
-        const normalized = raw.length % 2 === 1 ? `0${raw}` : raw;
+        const normalized = normalizeEvenHex(raw);
         return /^[0-9a-fA-F]+$/.test(normalized) ? normalized : null;
       }
       if (value instanceof ArrayBuffer) {
@@ -1676,20 +1689,7 @@ export class BrowserVMProvider {
       return hexToBytes(`0x${hex}`);
     };
 
-    // Restore trie database entries
-    const trie = (this.vm.stateManager as any)._trie;
-    const db = trie.database().db;
-    const getTrieMap = (store: any): Map<any, any> | null => {
-      if (store instanceof Map) return store;
-      if (store && store._database instanceof Map) return store._database;
-      if (store && store.db instanceof Map) return store.db;
-      return null;
-    };
-
-    const trieMap = getTrieMap(db);
-    if (!trieMap) {
-      throw new Error('BrowserVM restoreState: unsupported trie db');
-    }
+    const trieMap = getBrowserVmTrieMap(this.vm, 'restoreState');
     trieMap.clear();
     for (const entry of data.trieData || []) {
       const keyHex = normalizeHex(entry?.[0]);
@@ -1945,7 +1945,7 @@ export class BrowserVMProvider {
     }
   }
 
-  private async runTxInBlock(tx: any): Promise<any> {
+  private async runTxInBlock(tx: BrowserVmTx): Promise<BrowserVmRunTxResult> {
     const block = this.activeBlock ?? this.createBlock(this.blockTimestamp);
     // Skip nonce validation for simnet - ethereumjs stateManager has caching issues
     // that cause nonce mismatches between getAccount reads and actual VM state
