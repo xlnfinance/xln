@@ -95,6 +95,137 @@ export interface ApplyEntityTxResult {
   skippedError?: string;
 }
 
+type EntityTxDispatcher = (
+  env: Env,
+  entityState: EntityState,
+  entityTx: EntityTx,
+) => Promise<ApplyEntityTxResult> | ApplyEntityTxResult;
+
+const handleJEventEntityTx: EntityTxDispatcher = async (env, entityState, entityTx) => {
+  if (entityTx.type !== 'j_event') throw new Error(`ENTITY_TX_DISPATCH_MISMATCH: ${entityTx.type}`);
+  const jEventData = entityTx.data as {
+    event?: { type?: string };
+    events?: Array<{ type?: string }>;
+    blockNumber?: number;
+    transactionHash?: string;
+  };
+  const firstEventType =
+    jEventData.event?.type ??
+    (Array.isArray(jEventData.events) && jEventData.events.length > 0 ? jEventData.events[0]?.type : undefined) ??
+    'unknown';
+  env.emit('JEventReceived', {
+    entityId: entityState.entityId,
+    eventType: firstEventType,
+    blockNumber: jEventData.blockNumber,
+    txHash: jEventData.transactionHash,
+  });
+  const { newState, mempoolOps, outputs, dirtyAccounts } = await handleJEvent(entityState, entityTx.data, env);
+  return { newState, outputs: outputs || [], mempoolOps: mempoolOps || [], dirtyAccounts };
+};
+
+const handleAccountInputEntityTx: EntityTxDispatcher = async (env, entityState, entityTx) => {
+  if (entityTx.type !== 'accountInput') throw new Error(`ENTITY_TX_DISPATCH_MISMATCH: ${entityTx.type}`);
+  const result = await handleAccountInput(entityState, entityTx.data, env);
+  markStorageAccountDirty(env, result.newState.entityId, entityTx.data.fromEntityId);
+  return {
+    newState: result.newState,
+    outputs: result.outputs,
+    mempoolOps: result.mempoolOps,
+    swapOffersCreated: result.swapOffersCreated,
+    swapCancelRequests: result.swapCancelRequests,
+    swapOffersCancelled: result.swapOffersCancelled,
+    ...(result.hashesToSign && result.hashesToSign.length > 0 && { hashesToSign: result.hashesToSign }),
+  };
+};
+
+const handleSettleApproveEntityTx: EntityTxDispatcher = async (env, entityState, entityTx) => {
+  if (entityTx.type !== 'settle_approve') throw new Error(`ENTITY_TX_DISPATCH_MISMATCH: ${entityTx.type}`);
+  const result = await handleSettleApprove(entityState, entityTx, env);
+  return {
+    ...result,
+    ...(result.hashesToSign && result.hashesToSign.length > 0 && { hashesToSign: result.hashesToSign }),
+  };
+};
+
+const handleJBroadcastEntityTx: EntityTxDispatcher = async (env, entityState, entityTx) => {
+  if (entityTx.type !== 'j_broadcast') throw new Error(`ENTITY_TX_DISPATCH_MISMATCH: ${entityTx.type}`);
+  const batch = entityState.jBatchState?.batch;
+  entityTxLog.debug('j_broadcast.apply', batch
+    ? {
+        entity: entityState.entityId.slice(-4),
+        r2r: batch.reserveToReserve.length,
+        r2c: batch.reserveToCollateral.length,
+        c2r: batch.collateralToReserve.length,
+        settlements: batch.settlements.length,
+        starts: batch.disputeStarts.length,
+        finals: batch.disputeFinalizations.length,
+      }
+    : { entity: entityState.entityId.slice(-4), batch: 'missing' });
+  return handleJBroadcast(entityState, entityTx, env);
+};
+
+// This table is intentionally boring: adding a new EntityTx should mean adding
+// one row here and keeping domain behavior inside runtime/entity-tx/handlers.
+const entityTxDispatchers: Record<string, EntityTxDispatcher> = {
+  chat: (_env, state, tx) => handleChatEntityTx(state, tx as Extract<EntityTx, { type: 'chat' }>),
+  chatMessage: (_env, state, tx) => handleChatMessageEntityTx(state, tx as Extract<EntityTx, { type: 'chatMessage' }>),
+  propose: (_env, state, tx) => handleProposeEntityTx(state, tx as Extract<EntityTx, { type: 'propose' }>),
+  vote: (_env, state, tx) => handleVoteEntityTx(state, tx as Extract<EntityTx, { type: 'vote' }>),
+  'profile-update': (env, state, tx) => handleProfileUpdateEntityTx(env, state, tx as Extract<EntityTx, { type: 'profile-update' }>),
+  initOrderbookExt: (_env, state, tx) => handleInitOrderbookExtEntityTx(state, tx as Extract<EntityTx, { type: 'initOrderbookExt' }>),
+  j_event: handleJEventEntityTx,
+  accountInput: handleAccountInputEntityTx,
+  openAccount: (env, state, tx) => handleOpenAccountEntityTx(env, state, tx as Extract<EntityTx, { type: 'openAccount' }>),
+  htlcPayment: (env, state, tx) => handleHtlcPayment(state, tx as Extract<EntityTx, { type: 'htlcPayment' }>, env),
+  hashlockPayment: (env, state, tx) => handleHashlockPaymentEntityTx(env, state, tx as Extract<EntityTx, { type: 'hashlockPayment' }>),
+  resolveHtlcLock: (_env, state, tx) => handleResolveHtlcLockEntityTx(state, tx as Extract<EntityTx, { type: 'resolveHtlcLock' }>),
+  processHtlcTimeouts: (_env, state, tx) => handleProcessHtlcTimeoutsEntityTx(state, tx as Extract<EntityTx, { type: 'processHtlcTimeouts' }>),
+  rollbackTimedOutFrames: (_env, state, tx) => handleRollbackTimedOutFramesEntityTx(state, tx as Extract<EntityTx, { type: 'rollbackTimedOutFrames' }>),
+  manualHtlcLock: (_env, state, tx) => handleManualHtlcLockEntityTx(state, tx as Extract<EntityTx, { type: 'manualHtlcLock' }>),
+  directPayment: (env, state, tx) => handleDirectPaymentEntityTx(env, state, tx as Extract<EntityTx, { type: 'directPayment' }>),
+  r2c: (env, state, tx) => handleR2C(state, tx as Extract<EntityTx, { type: 'r2c' }>, env.timestamp),
+  e2r: (_env, state, tx) => handleE2R(state, tx as Extract<EntityTx, { type: 'e2r' }>),
+  r2r: (_env, state, tx) => handleR2R(state, tx as Extract<EntityTx, { type: 'r2r' }>),
+  j_broadcast: handleJBroadcastEntityTx,
+  j_rebroadcast: (env, state, tx) => handleJRebroadcast(state, tx as Extract<EntityTx, { type: 'j_rebroadcast' }>, env),
+  j_abort_sent_batch: (env, state, tx) => handleJAbortSentBatch(state, tx as Extract<EntityTx, { type: 'j_abort_sent_batch' }>, env),
+  j_clear_batch: (env, state, tx) => handleJClearBatch(state, tx as Extract<EntityTx, { type: 'j_clear_batch' }>, env),
+  mintReserves: (env, state, tx) => handleMintReserves(state, tx as Extract<EntityTx, { type: 'mintReserves' }>, env),
+  createSettlement: (_env, state, tx) => handleCreateSettlement(state, tx as Extract<EntityTx, { type: 'createSettlement' }>),
+  settle_propose: (env, state, tx) => handleSettlePropose(state, tx as Extract<EntityTx, { type: 'settle_propose' }>, env),
+  settle_update: (env, state, tx) => handleSettleUpdate(state, tx as Extract<EntityTx, { type: 'settle_update' }>, env),
+  settle_approve: handleSettleApproveEntityTx,
+  settle_execute: (env, state, tx) => handleSettleExecute(state, tx as Extract<EntityTx, { type: 'settle_execute' }>, env),
+  settle_reject: (env, state, tx) => handleSettleReject(state, tx as Extract<EntityTx, { type: 'settle_reject' }>, env),
+  extendCredit: (_env, state, tx) => handleExtendCreditEntityTx(state, tx as Extract<EntityTx, { type: 'extendCredit' }>),
+  setHubConfig: (env, state, tx) => handleSetHubConfigEntityTx(env, state, tx as Extract<EntityTx, { type: 'setHubConfig' }>),
+  setRebalancePolicy: (_env, state, tx) => handleSetRebalancePolicyEntityTx(state, tx as Extract<EntityTx, { type: 'setRebalancePolicy' }>),
+  requestCollateral: (_env, state, tx) => handleRequestCollateralEntityTx(state, tx as Extract<EntityTx, { type: 'requestCollateral' }>),
+  reopenDisputedAccount: (_env, state, tx) => handleReopenDisputedAccountEntityTx(state, tx as Extract<EntityTx, { type: 'reopenDisputedAccount' }>),
+  pullLock: (env, state, tx) => handlePullLockEntityTx(env, state, tx as Extract<EntityTx, { type: 'pullLock' }>),
+  resolvePull: (env, state, tx) => handleResolvePullEntityTx(env, state, tx as Extract<EntityTx, { type: 'resolvePull' }>),
+  cancelPull: (env, state, tx) => handleCancelPullEntityTx(env, state, tx as Extract<EntityTx, { type: 'cancelPull' }>),
+  pullCancelExpired: (env, state, tx) => handleCancelPullEntityTx(env, state, tx as Extract<EntityTx, { type: 'pullCancelExpired' }>),
+  requestCrossJurisdictionSwap: (env, state, tx) => handleRequestCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'requestCrossJurisdictionSwap' }>),
+  prepareCrossJurisdictionSwap: (env, state, tx) => handlePrepareCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'prepareCrossJurisdictionSwap' }>),
+  commitCrossJurisdictionSwap: (env, state, tx) => handleCommitCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'commitCrossJurisdictionSwap' }>),
+  registerCrossJurisdictionSwap: (env, state, tx) => handleRegisterCrossJurisdictionSwapEntityTx(env, state, tx as Extract<EntityTx, { type: 'registerCrossJurisdictionSwap' }>),
+  crossJurisdictionFillNotice: (_env, state, tx) => handleCrossJurisdictionFillNoticeEntityTx(state, tx as Extract<EntityTx, { type: 'crossJurisdictionFillNotice' }>),
+  requestCrossJurisdictionClear: (env, state, tx) => handleRequestCrossJurisdictionClearEntityTx(env, state, tx as Extract<EntityTx, { type: 'requestCrossJurisdictionClear' }>),
+  crossJurisdictionSalvage: (env, state, tx) => handleCrossJurisdictionSalvageEntityTx(env, state, tx as Extract<EntityTx, { type: 'crossJurisdictionSalvage' }>),
+  orderbookSweepCrossJurisdiction: (env, state, tx) => handleOrderbookSweepCrossJurisdictionEntityTx(env, state, tx as Extract<EntityTx, { type: 'orderbookSweepCrossJurisdiction' }>),
+  removeCrossJurisdictionBookOrder: (env, state, tx) => handleRemoveCrossJurisdictionBookOrderEntityTx(env, state, tx as Extract<EntityTx, { type: 'removeCrossJurisdictionBookOrder' }>),
+  placeSwapOffer: (env, state, tx) => handlePlaceSwapOfferRequest(env, state, tx as Extract<EntityTx, { type: 'placeSwapOffer' }>),
+  resolveSwap: (_env, state, tx) => handleResolveSwapRequest(state, tx as Extract<EntityTx, { type: 'resolveSwap' }>),
+  cancelSwapOffer: (_env, state, tx) => handleCancelSwapRequest(state, tx as Extract<EntityTx, { type: 'cancelSwapOffer' }>),
+  cancelSwap: (_env, state, tx) => handleCancelSwapRequest(state, tx as Extract<EntityTx, { type: 'cancelSwap' }>),
+  proposeCancelSwap: (_env, state, tx) => handleCancelSwapRequest(state, tx as Extract<EntityTx, { type: 'proposeCancelSwap' }>),
+  r2e: (_env, state, tx) => handleR2E(state, tx as Extract<EntityTx, { type: 'r2e' }>),
+  settleDiffs: (_env, state, tx) => handleSettleDiffsEntityTx(state, tx as Extract<EntityTx, { type: 'settleDiffs' }>),
+  disputeStart: (env, state, tx) => handleDisputeStart(state, tx as Extract<EntityTx, { type: 'disputeStart' }>, env),
+  disputeFinalize: (env, state, tx) => handleDisputeFinalize(state, tx as Extract<EntityTx, { type: 'disputeFinalize' }>, env),
+};
+
 export const applyEntityTx = async (
   env: Env,
   entityState: EntityState,
@@ -108,264 +239,9 @@ export const applyEntityTx = async (
   try {
     markStorageEntityDirty(env, entityState.entityId);
 
-    if (entityTx.type === 'chat') {
-      return handleChatEntityTx(entityState, entityTx);
-    }
-
-    if (entityTx.type === 'chatMessage') {
-      return handleChatMessageEntityTx(entityState, entityTx);
-    }
-
-    if (entityTx.type === 'propose') {
-      return handleProposeEntityTx(entityState, entityTx);
-    }
-
-    if (entityTx.type === 'vote') {
-      return handleVoteEntityTx(entityState, entityTx);
-    }
-
-    if (entityTx.type === 'profile-update') {
-      return handleProfileUpdateEntityTx(env, entityState, entityTx);
-    }
-
-    if (entityTx.type === 'initOrderbookExt') {
-      return handleInitOrderbookExtEntityTx(entityState, entityTx);
-    }
-
-    if (entityTx.type === 'j_event') {
-      const jEventData = entityTx.data as {
-        event?: { type?: string };
-        events?: Array<{ type?: string }>;
-        blockNumber?: number;
-        transactionHash?: string;
-      };
-      const firstEventType =
-        jEventData.event?.type ??
-        (Array.isArray(jEventData.events) && jEventData.events.length > 0 ? jEventData.events[0]?.type : undefined) ??
-        'unknown';
-      env.emit('JEventReceived', {
-        entityId: entityState.entityId,
-        eventType: firstEventType,
-        blockNumber: jEventData.blockNumber,
-        txHash: jEventData.transactionHash,
-      });
-      const { newState, mempoolOps, outputs, dirtyAccounts } = await handleJEvent(entityState, entityTx.data, env);
-      return { newState, outputs: outputs || [], mempoolOps: mempoolOps || [], dirtyAccounts };
-    }
-
-    if (entityTx.type === 'accountInput') {
-      const result = await handleAccountInput(entityState, entityTx.data, env);
-      markStorageAccountDirty(env, result.newState.entityId, entityTx.data.fromEntityId);
-      return {
-        newState: result.newState,
-        outputs: result.outputs,
-        mempoolOps: result.mempoolOps,
-        swapOffersCreated: result.swapOffersCreated,
-        swapCancelRequests: result.swapCancelRequests,
-        swapOffersCancelled: result.swapOffersCancelled,
-        ...(result.hashesToSign && result.hashesToSign.length > 0 && { hashesToSign: result.hashesToSign }),
-      };
-    }
-
-    if (entityTx.type === 'openAccount') {
-      return handleOpenAccountEntityTx(env, entityState, entityTx);
-    }
-
-    if (entityTx.type === 'htlcPayment') {
-      return await handleHtlcPayment(entityState, entityTx, env);
-    }
-
-    if (entityTx.type === 'hashlockPayment') {
-      return handleHashlockPaymentEntityTx(env, entityState, entityTx);
-    }
-
-    if (entityTx.type === 'resolveHtlcLock') {
-      return handleResolveHtlcLockEntityTx(entityState, entityTx);
-    }
-
-    if (entityTx.type === 'processHtlcTimeouts') {
-      return handleProcessHtlcTimeoutsEntityTx(entityState, entityTx);
-    }
-
-    if (entityTx.type === 'rollbackTimedOutFrames') {
-      return handleRollbackTimedOutFramesEntityTx(entityState, entityTx);
-    }
-
-    if (entityTx.type === 'manualHtlcLock') {
-      return handleManualHtlcLockEntityTx(entityState, entityTx);
-    }
-
-    if (entityTx.type === 'directPayment') {
-      return await handleDirectPaymentEntityTx(env, entityState, entityTx);
-    }
-
-    if (entityTx.type === 'r2c') {
-      return await handleR2C(entityState, entityTx, env.timestamp);
-    }
-
-    if (entityTx.type === 'e2r') {
-      return await handleE2R(entityState, entityTx);
-    }
-
-    if (entityTx.type === 'r2r') {
-      return await handleR2R(entityState, entityTx);
-    }
-
-    if (entityTx.type === 'j_broadcast') {
-      const batch = entityState.jBatchState?.batch;
-      if (batch) {
-        console.log(
-          `🔍 APPLY j_broadcast: ${entityState.entityId.slice(-4)} batch r2r=${batch.reserveToReserve.length}, r2c=${batch.reserveToCollateral.length}, c2r=${batch.collateralToReserve.length}, settlements=${batch.settlements.length}, starts=${batch.disputeStarts.length}, finals=${batch.disputeFinalizations.length}`,
-        );
-      } else {
-        console.log(`🔍 APPLY j_broadcast: ${entityState.entityId.slice(-4)} has no jBatchState`);
-      }
-      const result = await handleJBroadcast(entityState, entityTx, env);
-      // j_broadcast returns jOutputs to queue to J-mempool
-      return result;
-    }
-
-    if (entityTx.type === 'j_rebroadcast') {
-      return await handleJRebroadcast(entityState, entityTx, env);
-    }
-
-    if (entityTx.type === 'j_abort_sent_batch') {
-      return await handleJAbortSentBatch(entityState, entityTx, env);
-    }
-
-    if (entityTx.type === 'j_clear_batch') {
-      return await handleJClearBatch(entityState, entityTx, env);
-    }
-
-    if (entityTx.type === 'mintReserves') {
-      return await handleMintReserves(entityState, entityTx, env);
-    }
-
-    if (entityTx.type === 'createSettlement') {
-      return await handleCreateSettlement(entityState, entityTx);
-    }
-
-    // === SETTLEMENT WORKSPACE HANDLERS ===
-    if (entityTx.type === 'settle_propose') {
-      return await handleSettlePropose(entityState, entityTx, env);
-    }
-
-    if (entityTx.type === 'settle_update') {
-      return await handleSettleUpdate(entityState, entityTx, env);
-    }
-
-    if (entityTx.type === 'settle_approve') {
-      const result = await handleSettleApprove(entityState, entityTx, env);
-      return {
-        ...result,
-        ...(result.hashesToSign && result.hashesToSign.length > 0 && { hashesToSign: result.hashesToSign }),
-      };
-    }
-
-    if (entityTx.type === 'settle_execute') {
-      return await handleSettleExecute(entityState, entityTx, env);
-    }
-
-    if (entityTx.type === 'settle_reject') {
-      return await handleSettleReject(entityState, entityTx, env);
-    }
-
-    if (entityTx.type === 'extendCredit') {
-      return handleExtendCreditEntityTx(entityState, entityTx);
-    }
-
-    if (entityTx.type === 'setHubConfig') {
-      return handleSetHubConfigEntityTx(env, entityState, entityTx);
-    }
-
-    if (entityTx.type === 'setRebalancePolicy') {
-      return handleSetRebalancePolicyEntityTx(entityState, entityTx);
-    }
-
-    if (entityTx.type === 'requestCollateral') {
-      return handleRequestCollateralEntityTx(entityState, entityTx);
-    }
-
-    if (entityTx.type === 'reopenDisputedAccount') {
-      return handleReopenDisputedAccountEntityTx(entityState, entityTx);
-    }
-
-    // === SWAP ENTITY HANDLERS ===
-    if (entityTx.type === 'pullLock') {
-      return handlePullLockEntityTx(env, entityState, entityTx);
-    }
-
-    if (entityTx.type === 'resolvePull') {
-      return handleResolvePullEntityTx(env, entityState, entityTx);
-	    }
-
-    if (entityTx.type === 'cancelPull' || entityTx.type === 'pullCancelExpired') {
-      return handleCancelPullEntityTx(env, entityState, entityTx);
-    }
-
-    if (entityTx.type === 'requestCrossJurisdictionSwap') {
-      return handleRequestCrossJurisdictionSwapEntityTx(env, entityState, entityTx);
-    }
-
-    if (entityTx.type === 'prepareCrossJurisdictionSwap') {
-      return handlePrepareCrossJurisdictionSwapEntityTx(env, entityState, entityTx);
-    }
-
-    if (entityTx.type === 'commitCrossJurisdictionSwap') {
-      return handleCommitCrossJurisdictionSwapEntityTx(env, entityState, entityTx);
-    }
-
-    if (entityTx.type === 'registerCrossJurisdictionSwap') {
-      return handleRegisterCrossJurisdictionSwapEntityTx(env, entityState, entityTx);
-    }
-
-    if (entityTx.type === 'crossJurisdictionFillNotice') {
-      return handleCrossJurisdictionFillNoticeEntityTx(entityState, entityTx);
-    }
-
-    if (entityTx.type === 'requestCrossJurisdictionClear') {
-      return handleRequestCrossJurisdictionClearEntityTx(env, entityState, entityTx);
-    }
-
-    if (entityTx.type === 'crossJurisdictionSalvage') {
-      return handleCrossJurisdictionSalvageEntityTx(env, entityState, entityTx);
-    }
-
-    if (entityTx.type === 'orderbookSweepCrossJurisdiction') {
-      return handleOrderbookSweepCrossJurisdictionEntityTx(env, entityState, entityTx);
-    }
-
-    if (entityTx.type === 'removeCrossJurisdictionBookOrder') {
-      return handleRemoveCrossJurisdictionBookOrderEntityTx(env, entityState, entityTx);
-    }
-
-	    if (entityTx.type === 'placeSwapOffer') {
-	      return handlePlaceSwapOfferRequest(env, entityState, entityTx);
-	    }
-
-    if (entityTx.type === 'resolveSwap') {
-      return handleResolveSwapRequest(entityState, entityTx);
-    }
-
-    if (entityTx.type === 'cancelSwapOffer' || entityTx.type === 'cancelSwap' || entityTx.type === 'proposeCancelSwap') {
-      return handleCancelSwapRequest(entityState, entityTx);
-    }
-
-    if (entityTx.type === 'r2e') {
-      return handleR2E(entityState, entityTx);
-    }
-
-    if (entityTx.type === 'settleDiffs') {
-      return handleSettleDiffsEntityTx(entityState, entityTx);
-    }
-
-    // === DISPUTES ===
-    if (entityTx.type === 'disputeStart') {
-      return await handleDisputeStart(entityState, entityTx, env);
-    }
-
-    if (entityTx.type === 'disputeFinalize') {
-      return await handleDisputeFinalize(entityState, entityTx, env);
+    const dispatcher = entityTxDispatchers[String(entityTx.type)];
+    if (dispatcher) {
+      return await dispatcher(env, entityState, entityTx);
     }
 
     const skippedError = `ENTITY_TX_UNHANDLED: type=${String(entityTx.type)}`;
