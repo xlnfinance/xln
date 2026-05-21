@@ -177,8 +177,8 @@ async function main() {
   rl.on('line', async (line) => {
     try {
       await cmd(line);
-    } catch (e: any) {
-      console.error(`Error: ${e.message}`);
+    } catch (e: unknown) {
+      console.error(`Error: ${e instanceof Error ? e.message : String(e)}`);
     }
     rl.prompt();
   });

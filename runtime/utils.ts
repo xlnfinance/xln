@@ -435,7 +435,7 @@ export async function cryptoHash(content: string): Promise<string> {
  * @param obj - Object to hash
  * @returns Promise<string> - Full SHA-256 hash
  */
-export async function hashObject(obj: any): Promise<string> {
+export async function hashObject(obj: unknown): Promise<string> {
   const content = deterministicStringify(obj);
   return await cryptoHash(content);
 }
@@ -455,7 +455,7 @@ export async function hash20(content: string): Promise<string> {
  * @param obj - Object to serialize
  * @returns string - Deterministic JSON string
  */
-export function deterministicStringify(obj: any): string {
+export function deterministicStringify(obj: unknown): string {
   return JSON.stringify(obj, (_key, value) => {
     if (typeof value === 'bigint') {
       return value.toString();
