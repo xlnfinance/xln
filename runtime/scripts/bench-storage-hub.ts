@@ -14,7 +14,7 @@ import {
   process as processRuntime,
   saveEnvToDB,
 } from '../runtime';
-import type { AccountMachine, EntityReplica, EntityState, Env } from '../types';
+import type { AccountMachine, EntityReplica, EntityState, Env, JReplica, RoutedEntityInput } from '../types';
 import { getPerfMs } from '../utils';
 import { buildRuntimeCheckpointSnapshot } from '../wal/snapshot';
 
@@ -381,8 +381,14 @@ async function main() {
     chainId: 31337,
   };
   env.activeJurisdiction = jurisdiction.name;
-  env.jReplicas.set(jurisdiction.name, {
+  const benchJReplica: JReplica = {
     name: jurisdiction.name,
+    blockNumber: 0n,
+    stateRoot: new Uint8Array(32),
+    mempool: [],
+    blockDelayMs: 0,
+    lastBlockTimestamp: env.timestamp,
+    position: { x: 0, y: 0, z: 0 },
     depositoryAddress: jurisdiction.depositoryAddress,
     entityProviderAddress: jurisdiction.entityProviderAddress,
     chainId: jurisdiction.chainId,
@@ -390,7 +396,8 @@ async function main() {
       depository: jurisdiction.depositoryAddress,
       entityProvider: jurisdiction.entityProviderAddress,
     },
-  } as any);
+  };
+  env.jReplicas.set(jurisdiction.name, benchJReplica);
 
   const hub = makeParticipant(seed, 1, 'hub');
   const users: Participant[] = [];
@@ -409,38 +416,35 @@ async function main() {
   const openStartedAt = getPerfMs();
   for (let offset = 0; offset < users.length; offset += openBatch) {
     const slice = users.slice(offset, offset + openBatch);
-    await runQuiet(!verbose, () =>
-      processRuntime(
-        env,
-        [
-          ...slice.map((user) => ({
-            entityId: user.entityId,
-            signerId: user.signerId,
-            entityTxs: [
-              {
-                type: 'openAccount',
-                data: {
-                  targetEntityId: hub.entityId,
-                  tokenId,
-                  creditAmount,
-                },
-              },
-            ],
-          })),
+    const openInputs: RoutedEntityInput[] = [
+      ...slice.map((user) => ({
+        entityId: user.entityId,
+        signerId: user.signerId,
+        entityTxs: [
           {
-            entityId: hub.entityId,
-            signerId: hub.signerId,
-            entityTxs: slice.map((user) => ({
-              type: 'openAccount' as const,
-              data: {
-                targetEntityId: user.entityId,
-                tokenId,
-                creditAmount,
-              },
-            })),
+            type: 'openAccount' as const,
+            data: {
+              targetEntityId: hub.entityId,
+              tokenId,
+              creditAmount,
+            },
           },
-        ] as any,
-      ));
+        ],
+      })),
+      {
+        entityId: hub.entityId,
+        signerId: hub.signerId,
+        entityTxs: slice.map((user) => ({
+          type: 'openAccount' as const,
+          data: {
+            targetEntityId: user.entityId,
+            tokenId,
+            creditAmount,
+          },
+        })),
+      },
+    ];
+    await runQuiet(!verbose, () => processRuntime(env, openInputs));
 
     await runQuiet(!verbose, () => converge(env, maxConverge));
     const expected = offset + slice.length;
@@ -496,24 +500,25 @@ async function main() {
       throw new Error('SAMPLE_ACCOUNT_MISSING');
     }
 
-    await runQuiet(!verbose, () =>
-      processRuntime(env, [
-        {
-          entityId: sampleUser.entityId,
-          signerId: sampleUser.signerId,
-          entityTxs: [
-            {
-              type: 'directPayment',
-              data: {
-                targetEntityId: hub.entityId,
-                tokenId,
-                amount: paymentAmount,
-                description: 'sample-payment',
-              },
+    const samplePaymentInput: RoutedEntityInput[] = [
+      {
+        entityId: sampleUser.entityId,
+        signerId: sampleUser.signerId,
+        entityTxs: [
+          {
+            type: 'directPayment',
+            data: {
+              targetEntityId: hub.entityId,
+              tokenId,
+              amount: paymentAmount,
+              route: [],
+              description: 'sample-payment',
             },
-          ],
-        },
-      ] as any));
+          },
+        ],
+      },
+    ];
+    await runQuiet(!verbose, () => processRuntime(env, samplePaymentInput));
     await runQuiet(!verbose, () => converge(env, maxConverge));
     processedPayments += 1;
 
@@ -537,25 +542,23 @@ async function main() {
     const paymentStartedAt = getPerfMs();
     for (let offset = 0; offset < paymentUsers.length; offset += paymentBatch) {
       const slice = paymentUsers.slice(offset, offset + paymentBatch);
-      await runQuiet(!verbose, () =>
-        processRuntime(
-          env,
-          slice.map((user, index) => ({
-            entityId: user.entityId,
-            signerId: user.signerId,
-            entityTxs: [
-              {
-                type: 'directPayment',
-                data: {
-                  targetEntityId: hub.entityId,
-                  tokenId,
-                  amount: paymentAmount,
-                  description: `burst-${offset + index + 1}`,
-                },
-              },
-            ],
-          })) as any,
-        ));
+      const paymentInputs: RoutedEntityInput[] = slice.map((user, index) => ({
+        entityId: user.entityId,
+        signerId: user.signerId,
+        entityTxs: [
+          {
+            type: 'directPayment' as const,
+            data: {
+              targetEntityId: hub.entityId,
+              tokenId,
+              amount: paymentAmount,
+              route: [],
+              description: `burst-${offset + index + 1}`,
+            },
+          },
+        ],
+      }));
+      await runQuiet(!verbose, () => processRuntime(env, paymentInputs));
       await runQuiet(!verbose, () => converge(env, maxConverge));
       processedPayments += slice.length;
       if ((offset / paymentBatch) % 8 === 0) {
