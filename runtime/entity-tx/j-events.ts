@@ -1,6 +1,5 @@
 import type {
   AccountMachine,
-  AccountTx,
   EntityInput,
   EntityState,
   JBlockObservation,
@@ -10,7 +9,7 @@ import type {
 } from '../types';
 import type { CompletedBatch } from '../j-batch';
 import { cloneEntityState, addMessage } from '../state-helpers';
-import { getDefaultCreditLimit, getTokenInfo } from '../account-utils';
+import { getTokenInfo } from '../account-utils';
 import { CANONICAL_J_EVENTS } from '../jadapter/helpers';
 import { hashHtlcSecret } from '../htlc-utils';
 import { scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from '../entity-crontab';
@@ -37,8 +36,12 @@ import {
   decodeDisputeInitialSecrets,
   queueCrossJurisdictionSalvageFromDispute,
   queueCrossJurisdictionSourceDisputeFromTargetDispute,
-  type JEventMempoolOp,
 } from './j-events-htlc';
+import {
+  mergeAccountJObservations,
+  mergeJEventClaimOps,
+} from './j-events-account';
+import type { JEventApplyResult, JEventMempoolOp } from './j-events-types';
 
 const jEventLog = createStructuredLogger('j.event');
 
@@ -61,19 +64,6 @@ export interface JEventEntityTxData {
   eventsHash?: string;
   signature?: string;
 }
-
-type JEventApplyResult = {
-  newState: EntityState;
-  mempoolOps: JEventMempoolOp[];
-  outputs: EntityInput[];
-  dirtyAccounts: string[];
-};
-
-type JEventClaimTx = Extract<AccountTx, { type: 'j_event_claim' }>;
-type AccountJObservation = AccountMachine['leftJObservations'][number];
-
-const isJEventClaimOp = (op: JEventMempoolOp): op is { accountId: string; tx: JEventClaimTx } =>
-  op.tx.type === 'j_event_claim';
 
 const normalizeSignerId = (value: unknown): string => String(value || '').trim().toLowerCase();
 
@@ -297,196 +287,6 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
 };
 
 // ═══════════════════════════════════════════════════════════════════════════════
-// BILATERAL J-EVENT CONSENSUS: 2-of-2 agreement on AccountSettled events
-// ═══════════════════════════════════════════════════════════════════════════════
-/**
- * Finalize AccountSettled when BOTH entities agree (2-of-2).
- * Called after receiving j_event_claim from counterparty.
- */
-export function tryFinalizeAccountJEvents(account: AccountMachine, counterpartyId: string, opts: { timestamp: number }): void {
-  const normalizeObsEvents = (obs: AccountJObservation): JurisdictionEvent[] => {
-    const raw = obs?.events;
-    if (!Array.isArray(raw)) return [];
-    return normalizeJurisdictionEvents(raw);
-  };
-
-  const sameEventMultiset = (a: JurisdictionEvent[], b: JurisdictionEvent[]): boolean => {
-    if (a.length !== b.length) return false;
-    const counts = new Map<string, number>();
-    for (const event of a) {
-      const key = canonicalJurisdictionEventKey(event);
-      counts.set(key, (counts.get(key) || 0) + 1);
-    }
-    for (const event of b) {
-      const key = canonicalJurisdictionEventKey(event);
-      const current = counts.get(key) || 0;
-      if (current <= 0) return false;
-      counts.set(key, current - 1);
-    }
-    for (const [, remaining] of counts) {
-      if (remaining !== 0) return false;
-    }
-    return true;
-  };
-
-  // Find matching (jHeight, jBlockHash) in left + right observations
-  const leftMap = new Map<string, AccountJObservation>();
-  const rightMap = new Map<string, AccountJObservation>();
-
-  for (const obs of account.leftJObservations) {
-    leftMap.set(`${obs.jHeight}:${obs.jBlockHash}`, obs);
-  }
-  for (const obs of account.rightJObservations) {
-    rightMap.set(`${obs.jHeight}:${obs.jBlockHash}`, obs);
-  }
-
-  const matches = Array.from(leftMap.keys()).filter(k => rightMap.has(k));
-
-  if (matches.length === 0) {
-    return;
-  }
-
-  const finalizedKeys = new Set<string>();
-
-  for (const key of matches) {
-    const leftObs = leftMap.get(key)!;
-    const rightObs = rightMap.get(key)!;
-    const jHeight = leftObs.jHeight;
-
-    // Skip already finalized
-    if (account.lastFinalizedJHeight >= jHeight) continue;
-    if (account.jEventChain.some((b) => b.jHeight === jHeight)) continue;
-
-    // Require both sides to agree on canonical settlement payload.
-    const leftRawLen = Array.isArray(leftObs?.events) ? leftObs.events.length : 0;
-    const rightRawLen = Array.isArray(rightObs?.events) ? rightObs.events.length : 0;
-    const leftEvents = normalizeObsEvents(leftObs);
-    const rightEvents = normalizeObsEvents(rightObs);
-    if (leftEvents.length === 0 || rightEvents.length === 0) {
-      jEventLog.warn('bilateral.empty_events', { height: jHeight, block: shortHash(leftObs.jBlockHash) });
-      continue;
-    }
-    if (leftEvents.length !== leftRawLen || rightEvents.length !== rightRawLen) {
-      jEventLog.warn('bilateral.malformed_events', { height: jHeight, block: shortHash(leftObs.jBlockHash), leftRawLen, leftNormLen: leftEvents.length, rightRawLen, rightNormLen: rightEvents.length });
-      continue;
-    }
-
-    if (!sameEventMultiset(leftEvents, rightEvents)) {
-      const leftKeys = leftEvents.map(canonicalJurisdictionEventKey);
-      const rightKeys = rightEvents.map(canonicalJurisdictionEventKey);
-      jEventLog.warn('bilateral.event_mismatch', { height: jHeight, block: shortHash(leftObs.jBlockHash), leftKeys, rightKeys });
-      jEventLog.trace('bilateral.event_mismatch_payload', { height: jHeight, leftRaw: leftObs.events, rightRaw: rightObs.events });
-      continue;
-    }
-
-    // Apply events (from left observation - both should be identical)
-    for (const event of leftEvents) {
-      if (event.type === 'AccountSettled') {
-        const { tokenId, collateral, ondelta } = event.data;
-        const tokenIdNum = Number(tokenId);
-
-        let delta = account.deltas.get(tokenIdNum);
-        if (!delta) {
-          const defaultCreditLimit = getDefaultCreditLimit(tokenIdNum);
-          delta = {
-            tokenId: tokenIdNum,
-            collateral: 0n,
-            ondelta: 0n,
-            offdelta: 0n,
-            leftCreditLimit: defaultCreditLimit,
-            rightCreditLimit: defaultCreditLimit,
-            leftAllowance: 0n,
-            rightAllowance: 0n,
-          };
-          account.deltas.set(tokenIdNum, delta);
-        }
-
-        const oldColl = delta.collateral;
-        delta.collateral = BigInt(collateral);
-        delta.ondelta = BigInt(ondelta);
-
-        // requestedRebalance lifecycle:
-        // Clear/reduce only after bilateral on-chain collateral update is finalized.
-        // Fee is prepaid in request_collateral (never charged here).
-        const pendingRequest = account.requestedRebalance?.get(tokenIdNum) ?? 0n;
-        if (pendingRequest > 0n) {
-          const collateralIncrease = delta.collateral > oldColl ? delta.collateral - oldColl : 0n;
-          if (collateralIncrease > 0n) {
-            const fulfilledAmount = pendingRequest > collateralIncrease ? collateralIncrease : pendingRequest;
-            const remaining = pendingRequest - fulfilledAmount;
-            if (remaining > 0n) {
-              account.requestedRebalance.set(tokenIdNum, remaining);
-              const feeState = account.requestedRebalanceFeeState?.get(tokenIdNum);
-              if (feeState) {
-                feeState.jBatchSubmittedAt = 0;
-              }
-              // Keep fee metadata for audit/scheduling; fee is already prepaid.
-            } else {
-              account.requestedRebalance.delete(tokenIdNum);
-              account.requestedRebalanceFeeState?.delete(tokenIdNum);
-            }
-          }
-        }
-
-        // Always sync onChainSettlementNonce from event — keep it accurate
-        const eventNonce = event.data.nonce;
-        if (eventNonce != null) {
-          const eventNonceNum = Number(eventNonce);
-          const prev = account.onChainSettlementNonce ?? 0;
-          if (eventNonceNum > prev) {
-            account.onChainSettlementNonce = eventNonceNum;
-          }
-        }
-      }
-    }
-
-    // Add to jEventChain (replay prevention) - DETERMINISTIC timestamp
-    account.jEventChain.push({ jHeight, jBlockHash: leftObs.jBlockHash, events: leftEvents, finalizedAt: opts.timestamp });
-    account.lastFinalizedJHeight = Math.max(account.lastFinalizedJHeight, jHeight);
-    finalizedKeys.add(key);
-
-    // SYMMETRIC NONCE TRACKING: Both sides increment when workspace has signed hankos.
-    // Covers all settlement types: C2R (counterparty hanko only), full settle (both hankos).
-    // R2C events don't create workspaces, so this check safely skips them.
-    const ws = account.settlementWorkspace;
-    if (ws && (ws.leftHanko || ws.rightHanko)) {
-      // Activate post-settlement dispute proof (nonce+1) before clearing workspace
-      const postProof = ws.postSettlementDisputeProof;
-      if (postProof?.leftHanko && postProof?.rightHanko) {
-        // Side-safe: store MY hanko vs THEIR hanko based on which side I am
-        const iAmLeftHere = account.leftEntity !== counterpartyId;
-        account.currentDisputeProofHanko = iAmLeftHere ? postProof.leftHanko : postProof.rightHanko;
-        account.counterpartyDisputeProofHanko = iAmLeftHere ? postProof.rightHanko : postProof.leftHanko;
-        account.currentDisputeProofNonce = postProof.nonce;
-        account.currentDisputeProofBodyHash = postProof.proofBodyHash;
-        account.counterpartyDisputeProofNonce = postProof.nonce;
-        account.counterpartyDisputeProofBodyHash = postProof.proofBodyHash;
-      }
-
-      // Set on-chain nonce from event data (not +1 — handles nonce jumps from disputes)
-      const firstSettled = leftEvents.find(e => e.type === 'AccountSettled');
-      const eventNonce = firstSettled?.data?.nonce;
-      if (typeof eventNonce === 'number') {
-        account.onChainSettlementNonce = eventNonce;
-      } else {
-        // Fallback: use workspace's signed nonce (should match on-chain after settlement)
-        account.onChainSettlementNonce = ws.nonceAtSign ?? ((account.onChainSettlementNonce || 0) + 1);
-      }
-      // Clear workspace after nonce increment — both sides (Hub + counterparty)
-      delete account.settlementWorkspace;
-    }
-  }
-
-  // Prune finalized
-  account.leftJObservations = account.leftJObservations.filter(
-    (o) => !finalizedKeys.has(`${o.jHeight}:${o.jBlockHash}`),
-  );
-  account.rightJObservations = account.rightJObservations.filter(
-    (o) => !finalizedKeys.has(`${o.jHeight}:${o.jBlockHash}`),
-  );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════════
 // J-BLOCK CONSENSUS: Multi-signer agreement on jurisdiction (blockchain) state
 // ═══════════════════════════════════════════════════════════════════════════════
 //
@@ -511,88 +311,6 @@ export function tryFinalizeAccountJEvents(account: AccountMachine, counterpartyI
 // SINGLE-SIGNER FAST PATH: For entities with threshold=1, blocks finalize
 // immediately when the single signer submits an observation.
 // ═══════════════════════════════════════════════════════════════════════════════
-
-/**
- * Merge observations with same (jHeight, jBlockHash) into a single observation.
- * This batches multiple AccountSettled events from the same settlement tx so
- * tryFinalizeAccountJEvents can process all token updates atomically.
- */
-function mergeAccountJObservations(observations: Array<{ jHeight: number; jBlockHash: string; events: JurisdictionEvent[] }>): boolean {
-  if (observations.length <= 1) return false;
-  const groups = new Map<string, number>(); // key → index in observations[]
-  let changed = false;
-  let i = 0;
-  while (i < observations.length) {
-    const obs = observations[i];
-    if (!obs) {
-      observations.splice(i, 1);
-      changed = true;
-      continue;
-    }
-    const key = `${obs.jHeight}:${obs.jBlockHash}`;
-    const existing = groups.get(key);
-    if (existing !== undefined) {
-      // Merge events into existing observation (dedup by type+data)
-      const target = observations[existing];
-      if (!target) {
-        groups.delete(key);
-        i++;
-        continue;
-      }
-      const normalizedEvents = normalizeJurisdictionEvents(obs.events);
-      for (const ev of normalizedEvents) {
-        const evKey = canonicalJurisdictionEventKey(ev);
-        const alreadyHas = target.events.some((e: JurisdictionEvent) => canonicalJurisdictionEventKey(e) === evKey);
-        if (!alreadyHas) {
-          target.events.push(ev);
-          changed = true;
-        }
-      }
-      observations.splice(i, 1); // Remove merged obs
-      changed = true;
-    } else {
-      groups.set(key, i);
-      i++;
-    }
-  }
-  return changed;
-}
-
-/**
- * Merge j_event_claim mempoolOps targeting the same (accountId, jHeight, jBlockHash)
- * into a single op with all events batched.
- */
-function mergeJEventClaimOps(ops: JEventMempoolOp[]): void {
-  const groups = new Map<string, number>(); // key → index in ops[]
-  let i = 0;
-  while (i < ops.length) {
-    const op = ops[i];
-    if (!op) {
-      ops.splice(i, 1);
-      continue;
-    }
-    if (!isJEventClaimOp(op)) { i++; continue; }
-    const key = `${op.accountId}:${op.tx.data.jHeight}:${op.tx.data.jBlockHash}`;
-    const existing = groups.get(key);
-    if (existing !== undefined) {
-      // Merge events into existing op
-      const target = ops[existing];
-      if (!target || !isJEventClaimOp(target)) {
-        groups.delete(key);
-        i++;
-        continue;
-      }
-      const normalizedEvents = normalizeJurisdictionEvents(op.tx.data.events);
-      for (const ev of normalizedEvents) {
-        target.tx.data.events.push(ev);
-      }
-      ops.splice(i, 1);
-    } else {
-      groups.set(key, i);
-      i++;
-    }
-  }
-}
 
 /**
  * Check for j-block finalization and apply finalized events.
