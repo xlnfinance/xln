@@ -454,9 +454,6 @@ export interface XLNModule {
   resolveEntityProposerId: (env: Env, entityId: string, context: string) => string;
   ensureGossipProfiles?: (env: Env, entityIds: string[]) => Promise<boolean>;
 
-  // Demo utilities
-  demoCompleteHanko: (env: Env) => Promise<Env>;
-
   // Entity display helpers
   getEntityDisplayInfoFromProfile: (profile: EntityProfile) => EntityDisplayInfo;
   formatShortEntityId: (entityId: string) => string;

@@ -314,7 +314,7 @@ export async function proposeAccountFrame(
     if (!result.success) {
       // Skip failed tx — remove from mempool, don't abort entire proposal
       txsToRemove.push(accountTx);
-      console.log(`⚠️ Skipping failed tx: ${accountTx.type} (${result.error})`);
+      accountLog.debug('tx.skipped', { type: accountTx.type, error: result.error || 'unknown' });
 
       // Track failed HTLC locks for backward cancellation
       if (accountTx.type === 'htlc_lock') {
@@ -322,7 +322,7 @@ export async function proposeAccountFrame(
           hashlock: accountTx.data.hashlock,
           reason: result.error || 'validation_failed',
         });
-        console.log(`⬅️ Failed htlc_lock queued for cancel: hashlock=${accountTx.data.hashlock.slice(0, 12)}...`);
+        accountLog.debug('htlc_lock.cancel_queued', { hashlock: shortHash(accountTx.data.hashlock) });
       }
       continue; // Skip to next tx
     }
