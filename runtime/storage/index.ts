@@ -135,7 +135,7 @@ const resolveCanonicalHashPeriodFrames = (env: Env): 0 | 1 => {
   const raw =
     env.runtimeConfig?.storage?.canonicalHashPeriodFrames ??
     process.env['XLN_STORAGE_CANONICAL_HASH_PERIOD_FRAMES'] ??
-    (process.env['XLN_STORAGE_VERIFY_CANONICAL'] === '0' ? 0 : 1);
+    1;
   const enabled = Number(raw) > 0;
   if (!enabled && isProductionStorageRuntime()) {
     throw new Error('STORAGE_CANONICAL_HASH_REQUIRED_IN_PRODUCTION');
