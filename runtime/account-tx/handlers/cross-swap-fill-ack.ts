@@ -1,6 +1,6 @@
 import type { AccountMachine, AccountTx } from '../../types';
 import { MAX_SWAP_FILL_RATIO } from '../../swap-execution';
-import { validateCrossJurisdictionFillProgress, withCrossJurisdictionFillProgress } from '../../cross-jurisdiction';
+import { transitionCrossJurisdictionRouteStatus, validateCrossJurisdictionFillProgress, withCrossJurisdictionFillProgress } from '../../cross-jurisdiction';
 import { recordSwapClosedLifecycle, recordSwapResolveLifecycle } from './swap-history';
 
 type CrossSwapFillAckTx = Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;
@@ -59,9 +59,8 @@ export async function handleCrossSwapFillAck(
     if (cumulativeTargetAmount === undefined || cumulativeTargetAmount !== currentTarget) {
       return { success: false, error: `Cross-j cancel target mismatch: expected ${currentTarget}, got ${cumulativeTargetAmount}`, events };
     }
-    route.status = 'clear_requested';
+    transitionCrossJurisdictionRouteStatus(route, 'clear_requested', deterministicAccountTimestamp(accountMachine));
     route.clearingPolicy = 'cancel_and_clear';
-    route.updatedAt = deterministicAccountTimestamp(accountMachine);
     offer.crossJurisdiction = route;
     accountMachine.swapOffers?.delete(offerId);
     recordSwapClosedLifecycle(accountMachine, offerId);
