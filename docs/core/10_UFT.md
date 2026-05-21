@@ -2,6 +2,12 @@
 
 **[← Index](../readme.md)** | **[Prev: Q&A](00_QA.md)** | **[Next: J-Machine →](11_Jurisdiction_Machine.md)**
 
+**Role:** flagship theory / whitepaper
+**Status:** active theory doc; use [../status.md](../status.md) and
+[../mainnet.md](../mainnet.md) for current implementation and launch truth
+**Audience:** readers who want the full XLN thesis, not just the short protocol
+path
+
 ### Egor Homakov / h@xln.finance
 
 ### [Optional Q&A](00_QA.md)
@@ -16,9 +22,10 @@ We're doing the opposite: just 3 invariants, ASCII diagrams, VR scenes, and yes 
 
 
 
-Traditional finance is a mess of terminology and regulations
+Traditional finance is a mess of terminology and regulations.
 
-We propose a new financial system - xln, redesigned from first principles. We believe humanity deserves Scalable, Secure & Simple value network.
+We propose a new financial system - xln, redesigned from first principles. We
+believe humanity deserves a scalable, secure, and simple value network.
 
 
 
@@ -31,7 +38,9 @@ Simple
 
 
 
-UFT (Unified Financial Theory) is a new way individuals
+UFT (Unified Financial Theory) is XLN's attempt to unify the parts of finance
+that traditional banking, payment channels, and crypto each captured only
+partially.
 
 xln is mathematically impossible to compete with. 
 xln is first ever algorithmically enforceable debt. 
