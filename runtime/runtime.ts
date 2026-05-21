@@ -174,6 +174,14 @@ import {
   resolveRuntimeIdForCrossJurisdictionEntity,
   type RuntimeEntityRoutingDeps,
 } from './runtime-entity-routing';
+import {
+  entityNeedsPeriodicWake as entityNeedsPeriodicWakeForRuntime,
+  generateHookPings as generateRuntimeHookPings,
+  getEarliestWallClockDueTimestamp as getEarliestRuntimeWallClockDueTimestamp,
+  getNextWallClockWakeTimestamp as getNextRuntimeWallClockWakeTimestamp,
+  hasDueEntityHooks as hasDueRuntimeEntityHooks,
+  type RuntimeWakeDeps,
+} from './runtime-wake';
 import { normalizeEntitySwapTradingPairs } from './runtime-swap-pairs';
 import { classifyBilateralState, getAccountBarVisual } from './account-consensus-state';
 import { calculateSolvency, verifySolvency } from './solvency';
@@ -680,168 +688,23 @@ const hasRuntimeWork = (env: Env): boolean => {
   return false;
 };
 
-/**
- * True when an entity has periodic/security work that actually needs wakeups.
- * Generic bilateral work must not be hub-gated: a normal user runtime with a
- * lost ACK still needs to wake up and resend its pending account frame.
- */
-export const entityNeedsPeriodicWake = (replica: EntityReplica): boolean => {
-  const state = replica?.state;
-  if (!state) return false;
+const getRuntimeWakeDeps = (): RuntimeWakeDeps => ({
+  ensureRuntimeState,
+  ensureRuntimeMempool,
+  enqueueRuntimeInputs,
+  getRuntimeNowMs,
+});
 
-  for (const accountMachine of state.accounts.values()) {
-    const settlementWorkspace = accountMachine.settlementWorkspace;
-    if (settlementWorkspace && settlementWorkspace.status !== 'submitted') {
-      const iAmLeft = state.entityId === accountMachine.leftEntity;
-      const counterpartyHanko = iAmLeft ? settlementWorkspace.rightHanko : settlementWorkspace.leftHanko;
-      if (counterpartyHanko) return true;
-    }
+export const entityNeedsPeriodicWake = entityNeedsPeriodicWakeForRuntime;
 
-    if (accountMachine.activeDispute) return true;
-    if (accountMachine.pendingFrame || accountMachine.pendingAccountInput) return true;
-  }
+const hasDueEntityHooks = (env: Env): boolean =>
+  hasDueRuntimeEntityHooks(env, getRuntimeWakeDeps());
 
-  if (!state.hubRebalanceConfig) return false;
-  if (state.jBatchState?.sentBatch) return true;
+const getEarliestWallClockDueTimestamp = (env: Env): number | null =>
+  getEarliestRuntimeWallClockDueTimestamp(env, getRuntimeWakeDeps());
 
-  for (const accountMachine of state.accounts.values()) {
-    if ((accountMachine.requestedRebalance?.size ?? 0) > 0) return true;
-    if ((accountMachine.requestedRebalanceFeeState?.size ?? 0) > 0) return true;
-  }
-
-  return false;
-};
-
-/**
- * Check if any entity has scheduled hooks or due periodic tasks.
- * Used by the runtime loop to wake up idle entities at the right time.
- * Checks both one-shot hooks (setTimeout-like) AND periodic tasks (setInterval-like)
- * so that hub rebalance crontab fires even when no external inputs arrive.
- */
-const hasDueEntityHooks = (env: Env): boolean => {
-  if (!env.eReplicas || env.eReplicas.size === 0) return false;
-  if (!ensureRuntimeState(env).clockPrimed && !env.scenarioMode) return false;
-  const nowMs = getRuntimeNowMs(env);
-  for (const [, replica] of env.eReplicas) {
-    const crontab = replica.state?.crontabState;
-    if (!crontab) continue;
-    // One-shot hooks (setTimeout-like)
-    const hooks = crontab.hooks;
-    if (hooks && hooks.size > 0) {
-      for (const hook of hooks.values()) {
-        if (hook.triggerAt <= nowMs) return true;
-      }
-    }
-    // Periodic tasks (setInterval-like) — only when hub has actual pending work.
-    // Fully idle hubs should not receive synthetic empty pings.
-    if (entityNeedsPeriodicWake(replica)) {
-      const tasks = crontab.tasks;
-      if (tasks && tasks.size > 0) {
-        for (const task of tasks.values()) {
-          if (nowMs - task.lastRun >= task.intervalMs) return true;
-        }
-      }
-    }
-  }
-  return false;
-};
-
-const getEarliestWallClockDueTimestamp = (env: Env): number | null => {
-  if (!ensureRuntimeState(env).clockPrimed && !env.scenarioMode) return null;
-  const logicalNow = getRuntimeNowMs(env);
-  const wallClockNow = getWallClockMs();
-  let earliestDue = Infinity;
-
-  if (env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) {
-    const deferredMeta = ensureRuntimeState(env).deferredNetworkMeta;
-    for (const output of env.pendingNetworkOutputs) {
-      const retryAt = deferredMeta?.get(buildRouteOutputKey(output))?.nextRetryAt ?? 0;
-      if (retryAt > logicalNow && retryAt <= wallClockNow) {
-        earliestDue = Math.min(earliestDue, retryAt);
-      }
-    }
-  }
-
-  if (!env.eReplicas || env.eReplicas.size === 0) {
-    return Number.isFinite(earliestDue) ? earliestDue : null;
-  }
-
-  for (const [, replica] of env.eReplicas) {
-    const crontab = replica.state?.crontabState;
-    if (!crontab) continue;
-
-    const hooks = crontab.hooks;
-    if (hooks && hooks.size > 0) {
-      for (const hook of hooks.values()) {
-        if (hook.triggerAt > logicalNow && hook.triggerAt <= wallClockNow) {
-          earliestDue = Math.min(earliestDue, hook.triggerAt);
-        }
-      }
-    }
-
-    if (entityNeedsPeriodicWake(replica)) {
-      const tasks = crontab.tasks;
-      if (tasks && tasks.size > 0) {
-        for (const task of tasks.values()) {
-          const dueAt = task.lastRun + task.intervalMs;
-          if (dueAt > logicalNow && dueAt <= wallClockNow) {
-            earliestDue = Math.min(earliestDue, dueAt);
-          }
-        }
-      }
-    }
-  }
-
-  return Number.isFinite(earliestDue) ? earliestDue : null;
-};
-
-const getNextWallClockWakeTimestamp = (env: Env): number | null => {
-  if (!ensureRuntimeState(env).clockPrimed && !env.scenarioMode) return null;
-  const logicalNow = getRuntimeNowMs(env);
-  let nextWake = Infinity;
-
-  if (env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) {
-    const deferredMeta = ensureRuntimeState(env).deferredNetworkMeta;
-    for (const output of env.pendingNetworkOutputs) {
-      const retryAt = deferredMeta?.get(buildRouteOutputKey(output))?.nextRetryAt ?? 0;
-      if (retryAt > logicalNow) {
-        nextWake = Math.min(nextWake, retryAt);
-      }
-    }
-  }
-
-  if (!env.eReplicas || env.eReplicas.size === 0) {
-    return Number.isFinite(nextWake) ? nextWake : null;
-  }
-
-  for (const [, replica] of env.eReplicas) {
-    const crontab = replica.state?.crontabState;
-    if (!crontab) continue;
-
-    const hooks = crontab.hooks;
-    if (hooks && hooks.size > 0) {
-      for (const hook of hooks.values()) {
-        if (hook.triggerAt > logicalNow) {
-          nextWake = Math.min(nextWake, hook.triggerAt);
-        }
-      }
-    }
-
-    if (entityNeedsPeriodicWake(replica)) {
-      const tasks = crontab.tasks;
-      if (tasks && tasks.size > 0) {
-        for (const task of tasks.values()) {
-          const dueAt = task.lastRun + task.intervalMs;
-          if (dueAt > logicalNow) {
-            nextWake = Math.min(nextWake, dueAt);
-          }
-        }
-      }
-    }
-  }
-
-  return Number.isFinite(nextWake) ? nextWake : null;
-};
+const getNextWallClockWakeTimestamp = (env: Env): number | null =>
+  getNextRuntimeWallClockWakeTimestamp(env, getRuntimeWakeDeps());
 
 const RUNTIME_WAKE_WATCHDOG_MS = 1000;
 const trackedRuntimeEnvs = new Set<Env>();
@@ -888,63 +751,8 @@ const stopRuntimeWakeWatchdogIfIdle = (): void => {
   }
 };
 
-/**
- * Generate entity input pings for entities with due hooks OR periodic tasks.
- * Injects empty entityInputs so applyEntityInput runs → crontab fires → hooks/tasks execute.
- *
- * Critical for hub rebalance: after faucet payment creates uncollateralized debt,
- * hubRebalanceHandler (periodic) needs to fire even with no external inputs.
- */
 const generateHookPings = (env: Env, nowMs = getRuntimeNowMs(env), queuedAt = env.timestamp ?? 0): void => {
-  if (!env.eReplicas || env.eReplicas.size === 0) return;
-  if (!ensureRuntimeState(env).clockPrimed && !env.scenarioMode) return;
-  const mempool = ensureRuntimeMempool(env);
-  const pings: RoutedEntityInput[] = [];
-
-  for (const [key, replica] of env.eReplicas) {
-    const crontab = replica.state?.crontabState;
-    if (!crontab) continue;
-
-    let hasDue = false;
-    // crontab state is declarative and validated on restore; use the typed fields directly.
-    const hooks = crontab.hooks;
-    if (hooks && hooks.size > 0) {
-      for (const hook of hooks.values()) {
-        if (hook.triggerAt <= nowMs) {
-          hasDue = true;
-          break;
-        }
-      }
-    }
-    // Periodic tasks — only when hub has actual pending work.
-    if (!hasDue && entityNeedsPeriodicWake(replica)) {
-      const tasks = crontab.tasks;
-      if (tasks && tasks.size > 0) {
-        for (const task of tasks.values()) {
-          if (nowMs - task.lastRun >= task.intervalMs) {
-            hasDue = true;
-            break;
-          }
-        }
-      }
-    }
-    if (!hasDue) continue;
-
-    // Extract entityId and signerId from replica key (format: "entityId:signerId")
-    const entityId = replica.entityId || String(key).split(':')[0];
-    const signerId = replica.state?.config?.validators?.[0] || String(key).split(':')[1];
-    if (!entityId || !signerId) continue;
-
-    // Check if there's already a pending entityInput for this entity
-    const alreadyQueued = mempool.entityInputs.some(ei => ei.entityId === entityId);
-    if (alreadyQueued) continue;
-
-    pings.push({ entityId, signerId, entityTxs: [] });
-  }
-
-  if (pings.length > 0) {
-    enqueueRuntimeInputs(env, pings, undefined, undefined, queuedAt);
-  }
+  generateRuntimeHookPings(env, getRuntimeWakeDeps(), nowMs, queuedAt);
 };
 
 const isRuntimeFrameReady = (env: Env, now: number, overrideDelayMs?: number): boolean => {
