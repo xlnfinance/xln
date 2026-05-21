@@ -24,7 +24,7 @@ export async function handleSwapOffer(
   accountTx: Extract<AccountTx, { type: 'swap_offer' }>,
   byLeft: boolean,
   currentHeight: number,
-  isValidation: boolean = false
+  _isValidation: boolean = false
 ): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCreated?: SwapOfferEvent }> {
   const { offerId, giveTokenId, giveAmount, wantTokenId, wantAmount, priceTicks: inputPriceTicks, timeInForce, minFillRatio, crossJurisdiction } = accountTx.data;
   const events: string[] = [];
@@ -263,11 +263,6 @@ export async function handleSwapOffer(
   // 9. Store offer (proofBody includes swapOffers, so keep validation+commit aligned)
   accountMachine.swapOffers.set(offerId, offer);
   recordSwapOfferLifecycle(accountMachine, offer);
-  if (isValidation) {
-    console.log(`📊 VALIDATION: Swap offer stored (for dispute proof)`);
-  } else {
-    console.log(`📊 COMMIT: Swap offer stored`);
-  }
 
   events.push(`📊 Swap offer created: ${offerId.slice(0,8)}... give ${effectiveGiveAmount} token${giveTokenId} for ${effectiveWantAmount} token${wantTokenId}`);
 

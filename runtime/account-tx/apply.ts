@@ -85,7 +85,6 @@ export async function processAccountTx(
   // Derive counterparty from canonical left/right using proofHeader's fromEntity as "me"
   const myEntityId = accountMachine.proofHeader.fromEntity;
   const { counterparty } = getAccountPerspective(accountMachine, myEntityId);
-  console.log(`🔄 Processing ${accountTx.type} for ${counterparty.slice(-4)} (byLeft: ${byLeft})`);
 
   const emitRebalanceDebug = (payload: Record<string, unknown>) => {
     const p2p = env?.runtimeState?.p2p;
