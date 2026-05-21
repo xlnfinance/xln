@@ -30,7 +30,7 @@ import {
 import { getProcess, enableStrictScenario } from './helpers';
 
 // Simple snapshot helper for this scenario
-function pushSnapshot(env: Env, tag: string, description: string, metadata: Record<string, any> = {}) {
+function pushSnapshot(env: Env, tag: string, description: string, metadata: Record<string, unknown> = {}) {
   if (!env.history) env.history = [];
   const frame = {
     tag,
@@ -40,7 +40,7 @@ function pushSnapshot(env: Env, tag: string, description: string, metadata: Reco
     eReplicas: new Map(env.eReplicas),
     jReplicas: env.jReplicas ? new Map(env.jReplicas) : undefined
   };
-  env.history.push(frame as any);
+  env.history.push(frame as unknown as Env['history'][number]);
   console.log(`📸 Snapshot: ${description}`);
 }
 
@@ -78,7 +78,7 @@ async function openGridAccount(env: Env, fromEntityId: string, toEntityId: strin
   }]);
 }
 
-// Process any pending j_events queued by j-watcher
+// Process pending j_events queued by j-watcher
 async function processJEvents(env: Env): Promise<void> {
   const process = await getProcess();
   const pendingInputs = env.runtimeInput?.entityInputs || [];
@@ -143,9 +143,9 @@ export async function grid(env: Env): Promise<void> {
   } catch {
     jadapter = await ensureJAdapter(env);
     const jReplica = createJReplica(env, 'Grid Demo', jadapter.addresses.depository, { x: 0, y: 600, z: 0 });
-    (jReplica as any).jadapter = jadapter;
-    (jReplica as any).depositoryAddress = jadapter.addresses.depository;
-    (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
+    jReplica.jadapter = jadapter;
+    jReplica.depositoryAddress = jadapter.addresses.depository;
+    jReplica.entityProviderAddress = jadapter.addresses.entityProvider;
     jadapter.startWatching(env);
   }
 

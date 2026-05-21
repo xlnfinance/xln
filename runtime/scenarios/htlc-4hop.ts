@@ -54,9 +54,9 @@ export async function htlc4hop(env: Env): Promise<void> {
   } catch {
     jadapter = await ensureJAdapter(env);
     const jReplica = createJReplica(env, '4-Hop Demo', jadapter.addresses.depository);
-    (jReplica as any).jadapter = jadapter;
-    (jReplica as any).depositoryAddress = jadapter.addresses.depository;
-    (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
+    jReplica.jadapter = jadapter;
+    jReplica.depositoryAddress = jadapter.addresses.depository;
+    jReplica.entityProviderAddress = jadapter.addresses.entityProvider;
     jadapter.startWatching(env);
   }
 
