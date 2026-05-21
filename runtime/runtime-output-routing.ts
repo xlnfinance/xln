@@ -265,39 +265,6 @@ const batchOutputsByTarget = (outputs: DeliverableEntityInput[]): DeliverableEnt
   return Array.from(batched.values());
 };
 
-const hasDirectHubP2PEndpoint = (env: Env, targetRuntimeId: string): boolean => {
-  const normalizedTargetRuntimeId = normalizeRuntimeId(targetRuntimeId);
-  if (!normalizedTargetRuntimeId) return false;
-  const profiles = env.gossip?.getProfiles?.() || [];
-  return profiles.some((profile) => {
-    if (profile.metadata?.isHub !== true) return false;
-    if (normalizeRuntimeId(profile.runtimeId || '') !== normalizedTargetRuntimeId) return false;
-    if (typeof profile.wsUrl !== 'string') return false;
-    try {
-      const parsed = new URL(profile.wsUrl.trim());
-      return parsed.protocol === 'ws:' || parsed.protocol === 'wss:';
-    } catch {
-      return false;
-    }
-  });
-};
-
-const canUseRemoteEntityInputFallback = (
-  env: Env,
-  targetRuntimeId: string,
-  output: Pick<DeliverableEntityInput, 'entityTxs'>,
-  deps: RuntimeOutputRoutingDeps,
-): boolean => {
-  if (!entityInputHasCrossJurisdictionIntraRuntimeTx(output)) {
-    return true;
-  }
-  const state = deps.ensureRuntimeState(env);
-  if (state.canUseConnectedRelayFallback?.(targetRuntimeId) === true) {
-    return true;
-  }
-  return hasDirectHubP2PEndpoint(env, targetRuntimeId);
-};
-
 export const dispatchEntityOutputs = (
   env: Env,
   outputs: PlannedRemoteOutput[],
@@ -332,14 +299,11 @@ export const dispatchEntityOutputs = (
       if (deliveredDirect) {
         continue;
       }
-      if (!canUseRemoteEntityInputFallback(env, targetRuntimeId, output, deps)) {
-        env.warn('network', 'ROUTE_DEFER_DIRECT_SOCKET_REQUIRED', {
-          entityId: output.entityId,
-          runtimeId: targetRuntimeId,
-        });
-        deferredOutputs.push(output);
-        continue;
-      }
+      // Direct dispatch is only an optimization for runtimes connected to this
+      // process. A miss must still fall through to RuntimeP2P, which encrypts the
+      // entity_input and delivers it over relay/direct transport. Cross-j system
+      // txs are safe here because planEntityOutputs already validated that the
+      // hop is exactly between the two runtimes bound by the route topology.
     }
     if (!p2p) {
       env.warn('network', 'ROUTE_DROP_NO_P2P', {

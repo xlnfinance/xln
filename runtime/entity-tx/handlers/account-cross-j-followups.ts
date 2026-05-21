@@ -32,15 +32,34 @@ const assertPullResolveAllowed = (
     throw new Error(`CROSS_J_PULL_RESOLVE_STATE_INVALID: route=${route.orderId} leg=target status=${route.status}`);
   }
   const committedRatio = committedCrossJurisdictionRatio(route);
-  if (leg === 'source' && committedRatio <= 0) {
-    throw new Error(`CROSS_J_PULL_RESOLVE_NO_COMMITTED_FILL: route=${route.orderId}`);
-  }
   if (committedRatio > 0 && fillRatio > committedRatio) {
     throw new Error(
       `CROSS_J_PULL_RESOLVE_OVER_COMMITTED: route=${route.orderId} ` +
       `ratio=${fillRatio} committed=${committedRatio}`,
     );
   }
+};
+
+const backfillCommittedFillFromResolvedPull = (
+  route: CrossJurisdictionSwapRoute,
+  fillRatio: number,
+  updatedAt: number,
+): void => {
+  if (committedCrossJurisdictionRatio(route) > 0) return;
+  const validatedFill = validateCrossJurisdictionFillProgress(route, {
+    cumulativeFillRatio: fillRatio,
+  });
+  if (!validatedFill.ok) {
+    throw new Error(`CROSS_J_PULL_RESOLVE_NO_COMMITTED_FILL: route=${route.orderId} ${validatedFill.error}`);
+  }
+
+  // Network delivery may commit the bilateral pull_resolve before the route's
+  // cross_swap_fill_ack mirror reaches this runtime. The pull_resolve is itself
+  // a committed account frame carrying a valid hash-ladder reveal, so we can
+  // backfill the committed fill fields while preserving the current lifecycle
+  // status chosen by the route FSM.
+  const { status: _status, ...fillFields } = withCrossJurisdictionFillProgress(route, validatedFill.value, updatedAt);
+  Object.assign(route, fillFields);
 };
 
 const routeBookOwnerEntityId = (route: CrossJurisdictionSwapRoute): string =>
@@ -125,6 +144,7 @@ const applyPullResolveFollowup = (
 
     if (isSourceHubResolve || isSourceUserResolve) {
       assertPullResolveAllowed(route, fillRatio, 'source');
+      backfillCommittedFillFromResolvedPull(route, fillRatio, newState.timestamp);
       Object.assign(route, withCrossJurisdictionClaimProgress(route, fillRatio, newState.timestamp));
       transitionCrossJurisdictionRouteStatus(route, 'source_claimed', newState.timestamp);
 
@@ -176,6 +196,7 @@ const applyPullResolveFollowup = (
       counterpartyEntityId === targetHubId
     ) {
       assertPullResolveAllowed(route, fillRatio, 'target');
+      backfillCommittedFillFromResolvedPull(route, fillRatio, newState.timestamp);
       Object.assign(route, withCrossJurisdictionClaimProgress(route, fillRatio, newState.timestamp));
       transitionCrossJurisdictionRouteStatus(route, 'settled', newState.timestamp);
       route.settledAt = newState.timestamp;

@@ -30,6 +30,7 @@ import {
   buildJEventObservationDigest,
   canonicalJurisdictionEventsHash,
 } from '../j-event-observation';
+import { isCrossJurisdictionTerminalStatus } from '../cross-jurisdiction';
 import { verifyAccountSignature } from '../account-crypto';
 import { decodeHashLadderBinary } from '../hashladder';
 import { markStorageEntityDirty } from '../env-events';
@@ -278,15 +279,15 @@ function findCrossJurisdictionRouteForSourceDispute(
 ): CrossJurisdictionSwapRoute | null {
   const self = String(state.entityId || '').toLowerCase();
   const counterparty = String(counterpartyId || '').toLowerCase();
-  for (const route of state.crossJurisdictionSwaps?.values() ?? []) {
-    if (
+  const candidates = Array.from(state.crossJurisdictionSwaps?.values() ?? [])
+    .filter((route) =>
       String(route.source.entityId || '').toLowerCase() === self &&
-      String(route.source.counterpartyEntityId || '').toLowerCase() === counterparty
-    ) {
-      return route;
-    }
-  }
-  return null;
+      String(route.source.counterpartyEntityId || '').toLowerCase() === counterparty &&
+      Boolean(route.targetPull) &&
+      !isCrossJurisdictionTerminalStatus(route.status),
+    )
+    .sort((a, b) => Number(b.updatedAt || 0) - Number(a.updatedAt || 0));
+  return candidates[0] ?? null;
 }
 
 function findCrossJurisdictionRouteForTargetDispute(
