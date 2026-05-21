@@ -217,6 +217,7 @@ function prepareExtension(): void {
 
 	copyFileSync(path.join(sourceDir, 'manifest.json'), path.join(distDir, 'manifest.json'));
 	copyFileSync(path.join(sourceDir, 'extension-service-worker.js'), path.join(distDir, 'extension-service-worker.js'));
+	copyFileSync(path.join(sourceDir, 'extension-security.js'), path.join(distDir, 'extension-security.js'));
 
 	const iconSource = path.join(BUILD_DIR, 'android-chrome-192x192.png');
 	if (existsSync(iconSource)) {

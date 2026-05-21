@@ -1,3 +1,5 @@
+import { sanitizeNotificationPayload } from './extension-security.js';
+
 chrome.runtime.onInstalled.addListener(() => {
   chrome.storage.local.set({ xlnCompanionInstalledAt: Date.now() });
 });
@@ -9,14 +11,14 @@ chrome.action.onClicked.addListener(() => {
 chrome.runtime.onMessageExternal.addListener((message, sender, sendResponse) => {
   if (!message || message.type !== 'xln.payment_wake') return false;
 
-  const url = typeof message.url === 'string' ? message.url : 'xln://app';
+  const payload = sanitizeNotificationPayload(message);
   chrome.notifications.create({
     type: 'basic',
     iconUrl: 'icon-128.png',
-    title: String(message.title || 'XLN payment'),
-    message: String(message.body || 'Open XLN Wallet to review this payment.'),
+    title: payload.title,
+    message: payload.body,
   }, notificationId => {
-    chrome.storage.local.set({ [`wake:${notificationId}`]: url });
+    chrome.storage.local.set({ [`wake:${notificationId}`]: payload.url });
     sendResponse({ ok: true, notificationId, sender: sender.origin || null });
   });
   return true;
