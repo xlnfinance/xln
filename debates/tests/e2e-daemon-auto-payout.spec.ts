@@ -103,7 +103,8 @@ test('live daemon mode auto-payout queues an XLN HTLC withdrawal to the winner',
     const slug = new URL(pageA.url()).pathname.split('/').pop();
     const detail = await pageA.request.get(`http://127.0.0.1:${debatesPort}/api/challenges/${slug}`);
     expect((await detail.json()).challenge.verdict.payout.autoPayout.hashlock).toContain('fake_hashlock');
-    await pageA.getByText('withdrawal_reserved').waitFor({ timeout: 10_000 });
+    await pageA.getByTestId('dev-ledger').locator('summary').click();
+    await pageA.getByTestId('dev-ledger').getByText('withdrawal_reserved').waitFor({ timeout: 10_000 });
 
     await creator.close();
     await counterparty.close();

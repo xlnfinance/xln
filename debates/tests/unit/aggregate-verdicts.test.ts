@@ -40,6 +40,39 @@ describe('aggregateVerdicts', () => {
     expect(result.summary).toContain('too close');
   });
 
+  test('applies judge weights and threshold before awarding a winner', () => {
+    const judges = [
+      { weight: 3 },
+      { weight: 1 },
+      { weight: 1 },
+    ];
+    const result = aggregateVerdicts([
+      verdict('A', 760, 620),
+      verdict('B', 650, 780),
+      verdict('B', 640, 790),
+    ], { judges, threshold: 700 });
+
+    expect(result.method).toBe('weighted_majority');
+    expect(result.votes.A).toBe(3);
+    expect(result.votes.B).toBe(2);
+    expect(result.winner).toBe('A');
+    expect(result.thresholdMet).toBe(true);
+    expect(result.totalWeight).toBe(5);
+  });
+
+  test('returns no winner when the leading side misses the configured threshold', () => {
+    const result = aggregateVerdicts([
+      verdict('A', 640, 610),
+      verdict('A', 650, 612),
+      verdict('B', 600, 640),
+    ], { threshold: 700 });
+
+    expect(result.leader).toBe('A');
+    expect(result.winner).toBe('draw');
+    expect(result.thresholdMet).toBe(false);
+    expect(result.summary).toContain('did not reach the 700-point threshold');
+  });
+
   test('fallback judge keeps 1000-point scores readable for long transcripts', async () => {
     const judge: JudgeConfig = {
       id: 'logic',
