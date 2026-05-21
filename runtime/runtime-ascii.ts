@@ -491,9 +491,30 @@ export function formatAccount(account: AccountMachine, myEntityId: string, optio
 /**
  * Format orderbook state (for hubs)
  */
-export function formatOrderbook(bookState: any, pairId: string, depth: number = 10): string {
+type OrderbookLevelIterable = Iterable<[unknown, unknown]>;
+type OrderbookAsciiState = { bids?: unknown; asks?: unknown };
+
+const isOrderbookLevelIterable = (value: unknown): value is OrderbookLevelIterable =>
+  !!value &&
+  (typeof value === 'object' || typeof value === 'function') &&
+  typeof (value as { [Symbol.iterator]?: unknown })[Symbol.iterator] === 'function';
+
+const toBigIntInput = (value: unknown): string | number | bigint | boolean => {
+  if (
+    typeof value === 'bigint' ||
+    typeof value === 'number' ||
+    typeof value === 'string' ||
+    typeof value === 'boolean'
+  ) {
+    return value;
+  }
+  return String(value);
+};
+
+export function formatOrderbook(bookState: unknown, pairId: string, depth: number = 10): string {
   const output: string[] = [];
   const width = 60;
+  const book = (bookState && typeof bookState === 'object') ? bookState as OrderbookAsciiState : {};
 
   // Parse pair ID (e.g., "1/2" -> token1=ETH, token2=USDC)
   const [baseId, quoteId] = pairId.split('/').map(Number);
@@ -506,15 +527,15 @@ export function formatOrderbook(bookState: any, pairId: string, depth: number = 
   const bids: Array<{ price: bigint; amount: bigint }> = [];
   const asks: Array<{ price: bigint; amount: bigint }> = [];
 
-  if (bookState?.bids && typeof bookState.bids[Symbol.iterator] === 'function') {
-    for (const [price, amount] of bookState.bids) {
-      bids.push({ price: BigInt(price), amount: BigInt(amount) });
+  if (isOrderbookLevelIterable(book.bids)) {
+    for (const [price, amount] of book.bids) {
+      bids.push({ price: BigInt(toBigIntInput(price)), amount: BigInt(toBigIntInput(amount)) });
     }
   }
 
-  if (bookState?.asks && typeof bookState.asks[Symbol.iterator] === 'function') {
-    for (const [price, amount] of bookState.asks) {
-      asks.push({ price: BigInt(price), amount: BigInt(amount) });
+  if (isOrderbookLevelIterable(book.asks)) {
+    for (const [price, amount] of book.asks) {
+      asks.push({ price: BigInt(toBigIntInput(price)), amount: BigInt(toBigIntInput(amount)) });
     }
   }
 
@@ -606,7 +627,7 @@ export function formatSummary(env: Env): string {
 }
 
 // Helper: Get lock status
-function getLockStatus(lock: any, entity: EntityState): string {
+function getLockStatus(lock: { timelock: bigint | number | string; hashlock: string }, entity: EntityState): string {
   const now = getWallClockMs();
   if (now > Number(lock.timelock)) {
     return '🔴 Expired';

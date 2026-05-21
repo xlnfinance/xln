@@ -115,7 +115,6 @@ const registerLazySigner = (
   const signerId = deriveSignerAddressSync(seed, signerSlot);
   const privateKey = deriveSignerKeySync(seed, signerSlot);
   registerSignerKey(signerId, privateKey);
-  registerSignerKey(signerId.slice(-4).toLowerCase(), privateKey);
   return {
     signerId,
     entityId: generateLazyEntityId([signerId], 1n).toLowerCase(),

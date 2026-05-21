@@ -19,10 +19,16 @@ import {
 // ---------------------------------------------------------------------------
 
 export type RelayClient = {
-  ws: any;          // Bun ServerWebSocket — stored opaquely, never called here
+  ws: RelaySocketLike;
   runtimeId: string;
   lastSeen: number;
   topics: Set<string>;
+};
+
+export type RelaySocketLike = {
+  send(data: string): boolean | number | void;
+  close?(code?: number, reason?: string): unknown;
+  readyState?: unknown;
 };
 
 export type RelayDebugEvent = {
@@ -70,7 +76,7 @@ type RelayPendingLimits = {
 };
 
 type PendingRelayMessage = {
-  msg: any;
+  msg: unknown;
   bytes: number;
 };
 
@@ -191,7 +197,7 @@ export const getProfileBatch = (
 // Client registry
 // ---------------------------------------------------------------------------
 
-export const registerClient = (store: RelayStore, runtimeId: string, ws: any): boolean => {
+export const registerClient = (store: RelayStore, runtimeId: string, ws: RelaySocketLike): boolean => {
   const key = normalizeRuntimeKey(runtimeId);
   if (!key) return false;
   const existing = store.clients.get(key);
@@ -216,7 +222,7 @@ export const registerClient = (store: RelayStore, runtimeId: string, ws: any): b
   return true;
 };
 
-export const removeClient = (store: RelayStore, ws: any): string | null => {
+export const removeClient = (store: RelayStore, ws: RelaySocketLike): string | null => {
   for (const [id, client] of store.clients) {
     if (client.ws === ws) {
       store.clients.delete(id);

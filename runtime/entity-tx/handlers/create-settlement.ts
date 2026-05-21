@@ -11,7 +11,7 @@
  * 4. Settlement executes via J-processor
  */
 
-import type { EntityState, EntityTx, EntityInput } from '../../types';
+import type { EntityState, EntityTx, EntityInput, JInput } from '../../types';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { initJBatch, batchAddSettlement } from '../../j-batch';
 import { isLeftEntity } from '../../entity-id-utils';
@@ -19,7 +19,7 @@ import { isLeftEntity } from '../../entity-id-utils';
 export async function handleCreateSettlement(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'createSettlement' }>
-): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs?: any[] }> {
+): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs?: JInput[] }> {
   const { counterpartyEntityId, diffs, sig } = entityTx.data;
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];

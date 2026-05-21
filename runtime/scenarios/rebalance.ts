@@ -13,7 +13,7 @@
  * outCollateral is already secured value and must not inflate trigger metric.
  */
 
-import type { Env, EntityReplica, AccountMachine } from '../types';
+import type { Env, EntityReplica, AccountMachine, JReplica } from '../types';
 import { commitRuntimeInput, getProcess, usd, ensureSignerKeysFromSeed, converge as _converge } from './helpers';
 import { formatRuntime } from '../runtime-ascii';
 import { deriveDelta } from '../account-utils';
@@ -153,11 +153,11 @@ export async function runRebalanceScenario(): Promise<void> {
 
   // Create jReplica + attach jadapter
   const jReplicaName = 'Rebalance Demo';
-  const jReplica = {
+  const jReplica: JReplica = {
     name: jReplicaName,
     blockNumber: 0n,
     stateRoot: new Uint8Array(32),
-    mempool: [] as any[],
+    mempool: [],
     blockDelayMs: 100,
     lastBlockTimestamp: env.timestamp,
     position: { x: 0, y: 600, z: 0 },
@@ -167,15 +167,15 @@ export async function runRebalanceScenario(): Promise<void> {
       entityProvider: jadapter.addresses.entityProvider,
       deltaTransformer: jadapter.addresses.deltaTransformer,
     },
-    rpc: jMode === 'browservm' ? 'browservm://' : rpcUrl,
+    rpcs: [jMode === 'browservm' ? 'browservm://' : rpcUrl],
   };
   env.jReplicas.set(jReplicaName, jReplica);
   env.activeJurisdiction = jReplicaName;
 
   // Attach jadapter to jReplica + start watching for events
-  (jReplica as any).jadapter = jadapter;
-  (jReplica as any).depositoryAddress = jadapter.addresses.depository;
-  (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
+  jReplica.jadapter = jadapter;
+  jReplica.depositoryAddress = jadapter.addresses.depository;
+  jReplica.entityProviderAddress = jadapter.addresses.entityProvider;
   jadapter.startWatching(env);
   console.log('✅ JAdapter attached + watching');
   await process(env);

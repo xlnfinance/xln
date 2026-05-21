@@ -930,6 +930,10 @@ export class DebatesStore {
         inferenceFeeMinor: '0',
         scores1000: aggregated.scores1000,
         margin: aggregated.margin,
+        leader: aggregated.leader,
+        threshold: aggregated.threshold,
+        thresholdMet: aggregated.thresholdMet,
+        totalWeight: aggregated.totalWeight,
       };
 
       if (winnerUserId && totalLocked > 0n) {

@@ -4,8 +4,9 @@
  * Executes parsed scenarios by feeding events to the XLN runtime
  */
 
-import type { Env, RuntimeTx, ConsensusConfig } from '../types.js';
+import type { Env, EntityInput, RuntimeTx, ConsensusConfig } from '../types.js';
 import type {
+  ActionParam,
   Scenario,
   ScenarioEvent,
   ScenarioAction,
@@ -21,6 +22,7 @@ import { safeStringify } from '../serialization-utils.js';
 import { commitRuntimeInput, waitScenario } from './helpers';
 
 let payRandomCounter = 0;
+type ImportReplicaData = Extract<RuntimeTx, { type: 'importReplica' }>['data'];
 
 /**
  * Execute a scenario and generate runtime frames
@@ -48,7 +50,7 @@ export async function executeScenario(
     tickInterval, // Pass tickInterval through context
   };
 
-  const errors: any[] = [];
+  const errors: ScenarioExecutionResult['errors'] = [];
 
   console.log(`🎬 SCENARIO: Starting execution with seed="${scenario.seed}"`);
   console.log(`📋 SCENARIO: ${allEvents.length} events to execute`);
@@ -84,9 +86,8 @@ export async function executeScenario(
       } catch (error) {
         console.error(`❌ Error executing event at t=${timestamp}:`, error);
         errors.push({
-          timestamp,
-          event,
-          error: (error as Error).message,
+          message: error instanceof Error ? error.message : String(error),
+          context: `timestamp=${timestamp} actions=${event.actions.map((action) => action.type).join(',')}`,
         });
       }
     }
@@ -198,7 +199,7 @@ async function executeAction(
  * 4. Creates snapshots with narrative metadata
  */
 async function handleImport(
-  params: any[],
+  params: ActionParam[],
   context: ScenarioExecutionContext,
   env: Env
 ): Promise<void> {
@@ -338,7 +339,7 @@ async function handleImport(
  * Syntax: grid N (creates N×N×N cube) OR grid X Y Z spacing=40
  */
 async function handleGrid(
-  params: any[],
+  params: ActionParam[],
   context: ScenarioExecutionContext,
   env: Env
 ): Promise<void> {
@@ -449,7 +450,7 @@ async function handleGrid(
     const pos = positions.get(gridCoord);
 
     // Include position in runtimeTx for replica state
-    const txData: any = {
+    const txData: ImportReplicaData = {
       config: result.config,
       isProposer: true,
       profileName: entityDef.name,
@@ -477,7 +478,7 @@ async function handleGrid(
 
   // Phase 2: Create connections along each axis (INCREMENTAL - skip existing)
   const { process } = await import('../runtime.js');
-  const connectionInputs: any[] = [];
+  const connectionInputs: EntityInput[] = [];
 
   // Helper to check if account already exists
   const hasAccount = (from: string, to: string): boolean => {
@@ -582,7 +583,7 @@ async function handleLazyGrid(
   const total = X * Y * Z;
   console.log(`  ⚡ LAZY MODE: Creating ${total} in-browser entities (no blockchain)`);
 
-  const runtimeTxs: any[] = [];
+  const runtimeTxs: RuntimeTx[] = [];
 
   for (let z = 0; z < Z; z++) {
     for (let y = 0; y < Y; y++) {
@@ -607,6 +608,7 @@ async function handleLazyGrid(
               validators: [signerId],
               threshold: 1n,
               mode: 'proposer-based' as const,
+              shares: { [signerId]: 1n },
             },
             isProposer: true,
             profileName: gridCoord.slice(0, 4),
@@ -624,7 +626,7 @@ async function handleLazyGrid(
 
   // Create connections (same as normal grid)
   const { process } = await import('../runtime.js');
-  const connectionInputs: any[] = [];
+  const connectionInputs: EntityInput[] = [];
 
   const gridId = (x: number, y: number, z: number) => `${x}_${y}_${z}`;
 
@@ -719,7 +721,7 @@ async function handleLazyGrid(
  * Syntax: payRandom count=10 minHops=0 maxHops=5 minAmount=1000 maxAmount=100000 token=1
  */
 async function handlePayRandom(
-  params: any[],
+  params: ActionParam[],
   context: ScenarioExecutionContext,
   env: Env
 ): Promise<void> {
@@ -806,13 +808,13 @@ async function handlePayRandom(
  * Syntax: r2r <fromEntityIndex> <toEntityIndex> <amount>
  */
 async function handleR2R(
-  params: any[],
+  params: ActionParam[],
   context: ScenarioExecutionContext,
   env: Env
 ): Promise<void> {
   const fromIndex = String(params[0]);
   const toIndex = String(params[1]);
-  const amount = BigInt(params[2] || '0');
+  const amount = BigInt(String(params[2] ?? '0'));
 
   // Resolve entity IDs from grid coordinates
   const fromEntityId = context.entityMapping.get(fromIndex);
@@ -856,12 +858,12 @@ async function handleR2R(
  * Syntax: fund <entityIndex> <amount>
  */
 async function handleFund(
-  params: any[],
+  params: ActionParam[],
   context: ScenarioExecutionContext,
   env: Env
 ): Promise<void> {
   const entityIndex = String(params[0]);
-  const amount = BigInt(params[1] || '0');
+  const amount = BigInt(String(params[1] ?? '0'));
 
   // Resolve entity ID from grid coordinates
   const entityId = context.entityMapping.get(entityIndex);
@@ -903,7 +905,7 @@ async function handleFund(
  */
 async function handleOpenAccount(
   entityId: string,
-  params: any[],
+  params: ActionParam[],
   context: ScenarioExecutionContext,
   env: Env
 ): Promise<void> {

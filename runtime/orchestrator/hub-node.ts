@@ -9,11 +9,10 @@ import type {
 } from 'ethers';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { createExternalWalletApi } from '../api/external-wallet-api';
-import { createDirectRuntimeWsRoute } from '../networking/direct-runtime-bun';
+import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../networking/direct-runtime-bun';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from '../jadapter/default-tokens';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
-import { clearJurisdictionsCache, loadJurisdictions } from '../jurisdiction-loader';
 import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
 import { DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';
 import {
@@ -35,6 +34,7 @@ import {
   closeInvalidRuntimeAdapterMessage,
   forgetRuntimeAdapterClient,
   handleRuntimeAdapterMessage,
+  type RuntimeAdapterSocket,
 } from '../radapter/server';
 import {
   getActiveJAdapter,
@@ -80,6 +80,16 @@ import {
   sleep,
   waitUntil,
 } from './mesh-common';
+import {
+  formatJurisdictionDisplayName,
+  requireJurisdictionBlockTimeMs,
+  resetMeshJurisdictionsCache,
+  resolveMeshJurisdictionConfig,
+  resolveSecondaryJurisdictions,
+  type MeshJurisdictionConfig,
+} from './mesh-jurisdictions';
+
+type HubServerSocket = DirectWebSocket & RuntimeAdapterSocket & { data?: { type?: string } };
 
 type Args = {
   name: string;
@@ -165,18 +175,7 @@ type LocalHealthResponse = {
   timings: TimingMap;
 };
 
-type JurisdictionConfig = {
-  name: string;
-  chainId: number;
-  rpc: string;
-  blockTimeMs?: number;
-  contracts?: {
-    depository: string;
-    entityProvider: string;
-    account?: string;
-    deltaTransformer?: string;
-  };
-};
+type JurisdictionConfig = MeshJurisdictionConfig;
 
 type JurisdictionsFile = {
   version?: string;
@@ -345,52 +344,8 @@ const startedAtFor = (stage: keyof typeof timings): number | null => {
   return timing.startedAt;
 };
 
-const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig => {
-  const data = loadJurisdictions();
-  const map = data.jurisdictions ?? {};
-  const requestedRpc = String(rpcUrlOverride || '').trim();
-  const exactMatch = Object.values(map).find((entry) => {
-    if (!entry || typeof entry !== 'object') return false;
-    return String((entry as JurisdictionConfig).rpc || '').trim() === requestedRpc;
-  });
-  const arrakis = exactMatch ?? map['arrakis'] ?? Object.values(map)[0];
-  if (!arrakis) {
-    throw new Error('JURISDICTION_NOT_FOUND');
-  }
-  return {
-    ...(arrakis as JurisdictionConfig),
-    rpc: rpcUrlOverride || (arrakis as JurisdictionConfig).rpc,
-  };
-};
-
-const requireJurisdictionBlockTimeMs = (jurisdiction: JurisdictionConfig): number => {
-  const value = Number(jurisdiction.blockTimeMs);
-  if (Number.isFinite(value) && value > 0) return Math.floor(value);
-  throw new Error(`JURISDICTION_BLOCK_TIME_MISSING:${jurisdiction.name}`);
-};
-
-const isSecondaryJurisdictionConfig = (key: string, jurisdiction: JurisdictionConfig, primaryRpc: string): boolean => {
-  const normalizedKey = String(key || '').trim().toLowerCase();
-  const normalizedName = String(jurisdiction.name || '').trim().toLowerCase();
-  const normalizedRpc = String(jurisdiction.rpc || '').trim();
-  if (primaryRpc && normalizedRpc === primaryRpc) return false;
-  return normalizedKey === 'tron' || normalizedKey === 'rpc2' || normalizedName.includes('tron') || normalizedRpc.includes('/rpc2');
-};
-
-const formatJurisdictionDisplayName = (name: string): string =>
-  String(name || '')
-    .replace(/\s*\((?:local|shared)\s+anvil\)\s*$/i, '')
-    .trim();
-
-const resolveSecondaryJurisdictions = (primaryRpc: string): JurisdictionConfig[] => {
-  clearJurisdictionsCache();
-  const data = loadJurisdictions();
-  const entries = Object.entries(data.jurisdictions ?? {});
-  return entries
-    .filter(([, jurisdiction]) => Boolean(jurisdiction?.rpc && jurisdiction?.contracts?.depository && jurisdiction?.contracts?.entityProvider))
-    .filter(([key, jurisdiction]) => isSecondaryJurisdictionConfig(key, jurisdiction as JurisdictionConfig, primaryRpc))
-    .map(([, jurisdiction]) => jurisdiction as JurisdictionConfig);
-};
+const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig =>
+  resolveMeshJurisdictionConfig<JurisdictionConfig>(rpcUrlOverride);
 
 const REQUIRED_RPC_CONTRACT_KEYS = ['account', 'depository', 'entityProvider', 'deltaTransformer'] as const;
 
@@ -528,7 +483,7 @@ const writeJurisdictionAddresses = async (jadapter: JAdapter, rpcUrl: string): P
     };
     writeFileSync(filePath, JSON.stringify(nextPayload, null, 2) + '\n', 'utf8');
   }
-  clearJurisdictionsCache();
+  resetMeshJurisdictionsCache();
 };
 
 const syncEnvJurisdictionReplica = (env: Env, jadapter: JAdapter, rpcUrl: string): void => {
@@ -1088,7 +1043,7 @@ const run = async (): Promise<void> => {
   env.runtimeState = env.runtimeState ?? {};
   env.runtimeState.directEntityInputDispatch = (targetRuntimeId, input, ingressTimestamp) =>
     directRuntimeWs.sendEntityInput(targetRuntimeId, input, ingressTimestamp);
-  const handleRadapterWsMessage = (ws: any, raw: string | Buffer | ArrayBuffer): void => {
+  const handleRadapterWsMessage = (ws: HubServerSocket, raw: string | Buffer | ArrayBuffer): void => {
     let msg: Record<string, unknown>;
     try {
       msg = decodeRuntimeAdapterMessage<Record<string, unknown>>(raw);
@@ -1411,21 +1366,21 @@ const run = async (): Promise<void> => {
       }
 	    },
 	    websocket: {
-	      open(ws: any) {
+	      open(ws: HubServerSocket) {
 	        if (ws.data?.type === 'rpc') {
 	          attachRuntimeAdapterTicker(env, registerEnvChangeCallback);
 	          return;
 	        }
 	        directRuntimeWs.websocket.open(ws);
 	      },
-	      message(ws: any, raw: string | Buffer | ArrayBuffer) {
+	      message(ws: HubServerSocket, raw: string | Buffer | ArrayBuffer) {
 	        if (ws.data?.type === 'rpc') {
 	          handleRadapterWsMessage(ws, raw);
 	          return;
 	        }
 	        return directRuntimeWs.websocket.message(ws, raw);
 	      },
-	      close(ws: any) {
+	      close(ws: HubServerSocket) {
 	        if (ws.data?.type === 'rpc') {
 	          forgetRuntimeAdapterClient(ws);
 	          return;

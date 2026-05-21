@@ -80,15 +80,31 @@ type DecodedHankoEnvelope = {
   claims: DecodedHankoClaim[];
 };
 
+type AbiDecodedHankoClaim = readonly [
+  entityId: Uint8Array | string,
+  entityIndexes: readonly bigint[],
+  weights: readonly bigint[],
+  threshold: bigint,
+];
+
+type AbiDecodedHankoEnvelope = readonly [
+  readonly [
+    placeholders: readonly string[],
+    packedSignatures: string,
+    claims: readonly AbiDecodedHankoClaim[],
+  ],
+];
+
 const toEntityIdHex = (value: Uint8Array | Buffer): string =>
   `0x${Array.from(value).map((b) => b.toString(16).padStart(2, '0')).join('')}`;
 
 function decodeHankoEnvelope(hankoBytes: HankoString): DecodedHankoEnvelope {
-  const decoded = ethers.AbiCoder.defaultAbiCoder().decode(HANKO_ABI, hankoBytes);
+  const decoded = ethers.AbiCoder.defaultAbiCoder().decode(HANKO_ABI, hankoBytes) as unknown as AbiDecodedHankoEnvelope;
+  const [placeholders, packedSignatures, claims] = decoded[0];
   return {
-    placeholders: decoded[0][0].map((p: string) => ethers.hexlify(p).toLowerCase()),
-    packedSignatures: bufferFrom(decoded[0][1].replace('0x', ''), 'hex'),
-    claims: decoded[0][2].map((c: any) => ({
+    placeholders: placeholders.map((p) => ethers.hexlify(p).toLowerCase()),
+    packedSignatures: bufferFrom(packedSignatures.replace('0x', ''), 'hex'),
+    claims: claims.map((c) => ({
       entityId: ethers.hexlify(c[0]).toLowerCase(),
       entityIndexes: c[1].map((idx: bigint) => Number(idx)),
       weights: c[2].map((w: bigint) => Number(w)),
@@ -431,7 +447,7 @@ export async function verifyHankoForHash(
   hankoBytes: HankoString,
   hash: string,
   expectedEntityId: string,
-  env?: any
+  env?: Env,
 ): Promise<{ valid: boolean; entityId: string | null }> {
   try {
     const decodedHanko = decodeHankoEnvelope(hankoBytes);
@@ -516,7 +532,7 @@ export async function verifyHankoForHash(
     // CRITICAL: Verify recovered addresses match entity's board validators
     let expectedAddresses: string[] = [];
     if (env && env.eReplicas) {
-      const replica: any = Array.from(env.eReplicas.values()).find((r: any) => r.state?.entityId === expectedEntityId);
+      const replica = Array.from(env.eReplicas.values()).find((r) => r.state?.entityId === expectedEntityId);
       if (replica) {
         const validators = (replica.state?.config?.validators || []) as unknown[];
 

@@ -12,8 +12,9 @@ import { loadJurisdictions } from '../jurisdiction-loader';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT } from '../jadapter/default-tokens';
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { hashHtlcSecret } from '../htlc-utils';
-import type { JurisdictionConfig } from '../types';
+import type { AccountMachine, Delta, EntityInput, Env, JurisdictionConfig, RoutedEntityInput } from '../types';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
+import type { Profile } from '../networking/gossip';
 import { ethers } from 'ethers';
 
 const args = globalThis.process.argv.slice(2);
@@ -47,6 +48,7 @@ const R2R_AMOUNT = usd(250);
 const HTLC_AMOUNT = usd(1_000);
 
 const sleep = (ms: number) => new Promise(resolve => setTimeout(resolve, ms));
+type P2PScenarioEnv = Env & { _lastGossipRefresh?: number };
 
 const resolveJurisdiction = (): {
   jurisdiction: JurisdictionConfig;
@@ -87,7 +89,7 @@ const deployDefaultTokensOnRpc = async (jadapter: JAdapter): Promise<void> => {
   }
 
   console.log(`[P2P] Deploying default tokens on ${jurisdictionName}...`);
-  const erc20Factory = new ERC20Mock__factory(jadapter.signer as any);
+  const erc20Factory = new ERC20Mock__factory(jadapter.signer);
   for (const token of DEFAULT_TOKENS) {
     const tokenContract = await erc20Factory.deploy(token.name, token.symbol, DEFAULT_TOKEN_SUPPLY);
     await tokenContract.waitForDeployment();
@@ -97,7 +99,7 @@ const deployDefaultTokensOnRpc = async (jadapter: JAdapter): Promise<void> => {
     const approveTx = await tokenContract.approve(depositoryAddress, TOKEN_REGISTRATION_AMOUNT);
     await approveTx.wait();
 
-    const registerTx = await (jadapter.depository.connect(jadapter.signer as any) as any).adminRegisterExternalToken({
+    const registerTx = await jadapter.depository.connect(jadapter.signer).adminRegisterExternalToken({
       entity: ethers.ZeroHash,
       contractAddress: tokenAddress,
       externalTokenId: 0,
@@ -146,14 +148,14 @@ const waitForTokenCatalog = async (jadapter: JAdapter, maxRounds = 40): Promise<
   throw new Error('TOKEN_CATALOG_EMPTY');
 };
 
-const getReserveBalance = (env: any, entityId: string, signerId: string, tokenId: number) => {
+const getReserveBalance = (env: P2PScenarioEnv, entityId: string, signerId: string, tokenId: number): bigint => {
   const replica = env.eReplicas.get(`${entityId}:${signerId}`);
   if (!replica) return 0n;
   return replica.state.reserves?.get(tokenId) ?? 0n;
 };
 
 const waitForReserveBalance = async (
-  env: any,
+  env: P2PScenarioEnv,
   entityId: string,
   signerId: string,
   tokenId: number,
@@ -162,12 +164,13 @@ const waitForReserveBalance = async (
   maxRounds = 300
 ) => {
   const jadapter = getActiveJAdapter(env);
+  if (!jadapter) throw new Error('JADAPTER_MISSING');
   for (let round = 1; round <= maxRounds; round++) {
     if (getReserveBalance(env, entityId, signerId, tokenId) >= minAmount) return;
 
     await runtimeProcess(env);
-    if (typeof (jadapter as any)?.pollNow === 'function') {
-      await (jadapter as any).pollNow();
+    if (typeof jadapter.pollNow === 'function') {
+      await jadapter.pollNow();
       await runtimeProcess(env);
     }
 
@@ -184,7 +187,7 @@ const waitForReserveBalance = async (
 };
 
 const fundWalletAndDeposit = async (
-  env: any,
+  env: P2PScenarioEnv,
   jadapter: JAdapter,
   token: JTokenInfo,
   entityId: string,
@@ -193,7 +196,7 @@ const fundWalletAndDeposit = async (
 ) => {
   const signerPrivateKey = getSignerPrivateKey(env, signerId);
   const privateKeyHex = '0x' + Buffer.from(signerPrivateKey).toString('hex');
-  const wallet = new ethers.Wallet(privateKeyHex, jadapter.provider as any);
+  const wallet = new ethers.Wallet(privateKeyHex, jadapter.provider);
   const walletAddress = await wallet.getAddress();
   console.log(`[P2P] Faucet: ${signerId.slice(-4)} wallet=${walletAddress.slice(0, 10)} token=${token.symbol}`);
 
@@ -212,7 +215,7 @@ const fundWalletAndDeposit = async (
     const erc20 = new ethers.Contract(
       token.address,
       ['function balanceOf(address owner) view returns (uint256)', 'function transfer(address to, uint256 amount) returns (bool)'],
-      jadapter.signer as any
+      jadapter.signer
     );
     const balanceOf = erc20.getFunction('balanceOf');
     const transfer = erc20.getFunction('transfer');
@@ -229,32 +232,32 @@ const fundWalletAndDeposit = async (
   console.log(`[P2P] Faucet: deposited ${amount} ${token.symbol} to ${entityId.slice(-4)}`);
 };
 
-const getProfileByName = (env: any, name: string) => {
+const getProfileByName = (env: P2PScenarioEnv, name: string): Profile | undefined => {
   const profiles = env.gossip?.getProfiles?.() || [];
   console.log(`🔍 getProfileByName('${name}'): Searching in ${profiles.length} profiles`);
 
-  const profile = profiles.find((p: any) => (p.metadata?.name || '').toLowerCase() === name.toLowerCase());
+  const profile = profiles.find((p) => (p.name || '').toLowerCase() === name.toLowerCase());
   if (profile) {
-    console.log(`🔍 FOUND '${name}': ${profile.entityId.slice(-4)} accounts=${profile.accounts?.length || 0} ts=${profile.metadata?.lastUpdated}`);
+    console.log(`🔍 FOUND '${name}': ${profile.entityId.slice(-4)} accounts=${profile.accounts?.length || 0} ts=${profile.lastUpdated}`);
   } else {
-    console.log(`🔍 NOT FOUND '${name}' (names: ${profiles.map((p: any) => p.metadata?.name).join(',')})`);
+    console.log(`🔍 NOT FOUND '${name}' (names: ${profiles.map((p) => p.name).join(',')})`);
   }
   return profile;
 };
 
-const getAccount = (env: any, entityId: string, signerId: string, counterpartyId: string) => {
+const getAccount = (env: P2PScenarioEnv, entityId: string, signerId: string, counterpartyId: string): AccountMachine | undefined => {
   const replica = env.eReplicas.get(`${entityId}:${signerId}`);
   return replica?.state.accounts?.get(counterpartyId);
 };
 
-const getLeftEntity = (account: any): string | null => {
+const getLeftEntity = (account: AccountMachine | undefined): string | null => {
   const from = account?.proofHeader?.fromEntity;
   const to = account?.proofHeader?.toEntity;
   if (!from || !to) return null;
   return from < to ? from : to;
 };
 
-const resolveSides = (account: any, entityId: string, counterpartyId: string) => {
+const resolveSides = (account: AccountMachine | undefined, entityId: string, counterpartyId: string) => {
   const leftEntity = getLeftEntity(account);
   if (leftEntity) {
     return {
@@ -273,7 +276,7 @@ const formatBig = (value: bigint | undefined) => (value === undefined ? undefine
 
 const summarizeTxs = (txs: Array<{ type: string }> | undefined) => (txs || []).map(tx => tx.type);
 
-const describeDelta = (delta: any) => {
+const describeDelta = (delta: Delta | undefined) => {
   if (!delta) return null;
   return {
     offdelta: formatBig(delta.offdelta),
@@ -286,7 +289,7 @@ const describeDelta = (delta: any) => {
   };
 };
 
-const describeAccount = (account: any) => {
+const describeAccount = (account: AccountMachine | undefined) => {
   if (!account) {
     return { exists: false };
   }
@@ -301,7 +304,7 @@ const describeAccount = (account: any) => {
   };
 };
 
-const logAccountState = (env: any, entityId: string, signerId: string, counterpartyId: string, label: string) => {
+const logAccountState = (env: P2PScenarioEnv, entityId: string, signerId: string, counterpartyId: string, label: string) => {
   const account = getAccount(env, entityId, signerId, counterpartyId);
   const delta = account?.deltas?.get(USDC);
   console.log(`[P2P_DEBUG] ${label}`, {
@@ -310,7 +313,7 @@ const logAccountState = (env: any, entityId: string, signerId: string, counterpa
   });
 };
 
-const logEntityState = (env: any, entityId: string, signerId: string, label: string) => {
+const logEntityState = (env: P2PScenarioEnv, entityId: string, signerId: string, label: string) => {
   const replica = env.eReplicas.get(`${entityId}:${signerId}`);
   if (!replica) {
     console.log(`[P2P_DEBUG] ${label}`, { entity: 'missing' });
@@ -324,7 +327,7 @@ const logEntityState = (env: any, entityId: string, signerId: string, label: str
   });
 };
 
-const summarizeQueueTargets = (inputs: any[] | undefined) => {
+const summarizeQueueTargets = (inputs: EntityInput[] | undefined) => {
   if (!inputs || inputs.length === 0) return [];
   const targets = new Set<string>();
   for (const input of inputs) {
@@ -333,7 +336,7 @@ const summarizeQueueTargets = (inputs: any[] | undefined) => {
   return Array.from(targets.values());
 };
 
-const logQueues = (env: any, label: string) => {
+const logQueues = (env: P2PScenarioEnv, label: string) => {
   console.log(`[P2P_DEBUG] ${label}`, {
     pendingOutputs: summarizeQueueTargets(env.pendingOutputs),
     pendingNetworkOutputs: summarizeQueueTargets(env.pendingNetworkOutputs),
@@ -341,7 +344,7 @@ const logQueues = (env: any, label: string) => {
   });
 };
 
-const logProfile = (label: string, profile: any) => {
+const logProfile = (label: string, profile: Profile | null | undefined) => {
   if (!profile) {
     console.log(`[P2P_DEBUG] ${label}`, { profile: 'missing' });
     return;
@@ -354,14 +357,14 @@ const logProfile = (label: string, profile: any) => {
     entityId: profile.entityId,
     runtimeId: profile.runtimeId,
     wsUrl: profile.wsUrl || null,
-    accounts: (profile.accounts || []).map((acct: any) => acct.counterpartyId?.slice(-4)).filter(Boolean),
+    accounts: (profile.accounts || []).map((acct) => acct.counterpartyId?.slice(-4)).filter(Boolean),
     boardSize,
     hasPublicKey: typeof profile.metadata?.board?.validators?.[0]?.publicKey === 'string',
   });
 };
 
 const waitForProfile = async (
-  env: any,
+  env: P2PScenarioEnv,
   name: string,
   maxRounds = 30,
   refresh?: () => void,
@@ -369,7 +372,7 @@ const waitForProfile = async (
   requireBoard = false,
   requirePublicKey = false
 ) => {
-  let lastProfile: any | null = null;
+  let lastProfile: Profile | null = null;
   for (let i = 0; i < maxRounds; i++) {
     const profile = getProfileByName(env, name);
     if (profile) {
@@ -404,7 +407,7 @@ const waitForProfile = async (
   throw new Error(`PROFILE_TIMEOUT: ${name}`);
 };
 
-const waitForAccount = async (env: any, entityId: string, signerId: string, counterpartyId: string, maxRounds = 30) => {
+const waitForAccount = async (env: P2PScenarioEnv, entityId: string, signerId: string, counterpartyId: string, maxRounds = 30) => {
   await processUntil(
     env,
     () => !!getAccount(env, entityId, signerId, counterpartyId),
@@ -425,7 +428,7 @@ const waitForAccount = async (env: any, entityId: string, signerId: string, coun
   );
 };
 
-const waitForAccountReady = async (env: any, entityId: string, signerId: string, counterpartyId: string, maxRounds = 60) => {
+const waitForAccountReady = async (env: P2PScenarioEnv, entityId: string, signerId: string, counterpartyId: string, maxRounds = 60) => {
   await processUntil(
     env,
     () => {
@@ -450,7 +453,7 @@ const waitForAccountReady = async (env: any, entityId: string, signerId: string,
 };
 
 const waitForPayment = async (
-  env: any,
+  env: P2PScenarioEnv,
   entityId: string,
   signerId: string,
   counterpartyId: string,
@@ -483,7 +486,7 @@ const waitForPayment = async (
  * This is critical: we can't open account until hub can route messages back to us.
  */
 const waitForHubToHaveOurProfile = async (
-  env: any,
+  env: P2PScenarioEnv,
   ourEntityId: string,
   refresh?: () => void,
   maxRounds = 10
@@ -509,7 +512,7 @@ const waitForHubToHaveOurProfile = async (
 };
 
 const waitForHubAccount = async (
-  env: any,
+  env: P2PScenarioEnv,
   counterpartyId: string,
   refresh?: () => void,
   maxRounds = 40
@@ -517,13 +520,13 @@ const waitForHubAccount = async (
   for (let i = 0; i < maxRounds; i++) {
     const profile = getProfileByName(env, 'hub');
     const accounts = profile?.accounts || [];
-    const accountIds = accounts.map((a: any) => a.counterpartyId?.slice(-4) || '????');
+    const accountIds = accounts.map((account) => account.counterpartyId?.slice(-4) || '????');
 
     if (i % 5 === 0) {
       console.log(`[HUB-ACCOUNT-WAIT] round=${i} hubProfile=${!!profile} accounts=[${accountIds.join(',')}] looking for=${counterpartyId.slice(-4)}`);
     }
 
-    if (profile?.runtimeId && accounts.some((account: any) => account.counterpartyId === counterpartyId)) {
+    if (profile?.runtimeId && accounts.some((account) => account.counterpartyId === counterpartyId)) {
       console.log(`✅ Found hub account with ${counterpartyId.slice(-4)}`);
       return;
     }
@@ -534,14 +537,14 @@ const waitForHubAccount = async (
   // Scope fix for error message
   const finalProfile = getProfileByName(env, 'hub');
   const finalAccounts = finalProfile?.accounts || [];
-  const finalAccountIds = finalAccounts.map((a: any) => a.counterpartyId?.slice(-4) || '????');
+  const finalAccountIds = finalAccounts.map((account) => account.counterpartyId?.slice(-4) || '????');
   console.error(`❌ HUB_ACCOUNT_MISSING: Looking for ${counterpartyId.slice(-4)}, hub has accounts: [${finalAccountIds.join(',')}]`);
   logProfile('wait-hub-account timeout', finalProfile);
   throw new Error(`HUB_ACCOUNT_MISSING: ${counterpartyId}`);
 };
 
 const waitForCreditLimit = async (
-  env: any,
+  env: P2PScenarioEnv,
   entityId: string,
   signerId: string,
   counterpartyId: string,
@@ -576,7 +579,7 @@ const waitForCreditLimit = async (
 };
 
 const waitForOwnCreditLimit = async (
-  env: any,
+  env: P2PScenarioEnv,
   entityId: string,
   signerId: string,
   counterpartyId: string,
@@ -613,7 +616,7 @@ const waitForOwnCreditLimit = async (
 const run = async () => {
   console.log(`P2P_NODE_CONFIG role=${role} relayUrl=${relayUrl} relayPort=${relayPort} isHub=${isHub}`);
 
-  const env = await main(seed);
+  const env: P2PScenarioEnv = await main(seed);
   startRuntimeLoop(env);
   console.log('[P2P-NODE] Runtime event loop started');
   let jurisdiction: JurisdictionConfig | null = null;
@@ -662,23 +665,24 @@ const run = async () => {
       serverId: role,
       ...(env.runtimeId ? { serverRuntimeId: env.runtimeId } : {}),  // Enable local delivery for messages to self
       // CRITICAL: Pass callback to feed messages into Hub's runtime
-      onEntityInput: async (from: string | undefined, input: any) => {
+      onEntityInput: async (from: string | undefined, input: unknown) => {
+        const routedInput = input as RoutedEntityInput;
         const fromLabel = from ? from.slice(0, 10) : 'unknown';
-        console.log(`[HUB-RELAY] Received entity_input from=${fromLabel} entity=${input.entityId.slice(-4)}`);
+        console.log(`[HUB-RELAY] Received entity_input from=${fromLabel} entity=${routedInput.entityId.slice(-4)}`);
 
         // CRITICAL: Ensure we have profiles before processing
         // Only refresh if we haven't recently (to avoid slowdown)
         const now = Date.now();
-        const lastRefresh = (env as any)._lastGossipRefresh || 0;
+        const lastRefresh = env._lastGossipRefresh || 0;
         if (p2p && (now - lastRefresh > 1000)) {  // Refresh max once per second
           console.log(`[HUB-RELAY] Refreshing gossip before processing...`);
           p2p.refreshGossip();
-          (env as any)._lastGossipRefresh = now;
+          env._lastGossipRefresh = now;
           await sleep(100);  // Brief wait for response
         }
 
         if (!env.networkInbox) env.networkInbox = [];
-        env.networkInbox.push(input);
+        env.networkInbox.push(routedInput);
         console.log(`[HUB-RELAY] Added to networkInbox, size=${env.networkInbox.length}`);
         // Runtime loop will pick this up on next tick (always-on via startRuntimeLoop)
       },
@@ -751,8 +755,8 @@ const run = async () => {
     }
     await fundWalletAndDeposit(env, jadapter, usdcToken, entityId, signerId, FAUCET_DEPOSIT_AMOUNT);
     // RPC watcher default poll is 15s; force immediate fetch so reserve sync is not timing-sensitive.
-    if (typeof (jadapter as any).pollNow === 'function') {
-      await (jadapter as any).pollNow();
+    if (typeof jadapter.pollNow === 'function') {
+      await jadapter.pollNow();
       await runtimeProcess(env);
       await runtimeProcess(env);
     }
@@ -964,8 +968,8 @@ const run = async () => {
           break;
         }
         await runtimeProcess(env);
-        if (typeof (jadapter as any).pollNow === 'function') {
-          await (jadapter as any).pollNow();
+        if (typeof jadapter.pollNow === 'function') {
+          await jadapter.pollNow();
           await runtimeProcess(env);
         }
         if (round % 10 === 0) {
@@ -1031,7 +1035,7 @@ const run = async () => {
         const account = getAccount(env, entityId, signerId, hubProfile.entityId);
         // Payment is done when our account shows the offdelta change and no pending frame
         const delta = account?.deltas?.get(USDC);
-        return !!account && !account.pendingFrame && delta && delta.offdelta < 0n;
+        return !!account && !account.pendingFrame && !!delta && delta.offdelta < 0n;
       },
       240,
       'alice-htlc-ack',

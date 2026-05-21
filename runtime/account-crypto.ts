@@ -16,6 +16,11 @@ type RuntimeGlobal = typeof globalThis & {
   Buffer?: typeof BufferPolyfill;
 };
 
+type SignerKeyEnv = {
+  runtimeSeed?: Uint8Array | string | null | undefined;
+  quietRuntimeLogs?: boolean | undefined;
+};
+
 // Configure @noble/secp256k1 HMAC (required for signing)
 // Always install a sync HMAC implementation (Node/Bun fast path, browser fallback).
 const installHmacSync = () => {
@@ -308,7 +313,7 @@ export function getCachedSignerAddress(signerId: string): string | null {
 }
 
 // Export for runtime/hanko/signing.ts
-export function getSignerPrivateKey(env: any, signerId: string): Uint8Array {
+export function getSignerPrivateKey(env: SignerKeyEnv, signerId: string): Uint8Array {
   const key = signerId.toLowerCase();
   const exactRegistered = getExactRegisteredSignerPrivateKey(key);
   if (exactRegistered) {
@@ -329,7 +334,7 @@ export function getSignerPrivateKey(env: any, signerId: string): Uint8Array {
   throw new Error(`UNSUPPORTED_SIGNER_ID: "${signerId}" is not numeric or a registered EOA address.`);
 }
 
-export function getSignerPublicKey(env: any, signerId: string): Uint8Array | null {
+export function getSignerPublicKey(env: SignerKeyEnv, signerId: string): Uint8Array | null {
   const key = signerId.toLowerCase();
   const exactRegistered = getExactRegisteredSignerPublicKey(key);
   if (exactRegistered) return exactRegistered;
@@ -353,7 +358,7 @@ export function deriveSignerAddressSync(seed: Uint8Array | string, signerId: str
   return privateKeyToAddress(privateKey);
 }
 
-export function getSignerAddress(env: any, signerId: string): string | null {
+export function getSignerAddress(env: SignerKeyEnv, signerId: string): string | null {
   const key = signerId.toLowerCase();
   const exactRegistered = getExactRegisteredSignerAddress(key);
   if (exactRegistered) return exactRegistered;
@@ -444,7 +449,7 @@ export function clearSignerKeys(): void {
  * Returns: 65-byte signature (r + s + recovery)
  */
 export function signAccountFrame(
-  env: any,
+  env: SignerKeyEnv,
   signerId: string,
   frameHash: string
 ): string {
@@ -473,7 +478,7 @@ export function signDigest(seed: Uint8Array | string, signerId: string, digestHe
  * Verify account signature using secp256k1
  */
 export function verifyAccountSignature(
-  env: any,
+  env: SignerKeyEnv,
   signerId: string,
   frameHash: string,
   signature: string
@@ -527,7 +532,7 @@ export function verifyAccountSignature(
  * Validate multiple signatures for account frame
  */
 export function validateAccountSignatures(
-  env: any,
+  env: SignerKeyEnv,
   frameHash: string,
   signatures: string[],
   expectedSigners: string[]

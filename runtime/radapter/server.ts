@@ -18,7 +18,7 @@ import {
   verifyRuntimeAdapterAuthCredential,
 } from './auth';
 
-type AdapterSocket = {
+export type RuntimeAdapterSocket = {
   send: (message: string | Uint8Array) => unknown;
   close?: (code?: number, reason?: string) => unknown;
 };
@@ -42,7 +42,7 @@ export type RuntimeAdapterServerDeps = {
   enqueueRuntimeInput: (env: Env, input: RuntimeInput) => void;
 };
 
-const clients = new Map<AdapterSocket, AdapterClientState>();
+const clients = new Map<RuntimeAdapterSocket, AdapterClientState>();
 let attachedEnv: Env | null = null;
 let detachEnvChange: (() => void) | null = null;
 const RUNTIME_ADAPTER_BACKPRESSURE_DEFAULT_BYTES = 2 * 1024 * 1024;
@@ -65,7 +65,7 @@ const createConfiguredBucket = (
 const runtimeAdapterBackpressureBytes = (): number =>
   readPositiveNumberEnv('XLN_RADAPTER_BACKPRESSURE_BYTES', RUNTIME_ADAPTER_BACKPRESSURE_DEFAULT_BYTES);
 
-const getClientState = (ws: AdapterSocket): AdapterClientState => {
+const getClientState = (ws: RuntimeAdapterSocket): AdapterClientState => {
   let state = clients.get(ws);
   if (!state) {
     state = {
@@ -80,8 +80,8 @@ const getClientState = (ws: AdapterSocket): AdapterClientState => {
   return state;
 };
 
-const sendResponse = (ws: AdapterSocket, response: RuntimeAdapterResponse): void => {
-  const buffered = (ws as AdapterSocket & { getBufferedAmount?: () => number }).getBufferedAmount?.() ?? 0;
+const sendResponse = (ws: RuntimeAdapterSocket, response: RuntimeAdapterResponse): void => {
+  const buffered = (ws as RuntimeAdapterSocket & { getBufferedAmount?: () => number }).getBufferedAmount?.() ?? 0;
   if (buffered > runtimeAdapterBackpressureBytes()) {
     ws.close?.(1013, 'runtime adapter socket backpressure');
     return;
@@ -113,11 +113,11 @@ const sendResponse = (ws: AdapterSocket, response: RuntimeAdapterResponse): void
   ws.send(encoded);
 };
 
-const sendOk = (ws: AdapterSocket, inReplyTo: string, payload: unknown): void => {
+const sendOk = (ws: RuntimeAdapterSocket, inReplyTo: string, payload: unknown): void => {
   sendResponse(ws, { v: 1, inReplyTo, ok: true, payload });
 };
 
-const sendErr = (ws: AdapterSocket, inReplyTo: string, error: unknown): void => {
+const sendErr = (ws: RuntimeAdapterSocket, inReplyTo: string, error: unknown): void => {
   sendResponse(ws, { v: 1, inReplyTo, ok: false, error: toRuntimeAdapterErrorPayload(error) });
 };
 
@@ -148,13 +148,13 @@ const requireBucket = (bucket: TokenBucket, label: string): void => {
   );
 };
 
-export const forgetRuntimeAdapterClient = (ws: AdapterSocket): void => {
+export const forgetRuntimeAdapterClient = (ws: RuntimeAdapterSocket): void => {
   clients.delete(ws);
 };
 
 export const runtimeAdapterClientCount = (): number => clients.size;
 
-export const closeInvalidRuntimeAdapterMessage = (ws: AdapterSocket, error: unknown): void => {
+export const closeInvalidRuntimeAdapterMessage = (ws: RuntimeAdapterSocket, error: unknown): void => {
   const message = error instanceof Error ? error.message : String(error || '');
   ws.close?.(message.includes('RADAPTER_MESSAGE_TOO_LARGE') ? 1009 : 1003, 'Invalid runtime adapter message');
 };
@@ -189,7 +189,7 @@ export const attachRuntimeAdapterTicker = (
 };
 
 export const handleRuntimeAdapterMessage = async (
-  ws: AdapterSocket,
+  ws: RuntimeAdapterSocket,
   msg: Record<string, unknown>,
   env: Env | null,
   deps: RuntimeAdapterServerDeps,

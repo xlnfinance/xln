@@ -2,7 +2,25 @@ import { describe, expect, test } from 'bun:test';
 
 import { getWatcherStartBlock, processEventBatch, updateWatcherJurisdictionCursor } from '../jadapter/watcher';
 import { createEmptyEnv } from '../runtime';
-import type { EntityReplica } from '../types';
+import type { EntityReplica, Env, JReplica } from '../types';
+
+const makeJReplica = (name: string, blockNumber: bigint, depositoryAddress: string): JReplica => ({
+  name,
+  blockNumber,
+  depositoryAddress,
+  stateRoot: new Uint8Array(32),
+  mempool: [],
+  blockDelayMs: 0,
+  lastBlockTimestamp: 0,
+  position: { x: 0, y: 0, z: 0 },
+});
+
+const makeCursorEnv = (seed: string, replicas: JReplica[], activeJurisdiction?: string): Env => {
+  const env = createEmptyEnv(seed);
+  env.activeJurisdiction = activeJurisdiction;
+  env.jReplicas = new Map(replicas.map((replica) => [replica.name, replica]));
+  return env;
+};
 
 const makeReplica = (entityId: string, signerId: string, isProposer: boolean): EntityReplica =>
   ({
@@ -49,44 +67,33 @@ const makeReplica = (entityId: string, signerId: string, isProposer: boolean): E
 
 describe('jadapter helper cursors', () => {
   test('uses matching jReplica blockNumber as watcher cursor source', () => {
-    const env = {
-      activeJurisdiction: 'Arrakis',
-      jReplicas: new Map([
-        ['Arrakis', { name: 'Arrakis', blockNumber: 17n, depositoryAddress: '0xaaa' }],
-        ['Wakanda', { name: 'Wakanda', blockNumber: 44n, depositoryAddress: '0xbbb' }],
-      ]),
-    } as any;
+    const env = makeCursorEnv('jadapter-cursor-match', [
+      makeJReplica('Arrakis', 17n, '0xaaa'),
+      makeJReplica('Wakanda', 44n, '0xbbb'),
+    ], 'Arrakis');
 
     expect(getWatcherStartBlock(env, '0xaaa')).toBe(18);
   });
 
   test('falls back to active jurisdiction block when no depository address is provided', () => {
-    const env = {
-      activeJurisdiction: 'Wakanda',
-      jReplicas: new Map([
-        ['Arrakis', { name: 'Arrakis', blockNumber: 22n, depositoryAddress: '0xaaa' }],
-        ['Wakanda', { name: 'Wakanda', blockNumber: 19n, depositoryAddress: '0xbbb' }],
-      ]),
-    } as any;
+    const env = makeCursorEnv('jadapter-cursor-active', [
+      makeJReplica('Arrakis', 22n, '0xaaa'),
+      makeJReplica('Wakanda', 19n, '0xbbb'),
+    ], 'Wakanda');
 
     expect(getWatcherStartBlock(env)).toBe(20);
   });
 
   test('falls back to genesis when no jurisdiction replica is present', () => {
-    const env = {
-      jReplicas: new Map(),
-    } as any;
+    const env = makeCursorEnv('jadapter-cursor-empty', []);
 
     expect(getWatcherStartBlock(env)).toBe(1);
   });
 
   test('watcher start block only advances after an explicit committed cursor update', () => {
-    const env = {
-      activeJurisdiction: 'Arrakis',
-      jReplicas: new Map([
-        ['Arrakis', { name: 'Arrakis', blockNumber: 100n, depositoryAddress: '0xaaa' }],
-      ]),
-    } as any;
+    const env = makeCursorEnv('jadapter-cursor-update', [
+      makeJReplica('Arrakis', 100n, '0xaaa'),
+    ], 'Arrakis');
 
     expect(getWatcherStartBlock(env, '0xaaa')).toBe(101);
     updateWatcherJurisdictionCursor(env, 120, '0xaaa');
@@ -99,8 +106,8 @@ describe('jadapter helper cursors', () => {
     env.quietRuntimeLogs = true;
 
     const entityId = `0x${'44'.repeat(32)}`;
-    const proposerSignerId = `0x${'55'.repeat(20)}`;
-    const validatorSignerId = `0x${'66'.repeat(20)}`;
+    const proposerSignerId = '1';
+    const validatorSignerId = '2';
     env.eReplicas.set(`${entityId}:${proposerSignerId}`, makeReplica(entityId, proposerSignerId, true));
     env.eReplicas.set(`${entityId}:${validatorSignerId}`, makeReplica(entityId, validatorSignerId, false));
 

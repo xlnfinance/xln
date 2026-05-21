@@ -32,7 +32,7 @@ function compareNumericKey(left: string | number, right: string | number): numbe
  * Uses canonical JSON serialization for consistency
  */
 function hashEntityState(state: EntityState): string {
-  const canonical: any = {
+  const canonical = {
     entityId: state.entityId,
     height: state.height,
     timestamp: state.timestamp,

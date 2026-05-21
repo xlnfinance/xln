@@ -1,7 +1,7 @@
 import type { AccountMachine, AccountTx, Env } from '../../types';
 import { getAccountPerspective } from '../../state-helpers';
 import { canonicalJurisdictionEventKey, normalizeJurisdictionEvents } from '../../j-event-normalization';
-import { tryFinalizeAccountJEvents } from '../../entity-tx/j-events';
+import { tryFinalizeAccountJEvents } from '../../entity-tx/j-events-account';
 import { createStructuredLogger, shortHash } from '../../logger';
 
 const jEventClaimLog = createStructuredLogger('account.j_event');
@@ -45,7 +45,7 @@ export function handleJEventClaim(
 
   const sideObservations = claimIsFromLeft ? accountMachine.leftJObservations : accountMachine.rightJObservations;
   const existingObs = sideObservations.find(
-    (o: any) => Number(o?.jHeight) === Number(jHeight) && String(o?.jBlockHash || '') === String(jBlockHash || ''),
+    (o) => Number(o?.jHeight) === Number(jHeight) && String(o?.jBlockHash || '') === String(jBlockHash || ''),
   );
 
   if (existingObs) {

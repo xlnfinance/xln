@@ -14,7 +14,8 @@ test('demo seed creates five finalized court cases with 1000-point verdict margi
   await page.locator('.feed-row').filter({ hasText: 'Side A 866-742 (+124)' }).click();
   await expect(page.getByTestId('verdict-panel')).toBeVisible();
   await expect(page.getByText('Winner: Side A')).toBeVisible();
-  await expect(page.getByText('Side A wins 866-742 by a 124-point margin')).toBeVisible();
+  await expect(page.locator('.judge-panel.verdict')).toContainText('Side A wins 866-742 by a 124-point margin');
+  await expect(page.getByTestId('chief-judge')).toContainText('Side A wins 866-742 by a 124-point margin');
   await expect(page.locator('.score-card')).toContainText('Side A');
   await expect(page.locator('.score-card')).toContainText('866');
   await expect(page.locator('.score-card')).toContainText('Margin');

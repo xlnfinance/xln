@@ -2,22 +2,17 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { cpus, freemem, loadavg, totalmem } from 'node:os';
-import { join, resolve } from 'node:path';
+import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
-import type { ServerWebSocket } from 'bun';
 import { encodeBoard, hashBoard } from '../entity-factory';
 import { compareStableText, safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
-import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
-import { computeJurisdictionsNetworkVersion } from '../jurisdictions-version';
 import { deriveSignerAddressSync } from '../account-crypto';
 import {
   startCustodySupport,
   stopManagedChild,
-  type ManagedChild,
-  type ManagedIdentity,
 } from './custody-bootstrap';
 import {
   createRelayStore,
@@ -30,345 +25,57 @@ import {
 import { forgetRelaySocketRuntimeId, relayRoute, type RelayRouterConfig } from '../relay-router';
 import { type MarketSnapshotPayload } from '../market-snapshot';
 import { createMarketSubscriptionStack, isMarketMessageType } from '../relay/market-subscriptions';
-import { normalizeLoopbackUrl, toPublicRpcUrl } from '../loopback-url';
 import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync, type StorageHealth } from './storage-monitor';
 import { maybeHandleQaRequest } from '../qa/api';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { isLocalOperatorRequest, publicAggregatedHealth } from '../health-redaction';
-
-type Args = {
-  host: string;
-  port: number;
-  publicWsBaseUrl: string;
-  nodeApiPortBase: number;
-  nodePublicPortBase: number;
-  rpcUrl: string;
-  rpc2Url: string;
-  dbRoot: string;
-  mmEnabled: boolean;
-  resetAllowed: boolean;
-  deferInitialReset: boolean;
-  custodyEnabled: boolean;
-  custodyPort: number;
-  custodyDaemonPort: number;
-  custodyDbRoot: string;
-  walletUrl: string;
-};
-
-type OrchestratorWebSocket = ServerWebSocket<{ type: 'relay'; clientIp: string }>;
-
-const readPositiveIntEnv = (name: string, fallback: number): number => {
-  const value = Number(process.env[name] || '');
-  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
-};
-
-const STARTUP_TIMEOUT_MS = readPositiveIntEnv('XLN_ORCHESTRATOR_STARTUP_TIMEOUT_MS', 180_000);
-const HUB_SELF_READY_TIMEOUT_MS = readPositiveIntEnv('XLN_HUB_SELF_READY_TIMEOUT_MS', STARTUP_TIMEOUT_MS);
-const HUB_PROFILES_READY_TIMEOUT_MS = readPositiveIntEnv('XLN_HUB_PROFILES_READY_TIMEOUT_MS', 5_000);
-const HUB_BASELINE_TIMEOUT_MS = readPositiveIntEnv('XLN_HUB_BASELINE_TIMEOUT_MS', Math.max(90_000, STARTUP_TIMEOUT_MS));
-const HUB_DIRECT_LINK_BASELINE_GRACE_MS = readPositiveIntEnv('XLN_HUB_DIRECT_LINK_BASELINE_GRACE_MS', 5_000);
-const MARKET_MAKER_READY_TIMEOUT_MS = readPositiveIntEnv('XLN_MARKET_MAKER_READY_TIMEOUT_MS', Math.max(300_000, STARTUP_TIMEOUT_MS));
-const RELAY_MARKET_MAX_SUBSCRIPTIONS = readPositiveIntEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTIONS', 1000);
-const RELAY_MARKET_MAX_SUBSCRIPTION_CELLS = readPositiveIntEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTION_CELLS', 64);
-const RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP = readPositiveIntEnv('XLN_RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP', 8);
-const CHILD_LOG_RING_MAX = 30;
-
-type StageTiming = {
-  startedAt: number | null;
-  completedAt: number | null;
-  ms: number | null;
-};
-
-type TimingMap = Record<string, StageTiming>;
-
-type ResetState = {
-  inProgress: boolean;
-  lastError: string | null;
-  startedAt: number | null;
-  completedAt: number | null;
-  failedAt: number | null;
-  resolvedAt: number | null;
-};
-
-type HubProcessSpec = {
-  name: 'H1' | 'H2' | 'H3';
-  region: string;
-  seed: string;
-  authSeed: string;
-  signerLabel: string;
-  apiPort: number;
-  publicPort: number;
-  dbPath: string;
-  deployTokens: boolean;
-};
-
-type HubChild = HubProcessSpec & {
-  proc: ChildProcess | null;
-  startedAt: number | null;
-  exitedAt: number | null;
-  exitCode: number | null;
-  restartTimer: ReturnType<typeof setTimeout> | null;
-  restartCount: number;
-  lastHealth: HubHealthPayload | null;
-  lastInfo: HubInfoPayload | null;
-  recentStdout: string[];
-  recentStderr: string[];
-};
-
-type HubHealthPayload = {
-  ok?: boolean;
-  name?: string;
-  entityId?: string | null;
-  runtimeId?: string | null;
-  relayUrl?: string;
-  apiUrl?: string;
-  directWsUrl?: string;
-  p2p?: {
-    directPeers?: Array<{ runtimeId: string; endpoint: string; open: boolean }>;
-  };
-  gossip?: {
-    visibleHubNames?: string[];
-    visibleHubIds?: string[];
-    ready?: boolean;
-  };
-  mesh?: {
-    ready?: boolean;
-    pairs?: Array<{
-      counterpartyId: string;
-      counterpartyName: string;
-      hasAccount: boolean;
-      grantedByMe: string;
-      grantedByPeer: string;
-      ready: boolean;
-    }>;
-  };
-  bootstrapReserves?: {
-    ok: boolean;
-    targetMet?: boolean;
-    tokens: Array<{
-      tokenId: number;
-      symbol: string;
-      decimals: number;
-      current: string;
-      expectedMin: string;
-      ready: boolean;
-      operational?: boolean;
-      targetMet?: boolean;
-    }>;
-  };
-  marketMaker?: {
-    enabled: boolean;
-    ok: boolean;
-    entityId: string | null;
-    startupPhase: string | null;
-    expectedOffersPerHub: number;
-    expectedOffersPerPair?: number;
-    hubs: Array<{
-      hubEntityId: string;
-      offers: number;
-      ready: boolean;
-      pairs?: Array<{
-        pairId: string;
-        offers: number;
-        ready: boolean;
-      }>;
-    }>;
-  };
-  timings?: TimingMap;
-};
-
-type HubInfoPayload = {
-  name?: string;
-  entityId?: string;
-  hubEntities?: Array<{
-    entityId?: string;
-    signerId?: string;
-    name?: string;
-    jurisdictionName?: string;
-    chainId?: number;
-    depositoryAddress?: string;
-    entityProviderAddress?: string;
-    primary?: boolean;
-  }>;
-  runtimeId?: string;
-  apiUrl?: string;
-  relayUrl?: string;
-  startupPhase?: string;
-};
-
-type MarketMakerHealthPayload = {
-  ok?: boolean;
-  name?: string;
-  entityId?: string | null;
-  runtimeId?: string | null;
-  relayUrl?: string;
-  apiUrl?: string;
-  directWsUrl?: string;
-  startupPhase?: string;
-  p2p?: {
-    directPeers?: Array<{ runtimeId: string; endpoint: string; open: boolean }>;
-  };
-  gossip?: {
-    visibleHubNames?: string[];
-    visibleHubIds?: string[];
-    ready?: boolean;
-  };
-  marketMaker?: {
-    enabled: boolean;
-    ok: boolean;
-    entityId: string | null;
-    expectedOffersPerHub: number;
-    expectedOffersPerPair?: number;
-    hubs: Array<{
-      hubEntityId: string;
-      offers: number;
-      ready: boolean;
-      pairs?: Array<{
-        pairId: string;
-        offers: number;
-        ready: boolean;
-      }>;
-    }>;
-  };
-};
-
-type MarketMakerInfoPayload = HubInfoPayload;
-
-type AggregatedHealth = {
-  timestamp: number;
-  coreOk: boolean;
-  systemOk: boolean;
-  degraded: string[];
-  reset: ResetState;
-  system: {
-    runtime: boolean;
-    relay: boolean;
-  };
-  relay: {
-    clientCount: number;
-    managedRuntimeIds: string[];
-    externalClientIds: string[];
-    marketSubscriptions: {
-      total: number;
-      byIp: Record<string, number>;
-      maxTotal: number;
-      maxPerIp: number;
-      maxCellsPerSubscription: number;
-    };
-  };
-  process: {
-    pid: number;
-    ownerId: string;
-    uptimeSec: number;
-    rssBytes: number;
-    heapUsedBytes: number;
-    loadavg: number[];
-    cpuCount: number;
-    memory: {
-      freeBytes: number;
-      totalBytes: number;
-      freePct: number;
-    };
-    children: Array<{
-      role: ManagedRuntimeRole;
-      name: string;
-      pid: number | null;
-      leasePid: number | null;
-      leaseOwnerId: string | null;
-      online: boolean;
-      exitCode: number | null;
-      exitSignal?: NodeJS.Signals | null;
-      startedAt: number | null;
-      exitedAt: number | null;
-      restartCount: number;
-      apiPort: number;
-      dbPath: string;
-      lastErrorLine: string | null;
-      recentStdout: string[];
-      recentStderr: string[];
-    }>;
-  };
-  disk: {
-    ok: boolean;
-    minFreeBytes: number;
-    freeBytes: number;
-    usedBytes: number;
-    totalBytes: number;
-    freeGiB: number;
-    usedGiB: number;
-    totalGiB: number;
-    usedPct: number;
-  };
-  storage: StorageHealth;
-  hubMesh: {
-    ok: boolean;
-    hubIds: string[];
-    pairs: Array<{ left: string; right: string; ok: boolean }>;
-    direct: {
-      openLinkCount: number;
-      links: Array<{ fromRuntimeId: string; toRuntimeId: string; endpoint: string }>;
-    };
-  };
-  marketMaker: {
-    enabled: boolean;
-    ok: boolean;
-    entityId: string | null;
-    startupPhase: string | null;
-    expectedOffersPerHub: number;
-    hubs: Array<{
-      hubEntityId: string;
-      offers: number;
-      ready: boolean;
-      pairs: Array<{ pairId: string; offers: number; ready: boolean }>;
-    }>;
-  };
-  custody: {
-    enabled: boolean;
-    ok: boolean;
-    entityId: string | null;
-    daemonPort: number | null;
-    servicePort: number | null;
-  };
-  bootstrapReserves: {
-    ok: boolean;
-    targetMet: boolean;
-    requiredTokenCount: number;
-    entityCount: number;
-    entities: Array<{
-      entityId: string;
-      role: 'hub' | 'market-maker';
-      ready: boolean;
-      targetMet: boolean;
-      tokens: Array<{
-        tokenId: number;
-        symbol: string;
-        decimals: number;
-        current: string;
-        expectedMin: string;
-        ready: boolean;
-        operational?: boolean;
-        targetMet?: boolean;
-      }>;
-    }>;
-  };
-  hubs: Array<{
-    entityId: string;
-    name: string;
-    online: boolean;
-    runtimeId: string;
-    selfRelayPresence: boolean;
-    pid: number | null;
-    apiPort: number;
-    apiUrl: string;
-    dbPath: string;
-    startedAt: number | null;
-    exitedAt: number | null;
-    exitCode: number | null;
-    restartCount: number;
-    lastErrorLine: string | null;
-  }>;
-  timings: TimingMap;
-};
+import type {
+  AggregatedHealth,
+  CustodySupportState,
+  HubChild,
+  HubHealthPayload,
+  HubInfoPayload,
+  ManagedRuntimeSpec,
+  MarketMakerChild,
+  MarketMakerHealthPayload,
+  MarketMakerInfoPayload,
+  OrchestratorWebSocket,
+  ResetState,
+  TimingMap,
+} from './orchestrator-types';
+import {
+  CHILD_LOG_RING_MAX,
+  HUB_BASELINE_TIMEOUT_MS,
+  HUB_DIRECT_LINK_BASELINE_GRACE_MS,
+  HUB_NAMES,
+  HUB_PROFILES_READY_TIMEOUT_MS,
+  HUB_REQUIRED_TOKEN_COUNT,
+  HUB_SELF_READY_TIMEOUT_MS,
+  MARKET_MAKER_READY_TIMEOUT_MS,
+  RELAY_MARKET_MAX_SUBSCRIPTION_CELLS,
+  RELAY_MARKET_MAX_SUBSCRIPTIONS,
+  RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP,
+  STARTUP_TIMEOUT_MS,
+  UNEXPECTED_EXIT_RESTART_MS,
+  parseArgs,
+} from './orchestrator-config';
+import {
+  createManagedRuntimeLeaseManager,
+  readManagedProcessTable,
+  type ManagedProcessTableEntry,
+} from './managed-runtime-leases';
+import { buildPrometheusMetrics } from './prometheus';
+import { buildPublicHubDiscoveryPayload } from './public-discovery';
+import {
+  deployRpc2JurisdictionStack,
+  readShardJurisdictions,
+  resolvePrimaryHubJurisdictionFallback,
+  seedShardJurisdictions,
+  toPublicJurisdictionsPayload,
+  type OrchestratorJurisdictionsConfig,
+} from './jurisdictions';
+import { createOrchestratorProxyHandlers } from './proxy';
+import { maybeHandleOrchestratorDebugApi } from './debug-api';
 
 const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
   const totalBytes = Number(storage.disk.totalBytes || 0);
@@ -388,119 +95,6 @@ const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
   };
 };
 
-type MarketMakerChild = {
-  name: 'MM';
-  seed: string;
-  authSeed: string;
-  signerLabel: string;
-  apiPort: number;
-  publicPort: number;
-  dbPath: string;
-  proc: ChildProcess | null;
-  startedAt: number | null;
-  exitedAt: number | null;
-  exitCode: number | null;
-  exitSignal: NodeJS.Signals | null;
-  restartTimer: ReturnType<typeof setTimeout> | null;
-  restartCount: number;
-  lastHealth: MarketMakerHealthPayload | null;
-  lastInfo: MarketMakerInfoPayload | null;
-  lastStartupPhase: string | null;
-  recentStdout: string[];
-  recentStderr: string[];
-};
-
-type CustodySupportState = {
-  daemonChild: ManagedChild;
-  custodyChild: ManagedChild;
-  identity: ManagedIdentity;
-  hubIds: string[];
-};
-
-type ManagedRuntimeRole = 'hub' | 'market-maker';
-
-type ManagedRuntimeSpec = {
-  role: ManagedRuntimeRole;
-  name: string;
-  script: 'runtime/orchestrator/hub-node.ts' | 'runtime/orchestrator/mm-node.ts';
-  apiPort: number;
-  dbPath: string;
-};
-
-type ManagedRuntimeLease = ManagedRuntimeSpec & {
-  ownerId: string;
-  orchestratorPid: number;
-  pid: number;
-  cwd: string;
-  startedAt: number;
-  updatedAt: number;
-};
-
-const HUB_NAMES = ['H1', 'H2', 'H3'] as const;
-const HUB_REQUIRED_TOKEN_COUNT = 3;
-const UNEXPECTED_EXIT_RESTART_MS = 1_000;
-
-const argsRaw = process.argv.slice(2);
-
-const getArg = (name: string, fallback = ''): string => {
-  const eq = argsRaw.find(arg => arg.startsWith(`${name}=`));
-  if (eq) return eq.slice(name.length + 1);
-  const index = argsRaw.indexOf(name);
-  if (index === -1) return fallback;
-  return argsRaw[index + 1] || fallback;
-};
-
-const hasFlag = (name: string): boolean => argsRaw.includes(name);
-
-const normalizeWsBaseUrl = (raw: string, fallbackHost: string, fallbackPort: number): string => {
-  const fallback = `ws://${fallbackHost}:${fallbackPort}`;
-  const value = String(raw || '').trim() || fallback;
-  const parsed = new URL(value);
-  if (parsed.protocol === 'http:') parsed.protocol = 'ws:';
-  if (parsed.protocol === 'https:') parsed.protocol = 'wss:';
-  if (parsed.protocol !== 'ws:' && parsed.protocol !== 'wss:') {
-    throw new Error(`Invalid --public-ws-base-url: ${value}`);
-  }
-  parsed.pathname = '';
-  parsed.search = '';
-  parsed.hash = '';
-  return parsed.toString().replace(/\/+$/, '');
-};
-
-const parseArgs = (): Args => {
-  const port = Number(getArg('--port', '20002'));
-  if (!Number.isFinite(port) || port <= 0) {
-    throw new Error(`Invalid --port: ${String(port)}`);
-  }
-  const host = getArg('--host', '127.0.0.1');
-  const nodeApiPortBase = Number(getArg('--node-api-port-base', String(port + 10)));
-  if (!Number.isFinite(nodeApiPortBase) || nodeApiPortBase <= 0) {
-    throw new Error(`Invalid --node-api-port-base: ${String(nodeApiPortBase)}`);
-  }
-  const nodePublicPortBase = Number(getArg('--node-public-port-base', String(nodeApiPortBase)));
-  if (!Number.isFinite(nodePublicPortBase) || nodePublicPortBase <= 0) {
-    throw new Error(`Invalid --node-public-port-base: ${String(nodePublicPortBase)}`);
-  }
-  return {
-    host,
-    port,
-    publicWsBaseUrl: normalizeWsBaseUrl(getArg('--public-ws-base-url', ''), host, port),
-    nodeApiPortBase,
-    nodePublicPortBase,
-    rpcUrl: normalizeLoopbackUrl(getArg('--rpc-url', process.env['ANVIL_RPC'] || 'http://localhost:8545')),
-    rpc2Url: normalizeLoopbackUrl(getArg('--rpc2-url', process.env['ANVIL_RPC2'] || '')),
-    dbRoot: resolve(getArg('--db-root', join(process.cwd(), '.e2e-mesh-db'))),
-    mmEnabled: hasFlag('--mm'),
-    resetAllowed: hasFlag('--allow-reset') || process.env['XLN_MESH_RESET_ALLOWED'] === '1',
-    deferInitialReset: hasFlag('--defer-initial-reset') || process.env['XLN_MESH_DEFER_INITIAL_RESET'] === '1',
-    custodyEnabled: hasFlag('--custody'),
-    custodyPort: Number(getArg('--custody-port', String(port + 7))),
-    custodyDaemonPort: Number(getArg('--custody-daemon-port', String(port + 8))),
-    custodyDbRoot: resolve(getArg('--custody-db-root', join(getArg('--db-root', join(process.cwd(), '.e2e-mesh-db')), 'custody'))),
-    walletUrl: getArg('--wallet-url', `https://localhost:${port + 4}/app`),
-  };
-};
-
 const args = parseArgs();
 const orchestratorOwnerId = `${process.pid}:${Date.now()}:${randomUUID()}`;
 const staleReapEnabled = process.env['XLN_SKIP_STALE_REAP'] !== '1';
@@ -513,6 +107,14 @@ const relayUrl = (() => {
 })();
 const shardJurisdictionsPath = join(args.dbRoot, 'jurisdictions.json');
 const controlPlaneDir = join(args.dbRoot, '.control-plane');
+const managedRuntimeLeases = createManagedRuntimeLeaseManager({
+  controlPlaneDir,
+  ownerId: orchestratorOwnerId,
+});
+const jurisdictionsConfig: OrchestratorJurisdictionsConfig = {
+  shardJurisdictionsPath,
+  rpc2Url: args.rpc2Url,
+};
 
 const relayStore: RelayStore = createRelayStore('mesh-relay');
 const routerConfig: RelayRouterConfig = {
@@ -674,9 +276,9 @@ const stopProcess = async (proc: ChildProcess | null): Promise<void> => {
 const clearRelayState = (): void => {
   for (const [, client] of relayStore.clients.entries()) {
     try {
-      client.ws.close(4000, 'mesh-reset');
+      client.ws.close?.(4000, 'mesh-reset');
     } catch {
-      try { client.ws.close(); } catch {}
+      try { client.ws.close?.(); } catch {}
     }
   }
   relayStore.clients.clear();
@@ -759,6 +361,9 @@ const getHubChildByEntityId = (hubEntityId: string): HubChild | null => {
   }) || null;
 };
 
+const getHealthyHubChild = (): HubChild | null =>
+  hubChildren.find((candidate) => candidate.proc?.exitCode === null && candidate.lastHealth) || null;
+
 const fetchHubMarketSnapshots = async (
   child: HubChild,
   pairIds: string[],
@@ -794,189 +399,6 @@ const marketSubscriptionStack = createMarketSubscriptionStack<OrchestratorWebSoc
 });
 
 const cleanupRpcMarketSubscription = (ws: OrchestratorWebSocket): void => marketSubscriptionStack.cleanup(ws);
-
-const readShardJurisdictions = (): string => {
-  const canonicalPath = resolveJurisdictionsJsonPath();
-  if (!existsSync(canonicalPath)) {
-    throw new Error(`CANONICAL_JURISDICTIONS_MISSING path=${canonicalPath}`);
-  }
-  if (!existsSync(shardJurisdictionsPath)) {
-    throw new Error(`JURISDICTIONS_JSON_MISSING path=${shardJurisdictionsPath}`);
-  }
-  const canonical = readFileSync(canonicalPath, 'utf8');
-  const shard = readFileSync(shardJurisdictionsPath, 'utf8');
-  try {
-    const canonicalVersion = String((JSON.parse(canonical) as { version?: unknown }).version || '').trim() || '1';
-    const shardPayload = JSON.parse(shard) as { version?: unknown };
-    const shardVersion = String(shardPayload.version || '').trim();
-    if (shardVersion !== canonicalVersion) {
-      shardPayload.version = canonicalVersion;
-      const next = `${JSON.stringify(shardPayload, null, 2)}\n`;
-      writeFileSync(shardJurisdictionsPath, next, 'utf8');
-      return next;
-    }
-  } catch {
-    // If either payload is malformed, just return the shard payload unchanged.
-  }
-  return shard;
-};
-
-type ShardJurisdictionEntry = {
-  name?: string;
-  chainId?: number;
-  rpc?: unknown;
-  blockTimeMs?: number;
-  explorer?: string;
-  currency?: string;
-  status?: string;
-  description?: string;
-  contracts?: {
-    account?: string;
-    depository?: string;
-    entityProvider?: string;
-    deltaTransformer?: string;
-  };
-  rebalancePolicyUsd?: unknown;
-};
-
-type ShardJurisdictionsFile = {
-  version?: unknown;
-  deployVersion?: unknown;
-  networkVersion?: unknown;
-  lastUpdated?: unknown;
-  jurisdictions?: Record<string, ShardJurisdictionEntry>;
-  defaults?: Record<string, unknown>;
-};
-
-const isRpc2Jurisdiction = (key: string, jurisdiction: ShardJurisdictionEntry): boolean => {
-  const normalizedKey = String(key || '').trim().toLowerCase();
-  if (normalizedKey === 'tron' || normalizedKey === 'rpc2' || normalizedKey === 'localhost2') return true;
-  const name = String(jurisdiction.name || '').trim().toLowerCase();
-  if (name.includes('tron')) return true;
-  const rpc = String(jurisdiction.rpc || '').trim();
-  return Boolean(args.rpc2Url && normalizeLoopbackUrl(rpc) === normalizeLoopbackUrl(args.rpc2Url));
-};
-
-const resolvePrimaryHubJurisdictionFallback = (): {
-  name: string;
-  chainId?: number;
-  depositoryAddress?: string;
-  entityProviderAddress?: string;
-} | null => {
-  if (!existsSync(shardJurisdictionsPath)) return null;
-  try {
-    const payload = JSON.parse(readFileSync(shardJurisdictionsPath, 'utf8')) as ShardJurisdictionsFile;
-    const entries = Object.entries(payload.jurisdictions ?? {});
-    const match = entries.find(([key, jurisdiction]) => !isRpc2Jurisdiction(key, jurisdiction)) ?? entries[0];
-    if (!match) return null;
-    const [, jurisdiction] = match;
-    const name = String(jurisdiction.name || '').trim();
-    if (!name) return null;
-    return {
-      name,
-      ...(jurisdiction.chainId !== undefined ? { chainId: jurisdiction.chainId } : {}),
-      ...(jurisdiction.contracts?.depository ? { depositoryAddress: jurisdiction.contracts.depository } : {}),
-      ...(jurisdiction.contracts?.entityProvider ? { entityProviderAddress: jurisdiction.contracts.entityProvider } : {}),
-    };
-  } catch {
-    return null;
-  }
-};
-
-const readRpcChainId = async (rpcUrl: string): Promise<number> => {
-  const response = await fetch(rpcUrl, {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ jsonrpc: '2.0', id: 1, method: 'eth_chainId', params: [] }),
-  });
-  if (!response.ok) {
-    throw new Error(`RPC_CHAIN_ID_HTTP_${response.status}`);
-  }
-  const payload = await response.json() as { result?: unknown; error?: { message?: string } };
-  if (payload.error) throw new Error(`RPC_CHAIN_ID_ERROR:${payload.error.message || 'unknown'}`);
-  const result = String(payload.result || '').trim();
-  const chainId = result.startsWith('0x') ? Number.parseInt(result.slice(2), 16) : Number(result);
-  if (!Number.isFinite(chainId) || chainId <= 0) throw new Error(`RPC_CHAIN_ID_INVALID:${result || 'empty'}`);
-  return Math.floor(chainId);
-};
-
-const deployRpc2JurisdictionStack = async (): Promise<void> => {
-  if (!args.rpc2Url) return;
-  const startedAt = Date.now();
-  const chainId = await readRpcChainId(args.rpc2Url);
-  const { createJAdapter } = await import('../jadapter');
-  const jadapter = await createJAdapter({
-    mode: 'rpc',
-    chainId,
-    rpcUrl: args.rpc2Url,
-  });
-  await jadapter.deployStack();
-
-  const current: ShardJurisdictionsFile = existsSync(shardJurisdictionsPath)
-    ? JSON.parse(readFileSync(shardJurisdictionsPath, 'utf8'))
-    : {};
-  const jurisdictions = current.jurisdictions ?? {};
-  const updatedAt = new Date().toISOString();
-  jurisdictions['tron'] = {
-    ...(jurisdictions['tron'] ?? {}),
-    name: 'Tron',
-    chainId,
-    rpc: toPublicRpcUrl(args.rpc2Url, '/rpc2'),
-    blockTimeMs: 1_000,
-    explorer: '',
-    currency: 'TRX',
-    status: 'active',
-    description: 'Second local EVM chain used to simulate Tron cross-jurisdiction swaps',
-    contracts: {
-      ...(jurisdictions['tron']?.contracts ?? {}),
-      account: jadapter.addresses.account,
-      depository: jadapter.addresses.depository,
-      entityProvider: jadapter.addresses.entityProvider,
-      deltaTransformer: jadapter.addresses.deltaTransformer,
-    },
-  };
-  const nextPayload: ShardJurisdictionsFile = {
-    version: String(current.version || '').trim() || '3',
-    lastUpdated: updatedAt,
-    jurisdictions,
-    defaults: current.defaults ?? {
-      timeout: 30000,
-      retryAttempts: 3,
-      gasLimit: 1000000,
-    },
-  };
-  const networkVersion = computeJurisdictionsNetworkVersion(nextPayload, String(nextPayload.version || '3'));
-  nextPayload.deployVersion = networkVersion;
-  nextPayload.networkVersion = networkVersion;
-  writeFileSync(shardJurisdictionsPath, JSON.stringify(nextPayload, null, 2) + '\n', 'utf8');
-  console.log(`[MESH] rpc2 jurisdiction ready chainId=${chainId} rpc=${args.rpc2Url} ms=${Date.now() - startedAt}`);
-};
-
-const toPublicJurisdictionsPayload = (raw: string): string => {
-  try {
-    const parsed = JSON.parse(raw) as ShardJurisdictionsFile;
-    if (!parsed || typeof parsed !== 'object' || !parsed.jurisdictions) return raw;
-    const networkVersion = computeJurisdictionsNetworkVersion(parsed, String(parsed.version || '3'));
-    parsed.deployVersion = networkVersion;
-    parsed.networkVersion = networkVersion;
-    for (const [key, jurisdiction] of Object.entries(parsed.jurisdictions)) {
-      if (!jurisdiction || typeof jurisdiction !== 'object') continue;
-      const fallback = isRpc2Jurisdiction(key, jurisdiction) ? '/rpc2' : '/rpc';
-      jurisdiction.rpc = toPublicRpcUrl(String(jurisdiction.rpc || fallback), fallback);
-    }
-    return `${JSON.stringify(parsed, null, 2)}\n`;
-  } catch {
-    return raw;
-  }
-};
-
-const seedShardJurisdictions = (): void => {
-  const canonicalPath = resolveJurisdictionsJsonPath();
-  if (!existsSync(canonicalPath)) {
-    throw new Error(`CANONICAL_JURISDICTIONS_MISSING path=${canonicalPath}`);
-  }
-  writeFileSync(shardJurisdictionsPath, readFileSync(canonicalPath, 'utf8'), 'utf8');
-};
 
 const pollHubHealth = async (child: HubChild): Promise<void> => {
   const apiBase = `http://${args.host}:${child.apiPort}`;
@@ -1077,182 +499,19 @@ const managedSpecForMarketMaker = (): ManagedRuntimeSpec => ({
   dbPath: marketMakerChild.dbPath,
 });
 
-const leasePathForManagedRuntime = (spec: ManagedRuntimeSpec): string =>
-  join(controlPlaneDir, `${spec.role}-${spec.name.toLowerCase()}.lease.json`);
-
-const readManagedRuntimeLease = (spec: ManagedRuntimeSpec): ManagedRuntimeLease | null => {
-  const path = leasePathForManagedRuntime(spec);
-  if (!existsSync(path)) return null;
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<ManagedRuntimeLease>;
-    if (
-      parsed.role === spec.role &&
-      parsed.name === spec.name &&
-      parsed.script === spec.script &&
-      Number(parsed.apiPort) === spec.apiPort &&
-      String(parsed.dbPath || '') === spec.dbPath &&
-      typeof parsed.ownerId === 'string' &&
-      Number.isFinite(parsed.pid)
-    ) {
-      return {
-        role: spec.role,
-        name: spec.name,
-        script: spec.script,
-        apiPort: spec.apiPort,
-        dbPath: spec.dbPath,
-        ownerId: parsed.ownerId,
-        orchestratorPid: Number(parsed.orchestratorPid || 0),
-        pid: Number(parsed.pid),
-        cwd: String(parsed.cwd || ''),
-        startedAt: Number(parsed.startedAt || 0),
-        updatedAt: Number(parsed.updatedAt || 0),
-      };
-    }
-  } catch (error) {
-    console.warn(`[MESH] ignoring unreadable child lease ${path}: ${serializeError(error)}`);
-  }
-  return null;
-};
-
-const writeManagedRuntimeLease = (spec: ManagedRuntimeSpec, pid: number, startedAt: number): void => {
-  mkdirSync(controlPlaneDir, { recursive: true });
-  const lease: ManagedRuntimeLease = {
-    ...spec,
-    ownerId: orchestratorOwnerId,
-    orchestratorPid: process.pid,
-    pid,
-    cwd: process.cwd(),
-    startedAt,
-    updatedAt: Date.now(),
-  };
-  const path = leasePathForManagedRuntime(spec);
-  const tmpPath = `${path}.tmp`;
-  writeFileSync(tmpPath, `${safeStringify(lease)}\n`);
-  renameSync(tmpPath, path);
-};
-
-const removeManagedRuntimeLease = (spec: ManagedRuntimeSpec, pid?: number | null): void => {
-  const lease = readManagedRuntimeLease(spec);
-  if (!lease) return;
-  if (lease.ownerId !== orchestratorOwnerId) return;
-  if (pid !== undefined && pid !== null && lease.pid !== pid) return;
-  rmSync(leasePathForManagedRuntime(spec), { force: true });
-};
-
-type ProcessTableEntry = { pid: number; command: string };
-
-const readProcessTable = async (): Promise<ProcessTableEntry[]> => {
-  return await new Promise<ProcessTableEntry[]>((resolve) => {
-    const child = spawn('ps', ['-axo', 'pid=,command='], {
-      cwd: process.cwd(),
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-
-    let stdout = '';
-    child.stdout.on('data', chunk => {
-      stdout += chunk.toString();
-    });
-
-    child.on('error', () => resolve([]));
-    child.on('close', () => {
-      const rows = stdout
-        .split(/\r?\n/)
-        .map((line): ProcessTableEntry | null => {
-          const match = line.match(/^\s*(\d+)\s+(.+)$/);
-          if (!match) return null;
-          const pid = Number.parseInt(match[1]!, 10);
-          if (!Number.isFinite(pid) || pid <= 0 || pid === process.pid) return null;
-          return { pid, command: match[2]!.trim() };
-        })
-        .filter((row): row is ProcessTableEntry => row !== null);
-      resolve(rows);
-    });
-  });
-};
-
-const isPidAlive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const commandMatchesManagedRuntime = (command: string, spec: ManagedRuntimeSpec): boolean => {
-  if (!command.includes(spec.script)) return false;
-  if (!command.includes(`--name ${spec.name}`) && !command.includes(`--name=${spec.name}`)) return false;
-  const hasApiPort =
-    command.includes(`--api-port ${spec.apiPort}`) ||
-    command.includes(`--api-port=${spec.apiPort}`);
-  const hasDbPath =
-    command.includes(`--db-path ${spec.dbPath}`) ||
-    command.includes(`--db-path=${spec.dbPath}`);
-  return hasApiPort && hasDbPath;
-};
-
-const killProcessIds = async (pids: number[], label: string): Promise<void> => {
-  if (pids.length === 0) return;
-  console.warn(`[MESH] killing stale ${label}: ${pids.join(' ')}`);
-  for (const pid of pids) {
-    try { process.kill(pid, 'SIGTERM'); } catch {}
-  }
-  await delay(1_000);
-  for (const pid of pids) {
-    if (!isPidAlive(pid)) continue;
-    try { process.kill(pid, 'SIGKILL'); } catch {}
-  }
-  await delay(200);
-};
-
-const reapStaleManagedRuntime = async (
-  spec: ManagedRuntimeSpec,
-  currentPid: number,
-  processTable?: ProcessTableEntry[],
-): Promise<void> => {
-  const table = processTable ?? await readProcessTable();
-  const candidates = new Set<number>();
-  const lease = readManagedRuntimeLease(spec);
-  if (lease) {
-    if (!isPidAlive(lease.pid)) {
-      rmSync(leasePathForManagedRuntime(spec), { force: true });
-    } else if (lease.ownerId !== orchestratorOwnerId && lease.pid !== currentPid) {
-      candidates.add(lease.pid);
-    }
-  }
-
-  const commandByPid = new Map<number, string>();
-  for (const row of table) {
-    commandByPid.set(row.pid, row.command);
-    if (row.pid === currentPid) continue;
-    if (commandMatchesManagedRuntime(row.command, spec)) candidates.add(row.pid);
-  }
-
-  const verified: number[] = [];
-  for (const pid of candidates) {
-    if (pid === process.pid || pid === currentPid || !isPidAlive(pid)) continue;
-    const command = commandByPid.get(pid) || '';
-    if (commandMatchesManagedRuntime(command, spec)) {
-      verified.push(pid);
-    }
-  }
-
-  await killProcessIds(verified, `${spec.name} ${spec.role} process(es)`);
-};
-
-const reapStaleHubProcess = async (child: HubChild, processTable?: ProcessTableEntry[]): Promise<void> => {
+const reapStaleHubProcess = async (child: HubChild, processTable?: ManagedProcessTableEntry[]): Promise<void> => {
   if (!staleReapEnabled) return;
-  await reapStaleManagedRuntime(managedSpecForHub(child), child.proc?.pid ?? -1, processTable);
+  await managedRuntimeLeases.reapStale(managedSpecForHub(child), child.proc?.pid ?? -1, processTable);
 };
 
-const reapStaleMarketMakerProcess = async (processTable?: ProcessTableEntry[]): Promise<void> => {
+const reapStaleMarketMakerProcess = async (processTable?: ManagedProcessTableEntry[]): Promise<void> => {
   if (!staleReapEnabled) return;
-  await reapStaleManagedRuntime(managedSpecForMarketMaker(), marketMakerChild.proc?.pid ?? -1, processTable);
+  await managedRuntimeLeases.reapStale(managedSpecForMarketMaker(), marketMakerChild.proc?.pid ?? -1, processTable);
 };
 
 const reapStaleManagedChildren = async (): Promise<void> => {
   if (!staleReapEnabled) return;
-  const processTable = await readProcessTable();
+  const processTable = await readManagedProcessTable();
   await Promise.all(hubChildren.map(child => reapStaleHubProcess(child, processTable)));
   if (args.mmEnabled) {
     await reapStaleMarketMakerProcess(processTable);
@@ -1336,7 +595,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
   if (!proc.pid) {
     throw new Error(`${child.name}_SPAWN_FAILED_NO_PID`);
   }
-  writeManagedRuntimeLease(spec, proc.pid, child.startedAt ?? Date.now());
+  managedRuntimeLeases.writeLease(spec, proc.pid, child.startedAt ?? Date.now());
   proc.stdout?.on('data', chunk => {
     pushChildLogLines(child.recentStdout, chunk);
     process.stdout.write(`[${child.name}] ${chunk.toString()}`);
@@ -1346,7 +605,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
     process.stderr.write(`[${child.name}:err] ${chunk.toString()}`);
   });
   proc.once('exit', code => {
-    removeManagedRuntimeLease(spec, proc.pid ?? null);
+    managedRuntimeLeases.removeLease(spec, proc.pid ?? null);
     child.exitedAt = Date.now();
     child.exitCode = code;
     if (!resetState.inProgress && code !== 0) {
@@ -1405,7 +664,7 @@ const spawnMarketMaker = async (): Promise<void> => {
   if (!proc.pid) {
     throw new Error('MM_SPAWN_FAILED_NO_PID');
   }
-  writeManagedRuntimeLease(spec, proc.pid, marketMakerChild.startedAt ?? Date.now());
+  managedRuntimeLeases.writeLease(spec, proc.pid, marketMakerChild.startedAt ?? Date.now());
   proc.stdout?.on('data', chunk => {
     pushChildLogLines(marketMakerChild.recentStdout, chunk);
     process.stdout.write(`[MM] ${chunk.toString()}`);
@@ -1415,7 +674,7 @@ const spawnMarketMaker = async (): Promise<void> => {
     process.stderr.write(`[MM:err] ${chunk.toString()}`);
   });
   proc.once('exit', (code, signal) => {
-    removeManagedRuntimeLease(spec, proc.pid ?? null);
+    managedRuntimeLeases.removeLease(spec, proc.pid ?? null);
     marketMakerChild.exitedAt = Date.now();
     marketMakerChild.exitCode = code ?? null;
     marketMakerChild.exitSignal = signal ?? null;
@@ -1459,14 +718,14 @@ const stopAllChildren = async (): Promise<void> => {
     currentCustody ? stopManagedChild(currentCustody.custodyChild) : Promise.resolve(),
     currentCustody ? stopManagedChild(currentCustody.daemonChild) : Promise.resolve(),
   ]);
-  for (const child of hubChildren) removeManagedRuntimeLease(managedSpecForHub(child));
-  removeManagedRuntimeLease(managedSpecForMarketMaker());
+  for (const child of hubChildren) managedRuntimeLeases.removeLease(managedSpecForHub(child));
+  managedRuntimeLeases.removeLease(managedSpecForMarketMaker());
 };
 
 const buildChildProcessHealth = (): AggregatedHealth['process']['children'] => {
   const hubEntries = hubChildren.map((child) => {
     const spec = managedSpecForHub(child);
-    const lease = readManagedRuntimeLease(spec);
+    const lease = managedRuntimeLeases.readLease(spec);
     return {
       role: spec.role,
       name: spec.name,
@@ -1486,7 +745,7 @@ const buildChildProcessHealth = (): AggregatedHealth['process']['children'] => {
     };
   });
   const mmSpec = managedSpecForMarketMaker();
-  const mmLease = readManagedRuntimeLease(mmSpec);
+  const mmLease = managedRuntimeLeases.readLease(mmSpec);
   return [
     ...hubEntries,
     {
@@ -1771,323 +1030,6 @@ const buildAggregatedHealthResponse = async (): Promise<AggregatedHealth> => {
   };
 };
 
-const prometheusLabelValue = (value: string | number | boolean | null | undefined): string =>
-  String(value ?? '')
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, '\\n');
-
-const prometheusLine = (
-  name: string,
-  value: number | boolean,
-  labels: Record<string, string | number | boolean | null | undefined> = {},
-): string => {
-  const numericValue = typeof value === 'boolean' ? (value ? 1 : 0) : Number.isFinite(value) ? value : 0;
-  const labelEntries = Object.entries(labels).filter(([, labelValue]) => labelValue !== undefined && labelValue !== null);
-  const labelText = labelEntries.length > 0
-    ? `{${labelEntries.map(([labelName, labelValue]) => `${labelName}="${prometheusLabelValue(labelValue)}"`).join(',')}}`
-    : '';
-  return `${name}${labelText} ${numericValue}`;
-};
-
-const buildPrometheusMetrics = (health: AggregatedHealth): string => {
-  const lines: string[] = [
-    '# HELP xln_core_ok Core XLN readiness.',
-    '# TYPE xln_core_ok gauge',
-    prometheusLine('xln_core_ok', health.coreOk),
-    '# HELP xln_system_ok Full system readiness including children and storage.',
-    '# TYPE xln_system_ok gauge',
-    prometheusLine('xln_system_ok', health.systemOk),
-    prometheusLine('xln_degraded_count', health.degraded.length),
-    prometheusLine('xln_reset_in_progress', health.reset.inProgress),
-    prometheusLine('xln_relay_clients', health.relay.clientCount),
-    prometheusLine('xln_relay_external_clients', health.relay.externalClientIds.length),
-    prometheusLine('xln_relay_market_subscriptions', health.relay.marketSubscriptions.total),
-    prometheusLine('xln_process_uptime_seconds', health.process.uptimeSec),
-    prometheusLine('xln_process_rss_bytes', health.process.rssBytes),
-    prometheusLine('xln_process_heap_used_bytes', health.process.heapUsedBytes),
-    prometheusLine('xln_disk_free_bytes', health.disk.freeBytes),
-    prometheusLine('xln_disk_used_pct', health.disk.usedPct),
-    prometheusLine('xln_storage_ok', health.storage.ok),
-    prometheusLine('xln_hub_mesh_ok', health.hubMesh.ok),
-    prometheusLine('xln_hub_mesh_open_direct_links', health.hubMesh.direct.openLinkCount),
-    prometheusLine('xln_market_maker_ok', health.marketMaker.ok),
-    prometheusLine('xln_custody_ok', health.custody.enabled ? health.custody.ok : true),
-    prometheusLine('xln_bootstrap_reserves_ok', health.bootstrapReserves.ok),
-    prometheusLine('xln_bootstrap_reserves_target_met', health.bootstrapReserves.targetMet),
-  ];
-
-  for (const child of health.process.children) {
-    const labels = { role: child.role, name: child.name };
-    lines.push(prometheusLine('xln_child_online', child.online, labels));
-    lines.push(prometheusLine('xln_child_restart_total', child.restartCount, labels));
-  }
-  for (const hub of health.hubs) {
-    const labels = { name: hub.name };
-    lines.push(prometheusLine('xln_hub_online', hub.online, labels));
-    lines.push(prometheusLine('xln_hub_self_relay_presence', hub.selfRelayPresence, labels));
-    lines.push(prometheusLine('xln_hub_restart_total', hub.restartCount, labels));
-  }
-  for (const tracked of health.storage.tracked) {
-    const labels = { name: tracked.name, kind: tracked.kind };
-    lines.push(prometheusLine('xln_storage_tracked_bytes', tracked.currentBytes, labels));
-    lines.push(prometheusLine('xln_storage_tracked_bytes_per_hour', tracked.bytesPerHour, labels));
-    lines.push(prometheusLine('xln_storage_scan_truncated', tracked.scanTruncated, labels));
-  }
-  for (const [stage, timing] of Object.entries(health.timings)) {
-    if (typeof timing.ms === 'number') lines.push(prometheusLine('xln_orchestrator_stage_ms', timing.ms, { stage }));
-  }
-
-  return `${lines.join('\n')}\n`;
-};
-
-const buildPublicHubDiscoveryPayload = (): {
-  ok: true;
-  count: number;
-  serverTime: number;
-  hubs: Array<{
-    entityId: string;
-    runtimeId: string | null;
-    name: string;
-    bio: null;
-    website: null;
-    wsUrl: string | null;
-    publicAccounts: [];
-    metadata: {
-      isHub: true;
-      jurisdiction?: {
-        name: string;
-        chainId?: number;
-        depositoryAddress?: string;
-        entityProviderAddress?: string;
-      };
-    };
-    lastUpdated: number;
-    online: boolean;
-  }>;
-} => {
-  const serverTime = Date.now();
-  const primaryJurisdictionFallback = resolvePrimaryHubJurisdictionFallback();
-  type PublicHubDiscoveryHub = {
-    entityId: string;
-    runtimeId: string | null;
-    name: string;
-    bio: null;
-    website: null;
-    wsUrl: string | null;
-    publicAccounts: [];
-    metadata: {
-      isHub: true;
-      jurisdiction?: {
-        name: string;
-        chainId?: number;
-        depositoryAddress?: string;
-        entityProviderAddress?: string;
-      };
-    };
-    lastUpdated: number;
-    online: boolean;
-  };
-  const hubsByEntityId = new Map<string, PublicHubDiscoveryHub>();
-  const addHub = (hub: PublicHubDiscoveryHub): void => {
-    const key = String(hub.entityId || '').trim().toLowerCase();
-    if (!key || !hub.online) return;
-    const existing = hubsByEntityId.get(key);
-    if (!existing || (hub.metadata.jurisdiction && !existing.metadata.jurisdiction)) {
-      hubsByEntityId.set(key, hub);
-    }
-  };
-
-  hubChildren
-    .flatMap((child) => {
-      const entityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '').trim();
-      const runtimeId = String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || '').trim();
-      const normalizedRuntimeId = normalizeRuntimeKey(runtimeId);
-      const directWsUrl = String(child.lastHealth?.directWsUrl || '').trim();
-      const apiReachable = Boolean(child.lastInfo || child.lastHealth);
-      const online =
-        child.proc?.exitCode === null
-        && apiReachable
-        && Boolean(normalizedRuntimeId)
-        && (relayStore.clients.has(normalizedRuntimeId) || Boolean(directWsUrl));
-      const hubEntities = child.lastInfo?.hubEntities?.length
-        ? child.lastInfo.hubEntities
-        : [{
-          entityId,
-          name: child.name,
-          jurisdictionName: primaryJurisdictionFallback?.name || '',
-          ...(primaryJurisdictionFallback?.chainId !== undefined ? { chainId: primaryJurisdictionFallback.chainId } : {}),
-          ...(primaryJurisdictionFallback?.depositoryAddress ? { depositoryAddress: primaryJurisdictionFallback.depositoryAddress } : {}),
-          ...(primaryJurisdictionFallback?.entityProviderAddress ? { entityProviderAddress: primaryJurisdictionFallback.entityProviderAddress } : {}),
-        }];
-      return hubEntities
-        .map((entry) => {
-          const entryEntityId = String(entry?.entityId || '').trim();
-          if (!entryEntityId) return null;
-          const jurisdictionName = String(entry?.jurisdictionName || '').trim();
-          return {
-            entityId: entryEntityId,
-            runtimeId: runtimeId || null,
-            name: String(entry?.name || child.name || entryEntityId).trim(),
-            bio: null,
-            website: null,
-            wsUrl: directWsUrl || null,
-            publicAccounts: [] as [],
-            metadata: {
-              isHub: true as const,
-              ...(jurisdictionName ? {
-                jurisdiction: {
-                  name: jurisdictionName,
-                  ...(entry.chainId !== undefined ? { chainId: entry.chainId } : {}),
-                  ...(entry.depositoryAddress ? { depositoryAddress: entry.depositoryAddress } : {}),
-                  ...(entry.entityProviderAddress ? { entityProviderAddress: entry.entityProviderAddress } : {}),
-                },
-              } : {}),
-            },
-            lastUpdated: serverTime,
-            online,
-          };
-        })
-        .filter((hub): hub is NonNullable<typeof hub> => Boolean(hub));
-    })
-    .forEach(addHub);
-
-  for (const entry of relayStore.gossipProfiles.values()) {
-    const profile = entry.profile;
-    if (profile?.metadata?.isHub !== true) continue;
-    const runtimeId = normalizeRuntimeKey(profile.runtimeId);
-    const online = Boolean(runtimeId && relayStore.clients.has(runtimeId));
-    const jurisdiction = profile.metadata?.jurisdiction as
-      | { name?: string; chainId?: number; depositoryAddress?: string; entityProviderAddress?: string }
-      | undefined;
-    const jurisdictionName = String(jurisdiction?.name || '').trim();
-    addHub({
-      entityId: profile.entityId,
-      runtimeId: runtimeId || profile.runtimeId || null,
-      name: String(profile.name || profile.entityId).trim(),
-      bio: null,
-      website: null,
-      wsUrl: String(profile.wsUrl || '').trim() || null,
-      publicAccounts: [],
-      metadata: {
-        isHub: true,
-        ...(jurisdictionName ? {
-          jurisdiction: {
-            name: jurisdictionName,
-            ...(jurisdiction?.chainId !== undefined ? { chainId: jurisdiction.chainId } : {}),
-            ...(jurisdiction?.depositoryAddress ? { depositoryAddress: jurisdiction.depositoryAddress } : {}),
-            ...(jurisdiction?.entityProviderAddress ? { entityProviderAddress: jurisdiction.entityProviderAddress } : {}),
-          },
-        } : {}),
-      },
-      lastUpdated: Number(profile.lastUpdated || entry.timestamp || serverTime),
-      online,
-    });
-  }
-
-  const hubs = Array.from(hubsByEntityId.values())
-    .sort((left, right) =>
-      compareStableText(String(left.metadata.jurisdiction?.name || ''), String(right.metadata.jurisdiction?.name || '')) ||
-      compareStableText(left.name, right.name)
-    );
-
-  return {
-    ok: true,
-    count: hubs.length,
-    serverTime,
-    hubs,
-  };
-};
-
-const getDebugEntityEntries = (requestUrl: URL): Array<{
-  entityId: string;
-  runtimeId?: string | undefined;
-  name: string;
-  isHub: boolean;
-  online: boolean;
-  lastUpdated: number;
-  accounts: unknown[];
-  publicAccounts: unknown[];
-  metadata: Record<string, unknown>;
-}> => {
-  const q = (requestUrl.searchParams.get('q') || '').trim().toLowerCase();
-  const limit = Math.max(1, Math.min(5000, Number(requestUrl.searchParams.get('limit') || '1000')));
-  const onlineOnly = requestUrl.searchParams.get('online') === 'true';
-
-  const entities = new Map<string, {
-    entityId: string;
-    runtimeId?: string | undefined;
-    name: string;
-    isHub: boolean;
-    online: boolean;
-    lastUpdated: number;
-    accounts: unknown[];
-    publicAccounts: unknown[];
-    metadata: Record<string, unknown>;
-  }>();
-
-  for (const [entityId, entry] of relayStore.gossipProfiles.entries()) {
-    const profile = entry.profile || {};
-    const runtimeId = typeof profile.runtimeId === 'string' ? profile.runtimeId : undefined;
-    const normalizedRuntimeId = normalizeRuntimeKey(runtimeId);
-    const metadata =
-      profile?.metadata && typeof profile.metadata === 'object'
-        ? profile.metadata as Record<string, unknown>
-        : {};
-    const isHub = profile?.metadata?.isHub === true;
-    const name =
-      typeof profile?.name === 'string' && profile.name.trim().length > 0
-        ? profile.name.trim()
-        : entityId;
-    const online = normalizedRuntimeId ? relayStore.clients.has(normalizedRuntimeId) : false;
-    entities.set(entityId.toLowerCase(), {
-      entityId,
-      runtimeId: normalizedRuntimeId || runtimeId,
-      name,
-      isHub,
-      online,
-      lastUpdated: Number(profile?.lastUpdated || entry.timestamp || 0),
-      accounts: Array.isArray(profile?.accounts) ? profile.accounts : [],
-      publicAccounts: Array.isArray(profile?.publicAccounts) ? profile.publicAccounts : [],
-      metadata,
-    });
-  }
-
-  for (const child of hubChildren) {
-    const entityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '');
-    if (!entityId) continue;
-    const key = entityId.toLowerCase();
-    const runtimeId = String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || '') || undefined;
-    const normalizedRuntimeId = normalizeRuntimeKey(runtimeId);
-    const existing = entities.get(key);
-    const online = child.proc?.exitCode === null && Boolean(child.lastHealth);
-    entities.set(key, {
-      entityId,
-      runtimeId: normalizedRuntimeId || runtimeId || existing?.runtimeId,
-      name: existing?.name || child.name,
-      isHub: true,
-      online: existing?.online === true || online,
-      lastUpdated: Math.max(existing?.lastUpdated || 0, Date.now()),
-      accounts: existing?.accounts || [],
-      publicAccounts: existing?.publicAccounts || [],
-      metadata: {
-        ...(existing?.metadata || {}),
-        isHub: true,
-      },
-    });
-  }
-
-  return Array.from(entities.values())
-    .filter((entity) => {
-      if (onlineOnly && !entity.online) return false;
-      if (!q) return true;
-      const blob = `${entity.entityId} ${entity.runtimeId || ''} ${entity.name}`.toLowerCase();
-      return blob.includes(q);
-    })
-    .sort((left, right) => (right.lastUpdated || 0) - (left.lastUpdated || 0))
-    .slice(0, limit);
-};
-
 const waitForHubBaseline = async (): Promise<void> => {
   const deadline = Date.now() + HUB_BASELINE_TIMEOUT_MS;
   const directRequired = HUB_NAMES.length * Math.max(0, HUB_NAMES.length - 1);
@@ -2241,8 +1183,8 @@ const runReset = async (): Promise<void> => {
       rmSync(args.dbRoot, { recursive: true, force: true });
     }
     mkdirSync(args.dbRoot, { recursive: true });
-    seedShardJurisdictions();
-    await deployRpc2JurisdictionStack();
+    seedShardJurisdictions(jurisdictionsConfig);
+    await deployRpc2JurisdictionStack(jurisdictionsConfig);
     finishTiming('reset_clear_state', clearStartedAt);
 
     const h1 = hubChildren[0]!;
@@ -2314,252 +1256,18 @@ const ensureReset = async (): Promise<void> => {
   });
   await resetPromise;
 };
-
-const FORBIDDEN_RPC_PROXY_METHODS = new Set([
-  'eth_accounts',
-  'eth_coinbase',
-  'eth_sendTransaction',
-  'eth_sign',
-  'eth_signTransaction',
-  'eth_submitHashrate',
-  'eth_submitWork',
-]);
-
-const FORBIDDEN_RPC_PROXY_PREFIXES = [
-  'admin_',
-  'anvil_',
-  'debug_',
-  'evm_',
-  'hardhat_',
-  'miner_',
-  'personal_',
-  'txpool_',
-  'wallet_',
-];
-
-const findForbiddenRpcProxyMethod = (bodyText: string): string | null => {
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(bodyText);
-  } catch {
-    return 'invalid-json';
-  }
-
-  const calls = Array.isArray(parsed) ? parsed : [parsed];
-  if (calls.length === 0) return 'empty-batch';
-
-  for (const call of calls) {
-    if (!call || typeof call !== 'object' || typeof (call as { method?: unknown }).method !== 'string') {
-      return 'invalid-json-rpc';
-    }
-    const method = (call as { method: string }).method;
-    if (FORBIDDEN_RPC_PROXY_METHODS.has(method) || FORBIDDEN_RPC_PROXY_PREFIXES.some(prefix => method.startsWith(prefix))) {
-      return method;
-    }
-  }
-
-  return null;
-};
-
-const proxyRpc = async (request: Request, upstreamRpcUrl = args.rpcUrl): Promise<Response> => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': '*',
-    'Access-Control-Allow-Headers': '*',
-    'Content-Type': 'application/json',
-  };
-  if (!upstreamRpcUrl) {
-    return new Response(
-      JSON.stringify({ error: 'RPC upstream is not configured' }),
-      { status: 503, headers },
-    );
-  }
-  try {
-    const bodyText = await request.text();
-    if (!isLocalOperatorRequest(request)) {
-      const forbidden = findForbiddenRpcProxyMethod(bodyText);
-      if (forbidden) {
-        return new Response(
-          JSON.stringify({ error: 'RPC proxy method is not allowed', method: forbidden }),
-          { status: forbidden.startsWith('invalid') || forbidden === 'empty-batch' ? 400 : 403, headers },
-        );
-      }
-    }
-    const response = await fetch(upstreamRpcUrl, {
-      method: 'POST',
-      headers: {
-        'content-type': request.headers.get('content-type') || 'application/json',
-      },
-      body: bodyText,
-    });
-    const text = await response.text();
-    return new Response(text, {
-      status: response.status,
-      headers: {
-        ...headers,
-        'content-type': response.headers.get('content-type') || 'application/json',
-      },
-    });
-  } catch (error) {
-    return new Response(
-      JSON.stringify({ error: serializeError(error), upstream: upstreamRpcUrl }),
-      { status: 502, headers },
-    );
-  }
-};
-
-const proxyHubApi = async (
-  request: Request,
-  endpoint: '/api/faucet/offchain',
-): Promise<Response> => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': '*',
-    'Access-Control-Allow-Headers': '*',
-    'Content-Type': 'application/json',
-  };
-  let bodyText = '';
-  let bodyJson: { hubEntityId?: string } | null = null;
-  try {
-    bodyText = await request.text();
-    bodyJson = bodyText ? JSON.parse(bodyText) as { hubEntityId?: string } : {};
-  } catch (error) {
-    return new Response(safeStringify({ success: false, error: `Invalid JSON: ${serializeError(error)}` }), {
-      status: 400,
-      headers,
-    });
-  }
-
-  await pollAllHubHealth();
-  const requestedHubId = String(bodyJson?.hubEntityId || '').toLowerCase();
-  const child = getHubChildByEntityId(requestedHubId);
-  if (!child) {
-    return new Response(safeStringify({
-      success: false,
-      error: `Hub not found for hubEntityId=${requestedHubId || 'missing'}`,
-      code: 'FAUCET_HUB_NOT_FOUND',
-    }), {
-      status: 404,
-      headers,
-    });
-  }
-
-  try {
-    const response = await fetch(`http://${args.host}:${child.apiPort}${endpoint}`, {
-      method: 'POST',
-      headers: {
-        'content-type': request.headers.get('content-type') || 'application/json',
-      },
-      body: bodyText,
-    });
-    const text = await response.text();
-    return new Response(text, {
-      status: response.status,
-      headers: {
-        ...headers,
-        'content-type': response.headers.get('content-type') || 'application/json',
-      },
-    });
-  } catch (error) {
-    return new Response(safeStringify({
-      success: false,
-      error: serializeError(error),
-      code: 'FAUCET_PROXY_FAILED',
-    }), {
-      status: 502,
-      headers,
-    });
-  }
-};
-
-const proxyAnyHubGet = async (request: Request, endpointWithQuery: string): Promise<Response> => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': '*',
-    'Access-Control-Allow-Headers': '*',
-    'Content-Type': 'application/json',
-  };
-
-  await pollAllHubHealth();
-  const child = hubChildren.find((candidate) => candidate.proc?.exitCode === null && candidate.lastHealth);
-  if (!child) {
-    return new Response(safeStringify({ error: 'No healthy hub API available' }), {
-      status: 503,
-      headers,
-    });
-  }
-
-  try {
-    const response = await fetch(`http://${args.host}:${child.apiPort}${endpointWithQuery}`, {
-      method: 'GET',
-      headers: {
-        'content-type': request.headers.get('content-type') || 'application/json',
-      },
-    });
-    const text = await response.text();
-    return new Response(text, {
-      status: response.status,
-      headers: {
-        ...headers,
-        'content-type': response.headers.get('content-type') || 'application/json',
-      },
-    });
-  } catch (error) {
-    return new Response(safeStringify({ error: serializeError(error) }), {
-      status: 502,
-      headers,
-    });
-  }
-};
-
-const proxyAnyHubRequest = async (
-  request: Request,
-  endpointWithQuery: string,
-): Promise<Response> => {
-  const headers = {
-    'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': '*',
-    'Access-Control-Allow-Headers': '*',
-    'Content-Type': 'application/json',
-  };
-
-  await pollAllHubHealth();
-  const child = hubChildren.find((candidate) => candidate.proc?.exitCode === null && candidate.lastHealth);
-  if (!child) {
-    return new Response(safeStringify({ error: 'No healthy hub API available' }), {
-      status: 503,
-      headers,
-    });
-  }
-
-  let bodyText = '';
-  if (request.method !== 'GET' && request.method !== 'HEAD') {
-    bodyText = await request.text();
-  }
-
-  try {
-    const response = await fetch(`http://${args.host}:${child.apiPort}${endpointWithQuery}`, {
-      method: request.method,
-      headers: {
-        'content-type': request.headers.get('content-type') || 'application/json',
-      },
-      ...(bodyText.length > 0 ? { body: bodyText } : {}),
-    });
-    const text = await response.text();
-    return new Response(text, {
-      status: response.status,
-      headers: {
-        ...headers,
-        'content-type': response.headers.get('content-type') || 'application/json',
-      },
-    });
-  } catch (error) {
-    return new Response(safeStringify({ error: serializeError(error) }), {
-      status: 502,
-      headers,
-    });
-  }
-};
+const {
+  proxyAnyHubGet,
+  proxyAnyHubRequest,
+  proxyHubApi,
+  proxyRpc,
+} = createOrchestratorProxyHandlers({
+  host: args.host,
+  defaultRpcUrl: args.rpcUrl,
+  pollAllHubHealth,
+  getHubChildByEntityId,
+  getHealthyHub: getHealthyHubChild,
+});
 
 const httpDrain = createHttpDrainTracker();
 const server = Bun.serve({
@@ -2632,147 +1340,26 @@ const server = Bun.serve({
 
     if (pathname === '/api/hubs') {
       await pollAllHubHealth();
-      return new Response(safeStringify(buildPublicHubDiscoveryPayload()), { headers });
+      return new Response(safeStringify(buildPublicHubDiscoveryPayload({
+        hubChildren,
+        relayStore,
+        primaryJurisdictionFallback: resolvePrimaryHubJurisdictionFallback(jurisdictionsConfig),
+      })), { headers });
     }
 
-    if (pathname === '/api/debug/entities') {
-      await pollAllHubHealth();
-      await pollMarketMakerHealth();
-      const entities = getDebugEntityEntries(url).map((entity) => {
-        const hubChild = hubChildren.find((child) => {
-          const childEntityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '').toLowerCase();
-          return childEntityId === entity.entityId.toLowerCase();
-        });
-        return {
-          ...entity,
-          apiPort: hubChild?.apiPort ?? null,
-          exitCode: hubChild?.exitCode ?? null,
-          dbPath: hubChild?.dbPath ?? null,
-        };
-      });
-      if (marketMakerChild.lastInfo?.entityId || marketMakerChild.lastHealth?.entityId) {
-        const entityId = String(marketMakerChild.lastInfo?.entityId || marketMakerChild.lastHealth?.entityId || '').toLowerCase();
-        const existing = entities.find(entry => String(entry.entityId || '').toLowerCase() === entityId);
-        if (!existing) {
-          entities.unshift({
-            entityId,
-            runtimeId: String(marketMakerChild.lastInfo?.runtimeId || marketMakerChild.lastHealth?.runtimeId || ''),
-            name: marketMakerChild.name,
-            isHub: false,
-            online: marketMakerChild.proc?.exitCode === null && Boolean(marketMakerChild.lastHealth),
-            lastUpdated: Date.now(),
-            accounts: [],
-            publicAccounts: [],
-            metadata: { isMarketMaker: true },
-            apiPort: marketMakerChild.apiPort,
-            exitCode: marketMakerChild.exitCode,
-            dbPath: marketMakerChild.dbPath,
-          });
-        }
-      }
-      return new Response(safeStringify({ entities }), { headers });
-    }
-
-    if (pathname === '/api/debug/reserve' && request.method === 'GET') {
-      return await proxyAnyHubGet(request, `${pathname}${url.search}`);
-    }
-
-    if (pathname === '/api/debug/events') {
-      const last = Math.max(1, Math.min(5000, Number(url.searchParams.get('last') || '200')));
-      const event = url.searchParams.get('event') || undefined;
-      const runtimeId = url.searchParams.get('runtimeId') || undefined;
-      const from = url.searchParams.get('from') || undefined;
-      const to = url.searchParams.get('to') || undefined;
-      const msgType = url.searchParams.get('msgType') || undefined;
-      const status = url.searchParams.get('status') || undefined;
-      const since = Number(url.searchParams.get('since') || '0');
-
-      let filtered = relayStore.debugEvents;
-      if (since > 0) filtered = filtered.filter((entry) => entry.ts >= since);
-      if (event) filtered = filtered.filter((entry) => entry.event === event);
-      if (runtimeId) {
-        filtered = filtered.filter((entry) =>
-          entry.runtimeId === runtimeId || entry.from === runtimeId || entry.to === runtimeId,
-        );
-      }
-      if (from) filtered = filtered.filter((entry) => entry.from === from);
-      if (to) filtered = filtered.filter((entry) => entry.to === to);
-      if (msgType) filtered = filtered.filter((entry) => entry.msgType === msgType);
-      if (status) filtered = filtered.filter((entry) => entry.status === status);
-
-      const events = filtered.slice(-last);
-      return new Response(safeStringify({
-        ok: true,
-        total: relayStore.debugEvents.length,
-        returned: events.length,
-        serverTime: Date.now(),
-        filters: {
-          last,
-          event,
-          runtimeId,
-          from,
-          to,
-          msgType,
-          status,
-          since: Number.isFinite(since) ? since : 0,
-        },
-        events,
-      }), { headers });
-    }
-
-    if (pathname === '/api/debug/events/mark' && request.method === 'POST') {
-      const body = await request.json().catch(() => ({} as Record<string, unknown>));
-      const label = typeof body?.label === 'string' ? body.label.trim() : '';
-      if (!label) {
-        return new Response(safeStringify({ ok: false, error: 'label is required' }), {
-          status: 400,
-          headers,
-        });
-      }
-      const runtimeId =
-        typeof body?.runtimeId === 'string' && body.runtimeId.trim().length > 0
-          ? body.runtimeId.trim()
-          : undefined;
-      const entityId =
-        typeof body?.entityId === 'string' && body.entityId.trim().length > 0
-          ? body.entityId.trim()
-          : undefined;
-      const phase =
-        typeof body?.phase === 'string' && body.phase.trim().length > 0
-          ? body.phase.trim()
-          : undefined;
-      const details =
-        body?.details && typeof body.details === 'object'
-          ? body.details
-          : undefined;
-      pushDebugEvent(relayStore, {
-        event: 'e2e_phase',
-        runtimeId,
-        status: 'marked',
-        details: {
-          label,
-          ...(entityId ? { entityId } : {}),
-          ...(phase ? { phase } : {}),
-          ...(details ? { details } : {}),
-        },
-      });
-      return new Response(safeStringify({ ok: true, label }), { headers });
-    }
-
-    if (pathname === '/api/debug/relay') {
-      return new Response(safeStringify({
-        clients: Array.from(relayStore.clients.keys()),
-        profiles: Array.from(relayStore.gossipProfiles.values()).map(entry => ({
-          entityId: entry.profile.entityId,
-          runtimeId: entry.profile.runtimeId,
-          name: entry.profile.name ?? null,
-          isHub: entry.profile.metadata?.isHub === true,
-          lastUpdated: entry.profile.lastUpdated ?? 0,
-        })),
-        activeHubEntityIds: relayStore.activeHubEntityIds,
-        debugEvents: relayStore.debugEvents.slice(-200),
-      }), { headers });
-    }
+    const debugResponse = await maybeHandleOrchestratorDebugApi({
+      request,
+      pathname,
+      url,
+      headers,
+      relayStore,
+      hubChildren,
+      marketMakerChild,
+      pollAllHubHealth,
+      pollMarketMakerHealth,
+      proxyAnyHubGet,
+    });
+    if (debugResponse) return debugResponse;
 
     if (pathname === '/api/reset' && request.method === 'POST') {
       if (!args.resetAllowed) {
@@ -2804,7 +1391,10 @@ const server = Bun.serve({
 
     if (pathname === '/api/jurisdictions') {
       try {
-        const payload = toPublicJurisdictionsPayload(readShardJurisdictions());
+        const payload = toPublicJurisdictionsPayload(
+          jurisdictionsConfig,
+          readShardJurisdictions(jurisdictionsConfig),
+        );
         return new Response(payload, {
           headers: {
             ...headers,

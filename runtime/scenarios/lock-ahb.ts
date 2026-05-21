@@ -101,10 +101,10 @@ export async function lockAhb(env: Env): Promise<void> {
       jadapter = await ensureJAdapter(env);
       const jReplicaName = 'AHB Demo';
       const jReplica = createJReplica(env, jReplicaName, jadapter.addresses.depository);
-      (jReplica as any).jadapter = jadapter;
-      (jReplica as any).depositoryAddress = jadapter.addresses.depository;
-      (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
-      (jReplica as any).contracts = {
+      jReplica.jadapter = jadapter;
+      jReplica.depositoryAddress = jadapter.addresses.depository;
+      jReplica.entityProviderAddress = jadapter.addresses.entityProvider;
+      jReplica.contracts = {
         depository: jadapter.addresses.depository,
         entityProvider: jadapter.addresses.entityProvider,
         account: jadapter.addresses.account,
@@ -124,7 +124,7 @@ export async function lockAhb(env: Env): Promise<void> {
     snap(env, 'Jurisdiction Machine Deployed', {
       description: 'Frame 0: Clean Slate - J-Machine Ready',
       what: 'The J-Machine (Jurisdiction Machine) is deployed on-chain.',
-      why: 'Before any entities exist, the jurisdiction infrastructure must be in place.',
+      why: 'Before entities exist, the jurisdiction infrastructure must be in place.',
       tradfiParallel: 'Like the Federal Reserve deploying its Fedwire Funds Service.',
       keyMetrics: ['J-Machine: Deployed', 'Entities: 0', 'Reserves: Empty'],
       expectedSolvency: 0n,
@@ -754,7 +754,7 @@ export async function lockAhb(env: Env): Promise<void> {
 
     // Verify deltas updated (recipient-exact HTLC semantics)
     const { calculateRequiredInboundForDesiredForward } = await import('../htlc-utils');
-    const hubProfile = env.gossip?.getProfiles?.().find((p: any) => p?.entityId === hub.id);
+    const hubProfile = env.gossip?.getProfiles?.().find((p) => p?.entityId === hub.id);
     const hubFeePpm = Number.isFinite(Number(hubProfile?.metadata?.routingFeePPM))
       ? Math.max(0, Math.floor(Number(hubProfile?.metadata?.routingFeePPM)))
       : 10;
