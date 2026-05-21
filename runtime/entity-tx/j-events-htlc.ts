@@ -1,6 +1,5 @@
 import { ethers } from 'ethers';
 import type {
-  AccountTx,
   CrossJurisdictionSwapRoute,
   EntityInput,
   EntityState,
@@ -10,13 +9,9 @@ import { addMessage } from '../state-helpers';
 import { decodeHashLadderBinary } from '../hashladder';
 import { isCrossJurisdictionTerminalStatus } from '../cross-jurisdiction';
 import { createStructuredLogger, shortHash, shortId, shortOrder } from '../logger';
+import type { JEventMempoolOp } from './j-events-types';
 
 const jEventHtlcLog = createStructuredLogger('j.event.htlc');
-
-export type JEventMempoolOp = {
-  accountId: string;
-  tx: AccountTx;
-};
 
 type DisputeTransformerArgs = {
   secrets?: Array<string>;
