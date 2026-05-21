@@ -518,6 +518,51 @@ describe('cross-jurisdiction hashledger swap', () => {
     )).toBe(true);
   });
 
+  test('committed pull resolve rejects stale cross-j claim ratios', () => {
+    const env = createEmptyEnv('cross-source-stale-claim');
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('a7');
+    const sourceHub = entity('a8');
+    const targetHub = entity('a9');
+    const targetUser = entity('b0');
+    const sourceHubState = makeState(sourceHub, addr('b1'), eth, sourceUser);
+    const route = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-source-stale-claim',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      status: 'resting',
+      createdAt: env.timestamp,
+      updatedAt: env.timestamp,
+      expiresAt: 70_000,
+    }, { runtimeSeed: 'cross-source-stale-claim-seed', sourceDisputeDelayMs: 5_000, now: env.timestamp });
+    const filledRoute = {
+      ...route,
+      status: 'clear_requested' as const,
+      fillSeq: 1,
+      cumulativeFillRatio: 0x8000,
+      claimedRatio: 0x8000,
+      filledSourceAmount: (BigInt(route.source.amount) * 0x8000n) / 65_535n,
+      filledTargetAmount: (BigInt(route.target.amount) * 0x8000n) / 65_535n,
+      clearingPolicy: 'cancel_and_clear' as const,
+    };
+    sourceHubState.crossJurisdictionSwaps?.set(filledRoute.orderId, filledRoute);
+    const privateSeed = deriveCrossJurisdictionPrivateSeed('cross-source-stale-claim-seed', filledRoute);
+    const staleBinary = buildCrossJurisdictionPullReveal(filledRoute, 0x4000, privateSeed).binary;
+
+    expect(() => applyCommittedCrossJurisdictionAccountTxFollowup(env, sourceHubState, sourceUser, {
+      type: 'pull_resolve',
+      data: {
+        pullId: filledRoute.sourcePull!.pullId,
+        binary: staleBinary,
+      },
+    }, [])).toThrow('CROSS_J_CLAIM_PROGRESS_INVALID');
+  });
+
   test('source user committed pull resolve mirrors source-claimed status locally', () => {
     const env = createEmptyEnv('cross-source-user-mirror');
     env.timestamp = 10_000;
