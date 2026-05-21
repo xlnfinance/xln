@@ -98,14 +98,8 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
   const rememberRuntimeSession = (session: DirectWsSession, runtimeId: string): boolean => {
     const existing = sessionsByRuntime.get(runtimeId);
     if (existing && existing.ws !== session.ws) {
-      trySend(existing.ws, {
-        type: 'error',
-        error: 'Runtime connection displaced by newer session',
-      });
-      try {
-        existing.ws.close();
-      } catch {
-        // Old peer may already be half-closed; replacing the routing slot is enough.
+      if (isSocketOpen(existing.ws)) {
+        return false;
       }
       sessions.delete(existing.ws);
     }

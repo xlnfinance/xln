@@ -147,4 +147,45 @@ describe('direct runtime websocket route', () => {
     });
     expect(received).toEqual([]);
   });
+
+  test('rejects duplicate runtime hello without displacing the live socket', async () => {
+    const serverSeed = 'direct-route-server-duplicate';
+    const clientSeed = 'direct-route-client-duplicate';
+    const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
+    const clientRuntimeId = deriveSignerAddressSync(clientSeed, '1').toLowerCase();
+    const route = createDirectRuntimeWsRoute({
+      runtimeId: serverRuntimeId,
+      runtimeSeed: serverSeed,
+      requireHelloAuth: false,
+      onEntityInput: () => {},
+    });
+
+    const first = makeFakeWs();
+    const second = makeFakeWs();
+    route.websocket.open(first.ws);
+    route.websocket.open(second.ws);
+
+    await route.websocket.message(first.ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
+    await route.websocket.message(second.ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
+
+    expect(first.ws.readyState).toBe(1);
+    expect(second.ws.readyState).toBe(3);
+    expect(second.sent.at(-1)).toMatchObject({
+      type: 'error',
+      error: 'Runtime already connected',
+    });
+    expect(route.getSessionState()).toEqual([
+      expect.objectContaining({ runtimeId: clientRuntimeId, open: true }),
+    ]);
+
+    const outboundInput: RoutedEntityInput = {
+      entityId: `0x${'33'.repeat(32)}`,
+      runtimeId: clientRuntimeId,
+      signerId: clientRuntimeId,
+      entityTxs: [],
+    };
+    expect(route.sendEntityInput(clientRuntimeId, outboundInput)).toBe(true);
+    expect(first.sent.at(-1)?.type).toBe('entity_input');
+    expect(second.sent.at(-1)?.type).toBe('error');
+  });
 });
