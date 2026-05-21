@@ -63,6 +63,11 @@ import {
   UNEXPECTED_EXIT_RESTART_MS,
   parseArgs,
 } from './orchestrator-config';
+import { buildPrometheusMetrics } from './prometheus';
+import {
+  buildPublicHubDiscoveryPayload,
+  getDebugEntityEntries,
+} from './public-discovery';
 
 const buildDiskSummary = (storage: StorageHealth): AggregatedHealth['disk'] => {
   const totalBytes = Number(storage.disk.totalBytes || 0);
@@ -1352,323 +1357,6 @@ const buildAggregatedHealthResponse = async (): Promise<AggregatedHealth> => {
   };
 };
 
-const prometheusLabelValue = (value: string | number | boolean | null | undefined): string =>
-  String(value ?? '')
-    .replace(/\\/g, '\\\\')
-    .replace(/"/g, '\\"')
-    .replace(/\n/g, '\\n');
-
-const prometheusLine = (
-  name: string,
-  value: number | boolean,
-  labels: Record<string, string | number | boolean | null | undefined> = {},
-): string => {
-  const numericValue = typeof value === 'boolean' ? (value ? 1 : 0) : Number.isFinite(value) ? value : 0;
-  const labelEntries = Object.entries(labels).filter(([, labelValue]) => labelValue !== undefined && labelValue !== null);
-  const labelText = labelEntries.length > 0
-    ? `{${labelEntries.map(([labelName, labelValue]) => `${labelName}="${prometheusLabelValue(labelValue)}"`).join(',')}}`
-    : '';
-  return `${name}${labelText} ${numericValue}`;
-};
-
-const buildPrometheusMetrics = (health: AggregatedHealth): string => {
-  const lines: string[] = [
-    '# HELP xln_core_ok Core XLN readiness.',
-    '# TYPE xln_core_ok gauge',
-    prometheusLine('xln_core_ok', health.coreOk),
-    '# HELP xln_system_ok Full system readiness including children and storage.',
-    '# TYPE xln_system_ok gauge',
-    prometheusLine('xln_system_ok', health.systemOk),
-    prometheusLine('xln_degraded_count', health.degraded.length),
-    prometheusLine('xln_reset_in_progress', health.reset.inProgress),
-    prometheusLine('xln_relay_clients', health.relay.clientCount),
-    prometheusLine('xln_relay_external_clients', health.relay.externalClientIds.length),
-    prometheusLine('xln_relay_market_subscriptions', health.relay.marketSubscriptions.total),
-    prometheusLine('xln_process_uptime_seconds', health.process.uptimeSec),
-    prometheusLine('xln_process_rss_bytes', health.process.rssBytes),
-    prometheusLine('xln_process_heap_used_bytes', health.process.heapUsedBytes),
-    prometheusLine('xln_disk_free_bytes', health.disk.freeBytes),
-    prometheusLine('xln_disk_used_pct', health.disk.usedPct),
-    prometheusLine('xln_storage_ok', health.storage.ok),
-    prometheusLine('xln_hub_mesh_ok', health.hubMesh.ok),
-    prometheusLine('xln_hub_mesh_open_direct_links', health.hubMesh.direct.openLinkCount),
-    prometheusLine('xln_market_maker_ok', health.marketMaker.ok),
-    prometheusLine('xln_custody_ok', health.custody.enabled ? health.custody.ok : true),
-    prometheusLine('xln_bootstrap_reserves_ok', health.bootstrapReserves.ok),
-    prometheusLine('xln_bootstrap_reserves_target_met', health.bootstrapReserves.targetMet),
-  ];
-
-  for (const child of health.process.children) {
-    const labels = { role: child.role, name: child.name };
-    lines.push(prometheusLine('xln_child_online', child.online, labels));
-    lines.push(prometheusLine('xln_child_restart_total', child.restartCount, labels));
-  }
-  for (const hub of health.hubs) {
-    const labels = { name: hub.name };
-    lines.push(prometheusLine('xln_hub_online', hub.online, labels));
-    lines.push(prometheusLine('xln_hub_self_relay_presence', hub.selfRelayPresence, labels));
-    lines.push(prometheusLine('xln_hub_restart_total', hub.restartCount, labels));
-  }
-  for (const tracked of health.storage.tracked) {
-    const labels = { name: tracked.name, kind: tracked.kind };
-    lines.push(prometheusLine('xln_storage_tracked_bytes', tracked.currentBytes, labels));
-    lines.push(prometheusLine('xln_storage_tracked_bytes_per_hour', tracked.bytesPerHour, labels));
-    lines.push(prometheusLine('xln_storage_scan_truncated', tracked.scanTruncated, labels));
-  }
-  for (const [stage, timing] of Object.entries(health.timings)) {
-    if (typeof timing.ms === 'number') lines.push(prometheusLine('xln_orchestrator_stage_ms', timing.ms, { stage }));
-  }
-
-  return `${lines.join('\n')}\n`;
-};
-
-const buildPublicHubDiscoveryPayload = (): {
-  ok: true;
-  count: number;
-  serverTime: number;
-  hubs: Array<{
-    entityId: string;
-    runtimeId: string | null;
-    name: string;
-    bio: null;
-    website: null;
-    wsUrl: string | null;
-    publicAccounts: [];
-    metadata: {
-      isHub: true;
-      jurisdiction?: {
-        name: string;
-        chainId?: number;
-        depositoryAddress?: string;
-        entityProviderAddress?: string;
-      };
-    };
-    lastUpdated: number;
-    online: boolean;
-  }>;
-} => {
-  const serverTime = Date.now();
-  const primaryJurisdictionFallback = resolvePrimaryHubJurisdictionFallback();
-  type PublicHubDiscoveryHub = {
-    entityId: string;
-    runtimeId: string | null;
-    name: string;
-    bio: null;
-    website: null;
-    wsUrl: string | null;
-    publicAccounts: [];
-    metadata: {
-      isHub: true;
-      jurisdiction?: {
-        name: string;
-        chainId?: number;
-        depositoryAddress?: string;
-        entityProviderAddress?: string;
-      };
-    };
-    lastUpdated: number;
-    online: boolean;
-  };
-  const hubsByEntityId = new Map<string, PublicHubDiscoveryHub>();
-  const addHub = (hub: PublicHubDiscoveryHub): void => {
-    const key = String(hub.entityId || '').trim().toLowerCase();
-    if (!key || !hub.online) return;
-    const existing = hubsByEntityId.get(key);
-    if (!existing || (hub.metadata.jurisdiction && !existing.metadata.jurisdiction)) {
-      hubsByEntityId.set(key, hub);
-    }
-  };
-
-  hubChildren
-    .flatMap((child) => {
-      const entityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '').trim();
-      const runtimeId = String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || '').trim();
-      const normalizedRuntimeId = normalizeRuntimeKey(runtimeId);
-      const directWsUrl = String(child.lastHealth?.directWsUrl || '').trim();
-      const apiReachable = Boolean(child.lastInfo || child.lastHealth);
-      const online =
-        child.proc?.exitCode === null
-        && apiReachable
-        && Boolean(normalizedRuntimeId)
-        && (relayStore.clients.has(normalizedRuntimeId) || Boolean(directWsUrl));
-      const hubEntities = child.lastInfo?.hubEntities?.length
-        ? child.lastInfo.hubEntities
-        : [{
-          entityId,
-          name: child.name,
-          jurisdictionName: primaryJurisdictionFallback?.name || '',
-          ...(primaryJurisdictionFallback?.chainId !== undefined ? { chainId: primaryJurisdictionFallback.chainId } : {}),
-          ...(primaryJurisdictionFallback?.depositoryAddress ? { depositoryAddress: primaryJurisdictionFallback.depositoryAddress } : {}),
-          ...(primaryJurisdictionFallback?.entityProviderAddress ? { entityProviderAddress: primaryJurisdictionFallback.entityProviderAddress } : {}),
-        }];
-      return hubEntities
-        .map((entry) => {
-          const entryEntityId = String(entry?.entityId || '').trim();
-          if (!entryEntityId) return null;
-          const jurisdictionName = String(entry?.jurisdictionName || '').trim();
-          return {
-            entityId: entryEntityId,
-            runtimeId: runtimeId || null,
-            name: String(entry?.name || child.name || entryEntityId).trim(),
-            bio: null,
-            website: null,
-            wsUrl: directWsUrl || null,
-            publicAccounts: [] as [],
-            metadata: {
-              isHub: true as const,
-              ...(jurisdictionName ? {
-                jurisdiction: {
-                  name: jurisdictionName,
-                  ...(entry.chainId !== undefined ? { chainId: entry.chainId } : {}),
-                  ...(entry.depositoryAddress ? { depositoryAddress: entry.depositoryAddress } : {}),
-                  ...(entry.entityProviderAddress ? { entityProviderAddress: entry.entityProviderAddress } : {}),
-                },
-              } : {}),
-            },
-            lastUpdated: serverTime,
-            online,
-          };
-        })
-        .filter((hub): hub is NonNullable<typeof hub> => Boolean(hub));
-    })
-    .forEach(addHub);
-
-  for (const entry of relayStore.gossipProfiles.values()) {
-    const profile = entry.profile;
-    if (profile?.metadata?.isHub !== true) continue;
-    const runtimeId = normalizeRuntimeKey(profile.runtimeId);
-    const online = Boolean(runtimeId && relayStore.clients.has(runtimeId));
-    const jurisdiction = profile.metadata?.jurisdiction as
-      | { name?: string; chainId?: number; depositoryAddress?: string; entityProviderAddress?: string }
-      | undefined;
-    const jurisdictionName = String(jurisdiction?.name || '').trim();
-    addHub({
-      entityId: profile.entityId,
-      runtimeId: runtimeId || profile.runtimeId || null,
-      name: String(profile.name || profile.entityId).trim(),
-      bio: null,
-      website: null,
-      wsUrl: String(profile.wsUrl || '').trim() || null,
-      publicAccounts: [],
-      metadata: {
-        isHub: true,
-        ...(jurisdictionName ? {
-          jurisdiction: {
-            name: jurisdictionName,
-            ...(jurisdiction?.chainId !== undefined ? { chainId: jurisdiction.chainId } : {}),
-            ...(jurisdiction?.depositoryAddress ? { depositoryAddress: jurisdiction.depositoryAddress } : {}),
-            ...(jurisdiction?.entityProviderAddress ? { entityProviderAddress: jurisdiction.entityProviderAddress } : {}),
-          },
-        } : {}),
-      },
-      lastUpdated: Number(profile.lastUpdated || entry.timestamp || serverTime),
-      online,
-    });
-  }
-
-  const hubs = Array.from(hubsByEntityId.values())
-    .sort((left, right) =>
-      compareStableText(String(left.metadata.jurisdiction?.name || ''), String(right.metadata.jurisdiction?.name || '')) ||
-      compareStableText(left.name, right.name)
-    );
-
-  return {
-    ok: true,
-    count: hubs.length,
-    serverTime,
-    hubs,
-  };
-};
-
-const getDebugEntityEntries = (requestUrl: URL): Array<{
-  entityId: string;
-  runtimeId?: string | undefined;
-  name: string;
-  isHub: boolean;
-  online: boolean;
-  lastUpdated: number;
-  accounts: unknown[];
-  publicAccounts: unknown[];
-  metadata: Record<string, unknown>;
-}> => {
-  const q = (requestUrl.searchParams.get('q') || '').trim().toLowerCase();
-  const limit = Math.max(1, Math.min(5000, Number(requestUrl.searchParams.get('limit') || '1000')));
-  const onlineOnly = requestUrl.searchParams.get('online') === 'true';
-
-  const entities = new Map<string, {
-    entityId: string;
-    runtimeId?: string | undefined;
-    name: string;
-    isHub: boolean;
-    online: boolean;
-    lastUpdated: number;
-    accounts: unknown[];
-    publicAccounts: unknown[];
-    metadata: Record<string, unknown>;
-  }>();
-
-  for (const [entityId, entry] of relayStore.gossipProfiles.entries()) {
-    const profile = entry.profile || {};
-    const runtimeId = typeof profile.runtimeId === 'string' ? profile.runtimeId : undefined;
-    const normalizedRuntimeId = normalizeRuntimeKey(runtimeId);
-    const metadata =
-      profile?.metadata && typeof profile.metadata === 'object'
-        ? profile.metadata as Record<string, unknown>
-        : {};
-    const isHub = profile?.metadata?.isHub === true;
-    const name =
-      typeof profile?.name === 'string' && profile.name.trim().length > 0
-        ? profile.name.trim()
-        : entityId;
-    const online = normalizedRuntimeId ? relayStore.clients.has(normalizedRuntimeId) : false;
-    entities.set(entityId.toLowerCase(), {
-      entityId,
-      runtimeId: normalizedRuntimeId || runtimeId,
-      name,
-      isHub,
-      online,
-      lastUpdated: Number(profile?.lastUpdated || entry.timestamp || 0),
-      accounts: Array.isArray(profile?.accounts) ? profile.accounts : [],
-      publicAccounts: Array.isArray(profile?.publicAccounts) ? profile.publicAccounts : [],
-      metadata,
-    });
-  }
-
-  for (const child of hubChildren) {
-    const entityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '');
-    if (!entityId) continue;
-    const key = entityId.toLowerCase();
-    const runtimeId = String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || '') || undefined;
-    const normalizedRuntimeId = normalizeRuntimeKey(runtimeId);
-    const existing = entities.get(key);
-    const online = child.proc?.exitCode === null && Boolean(child.lastHealth);
-    entities.set(key, {
-      entityId,
-      runtimeId: normalizedRuntimeId || runtimeId || existing?.runtimeId,
-      name: existing?.name || child.name,
-      isHub: true,
-      online: existing?.online === true || online,
-      lastUpdated: Math.max(existing?.lastUpdated || 0, Date.now()),
-      accounts: existing?.accounts || [],
-      publicAccounts: existing?.publicAccounts || [],
-      metadata: {
-        ...(existing?.metadata || {}),
-        isHub: true,
-      },
-    });
-  }
-
-  return Array.from(entities.values())
-    .filter((entity) => {
-      if (onlineOnly && !entity.online) return false;
-      if (!q) return true;
-      const blob = `${entity.entityId} ${entity.runtimeId || ''} ${entity.name}`.toLowerCase();
-      return blob.includes(q);
-    })
-    .sort((left, right) => (right.lastUpdated || 0) - (left.lastUpdated || 0))
-    .slice(0, limit);
-};
-
 const waitForHubBaseline = async (): Promise<void> => {
   const deadline = Date.now() + HUB_BASELINE_TIMEOUT_MS;
   const directRequired = HUB_NAMES.length * Math.max(0, HUB_NAMES.length - 1);
@@ -2213,13 +1901,17 @@ const server = Bun.serve({
 
     if (pathname === '/api/hubs') {
       await pollAllHubHealth();
-      return new Response(safeStringify(buildPublicHubDiscoveryPayload()), { headers });
+      return new Response(safeStringify(buildPublicHubDiscoveryPayload({
+        hubChildren,
+        relayStore,
+        primaryJurisdictionFallback: resolvePrimaryHubJurisdictionFallback(),
+      })), { headers });
     }
 
     if (pathname === '/api/debug/entities') {
       await pollAllHubHealth();
       await pollMarketMakerHealth();
-      const entities = getDebugEntityEntries(url).map((entity) => {
+      const entities = getDebugEntityEntries({ requestUrl: url, relayStore, hubChildren }).map((entity) => {
         const hubChild = hubChildren.find((child) => {
           const childEntityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '').toLowerCase();
           return childEntityId === entity.entityId.toLowerCase();
