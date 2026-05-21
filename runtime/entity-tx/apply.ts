@@ -42,16 +42,20 @@ import {
 	getCrossJurisdictionPrivateSeed,
 	isCrossJurisdictionPullExpired,
 	isCrossJurisdictionRouteExpired,
-	isCrossJurisdictionRouteTransitionAllowed,
 	isCrossJurisdictionTerminalStatus,
 	cloneCrossJurisdictionRoute,
 	validateCrossJurisdictionFillProgress,
 	withCanonicalCrossJurisdictionRouteHash,
 } from '../cross-jurisdiction';
-import { decodeHashLadderBinary, verifyHashLadderBinary } from '../hashladder';
+import { decodeHashLadderBinary } from '../hashladder';
 import { handleR2C } from './handlers/r2c';
 import { handleE2R } from './handlers/e2r';
 import { handleR2R } from './handlers/r2r';
+import {
+  handleCancelPullEntityTx,
+  handlePullLockEntityTx,
+  handleResolvePullEntityTx,
+} from './handlers/pull';
 import {
   handleCancelSwapRequest,
   handlePlaceSwapOfferRequest,
@@ -79,14 +83,12 @@ import {
   accountHasPullResolveQueued,
   canonicalizeCrossJurisdictionRouteForKnownEntities,
   findCrossJurisdictionOfferRoute,
-  findCrossJurisdictionPullRoute,
-  hasCommittedCrossJurisdictionFill,
-  isCrossJurisdictionPullCancelWithinClear,
   isCrossJurisdictionRouteParticipant,
   mergeCrossJurisdictionRoute,
   validateCrossJurisdictionLocalBinding,
   validateCrossJurisdictionRouteTransition,
 } from './cross-jurisdiction-helpers';
+import { findAccountKey, normalizeEntityRef } from './account-key';
 
 // Extended return type including pure events from handlers
 export interface ApplyEntityTxResult {
@@ -103,7 +105,6 @@ export interface ApplyEntityTxResult {
   hashesToSign?: Array<{ hash: string; type: HashType; context: string }>;
 }
 
-const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 const deterministicEntityTimestamp = (state: EntityState, env: Env): number =>
   Number(state.timestamp || env.timestamp || 0);
 const cancelOrderbookOfferIfPresent = (
@@ -139,14 +140,6 @@ const resolveJurisdictionRebalanceDefaults = (
     };
   }
   return { r2cRequestSoftLimit, hardLimit, maxAcceptableFee };
-};
-
-const findAccountKey = (state: EntityState, counterpartyId: string): string | null => {
-  const target = normalizeEntityRef(counterpartyId);
-  for (const key of state.accounts.keys()) {
-    if (normalizeEntityRef(key) === target) return key;
-  }
-  return null;
 };
 
 const pushCrossJOutput = (
@@ -1337,162 +1330,15 @@ export const applyEntityTx = async (
 
     // === SWAP ENTITY HANDLERS ===
     if (entityTx.type === 'pullLock') {
-      const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
-      const mempoolOps: MempoolOp[] = [];
-      const { counterpartyEntityId, pullId, tokenId, amount, revealedUntilTimestamp, fullHash, partialRoot } = entityTx.data;
-      const normalizedCounterparty = findAccountKey(newState, counterpartyEntityId);
-      if (!normalizedCounterparty) {
-        addMessage(newState, `❌ Pull lock failed: no account with ${formatEntityId(counterpartyEntityId)}`);
-        return { newState, outputs, mempoolOps };
-      }
-      mempoolOps.push({
-        accountId: normalizedCounterparty,
-        tx: {
-          type: 'pull_lock',
-          data: {
-            pullId,
-            tokenId: Number(tokenId),
-            amount: BigInt(amount),
-            revealedUntilTimestamp: Number(revealedUntilTimestamp),
-            fullHash,
-            partialRoot,
-          },
-        },
-      });
-      const firstValidator = entityState.config.validators[0];
-      if (firstValidator) {
-        outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
-      }
-      return { newState, outputs, mempoolOps };
+      return handlePullLockEntityTx(env, entityState, entityTx);
     }
 
     if (entityTx.type === 'resolvePull') {
-      const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
-      const mempoolOps: MempoolOp[] = [];
-      const { counterpartyEntityId, pullId, binary } = entityTx.data;
-      const normalizedCounterparty = findAccountKey(newState, counterpartyEntityId);
-      if (!normalizedCounterparty) {
-        addMessage(newState, `❌ Pull resolve failed: no account with ${formatEntityId(counterpartyEntityId)}`);
-        return { newState, outputs, mempoolOps };
-      }
-      const crossSourceRoute = [...(newState.crossJurisdictionSwaps?.values?.() ?? [])].find(route =>
-        route.sourcePull?.pullId === pullId &&
-        normalizeEntityRef(route.source.counterpartyEntityId) === normalizeEntityRef(newState.entityId) &&
-        normalizeEntityRef(route.source.entityId) === normalizeEntityRef(counterpartyEntityId),
-      );
-      if (crossSourceRoute && crossSourceRoute.status !== 'clearing') {
-        addMessage(newState, `❌ Cross-j source pull ${pullId.slice(0, 8)} resolve blocked: use requestCrossJurisdictionClear`);
-        return { newState, outputs, mempoolOps };
-      }
-      const crossTargetRoute = [...(newState.crossJurisdictionSwaps?.values?.() ?? [])].find(route =>
-        route.targetPull?.pullId === pullId &&
-        normalizeEntityRef(route.target.counterpartyEntityId) === normalizeEntityRef(newState.entityId) &&
-        normalizeEntityRef(route.target.entityId) === normalizeEntityRef(counterpartyEntityId),
-      );
-      if (crossTargetRoute) {
-        if (isCrossJurisdictionTerminalStatus(crossTargetRoute.status)) {
-          addMessage(newState, `❌ Cross-j target pull ${pullId.slice(0, 8)} resolve blocked: route ${crossTargetRoute.status}`);
-          return { newState, outputs, mempoolOps };
-        }
-        if (!crossTargetRoute.targetPull) {
-          addMessage(newState, `❌ Cross-j target pull ${pullId.slice(0, 8)} resolve blocked: missing commitment`);
-          return { newState, outputs, mempoolOps };
-        }
-        let decodedRatio = 0;
-        try {
-          decodedRatio = verifyHashLadderBinary({
-            fullHash: crossTargetRoute.targetPull.fullHash,
-            partialRoot: crossTargetRoute.targetPull.partialRoot,
-          }, binary).fillRatio;
-        } catch (error) {
-          addMessage(newState, `❌ Cross-j target pull ${pullId.slice(0, 8)} resolve blocked: ${error instanceof Error ? error.message : String(error)}`);
-          return { newState, outputs, mempoolOps };
-        }
-        if (decodedRatio <= 0) {
-          addMessage(newState, `❌ Cross-j target pull ${pullId.slice(0, 8)} resolve blocked: empty reveal`);
-          return { newState, outputs, mempoolOps };
-        }
-        const committedRatio = Math.max(
-          Math.floor(Number(crossTargetRoute.cumulativeFillRatio ?? 0) || 0),
-          Math.floor(Number(crossTargetRoute.claimedRatio ?? 0) || 0),
-        );
-        if (committedRatio > 0 && decodedRatio > committedRatio) {
-          addMessage(
-            newState,
-            `❌ Cross-j target pull ${pullId.slice(0, 8)} resolve blocked: ratio ${decodedRatio}/65535 exceeds committed ${committedRatio}/65535`,
-          );
-          return { newState, outputs, mempoolOps };
-        }
-        if (!isCrossJurisdictionRouteTransitionAllowed(crossTargetRoute.status, 'clearing')) {
-          addMessage(
-            newState,
-            `❌ Cross-j target pull ${pullId.slice(0, 8)} resolve blocked: route ${crossTargetRoute.status}->clearing`,
-          );
-          return { newState, outputs, mempoolOps };
-        }
-        crossTargetRoute.status = 'clearing';
-        crossTargetRoute.pendingClearRequestedAt ||= deterministicEntityTimestamp(newState, env);
-        crossTargetRoute.updatedAt = newState.timestamp || env.timestamp;
-        newState.crossJurisdictionSwaps?.set(crossTargetRoute.orderId, crossTargetRoute);
-      }
-      mempoolOps.push({
-        accountId: normalizedCounterparty,
-        tx: {
-          type: 'pull_resolve',
-          data: {
-            pullId,
-            binary,
-          },
-        },
-      });
-      const firstValidator = entityState.config.validators[0];
-      if (firstValidator) {
-        outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
-	      }
-	      return { newState, outputs, mempoolOps };
+      return handleResolvePullEntityTx(env, entityState, entityTx);
 	    }
 
     if (entityTx.type === 'cancelPull' || entityTx.type === 'pullCancelExpired') {
-      const newState = cloneEntityState(entityState);
-      const outputs: EntityInput[] = [];
-      const mempoolOps: MempoolOp[] = [];
-      const { counterpartyEntityId, pullId } = entityTx.data;
-      const normalizedCounterparty = findAccountKey(newState, counterpartyEntityId);
-      if (!normalizedCounterparty) {
-        addMessage(newState, `❌ Pull cancel failed: no account with ${formatEntityId(counterpartyEntityId)}`);
-        return { newState, outputs, mempoolOps };
-      }
-      const crossPullRoute = findCrossJurisdictionPullRoute(newState, pullId);
-      if (
-        crossPullRoute &&
-        hasCommittedCrossJurisdictionFill(crossPullRoute.route) &&
-        !isCrossJurisdictionPullCancelWithinClear(crossPullRoute.route)
-      ) {
-        addMessage(
-          newState,
-          `❌ Cross-j ${crossPullRoute.leg} pull ${pullId.slice(0, 8)} cancel blocked: ` +
-          `route ${crossPullRoute.route.orderId} must clear through requestCrossJurisdictionClear`,
-        );
-        return { newState, outputs, mempoolOps };
-      }
-      mempoolOps.push({
-        accountId: normalizedCounterparty,
-        tx: {
-          type: 'pull_cancel',
-          data: {
-            pullId,
-            reason: entityTx.type === 'pullCancelExpired' ? 'expired' : 'beneficiary_release',
-          },
-        },
-      });
-      const firstValidator = entityState.config.validators[0];
-      if (firstValidator) {
-        outputs.push({ entityId: entityState.entityId, signerId: firstValidator, entityTxs: [] });
-      }
-      addMessage(newState, `🪝 Pull cancel queued: ${pullId.slice(0, 8)}`);
-      return { newState, outputs, mempoolOps };
+      return handleCancelPullEntityTx(env, entityState, entityTx);
     }
 
     if (entityTx.type === 'requestCrossJurisdictionSwap') {
