@@ -63,15 +63,6 @@ function copyContracts() {
   }
 }
 
-function ensureBrowserRuntimeBundle() {
-  const serverJsPath = fromFrontend('static/server.js');
-  if (existsSync(serverJsPath)) {
-    console.log('✅ static/server.js exists (built directly)');
-  } else {
-    console.log(`⚠️ static/server.js missing - run 'bun run build' first`);
-  }
-}
-
 function copyScenarios() {
   const scenariosSrc = fromFrontend('../scenarios');
   const scenariosDest = fromFrontend('static/scenarios');
@@ -323,7 +314,6 @@ function copyDocsAndManifest() {
 }
 
 copyContracts();
-ensureBrowserRuntimeBundle();
 copyScenarios();
 copyDocsAndManifest();
 
