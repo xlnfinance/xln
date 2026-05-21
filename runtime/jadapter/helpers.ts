@@ -475,29 +475,18 @@ function enqueueRawJEventsToRuntime(
       events[0]?.transactionHash ??
       `${adapterLabel}-${blockNumber}-${txCounter ? txCounter.value++ : entityInputs.length}`;
     const eventsHash = canonicalJurisdictionEventsHash(jEvents);
-    let signature: string | undefined;
-    try {
-      signature = signAccountFrame(
-        env,
+    const signature = signAccountFrame(
+      env,
+      signerId,
+      buildJEventObservationDigest({
+        entityId,
         signerId,
-        buildJEventObservationDigest({
-          entityId,
-          signerId,
-          blockNumber,
-          blockHash,
-          transactionHash,
-          eventsHash,
-        }),
-      );
-    } catch (error) {
-      const replica = env.eReplicas.get(`${entityId}:${signerId}`);
-      const validators = replica?.state?.config?.validators || [];
-      const threshold = BigInt(replica?.state?.config?.threshold || 0n);
-      const signatureRequired = validators.length > 1 || threshold > 1n;
-      if (signatureRequired) {
-        throw error;
-      }
-    }
+        blockNumber,
+        blockHash,
+        transactionHash,
+        eventsHash,
+      }),
+    );
 
     entityInputs.push({
       entityId,
@@ -512,7 +501,7 @@ function enqueueRawJEventsToRuntime(
             blockHash,
             transactionHash,
             eventsHash,
-            ...(signature ? { signature } : {}),
+            signature,
             events: jEvents,
             event: firstJEvent,
           },

@@ -1,6 +1,6 @@
 import { sveltekit } from '@sveltejs/kit/vite';
 import { defineConfig } from 'vite';
-import type { PreviewServer } from 'vite';
+import type { Plugin, PreviewServer, ViteDevServer } from 'vite';
 import fs from 'fs';
 import net from 'net';
 import http from 'node:http';
@@ -52,6 +52,7 @@ const API_PROXY_TARGET = process.env['VITE_API_PROXY_TARGET'] || 'http://localho
 const VITE_CACHE_DIR = process.env['VITE_CACHE_DIR'] || 'node_modules/.vite';
 const REPO_ROOT = fileURLToPath(new URL('..', import.meta.url));
 const TYPECHAIN_INDEX = fileURLToPath(new URL('../jurisdictions/typechain-types/index.ts', import.meta.url));
+const RUNTIME_BUNDLE_PATH = fileURLToPath(new URL('./static/runtime.js', import.meta.url));
 const BUILD_NUMBER = (() => {
   const explicit = String(process.env['XLN_BUILD_NUMBER'] || '').trim();
   if (explicit) return explicit;
@@ -148,6 +149,41 @@ function createPreviewHttpProxyMiddleware(targetBase: string) {
 	};
 }
 
+function createRuntimeBundleMiddleware() {
+	return (req: http.IncomingMessage, res: http.ServerResponse, next: (err?: unknown) => void) => {
+		const requestPath = String(req.url || '').split('?')[0];
+		if (requestPath !== '/runtime.js') {
+			next();
+			return;
+		}
+
+		if (!fs.existsSync(RUNTIME_BUNDLE_PATH)) {
+			res.statusCode = 503;
+			res.setHeader('content-type', 'application/json');
+			res.end(JSON.stringify({ error: 'RUNTIME_BUNDLE_MISSING' }));
+			return;
+		}
+
+		res.statusCode = 200;
+		res.setHeader('content-type', 'text/javascript; charset=utf-8');
+		res.setHeader('cache-control', 'no-store, must-revalidate');
+		fs.createReadStream(RUNTIME_BUNDLE_PATH).pipe(res);
+	};
+}
+
+function runtimeBundlePlugin(): Plugin {
+	return {
+		name: 'xln-runtime-bundle',
+		enforce: 'pre',
+		configureServer(server: ViteDevServer) {
+			server.middlewares.use(createRuntimeBundleMiddleware());
+		},
+		configurePreviewServer(server: PreviewServer) {
+			server.middlewares.use(createRuntimeBundleMiddleware());
+		},
+	};
+}
+
 async function assertPortAvailable(port: number, host: string): Promise<void> {
 	return new Promise((resolve, reject) => {
 		const server = net.createServer();
@@ -178,6 +214,7 @@ export default defineConfig(async ({ command }) => {
 
 	return {
 	plugins: [
+		runtimeBundlePlugin(),
 		sveltekit(),
 		{
 			name: 'xln-preview-http-proxy',

@@ -11,9 +11,9 @@ import {
 } from '../runtime';
 import { hashHtlcSecret } from '../htlc-utils';
 import { getJurisdictionStackId } from '../jurisdiction-runtime';
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
+import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account-crypto';
 import { generateLazyEntityId } from '../entity-factory';
-import type { AccountMachine, ConsensusConfig, EntityReplica, EntityState, Env, JurisdictionConfig } from '../types';
+import type { AccountMachine, ConsensusConfig, EntityReplica, EntityState, Env, JurisdictionConfig, JurisdictionEvent } from '../types';
 import { createDefaultDelta } from '../validation-utils';
 import { cloneEntityState } from '../state-helpers';
 import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
@@ -29,6 +29,10 @@ import {
   cloneCrossJurisdictionRoute,
 } from '../cross-jurisdiction';
 import { verifyHashLadderBinary } from '../hashladder';
+import {
+  buildJEventObservationDigest,
+  canonicalJurisdictionEventsHash,
+} from '../j-event-observation';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
@@ -44,6 +48,40 @@ const makeJurisdiction = (name: string, chainId: number, depByte: string, epByte
   depositoryAddress: addr(depByte),
   entityProviderAddress: addr(epByte),
 });
+
+const registerTestSigner = (env: Env, seed: string, slot = '1'): string => {
+  env.runtimeSeed = seed;
+  const signerId = deriveSignerAddressSync(seed, slot);
+  registerSignerKey(signerId, deriveSignerKeySync(seed, slot));
+  return signerId;
+};
+
+const signJEventObservation = (
+  env: Env,
+  entityId: string,
+  signerId: string,
+  input: {
+    blockNumber: number;
+    blockHash: string;
+    transactionHash: string;
+    events: JurisdictionEvent[];
+  },
+): { eventsHash: string; signature: string } => {
+  const eventsHash = canonicalJurisdictionEventsHash(input.events);
+  const signature = signAccountFrame(
+    env,
+    signerId,
+    buildJEventObservationDigest({
+      entityId,
+      signerId,
+      blockNumber: input.blockNumber,
+      blockHash: input.blockHash,
+      transactionHash: input.transactionHash,
+      eventsHash,
+    }),
+  );
+  return { eventsHash, signature };
+};
 
 const jref = (jurisdiction: JurisdictionConfig): string => getJurisdictionStackId(jurisdiction);
 
@@ -1622,7 +1660,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const hub = entity('22');
     const targetUser = entity('23');
     const targetHub = entity('24');
-    const signer = addr('51');
+    const signer = registerTestSigner(env, 'cross-dispute-secret', '1');
     const state = makeState(user, signer, eth, hub);
     const revealedSecret = secret('77');
     const hashlock = hashHtlcSecret(revealedSecret);
@@ -1651,26 +1689,34 @@ describe('cross-jurisdiction hashledger swap', () => {
       [{ fillRatios: [], secrets: [revealedSecret], pulls: [] }],
     );
     const initialArguments = abiCoder.encode(['bytes[]'], [[paymentArgs]]);
+    const disputeStartedEvent: JurisdictionEvent = {
+      type: 'DisputeStarted',
+      data: {
+        sender: hub,
+        counterentity: user,
+        nonce: '1',
+        proofbodyHash: secret('7a'),
+        initialArguments,
+        disputeTimeout: 100,
+        onChainNonce: 1,
+      },
+    };
+    const signed = signJEventObservation(env, user, signer, {
+      blockNumber: 2,
+      blockHash: secret('7b'),
+      transactionHash: secret('7c'),
+      events: [disputeStartedEvent],
+    });
     const result = await applyEntityTx(env, state, {
       type: 'j_event',
       data: {
         from: signer,
-        event: {
-          type: 'DisputeStarted',
-          data: {
-            sender: hub,
-            counterentity: user,
-            nonce: '1',
-            proofbodyHash: secret('7a'),
-            initialArguments,
-            disputeTimeout: 100,
-            onChainNonce: 1,
-          },
-        },
+        event: disputeStartedEvent,
         observedAt: env.timestamp,
         blockNumber: 2,
         blockHash: secret('7b'),
         transactionHash: secret('7c'),
+        ...signed,
       },
     });
 
@@ -1694,7 +1740,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const sourceHub = entity('32');
     const targetHub = entity('33');
     const targetUser = entity('34');
-    const signer = addr('61');
+    const signer = registerTestSigner(env, 'cross-dispute-salvage', '1');
     const state = makeState(sourceUser, signer, eth, sourceHub);
     const route = buildPreparedCrossJurisdictionRoute({
       orderId: 'cross-pull-dispute',
@@ -1727,26 +1773,34 @@ describe('cross-jurisdiction hashledger swap', () => {
       [{ fillRatios: [], secrets: [], pulls: [binary] }],
     );
     const initialArguments = abiCoder.encode(['bytes[]'], [[crossPullArgs]]);
+    const disputeStartedEvent: JurisdictionEvent = {
+      type: 'DisputeStarted',
+      data: {
+        sender: sourceHub,
+        counterentity: sourceUser,
+        nonce: '1',
+        proofbodyHash: secret('8a'),
+        initialArguments,
+        disputeTimeout: 100,
+        onChainNonce: 1,
+      },
+    };
+    const signed = signJEventObservation(env, sourceUser, signer, {
+      blockNumber: 2,
+      blockHash: secret('8b'),
+      transactionHash: secret('8c'),
+      events: [disputeStartedEvent],
+    });
     const result = await applyEntityTx(env, state, {
       type: 'j_event',
       data: {
         from: signer,
-        event: {
-          type: 'DisputeStarted',
-          data: {
-            sender: sourceHub,
-            counterentity: sourceUser,
-            nonce: '1',
-            proofbodyHash: secret('8a'),
-            initialArguments,
-            disputeTimeout: 100,
-            onChainNonce: 1,
-          },
-        },
+        event: disputeStartedEvent,
         observedAt: env.timestamp,
         blockNumber: 2,
         blockHash: secret('8b'),
         transactionHash: secret('8c'),
+        ...signed,
       },
     });
 
@@ -1833,7 +1887,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const targetHub = entity('53');
     const targetUser = entity('54');
     const sourceSigner = addr('81');
-    const targetSigner = addr('82');
+    const targetSigner = registerTestSigner(env, 'cross-target-dispute-force-source', '1');
     const sourceState = makeState(sourceUser, sourceSigner, eth, sourceHub);
     const targetState = makeState(targetUser, targetSigner, base, targetHub);
     addReplica(env, sourceState, sourceSigner);
@@ -1862,26 +1916,34 @@ describe('cross-jurisdiction hashledger swap', () => {
     }, { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.timestamp });
     targetState.crossJurisdictionSwaps?.set(route.orderId, { ...route });
 
+    const disputeStartedEvent: JurisdictionEvent = {
+      type: 'DisputeStarted',
+      data: {
+        sender: targetHub,
+        counterentity: targetUser,
+        nonce: '1',
+        proofbodyHash: secret('9a'),
+        initialArguments: '0x',
+        disputeTimeout: 100,
+        onChainNonce: 1,
+      },
+    };
+    const signed = signJEventObservation(env, targetUser, targetSigner, {
+      blockNumber: 2,
+      blockHash: secret('9b'),
+      transactionHash: secret('9c'),
+      events: [disputeStartedEvent],
+    });
     const result = await applyEntityTx(env, targetState, {
       type: 'j_event',
       data: {
         from: targetSigner,
-        event: {
-          type: 'DisputeStarted',
-          data: {
-            sender: targetHub,
-            counterentity: targetUser,
-            nonce: '1',
-            proofbodyHash: secret('9a'),
-            initialArguments: '0x',
-            disputeTimeout: 100,
-            onChainNonce: 1,
-          },
-        },
+        event: disputeStartedEvent,
         observedAt: env.timestamp,
         blockNumber: 2,
         blockHash: secret('9b'),
         transactionHash: secret('9c'),
+        ...signed,
       },
     });
 

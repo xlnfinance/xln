@@ -113,40 +113,12 @@ export const isCrossJurisdictionRouteRemoteHopAllowed = (
   const remote = normalizeRuntimeRef(remoteRuntimeId);
   if (!local || !remote || local === remote) return false;
 
-  const sourceUserId = normalizeEntityRef(route.source?.entityId);
-  const targetUserId = normalizeEntityRef(route.target?.counterpartyEntityId);
-  const sourceHubId = normalizeEntityRef(route.source?.counterpartyEntityId);
-  const targetHubId = normalizeEntityRef(route.target?.entityId);
-  if (!sourceUserId || !targetUserId || !sourceHubId || !targetHubId) return false;
-
-  const knownRuntime = (entityId: string): string => normalizeRuntimeRef(resolveRuntimeId(entityId));
-  const sideFor = (entityIds: string[]): string | null => {
-    let side: string | null = null;
-    for (const entityId of entityIds) {
-      const runtimeId = knownRuntime(entityId);
-      if (!runtimeId) continue;
-      if (runtimeId !== local && runtimeId !== remote) return '__invalid__';
-      if (side && side !== runtimeId) return '__invalid__';
-      side = runtimeId;
-    }
-    return side;
-  };
-
-  let userRuntimeId = sideFor([sourceUserId, targetUserId]);
-  let hubRuntimeId = sideFor([sourceHubId, targetHubId]);
-  if (userRuntimeId === '__invalid__' || hubRuntimeId === '__invalid__') return false;
-
-  if (!userRuntimeId && hubRuntimeId) userRuntimeId = hubRuntimeId === local ? remote : local;
-  if (!hubRuntimeId && userRuntimeId) hubRuntimeId = userRuntimeId === local ? remote : local;
-  if (!userRuntimeId || !hubRuntimeId || userRuntimeId === hubRuntimeId) return false;
-
-  const bookOwnerId = normalizeEntityRef(route.bookOwnerEntityId || route.source?.counterpartyEntityId || route.hubEntityId);
-  const knownBookOwnerRuntimeId = bookOwnerId ? knownRuntime(bookOwnerId) : '';
-  if (knownBookOwnerRuntimeId && knownBookOwnerRuntimeId !== hubRuntimeId) return false;
+  const topology = resolveCrossJurisdictionRuntimeTopology(route, resolveRuntimeId);
+  if (!topology) return false;
 
   return (
-    (local === userRuntimeId && remote === hubRuntimeId) ||
-    (local === hubRuntimeId && remote === userRuntimeId)
+    (local === topology.userRuntimeId && remote === topology.hubRuntimeId) ||
+    (local === topology.hubRuntimeId && remote === topology.userRuntimeId)
   );
 };
 

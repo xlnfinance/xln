@@ -2293,6 +2293,12 @@ export interface Env {
     }>;
     watcherDedupCounter?: import('./jadapter/watcher').EventBatchCounter;
     directEntityInputDispatch?: ((targetRuntimeId: string, input: DeliverableEntityInput, ingressTimestamp?: number) => boolean) | null;
+    /**
+     * True only when the target runtime is already attached to this same
+     * server/relay process with a cached encryption key. This is local socket
+     * delivery capability, not permission to queue arbitrary public relay hops.
+     */
+    canUseConnectedRelayFallback?: ((targetRuntimeId: string) => boolean) | null;
   } | undefined;
   history: EnvSnapshot[]; // Time machine snapshots - single source of truth
   gossip: GossipLayer;

@@ -605,30 +605,29 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
   }
   const canonicalEventsHash = canonicalJurisdictionEventsHash(jEvents);
   const suppliedEventsHash = typeof batchData.eventsHash === 'string' ? batchData.eventsHash.toLowerCase() : '';
-  if (suppliedEventsHash && suppliedEventsHash !== canonicalEventsHash) {
+  if (!suppliedEventsHash) {
+    throw new Error(`j_event rejected: missing eventsHash for signer ${String(signerId)} block ${blockNumber}`);
+  }
+  if (suppliedEventsHash !== canonicalEventsHash) {
     throw new Error(
       `j_event rejected: eventsHash mismatch for signer ${String(signerId)} block ${blockNumber}`,
     );
   }
 
-  const requiresSignedObservation =
-    (entityState.config.validators || []).length > 1 || BigInt(entityState.config.threshold || 0n) > 1n;
-  if (requiresSignedObservation) {
-    const signature = typeof batchData.signature === 'string' ? batchData.signature : '';
-    if (!signature) {
-      throw new Error(`j_event rejected: missing observation signature for signer ${String(signerId)}`);
-    }
-    const digest = buildJEventObservationDigest({
-      entityId: entityState.entityId,
-      signerId: String(signerId),
-      blockNumber,
-      blockHash,
-      transactionHash: batchData.transactionHash || '',
-      eventsHash: canonicalEventsHash,
-    });
-    if (!verifyAccountSignature(env, String(signerId), digest, signature)) {
-      throw new Error(`j_event rejected: invalid observation signature for signer ${String(signerId)}`);
-    }
+  const signature = typeof batchData.signature === 'string' ? batchData.signature : '';
+  if (!signature) {
+    throw new Error(`j_event rejected: missing observation signature for signer ${String(signerId)}`);
+  }
+  const digest = buildJEventObservationDigest({
+    entityId: entityState.entityId,
+    signerId: String(signerId),
+    blockNumber,
+    blockHash,
+    transactionHash: batchData.transactionHash || '',
+    eventsHash: canonicalEventsHash,
+  });
+  if (!verifyAccountSignature(env, String(signerId), digest, signature)) {
+    throw new Error(`j_event rejected: invalid observation signature for signer ${String(signerId)}`);
   }
 
   // Clone state and create observation with ALL events from this batch

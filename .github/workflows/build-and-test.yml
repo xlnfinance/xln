@@ -51,7 +51,7 @@ jobs:
         run: bun run env:build
 
       - name: Run full contract tests
-        run: cd jurisdictions && bun run test
+        run: bun run test:contracts:full
 
   build-xln:
     name: Runtime Checks
@@ -193,8 +193,8 @@ jobs:
           # Clear any existing deployment cache to avoid reconciliation issues in CI
           rm -rf jurisdictions/ignition/deployments/chain-* || true
 
-      - name: Run isolated quick suite
-        run: bun run test
+      - name: Run CI release gate
+        run: bun run gate:ci
         env:
           CI: true
 

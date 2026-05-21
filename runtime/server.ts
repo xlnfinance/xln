@@ -1137,6 +1137,15 @@ const resolveRequestClientIp = (request: Request): string => {
 
 const getRelayClientIp = (ws: RelaySocket): string => String(ws.data?.clientIp || 'unknown');
 
+const hasConnectedEncryptedRelayClient = (targetRuntimeId: string): boolean => {
+  const targetKey = normalizeRuntimeKey(targetRuntimeId);
+  if (!targetKey) return false;
+  return Boolean(
+    relayStore.clients.has(targetKey) &&
+    resolveEncryptionPublicKeyHex(relayStore, targetKey),
+  );
+};
+
 const sendEntityInputDirectViaRelaySocket = (
   env: Env,
   targetRuntimeId: string,
@@ -3341,6 +3350,7 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
     env.runtimeState = env.runtimeState ?? {};
     env.runtimeState.directEntityInputDispatch = (targetRuntimeId, input, ingressTimestamp) =>
       sendEntityInputDirectViaRelaySocket(runtimeEnv, targetRuntimeId, input, ingressTimestamp);
+    env.runtimeState.canUseConnectedRelayFallback = hasConnectedEncryptedRelayClient;
     startRuntimeLoop(env);
     console.log('[XLN] Runtime event loop started ✓');
 
