@@ -5,13 +5,14 @@ import { createStructuredLogger } from '../logger';
 import { decodeRuntimeAdapterMessage } from '../radapter/codec';
 import { encodeBoard, hashBoard } from '../entity-factory';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
-import { createDirectRuntimeWsRoute } from '../networking/direct-runtime-bun';
+import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../networking/direct-runtime-bun';
 import { clearJurisdictionsCache, loadJurisdictions } from '../jurisdiction-loader';
 import {
   attachRuntimeAdapterTicker,
   closeInvalidRuntimeAdapterMessage,
   forgetRuntimeAdapterClient,
   handleRuntimeAdapterMessage,
+  type RuntimeAdapterSocket,
 } from '../radapter/server';
 import {
   getActiveJAdapter,
@@ -77,6 +78,8 @@ type Args = {
   meshHubIdentitiesJson: string;
   dbPath: string;
 };
+
+type MarketMakerServerSocket = DirectWebSocket & RuntimeAdapterSocket & { data?: { type?: string } };
 
 type MeshHubIdentity = {
   name: string;
@@ -465,7 +468,7 @@ const ensureJurisdictionReplica = (env: Env, jadapter: JAdapter, rpcUrl: string)
 
 const hubBaseName = (name: string): string => String(name || '').trim().split(/\s+/)[0]?.toLowerCase() || '';
 
-const readHubSignerId = (profile: { metadata?: any }): string => {
+const readHubSignerId = (profile: { metadata?: { board?: { validators?: Array<{ signerId?: string; signer?: string }> } } }): string => {
   const validators = profile.metadata?.board?.validators;
   if (!Array.isArray(validators) || validators.length === 0) return '';
   const first = validators[0] || {};
@@ -1362,7 +1365,7 @@ const run = async (): Promise<void> => {
   env.runtimeState = env.runtimeState ?? {};
   env.runtimeState.directEntityInputDispatch = (targetRuntimeId, input, ingressTimestamp) =>
     directRuntimeWs.sendEntityInput(targetRuntimeId, input, ingressTimestamp);
-  const handleRadapterWsMessage = (ws: any, raw: string | Buffer | ArrayBuffer): void => {
+  const handleRadapterWsMessage = (ws: MarketMakerServerSocket, raw: string | Buffer | ArrayBuffer): void => {
     let msg: Record<string, unknown>;
     try {
       msg = decodeRuntimeAdapterMessage<Record<string, unknown>>(raw);
@@ -1465,21 +1468,21 @@ const run = async (): Promise<void> => {
       }
 	    },
 	    websocket: {
-	      open(ws: any) {
+	      open(ws: MarketMakerServerSocket) {
 	        if (ws.data?.type === 'rpc') {
 	          attachRuntimeAdapterTicker(env, registerEnvChangeCallback);
 	          return;
 	        }
 	        directRuntimeWs.websocket.open(ws);
 	      },
-	      message(ws: any, raw: string | Buffer | ArrayBuffer) {
+	      message(ws: MarketMakerServerSocket, raw: string | Buffer | ArrayBuffer) {
 	        if (ws.data?.type === 'rpc') {
 	          handleRadapterWsMessage(ws, raw);
 	          return;
 	        }
 	        return directRuntimeWs.websocket.message(ws, raw);
 	      },
-	      close(ws: any) {
+	      close(ws: MarketMakerServerSocket) {
 	        if (ws.data?.type === 'rpc') {
 	          forgetRuntimeAdapterClient(ws);
 	          return;

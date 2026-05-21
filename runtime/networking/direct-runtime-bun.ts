@@ -14,9 +14,19 @@ type DirectRuntimeWsOptions = {
   onEntityInput: (from: string, input: RoutedEntityInput, timestamp?: number) => Promise<void> | void;
 };
 
+export type DirectWebSocket = {
+  readyState?: number;
+  send(data: string): boolean | number | void;
+  close(code?: number, reason?: string): unknown;
+};
+
+type DirectUpgradeServer = {
+  upgrade(request: Request, options: { data: { type: 'direct-runtime' } }): boolean;
+};
+
 type DirectWsSession = {
   runtimeId: string | null;
-  ws: any;
+  ws: DirectWebSocket;
   handshakeDone: boolean;
   peerEncryptionPubKey: string | null;
   lastSeen: number;
@@ -35,9 +45,9 @@ const nextTimestamp = (): number => {
   return directWsTimestampCounter;
 };
 
-const isSocketOpen = (ws: unknown): boolean => {
-  if (!ws || (typeof ws !== 'object' && typeof ws !== 'function')) return false;
-  const readyState = Number((ws as { readyState?: unknown }).readyState);
+const isSocketOpen = (ws: DirectWebSocket | null | undefined): boolean => {
+  if (!ws) return false;
+  const readyState = Number(ws.readyState);
   return !Number.isFinite(readyState) || readyState === 1;
 };
 
@@ -47,11 +57,11 @@ const normalizeEncryptionPubKey = (pubKey: unknown): string | null => {
   return /^0x[0-9a-f]{64}$/.test(normalized) ? normalized : null;
 };
 
-const send = (ws: any, msg: RuntimeWsMessage): void => {
+const send = (ws: DirectWebSocket, msg: RuntimeWsMessage): void => {
   ws.send(serializeWsMessage(msg));
 };
 
-const trySend = (ws: any, msg: RuntimeWsMessage): boolean => {
+const trySend = (ws: DirectWebSocket, msg: RuntimeWsMessage): boolean => {
   if (!isSocketOpen(ws)) return false;
   try {
     const result = ws.send(serializeWsMessage(msg));
@@ -69,10 +79,10 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
     throw new Error(`DIRECT_RUNTIME_WS_INVALID_RUNTIME_ID: ${String(options.runtimeId || '')}`);
   }
   const keyPair = deriveEncryptionKeyPair(options.runtimeSeed);
-  const sessions = new Map<any, DirectWsSession>();
+  const sessions = new Map<DirectWebSocket, DirectWsSession>();
   const sessionsByRuntime = new Map<string, DirectWsSession>();
 
-  const ensureSession = (ws: any): DirectWsSession => {
+  const ensureSession = (ws: DirectWebSocket): DirectWsSession => {
     const existing = sessions.get(ws);
     if (existing) return existing;
     const created: DirectWsSession = {
@@ -86,7 +96,7 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
     return created;
   };
 
-  const forgetSession = (ws: any): void => {
+  const forgetSession = (ws: DirectWebSocket): void => {
     const session = sessions.get(ws);
     if (!session) return;
     sessions.delete(ws);
@@ -156,7 +166,7 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
         return false;
       }
     },
-    maybeUpgrade(request: Request, serverRef: any): Response | undefined {
+    maybeUpgrade(request: Request, serverRef: DirectUpgradeServer): Response | undefined {
       const url = new URL(request.url);
       if (request.headers.get('upgrade') !== 'websocket' || url.pathname !== routePath) {
         return undefined;
@@ -166,10 +176,10 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
       return new Response('WebSocket upgrade failed', { status: 400 });
     },
     websocket: {
-      open(ws: any) {
+      open(ws: DirectWebSocket) {
         ensureSession(ws);
       },
-      async message(ws: any, raw: string | Buffer | ArrayBuffer) {
+      async message(ws: DirectWebSocket, raw: string | Buffer | ArrayBuffer) {
         const session = ensureSession(ws);
         let msg: RuntimeWsMessage;
         try {
@@ -258,7 +268,7 @@ export const createDirectRuntimeWsRoute = (options: DirectRuntimeWsOptions) => {
           send(ws, { type: 'error', error: `Direct delivery failed: ${(error as Error).message}` });
         }
       },
-      close(ws: any) {
+      close(ws: DirectWebSocket) {
         forgetSession(ws);
       },
     },
