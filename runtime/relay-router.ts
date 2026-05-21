@@ -36,6 +36,9 @@ const NON_RECOVERABLE_LOCAL_DELIVERY_ERRORS = [
   'P2P_DECRYPT_ERROR',
   'NO_LOCAL_REPLICA',
 ];
+const relayLog = process.env['RELAY_VERBOSE_LOGS'] === '1'
+  ? (message: string): void => console.log(message)
+  : (_message: string): void => {};
 
 const rememberSocketRuntimeId = (ws: unknown, runtimeId: string): void => {
   if (!ws || (typeof ws !== 'object' && typeof ws !== 'function')) return;
@@ -215,13 +218,8 @@ export const relayRoute = async <Socket = RelaySocketLike>(
   try { size = JSON.stringify(msg).length; } catch { size = 0; }
 
   // Log non-gossip messages
-  if (
-    process.env['RELAY_VERBOSE_LOGS'] === '1'
-    && type !== 'gossip_request'
-    && type !== 'gossip_response'
-    && type !== 'gossip_announce'
-  ) {
-    console.log(`[RELAY-MSG] type=${type} from=${from || 'none'} to=${to || 'none'}`);
+  if (type !== 'gossip_request' && type !== 'gossip_response' && type !== 'gossip_announce') {
+    relayLog(`[RELAY-MSG] type=${type} from=${from || 'none'} to=${to || 'none'}`);
   }
 
   pushDebugEvent(store, {
@@ -509,7 +507,7 @@ export const relayRoute = async <Socket = RelaySocketLike>(
       return;
     }
 
-    console.log(`[RELAY] ${type} from=${from || 'none'} to=${to || 'none'} encrypted=${msg.encrypted ?? false}`);
+    relayLog(`[RELAY] ${type} from=${from || 'none'} to=${to || 'none'} encrypted=${msg.encrypted ?? false}`);
 
     const localRuntimeKey = normalizeRuntimeKey(config.localRuntimeId);
     const isLocalTarget = !!localRuntimeKey && toKey === localRuntimeKey;
@@ -518,7 +516,7 @@ export const relayRoute = async <Socket = RelaySocketLike>(
     const target = store.clients.get(toKey);
     if (target && !isLocalTarget) {
       if (trySendRelay(config, target.ws, msg)) {
-        console.log(`[RELAY] → forwarding to WS client`);
+        relayLog(`[RELAY] → forwarding to WS client`);
         pushDebugEvent(store, {
           event: 'delivery',
           from,
@@ -554,7 +552,7 @@ export const relayRoute = async <Socket = RelaySocketLike>(
         return;
       } catch (error) {
         const reason = (error as Error).message;
-        console.warn(`[RELAY] Local delivery failed: ${reason}`);
+        relayLog(`[RELAY] Local delivery failed: ${reason}`);
         pushDebugEvent(store, {
           event: 'error',
           from,
@@ -577,7 +575,7 @@ export const relayRoute = async <Socket = RelaySocketLike>(
 
     // Queue for offline client
     const queueSize = enqueueMessage(store, toKey, msg);
-    console.log(`[RELAY] → queued (no client, queue=${queueSize})`);
+    relayLog(`[RELAY] → queued (no client, queue=${queueSize})`);
     pushDebugEvent(store, {
       event: 'delivery',
       from,
