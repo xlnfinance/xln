@@ -10,6 +10,7 @@ import type {
   JurisdictionEvent,
   JurisdictionEventData,
 } from './types/jurisdiction-events';
+import type { HankoString } from './types/hanko';
 export type {
   CrossJurisdictionPullLeg,
   CrossJurisdictionSwapLeg,
@@ -28,6 +29,14 @@ export type {
   JurisdictionEvent,
   JurisdictionEventData,
 } from './types/jurisdiction-events';
+export type {
+  HankoBytes,
+  HankoClaim,
+  HankoContext,
+  HankoMergeResult,
+  HankoString,
+  HankoVerificationResult,
+} from './types/hanko';
 
 /**
  * Shared XLN wire/state type barrel.
@@ -2140,51 +2149,6 @@ export { type EntityType } from './ids';
 
 // Constants
 export const ENC = 'hex' as const;
-
-// === HANKO BYTES SYSTEM (Final Design) ===
-export interface HankoBytes {
-  placeholders: Buffer[]; // Entity IDs that failed to sign (index 0..N-1)
-  packedSignatures: Buffer; // EOA signatures → yesEntities (index N..M-1)
-  claims: HankoClaim[]; // Entity claims to verify (index M..∞)
-}
-
-export interface HankoClaim {
-  entityId: Buffer;
-  entityIndexes: number[];
-  weights: number[];
-  threshold: number;
-  // NOTE: NO expectedQuorumHash - EP.sol reconstructs board hash from recovered signers
-}
-
-// Hanko in string format (hex-encoded ABI bytes)
-export type HankoString = string;
-
-export interface HankoVerificationResult {
-  valid: boolean;
-  entityId: Buffer;
-  signedHash: Buffer;
-  yesEntities: Buffer[];
-  noEntities: Buffer[];
-  completionPercentage: number; // 0-100% completion
-  errors?: string[];
-}
-
-export interface HankoMergeResult {
-  merged: HankoBytes;
-  addedSignatures: number;
-  completionBefore: number;
-  completionAfter: number;
-  log: string[];
-}
-
-/**
- * Context for hanko verification
- */
-export interface HankoContext {
-  timestamp: number;
-  blockNumber?: number;
-  networkId?: number;
-}
 
 // === PROFILE & NAME RESOLUTION TYPES ===
 
