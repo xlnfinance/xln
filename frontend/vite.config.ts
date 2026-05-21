@@ -184,6 +184,53 @@ function runtimeBundlePlugin(): Plugin {
 	};
 }
 
+function manualClientChunk(id: string): string | undefined {
+	if (!id.includes('/node_modules/')) return undefined;
+	if (
+		id.includes('/node_modules/svelte/') ||
+		id.includes('/node_modules/svelte-') ||
+		id.includes('/node_modules/@sveltejs/') ||
+		id.includes('/node_modules/esm-env/')
+	) {
+		return 'vendor-svelte';
+	}
+	if (id.includes('/node_modules/three/')) {
+		return 'vendor-three';
+	}
+	if (id.includes('/node_modules/lucide-svelte/')) {
+		return 'vendor-icons';
+	}
+	if (id.includes('/node_modules/@capacitor/')) {
+		return 'vendor-capacitor';
+	}
+	if (id.includes('/node_modules/@ethereumjs/') || id.includes('/node_modules/ethers/')) {
+		return 'vendor-chain';
+	}
+	if (
+		id.includes('/node_modules/@noble/') ||
+		id.includes('/node_modules/@node-rs/argon2/') ||
+		id.includes('/node_modules/argon2/') ||
+		id.includes('/node_modules/bip39/') ||
+		id.includes('/node_modules/crypto-js/') ||
+		id.includes('/node_modules/hash-wasm/')
+	) {
+		return 'vendor-crypto';
+	}
+	if (id.includes('/node_modules/dockview/')) {
+		return 'vendor-dockview';
+	}
+	if (
+		id.includes('/node_modules/jdenticon/') ||
+		id.includes('/node_modules/marked/') ||
+		id.includes('/node_modules/jsqr/') ||
+		id.includes('/node_modules/qrcode/') ||
+		id.includes('/node_modules/msgpackr/')
+	) {
+		return 'vendor-ui-utils';
+	}
+	return 'vendor';
+}
+
 async function assertPortAvailable(port: number, host: string): Promise<void> {
 	return new Promise((resolve, reject) => {
 		const server = net.createServer();
@@ -275,6 +322,16 @@ export default defineConfig(async ({ command }) => {
 	// Fast builds
 	esbuild: {
 		target: 'es2022'
+	},
+	build: {
+		// The app intentionally ships runtime/3D workspaces. Keep warnings focused
+		// on accidental multi-megabyte chunks after the explicit vendor split above.
+		chunkSizeWarningLimit: 1500,
+		rollupOptions: {
+			output: {
+				manualChunks: manualClientChunk,
+			},
+		},
 	},
 		define: {
 		// Define globals for browser compatibility

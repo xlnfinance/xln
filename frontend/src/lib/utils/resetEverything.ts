@@ -1,4 +1,5 @@
 import { broadcastHardResetRequest } from './activeTabLock';
+import { shutdownRuntimeResumeListener, vaultOperations } from '../stores/vaultStore';
 
 let activeResetPromise: Promise<void> | null = null;
 
@@ -8,9 +9,8 @@ const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout
 
 async function stopCurrentRuntimeActivity(): Promise<void> {
   try {
-    const vaultStore = await import('../stores/vaultStore');
-    await vaultStore.vaultOperations.suspendAllRuntimeActivity?.();
-    vaultStore.shutdownRuntimeResumeListener?.();
+    await vaultOperations.suspendAllRuntimeActivity?.();
+    shutdownRuntimeResumeListener?.();
   } catch {
     // best effort
   }
