@@ -347,6 +347,18 @@ const applyDocs = (
   }
 };
 
+const readRequiredDiff = async (
+  db: RuntimeDbLike,
+  height: number,
+  scope: string,
+): Promise<StorageDiffRecord> => {
+  const diff = await readJsonOrNull<StorageDiffRecord>(db, keyDiff(height));
+  if (!diff) {
+    throw new Error(`STORAGE_DIFF_MISSING: height=${height} scope=${scope}`);
+  }
+  return diff;
+};
+
 const loadSnapshotDocsForEntity = async (db: RuntimeDbLike, snapshotHeight: number, entityId: string): Promise<Map<string, StorageDoc>> => {
   const docs = new Map<string, StorageDoc>();
 
@@ -398,8 +410,7 @@ const loadEntityCoreDocAtHeight = async (
     ? await readJsonOrNull<StorageEntityCoreDoc>(db, keySnapshotEntity(baseSnapshotHeight, normalized))
     : null;
   for (let cursor = baseSnapshotHeight + 1; cursor <= targetHeight; cursor += 1) {
-    const diff = await readJsonOrNull<StorageDiffRecord>(db, keyDiff(cursor));
-    if (!diff) continue;
+    const diff = await readRequiredDiff(db, cursor, `entity:${normalized}`);
     for (const ref of diff.dels) {
       if (ref.family === 'entity' && normalizeEntityId(ref.entityId) === normalized) core = null;
     }
@@ -419,8 +430,7 @@ const collectHistoricalAccountOverlay = async (
   const normalized = normalizeEntityId(entityId);
   const overlay = new Map<string, StorageAccountDoc | null>();
   for (let height = fromHeightExclusive + 1; height <= toHeight; height += 1) {
-    const diff = await readJsonOrNull<StorageDiffRecord>(db, keyDiff(height));
-    if (!diff) continue;
+    const diff = await readRequiredDiff(db, height, `accounts:${normalized}`);
     for (const ref of diff.dels) {
       if (ref.family === 'account' && normalizeEntityId(ref.entityId) === normalized) {
         overlay.set(normalizeEntityId(ref.counterpartyId), null);
@@ -516,8 +526,7 @@ const loadAccountDocAtHeight = async (
       )
     : null;
   for (let height = baseSnapshotHeight + 1; height <= targetHeight; height += 1) {
-    const diff = await readJsonOrNull<StorageDiffRecord>(db, keyDiff(height));
-    if (!diff) continue;
+    const diff = await readRequiredDiff(db, height, `account:${normalized}:${counterparty}`);
     for (const ref of diff.dels) {
       if (
         ref.family === 'account' &&
@@ -665,8 +674,7 @@ const loadBookDocPageAtHeight = async (
   const baseSnapshotHeight = await findLatestSnapshotAtOrBelow(db, targetHeight);
   const overlay = new Map<string, BookState | null>();
   for (let height = baseSnapshotHeight + 1; height <= targetHeight; height += 1) {
-    const diff = await readJsonOrNull<StorageDiffRecord>(db, keyDiff(height));
-    if (!diff) continue;
+    const diff = await readRequiredDiff(db, height, `books:${normalized}`);
     for (const ref of diff.dels) {
       if (ref.family === 'book' && normalizeEntityId(ref.entityId) === normalized) overlay.set(ref.pairId, null);
     }
@@ -841,10 +849,8 @@ export const loadEntityStateFromStorage = async (options: {
 
   let cursor = baseSnapshotHeight + 1;
   while (cursor <= targetHeight) {
-    const diff = await readJsonOrNull<StorageDiffRecord>(db, keyDiff(cursor));
-    if (diff) {
-      applyDocs(docs, diff.puts, diff.dels, entityId);
-    }
+    const diff = await readRequiredDiff(db, cursor, `entity-state:${entityId}`);
+    applyDocs(docs, diff.puts, diff.dels, entityId);
     cursor += 1;
   }
 

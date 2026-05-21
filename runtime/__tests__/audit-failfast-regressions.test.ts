@@ -10,7 +10,7 @@ import { LIMITS } from '../constants';
 import { ACCOUNT_PENDING_RESEND_AFTER_MS, executeCrontab, initCrontab } from '../entity-crontab';
 import { generateLazyEntityId } from '../entity-factory';
 import { isLeftEntity } from '../entity-id-utils';
-import { applyEntityInput } from '../entity-consensus';
+import { applyEntityFrame, applyEntityInput } from '../entity-consensus';
 import { applyEntityTx } from '../entity-tx/apply';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity-tx/handlers/account-cross-j-followups';
 import { handleJAbortSentBatch } from '../entity-tx/handlers/j-abort-sent-batch';
@@ -326,6 +326,48 @@ describe('audit fail-fast regressions', () => {
     const result = await handleJEvent(state, { ...common, ...signed }, env);
     expect(result.newState.jBlockChain.length).toBe(1);
     expect(result.newState.reserves.get(1)).toBe(100n);
+  });
+
+  test('j_event auth rejects are fatal inside applyEntityTx', async () => {
+    const seed = 'j-event-auth-reject-fatal';
+    const env = createEmptyEnv(seed);
+    const { signerId, entityId } = registerLazySigner(seed, '1');
+    const state = makeEntityState(entityId);
+    state.config = makeSingleSignerConfigFor(signerId);
+    const event: JurisdictionEvent = {
+      type: 'ReserveUpdated',
+      data: { entity: entityId, tokenId: 1, newBalance: '100' },
+    };
+    const eventsHash = canonicalJurisdictionEventsHash([event]);
+
+    await expect(applyEntityTx(env, state, {
+      type: 'j_event',
+      data: {
+        from: signerId,
+        observedAt: 1_000,
+        blockNumber: 3,
+        blockHash: `0x${'14'.repeat(32)}`,
+        transactionHash: `0x${'15'.repeat(32)}`,
+        eventsHash,
+        event,
+      },
+    } as any)).rejects.toThrow('j_event rejected: missing observation signature');
+  });
+
+  test('entity frame aborts instead of partially committing after a skipped tx', async () => {
+    const env = createEmptyEnv('entity-frame-atomicity');
+    env.quietRuntimeLogs = true;
+    const state = makeEntityState(`0x${'61'.repeat(32)}`);
+    const signer = 'atomic-signer';
+
+    await expect(applyEntityFrame(env, state, [
+      { type: 'chatMessage', data: { message: 'first mutation' } } as any,
+      { type: 'definitely_unknown_entity_tx', data: {} } as any,
+      { type: 'chatMessage', data: { message: 'late mutation' } } as any,
+    ], 1_000)).rejects.toThrow('ENTITY_FRAME_TX_FAILED: type=definitely_unknown_entity_tx');
+
+    expect(state.messages).toHaveLength(0);
+    expect(state.nonces.has(signer)).toBe(false);
   });
 
   test('cross-j remote route cannot seed missing sibling runtime hints before topology validation', async () => {
@@ -1017,8 +1059,8 @@ describe('audit fail-fast regressions', () => {
       entityId: replica.entityId,
       entityTxs: [
         {
-          type: 'openAccount',
-          data: { targetEntityId: `0x${'22'.repeat(32)}` },
+          type: 'chatMessage',
+          data: { message: 'forces single-signer frame creation' },
         },
       ],
     };

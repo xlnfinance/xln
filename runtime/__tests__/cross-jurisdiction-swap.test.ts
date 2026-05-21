@@ -3,6 +3,7 @@ import { ethers } from 'ethers';
 
 import { applyEntityTx } from '../entity-tx/apply';
 import { processAccountTx } from '../account-tx/apply';
+import { handlePullCancel } from '../account-tx/handlers/pull';
 import { processOrderbookCancels } from '../entity-tx/handlers/account';
 import { applyEntityInput } from '../entity-consensus';
 import {
@@ -1202,6 +1203,73 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(result.mempoolOps ?? []).toHaveLength(0);
     expect(result.newState.crossJurisdictionSwaps?.get(route.orderId)?.status).toBe('partially_filled');
     expect(result.newState.messages.some(message => message.includes('must clear through requestCrossJurisdictionClear'))).toBe(true);
+  });
+
+  test('account-layer pull_cancel cannot release a committed cross-j partial fill', async () => {
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('72');
+    const sourceHub = entity('73');
+    const targetHub = entity('74');
+    const targetUser = entity('75');
+    const account = makeAccount(sourceHub, sourceUser);
+    const prepared = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-account-cancel-blocked',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+      target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+      status: 'resting',
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      expiresAt: 70_000,
+    }, { runtimeSeed: 'cross-account-cancel-blocked-seed', sourceDisputeDelayMs: 5_000, now: 1_000 });
+    const route = {
+      ...prepared,
+      status: 'partially_filled' as const,
+      fillSeq: 1,
+      cumulativeFillRatio: 32_768,
+      claimedRatio: 32_768,
+      filledSourceAmount: 500n,
+      filledTargetAmount: 450n,
+      sourceClaimed: 500n,
+      targetClaimed: 450n,
+    };
+    account.swapOffers.set(route.orderId, {
+      offerId: route.orderId,
+      giveTokenId: route.source.tokenId,
+      giveAmount: route.source.amount,
+      wantTokenId: route.target.tokenId,
+      wantAmount: route.target.amount,
+      priceTicks: 900n,
+      timeInForce: 0,
+      minFillRatio: 0,
+      makerIsLeft: account.leftEntity === sourceUser,
+      createdHeight: 0,
+      crossJurisdiction: route,
+    });
+    account.pulls = new Map([[route.sourcePull!.pullId, {
+      pullId: route.sourcePull!.pullId,
+      tokenId: route.sourcePull!.tokenId,
+      amount: route.sourcePull!.signedAmount,
+      claimedRatio: 0,
+      claimedAmount: 0n,
+      revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
+      fullHash: route.sourcePull!.fullHash,
+      partialRoot: route.sourcePull!.partialRoot,
+      createdHeight: 0,
+      createdTimestamp: 1_000,
+    }]]);
+
+    const payerIsLeft = !(route.sourcePull!.signedAmount > 0n);
+    const result = await handlePullCancel(account, {
+      type: 'pull_cancel',
+      data: { pullId: route.sourcePull!.pullId, reason: 'expired' },
+    }, payerIsLeft, route.sourcePull!.revealedUntilTimestamp);
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('must clear through requestCrossJurisdictionClear');
+    expect(account.pulls?.has(route.sourcePull!.pullId)).toBe(true);
   });
 
   test('target pull resolve verifies relay binary and enters clearing before account commit', async () => {

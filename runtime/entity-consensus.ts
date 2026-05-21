@@ -1321,7 +1321,11 @@ export const applyEntityFrame = async (
       swapOffersCreated,
       swapCancelRequests,
       swapOffersCancelled,
+      skippedError,
     } = await applyEntityTx(env, currentEntityState, entityTx);
+    if (skippedError) {
+      throw new Error(`ENTITY_FRAME_TX_FAILED: type=${String(entityTx.type)} error=${skippedError}`);
+    }
     currentEntityState = newState;
     for (const accountId of dirtyAccounts || []) {
       markStorageAccountDirty(env, currentEntityState.entityId, accountId);

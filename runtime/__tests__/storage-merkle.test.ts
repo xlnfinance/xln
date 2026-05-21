@@ -126,7 +126,7 @@ test('storage radix merkle supports radix 256 with byte-depth paths', () => {
   expect(result.root).toMatch(/^0x[0-9a-f]{64}$/);
 });
 
-test('storage canonical audit hash is explicit env opt-in in every NODE_ENV', () => {
+test('storage canonical audit hash is mandatory in production', () => {
   const previousNodeEnv = process.env['NODE_ENV'];
   const previousVerifyCanonical = process.env['XLN_STORAGE_VERIFY_CANONICAL'];
   try {
@@ -135,7 +135,11 @@ test('storage canonical audit hash is explicit env opt-in in every NODE_ENV', ()
     expect(storageCanonicalHashEnabled()).toBe(true);
     process.env['NODE_ENV'] = 'production';
     expect(storageCanonicalHashEnabled()).toBe(true);
+    process.env['XLN_STORAGE_VERIFY_CANONICAL'] = '0';
+    expect(storageCanonicalHashEnabled()).toBe(true);
     delete process.env['XLN_STORAGE_VERIFY_CANONICAL'];
+    expect(storageCanonicalHashEnabled()).toBe(true);
+    process.env['NODE_ENV'] = 'development';
     expect(storageCanonicalHashEnabled()).toBe(false);
   } finally {
     if (previousNodeEnv === undefined) delete process.env['NODE_ENV'];

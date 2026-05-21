@@ -1,4 +1,4 @@
-import type { AccountMachine, AccountTx } from '../../types';
+import type { AccountMachine, AccountTx, CrossJurisdictionSwapRoute } from '../../types';
 import { deriveDelta } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { FINANCIAL, LIMITS } from '../../constants';
@@ -16,6 +16,33 @@ const HEX_32_RE = /^0x[0-9a-fA-F]{64}$/;
 const absBigInt = (value: bigint): bigint => value >= 0n ? value : -value;
 const isPullRevealExpired = (deadline: number, currentTimestamp: number): boolean =>
   Number.isFinite(deadline) && deadline > 0 && currentTimestamp >= deadline;
+const hasCommittedCrossJurisdictionFill = (route: CrossJurisdictionSwapRoute): boolean => (
+  Math.max(Number(route.cumulativeFillRatio ?? 0), Number(route.claimedRatio ?? 0)) > 0 ||
+  (route.filledSourceAmount ?? 0n) > 0n ||
+  (route.filledTargetAmount ?? 0n) > 0n ||
+  (route.sourceClaimed ?? 0n) > 0n ||
+  (route.targetClaimed ?? 0n) > 0n
+);
+const isCrossJurisdictionPullCancelWithinClear = (route: CrossJurisdictionSwapRoute): boolean => (
+  route.status === 'clearing' ||
+  route.status === 'source_claimed' ||
+  route.status === 'target_claimed' ||
+  route.status === 'settled' ||
+  route.clearingPolicy === 'cancel_and_clear' ||
+  route.clearingPolicy === 'full_fill'
+);
+const findCrossJurisdictionRouteForPull = (
+  accountMachine: AccountMachine,
+  pullId: string,
+): { route: CrossJurisdictionSwapRoute; leg: 'source' | 'target' } | undefined => {
+  for (const offer of accountMachine.swapOffers?.values() ?? []) {
+    const route = offer.crossJurisdiction;
+    if (!route) continue;
+    if (route.sourcePull?.pullId === pullId) return { route, leg: 'source' };
+    if (route.targetPull?.pullId === pullId) return { route, leg: 'target' };
+  }
+  return undefined;
+};
 
 export async function handlePullLock(
   accountMachine: AccountMachine,
@@ -191,6 +218,18 @@ export async function handlePullCancel(
   const expiredPayerCancel = byLeft === payerIsLeft && isPullRevealExpired(pull.revealedUntilTimestamp, currentTimestamp);
   if (!beneficiaryRelease && !expiredPayerCancel) {
     return { success: false, error: `Only beneficiary can release an active pull, payer can cancel only after expiry`, events };
+  }
+  const crossRoute = findCrossJurisdictionRouteForPull(accountMachine, pullId);
+  if (
+    crossRoute &&
+    hasCommittedCrossJurisdictionFill(crossRoute.route) &&
+    !isCrossJurisdictionPullCancelWithinClear(crossRoute.route)
+  ) {
+    return {
+      success: false,
+      error: `Cross-j ${crossRoute.leg} pull ${pullId.slice(0, 8)} cancel blocked: route ${crossRoute.route.orderId} must clear through requestCrossJurisdictionClear`,
+      events,
+    };
   }
 
   let delta = accountMachine.deltas.get(pull.tokenId);
