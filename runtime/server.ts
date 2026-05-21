@@ -49,6 +49,7 @@ import {
 } from './server/market-maker-health';
 import { serveRuntimeBundle, serveStatic } from './server/static-assets';
 import { parseTaggedControlBody, requireDaemonControlAuth, requireDaemonRpcAuth } from './server/auth';
+import { listLocalControlEntities } from './server/control-entities';
 import { encryptJSON, hexToPubKey } from './networking/p2p-crypto';
 import type { Profile } from './networking/gossip';
 import { encodeRebalancePolicyMemo } from './rebalance-policy';
@@ -1410,63 +1411,6 @@ const resolveRpcPaymentRoute = async (
   return retryRoutes[0]!.path;
 };
 
-type ControlEntitySummary = {
-  entityId: string;
-  signerId: string;
-  name: string;
-  isRoutingEnabled: boolean;
-  runtimeId: string | null;
-  accountCount: number;
-  publicAccountCount: number;
-  accountEntityIds: string[];
-};
-
-const getProfileNameForEntity = (env: Env, entityId: string): string => {
-  const target = entityId.toLowerCase();
-  const localReplica = Array.from(env.eReplicas?.values?.() || []).find(
-    replica => String(replica?.entityId || '').toLowerCase() === target,
-  );
-  const localName = localReplica?.state?.profile?.name;
-  const gossipProfiles = env.gossip?.getProfiles?.() || [];
-  const gossipProfile = gossipProfiles.find(profile => String(profile?.entityId || '').toLowerCase() === target);
-  const relayProfile = relayStore.gossipProfiles.get(target)?.profile;
-  const rawName = localName ?? gossipProfile?.name ?? relayProfile?.name;
-  return typeof rawName === 'string' && rawName.trim().length > 0 ? rawName.trim() : entityId;
-};
-
-const listLocalControlEntities = (env: Env): ControlEntitySummary[] => {
-  const seen = new Set<string>();
-  const entities: ControlEntitySummary[] = [];
-  for (const replica of env.eReplicas?.values?.() || []) {
-    const entityId = String(replica?.entityId || '').toLowerCase();
-    if (!entityId || seen.has(entityId)) continue;
-    let signerId = '';
-    try {
-      signerId = resolveEntityProposerId(env, entityId, 'daemon-control.list');
-    } catch {
-      continue;
-    }
-    seen.add(entityId);
-    const profile = replica?.state?.profile as (typeof replica.state.profile & { publicAccounts?: unknown[] }) | undefined;
-    entities.push({
-      entityId,
-      signerId,
-      name: getProfileNameForEntity(env, entityId),
-      isRoutingEnabled: !!replica?.state?.hubRebalanceConfig,
-      runtimeId: typeof env.runtimeId === 'string' && env.runtimeId.trim().length > 0 ? env.runtimeId : null,
-      accountCount: replica?.state?.accounts instanceof Map ? replica.state.accounts.size : 0,
-      publicAccountCount: Array.isArray(profile?.publicAccounts)
-        ? profile.publicAccounts.length
-        : 0,
-      accountEntityIds: replica?.state?.accounts instanceof Map
-        ? Array.from(replica.state.accounts.keys()).map(value => String(value).toLowerCase()).sort()
-        : [],
-    });
-  }
-  entities.sort((left, right) => compareText(left.name, right.name));
-  return entities;
-};
-
 const handleRpcMessage = async (ws: RelaySocket, msg: Record<string, unknown>, env: Env | null) => {
   const handledByRuntimeAdapter = await handleRuntimeAdapterMessage(ws, msg, env, {
     enqueueRuntimeInput,
@@ -1761,7 +1705,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       serializeTaggedJson({
         ok: true,
         runtimeId: typeof env.runtimeId === 'string' ? env.runtimeId : null,
-        entities: listLocalControlEntities(env),
+        entities: listLocalControlEntities(env, entityId => relayStore.gossipProfiles.get(entityId)?.profile?.name),
       }),
       { headers },
     );
