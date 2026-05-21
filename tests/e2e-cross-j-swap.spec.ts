@@ -34,6 +34,13 @@ type HubEntityInfo = {
   primary: boolean;
 };
 
+type SyntheticJEventInput = {
+  event: unknown;
+  blockNumber: number;
+  blockHash: string;
+  transactionHash: string;
+};
+
 type CrossRuntimeWindow = Window & {
   isolatedEnv?: {
     runtimeId?: string;
@@ -62,6 +69,12 @@ function getPrimaryHubApiBaseUrl(health: E2EHealthResponse, primaryHubId: string
 
 function getPrimaryHubName(health: E2EHealthResponse, primaryHubId: string): string {
   return String((health.hubs || []).find((entry) => normalizeId(entry.entityId) === normalizeId(primaryHubId))?.name || '').trim();
+}
+
+function getIsolatedHubRuntimeSeed(hubName: string): string {
+  const name = String(hubName || '').trim().toLowerCase();
+  expect(name, 'isolated cross-j source hub name is required to derive source pull args').toBeTruthy();
+  return `xln-e2e-${name}`;
 }
 
 async function getSecondaryHubInfo(
@@ -122,6 +135,46 @@ function deriveSigner(mnemonic: string, jurisdictionName: string): { address: st
     getIndexedAccountPath(deriveJurisdictionSignerIndex(jurisdictionName)),
   );
   return { address: hd.address.toLowerCase(), privateKey: hd.privateKey };
+}
+
+async function signSyntheticJEventObservation(
+  page: Page,
+  identity: RuntimeIdentity,
+  input: SyntheticJEventInput,
+): Promise<{ eventsHash: string; signature: string }> {
+  return page.evaluate(async ({ identity, input }) => {
+    const view = window as CrossRuntimeWindow;
+    const env = view.isolatedEnv;
+    if (!env) throw new Error('isolatedEnv missing');
+    const runtimeModule = view.XLN
+      ?? view.__xln_instance
+      ?? await import(/* @vite-ignore */ new URL('/runtime.js', window.location.origin).href) as any;
+    view.XLN = runtimeModule;
+    view.__xln_instance = runtimeModule;
+    if (typeof runtimeModule.canonicalJurisdictionEventsHash !== 'function') {
+      throw new Error('canonicalJurisdictionEventsHash missing from runtime bundle');
+    }
+    if (typeof runtimeModule.buildJEventObservationDigest !== 'function') {
+      throw new Error('buildJEventObservationDigest missing from runtime bundle');
+    }
+    if (typeof runtimeModule.signAccountFrame !== 'function') {
+      throw new Error('signAccountFrame missing from runtime bundle');
+    }
+
+    const eventsHash = runtimeModule.canonicalJurisdictionEventsHash([input.event]);
+    const digest = runtimeModule.buildJEventObservationDigest({
+      entityId: identity.entityId,
+      signerId: identity.signerId,
+      blockNumber: input.blockNumber,
+      blockHash: input.blockHash,
+      transactionHash: input.transactionHash,
+      eventsHash,
+    });
+    return {
+      eventsHash,
+      signature: runtimeModule.signAccountFrame(env, identity.signerId, digest),
+    };
+  }, { identity, input });
 }
 
 async function importRpc2SiblingEntity(
@@ -742,6 +795,10 @@ async function placeCrossOrder(
   const submit = page.getByTestId('swap-submit-order').first();
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
   await expect(priceInput).toBeVisible({ timeout: 20_000 });
+  const beforeSubmit = await readCrossState(page, params.source, params.hubId);
+  const beforeRouteIds = new Set(beforeSubmit.routeSummaries.map(route => route.orderId));
+  const beforeOfferIds = new Set(beforeSubmit.offerSummaries.map(offer => offer.offerId));
+  const beforeMessageCount = beforeSubmit.messages.length;
   await amountInput.fill(params.amount);
   await priceInput.fill(params.price);
   await expect(submit).toBeEnabled({ timeout: 30_000 });
@@ -750,49 +807,54 @@ async function placeCrossOrder(
   try {
     await expect.poll(
       async () => {
-      const state = await readCrossState(page, params.source, params.hubId);
-      const formError = await page.getByTestId('swap-form-error').first().textContent().catch(() => '');
-      const formValues = await page.evaluate(() => {
-        const amount = document.querySelector<HTMLInputElement>('[data-testid="swap-order-amount"]')?.value || '';
-        const price = document.querySelector<HTMLInputElement>('[data-testid="swap-order-price"]')?.value || '';
-        const view = window as CrossRuntimeWindow & { __xln_env?: any };
-        const summarizeEnv = (env: any) => ({
-          runtimeId: String(env?.runtimeId || ''),
-          height: Number(env?.height || 0),
-          timestamp: Number(env?.timestamp || 0),
-          scenarioMode: Boolean(env?.scenarioMode),
-          loopActive: Boolean(env?.runtimeState?.loopActive),
-          wakeRequested: Boolean(env?.runtimeState?.wakeRequested),
-          processing: Boolean(env?.runtimeState?.processingPromise),
-          lastProcessEnteredAt: Number(env?.lastProcessEnteredAt || 0),
-          lastFrameAt: Number(env?.runtimeState?.lastFrameAt || 0),
-          minFrameDelayMs: Number(env?.runtimeConfig?.minFrameDelayMs || 0),
-          queuedAt: Number(env?.runtimeMempool?.queuedAt || 0),
-          runtimeInputTypes: Array.from(env?.runtimeInput?.entityInputs || []).map((input: any) => ({
-            entityId: String(input?.entityId || '').slice(-8),
-            txTypes: Array.from(input?.entityTxs || []).map((tx: any) => String(tx?.type || '')),
-          })),
-          mempoolTypes: Array.from(env?.runtimeMempool?.entityInputs || []).map((input: any) => ({
-            entityId: String(input?.entityId || '').slice(-8),
-            txTypes: Array.from(input?.entityTxs || []).map((tx: any) => String(tx?.type || '')),
-          })),
+        const state = await readCrossState(page, params.source, params.hubId);
+        const newRoutes = state.routeSummaries.filter(route => !beforeRouteIds.has(route.orderId));
+        const newOffers = state.offerSummaries.filter(offer => !beforeOfferIds.has(offer.offerId));
+        const newMessages = state.messages.slice(beforeMessageCount);
+        const formError = await page.getByTestId('swap-form-error').first().textContent().catch(() => '');
+        const formValues = await page.evaluate(() => {
+          const amount = document.querySelector<HTMLInputElement>('[data-testid="swap-order-amount"]')?.value || '';
+          const price = document.querySelector<HTMLInputElement>('[data-testid="swap-order-price"]')?.value || '';
+          const view = window as CrossRuntimeWindow & { __xln_env?: any };
+          const summarizeEnv = (env: any) => ({
+            runtimeId: String(env?.runtimeId || ''),
+            height: Number(env?.height || 0),
+            timestamp: Number(env?.timestamp || 0),
+            scenarioMode: Boolean(env?.scenarioMode),
+            loopActive: Boolean(env?.runtimeState?.loopActive),
+            wakeRequested: Boolean(env?.runtimeState?.wakeRequested),
+            processing: Boolean(env?.runtimeState?.processingPromise),
+            lastProcessEnteredAt: Number(env?.lastProcessEnteredAt || 0),
+            lastFrameAt: Number(env?.runtimeState?.lastFrameAt || 0),
+            minFrameDelayMs: Number(env?.runtimeConfig?.minFrameDelayMs || 0),
+            queuedAt: Number(env?.runtimeMempool?.queuedAt || 0),
+            runtimeInputTypes: Array.from(env?.runtimeInput?.entityInputs || []).map((input: any) => ({
+              entityId: String(input?.entityId || '').slice(-8),
+              txTypes: Array.from(input?.entityTxs || []).map((tx: any) => String(tx?.type || '')),
+            })),
+            mempoolTypes: Array.from(env?.runtimeMempool?.entityInputs || []).map((input: any) => ({
+              entityId: String(input?.entityId || '').slice(-8),
+              txTypes: Array.from(input?.entityTxs || []).map((tx: any) => String(tx?.type || '')),
+            })),
+          });
+          return {
+            amount,
+            price,
+            isolated: summarizeEnv(view.isolatedEnv),
+            live: summarizeEnv(view.__xln_env),
+          };
         });
-        return {
-          amount,
-          price,
-          isolated: summarizeEnv(view.isolatedEnv),
-          live: summarizeEnv(view.__xln_env),
+        lastSubmitState = {
+          ok: newRoutes.length > 0 || newOffers.length > 0 || newMessages.some((message) => /Cross-j swap/i.test(message)),
+          routes: state.routes,
+          offers: state.offers,
+          newRoutes: newRoutes.map(route => ({ orderId: route.orderId, status: route.status })),
+          newOffers: newOffers.map(offer => ({ offerId: offer.offerId, status: offer.status })),
+          formError: String(formError || '').trim(),
+          formValues,
+          recentMessages: state.messages.slice(-8),
         };
-      });
-      lastSubmitState = {
-        ok: state.routes > 0 || state.offers > 0 || state.messages.some((message) => /Cross-j swap/i.test(message)),
-        routes: state.routes,
-        offers: state.offers,
-        formError: String(formError || '').trim(),
-        formValues,
-        recentMessages: state.messages.slice(-8),
-      };
-      return lastSubmitState;
+        return lastSubmitState;
       },
       {
         message: 'cross-j order submit must create a route or a cross-j offer in live runtime',
@@ -1242,88 +1304,195 @@ async function waitForCrossRouteStatus(
   }
 }
 
-async function readFirstCrossRouteId(page: Page, identity: RuntimeIdentity): Promise<string> {
-  const routeId = await page.evaluate((identity) => {
-    const env = (window as CrossRuntimeWindow).isolatedEnv;
-    const entityNeedle = String(identity.entityId || '').toLowerCase();
-    const signerNeedle = String(identity.signerId || '').toLowerCase();
-    let replica = env?.eReplicas?.get(`${entityNeedle}:${signerNeedle}`);
-    if (!replica && env?.eReplicas instanceof Map) {
-      for (const [key, candidate] of env.eReplicas.entries()) {
-        const keyText = String(key || '').toLowerCase();
-        const candidateEntity = String(candidate?.state?.entityId || candidate?.entityId || '').toLowerCase();
-        const candidateSigner = String(candidate?.signerId || '').toLowerCase();
-        if (
-          candidateEntity === entityNeedle ||
-          keyText.startsWith(`${entityNeedle}:`) ||
-          (keyText.includes(entityNeedle) && (!signerNeedle || keyText.includes(signerNeedle) || candidateSigner === signerNeedle))
-        ) {
-          replica = candidate;
-          break;
-        }
-      }
-    }
-    return String(replica?.state?.crossJurisdictionSwaps?.keys?.().next?.().value || '');
-  }, identity);
-  expect(routeId, `${identity.entityId.slice(0, 10)} must have a registered cross-j route`).toBeTruthy();
-  return routeId;
+async function waitForCrossRouteMaterialized(
+  page: Page,
+  identity: RuntimeIdentity,
+  hubId: string,
+  orderId: string,
+  label: string,
+): Promise<void> {
+  try {
+    await expect.poll(
+      async () => {
+        const state = await readCrossState(page, identity, hubId);
+        const route = state.routeSummaries.find((candidate) => candidate.orderId === orderId);
+        return {
+          present: Boolean(route),
+          sourcePull: Boolean(route?.sourcePull),
+          targetPull: Boolean(route?.targetPull),
+          status: route?.status || '',
+        };
+      },
+      {
+        timeout: 45_000,
+        intervals: [250, 500, 1000],
+        message: `${label} route ${orderId.slice(0, 10)} must materialize before dispute salvage`,
+      },
+    ).toMatchObject({ present: true, targetPull: true });
+  } catch (error) {
+    const state = await readCrossState(page, identity, hubId);
+    console.log(`[E2E ${label} route materialization debug]`, JSON.stringify({
+      orderId,
+      routes: state.routeSummaries,
+      accountKeys: state.accountKeys,
+      messages: state.messages.slice(-24),
+    }, null, 2));
+    throw error;
+  }
 }
 
 async function triggerSourceDisputeArguments(
   page: Page,
   source: RuntimeIdentity,
   hubId: string,
+  routeId: string,
+  sourceHubRuntimeSeed: string,
 ): Promise<void> {
-  const routeId = await readFirstCrossRouteId(page, source);
+  expect(routeId, `${source.entityId.slice(0, 10)} active cross-j route id required for dispute args`).toBeTruthy();
   const abi = AbiCoder.defaultAbiCoder();
-  const partialBinary = `0x${(0x8000).toString(16).padStart(4, '0')}${[
-    `0x${'91'.repeat(32)}`,
-    `0x${'92'.repeat(32)}`,
-    `0x${'93'.repeat(32)}`,
-    `0x${'94'.repeat(32)}`,
-  ].map(node => node.slice(2)).join('')}`;
+  const partialBinary = await page.evaluate(async ({ source, routeId, sourceHubRuntimeSeed }) => {
+    const view = window as CrossRuntimeWindow;
+    const env = view.isolatedEnv;
+    if (!env) throw new Error('isolatedEnv missing');
+    const runtimeModule = view.XLN
+      ?? view.__xln_instance
+      ?? await import(/* @vite-ignore */ new URL('/runtime.js', window.location.origin).href);
+    view.XLN = runtimeModule;
+    view.__xln_instance = runtimeModule;
+    const sourceEntityId = String(source.entityId || '').toLowerCase();
+    let sourceState: any = null;
+    for (const replica of env.eReplicas?.values?.() || []) {
+      const state = replica?.state;
+      if (String(state?.entityId || '').toLowerCase() === sourceEntityId) {
+        sourceState = state;
+        break;
+      }
+    }
+    const route = sourceState?.crossJurisdictionSwaps?.get(routeId);
+    if (!route) throw new Error(`cross-j source dispute route missing: ${routeId}`);
+    const fillRatio = Number(route.cumulativeFillRatio || route.claimedRatio || 0);
+    if (!Number.isFinite(fillRatio) || fillRatio <= 0) {
+      throw new Error(`cross-j source dispute route has no committed fill: ${routeId}`);
+    }
+    // Pull commitments are prepared by the source hub, so source-dispute args
+    // must reveal with the source hub runtime seed, not the user's BrainVault seed.
+    const privateSeed = runtimeModule.getCrossJurisdictionPrivateSeed({ runtimeSeed: sourceHubRuntimeSeed }, route);
+    const reveal = runtimeModule.buildCrossJurisdictionPullReveal(route, fillRatio, privateSeed);
+    if (!reveal?.binary || reveal.binary === '0x') {
+      throw new Error(`cross-j source dispute reveal missing binary: ${routeId}`);
+    }
+    return String(reveal.binary);
+  }, { source, routeId, sourceHubRuntimeSeed });
   const crossPullArgs = abi.encode(
     ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
     [{ fillRatios: [], secrets: [], pulls: [partialBinary] }],
   );
   const initialArguments = abi.encode(['bytes[]'], [[crossPullArgs]]);
   const suffix = routeId.replace(/[^a-fA-F0-9]/g, '').padEnd(64, '0').slice(0, 64);
+  const event = {
+    type: 'DisputeStarted',
+    data: {
+      sender: hubId,
+      counterentity: source.entityId,
+      nonce: '1',
+      proofbodyHash: `0x${suffix}`,
+      initialArguments,
+      disputeTimeout: 100,
+      onChainNonce: 1,
+    },
+  };
+  const blockNumber = 9001;
+  const blockHash = `0x${'ab'.repeat(32)}`;
+  const transactionHash = `0x${'cd'.repeat(32)}`;
+  const signed = await signSyntheticJEventObservation(page, source, {
+    event,
+    blockNumber,
+    blockHash,
+    transactionHash,
+  });
   await enqueueEntityTxs(page, source.entityId, source.signerId, [{
     type: 'j_event',
     data: {
       from: source.signerId,
-      event: {
-        type: 'DisputeStarted',
-        data: {
-          sender: hubId,
-          counterentity: source.entityId,
-          nonce: '1',
-          proofbodyHash: `0x${suffix}`,
-          initialArguments,
-          disputeTimeout: 100,
-          onChainNonce: 1,
-        },
-      },
+      event,
       observedAt: Date.now(),
-      blockNumber: 9001,
-      blockHash: `0x${'ab'.repeat(32)}`,
-      transactionHash: `0x${'cd'.repeat(32)}`,
+      blockNumber,
+      blockHash,
+      transactionHash,
+      ...signed,
     },
   }]);
+  await flushRuntime(page, 8);
 }
 
-async function waitForCrossSalvageQueued(page: Page, target: RuntimeIdentity, hubId: string): Promise<void> {
-  await expect.poll(
-    async () => {
-      const state = await readCrossState(page, target, hubId);
-      return state.messages.some((message) => /Cross-j salvage queued/i.test(message));
-    },
-    {
-      timeout: 45_000,
-      intervals: [250, 500, 1000],
-      message: 'target sibling must queue cross-j salvage after source dispute arguments',
-    },
-  ).toBe(true);
+async function waitForCrossDisputeRouted(
+  page: Page,
+  source: RuntimeIdentity,
+  hubId: string,
+  routeId: string,
+): Promise<void> {
+  try {
+    await expect.poll(
+      async () => {
+        await flushRuntime(page, 1);
+        const state = await readCrossState(page, source, hubId);
+        return state.messages.some((message) =>
+          /Cross-j pull args observed/i.test(message) && message.includes(routeId),
+        );
+      },
+      {
+        timeout: 45_000,
+        intervals: [250, 500, 1000],
+        message: 'source dispute must route cross-j pull args to target sibling',
+      },
+    ).toBe(true);
+  } catch (error) {
+    const state = await readCrossState(page, source, hubId);
+    console.log('[E2E source dispute route debug]', JSON.stringify({
+      routeId,
+      routes: state.routeSummaries,
+      accountKeys: state.accountKeys,
+      messages: state.messages.slice(-32),
+    }, null, 2));
+    throw error;
+  }
+}
+
+async function waitForCrossSalvageQueued(
+  page: Page,
+  target: RuntimeIdentity,
+  hubId: string,
+  routeId: string,
+): Promise<void> {
+  try {
+    await expect.poll(
+      async () => {
+        await flushRuntime(page, 1);
+        const state = await readCrossState(page, target, hubId);
+        return state.messages.some((message) =>
+          (
+            /Cross-j salvage queued/i.test(message) ||
+            /Dispute started/i.test(message)
+          ) && message.includes(routeId),
+        );
+      },
+      {
+        timeout: 45_000,
+        intervals: [250, 500, 1000],
+        message: 'target sibling must queue cross-j salvage after source dispute arguments',
+      },
+    ).toBe(true);
+  } catch (error) {
+    const state = await readCrossState(page, target, hubId);
+    console.log('[E2E target salvage debug]', JSON.stringify({
+      routeId,
+      routes: state.routeSummaries,
+      pullIds: state.pullIds,
+      accountKeys: state.accountKeys,
+      messages: state.messages.slice(-32),
+    }, null, 2));
+    throw error;
+  }
 }
 
 test.describe('E2E Cross-J Swap Isolated Flow', () => {
@@ -1343,6 +1512,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       const hubId = getPrimaryHubId(baseline);
       const primaryHubApiBaseUrl = getPrimaryHubApiBaseUrl(baseline, hubId);
       const primaryHubName = getPrimaryHubName(baseline, hubId);
+      const primaryHubRuntimeSeed = getIsolatedHubRuntimeSeed(primaryHubName);
       const targetHub = await timedStep('cross_j_swap.resolve_rpc2_hub', () =>
         getSecondaryHubInfo(page, hubId, primaryHubName, primaryHubApiBaseUrl),
       );
@@ -1488,8 +1658,45 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         ),
       ]);
 
-      await timedStep('cross_j_swap.dispute.source_args', () => triggerSourceDisputeArguments(alicePage, alice, hubId));
-      await timedStep('cross_j_swap.dispute.target_salvage', () => waitForCrossSalvageQueued(alicePage, aliceRpc2, targetHubId));
+      await timedStep('cross_j_swap.dispute.alice_offer', () => placeCrossOrder(alicePage, {
+        source: alice,
+        hubId,
+        targetEntityId: aliceRpc2.entityId,
+        side: 'sell',
+        amount: '0.04',
+        price: '2500',
+      }));
+      await timedStep('cross_j_swap.dispute.bob_offer', () => placeCrossOrder(bobPage, {
+        source: bobRpc2,
+        hubId: targetHubId,
+        targetEntityId: bob.entityId,
+        side: 'buy',
+        amount: '25',
+        price: '2500',
+      }));
+
+      const [aliceDisputePartial] = await Promise.all([
+        timedStep('cross_j_swap.dispute.alice_pending_fill', () =>
+          waitForCrossPendingFill(alicePage, alice, hubId, 'Alice dispute route'),
+        ),
+        timedStep('cross_j_swap.dispute.bob_cleared', () =>
+          waitForCrossOffersCleared(bobPage, bobRpc2, targetHubId, 'Bob dispute counter-order'),
+        ),
+      ]);
+
+      await timedStep('cross_j_swap.dispute.target_route_ready', () =>
+        waitForCrossRouteMaterialized(alicePage, aliceRpc2, targetHubId, aliceDisputePartial.routeId, 'Alice target dispute sibling'),
+      );
+
+      await timedStep('cross_j_swap.dispute.source_args', () =>
+        triggerSourceDisputeArguments(alicePage, alice, hubId, aliceDisputePartial.routeId, primaryHubRuntimeSeed),
+      );
+      await timedStep('cross_j_swap.dispute.source_routed', () =>
+        waitForCrossDisputeRouted(alicePage, alice, hubId, aliceDisputePartial.routeId),
+      );
+      await timedStep('cross_j_swap.dispute.target_salvage', () =>
+        waitForCrossSalvageQueued(alicePage, aliceRpc2, targetHubId, aliceDisputePartial.routeId),
+      );
     } finally {
       await Promise.all([
         aliceContext ? aliceContext.close().catch(() => {}) : Promise.resolve(),

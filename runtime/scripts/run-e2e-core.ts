@@ -6,6 +6,8 @@ const CORE_E2E_FILES = [
   'tests/e2e-payment-smoke.spec.ts',
   'tests/e2e-dispute.spec.ts',
   'tests/e2e-swap-isolated.spec.ts',
+  'tests/e2e-ahb-isolated.spec.ts',
+  'tests/e2e-cross-j-swap.spec.ts',
   'tests/e2e-pay-deeplink.spec.ts',
 ];
 
@@ -15,6 +17,8 @@ const CORE_E2E_TITLES = [
   'entity settle workspace Sign & Broadcast submits dispute batch',
   'two isolated users trade against each other through one hub orderbook without market maker liquidity',
   'swap round-trip both directions clears holds and updates closed history on both peers',
+  'bidirectional payments survive across two isolated browser contexts',
+  'two users can place full, partial, and disputed cross-j swaps through the shared swap builder',
   'restores runtime and opens the pay screen from hash params',
 ];
 

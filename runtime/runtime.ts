@@ -4677,6 +4677,14 @@ export {
   verifyAccountSignature,
   getSignerPublicKey,
 } from './account-crypto.js';
+export {
+  buildJEventObservationDigest,
+  canonicalJurisdictionEventsHash,
+} from './j-event-observation';
+export {
+  buildCrossJurisdictionPullReveal,
+  getCrossJurisdictionPrivateSeed,
+} from './cross-jurisdiction';
 
 // === NAME RESOLUTION WRAPPERS (override imports) ===
 // Runtime no longer keeps a module-global env/db; these pure wrappers expose
