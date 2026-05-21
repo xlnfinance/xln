@@ -1,1104 +1,521 @@
-# radapter: runtime adapter
+# radapter: minimal runtime adapter for mainnet
 
-decoupling frontend from runtime daemon. same pattern as jadapter (browservm | rpc) but for the runtime layer.
+This document supersedes the old v1 adapter spec. The old version proposed
+FrameView push, `assembleFrameView`, `ViewState`, client sort caches, phase-2 KV
+storage, and an 11-method interface before the storage layer in
+`runtime/storage/` shipped.
 
-## problem
+This doc is the production target: a 3-method adapter that ships embedded,
+remote, and mobile from one Svelte codebase, reuses existing storage projections,
+and is small enough to harden for mainnet.
 
-frontend currently imports runtime.ts as a browser bundle and runs the full runtime in-process. this means:
+## premise
 
-- **can't inspect server hubs** — hub H1 runs in server.ts, frontend only sees its own browser-side env
-- **can't scale to 1M accounts** — hub entity's full accounts Map in browser memory is too big
-- **tight coupling** — xlnStore.ts calls `xln.main()`, holds full env, time machine is in-memory `env.history[]`
-- **no auth model** — no way to give read-only access to a hub's state from another browser
+The runtime is the source of truth. Frontends are dumb readers. The minimum
+viable contract between them is:
 
-the browser runtime is only for demo webapp and extensions. real architecture: runtime is always a daemon (desktop user or server hub). browser is a dumb reactive viewer.
+- **read** — fetch a piece of state by path
+- **send** — submit an input (admin only)
+- **onChange** — wake me up when something changed
 
-## core principle: push what's on screen
-
-every frame, daemon pushes a `FrameView` — exactly what the frontend needs to render:
-
-1. **runtime summary** — height, timestamp, totals
-2. **entity list** — all 10-50 entities as short summaries (sidebar, network visual)
-3. **selected entity** — full detail for whichever entity is expanded
-4. **account page** — sorted, paginated slice of accounts for the selected entity
-
-frontend calls `setView()` to tell daemon what it's looking at. daemon includes that data in every push. no extra round-trips.
-
-## required corrections for production
-
-1. **FrameView always must stay projected**
-   - Keep `FrameView` schema, but avoid serializing the full `Env`.
-   - 1M-account hub: payload per frame should stay at page scale (`selected entity` + one `accounts` page), not full account maps.
-
-2. **Cursor pagination for accounts**
-   - Use `cursor` (`nextKey`) instead of `offset`.
-   - Offset breaks under churn and concurrent mutations; cursor gives stable pages under heavy updates.
-
-3. **Versioned WS protocol**
-   - Wrap ws payloads with a versioned envelope: `{v, type, id, inReplyTo, payload}`.
-   - This avoids silent compatibility breaks and makes RPC retries deterministic.
-
-4. **Checkpoint index endpoint, not key scan**
-   - `getCheckpoints` should read a dedicated compact index.
-   - Avoid iterating all `snapshot:*` keys per request.
-
-5. **Replay-safe reconnect**
-   - Push messages should include `{height, seq}`.
-   - On reconnect, client sends `fromHeight`; if server detects a gap, it replies with a fresh full `FrameView` snapshot.
-
-6. **Configurable checkpoint interval**
-   - `interval=5` is fine for local testing.
-   - Hubs should default to bigger intervals and track write amplification.
-
-7. **No immediate full KV rewrite**
-   - Keep phase 1 on current snapshot+WAL.
-   - Add `getFrameAt` by replaying from nearest snapshot to target.
-
-8. **Error discipline + ACL**
-   - Unauthorized `sendInput/rpc` must return `E_UNAUTHORIZED` explicitly.
-   - Treat malformed requests and failed writes as structured errors (`code`, `message`, `retryable`).
-
-### what's big, what's small
-
-```
-env.eReplicas: 10-50 entities      → always tiny, always push all summaries
-  └─ entity.state.accounts: 1M     → THIS is where a hub gets big
-```
-
-a runtime has 10-50 entities max (registered participants on that machine). the scaling concern is **accounts per entity** — a hub connected to 1M users has 1M bilateral accounts in one entity.
-
-entity summaries for 50 entities: ~5KB. one page of 100 accounts: ~50KB. total FrameView per push: ~55KB. works at any scale.
-
-## goal
-
-- runtime daemon is single source of truth (localhost or remote)
-- frontend is stateless viewer: receives FrameView, sends commands via internal_rpc
-- identical frontend code for 3-entity local user and 1M-account remote hub
-- time machine via checkpoint + WAL, works at any scale
-- one interface (RAdapter), two implementations (embedded | rpc), like jadapter
-- option A: both modes produce FrameView. raw env only on `window.xlnEnv` for F12 debug.
-
-## design decisions
-
-### 1. jadapter parallel
-
-```
-jadapter/types.ts    → unified interface for jurisdiction layer
-jadapter/browservm.ts → emulated EVM in browser (demo/test)
-jadapter/rpc.ts      → real EVM via WebSocket/HTTP (production)
-
-radapter/types.ts    → unified interface for runtime layer
-radapter/embedded.ts → runtime.ts running in-process (demo/extension)
-radapter/rpc.ts      → daemon via WebSocket (desktop/server/remote)
-```
-
-frontend imports RAdapter, never knows which implementation. same svelte stores, same components, same UX.
-
-### 2. dumb pipe — no diffs, no subscriptions
-
-on every frame, daemon assembles FrameView for each connected client and pushes it. frontend replaces its store entirely. no diffing, no merging, no conflict resolution.
-
-why:
-- impossible to have stale state — every push is the complete truth
-- reconnect is trivial — just push current FrameView, client is caught up
-- frontend code is trivial — `store.set(view)`, done
-
-### 3. commands via internal_rpc
-
-all state-changing inputs go back to daemon as RPC:
-
-```typescript
-adapter.rpc('pay', { to: '0xBOB', amount: 100n })
-adapter.rpc('setCreditLimit', { entityId, limit: 1000n })
-adapter.rpc('openAccount', { counterpartyId })
-```
-
-frontend does NOT optimistically update. waits for next FrameView push. what you see = what daemon has.
-
-### 4. height IS the sequence number
-
-no separate counter. runtime height is monotonic. reconnect uses `lastSeenHeight`.
-
-### 5. reconnect = connect
-
-with full FrameView push, reconnect is: re-send auth + viewState → daemon pushes current FrameView. no gap replay. dumb pipe beauty.
-
-### 6. account sorting + pagination
-
-accounts within an entity are the only thing that needs pagination and sorting.
-
-**page sizes:** 10, 20, 50, or 100 accounts per page (user-configurable in UI).
-
-**pagination:** page numbers (1, 2, 3...) not infinite scroll. total pages = ceil(accountCount / pageSize).
-
-**sort keys:**
-- `inbound` — inbound capacity (what counterparty can send us)
-- `outbound` — outbound capacity (what we can send them)
-- `collateral` — total collateral locked in this bilateral
-- `balance` — net balance (our perspective)
-- `created` — account creation height (immutable, cheap)
-- `updated` — last frame height that touched this account
-- `counterparty` — counterparty entityId alphabetical
-
-**sort direction:** ascending / descending toggle.
-
-**sorting strategy:**
-
-for embedded mode (3-50 accounts): sort on the fly. Array.sort() on 50 items is instant.
-
-for rpc mode (1M accounts): server maintains a **sorted index** — an array of account keys sorted by current sort key. this is built once when sort key changes, then sliced per page. between sort changes, the index is reused (just re-slice for new page).
-
-```typescript
-// server-side sort cache per client
-interface ClientSortCache {
-  sortBy: AccountSortKey
-  sortDir: 'asc' | 'desc'
-  sortedKeys: string[]              // account keys in sorted order
-  builtAtHeight: number             // when this index was last rebuilt
-}
-
-// on frame push:
-// if client's sort key changed OR cache is stale (>10 frames old):
-//   rebuild sortedKeys from accounts Map (O(n log n), ~200ms for 1M)
-// else:
-//   reuse existing sortedKeys
-// then slice page from sortedKeys
-```
-
-rebuilding sort index for 1M accounts: O(n log n) = ~20M comparisons. with BigInt: ~200-500ms. acceptable because it only happens when user changes sort key, not every frame.
-
-for the common case (user watching page 1 sorted by balance): same sortedKeys reused, just slice [0..pageSize] from cached index. O(pageSize).
+Every other concept in v1 (ViewState, FrameView, subscription filters, sort
+caches, push-every-frame) is convenience that the storage layer + Svelte
+component reactivity already provide. We deleted them.
 
 ## interface
 
-```typescript
-type RAdapterMode = 'embedded' | 'rpc'
+```ts
+// runtime/radapter/types.ts (new file, ~40 LOC)
 
-interface RAdapterConfig {
-  mode: RAdapterMode
-  // rpc mode
-  wsUrl?: string                    // ws://localhost:8080/rpc or wss://hub.example.com/rpc
-  authKey?: string                  // HMAC(seed, 'inspect') for read, HMAC(seed, 'admin') for write
-  // embedded mode
-  seed?: string                     // runtime seed for in-process runtime
-  // shared
-  snapshotInterval?: number         // checkpoint frequency (5 dev, 50 prod hub)
-}
-
-type AccountSortKey = 'inbound' | 'outbound' | 'collateral' | 'balance' | 'created' | 'updated' | 'counterparty'
-
-interface ViewState {
-  selectedEntityId: string | null
-  accountPage: number               // 1-indexed page number
-  accountPageSize: 10 | 20 | 50 | 100
-  accountSortBy: AccountSortKey
-  accountSortDir: 'asc' | 'desc'
-}
-
-interface FrameView {
-  // runtime level
-  height: number
-  timestamp: number
-  runtimeId: string
-  checkpointInterval: number
-
-  // all entities — short summaries for sidebar / network visual
-  // always complete (10-50 entities, always tiny)
-  entities: EntitySummary[]
-
-  // selected entity — full detail minus accounts Map (null if nothing selected)
-  selectedEntity: EntityReplicaFull | null
-
-  // accounts for selected entity — sorted, paginated
-  accounts: AccountPage | null
-}
-
-interface EntitySummary {
-  entityId: string
-  label: string
-  accountCount: number              // might be 1M for hub
-  totalBalance: bigint
-  pendingHTLCs: number
-  stateRoot: string                 // for change detection
-}
-
-interface EntityReplicaFull {
-  entityId: string
-  height: number
-  lockBook: any
-  // all entity-level fields, but NOT the accounts Map
-}
-
-interface AccountPage {
-  accounts: AccountView[]           // page of sorted accounts
-  page: number                      // current page (1-indexed)
-  pageSize: number                  // 10 | 20 | 50 | 100
-  totalAccounts: number             // total for this entity
-  totalPages: number                // ceil(totalAccounts / pageSize)
-  sortBy: AccountSortKey
-  sortDir: 'asc' | 'desc'
-}
-
-interface AccountView {
-  counterpartyId: string
-  counterpartyLabel: string
-  inbound: bigint                   // inbound capacity
-  outbound: bigint                  // outbound capacity
-  collateral: bigint                // total collateral
-  balance: bigint                   // net balance (our perspective)
-  pendingHTLCs: number
-  createdAtHeight: number
-  updatedAtHeight: number
-  // full delta/account detail available via selectAccount drill-down
-}
-
-interface CheckpointInfo {
-  height: number
-  timestamp: number
-}
-
-interface RAdapter {
-  readonly mode: RAdapterMode
-  readonly status: 'connected' | 'connecting' | 'disconnected'
+export interface RuntimeAdapter {
+  readonly mode: 'embedded' | 'remote'
+  readonly status: 'connected' | 'connecting' | 'disconnected' | 'error'
   readonly currentHeight: number
+  readonly authLevel: 'inspect' | 'admin' | null
 
-  // lifecycle
-  connect(config: RAdapterConfig): Promise<void>
+  connect(config: RuntimeAdapterConfig): Promise<void>
   disconnect(): void
 
-  // tell daemon what you're looking at
-  setView(view: ViewState): void
+  read<T = unknown>(path: string, query?: ReadQuery): Promise<T>
+  send(input: RuntimeInput): Promise<{ height: number }>     // admin only
+  onChange(cb: (height: number) => void): () => void
+  onStatus(cb: (s: RuntimeAdapter['status']) => void): () => void
+}
 
-  // reactive push — dumb pipe, every frame
-  onFrame(cb: (view: FrameView) => void): () => void
-  onStatusChange(cb: (s: string) => void): () => void
+export interface RuntimeAdapterConfig {
+  mode: 'embedded' | 'remote'
+  wsUrl?: string                  // remote only — wss://hub.example.com/rpc
+  authKey?: string                // remote only — HMAC-SHA256(seed, 'xln-radapter-v1:<level>')
+  seed?: string                   // embedded only — runtime seed
+  reconnectMaxMs?: number         // remote only — default 30_000
+}
 
-  // time machine
-  getCheckpoints(): Promise<CheckpointInfo[]>
-  getFrameAt(height: number): Promise<FrameView>  // uses current ViewState
-
-  // commands → internal_rpc
-  sendInput(input: RuntimeInput): Promise<{ height: number }>
-  rpc(method: string, params: any): Promise<any>
+export interface ReadQuery {
+  atHeight?: number               // historical read; omitted = current
+  cursor?: string                 // pagination cursor (last key from prior page)
+  limit?: number                  // pagination size, default 50, max 500
+  sortBy?: string                 // path-specific (e.g. 'balance' for accounts)
+  sortDir?: 'asc' | 'desc'
 }
 ```
 
-## assembleFrameView — the shared core function
+That is the full surface. No `ViewState`, no `subscribeView`, no `getEntity`,
+no `getAccounts`, no `getCheckpoints`, no `seekHeight`, no `setView`, no
+`AccountSortKey`, no `FrameView`, no `EntitySummary`, no `EntityReplicaFull`,
+no `AccountView`, no `AccountPage`, no `TickPayload`, no `ClientSortCache`.
 
-both embedded and rpc implementations use the same pure function to build FrameView from env + ViewState. this guarantees identical output regardless of transport.
+## paths
 
-```typescript
-function assembleFrameView(env: Env, view: ViewState): FrameView {
-  // 1. entity summaries — always all entities, always cheap
-  const entities = Array.from(env.eReplicas.values()).map(toEntitySummary)
+The path string is the read API. Server validates against a closed allowlist.
+Each path returns an existing storage type — we do not introduce new
+projections.
 
-  // 2. selected entity detail (minus accounts Map)
-  const selectedEntity = view.selectedEntityId
-    ? toEntityFull(env, view.selectedEntityId)
-    : null
+| Path                                       | Returns                                | Source                                                    |
+|--------------------------------------------|----------------------------------------|-----------------------------------------------------------|
+| `head`                                     | `StorageHead`                          | `runtime/storage/index.ts` `readStorageHead`              |
+| `entities`                                 | `Array<{ entityId, label, height }>`   | scan `KEY_LIVE_ENTITY` prefix                             |
+| `entity/:id`                               | `StorageEntityCoreDoc`                 | `KEY_LIVE_ENTITY` get, or `projectEntityCoreDoc` on live  |
+| `entity/:id/accounts`                      | `{ items: StorageAccountDoc[], nextCursor }` | `KEY_LIVE_ACCOUNT` prefix scan + cursor               |
+| `entity/:id/account/:cp`                   | `StorageAccountDoc`                    | `KEY_LIVE_ACCOUNT` direct get                             |
+| `entity/:id/books`                         | `BookState[]`                          | `KEY_LIVE_BOOK` prefix scan                               |
+| `frame/:height`                            | `StorageFrameRecord`                   | `readStorageFrameRecord`                                  |
+| `frame/latest`                             | `StorageFrameRecord`                   | `readStorageFrameRecord(head.latestHeight)`               |
+| `checkpoints`                              | `Array<{ height, timestamp }>`         | `listStorageSnapshotHeights`                              |
 
-  // 3. sorted + paginated account page
-  let accounts: AccountPage | null = null
-  if (view.selectedEntityId) {
-    const accountsMap = getEntityAccounts(env, view.selectedEntityId)
-    const sorted = sortAccounts(accountsMap, view.accountSortBy, view.accountSortDir)
-    const start = (view.accountPage - 1) * view.accountPageSize
-    const pageSlice = sorted.slice(start, start + view.accountPageSize)
-    accounts = {
-      accounts: pageSlice.map(toAccountView),
-      page: view.accountPage,
-      pageSize: view.accountPageSize,
-      totalAccounts: accountsMap.size,
-      totalPages: Math.ceil(accountsMap.size / view.accountPageSize),
-      sortBy: view.accountSortBy,
-      sortDir: view.accountSortDir,
-    }
+`atHeight=N` rewrites any path to read at a historical snapshot. Implementation
+calls `loadEntityStateFromStorage(db, entityId, N)` from
+`runtime/storage/index.ts:2537` and reads from the materialized state.
+
+For `accounts` pagination: cursor is the last `counterpartyId` from the previous
+page. Server scans `KEY_LIVE_ACCOUNT_<entityId>_<cursor>..` with `limit` and
+returns `nextCursor = items.last.counterpartyId` or `null`.
+
+For `sortBy`: omitted = lexicographic on counterparty (cheapest, native KV order).
+Sorted reads (`balance`, `inbound`, `outbound`) are deferred. They require a
+separate sort index; we only add them when a real hub crosses ~10K accounts and
+profiling shows latency. Until then, sorting in the frontend is fine
+(O(n log n) on 1K accounts is sub-50ms).
+
+## wire protocol (remote only)
+
+Versioned envelope. Every message has `v`. Bumps require migration period.
+
+```
+client → server (request):
+  { v:1, id:'r-42', op:'read', path:'entity/0xabc', query?:{...} }
+  { v:1, id:'r-43', op:'send', input:{...} }
+  { v:1, id:'r-44', op:'auth', key:'<hmac>' }
+
+server → client (response):
+  { v:1, inReplyTo:'r-42', ok:true, payload:{...} }
+  { v:1, inReplyTo:'r-43', ok:false, error:{ code:'E_UNAUTHORIZED', message:'admin required', retryable:false } }
+
+server → client (push, single type):
+  { v:1, op:'tick', height: 1234 }
+```
+
+That is the entire protocol. No `frame`, no `subscribe`, no `set_view`. The
+client decides what to re-read on tick by inspecting which routes/components
+are mounted.
+
+Errors are structured: `{ code, message, retryable }`. Codes are a closed enum:
+`E_UNAUTHORIZED`, `E_NOT_FOUND`, `E_BAD_PATH`, `E_BAD_QUERY`, `E_RATE_LIMITED`,
+`E_INTERNAL`. No string matching anywhere.
+
+## embedded implementation
+
+```
+runtime/radapter/embedded.ts (~150 LOC)
+
+class EmbeddedAdapter implements RuntimeAdapter {
+  private env: Env
+  private changeCbs = new Set<(h: number) => void>()
+  private unregister?: () => void
+
+  async connect(config) {
+    if (config.seed) this.env = await main()           // for extension/standalone
+    else this.env = getCurrentEnv()                    // for demo where env already exists
+    this.unregister = registerEnvChangeCallback(this.env, (e) => {
+      for (const cb of this.changeCbs) cb(e.height)
+    })
   }
 
-  return {
-    height: env.height,
-    timestamp: env.timestamp,
-    runtimeId: env.runtimeId,
-    checkpointInterval: env.runtimeConfig?.snapshotIntervalFrames ?? 100,
-    entities,
-    selectedEntity,
-    accounts,
+  async read<T>(path, query): Promise<T> {
+    return resolveRead(this.env, path, query) as T     // pure local function — no IO
+  }
+
+  async send(input) {
+    enqueueRuntimeInput(this.env, input)
+    return { height: this.env.height }                 // local, no admin gate (it's your own runtime)
+  }
+
+  onChange(cb) {
+    this.changeCbs.add(cb)
+    return () => this.changeCbs.delete(cb)
   }
 }
 ```
 
-for embedded (small): sortAccounts sorts 3-50 items in microseconds. no caching needed.
-
-for rpc (1M accounts): server wraps sortAccounts with a cache. sorted index is rebuilt only when sort key changes or every N frames. page slice is O(pageSize) from cached sorted array.
-
-## implementations
-
-### radapter/embedded.ts
-
-wraps runtime.ts running in the same process. for demo webapp and browser extensions.
+`resolveRead(env, path, query)` is the shared dispatch. It is the SAME
+function used on the server side — embedded and remote produce bit-identical
+output by construction.
 
 ```
-connect()         → xln.main() → env in memory
-setView()         → store ViewState locally
-onFrame()         → registerEnvChangeCallback → on each: assembleFrameView(env, viewState) → cb
-sendInput()       → env.mempool.push(input) → process()
-getFrameAt()      → loadEnvFromDB checkpoint + WAL replay → assembleFrameView
-disconnect()      → cleanup callbacks
+runtime/radapter/resolve.ts (~200 LOC)
+
+resolveRead(env, path, query):
+  match path:
+    'head'                       → readStorageHead-style summary from env
+    'entities'                   → env.eReplicas.values().map(toBriefSummary)
+    'entity/:id'                 → projectEntityCoreDoc(replica.state, replica)   // existing storage/index.ts:767
+    'entity/:id/accounts'        → for each entry in entity.accounts, projectAccountDoc(account); paginate; sort if requested
+    'entity/:id/account/:cp'     → projectAccountDoc(entity.accounts.get(cp))     // existing storage/index.ts:882
+    'entity/:id/books'           → Array.from(entity.orderbookExt?.books?.values() ?? [])
+    'frame/:h'                   → loadStorageFrameRecord(db, h) on storage layer
+    'frame/latest'               → loadStorageFrameRecord(db, env.height)
+    'checkpoints'                → listStorageSnapshotHeights(db)
+  apply atHeight: if set, swap env for replayed env from loadEntityStateFromStorage
+  validate: throw E_BAD_PATH / E_NOT_FOUND on miss
 ```
 
-no serialization, no network. direct function calls. produces identical FrameView to rpc mode.
+We do not write `toEntitySummary`, `toEntityFull`, `toAccountView`,
+`assembleAccountPage`, `sortAccountViews`. The only new builders are
+`toBriefSummary` (~5 fields per entity for the `entities` listing) and
+the dispatch table. Total new code in resolve.ts: ~200 LOC. Total of all
+existing projection code reused: ~600 LOC.
 
-### radapter/rpc.ts
-
-WebSocket client connecting to daemon's `/rpc` endpoint.
-
-```
-connect()         → new WebSocket(wsUrl) + { type: 'auth', key } handshake
-setView()         → ws.send({ type: 'set_view', ...viewState })
-                    server remembers per-client, includes in every push
-onFrame()         → server pushes { type: 'frame', view: FrameView } every frame
-sendInput()       → ws.send({ type: 'send_input', input }) → await ack
-getFrameAt()      → ws.send({ type: 'get_frame_at', height }) → await FrameView
-disconnect()      → ws.close()
-```
-
-reconnect: ws close → exponential backoff → reconnect → re-send auth + viewState → server pushes current FrameView → instant catch-up.
-
-auth:
-- `HMAC(seed, 'inspect')` → read-only (receive frames, time machine)
-- `HMAC(seed, 'admin')` → read + write (sendInput, rpc)
-- hub generates inspector URLs: `xln.finance/app?mode=inspect&ws=wss://hub:8080/rpc&key=abc`
-
-## server-side: what to add to handleRpcMessage
-
-in server.ts, expand the existing `/rpc` WS handler:
-
-```typescript
-// per-client state:
-//   viewState: ViewState
-//   sortCache: { sortBy, sortDir, sortedKeys[], builtAtHeight }
-
-// on auth: store default ViewState
-// on set_view: update client.viewState, invalidate sortCache if sort key changed
-// on notifyEnvChange: for each client → assembleFrameView(env, client.viewState) → push
-
-'set_view'              → update client.viewState (+invalidate sort cache if needed)
-'get_frame_at'          → getEnvAtHeight(h) → assembleFrameView(tmpEnv, client.viewState) → send
-'get_checkpoints'       → scan DB for snapshot:{h} keys → send [{h, ts}...]
-'send_input'            → push to env.mempool → respond after next process()
-'rpc'                   → dispatch method (pay, setCreditLimit, etc.)
-```
-
-total: ~5 case branches. assembleFrameView is the same function used by embedded adapter.
-
-sort cache per client: rebuild sorted index when sort key changes or cache is >10 frames stale. for 1M accounts, rebuild takes ~200-500ms but only happens on sort change, not every frame. page slicing from cached index is O(pageSize).
-
-## state persistence: 3-tier KV + diff + WAL
-
-### the problem with full JSON snapshots
-
-current `saveEnvToDB` writes a full JSON blob per checkpoint. for 1M accounts this is ~200MB per checkpoint. at interval=50, that's 4GB per 1000 frames. unacceptable.
-
-### what already exists (runtime.ts)
+## remote implementation
 
 ```
-saveEnvToDB():
-  frame_input:{height}              → WAL journal (runtimeInput per frame)
-  snapshot:{height}                 → full env JSON blob (every N frames)
-  latest_checkpoint_height          → pointer to newest checkpoint
-  latest_height                     → pointer to newest frame
+runtime/radapter/remote.ts (~250 LOC)
 
-loadEnvFromDB():
-  1. load snapshot:{checkpoint}
-  2. replay frame_input:{checkpoint+1} through frame_input:{latest}
-  3. result: fully restored env
-```
+class RemoteAdapter implements RuntimeAdapter {
+  private ws: WebSocket
+  private pending = new Map<string, { resolve, reject }>()
+  private nextId = 1
 
-### 3-tier storage design
-
-instead of monolithic JSON blobs, store state as individual KV entries with diff layers:
-
-```
-tier 1: FULL KV SNAPSHOT (every ~500 frames)
-  every account as an individual key:
-    fkv:{height}:E1:CP1     → serialized account state (~200 bytes)
-    fkv:{height}:E1:CP2     → serialized account state
-    ... (1M keys)
-    fkv:{height}:_meta      → { entitySummaries, reserves, config... }
-  written rarely. ~200MB for 1M accounts. this is the base layer.
-
-tier 2: DIFF KV (every ~50 frames)
-  only keys that changed since the last full or diff:
-    dkv:{height}:E1:CP5     → new account state (this account changed)
-    dkv:{height}:E1:CP99    → new account state
-    dkv:{height}:_meta      → updated entity summaries
-  typical frame touches 1-10 accounts → diff is ~2-20KB.
-  cumulative: diff at frame 550 contains all changes since full KV at frame 500.
-
-tier 3: WAL FRAMES (every frame)
-  same as current frame_input:{height} — the runtimeInput that produced this frame.
-    wal:{height}             → { runtimeInput, timestamp, gossipProfiles }
-  ~5KB per frame. used for replay between diffs.
-```
-
-### reaching any historical state
-
-to reach frame 573:
-
-```
-1. load nearest full KV ≤ 573         → fkv:500 (the base)
-2. apply nearest cumulative diff ≤ 573 → dkv:550 (50 frames of changes)
-3. replay WAL frames 551-573           → 23 frames of applyRuntimeInput
-
-result: exact state at frame 573
-```
-
-for assembleFrameView, we don't even need to materialize the full env:
-- entity summaries: read from `dkv:550:_meta` (or `fkv:500:_meta` + overlay)
-- account page: sort index tells us which 100 accounts to read → 100 KV gets
-- total: ~100 KV reads, not 1M
-
-### storage math
-
-```
-user (3 entities × 5 accounts):
-  full KV: ~5KB (rare, every 500 frames)
-  diffs: ~500 bytes (every 50 frames)
-  WAL: ~2KB/frame
-  1000 frames: ~2MB total. no concern.
-
-hub (20 entities, 1 hub entity × 1M accounts):
-  full KV: ~200MB (every 500 frames = 2 per 1000 frames)
-  diffs: ~10KB each (every 50 frames = 20 per 1000 frames)
-  WAL: ~5KB/frame (1000 per 1000 frames)
-  1000 frames: 400MB + 200KB + 5MB ≈ 405MB
-
-  compare to old approach (full JSON every 50 frames):
-  1000 frames: 4GB. that's 10x worse.
-```
-
-### phase 1 vs phase 2
-
-**phase 1 (implement now):** use current JSON snapshot + WAL. already built, works. assembleFrameView reads from in-memory env after loadEnvFromDB replay. the RAdapter interface is identical regardless of storage backend.
-
-**phase 2 (when scaling to 1M):** migrate saveEnvToDB to write individual KV entries + diffs. add KV-aware `getEnvAtHeight()` that reads only needed keys. assembleFrameView's output is identical — only the read path changes.
-
-the key insight: assembleFrameView should use a `StateReader` abstraction, not raw env:
-
-```typescript
-// phase 1: reads from in-memory Env object
-interface StateReader {
-  getEntitySummaries(): EntitySummary[]
-  getEntityFull(entityId: string): EntityReplicaFull
-  getAccountsSorted(entityId: string, sortBy, sortDir): AccountView[]
-}
-
-class EnvStateReader implements StateReader {
-  constructor(private env: Env) {}
-  // reads directly from env.eReplicas, env.state.accounts
-}
-
-// phase 2: reads from KV store with diff overlay resolution
-class KVStateReader implements StateReader {
-  constructor(private db: Level, private height: number) {}
-  // reads from fkv + dkv + wal overlay chain
-}
-```
-
-assembleFrameView calls StateReader methods. switching from phase 1 to phase 2 = swap the reader. FrameView output unchanged. frontend unchanged.
-
-### sort index for 1M accounts
-
-sorting 1M accounts requires knowing the sort value for every account. with KV storage, we can maintain a separate sorted index:
-
-```
-sortidx:{entityId}:{sortKey}  → [counterpartyId1, counterpartyId2, ...]
-```
-
-this index is ~16MB for 1M accounts (16 bytes per entry: 8-byte counterpartyId prefix + 8-byte sort value). rebuilt when sort key changes. page slicing = array slice on the index, then 100 KV gets for the actual account data.
-
-### configurable intervals
-
-```
-snapshotIntervalFrames:          // full KV snapshot
-  500   for dev/demo (small state, fast)
-  500   for production hubs (same — full KV is rare)
-
-diffIntervalFrames:              // diff KV
-  5     for dev/demo (instant time machine jumps)
-  50    for production hubs
-
-// stored in env.runtimeConfig, reported in FrameView.checkpointInterval
-```
-
-### historical query function
-
-```typescript
-// phase 1 (current): load full env, replay WAL
-async function getEnvAtHeight(targetHeight: number): Promise<Env> {
-  const cpHeight = findNearestCheckpoint(targetHeight)
-  const env = deserialize(await db.get(`snapshot:${cpHeight}`))
-  env[ENV_REPLAY_MODE_KEY] = true  // prevent saveEnvToDB during replay
-  for (let h = cpHeight + 1; h <= targetHeight; h++) {
-    const wal = deserialize(await db.get(`frame_input:${h}`))
-    await applyRuntimeInput(env, wal.runtimeInput)
+  async connect(config) {
+    this.ws = new WebSocket(config.wsUrl)
+    await this.handshake()
+    await this.request({ op: 'auth', key: config.authKey })  // sets authLevel
   }
-  return env
-}
 
-// phase 2 (future): KV-aware, no full env materialization
-async function getStateReaderAtHeight(targetHeight: number): StateReader {
-  const fullKVHeight = findNearestFullKV(targetHeight)
-  const diffHeight = findNearestDiff(targetHeight)  // between fullKV and target
-  // overlay chain: fullKV → diff → WAL replay for remaining frames
-  return new KVStateReader(db, fullKVHeight, diffHeight, targetHeight)
+  read(path, query) { return this.request({ op: 'read', path, query }) }
+  send(input)        { return this.request({ op: 'send', input }) }
+
+  private request(msg) {
+    const id = `r-${this.nextId++}`
+    return new Promise((resolve, reject) => {
+      this.pending.set(id, { resolve, reject })
+      this.ws.send(JSON.stringify({ v: 1, id, ...msg }))
+    })
+  }
+
+  private onMessage(raw) {
+    const msg = JSON.parse(raw)
+    if (msg.op === 'tick') { for (const cb of this.changeCbs) cb(msg.height); return }
+    const p = this.pending.get(msg.inReplyTo); this.pending.delete(msg.inReplyTo)
+    msg.ok ? p.resolve(msg.payload) : p.reject(new RuntimeError(msg.error))
+  }
+
+  // reconnect: exponential backoff 1s → 30s, replays auth, no state to restore
 }
 ```
 
-WAL replay cost: O(txs_in_frame × frames_from_nearest_diff), NOT O(account_count). typically 1-50 frames × 1-10 txs = sub-millisecond.
+Reconnect: WS close → backoff → reconnect → re-send auth. No state to replay
+because the adapter is stateless. Components remount under the existing
+Svelte error-boundary pattern and refetch what they show. Last-seen-height
+tracking is per-component, not in the adapter.
 
-## time machine
+## server-side wiring
 
-### current behavior
-- `env.history[]` — in-memory array, all frames, all state
-- slider iterates array index
-- works for ~50 frames, unusable at 10K+
-
-### new behavior
+Modify `runtime/server.ts` `/rpc` handler. ~250 LOC added.
 
 ```
-adapter.getCheckpoints() → [{h:1}, {h:6}, {h:11}, {h:16}, ...]
+on connection:
+  client = { ws, authLevel: null, rateLimit: new TokenBucket(...) }
 
-slider visualization:
-|●····●····●····●····●····●····●|
-1    6    11   16   21   26   31
+on message (parsed envelope):
+  enforce v === 1
+  enforce rateLimit.tryConsume(1)
+  switch msg.op:
+    'auth':
+      level = verifyHmac(msg.key, env.runtimeSeed)  // 'inspect' | 'admin' | null
+      if !level: respond E_UNAUTHORIZED
+      client.authLevel = level
+      respond ok
+    'read':
+      payload = await resolveRead(env, msg.path, msg.query)  // SAME function as embedded
+      respond ok payload
+    'send':
+      if client.authLevel !== 'admin': respond E_UNAUTHORIZED
+      enqueueRuntimeInput(env, msg.input)
+      respond ok { height: env.height }
+    default:
+      respond E_BAD_PATH
 
-● = checkpoint (instant jump, pre-computed snapshot on disk)
-· = between checkpoints (small delay, WAL replay on server)
+on env change (single hook):
+  height = env.height
+  for client in clients: ws.send({ v:1, op:'tick', height })
 ```
 
-**user drags slider to frame 8:**
-1. `adapter.getFrameAt(8)` — uses current ViewState (selected entity, sort, page)
-2. daemon: load checkpoint:6 + replay WAL[7,8] → assembleFrameView → send
-3. frontend renders. same FrameView shape as live mode. components don't know it's historical.
+Total per-client state: `{ ws, authLevel, rateLimit }`. No subscription state,
+no view state, no sort cache. Server can hold thousands of inspectors at
+~150 bytes each.
 
-**LIVE mode (slider at rightmost):**
-- automatic FrameView push every frame via onFrame callback
-- no manual fetching
+## auth
 
-**client-side LRU cache:**
-- cache last ~5 visited heights → FrameView
-- scrubbing back to recently visited frame is instant
-- invalidate on view change (sort/page/entity switch)
+HMAC-derived keys, generated by the hub once on boot:
 
-**prefetch:**
-- at checkpoint N, prefetch N-1 and N+1 in background
-- cheap, big UX win for scrubbing
+```
+inspectKey = HMAC-SHA256(runtimeSeed, 'xln-radapter-v1:inspect')
+adminKey   = HMAC-SHA256(runtimeSeed, 'xln-radapter-v1:admin')
+```
 
-## svelte integration
+Hub UI displays both keys. Operator gives `inspectKey` to anyone, holds
+`adminKey` close. URLs:
 
-radapter produces identical FrameView for both modes. frontend has ONE code path.
+```
+https://xln.finance/app?ws=wss://hub.example.com/rpc&key=<inspectKey>
+```
 
-```typescript
-// xlnStore.ts — the only file that knows about RAdapter
-import { writable } from 'svelte/store'
+Frontend reads `key` from URL, passes to adapter `connect()`. Server validates
+on `auth` message — constant-time comparison against expected HMAC.
 
-export const frameView = writable<FrameView | null>(null)
-let adapter: RAdapter
-let currentView: ViewState = {
-  selectedEntityId: null,
-  accountPage: 1,
-  accountPageSize: 50,
-  accountSortBy: 'balance',
-  accountSortDir: 'desc',
+For mainnet: rotate `runtimeSeed` invalidates all keys. Hub config has
+`adminKeySalt` so admin URLs survive seed rotation if intentional.
+
+## mainnet hardening
+
+Five concerns that v1 ignored:
+
+### 1. rate limiting
+
+Token bucket per WS connection. Default: 50 reads/sec, 5 sends/sec, burst
+100. Configurable via env. `E_RATE_LIMITED` is structured + `retryable: true`
++ `retryAfterMs`. Frontend honors backoff; missing this opens trivial DoS.
+
+```
+runtime/radapter/rate-limit.ts (~80 LOC)
+
+class TokenBucket {
+  constructor(capacity, refillPerSec) { ... }
+  tryConsume(n): boolean
+  retryAfterMs(n): number
 }
+```
 
-export async function initRuntime(config: RAdapterConfig) {
-  adapter = config.mode === 'embedded'
-    ? new EmbeddedRAdapter()
-    : new RpcRAdapter()
+### 2. payload caps
+
+- max request size: 16KB (auth has tiny key, `read` has tiny path, `send`
+  has bounded RuntimeInput)
+- max response size: 4MB (single `entity/:id/accounts` page with `limit=500`
+  is ~250KB; cap is generous)
+- enforce both sides. Reject oversize with `E_INTERNAL` + close connection.
+
+### 3. read isolation
+
+`atHeight` reads must never block live writes. Storage layer already supports
+this — `loadEntityStateFromStorage` does materialize-replay against an
+overlay; live env writes continue to `KEY_LIVE_*`. Verify in soak test:
+hub serving 100 historical reads/sec while processing live frames must
+show no consensus delay.
+
+### 4. backpressure
+
+If client's WS write buffer exceeds 1MB, server drops the connection with
+`E_INTERNAL`. Client reconnects and refetches. Cheaper than buffering.
+Required because broadcasting `tick` to a slow client otherwise pins memory.
+
+### 5. observability
+
+Server logs every request as one structured line:
+`{ ts, clientId, authLevel, op, path?, latencyMs, status, errCode? }`
+
+Aggregated to Prometheus or equivalent. Mainnet hub without read-path
+metrics is unship-able — first inspector that hangs takes the team an hour
+to diagnose.
+
+## frontend integration
+
+```
+frontend/src/lib/stores/runtimeStore.ts (~80 LOC, replaces large parts of xlnStore)
+
+import { writable, derived } from 'svelte/store'
+
+let adapter: RuntimeAdapter
+export const runtimeHeight = writable(0)
+
+export async function initRuntime(config: RuntimeAdapterConfig) {
+  adapter = config.mode === 'embedded' ? new EmbeddedAdapter() : new RemoteAdapter()
   await adapter.connect(config)
-  adapter.onFrame((view) => frameView.set(view))
+  adapter.onChange((h) => runtimeHeight.set(h))
 }
 
-// view controls — just update ViewState, next push has new data
-export function selectEntity(entityId: string) {
-  currentView = { ...currentView, selectedEntityId: entityId, accountPage: 1 }
-  adapter.setView(currentView)
+export function readStore<T>(path: string, query?: ReadQuery) {
+  // Returns a Svelte store that auto-refetches on every height bump.
+  // Pins atHeight to the tick height so every mounted component reads the
+  // same snapshot. That prevents torn financial UI across concurrent reads.
+  const store = writable<T | null>(null)
+  const refetch = async (h: number) => {
+    try {
+      const pinned = query?.atHeight !== undefined
+        ? query
+        : { ...query, atHeight: h }
+      store.set(await adapter.read<T>(path, pinned))
+    } catch {}
+  }
+  // Svelte store subscription invokes refetch immediately with current height.
+  const unsub = runtimeHeight.subscribe(refetch)
+  return { ...store, dispose: unsub }
 }
 
-export function setAccountPage(page: number) {
-  currentView = { ...currentView, accountPage: page }
-  adapter.setView(currentView)
-}
-
-export function setAccountPageSize(size: 10 | 20 | 50 | 100) {
-  currentView = { ...currentView, accountPageSize: size, accountPage: 1 }
-  adapter.setView(currentView)
-}
-
-export function setAccountSort(sortBy: AccountSortKey, sortDir: 'asc' | 'desc') {
-  currentView = { ...currentView, accountSortBy: sortBy, accountSortDir: sortDir, accountPage: 1 }
-  adapter.setView(currentView)
-}
-
-export async function pay(to: string, amount: bigint) {
-  await adapter.rpc('pay', { to, amount })
-  // no local update — wait for next frame push
-}
-
-export async function timeMachineSeek(height: number) {
-  const view = await adapter.getFrameAt(height)
-  frameView.set(view)
-}
+export const send = (input: RuntimeInput) => adapter.send(input)
 ```
 
-components subscribe to `frameView` — zero knowledge of embedded vs rpc:
+Components use `readStore`:
 
 ```svelte
+<!-- EntityCard.svelte -->
 <script>
-  import { frameView, selectEntity, setAccountPage, setAccountSort, setAccountPageSize } from '$lib/stores/xlnStore'
-
-  $: entities = $frameView?.entities ?? []
-  $: selected = $frameView?.selectedEntity
-  $: accountPage = $frameView?.accounts
+  import { readStore } from '$lib/stores/runtimeStore'
+  export let entityId: string
+  const entity = readStore<StorageEntityCoreDoc>(`entity/${entityId}`)
 </script>
 
-<!-- entity sidebar -->
-{#each entities as entity}
-  <EntityCard {entity} on:click={() => selectEntity(entity.entityId)} />
-{/each}
-
-<!-- selected entity detail -->
-{#if selected}
-  <EntityDetail entity={selected} />
-
-  <!-- account list with sorting + pagination -->
-  {#if accountPage}
-    <div class="sort-controls">
-      <select on:change={e => setAccountSort(e.target.value, accountPage.sortDir)}>
-        <option value="balance">Balance</option>
-        <option value="inbound">Inbound</option>
-        <option value="outbound">Outbound</option>
-        <option value="collateral">Collateral</option>
-        <option value="created">Created</option>
-        <option value="updated">Updated</option>
-        <option value="counterparty">Counterparty</option>
-      </select>
-      <select on:change={e => setAccountPageSize(Number(e.target.value))}>
-        <option value="10">10</option>
-        <option value="20">20</option>
-        <option value="50">50</option>
-        <option value="100">100</option>
-      </select>
-    </div>
-
-    {#each accountPage.accounts as account}
-      <AccountRow {account} />
-    {/each}
-
-    <!-- pagination: 1, 2, 3... -->
-    <Pagination
-      page={accountPage.page}
-      totalPages={accountPage.totalPages}
-      on:goto={e => setAccountPage(e.detail)}
-    />
-  {/if}
+{#if $entity}
+  <h3>{$entity.entityId}</h3>
+  <p>height: {$entity.height}</p>
 {/if}
 ```
 
-## data flow
+```svelte
+<!-- AccountList.svelte -->
+<script>
+  import { readStore } from '$lib/stores/runtimeStore'
+  export let entityId: string
+  let cursor = ''
+  $: page = readStore(`entity/${entityId}/accounts`, { cursor, limit: 50 })
+</script>
 
-```
-                      Frontend (Svelte)
-                           │
-                     ┌─────┴─────┐
-                     │  xlnStore  │  frameView store
-                     │  setView() │  selectEntity(), setAccountPage()...
-                     └─────┬─────┘
-                           │
-                      ┌────┴────┐
-                      │ RAdapter │  interface — same for both modes
-                      └────┬────┘
-                           │
-             ┌─────────────┼─────────────┐
-             │                           │
-      embedded.ts                    rpc.ts
-      (in-process)              (WebSocket client)
-             │                           │
-      runtime.ts                  ┌──────┴──────┐
-      assembleFrameView()         │  server.ts   │
-      (direct call)               │ handleRpc()  │
-                                  │ assembleFrameView()
-                                  │  runtime.ts  │
-                                  │   LevelDB    │
-                                  └──────────────┘
+{#if $page}
+  {#each $page.items as account}
+    <AccountRow doc={account} />
+  {/each}
+  <button on:click={() => cursor = $page.nextCursor} disabled={!$page.nextCursor}>Next</button>
+{/if}
 ```
 
-**desktop user (3 entities × 5 accounts):**
-```
-app → rpc radapter → localhost:8080 daemon
-```
-
-**admin inspecting hub remotely (1M accounts):**
-```
-browser → rpc radapter → wss://hub.example.com/rpc → server runtime
-```
-
-**demo webapp / browser extension:**
-```
-browser → embedded radapter → runtime.ts in-process → IndexedDB
-```
-
-all three: identical frontend code. only RAdapterConfig differs.
-
-## auth model
-
-```
-hub seed → HMAC(seed, 'inspect') → read-only auth key
-hub seed → HMAC(seed, 'admin')   → read + write auth key
-```
-
-permissions:
-- inspect: receive FrameView, setView, time machine, getCheckpoints
-- admin: all above + sendInput + rpc commands
-
-hub generates inspector URLs:
-```
-https://xln.finance/app?mode=inspect&ws=wss://hub:8080/rpc&key=abc123
-```
-
-frontend detects `mode=inspect` → rpc adapter with read-only key.
-
-## implementation plan
-
-### files to create
-
-```
-runtime/radapter/
-  types.ts              → RAdapter interface, ViewState, FrameView, AccountPage, AccountView, etc.
-  assemble.ts           → assembleFrameView() + toEntitySummary, toEntityFull, toAccountView, sortAccountViews
-  embedded.ts           → EmbeddedRAdapter class
-  rpc.ts                → RpcRAdapter class (WebSocket client)
-  index.ts              → createRAdapter() factory, re-exports
-```
-
-### files to modify
-
-```
-runtime/server.ts       → rpcClients Map, 5 new RPC handlers, registerEnvChangeCallback hook
-runtime/runtime.ts      → export ENV_REPLAY_MODE_KEY, export enqueueRuntimeInput
-runtime/types.ts        → add createdAtHeight?: number to AccountMachine
-runtime/entity-tx/handlers/account.ts → set createdAtHeight on new account creation
-frontend/src/lib/stores/xlnStore.ts   → frameView store, adapter wiring, view controls
-frontend/src/lib/components/Entity/*  → migrate to $frameView (incremental)
-```
-
----
-
-### step 1: types + assembleFrameView (no behavior change)
-
-**create `runtime/radapter/types.ts`:**
-- RAdapterMode, RAdapterConfig, ViewState, FrameView
-- EntitySummary, EntityReplicaFull, AccountPage, AccountView
-- AccountSortKey (7 keys: inbound, outbound, collateral, balance, created, updated, counterparty)
-- CheckpointInfo, ClientSortCache
-- RAdapter interface (connect, disconnect, setView, onFrame, onStatusChange, getCheckpoints, getFrameAt, sendInput, rpc)
-
-**create `runtime/radapter/assemble.ts`:**
-- `assembleFrameView(env: Env, view: ViewState): FrameView` — the shared pure function
-- `toEntitySummary(replica)` — uses `deriveDelta` from `account-utils.ts:30` to compute totalBalance
-- `toEntityFull(replica)` — entity detail (lockBook, swapBook, reserves) minus accounts Map
-- `toAccountView(myEntityId, counterpartyId, account)` — derives inbound/outbound/collateral/balance via `deriveDelta(delta, isLeft)`
-- `sortAccountViews(views, sortBy, sortDir)` — BigInt-aware comparator for all 7 sort keys
-- `assembleAccountPage(replica, viewState)` — sort all accounts → slice page
-
-**create `runtime/radapter/index.ts`:**
-- `createRAdapter(config)` factory → dispatches to EmbeddedRAdapter or RpcRAdapter
-- re-exports all types
-
-**modify `runtime/types.ts`:**
-- add `createdAtHeight?: number` to AccountMachine (~line 1000)
-
-**modify `runtime/entity-tx/handlers/account.ts`:**
-- set `account.createdAtHeight = machine.currentHeight` when new AccountMachine created
-
-**verify:** `bun run check` passes. no runtime behavior change.
-
----
-
-### step 2: embedded adapter (no behavior change)
-
-**create `runtime/radapter/embedded.ts`:**
-
-```
-class EmbeddedRAdapter implements RAdapter:
-  mode = 'embedded'
-  viewState: ViewState (local)
-  frameCallbacks: Set<(FrameView) => void>
-  env: Env | null
-  unregisterEnvChange: (() => void) | null
-
-  connect(config):
-    → import runtime.ts
-    → env = await main()
-    → registerEnvChangeCallback(env, pushFrame)
-
-  attachEnv(env):
-    → skip main(), register callback on existing env
-    → for xlnStore.ts which already called main()
-
-  setView(view):
-    → store locally
-    → pushFrame() immediately (no network round-trip)
-
-  onFrame(cb):
-    → add to frameCallbacks
-    → registerEnvChangeCallback → assembleFrameView(env, viewState) → cb
-
-  getFrameAt(height):
-    → check LRU cache (5 entries)
-    → miss: getEnvAtHeight(height) → assembleFrameView → cache → return
-
-  sendInput(input):
-    → enqueueRuntimeInput(env, input)
-
-  rpc(method, params):
-    → dispatch to runtime-level handler (pay, setCreditLimit, etc.)
-
-  pushFrame():
-    → assembleFrameView(env, viewState) → call all frameCallbacks
-```
-
-**modify `runtime/runtime.ts`:**
-- export `ENV_REPLAY_MODE_KEY` (currently module-private Symbol at line 367)
-- ensure `enqueueRuntimeInput` or mempool access is available for embedded sendInput
-
-**verify:** create EmbeddedRAdapter in test, verify FrameView produced on each frame, entities + accounts populated.
-
----
-
-### step 3: frontend xlnStore integration (additive, no breaking changes)
-
-**modify `frontend/src/lib/stores/xlnStore.ts`:**
-
-keep ALL existing stores (`xlnEnvironment`, `history`, `currentHeight`). add:
-
-```typescript
-export const frameView = writable<FrameView | null>(null)
-let _adapter: RAdapter
-let _viewState: ViewState = { selectedEntityId: null, accountPage: 1, accountPageSize: 50, accountSortBy: 'balance', accountSortDir: 'desc' }
-
-// called from initializeXLN after env is ready:
-//   const adapter = new EmbeddedRAdapter()
-//   await adapter.attachEnv(env)      // uses existing env, no double-main
-//   adapter.onFrame(view => frameView.set(view))
-
-// view control exports:
-export function selectEntity(entityId)
-export function setAccountPage(page)
-export function setAccountPageSize(size: 10|20|50|100)
-export function setAccountSort(sortBy, sortDir)
-export async function timeMachineSeek(height)
-export async function timeMachineGetCheckpoints()
-```
-
-**key detail — double-main guard:**
-- `initializeXLN()` already calls `xln.main()` → env exists
-- EmbeddedRAdapter uses `attachEnv(env)` instead of `connect()` → registers callback on existing env
-- `connect()` calls `main()` → only used in standalone/extension mode where no env exists yet
-
-**verify:** `bun run check` passes. browser shows same UI. F12: `window.$frameView` or subscribe to frameView store shows entities + accounts.
-
-**ship checkpoint:** after step 3, demo webapp works unchanged AND `$frameView` is populated alongside existing stores. components can begin migrating.
-
----
-
-### step 4: server RPC expansion
-
-**modify `runtime/server.ts`:**
-
-4a. **rpcClients registry:**
-```typescript
-interface RpcClientState {
-  ws: any
-  viewState: ViewState
-  sortCache: ClientSortCache | null
-  authLevel: 'inspect' | 'admin' | null
-}
-const rpcClients = new Map<any, RpcClientState>()
-```
-- add to rpcClients on 'auth' message
-- remove from rpcClients in close(ws) handler (line ~2964)
-
-4b. **hook registerEnvChangeCallback** after env initialization:
-```typescript
-registerEnvChangeCallback(env, (newEnv) => {
-  for (const [ws, client] of rpcClients) {
-    if (!client.authLevel) continue
-    const view = assembleFrameViewCached(newEnv, client)
-    ws.send(serializeTaggedJson({ type: 'frame', view }))
-  }
-})
-```
-
-4c. **sort cache** for 1M accounts:
-- per-client: `{ sortBy, sortDir, sortedKeys[], builtAtHeight }`
-- rebuild when sortBy/sortDir changes OR cache >10 frames stale
-- rebuild = Array.from(accounts).map(toAccountView).sort() → extract keys
-- O(n log n) for 1M = ~200-500ms, only on sort change
-- page slice from cached sortedKeys = O(pageSize)
-
-4d. **5 new message handlers** in handleRpcMessage:
-- `auth` → validate HMAC(seed, 'inspect'|'admin'), register client, push initial FrameView
-- `set_view` → update client.viewState, invalidate sort cache if needed, push FrameView
-- `get_frame_at` → getEnvAtHeight(height) → assembleFrameView(tmpEnv, client.viewState) → send
-- `get_checkpoints` → scan DB for checkpoint keys → send [{height, timestamp}...]
-- `send_input` / `rpc` → admin auth check, dispatch to runtime
-
-4e. **getEnvAtHeight(env, height)** utility:
-- find nearest checkpoint ≤ height from LevelDB
-- load checkpoint, set ENV_REPLAY_MODE_KEY on restored env
-- replay WAL frames from checkpoint+1 to target height
-- return temporary env (not persisted)
-
-**verify:** connect to server /rpc via wscat, send auth + set_view, receive FrameView on each frame.
-
----
-
-### step 5: rpc adapter (WebSocket client)
-
-**create `runtime/radapter/rpc.ts`:**
-
-```
-class RpcRAdapter implements RAdapter:
-  mode = 'rpc'
-  ws: WebSocket | null
-  viewState: ViewState
-  frameCallbacks: Set
-  pendingRequests: Map<msgId, {resolve, reject}>
-  frameCache: Map<height, FrameView> (LRU, 5 entries)
-
-  connect(config):
-    → new WebSocket(config.wsUrl)
-    → onopen: send { type: 'auth', key: config.authKey }
-    → await auth ack
-    → send set_view with current viewState
-    → status = 'connected'
-
-  setView(view):
-    → store locally
-    → ws.send({ type: 'set_view', ...view })
-
-  onFrame(cb):
-    → add to frameCallbacks
-    → server pushes { type: 'frame', view } → invoke all callbacks
-
-  getFrameAt(height):
-    → check frameCache → hit: return cached
-    → miss: ws.send({ type: 'get_frame_at', height }) → await response → cache → return
-
-  sendInput(input):
-    → ws.send({ type: 'send_input', input }) → await ack
-
-  rpc(method, params):
-    → ws.send({ type: 'rpc', method, params }) → await result
-
-  handleMessage(raw):
-    → deserializeTaggedJson(raw)
-    → if type='frame': update currentHeight, invoke frameCallbacks
-    → if inReplyTo: resolve pending request
-
-  reconnect:
-    → ws.onclose → exponential backoff (1s, 2s, 4s... max 30s)
-    → on reconnect: re-send auth + viewState → server pushes current FrameView
-    → no gap tracking needed (full FrameView push = instant catch-up)
-
-  serialization:
-    → send: JSON.stringify (sort keys, page numbers are safe)
-    → receive: deserializeTaggedJson (BigInt, Map preservation)
-```
-
-**verify:** start server, open browser with `?mode=inspect&ws=ws://localhost:8080/rpc`, verify FrameView received and rendered.
-
-**ship checkpoint:** after step 5, remote hub inspection works end-to-end.
-
----
-
-### step 6: frontend component migration
-
-**migrate entity list** to `$frameView.entities`:
-- entity sidebar reads `$frameView.entities` instead of iterating `$xlnEnvironment.eReplicas`
-- click entity → `selectEntity(entityId)` → adapter.setView → next push has entity detail + accounts
-
-**migrate account list** to `$frameView.accounts`:
-- AccountPreview reads from `$frameView.accounts.accounts[i]` (AccountView) instead of raw AccountMachine
-- AccountView has pre-computed inbound/outbound/collateral/balance — no deriveDelta needed in component
-
-**add sort controls:**
-- dropdown: balance, inbound, outbound, collateral, created, updated, counterparty
-- asc/desc toggle button
-- calls `setAccountSort(sortBy, sortDir)`
-
-**add page size selector:**
-- options: 10, 20, 50, 100
-- calls `setAccountPageSize(size)`
-
-**add pagination:**
-- numbered page buttons: 1, 2, 3... totalPages
-- calls `setAccountPage(page)`
-- show: "Page X of Y (Z accounts)"
-
-**keep AccountPanel settle/dispute tabs** on `xlnEnvironment` for now:
-- these tabs use full AccountMachine deeply (per-token deltas, lock details, settlement workspace)
-- separate `getAccountDetail` drill-down added later when needed
-
-**verify:** sort accounts by each key, change page sizes, navigate pages. verify data matches between old and new views.
-
----
-
-### step 7: time machine slider
-
-**replace in-memory history with checkpoint-aware slider:**
-
-```
-old: env.history[] in memory → slider index → EnvSnapshot
-new: adapter.getCheckpoints() → slider height → adapter.getFrameAt(height) → FrameView
-```
-
-**slider component:**
-- range: 1 to currentHeight
-- checkpoint dots (●) rendered at checkpoint heights — click for instant jump
-- between dots (·) — small delay for WAL replay
-- LIVE button — resume automatic frame push from onFrame callback
-- height display: "h=48 / 100"
-
-**LRU cache:** both adapters cache last 5 getFrameAt results. scrubbing back to recently visited frame is instant. cache invalidated on viewState change.
-
-**prefetch:** at checkpoint N, prefetch N-1 and N+1 in background. cheap, big UX win.
-
-**verify:** drag slider to checkpoint (instant), drag between checkpoints (short delay), click LIVE (resumes real-time). sort/page controls work in historical mode.
-
----
-
-### future: step 8 — KV + diff storage (phase 2)
-
-when scaling to 1M accounts, swap the storage backend:
-
-- `saveEnvToDB` → write individual KV entries + cumulative diffs
-- `getEnvAtHeight` → KV-aware reader, no full env materialization
-- add `KVStateReader` implementing `StateReader` interface
-- assembleFrameView works unchanged — just swap EnvStateReader → KVStateReader
-- sorted index stored as separate KV key, rebuilt on sort change
-- 10x storage reduction (405MB vs 4GB per 1000 frames)
-
-this is a backend-only change. RAdapter interface, FrameView, frontend — all unchanged.
-
-## migration safety
-
-- steps 1-3: zero behavior change. demo works exactly as today. `$frameView` populated alongside existing stores.
-- steps 4-5: additive capability. remote inspection works.
-- steps 6-7: UI improvements. existing components can migrate incrementally.
-- step 8: backend storage optimization. no interface changes.
-
-embedded adapter is the fallback: if rpc fails, demo/extension runs in-process.
+`AccountRow` consumes `StorageAccountDoc` directly. Existing `deriveDelta`
+from `runtime/account-utils.ts:30` derives inbound/outbound/balance.
+We do not introduce `AccountView` or any other intermediate type.
+
+Time machine slider: a single store `viewHeight` (defaults to live).
+`readStore` passes `{ atHeight: viewHeight }`. When user scrubs, every mounted
+component refetches at that height. Live mode = `viewHeight = null`.
+
+## tearing protection
+
+Every live read pins `atHeight` to the last seen tick. When tick N arrives,
+all mounted `readStore` components refetch with `atHeight=N`, so the server
+returns one consistent snapshot for every read. Without pinning, two reads on
+the same UI refresh can land at heights N and N+1, rendering torn financial
+state such as a balance from one frame and an account list from the next.
+
+The pin is automatic in `readStore`; components do not pass it manually. Time
+machine scrubbing passes its own `atHeight`, which overrides the live pin.
+
+This is the only feature added on top of the bare three-method interface.
+Other optimizations such as batch reads, caching, `subscribe(prefixes)`,
+`AbortSignal`, HTTP, and SSE are deferred until profiling shows real pain.
+They are additive and do not break the wire protocol.
+
+## migration from current frontend
+
+Phase A: introduce adapter without removing anything.
+- create `runtime/radapter/{types, resolve, embedded}.ts`
+- `xlnStore.ts` initializes embedded adapter alongside existing env logic
+- export `readStore` helper
+- existing components unchanged, keep using `$xlnEnvironment`
+
+Phase B: migrate one route as proof.
+- pick `/radapter` or `/inspector/:entityId` (new route, no rewrite of existing UI)
+- build it on `readStore` only
+- demo embedded mode for local user, remote mode for hub inspection
+
+Phase C: incrementally migrate live-app components.
+- replace `$xlnEnvironment.eReplicas.get(id)` reads with `readStore('entity/' + id)`
+- keep settle/dispute panels on `xlnEnvironment` until they explicitly need remote support
+- delete `xlnEnvironment` derived data once unused (likely 8-12 weeks out)
+
+Phase D: enable remote adapter for production hubs.
+- ship server-side `/rpc` read handlers (currently only `send_input` exists)
+- generate inspect/admin URLs in hub admin page
+- validate with soak test
+
+No big-bang. Each phase ships independently. Embedded keeps demo working at
+every step.
+
+## ship plan
+
+| step | scope                                                | LOC  | depends on |
+|------|------------------------------------------------------|------|------------|
+| 1    | types.ts + resolve.ts dispatch (no IO)               | ~250 | -          |
+| 2    | embedded.ts + readStore helper + one demo component  | ~200 | 1          |
+| 3    | remote.ts WS client + envelope + reconnect           | ~250 | 1          |
+| 4    | server.ts /rpc read handler + auth + rate limit      | ~330 | 1, 3       |
+| 5    | inspector route /inspector/:entityId                 | ~150 | 2, 4       |
+| 6    | mainnet hardening: payload caps, backpressure, metrics | ~200 | 4          |
+| 7    | incremental component migration (per-component)      | varies | 2        |
+| 8    | sort indexes (deferred until measured need)          | ~150 | profile    |
+
+Step 1-5 = adapter is shippable for hub inspection. ~1180 LOC.
+Step 6 = production-ready. ~1380 LOC.
+Step 7-8 = optional polish, no architecture changes.
+
+## explicit non-goals
+
+These were proposed in v1 and are intentionally not built:
+
+- `FrameView` monolithic snapshot type
+- `EntitySummary`, `EntityReplicaFull`, `AccountView`, `AccountPage` projections
+  (use existing `StorageEntityCoreDoc`, `StorageAccountDoc`)
+- `assembleFrameView` / `toEntitySummary` / `toEntityFull` / `toAccountView` /
+  `sortAccountViews` builders
+- `ViewState` + `setView` + `subscribeView` (server holds none of this)
+- `ClientSortCache` per-connection sort caches
+- Push-every-frame `{ type: 'frame', view }` broadcasts
+- `TickPayload` with `touchedEntities` / `touchedAccounts` filter sets
+  (single integer height bump is enough)
+- Phase-2 KV/diff storage rewrite (already shipped in `runtime/storage/`)
+- `seekHeight` as adapter state (use per-call `atHeight` query instead)
+- Separate `getCheckpoints` / `getFrameAt` methods (use `read('checkpoints')`,
+  `read('frame/:h')`)
+- Optimistic local updates (frontend always reflects what the runtime confirmed)
+
+If a future change argues for any of these, that change must justify the
+re-introduction against this list.
+
+## open questions
+
+1. **push tick vs poll head?** WS push is realtime, ~10 bytes per frame per
+   client. Polling `read('head')` every 500ms is simpler (no WS push channel)
+   but burns battery on mobile. Default: WS push. Mobile clients can opt out
+   via `RuntimeAdapterConfig.pollIntervalMs`.
+
+2. **sort indexes when?** Deferred until profiling shows a real hub crossing
+   ~10K accounts with sort latency >100ms. Until then, frontend sorts the
+   page slice in-memory. Premature indexing is the v1 mistake.
+
+3. **batch reads?** Single round-trip for multiple paths. Probably needed for
+   inspector dashboards that show 5-10 entity summaries at once. Not in v1
+   scope. Add when measured: `read('batch', { paths: [...] })`.
+
+4. **schema versioning of payloads?** `StorageEntityCoreDoc` schema can
+   evolve. We rely on `StorageHead.schemaVersion` (already exists in
+   `runtime/storage/index.ts:74`). Bump = breaking change, frontend pins
+   compatible major. Document in CHANGELOG.
+
+5. **read consistency at height boundary?** Resolved: `readStore` pins
+   `atHeight` to the last received tick height, so every batch of refetches on
+   a single tick reads against the same snapshot. See "tearing protection".
