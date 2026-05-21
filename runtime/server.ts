@@ -46,7 +46,8 @@ import {
   createMarketMakerServerState,
   getMarketMakerHealth,
   resetMarketMakerServerState,
-} from './server-market-maker-health';
+} from './server/market-maker-health';
+import { serveRuntimeBundle, serveStatic } from './server/static-assets';
 import { encryptJSON, hexToPubKey } from './networking/p2p-crypto';
 import type { Profile } from './networking/gossip';
 import { encodeRebalancePolicyMemo } from './rebalance-policy';
@@ -1284,76 +1285,6 @@ const faucetLock = {
       this.locked = false;
     }
   },
-};
-
-// ============================================================================
-// STATIC FILE SERVING
-// ============================================================================
-
-const MIME_TYPES: Record<string, string> = {
-  '.html': 'text/html; charset=utf-8',
-  '.css': 'text/css; charset=utf-8',
-  '.js': 'text/javascript; charset=utf-8',
-  '.json': 'application/json; charset=utf-8',
-  '.map': 'application/json; charset=utf-8',
-  '.svg': 'image/svg+xml',
-  '.png': 'image/png',
-  '.jpg': 'image/jpeg',
-  '.ico': 'image/x-icon',
-  '.woff': 'font/woff',
-  '.woff2': 'font/woff2',
-  '.txt': 'text/plain; charset=utf-8',
-};
-
-const getMimeType = (path: string): string | undefined => {
-  const idx = path.lastIndexOf('.');
-  if (idx === -1) return undefined;
-  return MIME_TYPES[path.slice(idx)];
-};
-
-const serveStatic = async (pathname: string, staticDir: string): Promise<Response | null> => {
-  // Try exact path
-  const exactPath = `${staticDir}${pathname}`;
-  let file = Bun.file(exactPath);
-  if (await file.exists()) {
-    const ct = getMimeType(pathname);
-    return new Response(file, ct ? { headers: { 'content-type': ct } } : undefined);
-  }
-
-  // Try with .html extension
-  if (!pathname.includes('.')) {
-    const htmlPath = `${staticDir}${pathname}.html`;
-    file = Bun.file(htmlPath);
-    if (await file.exists()) {
-      return new Response(file, { headers: { 'content-type': 'text/html; charset=utf-8' } });
-    }
-  }
-
-  return null;
-};
-
-// Serve runtime bundle from canonical static/public locations.
-// In dev, Vite serves frontend/static. In server mode, frontend/public/build
-// may be used depending on deploy workflow.
-const serveRuntimeBundle = async (): Promise<Response | null> => {
-  const path = await import('path');
-  const candidates = [
-    path.join(process.cwd(), 'frontend', 'static', 'runtime.js'),
-    path.join(process.cwd(), 'frontend', 'public', 'runtime.js'),
-    path.join(process.cwd(), 'frontend', 'build', 'runtime.js'),
-  ];
-  for (const runtimePath of candidates) {
-    const file = Bun.file(runtimePath);
-    if (!(await file.exists())) continue;
-    return new Response(file, {
-      headers: {
-        'content-type': 'text/javascript; charset=utf-8',
-        // Prevent stale module cache across reloads while debugging/prod hotfixes.
-        'cache-control': 'no-store, must-revalidate',
-      },
-    });
-  }
-  return null;
 };
 
 // ============================================================================
