@@ -1,25 +1,7 @@
 /**
- * XLN P2P Overlay Network
- *
- * ARCHITECTURE: Transport layer for entity communication via relay servers.
- *
- * SECURITY MODEL - P2P is a "dumb pipe":
- * - NO replay protection here - accountFrame heights handle that in consensus layer
- * - Profile signatures prevent spoofing (board validator public keys bind the entity)
- * - Queue limits prevent memory exhaustion from disconnected peers
- * - Actual transaction validation happens at entity/account consensus layer
- *
- * Why no nonces/replay protection at P2P level?
- * - Each accountFrame has monotonic height (can't replay frame 5 after frame 6)
- * - Entity transactions require validator signatures (can't forge)
- * - Even replayed messages are rejected by consensus height checks
- * - Adding P2P nonces would be redundant complexity
- *
- * Profile anti-spoofing (uses same Hanko mechanism as accountFrames):
- * - Profile hash signed using same path as accountFrame/disputeHash/settlement
- * - Verification uses verifyHankoForHash() - same security as all entity operations
- * - Key binding: signer must be in entity's board.validators[]
- * - Invalid or unsigned profiles are rejected
+ * P2P is a dumb encrypted transport. Replay protection and tx validity belong
+ * to entity/account consensus; this layer only authenticates runtime sockets,
+ * verifies signed gossip profiles, and bounds disconnected-peer queues.
  */
 
 import type { Env, RoutedEntityInput } from '../types';
@@ -43,7 +25,7 @@ import { createStructuredLogger, shortId } from '../logger';
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const p2pLog = createStructuredLogger('p2p');
-const MAX_QUEUE_PER_RUNTIME = 100; // Prevent memory exhaustion (DoS protection)
+const MAX_QUEUE_PER_RUNTIME = 100;
 const MIN_GOSSIP_POLL_MS = 250;
 const SLOW_BROWSER_TIMER_MS = 32;
 
@@ -141,8 +123,11 @@ const logSlowBrowserTimer = (label: string, startedAt: number, extra = ''): void
   if (typeof window === 'undefined' || typeof performance === 'undefined') return;
   const elapsedMs = performance.now() - startedAt;
   if (elapsedMs < SLOW_BROWSER_TIMER_MS) return;
-  const suffix = extra ? ` ${extra}` : '';
-  console.warn(`[perf] slow timer ${label} ${elapsedMs.toFixed(1)}ms${suffix}`);
+  p2pLog.warn('perf.slow_timer', {
+    label,
+    elapsedMs: Number(elapsedMs.toFixed(1)),
+    ...(extra ? { extra } : {}),
+  });
 };
 
 const isBrowserDirectWsEndpointAllowed = (endpoint: string): boolean => {
@@ -163,12 +148,7 @@ const isSameList = (a: string[], b: string[]): boolean => {
   return aSorted.every((value, index) => value === bSorted[index]);
 };
 
-const isHexPublicKey = (value: string): boolean => {
-  if (!value.startsWith('0x')) return false;
-  const hex = value.slice(2);
-  if (!/^[0-9a-fA-F]+$/.test(hex)) return false;
-  return hex.length === 66 || hex.length === 130;
-};
+const isHexPublicKey = (value: string): boolean => /^0x(?:[0-9a-fA-F]{66}|[0-9a-fA-F]{130})$/.test(value);
 
 type SanitizedIncomingProfile = {
   profile: Profile | null;
@@ -266,7 +246,6 @@ export class RuntimeP2P {
     this.gossipPollMs = normalizeGossipPollMs(options.gossipPollMs);
     this.onEntityInput = options.onEntityInput;
     this.onGossipProfiles = options.onGossipProfiles;
-    // Derive X25519 encryption keypair from seed (mandatory, no fallback)
     const seed = this.env.runtimeSeed;
     if (!seed) {
       throw new Error('P2P_INIT_ERROR: runtimeSeed is required for encryption keypair');
@@ -274,7 +253,6 @@ export class RuntimeP2P {
     this.encryptionKeyPair = deriveEncryptionKeyPair(seed);
   }
 
-  /** Get encryption public key as hex for profile sharing */
   getEncryptionPublicKeyHex(): string {
     return pubKeyToHex(this.encryptionKeyPair.publicKey);
   }
@@ -330,9 +308,9 @@ export class RuntimeP2P {
         url,
         runtimeId: this.runtimeId,
         signerId: this.signerId,
-        ...(runtimeSeed ? { seed: runtimeSeed } : {}),  // Pass seed for hello auth signing if available
+        ...(runtimeSeed ? { seed: runtimeSeed } : {}),
         useHelloAuth: true,
-        encryptionKeyPair: this.encryptionKeyPair, // Pass our keypair for encryption/decryption
+        encryptionKeyPair: this.encryptionKeyPair,
         onPeerEncryptionKey: (fromRuntimeId: string, pubKeyHex: string) => {
           const normalizedRuntimeId = normalizeRuntimeId(fromRuntimeId);
           const normalizedKey = typeof pubKeyHex === 'string'
@@ -347,7 +325,6 @@ export class RuntimeP2P {
         },
         onOpen: () => {
           this.flushPending();
-          // ALWAYS request gossip on connect (even if periodic polling is disabled)
           this.requestSeedGossip('full');
           this.announceLocalProfiles();
           this.syncDirectPeerConnections();
@@ -362,8 +339,6 @@ export class RuntimeP2P {
         onError: (error) => {
           this.env.warn('network', 'WS_CLIENT_ERROR', { relay: url, error: error.message });
         },
-        // Browser UX: stop after bounded attempts.
-        // Server/hub runtime: keep reconnecting to avoid dead relay state after transient boot races.
         maxReconnectAttempts: 0,
       });
       this.clients.push(client);
@@ -436,7 +411,7 @@ export class RuntimeP2P {
         return;
       }
       if (!activeClient) {
-        console.warn('[P2P] Tab resumed with no active WS client — forcing reconnect');
+        p2pLog.warn('browser.resume_reconnect');
         this.reconnect();
         return;
       }
@@ -555,7 +530,7 @@ export class RuntimeP2P {
       try {
         const sent = client.sendEntityInput(normalizedTargetRuntimeId, input, ingressTimestamp);
         if (sent) return;
-        console.warn(`P2P-SEND-FAILED: Client.send returned false for ${normalizedTargetRuntimeId}`);
+        this.env.warn('network', 'P2P_SEND_FAILED', { targetRuntimeId: normalizedTargetRuntimeId });
       } catch (error) {
         const message = (error as Error).message || String(error);
         if (message.includes('P2P_NO_PUBKEY')) {
@@ -720,11 +695,10 @@ export class RuntimeP2P {
     const missingEntities = Array.from(entitiesToCheck).filter(entityId => !this.hasProfileForEntity(entityId));
     if (missingEntities.length === 0) return;
     void this.ensureProfiles(missingEntities).catch(error => {
-      console.warn(`P2P_FETCH_PROFILE_FAILED: ${(error as Error).message}`);
+      this.env.warn('network', 'P2P_FETCH_PROFILE_FAILED', { error: (error as Error).message });
     });
   }
 
-  // Call this to refresh profiles from relay
   refreshGossip() {
     this.requestSeedGossip('full');
     void this.maybeHeartbeatAnnounce();
@@ -882,7 +856,7 @@ export class RuntimeP2P {
       this.pendingAnnounceEntities.clear();
       this.announceTimer = null;
       this.announceProfilesNow(targets, reason).catch(error => {
-        console.warn(`P2P_ANNOUNCE_FAILED (${reason}): ${(error as Error).message}`);
+        this.env.warn('network', 'P2P_ANNOUNCE_FAILED', { reason, error: (error as Error).message });
       });
       logSlowBrowserTimer('p2p.announce-debounce', startedAt, `targets=${targets.length} reason=${reason}`);
     }, PROFILE_ANNOUNCE_DEBOUNCE_MS);
@@ -979,7 +953,7 @@ export class RuntimeP2P {
     const response = payload as GossipResponsePayload;
     const profiles = Array.isArray(response?.profiles) ? response.profiles : [];
     this.applyIncomingProfiles(from, profiles).catch(err => {
-      console.warn(`P2P_APPLY_PROFILES_ERROR: ${err.message}`);
+      this.env.warn('network', 'P2P_APPLY_PROFILES_ERROR', { error: err.message });
     });
   }
 
@@ -987,42 +961,39 @@ export class RuntimeP2P {
     const response = payload as GossipResponsePayload;
     const profiles = Array.isArray(response?.profiles) ? response.profiles : [];
     this.applyIncomingProfiles(from, profiles).catch(err => {
-      console.warn(`P2P_APPLY_PROFILES_ERROR: ${err.message}`);
+      this.env.warn('network', 'P2P_APPLY_PROFILES_ERROR', { error: err.message });
     });
   }
 
   private async applyIncomingProfiles(from: string, profiles: Profile[]) {
     if (profiles.length === 0) return;
-    let verified = 0;
-    let skipped = 0;
     let accepted = 0;
     const acceptedProfiles: Profile[] = [];
     for (const profile of profiles) {
       const { profile: sanitized, error: malformedReason } = sanitizeIncomingProfile(profile);
       if (!sanitized) {
-        skipped++;
         const entityId = typeof profile === 'object' && profile !== null && 'entityId' in profile
           ? String((profile as { entityId?: unknown }).entityId || 'unknown')
           : 'unknown';
-        console.warn(
-          `P2P_PROFILE_DROPPED_MALFORMED: from=${from} entity=${entityId} reason=${malformedReason || 'unknown'}`,
-        );
+        p2pLog.warn('profile.dropped_malformed', {
+          from: shortId(from),
+          entity: shortId(entityId),
+          reason: malformedReason || 'unknown',
+        });
         continue;
       }
-      // Skip profiles we already have at the same or newer timestamp (avoids re-verification)
       const existingProfiles = this.env.gossip?.getProfiles?.() || [];
       const existing = existingProfiles.find((existingProfile) => existingProfile.entityId === sanitized.entityId);
       if (existing && existing.lastUpdated >= sanitized.lastUpdated) {
-        skipped++;
         continue;
       }
 
-      // Verify profile signature if present (anti-spoofing)
-      // Hanko is self-contained: claims embed the board, signatures prove identity
       const hasHanko = sanitized.metadata.profileHanko;
       if (!hasHanko) {
-        skipped++;
-        console.warn(`P2P_PROFILE_DROPPED_UNSIGNED: from=${from} entity=${sanitized.entityId}`);
+        p2pLog.warn('profile.dropped_unsigned', {
+          from: shortId(from),
+          entity: shortId(sanitized.entityId),
+        });
         continue;
       }
       {
@@ -1051,34 +1022,30 @@ export class RuntimeP2P {
               recoveredAddresses: [`inspect_failed:${(error as Error).message}`],
             };
           }
-          console.error(
-            `P2P_PROFILE_INVALID_SIGNATURE: ${sanitized.entityId.slice(-4)} from=${from.slice(-6)}`,
-            {
-              reason: result.reason,
-              hash: result.hash?.slice(0, 18),
-              signerId: result.signerId,
-              hanko: typeof hasHanko === 'string' ? hasHanko.slice(0, 30) + '...' : !!hasHanko,
-              entityPublicKey: entityPublicKey.slice(0, 20) + '...',
-              boardPublicKey: hasBoardKey ? 'yes' : 'no',
-              validators: boardValidators.length,
-              boardSigners: boardValidators.map((validator) => String(validator.signerId || validator.signer)).filter(Boolean),
-              recoveredAddresses: hankoInspect?.recoveredAddresses ?? [],
-              reconstructedBoardHash: hankoInspect?.reconstructedBoardHash,
-              runtimeId: sanitized.runtimeId,
-              name: sanitized.name,
-            }
-          );
-          continue; // Skip invalid profiles
+          p2pLog.error('profile.invalid_signature', {
+            entity: shortId(sanitized.entityId),
+            from: shortId(from),
+            reason: result.reason,
+            hash: result.hash ? `${result.hash.slice(0, 18)}..` : undefined,
+            signerId: result.signerId,
+            hanko: typeof hasHanko === 'string' ? `${hasHanko.slice(0, 30)}..` : Boolean(hasHanko),
+            entityPublicKey: `${entityPublicKey.slice(0, 20)}..`,
+            boardPublicKey: hasBoardKey,
+            validators: boardValidators.length,
+            boardSigners: boardValidators.map((validator) => String(validator.signerId || validator.signer)).filter(Boolean),
+            recoveredAddresses: hankoInspect?.recoveredAddresses ?? [],
+            reconstructedBoardHash: hankoInspect?.reconstructedBoardHash,
+            runtimeId: sanitized.runtimeId,
+            name: sanitized.name,
+          });
+          continue;
         }
-        verified++;
       }
 
-      // Store in local gossip cache
       this.env.gossip?.announce?.(sanitized);
       accepted++;
       acceptedProfiles.push(sanitized);
 
-      // Register validator public keys from profile board (for account signature verification)
       for (const validator of sanitized.metadata.board.validators) {
         const signerId = validator.signerId;
         const publicKey = validator.publicKey;
@@ -1087,7 +1054,6 @@ export class RuntimeP2P {
         }
       }
 
-      // Register public key for signature verification
       const publicKey = getBoardPrimaryPublicKey(sanitized.metadata.board, sanitized.entityId);
       if (publicKey && isHexPublicKey(publicKey)) {
         registerSignerPublicKey(sanitized.entityId, publicKey);
