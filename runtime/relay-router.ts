@@ -461,8 +461,8 @@ export const relayRoute = async <Socket = RelaySocketLike>(
     return;
   }
 
-  // ----- routable messages (entity_input, legacy runtime_input reject, gossip_response) -----
-  if (type === 'entity_input' || type === 'runtime_input' || type === 'gossip_response') {
+  // ----- routable messages (entity_input, gossip_response) -----
+  if (type === 'entity_input' || type === 'gossip_response') {
     if (!toKey) {
       pushDebugEvent(store, {
         event: 'error',
@@ -473,23 +473,6 @@ export const relayRoute = async <Socket = RelaySocketLike>(
         details: { traceId },
       });
       send(ws, safeStringify({ type: 'error', error: 'Missing target runtimeId' }));
-      return;
-    }
-
-    // Legacy runtime_input is intentionally not part of the advertised WS
-    // protocol. Keep this raw-string reject so old clients or hostile JSON
-    // cannot recreate a plaintext control plane by bypassing TypeScript.
-    if (type === 'runtime_input') {
-      pushDebugEvent(store, {
-        event: 'error',
-        from,
-        to,
-        msgType: type,
-        status: 'rejected',
-        reason: 'RUNTIME_INPUT_DISABLED',
-        details: { traceId },
-      });
-      send(ws, safeStringify({ type: 'error', error: 'runtime_input is disabled' }));
       return;
     }
 

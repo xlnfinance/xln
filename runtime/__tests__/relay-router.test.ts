@@ -368,7 +368,7 @@ describe('relay-router gossip fanout', () => {
     expect(store.debugEvents.some(event => event.reason === 'ENTITY_INPUT_MUST_BE_ENCRYPTED')).toBe(true);
   });
 
-  test('rejects runtime_input relay ingress', async () => {
+  test('runtime_input is not a relay protocol message', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const sentBySocket = new Map<FakeWs, unknown[]>();
     const config = {
@@ -395,10 +395,10 @@ describe('relay-router gossip fanout', () => {
 
     expect(sentBySocket.get(wsA)?.at(-1)).toMatchObject({
       type: 'error',
-      error: 'runtime_input is disabled',
+      error: 'Unknown message type: runtime_input',
     });
     expect(store.pendingMessages.get(RUNTIME_B)).toBeUndefined();
-    expect(store.debugEvents.some(event => event.reason === 'RUNTIME_INPUT_DISABLED')).toBe(true);
+    expect(store.debugEvents.some(event => event.reason === 'Unknown message type: runtime_input')).toBe(true);
   });
 
   test('local delivery rejects unknown local entity instead of queueing forever', async () => {
