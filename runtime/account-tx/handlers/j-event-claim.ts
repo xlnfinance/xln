@@ -45,7 +45,7 @@ export function handleJEventClaim(
 
   const sideObservations = claimIsFromLeft ? accountMachine.leftJObservations : accountMachine.rightJObservations;
   const existingObs = sideObservations.find(
-    (o: any) => Number(o?.jHeight) === Number(jHeight) && String(o?.jBlockHash || '') === String(jBlockHash || ''),
+    (o) => Number(o?.jHeight) === Number(jHeight) && String(o?.jBlockHash || '') === String(jBlockHash || ''),
   );
 
   if (existingObs) {

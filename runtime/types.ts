@@ -631,6 +631,9 @@ export type EntityTx =
         preparedEnvelope?: unknown;
         preparedSenderLockAmount?: bigint | string;
         preparedTotalFee?: bigint | string;
+        preparedLockId?: string;
+        preparedTimelock?: bigint | string;
+        preparedRevealBeforeHeight?: number;
       };
     }
   | {
