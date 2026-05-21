@@ -12,6 +12,8 @@
  */
 
 import type {
+  Env,
+  RuntimeTx,
   Xlnomy,
   JurisdictionEVM,
 } from './types.js';
@@ -27,7 +29,7 @@ export async function createXlnomy(options: {
   rpcUrl?: string;
   blockTimeMs?: number;
   autoGrid?: boolean;
-  env?: any; // Optional env to apply grid entities to
+  env?: Env; // Optional env to apply grid entities to
 }): Promise<Xlnomy> {
   const { name, evmType, rpcUrl, blockTimeMs = 1000, autoGrid = false, env } = options;
 
@@ -147,7 +149,7 @@ async function deployContracts(evm: JurisdictionEVM): Promise<{
  * Create 3×3×1 grid (9 entities) - Hub layer above J-Machine
  * Forms pinnacle hub at supreme layer
  */
-async function createGridEntities(xlnomy: Xlnomy, env: any): Promise<void> {
+async function createGridEntities(xlnomy: Xlnomy, env: Env): Promise<void> {
   console.log('[Xlnomy] Creating 3×3×1 hub grid (9 entities) with $1M reserves...');
 
   // Import necessary functions
@@ -158,7 +160,7 @@ async function createGridEntities(xlnomy: Xlnomy, env: any): Promise<void> {
 
   // Generate 9 numbered entity IDs
   const gridEntities: string[] = [];
-  const entityInputs: any[] = [];
+  const entityInputs: RuntimeTx[] = [];
 
   // Base entity number for this Xlnomy (each Xlnomy gets 9 sequential IDs now)
   const xlnomyIndex = env?.jReplicas ? env.jReplicas.size : 0;

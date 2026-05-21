@@ -70,7 +70,8 @@ test('paid XLN Debate lifecycle: create, accept, argue, judge, withdraw', async 
   await expect(pageA.getByTestId('verdict-panel')).toBeVisible();
   await expect(pageA.getByText('Winner: Side A')).toBeVisible();
   await expect(pageA.getByTestId('auto-payout-status')).toContainText('finalized');
-  await pageA.getByText('withdrawal_reserved').waitFor({ timeout: 10_000 });
+  await pageA.getByTestId('dev-ledger').locator('summary').click();
+  await pageA.getByTestId('dev-ledger').getByText('withdrawal_reserved').waitFor({ timeout: 10_000 });
 
   await creator.close();
   await counterparty.close();

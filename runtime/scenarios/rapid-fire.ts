@@ -64,10 +64,10 @@ export async function rapidFire(env: Env): Promise<void> {
   const jMode = getJAdapterMode();
   const jadapter = await ensureJAdapter(env, jMode);
   const jReplica = createJReplica(env, 'RapidFire', jadapter.addresses.depository, { x: 0, y: 600, z: 0 }); // Match ahb.ts positioning
-  (jReplica as any).jadapter = jadapter;
-  (jReplica as any).depositoryAddress = jadapter.addresses.depository;
-  (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
-  (jReplica as any).contracts = {
+  jReplica.jadapter = jadapter;
+  jReplica.depositoryAddress = jadapter.addresses.depository;
+  jReplica.entityProviderAddress = jadapter.addresses.entityProvider;
+  jReplica.contracts = {
     depository: jadapter.addresses.depository,
     entityProvider: jadapter.addresses.entityProvider,
     account: jadapter.addresses.account,

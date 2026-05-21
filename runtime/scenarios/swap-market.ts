@@ -146,10 +146,10 @@ export async function swapMarket(env: Env): Promise<void> {
   const jadapter = await ensureJAdapter(env, jMode);
   const J_MACHINE_POSITION = { x: 0, y: 600, z: 0 };
   const jReplica = createJReplica(env, 'Market', jadapter.addresses.depository, J_MACHINE_POSITION); // Match ahb.ts positioning
-  (jReplica as any).jadapter = jadapter;
-  (jReplica as any).depositoryAddress = jadapter.addresses.depository;
-  (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
-  (jReplica as any).contracts = {
+  jReplica.jadapter = jadapter;
+  jReplica.depositoryAddress = jadapter.addresses.depository;
+  jReplica.entityProviderAddress = jadapter.addresses.entityProvider;
+  jReplica.contracts = {
     depository: jadapter.addresses.depository,
     entityProvider: jadapter.addresses.entityProvider,
     account: jadapter.addresses.account,
@@ -699,10 +699,10 @@ export async function swapMarket(env: Env): Promise<void> {
   assert(!aliceEthAccountAfter?.swapOffers?.has('alice-eth-ask'), 'Alice ETH ask cancelled');
   const aliceEthOfferV2 = aliceEthAccountAfter?.swapOffers?.get('alice-eth-ask-v2');
   const aliceEthOfferV2InHistory = aliceEthAccountAfter
-    ? getAccountFrameHistoryView(aliceEthAccountAfter).some((frame: any) =>
+    ? getAccountFrameHistoryView(aliceEthAccountAfter).some((frame) =>
     Array.isArray(frame?.accountTxs) &&
       frame.accountTxs.some(
-        (tx: any) => tx?.type === 'swap_offer' && String(tx?.data?.offerId || '') === 'alice-eth-ask-v2',
+        (tx) => tx?.type === 'swap_offer' && String(tx?.data?.offerId || '') === 'alice-eth-ask-v2',
       ),
     )
     : false;
@@ -852,10 +852,10 @@ export async function swapMarketStress(env: Env): Promise<void> {
   const jadapter = await ensureJAdapter(env, jMode);
   const J_MACHINE_POSITION = { x: 0, y: 600, z: 0 };
   const jReplica = createJReplica(env, 'StressTest', jadapter.addresses.depository, J_MACHINE_POSITION);
-  (jReplica as any).jadapter = jadapter;
-  (jReplica as any).depositoryAddress = jadapter.addresses.depository;
-  (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
-  (jReplica as any).contracts = {
+  jReplica.jadapter = jadapter;
+  jReplica.depositoryAddress = jadapter.addresses.depository;
+  jReplica.entityProviderAddress = jadapter.addresses.entityProvider;
+  jReplica.contracts = {
     depository: jadapter.addresses.depository,
     entityProvider: jadapter.addresses.entityProvider,
     account: jadapter.addresses.account,
@@ -952,7 +952,7 @@ export async function swapMarketStress(env: Env): Promise<void> {
 
   // Each trader places ORDERS_PER_TRADER orders alternating buy/sell
   for (let round = 0; round < ORDERS_PER_TRADER; round++) {
-    const orderBatch: Array<{ entityId: string; signerId: string; entityTxs: any[] }> = [];
+    const orderBatch: EntityInput[] = [];
 
     for (let t = 0; t < traders.length; t++) {
       const trader = traders[t]!;

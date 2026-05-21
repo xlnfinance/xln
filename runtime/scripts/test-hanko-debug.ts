@@ -5,8 +5,20 @@
 
 import { BrowserVMProvider } from '../jadapter/browservm-provider.js';
 import { ethers } from 'ethers';
-import { registerSeededKeys } from '../account-crypto.js';
+import { createAddressFromString } from '@ethereumjs/util';
+import { deriveSignerKeySync, registerSeededKeys, registerSignerKey } from '../account-crypto.js';
 import { isLeftEntity } from '../entity-id-utils';
+import type { BrowserVmEthersProviderTarget } from '../jadapter/types';
+
+const errorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+const evmExceptionMessage = (error: unknown): string => {
+  if (error && typeof error === 'object' && 'error' in error) {
+    return String((error as { error?: unknown }).error);
+  }
+  return errorMessage(error);
+};
 
 async function main() {
   console.log('🔍 Testing Hanko Board Hash Computation\n');
@@ -17,12 +29,18 @@ async function main() {
   }
 
   // Register signer keys from runtime seed
-  await registerSeededKeys(runtimeSeed, ['1', '2', '3', '4', '5', '6', '7', '8']);
+  const signerSlots = ['1', '2', '3', '4', '5', '6', '7', '8'];
+  await registerSeededKeys(runtimeSeed, signerSlots);
+  for (const slot of signerSlots) {
+    registerSignerKey(slot, deriveSignerKeySync(runtimeSeed, slot));
+  }
   console.log('✅ Registered signer keys\n');
 
   // Create BrowserVM
   const browserVM = new BrowserVMProvider();
   await browserVM.init();
+  const browserVMTarget = browserVM as unknown as BrowserVmEthersProviderTarget;
+  const entityProviderAddress = createAddressFromString(browserVM.getEntityProviderAddress());
 
   console.log('✅ BrowserVM initialized');
   console.log(`   EntityProvider: ${browserVM.getEntityProviderAddress()}`);
@@ -242,15 +260,15 @@ async function main() {
         const callData = epInterface.encodeFunctionData('verifyHankoSignature', [hankoData, testHash]);
 
         // Use raw runCall to get actual return value / revert reason
-        const rawResult = await (browserVM as any).vm.evm.runCall({
-          to: (browserVM as any).entityProviderAddress,
-          caller: (browserVM as any).deployerAddress,
+        const rawResult = await browserVMTarget.vm.evm.runCall({
+          to: entityProviderAddress,
+          caller: browserVMTarget.deployerAddress,
           data: ethers.getBytes(callData),
           gasLimit: 500000n,
         });
 
         if (rawResult.execResult.exceptionError) {
-          console.log(`   REVERTED: ${rawResult.execResult.exceptionError.error}`);
+          console.log(`   REVERTED: ${evmExceptionMessage(rawResult.execResult.exceptionError)}`);
           const returnValue = rawResult.execResult.returnValue;
           if (returnValue.length > 0) {
             const returnHex = ethers.hexlify(returnValue);
@@ -273,8 +291,8 @@ async function main() {
           console.log(`   Result: entityId=${decoded[0]}, success=${decoded[1]}`);
         }
       }
-    } catch (e: any) {
-      console.log(`   Direct test error: ${e.message}`);
+    } catch (e: unknown) {
+      console.log(`   Direct test error: ${errorMessage(e)}`);
     }
 
     // Direct test with the ACTUAL settlement hash and Hanko sig
@@ -300,15 +318,15 @@ async function main() {
       ]);
       const callData2 = epInterface2.encodeFunctionData('verifyHankoSignature', [sig, settlementHash]);
 
-      const rawResult2 = await (browserVM as any).vm.evm.runCall({
-        to: (browserVM as any).entityProviderAddress,
-        caller: (browserVM as any).deployerAddress,
+      const rawResult2 = await browserVMTarget.vm.evm.runCall({
+        to: entityProviderAddress,
+        caller: browserVMTarget.deployerAddress,
         data: ethers.getBytes(callData2),
         gasLimit: 30000000n,
       });
 
       if (rawResult2.execResult.exceptionError) {
-        console.log(`   Settlement sig REVERTED: ${rawResult2.execResult.exceptionError.error}`);
+        console.log(`   Settlement sig REVERTED: ${evmExceptionMessage(rawResult2.execResult.exceptionError)}`);
         const rv = rawResult2.execResult.returnValue;
         if (rv.length > 0) {
           const rvHex = ethers.hexlify(rv);
@@ -325,8 +343,8 @@ async function main() {
         const decoded2 = epInterface2.decodeFunctionResult('verifyHankoSignature', rawResult2.execResult.returnValue);
         console.log(`   Result: entityId=${decoded2[0]}, success=${decoded2[1]}`);
       }
-    } catch (e: any) {
-      console.log(`   Direct settlement test error: ${e.message}`);
+    } catch (e: unknown) {
+      console.log(`   Direct settlement test error: ${errorMessage(e)}`);
     }
 
     // Skip empty settlement test - it changes nonce which breaks subsequent tests
@@ -387,8 +405,8 @@ async function main() {
       console.log(`   100-byte sig result events=${result100.length}`);
     }
 
-  } catch (err: any) {
-    console.log(`   ❌ Error: ${err.message}`);
+  } catch (err: unknown) {
+    console.log(`   ❌ Error: ${errorMessage(err)}`);
   }
 
   console.log('\n✅ Test complete');

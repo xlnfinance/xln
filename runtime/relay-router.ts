@@ -8,6 +8,7 @@
 import { safeStringify } from './serialization-utils';
 import { asFailFastPayload, failfastAssert } from './networking/failfast';
 import {
+  type RelaySocketLike,
   type RelayStore,
   isCanonicalRuntimeId,
   normalizeRuntimeKey,
@@ -67,15 +68,14 @@ export const forgetRelaySocketRuntimeId = (ws: unknown): void => {
 // ---------------------------------------------------------------------------
 
 export type RelaySendResult = boolean | number | void;
-export type RelaySocketLike = { send(data: string): RelaySendResult; readyState?: number };
 
-export type RelayRouterConfig<Socket = RelaySocketLike> = {
+export type RelayRouterConfig = {
   store: RelayStore;
   localRuntimeId: string;
   /** Called when an entity_input is addressed to this runtime. */
   localDeliver: (from: string | undefined, msg: RuntimeWsMessage) => Promise<void>;
   /** Thin wrapper: (ws, data: string) => boolean | number | void */
-  send: (ws: Socket, data: string) => RelaySendResult;
+  send: (ws: RelaySocketLike, data: string) => RelaySendResult;
   /** Hook to mirror gossip into env. */
   onGossipStore?: (profile: Profile) => void;
   /** Defaults to true. Unsigned hello cannot claim a runtime slot. */
@@ -90,7 +90,7 @@ const flushPendingToSocket = <Socket>(
   store: RelayStore,
   runtimeId: string,
   ws: Socket,
-  send: RelayRouterConfig<Socket>['send'],
+  send: (ws: Socket, data: string) => RelaySendResult,
 ): number => {
   const pending = flushPendingMessages(store, runtimeId);
   for (const pendingMsg of pending) {
@@ -99,9 +99,9 @@ const flushPendingToSocket = <Socket>(
   return pending.length;
 };
 
-const trySendRelay = <Socket>(
-  config: RelayRouterConfig<Socket>,
-  ws: Socket,
+const trySendRelay = (
+  config: RelayRouterConfig,
+  ws: RelaySocketLike,
   msg: unknown,
 ): boolean => {
   if (!isRelaySocketOpen(ws)) return false;
@@ -123,9 +123,9 @@ const trySendRelay = <Socket>(
 // Main entry point
 // ---------------------------------------------------------------------------
 
-export const relayRoute = async <Socket = RelaySocketLike>(
-  config: RelayRouterConfig<Socket>,
-  ws: Socket,
+export const relayRoute = async (
+  config: RelayRouterConfig,
+  ws: RelaySocketLike,
   rawMsg: unknown,
 ): Promise<void> => {
   const { store, send } = config;

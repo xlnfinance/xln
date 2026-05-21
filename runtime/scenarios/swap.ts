@@ -52,7 +52,7 @@ async function processJEvents(env: Env): Promise<void> {
   // RPC watcher is polling-based; force immediate poll in scenarios to avoid
   // relying on wall-clock interval timing between submit and assertions.
   for (const [, jReplica] of env.jReplicas) {
-    const ja = (jReplica as any).jadapter;
+    const ja = jReplica.jadapter;
     if (ja?.pollNow) await ja.pollNow();
   }
 
@@ -224,9 +224,9 @@ export async function swap(env: Env): Promise<void> {
   } catch {
     jadapter = await ensureJAdapter(env);
     const jReplica = createJReplica(env, 'Swap Demo', jadapter.addresses.depository, J_MACHINE_POSITION);
-    (jReplica as any).jadapter = jadapter;
-    (jReplica as any).depositoryAddress = jadapter.addresses.depository;
-    (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
+    jReplica.jadapter = jadapter;
+    jReplica.depositoryAddress = jadapter.addresses.depository;
+    jReplica.entityProviderAddress = jadapter.addresses.entityProvider;
     jadapter.startWatching(env);
   }
   const jurisdiction = createJurisdictionConfig('Swap Demo', jadapter.addresses.depository, jadapter.addresses.entityProvider);
@@ -693,7 +693,7 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
   }
   const process = await getProcess();
   const jadapter = getScenarioJAdapter(env);
-  const runDisputePhase = Boolean((env as any).scenarioSwapRunDisputePhase);
+  const runDisputePhase = Boolean((env as Env & { scenarioSwapRunDisputePhase?: boolean }).scenarioSwapRunDisputePhase);
   console.log('═══════════════════════════════════════════════════════════════');
   console.log('             PHASE 2: ORDERBOOK MATCHING (RJEA FLOW)            ');
   console.log('═══════════════════════════════════════════════════════════════\n');

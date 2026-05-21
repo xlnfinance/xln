@@ -51,10 +51,9 @@ function assert(condition: unknown, message: string, env?: Env): asserts conditi
   }
 }
 
-
 async function processJEvents(env: Env): Promise<void> {
   for (const [, jReplica] of env.jReplicas) {
-    const ja = (jReplica as any).jadapter;
+    const ja = jReplica.jadapter;
     if (ja?.pollNow) await ja.pollNow();
   }
 
@@ -111,7 +110,7 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
 
   // Suppress console.log for cleaner output
   const originalLog = console.log;
-  const quietLog = (...args: any[]) => {
+  const quietLog = (...args: unknown[]) => {
     const msg = args[0]?.toString() || '';
     // Only show key events
     if (msg.includes('ASSERT') || msg.includes('✅') || msg.includes('❌') ||
@@ -135,9 +134,9 @@ export async function runSettleScenario(existingEnv?: Env): Promise<Env> {
   } catch {
     jadapter = await ensureJAdapter(env);
     const jReplica = createJReplica(env, JURISDICTION, jadapter.addresses.depository);
-    (jReplica as any).jadapter = jadapter;
-    (jReplica as any).depositoryAddress = jadapter.addresses.depository;
-    (jReplica as any).entityProviderAddress = jadapter.addresses.entityProvider;
+    jReplica.jadapter = jadapter;
+    jReplica.depositoryAddress = jadapter.addresses.depository;
+    jReplica.entityProviderAddress = jadapter.addresses.entityProvider;
     jadapter.startWatching(env);
   }
 

@@ -16,7 +16,7 @@
  * 5. On-chain event triggers bilateral account state update
  */
 
-import type { EntityState, EntityTx, EntityInput, AccountTx } from '../../types';
+import type { EntityState, EntityTx, EntityInput, AccountTx, JInput } from '../../types';
 import { QUOTE_EXPIRY_MS } from '../../types';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { getEffectiveDraftReserveBalance } from '../../j-batch';
@@ -27,7 +27,7 @@ export async function handleR2C(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'r2c' }>,
   currentTimestamp: number = 0
-): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs?: any[]; mempoolOps?: MempoolOp[] }> {
+): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs?: JInput[]; mempoolOps?: MempoolOp[] }> {
   const { counterpartyId, receivingEntityId, tokenId, amount, rebalanceQuoteId, rebalanceFeeTokenId, rebalanceFeeAmount } = entityTx.data;
   const receivingEntity = String(receivingEntityId || entityState.entityId || '').trim().toLowerCase();
   const isLocalReceivingEntity = receivingEntity === String(entityState.entityId || '').trim().toLowerCase();

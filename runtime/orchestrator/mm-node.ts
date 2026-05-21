@@ -5,13 +5,13 @@ import { createStructuredLogger } from '../logger';
 import { decodeRuntimeAdapterMessage } from '../radapter/codec';
 import { encodeBoard, hashBoard } from '../entity-factory';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
-import { createDirectRuntimeWsRoute } from '../networking/direct-runtime-bun';
-import { clearJurisdictionsCache, loadJurisdictions } from '../jurisdiction-loader';
+import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../networking/direct-runtime-bun';
 import {
   attachRuntimeAdapterTicker,
   closeInvalidRuntimeAdapterMessage,
   forgetRuntimeAdapterClient,
   handleRuntimeAdapterMessage,
+  type RuntimeAdapterSocket,
 } from '../radapter/server';
 import {
   getActiveJAdapter,
@@ -63,6 +63,14 @@ import { resolveCrossJurisdictionRuntimeTopology } from '../cross-jurisdiction-b
 import { getJurisdictionStackId } from '../jurisdiction-stack';
 import { startParentLivenessWatch } from './parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
+import {
+  formatJurisdictionDisplayName,
+  requireJurisdictionBlockTimeMs,
+  resetMeshJurisdictionsCache,
+  resolveMeshJurisdictionConfig,
+  resolveSecondaryJurisdictions,
+  type MeshJurisdictionConfig,
+} from './mesh-jurisdictions';
 
 type Args = {
   name: string;
@@ -78,23 +86,16 @@ type Args = {
   dbPath: string;
 };
 
+type MarketMakerServerSocket = DirectWebSocket & RuntimeAdapterSocket & { data?: { type?: string } };
+
 type MeshHubIdentity = {
   name: string;
   entityId: string;
   signerId: string;
 };
 
-type JurisdictionConfig = {
-  name: string;
-  chainId: number;
-  rpc: string;
-  blockTimeMs?: number;
-  contracts: {
-    depository: string;
-    entityProvider: string;
-    account?: string;
-    deltaTransformer?: string;
-  };
+type JurisdictionConfig = MeshJurisdictionConfig & {
+  contracts: NonNullable<MeshJurisdictionConfig['contracts']>;
 };
 
 type HubProfile = {
@@ -279,52 +280,8 @@ if (!directWsUrl) {
 const JSON_HEADERS = { 'Content-Type': 'application/json' } as const;
 const nodeLog = createStructuredLogger('mesh.marketMaker', { name: resolvedArgs.name });
 
-const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig => {
-  const data = loadJurisdictions();
-  const map = data.jurisdictions ?? {};
-  const requestedRpc = String(rpcUrlOverride || '').trim();
-  const exactMatch = Object.values(map).find((entry) => {
-    if (!entry || typeof entry !== 'object') return false;
-    return String((entry as JurisdictionConfig).rpc || '').trim() === requestedRpc;
-  });
-  const arrakis = exactMatch ?? map['arrakis'] ?? Object.values(map)[0];
-  if (!arrakis) {
-    throw new Error('JURISDICTION_NOT_FOUND');
-  }
-  return {
-    ...(arrakis as JurisdictionConfig),
-    rpc: rpcUrlOverride || (arrakis as JurisdictionConfig).rpc,
-  };
-};
-
-const requireJurisdictionBlockTimeMs = (jurisdiction: JurisdictionConfig): number => {
-  const value = Number(jurisdiction.blockTimeMs);
-  if (Number.isFinite(value) && value > 0) return Math.floor(value);
-  throw new Error(`JURISDICTION_BLOCK_TIME_MISSING:${jurisdiction.name}`);
-};
-
-const isSecondaryJurisdictionConfig = (key: string, jurisdiction: JurisdictionConfig, primaryRpc: string): boolean => {
-  const normalizedKey = String(key || '').trim().toLowerCase();
-  const normalizedName = String(jurisdiction.name || '').trim().toLowerCase();
-  const normalizedRpc = String(jurisdiction.rpc || '').trim();
-  if (primaryRpc && normalizedRpc === primaryRpc) return false;
-  return normalizedKey === 'tron' || normalizedKey === 'rpc2' || normalizedName.includes('tron') || normalizedRpc.includes('/rpc2');
-};
-
-const formatJurisdictionDisplayName = (name: string): string =>
-  String(name || '')
-    .replace(/\s*\((?:local|shared)\s+anvil\)\s*$/i, '')
-    .trim();
-
-const resolveSecondaryJurisdictions = (primaryRpc: string): JurisdictionConfig[] => {
-  clearJurisdictionsCache();
-  const data = loadJurisdictions();
-  const entries = Object.entries(data.jurisdictions ?? {});
-  return entries
-    .filter(([, jurisdiction]) => Boolean(jurisdiction?.rpc && jurisdiction?.contracts?.depository && jurisdiction?.contracts?.entityProvider))
-    .filter(([key, jurisdiction]) => isSecondaryJurisdictionConfig(key, jurisdiction as JurisdictionConfig, primaryRpc))
-    .map(([, jurisdiction]) => jurisdiction as JurisdictionConfig);
-};
+const resolveJurisdictionConfig = (rpcUrlOverride: string): JurisdictionConfig =>
+  resolveMeshJurisdictionConfig<JurisdictionConfig>(rpcUrlOverride);
 
 const resolveImportedJurisdictionRpc = (jurisdiction: JurisdictionConfig): string =>
   resolveLocalApiUrl(jurisdiction.rpc);
@@ -465,7 +422,7 @@ const ensureJurisdictionReplica = (env: Env, jadapter: JAdapter, rpcUrl: string)
 
 const hubBaseName = (name: string): string => String(name || '').trim().split(/\s+/)[0]?.toLowerCase() || '';
 
-const readHubSignerId = (profile: { metadata?: any }): string => {
+const readHubSignerId = (profile: { metadata?: { board?: { validators?: Array<{ signerId?: string; signer?: string }> } } }): string => {
   const validators = profile.metadata?.board?.validators;
   if (!Array.isArray(validators) || validators.length === 0) return '';
   const first = validators[0] || {};
@@ -1362,7 +1319,7 @@ const run = async (): Promise<void> => {
   env.runtimeState = env.runtimeState ?? {};
   env.runtimeState.directEntityInputDispatch = (targetRuntimeId, input, ingressTimestamp) =>
     directRuntimeWs.sendEntityInput(targetRuntimeId, input, ingressTimestamp);
-  const handleRadapterWsMessage = (ws: any, raw: string | Buffer | ArrayBuffer): void => {
+  const handleRadapterWsMessage = (ws: MarketMakerServerSocket, raw: string | Buffer | ArrayBuffer): void => {
     let msg: Record<string, unknown>;
     try {
       msg = decodeRuntimeAdapterMessage<Record<string, unknown>>(raw);
@@ -1465,21 +1422,21 @@ const run = async (): Promise<void> => {
       }
 	    },
 	    websocket: {
-	      open(ws: any) {
+	      open(ws: MarketMakerServerSocket) {
 	        if (ws.data?.type === 'rpc') {
 	          attachRuntimeAdapterTicker(env, registerEnvChangeCallback);
 	          return;
 	        }
 	        directRuntimeWs.websocket.open(ws);
 	      },
-	      message(ws: any, raw: string | Buffer | ArrayBuffer) {
+	      message(ws: MarketMakerServerSocket, raw: string | Buffer | ArrayBuffer) {
 	        if (ws.data?.type === 'rpc') {
 	          handleRadapterWsMessage(ws, raw);
 	          return;
 	        }
 	        return directRuntimeWs.websocket.message(ws, raw);
 	      },
-	      close(ws: any) {
+	      close(ws: MarketMakerServerSocket) {
 	        if (ws.data?.type === 'rpc') {
 	          forgetRuntimeAdapterClient(ws);
 	          return;
@@ -1527,7 +1484,7 @@ const run = async (): Promise<void> => {
   activeMmEntityId = primaryMmContext.entityId;
   mmContexts = [primaryMmContext];
 
-  const secondaryJurisdictions = resolveSecondaryJurisdictions(jurisdiction.rpc);
+  const secondaryJurisdictions = resolveSecondaryJurisdictions<JurisdictionConfig>(jurisdiction.rpc);
   for (const [index, secondary] of secondaryJurisdictions.entries()) {
     const secondaryName = String(secondary.name || `Secondary ${index + 1}`).trim();
     const secondaryDisplayName = formatJurisdictionDisplayName(secondaryName) || secondaryName;
@@ -1714,7 +1671,7 @@ const run = async (): Promise<void> => {
   await new Promise<void>(() => {});
 };
 
-clearJurisdictionsCache();
+resetMeshJurisdictionsCache();
 run().catch(error => {
   console.error(`[MESH-MM] FAILED:`, (error as Error).stack || (error as Error).message);
   process.exit(1);
