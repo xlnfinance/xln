@@ -45,6 +45,7 @@ describe('direct runtime websocket route', () => {
     const route = createDirectRuntimeWsRoute({
       runtimeId: serverRuntimeId,
       runtimeSeed: serverSeed,
+      requireHelloAuth: false,
       onEntityInput: (from, input, timestamp) => {
         received.push({ from, input, timestamp });
       },
@@ -103,5 +104,47 @@ describe('direct runtime websocket route', () => {
         timestamp: 456,
       },
     ]);
+  });
+
+  test('rejects unencrypted entity input on a direct socket', async () => {
+    const serverSeed = 'direct-route-server-plaintext';
+    const clientSeed = 'direct-route-client-plaintext';
+    const serverRuntimeId = deriveSignerAddressSync(serverSeed, '1').toLowerCase();
+    const clientRuntimeId = deriveSignerAddressSync(clientSeed, '1').toLowerCase();
+    const received: Array<{ from: string; input: RoutedEntityInput; timestamp?: number }> = [];
+
+    const route = createDirectRuntimeWsRoute({
+      runtimeId: serverRuntimeId,
+      runtimeSeed: serverSeed,
+      requireHelloAuth: false,
+      onEntityInput: (from, input, timestamp) => {
+        received.push({ from, input, timestamp });
+      },
+    });
+
+    const { ws, sent } = makeFakeWs();
+    route.websocket.open(ws);
+    await route.websocket.message(ws, serializeWsMessage(makeAuthedHello(clientSeed, clientRuntimeId)));
+    await route.websocket.message(ws, serializeWsMessage({
+      type: 'entity_input',
+      id: 'client-to-server-plaintext',
+      from: clientRuntimeId,
+      fromEncryptionPubKey: pubKeyToHex(deriveEncryptionKeyPair(clientSeed).publicKey),
+      to: serverRuntimeId,
+      timestamp: 456,
+      encrypted: false,
+      payload: {
+        entityId: `0x${'22'.repeat(32)}`,
+        runtimeId: serverRuntimeId,
+        signerId: serverRuntimeId,
+        entityTxs: [],
+      },
+    }));
+
+    expect(sent.at(-1)).toMatchObject({
+      type: 'error',
+      error: 'Direct entity_input must be encrypted',
+    });
+    expect(received).toEqual([]);
   });
 });
