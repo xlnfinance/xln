@@ -2081,6 +2081,23 @@ const batchOutputsByTarget = (outputs: DeliverableEntityInput[]): DeliverableEnt
   return Array.from(batched.values());
 };
 
+const hasDirectHubP2PEndpoint = (env: Env, targetRuntimeId: string): boolean => {
+  const normalizedTargetRuntimeId = normalizeRuntimeId(targetRuntimeId);
+  if (!normalizedTargetRuntimeId) return false;
+  const profiles = env.gossip?.getProfiles?.() || [];
+  return profiles.some((profile) => {
+    if (profile.metadata?.isHub !== true) return false;
+    if (normalizeRuntimeId(profile.runtimeId || '') !== normalizedTargetRuntimeId) return false;
+    if (typeof profile.wsUrl !== 'string') return false;
+    try {
+      const parsed = new URL(profile.wsUrl.trim());
+      return parsed.protocol === 'ws:' || parsed.protocol === 'wss:';
+    } catch {
+      return false;
+    }
+  });
+};
+
 const dispatchEntityOutputs = (env: Env, outputs: PlannedRemoteOutput[]): RoutedEntityInput[] => {
   const state = ensureRuntimeState(env);
   const directDispatch = state.directEntityInputDispatch;
@@ -2110,6 +2127,14 @@ const dispatchEntityOutputs = (env: Env, outputs: PlannedRemoteOutput[]): Routed
     if (directDispatch) {
       const deliveredDirect = directDispatch(targetRuntimeId, output, env.timestamp);
       if (deliveredDirect) {
+        continue;
+      }
+      if (!hasDirectHubP2PEndpoint(env, targetRuntimeId)) {
+        env.warn('network', 'ROUTE_DEFER_DIRECT_SOCKET_REQUIRED', {
+          entityId: output.entityId,
+          runtimeId: targetRuntimeId,
+        });
+        deferredOutputs.push(output);
         continue;
       }
     }

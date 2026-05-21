@@ -981,7 +981,7 @@ export class RuntimeP2P {
       const monotonicTimestamp = Math.max(lastTimestamp + 1, this.env.timestamp);
       const profile = buildLocalEntityProfile(this.env, replica.state, monotonicTimestamp);
       profile.runtimeId = this.runtimeId;
-      profile.wsUrl = this.wsUrl;
+      profile.wsUrl = profile.metadata.isHub === true ? this.wsUrl : null;
       profile.relays = this.relayUrls;
       const firstValidator = replica.state.config.validators[0];
       if (!firstValidator) {
@@ -1156,6 +1156,7 @@ export class RuntimeP2P {
     const profiles = this.env.gossip?.getProfiles?.() || [];
     for (const profile of profiles) {
       if (normalizeRuntimeId(profile.runtimeId || '') !== normalizedTargetRuntimeId) continue;
+      if (profile.metadata?.isHub !== true) continue;
       const endpoint = normalizeOptionalWsUrl(profile.wsUrl);
       if (endpoint && isBrowserDirectWsEndpointAllowed(endpoint)) return endpoint;
     }

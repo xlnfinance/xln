@@ -385,12 +385,18 @@ export class RuntimeWsClient {
       this.options.onPeerEncryptionKey?.(msg.from, msg.fromEncryptionPubKey);
     }
 
-    if (msg.type === 'runtime_input' && msg.payload && msg.from) {
-      await this.options.onRuntimeInput?.(
-        msg.from,
-        msg.payload as RuntimeInput,
-        typeof msg.timestamp === 'number' ? msg.timestamp : undefined,
-      );
+    if (msg.type === 'runtime_input') {
+      // runtime_input is not a public transport API. Runtime-level work is
+      // enqueued locally by the owning process; cross-runtime delivery must use
+      // encrypted entity_input so relay/P2P cannot become a plaintext control
+      // plane by accident.
+      this.sendDebugEvent({
+        level: 'error',
+        code: 'P2P_RUNTIME_INPUT_DISABLED',
+        message: 'Rejected runtime_input transport message',
+        from: msg.from,
+      });
+      this.options.onError?.(new Error('P2P_RUNTIME_INPUT_DISABLED: runtime_input transport is disabled'));
       return;
     }
     if (msg.type === 'entity_input' && msg.payload && msg.from) {

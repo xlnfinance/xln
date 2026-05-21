@@ -55,16 +55,13 @@ export const createLocalDeliveryHandler = (
       throw new Error('Invalid target runtimeId for local delivery');
     }
 
-    // Decrypt or parse plaintext
     let input: EntityInput;
-    if (msg.encrypted && typeof payload === 'string') {
-      const activeKeyPair = getServerKeyPair();
-      input = decryptJSON<EntityInput>(payload, activeKeyPair.privateKey);
-      console.log(`[RELAY] → decrypted entity_input: entityId=${input.entityId?.slice(-8)} txs=${input.entityTxs?.length ?? 0}`);
-    } else {
-      input = payload as EntityInput;
-      console.log(`[RELAY] → plaintext entity_input: entityId=${input.entityId?.slice(-8)}`);
+    if (msg.encrypted !== true || typeof payload !== 'string') {
+      throw new Error('P2P_UNENCRYPTED: local entity_input must be encrypted');
     }
+    const activeKeyPair = getServerKeyPair();
+    input = decryptJSON<EntityInput>(payload, activeKeyPair.privateKey);
+    console.log(`[RELAY] → decrypted entity_input: entityId=${input.entityId?.slice(-8)} txs=${input.entityTxs?.length ?? 0}`);
 
     // Check if local replica exists
     const localRuntimeKey = normalizeRuntimeKey(env.runtimeId);

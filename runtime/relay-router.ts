@@ -27,6 +27,7 @@ import {
 import type { Profile } from './networking/gossip';
 import { verifyProfileSignature, type ProfileVerifyResult } from './networking/profile-signing';
 import { verifyHelloAuth } from './networking/hello-auth';
+import type { RuntimeWsMessage } from './networking/ws-protocol';
 
 const SOCKET_RUNTIME_ID = Symbol.for('xln.relay.socketRuntimeId');
 type RememberedRelaySocket = object & { [SOCKET_RUNTIME_ID]?: string };
@@ -57,15 +58,18 @@ export const forgetRelaySocketRuntimeId = (ws: unknown): void => {
 // Config
 // ---------------------------------------------------------------------------
 
-export type RelayRouterConfig = {
+export type RelaySendResult = boolean | number | void;
+export type RelaySocketLike = { send(data: string): RelaySendResult; readyState?: number };
+
+export type RelayRouterConfig<Socket = RelaySocketLike> = {
   store: RelayStore;
   localRuntimeId: string;
   /** Called when an entity_input is addressed to this runtime. */
-  localDeliver: (from: string | undefined, msg: any) => Promise<void>;
+  localDeliver: (from: string | undefined, msg: RuntimeWsMessage) => Promise<void>;
   /** Thin wrapper: (ws, data: string) => boolean | number | void */
-  send: (ws: any, data: string) => boolean | number | void;
+  send: (ws: Socket, data: string) => RelaySendResult;
   /** Hook to mirror gossip into env. */
-  onGossipStore?: (profile: any) => void;
+  onGossipStore?: (profile: Profile) => void;
   /** Defaults to true. Unsigned hello cannot claim a runtime slot. */
   requireHelloAuth?: boolean;
   helloSkewMs?: number;
@@ -74,11 +78,11 @@ export type RelayRouterConfig = {
 
 const DEFAULT_HELLO_SKEW_MS = 5 * 60 * 1000;
 
-const flushPendingToSocket = (
+const flushPendingToSocket = <Socket>(
   store: RelayStore,
   runtimeId: string,
-  ws: unknown,
-  send: RelayRouterConfig['send'],
+  ws: Socket,
+  send: RelayRouterConfig<Socket>['send'],
 ): number => {
   const pending = flushPendingMessages(store, runtimeId);
   for (const pendingMsg of pending) {
@@ -87,9 +91,9 @@ const flushPendingToSocket = (
   return pending.length;
 };
 
-const trySendRelay = (
-  config: RelayRouterConfig,
-  ws: unknown,
+const trySendRelay = <Socket>(
+  config: RelayRouterConfig<Socket>,
+  ws: Socket,
   msg: unknown,
 ): boolean => {
   if (!isRelaySocketOpen(ws)) return false;
@@ -111,13 +115,17 @@ const trySendRelay = (
 // Main entry point
 // ---------------------------------------------------------------------------
 
-export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): Promise<void> => {
+export const relayRoute = async <Socket = RelaySocketLike>(
+  config: RelayRouterConfig<Socket>,
+  ws: Socket,
+  rawMsg: unknown,
+): Promise<void> => {
   const { store, send } = config;
 
   // Validate message shape
   try {
-    failfastAssert(!!msg && typeof msg === 'object', 'RELAY_MSG_OBJECT_INVALID', 'Relay payload must be an object');
-    failfastAssert(typeof msg.type === 'string' && msg.type.length > 0, 'RELAY_MSG_TYPE_INVALID', 'Relay message type is required');
+    failfastAssert(!!rawMsg && typeof rawMsg === 'object', 'RELAY_MSG_OBJECT_INVALID', 'Relay payload must be an object');
+    failfastAssert(typeof (rawMsg as { type?: unknown }).type === 'string' && (rawMsg as { type: string }).type.length > 0, 'RELAY_MSG_TYPE_INVALID', 'Relay message type is required');
   } catch (error) {
     const ff = asFailFastPayload(error);
     pushDebugEvent(store, {
@@ -131,6 +139,7 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
     return;
   }
 
+  const msg = rawMsg as RuntimeWsMessage;
   const { type, to, from, payload, id } = msg;
   const fromKey = normalizeRuntimeKey(from);
   const toKey = normalizeRuntimeKey(to);
@@ -295,7 +304,8 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
       send(ws, safeStringify({ type: 'error', error: 'Gossip announce requires registered relay hello' }));
       return;
     }
-    const profiles = (payload?.profiles || []) as Profile[];
+    const payloadRecord = payload && typeof payload === 'object' ? payload as { profiles?: unknown } : {};
+    const profiles = (Array.isArray(payloadRecord.profiles) ? payloadRecord.profiles : []) as Profile[];
     let stored = 0;
     let droppedMalformed = 0;
     let droppedInvalidSignature = 0;
@@ -305,7 +315,7 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
       if (!profile || typeof profile !== 'object') continue;
       const normalized: Profile = {
         ...profile,
-        runtimeId: profile.runtimeId || from,
+        runtimeId: profile.runtimeId || fromKey,
       };
       try {
         const verified = await verifyProfile(normalized);
@@ -447,8 +457,8 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
     return;
   }
 
-  // ----- routable messages (entity_input, runtime_input, gossip_*) -----
-  if (type === 'entity_input' || type === 'runtime_input' || type === 'gossip_request' || type === 'gossip_response' || type === 'gossip_announce') {
+  // ----- routable messages (entity_input, runtime_input, gossip_response) -----
+  if (type === 'entity_input' || type === 'runtime_input' || type === 'gossip_response') {
     if (!toKey) {
       pushDebugEvent(store, {
         event: 'error',
@@ -459,6 +469,38 @@ export const relayRoute = async (config: RelayRouterConfig, ws: any, msg: any): 
         details: { traceId },
       });
       send(ws, safeStringify({ type: 'error', error: 'Missing target runtimeId' }));
+      return;
+    }
+
+    // Runtime-level input over relay is intentionally disabled. Production
+    // control flow must go through encrypted entity_input or local in-process
+    // queues; keeping a plaintext runtime_input transport would create a
+    // second ingress path that bypasses those boundaries.
+    if (type === 'runtime_input') {
+      pushDebugEvent(store, {
+        event: 'error',
+        from,
+        to,
+        msgType: type,
+        status: 'rejected',
+        reason: 'RUNTIME_INPUT_DISABLED',
+        details: { traceId },
+      });
+      send(ws, safeStringify({ type: 'error', error: 'runtime_input is disabled' }));
+      return;
+    }
+
+    if (type === 'entity_input' && (msg.encrypted !== true || typeof payload !== 'string')) {
+      pushDebugEvent(store, {
+        event: 'error',
+        from,
+        to,
+        msgType: type,
+        status: 'rejected',
+        reason: 'ENTITY_INPUT_MUST_BE_ENCRYPTED',
+        details: { traceId },
+      });
+      send(ws, safeStringify({ type: 'error', error: 'entity_input must be encrypted' }));
       return;
     }
 

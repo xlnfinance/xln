@@ -329,6 +329,75 @@ describe('relay-router gossip fanout', () => {
     expect(store.debugEvents.some(event => event.status === 'stale-target')).toBe(true);
   });
 
+  test('rejects unencrypted entity_input at relay ingress', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const sentBySocket = new Map<FakeWs, unknown[]>();
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: (ws: FakeWs, raw: string) => {
+        const bucket = sentBySocket.get(ws) ?? [];
+        bucket.push(JSON.parse(raw));
+        sentBySocket.set(ws, bucket);
+      },
+    };
+    const wsA: FakeWs = { label: 'A', readyState: 1 };
+
+    await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    await relayRoute(config, wsA, {
+      type: 'entity_input',
+      id: 'plaintext-entity-input',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      to: RUNTIME_B,
+      payload: { entityId: ENTITY_B, entityTxs: [] },
+      encrypted: false,
+      entityId: ENTITY_B,
+      txs: 0,
+    });
+
+    expect(sentBySocket.get(wsA)?.at(-1)).toMatchObject({
+      type: 'error',
+      error: 'entity_input must be encrypted',
+    });
+    expect(store.pendingMessages.get(RUNTIME_B)).toBeUndefined();
+    expect(store.debugEvents.some(event => event.reason === 'ENTITY_INPUT_MUST_BE_ENCRYPTED')).toBe(true);
+  });
+
+  test('rejects runtime_input relay ingress', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const sentBySocket = new Map<FakeWs, unknown[]>();
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: (ws: FakeWs, raw: string) => {
+        const bucket = sentBySocket.get(ws) ?? [];
+        bucket.push(JSON.parse(raw));
+        sentBySocket.set(ws, bucket);
+      },
+    };
+    const wsA: FakeWs = { label: 'A', readyState: 1 };
+
+    await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    await relayRoute(config, wsA, {
+      type: 'runtime_input',
+      id: 'plaintext-runtime-input',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      to: RUNTIME_B,
+      payload: { runtimeTxs: [], entityInputs: [] },
+    });
+
+    expect(sentBySocket.get(wsA)?.at(-1)).toMatchObject({
+      type: 'error',
+      error: 'runtime_input is disabled',
+    });
+    expect(store.pendingMessages.get(RUNTIME_B)).toBeUndefined();
+    expect(store.debugEvents.some(event => event.reason === 'RUNTIME_INPUT_DISABLED')).toBe(true);
+  });
+
   test('rejects unsigned hello by default', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const sentBySocket = new Map<FakeWs, unknown[]>();
