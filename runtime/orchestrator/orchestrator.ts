@@ -2,7 +2,7 @@
 
 import { spawn, type ChildProcess } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { cpus, freemem, loadavg, totalmem } from 'node:os';
 import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
@@ -35,7 +35,6 @@ import type {
   HubChild,
   HubHealthPayload,
   HubInfoPayload,
-  ManagedRuntimeLease,
   ManagedRuntimeSpec,
   MarketMakerChild,
   MarketMakerHealthPayload,
@@ -60,6 +59,11 @@ import {
   UNEXPECTED_EXIT_RESTART_MS,
   parseArgs,
 } from './orchestrator-config';
+import {
+  createManagedRuntimeLeaseManager,
+  readManagedProcessTable,
+  type ManagedProcessTableEntry,
+} from './managed-runtime-leases';
 import { buildPrometheusMetrics } from './prometheus';
 import {
   buildPublicHubDiscoveryPayload,
@@ -105,6 +109,10 @@ const relayUrl = (() => {
 })();
 const shardJurisdictionsPath = join(args.dbRoot, 'jurisdictions.json');
 const controlPlaneDir = join(args.dbRoot, '.control-plane');
+const managedRuntimeLeases = createManagedRuntimeLeaseManager({
+  controlPlaneDir,
+  ownerId: orchestratorOwnerId,
+});
 const jurisdictionsConfig: OrchestratorJurisdictionsConfig = {
   shardJurisdictionsPath,
   rpc2Url: args.rpc2Url,
@@ -493,182 +501,19 @@ const managedSpecForMarketMaker = (): ManagedRuntimeSpec => ({
   dbPath: marketMakerChild.dbPath,
 });
 
-const leasePathForManagedRuntime = (spec: ManagedRuntimeSpec): string =>
-  join(controlPlaneDir, `${spec.role}-${spec.name.toLowerCase()}.lease.json`);
-
-const readManagedRuntimeLease = (spec: ManagedRuntimeSpec): ManagedRuntimeLease | null => {
-  const path = leasePathForManagedRuntime(spec);
-  if (!existsSync(path)) return null;
-  try {
-    const parsed = JSON.parse(readFileSync(path, 'utf8')) as Partial<ManagedRuntimeLease>;
-    if (
-      parsed.role === spec.role &&
-      parsed.name === spec.name &&
-      parsed.script === spec.script &&
-      Number(parsed.apiPort) === spec.apiPort &&
-      String(parsed.dbPath || '') === spec.dbPath &&
-      typeof parsed.ownerId === 'string' &&
-      Number.isFinite(parsed.pid)
-    ) {
-      return {
-        role: spec.role,
-        name: spec.name,
-        script: spec.script,
-        apiPort: spec.apiPort,
-        dbPath: spec.dbPath,
-        ownerId: parsed.ownerId,
-        orchestratorPid: Number(parsed.orchestratorPid || 0),
-        pid: Number(parsed.pid),
-        cwd: String(parsed.cwd || ''),
-        startedAt: Number(parsed.startedAt || 0),
-        updatedAt: Number(parsed.updatedAt || 0),
-      };
-    }
-  } catch (error) {
-    console.warn(`[MESH] ignoring unreadable child lease ${path}: ${serializeError(error)}`);
-  }
-  return null;
-};
-
-const writeManagedRuntimeLease = (spec: ManagedRuntimeSpec, pid: number, startedAt: number): void => {
-  mkdirSync(controlPlaneDir, { recursive: true });
-  const lease: ManagedRuntimeLease = {
-    ...spec,
-    ownerId: orchestratorOwnerId,
-    orchestratorPid: process.pid,
-    pid,
-    cwd: process.cwd(),
-    startedAt,
-    updatedAt: Date.now(),
-  };
-  const path = leasePathForManagedRuntime(spec);
-  const tmpPath = `${path}.tmp`;
-  writeFileSync(tmpPath, `${safeStringify(lease)}\n`);
-  renameSync(tmpPath, path);
-};
-
-const removeManagedRuntimeLease = (spec: ManagedRuntimeSpec, pid?: number | null): void => {
-  const lease = readManagedRuntimeLease(spec);
-  if (!lease) return;
-  if (lease.ownerId !== orchestratorOwnerId) return;
-  if (pid !== undefined && pid !== null && lease.pid !== pid) return;
-  rmSync(leasePathForManagedRuntime(spec), { force: true });
-};
-
-type ProcessTableEntry = { pid: number; command: string };
-
-const readProcessTable = async (): Promise<ProcessTableEntry[]> => {
-  return await new Promise<ProcessTableEntry[]>((resolve) => {
-    const child = spawn('ps', ['-axo', 'pid=,command='], {
-      cwd: process.cwd(),
-      stdio: ['ignore', 'pipe', 'ignore'],
-    });
-
-    let stdout = '';
-    child.stdout.on('data', chunk => {
-      stdout += chunk.toString();
-    });
-
-    child.on('error', () => resolve([]));
-    child.on('close', () => {
-      const rows = stdout
-        .split(/\r?\n/)
-        .map((line): ProcessTableEntry | null => {
-          const match = line.match(/^\s*(\d+)\s+(.+)$/);
-          if (!match) return null;
-          const pid = Number.parseInt(match[1]!, 10);
-          if (!Number.isFinite(pid) || pid <= 0 || pid === process.pid) return null;
-          return { pid, command: match[2]!.trim() };
-        })
-        .filter((row): row is ProcessTableEntry => row !== null);
-      resolve(rows);
-    });
-  });
-};
-
-const isPidAlive = (pid: number): boolean => {
-  try {
-    process.kill(pid, 0);
-    return true;
-  } catch {
-    return false;
-  }
-};
-
-const commandMatchesManagedRuntime = (command: string, spec: ManagedRuntimeSpec): boolean => {
-  if (!command.includes(spec.script)) return false;
-  if (!command.includes(`--name ${spec.name}`) && !command.includes(`--name=${spec.name}`)) return false;
-  const hasApiPort =
-    command.includes(`--api-port ${spec.apiPort}`) ||
-    command.includes(`--api-port=${spec.apiPort}`);
-  const hasDbPath =
-    command.includes(`--db-path ${spec.dbPath}`) ||
-    command.includes(`--db-path=${spec.dbPath}`);
-  return hasApiPort && hasDbPath;
-};
-
-const killProcessIds = async (pids: number[], label: string): Promise<void> => {
-  if (pids.length === 0) return;
-  console.warn(`[MESH] killing stale ${label}: ${pids.join(' ')}`);
-  for (const pid of pids) {
-    try { process.kill(pid, 'SIGTERM'); } catch {}
-  }
-  await delay(1_000);
-  for (const pid of pids) {
-    if (!isPidAlive(pid)) continue;
-    try { process.kill(pid, 'SIGKILL'); } catch {}
-  }
-  await delay(200);
-};
-
-const reapStaleManagedRuntime = async (
-  spec: ManagedRuntimeSpec,
-  currentPid: number,
-  processTable?: ProcessTableEntry[],
-): Promise<void> => {
-  const table = processTable ?? await readProcessTable();
-  const candidates = new Set<number>();
-  const lease = readManagedRuntimeLease(spec);
-  if (lease) {
-    if (!isPidAlive(lease.pid)) {
-      rmSync(leasePathForManagedRuntime(spec), { force: true });
-    } else if (lease.ownerId !== orchestratorOwnerId && lease.pid !== currentPid) {
-      candidates.add(lease.pid);
-    }
-  }
-
-  const commandByPid = new Map<number, string>();
-  for (const row of table) {
-    commandByPid.set(row.pid, row.command);
-    if (row.pid === currentPid) continue;
-    if (commandMatchesManagedRuntime(row.command, spec)) candidates.add(row.pid);
-  }
-
-  const verified: number[] = [];
-  for (const pid of candidates) {
-    if (pid === process.pid || pid === currentPid || !isPidAlive(pid)) continue;
-    const command = commandByPid.get(pid) || '';
-    if (commandMatchesManagedRuntime(command, spec)) {
-      verified.push(pid);
-    }
-  }
-
-  await killProcessIds(verified, `${spec.name} ${spec.role} process(es)`);
-};
-
-const reapStaleHubProcess = async (child: HubChild, processTable?: ProcessTableEntry[]): Promise<void> => {
+const reapStaleHubProcess = async (child: HubChild, processTable?: ManagedProcessTableEntry[]): Promise<void> => {
   if (!staleReapEnabled) return;
-  await reapStaleManagedRuntime(managedSpecForHub(child), child.proc?.pid ?? -1, processTable);
+  await managedRuntimeLeases.reapStale(managedSpecForHub(child), child.proc?.pid ?? -1, processTable);
 };
 
-const reapStaleMarketMakerProcess = async (processTable?: ProcessTableEntry[]): Promise<void> => {
+const reapStaleMarketMakerProcess = async (processTable?: ManagedProcessTableEntry[]): Promise<void> => {
   if (!staleReapEnabled) return;
-  await reapStaleManagedRuntime(managedSpecForMarketMaker(), marketMakerChild.proc?.pid ?? -1, processTable);
+  await managedRuntimeLeases.reapStale(managedSpecForMarketMaker(), marketMakerChild.proc?.pid ?? -1, processTable);
 };
 
 const reapStaleManagedChildren = async (): Promise<void> => {
   if (!staleReapEnabled) return;
-  const processTable = await readProcessTable();
+  const processTable = await readManagedProcessTable();
   await Promise.all(hubChildren.map(child => reapStaleHubProcess(child, processTable)));
   if (args.mmEnabled) {
     await reapStaleMarketMakerProcess(processTable);
@@ -752,7 +597,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
   if (!proc.pid) {
     throw new Error(`${child.name}_SPAWN_FAILED_NO_PID`);
   }
-  writeManagedRuntimeLease(spec, proc.pid, child.startedAt ?? Date.now());
+  managedRuntimeLeases.writeLease(spec, proc.pid, child.startedAt ?? Date.now());
   proc.stdout?.on('data', chunk => {
     pushChildLogLines(child.recentStdout, chunk);
     process.stdout.write(`[${child.name}] ${chunk.toString()}`);
@@ -762,7 +607,7 @@ const spawnHub = async (child: HubChild): Promise<void> => {
     process.stderr.write(`[${child.name}:err] ${chunk.toString()}`);
   });
   proc.once('exit', code => {
-    removeManagedRuntimeLease(spec, proc.pid ?? null);
+    managedRuntimeLeases.removeLease(spec, proc.pid ?? null);
     child.exitedAt = Date.now();
     child.exitCode = code;
     if (!resetState.inProgress && code !== 0) {
@@ -821,7 +666,7 @@ const spawnMarketMaker = async (): Promise<void> => {
   if (!proc.pid) {
     throw new Error('MM_SPAWN_FAILED_NO_PID');
   }
-  writeManagedRuntimeLease(spec, proc.pid, marketMakerChild.startedAt ?? Date.now());
+  managedRuntimeLeases.writeLease(spec, proc.pid, marketMakerChild.startedAt ?? Date.now());
   proc.stdout?.on('data', chunk => {
     pushChildLogLines(marketMakerChild.recentStdout, chunk);
     process.stdout.write(`[MM] ${chunk.toString()}`);
@@ -831,7 +676,7 @@ const spawnMarketMaker = async (): Promise<void> => {
     process.stderr.write(`[MM:err] ${chunk.toString()}`);
   });
   proc.once('exit', (code, signal) => {
-    removeManagedRuntimeLease(spec, proc.pid ?? null);
+    managedRuntimeLeases.removeLease(spec, proc.pid ?? null);
     marketMakerChild.exitedAt = Date.now();
     marketMakerChild.exitCode = code ?? null;
     marketMakerChild.exitSignal = signal ?? null;
@@ -875,14 +720,14 @@ const stopAllChildren = async (): Promise<void> => {
     currentCustody ? stopManagedChild(currentCustody.custodyChild) : Promise.resolve(),
     currentCustody ? stopManagedChild(currentCustody.daemonChild) : Promise.resolve(),
   ]);
-  for (const child of hubChildren) removeManagedRuntimeLease(managedSpecForHub(child));
-  removeManagedRuntimeLease(managedSpecForMarketMaker());
+  for (const child of hubChildren) managedRuntimeLeases.removeLease(managedSpecForHub(child));
+  managedRuntimeLeases.removeLease(managedSpecForMarketMaker());
 };
 
 const buildChildProcessHealth = (): AggregatedHealth['process']['children'] => {
   const hubEntries = hubChildren.map((child) => {
     const spec = managedSpecForHub(child);
-    const lease = readManagedRuntimeLease(spec);
+    const lease = managedRuntimeLeases.readLease(spec);
     return {
       role: spec.role,
       name: spec.name,
@@ -902,7 +747,7 @@ const buildChildProcessHealth = (): AggregatedHealth['process']['children'] => {
     };
   });
   const mmSpec = managedSpecForMarketMaker();
-  const mmLease = readManagedRuntimeLease(mmSpec);
+  const mmLease = managedRuntimeLeases.readLease(mmSpec);
   return [
     ...hubEntries,
     {
