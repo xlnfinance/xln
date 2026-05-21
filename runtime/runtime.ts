@@ -3647,56 +3647,8 @@ export const clearDB = async (env?: Env): Promise<void> => {
   }
 };
 
-// === SCENARIO FUNCTIONS ===
-export const scenarios = {
-  ahb: async (env: Env): Promise<Env> => {
-    const { ahb } = await import('./scenarios/ahb');
-    await ahb(env);
-    return env;
-  },
-  lockAhb: async (env: Env): Promise<Env> => {
-    const { lockAhb } = await import('./scenarios/lock-ahb');
-    await lockAhb(env);
-    return env;
-  },
-  swap: async (env: Env): Promise<Env> => {
-    const { swap, swapWithOrderbook, multiPartyTrading } = await import('./scenarios/swap');
-    // Run all 3 phases for complete swap demo (Alice, Hub, Bob, Carol, Dave)
-    await swap(env); // Phase 1: Alice + Hub basic bilateral swaps
-    await swapWithOrderbook(env); // Phase 2: Add Bob, orderbook matching
-    await multiPartyTrading(env); // Phase 3: Add Carol + Dave, multi-party
-    return env;
-  },
-  swapMarket: async (env: Env): Promise<Env> => {
-    const { swapMarket } = await import('./scenarios/swap-market');
-    await swapMarket(env);
-    return env;
-  },
-  rapidFire: async (env: Env): Promise<Env> => {
-    const { rapidFire } = await import('./scenarios/rapid-fire');
-    await rapidFire(env);
-    return env;
-  },
-  grid: async (env: Env): Promise<Env> => {
-    const { grid } = await import('./scenarios/grid');
-    await grid(env);
-    return env;
-  },
-  settle: async (env: Env): Promise<Env> => {
-    const { runSettleScenario } = await import('./scenarios/settle');
-    await runSettleScenario(env);
-    return env;
-  },
-  fullMechanics: async (env: Env): Promise<Env> => {
-    const { getScenario } = await import('./scenarios');
-    const scenario = getScenario('ahb');
-    if (!scenario) throw new Error('FULL_MECHANICS_SCENARIO_MISSING');
-    await scenario.run(env);
-    return env;
-  },
-};
-
 // === SCENARIO SYSTEM ===
+export { scenarios } from './runtime-scenarios';
 export { parseScenario, mergeAndSortEvents } from './scenarios/parser.js';
 export { executeScenario } from './scenarios/executor.js';
 // NOTE: loadScenarioFromFile uses fs/promises - import directly from './scenarios/loader.js' in CLI only
