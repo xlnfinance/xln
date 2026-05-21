@@ -258,7 +258,7 @@ import {
   getSignerDisplayInfo,
   log,
 } from './utils';
-import { logError } from './logger';
+import { createStructuredLogger, logError } from './logger';
 import type { PersistedFrameJournal } from './wal/store';
 import { rehydrateRestoredRuntimeInfra } from './runtime-infra';
 import {
@@ -268,6 +268,7 @@ import {
 } from './runtime-infra-gossip-store';
 
 const DEFAULT_DB_NAMESPACE = 'default';
+const runtimeLog = createStructuredLogger('runtime');
 
 const normalizeDbNamespace = (value: string): string => value.trim().toLowerCase();
 type RuntimeDbKind = 'core' | 'infra';
@@ -2909,7 +2910,7 @@ const applyRuntimeInput = async (
     };
     return { entityOutbox, mergedInputs, jOutbox, appliedRuntimeInput };
   } catch (error) {
-    console.error(`❌ CRITICAL: applyRuntimeInput failed!`, error);
+    runtimeLog.error('apply_input.failed', { error: error instanceof Error ? error.message : String(error) });
     throw error; // Don't swallow - fail fast and loud
   }
 };
@@ -3048,7 +3049,6 @@ export {
   createNumberedEntity,
   createNumberedEntitiesBatch,
   createProfileUpdateTx,
-  demoCompleteHanko,
   detectEntityType,
   encodeBoard,
   // Display and avatar functions
@@ -3187,32 +3187,6 @@ export type {
 
 // Runtime is a pure library - no auto-execution side effects.
 // Browser and server entrypoints call xln.main() explicitly.
-
-// === HANKO DEMO FUNCTION ===
-
-const demoCompleteHanko = async (): Promise<void> => {
-  try {
-    // Check if running in browser environment
-    const isBrowser = typeof window !== 'undefined';
-
-    if (isBrowser) {
-      console.log('🎯 Browser environment detected - running simplified Hanko demo...');
-      console.log('✅ Basic signature verification available');
-      console.log('💡 Full test suite available in Node.js environment');
-      console.log('✅ Hanko browser demo completed!');
-      return;
-    }
-
-    console.log('🎯 Complete Hanko test suite disabled during strict TypeScript mode');
-    // await runCompleteHankoTests();
-    console.log('✅ Complete Hanko tests skipped!');
-  } catch (error) {
-    logError('RUNTIME_TICK', '❌ Complete Hanko tests failed:', error);
-    throw error;
-  }
-};
-
-// Demo wrapper removed - use scenarios.ahb(env) or scenarios.grid(env) instead
 
 export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
   const normalizedSeed = Array.isArray(seed) ? new Uint8Array(seed) : seed;

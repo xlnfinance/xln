@@ -28,7 +28,7 @@ import { shouldRethrowEntityTxError } from './invariant-errors';
 import { executeProposal, generateProposalId } from './proposals';
 import { validateMessage } from './validation';
 import { cloneEntityState, addMessage } from '../state-helpers';
-import { logError } from '../logger';
+import { createStructuredLogger, logError } from '../logger';
 import { FINANCIAL } from '../constants';
 import { normalizeRebalanceMatchingStrategy } from '../rebalance-policy';
 import { initJBatch, batchAddSettlement } from '../j-batch';
@@ -78,6 +78,8 @@ import { handleDisputeFinalize, handleDisputeStart } from './handlers/dispute';
 import { buildCrossJurisdictionCancelAck } from '../cross-jurisdiction-orderbook';
 import { removeBookOrderById, removeCrossJurisdictionBookOrderByRouteId } from '../orderbook/cross-j';
 import { assertSameJurisdictionAccount } from '../jurisdiction-runtime';
+
+const entityTxLog = createStructuredLogger('entity.tx');
 import {
   accountHasCrossSwapAckQueued,
   accountHasPullResolveQueued,
@@ -2155,15 +2157,15 @@ export const applyEntityTx = async (
     }
 
     const skippedError = `ENTITY_TX_UNHANDLED: type=${String(entityTx.type)}`;
-    console.warn(`⚠️ ${skippedError}`);
+    entityTxLog.warn('unhandled', { type: String(entityTx.type) });
     return { newState: entityState, outputs: [], jOutputs: [], skippedError };
   } catch (error) {
-    console.error(`❌ Transaction execution error:`, error);
-    log.error(`❌ Transaction execution error: ${error}`);
+    const message = error instanceof Error ? error.message : String(error);
     if (shouldRethrowEntityTxError(error)) {
+      entityTxLog.error('failed_invariant', { type: String(entityTx.type), error: message });
       throw error;
     }
-    const message = error instanceof Error ? error.message : String(error);
+    entityTxLog.debug('skipped_error', { type: String(entityTx.type), error: message });
     return { newState: entityState, outputs: [], jOutputs: [], skippedError: message };
   }
 };

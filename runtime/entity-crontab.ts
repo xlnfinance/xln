@@ -541,10 +541,11 @@ async function checkAccountTimeoutsHandler(
             },
           ],
         });
-        console.warn(
-          `⏰ PENDING-FRAME-RESEND: Account ${counterpartyId.slice(-4)} h${accountMachine.pendingFrame.height} ` +
-            `age=${Math.floor(frameAge / 1000)}s`,
-        );
+        crontabLog.debug('pending_frame.resend', {
+          account: shortId(counterpartyId),
+          height: accountMachine.pendingFrame.height,
+          ageSeconds: Math.floor(frameAge / 1000),
+        });
       }
 
       // Non-HTLC pending frames: dispute suggestion after 30s
