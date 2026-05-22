@@ -25,7 +25,6 @@ import {
 import { bootScenario, registerEntities, type RegisteredEntity } from './boot';
 import { userAutoApprove } from '../entity-tx/handlers/settle';
 import { deriveDelta } from '../account-utils';
-import { getAccountFrameHistoryView } from '../env-events';
 import { isLeftEntity } from '../entity-id-utils';
 import { hashHtlcSecret } from '../htlc-utils';
 import { ethers } from 'ethers';
@@ -423,6 +422,7 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
 
   const daveCollateralBeforeHtlc =
     findReplica(env, dave.id)[1].state.accounts.get(hub.id)?.deltas.get(USDC)?.collateral || 0n;
+  const phase65StartHeight = env.height;
 
   const htlcSecret = ethers.keccak256(ethers.toUtf8Bytes('settle-rebalance-htlc-phase-6-5'));
   const htlcHashlock = hashHtlcSecret(htlcSecret);
@@ -443,33 +443,54 @@ export async function runSettleRebalance(_existingEnv?: Env): Promise<Env> {
       },
     }],
   }]);
-  for (let i = 0; i < 10; i++) {
-    advanceTime(100);
+  let daveAccountAfterHtlc = findReplica(env, dave.id)[1].state.accounts.get(hub.id);
+  let daveRequestedAfterHtlc = 0n;
+  let daveCollateralAfterHtlc = daveCollateralBeforeHtlc;
+  let phase65HtlcReceived = false;
+  let phase65HtlcFinalized = false;
+  let phase65RequestCollateralCommitted = false;
+
+  // Wait for the full off-chain ACK chain, not a fixed tick count. Runtime
+  // may insert a J-event-only frame between submit and local follow-ups; the
+  // invariant here is the observed sequence, not a specific frame number.
+  for (let i = 0; i < 80; i++) {
+    advanceTime(i < 20 ? 50 : 100);
     await process(env);
-  }
-  // NOTE: Avoid converge() here because it advances scenario time by j block delay
-  // and can let hub crontab fully fulfill+clear the just-created request before
-  // this phase validates HTLC -> auto-rebalance trigger.
-  for (let i = 0; i < 10; i++) {
-    advanceTime(50);
-    await process(env);
+    daveAccountAfterHtlc = findReplica(env, dave.id)[1].state.accounts.get(hub.id);
+    daveRequestedAfterHtlc = daveAccountAfterHtlc?.requestedRebalance.get(USDC) || 0n;
+    daveCollateralAfterHtlc = daveAccountAfterHtlc?.deltas.get(USDC)?.collateral || 0n;
+    const phase65Logs = (env.history ?? [])
+      .filter((snapshot) => Number(snapshot.height ?? 0) >= phase65StartHeight)
+      .flatMap((snapshot) => snapshot.logs ?? []);
+    phase65HtlcReceived = phase65Logs.some((log) => {
+      const data = (log.data ?? {}) as Record<string, unknown>;
+      return log.message === 'HtlcReceived' &&
+        String(data['entityId'] || '').toLowerCase() === dave.id.toLowerCase() &&
+        String(data['hashlock'] || '').toLowerCase() === htlcHashlock.toLowerCase();
+    });
+    phase65HtlcFinalized = phase65Logs.some((log) => {
+      const data = (log.data ?? {}) as Record<string, unknown>;
+      return log.message === 'HtlcFinalized' &&
+        String(data['hashlock'] || '').toLowerCase() === htlcHashlock.toLowerCase();
+    });
+    phase65RequestCollateralCommitted = phase65Logs.some((log) => {
+      const data = (log.data ?? {}) as Record<string, unknown>;
+      return log.message === 'request_collateral_committed' &&
+        String(data['entityId'] || '').toLowerCase() === dave.id.toLowerCase() &&
+        Number(data['tokenId']) === USDC;
+    });
+    if (phase65HtlcReceived && phase65HtlcFinalized && phase65RequestCollateralCommitted &&
+      (daveRequestedAfterHtlc > 0n || daveCollateralAfterHtlc > daveCollateralBeforeHtlc)) {
+      break;
+    }
   }
 
-  const daveAccountAfterHtlc = findReplica(env, dave.id)[1].state.accounts.get(hub.id);
-  const daveRequestedAfterHtlc = daveAccountAfterHtlc?.requestedRebalance.get(USDC) || 0n;
-  const daveCollateralAfterHtlc = daveAccountAfterHtlc?.deltas.get(USDC)?.collateral || 0n;
   const phase65TopUpApplied = daveCollateralAfterHtlc > daveCollateralBeforeHtlc;
-  const daveRecentFramesAfterHtlc = daveAccountAfterHtlc ? getAccountFrameHistoryView(daveAccountAfterHtlc) : [];
-  const daveRecentFrameHasHtlcResolve = daveRecentFramesAfterHtlc.some((frame) =>
-    frame.accountTxs.some((tx) => tx.type === 'htlc_resolve'),
-  );
-  assert(daveRecentFrameHasHtlcResolve, 'Expected htlc_resolve in Dave frame history before request_collateral', env);
-  const daveRecentFrameHasRequestCollateral = daveRecentFramesAfterHtlc.some((frame) =>
-    frame.accountTxs.some((tx) => tx.type === 'request_collateral' && Number(tx.data?.tokenId) === USDC),
-  );
+  assert(phase65HtlcReceived, 'Expected Dave to receive HTLC before request_collateral', env);
+  assert(phase65HtlcFinalized, 'Expected HTLC to finalize before request_collateral', env);
   assert(
-    daveRecentFrameHasRequestCollateral,
-    'Expected request_collateral frame after HTLC resolve (auto-rebalance trigger)',
+    phase65RequestCollateralCommitted,
+    'Expected request_collateral commit after HTLC resolve (auto-rebalance trigger)',
     env,
   );
   assert(

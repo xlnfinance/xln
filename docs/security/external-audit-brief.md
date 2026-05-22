@@ -14,11 +14,15 @@ Review these surfaces first:
 - Cross-jurisdiction delayed-clearing route lifecycle and orderbook cleanup.
 - Relay/direct transport trust boundaries, including encrypted-only ingress and hub-only direct endpoints.
 - Production deploy, health, and release-gate scripts.
+- User-facing Pay, same-account Swap, and Cross-j Swap coverage through the
+  shared frontend surfaces and their E2E tests.
 
 Out of scope unless a scoped issue depends on it:
 
 - Editorial product copy.
 - Non-production scenario-only demos.
+- BrowserVM simulator internals, except where they can affect server/RPC
+  runtime state.
 - Experimental side apps outside runtime, custody, native shell security, and frontend payment surfaces.
 
 ## Main Invariants
@@ -38,6 +42,7 @@ The reviewer should run these commands from a clean checkout and include exact v
 
 ```bash
 bun run gate:ci
+bun run test:e2e:coverage
 bun run test:rpc-settlement
 bun run soak:quick
 bun run prod:health
@@ -83,7 +88,8 @@ The soak release command is deliberately long. It is the operational evidence fo
 - Do not propose repair-on-restore or quarantine behavior for production storage corruption. Production should fail closed.
 - Do not route cross-jurisdiction control messages through generic public P2P unless a new signed inter-runtime protocol is explicitly designed and reviewed.
 - Do not treat "queued" HTTP responses as committed payments.
-- Do not accept BrowserVM-only evidence for J-layer correctness; the RPC/anvil path must be green.
+- Do not accept BrowserVM-only evidence for J-layer correctness. BrowserVM is a
+  dev/demo simulator for now; the public-testnet gate is RPC/anvil only.
 
 ## Auditor Deliverables
 

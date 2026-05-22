@@ -31,6 +31,45 @@ const buildAbortSentBatchInput = (
   ],
 });
 
+const hasJEventTx = (input: RoutedEntityInput): boolean =>
+  (input.entityTxs ?? []).some((tx) => tx?.type === 'j_event');
+
+const captureQueuedEntityInputs = (env: Env): RoutedEntityInput[] => {
+  const mempool = env.runtimeMempool ?? env.runtimeInput;
+  return Array.isArray(mempool?.entityInputs) ? [...mempool.entityInputs] : [];
+};
+
+const prioritizeJEventsQueuedAfterSubmit = (env: Env, beforePoll: RoutedEntityInput[]): number => {
+  const mempool = env.runtimeMempool ?? env.runtimeInput;
+  if (!mempool || !Array.isArray(mempool.entityInputs)) return 0;
+  const current = mempool.entityInputs;
+  if (current.length <= beforePoll.length) return 0;
+
+  const newlyQueued = current.slice(beforePoll.length);
+  const newlyQueuedJEvents = newlyQueued.filter(hasJEventTx);
+  if (newlyQueuedJEvents.length === 0) return 0;
+
+  const newlyQueuedOtherInputs = newlyQueued.filter((input) => !hasJEventTx(input));
+  // Chain receipts caused by the just-submitted J batch must be visible before
+  // same-entity local follow-ups already queued for the next R-frame. Otherwise
+  // a follow-up such as j_broadcast can observe a stale sentBatch latch and
+  // fail even though the chain transaction has already finalized.
+  mempool.entityInputs = [...newlyQueuedJEvents, ...beforePoll, ...newlyQueuedOtherInputs];
+  env.runtimeMempool = mempool;
+  env.runtimeInput = mempool;
+  return newlyQueuedJEvents.length;
+};
+
+const pollSubmittedJEventsBeforeFollowups = async (env: Env, jAdapter: { pollNow?: () => Promise<void> }): Promise<void> => {
+  if (typeof jAdapter.pollNow !== 'function') return;
+  const beforePoll = captureQueuedEntityInputs(env);
+  await jAdapter.pollNow();
+  const prioritized = prioritizeJEventsQueuedAfterSubmit(env, beforePoll);
+  if (prioritized > 0) {
+    console.log(`✅ [J-SUBMIT] prioritized ${prioritized} watcher j_event input(s) before local follow-ups`);
+  }
+};
+
 /**
  * Submit post-commit J batches after the R-frame is durable.
  *
@@ -110,6 +149,7 @@ export async function submitRuntimeJOutbox(
           console.log(
             `✅ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)}: ok (events=${result.events?.length ?? 0}, txHash=${result.txHash ?? 'n/a'})`,
           );
+          await pollSubmittedJEventsBeforeFollowups(env, jAdapter);
         } else {
           console.error(`❌ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} FAILED: ${result.error}`);
           if (!env.scenarioMode) {
