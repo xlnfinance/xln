@@ -16,6 +16,8 @@ const CORE_E2E_TITLES = [
   'entity workspace dispute lifecycle returns reserve',
   'entity settle workspace Sign & Broadcast submits dispute batch',
   'two isolated users trade against each other through one hub orderbook without market maker liquidity',
+  'resting maker order can fill partially, stay open, then cancel remainder',
+  'one resting maker order can be matched by two isolated takers until fully closed',
   'swap round-trip both directions clears holds and updates closed history on both peers',
   'bidirectional payments survive across two isolated browser contexts',
   'two users can place full, partial, and disputed cross-j swaps through the shared swap builder',

@@ -13,7 +13,7 @@ const assertIncludes = (text: string, needle: string, path: string): void => {
 
 const packageJson = JSON.parse(readText('package.json')) as { scripts?: Record<string, string> };
 const scripts = packageJson.scripts ?? {};
-for (const name of ['gate:ci', 'gate:release', 'test:rpc-settlement', 'soak:quick', 'soak:release', 'prod:health']) {
+for (const name of ['gate:ci', 'gate:release', 'test:e2e:coverage', 'test:rpc-settlement', 'soak:quick', 'soak:release', 'prod:health']) {
   if (!scripts[name]) throw new Error(`package.json missing script: ${name}`);
 }
 
@@ -32,6 +32,7 @@ for (const heading of [
 }
 for (const command of [
   'bun run gate:ci',
+  'bun run test:e2e:coverage',
   'bun run gate:release',
   'bun run test:rpc-settlement',
   'bun run soak:release',
@@ -43,12 +44,25 @@ for (const command of [
 const mainnetPath = 'docs/mainnet.md';
 const mainnet = readText(mainnetPath);
 for (const marker of [
+  'bun run test:e2e:coverage',
   'bun run test:rpc-settlement',
   'bun run soak:release',
   'docs/security/external-audit-brief.md',
   'bun run prod:health',
 ]) {
   assertIncludes(mainnet, marker, mainnetPath);
+}
+
+const flowCoveragePath = 'docs/testnet-flow-coverage.md';
+const flowCoverage = readText(flowCoveragePath);
+for (const marker of [
+  '## Pay',
+  '## Same-Account Swap',
+  '## Cross-J Swap',
+  'bun run test:e2e:coverage',
+  'bun run test:e2e:core',
+]) {
+  assertIncludes(flowCoverage, marker, flowCoveragePath);
 }
 
 console.log('✅ security audit pack check passed');

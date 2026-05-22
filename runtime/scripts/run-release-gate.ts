@@ -61,6 +61,7 @@ const quickSteps: GateStep[] = [
 
 const ciSteps: GateStep[] = [
   ...quickSteps,
+  { name: 'flow E2E coverage contract', command: 'bun run test:e2e:coverage', timeoutMs: 30_000 },
   { name: 'frontend check', command: 'bun run check:frontend', timeoutMs: 180_000 },
   { name: 'contract full suite', command: 'bun run test:contracts:full', timeoutMs: 240_000 },
   { name: 'RPC settlement parity', command: 'bun run test:rpc-settlement', timeoutMs: 240_000 },
@@ -75,7 +76,6 @@ const releaseSteps: GateStep[] = [
   { name: 'core E2E gate', command: 'bun run test:e2e:core', timeoutMs: 1_200_000 },
   { name: 'RPC system scenarios', command: 'bun run test:system:parallel', timeoutMs: 1_200_000 },
   { name: 'hub 10k storage benchmark', command: 'bun run bench:radapter:hub10k', timeoutMs: 1_200_000 },
-  { name: 'full E2E matrix', command: 'bun run test:e2e:full', timeoutMs: 2_400_000 },
   { name: 'production health smoke', command: 'bun run prod:health', timeoutMs: 60_000 },
 ];
 

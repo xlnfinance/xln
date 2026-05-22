@@ -431,6 +431,13 @@ export async function handleSettleExecute(
   }
 
   const workspace = account.settlementWorkspace;
+  if (workspace.status === 'submitted') {
+    addMessage(newState, `⏭️ settle_execute skipped: settlement already submitted`);
+    console.warn(
+      `⚠️ settle_execute skipped: settlement already submitted for ${counterpartyEntityId.slice(-4)} (waiting for J-event finality)`,
+    );
+    return { newState, outputs, mempoolOps };
+  }
 
   // Need counterparty's hanko for on-chain validation
   const { iAmLeft } = getAccountPerspective(account, entityState.entityId);

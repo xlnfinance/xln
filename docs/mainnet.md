@@ -2,7 +2,8 @@
 
 **[← Index](readme.md)** | **[Current Status](status.md)** | **[Roadmap](roadmap.md)**
 
-This file defines the release bar for mainnet.
+This file defines the release bar for mainnet and the narrower bar for the next
+public testnet.
 
 It is intentionally narrower than `status.md`:
 - `status.md` answers: what are we doing now?
@@ -16,6 +17,23 @@ It is intentionally narrower than `status.md`:
 The project appears to be in the "testnet/prod-hardening" phase:
 - bilateral protocol ideas and core mechanics exist
 - the remaining risk is concentrated in integration, recovery, security, and operations
+
+## Public Testnet Scope
+
+The next release target is a strong public testnet, not mainnet. The blocking
+surface is deliberately narrow:
+
+- server runtime and RPC JAdapter paths
+- transport ingress, encrypted entity inputs, and hub direct endpoints
+- storage snapshot/WAL restore and canonical hashes
+- J-layer `processBatch` contract integration on real Anvil/RPC
+- user-facing Pay, same-account Swap, and Cross-j Swap through the shared app UI
+- fast/core E2E for happy paths plus worst-case rejects, partial fills, disputes,
+  expiry/clear paths, and reload/restart behavior
+
+BrowserVM is out of the public-testnet release scope. It can remain as a local
+dev/demo simulator, but BrowserVM success is not accepted as evidence for
+testnet readiness.
 
 ## Mainnet Gates
 
@@ -33,6 +51,7 @@ Required:
 Executable checks:
 
 ```bash
+bun run test:e2e:coverage
 bun run test:contracts:full
 bun run test:rpc-settlement
 ```
@@ -120,6 +139,8 @@ Important, but not always first-launch blockers:
 - richer fee markets
 - product polish beyond critical clarity
 - longer-term wallet surface expansion
+- BrowserVM parity and BrowserVM-specific debugger polish
+- broad demo/full-matrix E2E that does not exercise public-testnet flows
 
 ## Required Live Docs
 

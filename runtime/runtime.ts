@@ -588,6 +588,49 @@ const hasRuntimeWork = (env: Env): boolean => {
   return false;
 };
 
+const prioritizeJEventFrame = (
+  runtimeInput: RuntimeInput,
+  mempool: RuntimeInput,
+  runtimeState: NonNullable<Env['runtimeState']>,
+  timestamp: number,
+): boolean => {
+  const priorityInputs: RoutedEntityInput[] = [];
+  const deferredInputs: RoutedEntityInput[] = [];
+
+  for (const input of runtimeInput.entityInputs) {
+    const entityTxs = input.entityTxs ?? [];
+    const jEventTxs = entityTxs.filter((tx) => tx?.type === 'j_event');
+    const otherTxs = entityTxs.filter((tx) => tx?.type !== 'j_event');
+    const hasNonTxPayload =
+      !!input.proposedFrame ||
+      (!!input.hashPrecommits && input.hashPrecommits.size > 0);
+
+    if (jEventTxs.length > 0) {
+      priorityInputs.push({ ...input, entityTxs: jEventTxs });
+    }
+
+    if (otherTxs.length > 0 || hasNonTxPayload) {
+      const deferredInput: RoutedEntityInput = { ...input, entityTxs: otherTxs };
+      if (otherTxs.length === 0) {
+        delete deferredInput.entityTxs;
+      }
+      deferredInputs.push(deferredInput);
+    }
+  }
+
+  if (priorityInputs.length === 0 || deferredInputs.length === 0) return false;
+
+  // Chain observations are frame-boundary facts. Apply them alone before any
+  // local follow-up tx that may depend on sentBatch, entityNonce, reserves, or
+  // account-settlement claims; merging both into one entity frame can make the
+  // follow-up build a stale J batch against pre-event state.
+  runtimeInput.entityInputs = priorityInputs;
+  mempool.entityInputs = [...deferredInputs, ...mempool.entityInputs];
+  mempool.queuedAt = mempool.queuedAt ?? timestamp;
+  runtimeState.clockPrimed = true;
+  return true;
+};
+
 const getRuntimeWakeDeps = (): RuntimeWakeDeps => ({
   ensureRuntimeState,
   ensureRuntimeMempool,
@@ -1755,6 +1798,12 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
     if (mempool.jInputs) mempool.jInputs = [];
     mempool.queuedAt = undefined;
 
+    const jEventFramePrioritized = prioritizeJEventFrame(
+      runtimeInput,
+      mempool,
+      state,
+      mempoolQueuedAt ?? (env.timestamp ?? 0),
+    );
     const hasRuntimeInput =
       runtimeInput.runtimeTxs.length > 0 ||
       runtimeInput.entityInputs.length > 0 ||
@@ -1808,6 +1857,9 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
         console.log(
           `📥 TICK: Processing ${runtimeInput.entityInputs.length} inputs for [${runtimeInput.entityInputs.map(o => o.entityId.slice(-4)).join(',')}]`,
         );
+        if (jEventFramePrioritized) {
+          console.log(`📥 TICK: deferred non-J inputs behind watcher j_event frame`);
+        }
         if (runtimeInput.runtimeTxs.length > 0) {
           console.log(`📥 TICK: Processing ${runtimeInput.runtimeTxs.length} queued runtimeTxs`);
         }
