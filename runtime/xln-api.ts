@@ -54,6 +54,18 @@ export type {
 } from './types';
 export type { PersistedFrameJournal } from './wal/store';
 export type { StorageFrameRecord, StorageHead } from './storage/types';
+export type {
+  EncryptedRuntimeRecoveryBundleV1,
+  RuntimeRecoveryBundleV1,
+  RuntimeRecoveryMetaV1,
+  RuntimeRecoverySignerV1,
+  TowerAppointmentOwnerProofV1,
+  TowerAppointmentV1,
+  TowerDiscoverResponseV1,
+  TowerReceiptV1,
+  TowerRestoreRequestV1,
+  TowerRestoreResponseV1,
+} from './recovery/types';
 
 export type { Profile, GossipLayer } from './networking/gossip';
 export type { PaymentRoute } from './routing/pathfinding';
@@ -120,6 +132,12 @@ import type {
   EntityInput,
   EntityState,
 } from './types';
+import type {
+  EncryptedRuntimeRecoveryBundleV1,
+  RuntimeRecoveryBundleV1,
+  RuntimeRecoveryMetaV1,
+  RuntimeRecoverySignerV1,
+} from './recovery/types';
 import type { JAdapter } from './jadapter/types';
 import type { PersistedFrameJournal } from './wal/store';
 import type { EmbeddedRuntimeAdapter } from './radapter/embedded';
@@ -382,6 +400,10 @@ export interface XLNModule {
   clearDatabase: () => Promise<void>;
   clearDatabaseAndHistory: (env: Env) => Promise<Env>;
   saveEnvToDB: (env: Env) => Promise<void>;
+  restoreEnvFromCheckpointSnapshot: (
+    snapshot: Record<string, unknown>,
+    options?: { runtimeSeed?: string | null; runtimeId?: string | null },
+  ) => Promise<Env>;
   loadEnvFromDB: (
     runtimeId?: string | null,
     runtimeSeed?: string | null,
@@ -420,6 +442,26 @@ export interface XLNModule {
     },
   ) => Promise<PersistedFrameJournal[]>;
   readPersistedCheckpointSnapshot: (env: Env, height: number) => Promise<Record<string, unknown> | null>;
+  buildRuntimeRecoveryBundle: (
+    env: Env,
+    options: { signers: RuntimeRecoverySignerV1[]; meta?: RuntimeRecoveryMetaV1; createdAt?: number },
+  ) => RuntimeRecoveryBundleV1;
+  encryptRuntimeRecoveryBundle: (
+    bundle: RuntimeRecoveryBundleV1,
+    runtimeSeed: string,
+  ) => Promise<EncryptedRuntimeRecoveryBundleV1>;
+  decryptRuntimeRecoveryBundle: (
+    bundle: EncryptedRuntimeRecoveryBundleV1,
+    runtimeSeed: string,
+  ) => Promise<RuntimeRecoveryBundleV1>;
+  deriveRuntimeRecoveryLookupKey: (runtimeId: string, runtimeSeed: string) => string;
+  buildTowerAppointmentOwnerMessage: (
+    runtimeId: string,
+    lookupKey: string,
+    bundleHash: string,
+    height: number,
+    signedAt: number,
+  ) => string;
 
   // Blockchain operations
   submitProcessBatch: (env: Env, jurisdiction: JurisdictionConfig, entityId: string, batch: unknown, signerId?: string) => Promise<{ transaction: unknown; receipt: unknown }>;
