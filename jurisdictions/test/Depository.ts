@@ -794,6 +794,63 @@ describe("Depository", function () {
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(200n);
   });
 
+  it("never lets a tower start a dispute when no active dispute exists", async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const [, , tower] = await hre.ethers.getSigners();
+
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const tokenId = 1n;
+    const appointmentSequence = 9n;
+    const lastResortWindowBlocks = 16n;
+
+    const finalNonce = 2n;
+    const finalProofbody = proofBody([-200n], [tokenId]);
+    const finalProofbodyHash = proofBodyHash(finalProofbody);
+    const finalization = {
+      counterentity: right.entityId,
+      initialNonce: 1n,
+      finalNonce,
+      initialProofbodyHash: proofBodyHash(proofBody([0n], [tokenId])),
+      finalProofbody,
+      finalArguments: "0x",
+      initialArguments: "0x",
+      sig: signEntityHash(
+        right.entityId,
+        await disputeProofHash(
+          depository,
+          await accountKeyFor(depository, left.entityId, right.entityId),
+          finalNonce,
+          finalProofbodyHash,
+        ),
+        right.privateKey,
+      ),
+      startedByLeft: true,
+      disputeUntilBlock: 0,
+      cooperative: false,
+    };
+    const ownerAuthHash = await watchtowerCounterDisputeHash(
+      depository,
+      tower.address,
+      left.entityId,
+      right.entityId,
+      finalNonce,
+      finalProofbodyHash,
+      lastResortWindowBlocks,
+      appointmentSequence,
+    );
+    const ownerAuthorization = signEntityHash(left.entityId, ownerAuthHash, left.privateKey);
+
+    await expect(
+      depository.connect(tower).watchtowerCounterDispute(
+        left.entityId,
+        finalization,
+        lastResortWindowBlocks,
+        appointmentSequence,
+        ownerAuthorization,
+      )
+    ).to.be.revertedWithCustomError(depository, "E5");
+  });
+
   it("rejects watchtower counter-dispute from the wrong tower or without a newer signed proof", async function () {
     const { depository } = await loadFixture(deployFixture);
     const [, , tower, wrongTower] = await hre.ethers.getSigners();
