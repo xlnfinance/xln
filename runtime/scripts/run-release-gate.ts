@@ -36,6 +36,7 @@ const RUNTIME_CORE_TESTS = [
   'native/__tests__/native-build-options.test.ts',
   'native/__tests__/native-deeplink.test.ts',
   'native/__tests__/lazy-entity-id.test.ts',
+  'native/__tests__/watchtower-recovery-flow.test.ts',
 ].join(' ');
 
 const SOUNDCHECK_TARGETS = [

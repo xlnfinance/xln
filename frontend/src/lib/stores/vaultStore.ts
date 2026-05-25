@@ -423,7 +423,7 @@ const getConfiguredRecoveryTowers = (runtime: Runtime | null | undefined): Recov
   return [...deduped.values()];
 };
 
-async function fetchTowerServerInfo(towerUrl: string): Promise<TowerServerInfo> {
+export async function fetchTowerServerInfo(towerUrl: string): Promise<TowerServerInfo> {
   const normalizedUrl = normalizeTowerBaseUrl(towerUrl);
   const cached = recoveryTowerInfoCache.get(normalizedUrl);
   const now = Date.now();
@@ -536,7 +536,7 @@ const persistRuntimeMetadataSnapshot = (): void => {
   }
 };
 
-async function tryRestoreRuntimeEnvFromTower(
+export async function tryRestoreRuntimeEnvFromTower(
   runtime: Runtime,
   xln: XLNModule,
 ): Promise<{ env: Env; bundle: RuntimeRecoveryBundleV1 } | null> {
@@ -1069,6 +1069,12 @@ const resolveRpcUrl = (rpc: string, baseOrigin?: string): string => {
   return rpc;
 };
 
+// Tower remedies carry dispute proof bodies, which still contain bigint deltas.
+// JSON.stringify would throw here and silently break active watchtower coverage,
+// so we normalize bigint leaves into decimal strings before upload.
+const stringifyTowerPayload = (value: unknown): string =>
+  JSON.stringify(value, (_key, candidate) => typeof candidate === 'bigint' ? candidate.toString() : candidate);
+
 type ActiveTowerAppointmentUpload = {
   tower: RecoveryTowerConfig;
   appointment: TowerAppointmentV1;
@@ -1076,7 +1082,7 @@ type ActiveTowerAppointmentUpload = {
   triggerHint: string;
 };
 
-async function buildDelayedLastResortAppointmentsForTower(
+export async function buildDelayedLastResortAppointmentsForTower(
   runtime: Runtime,
   env: Env,
   xln: XLNModule,
@@ -1188,7 +1194,7 @@ async function buildDelayedLastResortAppointmentsForTower(
       const triggerHint = `chain:${chainId}:acct:${entityId}:${counterpartyId}`;
       const activePayload: TowerActivePayloadV1 = {
         triggerHint,
-        encryptedRemedy: JSON.stringify(remedy),
+        encryptedRemedy: stringifyTowerPayload(remedy),
         actionKind: 'counter_dispute_only',
         appointmentSequence,
         proofNonce,
