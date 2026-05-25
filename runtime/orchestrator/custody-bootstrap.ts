@@ -13,6 +13,14 @@ const sleep = async (ms: number): Promise<void> => {
   await new Promise(resolve => setTimeout(resolve, ms));
 };
 
+const assertChildStillRunning = (child: ManagedChild | null): void => {
+  if (!child || child.proc.exitCode === null) return;
+  throw new Error(
+    `${child.name} exited early with code=${String(child.proc.exitCode)}\n` +
+    `stdout:\n${tailLines(child.stdoutLines)}\n\nstderr:\n${tailLines(child.stderrLines)}`,
+  );
+};
+
 const resolveCustodyJurisdictionsJsonPath = (): string => {
   const overridePath = process.env['XLN_JURISDICTIONS_PATH']?.trim() || '';
   return overridePath.length > 0
@@ -181,6 +189,7 @@ export const waitForHttpReady = async (
   const deadline = Date.now() + timeoutMs;
   let lastError = 'not-started';
   while (Date.now() < deadline) {
+    assertChildStillRunning(child);
     try {
       const insecureLocalHttps = url.startsWith('https://localhost:') || url.startsWith('https://127.0.0.1:');
       const prevTlsReject = process.env['NODE_TLS_REJECT_UNAUTHORIZED'];
@@ -195,7 +204,10 @@ export const waitForHttpReady = async (
       const bodyText = await response.text();
       if (response.status < 500) {
         const ready = isReady ? await isReady(response, bodyText) : true;
-        if (ready) return;
+        if (ready) {
+          assertChildStillRunning(child);
+          return;
+        }
         lastError = `predicate=false status=${response.status}`;
       } else {
         lastError = `status=${response.status}`;
@@ -203,12 +215,7 @@ export const waitForHttpReady = async (
     } catch (error) {
       lastError = error instanceof Error ? error.message : String(error);
     }
-    if (child && child.proc.exitCode !== null) {
-      throw new Error(
-        `${child.name} exited early with code=${String(child.proc.exitCode)}\n` +
-        `stdout:\n${tailLines(child.stdoutLines)}\n\nstderr:\n${tailLines(child.stderrLines)}`,
-      );
-    }
+    assertChildStillRunning(child);
     await sleep(1000);
   }
 
@@ -419,98 +426,108 @@ export const waitForDebugEntity = async (
 export const startCustodySupport = async (
   options: StartCustodySupportOptions,
 ): Promise<StartedCustodySupport> => {
-  const shardJurisdictionsPath = join(options.dbRoot, 'jurisdictions.json');
-  await mkdir(options.dbRoot, { recursive: true });
-  await writeFile(shardJurisdictionsPath, await readFile(resolveCustodyJurisdictionsJsonPath(), 'utf8'), 'utf8');
-  const daemonAuthSeed = randomBytes(32).toString('hex');
-  const daemonAuthAudience = `custody-daemon-${options.daemonPort}`;
-  const deriveDaemonAdminKey = (): string => deriveRuntimeAdapterCapabilityToken(
-    daemonAuthSeed,
-    'full',
-    Date.now() + 30 * 60_000,
-    {
-      audience: daemonAuthAudience,
-      keyId: 'custody-bootstrap',
-      tokenId: randomBytes(16).toString('hex'),
-    },
-  );
-  const daemonAuthKey = deriveDaemonAdminKey();
-  const daemonChild = spawnBunChild(
-    'custody-daemon',
-    ['runtime/server.ts', '--port', String(options.daemonPort), '--host', '127.0.0.1', '--server-id', `custody-daemon-${options.daemonPort}`],
-    {
-      USE_ANVIL: 'true',
-      XLN_USE_PREDEPLOYED_ADDRESSES: 'true',
-      BOOTSTRAP_LOCAL_HUBS: '0',
-      XLN_SKIP_SERVER_BOOTSTRAP: '1',
-      XLN_EARLY_HTTP_BIND: '1',
-      XLN_RADAPTER_AUTH_SEED: daemonAuthSeed,
-      XLN_RADAPTER_AUDIENCE: daemonAuthAudience,
-      XLN_RADAPTER_REQUIRE_STRONG_AUTH_SEED: '1',
-      ANVIL_RPC: options.rpcUrl,
-      PUBLIC_RPC: options.rpcUrl,
-      XLN_STARTUP_STEP_TIMEOUT_MS: process.env['XLN_STARTUP_STEP_TIMEOUT_MS'] ?? '60000',
-      RELAY_URL: options.relayUrl,
-      XLN_RUNTIME_SEED: options.daemonRuntimeSeed || `${options.seed}:runtime`,
-      XLN_DB_PATH: `${options.dbRoot}/daemon-db`,
-      XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
-    },
-  );
-  const [, hubIds] = await Promise.all([
-    waitForHttpReady(`http://127.0.0.1:${options.daemonPort}/api/health`, daemonChild, DEFAULT_CHILD_READY_TIMEOUT_MS, isDaemonHealthReady),
-    discoverHubIds(options.apiBaseUrl),
-  ]);
-  const controlResult = await runDaemonControl(
-    [
-      'setup-custody',
-      '--base-url', `http://127.0.0.1:${options.daemonPort}`,
-      '--name', options.profileName,
-      '--seed', options.seed,
-      '--signer-label', options.signerLabel,
-      '--auth-key', daemonAuthKey,
-      '--hub-ids', hubIds.join(','),
-      '--relay-url', options.relayUrl,
-      '--gossip-poll-ms', '250',
-    ],
-    {
-      USE_ANVIL: 'true',
-    },
-  );
+  let daemonChild: ManagedChild | null = null;
+  let custodyChild: ManagedChild | null = null;
+  try {
+    const shardJurisdictionsPath = join(options.dbRoot, 'jurisdictions.json');
+    await mkdir(options.dbRoot, { recursive: true });
+    await writeFile(shardJurisdictionsPath, await readFile(resolveCustodyJurisdictionsJsonPath(), 'utf8'), 'utf8');
+    const daemonAuthSeed = randomBytes(32).toString('hex');
+    const daemonAuthAudience = `custody-daemon-${options.daemonPort}`;
+    const deriveDaemonAdminKey = (): string => deriveRuntimeAdapterCapabilityToken(
+      daemonAuthSeed,
+      'full',
+      Date.now() + 30 * 60_000,
+      {
+        audience: daemonAuthAudience,
+        keyId: 'custody-bootstrap',
+        tokenId: randomBytes(16).toString('hex'),
+      },
+    );
+    const daemonAuthKey = deriveDaemonAdminKey();
+    daemonChild = spawnBunChild(
+      'custody-daemon',
+      ['runtime/server.ts', '--port', String(options.daemonPort), '--host', '127.0.0.1', '--server-id', `custody-daemon-${options.daemonPort}`],
+      {
+        USE_ANVIL: 'true',
+        XLN_USE_PREDEPLOYED_ADDRESSES: 'true',
+        BOOTSTRAP_LOCAL_HUBS: '0',
+        XLN_SKIP_SERVER_BOOTSTRAP: '1',
+        XLN_EARLY_HTTP_BIND: '1',
+        XLN_RADAPTER_AUTH_SEED: daemonAuthSeed,
+        XLN_RADAPTER_AUDIENCE: daemonAuthAudience,
+        XLN_RADAPTER_REQUIRE_STRONG_AUTH_SEED: '1',
+        ANVIL_RPC: options.rpcUrl,
+        PUBLIC_RPC: options.rpcUrl,
+        XLN_STARTUP_STEP_TIMEOUT_MS: process.env['XLN_STARTUP_STEP_TIMEOUT_MS'] ?? '60000',
+        RELAY_URL: options.relayUrl,
+        XLN_RUNTIME_SEED: options.daemonRuntimeSeed || `${options.seed}:runtime`,
+        XLN_DB_PATH: `${options.dbRoot}/daemon-db`,
+        XLN_JURISDICTIONS_PATH: shardJurisdictionsPath,
+      },
+    );
+    const [, hubIds] = await Promise.all([
+      waitForHttpReady(`http://127.0.0.1:${options.daemonPort}/api/health`, daemonChild, DEFAULT_CHILD_READY_TIMEOUT_MS, isDaemonHealthReady),
+      discoverHubIds(options.apiBaseUrl),
+    ]);
+    const controlResult = await runDaemonControl(
+      [
+        'setup-custody',
+        '--base-url', `http://127.0.0.1:${options.daemonPort}`,
+        '--name', options.profileName,
+        '--seed', options.seed,
+        '--signer-label', options.signerLabel,
+        '--auth-key', daemonAuthKey,
+        '--hub-ids', hubIds.join(','),
+        '--relay-url', options.relayUrl,
+        '--gossip-poll-ms', '250',
+      ],
+      {
+        USE_ANVIL: 'true',
+      },
+    );
 
-  if (!controlResult.ok) {
-    throw new Error('setup-custody returned ok=false');
+    if (!controlResult.ok) {
+      throw new Error('setup-custody returned ok=false');
+    }
+
+    const identity = controlResult.result;
+    await waitForCustodyRouteableState(options.apiBaseUrl, identity.entityId, hubIds);
+    const custodyHttps = resolveCustodyServiceHttps();
+
+    custodyChild = spawnBunChild(
+      'custody-service',
+      ['custody/server.ts'],
+      {
+        CUSTODY_HOST: '127.0.0.1',
+        CUSTODY_PORT: String(options.custodyPort),
+        CUSTODY_HTTPS: custodyHttps ? '1' : '0',
+        CUSTODY_DAEMON_WS: `ws://127.0.0.1:${options.daemonPort}/rpc`,
+        CUSTODY_DAEMON_AUTH_SEED: daemonAuthSeed,
+        CUSTODY_DAEMON_AUTH_AUDIENCE: daemonAuthAudience,
+        CUSTODY_WALLET_URL: options.walletUrl,
+        CUSTODY_ENTITY_ID: identity.entityId,
+        CUSTODY_SIGNER_ID: identity.signerId,
+        CUSTODY_JURISDICTION_ID: options.jurisdictionId,
+        CUSTODY_DB_PATH: `${options.dbRoot}/custody.sqlite`,
+      },
+    );
+    await waitForCustodyServiceReady(options.custodyPort, custodyChild, custodyHttps);
+
+    return {
+      daemonChild,
+      custodyChild,
+      identity,
+      hubIds,
+      daemonAuthSeed,
+      daemonAuthAudience,
+      daemonAuthKey,
+    };
+  } catch (error) {
+    await Promise.allSettled([
+      stopManagedChild(custodyChild),
+      stopManagedChild(daemonChild),
+    ]);
+    throw error;
   }
-
-  const identity = controlResult.result;
-  await waitForCustodyRouteableState(options.apiBaseUrl, identity.entityId, hubIds);
-  const custodyHttps = resolveCustodyServiceHttps();
-
-  const custodyChild = spawnBunChild(
-    'custody-service',
-    ['custody/server.ts'],
-    {
-      CUSTODY_HOST: '127.0.0.1',
-      CUSTODY_PORT: String(options.custodyPort),
-      CUSTODY_HTTPS: custodyHttps ? '1' : '0',
-      CUSTODY_DAEMON_WS: `ws://127.0.0.1:${options.daemonPort}/rpc`,
-      CUSTODY_DAEMON_AUTH_SEED: daemonAuthSeed,
-      CUSTODY_DAEMON_AUTH_AUDIENCE: daemonAuthAudience,
-      CUSTODY_WALLET_URL: options.walletUrl,
-      CUSTODY_ENTITY_ID: identity.entityId,
-      CUSTODY_SIGNER_ID: identity.signerId,
-      CUSTODY_JURISDICTION_ID: options.jurisdictionId,
-      CUSTODY_DB_PATH: `${options.dbRoot}/custody.sqlite`,
-    },
-  );
-  await waitForCustodyServiceReady(options.custodyPort, custodyChild, custodyHttps);
-
-  return {
-    daemonChild,
-    custodyChild,
-    identity,
-    hubIds,
-    daemonAuthSeed,
-    daemonAuthAudience,
-    daemonAuthKey,
-  };
 };
