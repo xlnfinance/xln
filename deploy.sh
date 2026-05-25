@@ -237,12 +237,12 @@ wait_for_http_json_field_insecure() {
 wait_for_custody() {
   local deadline=$((SECONDS + 240))
   wait_for_http_json_field \
-    "http://127.0.0.1:8088/api/health" \
-    "return payload?.system?.runtime === true && payload?.system?.relay === true;" \
+    "http://127.0.0.1:8080/api/health" \
+    "return payload?.custody?.ok === true;" \
     "$deadline" \
     || return 1
 
-  wait_for_http_json_field_insecure \
+  wait_for_http_json_field \
     "http://127.0.0.1:8087/api/me" \
     "return typeof payload?.custody?.entityId === 'string' && payload.custody.entityId.length > 0;" \
     "$deadline"

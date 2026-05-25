@@ -60,6 +60,7 @@ const main = async (): Promise<void> => {
     await rm(DB_ROOT, { recursive: true, force: true });
   }
   await mkdir(DB_ROOT, { recursive: true });
+  process.env['CUSTODY_HTTPS'] = CUSTODY_HTTPS ? '1' : '0';
 
   console.log(`[dev-custody] waiting for shared dev API ${API_BASE_URL}`);
   await waitForHttpReady(`${API_BASE_URL}/api/health`, null, 120_000);
