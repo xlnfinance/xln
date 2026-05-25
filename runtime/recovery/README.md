@@ -6,6 +6,8 @@ This folder owns recovery bundle primitives and watchtower authorization helpers
 
 - builds an encrypted runtime checkpoint bundle from canonical runtime state
 - derives deterministic lookup keys from `runtimeId + runtimeSeed`
+- derives separate blinded namespaces for blind backup restore and active
+  watchtower appointments
 - verifies and decrypts tower payloads locally in the wallet
 - computes owner-side tower authorization hashes for delayed counter-disputes
 - does **not** hold spend-capable keys
@@ -19,6 +21,18 @@ This folder owns recovery bundle primitives and watchtower authorization helpers
 - `crypto.ts`
   Lookup-key derivation, AES-GCM encrypt/decrypt for blind tower mode, and
   watchtower authorization hash helpers.
+
+## Namespace rule
+
+- `deriveRuntimeRecoveryLookupKey(...)`
+  Blind backup namespace used for full encrypted runtime restore.
+- `deriveRuntimeRecoveryActionLookupKey(...)`
+  Per-account active watchtower namespace used for delayed last-resort dispute
+  appointments.
+
+Those two lookup families must stay separate. The tower should not learn backup
+availability from the action path or action coverage from the blind restore
+path.
 
 ## Called by
 

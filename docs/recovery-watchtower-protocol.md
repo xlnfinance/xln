@@ -358,7 +358,8 @@ Derive a recovery branch from BrainVault output:
 recoverySecret = HKDF(masterKey, "xln/recovery/v1")
 recoveryPubkey = secp256k1(recoverySecret).pubkey
 bundleKey      = ECDH(recoverySecret, towerStoragePubkey) or local AEAD key
-lookupSalt     = HKDF(recoverySecret, "xln/recovery/lookup/v1")
+backupLookup   = H("xln/recovery/lookup/v1" || runtimeId || recoverySecret)
+actionLookup   = H("xln/recovery/action-lookup/v1" || runtimeId || entityId || counterentity || recoverySecret)
 ```
 
 Blind backup:
@@ -373,7 +374,7 @@ Active watchtower:
 - remedy includes only the contract call data needed to update/finalize a dispute;
 - no user spend key is shared;
 - permission is revocable by rotating tower session and publishing a newer appointment set;
-- backup bundles and active remedies are separate: the `K` historical backup slots stay encrypted only to the user, while the tower-action payload is a single latest-only appointment.
+- backup bundles and active remedies are separate in both payload and lookup namespace: the `K` historical backup slots stay encrypted only to the user, while the tower-action payload is a single latest-only appointment under its own blinded lookup key.
 
 Delayed last-resort mode:
 

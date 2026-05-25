@@ -17,6 +17,8 @@ import {
 import {
   buildTowerAppointmentOwnerMessage,
   decryptRuntimeRecoveryBundle,
+  deriveRuntimeRecoveryActionLookupKey,
+  deriveRuntimeRecoveryLookupKey,
   encryptRuntimeRecoveryBundle,
 } from '../recovery/crypto';
 import type { TowerAppointmentV1 } from '../recovery/types';
@@ -93,6 +95,20 @@ const buildRuntimeEnv = async () => {
 };
 
 describe('runtime recovery tower', () => {
+  test('action lookup keys stay deterministic and separate from blind backup lookup keys', async () => {
+    const runtimeId = Wallet.createRandom().address.toLowerCase();
+    const seed = 'tower-action-lookup-seed';
+    const entityId = `0x${'11'.repeat(32)}`;
+    const counterentity = `0x${'22'.repeat(32)}`;
+    const blindLookup = deriveRuntimeRecoveryLookupKey(runtimeId, seed);
+    const actionLookupA = deriveRuntimeRecoveryActionLookupKey(runtimeId, seed, entityId, counterentity);
+    const actionLookupB = deriveRuntimeRecoveryActionLookupKey(runtimeId, seed, entityId, counterentity);
+    const actionLookupOther = deriveRuntimeRecoveryActionLookupKey(runtimeId, seed, entityId, `0x${'33'.repeat(32)}`);
+    expect(actionLookupA).toBe(actionLookupB);
+    expect(actionLookupA).not.toBe(blindLookup);
+    expect(actionLookupOther).not.toBe(actionLookupA);
+  });
+
   test('recovery bundle round-trips checkpoint restore', async () => {
     const { env, runtimeSeed, runtimeId, entityId, jurisdiction } = await buildRuntimeEnv();
     const bundle = buildRuntimeRecoveryBundle(env, {

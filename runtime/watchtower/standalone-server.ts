@@ -55,6 +55,7 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
           ok: true,
           service: 'xln-watchtower',
           towerId: store.towerId,
+          signerAddress: store.signerAddress,
           maxStoredBytesPerLookupKey: store.maxStoredBytesPerLookupKey,
           maxBundlesPerLookupKey: store.maxBundlesPerLookupKey,
         }), {

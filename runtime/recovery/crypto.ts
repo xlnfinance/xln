@@ -13,6 +13,7 @@ import type {
 } from './types';
 
 const RECOVERY_LOOKUP_DOMAIN = 'xln:recovery:lookup:v1';
+const RECOVERY_ACTION_LOOKUP_DOMAIN = 'xln:recovery:action-lookup:v1';
 const RECOVERY_AES_KEY_DOMAIN = 'xln:recovery:key:v1';
 const TOWER_APPOINTMENT_DOMAIN = 'xln:tower:appointment:v1';
 const WATCHTOWER_COUNTER_DISPUTE_DOMAIN = 'XLN_WATCHTOWER_COUNTER_DISPUTE_V1';
@@ -46,6 +47,17 @@ export const deriveRuntimeRecoveryLookupKey = (runtimeId: string, runtimeSeed: s
   ethers.keccak256(
     ethers.toUtf8Bytes(`${RECOVERY_LOOKUP_DOMAIN}|${String(runtimeId).toLowerCase()}|${runtimeSeed}`),
   );
+
+export const deriveRuntimeRecoveryActionLookupKey = (
+  runtimeId: string,
+  runtimeSeed: string,
+  entityId: string,
+  counterentity: string,
+): string => ethers.keccak256(
+  ethers.toUtf8Bytes(
+    `${RECOVERY_ACTION_LOOKUP_DOMAIN}|${String(runtimeId).toLowerCase()}|${String(entityId).toLowerCase()}|${String(counterentity).toLowerCase()}|${runtimeSeed}`,
+  ),
+);
 
 export const computeTowerActivePayloadDigest = (payload: TowerActivePayloadV1 | null | undefined): string => {
   if (!payload) return ethers.ZeroHash;
