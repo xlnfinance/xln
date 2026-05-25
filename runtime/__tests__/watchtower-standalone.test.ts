@@ -1,0 +1,179 @@
+import { afterEach, describe, expect, test } from 'bun:test';
+import { mkdirSync, rmSync } from 'node:fs';
+import { join } from 'node:path';
+import { Wallet } from 'ethers';
+
+import { createEmptyEnv, enqueueRuntimeInput, process as processRuntime } from '../runtime.ts';
+import { buildRuntimeRecoveryBundle } from '../recovery/bundle';
+import { buildTowerAppointmentOwnerMessage, encryptRuntimeRecoveryBundle } from '../recovery/crypto';
+import type { JReplica, JurisdictionConfig, TowerAppointmentV1 } from '../xln-api';
+import { startStandaloneWatchtowerServer, type StandaloneWatchtowerServer } from '../watchtower/standalone-server';
+
+const addr = (byte: string): string => `0x${byte.repeat(20)}`;
+const servers: StandaloneWatchtowerServer[] = [];
+
+afterEach(async () => {
+  while (servers.length > 0) {
+    const server = servers.pop();
+    if (server) await server.close();
+  }
+});
+
+const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): JurisdictionConfig => {
+  const jurisdiction: JurisdictionConfig = {
+    name: 'TowerHTTP',
+    address: 'rpc://tower-http',
+    chainId: 31337,
+    depositoryAddress: addr('11'),
+    entityProviderAddress: addr('12'),
+  };
+  env.activeJurisdiction = jurisdiction.name;
+  env.jReplicas.set(jurisdiction.name, {
+    name: jurisdiction.name,
+    rpcs: [jurisdiction.address],
+    chainId: jurisdiction.chainId,
+    depositoryAddress: jurisdiction.depositoryAddress,
+    entityProviderAddress: jurisdiction.entityProviderAddress,
+    contracts: {
+      depository: jurisdiction.depositoryAddress,
+      entityProvider: jurisdiction.entityProviderAddress,
+      account: addr('13'),
+      deltaTransformer: addr('14'),
+    },
+  } as JReplica);
+  return jurisdiction;
+};
+
+const createRuntimeAppointment = async () => {
+  const runtimeSeed = 'watchtower-http-seed';
+  const wallet = Wallet.createRandom();
+  const runtimeId = wallet.address.toLowerCase();
+  const env = createEmptyEnv(runtimeSeed);
+  env.runtimeId = runtimeId;
+  env.dbNamespace = `${runtimeId}-${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
+  env.quietRuntimeLogs = true;
+  const jurisdiction = installJurisdiction(env);
+  const entityId = `0x${'ab'.repeat(32)}`;
+  enqueueRuntimeInput(env, {
+    runtimeTxs: [{
+      type: 'importReplica',
+      entityId,
+      signerId: runtimeId,
+      data: {
+        config: {
+          mode: 'proposer-based',
+          threshold: 1n,
+          validators: [runtimeId],
+          shares: { [runtimeId]: 1n },
+          jurisdiction,
+        },
+        isProposer: true,
+        profileName: 'Watchtower HTTP',
+      },
+    }],
+    entityInputs: [],
+  });
+  await processRuntime(env);
+  const bundle = buildRuntimeRecoveryBundle(env, {
+    signers: [{
+      index: 0,
+      derivationIndex: 0,
+      address: runtimeId,
+      name: 'Signer 1',
+      entityId,
+      jurisdiction: jurisdiction.name,
+    }],
+  });
+  const encrypted = await encryptRuntimeRecoveryBundle(bundle, runtimeSeed);
+  const signedAt = 123_456;
+  const signature = await wallet.signMessage(
+    buildTowerAppointmentOwnerMessage(
+      runtimeId,
+      'blind_backup',
+      encrypted.lookupKey,
+      0,
+      encrypted.bundleHash,
+      encrypted.height,
+      signedAt,
+      undefined,
+    ),
+  );
+  const appointment: TowerAppointmentV1 = {
+    type: 'tower_appointment',
+    version: 1,
+    towerMode: 'blind_backup',
+    lookupKey: encrypted.lookupKey,
+    slot: 0,
+    bundle: encrypted,
+    ownerProof: {
+      runtimeId,
+      signedAt,
+      signature,
+    },
+  };
+  return { appointment, encrypted };
+};
+
+describe('standalone watchtower service', () => {
+  test('stores and restores bundles over HTTP', async () => {
+    const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-http-${Date.now()}`);
+    rmSync(tempRoot, { recursive: true, force: true });
+    mkdirSync(tempRoot, { recursive: true });
+
+    const server = startStandaloneWatchtowerServer({
+      host: '127.0.0.1',
+      port: 0,
+      towerId: 'tower-http-test',
+      dbPath: join(tempRoot, 'tower.level'),
+      maxStoredBytesPerLookupKey: 64 * 1024,
+    });
+    servers.push(server);
+    const base = `http://127.0.0.1:${server.server.port}`;
+    const { appointment, encrypted } = await createRuntimeAppointment();
+
+    const put = await fetch(`${base}/api/tower/appointment`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(appointment),
+    });
+    expect(put.ok).toBe(true);
+
+    const restore = await fetch(`${base}/api/tower/restore`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ lookupKey: encrypted.lookupKey }),
+    });
+    expect(restore.ok).toBe(true);
+    const payload = await restore.json() as { ok: boolean; bundle?: { lookupKey: string }; receipt?: { towerSignature?: string } };
+    expect(payload.ok).toBe(true);
+    expect(payload.bundle?.lookupKey).toBe(encrypted.lookupKey);
+    expect(typeof payload.receipt?.towerSignature).toBe('string');
+  });
+
+  test('rejects oversize free-tier bundles with quota error', async () => {
+    const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-quota-${Date.now()}`);
+    rmSync(tempRoot, { recursive: true, force: true });
+    mkdirSync(tempRoot, { recursive: true });
+
+    const server = startStandaloneWatchtowerServer({
+      host: '127.0.0.1',
+      port: 0,
+      towerId: 'tower-quota-test',
+      dbPath: join(tempRoot, 'tower.level'),
+      maxStoredBytesPerLookupKey: 256,
+    });
+    servers.push(server);
+    const base = `http://127.0.0.1:${server.server.port}`;
+    const { appointment } = await createRuntimeAppointment();
+
+    const put = await fetch(`${base}/api/tower/appointment`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(appointment),
+    });
+    expect(put.status).toBe(413);
+    const payload = await put.json() as { ok: boolean; error?: string };
+    expect(payload.ok).toBe(false);
+    expect(String(payload.error || '')).toContain('TOWER_QUOTA_EXCEEDED');
+  });
+});

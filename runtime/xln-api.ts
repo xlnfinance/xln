@@ -59,9 +59,14 @@ export type {
   RuntimeRecoveryBundleV1,
   RuntimeRecoveryMetaV1,
   RuntimeRecoverySignerV1,
+  TowerActivePayloadV1,
+  TowerActionKindV1,
   TowerAppointmentOwnerProofV1,
   TowerAppointmentV1,
+  TowerCounterDisputeRemedyV1,
   TowerDiscoverResponseV1,
+  TowerFinalDisputeProofV1,
+  TowerModeV1,
   TowerReceiptV1,
   TowerRestoreRequestV1,
   TowerRestoreResponseV1,
@@ -137,6 +142,8 @@ import type {
   RuntimeRecoveryBundleV1,
   RuntimeRecoveryMetaV1,
   RuntimeRecoverySignerV1,
+  TowerActivePayloadV1,
+  TowerModeV1,
 } from './recovery/types';
 import type { JAdapter } from './jadapter/types';
 import type { PersistedFrameJournal } from './wal/store';
@@ -268,6 +275,10 @@ export interface XLNModule {
   main: () => Promise<Env>;
   process: (env: Env, inputs?: unknown[], delay?: number) => Promise<Env>;
   registerEnvChangeCallback: (env: Env, callback: (env: Env) => void) => (() => void);
+  registerRecoveryBackupBarrier?: (
+    env: Env,
+    callback: (env: Env, info: { height: number; remoteOutputCount: number; jInputCount: number }) => Promise<void>,
+  ) => (() => void);
   getEnv: (env?: Env | null) => Env | null;
   getActiveJAdapter?: (env: Env | null) => JAdapter | null;
   getEntityJAdapter: (env: Env, entityId: string, signerId?: string) => JAdapter | null;
@@ -457,10 +468,24 @@ export interface XLNModule {
   deriveRuntimeRecoveryLookupKey: (runtimeId: string, runtimeSeed: string) => string;
   buildTowerAppointmentOwnerMessage: (
     runtimeId: string,
+    towerMode: TowerModeV1,
     lookupKey: string,
+    slot: number,
     bundleHash: string,
     height: number,
     signedAt: number,
+    activePayload?: TowerActivePayloadV1 | null,
+  ) => string;
+  computeWatchtowerCounterDisputeAuthorizationHash: (
+    chainId: number,
+    depositoryAddress: string,
+    towerAddress: string,
+    entityId: string,
+    counterentity: string,
+    finalNonce: number,
+    finalProofbodyHash: string,
+    lastResortWindowBlocks: number,
+    appointmentSequence: number,
   ) => string;
 
   // Blockchain operations

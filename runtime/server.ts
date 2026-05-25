@@ -91,15 +91,6 @@ import { handleP2PControl } from './server/p2p-control';
 import { handleRuntimeInputControl, handleRuntimeInputStatus } from './server/runtime-input-control';
 import { handleSignerRegistration } from './server/signer-control';
 import { fetchRpcCode, probeLocalAnvilContractStack } from './server/stack-probe';
-import { createTowerBackupStore } from './server/tower-backup';
-import {
-  handleRecoveryComplaint,
-  handleRecoveryDiscover,
-  handleRecoveryState,
-  handleTowerAppointment,
-  handleTowerReceipt,
-  handleTowerRestore,
-} from './server/recovery-tower';
 
 // Global J-adapter instance (set during startup)
 let globalJAdapter: JAdapter | null = null;
@@ -115,7 +106,6 @@ let cachedHealthInFlight: Promise<{ fullBody: string; publicBody: string }> | nu
 
 let processGuardsInstalled = false;
 const runtimeIngressReceipts = createRuntimeIngressReceiptStore();
-const towerBackupStore = createTowerBackupStore();
 const serverLog = createStructuredLogger('server');
 const tokenCatalogController = createTokenCatalogController({
   getAdapter: () => globalJAdapter,
@@ -366,32 +356,6 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     const authError = requireDaemonControlAuth(req, env);
     if (authError) return authError;
     return handleP2PControl(req, headers, env, { parseTaggedControlBody, startP2P });
-  }
-
-  if (pathname === '/api/tower/appointment' && req.method === 'PUT') {
-    return handleTowerAppointment(req, headers, towerBackupStore);
-  }
-
-  if (pathname === '/api/tower/restore' && req.method === 'POST') {
-    return handleTowerRestore(req, headers, towerBackupStore);
-  }
-
-  const towerReceiptMatch = pathname.match(/^\/api\/tower\/receipt\/([^/]+)$/);
-  if (towerReceiptMatch && req.method === 'GET') {
-    const lookupKey = decodeURIComponent(towerReceiptMatch[1] || '');
-    return handleTowerReceipt(lookupKey, headers, towerBackupStore);
-  }
-
-  if (pathname === '/api/recovery/discover' && req.method === 'POST') {
-    return handleRecoveryDiscover(req, headers, towerBackupStore);
-  }
-
-  if (pathname === '/api/recovery/state' && req.method === 'POST') {
-    return handleRecoveryState(req, headers, towerBackupStore);
-  }
-
-  if (pathname === '/api/recovery/complaint' && req.method === 'POST') {
-    return handleRecoveryComplaint(req, headers, towerBackupStore);
   }
 
   // JSON-RPC proxy endpoint (single canonical path: /rpc).

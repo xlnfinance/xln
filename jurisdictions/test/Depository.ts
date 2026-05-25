@@ -113,6 +113,27 @@ async function cooperativeDisputeProofHash(
   ));
 }
 
+async function watchtowerCounterDisputeHash(
+  depository: Depository,
+  tower: string,
+  entityId: string,
+  counterentity: string,
+  finalNonce: bigint,
+  finalProofbodyHash: string,
+  lastResortWindowBlocks: bigint,
+  appointmentSequence: bigint,
+): Promise<string> {
+  return depository.computeWatchtowerCounterDisputeHash(
+    tower,
+    entityId,
+    counterentity,
+    finalNonce,
+    finalProofbodyHash,
+    lastResortWindowBlocks,
+    appointmentSequence,
+  );
+}
+
 function proofBodyHash(proofbody: Record<string, unknown>): string {
   return ethers.keccak256(abi.encode([PROOF_BODY_ABI], [proofbody]));
 }
@@ -660,6 +681,223 @@ describe("Depository", function () {
     expect(collateralAfter.ondelta).to.equal(0n);
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(800n);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(200n);
+  });
+
+  it("allows a designated tower to submit a delayed last-resort counter-dispute", async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const [, , tower] = await hre.ethers.getSigners();
+
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const tokenId = 1n;
+    const appointmentSequence = 7n;
+    const lastResortWindowBlocks = 16n;
+    await depository.mintToReserve(left.entityId, tokenId, 1_000n);
+
+    const fundCollateralBatch = emptyBatch({
+      reserveToCollateral: [{
+        tokenId,
+        receivingEntity: left.entityId,
+        pairs: [{ entity: right.entityId, amount: 300n }],
+      }],
+    });
+    const fundCollateral = await signDepositoryBatch(depository, left.entityId, left.privateKey, fundCollateralBatch);
+    await depository.connect(left.signer).processBatch(
+      fundCollateral.encodedBatch,
+      fundCollateral.hankoData,
+      fundCollateral.nonce,
+    );
+
+    const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+    const initialProofbody = proofBody([0n], [tokenId]);
+    const initialProofbodyHash = proofBodyHash(initialProofbody);
+    const initialArguments = "0x";
+    const disputeNonce = 1n;
+    const startHash = await disputeProofHash(depository, acctKey, disputeNonce, initialProofbodyHash);
+    const startSig = signEntityHash(right.entityId, startHash, right.privateKey);
+    const startBatch = emptyBatch({
+      disputeStarts: [{
+        counterentity: right.entityId,
+        nonce: disputeNonce,
+        proofbodyHash: initialProofbodyHash,
+        sig: startSig,
+        initialArguments,
+      }],
+    });
+    const start = await signDepositoryBatch(depository, left.entityId, left.privateKey, startBatch);
+    await depository.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
+
+    const finalNonce = 2n;
+    const finalProofbody = proofBody([-200n], [tokenId]);
+    const finalProofbodyHash = proofBodyHash(finalProofbody);
+    const finalHash = await disputeProofHash(depository, acctKey, finalNonce, finalProofbodyHash);
+    const finalSig = signEntityHash(right.entityId, finalHash, right.privateKey);
+    const ownerAuthHash = await watchtowerCounterDisputeHash(
+      depository,
+      tower.address,
+      left.entityId,
+      right.entityId,
+      finalNonce,
+      finalProofbodyHash,
+      lastResortWindowBlocks,
+      appointmentSequence,
+    );
+    const ownerAuthorization = signEntityHash(left.entityId, ownerAuthHash, left.privateKey);
+    const finalization = {
+      counterentity: right.entityId,
+      initialNonce: disputeNonce,
+      finalNonce,
+      initialProofbodyHash,
+      finalProofbody,
+      finalArguments: "0x",
+      initialArguments,
+      sig: finalSig,
+      startedByLeft: true,
+      disputeUntilBlock: 0,
+      cooperative: false,
+    };
+
+    await expect(
+      depository.connect(tower).watchtowerCounterDispute(
+        left.entityId,
+        finalization,
+        lastResortWindowBlocks,
+        appointmentSequence,
+        ownerAuthorization,
+      )
+    ).to.be.revertedWithCustomError(depository, "E2");
+
+    const currentBlock = BigInt(await time.latestBlock());
+    const timeoutBlock = (await depository._accounts(acctKey)).disputeTimeout;
+    const lastResortStartBlock = timeoutBlock - lastResortWindowBlocks;
+    if (lastResortStartBlock > currentBlock) {
+      await mine(Number(lastResortStartBlock - currentBlock));
+    }
+
+    await expect(
+      depository.connect(tower).watchtowerCounterDispute(
+        left.entityId,
+        finalization,
+        lastResortWindowBlocks,
+        appointmentSequence,
+        ownerAuthorization,
+      )
+    ).to.emit(depository, "WatchtowerCounterDisputeExecuted")
+      .withArgs(tower.address, left.entityId, right.entityId, finalNonce, appointmentSequence);
+
+    const finalizedAccount = await depository._accounts(acctKey);
+    const collateralAfter = await depository._collaterals(acctKey, tokenId);
+    expect(finalizedAccount.nonce).to.equal(finalNonce);
+    expect(finalizedAccount.disputeHash).to.equal(ethers.ZeroHash);
+    expect(collateralAfter.collateral).to.equal(0n);
+    expect(collateralAfter.ondelta).to.equal(0n);
+    expect(await depository._reserves(left.entityId, tokenId)).to.equal(800n);
+    expect(await depository._reserves(right.entityId, tokenId)).to.equal(200n);
+  });
+
+  it("rejects watchtower counter-dispute from the wrong tower or without a newer signed proof", async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const [, , tower, wrongTower] = await hre.ethers.getSigners();
+
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const tokenId = 1n;
+    const appointmentSequence = 3n;
+    const lastResortWindowBlocks = 12n;
+    await depository.mintToReserve(left.entityId, tokenId, 1_000n);
+
+    const fundCollateralBatch = emptyBatch({
+      reserveToCollateral: [{
+        tokenId,
+        receivingEntity: left.entityId,
+        pairs: [{ entity: right.entityId, amount: 300n }],
+      }],
+    });
+    const fundCollateral = await signDepositoryBatch(depository, left.entityId, left.privateKey, fundCollateralBatch);
+    await depository.connect(left.signer).processBatch(
+      fundCollateral.encodedBatch,
+      fundCollateral.hankoData,
+      fundCollateral.nonce,
+    );
+
+    const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+    const initialProofbody = proofBody([0n], [tokenId]);
+    const initialProofbodyHash = proofBodyHash(initialProofbody);
+    const initialArguments = "0x";
+    const disputeNonce = 1n;
+    const startHash = await disputeProofHash(depository, acctKey, disputeNonce, initialProofbodyHash);
+    const startSig = signEntityHash(right.entityId, startHash, right.privateKey);
+    const startBatch = emptyBatch({
+      disputeStarts: [{
+        counterentity: right.entityId,
+        nonce: disputeNonce,
+        proofbodyHash: initialProofbodyHash,
+        sig: startSig,
+        initialArguments,
+      }],
+    });
+    const start = await signDepositoryBatch(depository, left.entityId, left.privateKey, startBatch);
+    await depository.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
+
+    const finalNonce = 2n;
+    const finalProofbody = proofBody([-200n], [tokenId]);
+    const finalProofbodyHash = proofBodyHash(finalProofbody);
+    const finalHash = await disputeProofHash(depository, acctKey, finalNonce, finalProofbodyHash);
+    const finalSig = signEntityHash(right.entityId, finalHash, right.privateKey);
+    const ownerAuthHash = await watchtowerCounterDisputeHash(
+      depository,
+      tower.address,
+      left.entityId,
+      right.entityId,
+      finalNonce,
+      finalProofbodyHash,
+      lastResortWindowBlocks,
+      appointmentSequence,
+    );
+    const ownerAuthorization = signEntityHash(left.entityId, ownerAuthHash, left.privateKey);
+    const finalization = {
+      counterentity: right.entityId,
+      initialNonce: disputeNonce,
+      finalNonce,
+      initialProofbodyHash,
+      finalProofbody,
+      finalArguments: "0x",
+      initialArguments,
+      sig: finalSig,
+      startedByLeft: true,
+      disputeUntilBlock: 0,
+      cooperative: false,
+    };
+
+    const currentBlock = BigInt(await time.latestBlock());
+    const timeoutBlock = (await depository._accounts(acctKey)).disputeTimeout;
+    const lastResortStartBlock = timeoutBlock - lastResortWindowBlocks;
+    if (lastResortStartBlock > currentBlock) {
+      await mine(Number(lastResortStartBlock - currentBlock));
+    }
+
+    await expect(
+      depository.connect(wrongTower).watchtowerCounterDispute(
+        left.entityId,
+        finalization,
+        lastResortWindowBlocks,
+        appointmentSequence,
+        ownerAuthorization,
+      )
+    ).to.be.revertedWithCustomError(depository, "E4");
+
+    const sameProof = {
+      ...finalization,
+      finalNonce: disputeNonce,
+      sig: "0x",
+    };
+    await expect(
+      depository.connect(tower).watchtowerCounterDispute(
+        left.entityId,
+        sameProof,
+        lastResortWindowBlocks,
+        appointmentSequence,
+        ownerAuthorization,
+      )
+    ).to.be.revertedWithCustomError(depository, "E2");
   });
 
   it("passes dispute argument timestamps into DeltaTransformer pull without storing secrets", async function () {

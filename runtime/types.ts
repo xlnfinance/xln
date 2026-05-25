@@ -562,6 +562,24 @@ export interface Env {
      * delivery capability, not permission to queue arbitrary public relay hops.
      */
     canUseConnectedRelayFallback?: ((targetRuntimeId: string) => boolean) | null;
+    /**
+     * Optional post-commit backup barrier. If present, runtime holds remote
+     * side effects until this callback confirms external recovery storage for
+     * the just-committed state.
+     */
+    recoveryBackupBarrier?: ((
+      env: Env,
+      info: {
+        height: number;
+        remoteOutputCount: number;
+        jInputCount: number;
+      },
+    ) => Promise<void>) | null;
+    /**
+     * J-side effects that were intentionally deferred after the frame was
+     * committed because the recovery backup barrier did not complete yet.
+     */
+    pendingCommittedJOutbox?: JInput[];
   } | undefined;
   history: EnvSnapshot[]; // Time machine snapshots - single source of truth
   gossip: GossipLayer;

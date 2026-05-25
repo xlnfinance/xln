@@ -38,6 +38,49 @@ export type EncryptedRuntimeRecoveryBundleV1 = {
   ciphertext: string;
 };
 
+export type TowerModeV1 =
+  | 'blind_backup'
+  | 'active_watchtower'
+  | 'delayed_last_resort';
+
+export type TowerActionKindV1 = 'counter_dispute_only';
+
+export type TowerFinalDisputeProofV1 = {
+  counterentity: string;
+  finalNonce: number;
+  finalProofbody: Record<string, unknown>;
+  finalArguments: string;
+  sig: string;
+};
+
+export type TowerCounterDisputeRemedyV1 = {
+  version: 1;
+  type: 'counter_dispute_remedy';
+  rpcUrl: string;
+  chainId: number;
+  depositoryAddress: string;
+  watchedEntityId: string;
+  towerAddress: string;
+  lastResortWindowBlocks: number;
+  appointmentSequence: number;
+  ownerAuthorizationHanko: string;
+  latestProof: TowerFinalDisputeProofV1;
+};
+
+export type TowerActivePayloadV1 = {
+  triggerHint: string;
+  encryptedRemedy: string;
+  actionKind: TowerActionKindV1;
+  appointmentSequence: number;
+  proofNonce: number;
+  proofBodyHash: string;
+  responseMode: 'last_resort';
+  lastResortWindowBlocks: number;
+  safetyMarginBlocks: number;
+  maxFeeToken?: string;
+  feeBudget?: string;
+};
+
 export type TowerAppointmentOwnerProofV1 = {
   runtimeId: string;
   signedAt: number;
@@ -47,8 +90,11 @@ export type TowerAppointmentOwnerProofV1 = {
 export type TowerAppointmentV1 = {
   type: 'tower_appointment';
   version: 1;
+  towerMode?: TowerModeV1;
   lookupKey: string;
+  slot?: number;
   bundle: EncryptedRuntimeRecoveryBundleV1;
+  activePayload?: TowerActivePayloadV1;
   ownerProof: TowerAppointmentOwnerProofV1;
 };
 
@@ -60,9 +106,18 @@ export type TowerReceiptV1 = {
   runtimeId: string;
   height: number;
   bundleHash: string;
+  towerMode?: TowerModeV1;
+  slot?: number;
+  storedAt?: number;
   receivedAt: number;
+  expiresAt?: number;
   sequence: number;
   retainedSlots: number;
+  storedBytes?: number;
+  maxStoredBytes?: number;
+  quotaOk?: boolean;
+  appointmentSequence?: number | null;
+  towerSignature?: string;
 };
 
 export type TowerRestoreRequestV1 = {
