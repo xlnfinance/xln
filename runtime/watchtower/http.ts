@@ -179,11 +179,18 @@ export const handleRecoveryComplaint = async (req: Request, store: WatchtowerSto
   }
 };
 
-export const handleWatchtowerSweep = async (req: Request, store: WatchtowerStore): Promise<Response> => {
+export const handleWatchtowerSweep = async (
+  req: Request,
+  store: WatchtowerStore,
+  options?: { towerPrivateKey?: string },
+): Promise<Response> => {
   try {
     const body = await parseJsonBody<Record<string, unknown>>(req);
     const lookupKey = typeof body['lookupKey'] === 'string' ? normalizeLookupKey(body['lookupKey']) : undefined;
-    const result = await runWatchtowerSweep(store, lookupKey ? { lookupKey } : undefined);
+    const result = await runWatchtowerSweep(store, {
+      ...(lookupKey ? { lookupKey } : {}),
+      ...(options?.towerPrivateKey ? { towerPrivateKey: options.towerPrivateKey } : {}),
+    });
     return new Response(serializeTaggedJson({ ok: true, ...result }), {
       headers: { 'content-type': 'application/json' },
     });

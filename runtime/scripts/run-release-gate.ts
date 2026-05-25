@@ -30,6 +30,7 @@ const RUNTIME_CORE_TESTS = [
   'runtime/__tests__/proof-builder.test.ts',
   'runtime/__tests__/transformer-ordering.test.ts',
   'runtime/__tests__/server-ingress-receipts.test.ts',
+  'runtime/__tests__/watchtower-rpc-last-resort.test.ts',
   'native/__tests__/desktop-security.test.ts',
   'native/__tests__/extension-security.test.ts',
   'native/__tests__/capacitor-config.test.ts',

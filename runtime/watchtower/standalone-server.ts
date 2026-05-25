@@ -83,7 +83,9 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
         return handleRecoveryComplaint(req, store);
       }
       if (pathname === '/api/watchtower/sweep' && req.method === 'POST') {
-        return handleWatchtowerSweep(req, store);
+        return handleWatchtowerSweep(req, store, {
+          ...(options.towerPrivateKey ? { towerPrivateKey: options.towerPrivateKey } : {}),
+        });
       }
       const actionReceiptMatch = pathname.match(/^\/api\/watchtower\/actions\/([^/]+)$/);
       if (actionReceiptMatch && req.method === 'GET') {

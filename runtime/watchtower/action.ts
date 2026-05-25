@@ -1,5 +1,5 @@
 import { Contract, Interface, JsonRpcProvider, Wallet, ethers } from 'ethers';
-import { serializeTaggedJson } from '../serialization-utils';
+import { deserializeTaggedJson, serializeTaggedJson } from '../serialization-utils';
 import type {
   TowerCounterDisputeRemedyV1,
   TowerFinalDisputeProofV1,
@@ -67,7 +67,7 @@ export const encodeTowerCounterDisputeRemedy = (remedy: TowerCounterDisputeRemed
 export const decodeTowerCounterDisputeRemedy = (payload: string): TowerCounterDisputeRemedyV1 => {
   const raw = String(payload || '').trim();
   if (!raw) throw new Error('WATCHTOWER_REMEDY_EMPTY');
-  const parsed = JSON.parse(raw) as Record<string, unknown>;
+  const parsed = deserializeTaggedJson<Record<string, unknown>>(raw);
   if (parsed['type'] !== 'counter_dispute_remedy' || parsed['version'] !== 1) {
     throw new Error('WATCHTOWER_REMEDY_TYPE_INVALID');
   }
@@ -90,6 +90,7 @@ type WatchtowerSweepOptions = {
   lookupKey?: string;
   towerPrivateKey?: string;
   now?: () => number;
+  txWaitTimeoutMs?: number;
   providerFactory?: (rpcUrl: string, chainId: number) => {
     getBlockNumber: () => Promise<number>;
     getLogs?: (filter: Record<string, unknown>) => Promise<WatchtowerLog[]>;
@@ -121,6 +122,20 @@ type WatchtowerSweepOptions = {
       ownerAuthorizationHanko: string,
     ) => Promise<{ hash?: string; wait?: () => Promise<{ blockNumber?: number } | null> }>;
   };
+};
+
+const waitForReceiptWithTimeout = async (
+  tx: { wait?: () => Promise<{ blockNumber?: number } | null> },
+  timeoutMs: number,
+): Promise<{ blockNumber?: number } | null> => {
+  if (typeof tx.wait !== 'function') return null;
+  if (!(Number.isFinite(timeoutMs) && timeoutMs > 0)) {
+    return await tx.wait();
+  }
+  return await Promise.race([
+    tx.wait(),
+    new Promise<null>((resolve) => setTimeout(() => resolve(null), timeoutMs)),
+  ]);
 };
 
 type ActiveDisputeContext = {
@@ -247,6 +262,7 @@ export const runWatchtowerSweep = async (
   }
   const towerWallet = new Wallet(towerPrivateKey);
   const now = options?.now || (() => Date.now());
+  const txWaitTimeoutMs = Math.max(0, Math.floor(Number(options?.txWaitTimeoutMs ?? 15_000)));
   const activeAppointments = (await store.listLatestActiveAppointments())
     .filter((appointment) => appointment.towerMode === 'delayed_last_resort')
     .filter((appointment) => !options?.lookupKey || appointment.lookupKey === options.lookupKey);
@@ -326,7 +342,7 @@ export const runWatchtowerSweep = async (
         remedy.appointmentSequence,
         remedy.ownerAuthorizationHanko,
       );
-      const receipt = await tx.wait?.();
+      const receipt = await waitForReceiptWithTimeout(tx, txWaitTimeoutMs);
       await store.appendActionReceipt(
         buildActionReceipt(
           appointment.lookupKey,
