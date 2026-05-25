@@ -151,7 +151,11 @@
   let onboardingComplete = $state(false);
 
   // Reactive: signer info from vault
-  const signer = $derived($activeRuntimeStore?.signers?.[0] || null);
+  const signer = $derived.by(() => {
+    const vault = $activeRuntimeStore;
+    const activeSignerIndex = Number(vault?.activeSignerIndex ?? 0);
+    return vault?.signers?.[activeSignerIndex] || vault?.signers?.[0] || null;
+  });
   const positionsMap = $derived($entityPositions);
   const activeXlnFunctions = $derived($xlnFunctions);
   const xlnReady = $derived(Boolean(activeXlnFunctions?.isReady));
@@ -292,6 +296,56 @@
     selectedSignerId = String(replica.signerId).toLowerCase();
     selectedAccountId = null;
     selectedJurisdictionName = null;
+  });
+
+  $effect(() => {
+    if (isRemoteRuntime || !currentFrame?.eReplicas) return;
+    if (selectedEntityId && selectedReplica) return;
+
+    const vault = $activeRuntimeStore;
+    const activeSignerIndex = Number(vault?.activeSignerIndex ?? 0);
+    const activeSigner =
+      vault?.signers?.[activeSignerIndex]
+      || vault?.signers?.[0]
+      || null;
+    const activeSignerId = String(activeSigner?.address || '').trim().toLowerCase();
+    const preferredReplica = activeSignerId
+      ? findReplicaBySigner(currentFrame, activeSignerId, null)
+      : null;
+    const replica = preferredReplica || firstReplicaInFrame(currentFrame);
+    if (!replica?.entityId || !replica?.signerId) return;
+
+    // After full device wipe the runtime can be restored from a tower before the
+    // old tab selection exists. Defaulting to the active local signer replica
+    // keeps wallet boot deterministic instead of landing on an empty "Select Entity" shell.
+    viewMode = 'entity';
+    selectedEntityId = String(replica.entityId).toLowerCase();
+    selectedSignerId = String(replica.signerId).toLowerCase();
+    if (selectedJurisdictionName && selectedReplicaJurisdiction && selectedJurisdictionName !== selectedReplicaJurisdiction) {
+      selectedJurisdictionName = selectedReplicaJurisdiction;
+    }
+  });
+
+  $effect(() => {
+    if (isRemoteRuntime) return;
+    if (selectedEntityId && selectedSignerId) return;
+
+    const vault = $activeRuntimeStore;
+    const activeSignerIndex = Number(vault?.activeSignerIndex ?? 0);
+    const activeSigner =
+      vault?.signers?.[activeSignerIndex]
+      || vault?.signers?.[0]
+      || null;
+    const fallbackEntityId = String(activeSigner?.entityId || '').trim().toLowerCase();
+    const fallbackSignerId = String(activeSigner?.address || '').trim().toLowerCase();
+    if (!fallbackEntityId || !fallbackSignerId) return;
+
+    // Runtime restore can hydrate signer metadata before env-derived replica selection catches up.
+    // Seeding the visible entity from signer metadata avoids booting into an empty shell after
+    // device wipe + watchtower restore while still converging to the same replica once env sync finishes.
+    viewMode = 'entity';
+    selectedEntityId = fallbackEntityId;
+    selectedSignerId = fallbackSignerId;
   });
 
   // Clear entity/account if jurisdiction filter no longer matches
@@ -532,9 +586,9 @@
   // Tab for EntityPanel
   const entityTab: Tab = $derived({
 	    id: 'user-entity',
-	    title: selectedEntityId ? `Entity ${selectedEntityId}` : 'Entity',
-	    entityId: selectedEntityId || '',
-	    signerId: selectedSignerId || '',
+	    title: (selectedEntityId || signer?.entityId) ? `Entity ${selectedEntityId || signer?.entityId}` : 'Entity',
+	    entityId: selectedEntityId || String(signer?.entityId || '').trim().toLowerCase(),
+	    signerId: selectedSignerId || String(signer?.address || '').trim().toLowerCase(),
 	    jurisdiction: selectedReplicaJurisdiction || selectedJurisdictionName || 'browservm',
 	    isActive: true,
 	  });

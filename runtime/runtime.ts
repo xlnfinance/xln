@@ -201,6 +201,9 @@ import { resolveEntityProposerId } from './state-helpers';
 import { getEntityShortId, formatEntityId } from './utils';
 import { safeStringify } from './serialization-utils';
 import { computeCanonicalEntityHashesFromEnv, computeCanonicalStateHashFromEnv } from './storage/canonical-hash';
+import { encodeBuffer, writeBatch } from './storage/codec';
+import { docValueKey, liveKeyForDoc } from './storage/doc-refs';
+import { computeStorageFrameHash, prepareStorageStateHashes } from './storage/hashes';
 import {
   computeStorageStateRoot,
   findStorageLatestSnapshotAtOrBelow,
@@ -219,8 +222,22 @@ import {
   saveRuntimeFrameToStorage,
   type StorageHead,
 } from './storage';
+import {
+  DEFAULT_ACCOUNT_MERKLE_RADIX,
+  DEFAULT_EPOCH_MAX_BYTES,
+  DEFAULT_RETAIN_SNAPSHOTS,
+  DEFAULT_SNAPSHOT_PERIOD_FRAMES,
+  keyLiveReplicaMeta,
+  KEY_HEAD,
+  keyFrame,
+  ZERO_FRAME_HASH,
+  STORAGE_SCHEMA_VERSION,
+} from './storage/keys';
+import { createSnapshot } from './storage/lifecycle';
+import { projectAccountDoc, projectEntityCoreDoc, projectReplicaMeta } from './storage/projections';
 import { assertStorageSafetyOverridesAllowed } from './storage/safety';
 import { storageOverlayRecordKey } from './storage/overlay';
+import type { StorageDoc, StorageFrameRecord } from './storage/types';
 import type { RuntimeAdapterReadQuery } from './radapter';
 export {
   resolveRuntimeAdapterRead,
@@ -1753,6 +1770,186 @@ export const restoreEnvFromCheckpointSnapshot = async (
   });
 
   return env;
+};
+
+const collectAllStorageDocsFromEnv = (env: Env): StorageDoc[] => {
+  const docs: StorageDoc[] = [];
+  const seenEntities = new Set<string>();
+  const seenAccounts = new Set<string>();
+  const seenBooks = new Set<string>();
+
+  for (const replica of env.eReplicas.values()) {
+    if (!replica?.state) continue;
+    const entityId = String(replica.entityId || replica.state.entityId || '').toLowerCase();
+    if (!entityId) continue;
+
+    if (!seenEntities.has(entityId)) {
+      seenEntities.add(entityId);
+      docs.push({
+        family: 'entity',
+        entityId,
+        value: projectEntityCoreDoc(replica.state, replica),
+      });
+    }
+
+    for (const [counterpartyId, account] of replica.state.accounts.entries()) {
+      const normalizedCounterparty = String(counterpartyId || '').toLowerCase();
+      if (!normalizedCounterparty || !account) continue;
+      const accountKey = `${entityId}:${normalizedCounterparty}`;
+      if (seenAccounts.has(accountKey)) continue;
+      seenAccounts.add(accountKey);
+      docs.push({
+        family: 'account',
+        entityId,
+        counterpartyId: normalizedCounterparty,
+        value: projectAccountDoc(account),
+      });
+    }
+
+    for (const [pairId, book] of replica.state.orderbookExt?.books?.entries?.() ?? []) {
+      const normalizedPairId = String(pairId || '').trim();
+      if (!normalizedPairId || !book) continue;
+      const bookKey = `${entityId}:${normalizedPairId}`;
+      if (seenBooks.has(bookKey)) continue;
+      seenBooks.add(bookKey);
+      docs.push({
+        family: 'book',
+        entityId,
+        pairId: normalizedPairId,
+        value: book,
+      });
+    }
+  }
+
+  return docs;
+};
+
+// Recovery checkpoint imports are not an append to the local WAL. They seed a new
+// local persistence base at the recovered runtime height, anchored by a materialized
+// snapshot and a synthetic frame at that same height.
+export const persistRestoredEnvToDB = async (env: Env): Promise<void> => {
+  const restoredHeight = Math.max(1, Math.floor(Number(env.height || 0)));
+  if (restoredHeight <= 0) {
+    throw new Error('RECOVERY_PERSIST_HEIGHT_REQUIRED');
+  }
+
+  if (!(await tryOpenStorageDb(env, 'current'))) {
+    throw new Error('RECOVERY_PERSIST_STORAGE_OPEN_FAILED');
+  }
+  if (!(await tryOpenFrameDb(env))) {
+    throw new Error('RECOVERY_PERSIST_FRAME_DB_OPEN_FAILED');
+  }
+
+  const currentDb = getStorageDb(env, 'current');
+  const frameDb = getFrameDb(env);
+
+  await clearDatabase(currentDb);
+  await clearDatabase(frameDb);
+  try {
+    if (await tryOpenStorageDb(env, 'previous')) {
+      await clearDatabase(getStorageDb(env, 'previous'));
+    }
+  } catch {
+    // Previous-epoch storage is optional. Recovery import only needs a clean
+    // current epoch; stale previous data is ignored if the store does not open.
+  }
+
+  const puts = collectAllStorageDocsFromEnv(env);
+  const preparedHashes = await prepareStorageStateHashes({
+    db: currentDb,
+    puts,
+    dels: [],
+  });
+
+  const currentBatch = currentDb.batch();
+  for (const doc of puts) {
+    currentBatch.put(
+      liveKeyForDoc(doc),
+      preparedHashes.docValueBuffers.get(docValueKey(doc)) ?? encodeBuffer(doc.value),
+    );
+  }
+  for (const item of preparedHashes.merklePuts) {
+    currentBatch.put(item.key, item.value);
+  }
+  for (const replica of env.eReplicas.values()) {
+    if (!replica?.state) continue;
+    const entityId = String(replica.entityId || replica.state.entityId || '').toLowerCase();
+    if (!entityId) continue;
+    currentBatch.put(keyLiveReplicaMeta(entityId), encodeBuffer(projectReplicaMeta(replica)));
+  }
+
+  const retainedHistoryBytes =
+    keyFrame(restoredHeight).byteLength +
+    encodeBuffer({}).byteLength;
+  const head: StorageHead = {
+    schemaVersion: STORAGE_SCHEMA_VERSION,
+    latestHeight: restoredHeight,
+    latestMaterializedHeight: restoredHeight,
+    latestSnapshotHeight: restoredHeight,
+    snapshotPeriodFrames: Math.max(1, Number(env.runtimeConfig?.storage?.snapshotPeriodFrames ?? DEFAULT_SNAPSHOT_PERIOD_FRAMES)),
+    retainSnapshots: Math.max(1, Number(env.runtimeConfig?.storage?.retainSnapshots ?? DEFAULT_RETAIN_SNAPSHOTS)),
+    epochMaxBytes: Math.max(1, Number(env.runtimeConfig?.storage?.epochMaxBytes ?? DEFAULT_EPOCH_MAX_BYTES)),
+    accountMerkleRadix: env.runtimeConfig?.storage?.accountMerkleRadix === 256 ? 256 : DEFAULT_ACCOUNT_MERKLE_RADIX,
+    retainedHistoryBytes,
+  };
+  currentBatch.put(KEY_HEAD, encodeBuffer(head));
+  await writeBatch(currentBatch);
+
+  const snapshotResult = await createSnapshot(currentDb, frameDb, restoredHeight, env.timestamp);
+  const canonicalEntityHashes = computeCanonicalEntityHashesFromEnv(env);
+  const canonicalStateHash = computeCanonicalStateHashFromEnv(env);
+  const frameRecordBase: StorageFrameRecord = {
+    height: restoredHeight,
+    timestamp: env.timestamp,
+    prevFrameHash: ZERO_FRAME_HASH,
+    stateHash: preparedHashes.stateHash,
+    hashMode: 'storage-merkle-v1',
+    materializedState: true,
+    entityHashes: preparedHashes.entityHashes,
+    canonicalStateHash,
+    canonicalEntityHashes,
+    runtimeInput: { runtimeTxs: [], entityInputs: [] },
+    touchedEntities: Array.from(new Set(puts.map((doc) => doc.entityId))).sort(),
+    touchedAccounts: puts
+      .filter((doc): doc is Extract<StorageDoc, { family: 'account' }> => doc.family === 'account')
+      .map((doc) => ({ entityId: doc.entityId, counterpartyId: doc.counterpartyId })),
+    touchedBookEntities: Array.from(
+      new Set(
+        puts
+          .filter((doc): doc is Extract<StorageDoc, { family: 'book' }> => doc.family === 'book')
+          .map((doc) => doc.entityId),
+      ),
+    ).sort(),
+  };
+  const frameRecord: StorageFrameRecord = {
+    ...frameRecordBase,
+    frameHash: computeStorageFrameHash(frameRecordBase),
+  };
+
+  const frameBatch = frameDb.batch();
+  frameBatch.put(keyFrame(restoredHeight), encodeBuffer(frameRecord));
+  frameBatch.put(
+    KEY_HEAD,
+    encodeBuffer({
+      ...head,
+      retainedHistoryBytes:
+        retainedHistoryBytes + snapshotResult.bytes + encodeBuffer(frameRecord).byteLength + keyFrame(restoredHeight).byteLength,
+    } satisfies StorageHead),
+  );
+  await writeBatch(frameBatch);
+
+  const updatedHead: StorageHead = {
+    ...head,
+    retainedHistoryBytes:
+      retainedHistoryBytes + snapshotResult.bytes + encodeBuffer(frameRecord).byteLength + keyFrame(restoredHeight).byteLength,
+  };
+  const finalizeCurrentBatch = currentDb.batch();
+  finalizeCurrentBatch.put(KEY_HEAD, encodeBuffer(updatedHead));
+  await writeBatch(finalizeCurrentBatch);
+
+  const state = ensureRuntimeState(env);
+  state.storageEntityHashDocs = preparedHashes.entityHashDocs;
+  state.currentStorageOverlayMarks = [];
 };
 
 const requirePersistedContractAddress = (

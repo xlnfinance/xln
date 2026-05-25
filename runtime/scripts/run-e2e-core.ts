@@ -5,6 +5,7 @@ import { spawn, type ChildProcess } from 'node:child_process';
 const CORE_E2E_FILES = [
   'tests/e2e-payment-smoke.spec.ts',
   'tests/e2e-dispute.spec.ts',
+  'tests/e2e-watchtower-recovery.spec.ts',
   'tests/e2e-swap-isolated.spec.ts',
   'tests/e2e-ahb-isolated.spec.ts',
   'tests/e2e-cross-j-swap.spec.ts',
@@ -15,6 +16,7 @@ const CORE_E2E_TITLES = [
   'fresh runtimes can open accounts, faucet, pay, and reload persisted state',
   'entity workspace dispute lifecycle returns reserve',
   'entity settle workspace Sign & Broadcast submits dispute batch',
+  'restores a wiped runtime from standalone tower backup',
   'two isolated users trade against each other through one hub orderbook without market maker liquidity',
   'resting maker order can fill partially, stay open, then cancel remainder',
   'one resting maker order can be matched by two isolated takers until fully closed',

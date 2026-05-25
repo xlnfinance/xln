@@ -385,6 +385,7 @@
         appStateOperations.setViewMode('home');
       }
     } catch (err) {
+      console.error('[RuntimeCreation] Failed to create XLN wallet', err);
       runtimeCreateError = err instanceof Error ? err.message : 'Failed to create XLN wallet';
     } finally {
       creatingRuntime = false;

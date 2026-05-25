@@ -89,6 +89,90 @@ export type ExternalTokenToReserveStructOutput = [
   amount: bigint;
 };
 
+export type AllowanceStruct = {
+  deltaIndex: BigNumberish;
+  rightAllowance: BigNumberish;
+  leftAllowance: BigNumberish;
+};
+
+export type AllowanceStructOutput = [
+  deltaIndex: bigint,
+  rightAllowance: bigint,
+  leftAllowance: bigint
+] & { deltaIndex: bigint; rightAllowance: bigint; leftAllowance: bigint };
+
+export type TransformerClauseStruct = {
+  transformerAddress: AddressLike;
+  encodedBatch: BytesLike;
+  allowances: AllowanceStruct[];
+};
+
+export type TransformerClauseStructOutput = [
+  transformerAddress: string,
+  encodedBatch: string,
+  allowances: AllowanceStructOutput[]
+] & {
+  transformerAddress: string;
+  encodedBatch: string;
+  allowances: AllowanceStructOutput[];
+};
+
+export type ProofBodyStruct = {
+  offdeltas: BigNumberish[];
+  tokenIds: BigNumberish[];
+  transformers: TransformerClauseStruct[];
+};
+
+export type ProofBodyStructOutput = [
+  offdeltas: bigint[],
+  tokenIds: bigint[],
+  transformers: TransformerClauseStructOutput[]
+] & {
+  offdeltas: bigint[];
+  tokenIds: bigint[];
+  transformers: TransformerClauseStructOutput[];
+};
+
+export type FinalDisputeProofStruct = {
+  counterentity: BytesLike;
+  initialNonce: BigNumberish;
+  finalNonce: BigNumberish;
+  initialProofbodyHash: BytesLike;
+  finalProofbody: ProofBodyStruct;
+  finalArguments: BytesLike;
+  initialArguments: BytesLike;
+  sig: BytesLike;
+  startedByLeft: boolean;
+  disputeUntilBlock: BigNumberish;
+  cooperative: boolean;
+};
+
+export type FinalDisputeProofStructOutput = [
+  counterentity: string,
+  initialNonce: bigint,
+  finalNonce: bigint,
+  initialProofbodyHash: string,
+  finalProofbody: ProofBodyStructOutput,
+  finalArguments: string,
+  initialArguments: string,
+  sig: string,
+  startedByLeft: boolean,
+  disputeUntilBlock: bigint,
+  cooperative: boolean
+] & {
+  counterentity: string;
+  initialNonce: bigint;
+  finalNonce: bigint;
+  initialProofbodyHash: string;
+  finalProofbody: ProofBodyStructOutput;
+  finalArguments: string;
+  initialArguments: string;
+  sig: string;
+  startedByLeft: boolean;
+  disputeUntilBlock: bigint;
+  cooperative: boolean;
+};
+
 export declare namespace Depository {
   export type ReserveMintStruct = {
     entity: BytesLike;
@@ -107,6 +191,7 @@ export interface DepositoryInterface extends Interface {
   getFunction(
     nameOrSignature:
       | "DOMAIN_SEPARATOR"
+      | "WATCHTOWER_COUNTER_DISPUTE_DOMAIN_SEPARATOR"
       | "_accounts"
       | "_activeDebts"
       | "_activeDebtsByToken"
@@ -118,6 +203,7 @@ export interface DepositoryInterface extends Interface {
       | "accountKey"
       | "admin"
       | "adminRegisterExternalToken"
+      | "computeWatchtowerCounterDisputeHash"
       | "debtOutstanding"
       | "defaultDisputeDelay"
       | "enforceDebts"
@@ -134,6 +220,7 @@ export interface DepositoryInterface extends Interface {
       | "spendableReserve"
       | "tokenToId"
       | "unpackTokenReference"
+      | "watchtowerCounterDispute"
   ): FunctionFragment;
 
   getEvent(
@@ -148,10 +235,15 @@ export interface DepositoryInterface extends Interface {
       | "HankoBatchProcessed"
       | "ReserveUpdated"
       | "SecretRevealed"
+      | "WatchtowerCounterDisputeExecuted"
   ): EventFragment;
 
   encodeFunctionData(
     functionFragment: "DOMAIN_SEPARATOR",
+    values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "WATCHTOWER_COUNTER_DISPUTE_DOMAIN_SEPARATOR",
     values?: undefined
   ): string;
   encodeFunctionData(
@@ -194,6 +286,18 @@ export interface DepositoryInterface extends Interface {
   encodeFunctionData(
     functionFragment: "adminRegisterExternalToken",
     values: [ExternalTokenToReserveStruct]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "computeWatchtowerCounterDisputeHash",
+    values: [
+      AddressLike,
+      BytesLike,
+      BytesLike,
+      BigNumberish,
+      BytesLike,
+      BigNumberish,
+      BigNumberish
+    ]
   ): string;
   encodeFunctionData(
     functionFragment: "debtOutstanding",
@@ -265,9 +369,23 @@ export interface DepositoryInterface extends Interface {
     functionFragment: "unpackTokenReference",
     values: [BytesLike]
   ): string;
+  encodeFunctionData(
+    functionFragment: "watchtowerCounterDispute",
+    values: [
+      BytesLike,
+      FinalDisputeProofStruct,
+      BigNumberish,
+      BigNumberish,
+      BytesLike
+    ]
+  ): string;
 
   decodeFunctionResult(
     functionFragment: "DOMAIN_SEPARATOR",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "WATCHTOWER_COUNTER_DISPUTE_DOMAIN_SEPARATOR",
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "_accounts", data: BytesLike): Result;
@@ -291,6 +409,10 @@ export interface DepositoryInterface extends Interface {
   decodeFunctionResult(functionFragment: "admin", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "adminRegisterExternalToken",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "computeWatchtowerCounterDisputeHash",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -352,6 +474,10 @@ export interface DepositoryInterface extends Interface {
   decodeFunctionResult(functionFragment: "tokenToId", data: BytesLike): Result;
   decodeFunctionResult(
     functionFragment: "unpackTokenReference",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "watchtowerCounterDispute",
     data: BytesLike
   ): Result;
 }
@@ -602,6 +728,34 @@ export namespace SecretRevealedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
+export namespace WatchtowerCounterDisputeExecutedEvent {
+  export type InputTuple = [
+    tower: AddressLike,
+    entityId: BytesLike,
+    counterentity: BytesLike,
+    finalNonce: BigNumberish,
+    appointmentSequence: BigNumberish
+  ];
+  export type OutputTuple = [
+    tower: string,
+    entityId: string,
+    counterentity: string,
+    finalNonce: bigint,
+    appointmentSequence: bigint
+  ];
+  export interface OutputObject {
+    tower: string;
+    entityId: string;
+    counterentity: string;
+    finalNonce: bigint;
+    appointmentSequence: bigint;
+  }
+  export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
+  export type Filter = TypedDeferredTopicFilter<Event>;
+  export type Log = TypedEventLog<Event>;
+  export type LogDescription = TypedLogDescription<Event>;
+}
+
 export interface Depository extends BaseContract {
   connect(runner?: ContractRunner | null): Depository;
   waitForDeployment(): Promise<this>;
@@ -646,6 +800,12 @@ export interface Depository extends BaseContract {
   ): Promise<this>;
 
   DOMAIN_SEPARATOR: TypedContractMethod<[], [string], "view">;
+
+  WATCHTOWER_COUNTER_DISPUTE_DOMAIN_SEPARATOR: TypedContractMethod<
+    [],
+    [string],
+    "view"
+  >;
 
   _accounts: TypedContractMethod<
     [arg0: BytesLike],
@@ -716,6 +876,20 @@ export interface Depository extends BaseContract {
     [params: ExternalTokenToReserveStruct],
     [void],
     "nonpayable"
+  >;
+
+  computeWatchtowerCounterDisputeHash: TypedContractMethod<
+    [
+      tower: AddressLike,
+      entityId: BytesLike,
+      counterentity: BytesLike,
+      finalNonce: BigNumberish,
+      finalProofbodyHash: BytesLike,
+      lastResortWindowBlocks: BigNumberish,
+      appointmentSequence: BigNumberish
+    ],
+    [string],
+    "view"
   >;
 
   debtOutstanding: TypedContractMethod<
@@ -822,12 +996,27 @@ export interface Depository extends BaseContract {
     "view"
   >;
 
+  watchtowerCounterDispute: TypedContractMethod<
+    [
+      entityId: BytesLike,
+      params: FinalDisputeProofStruct,
+      lastResortWindowBlocks: BigNumberish,
+      appointmentSequence: BigNumberish,
+      ownerAuthorizationHanko: BytesLike
+    ],
+    [boolean],
+    "nonpayable"
+  >;
+
   getFunction<T extends ContractMethod = ContractMethod>(
     key: string | FunctionFragment
   ): T;
 
   getFunction(
     nameOrSignature: "DOMAIN_SEPARATOR"
+  ): TypedContractMethod<[], [string], "view">;
+  getFunction(
+    nameOrSignature: "WATCHTOWER_COUNTER_DISPUTE_DOMAIN_SEPARATOR"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
     nameOrSignature: "_accounts"
@@ -906,6 +1095,21 @@ export interface Depository extends BaseContract {
     [params: ExternalTokenToReserveStruct],
     [void],
     "nonpayable"
+  >;
+  getFunction(
+    nameOrSignature: "computeWatchtowerCounterDisputeHash"
+  ): TypedContractMethod<
+    [
+      tower: AddressLike,
+      entityId: BytesLike,
+      counterentity: BytesLike,
+      finalNonce: BigNumberish,
+      finalProofbodyHash: BytesLike,
+      lastResortWindowBlocks: BigNumberish,
+      appointmentSequence: BigNumberish
+    ],
+    [string],
+    "view"
   >;
   getFunction(
     nameOrSignature: "debtOutstanding"
@@ -1027,6 +1231,19 @@ export interface Depository extends BaseContract {
     ],
     "view"
   >;
+  getFunction(
+    nameOrSignature: "watchtowerCounterDispute"
+  ): TypedContractMethod<
+    [
+      entityId: BytesLike,
+      params: FinalDisputeProofStruct,
+      lastResortWindowBlocks: BigNumberish,
+      appointmentSequence: BigNumberish,
+      ownerAuthorizationHanko: BytesLike
+    ],
+    [boolean],
+    "nonpayable"
+  >;
 
   getEvent(
     key: "AccountSettled"
@@ -1097,6 +1314,13 @@ export interface Depository extends BaseContract {
     SecretRevealedEvent.InputTuple,
     SecretRevealedEvent.OutputTuple,
     SecretRevealedEvent.OutputObject
+  >;
+  getEvent(
+    key: "WatchtowerCounterDisputeExecuted"
+  ): TypedContractEvent<
+    WatchtowerCounterDisputeExecutedEvent.InputTuple,
+    WatchtowerCounterDisputeExecutedEvent.OutputTuple,
+    WatchtowerCounterDisputeExecutedEvent.OutputObject
   >;
 
   filters: {
@@ -1208,6 +1432,17 @@ export interface Depository extends BaseContract {
       SecretRevealedEvent.InputTuple,
       SecretRevealedEvent.OutputTuple,
       SecretRevealedEvent.OutputObject
+    >;
+
+    "WatchtowerCounterDisputeExecuted(address,bytes32,bytes32,uint256,uint256)": TypedContractEvent<
+      WatchtowerCounterDisputeExecutedEvent.InputTuple,
+      WatchtowerCounterDisputeExecutedEvent.OutputTuple,
+      WatchtowerCounterDisputeExecutedEvent.OutputObject
+    >;
+    WatchtowerCounterDisputeExecuted: TypedContractEvent<
+      WatchtowerCounterDisputeExecutedEvent.InputTuple,
+      WatchtowerCounterDisputeExecutedEvent.OutputTuple,
+      WatchtowerCounterDisputeExecutedEvent.OutputObject
     >;
   };
 }

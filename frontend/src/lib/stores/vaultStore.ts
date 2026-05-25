@@ -398,6 +398,26 @@ const defaultRecoveryTowerUrls = (): string[] => {
 
 const normalizeTowerBaseUrl = (url: string): string => String(url || '').trim().replace(/\/+$/, '');
 
+const buildTowerRequestUrl = (towerUrl: string, towerPath: string): string => {
+  const normalizedBaseUrl = normalizeTowerBaseUrl(towerUrl);
+  const normalizedPath = towerPath.startsWith('/') ? towerPath : `/${towerPath}`;
+  if (typeof window !== 'undefined') {
+    const pageUrl = new URL(window.location.href);
+    const targetUrl = new URL(`${normalizedBaseUrl}/`);
+    const isSecurePage = pageUrl.protocol === 'https:';
+    const isLocalInsecureTower =
+      targetUrl.protocol === 'http:'
+      && (targetUrl.hostname === '127.0.0.1' || targetUrl.hostname === 'localhost');
+    if (isSecurePage && isLocalInsecureTower) {
+      const proxyUrl = new URL('/api/watchtower-proxy', pageUrl.origin);
+      proxyUrl.searchParams.set('target', normalizedBaseUrl);
+      proxyUrl.searchParams.set('path', normalizedPath);
+      return proxyUrl.toString();
+    }
+  }
+  return new URL(normalizedPath, `${normalizedBaseUrl}/`).toString();
+};
+
 const getConfiguredRecoveryTowers = (runtime: Runtime | null | undefined): RecoveryTowerConfig[] => {
   const explicit = (runtime?.recovery?.towers || [])
     .map((tower) => ({
@@ -430,7 +450,7 @@ export async function fetchTowerServerInfo(towerUrl: string): Promise<TowerServe
   if (cached && now - cached.fetchedAt < RECOVERY_TOWER_INFO_TTL_MS) {
     return cached.info;
   }
-  const response = await fetch(new URL('/', `${normalizedUrl}/`), {
+  const response = await fetch(buildTowerRequestUrl(normalizedUrl, '/'), {
     method: 'GET',
     headers: { accept: 'application/json' },
   });
@@ -544,7 +564,7 @@ export async function tryRestoreRuntimeEnvFromTower(
     typeof xln.restoreEnvFromCheckpointSnapshot !== 'function' ||
     typeof xln.decryptRuntimeRecoveryBundle !== 'function' ||
     typeof xln.deriveRuntimeRecoveryLookupKey !== 'function' ||
-    typeof xln.saveEnvToDB !== 'function'
+    typeof xln.persistRestoredEnvToDB !== 'function'
   ) {
     return null;
   }
@@ -563,7 +583,8 @@ export async function tryRestoreRuntimeEnvFromTower(
 
   for (const tower of towers) {
     try {
-      const response = await fetch(new URL('/api/tower/restore', `${tower.url}/`), {
+      const restoreUrl = buildTowerRequestUrl(tower.url, '/api/tower/restore');
+      const response = await fetch(restoreUrl, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ lookupKey }),
@@ -625,7 +646,7 @@ export async function tryRestoreRuntimeEnvFromTower(
     runtimeId,
   });
   applyRuntimeLogPreference(restoredEnv);
-  await xln.saveEnvToDB(restoredEnv);
+  await xln.persistRestoredEnvToDB(restoredEnv);
   return { env: restoredEnv, bundle };
 }
 
@@ -699,7 +720,8 @@ async function uploadRuntimeRecoverySnapshot(
 
   for (const tower of towers) {
     try {
-      const response = await fetch(new URL('/api/tower/appointment', `${tower.url}/`), {
+      const appointmentUrl = buildTowerRequestUrl(tower.url, '/api/tower/appointment');
+      const response = await fetch(appointmentUrl, {
         method: 'PUT',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify(appointment),
@@ -741,7 +763,8 @@ async function uploadRuntimeRecoverySnapshot(
         encrypted,
       );
       for (const upload of activeAppointments) {
-        const response = await fetch(new URL('/api/tower/appointment', `${tower.url}/`), {
+        const appointmentUrl = buildTowerRequestUrl(tower.url, '/api/tower/appointment');
+        const response = await fetch(appointmentUrl, {
           method: 'PUT',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify(upload.appointment),
@@ -1553,6 +1576,43 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
   let signerMetadataChanged = false;
   let restoredFromTower = false;
 
+  const persistRuntimeMetadataIfChanged = (): void => {
+    if (!signerMetadataChanged) return;
+    const currentState = get(runtimesState);
+    if (!findRuntimeByIdCaseInsensitive(currentState.runtimes, runtime.id)?.runtime) return;
+    runtimesState.update((state) => ({
+      ...state,
+      runtimes: {
+        ...state.runtimes,
+        [runtime.id]: runtime,
+      },
+    }));
+    persistRuntimeMetadataSnapshot();
+  };
+
+  const restoreFromTower = async (
+    reason: 'missing_local_env' | 'invalid_local_env',
+  ): Promise<boolean> => {
+    try {
+      const towerRestored = await tryRestoreRuntimeEnvFromTower(runtime, xln);
+      if (!towerRestored) return false;
+      env = towerRestored.env;
+      restoredFromTower = true;
+      signerMetadataChanged = true;
+      console.info(
+        `[VaultStore] Restored runtime ${runtime.id.slice(0, 12)} from tower after ${reason}`,
+      );
+      return true;
+    } catch (error) {
+      if (strictRestore) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`[VaultStore] Tower restore failed for ${runtime.id.slice(0, 12)}: ${message}`);
+      }
+      console.warn('[VaultStore] ⚠️ Failed to restore env from tower, continuing with local recovery path:', error);
+      return false;
+    }
+  };
+
   for (const signer of runtime.signers || []) {
     if (!signer?.address) continue;
     const canonicalEntityId = String(xln.generateLazyEntityId([signer.address], 1n)).toLowerCase();
@@ -1580,32 +1640,10 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
   }
 
   if (!env) {
-    try {
-      const towerRestored = await tryRestoreRuntimeEnvFromTower(runtime, xln);
-      if (towerRestored) {
-        env = towerRestored.env;
-        restoredFromTower = true;
-        signerMetadataChanged = true;
-      }
-    } catch (error) {
-      if (strictRestore) {
-        const message = error instanceof Error ? error.message : String(error);
-        throw new Error(`[VaultStore] Tower restore failed for ${runtime.id.slice(0, 12)}: ${message}`);
-      }
-      console.warn('[VaultStore] ⚠️ Failed to restore env from tower, continuing with local recovery path:', error);
-    }
+    await restoreFromTower('missing_local_env');
   }
 
-  if (signerMetadataChanged) {
-    runtimesState.update((state) => ({
-      ...state,
-      runtimes: {
-        ...state.runtimes,
-        [runtime.id]: runtime,
-      },
-    }));
-    persistRuntimeMetadataSnapshot();
-  }
+  persistRuntimeMetadataIfChanged();
 
   if (!env && strictRestore) {
     throw new Error(`[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: persisted env missing`);
@@ -1615,8 +1653,12 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     if (strictRestore && !restoredFromTower) {
       throw new Error(`[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: restored env missing jReplicas`);
     }
-    console.warn('[VaultStore] ⚠️ Restored env missing J-replicas; re-importing');
+    console.warn('[VaultStore] ⚠️ Restored env missing J-replicas; retrying tower restore before local re-import');
     env = null;
+    if (!restoredFromTower) {
+      await restoreFromTower('invalid_local_env');
+      persistRuntimeMetadataIfChanged();
+    }
   }
 
   const hasLiveJAdapter = (targetEnv: Env | null): boolean => {
@@ -1750,12 +1792,12 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
         }],
         entityInputs: []
       },
-      () => hasConnectedJurisdictionAdapter(findJReplicaByName(env, primaryJurisdictionName)),
+      () => hasConnectedJurisdictionAdapter(findJReplicaByName(env!, primaryJurisdictionName)),
       `repairImportJ(${primaryJurisdictionName})`,
       45_000,
     );
     await waitForCondition(
-      () => hasRuntimeJurisdictionAddresses(findJReplicaByName(env, primaryJurisdictionName)),
+      () => hasRuntimeJurisdictionAddresses(findJReplicaByName(env!, primaryJurisdictionName)),
       `repairImportJ(${primaryJurisdictionName}).addresses`,
       45_000,
     );
@@ -2196,63 +2238,57 @@ export const vaultOperations = {
       requiresOnboarding,
       createdAt: Date.now()
     };
-
-    runtimesState.update(state => ({
-      ...state,
-      runtimes: {
-        ...state.runtimes,
-        [id]: runtime
-      },
-      activeRuntimeId: id
-    }));
-    markPerf('persist_runtime_state');
+    const previousActiveRuntimeId = currentState.activeRuntimeId;
 
     // CRITICAL: Create NEW isolated runtime for this runtime (AWAIT to avoid race)
     const runtimeId = normalizeRuntimeId(id); // Use normalized runtime ID key
 
     // Import XLN and create env BEFORE returning
-    const xln = await getXLN();
-    markPerf('load_xln_runtime');
-    const towerRestored = await tryRestoreRuntimeEnvFromTower(runtime, xln);
-    const runtimeIdLower = runtimeId.toLowerCase();
-    let newEnv: Env;
+    let xln: XLNModule | null = null;
+    let newEnv: Env | null = null;
 
-    if (towerRestored) {
-      newEnv = await buildOrRestoreRuntimeEnv(runtime, xln, false);
-      applyRuntimeLogPreference(newEnv);
-      markPerf('restore_runtime_from_tower');
-      toasts.info('Runtime restored from recovery backup', 6_000);
-    } else {
-      newEnv = xln.createEmptyEnv(seed);
-      applyRuntimeLogPreference(newEnv);
-      newEnv.runtimeId = runtimeIdLower;
-      newEnv.dbNamespace = runtimeIdLower;
+    try {
+      xln = await getXLN();
+      markPerf('load_xln_runtime');
+      const towerRestored = await tryRestoreRuntimeEnvFromTower(runtime, xln);
+      const runtimeIdLower = runtimeId.toLowerCase();
 
-      // REMOVED: setRuntimeSeed() - seed now stored in env.runtimeSeed and passed to pure functions
-      // All crypto functions now read from env.runtimeSeed, not global state
+      if (towerRestored) {
+        newEnv = await buildOrRestoreRuntimeEnv(runtime, xln, false);
+        applyRuntimeLogPreference(newEnv);
+        markPerf('restore_runtime_from_tower');
+        toasts.info('Runtime restored from recovery backup', 6_000);
+      } else {
+        newEnv = xln.createEmptyEnv(seed);
+        applyRuntimeLogPreference(newEnv);
+        newEnv.runtimeId = runtimeIdLower;
+        newEnv.dbNamespace = runtimeIdLower;
 
-      // Fetch pre-deployed contract addresses from prod
-      const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
-      markPerf('wait_server_runtime_ready');
-      const jurisdictions = await fetchJurisdictions(baseOrigin);
-      markPerf('fetch_jurisdictions');
-      const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
-      const defaultJurisdictionImports = listDefaultJurisdictionImports(jurisdictions);
-      const primaryJurisdictionName =
-        defaultJurisdictionImports[0]?.name ||
-        stripLocalJurisdictionSuffix(arrakisConfig.name || 'primary') ||
-        'primary';
-      const secondaryJurisdictionImports = defaultJurisdictionImports.slice(1);
-      const rpcUrl = resolveRpcUrl(resolveJurisdictionRpc(arrakisConfig), baseOrigin);
-      const chainId = resolveJurisdictionChainId(arrakisConfig, 'VaultStore.createRuntime');
+        // REMOVED: setRuntimeSeed() - seed now stored in env.runtimeSeed and passed to pure functions
+        // All crypto functions now read from env.runtimeSeed, not global state
+
+        // Fetch pre-deployed contract addresses from prod
+        const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
+        markPerf('wait_server_runtime_ready');
+        const jurisdictions = await fetchJurisdictions(baseOrigin);
+        markPerf('fetch_jurisdictions');
+        const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
+        const defaultJurisdictionImports = listDefaultJurisdictionImports(jurisdictions);
+        const primaryJurisdictionName =
+          defaultJurisdictionImports[0]?.name ||
+          stripLocalJurisdictionSuffix(arrakisConfig.name || 'primary') ||
+          'primary';
+        const secondaryJurisdictionImports = defaultJurisdictionImports.slice(1);
+        const rpcUrl = resolveRpcUrl(resolveJurisdictionRpc(arrakisConfig), baseOrigin);
+        const chainId = resolveJurisdictionChainId(arrakisConfig, 'VaultStore.createRuntime');
 
       // Import the same primary jurisdiction name that hub profiles advertise.
-      if (xln.startRuntimeLoop) {
-        xln.startRuntimeLoop(newEnv);
-      }
-      await enqueueAndAwait(
-        xln,
-        newEnv,
+        if (xln.startRuntimeLoop) {
+          xln.startRuntimeLoop(newEnv);
+        }
+        await enqueueAndAwait(
+          xln,
+          newEnv,
         {
           runtimeTxs: [{
             type: 'importJ',
@@ -2268,7 +2304,7 @@ export const vaultOperations = {
           entityInputs: []
         },
         () => {
-          const replica = findJReplicaByName(newEnv, primaryJurisdictionName);
+          const replica = findJReplicaByName(newEnv!, primaryJurisdictionName);
           if (hasConnectedJurisdictionAdapter(replica)) return true;
           if (newEnv?.runtimeState?.loopActive === false) {
             throw new Error(`createRuntime.importJ(${primaryJurisdictionName}) failed: runtime loop halted\n${getRuntimeFatalDiagnostics(newEnv)}`);
@@ -2277,15 +2313,15 @@ export const vaultOperations = {
         },
         `createRuntime.importJ(${primaryJurisdictionName})`,
         45_000,
-      );
-      await waitForCondition(
-        () => hasRuntimeJurisdictionAddresses(findJReplicaByName(newEnv, primaryJurisdictionName)),
-        `createRuntime.importJ(${primaryJurisdictionName}).addresses`,
-        45_000,
-      );
-      markPerf('import_j_testnet');
+        );
+        await waitForCondition(
+          () => hasRuntimeJurisdictionAddresses(findJReplicaByName(newEnv!, primaryJurisdictionName)),
+          `createRuntime.importJ(${primaryJurisdictionName}).addresses`,
+          45_000,
+        );
+        markPerf('import_j_testnet');
 
-      for (const secondary of secondaryJurisdictionImports) {
+        for (const secondary of secondaryJurisdictionImports) {
         const secondaryRpcUrl = resolveRpcUrl(resolveJurisdictionRpc(secondary.config), baseOrigin);
         const secondaryChainId = resolveJurisdictionChainId(secondary.config, `VaultStore.createRuntime.${secondary.name}`);
         await enqueueAndAwait(
@@ -2314,24 +2350,24 @@ export const vaultOperations = {
           `createRuntime.importJ(${secondary.name}).addresses`,
           45_000,
         );
-      }
+        }
 
       // === MVP: Create entity ===
       // Create entity config (single-signer, threshold 1)
-      const signerAddress = firstAddress;
+        const signerAddress = firstAddress;
 
       // Get contract addresses from imported J-machine
-      const jReplica = findJReplicaByName(newEnv, primaryJurisdictionName);
-      if (!jReplica) {
-        throw new Error(`${primaryJurisdictionName} J-machine not found after import`);
-      }
-      const depositoryAddress = requireContractAddress(jReplica.depositoryAddress, 'depository');
-      const entityProviderAddress = requireContractAddress(jReplica.entityProviderAddress, 'entity_provider');
+        const jReplica = findJReplicaByName(newEnv, primaryJurisdictionName);
+        if (!jReplica) {
+          throw new Error(`${primaryJurisdictionName} J-machine not found after import`);
+        }
+        const depositoryAddress = requireContractAddress(jReplica.depositoryAddress, 'depository');
+        const entityProviderAddress = requireContractAddress(jReplica.entityProviderAddress, 'entity_provider');
 
       // Lazy entity IDs are board hashes generated from the sorted validator set.
-      const entityId = generateLazyEntityIdPreview([signerAddress], 1n);
+        const entityId = generateLazyEntityIdPreview([signerAddress], 1n);
 
-      const entityConfig = {
+        const entityConfig = {
         mode: 'proposer-based' as const,
         threshold: 1n,
         validators: [signerAddress],
@@ -2349,17 +2385,17 @@ export const vaultOperations = {
       // The wallet/runtime signer for index 0 is the BIP44 account-path key derived above;
       // the entity uses the resulting EOA address as signerId, so consensus/J-batch signing
       // must reuse this exact private key instead of deriving a second one from other labels.
-      const signerPrivateKey = derivePrivateKey(seed, 0);
-      const privateKeyBytes = new Uint8Array(
-        signerPrivateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))
-      );
-      xln.registerSignerKey(signerAddress, privateKeyBytes);
-      markPerf('register_signer_key');
+        const signerPrivateKey = derivePrivateKey(seed, 0);
+        const privateKeyBytes = new Uint8Array(
+          signerPrivateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))
+        );
+        xln.registerSignerKey(signerAddress, privateKeyBytes);
+        markPerf('register_signer_key');
 
       // Import entity replica into runtime
-      await enqueueAndAwait(
-        xln,
-        newEnv,
+        await enqueueAndAwait(
+          xln,
+          newEnv,
         {
           runtimeTxs: [{
             type: 'importReplica',
@@ -2384,15 +2420,15 @@ export const vaultOperations = {
           return false;
         },
         `createRuntime.importReplica(${entityId.slice(0, 12)})`,
-      );
-      markPerf('import_entity_replica');
+        );
+        markPerf('import_entity_replica');
 
       // Store entityId in signer
-      runtime.signers[0]!.entityId = entityId;
-      runtime.signers[0]!.jurisdiction = primaryJurisdictionName;
-      void fundSignerWalletViaFaucet(signerAddress);
+        runtime.signers[0]!.entityId = entityId;
+        runtime.signers[0]!.jurisdiction = primaryJurisdictionName;
+        void fundSignerWalletViaFaucet(signerAddress);
 
-      for (const secondary of secondaryJurisdictionImports) {
+        for (const secondary of secondaryJurisdictionImports) {
         const jReplicaSecondary = findJReplicaByName(newEnv, secondary.name);
         if (!jReplicaSecondary) throw new Error(`${secondary.name} J-machine not found after import`);
         const derivationIndex = deriveJurisdictionSignerIndex(secondary.name);
@@ -2426,7 +2462,7 @@ export const vaultOperations = {
             }],
             entityInputs: [],
           },
-          () => Boolean(findEntityReplicaByEntityAndSigner(newEnv, secondaryEntityId, secondaryAddress)),
+          () => Boolean(findEntityReplicaByEntityAndSigner(newEnv!, secondaryEntityId, secondaryAddress)),
           `createRuntime.importReplica(${secondary.name}:${secondaryEntityId.slice(0, 12)})`,
         );
         runtime.signers.push({
@@ -2438,55 +2474,89 @@ export const vaultOperations = {
           entityId: secondaryEntityId,
         });
         void fundSignerWalletViaFaucet(secondaryAddress);
+        }
+        if (!requiresOnboarding) {
+          writeSavedCollateralPolicy({
+            mode: 'autopilot',
+            softLimitUsd: 500,
+            hardLimitUsd: 10_000,
+            maxFeeUsd: 15,
+          });
+          writeHubJoinPreference(loginType === 'demo' ? '1' : 'manual');
+          writeOnboardingComplete(entityId, true);
+        }
       }
-      if (!requiresOnboarding) {
-        writeSavedCollateralPolicy({
-          mode: 'autopilot',
-          softLimitUsd: 500,
-          hardLimitUsd: 10_000,
-          maxFeeUsd: 15,
-        });
-        writeHubJoinPreference(loginType === 'demo' ? '1' : 'manual');
-        writeOnboardingComplete(entityId, true);
-      }
-    }
-    runtimesState.update(state => ({
-      ...state,
-      runtimes: { ...state.runtimes, [id]: runtime }
-    }));
-    this.saveToStorage();
-    markPerf('save_runtime_metadata');
+      runtimesState.update(state => ({
+        ...state,
+        runtimes: { ...state.runtimes, [id]: runtime },
+        activeRuntimeId: id,
+      }));
+      this.saveToStorage();
+      markPerf('persist_runtime_state');
 
-    // Add to runtimes store
-    runtimes.update(r => {
-      const updated = new Map(r);
-      updated.set(runtimeId, runtimeToEntry(runtime, newEnv));
-      return updated;
-    });
-    registerRuntimeEnvChange(runtimeId, newEnv, xln);
-    markPerf('attach_runtime_to_store');
-
-    // Start P2P for this runtime's env (one WS per runtime, stays alive across switches)
-    if (xln.startP2P) {
-      const relayUrls = resolveRelayUrls();
-      xln.startP2P(newEnv, {
-        signerId: runtimeId,
-        relayUrls,
-        gossipPollMs: BROWSER_GOSSIP_POLL_MS,
+      // Add to runtimes store
+      runtimes.update(r => {
+        const updated = new Map(r);
+        updated.set(runtimeId, runtimeToEntry(runtime, newEnv!));
+        return updated;
       });
+      registerRuntimeEnvChange(runtimeId, newEnv!, xln);
+      markPerf('attach_runtime_to_store');
+
+      // Start P2P for this runtime's env (one WS per runtime, stays alive across switches)
+      if (xln.startP2P) {
+        const relayUrls = resolveRelayUrls();
+        xln.startP2P(newEnv!, {
+          signerId: runtimeId,
+          relayUrls,
+          gossipPollMs: BROWSER_GOSSIP_POLL_MS,
+        });
+      }
+      markPerf('start_p2p');
+
+      // Switch to new runtime
+      activeRuntimeId.set(runtimeId);
+      markPerf('activate_runtime');
+
+      // Sync metadata (no P2P — already started above)
+      this.syncRuntime(runtime);
+      markPerf('sync_runtime');
+      flushPerf('ok');
+
+      return runtime;
+    } catch (error) {
+      console.error(`[VaultStore] createRuntime failed for ${id.slice(0, 12)}`, error);
+      try {
+        if (runtimeId) {
+          await cleanupRuntimeEnv(runtimeId);
+        }
+      } catch (cleanupError) {
+        console.warn(`[VaultStore] Failed to cleanup partial runtime ${id.slice(0, 12)}`, cleanupError);
+      }
+      runtimesState.update((state) => {
+        const nextRuntimes = { ...state.runtimes };
+        delete nextRuntimes[id];
+        return {
+          ...state,
+          runtimes: nextRuntimes,
+          activeRuntimeId: previousActiveRuntimeId && nextRuntimes[previousActiveRuntimeId]
+            ? previousActiveRuntimeId
+            : null,
+        };
+      });
+      this.saveToStorage();
+      runtimes.update((entries) => {
+        const updated = new Map(entries);
+        updated.delete(runtimeId);
+        return updated;
+      });
+      if (normalizeRuntimeId(get(activeRuntimeId) || '') === runtimeId) {
+        activeRuntimeId.set(previousActiveRuntimeId && currentState.runtimes[String(previousActiveRuntimeId)]
+          ? previousActiveRuntimeId
+          : '');
+      }
+      throw error;
     }
-    markPerf('start_p2p');
-
-    // Switch to new runtime
-    activeRuntimeId.set(runtimeId);
-    markPerf('activate_runtime');
-
-    // Sync metadata (no P2P — already started above)
-    this.syncRuntime(runtime);
-    markPerf('sync_runtime');
-    flushPerf('ok');
-
-    return runtime;
   },
 
   // Select runtime

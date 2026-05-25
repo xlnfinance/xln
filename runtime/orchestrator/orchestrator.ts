@@ -27,6 +27,7 @@ import { type MarketSnapshotPayload } from '../market-snapshot';
 import { createMarketSubscriptionStack, isMarketMessageType } from '../relay/market-subscriptions';
 import { assertMinDiskFree, getStorageHealth, getStorageHealthSnapshotSync, type StorageHealth } from './storage-monitor';
 import { maybeHandleQaRequest } from '../qa/api';
+import { handleWatchtowerProxy } from '../server/watchtower-proxy';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
 import { isLocalOperatorRequest, publicAggregatedHealth } from '../health-redaction';
 import type {
@@ -1412,6 +1413,10 @@ const server = Bun.serve({
 
     if (pathname === '/api/tokens' && request.method === 'GET') {
       return await proxyAnyHubRequest(request, `${pathname}${url.search}`);
+    }
+
+    if (pathname === '/api/watchtower-proxy' && (request.method === 'GET' || request.method === 'POST' || request.method === 'PUT')) {
+      return await handleWatchtowerProxy(request);
     }
 
     if (pathname.startsWith('/api/')) {
