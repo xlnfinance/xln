@@ -3,7 +3,7 @@
 import { readFileSync } from 'node:fs';
 
 type CoverageRequirement = {
-  area: 'pay' | 'swap' | 'cross-j' | 'frontend';
+  area: 'pay' | 'swap' | 'cross-j' | 'frontend' | 'recovery';
   file: string;
   patterns: string[];
 };
@@ -45,6 +45,16 @@ const requirements: CoverageRequirement[] = [
     patterns: [
       'restores runtime and opens the pay screen from hash params',
       '#payment-amount-input',
+    ],
+  },
+  {
+    area: 'recovery',
+    file: 'tests/e2e-watchtower-recovery.spec.ts',
+    patterns: [
+      'restores a wiped runtime from standalone tower backup',
+      'deriveRuntimeRecoveryLookupKey',
+      '/api/tower/receipt/',
+      '/resetdb?returnTo=/app',
     ],
   },
   {
@@ -124,6 +134,7 @@ const coreGate = readText(coreGatePath);
 const coreTitles = [
   'fresh runtimes can open accounts, faucet, pay, and reload persisted state',
   'bidirectional payments survive across two isolated browser contexts',
+  'restores a wiped runtime from standalone tower backup',
   'two isolated users trade against each other through one hub orderbook without market maker liquidity',
   'resting maker order can fill partially, stay open, then cancel remainder',
   'one resting maker order can be matched by two isolated takers until fully closed',

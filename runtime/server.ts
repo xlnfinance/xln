@@ -83,6 +83,7 @@ import { buildHubDiscoveryPayload } from './server/hub-discovery';
 import { buildDebugEntitiesPayload, buildKnownProfileBundle } from './server/gossip-profiles';
 import { maybeHandleDebugDumpsRequest } from './server/debug-dumps';
 import { handleCreditRequest } from './server/credit-request';
+import { handleWatchtowerProxy } from './server/watchtower-proxy';
 import { handleOffchainFaucet } from './server/offchain-faucet';
 import { handleReserveFaucet } from './server/reserve-faucet';
 import { handleRuntimeHealth, type RuntimeHealthCacheEntry } from './server/health-api';
@@ -385,6 +386,10 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       getAccountMachine,
       ensureTokenCatalog: () => tokenCatalogController.ensureTokenCatalog(),
     });
+  }
+
+  if (pathname === '/api/watchtower-proxy' && (req.method === 'GET' || req.method === 'POST' || req.method === 'PUT')) {
+    return handleWatchtowerProxy(req);
   }
 
   const qaResponse = await maybeHandleQaRequest(req, pathname, headers);

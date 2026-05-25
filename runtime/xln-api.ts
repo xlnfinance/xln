@@ -411,6 +411,7 @@ export interface XLNModule {
   clearDatabase: () => Promise<void>;
   clearDatabaseAndHistory: (env: Env) => Promise<Env>;
   saveEnvToDB: (env: Env) => Promise<void>;
+  persistRestoredEnvToDB: (env: Env) => Promise<void>;
   restoreEnvFromCheckpointSnapshot: (
     snapshot: Record<string, unknown>,
     options?: { runtimeSeed?: string | null; runtimeId?: string | null },

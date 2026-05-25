@@ -69,12 +69,28 @@ export const verifyStorageTailIntegrity = async (
   const latestHeight = Math.max(0, Math.floor(Number(head.latestHeight)));
   await verifyStorageSnapshotIntegrity(db, head);
   const tailFrames = Math.max(1, Math.floor(Number(options.tailFrames ?? STORAGE_VERIFY_TAIL_FRAMES)));
-  const startHeight = Math.max(1, latestHeight - tailFrames + 1);
-  let previousHash = ZERO_FRAME_HASH;
+  const snapshotHeight = Math.max(0, Math.floor(Number(head.latestSnapshotHeight ?? 0)));
+  let startHeight = Math.max(1, latestHeight - tailFrames + 1);
+  let anchoredAtSnapshot = false;
+  const firstCandidate = await readStorageFrameRecord(db, startHeight);
+  if (!firstCandidate && snapshotHeight > startHeight) {
+    startHeight = snapshotHeight;
+    anchoredAtSnapshot = true;
+  }
+
+  let previousHash: string | null = ZERO_FRAME_HASH;
   if (startHeight > 1) {
     const previous = await readStorageFrameRecord(db, startHeight - 1);
-    if (!previous) throw new Error(`STORAGE_VERIFY_PREV_FRAME_MISSING: height=${startHeight - 1}`);
-    previousHash = previous.frameHash ?? computeStorageFrameHash(previous);
+    if (!previous) {
+      if (snapshotHeight === startHeight) {
+        anchoredAtSnapshot = true;
+        previousHash = null;
+      } else {
+        throw new Error(`STORAGE_VERIFY_PREV_FRAME_MISSING: height=${startHeight - 1}`);
+      }
+    } else {
+      previousHash = previous.frameHash ?? computeStorageFrameHash(previous);
+    }
   }
 
   let checkedFrames = 0;
@@ -83,7 +99,8 @@ export const verifyStorageTailIntegrity = async (
     const record = await readStorageFrameRecord(db, height);
     if (!record) throw new Error(`STORAGE_VERIFY_FRAME_MISSING: height=${height}`);
     if (record.height !== height) throw new Error(`STORAGE_VERIFY_FRAME_HEIGHT_MISMATCH: key=${height} record=${record.height}`);
-    if (record.prevFrameHash !== previousHash) {
+    const skipPrevHashCheck = anchoredAtSnapshot && height === startHeight && previousHash === null;
+    if (!skipPrevHashCheck && record.prevFrameHash !== previousHash) {
       throw new Error(`STORAGE_VERIFY_FRAME_CHAIN_BROKEN: height=${height} expectedPrev=${previousHash} actualPrev=${record.prevFrameHash ?? 'none'}`);
     }
     if (!Array.isArray(record.entityHashes)) {

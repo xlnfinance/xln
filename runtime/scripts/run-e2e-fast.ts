@@ -32,6 +32,10 @@ const FAST_E2E_TARGETS = [
     title: 'entity workspace dispute lifecycle returns reserve',
   },
   {
+    file: 'tests/e2e-watchtower-recovery.spec.ts',
+    title: 'restores a wiped runtime from standalone tower backup',
+  },
+  {
     file: 'tests/e2e-swap-isolated.spec.ts',
     title: 'two isolated users trade against each other through one hub orderbook without market maker liquidity',
   },

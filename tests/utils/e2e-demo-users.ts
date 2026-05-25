@@ -56,6 +56,40 @@ async function selectBrainvaultWorkFactor(page: Page, factor = 1): Promise<void>
   await factorButton.click();
 }
 
+async function firstVisibleLocator(
+  locators: Locator[],
+  timeoutMs = 1_000,
+): Promise<Locator | null> {
+  for (const locator of locators) {
+    if (await locator.isVisible({ timeout: timeoutMs }).catch(() => false)) return locator;
+  }
+  return null;
+}
+
+async function ensureVisibleInputValue(
+  resolveLocator: () => Promise<Locator | null>,
+  expectedValue: string,
+): Promise<void> {
+  const target = String(expectedValue || '');
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const locator = await resolveLocator();
+    if (!locator) break;
+    const currentValue = await locator.inputValue().catch(() => '');
+    if (currentValue === target) return;
+    await locator.fill(target);
+    await expect
+      .poll(async () => {
+        const current = await locator.inputValue().catch(() => '');
+        return current;
+      }, {
+        timeout: 5_000,
+        intervals: [150, 300, 500],
+      })
+      .toBe(target);
+    await locator.page().waitForTimeout(250);
+  }
+}
+
 async function openRuntimeDropdown(page: Page): Promise<void> {
   const trigger = page.locator('button:has([data-testid="context-current"]), .context-switcher .dropdown-trigger').first();
   const menu = page.locator('.dropdown-menu').first();
@@ -277,40 +311,105 @@ async function waitForAnyRuntimeReady(page: Page): Promise<string> {
 }
 
 async function waitForNextRuntimeReady(page: Page, previousRuntimeId: string | null): Promise<string> {
-  return await page.waitForFunction(({ priorRuntimeId }) => {
-    const env = (window as typeof window & {
-      isolatedEnv?: {
-        runtimeId?: string;
-        eReplicas?: Map<string, unknown>;
-      };
-    }).isolatedEnv;
-    const runtimeId = String(env?.runtimeId || '').toLowerCase();
-    const previous = String(priorRuntimeId || '').toLowerCase();
+  try {
+    return await page.waitForFunction(({ priorRuntimeId }) => {
+      const env = (window as typeof window & {
+        isolatedEnv?: {
+          runtimeId?: string;
+          eReplicas?: Map<string, unknown>;
+        };
+      }).isolatedEnv;
+      const runtimeId = String(env?.runtimeId || '').toLowerCase();
+      const previous = String(priorRuntimeId || '').toLowerCase();
 
-    const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
-    const selectedRuntimeId = String(selectedTrigger?.dataset?.runtimeId || '').toLowerCase();
-    const selectedEntityId = String(selectedTrigger?.dataset?.entityId || '');
-    const selectedSignerId = String(selectedTrigger?.dataset?.signerId || '');
-    if (
-      runtimeId
-      && selectedRuntimeId === runtimeId
-      && selectedRuntimeId !== previous
-      && /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
-      && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId)
-      && Number(env?.eReplicas?.size || 0) > 0
-    ) {
+      const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
+      const selectedRuntimeId = String(selectedTrigger?.dataset?.runtimeId || '').toLowerCase();
+      const selectedEntityId = String(selectedTrigger?.dataset?.entityId || '');
+      const selectedSignerId = String(selectedTrigger?.dataset?.signerId || '');
+      if (
+        runtimeId
+        && selectedRuntimeId === runtimeId
+        && selectedRuntimeId !== previous
+        && /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
+        && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId)
+        && Number(env?.eReplicas?.size || 0) > 0
+      ) {
+        return runtimeId;
+      }
+      if (!runtimeId || Number(env?.eReplicas?.size || 0) <= 0) return null;
+      if (previous && runtimeId === previous) return null;
       return runtimeId;
-    }
-    if (!runtimeId || Number(env?.eReplicas?.size || 0) <= 0) return null;
-    if (previous && runtimeId === previous) return null;
-    return runtimeId;
-  }, { priorRuntimeId: previousRuntimeId }, { timeout: RUNTIME_READY_TIMEOUT }).then(async (handle) => {
-    const value = await handle.jsonValue();
-    if (typeof value !== 'string' || value.length === 0) {
-      throw new Error('next runtimeId missing after quick login');
-    }
-    return value;
-  });
+    }, { priorRuntimeId: previousRuntimeId }, { timeout: RUNTIME_READY_TIMEOUT }).then(async (handle) => {
+      const value = await handle.jsonValue();
+      if (typeof value !== 'string' || value.length === 0) {
+        throw new Error('next runtimeId missing after quick login');
+      }
+      return value;
+    });
+  } catch (error) {
+    const diagnostics = await page.evaluate(() => {
+      const env = (window as typeof window & {
+        isolatedEnv?: {
+          runtimeId?: string;
+          eReplicas?: Map<string, unknown>;
+          jReplicas?: Map<string, unknown>;
+          height?: number;
+        };
+      }).isolatedEnv;
+      const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
+      const runtimeCreationVisible =
+        Boolean(document.querySelector('#runtime-creation'))
+        || Boolean(document.querySelector('.quick-login-grid'));
+      const matrixErrorText = String(document.querySelector<HTMLElement>('.matrix-status.error')?.innerText || '').trim();
+      const primaryAction = document.querySelector<HTMLButtonElement>('button.derive-btn');
+      const runtimeErrorText = Array.from(document.querySelectorAll('*'))
+        .map((node) => String((node as HTMLElement).innerText || '').trim())
+        .find((text) => /failed to create xln wallet|tower restore|strict restore|runtime id collision|invalid runtime/i.test(text))
+        || '';
+      const localStorageSummary = (() => {
+        try {
+          const raw = window.localStorage.getItem('xln-vaults');
+          if (!raw) return null;
+          const parsed = JSON.parse(raw) as {
+            activeRuntimeId?: string | null;
+            runtimes?: Record<string, { id?: string; signers?: Array<{ entityId?: string; address?: string }> }>;
+          };
+          return {
+            activeRuntimeId: String(parsed?.activeRuntimeId || ''),
+            runtimeKeys: Object.keys(parsed?.runtimes || {}),
+            signerEntityIds: Object.values(parsed?.runtimes || {}).flatMap((runtime) =>
+              Array.isArray(runtime?.signers) ? runtime.signers.map((signer) => String(signer?.entityId || '')) : [],
+            ),
+          };
+        } catch (storageError) {
+          return { error: String(storageError) };
+        }
+      })();
+      return {
+        href: window.location.href,
+        runtimeCreationVisible,
+        matrixErrorText,
+        runtimeErrorText,
+        primaryActionText: String(primaryAction?.innerText || '').trim(),
+        primaryActionDisabled: Boolean(primaryAction?.disabled),
+        nameValue: String((document.querySelector('#name') as HTMLInputElement | null)?.value || ''),
+        passphraseLength: String((document.querySelector('#passphrase') as HTMLInputElement | null)?.value || '').length,
+        bodyText: String(document.body?.innerText || '').slice(0, 500),
+        selectedRuntimeId: String(selectedTrigger?.dataset?.runtimeId || ''),
+        selectedEntityId: String(selectedTrigger?.dataset?.entityId || ''),
+        selectedSignerId: String(selectedTrigger?.dataset?.signerId || ''),
+        envRuntimeId: String(env?.runtimeId || ''),
+        envHeight: Number(env?.height || 0),
+        envReplicaCount: Number(env?.eReplicas?.size || 0),
+        envJurisdictionCount: Number(env?.jReplicas?.size || 0),
+        envReplicaKeys: env?.eReplicas ? Array.from(env.eReplicas.keys()).slice(0, 8) : [],
+        localStorageSummary,
+      };
+    }).catch((diagnosticError) => ({ evaluationError: String(diagnosticError) }));
+    throw new Error(
+      `waitForNextRuntimeReady timeout: ${error instanceof Error ? error.message : String(error)} :: ${JSON.stringify(diagnostics)}`,
+    );
+  }
 }
 
 async function dismissOnboardingIfVisible(page: Page): Promise<void> {
@@ -325,6 +424,58 @@ async function dismissOnboardingIfVisible(page: Page): Promise<void> {
       await startBtn.click({ timeout: 2000 }).catch(() => null);
     }
   }
+}
+
+async function waitForReadyAfterCreate(
+  page: Page,
+  previousRuntimeId: string | null,
+  options: { onboardingAssist?: boolean } = {},
+): Promise<string> {
+  if (!options.onboardingAssist) {
+    return await waitForNextRuntimeReady(page, previousRuntimeId);
+  }
+
+  const deadline = Date.now() + RUNTIME_READY_TIMEOUT;
+  while (Date.now() < deadline) {
+    try {
+      await dismissOnboardingIfVisible(page);
+      const runtimeId = await page.evaluate(({ priorRuntimeId }) => {
+        const env = (window as typeof window & {
+          isolatedEnv?: {
+            runtimeId?: string;
+            eReplicas?: Map<string, unknown>;
+          };
+        }).isolatedEnv;
+        const runtimeId = String(env?.runtimeId || '').toLowerCase();
+        const previous = String(priorRuntimeId || '').toLowerCase();
+
+        const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
+        const selectedRuntimeId = String(selectedTrigger?.dataset?.runtimeId || '').toLowerCase();
+        const selectedEntityId = String(selectedTrigger?.dataset?.entityId || '');
+        const selectedSignerId = String(selectedTrigger?.dataset?.signerId || '');
+        if (
+          runtimeId
+          && selectedRuntimeId === runtimeId
+          && selectedRuntimeId !== previous
+          && /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
+          && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId)
+          && Number(env?.eReplicas?.size || 0) > 0
+        ) {
+          return runtimeId;
+        }
+        if (!runtimeId || Number(env?.eReplicas?.size || 0) <= 0) return null;
+        if (previous && runtimeId === previous) return null;
+        return runtimeId;
+      }, { priorRuntimeId: previousRuntimeId }).catch(() => null);
+      if (typeof runtimeId === 'string' && runtimeId.length > 0) {
+        return runtimeId;
+      }
+      await page.waitForTimeout(400);
+    } catch {
+      await page.waitForTimeout(400);
+    }
+  }
+  return await waitForNextRuntimeReady(page, previousRuntimeId);
 }
 
 async function completeProfileOnboardingIfVisible(page: Page, label: string): Promise<void> {
@@ -353,9 +504,11 @@ async function completeProfileOnboardingIfVisible(page: Page, label: string): Pr
   const onboardingGoneOrReady = async (): Promise<boolean> => {
     const stillHasInput = await visibleDisplayNameInput() !== null;
     const stillHasButton = await finishButton.isVisible().catch(() => false);
-    if (await runtimeReady()) return true;
     if (!stillHasInput && !stillHasButton) return true;
-    return await contextReady.isVisible().catch(() => false);
+    const contextVisible = await contextReady.isVisible().catch(() => false);
+    if (contextVisible) return true;
+    if (await runtimeReady()) return false;
+    return false;
   };
 
   const onboardingVisible =
@@ -405,11 +558,14 @@ async function completeProfileOnboardingIfVisible(page: Page, label: string): Pr
     if (await finishButton.isVisible().catch(() => false)) {
       const enabled = await finishButton.isEnabled().catch(() => false);
       if (enabled) {
-        await finishButton.click({ timeout: 5_000 }).catch(async (error) => {
+        await finishButton.click({ timeout: 5_000, force: true }).catch(async (error) => {
           if (page.isClosed() || await onboardingGoneOrReady()) return;
           throw error;
         });
-        break;
+        await page.waitForTimeout(250);
+        if (await onboardingGoneOrReady()) {
+          break;
+        }
       }
     }
     await page.waitForTimeout(250);
@@ -595,38 +751,79 @@ export async function createRuntime(
     await quickLoginButton.click();
     runtimeId = await waitForNextRuntimeReady(page, previousRuntimeId);
   } else {
-    const displayNameInput = page.locator('#name').first();
-    if (await displayNameInput.isVisible({ timeout: 1500 }).catch(() => false)) {
+    const resolveDisplayNameInput = async () => await firstVisibleLocator([
+      page.locator('#name').first(),
+      page.getByRole('textbox', { name: /display name/i }).first(),
+    ], 1_500);
+    const displayNameInput = await resolveDisplayNameInput();
+    if (displayNameInput) {
       const currentName = await displayNameInput.inputValue().catch(() => '');
       if (!currentName.trim()) {
         await displayNameInput.fill(label);
       }
     }
 
-    let mnemonicInput = page.locator('#mnemonic');
+    const resolveMnemonicInput = async () => await firstVisibleLocator([
+      page.locator('#mnemonic').first(),
+      page.getByRole('textbox', { name: /mnemonic/i }).first(),
+    ]);
+    const mnemonicInput = await resolveMnemonicInput();
     const normalizedSecret = normalizeMnemonic(mnemonic);
-    const usingMnemonicImport = await mnemonicInput.isVisible({ timeout: 1000 }).catch(() => false);
+    const usingMnemonicImport = Boolean(mnemonicInput);
     if (usingMnemonicImport) {
-      await expect(mnemonicInput).toBeVisible({ timeout: 15_000 });
-      await mnemonicInput.fill(normalizedSecret);
+      await ensureVisibleInputValue(resolveMnemonicInput, normalizedSecret);
     } else {
-      const passphraseInput = page.locator('#passphrase').first();
+      const resolvePassphraseInput = async () => await firstVisibleLocator([
+        page.locator('#passphrase').first(),
+        page.getByRole('textbox', { name: /password|secret/i }).first(),
+      ], 15_000);
+      const passphraseInput = await resolvePassphraseInput();
+      if (!passphraseInput) {
+        throw new Error('visible BrainVault passphrase input not found');
+      }
       await expect(passphraseInput).toBeVisible({ timeout: 15_000 });
-      await passphraseInput.fill(normalizedSecret);
+      await ensureVisibleInputValue(resolvePassphraseInput, normalizedSecret);
     }
-    if (await displayNameInput.isVisible({ timeout: 1000 }).catch(() => false)) {
-      const currentName = await displayNameInput.inputValue().catch(() => '');
+    const stableDisplayNameInput = await resolveDisplayNameInput();
+    if (stableDisplayNameInput && await stableDisplayNameInput.isVisible({ timeout: 1000 }).catch(() => false)) {
+      const currentName = await stableDisplayNameInput.inputValue().catch(() => '');
       if (!currentName.trim()) {
-        await displayNameInput.fill(label);
+        await stableDisplayNameInput.fill(label);
       }
     }
+    await ensureVisibleInputValue(resolveDisplayNameInput, label);
     await selectBrainvaultWorkFactor(page, options.workFactor ?? 1);
-    const openVaultButton = page.getByRole('button', { name: /(Create XLN wallet|Open (Wallet|Vault))/, exact: false });
+    const openVaultButton = await firstVisibleLocator([
+      page.getByRole('button', { name: /(Create XLN wallet|Open (Wallet|Vault))/, exact: false }).first(),
+      page.locator('button.derive-btn').first(),
+    ], 15_000);
+    if (!openVaultButton) {
+      throw new Error('visible create wallet button not found');
+    }
     await expect(openVaultButton).toBeEnabled({ timeout: 15_000 });
-    await openVaultButton.click();
+    await openVaultButton.click({ force: true });
+    await page.waitForTimeout(400);
+    const visiblePassphraseAfterClick = await firstVisibleLocator([
+      page.locator('#passphrase').first(),
+      page.getByRole('textbox', { name: /password|secret/i }).first(),
+    ], 250);
+    const visibleMnemonicAfterClick = await firstVisibleLocator([
+      page.locator('#mnemonic').first(),
+      page.getByRole('textbox', { name: /mnemonic/i }).first(),
+    ], 250);
+    const createButtonStillEnabled = await openVaultButton.isEnabled().catch(() => false);
+    const stillInInitialInputState =
+      createButtonStillEnabled
+      && (
+        (visiblePassphraseAfterClick && String(await visiblePassphraseAfterClick.inputValue().catch(() => '')).trim().length > 0)
+        || (visibleMnemonicAfterClick && String(await visibleMnemonicAfterClick.inputValue().catch(() => '')).trim().length > 0)
+      );
+    if (stillInInitialInputState) {
+      await openVaultButton.click({ force: true });
+    }
     runtimeId = usingMnemonicImport
       ? await waitForRuntimeBootstrap(page, runtimeId, previousRuntimeId)
-      : await waitForNextRuntimeReady(page, previousRuntimeId);
+      : await waitForReadyAfterCreate(page, previousRuntimeId, { onboardingAssist: true });
   }
   runtimeIdsByLabel.set(label.toLowerCase(), runtimeId);
   await dismissOnboardingIfVisible(page);

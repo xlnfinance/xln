@@ -1,10 +1,9 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Wallet, hexlify, keccak256, toUtf8Bytes } from 'ethers';
+import { Interface, Wallet, hexlify, keccak256, solidityPacked, toUtf8Bytes } from 'ethers';
 
 import * as xln from '../../runtime/runtime.ts';
-import { createWatchtowerStore } from '../../runtime/watchtower/store';
 import { startStandaloneWatchtowerServer, type StandaloneWatchtowerServer } from '../../runtime/watchtower/standalone-server';
 import { buildTowerAppointmentOwnerMessage, encryptRuntimeRecoveryBundle } from '../../runtime/recovery/crypto';
 import type { JReplica, JurisdictionConfig, TowerAppointmentV1 } from '../../runtime/xln-api';
@@ -15,10 +14,14 @@ import {
 } from '../../frontend/src/lib/stores/vaultStore';
 import { createDefaultDelta } from '../../runtime/validation-utils';
 import type { AccountMachine } from '../../runtime/types';
+import { runWatchtowerSweep } from '../../runtime/watchtower/action';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const servers: StandaloneWatchtowerServer[] = [];
 const tempRoots: string[] = [];
+const disputeStartedInterface = new Interface([
+  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes initialArguments)',
+]);
 
 afterEach(async () => {
   while (servers.length > 0) {
@@ -100,6 +103,19 @@ const makeAccount = (selfId: string, counterpartyId: string): AccountMachine => 
     rebalancePolicy: new Map(),
   };
 };
+
+const encodeDisputeHash = (
+  initialNonce: number,
+  startedByLeft: boolean,
+  disputeTimeout: bigint,
+  initialProofbodyHash: string,
+  initialArguments: string,
+): string => keccak256(
+  solidityPacked(
+    ['uint256', 'bool', 'uint256', 'bytes32', 'bytes32'],
+    [BigInt(initialNonce), startedByLeft, disputeTimeout, initialProofbodyHash, keccak256(initialArguments)],
+  ),
+);
 
 describe('watchtower recovery full flow', () => {
   test('frontend restore path recovers the highest valid bundle from a standalone tower', async () => {
@@ -212,6 +228,14 @@ describe('watchtower recovery full flow', () => {
     expect(restored?.env.runtimeId).toBe(runtimeId);
     expect(restored?.env.eReplicas.size).toBe(env.eReplicas.size);
     expect(runtime.signers[0]?.entityId).toBe(entityId);
+    await xln.closeRuntimeDb(restored!.env);
+    await xln.closeInfraDb(restored!.env);
+
+    const reloaded = await xln.loadEnvFromDB(runtimeId, runtimeSeed);
+    expect(reloaded).not.toBeNull();
+    expect(reloaded?.runtimeId).toBe(runtimeId);
+    expect(reloaded?.height).toBe(bundle.runtimeHeight);
+    expect(reloaded?.eReplicas.size).toBe(env.eReplicas.size);
   });
 
   test('frontend last-resort builder emits a tower-bound appointment for dispute-capable accounts', async () => {
@@ -313,5 +337,166 @@ describe('watchtower recovery full flow', () => {
     expect(remedy.towerAddress).toBe(towerWallet.address.toLowerCase());
     expect(typeof remedy.ownerAuthorizationHanko).toBe('string');
     expect(remedy.ownerAuthorizationHanko.startsWith('0x')).toBe(true);
+  });
+
+  test('standalone tower executes a builder-produced delayed last-resort remedy and exposes the action receipt', async () => {
+    const towerRoot = join(process.cwd(), '.tmp-tests', `tower-last-resort-flow-${Date.now()}`);
+    tempRoots.push(towerRoot);
+    await mkdir(towerRoot, { recursive: true });
+
+    const runtimeSeed = 'legal winner thank year wave sausage worth useful legal winner thank yellow';
+    const rootWallet = new Wallet(hexlify(xln.deriveSignerKeySync(runtimeSeed, '1')));
+    const signerAddress = rootWallet.address.toLowerCase();
+    const entityId = `0x${'88'.repeat(32)}`;
+    const counterpartyId = `0x${'99'.repeat(32)}`;
+    const proofBodyHash = `0x${'aa'.repeat(32)}`;
+    const proofHanko = `0x${'bb'.repeat(80)}`;
+    const towerWallet = Wallet.createRandom();
+    const env = xln.createEmptyEnv(runtimeSeed);
+    env.runtimeId = signerAddress;
+    env.dbNamespace = `${signerAddress}-${Date.now()}-last-resort-flow`;
+    env.quietRuntimeLogs = true;
+    const jurisdiction = installJurisdiction(env, 'LastResortFlow');
+
+    xln.enqueueRuntimeInput(env, {
+      runtimeTxs: [{
+        type: 'importReplica',
+        entityId,
+        signerId: signerAddress,
+        data: {
+          config: {
+            mode: 'proposer-based',
+            threshold: 1n,
+            validators: [signerAddress],
+            shares: { [signerAddress]: 1n },
+            jurisdiction,
+          },
+          isProposer: true,
+          profileName: 'Last Resort Flow',
+        },
+      }],
+      entityInputs: [],
+    });
+    await xln.process(env);
+
+    const replica = [...env.eReplicas.values()][0];
+    expect(replica).toBeTruthy();
+    const account = makeAccount(entityId, counterpartyId);
+    account.counterpartyDisputeProofNonce = 9;
+    account.counterpartyDisputeProofBodyHash = proofBodyHash;
+    account.counterpartyDisputeProofHanko = proofHanko;
+    account.disputeProofBodiesByHash = {
+      [proofBodyHash]: { tokenIds: [1], offdeltas: [-123n], transformers: [] },
+    };
+    replica!.state.accounts.set(counterpartyId, account);
+
+    const runtime: Runtime = {
+      id: signerAddress,
+      label: 'Last Resort Flow Runtime',
+      seed: runtimeSeed,
+      signers: [{
+        index: 0,
+        derivationIndex: 0,
+        address: signerAddress,
+        name: 'Signer 1',
+        entityId,
+        jurisdiction: jurisdiction.name,
+      }],
+      activeSignerIndex: 0,
+      createdAt: Date.now(),
+      recovery: {
+        towers: [{ url: 'http://tower.flow', towerMode: 'delayed_last_resort', enabled: true }],
+      },
+    };
+
+    const encryptedBundle = {
+      version: 1 as const,
+      runtimeId: signerAddress,
+      lookupKey: keccak256(toUtf8Bytes('blind-lookup:last-resort-flow')),
+      height: 21,
+      createdAt: 2000,
+      bundleHash: keccak256(toUtf8Bytes('bundle-hash:last-resort-flow')),
+      iv: '0x1234',
+      ciphertext: '0xabcd',
+    };
+
+    const uploads = await buildDelayedLastResortAppointmentsForTower(
+      runtime,
+      env,
+      xln,
+      { url: 'http://tower.flow', towerMode: 'delayed_last_resort', enabled: true },
+      towerWallet.address.toLowerCase(),
+      encryptedBundle,
+    );
+    expect(uploads.length).toBe(1);
+    const upload = uploads[0]!;
+
+    const towerServer = startStandaloneWatchtowerServer({
+      host: '127.0.0.1',
+      port: 0,
+      towerId: 'tower-last-resort-flow',
+      dbPath: join(towerRoot, 'tower.level'),
+      towerPrivateKey: towerWallet.privateKey,
+      maxStoredBytesPerLookupKey: 64 * 1024,
+    });
+    servers.push(towerServer);
+
+    const put = await fetch(`http://127.0.0.1:${towerServer.server.port}/api/tower/appointment`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify(upload.appointment),
+    });
+    expect(put.ok).toBe(true);
+
+    const initialProofbodyHash = `0x${'cc'.repeat(32)}`;
+    const initialArguments = '0x1234';
+    const disputeHash = encodeDisputeHash(7, true, 100n, initialProofbodyHash, initialArguments);
+    const result = await runWatchtowerSweep(towerServer.store, {
+      lookupKey: upload.lookupKey,
+      towerPrivateKey: towerWallet.privateKey,
+      providerFactory: () => ({
+        getBlockNumber: async () => 95,
+        getLogs: async () => {
+          const event = disputeStartedInterface.encodeEventLog(
+            disputeStartedInterface.getEvent('DisputeStarted'),
+            [
+              entityId,
+              counterpartyId,
+              7n,
+              initialProofbodyHash,
+              initialArguments,
+            ],
+          );
+          return [{ topics: event.topics, data: event.data }];
+        },
+      }),
+      contractFactory: () => ({
+        accountKey: async () => '0xfeed',
+        _accounts: async () => ({
+          nonce: 7n,
+          disputeHash,
+          disputeTimeout: 100n,
+        }),
+        watchtowerCounterDispute: async () => ({
+          hash: '0xwatchtowerflow',
+          wait: async () => ({ blockNumber: 96 }),
+        }),
+      }),
+    });
+
+    expect(result).toEqual({
+      scanned: 1,
+      submitted: 1,
+      skipped: 0,
+      errors: 0,
+    });
+
+    const actionsResponse = await fetch(`http://127.0.0.1:${towerServer.server.port}/api/watchtower/actions/${upload.lookupKey}`);
+    expect(actionsResponse.ok).toBe(true);
+    const actionsPayload = await actionsResponse.json() as { ok: boolean; receipts?: Array<{ status?: string; txHash?: string }> };
+    expect(actionsPayload.ok).toBe(true);
+    expect(actionsPayload.receipts?.length).toBe(1);
+    expect(actionsPayload.receipts?.[0]?.status).toBe('submitted');
+    expect(actionsPayload.receipts?.[0]?.txHash).toBe('0xwatchtowerflow');
   });
 });
