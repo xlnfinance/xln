@@ -465,6 +465,12 @@ export interface XLNModule {
     bundle: EncryptedRuntimeRecoveryBundleV1,
     runtimeSeed: string,
   ) => Promise<RuntimeRecoveryBundleV1>;
+  deriveRuntimeRecoveryActionLookupKey: (
+    runtimeId: string,
+    runtimeSeed: string,
+    entityId: string,
+    counterentity: string,
+  ) => string;
   deriveRuntimeRecoveryLookupKey: (runtimeId: string, runtimeSeed: string) => string;
   buildTowerAppointmentOwnerMessage: (
     runtimeId: string,
@@ -486,6 +492,11 @@ export interface XLNModule {
     finalProofbodyHash: string,
     lastResortWindowBlocks: number,
     appointmentSequence: number,
+  ) => string;
+  buildSingleSignerHanko: (
+    entityId: string,
+    hash: string,
+    privateKey: string | Uint8Array,
   ) => string;
 
   // Blockchain operations

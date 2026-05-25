@@ -3039,9 +3039,11 @@ export {
   buildTowerAppointmentOwnerMessage,
   computeWatchtowerCounterDisputeAuthorizationHash,
   decryptRuntimeRecoveryBundle,
+  deriveRuntimeRecoveryActionLookupKey,
   deriveRuntimeRecoveryLookupKey,
   encryptRuntimeRecoveryBundle,
 } from './recovery/crypto';
+export { buildSingleSignerHanko } from './hanko/batch';
 export {
   buildCrossJurisdictionPullReveal,
   getCrossJurisdictionPrivateSeed,

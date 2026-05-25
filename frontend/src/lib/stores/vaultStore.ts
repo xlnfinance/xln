@@ -8,6 +8,8 @@ import type {
   PersistedFrameJournal,
   RoutedEntityInput,
   RuntimeInput,
+  TowerActivePayloadV1,
+  TowerCounterDisputeRemedyV1,
   RuntimeRecoveryBundleV1,
   RuntimeRecoveryMetaV1,
   RuntimeRecoverySignerV1,
@@ -173,8 +175,12 @@ const runtimeEnvChangeUnsubscribers = new Map<string, () => void>();
 const runtimeRecoveryBarrierUnsubscribers = new Map<string, () => void>();
 const runtimeRecoveryUploadTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const runtimeRecoveryUploadMeta = new Map<string, { lastUploadedHeight: number; lastBundleHash: string | null }>();
+const recoveryTowerInfoCache = new Map<string, { fetchedAt: number; info: TowerServerInfo }>();
 
 const RECOVERY_UPLOAD_DEBOUNCE_MS = 1_500;
+const RECOVERY_TOWER_INFO_TTL_MS = 60_000;
+const WATCHTOWER_LAST_RESORT_WINDOW_BLOCKS = 60;
+const WATCHTOWER_SAFETY_MARGIN_BLOCKS = 12;
 
 type FrameLogEntry = Env['frameLogs'][number];
 type HealthMachine = { name?: string; status?: string; chainId?: number; lastBlock?: unknown };
@@ -198,6 +204,15 @@ type TowerRestorePayload = {
   receipt?: TowerReceiptV1;
   bundle?: EncryptedRuntimeRecoveryBundleV1;
   error?: string;
+};
+
+type TowerServerInfo = {
+  ok: boolean;
+  service?: string;
+  towerId?: string;
+  signerAddress?: string;
+  maxStoredBytesPerLookupKey?: number;
+  maxBundlesPerLookupKey?: number;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
@@ -407,6 +422,28 @@ const getConfiguredRecoveryTowers = (runtime: Runtime | null | undefined): Recov
   }
   return [...deduped.values()];
 };
+
+async function fetchTowerServerInfo(towerUrl: string): Promise<TowerServerInfo> {
+  const normalizedUrl = normalizeTowerBaseUrl(towerUrl);
+  const cached = recoveryTowerInfoCache.get(normalizedUrl);
+  const now = Date.now();
+  if (cached && now - cached.fetchedAt < RECOVERY_TOWER_INFO_TTL_MS) {
+    return cached.info;
+  }
+  const response = await fetch(new URL('/', `${normalizedUrl}/`), {
+    method: 'GET',
+    headers: { accept: 'application/json' },
+  });
+  if (!response.ok) {
+    throw new Error(`TOWER_INFO_HTTP_${response.status}`);
+  }
+  const payload = await response.json() as TowerServerInfo;
+  if (!payload.ok) {
+    throw new Error(`TOWER_INFO_INVALID:${normalizedUrl}`);
+  }
+  recoveryTowerInfoCache.set(normalizedUrl, { fetchedAt: now, info: payload });
+  return payload;
+}
 
 const buildRuntimeRecoverySigners = (runtime: Runtime): RuntimeRecoverySignerV1[] =>
   (runtime.signers || [])
@@ -657,6 +694,8 @@ async function uploadRuntimeRecoverySnapshot(
   let successfulTowers = 0;
   const errors: string[] = [];
   let maxObservedStoredBytes = runtime.recovery?.lastKnownStoredBytes ?? 0;
+  const delayedTowers = towers.filter((tower) => tower.towerMode === 'delayed_last_resort');
+  const activeTowerErrors: string[] = [];
 
   for (const tower of towers) {
     try {
@@ -686,6 +725,46 @@ async function uploadRuntimeRecoverySnapshot(
     }
   }
 
+  for (const tower of delayedTowers) {
+    try {
+      const info = await fetchTowerServerInfo(tower.url);
+      const towerSignerAddress = normalizeRuntimeId(info.signerAddress || '');
+      if (!towerSignerAddress) {
+        throw new Error('TOWER_SIGNER_ADDRESS_MISSING');
+      }
+      const activeAppointments = await buildDelayedLastResortAppointmentsForTower(
+        runtime,
+        env,
+        xln,
+        tower,
+        towerSignerAddress,
+        encrypted,
+      );
+      for (const upload of activeAppointments) {
+        const response = await fetch(new URL('/api/tower/appointment', `${tower.url}/`), {
+          method: 'PUT',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify(upload.appointment),
+        });
+        const payload = await response.json() as { ok: boolean; error?: string; receipt?: TowerReceiptV1 };
+        if (!response.ok || !payload.ok) {
+          const errorText = String(payload.error || `HTTP_${response.status}`);
+          if (errorText.startsWith('TOWER_QUOTA_EXCEEDED')) {
+            runtime.recovery = {
+              ...(runtime.recovery || {}),
+              lastQuotaWarningAt: Date.now(),
+            };
+            toasts.warning('Watchtower dispute backup quota exceeded. Last-resort coverage is incomplete until the runtime state shrinks or quota is raised.', 8_000);
+          }
+          throw new Error(`${upload.triggerHint}:${errorText}`);
+        }
+        maxObservedStoredBytes = Math.max(maxObservedStoredBytes, Number(payload.receipt?.storedBytes || 0));
+      }
+    } catch (error) {
+      activeTowerErrors.push(`${tower.url}:${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
   runtime.recovery = {
     ...(runtime.recovery || {}),
     towers,
@@ -693,6 +772,9 @@ async function uploadRuntimeRecoverySnapshot(
   };
   if (successfulTowers < minSuccessfulTowers) {
     throw new Error(`[VaultStore] Tower appointment failed for ${normalizedRuntimeId.slice(0, 12)}: ${errors.join(' | ') || 'no tower accepted backup'}`);
+  }
+  if (activeTowerErrors.length > 0) {
+    throw new Error(`[VaultStore] Tower last-resort appointment failed for ${normalizedRuntimeId.slice(0, 12)}: ${activeTowerErrors.join(' | ')}`);
   }
   runtimeRecoveryUploadMeta.set(normalizedRuntimeId, {
     lastUploadedHeight: encrypted.height,
@@ -986,6 +1068,182 @@ const resolveRpcUrl = (rpc: string, baseOrigin?: string): string => {
   }
   return rpc;
 };
+
+type ActiveTowerAppointmentUpload = {
+  tower: RecoveryTowerConfig;
+  appointment: TowerAppointmentV1;
+  lookupKey: string;
+  triggerHint: string;
+};
+
+async function buildDelayedLastResortAppointmentsForTower(
+  runtime: Runtime,
+  env: Env,
+  xln: XLNModule,
+  tower: RecoveryTowerConfig,
+  towerSignerAddress: string,
+  encryptedBundle: EncryptedRuntimeRecoveryBundleV1,
+): Promise<ActiveTowerAppointmentUpload[]> {
+  if (
+    typeof xln.deriveRuntimeRecoveryActionLookupKey !== 'function' ||
+    typeof xln.computeWatchtowerCounterDisputeAuthorizationHash !== 'function' ||
+    typeof xln.buildTowerAppointmentOwnerMessage !== 'function' ||
+    typeof xln.buildSingleSignerHanko !== 'function'
+  ) {
+    return [];
+  }
+
+  const normalizedRuntimeId = normalizeRuntimeId(runtime.id);
+  if (!normalizedRuntimeId || !runtime.seed) return [];
+
+  const rootWallet = new Wallet(derivePrivateKey(runtime.seed, 0));
+  const uploads = new Map<string, ActiveTowerAppointmentUpload>();
+
+  // We publish one last-resort appointment per concrete bilateral account.
+  // The tower never gets spend authority. It only receives the latest
+  // counterparty-signed proof plus a narrow owner authorization bound to the
+  // tower address, the exact account pair, and the last-resort window.
+  for (const signer of runtime.signers || []) {
+    const entityId = normalizeEntityId(signer.entityId);
+    const signerAddress = normalizeRuntimeId(signer.address);
+    if (!entityId || !signerAddress) continue;
+
+    const replica = findEntityReplicaByEntityAndSigner(env, entityId, signerAddress);
+    if (!replica?.state?.accounts || !(replica.state.accounts instanceof Map)) continue;
+
+    const jurisdictionName =
+      getEntityReplicaJurisdictionName(replica)
+      || String(signer.jurisdiction || '').trim()
+      || String(env.activeJurisdiction || '').trim();
+    const jReplica = findJReplicaByName(env, jurisdictionName);
+    if (!jReplica) continue;
+
+    let depositoryAddress = '';
+    try {
+      depositoryAddress = getJReplicaContractAddress(jReplica, 'depository');
+    } catch {
+      continue;
+    }
+    const chainId = Number(jReplica.chainId ?? jReplica.jadapter?.chainId ?? 0);
+    if (!Number.isFinite(chainId) || chainId <= 0) continue;
+
+    const rpcBase = String(jReplica.rpcs?.[0] || '').trim();
+    if (!rpcBase) continue;
+    const rpcUrl = resolveRpcUrl(rpcBase);
+    const signerPrivateKey = derivePrivateKey(runtime.seed, getSignerDerivationIndex(signer));
+
+    for (const [rawCounterpartyId, account] of replica.state.accounts.entries()) {
+      const counterpartyId = normalizeEntityId(rawCounterpartyId);
+      const proofNonce = Math.max(0, Math.floor(Number(account?.counterpartyDisputeProofNonce || 0)));
+      const proofBodyHash = String(account?.counterpartyDisputeProofBodyHash || '').trim().toLowerCase();
+      const proofHanko = String(account?.counterpartyDisputeProofHanko || '').trim();
+      const proofBody = proofBodyHash ? account?.disputeProofBodiesByHash?.[proofBodyHash] : null;
+      if (!counterpartyId || proofNonce <= 0 || !proofBodyHash || !proofHanko || !proofBody || typeof proofBody !== 'object') {
+        continue;
+      }
+
+      const appointmentSequence = proofNonce;
+      const lookupKey = xln.deriveRuntimeRecoveryActionLookupKey(
+        normalizedRuntimeId,
+        runtime.seed,
+        entityId,
+        counterpartyId,
+      );
+      const ownerAuthorizationHash = xln.computeWatchtowerCounterDisputeAuthorizationHash(
+        chainId,
+        depositoryAddress,
+        towerSignerAddress,
+        entityId,
+        counterpartyId,
+        proofNonce,
+        proofBodyHash,
+        WATCHTOWER_LAST_RESORT_WINDOW_BLOCKS,
+        appointmentSequence,
+      );
+      const ownerAuthorizationHanko = xln.buildSingleSignerHanko(
+        entityId,
+        ownerAuthorizationHash,
+        signerPrivateKey,
+      );
+
+      const remedy: TowerCounterDisputeRemedyV1 = {
+        version: 1,
+        type: 'counter_dispute_remedy',
+        rpcUrl,
+        chainId,
+        depositoryAddress,
+        watchedEntityId: entityId,
+        towerAddress: towerSignerAddress,
+        lastResortWindowBlocks: WATCHTOWER_LAST_RESORT_WINDOW_BLOCKS,
+        appointmentSequence,
+        ownerAuthorizationHanko,
+        latestProof: {
+          counterentity: counterpartyId,
+          finalNonce: proofNonce,
+          finalProofbody: structuredClone(proofBody as Record<string, unknown>),
+          finalArguments: '0x',
+          sig: proofHanko,
+        },
+      };
+      const triggerHint = `chain:${chainId}:acct:${entityId}:${counterpartyId}`;
+      const activePayload: TowerActivePayloadV1 = {
+        triggerHint,
+        encryptedRemedy: JSON.stringify(remedy),
+        actionKind: 'counter_dispute_only',
+        appointmentSequence,
+        proofNonce,
+        proofBodyHash,
+        responseMode: 'last_resort',
+        lastResortWindowBlocks: WATCHTOWER_LAST_RESORT_WINDOW_BLOCKS,
+        safetyMarginBlocks: WATCHTOWER_SAFETY_MARGIN_BLOCKS,
+      };
+      const signedAt = Date.now();
+      const ownerProofSignature = await rootWallet.signMessage(
+        xln.buildTowerAppointmentOwnerMessage(
+          normalizedRuntimeId,
+          'delayed_last_resort',
+          lookupKey,
+          0,
+          encryptedBundle.bundleHash,
+          encryptedBundle.height,
+          signedAt,
+          activePayload,
+        ),
+      );
+      const nextUpload: ActiveTowerAppointmentUpload = {
+        tower,
+        lookupKey,
+        triggerHint,
+        appointment: {
+          type: 'tower_appointment',
+          version: 1,
+          towerMode: 'delayed_last_resort',
+          lookupKey,
+          slot: 0,
+          // Active appointments use a separate blind lookup namespace so towers
+          // cannot infer backup availability from the action channel and vice
+          // versa. The ciphertext stays opaque to the tower either way.
+          bundle: {
+            ...encryptedBundle,
+            lookupKey,
+          },
+          activePayload,
+          ownerProof: {
+            runtimeId: normalizedRuntimeId,
+            signedAt,
+            signature: ownerProofSignature,
+          },
+        },
+      };
+      const previous = uploads.get(lookupKey);
+      if (!previous || (previous.appointment.activePayload?.proofNonce || 0) < proofNonce) {
+        uploads.set(lookupKey, nextUpload);
+      }
+    }
+  }
+
+  return [...uploads.values()];
+}
 
 const summarizeHealth = (payload: HealthPayload | null): Record<string, unknown> => {
   if (!payload) return {};

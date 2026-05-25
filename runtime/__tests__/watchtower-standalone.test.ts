@@ -130,6 +130,11 @@ describe('standalone watchtower service', () => {
     servers.push(server);
     const base = `http://127.0.0.1:${server.server.port}`;
     const { appointment, encrypted } = await createRuntimeAppointment();
+    const health = await fetch(`${base}/`);
+    expect(health.ok).toBe(true);
+    const healthPayload = await health.json() as { ok: boolean; signerAddress?: string };
+    expect(healthPayload.ok).toBe(true);
+    expect(healthPayload.signerAddress).toBe(server.store.signerAddress);
 
     const put = await fetch(`${base}/api/tower/appointment`, {
       method: 'PUT',
