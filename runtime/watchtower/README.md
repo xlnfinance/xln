@@ -24,7 +24,9 @@ This folder owns the standalone recovery/watchtower API service.
 - `standalone-server.ts`
   Bun server entrypoint. Equivalent in spirit to `runtime/relay/standalone-server.ts`.
   Publishes `towerId`, `signerAddress`, and quota limits on `/` and `/healthz`
-  so wallets can bind delayed authorizations to the exact tower address.
+  so wallets can bind delayed authorizations to the exact tower address. Health
+  also exposes persisted lookup / active-appointment / action-receipt counts so
+  operators can verify restart persistence cheaply.
 
 ## Called by
 

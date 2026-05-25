@@ -51,6 +51,12 @@ export type ActiveTowerAppointment = {
   activePayload: TowerActivePayloadV1;
 };
 
+export type WatchtowerStoreStats = {
+  lookupCount: number;
+  activeAppointmentCount: number;
+  actionReceiptCount: number;
+};
+
 const DEFAULT_MAX_BUNDLES = 3;
 const DEFAULT_MAX_STORED_BYTES = 10 * 1024;
 const DEFAULT_RECEIPT_TTL_MS = 365 * 24 * 60 * 60 * 1000;
@@ -288,6 +294,35 @@ export const createWatchtowerStore = (options?: {
     await db.close();
   };
 
+  const getStats = async (): Promise<WatchtowerStoreStats> => {
+    await ensureOpen();
+    let lookupCount = 0;
+    let activeAppointmentCount = 0;
+    let actionReceiptCount = 0;
+    for await (const [key, raw] of db.iterator()) {
+      if (key.startsWith('lookup:')) {
+        lookupCount += 1;
+        const parsed = JSON.parse(String(raw)) as StoredLookupDoc;
+        const doc = normalizeStoredDoc(parsed.lookupKey, parsed);
+        if (doc.bundles.some((entry) =>
+          (entry.towerMode === 'active_watchtower' || entry.towerMode === 'delayed_last_resort')
+          && !!entry.activePayload,
+        )) {
+          activeAppointmentCount += 1;
+        }
+        continue;
+      }
+      if (key.startsWith('action:')) {
+        actionReceiptCount += 1;
+      }
+    }
+    return {
+      lookupCount,
+      activeAppointmentCount,
+      actionReceiptCount,
+    };
+  };
+
   return {
     towerId,
     dbPath,
@@ -301,6 +336,7 @@ export const createWatchtowerStore = (options?: {
     appendActionReceipt,
     listActionReceipts,
     appendComplaint,
+    getStats,
     close,
   };
 };

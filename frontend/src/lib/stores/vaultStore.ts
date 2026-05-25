@@ -377,23 +377,39 @@ const parseRecoveryTowerUrls = (value: unknown): string[] => {
   return [];
 };
 
+export const resolveDefaultRecoveryTowerUrls = (options: {
+  hostname: string;
+  globalUrls?: unknown;
+  localUrls?: unknown;
+}): string[] => {
+  const globalTowerUrls = parseRecoveryTowerUrls(options.globalUrls);
+  if (globalTowerUrls.length > 0) return globalTowerUrls;
+  const localTowerUrls = parseRecoveryTowerUrls(options.localUrls);
+  if (localTowerUrls.length > 0) return localTowerUrls;
+  const hostname = String(options.hostname || '').trim().toLowerCase();
+  // Local/dev environments should not assume an always-on watchtower. Recovery towers
+  // there must be configured explicitly, otherwise fresh wallet creation gets blocked by
+  // an unrelated localhost dependency.
+  if (hostname === 'localhost' || hostname === '127.0.0.1') {
+    return [];
+  }
+  return ['https://tower.xln.finance'];
+};
+
 const defaultRecoveryTowerUrls = (): string[] => {
   if (typeof window === 'undefined') return ['https://tower.xln.finance'];
   const w = window as Window & { __XLN_WATCHTOWERS__?: unknown };
-  const globalUrls = parseRecoveryTowerUrls(w.__XLN_WATCHTOWERS__);
-  if (globalUrls.length > 0) return globalUrls;
+  let localUrls: string | null = null;
   try {
-    const local = localStorage.getItem('xln-watchtower-urls');
-    const localUrls = parseRecoveryTowerUrls(local);
-    if (localUrls.length > 0) return localUrls;
+    localUrls = localStorage.getItem('xln-watchtower-urls');
   } catch {
     // Recovery should not fail because local tower preferences are unreadable.
   }
-  const host = window.location.hostname;
-  if (host === 'localhost' || host === '127.0.0.1') {
-    return ['http://127.0.0.1:9100'];
-  }
-  return ['https://tower.xln.finance'];
+  return resolveDefaultRecoveryTowerUrls({
+    hostname: window.location.hostname,
+    globalUrls: w.__XLN_WATCHTOWERS__,
+    localUrls,
+  });
 };
 
 const normalizeTowerBaseUrl = (url: string): string => String(url || '').trim().replace(/\/+$/, '');

@@ -482,6 +482,7 @@ export const startCustodySupport = async (
   }
 
   const identity = controlResult.result;
+  await waitForCustodyRouteableState(options.apiBaseUrl, identity.entityId, hubIds);
   const custodyHttps = resolveCustodyServiceHttps();
 
   const custodyChild = spawnBunChild(

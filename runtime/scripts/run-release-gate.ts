@@ -31,6 +31,7 @@ const RUNTIME_CORE_TESTS = [
   'runtime/__tests__/transformer-ordering.test.ts',
   'runtime/__tests__/server-ingress-receipts.test.ts',
   'runtime/__tests__/watchtower-rpc-last-resort.test.ts',
+  'runtime/__tests__/watchtower-restart-resilience.test.ts',
   'native/__tests__/desktop-security.test.ts',
   'native/__tests__/extension-security.test.ts',
   'native/__tests__/capacitor-config.test.ts',
@@ -69,6 +70,7 @@ const ciSteps: GateStep[] = [
   { name: 'RPC settlement parity', command: 'bun run test:rpc-settlement', timeoutMs: 240_000 },
   { name: 'security audit pack', command: 'bun run security:audit-pack', timeoutMs: 30_000 },
   { name: 'storage WAL smoke', command: 'bun run test:persistence:cli', timeoutMs: 120_000 },
+  { name: 'watchtower smoke', command: 'bun run test:watchtower:smoke', timeoutMs: 120_000 },
   { name: 'fast E2E gate', command: 'bun run test:e2e:fast', timeoutMs: 900_000 },
 ];
 

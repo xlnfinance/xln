@@ -9,6 +9,7 @@ import { buildTowerAppointmentOwnerMessage, encryptRuntimeRecoveryBundle } from 
 import type { JReplica, JurisdictionConfig, TowerAppointmentV1 } from '../../runtime/xln-api';
 import {
   buildDelayedLastResortAppointmentsForTower,
+  resolveDefaultRecoveryTowerUrls,
   tryRestoreRuntimeEnvFromTower,
   type Runtime,
 } from '../../frontend/src/lib/stores/vaultStore';
@@ -118,6 +119,28 @@ const encodeDisputeHash = (
 );
 
 describe('watchtower recovery full flow', () => {
+  test('localhost defaults do not require an implicit tower unless configured explicitly', () => {
+    expect(resolveDefaultRecoveryTowerUrls({
+      hostname: 'localhost',
+      globalUrls: undefined,
+      localUrls: undefined,
+    })).toEqual([]);
+    expect(resolveDefaultRecoveryTowerUrls({
+      hostname: '127.0.0.1',
+      globalUrls: undefined,
+      localUrls: undefined,
+    })).toEqual([]);
+    expect(resolveDefaultRecoveryTowerUrls({
+      hostname: 'localhost',
+      localUrls: JSON.stringify(['http://127.0.0.1:9100']),
+    })).toEqual(['http://127.0.0.1:9100']);
+    expect(resolveDefaultRecoveryTowerUrls({
+      hostname: 'xln.finance',
+      globalUrls: undefined,
+      localUrls: undefined,
+    })).toEqual(['https://tower.xln.finance']);
+  });
+
   test('frontend restore path recovers the highest valid bundle from a standalone tower', async () => {
     const towerRoot = join(process.cwd(), '.tmp-tests', `tower-restore-${Date.now()}`);
     tempRoots.push(towerRoot);
