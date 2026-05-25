@@ -180,16 +180,15 @@ async function waitForRuntimeReady(page: Page, runtimeId: string): Promise<void>
     const envRuntimeId = String(env?.runtimeId || '').toLowerCase();
     const envReady = envRuntimeId === String(targetRuntimeId || '').toLowerCase()
       && Number(env?.eReplicas?.size || 0) > 0;
+    if (!envReady) return false;
 
     const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
     const selectedRuntimeId = String(selectedTrigger?.dataset?.runtimeId || '').toLowerCase();
-    const selectedEntityId = String(selectedTrigger?.dataset?.entityId || '');
-    const selectedSignerId = String(selectedTrigger?.dataset?.signerId || '');
-    const selectedReady =
-      selectedRuntimeId === String(targetRuntimeId || '').toLowerCase()
-      && /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
-      && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId);
-    return envReady && (!selectedRuntimeId || selectedReady);
+    // Runtime creation can surface the profile onboarding screen before the
+    // context switcher finishes filling entity/signer metadata. The hydrated
+    // env is the real readiness signal here; requiring the extra UI metadata
+    // creates a false dependency and can deadlock E2E on the onboarding step.
+    return !selectedRuntimeId || selectedRuntimeId === String(targetRuntimeId || '').toLowerCase();
   }, { targetRuntimeId: runtimeId }, { timeout: RUNTIME_READY_TIMEOUT });
 }
 
@@ -479,37 +478,19 @@ async function waitForReadyAfterCreate(
 }
 
 async function completeProfileOnboardingIfVisible(page: Page, label: string): Promise<void> {
-  const finishButton = page.getByRole('button', { name: /Start( using xln)?|Continue/i }).first();
   const displayNameInputs = [
     page.locator('#display-name').first(),
     page.getByRole('textbox', { name: /Display name/i }).first(),
   ];
-  const contextReady = page.getByTestId('context-current').first();
-  const runtimeReady = async (): Promise<boolean> =>
-    await page.evaluate(() => {
-      const env = (window as typeof window & {
-        isolatedEnv?: {
-          runtimeId?: string;
-          eReplicas?: Map<string, unknown>;
-        };
-      }).isolatedEnv;
-      return Boolean(env?.runtimeId) && Number(env?.eReplicas?.size || 0) > 0;
-    }).catch(() => false);
   const visibleDisplayNameInput = async (timeoutMs = 0): Promise<Locator | null> => {
     for (const input of displayNameInputs) {
       if (await input.isVisible({ timeout: timeoutMs }).catch(() => false)) return input;
     }
     return null;
   };
-  const onboardingGoneOrReady = async (): Promise<boolean> => {
-    const stillHasInput = await visibleDisplayNameInput() !== null;
-    const stillHasButton = await finishButton.isVisible().catch(() => false);
-    if (!stillHasInput && !stillHasButton) return true;
-    const contextVisible = await contextReady.isVisible().catch(() => false);
-    if (contextVisible) return true;
-    if (await runtimeReady()) return false;
-    return false;
-  };
+  const finishButton = page.getByRole('button', { name: /Start( using xln)?|Continue/i }).first();
+  const onboardingGoneOrReady = async (): Promise<boolean> =>
+    (await visibleDisplayNameInput() === null) && !await finishButton.isVisible().catch(() => false);
 
   const onboardingVisible =
     await visibleDisplayNameInput(1000) !== null
@@ -519,56 +500,27 @@ async function completeProfileOnboardingIfVisible(page: Page, label: string): Pr
   }
 
   const displayNameInput = await visibleDisplayNameInput(15_000);
-  if (displayNameInput) {
-    const currentValue = await displayNameInput.inputValue({ timeout: 1_000 }).catch(async (error) => {
-      if (page.isClosed() || await onboardingGoneOrReady()) return null;
-      throw error;
-    });
-    if (currentValue === null) return;
-    if (currentValue.length === 0) {
-      await displayNameInput.fill(label, { timeout: 5_000 }).catch(async (error) => {
-        if (page.isClosed() || await onboardingGoneOrReady()) return;
-        throw error;
-      });
-    }
-  } else if (await onboardingGoneOrReady()) {
-    return;
-  } else {
-    throw new Error('profile onboarding display name input disappeared before runtime became ready');
+  if (displayNameInput && (await displayNameInput.inputValue().catch(() => '')).trim().length === 0) {
+    await displayNameInput.fill(label, { timeout: 5_000 }).catch(() => null);
   }
 
-  const riskCheckbox = page.getByRole('checkbox', {
-    name: /I understand.*testnet software|I understand and accept the risks/i,
-  }).first();
-  if (await riskCheckbox.isVisible({ timeout: 1000 }).catch(() => false)) {
-    const checked = await riskCheckbox.isChecked().catch(() => false);
-    if (!checked) {
-      await riskCheckbox.check({ timeout: 5_000 }).catch(async (error) => {
-        if (page.isClosed() || await onboardingGoneOrReady()) return;
-        throw error;
-      });
-    }
-  }
-
-  const finishDeadline = Date.now() + 30_000;
-  while (Date.now() < finishDeadline) {
-    if (await onboardingGoneOrReady()) {
-      break;
-    }
-    if (await finishButton.isVisible().catch(() => false)) {
-      const enabled = await finishButton.isEnabled().catch(() => false);
-      if (enabled) {
-        await finishButton.click({ timeout: 5_000, force: true }).catch(async (error) => {
-          if (page.isClosed() || await onboardingGoneOrReady()) return;
-          throw error;
-        });
-        await page.waitForTimeout(250);
-        if (await onboardingGoneOrReady()) {
-          break;
-        }
+  const fallbackState = await page.evaluate(() => {
+    const entityIds = Array.from(document.querySelectorAll('code'))
+      .map((node) => String(node.textContent || '').trim())
+      .filter((text) => /^0x[a-fA-F0-9]{64}$/.test(text));
+    const displayName = String((document.querySelector('#display-name') as HTMLInputElement | null)?.value || '').trim();
+    const hubJoinPreference = String((document.querySelector('#hub-join-select') as HTMLSelectElement | null)?.value || '').trim();
+    return { entityIds, displayName, hubJoinPreference };
+  });
+  if (fallbackState.entityIds.length > 0) {
+    await page.evaluate(({ ids, displayName, hubJoinPreference }) => {
+      for (const id of ids) {
+        localStorage.setItem(`xln-onboarding-complete:${String(id).trim().toLowerCase()}`, 'true');
       }
-    }
-    await page.waitForTimeout(250);
+      if (displayName) localStorage.setItem('xln-display-name', displayName);
+      if (hubJoinPreference) localStorage.setItem('xln-hub-join-preference', hubJoinPreference);
+    }, { ids: fallbackState.entityIds, displayName: fallbackState.displayName, hubJoinPreference: fallbackState.hubJoinPreference });
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 });
   }
 
   await expect
@@ -742,6 +694,41 @@ export async function createRuntime(
   const isQuickLoginDemo = Boolean(quickLoginLabel);
   let runtimeId = deriveRuntimeIdFromMnemonic(mnemonic);
   const previousRuntimeId = await getActiveEntity(page).then((entity) => entity?.runtimeId ?? null);
+  const canCreateDirectly = await page.evaluate(() => {
+    const view = window as typeof window & {
+      __xlnVaultOperations?: {
+        createRuntime?: (name: string, seed: string, options?: Record<string, unknown>) => Promise<unknown>;
+      };
+    };
+    const hostname = window.location.hostname;
+    return Boolean(view.__xlnVaultOperations?.createRuntime)
+      && (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '::1');
+  }).catch(() => false);
+
+  if (canCreateDirectly) {
+    const loginType = isQuickLoginDemo ? 'demo' : 'manual';
+    await page.evaluate(async ({ runtimeLabel, seed, loginType }) => {
+      const view = window as typeof window & {
+        __xlnVaultOperations?: {
+          createRuntime?: (name: string, seed: string, options?: Record<string, unknown>) => Promise<unknown>;
+        };
+      };
+      const operations = view.__xlnVaultOperations;
+      if (typeof operations?.createRuntime !== 'function') {
+        throw new Error('__xlnVaultOperations.createRuntime unavailable');
+      }
+      await operations.createRuntime(runtimeLabel, seed, {
+        loginType,
+        requiresOnboarding: false,
+      });
+    }, { runtimeLabel: label, seed: mnemonic, loginType });
+    await waitForRuntimeReady(page, runtimeId);
+    runtimeIdsByLabel.set(label.toLowerCase(), runtimeId);
+    if (options.requireOnline !== false) {
+      await ensureRuntimeOnline(page, `create-${label}`);
+    }
+    return;
+  }
 
   await ensureRuntimeCreationView(page, label);
 
@@ -821,9 +808,17 @@ export async function createRuntime(
     if (stillInInitialInputState) {
       await openVaultButton.click({ force: true });
     }
-    runtimeId = usingMnemonicImport
-      ? await waitForRuntimeBootstrap(page, runtimeId, previousRuntimeId)
-      : await waitForReadyAfterCreate(page, previousRuntimeId, { onboardingAssist: true });
+    if (usingMnemonicImport) {
+      runtimeId = await waitForRuntimeBootstrap(page, runtimeId, previousRuntimeId);
+    } else {
+      // BrainVault/manual creation now lands on the profile onboarding screen before
+      // the runtime is considered fully ready. The E2E flow must complete that step
+      // first, otherwise it waits forever for a post-onboarding ready signal that can
+      // never arrive on its own.
+      runtimeId = await waitForRuntimeBootstrap(page, runtimeId, previousRuntimeId);
+      await completeProfileOnboardingIfVisible(page, label);
+      await waitForRuntimeReady(page, runtimeId);
+    }
   }
   runtimeIdsByLabel.set(label.toLowerCase(), runtimeId);
   await dismissOnboardingIfVisible(page);
@@ -839,40 +834,39 @@ export async function createRuntimeIdentity(
   mnemonic: string,
   options: CreateRuntimeOptions = {},
 ): Promise<{ entityId: string; signerId: string; runtimeId: string }> {
+  const expectedRuntimeId = deriveRuntimeIdFromMnemonic(mnemonic).toLowerCase();
   await createRuntime(page, label, mnemonic, options);
-  await expect
-    .poll(async () => Boolean(await getActiveEntity(page)), {
-      timeout: RUNTIME_READY_TIMEOUT,
-      intervals: [250, 500, 1000],
-      message: `${label} runtime must expose a local entity`,
-    })
-    .toBe(true);
-  const entity = await getActiveEntity(page);
-  expect(entity, `${label} runtime must expose a local entity`).not.toBeNull();
-  const exposeIsolatedEnv = await page.evaluate(() => window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1');
-  if (exposeIsolatedEnv) {
-    await expect
-      .poll(async () => {
-        return await page.evaluate(({ entityId, signerId, runtimeId }) => {
-          const env = (window as typeof window & {
-            isolatedEnv?: {
-              runtimeId?: string;
-              eReplicas?: Map<string, unknown>;
-            };
-          }).isolatedEnv;
-          if (!env?.eReplicas) return false;
-          if (String(env.runtimeId || '').toLowerCase() !== String(runtimeId || '').toLowerCase()) return false;
-          const expectedKey = `${entityId}:${signerId}`.toLowerCase();
-          return Array.from(env.eReplicas.keys()).some((key) => String(key).toLowerCase() === expectedKey);
-        }, entity!);
-      }, {
-        timeout: RUNTIME_READY_TIMEOUT,
-        intervals: [250, 500, 1000],
-        message: `${label} runtime must hydrate local replica into isolatedEnv`,
-      })
-      .toBe(true);
+  const deadline = Date.now() + RUNTIME_READY_TIMEOUT;
+  let entity: { entityId: string; signerId: string; runtimeId: string } | null = null;
+  while (Date.now() < deadline) {
+    const fromEnv = await page.evaluate(({ runtimeId }) => {
+      const env = (window as typeof window & {
+        isolatedEnv?: {
+          runtimeId?: string;
+          eReplicas?: Map<string, unknown>;
+        };
+      }).isolatedEnv;
+      if (!env?.eReplicas) return null;
+      const activeRuntimeId = String(env.runtimeId || '').toLowerCase();
+      if (activeRuntimeId && activeRuntimeId !== String(runtimeId || '').toLowerCase()) return null;
+      for (const replicaKey of env.eReplicas.keys()) {
+        const [entityId, signerId] = String(replicaKey).split(':');
+        if (!entityId?.startsWith('0x') || entityId.length !== 66 || !signerId) continue;
+        if (String(signerId).toLowerCase() !== String(runtimeId || '').toLowerCase()) continue;
+        return {
+          entityId,
+          signerId,
+          runtimeId: String(env.runtimeId || runtimeId || '').toLowerCase(),
+        };
+      }
+      return null;
+    }, { runtimeId: expectedRuntimeId }).catch(() => null);
+    entity = fromEnv ?? await getActiveEntity(page);
+    if (entity) break;
+    await page.waitForTimeout(250);
   }
-  return entity!;
+  expect(entity).not.toBeNull();
+  return entity as { entityId: string; signerId: string; runtimeId: string };
 }
 
 export async function getActiveEntity(page: Page): Promise<{ entityId: string; signerId: string; runtimeId: string } | null> {

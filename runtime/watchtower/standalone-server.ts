@@ -51,6 +51,7 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
       const pathname = url.pathname;
 
       if (pathname === '/' || pathname === '/healthz') {
+        const stats = await store.getStats();
         return new Response(JSON.stringify({
           ok: true,
           service: 'xln-watchtower',
@@ -58,6 +59,7 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
           signerAddress: store.signerAddress,
           maxStoredBytesPerLookupKey: store.maxStoredBytesPerLookupKey,
           maxBundlesPerLookupKey: store.maxBundlesPerLookupKey,
+          stats,
         }), {
           headers: { 'content-type': 'application/json' },
         });

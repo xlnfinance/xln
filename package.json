@@ -39,6 +39,7 @@
     "test:e2e:core:fast": "bun runtime/scripts/run-e2e-core.ts --skip-build",
     "test:e2e:coverage": "bun runtime/scripts/check-flow-e2e-coverage.ts",
     "test:persistence:cli": "bun runtime/scripts/persistence-wal-smoke.ts",
+    "test:watchtower:smoke": "bun runtime/scripts/watchtower-smoke.ts",
     "test:rpc-settlement": "bun runtime/scripts/rpc-settlement-parity.ts",
     "soak:quick": "bun runtime/scripts/run-soak-gate.ts --profile=quick --iterations=2",
     "soak:release": "bun runtime/scripts/run-soak-gate.ts --profile=release --minutes=240",
