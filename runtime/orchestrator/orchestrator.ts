@@ -133,6 +133,8 @@ const timings: TimingMap = {
   reset_wait_h1: { startedAt: null, completedAt: null, ms: null },
   reset_spawn_h23: { startedAt: null, completedAt: null, ms: null },
   reset_wait_hubs: { startedAt: null, completedAt: null, ms: null },
+  reset_market_maker: { startedAt: null, completedAt: null, ms: null },
+  reset_custody: { startedAt: null, completedAt: null, ms: null },
 };
 
 const resetState: ResetState = {
