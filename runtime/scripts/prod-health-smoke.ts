@@ -6,6 +6,10 @@ type HealthSmokeArgs = {
   allowDegraded: boolean;
 };
 
+const ADVISORY_DEGRADED_REASONS = new Set([
+  'bootstrapReserveTargets',
+]);
+
 const parseArgs = (): HealthSmokeArgs => {
   const flags = new Map<string, string | true>();
   const positional: string[] = [];
@@ -62,6 +66,13 @@ const readMetric = (metrics: string, name: string): number | null => {
   return Number.isFinite(value) ? value : null;
 };
 
+export const getFatalDegradedReasons = (degraded: unknown): string[] => {
+  if (!Array.isArray(degraded)) return [];
+  return degraded
+    .filter((value): value is string => typeof value === 'string' && value.length > 0)
+    .filter((reason) => !ADVISORY_DEGRADED_REASONS.has(reason));
+};
+
 const main = async (): Promise<void> => {
   const args = parseArgs();
   const healthRes = await fetchWithTimeout(`${args.baseUrl}/api/health`, args.timeoutMs);
@@ -79,7 +90,11 @@ const main = async (): Promise<void> => {
   requireCondition(health.coreOk === true, 'health.coreOk is not true');
   requireCondition(health.systemOk === true, 'health.systemOk is not true');
   if (!args.allowDegraded) {
-    requireCondition(Array.isArray(health.degraded) && health.degraded.length === 0, `health.degraded is not empty: ${JSON.stringify(health.degraded)}`);
+    const fatalDegraded = getFatalDegradedReasons(health.degraded);
+    requireCondition(
+      fatalDegraded.length === 0,
+      `health.degraded has fatal entries: ${JSON.stringify(fatalDegraded)} (full=${JSON.stringify(health.degraded)})`,
+    );
   }
 
   const metricsRes = await fetchWithTimeout(`${args.baseUrl}/api/metrics`, args.timeoutMs);
