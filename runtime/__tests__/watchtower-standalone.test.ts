@@ -133,9 +133,10 @@ describe('standalone watchtower service', () => {
     for (const healthPath of ['/', '/api/tower/healthz']) {
       const health = await fetch(`${base}${healthPath}`);
       expect(health.ok).toBe(true);
-      const healthPayload = await health.json() as { ok: boolean; signerAddress?: string };
+      const healthPayload = await health.json() as { ok: boolean; signerAddress?: string; sweep?: { enabled?: boolean } };
       expect(healthPayload.ok).toBe(true);
       expect(healthPayload.signerAddress).toBe(server.store.signerAddress);
+      expect(healthPayload.sweep?.enabled).toBe(false);
     }
 
     const put = await fetch(`${base}/api/tower/appointment`, {
@@ -182,5 +183,28 @@ describe('standalone watchtower service', () => {
     const payload = await put.json() as { ok: boolean; error?: string };
     expect(payload.ok).toBe(false);
     expect(String(payload.error || '')).toContain('TOWER_QUOTA_EXCEEDED');
+  });
+
+  test('reports scheduler enabled when an action key is configured', async () => {
+    const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-scheduler-${Date.now()}`);
+    rmSync(tempRoot, { recursive: true, force: true });
+    mkdirSync(tempRoot, { recursive: true });
+
+    const server = startStandaloneWatchtowerServer({
+      host: '127.0.0.1',
+      port: 0,
+      towerId: 'tower-scheduler-test',
+      dbPath: join(tempRoot, 'tower.level'),
+      maxStoredBytesPerLookupKey: 64 * 1024,
+      towerPrivateKey: Wallet.createRandom().privateKey,
+      sweepIntervalMs: 60_000,
+    });
+    servers.push(server);
+
+    const health = await fetch(`http://127.0.0.1:${server.server.port}/api/tower/healthz`);
+    expect(health.ok).toBe(true);
+    const payload = await health.json() as { sweep?: { enabled?: boolean; intervalMs?: number } };
+    expect(payload.sweep?.enabled).toBe(true);
+    expect(payload.sweep?.intervalMs).toBe(60_000);
   });
 });

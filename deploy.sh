@@ -308,22 +308,23 @@ block = """    location /api/tower/ {
         proxy_read_timeout 86400;
     }
 
-    location /api/watchtower/ {
-        proxy_pass http://127.0.0.1:9100;
-        proxy_http_version 1.1;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_read_timeout 86400;
-    }
-
 """
 if marker in text and "location /api/tower/" not in text:
     text = text.replace(marker, block + marker, 1)
     path.write_text(text)
 PY
   fi
+
+  python3 - "$available" <<'PY'
+from pathlib import Path
+import re
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+text = re.sub(r"\n    location /api/watchtower/ \{\n(?:        .*\n)*?    \}\n", "\n", text)
+path.write_text(text)
+PY
 
   if grep -q 'proxy_pass https://127.0.0.1:8087;' "$available"; then
     echo "[deploy] invalid custody upstream scheme in nginx config: expected http://127.0.0.1:8087" >&2

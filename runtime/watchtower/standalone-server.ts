@@ -14,6 +14,7 @@ import {
   handleWatchtowerActions,
   handleWatchtowerSweep,
 } from './http';
+import { runWatchtowerSweep } from './action';
 import { createWatchtowerStore, type WatchtowerStore } from './store';
 
 export type StandaloneWatchtowerOptions = {
@@ -25,12 +26,78 @@ export type StandaloneWatchtowerOptions = {
   maxBundlesPerLookupKey?: number;
   receiptTtlMs?: number;
   towerPrivateKey?: string;
+  sweepIntervalMs?: number;
+  allowedRpcUrls?: string[];
 };
 
 export type StandaloneWatchtowerServer = {
   server: ReturnType<typeof Bun.serve>;
   store: WatchtowerStore;
   close: () => Promise<void>;
+};
+
+type SweepScheduler = {
+  enabled: boolean;
+  intervalMs: number;
+  close: () => void;
+};
+
+const startSweepScheduler = (
+  store: WatchtowerStore,
+  options: {
+    towerPrivateKey?: string;
+    intervalMs?: number;
+    allowedRpcUrls?: string[];
+  },
+): SweepScheduler => {
+  const towerPrivateKey = String(options.towerPrivateKey || '').trim();
+  const intervalMs = Math.max(1_000, Math.floor(Number(options.intervalMs ?? 30_000)));
+  if (!towerPrivateKey) {
+    return { enabled: false, intervalMs, close: () => {} };
+  }
+
+  let closed = false;
+  let running = false;
+  let timer: ReturnType<typeof setTimeout> | null = null;
+
+  const schedule = (): void => {
+    if (closed) return;
+    timer = setTimeout(tick, intervalMs);
+    timer.unref?.();
+  };
+
+  const tick = async (): Promise<void> => {
+    if (closed) return;
+    if (running) {
+      schedule();
+      return;
+    }
+    running = true;
+    try {
+      const result = await runWatchtowerSweep(store, {
+        towerPrivateKey,
+        ...(options.allowedRpcUrls ? { allowedRpcUrls: options.allowedRpcUrls } : {}),
+      });
+      if (result.scanned > 0 || result.submitted > 0 || result.errors > 0) {
+        console.log(`[WATCHTOWER] sweep ${JSON.stringify(result)}`);
+      }
+    } catch (error) {
+      console.error(`[WATCHTOWER] sweep failed: ${error instanceof Error ? error.message : String(error)}`);
+    } finally {
+      running = false;
+      schedule();
+    }
+  };
+
+  schedule();
+  return {
+    enabled: true,
+    intervalMs,
+    close: () => {
+      closed = true;
+      if (timer) clearTimeout(timer);
+    },
+  };
 };
 
 export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOptions): StandaloneWatchtowerServer => {
@@ -41,6 +108,11 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
     ...(options.maxBundlesPerLookupKey !== undefined ? { maxBundlesPerLookupKey: options.maxBundlesPerLookupKey } : {}),
     ...(options.receiptTtlMs !== undefined ? { receiptTtlMs: options.receiptTtlMs } : {}),
     ...(options.towerPrivateKey ? { towerPrivateKey: options.towerPrivateKey } : {}),
+  });
+  const scheduler = startSweepScheduler(store, {
+    ...(options.towerPrivateKey ? { towerPrivateKey: options.towerPrivateKey } : {}),
+    ...(options.sweepIntervalMs !== undefined ? { intervalMs: options.sweepIntervalMs } : {}),
+    ...(options.allowedRpcUrls ? { allowedRpcUrls: options.allowedRpcUrls } : {}),
   });
 
   const server = Bun.serve({
@@ -59,9 +131,13 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
           signerAddress: store.signerAddress,
           maxStoredBytesPerLookupKey: store.maxStoredBytesPerLookupKey,
           maxBundlesPerLookupKey: store.maxBundlesPerLookupKey,
+          sweep: {
+            enabled: scheduler.enabled,
+            intervalMs: scheduler.intervalMs,
+          },
           stats,
         }), {
-          headers: { 'content-type': 'application/json' },
+          headers: { 'content-type': 'application/json', 'cache-control': 'no-store, max-age=0' },
         });
       }
 
@@ -106,6 +182,7 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
     server,
     store,
     close: async () => {
+      scheduler.close();
       server.stop(true);
       await store.close();
     },
@@ -119,6 +196,7 @@ if (import.meta.main) {
   const dbArgIdx = args.indexOf('--db');
   const quotaArgIdx = args.indexOf('--quota-bytes');
   const bundlesArgIdx = args.indexOf('--max-bundles');
+  const sweepIntervalArgIdx = args.indexOf('--sweep-interval-ms');
 
   const port = portArgIdx !== -1 && args[portArgIdx + 1]
     ? Number(args[portArgIdx + 1])
@@ -136,6 +214,13 @@ if (import.meta.main) {
     ? Number(args[bundlesArgIdx + 1])
     : Number(process.env['XLN_WATCHTOWER_MAX_BUNDLES'] || 3);
   const towerId = process.env['XLN_WATCHTOWER_ID'] || 'watchtower';
+  const sweepIntervalMs = sweepIntervalArgIdx !== -1 && args[sweepIntervalArgIdx + 1]
+    ? Number(args[sweepIntervalArgIdx + 1])
+    : Number(process.env['XLN_WATCHTOWER_SWEEP_INTERVAL_MS'] || 30_000);
+  const allowedRpcUrls = String(process.env['XLN_WATCHTOWER_ALLOWED_RPC_URLS'] || '')
+    .split(',')
+    .map(value => value.trim())
+    .filter(Boolean);
 
   startStandaloneWatchtowerServer({
     host,
@@ -144,6 +229,8 @@ if (import.meta.main) {
     towerId,
     maxStoredBytesPerLookupKey,
     maxBundlesPerLookupKey,
+    sweepIntervalMs,
+    ...(allowedRpcUrls.length > 0 ? { allowedRpcUrls } : {}),
     ...(process.env['XLN_WATCHTOWER_PRIVATE_KEY'] ? { towerPrivateKey: process.env['XLN_WATCHTOWER_PRIVATE_KEY'] } : {}),
   });
 }
