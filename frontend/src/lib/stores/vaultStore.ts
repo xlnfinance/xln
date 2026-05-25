@@ -1,6 +1,19 @@
 import { writable, get, derived } from 'svelte/store';
-import { HDNodeWallet, Mnemonic, getAddress, getIndexedAccountPath, keccak256, toUtf8Bytes } from 'ethers';
-import type { ConsensusConfig, Env, JurisdictionConfig, PersistedFrameJournal, RoutedEntityInput, RuntimeInput, XLNModule } from '@xln/runtime/xln-api';
+import { HDNodeWallet, Mnemonic, Wallet, getAddress, getIndexedAccountPath, keccak256, toUtf8Bytes } from 'ethers';
+import type {
+  ConsensusConfig,
+  EncryptedRuntimeRecoveryBundleV1,
+  Env,
+  JurisdictionConfig,
+  PersistedFrameJournal,
+  RoutedEntityInput,
+  RuntimeInput,
+  RuntimeRecoveryBundleV1,
+  RuntimeRecoveryMetaV1,
+  RuntimeRecoverySignerV1,
+  TowerAppointmentV1,
+  XLNModule,
+} from '@xln/runtime/xln-api';
 import { runtimeOperations, runtimes, activeRuntimeId } from './runtimeStore';
 import {
   xlnEnvironment,
@@ -139,6 +152,10 @@ let resumeRefreshPromise: Promise<boolean> | null = null;
 let runtimeSyncChannel: BroadcastChannel | null = null;
 let runtimeResumeTrigger: (() => void) | null = null;
 const runtimeEnvChangeUnsubscribers = new Map<string, () => void>();
+const runtimeRecoveryUploadTimers = new Map<string, ReturnType<typeof setTimeout>>();
+const runtimeRecoveryUploadMeta = new Map<string, { lastUploadedHeight: number; lastBundleHash: string | null }>();
+
+const RECOVERY_UPLOAD_DEBOUNCE_MS = 1_500;
 
 type FrameLogEntry = Env['frameLogs'][number];
 type HealthMachine = { name?: string; status?: string; chainId?: number; lastBlock?: unknown };
@@ -155,6 +172,13 @@ type RuntimeP2PHandle = {
   connect?: () => void;
   refreshGossip?: () => void;
   getReconnectState?: () => { attempt: number; nextAt: number } | null;
+};
+
+type TowerRestorePayload = {
+  ok: boolean;
+  receipt?: unknown;
+  bundle?: EncryptedRuntimeRecoveryBundleV1;
+  error?: string;
 };
 
 const isRecord = (value: unknown): value is Record<string, unknown> => typeof value === 'object' && value !== null;
@@ -292,6 +316,236 @@ function deriveJurisdictionSignerIndex(jurisdiction: string): number {
 
 function getSignerDerivationIndex(signer: Signer | null | undefined): number {
   return Number.isInteger(signer?.derivationIndex) ? Number(signer!.derivationIndex) : Number(signer?.index ?? 0);
+}
+
+const recoveryApiBaseOrigin = (): string =>
+  typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
+
+const buildRuntimeRecoverySigners = (runtime: Runtime): RuntimeRecoverySignerV1[] =>
+  (runtime.signers || [])
+    .map((signer, index) => ({
+      index,
+      derivationIndex: getSignerDerivationIndex(signer),
+      address: normalizeRuntimeId(signer.address),
+      name: String(signer.name || `Signer ${index + 1}`),
+      ...(signer.entityId ? { entityId: normalizeEntityId(signer.entityId) } : {}),
+      ...(signer.jurisdiction ? { jurisdiction: String(signer.jurisdiction).trim() } : {}),
+    }))
+    .filter((signer) => !!signer.address);
+
+const buildRuntimeRecoveryMeta = (runtime: Runtime): RuntimeRecoveryMetaV1 => ({
+  label: runtime.label,
+  activeSignerIndex: Math.max(0, Math.floor(Number(runtime.activeSignerIndex || 0))),
+  loginType: runtime.loginType === 'demo' ? 'demo' : 'manual',
+  ...(typeof runtime.requiresOnboarding === 'boolean'
+    ? { requiresOnboarding: runtime.requiresOnboarding }
+    : {}),
+  createdAt: runtime.createdAt,
+});
+
+const applyRecoveryBundleMetadata = (runtime: Runtime, bundle: RuntimeRecoveryBundleV1): boolean => {
+  let changed = false;
+  const restoredSigners = [...bundle.signers]
+    .sort((left, right) => left.index - right.index)
+    .map((signer, index) => ({
+      index,
+      ...(Number.isFinite(Number(signer.derivationIndex))
+        ? { derivationIndex: Math.max(0, Math.floor(Number(signer.derivationIndex))) }
+        : {}),
+      address: normalizeRuntimeId(signer.address),
+      name: String(signer.name || `Signer ${index + 1}`),
+      ...(signer.entityId ? { entityId: normalizeEntityId(signer.entityId) } : {}),
+      ...(signer.jurisdiction ? { jurisdiction: String(signer.jurisdiction).trim() } : {}),
+    }))
+    .filter((signer) => !!signer.address);
+
+  const nextLabel = String(bundle.meta?.label || runtime.label || 'Runtime').trim() || 'Runtime';
+  if (runtime.label !== nextLabel) {
+    runtime.label = nextLabel;
+    changed = true;
+  }
+  if (restoredSigners.length > 0) {
+    const current = JSON.stringify(runtime.signers);
+    const incoming = JSON.stringify(restoredSigners);
+    if (current !== incoming) {
+      runtime.signers = restoredSigners;
+      changed = true;
+    }
+  }
+
+  const nextActiveSignerIndex = Math.max(
+    0,
+    Math.min(
+      restoredSigners.length > 0 ? restoredSigners.length - 1 : Math.max(0, runtime.signers.length - 1),
+      Math.floor(Number(bundle.meta?.activeSignerIndex ?? runtime.activeSignerIndex ?? 0)),
+    ),
+  );
+  if (runtime.activeSignerIndex !== nextActiveSignerIndex) {
+    runtime.activeSignerIndex = nextActiveSignerIndex;
+    changed = true;
+  }
+  const nextLoginType = bundle.meta?.loginType === 'demo' ? 'demo' : 'manual';
+  if (runtime.loginType !== nextLoginType) {
+    runtime.loginType = nextLoginType;
+    changed = true;
+  }
+  if (typeof bundle.meta?.requiresOnboarding === 'boolean' && runtime.requiresOnboarding !== bundle.meta.requiresOnboarding) {
+    runtime.requiresOnboarding = bundle.meta.requiresOnboarding;
+    changed = true;
+  }
+  if (Number.isFinite(Number(bundle.meta?.createdAt || 0))) {
+    const nextCreatedAt = Math.max(0, Math.floor(Number(bundle.meta?.createdAt || runtime.createdAt)));
+    if (runtime.createdAt !== nextCreatedAt) {
+      runtime.createdAt = nextCreatedAt;
+      changed = true;
+    }
+  }
+  return changed;
+};
+
+const persistRuntimeMetadataSnapshot = (): void => {
+  try {
+    if (typeof localStorage === 'undefined') return;
+    localStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify(get(runtimesState)));
+  } catch {
+    // Recovery upload should never break the interactive runtime.
+  }
+};
+
+async function tryRestoreRuntimeEnvFromTower(
+  runtime: Runtime,
+  xln: XLNModule,
+): Promise<{ env: Env; bundle: RuntimeRecoveryBundleV1 } | null> {
+  if (
+    typeof xln.restoreEnvFromCheckpointSnapshot !== 'function' ||
+    typeof xln.decryptRuntimeRecoveryBundle !== 'function' ||
+    typeof xln.deriveRuntimeRecoveryLookupKey !== 'function' ||
+    typeof xln.saveEnvToDB !== 'function'
+  ) {
+    return null;
+  }
+
+  const runtimeId = normalizeRuntimeId(runtime.id);
+  if (!runtimeId || !runtime.seed) return null;
+
+  const lookupKey = xln.deriveRuntimeRecoveryLookupKey(runtimeId, runtime.seed);
+  const response = await fetch(new URL('/api/tower/restore', recoveryApiBaseOrigin()), {
+    method: 'POST',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify({ lookupKey }),
+  });
+  if (response.status === 404) return null;
+  if (!response.ok) {
+    throw new Error(`[VaultStore] Tower restore failed for ${runtimeId.slice(0, 12)}: HTTP ${response.status}`);
+  }
+
+  const payload = await response.json() as TowerRestorePayload;
+  if (!payload.ok || !payload.bundle) {
+    if (payload.error === 'TOWER_BUNDLE_NOT_FOUND') return null;
+    throw new Error(`[VaultStore] Tower restore rejected for ${runtimeId.slice(0, 12)}: ${String(payload.error || 'unknown')}`);
+  }
+
+  const bundle = await xln.decryptRuntimeRecoveryBundle(payload.bundle, runtime.seed);
+  applyRecoveryBundleMetadata(runtime, bundle);
+  const restoredEnv = await xln.restoreEnvFromCheckpointSnapshot(bundle.checkpoint, {
+    runtimeSeed: runtime.seed,
+    runtimeId,
+  });
+  applyRuntimeLogPreference(restoredEnv);
+  await xln.saveEnvToDB(restoredEnv);
+  return { env: restoredEnv, bundle };
+}
+
+async function uploadRuntimeRecoverySnapshot(
+  runtimeId: string,
+  env: Env,
+  xln: XLNModule,
+): Promise<void> {
+  if (
+    typeof xln.buildRuntimeRecoveryBundle !== 'function' ||
+    typeof xln.encryptRuntimeRecoveryBundle !== 'function' ||
+    typeof xln.buildTowerAppointmentOwnerMessage !== 'function'
+  ) {
+    return;
+  }
+
+  const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
+  const runtime = get(runtimesState).runtimes[normalizedRuntimeId];
+  if (!runtime?.seed) return;
+  if (Number(env.height || 0) <= 0) return;
+  if (!(env.eReplicas instanceof Map) || env.eReplicas.size === 0) return;
+
+  const previous = runtimeRecoveryUploadMeta.get(normalizedRuntimeId);
+  if (previous && Number(env.height || 0) < previous.lastUploadedHeight) return;
+
+  // Blind tower mode stores opaque ciphertext only. The browser still validates the
+  // restored checkpoint locally after decrypting it with the same BrainVault seed.
+  const bundle = xln.buildRuntimeRecoveryBundle(env, {
+    signers: buildRuntimeRecoverySigners(runtime),
+    meta: buildRuntimeRecoveryMeta(runtime),
+  });
+  const encrypted = await xln.encryptRuntimeRecoveryBundle(bundle, runtime.seed);
+  if (previous && previous.lastBundleHash === encrypted.bundleHash && previous.lastUploadedHeight === encrypted.height) {
+    return;
+  }
+
+  const signedAt = Date.now();
+  const message = xln.buildTowerAppointmentOwnerMessage(
+    normalizedRuntimeId,
+    encrypted.lookupKey,
+    encrypted.bundleHash,
+    encrypted.height,
+    signedAt,
+  );
+  const signature = await new Wallet(derivePrivateKey(runtime.seed, 0)).signMessage(message);
+  const appointment: TowerAppointmentV1 = {
+    type: 'tower_appointment',
+    version: 1,
+    lookupKey: encrypted.lookupKey,
+    bundle: encrypted,
+    ownerProof: {
+      runtimeId: normalizedRuntimeId,
+      signedAt,
+      signature,
+    },
+  };
+
+  const response = await fetch(new URL('/api/tower/appointment', recoveryApiBaseOrigin()), {
+    method: 'PUT',
+    headers: { 'content-type': 'application/json' },
+    body: JSON.stringify(appointment),
+  });
+  if (!response.ok) {
+    throw new Error(`[VaultStore] Tower appointment failed for ${normalizedRuntimeId.slice(0, 12)}: HTTP ${response.status}`);
+  }
+  const payload = await response.json() as { ok: boolean; error?: string };
+  if (!payload.ok) {
+    throw new Error(`[VaultStore] Tower appointment rejected for ${normalizedRuntimeId.slice(0, 12)}: ${String(payload.error || 'unknown')}`);
+  }
+  runtimeRecoveryUploadMeta.set(normalizedRuntimeId, {
+    lastUploadedHeight: encrypted.height,
+    lastBundleHash: encrypted.bundleHash,
+  });
+}
+
+function scheduleRuntimeRecoveryUpload(
+  runtimeId: string,
+  env: Env,
+  xln: XLNModule,
+): void {
+  const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
+  if (!normalizedRuntimeId) return;
+  const existingTimer = runtimeRecoveryUploadTimers.get(normalizedRuntimeId);
+  if (existingTimer) clearTimeout(existingTimer);
+  runtimeRecoveryUploadTimers.set(
+    normalizedRuntimeId,
+    setTimeout(() => {
+      runtimeRecoveryUploadTimers.delete(normalizedRuntimeId);
+      void uploadRuntimeRecoverySnapshot(normalizedRuntimeId, unwrapLiveRuntimeEnv(env) ?? env, xln).catch((error) => {
+        console.warn(`[VaultStore] Tower recovery upload failed for ${normalizedRuntimeId.slice(0, 12)}:`, error);
+      });
+    }, RECOVERY_UPLOAD_DEBOUNCE_MS),
+  );
 }
 
 const findRuntimeByIdCaseInsensitive = (
@@ -668,6 +922,7 @@ async function fundRuntimeSignersInBrowserVM(runtime: Runtime | null): Promise<v
 async function cleanupRuntimeEnv(runtimeId: string): Promise<void> {
   try {
     unregisterRuntimeEnvChange(runtimeId);
+    runtimeRecoveryUploadMeta.delete(normalizeRuntimeId(runtimeId));
     const runtimeEntry = get(runtimes).get(runtimeId);
     const env = runtimeEntry?.env;
     if (!env) return;
@@ -731,12 +986,17 @@ function unregisterRuntimeEnvChange(runtimeId: string): void {
   if (!unsubscribe) return;
   runtimeEnvChangeUnsubscribers.delete(normalizedRuntimeId);
   unsubscribe();
+  const uploadTimer = runtimeRecoveryUploadTimers.get(normalizedRuntimeId);
+  if (uploadTimer) {
+    clearTimeout(uploadTimer);
+    runtimeRecoveryUploadTimers.delete(normalizedRuntimeId);
+  }
 }
 
 function registerRuntimeEnvChange(
   runtimeId: string,
   env: Env,
-  xln: { registerEnvChangeCallback?: (env: Env, callback: (env: Env) => void) => (() => void) },
+  xln: XLNModule,
 ): void {
   const runtimeEnv = unwrapLiveRuntimeEnv(env) ?? env;
   const normalizedRuntimeId = normalizeRuntimeId(runtimeId || runtimeEnv.runtimeId);
@@ -751,6 +1011,7 @@ function registerRuntimeEnvChange(
     if (normalizeRuntimeId(get(activeRuntimeId) || '') === normalizedRuntimeId) {
       setXlnEnvironment(nextEnv);
     }
+    scheduleRuntimeRecoveryUpload(normalizedRuntimeId, nextEnv, xln);
   };
 
   runtimeEnvChangeUnsubscribers.set(
@@ -839,6 +1100,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
   const runtimeSeed = runtime.seed;
   let env: Env | null = null;
   let signerMetadataChanged = false;
+  let restoredFromTower = false;
 
   for (const signer of runtime.signers || []) {
     if (!signer?.address) continue;
@@ -866,6 +1128,23 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     }
   }
 
+  if (!env) {
+    try {
+      const towerRestored = await tryRestoreRuntimeEnvFromTower(runtime, xln);
+      if (towerRestored) {
+        env = towerRestored.env;
+        restoredFromTower = true;
+        signerMetadataChanged = true;
+      }
+    } catch (error) {
+      if (strictRestore) {
+        const message = error instanceof Error ? error.message : String(error);
+        throw new Error(`[VaultStore] Tower restore failed for ${runtime.id.slice(0, 12)}: ${message}`);
+      }
+      console.warn('[VaultStore] ⚠️ Failed to restore env from tower, continuing with local recovery path:', error);
+    }
+  }
+
   if (signerMetadataChanged) {
     runtimesState.update((state) => ({
       ...state,
@@ -874,11 +1153,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
         [runtime.id]: runtime,
       },
     }));
-    try {
-      localStorage.setItem(VAULT_STORAGE_KEY, JSON.stringify(get(runtimesState)));
-    } catch {
-      // ignore storage errors
-    }
+    persistRuntimeMetadataSnapshot();
   }
 
   if (!env && strictRestore) {
@@ -886,7 +1161,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
   }
 
   if (env && (!env.jReplicas || env.jReplicas.size === 0)) {
-    if (strictRestore) {
+    if (strictRestore && !restoredFromTower) {
       throw new Error(`[VaultStore] Strict restore failed for ${runtime.id.slice(0, 12)}: restored env missing jReplicas`);
     }
     console.warn('[VaultStore] ⚠️ Restored env missing J-replicas; re-importing');
@@ -911,7 +1186,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
     return false;
   };
 
-  if (env && strictRestore) {
+  if (env && strictRestore && !restoredFromTower) {
     for (const signer of runtime.signers || []) {
       if (!signer?.entityId) continue;
       if (!hasEntityReplica(signer.entityId)) {
@@ -1487,72 +1762,43 @@ export const vaultOperations = {
     // Import XLN and create env BEFORE returning
     const xln = await getXLN();
     markPerf('load_xln_runtime');
-    const newEnv = xln.createEmptyEnv(seed);
-    applyRuntimeLogPreference(newEnv);
+    const towerRestored = await tryRestoreRuntimeEnvFromTower(runtime, xln);
     const runtimeIdLower = runtimeId.toLowerCase();
-    newEnv.runtimeId = runtimeIdLower;
-    newEnv.dbNamespace = runtimeIdLower;
+    let newEnv: Env;
 
-    // REMOVED: setRuntimeSeed() - seed now stored in env.runtimeSeed and passed to pure functions
-    // All crypto functions now read from env.runtimeSeed, not global state
+    if (towerRestored) {
+      newEnv = await buildOrRestoreRuntimeEnv(runtime, xln, false);
+      applyRuntimeLogPreference(newEnv);
+      markPerf('restore_runtime_from_tower');
+      toasts.info('Runtime restored from recovery backup', 6_000);
+    } else {
+      newEnv = xln.createEmptyEnv(seed);
+      applyRuntimeLogPreference(newEnv);
+      newEnv.runtimeId = runtimeIdLower;
+      newEnv.dbNamespace = runtimeIdLower;
 
-    // Fetch pre-deployed contract addresses from prod
-    const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
-    markPerf('wait_server_runtime_ready');
-    const jurisdictions = await fetchJurisdictions(baseOrigin);
-    markPerf('fetch_jurisdictions');
-    const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
-    const defaultJurisdictionImports = listDefaultJurisdictionImports(jurisdictions);
-    const primaryJurisdictionName =
-      defaultJurisdictionImports[0]?.name ||
-      stripLocalJurisdictionSuffix(arrakisConfig.name || 'primary') ||
-      'primary';
-    const secondaryJurisdictionImports = defaultJurisdictionImports.slice(1);
-    const rpcUrl = resolveRpcUrl(resolveJurisdictionRpc(arrakisConfig), baseOrigin);
-    const chainId = resolveJurisdictionChainId(arrakisConfig, 'VaultStore.createRuntime');
+      // REMOVED: setRuntimeSeed() - seed now stored in env.runtimeSeed and passed to pure functions
+      // All crypto functions now read from env.runtimeSeed, not global state
 
-    // Import the same primary jurisdiction name that hub profiles advertise.
-    if (xln.startRuntimeLoop) {
-      xln.startRuntimeLoop(newEnv);
-    }
-    await enqueueAndAwait(
-      xln,
-      newEnv,
-      {
-        runtimeTxs: [{
-          type: 'importJ',
-          data: {
-            name: primaryJurisdictionName,
-            chainId,
-            ticker: 'USDC',
-            rpcs: [rpcUrl],
-            blockTimeMs: 1_000,
-            contracts: arrakisConfig.contracts, // Use pre-deployed addresses
-          }
-        }],
-        entityInputs: []
-      },
-      () => {
-        const replica = findJReplicaByName(newEnv, primaryJurisdictionName);
-        if (hasConnectedJurisdictionAdapter(replica)) return true;
-        if (newEnv?.runtimeState?.loopActive === false) {
-          throw new Error(`createRuntime.importJ(${primaryJurisdictionName}) failed: runtime loop halted\n${getRuntimeFatalDiagnostics(newEnv)}`);
-        }
-        return false;
-      },
-      `createRuntime.importJ(${primaryJurisdictionName})`,
-      45_000,
-    );
-    await waitForCondition(
-      () => hasRuntimeJurisdictionAddresses(findJReplicaByName(newEnv, primaryJurisdictionName)),
-      `createRuntime.importJ(${primaryJurisdictionName}).addresses`,
-      45_000,
-    );
-    markPerf('import_j_testnet');
+      // Fetch pre-deployed contract addresses from prod
+      const baseOrigin = typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
+      markPerf('wait_server_runtime_ready');
+      const jurisdictions = await fetchJurisdictions(baseOrigin);
+      markPerf('fetch_jurisdictions');
+      const arrakisConfig = resolveJurisdictionConfig(jurisdictions);
+      const defaultJurisdictionImports = listDefaultJurisdictionImports(jurisdictions);
+      const primaryJurisdictionName =
+        defaultJurisdictionImports[0]?.name ||
+        stripLocalJurisdictionSuffix(arrakisConfig.name || 'primary') ||
+        'primary';
+      const secondaryJurisdictionImports = defaultJurisdictionImports.slice(1);
+      const rpcUrl = resolveRpcUrl(resolveJurisdictionRpc(arrakisConfig), baseOrigin);
+      const chainId = resolveJurisdictionChainId(arrakisConfig, 'VaultStore.createRuntime');
 
-    for (const secondary of secondaryJurisdictionImports) {
-      const secondaryRpcUrl = resolveRpcUrl(resolveJurisdictionRpc(secondary.config), baseOrigin);
-      const secondaryChainId = resolveJurisdictionChainId(secondary.config, `VaultStore.createRuntime.${secondary.name}`);
+      // Import the same primary jurisdiction name that hub profiles advertise.
+      if (xln.startRuntimeLoop) {
+        xln.startRuntimeLoop(newEnv);
+      }
       await enqueueAndAwait(
         xln,
         newEnv,
@@ -1560,159 +1806,198 @@ export const vaultOperations = {
           runtimeTxs: [{
             type: 'importJ',
             data: {
-              name: secondary.name,
-              chainId: secondaryChainId,
-              ticker: String((secondary.config as { currency?: unknown }).currency || 'USDC'),
-              rpcs: [secondaryRpcUrl],
-              blockTimeMs: secondary.config.blockTimeMs ?? 1_000,
-              contracts: secondary.config.contracts,
-            },
+              name: primaryJurisdictionName,
+              chainId,
+              ticker: 'USDC',
+              rpcs: [rpcUrl],
+              blockTimeMs: 1_000,
+              contracts: arrakisConfig.contracts, // Use pre-deployed addresses
+            }
           }],
-          entityInputs: [],
+          entityInputs: []
         },
-        () => hasConnectedJurisdictionAdapter(newEnv?.jReplicas?.get?.(secondary.name)),
-        `createRuntime.importJ(${secondary.name})`,
+        () => {
+          const replica = findJReplicaByName(newEnv, primaryJurisdictionName);
+          if (hasConnectedJurisdictionAdapter(replica)) return true;
+          if (newEnv?.runtimeState?.loopActive === false) {
+            throw new Error(`createRuntime.importJ(${primaryJurisdictionName}) failed: runtime loop halted\n${getRuntimeFatalDiagnostics(newEnv)}`);
+          }
+          return false;
+        },
+        `createRuntime.importJ(${primaryJurisdictionName})`,
         45_000,
       );
       await waitForCondition(
-        () => hasRuntimeJurisdictionAddresses(newEnv?.jReplicas?.get?.(secondary.name)),
-        `createRuntime.importJ(${secondary.name}).addresses`,
+        () => hasRuntimeJurisdictionAddresses(findJReplicaByName(newEnv, primaryJurisdictionName)),
+        `createRuntime.importJ(${primaryJurisdictionName}).addresses`,
         45_000,
       );
-    }
+      markPerf('import_j_testnet');
 
-    // === MVP: Create entity ===
-    // Create entity config (single-signer, threshold 1)
-    const signerAddress = firstAddress;
-
-    // Get contract addresses from imported J-machine
-    const jReplica = findJReplicaByName(newEnv, primaryJurisdictionName);
-    if (!jReplica) {
-      throw new Error(`${primaryJurisdictionName} J-machine not found after import`);
-    }
-    const depositoryAddress = requireContractAddress(jReplica.depositoryAddress, 'depository');
-    const entityProviderAddress = requireContractAddress(jReplica.entityProviderAddress, 'entity_provider');
-
-    // Lazy entity IDs are board hashes generated from the sorted validator set.
-    const entityId = generateLazyEntityIdPreview([signerAddress], 1n);
-
-    const entityConfig = {
-      mode: 'proposer-based' as const,
-      threshold: 1n,
-      validators: [signerAddress],
-      shares: { [signerAddress]: 1n },
-      jurisdiction: {
-        address: depositoryAddress,
-        name: primaryJurisdictionName,
-        chainId: Number(jReplica.chainId ?? chainId ?? 31337),
-        entityProviderAddress: entityProviderAddress,
-        depositoryAddress: depositoryAddress,
+      for (const secondary of secondaryJurisdictionImports) {
+        const secondaryRpcUrl = resolveRpcUrl(resolveJurisdictionRpc(secondary.config), baseOrigin);
+        const secondaryChainId = resolveJurisdictionChainId(secondary.config, `VaultStore.createRuntime.${secondary.name}`);
+        await enqueueAndAwait(
+          xln,
+          newEnv,
+          {
+            runtimeTxs: [{
+              type: 'importJ',
+              data: {
+                name: secondary.name,
+                chainId: secondaryChainId,
+                ticker: String((secondary.config as { currency?: unknown }).currency || 'USDC'),
+                rpcs: [secondaryRpcUrl],
+                blockTimeMs: secondary.config.blockTimeMs ?? 1_000,
+                contracts: secondary.config.contracts,
+              },
+            }],
+            entityInputs: [],
+          },
+          () => hasConnectedJurisdictionAdapter(newEnv?.jReplicas?.get?.(secondary.name)),
+          `createRuntime.importJ(${secondary.name})`,
+          45_000,
+        );
+        await waitForCondition(
+          () => hasRuntimeJurisdictionAddresses(newEnv?.jReplicas?.get?.(secondary.name)),
+          `createRuntime.importJ(${secondary.name}).addresses`,
+          45_000,
+        );
       }
-    };
 
-    // CRITICAL: Register the canonical signer key with runtime BEFORE importing entity.
-    // The wallet/runtime signer for index 0 is the BIP44 account-path key derived above;
-    // the entity uses the resulting EOA address as signerId, so consensus/J-batch signing
-    // must reuse this exact private key instead of deriving a second one from other labels.
-    const signerPrivateKey = derivePrivateKey(seed, 0);
-    const privateKeyBytes = new Uint8Array(
-      signerPrivateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))
-    );
-    xln.registerSignerKey(signerAddress, privateKeyBytes);
-    markPerf('register_signer_key');
+      // === MVP: Create entity ===
+      // Create entity config (single-signer, threshold 1)
+      const signerAddress = firstAddress;
 
-    // Import entity replica into runtime
-    await enqueueAndAwait(
-      xln,
-      newEnv,
-      {
-        runtimeTxs: [{
-          type: 'importReplica',
-          entityId: entityId,
-          signerId: signerAddress,
-          data: {
-            isProposer: true,
-            config: entityConfig,
-            profileName: name,
-          }
-        }],
-        entityInputs: []
-      },
-      () => {
-        const reps = newEnv?.eReplicas;
-        if (!reps?.keys) return false;
-        const entityIdNorm = String(entityId).toLowerCase();
-        for (const key of reps.keys()) {
-          const [repEntityId] = String(key).split(':');
-          if (String(repEntityId || '').toLowerCase() === entityIdNorm) return true;
+      // Get contract addresses from imported J-machine
+      const jReplica = findJReplicaByName(newEnv, primaryJurisdictionName);
+      if (!jReplica) {
+        throw new Error(`${primaryJurisdictionName} J-machine not found after import`);
+      }
+      const depositoryAddress = requireContractAddress(jReplica.depositoryAddress, 'depository');
+      const entityProviderAddress = requireContractAddress(jReplica.entityProviderAddress, 'entity_provider');
+
+      // Lazy entity IDs are board hashes generated from the sorted validator set.
+      const entityId = generateLazyEntityIdPreview([signerAddress], 1n);
+
+      const entityConfig = {
+        mode: 'proposer-based' as const,
+        threshold: 1n,
+        validators: [signerAddress],
+        shares: { [signerAddress]: 1n },
+        jurisdiction: {
+          address: depositoryAddress,
+          name: primaryJurisdictionName,
+          chainId: Number(jReplica.chainId ?? chainId ?? 31337),
+          entityProviderAddress: entityProviderAddress,
+          depositoryAddress: depositoryAddress,
         }
-        return false;
-      },
-      `createRuntime.importReplica(${entityId.slice(0, 12)})`,
-    );
-    markPerf('import_entity_replica');
+      };
 
-    // Store entityId in signer
-    runtime.signers[0]!.entityId = entityId;
-    runtime.signers[0]!.jurisdiction = primaryJurisdictionName;
-    void fundSignerWalletViaFaucet(signerAddress);
+      // CRITICAL: Register the canonical signer key with runtime BEFORE importing entity.
+      // The wallet/runtime signer for index 0 is the BIP44 account-path key derived above;
+      // the entity uses the resulting EOA address as signerId, so consensus/J-batch signing
+      // must reuse this exact private key instead of deriving a second one from other labels.
+      const signerPrivateKey = derivePrivateKey(seed, 0);
+      const privateKeyBytes = new Uint8Array(
+        signerPrivateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))
+      );
+      xln.registerSignerKey(signerAddress, privateKeyBytes);
+      markPerf('register_signer_key');
 
-    for (const secondary of secondaryJurisdictionImports) {
-      const jReplicaSecondary = findJReplicaByName(newEnv, secondary.name);
-      if (!jReplicaSecondary) throw new Error(`${secondary.name} J-machine not found after import`);
-      const derivationIndex = deriveJurisdictionSignerIndex(secondary.name);
-      const secondaryAddress = deriveAddress(seed, derivationIndex);
-      const secondaryPrivateKey = derivePrivateKey(seed, derivationIndex);
-      const secondaryPrivateKeyBytes = new Uint8Array(
-        secondaryPrivateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))
-      );
-      xln.registerSignerKey(secondaryAddress, secondaryPrivateKeyBytes);
-      const secondaryEntityId = generateLazyEntityIdPreview([secondaryAddress], 1n);
-      const secondaryChainId = Number(jReplicaSecondary.chainId ?? secondary.config.chainId ?? chainId);
-      const secondaryEntityConfig = buildSignerEntityConfig(
-        secondaryAddress,
-        jReplicaSecondary,
-        secondary.name,
-        Number.isFinite(secondaryChainId) && secondaryChainId > 0 ? secondaryChainId : chainId,
-      );
+      // Import entity replica into runtime
       await enqueueAndAwait(
         xln,
         newEnv,
         {
           runtimeTxs: [{
             type: 'importReplica',
-            entityId: secondaryEntityId,
-            signerId: secondaryAddress,
+            entityId: entityId,
+            signerId: signerAddress,
             data: {
               isProposer: true,
-              config: secondaryEntityConfig,
-              profileName: `${name} ${secondary.name}`,
-            },
+              config: entityConfig,
+              profileName: name,
+            }
           }],
-          entityInputs: [],
+          entityInputs: []
         },
-        () => Boolean(findEntityReplicaByEntityAndSigner(newEnv, secondaryEntityId, secondaryAddress)),
-        `createRuntime.importReplica(${secondary.name}:${secondaryEntityId.slice(0, 12)})`,
+        () => {
+          const reps = newEnv?.eReplicas;
+          if (!reps?.keys) return false;
+          const entityIdNorm = String(entityId).toLowerCase();
+          for (const key of reps.keys()) {
+            const [repEntityId] = String(key).split(':');
+            if (String(repEntityId || '').toLowerCase() === entityIdNorm) return true;
+          }
+          return false;
+        },
+        `createRuntime.importReplica(${entityId.slice(0, 12)})`,
       );
-      runtime.signers.push({
-        index: runtime.signers.length,
-        derivationIndex,
-        address: secondaryAddress,
-        name: `${secondary.name} Signer`,
-        jurisdiction: secondary.name,
-        entityId: secondaryEntityId,
-      });
-      void fundSignerWalletViaFaucet(secondaryAddress);
-    }
-    if (!requiresOnboarding) {
-      writeSavedCollateralPolicy({
-        mode: 'autopilot',
-        softLimitUsd: 500,
-        hardLimitUsd: 10_000,
-        maxFeeUsd: 15,
-      });
-      writeHubJoinPreference(loginType === 'demo' ? '1' : 'manual');
-      writeOnboardingComplete(entityId, true);
+      markPerf('import_entity_replica');
+
+      // Store entityId in signer
+      runtime.signers[0]!.entityId = entityId;
+      runtime.signers[0]!.jurisdiction = primaryJurisdictionName;
+      void fundSignerWalletViaFaucet(signerAddress);
+
+      for (const secondary of secondaryJurisdictionImports) {
+        const jReplicaSecondary = findJReplicaByName(newEnv, secondary.name);
+        if (!jReplicaSecondary) throw new Error(`${secondary.name} J-machine not found after import`);
+        const derivationIndex = deriveJurisdictionSignerIndex(secondary.name);
+        const secondaryAddress = deriveAddress(seed, derivationIndex);
+        const secondaryPrivateKey = derivePrivateKey(seed, derivationIndex);
+        const secondaryPrivateKeyBytes = new Uint8Array(
+          secondaryPrivateKey.slice(2).match(/.{2}/g)!.map(byte => parseInt(byte, 16))
+        );
+        xln.registerSignerKey(secondaryAddress, secondaryPrivateKeyBytes);
+        const secondaryEntityId = generateLazyEntityIdPreview([secondaryAddress], 1n);
+        const secondaryChainId = Number(jReplicaSecondary.chainId ?? secondary.config.chainId ?? chainId);
+        const secondaryEntityConfig = buildSignerEntityConfig(
+          secondaryAddress,
+          jReplicaSecondary,
+          secondary.name,
+          Number.isFinite(secondaryChainId) && secondaryChainId > 0 ? secondaryChainId : chainId,
+        );
+        await enqueueAndAwait(
+          xln,
+          newEnv,
+          {
+            runtimeTxs: [{
+              type: 'importReplica',
+              entityId: secondaryEntityId,
+              signerId: secondaryAddress,
+              data: {
+                isProposer: true,
+                config: secondaryEntityConfig,
+                profileName: `${name} ${secondary.name}`,
+              },
+            }],
+            entityInputs: [],
+          },
+          () => Boolean(findEntityReplicaByEntityAndSigner(newEnv, secondaryEntityId, secondaryAddress)),
+          `createRuntime.importReplica(${secondary.name}:${secondaryEntityId.slice(0, 12)})`,
+        );
+        runtime.signers.push({
+          index: runtime.signers.length,
+          derivationIndex,
+          address: secondaryAddress,
+          name: `${secondary.name} Signer`,
+          jurisdiction: secondary.name,
+          entityId: secondaryEntityId,
+        });
+        void fundSignerWalletViaFaucet(secondaryAddress);
+      }
+      if (!requiresOnboarding) {
+        writeSavedCollateralPolicy({
+          mode: 'autopilot',
+          softLimitUsd: 500,
+          hardLimitUsd: 10_000,
+          maxFeeUsd: 15,
+        });
+        writeHubJoinPreference(loginType === 'demo' ? '1' : 'manual');
+        writeOnboardingComplete(entityId, true);
+      }
     }
     runtimesState.update(state => ({
       ...state,

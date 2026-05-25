@@ -21,6 +21,7 @@ import { setDeltaTransformerAddress } from './proof-builder';
 import {
   buildCanonicalEnvSnapshot,
   buildRuntimeCheckpointSnapshot,
+  normalizePersistedSnapshotInPlace,
 } from './wal/snapshot';
 import { computePersistedEnvStateHash } from './wal/hash';
 import { mergeEntityInputs } from './entity-consensus';
@@ -1660,6 +1661,85 @@ export const createEmptyEnv = (seed?: Uint8Array | string | null): Env => {
   return env;
 };
 
+const normalizeCheckpointReplicaMap = (raw: unknown): Map<string, unknown> => {
+  if (raw instanceof Map) return new Map(raw.entries());
+  if (!Array.isArray(raw)) return new Map();
+  return new Map(
+    raw
+      .filter((entry): entry is [string, unknown] => Array.isArray(entry) && entry.length >= 2)
+      .map(([key, value]) => [String(key), value]),
+  );
+};
+
+// Recovery bundles deliberately reuse the canonical checkpoint snapshot. That keeps
+// the restore path aligned with the storage replay oracle instead of inventing a
+// second persistence format that would drift over time.
+export const restoreEnvFromCheckpointSnapshot = async (
+  snapshot: Record<string, unknown>,
+  options?: {
+    runtimeSeed?: string | null;
+    runtimeId?: string | null;
+  },
+): Promise<Env> => {
+  if (!snapshot || typeof snapshot !== 'object') {
+    throw new Error('RECOVERY_CHECKPOINT_INVALID');
+  }
+
+  const normalizedSnapshot = structuredClone(snapshot);
+  normalizePersistedSnapshotInPlace(normalizedSnapshot, {
+    normalizeReplicaMap: normalizeCheckpointReplicaMap,
+    normalizeJReplicaMap: normalizeCheckpointReplicaMap,
+  });
+
+  const snapshotRuntimeSeed =
+    typeof normalizedSnapshot['runtimeSeed'] === 'string' ? normalizedSnapshot['runtimeSeed'] : null;
+  const runtimeSeed =
+    options?.runtimeSeed !== undefined ? options.runtimeSeed : snapshotRuntimeSeed;
+  const env = createEmptyEnv(runtimeSeed ?? null);
+
+  const snapshotRuntimeId = normalizeRuntimeId(
+    options?.runtimeId ?? String(normalizedSnapshot['runtimeId'] || env.runtimeId || ''),
+  );
+  if (!snapshotRuntimeId) {
+    throw new Error('RECOVERY_CHECKPOINT_RUNTIME_ID_REQUIRED');
+  }
+
+  env.runtimeId = snapshotRuntimeId;
+  env.dbNamespace = normalizeDbNamespace(snapshotRuntimeId);
+  env.height = Math.max(0, Math.floor(Number(normalizedSnapshot['height'] || 0)));
+  env.timestamp = Math.max(0, Math.floor(Number(normalizedSnapshot['timestamp'] || 0)));
+  env.eReplicas = normalizedSnapshot['eReplicas'] instanceof Map
+    ? new Map(Array.from(normalizedSnapshot['eReplicas'].entries()).map(([key, value]) => [String(key), value as never]))
+    : new Map();
+  env.jReplicas = normalizedSnapshot['jReplicas'] instanceof Map
+    ? new Map(Array.from(normalizedSnapshot['jReplicas'].entries()).map(([key, value]) => [String(key), value as never]))
+    : new Map();
+  env.activeJurisdiction =
+    typeof normalizedSnapshot['activeJurisdiction'] === 'string'
+      ? String(normalizedSnapshot['activeJurisdiction'])
+      : env.activeJurisdiction;
+  const browserVMState = normalizedSnapshot['browserVMState'];
+  if (browserVMState !== undefined) {
+    Object.assign(env, {
+      browserVMState: structuredClone(browserVMState) as Env['browserVMState'],
+    });
+  }
+  env.runtimeInput = { runtimeTxs: [], entityInputs: [] };
+  env.frameLogs = [];
+  env.networkInbox = [];
+  env.pendingNetworkOutputs = [];
+  env.overlay = [];
+
+  await rehydrateRestoredRuntimeInfra(env, {
+    isBrowser: runtimeIsBrowser,
+    loadGossipProfiles: (targetEnv) => loadGossipProfilesFromInfraDb(targetEnv, infraGossipDbAccess),
+    assertPersistedContractConfigReady,
+    setBrowserVMJurisdiction,
+  });
+
+  return env;
+};
+
 const requirePersistedContractAddress = (
   jReplicas: Map<string, JReplica>,
   label: string,
@@ -2890,6 +2970,30 @@ export {
   buildJEventObservationDigest,
   canonicalJurisdictionEventsHash,
 } from './j-event-observation';
+export type {
+  EncryptedRuntimeRecoveryBundleV1,
+  RuntimeRecoveryBundleV1,
+  RuntimeRecoveryMetaV1,
+  RuntimeRecoverySignerV1,
+  TowerAppointmentOwnerProofV1,
+  TowerAppointmentV1,
+  TowerDiscoverResponseV1,
+  TowerReceiptV1,
+  TowerRestoreRequestV1,
+  TowerRestoreResponseV1,
+} from './recovery/types';
+export {
+  buildRuntimeRecoveryBundle,
+  computeRuntimeRecoveryBundleHash,
+  computeRuntimeRecoveryCheckpointHash,
+  validateRuntimeRecoveryBundle,
+} from './recovery/bundle';
+export {
+  buildTowerAppointmentOwnerMessage,
+  decryptRuntimeRecoveryBundle,
+  deriveRuntimeRecoveryLookupKey,
+  encryptRuntimeRecoveryBundle,
+} from './recovery/crypto';
 export {
   buildCrossJurisdictionPullReveal,
   getCrossJurisdictionPrivateSeed,
