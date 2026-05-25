@@ -1,6 +1,5 @@
 import { spawn, type ChildProcessByStdio } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
-import { existsSync } from 'node:fs';
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
@@ -29,11 +28,9 @@ const resolveCustodyJurisdictionsJsonPath = (): string => {
 };
 
 const resolveCustodyServiceHttps = (): boolean => {
-  const candidates = [
-    { key: join(process.cwd(), 'frontend', 'localhost+3-key.pem'), cert: join(process.cwd(), 'frontend', 'localhost+3.pem') },
-    { key: join(process.cwd(), 'frontend', 'localhost+2-key.pem'), cert: join(process.cwd(), 'frontend', 'localhost+2.pem') },
-  ];
-  return candidates.some((candidate) => existsSync(candidate.key) && existsSync(candidate.cert));
+  const raw = String(process.env['CUSTODY_HTTPS'] || '').trim().toLowerCase();
+  if (raw === '1' || raw === 'true' || raw === 'yes') return true;
+  return false;
 };
 
 const waitForCustodyServiceReady = async (
