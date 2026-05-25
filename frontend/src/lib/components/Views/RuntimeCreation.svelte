@@ -4,7 +4,14 @@
   // Removed WalletView - Entity = Wallet, no separate signer wallet view
   import HierarchicalNav from '$lib/components/Navigation/HierarchicalNav.svelte';
   import { appStateOperations } from '$lib/stores/appStateStore';
-  import { vaultOperations, activeRuntime, activeSigner, allRuntimes } from '$lib/stores/vaultStore';
+  import {
+    vaultOperations,
+    activeRuntime,
+    activeSigner,
+    allRuntimes,
+    type RecoveryTowerConfig,
+    type RuntimeRecoveryConfig,
+  } from '$lib/stores/vaultStore';
   import { deriveRequestSignal, showVaultPanel, vaultUiOperations } from '$lib/stores/vaultUiStore';
   import { xlnFunctions } from '$lib/stores/xlnStore';
   import type { Tab } from '$lib/types/ui';
@@ -74,9 +81,11 @@
 
   type Phase = 'input' | 'deriving' | 'complete';
   type InputMode = 'brainvault' | 'mnemonic';
+  type WatchtowerSetupMode = 'recommended' | 'backup_only' | 'local_only';
 
   let inputMode: InputMode = 'brainvault';
   let phase: Phase = 'input';
+  let watchtowerSetupMode: WatchtowerSetupMode = 'recommended';
 
   $: hasAnyPersistedState = typeof localStorage !== 'undefined' && (localStorage.length > 0 || typeof indexedDB !== 'undefined');
 
@@ -229,6 +238,30 @@
   let creatingRuntime = false;
   let runtimeCreateError = '';
 
+  const officialTowerUrl = 'https://xln.finance';
+
+  const buildSelectedRecoveryConfig = (): RuntimeRecoveryConfig => {
+    if (watchtowerSetupMode === 'local_only') {
+      return {
+        useDefaultTowers: false,
+        towers: [],
+      };
+    }
+    const towerMode = watchtowerSetupMode === 'backup_only'
+      ? 'blind_backup'
+      : 'delayed_last_resort';
+    const towers: RecoveryTowerConfig[] = [{
+      id: 'official-watchtower',
+      url: officialTowerUrl,
+      towerMode,
+      enabled: true,
+    }];
+    return {
+      useDefaultTowers: false,
+      towers,
+    };
+  };
+
   // ============================================================================
   // LIFECYCLE - Load vault on mount
   // ============================================================================
@@ -371,6 +404,7 @@
           requiresOnboarding: createLoginType !== 'demo',
           mnemonic12: recoveryMnemonic12 || undefined,
           devicePassphrase: devicePassphrase || undefined,
+          recovery: buildSelectedRecoveryConfig(),
         });
         entityId = runtime.signers[0]?.entityId || entityId;
       } else {
@@ -633,6 +667,7 @@
           loginType: 'manual',
           requiresOnboarding: true,
           mnemonic12: undefined,
+          recovery: buildSelectedRecoveryConfig(),
         });
         // entityId is set by createRuntime internally
       } else {
@@ -1029,6 +1064,48 @@
           </div>
         </div>
 
+        <div class="watchtower-section" aria-label="Watchtower setup">
+          <div class="watchtower-head">
+            <div>
+              <div class="watchtower-eyebrow">Recovery and dispute backup</div>
+              <h3>Watchtower coverage</h3>
+              <p>Official towers do two jobs only: encrypted runtime backup and last-resort counter-dispute in the final delay window.</p>
+            </div>
+          </div>
+          <div class="watchtower-options">
+            <button
+              type="button"
+              class="watchtower-option"
+              class:selected={watchtowerSetupMode === 'recommended'}
+              on:click={() => watchtowerSetupMode = 'recommended'}
+            >
+              <span class="watchtower-option-title">Official tower</span>
+              <span class="watchtower-option-copy">Encrypted backup plus last-resort counter-dispute from the official XLN tower.</span>
+            </button>
+            <button
+              type="button"
+              class="watchtower-option"
+              class:selected={watchtowerSetupMode === 'backup_only'}
+              on:click={() => watchtowerSetupMode = 'backup_only'}
+            >
+              <span class="watchtower-option-title">Backup only</span>
+              <span class="watchtower-option-copy">Cross-browser recovery stays on. The tower does not hold an active rescue appointment.</span>
+            </button>
+            <button
+              type="button"
+              class="watchtower-option"
+              class:selected={watchtowerSetupMode === 'local_only'}
+              on:click={() => watchtowerSetupMode = 'local_only'}
+            >
+              <span class="watchtower-option-title">Local only</span>
+              <span class="watchtower-option-copy">No remote backup and no last-resort dispute help. Safe only if you manage recovery yourself.</span>
+            </button>
+          </div>
+          <p class="watchtower-footnote">
+            You can add more towers later. The tower never gets spend authority or the right to start disputes.
+          </p>
+        </div>
+
         {#if inputMode === 'brainvault'}
         <!-- Name Input -->
         <div class="input-group">
@@ -1149,7 +1226,7 @@
         </div>
 
         <!-- Warning (subtle) -->
-	        <p class="warning-text">Your inputs generate a unique wallet. No recovery if forgotten.</p>
+	        <p class="warning-text">Your inputs generate a unique wallet. If you disable watchtowers, losing the phrase means losing recovery and offline dispute protection.</p>
         {:else}
         <!-- Mnemonic Input Mode -->
         <button type="button" class="back-to-create" on:click={() => inputMode = 'brainvault'}>
@@ -1632,6 +1709,88 @@
     background: rgba(255, 255, 255, 0.1);
     border-color: rgba(255, 200, 100, 0.24);
     color: rgba(255, 200, 100, 0.95);
+  }
+
+  .watchtower-section {
+    margin-bottom: 12px;
+    padding: 12px;
+    background: rgba(255, 255, 255, 0.018);
+    border: 1px solid rgba(212, 175, 55, 0.12);
+    border-radius: 8px;
+    width: 100%;
+    box-sizing: border-box;
+  }
+
+  .watchtower-head {
+    margin-bottom: 10px;
+  }
+
+  .watchtower-eyebrow {
+    margin-bottom: 6px;
+    font-size: 10px;
+    font-weight: 600;
+    color: rgba(212, 175, 55, 0.78);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+  }
+
+  .watchtower-head h3 {
+    margin: 0 0 6px;
+    font-size: 15px;
+    color: rgba(255, 255, 255, 0.94);
+  }
+
+  .watchtower-head p,
+  .watchtower-footnote {
+    margin: 0;
+    font-size: 12px;
+    line-height: 1.45;
+    color: rgba(255, 255, 255, 0.56);
+  }
+
+  .watchtower-options {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+    margin-bottom: 10px;
+  }
+
+  .watchtower-option {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    min-height: 104px;
+    padding: 10px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: 8px;
+    color: rgba(255, 255, 255, 0.88);
+    text-align: left;
+    transition: background 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+  }
+
+  .watchtower-option:hover {
+    background: rgba(255, 255, 255, 0.07);
+    border-color: rgba(255, 200, 100, 0.24);
+  }
+
+  .watchtower-option.selected {
+    background: rgba(255, 200, 100, 0.11);
+    border-color: rgba(255, 200, 100, 0.52);
+    box-shadow: inset 0 0 0 1px rgba(255, 200, 100, 0.08);
+  }
+
+  .watchtower-option-title {
+    font-size: 12px;
+    font-weight: 700;
+    color: rgba(255, 255, 255, 0.94);
+  }
+
+  .watchtower-option-copy {
+    font-size: 11px;
+    line-height: 1.4;
+    color: rgba(255, 255, 255, 0.56);
   }
 
   .brainvault-wrapper {
@@ -3251,6 +3410,14 @@
       padding: 9px 6px;
       font-size: 12px;
       min-height: 38px;
+    }
+
+    .watchtower-options {
+      grid-template-columns: 1fr;
+    }
+
+    .watchtower-option {
+      min-height: 0;
     }
 
     .factor-buttons {

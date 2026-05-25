@@ -29,6 +29,7 @@
   import { xlnFunctions, entityPositions, enqueueEntityInputs } from '../../stores/xlnStore';
   import { toasts } from '../../stores/toastStore';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
+  import { prewarmCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import { getEntityDisplayName, resolveEntityName } from '$lib/utils/entityNaming';
   import { entityAvatar as resolveEntityAvatar } from '$lib/utils/avatar';
@@ -3289,6 +3290,7 @@
     try {
       const env = requireRuntimeEnv(activeEnv, 'open-account');
       const rebalancePolicy = getOpenAccountRebalancePolicyData();
+      await prewarmCounterpartyProfiles(env, [trimmed]);
       await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
           type: 'openAccount' as const,
           data: {

@@ -181,7 +181,19 @@ wait_for_public_production_stack() {
 
   wait_for_http_status "https://xln.finance/" "200" "$deadline" || return 1
   wait_for_http_status "https://xln.finance/app" "200" "$deadline" || return 1
-  wait_for_http_content_type "https://xln.finance/app" "text/html" "$deadline"
+  wait_for_http_content_type "https://xln.finance/app" "text/html" "$deadline" || return 1
+  wait_for_http_json_field \
+    "https://xln.finance/api/tower/healthz" \
+    "return payload?.ok === true && payload?.service === 'xln-watchtower' && typeof payload?.towerId === 'string' && payload.towerId.length > 0;" \
+    "$deadline"
+}
+
+wait_for_watchtower() {
+  local deadline=$((SECONDS + 120))
+  wait_for_http_json_field \
+    "http://127.0.0.1:9100/api/tower/healthz" \
+    "return payload?.ok === true && payload?.service === 'xln-watchtower' && typeof payload?.towerId === 'string' && payload.towerId.length > 0;" \
+    "$deadline"
 }
 
 wait_for_http_json_field() {
@@ -278,6 +290,54 @@ if marker in text:
 PY
   fi
 
+  if ! grep -q 'location /api/tower/' "$available"; then
+    python3 - "$available" <<'PY'
+from pathlib import Path
+import sys
+
+path = Path(sys.argv[1])
+text = path.read_text()
+marker = """    location /api/ {
+        proxy_pass http://127.0.0.1:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+        proxy_read_timeout 86400;
+    }
+
+"""
+block = """    location /api/tower/ {
+        proxy_pass http://127.0.0.1:9100;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400;
+    }
+
+    location /api/watchtower/ {
+        proxy_pass http://127.0.0.1:9100;
+        proxy_http_version 1.1;
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 86400;
+    }
+
+"""
+if marker in text and block not in text:
+    text = text.replace(marker, block + marker, 1)
+    path.write_text(text)
+PY
+  fi
+
   if grep -q 'proxy_pass https://127.0.0.1:8087;' "$available"; then
     echo "[deploy] invalid custody upstream scheme in nginx config: expected http://127.0.0.1:8087" >&2
     return 1
@@ -355,6 +415,7 @@ debug_dump_ports() {
   lsof -nP \
     -iTCP:8545 \
     -iTCP:8080 \
+    -iTCP:9100 \
     -iTCP:8087 \
     -iTCP:8088 \
     -iTCP:18090 \
@@ -404,6 +465,7 @@ dump_production_debug_snapshot() {
   echo "[deploy][debug] ===== production debug snapshot ====="
   debug_dump_http_json "local main health" "http://127.0.0.1:8080/api/health"
   debug_dump_http_json "local main info" "http://127.0.0.1:8080/api/info"
+  debug_dump_http_json "local watchtower health" "http://127.0.0.1:9100/api/tower/healthz"
   debug_dump_http_json "local custody daemon health" "http://127.0.0.1:8088/api/health"
   debug_dump_http_json "local custody me" "http://127.0.0.1:8087/api/me"
   debug_dump_http_json "public health" "https://xln.finance/api/health"
@@ -645,6 +707,7 @@ run_local_deploy() {
 
       lsof -ti TCP:8545 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
       pm2 delete xln-server >/dev/null 2>&1 || true
+      pm2 delete xln-watchtower >/dev/null 2>&1 || true
       pm2 delete xln-custody >/dev/null 2>&1 || true
       pm2 delete anvil >/dev/null 2>&1 || true
 
@@ -654,7 +717,12 @@ run_local_deploy() {
       fi
 
       pm2 delete xln-server >/dev/null 2>&1 || true
+      pm2 delete xln-watchtower >/dev/null 2>&1 || true
       run_or_fail_deploy "failed to start xln-server via pm2" pm2 start scripts/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M
+      run_or_fail_deploy "failed to start xln-watchtower via pm2" pm2 start scripts/start-watchtower.sh --name xln-watchtower --interpreter bash --max-memory-restart 256M
+      if ! wait_for_watchtower; then
+        fail_deploy_with_debug "official watchtower did not become healthy"
+      fi
       if ! wait_for_main_stack; then
         fail_deploy_with_debug "main XLN stack did not become healthy"
       fi

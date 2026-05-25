@@ -23,6 +23,7 @@
   } from '../../utils/onboardingPreferences';
   import { readOnboardingComplete, writeOnboardingComplete } from '../../utils/onboardingState';
   import { normalizeEntityId, hasCounterpartyAccount } from '../../utils/entityReplica';
+  import { prewarmCounterpartyProfiles } from '../../utils/p2pPrefetch';
 
   export let entityId: string = '';
   export let signerId: string = '';
@@ -314,6 +315,8 @@
 
     const candidates = await waitForCandidates();
     if (candidates.length === 0) return 0;
+
+    await prewarmCounterpartyProfiles(env, candidates);
 
     const creditAmount = 10_000n * 10n ** 18n;
     const entityTxs = candidates.map((hubId) => ({

@@ -133,6 +133,7 @@ const GOSSIP_POLL_MS = 250; // Keep interactive account flows responsive without
 const PROFILE_ANNOUNCE_DEBOUNCE_MS = 25;
 const PROFILE_HEARTBEAT_MS = 15_000;
 const GOSSIP_FETCH_RETRY_DELAYS_MS = [40, 80, 160];
+const PENDING_FLUSH_RETRY_MS = 500;
 const INACTIVE_TAB_STANDBY_KEY = 'xln-inactive-tab-standby';
 
 const isInactiveTabStandby = (): boolean => {
@@ -378,7 +379,7 @@ export class RuntimeP2P {
         this.flushPending();
       }
       logSlowBrowserTimer('p2p.retry-interval', startedAt, `queue=${this.pendingByRuntime.size}`);
-    }, 10_000);
+    }, PENDING_FLUSH_RETRY_MS);
   }
 
   private stopRetryLoop() {
@@ -452,6 +453,7 @@ export class RuntimeP2P {
     }
 
     this.ensureRelayConnectionsForEntity(input.entityId);
+    this.prefetchProfilesForInput(input);
 
     const normalizedTargetRuntimeId = normalizeRuntimeId(targetRuntimeId);
     failfastAssert(
@@ -579,7 +581,10 @@ export class RuntimeP2P {
         try {
           const sent = client.sendEntityInput(targetRuntimeId, entry.input, entry.ingressTimestamp);
           if (!sent) remaining.push(entry);
-        } catch {
+        } catch (error) {
+          if (String((error as Error)?.message || error || '').includes('P2P_NO_PUBKEY')) {
+            this.refreshGossip();
+          }
           remaining.push(entry);
         }
       }

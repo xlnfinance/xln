@@ -14,6 +14,7 @@
   import { toasts } from '../../stores/toastStore';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
   import { unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
+  import { prewarmCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
   import { amountToUsd } from '$lib/utils/assetPricing';
   import OrderbookPanel from '../Trading/OrderbookPanel.svelte';
   import SwapPairToolbar from './SwapPairToolbar.svelte';
@@ -1376,6 +1377,7 @@
       const desiredCredit = crossAutoInboundCreditTarget && crossAutoInboundCreditTarget > 0n
         ? crossAutoInboundCreditTarget
         : defaultCreditLimitForToken(wantToken);
+      await prewarmCounterpartyProfiles(env, [target.targetHubEntityId]);
       await enqueueEntityInputs(env, [{
         entityId: target.targetEntityId,
         signerId: targetSignerId,
