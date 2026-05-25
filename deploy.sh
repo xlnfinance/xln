@@ -689,10 +689,17 @@ run_local_deploy() {
       run_or_fail_deploy "failed to enforce nginx site consistency" ensure_production_nginx_site_consistency
       echo "[deploy] resetting production anvil + runtime state"
       mkdir -p db/runtime db/custody data logs
+      pkill -TERM -f 'scripts/start-custody.sh' >/dev/null 2>&1 || true
+      pkill -TERM -f 'runtime/scripts/start-custody-prod.ts' >/dev/null 2>&1 || true
+      sleep 1
+      pkill -KILL -f 'scripts/start-custody.sh' >/dev/null 2>&1 || true
+      pkill -KILL -f 'runtime/scripts/start-custody-prod.ts' >/dev/null 2>&1 || true
       rm -rf db/runtime/prod-main db/runtime/prod-mesh db/custody/prod db-tmp/prod-custody
       rm -f data/anvil-state.json
 
       lsof -ti TCP:8545 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
+      lsof -ti TCP:8087 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
+      lsof -ti TCP:8088 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
       pm2 delete xln-server >/dev/null 2>&1 || true
       pm2 delete xln-watchtower >/dev/null 2>&1 || true
       pm2 delete xln-custody >/dev/null 2>&1 || true
