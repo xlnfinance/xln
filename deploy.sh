@@ -297,20 +297,7 @@ import sys
 
 path = Path(sys.argv[1])
 text = path.read_text()
-marker = """    location /api/ {
-        proxy_pass http://127.0.0.1:8080;
-        proxy_http_version 1.1;
-        proxy_set_header Upgrade $http_upgrade;
-        proxy_set_header Connection 'upgrade';
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
-        proxy_set_header X-Forwarded-Proto $scheme;
-        proxy_cache_bypass $http_upgrade;
-        proxy_read_timeout 86400;
-    }
-
-"""
+marker = "    location /api/ {\n"
 block = """    location /api/tower/ {
         proxy_pass http://127.0.0.1:9100;
         proxy_http_version 1.1;
@@ -332,7 +319,7 @@ block = """    location /api/tower/ {
     }
 
 """
-if marker in text and block not in text:
+if marker in text and "location /api/tower/" not in text:
     text = text.replace(marker, block + marker, 1)
     path.write_text(text)
 PY
