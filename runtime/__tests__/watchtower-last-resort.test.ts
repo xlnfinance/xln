@@ -248,4 +248,86 @@ describe('watchtower delayed last-resort sweep', () => {
     expect(receipts.length).toBe(1);
     expect(receipts[0]?.status).toBe('skipped');
   });
+
+  test('rejects appointment RPC URLs outside the tower allowlist during sweep', async () => {
+    const runtimeWallet = Wallet.createRandom();
+    const towerWallet = Wallet.createRandom();
+    const lookupKey = makeLookupKey('tower:last-resort:ssrf');
+    const tempRoot = join(process.cwd(), '.tmp-tests', `tower-last-resort-ssrf-${Date.now()}`);
+    tempRoots.push(tempRoot);
+    await mkdir(tempRoot, { recursive: true });
+
+    const store = createWatchtowerStore({
+      towerId: 'tower-last-resort-ssrf',
+      dbPath: join(tempRoot, 'tower.level'),
+      towerPrivateKey: towerWallet.privateKey,
+    });
+
+    await store.upsertAppointment({
+      type: 'tower_appointment',
+      version: 1,
+      towerMode: 'delayed_last_resort',
+      lookupKey,
+      slot: 0,
+      bundle: {
+        version: 1,
+        runtimeId: runtimeWallet.address.toLowerCase(),
+        lookupKey,
+        height: 8,
+        createdAt: 1_717_171_719_000,
+        bundleHash: keccak256(toUtf8Bytes('bundle:ssrf')),
+        iv: '0x1234',
+        ciphertext: '0xabcd',
+      },
+      activePayload: {
+        triggerHint: 'chain:31337:acct:ssrf',
+        encryptedRemedy: encodeTowerCounterDisputeRemedy({
+          version: 1,
+          type: 'counter_dispute_remedy',
+          rpcUrl: 'http://169.254.169.254/latest/meta-data',
+          chainId: 31337,
+          depositoryAddress: '0x1111111111111111111111111111111111111111',
+          watchedEntityId: '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa',
+          towerAddress: towerWallet.address.toLowerCase(),
+          lastResortWindowBlocks: 8,
+          appointmentSequence: 10,
+          ownerAuthorizationHanko: '0xbeef',
+          latestProof: {
+            counterentity: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
+            finalNonce: 2,
+            finalProofbody: { offdeltas: [-1], tokenIds: [1], transformers: [] },
+            finalArguments: '0x',
+            sig: '0xcafe',
+          },
+        }),
+        actionKind: 'counter_dispute_only',
+        appointmentSequence: 10,
+        proofNonce: 2,
+        proofBodyHash: '0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd',
+        responseMode: 'last_resort',
+        lastResortWindowBlocks: 8,
+        safetyMarginBlocks: 2,
+      },
+      ownerProof: {
+        runtimeId: runtimeWallet.address.toLowerCase(),
+        signedAt: Date.now(),
+        signature: '0xdead',
+      },
+    });
+
+    const result = await runWatchtowerSweep(store, {
+      towerPrivateKey: towerWallet.privateKey,
+      allowedRpcUrls: ['http://127.0.0.1:8545/'],
+    });
+
+    expect(result).toEqual({
+      scanned: 1,
+      submitted: 0,
+      skipped: 0,
+      errors: 1,
+    });
+    const receipts = await store.listActionReceipts(lookupKey);
+    expect(receipts[0]?.status).toBe('error');
+    expect(receipts[0]?.error).toContain('WATCHTOWER_RPC_URL_NOT_ALLOWED');
+  });
 });

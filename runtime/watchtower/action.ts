@@ -89,6 +89,7 @@ export const decodeTowerCounterDisputeRemedy = (payload: string): TowerCounterDi
 type WatchtowerSweepOptions = {
   lookupKey?: string;
   towerPrivateKey?: string;
+  allowedRpcUrls?: string[];
   now?: () => number;
   txWaitTimeoutMs?: number;
   providerFactory?: (rpcUrl: string, chainId: number) => {
@@ -122,6 +123,41 @@ type WatchtowerSweepOptions = {
       ownerAuthorizationHanko: string,
     ) => Promise<{ hash?: string; wait?: () => Promise<{ blockNumber?: number } | null> }>;
   };
+};
+
+const DEFAULT_ALLOWED_RPC_URLS = [
+  'http://127.0.0.1:8545/',
+  'http://localhost:8545/',
+  'https://xln.finance/rpc',
+];
+
+const normalizeRpcUrl = (value: string): string => {
+  const parsed = new URL(String(value || '').trim());
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    throw new Error(`WATCHTOWER_RPC_URL_SCHEME_NOT_ALLOWED:${parsed.protocol}`);
+  }
+  parsed.hash = '';
+  return parsed.toString();
+};
+
+const resolveAllowedRpcUrls = (override?: string[]): Set<string> => {
+  const configured = override && override.length > 0
+    ? override
+    : String(process.env['XLN_WATCHTOWER_ALLOWED_RPC_URLS'] || '')
+      .split(',')
+      .map(value => value.trim())
+      .filter(Boolean);
+  const source = configured.length > 0 ? configured : DEFAULT_ALLOWED_RPC_URLS;
+  return new Set(source.map(normalizeRpcUrl));
+};
+
+export const assertWatchtowerRpcUrlAllowed = (rpcUrl: string, allowedRpcUrls?: string[]): string => {
+  const normalized = normalizeRpcUrl(rpcUrl);
+  const allowed = resolveAllowedRpcUrls(allowedRpcUrls);
+  if (!allowed.has(normalized)) {
+    throw new Error(`WATCHTOWER_RPC_URL_NOT_ALLOWED:${normalized}`);
+  }
+  return normalized;
 };
 
 const waitForReceiptWithTimeout = async (
@@ -270,7 +306,8 @@ export const runWatchtowerSweep = async (
   let submitted = 0;
   let skipped = 0;
   let errors = 0;
-  const providerFactory = options?.providerFactory || ((rpcUrl: string, chainId: number) => new JsonRpcProvider(rpcUrl, chainId));
+  const customProviderFactory = options?.providerFactory;
+  const providerFactory = customProviderFactory || ((rpcUrl: string, chainId: number) => new JsonRpcProvider(rpcUrl, chainId));
   const contractFactory = options?.contractFactory || ((remedy, wallet, provider) =>
     new Contract(remedy.depositoryAddress, DEPOSITORY_MINIMAL_ABI, wallet.connect(provider as unknown as JsonRpcProvider)));
 
@@ -293,7 +330,10 @@ export const runWatchtowerSweep = async (
         errors += 1;
         continue;
       }
-      const provider = providerFactory(remedy.rpcUrl, remedy.chainId);
+      const rpcUrl = customProviderFactory
+        ? remedy.rpcUrl
+        : assertWatchtowerRpcUrlAllowed(remedy.rpcUrl, options?.allowedRpcUrls);
+      const provider = providerFactory(rpcUrl, remedy.chainId);
       const depository = contractFactory(remedy, towerWallet, provider);
       const acctKey = await depository.accountKey(remedy.watchedEntityId, remedy.latestProof.counterentity) as string;
       const account = await depository._accounts(acctKey) as {

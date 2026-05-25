@@ -18,8 +18,19 @@ export XLN_WATCHTOWER_DB_PATH="${XLN_WATCHTOWER_DB_PATH:-$REPO_ROOT/db/watchtowe
 export XLN_WATCHTOWER_MAX_BYTES="${XLN_WATCHTOWER_MAX_BYTES:-10240}"
 export XLN_WATCHTOWER_MAX_BUNDLES="${XLN_WATCHTOWER_MAX_BUNDLES:-3}"
 export XLN_WATCHTOWER_ID="${XLN_WATCHTOWER_ID:-xln-official-watchtower}"
+export XLN_WATCHTOWER_SWEEP_INTERVAL_MS="${XLN_WATCHTOWER_SWEEP_INTERVAL_MS:-30000}"
+export XLN_WATCHTOWER_ALLOWED_RPC_URLS="${XLN_WATCHTOWER_ALLOWED_RPC_URLS:-http://127.0.0.1:8545/,https://xln.finance/rpc}"
+export XLN_WATCHTOWER_PRIVATE_KEY_FILE="${XLN_WATCHTOWER_PRIVATE_KEY_FILE:-$REPO_ROOT/db/watchtower/private-key}"
 
 mkdir -p "$(dirname "$XLN_WATCHTOWER_DB_PATH")"
+if [ -z "${XLN_WATCHTOWER_PRIVATE_KEY:-}" ]; then
+  mkdir -p "$(dirname "$XLN_WATCHTOWER_PRIVATE_KEY_FILE")"
+  if [ ! -f "$XLN_WATCHTOWER_PRIVATE_KEY_FILE" ]; then
+    umask 077
+    "${HOME}/.bun/bin/bun" -e "const { Wallet } = await import('ethers'); console.log(Wallet.createRandom().privateKey)" > "$XLN_WATCHTOWER_PRIVATE_KEY_FILE"
+  fi
+  export XLN_WATCHTOWER_PRIVATE_KEY="$(tr -d '\r\n' < "$XLN_WATCHTOWER_PRIVATE_KEY_FILE")"
+fi
 xln_kill_by_port "$XLN_WATCHTOWER_PORT" start-watchtower
 
 exec "${HOME}/.bun/bin/bun" runtime/watchtower/standalone-server.ts \
@@ -27,4 +38,5 @@ exec "${HOME}/.bun/bin/bun" runtime/watchtower/standalone-server.ts \
   --port "$XLN_WATCHTOWER_PORT" \
   --db "$XLN_WATCHTOWER_DB_PATH" \
   --quota-bytes "$XLN_WATCHTOWER_MAX_BYTES" \
-  --max-bundles "$XLN_WATCHTOWER_MAX_BUNDLES"
+  --max-bundles "$XLN_WATCHTOWER_MAX_BUNDLES" \
+  --sweep-interval-ms "$XLN_WATCHTOWER_SWEEP_INTERVAL_MS"
