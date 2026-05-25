@@ -19,6 +19,7 @@
     isCommittedAccount,
     isOpeningAccount,
   } from '$lib/utils/entityReplica';
+  import { prewarmCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
   import { compareStableText } from '$lib/utils/stableSort';
   import { RefreshCw, ChevronDown, ChevronUp, Plus, Check, AlertTriangle } from 'lucide-svelte';
 
@@ -301,6 +302,10 @@
       // Default credit amount: 10,000 tokens (with 18 decimals)
       const creditAmount = 10_000n * 10n ** 18n;
       const rebalancePolicy = getOpenAccountRebalancePolicyData();
+
+      // Preload signed gossip/runtime routing metadata first so the initial
+      // openAccount does not sit in the local pending queue waiting for pubkey discovery.
+      await prewarmCounterpartyProfiles(currentEnv, [hub.entityId]);
 
       // Open account WITH credit extension (both in same frame)
       // Frame #1 will have: [add_delta, set_credit_limit] - order matters!

@@ -55,6 +55,7 @@ export interface RecoveryTowerConfig {
 
 export interface RuntimeRecoveryConfig {
   towers?: RecoveryTowerConfig[];
+  useDefaultTowers?: boolean;
   minSuccessfulTowers?: number;
   maxStoredBytes?: number;
   lastKnownStoredBytes?: number;
@@ -81,6 +82,7 @@ type CreateRuntimeOptions = {
   requiresOnboarding?: boolean | undefined;
   devicePassphrase?: string | undefined;
   mnemonic12?: string | undefined;
+  recovery?: RuntimeRecoveryConfig | undefined;
 };
 
 type ImportedJMachineConfig = {
@@ -397,11 +399,11 @@ export const resolveDefaultRecoveryTowerUrls = (options: {
   if (hostname === 'localhost' || hostname === '127.0.0.1') {
     return [];
   }
-  return ['https://tower.xln.finance'];
+  return ['https://xln.finance'];
 };
 
 const defaultRecoveryTowerUrls = (): string[] => {
-  if (typeof window === 'undefined') return ['https://tower.xln.finance'];
+  if (typeof window === 'undefined') return ['https://xln.finance'];
   const w = window as Window & { __XLN_WATCHTOWERS__?: unknown };
   let localUrls: string | null = null;
   try {
@@ -417,6 +419,23 @@ const defaultRecoveryTowerUrls = (): string[] => {
 };
 
 const normalizeTowerBaseUrl = (url: string): string => String(url || '').trim().replace(/\/+$/, '');
+
+const buildDefaultRecoveryTowerConfigs = (): RecoveryTowerConfig[] =>
+  defaultRecoveryTowerUrls().map((url, index) => ({
+    id: `official-${index + 1}`,
+    url: normalizeTowerBaseUrl(url),
+    // The official tower does both jobs: encrypted backup storage and delayed
+    // last-resort counter-dispute. Blind backups are still uploaded for every
+    // configured tower; this mode only opts the same endpoint into the active
+    // rescue appointment channel too.
+    towerMode: 'delayed_last_resort' as const,
+    enabled: true,
+  }));
+
+const buildDefaultRuntimeRecoveryConfig = (): RuntimeRecoveryConfig => ({
+  useDefaultTowers: false,
+  towers: buildDefaultRecoveryTowerConfigs(),
+});
 
 const buildTowerRequestUrl = (towerUrl: string, towerPath: string): string => {
   const normalizedBaseUrl = normalizeTowerBaseUrl(towerUrl);
@@ -449,15 +468,16 @@ const getConfiguredRecoveryTowers = (runtime: Runtime | null | undefined): Recov
       enabled: tower.enabled !== false,
     }))
     .filter((tower) => !!tower.url && tower.enabled !== false);
-  const fallback = defaultRecoveryTowerUrls().map((url, index) => ({
-    id: `default-${index + 1}`,
-    url: normalizeTowerBaseUrl(url),
-    towerMode: 'blind_backup' as const,
-    enabled: true,
-  }));
+  const fallback = runtime?.recovery?.useDefaultTowers === false
+    ? []
+    : buildDefaultRecoveryTowerConfigs();
   const deduped = new Map<string, RecoveryTowerConfig>();
-  for (const tower of [...explicit, ...fallback]) {
+  for (const tower of explicit) {
     if (!tower.url) continue;
+    deduped.set(tower.url, tower);
+  }
+  for (const tower of fallback) {
+    if (!tower.url || deduped.has(tower.url)) continue;
     deduped.set(tower.url, tower);
   }
   return [...deduped.values()];
@@ -470,7 +490,7 @@ export async function fetchTowerServerInfo(towerUrl: string): Promise<TowerServe
   if (cached && now - cached.fetchedAt < RECOVERY_TOWER_INFO_TTL_MS) {
     return cached.info;
   }
-  const response = await fetch(buildTowerRequestUrl(normalizedUrl, '/'), {
+  const response = await fetch(buildTowerRequestUrl(normalizedUrl, '/api/tower/healthz'), {
     method: 'GET',
     headers: { accept: 'application/json' },
   });
@@ -2256,6 +2276,7 @@ export const vaultOperations = {
       activeSignerIndex: 0,
       loginType,
       requiresOnboarding,
+      recovery: options.recovery || buildDefaultRuntimeRecoveryConfig(),
       createdAt: Date.now()
     };
     const previousActiveRuntimeId = currentState.activeRuntimeId;

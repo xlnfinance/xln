@@ -50,7 +50,7 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
       const url = new URL(req.url);
       const pathname = url.pathname;
 
-      if (pathname === '/' || pathname === '/healthz') {
+      if (pathname === '/' || pathname === '/healthz' || pathname === '/api/tower/healthz') {
         const stats = await store.getStats();
         return new Response(JSON.stringify({
           ok: true,

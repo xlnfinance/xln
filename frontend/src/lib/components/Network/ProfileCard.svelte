@@ -4,6 +4,7 @@
   import type { Profile as GossipProfile } from '@xln/runtime/xln-api';
   import { getOpenAccountRebalancePolicyData } from '$lib/utils/onboardingPreferences';
   import { hasCounterpartyAccount, normalizeEntityId } from '$lib/utils/entityReplica';
+  import { prewarmCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
 
   export let profile: GossipProfile;
 
@@ -58,6 +59,8 @@
       if (!env) {
         throw new Error('XLN environment not ready');
       }
+
+      await prewarmCounterpartyProfiles(env, [targetEntityId]);
 
       // Open bilateral account via EntityTx (never craft raw accountInput from UI)
       const rebalancePolicy = getOpenAccountRebalancePolicyData();

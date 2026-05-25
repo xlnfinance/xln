@@ -3,6 +3,7 @@ const ALLOWED_LOCAL_HOSTS = new Set(['127.0.0.1', 'localhost']);
 const isAllowedTowerPath = (path: string): boolean =>
   path === '/'
   || path === '/healthz'
+  || path === '/api/tower/healthz'
   || path === '/api/tower/restore'
   || path === '/api/tower/appointment'
   || path.startsWith('/api/tower/receipt/');
