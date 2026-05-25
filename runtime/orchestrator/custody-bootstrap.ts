@@ -362,6 +362,28 @@ const isEntityRouteableAcrossHubs = (
   return true;
 };
 
+const isCounterpartyRouteableFromHubs = (
+  entities: DebugEntitySummary[],
+  counterpartyId: string,
+  hubEntityIds: string[],
+  tokenIds: readonly number[],
+): boolean => {
+  const counterpartyNorm = counterpartyId.toLowerCase();
+  for (const hubEntityId of hubEntityIds) {
+    const hubEntry = entities.find(entry => toLowerId(entry.entityId) === hubEntityId);
+    if (!hubEntry) return false;
+    let tokenReady = false;
+    for (const tokenId of tokenIds) {
+      if (hasAccountCapacityForToken(hubEntry, counterpartyNorm, tokenId)) {
+        tokenReady = true;
+        break;
+      }
+    }
+    if (!tokenReady) return false;
+  }
+  return true;
+};
+
 export const waitForCustodyRouteableState = async (
   apiBaseUrl: string,
   entityId: string,
@@ -376,7 +398,13 @@ export const waitForCustodyRouteableState = async (
   while (Date.now() - startedAt < timeoutMs) {
     const entities = await fetchDebugEntities(apiBaseUrl);
     const custodyEntry = entities.find(entry => toLowerId(entry.entityId) === normalizedEntityId);
-    if (custodyEntry && isEntityRouteableAcrossHubs(custodyEntry, normalizedHubIds, tokenIds)) {
+    if (
+      custodyEntry &&
+      (
+        isEntityRouteableAcrossHubs(custodyEntry, normalizedHubIds, tokenIds) ||
+        isCounterpartyRouteableFromHubs(entities, normalizedEntityId, normalizedHubIds, tokenIds)
+      )
+    ) {
       return custodyEntry;
     }
 
