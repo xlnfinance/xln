@@ -1212,26 +1212,47 @@ const runReset = async (): Promise<void> => {
     await waitForHubBaseline();
     finishTiming('reset_wait_hubs', waitStartedAt);
 
+    let marketMakerBootstrapError: unknown = null;
+    const marketMakerReady = args.mmEnabled ? (async (): Promise<void> => {
+      const marketMakerStartedAt = startTiming('reset_market_maker');
+      try {
+        await spawnMarketMaker();
+        await waitForMarketMakerReady();
+      } catch (error) {
+        marketMakerBootstrapError = error;
+      } finally {
+        finishTiming('reset_market_maker', marketMakerStartedAt);
+      }
+    })() : null;
+
+    let custodyBootstrapError: unknown = null;
     if (args.custodyEnabled) {
-      custodySupport = await startCustodySupport({
-        apiBaseUrl: `http://${args.host}:${args.port}`,
-        daemonPort: args.custodyDaemonPort,
-        custodyPort: args.custodyPort,
-        relayUrl,
-        rpcUrl: args.rpcUrl,
-        walletUrl: args.walletUrl,
-        dbRoot: args.custodyDbRoot,
-        seed: 'xln-mesh-custody-seed',
-        signerLabel: 'custody-mesh-1',
-        profileName: 'Custody',
-        jurisdictionId: 'arrakis',
-      });
+      const custodyStartedAt = startTiming('reset_custody');
+      try {
+        custodySupport = await startCustodySupport({
+          apiBaseUrl: `http://${args.host}:${args.port}`,
+          daemonPort: args.custodyDaemonPort,
+          custodyPort: args.custodyPort,
+          relayUrl,
+          rpcUrl: args.rpcUrl,
+          walletUrl: args.walletUrl,
+          dbRoot: args.custodyDbRoot,
+          seed: 'xln-mesh-custody-seed',
+          signerLabel: 'custody-mesh-1',
+          profileName: 'Custody',
+          jurisdictionId: 'arrakis',
+        });
+      } catch (error) {
+        custodyBootstrapError = error;
+        console.error('[MESH] custody bootstrap failed; continuing market maker startup before failing reset:', serializeError(error));
+      } finally {
+        finishTiming('reset_custody', custodyStartedAt);
+      }
     }
 
-    if (args.mmEnabled) {
-      await spawnMarketMaker();
-      await waitForMarketMakerReady();
-    }
+    if (marketMakerReady) await marketMakerReady;
+    if (marketMakerBootstrapError) throw marketMakerBootstrapError;
+    if (custodyBootstrapError) throw custodyBootstrapError;
 
     finishTiming('reset_total', resetTotalStartedAt);
     resetState.completedAt = Date.now();

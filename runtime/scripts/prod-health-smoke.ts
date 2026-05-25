@@ -121,7 +121,9 @@ const main = async (): Promise<void> => {
   }, null, 2));
 };
 
-main().catch((error) => {
-  console.error('❌ prod-health-smoke failed:', error instanceof Error ? error.stack || error.message : String(error));
-  process.exit(1);
-});
+if (import.meta.main) {
+  main().catch((error) => {
+    console.error('❌ prod-health-smoke failed:', error instanceof Error ? error.stack || error.message : String(error));
+    process.exit(1);
+  });
+}
