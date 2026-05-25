@@ -665,6 +665,13 @@ Exit tests:
 - tower receipt signature verifies;
 - restore picks highest valid height.
 
+Current repo status:
+
+- standalone `runtime/watchtower/*` service exists;
+- blind backup uploads/restores are live and tested;
+- backup barrier defers remote side effects until backup succeeds;
+- free-tier byte quota is enforced per lookup key.
+
 ### Phase C: Delayed Last-resort Watchtower
 
 Files/modules:
@@ -684,6 +691,14 @@ Exit tests:
 - same-proof tower finalization is rejected;
 - tower cannot spend user funds;
 - action remains valid after user is offline for the dispute window.
+
+Current repo status:
+
+- guarded `watchtowerCounterDispute(...)` exists in `Depository.sol`;
+- early tower action reverts on-chain;
+- wrong tower / missing newer proof is rejected;
+- standalone watchtower sweep engine exists in `runtime/watchtower/action.ts`;
+- service-side active appointment auto-generation from wallet/runtime still needs a dedicated uploader path.
 
 ### Phase D: Multi-tower and Incentives
 

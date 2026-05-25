@@ -23,7 +23,9 @@ If you only have 1-2 hours, read files in this order:
 7. `storage/README.md`
    Snapshot/WAL/materialization/canonical-hash map.
 8. `server/README.md`
-   Public API surface and recovery/watchtower endpoints.
+   Public API surface for runtime, relay, discovery, control, and faucet.
+9. `watchtower/README.md`
+   Standalone recovery/watchtower API service backed by LevelDB.
 
 ## Core Domains
 

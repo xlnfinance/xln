@@ -309,6 +309,19 @@ export const registerEnvChangeCallback = (env: Env, callback: (env: Env) => void
   return () => state.envChangeCallbacks?.delete(callback);
 };
 
+export const registerRecoveryBackupBarrier = (
+  env: Env,
+  callback: (env: Env, info: { height: number; remoteOutputCount: number; jInputCount: number }) => Promise<void>,
+): (() => void) => {
+  const state = ensureRuntimeState(env);
+  state.recoveryBackupBarrier = callback;
+  return () => {
+    if (state.recoveryBackupBarrier === callback) {
+      state.recoveryBackupBarrier = null;
+    }
+  };
+};
+
 const ensureRuntimeConfig = (env: Env): NonNullable<Env['runtimeConfig']> => {
   if (!env.runtimeConfig) {
     env.runtimeConfig = {
@@ -338,6 +351,8 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
       lastP2PConfig: null,
       directEntityInputDispatch: null,
       canUseConnectedRelayFallback: null,
+      recoveryBackupBarrier: null,
+      pendingCommittedJOutbox: [],
     };
   }
   if (!env.runtimeState.entityRuntimeHints) {
@@ -1891,7 +1906,8 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
     let appliedRuntimeInputForPersistence: RuntimeInput | undefined;
 
     let entityOutbox: RoutedEntityInput[] = [];
-    let jOutbox: JInput[] = [];
+    let jOutbox: JInput[] = [...(state.pendingCommittedJOutbox ?? [])];
+    state.pendingCommittedJOutbox = [];
     const changedEntityIds = new Set<string>();
     const getLocallySignableEntityIds = (): Set<string> => {
       const localEntityIds = new Set<string>();
@@ -1953,7 +1969,7 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
           );
         }
         entityOutbox = result.entityOutbox;
-        jOutbox = result.jOutbox;
+        jOutbox = [...jOutbox, ...result.jOutbox];
         appliedRuntimeInputForPersistence = result.appliedRuntimeInput;
         for (const runtimeTx of runtimeInput.runtimeTxs) {
           if (runtimeTx.type === 'importReplica') {
@@ -2076,6 +2092,37 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
       }
     } else {
       clearPendingAuditEvents(env);
+    }
+
+    const recoveryBarrier = state.recoveryBackupBarrier;
+    if (recoveryBarrier && (remoteOutputs.length > 0 || jOutbox.length > 0)) {
+      try {
+        await recoveryBarrier(env, {
+          height: env.height,
+          remoteOutputCount: remoteOutputs.length,
+          jInputCount: jOutbox.length,
+        });
+      } catch (error) {
+        const heldRemoteOutputs = remoteOutputs.map(({ output }) => output as RoutedEntityInput);
+        env.pendingNetworkOutputs = rescheduleDeferredOutputs(
+          env,
+          readyPendingOutputs,
+          [...heldRemoteOutputs, ...deferredOutputs],
+          waitingPendingOutputs,
+          outputRoutingDeps,
+        );
+        if (jOutbox.length > 0) {
+          state.pendingCommittedJOutbox = [...(state.pendingCommittedJOutbox ?? []), ...jOutbox];
+        }
+        env.warn('system', 'RECOVERY_BACKUP_BARRIER_DEFERRED', {
+          height: env.height,
+          remoteOutputCount: remoteOutputs.length,
+          jInputCount: jOutbox.length,
+          reason: error instanceof Error ? error.message : String(error),
+        });
+        notifyEnvChange(env);
+        return env;
+      }
     }
 
     // === SIDE EFFECTS (safe to fail — bilateral consensus retries) ===
@@ -2990,6 +3037,7 @@ export {
 } from './recovery/bundle';
 export {
   buildTowerAppointmentOwnerMessage,
+  computeWatchtowerCounterDisputeAuthorizationHash,
   decryptRuntimeRecoveryBundle,
   deriveRuntimeRecoveryLookupKey,
   encryptRuntimeRecoveryBundle,

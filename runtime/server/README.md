@@ -8,7 +8,6 @@ This folder owns the runtime HTTP/WS API surface.
 - hub discovery and public entity lookup
 - faucet/control endpoints
 - RPC proxy safety
-- tower/recovery backup surface
 
 ## Main files
 
@@ -24,8 +23,6 @@ This folder owns the runtime HTTP/WS API surface.
   Public discovery helpers.
 - `offchain-faucet.ts`, `reserve-faucet.ts`
   Testnet bootstrap endpoints.
-- `recovery-tower.ts`, `tower-backup.ts`
-  Blind-backup recovery vault endpoints and local tower storage.
 
 ## Called by
 

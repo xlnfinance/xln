@@ -11,7 +11,9 @@ import type {
   RuntimeRecoveryBundleV1,
   RuntimeRecoveryMetaV1,
   RuntimeRecoverySignerV1,
+  TowerModeV1,
   TowerAppointmentV1,
+  TowerReceiptV1,
   XLNModule,
 } from '@xln/runtime/xln-api';
 import { runtimeOperations, runtimes, activeRuntimeId } from './runtimeStore';
@@ -42,6 +44,21 @@ export interface Signer {
   jurisdiction?: string; // Preferred jurisdiction for this signer/runtime lane
 }
 
+export interface RecoveryTowerConfig {
+  id?: string;
+  url: string;
+  towerMode?: TowerModeV1;
+  enabled?: boolean;
+}
+
+export interface RuntimeRecoveryConfig {
+  towers?: RecoveryTowerConfig[];
+  minSuccessfulTowers?: number;
+  maxStoredBytes?: number;
+  lastKnownStoredBytes?: number;
+  lastQuotaWarningAt?: number;
+}
+
 export interface Runtime {
   id: string; // signer EOA (0xABCD...)
   label: string; // user-chosen name ("MyWallet")
@@ -52,6 +69,7 @@ export interface Runtime {
   activeSignerIndex: number;
   loginType?: 'manual' | 'demo';
   requiresOnboarding?: boolean;
+  recovery?: RuntimeRecoveryConfig;
   createdAt: number;
   env?: Env | null;
 }
@@ -152,6 +170,7 @@ let resumeRefreshPromise: Promise<boolean> | null = null;
 let runtimeSyncChannel: BroadcastChannel | null = null;
 let runtimeResumeTrigger: (() => void) | null = null;
 const runtimeEnvChangeUnsubscribers = new Map<string, () => void>();
+const runtimeRecoveryBarrierUnsubscribers = new Map<string, () => void>();
 const runtimeRecoveryUploadTimers = new Map<string, ReturnType<typeof setTimeout>>();
 const runtimeRecoveryUploadMeta = new Map<string, { lastUploadedHeight: number; lastBundleHash: string | null }>();
 
@@ -176,7 +195,7 @@ type RuntimeP2PHandle = {
 
 type TowerRestorePayload = {
   ok: boolean;
-  receipt?: unknown;
+  receipt?: TowerReceiptV1;
   bundle?: EncryptedRuntimeRecoveryBundleV1;
   error?: string;
 };
@@ -318,8 +337,76 @@ function getSignerDerivationIndex(signer: Signer | null | undefined): number {
   return Number.isInteger(signer?.derivationIndex) ? Number(signer!.derivationIndex) : Number(signer?.index ?? 0);
 }
 
-const recoveryApiBaseOrigin = (): string =>
-  typeof window !== 'undefined' ? window.location.origin : 'https://xln.finance';
+const parseRecoveryTowerUrls = (value: unknown): string[] => {
+  if (Array.isArray(value)) {
+    return value
+      .map((entry) => {
+        if (typeof entry === 'string') return entry;
+        if (entry && typeof entry === 'object' && typeof (entry as { url?: unknown }).url === 'string') {
+          return String((entry as { url: string }).url);
+        }
+        return '';
+      })
+      .map((url) => String(url || '').trim())
+      .filter(Boolean);
+  }
+  if (typeof value === 'string') {
+    const trimmed = value.trim();
+    if (!trimmed) return [];
+    try {
+      return parseRecoveryTowerUrls(JSON.parse(trimmed));
+    } catch {
+      return trimmed.split(',').map((entry) => entry.trim()).filter(Boolean);
+    }
+  }
+  return [];
+};
+
+const defaultRecoveryTowerUrls = (): string[] => {
+  if (typeof window === 'undefined') return ['https://tower.xln.finance'];
+  const w = window as Window & { __XLN_WATCHTOWERS__?: unknown };
+  const globalUrls = parseRecoveryTowerUrls(w.__XLN_WATCHTOWERS__);
+  if (globalUrls.length > 0) return globalUrls;
+  try {
+    const local = localStorage.getItem('xln-watchtower-urls');
+    const localUrls = parseRecoveryTowerUrls(local);
+    if (localUrls.length > 0) return localUrls;
+  } catch {
+    // Recovery should not fail because local tower preferences are unreadable.
+  }
+  const host = window.location.hostname;
+  if (host === 'localhost' || host === '127.0.0.1') {
+    return ['http://127.0.0.1:9100'];
+  }
+  return ['https://tower.xln.finance'];
+};
+
+const normalizeTowerBaseUrl = (url: string): string => String(url || '').trim().replace(/\/+$/, '');
+
+const getConfiguredRecoveryTowers = (runtime: Runtime | null | undefined): RecoveryTowerConfig[] => {
+  const explicit = (runtime?.recovery?.towers || [])
+    .map((tower) => ({
+      ...tower,
+      url: normalizeTowerBaseUrl(tower.url),
+      towerMode: (tower.towerMode === 'active_watchtower' || tower.towerMode === 'delayed_last_resort'
+        ? tower.towerMode
+        : 'blind_backup') as TowerModeV1,
+      enabled: tower.enabled !== false,
+    }))
+    .filter((tower) => !!tower.url && tower.enabled !== false);
+  const fallback = defaultRecoveryTowerUrls().map((url, index) => ({
+    id: `default-${index + 1}`,
+    url: normalizeTowerBaseUrl(url),
+    towerMode: 'blind_backup' as const,
+    enabled: true,
+  }));
+  const deduped = new Map<string, RecoveryTowerConfig>();
+  for (const tower of [...explicit, ...fallback]) {
+    if (!tower.url) continue;
+    deduped.set(tower.url, tower);
+  }
+  return [...deduped.values()];
+};
 
 const buildRuntimeRecoverySigners = (runtime: Runtime): RuntimeRecoverySignerV1[] =>
   (runtime.signers || [])
@@ -429,23 +516,72 @@ async function tryRestoreRuntimeEnvFromTower(
   if (!runtimeId || !runtime.seed) return null;
 
   const lookupKey = xln.deriveRuntimeRecoveryLookupKey(runtimeId, runtime.seed);
-  const response = await fetch(new URL('/api/tower/restore', recoveryApiBaseOrigin()), {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ lookupKey }),
+  const towers = getConfiguredRecoveryTowers(runtime);
+  const candidates: Array<{
+    bundle: RuntimeRecoveryBundleV1;
+    receipt?: TowerReceiptV1;
+    towerUrl: string;
+  }> = [];
+  const errors: string[] = [];
+
+  for (const tower of towers) {
+    try {
+      const response = await fetch(new URL('/api/tower/restore', `${tower.url}/`), {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ lookupKey }),
+      });
+      if (response.status === 404) continue;
+      if (!response.ok) {
+        errors.push(`${tower.url}:HTTP_${response.status}`);
+        continue;
+      }
+      const payload = await response.json() as TowerRestorePayload;
+      if (!payload.ok || !payload.bundle) {
+        if (payload.error === 'TOWER_BUNDLE_NOT_FOUND') continue;
+        errors.push(`${tower.url}:${String(payload.error || 'unknown')}`);
+        continue;
+      }
+      const bundle = await xln.decryptRuntimeRecoveryBundle(payload.bundle, runtime.seed);
+      candidates.push({
+        bundle,
+        ...(payload.receipt ? { receipt: payload.receipt } : {}),
+        towerUrl: tower.url,
+      });
+    } catch (error) {
+      errors.push(`${tower.url}:${error instanceof Error ? error.message : String(error)}`);
+    }
+  }
+
+  if (candidates.length === 0) {
+    if (errors.length > 0) {
+      throw new Error(`[VaultStore] Tower restore failed for ${runtimeId.slice(0, 12)}: ${errors.join(' | ')}`);
+    }
+    return null;
+  }
+
+  candidates.sort((left, right) => {
+    if (right.bundle.runtimeHeight !== left.bundle.runtimeHeight) {
+      return right.bundle.runtimeHeight - left.bundle.runtimeHeight;
+    }
+    if (right.bundle.createdAt !== left.bundle.createdAt) {
+      return right.bundle.createdAt - left.bundle.createdAt;
+    }
+    return (right.receipt?.sequence || 0) - (left.receipt?.sequence || 0);
   });
-  if (response.status === 404) return null;
-  if (!response.ok) {
-    throw new Error(`[VaultStore] Tower restore failed for ${runtimeId.slice(0, 12)}: HTTP ${response.status}`);
-  }
 
-  const payload = await response.json() as TowerRestorePayload;
-  if (!payload.ok || !payload.bundle) {
-    if (payload.error === 'TOWER_BUNDLE_NOT_FOUND') return null;
-    throw new Error(`[VaultStore] Tower restore rejected for ${runtimeId.slice(0, 12)}: ${String(payload.error || 'unknown')}`);
+  const best = candidates[0]!;
+  const bundle = best.bundle;
+  if (candidates.length > 1) {
+    const conflictingSameHeight = candidates.some((candidate) =>
+      candidate !== best
+      && candidate.bundle.runtimeHeight === best.bundle.runtimeHeight
+      && candidate.bundle.checkpointHash !== best.bundle.checkpointHash,
+    );
+    if (conflictingSameHeight) {
+      console.warn(`[VaultStore] Tower restore conflict detected for ${runtimeId.slice(0, 12)}; choosing highest valid bundle from ${best.towerUrl}`);
+    }
   }
-
-  const bundle = await xln.decryptRuntimeRecoveryBundle(payload.bundle, runtime.seed);
   applyRecoveryBundleMetadata(runtime, bundle);
   const restoredEnv = await xln.restoreEnvFromCheckpointSnapshot(bundle.checkpoint, {
     runtimeSeed: runtime.seed,
@@ -474,6 +610,8 @@ async function uploadRuntimeRecoverySnapshot(
   if (!runtime?.seed) return;
   if (Number(env.height || 0) <= 0) return;
   if (!(env.eReplicas instanceof Map) || env.eReplicas.size === 0) return;
+  const towers = getConfiguredRecoveryTowers(runtime);
+  if (towers.length === 0) return;
 
   const previous = runtimeRecoveryUploadMeta.get(normalizedRuntimeId);
   if (previous && Number(env.height || 0) < previous.lastUploadedHeight) return;
@@ -492,16 +630,21 @@ async function uploadRuntimeRecoverySnapshot(
   const signedAt = Date.now();
   const message = xln.buildTowerAppointmentOwnerMessage(
     normalizedRuntimeId,
+    'blind_backup',
     encrypted.lookupKey,
+    0,
     encrypted.bundleHash,
     encrypted.height,
     signedAt,
+    undefined,
   );
   const signature = await new Wallet(derivePrivateKey(runtime.seed, 0)).signMessage(message);
   const appointment: TowerAppointmentV1 = {
     type: 'tower_appointment',
     version: 1,
+    towerMode: 'blind_backup',
     lookupKey: encrypted.lookupKey,
+    slot: 0,
     bundle: encrypted,
     ownerProof: {
       runtimeId: normalizedRuntimeId,
@@ -510,22 +653,52 @@ async function uploadRuntimeRecoverySnapshot(
     },
   };
 
-  const response = await fetch(new URL('/api/tower/appointment', recoveryApiBaseOrigin()), {
-    method: 'PUT',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify(appointment),
-  });
-  if (!response.ok) {
-    throw new Error(`[VaultStore] Tower appointment failed for ${normalizedRuntimeId.slice(0, 12)}: HTTP ${response.status}`);
+  const minSuccessfulTowers = Math.max(1, Math.floor(Number(runtime.recovery?.minSuccessfulTowers ?? 1)));
+  let successfulTowers = 0;
+  const errors: string[] = [];
+  let maxObservedStoredBytes = runtime.recovery?.lastKnownStoredBytes ?? 0;
+
+  for (const tower of towers) {
+    try {
+      const response = await fetch(new URL('/api/tower/appointment', `${tower.url}/`), {
+        method: 'PUT',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify(appointment),
+      });
+      const payload = await response.json() as { ok: boolean; error?: string; receipt?: TowerReceiptV1 };
+      if (!response.ok || !payload.ok) {
+        const errorText = String(payload.error || `HTTP_${response.status}`);
+        errors.push(`${tower.url}:${errorText}`);
+        if (errorText.startsWith('TOWER_QUOTA_EXCEEDED')) {
+          const nextRecovery = runtime.recovery || {};
+          runtime.recovery = {
+            ...nextRecovery,
+            lastQuotaWarningAt: Date.now(),
+          };
+          toasts.warning('Recovery backup quota exceeded. Runtime state is larger than the free tower allowance.', 8_000);
+        }
+        continue;
+      }
+      successfulTowers += 1;
+      maxObservedStoredBytes = Math.max(maxObservedStoredBytes, Number(payload.receipt?.storedBytes || 0));
+    } catch (error) {
+      errors.push(`${tower.url}:${error instanceof Error ? error.message : String(error)}`);
+    }
   }
-  const payload = await response.json() as { ok: boolean; error?: string };
-  if (!payload.ok) {
-    throw new Error(`[VaultStore] Tower appointment rejected for ${normalizedRuntimeId.slice(0, 12)}: ${String(payload.error || 'unknown')}`);
+
+  runtime.recovery = {
+    ...(runtime.recovery || {}),
+    towers,
+    lastKnownStoredBytes: maxObservedStoredBytes,
+  };
+  if (successfulTowers < minSuccessfulTowers) {
+    throw new Error(`[VaultStore] Tower appointment failed for ${normalizedRuntimeId.slice(0, 12)}: ${errors.join(' | ') || 'no tower accepted backup'}`);
   }
   runtimeRecoveryUploadMeta.set(normalizedRuntimeId, {
     lastUploadedHeight: encrypted.height,
     lastBundleHash: encrypted.bundleHash,
   });
+  persistRuntimeMetadataSnapshot();
 }
 
 function scheduleRuntimeRecoveryUpload(
@@ -983,9 +1156,15 @@ function unregisterRuntimeEnvChange(runtimeId: string): void {
   const normalizedRuntimeId = normalizeRuntimeId(runtimeId);
   if (!normalizedRuntimeId) return;
   const unsubscribe = runtimeEnvChangeUnsubscribers.get(normalizedRuntimeId);
-  if (!unsubscribe) return;
-  runtimeEnvChangeUnsubscribers.delete(normalizedRuntimeId);
-  unsubscribe();
+  if (unsubscribe) {
+    runtimeEnvChangeUnsubscribers.delete(normalizedRuntimeId);
+    unsubscribe();
+  }
+  const recoveryBarrierUnsub = runtimeRecoveryBarrierUnsubscribers.get(normalizedRuntimeId);
+  if (recoveryBarrierUnsub) {
+    runtimeRecoveryBarrierUnsubscribers.delete(normalizedRuntimeId);
+    recoveryBarrierUnsub();
+  }
   const uploadTimer = runtimeRecoveryUploadTimers.get(normalizedRuntimeId);
   if (uploadTimer) {
     clearTimeout(uploadTimer);
@@ -1005,6 +1184,14 @@ function registerRuntimeEnvChange(
   }
   unregisterRuntimeEnvChange(normalizedRuntimeId);
   if (typeof xln.registerEnvChangeCallback !== 'function') return;
+  if (typeof xln.registerRecoveryBackupBarrier === 'function') {
+    runtimeRecoveryBarrierUnsubscribers.set(
+      normalizedRuntimeId,
+      xln.registerRecoveryBackupBarrier(runtimeEnv, async (backupEnv) => {
+        await uploadRuntimeRecoverySnapshot(normalizedRuntimeId, unwrapLiveRuntimeEnv(backupEnv) ?? backupEnv, xln);
+      }),
+    );
+  }
 
   const onEnvChange = (nextEnv: Env): void => {
     runtimeOperations.updateRuntimeEnv(normalizedRuntimeId, nextEnv);

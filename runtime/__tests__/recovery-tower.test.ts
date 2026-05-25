@@ -21,8 +21,9 @@ import {
 } from '../recovery/crypto';
 import type { TowerAppointmentV1 } from '../recovery/types';
 import { buildRuntimeCheckpointSnapshot } from '../wal';
-import { createTowerBackupStore } from '../server/tower-backup';
-import { handleRecoveryDiscover, handleTowerAppointment, handleTowerRestore } from '../server/recovery-tower';
+import { computePersistedEnvStateHash } from '../wal/hash';
+import { createWatchtowerStore } from '../watchtower/store';
+import { handleRecoveryDiscover, handleTowerAppointment, handleTowerRestore } from '../watchtower/http';
 import type { JReplica, JurisdictionConfig } from '../types';
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -56,11 +57,11 @@ const installJurisdiction = (env: ReturnType<typeof createEmptyEnv>): Jurisdicti
 const buildRuntimeEnv = async () => {
   const runtimeSeed = 'recovery tower runtime seed';
   runtimeCounter += 1;
-  const wallet = new Wallet(`0x${runtimeCounter.toString(16).padStart(64, '0')}`);
+  const wallet = Wallet.createRandom();
   const runtimeId = wallet.address.toLowerCase();
   const env = createEmptyEnv(runtimeSeed);
   env.runtimeId = runtimeId;
-  env.dbNamespace = runtimeId;
+  env.dbNamespace = `${runtimeId}-${Date.now()}-${runtimeCounter}`;
   env.quietRuntimeLogs = true;
 
   const jurisdiction = installJurisdiction(env);
@@ -120,11 +121,11 @@ describe('runtime recovery tower', () => {
       runtimeId,
     });
 
-    const originalCheckpointHash = computeRuntimeRecoveryCheckpointHash(buildRuntimeCheckpointSnapshot(env));
-    const restoredCheckpointHash = computeRuntimeRecoveryCheckpointHash(buildRuntimeCheckpointSnapshot(restoredEnv));
+    const originalPersistedHash = computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(env));
+    const restoredPersistedHash = computePersistedEnvStateHash(buildRuntimeCheckpointSnapshot(restoredEnv));
 
     expect(decrypted.checkpointHash).toBe(bundle.checkpointHash);
-    expect(restoredCheckpointHash).toBe(originalCheckpointHash);
+    expect(restoredPersistedHash).toBe(originalPersistedHash);
     expect(restoredEnv.runtimeId).toBe(runtimeId);
     expect(restoredEnv.height).toBe(env.height);
     expect(restoredEnv.eReplicas.size).toBe(env.eReplicas.size);
@@ -155,17 +156,22 @@ describe('runtime recovery tower', () => {
     const signature = await wallet.signMessage(
       buildTowerAppointmentOwnerMessage(
         runtimeId,
+        'blind_backup',
         encrypted.lookupKey,
+        0,
         encrypted.bundleHash,
         encrypted.height,
         signedAt,
+        undefined,
       ),
     );
 
     const appointment: TowerAppointmentV1 = {
       type: 'tower_appointment',
       version: 1,
+      towerMode: 'blind_backup',
       lookupKey: encrypted.lookupKey,
+      slot: 0,
       bundle: encrypted,
       ownerProof: {
         runtimeId,
@@ -177,20 +183,17 @@ describe('runtime recovery tower', () => {
     const tempRoot = join(process.cwd(), '.tmp-tests', `tower-${Date.now()}`);
     rmSync(tempRoot, { recursive: true, force: true });
     mkdirSync(tempRoot, { recursive: true });
-    const store = createTowerBackupStore({
+    const store = createWatchtowerStore({
       towerId: 'tower-test',
-      dir: join(tempRoot, 'bundles'),
-      complaintLogPath: join(tempRoot, 'complaints.jsonl'),
+      dbPath: join(tempRoot, 'tower.level'),
       now: () => 1000,
     });
-    const headers = { 'content-type': 'application/json' };
 
     const appointmentResponse = await handleTowerAppointment(
       new Request('http://xln.test/api/tower/appointment', {
         method: 'PUT',
         body: JSON.stringify(appointment),
       }),
-      headers,
       store,
     );
     const appointmentPayload = deserializeTaggedJson<{ ok: boolean; receipt?: { lookupKey: string; height: number } }>(
@@ -205,7 +208,6 @@ describe('runtime recovery tower', () => {
         method: 'POST',
         body: JSON.stringify({ lookupKey: encrypted.lookupKey }),
       }),
-      headers,
       store,
     );
     const discoverPayload = deserializeTaggedJson<{ ok: boolean; available: boolean }>(
@@ -219,7 +221,6 @@ describe('runtime recovery tower', () => {
         method: 'POST',
         body: JSON.stringify({ lookupKey: encrypted.lookupKey }),
       }),
-      headers,
       store,
     );
     const restorePayload = deserializeTaggedJson<{ ok: boolean; bundle?: typeof encrypted }>(
@@ -231,5 +232,6 @@ describe('runtime recovery tower', () => {
     const restoredBundle = await decryptRuntimeRecoveryBundle(restorePayload.bundle!, runtimeSeed);
     expect(restoredBundle.checkpointHash).toBe(bundle.checkpointHash);
     expect(serializeTaggedJson(restoredBundle.signers)).toBe(serializeTaggedJson(bundle.signers));
+    await store.close();
   });
 });

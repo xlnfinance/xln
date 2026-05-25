@@ -189,8 +189,17 @@ contract Depository is ReentrancyGuardLite {
 
   /// @notice Domain separator used when hashing Hanko payloads for verification.
   bytes32 public constant DOMAIN_SEPARATOR = keccak256("XLN_DEPOSITORY_HANKO_V1");
+  bytes32 public constant WATCHTOWER_COUNTER_DISPUTE_DOMAIN_SEPARATOR =
+    keccak256("XLN_WATCHTOWER_COUNTER_DISPUTE_V1");
 
   event HankoBatchProcessed(bytes32 indexed entityId, bytes32 indexed hankoHash, uint256 nonce, bool success);
+  event WatchtowerCounterDisputeExecuted(
+    address indexed tower,
+    bytes32 indexed entityId,
+    bytes32 indexed counterentity,
+    uint256 finalNonce,
+    uint256 appointmentSequence
+  );
 
   /// @notice Process a batch authorized by entity Hanko.
   /// @dev This is the canonical production write path.
@@ -211,6 +220,85 @@ contract Depository is ReentrancyGuardLite {
     completeSuccess = _processBatch(entityId, abi.decode(encodedBatch, (Batch)));
     if (!completeSuccess) revert E4();
     emit HankoBatchProcessed(entityId, keccak256(hankoData), nonce, completeSuccess);
+  }
+
+  /// @notice Hash that an entity authorizes for a tower-only delayed counter-dispute.
+  /// @dev The authorization is exact: tower address, account side, counterparty, final nonce,
+  ///      proof-body hash, last-resort window, and appointment sequence are all bound.
+  function computeWatchtowerCounterDisputeHash(
+    address tower,
+    bytes32 entityId,
+    bytes32 counterentity,
+    uint256 finalNonce,
+    bytes32 finalProofbodyHash,
+    uint256 lastResortWindowBlocks,
+    uint256 appointmentSequence
+  ) public view returns (bytes32) {
+    return keccak256(
+      abi.encode(
+        WATCHTOWER_COUNTER_DISPUTE_DOMAIN_SEPARATOR,
+        block.chainid,
+        address(this),
+        tower,
+        entityId,
+        counterentity,
+        finalNonce,
+        finalProofbodyHash,
+        lastResortWindowBlocks,
+        appointmentSequence
+      )
+    );
+  }
+
+  /// @notice Delegated last-resort counter-dispute for a designated watchtower.
+  /// @dev This path is intentionally narrower than processBatch():
+  ///      - tower may only submit newer signed counter-disputes
+  ///      - tower may never start disputes
+  ///      - tower may never use unilateral timeout finalize
+  ///      - tower may never act before the final last-resort window
+  function watchtowerCounterDispute(
+    bytes32 entityId,
+    FinalDisputeProof calldata params,
+    uint256 lastResortWindowBlocks,
+    uint256 appointmentSequence,
+    bytes calldata ownerAuthorizationHanko
+  ) external nonReentrant returns (bool completeSuccess) {
+    bytes memory acct_key = accountKey(entityId, params.counterentity);
+    AccountInfo storage account = _accounts[acct_key];
+
+    if (account.disputeHash == bytes32(0)) revert E5();
+    if (params.cooperative) revert E2();
+    if (params.sig.length == 0) revert E2();
+    if (lastResortWindowBlocks == 0) revert E2();
+    if (params.finalNonce <= account.nonce) revert E2();
+    if (params.finalNonce <= params.initialNonce) revert E2();
+    if (block.number + lastResortWindowBlocks < account.disputeTimeout) revert E2();
+
+    bytes32 finalProofbodyHash = keccak256(abi.encode(params.finalProofbody));
+    (bytes32 recoveredEntity, bool valid) =
+      EntityProvider(entityProvider).verifyHankoSignature(
+        ownerAuthorizationHanko,
+        computeWatchtowerCounterDisputeHash(
+          msg.sender,
+          entityId,
+          params.counterentity,
+          params.finalNonce,
+          finalProofbodyHash,
+          lastResortWindowBlocks,
+          appointmentSequence
+        )
+      );
+    if (!valid || recoveredEntity != entityId) revert E4();
+
+    completeSuccess = _disputeFinalizeInternal(entityId, params);
+    if (!completeSuccess) revert E4();
+    emit WatchtowerCounterDisputeExecuted(
+      msg.sender,
+      entityId,
+      params.counterentity,
+      params.finalNonce,
+      appointmentSequence
+    );
   }
 
   /**
