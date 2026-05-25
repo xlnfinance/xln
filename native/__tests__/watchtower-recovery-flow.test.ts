@@ -353,11 +353,13 @@ describe('watchtower recovery full flow', () => {
     expect(upload.appointment.towerMode).toBe('delayed_last_resort');
     expect(upload.appointment.activePayload?.proofNonce).toBe(9);
     expect(upload.appointment.activePayload?.proofBodyHash).toBe(proofBodyHash);
+    expect(upload.appointment.activePayload?.lastResortWindowBlocks).toBe(1152);
     const remedy = JSON.parse(String(upload.appointment.activePayload?.encryptedRemedy || '{}'));
     expect(remedy.watchedEntityId).toBe(entityId);
     expect(remedy.latestProof.counterentity).toBe(counterpartyId);
     expect(remedy.latestProof.finalNonce).toBe(9);
     expect(remedy.towerAddress).toBe(towerWallet.address.toLowerCase());
+    expect(remedy.lastResortWindowBlocks).toBe(1152);
     expect(typeof remedy.ownerAuthorizationHanko).toBe('string');
     expect(remedy.ownerAuthorizationHanko.startsWith('0x')).toBe(true);
   });

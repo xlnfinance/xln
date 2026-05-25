@@ -179,7 +179,11 @@ const recoveryTowerInfoCache = new Map<string, { fetchedAt: number; info: TowerS
 
 const RECOVERY_UPLOAD_DEBOUNCE_MS = 1_500;
 const RECOVERY_TOWER_INFO_TTL_MS = 60_000;
-const WATCHTOWER_LAST_RESORT_WINDOW_BLOCKS = 60;
+// Keep this aligned with Depository.defaultDisputeDelay. Towers are not meant to
+// intervene for most of the dispute window; they only become eligible in the final
+// last-resort slice after the user had ample time to answer personally.
+const DEFAULT_DISPUTE_WINDOW_BLOCKS = 5760;
+const WATCHTOWER_LAST_RESORT_WINDOW_BLOCKS = Math.max(1, Math.ceil(DEFAULT_DISPUTE_WINDOW_BLOCKS * 0.2));
 const WATCHTOWER_SAFETY_MARGIN_BLOCKS = 12;
 
 type FrameLogEntry = Env['frameLogs'][number];
