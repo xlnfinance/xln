@@ -27,7 +27,7 @@ import { availableParallelism } from 'node:os';
 import { join, resolve } from 'node:path';
 import type { Readable } from 'node:stream';
 import { setTimeout as delay } from 'node:timers/promises';
-import { deriveQaTestDescription, deriveQaTestHandle } from '../qa-report';
+import { deriveQaTestDescription, deriveQaTestHandle } from '../qa/report';
 import { compareStableText } from '../serialization-utils';
 
 type CliArgs = {

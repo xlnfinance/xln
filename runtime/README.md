@@ -1,46 +1,113 @@
 # Runtime Map
 
-This folder already has the right coarse split. The current goal is to keep behavior stable and make the boundaries explicit before moving more files.
+This README is the entry point for reading the XLN runtime. It is not a full
+file catalog. The goal is to show where protocol truth lives, which modules are
+infrastructure, and which folders are generated or scenario-only.
 
-## Core consensus
+## Read Order
 
-- `runtime.ts`: runtime loop, persistence, reload, ingress, and exports
-- `account-consensus.ts`: bilateral account-frame consensus
-- `entity-consensus.ts`: entity-frame consensus and machine application
-- `types.ts`: shared runtime model types
+If you only have 1-2 hours, read files in this order:
 
-## Transaction application
+1. `runtime.ts`
+   Runtime loop, persistence boundary, ingress, exports.
+2. `entity-consensus.ts`
+   Entity-frame proposer/validator/commit flow.
+3. `account-consensus.ts`
+   Bilateral account-frame proposer/validator/commit flow.
+4. `entity-tx/apply.ts`
+   Entity-tx dispatcher and domain entry points.
+5. `account-tx/apply.ts`
+   Bilateral account-tx dispatcher.
+6. `cross-jurisdiction.ts`
+   Cross-j route lifecycle helpers, fill monotonicity, route FSM guardrails.
+7. `storage/README.md`
+   Snapshot/WAL/materialization/canonical-hash map.
+8. `server/README.md`
+   Public API surface and recovery/watchtower endpoints.
 
-- `account-tx/`: bilateral account tx handlers and dispatcher
-- `entity-tx/`: entity tx handlers, proposals, j-events, validation
+## Core Domains
 
-## Network / relay
+- `runtime.ts`
+  Owns the runtime loop, frame persistence, env lifecycle, and top-level API.
+- `entity-consensus.ts`, `entity-consensus/`
+  Own entity-frame consensus, proposal hashing, and cross-j orderbook orchestration.
+- `account-consensus.ts`, `account-consensus/`
+  Own bilateral frame consensus, replay protection, and dispute proof updates.
+- `entity-tx/`
+  Applies entity-layer transactions, J-events, disputes, settlement, cross-j coordination.
+- `account-tx/`
+  Applies bilateral txs such as payment, HTLC, pull, swap, settlement-side actions.
+- `storage/`
+  Durable truth: snapshot, WAL, materialized docs, canonical hash verification.
+- `networking/`, `relay/`, `relay-router.ts`, `relay-local-delivery.ts`
+  Transport only. These modules deliver inputs; they do not define financial truth.
+- `server.ts`, `server/`
+  Runtime HTTP/WS surface, health, faucet, ingress receipts, tower/recovery APIs.
+- `jadapter/`
+  J-layer bridge. `rpc.ts` is production-testnet relevant. BrowserVM adapters are legacy/dev-oriented.
+- `orderbook/`, `routing/`
+  Same-j swap matching, book state, graph routing, and pathfinding.
 
-- `networking/`: p2p client, gossip, ws transport, runtime ids
-- `relay/`: relay helper modules
-- `relay-router.ts`, `relay-store.ts`: relay server behavior
+## Folder Readmes
 
-## Routing / markets
+- [account-tx/README.md](/Users/zigota/xln/runtime/account-tx/README.md)
+- [entity-tx/README.md](/Users/zigota/xln/runtime/entity-tx/README.md)
+- [storage/README.md](/Users/zigota/xln/runtime/storage/README.md)
+- [networking/README.md](/Users/zigota/xln/runtime/networking/README.md)
+- [server/README.md](/Users/zigota/xln/runtime/server/README.md)
+- [jadapter/README.md](/Users/zigota/xln/runtime/jadapter/README.md)
+- [recovery/README.md](/Users/zigota/xln/runtime/recovery/README.md)
 
-- `routing/`: graph building, pathfinding, fees, capacity
-- `orderbook/`: swap-market core logic and types
+## Surface Classification
 
-## Ops / orchestration
+### Protocol-critical
 
-- `orchestrator/`: daemon control and custody bootstrap helpers
-- `scripts/`: E2E mesh control, checks, smoke tests, runners
-- `server.ts`: daemon HTTP / WS API surface
+These files define correctness and are the first audit target:
 
-## Integration
+- `runtime.ts`
+- `entity-consensus.ts`
+- `account-consensus.ts`
+- `entity-tx/`
+- `account-tx/`
+- `cross-jurisdiction.ts`
+- `j-batch.ts`
+- `storage/`
 
-- `jadapter/`: chain bridge and browser VM adapters
-- `typechain/`: generated contract bindings
+### Infrastructure, not protocol truth
 
-## Scenarios / tests
+- `server.ts`, `server/`
+- `networking/`
+- `relay/`
+- `orchestrator/`
+- `radapter/`
 
-- `scenarios/`: scripted system scenarios and parser
-- `__tests__/`: runtime unit tests
+### Scenario / dev / operator tooling
 
-## Safe cleanup rule
+- `scripts/`
+- `scenarios/`
+- `runtime-ascii.ts`
+- `qa/`
 
-Do not move the consensus and apply files while they are simultaneously carrying behavior changes. First stabilize behavior, then move modules in one mechanical pass.
+### Generated or compatibility surface
+
+- `typechain/`
+- `xln-api.ts`
+- `types.ts`
+
+`xln-api.ts` is a frontend-facing compatibility/export surface.
+`types.ts` is a compatibility barrel while the codebase still migrates to
+domain types under `runtime/types/`.
+
+## Cleanup Targets
+
+These are the current safe simplification targets:
+
+- keep BrowserVM adapters out of the default public-testnet reading path
+- continue replacing internal `./types` imports with narrower domain type modules
+- keep generated `typechain/` and scenario tooling out of protocol reviews
+- avoid adding new root-level helper files when a domain folder already exists
+
+## Safe Cleanup Rule
+
+Do not mechanically move consensus/apply files while behavior is changing.
+Stabilize behavior first, then do one move-only pass.
