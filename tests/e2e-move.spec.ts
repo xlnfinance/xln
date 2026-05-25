@@ -377,6 +377,21 @@ async function broadcastDraftBatch(
     ) {
       observedBroadcast = true;
     }
+    if (
+      !observedBroadcast &&
+      lastSnapshot.batchHistoryCount > before.batchHistoryCount &&
+      lastSnapshot.lastHistoryEntityNonce === expectedNonce &&
+      lastSnapshot.lastHistoryStatus === 'confirmed' &&
+      (
+        recentMessageText.includes(`jBatch finalized (nonce ${expectedNonce})`)
+        || recentMessageText.includes(`Block ${expectedNonce}`)
+      )
+    ) {
+      // Fast local stacks can confirm and clear a batch between polls, so the
+      // durable history entry plus the finalization message is sufficient
+      // evidence that the broadcast path ran even if we never sampled sentBatch.
+      observedBroadcast = true;
+    }
     if (lastSnapshot.batchHistoryCount > before.batchHistoryCount) {
       expect(observedBroadcast, `Batch must enter broadcast path before history commit: ${JSON.stringify(lastSnapshot)}`).toBe(true);
       expect(lastSnapshot.sentExists, `sentBatch must clear after confirmation: ${JSON.stringify(lastSnapshot)}`).toBe(false);
