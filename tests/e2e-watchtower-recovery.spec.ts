@@ -469,7 +469,7 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeout:
 test.describe('watchtower runtime recovery', () => {
   test.setTimeout(TEST_TIMEOUT_MS);
 
-  test('restores a wiped runtime from standalone tower backup', async ({ page }) => {
+  test('restores a wiped runtime from standalone tower backup', async ({ page, context }) => {
     if (!ISOLATED_BASELINE_READY && process.env.E2E_RESET_BASE_URL) {
       await ensureE2EBaseline(page, {
         timeoutMs: LONG_E2E ? 240_000 : 180_000,
@@ -479,6 +479,10 @@ test.describe('watchtower runtime recovery', () => {
 
     const tower = await startWatchtower();
     try {
+      await context.addInitScript((towerUrl: string) => {
+        window.localStorage.setItem('xln-watchtower-urls', JSON.stringify([towerUrl]));
+        (window as typeof window & { __XLN_WATCHTOWERS__?: string[] }).__XLN_WATCHTOWERS__ = [towerUrl];
+      }, tower.baseUrl);
       await page.addInitScript((towerUrl: string) => {
         window.localStorage.setItem('xln-watchtower-urls', JSON.stringify([towerUrl]));
         (window as typeof window & { __XLN_WATCHTOWERS__?: string[] }).__XLN_WATCHTOWERS__ = [towerUrl];
@@ -519,6 +523,16 @@ test.describe('watchtower runtime recovery', () => {
 
       await page.goto(`${APP_BASE_URL}/resetdb?returnTo=/app`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
+      await expect
+        .poll(async () => await page.evaluate(() => {
+          const w = window as typeof window & { __XLN_WATCHTOWERS__?: string[] };
+          return Array.isArray(w.__XLN_WATCHTOWERS__) ? w.__XLN_WATCHTOWERS__[0] || '' : '';
+        }), {
+          timeout: 10_000,
+          intervals: [100, 250, 500],
+          message: 'standalone tower override must survive resetdb navigation',
+        })
+        .toBe(tower.baseUrl);
 
       const restored = await withTimeout(
         createRuntimeViaUi(page, label, mnemonic, { requireOnline: false }),

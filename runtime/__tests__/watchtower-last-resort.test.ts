@@ -4,6 +4,7 @@ import { join } from 'node:path';
 import { Interface, Wallet, keccak256, solidityPacked, toUtf8Bytes } from 'ethers';
 import { createWatchtowerStore } from '../watchtower/store';
 import { encodeTowerCounterDisputeRemedy, runWatchtowerSweep } from '../watchtower/action';
+import { encryptTowerPayloadForPublicKey, getTowerPayloadEncryptionPublicKey } from '../recovery/crypto';
 import type { TowerAppointmentV1 } from '../recovery/types';
 
 const makeLookupKey = (label: string): string => keccak256(toUtf8Bytes(label));
@@ -44,6 +45,7 @@ describe('watchtower delayed last-resort sweep', () => {
     const initialProofbodyHash = '0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
     const initialArguments = '0x1234';
     const disputeHash = encodeDisputeHash(1, true, 100n, initialProofbodyHash, initialArguments);
+    const queriedFromBlocks: number[] = [];
     const tempRoot = join(process.cwd(), '.tmp-tests', `tower-last-resort-${Date.now()}`);
     tempRoots.push(tempRoot);
     await mkdir(tempRoot, { recursive: true });
@@ -53,6 +55,29 @@ describe('watchtower delayed last-resort sweep', () => {
       dbPath: join(tempRoot, 'tower.level'),
       towerPrivateKey: towerWallet.privateKey,
     });
+
+    const encryptedRemedy = await encryptTowerPayloadForPublicKey(
+      encodeTowerCounterDisputeRemedy({
+        version: 1,
+        type: 'counter_dispute_remedy',
+        rpcUrl: 'mock://watchtower',
+        chainId: 31337,
+        depositoryAddress: '0x1111111111111111111111111111111111111111',
+        watchedEntityId,
+        towerAddress: towerWallet.address.toLowerCase(),
+        lastResortWindowBlocks: 8,
+        appointmentSequence: 5,
+        ownerAuthorizationHanko: '0xbeef',
+        latestProof: {
+          counterentity,
+          finalNonce: 2,
+          finalProofbody: { offdeltas: [-1], tokenIds: [1], transformers: [] },
+          finalArguments: '0x',
+          sig: '0xcafe',
+        },
+      }),
+      getTowerPayloadEncryptionPublicKey(towerWallet.privateKey),
+    );
 
     const appointment: TowerAppointmentV1 = {
       type: 'tower_appointment',
@@ -72,25 +97,7 @@ describe('watchtower delayed last-resort sweep', () => {
       },
       activePayload: {
         triggerHint: 'chain:31337:acct:test',
-        encryptedRemedy: encodeTowerCounterDisputeRemedy({
-          version: 1,
-          type: 'counter_dispute_remedy',
-          rpcUrl: 'mock://watchtower',
-          chainId: 31337,
-          depositoryAddress: '0x1111111111111111111111111111111111111111',
-          watchedEntityId,
-          towerAddress: towerWallet.address.toLowerCase(),
-          lastResortWindowBlocks: 8,
-          appointmentSequence: 5,
-          ownerAuthorizationHanko: '0xbeef',
-          latestProof: {
-            counterentity,
-            finalNonce: 2,
-            finalProofbody: { offdeltas: [-1], tokenIds: [1], transformers: [] },
-            finalArguments: '0x',
-            sig: '0xcafe',
-          },
-        }),
+        encryptedRemedy,
         actionKind: 'counter_dispute_only',
         appointmentSequence: 5,
         proofNonce: 2,
@@ -111,7 +118,8 @@ describe('watchtower delayed last-resort sweep', () => {
       towerPrivateKey: towerWallet.privateKey,
       providerFactory: () => ({
         getBlockNumber: async () => 95,
-        getLogs: async () => {
+        getLogs: async (filter) => {
+          queriedFromBlocks.push(Number(filter['fromBlock']));
           const event = disputeStartedInterface.encodeEventLog(
             disputeStartedInterface.getEvent('DisputeStarted'),
             [
@@ -132,6 +140,7 @@ describe('watchtower delayed last-resort sweep', () => {
           disputeHash,
           disputeTimeout: 100n,
         }),
+        defaultDisputeDelay: async () => 95n,
         watchtowerCounterDispute: async () => ({
           hash: '0xtxhash',
           wait: async () => ({ blockNumber: 96 }),
@@ -150,6 +159,7 @@ describe('watchtower delayed last-resort sweep', () => {
     expect(receipts.length).toBe(1);
     expect(receipts[0]?.status).toBe('submitted');
     expect(receipts[0]?.txHash).toBe('0xtxhash');
+    expect(queriedFromBlocks).toEqual([5, 5]);
   });
 
   test('skips when dispute is inactive or still outside the last-resort window', async () => {

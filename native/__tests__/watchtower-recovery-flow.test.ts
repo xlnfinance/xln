@@ -138,7 +138,7 @@ describe('watchtower recovery full flow', () => {
       hostname: 'xln.finance',
       globalUrls: undefined,
       localUrls: undefined,
-    })).toEqual(['https://tower.xln.finance']);
+    })).toEqual(['https://xln.finance']);
   });
 
   test('frontend restore path recovers the highest valid bundle from a standalone tower', async () => {

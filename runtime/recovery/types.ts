@@ -67,6 +67,16 @@ export type TowerCounterDisputeRemedyV1 = {
   latestProof: TowerFinalDisputeProofV1;
 };
 
+export type TowerEncryptedPayloadV1 = {
+  version: 1;
+  type: 'tower_encrypted_payload';
+  alg: 'secp256k1-aes-256-gcm';
+  epk: string;
+  iv: string;
+  ciphertext: string;
+  plaintextHash: string;
+};
+
 export type TowerActivePayloadV1 = {
   triggerHint: string;
   encryptedRemedy: string;

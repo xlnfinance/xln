@@ -3222,6 +3222,7 @@ export type {
   TowerAppointmentOwnerProofV1,
   TowerAppointmentV1,
   TowerDiscoverResponseV1,
+  TowerEncryptedPayloadV1,
   TowerReceiptV1,
   TowerRestoreRequestV1,
   TowerRestoreResponseV1,
@@ -3238,7 +3239,9 @@ export {
   decryptRuntimeRecoveryBundle,
   deriveRuntimeRecoveryActionLookupKey,
   deriveRuntimeRecoveryLookupKey,
+  encryptTowerPayloadForPublicKey,
   encryptRuntimeRecoveryBundle,
+  getTowerPayloadEncryptionPublicKey,
 } from './recovery/crypto';
 export { buildSingleSignerHanko } from './hanko/batch';
 export {
