@@ -58,7 +58,7 @@ export type WatchtowerStoreStats = {
 };
 
 const DEFAULT_MAX_BUNDLES = 3;
-const DEFAULT_MAX_STORED_BYTES = 10 * 1024;
+const DEFAULT_MAX_STORED_BYTES = 256 * 1024;
 const DEFAULT_RECEIPT_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 const STATS_CACHE_TTL_MS = 5_000;
 
