@@ -66,6 +66,42 @@ async function firstVisibleLocator(
   return null;
 }
 
+async function firstVisibleButtonByText(
+  page: Page,
+  pattern: RegExp,
+  timeoutMs = 1_000,
+): Promise<Locator | null> {
+  const deadline = Date.now() + timeoutMs;
+  do {
+    const buttons = page.locator('button');
+    const count = Math.min(await buttons.count().catch(() => 0), 40);
+    for (let index = 0; index < count; index += 1) {
+      const button = buttons.nth(index);
+      if (!await button.isVisible({ timeout: 100 }).catch(() => false)) continue;
+      const label = String(await button.textContent({ timeout: 100 }).catch(() => '') || '').trim();
+      if (!pattern.test(label)) continue;
+      return button;
+    }
+    await page.waitForTimeout(100);
+  } while (Date.now() < deadline);
+  return null;
+}
+
+async function acceptOnboardingTermsIfVisible(page: Page): Promise<void> {
+  const checkboxes = page.locator('input[type="checkbox"]');
+  const count = Math.min(await checkboxes.count().catch(() => 0), 12);
+  for (let index = 0; index < count; index += 1) {
+    const checkbox = checkboxes.nth(index);
+    if (!await checkbox.isVisible({ timeout: 100 }).catch(() => false)) continue;
+    const label = String(await checkbox.evaluate((input) => input.closest('label')?.textContent || '').catch(() => ''));
+    if (!/testnet software|accept the risks/i.test(label)) continue;
+    if (!await checkbox.isChecked().catch(() => false)) {
+      await checkbox.check({ force: true, timeout: 2_000 }).catch(() => null);
+    }
+    return;
+  }
+}
+
 async function ensureVisibleInputValue(
   resolveLocator: () => Promise<Locator | null>,
   expectedValue: string,
@@ -171,19 +207,26 @@ async function ensureRuntimeCreationView(page: Page, label: string): Promise<voi
 
 async function waitForRuntimeReady(page: Page, runtimeId: string): Promise<void> {
   await page.waitForFunction(({ targetRuntimeId }) => {
+    const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
+    const selectedRuntimeId = String(selectedTrigger?.dataset?.runtimeId || '').toLowerCase();
+    const selectedEntityId = String(selectedTrigger?.dataset?.entityId || '');
+    const selectedSignerId = String(selectedTrigger?.dataset?.signerId || '');
     const env = (window as typeof window & {
       isolatedEnv?: {
         runtimeId?: string;
         eReplicas?: Map<string, unknown>;
       };
     }).isolatedEnv;
+    if (!env) {
+      return selectedRuntimeId === String(targetRuntimeId || '').toLowerCase()
+        && /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
+        && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId);
+    }
     const envRuntimeId = String(env?.runtimeId || '').toLowerCase();
     const envReady = envRuntimeId === String(targetRuntimeId || '').toLowerCase()
       && Number(env?.eReplicas?.size || 0) > 0;
     if (!envReady) return false;
 
-    const selectedTrigger = document.querySelector<HTMLElement>('[data-testid="context-current"]');
-    const selectedRuntimeId = String(selectedTrigger?.dataset?.runtimeId || '').toLowerCase();
     // Runtime creation can surface the profile onboarding screen before the
     // context switcher finishes filling entity/signer metadata. The hydrated
     // env is the real readiness signal here; requiring the extra UI metadata
@@ -224,6 +267,15 @@ async function waitForRuntimeBootstrap(
           && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId);
         if (runtimeId && replicaCount > 0 && selectedReady) {
           return runtimeId;
+        }
+        if (
+          !runtimeId
+          && selectedRuntimeId
+          && selectedRuntimeId !== String(previousRuntimeId || '').toLowerCase()
+          && /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
+          && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId)
+        ) {
+          return selectedRuntimeId;
         }
 
         const onboardingVisible =
@@ -335,6 +387,15 @@ async function waitForNextRuntimeReady(page: Page, previousRuntimeId: string | n
       ) {
         return runtimeId;
       }
+      if (
+        !runtimeId
+        && selectedRuntimeId
+        && selectedRuntimeId !== previous
+        && /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
+        && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId)
+      ) {
+        return selectedRuntimeId;
+      }
       if (!runtimeId || Number(env?.eReplicas?.size || 0) <= 0) return null;
       if (previous && runtimeId === previous) return null;
       return runtimeId;
@@ -412,31 +473,31 @@ async function waitForNextRuntimeReady(page: Page, previousRuntimeId: string | n
 }
 
 async function dismissOnboardingIfVisible(page: Page): Promise<void> {
-  const clicked = await page.evaluate(() => {
-    const isVisible = (element: Element | null): element is HTMLElement => {
-      if (!(element instanceof HTMLElement)) return false;
-      const style = window.getComputedStyle(element);
-      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
-      const rect = element.getBoundingClientRect();
-      return rect.width > 0 && rect.height > 0;
-    };
+  const completed = await page.evaluate(() => {
+    const hasOnboarding =
+      Boolean(document.querySelector('#display-name')) ||
+      Array.from(document.querySelectorAll('button')).some((button) =>
+        /^(Start|Start using XLN|Continue)$/i.test(String(button.textContent || '').trim()),
+      );
+    if (!hasOnboarding) return false;
 
-    const checkbox = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
-      .find((input) => isVisible(input) && /testnet software|accept the risks/i.test(input.closest('label')?.textContent || ''));
-    if (checkbox && !checkbox.checked) checkbox.click();
+    const entityIds = Array.from(document.querySelectorAll('code'))
+      .map((node) => String(node.textContent || '').trim())
+      .filter((text) => /^0x[a-fA-F0-9]{64}$/.test(text));
+    if (entityIds.length === 0) return false;
 
-    const startButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => {
-        const label = String(button.textContent || '').trim();
-        return isVisible(button) && !button.disabled && /^(Start|Start using XLN|Continue)$/i.test(label);
-      });
-    if (!startButton) return false;
-    startButton.click();
+    const displayName = String((document.querySelector('#display-name') as HTMLInputElement | null)?.value || '').trim();
+    const hubJoinPreference = String((document.querySelector('#hub-join-select') as HTMLSelectElement | null)?.value || '').trim();
+    for (const id of entityIds) {
+      localStorage.setItem(`xln-onboarding-complete:${id.toLowerCase()}`, 'true');
+    }
+    if (displayName) localStorage.setItem('xln-display-name', displayName);
+    if (hubJoinPreference) localStorage.setItem('xln-hub-join-preference', hubJoinPreference);
     return true;
   }).catch(() => false);
 
-  if (clicked) {
-    await page.waitForTimeout(500);
+  if (completed) {
+    await page.reload({ waitUntil: 'domcontentloaded', timeout: 30_000 });
   }
 }
 
@@ -477,6 +538,15 @@ async function waitForReadyAfterCreate(
         ) {
           return runtimeId;
         }
+        if (
+          !runtimeId
+          && selectedRuntimeId
+          && selectedRuntimeId !== previous
+          && /^0x[a-fA-F0-9]{64}$/.test(selectedEntityId)
+          && /^0x[a-fA-F0-9]{40}$/.test(selectedSignerId)
+        ) {
+          return selectedRuntimeId;
+        }
         if (!runtimeId || Number(env?.eReplicas?.size || 0) <= 0) return null;
         if (previous && runtimeId === previous) return null;
         return runtimeId;
@@ -504,18 +574,8 @@ async function completeProfileOnboardingIfVisible(page: Page, label: string): Pr
     }
     return null;
   };
-  const finishButtonVisible = async (): Promise<boolean> => await page.evaluate(() => {
-    const isVisible = (element: Element | null): element is HTMLElement => {
-      if (!(element instanceof HTMLElement)) return false;
-      const style = window.getComputedStyle(element);
-      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
-      const rect = element.getBoundingClientRect();
-      return rect.width > 0 && rect.height > 0;
-    };
-    return Array.from(document.querySelectorAll<HTMLButtonElement>('button')).some((button) =>
-      isVisible(button) && /^(Start|Starting\.\.\.|Start using XLN|Continue)$/i.test(String(button.textContent || '').trim()),
-    );
-  }).catch(() => false);
+  const finishButtonVisible = async (): Promise<boolean> =>
+    (await firstVisibleButtonByText(page, /^(Start|Starting\.\.\.|Start using XLN|Continue)$/i, 200)) !== null;
   const onboardingGoneOrReady = async (): Promise<boolean> =>
     (await visibleDisplayNameInput() === null) && !await finishButtonVisible();
 
@@ -531,28 +591,12 @@ async function completeProfileOnboardingIfVisible(page: Page, label: string): Pr
     await displayNameInput.fill(label, { timeout: 5_000 }).catch(() => null);
   }
 
-  const submitted = await page.evaluate(() => {
-    const isVisible = (element: Element | null): element is HTMLElement => {
-      if (!(element instanceof HTMLElement)) return false;
-      const style = window.getComputedStyle(element);
-      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
-      const rect = element.getBoundingClientRect();
-      return rect.width > 0 && rect.height > 0;
-    };
-
-    const checkbox = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
-      .find((input) => isVisible(input) && /testnet software|accept the risks/i.test(input.closest('label')?.textContent || ''));
-    if (checkbox && !checkbox.checked) checkbox.click();
-
-    const startButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
-      .find((button) => {
-        const label = String(button.textContent || '').trim();
-        return isVisible(button) && !button.disabled && /^(Start|Start using XLN|Continue)$/i.test(label);
-      });
-    if (!startButton) return false;
-    startButton.click();
-    return true;
-  }).catch(() => false);
+  await acceptOnboardingTermsIfVisible(page);
+  const startButton = await firstVisibleButtonByText(page, /^(Start|Start using XLN|Continue)$/i, 1_000);
+  const submitted = Boolean(startButton && await startButton.isEnabled().catch(() => false));
+  if (startButton && submitted) {
+    await startButton.click({ force: true, timeout: 2_000 });
+  }
 
   if (submitted) {
     await expect
@@ -865,7 +909,9 @@ export async function createRuntime(
       page.locator('#mnemonic').first(),
       page.getByRole('textbox', { name: /mnemonic/i }).first(),
     ], 250);
-    const createButtonStillEnabled = await openVaultButton.isEnabled().catch(() => false);
+    const createButtonStillEnabled = usingMnemonicImport
+      ? false
+      : await openVaultButton.isEnabled({ timeout: 500 }).catch(() => false);
     const stillInInitialInputState =
       createButtonStillEnabled
       && (
