@@ -359,8 +359,19 @@ PY
   nginx -t
   systemctl reload nginx
 
-  if ! curl -ksSI --max-time 10 'https://xln.finance/resetdb?returnTo=%2Fapp' | tr -d '\r' | grep -iq '^clear-site-data: "\*"$'; then
+  local resetdb_headers=""
+  local resetdb_header_ok=0
+  for _attempt in 1 2 3 4 5; do
+    resetdb_headers="$(curl -ksSI --max-time 10 'https://xln.finance/resetdb?returnTo=%2Fapp' | tr -d '\r' || true)"
+    if printf '%s\n' "$resetdb_headers" | grep -iq '^clear-site-data: "\*"$'; then
+      resetdb_header_ok=1
+      break
+    fi
+    sleep 1
+  done
+  if [ "$resetdb_header_ok" != "1" ]; then
     echo "[deploy] /resetdb Clear-Site-Data header not visible on public endpoint" >&2
+    printf '%s\n' "$resetdb_headers" >&2
     return 1
   fi
 }
