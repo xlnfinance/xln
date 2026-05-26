@@ -6,6 +6,7 @@ import { handleHtlcLock } from '../account-tx/handlers/htlc-lock';
 import { handleHtlcResolve } from '../account-tx/handlers/htlc-resolve';
 import { checkAutoRebalance, handleRequestCollateral } from '../account-tx/handlers/request-collateral';
 import { handleSwapOffer } from '../account-tx/handlers/swap-offer';
+import { createFrameHash } from '../account-consensus-frame';
 import { LIMITS } from '../constants';
 import { ACCOUNT_PENDING_RESEND_AFTER_MS, executeCrontab, initCrontab } from '../entity-crontab';
 import { generateLazyEntityId } from '../entity-factory';
@@ -27,6 +28,7 @@ import { process, createEmptyEnv, registerEntityRuntimeHint, sendEntityInput } f
 import { safeStringify } from '../serialization-utils';
 import { projectAccountDoc } from '../storage/projections';
 import { createDefaultDelta } from '../validation-utils';
+import { signEntityHashes } from '../hanko/signing';
 import type { AccountMachine, AccountTx, ConsensusConfig, CrossJurisdictionSwapRoute, EntityInput, EntityReplica, EntityState, JurisdictionEvent } from '../types';
 
 const makeSingleSignerConfig = (): ConsensusConfig => ({
@@ -1273,6 +1275,67 @@ describe('audit fail-fast regressions', () => {
     expect(result.response?.kind).toBe('ack');
     expect(result.response?.height).toBe(10);
     expect(result.response?.prevHanko).toBe(accountMachine.lastOutboundFrameAck.prevHanko);
+  });
+
+  test('handleAccountInput rejects frames whose byLeft does not match the signed proposer', async () => {
+    const seed = 'account-frame-by-left-binding';
+    const env = createEmptyEnv(seed);
+    env.quietRuntimeLogs = true;
+    env.timestamp = 10_000;
+    env.browserVM = {
+      getDepositoryAddress: () => hex20('dd'),
+    } as typeof env.browserVM;
+
+    const first = registerLazySigner(seed, '1');
+    const second = registerLazySigner(seed, '2');
+    const left = isLeftEntity(first.entityId, second.entityId) ? first : second;
+    const right = left === first ? second : first;
+    attachSigningReplica(env, left.entityId, left.signerId);
+    attachSigningReplica(env, right.entityId, right.signerId);
+
+    const receiverAccount = makeProposalAccount([], left.entityId, right.entityId);
+    receiverAccount.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nonce: 0 };
+
+    const tx: AccountTx = {
+      type: 'set_credit_limit',
+      data: { tokenId: 1, amount: 100n },
+    };
+    const maliciousFrame = {
+      height: 1,
+      timestamp: env.timestamp,
+      jHeight: 0,
+      accountTxs: [tx],
+      prevFrameHash: 'genesis',
+      stateHash: '',
+      byLeft: false,
+      deltas: [{
+        tokenId: 1,
+        collateral: 0n,
+        ondelta: 0n,
+        offdelta: 0n,
+        leftCreditLimit: 100n,
+        rightCreditLimit: 0n,
+        leftAllowance: 0n,
+        rightAllowance: 0n,
+        leftHold: 0n,
+        rightHold: 0n,
+      }],
+    };
+    maliciousFrame.stateHash = await createFrameHash(maliciousFrame);
+    const [newHanko] = await signEntityHashes(env, left.entityId, left.signerId, [maliciousFrame.stateHash]);
+
+    const result = await handleAccountInput(env, receiverAccount, {
+      kind: 'frame',
+      fromEntityId: left.entityId,
+      toEntityId: right.entityId,
+      height: 1,
+      newAccountFrame: maliciousFrame,
+      newHanko,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('Frame proposer side mismatch');
+    expect(receiverAccount.deltas.get(1)?.leftCreditLimit ?? 0n).toBe(0n);
   });
 
   test('failed proposal keeps queued txs, including late arrivals, instead of wiping the mempool', async () => {

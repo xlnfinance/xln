@@ -27,7 +27,7 @@ import {
   textBytes,
 } from '../storage/keys';
 import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
-import { loadEntityStateFromStorage, loadEntityViewPageFromStorage } from '../storage/read';
+import { loadEntityAccountDocFromStorage, loadEntityStateFromStorage, loadEntityViewPageFromStorage } from '../storage/read';
 import type {
   RuntimeDbLike,
   StorageEntityHashDoc,
@@ -608,6 +608,49 @@ test('runtime adapter historical head reads persisted storage head', async () =>
   expect(head.latestSnapshotHeight).toBe(40);
 });
 
+test('runtime adapter rejects historical reads beyond the persisted storage head', async () => {
+  const env = makeEnv();
+  env.height = 20;
+  const persistedHead: StorageHead = {
+    schemaVersion: 1,
+    latestHeight: 8,
+    latestMaterializedHeight: 8,
+    latestSnapshotHeight: 8,
+    snapshotPeriodFrames: 256,
+    retainSnapshots: 3,
+    epochMaxBytes: 1,
+    accountMerkleRadix: 16,
+    retainedHistoryBytes: 0,
+  };
+  let listedEntities = false;
+
+  await expect(resolveRuntimeAdapterRead({
+    env,
+    readHead: async () => persistedHead,
+  }, 'head', { atHeight: 9 })).rejects.toThrow('head height unavailable');
+
+  await expect(resolveRuntimeAdapterRead({
+    env,
+    readHead: async () => persistedHead,
+    listEntityIdsAtHeight: async () => {
+      listedEntities = true;
+      return [entityId];
+    },
+  }, 'entities', { atHeight: 9 })).rejects.toThrow('entity summary height unavailable');
+  expect(listedEntities).toBe(false);
+
+  await expect(resolveRuntimeAdapterRead({
+    env,
+    readHead: async () => persistedHead,
+    listEntityIdsAtHeight: async () => {
+      throw new Error('future view-frame must not list entities');
+    },
+    loadEntityViewPage: async () => {
+      throw new Error('future view-frame must not load entity pages');
+    },
+  }, 'view-frame', { atHeight: 9 })).rejects.toThrow('view-frame height unavailable');
+});
+
 test('runtime adapter historical account search uses the point storage loader', async () => {
   const env = makeEnv();
   env.height = 9;
@@ -726,6 +769,54 @@ test('storage-backed historical view pages support desc account and book cursors
   expect(second?.accounts.nextCursor).toBe(null);
   expect(second?.books.items.map((item) => item.pairId)).toEqual(['1/2']);
   expect(second?.books.nextCursor).toBe(null);
+});
+
+test('storage readers reject requested heights beyond the persisted head', async () => {
+  const env = makeEnv();
+  const replica = Array.from(env.eReplicas.values())[0]!;
+  const account = replica.state.accounts.get(counterpartyId)!;
+  const head: StorageHead = {
+    schemaVersion: 1,
+    latestHeight: env.height,
+    latestMaterializedHeight: env.height,
+    latestSnapshotHeight: 0,
+    snapshotPeriodFrames: 256,
+    retainSnapshots: 3,
+    epochMaxBytes: 1,
+    accountMerkleRadix: 16,
+    retainedHistoryBytes: 0,
+  };
+  const db = makeMemoryDb([
+    [KEY_HEAD, encodeBuffer(head)],
+    [keyLiveEntity(entityId), encodeBuffer(projectEntityCoreDoc(replica.state, replica))],
+    [keyLiveAccount(entityId, counterpartyId), encodeBuffer(projectAccountDoc(account))],
+  ]);
+  const futureHeight = env.height + 1;
+
+  await expect(loadEntityStateFromStorage({
+    env,
+    tryOpenDb: async () => true,
+    getRuntimeDb: () => db,
+    entityId,
+    height: futureHeight,
+  })).rejects.toThrow('STORAGE_HEIGHT_UNAVAILABLE');
+
+  await expect(loadEntityAccountDocFromStorage({
+    env,
+    tryOpenDb: async () => true,
+    getRuntimeDb: () => db,
+    entityId,
+    counterpartyId,
+    height: futureHeight,
+  })).rejects.toThrow('STORAGE_HEIGHT_UNAVAILABLE');
+
+  await expect(loadEntityViewPageFromStorage({
+    env,
+    tryOpenDb: async () => true,
+    getRuntimeDb: () => db,
+    entityId,
+    height: futureHeight,
+  })).rejects.toThrow('STORAGE_HEIGHT_UNAVAILABLE');
 });
 
 test('storage live recovery verifies doc values through merkle leaves', async () => {

@@ -410,6 +410,17 @@ export async function handleAccountInput(
     }
 
     // Validate frame with timestamp checks (HTLC safety)
+    const expectedFrameByLeft = isLeft(input.fromEntityId, input.toEntityId);
+    if (receivedFrame.byLeft !== expectedFrameByLeft) {
+      return {
+        success: false,
+        error:
+          `Frame proposer side mismatch: expected byLeft=${String(expectedFrameByLeft)} ` +
+          `for proposer ${input.fromEntityId.slice(-4)}, got ${String(receivedFrame.byLeft)}`,
+        events,
+      };
+    }
+
     const previousTimestamp = accountMachine.currentFrame?.timestamp;
     if (!validateAccountFrame(receivedFrame, env.timestamp, previousTimestamp)) {
       return { success: false, error: 'Invalid frame structure', events };

@@ -359,6 +359,25 @@ const readRequiredDiff = async (
   return diff;
 };
 
+const resolveTargetStorageHeight = (
+  head: StorageHead,
+  requestedHeight: number | undefined,
+  scope: string,
+): number => {
+  const latestHeight = Math.max(0, Math.floor(Number(head.latestHeight ?? 0)));
+  if (requestedHeight === undefined) return latestHeight;
+  const raw = Number(requestedHeight);
+  if (!Number.isFinite(raw)) {
+    throw new Error(`STORAGE_HEIGHT_INVALID: scope=${scope} requested=${String(requestedHeight)}`);
+  }
+  const targetHeight = Math.floor(raw);
+  if (targetHeight <= 0) return 0;
+  if (targetHeight > latestHeight) {
+    throw new Error(`STORAGE_HEIGHT_UNAVAILABLE: scope=${scope} requested=${targetHeight} latest=${latestHeight}`);
+  }
+  return targetHeight;
+};
+
 const loadSnapshotDocsForEntity = async (db: RuntimeDbLike, snapshotHeight: number, entityId: string): Promise<Map<string, StorageDoc>> => {
   const docs = new Map<string, StorageDoc>();
 
@@ -721,7 +740,7 @@ export const loadEntityViewPageFromStorage = async (options: {
   const db = options.getRuntimeDb(options.env);
   const head = await readJsonOrNull<StorageHead>(db, KEY_HEAD);
   if (!head) return null;
-  const targetHeight = Math.min(options.height ?? head.latestHeight, head.latestHeight);
+  const targetHeight = resolveTargetStorageHeight(head, options.height, `entity-view:${normalizeEntityId(options.entityId)}`);
   const entityId = normalizeEntityId(options.entityId);
   const latestMaterializedHeight = Math.max(
     0,
@@ -765,7 +784,11 @@ export const loadEntityAccountDocFromStorage = async (options: {
   const db = options.getRuntimeDb(options.env);
   const head = await readJsonOrNull<StorageHead>(db, KEY_HEAD);
   if (!head) return null;
-  const targetHeight = Math.min(options.height ?? head.latestHeight, head.latestHeight);
+  const targetHeight = resolveTargetStorageHeight(
+    head,
+    options.height,
+    `account:${normalizeEntityId(options.entityId)}:${normalizeEntityId(options.counterpartyId)}`,
+  );
   const latestMaterializedHeight = Math.max(
     0,
     Math.floor(Number(head.latestMaterializedHeight ?? head.latestSnapshotHeight ?? 0)),
@@ -793,7 +816,7 @@ export const loadEntityStateFromStorage = async (options: {
   const db = options.getRuntimeDb(options.env);
   const head = await readJsonOrNull<StorageHead>(db, KEY_HEAD);
   if (!head) return null;
-  const targetHeight = Math.min(options.height ?? head.latestHeight, head.latestHeight);
+  const targetHeight = resolveTargetStorageHeight(head, options.height, `entity-state:${normalizeEntityId(options.entityId)}`);
   const entityId = normalizeEntityId(options.entityId);
   const latestMaterializedHeight = Math.max(
     0,
