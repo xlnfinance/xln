@@ -2588,6 +2588,16 @@
           externalTokensLoading = false;
         }
       } catch (err) {
+        if (toErrorMessage(err, '').includes('ENTITY_JURISDICTION_MISSING')) {
+          externalTokens = [];
+          if (moveAllowanceRouteEnabled) {
+            moveAllowanceRaw = null;
+            moveAllowanceError = null;
+            moveAllowanceLoading = false;
+          }
+          externalTokensLoading = false;
+          return;
+        }
         console.error('[EntityPanel] Failed to fetch external tokens:', err);
         if (moveAllowanceRouteEnabled) {
           moveAllowanceRaw = null;
