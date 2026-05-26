@@ -1,5 +1,4 @@
 import { expect, type Page } from '@playwright/test';
-import { listRenderedCounterpartyIds } from './e2e-account-ui';
 import { enqueueEntityTxs } from './e2e-runtime-input';
 
 const DEFAULT_TOKEN_IDS = [1] as const;
@@ -480,9 +479,23 @@ async function hasExportedRuntimeEnv(page: Page): Promise<boolean> {
   return await page.evaluate(() => typeof (window as typeof window & { isolatedEnv?: unknown }).isolatedEnv !== 'undefined');
 }
 
-async function hasRenderedAccountCard(page: Page, hubId: string): Promise<boolean> {
-  const ids = await listRenderedCounterpartyIds(page).catch(() => []);
-  return ids.includes(hubId.toLowerCase());
+async function hasRenderedCommittedAccountCard(page: Page, hubId: string): Promise<boolean> {
+  return page.evaluate((targetHubId) => {
+    const normalizeEntityId = (value: string): string => String(value || '').trim().toLowerCase();
+    const target = normalizeEntityId(targetHubId);
+    const cards = Array.from(document.querySelectorAll('.account-preview'));
+    const card = cards.find((entry) => {
+      const rawCounterpartyId = String(
+        entry.getAttribute('data-counterparty-id')
+        || entry.querySelector('.entity-id, .id, [data-entity-id]')?.textContent
+        || '',
+      ).trim();
+      return normalizeEntityId(rawCounterpartyId) === target;
+    });
+    if (!card) return false;
+    const text = String(card.textContent || '');
+    return !/Awaiting first frame/i.test(text);
+  }, hubId);
 }
 
 export async function connectRuntimeToHub(
@@ -522,14 +535,14 @@ export async function connectRuntimeToHubWithCredit(
     if (!canUseDefaultUiConnect) {
       throw new Error(`prod/runtime-global-free connect only supports default hub connect for ${hubId.slice(0, 10)}`);
     }
-    if (await hasRenderedAccountCard(page, hubId)) return;
+    if (await hasRenderedCommittedAccountCard(page, hubId)) return;
     await connectHubThroughUi(page, hubId);
     await expect.poll(
-      async () => await hasRenderedAccountCard(page, hubId),
+      async () => await hasRenderedCommittedAccountCard(page, hubId),
       {
         timeout: DEFAULT_OPEN_TIMEOUT_MS,
         intervals: [250, 500, 750],
-        message: `rendered account ${hubId.slice(0, 10)} must appear after hub connect`,
+        message: `rendered account ${hubId.slice(0, 10)} must commit after hub connect`,
       },
     ).toBe(true);
     return;
