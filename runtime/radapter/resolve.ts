@@ -102,6 +102,23 @@ const readAtHeight = (query?: RuntimeAdapterReadQuery): number | null => {
 
 const envHeight = (env: Env): number => Math.max(0, Math.floor(Number(env.height ?? 0)));
 
+const latestHeadHeight = (head: StorageHead): number =>
+  Math.max(0, Math.floor(Number(head.latestHeight ?? 0)));
+
+const assertRequestedHeightAvailable = (
+  requestedHeight: number,
+  head: StorageHead,
+  scope: string,
+): void => {
+  const latestHeight = latestHeadHeight(head);
+  if (requestedHeight > latestHeight) {
+    throw new RuntimeAdapterError(
+      'E_NOT_FOUND',
+      `${scope} height unavailable: requested=${requestedHeight} latest=${latestHeight}`,
+    );
+  }
+};
+
 const findReplica = (env: Env, entityId: string): EntityReplica | null => {
   const normalized = normalizeEntityId(entityId);
   for (const replica of env.eReplicas?.values?.() ?? []) {
@@ -188,6 +205,11 @@ const listEntitySummaries = async (
 ): Promise<RuntimeAdapterEntitySummary[]> => {
   const height = readAtHeight(query);
   if (height !== null && height !== envHeight(ctx.env)) {
+    if (ctx.readHead) {
+      const head = await ctx.readHead();
+      if (!head) throw new RuntimeAdapterError('E_NOT_FOUND', `storage head not found at height ${height}`);
+      assertRequestedHeightAvailable(height, head, 'entity summary');
+    }
     if (!ctx.listEntityIdsAtHeight) {
       throw new RuntimeAdapterError('E_INTERNAL', 'storage entity listing is required for historical reads');
     }
@@ -388,6 +410,9 @@ const projectViewFrame = async (
   if (!isCurrentHeight && !persistedHead) {
     throw new RuntimeAdapterError('E_NOT_FOUND', `storage head not found at height ${requestedHeight}`);
   }
+  if (!isCurrentHeight) {
+    assertRequestedHeightAvailable(requestedHeight!, persistedHead!, 'view-frame');
+  }
   const head = persistedHead ?? headFromEnv(ctx.env);
   const height = requestedHeight ?? currentEnvHeight;
   const heightQuery = height > 0 ? { ...query, atHeight: height } : query;
@@ -465,6 +490,7 @@ export const resolveRuntimeAdapterRead = async <T = unknown>(
       }
       const head = await ctx.readHead();
       if (!head) throw new RuntimeAdapterError('E_NOT_FOUND', `storage head not found at height ${requestedHeight}`);
+      assertRequestedHeightAvailable(requestedHeight, head, 'head');
       return head as T;
     }
     return headFromEnv(ctx.env) as T;
