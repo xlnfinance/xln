@@ -9,6 +9,7 @@
     activeRuntime,
     activeSigner,
     allRuntimes,
+    resolveDefaultRecoveryTowerUrls,
     type RecoveryTowerConfig,
     type RuntimeRecoveryConfig,
   } from '$lib/stores/vaultStore';
@@ -238,7 +239,21 @@
   let creatingRuntime = false;
   let runtimeCreateError = '';
 
-  const officialTowerUrl = 'https://xln.finance';
+  const resolveOfficialTowerUrl = (): string => {
+    if (typeof window === 'undefined') return 'https://xln.finance';
+    const w = window as Window & { __XLN_WATCHTOWERS__?: unknown };
+    let localUrls: string | null = null;
+    try {
+      localUrls = localStorage.getItem('xln-watchtower-urls');
+    } catch {
+      localUrls = null;
+    }
+    return resolveDefaultRecoveryTowerUrls({
+      hostname: window.location.hostname,
+      globalUrls: w.__XLN_WATCHTOWERS__,
+      localUrls,
+    })[0] || 'https://xln.finance';
+  };
 
   const buildSelectedRecoveryConfig = (): RuntimeRecoveryConfig => {
     if (watchtowerSetupMode === 'local_only') {
@@ -250,6 +265,7 @@
     const towerMode = watchtowerSetupMode === 'backup_only'
       ? 'blind_backup'
       : 'delayed_last_resort';
+    const officialTowerUrl = resolveOfficialTowerUrl();
     const towers: RecoveryTowerConfig[] = [{
       id: 'official-watchtower',
       url: officialTowerUrl,

@@ -133,9 +133,15 @@ describe('standalone watchtower service', () => {
     for (const healthPath of ['/', '/api/tower/healthz']) {
       const health = await fetch(`${base}${healthPath}`);
       expect(health.ok).toBe(true);
-      const healthPayload = await health.json() as { ok: boolean; signerAddress?: string; sweep?: { enabled?: boolean } };
+      const healthPayload = await health.json() as {
+        ok: boolean;
+        signerAddress?: string;
+        actionPublicKey?: string;
+        sweep?: { enabled?: boolean };
+      };
       expect(healthPayload.ok).toBe(true);
       expect(healthPayload.signerAddress).toBe(server.store.signerAddress);
+      expect(healthPayload.actionPublicKey).toBe(server.store.actionPublicKey);
       expect(healthPayload.sweep?.enabled).toBe(false);
     }
 
@@ -183,6 +189,56 @@ describe('standalone watchtower service', () => {
     const payload = await put.json() as { ok: boolean; error?: string };
     expect(payload.ok).toBe(false);
     expect(String(payload.error || '')).toContain('TOWER_QUOTA_EXCEEDED');
+  });
+
+  test('rejects oversized JSON bodies before request handling', async () => {
+    const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-body-cap-${Date.now()}`);
+    rmSync(tempRoot, { recursive: true, force: true });
+    mkdirSync(tempRoot, { recursive: true });
+
+    const server = startStandaloneWatchtowerServer({
+      host: '127.0.0.1',
+      port: 0,
+      towerId: 'tower-body-cap-test',
+      dbPath: join(tempRoot, 'tower.level'),
+      maxStoredBytesPerLookupKey: 64 * 1024,
+    });
+    servers.push(server);
+
+    const response = await fetch(`http://127.0.0.1:${server.server.port}/api/tower/appointment`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ payload: 'x'.repeat(129 * 1024) }),
+    });
+    expect(response.status).toBe(413);
+    const payload = await response.json() as { ok: boolean; error?: string };
+    expect(payload.ok).toBe(false);
+    expect(String(payload.error || '')).toContain('TOWER_BODY_TOO_LARGE');
+  });
+
+  test('keeps the write-only recovery complaint sink disabled by default', async () => {
+    const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-complaint-disabled-${Date.now()}`);
+    rmSync(tempRoot, { recursive: true, force: true });
+    mkdirSync(tempRoot, { recursive: true });
+
+    const server = startStandaloneWatchtowerServer({
+      host: '127.0.0.1',
+      port: 0,
+      towerId: 'tower-complaint-disabled-test',
+      dbPath: join(tempRoot, 'tower.level'),
+      maxStoredBytesPerLookupKey: 64 * 1024,
+    });
+    servers.push(server);
+
+    const response = await fetch(`http://127.0.0.1:${server.server.port}/api/recovery/complaint`, {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ reason: 'test' }),
+    });
+    expect(response.status).toBe(404);
+    const payload = await response.json() as { ok: boolean; error?: string };
+    expect(payload.ok).toBe(false);
+    expect(payload.error).toBe('TOWER_COMPLAINTS_DISABLED');
   });
 
   test('reports scheduler enabled when an action key is configured', async () => {

@@ -217,6 +217,7 @@ type TowerServerInfo = {
   service?: string;
   towerId?: string;
   signerAddress?: string;
+  actionPublicKey?: string;
   maxStoredBytesPerLookupKey?: number;
   maxBundlesPerLookupKey?: number;
 };
@@ -801,6 +802,7 @@ async function uploadRuntimeRecoverySnapshot(
         tower,
         towerSignerAddress,
         encrypted,
+        typeof info.actionPublicKey === 'string' ? info.actionPublicKey : undefined,
       );
       for (const upload of activeAppointments) {
         const appointmentUrl = buildTowerRequestUrl(tower.url, '/api/tower/appointment');
@@ -1152,6 +1154,7 @@ export async function buildDelayedLastResortAppointmentsForTower(
   tower: RecoveryTowerConfig,
   towerSignerAddress: string,
   encryptedBundle: EncryptedRuntimeRecoveryBundleV1,
+  towerActionPublicKey?: string,
 ): Promise<ActiveTowerAppointmentUpload[]> {
   if (
     typeof xln.deriveRuntimeRecoveryActionLookupKey !== 'function' ||
@@ -1254,10 +1257,14 @@ export async function buildDelayedLastResortAppointmentsForTower(
           sig: proofHanko,
         },
       };
+      const serializedRemedy = stringifyTowerPayload(remedy);
+      const encryptedRemedy = towerActionPublicKey && typeof xln.encryptTowerPayloadForPublicKey === 'function'
+        ? await xln.encryptTowerPayloadForPublicKey(serializedRemedy, towerActionPublicKey)
+        : serializedRemedy;
       const triggerHint = `chain:${chainId}:acct:${entityId}:${counterpartyId}`;
       const activePayload: TowerActivePayloadV1 = {
         triggerHint,
-        encryptedRemedy: stringifyTowerPayload(remedy),
+        encryptedRemedy,
         actionKind: 'counter_dispute_only',
         appointmentSequence,
         proofNonce,

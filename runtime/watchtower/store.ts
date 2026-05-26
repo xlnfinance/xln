@@ -11,7 +11,7 @@ import type {
   TowerModeV1,
   TowerReceiptV1,
 } from '../recovery/types';
-import { computeTowerActivePayloadDigest } from '../recovery/crypto';
+import { computeTowerActivePayloadDigest, getTowerPayloadEncryptionPublicKey } from '../recovery/crypto';
 
 type StoredLookupDoc = {
   lookupKey: string;
@@ -60,6 +60,7 @@ export type WatchtowerStoreStats = {
 const DEFAULT_MAX_BUNDLES = 3;
 const DEFAULT_MAX_STORED_BYTES = 10 * 1024;
 const DEFAULT_RECEIPT_TTL_MS = 365 * 24 * 60 * 60 * 1000;
+const STATS_CACHE_TTL_MS = 5_000;
 
 const normalizeLookupKey = (lookupKey: string): string => {
   const normalized = String(lookupKey || '').trim().toLowerCase();
@@ -110,16 +111,21 @@ export const createWatchtowerStore = (options?: {
   const maxStoredBytesPerLookupKey = Math.max(1024, Math.floor(Number(options?.maxStoredBytesPerLookupKey ?? DEFAULT_MAX_STORED_BYTES)));
   const receiptTtlMs = Math.max(60_000, Math.floor(Number(options?.receiptTtlMs ?? DEFAULT_RECEIPT_TTL_MS)));
   const now = options?.now || (() => Date.now());
-  const signer = new Wallet(
-    String(
-      options?.towerPrivateKey
-      || process.env['XLN_WATCHTOWER_PRIVATE_KEY']
-      || ethers.keccak256(ethers.toUtf8Bytes(`xln:watchtower:${towerId}`)),
-    ),
+  const towerPrivateKey = String(
+    options?.towerPrivateKey
+    || process.env['XLN_WATCHTOWER_PRIVATE_KEY']
+    || ethers.keccak256(ethers.toUtf8Bytes(`xln:watchtower:${towerId}`)),
   );
+  const signer = new Wallet(towerPrivateKey);
+  const actionPublicKey = getTowerPayloadEncryptionPublicKey(towerPrivateKey);
 
   const db = new Level<string, string>(dbPath, { valueEncoding: 'utf8' });
   let opened = false;
+  let cachedStats: { cachedAt: number; value: WatchtowerStoreStats } | null = null;
+
+  const invalidateStats = (): void => {
+    cachedStats = null;
+  };
 
   const ensureOpen = async (): Promise<void> => {
     if (opened) return;
@@ -148,6 +154,7 @@ export const createWatchtowerStore = (options?: {
   const writeLookup = async (doc: StoredLookupDoc): Promise<void> => {
     await ensureOpen();
     await db.put(lookupKeyFor(doc.lookupKey), serializeTaggedJson(doc));
+    invalidateStats();
   };
 
   const signReceipt = async (receipt: TowerReceiptV1): Promise<TowerReceiptV1> => ({
@@ -241,6 +248,7 @@ export const createWatchtowerStore = (options?: {
   const appendComplaint = async (payload: Record<string, unknown>): Promise<void> => {
     await ensureOpen();
     await db.put(complaintKey(), serializeTaggedJson({ ts: now(), ...payload }));
+    invalidateStats();
   };
 
   const listLatestActiveAppointments = async (): Promise<ActiveTowerAppointment[]> => {
@@ -275,6 +283,7 @@ export const createWatchtowerStore = (options?: {
   const appendActionReceipt = async (receipt: StoredTowerActionReceipt): Promise<void> => {
     await ensureOpen();
     await db.put(actionReceiptKey(receipt.lookupKey), serializeTaggedJson(receipt));
+    invalidateStats();
   };
 
   const listActionReceipts = async (lookupKey: string): Promise<StoredTowerActionReceipt[]> => {
@@ -296,6 +305,10 @@ export const createWatchtowerStore = (options?: {
 
   const getStats = async (): Promise<WatchtowerStoreStats> => {
     await ensureOpen();
+    const currentTime = now();
+    if (cachedStats && currentTime - cachedStats.cachedAt < STATS_CACHE_TTL_MS) {
+      return cachedStats.value;
+    }
     let lookupCount = 0;
     let activeAppointmentCount = 0;
     let actionReceiptCount = 0;
@@ -316,11 +329,41 @@ export const createWatchtowerStore = (options?: {
         actionReceiptCount += 1;
       }
     }
-    return {
+    const value = {
       lookupCount,
       activeAppointmentCount,
       actionReceiptCount,
     };
+    cachedStats = { cachedAt: currentTime, value };
+    return value;
+  };
+
+  const pruneExpired = async (): Promise<{ deleted: number }> => {
+    await ensureOpen();
+    const cutoff = now() - receiptTtlMs;
+    let deleted = 0;
+    const keysToDelete: string[] = [];
+    for await (const [key] of db.iterator()) {
+      if (key.startsWith('action:')) {
+        const timestamp = Number(String(key).split(':')[2] || 0);
+        if (Number.isFinite(timestamp) && timestamp > 0 && timestamp < cutoff) {
+          keysToDelete.push(key);
+        }
+        continue;
+      }
+      if (key.startsWith('complaint:')) {
+        const timestamp = Number(String(key).split(':')[1] || 0);
+        if (Number.isFinite(timestamp) && timestamp > 0 && timestamp < cutoff) {
+          keysToDelete.push(key);
+        }
+      }
+    }
+    for (const key of keysToDelete) {
+      await db.del(key);
+      deleted += 1;
+    }
+    if (deleted > 0) invalidateStats();
+    return { deleted };
   };
 
   return {
@@ -329,6 +372,7 @@ export const createWatchtowerStore = (options?: {
     maxBundlesPerLookupKey,
     maxStoredBytesPerLookupKey,
     signerAddress: signer.address.toLowerCase(),
+    actionPublicKey,
     upsertAppointment,
     getLatest,
     getLatestReceipt,
@@ -337,6 +381,7 @@ export const createWatchtowerStore = (options?: {
     listActionReceipts,
     appendComplaint,
     getStats,
+    pruneExpired,
     close,
   };
 };

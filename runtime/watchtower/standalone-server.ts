@@ -74,6 +74,7 @@ const startSweepScheduler = (
     }
     running = true;
     try {
+      await store.pruneExpired();
       const result = await runWatchtowerSweep(store, {
         towerPrivateKey,
         ...(options.allowedRpcUrls ? { allowedRpcUrls: options.allowedRpcUrls } : {}),
@@ -129,6 +130,7 @@ export const startStandaloneWatchtowerServer = (options: StandaloneWatchtowerOpt
           service: 'xln-watchtower',
           towerId: store.towerId,
           signerAddress: store.signerAddress,
+          actionPublicKey: store.actionPublicKey,
           maxStoredBytesPerLookupKey: store.maxStoredBytesPerLookupKey,
           maxBundlesPerLookupKey: store.maxBundlesPerLookupKey,
           sweep: {

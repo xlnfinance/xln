@@ -65,6 +65,7 @@ export type {
   TowerAppointmentV1,
   TowerCounterDisputeRemedyV1,
   TowerDiscoverResponseV1,
+  TowerEncryptedPayloadV1,
   TowerFinalDisputeProofV1,
   TowerModeV1,
   TowerReceiptV1,
@@ -494,6 +495,11 @@ export interface XLNModule {
     lastResortWindowBlocks: number,
     appointmentSequence: number,
   ) => string;
+  encryptTowerPayloadForPublicKey: (
+    plaintext: string,
+    towerPublicKey: string,
+  ) => Promise<string>;
+  getTowerPayloadEncryptionPublicKey: (towerPrivateKey: string) => string;
   buildSingleSignerHanko: (
     entityId: string,
     hash: string,

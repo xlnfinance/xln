@@ -9,12 +9,14 @@ import type {
   EncryptedRuntimeRecoveryBundleV1,
   RuntimeRecoveryBundleV1,
   TowerActivePayloadV1,
+  TowerEncryptedPayloadV1,
   TowerModeV1,
 } from './types';
 
 const RECOVERY_LOOKUP_DOMAIN = 'xln:recovery:lookup:v1';
 const RECOVERY_ACTION_LOOKUP_DOMAIN = 'xln:recovery:action-lookup:v1';
 const RECOVERY_AES_KEY_DOMAIN = 'xln:recovery:key:v1';
+const TOWER_PAYLOAD_AES_KEY_DOMAIN = 'xln:tower:payload-key:v1';
 const TOWER_APPOINTMENT_DOMAIN = 'xln:tower:appointment:v1';
 const WATCHTOWER_COUNTER_DISPUTE_DOMAIN = 'XLN_WATCHTOWER_COUNTER_DISPUTE_V1';
 
@@ -41,6 +43,103 @@ const importAesKey = async (runtimeId: string, runtimeSeed: string): Promise<Cry
     false,
     ['encrypt', 'decrypt'],
   );
+};
+
+const normalizeTowerPublicKey = (publicKey: string): string =>
+  ethers.SigningKey.computePublicKey(String(publicKey || '').trim(), true);
+
+const deriveTowerPayloadAesKeyBytes = (
+  sharedSecret: string,
+  ephemeralPublicKey: string,
+  towerPublicKey: string,
+): Uint8Array =>
+  ethers.getBytes(
+    ethers.keccak256(
+      ethers.solidityPacked(
+        ['string', 'bytes', 'bytes', 'bytes'],
+        [
+          TOWER_PAYLOAD_AES_KEY_DOMAIN,
+          ethers.getBytes(sharedSecret),
+          ethers.getBytes(ephemeralPublicKey),
+          ethers.getBytes(towerPublicKey),
+        ],
+      ),
+    ),
+  );
+
+const importTowerPayloadAesKey = async (
+  sharedSecret: string,
+  ephemeralPublicKey: string,
+  towerPublicKey: string,
+): Promise<CryptoKey> =>
+  crypto.subtle.importKey(
+    'raw',
+    toOwnedArrayBuffer(deriveTowerPayloadAesKeyBytes(sharedSecret, ephemeralPublicKey, towerPublicKey)),
+    { name: 'AES-GCM' },
+    false,
+    ['encrypt', 'decrypt'],
+  );
+
+export const getTowerPayloadEncryptionPublicKey = (towerPrivateKey: string): string =>
+  new ethers.SigningKey(String(towerPrivateKey || '').trim()).compressedPublicKey;
+
+export const encryptTowerPayloadForPublicKey = async (
+  plaintext: string,
+  towerPublicKey: string,
+): Promise<string> => {
+  const normalizedTowerPublicKey = normalizeTowerPublicKey(towerPublicKey);
+  const ephemeral = ethers.Wallet.createRandom();
+  const ephemeralSigningKey = new ethers.SigningKey(ephemeral.privateKey);
+  const ephemeralPublicKey = ephemeralSigningKey.compressedPublicKey;
+  const sharedSecret = ephemeralSigningKey.computeSharedSecret(normalizedTowerPublicKey);
+  const key = await importTowerPayloadAesKey(sharedSecret, ephemeralPublicKey, normalizedTowerPublicKey);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = new Uint8Array(
+    await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, encoder.encode(plaintext)),
+  );
+  const encrypted: TowerEncryptedPayloadV1 = {
+    version: 1,
+    type: 'tower_encrypted_payload',
+    alg: 'secp256k1-aes-256-gcm',
+    epk: ephemeralPublicKey,
+    iv: ethers.hexlify(iv),
+    ciphertext: ethers.hexlify(ciphertext),
+    plaintextHash: ethers.keccak256(ethers.toUtf8Bytes(plaintext)),
+  };
+  return serializeTaggedJson(encrypted);
+};
+
+export const decryptTowerPayloadWithPrivateKey = async (
+  payload: string,
+  towerPrivateKey: string,
+): Promise<string> => {
+  const raw = String(payload || '').trim();
+  if (!raw) throw new Error('TOWER_PAYLOAD_EMPTY');
+  const parsed = deserializeTaggedJson<Record<string, unknown>>(raw);
+  if (parsed['type'] !== 'tower_encrypted_payload') {
+    return raw;
+  }
+  if (parsed['version'] !== 1 || parsed['alg'] !== 'secp256k1-aes-256-gcm') {
+    throw new Error('TOWER_PAYLOAD_ENCRYPTION_UNSUPPORTED');
+  }
+  const towerSigningKey = new ethers.SigningKey(String(towerPrivateKey || '').trim());
+  const towerPublicKey = towerSigningKey.compressedPublicKey;
+  const ephemeralPublicKey = normalizeTowerPublicKey(String(parsed['epk'] || ''));
+  const sharedSecret = towerSigningKey.computeSharedSecret(ephemeralPublicKey);
+  const key = await importTowerPayloadAesKey(sharedSecret, ephemeralPublicKey, towerPublicKey);
+  const plaintext = decoder.decode(new Uint8Array(
+    await crypto.subtle.decrypt(
+      { name: 'AES-GCM', iv: toOwnedArrayBuffer(ethers.getBytes(String(parsed['iv'] || '0x'))) },
+      key,
+      toOwnedArrayBuffer(ethers.getBytes(String(parsed['ciphertext'] || '0x'))),
+    ),
+  ));
+  const expectedHash = String(parsed['plaintextHash'] || '').toLowerCase();
+  const actualHash = ethers.keccak256(ethers.toUtf8Bytes(plaintext));
+  if (expectedHash && expectedHash !== actualHash) {
+    throw new Error(`TOWER_PAYLOAD_HASH_MISMATCH: expected=${expectedHash} actual=${actualHash}`);
+  }
+  return plaintext;
 };
 
 export const deriveRuntimeRecoveryLookupKey = (runtimeId: string, runtimeSeed: string): string =>

@@ -12,8 +12,52 @@ import {
 import type { WatchtowerStore } from './store';
 import { runWatchtowerSweep } from './action';
 
-const parseJsonBody = async <T>(request: Request): Promise<T> => {
-  return await request.json() as T;
+const DEFAULT_MAX_JSON_BODY_BYTES = 128 * 1024;
+const SMALL_MAX_JSON_BODY_BYTES = 8 * 1024;
+
+const parseContentLength = (request: Request): number | null => {
+  const header = request.headers.get('content-length');
+  if (!header) return null;
+  const parsed = Number(header);
+  return Number.isFinite(parsed) && parsed >= 0 ? Math.floor(parsed) : null;
+};
+
+const readCappedRequestBody = async (request: Request, maxBytes: number): Promise<string> => {
+  const contentLength = parseContentLength(request);
+  if (contentLength !== null && contentLength > maxBytes) {
+    throw new Error(`TOWER_BODY_TOO_LARGE: bytes=${contentLength} max=${maxBytes}`);
+  }
+  if (!request.body) return '';
+
+  const reader = request.body.getReader();
+  const chunks: Uint8Array[] = [];
+  let total = 0;
+  while (true) {
+    const { done, value } = await reader.read();
+    if (done) break;
+    if (!value) continue;
+    total += value.byteLength;
+    if (total > maxBytes) {
+      throw new Error(`TOWER_BODY_TOO_LARGE: bytes=${total} max=${maxBytes}`);
+    }
+    chunks.push(value);
+  }
+
+  const buffer = new Uint8Array(total);
+  let offset = 0;
+  for (const chunk of chunks) {
+    buffer.set(chunk, offset);
+    offset += chunk.byteLength;
+  }
+  return new TextDecoder().decode(buffer);
+};
+
+const parseJsonBody = async <T>(request: Request, maxBytes = DEFAULT_MAX_JSON_BODY_BYTES): Promise<T> => {
+  const raw = await readCappedRequestBody(request, maxBytes);
+  if (!raw.trim()) {
+    throw new Error('TOWER_BODY_EMPTY');
+  }
+  return JSON.parse(raw) as T;
 };
 
 const normalizeLookupKey = (lookupKey: unknown): string => {
@@ -24,7 +68,8 @@ const normalizeLookupKey = (lookupKey: unknown): string => {
   return value;
 };
 
-const quotaExceededStatus = (message: string): number => message.startsWith('TOWER_QUOTA_EXCEEDED') ? 413 : 400;
+const quotaExceededStatus = (message: string): number =>
+  message.startsWith('TOWER_QUOTA_EXCEEDED') || message.startsWith('TOWER_BODY_TOO_LARGE') ? 413 : 400;
 
 const verifyTowerAppointment = (appointment: TowerAppointmentV1): TowerAppointmentV1 => {
   if (!appointment || appointment.type !== 'tower_appointment' || appointment.version !== 1) {
@@ -164,7 +209,13 @@ export const handleRecoveryState = async (req: Request, store: WatchtowerStore):
 
 export const handleRecoveryComplaint = async (req: Request, store: WatchtowerStore): Promise<Response> => {
   try {
-    const body = await parseJsonBody<Record<string, unknown>>(req);
+    if (process.env['XLN_WATCHTOWER_ACCEPT_COMPLAINTS'] !== '1') {
+      return new Response(serializeTaggedJson({ ok: false, error: 'TOWER_COMPLAINTS_DISABLED' }), {
+        status: 404,
+        headers: { 'content-type': 'application/json' },
+      });
+    }
+    const body = await parseJsonBody<Record<string, unknown>>(req, SMALL_MAX_JSON_BODY_BYTES);
     await store.appendComplaint({
       type: 'recovery_complaint',
       lookupKey: typeof body['lookupKey'] === 'string' ? body['lookupKey'] : undefined,

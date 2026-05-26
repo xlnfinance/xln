@@ -9,6 +9,8 @@ This folder owns recovery bundle primitives and watchtower authorization helpers
 - derives separate blinded namespaces for blind backup restore and active
   watchtower appointments
 - verifies and decrypts tower payloads locally in the wallet
+- encrypts delayed last-resort remedy payloads to the tower action public key
+  when the tower advertises one
 - computes owner-side tower authorization hashes for delayed counter-disputes
 - does **not** hold spend-capable keys
 

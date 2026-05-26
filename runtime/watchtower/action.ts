@@ -4,10 +4,12 @@ import type {
   TowerCounterDisputeRemedyV1,
   TowerFinalDisputeProofV1,
 } from '../recovery/types';
+import { decryptTowerPayloadWithPrivateKey } from '../recovery/crypto';
 import type { WatchtowerStore, StoredTowerActionReceipt } from './store';
 
 const DEPOSITORY_MINIMAL_ABI = [
   'function accountKey(bytes32 e1, bytes32 e2) view returns (bytes)',
+  'function defaultDisputeDelay() view returns (uint256)',
   'function _accounts(bytes acctKey) view returns (uint256 nonce, bytes32 disputeHash, uint256 disputeTimeout, uint256 disputeStartTimestamp)',
   'function watchtowerCounterDispute(bytes32 entityId, (bytes32 counterentity,uint256 initialNonce,uint256 finalNonce,bytes32 initialProofbodyHash,(int256[] offdeltas,uint256[] tokenIds,(address transformerAddress,bytes encodedBatch,(uint256 deltaIndex,uint256 rightAllowance,uint256 leftAllowance)[] allowances)[] transformers) finalProofbody,bytes finalArguments,bytes initialArguments,bytes sig,bool startedByLeft,uint256 disputeUntilBlock,bool cooperative) params, uint256 lastResortWindowBlocks, uint256 appointmentSequence, bytes ownerAuthorizationHanko) returns (bool)',
   'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes initialArguments)',
@@ -64,8 +66,13 @@ const normalizeFinalDisputeProof = (value: unknown): TowerFinalDisputeProofV1 =>
 export const encodeTowerCounterDisputeRemedy = (remedy: TowerCounterDisputeRemedyV1): string =>
   serializeTaggedJson(remedy);
 
-export const decodeTowerCounterDisputeRemedy = (payload: string): TowerCounterDisputeRemedyV1 => {
-  const raw = String(payload || '').trim();
+export const decodeTowerCounterDisputeRemedy = async (
+  payload: string,
+  towerPrivateKey?: string,
+): Promise<TowerCounterDisputeRemedyV1> => {
+  const raw = towerPrivateKey
+    ? await decryptTowerPayloadWithPrivateKey(payload, towerPrivateKey)
+    : String(payload || '').trim();
   if (!raw) throw new Error('WATCHTOWER_REMEDY_EMPTY');
   const parsed = deserializeTaggedJson<Record<string, unknown>>(raw);
   if (parsed['type'] !== 'counter_dispute_remedy' || parsed['version'] !== 1) {
@@ -102,7 +109,13 @@ type WatchtowerSweepOptions = {
     provider: WatchtowerSweepProvider | JsonRpcProvider,
   ) => {
     accountKey: (entityId: string, counterentity: string) => Promise<string>;
-    _accounts: (acctKey: string) => Promise<{ nonce: bigint; disputeHash: string; disputeTimeout: bigint }>;
+    _accounts: (acctKey: string) => Promise<{
+      nonce: bigint;
+      disputeHash: string;
+      disputeTimeout: bigint;
+      disputeStartTimestamp?: bigint;
+    }>;
+    defaultDisputeDelay?: () => Promise<bigint>;
     watchtowerCounterDispute: (
       entityId: string,
       finalization: {
@@ -206,12 +219,16 @@ const findActiveDisputeContext = async (
   remedy: TowerCounterDisputeRemedyV1,
   disputeHash: string,
   disputeTimeout: bigint,
+  fromBlockHint?: bigint,
 ): Promise<ActiveDisputeContext> => {
   if (typeof provider.getLogs !== 'function') {
     throw new Error('WATCHTOWER_PROVIDER_GET_LOGS_UNAVAILABLE');
   }
-  const latestBlock = Number(disputeTimeout);
-  const fromBlock = Math.max(0, latestBlock - 20_000);
+  const latestBlock = Math.max(0, Number(disputeTimeout));
+  const hintedFromBlock = Number(fromBlockHint || 0n);
+  const fromBlock = Number.isFinite(hintedFromBlock) && hintedFromBlock > 0
+    ? Math.max(0, Math.floor(hintedFromBlock))
+    : Math.max(0, latestBlock - 20_000);
   const topic0 = DEPOSITORY_INTERFACE.getEvent('DisputeStarted')!.topicHash;
   const watchedTopic = ethers.zeroPadValue(remedy.watchedEntityId, 32).toLowerCase();
   const counterpartyTopic = ethers.zeroPadValue(remedy.latestProof.counterentity, 32).toLowerCase();
@@ -314,7 +331,7 @@ export const runWatchtowerSweep = async (
   for (const appointment of activeAppointments) {
     const createdAt = now();
     try {
-      const remedy = decodeTowerCounterDisputeRemedy(appointment.activePayload.encryptedRemedy);
+      const remedy = await decodeTowerCounterDisputeRemedy(appointment.activePayload.encryptedRemedy, towerPrivateKey);
       if (remedy.towerAddress.toLowerCase() !== towerWallet.address.toLowerCase()) {
         await store.appendActionReceipt(
           buildActionReceipt(
@@ -340,6 +357,7 @@ export const runWatchtowerSweep = async (
         nonce: bigint;
         disputeHash: string;
         disputeTimeout: bigint;
+        disputeStartTimestamp?: bigint;
       };
       const currentBlock = BigInt(await provider.getBlockNumber());
       const disputeTimeout = BigInt(account.disputeTimeout || 0n);
@@ -360,7 +378,24 @@ export const runWatchtowerSweep = async (
         skipped += 1;
         continue;
       }
-      const disputeContext = await findActiveDisputeContext(provider, remedy, String(account.disputeHash || '0x'), disputeTimeout);
+      let disputeStartBlock: bigint | undefined;
+      if (typeof depository.defaultDisputeDelay === 'function') {
+        try {
+          const disputeDelay = BigInt(await depository.defaultDisputeDelay());
+          if (disputeDelay > 0n && disputeTimeout >= disputeDelay) {
+            disputeStartBlock = disputeTimeout - disputeDelay;
+          }
+        } catch {
+          disputeStartBlock = undefined;
+        }
+      }
+      const disputeContext = await findActiveDisputeContext(
+        provider,
+        remedy,
+        String(account.disputeHash || '0x'),
+        disputeTimeout,
+        disputeStartBlock,
+      );
       const finalization = {
         counterentity: remedy.latestProof.counterentity,
         initialNonce: disputeContext.initialNonce,
