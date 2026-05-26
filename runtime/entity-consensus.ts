@@ -357,11 +357,51 @@ export const applyEntityInput = async (
       }
       entityLog.debug('commit.signatures_verified', { count: frameCollectedSigs.size, frame: shortHash(entityInput.proposedFrame.hash) });
 
-      // Normally use the validator-computed state. A behind validator can only
-      // catch up from the quorum commit state because it missed the proposal.
-      const stateToApply = workingReplica.validatorComputedState || entityInput.proposedFrame.newState;
-      if (!workingReplica.validatorComputedState) {
-        entityLog.warn('commit.catch_up_state_used', { height: entityInput.proposedFrame.height });
+      // Normally use the validator-computed state. If this replica missed the
+      // proposal but is exactly one frame behind, replay the signed txs locally.
+      // Never apply proposedFrame.newState directly: quorum signatures bind the
+      // frame hash, not the mutable transport snapshot carrying the commit.
+      let stateToApply = workingReplica.validatorComputedState;
+      if (!stateToApply) {
+        const proposedFrame = entityInput.proposedFrame;
+        const expectedPrevHeight = proposedFrame.height - 1;
+        if (workingReplica.state.height !== expectedPrevHeight) {
+          entityLog.warn('commit.catch_up_state_wait', {
+            height: workingReplica.state.height,
+            expectedPrevHeight,
+            commitHeight: proposedFrame.height,
+            frame: shortHash(proposedFrame.hash),
+          });
+          return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
+        }
+
+        const { newState: replayedState } = await applyEntityFrame(
+          env,
+          workingReplica.state,
+          proposedFrame.txs,
+          proposedFrame.newState.timestamp,
+        );
+        const replayedCommitState = {
+          ...replayedState,
+          entityId: workingReplica.state.entityId,
+          height: proposedFrame.height,
+          timestamp: proposedFrame.newState.timestamp,
+        };
+        const replayedHash = await createEntityFrameHash(
+          getPrevFrameHash(workingReplica.state),
+          proposedFrame.height,
+          proposedFrame.newState.timestamp,
+          proposedFrame.txs,
+          replayedCommitState,
+        );
+        if (replayedHash !== proposedFrame.hash) {
+          logError("FRAME_CONSENSUS", `❌ COMMIT REJECTED: replayed catch-up state does not match signed frame hash!`);
+          logError("FRAME_CONSENSUS", `   Expected: ${replayedHash.slice(0, 30)}...`);
+          logError("FRAME_CONSENSUS", `   Received: ${proposedFrame.hash.slice(0, 30)}...`);
+          return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
+        }
+        stateToApply = replayedCommitState;
+        entityLog.warn('commit.catch_up_state_replayed', { height: proposedFrame.height, frame: shortHash(proposedFrame.hash) });
       }
       workingReplica.state = {
         ...stateToApply,
