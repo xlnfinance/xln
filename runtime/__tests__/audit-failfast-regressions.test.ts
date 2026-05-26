@@ -12,6 +12,7 @@ import { ACCOUNT_PENDING_RESEND_AFTER_MS, executeCrontab, initCrontab } from '..
 import { generateLazyEntityId } from '../entity-factory';
 import { isLeftEntity } from '../entity-id-utils';
 import { applyEntityFrame, applyEntityInput } from '../entity-consensus';
+import { createEntityFrameHash } from '../entity-consensus-frame';
 import { queueCrossJurisdictionBookOwnerWake } from '../entity-consensus/cross-j-orderbook';
 import { applyEntityTx } from '../entity-tx/apply';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity-tx/handlers/account-cross-j-followups';
@@ -1079,6 +1080,77 @@ describe('audit fail-fast regressions', () => {
     await expect(applyEntityInput(env, replica, entityInput)).rejects.toThrow(
       'ENTITY_FRAME_CHAIN_CORRUPTED',
     );
+  });
+
+  test('entity commit catch-up does not apply unsigned proposed newState mutations', async () => {
+    const seed = 'entity-commit-catch-up-state-binding seed alpha beta gamma';
+    const env = createEmptyEnv(seed);
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    env.timestamp = 42_000;
+    const { signerId, entityId } = registerLazySigner(seed, '1');
+    const frameTxs: EntityTx[] = [{
+      type: 'profile-update',
+      data: {
+        profile: {
+          entityId,
+          name: 'Signed Profile',
+        },
+      },
+    } as any];
+
+    const honestBaseState = makeEntityState(entityId);
+    honestBaseState.config = makeSingleSignerConfigFor(signerId);
+    const { newState: honestFrameState } = await applyEntityFrame(
+      env,
+      honestBaseState,
+      frameTxs,
+      env.timestamp,
+    );
+    const honestNewState: EntityState = {
+      ...honestFrameState,
+      entityId,
+      height: 1,
+      timestamp: env.timestamp,
+    };
+    const frameHash = await createEntityFrameHash(
+      'genesis',
+      1,
+      env.timestamp,
+      frameTxs,
+      honestNewState,
+    );
+    const frameSig = signAccountFrame(env, signerId, frameHash);
+    const tamperedNewState: EntityState = {
+      ...honestNewState,
+      profile: {
+        ...honestNewState.profile,
+        name: 'Injected Profile',
+      },
+    };
+    const replica = {
+      entityId,
+      signerId,
+      mempool: [],
+      isProposer: false,
+      state: makeEntityState(entityId),
+    } as EntityReplica;
+    replica.state.config = makeSingleSignerConfigFor(signerId);
+
+    const result = await applyEntityInput(env, replica, {
+      entityId,
+      signerId,
+      proposedFrame: {
+        height: 1,
+        txs: frameTxs,
+        hash: frameHash,
+        newState: tamperedNewState,
+        collectedSigs: new Map([[signerId, [frameSig]]]),
+      },
+    });
+
+    expect(result.workingReplica.state.height).toBe(1);
+    expect(result.workingReplica.state.profile.name).toBe('Signed Profile');
   });
 
   test('swap_offer refuses to add more than the configured per-account cap', async () => {
