@@ -83,8 +83,7 @@ const main = async (): Promise<void> => {
     degraded?: unknown[];
     storage?: { ok?: boolean };
     hubMesh?: { ok?: boolean };
-    marketMaker?: { ok?: boolean };
-    startupPhase?: string;
+    marketMaker?: { ok?: boolean; startupPhase?: string | null };
   };
 
   requireCondition(health.coreOk === true, 'health.coreOk is not true');
@@ -117,7 +116,7 @@ const main = async (): Promise<void> => {
     storageOk: health.storage?.ok ?? null,
     hubMeshOk: health.hubMesh?.ok ?? null,
     marketMakerOk: health.marketMaker?.ok ?? null,
-    startupPhase: health.startupPhase ?? null,
+    startupPhase: health.marketMaker?.startupPhase ?? null,
   }, null, 2));
 };
 
