@@ -1058,6 +1058,27 @@
           </div>
         </div>
 
+        <div class="input-mode-tabs" role="tablist" aria-label="Wallet setup mode">
+          <button
+            type="button"
+            role="tab"
+            aria-selected={inputMode === 'brainvault'}
+            class:selected={inputMode === 'brainvault'}
+            on:click={() => inputMode = 'brainvault'}
+          >
+            BrainVault
+          </button>
+          <button
+            type="button"
+            role="tab"
+            aria-selected={inputMode === 'mnemonic'}
+            class:selected={inputMode === 'mnemonic'}
+            on:click={() => inputMode = 'mnemonic'}
+          >
+            Mnemonic
+          </button>
+        </div>
+
         <div class="quick-login-section">
           <div class="quick-login-header">Quick Login (Testnet)</div>
           <div class="quick-login-grid">
@@ -1683,6 +1704,39 @@
   .back-to-create {
     width: 100%;
     margin-bottom: 14px;
+  }
+
+  .input-mode-tabs {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 6px;
+    margin-bottom: 12px;
+    padding: 4px;
+    border: 1px solid rgba(255, 255, 255, 0.07);
+    border-radius: 8px;
+    background: rgba(255, 255, 255, 0.025);
+  }
+
+  .input-mode-tabs button {
+    min-height: 34px;
+    border: 1px solid transparent;
+    border-radius: 6px;
+    background: transparent;
+    color: rgba(255, 255, 255, 0.64);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+  }
+
+  .input-mode-tabs button:hover {
+    color: rgba(255, 255, 255, 0.9);
+    background: rgba(255, 255, 255, 0.04);
+  }
+
+  .input-mode-tabs button.selected {
+    border-color: rgba(255, 200, 100, 0.28);
+    background: rgba(255, 200, 100, 0.1);
+    color: rgba(255, 218, 150, 0.96);
   }
 
   .quick-login-section {
