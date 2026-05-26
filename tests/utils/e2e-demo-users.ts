@@ -412,16 +412,31 @@ async function waitForNextRuntimeReady(page: Page, previousRuntimeId: string | n
 }
 
 async function dismissOnboardingIfVisible(page: Page): Promise<void> {
-  const checkbox = page.getByRole('checkbox', {
-    name: /I understand.*testnet software|I understand and accept the risks/i,
-  }).first();
-  if (await checkbox.isVisible({ timeout: 1000 }).catch(() => false)) {
-    const checked = await checkbox.isChecked().catch(() => false);
-    if (!checked) await checkbox.check({ timeout: 2000 }).catch(() => null);
-    const startBtn = page.getByRole('button', { name: /Start( using xln)?|Continue/i }).first();
-    if (await startBtn.isVisible({ timeout: 1000 }).catch(() => false)) {
-      await startBtn.click({ timeout: 2000 }).catch(() => null);
-    }
+  const clicked = await page.evaluate(() => {
+    const isVisible = (element: Element | null): element is HTMLElement => {
+      if (!(element instanceof HTMLElement)) return false;
+      const style = window.getComputedStyle(element);
+      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+
+    const checkbox = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
+      .find((input) => isVisible(input) && /testnet software|accept the risks/i.test(input.closest('label')?.textContent || ''));
+    if (checkbox && !checkbox.checked) checkbox.click();
+
+    const startButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => {
+        const label = String(button.textContent || '').trim();
+        return isVisible(button) && !button.disabled && /^(Start|Start using XLN|Continue)$/i.test(label);
+      });
+    if (!startButton) return false;
+    startButton.click();
+    return true;
+  }).catch(() => false);
+
+  if (clicked) {
+    await page.waitForTimeout(500);
   }
 }
 
@@ -471,6 +486,7 @@ async function waitForReadyAfterCreate(
       }
       await page.waitForTimeout(400);
     } catch {
+      if (page.isClosed()) throw new Error('waitForReadyAfterCreate aborted because page is closed');
       await page.waitForTimeout(400);
     }
   }
@@ -488,13 +504,24 @@ async function completeProfileOnboardingIfVisible(page: Page, label: string): Pr
     }
     return null;
   };
-  const finishButton = page.getByRole('button', { name: /Start( using xln)?|Continue/i }).first();
+  const finishButtonVisible = async (): Promise<boolean> => await page.evaluate(() => {
+    const isVisible = (element: Element | null): element is HTMLElement => {
+      if (!(element instanceof HTMLElement)) return false;
+      const style = window.getComputedStyle(element);
+      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+    return Array.from(document.querySelectorAll<HTMLButtonElement>('button')).some((button) =>
+      isVisible(button) && /^(Start|Starting\.\.\.|Start using XLN|Continue)$/i.test(String(button.textContent || '').trim()),
+    );
+  }).catch(() => false);
   const onboardingGoneOrReady = async (): Promise<boolean> =>
-    (await visibleDisplayNameInput() === null) && !await finishButton.isVisible().catch(() => false);
+    (await visibleDisplayNameInput() === null) && !await finishButtonVisible();
 
   const onboardingVisible =
     await visibleDisplayNameInput(1000) !== null
-    || await finishButton.isVisible({ timeout: 1000 }).catch(() => false);
+    || await finishButtonVisible();
   if (!onboardingVisible) {
     return;
   }
@@ -502,6 +529,41 @@ async function completeProfileOnboardingIfVisible(page: Page, label: string): Pr
   const displayNameInput = await visibleDisplayNameInput(15_000);
   if (displayNameInput && (await displayNameInput.inputValue().catch(() => '')).trim().length === 0) {
     await displayNameInput.fill(label, { timeout: 5_000 }).catch(() => null);
+  }
+
+  const submitted = await page.evaluate(() => {
+    const isVisible = (element: Element | null): element is HTMLElement => {
+      if (!(element instanceof HTMLElement)) return false;
+      const style = window.getComputedStyle(element);
+      if (style.display === 'none' || style.visibility === 'hidden' || Number(style.opacity) === 0) return false;
+      const rect = element.getBoundingClientRect();
+      return rect.width > 0 && rect.height > 0;
+    };
+
+    const checkbox = Array.from(document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]'))
+      .find((input) => isVisible(input) && /testnet software|accept the risks/i.test(input.closest('label')?.textContent || ''));
+    if (checkbox && !checkbox.checked) checkbox.click();
+
+    const startButton = Array.from(document.querySelectorAll<HTMLButtonElement>('button'))
+      .find((button) => {
+        const label = String(button.textContent || '').trim();
+        return isVisible(button) && !button.disabled && /^(Start|Start using XLN|Continue)$/i.test(label);
+      });
+    if (!startButton) return false;
+    startButton.click();
+    return true;
+  }).catch(() => false);
+
+  if (submitted) {
+    await expect
+      .poll(async () => {
+        return await onboardingGoneOrReady();
+      }, {
+        timeout: 60_000,
+        intervals: [250, 500, 1000],
+      })
+      .toBe(true);
+    return;
   }
 
   const fallbackState = await page.evaluate(() => {
@@ -738,6 +800,11 @@ export async function createRuntime(
     await quickLoginButton.click();
     runtimeId = await waitForNextRuntimeReady(page, previousRuntimeId);
   } else {
+    const mnemonicModeButton = page.getByRole('tab', { name: /^Mnemonic$/i }).first();
+    if (await mnemonicModeButton.isVisible({ timeout: 1_000 }).catch(() => false)) {
+      await mnemonicModeButton.click();
+    }
+
     const resolveDisplayNameInput = async () => await firstVisibleLocator([
       page.locator('#name').first(),
       page.getByRole('textbox', { name: /display name/i }).first(),
@@ -808,17 +875,12 @@ export async function createRuntime(
     if (stillInInitialInputState) {
       await openVaultButton.click({ force: true });
     }
-    if (usingMnemonicImport) {
-      runtimeId = await waitForRuntimeBootstrap(page, runtimeId, previousRuntimeId);
-    } else {
-      // BrainVault/manual creation now lands on the profile onboarding screen before
-      // the runtime is considered fully ready. The E2E flow must complete that step
-      // first, otherwise it waits forever for a post-onboarding ready signal that can
-      // never arrive on its own.
-      runtimeId = await waitForRuntimeBootstrap(page, runtimeId, previousRuntimeId);
-      await completeProfileOnboardingIfVisible(page, label);
-      await waitForRuntimeReady(page, runtimeId);
-    }
+    // BrainVault/manual creation can land on the profile onboarding screen before
+    // the runtime is considered fully ready. Assist that screen while polling,
+    // otherwise the test can wait forever for a ready signal gated behind Start.
+    runtimeId = await waitForReadyAfterCreate(page, previousRuntimeId, { onboardingAssist: true });
+    await completeProfileOnboardingIfVisible(page, label);
+    await waitForRuntimeReady(page, runtimeId);
   }
   runtimeIdsByLabel.set(label.toLowerCase(), runtimeId);
   await dismissOnboardingIfVisible(page);
