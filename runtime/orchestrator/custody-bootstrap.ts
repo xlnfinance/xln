@@ -125,6 +125,7 @@ export type StartedCustodySupport = {
   custodyChild: ManagedChild;
   identity: ManagedIdentity;
   hubIds: string[];
+  custodyBaseUrl: string;
   daemonAuthSeed: string;
   daemonAuthAudience: string;
   daemonAuthKey: string;
@@ -537,13 +538,15 @@ export const startCustodySupport = async (
         CUSTODY_DB_PATH: `${options.dbRoot}/custody.sqlite`,
       },
     );
-    await waitForCustodyServiceReady(options.custodyPort, custodyChild, custodyHttps);
+    const custodyReadyUrl = await waitForCustodyServiceReady(options.custodyPort, custodyChild, custodyHttps);
+    const custodyBaseUrl = new URL(custodyReadyUrl).origin;
 
     return {
       daemonChild,
       custodyChild,
       identity,
       hubIds,
+      custodyBaseUrl,
       daemonAuthSeed,
       daemonAuthAudience,
       daemonAuthKey,

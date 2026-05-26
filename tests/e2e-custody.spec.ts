@@ -889,7 +889,7 @@ test.describe('E2E Custody Flow', () => {
     const tempRoot = await mkdtemp(join(tmpdir(), 'xln-custody-e2e-'));
     const daemonPort = await getFreePort();
     const custodyPort = await getFreePort();
-    const custodyBaseUrl = `https://localhost:${custodyPort}`;
+    let custodyBaseUrl = '';
     const relayUrl = toWsUrl(API_BASE_URL, '/relay');
     const rpcProxyUrl = process.env.E2E_ANVIL_RPC ?? 'http://localhost:8545';
 
@@ -932,6 +932,7 @@ test.describe('E2E Custody Flow', () => {
       }));
       daemonChild = custodySupport.daemonChild;
       custodyChild = custodySupport.custodyChild;
+      custodyBaseUrl = custodySupport.custodyBaseUrl;
       daemonClient = new DaemonRpcClient(`ws://127.0.0.1:${daemonPort}/rpc`, custodySupport.daemonAuthKey);
       const custodyIdentity = custodySupport.identity;
       const senderHubIds = custodySupport.hubIds.slice(0, 2);

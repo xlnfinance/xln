@@ -87,6 +87,7 @@
   let inputMode: InputMode = 'brainvault';
   let phase: Phase = 'input';
   let watchtowerSetupMode: WatchtowerSetupMode = 'recommended';
+  let officialTowerUnavailable = false;
 
   $: hasAnyPersistedState = typeof localStorage !== 'undefined' && (localStorage.length > 0 || typeof indexedDB !== 'undefined');
 
@@ -239,7 +240,7 @@
   let creatingRuntime = false;
   let runtimeCreateError = '';
 
-  const resolveOfficialTowerUrl = (): string => {
+  const resolveOfficialTowerUrl = (): string | null => {
     if (typeof window === 'undefined') return 'https://xln.finance';
     const w = window as Window & { __XLN_WATCHTOWERS__?: unknown };
     let localUrls: string | null = null;
@@ -252,7 +253,7 @@
       hostname: window.location.hostname,
       globalUrls: w.__XLN_WATCHTOWERS__,
       localUrls,
-    })[0] || 'https://xln.finance';
+    })[0] || null;
   };
 
   const buildSelectedRecoveryConfig = (): RuntimeRecoveryConfig => {
@@ -266,6 +267,12 @@
       ? 'blind_backup'
       : 'delayed_last_resort';
     const officialTowerUrl = resolveOfficialTowerUrl();
+    if (!officialTowerUrl) {
+      return {
+        useDefaultTowers: false,
+        towers: [],
+      };
+    }
     const towers: RecoveryTowerConfig[] = [{
       id: 'official-watchtower',
       url: officialTowerUrl,
@@ -285,6 +292,10 @@
   onMount(() => {
     // Initialize vault store from localStorage
     vaultOperations.initialize();
+    officialTowerUnavailable = !resolveOfficialTowerUrl();
+    if (officialTowerUnavailable) {
+      watchtowerSetupMode = 'local_only';
+    }
 
     // Check if there's an active vault
     const vault = $activeRuntime;
@@ -1114,19 +1125,29 @@
               type="button"
               class="watchtower-option"
               class:selected={watchtowerSetupMode === 'recommended'}
+              disabled={officialTowerUnavailable}
               on:click={() => watchtowerSetupMode = 'recommended'}
             >
               <span class="watchtower-option-title">Official tower</span>
-              <span class="watchtower-option-copy">Encrypted backup plus last-resort counter-dispute from the official XLN tower.</span>
+              <span class="watchtower-option-copy">
+                {officialTowerUnavailable
+                  ? 'No tower configured for this local runtime.'
+                  : 'Encrypted backup plus last-resort counter-dispute from the official XLN tower.'}
+              </span>
             </button>
             <button
               type="button"
               class="watchtower-option"
               class:selected={watchtowerSetupMode === 'backup_only'}
+              disabled={officialTowerUnavailable}
               on:click={() => watchtowerSetupMode = 'backup_only'}
             >
               <span class="watchtower-option-title">Backup only</span>
-              <span class="watchtower-option-copy">Cross-browser recovery stays on. The tower does not hold an active rescue appointment.</span>
+              <span class="watchtower-option-copy">
+                {officialTowerUnavailable
+                  ? 'Configure a local tower URL to enable remote backup here.'
+                  : 'Cross-browser recovery stays on. The tower does not hold an active rescue appointment.'}
+              </span>
             </button>
             <button
               type="button"
@@ -1843,6 +1864,16 @@
   .watchtower-option:hover {
     background: rgba(255, 255, 255, 0.07);
     border-color: rgba(255, 200, 100, 0.24);
+  }
+
+  .watchtower-option:disabled {
+    cursor: not-allowed;
+    opacity: 0.56;
+  }
+
+  .watchtower-option:disabled:hover {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.08);
   }
 
   .watchtower-option.selected {
