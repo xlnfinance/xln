@@ -42,6 +42,8 @@ type SweepScheduler = {
   close: () => void;
 };
 
+const SWEEP_PRUNE_INTERVAL_MS = 60 * 60 * 1000;
+
 const startSweepScheduler = (
   store: WatchtowerStore,
   options: {
@@ -59,6 +61,7 @@ const startSweepScheduler = (
   let closed = false;
   let running = false;
   let timer: ReturnType<typeof setTimeout> | null = null;
+  let nextPruneAt = Date.now() + SWEEP_PRUNE_INTERVAL_MS;
 
   const schedule = (): void => {
     if (closed) return;
@@ -74,7 +77,11 @@ const startSweepScheduler = (
     }
     running = true;
     try {
-      await store.pruneExpired();
+      const now = Date.now();
+      if (now >= nextPruneAt) {
+        nextPruneAt = now + SWEEP_PRUNE_INTERVAL_MS;
+        await store.pruneExpired();
+      }
       const result = await runWatchtowerSweep(store, {
         towerPrivateKey,
         ...(options.allowedRpcUrls ? { allowedRpcUrls: options.allowedRpcUrls } : {}),

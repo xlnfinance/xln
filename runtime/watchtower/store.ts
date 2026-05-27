@@ -27,6 +27,10 @@ type StoredLookupDoc = {
   }>;
 };
 
+type StoredTowerMetaStats = {
+  actionReceiptCount: number;
+};
+
 export type StoredTowerActionReceipt = {
   id: string;
   lookupKey: string;
@@ -61,6 +65,7 @@ const DEFAULT_MAX_BUNDLES = 3;
 const DEFAULT_MAX_STORED_BYTES = 256 * 1024;
 const DEFAULT_RECEIPT_TTL_MS = 365 * 24 * 60 * 60 * 1000;
 const STATS_CACHE_TTL_MS = 5_000;
+const META_STATS_KEY = 'meta:stats:v1';
 
 const normalizeLookupKey = (lookupKey: string): string => {
   const normalized = String(lookupKey || '').trim().toLowerCase();
@@ -138,6 +143,21 @@ export const createWatchtowerStore = (options?: {
   const complaintKey = (): string => `complaint:${now()}:${randomUUID()}`;
   const actionReceiptPrefix = (lookupKey: string): string => `action:${normalizeLookupKey(lookupKey)}:`;
   const actionReceiptKey = (lookupKey: string): string => `${actionReceiptPrefix(lookupKey)}${now()}:${randomUUID()}`;
+
+  const normalizeMetaStats = (raw: StoredTowerMetaStats | null | undefined): StoredTowerMetaStats => ({
+    actionReceiptCount: Math.max(0, Math.floor(Number(raw?.actionReceiptCount || 0))),
+  });
+
+  const readMetaStats = async (): Promise<StoredTowerMetaStats> => {
+    await ensureOpen();
+    try {
+      return normalizeMetaStats(JSON.parse(await db.get(META_STATS_KEY)) as StoredTowerMetaStats);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      if (/LEVEL_NOT_FOUND|NotFound/i.test(message)) return normalizeMetaStats(null);
+      throw error;
+    }
+  };
 
   const readLookup = async (lookupKey: string): Promise<StoredLookupDoc | null> => {
     await ensureOpen();
@@ -282,7 +302,17 @@ export const createWatchtowerStore = (options?: {
 
   const appendActionReceipt = async (receipt: StoredTowerActionReceipt): Promise<void> => {
     await ensureOpen();
-    await db.put(actionReceiptKey(receipt.lookupKey), serializeTaggedJson(receipt));
+    const metaStats = await readMetaStats();
+    await db.batch([
+      { type: 'put', key: actionReceiptKey(receipt.lookupKey), value: serializeTaggedJson(receipt) },
+      {
+        type: 'put',
+        key: META_STATS_KEY,
+        value: serializeTaggedJson({
+          actionReceiptCount: metaStats.actionReceiptCount + 1,
+        } satisfies StoredTowerMetaStats),
+      },
+    ]);
     invalidateStats();
   };
 
@@ -311,28 +341,22 @@ export const createWatchtowerStore = (options?: {
     }
     let lookupCount = 0;
     let activeAppointmentCount = 0;
-    let actionReceiptCount = 0;
-    for await (const [key, raw] of db.iterator()) {
-      if (key.startsWith('lookup:')) {
-        lookupCount += 1;
-        const parsed = JSON.parse(String(raw)) as StoredLookupDoc;
-        const doc = normalizeStoredDoc(parsed.lookupKey, parsed);
-        if (doc.bundles.some((entry) =>
-          (entry.towerMode === 'active_watchtower' || entry.towerMode === 'delayed_last_resort')
-          && !!entry.activePayload,
-        )) {
-          activeAppointmentCount += 1;
-        }
-        continue;
-      }
-      if (key.startsWith('action:')) {
-        actionReceiptCount += 1;
+    for await (const [, raw] of db.iterator({ gte: 'lookup:', lte: 'lookup:\xff' })) {
+      lookupCount += 1;
+      const parsed = JSON.parse(String(raw)) as StoredLookupDoc;
+      const doc = normalizeStoredDoc(parsed.lookupKey, parsed);
+      if (doc.bundles.some((entry) =>
+        (entry.towerMode === 'active_watchtower' || entry.towerMode === 'delayed_last_resort')
+        && !!entry.activePayload,
+      )) {
+        activeAppointmentCount += 1;
       }
     }
+    const metaStats = await readMetaStats();
     const value = {
       lookupCount,
       activeAppointmentCount,
-      actionReceiptCount,
+      actionReceiptCount: metaStats.actionReceiptCount,
     };
     cachedStats = { cachedAt: currentTime, value };
     return value;
@@ -358,9 +382,19 @@ export const createWatchtowerStore = (options?: {
         }
       }
     }
-    for (const key of keysToDelete) {
-      await db.del(key);
-      deleted += 1;
+    if (keysToDelete.length > 0) {
+      const metaStats = await readMetaStats();
+      await db.batch([
+        ...keysToDelete.map((key) => ({ type: 'del' as const, key })),
+        {
+          type: 'put' as const,
+          key: META_STATS_KEY,
+          value: serializeTaggedJson({
+            actionReceiptCount: Math.max(0, metaStats.actionReceiptCount - keysToDelete.filter((key) => key.startsWith('action:')).length),
+          } satisfies StoredTowerMetaStats),
+        },
+      ]);
+      deleted = keysToDelete.length;
     }
     if (deleted > 0) invalidateStats();
     return { deleted };
