@@ -337,6 +337,7 @@ export const sendEntityInputWithRouting = (
   input: RoutedEntityInput,
   deps: RuntimeOutputRoutingDeps,
 ): { sent: boolean; deferred: boolean; queuedLocal: boolean } => {
+  const state = deps.ensureRuntimeState(env);
   const pendingBeforePlan = env.pendingNetworkOutputs ?? [];
   const { ready: readyPendingOutputs, waiting: waitingPendingOutputs } = splitPendingOutputsByRetryWindow(
     env,
@@ -345,6 +346,9 @@ export const sendEntityInputWithRouting = (
   );
   const outputsToPlan = [...readyPendingOutputs, input];
   const { localOutputs, remoteOutputs, deferredOutputs } = planEntityOutputs(env, outputsToPlan, deps);
+  if (remoteOutputs.length > 0 && state.recoveryBackupBarrier) {
+    throw new Error('DIRECT_NETWORK_SEND_REQUIRES_COMMITTED_RECOVERY_BACKUP');
+  }
   env.pendingNetworkOutputs = [];
   if (localOutputs.length > 0) {
     deps.enqueueRuntimeInputs(env, localOutputs, undefined, undefined, env.timestamp);

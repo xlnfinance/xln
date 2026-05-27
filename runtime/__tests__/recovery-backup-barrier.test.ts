@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test';
 
-import { createEmptyEnv, process as processRuntime, registerRecoveryBackupBarrier } from '../runtime.ts';
+import { createEmptyEnv, process as processRuntime, registerRecoveryBackupBarrier, sendEntityInput } from '../runtime.ts';
 
 test('recovery backup barrier holds remote outputs until backup succeeds', async () => {
   const env = createEmptyEnv('recovery-barrier-seed');
@@ -42,4 +42,31 @@ test('recovery backup barrier holds remote outputs until backup succeeds', async
   expect(barrierAttempts).toBe(2);
   expect(dispatchCount).toBe(1);
   expect(env.pendingNetworkOutputs.length).toBe(0);
+});
+
+test('direct remote sends fail closed while recovery backup barrier is active', () => {
+  const env = createEmptyEnv('recovery-barrier-direct-send');
+  env.runtimeId = '0x1111111111111111111111111111111111111111';
+  env.dbNamespace = `recovery-barrier-direct-${Date.now()}`;
+  env.quietRuntimeLogs = true;
+  env.timestamp = 1_000;
+
+  const targetEntityId = `0x${'cd'.repeat(32)}`;
+  let dispatchCount = 0;
+  env.runtimeState = {
+    ...(env.runtimeState || {}),
+    entityRuntimeHints: new Map([[targetEntityId, { runtimeId: '0x2222222222222222222222222222222222222222', seenAt: Date.now() }]]),
+    directEntityInputDispatch: () => {
+      dispatchCount += 1;
+      return true;
+    },
+  };
+
+  registerRecoveryBackupBarrier(env, async () => {});
+
+  expect(() => sendEntityInput(env, { entityId: targetEntityId })).toThrow(
+    'DIRECT_NETWORK_SEND_REQUIRES_COMMITTED_RECOVERY_BACKUP',
+  );
+  expect(dispatchCount).toBe(0);
+  expect(env.pendingNetworkOutputs?.length ?? 0).toBe(0);
 });

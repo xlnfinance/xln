@@ -8,7 +8,12 @@ import { ContractFactory, HDNodeWallet, JsonRpcProvider, Wallet, ethers } from '
 import { buildSingleSignerHanko } from '../hanko/batch';
 import { computeBatchHankoHash, createEmptyBatch, encodeJBatch, type JBatch } from '../j-batch';
 import { linkArtifactBytecode } from '../jadapter/rpc-utils';
-import { buildTowerAppointmentOwnerMessage, deriveRuntimeRecoveryActionLookupKey } from '../recovery/crypto';
+import {
+  buildTowerAppointmentOwnerMessage,
+  deriveRuntimeRecoveryActionLookupKey,
+  encryptTowerPayloadForPublicKey,
+  getTowerPayloadEncryptionPublicKey,
+} from '../recovery/crypto';
 import type { TowerActivePayloadV1, TowerAppointmentV1, TowerCounterDisputeRemedyV1 } from '../recovery/types';
 import { generateLazyEntityId } from '../entity-factory';
 import { encodeTowerCounterDisputeRemedy, runWatchtowerSweep } from '../watchtower/action';
@@ -277,7 +282,10 @@ describe('watchtower rpc last-resort integration', () => {
     };
     const activePayload: TowerActivePayloadV1 = {
       triggerHint: `${watched.entityId}:${counterparty.entityId}`,
-      encryptedRemedy: encodeTowerCounterDisputeRemedy(remedy),
+      encryptedRemedy: await encryptTowerPayloadForPublicKey(
+        encodeTowerCounterDisputeRemedy(remedy),
+        getTowerPayloadEncryptionPublicKey(tower.privateKey),
+      ),
       actionKind: 'counter_dispute_only',
       appointmentSequence,
       proofNonce: Number(finalNonce),
@@ -548,7 +556,10 @@ describe('watchtower rpc last-resort integration', () => {
     };
     const activePayload: TowerActivePayloadV1 = {
       triggerHint: `${watched.entityId}:${counterparty.entityId}`,
-      encryptedRemedy: encodeTowerCounterDisputeRemedy(towerRemedy),
+      encryptedRemedy: await encryptTowerPayloadForPublicKey(
+        encodeTowerCounterDisputeRemedy(towerRemedy),
+        getTowerPayloadEncryptionPublicKey(tower.privateKey),
+      ),
       actionKind: 'counter_dispute_only',
       appointmentSequence,
       proofNonce: Number(towerFinalNonce),
