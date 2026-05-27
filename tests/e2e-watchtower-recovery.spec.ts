@@ -10,7 +10,7 @@
  *    state from the watchtower instead of booting as a fresh empty wallet.
  */
 
-import { expect, test, type Page } from '@playwright/test';
+import { expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { createServer } from 'node:net';
 import { mkdtemp, rm } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
@@ -18,8 +18,18 @@ import { join } from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { spawn, type ChildProcess } from 'node:child_process';
 import { Wallet, keccak256, toUtf8Bytes } from 'ethers';
-import { APP_BASE_URL, ensureE2EBaseline } from './utils/e2e-baseline';
+import { API_BASE_URL, APP_BASE_URL, ensureE2EBaseline } from './utils/e2e-baseline';
+import {
+  getRenderedOutboundForAccount,
+  waitForRenderedOutboundForAccountDelta,
+} from './utils/e2e-account-ui';
+import { connectRuntimeToHub } from './utils/e2e-connect';
 import { gotoApp } from './utils/e2e-demo-users';
+import { submitUiPayment } from './utils/e2e-pay-ui';
+import {
+  getPersistedReceiptCursor,
+  waitForPersistedFrameEventMatch,
+} from './utils/e2e-runtime-receipts';
 
 process.env.NODE_TLS_REJECT_UNAUTHORIZED = '0';
 
@@ -27,6 +37,8 @@ const LONG_E2E = process.env.E2E_LONG === '1';
 const ISOLATED_BASELINE_READY = process.env.E2E_ISOLATED_BASELINE_READY === '1';
 const TEST_TIMEOUT_MS = LONG_E2E ? 240_000 : 180_000;
 const RECOVERY_LOOKUP_DOMAIN = 'xln:recovery:lookup:v1';
+const POST_RESTORE_PAYMENT_AMOUNT = 3n * 10n ** 18n;
+const CHANNEL_OP_TIMEOUT_MS = 75_000;
 
 type WatchtowerChild = {
   process: ChildProcess;
@@ -36,6 +48,10 @@ type WatchtowerChild = {
 
 function randomMnemonic(): string {
   return Wallet.createRandom().mnemonic!.phrase;
+}
+
+function randomLabel(prefix: string): string {
+  return `${prefix}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}`;
 }
 
 function deriveRuntimeRecoveryLookupKey(runtimeId: string, runtimeSeed: string): string {
@@ -314,6 +330,144 @@ async function waitForLocalRuntimeIdentity(page: Page): Promise<{ entityId: stri
   throw new Error('local runtime identity must appear in isolatedEnv');
 }
 
+async function getActiveRuntimeId(page: Page): Promise<string> {
+  const runtimeId = await page.evaluate(() => {
+    const fromUi = document.querySelector<HTMLElement>('[data-testid="context-current"]')?.dataset?.runtimeId;
+    if (fromUi) return String(fromUi).trim();
+    return String((window as typeof window & { isolatedEnv?: { runtimeId?: string } }).isolatedEnv?.runtimeId || '').trim();
+  });
+  expect(runtimeId, 'active runtime id must be visible after tower restore').toBeTruthy();
+  return runtimeId;
+}
+
+async function waitForRuntimeOnline(page: Page, label: string): Promise<void> {
+  await expect
+    .poll(async () => {
+      return await page.evaluate(() => {
+        const env = (window as typeof window & {
+          isolatedEnv?: {
+            runtimeState?: {
+              p2p?: {
+                isConnected?: () => boolean;
+                connect?: () => void;
+                reconnect?: () => void;
+              };
+            };
+          };
+        }).isolatedEnv;
+        const p2p = env?.runtimeState?.p2p;
+        if (!p2p) return false;
+        if (typeof p2p.isConnected === 'function' && p2p.isConnected()) return true;
+        if (typeof p2p.connect === 'function') {
+          try { p2p.connect(); } catch {}
+        } else if (typeof p2p.reconnect === 'function') {
+          try { p2p.reconnect(); } catch {}
+        }
+        return false;
+      }).catch(() => false);
+    }, {
+      timeout: 30_000,
+      intervals: [250, 500, 1_000],
+      message: `${label} runtime must reconnect after restore`,
+    })
+    .toBe(true);
+}
+
+async function waitForEntityAdvertised(page: Page, entityId: string, timeoutMs = CHANNEL_OP_TIMEOUT_MS): Promise<void> {
+  await expect
+    .poll(async () => {
+      const local = await page.evaluate((targetEntityId) => {
+        const view = window as typeof window & {
+          XLN?: { refreshGossip?: (env: unknown) => void };
+          isolatedEnv?: {
+            gossip?: {
+              getProfiles?: () => Array<{ entityId?: string; runtimeId?: string; metadata?: { runtimeId?: string } }>;
+            };
+          };
+        };
+        try {
+          view.XLN?.refreshGossip?.(view.isolatedEnv);
+        } catch {
+          // best effort
+        }
+        const profiles = view.isolatedEnv?.gossip?.getProfiles?.() || [];
+        return profiles.some((profile) =>
+          String(profile?.entityId || '').toLowerCase() === String(targetEntityId || '').toLowerCase()
+          && Boolean(profile?.runtimeId || profile?.metadata?.runtimeId),
+        );
+      }, entityId).catch(() => false);
+      if (local) return true;
+
+      const response = await page.request.get(
+        `${API_BASE_URL}/api/debug/entities?limit=5000&q=${encodeURIComponent(entityId)}`,
+      ).catch(() => null);
+      if (!response?.ok()) return false;
+      const body = await response.json().catch(() => ({})) as { entities?: Array<{ entityId?: string; runtimeId?: string }> };
+      return (Array.isArray(body.entities) ? body.entities : []).some((entry) =>
+        String(entry.entityId || '').toLowerCase() === entityId.toLowerCase() && Boolean(entry.runtimeId),
+      );
+    }, {
+      timeout: timeoutMs,
+      intervals: [500, 1_000, 1_500],
+      message: `entity ${entityId.slice(0, 10)} must be advertised for post-restore payment`,
+    })
+    .toBe(true);
+}
+
+async function faucetOffchain(page: Page, entityId: string, hubEntityId: string): Promise<void> {
+  let lastError = 'not-run';
+  for (let attempt = 1; attempt <= 6; attempt += 1) {
+    const runtimeId = await getActiveRuntimeId(page);
+    const response = await page.request.post(`${API_BASE_URL}/api/faucet/offchain`, {
+      data: {
+        userEntityId: entityId,
+        userRuntimeId: runtimeId,
+        hubEntityId,
+        tokenId: 1,
+        amount: '100',
+      },
+    }).catch((error) => ({
+      ok: () => false,
+      status: () => 0,
+      json: async () => ({ error: error instanceof Error ? error.message : String(error) }),
+    }));
+
+    const body = await response.json().catch(() => ({} as Record<string, unknown>));
+    if (response.ok()) return;
+    lastError = JSON.stringify(body);
+    const message = String((body as Record<string, unknown>).error || '');
+    const code = String((body as Record<string, unknown>).code || '');
+    const transient =
+      response.status() === 202 ||
+      response.status() === 409 ||
+      message.includes('pending') ||
+      message.includes('AWAITING') ||
+      message.includes('FAUCET_ACCOUNT_MISSING') ||
+      message.includes('SIGNER_RESOLUTION_FAILED') ||
+      code === 'FAUCET_TOKEN_SURFACE_NOT_READY';
+    if (!transient) break;
+    await page.waitForTimeout(1_500);
+  }
+
+  throw new Error(`post-restore faucet failed for ${entityId.slice(0, 10)} via ${hubEntityId.slice(0, 10)}: ${lastError}`);
+}
+
+async function waitForSenderSpend(
+  page: Page,
+  counterpartyId: string,
+  baseline: number,
+  minSpend: number,
+): Promise<number> {
+  return await expect
+    .poll(async () => baseline - await getRenderedOutboundForAccount(page, counterpartyId), {
+      timeout: CHANNEL_OP_TIMEOUT_MS,
+      intervals: [250, 500, 1_000],
+      message: 'restored sender must spend from recovered channel state',
+    })
+    .toBeGreaterThanOrEqual(minSpend)
+    .then(async () => getRenderedOutboundForAccount(page, counterpartyId));
+}
+
 async function createRuntimeViaUi(
   page: Page,
   label: string,
@@ -469,7 +623,8 @@ async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, onTimeout:
 test.describe('watchtower runtime recovery', () => {
   test.setTimeout(TEST_TIMEOUT_MS);
 
-  test('restores a wiped runtime from standalone tower backup', async ({ page, context }) => {
+  test('restores a wiped runtime from standalone tower backup and continues channel payments', async ({ page, context, browser }) => {
+    let recipientContext: BrowserContext | null = null;
     if (!ISOLATED_BASELINE_READY && process.env.E2E_RESET_BASE_URL) {
       await ensureE2EBaseline(page, {
         timeoutMs: LONG_E2E ? 240_000 : 180_000,
@@ -552,11 +707,76 @@ test.describe('watchtower runtime recovery', () => {
           hasPendingFrame: preWipe.hasPendingFrame,
           currentHeight: preWipe.currentHeight,
           tokenIds: preWipe.tokenIds,
-        });
+      });
 
       const after = await readLocalHubAccountState(page, preWipe.hubId!);
       expect(after.runtimeHeight, 'restored runtime height must be non-zero after tower recovery').toBeGreaterThan(0);
+
+      const hubId = preWipe.hubId!;
+      await waitForRuntimeOnline(page, 'restored sender');
+      await connectRuntimeToHub(page, restored, hubId, { requireOnline: false });
+
+      recipientContext = await browser.newContext({ ignoreHTTPSErrors: true });
+      const recipientPage = await recipientContext.newPage();
+      await gotoApp(recipientPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
+      const recipient = await withTimeout(
+        createRuntimeViaUi(recipientPage, randomLabel('tower-recipient'), randomMnemonic(), { requireOnline: false }),
+        75_000,
+        async () => await readRecoveryUiDiagnostics(recipientPage),
+      );
+      await waitForRuntimeOnline(recipientPage, 'post-restore recipient');
+      await connectRuntimeToHub(recipientPage, recipient, hubId, { requireOnline: false });
+
+      await Promise.all([
+        waitForEntityAdvertised(page, restored.entityId),
+        waitForEntityAdvertised(page, recipient.entityId),
+        waitForEntityAdvertised(recipientPage, restored.entityId),
+        waitForEntityAdvertised(recipientPage, recipient.entityId),
+      ]);
+
+      const senderBeforeFaucet = await getRenderedOutboundForAccount(page, hubId);
+      await faucetOffchain(page, restored.entityId, hubId);
+      const senderAfterFaucet = await waitForRenderedOutboundForAccountDelta(page, hubId, senderBeforeFaucet, 100, {
+        timeoutMs: CHANNEL_OP_TIMEOUT_MS,
+      });
+
+      const recipientBeforePayment = await getRenderedOutboundForAccount(recipientPage, hubId);
+      const senderCursor = await getPersistedReceiptCursor(page);
+      const recipientCursor = await getPersistedReceiptCursor(recipientPage);
+
+      await submitUiPayment(page, {
+        recipientEntityId: recipient.entityId,
+        amount: POST_RESTORE_PAYMENT_AMOUNT,
+        routeEntityIds: [hubId, recipient.entityId],
+      });
+
+      await Promise.all([
+        waitForPersistedFrameEventMatch(page, {
+          cursor: senderCursor,
+          eventName: 'HtlcFinalized',
+          entityId: restored.entityId,
+          timeoutMs: CHANNEL_OP_TIMEOUT_MS,
+          predicate: (event) => String(event.data?.amount || '') === POST_RESTORE_PAYMENT_AMOUNT.toString(),
+        }),
+        waitForPersistedFrameEventMatch(recipientPage, {
+          cursor: recipientCursor,
+          eventName: 'HtlcReceived',
+          entityId: recipient.entityId,
+          timeoutMs: CHANNEL_OP_TIMEOUT_MS,
+          predicate: (event) => String(event.data?.amount || '') === POST_RESTORE_PAYMENT_AMOUNT.toString(),
+        }),
+      ]);
+
+      await waitForSenderSpend(page, hubId, senderAfterFaucet, Number(POST_RESTORE_PAYMENT_AMOUNT / 10n ** 18n));
+      await waitForRenderedOutboundForAccountDelta(
+        recipientPage,
+        hubId,
+        recipientBeforePayment,
+        Number(POST_RESTORE_PAYMENT_AMOUNT / 10n ** 18n),
+        { timeoutMs: CHANNEL_OP_TIMEOUT_MS },
+      );
     } finally {
+      await recipientContext?.close().catch(() => undefined);
       await stopWatchtower(tower);
     }
   });
