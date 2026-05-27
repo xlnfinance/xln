@@ -1258,9 +1258,10 @@ export async function buildDelayedLastResortAppointmentsForTower(
         },
       };
       const serializedRemedy = stringifyTowerPayload(remedy);
-      const encryptedRemedy = towerActionPublicKey && typeof xln.encryptTowerPayloadForPublicKey === 'function'
-        ? await xln.encryptTowerPayloadForPublicKey(serializedRemedy, towerActionPublicKey)
-        : serializedRemedy;
+      if (!towerActionPublicKey || typeof xln.encryptTowerPayloadForPublicKey !== 'function') {
+        throw new Error('TOWER_ACTION_PUBLIC_KEY_REQUIRED');
+      }
+      const encryptedRemedy = await xln.encryptTowerPayloadForPublicKey(serializedRemedy, towerActionPublicKey);
       const triggerHint = `chain:${chainId}:acct:${entityId}:${counterpartyId}`;
       const activePayload: TowerActivePayloadV1 = {
         triggerHint,

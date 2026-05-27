@@ -1,5 +1,5 @@
 import { ethers } from 'ethers';
-import { serializeTaggedJson } from '../serialization-utils';
+import { deserializeTaggedJson, serializeTaggedJson } from '../serialization-utils';
 import type {
   TowerAppointmentV1,
   TowerDiscoverResponseV1,
@@ -71,6 +71,30 @@ const normalizeLookupKey = (lookupKey: unknown): string => {
 const quotaExceededStatus = (message: string): number =>
   message.startsWith('TOWER_QUOTA_EXCEEDED') || message.startsWith('TOWER_BODY_TOO_LARGE') ? 413 : 400;
 
+const assertEncryptedActivePayload = (activePayload: TowerAppointmentV1['activePayload']): void => {
+  const raw = String(activePayload?.encryptedRemedy || '').trim();
+  if (!raw) {
+    throw new Error('TOWER_ACTIVE_PAYLOAD_REMEDY_MISSING');
+  }
+  let parsed: Record<string, unknown>;
+  try {
+    parsed = deserializeTaggedJson<Record<string, unknown>>(raw);
+  } catch {
+    throw new Error('TOWER_ACTIVE_PAYLOAD_REMEDY_NOT_ENCRYPTED');
+  }
+  if (
+    parsed['type'] !== 'tower_encrypted_payload' ||
+    parsed['version'] !== 1 ||
+    parsed['alg'] !== 'secp256k1-aes-256-gcm' ||
+    typeof parsed['epk'] !== 'string' ||
+    typeof parsed['iv'] !== 'string' ||
+    typeof parsed['ciphertext'] !== 'string' ||
+    typeof parsed['plaintextHash'] !== 'string'
+  ) {
+    throw new Error('TOWER_ACTIVE_PAYLOAD_REMEDY_NOT_ENCRYPTED');
+  }
+};
+
 const verifyTowerAppointment = (appointment: TowerAppointmentV1): TowerAppointmentV1 => {
   if (!appointment || appointment.type !== 'tower_appointment' || appointment.version !== 1) {
     throw new Error('TOWER_APPOINTMENT_INVALID');
@@ -89,6 +113,12 @@ const verifyTowerAppointment = (appointment: TowerAppointmentV1): TowerAppointme
     appointment.towerMode === 'active_watchtower' || appointment.towerMode === 'delayed_last_resort'
       ? appointment.towerMode
       : 'blind_backup';
+  if (towerMode !== 'blind_backup' && !appointment.activePayload) {
+    throw new Error('TOWER_ACTIVE_PAYLOAD_MISSING');
+  }
+  if (appointment.activePayload) {
+    assertEncryptedActivePayload(appointment.activePayload);
+  }
   const message = buildTowerAppointmentOwnerMessage(
     runtimeId,
     towerMode,

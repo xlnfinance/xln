@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdirSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
-import { Wallet } from 'ethers';
+import { Wallet, keccak256, toUtf8Bytes } from 'ethers';
 
 import { createEmptyEnv, enqueueRuntimeInput, process as processRuntime } from '../runtime.ts';
 import { buildRuntimeRecoveryBundle } from '../recovery/bundle';
@@ -189,6 +189,83 @@ describe('standalone watchtower service', () => {
     const payload = await put.json() as { ok: boolean; error?: string };
     expect(payload.ok).toBe(false);
     expect(String(payload.error || '')).toContain('TOWER_QUOTA_EXCEEDED');
+  });
+
+  test('rejects plaintext active remedies over HTTP', async () => {
+    const tempRoot = join(process.cwd(), '.tmp-tests', `watchtower-active-plaintext-${Date.now()}`);
+    rmSync(tempRoot, { recursive: true, force: true });
+    mkdirSync(tempRoot, { recursive: true });
+
+    const server = startStandaloneWatchtowerServer({
+      host: '127.0.0.1',
+      port: 0,
+      towerId: 'tower-active-plaintext-test',
+      dbPath: join(tempRoot, 'tower.level'),
+      maxStoredBytesPerLookupKey: 64 * 1024,
+    });
+    servers.push(server);
+
+    const runtimeWallet = Wallet.createRandom();
+    const runtimeId = runtimeWallet.address.toLowerCase();
+    const lookupKey = keccak256(toUtf8Bytes('tower:plaintext-active'));
+    const activePayload = {
+      triggerHint: 'chain:31337:acct:plaintext',
+      encryptedRemedy: JSON.stringify({ type: 'counter_dispute_remedy' }),
+      actionKind: 'counter_dispute_only' as const,
+      appointmentSequence: 1,
+      proofNonce: 1,
+      proofBodyHash: keccak256(toUtf8Bytes('proof-body')),
+      responseMode: 'last_resort' as const,
+      lastResortWindowBlocks: 8,
+      safetyMarginBlocks: 2,
+    };
+    const bundle = {
+      version: 1 as const,
+      runtimeId,
+      lookupKey,
+      height: 3,
+      createdAt: 123_456,
+      bundleHash: keccak256(toUtf8Bytes('bundle:plaintext-active')),
+      iv: '0x1234',
+      ciphertext: '0xabcd',
+    };
+    const signedAt = 123_456;
+    const signature = await runtimeWallet.signMessage(
+      buildTowerAppointmentOwnerMessage(
+        runtimeId,
+        'delayed_last_resort',
+        lookupKey,
+        0,
+        bundle.bundleHash,
+        bundle.height,
+        signedAt,
+        activePayload,
+      ),
+    );
+
+    const response = await fetch(`http://127.0.0.1:${server.server.port}/api/tower/appointment`, {
+      method: 'PUT',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        type: 'tower_appointment',
+        version: 1,
+        towerMode: 'delayed_last_resort',
+        lookupKey,
+        slot: 0,
+        bundle,
+        activePayload,
+        ownerProof: {
+          runtimeId,
+          signedAt,
+          signature,
+        },
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    const payload = await response.json() as { ok: boolean; error?: string };
+    expect(payload.ok).toBe(false);
+    expect(String(payload.error || '')).toContain('TOWER_ACTIVE_PAYLOAD_REMEDY_NOT_ENCRYPTED');
   });
 
   test('rejects oversized JSON bodies before request handling', async () => {

@@ -5,7 +5,12 @@ import { Interface, Wallet, hexlify, keccak256, solidityPacked, toUtf8Bytes } fr
 
 import * as xln from '../../runtime/runtime.ts';
 import { startStandaloneWatchtowerServer, type StandaloneWatchtowerServer } from '../../runtime/watchtower/standalone-server';
-import { buildTowerAppointmentOwnerMessage, encryptRuntimeRecoveryBundle } from '../../runtime/recovery/crypto';
+import {
+  buildTowerAppointmentOwnerMessage,
+  decryptTowerPayloadWithPrivateKey,
+  encryptRuntimeRecoveryBundle,
+  getTowerPayloadEncryptionPublicKey,
+} from '../../runtime/recovery/crypto';
 import type { JReplica, JurisdictionConfig, TowerAppointmentV1 } from '../../runtime/xln-api';
 import {
   buildDelayedLastResortAppointmentsForTower,
@@ -345,6 +350,7 @@ describe('watchtower recovery full flow', () => {
       { url: 'http://tower.test', towerMode: 'delayed_last_resort', enabled: true },
       towerWallet.address.toLowerCase(),
       encryptedBundle,
+      getTowerPayloadEncryptionPublicKey(towerWallet.privateKey),
     );
 
     expect(uploads.length).toBe(1);
@@ -354,7 +360,9 @@ describe('watchtower recovery full flow', () => {
     expect(upload.appointment.activePayload?.proofNonce).toBe(9);
     expect(upload.appointment.activePayload?.proofBodyHash).toBe(proofBodyHash);
     expect(upload.appointment.activePayload?.lastResortWindowBlocks).toBe(1152);
-    const remedy = JSON.parse(String(upload.appointment.activePayload?.encryptedRemedy || '{}'));
+    const encryptedRemedy = String(upload.appointment.activePayload?.encryptedRemedy || '');
+    expect(encryptedRemedy).not.toContain('counter_dispute_remedy');
+    const remedy = JSON.parse(await decryptTowerPayloadWithPrivateKey(encryptedRemedy, towerWallet.privateKey));
     expect(remedy.watchedEntityId).toBe(entityId);
     expect(remedy.latestProof.counterentity).toBe(counterpartyId);
     expect(remedy.latestProof.finalNonce).toBe(9);
@@ -452,6 +460,7 @@ describe('watchtower recovery full flow', () => {
       { url: 'http://tower.flow', towerMode: 'delayed_last_resort', enabled: true },
       towerWallet.address.toLowerCase(),
       encryptedBundle,
+      getTowerPayloadEncryptionPublicKey(towerWallet.privateKey),
     );
     expect(uploads.length).toBe(1);
     const upload = uploads[0]!;
