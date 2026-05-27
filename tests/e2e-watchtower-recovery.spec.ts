@@ -767,14 +767,39 @@ test.describe('watchtower runtime recovery', () => {
         }),
       ]);
 
-      await waitForSenderSpend(page, hubId, senderAfterFaucet, Number(POST_RESTORE_PAYMENT_AMOUNT / 10n ** 18n));
-      await waitForRenderedOutboundForAccountDelta(
+      const senderAfterPayment = await waitForSenderSpend(
+        page,
+        hubId,
+        senderAfterFaucet,
+        Number(POST_RESTORE_PAYMENT_AMOUNT / 10n ** 18n),
+      );
+      const recipientAfterPayment = await waitForRenderedOutboundForAccountDelta(
         recipientPage,
         hubId,
         recipientBeforePayment,
         Number(POST_RESTORE_PAYMENT_AMOUNT / 10n ** 18n),
         { timeoutMs: CHANNEL_OP_TIMEOUT_MS },
       );
+
+      await page.close();
+      const reopenedSenderPage = await context.newPage();
+      await gotoApp(reopenedSenderPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
+      await waitForRuntimeOnline(reopenedSenderPage, 'reopened restored sender');
+      await connectRuntimeToHub(reopenedSenderPage, restored, hubId, { requireOnline: false });
+      await expect
+        .poll(() => getRenderedOutboundForAccount(reopenedSenderPage, hubId), {
+          timeout: CHANNEL_OP_TIMEOUT_MS,
+          intervals: [500, 1_000, 1_500],
+          message: 'post-restore payment state must survive a closed-tab restart',
+        })
+        .toBe(senderAfterPayment);
+      await expect
+        .poll(() => getRenderedOutboundForAccount(recipientPage, hubId), {
+          timeout: CHANNEL_OP_TIMEOUT_MS,
+          intervals: [500, 1_000, 1_500],
+          message: 'recipient post-restore payment state must stay committed after sender tab restart',
+        })
+        .toBe(recipientAfterPayment);
     } finally {
       await recipientContext?.close().catch(() => undefined);
       await stopWatchtower(tower);
