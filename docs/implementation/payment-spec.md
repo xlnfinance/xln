@@ -743,7 +743,7 @@ function buildNetworkGraph(env: Env, tokenId: number): NetworkGraph {
         from: entity1,
         to: entity2,
         capacity: derived.outCapacity,
-        baseFee: 0n, // TODO: Configure fees
+        baseFee: 0n, // fee policy is configured outside this sketch
         feeRate: 1000, // 0.1%
         minHTLC: 1n,
         maxHTLC: derived.outCapacity,

@@ -1,186 +1,158 @@
 # XLN Status
 
-This is the canonical status surface for XLN.
+This is the canonical status surface for XLN. Use it for the current launch
+picture, blocker order, active engineering backlog, and assumptions for the
+current network shape.
 
-Use this file for:
-- the current launch picture
-- the blocker order
-- the active engineering backlog
-- the non-negotiable assumptions for the current network shape
-
-Historical planning snapshots were moved to `docs/archive/planning/`.
+For executable work, use the repository root [todo.md](../todo.md). This file
+summarizes why those items matter and how they fit the protocol.
 
 ## Current Snapshot
 
-**Date:** 2026-05-21
-**State:** pre-mainnet, testnet/prod-runtime hardening in progress
+**Date:** 2026-05-29
+**State:** `0.1.5` is production-demo/public-testnet grade, not mainnet-ready.
 
-What appears true from the current docs set:
-- the bilateral runtime and core consensus architecture exist and are actively exercised
-- the largest remaining work is not protocol invention, but integration, recovery, security hardening, and operational cleanup
-- several old status docs had diverged; this file replaces them as the source of truth
+What is true now:
+
+- the bilateral runtime and consensus architecture exist and are actively
+  exercised by local, browser, and prod-facing checks;
+- official same-origin watchtower recovery is live, encrypted, scheduled, and
+  no longer exposes public sweep;
+- wiped-browser watchtower recovery and post-restore channel payments are
+  covered by browser E2E;
+- prod health and prod payment smoke passed during the `0.1.5` release pass;
+- remaining mainnet risk is concentrated in release-duration soak, external
+  audit, real mainnet ops, PSR/peer recovery, observability, and cleanup of
+  explicit product boundaries.
 
 ## Precedence
 
 When docs disagree, use this order:
 
 1. code + tests
-2. `status.md`
-3. `mainnet.md`
-4. protocol/spec docs
-5. archive docs
+2. root [todo.md](../todo.md)
+3. this file
+4. [mainnet.md](mainnet.md)
+5. protocol/spec docs
+6. archive docs
 
 ## Non-Negotiable Current Assumptions
 
-These ideas were spread across older planning docs. They stay live here because
-they still define the shape of the system.
-
 ### Network shape
 
-- **Hub = normal entity.**
-  No special consensus model for hubs. A hub is an entity with reserves,
-  connectivity, and gossip metadata.
-- **Runtime is the source of truth.**
-  Frontends are readers/controllers, not authorities.
-- **Bilateral state is the main execution surface.**
-  The J-layer is the court and settlement anchor, not the fast path.
-- **Transport must support direct/public runtime operation.**
-  Relay and public WS exist to deliver messages, not to own protocol state.
+- **Hub = normal entity.** No special consensus model for hubs. A hub is an
+  entity with reserves, connectivity, and gossip metadata.
+- **Runtime is the source of truth.** Frontends are readers/controllers, not
+  authorities.
+- **Bilateral state is the main execution surface.** The J-layer is the court
+  and settlement anchor, not the fast path.
+- **Transport must support direct/public runtime operation.** Relay and public
+  WS exist to deliver messages, not to own protocol state.
 
 ### Product shape
 
-- **USDC-first is acceptable only if explicit.**
-  Silent single-token assumptions are not acceptable.
-- **Recovery/watchtower is not optional for mainnet.**
-  Offline users need a recovery/dispute story.
-- **Debug surfaces are protocol infrastructure.**
-  `/api/debug/events`, health, metrics, and replayability are part of the product.
+- **USDC-first is acceptable only if explicit.** Silent single-token
+  assumptions are not acceptable.
+- **Recovery/watchtower is not optional for mainnet.** Offline users need a
+  recovery/dispute story.
+- **Debug surfaces are protocol infrastructure.** `/api/debug/events`, health,
+  metrics, and replayability are part of the product.
 
-## Blocker Order
+## Recently Closed By `0.1.5`
 
-These are the highest-value unresolved items after deduping older planning docs.
+- Contract, RPC settlement, persistence, watchtower, runtime type, frontend
+  type, and browser E2E gates passed in `bun run gate:ci`.
+- Full browser E2E passed: `bun run test:e2e:full`.
+- Prod payment smoke passed: `bun run test:e2e:prod:payment`.
+- Prod health passed: `bun run prod:health`.
+- Official tower moved to same-origin `/api/tower/*`.
+- Watchtower sweep is scheduled inside the daemon and public
+  `/api/watchtower/*` is not exposed through nginx.
+- Active tower remedies are encrypted to the tower action public key and
+  plaintext active remedies are rejected by the tower HTTP layer.
+- Tower uploads are gated by reliable local backup barriers before remote side
+  effects continue.
+- Browser restart after tower restore keeps recovered runtime/channel state.
 
-### P0 — launch blockers
+## Active Blocker Order
 
-1. **Contract integration coverage for the current Depository API**
-   - old integration suite is still skipped or incomplete against the live ABI
-   - exit: deposit, reserve transfers, settlement, dispute start/finalize, replay safety all covered on the current contract surface
+### P0 - release and mainnet readiness
 
-2. **Explicit nonce / replay safety tests**
-   - replay remains the highest-risk fintech failure mode
-   - exit: one test proves replay revert, one proves nonce advancement exactly once across settle/finalize paths
+1. Publish the GitHub Release object for `v0.1.5`; the tag is pushed, but the
+   release object is blocked by missing `gh` auth or `GH_TOKEN`.
+2. Run `bun run gate:release` and the multi-hour `bun run soak:release` before
+   calling any build a mainnet candidate.
+3. Document real mainnet chain/RPC, operator keys, tower gas policy,
+   backup/restore drills, and monitoring thresholds.
+4. Refresh the external audit pack and treat external audit as required for
+   real user funds.
 
-3. **RPC settlement scenario**
-   - BrowserVM coverage is not enough
-   - exit: minimal `settle -> j_broadcast -> submitTx -> chain event -> workspace clear` scenario passes on local anvil/RPC
+### P1 - protocol and runtime
 
-4. **Dispute E2E scenario**
-   - dispute handlers exist, but the full unhappy-path scenario still needs proof
-   - exit: unilateral dispute and counter-dispute flows pass end to end
+5. Implement Peer State Refresh so a wiped client can recover from honest peers
+   even when a tower is unavailable.
+6. Add account-level recovery coverage UI and tower receipt/failure visibility.
+7. Classify runtime exceptions as `drop`, `defer`, `debug-assert`, or `fatal`.
+8. Re-check current consensus/Hanko production semantics against the current
+   code, not old audit snapshots.
+9. Re-run a current contract governance/access-control scan before external
+   audit.
+10. Replace placeholder RPC `stateRoot` output with useful J-state commitment
+   data or fail explicitly until it exists.
+11. Add persistence inspect/repair tooling for frame DB, snapshots, WAL, tower
+   receipts, and bundle coverage.
+12. Keep destructive reset/clearDB/dev actions strongly gated.
 
-5. **Recovery / watchtower implementation path**
-   - the protocol draft exists; the implementation tracker must close the gap
-   - exit: a documented minimum recovery path exists and is tested against offline/dispute failure modes
+### P2 - product clarity
 
-### P1 — mainnet hardening
-
-6. **Restart / crash recovery soak**
-   - restart behavior has improved, but still needs sustained proof
-   - exit: kill/restart tests show no silent drift, no lost pending work, no split-brain behavior
-
-7. **Long soak under load**
-   - exit: multi-hour payment/swap/dispute run with stable memory and no consensus divergence
-
-8. **Runtime transport operational cleanup**
-   - bounded reconnect policy
-   - clear transport readiness in health
-   - one coherent deploy/setup path
-
-9. **Persistence repair tooling**
-   - checkpoint-first persistence is fine only if inspection/repair is operationally usable
-
-10. **RPC state commitment quality**
-   - RPC-side `stateRoot` / J-state commitment quality needs to match dispute/debug needs
-
-### P2 — explicit product limits and cleanup
-
-11. **Single-token vs multi-token clarity**
-   - either multi-token works E2E or unsupported paths fail explicitly
-
-12. **Custody / fee UX consistency**
-   - custody balance and auto-fee flows are valid product bets, but they must read cleanly in UI and docs
-
-13. **SettlementPanel path consistency**
-   - decide whether the flow stays direct on-chain or moves behind entity/quorum semantics
-
-14. **Activity / account-card polish**
-   - present routing, HTLC, and J-event context cleanly enough for debugging and demo use
+13. Make the token support boundary explicit: prove multi-token E2E or keep
+    the current release line visibly single-token/USDC-first.
+14. Clean up custody/fee UX, settlement flow consistency, and activity/account
+    cards enough for support/debug use.
 
 ## Workstreams
 
 ### Contracts and J-Layer
 
-- integration tests for current Depository API
-- nonce/replay proofs
-- RPC settlement and dispute scenarios
-- explicit state commitment capture on RPC
-- clear single-token policy until broader token support is real
+- keep current Depository coverage green;
+- preserve explicit nonce/replay tests;
+- keep RPC settlement and dispute scenarios in the required gate set;
+- improve RPC-side state commitment quality.
 
 ### Runtime and Consensus
 
-- restart/crash recovery soak
-- long-running consensus soak
-- exception policy cleanup:
-  - `drop`
-  - `defer`
-  - `debug-assert`
-  - `fatal`
-- continue treating `consensus-invariants.md` as the living bug-prevention checklist
+- run release-duration restart/crash/load soaks;
+- keep `consensus-invariants.md` as the living bug-prevention checklist;
+- simplify exception handling only after each path has a clear disposition.
 
 ### Recovery and Offline Safety
 
-- turn `recovery-watchtower-protocol.md` from broad draft into tracked implementation scope
-- prove peer state refresh, recovery bundles, and dispute protection on realistic failure cases
+- finish PSR and recovery coverage UX;
+- keep tower backup, restore, and delayed-last-resort tests in the gate set;
+- prove restore and defense on realistic offline cases, not only clean demos.
 
 ### Transport and Ops
 
-- bounded reconnect and better readiness semantics
-- one deployment surface for frontend, runtime, relay, and anvil/testnet
-- preserve health/metrics as first-class operational interfaces
+- keep one coherent deployment surface for frontend, runtime, relay, tower, and
+  local chain/testnet components;
+- make runtime, market maker, storage, relay, and tower readiness visible in
+  health/metrics.
 
 ### Product and UI
 
-- simplify reserve-to-collateral UX
-- keep dev/scenario surfaces out of the normal wallet path
-- make settlements/disputes/recovery visible enough for a serious demo and for support/debug use
+- keep dev/scenario surfaces out of the normal wallet path;
+- make settlements, disputes, and recovery visible enough for demo and support.
 
 ### Multisigner-First Direction
 
-This remains active and should not disappear under status cleanup.
+- one authorization envelope for entity actions;
+- proposer is coordinator, not implicit authority;
+- ingress verification is quorum-aware;
+- `1-of-1` is configuration, not a separate auth model;
+- J-batch auth moves to strict entity quorum semantics;
+- complex-board tests must exist, not just happy-path single-signer tests.
 
-- one authorization envelope for entity actions
-- proposer is coordinator, not implicit authority
-- ingress verification is quorum-aware
-- `1-of-1` is configuration, not a separate auth model
-- J-batch auth moves to strict entity quorum semantics
-- complex-board tests must exist, not just happy-path single-signer tests
+## Historical Reference
 
-### AI / Auxiliary Work
-
-These are real backlog items, but not launch-defining:
-
-- local model/tooling setup
-- `piper` install for TTS
-- AI UI polish issues such as visual speech indicator behavior
-
-## What Moved Out
-
-The following documents were not deleted for idea preservation; they were moved
-because they had become snapshots rather than canonical status:
-
-- `docs/archive/planning/todo-2026-03.md`
-- `docs/archive/planning/next-2026-02.md`
-- `docs/archive/planning/mvp-testnet-spec-2026-02.md`
-- `docs/archive/planning/mainnet-readiness-2026-01.md`
-
-Read them when you need historical context or the exact earlier wording.
+Historical snapshots remain in `docs/archive/`. They are useful for context but
+must not be treated as active TODOs.

@@ -59,8 +59,6 @@ const IGNORED_DIRS = new Set([
 const IGNORED_FILES = new Set([
   // Generated browser bundle; soundcheck must scan source, not emitted code.
   'frontend/static/runtime.js',
-  // Historical test-status note, not executable coverage.
-  'tests/final_status.md',
 ]);
 
 const ORDERBOOK_MARKERS = [
