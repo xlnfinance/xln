@@ -15,6 +15,7 @@ more L2", but a consequence of the scaling and enforcement constraints.
 3. [core/12_invariant.md](core/12_invariant.md) — the RCPAN invariant
 4. [core/rjea-architecture.md](core/rjea-architecture.md) — the runtime/entity/account/jurisdiction stack
 5. [status.md](status.md) — the current source of truth
+6. [../todo.md](../todo.md) — the active TODO/NEXT backlog
 
 **Developers**
 
@@ -62,6 +63,7 @@ more L2", but a consequence of the scaling and enforcement constraints.
 | [status.md](status.md) | canonical current blockers and workstreams |
 | [mainnet.md](mainnet.md) | release bar for real-user-fund launch |
 | [roadmap.md](roadmap.md) | phased rollout and strategic direction |
+| [../todo.md](../todo.md) | active TODO/NEXT backlog |
 
 ## Ops and Debugging
 
@@ -77,4 +79,4 @@ more L2", but a consequence of the scaling and enforcement constraints.
 
 - [archive/](archive/) — historical planning, research, philosophy, and logs
 
-**Last updated:** 2026-05-21
+**Last updated:** 2026-05-29

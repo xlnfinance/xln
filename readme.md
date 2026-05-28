@@ -166,8 +166,9 @@ bun run bench:radapter:hub1m:allmem  # Same, but materialize all 1M accounts int
 ```
 Root:
   readme.md              This file - project overview
+  todo.md                Active TODO/NEXT backlog
   CLAUDE.md              AI assistant instructions
-  changelog.md           Version history
+  CHANGELOG.md           Version history
 
 /docs/
   ├── contributing/      How to develop on XLN
@@ -184,11 +185,13 @@ Root:
   │   ├── depository-core.md    Contract logic summary
   │   └── rollups-position.md   XLN vs rollups comparison
   │
-  ├── planning/          Active & historical planning
-  │   ├── active/
-  │   │   └── next.md           Current priority tasks
-  │   ├── completed/            Finished refactors
-  │   └── launch-checklist.md   Pre-launch verification
+  ├── status.md          Current launch state and blocker order
+  ├── mainnet.md         Real-user-fund release bar
+  ├── roadmap.md         Strategic rollout plan
+  ├── recovery-watchtower-protocol.md
+  │                       Recovery, tower backup, and last-resort dispute spec
+  ├── deployment/        Deploy and ops runbooks
+  ├── archive/           Historical snapshots only
   │
   ├── about/             Philosophy & origin
   │   ├── homakov.md            Founder's vision
@@ -205,21 +208,20 @@ Root:
 ```
 
 **Quick links:**
-- New to XLN? Start with [docs/about/homakov.md](docs/about/homakov.md)
-- Want to contribute? Read [docs/contributing/workflow.md](docs/contributing/workflow.md)
-- Current priorities? Check [docs/planning/active/next.md](docs/planning/active/next.md)
-- Architecture deep-dive? See [docs/docs/rjea.md](docs/docs/rjea.md)
+- New to XLN? Start with [docs/readme.md](docs/readme.md)
+- Current priorities? Check [todo.md](todo.md)
+- Current launch state? Read [docs/status.md](docs/status.md)
+- Mainnet bar? Read [docs/mainnet.md](docs/mainnet.md)
 
 ---
 
-## 🔥 Recent Updates (Oct 2025)
+## 🔥 Recent Updates (`0.1.5` - May 2026)
 
-- ✅ **Repository restructure** - Essence-driven naming (docs, runtime, jurisdictions, worlds)
-- ✅ **BrowserVM integration** - Offline simnet with @ethereumjs/vm
-- ✅ **Panel workspace** - Dockview-based Bloomberg Terminal UX
-- ✅ **WebGPU/WebGL switch** - Runtime renderer toggle (future-proof)
-- ✅ **IDepository interface** - Standardizable ERC for reserve management
-- ✅ **Depository** - 69% smaller, self-contained (6.6KB vs 21KB)
+- ✅ **Official watchtower** - Same-origin `/api/tower/*`, standalone daemon, scheduled sweep, and no public `/api/watchtower/*` sweep exposure
+- ✅ **Encrypted recovery** - Tower backup bundles and delayed-last-resort active remedies are encrypted; plaintext active remedies are rejected
+- ✅ **Recovery E2E** - Wiped-browser tower restore and post-restore channel payments are covered by browser tests
+- ✅ **Prod health** - Market maker/reset recovery and prod payment smoke passed in the `0.1.5` release pass
+- ✅ **Planning cleanup** - Live TODO/NEXT work is consolidated into [todo.md](todo.md)
 
 ---
 
@@ -236,42 +238,35 @@ Root:
 
 ## 🗺️ Network Roadmap
 
-### Simnet (Now - Oct 2025)
-**Browser-only simulation. Zero infrastructure.**
-- **Engine:** @ethereumjs/vm (in-browser blockchain)
-- **Contracts:** Depository.sol (6.6KB, implements IDepository)
-- **State:** 500 prefunded entities, USDC + ETH
-- **Reset:** Refresh page = new universe
-- **Use:** Scenario rehearsals, VR demos, tutorials
+The current release line is production-demo/public-testnet grade, not
+mainnet-ready. The active blocker order is in [todo.md](todo.md), current
+status is in [docs/status.md](docs/status.md), and the real-user-fund bar is in
+[docs/mainnet.md](docs/mainnet.md).
 
-### Testnet (Q1 2026)
-**Base Sepolia. Multi-user coordination.**
-- **Network:** Base L2 Sepolia (chainId: 84532)
-- **Contracts:** Full suite (EntityProvider, Depository, DeltaTransformer)
-- **RPC:** https://sepolia.base.org
-- **Use:** Integration testing, onboarding flows, load testing
+Current focus:
 
-### Mainnet (Q4 2026)
-**Production deployment. Real value.**
-- **Chains:** Base L2 (primary), Ethereum L1 (bridge)
-- **Governance:** Multi-sig + timelock
-- **Audits:** Trail of Bits + OpenZeppelin
-- **Use:** Live settlement network
+- keep local and prod-like E2E green for payments, swaps, disputes, recovery,
+  and watchtower action;
+- finish Peer State Refresh and account-level recovery coverage UX;
+- run release-duration soak/gates before any mainnet-candidate claim;
+- make chain/RPC, operator keys, tower gas policy, and monitoring explicit;
+- prepare external audit material before real funds.
 
 ---
 
 ## 📖 Learn More
 
 **Start here:**
-1. [docs/contributing/workflow.md](docs/contributing/workflow.md) - Daily dev commands
-2. [docs/docs/xlnview.md](docs/docs/xlnview.md) - Panel architecture + BrowserVM
-3. [docs/docs/rjea.md](docs/docs/rjea.md) - R→E→A→J flow explanation
-4. [simnet/readme.md](simnet/readme.md) - Offline blockchain setup
+1. [docs/readme.md](docs/readme.md) - Documentation index
+2. [todo.md](todo.md) - Active TODO/NEXT backlog
+3. [docs/status.md](docs/status.md) - Current launch state
+4. [docs/mainnet.md](docs/mainnet.md) - Mainnet release bar
+5. [docs/recovery-watchtower-protocol.md](docs/recovery-watchtower-protocol.md) - Recovery and watchtower protocol
 
-**For deep dives:** [docs/docs/](docs/docs/)
+**For deep dives:** [docs/readme.md](docs/readme.md)
 
 ---
 
 **License:** AGPL-3.0
-**Status:** Active development (2025)
-**Website:** xln.finance (coming soon)
+**Status:** Active development, pre-mainnet `0.1.5`
+**Website:** https://xln.finance

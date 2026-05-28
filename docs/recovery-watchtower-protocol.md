@@ -1,7 +1,7 @@
 # XLN Recovery and Watchtower Protocol
 
-Status: draft protocol  
-Scope: account-state recovery, peer refresh, watchtower storage, and offline dispute protection  
+Status: protocol spec and implementation tracker, updated for `0.1.5`
+Scope: account-state recovery, peer refresh, watchtower storage, and offline dispute protection
 Audience: runtime, wallet, hub, relay, and protocol implementers
 
 ## Executive Summary
@@ -39,7 +39,26 @@ XLN already has most of the raw material:
 - `entity-crontab.ts` already handles pending-frame resend, stale pending-frame detection, HTLC timeouts, rollback suggestions, and rebalance automation.
 - the native wallet plan already says relays/watchtowers may notify and prove, but must not hold spend-capable user keys.
 
-What is missing is a first-class protocol for account discovery, peer state refresh, tower upload, tower restore, and tower dispute action.
+Implemented in the current repo:
+
+- same-origin official tower endpoint under `/api/tower/*`;
+- standalone watchtower daemon with scheduled sweep;
+- blind encrypted backup uploads and restore;
+- encrypted delayed-last-resort active remedies sent to the tower action public key;
+- HTTP rejection of plaintext active remedies;
+- public nginx exposure of `/api/watchtower/*` removed;
+- guarded `watchtowerCounterDispute(...)` path that rejects early tower action,
+  wrong tower action, missing newer proof, and same-proof delegated finalize;
+- browser E2E for wiped-browser watchtower restore and post-restore channel
+  payments.
+
+Still missing or incomplete:
+
+- first-class Peer State Refresh (PSR) wire flow;
+- recovery relay account discovery and complaint/reputation flow;
+- account-level recovery coverage UI;
+- production monitoring/alerts for tower upload freshness and action receipts;
+- mainnet operator policy for tower keys, gas, RPC allowlist, and backup drills.
 
 ## Goals
 
@@ -588,10 +607,14 @@ Required contract/runtime assumption:
 
 Current repo note:
 
-- `Depository.sol` already has a newer-proof counter-dispute path in `_disputeFinalizeInternal`.
-- The same function also allows the counterparty side to finalize a same-proof dispute without waiting.
-- That is useful for normal protocol operation, but a delegated tower should not receive that broad capability.
-- The missing piece is a tower-specific guard that makes early action and same-proof acceptance invalid for delegated tower payloads.
+- `Depository.sol` has a tower-specific `watchtowerCounterDispute(...)` path.
+- The delegated path is intentionally narrower than the normal dispute/finalize
+  surface: it cannot start disputes, cannot same-proof finalize, and cannot act
+  before the last-resort window.
+- Runtime/watchtower tests cover early action, wrong tower/missing newer proof,
+  stale dispute rescue, and no-action-on-latest cases.
+- This does not replace PSR or recovery relay; it only covers the delayed
+  last-resort dispute defense role.
 
 ## UX Contract
 
@@ -699,7 +722,12 @@ Current repo status:
 - early tower action reverts on-chain;
 - wrong tower / missing newer proof is rejected;
 - standalone watchtower sweep engine exists in `runtime/watchtower/action.ts`;
-- service-side active appointment auto-generation from wallet/runtime still needs a dedicated uploader path.
+- standalone daemon schedules sweeps and exposes health without requiring public
+  `/api/watchtower/*` access;
+- active remedies are encrypted to the tower action key and plaintext active
+  remedies are rejected by tower HTTP;
+- browser/runtime upload paths exist for configured recovery towers;
+- PSR, recovery relay, and recovery coverage UI remain separate open work.
 
 ### Phase D: Multi-tower and Incentives
 
@@ -714,32 +742,37 @@ Features:
 
 ## Code Changes Checklist
 
-1. Define recovery protocol types in `runtime/recovery/types.ts`.
-2. Build bundle creation from `AccountMachine` in `runtime/recovery/bundle.ts`.
-3. Build deterministic verification in `runtime/recovery/verify.ts`.
-4. Add PSR wire handling to direct runtime/hub/relay transports.
-5. Add recovery discovery endpoint:
+Status key: done = implemented and covered in the current repo; open = still
+active backlog.
+
+1. done: define recovery protocol types in `runtime/recovery/types.ts`.
+2. done: build bundle creation from `AccountMachine` in `runtime/recovery/bundle.ts`.
+3. done: build deterministic verification in `runtime/recovery/verify.ts`.
+4. open: add PSR wire handling to direct runtime/hub/relay transports.
+5. partial: add recovery discovery endpoint:
    - `POST /api/recovery/discover`
    - `POST /api/recovery/state`
    - `POST /api/recovery/complaint`
-6. Add tower API:
+6. done: add tower API:
    - `PUT /api/tower/appointment`
    - `POST /api/tower/restore`
    - `GET /api/tower/receipt/:lookupKey`
-7. Persist tower receipts and last-uploaded heights.
-8. Extend `entity-crontab.ts` for scheduled PSR and tower upload.
-9. Extend wallet initialization after BrainVault unlock:
+7. partial: persist tower receipts and last-uploaded heights.
+8. partial: extend scheduled recovery work; tower upload exists, PSR cadence is
+   still open.
+9. partial: extend wallet initialization after BrainVault unlock:
    - try local DB;
    - if missing or strict restore fails, enter recovery discovery instead of creating empty state silently;
    - only create a fresh env after explicit user confirmation when no recoverable accounts exist.
-10. Add UI state for recovery coverage and account recovery status.
-11. Add contract support for dispute update/challenge if missing.
-12. Add contract-enforced delayed tower action:
+10. open: add UI state for recovery coverage and account recovery status.
+11. done: add contract support for dispute update/challenge if missing.
+12. done: add contract-enforced delayed tower action:
    - `lastResortWindowBlocks`;
    - `safetyMarginBlocks` as tower policy;
    - counter-dispute-only payload;
    - no same-proof finalize capability.
-13. Add soak test: kill local DB, restore through BrainVault + hub + tower.
+13. partial: add recovery E2E for wiped local browser state and tower restore;
+    broader BrainVault + hub + PSR recovery soak remains open.
 
 ## Minimum Viable Product
 
@@ -751,6 +784,13 @@ MVP should include:
 - Tower stores last 3 encrypted bundles per account.
 - UI shows recovery coverage.
 - Complaint relay records stale/fake peer responses.
+
+Current `0.1.5` status:
+
+- tower encrypted backup restore is implemented;
+- delayed-last-resort counter-dispute infrastructure is implemented;
+- wiped-browser tower restore is covered by E2E;
+- PSR, recovery relay complaints/reputation, and coverage UI are still open.
 
 MVP should not include yet:
 
