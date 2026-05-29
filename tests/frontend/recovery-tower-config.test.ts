@@ -3,6 +3,7 @@ import { HDNodeWallet, Mnemonic, Wallet, getIndexedAccountPath, keccak256, toUtf
 
 import {
   buildDelayedLastResortAppointmentsForTower,
+  buildRuntimeRecoveryConfigForMode,
   resolveDefaultRecoveryTowerUrls,
 } from '../../frontend/src/lib/stores/vaultStore';
 import * as xln from '../../runtime/runtime';
@@ -24,6 +25,29 @@ test('resolveDefaultRecoveryTowerUrls stays disabled by default on localhost', (
     globalUrls: undefined,
     localUrls: undefined,
   })).toEqual([]);
+});
+
+test('runtime recovery modes keep tower setup out of seed creation defaults', () => {
+  expect(buildRuntimeRecoveryConfigForMode('official', {
+    officialTowerUrl: 'https://xln.finance/',
+  }).towers).toEqual([{
+    id: 'official-watchtower',
+    url: 'https://xln.finance',
+    towerMode: 'delayed_last_resort',
+    enabled: true,
+  }]);
+
+  expect(buildRuntimeRecoveryConfigForMode('backup_only', {
+    officialTowerUrl: 'https://xln.finance/',
+  }).towers?.[0]?.towerMode).toBe('blind_backup');
+
+  expect(buildRuntimeRecoveryConfigForMode('local_only', {
+    officialTowerUrl: 'https://xln.finance/',
+    manualTowers: [{ url: 'http://127.0.0.1:9100/', towerMode: 'delayed_last_resort' }],
+  })).toMatchObject({
+    useDefaultTowers: false,
+    towers: [{ url: 'http://127.0.0.1:9100', towerMode: 'delayed_last_resort', enabled: true }],
+  });
 });
 
 const testMnemonic = 'test test test test test test test test test test test junk';

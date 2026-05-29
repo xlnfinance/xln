@@ -1,5 +1,5 @@
 export type ViewTab = 'assets' | 'accounts' | 'settings';
-export type SettingsSubview = 'wallet' | 'display' | 'network' | 'data' | 'log' | 'entity';
+export type SettingsSubview = 'wallet' | 'recovery' | 'display' | 'network' | 'data' | 'log' | 'entity';
 export type AccountWorkspaceTab = 'send' | 'receive' | 'swap' | 'open' | 'activity' | 'move' | 'history' | 'configure' | 'appearance';
 export type AssetWorkspaceTab = 'move' | 'history';
 export type ConfigureWorkspaceTab = 'extend-credit' | 'request-credit' | 'collateral' | 'token' | 'dispute';
@@ -90,6 +90,10 @@ export function canonicalizeEntityPanelRoute(routeRaw: string | null): string | 
     case 'settings/wallet':
     case 'wallet':
       return 'settings';
+    case 'settings/recovery':
+    case 'recovery':
+    case 'watchtowers':
+      return 'settings/recovery';
     case 'settings/display':
     case 'display':
       return 'settings/display';
