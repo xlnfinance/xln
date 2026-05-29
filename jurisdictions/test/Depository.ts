@@ -389,6 +389,53 @@ describe("Depository", function () {
     expect(await erc20.balanceOf(user1.address)).to.equal(2_500n);
   });
 
+  it("processBatch supports no-return ERC20 tokens on deposit and withdrawal", async function () {
+    const { depository } = await loadFixture(deployFixture);
+
+    const NoReturnERC20Mock = await hre.ethers.getContractFactory("NoReturnERC20Mock");
+    const noReturnToken = await NoReturnERC20Mock.deploy("NoReturn", "NORET", 1_000_000n);
+    await noReturnToken.waitForDeployment();
+
+    const actor = lazyActor(user0, 0);
+    const recipientEntity = addressEntityId(user1.address);
+
+    await noReturnToken.approve(await depository.getAddress(), 10_000n);
+
+    const depositBatch = emptyBatch({
+      externalTokenToReserve: [{
+        entity: ethers.ZeroHash,
+        contractAddress: await noReturnToken.getAddress(),
+        externalTokenId: 0,
+        tokenType: 0,
+        internalTokenId: 0,
+        amount: 10_000n,
+      }],
+    });
+    const deposit = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, depositBatch);
+
+    await expect(
+      depository.connect(user0).processBatch(deposit.encodedBatch, deposit.hankoData, deposit.nonce)
+    ).to.emit(depository, "HankoBatchProcessed")
+      .withArgs(actor.entityId, ethers.keccak256(deposit.hankoData), deposit.nonce, true);
+
+    const tokenId = (await depository.getTokensLength()) - 1n;
+    expect(await depository._reserves(actor.entityId, tokenId)).to.equal(10_000n);
+    expect(await noReturnToken.balanceOf(await depository.getAddress())).to.equal(10_000n);
+
+    const withdrawBatch = emptyBatch({
+      reserveToExternalToken: [{ receivingEntity: recipientEntity, tokenId, amount: 2_500n }],
+    });
+    const withdraw = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, withdrawBatch);
+
+    await expect(
+      depository.connect(user0).processBatch(withdraw.encodedBatch, withdraw.hankoData, withdraw.nonce)
+    ).to.emit(depository, "ReserveUpdated")
+      .withArgs(actor.entityId, tokenId, 7_500n);
+
+    expect(await depository._reserves(actor.entityId, tokenId)).to.equal(7_500n);
+    expect(await noReturnToken.balanceOf(user1.address)).to.equal(2_500n);
+  });
+
   it("rejects zero-amount ERC721 withdrawals instead of transferring the NFT for free", async function () {
     const { depository, erc721 } = await loadFixture(deployFixture);
 
