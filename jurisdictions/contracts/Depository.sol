@@ -177,8 +177,20 @@ contract Depository is ReentrancyGuardLite {
     return (meta.contractAddress, meta.externalTokenId, meta.tokenType);
   }
 
+  function _safeERC20Call(address token, bytes memory data) private {
+    (bool success, bytes memory returndata) = token.call(data);
+    if (!success) revert E3();
+    if (returndata.length == 0) return;
+    if (returndata.length < 32 || !abi.decode(returndata, (bool))) revert E3();
+  }
 
+  function _safeERC20TransferFrom(address token, address from, address to, uint256 amount) private {
+    _safeERC20Call(token, abi.encodeWithSelector(IERC20.transferFrom.selector, from, to, amount));
+  }
 
+  function _safeERC20Transfer(address token, address to, uint256 amount) private {
+    _safeERC20Call(token, abi.encodeWithSelector(IERC20.transfer.selector, to, amount));
+  }
 
 
   // Batch struct is in Types.sol
@@ -601,9 +613,10 @@ contract Depository is ReentrancyGuardLite {
 
     if (params.tokenType == TypeERC20) {
       uint256 balanceBefore = IERC20(params.contractAddress).balanceOf(address(this));
-      if (!IERC20(params.contractAddress).transferFrom(msg.sender, address(this), params.amount)) revert E3();
+      _safeERC20TransferFrom(params.contractAddress, msg.sender, address(this), params.amount);
       uint256 balanceAfter = IERC20(params.contractAddress).balanceOf(address(this));
       params.amount = balanceAfter - balanceBefore;
+      if (params.amount == 0) revert E3();
     } else if (params.tokenType == TypeERC721) {
       IERC721(params.contractAddress).transferFrom(msg.sender, address(this), uint(params.externalTokenId));
       params.amount = 1;
@@ -628,7 +641,7 @@ contract Depository is ReentrancyGuardLite {
     _decreaseReserve(entity, params.tokenId, params.amount);
 
     if (meta.tokenType == TypeERC20) {
-      if (!IERC20(meta.contractAddress).transfer(recipient, params.amount)) revert E3();
+      _safeERC20Transfer(meta.contractAddress, recipient, params.amount);
     } else if (meta.tokenType == TypeERC721) {
       IERC721(meta.contractAddress).transferFrom(address(this), recipient, uint(meta.externalTokenId));
     } else if (meta.tokenType == TypeERC1155) {
