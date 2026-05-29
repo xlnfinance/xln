@@ -30,6 +30,7 @@ export interface JMachineHealth {
   rpc: string[];
   status: 'healthy' | 'degraded' | 'down';
   lastBlock?: number;
+  watching?: boolean;
   responseTime?: number;
   error?: string;
 }
@@ -97,17 +98,14 @@ export async function getHealthStatus(env: Env | null): Promise<HealthStatus> {
           status: 'healthy',
         };
 
-        // Try to get latest block
-        if (jadapter?.provider) {
-          const start = Date.now();
-          try {
-            const blockNumber = await jadapter.provider.getBlockNumber();
-            status.lastBlock = blockNumber;
-            status.responseTime = Date.now() - start;
-          } catch (err) {
-            status.status = 'down';
-            status.error = err instanceof Error ? err.message : String(err);
-          }
+        // Health must not create its own RPC polling path. The J-watcher is the
+        // single source of observed chain progress; expose its persisted cursor.
+        const blockNumber = Number(jReplica.blockNumber ?? 0n);
+        if (Number.isFinite(blockNumber) && blockNumber >= 0) {
+          status.lastBlock = Math.floor(blockNumber);
+        }
+        if (jadapter?.isWatching) {
+          status.watching = jadapter.isWatching();
         }
 
         jMachines.push(status);
