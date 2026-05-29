@@ -3,7 +3,15 @@
   import { ethers } from 'ethers';
   import type { Env, EntityTx } from '@xln/runtime/xln-api';
   import type { BarColorMode, EntityReplica, Tab, ThemeName, UIStyleSettings } from '$lib/types/ui';
-  import { activeRuntime, vaultOperations } from '$lib/stores/vaultStore';
+  import {
+    activeRuntime,
+    buildRuntimeRecoveryConfigForMode,
+    resolveDefaultRecoveryTowerUrls,
+    vaultOperations,
+    type RecoveryTowerConfig,
+    type RecoveryTowerSetupMode,
+    type Runtime,
+  } from '$lib/stores/vaultStore';
   import {
     jmachineConfigs,
     jmachineOperations,
@@ -37,10 +45,11 @@
 
   const dispatch = createEventDispatcher();
 
-  type SettingsTab = 'wallet' | 'display' | 'network' | 'data' | 'log' | 'entity';
+  type SettingsTab = 'wallet' | 'recovery' | 'display' | 'network' | 'data' | 'log' | 'entity';
 
   const SETTINGS_TABS: Array<{ id: SettingsTab; label: string }> = [
     { id: 'wallet', label: 'Wallet' },
+    { id: 'recovery', label: 'Recovery' },
     { id: 'display', label: 'Display' },
     { id: 'network', label: 'Network' },
     { id: 'data', label: 'Advanced' },
@@ -68,6 +77,14 @@
   let seedCopied = false;
   let mnemonic12Copied = false;
   let recoveryPhraseRevealed = false;
+  let recoveryMode: RecoveryTowerSetupMode = 'official';
+  let recoveryTowerDraft: RecoveryTowerConfig[] = [];
+  let recoveryDraftLoadedFor = '';
+  let recoveryManualUrl = '';
+  let recoveryManualKind: 'blind_backup' | 'delayed_last_resort' = 'blind_backup';
+  let recoverySaving = false;
+  let recoveryMessage = '';
+  let recoveryMessageTone: 'neutral' | 'error' = 'neutral';
 
   let showAddJMachine = false;
   let editingJMachineName: string | null = null;
@@ -195,6 +212,10 @@
     void loadCheckpointHeights();
   }
 
+  $: if (activeTab === 'recovery') {
+    syncRecoveryDraftFromRuntime();
+  }
+
   $: if (activeTab === 'entity') {
     loadGovernanceProfileFromGossip();
     loadHubConfigFromState();
@@ -254,6 +275,170 @@
       navigator.clipboard.writeText($activeRuntime.mnemonic12);
       mnemonic12Copied = true;
       setTimeout(() => mnemonic12Copied = false, 2000);
+    }
+  }
+
+  function resolveOfficialRecoveryTowerUrl(): string | null {
+    if (typeof window === 'undefined') return 'https://xln.finance';
+    const w = window as Window & { __XLN_WATCHTOWERS__?: unknown };
+    let localUrls: string | null = null;
+    try {
+      localUrls = localStorage.getItem('xln-watchtower-urls');
+    } catch {
+      localUrls = null;
+    }
+    return resolveDefaultRecoveryTowerUrls({
+      hostname: window.location.hostname,
+      globalUrls: w.__XLN_WATCHTOWERS__,
+      localUrls,
+    })[0] || null;
+  }
+
+  function normalizeRecoveryUrl(value: string): string {
+    const trimmed = value.trim().replace(/\/+$/, '');
+    if (!trimmed) throw new Error('Service URL is required');
+    const parsed = new URL(trimmed);
+    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
+      throw new Error('Service URL must start with http:// or https://');
+    }
+    return parsed.toString().replace(/\/+$/, '');
+  }
+
+  function normalizeTowerMode(mode: unknown): 'blind_backup' | 'delayed_last_resort' {
+    return mode === 'delayed_last_resort' || mode === 'active_watchtower'
+      ? 'delayed_last_resort'
+      : 'blind_backup';
+  }
+
+  function normalizeRecoveryDraft(towers: RecoveryTowerConfig[] | undefined): RecoveryTowerConfig[] {
+    const deduped = new Map<string, RecoveryTowerConfig>();
+    for (const tower of towers || []) {
+      try {
+        const url = normalizeRecoveryUrl(tower.url);
+        if (tower.enabled === false) continue;
+        deduped.set(url, {
+          ...tower,
+          id: tower.id || `manual-${deduped.size + 1}`,
+          url,
+          towerMode: normalizeTowerMode(tower.towerMode),
+          enabled: true,
+        });
+      } catch {
+        // Ignore malformed persisted service URLs in the settings draft.
+      }
+    }
+    return [...deduped.values()];
+  }
+
+  function isOfficialRecoveryTower(tower: RecoveryTowerConfig, officialUrl: string | null): boolean {
+    if (!officialUrl) return false;
+    try {
+      return normalizeRecoveryUrl(tower.url) === normalizeRecoveryUrl(officialUrl);
+    } catch {
+      return false;
+    }
+  }
+
+  function getManualRecoveryTowers(towers: RecoveryTowerConfig[], officialUrl: string | null): RecoveryTowerConfig[] {
+    return normalizeRecoveryDraft(towers).filter((tower) => !isOfficialRecoveryTower(tower, officialUrl));
+  }
+
+  function inferRecoveryMode(runtime: Runtime | null | undefined): RecoveryTowerSetupMode {
+    const officialUrl = resolveOfficialRecoveryTowerUrl();
+    const towers = normalizeRecoveryDraft(runtime?.recovery?.towers);
+    const officialTower = towers.find((tower) => isOfficialRecoveryTower(tower, officialUrl));
+    if (officialTower) {
+      return normalizeTowerMode(officialTower.towerMode) === 'delayed_last_resort'
+        ? 'official'
+        : 'backup_only';
+    }
+    if (!officialUrl && towers.length === 0) return 'local_only';
+    if (towers.length === 0) return 'official';
+    return 'local_only';
+  }
+
+  function syncRecoveryDraftFromRuntime(force = false): void {
+    const runtime = $activeRuntime;
+    const key = `${runtime?.id || 'none'}:${JSON.stringify(runtime?.recovery?.towers || [])}:${runtime?.recovery?.useDefaultTowers === true}`;
+    if (!force && recoveryDraftLoadedFor === key) return;
+    recoveryMode = inferRecoveryMode(runtime);
+    recoveryTowerDraft = normalizeRecoveryDraft(runtime?.recovery?.towers);
+    recoveryDraftLoadedFor = key;
+    recoveryMessage = '';
+    recoveryMessageTone = 'neutral';
+  }
+
+  function applyRecoveryModeDraft(mode: RecoveryTowerSetupMode): void {
+    const officialUrl = resolveOfficialRecoveryTowerUrl();
+    if (mode !== 'local_only' && !officialUrl) return;
+    recoveryMode = mode;
+    const config = buildRuntimeRecoveryConfigForMode(mode, {
+      officialTowerUrl: officialUrl,
+      manualTowers: getManualRecoveryTowers(recoveryTowerDraft, officialUrl),
+      previous: $activeRuntime?.recovery || null,
+    });
+    recoveryTowerDraft = normalizeRecoveryDraft(config.towers);
+    recoveryMessage = '';
+    recoveryMessageTone = 'neutral';
+  }
+
+  function addManualRecoveryTower(): void {
+    recoveryMessage = '';
+    recoveryMessageTone = 'neutral';
+    try {
+      const url = normalizeRecoveryUrl(recoveryManualUrl);
+      const nextTower: RecoveryTowerConfig = {
+        id: `manual-${Date.now()}`,
+        url,
+        towerMode: recoveryManualKind,
+        enabled: true,
+      };
+      recoveryTowerDraft = normalizeRecoveryDraft([
+        ...recoveryTowerDraft.filter((tower) => tower.url !== url),
+        nextTower,
+      ]);
+      recoveryManualUrl = '';
+    } catch (error) {
+      recoveryMessage = error instanceof Error ? error.message : String(error);
+      recoveryMessageTone = 'error';
+    }
+  }
+
+  function updateRecoveryTowerMode(url: string, mode: 'blind_backup' | 'delayed_last_resort'): void {
+    recoveryTowerDraft = normalizeRecoveryDraft(recoveryTowerDraft.map((tower) =>
+      tower.url === url
+        ? { ...tower, towerMode: mode }
+        : tower
+    ));
+  }
+
+  function removeRecoveryTower(url: string): void {
+    recoveryTowerDraft = recoveryTowerDraft.filter((tower) => tower.url !== url);
+  }
+
+  async function saveRecoveryConfig(): Promise<void> {
+    const runtime = $activeRuntime;
+    if (!runtime) return;
+    recoverySaving = true;
+    recoveryMessage = '';
+    recoveryMessageTone = 'neutral';
+    try {
+      const officialUrl = resolveOfficialRecoveryTowerUrl();
+      const config = buildRuntimeRecoveryConfigForMode(recoveryMode, {
+        officialTowerUrl: officialUrl,
+        manualTowers: getManualRecoveryTowers(recoveryTowerDraft, officialUrl),
+        previous: runtime.recovery || null,
+      });
+      const updatedRuntime = await vaultOperations.updateRuntimeRecovery(runtime.id, config);
+      recoveryTowerDraft = normalizeRecoveryDraft(updatedRuntime.recovery?.towers);
+      recoveryDraftLoadedFor = '';
+      recoveryMessage = 'Recovery services saved.';
+      toasts.success('Runtime recovery services saved');
+    } catch (error) {
+      recoveryMessage = error instanceof Error ? error.message : String(error);
+      recoveryMessageTone = 'error';
+    } finally {
+      recoverySaving = false;
     }
   }
 
@@ -790,6 +975,151 @@
           <div class="empty-card">No wallet connected. Create or import a wallet first.</div>
         {/if}
       </section>
+
+    {:else if activeTab === 'recovery'}
+      <section class="section-card">
+        <div class="section-head">
+          <div>
+            <h3>Runtime Recovery</h3>
+            <p class="section-desc">Watchtower services for encrypted backups and last-resort dispute response.</p>
+          </div>
+        </div>
+
+        {#if $activeRuntime}
+          {@const officialUrl = resolveOfficialRecoveryTowerUrl()}
+          <div class="recovery-mode-grid" role="radiogroup" aria-label="Runtime recovery mode">
+            <button
+              type="button"
+              class="recovery-mode-option"
+              class:selected={recoveryMode === 'official'}
+              disabled={!officialUrl}
+              on:click={() => applyRecoveryModeDraft('official')}
+            >
+              <span class="recovery-mode-title">Official tower</span>
+              <span class="recovery-mode-copy">
+                {officialUrl
+                  ? 'Encrypted backup plus last-resort counter-dispute from the official XLN service.'
+                  : 'No official tower URL is configured for this local runtime.'}
+              </span>
+            </button>
+
+            <button
+              type="button"
+              class="recovery-mode-option"
+              class:selected={recoveryMode === 'backup_only'}
+              disabled={!officialUrl}
+              on:click={() => applyRecoveryModeDraft('backup_only')}
+            >
+              <span class="recovery-mode-title">Backup only</span>
+              <span class="recovery-mode-copy">
+                Encrypted backup only. The tower stores ciphertext and cannot read intermediate channel balances.
+              </span>
+            </button>
+
+            <button
+              type="button"
+              class="recovery-mode-option"
+              class:selected={recoveryMode === 'local_only'}
+              on:click={() => applyRecoveryModeDraft('local_only')}
+            >
+              <span class="recovery-mode-title">Local only</span>
+              <span class="recovery-mode-copy">
+                No default remote service. Add backup services and last-resort disputers manually by URL.
+              </span>
+            </button>
+          </div>
+
+          <p class="helper-note">
+            A tower never gets spend authority and cannot start disputes. Last-resort disputers can only answer an already-open dispute in the final delay window.
+          </p>
+        {:else}
+          <div class="empty-card">Create or import a runtime before configuring recovery services.</div>
+        {/if}
+      </section>
+
+      {#if $activeRuntime}
+        {@const officialUrl = resolveOfficialRecoveryTowerUrl()}
+        <section class="section-card">
+          <div class="section-head">
+            <div>
+              <h3>Configured Services</h3>
+              <p class="section-desc">Services saved on this runtime. Manual entries can be backup-only or last-resort disputers.</p>
+            </div>
+          </div>
+
+          <div class="service-list">
+            {#if recoveryTowerDraft.length === 0}
+              <div class="empty-card">No remote recovery services are configured.</div>
+            {:else}
+              {#each recoveryTowerDraft as tower (tower.url)}
+                {@const isOfficial = isOfficialRecoveryTower(tower, officialUrl)}
+                <div class="service-row">
+                  <div class="service-details">
+                    <div class="service-title-row">
+                      <span class="service-name">{isOfficial ? 'Official XLN tower' : 'Manual service'}</span>
+                      <span class="service-kind-badge">
+                        {normalizeTowerMode(tower.towerMode) === 'delayed_last_resort' ? 'backup + last resort' : 'encrypted backup'}
+                      </span>
+                    </div>
+                    <span class="network-meta mono">{tower.url}</span>
+                  </div>
+                  <div class="service-actions">
+                    <select
+                      value={normalizeTowerMode(tower.towerMode)}
+                      disabled={isOfficial}
+                      aria-label="Recovery service mode"
+                      on:change={(event) => updateRecoveryTowerMode(tower.url, (event.currentTarget as HTMLSelectElement).value as 'blind_backup' | 'delayed_last_resort')}
+                    >
+                      <option value="blind_backup">Backup service</option>
+                      <option value="delayed_last_resort">Last-resort disputer</option>
+                    </select>
+                    {#if !isOfficial}
+                      <button class="compact-btn" type="button" on:click={() => removeRecoveryTower(tower.url)}>Remove</button>
+                    {/if}
+                  </div>
+                </div>
+              {/each}
+            {/if}
+          </div>
+
+          <div class="manual-service-editor">
+            <div class="manual-service-grid">
+              <label>
+                <span class="setting-title">Service URL</span>
+                <input
+                  type="url"
+                  bind:value={recoveryManualUrl}
+                  placeholder="https://tower.example.com"
+                  autocomplete="off"
+                  spellcheck="false"
+                />
+              </label>
+              <label>
+                <span class="setting-title">Role</span>
+                <select bind:value={recoveryManualKind}>
+                  <option value="blind_backup">Backup service</option>
+                  <option value="delayed_last_resort">Last-resort disputer</option>
+                </select>
+              </label>
+              <button class="compact-btn manual-service-add" type="button" on:click={addManualRecoveryTower}>Add service</button>
+            </div>
+            <p class="helper-note">
+              Backup services store encrypted runtime bundles. Last-resort disputers also receive encrypted rescue appointments for dispute response.
+            </p>
+          </div>
+
+          <div class="editor-actions recovery-save-row">
+            <button class="primary-btn" type="button" on:click={saveRecoveryConfig} disabled={recoverySaving}>
+              {recoverySaving ? 'Saving...' : 'Save Recovery Services'}
+            </button>
+            {#if recoveryMessage}
+              <p class:helper-note={recoveryMessageTone === 'neutral'} class:error-text={recoveryMessageTone === 'error'}>
+                {recoveryMessage}
+              </p>
+            {/if}
+          </div>
+        </section>
+      {/if}
 
     {:else if activeTab === 'display'}
       <section class="section-card">
@@ -1697,6 +2027,142 @@
     text-align: center;
   }
 
+  .recovery-mode-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 10px;
+  }
+
+  .recovery-mode-option {
+    display: grid;
+    align-content: start;
+    gap: 8px;
+    min-height: 132px;
+    padding: 14px;
+    border: 1px solid color-mix(in srgb, var(--theme-border, rgba(255, 255, 255, 0.12)) var(--ui-border-mix, 56%), transparent) !important;
+    border-radius: var(--ui-radius-base, 12px) !important;
+    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) 58%, transparent) !important;
+    color: var(--theme-text-primary, #e4e4e7) !important;
+    text-align: left;
+    cursor: pointer;
+    box-sizing: border-box;
+    transition: border-color 0.16s ease, background 0.16s ease, transform 0.16s ease;
+  }
+
+  .recovery-mode-option:hover {
+    border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) 18%, transparent) !important;
+    transform: translateY(-1px);
+  }
+
+  .recovery-mode-option:disabled {
+    cursor: not-allowed;
+    opacity: 0.56;
+    transform: none;
+  }
+
+  .recovery-mode-option.selected {
+    border-color: color-mix(in srgb, var(--theme-accent, #fbbf24) 34%, transparent) !important;
+    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 12%, var(--theme-surface-hover, #1c1c20)) !important;
+    box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--theme-accent, #fbbf24) 16%, transparent);
+  }
+
+  .recovery-mode-title {
+    font-size: calc(13px * var(--ui-font-scale, 1));
+    font-weight: 700;
+  }
+
+  .recovery-mode-copy {
+    color: var(--theme-text-secondary, rgba(255, 255, 255, 0.68));
+    font-size: calc(12px * var(--ui-font-scale, 1));
+    line-height: 1.45;
+  }
+
+  .service-list {
+    display: grid;
+    gap: 10px;
+  }
+
+  .service-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px;
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) var(--ui-border-mix, 60%), transparent);
+    border-radius: var(--ui-radius-base, 12px);
+    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) var(--ui-card-fill-mix, 55%), transparent);
+  }
+
+  .service-details {
+    display: grid;
+    gap: 5px;
+    min-width: 0;
+  }
+
+  .service-title-row {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+
+  .service-name {
+    font-weight: 650;
+  }
+
+  .service-kind-badge {
+    display: inline-flex;
+    align-items: center;
+    min-height: 22px;
+    padding: 0 8px;
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--theme-accent, #fbbf24) 11%, transparent);
+    border: 1px solid color-mix(in srgb, var(--theme-accent, #fbbf24) 18%, transparent);
+    color: var(--theme-accent, #fbbf24);
+    font-size: 10px;
+    font-weight: 700;
+    letter-spacing: 0.03em;
+    text-transform: uppercase;
+  }
+
+  .service-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: flex-end;
+  }
+
+  .manual-service-editor {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+    padding: 14px;
+    border: 1px solid color-mix(in srgb, var(--theme-border, #27272a) var(--ui-border-mix, 60%), transparent);
+    border-radius: var(--ui-radius-base, 12px);
+    background: color-mix(in srgb, var(--theme-surface-hover, #1c1c20) var(--ui-card-fill-mix, 55%), transparent);
+  }
+
+  .manual-service-grid {
+    display: grid;
+    grid-template-columns: minmax(0, 1.6fr) minmax(170px, 0.8fr) auto;
+    gap: 10px;
+    align-items: end;
+  }
+
+  .manual-service-grid label {
+    display: grid;
+    gap: 6px;
+  }
+
+  .manual-service-add {
+    min-height: var(--ui-control-height, 44px);
+  }
+
+  .recovery-save-row {
+    margin-top: 12px;
+  }
+
   .info-card,
   .seed-card {
     display: grid;
@@ -2398,6 +2864,8 @@
   :global(html[data-ui-cards='flat']) .inline-editor,
   :global(html[data-ui-cards='flat']) .expand-panel,
   :global(html[data-ui-cards='flat']) .network-row,
+  :global(html[data-ui-cards='flat']) .service-row,
+  :global(html[data-ui-cards='flat']) .manual-service-editor,
   :global(html[data-ui-cards='flat']) .helper-details {
     background: color-mix(in srgb, var(--theme-surface, #18181b) 56%, transparent);
   }
@@ -2461,17 +2929,25 @@
       gap: 12px;
     }
 
+    .recovery-mode-grid,
+    .manual-service-grid {
+      grid-template-columns: 1fr;
+    }
+
     .info-row,
     .setting-row,
     .scale-head,
-    .network-row {
+    .network-row,
+    .service-row {
       grid-template-columns: 1fr;
       flex-direction: column;
       align-items: flex-start;
     }
 
-    .network-actions {
+    .network-actions,
+    .service-actions {
       width: 100%;
+      justify-content: flex-start;
     }
 
     .editor-grid {

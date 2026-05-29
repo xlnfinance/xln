@@ -267,6 +267,10 @@
         activeTab = 'settings';
         settingsSubview = 'wallet';
         break;
+      case 'settings/recovery':
+        activeTab = 'settings';
+        settingsSubview = 'recovery';
+        break;
       case 'settings/display':
         activeTab = 'settings';
         settingsSubview = 'display';
@@ -292,7 +296,7 @@
     }
 
     if (view === 'settings' && subview) {
-      const nextSettingsSubview = ['wallet', 'display', 'network', 'data', 'log', 'entity'].includes(subview)
+      const nextSettingsSubview = ['wallet', 'recovery', 'display', 'network', 'data', 'log', 'entity'].includes(subview)
         ? subview as SettingsSubview
         : null;
       if (nextSettingsSubview) settingsSubview = nextSettingsSubview;

@@ -85,6 +85,8 @@ type CreateRuntimeOptions = {
   recovery?: RuntimeRecoveryConfig | undefined;
 };
 
+export type RecoveryTowerSetupMode = 'official' | 'backup_only' | 'local_only';
+
 type ImportedJMachineConfig = {
   name: string;
   mode: 'browservm' | 'rpc';
@@ -421,6 +423,27 @@ const defaultRecoveryTowerUrls = (): string[] => {
 
 const normalizeTowerBaseUrl = (url: string): string => String(url || '').trim().replace(/\/+$/, '');
 
+const normalizeRecoveryTowerMode = (mode: unknown): TowerModeV1 =>
+  mode === 'active_watchtower' || mode === 'delayed_last_resort'
+    ? mode
+    : 'blind_backup';
+
+const normalizeRecoveryTowerConfigs = (towers: RecoveryTowerConfig[] | undefined): RecoveryTowerConfig[] => {
+  const deduped = new Map<string, RecoveryTowerConfig>();
+  for (const tower of towers || []) {
+    const url = normalizeTowerBaseUrl(tower.url);
+    if (!url || tower.enabled === false) continue;
+    deduped.set(url, {
+      ...tower,
+      id: tower.id || `tower-${deduped.size + 1}`,
+      url,
+      towerMode: normalizeRecoveryTowerMode(tower.towerMode),
+      enabled: true,
+    });
+  }
+  return [...deduped.values()];
+};
+
 const buildDefaultRecoveryTowerConfigs = (): RecoveryTowerConfig[] =>
   defaultRecoveryTowerUrls().map((url, index) => ({
     id: `official-${index + 1}`,
@@ -437,6 +460,39 @@ const buildDefaultRuntimeRecoveryConfig = (): RuntimeRecoveryConfig => ({
   useDefaultTowers: false,
   towers: buildDefaultRecoveryTowerConfigs(),
 });
+
+export const buildRuntimeRecoveryConfigForMode = (
+  mode: RecoveryTowerSetupMode,
+  options: {
+    officialTowerUrl?: string | null;
+    manualTowers?: RecoveryTowerConfig[];
+    previous?: RuntimeRecoveryConfig | null;
+  } = {},
+): RuntimeRecoveryConfig => {
+  const manualTowers = normalizeRecoveryTowerConfigs(options.manualTowers);
+  const officialTowerUrl = normalizeTowerBaseUrl(options.officialTowerUrl || defaultRecoveryTowerUrls()[0] || '');
+  const towers: RecoveryTowerConfig[] = [];
+
+  if (mode !== 'local_only' && officialTowerUrl) {
+    towers.push({
+      id: 'official-watchtower',
+      url: officialTowerUrl,
+      towerMode: mode === 'backup_only' ? 'blind_backup' : 'delayed_last_resort',
+      enabled: true,
+    });
+  }
+
+  for (const tower of manualTowers) {
+    if (towers.some((existing) => existing.url === tower.url)) continue;
+    towers.push(tower);
+  }
+
+  return {
+    ...(options.previous || {}),
+    useDefaultTowers: false,
+    towers,
+  };
+};
 
 const buildTowerRequestUrl = (towerUrl: string, towerPath: string): string => {
   const normalizedBaseUrl = normalizeTowerBaseUrl(towerUrl);
@@ -463,9 +519,7 @@ const getConfiguredRecoveryTowers = (runtime: Runtime | null | undefined): Recov
     .map((tower) => ({
       ...tower,
       url: normalizeTowerBaseUrl(tower.url),
-      towerMode: (tower.towerMode === 'active_watchtower' || tower.towerMode === 'delayed_last_resort'
-        ? tower.towerMode
-        : 'blind_backup') as TowerModeV1,
+      towerMode: normalizeRecoveryTowerMode(tower.towerMode),
       enabled: tower.enabled !== false,
     }))
     .filter((tower) => !!tower.url && tower.enabled !== false);
@@ -2158,6 +2212,49 @@ export const vaultOperations = {
   async readPersistedFrameJournal(env: Env, height: number): Promise<PersistedFrameJournal | null> {
     const xln = await getXLN();
     return xln.readPersistedFrameJournal(unwrapLiveRuntimeEnv(env) ?? env, height);
+  },
+
+  async updateRuntimeRecovery(runtimeId: string | null | undefined, recovery: RuntimeRecoveryConfig): Promise<Runtime> {
+    const normalizedRuntimeId = normalizeRuntimeId(runtimeId || get(activeRuntimeId));
+    if (!normalizedRuntimeId) throw new Error('No active runtime selected');
+
+    let updatedRuntime: Runtime | null = null;
+    runtimesState.update((state) => {
+      const runtime = state.runtimes[normalizedRuntimeId];
+      if (!runtime) throw new Error(`Runtime not found: ${normalizedRuntimeId}`);
+      updatedRuntime = {
+        ...runtime,
+        recovery: {
+          ...recovery,
+          towers: normalizeRecoveryTowerConfigs(recovery.towers),
+          useDefaultTowers: recovery.useDefaultTowers === true,
+        },
+      };
+      return {
+        ...state,
+        runtimes: {
+          ...state.runtimes,
+          [normalizedRuntimeId]: updatedRuntime,
+        },
+      };
+    });
+
+    if (!updatedRuntime) throw new Error(`Runtime not found: ${normalizedRuntimeId}`);
+    this.saveToStorage();
+
+    const runtimeEntry = get(runtimes).get(normalizedRuntimeId);
+    const entryEnv = runtimeEntry?.env || null;
+    if (entryEnv) {
+      runtimes.update((currentRuntimes) => {
+        const updated = new Map(currentRuntimes);
+        updated.set(normalizedRuntimeId, runtimeToEntry(updatedRuntime!, entryEnv));
+        return updated;
+      });
+      const xln = await getXLN();
+      scheduleRuntimeRecoveryUpload(normalizedRuntimeId, unwrapLiveRuntimeEnv(entryEnv) ?? entryEnv, xln);
+    }
+
+    return updatedRuntime;
   },
 
   syncRuntime(runtime: Runtime | null) {
