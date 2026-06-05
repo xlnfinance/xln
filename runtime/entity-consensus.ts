@@ -28,24 +28,26 @@ import {
   type SwapCancelRequestEvent,
   type SwapOfferEvent,
 } from './entity-tx/handlers/account';
-import { swapKey } from './swap-execution';
+import {
+  markAdmittedOrderbookOffer,
+  swapKey,
+  type AdmittedOrderbookOffer,
+  type NormalizedOrderbookOffer,
+} from './swap-execution';
 import { replaceOrderbookPair, type OrderbookExtState } from './orderbook';
 import { executeCrontab, initCrontab, scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from './entity-crontab';
 import {
-  accountInputCommitsCrossJurisdictionReadiness,
   applyCommittedSwapCancelsToOrderbook,
-  collectLocalCrossJurisdictionOffers,
-  collectSiblingCrossJurisdictionOffers,
   crossJurisdictionBookOwnerRef,
-  crossJurisdictionPullsReady,
   deterministicEntityTimestamp,
   findAccountByCounterparty,
   findEntityStateById,
   findSwapOfferOwnerState,
+  getCrossJurisdictionBookAdmissionError,
+  isCrossJurisdictionBookAdmissionPending,
   normalizeEntityRef,
-  queueCrossJurisdictionBookOwnerWake,
-  type OrderbookOfferForMatch,
 } from './entity-consensus/cross-j-orderbook';
+import { markCrossJurisdictionBookAdmissionResolving } from './cross-jurisdiction-orderbook';
 import { createEntityFrameHash } from './entity-consensus-frame';
 import {
   attachHankoWitnessToOutputs,
@@ -74,6 +76,109 @@ function queueUniqueAccountMempoolTx(
   account.mempool.push(tx);
   return true;
 }
+
+type EntityAccountMachine = EntityState['accounts'] extends Map<string, infer T> ? T : never;
+
+const hasQueuedOrderLifecycleTx = (
+  account: EntityAccountMachine,
+  offerId: string,
+): boolean => {
+  for (const tx of account.mempool ?? []) {
+    if (
+      (tx.type === 'swap_resolve' || tx.type === 'cross_swap_fill_ack' || tx.type === 'swap_cancel_request') &&
+      tx.data.offerId === offerId
+    ) {
+      return true;
+    }
+  }
+  for (const tx of account.pendingFrame?.accountTxs ?? []) {
+    if (
+      (tx.type === 'swap_resolve' || tx.type === 'cross_swap_fill_ack' || tx.type === 'swap_cancel_request') &&
+      tx.data.offerId === offerId
+    ) {
+      return true;
+    }
+  }
+  return false;
+};
+
+const assertCommittedSwapOfferMatchesEvent = (
+  state: EntityState,
+  offer: NormalizedOrderbookOffer,
+): EntityAccountMachine => {
+  const account = findAccountByCounterparty(state, offer.accountId);
+  const committedOffer = account?.swapOffers?.get(offer.offerId);
+  if (!account || !committedOffer) {
+    throw new Error(`ORDERBOOK_ORDER_NOT_COMMITTED: account=${offer.accountId} offer=${offer.offerId}`);
+  }
+  if (hasQueuedOrderLifecycleTx(account, offer.offerId)) {
+    throw new Error(`ORDERBOOK_ORDER_NOT_READY: account=${offer.accountId} offer=${offer.offerId}`);
+  }
+  const committedPriceTicks = committedOffer.priceTicks ?? offer.priceTicks;
+  if (
+    committedOffer.giveTokenId !== offer.giveTokenId ||
+    committedOffer.wantTokenId !== offer.wantTokenId ||
+    (committedOffer.quantizedGive ?? committedOffer.giveAmount) !== (offer.quantizedGive ?? offer.giveAmount) ||
+    (committedOffer.quantizedWant ?? committedOffer.wantAmount) !== (offer.quantizedWant ?? offer.wantAmount) ||
+    committedPriceTicks !== offer.priceTicks ||
+    committedOffer.makerIsLeft !== offer.makerIsLeft ||
+    Boolean(committedOffer.crossJurisdiction) !== Boolean(offer.crossJurisdiction)
+  ) {
+    throw new Error(`ORDERBOOK_ORDER_COMMITTED_MISMATCH: account=${offer.accountId} offer=${offer.offerId}`);
+  }
+  return account;
+};
+
+const assertSameJurisdictionOrderHoldCommitted = (
+  account: EntityAccountMachine,
+  offer: NormalizedOrderbookOffer,
+): void => {
+  const committedOffer = account.swapOffers.get(offer.offerId);
+  if (!committedOffer) {
+    throw new Error(`ORDERBOOK_ORDER_NOT_COMMITTED: account=${offer.accountId} offer=${offer.offerId}`);
+  }
+  const delta = account.deltas?.get(committedOffer.giveTokenId);
+  const requiredHold = committedOffer.quantizedGive ?? committedOffer.giveAmount;
+  const committedHold = committedOffer.makerIsLeft
+    ? (delta?.leftHold ?? 0n)
+    : (delta?.rightHold ?? 0n);
+  if (requiredHold <= 0n || committedHold < requiredHold) {
+    throw new Error(
+      `ORDERBOOK_ORDER_HOLD_NOT_COMMITTED: account=${offer.accountId} offer=${offer.offerId} ` +
+      `required=${requiredHold.toString()} committed=${committedHold.toString()}`,
+    );
+  }
+};
+
+const admitOrderbookOfferForMatching = (
+  env: Env,
+  state: EntityState,
+  offer: NormalizedOrderbookOffer,
+): AdmittedOrderbookOffer | null => {
+  const account = assertCommittedSwapOfferMatchesEvent(state, offer);
+  if (offer.crossJurisdiction) {
+    // Cross-j orders are allowed into the shared matcher only after both
+    // bilateral account frames committed their source/target pull_lock receipts.
+    const admissionError = getCrossJurisdictionBookAdmissionError(
+      state,
+      offer.crossJurisdiction,
+      deterministicEntityTimestamp(state, env),
+    );
+    if (admissionError) {
+      if (isCrossJurisdictionBookAdmissionPending(admissionError)) {
+        entityLog.debug('crossj.orderbook.admission_pending', {
+          offer: shortOrder(offer.offerId, 8),
+          reason: admissionError,
+        });
+        return null;
+      }
+      throw new Error(admissionError);
+    }
+  } else {
+    assertSameJurisdictionOrderHoldCommitted(account, offer);
+  }
+  return markAdmittedOrderbookOffer(offer);
+};
 
 
 /**
@@ -936,16 +1041,11 @@ export const applyEntityFrame = async (
   const allSwapOffersCreated: SwapOfferEvent[] = [];
   const allSwapCancelRequests: SwapCancelRequestEvent[] = [];
   const allSwapOffersCancelled: SwapCancelEvent[] = [];
-  let crossJurisdictionReadinessChanged = false;
 
   // Preserve WAL transaction order exactly during live processing and replay.
   // Reordering batched txs can change bilateral account state transitions
   // (e.g., openAccount + accountInput ACK in same frame).
   for (const entityTx of entityTxs) {
-    const accountInputCrossReadinessChanged = accountInputCommitsCrossJurisdictionReadiness(
-      currentEntityState,
-      entityTx,
-    );
     const {
       newState,
       outputs,
@@ -963,16 +1063,6 @@ export const applyEntityFrame = async (
     currentEntityState = newState;
     for (const accountId of dirtyAccounts || []) {
       markStorageAccountDirty(env, currentEntityState.entityId, accountId);
-    }
-    if (
-      entityTx.type === 'registerCrossJurisdictionSwap' ||
-      entityTx.type === 'prepareCrossJurisdictionSwap' ||
-      entityTx.type === 'commitCrossJurisdictionSwap' ||
-      entityTx.type === 'requestCrossJurisdictionSwap' ||
-      entityTx.type === 'orderbookSweepCrossJurisdiction' ||
-      accountInputCrossReadinessChanged
-    ) {
-      crossJurisdictionReadinessChanged = true;
     }
 
     allOutputs.push(...outputs);
@@ -1077,10 +1167,9 @@ export const applyEntityFrame = async (
     currentEntityState.orderbookExt &&
     Array.from(currentEntityState.orderbookExt.books?.keys?.() || []).some((pairId) => String(pairId).startsWith('cross:')),
   );
-  if ((allSwapOffersCreated.length > 0 || crossJurisdictionReadinessChanged || hasPersistedCrossJurisdictionBook) && currentEntityState.orderbookExt) {
+  if ((allSwapOffersCreated.length > 0 || hasPersistedCrossJurisdictionBook) && currentEntityState.orderbookExt) {
     entityLog.debug('orderbook.matching', {
       offers: allSwapOffersCreated.length,
-      readinessChanged: crossJurisdictionReadinessChanged,
       hasPersistedCrossJurisdictionBook,
     });
 
@@ -1094,47 +1183,29 @@ export const applyEntityFrame = async (
       const counterparty = fromEntity === hubEntity ? toEntity : fromEntity;
       return normalizeSwapOfferForOrderbook(offer, counterparty);
     });
-    if (crossJurisdictionReadinessChanged) {
-      enrichedOffers.push(...collectLocalCrossJurisdictionOffers(currentEntityState));
-    }
-    const hasCrossJurisdictionOffer =
-      hasPersistedCrossJurisdictionBook ||
-      crossJurisdictionReadinessChanged ||
-      enrichedOffers.some(offer => !!offer.crossJurisdiction);
-    const siblingOffers = hasCrossJurisdictionOffer
-      ? collectSiblingCrossJurisdictionOffers(env, currentEntityState)
-      : [];
     const seenOfferKeys = new Set<string>();
-    const offersToMatch: OrderbookOfferForMatch[] = [];
-    let waitingForCrossPullCommitments = false;
-    const currentEntityRef = normalizeEntityRef(currentEntityState.entityId);
-    const crossJurisdictionOwnerWakes = new Set<string>();
-    for (const offer of [...enrichedOffers, ...siblingOffers]) {
+    const offersToMatch: AdmittedOrderbookOffer[] = [];
+    for (const offer of enrichedOffers) {
       const key = swapKey(offer.accountId, offer.offerId);
       if (seenOfferKeys.has(key)) continue;
-      if (offer.crossJurisdiction) {
-        const bookOwnerRef = crossJurisdictionBookOwnerRef(offer.crossJurisdiction);
-        if (bookOwnerRef && bookOwnerRef !== currentEntityRef) {
-          crossJurisdictionOwnerWakes.add(bookOwnerRef);
-          entityLog.debug('crossj.wake_book_owner', { owner: shortId(bookOwnerRef, 8), offer: shortOrder(offer.offerId, 8) });
-          continue;
-        }
-        if (!crossJurisdictionPullsReady(
-          env,
-          offer.crossJurisdiction,
-          deterministicEntityTimestamp(currentEntityState, env),
-        )) {
-          waitingForCrossPullCommitments = true;
-          entityLog.info('crossj.waiting_pull_commitments', { offer: shortOrder(offer.offerId) });
-          continue;
-        }
-      }
       seenOfferKeys.add(key);
-      offersToMatch.push(offer);
+      if (
+        offer.crossJurisdiction &&
+        crossJurisdictionBookOwnerRef(offer.crossJurisdiction) !== normalizeEntityRef(currentEntityState.entityId)
+      ) {
+        entityLog.debug('crossj.orderbook.skip_non_owner', {
+          offer: shortOrder(offer.offerId, 8),
+          owner: shortId(crossJurisdictionBookOwnerRef(offer.crossJurisdiction), 8),
+          current: shortId(currentEntityState.entityId, 8),
+        });
+        continue;
+      }
+      const admittedOffer = admitOrderbookOfferForMatching(env, currentEntityState, offer);
+      if (admittedOffer) offersToMatch.push(admittedOffer);
     }
     entityLog.debug('orderbook.offers_enriched', {
       local: enrichedOffers.length,
-      siblingCrossJ: siblingOffers.length,
+      admitted: offersToMatch.length,
     });
 
     const matchResult = processOrderbookSwaps(currentEntityState, offersToMatch);
@@ -1237,6 +1308,8 @@ export const applyEntityFrame = async (
               cumulativeSourceAmount: tx.data.cumulativeSourceAmount ?? 0n,
               cumulativeTargetAmount: tx.data.cumulativeTargetAmount ?? 0n,
               cumulativeFillRatio,
+              ...(tx.data.fillNumerator !== undefined ? { fillNumerator: tx.data.fillNumerator } : {}),
+              ...(tx.data.fillDenominator !== undefined ? { fillDenominator: tx.data.fillDenominator } : {}),
               ...(tx.data.priceImprovementMode ? { priceImprovementMode: tx.data.priceImprovementMode } : {}),
               ...(tx.data.priceImprovementAmount !== undefined ? { priceImprovementAmount: tx.data.priceImprovementAmount } : {}),
               ...(tx.data.priceImprovementTokenId !== undefined ? { priceImprovementTokenId: tx.data.priceImprovementTokenId } : {}),
@@ -1262,55 +1335,42 @@ export const applyEntityFrame = async (
 
     if (matchResult.crossJurisdictionFills.length > 0) {
       entityLog.info('crossj.firm_fills_recorded', { count: matchResult.crossJurisdictionFills.length });
-        for (const fill of matchResult.crossJurisdictionFills) {
-          if (fill.priceImprovementMode !== 'target_bonus' || fill.priceImprovementAmount <= 0n || fill.priceImprovementTokenId === null) {
-            continue;
-          }
-          const targetHubState = findEntityStateById(env, fill.route.target.entityId);
-          const targetSigner = targetHubState?.config?.validators?.[0];
-          if (!targetHubState || !targetSigner) {
-            entityLog.warn('crossj.target_price_improvement_unroutable', {
-              offer: shortOrder(fill.offerId, 8),
-              targetHub: shortId(fill.route.target.entityId, 8),
-            });
-            continue;
-          }
-          allOutputs.push({
-            entityId: targetHubState.entityId,
-            signerId: targetSigner,
-            entityTxs: [{
-              type: 'directPayment',
-              data: {
-                targetEntityId: fill.route.target.counterpartyEntityId,
-                tokenId: fill.priceImprovementTokenId,
-                amount: fill.priceImprovementAmount,
-                route: [fill.route.target.entityId, fill.route.target.counterpartyEntityId],
-                description: `cross-j-target-bonus:${fill.offerId}`,
-              },
-            }],
-          });
+      for (const fill of matchResult.crossJurisdictionFills) {
+        markCrossJurisdictionBookAdmissionResolving(
+          currentEntityState,
+          fill.route,
+          deterministicEntityTimestamp(currentEntityState, env),
+        );
+        if (fill.priceImprovementMode !== 'target_bonus' || fill.priceImprovementAmount <= 0n || fill.priceImprovementTokenId === null) {
+          continue;
         }
-	    }
-
-	    if (waitingForCrossPullCommitments && currentEntityState.crontabState) {
-	      scheduleCrontabHook(currentEntityState.crontabState, {
-	        id: `cross-j-orderbook-sweep:${currentEntityState.entityId}`,
-        triggerAt: deterministicEntityTimestamp(currentEntityState, env) + 500,
-	        type: 'cross_j_orderbook_sweep',
-	        data: { reason: 'pull-commitment-wait' },
-	      });
-	      markStorageEntityDirty(env, currentEntityState.entityId);
-	    }
-    for (const ownerRef of crossJurisdictionOwnerWakes) {
-      queueCrossJurisdictionBookOwnerWake(
-        env,
-        allOutputs,
-        ownerRef,
-        `cross-j-book-owner-wake:${currentEntityState.entityId.slice(-8)}`,
-      );
+        const targetHubState = findEntityStateById(env, fill.route.target.entityId);
+        const targetSigner = targetHubState?.config?.validators?.[0];
+        if (!targetHubState || !targetSigner) {
+          entityLog.warn('crossj.target_price_improvement_unroutable', {
+            offer: shortOrder(fill.offerId, 8),
+            targetHub: shortId(fill.route.target.entityId, 8),
+          });
+          continue;
+        }
+        allOutputs.push({
+          entityId: targetHubState.entityId,
+          signerId: targetSigner,
+          entityTxs: [{
+            type: 'directPayment',
+            data: {
+              targetEntityId: fill.route.target.counterpartyEntityId,
+              tokenId: fill.priceImprovementTokenId,
+              amount: fill.priceImprovementAmount,
+              route: [fill.route.target.entityId, fill.route.target.counterpartyEntityId],
+              description: `cross-j-target-bonus:${fill.offerId}`,
+            },
+          }],
+        });
+      }
     }
 
-	    // Apply book updates
+    // Apply book updates
     const ext = currentEntityState.orderbookExt as OrderbookExtState;
     for (const { pairId, book } of matchResult.bookUpdates) {
       replaceOrderbookPair(ext, pairId, book);

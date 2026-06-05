@@ -25,7 +25,7 @@ import type { AccountMachine, AccountTx } from '../../types';
 import { deriveDelta } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { FINANCIAL } from '../../constants';
-import { deriveCanonicalSwapFillRatio, MAX_SWAP_FILL_RATIO } from '../../swap-execution';
+import { deriveExactSwapFillRatio, exactFillRatioToUint16, MAX_SWAP_FILL_RATIO } from '../../swap-execution';
 import {
   computeSwapPriceTicks,
   requantizeRemainingSwapAtPrice,
@@ -50,6 +50,8 @@ export async function handleSwapResolve(
     feeAmount = 0n,
     executionGiveAmount,
     executionWantAmount,
+    fillNumerator,
+    fillDenominator,
     restingPriceTicks,
     restingGiveAmount,
     restingWantAmount,
@@ -116,6 +118,7 @@ export async function handleSwapResolve(
   if (fillRatio < 0 || fillRatio > MAX_SWAP_FILL_RATIO) {
     return { success: false, error: `Invalid fillRatio: ${fillRatio}`, events };
   }
+  const effectiveCancelRemainder = cancelRemainder || fillRatio === 0;
 
   // 4. Calculate fill amounts
   const effectiveGive = canonicalQuantizedGive;
@@ -143,10 +146,35 @@ export async function handleSwapResolve(
 
   const filledGive = executionProvided ? executionGiveAmount! : limitFilledGive;
   const filledWant = executionProvided ? executionWantAmount! : limitFilledWant;
+  const exactFillRatio = deriveExactSwapFillRatio(effectiveGive, filledGive);
   const canonicalFillRatio = executionProvided
-    ? deriveCanonicalSwapFillRatio(effectiveGive, filledGive)
+    ? exactFillRatioToUint16(exactFillRatio)
     : fillRatio;
   const effectiveFeeTokenId = feeTokenId ?? offer.wantTokenId;
+  const exactRatioProvided = fillNumerator !== undefined || fillDenominator !== undefined;
+  if (exactRatioProvided) {
+    if (fillNumerator === undefined || fillDenominator === undefined) {
+      return {
+        success: false,
+        error: `fillNumerator and fillDenominator must both be provided`,
+        events,
+      };
+    }
+    if (fillDenominator <= 0n || fillNumerator < 0n || fillNumerator > fillDenominator) {
+      return {
+        success: false,
+        error: `Exact fill ratio out of range: ${fillNumerator}/${fillDenominator}`,
+        events,
+      };
+    }
+    if (fillNumerator * effectiveGive !== filledGive * fillDenominator) {
+      return {
+        success: false,
+        error: `Exact fill ratio mismatch: ${fillNumerator}/${fillDenominator} != ${filledGive}/${effectiveGive}`,
+        events,
+      };
+    }
+  }
 
   if (feeAmount < 0n) {
     return { success: false, error: `Swap taker fee must be >= 0`, events };
@@ -349,7 +377,7 @@ export async function handleSwapResolve(
   let swapOfferCancelled: { offerId: string; accountId: string } | undefined;
   let closeOrderInHistory = false;
 
-  if (cancelRemainder || canonicalFillRatio === MAX_SWAP_FILL_RATIO) {
+  if (effectiveCancelRemainder || canonicalFillRatio === MAX_SWAP_FILL_RATIO) {
     // Cancel or fully filled - remove offer and notify orderbook
     const remainingHold = effectiveGive - filledGive;
     if (remainingHold > 0n) {
@@ -422,7 +450,9 @@ export async function handleSwapResolve(
     currentHeight,
     {
       fillRatio,
-      cancelRemainder,
+      fillNumerator: fillNumerator ?? exactFillRatio.numerator,
+      fillDenominator: fillDenominator ?? exactFillRatio.denominator,
+      cancelRemainder: effectiveCancelRemainder,
       height: currentHeight,
       ...(executionGiveAmount !== undefined ? { executionGiveAmount } : {}),
       ...(executionWantAmount !== undefined ? { executionWantAmount } : {}),

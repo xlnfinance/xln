@@ -33,6 +33,45 @@ export interface CrossJurisdictionPullLeg {
   partialRoot: string;
 }
 
+export type CrossJurisdictionBookLeg = 'source' | 'target';
+
+export type CrossJurisdictionBookStatus =
+  | 'pending'
+  | 'admitted'
+  | 'resolving'
+  | 'closed';
+
+export interface CrossJurisdictionBookAdmissionReceipt {
+  leg: CrossJurisdictionBookLeg;
+  orderId: string;
+  routeHash: string;
+  hubEntityId: string;
+  counterpartyEntityId: string;
+  pullId: string;
+  tokenId: number;
+  signedAmount: bigint;
+  revealedUntilTimestamp: number;
+  fullHash: string;
+  partialRoot: string;
+  committedAt: number;
+}
+
+export interface CrossJurisdictionBookAdmission {
+  orderId: string;
+  routeHash: string;
+  sourceEntityId: string;
+  bookOwnerEntityId: string;
+  status: CrossJurisdictionBookStatus;
+  route: CrossJurisdictionSwapRoute;
+  sourceReceipt?: CrossJurisdictionBookAdmissionReceipt;
+  targetReceipt?: CrossJurisdictionBookAdmissionReceipt;
+  admittedAt?: number;
+  resolvingAt?: number;
+  closedAt?: number;
+  closeReason?: string;
+  updatedAt: number;
+}
+
 export interface CrossJurisdictionSwapRoute {
   orderId: string;
   routeHash?: string;
@@ -46,7 +85,9 @@ export interface CrossJurisdictionSwapRoute {
   targetPull?: CrossJurisdictionPullLeg;
   priceTicks?: bigint;
   fillSeq?: number;
-  cumulativeFillRatio?: number;
+  cumulativeFillRatio?: number; // Coarse 0-65535 compatibility/dispute ratio.
+  fillNumerator?: bigint;
+  fillDenominator?: bigint;
   filledSourceAmount?: bigint;
   filledTargetAmount?: bigint;
   priceImprovementSourceAmount?: bigint;

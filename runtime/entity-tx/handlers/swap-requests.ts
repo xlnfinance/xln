@@ -90,6 +90,8 @@ export const handleResolveSwapRequest = (
     counterpartyEntityId,
     offerId,
     fillRatio,
+    fillNumerator,
+    fillDenominator,
     cancelRemainder,
     comment,
     feeTokenId,
@@ -113,8 +115,14 @@ export const handleResolveSwapRequest = (
     data: {
       offerId,
       fillRatio,
-      cancelRemainder,
-      ...(comment !== undefined ? { comment } : {}),
+      ...(fillNumerator !== undefined ? { fillNumerator } : {}),
+      ...(fillDenominator !== undefined ? { fillDenominator } : {}),
+      cancelRemainder: cancelRemainder || fillRatio <= 0,
+      ...(comment !== undefined
+        ? { comment }
+        : fillRatio <= 0
+          ? { comment: 'zero_fill_cancel' }
+          : {}),
       ...(feeTokenId !== undefined ? { feeTokenId } : {}),
       ...(feeAmount !== undefined ? { feeAmount } : {}),
       ...(executionGiveAmount !== undefined ? { executionGiveAmount } : {}),

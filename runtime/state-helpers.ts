@@ -21,6 +21,7 @@ import { isLeftEntity } from './entity-id-utils';
 import { getAccountFrameHistoryView, setAccountFrameHistoryView } from './env-events';
 import { cloneJBatch, type CompletedBatch, type JBatchState } from './j-batch';
 import {
+  cloneCrossJurisdictionBookAdmission,
   cloneCrossJurisdictionAccountFrameRoute,
   cloneCrossJurisdictionAccountTxRoute,
   cloneCrossJurisdictionAccountInputRoute,
@@ -40,13 +41,22 @@ import type {
 } from './orderbook';
 
 const cloneCrossJurisdictionRoutesInState = (state: EntityState): void => {
-  if (!state.crossJurisdictionSwaps) return;
-  state.crossJurisdictionSwaps = new Map(
-    Array.from(state.crossJurisdictionSwaps.entries()).map(([id, route]) => [
-      id,
-      cloneCrossJurisdictionRoute(route),
-    ]),
-  );
+  if (state.crossJurisdictionSwaps) {
+    state.crossJurisdictionSwaps = new Map(
+      Array.from(state.crossJurisdictionSwaps.entries()).map(([id, route]) => [
+        id,
+        cloneCrossJurisdictionRoute(route),
+      ]),
+    );
+  }
+  if (state.crossJurisdictionBookAdmissions) {
+    state.crossJurisdictionBookAdmissions = new Map(
+      Array.from(state.crossJurisdictionBookAdmissions.entries()).map(([id, admission]) => [
+        id,
+        cloneCrossJurisdictionBookAdmission(admission),
+      ]),
+    );
+  }
 };
 
 const cloneCrossJurisdictionRoutesInAccount = (account: AccountMachine): void => {
@@ -410,6 +420,9 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
       : {}),
     ...(entityState.crossJurisdictionSwaps
       ? { crossJurisdictionSwaps: new Map(Array.from(entityState.crossJurisdictionSwaps.entries()).map(([id, route]) => [id, cloneCrossJurisdictionRoute(route)])) }
+      : {}),
+    ...(entityState.crossJurisdictionBookAdmissions
+      ? { crossJurisdictionBookAdmissions: new Map(Array.from(entityState.crossJurisdictionBookAdmissions.entries()).map(([id, admission]) => [id, cloneCrossJurisdictionBookAdmission(admission)])) }
       : {}),
   };
 }

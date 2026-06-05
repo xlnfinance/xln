@@ -31,6 +31,8 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
     cumulativeSourceAmount,
     cumulativeTargetAmount,
     cumulativeFillRatio,
+    fillNumerator,
+    fillDenominator,
     priceImprovementMode,
     priceImprovementAmount,
     priceImprovementTokenId,
@@ -74,6 +76,8 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
   const validatedFill = validateCrossJurisdictionFillProgress(route, {
     fillSeq,
     cumulativeFillRatio,
+    fillNumerator,
+    fillDenominator,
     incrementalSourceAmount,
     incrementalTargetAmount,
     cumulativeSourceAmount,
@@ -102,6 +106,8 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
         cumulativeSourceAmount: fill.cumulativeSourceAmount,
         cumulativeTargetAmount: fill.cumulativeTargetAmount,
         cumulativeFillRatio: fill.nextRatio,
+        ...(fill.fillNumerator !== undefined ? { fillNumerator: fill.fillNumerator } : {}),
+        ...(fill.fillDenominator !== undefined ? { fillDenominator: fill.fillDenominator } : {}),
         executionSourceAmount: priceImprovementMode === 'source_savings' && (priceImprovementAmount ?? 0n) > 0n
           ? fill.incrementalSourceAmount - (priceImprovementAmount ?? 0n)
           : fill.incrementalSourceAmount,

@@ -80,6 +80,8 @@ export interface SwapOffer {
 
 export interface SwapOrderResolveHistoryEntry {
   fillRatio: number;
+  fillNumerator?: bigint;
+  fillDenominator?: bigint;
   cancelRemainder: boolean;
   height: number;
   executionGiveAmount?: bigint;
@@ -672,7 +674,9 @@ export type AccountTx =
       type: 'swap_resolve';
       data: {
         offerId: string;
-        fillRatio: number;        // 0-65535 (uint16)
+        fillRatio: number;        // Coarse 0-65535 compatibility/dispute ratio.
+        fillNumerator?: bigint;   // Exact fill ratio numerator.
+        fillDenominator?: bigint; // Exact fill ratio denominator.
         cancelRemainder: boolean; // true = fill + cancel, false = fill + keep open
         comment?: string;
         feeTokenId?: number;
@@ -703,7 +707,9 @@ export type AccountTx =
         incrementalTargetAmount?: bigint;
         cumulativeSourceAmount?: bigint;
         cumulativeTargetAmount?: bigint;
-        cumulativeFillRatio: number;
+        cumulativeFillRatio: number; // Coarse 0-65535 compatibility/dispute ratio.
+        fillNumerator?: bigint;
+        fillDenominator?: bigint;
         executionSourceAmount?: bigint;
         executionTargetAmount?: bigint;
         priceImprovementMode?: 'source_savings' | 'target_bonus' | 'none';

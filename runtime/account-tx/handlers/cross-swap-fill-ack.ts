@@ -1,4 +1,5 @@
 import type { AccountMachine, AccountTx } from '../../types';
+import type { SwapOfferEvent } from '../../entity-tx/handlers/account';
 import { MAX_SWAP_FILL_RATIO } from '../../swap-execution';
 import { transitionCrossJurisdictionRouteStatus, validateCrossJurisdictionFillProgress, withCrossJurisdictionFillProgress } from '../../cross-jurisdiction';
 import { recordSwapClosedLifecycle, recordSwapResolveLifecycle } from './swap-history';
@@ -12,7 +13,13 @@ export async function handleCrossSwapFillAck(
   accountTx: CrossSwapFillAckTx,
   byLeft: boolean,
   currentHeight: number,
-): Promise<{ success: boolean; events: string[]; error?: string; swapOfferCancelled?: { offerId: string; accountId: string } }> {
+): Promise<{
+  success: boolean;
+  events: string[];
+  error?: string;
+  swapOfferCreated?: SwapOfferEvent;
+  swapOfferCancelled?: { offerId: string; accountId: string };
+}> {
   const {
     offerId,
     fillSeq,
@@ -23,6 +30,8 @@ export async function handleCrossSwapFillAck(
     cumulativeTargetAmount,
     executionSourceAmount,
     executionTargetAmount,
+    fillNumerator,
+    fillDenominator,
     priceImprovementMode = 'source_savings',
     priceImprovementAmount = 0n,
     priceImprovementTokenId,
@@ -66,6 +75,8 @@ export async function handleCrossSwapFillAck(
     recordSwapClosedLifecycle(accountMachine, offerId);
     recordSwapResolveLifecycle(accountMachine, offerId, currentHeight, {
       fillRatio: currentRatio,
+      ...(route.fillNumerator !== undefined ? { fillNumerator: route.fillNumerator } : {}),
+      ...(route.fillDenominator !== undefined ? { fillDenominator: route.fillDenominator } : {}),
       cancelRemainder: true,
       height: currentHeight,
       executionGiveAmount: 0n,
@@ -83,6 +94,8 @@ export async function handleCrossSwapFillAck(
   const validatedFill = validateCrossJurisdictionFillProgress(route, {
     fillSeq,
     cumulativeFillRatio,
+    fillNumerator,
+    fillDenominator,
     incrementalSourceAmount,
     incrementalTargetAmount,
     cumulativeSourceAmount,
@@ -119,6 +132,18 @@ export async function handleCrossSwapFillAck(
   if (executionTargetAmount !== undefined && executionTargetAmount !== expectedExecutionTarget) {
     return { success: false, error: `Cross-j target execution mismatch: expected ${expectedExecutionTarget}, got ${executionTargetAmount}`, events };
   }
+  const sourceTotal = BigInt(route.source.amount);
+  const previousExactSourceAmount = fill.previousSourceAmount;
+  if (fill.fillNumerator !== undefined && fill.fillDenominator !== undefined) {
+    const exactSourceAmount = previousExactSourceAmount + expectedExecutionSource;
+    if (fill.fillNumerator * sourceTotal !== exactSourceAmount * fill.fillDenominator) {
+      return {
+        success: false,
+        error: `Cross-j exact fill ratio mismatch: ${fill.fillNumerator}/${fill.fillDenominator} != ${exactSourceAmount}/${sourceTotal}`,
+        events,
+      };
+    }
+  }
 
   const nextRoute = withCrossJurisdictionFillProgress(
     route,
@@ -137,10 +162,13 @@ export async function handleCrossSwapFillAck(
   if (pairId) route.venueId ||= pairId;
   offer.crossJurisdiction = route;
 
-  const sourceTotal = BigInt(route.source.amount);
   const targetTotal = BigInt(route.target.amount);
-  const full = fill.nextRatio >= MAX_SWAP_FILL_RATIO || fill.cumulativeSourceAmount >= sourceTotal || fill.cumulativeTargetAmount >= targetTotal;
+  const full = fill.nextRatio >= MAX_SWAP_FILL_RATIO ||
+    fill.cumulativeSourceAmount >= sourceTotal ||
+    fill.cumulativeTargetAmount >= targetTotal;
   const shouldClose = full || cancelRemainder;
+  let closedByDust = false;
+  let remainingOfferEvent: SwapOfferEvent | undefined;
   if (shouldClose) {
     accountMachine.swapOffers?.delete(offerId);
     recordSwapClosedLifecycle(accountMachine, offerId);
@@ -151,6 +179,7 @@ export async function handleCrossSwapFillAck(
     if (remainingSource <= 0n || remainingTarget <= 0n) {
       accountMachine.swapOffers?.delete(offerId);
       recordSwapClosedLifecycle(accountMachine, offerId);
+      closedByDust = true;
       events.push(`🌉 Cross-j offer ${offerId.slice(0, 8)} closed after dust remainder`);
     } else {
       offer.giveAmount = remainingSource;
@@ -160,13 +189,30 @@ export async function handleCrossSwapFillAck(
       offer.minFillRatio = 0;
       const nextPriceTicks = route.priceTicks ?? offer.priceTicks;
       if (nextPriceTicks !== undefined) offer.priceTicks = nextPriceTicks;
+      remainingOfferEvent = {
+        offerId,
+        makerIsLeft: offer.makerIsLeft,
+        fromEntity: accountMachine.leftEntity,
+        toEntity: accountMachine.rightEntity,
+        createdHeight: offer.createdHeight,
+        giveTokenId: offer.giveTokenId,
+        giveAmount: offer.giveAmount,
+        wantTokenId: offer.wantTokenId,
+        wantAmount: offer.wantAmount,
+        ...(offer.priceTicks !== undefined ? { priceTicks: offer.priceTicks } : {}),
+        ...(offer.timeInForce !== undefined ? { timeInForce: offer.timeInForce } : {}),
+        minFillRatio: offer.minFillRatio,
+        crossJurisdiction: offer.crossJurisdiction,
+      };
       events.push(`🌉 Cross-j offer ${offerId.slice(0, 8)} filled to ${fill.nextRatio}/65535, ${remainingSource} source remaining`);
     }
   }
 
   recordSwapResolveLifecycle(accountMachine, offerId, currentHeight, {
     fillRatio: fill.nextRatio,
-    cancelRemainder: shouldClose,
+    ...(fill.fillNumerator !== undefined ? { fillNumerator: fill.fillNumerator } : {}),
+    ...(fill.fillDenominator !== undefined ? { fillDenominator: fill.fillDenominator } : {}),
+    cancelRemainder: shouldClose || closedByDust,
     height: currentHeight,
     executionGiveAmount: executionSourceAmount ?? fill.incrementalSourceAmount,
     executionWantAmount: executionTargetAmount ?? fill.incrementalTargetAmount,
@@ -183,6 +229,9 @@ export async function handleCrossSwapFillAck(
   return {
     success: true,
     events,
-    ...(shouldClose ? { swapOfferCancelled: { offerId, accountId: offer.makerIsLeft ? accountMachine.leftEntity : accountMachine.rightEntity } } : {}),
+    ...(remainingOfferEvent ? { swapOfferCreated: remainingOfferEvent } : {}),
+    ...(shouldClose || closedByDust
+      ? { swapOfferCancelled: { offerId, accountId: offer.makerIsLeft ? accountMachine.leftEntity : accountMachine.rightEntity } }
+      : {}),
   };
 }
