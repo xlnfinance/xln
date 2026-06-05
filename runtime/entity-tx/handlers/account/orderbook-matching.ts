@@ -22,12 +22,14 @@ import {
   calculateSwapTakerFeeAmount,
   compareCanonicalText,
   MAX_SWAP_FILL_RATIO,
+  type AdmittedOrderbookOffer,
   type NormalizedOrderbookOffer,
   swapKey,
 } from '../../../swap-execution';
 import {
   buildCrossJurisdictionFillAck,
   buildCrossJurisdictionMarketOffer,
+  markCrossJurisdictionBookAdmissionClosed,
   type CrossJurisdictionFillInstruction,
   type CrossMarketOffer,
 } from '../../../cross-jurisdiction-orderbook';
@@ -59,7 +61,7 @@ type OrderbookProcessOptions = {
  */
 export function processOrderbookSwaps(
   hubState: EntityState,
-  swapOffers: NormalizedOrderbookOffer[],
+  swapOffers: AdmittedOrderbookOffer[],
   options: OrderbookProcessOptions = {},
 ): MatchResult {
   const mempoolOps: MempoolOp[] = [];
@@ -117,6 +119,62 @@ export function processOrderbookSwaps(
   const queuedSwapResolutions = new Set<string>();
   const sweptPairs = new Set<string>();
 
+  const parseNamespacedOrderId = (
+    namespacedOrderId: string,
+    errorCode: string,
+  ): { accountId: string; offerId: string } => {
+    const lastColon = namespacedOrderId.lastIndexOf(':');
+    if (lastColon <= 0 || lastColon === namespacedOrderId.length - 1) {
+      throw new Error(`${errorCode}: order=${namespacedOrderId}`);
+    }
+    return {
+      accountId: namespacedOrderId.slice(0, lastColon),
+      offerId: namespacedOrderId.slice(lastColon + 1),
+    };
+  };
+
+  const cancelNonWorkingBookOrder = (
+    pairId: string,
+    book: BookState,
+    order: NonNullable<ReturnType<typeof getBookOrder>>,
+    reason: string,
+  ): BookState => {
+    const parsed = parseNamespacedOrderId(order.orderId, 'ORDERBOOK_MALFORMED_BOOK_ORDER');
+    if (debugRebuildProjectionOnly) {
+      recordDebugProjectionReject(parsed.accountId, parsed.offerId, reason);
+      return book;
+    }
+    const result = applyCommand(book, {
+      kind: 1,
+      ownerId: order.ownerId,
+      orderId: order.orderId,
+    });
+    const cancelled = result.events.some((event) => event.type === 'CANCELED' && event.orderId === order.orderId);
+    if (!cancelled) {
+      throw new Error(
+        `ORDERBOOK_CANCEL_NONWORKING_FAILED: pair=${pairId} order=${order.orderId} reason=${reason}`,
+      );
+    }
+    const route = hubState.accounts.get(parsed.accountId)?.swapOffers?.get(parsed.offerId)?.crossJurisdiction;
+    if (route) {
+      markCrossJurisdictionBookAdmissionClosed(
+        hubState,
+        route.source.entityId,
+        parsed.offerId,
+        Number(hubState.timestamp || 0),
+        reason,
+      );
+    }
+    bookCache.set(pairId, result.state);
+    bookUpdates.push({ pairId, book: result.state });
+    orderbookLog.debug('book.cancel_nonworking', {
+      pair: pairId,
+      order: shortOrder(order.orderId, 20),
+      reason,
+    });
+    return result.state;
+  };
+
   const materializeCanonicalRestingOffer = (
     giveTokenId: number,
     wantTokenId: number,
@@ -159,10 +217,7 @@ export function processOrderbookSwaps(
   const buildLiveOfferMeta = (
     namespacedOrderId: string,
   ): NormalizedOrderbookOffer | null => {
-    const lastColon = namespacedOrderId.lastIndexOf(':');
-    if (lastColon === -1) return null;
-    const accountId = namespacedOrderId.slice(0, lastColon);
-    const offerId = namespacedOrderId.slice(lastColon + 1);
+    const { accountId, offerId } = parseNamespacedOrderId(namespacedOrderId, 'ORDERBOOK_MALFORMED_BOOK_ORDER');
     const account = hubState.accounts.get(accountId);
     const liveOffer = account?.swapOffers?.get(offerId);
     if (!account || !liveOffer) return null;
@@ -291,11 +346,12 @@ export function processOrderbookSwaps(
     let removed = 0;
     let nextBook = currentBook;
 
-    for (const order of currentBook.orders.values()) {
+    for (const order of [...currentBook.orders.values()]) {
       const liveOffer = buildLiveOfferMeta(order.orderId);
       if (!liveOffer) {
-        if (debugRebuildProjectionOnly) continue;
-        throw new Error(`ORDERBOOK_ORPHAN_BOOK_ORDER: pair=${pairId} order=${order.orderId}`);
+        removed += 1;
+        nextBook = cancelNonWorkingBookOrder(pairId, nextBook, order, 'orphan-book-order');
+        continue;
       }
       if (order.priceTicks < minAllowed || order.priceTicks > maxAllowed) {
         removed += 1;
@@ -327,15 +383,18 @@ export function processOrderbookSwaps(
     return nextBook;
   };
 
-  const assertBookMatchesKnownAccountOffers = (pairId: string, book: BookState): void => {
-    for (const order of book.orders.values()) {
+  const assertBookMatchesKnownAccountOffers = (pairId: string, book: BookState): BookState => {
+    let currentBook = book;
+    for (const order of [...book.orders.values()]) {
       const orderId = order.orderId;
       const meta = orderbookOfferMeta.get(orderId) ?? buildLiveOfferMeta(orderId);
       if (!meta) {
-        throw new Error(`ORDERBOOK_ORPHAN_BOOK_ORDER: pair=${pairId} order=${orderId}`);
+        currentBook = cancelNonWorkingBookOrder(pairId, currentBook, order, 'orphan-book-order');
+        continue;
       }
       if (hasQueuedSwapResolveForEntityState(hubState, queuedSwapResolutions, meta.accountId, meta.offerId)) {
-        throw new Error(`ORDERBOOK_PENDING_RESOLUTION_STILL_IN_BOOK: pair=${pairId} order=${orderId}`);
+        currentBook = cancelNonWorkingBookOrder(pairId, currentBook, order, 'pending-swap-resolve');
+        continue;
       }
       orderbookOfferMeta.set(orderId, meta);
       const metaSide = deriveSide(meta.giveTokenId, meta.wantTokenId);
@@ -353,6 +412,7 @@ export function processOrderbookSwaps(
         );
       }
     }
+    return currentBook;
   };
 
   const buildCrossMarketOffer = (offer: NormalizedOrderbookOffer): CrossMarketOffer | null => {
@@ -398,20 +458,7 @@ export function processOrderbookSwaps(
     crossPendingAckInputs.set(swapKey(rawOffer.accountId, rawOffer.offerId), rawOffer.pendingCrossSwapAck);
   }
   const assertedCrossJurisdictionPairs = new Set<string>();
-  const crossPendingAckOrderIdsByPair = new Map<string, Set<string>>();
   const crossAggregatedFills = new Map<string, { filledLots: number; weightedCost: bigint }>();
-  const suspendCrossOrderForPendingAck = (pairId: string, orderId: string): void => {
-    let orders = crossPendingAckOrderIdsByPair.get(pairId);
-    if (!orders) {
-      orders = new Set();
-      crossPendingAckOrderIdsByPair.set(pairId, orders);
-    }
-    orders.add(orderId);
-  };
-  const suspendedCrossOrdersForPair = (pairId: string): ReadonlySet<string> | undefined => {
-    const orders = crossPendingAckOrderIdsByPair.get(pairId);
-    return orders && orders.size > 0 ? orders : undefined;
-  };
 
   const refreshExistingCrossBookOrder = (
     pairId: string,
@@ -446,47 +493,31 @@ export function processOrderbookSwaps(
     bookUpdates.push({ pairId, book });
   };
 
-  const assertCrossBookMatchesKnownRoutes = (pairId: string, book: BookState): void => {
-    if (assertedCrossJurisdictionPairs.has(pairId)) return;
+  const assertCrossBookMatchesKnownRoutes = (pairId: string, book: BookState): BookState => {
+    if (assertedCrossJurisdictionPairs.has(pairId)) return book;
     assertedCrossJurisdictionPairs.add(pairId);
+    let currentBook = book;
 
-    for (const order of book.orders.values()) {
+    for (const order of [...book.orders.values()]) {
       const orderId = order.orderId;
-      const lastColon = orderId.lastIndexOf(':');
-      if (lastColon === -1) {
-        throw new Error(`ORDERBOOK_CROSS_J_MALFORMED_BOOK_ORDER: pair=${pairId} order=${orderId}`);
-      }
-      const accountId = orderId.slice(0, lastColon);
-      const offerId = orderId.slice(lastColon + 1);
+      const { accountId, offerId } = parseNamespacedOrderId(orderId, 'ORDERBOOK_CROSS_J_MALFORMED_BOOK_ORDER');
       const queuedPendingAck = findQueuedCrossSwapAckForEntityState(hubState, accountId, offerId);
       const pendingAck = crossPendingAckInputs.get(orderId) ?? queuedPendingAck?.data ?? null;
       const meta = crossLiveOfferMeta.get(orderId) ?? buildCrossMarketOfferFromBookOrder(orderId);
       if (!meta) {
-        if (pendingAck) {
-          suspendCrossOrderForPendingAck(pairId, orderId);
-          continue;
-        }
-        throw new Error(`ORDERBOOK_CROSS_J_ORPHAN_BOOK_ORDER: pair=${pairId} order=${orderId}`);
+        currentBook = cancelNonWorkingBookOrder(
+          pairId,
+          currentBook,
+          order,
+          pendingAck ? 'pending-cross-ack-orphan' : 'orphan-cross-route',
+        );
+        continue;
       }
 
       crossLiveOfferMeta.set(orderId, meta);
       const canonicalQtyLots = meta.baseAmount / SWAP_LOT_SCALE;
       if (pendingAck) {
-        const pendingRatio = Math.max(
-          0,
-          Math.min(MAX_SWAP_FILL_RATIO, Math.floor(Number(pendingAck.cumulativeFillRatio ?? 0) || 0)),
-        );
-        if (pendingAck.cancelRemainder || pendingRatio >= MAX_SWAP_FILL_RATIO) {
-          suspendCrossOrderForPendingAck(pairId, orderId);
-          continue;
-        }
-        if (BigInt(order.qtyLots) > canonicalQtyLots) {
-          throw new Error(
-            `ORDERBOOK_CROSS_J_PENDING_ACK_QTY_INVALID: pair=${pairId} order=${orderId} ` +
-            `storedQty=${order.qtyLots.toString()} canonicalQty=${canonicalQtyLots.toString()}`,
-          );
-        }
-        suspendCrossOrderForPendingAck(pairId, orderId);
+        currentBook = cancelNonWorkingBookOrder(pairId, currentBook, order, 'pending-cross-ack');
         continue;
       }
       if (
@@ -501,6 +532,7 @@ export function processOrderbookSwaps(
         );
       }
     }
+    return currentBook;
   };
 
   const processCrossJurisdictionOffers = (): void => {
@@ -524,10 +556,8 @@ export function processOrderbookSwaps(
     for (const [pairId, book] of ext.books) {
       if (!String(pairId).startsWith('cross:')) continue;
       const currentBook = bookCache.get(pairId) || book;
-      assertCrossBookMatchesKnownRoutes(pairId, currentBook);
-      if (currentBook !== book) {
-        bookCache.set(pairId, currentBook);
-      }
+      const checkedBook = assertCrossBookMatchesKnownRoutes(pairId, currentBook);
+      bookCache.set(pairId, checkedBook);
     }
 
     for (const rawOffer of sortSwapOffersForOrderbook(crossJurisdictionSwapOffers)) {
@@ -550,8 +580,6 @@ export function processOrderbookSwaps(
       }
 
       crossLiveOfferMeta.set(currentNamespacedOrderId, marketOffer);
-      const suspendedOrderIds = suspendedCrossOrdersForPair(marketOffer.pairId);
-      if (suspendedOrderIds?.has(currentNamespacedOrderId)) continue;
       if (hasQueuedSwapResolveForEntityState(hubState, queuedSwapResolutions, currentAccountId, rawOffer.offerId)) {
         continue;
       }
@@ -562,7 +590,7 @@ export function processOrderbookSwaps(
       if (!book) {
         book = createEmptyPairBook(getSwapPairPolicyByBaseQuote(rawOffer.giveTokenId, rawOffer.wantTokenId).bookBucketWidthTicks);
       } else {
-        assertCrossBookMatchesKnownRoutes(marketOffer.pairId, book);
+        book = assertCrossBookMatchesKnownRoutes(marketOffer.pairId, book);
       }
       const existingOrder = getBookOrder(book, currentNamespacedOrderId);
       if (existingOrder) {
@@ -588,7 +616,7 @@ export function processOrderbookSwaps(
           priceTicks: marketOffer.priceTicks,
           qtyLots: Number(qtyLots),
           minFillRatio: rawOffer.minFillRatio,
-        }, suspendedOrderIds ? { suspendedOrderIds } : undefined);
+        });
       } catch (error) {
         rejectInvalidCrossOffer(currentAccountId, rawOffer.offerId, `cross-pair-error:${error instanceof Error ? error.message : String(error)}`);
         continue;
@@ -754,7 +782,7 @@ export function processOrderbookSwaps(
     if (!book) {
       book = createEmptyPairBook(bucketWidthTicks);
     } else {
-      assertBookMatchesKnownAccountOffers(bookKey, book);
+      book = assertBookMatchesKnownAccountOffers(bookKey, book);
     }
 
     if (!sweptPairs.has(bookKey)) {

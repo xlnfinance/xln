@@ -313,13 +313,19 @@ async function ensureHubCardVisible(page: Page, hubId: string): Promise<void> {
 
 async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
   await ensureHubCardVisible(page, hubId);
-  const hubCard = await resolveHubCardLocator(page, hubId);
+  if (await hasRenderedCommittedAccountCard(page, hubId)) return;
+
+  const panel = page.locator('.hub-panel').first();
+  await expect(panel).toBeVisible({ timeout: 20_000 });
+  const hubCard = await resolveHubCardLocator(page, hubId, panel);
   const connectButton = hubCard.getByRole('button', { name: /Connect/i }).first();
   if (await connectButton.isVisible().catch(() => false)) {
     await connectButton.click({ timeout: 5_000 });
     return;
   }
-  const openState = hubCard.getByText(/^Open$/i).first();
+  if (await hasRenderedCommittedAccountCard(page, hubId)) return;
+
+  const openState = hubCard.locator('.connection-state').filter({ hasText: /^Open$/i }).first();
   await expect(openState, `hub ${hubId} must expose Connect or already be Open`).toBeVisible({ timeout: 5_000 });
 }
 

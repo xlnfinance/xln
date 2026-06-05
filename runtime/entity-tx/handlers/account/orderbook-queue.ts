@@ -9,6 +9,8 @@ export interface MempoolOp {
 export type SwapResolveEnqueueData = {
   offerId: string;
   fillRatio: number;
+  fillNumerator?: bigint;
+  fillDenominator?: bigint;
   cancelRemainder: boolean;
   comment?: string;
   feeTokenId?: number;

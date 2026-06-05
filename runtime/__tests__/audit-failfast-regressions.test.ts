@@ -13,9 +13,15 @@ import { generateLazyEntityId } from '../entity-factory';
 import { isLeftEntity } from '../entity-id-utils';
 import { applyEntityFrame, applyEntityInput } from '../entity-consensus';
 import { createEntityFrameHash } from '../entity-consensus-frame';
-import { queueCrossJurisdictionBookOwnerWake } from '../entity-consensus/cross-j-orderbook';
+import { assertCrossJurisdictionOrderAdmissible } from '../entity-consensus/cross-j-orderbook';
+import {
+  buildCrossJurisdictionBookAdmissionReceipt,
+  getCrossJurisdictionBookAdmissionError,
+  mergeCrossJurisdictionBookAdmission,
+} from '../cross-jurisdiction-orderbook';
 import { applyEntityTx } from '../entity-tx/apply';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity-tx/handlers/account-cross-j-followups';
+import { handleAdmitCrossJurisdictionBookOrderEntityTx } from '../entity-tx/handlers/cross-j-book-order';
 import { handleJAbortSentBatch } from '../entity-tx/handlers/j-abort-sent-batch';
 import { handleJRebroadcast } from '../entity-tx/handlers/j-rebroadcast';
 import { handleJEvent } from '../entity-tx/j-events';
@@ -373,15 +379,6 @@ describe('audit fail-fast regressions', () => {
     expect(state.nonces.has(signer)).toBe(false);
   });
 
-  test('missing cross-j book owner wake is fatal instead of a silent warn', () => {
-    const env = createEmptyEnv('cross-j-missing-owner-wake');
-    const outputs: EntityInput[] = [];
-
-    expect(() => queueCrossJurisdictionBookOwnerWake(env, outputs, `0x${'77'.repeat(32)}`, 'test-missing-owner'))
-      .toThrow('CROSS_J_BOOK_OWNER_UNREACHABLE');
-    expect(outputs).toHaveLength(0);
-  });
-
   test('cross-j remote route cannot seed missing sibling runtime hints before topology validation', async () => {
     const env = createEmptyEnv('cross-j-topology-hints');
     env.scenarioMode = true;
@@ -412,6 +409,168 @@ describe('audit fail-fast regressions', () => {
         },
       } as any],
     }])).rejects.toThrow('RUNTIME_CROSS_J_TOPOLOGY_INVALID');
+  });
+
+  test('cross-j order admission requires committed source and target pull receipts', () => {
+    const sourceUser = `0x${'31'.repeat(32)}`;
+    const sourceHub = `0x${'41'.repeat(32)}`;
+    const targetHub = `0x${'42'.repeat(32)}`;
+    const targetUser = `0x${'32'.repeat(32)}`;
+    const sourcePull = {
+      pullId: 'source-pull',
+      tokenId: 1,
+      amount: 1_000n,
+      signedAmount: 1_000n,
+      revealedUntilTimestamp: 60_000,
+      fullHash: `0x${'aa'.repeat(32)}`,
+      partialRoot: `0x${'bb'.repeat(32)}`,
+    };
+    const targetPull = {
+      pullId: 'target-pull',
+      tokenId: 2,
+      amount: 900n,
+      signedAmount: 900n,
+      revealedUntilTimestamp: 60_000,
+      fullHash: `0x${'cc'.repeat(32)}`,
+      partialRoot: `0x${'dd'.repeat(32)}`,
+    };
+    const sourceHubState = {
+      entityId: sourceHub,
+      accounts: new Map(),
+      crossJurisdictionBookAdmissions: new Map(),
+    } as EntityState;
+    const route = {
+      orderId: 'cross-admit-missing-target-lock',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      bookOwnerEntityId: sourceHub,
+      venueId: 'cross:test:1/target:2',
+      source: {
+        jurisdiction: 'test',
+        entityId: sourceUser,
+        counterpartyEntityId: sourceHub,
+        tokenId: 1,
+        amount: 1_000n,
+      },
+      target: {
+        jurisdiction: 'target',
+        entityId: targetHub,
+        counterpartyEntityId: targetUser,
+        tokenId: 2,
+        amount: 900n,
+      },
+      sourcePull,
+      targetPull,
+      status: 'resting',
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      expiresAt: 60_000,
+    } satisfies CrossJurisdictionSwapRoute;
+    const sourceReceipt = buildCrossJurisdictionBookAdmissionReceipt(
+      route,
+      'source',
+      {
+        type: 'pull_lock',
+        data: {
+          pullId: sourcePull.pullId,
+          tokenId: sourcePull.tokenId,
+          amount: sourcePull.signedAmount,
+          revealedUntilTimestamp: sourcePull.revealedUntilTimestamp,
+          fullHash: sourcePull.fullHash,
+          partialRoot: sourcePull.partialRoot,
+        },
+      },
+      sourceHub,
+      sourceUser,
+      1_000,
+    );
+    mergeCrossJurisdictionBookAdmission(sourceHubState, route, 1_000, sourceReceipt);
+
+    expect(getCrossJurisdictionBookAdmissionError(sourceHubState, route, 1_000))
+      .toContain('CROSS_J_BOOK_ADMISSION_PENDING');
+    expect(() => assertCrossJurisdictionOrderAdmissible(sourceHubState, route, 1_000))
+      .toThrow('CROSS_J_BOOK_ADMISSION_PENDING');
+
+    const targetReceipt = buildCrossJurisdictionBookAdmissionReceipt(
+      route,
+      'target',
+      {
+        type: 'pull_lock',
+        data: {
+          pullId: targetPull.pullId,
+          tokenId: targetPull.tokenId,
+          amount: targetPull.signedAmount,
+          revealedUntilTimestamp: targetPull.revealedUntilTimestamp,
+          fullHash: targetPull.fullHash,
+          partialRoot: targetPull.partialRoot,
+        },
+      },
+      targetHub,
+      targetUser,
+      1_001,
+    );
+    mergeCrossJurisdictionBookAdmission(sourceHubState, route, 1_001, targetReceipt);
+    expect(() => assertCrossJurisdictionOrderAdmissible(sourceHubState, route, 1_001)).not.toThrow();
+
+    const env = createEmptyEnv('cross-j-admit-handler');
+    const handlerState = makeEntityState(sourceHub);
+    handlerState.accounts.set(sourceUser, {
+      ...makeProposalAccount([], sourceUser, sourceHub),
+      swapOffers: new Map([[route.orderId, {
+        offerId: route.orderId,
+        makerIsLeft: true,
+        giveTokenId: route.source.tokenId,
+        giveAmount: route.source.amount,
+        wantTokenId: route.target.tokenId,
+        wantAmount: route.target.amount,
+        minFillRatio: 0,
+        createdHeight: 1,
+        crossJurisdiction: route,
+      }]]),
+    });
+    const sourceAdmit = handleAdmitCrossJurisdictionBookOrderEntityTx(env, handlerState, {
+      type: 'admitCrossJurisdictionBookOrder',
+      data: { route, receipt: sourceReceipt, reason: 'source_pull_committed' },
+    });
+    expect(sourceAdmit.swapOffersCreated).toHaveLength(0);
+    expect(sourceAdmit.newState.crossJurisdictionBookAdmissions?.values().next().value?.status).toBe('pending');
+
+    const targetAdmit = handleAdmitCrossJurisdictionBookOrderEntityTx(env, sourceAdmit.newState, {
+      type: 'admitCrossJurisdictionBookOrder',
+      data: { route, receipt: targetReceipt, reason: 'target_pull_committed' },
+    });
+    expect(targetAdmit.swapOffersCreated).toHaveLength(1);
+    expect(targetAdmit.swapOffersCreated[0]?.crossJurisdiction?.orderId).toBe(route.orderId);
+    expect(targetAdmit.newState.crossJurisdictionBookAdmissions?.values().next().value?.status).toBe('admitted');
+
+    const badTargetReceipt = { ...targetReceipt, signedAmount: targetReceipt.signedAmount + 1n };
+    const resolvingAdmission = targetAdmit.newState.crossJurisdictionBookAdmissions?.values().next().value;
+    if (!resolvingAdmission) throw new Error('test fixture missing cross-j admission');
+    resolvingAdmission.status = 'resolving';
+    const duplicateResolvingAdmit = handleAdmitCrossJurisdictionBookOrderEntityTx(env, targetAdmit.newState, {
+      type: 'admitCrossJurisdictionBookOrder',
+      data: { route, receipt: targetReceipt, reason: 'duplicate_target_pull_committed' },
+    });
+    expect(duplicateResolvingAdmit.swapOffersCreated).toHaveLength(0);
+    expect(duplicateResolvingAdmit.newState.crossJurisdictionBookAdmissions?.values().next().value?.status).toBe('resolving');
+    expect(() => handleAdmitCrossJurisdictionBookOrderEntityTx(env, targetAdmit.newState, {
+      type: 'admitCrossJurisdictionBookOrder',
+      data: { route, receipt: badTargetReceipt, reason: 'bad_duplicate' },
+    })).toThrow('CROSS_J_BOOK_ADMISSION_RECEIPT_MISMATCH');
+
+    const closedAdmission = duplicateResolvingAdmit.newState.crossJurisdictionBookAdmissions?.values().next().value;
+    if (!closedAdmission) throw new Error('test fixture missing cross-j admission');
+    closedAdmission.status = 'closed';
+    const duplicateClosedAdmit = handleAdmitCrossJurisdictionBookOrderEntityTx(env, duplicateResolvingAdmit.newState, {
+      type: 'admitCrossJurisdictionBookOrder',
+      data: { route, receipt: sourceReceipt, reason: 'duplicate_source_pull_committed' },
+    });
+    expect(duplicateClosedAdmit.swapOffersCreated).toHaveLength(0);
+    expect(duplicateClosedAdmit.newState.crossJurisdictionBookAdmissions?.values().next().value?.status).toBe('closed');
+
+    mergeCrossJurisdictionBookAdmission(sourceHubState, route, 1_002, badTargetReceipt);
+    expect(() => assertCrossJurisdictionOrderAdmissible(sourceHubState, route, 1_002))
+      .toThrow('CROSS_J_BOOK_ADMISSION_RECEIPT_MISMATCH');
   });
 
   test('j_event finality requires quorum on canonical event set, not only block hash', async () => {

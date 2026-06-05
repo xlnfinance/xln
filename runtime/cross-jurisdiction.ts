@@ -4,6 +4,8 @@ import type {
   AccountFrame,
   AccountInput,
   AccountTx,
+  CrossJurisdictionBookAdmission,
+  CrossJurisdictionBookAdmissionReceipt,
   CrossJurisdictionPullLeg,
   CrossJurisdictionSwapLeg,
   CrossJurisdictionSwapRoute,
@@ -115,6 +117,8 @@ export function isCrossJurisdictionRouteExpired(route: CrossJurisdictionSwapRout
 export type CrossJurisdictionFillProgressInput = {
   fillSeq?: number | undefined;
   cumulativeFillRatio: number;
+  fillNumerator?: bigint | undefined;
+  fillDenominator?: bigint | undefined;
   incrementalSourceAmount?: bigint | undefined;
   incrementalTargetAmount?: bigint | undefined;
   cumulativeSourceAmount?: bigint | undefined;
@@ -125,6 +129,8 @@ export type CrossJurisdictionFillProgress = {
   fillSeq: number;
   previousRatio: number;
   nextRatio: number;
+  fillNumerator?: bigint | undefined;
+  fillDenominator?: bigint | undefined;
   previousSourceAmount: bigint;
   previousTargetAmount: bigint;
   cumulativeSourceAmount: bigint;
@@ -148,6 +154,15 @@ export function validateCrossJurisdictionFillProgress(
 
   const previousRatio = Math.max(clampFillRatio(route.cumulativeFillRatio), clampFillRatio(route.claimedRatio));
   const nextRatio = clampFillRatio(input.cumulativeFillRatio);
+  if ((input.fillNumerator === undefined) !== (input.fillDenominator === undefined)) {
+    return { ok: false, error: 'exact fill ratio must include numerator and denominator' };
+  }
+  if (input.fillNumerator !== undefined && input.fillDenominator !== undefined) {
+    if (input.fillDenominator <= 0n) return { ok: false, error: 'exact fill denominator must be positive' };
+    if (input.fillNumerator < 0n || input.fillNumerator > input.fillDenominator) {
+      return { ok: false, error: 'exact fill numerator out of range' };
+    }
+  }
   if (nextRatio <= previousRatio) {
     return { ok: false, error: `non-monotonic ratio ${nextRatio} <= ${previousRatio}` };
   }
@@ -195,6 +210,8 @@ export function validateCrossJurisdictionFillProgress(
       fillSeq: nextSeq,
       previousRatio,
       nextRatio,
+      fillNumerator: input.fillNumerator,
+      fillDenominator: input.fillDenominator,
       previousSourceAmount,
       previousTargetAmount,
       cumulativeSourceAmount,
@@ -214,6 +231,8 @@ export function withCrossJurisdictionFillProgress(
     ...route,
     fillSeq: fill.fillSeq,
     cumulativeFillRatio: fill.nextRatio,
+    ...(fill.fillNumerator !== undefined ? { fillNumerator: fill.fillNumerator } : {}),
+    ...(fill.fillDenominator !== undefined ? { fillDenominator: fill.fillDenominator } : {}),
     claimedRatio: fill.nextRatio,
     filledSourceAmount: fill.cumulativeSourceAmount,
     filledTargetAmount: fill.cumulativeTargetAmount,
@@ -381,6 +400,8 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
   const priceTicks = optionalBigInt(route.priceTicks);
   const fillSeq = optionalNumber(route.fillSeq);
   const cumulativeFillRatio = optionalNumber(route.cumulativeFillRatio);
+  const fillNumerator = optionalBigInt(route.fillNumerator);
+  const fillDenominator = optionalBigInt(route.fillDenominator);
   const filledSourceAmount = optionalBigInt(route.filledSourceAmount);
   const filledTargetAmount = optionalBigInt(route.filledTargetAmount);
   const priceImprovementSourceAmount = optionalBigInt(route.priceImprovementSourceAmount);
@@ -402,6 +423,8 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
   if (priceTicks !== undefined) clone.priceTicks = priceTicks;
   if (fillSeq !== undefined) clone.fillSeq = fillSeq;
   if (cumulativeFillRatio !== undefined) clone.cumulativeFillRatio = cumulativeFillRatio;
+  if (fillNumerator !== undefined) clone.fillNumerator = fillNumerator;
+  if (fillDenominator !== undefined) clone.fillDenominator = fillDenominator;
   if (filledSourceAmount !== undefined) clone.filledSourceAmount = filledSourceAmount;
   if (filledTargetAmount !== undefined) clone.filledTargetAmount = filledTargetAmount;
   if (priceImprovementSourceAmount !== undefined) clone.priceImprovementSourceAmount = priceImprovementSourceAmount;
@@ -417,6 +440,54 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
   if (settledAt !== undefined) clone.settledAt = settledAt;
   if (error) clone.error = error;
   if (memo) clone.memo = memo;
+  return clone;
+}
+
+export function cloneCrossJurisdictionBookAdmissionReceipt(
+  receipt: CrossJurisdictionBookAdmissionReceipt,
+): CrossJurisdictionBookAdmissionReceipt {
+  return {
+    leg: receipt.leg,
+    orderId: String(receipt.orderId || ''),
+    routeHash: String(receipt.routeHash || ''),
+    hubEntityId: String(receipt.hubEntityId || ''),
+    counterpartyEntityId: String(receipt.counterpartyEntityId || ''),
+    pullId: String(receipt.pullId || ''),
+    tokenId: Number(receipt.tokenId),
+    signedAmount: BigInt(receipt.signedAmount),
+    revealedUntilTimestamp: Number(receipt.revealedUntilTimestamp),
+    fullHash: String(receipt.fullHash || ''),
+    partialRoot: String(receipt.partialRoot || ''),
+    committedAt: Number(receipt.committedAt || 0),
+  };
+}
+
+export function cloneCrossJurisdictionBookAdmission(
+  admission: CrossJurisdictionBookAdmission,
+): CrossJurisdictionBookAdmission {
+  const clone: CrossJurisdictionBookAdmission = {
+    orderId: String(admission.orderId || ''),
+    routeHash: String(admission.routeHash || ''),
+    sourceEntityId: String(admission.sourceEntityId || ''),
+    bookOwnerEntityId: String(admission.bookOwnerEntityId || ''),
+    status: admission.status || 'pending',
+    route: cloneCrossJurisdictionRoute(admission.route),
+    updatedAt: Number(admission.updatedAt || 0),
+  };
+  if (admission.sourceReceipt) {
+    clone.sourceReceipt = cloneCrossJurisdictionBookAdmissionReceipt(admission.sourceReceipt);
+  }
+  if (admission.targetReceipt) {
+    clone.targetReceipt = cloneCrossJurisdictionBookAdmissionReceipt(admission.targetReceipt);
+  }
+  const admittedAt = optionalNumber(admission.admittedAt);
+  const resolvingAt = optionalNumber(admission.resolvingAt);
+  const closedAt = optionalNumber(admission.closedAt);
+  const closeReason = optionalString(admission.closeReason);
+  if (admittedAt !== undefined) clone.admittedAt = admittedAt;
+  if (resolvingAt !== undefined) clone.resolvingAt = resolvingAt;
+  if (closedAt !== undefined) clone.closedAt = closedAt;
+  if (closeReason) clone.closeReason = closeReason;
   return clone;
 }
 

@@ -79,9 +79,13 @@ function usage(): never {
 }
 
 function run(cmd: string[], cwd = process.cwd()): { ok: boolean; output: string } {
-  const proc = Bun.spawnSync(cmd, { cwd, stdout: 'pipe', stderr: 'pipe' });
-  const output = `${proc.stdout ? new TextDecoder().decode(proc.stdout) : ''}${proc.stderr ? new TextDecoder().decode(proc.stderr) : ''}`.trim();
-  return { ok: proc.exitCode === 0, output };
+  try {
+    const proc = Bun.spawnSync(cmd, { cwd, stdout: 'pipe', stderr: 'pipe' });
+    const output = `${proc.stdout ? new TextDecoder().decode(proc.stdout) : ''}${proc.stderr ? new TextDecoder().decode(proc.stderr) : ''}`.trim();
+    return { ok: proc.exitCode === 0, output };
+  } catch (error) {
+    return { ok: false, output: error instanceof Error ? error.message : String(error) };
+  }
 }
 
 function parseArgs(argv: string[]) {
@@ -250,9 +254,57 @@ function scanManualSwapKeys(files: string[]): Finding | null {
     : null;
 }
 
-function runScc(targets: string[]): SccSummary | null {
+function countLocalCodeMetrics(files: string[]): SccSummary {
+  return files.reduce<SccSummary>((acc, file) => {
+    const lines = readLines(file);
+    let inBlockComment = false;
+    let blanks = 0;
+    let comments = 0;
+    let code = 0;
+    let complexity = 0;
+
+    for (const line of lines) {
+      const trimmed = line.trim();
+      if (!trimmed) {
+        blanks += 1;
+        continue;
+      }
+
+      if (inBlockComment) {
+        comments += 1;
+        if (trimmed.includes('*/')) inBlockComment = false;
+        continue;
+      }
+
+      if (trimmed.startsWith('/*')) {
+        comments += 1;
+        if (!trimmed.includes('*/')) inBlockComment = true;
+        continue;
+      }
+      if (trimmed.startsWith('//') || trimmed.startsWith('#') || trimmed.startsWith('<!--')) {
+        comments += 1;
+        continue;
+      }
+
+      code += 1;
+      const matches = line.match(/\b(if|for|while|case|catch|switch)\b|&&|\|\||\?/g);
+      complexity += matches?.length ?? 0;
+    }
+
+    return {
+      lines: acc.lines + lines.length,
+      blanks: acc.blanks + blanks,
+      comments: acc.comments + comments,
+      code: acc.code + code,
+      complexity: acc.complexity + complexity,
+      files: acc.files + 1,
+    };
+  }, { lines: 0, blanks: 0, comments: 0, code: 0, complexity: 0, files: 0 });
+}
+
+function runScc(targets: string[], files: string[]): SccSummary | null {
   const result = run(['scc', '-f', 'json2', '--no-cocomo', ...targets]);
-  if (!result.ok) return null;
+  if (!result.ok) return countLocalCodeMetrics(files);
   const parsed = JSON.parse(result.output) as { languageSummary?: Array<{ Lines: number; Blank: number; Comment: number; Code: number; Complexity: number; Count: number }> };
   const rows = parsed.languageSummary ?? [];
   return rows.reduce<SccSummary>(
@@ -456,7 +508,7 @@ async function main() {
   const normalizedTargets = targets.map((target) => relative(process.cwd(), resolve(target)));
   const files = collectFiles(targets);
   const profile = detectProfile(normalizedTargets, files.map((file) => relative(process.cwd(), file)));
-  const scc = runScc(targets);
+  const scc = runScc(targets, files);
   const findings = collectFindings(files, profile);
   const tsc = skipTsc ? { ok: true, output: 'skipped' } : run(['bun', 'x', 'tsc', '--noEmit', '--pretty', 'false']);
 

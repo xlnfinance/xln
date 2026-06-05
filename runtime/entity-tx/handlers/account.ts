@@ -239,8 +239,6 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       pending: accountMachine.pendingFrame ? accountMachine.pendingFrame.height : null,
     });
 
-    const currentHeightBefore = accountMachine.currentHeight;
-    const pendingFrameBefore = accountMachine.pendingFrame;
     const result = await processAccountInput(env, accountMachine, input);
 
     if (result.success) {
@@ -283,63 +281,75 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
       // === COMMITTED FRAME PROCESSING: Check if account-level commits need entity side effects ===
       // Account consensus returns the committed frames explicitly. This avoids
       // guessing from input shape, especially for batched ACK + new-frame flows.
-      const committedFrameEntries =
-        result.committedFrames && result.committedFrames.length > 0
-          ? result.committedFrames
-          : (() => {
-              const justCommittedFrame =
-                input.newAccountFrame && input.newAccountFrame.height > currentHeightBefore
-                  ? input.newAccountFrame
-                  : input.prevHanko && pendingFrameBefore && accountMachine.currentHeight > currentHeightBefore
-                    ? pendingFrameBefore
-                    : undefined;
-              return justCommittedFrame
-                ? [{ frame: justCommittedFrame, committedViaNewFrame: Boolean(input.newAccountFrame) }]
-                : [];
-            })();
+      const buildCommittedSwapOfferEvent = (offerId: string): SwapOfferEvent | null => {
+        const offer = accountMachine.swapOffers?.get(offerId);
+        if (!offer) return null;
+        return {
+          offerId,
+          accountId: counterpartyId,
+          makerIsLeft: offer.makerIsLeft,
+          fromEntity: accountMachine.leftEntity,
+          toEntity: accountMachine.rightEntity,
+          createdHeight: offer.createdHeight,
+          giveTokenId: offer.giveTokenId,
+          giveAmount: offer.giveAmount,
+          wantTokenId: offer.wantTokenId,
+          wantAmount: offer.wantAmount,
+          ...(offer.priceTicks !== undefined ? { priceTicks: offer.priceTicks } : {}),
+          ...(offer.timeInForce !== undefined ? { timeInForce: offer.timeInForce } : {}),
+          minFillRatio: offer.minFillRatio,
+          ...(offer.crossJurisdiction ? { crossJurisdiction: offer.crossJurisdiction } : {}),
+        };
+      };
+      const committedFrameEntries = result.committedFrames ?? [];
 
       for (const { frame: committedFrame, committedViaNewFrame } of committedFrameEntries) {
         if (!committedFrame?.accountTxs) continue;
         applyCommittedAccountFrameFollowups(newState, counterpartyId, committedFrame);
 
         for (const accountTx of committedFrame.accountTxs) {
-          if (applyCommittedCrossJurisdictionAccountTxFollowup(env, newState, counterpartyId, accountTx, outputs)) {
-            continue;
-          }
-          await applyCommittedHtlcLockFollowup(
-            { env, state, newState, input, accountMachine, outputs, mempoolOps },
+          const crossJurisdictionFollowupHandled = applyCommittedCrossJurisdictionAccountTxFollowup(
+            env,
+            newState,
+            counterpartyId,
             accountTx,
-            committedViaNewFrame,
+            outputs,
           );
+          if (!crossJurisdictionFollowupHandled) {
+            await applyCommittedHtlcLockFollowup(
+              { env, state, newState, input, accountMachine, outputs, mempoolOps },
+              accountTx,
+              committedViaNewFrame,
+            );
+          }
+
+          if (accountTx.type === 'swap_offer') {
+            const committedOfferEvent = buildCommittedSwapOfferEvent(accountTx.data.offerId);
+            if (committedOfferEvent) allSwapOffersCreated.push(committedOfferEvent);
+          } else if (accountTx.type === 'swap_resolve' || accountTx.type === 'cross_swap_fill_ack') {
+            const committedOfferEvent = buildCommittedSwapOfferEvent(accountTx.data.offerId);
+            if (committedOfferEvent) {
+              allSwapOffersCreated.push(committedOfferEvent);
+            } else {
+              allSwapOffersCancelled.push({ offerId: accountTx.data.offerId, accountId: counterpartyId });
+            }
+          } else if (accountTx.type === 'swap_cancel_request') {
+            allSwapCancelRequests.push({ offerId: accountTx.data.offerId, accountId: counterpartyId });
+          }
         }
       }
       applyPendingForwardFollowup({ env, state, newState, input, accountMachine, outputs, mempoolOps });
       applyHtlcTimeoutFollowups({ env, state, newState, input, accountMachine, outputs, mempoolOps }, result.timedOutHashlocks || []);
       applyHtlcSecretFollowups({ env, state, newState, input, accountMachine, outputs, mempoolOps }, result.revealedSecrets || []);
 
-      // === COLLECT SWAP EVENTS (deferred to entity-level orchestration) ===
-      const swapOffersCreated = result.swapOffersCreated || [];
-      if (swapOffersCreated.length > 0) {
-        accountHandlerLog.debug('swap.offers_created', { count: swapOffersCreated.length });
-        allSwapOffersCreated.push(...swapOffersCreated);
+      if (allSwapOffersCreated.length > 0) {
+        accountHandlerLog.debug('swap.offers_committed', { count: allSwapOffersCreated.length });
       }
-
-      const swapCancelRequests = result.swapCancelRequests || [];
-      if (swapCancelRequests.length > 0) {
-        accountHandlerLog.debug('swap.cancel_requests', { count: swapCancelRequests.length });
-        const normalizedCancelRequests = swapCancelRequests.map(({ offerId }) => ({
-          offerId,
-          accountId: counterpartyId,
-        }));
-        allSwapCancelRequests.push(...normalizedCancelRequests);
+      if (allSwapCancelRequests.length > 0) {
+        accountHandlerLog.debug('swap.cancel_requests_committed', { count: allSwapCancelRequests.length });
       }
-
-      const swapOffersCancelled = result.swapOffersCancelled || [];
-      if (swapOffersCancelled.length > 0) {
-        accountHandlerLog.debug('swap.offers_cancelled', { count: swapOffersCancelled.length });
-        // Normalize to local counterparty key for this account machine.
-        const normalizedCancels = swapOffersCancelled.map(({ offerId }) => ({ offerId, accountId: counterpartyId }));
-        allSwapOffersCancelled.push(...normalizedCancels);
+      if (allSwapOffersCancelled.length > 0) {
+        accountHandlerLog.debug('swap.offers_cancelled_committed', { count: allSwapOffersCancelled.length });
       }
 
       // Send response (ACK + optional new frame)

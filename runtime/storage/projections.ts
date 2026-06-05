@@ -1,6 +1,7 @@
 import { rebuildOrderbookPairIndex, type BookState, type OrderbookExtState } from '../orderbook';
 import type { AccountMachine, EntityReplica, EntityState } from '../types';
 import {
+  cloneCrossJurisdictionBookAdmission,
   cloneCrossJurisdictionAccountFrameRoute,
   cloneCrossJurisdictionAccountInputRoute,
   cloneCrossJurisdictionAccountTxRoute,
@@ -18,6 +19,14 @@ const withProp = <K extends string, V>(key: K, value: V | undefined): Partial<Re
 
 const publicCrossJurisdictionSwaps = (swaps: EntityState['crossJurisdictionSwaps']): EntityState['crossJurisdictionSwaps'] | undefined =>
   swaps ? new Map(Array.from(swaps.entries()).map(([id, route]) => [id, cloneCrossJurisdictionRoute(route)])) : undefined;
+
+const publicCrossJurisdictionBookAdmissions = (
+  admissions: EntityState['crossJurisdictionBookAdmissions'],
+): EntityState['crossJurisdictionBookAdmissions'] | undefined =>
+  admissions ? new Map(Array.from(admissions.entries()).map(([id, admission]) => [
+    id,
+    cloneCrossJurisdictionBookAdmission(admission),
+  ])) : undefined;
 
 const publicSwapOffers = (offers: AccountMachine['swapOffers']): AccountMachine['swapOffers'] =>
   new Map(Array.from((offers ?? new Map()).entries()).map(([id, offer]) => [
@@ -68,6 +77,7 @@ export const projectEntityCoreDoc = (
   ...withProp('swapTradingPairs', state.swapTradingPairs),
   ...withProp('pendingSwapFillRatios', state.pendingSwapFillRatios),
   ...withProp('crossJurisdictionSwaps', publicCrossJurisdictionSwaps(state.crossJurisdictionSwaps)),
+  ...withProp('crossJurisdictionBookAdmissions', publicCrossJurisdictionBookAdmissions(state.crossJurisdictionBookAdmissions)),
   ...withProp('hubRebalanceConfig', state.hubRebalanceConfig),
   ...withProp('orderbookHubProfile', state.orderbookExt?.hubProfile),
   ...withProp('orderbookReferrals', state.orderbookExt?.referrals),
@@ -296,6 +306,7 @@ export const hydrateEntityStateFromStorage = (options: {
     ...withProp('swapTradingPairs', core.swapTradingPairs),
     ...withProp('pendingSwapFillRatios', core.pendingSwapFillRatios),
     ...withProp('crossJurisdictionSwaps', publicCrossJurisdictionSwaps(core.crossJurisdictionSwaps)),
+    ...withProp('crossJurisdictionBookAdmissions', publicCrossJurisdictionBookAdmissions(core.crossJurisdictionBookAdmissions)),
     ...withProp('hubRebalanceConfig', core.hubRebalanceConfig),
   };
 };

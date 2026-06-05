@@ -43,6 +43,12 @@ type FaucetLock = {
   release: () => void;
 };
 
+type FaucetWalletState = {
+  provider: ethers.Provider;
+  wallet: ethers.NonceManager;
+  lock: FaucetLock;
+};
+
 const createJsonResponse = (
   headers: Record<string, string>,
   payload: unknown,
@@ -66,6 +72,9 @@ const createFaucetLock = (): FaucetLock => ({
     });
   },
   release() {
+    if (!this.locked) {
+      throw new Error('FAUCET_LOCK_RELEASE_WITHOUT_ACQUIRE');
+    }
     const next = this.queue.shift();
     if (next) {
       next();
@@ -99,17 +108,75 @@ const toErc20ContractRunner = (runner: unknown, label: string): Erc20ContractRun
   return runner as Erc20ContractRunner;
 };
 
-const faucetSignerByAddress = new Map<string, ethers.NonceManager>();
+const providerIdentityByObject = new Map<object, string>();
+const faucetWalletStateByKey = new Map<string, FaucetWalletState>();
+let providerIdentityCounter = 0;
 
-const getFaucetWallet = (context: ExternalWalletApiContext, adapter: JAdapter): ethers.NonceManager => {
+const resolveProviderIdentity = (provider: ethers.Provider): string => {
+  const maybeJsonRpcProvider = provider as ethers.Provider & {
+    _getConnection?: () => { url?: string };
+    connection?: { url?: string };
+  };
+  const connectionUrl = maybeJsonRpcProvider._getConnection?.().url ?? maybeJsonRpcProvider.connection?.url;
+  if (connectionUrl) return `rpc:${connectionUrl}`;
+
+  const providerObject = provider as object;
+  const cached = providerIdentityByObject.get(providerObject);
+  if (cached) return cached;
+
+  providerIdentityCounter += 1;
+  const identity = `provider:${providerIdentityCounter}`;
+  providerIdentityByObject.set(providerObject, identity);
+  return identity;
+};
+
+const resolveFaucetWalletStateKey = (
+  adapter: JAdapter,
+  faucetAddress: string,
+): string => [
+  adapter.mode,
+  String(adapter.chainId),
+  resolveProviderIdentity(adapter.provider),
+  faucetAddress.toLowerCase(),
+].join(':');
+
+const getFaucetWalletState = (context: ExternalWalletApiContext, adapter: JAdapter): FaucetWalletState => {
   const privateKeyBytes = deriveSignerKeySync(context.faucetSeed, context.faucetSignerLabel);
   const wallet = new ethers.Wallet(ethers.hexlify(privateKeyBytes), adapter.provider);
-  const cacheKey = wallet.address.toLowerCase();
-  const cached = faucetSignerByAddress.get(cacheKey);
-  if (cached) return cached;
-  const managed = new ethers.NonceManager(wallet);
-  faucetSignerByAddress.set(cacheKey, managed);
-  return managed;
+  const cacheKey = resolveFaucetWalletStateKey(adapter, wallet.address);
+  const cached = faucetWalletStateByKey.get(cacheKey);
+  if (cached) {
+    if (cached.provider !== adapter.provider) {
+      cached.provider = adapter.provider;
+      cached.wallet = new ethers.NonceManager(wallet);
+    }
+    return cached;
+  }
+  const state: FaucetWalletState = {
+    provider: adapter.provider,
+    wallet: new ethers.NonceManager(wallet),
+    lock: createFaucetLock(),
+  };
+  faucetWalletStateByKey.set(cacheKey, state);
+  return state;
+};
+
+const getFaucetWallet = (context: ExternalWalletApiContext, adapter: JAdapter): ethers.NonceManager =>
+  getFaucetWalletState(context, adapter).wallet;
+
+const withFaucetWalletLock = async <T>(
+  context: ExternalWalletApiContext,
+  adapter: JAdapter,
+  action: (faucetWallet: ethers.NonceManager) => Promise<T>,
+): Promise<T> => {
+  const state = getFaucetWalletState(context, adapter);
+  const faucetWallet = state.wallet;
+  await state.lock.acquire();
+  try {
+    return await action(faucetWallet);
+  } finally {
+    state.lock.release();
+  }
 };
 
 const provisionFaucetWalletFunding = async (
@@ -121,70 +188,71 @@ const provisionFaucetWalletFunding = async (
     ensureTokens: boolean;
   },
 ) : Promise<ethers.NonceManager> => {
-  const faucetWallet = getFaucetWallet(context, adapter);
-  const faucetAddress = await faucetWallet.getAddress();
-  const deployerAddress = await adapter.signer.getAddress().catch(() => '');
-  let nextNonce = deployerAddress
-    ? await adapter.provider.getTransactionCount(deployerAddress, 'pending').catch(() => -1)
-    : -1;
+  return withFaucetWalletLock(context, adapter, async (faucetWallet) => {
+    const faucetAddress = await faucetWallet.getAddress();
+    const deployerAddress = await adapter.signer.getAddress().catch(() => '');
+    let nextNonce = deployerAddress
+      ? await adapter.provider.getTransactionCount(deployerAddress, 'pending').catch(() => -1)
+      : -1;
 
-  if (adapter.mode === 'browservm') {
+    if (adapter.mode === 'browservm') {
+      if (options.ensureEth) {
+        const funded = await context.fundBrowserVmWallet(faucetAddress, context.faucetWalletEthTarget);
+        if (!funded) throw new Error('BROWSERVM_FAUCET_UNAVAILABLE');
+      }
+      return faucetWallet;
+    }
+
+    if (options.ensureTokens) {
+      for (const token of tokenCatalog) {
+        const tokenContract = ERC20Mock__factory.connect(
+          token.address,
+          toErc20ContractRunner(adapter.signer, 'adapter.signer'),
+        );
+        const currentBalance = await tokenContract.balanceOf(faucetAddress);
+        const targetBalance = context.faucetTokenTargetUnits * 10n ** BigInt(token.decimals);
+        console.log(
+          `[EXT-FAUCET/PROVISION] token=${token.symbol} faucet=${faucetAddress} current=${currentBalance.toString()} target=${targetBalance.toString()}`,
+        );
+        if (currentBalance >= targetBalance) continue;
+        console.log(
+          `[EXT-FAUCET/PROVISION] token-transfer-start token=${token.symbol} deployer=${deployerAddress || 'unknown'} nonce=${nextNonce}`,
+        );
+        const refillTx = await tokenContract.transfer(
+          faucetAddress,
+          targetBalance - currentBalance,
+          nextNonce >= 0 ? { nonce: nextNonce } : {},
+        );
+        if (nextNonce >= 0) nextNonce += 1;
+        console.log(`[EXT-FAUCET/PROVISION] token-transfer-tx token=${token.symbol} hash=${refillTx.hash}`);
+        await refillTx.wait();
+        console.log(`[EXT-FAUCET/PROVISION] token-transfer-mined token=${token.symbol} hash=${refillTx.hash}`);
+      }
+    }
+
     if (options.ensureEth) {
-      const funded = await context.fundBrowserVmWallet(faucetAddress, context.faucetWalletEthTarget);
-      if (!funded) throw new Error('BROWSERVM_FAUCET_UNAVAILABLE');
+      const currentEth = await adapter.provider.getBalance(faucetAddress);
+      console.log(
+        `[EXT-FAUCET/PROVISION] eth faucet=${faucetAddress} current=${currentEth.toString()} target=${context.faucetWalletEthTarget.toString()}`,
+      );
+      if (currentEth < context.faucetWalletEthTarget) {
+        console.log(
+          `[EXT-FAUCET/PROVISION] eth-topup-start deployer=${deployerAddress || 'unknown'} nonce=${nextNonce}`,
+        );
+        const topupTx = await adapter.signer.sendTransaction({
+          to: faucetAddress,
+          value: context.faucetWalletEthTarget - currentEth,
+          ...(nextNonce >= 0 ? { nonce: nextNonce } : {}),
+        });
+        if (nextNonce >= 0) nextNonce += 1;
+        console.log(`[EXT-FAUCET/PROVISION] eth-topup-tx hash=${topupTx.hash}`);
+        await topupTx.wait();
+        console.log(`[EXT-FAUCET/PROVISION] eth-topup-mined hash=${topupTx.hash}`);
+      }
     }
+
     return faucetWallet;
-  }
-
-  if (options.ensureTokens) {
-    for (const token of tokenCatalog) {
-      const tokenContract = ERC20Mock__factory.connect(
-        token.address,
-        toErc20ContractRunner(adapter.signer, 'adapter.signer'),
-      );
-      const currentBalance = await tokenContract.balanceOf(faucetAddress);
-      const targetBalance = context.faucetTokenTargetUnits * 10n ** BigInt(token.decimals);
-      console.log(
-        `[EXT-FAUCET/PROVISION] token=${token.symbol} faucet=${faucetAddress} current=${currentBalance.toString()} target=${targetBalance.toString()}`,
-      );
-      if (currentBalance >= targetBalance) continue;
-      console.log(
-        `[EXT-FAUCET/PROVISION] token-transfer-start token=${token.symbol} deployer=${deployerAddress || 'unknown'} nonce=${nextNonce}`,
-      );
-      const refillTx = await tokenContract.transfer(
-        faucetAddress,
-        targetBalance - currentBalance,
-        nextNonce >= 0 ? { nonce: nextNonce } : {},
-      );
-      if (nextNonce >= 0) nextNonce += 1;
-      console.log(`[EXT-FAUCET/PROVISION] token-transfer-tx token=${token.symbol} hash=${refillTx.hash}`);
-      await refillTx.wait();
-      console.log(`[EXT-FAUCET/PROVISION] token-transfer-mined token=${token.symbol} hash=${refillTx.hash}`);
-    }
-  }
-
-  if (options.ensureEth) {
-    const currentEth = await adapter.provider.getBalance(faucetAddress);
-    console.log(
-      `[EXT-FAUCET/PROVISION] eth faucet=${faucetAddress} current=${currentEth.toString()} target=${context.faucetWalletEthTarget.toString()}`,
-    );
-    if (currentEth < context.faucetWalletEthTarget) {
-      console.log(
-        `[EXT-FAUCET/PROVISION] eth-topup-start deployer=${deployerAddress || 'unknown'} nonce=${nextNonce}`,
-      );
-      const topupTx = await adapter.signer.sendTransaction({
-        to: faucetAddress,
-        value: context.faucetWalletEthTarget - currentEth,
-        ...(nextNonce >= 0 ? { nonce: nextNonce } : {}),
-      });
-      if (nextNonce >= 0) nextNonce += 1;
-      console.log(`[EXT-FAUCET/PROVISION] eth-topup-tx hash=${topupTx.hash}`);
-      await topupTx.wait();
-      console.log(`[EXT-FAUCET/PROVISION] eth-topup-mined hash=${topupTx.hash}`);
-    }
-  }
-
-  return faucetWallet;
+  });
 };
 
 const requireFaucetWalletBalances = async (
@@ -234,8 +302,6 @@ const requireFaucetWalletBalances = async (
 };
 
 export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
-  const faucetLock = createFaucetLock();
-
   const handleTokens = async (): Promise<Response> => {
     const adapter = context.getJAdapter();
     if (!adapter) {
@@ -252,7 +318,6 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
   };
 
   const handleErc20Faucet = async (request: Request): Promise<Response> => {
-    await faucetLock.acquire();
     try {
       const adapter = context.getJAdapter();
       if (!adapter) {
@@ -275,18 +340,87 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
       });
 
       if (adapter.mode === 'browservm') {
-        const amountWei = ethers.parseUnits(amount, 18);
-        console.log(`[EXT-FAUCET/ERC20 ${requestId}] browservm fund amountWei=${amountWei}`);
-        const funded = await context.fundBrowserVmWallet(userAddress, amountWei);
-        if (!funded) {
-          return createJsonResponse(context.jsonHeaders, { error: 'BrowserVM faucet unavailable' }, 503);
+        return await withFaucetWalletLock(context, adapter, async () => {
+          const amountWei = ethers.parseUnits(amount, 18);
+          console.log(`[EXT-FAUCET/ERC20 ${requestId}] browservm fund amountWei=${amountWei}`);
+          const funded = await context.fundBrowserVmWallet(userAddress, amountWei);
+          if (!funded) {
+            return createJsonResponse(context.jsonHeaders, { error: 'BrowserVM faucet unavailable' }, 503);
+          }
+          context.emitDebugEvent({
+            event: 'debug_event',
+            runtimeId: context.getRuntimeId(),
+            status: 'delivered',
+            reason: 'FAUCET_ERC20_BROWSER_VM_OK',
+            details: { requestId, userAddress, tokenSymbol, amount },
+          });
+          return createJsonResponse(context.jsonHeaders, {
+            success: true,
+            type: 'erc20',
+            amount,
+            tokenSymbol,
+            userAddress,
+            requestId,
+          });
+        });
+      }
+
+      return await withFaucetWalletLock(context, adapter, async () => {
+        const tokens = await context.getTokenCatalog();
+        console.log(`[EXT-FAUCET/ERC20 ${requestId}] token catalog size=${tokens.length}`);
+        const tokenInfo = tokens.find((token) => token.symbol.toUpperCase() === tokenSymbol);
+        if (!tokenInfo) {
+          return createJsonResponse(context.jsonHeaders, { error: `Token ${tokenSymbol} not found` }, 404);
         }
+
+        const amountWei = ethers.parseUnits(amount, tokenInfo.decimals);
+        let ethTxHash = '';
+        const userEth = await adapter.provider.getBalance(userAddress);
+        const minBalance = ethers.parseEther('0.01');
+        const targetBalance = ethers.parseEther('0.1');
+        const userTopupAmount = userEth < minBalance ? targetBalance - userEth : 0n;
+
+        console.log(`[EXT-FAUCET/ERC20 ${requestId}] checking faucet wallet balances`);
+        const faucetWallet = await requireFaucetWalletBalances(context, adapter, tokens, {
+          requiredEth: ethers.parseEther('0.02') + userTopupAmount,
+          requiredTokenAddress: tokenInfo.address,
+          requiredTokenAmount: amountWei,
+        });
+        console.log(`[EXT-FAUCET/ERC20 ${requestId}] transfer token=${tokenInfo.symbol} amountWei=${amountWei}`);
+        const tokenContract = ERC20Mock__factory.connect(
+          tokenInfo.address,
+          toErc20ContractRunner(faucetWallet, 'faucetWallet'),
+        );
+        const transferTx = await tokenContract.transfer(userAddress, amountWei);
+        console.log(`[EXT-FAUCET/ERC20 ${requestId}] transfer tx=${transferTx.hash} waiting`);
+        await transferTx.wait();
+        console.log(`[EXT-FAUCET/ERC20 ${requestId}] transfer mined`);
+
+        if (userEth < minBalance) {
+          console.log(`[EXT-FAUCET/ERC20 ${requestId}] topping up gas currentEth=${userEth}`);
+          const topupTx = await faucetWallet.sendTransaction({
+            to: userAddress,
+            value: targetBalance - userEth,
+          });
+          console.log(`[EXT-FAUCET/ERC20 ${requestId}] topup tx=${topupTx.hash} waiting`);
+          await topupTx.wait();
+          ethTxHash = topupTx.hash;
+          console.log(`[EXT-FAUCET/ERC20 ${requestId}] topup mined`);
+        }
+
         context.emitDebugEvent({
           event: 'debug_event',
           runtimeId: context.getRuntimeId(),
           status: 'delivered',
-          reason: 'FAUCET_ERC20_BROWSER_VM_OK',
-          details: { requestId, userAddress, tokenSymbol, amount },
+          reason: 'FAUCET_ERC20_OK',
+          details: {
+            requestId,
+            userAddress,
+            tokenSymbol,
+            amount,
+            txHash: transferTx.hash,
+            ethTxHash,
+          },
         });
         return createJsonResponse(context.jsonHeaders, {
           success: true,
@@ -294,75 +428,10 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
           amount,
           tokenSymbol,
           userAddress,
-          requestId,
-        });
-      }
-
-      const tokens = await context.getTokenCatalog();
-      console.log(`[EXT-FAUCET/ERC20 ${requestId}] token catalog size=${tokens.length}`);
-      const tokenInfo = tokens.find((token) => token.symbol.toUpperCase() === tokenSymbol);
-      if (!tokenInfo) {
-        return createJsonResponse(context.jsonHeaders, { error: `Token ${tokenSymbol} not found` }, 404);
-      }
-
-      const amountWei = ethers.parseUnits(amount, tokenInfo.decimals);
-      let ethTxHash = '';
-      const userEth = await adapter.provider.getBalance(userAddress);
-      const minBalance = ethers.parseEther('0.01');
-      const targetBalance = ethers.parseEther('0.1');
-      const userTopupAmount = userEth < minBalance ? targetBalance - userEth : 0n;
-
-      console.log(`[EXT-FAUCET/ERC20 ${requestId}] checking faucet wallet balances`);
-      const faucetWallet = await requireFaucetWalletBalances(context, adapter, tokens, {
-        requiredEth: ethers.parseEther('0.02') + userTopupAmount,
-        requiredTokenAddress: tokenInfo.address,
-        requiredTokenAmount: amountWei,
-      });
-      console.log(`[EXT-FAUCET/ERC20 ${requestId}] transfer token=${tokenInfo.symbol} amountWei=${amountWei}`);
-      const tokenContract = ERC20Mock__factory.connect(
-        tokenInfo.address,
-        toErc20ContractRunner(faucetWallet, 'faucetWallet'),
-      );
-      const transferTx = await tokenContract.transfer(userAddress, amountWei);
-      console.log(`[EXT-FAUCET/ERC20 ${requestId}] transfer tx=${transferTx.hash} waiting`);
-      await transferTx.wait();
-      console.log(`[EXT-FAUCET/ERC20 ${requestId}] transfer mined`);
-
-      if (userEth < minBalance) {
-        console.log(`[EXT-FAUCET/ERC20 ${requestId}] topping up gas currentEth=${userEth}`);
-        const topupTx = await faucetWallet.sendTransaction({
-          to: userAddress,
-          value: targetBalance - userEth,
-        });
-        console.log(`[EXT-FAUCET/ERC20 ${requestId}] topup tx=${topupTx.hash} waiting`);
-        await topupTx.wait();
-        ethTxHash = topupTx.hash;
-        console.log(`[EXT-FAUCET/ERC20 ${requestId}] topup mined`);
-      }
-
-      context.emitDebugEvent({
-        event: 'debug_event',
-        runtimeId: context.getRuntimeId(),
-        status: 'delivered',
-        reason: 'FAUCET_ERC20_OK',
-        details: {
-          requestId,
-          userAddress,
-          tokenSymbol,
-          amount,
           txHash: transferTx.hash,
           ethTxHash,
-        },
-      });
-      return createJsonResponse(context.jsonHeaders, {
-        success: true,
-        type: 'erc20',
-        amount,
-        tokenSymbol,
-        userAddress,
-        txHash: transferTx.hash,
-        ethTxHash,
-        requestId,
+          requestId,
+        });
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -375,13 +444,10 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
         details: { error: message },
       });
       return createJsonResponse(context.jsonHeaders, { error: message }, 500);
-    } finally {
-      faucetLock.release();
     }
   };
 
   const handleGasFaucet = async (request: Request): Promise<Response> => {
-    await faucetLock.acquire();
     try {
       const adapter = context.getJAdapter();
       if (!adapter) {
@@ -396,31 +462,31 @@ export const createExternalWalletApi = (context: ExternalWalletApiContext) => {
       }
 
       const topupAmount = ethers.parseEther(amount);
-      const faucetWallet = await requireFaucetWalletBalances(context, adapter, [], {
-        requiredEth: topupAmount + ethers.parseEther('0.01'),
-      });
-      console.log(`[EXT-FAUCET/GAS ${requestId}] sending topup wei=${topupAmount}`);
-      const tx = await faucetWallet.sendTransaction({
-        to: userAddress,
-        value: topupAmount,
-      });
-      console.log(`[EXT-FAUCET/GAS ${requestId}] tx=${tx.hash} waiting`);
-      await tx.wait();
-      console.log(`[EXT-FAUCET/GAS ${requestId}] mined`);
-      return createJsonResponse(context.jsonHeaders, {
-        success: true,
-        type: 'gas',
-        amount,
-        userAddress,
-        txHash: tx.hash,
-        requestId,
+      return await withFaucetWalletLock(context, adapter, async () => {
+        const faucetWallet = await requireFaucetWalletBalances(context, adapter, [], {
+          requiredEth: topupAmount + ethers.parseEther('0.01'),
+        });
+        console.log(`[EXT-FAUCET/GAS ${requestId}] sending topup wei=${topupAmount}`);
+        const tx = await faucetWallet.sendTransaction({
+          to: userAddress,
+          value: topupAmount,
+        });
+        console.log(`[EXT-FAUCET/GAS ${requestId}] tx=${tx.hash} waiting`);
+        await tx.wait();
+        console.log(`[EXT-FAUCET/GAS ${requestId}] mined`);
+        return createJsonResponse(context.jsonHeaders, {
+          success: true,
+          type: 'gas',
+          amount,
+          userAddress,
+          txHash: tx.hash,
+          requestId,
+        });
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       console.error('[EXT-FAUCET/GAS] failed:', message);
       return createJsonResponse(context.jsonHeaders, { error: message }, 500);
-    } finally {
-      faucetLock.release();
     }
   };
 

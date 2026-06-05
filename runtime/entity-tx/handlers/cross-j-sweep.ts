@@ -5,7 +5,10 @@ import {
   transitionCrossJurisdictionRouteStatus,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../cross-jurisdiction';
-import { buildCrossJurisdictionCancelAck } from '../../cross-jurisdiction-orderbook';
+import {
+  buildCrossJurisdictionCancelAck,
+  markCrossJurisdictionBookAdmissionClosed,
+} from '../../cross-jurisdiction-orderbook';
 import { removeBookOrderById } from '../../orderbook/cross-j';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import type { EntityInput, EntityState, EntityTx, Env } from '../../types';
@@ -98,6 +101,7 @@ export const handleOrderbookSweepCrossJurisdictionEntityTx = (
 
     if (accountId && account?.swapOffers?.has(orderId)) {
       cancelOrderbookOfferIfPresent(env, newState, accountId, orderId);
+      markCrossJurisdictionBookAdmissionClosed(newState, sourceEntityId, orderId, now, 'sweep_expired');
       if (!accountHasCrossSwapAckQueued(account, orderId)) {
         mempoolOps.push({
           accountId,

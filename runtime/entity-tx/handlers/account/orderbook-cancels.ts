@@ -7,7 +7,11 @@ import {
   type OrderbookExtState,
 } from '../../../orderbook';
 import { createStructuredLogger, shortId, shortOrder } from '../../../logger';
-import { buildCrossJurisdictionCancelAck, type CrossJurisdictionFillInstruction } from '../../../cross-jurisdiction-orderbook';
+import {
+  buildCrossJurisdictionCancelAck,
+  markCrossJurisdictionBookAdmissionClosed,
+  type CrossJurisdictionFillInstruction,
+} from '../../../cross-jurisdiction-orderbook';
 import {
   queueUniqueSwapResolveForEntityState,
   type MempoolOp,
@@ -73,6 +77,13 @@ export function processOrderbookCancels(
 
     const offer = accountMachine?.swapOffers?.get(offerId);
     if (offer?.crossJurisdiction) {
+      markCrossJurisdictionBookAdmissionClosed(
+        hubState,
+        offer.crossJurisdiction.source.entityId,
+        offerId,
+        Number(hubState.timestamp || 0),
+        'cancel_request',
+      );
       mempoolOps.push({ accountId, tx: buildCrossJurisdictionCancelAck(offerId, offer.crossJurisdiction) });
       orderbookLog.debug('crossj.cancel_ack_queued', { offer: shortOrder(offerId, 8), account: shortId(accountId, 8) });
       continue;

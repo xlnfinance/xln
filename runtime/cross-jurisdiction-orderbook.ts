@@ -1,15 +1,285 @@
 import {
   CROSS_J_MAX_FILL_RATIO,
+  cloneCrossJurisdictionRoute,
   deriveCanonicalCrossJurisdictionMarket,
+  isCrossJurisdictionPullExpired,
+  isCrossJurisdictionRouteExpired,
+  withCanonicalCrossJurisdictionRouteHash,
 } from './cross-jurisdiction';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from './orderbook';
 import {
-  deriveCanonicalSwapFillRatio,
+  deriveExactSwapFillRatio,
+  exactFillRatioToUint16,
   type NormalizedOrderbookOffer,
 } from './swap-execution';
-import type { AccountTx, CrossJurisdictionSwapRoute } from './types';
+import type {
+  AccountTx,
+  CrossJurisdictionBookAdmission,
+  CrossJurisdictionBookAdmissionReceipt,
+  CrossJurisdictionBookLeg,
+  CrossJurisdictionPullLeg,
+  CrossJurisdictionSwapRoute,
+  EntityState,
+} from './types';
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
+
+export const crossJurisdictionBookAdmissionKeyFor = (sourceEntityId: string, orderId: string): string =>
+  `${normalizeEntityRef(sourceEntityId)}:${String(orderId || '')}`;
+
+export const crossJurisdictionBookAdmissionKey = (route: CrossJurisdictionSwapRoute): string =>
+  crossJurisdictionBookAdmissionKeyFor(route.source.entityId, route.orderId);
+
+const routeLegRefs = (
+  route: CrossJurisdictionSwapRoute,
+  leg: CrossJurisdictionBookLeg,
+): { hubEntityId: string; counterpartyEntityId: string; pull: CrossJurisdictionPullLeg | undefined } => (
+  leg === 'source'
+    ? {
+        hubEntityId: route.source.counterpartyEntityId,
+        counterpartyEntityId: route.source.entityId,
+        pull: route.sourcePull,
+      }
+    : {
+        hubEntityId: route.target.entityId,
+        counterpartyEntityId: route.target.counterpartyEntityId,
+        pull: route.targetPull,
+      }
+);
+
+const receiptAdmissionError = (
+  routeOrderId: string,
+  routeHash: string,
+  legName: CrossJurisdictionBookLeg,
+  receipt: CrossJurisdictionBookAdmissionReceipt | undefined,
+  expected: CrossJurisdictionPullLeg,
+  expectedHubEntityId: string,
+  expectedCounterpartyEntityId: string,
+): string | null => {
+  if (!receipt) {
+    return `CROSS_J_BOOK_ADMISSION_PENDING: order=${routeOrderId} leg=${legName} pull=${expected.pullId}`;
+  }
+  if (
+    receipt.leg !== legName ||
+    receipt.orderId !== routeOrderId ||
+    receipt.routeHash.toLowerCase() !== routeHash.toLowerCase() ||
+    normalizeEntityRef(receipt.hubEntityId) !== normalizeEntityRef(expectedHubEntityId) ||
+    normalizeEntityRef(receipt.counterpartyEntityId) !== normalizeEntityRef(expectedCounterpartyEntityId) ||
+    receipt.pullId !== expected.pullId ||
+    receipt.tokenId !== expected.tokenId ||
+    receipt.signedAmount !== expected.signedAmount ||
+    (receipt.fullHash || '').toLowerCase() !== expected.fullHash.toLowerCase() ||
+    (receipt.partialRoot || '').toLowerCase() !== expected.partialRoot.toLowerCase() ||
+    receipt.revealedUntilTimestamp !== expected.revealedUntilTimestamp
+  ) {
+    return `CROSS_J_BOOK_ADMISSION_RECEIPT_MISMATCH: order=${routeOrderId} leg=${legName} pull=${expected.pullId}`;
+  }
+  return null;
+};
+
+export const getCrossJurisdictionBookReceiptError = (
+  route: CrossJurisdictionSwapRoute,
+  receipt: CrossJurisdictionBookAdmissionReceipt,
+): string | null => {
+  const canonicalRoute = withCanonicalCrossJurisdictionRouteHash(route);
+  const { hubEntityId, counterpartyEntityId, pull } = routeLegRefs(canonicalRoute, receipt.leg);
+  if (!pull) {
+    return `CROSS_J_BOOK_RECEIPT_PULL_REF_MISSING: order=${canonicalRoute.orderId} leg=${receipt.leg}`;
+  }
+  return receiptAdmissionError(
+    canonicalRoute.orderId,
+    canonicalRoute.routeHash || '',
+    receipt.leg,
+    receipt,
+    pull,
+    hubEntityId,
+    counterpartyEntityId,
+  );
+};
+
+export const crossJurisdictionBookOwnerRef = (route: CrossJurisdictionSwapRoute): string =>
+  normalizeEntityRef(route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId || '');
+
+export const buildCrossJurisdictionBookAdmissionReceipt = (
+  route: CrossJurisdictionSwapRoute,
+  leg: CrossJurisdictionBookLeg,
+  accountTx: Extract<AccountTx, { type: 'pull_lock' }>,
+  hubEntityId: string,
+  counterpartyEntityId: string,
+  committedAt: number,
+): CrossJurisdictionBookAdmissionReceipt => {
+  const canonicalRoute = withCanonicalCrossJurisdictionRouteHash(route);
+  const { hubEntityId: expectedHubEntityId, counterpartyEntityId: expectedCounterpartyEntityId, pull } =
+    routeLegRefs(canonicalRoute, leg);
+  if (!pull) {
+    throw new Error(`CROSS_J_BOOK_RECEIPT_PULL_REF_MISSING: order=${canonicalRoute.orderId} leg=${leg}`);
+  }
+  const receipt: CrossJurisdictionBookAdmissionReceipt = {
+    leg,
+    orderId: canonicalRoute.orderId,
+    routeHash: canonicalRoute.routeHash || '',
+    hubEntityId: normalizeEntityRef(hubEntityId),
+    counterpartyEntityId: normalizeEntityRef(counterpartyEntityId),
+    pullId: String(accountTx.data.pullId || ''),
+    tokenId: Number(accountTx.data.tokenId),
+    signedAmount: BigInt(accountTx.data.amount),
+    revealedUntilTimestamp: Number(accountTx.data.revealedUntilTimestamp),
+    fullHash: String(accountTx.data.fullHash || ''),
+    partialRoot: String(accountTx.data.partialRoot || ''),
+    committedAt: Number(committedAt || 0),
+  };
+  const error = receiptAdmissionError(
+    canonicalRoute.orderId,
+    canonicalRoute.routeHash || '',
+    leg,
+    receipt,
+    pull,
+    expectedHubEntityId,
+    expectedCounterpartyEntityId,
+  );
+  if (error) throw new Error(error);
+  return receipt;
+};
+
+export const mergeCrossJurisdictionBookAdmission = (
+  currentEntityState: EntityState,
+  route: CrossJurisdictionSwapRoute,
+  now: number,
+  receipt?: CrossJurisdictionBookAdmissionReceipt,
+): CrossJurisdictionBookAdmission => {
+  const canonicalRoute = withCanonicalCrossJurisdictionRouteHash(route);
+  const key = crossJurisdictionBookAdmissionKey(canonicalRoute);
+  currentEntityState.crossJurisdictionBookAdmissions ||= new Map();
+  const existing = currentEntityState.crossJurisdictionBookAdmissions.get(key);
+  const current: CrossJurisdictionBookAdmission = existing
+    ? {
+        ...existing,
+        route: cloneCrossJurisdictionRoute(canonicalRoute),
+        updatedAt: now,
+      }
+    : {
+        orderId: canonicalRoute.orderId,
+        routeHash: canonicalRoute.routeHash || '',
+        sourceEntityId: normalizeEntityRef(canonicalRoute.source.entityId),
+        bookOwnerEntityId: crossJurisdictionBookOwnerRef(canonicalRoute),
+        status: 'pending',
+        route: cloneCrossJurisdictionRoute(canonicalRoute),
+        updatedAt: now,
+      };
+  if (receipt) {
+    if (receipt.leg === 'source') current.sourceReceipt = receipt;
+    if (receipt.leg === 'target') current.targetReceipt = receipt;
+  }
+  currentEntityState.crossJurisdictionBookAdmissions.set(key, current);
+  return current;
+};
+
+export const markCrossJurisdictionBookAdmissionResolving = (
+  currentEntityState: EntityState,
+  route: CrossJurisdictionSwapRoute,
+  now: number,
+): void => {
+  const canonicalRoute = withCanonicalCrossJurisdictionRouteHash(route);
+  const key = crossJurisdictionBookAdmissionKey(canonicalRoute);
+  const admission = currentEntityState.crossJurisdictionBookAdmissions?.get(key);
+  if (!admission || admission.status === 'closed') return;
+  admission.status = 'resolving';
+  admission.resolvingAt = now;
+  admission.updatedAt = now;
+};
+
+export const markCrossJurisdictionBookAdmissionClosed = (
+  currentEntityState: EntityState,
+  sourceEntityId: string,
+  orderId: string,
+  now: number,
+  reason: string,
+): void => {
+  const key = crossJurisdictionBookAdmissionKeyFor(sourceEntityId, orderId);
+  const admission = currentEntityState.crossJurisdictionBookAdmissions?.get(key);
+  if (!admission) return;
+  admission.status = 'closed';
+  admission.closedAt = now;
+  admission.closeReason = reason;
+  admission.updatedAt = now;
+};
+
+export const getCrossJurisdictionBookAdmissionError = (
+  currentEntityState: EntityState,
+  route: CrossJurisdictionSwapRoute,
+  now: number,
+): string | null => {
+  const canonicalRoute = withCanonicalCrossJurisdictionRouteHash(route);
+  const currentOwner = normalizeEntityRef(currentEntityState.entityId);
+  const bookOwner = crossJurisdictionBookOwnerRef(canonicalRoute);
+  if (bookOwner !== currentOwner) {
+    return `CROSS_J_ORDER_WRONG_BOOK_OWNER: order=${canonicalRoute.orderId} owner=${bookOwner} current=${currentOwner}`;
+  }
+  if (!canonicalRoute.sourcePull || !canonicalRoute.targetPull) {
+    return `CROSS_J_ORDER_LOCK_REF_MISSING: order=${canonicalRoute.orderId}`;
+  }
+  if (isCrossJurisdictionRouteExpired(canonicalRoute, now)) {
+    return `CROSS_J_ORDER_ROUTE_EXPIRED: order=${canonicalRoute.orderId}`;
+  }
+  if (isCrossJurisdictionPullExpired(canonicalRoute, 'source', now)) {
+    return `CROSS_J_ORDER_LOCK_EXPIRED: order=${canonicalRoute.orderId} leg=source`;
+  }
+  if (isCrossJurisdictionPullExpired(canonicalRoute, 'target', now)) {
+    return `CROSS_J_ORDER_LOCK_EXPIRED: order=${canonicalRoute.orderId} leg=target`;
+  }
+
+  const key = crossJurisdictionBookAdmissionKey(canonicalRoute);
+  const admission = currentEntityState.crossJurisdictionBookAdmissions?.get(key);
+  if (!admission) return `CROSS_J_BOOK_ADMISSION_PENDING: order=${canonicalRoute.orderId} leg=both`;
+  if (admission.status === 'closed') {
+    return `CROSS_J_BOOK_ADMISSION_CLOSED: order=${canonicalRoute.orderId} reason=${admission.closeReason || ''}`;
+  }
+  if (admission.status === 'resolving') {
+    return `CROSS_J_BOOK_ADMISSION_RESOLVING: order=${canonicalRoute.orderId}`;
+  }
+  if (
+    admission.orderId !== canonicalRoute.orderId ||
+    admission.routeHash.toLowerCase() !== (canonicalRoute.routeHash || '').toLowerCase() ||
+    normalizeEntityRef(admission.bookOwnerEntityId) !== bookOwner
+  ) {
+    return `CROSS_J_BOOK_ADMISSION_ROUTE_MISMATCH: order=${canonicalRoute.orderId}`;
+  }
+
+  const sourceRefs = routeLegRefs(canonicalRoute, 'source');
+  const targetRefs = routeLegRefs(canonicalRoute, 'target');
+  return (
+    receiptAdmissionError(
+      canonicalRoute.orderId,
+      canonicalRoute.routeHash || '',
+      'source',
+      admission.sourceReceipt,
+      canonicalRoute.sourcePull,
+      sourceRefs.hubEntityId,
+      sourceRefs.counterpartyEntityId,
+    ) ??
+    receiptAdmissionError(
+      canonicalRoute.orderId,
+      canonicalRoute.routeHash || '',
+      'target',
+      admission.targetReceipt,
+      canonicalRoute.targetPull,
+      targetRefs.hubEntityId,
+      targetRefs.counterpartyEntityId,
+    )
+  );
+};
+
+export const isCrossJurisdictionBookAdmissionPending = (error: string | null): boolean =>
+  Boolean(error && error.startsWith('CROSS_J_BOOK_ADMISSION_PENDING:'));
+
+export const assertCrossJurisdictionOrderAdmissible = (
+  currentEntityState: EntityState,
+  route: CrossJurisdictionSwapRoute,
+  now: number,
+): void => {
+  const error = getCrossJurisdictionBookAdmissionError(currentEntityState, route, now);
+  if (error) throw new Error(error);
+};
 
 type CrossSwapFillAckTx = Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;
 
@@ -18,6 +288,8 @@ export interface CrossJurisdictionFillInstruction {
   offerId: string;
   route: CrossJurisdictionSwapRoute;
   fillRatio: number;
+  fillNumerator: bigint;
+  fillDenominator: bigint;
   cancelRemainder: boolean;
   sourceAmount: bigint;
   targetAmount: bigint;
@@ -122,9 +394,8 @@ export const buildCrossJurisdictionFillAck = (
     ((sourceTotal * BigInt(previousCumulativeRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO));
   const desiredSourceClaimed = previousSourceClaimed + sourceAmount;
   const cappedSourceClaimed = desiredSourceClaimed >= sourceTotal ? sourceTotal : desiredSourceClaimed;
-  const fillRatio = cappedSourceClaimed >= sourceTotal
-    ? CROSS_J_MAX_FILL_RATIO
-    : deriveCanonicalSwapFillRatio(sourceTotal, cappedSourceClaimed);
+  const exactFillRatio = deriveExactSwapFillRatio(sourceTotal, cappedSourceClaimed);
+  const fillRatio = exactFillRatioToUint16(exactFillRatio);
   if (fillRatio <= previousCumulativeRatio) return null;
 
   const settlementSourceAmount =
@@ -161,6 +432,8 @@ export const buildCrossJurisdictionFillAck = (
     offerId,
     route: meta.route,
     fillRatio,
+    fillNumerator: exactFillRatio.numerator,
+    fillDenominator: exactFillRatio.denominator,
     cancelRemainder: fillRatio >= CROSS_J_MAX_FILL_RATIO,
     sourceAmount: settlementSourceAmount,
     targetAmount: settlementTargetAmount,
@@ -183,6 +456,8 @@ export const buildCrossJurisdictionFillAck = (
       cumulativeSourceAmount: previousSourceClaimed + settlementSourceAmount,
       cumulativeTargetAmount: previousTargetClaimed + settlementTargetAmount,
       cumulativeFillRatio: fillRatio,
+      fillNumerator: exactFillRatio.numerator,
+      fillDenominator: exactFillRatio.denominator,
       executionSourceAmount,
       executionTargetAmount,
       priceImprovementMode,

@@ -2,7 +2,7 @@ import type { OrderbookExtState } from './orderbook';
 import type { SwapKey } from './swap-keys';
 import type { Level } from 'level';
 import type { RuntimeP2P } from './networking/p2p';
-import type { CrossJurisdictionSwapRoute } from './types/cross-jurisdiction';
+import type { CrossJurisdictionBookAdmission, CrossJurisdictionSwapRoute } from './types/cross-jurisdiction';
 import type { DebtEntry } from './types/debt';
 import type {
   JBlockFinalized,
@@ -23,6 +23,10 @@ import type { EntityTx } from './types/entity-tx';
 import type { FrameLogEntry, LogCategory } from './types/logging';
 import type { JReplica, JTx } from './types/jurisdiction-runtime';
 export type {
+  CrossJurisdictionBookAdmission,
+  CrossJurisdictionBookAdmissionReceipt,
+  CrossJurisdictionBookLeg,
+  CrossJurisdictionBookStatus,
   CrossJurisdictionPullLeg,
   CrossJurisdictionSwapLeg,
   CrossJurisdictionSwapRoute,
@@ -369,6 +373,10 @@ export interface EntityState {
   // Cross-jurisdiction swap routes are duplicated into sibling entities so
   // target-side dispute salvage does not depend on relay/profile gossip.
   crossJurisdictionSwaps?: Map<string, CrossJurisdictionSwapRoute>;
+  // Cross-jurisdiction book admission is local hub gate state. A cross order
+  // can enter the shared matcher only after source and target account frames
+  // both committed their pull_lock receipts.
+  crossJurisdictionBookAdmissions?: Map<string, CrossJurisdictionBookAdmission>;
 
   // 🔄 Rebalance Configuration - Hub-level matching strategy
   hubRebalanceConfig?: HubRebalanceConfig;

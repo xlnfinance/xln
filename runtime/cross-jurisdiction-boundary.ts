@@ -23,6 +23,7 @@ export const CROSS_J_INTRA_RUNTIME_ENTITY_TX_TYPES = new Set<string>([
   'requestCrossJurisdictionClear',
   'crossJurisdictionSalvage',
   'orderbookSweepCrossJurisdiction',
+  'admitCrossJurisdictionBookOrder',
   'removeCrossJurisdictionBookOrder',
 ]);
 

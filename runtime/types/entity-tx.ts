@@ -1,6 +1,6 @@
 import type { JurisdictionEvent, JurisdictionEventData } from './jurisdiction-events';
 import type { AccountInput, CrossJurisdictionSecretRelay, SettlementDiff, SettlementOp } from './account';
-import type { CrossJurisdictionSwapRoute } from './cross-jurisdiction';
+import type { CrossJurisdictionBookAdmissionReceipt, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
 import type { ProfileUpdateTx } from './profile';
 import type { ProposalAction } from '../types';
 
@@ -249,7 +249,9 @@ export type EntityTx =
         incrementalTargetAmount: bigint;
         cumulativeSourceAmount: bigint;
         cumulativeTargetAmount: bigint;
-        cumulativeFillRatio: number;
+        cumulativeFillRatio: number; // Coarse 0-65535 compatibility/dispute ratio.
+        fillNumerator?: bigint;
+        fillDenominator?: bigint;
         priceImprovementMode?: 'source_savings' | 'target_bonus' | 'none';
         priceImprovementAmount?: bigint;
         priceImprovementTokenId?: number;
@@ -279,6 +281,14 @@ export type EntityTx =
 	  | {
 	      type: 'orderbookSweepCrossJurisdiction';
 	      data: {
+	        reason?: string;
+	      };
+	    }
+	  | {
+	      type: 'admitCrossJurisdictionBookOrder';
+	      data: {
+	        route: CrossJurisdictionSwapRoute;
+	        receipt: CrossJurisdictionBookAdmissionReceipt;
 	        reason?: string;
 	      };
 	    }
@@ -442,7 +452,9 @@ export type EntityTx =
       data: {
         counterpartyEntityId: string; // User who placed the offer
         offerId: string;
-        fillRatio: number; // 0-65535
+        fillRatio: number; // Coarse 0-65535 compatibility/dispute ratio.
+        fillNumerator?: bigint;
+        fillDenominator?: bigint;
         cancelRemainder: boolean;
         comment?: string;
         feeTokenId?: number;

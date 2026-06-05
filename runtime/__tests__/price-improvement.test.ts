@@ -533,6 +533,40 @@ describe('price improvement', () => {
       expect(resolveResult.error).toContain('required for non-zero fills');
     });
 
+    test('handleSwapResolve treats zero fill as cancel even when cancelRemainder is false', async () => {
+      const offerId = 'zero-fill-auto-cancel';
+      const giveAmount = 3n * LOT_SCALE;
+      const wantAmount = ticksLotsToWei(8700n);
+      const offer: SwapOffer = {
+        offerId,
+        giveTokenId: 2,
+        giveAmount,
+        wantTokenId: 1,
+        wantAmount,
+        makerIsLeft: true,
+        minFillRatio: 0,
+        createdHeight: 0,
+        quantizedGive: giveAmount,
+        quantizedWant: wantAmount,
+      };
+      const accountMachine = makeAccountMachine(offer);
+      const accountTx: Extract<AccountTx, { type: 'swap_resolve' }> = {
+        type: 'swap_resolve',
+        data: {
+          offerId,
+          fillRatio: 0,
+          cancelRemainder: false,
+          comment: 'manual-cancel',
+        },
+      };
+
+      const resolveResult = await handleSwapResolve(accountMachine, accountTx, false, 1);
+      expect(resolveResult.success).toBe(true);
+      expect(accountMachine.swapOffers.has(offerId)).toBe(false);
+      expect(accountMachine.swapClosedOrders?.get(offerId)?.resolves.at(-1)?.cancelRemainder).toBe(true);
+      expect(accountMachine.swapClosedOrders?.get(offerId)?.resolves.at(-1)?.comment).toBe('manual-cancel');
+    });
+
     test('handleSwapResolve rejects hold underflow instead of clamping', async () => {
       const offerId = 'hold-underflow-offer';
       const giveAmount = 3n * LOT_SCALE;

@@ -242,6 +242,7 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): vo
       lockBook: new Map(),
       swapTradingPairs: buildDefaultEntitySwapPairs(),
       pendingSwapFillRatios: new Map(),
+      crossJurisdictionBookAdmissions: new Map(),
     },
   };
   normalizeEntitySwapTradingPairs(replica.state);

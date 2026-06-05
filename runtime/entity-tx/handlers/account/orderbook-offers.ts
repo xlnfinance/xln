@@ -104,7 +104,7 @@ export const normalizeSwapOfferForOrderbook = (
   };
 };
 
-export const compareSwapOffersForOrderbook = (left: NormalizedOrderbookOffer, right: NormalizedOrderbookOffer): number => {
+export const compareSwapOffersForOrderbook = <T extends NormalizedOrderbookOffer>(left: T, right: T): number => {
   const leftHeight = left.createdHeight;
   const rightHeight = right.createdHeight;
   if (leftHeight !== rightHeight) return leftHeight - rightHeight;
@@ -113,7 +113,7 @@ export const compareSwapOffersForOrderbook = (left: NormalizedOrderbookOffer, ri
   return compareCanonicalText(left.offerId, right.offerId);
 };
 
-export const sortSwapOffersForOrderbook = (swapOffers: NormalizedOrderbookOffer[]): NormalizedOrderbookOffer[] =>
+export const sortSwapOffersForOrderbook = <T extends NormalizedOrderbookOffer>(swapOffers: readonly T[]): T[] =>
   [...swapOffers].sort(compareSwapOffersForOrderbook);
 
 export const collectOpenSwapOffersForOrderbook = (hubState: EntityState): NormalizedOrderbookOffer[] =>

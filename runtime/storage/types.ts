@@ -106,6 +106,7 @@ export type StorageEntityCoreDoc = {
   swapTradingPairs?: EntitySwapPair[];
   pendingSwapFillRatios?: Map<SwapKey, number>;
   crossJurisdictionSwaps?: EntityState['crossJurisdictionSwaps'];
+  crossJurisdictionBookAdmissions?: EntityState['crossJurisdictionBookAdmissions'];
   hubRebalanceConfig?: HubRebalanceConfig;
   orderbookHubProfile?: HubProfile;
   orderbookReferrals?: Map<string, EntityReferral>;

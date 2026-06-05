@@ -9,6 +9,7 @@ export interface SwapOfferLike {
   wantTokenId: number;
   giveAmount: bigint;
   quantizedGive?: bigint;
+  quantizedWant?: bigint;
 }
 
 export interface NormalizedOrderbookOffer extends SwapOfferLike {
@@ -29,25 +30,81 @@ export interface NormalizedOrderbookOffer extends SwapOfferLike {
   };
 }
 
+declare const ADMITTED_ORDERBOOK_OFFER: unique symbol;
+
+export type AdmittedOrderbookOffer = NormalizedOrderbookOffer & {
+  readonly [ADMITTED_ORDERBOOK_OFFER]: true;
+};
+
+export function markAdmittedOrderbookOffer(offer: NormalizedOrderbookOffer): AdmittedOrderbookOffer {
+  return offer as AdmittedOrderbookOffer;
+}
+
 export { asOfferId, compareCanonicalText, swapKey, type OfferId, type SwapKey };
 
-export function deriveCanonicalSwapFillRatio(effectiveGive: bigint, filledGive: bigint): number {
-  if (effectiveGive <= 0n || filledGive <= 0n) return 0;
-  if (filledGive >= effectiveGive) return MAX_SWAP_FILL_RATIO;
+export interface ExactFillRatio {
+  numerator: bigint;
+  denominator: bigint;
+}
+
+const bigintGcd = (left: bigint, right: bigint): bigint => {
+  let a = left < 0n ? -left : left;
+  let b = right < 0n ? -right : right;
+  while (b !== 0n) {
+    const next = a % b;
+    a = b;
+    b = next;
+  }
+  return a === 0n ? 1n : a;
+};
+
+export function reduceExactFillRatio(numerator: bigint, denominator: bigint): ExactFillRatio {
+  if (denominator <= 0n) {
+    throw new Error(`EXACT_FILL_RATIO_INVALID_DENOMINATOR:${denominator.toString()}`);
+  }
+  const boundedNumerator = numerator <= 0n
+    ? 0n
+    : numerator >= denominator
+      ? denominator
+      : numerator;
+  if (boundedNumerator === 0n) return { numerator: 0n, denominator: 1n };
+  if (boundedNumerator === denominator) return { numerator: 1n, denominator: 1n };
+  const divisor = bigintGcd(boundedNumerator, denominator);
+  return {
+    numerator: boundedNumerator / divisor,
+    denominator: denominator / divisor,
+  };
+}
+
+export function exactFillRatioToUint16(ratio: ExactFillRatio): number {
+  if (ratio.denominator <= 0n) {
+    throw new Error(`EXACT_FILL_RATIO_INVALID_DENOMINATOR:${ratio.denominator.toString()}`);
+  }
+  if (ratio.numerator <= 0n) return 0;
+  if (ratio.numerator >= ratio.denominator) return MAX_SWAP_FILL_RATIO;
 
   const max = BigInt(MAX_SWAP_FILL_RATIO);
-  let ratio = Number((filledGive * max + effectiveGive - 1n) / effectiveGive);
-  if (ratio < 0) ratio = 0;
-  if (ratio > MAX_SWAP_FILL_RATIO) ratio = MAX_SWAP_FILL_RATIO;
+  let coarse = Number((ratio.numerator * max + ratio.denominator - 1n) / ratio.denominator);
+  if (coarse < 0) coarse = 0;
+  if (coarse > MAX_SWAP_FILL_RATIO) coarse = MAX_SWAP_FILL_RATIO;
 
-  while (ratio > 0 && ((effectiveGive * BigInt(ratio - 1)) / max) >= filledGive) {
-    ratio -= 1;
+  while (coarse > 0 && ((ratio.denominator * BigInt(coarse - 1)) / max) >= ratio.numerator) {
+    coarse -= 1;
   }
-  while (ratio < MAX_SWAP_FILL_RATIO && ((effectiveGive * BigInt(ratio)) / max) < filledGive) {
-    ratio += 1;
+  while (coarse < MAX_SWAP_FILL_RATIO && ((ratio.denominator * BigInt(coarse)) / max) < ratio.numerator) {
+    coarse += 1;
   }
 
-  return ratio;
+  return coarse;
+}
+
+export function deriveExactSwapFillRatio(effectiveGive: bigint, filledGive: bigint): ExactFillRatio {
+  if (effectiveGive <= 0n || filledGive <= 0n) return { numerator: 0n, denominator: 1n };
+  return reduceExactFillRatio(filledGive, effectiveGive);
+}
+
+export function deriveCanonicalSwapFillRatio(effectiveGive: bigint, filledGive: bigint): number {
+  return exactFillRatioToUint16(deriveExactSwapFillRatio(effectiveGive, filledGive));
 }
 
 export function buildSwapResolveDataFromOrderbookFill(
@@ -57,6 +114,8 @@ export function buildSwapResolveDataFromOrderbookFill(
   cancelRemainder: boolean,
 ): {
   fillRatio: number;
+  fillNumerator: bigint;
+  fillDenominator: bigint;
   cancelRemainder: boolean;
   executionGiveAmount?: bigint;
   executionWantAmount?: bigint;
@@ -65,13 +124,16 @@ export function buildSwapResolveDataFromOrderbookFill(
   const executionGiveAmount = offerSide === 0 ? executionQuoteWei : executionBaseWei;
   const executionWantAmount = offerSide === 0 ? executionBaseWei : executionQuoteWei;
   const effectiveGive = offer.quantizedGive ?? offer.giveAmount;
-  const fillRatio =
+  const exactFillRatio =
     executionGiveAmount > 0n && executionWantAmount > 0n
-      ? deriveCanonicalSwapFillRatio(effectiveGive, executionGiveAmount)
-      : 0;
+      ? deriveExactSwapFillRatio(effectiveGive, executionGiveAmount)
+      : { numerator: 0n, denominator: 1n };
+  const fillRatio = exactFillRatioToUint16(exactFillRatio);
 
   return {
     fillRatio: Math.min(fillRatio, MAX_SWAP_FILL_RATIO),
+    fillNumerator: exactFillRatio.numerator,
+    fillDenominator: exactFillRatio.denominator,
     cancelRemainder,
     ...(executionGiveAmount > 0n && executionWantAmount > 0n
       ? { executionGiveAmount, executionWantAmount }
