@@ -24,20 +24,48 @@ export interface NormalizedOrderbookOffer extends SwapOfferLike {
   minFillRatio: number;
   createdHeight: number;
   crossJurisdiction?: CrossJurisdictionSwapRoute;
-  pendingCrossSwapAck?: {
-    cancelRemainder?: boolean;
-    cumulativeFillRatio?: number;
-  };
 }
 
-declare const ADMITTED_ORDERBOOK_OFFER: unique symbol;
+export const WORKING_ORDERBOOK_OFFER_BRAND: unique symbol = Symbol('WORKING_ORDERBOOK_OFFER_BRAND');
 
-export type AdmittedOrderbookOffer = NormalizedOrderbookOffer & {
-  readonly [ADMITTED_ORDERBOOK_OFFER]: true;
+// Only entity-level admission may create WorkingOrderbookOffer. The shared
+// book matcher must never receive raw UI/account events or uncommitted locks.
+export type SameJurisdictionWorkingOrderbookOffer = NormalizedOrderbookOffer & {
+  readonly [WORKING_ORDERBOOK_OFFER_BRAND]: true;
+  readonly orderbookKind: 'same-jurisdiction';
+  readonly crossJurisdiction?: undefined;
 };
 
-export function markAdmittedOrderbookOffer(offer: NormalizedOrderbookOffer): AdmittedOrderbookOffer {
-  return offer as AdmittedOrderbookOffer;
+export type CrossJurisdictionWorkingOrderbookOffer = NormalizedOrderbookOffer & {
+  readonly [WORKING_ORDERBOOK_OFFER_BRAND]: true;
+  readonly orderbookKind: 'cross-jurisdiction';
+  readonly crossJurisdiction: CrossJurisdictionSwapRoute;
+};
+
+export type WorkingOrderbookOffer = SameJurisdictionWorkingOrderbookOffer | CrossJurisdictionWorkingOrderbookOffer;
+
+export function isWorkingOrderbookOffer(offer: unknown): offer is WorkingOrderbookOffer {
+  return Boolean(
+    offer &&
+      typeof offer === 'object' &&
+      (offer as { [WORKING_ORDERBOOK_OFFER_BRAND]?: unknown })[WORKING_ORDERBOOK_OFFER_BRAND] === true,
+  );
+}
+
+export function markWorkingOrderbookOffer(offer: NormalizedOrderbookOffer): WorkingOrderbookOffer {
+  if (offer.crossJurisdiction) {
+    return {
+      ...offer,
+      [WORKING_ORDERBOOK_OFFER_BRAND]: true,
+      orderbookKind: 'cross-jurisdiction',
+    } as CrossJurisdictionWorkingOrderbookOffer;
+  }
+  const { crossJurisdiction: _crossJurisdiction, ...sameOffer } = offer;
+  return {
+    ...sameOffer,
+    [WORKING_ORDERBOOK_OFFER_BRAND]: true,
+    orderbookKind: 'same-jurisdiction',
+  } as SameJurisdictionWorkingOrderbookOffer;
 }
 
 export { asOfferId, compareCanonicalText, swapKey, type OfferId, type SwapKey };
@@ -62,11 +90,7 @@ export function reduceExactFillRatio(numerator: bigint, denominator: bigint): Ex
   if (denominator <= 0n) {
     throw new Error(`EXACT_FILL_RATIO_INVALID_DENOMINATOR:${denominator.toString()}`);
   }
-  const boundedNumerator = numerator <= 0n
-    ? 0n
-    : numerator >= denominator
-      ? denominator
-      : numerator;
+  const boundedNumerator = numerator <= 0n ? 0n : numerator >= denominator ? denominator : numerator;
   if (boundedNumerator === 0n) return { numerator: 0n, denominator: 1n };
   if (boundedNumerator === denominator) return { numerator: 1n, denominator: 1n };
   const divisor = bigintGcd(boundedNumerator, denominator);
@@ -88,10 +112,10 @@ export function exactFillRatioToUint16(ratio: ExactFillRatio): number {
   if (coarse < 0) coarse = 0;
   if (coarse > MAX_SWAP_FILL_RATIO) coarse = MAX_SWAP_FILL_RATIO;
 
-  while (coarse > 0 && ((ratio.denominator * BigInt(coarse - 1)) / max) >= ratio.numerator) {
+  while (coarse > 0 && (ratio.denominator * BigInt(coarse - 1)) / max >= ratio.numerator) {
     coarse -= 1;
   }
-  while (coarse < MAX_SWAP_FILL_RATIO && ((ratio.denominator * BigInt(coarse)) / max) < ratio.numerator) {
+  while (coarse < MAX_SWAP_FILL_RATIO && (ratio.denominator * BigInt(coarse)) / max < ratio.numerator) {
     coarse += 1;
   }
 
@@ -135,20 +159,13 @@ export function buildSwapResolveDataFromOrderbookFill(
     fillNumerator: exactFillRatio.numerator,
     fillDenominator: exactFillRatio.denominator,
     cancelRemainder,
-    ...(executionGiveAmount > 0n && executionWantAmount > 0n
-      ? { executionGiveAmount, executionWantAmount }
-      : {}),
+    ...(executionGiveAmount > 0n && executionWantAmount > 0n ? { executionGiveAmount, executionWantAmount } : {}),
   };
 }
 
-export function calculateSwapTakerFeeAmount(
-  filledWantAmount: bigint,
-  takerFeeBps: number,
-): bigint {
+export function calculateSwapTakerFeeAmount(filledWantAmount: bigint, takerFeeBps: number): bigint {
   if (filledWantAmount <= 0n) return 0n;
-  const normalizedBps = Number.isFinite(takerFeeBps)
-    ? Math.max(0, Math.min(10_000, Math.floor(takerFeeBps)))
-    : 0;
+  const normalizedBps = Number.isFinite(takerFeeBps) ? Math.max(0, Math.min(10_000, Math.floor(takerFeeBps))) : 0;
   if (normalizedBps <= 0) return 0n;
   return (filledWantAmount * BigInt(normalizedBps)) / 10_000n;
 }

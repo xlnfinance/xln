@@ -1,11 +1,29 @@
 import { describe, expect, test } from 'bun:test';
-import { createBook, applyCommand, getBestAsk, getBestBid, getBookOrder, getBookSideLevels, refreshRestingOrder } from '../orderbook/core';
+import {
+  createBook,
+  applyCommand,
+  getBestAsk,
+  getBestBid,
+  getBookOrder,
+  getBookSideLevels,
+  refreshRestingOrder,
+} from '../orderbook/core';
 import { SWAP_LOT_SCALE } from '../orderbook/types';
 import { processOrderbookCancels, processOrderbookSwaps } from '../entity-tx/handlers/account';
 import { handleSwapResolve } from '../account-tx/handlers/swap-resolve';
-import { deriveCanonicalSwapFillRatio } from '../swap-execution';
+import {
+  deriveCanonicalSwapFillRatio,
+  markWorkingOrderbookOffer,
+  type NormalizedOrderbookOffer,
+} from '../swap-execution';
 import type { AccountMachine, AccountTx, SwapOffer } from '../types';
 import { createDefaultDelta } from '../validation-utils';
+
+const processCommittedOrderbookSwaps = (
+  state: Parameters<typeof processOrderbookSwaps>[0],
+  offers: NormalizedOrderbookOffer[],
+  options?: Parameters<typeof processOrderbookSwaps>[2],
+) => processOrderbookSwaps(state, offers.map(markWorkingOrderbookOffer), options);
 
 function makeAccountMachine(offer: SwapOffer): AccountMachine {
   const heldGiveAmount = offer.quantizedGive ?? offer.giveAmount;
@@ -64,6 +82,51 @@ function makeAccountMachine(offer: SwapOffer): AccountMachine {
 }
 
 describe('orderbook matching fallback execution mapping', () => {
+  test('fails fast when matcher receives a raw unadmitted offer', () => {
+    const rawOffer = {
+      offerId: 'raw-offer',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'alice',
+      accountId: 'alice',
+      createdHeight: 1,
+      giveTokenId: 2,
+      giveAmount: SWAP_LOT_SCALE,
+      wantTokenId: 1,
+      wantAmount: (1000n * SWAP_LOT_SCALE) / 10_000n,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 1000n,
+    };
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([['alice', { swapOffers: new Map() }]]),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 1,
+          supportedPairs: ['1/2'],
+        },
+        books: new Map(),
+        pairConfig: new Map(),
+      } as any,
+    } as any;
+
+    expect(() => processOrderbookSwaps(entityState, [rawOffer] as any)).toThrow(/ORDERBOOK_UNADMITTED_OFFER/);
+    expect(() =>
+      processOrderbookSwaps(entityState, [{ ...rawOffer, orderbookKind: 'same-jurisdiction' }] as any),
+    ).toThrow(/ORDERBOOK_UNADMITTED_OFFER/);
+  });
+
   test('refreshRestingOrder updates persisted order metadata without matching', () => {
     let book = createBook({
       bucketWidthTicks: 100n,
@@ -128,13 +191,15 @@ describe('orderbook matching fallback execution mapping', () => {
       qtyLots: 4,
     }).state;
 
-    expect(() => refreshRestingOrder(book, {
-      ownerId: 'asker',
-      orderId: 'ask-1',
-      side: 0,
-      priceTicks: 1200n,
-      qtyLots: 4,
-    })).toThrow('BOOK_REFRESH_SIDE_MISMATCH');
+    expect(() =>
+      refreshRestingOrder(book, {
+        ownerId: 'asker',
+        orderId: 'ask-1',
+        side: 0,
+        priceTicks: 1200n,
+        qtyLots: 4,
+      }),
+    ).toThrow('BOOK_REFRESH_SIDE_MISMATCH');
   });
 
   test('generates execution amounts from a persisted book backed by account offers', () => {
@@ -167,7 +232,7 @@ describe('orderbook matching fallback execution mapping', () => {
 
     const lot = SWAP_LOT_SCALE;
     const baseQty = 2n * lot;
-    const quoteAmount = 1100n * baseQty / 10_000n;
+    const quoteAmount = (1100n * baseQty) / 10_000n;
 
     const swapOffer = {
       offerId: 'taker-buy',
@@ -193,7 +258,7 @@ describe('orderbook matching fallback execution mapping', () => {
       giveTokenId: 4,
       giveAmount: lot,
       wantTokenId: 6,
-      wantAmount: 1000n * lot / 10_000n,
+      wantAmount: (1000n * lot) / 10_000n,
       createdHeight: 1,
       minFillRatio: 0,
       timeInForce: 0,
@@ -208,7 +273,7 @@ describe('orderbook matching fallback execution mapping', () => {
       giveTokenId: 4,
       giveAmount: lot,
       wantTokenId: 6,
-      wantAmount: 1100n * lot / 10_000n,
+      wantAmount: (1100n * lot) / 10_000n,
       createdHeight: 1,
       minFillRatio: 0,
       timeInForce: 0,
@@ -242,8 +307,8 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [swapOffer]);
-    const op = result.mempoolOps.find((item) => item.accountId === 'alice' && item.tx.type === 'swap_resolve');
+    const result = processCommittedOrderbookSwaps(entityState, [swapOffer]);
+    const op = result.mempoolOps.find(item => item.accountId === 'alice' && item.tx.type === 'swap_resolve');
 
     expect(op).toBeDefined();
     expect(op!.tx.data.fillRatio).toBe(deriveCanonicalSwapFillRatio(quoteAmount, 210_000_000_000n));
@@ -317,9 +382,13 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [makerOffer, takerOffer]);
-    const makerResolve = result.mempoolOps.find((item) => item.accountId === 'maker-account' && item.tx.type === 'swap_resolve');
-    const takerResolve = result.mempoolOps.find((item) => item.accountId === 'taker-account' && item.tx.type === 'swap_resolve');
+    const result = processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer]);
+    const makerResolve = result.mempoolOps.find(
+      item => item.accountId === 'maker-account' && item.tx.type === 'swap_resolve',
+    );
+    const takerResolve = result.mempoolOps.find(
+      item => item.accountId === 'taker-account' && item.tx.type === 'swap_resolve',
+    );
 
     expect(makerResolve).toBeDefined();
     expect(takerResolve).toBeDefined();
@@ -401,9 +470,13 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [makerOffer, takerOffer]);
-    const makerResolve = result.mempoolOps.find((item) => item.accountId === 'maker-account' && item.tx.type === 'swap_resolve');
-    const takerResolve = result.mempoolOps.find((item) => item.accountId === 'taker-account' && item.tx.type === 'swap_resolve');
+    const result = processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer]);
+    const makerResolve = result.mempoolOps.find(
+      item => item.accountId === 'maker-account' && item.tx.type === 'swap_resolve',
+    );
+    const takerResolve = result.mempoolOps.find(
+      item => item.accountId === 'taker-account' && item.tx.type === 'swap_resolve',
+    );
     const finalBook = result.bookUpdates.at(-1)?.book;
 
     expect(makerResolve).toBeDefined();
@@ -499,10 +572,16 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [makerAsk1, makerAsk2, takerBuy] as any);
-    const takerResolve = result.mempoolOps.find((item) => item.accountId === 'taker-account' && item.tx.type === 'swap_resolve');
-    const makerResolve1 = result.mempoolOps.find((item) => item.accountId === 'maker-account-1' && item.tx.type === 'swap_resolve');
-    const makerResolve2 = result.mempoolOps.find((item) => item.accountId === 'maker-account-2' && item.tx.type === 'swap_resolve');
+    const result = processCommittedOrderbookSwaps(entityState, [makerAsk1, makerAsk2, takerBuy] as any);
+    const takerResolve = result.mempoolOps.find(
+      item => item.accountId === 'taker-account' && item.tx.type === 'swap_resolve',
+    );
+    const makerResolve1 = result.mempoolOps.find(
+      item => item.accountId === 'maker-account-1' && item.tx.type === 'swap_resolve',
+    );
+    const makerResolve2 = result.mempoolOps.find(
+      item => item.accountId === 'maker-account-2' && item.tx.type === 'swap_resolve',
+    );
 
     const executionQuoteWei = (30_100n * lot) / 10_000n;
 
@@ -511,9 +590,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(makerResolve2).toBeDefined();
     expect(takerResolve!.tx.data.executionGiveAmount).toBe(executionQuoteWei);
     expect(takerResolve!.tx.data.executionWantAmount).toBe(3n * lot);
-    expect(takerResolve!.tx.data.fillRatio).toBe(
-      deriveCanonicalSwapFillRatio(takerBuy.giveAmount, executionQuoteWei),
-    );
+    expect(takerResolve!.tx.data.fillRatio).toBe(deriveCanonicalSwapFillRatio(takerBuy.giveAmount, executionQuoteWei));
   });
 
   test('preserves partial fills and tags STP when taker later hits own resting order', () => {
@@ -605,10 +682,16 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [selfMakerOffer, otherAskOffer, takerBuyOffer]);
-    const takerResolve = result.mempoolOps.find((item) => item.accountId === 'alice-taker-account' && item.tx.type === 'swap_resolve');
-    const otherMakerResolve = result.mempoolOps.find((item) => item.accountId === 'bob-maker-account' && item.tx.type === 'swap_resolve');
-    const selfMakerResolve = result.mempoolOps.find((item) => item.accountId === 'alice-maker-account' && item.tx.type === 'swap_resolve');
+    const result = processCommittedOrderbookSwaps(entityState, [selfMakerOffer, otherAskOffer, takerBuyOffer]);
+    const takerResolve = result.mempoolOps.find(
+      item => item.accountId === 'alice-taker-account' && item.tx.type === 'swap_resolve',
+    );
+    const otherMakerResolve = result.mempoolOps.find(
+      item => item.accountId === 'bob-maker-account' && item.tx.type === 'swap_resolve',
+    );
+    const selfMakerResolve = result.mempoolOps.find(
+      item => item.accountId === 'alice-maker-account' && item.tx.type === 'swap_resolve',
+    );
 
     expect(takerResolve).toBeDefined();
     expect(otherMakerResolve).toBeDefined();
@@ -682,7 +765,7 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [makerAsk, restingBid]);
+    const result = processCommittedOrderbookSwaps(entityState, [makerAsk, restingBid]);
     const finalBook = result.bookUpdates.at(-1)?.book;
     expect(finalBook).toBeDefined();
 
@@ -698,7 +781,7 @@ describe('orderbook matching fallback execution mapping', () => {
       toEntity: 'bid-maker',
       accountId: 'bid-maker-account',
       giveTokenId: 6,
-      giveAmount: 1000n * lot / 10_000n,
+      giveAmount: (1000n * lot) / 10_000n,
       wantTokenId: 4,
       wantAmount: lot,
       createdHeight: 1,
@@ -716,7 +799,7 @@ describe('orderbook matching fallback execution mapping', () => {
       giveTokenId: 4,
       giveAmount: lot,
       wantTokenId: 6,
-      wantAmount: 1200n * lot / 10_000n,
+      wantAmount: (1200n * lot) / 10_000n,
       createdHeight: 2,
       minFillRatio: 0,
       timeInForce: 0,
@@ -766,9 +849,12 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [makerBid, makerAsk, takerBuy]);
+    const result = processCommittedOrderbookSwaps(entityState, [makerBid, makerAsk, takerBuy]);
     const takerResolve = result.mempoolOps.find(
-      (item) => item.accountId === 'taker-account' && item.tx.type === 'swap_resolve' && item.tx.data.offerId === 'taker-buy-between-sides',
+      item =>
+        item.accountId === 'taker-account' &&
+        item.tx.type === 'swap_resolve' &&
+        item.tx.data.offerId === 'taker-buy-between-sides',
     );
     const finalBook = result.bookUpdates.at(-1)?.book;
     expect(takerResolve).toBeDefined();
@@ -786,7 +872,7 @@ describe('orderbook matching fallback execution mapping', () => {
       toEntity: 'bid-maker',
       accountId: 'bid-maker-account',
       giveTokenId: 6,
-      giveAmount: 1000n * lot / 10_000n,
+      giveAmount: (1000n * lot) / 10_000n,
       wantTokenId: 4,
       wantAmount: lot,
       createdHeight: 1,
@@ -804,7 +890,7 @@ describe('orderbook matching fallback execution mapping', () => {
       giveTokenId: 4,
       giveAmount: lot,
       wantTokenId: 6,
-      wantAmount: 1200n * lot / 10_000n,
+      wantAmount: (1200n * lot) / 10_000n,
       createdHeight: 2,
       minFillRatio: 0,
       timeInForce: 0,
@@ -854,9 +940,12 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [makerBid, makerAsk, takerSell]);
+    const result = processCommittedOrderbookSwaps(entityState, [makerBid, makerAsk, takerSell]);
     const takerResolve = result.mempoolOps.find(
-      (item) => item.accountId === 'taker-account' && item.tx.type === 'swap_resolve' && item.tx.data.offerId === 'taker-sell-between-sides',
+      item =>
+        item.accountId === 'taker-account' &&
+        item.tx.type === 'swap_resolve' &&
+        item.tx.data.offerId === 'taker-sell-between-sides',
     );
     const finalBook = result.bookUpdates.at(-1)?.book;
     expect(takerResolve).toBeDefined();
@@ -903,26 +992,31 @@ describe('orderbook matching fallback execution mapping', () => {
     const entityState = {
       entityId: 'hub-entity',
       accounts: new Map([
-        ['maker-account', {
-          leftEntity: 'hub-entity',
-          rightEntity: 'maker',
-          swapOffers: new Map([[
-            'maker-ask-historical',
-            {
-              offerId: 'maker-ask-historical',
-              giveTokenId: 4,
-              giveAmount: lot,
-              wantTokenId: 6,
-              wantAmount: 1000n * lot / 10_000n,
-              makerIsLeft: false,
-              minFillRatio: 0,
-              createdHeight: 1,
-              priceTicks: 1000n,
-              quantizedGive: lot,
-              quantizedWant: 1000n * lot / 10_000n,
-            },
-          ]]),
-        }],
+        [
+          'maker-account',
+          {
+            leftEntity: 'hub-entity',
+            rightEntity: 'maker',
+            swapOffers: new Map([
+              [
+                'maker-ask-historical',
+                {
+                  offerId: 'maker-ask-historical',
+                  giveTokenId: 4,
+                  giveAmount: lot,
+                  wantTokenId: 6,
+                  wantAmount: (1000n * lot) / 10_000n,
+                  makerIsLeft: false,
+                  minFillRatio: 0,
+                  createdHeight: 1,
+                  priceTicks: 1000n,
+                  quantizedGive: lot,
+                  quantizedWant: (1000n * lot) / 10_000n,
+                },
+              ],
+            ]),
+          },
+        ],
         ['taker-account', { swapOffers: new Map() }],
       ]),
       orderbookExt: {
@@ -945,14 +1039,17 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [takerOffer]);
+    const result = processCommittedOrderbookSwaps(entityState, [takerOffer]);
     const makerResolve = result.mempoolOps.find(
-      (item) => item.accountId === 'maker-account' && item.tx.type === 'swap_resolve' && item.tx.data.offerId === 'maker-ask-historical',
+      item =>
+        item.accountId === 'maker-account' &&
+        item.tx.type === 'swap_resolve' &&
+        item.tx.data.offerId === 'maker-ask-historical',
     );
 
     expect(makerResolve).toBeDefined();
     expect(makerResolve!.tx.data.executionGiveAmount).toBe(lot);
-    expect(makerResolve!.tx.data.executionWantAmount).toBe(1000n * lot / 10_000n);
+    expect(makerResolve!.tx.data.executionWantAmount).toBe((1000n * lot) / 10_000n);
   });
 
   test('swap_resolve rejects caller-supplied resting terms that differ from the live offer', async () => {
@@ -978,7 +1075,7 @@ describe('orderbook matching fallback execution mapping', () => {
         fillRatio: 32768,
         cancelRemainder: false,
         executionGiveAmount: lot,
-        executionWantAmount: 1000n * lot / 10_000n,
+        executionWantAmount: (1000n * lot) / 10_000n,
         restingPriceTicks: 1000n,
         restingGiveAmount: 2n * lot,
         restingWantAmount: (2000n * lot) / 10_000n,
@@ -1009,20 +1106,18 @@ describe('orderbook matching fallback execution mapping', () => {
       giveTokenId: 4,
       giveAmount: lot,
       wantTokenId: 6,
-      wantAmount: hugePriceTicks * lot / 10_000n,
+      wantAmount: (hugePriceTicks * lot) / 10_000n,
       createdHeight: 1,
       minFillRatio: 0,
       timeInForce: 0,
       priceTicks: hugePriceTicks,
       quantizedGive: lot,
-      quantizedWant: hugePriceTicks * lot / 10_000n,
+      quantizedWant: (hugePriceTicks * lot) / 10_000n,
     } satisfies SwapOffer;
 
     const entityState = {
       entityId: 'hub-entity',
-      accounts: new Map([
-        ['alice', makeAccountMachine(hugePriceOffer)],
-      ]),
+      accounts: new Map([['alice', makeAccountMachine(hugePriceOffer)]]),
       orderbookExt: {
         hubProfile: {
           entityId: 'hub-entity',
@@ -1043,8 +1138,8 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [hugePriceOffer] as any);
-    const book = result.bookUpdates.find((item) => item.pairId === '4/6')?.book;
+    const result = processCommittedOrderbookSwaps(entityState, [hugePriceOffer] as any);
+    const book = result.bookUpdates.find(item => item.pairId === '4/6')?.book;
 
     expect(result.mempoolOps.some((item: any) => item.tx?.type === 'swap_resolve')).toBe(false);
     expect(book).toBeDefined();
@@ -1126,9 +1221,12 @@ describe('orderbook matching fallback execution mapping', () => {
       priceTicks: makerPriceTicks,
     };
 
-    const result = processOrderbookSwaps(entityState, [makerOffer, takerOffer]);
+    const result = processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer]);
     const takerResolve = result.mempoolOps.find(
-      (item) => item.accountId === 'taker-account' && item.tx.type === 'swap_resolve' && item.tx.data.offerId === 'taker-buy-with-fee',
+      item =>
+        item.accountId === 'taker-account' &&
+        item.tx.type === 'swap_resolve' &&
+        item.tx.data.offerId === 'taker-buy-with-fee',
     );
 
     expect(takerResolve).toBeDefined();
@@ -1161,7 +1259,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const quoteDelta = accountMachine.deltas.get(6)!;
     const baseDelta = accountMachine.deltas.get(4)!;
     expect(quoteDelta.offdelta).toBe(makerQuoteQty);
-    expect(baseDelta.offdelta).toBe(-(makerBaseQty - (makerBaseQty / 10_000n)));
+    expect(baseDelta.offdelta).toBe(-(makerBaseQty - makerBaseQty / 10_000n));
   });
 
   test('recomputes canonical priceTicks for partial fills when legacy offer price is missing', async () => {
@@ -1269,9 +1367,12 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [makerOffer, takerOffer]);
+    const result = processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer]);
     const cancelOp = result.mempoolOps.find(
-      (item) => item.accountId === 'taker-account' && item.tx.type === 'swap_resolve' && item.tx.data.offerId === 'taker-buy-too-high',
+      item =>
+        item.accountId === 'taker-account' &&
+        item.tx.type === 'swap_resolve' &&
+        item.tx.data.offerId === 'taker-buy-too-high',
     );
     const finalBook = result.bookUpdates.at(-1)?.book;
 
@@ -1356,37 +1457,43 @@ describe('orderbook matching fallback execution mapping', () => {
           referenceTokenId: 1,
           supportedPairs: ['1/2'],
         },
-        books: new Map([['1/2', (() => {
-          let book = createBook({ bucketWidthTicks: 10_000n, maxOrders: 10_000, stpPolicy: 1 });
-          book = applyCommand(book, {
-            kind: 0,
-            ownerId: 'near-maker',
-            orderId: 'near-maker-account:near-ask',
-            side: 1,
-            tif: 0,
-            postOnly: false,
-            priceTicks: nearAskPriceTicks,
-            qtyLots: 1,
-          }).state;
-          book = applyCommand(book, {
-            kind: 0,
-            ownerId: 'far-maker',
-            orderId: 'far-maker-account:far-ask',
-            side: 1,
-            tif: 0,
-            postOnly: false,
-            priceTicks: farAskPriceTicks,
-            qtyLots: 1,
-          }).state;
-          return book;
-        })()]]),
+        books: new Map([
+          [
+            '1/2',
+            (() => {
+              let book = createBook({ bucketWidthTicks: 10_000n, maxOrders: 10_000, stpPolicy: 1 });
+              book = applyCommand(book, {
+                kind: 0,
+                ownerId: 'near-maker',
+                orderId: 'near-maker-account:near-ask',
+                side: 1,
+                tif: 0,
+                postOnly: false,
+                priceTicks: nearAskPriceTicks,
+                qtyLots: 1,
+              }).state;
+              book = applyCommand(book, {
+                kind: 0,
+                ownerId: 'far-maker',
+                orderId: 'far-maker-account:far-ask',
+                side: 1,
+                tif: 0,
+                postOnly: false,
+                priceTicks: farAskPriceTicks,
+                qtyLots: 1,
+              }).state;
+              return book;
+            })(),
+          ],
+        ]),
         pairConfig: new Map(),
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [incomingBidOffer] as any);
+    const result = processCommittedOrderbookSwaps(entityState, [incomingBidOffer] as any);
     const farCancel = result.mempoolOps.find(
-      (item) => item.accountId === 'far-maker-account' && item.tx.type === 'swap_resolve' && item.tx.data.offerId === 'far-ask',
+      item =>
+        item.accountId === 'far-maker-account' && item.tx.type === 'swap_resolve' && item.tx.data.offerId === 'far-ask',
     );
     const finalBook = result.bookUpdates.at(-1)?.book;
 
@@ -1409,13 +1516,13 @@ describe('orderbook matching fallback execution mapping', () => {
       giveTokenId: 4,
       giveAmount: SWAP_LOT_SCALE,
       wantTokenId: 6,
-      wantAmount: 1000n * SWAP_LOT_SCALE / 10_000n,
+      wantAmount: (1000n * SWAP_LOT_SCALE) / 10_000n,
       createdHeight: 1,
       minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 1000n,
       quantizedGive: SWAP_LOT_SCALE,
-      quantizedWant: 1000n * SWAP_LOT_SCALE / 10_000n,
+      quantizedWant: (1000n * SWAP_LOT_SCALE) / 10_000n,
     } satisfies SwapOffer;
 
     const takerOffer = {
@@ -1425,14 +1532,14 @@ describe('orderbook matching fallback execution mapping', () => {
       toEntity: 'taker-entity',
       accountId: 'taker-account',
       giveTokenId: 6,
-      giveAmount: 1400n * SWAP_LOT_SCALE / 10_000n,
+      giveAmount: (1400n * SWAP_LOT_SCALE) / 10_000n,
       wantTokenId: 4,
       wantAmount: SWAP_LOT_SCALE,
       createdHeight: 2,
       minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 1400n,
-      quantizedGive: 1400n * SWAP_LOT_SCALE / 10_000n,
+      quantizedGive: (1400n * SWAP_LOT_SCALE) / 10_000n,
       quantizedWant: SWAP_LOT_SCALE,
     } satisfies SwapOffer;
 
@@ -1468,7 +1575,7 @@ describe('orderbook matching fallback execution mapping', () => {
       pendingSwapFillRatios: new Map(),
     } as any;
 
-    const firstPass = processOrderbookSwaps(entityState, [makerOffer, takerOffer] as any);
+    const firstPass = processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer] as any);
     expect(firstPass.mempoolOps).toHaveLength(1);
     expect(firstPass.mempoolOps[0]?.accountId).toBe('taker-account');
     expect(firstPass.mempoolOps[0]?.tx.type).toBe('swap_resolve');
@@ -1476,7 +1583,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(firstPass.mempoolOps[0]?.tx.data.cancelRemainder).toBe(true);
 
     takerAccount.mempool.push(firstPass.mempoolOps[0]!.tx as AccountTx);
-    const secondPass = processOrderbookSwaps(entityState, [makerOffer, takerOffer] as any);
+    const secondPass = processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer] as any);
     expect(secondPass.mempoolOps).toHaveLength(0);
 
     takerAccount.mempool = [];
@@ -1490,7 +1597,7 @@ describe('orderbook matching fallback execution mapping', () => {
       stateHash: '',
       byLeft: true,
     };
-    const thirdPass = processOrderbookSwaps(entityState, [makerOffer, takerOffer] as any);
+    const thirdPass = processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer] as any);
     expect(thirdPass.mempoolOps).toHaveLength(0);
   });
 
@@ -1532,7 +1639,7 @@ describe('orderbook matching fallback execution mapping', () => {
         giveTokenId: 4,
         giveAmount: SWAP_LOT_SCALE,
         wantTokenId: 6,
-        wantAmount: 1000n * SWAP_LOT_SCALE / 10_000n,
+        wantAmount: (1000n * SWAP_LOT_SCALE) / 10_000n,
         minFillRatio: 0,
         timeInForce: 0,
         priceTicks: 1000n,
@@ -1547,14 +1654,14 @@ describe('orderbook matching fallback execution mapping', () => {
         giveTokenId: 4,
         giveAmount: SWAP_LOT_SCALE,
         wantTokenId: 6,
-        wantAmount: 1000n * SWAP_LOT_SCALE / 10_000n,
+        wantAmount: (1000n * SWAP_LOT_SCALE) / 10_000n,
         minFillRatio: 0,
         timeInForce: 0,
         priceTicks: 1000n,
       },
     ];
 
-    const result = processOrderbookSwaps(entityState, offers as any);
+    const result = processCommittedOrderbookSwaps(entityState, offers as any);
     const finalBook = result.bookUpdates.at(-1)?.book;
     expect(finalBook).toBeDefined();
     expect(getBestAsk(finalBook!)).toBe(1000n);
@@ -1599,7 +1706,7 @@ describe('orderbook matching fallback execution mapping', () => {
         giveTokenId: 4,
         giveAmount: SWAP_LOT_SCALE,
         wantTokenId: 6,
-        wantAmount: 1000n * SWAP_LOT_SCALE / 10_000n,
+        wantAmount: (1000n * SWAP_LOT_SCALE) / 10_000n,
         minFillRatio: 0,
         timeInForce: 0,
         priceTicks: 1000n,
@@ -1612,7 +1719,7 @@ describe('orderbook matching fallback execution mapping', () => {
         accountId: 'bob',
         createdHeight: 2,
         giveTokenId: 6,
-        giveAmount: 1000n * SWAP_LOT_SCALE / 10_000n,
+        giveAmount: (1000n * SWAP_LOT_SCALE) / 10_000n,
         wantTokenId: 4,
         wantAmount: SWAP_LOT_SCALE,
         minFillRatio: 0,
@@ -1621,10 +1728,10 @@ describe('orderbook matching fallback execution mapping', () => {
       },
     ];
 
-    const result = processOrderbookSwaps(entityState, offers as any, { debugRebuildProjectionOnly: true });
+    const result = processCommittedOrderbookSwaps(entityState, offers as any, { debugRebuildProjectionOnly: true });
     expect(result.mempoolOps).toHaveLength(0);
     expect(result.bookUpdates.length).toBeGreaterThan(0);
-    expect(result.debugProjectionRejects.map((offer) => `${offer.accountId}:${offer.offerId}`)).toEqual(['bob:offer-b']);
+    expect(result.debugProjectionRejects.map(offer => `${offer.accountId}:${offer.offerId}`)).toEqual(['bob:offer-b']);
     expect(result.debugProjectionRejects[0]?.reason).toBe('post-only-reject:postOnly would cross');
   });
 
@@ -1632,9 +1739,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const priceTicks = 24_999_992n;
     const entityState = {
       entityId: 'hub-entity',
-      accounts: new Map([
-        ['alice', { swapOffers: new Map([['offer-a', {}]]) }],
-      ]),
+      accounts: new Map([['alice', { swapOffers: new Map([['offer-a', {}]]) }]]),
       orderbookExt: {
         hubProfile: {
           entityId: 'hub-entity',
@@ -1671,7 +1776,7 @@ describe('orderbook matching fallback execution mapping', () => {
       priceTicks,
     };
 
-    const result = processOrderbookSwaps(entityState, [offer] as any);
+    const result = processCommittedOrderbookSwaps(entityState, [offer] as any);
     const finalBook = result.bookUpdates.at(-1)?.book;
     expect(finalBook).toBeDefined();
 
@@ -1683,7 +1788,16 @@ describe('orderbook matching fallback execution mapping', () => {
     const entityState = {
       entityId: 'hub-entity',
       accounts: new Map([
-        ['alice', { swapOffers: new Map([['offer-a', {}], ['offer-b', {}], ['offer-c', {}]]) }],
+        [
+          'alice',
+          {
+            swapOffers: new Map([
+              ['offer-a', {}],
+              ['offer-b', {}],
+              ['offer-c', {}],
+            ]),
+          },
+        ],
       ]),
       orderbookExt: {
         hubProfile: {
@@ -1726,9 +1840,9 @@ describe('orderbook matching fallback execution mapping', () => {
       makeOffer('offer-b', 25_137_562n, 600n * SWAP_LOT_SCALE),
       makeOffer('offer-c', 25_262_625n, 960n * SWAP_LOT_SCALE),
     ];
-    entityState.accounts.get('alice')!.swapOffers = new Map(offers.map((offer) => [offer.offerId, offer]));
+    entityState.accounts.get('alice')!.swapOffers = new Map(offers.map(offer => [offer.offerId, offer]));
 
-    const result = processOrderbookSwaps(entityState, offers as any);
+    const result = processCommittedOrderbookSwaps(entityState, offers as any);
     const finalBook = result.bookUpdates.at(-1)?.book;
     expect(finalBook).toBeDefined();
     expect(finalBook!.params.bucketWidthTicks).toBe(10_000n);
@@ -1814,7 +1928,7 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    expect(() => processOrderbookSwaps(entityState, [takerOffer] as any)).toThrow(/ORDERBOOK_CACHE_MISMATCH/);
+    expect(() => processCommittedOrderbookSwaps(entityState, [takerOffer] as any)).toThrow(/ORDERBOOK_CACHE_MISMATCH/);
   });
 
   test('removes a stale persisted cross-j book order when it has no live route', () => {
@@ -1904,7 +2018,7 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [takerOffer] as any);
+    const result = processCommittedOrderbookSwaps(entityState, [takerOffer] as any);
 
     expect(result.mempoolOps).toEqual([]);
     expect(getBookOrder(staleBook, 'maker-account:maker-cross')).toBeNull();
@@ -1989,9 +2103,7 @@ describe('orderbook matching fallback execution mapping', () => {
 
     const entityState = {
       entityId: 'hub-entity',
-      accounts: new Map([
-        ['maker-account', { swapOffers: new Map([['maker-cross-partial', offer]]) }],
-      ]),
+      accounts: new Map([['maker-account', { swapOffers: new Map([['maker-cross-partial', offer]]) }]]),
       orderbookExt: {
         hubProfile: {
           entityId: 'hub-entity',
@@ -2012,7 +2124,7 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [offer] as any);
+    const result = processCommittedOrderbookSwaps(entityState, [offer] as any);
     const finalBook = result.bookUpdates.at(-1)?.book;
 
     expect(finalBook).toBeDefined();
@@ -2080,15 +2192,18 @@ describe('orderbook matching fallback execution mapping', () => {
       entityId: 'hub-entity',
       accounts: new Map(),
       crossJurisdictionBookAdmissions: new Map([
-        ['maker-entity:maker-cross-partial', {
-          orderId: 'maker-cross-partial',
-          routeHash: 'hash',
-          sourceEntityId: 'maker-entity',
-          bookOwnerEntityId: 'hub-entity',
-          status: 'admitted',
-          route,
-          updatedAt: 2,
-        }],
+        [
+          'maker-entity:maker-cross-partial',
+          {
+            orderId: 'maker-cross-partial',
+            routeHash: 'hash',
+            sourceEntityId: 'maker-entity',
+            bookOwnerEntityId: 'hub-entity',
+            status: 'admitted',
+            route,
+            updatedAt: 2,
+          },
+        ],
       ]),
       orderbookExt: {
         hubProfile: {
@@ -2110,14 +2225,14 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [] as any);
+    const result = processCommittedOrderbookSwaps(entityState, [] as any);
     const finalBook = result.bookUpdates.at(-1)?.book;
 
     expect(finalBook).toBeDefined();
     expect(getBookOrder(finalBook!, namespacedOrderId)?.qtyLots).toBe(Number(remainingSource / lot));
   });
 
-  test('skips a cross-j order while its partial fill ack is pending', () => {
+  test('removes a cross-j order from the book while its partial fill ack is pending', () => {
     const lot = SWAP_LOT_SCALE;
     const sourceTotal = 40_000n * lot;
     const targetTotal = 100_000n * lot;
@@ -2226,24 +2341,29 @@ describe('orderbook matching fallback execution mapping', () => {
     const entityState = {
       entityId: 'hub-entity',
       accounts: new Map([
-        ['maker-account', {
-          swapOffers: new Map([['maker-cross-pending', makerOffer]]),
-          pendingFrame: {
-            accountTxs: [{
-              type: 'cross_swap_fill_ack',
-              data: {
-                offerId: 'maker-cross-pending',
-                fillSeq: 1,
-                incrementalSourceAmount: filledSourceAmount,
-                incrementalTargetAmount: filledTargetAmount,
-                cumulativeSourceAmount: filledSourceAmount,
-                cumulativeTargetAmount: filledTargetAmount,
-                cumulativeFillRatio: 16_384,
-                cancelRemainder: false,
-              },
-            }],
+        [
+          'maker-account',
+          {
+            swapOffers: new Map([['maker-cross-pending', makerOffer]]),
+            pendingFrame: {
+              accountTxs: [
+                {
+                  type: 'cross_swap_fill_ack',
+                  data: {
+                    offerId: 'maker-cross-pending',
+                    fillSeq: 1,
+                    incrementalSourceAmount: filledSourceAmount,
+                    incrementalTargetAmount: filledTargetAmount,
+                    cumulativeSourceAmount: filledSourceAmount,
+                    cumulativeTargetAmount: filledTargetAmount,
+                    cumulativeFillRatio: 16_384,
+                    cancelRemainder: false,
+                  },
+                },
+              ],
+            },
           },
-        }],
+        ],
         ['taker-account', { swapOffers: new Map([['taker-cross-pending', takerOffer]]) }],
       ]),
       orderbookExt: {
@@ -2266,14 +2386,14 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [takerOffer] as any);
+    const result = processCommittedOrderbookSwaps(entityState, [takerOffer] as any);
 
     expect(result.mempoolOps).toEqual([]);
     expect(result.crossJurisdictionFills).toEqual([]);
     expect(getBookOrder(book, makerOrderId)).toBeNull();
   });
 
-  test('skips a cross-j order when pending fill ack has already moved the account offer view', () => {
+  test('removes a cross-j order when pending fill ack has already moved the account offer view', () => {
     const lot = SWAP_LOT_SCALE;
     const sourceTotal = 40_000n * lot;
     const targetTotal = 100_000n * lot;
@@ -2344,24 +2464,29 @@ describe('orderbook matching fallback execution mapping', () => {
     const entityState = {
       entityId: 'hub-entity',
       accounts: new Map([
-        ['maker-account', {
-          swapOffers: new Map(),
-          pendingFrame: {
-            accountTxs: [{
-              type: 'cross_swap_fill_ack',
-              data: {
-                offerId: 'maker-cross-pending',
-                fillSeq: 1,
-                incrementalSourceAmount: filledSourceAmount,
-                incrementalTargetAmount: filledTargetAmount,
-                cumulativeSourceAmount: filledSourceAmount,
-                cumulativeTargetAmount: filledTargetAmount,
-                cumulativeFillRatio: 16_384,
-                cancelRemainder: false,
-              },
-            }],
+        [
+          'maker-account',
+          {
+            swapOffers: new Map(),
+            pendingFrame: {
+              accountTxs: [
+                {
+                  type: 'cross_swap_fill_ack',
+                  data: {
+                    offerId: 'maker-cross-pending',
+                    fillSeq: 1,
+                    incrementalSourceAmount: filledSourceAmount,
+                    incrementalTargetAmount: filledTargetAmount,
+                    cumulativeSourceAmount: filledSourceAmount,
+                    cumulativeTargetAmount: filledTargetAmount,
+                    cumulativeFillRatio: 16_384,
+                    cancelRemainder: false,
+                  },
+                },
+              ],
+            },
           },
-        }],
+        ],
         ['taker-account', { swapOffers: new Map([['taker-cross-pending', takerOffer]]) }],
       ]),
       orderbookExt: {
@@ -2384,7 +2509,7 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [takerOffer] as any);
+    const result = processCommittedOrderbookSwaps(entityState, [takerOffer] as any);
 
     expect(result.mempoolOps).toEqual([]);
     expect(result.crossJurisdictionFills).toEqual([]);
@@ -2506,24 +2631,29 @@ describe('orderbook matching fallback execution mapping', () => {
     const entityState = {
       entityId: 'hub-entity',
       accounts: new Map([
-        ['maker-pending-account', {
-          swapOffers: new Map(),
-          pendingFrame: {
-            accountTxs: [{
-              type: 'cross_swap_fill_ack',
-              data: {
-                offerId: 'maker-cross-pending',
-                fillSeq: 1,
-                incrementalSourceAmount: 2n * lot,
-                incrementalTargetAmount: 2n * lot,
-                cumulativeSourceAmount: 2n * lot,
-                cumulativeTargetAmount: 2n * lot,
-                cumulativeFillRatio: 65_535,
-                cancelRemainder: true,
-              },
-            }],
+        [
+          'maker-pending-account',
+          {
+            swapOffers: new Map(),
+            pendingFrame: {
+              accountTxs: [
+                {
+                  type: 'cross_swap_fill_ack',
+                  data: {
+                    offerId: 'maker-cross-pending',
+                    fillSeq: 1,
+                    incrementalSourceAmount: 2n * lot,
+                    incrementalTargetAmount: 2n * lot,
+                    cumulativeSourceAmount: 2n * lot,
+                    cumulativeTargetAmount: 2n * lot,
+                    cumulativeFillRatio: 65_535,
+                    cancelRemainder: true,
+                  },
+                },
+              ],
+            },
           },
-        }],
+        ],
         ['maker-committed-account', { swapOffers: new Map([['maker-cross-committed', committedOffer]]) }],
         ['taker-account', { swapOffers: new Map([['taker-cross', takerOffer]]) }],
       ]),
@@ -2547,15 +2677,15 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [takerOffer] as any);
+    const result = processCommittedOrderbookSwaps(entityState, [takerOffer] as any);
 
     expect(getBookOrder(book, pendingOrderId)).toBeNull();
     expect(getBookOrder(book, committedOrderId)).toBeNull();
-    expect(result.crossJurisdictionFills.map((fill) => fill.offerId).sort()).toEqual([
+    expect(result.crossJurisdictionFills.map(fill => fill.offerId).sort()).toEqual([
       'maker-cross-committed',
       'taker-cross',
     ]);
-    expect(result.mempoolOps.map((op) => `${op.accountId}:${op.tx.type}`).sort()).toEqual([
+    expect(result.mempoolOps.map(op => `${op.accountId}:${op.tx.type}`).sort()).toEqual([
       'maker-committed-account:cross_swap_fill_ack',
       'taker-account:cross_swap_fill_ack',
     ]);
@@ -2643,19 +2773,20 @@ describe('orderbook matching fallback execution mapping', () => {
 
     const entityState = {
       entityId: 'hub-entity',
-      accounts: new Map([
-        ['local-taker-account', { swapOffers: new Map([['taker-cross', takerOffer]]) }],
-      ]),
+      accounts: new Map([['local-taker-account', { swapOffers: new Map([['taker-cross', takerOffer]]) }]]),
       crossJurisdictionBookAdmissions: new Map([
-        ['remote-maker:maker-cross', {
-          orderId: 'maker-cross',
-          routeHash: 'hash',
-          sourceEntityId: 'remote-maker',
-          bookOwnerEntityId: 'hub-entity',
-          status: 'admitted',
-          route: makerRoute,
-          updatedAt: 1,
-        }],
+        [
+          'remote-maker:maker-cross',
+          {
+            orderId: 'maker-cross',
+            routeHash: 'hash',
+            sourceEntityId: 'remote-maker',
+            bookOwnerEntityId: 'hub-entity',
+            status: 'admitted',
+            route: makerRoute,
+            updatedAt: 1,
+          },
+        ],
       ]),
       orderbookExt: {
         hubProfile: {
@@ -2677,13 +2808,10 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [takerOffer] as any);
+    const result = processCommittedOrderbookSwaps(entityState, [takerOffer] as any);
 
-    expect(result.crossJurisdictionFills.map((fill) => fill.offerId).sort()).toEqual([
-      'maker-cross',
-      'taker-cross',
-    ]);
-    expect(result.mempoolOps.map((op) => `${op.accountId}:${op.tx.type}`).sort()).toEqual([
+    expect(result.crossJurisdictionFills.map(fill => fill.offerId).sort()).toEqual(['maker-cross', 'taker-cross']);
+    expect(result.mempoolOps.map(op => `${op.accountId}:${op.tx.type}`).sort()).toEqual([
       'local-taker-account:cross_swap_fill_ack',
       'remote-maker:cross_swap_fill_ack',
     ]);
@@ -2806,16 +2934,16 @@ describe('orderbook matching fallback execution mapping', () => {
       },
     };
 
-    const result = processOrderbookSwaps(entityState as any, [makerOffer, takerOne, takerTwo] as any);
+    const result = processCommittedOrderbookSwaps(entityState as any, [makerOffer, takerOne, takerTwo] as any);
     const makerAcks = result.mempoolOps.filter(
-      (op) => op.accountId === 'maker-account' && op.tx.type === 'cross_swap_fill_ack',
+      op => op.accountId === 'maker-account' && op.tx.type === 'cross_swap_fill_ack',
     );
 
     expect(makerAcks).toHaveLength(1);
     expect(makerAcks[0]?.tx.data.fillSeq).toBe(1);
     expect(makerAcks[0]?.tx.data.cumulativeFillRatio).toBe(65_535);
     expect(makerAcks[0]?.tx.data.incrementalSourceAmount).toBe(2n * lot);
-    expect(result.mempoolOps.filter((op) => op.tx.type === 'cross_swap_fill_ack')).toHaveLength(3);
+    expect(result.mempoolOps.filter(op => op.tx.type === 'cross_swap_fill_ack')).toHaveLength(3);
   });
 
   test('fails fast when persisted book price diverges from account offer', () => {
@@ -2909,7 +3037,7 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    expect(() => processOrderbookSwaps(entityState, [takerBid] as any)).toThrow(/ORDERBOOK_CACHE_MISMATCH/);
+    expect(() => processCommittedOrderbookSwaps(entityState, [takerBid] as any)).toThrow(/ORDERBOOK_CACHE_MISMATCH/);
   });
 
   test('fails fast instead of auto-fixing a mismatched cached pair', () => {
@@ -2980,7 +3108,15 @@ describe('orderbook matching fallback execution mapping', () => {
     const entityState = {
       entityId: 'hub-entity',
       accounts: new Map([
-        ['maker-account', { swapOffers: new Map([['maker-ask-a', makerOfferA], ['maker-ask-b', makerOfferB]]) }],
+        [
+          'maker-account',
+          {
+            swapOffers: new Map([
+              ['maker-ask-a', makerOfferA],
+              ['maker-ask-b', makerOfferB],
+            ]),
+          },
+        ],
         ['taker-account', { swapOffers: new Map() }],
       ]),
       orderbookExt: {
@@ -3003,7 +3139,7 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    expect(() => processOrderbookSwaps(entityState, [takerOffer] as any)).toThrow(/ORDERBOOK_CACHE_MISMATCH/);
+    expect(() => processCommittedOrderbookSwaps(entityState, [takerOffer] as any)).toThrow(/ORDERBOOK_CACHE_MISMATCH/);
   });
 
   test('removes a persisted book order when its swap resolution is already pending', () => {
@@ -3085,7 +3221,7 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    const result = processOrderbookSwaps(entityState, [takerOffer] as any);
+    const result = processCommittedOrderbookSwaps(entityState, [takerOffer] as any);
 
     expect(result.mempoolOps).toEqual([]);
     expect(getBookOrder(staleBook, 'maker-account:maker-ask')).toBeNull();
@@ -3096,9 +3232,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const overflowPriceTicks = 25_262_625n;
     const entityState = {
       entityId: 'hub-entity',
-      accounts: new Map([
-        ['alice', { swapOffers: new Map() }],
-      ]),
+      accounts: new Map([['alice', { swapOffers: new Map() }]]),
       orderbookExt: {
         hubProfile: {
           entityId: 'hub-entity',
@@ -3136,7 +3270,7 @@ describe('orderbook matching fallback execution mapping', () => {
     };
 
     entityState.accounts.get('alice')!.swapOffers = new Map([['offer-a', anchorOffer]]);
-    const firstPass = processOrderbookSwaps(entityState, [anchorOffer] as any);
+    const firstPass = processCommittedOrderbookSwaps(entityState, [anchorOffer] as any);
     const initialBook = firstPass.bookUpdates.at(-1)?.book;
     expect(initialBook).toBeDefined();
     expect(getBookOrder(initialBook!, 'alice:offer-a')).not.toBeNull();
@@ -3159,7 +3293,7 @@ describe('orderbook matching fallback execution mapping', () => {
       priceTicks: overflowPriceTicks,
     };
 
-    const overflowPass = processOrderbookSwaps(entityState, [overflowOffer] as any);
+    const overflowPass = processCommittedOrderbookSwaps(entityState, [overflowOffer] as any);
     const finalBook = overflowPass.bookUpdates.at(-1)?.book ?? entityState.orderbookExt.books.get('1/2');
     expect(finalBook).toBeDefined();
     expect(getBookOrder(finalBook!, 'alice:offer-a')?.priceTicks).toBe(anchorPriceTicks);
@@ -3170,9 +3304,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const maxOrders = 3;
     const entityState = {
       entityId: 'hub-entity',
-      accounts: new Map([
-        ['alice', { swapOffers: new Map() }],
-      ]),
+      accounts: new Map([['alice', { swapOffers: new Map() }]]),
       orderbookExt: {
         hubProfile: {
           entityId: 'hub-entity',
@@ -3204,19 +3336,19 @@ describe('orderbook matching fallback execution mapping', () => {
       giveTokenId: 4,
       giveAmount: SWAP_LOT_SCALE,
       wantTokenId: 6,
-      wantAmount: 1000n * SWAP_LOT_SCALE / 10_000n,
+      wantAmount: (1000n * SWAP_LOT_SCALE) / 10_000n,
       minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 1000n,
     }));
 
-    const result = processOrderbookSwaps(entityState, offers as any);
+    const result = processCommittedOrderbookSwaps(entityState, offers as any);
     const finalBook = result.bookUpdates.at(-1)?.book;
     expect(finalBook).toBeDefined();
     expect(finalBook!.orders.size).toBe(maxOrders);
 
     const cancelOp = result.mempoolOps.find(
-      (item) => item.tx.type === 'swap_resolve' && item.tx.data.offerId === rejectedOfferId,
+      item => item.tx.type === 'swap_resolve' && item.tx.data.offerId === rejectedOfferId,
     );
     expect(cancelOp).toBeDefined();
     expect(cancelOp!.tx.data.cancelRemainder).toBe(true);
@@ -3278,11 +3410,14 @@ describe('orderbook matching fallback execution mapping', () => {
     const entityState = {
       entityId: 'hub-entity',
       accounts: new Map([
-        ['maker-account', {
-          leftEntity: 'hub-entity',
-          rightEntity: 'maker-entity',
-          swapOffers: new Map([['maker-ask', makerOffer]]),
-        }],
+        [
+          'maker-account',
+          {
+            leftEntity: 'hub-entity',
+            rightEntity: 'maker-entity',
+            swapOffers: new Map([['maker-ask', makerOffer]]),
+          },
+        ],
         ['taker-account', { swapOffers: new Map() }],
       ]),
       orderbookExt: {
@@ -3305,7 +3440,9 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    expect(() => processOrderbookSwaps(entityState, [takerOffer] as any)).toThrow(/ORDERBOOK_PAIR_COMMAND_FAILED/);
+    expect(() => processCommittedOrderbookSwaps(entityState, [takerOffer] as any)).toThrow(
+      /ORDERBOOK_PAIR_COMMAND_FAILED/,
+    );
   });
 
   test('processOrderbookCancels queues account-level cancel once for an active orderbook order', () => {
@@ -3320,7 +3457,7 @@ describe('orderbook matching fallback execution mapping', () => {
       giveTokenId: 2,
       giveAmount: lot,
       wantTokenId: 1,
-      wantAmount: 1000n * lot / 10_000n,
+      wantAmount: (1000n * lot) / 10_000n,
       minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 1000n,
@@ -3387,7 +3524,7 @@ describe('orderbook matching fallback execution mapping', () => {
       giveTokenId: 2,
       giveAmount: lot,
       wantTokenId: 1,
-      wantAmount: 1000n * lot / 10_000n,
+      wantAmount: (1000n * lot) / 10_000n,
       minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 1000n,
@@ -3398,7 +3535,9 @@ describe('orderbook matching fallback execution mapping', () => {
       height: 1,
       timestamp: 1,
       jHeight: 0,
-      accountTxs: [{ type: 'swap_resolve', data: { offerId: 'offer-cancel-pending', fillRatio: 0, cancelRemainder: true } }],
+      accountTxs: [
+        { type: 'swap_resolve', data: { offerId: 'offer-cancel-pending', fillRatio: 0, cancelRemainder: true } },
+      ],
       prevFrameHash: '',
       deltas: [],
       stateHash: '',
@@ -3510,7 +3649,9 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    expect(() => processOrderbookSwaps(entityState, [takerOffer] as any)).toThrow(/ORDERBOOK_MALFORMED_BOOK_ORDER/);
+    expect(() => processCommittedOrderbookSwaps(entityState, [takerOffer] as any)).toThrow(
+      /ORDERBOOK_MALFORMED_BOOK_ORDER/,
+    );
   });
 
   test('processOrderbookCancels fails fast on duplicate order ids across pair books', () => {
@@ -3525,7 +3666,7 @@ describe('orderbook matching fallback execution mapping', () => {
       giveTokenId: 2,
       giveAmount: lot,
       wantTokenId: 1,
-      wantAmount: 1000n * lot / 10_000n,
+      wantAmount: (1000n * lot) / 10_000n,
       minFillRatio: 0,
       timeInForce: 0,
       priceTicks: 1000n,
@@ -3584,8 +3725,8 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    expect(() =>
-      processOrderbookCancels(entityState, [{ accountId: 'alice', offerId: 'dup' }]),
-    ).toThrow(/ORDERBOOK_DUPLICATE_BOOK_ORDER/);
+    expect(() => processOrderbookCancels(entityState, [{ accountId: 'alice', offerId: 'dup' }])).toThrow(
+      /ORDERBOOK_DUPLICATE_BOOK_ORDER/,
+    );
   });
 });
