@@ -2712,24 +2712,15 @@
 
       <div class="route-builder" class:cross-route={swapRouteMode === 'cross'} data-testid="swap-route-picker">
         <button type="button" class="route-summary" title={`${selectedRouteLabel} · ${routeVenueLabel}`} on:click={() => routeDetailsOpen = !routeDetailsOpen}>
-          <span>Best route</span>
+          <span>Route</span>
           <strong>{selectedRouteOption?.mode === 'cross' ? 'XLN cross-j' : 'XLN same-j'}</strong>
           <em>{routeVenueLabel}</em>
         </button>
         <div class="route-flow" data-testid="swap-route-flow">
-          <div class="route-node">
-            <span class="route-node-kicker">Sell</span>
-            <strong>{sourceJurisdictionLabel}</strong>
-            <span>{sourceRouteEntityLabel}</span>
-            <em>{estimatedSpendLabel}</em>
-          </div>
-          <span class="route-arrow">-&gt;</span>
-          <div class="route-node">
-            <span class="route-node-kicker">Buy</span>
-            <strong>{targetJurisdictionLabel}</strong>
-            <span>{targetRouteEntityLabel}</span>
-            <em>{estimatedReceiveLabel}</em>
-          </div>
+          <span title={sourceRouteEntityLabel}>{sourceJurisdictionLabel}</span>
+          <strong>-&gt;</strong>
+          <span title={targetRouteEntityLabel}>{targetJurisdictionLabel}</span>
+          <em>{estimatedSpendLabel} / {estimatedReceiveLabel}</em>
         </div>
         {#if swapRouteMode === 'cross' && canAutoPrepareCrossInboundCapacity}
           <label class="route-checkbox" data-testid="swap-cross-auto-extend">
@@ -3580,61 +3571,42 @@
 
   .route-flow {
     display: grid;
-    grid-template-columns: minmax(0, 1fr) 20px minmax(0, 1fr);
-    align-items: stretch;
-    gap: 6px;
-  }
-
-  .route-node {
-    display: grid;
-    gap: 3px;
-    min-width: 0;
-    padding: 8px 9px;
+    grid-template-columns: minmax(0, auto) auto minmax(0, auto) minmax(0, 1fr);
+    align-items: center;
+    gap: 7px;
+    min-height: 30px;
+    padding: 0 10px;
     background: #090b10;
     border: 1px solid #1d2230;
     border-radius: 8px;
   }
 
-  .route-node-kicker {
-    color: #6b7280;
-    font-size: 10px;
-    font-weight: 700;
-    text-transform: uppercase;
-  }
-
-  .route-node strong,
-  .route-node span,
-  .route-node em {
+  .route-flow span,
+  .route-flow em {
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
   }
 
-  .route-node strong {
-    color: #e5e7eb;
-    font-size: 12px;
-  }
-
-  .route-node span {
+  .route-flow span {
     color: #9ca3af;
     font-size: 11px;
+    font-weight: 700;
   }
 
-  .route-node em {
+  .route-flow strong {
+    color: #6b7280;
+    font-size: 12px;
+    font-weight: 900;
+  }
+
+  .route-flow em {
     color: #fbbf24;
     font-size: 11px;
     font-style: normal;
     font-weight: 700;
-  }
-
-  .route-arrow {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #6b7280;
-    font-size: 12px;
-    font-weight: 700;
+    text-align: right;
   }
 
   .route-checkbox {
@@ -4268,6 +4240,15 @@
     .token-select {
       flex: 1 1 120px;
       width: auto;
+    }
+
+    .route-flow {
+      grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
+    }
+
+    .route-flow em {
+      grid-column: 1 / -1;
+      text-align: left;
     }
   }
 
