@@ -4,7 +4,16 @@
  */
 
 import { applyEntityTx } from './entity-tx';
-import type { ConsensusConfig, EntityInput, EntityReplica, EntityState, EntityTx, Env, HankoString, JInput } from './types';
+import type {
+  ConsensusConfig,
+  EntityInput,
+  EntityReplica,
+  EntityState,
+  EntityTx,
+  Env,
+  HankoString,
+  JInput,
+} from './types';
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, log } from './utils';
 import { safeStringify } from './serialization-utils';
 import { createStructuredLogger, logError, shortHash, shortId, shortOrder, shouldLogFullPayloads } from './logger';
@@ -29,13 +38,18 @@ import {
   type SwapOfferEvent,
 } from './entity-tx/handlers/account';
 import {
-  markAdmittedOrderbookOffer,
+  markWorkingOrderbookOffer,
   swapKey,
-  type AdmittedOrderbookOffer,
   type NormalizedOrderbookOffer,
+  type WorkingOrderbookOffer,
 } from './swap-execution';
 import { replaceOrderbookPair, type OrderbookExtState } from './orderbook';
-import { executeCrontab, initCrontab, scheduleHook as scheduleCrontabHook, cancelHook as cancelCrontabHook } from './entity-crontab';
+import {
+  executeCrontab,
+  initCrontab,
+  scheduleHook as scheduleCrontabHook,
+  cancelHook as cancelCrontabHook,
+} from './entity-crontab';
 import {
   applyCommittedSwapCancelsToOrderbook,
   crossJurisdictionBookOwnerRef,
@@ -63,7 +77,9 @@ const entityLog = createStructuredLogger('entity');
 function queueUniqueAccountMempoolTx(
   account: EntityState['accounts'] extends Map<string, infer T> ? T : never,
   tx: EntityState['accounts'] extends Map<string, infer T>
-    ? T extends { mempool: Array<infer A> } ? A : never
+    ? T extends { mempool: Array<infer A> }
+      ? A
+      : never
     : never,
 ): boolean {
   const fp = txFingerprint(tx);
@@ -79,10 +95,7 @@ function queueUniqueAccountMempoolTx(
 
 type EntityAccountMachine = EntityState['accounts'] extends Map<string, infer T> ? T : never;
 
-const hasQueuedOrderLifecycleTx = (
-  account: EntityAccountMachine,
-  offerId: string,
-): boolean => {
+const hasQueuedOrderLifecycleTx = (account: EntityAccountMachine, offerId: string): boolean => {
   for (const tx of account.mempool ?? []) {
     if (
       (tx.type === 'swap_resolve' || tx.type === 'cross_swap_fill_ack' || tx.type === 'swap_cancel_request') &&
@@ -139,13 +152,11 @@ const assertSameJurisdictionOrderHoldCommitted = (
   }
   const delta = account.deltas?.get(committedOffer.giveTokenId);
   const requiredHold = committedOffer.quantizedGive ?? committedOffer.giveAmount;
-  const committedHold = committedOffer.makerIsLeft
-    ? (delta?.leftHold ?? 0n)
-    : (delta?.rightHold ?? 0n);
+  const committedHold = committedOffer.makerIsLeft ? (delta?.leftHold ?? 0n) : (delta?.rightHold ?? 0n);
   if (requiredHold <= 0n || committedHold < requiredHold) {
     throw new Error(
       `ORDERBOOK_ORDER_HOLD_NOT_COMMITTED: account=${offer.accountId} offer=${offer.offerId} ` +
-      `required=${requiredHold.toString()} committed=${committedHold.toString()}`,
+        `required=${requiredHold.toString()} committed=${committedHold.toString()}`,
     );
   }
 };
@@ -154,7 +165,7 @@ const admitOrderbookOfferForMatching = (
   env: Env,
   state: EntityState,
   offer: NormalizedOrderbookOffer,
-): AdmittedOrderbookOffer | null => {
+): WorkingOrderbookOffer | null => {
   if (offer.crossJurisdiction) {
     const crossStatus = offer.crossJurisdiction.status;
     if (crossStatus !== 'resting' && crossStatus !== 'partially_filled') {
@@ -185,9 +196,8 @@ const admitOrderbookOfferForMatching = (
     const account = assertCommittedSwapOfferMatchesEvent(state, offer);
     assertSameJurisdictionOrderHoldCommitted(account, offer);
   }
-  return markAdmittedOrderbookOffer(offer);
+  return markWorkingOrderbookOffer(offer);
 };
-
 
 /**
  * Get previous frame hash from entity state.
@@ -330,7 +340,7 @@ export const applyEntityInput = async (
   env: Env,
   entityReplica: EntityReplica,
   entityInput: EntityInput,
-): Promise<{ newState: EntityState, outputs: EntityInput[], jOutputs: JInput[], workingReplica: EntityReplica }> => {
+): Promise<{ newState: EntityState; outputs: EntityInput[]; jOutputs: JInput[]; workingReplica: EntityReplica }> => {
   // IMMUTABILITY: Clone replica at function start (fintech-safe, hacker-proof)
   // Prevents state mutations from escaping function scope
   const workingReplica = cloneEntityReplica(entityReplica);
@@ -344,9 +354,7 @@ export const applyEntityInput = async (
 
   if (!quietRuntimeLogs) {
     const hasInputActivity = Boolean(
-      (entityInput.entityTxs?.length ?? 0) > 0 ||
-      entityInput.proposedFrame ||
-      entityInput.hashPrecommits?.size,
+      (entityInput.entityTxs?.length ?? 0) > 0 || entityInput.proposedFrame || entityInput.hashPrecommits?.size,
     );
     const logInputReceived = hasInputActivity ? entityLog.info : entityLog.debug;
     logInputReceived('input.received', {
@@ -430,7 +438,7 @@ export const applyEntityInput = async (
   if (!workingReplica.isProposer && workingReplica.mempool.length > 0) {
     const proposerId = workingReplica.state.config.validators[0];
     if (!proposerId) {
-      logError("FRAME_CONSENSUS", `❌ No proposer found in validators: ${workingReplica.state.config.validators}`);
+      logError('FRAME_CONSENSUS', `❌ No proposer found in validators: ${workingReplica.state.config.validators}`);
       return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
     }
 
@@ -453,9 +461,9 @@ export const applyEntityInput = async (
     if (totalPower >= workingReplica.state.config.threshold) {
       if (workingReplica.lockedFrame) {
         if (workingReplica.lockedFrame.hash !== entityInput.proposedFrame.hash) {
-          logError("FRAME_CONSENSUS", `❌ BYZANTINE: Commit frame doesn't match locked frame!`);
-          logError("FRAME_CONSENSUS", `   Locked: ${workingReplica.lockedFrame.hash}`);
-          logError("FRAME_CONSENSUS", `   Commit: ${entityInput.proposedFrame.hash}`);
+          logError('FRAME_CONSENSUS', `❌ BYZANTINE: Commit frame doesn't match locked frame!`);
+          logError('FRAME_CONSENSUS', `   Locked: ${workingReplica.lockedFrame.hash}`);
+          logError('FRAME_CONSENSUS', `   Commit: ${entityInput.proposedFrame.hash}`);
           return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
         }
         entityLog.debug('commit.locked_frame_verified', { frame: shortHash(workingReplica.lockedFrame.hash) });
@@ -463,12 +471,15 @@ export const applyEntityInput = async (
 
       for (const [signerId, sigs] of frameCollectedSigs) {
         if (!sigs[0] || !verifyFrame(env, signerId, entityInput.proposedFrame.hash, sigs[0])) {
-          logError("FRAME_CONSENSUS", `❌ BYZANTINE: Invalid signature from ${signerId}`);
-          logError("FRAME_CONSENSUS", `   Frame hash: ${entityInput.proposedFrame.hash.slice(0,30)}...`);
+          logError('FRAME_CONSENSUS', `❌ BYZANTINE: Invalid signature from ${signerId}`);
+          logError('FRAME_CONSENSUS', `   Frame hash: ${entityInput.proposedFrame.hash.slice(0, 30)}...`);
           return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
         }
       }
-      entityLog.debug('commit.signatures_verified', { count: frameCollectedSigs.size, frame: shortHash(entityInput.proposedFrame.hash) });
+      entityLog.debug('commit.signatures_verified', {
+        count: frameCollectedSigs.size,
+        frame: shortHash(entityInput.proposedFrame.hash),
+      });
 
       // Normally use the validator-computed state. If this replica missed the
       // proposal but is exactly one frame behind, replay the signed txs locally.
@@ -508,13 +519,16 @@ export const applyEntityInput = async (
           replayedCommitState,
         );
         if (replayedHash !== proposedFrame.hash) {
-          logError("FRAME_CONSENSUS", `❌ COMMIT REJECTED: replayed catch-up state does not match signed frame hash!`);
-          logError("FRAME_CONSENSUS", `   Expected: ${replayedHash.slice(0, 30)}...`);
-          logError("FRAME_CONSENSUS", `   Received: ${proposedFrame.hash.slice(0, 30)}...`);
+          logError('FRAME_CONSENSUS', `❌ COMMIT REJECTED: replayed catch-up state does not match signed frame hash!`);
+          logError('FRAME_CONSENSUS', `   Expected: ${replayedHash.slice(0, 30)}...`);
+          logError('FRAME_CONSENSUS', `   Received: ${proposedFrame.hash.slice(0, 30)}...`);
           return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
         }
         stateToApply = replayedCommitState;
-        entityLog.warn('commit.catch_up_state_replayed', { height: proposedFrame.height, frame: shortHash(proposedFrame.hash) });
+        entityLog.warn('commit.catch_up_state_replayed', {
+          height: proposedFrame.height,
+          frame: shortHash(proposedFrame.hash),
+        });
       }
       workingReplica.state = {
         ...stateToApply,
@@ -526,7 +540,10 @@ export const applyEntityInput = async (
 
       const committedTxs = entityInput.proposedFrame.txs;
       if (committedTxs.length > 0) {
-        entityLog.debug('mempool.clear_committed', { committed: committedTxs.length, before: workingReplica.mempool.length });
+        entityLog.debug('mempool.clear_committed', {
+          committed: committedTxs.length,
+          before: workingReplica.mempool.length,
+        });
         workingReplica.mempool = removeCommittedTxsFromMempool(workingReplica.mempool, committedTxs);
         entityLog.debug('mempool.after_commit', { remaining: workingReplica.mempool.length });
       }
@@ -562,72 +579,72 @@ export const applyEntityInput = async (
     }
 
     if (canVerify) {
-    const { newState: validatorComputedState } = await applyEntityFrame(
-      env,
-      workingReplica.state,
-      proposedFrame.txs,
-      proposedFrame.newState.timestamp,
-    );
-    const validatorNewState = {
-      ...validatorComputedState,
-      entityId: workingReplica.state.entityId,
-      height: proposedFrame.height,
-      timestamp: proposedFrame.newState.timestamp,
-    };
+      const { newState: validatorComputedState } = await applyEntityFrame(
+        env,
+        workingReplica.state,
+        proposedFrame.txs,
+        proposedFrame.newState.timestamp,
+      );
+      const validatorNewState = {
+        ...validatorComputedState,
+        entityId: workingReplica.state.entityId,
+        height: proposedFrame.height,
+        timestamp: proposedFrame.newState.timestamp,
+      };
 
-    const prevFrameHash = getPrevFrameHash(workingReplica.state);
-    const validatorComputedHash = await createEntityFrameHash(
-      prevFrameHash,
-      proposedFrame.height,
-      proposedFrame.newState.timestamp,
-      proposedFrame.txs,
-      validatorNewState
-    );
+      const prevFrameHash = getPrevFrameHash(workingReplica.state);
+      const validatorComputedHash = await createEntityFrameHash(
+        prevFrameHash,
+        proposedFrame.height,
+        proposedFrame.newState.timestamp,
+        proposedFrame.txs,
+        validatorNewState,
+      );
 
-    if (validatorComputedHash !== proposedFrame.hash) {
-      logError("FRAME_CONSENSUS", `❌ HASH MISMATCH: Proposer sent invalid frame hash!`);
-      logError("FRAME_CONSENSUS", `   Expected: ${validatorComputedHash.slice(0, 30)}...`);
-      logError("FRAME_CONSENSUS", `   Received: ${proposedFrame.hash.slice(0, 30)}...`);
-      logError("FRAME_CONSENSUS", `   This could indicate equivocation attack or state divergence bug.`);
-      return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
-    }
-
-    entityLog.debug('proposal.hash_verified', { frame: shortHash(proposedFrame.hash) });
-
-    const hashesToSign = proposedFrame.hashesToSign || [{ hash: proposedFrame.hash, type: 'entityFrame' as const, context: '' }];
-    const allSignatures = await Promise.all(
-      hashesToSign.map(h => signFrame(env, workingReplica.signerId, h.hash))
-    );
-    entityLog.debug('proposal.hashes_signed', { count: allSignatures.length });
-
-    workingReplica.lockedFrame = proposedFrame;
-    workingReplica.validatorComputedState = validatorNewState;
-
-    if (config.mode === 'gossip-based') {
-      config.validators.forEach(validatorId => {
-        entityOutbox.push({
-          entityId: entityInput.entityId,
-          signerId: validatorId,
-          hashPrecommits: new Map([[workingReplica.signerId, allSignatures]]),
-        });
-      });
-    } else {
-      const proposerId = config.validators[0];
-      if (!proposerId) {
-        logError("FRAME_CONSENSUS", `❌ No proposer found in validators: ${config.validators}`);
+      if (validatorComputedHash !== proposedFrame.hash) {
+        logError('FRAME_CONSENSUS', `❌ HASH MISMATCH: Proposer sent invalid frame hash!`);
+        logError('FRAME_CONSENSUS', `   Expected: ${validatorComputedHash.slice(0, 30)}...`);
+        logError('FRAME_CONSENSUS', `   Received: ${proposedFrame.hash.slice(0, 30)}...`);
+        logError('FRAME_CONSENSUS', `   This could indicate equivocation attack or state divergence bug.`);
         return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
       }
-      entityOutbox.push({
-        entityId: entityInput.entityId,
-        signerId: proposerId,
-        hashPrecommits: new Map([[workingReplica.signerId, allSignatures]]),
+
+      entityLog.debug('proposal.hash_verified', { frame: shortHash(proposedFrame.hash) });
+
+      const hashesToSign = proposedFrame.hashesToSign || [
+        { hash: proposedFrame.hash, type: 'entityFrame' as const, context: '' },
+      ];
+      const allSignatures = await Promise.all(hashesToSign.map(h => signFrame(env, workingReplica.signerId, h.hash)));
+      entityLog.debug('proposal.hashes_signed', { count: allSignatures.length });
+
+      workingReplica.lockedFrame = proposedFrame;
+      workingReplica.validatorComputedState = validatorNewState;
+
+      if (config.mode === 'gossip-based') {
+        config.validators.forEach(validatorId => {
+          entityOutbox.push({
+            entityId: entityInput.entityId,
+            signerId: validatorId,
+            hashPrecommits: new Map([[workingReplica.signerId, allSignatures]]),
+          });
+        });
+      } else {
+        const proposerId = config.validators[0];
+        if (!proposerId) {
+          logError('FRAME_CONSENSUS', `❌ No proposer found in validators: ${config.validators}`);
+          return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
+        }
+        entityOutbox.push({
+          entityId: entityInput.entityId,
+          signerId: proposerId,
+          hashPrecommits: new Map([[workingReplica.signerId, allSignatures]]),
+        });
+      }
+      entityLog.debug('proposal.precommit_sent', {
+        mode: config.mode,
+        frame: frameHash,
+        signatures: allSignatures.length,
       });
-    }
-    entityLog.debug('proposal.precommit_sent', {
-      mode: config.mode,
-      frame: frameHash,
-      signatures: allSignatures.length,
-    });
     } // end if (canVerify) — behind validators skip verification and wait for commit
   }
 
@@ -639,7 +656,9 @@ export const applyEntityInput = async (
     for (const [signerId, sigs] of entityInput.hashPrecommits!) {
       // Verify signature count matches hashesToSign
       if (proposal.hashesToSign && sigs.length !== proposal.hashesToSign.length) {
-        log.error(`❌ Signature count mismatch from ${signerId}: got ${sigs.length}, expected ${proposal.hashesToSign.length}`);
+        log.error(
+          `❌ Signature count mismatch from ${signerId}: got ${sigs.length}, expected ${proposal.hashesToSign.length}`,
+        );
         continue;
       }
       // SECURITY: Verify frame hash signature (sigs[0]) before accepting precommit
@@ -705,7 +724,7 @@ export const applyEntityInput = async (
             workingReplica.state.entityId,
             hashInfo.hash,
             sigsForHash,
-            workingReplica.state.config
+            workingReplica.state.config,
           );
           committedHankos.push(hanko);
         }
@@ -748,7 +767,11 @@ export const applyEntityInput = async (
 
       entityOutbox.push(...commitOutputs);
       jOutbox.push(...commitJOutputs);
-      entityLog.info('commit.outputs', { outputs: commitOutputs.length, jOutputs: commitJOutputs.length, hankos: attachedCount });
+      entityLog.info('commit.outputs', {
+        outputs: commitOutputs.length,
+        jOutputs: commitJOutputs.length,
+        hankos: attachedCount,
+      });
 
       workingReplica.state = {
         ...proposal.newState,
@@ -822,12 +845,7 @@ export const applyEntityInput = async (
       outputs: frameOutputs,
       jOutputs: frameJOutputs,
       collectedHashes,
-    } = await applyEntityFrame(
-      env,
-      workingReplica.state,
-      workingReplica.mempool,
-      env.timestamp,
-    );
+    } = await applyEntityFrame(env, workingReplica.state, workingReplica.mempool, env.timestamp);
     const newHeight = workingReplica.state.height + 1;
     const newTimestamp = env.timestamp;
 
@@ -843,7 +861,7 @@ export const applyEntityInput = async (
       newHeight,
       newTimestamp,
       workingReplica.mempool,
-      singleSignerNewState
+      singleSignerNewState,
     );
 
     const hashesToSign = buildEntityHashesToSign(
@@ -858,7 +876,7 @@ export const applyEntityInput = async (
       env,
       workingReplica.state.entityId,
       workingReplica.signerId,
-      hashesToSign.map((hashInfo) => hashInfo.hash),
+      hashesToSign.map(hashInfo => hashInfo.hash),
     );
 
     if (!workingReplica.hankoWitness) {
@@ -897,12 +915,7 @@ export const applyEntityInput = async (
     return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
   }
 
-  if (
-    !isSingleSigner &&
-    workingReplica.isProposer &&
-    workingReplica.mempool.length > 0 &&
-    !workingReplica.proposal
-  ) {
+  if (!isSingleSigner && workingReplica.isProposer && workingReplica.mempool.length > 0 && !workingReplica.proposal) {
     entityLog.debug('proposal.auto_start', {
       mempool: workingReplica.mempool.length,
       txs: workingReplica.mempool.map(tx => tx.type),
@@ -943,18 +956,11 @@ export const applyEntityInput = async (
       newHeight,
       newTimestamp,
       workingReplica.mempool,
-      deterministicForHash
+      deterministicForHash,
     );
-    const hashesToSign = buildEntityHashesToSign(
-      workingReplica.state.entityId,
-      newHeight,
-      frameHash,
-      collectedHashes,
-    );
+    const hashesToSign = buildEntityHashesToSign(workingReplica.state.entityId, newHeight, frameHash, collectedHashes);
 
-    const selfSigs = await Promise.all(
-      hashesToSign.map(h => signFrame(env, workingReplica.signerId, h.hash))
-    );
+    const selfSigs = await Promise.all(hashesToSign.map(h => signFrame(env, workingReplica.signerId, h.hash)));
 
     workingReplica.proposal = {
       height: newHeight,
@@ -1026,7 +1032,11 @@ export const applyEntityFrame = async (
   outputs: EntityInput[];
   jOutputs: JInput[];
   // Hashes emitted during frame processing that need entity-quorum signing
-  collectedHashes?: Array<{ hash: string; type: 'accountFrame' | 'dispute' | 'profile' | 'settlement'; context: string }>;
+  collectedHashes?: Array<{
+    hash: string;
+    type: 'accountFrame' | 'dispute' | 'profile' | 'settlement';
+    context: string;
+  }>;
 }> => {
   entityLog.debug('frame.apply', { txs: entityTxs.map(tx => tx.type) });
   if (shouldLogFullPayloads()) {
@@ -1181,7 +1191,9 @@ export const applyEntityFrame = async (
 
   const hasPersistedCrossJurisdictionBook = Boolean(
     currentEntityState.orderbookExt &&
-    Array.from(currentEntityState.orderbookExt.books?.keys?.() || []).some((pairId) => String(pairId).startsWith('cross:')),
+    Array.from(currentEntityState.orderbookExt.books?.keys?.() || []).some(pairId =>
+      String(pairId).startsWith('cross:'),
+    ),
   );
   if ((allSwapOffersCreated.length > 0 || hasPersistedCrossJurisdictionBook) && currentEntityState.orderbookExt) {
     entityLog.debug('orderbook.matching', {
@@ -1200,7 +1212,7 @@ export const applyEntityFrame = async (
       return normalizeSwapOfferForOrderbook(offer, counterparty);
     });
     const seenOfferKeys = new Set<string>();
-    const offersToMatch: AdmittedOrderbookOffer[] = [];
+    const offersToMatch: WorkingOrderbookOffer[] = [];
     for (const offer of enrichedOffers) {
       const key = swapKey(offer.accountId, offer.offerId);
       if (seenOfferKeys.has(key)) continue;
@@ -1236,7 +1248,10 @@ export const applyEntityFrame = async (
         const localOwnsOffer = Boolean(account?.swapOffers?.has(tx.data.offerId));
         const localOffer = account?.swapOffers?.get(tx.data.offerId);
         if (localOffer?.crossJurisdiction) {
-          entityLog.warn('crossj.block_plain_swap_resolve', { offer: shortOrder(tx.data.offerId, 8), account: shortId(accountId, 8) });
+          entityLog.warn('crossj.block_plain_swap_resolve', {
+            offer: shortOrder(tx.data.offerId, 8),
+            account: shortId(accountId, 8),
+          });
           continue;
         }
         if (account && localOwnsOffer) {
@@ -1255,7 +1270,10 @@ export const applyEntityFrame = async (
           const ownerAccount = findAccountByCounterparty(ownerState, accountId);
           const ownerOffer = ownerAccount?.swapOffers?.get(tx.data.offerId);
           if (ownerOffer?.crossJurisdiction) {
-            entityLog.warn('crossj.block_routed_plain_swap_resolve', { offer: shortOrder(tx.data.offerId, 8), account: shortId(accountId, 8) });
+            entityLog.warn('crossj.block_routed_plain_swap_resolve', {
+              offer: shortOrder(tx.data.offerId, 8),
+              account: shortId(accountId, 8),
+            });
             continue;
           }
           const firstValidator = ownerState?.config?.validators?.[0];
@@ -1269,13 +1287,15 @@ export const applyEntityFrame = async (
           allOutputs.push({
             entityId: ownerState.entityId,
             signerId: firstValidator,
-            entityTxs: [{
-              type: 'resolveSwap',
-              data: {
-                counterpartyEntityId: accountId,
-                ...tx.data,
+            entityTxs: [
+              {
+                type: 'resolveSwap',
+                data: {
+                  counterpartyEntityId: accountId,
+                  ...tx.data,
+                },
               },
-            }],
+            ],
           });
           entityLog.debug('orderbook.sibling_tx_routed', {
             owner: shortId(ownerState.entityId, 8),
@@ -1298,7 +1318,10 @@ export const applyEntityFrame = async (
         const ownerState = findSwapOfferOwnerState(env, currentEntityState, accountId, tx.data.offerId);
         const firstValidator = ownerState?.config?.validators?.[0];
         if (!ownerState || !firstValidator) {
-          entityLog.warn('crossj.sibling_fill_notice_unroutable', { offer: shortOrder(tx.data.offerId, 8), account: shortId(accountId, 8) });
+          entityLog.warn('crossj.sibling_fill_notice_unroutable', {
+            offer: shortOrder(tx.data.offerId, 8),
+            account: shortId(accountId, 8),
+          });
           continue;
         }
         const fillSeq = Math.floor(Number(tx.data.fillSeq ?? 0));
@@ -1314,25 +1337,31 @@ export const applyEntityFrame = async (
         allOutputs.push({
           entityId: ownerState.entityId,
           signerId: firstValidator,
-          entityTxs: [{
-            type: 'crossJurisdictionFillNotice',
-            data: {
-              orderId: tx.data.offerId,
-              fillSeq,
-              incrementalSourceAmount: tx.data.incrementalSourceAmount ?? tx.data.executionSourceAmount ?? 0n,
-              incrementalTargetAmount: tx.data.incrementalTargetAmount ?? tx.data.executionTargetAmount ?? 0n,
-              cumulativeSourceAmount: tx.data.cumulativeSourceAmount ?? 0n,
-              cumulativeTargetAmount: tx.data.cumulativeTargetAmount ?? 0n,
-              cumulativeFillRatio,
-              ...(tx.data.fillNumerator !== undefined ? { fillNumerator: tx.data.fillNumerator } : {}),
-              ...(tx.data.fillDenominator !== undefined ? { fillDenominator: tx.data.fillDenominator } : {}),
-              ...(tx.data.priceImprovementMode ? { priceImprovementMode: tx.data.priceImprovementMode } : {}),
-              ...(tx.data.priceImprovementAmount !== undefined ? { priceImprovementAmount: tx.data.priceImprovementAmount } : {}),
-              ...(tx.data.priceImprovementTokenId !== undefined ? { priceImprovementTokenId: tx.data.priceImprovementTokenId } : {}),
-              ...(tx.data.priceTicks !== undefined ? { priceTicks: tx.data.priceTicks } : {}),
-              pairId: String(tx.data.pairId || ''),
+          entityTxs: [
+            {
+              type: 'crossJurisdictionFillNotice',
+              data: {
+                orderId: tx.data.offerId,
+                fillSeq,
+                incrementalSourceAmount: tx.data.incrementalSourceAmount ?? tx.data.executionSourceAmount ?? 0n,
+                incrementalTargetAmount: tx.data.incrementalTargetAmount ?? tx.data.executionTargetAmount ?? 0n,
+                cumulativeSourceAmount: tx.data.cumulativeSourceAmount ?? 0n,
+                cumulativeTargetAmount: tx.data.cumulativeTargetAmount ?? 0n,
+                cumulativeFillRatio,
+                ...(tx.data.fillNumerator !== undefined ? { fillNumerator: tx.data.fillNumerator } : {}),
+                ...(tx.data.fillDenominator !== undefined ? { fillDenominator: tx.data.fillDenominator } : {}),
+                ...(tx.data.priceImprovementMode ? { priceImprovementMode: tx.data.priceImprovementMode } : {}),
+                ...(tx.data.priceImprovementAmount !== undefined
+                  ? { priceImprovementAmount: tx.data.priceImprovementAmount }
+                  : {}),
+                ...(tx.data.priceImprovementTokenId !== undefined
+                  ? { priceImprovementTokenId: tx.data.priceImprovementTokenId }
+                  : {}),
+                ...(tx.data.priceTicks !== undefined ? { priceTicks: tx.data.priceTicks } : {}),
+                pairId: String(tx.data.pairId || ''),
+              },
             },
-          }],
+          ],
         });
         entityLog.info('crossj.sibling_fill_notice_routed', {
           owner: shortId(ownerState.entityId, 8),
@@ -1357,7 +1386,11 @@ export const applyEntityFrame = async (
           fill.route,
           deterministicEntityTimestamp(currentEntityState, env),
         );
-        if (fill.priceImprovementMode !== 'target_bonus' || fill.priceImprovementAmount <= 0n || fill.priceImprovementTokenId === null) {
+        if (
+          fill.priceImprovementMode !== 'target_bonus' ||
+          fill.priceImprovementAmount <= 0n ||
+          fill.priceImprovementTokenId === null
+        ) {
           continue;
         }
         const targetHubState = findEntityStateById(env, fill.route.target.entityId);
@@ -1372,16 +1405,18 @@ export const applyEntityFrame = async (
         allOutputs.push({
           entityId: targetHubState.entityId,
           signerId: targetSigner,
-          entityTxs: [{
-            type: 'directPayment',
-            data: {
-              targetEntityId: fill.route.target.counterpartyEntityId,
-              tokenId: fill.priceImprovementTokenId,
-              amount: fill.priceImprovementAmount,
-              route: [fill.route.target.entityId, fill.route.target.counterpartyEntityId],
-              description: `cross-j-target-bonus:${fill.offerId}`,
+          entityTxs: [
+            {
+              type: 'directPayment',
+              data: {
+                targetEntityId: fill.route.target.counterpartyEntityId,
+                tokenId: fill.priceImprovementTokenId,
+                amount: fill.priceImprovementAmount,
+                route: [fill.route.target.entityId, fill.route.target.counterpartyEntityId],
+                description: `cross-j-target-bonus:${fill.offerId}`,
+              },
             },
-          }],
+          ],
         });
       }
     }
@@ -1438,10 +1473,12 @@ export const applyEntityFrame = async (
         // Fallback cancel resolution is synthesized by the orchestrator itself.
         // It must land in the same working-state mempool so the later account
         // proposal step sees it in this frame.
-        if (!queueUniqueAccountMempoolTx(account, {
-          type: 'swap_resolve',
-          data: { offerId, fillRatio: 0, cancelRemainder: true },
-        })) {
+        if (
+          !queueUniqueAccountMempoolTx(account, {
+            type: 'swap_resolve',
+            data: { offerId, fillRatio: 0, cancelRemainder: true },
+          })
+        ) {
           continue;
         }
         proposableAccounts.add(accountId);
@@ -1471,12 +1508,18 @@ export const applyEntityFrame = async (
     })
     .sort();
 
-  const collectedHashes: Array<{ hash: string; type: 'accountFrame' | 'dispute' | 'profile' | 'settlement'; context: string }> = [];
+  const collectedHashes: Array<{
+    hash: string;
+    type: 'accountFrame' | 'dispute' | 'profile' | 'settlement';
+    context: string;
+  }> = [];
 
   if (accountsToProposeFrames.length > 0) {
     for (const accountKey of accountsToProposeFrames) {
       const accountMachine = currentEntityState.accounts.get(accountKey);
-      const { counterparty: cpId } = accountMachine ? getAccountPerspective(accountMachine, currentEntityState.entityId) : { counterparty: 'unknown' };
+      const { counterparty: cpId } = accountMachine
+        ? getAccountPerspective(accountMachine, currentEntityState.entityId)
+        : { counterparty: 'unknown' };
       if (accountMachine) {
         const proposal = await proposeAccountFrame(env, accountMachine, false, currentEntityState.lastFinalizedJHeight);
         if (proposal.swapOffersCancelled && proposal.swapOffersCancelled.length > 0) {
@@ -1508,7 +1551,7 @@ export const applyEntityFrame = async (
                       lockId: route.inboundLockId,
                       outcome: 'error' as const,
                       reason: `forward_failed:${reason}`,
-                    }
+                    },
                   });
                   proposableAccounts.add(route.inboundEntity);
                 }
@@ -1522,10 +1565,12 @@ export const applyEntityFrame = async (
         if (proposal.success && proposal.accountInput) {
           const outputEntityInput: EntityInput = {
             entityId: proposal.accountInput.toEntityId,
-            entityTxs: [{
-              type: 'accountInput' as const,
-              data: proposal.accountInput
-            }]
+            entityTxs: [
+              {
+                type: 'accountInput' as const,
+                data: proposal.accountInput,
+              },
+            ],
           };
           allOutputs.push(outputEntityInput);
 
@@ -1549,7 +1594,13 @@ export const applyEntityFrame = async (
     }
   }
 
-  return { newState: currentEntityState, deterministicState, outputs: allOutputs, jOutputs: allJOutputs, collectedHashes };
+  return {
+    newState: currentEntityState,
+    deterministicState,
+    outputs: allOutputs,
+    jOutputs: allJOutputs,
+    collectedHashes,
+  };
 };
 
 // === HELPER FUNCTIONS ===
@@ -1561,7 +1612,7 @@ export const calculateQuorumPower = (config: ConsensusConfig, signers: string[])
   return signers.reduce((total, signerId) => {
     const shares = config.shares[signerId];
     if (shares === undefined) {
-      logError("FRAME_CONSENSUS", `⚠️ BYZANTINE: Unknown signer ${signerId} in quorum calculation — skipped`);
+      logError('FRAME_CONSENSUS', `⚠️ BYZANTINE: Unknown signer ${signerId} in quorum calculation — skipped`);
       return total;
     }
     return total + shares;
