@@ -209,6 +209,7 @@ export interface DepositoryInterface extends Interface {
       | "enforceDebts"
       | "entityNonces"
       | "entityProvider"
+      | "getCollateral"
       | "getTokenMetadata"
       | "getTokensLength"
       | "mintToReserve"
@@ -318,6 +319,10 @@ export interface DepositoryInterface extends Interface {
   encodeFunctionData(
     functionFragment: "entityProvider",
     values?: undefined
+  ): string;
+  encodeFunctionData(
+    functionFragment: "getCollateral",
+    values: [BytesLike, BytesLike, BigNumberish]
   ): string;
   encodeFunctionData(
     functionFragment: "getTokenMetadata",
@@ -433,6 +438,10 @@ export interface DepositoryInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "entityProvider",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "getCollateral",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -910,6 +919,12 @@ export interface Depository extends BaseContract {
 
   entityProvider: TypedContractMethod<[], [string], "view">;
 
+  getCollateral: TypedContractMethod<
+    [leftEntity: BytesLike, rightEntity: BytesLike, tokenId: BigNumberish],
+    [[bigint, bigint] & { collateral: bigint; ondelta: bigint }],
+    "view"
+  >;
+
   getTokenMetadata: TypedContractMethod<
     [tokenId: BigNumberish],
     [
@@ -1134,6 +1149,13 @@ export interface Depository extends BaseContract {
   getFunction(
     nameOrSignature: "entityProvider"
   ): TypedContractMethod<[], [string], "view">;
+  getFunction(
+    nameOrSignature: "getCollateral"
+  ): TypedContractMethod<
+    [leftEntity: BytesLike, rightEntity: BytesLike, tokenId: BigNumberish],
+    [[bigint, bigint] & { collateral: bigint; ondelta: bigint }],
+    "view"
+  >;
   getFunction(
     nameOrSignature: "getTokenMetadata"
   ): TypedContractMethod<

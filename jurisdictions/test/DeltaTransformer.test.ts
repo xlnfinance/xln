@@ -267,6 +267,61 @@ describe("DeltaTransformer", function () {
     expect(cumulative[0]).to.equal(BigInt(partialRatio - previouslyClaimed));
   });
 
+  it("uses timestamp deadlines for payment secrets from arguments and on-chain reveals", async function () {
+    const { transformer } = await loadFixture(deployFixture);
+
+    const secretValue = ethers.encodeBytes32String("payment-secret");
+    const hash = ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(["bytes32"], [secretValue]));
+    const deadline = (await time.latest()) + 60;
+    const batch = {
+      payment: [{
+        deltaIndex: 0,
+        amount: 7,
+        revealedUntilTimestamp: deadline,
+        hash,
+      }],
+      swap: [],
+      pull: [],
+    };
+    const encodedBatch = await transformer.encodeBatch(batch);
+    const leftArguments = encodeTransformerArguments([], [secretValue]);
+
+    const beforeDeadline = await transformer.applyBatchWithArgumentTimestamps.staticCall(
+      [0],
+      encodedBatch,
+      leftArguments,
+      "0x",
+      deadline,
+      deadline + 1,
+    );
+    expect(beforeDeadline[0]).to.equal(7n);
+
+    const afterDeadline = await transformer.applyBatchWithArgumentTimestamps.staticCall(
+      [0],
+      encodedBatch,
+      leftArguments,
+      "0x",
+      deadline + 1,
+      deadline + 1,
+    );
+    expect(afterDeadline[0]).to.equal(0n);
+
+    await transformer.revealSecret(secretValue);
+    const revealedAt = await transformer.hashToTimestamp(hash);
+    expect(revealedAt > 0n).to.equal(true);
+    expect(revealedAt <= BigInt(deadline)).to.equal(true);
+
+    const onChainReveal = await transformer.applyBatchWithArgumentTimestamps.staticCall(
+      [0],
+      encodedBatch,
+      "0x",
+      "0x",
+      deadline + 1,
+      deadline + 1,
+    );
+    expect(onChainReveal[0]).to.equal(7n);
+  });
+
   it("stores the first secret reveal block and rejects later overwrites", async function () {
     const { transformer } = await loadFixture(deployFixture);
 
@@ -277,6 +332,7 @@ describe("DeltaTransformer", function () {
     const firstRevealBlock = await transformer.hashToBlock(hash);
 
     expect(firstRevealBlock > 0n).to.equal(true);
+    expect((await transformer.hashToTimestamp(hash)) > 0n).to.equal(true);
     expect(await transformer.hashRevealed(hash)).to.equal(true);
     await expect(transformer.revealSecret(secret)).to.be.revertedWithCustomError(transformer, "AlreadyRevealed");
     expect(await transformer.hashToBlock(hash)).to.equal(firstRevealBlock);

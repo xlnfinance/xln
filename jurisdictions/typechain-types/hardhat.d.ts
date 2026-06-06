@@ -154,6 +154,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.MockEntityProvider__factory>;
     getContractFactory(
+      name: "NoReturnERC20Mock",
+      signerOrOptions?: ethers.Signer | FactoryOptions
+    ): Promise<Contracts.NoReturnERC20Mock__factory>;
+    getContractFactory(
       name: "Token",
       signerOrOptions?: ethers.Signer | FactoryOptions
     ): Promise<Contracts.Token__factory>;
@@ -334,6 +338,11 @@ declare module "hardhat/types/runtime" {
       signer?: ethers.Signer
     ): Promise<Contracts.MockEntityProvider>;
     getContractAt(
+      name: "NoReturnERC20Mock",
+      address: string | ethers.Addressable,
+      signer?: ethers.Signer
+    ): Promise<Contracts.NoReturnERC20Mock>;
+    getContractAt(
       name: "Token",
       address: string | ethers.Addressable,
       signer?: ethers.Signer
@@ -480,6 +489,10 @@ declare module "hardhat/types/runtime" {
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.MockEntityProvider>;
     deployContract(
+      name: "NoReturnERC20Mock",
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.NoReturnERC20Mock>;
+    deployContract(
       name: "Token",
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.Token>;
@@ -659,6 +672,11 @@ declare module "hardhat/types/runtime" {
       args: any[],
       signerOrOptions?: ethers.Signer | DeployContractOptions
     ): Promise<Contracts.MockEntityProvider>;
+    deployContract(
+      name: "NoReturnERC20Mock",
+      args: any[],
+      signerOrOptions?: ethers.Signer | DeployContractOptions
+    ): Promise<Contracts.NoReturnERC20Mock>;
     deployContract(
       name: "Token",
       args: any[],

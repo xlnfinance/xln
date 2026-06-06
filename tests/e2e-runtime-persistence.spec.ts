@@ -396,12 +396,12 @@ async function readSwapState(page: Page, entityId: string, signerId: string, cou
 async function placeNonMarketableSwapOrder(page: Page, counterpartyId: string): Promise<void> {
   await openSwapWorkspace(page);
   await selectCounterpartyInSwap(page, counterpartyId);
-  const pairSelect = page.getByTestId('swap-pair-select').first();
-  await expect(pairSelect).toBeVisible({ timeout: 20_000 });
-  await pairSelect.selectOption({ label: 'WETH/USDC' });
-  const buySideButton = page.getByTestId('swap-side-buy').first();
-  await expect(buySideButton).toBeVisible({ timeout: 20_000 });
-  await buySideButton.click();
+  const fromTokenSelect = page.getByTestId('swap-from-token-select').first();
+  const toTokenSelect = page.getByTestId('swap-to-token-select').first();
+  await expect(fromTokenSelect).toBeVisible({ timeout: 20_000 });
+  await expect(toTokenSelect).toBeVisible({ timeout: 20_000 });
+  await fromTokenSelect.selectOption('1');
+  await toTokenSelect.selectOption('2');
   const amountInput = page.getByTestId('swap-order-amount').first();
   const priceInput = page.getByTestId('swap-order-price').first();
   await expect(amountInput).toBeVisible({ timeout: 20_000 });

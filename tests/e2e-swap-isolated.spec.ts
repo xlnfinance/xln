@@ -25,6 +25,11 @@ const INIT_TIMEOUT = 30_000;
 const APP_BASE_URL = requireIsolatedBaseUrl('E2E_BASE_URL');
 const API_BASE_URL = requireIsolatedBaseUrl('E2E_API_BASE_URL');
 const SWAP_CONNECT_TOKEN_IDS = [1, 2] as const;
+const SWAP_TOKEN_BY_SYMBOL: Record<string, string> = {
+  USDC: '1',
+  WETH: '2',
+  USDT: '3',
+};
 
 type SwapRuntimeWindow = typeof window & {
   isolatedEnv?: {
@@ -422,15 +427,26 @@ async function selectCounterpartyInSwap(page: Page, preferredAccountId?: string)
 
 async function configurePair(page: Page, pairLabel: string, side: 'buy' | 'sell'): Promise<void> {
   await dismissSwapCompletionModalIfVisible(page);
-  const pairSelect = page.getByTestId('swap-pair-select').first();
-  await pairSelect.scrollIntoViewIfNeeded().catch(() => {});
-  await expect(pairSelect).toBeVisible({ timeout: 20_000 });
-  await pairSelect.selectOption({ label: pairLabel });
-  const sideButton = side === 'buy'
-    ? page.getByTestId('swap-side-buy').first()
-    : page.getByTestId('swap-side-sell').first();
-  await expect(sideButton).toBeVisible({ timeout: 20_000 });
-  await sideButton.click();
+  const [baseSymbol, quoteSymbol] = pairLabel.split('/');
+  const baseToken = SWAP_TOKEN_BY_SYMBOL[String(baseSymbol || '').trim().toUpperCase()];
+  const quoteToken = SWAP_TOKEN_BY_SYMBOL[String(quoteSymbol || '').trim().toUpperCase()];
+  if (!baseToken || !quoteToken) throw new Error(`Unsupported swap pair label: ${pairLabel}`);
+  const fromToken = side === 'buy' ? quoteToken : baseToken;
+  const toToken = side === 'buy' ? baseToken : quoteToken;
+  const fromTokenSelect = page.getByTestId('swap-from-token-select').first();
+  const toTokenSelect = page.getByTestId('swap-to-token-select').first();
+  await expect(fromTokenSelect).toBeVisible({ timeout: 20_000 });
+  await expect(toTokenSelect).toBeVisible({ timeout: 20_000 });
+  await fromTokenSelect.selectOption(fromToken);
+  await toTokenSelect.selectOption(toToken);
+}
+
+async function ensureOrderbookVisible(page: Page): Promise<void> {
+  if (await page.getByTestId('swap-orderbook').first().isVisible({ timeout: 500 }).catch(() => false)) return;
+  const toggle = page.getByTestId('swap-orderbook-toggle').first();
+  await expect(toggle).toBeVisible({ timeout: 20_000 });
+  await toggle.click();
+  await expect(page.getByTestId('swap-orderbook').first()).toBeVisible({ timeout: 20_000 });
 }
 
 async function dismissSwapCompletionModalIfVisible(page: Page): Promise<void> {
@@ -441,18 +457,19 @@ async function dismissSwapCompletionModalIfVisible(page: Page): Promise<void> {
 }
 
 async function ensureSelectedScope(page: Page): Promise<void> {
+  await ensureOrderbookVisible(page);
   const toggle = page.getByTestId('swap-scope-toggle').first();
   await expect(toggle).toBeVisible({ timeout: 20_000 });
   await expect
-    .poll(async () => String(await toggle.textContent().catch(() => '')).trim(), {
+    .poll(async () => String(await toggle.getAttribute('data-scope-mode').catch(() => '') || '').trim(), {
       timeout: 10_000,
       intervals: [100, 250, 500],
     })
     .toBeTruthy();
-  if (String(await toggle.textContent() || '').trim() !== 'Selected') {
+  if (String(await toggle.getAttribute('data-scope-mode') || '').trim() !== 'selected') {
     await toggle.click();
   }
-  await expect(toggle).toHaveText('Selected', { timeout: 10_000 });
+  await expect(toggle).toHaveAttribute('data-scope-mode', 'selected', { timeout: 10_000 });
 }
 
 async function readAvailableSwapAmount(page: Page): Promise<number> {

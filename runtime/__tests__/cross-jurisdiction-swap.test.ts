@@ -29,6 +29,7 @@ import {
   withCanonicalCrossJurisdictionRouteHash,
   cloneCrossJurisdictionRoute,
 } from '../cross-jurisdiction';
+import { buildCrossJurisdictionMarketOffer } from '../cross-jurisdiction-orderbook';
 import { verifyHashLadderBinary } from '../hashladder';
 import {
   buildJEventObservationDigest,
@@ -2203,5 +2204,58 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect('submitCrossJurisdictionSourceLock' in runtime).toBe(false);
     expect('submitCrossJurisdictionTargetLock' in runtime).toBe(false);
     expect('submitCrossJurisdictionSwapClaims' in runtime).toBe(false);
+  });
+
+  test('cross-j same-token market price uses jurisdiction asset orientation', () => {
+    const route = {
+      ...buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-same-token-market',
+      makerEntityId: entity('c1'),
+      hubEntityId: entity('c2'),
+      bookOwnerEntityId: entity('c3'),
+      source: {
+        jurisdiction: 'stack:z:dep',
+        entityId: entity('c1'),
+        counterpartyEntityId: entity('c2'),
+        tokenId: 1,
+        amount: 2_000_000_000_000n,
+      },
+      target: {
+        jurisdiction: 'stack:a:dep',
+        entityId: entity('c3'),
+        counterpartyEntityId: entity('c4'),
+        tokenId: 1,
+        amount: 1_000_000_000_000n,
+      },
+      status: 'resting',
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      expiresAt: 61_000,
+      priceTicks: 1n,
+      }, { runtimeSeed: 'cross-same-token-market', sourceDisputeDelayMs: 5_000, now: 1_000 }),
+      status: 'resting' as const,
+    };
+    const market = buildCrossJurisdictionMarketOffer({
+      offerId: route.orderId,
+      accountId: route.source.entityId,
+      makerIsLeft: true,
+      fromEntity: route.source.entityId,
+      toEntity: route.source.counterpartyEntityId,
+      giveTokenId: 1,
+      giveAmount: route.source.amount,
+      wantTokenId: 1,
+      wantAmount: route.target.amount,
+      priceTicks: 1n,
+      timeInForce: 0,
+      minFillRatio: 0,
+      createdHeight: 1,
+      crossJurisdiction: route,
+    }, route.bookOwnerEntityId || '');
+
+    expect(market?.pairId).toBe('cross:stack:a:dep:1/stack:z:dep:1');
+    expect(market?.side).toBe(0);
+    expect(market?.baseAmount).toBe(1_000_000_000_000n);
+    expect(market?.quoteAmount).toBe(2_000_000_000_000n);
+    expect(market?.priceTicks).toBe(20_000n);
   });
 });

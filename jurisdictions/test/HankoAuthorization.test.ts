@@ -34,6 +34,26 @@ function buildHighSHanko(entityId: string, hash: string, privateKey: string): st
   ]]);
 }
 
+function buildSingleSignerClaimHanko(
+  entityId: string,
+  hash: string,
+  privateKey: string,
+  placeholders: string[],
+  entityIndexes: number[],
+  weights: bigint[],
+  threshold: bigint,
+): string {
+  const signingKey = new ethers.SigningKey(privateKey);
+  const signature = signingKey.sign(ethers.getBytes(hash));
+  const vBit = signature.v === 28 ? 1 : 0;
+  const packedSig = ethers.concat([signature.r, signature.s, ethers.toBeHex(vBit, 1)]);
+  return ethers.AbiCoder.defaultAbiCoder().encode(HANKO_ABI, [[
+    placeholders,
+    packedSig,
+    [[ethers.zeroPadValue(entityId, 32), entityIndexes, weights, threshold]],
+  ]]);
+}
+
 function buildRecoverEntityInputs(signerAddress: string, hash: string, privateKey: string): { encodedBoard: string; encodedSignature: string; boardHash: string } {
   const signerEntityId = ethers.zeroPadValue(signerAddress, 32);
   const encodedBoard = ethers.AbiCoder.defaultAbiCoder().encode(BOARD_ABI, [[
@@ -169,6 +189,35 @@ describe("Hanko Authorization", function () {
     expect(await depository.entityNonces(entity1Id)).to.equal(0n);
     expect(await depository._reserves(entity1Id, tokenId)).to.equal(1_000n);
     expect(await depository._reserves(entity2Id, tokenId)).to.equal(0n);
+  });
+
+  it("rejects Hanko claim weights that would truncate below the board hash width", async function () {
+    const { entityProvider, entity1, entity2 } = await loadFixture(deployFixture);
+    const hash = ethers.keccak256(ethers.toUtf8Bytes("weight truncation"));
+    const entity1Member = addressEntityId(entity1.address);
+    const entity2Member = addressEntityId(entity2.address);
+    const encodedBoard = ethers.AbiCoder.defaultAbiCoder().encode(BOARD_ABI, [[
+      2,
+      [entity1Member, entity2Member],
+      [1, 1],
+      0,
+      0,
+      0,
+    ]]);
+    const lazyEntityId = ethers.keccak256(encodedBoard);
+    const maliciousHanko = buildSingleSignerClaimHanko(
+      lazyEntityId,
+      hash,
+      deriveHardhatPrivateKey(1),
+      [entity2Member],
+      [1, 0],
+      [65537n, 1n],
+      2n,
+    );
+
+    await expect(
+      entityProvider.verifyHankoSignature(maliciousHanko, hash),
+    ).to.be.revertedWithCustomError(entityProvider, "InvalidHankoWeight");
   });
 
   it("recoverEntity uses the board hash index for registered entities", async function () {

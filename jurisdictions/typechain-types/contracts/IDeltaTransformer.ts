@@ -24,19 +24,19 @@ export declare namespace IDeltaTransformer {
   export type PaymentStruct = {
     deltaIndex: BigNumberish;
     amount: BigNumberish;
-    revealedUntilBlock: BigNumberish;
+    revealedUntilTimestamp: BigNumberish;
     hash: BytesLike;
   };
 
   export type PaymentStructOutput = [
     deltaIndex: bigint,
     amount: bigint,
-    revealedUntilBlock: bigint,
+    revealedUntilTimestamp: bigint,
     hash: string
   ] & {
     deltaIndex: bigint;
     amount: bigint;
-    revealedUntilBlock: bigint;
+    revealedUntilTimestamp: bigint;
     hash: string;
   };
 
@@ -110,6 +110,7 @@ export interface IDeltaTransformerInterface extends Interface {
       | "applyBatch"
       | "encodeBatch"
       | "hashToBlock"
+      | "hashToTimestamp"
       | "revealSecret"
   ): FunctionFragment;
 
@@ -126,6 +127,10 @@ export interface IDeltaTransformerInterface extends Interface {
     values: [BytesLike]
   ): string;
   encodeFunctionData(
+    functionFragment: "hashToTimestamp",
+    values: [BytesLike]
+  ): string;
+  encodeFunctionData(
     functionFragment: "revealSecret",
     values: [BytesLike]
   ): string;
@@ -137,6 +142,10 @@ export interface IDeltaTransformerInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "hashToBlock",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "hashToTimestamp",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -207,6 +216,8 @@ export interface IDeltaTransformer extends BaseContract {
 
   hashToBlock: TypedContractMethod<[hash: BytesLike], [bigint], "view">;
 
+  hashToTimestamp: TypedContractMethod<[hash: BytesLike], [bigint], "view">;
+
   revealSecret: TypedContractMethod<[secret: BytesLike], [void], "nonpayable">;
 
   getFunction<T extends ContractMethod = ContractMethod>(
@@ -230,6 +241,9 @@ export interface IDeltaTransformer extends BaseContract {
   ): TypedContractMethod<[b: IDeltaTransformer.BatchStruct], [string], "view">;
   getFunction(
     nameOrSignature: "hashToBlock"
+  ): TypedContractMethod<[hash: BytesLike], [bigint], "view">;
+  getFunction(
+    nameOrSignature: "hashToTimestamp"
   ): TypedContractMethod<[hash: BytesLike], [bigint], "view">;
   getFunction(
     nameOrSignature: "revealSecret"

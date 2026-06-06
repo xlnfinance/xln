@@ -704,14 +704,12 @@ async function selectCounterpartyInSwap(page: Page, hubId: string): Promise<void
 }
 
 async function configurePair(page: Page, side: 'buy' | 'sell'): Promise<void> {
-  const pairSelect = page.getByTestId('swap-pair-select').first();
-  await expect(pairSelect).toBeVisible({ timeout: 20_000 });
-  await pairSelect.selectOption({ label: 'WETH/USDC' });
-  const sideButton = side === 'buy'
-    ? page.getByTestId('swap-side-buy').first()
-    : page.getByTestId('swap-side-sell').first();
-  await expect(sideButton).toBeVisible({ timeout: 20_000 });
-  await sideButton.click();
+  const fromTokenSelect = page.getByTestId('swap-from-token-select').first();
+  const toTokenSelect = page.getByTestId('swap-to-token-select').first();
+  await expect(fromTokenSelect).toBeVisible({ timeout: 20_000 });
+  await expect(toTokenSelect).toBeVisible({ timeout: 20_000 });
+  await fromTokenSelect.selectOption(String(side === 'buy' ? USDC : WETH));
+  await toTokenSelect.selectOption(String(side === 'buy' ? WETH : USDC));
 }
 
 async function selectCrossRoute(page: Page, targetEntityId: string): Promise<void> {

@@ -564,6 +564,157 @@ describe("Depository", function () {
     expect(await depository.entityNonces(left.entityId)).to.equal(1n);
   });
 
+  it("requires counterparty hanko for empty settlements too", async function () {
+    const { depository } = await loadFixture(deployFixture);
+
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+    const settlementNonce = 1n;
+
+    const unsignedSettlement = {
+      leftEntity: left.entityId,
+      rightEntity: right.entityId,
+      diffs: [],
+      forgiveDebtsInTokenIds: [],
+      sig: "0x",
+      entityProvider: ethers.ZeroAddress,
+      hankoData: "0x",
+      nonce: settlementNonce,
+    };
+
+    const unsignedBatch = emptyBatch({ settlements: [unsignedSettlement] });
+    const unsigned = await signDepositoryBatch(depository, left.entityId, left.privateKey, unsignedBatch);
+    await expect(
+      depository.connect(left.signer).processBatch(unsigned.encodedBatch, unsigned.hankoData, unsigned.nonce)
+    ).to.be.revertedWith("Signature required for settlement");
+
+    expect((await depository._accounts(acctKey)).nonce).to.equal(0n);
+    expect(await depository.entityNonces(left.entityId)).to.equal(0n);
+
+    const settlementHash = await cooperativeUpdateHash(depository, acctKey, settlementNonce, []);
+    const signedSettlement = {
+      ...unsignedSettlement,
+      sig: signEntityHash(right.entityId, settlementHash, right.privateKey),
+    };
+    const signedBatch = emptyBatch({ settlements: [signedSettlement] });
+    const signed = await signDepositoryBatch(depository, left.entityId, left.privateKey, signedBatch);
+
+    await expect(
+      depository.connect(left.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce)
+    ).to.not.be.reverted;
+
+    expect((await depository._accounts(acctKey)).nonce).to.equal(settlementNonce);
+    expect(await depository.entityNonces(left.entityId)).to.equal(1n);
+  });
+
+  it("blocks cooperative settlement and C2R while a dispute is active", async function () {
+    const { depository } = await loadFixture(deployFixture);
+
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const tokenId = 1n;
+    await depository.mintToReserve(left.entityId, tokenId, 300n);
+
+    const fundCollateralBatch = emptyBatch({
+      reserveToCollateral: [{
+        tokenId,
+        receivingEntity: left.entityId,
+        pairs: [{ entity: right.entityId, amount: 100n }],
+      }],
+    });
+    const fundCollateral = await signDepositoryBatch(depository, left.entityId, left.privateKey, fundCollateralBatch);
+    await depository.connect(left.signer).processBatch(
+      fundCollateral.encodedBatch,
+      fundCollateral.hankoData,
+      fundCollateral.nonce,
+    );
+
+    const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+    const [collateral, ondelta] = await depository.getCollateral(left.entityId, right.entityId, tokenId);
+    expect(collateral).to.equal(100n);
+    expect(ondelta).to.equal(100n);
+
+    const initialProofbody = proofBody([0n], [tokenId]);
+    const initialProofbodyHash = proofBodyHash(initialProofbody);
+    const disputeNonce = 1n;
+    const startHash = await disputeProofHash(depository, acctKey, disputeNonce, initialProofbodyHash);
+    const startSig = signEntityHash(right.entityId, startHash, right.privateKey);
+    const startBatch = emptyBatch({
+      disputeStarts: [{
+        counterentity: right.entityId,
+        nonce: disputeNonce,
+        proofbodyHash: initialProofbodyHash,
+        sig: startSig,
+        initialArguments: "0x",
+      }],
+    });
+    const start = await signDepositoryBatch(depository, left.entityId, left.privateKey, startBatch);
+    await depository.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
+
+    expect((await depository._accounts(acctKey)).disputeHash).to.not.equal(ethers.ZeroHash);
+
+    const settlementNonce = 2n;
+    const settlementDiffs = [{
+      tokenId,
+      leftDiff: -1n,
+      rightDiff: 1n,
+      collateralDiff: 0n,
+      ondeltaDiff: 0n,
+    }];
+    const settlementSig = signEntityHash(
+      right.entityId,
+      await cooperativeUpdateHash(depository, acctKey, settlementNonce, settlementDiffs),
+      right.privateKey,
+    );
+    const settlementBatch = emptyBatch({
+      settlements: [{
+        leftEntity: left.entityId,
+        rightEntity: right.entityId,
+        diffs: settlementDiffs,
+        forgiveDebtsInTokenIds: [],
+        sig: settlementSig,
+        entityProvider: ethers.ZeroAddress,
+        hankoData: "0x",
+        nonce: settlementNonce,
+      }],
+    });
+    const settlement = await signDepositoryBatch(depository, left.entityId, left.privateKey, settlementBatch);
+
+    await expect(
+      depository.connect(left.signer).processBatch(settlement.encodedBatch, settlement.hankoData, settlement.nonce)
+    ).to.be.revertedWithCustomError(depository, "E6");
+
+    const c2rDiffs = [{
+      tokenId,
+      leftDiff: 1n,
+      rightDiff: 0n,
+      collateralDiff: -1n,
+      ondeltaDiff: -1n,
+    }];
+    const c2rSig = signEntityHash(
+      right.entityId,
+      await cooperativeUpdateHash(depository, acctKey, settlementNonce, c2rDiffs),
+      right.privateKey,
+    );
+    const c2rBatch = emptyBatch({
+      collateralToReserve: [{
+        counterparty: right.entityId,
+        tokenId,
+        amount: 1n,
+        nonce: settlementNonce,
+        sig: c2rSig,
+      }],
+    });
+    const c2r = await signDepositoryBatch(depository, left.entityId, left.privateKey, c2rBatch);
+
+    await expect(
+      depository.connect(left.signer).processBatch(c2r.encodedBatch, c2r.hankoData, c2r.nonce)
+    ).to.be.revertedWithCustomError(depository, "E6");
+
+    expect((await depository._accounts(acctKey)).nonce).to.equal(disputeNonce);
+    expect(await depository._reserves(left.entityId, tokenId)).to.equal(200n);
+    expect(await depository._reserves(right.entityId, tokenId)).to.equal(0n);
+  });
+
   it("rejects duplicate tokenIds inside one settlement diff", async function () {
     const { depository } = await loadFixture(deployFixture);
 
@@ -1191,6 +1342,49 @@ describe("Depository", function () {
     ).to.be.revertedWithCustomError(depository, "E3");
 
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(100n);
+    expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(200n);
+
+    const blockedSettlementNonce = 3n;
+    const blockedSettlementDiffs = [{
+      tokenId,
+      leftDiff: -1n,
+      rightDiff: 1n,
+      collateralDiff: 0n,
+      ondeltaDiff: 0n,
+    }];
+    const blockedSettlementSig = signEntityHash(
+      right.entityId,
+      await cooperativeUpdateHash(depository, acctKey, blockedSettlementNonce, blockedSettlementDiffs),
+      right.privateKey,
+    );
+    const blockedSettlementBatch = emptyBatch({
+      settlements: [{
+        leftEntity: left.entityId,
+        rightEntity: right.entityId,
+        diffs: blockedSettlementDiffs,
+        forgiveDebtsInTokenIds: [],
+        sig: blockedSettlementSig,
+        entityProvider: ethers.ZeroAddress,
+        hankoData: "0x",
+        nonce: blockedSettlementNonce,
+      }],
+    });
+    const blockedSettlement = await signDepositoryBatch(
+      depository,
+      left.entityId,
+      left.privateKey,
+      blockedSettlementBatch,
+    );
+    await expect(
+      depository.connect(left.signer).processBatch(
+        blockedSettlement.encodedBatch,
+        blockedSettlement.hankoData,
+        blockedSettlement.nonce,
+      )
+    ).to.be.revertedWithCustomError(depository, "E3");
+
+    expect(await depository._reserves(left.entityId, tokenId)).to.equal(100n);
+    expect(await depository._reserves(right.entityId, tokenId)).to.equal(100n);
     expect(await depository.debtOutstanding(left.entityId, tokenId)).to.equal(200n);
 
     await depository.enforceDebts(left.entityId, tokenId, 32);

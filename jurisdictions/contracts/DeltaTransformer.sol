@@ -1,9 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity ^0.8.24;
-import "./Token.sol";
 import "./HashLadder.sol";
 
-import "./ECDSA.sol";
 /* 
 Subcontracts - Programmable Delta Transformers
   function applyBatch(int[] memory deltas, bytes calldata encodedBatch,
@@ -24,6 +22,7 @@ contract DeltaTransformer {
   error InvalidDeltaIndex();
   error AlreadyRevealed();
   mapping(bytes32 => uint) public hashToBlock;
+  mapping(bytes32 => uint) public hashToTimestamp;
   mapping(bytes32 => bool) public hashRevealed;
   uint256 constant MAX_FILL_RATIO = type(uint16).max;
 
@@ -37,7 +36,7 @@ contract DeltaTransformer {
   struct Payment {
     uint deltaIndex;
     int amount;
-    uint revealedUntilBlock;
+    uint revealedUntilTimestamp;
     bytes32 hash;
   }
 
@@ -111,7 +110,7 @@ contract DeltaTransformer {
     Arguments memory right = _decodeArguments(rightArguments);
     
     for (uint i = 0; i < decodedBatch.payment.length; i++) {
-      applyPayment(deltas, decodedBatch.payment[i], left.secrets, right.secrets);
+      applyPayment(deltas, decodedBatch.payment[i], left.secrets, right.secrets, leftArgumentsTimestamp, rightArgumentsTimestamp);
     }
 
     uint leftSwaps = 0;
@@ -165,15 +164,25 @@ contract DeltaTransformer {
     return abi.decode(encoded, (Arguments));
   }
 
-  function applyPayment(int[] memory deltas, Payment memory payment, bytes32[] memory lSecrets, bytes32[] memory rSecrets) private view {
+  function applyPayment(
+    int[] memory deltas,
+    Payment memory payment,
+    bytes32[] memory lSecrets,
+    bytes32[] memory rSecrets,
+    uint leftArgumentsTimestamp,
+    uint rightArgumentsTimestamp
+  ) private view {
     // Apply amount when the hash was revealed on chain or supplied in settlement calldata.
-    uint revealedAt = hashToBlock[payment.hash];
+    uint revealedAt = hashToTimestamp[payment.hash];
     bool revealed = false;
-    if (revealedAt != 0 && revealedAt <= payment.revealedUntilBlock) {
+    if (revealedAt != 0 && revealedAt <= payment.revealedUntilTimestamp) {
       revealed = true;
     }
-    if (!revealed && block.number <= payment.revealedUntilBlock) {
-      if (matchesSecret(payment.hash, lSecrets) || matchesSecret(payment.hash, rSecrets)) {
+    if (!revealed) {
+      if (leftArgumentsTimestamp <= payment.revealedUntilTimestamp && matchesSecret(payment.hash, lSecrets)) {
+        revealed = true;
+      }
+      if (!revealed && rightArgumentsTimestamp <= payment.revealedUntilTimestamp && matchesSecret(payment.hash, rSecrets)) {
         revealed = true;
       }
     }
@@ -263,6 +272,7 @@ contract DeltaTransformer {
     if (hashRevealed[hash]) revert AlreadyRevealed();
     hashRevealed[hash] = true;
     hashToBlock[hash] = block.number;
+    hashToTimestamp[hash] = block.timestamp;
   }
   
   // anyone can get gas refund by deleting very old revealed secrets

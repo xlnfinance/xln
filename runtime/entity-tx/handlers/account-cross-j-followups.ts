@@ -175,19 +175,25 @@ const queueBookAdmissionOnCommittedPull = (
     if (!committedPullMatchesRoute(accountTx, route, leg)) {
       throw new Error(`CROSS_J_COMMITTED_PULL_ROUTE_MISMATCH: route=${route.orderId} leg=${leg} pull=${accountTx.data.pullId}`);
     }
+    const committedAt = Number(newState.timestamp || env.timestamp || 0);
+    const admissionRoute = cloneCrossJurisdictionRoute(route);
+    if (leg === 'source') {
+      admissionRoute.status = 'resting';
+      admissionRoute.updatedAt = committedAt;
+    }
     const receipt = buildCrossJurisdictionBookAdmissionReceipt(
-      route,
+      admissionRoute,
       leg,
       accountTx,
       newState.entityId,
       counterpartyId,
-      Number(newState.timestamp || env.timestamp || 0),
+      committedAt,
     );
 
     outputs.push(buildCrossJurisdictionEntityOutput(env, routeBookOwnerEntityId(route), [{
       type: 'admitCrossJurisdictionBookOrder',
       data: {
-        route: cloneCrossJurisdictionRoute(route),
+        route: admissionRoute,
         receipt,
         reason: `${leg}_pull_committed`,
       },
