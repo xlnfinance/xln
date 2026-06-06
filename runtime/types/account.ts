@@ -223,7 +223,7 @@ export interface AccountMachine {
     htlcLocks?: Array<{
       deltaIndex: number;       // Index in tokenIds array
       amount: bigint;
-      revealedUntilBlock: number; // revealBeforeHeight
+      revealedUntilTimestamp: number; // Unix-second deadline
       hash: string;             // hashlock
     }>;
   };

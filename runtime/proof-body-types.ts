@@ -63,7 +63,7 @@ export interface RuntimeBatch {
 export interface RuntimePayment {
   deltaIndex: number;            // Index in tokenIds array
   amount: bigint;                // int256 - positive = right owes left after reveal
-  revealedUntilBlock: number;    // Block deadline for secret reveal
+  revealedUntilTimestamp: number; // Unix-second deadline for on-chain/argument secret reveal
   hash: string;                  // bytes32 hashlock
 }
 
@@ -167,7 +167,7 @@ export const BATCH_ABI = {
       components: [
         { name: 'deltaIndex', type: 'uint256' },
         { name: 'amount', type: 'int256' },
-        { name: 'revealedUntilBlock', type: 'uint256' },
+        { name: 'revealedUntilTimestamp', type: 'uint256' },
         { name: 'hash', type: 'bytes32' },
       ],
     },

@@ -29,6 +29,8 @@ import {
 import {
   buildCrossJurisdictionFillAck,
   buildCrossJurisdictionMarketOffer,
+  crossJurisdictionBookAdmissionKeyFor,
+  getCrossJurisdictionRouteRemainingAmounts,
   markCrossJurisdictionBookAdmissionClosed,
   type CrossJurisdictionFillInstruction,
   type CrossMarketOffer,
@@ -53,6 +55,8 @@ const orderbookLog = createStructuredLogger('orderbook');
 type OrderbookProcessOptions = {
   debugRebuildProjectionOnly?: boolean;
 };
+
+const normalizeEntityRef = (value: string): string => String(value || '').trim().toLowerCase();
 
 
 /**
@@ -419,6 +423,40 @@ export function processOrderbookSwaps(
     return buildCrossJurisdictionMarketOffer(offer, hubState.entityId);
   };
 
+  const synthesizeCrossOfferFromRoute = (
+    accountId: string,
+    route: NonNullable<NormalizedOrderbookOffer['crossJurisdiction']>,
+  ): NormalizedOrderbookOffer => {
+    const remaining = getCrossJurisdictionRouteRemainingAmounts(route);
+    return normalizeSwapOfferForOrderbook({
+      offerId: route.orderId,
+      accountId,
+      makerIsLeft: true,
+      fromEntity: route.source.entityId,
+      toEntity: route.source.counterpartyEntityId,
+      createdHeight: 0,
+      giveTokenId: Number(route.source.tokenId),
+      giveAmount: remaining.sourceRemaining,
+      wantTokenId: Number(route.target.tokenId),
+      wantAmount: remaining.targetRemaining,
+      ...(route.priceTicks !== undefined ? { priceTicks: BigInt(route.priceTicks) } : {}),
+      timeInForce: 0,
+      minFillRatio: 0,
+      crossJurisdiction: route,
+    }, accountId);
+  };
+
+  const findCrossRouteForBookOrder = (
+    accountId: string,
+    offerId: string,
+  ): NonNullable<NormalizedOrderbookOffer['crossJurisdiction']> | null => {
+    const admission = hubState.crossJurisdictionBookAdmissions?.get(crossJurisdictionBookAdmissionKeyFor(accountId, offerId));
+    if (admission?.route) return admission.route;
+    const route = hubState.crossJurisdictionSwaps?.get(offerId);
+    if (route && normalizeEntityRef(route.source.entityId) === normalizeEntityRef(accountId)) return route;
+    return null;
+  };
+
   const buildCrossMarketOfferFromBookOrder = (namespacedOrderId: string): CrossMarketOffer | null => {
     const lastColon = namespacedOrderId.lastIndexOf(':');
     if (lastColon === -1) return null;
@@ -426,7 +464,10 @@ export function processOrderbookSwaps(
     const offerId = namespacedOrderId.slice(lastColon + 1);
     const account = hubState.accounts.get(accountId);
     const offer = account?.swapOffers?.get(offerId);
-    if (!account || !offer?.crossJurisdiction) return null;
+    if (!account || !offer?.crossJurisdiction) {
+      const route = findCrossRouteForBookOrder(accountId, offerId);
+      return route ? buildCrossMarketOffer(synthesizeCrossOfferFromRoute(accountId, route)) : null;
+    }
     const entityRefs = resolveStoredOfferEntityRefs(account, offer);
     return buildCrossMarketOffer(normalizeSwapOfferForOrderbook(
       {
@@ -520,14 +561,41 @@ export function processOrderbookSwaps(
         currentBook = cancelNonWorkingBookOrder(pairId, currentBook, order, 'pending-cross-ack');
         continue;
       }
-      if (
+      const staticMismatch =
         meta.pairId !== pairId ||
         order.priceTicks !== meta.priceTicks ||
-        order.ownerId !== meta.makerId ||
-        BigInt(order.qtyLots) !== canonicalQtyLots
-      ) {
+        order.ownerId !== meta.makerId;
+      const storedQtyLots = BigInt(order.qtyLots);
+      const committedPartialNeedsRefresh =
+        !staticMismatch &&
+        meta.route.status === 'partially_filled' &&
+        storedQtyLots > canonicalQtyLots;
+      if (committedPartialNeedsRefresh) {
+        if (canonicalQtyLots > 0xFFFFFFFFn) {
+          throw new Error(`ORDERBOOK_CROSS_J_REFRESH_QTY_INVALID: pair=${pairId} order=${orderId} qty=${canonicalQtyLots.toString()}`);
+        }
+        currentBook = canonicalQtyLots > 0n
+          ? refreshRestingOrder(currentBook, {
+              ownerId: meta.makerId,
+              orderId,
+              side: meta.side,
+              priceTicks: meta.priceTicks,
+              qtyLots: Number(canonicalQtyLots),
+            })
+          : applyCommand(currentBook, {
+              kind: 1,
+              ownerId: meta.makerId,
+              orderId,
+            }).state;
+        bookUpdates.push({ pairId, book: currentBook });
+        continue;
+      }
+      if (staticMismatch || storedQtyLots !== canonicalQtyLots) {
         throw new Error(
           `ORDERBOOK_CROSS_J_CACHE_MISMATCH: pair=${pairId} order=${orderId} ` +
+          `storedPair=${pairId} canonicalPair=${meta.pairId} ` +
+          `storedOwner=${order.ownerId} canonicalOwner=${meta.makerId} ` +
+          `storedQty=${storedQtyLots.toString()} canonicalQty=${canonicalQtyLots.toString()} ` +
           `storedPrice=${order.priceTicks.toString()} canonicalPrice=${meta.priceTicks.toString()}`,
         );
       }

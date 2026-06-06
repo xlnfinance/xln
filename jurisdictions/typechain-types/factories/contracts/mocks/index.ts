@@ -3,3 +3,4 @@
 /* eslint-disable */
 export { HashLadderHarness__factory } from "./HashLadderHarness__factory";
 export { MockEntityProvider__factory } from "./MockEntityProvider__factory";
+export { NoReturnERC20Mock__factory } from "./NoReturnERC20Mock__factory";

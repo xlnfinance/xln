@@ -1,6 +1,7 @@
 import {
   CROSS_J_MAX_FILL_RATIO,
   cloneCrossJurisdictionRoute,
+  compareCrossJurisdictionRouteStatus,
   deriveCanonicalCrossJurisdictionMarket,
   isCrossJurisdictionPullExpired,
   isCrossJurisdictionRouteExpired,
@@ -21,6 +22,27 @@ import type {
   CrossJurisdictionSwapRoute,
   EntityState,
 } from './types';
+
+const mergeAdmissionRoute = (
+  existing: CrossJurisdictionSwapRoute | undefined,
+  next: CrossJurisdictionSwapRoute,
+): CrossJurisdictionSwapRoute => {
+  const canonicalNext = cloneCrossJurisdictionRoute(next);
+  if (!existing) return canonicalNext;
+
+  const canonicalExisting = cloneCrossJurisdictionRoute(existing);
+  const merged: CrossJurisdictionSwapRoute = {
+    ...canonicalExisting,
+    ...canonicalNext,
+  };
+  if (compareCrossJurisdictionRouteStatus(canonicalExisting.status, canonicalNext.status) < 0) {
+    merged.status = canonicalExisting.status;
+  }
+  if (canonicalExisting.sourcePull && !merged.sourcePull) merged.sourcePull = canonicalExisting.sourcePull;
+  if (canonicalExisting.targetPull && !merged.targetPull) merged.targetPull = canonicalExisting.targetPull;
+  if (canonicalExisting.routeHash && !merged.routeHash) merged.routeHash = canonicalExisting.routeHash;
+  return merged;
+};
 
 const normalizeEntityRef = (value: string): string => String(value || '').toLowerCase();
 
@@ -151,10 +173,11 @@ export const mergeCrossJurisdictionBookAdmission = (
   const key = crossJurisdictionBookAdmissionKey(canonicalRoute);
   currentEntityState.crossJurisdictionBookAdmissions ||= new Map();
   const existing = currentEntityState.crossJurisdictionBookAdmissions.get(key);
+  const mergedRoute = mergeAdmissionRoute(existing?.route, canonicalRoute);
   const current: CrossJurisdictionBookAdmission = existing
     ? {
         ...existing,
-        route: cloneCrossJurisdictionRoute(canonicalRoute),
+        route: mergedRoute,
         updatedAt: now,
       }
     : {
@@ -163,7 +186,7 @@ export const mergeCrossJurisdictionBookAdmission = (
         sourceEntityId: normalizeEntityRef(canonicalRoute.source.entityId),
         bookOwnerEntityId: crossJurisdictionBookOwnerRef(canonicalRoute),
         status: 'pending',
-        route: cloneCrossJurisdictionRoute(canonicalRoute),
+        route: mergedRoute,
         updatedAt: now,
       };
   if (receipt) {
@@ -319,6 +342,60 @@ export type CrossOrderbookFill = {
   weightedCost: bigint;
 };
 
+const clampCrossJurisdictionFillRatio = (value: unknown): number =>
+  Math.max(0, Math.min(CROSS_J_MAX_FILL_RATIO, Math.floor(Number(value) || 0)));
+
+export const getCrossJurisdictionRouteRemainingAmounts = (
+  route: CrossJurisdictionSwapRoute,
+): {
+  sourceTotal: bigint;
+  targetTotal: bigint;
+  filledSourceAmount: bigint;
+  filledTargetAmount: bigint;
+  sourceRemaining: bigint;
+  targetRemaining: bigint;
+  fillRatio: number;
+} => {
+  const sourceTotal = BigInt(route.source.amount);
+  const targetTotal = BigInt(route.target.amount);
+  if (sourceTotal <= 0n || targetTotal <= 0n) {
+    throw new Error(`CROSS_J_ROUTE_AMOUNT_INVALID: order=${route.orderId}`);
+  }
+  const fillRatio = Math.max(
+    clampCrossJurisdictionFillRatio(route.cumulativeFillRatio),
+    clampCrossJurisdictionFillRatio(route.claimedRatio),
+  );
+  const filledSourceAmount =
+    route.filledSourceAmount ??
+    route.sourceClaimed ??
+    ((sourceTotal * BigInt(fillRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO));
+  const filledTargetAmount =
+    route.filledTargetAmount ??
+    route.targetClaimed ??
+    ((targetTotal * BigInt(fillRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO));
+  if (
+    filledSourceAmount < 0n ||
+    filledTargetAmount < 0n ||
+    filledSourceAmount > sourceTotal ||
+    filledTargetAmount > targetTotal
+  ) {
+    throw new Error(
+      `CROSS_J_ROUTE_FILL_INVALID: order=${route.orderId} ` +
+      `source=${filledSourceAmount.toString()}/${sourceTotal.toString()} ` +
+      `target=${filledTargetAmount.toString()}/${targetTotal.toString()}`,
+    );
+  }
+  return {
+    sourceTotal,
+    targetTotal,
+    filledSourceAmount,
+    filledTargetAmount,
+    sourceRemaining: sourceTotal - filledSourceAmount,
+    targetRemaining: targetTotal - filledTargetAmount,
+    fillRatio,
+  };
+};
+
 export const computeCrossJurisdictionPriceTicks = (
   side: 0 | 1,
   baseAmount: bigint,
@@ -344,11 +421,13 @@ export const buildCrossJurisdictionMarketOffer = (
   const market = deriveCanonicalCrossJurisdictionMarket(route);
   if (!market.sourceKey || !market.targetKey || market.sourceKey === market.targetKey) return null;
   const side: 0 | 1 = market.sourceIsBase ? 1 : 0;
-  const baseAmount = side === 1 ? offer.giveAmount : offer.wantAmount;
-  const quoteAmount = side === 1 ? offer.wantAmount : offer.giveAmount;
-  const priceTicks = offer.priceTicks > 0n
-    ? offer.priceTicks
-    : computeCrossJurisdictionPriceTicks(side, baseAmount, quoteAmount);
+  const remaining = getCrossJurisdictionRouteRemainingAmounts(route);
+  const baseAmount = market.sourceIsBase ? remaining.sourceRemaining : remaining.targetRemaining;
+  const quoteAmount = market.sourceIsBase ? remaining.targetRemaining : remaining.sourceRemaining;
+  // Cross-j books are keyed by jurisdiction+token assets, not by token id alone.
+  // Route amounts are the committed economic intent, so derive book price from
+  // the committed route remainder instead of trusting the account offer view.
+  const priceTicks = computeCrossJurisdictionPriceTicks(side, baseAmount, quoteAmount);
   if (baseAmount <= 0n || quoteAmount <= 0n || priceTicks <= 0n) return null;
   return {
     offer,

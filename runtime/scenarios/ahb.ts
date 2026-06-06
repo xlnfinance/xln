@@ -1331,8 +1331,7 @@ export async function ahb(env: Env): Promise<void> {
     }
     console.log(`✅ ASSERT: Hub reserve ${hubPreReserve} → ${hubPostReserve} (+${formatUSD(rebalanceAmount)}) ✓`);
 
-    // NOTE: BrowserVM.getCollateral() requires public getter in Depository.sol (not implemented yet)
-    // Entity replica state already proves RJEA flow works correctly
+    // BrowserVM.getCollateral() is backed by Depository.getCollateral(); replica state mirrors the chain value.
 
     console.log(`   A-H after settlement: collateral=${ahDeltaRebal?.collateral}, ondelta=${ahDeltaRebal?.ondelta}`);
 
@@ -1454,8 +1453,7 @@ export async function ahb(env: Env): Promise<void> {
     }
     console.log(`✅ ASSERT: Hub reserve ${hubPreHBReserve} → ${hubPostHBReserve} (-$200K) ✓`);
 
-    // NOTE: BrowserVM.getCollateral() requires public getter in Depository.sol (not implemented yet)
-    // Entity replica state already proves RJEA flow works correctly
+    // BrowserVM.getCollateral() is backed by Depository.getCollateral(); replica state mirrors the chain value.
 
     console.log(`   H-B after settlement: collateral=${hbDeltaRebal?.collateral}, ondelta=${hbDeltaRebal?.ondelta}`);
 

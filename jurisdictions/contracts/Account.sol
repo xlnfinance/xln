@@ -136,6 +136,7 @@ library Account {
   /// @notice Process settlements - diffs only (debt handled by Depository)
   function processSettlements(
     mapping(bytes32 => mapping(uint256 => uint256)) storage _reserves,
+    mapping(bytes32 => mapping(uint256 => uint256)) storage debtOutstanding,
     mapping(bytes => AccountInfo) storage _accounts,
     mapping(bytes => mapping(uint256 => AccountCollateral)) storage _collaterals,
     bytes32 entityId,
@@ -144,7 +145,7 @@ library Account {
   ) external returns (bool completeSuccess) {
     completeSuccess = true;
     for (uint i = 0; i < settlements.length; i++) {
-      if (!_settleDiffs(_reserves, _accounts, _collaterals, entityId, settlements[i], entityProvider)) {
+      if (!_settleDiffs(_reserves, debtOutstanding, _accounts, _collaterals, entityId, settlements[i], entityProvider)) {
         completeSuccess = false;
       }
     }
@@ -163,6 +164,8 @@ library Account {
     bytes32 leftEntity = isLeft ? entityId : c2r.counterparty;
     bytes32 rightEntity = isLeft ? c2r.counterparty : entityId;
     bytes memory acct_key = _accountKey(leftEntity, rightEntity);
+
+    if (_accounts[acct_key].disputeHash != bytes32(0)) revert E6();
 
     // NONCE CHECK: signedNonce > storedNonce (strictly greater)
     if (c2r.nonce <= _accounts[acct_key].nonce) revert E2();
@@ -250,6 +253,7 @@ library Account {
 
   function _settleDiffs(
     mapping(bytes32 => mapping(uint256 => uint256)) storage _reserves,
+    mapping(bytes32 => mapping(uint256 => uint256)) storage debtOutstanding,
     mapping(bytes => AccountInfo) storage _accounts,
     mapping(bytes => mapping(uint256 => AccountCollateral)) storage _collaterals,
     bytes32 initiator,
@@ -264,6 +268,8 @@ library Account {
     bytes memory acct_key = _accountKey(leftEntity, rightEntity);
     bytes32 counterparty = (initiator == leftEntity) ? rightEntity : leftEntity;
 
+    if (_accounts[acct_key].disputeHash != bytes32(0)) revert E6();
+
     if (s.diffs.length > MAX_SETTLEMENT_DIFFS) revert E10();
     if (s.forgiveDebtsInTokenIds.length > MAX_SETTLEMENT_FORGIVENESS_IDS) revert E10();
     for (uint j = 0; j < s.diffs.length; j++) {
@@ -275,20 +281,17 @@ library Account {
     // NONCE CHECK: signedNonce > storedNonce (strictly greater)
     if (s.nonce <= _accounts[acct_key].nonce) revert E2();
 
-    // Counterparty signature REQUIRED for any state changes
-    if (s.diffs.length > 0 || s.forgiveDebtsInTokenIds.length > 0) {
-      require(s.sig.length > 0, "Signature required for settlement");
-      // Hash includes signedNonce (from settlement struct), not storedNonce
-      bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, address(this), acct_key, s.nonce, s.diffs, s.forgiveDebtsInTokenIds);
-      bytes32 hash = keccak256(encoded_msg);
+    require(s.sig.length > 0, "Signature required for settlement");
+    // Hash includes signedNonce (from settlement struct), not storedNonce
+    bytes memory encoded_msg = abi.encode(MessageType.CooperativeUpdate, address(this), acct_key, s.nonce, s.diffs, s.forgiveDebtsInTokenIds);
+    bytes32 hash = keccak256(encoded_msg);
 
-      try IEntityProvider(entityProvider).verifyHankoSignature(s.sig, hash) returns (bytes32 recoveredEntity, bool valid) {
-        if (!valid || recoveredEntity != counterparty) {
-          return false;
-        }
-      } catch {
+    try IEntityProvider(entityProvider).verifyHankoSignature(s.sig, hash) returns (bytes32 recoveredEntity, bool valid) {
+      if (!valid || recoveredEntity != counterparty) {
         return false;
       }
+    } catch {
+      return false;
     }
 
     // Apply diffs
@@ -298,7 +301,7 @@ library Account {
       if (diff.leftDiff + diff.rightDiff + diff.collateralDiff != 0) revert E2();
 
       if (diff.leftDiff < 0) {
-        if (_reserves[leftEntity][tokenId] < uint(-diff.leftDiff)) revert E3();
+        if (_spendableReserve(_reserves, debtOutstanding, leftEntity, tokenId) < uint(-diff.leftDiff)) revert E3();
         _reserves[leftEntity][tokenId] -= uint(-diff.leftDiff);
         emit ReserveUpdated(leftEntity, tokenId, _reserves[leftEntity][tokenId]);
       } else if (diff.leftDiff > 0) {
@@ -307,7 +310,7 @@ library Account {
       }
 
       if (diff.rightDiff < 0) {
-        if (_reserves[rightEntity][tokenId] < uint(-diff.rightDiff)) revert E3();
+        if (_spendableReserve(_reserves, debtOutstanding, rightEntity, tokenId) < uint(-diff.rightDiff)) revert E3();
         _reserves[rightEntity][tokenId] -= uint(-diff.rightDiff);
         emit ReserveUpdated(rightEntity, tokenId, _reserves[rightEntity][tokenId]);
       } else if (diff.rightDiff > 0) {
@@ -353,6 +356,17 @@ library Account {
     }
 
     return true;
+  }
+
+  function _spendableReserve(
+    mapping(bytes32 => mapping(uint256 => uint256)) storage _reserves,
+    mapping(bytes32 => mapping(uint256 => uint256)) storage debtOutstanding,
+    bytes32 entity,
+    uint256 tokenId
+  ) private view returns (uint256) {
+    uint256 reserve = _reserves[entity][tokenId];
+    uint256 debt = debtOutstanding[entity][tokenId];
+    return reserve > debt ? reserve - debt : 0;
   }
 
   // ========== DISPUTE START ==========

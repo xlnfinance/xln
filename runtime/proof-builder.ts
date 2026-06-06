@@ -147,11 +147,15 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
     // If senderIsLeft=true, left is sending to right → positive amount
     // If senderIsLeft=false, right is sending to left → negative amount
     const signedAmount = lock.senderIsLeft ? lock.amount : -lock.amount;
+    const revealedUntilTimestamp = Math.floor(Number(lock.timelock) / 1000);
+    if (!Number.isFinite(revealedUntilTimestamp) || revealedUntilTimestamp <= 0) {
+      throw new Error(`HTLC_LOCK_INVALID_TIMELOCK:${lockId}`);
+    }
 
     payments.push({
       deltaIndex,
       amount: signedAmount,
-      revealedUntilBlock: lock.revealBeforeHeight,
+      revealedUntilTimestamp,
       hash: lock.hashlock,
     });
   }
@@ -264,7 +268,7 @@ function runtimeToProofBodyStruct(runtime: RuntimeProofBody): ProofBodyStruct {
       payment: t.batch.payments.map(p => ({
         deltaIndex: BigInt(p.deltaIndex),
         amount: p.amount,
-        revealedUntilBlock: BigInt(p.revealedUntilBlock),
+        revealedUntilTimestamp: BigInt(p.revealedUntilTimestamp),
         hash: p.hash,
       })),
       swap: t.batch.swaps.map(s => ({

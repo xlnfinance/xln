@@ -20,7 +20,7 @@ interface IDeltaTransformer {
   struct Payment {
     uint deltaIndex;
     int amount;
-    uint revealedUntilBlock;
+    uint revealedUntilTimestamp;
     bytes32 hash;
   }
 
@@ -77,4 +77,5 @@ interface IDeltaTransformer {
    * @return blockNumber Block when revealed (0 if not revealed)
    */
   function hashToBlock(bytes32 hash) external view returns (uint);
+  function hashToTimestamp(bytes32 hash) external view returns (uint);
 }

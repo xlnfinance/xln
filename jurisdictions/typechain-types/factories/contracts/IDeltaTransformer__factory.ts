@@ -61,7 +61,7 @@ const _abi = [
               },
               {
                 internalType: "uint256",
-                name: "revealedUntilBlock",
+                name: "revealedUntilTimestamp",
                 type: "uint256",
               },
               {
@@ -169,6 +169,25 @@ const _abi = [
       },
     ],
     name: "hashToBlock",
+    outputs: [
+      {
+        internalType: "uint256",
+        name: "",
+        type: "uint256",
+      },
+    ],
+    stateMutability: "view",
+    type: "function",
+  },
+  {
+    inputs: [
+      {
+        internalType: "bytes32",
+        name: "hash",
+        type: "bytes32",
+      },
+    ],
+    name: "hashToTimestamp",
     outputs: [
       {
         internalType: "uint256",

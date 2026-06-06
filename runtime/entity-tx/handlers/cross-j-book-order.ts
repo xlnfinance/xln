@@ -1,5 +1,6 @@
 import {
   cloneCrossJurisdictionRoute,
+  compareCrossJurisdictionRouteStatus,
   isCrossJurisdictionTerminalStatus,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../cross-jurisdiction';
@@ -8,6 +9,7 @@ import {
   crossJurisdictionBookOwnerRef,
   getCrossJurisdictionBookAdmissionError,
   getCrossJurisdictionBookReceiptError,
+  getCrossJurisdictionRouteRemainingAmounts,
   isCrossJurisdictionBookAdmissionPending,
   markCrossJurisdictionBookAdmissionClosed,
   mergeCrossJurisdictionBookAdmission,
@@ -34,7 +36,28 @@ const buildCommittedCrossJurisdictionOfferEvent = (
   const accountId = findAccountKey(state, route.source.entityId);
   const account = accountId ? state.accounts.get(accountId) : undefined;
   const offer = account?.swapOffers?.get(route.orderId);
-  if (!accountId || !account || !offer?.crossJurisdiction) return null;
+  const remaining = getCrossJurisdictionRouteRemainingAmounts(route);
+  if (!accountId || !account || !offer?.crossJurisdiction) {
+    // The canonical cross-j book owner may be the target-side hub. In that
+    // case the source offer is committed on the sibling source hub, but this
+    // book owner still has both committed pull receipts and can safely expose
+    // the order to matching.
+    return {
+      offerId: route.orderId,
+      accountId: normalizeEntityRef(route.source.entityId),
+      makerIsLeft: true,
+      fromEntity: normalizeEntityRef(route.source.entityId),
+      toEntity: normalizeEntityRef(route.source.counterpartyEntityId),
+      createdHeight: 0,
+      giveTokenId: Number(route.source.tokenId),
+      giveAmount: remaining.sourceRemaining,
+      wantTokenId: Number(route.target.tokenId),
+      wantAmount: remaining.targetRemaining,
+      ...(route.priceTicks !== undefined ? { priceTicks: BigInt(route.priceTicks) } : {}),
+      minFillRatio: 0,
+      crossJurisdiction: cloneCrossJurisdictionRoute(route),
+    };
+  }
   return {
     offerId: route.orderId,
     accountId,
@@ -43,13 +66,13 @@ const buildCommittedCrossJurisdictionOfferEvent = (
     toEntity: account.rightEntity,
     createdHeight: offer.createdHeight,
     giveTokenId: offer.giveTokenId,
-    giveAmount: offer.giveAmount,
+    giveAmount: remaining.sourceRemaining,
     wantTokenId: offer.wantTokenId,
-    wantAmount: offer.wantAmount,
+    wantAmount: remaining.targetRemaining,
     ...(offer.priceTicks !== undefined ? { priceTicks: offer.priceTicks } : {}),
     ...(offer.timeInForce !== undefined ? { timeInForce: offer.timeInForce } : {}),
     minFillRatio: offer.minFillRatio,
-    crossJurisdiction: cloneCrossJurisdictionRoute(offer.crossJurisdiction),
+    crossJurisdiction: cloneCrossJurisdictionRoute(route),
   };
 };
 
@@ -85,15 +108,26 @@ export const handleAdmitCrossJurisdictionBookOrderEntityTx = (
   const existing = newState.crossJurisdictionSwaps.get(route.orderId);
   if (!existing || !isCrossJurisdictionTerminalStatus(existing.status)) {
     const transitionError = validateCrossJurisdictionRouteTransition(existing, route);
-    if (transitionError) {
+    const existingRouteHash = existing?.routeHash?.toLowerCase();
+    const routeHash = route.routeHash?.toLowerCase();
+    const staleSameRoute =
+      Boolean(existingRouteHash && routeHash) &&
+      existingRouteHash === routeHash &&
+      compareCrossJurisdictionRouteStatus(existing?.status, route.status) < 0;
+    if (transitionError && !staleSameRoute) {
       throw new Error(`CROSS_J_BOOK_ADMIT_ROUTE_INVALID: order=${route.orderId} ${transitionError}`);
     }
-    newState.crossJurisdictionSwaps.set(route.orderId, mergeCrossJurisdictionRoute(existing, route));
+    newState.crossJurisdictionSwaps.set(
+      route.orderId,
+      staleSameRoute && existing
+        ? mergeCrossJurisdictionRoute(route, existing)
+        : mergeCrossJurisdictionRoute(existing, route),
+    );
   }
 
   const admission = mergeCrossJurisdictionBookAdmission(newState, route, now, entityTx.data.receipt);
 
-  const offerEvent = buildCommittedCrossJurisdictionOfferEvent(newState, route);
+  const offerEvent = buildCommittedCrossJurisdictionOfferEvent(newState, admission.route);
   if (!offerEvent) {
     addMessage(newState, `🌉 Cross-j book admit ${route.orderId}: waiting source offer`);
     return { newState, outputs: [], swapOffersCreated: [] };
@@ -101,7 +135,7 @@ export const handleAdmitCrossJurisdictionBookOrderEntityTx = (
 
   const admissionError = getCrossJurisdictionBookAdmissionError(
     newState,
-    route,
+    admission.route,
     now,
   );
   if (admissionError) {

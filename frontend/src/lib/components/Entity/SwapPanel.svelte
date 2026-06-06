@@ -3,6 +3,7 @@
   import type { BookState, CrossJurisdictionSwapRoute, Delta, EntityState, Env, EnvSnapshot, RoutedEntityInput } from '@xln/runtime/xln-api';
   import {
     deriveCanonicalCrossJurisdictionBookOwnerForLegs,
+    deriveCanonicalCrossJurisdictionMarketForLegs,
     deriveCanonicalCrossJurisdictionVenueIdForLegs,
     getJurisdictionStackId,
     getBestAsk,
@@ -17,7 +18,6 @@
   import { prewarmCounterpartyProfiles } from '$lib/utils/p2pPrefetch';
   import { amountToUsd } from '$lib/utils/assetPricing';
   import OrderbookPanel from '../Trading/OrderbookPanel.svelte';
-  import SwapPairToolbar from './SwapPairToolbar.svelte';
   import { resolveEntityName } from '$lib/utils/entityNaming';
   import { formatEntityId } from '$lib/utils/format';
   import {
@@ -40,6 +40,7 @@
   let createOrderAccountId = '';
   let selectedBookAccountId = '';
   let activeOrderAccountId = '';
+  let showOrderbook = true;
   const AGGREGATED_ORDERBOOK_DEPTH = 10;
   const SELECTED_ORDERBOOK_DEPTH = 10;
   const ORDERBOOK_PRICE_SCALE = 10_000n;
@@ -162,7 +163,6 @@
   let submitError = '';
   let pendingSwapFeedbackOfferId = '';
   let swapCompletionModal: SwapCompletionModal | null = null;
-  let selectedPairValue = '';
   let tradeSide: 'buy-base' | 'sell-base' = 'buy-base';
   let hasAutoSuggestedInitialPrice = false;
   let hasUserEditedPriceInput = false;
@@ -206,6 +206,7 @@
   let crossAutoInboundCreditTarget: bigint | null = null;
   let crossCurrentPeerCreditLimit = 0n;
   let canAutoPrepareCrossInboundCapacity = false;
+  let placingSwapOffer = false;
   const MIN_ORDER_NOTIONAL_USD = 10;
   const FILLED_DISPLAY_PPM_THRESHOLD = 999_950n;
 
@@ -267,9 +268,27 @@
   $: activeOrderAccountId = orderbookScopeMode === 'aggregated'
     ? createOrderAccountId
     : selectedBookAccountId;
-  $: orderbookHubIds = orderbookScopeMode === 'aggregated'
-    ? hubAccountIds
-    : (selectedBookAccountId ? [selectedBookAccountId] : []);
+  $: activeBookHubId = (() => {
+    const sourceHubId = String(activeOrderAccountId || '').trim().toLowerCase();
+    if (swapRouteMode !== 'cross' || !selectedCrossTarget || !sourceHubId) return sourceHubId;
+    const sourceJurisdictionRef = getReplicaJurisdictionRef(currentReplica);
+    if (!sourceJurisdictionRef || !selectedCrossTarget.targetJurisdictionRef) return sourceHubId;
+    return deriveCanonicalCrossJurisdictionBookOwnerForLegs(
+      sourceJurisdictionRef,
+      giveToken,
+      sourceHubId,
+      selectedCrossTarget.targetJurisdictionRef,
+      wantToken,
+      selectedCrossTarget.targetHubEntityId,
+    );
+  })();
+  $: orderbookHubIds = swapRouteMode === 'cross'
+    ? (activeBookHubId ? [activeBookHubId] : [])
+    : (
+        orderbookScopeMode === 'aggregated'
+          ? hubAccountIds
+          : (selectedBookAccountId ? [selectedBookAccountId] : [])
+      );
   $: orderbookDepth = orderbookScopeMode === 'aggregated'
     ? AGGREGATED_ORDERBOOK_DEPTH
     : SELECTED_ORDERBOOK_DEPTH;
@@ -292,6 +311,9 @@
   $: if (!routeOptions.some((option) => option.value === selectedRouteValue)) {
     selectedRouteValue = 'same';
   }
+  $: if (selectedRouteValue !== 'same' && routeOptions.find((option) => option.value === selectedRouteValue)?.disabled) {
+    selectedRouteValue = 'same';
+  }
   $: swapRouteMode = selectedRouteValue === 'same' ? 'same' : 'cross';
   $: selectedCrossTargetValue = swapRouteMode === 'cross' ? selectedRouteValue : '';
   $: selectedCrossTarget = crossTargetOptions.find((option) => option.value === selectedCrossTargetValue) || null;
@@ -305,7 +327,9 @@
     : `${accountLabel(String(activeOrderAccountId || ''))} -> ${accountLabel(sourceEntityIdValue)}`;
   $: sourceChainLabel = selectedSourceEntity?.jurisdiction || sourceJurisdictionLabel;
   $: selectedRouteOption = routeOptions.find((option) => option.value === selectedRouteValue) || routeOptions[0] || null;
+  $: selectedRouteUnavailableReason = selectedRouteOption?.disabled ? selectedRouteOption.disabledReason || 'Selected route is unavailable.' : '';
   $: routeVenueLabel = activeOrderAccountId ? accountLabel(activeOrderAccountId) : 'Select venue';
+  $: bookVenueLabel = activeBookHubId ? accountLabel(activeBookHubId) : routeVenueLabel;
   $: selectedSourceEntityLabel = selectedSourceEntity?.label || sourceChainLabel || '';
   $: selectedRouteLabel = selectedRouteOption?.label || '';
   $: selectedHubLabel = selectedHubOption?.label || routeVenueLabel || '';
@@ -360,6 +384,7 @@
     targetJurisdictionRef: string;
     targetLabel: string;
     disabled?: boolean;
+    disabledReason?: string;
   };
   type OfferLike = {
     giveTokenId: number;
@@ -367,6 +392,11 @@
     giveAmount?: bigint;
     wantAmount?: bigint;
     priceTicks?: bigint;
+  };
+
+  type CrossMarketView = {
+    venueId: string;
+    sourceIsBase: boolean;
   };
 
   function getTokenMapValue<V>(map: TokenKeyedMap<V> | undefined, tokenIdValue: number): V | undefined {
@@ -509,6 +539,40 @@
     return String(profile?.metadata?.jurisdiction?.name || '').trim();
   }
 
+  function getHubProfile(entityIdValue: string): GossipProfile | null {
+    const normalized = String(entityIdValue || '').trim().toLowerCase();
+    if (!normalized) return null;
+    return getGossipProfiles().find((profile) =>
+      profile?.metadata?.isHub === true
+      && String(profile?.entityId || '').trim().toLowerCase() === normalized
+    ) || null;
+  }
+
+  function hubBaseName(profile: GossipProfile | null): string {
+    return String(profile?.name || profile?.entityId || '').trim().split(/\s+/)[0]?.toLowerCase() || '';
+  }
+
+  function hubMirrorsEntity(profile: GossipProfile | null, entityIdValue: string): boolean {
+    const normalized = String(entityIdValue || '').trim().toLowerCase();
+    if (!profile || !normalized) return false;
+    const mirrors = profile.metadata?.mirrors;
+    if (!Array.isArray(mirrors)) return false;
+    return mirrors.some((mirror) => String(mirror?.entityId || '').trim().toLowerCase() === normalized);
+  }
+
+  function hubRouteCompatible(sourceHubEntityId: string, targetHubEntityId: string): boolean {
+    const sourceHub = getHubProfile(sourceHubEntityId);
+    const targetHub = getHubProfile(targetHubEntityId);
+    if (!sourceHub || !targetHub) return false;
+    if (hubMirrorsEntity(sourceHub, targetHub.entityId) || hubMirrorsEntity(targetHub, sourceHub.entityId)) return true;
+    const sourceRuntime = String(sourceHub.runtimeId || '').trim().toLowerCase();
+    const targetRuntime = String(targetHub.runtimeId || '').trim().toLowerCase();
+    if (sourceRuntime && sourceRuntime === targetRuntime) return true;
+    const sourceBase = hubBaseName(sourceHub);
+    const targetBase = hubBaseName(targetHub);
+    return Boolean(sourceBase && sourceBase === targetBase);
+  }
+
   function findHubProfileForJurisdiction(jurisdictionName: string): GossipProfile | null {
     const normalized = String(jurisdictionName || '').trim().toLowerCase();
     if (!normalized) return null;
@@ -586,9 +650,13 @@
     }];
 
     for (const target of targets) {
+      const compatible = sourceHubEntityId ? hubRouteCompatible(sourceHubEntityId, target.targetHubEntityId) : false;
+      const disabledReason = compatible ? '' : `Try another hub: ${accountLabel(sourceHubEntityId)} has no sibling on ${target.targetJurisdiction}.`;
       options.push({
         value: target.value,
-        label: `Cross-j · ${sourceJurisdiction} -> ${target.targetJurisdiction} · ${accountLabel(target.targetHubEntityId)}`,
+        label: compatible
+          ? `${target.targetJurisdiction} · ${accountLabel(target.targetEntityId)}`
+          : `${target.targetJurisdiction} · try another hub`,
         mode: 'cross',
         sourceJurisdiction,
         targetJurisdiction: target.targetJurisdiction,
@@ -599,6 +667,8 @@
         targetEntityId: target.targetEntityId,
         targetHubEntityId: target.targetHubEntityId,
         targetLabel: target.label,
+        disabled: !compatible,
+        disabledReason,
       });
     }
     return options;
@@ -710,33 +780,46 @@
   $: swapTokenOptions = Array.from(allowedSwapTokenIds)
     .sort((a, b) => compareStableText(tokenSymbol(a), tokenSymbol(b)))
     .map((tokenId) => ({ tokenId, symbol: tokenSymbol(tokenId) }));
-  $: if (pairOptions.length > 0) {
-    const hasSelected = pairOptions.some((option) => option.value === selectedPairValue);
-    if (!hasSelected) {
-      selectedPairValue = pairOptions[0]!.value;
-    }
-  }
-  $: selectedPair = pairOptions.find((option) => option.value === selectedPairValue) || null;
+  $: giveToken = Number.parseInt(giveTokenId, 10);
+  $: wantToken = Number.parseInt(wantTokenId, 10);
+  $: derivedTokenPairValue = (() => {
+    if (!Number.isFinite(giveToken) || !Number.isFinite(wantToken) || giveToken <= 0 || wantToken <= 0 || giveToken === wantToken) return '';
+    const oriented = resolvePairOrientation(giveToken, wantToken);
+    return `${oriented.baseTokenId}/${oriented.quoteTokenId}`;
+  })();
+  $: selectedPair = derivedTokenPairValue
+    ? pairOptions.find((option) => option.value === derivedTokenPairValue) || null
+    : null;
 
-  function setTradeSide(next: 'buy-base' | 'sell-base'): void {
-    tradeSide = next;
-    selectedOrderLevel = null;
+  function fallbackCounterToken(tokenIdValue: number): number | null {
+    if (!Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return null;
+    const pair = selectedPair;
+    if (pair) {
+      if (tokenIdValue === pair.baseTokenId) return pair.quoteTokenId;
+      if (tokenIdValue === pair.quoteTokenId) return pair.baseTokenId;
+    }
+    const fallback = swapTokenOptions.find((token) => token.tokenId !== tokenIdValue);
+    return fallback?.tokenId ?? null;
   }
 
   function setSwapTokens(nextGiveToken: number, nextWantToken: number): void {
     if (!Number.isFinite(nextGiveToken) || !Number.isFinite(nextWantToken)) return;
-    if (nextGiveToken <= 0 || nextWantToken <= 0 || nextGiveToken === nextWantToken) {
+    if (nextGiveToken <= 0 || nextWantToken <= 0) {
       giveTokenId = String(nextGiveToken || '');
       wantTokenId = String(nextWantToken || '');
       selectedOrderLevel = null;
       submitError = '';
       return;
     }
-    const oriented = resolvePairOrientation(nextGiveToken, nextWantToken);
-    const pairValue = `${oriented.baseTokenId}/${oriented.quoteTokenId}`;
-    if (pairOptions.some((option) => option.value === pairValue)) {
-      selectedPairValue = pairValue;
+    if (nextGiveToken === nextWantToken && selectedRouteValue === 'same') {
+      const fallbackWantToken = fallbackCounterToken(nextGiveToken);
+      if (!fallbackWantToken || fallbackWantToken === nextGiveToken) {
+        submitError = 'Sell token and Buy token must be different.';
+        return;
+      }
+      nextWantToken = fallbackWantToken;
     }
+    const oriented = resolvePairOrientation(nextGiveToken, nextWantToken);
     tradeSide = nextGiveToken === oriented.baseTokenId ? 'sell-base' : 'buy-base';
     giveTokenId = String(nextGiveToken);
     wantTokenId = String(nextWantToken);
@@ -759,20 +842,6 @@
     const nextWant = Number.parseInt(String((event.currentTarget as HTMLSelectElement | null)?.value || ''), 10);
     setSwapTokens(giveToken, nextWant);
   }
-
-  $: if (selectedPair) {
-    if (tradeSide === 'buy-base') {
-      giveTokenId = String(selectedPair.quoteTokenId);
-      wantTokenId = String(selectedPair.baseTokenId);
-    } else {
-      giveTokenId = String(selectedPair.baseTokenId);
-      wantTokenId = String(selectedPair.quoteTokenId);
-    }
-  }
-
-  $: giveToken = Number.parseInt(giveTokenId, 10);
-  $: wantToken = Number.parseInt(wantTokenId, 10);
-  $: orderbookPairId = selectedPair?.pairId || '1/2';
 
   function formatPriceTicks(ticks: bigint): string {
     const whole = ticks / ORDERBOOK_PRICE_SCALE;
@@ -1003,6 +1072,16 @@
   $: estimatedSpendLabel = Number.isFinite(giveToken) && giveToken > 0
     ? `${formatAmount(canonicalGiveAmount, giveToken)} ${giveTokenSymbol}`
     : canonicalGiveAmount.toString();
+  $: sourceAssetLabel = `${giveTokenSymbol} · ${sourceJurisdictionLabel}`;
+  $: targetAssetLabel = `${wantTokenSymbol} · ${targetJurisdictionLabel}`;
+  $: swapRouteTitle = swapRouteMode === 'cross'
+    ? `${sourceJurisdictionLabel} -> ${targetJurisdictionLabel}`
+    : sourceJurisdictionLabel;
+  $: marketPriceTicks = resolveReferencePriceTicks();
+  $: marketPriceLabel = marketPriceTicks && marketPriceTicks > 0n
+    ? `${formatPriceTicks(marketPriceTicks)} ${quoteTokenSymbol}`
+    : 'No market';
+  $: marketPriceSideLabel = orderMode === 'sell-base' ? 'Best bid' : 'Best ask';
   $: leftoverGiveLabel = Number.isFinite(giveToken) && giveToken > 0
     ? `${formatAmount(giveAmountLeftover, giveToken)} ${giveTokenSymbol}`
     : giveAmountLeftover.toString();
@@ -1041,13 +1120,14 @@
   }
 
   function resolveReferencePriceTicks(): bigint | null {
+    const activeMode = orderMode !== 'none' ? orderMode : tradeSide;
     if (String(orderbookSnapshot?.pairId || '').trim() === String(orderbookPairId || '').trim()) {
-      const level = tradeSide === 'buy-base' ? orderbookSnapshot.asks?.[0] : orderbookSnapshot.bids?.[0];
+      const level = activeMode === 'buy-base' ? orderbookSnapshot.asks?.[0] : orderbookSnapshot.bids?.[0];
       const price = level?.price ?? 0n;
       if (price > 0n) return price;
     }
-    const bookSide: BookSide = tradeSide === 'buy-base' ? 'ask' : 'bid';
-    return readCurrentHubBestPriceTicks(bookSide, activeOrderAccountId);
+    const bookSide: BookSide = activeMode === 'buy-base' ? 'ask' : 'bid';
+    return readCurrentHubBestPriceTicks(bookSide, activeBookHubId || activeOrderAccountId);
   }
 
   function readCurrentHubPairBook(hubEntityId: string): BookState | null {
@@ -1108,8 +1188,10 @@
     input: SwapFormValidationInput,
     target: CrossTargetOption | null,
     allowAutoPrepareTargetInbound: boolean,
+    unavailableReason = selectedRouteUnavailableReason,
   ): string {
     if (!target) return 'Select target jurisdiction account.';
+    if (unavailableReason) return unavailableReason;
     if (!input.isLive) return 'Switch to LIVE mode to place swap orders.';
     if (!input.entityId) return 'Entity is not selected.';
     if (!input.counterpartyId) return 'Select source account (hub) first.';
@@ -1133,7 +1215,7 @@
       return `Minimum order size is ~$${MIN_ORDER_NOTIONAL_USD}.`;
     }
     if (input.giveAmount > input.availableGiveCapacity) {
-      return `Insufficient source outbound capacity (${input.formattedAvailableGive}).`;
+      return `Insufficient source capacity: ${input.formattedAvailableGive} available.`;
     }
 
     const targetReplica = findReplicaByEntityId(target.targetEntityId);
@@ -1260,6 +1342,8 @@
     const increaseLabel = formatAmount(autoInboundCreditIncrease, wantToken);
     return `Placing this swap will auto-activate ${wantTokenSymbol} and set inbound capacity to ${targetLabel} ${wantTokenSymbol} (+${increaseLabel}).`;
   })();
+  $: sourceCapacityShortfall = canonicalGiveAmount > availableGiveCapacity ? canonicalGiveAmount - availableGiveCapacity : 0n;
+  $: hasSourceCapacityShortfall = canonicalGiveAmount > 0n && sourceCapacityShortfall > 0n;
   $: crossAutoCapacityNote = (() => {
     if (swapRouteMode !== 'cross' || !selectedCrossTarget || !canAutoPrepareCrossInboundCapacity) return '';
     const targetLabel = formatAmount(crossAutoInboundCreditTarget ?? 0n, wantToken);
@@ -1267,19 +1351,23 @@
       ? (crossAutoInboundCreditTarget ?? 0n) - crossCurrentPeerCreditLimit
       : 0n;
     const increaseLabel = formatAmount(increase, wantToken);
-    return `Target side needs inbound capacity. I will extend ${wantTokenSymbol} to ${targetLabel} on ${selectedCrossTarget.targetJurisdiction} before registering the cross-j route (+${increaseLabel}).`;
+    return `Auto: extend target inbound to ${targetLabel} ${wantTokenSymbol} on ${selectedCrossTarget.targetJurisdiction} (+${increaseLabel}).`;
   })();
+  $: showCrossAutoCapacityNote = Boolean(crossAutoCapacityNote && autoExtendCrossInbound && !hasSourceCapacityShortfall);
   $: leftoverGiveNote = giveAmountLeftover > 0n
     ? `Canonical order leaves ${leftoverGiveLabel} unspent after lot quantization.`
     : '';
   $: capacityWarning = (() => {
     if (!activeOrderAccountId || !Number.isFinite(giveToken) || giveToken <= 0) return '';
-    if (availableGiveCapacity <= 0n) return `Observed available ${giveTokenSymbol}: 0 (may update after next frame).`;
+    if (availableGiveCapacity <= 0n) return `No ${giveTokenSymbol} outbound capacity on ${sourceRouteEntityLabel}.`;
     if (giveAmount > 0n && giveAmount > availableGiveCapacity) {
-      return `Give amount is above observed available capacity (${formattedAvailableGive}).`;
+      return `Only ${formattedAvailableGive} available on ${sourceRouteEntityLabel}.`;
     }
     return '';
   })();
+  $: swapSubmitLabel = placingSwapOffer
+    ? 'Submitting swap...'
+    : `Swap ${giveTokenSymbol} to ${wantTokenSymbol}`;
   $: if (selectedOrderLevel && orderbookScopeMode !== 'aggregated' && selectedOrderLevel.accountId !== selectedBookAccountId) {
     selectedOrderLevel = null;
   }
@@ -1301,11 +1389,14 @@
     const levelGiveTokenId = selectedOrderLevel.side === 'ask'
       ? selectedOrderLevel.quoteTokenId
       : selectedOrderLevel.baseTokenId;
-    const selectedLevelAccountId =
-      createOrderAccountId
-      || selectedBookAccountId
-      || selectedOrderLevel.accountIds[0]
-      || '';
+    const selectedLevelAccountId = swapRouteMode === 'cross'
+      ? activeOrderAccountId
+      : (
+          createOrderAccountId
+          || selectedBookAccountId
+          || selectedOrderLevel.accountIds[0]
+          || ''
+        );
     const levelBaseDecimals = getTokenDecimals(selectedOrderLevel.baseTokenId);
     const levelQuoteDecimals = getTokenDecimals(selectedOrderLevel.quoteTokenId);
     const levelGiveCapacity = readOutCapacity(selectedLevelAccountId, levelGiveTokenId);
@@ -1324,6 +1415,47 @@
     priceRatioInput = selectedOrderLevel.displayPrice
       ? normalizeDisplayPriceForInput(selectedOrderLevel.displayPrice)
       : formatPriceTicks(selectedOrderLevel.priceTicks);
+  }
+
+  function readLogicalNumber(value: unknown): number {
+    const numeric = Number(value ?? 0);
+    return Number.isFinite(numeric) ? Math.max(0, Math.floor(numeric)) : 0;
+  }
+
+  function stableIdHash(input: string): string {
+    let hash = 0xcbf29ce484222325n;
+    for (let i = 0; i < input.length; i += 1) {
+      hash ^= BigInt(input.charCodeAt(i));
+      hash = (hash * 0x100000001b3n) & 0xffffffffffffffffn;
+    }
+    return hash.toString(36).padStart(13, '0');
+  }
+
+  function buildSwapOfferId(
+    logicalTimestamp: number,
+    logicalHeight: number,
+    sourceEntityId: string,
+    counterpartyEntityId: string,
+    sellToken: number,
+    buyToken: number,
+    sellAmount: bigint,
+    buyAmount: bigint,
+    priceTicks: bigint,
+    routeValue: string,
+  ): string {
+    const seed = [
+      logicalTimestamp,
+      logicalHeight,
+      sourceEntityId,
+      counterpartyEntityId,
+      sellToken,
+      buyToken,
+      sellAmount.toString(),
+      buyAmount.toString(),
+      priceTicks.toString(),
+      routeValue,
+    ].join('|');
+    return `swap-${logicalTimestamp.toString(36)}-${logicalHeight.toString(36)}-${stableIdHash(seed)}`;
   }
 
   function handleOrderbookSnapshot(event: CustomEvent<OrderbookSnapshot>) {
@@ -1349,11 +1481,6 @@
       createOrderAccountId = nextValue;
     }
     selectedOrderLevel = null;
-  }
-
-  function handlePairChange(): void {
-    selectedOrderLevel = null;
-    submitError = '';
   }
 
   function defaultCreditLimitForToken(tokenIdValue: number): bigint {
@@ -1405,9 +1532,9 @@
 
   function handleOrderbookLevelClick(event: CustomEvent<OrderbookLevelClickDetail>) {
     submitError = '';
-    const pair = selectedPair;
+    const pair = parsedOrderbookPair;
     if (!pair) {
-      submitError = 'Select valid token pair first.';
+      submitError = 'Select valid swap route first.';
       return;
     }
 
@@ -1427,14 +1554,21 @@
     const availableAccountIds = Array.isArray(event.detail?.accountIds)
       ? event.detail.accountIds.map((id) => String(id || '').trim()).filter(Boolean)
       : [];
-    const clickedAccountId = orderbookScopeMode === 'aggregated'
-      ? String(availableAccountIds.find((id) => hubAccountIds.includes(id)) || activeOrderAccountId || '')
-      : String(selectedBookAccountId || availableAccountIds.find((id) => hubAccountIds.includes(id)) || '');
+    const clickedAccountId = swapRouteMode === 'cross'
+      ? String(activeBookHubId || availableAccountIds[0] || '')
+      : (
+          orderbookScopeMode === 'aggregated'
+            ? String(availableAccountIds.find((id) => hubAccountIds.includes(id)) || activeOrderAccountId || '')
+            : String(selectedBookAccountId || availableAccountIds.find((id) => hubAccountIds.includes(id)) || '')
+        );
     if (!clickedAccountId) {
       submitError = 'Pick a priced level from a connected account.';
       return;
     }
-    if (orderbookScopeMode === 'aggregated') {
+    if (swapRouteMode === 'cross') {
+      // Cross-j book owner can be the target hub. Source capacity still
+      // belongs to activeOrderAccountId, so do not rewrite createOrderAccountId.
+    } else if (orderbookScopeMode === 'aggregated') {
       createOrderAccountId = clickedAccountId;
     } else {
       selectedBookAccountId = clickedAccountId;
@@ -1465,7 +1599,8 @@
   function resolveSuggestedInitialPriceTicks(): bigint | null {
     if (selectedOrderLevel) return null;
     if (String(orderbookSnapshot?.pairId || '').trim() !== String(orderbookPairId || '').trim()) return null;
-    if (tradeSide === 'buy-base') {
+    const activeMode = orderMode !== 'none' ? orderMode : tradeSide;
+    if (activeMode === 'buy-base') {
       const ask = orderbookSnapshot.asks?.[0]?.price ?? 0n;
       return ask > 0n ? ask : null;
     }
@@ -1534,10 +1669,37 @@
     }
   }
 
-  $: parsedOrderbookPair = selectedPair
-    ? { baseTokenId: selectedPair.baseTokenId, quoteTokenId: selectedPair.quoteTokenId }
-    : null;
-  $: orderMode = parsedOrderbookPair ? tradeSide : 'none';
+  $: activeCrossMarket = (() => {
+    if (swapRouteMode !== 'cross' || !selectedCrossTarget) return null;
+    if (!Number.isFinite(giveToken) || !Number.isFinite(wantToken) || giveToken <= 0 || wantToken <= 0) return null;
+    return deriveCanonicalCrossJurisdictionMarketForLegs(
+      getReplicaJurisdictionRef(currentReplica),
+      giveToken,
+      selectedCrossTarget.targetJurisdictionRef,
+      wantToken,
+    ) as CrossMarketView;
+  })();
+  $: parsedOrderbookPair = (() => {
+    if (swapRouteMode === 'cross' && activeCrossMarket) {
+      return {
+        baseTokenId: activeCrossMarket.sourceIsBase ? giveToken : wantToken,
+        quoteTokenId: activeCrossMarket.sourceIsBase ? wantToken : giveToken,
+      };
+    }
+    return selectedPair
+      ? { baseTokenId: selectedPair.baseTokenId, quoteTokenId: selectedPair.quoteTokenId }
+      : null;
+  })();
+  $: orderbookPairId = swapRouteMode === 'cross' && activeCrossMarket
+    ? activeCrossMarket.venueId
+    : selectedPair?.pairId || '1/2';
+  $: orderMode = parsedOrderbookPair
+    ? (
+        swapRouteMode === 'cross' && activeCrossMarket
+          ? (activeCrossMarket.sourceIsBase ? 'sell-base' : 'buy-base')
+          : tradeSide
+      )
+    : 'none';
   $: baseTokenId = parsedOrderbookPair?.baseTokenId ?? giveToken;
   $: quoteTokenId = parsedOrderbookPair?.quoteTokenId ?? wantToken;
   $: baseTokenSymbol = tokenSymbol(baseTokenId);
@@ -1977,6 +2139,8 @@
   }
 
   async function placeSwapOffer() {
+    if (placingSwapOffer) return;
+    placingSwapOffer = true;
     submitError = '';
     try {
       const env = runtimeEnv;
@@ -2019,7 +2183,7 @@
       if (!Number.isFinite(wantToken) || !allowedSwapTokenIds.has(wantToken)) {
         throw new Error('Invalid want token');
       }
-      if (giveToken === wantToken && swapRouteMode !== 'cross') {
+      if (giveToken === wantToken && swapRouteMode === 'same') {
         throw new Error('Give token and want token must be different');
       }
       const liveValidation = buildSwapValidationInput(
@@ -2040,7 +2204,20 @@
         throw new Error(liveValidationReason);
       }
 
-      const offerId = `swap-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+      const logicalNow = readLogicalNumber(currentReplica?.state?.timestamp || env.timestamp);
+      const logicalHeight = readLogicalNumber(currentReplica?.state?.height || env.height);
+      const offerId = buildSwapOfferId(
+        logicalNow,
+        logicalHeight,
+        sourceEntityId,
+        resolvedCounterparty,
+        giveToken,
+        wantToken,
+        effectiveGiveAmount,
+        effectiveWantAmount,
+        canonicalPriceTicks,
+        selectedRouteValue,
+      );
       const minFillRatio = 0;
       const requiredInboundCreditLimit = computeAutoInboundCreditTarget(
         resolvedCounterparty,
@@ -2075,7 +2252,7 @@
         && requiredTargetInboundCreditLimit !== null
         && requiredTargetInboundCreditLimit > currentTargetInboundCreditLimit,
       );
-      const now = Date.now();
+      const now = logicalNow;
       const crossJurisdiction = (() => {
         if (swapRouteMode !== 'cross') return null;
         if (!targetRoute) throw new Error('Select target jurisdiction account.');
@@ -2198,6 +2375,8 @@
     } catch (error) {
       console.error('Failed to place swap offer:', error);
       submitError = `Failed to place swap: ${(error as Error)?.message || 'Unknown error'}`;
+    } finally {
+      placingSwapOffer = false;
     }
   }
 
@@ -2290,7 +2469,8 @@
 
   function requantizeAtLimitPrice(remainingGiveAmount: bigint, priceTicks: bigint): PreparedSwapOrderLike | null {
     if (remainingGiveAmount <= 0n || priceTicks <= 0n) return null;
-    const side = tradeSide === 'sell-base' ? 1 : 0;
+    const activeMode = orderMode !== 'none' ? orderMode : tradeSide;
+    const side = activeMode === 'sell-base' ? 1 : 0;
     if (side === 1) {
       const quantizedBaseAmount = (remainingGiveAmount / ORDERBOOK_LOT_SCALE) * ORDERBOOK_LOT_SCALE;
       if (quantizedBaseAmount <= 0n) return null;
@@ -2334,51 +2514,34 @@
     selectedOrderLevel = null;
   }
 
+  function useMarketPrice(): void {
+    const ticks = marketPriceTicks;
+    if (!ticks || ticks <= 0n) return;
+    priceRatioInput = formatPriceTicks(ticks);
+    hasUserEditedPriceInput = true;
+    selectedOrderLevel = null;
+    submitError = '';
+  }
+
 </script>
 
 <div class="swap-panel">
-  <div class="trade-grid">
-    <div class="section section-market">
-      <SwapPairToolbar
-        pairOptions={pairOptions}
-        selectedPairValue={selectedPairValue}
-        baseTokenSymbol={baseTokenSymbol}
-        quoteTokenSymbol={quoteTokenSymbol}
-        orderbookScopeMode={orderbookScopeMode}
-        on:pairchange={(event) => {
-          selectedPairValue = event.detail;
-          handlePairChange();
-        }}
-        on:togglescope={toggleOrderbookScope}
-      />
-      {#if orderbookHubIds.length > 0}
-        <div class="orderbook-wrap" data-testid="swap-orderbook">
-          {#key orderbookViewKey}
-            <OrderbookPanel
-              hubIds={orderbookHubIds}
-              hubId={selectedBookAccountId}
-              pairId={orderbookPairId}
-              pairLabel={selectedPair?.label || `${baseTokenSymbol}/${quoteTokenSymbol}`}
-              depth={orderbookDepth}
-              showSources={true}
-              sourceLabels={orderbookSourceLabels}
-              sourceAvatars={orderbookSourceAvatars}
-              compactHeader={true}
-              showPriceStepControl={false}
-              priceScale={Number(ORDERBOOK_PRICE_SCALE)}
-              sizeDisplayScale={orderbookSizeDisplayScale}
-              disablePriceAggregation={orderbookScopeMode === 'selected'}
-              preferredClickSide={tradeSide === 'buy-base' ? 'ask' : 'bid'}
-              on:levelclick={handleOrderbookLevelClick}
-              on:snapshot={handleOrderbookSnapshot}
-            />
-          {/key}
-        </div>
-      {:else}
-        <div class="orderbook-empty">No connected account orderbooks yet.</div>
-      {/if}
-    </div>
+  <div class="trade-grid" class:book-open={showOrderbook}>
     <div class="section section-order">
+      <div class="swap-mode-bar">
+        <span>{swapRouteMode === 'cross' ? 'Cross-j' : 'Same-j'}</span>
+        <strong title={`${sourceAssetLabel} -> ${targetAssetLabel}`}>{swapRouteTitle}</strong>
+        <button
+          type="button"
+          class="book-toggle"
+          class:active={showOrderbook}
+          data-testid="swap-orderbook-toggle"
+          aria-pressed={showOrderbook}
+          on:click={() => showOrderbook = !showOrderbook}
+        >
+          {showOrderbook ? 'Hide book' : 'Book'}
+        </button>
+      </div>
       <div class="anyswap-builder" data-testid="swap-any-builder">
         <div class="swap-leg-card">
           <div class="leg-header">
@@ -2401,6 +2564,7 @@
               type="text"
               bind:value={orderAmountInput}
               inputmode="decimal"
+              placeholder="0"
               data-testid="swap-order-amount"
               aria-label="Swap from amount"
             />
@@ -2417,7 +2581,7 @@
             </select>
           </div>
           <div class="leg-meta">
-            <span>{sourceRouteEntityLabel}</span>
+            <span>{sourceAssetLabel}</span>
             <strong>{formattedAvailableGive}</strong>
           </div>
         </div>
@@ -2428,21 +2592,8 @@
             class="direction-chip"
             on:click={() => setSwapTokens(wantToken, giveToken)}
             title="Swap selected tokens"
+            aria-label="Swap selected tokens"
           >⇅</button>
-          <button
-            type="button"
-            class="side-compat"
-            data-testid="swap-side-buy"
-            on:click={() => setTradeSide('buy-base')}
-            title="Use buy-base direction"
-          >Buy</button>
-          <button
-            type="button"
-            class="side-compat"
-            data-testid="swap-side-sell"
-            on:click={() => setTradeSide('sell-base')}
-            title="Use sell-base direction"
-          >Sell</button>
         </div>
 
         <div class="swap-leg-card">
@@ -2462,7 +2613,13 @@
             </select>
           </div>
           <div class="leg-main">
-            <input type="text" readonly value={formatAmount(wantAmount, wantToken)} class="readonly-input receive-amount" aria-label="Estimated receive amount" />
+            <input
+              type="text"
+              readonly
+              value={formatAmount(wantAmount, wantToken)}
+              class="readonly-input receive-amount"
+              aria-label="Estimated receive amount"
+            />
             <select
               class="token-select"
               value={String(wantToken)}
@@ -2476,7 +2633,7 @@
             </select>
           </div>
           <div class="leg-meta">
-            <span>{targetRouteEntityLabel}</span>
+            <span>{targetAssetLabel}</span>
             <strong>{targetAccountReady ? estimatedReceiveLabel : 'Account setup required'}</strong>
           </div>
         </div>
@@ -2499,8 +2656,22 @@
         </div>
       </div>
 
+      <div class="market-strip">
+        <button
+          type="button"
+          class="market-price-btn"
+          data-testid="swap-use-market-price"
+          disabled={!marketPriceTicks || marketPriceTicks <= 0n}
+          on:click={useMarketPrice}
+        >
+          <span>{marketPriceSideLabel}</span>
+          <strong>{marketPriceLabel}</strong>
+        </button>
+        <span class="book-owner-label" title={bookVenueLabel}>{bookVenueLabel}</span>
+      </div>
+
       <div class="venue-row">
-        <span>Venue</span>
+        <span>Hub</span>
         <select
           value={createOrderAccountId}
           data-testid="swap-account-select"
@@ -2539,7 +2710,7 @@
         </div>
       </div>
 
-      <div class="route-builder" data-testid="swap-route-picker">
+      <div class="route-builder" class:cross-route={swapRouteMode === 'cross'} data-testid="swap-route-picker">
         <button type="button" class="route-summary" title={`${selectedRouteLabel} · ${routeVenueLabel}`} on:click={() => routeDetailsOpen = !routeDetailsOpen}>
           <span>Best route</span>
           <strong>{selectedRouteOption?.mode === 'cross' ? 'XLN cross-j' : 'XLN same-j'}</strong>
@@ -2594,7 +2765,7 @@
       {#if autoCapacityNote}
         <p class="auto-capacity-note" data-testid="swap-auto-capacity-note">{autoCapacityNote}</p>
       {/if}
-      {#if crossAutoCapacityNote && autoExtendCrossInbound}
+      {#if showCrossAutoCapacityNote}
         <p class="auto-capacity-note" data-testid="swap-cross-auto-capacity-note">{crossAutoCapacityNote}</p>
       {/if}
 
@@ -2609,13 +2780,13 @@
 
       <button
         class="primary-btn"
-        class:buy-action={tradeSide === 'buy-base'}
-        class:sell-action={tradeSide === 'sell-base'}
+        class:buy-action={orderMode === 'buy-base'}
+        class:sell-action={orderMode === 'sell-base'}
         data-testid="swap-submit-order"
         on:click={placeSwapOffer}
-        disabled={Boolean(swapActionDisabledReason)}
+        disabled={placingSwapOffer || Boolean(swapActionDisabledReason)}
       >
-        Swap {giveTokenSymbol} to {wantTokenSymbol}
+        {swapSubmitLabel}
       </button>
       {#if canCreateTargetAccount}
         <button
@@ -2631,6 +2802,54 @@
         <p class="form-error" data-testid="swap-form-error">{submitError || swapActionDisabledReason}</p>
       {/if}
     </div>
+
+    {#if showOrderbook}
+      <div class="section section-market">
+        <div class="book-toolbar">
+          <div>
+            <span>Orderbook</span>
+            <strong>{baseTokenSymbol}/{quoteTokenSymbol}</strong>
+          </div>
+          <button
+            type="button"
+            class="scope-btn"
+            class:active={orderbookScopeMode === 'aggregated'}
+            data-testid="swap-scope-toggle"
+            data-scope-mode={orderbookScopeMode}
+            disabled={swapRouteMode === 'cross'}
+            on:click={toggleOrderbookScope}
+          >
+            {orderbookScopeMode === 'aggregated' ? 'All hubs' : 'Selected'}
+          </button>
+        </div>
+        {#if orderbookHubIds.length > 0}
+          <div class="orderbook-wrap" data-testid="swap-orderbook">
+            {#key orderbookViewKey}
+              <OrderbookPanel
+                hubIds={orderbookHubIds}
+                hubId={activeBookHubId || selectedBookAccountId}
+                pairId={orderbookPairId}
+                pairLabel={`${baseTokenSymbol}/${quoteTokenSymbol}`}
+                depth={orderbookDepth}
+                showSources={true}
+                sourceLabels={orderbookSourceLabels}
+                sourceAvatars={orderbookSourceAvatars}
+                compactHeader={true}
+                showPriceStepControl={false}
+                priceScale={Number(ORDERBOOK_PRICE_SCALE)}
+                sizeDisplayScale={orderbookSizeDisplayScale}
+                disablePriceAggregation={orderbookScopeMode === 'selected' || swapRouteMode === 'cross'}
+                preferredClickSide={orderMode === 'buy-base' ? 'ask' : 'bid'}
+                on:levelclick={handleOrderbookLevelClick}
+                on:snapshot={handleOrderbookSnapshot}
+              />
+            {/key}
+          </div>
+        {:else}
+          <div class="orderbook-empty">No connected account orderbooks yet.</div>
+        {/if}
+      </div>
+    {/if}
   </div>
 
   <div class="section section-orders">
@@ -2856,7 +3075,7 @@
 
   .section {
     margin-bottom: 0;
-    padding: 10px;
+    padding: 12px;
     background: #131419;
     border-radius: 6px;
     border: 1px solid #1e2028;
@@ -2864,9 +3083,16 @@
 
   .trade-grid {
     display: grid;
-    grid-template-columns: 1fr 1fr;
-    gap: 14px;
+    grid-template-columns: minmax(340px, 620px);
+    justify-content: center;
+    gap: 12px;
     align-items: start;
+  }
+
+  .trade-grid.book-open {
+    grid-template-columns: minmax(340px, 560px) minmax(420px, 1fr);
+    justify-content: stretch;
+    gap: 14px;
   }
 
   .trade-grid > .section {
@@ -2886,6 +3112,9 @@
     min-width: 0;
     max-width: 100%;
     overflow: visible;
+    background: #0a0c11;
+    border-color: #242936;
+    box-shadow: 0 14px 42px rgba(0, 0, 0, 0.22);
   }
 
   .section-orders {
@@ -2907,20 +3136,71 @@
     flex-shrink: 0;
   }
 
+  .swap-mode-bar {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    min-height: 32px;
+    margin-bottom: 10px;
+    color: #8b94a7;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  .swap-mode-bar strong {
+    min-width: 0;
+    overflow: hidden;
+    color: #f3f4f6;
+    font-size: 12px;
+    font-weight: 900;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-transform: none;
+  }
+
+  .book-toggle {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 72px;
+    height: 28px;
+    padding: 0 10px;
+    border-radius: 7px;
+    border: 1px solid #2b3040;
+    background: #11141b;
+    color: #a7afbd;
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
+  }
+
+  .book-toggle.active {
+    border-color: rgba(251, 191, 36, 0.55);
+    background: rgba(251, 191, 36, 0.12);
+    color: #f8d36f;
+  }
+
   .anyswap-builder {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
+    gap: 0;
     margin-bottom: 10px;
   }
 
   .swap-leg-card {
     display: grid;
     gap: 8px;
-    padding: 10px;
-    background: #0c0d12;
-    border: 1px solid #20232c;
+    padding: 12px;
+    background: linear-gradient(180deg, #11141b 0%, #0d0f15 100%);
+    border: 1px solid #252a36;
     border-radius: 8px;
+  }
+
+  .swap-leg-card:focus-within {
+    border-color: rgba(251, 191, 36, 0.55);
+    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.1);
   }
 
   .leg-header,
@@ -2936,9 +3216,9 @@
 
   .leg-header {
     display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 6px;
-    align-items: stretch;
+    grid-template-columns: auto minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
   }
 
   .leg-header span,
@@ -2956,7 +3236,7 @@
     min-width: 0;
     border: 1px solid #232631;
     border-radius: 7px;
-    background: #111217;
+    background: #090b10;
     color: #e5e7eb;
     font-size: 12px;
     font-weight: 700;
@@ -2971,28 +3251,30 @@
     width: 100%;
     max-width: none;
     min-width: 0;
-    min-height: 42px;
+    min-height: 34px;
     padding: 0 34px 0 10px;
+    justify-self: end;
   }
 
   .token-select {
-    width: 144px;
-    min-width: 120px;
-    min-height: 40px;
+    width: 132px;
+    min-width: 108px;
+    min-height: 42px;
     padding: 0 34px 0 10px;
     flex-shrink: 0;
+    font-size: 13px;
   }
 
   .leg-main input {
     flex: 1;
     min-width: 0;
-    height: 42px;
+    height: 48px;
     padding: 0;
     border: none;
     background: transparent;
     color: #f3f4f6;
-    font-size: 22px;
-    font-weight: 700;
+    font-size: 26px;
+    font-weight: 800;
     text-align: left;
   }
 
@@ -3008,6 +3290,7 @@
     justify-content: space-between;
     color: #7c8597;
     font-size: 11px;
+    min-height: 16px;
   }
 
   .leg-meta span,
@@ -3029,31 +3312,31 @@
     align-items: center;
     justify-content: center;
     gap: 6px;
-    min-height: 28px;
-  }
-
-  .direction-chip,
-  .side-compat {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    height: 24px;
-    border-radius: 7px;
-    border: 1px solid #252936;
-    background: #141720;
-    color: #a7afbd;
-    font-size: 11px;
-    font-weight: 800;
+    min-height: 36px;
+    margin: -4px 0;
+    position: relative;
+    z-index: 1;
   }
 
   .direction-chip {
-    width: 32px;
-    color: #fbbf24;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    height: 28px;
+    border-radius: 7px;
+    border: 1px solid #252936;
+    background: #10131a;
+    color: #a7afbd;
+    font-size: 11px;
+    font-weight: 800;
+    cursor: pointer;
   }
 
-  .side-compat {
-    min-width: 42px;
-    padding: 0 8px;
+  .direction-chip {
+    width: 34px;
+    color: #fbbf24;
+    background: #171b24;
+    border-color: rgba(251, 191, 36, 0.35);
   }
 
   .quote-row,
@@ -3061,9 +3344,9 @@
     min-height: 36px;
     padding: 0 10px;
     margin-bottom: 8px;
-    background: #111217;
-    border: 1px solid #1e2028;
-    border-radius: 6px;
+    background: #0d0f15;
+    border: 1px solid #202431;
+    border-radius: 8px;
     box-sizing: border-box;
   }
 
@@ -3075,6 +3358,8 @@
     background: transparent;
     color: #e5e7eb;
     text-align: right;
+    font-size: 14px;
+    font-weight: 700;
   }
 
   .quote-row input:focus {
@@ -3111,11 +3396,109 @@
     flex-shrink: 0;
   }
 
+  .market-strip {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) minmax(120px, auto);
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    margin-bottom: 8px;
+  }
+
+  .market-price-btn {
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    min-width: 0;
+    min-height: 34px;
+    padding: 0 10px;
+    border-radius: 8px;
+    border: 1px solid rgba(251, 191, 36, 0.28);
+    background: rgba(251, 191, 36, 0.08);
+    color: #f3f4f6;
+    cursor: pointer;
+  }
+
+  .market-price-btn:disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+  }
+
+  .market-price-btn span {
+    color: #9ca3af;
+    font-size: 11px;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  .market-price-btn strong,
+  .book-owner-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .market-price-btn strong {
+    color: #f8d36f;
+    font-size: 12px;
+    font-weight: 900;
+    text-align: right;
+  }
+
+  .book-owner-label {
+    color: #7c8597;
+    font-size: 11px;
+    font-weight: 700;
+    text-align: right;
+  }
+
+  .book-toolbar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    min-height: 32px;
+    margin-bottom: 8px;
+  }
+
+  .book-toolbar div {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+  }
+
+  .book-toolbar span {
+    color: #7c8597;
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+  }
+
+  .book-toolbar strong {
+    min-width: 0;
+    overflow: hidden;
+    color: #f3f4f6;
+    font-size: 13px;
+    font-weight: 900;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
   .route-builder {
     display: grid;
     grid-template-columns: minmax(0, 1fr);
-    gap: 8px;
+    gap: 7px;
     margin-bottom: 10px;
+    padding: 8px;
+    background: #0d0f15;
+    border: 1px solid #202431;
+    border-radius: 8px;
+  }
+
+  .route-builder.cross-route {
+    border-color: rgba(96, 165, 250, 0.28);
   }
 
   .route-summary {
@@ -3123,11 +3506,11 @@
     grid-template-columns: auto minmax(0, 1fr) auto;
     align-items: center;
     gap: 8px;
-    min-height: 34px;
-    padding: 0 10px;
-    background: #101116;
-    border: 1px solid #1e2028;
-    border-radius: 6px;
+    min-height: 30px;
+    padding: 0;
+    background: transparent;
+    border: none;
+    border-radius: 0;
     color: #d1d5db;
     text-align: left;
   }
@@ -3161,9 +3544,9 @@
     gap: 8px;
     padding: 0 10px;
     min-height: 36px;
-    background: #111217;
-    border: 1px solid #1e2028;
-    border-radius: 6px;
+    background: #090b10;
+    border: 1px solid #202431;
+    border-radius: 8px;
     box-sizing: border-box;
   }
 
@@ -3179,7 +3562,7 @@
     min-width: 0;
     padding: 0 34px 0 12px;
     color: #d1d5db;
-    background: #0c0d11;
+    background: #080a0f;
     border: 1px solid #232631;
     border-radius: 7px;
     font-size: 12px;
@@ -3206,10 +3589,10 @@
     display: grid;
     gap: 3px;
     min-width: 0;
-    padding: 8px;
-    background: #0c0d12;
-    border: 1px solid #1e2028;
-    border-radius: 6px;
+    padding: 8px 9px;
+    background: #090b10;
+    border: 1px solid #1d2230;
+    border-radius: 8px;
   }
 
   .route-node-kicker {
@@ -3259,15 +3642,16 @@
     align-items: center;
     gap: 8px;
     min-width: 0;
-    color: #a7f3d0;
+    color: #9ca3af;
     font-size: 12px;
+    min-height: 24px;
   }
 
   .route-checkbox input {
     width: 14px;
     height: 14px;
     margin: 0;
-    accent-color: #22c55e;
+    accent-color: #fbbf24;
   }
 
   .route-details {
@@ -3397,8 +3781,9 @@
     align-items: center;
     font-size: 12px;
     color: #6b7280;
-    margin-bottom: 12px;
+    margin-bottom: 10px;
     padding: 0 2px;
+    gap: 10px;
   }
 
   .avbl-row strong {
@@ -3406,8 +3791,13 @@
   }
 
   .capacity-warn {
+    min-width: 0;
+    overflow: hidden;
     color: #f59e0b;
     font-size: 11px;
+    text-align: right;
+    text-overflow: ellipsis;
+    white-space: nowrap;
   }
 
   .route-badge {
@@ -3501,13 +3891,14 @@
 
   .primary-btn {
     width: 100%;
-    padding: 10px;
+    min-height: 44px;
+    padding: 0 12px;
     background: linear-gradient(180deg, rgba(251, 191, 36, 0.18), rgba(217, 119, 6, 0.12)) !important;
     border: 1px solid rgba(251, 191, 36, 0.55) !important;
     border-radius: 8px;
     color: #fde68a;
-    font-size: 13px;
-    font-weight: 600;
+    font-size: 14px;
+    font-weight: 900;
     cursor: pointer;
     transition: all 0.2s;
   }
@@ -3533,7 +3924,7 @@
   }
 
   .primary-btn:disabled {
-    opacity: 0.4;
+    opacity: 0.48;
     cursor: not-allowed;
   }
 
@@ -3552,11 +3943,16 @@
     color: #fda4af;
     font-size: 12px;
     line-height: 1.4;
+    font-weight: 600;
   }
 
   .auto-capacity-note {
-    margin: 10px 0 8px;
-    color: #86efac;
+    margin: 8px 0;
+    padding: 8px 10px;
+    color: #a7f3d0;
+    background: rgba(34, 197, 94, 0.08);
+    border: 1px solid rgba(34, 197, 94, 0.18);
+    border-radius: 8px;
     font-size: 12px;
     line-height: 1.4;
   }

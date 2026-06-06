@@ -573,6 +573,192 @@ describe('audit fail-fast regressions', () => {
       .toThrow('CROSS_J_BOOK_ADMISSION_RECEIPT_MISMATCH');
   });
 
+  test('cross-j same-token swap_offer quantizes by jurisdiction market side', async () => {
+    const sourceUser = `0x${'33'.repeat(32)}`;
+    const sourceHub = `0x${'43'.repeat(32)}`;
+    const targetHub = `0x${'44'.repeat(32)}`;
+    const targetUser = `0x${'34'.repeat(32)}`;
+    const sourcePull = {
+      pullId: 'same-token-source-pull',
+      tokenId: 1,
+      amount: 2_000_000_000_000n,
+      signedAmount: 2_000_000_000_000n,
+      revealedUntilTimestamp: 60_000,
+      fullHash: `0x${'ab'.repeat(32)}`,
+      partialRoot: `0x${'bc'.repeat(32)}`,
+    };
+    const targetPull = {
+      pullId: 'same-token-target-pull',
+      tokenId: 1,
+      amount: 1_000_000_000_000n,
+      signedAmount: 1_000_000_000_000n,
+      revealedUntilTimestamp: 60_000,
+      fullHash: `0x${'cd'.repeat(32)}`,
+      partialRoot: `0x${'de'.repeat(32)}`,
+    };
+    const route = {
+      orderId: 'cross-same-token-offer',
+      makerEntityId: sourceUser,
+      hubEntityId: targetHub,
+      bookOwnerEntityId: targetHub,
+      venueId: 'cross:stack:a:dep:1/stack:z:dep:1',
+      source: {
+        jurisdiction: 'stack:z:dep',
+        entityId: sourceUser,
+        counterpartyEntityId: sourceHub,
+        tokenId: 1,
+        amount: sourcePull.amount,
+      },
+      target: {
+        jurisdiction: 'stack:a:dep',
+        entityId: targetHub,
+        counterpartyEntityId: targetUser,
+        tokenId: 1,
+        amount: targetPull.amount,
+      },
+      sourcePull,
+      targetPull,
+      status: 'resting',
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      expiresAt: 60_000,
+    } satisfies CrossJurisdictionSwapRoute;
+    const account = makeProposalAccount([], sourceUser, sourceHub);
+    (account as AccountMachine & { pulls: Map<string, typeof sourcePull> }).pulls = new Map([[sourcePull.pullId, sourcePull]]);
+
+    const result = await handleSwapOffer(account, {
+      type: 'swap_offer',
+      data: {
+        offerId: route.orderId,
+        giveTokenId: 1,
+        giveAmount: route.source.amount,
+        wantTokenId: 1,
+        wantAmount: route.target.amount,
+        priceTicks: 20_000n,
+        minFillRatio: 0,
+        crossJurisdiction: route,
+      },
+    }, true, 1);
+
+    expect(result.success).toBe(true);
+    const offer = account.swapOffers.get(route.orderId);
+    expect(offer?.giveAmount).toBe(route.source.amount);
+    expect(offer?.wantAmount).toBe(route.target.amount);
+    expect(offer?.priceTicks).toBe(20_000n);
+  });
+
+  test('target-side cross-j book owner admits remote source offer from committed receipts', () => {
+    const sourceUser = `0x${'35'.repeat(32)}`;
+    const sourceHub = `0x${'45'.repeat(32)}`;
+    const targetHub = `0x${'46'.repeat(32)}`;
+    const targetUser = `0x${'36'.repeat(32)}`;
+    const sourcePull = {
+      pullId: 'remote-source-pull',
+      tokenId: 1,
+      amount: 75_000_000_000_000_000_000n,
+      signedAmount: 75_000_000_000_000_000_000n,
+      revealedUntilTimestamp: 60_000,
+      fullHash: `0x${'ad'.repeat(32)}`,
+      partialRoot: `0x${'be'.repeat(32)}`,
+    };
+    const targetPull = {
+      pullId: 'remote-target-pull',
+      tokenId: 2,
+      amount: 30_000_000_000_000_000n,
+      signedAmount: 30_000_000_000_000_000n,
+      revealedUntilTimestamp: 60_000,
+      fullHash: `0x${'ad'.repeat(32)}`,
+      partialRoot: `0x${'be'.repeat(32)}`,
+    };
+    const route = {
+      orderId: 'remote-source-admit',
+      makerEntityId: sourceUser,
+      hubEntityId: targetHub,
+      bookOwnerEntityId: targetHub,
+      venueId: 'cross:base:2/tron:1',
+      source: {
+        jurisdiction: 'tron',
+        entityId: sourceUser,
+        counterpartyEntityId: sourceHub,
+        tokenId: 1,
+        amount: sourcePull.amount,
+      },
+      target: {
+        jurisdiction: 'base',
+        entityId: targetHub,
+        counterpartyEntityId: targetUser,
+        tokenId: 2,
+        amount: targetPull.amount,
+      },
+      sourcePull,
+      targetPull,
+      status: 'resting',
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      expiresAt: 60_000,
+    } satisfies CrossJurisdictionSwapRoute;
+    const staleTargetRoute = {
+      ...route,
+      status: 'target_prepared' as const,
+      updatedAt: 999,
+    } satisfies CrossJurisdictionSwapRoute;
+    const env = createEmptyEnv('target-side-cross-book-owner');
+    const targetHubState = makeEntityState(targetHub);
+    const sourceReceipt = buildCrossJurisdictionBookAdmissionReceipt(
+      route,
+      'source',
+      {
+        type: 'pull_lock',
+        data: {
+          pullId: sourcePull.pullId,
+          tokenId: sourcePull.tokenId,
+          amount: sourcePull.signedAmount,
+          revealedUntilTimestamp: sourcePull.revealedUntilTimestamp,
+          fullHash: sourcePull.fullHash,
+          partialRoot: sourcePull.partialRoot,
+        },
+      },
+      sourceHub,
+      sourceUser,
+      1_000,
+    );
+    const targetReceipt = buildCrossJurisdictionBookAdmissionReceipt(
+      staleTargetRoute,
+      'target',
+      {
+        type: 'pull_lock',
+        data: {
+          pullId: targetPull.pullId,
+          tokenId: targetPull.tokenId,
+          amount: targetPull.signedAmount,
+          revealedUntilTimestamp: targetPull.revealedUntilTimestamp,
+          fullHash: targetPull.fullHash,
+          partialRoot: targetPull.partialRoot,
+        },
+      },
+      targetHub,
+      targetUser,
+      1_001,
+    );
+
+    const pending = handleAdmitCrossJurisdictionBookOrderEntityTx(env, targetHubState, {
+      type: 'admitCrossJurisdictionBookOrder',
+      data: { route, receipt: sourceReceipt, reason: 'source_pull_committed' },
+    });
+    expect(pending.swapOffersCreated).toHaveLength(0);
+
+    const admitted = handleAdmitCrossJurisdictionBookOrderEntityTx(env, pending.newState, {
+      type: 'admitCrossJurisdictionBookOrder',
+      data: { route: staleTargetRoute, receipt: targetReceipt, reason: 'target_pull_committed' },
+    });
+    expect(admitted.swapOffersCreated).toHaveLength(1);
+    expect(admitted.swapOffersCreated[0]?.accountId).toBe(sourceUser);
+    expect(admitted.swapOffersCreated[0]?.fromEntity).toBe(sourceUser);
+    expect(admitted.swapOffersCreated[0]?.toEntity).toBe(sourceHub);
+    expect(admitted.swapOffersCreated[0]?.crossJurisdiction?.orderId).toBe(route.orderId);
+    expect(admitted.swapOffersCreated[0]?.crossJurisdiction?.status).toBe('resting');
+  });
+
   test('j_event finality requires quorum on canonical event set, not only block hash', async () => {
     const entityId = `0x${'44'.repeat(32)}`;
     let state = makeEntityState(entityId);

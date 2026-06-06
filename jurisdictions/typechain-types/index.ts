@@ -72,5 +72,7 @@ export type { HashLadderHarness } from "./contracts/mocks/HashLadderHarness";
 export { HashLadderHarness__factory } from "./factories/contracts/mocks/HashLadderHarness__factory";
 export type { MockEntityProvider } from "./contracts/mocks/MockEntityProvider";
 export { MockEntityProvider__factory } from "./factories/contracts/mocks/MockEntityProvider__factory";
+export type { NoReturnERC20Mock } from "./contracts/mocks/NoReturnERC20Mock";
+export { NoReturnERC20Mock__factory } from "./factories/contracts/mocks/NoReturnERC20Mock__factory";
 export type { Token } from "./contracts/Token";
 export { Token__factory } from "./factories/contracts/Token__factory";

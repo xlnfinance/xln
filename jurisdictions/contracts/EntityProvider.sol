@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: UNLICENSED
 pragma solidity ^0.8.24;
 
-import "./Token.sol";
 import "@openzeppelin/contracts/token/ERC1155/ERC1155.sol";
-import "./ECDSA.sol";
 
 contract EntityProvider is ERC1155 { 
+  error InvalidHankoWeight();
+  error InvalidHankoThreshold();
+
   struct Entity {
     bytes32 currentBoardHash;    // 0x0 = lazy entity (entityId == boardHash)
     bytes32 proposedBoardHash;   // Pending board transition
@@ -81,6 +82,16 @@ contract EntityProvider is ERC1155 {
   event GovernanceEnabled(bytes32 indexed entityId, uint256 controlTokenId, uint256 dividendTokenId);
 
   event ProposalCancelled(bytes32 indexed entityId, ProposerType cancelledBy);
+
+  function _asUint16Weight(uint256 value) internal pure returns (uint16) {
+    if (value > type(uint16).max) revert InvalidHankoWeight();
+    return uint16(value);
+  }
+
+  function _asUint16Threshold(uint256 value) internal pure returns (uint16) {
+    if (value == 0 || value > type(uint16).max) revert InvalidHankoThreshold();
+    return uint16(value);
+  }
 
   constructor() ERC1155("https://xln.com/entity/{id}.json") {
     // Reserve some premium names
@@ -675,12 +686,12 @@ contract EntityProvider is ERC1155 {
         entityIds[i] = hanko.claims[claimIdx].entityId;
       }
 
-      votingPowers[i] = uint16(claim.weights[i]);
+      votingPowers[i] = _asUint16Weight(claim.weights[i]);
     }
 
     // Build Board struct with parallel arrays (transition delays set to 0 for compatibility)
     Board memory reconstructedBoard = Board({
-      votingThreshold: uint16(claim.threshold),
+      votingThreshold: _asUint16Threshold(claim.threshold),
       entityIds: entityIds,
       votingPowers: votingPowers,
       boardChangeDelay: 0,      // Default delays for hanko verification
@@ -997,7 +1008,7 @@ contract EntityProvider is ERC1155 {
     (controlTokenId, dividendTokenId) = getTokenIds(entityNumber);
     controlSupply = totalControlSupply[entityId];
     dividendSupply = totalDividendSupply[entityId];
-    hasActiveProposal = activeProposals[entityId].active;
+    hasActiveProposal = entities[entityId].proposedBoardHash != bytes32(0);
     articlesHash = entities[entityId].articlesHash;
   }
 

@@ -177,6 +177,11 @@ contract Depository is ReentrancyGuardLite {
     return (meta.contractAddress, meta.externalTokenId, meta.tokenType);
   }
 
+  function getCollateral(bytes32 leftEntity, bytes32 rightEntity, uint tokenId) external view returns (uint collateral, int ondelta) {
+    AccountCollateral storage col = _collaterals[accountKey(leftEntity, rightEntity)][tokenId];
+    return (col.collateral, col.ondelta);
+  }
+
   function _safeERC20Call(address token, bytes memory data) private {
     (bool success, bytes memory returndata) = token.call(data);
     if (!success) revert E3();
@@ -439,7 +444,8 @@ contract Depository is ReentrancyGuardLite {
 
     // Delegate settlement diffs to Account library, handle debt forgiveness in Depository
     if (batch.settlements.length > 0) {
-      if (!Account.processSettlements(_reserves, _accounts, _collaterals, entityId, batch.settlements, entityProvider)) {
+      _enforceSettlementOutflowDebts(batch.settlements);
+      if (!Account.processSettlements(_reserves, debtOutstanding, _accounts, _collaterals, entityId, batch.settlements, entityProvider)) {
         completeSuccess = false;
       }
       // Handle debt forgiveness (not in Account due to stack limits)
@@ -557,6 +563,17 @@ contract Depository is ReentrancyGuardLite {
     uint256 reserve = _reserves[entity][tokenId];
     uint256 outstanding = debtOutstanding[entity][tokenId];
     return reserve > outstanding ? reserve - outstanding : 0;
+  }
+
+  function _enforceSettlementOutflowDebts(Settlement[] memory settlements) private {
+    for (uint i = 0; i < settlements.length; i++) {
+      Settlement memory s = settlements[i];
+      for (uint j = 0; j < s.diffs.length; j++) {
+        SettlementDiff memory diff = s.diffs[j];
+        if (diff.leftDiff < 0) enforceDebts(s.leftEntity, diff.tokenId, DEBT_ENFORCEMENT_CHUNK);
+        if (diff.rightDiff < 0) enforceDebts(s.rightEntity, diff.tokenId, DEBT_ENFORCEMENT_CHUNK);
+      }
+    }
   }
 
   function spendableReserve(bytes32 entity, uint256 tokenId) external view returns (uint256) {

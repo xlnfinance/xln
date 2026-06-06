@@ -155,8 +155,15 @@ const admitOrderbookOfferForMatching = (
   state: EntityState,
   offer: NormalizedOrderbookOffer,
 ): AdmittedOrderbookOffer | null => {
-  const account = assertCommittedSwapOfferMatchesEvent(state, offer);
   if (offer.crossJurisdiction) {
+    const crossStatus = offer.crossJurisdiction.status;
+    if (crossStatus !== 'resting' && crossStatus !== 'partially_filled') {
+      throw new Error(`CROSS_J_ORDERBOOK_ROUTE_NOT_WORKING: offer=${offer.offerId} status=${crossStatus}`);
+    }
+    const account = findAccountByCounterparty(state, offer.accountId);
+    if (account?.swapOffers?.has(offer.offerId)) {
+      assertCommittedSwapOfferMatchesEvent(state, offer);
+    }
     // Cross-j orders are allowed into the shared matcher only after both
     // bilateral account frames committed their source/target pull_lock receipts.
     const admissionError = getCrossJurisdictionBookAdmissionError(
@@ -175,6 +182,7 @@ const admitOrderbookOfferForMatching = (
       throw new Error(admissionError);
     }
   } else {
+    const account = assertCommittedSwapOfferMatchesEvent(state, offer);
     assertSameJurisdictionOrderHoldCommitted(account, offer);
   }
   return markAdmittedOrderbookOffer(offer);
@@ -1114,7 +1122,15 @@ export const applyEntityFrame = async (
       }
     }
 
-    if (swapOffersCreated) allSwapOffersCreated.push(...swapOffersCreated);
+    if (swapOffersCreated) {
+      for (const offer of swapOffersCreated) {
+        // Cross-j account-level swap_offer is only the source intent. The
+        // shared book receives the order from admitCrossJurisdictionBookOrder
+        // after both source and target pull locks have committed.
+        if (offer.crossJurisdiction && entityTx.type !== 'admitCrossJurisdictionBookOrder') continue;
+        allSwapOffersCreated.push(offer);
+      }
+    }
     if (swapCancelRequests) allSwapCancelRequests.push(...swapCancelRequests);
     if (swapOffersCancelled) allSwapOffersCancelled.push(...swapOffersCancelled);
 

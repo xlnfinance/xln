@@ -88,6 +88,7 @@ export type {
 export { getBestBid, getBestAsk, getBookSideLevels } from './orderbook';
 export {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
+  deriveCanonicalCrossJurisdictionMarketForLegs,
   deriveCanonicalCrossJurisdictionVenueIdForLegs,
 } from './cross-jurisdiction-market';
 export {
