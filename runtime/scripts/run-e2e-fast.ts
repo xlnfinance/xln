@@ -39,6 +39,10 @@ const FAST_E2E_TARGETS = [
     file: 'tests/e2e-swap-isolated.spec.ts',
     title: 'two isolated users trade against each other through one hub orderbook without market maker liquidity',
   },
+  {
+    file: 'tests/e2e-cross-j-swap.spec.ts',
+    title: 'two users can place full, partial, and disputed cross-j swaps through the shared swap builder',
+  },
 ];
 
 const fastTargets = FAST_E2E_TARGETS.map((target) => `${target.file}::${target.title}`);
