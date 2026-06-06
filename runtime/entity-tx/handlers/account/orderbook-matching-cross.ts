@@ -11,6 +11,7 @@ import { getSwapPairPolicyByBaseQuote } from '../../../account-utils';
 import { createStructuredLogger, shortOrder } from '../../../logger';
 import { compareCanonicalText, swapKey, type CrossJurisdictionWorkingOrderbookOffer } from '../../../swap-execution';
 import {
+  buildCrossJurisdictionMarketOffer,
   buildCrossJurisdictionFillAck,
   type CrossJurisdictionFillInstruction,
   type CrossMarketOffer,
@@ -21,10 +22,8 @@ import {
   hasQueuedSwapResolveForEntityState,
   type MempoolOp,
 } from './orderbook-queue';
-import { sortSwapOffersForOrderbook } from './orderbook-offers';
 import {
   aggregateCrossTradeFills,
-  buildCrossMarketOfferForHub,
   buildCrossMarketOfferFromBookOrder,
   createEmptyPairBook,
   MAX_ORDERBOOK_QTY_LOTS,
@@ -45,7 +44,7 @@ type CancelNonWorkingBookOrder = (
 type RejectInvalidCrossOffer = (accountId: string, offerId: string, reason: string) => void;
 type RecordDebugProjectionReject = (accountId: string, offerId: string, reason: string) => true;
 
-export type CrossOrderbookProcessInput = {
+type CrossOrderbookProcessInput = {
   hubState: EntityState;
   ext: OrderbookExtState;
   crossJurisdictionSwapOffers: CrossJurisdictionWorkingOrderbookOffer[];
@@ -84,7 +83,7 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
     const key = swapKey(offer.accountId, offer.offerId);
     const cached = crossLiveOfferMeta.get(key);
     if (cached) return cached;
-    const marketOffer = buildCrossMarketOfferForHub(hubState.entityId, offer);
+    const marketOffer = buildCrossJurisdictionMarketOffer(offer, hubState.entityId);
     if (marketOffer) crossLiveOfferMeta.set(key, marketOffer);
     return marketOffer;
   };
@@ -206,7 +205,7 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
     return currentBook;
   };
 
-  for (const rawOffer of sortSwapOffersForOrderbook(crossJurisdictionSwapOffers)) {
+  for (const rawOffer of crossJurisdictionSwapOffers) {
     const marketOffer = getCrossMarketOffer(rawOffer);
     if (!marketOffer) continue;
     refreshExistingCrossBookOrder(marketOffer.pairId, swapKey(rawOffer.accountId, rawOffer.offerId), marketOffer);
@@ -219,7 +218,7 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
     bookCache.set(pairId, checkedBook);
   }
 
-  for (const rawOffer of sortSwapOffersForOrderbook(crossJurisdictionSwapOffers)) {
+  for (const rawOffer of crossJurisdictionSwapOffers) {
     const currentAccountId = rawOffer.accountId;
     const currentNamespacedOrderId = swapKey(currentAccountId, rawOffer.offerId);
     const marketOffer = getCrossMarketOffer(rawOffer);

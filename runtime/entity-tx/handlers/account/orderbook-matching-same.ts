@@ -1,12 +1,15 @@
 import type { EntityState } from '../../../types';
 import {
   applyCommand,
+  deriveSide,
   getBestAsk,
   getBestBid,
   getBookOrder,
+  SWAP_LOT_SCALE,
   type BookState,
   type OrderbookExtState,
 } from '../../../orderbook';
+import { SWAP as SWAP_CONSTANTS } from '../../../constants';
 import type { SwapPairPolicy } from '../../../account-utils';
 import { createStructuredLogger, shortId, shortOrder, shouldLogFullPayloads } from '../../../logger';
 import { HEAVY_LOGS } from '../../../utils';
@@ -19,7 +22,7 @@ import {
   queueUniqueSwapResolveForEntityState,
   type MempoolOp,
 } from './orderbook-queue';
-import { sortSwapOffersForOrderbook } from './orderbook-offers';
+import { normalizeSwapOfferForOrderbook, resolveStoredOfferEntityRefs } from './orderbook-offers';
 import {
   aggregateSameTradeFills,
   buildSameFillResolvePlan,
@@ -29,6 +32,7 @@ import {
   extractOfferIdForLog,
   parseNamespacedOrderId,
   rejectEventsForOrder,
+  resolvePairBandReference,
   tradeEvents as collectTradeEvents,
 } from './orderbook-matching-helpers';
 
@@ -36,21 +40,14 @@ const orderbookSameLog = createStructuredLogger('orderbook.same');
 
 type RecordDebugProjectionReject = (accountId: string, offerId: string, reason: string) => true;
 type RejectInvalidOffer = (accountId: string, offerId: string, reason: string) => void;
-type ContainCurrentOfferPairFailure = (
+type CancelNonWorkingBookOrder = (
   pairId: string,
-  currentAccountId: string,
-  currentOfferId: string,
-  message: string,
-) => void;
-type SweepPairOutOfBandOffers = (
-  pairId: string,
-  pairPolicy: SwapPairPolicy,
-  hasExplicitPairPolicy: boolean,
-  currentBook: BookState,
+  book: BookState,
+  order: NonNullable<ReturnType<typeof getBookOrder>>,
+  reason: string,
 ) => BookState;
-type AssertBookMatchesKnownAccountOffers = (pairId: string, book: BookState) => BookState;
 
-export type SameOrderbookProcessInput = {
+type SameOrderbookProcessInput = {
   hubState: EntityState;
   ext: OrderbookExtState;
   sameAccountSwapOffers: SameJurisdictionWorkingOrderbookOffer[];
@@ -59,15 +56,11 @@ export type SameOrderbookProcessInput = {
   bookCache: Map<string, BookState>;
   bookUpdates: { pairId: string; book: BookState }[];
   mempoolOps: MempoolOp[];
-  orderbookOfferMeta: Map<string, NormalizedOrderbookOffer>;
-  sweptPairs: Set<string>;
   queuedSwapResolutions: Set<string>;
   debugRebuildProjectionOnly: boolean;
   recordDebugProjectionReject: RecordDebugProjectionReject;
   rejectInvalidOffer: RejectInvalidOffer;
-  containCurrentOfferPairFailure: ContainCurrentOfferPairFailure;
-  sweepPairOutOfBandOffers: SweepPairOutOfBandOffers;
-  assertBookMatchesKnownAccountOffers: AssertBookMatchesKnownAccountOffers;
+  cancelNonWorkingBookOrder: CancelNonWorkingBookOrder;
 };
 
 export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInput): void => {
@@ -80,18 +73,156 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
     bookCache,
     bookUpdates,
     mempoolOps,
-    orderbookOfferMeta,
-    sweptPairs,
     queuedSwapResolutions,
     debugRebuildProjectionOnly,
     recordDebugProjectionReject,
     rejectInvalidOffer,
-    containCurrentOfferPairFailure,
-    sweepPairOutOfBandOffers,
-    assertBookMatchesKnownAccountOffers,
+    cancelNonWorkingBookOrder,
   } = input;
 
-  for (const offer of sortSwapOffersForOrderbook(sameAccountSwapOffers)) {
+  const orderbookOfferMeta = new Map<string, NormalizedOrderbookOffer>();
+  const sweptPairs = new Set<string>();
+  let pairSweepCount = 0;
+
+  const buildLiveOfferMeta = (namespacedOrderId: string): NormalizedOrderbookOffer | null => {
+    const { accountId, offerId } = parseNamespacedOrderId(namespacedOrderId, 'ORDERBOOK_MALFORMED_BOOK_ORDER');
+    const account = hubState.accounts.get(accountId);
+    const liveOffer = account?.swapOffers?.get(offerId);
+    if (!account || !liveOffer || liveOffer.crossJurisdiction) return null;
+    const entityRefs = resolveStoredOfferEntityRefs(account, liveOffer);
+    return normalizeSwapOfferForOrderbook(
+      {
+        offerId,
+        makerIsLeft: liveOffer.makerIsLeft,
+        fromEntity: entityRefs.fromEntity,
+        toEntity: entityRefs.toEntity,
+        createdHeight: liveOffer.createdHeight,
+        giveTokenId: liveOffer.giveTokenId,
+        giveAmount: liveOffer.giveAmount,
+        wantTokenId: liveOffer.wantTokenId,
+        wantAmount: liveOffer.wantAmount,
+        priceTicks: liveOffer.priceTicks,
+        timeInForce: liveOffer.timeInForce,
+        minFillRatio: liveOffer.minFillRatio,
+      },
+      accountId,
+    );
+  };
+
+  const containCurrentOfferPairFailure = (
+    pairId: string,
+    currentAccountId: string,
+    currentOfferId: string,
+    message: string,
+  ): void => {
+    console.error(
+      `ORDERBOOK_PAIR_ERROR: pair=${pairId} offer=${currentOfferId} ` +
+        `account=${currentAccountId.slice(-8)} error=${message}`,
+    );
+    if (debugRebuildProjectionOnly) {
+      recordDebugProjectionReject(currentAccountId, currentOfferId, `pair-error:${message}`);
+      return;
+    }
+    throw new Error(
+      `ORDERBOOK_PAIR_COMMAND_FAILED: pair=${pairId} account=${currentAccountId} offer=${currentOfferId} error=${message}`,
+    );
+  };
+
+  const sweepPairOutOfBandOffers = (
+    pairId: string,
+    pairPolicy: SwapPairPolicy,
+    hasExplicitPairPolicy: boolean,
+    currentBook: BookState,
+  ): BookState => {
+    const rejectBps = SWAP_CONSTANTS.PRICE_REJECT_BPS;
+    const bpsBase = SWAP_CONSTANTS.BPS_BASE;
+    const bestBid = getBestBid(currentBook);
+    const bestAsk = getBestAsk(currentBook);
+    const { anchor: bandAnchor, label: bandLabel } = resolvePairBandReference(
+      pairPolicy,
+      hasExplicitPairPolicy,
+      bestBid,
+      bestAsk,
+    );
+    if (bandAnchor === null) return currentBook;
+
+    const minAllowed = bandAnchor - (bandAnchor * BigInt(rejectBps)) / BigInt(bpsBase);
+    const maxAllowed = bandAnchor + (bandAnchor * BigInt(rejectBps)) / BigInt(bpsBase);
+    let removed = 0;
+    let nextBook = currentBook;
+
+    for (const order of [...currentBook.orders.values()]) {
+      const liveOffer = buildLiveOfferMeta(order.orderId);
+      if (!liveOffer) {
+        removed += 1;
+        nextBook = cancelNonWorkingBookOrder(pairId, nextBook, order, 'orphan-book-order');
+        continue;
+      }
+      if (order.priceTicks < minAllowed || order.priceTicks > maxAllowed) {
+        removed += 1;
+        console.warn(
+          `ORDERBOOK_SWEEP_OUT_OF_BAND: offer=${liveOffer.offerId} pair=${pairId} ` +
+            `price=${order.priceTicks.toString()} outside +/-${rejectBps / 100}% of ` +
+            `${bandLabel} ${bandAnchor.toString()}`,
+        );
+        if (debugRebuildProjectionOnly) {
+          recordDebugProjectionReject(
+            liveOffer.accountId,
+            liveOffer.offerId,
+            `outside-anchor-band:${order.priceTicks.toString()}`,
+          );
+        } else {
+          const cancelResult = applyCommand(nextBook, {
+            kind: 1,
+            ownerId: order.ownerId,
+            orderId: order.orderId,
+          });
+          nextBook = cancelResult.state;
+          queueUniqueSwapResolveForEntityState(mempoolOps, hubState, queuedSwapResolutions, liveOffer.accountId, {
+            offerId: liveOffer.offerId,
+            fillRatio: 0,
+            cancelRemainder: true,
+          });
+        }
+      }
+    }
+
+    if (removed === 0) return currentBook;
+    pairSweepCount += 1;
+    return nextBook;
+  };
+
+  const assertBookMatchesKnownAccountOffers = (pairId: string, book: BookState): BookState => {
+    let currentBook = book;
+    for (const order of [...book.orders.values()]) {
+      const orderId = order.orderId;
+      const meta = orderbookOfferMeta.get(orderId) ?? buildLiveOfferMeta(orderId);
+      if (!meta) {
+        currentBook = cancelNonWorkingBookOrder(pairId, currentBook, order, 'orphan-book-order');
+        continue;
+      }
+      if (hasQueuedSwapResolveForEntityState(hubState, queuedSwapResolutions, meta.accountId, meta.offerId)) {
+        currentBook = cancelNonWorkingBookOrder(pairId, currentBook, order, 'pending-swap-resolve');
+        continue;
+      }
+      orderbookOfferMeta.set(orderId, meta);
+      const metaSide = deriveSide(meta.giveTokenId, meta.wantTokenId);
+      const metaBaseAmount = metaSide === 1 ? (meta.quantizedGive ?? meta.giveAmount) : meta.wantAmount;
+      if (
+        order.priceTicks !== meta.priceTicks ||
+        order.ownerId !== (meta.makerIsLeft ? meta.fromEntity : meta.toEntity) ||
+        BigInt(order.qtyLots) !== metaBaseAmount / SWAP_LOT_SCALE
+      ) {
+        throw new Error(
+          `ORDERBOOK_CACHE_MISMATCH: pair=${pairId} order=${orderId} ` +
+            `storedPrice=${order.priceTicks.toString()} canonicalPrice=${meta.priceTicks.toString()}`,
+        );
+      }
+    }
+    return currentBook;
+  };
+
+  for (const offer of sameAccountSwapOffers) {
     const currentAccountId = offer.accountId;
     if (hasQueuedSwapResolveForEntityState(hubState, queuedSwapResolutions, currentAccountId, offer.offerId)) {
       continue;
@@ -373,5 +504,9 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
       containCurrentOfferPairFailure(bookKey, currentAccountId, offer.offerId, message);
       continue;
     }
+  }
+
+  if (pairSweepCount > 0) {
+    orderbookSameLog.debug('pass.summary', { pairSweep: pairSweepCount });
   }
 };

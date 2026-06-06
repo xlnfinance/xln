@@ -39,12 +39,12 @@ export type OrderbookProcessOptions = {
   debugRebuildProjectionOnly?: boolean;
 };
 
-export type NamespacedOrderRef = {
+type NamespacedOrderRef = {
   accountId: string;
   offerId: string;
 };
 
-export type CanonicalRestingOffer = {
+type CanonicalRestingOffer = {
   giveTokenId: number;
   wantTokenId: number;
   giveAmount: bigint;
@@ -54,13 +54,13 @@ export type CanonicalRestingOffer = {
   priceTicks: bigint;
 };
 
-export type SameTradeFillAggregate = {
+type SameTradeFillAggregate = {
   filledLots: number;
   originalLots: number;
   weightedCost: bigint;
 };
 
-export type CrossTradeFillAggregate = {
+type CrossTradeFillAggregate = {
   filledLots: number;
   weightedCost: bigint;
 };
@@ -70,7 +70,7 @@ type RestingOrderTerms = {
   wantTokenId: number;
 };
 
-export type SameFillResolvePlan = {
+type SameFillResolvePlan = {
   accountId: string;
   offerId: string;
   fillPct: string;
@@ -91,7 +91,7 @@ export type SameFillResolvePlan = {
 
 export const MAX_ORDERBOOK_QTY_LOTS = 0xffffffffn;
 
-export type SameOrderbookMaterialization = {
+type SameOrderbookMaterialization = {
   pairId: string;
   base: number;
   quote: number;
@@ -107,17 +107,17 @@ export type SameOrderbookMaterialization = {
   bucketWidthTicks: number;
 };
 
-export type SameOrderbookMaterializationResult =
+type SameOrderbookMaterializationResult =
   | { kind: 'ok'; order: SameOrderbookMaterialization }
   | { kind: 'reject'; reason: string; message: string };
 
-export type SameOrderbookPriceBandDecision = {
+type SameOrderbookPriceBandDecision = {
   rejectReason?: string;
   rejectMessage?: string;
   warnMessage?: string;
 };
 
-export const normalizeEntityRef = (value: string): string =>
+const normalizeEntityRef = (value: string): string =>
   String(value || '')
     .trim()
     .toLowerCase();
@@ -305,11 +305,6 @@ export const evaluateSameOrderbookPriceBand = (input: {
   return {};
 };
 
-export const buildCrossMarketOfferForHub = (
-  hubEntityId: string,
-  offer: NormalizedOrderbookOffer,
-): CrossMarketOffer | null => buildCrossJurisdictionMarketOffer(offer, hubEntityId);
-
 export const synthesizeCrossOfferFromRoute = (
   accountId: string,
   route: NonNullable<NormalizedOrderbookOffer['crossJurisdiction']>,
@@ -360,11 +355,12 @@ export const buildCrossMarketOfferFromBookOrder = (
   const offer = account?.swapOffers?.get(offerId);
   if (!account || !offer?.crossJurisdiction) {
     const route = findCrossRouteForBookOrder(state, accountId, offerId);
-    return route ? buildCrossMarketOfferForHub(state.entityId, synthesizeCrossOfferFromRoute(accountId, route)) : null;
+    return route
+      ? buildCrossJurisdictionMarketOffer(synthesizeCrossOfferFromRoute(accountId, route), state.entityId)
+      : null;
   }
   const entityRefs = resolveStoredOfferEntityRefs(account, offer);
-  return buildCrossMarketOfferForHub(
-    state.entityId,
+  return buildCrossJurisdictionMarketOffer(
     normalizeSwapOfferForOrderbook(
       {
         offerId,
@@ -383,10 +379,11 @@ export const buildCrossMarketOfferFromBookOrder = (
       },
       accountId,
     ),
+    state.entityId,
   );
 };
 
-export const materializeCanonicalRestingOffer = (
+const materializeCanonicalRestingOffer = (
   giveTokenId: number,
   wantTokenId: number,
   priceTicks: bigint,
