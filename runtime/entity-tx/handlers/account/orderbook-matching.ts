@@ -5,30 +5,19 @@ import {
   getBookOrder,
   getBestAsk,
   getBestBid,
-  refreshRestingOrder,
   SWAP_LOT_SCALE,
   type BookState,
   type OrderbookExtState,
 } from '../../../orderbook';
 import { SWAP as SWAP_CONSTANTS } from '../../../constants';
-import { getSwapPairPolicyByBaseQuote, type SwapPairPolicy } from '../../../account-utils';
-import { HEAVY_LOGS } from '../../../utils';
-import { createStructuredLogger, shortId, shortOrder, shouldLogFullPayloads } from '../../../logger';
+import type { SwapPairPolicy } from '../../../account-utils';
+import { createStructuredLogger, shortId, shortOrder } from '../../../logger';
+import { type NormalizedOrderbookOffer, type WorkingOrderbookOffer, swapKey } from '../../../swap-execution';
 import {
-  compareCanonicalText,
-  type NormalizedOrderbookOffer,
-  type WorkingOrderbookOffer,
-  swapKey,
-} from '../../../swap-execution';
-import {
-  buildCrossJurisdictionFillAck,
   markCrossJurisdictionBookAdmissionClosed,
   type CrossJurisdictionFillInstruction,
-  type CrossMarketOffer,
 } from '../../../cross-jurisdiction-orderbook';
 import {
-  findQueuedCrossSwapAckForEntityState,
-  hasQueuedCrossSwapAckForEntityState,
   hasQueuedSwapResolveForEntityState,
   queueUniqueSwapResolveForEntityState,
   type MempoolOp,
@@ -36,26 +25,16 @@ import {
 import {
   normalizeSwapOfferForOrderbook,
   resolveStoredOfferEntityRefs,
-  sortSwapOffersForOrderbook,
   type MatchResult,
 } from './orderbook-offers';
 import {
-  aggregateCrossTradeFills,
-  aggregateSameTradeFills,
-  buildCrossMarketOfferForHub,
-  buildCrossMarketOfferFromBookOrder,
-  buildSameFillResolvePlan,
-  createEmptyPairBook,
-  deriveSameOrderbookMaterialization,
-  evaluateSameOrderbookPriceBand,
-  extractOfferIdForLog,
   parseNamespacedOrderId,
-  rejectEventsForOrder,
   resolvePairBandReference,
   splitWorkingOrderbookOffers,
-  tradeEvents as collectTradeEvents,
   type OrderbookProcessOptions,
 } from './orderbook-matching-helpers';
+import { processCrossJurisdictionOrderbookOffers } from './orderbook-matching-cross';
+import { processSameAccountOrderbookOffers } from './orderbook-matching-same';
 
 const orderbookLog = createStructuredLogger('orderbook');
 
@@ -303,585 +282,39 @@ export function processOrderbookSwaps(
     return currentBook;
   };
 
-  const crossLiveOfferMeta = new Map<string, CrossMarketOffer>();
-  const assertedCrossJurisdictionPairs = new Set<string>();
-  const crossAggregatedFills = new Map<string, { filledLots: number; weightedCost: bigint }>();
-
-  const getCrossMarketOffer = (offer: NormalizedOrderbookOffer): CrossMarketOffer | null => {
-    const key = swapKey(offer.accountId, offer.offerId);
-    const cached = crossLiveOfferMeta.get(key);
-    if (cached) return cached;
-    const marketOffer = buildCrossMarketOfferForHub(hubState.entityId, offer);
-    if (marketOffer) crossLiveOfferMeta.set(key, marketOffer);
-    return marketOffer;
-  };
-
-  const refreshExistingCrossBookOrder = (pairId: string, namespacedOrderId: string, meta: CrossMarketOffer): void => {
-    let book = bookCache.get(pairId) || ext.books.get(pairId);
-    if (!book || !getBookOrder(book, namespacedOrderId)) return;
-
-    const qtyLots = meta.baseAmount / SWAP_LOT_SCALE;
-    if (qtyLots > 0xffffffffn) {
-      throw new Error(
-        `ORDERBOOK_CROSS_J_REFRESH_QTY_INVALID: pair=${pairId} order=${namespacedOrderId} qty=${qtyLots.toString()}`,
-      );
-    }
-    if (qtyLots > 0n) {
-      book = refreshRestingOrder(book, {
-        ownerId: meta.makerId,
-        orderId: namespacedOrderId,
-        side: meta.side,
-        priceTicks: meta.priceTicks,
-        qtyLots: Number(qtyLots),
-      });
-    } else {
-      const cancelResult = applyCommand(book, {
-        kind: 1,
-        ownerId: meta.makerId,
-        orderId: namespacedOrderId,
-      });
-      book = cancelResult.state;
-    }
-
-    bookCache.set(pairId, book);
-    bookUpdates.push({ pairId, book });
-  };
-
-  const removeCrossBookOrderAfterFill = (pairId: string, namespacedOrderId: string, reason: string): void => {
-    let book = bookCache.get(pairId) || ext.books.get(pairId);
-    if (!book) return;
-    const order = getBookOrder(book, namespacedOrderId);
-    if (!order) return;
-    const result = applyCommand(book, {
-      kind: 1,
-      ownerId: order.ownerId,
-      orderId: namespacedOrderId,
-    });
-    book = result.state;
-    bookCache.set(pairId, book);
-    bookUpdates.push({ pairId, book });
-    orderbookLog.debug('crossj.book.remove_resolving', {
-      pair: pairId,
-      order: shortOrder(namespacedOrderId, 20),
-      reason,
-    });
-  };
-
-  const assertCrossBookMatchesKnownRoutes = (pairId: string, book: BookState): BookState => {
-    if (assertedCrossJurisdictionPairs.has(pairId)) return book;
-    assertedCrossJurisdictionPairs.add(pairId);
-    let currentBook = book;
-
-    for (const order of [...book.orders.values()]) {
-      const orderId = order.orderId;
-      const { accountId, offerId } = parseNamespacedOrderId(orderId, 'ORDERBOOK_CROSS_J_MALFORMED_BOOK_ORDER');
-      const queuedPendingAck = findQueuedCrossSwapAckForEntityState(hubState, accountId, offerId);
-      const pendingAck = queuedPendingAck?.data ?? null;
-      const meta = crossLiveOfferMeta.get(orderId) ?? buildCrossMarketOfferFromBookOrder(hubState, orderId);
-      if (!meta) {
-        currentBook = cancelNonWorkingBookOrder(
-          pairId,
-          currentBook,
-          order,
-          pendingAck ? 'pending-cross-ack-orphan' : 'orphan-cross-route',
-        );
-        continue;
-      }
-
-      crossLiveOfferMeta.set(orderId, meta);
-      const canonicalQtyLots = meta.baseAmount / SWAP_LOT_SCALE;
-      if (pendingAck) {
-        currentBook = cancelNonWorkingBookOrder(pairId, currentBook, order, 'resolving-cross-fill');
-        continue;
-      }
-      const staticMismatch =
-        meta.pairId !== pairId || order.priceTicks !== meta.priceTicks || order.ownerId !== meta.makerId;
-      const storedQtyLots = BigInt(order.qtyLots);
-      const committedPartialNeedsRefresh =
-        !staticMismatch && meta.route.status === 'partially_filled' && storedQtyLots > canonicalQtyLots;
-      if (committedPartialNeedsRefresh) {
-        if (canonicalQtyLots > 0xffffffffn) {
-          throw new Error(
-            `ORDERBOOK_CROSS_J_REFRESH_QTY_INVALID: pair=${pairId} order=${orderId} qty=${canonicalQtyLots.toString()}`,
-          );
-        }
-        currentBook =
-          canonicalQtyLots > 0n
-            ? refreshRestingOrder(currentBook, {
-                ownerId: meta.makerId,
-                orderId,
-                side: meta.side,
-                priceTicks: meta.priceTicks,
-                qtyLots: Number(canonicalQtyLots),
-              })
-            : applyCommand(currentBook, {
-                kind: 1,
-                ownerId: meta.makerId,
-                orderId,
-              }).state;
-        bookUpdates.push({ pairId, book: currentBook });
-        continue;
-      }
-      if (staticMismatch || storedQtyLots !== canonicalQtyLots) {
-        throw new Error(
-          `ORDERBOOK_CROSS_J_CACHE_MISMATCH: pair=${pairId} order=${orderId} ` +
-            `storedPair=${pairId} canonicalPair=${meta.pairId} ` +
-            `storedOwner=${order.ownerId} canonicalOwner=${meta.makerId} ` +
-            `storedQty=${storedQtyLots.toString()} canonicalQty=${canonicalQtyLots.toString()} ` +
-            `storedPrice=${order.priceTicks.toString()} canonicalPrice=${meta.priceTicks.toString()}`,
-        );
-      }
-    }
-    return currentBook;
-  };
-
-  const processCrossJurisdictionOffers = (): void => {
-    for (const rawOffer of sortSwapOffersForOrderbook(crossJurisdictionSwapOffers)) {
-      const marketOffer = getCrossMarketOffer(rawOffer);
-      if (!marketOffer) continue;
-      refreshExistingCrossBookOrder(marketOffer.pairId, swapKey(rawOffer.accountId, rawOffer.offerId), marketOffer);
-    }
-
-    for (const [pairId, book] of ext.books) {
-      if (!String(pairId).startsWith('cross:')) continue;
-      const currentBook = bookCache.get(pairId) || book;
-      const checkedBook = assertCrossBookMatchesKnownRoutes(pairId, currentBook);
-      bookCache.set(pairId, checkedBook);
-    }
-
-    for (const rawOffer of sortSwapOffersForOrderbook(crossJurisdictionSwapOffers)) {
-      const currentAccountId = rawOffer.accountId;
-      const currentNamespacedOrderId = swapKey(currentAccountId, rawOffer.offerId);
-      const marketOffer = getCrossMarketOffer(rawOffer);
-      if (!marketOffer) {
-        rejectInvalidCrossOffer(currentAccountId, rawOffer.offerId, 'invalid-cross-j-route');
-        continue;
-      }
-      const qtyLots = marketOffer.baseAmount / SWAP_LOT_SCALE;
-      if (qtyLots <= 0n) {
-        rejectInvalidCrossOffer(
-          currentAccountId,
-          rawOffer.offerId,
-          `cross-dust-remainder:${marketOffer.baseAmount.toString()}`,
-        );
-        continue;
-      }
-      if (qtyLots > 0xffffffffn) {
-        rejectInvalidCrossOffer(currentAccountId, rawOffer.offerId, `invalid-cross-qty:${qtyLots.toString()}`);
-        continue;
-      }
-
-      crossLiveOfferMeta.set(currentNamespacedOrderId, marketOffer);
-      if (hasQueuedSwapResolveForEntityState(hubState, queuedSwapResolutions, currentAccountId, rawOffer.offerId)) {
-        continue;
-      }
-      // Cross-j routes carry delayed clearing state outside the plain book.
-      // The book itself is loaded from the persisted snapshot and updated by
-      // normal order commands, never rebuilt from an account scan in live mode.
-      let book = bookCache.get(marketOffer.pairId) || ext.books.get(marketOffer.pairId);
-      if (!book) {
-        book = createEmptyPairBook(
-          getSwapPairPolicyByBaseQuote(rawOffer.giveTokenId, rawOffer.wantTokenId).bookBucketWidthTicks,
-        );
-      } else {
-        book = assertCrossBookMatchesKnownRoutes(marketOffer.pairId, book);
-      }
-      const existingOrder = getBookOrder(book, currentNamespacedOrderId);
-      if (existingOrder) {
-        const refreshResult = applyCommand(book, {
-          kind: 1,
-          ownerId: marketOffer.makerId,
-          orderId: currentNamespacedOrderId,
-        });
-        book = refreshResult.state;
-        bookCache.set(marketOffer.pairId, book);
-        bookUpdates.push({ pairId: marketOffer.pairId, book });
-      }
-
-      let result: ReturnType<typeof applyCommand>;
-      try {
-        result = applyCommand(book, {
-          kind: 0,
-          ownerId: marketOffer.makerId,
-          orderId: currentNamespacedOrderId,
-          side: marketOffer.side,
-          tif: rawOffer.timeInForce,
-          postOnly: debugRebuildProjectionOnly,
-          priceTicks: marketOffer.priceTicks,
-          qtyLots: Number(qtyLots),
-          minFillRatio: rawOffer.minFillRatio,
-        });
-      } catch (error) {
-        rejectInvalidCrossOffer(
-          currentAccountId,
-          rawOffer.offerId,
-          `cross-pair-error:${error instanceof Error ? error.message : String(error)}`,
-        );
-        continue;
-      }
-
-      book = result.state;
-      bookCache.set(marketOffer.pairId, book);
-      bookUpdates.push({ pairId: marketOffer.pairId, book });
-
-      const rejectEvents = rejectEventsForOrder(result.events, currentNamespacedOrderId);
-      const tradeEvents = collectTradeEvents(result.events);
-      if (rejectEvents.length > 0 && tradeEvents.length === 0) {
-        rejectInvalidCrossOffer(
-          currentAccountId,
-          rawOffer.offerId,
-          `cross-post-only-reject:${rejectEvents.map(event => event.reason).join(',')}`,
-        );
-        continue;
-      }
-      if (debugRebuildProjectionOnly) {
-        if (tradeEvents.length > 0) {
-          recordDebugProjectionReject(
-            currentAccountId,
-            rawOffer.offerId,
-            `debug-rebuild-cross-trade:${tradeEvents.length}`,
-          );
-        }
-        continue;
-      }
-
-      for (const [namespacedOrderId, fill] of aggregateCrossTradeFills(tradeEvents)) {
-        const meta = crossLiveOfferMeta.get(namespacedOrderId) ?? buildCrossMarketOfferFromBookOrder(hubState, namespacedOrderId);
-        if (!meta) {
-          throw new Error(`ORDERBOOK_CROSS_J_FILL_META_MISSING: order=${namespacedOrderId}`);
-        }
-        const { accountId, offerId } = parseNamespacedOrderId(
-          namespacedOrderId,
-          'ORDERBOOK_CROSS_J_MALFORMED_FILL_ORDER',
-        );
-        if (hasQueuedCrossSwapAckForEntityState(hubState, accountId, offerId)) continue;
-        const aggregatedFill = crossAggregatedFills.get(namespacedOrderId);
-        if (aggregatedFill) {
-          aggregatedFill.filledLots += fill.filledLots;
-          aggregatedFill.weightedCost += fill.weightedCost;
-        } else {
-          crossAggregatedFills.set(namespacedOrderId, {
-            filledLots: fill.filledLots,
-            weightedCost: fill.weightedCost,
-          });
-        }
-      }
-    }
-
-    for (const namespacedOrderId of [...crossAggregatedFills.keys()].sort(compareCanonicalText)) {
-      const fill = crossAggregatedFills.get(namespacedOrderId);
-      if (!fill) continue;
-      const meta = crossLiveOfferMeta.get(namespacedOrderId) ?? buildCrossMarketOfferFromBookOrder(hubState, namespacedOrderId);
-      if (!meta) {
-        throw new Error(`ORDERBOOK_CROSS_J_FILL_META_MISSING: order=${namespacedOrderId}`);
-      }
-      const { accountId, offerId } = parseNamespacedOrderId(
-        namespacedOrderId,
-        'ORDERBOOK_CROSS_J_MALFORMED_FILL_ORDER',
-      );
-      if (hasQueuedCrossSwapAckForEntityState(hubState, accountId, offerId)) {
-        removeCrossBookOrderAfterFill(meta.pairId, namespacedOrderId, 'queued-cross-fill-ack');
-        continue;
-      }
-      const ack = buildCrossJurisdictionFillAck(accountId, offerId, namespacedOrderId, meta, fill);
-      if (!ack) continue;
-      removeCrossBookOrderAfterFill(meta.pairId, namespacedOrderId, 'cross-fill-ack-created');
-      crossJurisdictionFills.push(ack.instruction);
-      mempoolOps.push({ accountId, tx: ack.tx });
-    }
-  };
-
-  const processSameAccountOffers = (): void => {
-    for (const rawOffer of sortSwapOffersForOrderbook(sameAccountSwapOffers)) {
-      let offer = rawOffer;
-      const currentAccountId = offer.accountId;
-      if (hasQueuedSwapResolveForEntityState(hubState, queuedSwapResolutions, currentAccountId, offer.offerId)) {
-        continue;
-      }
-      orderbookLog.debug('offer.process', { offer: shortOrder(offer.offerId), account: shortId(currentAccountId, 8) });
-
-      const materialized = deriveSameOrderbookMaterialization(offer, minTradeSize);
-      if (materialized.kind === 'reject') {
-        console.warn(materialized.message);
-        rejectInvalidOffer(currentAccountId, offer.offerId, materialized.reason);
-        continue;
-      }
-      const {
-        pairId: bookKey,
-        base,
-        quote,
-        side,
-        priceTicks,
-        qtyLots,
-        makerId,
-        namespacedOrderId: currentNamespacedOrderId,
-        pairPolicy,
-        hasExplicitPairPolicy,
-        bucketWidthTicks,
-      } = materialized.order;
-
-      // ext.books is the persisted hot book snapshot. Live mode must not rebuild
-      // it by scanning accounts; mismatches are bugs that need a root-cause fix.
-      let book = bookCache.get(bookKey) || ext.books.get(bookKey);
-      if (!book) {
-        book = createEmptyPairBook(bucketWidthTicks);
-      } else {
-        book = assertBookMatchesKnownAccountOffers(bookKey, book);
-      }
-
-      if (!sweptPairs.has(bookKey)) {
-        sweptPairs.add(bookKey);
-        const sweptBook = sweepPairOutOfBandOffers(bookKey, pairPolicy, hasExplicitPairPolicy, book);
-        if (sweptBook !== book) {
-          book = sweptBook;
-          bookCache.set(bookKey, book);
-          bookUpdates.push({ pairId: bookKey, book });
-        }
-      }
-
-      const bestBid = getBestBid(book);
-      const bestAsk = getBestAsk(book);
-      const priceBand = evaluateSameOrderbookPriceBand({
-        priceTicks,
-        side,
-        bestBid,
-        bestAsk,
-        pairPolicy,
-        hasExplicitPairPolicy,
-      });
-      if (priceBand.rejectReason) {
-        console.warn(`${priceBand.rejectMessage} offer=${offer.offerId}`);
-        if (debugRebuildProjectionOnly) {
-          recordDebugProjectionReject(currentAccountId, offer.offerId, priceBand.rejectReason);
-          continue;
-        }
-        queueUniqueSwapResolveForEntityState(mempoolOps, hubState, queuedSwapResolutions, currentAccountId, {
-          offerId: offer.offerId,
-          fillRatio: 0,
-          cancelRemainder: true,
-        });
-        continue;
-      }
-      if (priceBand.warnMessage) console.warn(priceBand.warnMessage);
-
-      orderbookOfferMeta.set(currentNamespacedOrderId, {
-        ...offer,
-        accountId: currentAccountId,
-        priceTicks,
-      });
-      const existingOrder = getBookOrder(book, currentNamespacedOrderId);
-      if (existingOrder) {
-        if (
-          existingOrder.ownerId === makerId &&
-          existingOrder.side === side &&
-          BigInt(existingOrder.qtyLots) === qtyLots &&
-          existingOrder.priceTicks === priceTicks
-        ) {
-          console.log(
-            `📊 ORDERBOOK-RESTING: already materialized offer=${offer.offerId} account=${currentAccountId.slice(-8)} ` +
-              `price=${priceTicks.toString()} qty=${qtyLots.toString()}`,
-          );
-          bookCache.set(bookKey, book);
-          continue;
-        }
-        console.warn(
-          `⚠️ ORDERBOOK: cached order mismatch for live offer=${offer.offerId} account=${currentAccountId.slice(-8)} ` +
-            `storedPrice=${existingOrder.priceTicks.toString()} canonicalPrice=${priceTicks.toString()} ` +
-            `storedQty=${existingOrder.qtyLots.toString()} canonicalQty=${qtyLots.toString()}`,
-        );
-        throw new Error(`ORDERBOOK_CACHE_MISMATCH: pair=${bookKey} order=${currentNamespacedOrderId}`);
-      }
-      orderbookLog.debug('order.add', {
-        maker: shortId(makerId),
-        order: shortOrder(currentNamespacedOrderId, 20),
-        side,
-        price: priceTicks.toString(),
-        qty: qtyLots.toString(),
-      });
-
-      let result: ReturnType<typeof applyCommand>;
-      try {
-        result = applyCommand(book, {
-          kind: 0,
-          ownerId: makerId,
-          orderId: currentNamespacedOrderId,
-          side,
-          tif: offer.timeInForce,
-          postOnly: debugRebuildProjectionOnly,
-          priceTicks,
-          qtyLots: Number(qtyLots),
-          minFillRatio: offer.minFillRatio,
-        });
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        if (message === 'Out of order slots') {
-          console.warn(
-            `⚠️ ORDERBOOK FULL: pair=${bookKey} maxOrders=${book.params.maxOrders} offer=${offer.offerId} account=${currentAccountId.slice(-8)}`,
-          );
-          if (debugRebuildProjectionOnly) {
-            recordDebugProjectionReject(currentAccountId, offer.offerId, `book-full:${book.params.maxOrders}`);
-            continue;
-          }
-          if (
-            queueUniqueSwapResolveForEntityState(mempoolOps, hubState, queuedSwapResolutions, currentAccountId, {
-              offerId: offer.offerId,
-              fillRatio: 0,
-              cancelRemainder: true,
-            })
-          ) {
-            orderbookLog.debug('resolve.queued_cancel_full_book', {
-              offer: shortOrder(offer.offerId, 8),
-              account: shortId(currentAccountId, 8),
-            });
-          }
-          continue;
-        }
-        containCurrentOfferPairFailure(bookKey, currentAccountId, offer.offerId, message);
-        continue;
-      }
-
-      book = result.state;
-      // Keep the updated pair book hot for the rest of this matching pass.
-      bookCache.set(bookKey, book);
-      bookUpdates.push({ pairId: bookKey, book });
-
-      try {
-        const rejectEvents = rejectEventsForOrder(result.events, currentNamespacedOrderId);
-        const tradeEvents = collectTradeEvents(result.events);
-        const stpRejectEvent = rejectEvents.find(event => event.reason === 'STP cancel taker');
-        const resolveComment = stpRejectEvent ? `STP:${String(stpRejectEvent.blockingOrderId || '')}` : undefined;
-        const offerRejectedWithoutFill = rejectEvents.length > 0 && tradeEvents.length === 0;
-        if (offerRejectedWithoutFill) {
-          const rejectReasons = rejectEvents
-            .map(event => event.reason)
-            .filter(Boolean)
-            .join(', ');
-          console.warn(
-            `⚠️ ORDERBOOK REJECT: offer=${offer.offerId} account=${currentAccountId.slice(-8)} side=${side} price=${priceTicks.toString()} qty=${qtyLots.toString()} bestBid=${String(bestBid)} bestAsk=${String(bestAsk)} reason=${rejectReasons || 'unknown'}`,
-          );
-          if (debugRebuildProjectionOnly) {
-            recordDebugProjectionReject(
-              currentAccountId,
-              offer.offerId,
-              `post-only-reject:${rejectReasons || 'unknown'}`,
-            );
-            continue;
-          }
-          if (
-            queueUniqueSwapResolveForEntityState(mempoolOps, hubState, queuedSwapResolutions, currentAccountId, {
-              offerId: offer.offerId,
-              fillRatio: 0,
-              cancelRemainder: true,
-              ...(resolveComment ? { comment: resolveComment } : {}),
-            })
-          ) {
-            orderbookLog.debug('resolve.queued_cancel_reject', {
-              offer: shortOrder(offer.offerId, 8),
-              account: shortId(currentAccountId, 8),
-            });
-          }
-          continue;
-        }
-
-        if (debugRebuildProjectionOnly) {
-          continue;
-        }
-
-        for (const event of tradeEvents) {
-          orderbookLog.debug('trade', {
-            maker: shortOrder(extractOfferIdForLog(event.makerOrderId)),
-            taker: shortOrder(extractOfferIdForLog(event.takerOrderId)),
-            price: event.price.toString(),
-            qty: event.qty,
-          });
-        }
-
-        // Emit swap_resolve for each filled order
-        for (const [namespacedOrderId, fill] of aggregateSameTradeFills(tradeEvents)) {
-          const { accountId, offerId } = parseNamespacedOrderId(namespacedOrderId, 'ORDERBOOK_FILL_LOOKUP_FAILED');
-          if (hasQueuedSwapResolveForEntityState(hubState, queuedSwapResolutions, accountId, offerId)) {
-            continue;
-          }
-
-          if (HEAVY_LOGS) {
-            orderbookLog.trace('lookup', {
-              account: shortId(accountId, 8),
-              known: Array.from(hubState.accounts.keys()).map(id => shortId(id, 8)),
-              found: hubState.accounts.has(accountId),
-            });
-          }
-          const account = hubState.accounts.get(accountId);
-          if (!account) {
-            throw new Error(
-              `ORDERBOOK_ACCOUNT_LOOKUP_FAILED: offer=${offerId} accountId=${accountId} ` +
-                `known=[${Array.from(hubState.accounts.keys()).join(',')}]`,
-            );
-          }
-          orderbookLog.debug('lookup.found', { account: shortId(accountId, 8), offer: shortOrder(offerId, 8) });
-
-          const plan = buildSameFillResolvePlan({
-            accountId,
-            offerId,
-            namespacedOrderId,
-            fill,
-            currentNamespacedOrderId,
-            currentOffer: offer,
-            batchOffer: orderbookOfferMeta.get(namespacedOrderId) ?? null,
-            accountOffer: account.swapOffers?.get(offerId) ?? null,
-            book,
-            bookKey,
-            ...(resolveComment ? { resolveComment } : {}),
-            takerFeeBps: swapTakerFeeBps,
-          });
-
-          if (
-            queueUniqueSwapResolveForEntityState(
-              mempoolOps,
-              hubState,
-              queuedSwapResolutions,
-              accountId,
-              plan.resolveEnqueueData,
-            )
-          ) {
-            orderbookLog.debug('resolve.queued', {
-              offer: shortOrder(offerId, 8),
-              fillPct: plan.fillPct,
-              cancel: plan.cancelRemainder,
-              source: plan.offerSource,
-            });
-          }
-          if (shouldLogFullPayloads()) {
-            orderbookLog.trace('resolve.payload', {
-              accountId,
-              offerId,
-              namespacedOrderId,
-              offerSource: plan.offerSource,
-              side,
-              baseTokenId: base,
-              quoteTokenId: quote,
-              originalLots: fill.originalLots,
-              filledLots: fill.filledLots,
-              weightedCost: fill.weightedCost.toString(),
-              executionBaseWei: plan.trace.executionBaseWei.toString(),
-              executionQuoteWei: plan.trace.executionQuoteWei.toString(),
-              orderStillInBook: !plan.cancelRemainder,
-              offerGiveTokenId: plan.trace.offerGiveTokenId,
-              offerWantTokenId: plan.trace.offerWantTokenId,
-              offerGiveAmount: plan.trace.offerGiveAmount.toString(),
-              offerQuantizedGive: plan.trace.offerQuantizedGive.toString(),
-            });
-          }
-        }
-      } catch (error) {
-        const message = error instanceof Error ? error.message : String(error);
-        containCurrentOfferPairFailure(bookKey, currentAccountId, offer.offerId, message);
-        continue;
-      }
-    }
-  };
-
-  processCrossJurisdictionOffers();
-  processSameAccountOffers();
+  processCrossJurisdictionOrderbookOffers({
+    hubState,
+    ext,
+    crossJurisdictionSwapOffers,
+    bookCache,
+    bookUpdates,
+    mempoolOps,
+    crossJurisdictionFills,
+    queuedSwapResolutions,
+    debugRebuildProjectionOnly,
+    cancelNonWorkingBookOrder,
+    rejectInvalidCrossOffer,
+    recordDebugProjectionReject,
+  });
+  processSameAccountOrderbookOffers({
+    hubState,
+    ext,
+    sameAccountSwapOffers,
+    minTradeSize,
+    swapTakerFeeBps,
+    bookCache,
+    bookUpdates,
+    mempoolOps,
+    orderbookOfferMeta,
+    sweptPairs,
+    queuedSwapResolutions,
+    debugRebuildProjectionOnly,
+    recordDebugProjectionReject,
+    rejectInvalidOffer,
+    containCurrentOfferPairFailure,
+    sweepPairOutOfBandOffers,
+    assertBookMatchesKnownAccountOffers,
+  });
 
   if (pairSweepCount > 0) {
     orderbookLog.debug('pass.summary', { pairSweep: pairSweepCount });
