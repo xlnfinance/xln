@@ -1,16 +1,11 @@
 import type { EntityState } from '../../../types';
 import {
-  applyCommand,
-  getBookOrder,
   type BookState,
   type OrderbookExtState,
 } from '../../../orderbook';
 import { createStructuredLogger, shortId, shortOrder } from '../../../logger';
 import { type WorkingOrderbookOffer, swapKey } from '../../../swap-execution';
-import {
-  markCrossJurisdictionBookAdmissionClosed,
-  type CrossJurisdictionFillInstruction,
-} from '../../../cross-jurisdiction-orderbook';
+import { type CrossJurisdictionFillInstruction } from '../../../cross-jurisdiction-orderbook';
 import {
   queueUniqueSwapResolveForEntityState,
   type MempoolOp,
@@ -20,7 +15,6 @@ import {
   type MatchResult,
 } from './orderbook-offers';
 import {
-  parseNamespacedOrderId,
   splitWorkingOrderbookOffers,
   type OrderbookProcessOptions,
 } from './orderbook-matching-helpers';
@@ -64,6 +58,10 @@ export function processOrderbookSwaps(
   const swapTakerFeeBps = Number.isFinite(Number(swapTakerFeeBpsRaw))
     ? Math.max(0, Math.min(10_000, Math.floor(Number(swapTakerFeeBpsRaw))))
     : 0;
+  // Pair books stay hot within this pass so same-tick offers see each other's exact fills.
+  // The book is a deterministic projection of account swapOffers, not a second owner of order lifecycle.
+  const bookCache = new Map<string, BookState>();
+  const queuedSwapResolutions = new Set<string>();
   const debugProjectionRejectKeys = new Set<string>();
   const recordDebugProjectionReject = (accountId: string, offerId: string, reason: string): true => {
     if (!debugRebuildProjectionOnly) {
@@ -99,51 +97,6 @@ export function processOrderbookSwaps(
     });
   };
 
-  // Pair books stay hot within this pass so same-tick offers see each other's exact fills.
-  // The book is a deterministic projection of account swapOffers, not a second owner of order lifecycle.
-  const bookCache = new Map<string, BookState>();
-  const queuedSwapResolutions = new Set<string>();
-
-  const cancelNonWorkingBookOrder = (
-    pairId: string,
-    book: BookState,
-    order: NonNullable<ReturnType<typeof getBookOrder>>,
-    reason: string,
-  ): BookState => {
-    const parsed = parseNamespacedOrderId(order.orderId, 'ORDERBOOK_MALFORMED_BOOK_ORDER');
-    if (debugRebuildProjectionOnly) {
-      recordDebugProjectionReject(parsed.accountId, parsed.offerId, reason);
-      return book;
-    }
-    const result = applyCommand(book, {
-      kind: 1,
-      ownerId: order.ownerId,
-      orderId: order.orderId,
-    });
-    const cancelled = result.events.some(event => event.type === 'CANCELED' && event.orderId === order.orderId);
-    if (!cancelled) {
-      throw new Error(`ORDERBOOK_CANCEL_NONWORKING_FAILED: pair=${pairId} order=${order.orderId} reason=${reason}`);
-    }
-    const route = hubState.accounts.get(parsed.accountId)?.swapOffers?.get(parsed.offerId)?.crossJurisdiction;
-    if (route) {
-      markCrossJurisdictionBookAdmissionClosed(
-        hubState,
-        route.source.entityId,
-        parsed.offerId,
-        Number(hubState.timestamp || 0),
-        reason,
-      );
-    }
-    bookCache.set(pairId, result.state);
-    bookUpdates.push({ pairId, book: result.state });
-    orderbookLog.debug('book.cancel_nonworking', {
-      pair: pairId,
-      order: shortOrder(order.orderId, 20),
-      reason,
-    });
-    return result.state;
-  };
-
   processCrossJurisdictionOrderbookOffers({
     hubState,
     ext,
@@ -170,7 +123,6 @@ export function processOrderbookSwaps(
     debugRebuildProjectionOnly,
     recordDebugProjectionReject,
     rejectInvalidOffer,
-    cancelNonWorkingBookOrder,
   });
 
   return { mempoolOps, crossJurisdictionFills, bookUpdates, debugProjectionRejects };
