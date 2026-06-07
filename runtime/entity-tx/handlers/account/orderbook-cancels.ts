@@ -93,6 +93,7 @@ export function processOrderbookCancels(
       offerId,
       fillRatio: 0,
       cancelRemainder: true,
+      comment: 'cancel_request',
     })) {
       if (!orderbookCancelled) {
         orderbookLog.debug('resolve.queued_cancel_missing_book_order', { offer: shortOrder(offerId, 8), account: shortId(accountId, 8) });
