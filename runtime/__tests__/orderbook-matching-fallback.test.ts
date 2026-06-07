@@ -1855,7 +1855,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(() => processCommittedOrderbookSwaps(entityState, [takerOffer] as any)).toThrow(/ORDERBOOK_CACHE_MISMATCH/);
   });
 
-  test('fails fast when a persisted cross-j book order has no committed snapshot', () => {
+  test('fails fast when a persisted cross-j book order has no swapOffer or admitted route', () => {
     const lot = SWAP_LOT_SCALE;
     const pairId = 'cross:base:1/tron:1';
     let staleBook = createBook({
@@ -2052,7 +2052,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(getBookOrder(staleBook, namespacedOrderId)?.qtyLots).toBe(30_000);
   });
 
-  test('fails fast instead of rebuilding a remote cross-j book order from admission remainder', () => {
+  test('validates a remote cross-j book order from admitted route without refreshing it', () => {
     const lot = SWAP_LOT_SCALE;
     const sourceTotal = 40_000n * lot;
     const targetTotal = 100_000_000n * lot;
@@ -2146,9 +2146,10 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    expect(() => processCommittedOrderbookSwaps(entityState, [] as any)).toThrow(
-      /ORDERBOOK_CROSS_J_SNAPSHOT_MISSING/,
-    );
+    const result = processCommittedOrderbookSwaps(entityState, [] as any);
+
+    expect(result.bookUpdates).toEqual([]);
+    expect(getBookOrder(staleBook, namespacedOrderId)?.qtyLots).toBe(30_000);
   });
 
   test('suspends a cross-j order while its partial fill ack is pending', () => {
@@ -2312,7 +2313,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(getBookOrder(book, makerOrderId)).not.toBeNull();
   });
 
-  test('fails fast when pending cross-j ack has already moved the committed account offer view', () => {
+  test('fails fast when pending cross-j ack has no swapOffer or admitted route to validate the row', () => {
     const lot = SWAP_LOT_SCALE;
     const sourceTotal = 40_000n * lot;
     const targetTotal = 100_000n * lot;
@@ -2645,7 +2646,7 @@ describe('orderbook matching fallback execution mapping', () => {
     ]);
   });
 
-  test('fails fast instead of rebuilding remote cross-j metadata from admission route', () => {
+  test('matches remote cross-j book metadata from admitted route without rebuilding the row', () => {
     const lot = SWAP_LOT_SCALE;
     const pairId = 'cross:base:2/tron:1';
     const remoteOrderId = 'remote-maker:maker-cross';
@@ -2762,9 +2763,13 @@ describe('orderbook matching fallback execution mapping', () => {
       } as any,
     } as any;
 
-    expect(() => processCommittedOrderbookSwaps(entityState, [takerOffer] as any)).toThrow(
-      /ORDERBOOK_CROSS_J_SNAPSHOT_MISSING/,
-    );
+    const result = processCommittedOrderbookSwaps(entityState, [takerOffer] as any);
+
+    expect(result.crossJurisdictionFills.map(fill => fill.offerId).sort()).toEqual(['maker-cross', 'taker-cross']);
+    expect(result.mempoolOps.map(op => `${op.accountId}:${op.tx.type}`).sort()).toEqual([
+      'local-taker-account:cross_swap_fill_ack',
+      'remote-maker:cross_swap_fill_ack',
+    ]);
   });
 
   test('aggregates multiple same-pass cross-j fills into one ack per order', () => {

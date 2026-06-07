@@ -27,6 +27,8 @@ import {
 } from '../../../swap-execution';
 import {
   buildCrossJurisdictionMarketOffer,
+  crossJurisdictionBookAdmissionKeyFor,
+  getCrossJurisdictionRouteRemainingAmounts,
   type CrossMarketOffer,
 } from '../../../cross-jurisdiction-orderbook';
 import type { EntityState } from '../../../types';
@@ -299,7 +301,7 @@ export const evaluateSameOrderbookPriceBand = (input: {
 };
 
 export const buildCrossMarketOfferFromBookOrder = (
-  state: Pick<EntityState, 'entityId' | 'accounts'>,
+  state: Pick<EntityState, 'entityId' | 'accounts' | 'crossJurisdictionBookAdmissions'>,
   namespacedOrderId: string,
 ): CrossMarketOffer | null => {
   const { accountId, offerId } = parseNamespacedOrderId(
@@ -308,24 +310,52 @@ export const buildCrossMarketOfferFromBookOrder = (
   );
   const account = state.accounts.get(accountId);
   const offer = account?.swapOffers?.get(offerId);
-  if (!account || !offer?.crossJurisdiction) return null;
-  const entityRefs = resolveStoredOfferEntityRefs(account, offer);
+  if (account && offer?.crossJurisdiction) {
+    const entityRefs = resolveStoredOfferEntityRefs(account, offer);
+    return buildCrossJurisdictionMarketOffer(
+      normalizeSwapOfferForOrderbook(
+        {
+          offerId,
+          makerIsLeft: offer.makerIsLeft,
+          fromEntity: entityRefs.fromEntity,
+          toEntity: entityRefs.toEntity,
+          createdHeight: offer.createdHeight,
+          giveTokenId: offer.giveTokenId,
+          giveAmount: offer.giveAmount,
+          wantTokenId: offer.wantTokenId,
+          wantAmount: offer.wantAmount,
+          priceTicks: offer.priceTicks,
+          timeInForce: offer.timeInForce,
+          minFillRatio: offer.minFillRatio,
+          crossJurisdiction: offer.crossJurisdiction,
+        },
+        accountId,
+      ),
+      state.entityId,
+    );
+  }
+
+  const admission = state.crossJurisdictionBookAdmissions?.get(
+    crossJurisdictionBookAdmissionKeyFor(accountId, offerId),
+  );
+  if (!admission || admission.status !== 'admitted') return null;
+
+  const remaining = getCrossJurisdictionRouteRemainingAmounts(admission.route);
   return buildCrossJurisdictionMarketOffer(
     normalizeSwapOfferForOrderbook(
       {
         offerId,
-        makerIsLeft: offer.makerIsLeft,
-        fromEntity: entityRefs.fromEntity,
-        toEntity: entityRefs.toEntity,
-        createdHeight: offer.createdHeight,
-        giveTokenId: offer.giveTokenId,
-        giveAmount: offer.giveAmount,
-        wantTokenId: offer.wantTokenId,
-        wantAmount: offer.wantAmount,
-        priceTicks: offer.priceTicks,
-        timeInForce: offer.timeInForce,
-        minFillRatio: offer.minFillRatio,
-        crossJurisdiction: offer.crossJurisdiction,
+        makerIsLeft: true,
+        fromEntity: admission.route.source.entityId,
+        toEntity: admission.route.source.counterpartyEntityId,
+        createdHeight: 0,
+        giveTokenId: Number(admission.route.source.tokenId),
+        giveAmount: remaining.sourceRemaining,
+        wantTokenId: Number(admission.route.target.tokenId),
+        wantAmount: remaining.targetRemaining,
+        ...(admission.route.priceTicks !== undefined ? { priceTicks: BigInt(admission.route.priceTicks) } : {}),
+        minFillRatio: 0,
+        crossJurisdiction: admission.route,
       },
       accountId,
     ),
