@@ -129,7 +129,7 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
       if (pendingAck) {
         // A cross-j partial fill ACK is an in-flight account settlement, not a
         // book cancel. Keep the row as the canonical hot-cache remainder, but
-        // suspend it until the committed account route catches up.
+        // suspend it until accountMachine.swapOffers reflects the ACK.
         suspendedCrossOrderIds.add(orderId);
         continue;
       }
@@ -303,7 +303,7 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
     if (!ack) continue;
     // Do not remove a partial cross-j maker row. The core book already reduced
     // its lot quantity during matching, and the pending ACK suspends it until
-    // the committed account snapshot catches up. Removing it here would make
+    // accountMachine.swapOffers reflects the ACK. Removing it here would make
     // the live book lose a still-working order.
     if (ack.tx.data.cancelRemainder) {
       removeCrossBookOrderAfterFill(meta.pairId, namespacedOrderId, 'cross-fill-ack-terminal');
