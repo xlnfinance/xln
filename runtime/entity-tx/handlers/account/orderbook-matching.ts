@@ -27,13 +27,14 @@ const orderbookLog = createStructuredLogger('orderbook');
  * Shared orderbook matcher for both same-chain and cross-chain swaps.
  *
  * Hard invariants:
- * - only offers already stored in accountMachine.swapOffers enter as WorkingOrderbookOffer
+ * - same-chain rows require an offer already stored in accountMachine.swapOffers
+ * - cross-chain rows require accountMachine.swapOffers or an admitted cross book route
  * - same-chain fills settle with account-level swap_resolve
  * - cross-chain fills settle with cross_swap_fill_ack plus hash-ledger pull clear
  * - cross-chain partial fills keep the existing book row alive; terminal fills
  *   and explicit cancels remove it permanently
- * - never reconstruct a book row from route/admission data; if the account
- *   swapOffer is missing, that is a fatal invariant failure, not a repair path
+ * - never refresh/repair a book row from route data; admitted cross routes may
+ *   only validate existing row metadata and produce fill notices
  *
  * The orderbook is one hot-cache matcher. Same/cross differ only in
  * materialization and post-match settlement.
@@ -75,8 +76,8 @@ export function processOrderbookSwaps(
   };
   const rejectInvalidCrossOffer = (accountId: string, offerId: string, reason: string): void => {
     // Cross-j orders settle through fill notices and pull clearing. The book
-    // row is never reconstructed from route/admission data: if the account
-    // swapOffer is missing or malformed, live matching must fail loudly.
+    // row is never refreshed from route/admission data: the account swapOffer
+    // or admitted route must validate the existing row exactly.
     recordDebugProjectionReject(accountId, offerId, reason);
     orderbookLog.warn('crossj.offer_rejected', {
       offer: shortOrder(offerId, 8),

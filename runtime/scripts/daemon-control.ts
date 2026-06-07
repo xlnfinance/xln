@@ -120,6 +120,17 @@ const requireBaseConfig = (): {
   return result;
 };
 
+const formatCliError = (error: unknown): string => {
+  if (error instanceof Error) return error.stack || error.message;
+  if (typeof error === 'string') return error;
+  if (error === undefined || error === null) return `Unknown daemon-control error: ${String(error)}`;
+  try {
+    return serializeTaggedJson(error);
+  } catch {
+    return String(error);
+  }
+};
+
 const run = async (): Promise<void> => {
   if (!command || hasFlag('--help') || hasFlag('-h')) {
     printUsage();
@@ -185,7 +196,7 @@ const run = async (): Promise<void> => {
   throw new Error(`Unknown command "${command}"`);
 };
 
-run().catch(error => {
-  console.error(`[daemon-control] ${(error as Error).stack || (error as Error).message}`);
+run().catch((error: unknown) => {
+  console.error(`[daemon-control] ${formatCliError(error)}`);
   process.exit(1);
 });
