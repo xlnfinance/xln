@@ -194,8 +194,8 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
       const orderId = order.orderId;
       const meta = orderbookOfferMeta.get(orderId) ?? buildLiveOfferMeta(orderId);
       if (!meta) {
-        // A resting same-chain book row is only valid while the committed account swapOffer exists.
-        // Do not cancel/refresh/rehydrate here: missing snapshot is a fatal projection bug.
+        // A resting same-chain book row is only valid while accountMachine.swapOffers has this offer.
+        // Do not cancel/refresh/rehydrate here: missing swapOffer is a fatal projection bug.
         throw new Error(`ORDERBOOK_SAME_SNAPSHOT_MISSING: pair=${pairId} order=${orderId}`);
       }
       if (hasQueuedSwapResolveForEntityState(hubState, queuedSwapResolutions, meta.accountId, meta.offerId)) {
