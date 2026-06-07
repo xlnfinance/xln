@@ -40,12 +40,6 @@ const orderbookSameLog = createStructuredLogger('orderbook.same');
 
 type RecordDebugProjectionReject = (accountId: string, offerId: string, reason: string) => true;
 type RejectInvalidOffer = (accountId: string, offerId: string, reason: string) => void;
-type CancelNonWorkingBookOrder = (
-  pairId: string,
-  book: BookState,
-  order: NonNullable<ReturnType<typeof getBookOrder>>,
-  reason: string,
-) => BookState;
 
 type SameOrderbookProcessInput = {
   hubState: EntityState;
@@ -60,7 +54,6 @@ type SameOrderbookProcessInput = {
   debugRebuildProjectionOnly: boolean;
   recordDebugProjectionReject: RecordDebugProjectionReject;
   rejectInvalidOffer: RejectInvalidOffer;
-  cancelNonWorkingBookOrder: CancelNonWorkingBookOrder;
 };
 
 export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInput): void => {
@@ -81,10 +74,10 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
     debugRebuildProjectionOnly,
     recordDebugProjectionReject,
     rejectInvalidOffer,
-    cancelNonWorkingBookOrder,
   } = input;
 
   const orderbookOfferMeta = new Map<string, NormalizedOrderbookOffer>();
+  const suspendedSameOrderIds = new Set<string>();
   const sweptPairs = new Set<string>();
   let pairSweepCount = 0;
 
@@ -156,11 +149,10 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
     let nextBook = currentBook;
 
     for (const order of [...currentBook.orders.values()]) {
+      if (suspendedSameOrderIds.has(order.orderId)) continue;
       const liveOffer = buildLiveOfferMeta(order.orderId);
       if (!liveOffer) {
-        removed += 1;
-        nextBook = cancelNonWorkingBookOrder(pairId, nextBook, order, 'orphan-book-order');
-        continue;
+        throw new Error(`ORDERBOOK_SAME_SNAPSHOT_MISSING: pair=${pairId} order=${order.orderId}`);
       }
       if (order.priceTicks < minAllowed || order.priceTicks > maxAllowed) {
         removed += 1;
@@ -198,16 +190,17 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
   };
 
   const assertBookMatchesKnownAccountOffers = (pairId: string, book: BookState): BookState => {
-    let currentBook = book;
     for (const order of [...book.orders.values()]) {
       const orderId = order.orderId;
       const meta = orderbookOfferMeta.get(orderId) ?? buildLiveOfferMeta(orderId);
       if (!meta) {
-        currentBook = cancelNonWorkingBookOrder(pairId, currentBook, order, 'orphan-book-order');
-        continue;
+        // A resting same-chain book row is only valid while the committed account swapOffer exists.
+        // Do not cancel/refresh/rehydrate here: missing snapshot is a fatal projection bug.
+        throw new Error(`ORDERBOOK_SAME_SNAPSHOT_MISSING: pair=${pairId} order=${orderId}`);
       }
       if (hasQueuedSwapResolveForEntityState(hubState, queuedSwapResolutions, meta.accountId, meta.offerId)) {
-        currentBook = cancelNonWorkingBookOrder(pairId, currentBook, order, 'pending-swap-resolve');
+        // The queued resolve owns this order's mutation. Keep the row unchanged and skip matching it this pass.
+        suspendedSameOrderIds.add(orderId);
         continue;
       }
       orderbookOfferMeta.set(orderId, meta);
@@ -224,7 +217,7 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
         );
       }
     }
-    return currentBook;
+    return book;
   };
 
   for (const offer of sameAccountSwapOffers) {
@@ -344,7 +337,7 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
         priceTicks,
         qtyLots: Number(qtyLots),
         minFillRatio: offer.minFillRatio,
-      });
+      }, { suspendedOrderIds: suspendedSameOrderIds });
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
       if (message === 'Out of order slots') {

@@ -579,48 +579,6 @@ export function applyCommand(state: BookState, cmd: OrderCmd, options: ApplyComm
   return { state, events };
 }
 
-export function refreshRestingOrder(
-  state: BookState,
-  input: {
-    ownerId: string;
-    orderId: string;
-    side: Side;
-    priceTicks: bigint;
-    qtyLots: number;
-  },
-): BookState {
-  const m = state as MutableBookState;
-  const existing = m.orders.get(input.orderId);
-  if (!existing) return state;
-  if (existing.ownerId !== input.ownerId) {
-    throw new Error(`BOOK_REFRESH_OWNER_MISMATCH: order=${input.orderId}`);
-  }
-  if (existing.side !== input.side) {
-    throw new Error(`BOOK_REFRESH_SIDE_MISMATCH: order=${input.orderId}`);
-  }
-  if (input.priceTicks <= 0n) {
-    throw new Error(`BOOK_REFRESH_PRICE_INVALID: order=${input.orderId}`);
-  }
-  if (input.qtyLots < 0 || input.qtyLots > MAX_QTY) {
-    throw new Error(`BOOK_REFRESH_QTY_INVALID: order=${input.orderId}`);
-  }
-
-  removeExistingOrder(m, input.orderId);
-  if (input.qtyLots > 0) {
-    addRestingOrder(m, {
-      orderId: input.orderId,
-      ownerId: input.ownerId,
-      side: input.side,
-      priceTicks: input.priceTicks,
-      qtyLots: input.qtyLots,
-      seq: existing.seq,
-      bucketId: bucketIdForPrice(input.priceTicks, m.params.bucketWidthTicks),
-    });
-  }
-  bumpHash(m, 6, input.priceTicks, input.qtyLots);
-  return state;
-}
-
 export function getBestBid(state: BookState): bigint | null {
   const first = getTopLevel(state, 0);
   return first?.level.priceTicks ?? null;
