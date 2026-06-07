@@ -64,6 +64,10 @@ type SameOrderbookProcessInput = {
 };
 
 export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInput): void => {
+  // Same-chain orders are account-local: the committed swap offer and committed
+  // token hold are the source of truth. Fills/cancels are expressed only as
+  // swap_resolve with an exact ratio; fillRatio=0 is a cancel with a reason.
+  // This path must not borrow cross-j hash-ledger behavior.
   const {
     hubState,
     ext,
@@ -182,6 +186,7 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
             offerId: liveOffer.offerId,
             fillRatio: 0,
             cancelRemainder: true,
+            comment: `outside-anchor-band:${order.priceTicks.toString()}`,
           });
         }
       }
@@ -286,6 +291,7 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
         offerId: offer.offerId,
         fillRatio: 0,
         cancelRemainder: true,
+        comment: priceBand.rejectReason,
       });
       continue;
     }
@@ -354,6 +360,7 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
             offerId: offer.offerId,
             fillRatio: 0,
             cancelRemainder: true,
+            comment: `book-full:${book.params.maxOrders}`,
           })
         ) {
           orderbookSameLog.debug('resolve.queued_cancel_full_book', {
@@ -400,7 +407,7 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
             offerId: offer.offerId,
             fillRatio: 0,
             cancelRemainder: true,
-            ...(resolveComment ? { comment: resolveComment } : {}),
+            comment: resolveComment ?? `post-only-reject:${rejectReasons || 'unknown'}`,
           })
         ) {
           orderbookSameLog.debug('resolve.queued_cancel_reject', {

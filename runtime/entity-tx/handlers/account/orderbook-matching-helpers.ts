@@ -27,8 +27,6 @@ import {
 } from '../../../swap-execution';
 import {
   buildCrossJurisdictionMarketOffer,
-  crossJurisdictionBookAdmissionKeyFor,
-  getCrossJurisdictionRouteRemainingAmounts,
   type CrossMarketOffer,
 } from '../../../cross-jurisdiction-orderbook';
 import type { EntityState } from '../../../types';
@@ -116,11 +114,6 @@ type SameOrderbookPriceBandDecision = {
   rejectMessage?: string;
   warnMessage?: string;
 };
-
-const normalizeEntityRef = (value: string): string =>
-  String(value || '')
-    .trim()
-    .toLowerCase();
 
 export const splitWorkingOrderbookOffers = (
   offers: readonly WorkingOrderbookOffer[],
@@ -305,46 +298,8 @@ export const evaluateSameOrderbookPriceBand = (input: {
   return {};
 };
 
-export const synthesizeCrossOfferFromRoute = (
-  accountId: string,
-  route: NonNullable<NormalizedOrderbookOffer['crossJurisdiction']>,
-): NormalizedOrderbookOffer => {
-  const remaining = getCrossJurisdictionRouteRemainingAmounts(route);
-  return normalizeSwapOfferForOrderbook(
-    {
-      offerId: route.orderId,
-      accountId,
-      makerIsLeft: true,
-      fromEntity: route.source.entityId,
-      toEntity: route.source.counterpartyEntityId,
-      createdHeight: 0,
-      giveTokenId: Number(route.source.tokenId),
-      giveAmount: remaining.sourceRemaining,
-      wantTokenId: Number(route.target.tokenId),
-      wantAmount: remaining.targetRemaining,
-      ...(route.priceTicks !== undefined ? { priceTicks: BigInt(route.priceTicks) } : {}),
-      timeInForce: 0,
-      minFillRatio: 0,
-      crossJurisdiction: route,
-    },
-    accountId,
-  );
-};
-
-export const findCrossRouteForBookOrder = (
-  state: Pick<EntityState, 'crossJurisdictionBookAdmissions' | 'crossJurisdictionSwaps'>,
-  accountId: string,
-  offerId: string,
-): NonNullable<NormalizedOrderbookOffer['crossJurisdiction']> | null => {
-  const admission = state.crossJurisdictionBookAdmissions?.get(crossJurisdictionBookAdmissionKeyFor(accountId, offerId));
-  if (admission?.route) return admission.route;
-  const route = state.crossJurisdictionSwaps?.get(offerId);
-  if (route && normalizeEntityRef(route.source.entityId) === normalizeEntityRef(accountId)) return route;
-  return null;
-};
-
 export const buildCrossMarketOfferFromBookOrder = (
-  state: Pick<EntityState, 'entityId' | 'accounts' | 'crossJurisdictionBookAdmissions' | 'crossJurisdictionSwaps'>,
+  state: Pick<EntityState, 'entityId' | 'accounts'>,
   namespacedOrderId: string,
 ): CrossMarketOffer | null => {
   const { accountId, offerId } = parseNamespacedOrderId(
@@ -353,12 +308,7 @@ export const buildCrossMarketOfferFromBookOrder = (
   );
   const account = state.accounts.get(accountId);
   const offer = account?.swapOffers?.get(offerId);
-  if (!account || !offer?.crossJurisdiction) {
-    const route = findCrossRouteForBookOrder(state, accountId, offerId);
-    return route
-      ? buildCrossJurisdictionMarketOffer(synthesizeCrossOfferFromRoute(accountId, route), state.entityId)
-      : null;
-  }
+  if (!account || !offer?.crossJurisdiction) return null;
   const entityRefs = resolveStoredOfferEntityRefs(account, offer);
   return buildCrossJurisdictionMarketOffer(
     normalizeSwapOfferForOrderbook(

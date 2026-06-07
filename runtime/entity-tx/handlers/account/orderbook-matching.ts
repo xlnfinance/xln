@@ -30,8 +30,19 @@ import { processSameAccountOrderbookOffers } from './orderbook-matching-same';
 const orderbookLog = createStructuredLogger('orderbook');
 
 /**
- * Process swap offers through hub's orderbook (PURE - returns events, no mutations)
- * Called at entity level after aggregating all swap events
+ * Shared orderbook matcher for both same-chain and cross-chain swaps.
+ *
+ * Hard invariants:
+ * - only committed account snapshots enter this function as WorkingOrderbookOffer
+ * - same-chain fills settle with account-level swap_resolve
+ * - cross-chain fills settle with cross_swap_fill_ack plus hash-ledger pull clear
+ * - cross-chain partial fills keep the existing book row alive; terminal fills
+ *   and explicit cancels remove it permanently
+ * - never reconstruct a book row from route/admission data; missing committed
+ *   account snapshot is a fatal invariant failure, not a repair opportunity
+ *
+ * The orderbook is one hot-cache matcher. Same/cross differ only in
+ * materialization and post-match settlement.
  */
 export function processOrderbookSwaps(
   hubState: EntityState,
@@ -65,9 +76,9 @@ export function processOrderbookSwaps(
     return true;
   };
   const rejectInvalidCrossOffer = (accountId: string, offerId: string, reason: string): void => {
-    // Cross-j orders settle through fill notices and pull clearing. Rehydrate
-    // can report debug projection rejects; live matching must surface malformed
-    // routes as invariant failures instead of silently cancelling liquidity.
+    // Cross-j orders settle through fill notices and pull clearing. The book
+    // row is never reconstructed from route/admission data: if the committed
+    // account snapshot is missing or malformed, live matching must fail loudly.
     recordDebugProjectionReject(accountId, offerId, reason);
     orderbookLog.warn('crossj.offer_rejected', {
       offer: shortOrder(offerId, 8),
@@ -143,7 +154,6 @@ export function processOrderbookSwaps(
     crossJurisdictionFills,
     queuedSwapResolutions,
     debugRebuildProjectionOnly,
-    cancelNonWorkingBookOrder,
     rejectInvalidCrossOffer,
     recordDebugProjectionReject,
   });

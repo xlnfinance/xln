@@ -1381,11 +1381,16 @@ export const applyEntityFrame = async (
     if (matchResult.crossJurisdictionFills.length > 0) {
       entityLog.info('crossj.firm_fills_recorded', { count: matchResult.crossJurisdictionFills.length });
       for (const fill of matchResult.crossJurisdictionFills) {
-        markCrossJurisdictionBookAdmissionResolving(
-          currentEntityState,
-          fill.route,
-          deterministicEntityTimestamp(currentEntityState, env),
-        );
+        // Partial cross-j fills keep the original book row alive and matchable.
+        // Only a terminal fill/cancel removes the row and moves admission into
+        // resolving so the clear flow can claim/release the hash-ledger pulls.
+        if (fill.cancelRemainder) {
+          markCrossJurisdictionBookAdmissionResolving(
+            currentEntityState,
+            fill.route,
+            deterministicEntityTimestamp(currentEntityState, env),
+          );
+        }
         if (
           fill.priceImprovementMode !== 'target_bonus' ||
           fill.priceImprovementAmount <= 0n ||
