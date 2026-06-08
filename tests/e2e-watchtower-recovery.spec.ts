@@ -547,7 +547,22 @@ async function createRuntimeViaUi(
   return identity;
 }
 
-async function waitForWatchtowerReceipt(baseUrl: string, lookupKey: string): Promise<{ height: number; storedBytes: number }> {
+async function waitForCommittedPrimaryLocalAccountState(page: Page) {
+  const deadline = Date.now() + 90_000;
+  let last: Awaited<ReturnType<typeof readPrimaryLocalAccountState>> | null = null;
+  while (Date.now() < deadline) {
+    last = await readPrimaryLocalAccountState(page);
+    if (last.accountExists && last.hubId && last.currentHeight > 0 && !last.hasPendingFrame) return last;
+    await delay(500);
+  }
+  throw new Error(`local hub account did not reach committed pre-wipe state: ${JSON.stringify(last)}`);
+}
+
+async function waitForWatchtowerReceipt(
+  baseUrl: string,
+  lookupKey: string,
+  minHeight = 1,
+): Promise<{ height: number; storedBytes: number }> {
   const deadline = Date.now() + 60_000;
   while (Date.now() < deadline) {
     try {
@@ -557,7 +572,7 @@ async function waitForWatchtowerReceipt(baseUrl: string, lookupKey: string): Pro
           ok?: boolean;
           receipt?: { height?: number; storedBytes?: number };
         };
-        if (payload.ok && payload.receipt) {
+        if (payload.ok && payload.receipt && Number(payload.receipt.height || 0) >= minHeight) {
           return {
             height: Number(payload.receipt.height || 0),
             storedBytes: Number(payload.receipt.storedBytes || 0),
@@ -569,7 +584,7 @@ async function waitForWatchtowerReceipt(baseUrl: string, lookupKey: string): Pro
     }
     await delay(500);
   }
-  throw new Error(`watchtower receipt did not appear for ${lookupKey.slice(0, 12)}`);
+  throw new Error(`watchtower receipt >= ${minHeight} did not appear for ${lookupKey.slice(0, 12)}`);
 }
 
 async function readRecoveryUiDiagnostics(page: Page): Promise<Record<string, unknown>> {
@@ -653,28 +668,14 @@ test.describe('watchtower runtime recovery', () => {
         async () => await readRecoveryUiDiagnostics(page),
       );
       const runtimeSeed = await readPersistedRuntimeSeed(page, runtime.runtimeId);
-      await expect
-        .poll(() => readPrimaryLocalAccountState(page), {
-          timeout: 75_000,
-          intervals: [500, 1_000, 1_500],
-          message: 'auto-joined hub account must appear before wipe',
-        })
-        .toMatchObject({
-          accountExists: true,
-        });
 
       const lookupKey = deriveRuntimeRecoveryLookupKey(runtime.runtimeId, runtimeSeed);
-      const receipt = await waitForWatchtowerReceipt(tower.baseUrl, lookupKey);
-      expect(receipt.height, 'watchtower backup must include a non-zero runtime height').toBeGreaterThan(0);
-      expect(receipt.storedBytes, 'watchtower backup must store encrypted runtime bytes').toBeGreaterThan(0);
-
-      const preWipe = await readPrimaryLocalAccountState(page);
+      const preWipe = await waitForCommittedPrimaryLocalAccountState(page);
       expect(preWipe.accountExists, 'pre-wipe local account must exist').toBe(true);
       expect(preWipe.hubId, 'pre-wipe local account must resolve a hub id').toBeTruthy();
-      expect(
-        preWipe.currentHeight > 0 || preWipe.hasPendingFrame,
-        'pre-wipe local account must have either a committed or pending frame',
-      ).toBe(true);
+      const receipt = await waitForWatchtowerReceipt(tower.baseUrl, lookupKey, preWipe.runtimeHeight);
+      expect(receipt.height, 'watchtower backup must include the committed pre-wipe runtime height').toBeGreaterThanOrEqual(preWipe.runtimeHeight);
+      expect(receipt.storedBytes, 'watchtower backup must store encrypted runtime bytes').toBeGreaterThan(0);
 
       await page.goto(`${APP_BASE_URL}/resetdb?returnTo=/app`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
       await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
