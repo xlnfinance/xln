@@ -127,7 +127,7 @@ External audit handoff:
 bun run security:audit-pack
 ```
 
-Brief: [security/external-audit-brief.md](security/external-audit-brief.md)
+Brief: [docs/security/external-audit-brief.md](security/external-audit-brief.md)
 
 ## Things That Are Mainnet-Relevant But Not First-Launch Gates
 
@@ -149,7 +149,7 @@ Keep these files aligned before launch:
 - [recovery-watchtower-protocol.md](recovery-watchtower-protocol.md)
 - [deployment/ops-runbook.md](deployment/ops-runbook.md)
 - [deployment/deployment.md](deployment/deployment.md)
-- [security/external-audit-brief.md](security/external-audit-brief.md)
+- [docs/security/external-audit-brief.md](security/external-audit-brief.md)
 
 ## Historical Reference
 
