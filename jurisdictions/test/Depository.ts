@@ -629,9 +629,9 @@ describe("Depository", function () {
     );
 
     const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
-    const [collateral, ondelta] = await depository.getCollateral(left.entityId, right.entityId, tokenId);
-    expect(collateral).to.equal(100n);
-    expect(ondelta).to.equal(100n);
+    const collateralState = await depository._collaterals(acctKey, tokenId);
+    expect(collateralState.collateral).to.equal(100n);
+    expect(collateralState.ondelta).to.equal(100n);
 
     const initialProofbody = proofBody([0n], [tokenId]);
     const initialProofbodyHash = proofBodyHash(initialProofbody);
@@ -1898,10 +1898,6 @@ describe("Depository", function () {
 
     await expect(
       depository.connect(user1).mintToReserve(entity, 1, 1n)
-    ).to.be.revertedWithCustomError(depository, "E2");
-
-    await expect(
-      depository.connect(user1).mintToReserveBatch([{ entity, tokenId: 1, amount: 1n }])
     ).to.be.revertedWithCustomError(depository, "E2");
 
     await erc20.connect(user1).approve(await depository.getAddress(), 1n);

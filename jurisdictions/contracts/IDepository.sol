@@ -23,8 +23,6 @@ interface IDepository {
   function getTokensLength() external view returns (uint);
   /// @dev Local Anvil-only admin helper.
   function mintToReserve(bytes32 entity, uint tokenId, uint amount) external;
-  /// @dev Local Anvil-only admin helper.
-  function mintToReserveBatch(ReserveMint[] calldata mints) external;
   function processBatch(
     bytes calldata encodedBatch,
     bytes calldata hankoData,
@@ -32,5 +30,4 @@ interface IDepository {
   ) external returns (bool);
   /// @dev Local Anvil-only admin helper. Production user deposits should use processBatch().
   function adminRegisterExternalToken(ExternalTokenToReserve memory params) external;
-  function getCollateral(bytes32 leftEntity, bytes32 rightEntity, uint tokenId) external view returns (uint collateral, int ondelta);
 }

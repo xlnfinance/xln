@@ -1331,7 +1331,7 @@ export async function ahb(env: Env): Promise<void> {
     }
     console.log(`✅ ASSERT: Hub reserve ${hubPreReserve} → ${hubPostReserve} (+${formatUSD(rebalanceAmount)}) ✓`);
 
-    // BrowserVM.getCollateral() is backed by Depository.getCollateral(); replica state mirrors the chain value.
+    // BrowserVM.getCollateral() reads Depository.accountKey() + _collaterals(); replica state mirrors the chain value.
 
     console.log(`   A-H after settlement: collateral=${ahDeltaRebal?.collateral}, ondelta=${ahDeltaRebal?.ondelta}`);
 
@@ -1453,7 +1453,7 @@ export async function ahb(env: Env): Promise<void> {
     }
     console.log(`✅ ASSERT: Hub reserve ${hubPreHBReserve} → ${hubPostHBReserve} (-$200K) ✓`);
 
-    // BrowserVM.getCollateral() is backed by Depository.getCollateral(); replica state mirrors the chain value.
+    // BrowserVM.getCollateral() reads Depository.accountKey() + _collaterals(); replica state mirrors the chain value.
 
     console.log(`   H-B after settlement: collateral=${hbDeltaRebal?.collateral}, ondelta=${hbDeltaRebal?.ondelta}`);
 

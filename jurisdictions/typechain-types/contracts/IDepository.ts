@@ -48,29 +48,13 @@ export type ExternalTokenToReserveStructOutput = [
   amount: bigint;
 };
 
-export declare namespace IDepository {
-  export type ReserveMintStruct = {
-    entity: BytesLike;
-    tokenId: BigNumberish;
-    amount: BigNumberish;
-  };
-
-  export type ReserveMintStructOutput = [
-    entity: string,
-    tokenId: bigint,
-    amount: bigint
-  ] & { entity: string; tokenId: bigint; amount: bigint };
-}
-
 export interface IDepositoryInterface extends Interface {
   getFunction(
     nameOrSignature:
       | "_reserves"
       | "adminRegisterExternalToken"
-      | "getCollateral"
       | "getTokensLength"
       | "mintToReserve"
-      | "mintToReserveBatch"
       | "processBatch"
   ): FunctionFragment;
 
@@ -85,20 +69,12 @@ export interface IDepositoryInterface extends Interface {
     values: [ExternalTokenToReserveStruct]
   ): string;
   encodeFunctionData(
-    functionFragment: "getCollateral",
-    values: [BytesLike, BytesLike, BigNumberish]
-  ): string;
-  encodeFunctionData(
     functionFragment: "getTokensLength",
     values?: undefined
   ): string;
   encodeFunctionData(
     functionFragment: "mintToReserve",
     values: [BytesLike, BigNumberish, BigNumberish]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "mintToReserveBatch",
-    values: [IDepository.ReserveMintStruct[]]
   ): string;
   encodeFunctionData(
     functionFragment: "processBatch",
@@ -111,19 +87,11 @@ export interface IDepositoryInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "getCollateral",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
     functionFragment: "getTokensLength",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
     functionFragment: "mintToReserve",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "mintToReserveBatch",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -209,22 +177,10 @@ export interface IDepository extends BaseContract {
     "nonpayable"
   >;
 
-  getCollateral: TypedContractMethod<
-    [leftEntity: BytesLike, rightEntity: BytesLike, tokenId: BigNumberish],
-    [[bigint, bigint] & { collateral: bigint; ondelta: bigint }],
-    "view"
-  >;
-
   getTokensLength: TypedContractMethod<[], [bigint], "view">;
 
   mintToReserve: TypedContractMethod<
     [entity: BytesLike, tokenId: BigNumberish, amount: BigNumberish],
-    [void],
-    "nonpayable"
-  >;
-
-  mintToReserveBatch: TypedContractMethod<
-    [mints: IDepository.ReserveMintStruct[]],
     [void],
     "nonpayable"
   >;
@@ -254,26 +210,12 @@ export interface IDepository extends BaseContract {
     "nonpayable"
   >;
   getFunction(
-    nameOrSignature: "getCollateral"
-  ): TypedContractMethod<
-    [leftEntity: BytesLike, rightEntity: BytesLike, tokenId: BigNumberish],
-    [[bigint, bigint] & { collateral: bigint; ondelta: bigint }],
-    "view"
-  >;
-  getFunction(
     nameOrSignature: "getTokensLength"
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
     nameOrSignature: "mintToReserve"
   ): TypedContractMethod<
     [entity: BytesLike, tokenId: BigNumberish, amount: BigNumberish],
-    [void],
-    "nonpayable"
-  >;
-  getFunction(
-    nameOrSignature: "mintToReserveBatch"
-  ): TypedContractMethod<
-    [mints: IDepository.ReserveMintStruct[]],
     [void],
     "nonpayable"
   >;

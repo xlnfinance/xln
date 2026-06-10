@@ -179,20 +179,6 @@ export type FinalDisputeProofStructOutput = [
   cooperative: boolean;
 };
 
-export declare namespace Depository {
-  export type ReserveMintStruct = {
-    entity: BytesLike;
-    tokenId: BigNumberish;
-    amount: BigNumberish;
-  };
-
-  export type ReserveMintStructOutput = [
-    entity: string,
-    tokenId: bigint,
-    amount: bigint
-  ] & { entity: string; tokenId: bigint; amount: bigint };
-}
-
 export interface DepositoryInterface extends Interface {
   getFunction(
     nameOrSignature:
@@ -216,18 +202,13 @@ export interface DepositoryInterface extends Interface {
       | "enforceDebts"
       | "entityNonces"
       | "entityProvider"
-      | "getCollateral"
-      | "getTokenMetadata"
       | "getTokensLength"
       | "mintToReserve"
-      | "mintToReserveBatch"
       | "onERC1155BatchReceived"
       | "onERC1155Received"
-      | "packTokenReference"
       | "processBatch"
       | "spendableReserve"
       | "tokenToId"
-      | "unpackTokenReference"
       | "watchtowerCounterDispute"
   ): FunctionFragment;
 
@@ -332,24 +313,12 @@ export interface DepositoryInterface extends Interface {
     values?: undefined
   ): string;
   encodeFunctionData(
-    functionFragment: "getCollateral",
-    values: [BytesLike, BytesLike, BigNumberish]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "getTokenMetadata",
-    values: [BigNumberish]
-  ): string;
-  encodeFunctionData(
     functionFragment: "getTokensLength",
     values?: undefined
   ): string;
   encodeFunctionData(
     functionFragment: "mintToReserve",
     values: [BytesLike, BigNumberish, BigNumberish]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "mintToReserveBatch",
-    values: [Depository.ReserveMintStruct[]]
   ): string;
   encodeFunctionData(
     functionFragment: "onERC1155BatchReceived",
@@ -366,10 +335,6 @@ export interface DepositoryInterface extends Interface {
     values: [AddressLike, AddressLike, BigNumberish, BigNumberish, BytesLike]
   ): string;
   encodeFunctionData(
-    functionFragment: "packTokenReference",
-    values: [BigNumberish, AddressLike, BigNumberish]
-  ): string;
-  encodeFunctionData(
     functionFragment: "processBatch",
     values: [BytesLike, BytesLike, BigNumberish]
   ): string;
@@ -379,10 +344,6 @@ export interface DepositoryInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "tokenToId",
-    values: [BytesLike]
-  ): string;
-  encodeFunctionData(
-    functionFragment: "unpackTokenReference",
     values: [BytesLike]
   ): string;
   encodeFunctionData(
@@ -456,23 +417,11 @@ export interface DepositoryInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "getCollateral",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "getTokenMetadata",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
     functionFragment: "getTokensLength",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
     functionFragment: "mintToReserve",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
-    functionFragment: "mintToReserveBatch",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -484,10 +433,6 @@ export interface DepositoryInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(
-    functionFragment: "packTokenReference",
-    data: BytesLike
-  ): Result;
-  decodeFunctionResult(
     functionFragment: "processBatch",
     data: BytesLike
   ): Result;
@@ -496,10 +441,6 @@ export interface DepositoryInterface extends Interface {
     data: BytesLike
   ): Result;
   decodeFunctionResult(functionFragment: "tokenToId", data: BytesLike): Result;
-  decodeFunctionResult(
-    functionFragment: "unpackTokenReference",
-    data: BytesLike
-  ): Result;
   decodeFunctionResult(
     functionFragment: "watchtowerCounterDispute",
     data: BytesLike
@@ -943,34 +884,10 @@ export interface Depository extends BaseContract {
 
   entityProvider: TypedContractMethod<[], [string], "view">;
 
-  getCollateral: TypedContractMethod<
-    [leftEntity: BytesLike, rightEntity: BytesLike, tokenId: BigNumberish],
-    [[bigint, bigint] & { collateral: bigint; ondelta: bigint }],
-    "view"
-  >;
-
-  getTokenMetadata: TypedContractMethod<
-    [tokenId: BigNumberish],
-    [
-      [string, bigint, bigint] & {
-        contractAddress: string;
-        externalTokenId: bigint;
-        tokenType: bigint;
-      }
-    ],
-    "view"
-  >;
-
   getTokensLength: TypedContractMethod<[], [bigint], "view">;
 
   mintToReserve: TypedContractMethod<
     [entity: BytesLike, tokenId: BigNumberish, amount: BigNumberish],
-    [void],
-    "nonpayable"
-  >;
-
-  mintToReserveBatch: TypedContractMethod<
-    [mints: Depository.ReserveMintStruct[]],
     [void],
     "nonpayable"
   >;
@@ -999,16 +916,6 @@ export interface Depository extends BaseContract {
     "nonpayable"
   >;
 
-  packTokenReference: TypedContractMethod<
-    [
-      tokenType: BigNumberish,
-      contractAddress: AddressLike,
-      externalTokenId: BigNumberish
-    ],
-    [string],
-    "view"
-  >;
-
   processBatch: TypedContractMethod<
     [encodedBatch: BytesLike, hankoData: BytesLike, nonce: BigNumberish],
     [boolean],
@@ -1022,18 +929,6 @@ export interface Depository extends BaseContract {
   >;
 
   tokenToId: TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
-
-  unpackTokenReference: TypedContractMethod<
-    [packed: BytesLike],
-    [
-      [string, bigint, bigint] & {
-        contractAddress: string;
-        externalTokenId: bigint;
-        tokenType: bigint;
-      }
-    ],
-    "view"
-  >;
 
   watchtowerCounterDispute: TypedContractMethod<
     [
@@ -1177,39 +1072,12 @@ export interface Depository extends BaseContract {
     nameOrSignature: "entityProvider"
   ): TypedContractMethod<[], [string], "view">;
   getFunction(
-    nameOrSignature: "getCollateral"
-  ): TypedContractMethod<
-    [leftEntity: BytesLike, rightEntity: BytesLike, tokenId: BigNumberish],
-    [[bigint, bigint] & { collateral: bigint; ondelta: bigint }],
-    "view"
-  >;
-  getFunction(
-    nameOrSignature: "getTokenMetadata"
-  ): TypedContractMethod<
-    [tokenId: BigNumberish],
-    [
-      [string, bigint, bigint] & {
-        contractAddress: string;
-        externalTokenId: bigint;
-        tokenType: bigint;
-      }
-    ],
-    "view"
-  >;
-  getFunction(
     nameOrSignature: "getTokensLength"
   ): TypedContractMethod<[], [bigint], "view">;
   getFunction(
     nameOrSignature: "mintToReserve"
   ): TypedContractMethod<
     [entity: BytesLike, tokenId: BigNumberish, amount: BigNumberish],
-    [void],
-    "nonpayable"
-  >;
-  getFunction(
-    nameOrSignature: "mintToReserveBatch"
-  ): TypedContractMethod<
-    [mints: Depository.ReserveMintStruct[]],
     [void],
     "nonpayable"
   >;
@@ -1240,17 +1108,6 @@ export interface Depository extends BaseContract {
     "nonpayable"
   >;
   getFunction(
-    nameOrSignature: "packTokenReference"
-  ): TypedContractMethod<
-    [
-      tokenType: BigNumberish,
-      contractAddress: AddressLike,
-      externalTokenId: BigNumberish
-    ],
-    [string],
-    "view"
-  >;
-  getFunction(
     nameOrSignature: "processBatch"
   ): TypedContractMethod<
     [encodedBatch: BytesLike, hankoData: BytesLike, nonce: BigNumberish],
@@ -1267,19 +1124,6 @@ export interface Depository extends BaseContract {
   getFunction(
     nameOrSignature: "tokenToId"
   ): TypedContractMethod<[arg0: BytesLike], [bigint], "view">;
-  getFunction(
-    nameOrSignature: "unpackTokenReference"
-  ): TypedContractMethod<
-    [packed: BytesLike],
-    [
-      [string, bigint, bigint] & {
-        contractAddress: string;
-        externalTokenId: bigint;
-        tokenType: bigint;
-      }
-    ],
-    "view"
-  >;
   getFunction(
     nameOrSignature: "watchtowerCounterDispute"
   ): TypedContractMethod<

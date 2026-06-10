@@ -182,17 +182,6 @@ contract Depository is ReentrancyGuardLite {
     return _tokens.length;
   }
 
-  function getTokenMetadata(uint256 tokenId) external view returns (address contractAddress, uint96 externalTokenId, uint8 tokenType) {
-    if (tokenId >= _tokens.length) revert E7();
-    TokenMetadata memory meta = _tokens[tokenId];
-    return (meta.contractAddress, meta.externalTokenId, meta.tokenType);
-  }
-
-  function getCollateral(bytes32 leftEntity, bytes32 rightEntity, uint tokenId) external view returns (uint collateral, int ondelta) {
-    AccountCollateral storage col = _collaterals[accountKey(leftEntity, rightEntity)][tokenId];
-    return (col.collateral, col.ondelta);
-  }
-
   function _safeERC20Call(address token, bytes memory data) private {
     (bool success, bytes memory returndata) = token.call(data);
     if (!success) revert E3();
@@ -341,23 +330,6 @@ contract Depository is ReentrancyGuardLite {
     if (amount == 0) revert E1();
     _increaseReserve(entity, tokenId, amount);
   }
-
-  /**
-   * @notice Mint reserves for multiple entity/token pairs in a single local dev tx.
-   * @dev Local Anvil bootstrap helper. Disabled outside configured local dev chain IDs.
-   */
-  function mintToReserveBatch(ReserveMint[] calldata mints) external onlyLocalDevAdmin {
-    uint len = mints.length;
-    if (len == 0) revert E1();
-
-    for (uint i = 0; i < len; i++) {
-      ReserveMint calldata mint = mints[i];
-      if (mint.amount == 0) revert E1();
-
-      _increaseReserve(mint.entity, mint.tokenId, mint.amount);
-    }
-  }
-
 
   function _assertBatchBounds(Batch memory batch) private pure {
     // Runtime already chunks J-batches at 50 top-level operations. Mirroring
@@ -607,20 +579,9 @@ contract Depository is ReentrancyGuardLite {
     return _spendableReserve(entity, tokenId);
   }
 
-  function packTokenReference(uint8 tokenType, address contractAddress, uint96 externalTokenId) public pure returns (bytes32) {
+  function _packTokenReference(uint8 tokenType, address contractAddress, uint96 externalTokenId) private pure returns (bytes32) {
     return keccak256(abi.encode(tokenType, contractAddress, externalTokenId));
   }
-
-  function unpackTokenReference(bytes32 packed) public view returns (address contractAddress, uint96 externalTokenId, uint8 tokenType) {
-    uint256 tokenId = tokenToId[packed];
-    if (tokenId == 0) revert E7();
-    TokenMetadata memory meta = _tokens[tokenId];
-    return (meta.contractAddress, meta.externalTokenId, meta.tokenType);
-  }
-
-
-
-
 
   // registerHub removed for size reduction
 
@@ -635,7 +596,7 @@ contract Depository is ReentrancyGuardLite {
     bytes32 targetEntity = params.entity == bytes32(0) ? bytes32(uint256(uint160(msg.sender))) : params.entity;
     if (params.amount == 0) revert E1();
 
-    bytes32 packedToken = packTokenReference(params.tokenType, params.contractAddress, params.externalTokenId);
+    bytes32 packedToken = _packTokenReference(params.tokenType, params.contractAddress, params.externalTokenId);
 
     if (params.internalTokenId == 0) {
       params.internalTokenId = tokenToId[packedToken];
@@ -1190,7 +1151,7 @@ contract Depository is ReentrancyGuardLite {
     // SECURITY FIX: Don't credit here - _externalTokenToReserve:713 already credits
     // This prevents double-crediting when ERC1155.safeTransferFrom triggers this callback
     // If tokens sent directly (not via externalTokenToReserve), they will be stuck but not inflate reserves
-    bytes32 packedToken = packTokenReference(TypeERC1155, msg.sender, uint96(id));
+    bytes32 packedToken = _packTokenReference(TypeERC1155, msg.sender, uint96(id));
     uint256 tid = tokenToId[packedToken];
     if (tid == 0) {
       _tokens.push(TokenMetadata({ contractAddress: msg.sender, externalTokenId: uint96(id), tokenType: TypeERC1155 }));
