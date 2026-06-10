@@ -174,6 +174,10 @@ contract Depository is ReentrancyGuardLite {
     _tokens.push(TokenMetadata({ contractAddress: address(0), externalTokenId: 0, tokenType: TypeERC20 }));
   }
 
+  function decodeTransformerArgumentListStrict(bytes calldata encoded) external pure returns (bytes[] memory) {
+    return abi.decode(encoded, (bytes[]));
+  }
+
   function getTokensLength() public view returns (uint) {
     return _tokens.length;
   }
@@ -886,6 +890,14 @@ contract Depository is ReentrancyGuardLite {
       // proof body, so the starter side must match starterIncrementedArguments.
       // If `sig` is empty, this is the timeout path for the initial proof, so
       // the starter side must match starterInitialArguments.
+      //
+      // Why two full starter blobs instead of a hash/diff:
+      // - disputes must close in two transactions: start + finalize;
+      // - a hash-only incremented blob would require a third reveal tx;
+      // - a structural diff would move transformer-specific parsing into the
+      //   Depository and make future transformers part of this contract ABI.
+      // The gas cost is paid only on dispute, while the security invariant is
+      // simple: the starter cannot change its side after opening the dispute.
       if (params.sig.length > 0) {
         // Counter-dispute: counterparty provides a NEWER signed proof.
         // The counterparty still supplies its own side in left/rightArguments.
@@ -1000,10 +1012,15 @@ contract Depository is ReentrancyGuardLite {
       deltas[i] = _collaterals[acct_key][tokenId].ondelta + proofbody.offdeltas[i];
     }
 
-    bytes[] memory decodedLeft = leftArgs.length > 0 ? abi.decode(leftArgs, (bytes[])) : new bytes[](0);
-    bytes[] memory decodedRight = rightArgs.length > 0 ? abi.decode(rightArgs, (bytes[])) : new bytes[](0);
+    bytes[] memory decodedLeft = _decodeTransformerArgumentList(leftArgs);
+    bytes[] memory decodedRight = _decodeTransformerArgumentList(rightArgs);
     // Dispute finalization passes transformer arguments directly via calldata.
-    // For HTLC this includes revealed secrets, so transformers can settle in one call.
+    // These arguments are adversarial evidence, not signed account state. If an
+    // entire side wrapper is malformed, treat that side as empty instead of
+    // reverting: otherwise a party could submit garbage left/rightArguments and
+    // DoS the honest side's unrelated swap/pull/payment claim. The signed
+    // ProofBody, transformer address, encoded batch, and allowances remain
+    // strict and still revert on corruption.
 
     // Apply transformers
     for (uint256 i = 0; i < proofbody.transformers.length; i++) {
@@ -1045,6 +1062,20 @@ contract Depository is ReentrancyGuardLite {
       if (allowances[i].deltaIndex == deltaIndex) return true;
     }
     return false;
+  }
+
+  function _decodeTransformerArgumentList(bytes memory encoded) internal view returns (bytes[] memory) {
+    if (encoded.length == 0) return new bytes[](0);
+
+    // Solidity cannot catch an internal abi.decode revert. The external
+    // self-call is deliberate and limited to dispute finalization so malformed
+    // adversarial evidence degrades to "no args" without weakening strict
+    // signed ProofBody validation.
+    try this.decodeTransformerArgumentListStrict(encoded) returns (bytes[] memory decoded) {
+      return decoded;
+    } catch {
+      return new bytes[](0);
+    }
   }
 
   function _applyTransformer(

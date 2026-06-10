@@ -45,6 +45,8 @@ import { MEMPOOL_LIMIT } from './account-consensus/constants';
 import { proposeAccountFrame } from './account-consensus/propose';
 import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from './dispute-arguments';
 import type { HandleAccountInputResult } from './account-consensus/types';
+import { createDisputeProofHashWithNonce } from './proof-builder';
+import { verifyHankoForHash } from './hanko/signing';
 export { proposeAccountFrame } from './account-consensus/propose';
 export type {
   AccountConsensusFrameResult,
@@ -60,6 +62,79 @@ export { computeFrameHash, validateAccountFrame } from './account-consensus-fram
 
 // Counter-based replay protection was intentionally replaced by the frame chain
 // (height + prevFrameHash). Nonces remain only for on-chain proof material.
+
+type ValidatedCounterpartyDisputeSeal = {
+  hanko: string;
+  nonce: number;
+  hash: string;
+  proofBodyHash: string;
+};
+
+async function validateCounterpartyDisputeSeal(
+  env: Env,
+  accountMachine: AccountMachine,
+  input: AccountInput,
+  context: string,
+): Promise<ValidatedCounterpartyDisputeSeal | undefined> {
+  if (!input.newDisputeHanko) return undefined;
+  if (
+    input.disputeProofNonce === undefined ||
+    !input.newDisputeHash ||
+    !input.newDisputeProofBodyHash
+  ) {
+    throw new Error(`${context}:DISPUTE_SEAL_INCOMPLETE`);
+  }
+
+  const depositoryAddress = getDepositoryAddress(env);
+  if (!isAddress20(depositoryAddress)) {
+    throw new Error(`${context}:DISPUTE_SEAL_DEPOSITORY_MISSING`);
+  }
+
+  // A dispute Hanko is only useful if it signs the exact Solidity message:
+  // (MessageType.DisputeProof, depository, canonical accountKey, nonce,
+  // proofbodyHash). Verifying a peer-supplied `newDisputeHash` alone is not
+  // enough: a malicious peer can sign any random hash, attach a plausible
+  // proofbodyHash, and make us store metadata that later fails on-chain.
+  const expectedHash = createDisputeProofHashWithNonce(
+    accountMachine,
+    input.newDisputeProofBodyHash,
+    depositoryAddress,
+    input.disputeProofNonce,
+  );
+  if (String(input.newDisputeHash).toLowerCase() !== expectedHash.toLowerCase()) {
+    throw new Error(`${context}:DISPUTE_SEAL_HASH_MISMATCH`);
+  }
+
+  const { valid } = await verifyHankoForHash(
+    input.newDisputeHanko,
+    expectedHash,
+    input.fromEntityId,
+    env,
+  );
+  if (!valid) {
+    throw new Error(`${context}:DISPUTE_SEAL_HANKO_INVALID`);
+  }
+
+  return {
+    hanko: input.newDisputeHanko,
+    nonce: input.disputeProofNonce,
+    hash: expectedHash,
+    proofBodyHash: input.newDisputeProofBodyHash,
+  };
+}
+
+function storeCounterpartyDisputeSeal(
+  accountMachine: AccountMachine,
+  seal: ValidatedCounterpartyDisputeSeal | undefined,
+): void {
+  if (!seal) return;
+  accountMachine.counterpartyDisputeProofHanko = seal.hanko;
+  accountMachine.counterpartyDisputeProofNonce = seal.nonce;
+  accountMachine.counterpartyDisputeHash = seal.hash;
+  accountMachine.counterpartyDisputeProofBodyHash = seal.proofBodyHash;
+  accountMachine.disputeProofNoncesByHash ??= {};
+  accountMachine.disputeProofNoncesByHash[seal.proofBodyHash] = seal.nonce;
+}
 
 /**
  * Handle received AccountInput (bilateral consensus)
@@ -109,6 +184,18 @@ export async function handleAccountInput(
     if (normalized.length % 2 !== 0) {
       return { success: false, error: 'Invalid dispute hanko (odd length)', events };
     }
+  }
+
+  let validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined;
+  try {
+    validatedCounterpartyDisputeSeal = await validateCounterpartyDisputeSeal(
+      env,
+      accountMachine,
+      input,
+      String(input.kind || 'ACCOUNT_INPUT').toUpperCase(),
+    );
+  } catch (error) {
+    return { success: false, error: (error as Error).message, events };
   }
 
   const pendingHeight = Number(accountMachine.pendingFrame?.height ?? 0);
@@ -231,36 +318,11 @@ export async function handleAccountInput(
         accountMachine.currentFrame = structuredClone(accountMachine.pendingFrame);
         accountMachine.currentHeight = accountMachine.pendingFrame.height;
         if (input.newDisputeHanko) {
-          if (input.disputeProofNonce === undefined || !input.newDisputeHash) {
-            console.warn(
-              `⚠️ ACK has newDisputeHanko but missing disputeProofNonce or newDisputeHash — skipping dispute metadata`,
-            );
-          } else {
-            // Cryptographic binding: verify hanko actually signs the claimed dispute hash
-            const { verifyHankoForHash } = await import('./hanko/signing');
-            const { valid: disputeValid } = await verifyHankoForHash(
-              input.newDisputeHanko,
-              input.newDisputeHash,
-              input.fromEntityId,
-              env,
-            );
-            if (!disputeValid) {
-              console.warn(`⚠️ ACK dispute hanko fails verification — skipping dispute metadata`);
-            } else {
-              accountMachine.counterpartyDisputeProofHanko = input.newDisputeHanko;
-              const signedCooperativeNonce = input.disputeProofNonce;
-              accountMachine.counterpartyDisputeProofNonce = signedCooperativeNonce;
-              accountMachine.counterpartyDisputeHash = input.newDisputeHash;
-              if (input.newDisputeProofBodyHash) {
-                accountMachine.counterpartyDisputeProofBodyHash = input.newDisputeProofBodyHash;
-                if (!accountMachine.disputeProofNoncesByHash) {
-                  accountMachine.disputeProofNoncesByHash = {};
-                }
-                accountMachine.disputeProofNoncesByHash[input.newDisputeProofBodyHash] = signedCooperativeNonce;
-              }
-              accountLog.debug('hanko.dispute_ack_stored', { nonce: signedCooperativeNonce, from: shortId(input.fromEntityId) });
-            }
-          }
+          storeCounterpartyDisputeSeal(accountMachine, validatedCounterpartyDisputeSeal);
+          accountLog.debug('hanko.dispute_ack_stored', {
+            nonce: input.disputeProofNonce,
+            from: shortId(input.fromEntityId),
+          });
         }
 
 	        const committedFrame = cloneAccountFrame(accountMachine.pendingFrame);
@@ -830,27 +892,9 @@ export async function handleAccountInput(
     accountMachine.currentFrame = structuredClone(receivedFrame);
     accountMachine.currentHeight = receivedFrame.height;
     // Store counterparty dispute metadata on COMMIT (verified, frame accepted)
-    if (input.newDisputeHanko && !ackProcessed && input.disputeProofNonce !== undefined && input.newDisputeHash) {
-      const { verifyHankoForHash } = await import('./hanko/signing');
-      const { valid: disputeValid } = await verifyHankoForHash(
-        input.newDisputeHanko,
-        input.newDisputeHash,
-        input.fromEntityId,
-        env,
-      );
-      if (disputeValid) {
-        accountMachine.counterpartyDisputeProofHanko = input.newDisputeHanko;
-        accountMachine.counterpartyDisputeProofNonce = input.disputeProofNonce;
-        accountMachine.counterpartyDisputeHash = input.newDisputeHash;
-        if (input.newDisputeProofBodyHash) {
-          accountMachine.counterpartyDisputeProofBodyHash = input.newDisputeProofBodyHash;
-          if (!accountMachine.disputeProofNoncesByHash) accountMachine.disputeProofNoncesByHash = {};
-          accountMachine.disputeProofNoncesByHash[input.newDisputeProofBodyHash] = input.disputeProofNonce;
-        }
-        accountLog.debug('hanko.dispute_frame_stored', { height: receivedFrame.height, from: shortId(input.fromEntityId) });
-      } else {
-        console.warn(`⚠️ Dispute hanko verification failed on commit — skipping dispute metadata`);
-      }
+    if (input.newDisputeHanko && !ackProcessed) {
+      storeCounterpartyDisputeSeal(accountMachine, validatedCounterpartyDisputeSeal);
+      accountLog.debug('hanko.dispute_frame_stored', { height: receivedFrame.height, from: shortId(input.fromEntityId) });
     }
 
     const committedFrame = cloneAccountFrame(receivedFrame);

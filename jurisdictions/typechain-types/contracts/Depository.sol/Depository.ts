@@ -211,6 +211,7 @@ export interface DepositoryInterface extends Interface {
       | "adminRegisterExternalToken"
       | "computeWatchtowerCounterDisputeHash"
       | "debtOutstanding"
+      | "decodeTransformerArgumentListStrict"
       | "defaultDisputeDelay"
       | "enforceDebts"
       | "entityNonces"
@@ -309,6 +310,10 @@ export interface DepositoryInterface extends Interface {
   encodeFunctionData(
     functionFragment: "debtOutstanding",
     values: [BytesLike, BigNumberish]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "decodeTransformerArgumentListStrict",
+    values: [BytesLike]
   ): string;
   encodeFunctionData(
     functionFragment: "defaultDisputeDelay",
@@ -428,6 +433,10 @@ export interface DepositoryInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "debtOutstanding",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "decodeTransformerArgumentListStrict",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -916,6 +925,12 @@ export interface Depository extends BaseContract {
     "view"
   >;
 
+  decodeTransformerArgumentListStrict: TypedContractMethod<
+    [encoded: BytesLike],
+    [string[]],
+    "view"
+  >;
+
   defaultDisputeDelay: TypedContractMethod<[], [bigint], "view">;
 
   enforceDebts: TypedContractMethod<
@@ -1142,6 +1157,9 @@ export interface Depository extends BaseContract {
     [bigint],
     "view"
   >;
+  getFunction(
+    nameOrSignature: "decodeTransformerArgumentListStrict"
+  ): TypedContractMethod<[encoded: BytesLike], [string[]], "view">;
   getFunction(
     nameOrSignature: "defaultDisputeDelay"
   ): TypedContractMethod<[], [bigint], "view">;

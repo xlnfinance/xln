@@ -83,11 +83,22 @@ struct InitialDisputeProof {
   bytes sig;
   // Starter-side transformer args for the proof body at `nonce`.
   // Used when the dispute finalizes on the initial proof after timeout.
+  //
+  // These are full bytes, not hashes and not Solidity-level swap/pull IDs:
+  // disputes must be finishable in two txs (start + finalize). A hash-only
+  // value would force an extra reveal tx, while IDs/diffs would leak runtime
+  // bookkeeping into the jurisdiction ABI and cost gas on every dispute.
   bytes starterInitialArguments;
   // Starter-side transformer args for exactly one newer proof body already
   // signed/sent by the starter before opening the dispute. These are not
   // counterparty args; they are the starter's own args for the incremented
   // state that the counterparty may reveal in a counter-dispute.
+  //
+  // Example this prevents: hub signs state N with a 50% fill, then signs N+1
+  // with total 75%, user stays offline, hub opens dispute. The initial args
+  // must settle N, but if user reveals N+1 the starter side must switch to the
+  // incremented args for N+1. Reusing initial args would underclaim; rebuilding
+  // live args would let deleted/reordered off-chain state drift into old proof.
   bytes starterIncrementedArguments;
 }
 
@@ -100,6 +111,8 @@ struct FinalDisputeProof {
   // Side-normalized transformer args consumed by DeltaTransformer. The
   // contract checks that the starter side equals one of the precommitted
   // starter blobs above; the other side is supplied by the finalizer.
+  // Malformed args are adversarial evidence and should be treated as empty by
+  // transformers. Malformed ProofBody remains fatal because it is signed state.
   bytes leftArguments;
   bytes rightArguments;
   bytes starterInitialArguments;

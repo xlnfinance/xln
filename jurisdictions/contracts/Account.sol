@@ -99,8 +99,16 @@ library Account {
     // - starterInitialArguments binds the starter's calldata for N.
     // - starterIncrementedArguments binds the starter's calldata for one
     //   already-signed newer proof that the counterparty may reveal.
-    // This avoids a second dispute round while preventing live-state argument
-    // rebuilding from being paired with an older proof body.
+    //
+    // Do not replace the incremented bytes with a hash unless the protocol also
+    // adds another reveal tx. The current dispute flow is intentionally two txs:
+    // start dispute, then finalize/counter-finalize. The bytes are committed by
+    // hash here, then later byte-matched in requireStarterArguments.
+    //
+    // Do not rebuild these arguments from live runtime state on-chain or
+    // off-chain. A maker can have fills applied/deleted between nonce N and
+    // dispute start; pairing live arguments with an old proofbodyHash would
+    // settle the wrong positional swap/pull slots.
     return keccak256(abi.encodePacked(
       nonce,
       startedByLeft,
@@ -120,6 +128,11 @@ library Account {
     // Finalization uses explicit left/right calldata. The starter side must
     // equal the blob committed at disputeStart; only the non-starter side is
     // free to provide fresh evidence at finalize time.
+    //
+    // This checks byte identity, not semantic validity. Invalid transformer
+    // evidence is handled downstream as "no evidence" so one party cannot DoS
+    // finalization with malformed optional args. Signed state, nonces, and
+    // proofbody hashes remain strict.
     bytes32 expected = keccak256(expectedStarterArguments);
     bytes32 actual = startedByLeft ? keccak256(leftArguments) : keccak256(rightArguments);
     if (actual != expected) revert E9();

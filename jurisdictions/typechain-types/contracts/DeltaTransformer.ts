@@ -21,6 +21,18 @@ import type {
 } from "../common";
 
 export declare namespace DeltaTransformer {
+  export type ArgumentsStruct = {
+    fillRatios: BigNumberish[];
+    secrets: BytesLike[];
+    pulls: BytesLike[];
+  };
+
+  export type ArgumentsStructOutput = [
+    fillRatios: bigint[],
+    secrets: string[],
+    pulls: string[]
+  ] & { fillRatios: bigint[]; secrets: string[]; pulls: string[] };
+
   export type PaymentStruct = {
     deltaIndex: BigNumberish;
     amount: BigNumberish;
@@ -110,6 +122,7 @@ export interface DeltaTransformerInterface extends Interface {
       | "applyBatch"
       | "applyBatchWithArgumentTimestamps"
       | "cleanSecret"
+      | "decodeArgumentsStrict"
       | "encodeBatch"
       | "hashRevealed"
       | "hashToBlock"
@@ -135,6 +148,10 @@ export interface DeltaTransformerInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "cleanSecret",
+    values: [BytesLike]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "decodeArgumentsStrict",
     values: [BytesLike]
   ): string;
   encodeFunctionData(
@@ -169,6 +186,10 @@ export interface DeltaTransformerInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "cleanSecret",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "decodeArgumentsStrict",
     data: BytesLike
   ): Result;
   decodeFunctionResult(
@@ -266,6 +287,12 @@ export interface DeltaTransformer extends BaseContract {
 
   cleanSecret: TypedContractMethod<[hash: BytesLike], [void], "nonpayable">;
 
+  decodeArgumentsStrict: TypedContractMethod<
+    [encoded: BytesLike],
+    [DeltaTransformer.ArgumentsStructOutput],
+    "view"
+  >;
+
   encodeBatch: TypedContractMethod<
     [b: DeltaTransformer.BatchStruct],
     [string],
@@ -315,6 +342,13 @@ export interface DeltaTransformer extends BaseContract {
   getFunction(
     nameOrSignature: "cleanSecret"
   ): TypedContractMethod<[hash: BytesLike], [void], "nonpayable">;
+  getFunction(
+    nameOrSignature: "decodeArgumentsStrict"
+  ): TypedContractMethod<
+    [encoded: BytesLike],
+    [DeltaTransformer.ArgumentsStructOutput],
+    "view"
+  >;
   getFunction(
     nameOrSignature: "encodeBatch"
   ): TypedContractMethod<[b: DeltaTransformer.BatchStruct], [string], "view">;
