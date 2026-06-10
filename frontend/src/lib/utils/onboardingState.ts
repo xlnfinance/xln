@@ -24,3 +24,10 @@ export const writeOnboardingComplete = (entityId: string, complete = true): void
     localStorage.removeItem(key);
   }
 };
+
+export const writeOnboardingCompleteForEntities = (entityIds: string[], complete = true): void => {
+  for (const entityId of entityIds) writeOnboardingComplete(entityId, complete);
+};
+
+export const readAnyOnboardingComplete = (entityIds: string[]): boolean =>
+  entityIds.some((entityId) => readOnboardingComplete(entityId));

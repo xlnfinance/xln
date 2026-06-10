@@ -1,7 +1,8 @@
-import type { AccountMachine, AccountTx, CrossJurisdictionSwapRoute } from '../../types';
+import type { AccountMachine, AccountTx, CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from '../../types';
 import { deriveDelta } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { FINANCIAL, LIMITS } from '../../constants';
+import { buildCrossJurisdictionPullBinding, cloneCrossJurisdictionPullBinding } from '../../cross-jurisdiction';
 import {
   HASHLADDER_MAX_FILL_RATIO,
   verifyHashLadderBinary,
@@ -44,6 +45,61 @@ const findCrossJurisdictionRouteForPull = (
   return undefined;
 };
 
+const committedCrossJurisdictionRatio = (binding: CrossJurisdictionPullBinding): number =>
+  Math.max(
+    0,
+    Math.min(
+      HASHLADDER_MAX_FILL_RATIO,
+      Math.floor(Number(binding.cumulativeFillRatio ?? binding.claimedRatio ?? 0) || 0),
+    ),
+  );
+
+const findCrossJurisdictionPullBinding = (
+  accountMachine: AccountMachine,
+  pullId: string,
+): CrossJurisdictionPullBinding | undefined => {
+  const routeMatch = findCrossJurisdictionRouteForPull(accountMachine, pullId);
+  if (routeMatch) return buildCrossJurisdictionPullBinding(routeMatch.route, routeMatch.leg);
+  return accountMachine.pulls?.get(pullId)?.crossJurisdiction;
+};
+
+const validateCrossJurisdictionPullResolve = (
+  binding: CrossJurisdictionPullBinding | undefined,
+  ratio: number,
+): string | null => {
+  if (!binding || ratio <= 0) return null;
+  const status = binding.status || 'intent';
+  const committedRatio = committedCrossJurisdictionRatio(binding);
+  if (binding.leg === 'source') {
+    if (!binding.targetReceipt) return `CROSS_J_SOURCE_PULL_RESOLVE_TARGET_RECEIPT_MISSING:${binding.orderId}`;
+    if (status !== 'clear_requested' && status !== 'clearing') {
+      return `CROSS_J_SOURCE_PULL_RESOLVE_BEFORE_CLEAR:${binding.orderId}:status=${status}`;
+    }
+    if (committedRatio <= 0) return `CROSS_J_SOURCE_PULL_RESOLVE_BEFORE_CLEAR:${binding.orderId}:committed=0`;
+    if (ratio > committedRatio) {
+      return `CROSS_J_SOURCE_PULL_RESOLVE_OVER_COMMITTED:${binding.orderId}:ratio=${ratio}:committed=${committedRatio}`;
+    }
+  } else {
+    const targetStatusAllowed =
+      status === 'target_prepared' ||
+      status === 'target_locked' ||
+      status === 'resting' ||
+      status === 'clearing' ||
+      status === 'source_claimed';
+    if (!targetStatusAllowed) {
+      return `CROSS_J_TARGET_PULL_RESOLVE_BEFORE_SOURCE_CLAIM:${binding.orderId}:status=${status}`;
+    }
+    // Target resolve pays the target beneficiary. It may arrive at the hub-side
+    // account before that entity has mirrored source-claim metadata; the binary
+    // itself is still verified against the committed target pull hash. Source
+    // pull resolves remain strict above because those move user source funds.
+    if (committedRatio > 0 && ratio > committedRatio) {
+      return `CROSS_J_TARGET_PULL_RESOLVE_OVER_COMMITTED:${binding.orderId}:ratio=${ratio}:committed=${committedRatio}`;
+    }
+  }
+  return null;
+};
+
 export async function handlePullLock(
   accountMachine: AccountMachine,
   accountTx: PullLockTx,
@@ -51,7 +107,7 @@ export async function handlePullLock(
   currentHeight: number,
   currentTimestamp: number,
 ): Promise<{ success: boolean; events: string[]; error?: string }> {
-  const { pullId, tokenId, amount, revealedUntilTimestamp, fullHash, partialRoot } = accountTx.data;
+  const { pullId, tokenId, amount, revealedUntilTimestamp, fullHash, partialRoot, crossJurisdiction } = accountTx.data;
   const events: string[] = [];
 
   if (!pullId || pullId.includes(':')) {
@@ -114,6 +170,7 @@ export async function handlePullLock(
     revealedUntilTimestamp,
     fullHash,
     partialRoot,
+    ...(crossJurisdiction ? { crossJurisdiction: cloneCrossJurisdictionPullBinding(crossJurisdiction) } : {}),
     createdHeight: currentHeight,
     createdTimestamp: currentTimestamp,
   });
@@ -157,6 +214,11 @@ export async function handlePullResolve(
   if (ratio > 0 && isPullRevealExpired(pull.revealedUntilTimestamp, currentTimestamp)) {
     return { success: false, error: `Pull reveal deadline expired`, events };
   }
+  const crossResolveError = validateCrossJurisdictionPullResolve(
+    findCrossJurisdictionPullBinding(accountMachine, pullId),
+    ratio,
+  );
+  if (crossResolveError) return { success: false, error: crossResolveError, events };
 
   let delta = accountMachine.deltas.get(pull.tokenId);
   if (!delta) {

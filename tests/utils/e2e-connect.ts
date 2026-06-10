@@ -83,6 +83,10 @@ async function nudgeRuntimeOnline(page: Page): Promise<void> {
     if (typeof p2p.reconnect === 'function') {
       try { p2p.reconnect(); } catch {}
     }
+  }).catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    if (message.includes('Execution context was destroyed')) return;
+    throw error;
   });
 }
 

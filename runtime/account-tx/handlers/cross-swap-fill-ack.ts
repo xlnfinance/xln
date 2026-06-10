@@ -1,12 +1,25 @@
-import type { AccountMachine, AccountTx } from '../../types';
+import type { AccountMachine, AccountTx, CrossJurisdictionSwapRoute } from '../../types';
 import type { SwapOfferEvent } from '../../entity-tx/handlers/account';
 import { MAX_SWAP_FILL_RATIO } from '../../swap-execution';
-import { transitionCrossJurisdictionRouteStatus, validateCrossJurisdictionFillProgress, withCrossJurisdictionFillProgress } from '../../cross-jurisdiction';
+import {
+  buildCrossJurisdictionPullBinding,
+  requireCrossJurisdictionFillProgress,
+  transitionCrossJurisdictionRouteStatus,
+  withCrossJurisdictionFillProgress,
+} from '../../cross-jurisdiction';
 import { recordSwapClosedLifecycle, recordSwapResolveLifecycle } from './swap-history';
 
 type CrossSwapFillAckTx = Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;
 const deterministicAccountTimestamp = (accountMachine: AccountMachine): number =>
   Number(accountMachine.pendingFrame?.timestamp ?? accountMachine.currentFrame?.timestamp ?? 0);
+
+const syncSourcePullBinding = (accountMachine: AccountMachine, route: CrossJurisdictionSwapRoute): void => {
+  const sourcePullId = route?.sourcePull?.pullId;
+  if (!sourcePullId) return;
+  const pull = accountMachine.pulls?.get(sourcePullId);
+  if (!pull) return;
+  pull.crossJurisdiction = buildCrossJurisdictionPullBinding(route, 'source');
+};
 
 export async function handleCrossSwapFillAck(
   accountMachine: AccountMachine,
@@ -71,6 +84,7 @@ export async function handleCrossSwapFillAck(
     transitionCrossJurisdictionRouteStatus(route, 'clear_requested', deterministicAccountTimestamp(accountMachine));
     route.clearingPolicy = 'cancel_and_clear';
     offer.crossJurisdiction = route;
+    syncSourcePullBinding(accountMachine, route);
     accountMachine.swapOffers?.delete(offerId);
     recordSwapClosedLifecycle(accountMachine, offerId);
     recordSwapResolveLifecycle(accountMachine, offerId, currentHeight, {
@@ -91,20 +105,21 @@ export async function handleCrossSwapFillAck(
     };
   }
 
-  const validatedFill = validateCrossJurisdictionFillProgress(route, {
-    fillSeq,
-    cumulativeFillRatio,
-    fillNumerator,
-    fillDenominator,
-    incrementalSourceAmount,
-    incrementalTargetAmount,
-    cumulativeSourceAmount,
-    cumulativeTargetAmount,
-  });
-  if (!validatedFill.ok) {
-    return { success: false, error: `Cross-j fill ack invalid: ${validatedFill.error}`, events };
+  let fill;
+  try {
+    fill = requireCrossJurisdictionFillProgress(route, {
+      fillSeq,
+      cumulativeFillRatio,
+      fillNumerator,
+      fillDenominator,
+      incrementalSourceAmount,
+      incrementalTargetAmount,
+      cumulativeSourceAmount,
+      cumulativeTargetAmount,
+    }, 'Cross-j fill ack invalid');
+  } catch (error) {
+    return { success: false, error: error instanceof Error ? error.message : String(error), events };
   }
-  const fill = validatedFill.value;
   const expectedExecutionSource = priceImprovementMode === 'source_savings' && priceImprovementAmount > 0n
     ? fill.incrementalSourceAmount - priceImprovementAmount
     : fill.incrementalSourceAmount;
@@ -135,7 +150,11 @@ export async function handleCrossSwapFillAck(
   const sourceTotal = BigInt(route.source.amount);
   const previousExactSourceAmount = fill.previousSourceAmount;
   if (fill.fillNumerator !== undefined && fill.fillDenominator !== undefined) {
-    const exactSourceAmount = previousExactSourceAmount + expectedExecutionSource;
+    // Exact fill ratio is hash-ledger/order progress, not execution economics.
+    // Source-savings price improvement may spend less source at execution time;
+    // it must not reduce the committed ratio or a full improved fill would fail
+    // validation and leave the owner-side order stuck in the book.
+    const exactSourceAmount = previousExactSourceAmount + fill.incrementalSourceAmount;
     if (fill.fillNumerator * sourceTotal !== exactSourceAmount * fill.fillDenominator) {
       return {
         success: false,
@@ -161,6 +180,7 @@ export async function handleCrossSwapFillAck(
   if (priceTicks !== undefined) route.priceTicks = priceTicks;
   if (pairId) route.venueId ||= pairId;
   offer.crossJurisdiction = route;
+  syncSourcePullBinding(accountMachine, route);
 
   const targetTotal = BigInt(route.target.amount);
   const full = fill.nextRatio >= MAX_SWAP_FILL_RATIO ||

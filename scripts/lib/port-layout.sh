@@ -46,3 +46,7 @@ xln_custody_port() {
 xln_custody_daemon_port() {
   xln_derived_port 8088 8
 }
+
+xln_watchtower_port() {
+  xln_derived_port 9100 10
+}

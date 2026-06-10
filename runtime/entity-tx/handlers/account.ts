@@ -234,12 +234,36 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
 
   // CHANNEL.TS PATTERN: Process frame-level consensus ONLY
   if (input.height !== undefined || input.newAccountFrame) {
+    const pendingBeforeTxs = accountMachine.pendingFrame?.accountTxs?.map(tx => tx.type) || [];
+    const inputFrameTxs = input.newAccountFrame?.accountTxs?.map(tx => tx.type) || [];
     accountHandlerLog.debug('frame.process', {
       from: shortId(input.fromEntityId),
       pending: accountMachine.pendingFrame ? accountMachine.pendingFrame.height : null,
     });
 
     const result = await processAccountInput(env, accountMachine, input);
+    const touchesCrossFillAck =
+      pendingBeforeTxs.includes('cross_swap_fill_ack') ||
+      inputFrameTxs.includes('cross_swap_fill_ack') ||
+      (result.committedFrames ?? []).some(({ frame }) =>
+        (frame.accountTxs ?? []).some(tx => tx.type === 'cross_swap_fill_ack'),
+      );
+    if (touchesCrossFillAck) {
+      accountHandlerLog.debug('cross_fill_ack.input_result', {
+        entity: shortId(newState.entityId),
+        counterparty: shortId(counterpartyId),
+        inputHeight: input.height,
+        hasPrevHanko: Boolean(input.prevHanko),
+        inputFrameTxs,
+        pendingBeforeTxs,
+        pendingAfter: accountMachine.pendingFrame?.accountTxs?.map(tx => tx.type) || [],
+        currentHeight: accountMachine.currentHeight,
+        committedTxs: (result.committedFrames ?? []).map(({ frame }) => frame.accountTxs.map(tx => tx.type)),
+        events: result.events,
+        success: result.success,
+        error: result.success ? undefined : result.error,
+      });
+    }
 
     if (result.success) {
       addMessages(newState, result.events);

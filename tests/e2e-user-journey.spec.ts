@@ -20,6 +20,7 @@ import {
 import { connectHub as connectActiveRuntimeToHub } from './utils/e2e-connect';
 import { getRenderedPrimaryOutbound, waitForRenderedPrimaryOutboundDelta } from './utils/e2e-account-ui';
 import { getPersistedReceiptCursor } from './utils/e2e-runtime-receipts';
+import { openAccountWorkspaceTab } from './utils/e2e-account-workspace';
 
 const INIT_TIMEOUT = 30_000;
 const LONG_E2E = process.env.E2E_LONG === '1';
@@ -59,8 +60,66 @@ async function dismissOnboardingIfVisible(page: Page): Promise<void> {
   }
 }
 
-async function createDemoRuntime(page: Page, label: string, mnemonic: string): Promise<void> {
-  await createSharedRuntime(page, label, mnemonic);
+async function createDemoRuntime(
+  page: Page,
+  label: string,
+  mnemonic: string,
+  options: { requiresOnboarding?: boolean } = {},
+): Promise<void> {
+  await createSharedRuntime(page, label, mnemonic, options);
+}
+
+async function readHubAccountSummary(page: Page): Promise<{
+  ready: boolean;
+  committed: number;
+  pending: number;
+  entitiesWithCommitted: number;
+  entityCount: number;
+  accounts: Array<{ entityId: string; counterpartyId: string; height: number; pending: boolean }>;
+}> {
+  return page.evaluate(() => {
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        eReplicas?: Map<string, {
+          entityId?: string;
+          state?: {
+            entityId?: string;
+            accounts?: Map<string, {
+              currentHeight?: number;
+              pendingFrame?: unknown;
+            }>;
+          };
+        }>;
+      };
+    }).isolatedEnv;
+    const accounts: Array<{ entityId: string; counterpartyId: string; height: number; pending: boolean }> = [];
+    const entityIds = new Set<string>();
+    const committedEntityIds = new Set<string>();
+    for (const [key, rep] of env?.eReplicas?.entries?.() ?? []) {
+      const entityId = String(rep?.entityId || rep?.state?.entityId || String(key).split(':')[0] || '').toLowerCase();
+      if (entityId) entityIds.add(entityId);
+      for (const [counterpartyId, account] of rep.state?.accounts?.entries?.() ?? []) {
+        const height = Number(account?.currentHeight || 0);
+        const pending = Boolean(account?.pendingFrame);
+        if (entityId && height > 0 && !pending) committedEntityIds.add(entityId);
+        accounts.push({
+          entityId,
+          counterpartyId: String(counterpartyId || ''),
+          height,
+          pending,
+        });
+      }
+    }
+    const pending = accounts.filter((account) => account.pending).length;
+    return {
+      ready: entityIds.size >= 2 && committedEntityIds.size === entityIds.size && pending === 0,
+      committed: accounts.filter((account) => account.height > 0 && !account.pending).length,
+      pending,
+      entitiesWithCommitted: committedEntityIds.size,
+      entityCount: entityIds.size,
+      accounts,
+    };
+  });
 }
 
 async function readPrimaryAccountProgress(page: Page): Promise<AccountProgress | null> {
@@ -99,6 +158,20 @@ async function readPrimaryAccountProgress(page: Page): Promise<AccountProgress |
     }
     return null;
   });
+}
+
+async function expectSwapBuilderLabels(page: Page): Promise<void> {
+  await openAccountWorkspaceTab(page, 'swap');
+  await expect(page.getByTestId('swap-from-token-label')).toHaveText(/^(USDC|USDT|WETH)$/);
+  await expect(page.getByTestId('swap-to-token-label')).toHaveText(/^(USDC|USDT|WETH)$/);
+
+  const routeLabels = await page.getByTestId('swap-route-select').locator('option').evaluateAll((options) =>
+    options.map((option) => String((option as HTMLOptionElement).label || option.textContent || '').trim()),
+  );
+  expect(routeLabels.filter((label) => label === 'Same account')).toHaveLength(1);
+  expect(new Set(routeLabels).size, `route options should not duplicate recipient lanes: ${routeLabels.join(' | ')}`)
+    .toBe(routeLabels.length);
+  expect(routeLabels.join(' | '), 'recipient dropdown must not expose internal hub names').not.toMatch(/\bH\d\b/);
 }
 
 async function ensureAnyHubAccountOpen(page: Page): Promise<void> {
@@ -144,21 +217,44 @@ async function ensureAnyHubAccountOpen(page: Page): Promise<void> {
       if (ready) break;
     }
 
-    if (!hubId) {
-      const profiles = env?.gossip?.getProfiles?.() || [];
-      const hubProfile = profiles.find((profile: any) => profile?.metadata?.isHub === true);
-      hubId = typeof hubProfile?.entityId === 'string' ? hubProfile.entityId : '';
-    }
-
     return { ready, hubId };
   });
 
   if (state.ready) return;
-  expect(state.hubId, 'hub must be discoverable before opening account').toBeTruthy();
-  await connectActiveRuntimeToHub(page, state.hubId);
+  if (!state.hubId) {
+    await page.getByTestId('tab-accounts').click({ timeout: 10_000 }).catch(() => null);
+    await expect(page.locator('.hub-card[data-hub-entity-id]').first()).toBeVisible({ timeout: 30_000 });
+  }
+  const visibleHubId = state.hubId
+    ? ''
+    : await page.locator('.hub-card[data-hub-entity-id]').first().getAttribute('data-hub-entity-id').catch(() => null);
+  const hubId = String(state.hubId || visibleHubId || '').trim();
+  expect(hubId, 'same-jurisdiction hub must be visible before opening account').toMatch(/^0x[0-9a-f]{64}$/i);
+  await connectActiveRuntimeToHub(page, hubId);
 }
 
 test.describe('E2E User Journey', () => {
+  test('profile onboarding auto-joins three hubs without stale pending frames', async ({ page }) => {
+    test.setTimeout(USER_JOURNEY_TIMEOUT);
+
+    await page.addInitScript(() => {
+      localStorage.setItem('xln-hub-join-preference', '3');
+    });
+    await gotoApp(page);
+    await dismissOnboardingIfVisible(page);
+    await createDemoRuntime(page, 'journey-auto3', randomMnemonic(), { requiresOnboarding: true });
+
+    await expect
+      .poll(async () => await readHubAccountSummary(page), {
+        timeout: USER_JOURNEY_TIMEOUT,
+        intervals: [500, 1000, 1500],
+        message: 'auto-join should commit at least one hub account per runtime entity lane and leave no pending frames',
+      })
+      .toMatchObject({ ready: true, pending: 0 });
+
+    await expectSwapBuilderLabels(page);
+  });
+
   test('demo runtime -> open hub account -> offchain faucet pipeline', async ({ page }) => {
     test.setTimeout(USER_JOURNEY_TIMEOUT);
 
@@ -175,7 +271,7 @@ test.describe('E2E User Journey', () => {
 
     // User flow action: request one offchain faucet payment through the opened account.
     await page.evaluate(async ({ entityId, signerId, counterpartyId }) => {
-      const env = (window as any).isolatedEnv;
+      const env = (window as typeof window & { isolatedEnv?: { runtimeId?: string } }).isolatedEnv;
       if (!env) return;
       const runtimeId = String(env.runtimeId || '').toLowerCase();
       const requestApiBase = window.location.origin;

@@ -6,6 +6,7 @@ import type {
   AccountTx,
   CrossJurisdictionBookAdmission,
   CrossJurisdictionBookAdmissionReceipt,
+  CrossJurisdictionPullBinding,
   CrossJurisdictionPullLeg,
   CrossJurisdictionSwapLeg,
   CrossJurisdictionSwapRoute,
@@ -43,12 +44,14 @@ const CROSS_J_STATUS_RANK: Record<CrossJurisdictionSwapStatus, number> = {
   intent: 10,
   target_prepared: 20,
   source_committed: 30,
+  // Pull locks are pre-book safety states. They must rank below `resting`,
+  // otherwise admission merges can keep a non-working route inside the matcher.
+  target_locked: 35,
+  source_locked: 36,
   resting: 40,
   partially_filled: 50,
   clear_requested: 60,
   clearing: 70,
-  target_locked: 80,
-  source_locked: 90,
   source_claimed: 100,
   target_claimed: 110,
   settled: 120,
@@ -142,6 +145,9 @@ export type CrossJurisdictionFillProgress = {
 const clampFillRatio = (value: unknown): number =>
   Math.max(0, Math.min(CROSS_J_MAX_FILL_RATIO, Math.floor(Number(value) || 0)));
 
+const scaleByExactRatio = (total: bigint, numerator: bigint, denominator: bigint): bigint =>
+  numerator >= denominator ? total : (total * numerator) / denominator;
+
 export function validateCrossJurisdictionFillProgress(
   route: CrossJurisdictionSwapRoute,
   input: CrossJurisdictionFillProgressInput,
@@ -181,10 +187,16 @@ export function validateCrossJurisdictionFillProgress(
     route.filledTargetAmount ??
     route.targetClaimed ??
     ((targetTotal * BigInt(previousRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO));
-  const cumulativeSourceAmount =
-    (sourceTotal * BigInt(nextRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO);
-  const cumulativeTargetAmount =
-    (targetTotal * BigInt(nextRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO);
+  // Runtime order progress is exact. `cumulativeFillRatio` is the coarse
+  // uint16 projection used by hash-ladder/dispute plumbing; it must not round
+  // economic amounts inside the committed orderbook path.
+  const useExactRatio = input.fillNumerator !== undefined && input.fillDenominator !== undefined;
+  const cumulativeSourceAmount = useExactRatio
+    ? scaleByExactRatio(sourceTotal, input.fillNumerator!, input.fillDenominator!)
+    : (sourceTotal * BigInt(nextRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO);
+  const cumulativeTargetAmount = useExactRatio
+    ? scaleByExactRatio(targetTotal, input.fillNumerator!, input.fillDenominator!)
+    : (targetTotal * BigInt(nextRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO);
   const incrementalSourceAmount = cumulativeSourceAmount - previousSourceAmount;
   const incrementalTargetAmount = cumulativeTargetAmount - previousTargetAmount;
   if (incrementalSourceAmount <= 0n || incrementalTargetAmount <= 0n) {
@@ -192,7 +204,12 @@ export function validateCrossJurisdictionFillProgress(
   }
 
   if (input.cumulativeSourceAmount !== undefined && input.cumulativeSourceAmount !== cumulativeSourceAmount) {
-    return { ok: false, error: `cumulative source mismatch: expected ${cumulativeSourceAmount}, got ${input.cumulativeSourceAmount}` };
+    return {
+      ok: false,
+      error: `cumulative source mismatch: expected ${cumulativeSourceAmount}, got ${input.cumulativeSourceAmount} ` +
+        `(previous=${previousSourceAmount}, total=${sourceTotal}, ratio=${nextRatio}, ` +
+        `exact=${useExactRatio ? `${input.fillNumerator}/${input.fillDenominator}` : 'none'})`,
+    };
   }
   if (input.cumulativeTargetAmount !== undefined && input.cumulativeTargetAmount !== cumulativeTargetAmount) {
     return { ok: false, error: `cumulative target mismatch: expected ${cumulativeTargetAmount}, got ${input.cumulativeTargetAmount}` };
@@ -241,6 +258,31 @@ export function withCrossJurisdictionFillProgress(
     status: fill.nextRatio >= CROSS_J_MAX_FILL_RATIO ? 'clear_requested' : 'partially_filled',
     updatedAt,
   };
+}
+
+export function requireCrossJurisdictionFillProgress(
+  route: CrossJurisdictionSwapRoute,
+  input: CrossJurisdictionFillProgressInput,
+  errorPrefix: string,
+): CrossJurisdictionFillProgress {
+  const validatedFill = validateCrossJurisdictionFillProgress(route, input);
+  if (!validatedFill.ok) {
+    throw new Error(`${errorPrefix}: route=${route.orderId} ${validatedFill.error}`);
+  }
+  return validatedFill.value;
+}
+
+export function applyCrossJurisdictionFillProgress(
+  route: CrossJurisdictionSwapRoute,
+  input: CrossJurisdictionFillProgressInput,
+  updatedAt: number,
+  errorPrefix: string,
+): CrossJurisdictionSwapRoute {
+  return withCrossJurisdictionFillProgress(
+    route,
+    requireCrossJurisdictionFillProgress(route, input, errorPrefix),
+    updatedAt,
+  );
 }
 
 export function withCrossJurisdictionClaimProgress(
@@ -397,6 +439,9 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
   const venueId = optionalString(route.venueId);
   const sourcePull = cloneCrossJurisdictionPullLeg(route.sourcePull);
   const targetPull = cloneCrossJurisdictionPullLeg(route.targetPull);
+  const targetReceipt = route.targetReceipt
+    ? cloneCrossJurisdictionBookAdmissionReceipt(route.targetReceipt)
+    : undefined;
   const priceTicks = optionalBigInt(route.priceTicks);
   const fillSeq = optionalNumber(route.fillSeq);
   const cumulativeFillRatio = optionalNumber(route.cumulativeFillRatio);
@@ -420,6 +465,7 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
   if (venueId) clone.venueId = venueId;
   if (sourcePull) clone.sourcePull = sourcePull;
   if (targetPull) clone.targetPull = targetPull;
+  if (targetReceipt) clone.targetReceipt = targetReceipt;
   if (priceTicks !== undefined) clone.priceTicks = priceTicks;
   if (fillSeq !== undefined) clone.fillSeq = fillSeq;
   if (cumulativeFillRatio !== undefined) clone.cumulativeFillRatio = cumulativeFillRatio;
@@ -460,6 +506,55 @@ export function cloneCrossJurisdictionBookAdmissionReceipt(
     partialRoot: String(receipt.partialRoot || ''),
     committedAt: Number(receipt.committedAt || 0),
   };
+}
+
+export function cloneCrossJurisdictionPullBinding(
+  binding: CrossJurisdictionPullBinding,
+): CrossJurisdictionPullBinding {
+  const clone: CrossJurisdictionPullBinding = {
+    orderId: String(binding.orderId || ''),
+    routeHash: String(binding.routeHash || ''),
+    leg: binding.leg,
+  };
+  if (binding.targetReceipt) {
+    clone.targetReceipt = cloneCrossJurisdictionBookAdmissionReceipt(binding.targetReceipt);
+  }
+  if (binding.status) clone.status = binding.status;
+  const cumulativeFillRatio = optionalNumber(binding.cumulativeFillRatio);
+  const claimedRatio = optionalNumber(binding.claimedRatio);
+  const filledSourceAmount = optionalBigInt(binding.filledSourceAmount);
+  const filledTargetAmount = optionalBigInt(binding.filledTargetAmount);
+  const sourceClaimed = optionalBigInt(binding.sourceClaimed);
+  const targetClaimed = optionalBigInt(binding.targetClaimed);
+  if (cumulativeFillRatio !== undefined) clone.cumulativeFillRatio = cumulativeFillRatio;
+  if (claimedRatio !== undefined) clone.claimedRatio = claimedRatio;
+  if (filledSourceAmount !== undefined) clone.filledSourceAmount = filledSourceAmount;
+  if (filledTargetAmount !== undefined) clone.filledTargetAmount = filledTargetAmount;
+  if (sourceClaimed !== undefined) clone.sourceClaimed = sourceClaimed;
+  if (targetClaimed !== undefined) clone.targetClaimed = targetClaimed;
+  if (binding.clearingPolicy) clone.clearingPolicy = binding.clearingPolicy;
+  return clone;
+}
+
+export function buildCrossJurisdictionPullBinding(
+  route: CrossJurisdictionSwapRoute,
+  leg: CrossJurisdictionPullBinding['leg'],
+): CrossJurisdictionPullBinding {
+  const canonical = withCanonicalCrossJurisdictionRouteHash(route);
+  return cloneCrossJurisdictionPullBinding({
+    orderId: canonical.orderId,
+    routeHash: canonical.routeHash || deriveCrossJurisdictionRouteHash(canonical),
+    leg,
+    ...(canonical.targetReceipt ? { targetReceipt: canonical.targetReceipt } : {}),
+    status: canonical.status,
+    ...(canonical.cumulativeFillRatio !== undefined ? { cumulativeFillRatio: canonical.cumulativeFillRatio } : {}),
+    ...(canonical.claimedRatio !== undefined ? { claimedRatio: canonical.claimedRatio } : {}),
+    ...(canonical.filledSourceAmount !== undefined ? { filledSourceAmount: canonical.filledSourceAmount } : {}),
+    ...(canonical.filledTargetAmount !== undefined ? { filledTargetAmount: canonical.filledTargetAmount } : {}),
+    ...(canonical.sourceClaimed !== undefined ? { sourceClaimed: canonical.sourceClaimed } : {}),
+    ...(canonical.targetClaimed !== undefined ? { targetClaimed: canonical.targetClaimed } : {}),
+    ...(canonical.clearingPolicy ? { clearingPolicy: canonical.clearingPolicy } : {}),
+  });
 }
 
 export function cloneCrossJurisdictionBookAdmission(
@@ -506,6 +601,15 @@ export const cloneCrossJurisdictionSwapHistoryRoute = (entry: SwapOrderHistoryEn
   cloneCrossJurisdictionCarrierRoute({ ...entry });
 
 export function cloneCrossJurisdictionAccountTxRoute(tx: AccountTx): AccountTx {
+  if (tx.type === 'pull_lock' && tx.data.crossJurisdiction) {
+    return {
+      ...tx,
+      data: {
+        ...tx.data,
+        crossJurisdiction: cloneCrossJurisdictionPullBinding(tx.data.crossJurisdiction),
+      },
+    };
+  }
   if (tx.type !== 'swap_offer' || !tx.data.crossJurisdiction) return tx;
   return {
     ...tx,
@@ -604,6 +708,17 @@ function signedAmountForBeneficiary(beneficiaryEntityId: string, counterpartyEnt
     : -amount;
 }
 
+const assertCrossJurisdictionAssetRouteIsUseful = (route: CrossJurisdictionSwapRoute): void => {
+  const sameJurisdiction = normalizeJurisdiction(route.source.jurisdiction) === normalizeJurisdiction(route.target.jurisdiction);
+  const sameToken = Number(route.source.tokenId) === Number(route.target.tokenId);
+  if (sameJurisdiction && sameToken) {
+    throw new Error(
+      `CROSS_J_SAME_JURISDICTION_TOKEN_INVALID:${route.orderId}:` +
+        `${route.source.jurisdiction}:${route.source.tokenId}`,
+    );
+  }
+};
+
 export function buildPreparedCrossJurisdictionRoute(
   route: CrossJurisdictionSwapRoute,
   options: {
@@ -626,6 +741,7 @@ export function buildPreparedCrossJurisdictionRoute(
     ...route,
     expiresAt: route.expiresAt ?? sourceRevealUntilTimestamp,
   });
+  assertCrossJurisdictionAssetRouteIsUseful(canonicalRoute);
   const privateSeed = deriveCrossJurisdictionPrivateSeed(options.runtimeSeed, canonicalRoute);
   const proof = deriveCrossJurisdictionHashLadderProof(canonicalRoute, privateSeed);
   const sourceAmount = BigInt(canonicalRoute.source.amount);

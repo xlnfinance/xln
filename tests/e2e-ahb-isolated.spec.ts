@@ -44,7 +44,13 @@ type GossipProfile = {
     isHub?: boolean;
     routingFeePPM?: number;
     baseFee?: string | number | bigint;
+    jurisdiction?: JurisdictionLike;
   };
+};
+
+type JurisdictionLike = {
+  chainId?: unknown;
+  depositoryAddress?: unknown;
 };
 
 type AccountView = {
@@ -55,8 +61,14 @@ type AccountView = {
 };
 
 type EntityReplicaView = {
+  position?: {
+    jurisdiction?: JurisdictionLike;
+  };
   state?: {
     accounts?: Map<string, AccountView>;
+    config?: {
+      jurisdiction?: JurisdictionLike;
+    };
   };
 };
 
@@ -101,6 +113,16 @@ const calcFee = (amount: bigint, feePPM: bigint, baseFee: bigint): bigint =>
 
 const afterFee = (amount: bigint, feePPM: bigint, baseFee: bigint): bigint =>
   amount - calcFee(amount, feePPM, baseFee);
+
+function jurisdictionStackKey(jurisdiction: unknown): string {
+  const value = jurisdiction as JurisdictionLike | null | undefined;
+  const depository = String(value?.depositoryAddress || '').trim().toLowerCase();
+  if (!depository) return '';
+  const chainId = Number(value?.chainId);
+  return Number.isFinite(chainId) && chainId > 0
+    ? `stack:${Math.floor(chainId)}:${depository}`
+    : `stack:${depository}`;
+}
 
 function assertHtlcReceivedPayload(
   event: { data?: Record<string, unknown> },
@@ -232,7 +254,36 @@ async function waitForEntityAdvertised(page: Page, entityId: string, timeoutMs =
 async function discoverHubs(page: Page): Promise<string[]> {
   const apiBaseUrl = await getActiveApiBase(page);
   for (let attempt = 0; attempt < 45; attempt += 1) {
-    const fromGossip = await page.evaluate(() => {
+    const activeJurisdiction = await page.evaluate(() => {
+      const stackKey = (jurisdiction: unknown): string => {
+        const value = jurisdiction as { chainId?: unknown; depositoryAddress?: unknown } | null | undefined;
+        const depository = String(value?.depositoryAddress || '').trim().toLowerCase();
+        if (!depository) return '';
+        const chainId = Number(value?.chainId);
+        return Number.isFinite(chainId) && chainId > 0
+          ? `stack:${Math.floor(chainId)}:${depository}`
+          : `stack:${depository}`;
+      };
+      const view = window as TestWindow;
+      const runtimeId = String(view.isolatedEnv?.runtimeId || '').toLowerCase();
+      for (const [key, replica] of view.isolatedEnv?.eReplicas?.entries?.() || []) {
+        const [, signerId] = String(key || '').split(':');
+        if (String(signerId || '').toLowerCase() !== runtimeId) continue;
+        return stackKey(replica?.state?.config?.jurisdiction) || stackKey(replica?.position?.jurisdiction);
+      }
+      return '';
+    });
+
+    const fromGossip = await page.evaluate((targetJurisdiction) => {
+      const stackKey = (jurisdiction: unknown): string => {
+        const value = jurisdiction as { chainId?: unknown; depositoryAddress?: unknown } | null | undefined;
+        const depository = String(value?.depositoryAddress || '').trim().toLowerCase();
+        if (!depository) return '';
+        const chainId = Number(value?.chainId);
+        return Number.isFinite(chainId) && chainId > 0
+          ? `stack:${Math.floor(chainId)}:${depository}`
+          : `stack:${depository}`;
+      };
       const view = window as TestWindow;
       try {
         view.XLN?.refreshGossip?.(view.isolatedEnv);
@@ -242,20 +293,22 @@ async function discoverHubs(page: Page): Promise<string[]> {
       const profiles = view.isolatedEnv?.gossip?.getProfiles?.() ?? [];
       const ids = profiles
         .filter((profile) => profile.metadata?.isHub === true)
+        .filter((profile) => stackKey(profile.metadata?.jurisdiction) === targetJurisdiction)
         .map((profile) => profile.entityId)
         .filter((entityId): entityId is string => typeof entityId === 'string');
       return Array.from(new Set(ids));
-    });
+    }, activeJurisdiction);
     if (fromGossip.length > 0) return fromGossip;
 
     try {
       const response = await page.request.get(`${apiBaseUrl}/api/debug/entities`);
       if (response.ok()) {
         const body = await response.json() as {
-          entities?: Array<{ entityId?: string; isHub?: boolean }>;
+          entities?: Array<{ entityId?: string; isHub?: boolean; metadata?: { jurisdiction?: JurisdictionLike } }>;
         };
         const ids = (Array.isArray(body.entities) ? body.entities : [])
           .filter((entry) => entry.isHub === true)
+          .filter((entry) => jurisdictionStackKey(entry.metadata?.jurisdiction) === activeJurisdiction)
           .map((entry) => entry.entityId)
           .filter((entityId): entityId is string => typeof entityId === 'string');
         const unique = Array.from(new Set(ids));

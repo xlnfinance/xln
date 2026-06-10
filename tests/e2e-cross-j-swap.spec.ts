@@ -51,6 +51,17 @@ type CrossRuntimeWindow = Window & {
   __xln_instance?: any;
 };
 
+type CrossResolveSnapshot = {
+  offerId: string;
+  fillRatio: number;
+  fillNumerator: string;
+  fillDenominator: string;
+  cancelRemainder: boolean;
+  executionGiveAmount: string;
+  executionWantAmount: string;
+  comment: string;
+};
+
 function getPrimaryHubId(health: E2EHealthResponse): string {
   const hubId = health.hubMesh?.hubIds?.[0];
   expect(hubId, `hub mesh must expose a primary hub: ${JSON.stringify(health.hubMesh || {})}`).toMatch(/^0x[a-fA-F0-9]{64}$/);
@@ -890,6 +901,7 @@ async function readCrossState(
     targetPull: boolean;
     bookOwnerEntityId: string;
     venueId: string;
+    priceTicks: string;
     updatedAt: number;
   }>;
   offerSummaries: Array<{
@@ -957,6 +969,7 @@ async function readCrossState(
         targetPull: Boolean(route?.targetPull),
         bookOwnerEntityId: String(route?.bookOwnerEntityId || route?.source?.counterpartyEntityId || ''),
         venueId: String(route?.venueId || ''),
+        priceTicks: String(route?.priceTicks ?? '0'),
         updatedAt: Number(route?.updatedAt || route?.createdAt || 0),
       });
     }
@@ -1086,6 +1099,83 @@ async function waitForCrossPullFlow(
     }, null, 2));
     throw error;
   }
+}
+
+async function readCrossResolveSnapshots(
+  page: Page,
+  entityId: string,
+  counterpartyId: string,
+): Promise<CrossResolveSnapshot[]> {
+  return await page.evaluate(({ entityId, counterpartyId }) => {
+    const env = (window as CrossRuntimeWindow).isolatedEnv;
+    const recordOf = (value: unknown): Record<string, unknown> =>
+      value && typeof value === 'object' ? value as Record<string, unknown> : {};
+    const owner = String(entityId || '').toLowerCase();
+    const cp = String(counterpartyId || '').toLowerCase();
+    const out: CrossResolveSnapshot[] = [];
+
+    const accountMatches = (accountKey: string, rawAccount: unknown): boolean => {
+      const account = recordOf(rawAccount);
+      const left = typeof account.leftEntity === 'string' ? account.leftEntity.toLowerCase() : '';
+      const right = typeof account.rightEntity === 'string' ? account.rightEntity.toLowerCase() : '';
+      const canonicalCp = typeof account.counterpartyEntityId === 'string' ? account.counterpartyEntityId.toLowerCase() : '';
+      return accountKey.toLowerCase() === cp ||
+        canonicalCp === cp ||
+        Boolean(left && right && ((left === owner && right === cp) || (right === owner && left === cp)));
+    };
+    const collectResolveSnapshots = (history: unknown) => {
+      if (!(history instanceof Map)) return;
+      for (const [offerId, rawLifecycle] of history.entries()) {
+        const resolves = recordOf(rawLifecycle).resolves;
+        if (!Array.isArray(resolves)) continue;
+        for (const rawResolve of resolves) {
+          const resolve = recordOf(rawResolve);
+          out.push({
+            offerId: String(offerId || ''),
+            fillRatio: Number(resolve.fillRatio || 0),
+            fillNumerator: String(resolve.fillNumerator ?? '0'),
+            fillDenominator: String(resolve.fillDenominator ?? '0'),
+            cancelRemainder: Boolean(resolve.cancelRemainder),
+            executionGiveAmount: String(resolve.executionGiveAmount ?? '0'),
+            executionWantAmount: String(resolve.executionWantAmount ?? '0'),
+            comment: String(resolve.comment || ''),
+          });
+        }
+      }
+    };
+
+    for (const [replicaKey, replica] of env?.eReplicas?.entries?.() || []) {
+      if (!String(replicaKey).toLowerCase().startsWith(`${owner}:`)) continue;
+      const state = recordOf(recordOf(replica).state);
+      const accounts = state.accounts;
+      if (!(accounts instanceof Map)) continue;
+      for (const [accountKey, rawAccount] of accounts.entries()) {
+        if (!accountMatches(String(accountKey || ''), rawAccount)) continue;
+        collectResolveSnapshots(recordOf(rawAccount).swapOrderHistory);
+        collectResolveSnapshots(recordOf(rawAccount).swapClosedOrders);
+        return out;
+      }
+    }
+    return out;
+  }, { entityId, counterpartyId });
+}
+
+async function waitForLatestCrossResolveSnapshot(
+  page: Page,
+  entityId: string,
+  counterpartyId: string,
+  minimumCount: number,
+): Promise<CrossResolveSnapshot> {
+  await expect
+    .poll(async () => (await readCrossResolveSnapshots(page, entityId, counterpartyId)).length, {
+      timeout: 45_000,
+      intervals: [250, 500, 1000],
+      message: `cross resolve snapshots must reach ${minimumCount}`,
+    })
+    .toBeGreaterThanOrEqual(minimumCount);
+  const latest = (await readCrossResolveSnapshots(page, entityId, counterpartyId)).at(-1);
+  expect(latest, 'latest cross resolve snapshot must exist').toBeTruthy();
+  return latest!;
 }
 
 async function waitForCrossOffersCleared(
@@ -1571,8 +1661,8 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         hubId: targetHubId,
         targetEntityId: bob.entityId,
         side: 'buy',
-        amount: '75',
-        price: '2500',
+        amount: '78',
+        price: '2600',
       }));
 
       await Promise.all([
@@ -1583,6 +1673,42 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       await Promise.all([
         waitForCrossOffersCleared(alicePage, alice, hubId, 'Alice full'),
         waitForCrossOffersCleared(bobPage, bobRpc2, targetHubId, 'Bob full'),
+      ]);
+      const bobFullResolve = await timedStep('cross_j_swap.full.bob_price_improvement', () =>
+        waitForLatestCrossResolveSnapshot(bobPage, bobRpc2.entityId, targetHubId, 1),
+      );
+      expect(bobFullResolve.fillRatio, 'Bob full source-savings must close the cross order').toBe(65_535);
+      expect(bobFullResolve.cancelRemainder, 'Bob full source-savings must remove the terminal order').toBe(true);
+      expect(bobFullResolve.executionGiveAmount, 'Bob spends execution source, not his 78 USDC limit').toBe('75000000000000000000');
+      expect(bobFullResolve.executionWantAmount, 'Bob receives the full 0.03 WETH target').toBe('30000000000000000');
+
+      await Promise.all([
+        waitForOutCapAtLeast(alicePage, aliceRpc2.entityId, targetHubId, USDC, 25n * 10n ** 18n),
+        waitForOutCapAtLeast(bobPage, bob.entityId, hubId, WETH, 5n * 10n ** 15n),
+      ]);
+      await timedStep('cross_j_swap.reverse.alice_offer', () => placeCrossOrder(alicePage, {
+        source: aliceRpc2,
+        hubId: targetHubId,
+        targetEntityId: alice.entityId,
+        side: 'buy',
+        amount: '25',
+        price: '2500',
+      }));
+      await timedStep('cross_j_swap.reverse.bob_offer', () => placeCrossOrder(bobPage, {
+        source: bob,
+        hubId,
+        targetEntityId: bobRpc2.entityId,
+        side: 'sell',
+        amount: '0.01',
+        price: '2500',
+      }));
+      await Promise.all([
+        waitForCrossPullFlow(alicePage, aliceRpc2, alice, targetHubId, hubId),
+        waitForCrossPullFlow(bobPage, bob, bobRpc2, hubId, targetHubId),
+      ]);
+      await Promise.all([
+        waitForCrossOffersCleared(alicePage, aliceRpc2, targetHubId, 'Alice reverse'),
+        waitForCrossOffersCleared(bobPage, bob, hubId, 'Bob reverse'),
       ]);
 
       await Promise.all([
@@ -1655,6 +1781,9 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
           waitForCrossRouteStatus(alicePage, aliceRpc2, targetHubId, aliceSecondPartial.routeId, ['settled'], 'Alice target clear'),
         ),
       ]);
+      await timedStep('cross_j_swap.partial.alice_remainder_removed', () =>
+        waitForCrossOffersCleared(alicePage, alice, hubId, 'Alice partial cancel-clear'),
+      );
 
       await timedStep('cross_j_swap.dispute.alice_offer', () => placeCrossOrder(alicePage, {
         source: alice,
@@ -1681,6 +1810,11 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
           waitForCrossOffersCleared(bobPage, bobRpc2, targetHubId, 'Bob dispute counter-order'),
         ),
       ]);
+
+      // Bob can disappear after submitting the counter-order. Dispute salvage is driven by
+      // Alice/source+target sibling state and must not require the counterparty browser.
+      await bobContext.close();
+      bobContext = null;
 
       await timedStep('cross_j_swap.dispute.target_route_ready', () =>
         waitForCrossRouteMaterialized(alicePage, aliceRpc2, targetHubId, aliceDisputePartial.routeId, 'Alice target dispute sibling'),

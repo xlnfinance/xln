@@ -30,7 +30,11 @@
   import type { Env } from '@xln/runtime/xln-api';
   import type { EnvSnapshot, EntityReplica } from '$types';
   import { createSelfEntity } from '$lib/utils/entityFactory';
-  import { readOnboardingComplete, writeOnboardingComplete } from '$lib/utils/onboardingState';
+  import {
+    readAnyOnboardingComplete,
+    readOnboardingComplete,
+    writeOnboardingCompleteForEntities,
+  } from '$lib/utils/onboardingState';
   import { createRuntimeViewEnv, unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
 
   import EntityPanelTabs from '$lib/components/Entity/EntityPanelTabs.svelte';
@@ -570,17 +574,39 @@
   const showVaultGate = $derived(!isRemoteRuntime && !hasSigner);
   const showVaultPanelVisible = $derived(showVaultGate || $showVaultPanel);
 
+  function getRuntimeOnboardingEntityIds(): string[] {
+    const ids = new Set<string>();
+    const add = (value: string | null | undefined) => {
+      const normalized = String(value || '').trim().toLowerCase();
+      if (normalized) ids.add(normalized);
+    };
+    add(selectedEntityId);
+    add(String(signer?.entityId || ''));
+    for (const runtimeSigner of $activeRuntimeStore?.signers || []) {
+      add(runtimeSigner.entityId);
+    }
+    return [...ids];
+  }
+
   $effect(() => {
     const entityId = selectedEntityId;
     if (!onboardingRequiredForRuntime) {
       onboardingComplete = true;
       return;
     }
-    if (!entityId) {
+    const runtimeEntityIds = getRuntimeOnboardingEntityIds();
+    if (!entityId && runtimeEntityIds.length === 0) {
       onboardingComplete = false;
       return;
     }
-    onboardingComplete = readOnboardingComplete(entityId);
+    if (readAnyOnboardingComplete(runtimeEntityIds)) {
+      // Onboarding is runtime-level: one seed creates all local signer/entity lanes
+      // (for example Testnet + Tron). Never show signup again for a sibling lane.
+      writeOnboardingCompleteForEntities(runtimeEntityIds, true);
+      onboardingComplete = true;
+      return;
+    }
+    onboardingComplete = entityId ? readOnboardingComplete(entityId) : false;
   });
 
   // Tab for EntityPanel
@@ -620,9 +646,8 @@
   }
 
   function handleOnboardingComplete() {
-    if (selectedEntityId) {
-      writeOnboardingComplete(selectedEntityId, true);
-    }
+    const runtimeEntityIds = getRuntimeOnboardingEntityIds();
+    writeOnboardingCompleteForEntities(runtimeEntityIds.length > 0 ? runtimeEntityIds : [selectedEntityId || ''], true);
     onboardingComplete = true;
     viewMode = 'entity';
     selectedAccountId = null;
@@ -764,10 +789,12 @@
   </main>
 {:else if showVaultPanelVisible}
   <main class="panel-content">
+    <!-- Onboarding Screen 1: derive/import seed and atomically create/select runtime. -->
     <RuntimeCreation embedded={true} />
   </main>
 {:else if viewMode === 'entity' && selectedEntityId && selectedSignerId && !onboardingComplete}
   <main class="panel-content">
+    <!-- Onboarding Screen 2: configure account only; wallet/seed state already exists. -->
     <OnboardingPanel
       entityId={selectedEntityId}
       signerId={selectedSignerId}

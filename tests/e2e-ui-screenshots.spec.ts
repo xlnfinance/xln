@@ -85,6 +85,37 @@ async function captureMainTabs(
   await capturePageScreenshot(page, output, `${prefix}-settings.png`);
 }
 
+async function captureOnboardingScreens(page: Page, output: Parameters<typeof capturePageScreenshot>[1]): Promise<void> {
+  await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
+  await expect(page.getByRole('heading', { name: /Create XLN wallet/i }).first()).toBeVisible({ timeout: 30_000 });
+  await capturePageScreenshot(page, output, 'desktop-onboarding-seed.png');
+
+  const seed = selectDemoMnemonic('dave');
+  await page.evaluate(async ({ label, mnemonic }) => {
+    const operations = (window as typeof window & {
+      __xlnVaultOperations?: {
+        createRuntime?: (name: string, seed: string, options?: Record<string, unknown>) => Promise<unknown>;
+      };
+    }).__xlnVaultOperations;
+    if (typeof operations?.createRuntime !== 'function') {
+      throw new Error('__xlnVaultOperations.createRuntime unavailable for onboarding screenshot');
+    }
+    await operations.createRuntime(label, mnemonic, {
+      loginType: 'manual',
+      requiresOnboarding: true,
+    });
+  }, { label: 'visual-onboarding', mnemonic: seed });
+
+  await expect(page.getByRole('heading', { name: /Configure account/i }).first()).toBeVisible({ timeout: 60_000 });
+  await expect(page.getByTestId('brainvault-onboarding-recovery').first()).toBeVisible({ timeout: 20_000 });
+  await capturePageScreenshot(page, output, 'desktop-onboarding-account-config.png');
+}
+
+test('ui screenshot smoke captures onboarding screens', async ({ page }, testInfo) => {
+  test.setTimeout(120_000);
+  await captureOnboardingScreens(page, testInfo);
+});
+
 test('ui screenshot smoke captures desktop and mobile main tabs', async ({ browser, page }, testInfo) => {
   test.setTimeout(240_000);
 

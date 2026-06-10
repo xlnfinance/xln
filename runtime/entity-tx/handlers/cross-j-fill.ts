@@ -1,5 +1,5 @@
 import {
-  validateCrossJurisdictionFillProgress,
+  requireCrossJurisdictionFillProgress,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../cross-jurisdiction';
 import { cloneEntityState, addMessage } from '../../state-helpers';
@@ -44,36 +44,31 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
   const mempoolOps: MempoolOp[] = [];
   let route = newState.crossJurisdictionSwaps?.get(orderId);
   if (!route) {
-    addMessage(newState, `❌ Cross-j fill notice ${orderId} missing entity-level route`);
-    return { newState, outputs, mempoolOps };
+    throw new Error(`CROSS_J_FILL_NOTICE_ROUTE_MISSING: order=${orderId}`);
   }
 
   const offerRoute = findCrossJurisdictionOfferRoute(newState, orderId);
   if (offerRoute) {
-    try {
-      route = mergeCrossJurisdictionRoute(route, withCanonicalCrossJurisdictionRouteHash(offerRoute.route));
-      newState.crossJurisdictionSwaps ||= new Map();
-      newState.crossJurisdictionSwaps.set(orderId, route);
-    } catch {
-      // Keep the entity-level route; validation below will reject if it is unusable.
-    }
+    route = mergeCrossJurisdictionRoute(route, withCanonicalCrossJurisdictionRouteHash(offerRoute.route));
+    newState.crossJurisdictionSwaps ||= new Map();
+    newState.crossJurisdictionSwaps.set(orderId, route);
   }
 
   const currentEntityId = normalizeEntityRef(newState.entityId);
   const routeBookOwner = normalizeEntityRef(route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId);
   const routeSourceHub = normalizeEntityRef(route.source.counterpartyEntityId);
   if (routeBookOwner !== currentEntityId && routeSourceHub !== currentEntityId) {
-    addMessage(newState, `❌ Cross-j fill notice ${orderId} routed to wrong book owner/source hub`);
-    return { newState, outputs, mempoolOps };
+    throw new Error(
+      `CROSS_J_FILL_NOTICE_WRONG_ENTITY: order=${orderId} current=${newState.entityId} owner=${routeBookOwner} sourceHub=${routeSourceHub}`,
+    );
   }
 
   const allowed = route.status === 'resting' || route.status === 'partially_filled';
   if (!allowed) {
-    addMessage(newState, `❌ Cross-j fill notice ${orderId} blocked in status ${route.status}`);
-    return { newState, outputs, mempoolOps };
+    throw new Error(`CROSS_J_FILL_NOTICE_STATUS_INVALID: order=${orderId} status=${route.status}`);
   }
 
-  const validatedFill = validateCrossJurisdictionFillProgress(route, {
+  const fill = requireCrossJurisdictionFillProgress(route, {
     fillSeq,
     cumulativeFillRatio,
     fillNumerator,
@@ -82,16 +77,10 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
     incrementalTargetAmount,
     cumulativeSourceAmount,
     cumulativeTargetAmount,
-  });
-  if (!validatedFill.ok) {
-    addMessage(newState, `❌ Cross-j fill notice ${orderId} blocked: ${validatedFill.error}`);
-    return { newState, outputs, mempoolOps };
-  }
-  const fill = validatedFill.value;
+  }, 'CROSS_J_FILL_NOTICE_INVALID');
   const accountId = findAccountKey(newState, route.source.entityId);
   if (!accountId) {
-    addMessage(newState, `❌ Cross-j fill notice ${orderId} blocked: no source account`);
-    return { newState, outputs, mempoolOps };
+    throw new Error(`CROSS_J_FILL_NOTICE_SOURCE_ACCOUNT_MISSING: order=${orderId} source=${route.source.entityId}`);
   }
 
   mempoolOps.push({

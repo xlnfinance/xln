@@ -12,6 +12,7 @@ import { compareCanonicalText, swapKey, type CrossJurisdictionWorkingOrderbookOf
 import {
   buildCrossJurisdictionMarketOffer,
   buildCrossJurisdictionFillAck,
+  crossJurisdictionBookAdmissionKeyFor,
   type CrossJurisdictionFillInstruction,
   type CrossMarketOffer,
 } from '../../../cross-jurisdiction-orderbook';
@@ -33,10 +34,15 @@ import {
 
 const orderbookCrossLog = createStructuredLogger('orderbook.cross');
 
+const cloneCrossBookForSimulation = (book: BookState): BookState => structuredClone(book) as BookState;
+
 const crossBookQtyLots = (baseAmount: bigint): bigint => {
   if (baseAmount <= 0n) return 0n;
   return (baseAmount + SWAP_LOT_SCALE - 1n) / SWAP_LOT_SCALE;
 };
+
+const isWorkingCrossRouteStatus = (status: string | undefined): boolean =>
+  status === 'resting' || status === 'partially_filled';
 
 type RejectInvalidCrossOffer = (accountId: string, offerId: string, reason: string) => void;
 type RecordDebugProjectionReject = (accountId: string, offerId: string, reason: string) => true;
@@ -74,6 +80,8 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
   const assertedCrossJurisdictionPairs = new Set<string>();
   const crossAggregatedFills = new Map<string, { filledLots: number; weightedCost: bigint }>();
   const suspendedCrossOrderIds = new Set<string>();
+  const workingBookCache = new Map<string, BookState>();
+  const dirtySimulationPairs = new Set<string>();
 
   const getCrossMarketOffer = (offer: CrossJurisdictionWorkingOrderbookOffer): CrossMarketOffer | null => {
     const key = swapKey(offer.accountId, offer.offerId);
@@ -103,6 +111,26 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
     });
   };
 
+  const getWorkingBook = (pairId: string, committedBook: BookState): BookState => {
+    const cached = workingBookCache.get(pairId);
+    if (cached) return cached;
+    const workingBook = cloneCrossBookForSimulation(committedBook);
+    workingBookCache.set(pairId, workingBook);
+    return workingBook;
+  };
+
+  const committedCrossRouteStatus = (accountId: string, offerId: string): string | undefined => {
+    const entityRoute = hubState.crossJurisdictionSwaps?.get(offerId);
+    if (entityRoute?.status) return entityRoute.status;
+    const offerRoute = hubState.accounts.get(accountId)?.swapOffers?.get(offerId)?.crossJurisdiction;
+    if (offerRoute?.status) return offerRoute.status;
+    const admission = hubState.crossJurisdictionBookAdmissions?.get(
+      crossJurisdictionBookAdmissionKeyFor(accountId, offerId),
+    );
+    if (admission && admission.status !== 'admitted') return `admission:${admission.status}`;
+    return admission?.route?.status;
+  };
+
   const assertCrossBookMatchesCommittedOffers = (pairId: string, book: BookState): BookState => {
     if (assertedCrossJurisdictionPairs.has(pairId)) return book;
     assertedCrossJurisdictionPairs.add(pairId);
@@ -112,6 +140,25 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
       const { accountId, offerId } = parseNamespacedOrderId(orderId, 'ORDERBOOK_CROSS_J_MALFORMED_BOOK_ORDER');
       const queuedPendingAck = findQueuedCrossSwapAckForEntityState(hubState, accountId, offerId);
       const pendingAck = queuedPendingAck?.data ?? null;
+      const committedStatus = committedCrossRouteStatus(accountId, offerId);
+      if (committedStatus && !isWorkingCrossRouteStatus(committedStatus)) {
+        // Terminal/clearing cross-j routes must disappear from the book
+        // permanently. Matching a stale row would fill an already claimed
+        // hash-ledger route instead of the next live order at the same price.
+        const removed = applyCommand(book, {
+          kind: 1,
+          ownerId: order.ownerId,
+          orderId,
+        }).state;
+        bookCache.set(pairId, removed);
+        bookUpdates.push({ pairId, book: removed });
+        orderbookCrossLog.debug('book.remove_non_working', {
+          pair: pairId,
+          order: shortOrder(orderId, 20),
+          status: committedStatus,
+        });
+        continue;
+      }
       const meta = crossLiveOfferMeta.get(orderId) ?? buildCrossMarketOfferFromBookOrder(hubState, orderId);
       if (!meta) {
         throw new Error(
@@ -136,11 +183,22 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
       const staticMismatch =
         meta.pairId !== pairId || order.priceTicks !== meta.priceTicks || order.ownerId !== meta.makerId;
       const storedQtyLots = BigInt(order.qtyLots);
-      if (staticMismatch || storedQtyLots !== canonicalQtyLots) {
+      if (staticMismatch) {
         throw new Error(
           `ORDERBOOK_CROSS_J_CACHE_MISMATCH: pair=${pairId} order=${orderId} ` +
             `storedPair=${pairId} canonicalPair=${meta.pairId} ` +
             `storedOwner=${order.ownerId} canonicalOwner=${meta.makerId} ` +
+            `storedQty=${storedQtyLots.toString()} canonicalQty=${canonicalQtyLots.toString()} ` +
+            `storedPrice=${order.priceTicks.toString()} canonicalPrice=${meta.priceTicks.toString()}`,
+        );
+      }
+      if (storedQtyLots !== canonicalQtyLots) {
+        // The matcher must never repair cross-j book quantity from route state.
+        // Account consensus owns fill progress; book-owner progress events resize
+        // the hot book. If this assertion fires, one of those committed events was
+        // dropped or applied out of order and matching must stop loudly.
+        throw new Error(
+          `ORDERBOOK_CROSS_J_CACHE_MISMATCH: pair=${pairId} order=${orderId} ` +
             `storedQty=${storedQtyLots.toString()} canonicalQty=${canonicalQtyLots.toString()} ` +
             `storedPrice=${order.priceTicks.toString()} canonicalPrice=${meta.priceTicks.toString()}`,
         );
@@ -186,15 +244,15 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
     if (hasQueuedSwapResolveForEntityState(hubState, queuedSwapResolutions, currentAccountId, rawOffer.offerId)) {
       continue;
     }
-    let book = bookCache.get(marketOffer.pairId) || ext.books.get(marketOffer.pairId);
-    if (!book) {
-      book = createEmptyPairBook(
+    let committedBook = bookCache.get(marketOffer.pairId) || ext.books.get(marketOffer.pairId);
+    if (!committedBook) {
+      committedBook = createEmptyPairBook(
         getSwapPairPolicyByBaseQuote(rawOffer.giveTokenId, rawOffer.wantTokenId).bookBucketWidthTicks,
       );
     } else {
-      book = assertCrossBookMatchesCommittedOffers(marketOffer.pairId, book);
+      committedBook = assertCrossBookMatchesCommittedOffers(marketOffer.pairId, committedBook);
     }
-    const existingOrder = getBookOrder(book, currentNamespacedOrderId);
+    const existingOrder = getBookOrder(committedBook, currentNamespacedOrderId);
     if (existingOrder) {
       const storedQtyLots = BigInt(existingOrder.qtyLots);
       if (
@@ -210,13 +268,14 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
             `storedPrice=${existingOrder.priceTicks.toString()} canonicalPrice=${marketOffer.priceTicks.toString()}`,
         );
       }
-      bookCache.set(marketOffer.pairId, book);
+      bookCache.set(marketOffer.pairId, committedBook);
       continue;
     }
 
+    const workingBook = getWorkingBook(marketOffer.pairId, committedBook);
     let result: ReturnType<typeof applyCommand>;
     try {
-      result = applyCommand(book, {
+      result = applyCommand(workingBook, {
         kind: 0,
         ownerId: marketOffer.makerId,
         orderId: currentNamespacedOrderId,
@@ -236,10 +295,6 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
       continue;
     }
 
-    book = result.state;
-    bookCache.set(marketOffer.pairId, book);
-    bookUpdates.push({ pairId: marketOffer.pairId, book });
-
     const rejectEvents = rejectEventsForOrder(result.events, currentNamespacedOrderId);
     const tradeEvents = collectTradeEvents(result.events);
     if (rejectEvents.length > 0 && tradeEvents.length === 0) {
@@ -250,6 +305,25 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
       );
       continue;
     }
+    if (tradeEvents.length === 0 && !dirtySimulationPairs.has(marketOffer.pairId)) {
+      const committedResult = applyCommand(committedBook, {
+        kind: 0,
+        ownerId: marketOffer.makerId,
+        orderId: currentNamespacedOrderId,
+        side: marketOffer.side,
+        tif: rawOffer.timeInForce,
+        postOnly: debugRebuildProjectionOnly,
+        priceTicks: marketOffer.priceTicks,
+        qtyLots: Number(qtyLots),
+        minFillRatio: rawOffer.minFillRatio,
+      }, { suspendedOrderIds: suspendedCrossOrderIds });
+      if (collectTradeEvents(committedResult.events).length > 0) {
+        throw new Error(`ORDERBOOK_CROSS_J_COMMITTED_WRITE_TRADED: order=${currentNamespacedOrderId}`);
+      }
+      committedBook = committedResult.state;
+      bookCache.set(marketOffer.pairId, committedBook);
+      bookUpdates.push({ pairId: marketOffer.pairId, book: committedBook });
+    }
     if (debugRebuildProjectionOnly) {
       if (tradeEvents.length > 0) {
         recordDebugProjectionReject(
@@ -259,6 +333,15 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
         );
       }
       continue;
+    }
+    if (tradeEvents.length > 0) dirtySimulationPairs.add(marketOffer.pairId);
+    for (const event of tradeEvents) {
+      orderbookCrossLog.debug('trade', {
+        maker: shortOrder(event.makerOrderId, 20),
+        taker: shortOrder(event.takerOrderId, 20),
+        qty: event.qty,
+        price: event.price.toString(),
+      });
     }
 
     for (const [namespacedOrderId, fill] of aggregateCrossTradeFills(tradeEvents)) {
@@ -301,6 +384,16 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
     }
     const ack = buildCrossJurisdictionFillAck(accountId, offerId, namespacedOrderId, meta, fill);
     if (!ack) continue;
+    orderbookCrossLog.debug('ack', {
+      account: shortOrder(accountId, 12),
+      offer: shortOrder(offerId, 12),
+      cancel: ack.tx.data.cancelRemainder,
+      ratio: ack.tx.data.cumulativeFillRatio,
+      exact: ack.tx.data.fillNumerator !== undefined && ack.tx.data.fillDenominator !== undefined
+        ? `${ack.tx.data.fillNumerator}/${ack.tx.data.fillDenominator}`
+        : 'none',
+      source: ack.tx.data.cumulativeSourceAmount?.toString(),
+    });
     // Do not remove a partial cross-j maker row. The core book already reduced
     // its lot quantity during matching, and the pending ACK suspends it until
     // accountMachine.swapOffers reflects the ACK. Removing it here would make

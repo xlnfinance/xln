@@ -24,7 +24,17 @@ test('resolveDefaultRecoveryTowerUrls stays disabled by default on localhost', (
     hostname: 'localhost',
     globalUrls: undefined,
     localUrls: undefined,
+    envUrls: undefined,
   })).toEqual([]);
+});
+
+test('resolveDefaultRecoveryTowerUrls enables explicit dev watchtower on localhost', () => {
+  expect(resolveDefaultRecoveryTowerUrls({
+    hostname: 'localhost',
+    globalUrls: undefined,
+    localUrls: undefined,
+    envUrls: 'http://127.0.0.1:9100',
+  })).toEqual(['http://127.0.0.1:9100']);
 });
 
 test('runtime recovery modes keep tower setup out of seed creation defaults', () => {

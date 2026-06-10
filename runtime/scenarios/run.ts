@@ -26,6 +26,7 @@ const SCENARIOS: Record<string, { file: string; fn: string }> = {
   'htlc-4hop': { file: './htlc-4hop', fn: 'htlc4hop' },
   'grid':              { file: './grid',              fn: 'grid' },
   'swap-market':       { file: './swap-market',       fn: 'swapMarket' },
+  'swap-tps':          { file: './swap-tps',          fn: 'swapTps' },
   'multi-sig':         { file: './multi-sig',         fn: 'multiSig' },
   'rapid-fire':        { file: './rapid-fire',        fn: 'rapidFire' },
   'settle-rebalance':  { file: './settle-rebalance',  fn: 'runSettleRebalance' },
@@ -38,6 +39,7 @@ const DEFAULT_PARALLEL_SET = [
   'processbatch',
   'rebalance',
   'settle-rebalance',
+  'swap-tps',
   'lock-ahb',
   'dispute-lifecycle',
 ];
@@ -54,6 +56,7 @@ const ALL_PARALLEL_SET = [
   'htlc-4hop',
   'grid',
   'swap-market',
+  'swap-tps',
   'multi-sig',
   'rapid-fire',
 ];
@@ -62,6 +65,7 @@ const SMOKE_PARALLEL_SET = [
   'processbatch',
   'rebalance',
   'dispute-lifecycle',
+  'swap-tps',
   'multi-sig',
 ];
 

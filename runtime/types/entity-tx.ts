@@ -1,6 +1,6 @@
 import type { JurisdictionEvent, JurisdictionEventData } from './jurisdiction-events';
 import type { AccountInput, CrossJurisdictionSecretRelay, SettlementDiff, SettlementOp } from './account';
-import type { CrossJurisdictionBookAdmissionReceipt, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
+import type { CrossJurisdictionBookAdmissionReceipt, CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
 import type { ProfileUpdateTx } from './profile';
 import type { ProposalAction } from '../types';
 
@@ -143,6 +143,7 @@ export type EntityTx =
         revealedUntilTimestamp: number;
         fullHash: string;
         partialRoot: string;
+        crossJurisdiction?: CrossJurisdictionPullBinding;
         description?: string;
       };
     }
@@ -238,6 +239,7 @@ export type EntityTx =
       type: 'commitCrossJurisdictionSwap';
       data: {
         route: CrossJurisdictionSwapRoute;
+        targetReceipt?: CrossJurisdictionBookAdmissionReceipt;
       };
     }
   | {
@@ -284,18 +286,37 @@ export type EntityTx =
 	        reason?: string;
 	      };
 	    }
-	  | {
-	      type: 'admitCrossJurisdictionBookOrder';
-	      data: {
-	        route: CrossJurisdictionSwapRoute;
-	        receipt: CrossJurisdictionBookAdmissionReceipt;
-	        reason?: string;
-	      };
-	    }
-	  | {
-	      type: 'removeCrossJurisdictionBookOrder';
-	      data: {
-	        orderId: string;
+		  | {
+		      type: 'admitCrossJurisdictionBookOrder';
+		      data: {
+		        route: CrossJurisdictionSwapRoute;
+		        receipt: CrossJurisdictionBookAdmissionReceipt;
+		        reason?: string;
+		      };
+		    }
+		  | {
+		      type: 'applyCrossJurisdictionBookProgress';
+		      data: {
+		        orderId: string;
+		        sourceEntityId: string;
+		        fillSeq: number;
+		        incrementalSourceAmount: bigint;
+		        incrementalTargetAmount: bigint;
+		        cumulativeSourceAmount: bigint;
+		        cumulativeTargetAmount: bigint;
+		        cumulativeFillRatio: number; // Coarse 0-65535 compatibility/dispute ratio.
+		        fillNumerator?: bigint;
+		        fillDenominator?: bigint;
+		        priceImprovementMode?: 'source_savings' | 'target_bonus' | 'none';
+		        priceImprovementAmount?: bigint;
+		        priceImprovementTokenId?: number;
+		        reason?: string;
+		      };
+		    }
+		  | {
+		      type: 'removeCrossJurisdictionBookOrder';
+		      data: {
+		        orderId: string;
 	        sourceEntityId: string;
 	        route?: CrossJurisdictionSwapRoute;
 	        reason?: string;

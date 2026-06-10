@@ -9,7 +9,9 @@ import {
 } from '../orderbook/core';
 import { SWAP_LOT_SCALE } from '../orderbook/types';
 import { processOrderbookCancels, processOrderbookSwaps } from '../entity-tx/handlers/account';
+import { applyCrossJurisdictionBookProgressToState } from '../entity-tx/handlers/cross-j-book-order';
 import { handleSwapResolve } from '../account-tx/handlers/swap-resolve';
+import { createEmptyEnv } from '../runtime';
 import {
   deriveCanonicalSwapFillRatio,
   markWorkingOrderbookOffer,
@@ -2052,6 +2054,274 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(getBookOrder(staleBook, namespacedOrderId)?.qtyLots).toBe(30_000);
   });
 
+  test('does not persist cross-j partial fill quantity before fill ack commits', () => {
+    const lot = SWAP_LOT_SCALE;
+    const sourceTotal = 40_000n * lot;
+    const targetTotal = 100_000_000n * lot;
+    const fillSource = 10_000n * lot;
+    const fillTarget = 25_000_000n * lot;
+    const pairId = 'cross:testnet:2/tron:1';
+    const makerOrderId = 'maker-account:maker-cross-partial-live';
+    let book = createBook({
+      bucketWidthTicks: 10_000n,
+      maxOrders: 10_000,
+      stpPolicy: 1,
+    });
+    book = applyCommand(book, {
+      kind: 0,
+      ownerId: 'maker-entity',
+      orderId: makerOrderId,
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 25_000_000n,
+      qtyLots: 40_000,
+    }).state;
+
+    const makerRoute = {
+      orderId: 'maker-cross-partial-live',
+      bookOwnerEntityId: 'hub-entity',
+      venueId: pairId,
+      makerEntityId: 'maker-entity',
+      hubEntityId: 'hub-entity',
+      source: {
+        jurisdiction: 'testnet',
+        entityId: 'maker-entity',
+        counterpartyEntityId: 'hub-entity',
+        tokenId: 2,
+        amount: sourceTotal,
+      },
+      target: {
+        jurisdiction: 'tron',
+        entityId: 'maker-entity',
+        counterpartyEntityId: 'hub-entity',
+        tokenId: 1,
+        amount: targetTotal,
+      },
+      status: 'resting',
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const takerRoute = {
+      ...makerRoute,
+      orderId: 'taker-cross-partial-live',
+      makerEntityId: 'taker-entity',
+      source: {
+        jurisdiction: 'tron',
+        entityId: 'taker-entity',
+        counterpartyEntityId: 'hub-entity',
+        tokenId: 1,
+        amount: fillTarget,
+      },
+      target: {
+        jurisdiction: 'testnet',
+        entityId: 'taker-entity',
+        counterpartyEntityId: 'hub-entity',
+        tokenId: 2,
+        amount: fillSource,
+      },
+    };
+    const makerOffer = {
+      offerId: 'maker-cross-partial-live',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'maker-entity',
+      accountId: 'maker-account',
+      createdHeight: 1,
+      giveTokenId: 2,
+      giveAmount: sourceTotal,
+      quantizedGive: sourceTotal,
+      wantTokenId: 1,
+      wantAmount: targetTotal,
+      quantizedWant: targetTotal,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 25_000_000n,
+      crossJurisdiction: makerRoute,
+    };
+    const takerOffer = {
+      offerId: 'taker-cross-partial-live',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'taker-entity',
+      accountId: 'taker-account',
+      createdHeight: 1,
+      giveTokenId: 1,
+      giveAmount: fillTarget,
+      quantizedGive: fillTarget,
+      wantTokenId: 2,
+      wantAmount: fillSource,
+      quantizedWant: fillSource,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 25_000_000n,
+      crossJurisdiction: takerRoute,
+    };
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([
+        ['maker-account', { swapOffers: new Map([['maker-cross-partial-live', makerOffer]]) }],
+        ['taker-account', { swapOffers: new Map([['taker-cross-partial-live', takerOffer]]) }],
+      ]),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 1,
+          supportedPairs: [pairId],
+        },
+        books: new Map([[pairId, book]]),
+        pairConfig: new Map(),
+      } as any,
+    } as any;
+
+    const result = processCommittedOrderbookSwaps(entityState, [makerOffer, takerOffer] as any);
+    const makerAck = result.mempoolOps.find(
+      op => op.accountId === 'maker-account' && op.tx.type === 'cross_swap_fill_ack',
+    );
+
+    expect(makerAck?.tx.data.cancelRemainder).toBe(false);
+    expect((makerAck?.tx.data.incrementalSourceAmount ?? 0n) > 0n).toBe(true);
+    expect((makerAck?.tx.data.incrementalSourceAmount ?? sourceTotal) < sourceTotal).toBe(true);
+    expect(getBookOrder(book, makerOrderId)?.qtyLots).toBe(40_000);
+    expect(result.bookUpdates).toEqual([]);
+  });
+
+  test('removes non-working cross-j committed routes before matching new takers', () => {
+    const lot = SWAP_LOT_SCALE;
+    const pairId = 'cross:testnet:2/tron:1';
+    const staleOrderId = 'old-maker:old-cross';
+    let book = createBook({
+      bucketWidthTicks: 10_000n,
+      maxOrders: 10_000,
+      stpPolicy: 1,
+    });
+    book = applyCommand(book, {
+      kind: 0,
+      ownerId: 'old-maker',
+      orderId: staleOrderId,
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 25_000_000n,
+      qtyLots: 1,
+    }).state;
+
+    const staleRoute = {
+      orderId: 'old-cross',
+      bookOwnerEntityId: 'hub-entity',
+      venueId: pairId,
+      makerEntityId: 'old-maker',
+      hubEntityId: 'hub-entity',
+      source: {
+        jurisdiction: 'testnet',
+        entityId: 'old-maker',
+        counterpartyEntityId: 'hub-entity',
+        tokenId: 2,
+        amount: lot,
+      },
+      target: {
+        jurisdiction: 'tron',
+        entityId: 'old-maker',
+        counterpartyEntityId: 'hub-entity',
+        tokenId: 1,
+        amount: 2_500n * lot,
+      },
+      status: 'source_claimed',
+      createdAt: 1,
+      updatedAt: 2,
+    };
+    const takerRoute = {
+      ...staleRoute,
+      orderId: 'new-taker',
+      makerEntityId: 'new-taker',
+      source: {
+        jurisdiction: 'tron',
+        entityId: 'new-taker',
+        counterpartyEntityId: 'hub-entity',
+        tokenId: 1,
+        amount: 2_500n * lot,
+      },
+      target: {
+        jurisdiction: 'testnet',
+        entityId: 'new-taker',
+        counterpartyEntityId: 'hub-entity',
+        tokenId: 2,
+        amount: lot,
+      },
+      status: 'resting',
+    };
+    const takerOffer = {
+      offerId: 'new-taker',
+      makerIsLeft: false,
+      fromEntity: 'hub-entity',
+      toEntity: 'new-taker',
+      accountId: 'new-taker-account',
+      createdHeight: 2,
+      giveTokenId: 1,
+      giveAmount: 2_500n * lot,
+      quantizedGive: 2_500n * lot,
+      wantTokenId: 2,
+      wantAmount: lot,
+      quantizedWant: lot,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 25_000_000n,
+      crossJurisdiction: takerRoute,
+    };
+    const entityState = {
+      entityId: 'hub-entity',
+      accounts: new Map([['new-taker-account', { swapOffers: new Map([['new-taker', takerOffer]]) }]]),
+      crossJurisdictionSwaps: new Map([['old-cross', staleRoute]]),
+      crossJurisdictionBookAdmissions: new Map([
+        [
+          'old-maker:old-cross',
+          {
+            orderId: 'old-cross',
+            routeHash: 'hash',
+            sourceEntityId: 'old-maker',
+            bookOwnerEntityId: 'hub-entity',
+            status: 'admitted',
+            route: { ...staleRoute, status: 'resting' },
+            updatedAt: 1,
+          },
+        ],
+      ]),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 1,
+          supportedPairs: [pairId],
+        },
+        books: new Map([[pairId, book]]),
+        pairConfig: new Map(),
+      } as any,
+    } as any;
+
+    const result = processCommittedOrderbookSwaps(entityState, [takerOffer] as any);
+
+    expect(result.crossJurisdictionFills).toEqual([]);
+    expect(result.mempoolOps).toEqual([]);
+    expect(getBookOrder(book, staleOrderId)).toBeNull();
+  });
+
   test('validates a remote cross-j book order from admitted route without refreshing it', () => {
     const lot = SWAP_LOT_SCALE;
     const sourceTotal = 40_000n * lot;
@@ -2150,6 +2420,116 @@ describe('orderbook matching fallback execution mapping', () => {
 
     expect(result.bookUpdates).toEqual([]);
     expect(getBookOrder(staleBook, namespacedOrderId)?.qtyLots).toBe(30_000);
+  });
+
+  test('applies committed cross-j book progress before matcher sees the next snapshot', () => {
+    const env = createEmptyEnv('cross-book-progress');
+    env.timestamp = 2;
+    const lot = SWAP_LOT_SCALE;
+    const sourceTotal = 40_000n * lot;
+    const targetTotal = 100_000_000n * lot;
+    const filledSourceAmount = 10_000n * lot;
+    const filledTargetAmount = 25_000_000n * lot;
+    const pairId = 'cross:testnet:2/tron:1';
+    const namespacedOrderId = 'maker-entity:maker-cross-progress';
+    let book = createBook({
+      bucketWidthTicks: 10_000n,
+      maxOrders: 10_000,
+      stpPolicy: 1,
+    });
+    book = applyCommand(book, {
+      kind: 0,
+      ownerId: 'maker-entity',
+      orderId: namespacedOrderId,
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 25_000_000n,
+      qtyLots: 40_000,
+    }).state;
+
+    const route = {
+      orderId: 'maker-cross-progress',
+      bookOwnerEntityId: 'hub-entity',
+      venueId: pairId,
+      makerEntityId: 'maker-entity',
+      hubEntityId: 'hub-entity',
+      source: {
+        jurisdiction: 'testnet',
+        entityId: 'maker-entity',
+        counterpartyEntityId: 'hub-entity',
+        tokenId: 2,
+        amount: sourceTotal,
+      },
+      target: {
+        jurisdiction: 'tron',
+        entityId: 'maker-entity',
+        counterpartyEntityId: 'hub-entity',
+        tokenId: 1,
+        amount: targetTotal,
+      },
+      status: 'resting',
+      createdAt: 1,
+      updatedAt: 1,
+    };
+    const entityState = {
+      entityId: 'hub-entity',
+      timestamp: 2,
+      accounts: new Map(),
+      crossJurisdictionBookAdmissions: new Map([
+        [
+          'maker-entity:maker-cross-progress',
+          {
+            orderId: 'maker-cross-progress',
+            routeHash: 'hash',
+            sourceEntityId: 'maker-entity',
+            bookOwnerEntityId: 'hub-entity',
+            status: 'admitted',
+            route,
+            updatedAt: 1,
+          },
+        ],
+      ]),
+      orderbookExt: {
+        hubProfile: {
+          entityId: 'hub-entity',
+          name: 'Hub',
+          minTradeSize: 0n,
+          spreadDistribution: {
+            makerBps: 0,
+            takerBps: 10_000,
+            hubBps: 0,
+            makerReferrerBps: 0,
+            takerReferrerBps: 0,
+          },
+          referenceTokenId: 1,
+          supportedPairs: [pairId],
+        },
+        books: new Map([[pairId, book]]),
+        pairConfig: new Map(),
+      } as any,
+    } as any;
+
+    applyCrossJurisdictionBookProgressToState(env, entityState, {
+      orderId: 'maker-cross-progress',
+      sourceEntityId: 'maker-entity',
+      fillSeq: 1,
+      incrementalSourceAmount: filledSourceAmount,
+      incrementalTargetAmount: filledTargetAmount,
+      cumulativeSourceAmount: filledSourceAmount,
+      cumulativeTargetAmount: filledTargetAmount,
+      cumulativeFillRatio: 16_384,
+      fillNumerator: 1n,
+      fillDenominator: 4n,
+      reason: 'test_committed_ack',
+    });
+
+    const admission = entityState.crossJurisdictionBookAdmissions.get('maker-entity:maker-cross-progress');
+    expect(admission?.route.status).toBe('partially_filled');
+    expect(admission?.route.filledSourceAmount).toBe(filledSourceAmount);
+    expect(admission?.route.filledTargetAmount).toBe(filledTargetAmount);
+    expect(getBookOrder(book, namespacedOrderId)?.qtyLots).toBe(30_000);
+    expect(() => processCommittedOrderbookSwaps(entityState, [] as any)).not.toThrow();
   });
 
   test('suspends a cross-j order while its partial fill ack is pending', () => {

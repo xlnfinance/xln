@@ -1,4 +1,4 @@
-import type { CrossJurisdictionSwapRoute } from './cross-jurisdiction';
+import type { CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
 import type { HankoString } from './hanko';
 import type { JurisdictionEvent } from './jurisdiction-events';
 import type { RebalancePolicy, RebalanceQuote, RebalanceRequestFeeState } from './rebalance';
@@ -55,6 +55,7 @@ export interface PullCommitment {
   revealedUntilTimestamp: number;
   fullHash: string;
   partialRoot: string;
+  crossJurisdiction?: CrossJurisdictionPullBinding;
   createdHeight: number;
   createdTimestamp: number;
 }
@@ -627,11 +628,12 @@ export type AccountTx =
         pullId: string;
         tokenId: number;
         amount: bigint;
-        revealedUntilTimestamp: number;
-        fullHash: string;
-        partialRoot: string;
-      };
-    }
+	        revealedUntilTimestamp: number;
+	        fullHash: string;
+	        partialRoot: string;
+	        crossJurisdiction?: CrossJurisdictionPullBinding;
+	      };
+	    }
   | {
       type: 'pull_resolve';
       data: {

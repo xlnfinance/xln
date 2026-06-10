@@ -134,6 +134,12 @@ export async function proposeAccountFrame(
     );
 
     if (!result.success) {
+      if (accountTx.type === 'cross_swap_fill_ack') {
+        throw new Error(
+          `CROSS_J_FILL_ACK_PROPOSAL_FAILED: offer=${accountTx.data.offerId} ` +
+            `seq=${accountTx.data.fillSeq} error=${result.error || 'validation_failed'}`,
+        );
+      }
       txsToRemove.push(accountTx);
       accountLog.debug('tx.skipped', { type: accountTx.type, error: result.error || 'unknown' });
 

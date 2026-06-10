@@ -6,7 +6,6 @@
   import {
     activeRuntime,
     buildRuntimeRecoveryConfigForMode,
-    resolveDefaultRecoveryTowerUrls,
     vaultOperations,
     type RecoveryTowerConfig,
     type RecoveryTowerSetupMode,
@@ -27,6 +26,15 @@
   import { CLASSIC_UI_STYLE, DEFAULT_UI_STYLE, isUiStyleEqual } from '$lib/utils/ui-style';
   import { getBarColors } from '$lib/utils/bar-colors';
   import { requireSignerIdForEntity } from '$lib/utils/entityReplica';
+  import {
+    getManualRecoveryTowers,
+    isOfficialRecoveryTower,
+    normalizeRecoveryDraft,
+    normalizeRecoveryUrl,
+    normalizeTowerMode,
+    resolveOfficialRecoveryTowerUrl,
+    type RecoveryServiceMode,
+  } from '$lib/utils/recoverySettings';
   import { Check, ChevronDown, ChevronUp, Copy, Download, Trash2, Upload, X } from 'lucide-svelte';
   import AddJMachine from '$lib/components/Jurisdiction/AddJMachine.svelte';
   import FormationPanel from '$lib/components/Entity/FormationPanel.svelte';
@@ -81,7 +89,7 @@
   let recoveryTowerDraft: RecoveryTowerConfig[] = [];
   let recoveryDraftLoadedFor = '';
   let recoveryManualUrl = '';
-  let recoveryManualKind: 'blind_backup' | 'delayed_last_resort' = 'blind_backup';
+  let recoveryManualKind: RecoveryServiceMode = 'blind_backup';
   let recoverySaving = false;
   let recoveryMessage = '';
   let recoveryMessageTone: 'neutral' | 'error' = 'neutral';
@@ -278,71 +286,6 @@
     }
   }
 
-  function resolveOfficialRecoveryTowerUrl(): string | null {
-    if (typeof window === 'undefined') return 'https://xln.finance';
-    const w = window as Window & { __XLN_WATCHTOWERS__?: unknown };
-    let localUrls: string | null = null;
-    try {
-      localUrls = localStorage.getItem('xln-watchtower-urls');
-    } catch {
-      localUrls = null;
-    }
-    return resolveDefaultRecoveryTowerUrls({
-      hostname: window.location.hostname,
-      globalUrls: w.__XLN_WATCHTOWERS__,
-      localUrls,
-    })[0] || null;
-  }
-
-  function normalizeRecoveryUrl(value: string): string {
-    const trimmed = value.trim().replace(/\/+$/, '');
-    if (!trimmed) throw new Error('Service URL is required');
-    const parsed = new URL(trimmed);
-    if (parsed.protocol !== 'https:' && parsed.protocol !== 'http:') {
-      throw new Error('Service URL must start with http:// or https://');
-    }
-    return parsed.toString().replace(/\/+$/, '');
-  }
-
-  function normalizeTowerMode(mode: unknown): 'blind_backup' | 'delayed_last_resort' {
-    return mode === 'delayed_last_resort' || mode === 'active_watchtower'
-      ? 'delayed_last_resort'
-      : 'blind_backup';
-  }
-
-  function normalizeRecoveryDraft(towers: RecoveryTowerConfig[] | undefined): RecoveryTowerConfig[] {
-    const deduped = new Map<string, RecoveryTowerConfig>();
-    for (const tower of towers || []) {
-      try {
-        const url = normalizeRecoveryUrl(tower.url);
-        if (tower.enabled === false) continue;
-        deduped.set(url, {
-          ...tower,
-          id: tower.id || `manual-${deduped.size + 1}`,
-          url,
-          towerMode: normalizeTowerMode(tower.towerMode),
-          enabled: true,
-        });
-      } catch {
-        // Ignore malformed persisted service URLs in the settings draft.
-      }
-    }
-    return [...deduped.values()];
-  }
-
-  function isOfficialRecoveryTower(tower: RecoveryTowerConfig, officialUrl: string | null): boolean {
-    if (!officialUrl) return false;
-    try {
-      return normalizeRecoveryUrl(tower.url) === normalizeRecoveryUrl(officialUrl);
-    } catch {
-      return false;
-    }
-  }
-
-  function getManualRecoveryTowers(towers: RecoveryTowerConfig[], officialUrl: string | null): RecoveryTowerConfig[] {
-    return normalizeRecoveryDraft(towers).filter((tower) => !isOfficialRecoveryTower(tower, officialUrl));
-  }
-
   function inferRecoveryMode(runtime: Runtime | null | undefined): RecoveryTowerSetupMode {
     const officialUrl = resolveOfficialRecoveryTowerUrl();
     const towers = normalizeRecoveryDraft(runtime?.recovery?.towers);
@@ -388,7 +331,7 @@
     try {
       const url = normalizeRecoveryUrl(recoveryManualUrl);
       const nextTower: RecoveryTowerConfig = {
-        id: `manual-${Date.now()}`,
+        id: `manual-${recoveryTowerDraft.length + 1}`,
         url,
         towerMode: recoveryManualKind,
         enabled: true,

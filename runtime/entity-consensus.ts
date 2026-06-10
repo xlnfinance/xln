@@ -1092,6 +1092,12 @@ export const applyEntityFrame = async (
       for (const { accountId, tx } of mempoolOps) {
         const account = currentEntityState.accounts.get(accountId);
         if (account) {
+          if (tx.type === 'cross_swap_fill_ack' && !account.swapOffers?.has(tx.data.offerId)) {
+            throw new Error(
+              `CROSS_J_FILL_ACK_ACCOUNT_OFFER_MISSING: account=${accountId} offer=${tx.data.offerId} ` +
+                `entity=${currentEntityState.entityId}`,
+            );
+          }
           if (
             tx.type === 'swap_cancel_request' &&
             account.swapOffers?.get(tx.data.offerId)?.crossJurisdiction &&
@@ -1126,6 +1132,10 @@ export const applyEntityFrame = async (
               markStorageEntityDirty(env, currentEntityState.entityId);
             }
           }
+        } else if (tx.type === 'cross_swap_fill_ack') {
+          throw new Error(
+            `CROSS_J_FILL_ACK_ACCOUNT_MISSING: account=${accountId} offer=${tx.data.offerId} entity=${currentEntityState.entityId}`,
+          );
         } else {
           entityLog.warn('mempool_op.account_missing', { account: shortId(accountId, 8), tx: tx.type });
         }
@@ -1306,33 +1316,39 @@ export const applyEntityFrame = async (
         continue;
       }
 
-      if (account) {
-        if (!queueUniqueAccountMempoolTx(account, tx)) {
+      if (tx.type === 'cross_swap_fill_ack') {
+        const localOwnsOffer = Boolean(account?.swapOffers?.has(tx.data.offerId));
+        if (account && localOwnsOffer) {
+          if (!queueUniqueAccountMempoolTx(account, tx)) {
+            continue;
+          }
+          proposableAccounts.add(accountId);
+          markStorageAccountDirty(env, currentEntityState.entityId, accountId);
+          markStorageEntityDirty(env, currentEntityState.entityId);
+          entityLog.debug('crossj.local_fill_ack_queued', {
+            account: shortId(accountId, 8),
+            offer: shortOrder(tx.data.offerId, 8),
+            ratio: tx.data.cumulativeFillRatio,
+            cancel: tx.data.cancelRemainder,
+          });
+          entityLog.debug('orderbook.account_tx_queued', { account: shortId(accountId, 8), tx: tx.type });
           continue;
         }
-        proposableAccounts.add(accountId);
-        markStorageAccountDirty(env, currentEntityState.entityId, accountId);
-        markStorageEntityDirty(env, currentEntityState.entityId);
-        entityLog.debug('orderbook.account_tx_queued', { account: shortId(accountId, 8), tx: tx.type });
-      } else if (tx.type === 'cross_swap_fill_ack') {
+
         const ownerState = findSwapOfferOwnerState(env, currentEntityState, accountId, tx.data.offerId);
         const firstValidator = ownerState?.config?.validators?.[0];
         if (!ownerState || !firstValidator) {
-          entityLog.warn('crossj.sibling_fill_notice_unroutable', {
-            offer: shortOrder(tx.data.offerId, 8),
-            account: shortId(accountId, 8),
-          });
-          continue;
+          throw new Error(
+            `CROSS_J_FILL_ACK_OWNER_MISSING: account=${accountId} offer=${tx.data.offerId} current=${currentEntityState.entityId}`,
+          );
         }
         const fillSeq = Math.floor(Number(tx.data.fillSeq ?? 0));
         const cumulativeFillRatio = Math.floor(Number(tx.data.cumulativeFillRatio ?? 0));
         if (fillSeq <= 0 || cumulativeFillRatio <= 0) {
-          entityLog.warn('crossj.sibling_fill_notice_invalid', {
-            offer: shortOrder(tx.data.offerId, 8),
-            fillSeq,
-            cumulativeFillRatio,
-          });
-          continue;
+          throw new Error(
+            `CROSS_J_FILL_ACK_INVALID_NOTICE: account=${accountId} offer=${tx.data.offerId} ` +
+              `fillSeq=${fillSeq} ratio=${cumulativeFillRatio}`,
+          );
         }
         allOutputs.push({
           entityId: ownerState.entityId,
@@ -1368,6 +1384,17 @@ export const applyEntityFrame = async (
           account: shortId(accountId, 8),
           offer: shortOrder(tx.data.offerId, 8),
         });
+        continue;
+      }
+
+      if (account) {
+        if (!queueUniqueAccountMempoolTx(account, tx)) {
+          continue;
+        }
+        proposableAccounts.add(accountId);
+        markStorageAccountDirty(env, currentEntityState.entityId, accountId);
+        markStorageEntityDirty(env, currentEntityState.entityId);
+        entityLog.debug('orderbook.account_tx_queued', { account: shortId(accountId, 8), tx: tx.type });
       }
     }
 

@@ -74,10 +74,12 @@ async function waitForBrainvaultCreateForm(page: Page): Promise<void> {
 }
 
 async function expectPostCreateBrainvaultRecovery(page: Page): Promise<void> {
+  await expect(page.getByRole('heading', { name: /Configure account/i })).toBeVisible({ timeout: 30_000 });
   const recoveryDetails = page.getByTestId('brainvault-onboarding-recovery');
   await expect(recoveryDetails).toBeVisible({ timeout: 30_000 });
   await expect(page.getByTestId('brainvault-onboarding-recovery-toggle')).toContainText(/BrainVault recovery/i);
-  await expect(page.getByTestId('brainvault-continue-copy')).toContainText(/continue creating the XLN account/i);
+  await expect(page.getByTestId('brainvault-continue-copy')).toContainText(/account settings below/i);
+  await expect(page.getByRole('heading', { name: /Recovery services/i })).toBeVisible();
   await page.getByTestId('brainvault-onboarding-recovery-toggle').click();
   await expect(page.getByRole('button', { name: /Download sheet/i })).toBeVisible({ timeout: 5_000 });
   await expect(page.getByRole('link', { name: /Read safety notes/i })).toBeVisible({ timeout: 5_000 });
