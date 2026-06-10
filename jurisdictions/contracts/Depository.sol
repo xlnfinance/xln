@@ -168,7 +168,7 @@ contract Depository is ReentrancyGuardLite {
   mapping(bytes32 => uint256) public tokenToId;
 
   constructor(address _entityProvider) {
-    require(_entityProvider != address(0), "EntityProvider cannot be zero address");
+    if (_entityProvider == address(0)) revert E7();
     entityProvider = _entityProvider;
     admin = msg.sender;
     _tokens.push(TokenMetadata({ contractAddress: address(0), externalTokenId: 0, tokenType: TypeERC20 }));
@@ -183,7 +183,7 @@ contract Depository is ReentrancyGuardLite {
   }
 
   function getTokenMetadata(uint256 tokenId) external view returns (address contractAddress, uint96 externalTokenId, uint8 tokenType) {
-    require(tokenId < _tokens.length, "!tok");
+    if (tokenId >= _tokens.length) revert E7();
     TokenMetadata memory meta = _tokens[tokenId];
     return (meta.contractAddress, meta.externalTokenId, meta.tokenType);
   }
@@ -360,6 +360,22 @@ contract Depository is ReentrancyGuardLite {
 
 
   function _assertBatchBounds(Batch memory batch) private pure {
+    // Runtime already chunks J-batches at 50 top-level operations. Mirroring
+    // that cap on-chain keeps authorized-but-gas-hostile batches from relying
+    // only on per-array limits that are individually valid but too large in sum.
+    if (
+      batch.flashloans.length +
+      batch.reserveToReserve.length +
+      batch.reserveToCollateral.length +
+      batch.collateralToReserve.length +
+      batch.settlements.length +
+      batch.disputeStarts.length +
+      batch.disputeFinalizations.length +
+      batch.externalTokenToReserve.length +
+      batch.reserveToExternalToken.length +
+      batch.revealSecrets.length > 50
+    ) revert E10();
+
     if (batch.flashloans.length > MAX_BATCH_FLASHLOANS) revert E10();
     if (batch.reserveToReserve.length > MAX_BATCH_RESERVE_TO_RESERVE) revert E10();
     if (batch.reserveToCollateral.length > MAX_BATCH_RESERVE_TO_COLLATERAL) revert E10();
@@ -597,7 +613,7 @@ contract Depository is ReentrancyGuardLite {
 
   function unpackTokenReference(bytes32 packed) public view returns (address contractAddress, uint96 externalTokenId, uint8 tokenType) {
     uint256 tokenId = tokenToId[packed];
-    require(tokenId != 0, "!tok");
+    if (tokenId == 0) revert E7();
     TokenMetadata memory meta = _tokens[tokenId];
     return (meta.contractAddress, meta.externalTokenId, meta.tokenType);
   }
@@ -861,7 +877,7 @@ contract Depository is ReentrancyGuardLite {
       // NONCE CHECK: signedNonce > storedNonce (strictly greater)
       if (params.finalNonce <= _accounts[acct_key].nonce) revert E2();
 
-      require(params.sig.length > 0, "Signature required for cooperative finalize");
+      if (params.sig.length == 0) revert E4();
       if (!Account.verifyCooperativeProofHanko(
         entityProvider,
         address(this),
@@ -1185,5 +1201,5 @@ contract Depository is ReentrancyGuardLite {
     // _reserves[entity][tid] += value; // REMOVED
     return this.onERC1155Received.selector;
   }
-  function onERC1155BatchReceived(address,address,uint256[] calldata,uint256[] calldata,bytes calldata) external pure returns (bytes4) { revert("!batch"); }
+  function onERC1155BatchReceived(address,address,uint256[] calldata,uint256[] calldata,bytes calldata) external pure returns (bytes4) { revert E7(); }
 }

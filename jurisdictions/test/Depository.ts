@@ -794,6 +794,31 @@ describe("Depository", function () {
     expect(await depository._reserves(recipient, tokenId)).to.equal(0n);
   });
 
+  it("rejects batches over the aggregate 50-op cap even when each array is under its own cap", async function () {
+    const { depository } = await loadFixture(deployFixture);
+
+    const actor = lazyActor(user0, 0);
+    const recipient = addressEntityId(user1.address);
+    const tokenId = 1n;
+    await depository.mintToReserve(actor.entityId, tokenId, 1_000n);
+
+    const transfers = Array.from({ length: 51 }, () => ({
+      receivingEntity: recipient,
+      tokenId,
+      amount: 1n,
+    }));
+    const batch = emptyBatch({ reserveToReserve: transfers });
+    const signed = await signDepositoryBatch(depository, actor.entityId, actor.privateKey, batch);
+
+    await expect(
+      depository.connect(actor.signer).processBatch(signed.encodedBatch, signed.hankoData, signed.nonce)
+    ).to.be.revertedWithCustomError(depository, "E10");
+
+    expect(await depository.entityNonces(actor.entityId)).to.equal(0n);
+    expect(await depository._reserves(actor.entityId, tokenId)).to.equal(1_000n);
+    expect(await depository._reserves(recipient, tokenId)).to.equal(0n);
+  });
+
   it("starts a dispute and finalizes a newer counter-dispute proof", async function () {
     const { depository } = await loadFixture(deployFixture);
 

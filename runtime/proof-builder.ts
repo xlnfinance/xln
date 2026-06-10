@@ -139,8 +139,10 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
   for (const [lockId, lock] of sortedLocks) {
     const deltaIndex = tokenIds.indexOf(lock.tokenId);
     if (deltaIndex === -1) {
-      console.warn(`[ProofBuilder] Lock ${lockId} references unknown tokenId ${lock.tokenId}`);
-      continue;
+      // A live commitment without a delta slot is signed-state corruption. Do
+      // not omit it from ProofBody: that would underclaim on-chain and make the
+      // signed hash look valid while silently dropping money-affecting logic.
+      throw new Error(`PROOF_BODY_LOCK_TOKEN_MISSING:${lockId}:${lock.tokenId}`);
     }
 
     // Amount sign convention:
@@ -170,8 +172,11 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
     const subDeltaIndex = tokenIds.indexOf(offer.wantTokenId);
 
     if (addDeltaIndex === -1 || subDeltaIndex === -1) {
-      console.warn(`[ProofBuilder] Swap ${offerId} references unknown tokenId`);
-      continue;
+      // Same invariant as HTLCs: every resting same-j swap must have both token
+      // deltas in the proof. Missing one side means upstream state is corrupt.
+      throw new Error(
+        `PROOF_BODY_SWAP_TOKEN_MISSING:${offerId}:give=${offer.giveTokenId}:want=${offer.wantTokenId}`,
+      );
     }
 
     swaps.push({
@@ -187,8 +192,9 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
   for (const [pullId, pull] of sortedPulls) {
     const deltaIndex = tokenIds.indexOf(pull.tokenId);
     if (deltaIndex === -1) {
-      console.warn(`[ProofBuilder] Pull ${pullId} references unknown tokenId ${pull.tokenId}`);
-      continue;
+      // Pulls include hash-ladder claims. Skipping a missing token would let a
+      // dispute proof omit the very claim that protects cross-j/salvage safety.
+      throw new Error(`PROOF_BODY_PULL_TOKEN_MISSING:${pullId}:${pull.tokenId}`);
     }
     pulls.push({
       deltaIndex,
