@@ -7,8 +7,7 @@ import {
   storeDisputeArgumentSnapshot,
 } from '../dispute-arguments';
 import { buildAccountProofBody, setDeltaTransformerAddress } from '../proof-builder';
-import { asOfferId, swapKey } from '../swap-keys';
-import type { AccountMachine, EntityState, SwapOffer } from '../types';
+import type { AccountMachine, AccountTx, EntityState, SwapOffer } from '../types';
 
 const DELTA_TRANSFORMER = '0x1111111111111111111111111111111111111111';
 
@@ -71,6 +70,7 @@ function accountWithSwaps(swaps: Array<[string, SwapOffer]>): AccountMachine {
 }
 
 function decodeFirstRatio(wrapped: string): number {
+  if (wrapped === '0x') return 0;
   const abi = ethers.AbiCoder.defaultAbiCoder();
   const [items] = abi.decode(['bytes[]'], wrapped) as unknown as [string[]];
   const [decoded] = abi.decode(
@@ -96,13 +96,11 @@ describe('dispute argument snapshots', () => {
     account.swapOffers.clear();
     account.swapOffers.set('unrelated', offer('unrelated', true, 1, 2));
 
-    const state = {
-      entityId: 'left',
-      pendingSwapFillRatios: new Map([
-        [swapKey('right', asOfferId('a-left-owned')), 111],
-        [swapKey('right', asOfferId('z-right-owned')), 222],
-      ]),
-    } as unknown as EntityState;
+    account.mempool.push(
+      { type: 'swap_resolve', data: { offerId: 'a-left-owned', fillRatio: 111, cancelRemainder: false } } as AccountTx,
+      { type: 'swap_resolve', data: { offerId: 'z-right-owned', fillRatio: 222, cancelRemainder: false } } as AccountTx,
+    );
+    const state = { entityId: 'left' } as unknown as EntityState;
 
     const args = buildDisputeArgumentsForSnapshot(account, state, 'right', proof.proofBodyHash, {
       secretsSide: 'left',
@@ -110,5 +108,82 @@ describe('dispute argument snapshots', () => {
 
     expect(decodeFirstRatio(args.leftArguments)).toBe(222);
     expect(decodeFirstRatio(args.rightArguments)).toBe(111);
+  });
+
+  test('does not reapply a pending swap fill to the proof body that already contains it', () => {
+    setDeltaTransformerAddress(DELTA_TRANSFORMER);
+    const secondFill = {
+      type: 'swap_resolve',
+      data: {
+        offerId: 'remaining-left-owned',
+        fillRatio: 32767,
+        fillNumerator: 1n,
+        fillDenominator: 2n,
+        executionGiveAmount: 25n,
+        executionWantAmount: 50n,
+        cancelRemainder: false,
+      },
+    } as AccountTx;
+
+    const afterFirstFill = accountWithSwaps([
+      ['remaining-left-owned', {
+        ...offer('remaining-left-owned', true, 1, 2),
+        giveAmount: 50n,
+        wantAmount: 100n,
+        quantizedGive: 50n,
+        quantizedWant: 100n,
+      }],
+    ]);
+    afterFirstFill.pendingFrame = {
+      height: 2,
+      timestamp: 20,
+      jHeight: 0,
+      accountTxs: [secondFill],
+      prevFrameHash: 'after-first',
+      stateHash: 'pending-second',
+      byLeft: false,
+      deltas: [],
+    };
+    const initialProof = buildAccountProofBody(afterFirstFill);
+    storeDisputeArgumentSnapshot(
+      afterFirstFill,
+      captureDisputeArgumentSnapshot(afterFirstFill, initialProof.proofBodyHash, 1, initialProof.proofBodyStruct),
+    );
+
+    const initialArgs = buildDisputeArgumentsForSnapshot(
+      afterFirstFill,
+      { entityId: 'left' } as unknown as EntityState,
+      'right',
+      initialProof.proofBodyHash,
+      { secretsSide: 'left' },
+    );
+    expect(decodeFirstRatio(initialArgs.rightArguments)).toBe(32767);
+
+    const afterSecondFill = accountWithSwaps([
+      ['remaining-left-owned', {
+        ...offer('remaining-left-owned', true, 1, 2),
+        giveAmount: 25n,
+        wantAmount: 50n,
+        quantizedGive: 25n,
+        quantizedWant: 50n,
+      }],
+    ]);
+    afterSecondFill.pendingFrame = structuredClone(afterFirstFill.pendingFrame);
+    const incrementedProof = buildAccountProofBody(afterSecondFill);
+    storeDisputeArgumentSnapshot(
+      afterSecondFill,
+      captureDisputeArgumentSnapshot(afterSecondFill, incrementedProof.proofBodyHash, 2, incrementedProof.proofBodyStruct, {
+        appliedAccountTxs: [secondFill],
+      }),
+    );
+
+    const incrementedArgs = buildDisputeArgumentsForSnapshot(
+      afterSecondFill,
+      { entityId: 'left' } as unknown as EntityState,
+      'right',
+      incrementedProof.proofBodyHash,
+      { secretsSide: 'left' },
+    );
+    expect(incrementedArgs.rightArguments).toBe('0x');
   });
 });

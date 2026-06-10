@@ -23,6 +23,7 @@ import { buildCrossJurisdictionPullBinding } from '../cross-jurisdiction';
 import { applyEntityTx } from '../entity-tx/apply';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity-tx/handlers/account-cross-j-followups';
 import { handleAdmitCrossJurisdictionBookOrderEntityTx } from '../entity-tx/handlers/cross-j-book-order';
+import { handleDisputeStart } from '../entity-tx/handlers/dispute';
 import { handleJAbortSentBatch } from '../entity-tx/handlers/j-abort-sent-batch';
 import { handleJRebroadcast } from '../entity-tx/handlers/j-rebroadcast';
 import { handleJEvent } from '../entity-tx/j-events';
@@ -2321,5 +2322,60 @@ describe('audit fail-fast regressions', () => {
     const removed = await applyEntityTx(env, targetState, removal!.entityTxs![0]!);
     const nextBook = removed.newState.orderbookExt?.books.get(pairId);
     expect(nextBook ? getBookOrder(nextBook, namespacedOrderId) : null).toBeNull();
+  });
+
+  test('disputeStart removes same-account orderbook rows before freezing the account', async () => {
+    const env = createEmptyEnv('dispute-start-orderbook-freeze');
+    const hubId = `0x${'90'.repeat(32)}`;
+    const userId = `0x${'91'.repeat(32)}`;
+    const offerId = 'dispute-freeze-offer';
+    const pairId = '1/2';
+    const namespacedOrderId = `${userId}:${offerId}`;
+    const hubState = makeEntityState(hubId);
+    hubState.config = makeSingleSignerConfigFor('hub-signer');
+    const account = makeProposalAccount([], hubId, userId);
+    account.swapOffers.set(offerId, {
+      offerId,
+      giveTokenId: 1,
+      giveAmount: 1_000n,
+      wantTokenId: 2,
+      wantAmount: 2_000n,
+      makerIsLeft: false,
+      minFillRatio: 0,
+      createdHeight: 1,
+      quantizedGive: 1_000n,
+      quantizedWant: 2_000n,
+      priceTicks: 2_000n,
+    });
+    hubState.accounts.set(userId, account);
+    let book = createBook({ bucketWidthTicks: 1n, maxOrders: 10, stpPolicy: 1 });
+    book = applyCommand(book, {
+      kind: 0,
+      ownerId: userId,
+      orderId: namespacedOrderId,
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 2_000n,
+      qtyLots: 1,
+    }).state;
+    hubState.orderbookExt = {
+      books: new Map([[pairId, book]]),
+      orderPairs: new Map([[namespacedOrderId, [pairId]]]),
+      referrals: new Map(),
+    } as unknown as OrderbookExtState;
+
+    const result = await handleDisputeStart(
+      hubState,
+      {
+        type: 'disputeStart',
+        data: { counterpartyEntityId: userId },
+      },
+      env,
+    );
+
+    const nextBook = result.newState.orderbookExt?.books.get(pairId);
+    expect(nextBook ? getBookOrder(nextBook, namespacedOrderId) : null).toBeNull();
+    expect(result.newState.messages.some((msg) => msg.includes('Dispute removed 1 local orderbook row'))).toBe(true);
   });
 });

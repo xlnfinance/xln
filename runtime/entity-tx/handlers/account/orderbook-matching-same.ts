@@ -192,6 +192,24 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
   const assertBookMatchesKnownAccountOffers = (pairId: string, book: BookState): BookState => {
     for (const order of [...book.orders.values()]) {
       const orderId = order.orderId;
+      const { accountId } = parseNamespacedOrderId(orderId, 'ORDERBOOK_MALFORMED_BOOK_ORDER');
+      const account = hubState.accounts.get(accountId);
+      if ((account?.status ?? 'active') !== 'active') {
+        const removed = applyCommand(book, {
+          kind: 1,
+          ownerId: order.ownerId,
+          orderId,
+        }).state;
+        bookCache.set(pairId, removed);
+        bookUpdates.push({ pairId, book: removed });
+        orderbookSameLog.debug('book.remove_disputed_account', {
+          pair: pairId,
+          order: shortOrder(orderId, 20),
+          account: shortId(accountId, 8),
+        });
+        book = removed;
+        continue;
+      }
       const meta = orderbookOfferMeta.get(orderId) ?? buildLiveOfferMeta(orderId);
       if (!meta) {
         // A resting same-chain book row is only valid while accountMachine.swapOffers has this offer.

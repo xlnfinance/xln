@@ -1,7 +1,7 @@
 import { ethers } from 'ethers';
-import type { AccountMachine, EntityState } from './types';
+import type { AccountMachine, AccountTx, EntityState } from './types';
 import type { ProofBodyStruct } from '../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
-import { asOfferId, swapKey, type OfferId } from './swap-keys';
+import { asOfferId, type OfferId } from './swap-keys';
 import { sortTransformerEntries } from './transformer-ordering';
 import { decodeHashLadderBinary } from './hashladder';
 
@@ -23,6 +23,7 @@ export type DisputeArgumentSnapshot = {
   side: DisputeArgumentSide;
   proofBodyStruct: ProofBodyStruct;
   plan: DisputeArgumentPlan;
+  appliedSwapFillFingerprints?: string[];
 };
 
 type PullArgumentBuckets = { binaries: string[] };
@@ -60,15 +61,51 @@ const hashHtlcSecret = (secret: string): string => {
   return ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(['bytes32'], [secret])).toLowerCase();
 };
 
+const swapFillFingerprint = (tx: Extract<AccountTx, { type: 'swap_resolve' }>): string => {
+  const data = tx.data;
+  // A proof snapshot records fills already applied to that proof body. While
+  // building dispute calldata later, the same pending frame may still be
+  // present locally; matching by the economic payload prevents that fill from
+  // being applied twice to the proof's remaining swap slot.
+  return [
+    data.offerId,
+    data.fillRatio,
+    data.fillNumerator?.toString() ?? '',
+    data.fillDenominator?.toString() ?? '',
+    data.executionGiveAmount?.toString() ?? '',
+    data.executionWantAmount?.toString() ?? '',
+    data.cancelRemainder ? '1' : '0',
+  ].join('|');
+};
+
+const collectAppliedSwapFillFingerprints = (accountTxs: readonly AccountTx[] | undefined): string[] => {
+  if (!accountTxs?.length) return [];
+  const fingerprints: string[] = [];
+  for (const tx of accountTxs) {
+    if (tx.type !== 'swap_resolve') continue;
+    fingerprints.push(swapFillFingerprint(tx));
+  }
+  return fingerprints;
+};
+
 const buildPendingSwapFillRatios = (
-  entityState: EntityState,
-  counterpartyEntityId: string,
+  account: AccountMachine,
   plan: DisputeArgumentPlan,
+  appliedSwapFillFingerprints: readonly string[] | undefined,
 ): Map<OfferId, number> => {
   const ratios = new Map<OfferId, number>();
-  for (const offerId of [...plan.leftSwapOfferIds, ...plan.rightSwapOfferIds]) {
-    const key = swapKey(counterpartyEntityId, offerId);
-    ratios.set(asOfferId(offerId), entityState.pendingSwapFillRatios?.get(key) ?? 0);
+  const planned = new Set([...plan.leftSwapOfferIds, ...plan.rightSwapOfferIds]);
+  if (planned.size === 0) return ratios;
+  const alreadyApplied = new Set(appliedSwapFillFingerprints ?? []);
+  for (const tx of [...(account.pendingFrame?.accountTxs ?? []), ...(account.mempool ?? [])]) {
+    if (tx.type !== 'swap_resolve') continue;
+    if (!planned.has(tx.data.offerId)) continue;
+    if (alreadyApplied.has(swapFillFingerprint(tx))) continue;
+    const offerId = asOfferId(tx.data.offerId);
+    if (ratios.has(offerId)) {
+      throw new Error(`DISPUTE_ARGUMENT_SWAP_FILL_AMBIGUOUS:${tx.data.offerId}`);
+    }
+    ratios.set(offerId, tx.data.fillRatio);
   }
   return ratios;
 };
@@ -130,6 +167,7 @@ export function captureDisputeArgumentSnapshot(
   proofbodyHash: string,
   nonce: number,
   proofBodyStruct: ProofBodyStruct,
+  options: { appliedAccountTxs?: readonly AccountTx[] } = {},
 ): DisputeArgumentSnapshot {
   // Capture the positional argument plan at the same moment the proof body is
   // signed. Later dispute code must follow this plan; current account maps may
@@ -155,6 +193,7 @@ export function captureDisputeArgumentSnapshot(
     side: account.leftEntity === account.proofHeader.fromEntity ? 'left' : 'right',
     proofBodyStruct,
     plan: { paymentHashlocks, leftSwapOfferIds, rightSwapOfferIds, leftPullIds, rightPullIds },
+    appliedSwapFillFingerprints: collectAppliedSwapFillFingerprints(options.appliedAccountTxs),
   };
 }
 
@@ -187,7 +226,11 @@ export function buildDisputeArgumentsForSnapshot(
   // live rebuild would be a rehydration bug and can pair wrong positional
   // swap/pull arguments with an old proof body.
   const snapshot = requireDisputeArgumentSnapshot(account, proofbodyHash, 'build');
-  const fillRatios = buildPendingSwapFillRatios(entityState, counterpartyEntityId, snapshot.plan);
+  const fillRatios = buildPendingSwapFillRatios(
+    account,
+    snapshot.plan,
+    snapshot.appliedSwapFillFingerprints,
+  );
   const resolves = collectPullResolves(account);
   const leftFillRatios = snapshot.plan.leftSwapOfferIds.map((offerId) => fillRatios.get(asOfferId(offerId)) ?? 0);
   const rightFillRatios = snapshot.plan.rightSwapOfferIds.map((offerId) => fillRatios.get(asOfferId(offerId)) ?? 0);

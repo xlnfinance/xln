@@ -138,6 +138,23 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
     for (const order of [...book.orders.values()]) {
       const orderId = order.orderId;
       const { accountId, offerId } = parseNamespacedOrderId(orderId, 'ORDERBOOK_CROSS_J_MALFORMED_BOOK_ORDER');
+      const account = hubState.accounts.get(accountId);
+      if ((account?.status ?? 'active') !== 'active') {
+        const removed = applyCommand(book, {
+          kind: 1,
+          ownerId: order.ownerId,
+          orderId,
+        }).state;
+        bookCache.set(pairId, removed);
+        bookUpdates.push({ pairId, book: removed });
+        orderbookCrossLog.debug('book.remove_disputed_account', {
+          pair: pairId,
+          order: shortOrder(orderId, 20),
+          account: accountId.slice(-8),
+        });
+        book = removed;
+        continue;
+      }
       const queuedPendingAck = findQueuedCrossSwapAckForEntityState(hubState, accountId, offerId);
       const pendingAck = queuedPendingAck?.data ?? null;
       const committedStatus = committedCrossRouteStatus(accountId, offerId);
