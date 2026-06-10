@@ -120,14 +120,14 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
   };
 
   const committedCrossRouteStatus = (accountId: string, offerId: string): string | undefined => {
-    const entityRoute = hubState.crossJurisdictionSwaps?.get(offerId);
-    if (entityRoute?.status) return entityRoute.status;
-    const offerRoute = hubState.accounts.get(accountId)?.swapOffers?.get(offerId)?.crossJurisdiction;
-    if (offerRoute?.status) return offerRoute.status;
     const admission = hubState.crossJurisdictionBookAdmissions?.get(
       crossJurisdictionBookAdmissionKeyFor(accountId, offerId),
     );
     if (admission && admission.status !== 'admitted') return `admission:${admission.status}`;
+    const entityRoute = hubState.crossJurisdictionSwaps?.get(offerId);
+    if (entityRoute?.status) return entityRoute.status;
+    const offerRoute = hubState.accounts.get(accountId)?.swapOffers?.get(offerId)?.crossJurisdiction;
+    if (offerRoute?.status) return offerRoute.status;
     return admission?.route?.status;
   };
 

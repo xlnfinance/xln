@@ -64,13 +64,12 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
 
   const offerRoute = findCrossJurisdictionOfferRoute(newState, orderId);
   if (offerRoute) {
-    try {
-      route = mergeCrossJurisdictionRoute(route, withCanonicalCrossJurisdictionRouteHash(offerRoute.route));
-      newState.crossJurisdictionSwaps ||= new Map();
-      newState.crossJurisdictionSwaps.set(orderId, route);
-    } catch {
-      // Keep the entity-level route; validation below will reject if it is unusable.
-    }
+    // Cross-j clear is money movement. The account offer snapshot and entity
+    // route mirror must agree exactly; falling back to either side would be
+    // rehydration and could reveal a pull for stale economics.
+    route = mergeCrossJurisdictionRoute(route, withCanonicalCrossJurisdictionRouteHash(offerRoute.route));
+    newState.crossJurisdictionSwaps ||= new Map();
+    newState.crossJurisdictionSwaps.set(orderId, route);
   }
 
   const sourceHubId = normalizeEntityRef(route.source.counterpartyEntityId);
@@ -88,16 +87,9 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
     return { newState, outputs, mempoolOps };
   }
 
-  let canonicalRoute: CrossJurisdictionSwapRoute;
-  try {
-    canonicalRoute = withCanonicalCrossJurisdictionRouteHash(route);
-  } catch (error) {
-    addMessage(newState, `❌ Cross-j clear ${orderId} invalid route: ${error instanceof Error ? error.message : String(error)}`);
-    return { newState, outputs, mempoolOps };
-  }
+  const canonicalRoute: CrossJurisdictionSwapRoute = withCanonicalCrossJurisdictionRouteHash(route);
   if (!canonicalRoute.sourcePull || !canonicalRoute.targetPull) {
-    addMessage(newState, `❌ Cross-j clear ${orderId} blocked: pull commitments missing`);
-    return { newState, outputs, mempoolOps };
+    throw new Error(`CROSS_J_CLEAR_CORRUPT_ROUTE: order=${orderId} pull commitments missing`);
   }
 
   const ratio = Math.max(
@@ -195,8 +187,9 @@ export const handleRequestCrossJurisdictionClearEntityTx = (
       getCrossJurisdictionPrivateSeed(env, canonicalRoute),
     );
   } catch (error) {
-    addMessage(newState, `❌ Cross-j clear ${orderId} reveal failed: ${error instanceof Error ? error.message : String(error)}`);
-    return { newState, outputs, mempoolOps };
+    throw new Error(
+      `CROSS_J_CLEAR_REVEAL_FAILED: order=${orderId} ${error instanceof Error ? error.message : String(error)}`,
+    );
   }
   mempoolOps.push({
     accountId,

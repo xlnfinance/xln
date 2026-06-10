@@ -2,7 +2,10 @@ import type { AccountMachine, AccountTx, CrossJurisdictionPullBinding, CrossJuri
 import { deriveDelta } from '../../account-utils';
 import { createDefaultDelta } from '../../validation-utils';
 import { FINANCIAL, LIMITS } from '../../constants';
-import { buildCrossJurisdictionPullBinding, cloneCrossJurisdictionPullBinding } from '../../cross-jurisdiction';
+import {
+  buildCommittedCrossJurisdictionPullBinding,
+  cloneCrossJurisdictionPullBinding,
+} from '../../cross-jurisdiction';
 import {
   HASHLADDER_MAX_FILL_RATIO,
   verifyHashLadderBinary,
@@ -59,7 +62,7 @@ const findCrossJurisdictionPullBinding = (
   pullId: string,
 ): CrossJurisdictionPullBinding | undefined => {
   const routeMatch = findCrossJurisdictionRouteForPull(accountMachine, pullId);
-  if (routeMatch) return buildCrossJurisdictionPullBinding(routeMatch.route, routeMatch.leg);
+  if (routeMatch) return buildCommittedCrossJurisdictionPullBinding(routeMatch.route, routeMatch.leg);
   return accountMachine.pulls?.get(pullId)?.crossJurisdiction;
 };
 

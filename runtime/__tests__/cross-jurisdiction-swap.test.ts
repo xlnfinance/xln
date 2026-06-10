@@ -11,10 +11,8 @@ import {
   submitCrossJurisdictionSwap,
 } from '../runtime';
 import { hashHtlcSecret } from '../htlc-utils';
-import { getJurisdictionStackId } from '../jurisdiction-runtime';
-import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey, signAccountFrame } from '../account-crypto';
+import type { EntityReplica, JurisdictionEvent } from '../types';
 import { generateLazyEntityId } from '../entity-factory';
-import type { AccountMachine, ConsensusConfig, EntityReplica, EntityState, Env, JurisdictionConfig, JurisdictionEvent } from '../types';
 import { createDefaultDelta } from '../validation-utils';
 import { cloneEntityState } from '../state-helpers';
 import { projectAccountDoc, projectEntityCoreDoc } from '../storage/projections';
@@ -36,167 +34,21 @@ import {
   buildCrossJurisdictionMarketOffer,
 } from '../cross-jurisdiction-orderbook';
 import { verifyHashLadderBinary } from '../hashladder';
-import {
-  buildJEventObservationDigest,
-  canonicalJurisdictionEventsHash,
-} from '../j-event-observation';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook/types';
-
-const addr = (byte: string): string => `0x${byte.repeat(20)}`;
-const entity = (byte: string): string => `0x${byte.repeat(32)}`;
-const secret = (byte: string): string => `0x${byte.repeat(32)}`;
-const partialBinary = (ratio: number): string =>
-  `0x${ratio.toString(16).padStart(4, '0')}${[secret('a1'), secret('a2'), secret('a3'), secret('a4')].map(node => node.slice(2)).join('')}`;
-
-const makeJurisdiction = (name: string, chainId: number, depByte: string, epByte: string): JurisdictionConfig => ({
-  name,
-  address: `rpc://${name}`,
-  chainId,
-  blockTimeMs: 1_000,
-  depositoryAddress: addr(depByte),
-  entityProviderAddress: addr(epByte),
-});
-
-const registerTestSigner = (env: Env, seed: string, slot = '1'): string => {
-  env.runtimeSeed = seed;
-  const signerId = deriveSignerAddressSync(seed, slot);
-  registerSignerKey(signerId, deriveSignerKeySync(seed, slot));
-  return signerId;
-};
-
-const signJEventObservation = (
-  env: Env,
-  entityId: string,
-  signerId: string,
-  input: {
-    blockNumber: number;
-    blockHash: string;
-    transactionHash: string;
-    events: JurisdictionEvent[];
-  },
-): { eventsHash: string; signature: string } => {
-  const eventsHash = canonicalJurisdictionEventsHash(input.events);
-  const signature = signAccountFrame(
-    env,
-    signerId,
-    buildJEventObservationDigest({
-      entityId,
-      signerId,
-      blockNumber: input.blockNumber,
-      blockHash: input.blockHash,
-      transactionHash: input.transactionHash,
-      eventsHash,
-    }),
-  );
-  return { eventsHash, signature };
-};
-
-const jref = (jurisdiction: JurisdictionConfig): string => getJurisdictionStackId(jurisdiction);
-
-const makeConfig = (signerId: string, jurisdiction: JurisdictionConfig): ConsensusConfig => ({
-  mode: 'proposer-based',
-  threshold: 1n,
-  validators: [signerId],
-  shares: { [signerId]: 1n },
-  jurisdiction,
-});
-
-const makeAccount = (selfId: string, counterpartyId: string): AccountMachine => {
-  const [leftEntity, rightEntity] = selfId.toLowerCase() < counterpartyId.toLowerCase()
-    ? [selfId, counterpartyId]
-    : [counterpartyId, selfId];
-  const delta = createDefaultDelta(1);
-  delta.leftCreditLimit = 10n ** 30n;
-  delta.rightCreditLimit = 10n ** 30n;
-  return {
-    leftEntity,
-    rightEntity,
-    status: 'active',
-    mempool: [],
-    currentFrame: {
-      height: 0,
-      timestamp: 0,
-      jHeight: 0,
-      accountTxs: [],
-      prevFrameHash: '',
-      stateHash: '',
-      deltas: [],
-      byLeft: true,
-    },
-    deltas: new Map([[1, delta]]),
-    locks: new Map(),
-    swapOffers: new Map(),
-    globalCreditLimits: { ownLimit: 0n, peerLimit: 0n },
-    currentHeight: 0,
-    pendingSignatures: [],
-    rollbackCount: 0,
-    leftJObservations: [],
-    rightJObservations: [],
-    jEventChain: [],
-    lastFinalizedJHeight: 0,
-    proofHeader: { fromEntity: selfId, toEntity: counterpartyId, nonce: 0 },
-    proofBody: { tokenIds: [], deltas: [] },
-    disputeConfig: { leftDisputeDelay: 10, rightDisputeDelay: 10 },
-    onChainSettlementNonce: 0,
-    pendingWithdrawals: new Map(),
-    requestedRebalance: new Map(),
-    requestedRebalanceFeeState: new Map(),
-    rebalancePolicy: new Map(),
-  };
-};
-
-const makeState = (
-  entityId: string,
-  signerId: string,
-  jurisdiction: JurisdictionConfig,
-  counterpartyId?: string,
-): EntityState => ({
-  entityId,
-  height: 1,
-  timestamp: 1_000,
-  nonces: new Map(),
-  messages: [],
-  proposals: new Map(),
-  config: makeConfig(signerId, jurisdiction),
-  reserves: new Map(),
-  accounts: counterpartyId ? new Map([[counterpartyId, makeAccount(entityId, counterpartyId)]]) : new Map(),
-  lastFinalizedJHeight: 0,
-  jBlockObservations: [],
-  jBlockChain: [],
-  entityEncPubKey: `0x${'aa'.repeat(32)}`,
-  entityEncPrivKey: `0x${'bb'.repeat(32)}`,
-  profile: { name: '', isHub: false, avatar: '', bio: '', website: '' },
-  htlcRoutes: new Map(),
-  htlcFeesEarned: 0n,
-  lockBook: new Map(),
-  crossJurisdictionSwaps: new Map(),
-  swapTradingPairs: [],
-  pendingSwapFillRatios: new Map(),
-});
-
-const addReplica = (env: Env, state: EntityState, signerId: string, isProposer = true): void => {
-  env.eReplicas.set(`${state.entityId}:${signerId}`, {
-    entityId: state.entityId,
-    signerId,
-    state,
-    mempool: [],
-    isProposer,
-  } as EntityReplica);
-};
-
-const installJurisdictions = (env: Env, ...jurisdictions: JurisdictionConfig[]): void => {
-  for (const jurisdiction of jurisdictions) {
-    env.jReplicas.set(jurisdiction.name, {
-      name: jurisdiction.name,
-      chainId: jurisdiction.chainId,
-      rpcs: [jurisdiction.address],
-      depositoryAddress: jurisdiction.depositoryAddress,
-      entityProviderAddress: jurisdiction.entityProviderAddress,
-      blockTimeMs: jurisdiction.blockTimeMs,
-      defaultDisputeDelayBlocks: 5,
-    } as any);
-  }
-};
+import {
+  addReplica,
+  addr,
+  entity,
+  installJurisdictions,
+  jref,
+  makeAccount,
+  makeJurisdiction,
+  makeState,
+  partialBinary,
+  registerTestSigner,
+  secret,
+  signJEventObservation,
+} from './helpers/cross-j';
 
 describe('cross-jurisdiction hashledger swap', () => {
   test('hashlockPayment creates a direct hashlock-only account lock', async () => {
@@ -1911,9 +1763,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const targetHub = entity('9c');
     const targetUser = entity('9d');
     const seed = 'cross-cancel-no-orderbook-ext seed alpha beta gamma';
-    env.runtimeSeed = seed;
-    const signer = deriveSignerAddressSync(seed, '1');
-    registerSignerKey(signer, deriveSignerKeySync(seed, '1'));
+    const signer = registerTestSigner(env, seed, '1');
     const sourceUser = generateLazyEntityId([signer], 1n).toLowerCase();
     const state = makeState(sourceUser, signer, eth, sourceHub);
     const route = buildPreparedCrossJurisdictionRoute({
