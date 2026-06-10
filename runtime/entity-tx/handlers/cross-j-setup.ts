@@ -1,10 +1,12 @@
 import {
+  buildCrossJurisdictionPullBinding,
   buildPreparedCrossJurisdictionRoute,
   cloneCrossJurisdictionRoute,
   isCrossJurisdictionPullExpired,
   isCrossJurisdictionRouteExpired,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../cross-jurisdiction';
+import { getCrossJurisdictionBookReceiptError } from '../../cross-jurisdiction-orderbook';
 import { requireRuntimeJurisdictionDisputeDelayMs } from '../../j-height';
 import { pushCrossJurisdictionEntityOutput } from '../cross-j-outputs';
 import {
@@ -145,20 +147,18 @@ export const handlePrepareCrossJurisdictionSwapEntityTx = (
         pullId: publicPreparedRoute.targetPull!.pullId,
         tokenId: publicPreparedRoute.targetPull!.tokenId,
         amount: publicPreparedRoute.targetPull!.signedAmount,
-        revealedUntilTimestamp: publicPreparedRoute.targetPull!.revealedUntilTimestamp,
-        fullHash: publicPreparedRoute.targetPull!.fullHash,
-        partialRoot: publicPreparedRoute.targetPull!.partialRoot,
-        description: publicPreparedRoute.memo || `Cross-j target pull ${publicPreparedRoute.orderId}`,
+          revealedUntilTimestamp: publicPreparedRoute.targetPull!.revealedUntilTimestamp,
+          fullHash: publicPreparedRoute.targetPull!.fullHash,
+          partialRoot: publicPreparedRoute.targetPull!.partialRoot,
+          crossJurisdiction: buildCrossJurisdictionPullBinding(publicPreparedRoute, 'target'),
+          description: publicPreparedRoute.memo || `Cross-j target pull ${publicPreparedRoute.orderId}`,
+        },
       },
-    },
-  ]);
+    ]);
   pushCrossJOutput(env, outputs, publicPreparedRoute.target.counterpartyEntityId, [
     { type: 'registerCrossJurisdictionSwap', data: { route: publicPreparedRoute } },
   ]);
-  pushCrossJOutput(env, outputs, publicPreparedRoute.source.entityId, [
-    { type: 'commitCrossJurisdictionSwap', data: { route: publicPreparedRoute } },
-  ]);
-  addMessage(newState, `🌉 Cross-j swap ${preparedRoute.orderId} prepared by hub`);
+  addMessage(newState, `🌉 Cross-j swap ${preparedRoute.orderId} target lock requested by hub`);
   return { newState, outputs };
 };
 
@@ -196,12 +196,23 @@ export const handleCommitCrossJurisdictionSwapEntityTx = (
     addMessage(newState, `❌ Cross-j commit ${route.orderId} missing pull commitments`);
     return { newState, outputs };
   }
+  const targetReceipt = entityTx.data.targetReceipt ?? route.targetReceipt;
+  if (!targetReceipt || targetReceipt.leg !== 'target') {
+    addMessage(newState, `❌ Cross-j commit ${route.orderId} blocked: target receipt missing`);
+    return { newState, outputs };
+  }
+  const receiptError = getCrossJurisdictionBookReceiptError(route, targetReceipt);
+  if (receiptError) {
+    addMessage(newState, `❌ Cross-j commit ${route.orderId} blocked: ${receiptError}`);
+    return { newState, outputs };
+  }
   const sourcePull = route.sourcePull;
   const targetPull = route.targetPull;
   const restingRoute = {
     ...cloneCrossJurisdictionRoute(route),
     sourcePull,
     targetPull,
+    targetReceipt,
     status: 'resting' as const,
     updatedAt: newState.timestamp || env.timestamp,
   };
@@ -225,12 +236,13 @@ export const handleCommitCrossJurisdictionSwapEntityTx = (
           pullId: sourcePull.pullId,
           tokenId: sourcePull.tokenId,
           amount: sourcePull.signedAmount,
-          revealedUntilTimestamp: sourcePull.revealedUntilTimestamp,
-          fullHash: sourcePull.fullHash,
-          partialRoot: sourcePull.partialRoot,
-          description: restingRoute.memo || `Cross-j source pull ${restingRoute.orderId}`,
+            revealedUntilTimestamp: sourcePull.revealedUntilTimestamp,
+            fullHash: sourcePull.fullHash,
+            partialRoot: sourcePull.partialRoot,
+            crossJurisdiction: buildCrossJurisdictionPullBinding(restingRoute, 'source'),
+            description: restingRoute.memo || `Cross-j source pull ${restingRoute.orderId}`,
+          },
         },
-      },
       {
         type: 'placeSwapOffer',
         data: {

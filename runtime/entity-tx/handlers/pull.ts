@@ -1,4 +1,9 @@
-import { isCrossJurisdictionRouteTransitionAllowed, isCrossJurisdictionTerminalStatus, transitionCrossJurisdictionRouteStatus } from '../../cross-jurisdiction';
+import {
+  buildCrossJurisdictionPullBinding,
+  isCrossJurisdictionRouteTransitionAllowed,
+  isCrossJurisdictionTerminalStatus,
+  transitionCrossJurisdictionRouteStatus,
+} from '../../cross-jurisdiction';
 import { verifyHashLadderBinary } from '../../hashladder';
 import { addMessage, cloneEntityState } from '../../state-helpers';
 import type { EntityInput, EntityState, EntityTx, Env } from '../../types';
@@ -31,14 +36,22 @@ const resolveCounterparty = (result: PullResult, counterpartyEntityId: string, a
 
 export const handlePullLockEntityTx = (_env: Env, state: EntityState, tx: PullLockTx): PullResult => {
   const result = createResult(state);
-  const { counterpartyEntityId, pullId, tokenId, amount, revealedUntilTimestamp, fullHash, partialRoot } = tx.data;
+  const { counterpartyEntityId, pullId, tokenId, amount, revealedUntilTimestamp, fullHash, partialRoot, crossJurisdiction } = tx.data;
   const accountId = resolveCounterparty(result, counterpartyEntityId, 'lock');
   if (!accountId) return result;
   result.mempoolOps.push({
     accountId,
     tx: {
       type: 'pull_lock',
-      data: { pullId, tokenId: Number(tokenId), amount: BigInt(amount), revealedUntilTimestamp: Number(revealedUntilTimestamp), fullHash, partialRoot },
+      data: {
+        pullId,
+        tokenId: Number(tokenId),
+        amount: BigInt(amount),
+        revealedUntilTimestamp: Number(revealedUntilTimestamp),
+        fullHash,
+        partialRoot,
+        ...(crossJurisdiction ? { crossJurisdiction } : {}),
+      },
     },
   });
   requestFrame(state, result.outputs);
@@ -59,7 +72,30 @@ const findCrossTargetRoute = (state: EntityState, pullId: string, counterpartyEn
     normalizeEntityRef(route.target.entityId) === normalizeEntityRef(counterpartyEntityId),
   );
 
-const validateCrossTargetResolve = (result: PullResult, env: Env, pullId: string, counterpartyEntityId: string, binary: string): PullResult | null => {
+const syncTargetPullBinding = (
+  result: PullResult,
+  accountId: string,
+  pullId: string,
+  route: NonNullable<ReturnType<typeof findCrossTargetRoute>>,
+  fillRatio: number,
+): void => {
+  const pull = result.newState.accounts.get(accountId)?.pulls?.get(pullId);
+  if (!pull) return;
+  pull.crossJurisdiction = buildCrossJurisdictionPullBinding({
+    ...route,
+    cumulativeFillRatio: Math.max(Math.floor(Number(route.cumulativeFillRatio ?? 0) || 0), fillRatio),
+    claimedRatio: Math.max(Math.floor(Number(route.claimedRatio ?? 0) || 0), fillRatio),
+  }, 'target');
+};
+
+const validateCrossTargetResolve = (
+  result: PullResult,
+  env: Env,
+  accountId: string,
+  pullId: string,
+  counterpartyEntityId: string,
+  binary: string,
+): PullResult | null => {
   const route = findCrossTargetRoute(result.newState, pullId, counterpartyEntityId);
   if (!route) return null;
   const shortPull = pullId.slice(0, 8);
@@ -84,6 +120,10 @@ const validateCrossTargetResolve = (result: PullResult, env: Env, pullId: string
   }
   route.pendingClearRequestedAt ||= now(result.newState, env);
   transitionCrossJurisdictionRouteStatus(route, 'clearing', result.newState.timestamp || env.timestamp);
+  // Entity-level resolvePull is the gate that verifies the target has the same
+  // hashladder binary relayed after source claim. Keep the account pull binding
+  // in lockstep before the account frame validates pull_resolve; no rehydration.
+  syncTargetPullBinding(result, accountId, pullId, route, decodedRatio);
   result.newState.crossJurisdictionSwaps?.set(route.orderId, route);
   return null;
 };
@@ -97,7 +137,7 @@ export const handleResolvePullEntityTx = (env: Env, state: EntityState, tx: Reso
   if (sourceRoute && sourceRoute.status !== 'clearing') {
     return fail(result, `❌ Cross-j source pull ${pullId.slice(0, 8)} resolve blocked: use requestCrossJurisdictionClear`);
   }
-  const blocked = validateCrossTargetResolve(result, env, pullId, counterpartyEntityId, binary);
+  const blocked = validateCrossTargetResolve(result, env, accountId, pullId, counterpartyEntityId, binary);
   if (blocked) return blocked;
   result.mempoolOps.push({ accountId, tx: { type: 'pull_resolve', data: { pullId, binary } } });
   requestFrame(state, result.outputs);

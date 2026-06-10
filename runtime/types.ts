@@ -27,6 +27,7 @@ export type {
   CrossJurisdictionBookAdmissionReceipt,
   CrossJurisdictionBookLeg,
   CrossJurisdictionBookStatus,
+  CrossJurisdictionPullBinding,
   CrossJurisdictionPullLeg,
   CrossJurisdictionSwapLeg,
   CrossJurisdictionSwapRoute,
@@ -135,6 +136,7 @@ export type RuntimeP2PSurface = {
   sendDebugEvent(payload: unknown): boolean;
   syncProfiles(): Promise<boolean>;
   announceProfilesForEntities(entityIds: string[], reason?: string): void;
+  announceProfilesForEntitiesNow(entityIds: string[], reason?: string): Promise<void>;
 };
 
 export interface JurisdictionConfig {

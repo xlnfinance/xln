@@ -2,13 +2,15 @@ import { expect, test } from '@playwright/test';
 
 async function completeOnboarding(page: import('@playwright/test').Page): Promise<void> {
   await expect(page.getByLabel('Display name')).toBeVisible({ timeout: 240_000 });
+  await expect(page.getByRole('heading', { name: /Recovery services/i })).toBeVisible();
+  await expect(page.getByRole('button', { name: /Local only/i })).toBeVisible();
   const startButton = page.getByRole('button', { name: /^start$/i });
   await expect(startButton).toBeVisible();
   await startButton.click();
   await expect(page.getByTestId('tab-accounts')).toBeVisible({ timeout: 30_000 });
   await expect(page.getByRole('button', { name: /^Open Account$/ })).toBeVisible();
   await expect(page.getByRole('heading', { name: 'Open Account', exact: true })).toBeVisible();
-  await expect(page.getByPlaceholder('Select entity or paste full ID...')).toBeVisible();
+  await expect(page.getByText('Counterparties')).toBeVisible();
 }
 
 test.describe('BrainVault default flow', () => {
@@ -24,7 +26,7 @@ test.describe('BrainVault default flow', () => {
     // UI now uses factor preset buttons (no slider input)
     await page.getByRole('button', { name: /^1\b/ }).click();
 
-    const deriveButton = page.getByRole('button', { name: /open vault/i });
+    const deriveButton = page.getByRole('button', { name: /Create XLN wallet/i });
     await expect(deriveButton).toBeEnabled({ timeout: 10_000 });
     await deriveButton.click();
 
@@ -44,7 +46,7 @@ test.describe('BrainVault default flow', () => {
 
     await page.getByRole('button', { name: /^2\b/ }).click();
 
-    const deriveButton = page.getByRole('button', { name: /open vault/i });
+    const deriveButton = page.getByRole('button', { name: /Create XLN wallet/i });
     await expect(deriveButton).toBeEnabled({ timeout: 10_000 });
     await deriveButton.click();
 

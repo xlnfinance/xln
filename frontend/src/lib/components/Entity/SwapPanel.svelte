@@ -202,6 +202,10 @@
   let crossPriceImprovementMode: 'source_savings' | 'target_bonus' = 'source_savings';
   let selectedSourceEntityValue = '';
   let routeDetailsOpen = false;
+  let openTokenMenu: 'give' | 'want' | '' = '';
+  let sourceMenuOpen = false;
+  let routeMenuOpen = false;
+  let hubMenuOpen = false;
   let crossTargetInCapacity = 0n;
   let crossAutoInboundCreditTarget: bigint | null = null;
   let crossCurrentPeerCreditLimit = 0n;
@@ -304,6 +308,37 @@
     const resolved = resolveEntityName(accountIdValue, activeFrame);
     return resolved || formatEntityId(accountIdValue);
   }
+
+  function formatEntityNetworkLabel(name: string, jurisdiction: string): string {
+    const cleanName = String(name || '').trim() || 'Unknown';
+    const cleanJurisdiction = String(jurisdiction || '').trim();
+    return cleanJurisdiction ? `${cleanName} (${cleanJurisdiction})` : cleanName;
+  }
+
+  function entityAvatarSrc(entityIdValue: string): string {
+    const normalized = String(entityIdValue || '').trim();
+    if (!normalized || !activeXlnFunctions?.isReady) return '';
+    return activeXlnFunctions.generateEntityAvatar?.(normalized) || '';
+  }
+
+  function entityInitials(entityIdValue: string, fallbackLabel = ''): string {
+    const label = String(fallbackLabel || '').trim();
+    if (label) return label.slice(0, 2).toUpperCase();
+    return formatEntityId(entityIdValue).slice(0, 2).toUpperCase();
+  }
+
+  function jurisdictionBadgeText(jurisdiction: string): string {
+    const clean = String(jurisdiction || '').trim().replace(/[^a-zA-Z0-9\s._-]/g, ' ');
+    if (!clean) return 'J';
+    const words = clean.split(/[\s._-]+/).map((word) => word.replace(/[^a-zA-Z0-9]/g, '')).filter(Boolean);
+    if (words.length >= 2) return `${words[0]?.[0] || ''}${words[1]?.[0] || ''}`.toUpperCase();
+    return (words[0] || clean).slice(0, 2).toUpperCase();
+  }
+
+  function hubJurisdictionLabel(entityIdValue: string): string {
+    const profileJurisdiction = getProfileJurisdictionName(getHubProfile(entityIdValue));
+    return profileJurisdiction || sourceJurisdictionLabel;
+  }
   $: selectedHubOptions = hubAccountIds.map((id) => ({ value: id, label: accountLabel(id) }));
   $: selectedHubOption = selectedHubOptions.find((hub) => hub.value === createOrderAccountId) || null;
   $: crossTargetOptions = buildCrossTargetOptions(activeFrame, sourceEntityIdValue, currentReplica);
@@ -333,6 +368,14 @@
   $: selectedSourceEntityLabel = selectedSourceEntity?.label || sourceChainLabel || '';
   $: selectedRouteLabel = selectedRouteOption?.label || '';
   $: selectedHubLabel = selectedHubOption?.label || routeVenueLabel || '';
+  $: selectedHubJurisdictionLabel = hubJurisdictionLabel(createOrderAccountId) || sourceJurisdictionLabel;
+  $: selectedHubDisplayLabel = createOrderAccountId
+    ? formatEntityNetworkLabel(selectedHubLabel, selectedHubJurisdictionLabel)
+    : 'Select hub';
+  $: routePathLabel = swapRouteMode === 'cross'
+    ? `${sourceJurisdictionLabel} -> ${targetJurisdictionLabel}`
+    : sourceJurisdictionLabel;
+  $: swapTokenPairLabel = `${giveTokenSymbol} -> ${wantTokenSymbol}`;
   $: targetAccountReady = swapRouteMode !== 'cross' || Boolean(selectedCrossTarget && hasReplicaAccount(
     findReplicaByEntityId(selectedCrossTarget.targetEntityId),
     selectedCrossTarget.targetHubEntityId,
@@ -365,6 +408,7 @@
   type SourceEntityOption = {
     value: string;
     label: string;
+    name: string;
     entityId: string;
     signerId: string;
     jurisdiction: string;
@@ -517,9 +561,11 @@
         const signerId = String(candidate.signerId || '').trim().toLowerCase();
         const jurisdiction = getReplicaJurisdictionName(candidate);
         if (!entityId || !signerId || !jurisdiction) return null;
+        const name = accountLabel(entityId);
         return {
           value: entityId,
-          label: `${jurisdiction} · ${accountLabel(entityId)}`,
+          label: formatEntityNetworkLabel(name, jurisdiction),
+          name,
           entityId,
           signerId,
           jurisdiction,
@@ -631,12 +677,9 @@
     const sourceJurisdiction = getReplicaJurisdictionName(sourceReplica) || 'Current';
     const sourceJurisdictionRef = getReplicaJurisdictionRef(sourceReplica) || sourceJurisdiction;
     const sourceHubEntityId = String(selectedHubEntityId || '').trim().toLowerCase();
-    const sameLabel = sourceHubEntityId
-      ? `${sourceJurisdiction} · ${accountLabel(sourceHubEntityId)}`
-      : `${sourceJurisdiction} · select hub`;
     const options: SwapRouteOption[] = [{
       value: 'same',
-      label: `Same account · ${sameLabel}`,
+      label: 'Same account',
       mode: 'same',
       sourceJurisdiction,
       targetJurisdiction: sourceJurisdiction,
@@ -646,17 +689,35 @@
       targetHubEntityId: sourceHubEntityId,
       sourceJurisdictionRef,
       targetJurisdictionRef: sourceJurisdictionRef,
-      targetLabel: sameLabel,
+      targetLabel: accountLabel(sourceEntityId),
     }];
 
+    const groupedTargets = new Map<string, CrossTargetOption[]>();
     for (const target of targets) {
-      const compatible = sourceHubEntityId ? hubRouteCompatible(sourceHubEntityId, target.targetHubEntityId) : false;
-      const disabledReason = compatible ? '' : `Try another hub: ${accountLabel(sourceHubEntityId)} has no sibling on ${target.targetJurisdiction}.`;
+      const key = `${target.targetJurisdictionRef}:${target.targetEntityId}`;
+      groupedTargets.set(key, [...(groupedTargets.get(key) || []), target]);
+    }
+
+    for (const group of groupedTargets.values()) {
+      const sortedGroup = [...group].sort((a, b) => {
+        const aCompatible = sourceHubEntityId && hubRouteCompatible(sourceHubEntityId, a.targetHubEntityId);
+        const bCompatible = sourceHubEntityId && hubRouteCompatible(sourceHubEntityId, b.targetHubEntityId);
+        if (aCompatible !== bCompatible) return aCompatible ? -1 : 1;
+        if (a.hasTargetAccount !== b.hasTargetAccount) return a.hasTargetAccount ? -1 : 1;
+        return compareStableText(accountLabel(a.targetHubEntityId), accountLabel(b.targetHubEntityId));
+      });
+      const target = sortedGroup[0];
+      if (!target) continue;
+      // User chooses the recipient entity, not the internal target hub leg. The
+      // matching sibling hub is selected here from the active source hub.
+      const compatible = Boolean(sourceHubEntityId && hubRouteCompatible(sourceHubEntityId, target.targetHubEntityId));
+      const recipientLabel = formatEntityNetworkLabel(accountLabel(target.targetEntityId), target.targetJurisdiction);
+      const disabledReason = compatible
+        ? ''
+        : `Try another hub: ${accountLabel(sourceHubEntityId)} has no sibling on ${target.targetJurisdiction}.`;
       options.push({
         value: target.value,
-        label: compatible
-          ? `${target.targetJurisdiction} · ${accountLabel(target.targetEntityId)}`
-          : `${target.targetJurisdiction} · try another hub`,
+        label: compatible ? recipientLabel : `Try another hub (${target.targetJurisdiction})`,
         mode: 'cross',
         sourceJurisdiction,
         targetJurisdiction: target.targetJurisdiction,
@@ -828,9 +889,19 @@
   }
 
   function handleSourceEntityChange(event: Event): void {
-    selectedSourceEntityValue = String((event.currentTarget as HTMLSelectElement | null)?.value || '');
+    selectSourceEntityOption(String((event.currentTarget as HTMLSelectElement | null)?.value || ''));
+  }
+
+  function selectSourceEntityOption(value: string): void {
+    const option = sourceEntityOptions.find((candidate) => candidate.value === value);
+    if (!option) return;
+    selectedSourceEntityValue = option.value;
     selectedOrderLevel = null;
     submitError = '';
+    sourceMenuOpen = false;
+    openTokenMenu = '';
+    routeMenuOpen = false;
+    hubMenuOpen = false;
   }
 
   function handleGiveTokenChange(event: Event): void {
@@ -841,6 +912,92 @@
   function handleWantTokenChange(event: Event): void {
     const nextWant = Number.parseInt(String((event.currentTarget as HTMLSelectElement | null)?.value || ''), 10);
     setSwapTokens(giveToken, nextWant);
+  }
+
+  function tokenIconText(symbol: string): string {
+    const text = String(symbol || '').trim();
+    return text.slice(0, 1).toUpperCase() || '?';
+  }
+
+  function tokenClass(symbol: string): string {
+    return String(symbol || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'token';
+  }
+
+  function toggleTokenMenu(menu: 'give' | 'want'): void {
+    sourceMenuOpen = false;
+    routeMenuOpen = false;
+    hubMenuOpen = false;
+    openTokenMenu = openTokenMenu === menu ? '' : menu;
+  }
+
+  function toggleSourceMenu(): void {
+    openTokenMenu = '';
+    routeMenuOpen = false;
+    hubMenuOpen = false;
+    sourceMenuOpen = !sourceMenuOpen;
+  }
+
+  function toggleRouteMenu(): void {
+    sourceMenuOpen = false;
+    openTokenMenu = '';
+    hubMenuOpen = false;
+    routeMenuOpen = !routeMenuOpen;
+  }
+
+  function toggleHubMenu(): void {
+    sourceMenuOpen = false;
+    openTokenMenu = '';
+    routeMenuOpen = false;
+    hubMenuOpen = !hubMenuOpen;
+  }
+
+  function selectGiveTokenOption(tokenIdValue: number): void {
+    setSwapTokens(tokenIdValue, wantToken);
+    sourceMenuOpen = false;
+    openTokenMenu = '';
+    routeMenuOpen = false;
+    hubMenuOpen = false;
+  }
+
+  function selectWantTokenOption(tokenIdValue: number): void {
+    setSwapTokens(giveToken, tokenIdValue);
+    sourceMenuOpen = false;
+    openTokenMenu = '';
+    routeMenuOpen = false;
+    hubMenuOpen = false;
+  }
+
+  function handleRouteSelectChange(event: Event): void {
+    const nextValue = String((event.currentTarget as HTMLSelectElement | null)?.value || '');
+    selectRouteOption(nextValue);
+  }
+
+  function selectRouteOption(value: string): void {
+    const option = routeOptions.find((candidate) => candidate.value === value);
+    if (!option || option.disabled) return;
+    selectedRouteValue = option.value;
+    sourceMenuOpen = false;
+    openTokenMenu = '';
+    routeMenuOpen = false;
+    hubMenuOpen = false;
+    submitError = '';
+  }
+
+  function closeSwapMenus(): void {
+    sourceMenuOpen = false;
+    openTokenMenu = '';
+    routeMenuOpen = false;
+    hubMenuOpen = false;
+  }
+
+  function handleSwapWindowClick(event: MouseEvent): void {
+    const target = event.target as HTMLElement | null;
+    if (target?.closest?.('[data-swap-menu-root]')) return;
+    closeSwapMenus();
+  }
+
+  function handleSwapWindowKeydown(event: KeyboardEvent): void {
+    if (event.key === 'Escape') closeSwapMenus();
   }
 
   function formatPriceTicks(ticks: bigint): string {
@@ -1481,6 +1638,16 @@
       createOrderAccountId = nextValue;
     }
     selectedOrderLevel = null;
+    hubMenuOpen = false;
+    sourceMenuOpen = false;
+    openTokenMenu = '';
+    routeMenuOpen = false;
+  }
+
+  function selectHubOption(nextValue: string): void {
+    const option = selectedHubOptions.find((candidate) => candidate.value === nextValue);
+    if (!option) return;
+    handleSelectedHubChange(option.value);
   }
 
   function defaultCreditLimitForToken(tokenIdValue: number): bigint {
@@ -2525,11 +2692,13 @@
 
 </script>
 
+<svelte:window on:click={handleSwapWindowClick} on:keydown={handleSwapWindowKeydown} />
+
 <div class="swap-panel">
   <div class="trade-grid" class:book-open={showOrderbook}>
     <div class="section section-order">
       <div class="swap-mode-bar">
-        <span>{swapRouteMode === 'cross' ? 'Cross-j' : 'Same-j'}</span>
+        <span>{swapRouteMode === 'cross' ? 'Cross chain' : 'Same chain'}</span>
         <strong title={`${sourceAssetLabel} -> ${targetAssetLabel}`}>{swapRouteTitle}</strong>
         <button
           type="button"
@@ -2539,25 +2708,77 @@
           aria-pressed={showOrderbook}
           on:click={() => showOrderbook = !showOrderbook}
         >
-          {showOrderbook ? 'Hide book' : 'Book'}
+          {showOrderbook ? 'Hide book' : 'Open book'}
         </button>
       </div>
       <div class="anyswap-builder" data-testid="swap-any-builder">
         <div class="swap-leg-card">
           <div class="leg-header">
             <span>From</span>
-            <select
-              class="chain-select"
-              value={selectedSourceEntityValue}
-              data-testid="swap-from-chain-select"
-              title={selectedSourceEntityLabel}
-              aria-label="Swap from account and network"
-              on:change={handleSourceEntityChange}
-            >
-              {#each sourceEntityOptions as option}
-                <option value={option.value} title={option.label}>{option.label}</option>
-              {/each}
-            </select>
+            <div class="entity-select-wrap" data-swap-menu-root>
+              <button
+                type="button"
+                class="entity-select-button"
+                aria-haspopup="listbox"
+                aria-expanded={sourceMenuOpen}
+                title={selectedSourceEntityLabel}
+                on:click|stopPropagation={toggleSourceMenu}
+              >
+                <span class="entity-avatar-wrap">
+                  {#if selectedSourceEntity && entityAvatarSrc(selectedSourceEntity.entityId)}
+                    <img class="entity-avatar-mini" src={entityAvatarSrc(selectedSourceEntity.entityId)} alt="" />
+                  {:else}
+                    <span class="entity-avatar-mini placeholder">{entityInitials(sourceEntityIdValue, selectedSourceEntity?.name || selectedSourceEntityLabel)}</span>
+                  {/if}
+                  <span class="jurisdiction-mini-badge">{jurisdictionBadgeText(selectedSourceEntity?.jurisdiction || sourceJurisdictionLabel)}</span>
+                </span>
+                <span class="entity-select-copy">
+                  <strong>{selectedSourceEntity?.name || accountLabel(sourceEntityIdValue)}</strong>
+                  <small>{selectedSourceEntity?.jurisdiction || sourceJurisdictionLabel}</small>
+                </span>
+                <span class="entity-select-chevron" aria-hidden="true">⌄</span>
+              </button>
+              <select
+                class="entity-select-native"
+                value={selectedSourceEntityValue}
+                data-testid="swap-from-chain-select"
+                title={selectedSourceEntityLabel}
+                aria-label="Swap from account and network"
+                on:change={handleSourceEntityChange}
+              >
+                {#each sourceEntityOptions as option}
+                  <option value={option.value} title={option.label}>{option.label}</option>
+                {/each}
+              </select>
+              {#if sourceMenuOpen}
+                <div class="entity-menu" role="listbox" aria-label="Source account">
+                  {#each sourceEntityOptions as option}
+                    <button
+                      type="button"
+                      class:selected={option.value === selectedSourceEntityValue}
+                      class="entity-option"
+                      role="option"
+                      aria-selected={option.value === selectedSourceEntityValue}
+                      title={option.label}
+                      on:click|stopPropagation={() => selectSourceEntityOption(option.value)}
+                    >
+                      <span class="entity-avatar-wrap">
+                        {#if entityAvatarSrc(option.entityId)}
+                          <img class="entity-avatar-mini" src={entityAvatarSrc(option.entityId)} alt="" />
+                        {:else}
+                          <span class="entity-avatar-mini placeholder">{entityInitials(option.entityId, option.name)}</span>
+                        {/if}
+                        <span class="jurisdiction-mini-badge">{jurisdictionBadgeText(option.jurisdiction)}</span>
+                      </span>
+                      <span class="entity-select-copy">
+                        <strong>{option.name}</strong>
+                        <small>{option.jurisdiction}</small>
+                      </span>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
           </div>
           <div class="leg-main">
             <input
@@ -2568,17 +2789,47 @@
               data-testid="swap-order-amount"
               aria-label="Swap from amount"
             />
-            <select
-              class="token-select"
-              value={String(giveToken)}
-              data-testid="swap-from-token-select"
-              aria-label="Swap from token"
-              on:change={handleGiveTokenChange}
-            >
-              {#each swapTokenOptions as token}
-                <option value={token.tokenId}>{token.symbol}</option>
-              {/each}
-            </select>
+            <div class="token-select-wrap" data-swap-menu-root title={giveTokenSymbol}>
+              <button
+                type="button"
+                class="token-select-button"
+                aria-haspopup="listbox"
+                aria-expanded={openTokenMenu === 'give'}
+                on:click|stopPropagation={() => toggleTokenMenu('give')}
+              >
+                <span class={`token-dot token-${tokenClass(giveTokenSymbol)}`}>{tokenIconText(giveTokenSymbol)}</span>
+                <span class="token-select-visible" data-testid="swap-from-token-label">{giveTokenSymbol}</span>
+                <span class="token-select-chevron" aria-hidden="true">⌄</span>
+              </button>
+              <select
+                class="token-select-native"
+                value={String(giveToken)}
+                data-testid="swap-from-token-select"
+                aria-label="Swap from token"
+                on:change={handleGiveTokenChange}
+              >
+                {#each swapTokenOptions as token}
+                  <option value={token.tokenId}>{token.symbol}</option>
+                {/each}
+              </select>
+              {#if openTokenMenu === 'give'}
+                <div class="token-menu" role="listbox" aria-label="Sell token">
+                  {#each swapTokenOptions as token}
+                    <button
+                      type="button"
+                      class:selected={token.tokenId === giveToken}
+                      class="token-option"
+                      role="option"
+                      aria-selected={token.tokenId === giveToken}
+                      on:click|stopPropagation={() => selectGiveTokenOption(token.tokenId)}
+                    >
+                      <span class={`token-dot token-${tokenClass(token.symbol)}`}>{tokenIconText(token.symbol)}</span>
+                      <span>{token.symbol}</span>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
           </div>
           <div class="leg-meta">
             <span>{sourceAssetLabel}</span>
@@ -2599,18 +2850,65 @@
         <div class="swap-leg-card">
           <div class="leg-header">
             <span>To</span>
-            <select
-              class="chain-select"
-              bind:value={selectedRouteValue}
-              data-testid="swap-route-select"
-              aria-label="Swap to network"
-              title={selectedRouteLabel}
-              on:change={() => { submitError = ''; }}
-            >
-              {#each routeOptions as option}
-                <option value={option.value} disabled={option.disabled} title={option.label}>{option.label}</option>
-              {/each}
-            </select>
+            <div class="route-select-wrap" data-swap-menu-root>
+              <button
+                type="button"
+                class="chain-select route-menu-button"
+                aria-haspopup="listbox"
+                aria-expanded={routeMenuOpen}
+                title={selectedRouteLabel}
+                on:click|stopPropagation={toggleRouteMenu}
+              >
+                <span class={`route-glyph ${selectedRouteOption?.mode === 'cross' ? 'cross' : 'same'}`} aria-hidden="true">
+                  <span class="route-node route-node-a"></span>
+                  {#if selectedRouteOption?.mode === 'cross'}<span class="route-node route-node-b"></span>{/if}
+                  <span class="route-arrows">⇄</span>
+                </span>
+                <span>{selectedRouteLabel || 'Same account'}</span>
+                <em aria-hidden="true">⌄</em>
+              </button>
+              <select
+                class="route-select-native"
+                value={selectedRouteValue}
+                data-testid="swap-route-select"
+                aria-label="Swap to network"
+                title={selectedRouteLabel}
+                on:change={handleRouteSelectChange}
+              >
+                {#each routeOptions as option}
+                  <option value={option.value} disabled={option.disabled} title={option.label}>{option.label}</option>
+                {/each}
+              </select>
+              {#if routeMenuOpen}
+                <div class="route-menu" role="listbox" aria-label="Destination account">
+                  {#each routeOptions as option}
+                    <button
+                      type="button"
+                      class:selected={option.value === selectedRouteValue}
+                      class:disabled={option.disabled}
+                      class="route-option"
+                      role="option"
+                      aria-selected={option.value === selectedRouteValue}
+                      disabled={option.disabled}
+                      title={option.disabledReason || option.label}
+                      on:click|stopPropagation={() => selectRouteOption(option.value)}
+                    >
+                      <span class={`route-glyph ${option.mode}`} aria-hidden="true">
+                        <span class="route-node route-node-a"></span>
+                        {#if option.mode === 'cross'}<span class="route-node route-node-b"></span>{/if}
+                        <span class="route-arrows">⇄</span>
+                      </span>
+                      <span class="route-option-copy">
+                        <strong>{option.label}</strong>
+                        {#if option.disabledReason}
+                          <small>{option.disabledReason}</small>
+                        {/if}
+                      </span>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
           </div>
           <div class="leg-main">
             <input
@@ -2620,17 +2918,47 @@
               class="readonly-input receive-amount"
               aria-label="Estimated receive amount"
             />
-            <select
-              class="token-select"
-              value={String(wantToken)}
-              data-testid="swap-to-token-select"
-              aria-label="Swap to token"
-              on:change={handleWantTokenChange}
-            >
-              {#each swapTokenOptions as token}
-                <option value={token.tokenId}>{token.symbol}</option>
-              {/each}
-            </select>
+            <div class="token-select-wrap" data-swap-menu-root title={wantTokenSymbol}>
+              <button
+                type="button"
+                class="token-select-button"
+                aria-haspopup="listbox"
+                aria-expanded={openTokenMenu === 'want'}
+                on:click|stopPropagation={() => toggleTokenMenu('want')}
+              >
+                <span class={`token-dot token-${tokenClass(wantTokenSymbol)}`}>{tokenIconText(wantTokenSymbol)}</span>
+                <span class="token-select-visible" data-testid="swap-to-token-label">{wantTokenSymbol}</span>
+                <span class="token-select-chevron" aria-hidden="true">⌄</span>
+              </button>
+              <select
+                class="token-select-native"
+                value={String(wantToken)}
+                data-testid="swap-to-token-select"
+                aria-label="Swap to token"
+                on:change={handleWantTokenChange}
+              >
+                {#each swapTokenOptions as token}
+                  <option value={token.tokenId}>{token.symbol}</option>
+                {/each}
+              </select>
+              {#if openTokenMenu === 'want'}
+                <div class="token-menu" role="listbox" aria-label="Buy token">
+                  {#each swapTokenOptions as token}
+                    <button
+                      type="button"
+                      class:selected={token.tokenId === wantToken}
+                      class="token-option"
+                      role="option"
+                      aria-selected={token.tokenId === wantToken}
+                      on:click|stopPropagation={() => selectWantTokenOption(token.tokenId)}
+                    >
+                      <span class={`token-dot token-${tokenClass(token.symbol)}`}>{tokenIconText(token.symbol)}</span>
+                      <span>{token.symbol}</span>
+                    </button>
+                  {/each}
+                </div>
+              {/if}
+            </div>
           </div>
           <div class="leg-meta">
             <span>{targetAssetLabel}</span>
@@ -2672,17 +3000,71 @@
 
       <div class="venue-row">
         <span>Hub</span>
-        <select
-          value={createOrderAccountId}
-          data-testid="swap-account-select"
-          title={selectedHubLabel}
-          aria-label="Swap venue"
-          on:change={(event) => handleSelectedHubChange((event.currentTarget as HTMLSelectElement).value)}
-        >
-          {#each selectedHubOptions as hub (hub.value)}
-            <option value={hub.value} title={hub.label}>{hub.label}</option>
-          {/each}
-        </select>
+        <div class="entity-select-wrap hub-select-wrap" data-swap-menu-root>
+          <button
+            type="button"
+            class="entity-select-button"
+            aria-haspopup="listbox"
+            aria-expanded={hubMenuOpen}
+            title={selectedHubDisplayLabel}
+            on:click|stopPropagation={toggleHubMenu}
+          >
+            <span class="entity-avatar-wrap">
+              {#if createOrderAccountId && entityAvatarSrc(createOrderAccountId)}
+                <img class="entity-avatar-mini" src={entityAvatarSrc(createOrderAccountId)} alt="" />
+              {:else}
+                <span class="entity-avatar-mini placeholder">{entityInitials(createOrderAccountId, selectedHubLabel)}</span>
+              {/if}
+              <span class="jurisdiction-mini-badge">{jurisdictionBadgeText(selectedHubJurisdictionLabel)}</span>
+            </span>
+            <span class="entity-select-copy">
+              <strong>{selectedHubLabel}</strong>
+              <small>{selectedHubJurisdictionLabel}</small>
+            </span>
+            <span class="entity-select-chevron" aria-hidden="true">⌄</span>
+          </button>
+          <select
+            class="entity-select-native"
+            value={createOrderAccountId}
+            data-testid="swap-account-select"
+            title={selectedHubDisplayLabel}
+            aria-label="Swap venue"
+            on:change={(event) => handleSelectedHubChange((event.currentTarget as HTMLSelectElement).value)}
+          >
+            {#each selectedHubOptions as hub (hub.value)}
+              <option value={hub.value} title={formatEntityNetworkLabel(hub.label, hubJurisdictionLabel(hub.value))}>{formatEntityNetworkLabel(hub.label, hubJurisdictionLabel(hub.value))}</option>
+            {/each}
+          </select>
+          {#if hubMenuOpen}
+            <div class="entity-menu hub-menu" role="listbox" aria-label="Hub">
+              {#each selectedHubOptions as hub (hub.value)}
+                {@const hubJurisdiction = hubJurisdictionLabel(hub.value)}
+                <button
+                  type="button"
+                  class:selected={hub.value === createOrderAccountId}
+                  class="entity-option"
+                  role="option"
+                  aria-selected={hub.value === createOrderAccountId}
+                  title={formatEntityNetworkLabel(hub.label, hubJurisdiction)}
+                  on:click|stopPropagation={() => selectHubOption(hub.value)}
+                >
+                  <span class="entity-avatar-wrap">
+                    {#if entityAvatarSrc(hub.value)}
+                      <img class="entity-avatar-mini" src={entityAvatarSrc(hub.value)} alt="" />
+                    {:else}
+                      <span class="entity-avatar-mini placeholder">{entityInitials(hub.value, hub.label)}</span>
+                    {/if}
+                    <span class="jurisdiction-mini-badge">{jurisdictionBadgeText(hubJurisdiction)}</span>
+                  </span>
+                  <span class="entity-select-copy">
+                    <strong>{hub.label}</strong>
+                    <small>{hubJurisdiction}</small>
+                  </span>
+                </button>
+              {/each}
+            </div>
+          {/if}
+        </div>
       </div>
 
       <div class="size-slider-row">
@@ -2713,14 +3095,12 @@
       <div class="route-builder" class:cross-route={swapRouteMode === 'cross'} data-testid="swap-route-picker">
         <button type="button" class="route-summary" title={`${selectedRouteLabel} · ${routeVenueLabel}`} on:click={() => routeDetailsOpen = !routeDetailsOpen}>
           <span>Route</span>
-          <strong>{selectedRouteOption?.mode === 'cross' ? 'XLN cross-j' : 'XLN same-j'}</strong>
-          <em>{routeVenueLabel}</em>
+          <strong>{selectedRouteLabel || 'Same account'}</strong>
+          <em>{swapTokenPairLabel}</em>
         </button>
         <div class="route-flow" data-testid="swap-route-flow">
-          <span title={sourceRouteEntityLabel}>{sourceJurisdictionLabel}</span>
-          <strong>-&gt;</strong>
-          <span title={targetRouteEntityLabel}>{targetJurisdictionLabel}</span>
-          <em>{estimatedSpendLabel} / {estimatedReceiveLabel}</em>
+          <span title={`${sourceRouteEntityLabel} -> ${targetRouteEntityLabel}`}>{routePathLabel}</span>
+          <em>via {routeVenueLabel}</em>
         </div>
         {#if swapRouteMode === 'cross' && canAutoPrepareCrossInboundCapacity}
           <label class="route-checkbox" data-testid="swap-cross-auto-extend">
@@ -3212,8 +3592,8 @@
     align-items: center;
   }
 
-  .leg-header span,
-  .venue-row span {
+  .leg-header > span,
+  .venue-row > span {
     color: #8b94a7;
     font-size: 11px;
     font-weight: 700;
@@ -3222,7 +3602,8 @@
   }
 
   .chain-select,
-  .token-select,
+  .entity-select-native,
+  .token-select-native,
   .venue-row select {
     min-width: 0;
     border: 1px solid #232631;
@@ -3247,13 +3628,416 @@
     justify-self: end;
   }
 
-  .token-select {
-    width: 132px;
-    min-width: 108px;
+  .entity-select-wrap {
+    position: relative;
+    min-width: 0;
+    width: 100%;
+  }
+
+  .entity-select-button {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 9px;
+    width: 100%;
     min-height: 42px;
-    padding: 0 34px 0 10px;
-    flex-shrink: 0;
+    padding: 4px 10px 4px 7px;
+    border: 1px solid #232631;
+    border-radius: 8px;
+    background: #090b10;
+    color: #e5e7eb;
+    box-sizing: border-box;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .entity-select-button:hover,
+  .entity-option:hover {
+    border-color: rgba(251, 191, 36, 0.45);
+    background: #0c0f16;
+  }
+
+  .entity-avatar-wrap {
+    position: relative;
+    width: 30px;
+    height: 30px;
+    flex: 0 0 auto;
+  }
+
+  .entity-avatar-mini {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    object-fit: cover;
+    box-sizing: border-box;
+  }
+
+  .entity-avatar-mini.placeholder {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    background: #172033;
+    color: #dbeafe;
+    font-size: 10px;
+    font-weight: 900;
+  }
+
+  .jurisdiction-mini-badge {
+    position: absolute;
+    right: -5px;
+    bottom: -4px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    min-width: 17px;
+    height: 17px;
+    padding: 0 3px;
+    border-radius: 6px;
+    border: 1px solid rgba(251, 191, 36, 0.45);
+    background: #171107;
+    color: #f8d36f;
+    font-size: 8px;
+    font-weight: 900;
+    line-height: 1;
+    box-sizing: border-box;
+  }
+
+  .entity-select-copy {
+    display: grid;
+    gap: 1px;
+    min-width: 0;
+  }
+
+  .entity-select-copy strong,
+  .entity-select-copy small {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .entity-select-copy strong {
+    color: #f3f4f6;
     font-size: 13px;
+    font-weight: 900;
+    line-height: 1.15;
+  }
+
+  .entity-select-copy small {
+    color: #8b94a7;
+    font-size: 10px;
+    font-weight: 700;
+    line-height: 1.1;
+  }
+
+  .entity-select-chevron {
+    color: #cbd5e1;
+    font-size: 16px;
+    line-height: 1;
+  }
+
+  .entity-select-native {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .token-select-wrap {
+    position: relative;
+    width: 132px;
+    min-width: 112px;
+    min-height: 42px;
+    box-sizing: border-box;
+    flex-shrink: 0;
+  }
+
+  .token-select-button {
+    display: grid;
+    grid-template-columns: 24px minmax(48px, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    width: 100%;
+    min-height: 42px;
+    padding: 0 10px;
+    border: 1px solid #232631;
+    border-radius: 7px;
+    background: #090b10;
+    color: #e5e7eb;
+    box-sizing: border-box;
+    cursor: pointer;
+  }
+
+  .token-select-button:hover,
+  .route-menu-button:hover {
+    border-color: rgba(251, 191, 36, 0.45);
+    background: #0c0f16;
+  }
+
+  .token-dot {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 22px;
+    height: 22px;
+    border-radius: 50%;
+    border: 1px solid rgba(255, 255, 255, 0.16);
+    background: #1f2937;
+    color: #f8fafc;
+    font-size: 11px;
+    font-weight: 900;
+    line-height: 1;
+  }
+
+  .token-usdc {
+    background: #2563eb;
+  }
+
+  .token-usdt {
+    background: #059669;
+  }
+
+  .token-weth,
+  .token-eth {
+    background: #64748b;
+  }
+
+  .token-select-visible,
+  .token-option span:last-child {
+    min-width: 0;
+    overflow: hidden;
+    color: #e5e7eb;
+    font-size: 13px;
+    font-weight: 900;
+    line-height: 1.2;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .token-select-chevron {
+    color: #cbd5e1;
+    font-size: 16px;
+    line-height: 1;
+    pointer-events: none;
+  }
+
+  .token-select-native {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .token-select-wrap:focus-within .token-select-button {
+    border-color: rgba(251, 191, 36, 0.65);
+  }
+
+  .entity-menu,
+  .token-menu,
+  .route-menu {
+    position: absolute;
+    z-index: 40;
+    right: 0;
+    top: calc(100% + 6px);
+    display: grid;
+    gap: 4px;
+    padding: 6px;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    border-radius: 12px;
+    background: rgba(18, 19, 24, 0.98);
+    box-shadow: 0 18px 42px rgba(0, 0, 0, 0.42);
+  }
+
+  .token-menu {
+    min-width: 150px;
+  }
+
+  .entity-menu {
+    left: 0;
+    right: 0;
+  }
+
+  .hub-menu {
+    top: calc(100% + 6px);
+  }
+
+  .entity-option,
+  .token-option,
+  .route-option {
+    border: 0;
+    border-radius: 9px;
+    background: transparent;
+    color: #e5e7eb;
+    cursor: pointer;
+    text-align: left;
+  }
+
+  .entity-option {
+    display: grid;
+    grid-template-columns: 32px minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+    min-height: 46px;
+    padding: 7px 9px;
+    border: 1px solid transparent;
+  }
+
+  .entity-option.selected {
+    border-color: rgba(251, 191, 36, 0.28);
+    background: rgba(251, 191, 36, 0.12);
+  }
+
+  .token-option {
+    display: grid;
+    grid-template-columns: 24px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    min-height: 40px;
+    padding: 0 10px;
+    font-size: 13px;
+    font-weight: 900;
+  }
+
+  .token-option:hover,
+  .route-option:hover {
+    background: rgba(255, 255, 255, 0.07);
+  }
+
+  .token-option.selected,
+  .route-option.selected {
+    background: rgba(251, 191, 36, 0.14);
+    color: #fde68a;
+  }
+
+  .route-select-wrap {
+    position: relative;
+    min-width: 0;
+  }
+
+  .route-menu-button {
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr) auto;
+    gap: 8px;
+    align-items: center;
+    text-align: left;
+  }
+
+  .route-menu-button > span:not(.route-glyph) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    text-transform: none;
+  }
+
+  .route-menu-button em {
+    color: #cbd5e1;
+    font-style: normal;
+  }
+
+  .route-select-native {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    opacity: 0;
+    pointer-events: none;
+  }
+
+  .route-menu {
+    left: 0;
+    right: 0;
+  }
+
+  .route-option {
+    display: grid;
+    grid-template-columns: 30px minmax(0, 1fr);
+    gap: 10px;
+    align-items: center;
+    min-height: 44px;
+    padding: 8px 10px;
+  }
+
+  .route-option.disabled {
+    opacity: 0.52;
+    cursor: not-allowed;
+  }
+
+  .route-glyph {
+    position: relative;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: 28px;
+    height: 28px;
+    color: #93c5fd;
+  }
+
+  .route-node {
+    position: absolute;
+    width: 20px;
+    height: 20px;
+    border-radius: 7px;
+    border: 1px solid rgba(96, 165, 250, 0.38);
+    background: rgba(96, 165, 250, 0.11);
+    box-sizing: border-box;
+  }
+
+  .route-glyph.same .route-node-a {
+    left: 4px;
+    top: 4px;
+  }
+
+  .route-glyph.cross .route-node-a {
+    left: 1px;
+    top: 5px;
+  }
+
+  .route-glyph.cross .route-node-b {
+    right: 1px;
+    top: 5px;
+    border-color: rgba(251, 191, 36, 0.42);
+    background: rgba(251, 191, 36, 0.12);
+  }
+
+  .route-arrows {
+    position: relative;
+    z-index: 1;
+    color: #dbeafe;
+    font-size: 13px;
+    font-weight: 900;
+    line-height: 1;
+  }
+
+  .route-option-copy {
+    display: grid;
+    gap: 2px;
+    min-width: 0;
+    text-transform: none;
+  }
+
+  .route-option-copy strong,
+  .route-option-copy small {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .route-option-copy strong {
+    color: #e5e7eb;
+    font-size: 13px;
+    font-weight: 900;
+  }
+
+  .route-option-copy small {
+    color: #8b94a7;
+    font-size: 11px;
   }
 
   .leg-main input {
@@ -3561,8 +4345,9 @@
     color-scheme: dark;
   }
 
-  .chain-select option,
-  .token-select option,
+  .entity-select-native option,
+  .token-select-native option,
+  .route-select-native option,
   .venue-row select option,
   .route-select option {
     background: #0f1117;
@@ -3571,7 +4356,7 @@
 
   .route-flow {
     display: grid;
-    grid-template-columns: minmax(0, auto) auto minmax(0, auto) minmax(0, 1fr);
+    grid-template-columns: minmax(0, 1fr) auto;
     align-items: center;
     gap: 7px;
     min-height: 30px;
@@ -3593,12 +4378,6 @@
     color: #9ca3af;
     font-size: 11px;
     font-weight: 700;
-  }
-
-  .route-flow strong {
-    color: #6b7280;
-    font-size: 12px;
-    font-weight: 900;
   }
 
   .route-flow em {
@@ -4237,7 +5016,7 @@
       flex-wrap: wrap;
     }
 
-    .token-select {
+    .token-select-wrap {
       flex: 1 1 120px;
       width: auto;
     }

@@ -26,6 +26,7 @@ import {
   cloneCrossJurisdictionAccountTxRoute,
   cloneCrossJurisdictionAccountInputRoute,
   cloneCrossJurisdictionRoute,
+  cloneCrossJurisdictionPullBinding,
   cloneCrossJurisdictionSwapHistoryRoute,
   cloneCrossJurisdictionSwapOfferRoute,
 } from './cross-jurisdiction';
@@ -68,6 +69,14 @@ const cloneCrossJurisdictionRoutesInAccount = (account: AccountMachine): void =>
     Array.from((account.swapOffers ?? new Map()).entries()).map(([id, offer]) => [
       id,
       cloneCrossJurisdictionSwapOfferRoute(offer),
+    ]),
+  );
+  account.pulls = new Map(
+    Array.from((account.pulls ?? new Map()).entries()).map(([id, pull]) => [
+      id,
+      pull.crossJurisdiction
+        ? { ...pull, crossJurisdiction: cloneCrossJurisdictionPullBinding(pull.crossJurisdiction) }
+        : { ...pull },
     ]),
   );
   if (account.swapOrderHistory instanceof Map) {

@@ -266,7 +266,7 @@ export class RuntimeP2P {
           this.syncDirectPeerConnections();
         },
         onEntityInput: async (from, input, timestamp) => {
-          this.prefetchProfilesForInput(input);
+          await this.ensureProfilesForInput(input);
           this.onEntityInput(from, input, timestamp);
         },
         onGossipRequest: (from, payload) => this.handleGossipRequest(from, payload),
@@ -614,7 +614,7 @@ export class RuntimeP2P {
     void entityId;
   }
 
-  private prefetchProfilesForInput(input: RoutedEntityInput): void {
+  private collectProfileEntityIdsForInput(input: RoutedEntityInput): string[] {
     const entitiesToCheck = new Set<string>();
     if (input.entityId) entitiesToCheck.add(input.entityId);
 
@@ -632,9 +632,29 @@ export class RuntimeP2P {
       }
     }
 
-    const missingEntities = Array.from(entitiesToCheck).filter(entityId => !this.hasProfileForEntity(entityId));
+    return Array.from(entitiesToCheck).filter(Boolean);
+  }
+
+  private async ensureProfilesForInput(input: RoutedEntityInput): Promise<boolean> {
+    const missingEntities = this.collectProfileEntityIdsForInput(input)
+      .filter(entityId => !this.hasProfileForEntity(entityId));
+    if (missingEntities.length === 0) return true;
+    const resolved = await this.ensureProfiles(missingEntities);
+    if (!resolved) {
+      this.env.warn('network', 'P2P_INPUT_PROFILE_PREFETCH_MISS', {
+        missingEntities,
+        entityId: input.entityId,
+        txTypes: input.entityTxs?.map(tx => tx.type) || [],
+      });
+    }
+    return resolved;
+  }
+
+  private prefetchProfilesForInput(input: RoutedEntityInput): void {
+    const missingEntities = this.collectProfileEntityIdsForInput(input)
+      .filter(entityId => !this.hasProfileForEntity(entityId));
     if (missingEntities.length === 0) return;
-    void this.ensureProfiles(missingEntities).catch(error => {
+    void this.ensureProfilesForInput(input).catch(error => {
       this.env.warn('network', 'P2P_FETCH_PROFILE_FAILED', { error: (error as Error).message });
     });
   }
@@ -800,6 +820,23 @@ export class RuntimeP2P {
       });
       logSlowBrowserTimer('p2p.announce-debounce', startedAt, `targets=${targets.length} reason=${reason}`);
     }, PROFILE_ANNOUNCE_DEBOUNCE_MS);
+  }
+
+  async announceProfilesForEntitiesNow(entityIds: string[], reason: string = 'runtime-change'): Promise<void> {
+    if (!entityIds || entityIds.length === 0) return;
+    const targets = new Set<string>();
+    for (const pending of this.pendingAnnounceEntities) {
+      if (pending) targets.add(normalizeId(pending));
+    }
+    for (const entityId of entityIds) {
+      if (entityId) targets.add(normalizeId(entityId));
+    }
+    this.pendingAnnounceEntities.clear();
+    if (this.announceTimer) {
+      clearTimeout(this.announceTimer);
+      this.announceTimer = null;
+    }
+    await this.announceProfilesNow(Array.from(targets), reason);
   }
 
   private async announceProfilesNow(entityIds: string[], reason: string) {
@@ -1132,7 +1169,7 @@ export class RuntimeP2P {
         this.flushPending();
       },
       onEntityInput: async (from, input, timestamp) => {
-        this.prefetchProfilesForInput(input);
+        await this.ensureProfilesForInput(input);
         this.onEntityInput(from, input, timestamp);
       },
       onError: (error) => {

@@ -17,7 +17,12 @@ import { createDefaultDelta } from '../../validation-utils';
 import { deriveSide, SWAP_LOT_SCALE, ORDERBOOK_PRICE_SCALE, prepareSwapOrder } from '../../orderbook';
 import { FINANCIAL, LIMITS } from '../../constants';
 import { recordSwapOfferLifecycle } from './swap-history';
-import { cloneCrossJurisdictionRoute, deriveCanonicalCrossJurisdictionMarket } from '../../cross-jurisdiction';
+import {
+  cloneCrossJurisdictionRoute,
+  deriveCanonicalCrossJurisdictionMarket,
+  withCanonicalCrossJurisdictionRouteHash,
+} from '../../cross-jurisdiction';
+import { getCrossJurisdictionBookReceiptError } from '../../cross-jurisdiction-orderbook';
 
 const computePriceTicks = (side: 0 | 1, baseAmount: bigint, quoteAmount: bigint, stepTicks: bigint): bigint => {
   if (baseAmount <= 0n || quoteAmount <= 0n || stepTicks <= 0n) return 0n;
@@ -197,6 +202,7 @@ export async function handleSwapOffer(
   }
 
   if (crossJurisdiction) {
+    const canonicalCrossJurisdiction = withCanonicalCrossJurisdictionRouteHash(crossJurisdiction);
     const sourcePull = crossJurisdiction.sourcePull;
     const pairedPull = sourcePull ? accountMachine.pulls?.get(sourcePull.pullId) : undefined;
     if (!sourcePull || !pairedPull) {
@@ -217,6 +223,30 @@ export async function handleSwapOffer(
       return {
         success: false,
         error: `Cross-j swap offer source pull mismatch`,
+        events,
+      };
+    }
+    const binding = pairedPull.crossJurisdiction;
+    const targetReceipt = binding?.targetReceipt ?? crossJurisdiction.targetReceipt;
+    if (
+      !binding ||
+      binding.leg !== 'source' ||
+      binding.orderId !== canonicalCrossJurisdiction.orderId ||
+      (binding.routeHash || '').toLowerCase() !== (canonicalCrossJurisdiction.routeHash || '').toLowerCase() ||
+      !targetReceipt ||
+      targetReceipt.leg !== 'target'
+    ) {
+      return {
+        success: false,
+        error: `Cross-j source pull requires target receipt binding`,
+        events,
+      };
+    }
+    const receiptError = getCrossJurisdictionBookReceiptError(canonicalCrossJurisdiction, targetReceipt);
+    if (receiptError) {
+      return {
+        success: false,
+        error: receiptError,
         events,
       };
     }

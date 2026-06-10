@@ -345,6 +345,9 @@ export type CrossOrderbookFill = {
 const clampCrossJurisdictionFillRatio = (value: unknown): number =>
   Math.max(0, Math.min(CROSS_J_MAX_FILL_RATIO, Math.floor(Number(value) || 0)));
 
+const scaleByExactFillRatio = (total: bigint, numerator: bigint, denominator: bigint): bigint =>
+  numerator >= denominator ? total : (total * numerator) / denominator;
+
 export const getCrossJurisdictionRouteRemainingAmounts = (
   route: CrossJurisdictionSwapRoute,
 ): {
@@ -471,22 +474,43 @@ export const buildCrossJurisdictionFillAck = (
     meta.route.filledSourceAmount ??
     meta.route.sourceClaimed ??
     ((sourceTotal * BigInt(previousCumulativeRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO));
-  const desiredSourceClaimed = previousSourceClaimed + sourceAmount;
-  const cappedSourceClaimed = desiredSourceClaimed >= sourceTotal ? sourceTotal : desiredSourceClaimed;
-  const exactFillRatio = deriveExactSwapFillRatio(sourceTotal, cappedSourceClaimed);
-  const fillRatio = exactFillRatioToUint16(exactFillRatio);
-  if (fillRatio <= previousCumulativeRatio) return null;
-
-  const settlementSourceAmount =
-    (sourceTotal * BigInt(fillRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO) - previousSourceClaimed;
   const previousTargetClaimed =
     meta.route.filledTargetAmount ??
     meta.route.targetClaimed ??
     ((targetTotal * BigInt(previousCumulativeRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO));
-  const settlementTargetAmount =
-    (targetTotal * BigInt(fillRatio)) / BigInt(CROSS_J_MAX_FILL_RATIO) - previousTargetClaimed;
-  if (settlementSourceAmount <= 0n || settlementTargetAmount <= 0n) return null;
   const priceImprovementMode = meta.route.priceImprovementMode ?? 'source_savings';
+  // Hash-ledger ratio is the committed order-progress ratio. Price improvement
+  // is execution economics only: source_savings preserves target progress and
+  // spends less source, while target_bonus preserves source progress and pays
+  // more target. Never derive the ratio from the improved amount itself.
+  const exactFillRatio = priceImprovementMode === 'source_savings'
+    ? deriveExactSwapFillRatio(
+        targetTotal,
+        previousTargetClaimed + targetAmount >= targetTotal ? targetTotal : previousTargetClaimed + targetAmount,
+      )
+    : deriveExactSwapFillRatio(
+        sourceTotal,
+        previousSourceClaimed + sourceAmount >= sourceTotal ? sourceTotal : previousSourceClaimed + sourceAmount,
+      );
+  const fillRatio = exactFillRatioToUint16(exactFillRatio);
+  if (fillRatio <= previousCumulativeRatio) return null;
+
+  // Keep settlement amounts exact. The uint16 ratio is only a coarse
+  // hash-ladder/dispute projection; using it here creates dust-sized drift on
+  // partial fills (for example exact 1/4 becomes 16384/65535).
+  const exactCumulativeSource = scaleByExactFillRatio(
+    sourceTotal,
+    exactFillRatio.numerator,
+    exactFillRatio.denominator,
+  );
+  const exactCumulativeTarget = scaleByExactFillRatio(
+    targetTotal,
+    exactFillRatio.numerator,
+    exactFillRatio.denominator,
+  );
+  const settlementSourceAmount = exactCumulativeSource - previousSourceClaimed;
+  const settlementTargetAmount = exactCumulativeTarget - previousTargetClaimed;
+  if (settlementSourceAmount <= 0n || settlementTargetAmount <= 0n) return null;
   const sourceSavings = settlementSourceAmount > sourceAmount ? settlementSourceAmount - sourceAmount : 0n;
   const targetBonus = targetAmount > settlementTargetAmount ? targetAmount - settlementTargetAmount : 0n;
   const priceImprovementAmount = priceImprovementMode === 'source_savings'

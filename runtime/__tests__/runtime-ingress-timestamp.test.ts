@@ -176,6 +176,22 @@ describe('runtime ingress timestamp', () => {
     expect(updatedReplica?.state.crontabState?.hooks?.has('watchdog:due-after-ingress')).toBe(false);
   });
 
+  test('direct live process inputs stamp R-frame from block creation time', async () => {
+    const env = createIsolatedEnv('runtime-ingress-timestamp-seed');
+    env.quietRuntimeLogs = true;
+    env.timestamp = 1_000;
+
+    const entityId = `0x${'44'.repeat(32)}`;
+    const replica = makeReplica(entityId, 1_000);
+    env.eReplicas.set(`${entityId}:1`, replica);
+
+    const before = Date.now();
+    await process(env, [{ entityId, signerId: '1', entityTxs: [] }]);
+
+    expect(env.timestamp).toBeGreaterThanOrEqual(before);
+    expect(env.timestamp).toBeLessThanOrEqual(Date.now() + TIMING.TIMESTAMP_DRIFT_MS);
+  });
+
   test('empty entity ingress advances runtime clock and fires due hooks', async () => {
     const env = createIsolatedEnv('runtime-ingress-timestamp-seed');
     env.quietRuntimeLogs = true;
@@ -200,7 +216,8 @@ describe('runtime ingress timestamp', () => {
 
     await process(env);
 
-    expect(env.timestamp).toBe(20_000);
+    expect(env.timestamp).toBeGreaterThanOrEqual(10_000);
+    expect(env.timestamp).toBeLessThanOrEqual(Date.now() + TIMING.TIMESTAMP_DRIFT_MS);
     const updatedReplica = env.eReplicas.get(`${entityId}:1`);
     expect(updatedReplica?.state.crontabState?.hooks?.has('watchdog:due-after-empty-ingress')).toBe(false);
   });

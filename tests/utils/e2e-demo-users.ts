@@ -18,6 +18,7 @@ export type DemoUserIdentity = {
 
 type CreateRuntimeOptions = {
   requireOnline?: boolean;
+  requiresOnboarding?: boolean;
   workFactor?: number;
 };
 
@@ -480,6 +481,10 @@ async function dismissOnboardingIfVisible(page: Page): Promise<void> {
         /^(Start|Start using XLN|Continue)$/i.test(String(button.textContent || '').trim()),
       );
     if (!hasOnboarding) return false;
+    // Profile onboarding owns real setup side effects such as initial hub joins.
+    // Do not mark it complete through localStorage here; completeProfileOnboardingIfVisible()
+    // must press Start so the app runs the same finish() path a user does.
+    if (document.querySelector('#display-name')) return false;
 
     const entityIds = Array.from(document.querySelectorAll('code'))
       .map((node) => String(node.textContent || '').trim())
@@ -813,7 +818,8 @@ export async function createRuntime(
 
   if (canCreateDirectly) {
     const loginType = isQuickLoginDemo ? 'demo' : 'manual';
-    await page.evaluate(async ({ runtimeLabel, seed, loginType }) => {
+    const requiresOnboarding = options.requiresOnboarding === true;
+    await page.evaluate(async ({ runtimeLabel, seed, loginType, requiresOnboarding }) => {
       const view = window as typeof window & {
         __xlnVaultOperations?: {
           createRuntime?: (name: string, seed: string, options?: Record<string, unknown>) => Promise<unknown>;
@@ -825,11 +831,15 @@ export async function createRuntime(
       }
       await operations.createRuntime(runtimeLabel, seed, {
         loginType,
-        requiresOnboarding: false,
+        requiresOnboarding,
       });
-    }, { runtimeLabel: label, seed: mnemonic, loginType });
+    }, { runtimeLabel: label, seed: mnemonic, loginType, requiresOnboarding });
     await waitForRuntimeReady(page, runtimeId);
     runtimeIdsByLabel.set(label.toLowerCase(), runtimeId);
+    if (requiresOnboarding) {
+      await completeProfileOnboardingIfVisible(page, label);
+      await waitForRuntimeReady(page, runtimeId);
+    }
     if (options.requireOnline !== false) {
       await ensureRuntimeOnline(page, `create-${label}`);
     }

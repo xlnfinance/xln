@@ -19,6 +19,7 @@ import {
   getCrossJurisdictionBookAdmissionError,
   mergeCrossJurisdictionBookAdmission,
 } from '../cross-jurisdiction-orderbook';
+import { buildCrossJurisdictionPullBinding } from '../cross-jurisdiction';
 import { applyEntityTx } from '../entity-tx/apply';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity-tx/handlers/account-cross-j-followups';
 import { handleAdmitCrossJurisdictionBookOrderEntityTx } from '../entity-tx/handlers/cross-j-book-order';
@@ -623,8 +624,33 @@ describe('audit fail-fast regressions', () => {
       updatedAt: 1_000,
       expiresAt: 60_000,
     } satisfies CrossJurisdictionSwapRoute;
+    const targetReceipt = buildCrossJurisdictionBookAdmissionReceipt(
+      route,
+      'target',
+      {
+        type: 'pull_lock',
+        data: {
+          pullId: targetPull.pullId,
+          tokenId: targetPull.tokenId,
+          amount: targetPull.signedAmount,
+          revealedUntilTimestamp: targetPull.revealedUntilTimestamp,
+          fullHash: targetPull.fullHash,
+          partialRoot: targetPull.partialRoot,
+        },
+      },
+      targetHub,
+      targetUser,
+      1_001,
+    );
+    const admittedRoute = { ...route, targetReceipt } satisfies CrossJurisdictionSwapRoute;
     const account = makeProposalAccount([], sourceUser, sourceHub);
-    (account as AccountMachine & { pulls: Map<string, typeof sourcePull> }).pulls = new Map([[sourcePull.pullId, sourcePull]]);
+    (account as AccountMachine & { pulls: Map<string, typeof sourcePull> }).pulls = new Map([[
+      sourcePull.pullId,
+      {
+        ...sourcePull,
+        crossJurisdiction: buildCrossJurisdictionPullBinding(admittedRoute, 'source'),
+      },
+    ]]);
 
     const result = await handleSwapOffer(account, {
       type: 'swap_offer',
@@ -636,7 +662,7 @@ describe('audit fail-fast regressions', () => {
         wantAmount: route.target.amount,
         priceTicks: 20_000n,
         minFillRatio: 0,
-        crossJurisdiction: route,
+        crossJurisdiction: admittedRoute,
       },
     }, true, 1);
 
@@ -937,6 +963,35 @@ describe('audit fail-fast regressions', () => {
     const frameDelta = result.accountInput?.newAccountFrame?.deltas.find((delta) => delta.tokenId === 1);
     expect(frameDelta?.offdelta).toBe(0n);
     expect(frameDelta?.rightCreditLimit).toBe(500n);
+  });
+
+  test('proposeAccountFrame throws instead of dropping invalid cross-j fill ack', async () => {
+    const env = createEmptyEnv('cross-fill-ack-propose-failfast');
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const left = `0x${'11'.repeat(32)}`;
+    const right = `0x${'22'.repeat(32)}`;
+    const account = makeProposalAccount([
+      {
+        type: 'cross_swap_fill_ack',
+        data: {
+          offerId: 'missing-cross-offer',
+          fillSeq: 1,
+          incrementalSourceAmount: 1n,
+          incrementalTargetAmount: 1n,
+          cumulativeSourceAmount: 1n,
+          cumulativeTargetAmount: 1n,
+          cumulativeFillRatio: 1,
+          executionSourceAmount: 1n,
+          executionTargetAmount: 1n,
+          cancelRemainder: false,
+          pairId: 'cross:testnet:1/tron:1',
+        },
+      },
+    ], left, right);
+
+    await expect(proposeAccountFrame(env, account)).rejects.toThrow(/CROSS_J_FILL_ACK_PROPOSAL_FAILED/);
+    expect(account.mempool).toHaveLength(1);
   });
 
   test('entity frame commits mark the entity core doc dirty for storage replay', async () => {

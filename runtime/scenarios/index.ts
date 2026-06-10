@@ -57,6 +57,13 @@ export const SCENARIOS: ScenarioMetadata[] = [
     run: async (env: Env) => (await import('./swap-market')).swapMarket(env),
   },
   {
+    id: 'swap-tps',
+    name: 'Swap TPS Benchmark',
+    description: 'Pure orderbook matcher throughput gate: 100k swaps, minimum 10k TPS',
+    tags: ['swap', 'orderbook', 'benchmark'],
+    run: async (env: Env) => (await import('./swap-tps')).swapTps(env),
+  },
+  {
     id: 'multi-sig',
     name: 'Multi-Signer BFT',
     description: '2-of-3 threshold consensus, byzantine tolerance, offline validator simulation',
@@ -121,6 +128,7 @@ export const scenarioRegistry: ScenarioEntry[] = [
   { key: 'htlc-4hop', name: 'HTLC 4-Hop', load: async () => (await import('./htlc-4hop')).htlc4hop },
   { key: 'swap', name: 'Swap Trading', load: async () => (await import('./swap')).swap },
   { key: 'swap-market', name: 'Swap Market', load: async () => (await import('./swap-market')).swapMarket },
+  { key: 'swap-tps', name: 'Swap TPS', load: async () => (await import('./swap-tps')).swapTps },
   { key: 'grid', name: 'Grid', load: async () => (await import('./grid')).grid },
   { key: 'multi-sig', name: 'Multi-Sig', load: async () => (await import('./multi-sig')).multiSig },
   {

@@ -130,7 +130,7 @@ async function startWatchtower(): Promise<WatchtowerChild> {
       '--host', '127.0.0.1',
       '--port', String(port),
       '--db', join(dbRoot, 'watchtower.level'),
-      '--quota-bytes', String(256 * 1024),
+      '--quota-bytes', String(4 * 1024 * 1024),
     ],
     {
       cwd: process.cwd(),
@@ -558,6 +558,30 @@ async function waitForCommittedPrimaryLocalAccountState(page: Page) {
   throw new Error(`local hub account did not reach committed pre-wipe state: ${JSON.stringify(last)}`);
 }
 
+async function waitForCommittedLocalHubAccountAdvance(
+  page: Page,
+  hubId: string,
+  baselineHeight: number,
+  label: string,
+): Promise<Awaited<ReturnType<typeof readLocalHubAccountState>>> {
+  await expect
+    .poll(async () => {
+      const state = await readLocalHubAccountState(page, hubId);
+      return state.accountExists
+        && !state.hasPendingFrame
+        && state.currentHeight > baselineHeight;
+    }, {
+      timeout: CHANNEL_OP_TIMEOUT_MS,
+      intervals: [250, 500, 1_000],
+      message: `${label} must leave the hub account committed before the next payment`,
+    })
+    .toBe(true);
+
+  const state = await readLocalHubAccountState(page, hubId);
+  expect(state.hasPendingFrame, `${label} must not leave a pending account frame`).toBe(false);
+  return state;
+}
+
 async function waitForWatchtowerReceipt(
   baseUrl: string,
   lookupKey: string,
@@ -585,6 +609,85 @@ async function waitForWatchtowerReceipt(
     await delay(500);
   }
   throw new Error(`watchtower receipt >= ${minHeight} did not appear for ${lookupKey.slice(0, 12)}`);
+}
+
+async function wipeBrowserRuntimeState(page: Page, context: BrowserContext, towerUrls: string[]): Promise<Page> {
+  await page.evaluate(async (urls) => {
+    const formatError = (error: unknown): string =>
+      error instanceof Error ? error.message : String(error);
+    const view = window as typeof window & {
+      XLN?: {
+        stopP2P?: (env: unknown) => void;
+        closeRuntimeDb?: (env: unknown) => Promise<void>;
+        closeInfraDb?: (env: unknown) => Promise<void>;
+      };
+      __xln_instance?: {
+        stopP2P?: (env: unknown) => void;
+        closeRuntimeDb?: (env: unknown) => Promise<void>;
+        closeInfraDb?: (env: unknown) => Promise<void>;
+      };
+      __XLN_WATCHTOWERS__?: string[];
+      isolatedEnv?: {
+        jReplicas?: Map<string, {
+          jadapter?: {
+            stopWatching?: () => void;
+          };
+        }>;
+        runtimeState?: {
+          stopLoop?: () => void;
+          loopActive?: boolean;
+        };
+      };
+    };
+    const errors: string[] = [];
+    const env = view.isolatedEnv;
+    const xln = view.XLN || view.__xln_instance;
+    if (!env) throw new Error('Cannot wipe runtime state: isolatedEnv missing');
+    if (typeof xln?.closeRuntimeDb !== 'function' || typeof xln.closeInfraDb !== 'function') {
+      throw new Error('Cannot wipe runtime state: DB close API missing');
+    }
+
+    // This is a real device wipe for the recovery test. Stop the live runtime
+    // before closing the tab. The browser releases any hidden bootstrap DB
+    // handles when the tab closes; /resetdb then performs the real storage wipe
+    // from a fresh page with no live runtime holding IndexedDB locks.
+    try {
+      for (const replica of env?.jReplicas?.values?.() || []) {
+        replica.jadapter?.stopWatching?.();
+      }
+    } catch (error) {
+      errors.push(`stop watchers: ${formatError(error)}`);
+    }
+    try {
+      xln?.stopP2P?.(env);
+    } catch (error) {
+      errors.push(`stop p2p: ${formatError(error)}`);
+    }
+    try {
+      await xln.closeRuntimeDb(env);
+      await xln.closeInfraDb(env);
+    } catch (error) {
+      errors.push(`close runtime db: ${formatError(error)}`);
+    }
+    try {
+      env?.runtimeState?.stopLoop?.();
+      if (env?.runtimeState) env.runtimeState.loopActive = false;
+    } catch (error) {
+      errors.push(`stop runtime loop: ${formatError(error)}`);
+    }
+    if (errors.length > 0) {
+      throw new Error(`Failed to stop runtime before wipe: ${errors.join(' | ')}`);
+    }
+    view.__XLN_WATCHTOWERS__ = urls;
+  }, towerUrls);
+  await page.close();
+  const nextPage = await context.newPage();
+  await nextPage.addInitScript((urls: string[]) => {
+    window.localStorage.setItem('xln-watchtower-urls', JSON.stringify(urls));
+    (window as typeof window & { __XLN_WATCHTOWERS__?: string[] }).__XLN_WATCHTOWERS__ = urls;
+  }, towerUrls);
+  await nextPage.goto(`${APP_BASE_URL}/resetdb?returnTo=/app`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+  return nextPage;
 }
 
 async function readRecoveryUiDiagnostics(page: Page): Promise<Record<string, unknown>> {
@@ -677,7 +780,7 @@ test.describe('watchtower runtime recovery', () => {
       expect(receipt.height, 'watchtower backup must include the committed pre-wipe runtime height').toBeGreaterThanOrEqual(preWipe.runtimeHeight);
       expect(receipt.storedBytes, 'watchtower backup must store encrypted runtime bytes').toBeGreaterThan(0);
 
-      await page.goto(`${APP_BASE_URL}/resetdb?returnTo=/app`, { waitUntil: 'domcontentloaded', timeout: 30_000 });
+      page = await wipeBrowserRuntimeState(page, context, [tower.baseUrl]);
       await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
       await expect
         .poll(async () => await page.evaluate(() => {
@@ -736,10 +839,17 @@ test.describe('watchtower runtime recovery', () => {
       ]);
 
       const senderBeforeFaucet = await getRenderedOutboundForAccount(page, hubId);
+      const senderCommittedBeforeFaucet = await readLocalHubAccountState(page, hubId);
       await faucetOffchain(page, restored.entityId, hubId);
       const senderAfterFaucet = await waitForRenderedOutboundForAccountDelta(page, hubId, senderBeforeFaucet, 100, {
         timeoutMs: CHANNEL_OP_TIMEOUT_MS,
       });
+      await waitForCommittedLocalHubAccountAdvance(
+        page,
+        hubId,
+        senderCommittedBeforeFaucet.currentHeight,
+        'post-restore faucet',
+      );
 
       const recipientBeforePayment = await getRenderedOutboundForAccount(recipientPage, hubId);
       const senderCursor = await getPersistedReceiptCursor(page);

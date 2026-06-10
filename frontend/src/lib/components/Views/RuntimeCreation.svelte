@@ -6,25 +6,18 @@
   import { appStateOperations } from '$lib/stores/appStateStore';
   import {
     vaultOperations,
-    activeRuntime,
-    activeSigner,
     allRuntimes,
   } from '$lib/stores/vaultStore';
-  import { deriveRequestSignal, showVaultPanel, vaultUiOperations } from '$lib/stores/vaultUiStore';
-  import { xlnFunctions } from '$lib/stores/xlnStore';
-  import type { Tab } from '$lib/types/ui';
-  import ContextSwitcher from '$lib/components/Entity/ContextSwitcher.svelte';
+  import { deriveRequestSignal, vaultUiOperations } from '$lib/stores/vaultUiStore';
   import { resetEverything } from '$lib/utils/resetEverything';
   import {
     BRAINVAULT_V1,
     bytesToHex,
     combineShards,
     deriveEthereumAddress,
-    deriveEthereumAddressMatrix,
     deriveKey,
     entropyToMnemonic,
     estimatePasswordStrength,
-    formatDuration,
     getShardCount,
     hexToBytes,
   } from '@xln/brainvault/core';
@@ -47,16 +40,7 @@
   // Props
   export let embedded: boolean = false;
 
-  // Initialize i18n
-  let i18nReady = false;
   $: t = $translations$;
-
-  // ============================================================================
-  // CONSTANTS
-  // ============================================================================
-
-  $: avatarFns = $xlnFunctions;
-  $: avatar = ethereumAddress ? avatarFns.hashToAvatar(ethereumAddress, 80) : '';
 
   function suggestPassphrase(): void {
     // Generate 10 Base58 chars = ~58.5 bits of entropy (log2(58^10))
@@ -77,7 +61,7 @@
   // STATE
   // ============================================================================
 
-  type Phase = 'input' | 'deriving' | 'complete';
+  type Phase = 'input' | 'deriving';
   type InputMode = 'brainvault' | 'mnemonic';
 
   let inputMode: InputMode = 'brainvault';
@@ -91,15 +75,6 @@
     }
   }
   let createLoginType: 'manual' | 'demo' = 'manual';
-  let showSuccessHeader = true;
-  let successHeaderTimeout: ReturnType<typeof setTimeout> | null = null;
-
-  // Auto-hide success header after 2.5 seconds
-  $: if (phase === 'complete' && showSuccessHeader) {
-    successHeaderTimeout = setTimeout(() => {
-      showSuccessHeader = false;
-    }, 2500);
-  }
 
   // Input state
   let name = '';
@@ -150,8 +125,6 @@
   // POWER USER OVERRIDE: Uncomment to set actual RAM (bypasses browser 8GB cap)
   // For M3 Ultra 512GB or similar high-RAM machines
   // deviceMemoryGB = 512;
-
-  let deviceMemoryMB = deviceMemoryGB * 1024;
 
   // Allow user to configure beyond hardwareConcurrency (they'll find sweet spot)
   const hardwareCores = typeof navigator !== 'undefined' ? (navigator.hardwareConcurrency || 4) : 4;
@@ -208,173 +181,53 @@
 
   // Show actual active worker memory, not an optimistic target.
   $: allocatedMemoryMB = activeWorkerCount * 256;
-  $: memoryPercent = Math.min(100, (allocatedMemoryMB / deviceMemoryMB) * 100);
   let shardCount = 0;
   let shardsCompleted = 0;
   let shardResults: Map<number, Uint8Array> = new Map();
   let shardStatus: ('pending' | 'computing' | 'complete')[] = [];
   let estimatedShardTimeMs = 3000;
-  let startTime = 0;
-  let elapsedMs = 0;
-  let elapsedInterval: ReturnType<typeof setInterval> | null = null;
 
 
   // Result state
-  type DerivedEoaAddress = { index: number; path: string; address: string };
   let mnemonic24 = '';
   let mnemonic12 = '';
-  let recoveryMnemonic24 = '';
-  let recoveryMnemonic12 = '';
   let devicePassphrase = '';
   let ethereumAddress = '';
   let entityId = ''; // bytes32 entity ID derived from address
-  let derivedEoaAddresses: DerivedEoaAddress[] = [];
-  let eoaDerivationSeq = 0;
-  let copiedField: string | null = null;
   let creatingRuntime = false;
-  let runtimeCreateError = '';
 
   // ============================================================================
   // LIFECYCLE - Load vault on mount
   // ============================================================================
 
   onMount(() => {
-    // Initialize vault store from localStorage
+    // Screen 1 only creates/selects a runtime, then exits immediately to Screen 2.
+    // Never show a post-seed "ready" screen here; account configuration owns that step.
     vaultOperations.initialize();
-
-    // Check if there's an active vault
-    const vault = $activeRuntime;
-    if (vault && !$showVaultPanel) {
-      // Restore state from saved vault
-      name = vault.id;
-      mnemonic24 = vault.seed;
-      mnemonic12 = vault.mnemonic12 || '';
-      devicePassphrase = vault.devicePassphrase || '';
-
-      // Get active signer's address
-      const signer = $activeSigner;
-      if (signer) {
-        ethereumAddress = signer.address;
-        entityId = signer.entityId || '';
-      }
-      void refreshDerivedEoaAddresses(mnemonic24);
-
-      // Skip to complete phase
-      phase = 'complete';
-      showSuccessHeader = false; // Don't show success animation on reload
-    }
   });
-
-  // Vault management state
-  let vaultDropdownOpen = false;
-  let signerDropdownOpen = false;
-  let showSaveVaultModal = false;
-  let vaultNameInput = '';
-  let addressCopied = false;
-
-  function copyAddress() {
-    if (!currentSignerAddress) return;
-    navigator.clipboard.writeText(currentSignerAddress);
-    addressCopied = true;
-    setTimeout(() => addressCopied = false, 2000);
-  }
-
-  function deriveNewVault() {
-    vaultDropdownOpen = false;
-    reset(); // Go back to input phase
-  }
-
-  // Click-outside handler to close dropdowns
-  function handleClickOutside(e: MouseEvent) {
-    const target = e.target as HTMLElement;
-    if (!target.closest('.context-dropdown')) {
-      vaultDropdownOpen = false;
-      signerDropdownOpen = false;
-    }
-  }
 
   let lastDeriveRequest = 0;
   $: if ($deriveRequestSignal !== lastDeriveRequest) {
     lastDeriveRequest = $deriveRequestSignal;
-    deriveNewVault();
+    reset();
   }
 
-  // Reactive: Get current vault/signer for display
-  $: currentVault = $activeRuntime;
   $: savedVaults = $allRuntimes;
-  $: derivedRuntime = ethereumAddress
-    ? savedVaults.find((vault) => vault.id.toLowerCase() === ethereumAddress.toLowerCase()) ?? null
-    : null;
-  $: activeRuntimeMatchesDerived = Boolean(
-    currentVault && ethereumAddress && currentVault.id.toLowerCase() === ethereumAddress.toLowerCase()
-  );
-  $: matchingRuntime = activeRuntimeMatchesDerived ? currentVault : derivedRuntime;
-  $: currentSigner = activeRuntimeMatchesDerived
-    ? $activeSigner
-    : matchingRuntime?.signers?.[0] ?? null;
 
-  // Current signer's address
-  $: currentSignerAddress = currentSigner?.address || ethereumAddress;
-  $: displayEntityId = currentSigner?.entityId || entityId;
-  $: creationContextTab = ({
-    id: 'runtime-creation',
-    title: 'Runtime Creation',
-    jurisdiction: 'browservm',
-    signerId: activeRuntimeMatchesDerived ? (currentSigner?.address || '') : '',
-    entityId: activeRuntimeMatchesDerived ? (currentSigner?.entityId || '') : '',
-    isActive: true,
-  }) satisfies Tab;
-
-  // Identicon for current signer
-  $: currentSignerAvatar = currentSignerAddress ? avatarFns.hashToAvatar(currentSignerAddress, 80) : avatar;
-  $: recoveryMnemonic24 = (mnemonic24 || matchingRuntime?.seed || '').trim().split(/\s+/).join(' ');
-  $: recoveryMnemonic12 = (mnemonic12 || matchingRuntime?.mnemonic12 || '').trim().split(/\s+/).join(' ');
-
-  // Helper to add a new signer
-  function handleAddSigner() {
-    const newSigner = vaultOperations.addSigner();
-    if (newSigner) {
-      vaultOperations.selectSigner(newSigner.index);
-    }
-  }
-
-  async function refreshDerivedEoaAddresses(seed: string): Promise<void> {
-    const normalizedSeed = seed.trim().split(/\s+/).join(' ');
-    const seq = ++eoaDerivationSeq;
-    if (!normalizedSeed) {
-      derivedEoaAddresses = [];
-      return;
-    }
-
-    try {
-      const matrix = await deriveEthereumAddressMatrix(normalizedSeed, '', 3);
-      if (seq !== eoaDerivationSeq) return;
-      derivedEoaAddresses = matrix.standard.map((address, index) => ({
-        index,
-        path: `m/44'/60'/0'/0/${index}`,
-        address,
-      }));
-    } catch (err) {
-      if (seq !== eoaDerivationSeq) return;
-      console.warn('[BrainVault] Failed to derive EOA preview addresses:', err);
-      derivedEoaAddresses = [];
-    }
-  }
-
-  async function createXlnWalletFromCurrentVault(labelOverride?: string) {
-    if (!mnemonic24 || !ethereumAddress || creatingRuntime) return;
+  async function createXlnWalletFromCurrentSeed(labelOverride?: string): Promise<boolean> {
+    if (!mnemonic24 || !ethereumAddress || creatingRuntime) return false;
 
     creatingRuntime = true;
-    runtimeCreateError = '';
+    derivationError = '';
     try {
       const runtimeId = ethereumAddress;
-      const label = (labelOverride || vaultNameInput || name || '').trim() || `Runtime ${ethereumAddress.slice(0, 6)}`;
+      const label = (labelOverride || name || '').trim() || `Runtime ${ethereumAddress.slice(0, 6)}`;
 
       if (!vaultOperations.runtimeExists(runtimeId)) {
         const runtime = await vaultOperations.createRuntime(label, mnemonic24, {
           loginType: createLoginType,
           requiresOnboarding: createLoginType !== 'demo',
-          mnemonic12: recoveryMnemonic12 || undefined,
+          mnemonic12: mnemonic12.trim().split(/\s+/).join(' ') || undefined,
           devicePassphrase: devicePassphrase || undefined,
         });
         entityId = runtime.signers[0]?.entityId || entityId;
@@ -382,41 +235,19 @@
         await vaultOperations.selectRuntime(runtimeId);
       }
       createLoginType = 'manual';
-      showSaveVaultModal = false;
-      vaultNameInput = '';
       vaultUiOperations.hideVault();
       if (!embedded) {
         appStateOperations.setMode('user');
         appStateOperations.setViewMode('home');
       }
+      return true;
     } catch (err) {
       console.error('[RuntimeCreation] Failed to create XLN wallet', err);
-      runtimeCreateError = err instanceof Error ? err.message : 'Failed to create XLN wallet';
+      derivationError = err instanceof Error ? err.message : 'Failed to create XLN wallet';
+      phase = 'input';
+      return false;
     } finally {
       creatingRuntime = false;
-    }
-  }
-
-  // Helper to save current derivation as runtime (uses mnemonic24 for valid BIP39)
-  async function saveCurrentAsVault() {
-    await createXlnWalletFromCurrentVault(vaultNameInput.trim());
-  }
-
-  // Switch to a saved vault
-  function switchToVault(vaultId: string) {
-    vaultOperations.selectRuntime(vaultId);
-    vaultDropdownOpen = false;
-  }
-
-  // Switch signer
-  function switchSigner(index: number) {
-    vaultOperations.selectSigner(index);
-    signerDropdownOpen = false;
-  }
-
-  function handleCreationContextSelect() {
-    if (embedded && savedVaults.length > 0) {
-      vaultUiOperations.hideVault();
     }
   }
 
@@ -452,10 +283,6 @@
     ? (name.length >= BRAINVAULT_V1.MIN_NAME_LENGTH && passphrase.length >= BRAINVAULT_V1.MIN_PASSPHRASE_LENGTH)
     : mnemonicInput.trim().split(/\s+/).filter(w => w).length >= 12;
   $: progress = shardCount > 0 ? (shardsCompleted / shardCount) * 100 : 0;
-  // Remaining time based on ACTUAL active worker count.
-  $: remainingMs = shardCount > 0
-    ? Math.max(0, ((shardCount - shardsCompleted) / Math.max(activeWorkerCount, 1)) * estimatedShardTimeMs)
-    : 0;
   // Projected ETA based on the current requested worker target.
   $: projectedRemainingMs = shardCount > 0
     ? Math.max(0, ((shardCount - shardsCompleted) / Math.max(effectiveTargetWorkerCount, 1)) * estimatedShardTimeMs)
@@ -465,21 +292,8 @@
   // Exact grid dimensions per factor (1:1 shard-to-cube mapping up to factor 5)
   // Factor 1 = 1×1, Factor 2 = 2×2, Factor 3 = 4×4, Factor 4 = 8×8, Factor 5 = 16×16
   // Factor 6+ uses aggregation to keep grid manageable
-  $: gridSize = Math.min(Math.ceil(Math.sqrt(shardCount)), 64); // Max 64×64 visual grid
   $: visualShardCount = factor <= 5 ? shardCount : Math.min(shardCount, 64 * 64);
-  $: gridCols = gridSize;
-  $: gridRows = Math.ceil(visualShardCount / gridCols);
   $: shardsPerCell = Math.ceil(shardCount / visualShardCount);
-
-  // ============================================================================
-  // UTILITY FUNCTIONS
-  // ============================================================================
-
-  async function copyToClipboard(text: string, field: string) {
-    await navigator.clipboard.writeText(text);
-    copiedField = field;
-    setTimeout(() => copiedField = null, 2000);
-  }
 
   // ============================================================================
   // DERIVATION LOGIC
@@ -552,10 +366,6 @@
 
   function failDerivation(message: string): void {
     derivationError = message;
-    if (elapsedInterval) {
-      clearInterval(elapsedInterval);
-      elapsedInterval = null;
-    }
     terminateWorkers();
     phase = 'input';
   }
@@ -617,34 +427,25 @@
   }
 
   async function startDerivation() {
+    derivationError = '';
     // === MNEMONIC MODE: Skip argon2, use mnemonic directly ===
     if (inputMode === 'mnemonic') {
-      phase = 'deriving'; // Brief transition
-      const cleanMnemonic = mnemonicInput.trim().split(/\s+/).join(' ');
-      mnemonic24 = cleanMnemonic;
-      // mnemonic12 left empty - only 24-word is canonical for imported mnemonics
-      mnemonic12 = '';
+      phase = 'deriving';
+      try {
+        const cleanMnemonic = mnemonicInput.trim().split(/\s+/).join(' ');
+        mnemonic24 = cleanMnemonic;
+        // Imported mnemonic is canonical as entered; no extra compatibility phrase.
+        mnemonic12 = '';
 
-      // Derive Ethereum address (for display)
-      ethereumAddress = await deriveEthereumAddress(mnemonic24);
-      await refreshDerivedEoaAddresses(mnemonic24);
-
-      // Auto-save runtime - createRuntime handles entity creation + funding
-      const runtimeId = ethereumAddress;
-      const label = `Mnemonic ${ethereumAddress.slice(0, 6)}`;
-
-      if (!vaultOperations.runtimeExists(runtimeId)) {
-        await vaultOperations.createRuntime(label, mnemonic24, {
-          loginType: 'manual',
-          requiresOnboarding: true,
-          mnemonic12: undefined,
-        });
-        // entityId is set by createRuntime internally
-      } else {
-        await vaultOperations.selectRuntime(runtimeId);
+        ethereumAddress = await deriveEthereumAddress(mnemonic24);
+        createLoginType = 'manual';
+        await createXlnWalletFromCurrentSeed(`Mnemonic ${ethereumAddress.slice(0, 6)}`);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : 'Failed to import mnemonic';
+        console.error('[RuntimeCreation] Mnemonic import failed:', err);
+        derivationError = message;
+        phase = 'input';
       }
-
-      phase = 'complete';
       return;
     }
 
@@ -663,13 +464,6 @@
     shardsCompleted = 0;
     shardResults = new Map();
     shardStatus = Array(shardCount).fill('pending');
-    startTime = Date.now();
-    elapsedMs = 0;
-
-    // Start elapsed timer
-    elapsedInterval = setInterval(() => {
-      elapsedMs = Date.now() - startTime;
-    }, 100);
 
     // Start with the exact worker count the UI is allowed to request.
     const cpuCores = navigator.hardwareConcurrency || 4;
@@ -823,12 +617,6 @@
   }
 
   async function finalizeDeriv() {
-    if (elapsedInterval) {
-      clearInterval(elapsedInterval);
-      elapsedInterval = null;
-    }
-    elapsedMs = Date.now() - startTime;
-
     terminateWorkers();
 
     // Collect results in order
@@ -853,12 +641,10 @@
 
     // Derive Ethereum address using the standard path (m/44'/60'/0'/0/0)
     ethereumAddress = await deriveEthereumAddress(mnemonic24);
-    await refreshDerivedEoaAddresses(mnemonic24);
     // Entity ID is a lazy entity ID for a single-signer quorum (matches runtime algorithm)
     entityId = generateLazyEntityIdPreview([ethereumAddress], 1n);
 
-    phase = 'complete';
-    await createXlnWalletFromCurrentVault(name.trim() || `Wallet ${ethereumAddress.slice(0, 6)}`);
+    await createXlnWalletFromCurrentSeed(name.trim() || `Wallet ${ethereumAddress.slice(0, 6)}`);
   }
 
   function terminateWorkers() {
@@ -914,23 +700,12 @@
     terminateWorkers();
     workerLimitNotice = '';
     createLoginType = 'manual';
-    if (elapsedInterval) {
-      clearInterval(elapsedInterval);
-      elapsedInterval = null;
-    }
-    if (successHeaderTimeout) {
-      clearTimeout(successHeaderTimeout);
-      successHeaderTimeout = null;
-    }
-    showSuccessHeader = true; // Reset for next open
     // Keep name and passphrase for convenience
     mnemonic24 = '';
     mnemonic12 = '';
     devicePassphrase = '';
     ethereumAddress = '';
     entityId = '';
-    derivedEoaAddresses = [];
-    runtimeCreateError = '';
     creatingRuntime = false;
     shardsCompleted = 0;
     shardResults = new Map();
@@ -939,12 +714,6 @@
 
   onDestroy(() => {
     terminateWorkers();
-    if (elapsedInterval) {
-      clearInterval(elapsedInterval);
-    }
-    if (successHeaderTimeout) {
-      clearTimeout(successHeaderTimeout);
-    }
   });
 
   // Check for saved resume on mount + init i18n
@@ -955,7 +724,6 @@
     (async () => {
       // Init i18n
       await initI18n();
-      i18nReady = true;
 
       // Watch for locale changes
       unsubscribe = locale.subscribe(async (loc) => {
@@ -972,8 +740,6 @@
 
 </script>
 
-<svelte:window on:click={handleClickOutside} />
-
 <div class="brainvault-wrapper" class:embedded>
   <!-- Hierarchical Navigation (only in standalone mode) -->
   {#if !embedded}
@@ -981,7 +747,7 @@
   {/if}
 
 	    <!-- Main Wallet Content -->
-  <div class="brainvault-container" class:deriving={phase === 'deriving'} class:complete={phase === 'complete'}>
+  <div class="brainvault-container" class:deriving={phase === 'deriving'}>
     <!-- Ambient particles disabled for minimalist mode -->
 
   <!-- Header - minimalist (no logo, clean fintech UI) -->
@@ -995,11 +761,10 @@
       <div class="glass-card input-section" class:deriving={phase === 'deriving'}>
         {#if embedded && savedVaults.length > 0}
           <div class="creation-context-bar">
-            <div class="creation-context-copy">Back to Existing Runtimes</div>
-            <ContextSwitcher
-              tab={creationContextTab}
-              on:entitySelect={handleCreationContextSelect}
-            />
+            <div class="creation-context-copy">Create another wallet</div>
+            <button type="button" class="back-to-create" on:click={() => vaultUiOperations.hideVault()}>
+              Back to wallet
+            </button>
           </div>
         {/if}
 
@@ -1242,6 +1007,10 @@
 
                 <div class="pyramid-stats">
                   <div class="stat-row">
+                    <span class="stat-label">STATUS</span>
+                    <span class="stat-value">{creatingRuntime ? 'CREATING RUNTIME' : 'DERIVING SEED'}</span>
+                  </div>
+                  <div class="stat-row">
                     <span class="stat-label">SHARDS</span>
                     <span class="stat-value">{shardsCompleted}/{shardCount}</span>
                   </div>
@@ -1307,254 +1076,6 @@
             </div>
           </div>
         {/if}
-      </div>
-    {/if}
-
-    <!-- COMPLETE PHASE -->
-    {#if phase === 'complete'}
-      <div class="glass-card complete tabbed">
-        {#if showSuccessHeader}
-          <div class="success-header" style="animation: fadeOut 0.5s ease-out 2s forwards;">
-            <div class="success-icon-container">
-              <div class="success-glow"></div>
-              <div class="success-ring">
-                <svg viewBox="0 0 24 24" fill="none" class="success-check">
-                  <path d="M5 13l4 4L19 7" stroke="url(#checkGradient)" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
-                  <defs>
-                    <linearGradient id="checkGradient" x1="5" y1="7" x2="19" y2="17">
-                      <stop offset="0%" stop-color="#fbbf24"/>
-                      <stop offset="100%" stop-color="#d97706"/>
-                    </linearGradient>
-                  </defs>
-                </svg>
-              </div>
-            </div>
-	            <h2>{activeRuntimeMatchesDerived ? 'XLN Wallet Ready' : 'Wallet Seed Ready'}</h2>
-            <p class="success-stats">{formatRuntimeDurationRounded(elapsedMs)} <span class="stat-divider">·</span> {shardCount} shards</p>
-          </div>
-        {/if}
-
-
-        <!-- Tab Content -->
-        <div class="complete-tab-content">
-          <!-- Unified Context Bar: Vault+Signer (always visible) -->
-          {#if !embedded && activeRuntimeMatchesDerived}
-          <div class="context-bar">
-                <!-- Combined Vault + Signer Dropdown -->
-                <div class="context-dropdown vault-signer-combo" class:open={vaultDropdownOpen}>
-                  <button
-                    class="context-trigger pill"
-                    on:click|stopPropagation={() => { vaultDropdownOpen = !vaultDropdownOpen; }}
-                  >
-                    <img src={currentSignerAvatar} alt="" class="context-avatar" />
-                    <div class="context-info">
-                      <span class="context-vault-name">{currentVault?.id || 'Vault'}</span>
-                      <span class="context-signer-name">{currentSigner?.name || 'Signer 1'}</span>
-                    </div>
-                    <span class="dropdown-arrow">▼</span>
-                  </button>
-                  {#if vaultDropdownOpen}
-                    <div class="context-menu cascading">
-                      <!-- Current Vault Section -->
-                      {#if currentVault}
-                        <div class="menu-section-label">
-                          <span class="section-icon">🔐</span>
-                          {currentVault.id}
-                        </div>
-                        <div class="signers-list">
-                          {#each currentVault.signers as signer}
-                            <div class="signer-row">
-                              <button
-                                class="menu-item signer-item"
-                                class:active={signer.index === currentSigner?.index}
-                                on:click={() => switchSigner(signer.index)}
-                              >
-                                <img src={avatarFns.hashToAvatar(signer.address, 80)} alt="" class="menu-item-avatar" />
-                                <div class="menu-item-info">
-                                  <span class="menu-item-label">{signer.name}</span>
-                                  <code class="menu-item-addr">{signer.address.slice(0, 6)}...{signer.address.slice(-4)}</code>
-                                </div>
-                              </button>
-                            </div>
-                          {/each}
-                          <button class="menu-item add-action indent" on:click={handleAddSigner}>
-                            <span class="menu-item-icon">➕</span>
-                            <span class="menu-item-label">Add Signer</span>
-                          </button>
-                        </div>
-                      {/if}
-
-                      <!-- Other Vaults -->
-                      {#if savedVaults.length > 0}
-                        <div class="menu-divider"></div>
-                        <div class="menu-section-label">Other Vaults</div>
-                        {#each savedVaults.filter(v => v.id !== currentVault?.id) as vault}
-                          <button
-                            class="menu-item vault-item"
-                            on:click={() => switchToVault(vault.id)}
-                          >
-                            <span class="menu-item-icon">🔐</span>
-                            <span class="menu-item-label">{vault.id}</span>
-                            <span class="menu-item-meta">{vault.signers.length} signers</span>
-                          </button>
-                        {/each}
-                      {/if}
-
-                      <div class="menu-divider"></div>
-                      {#if !currentVault}
-                        <button class="menu-item" on:click={() => { showSaveVaultModal = true; vaultDropdownOpen = false; }}>
-                          <span class="menu-item-icon">💾</span>
-                          <span class="menu-item-label">Save Current Vault</span>
-                        </button>
-                      {/if}
-                      <button class="menu-item derive-new" on:click={deriveNewVault}>
-                        <span class="menu-item-icon">➕</span>
-                        <span class="menu-item-label">Derive New Vault</span>
-                      </button>
-                    </div>
-                  {/if}
-                </div>
-
-              </div>
-          {/if}
-
-          <section class="recovery-card wallet-primary-card">
-            <div class="wallet-ready-head">
-              <div class="recovery-identity">
-                <img src={currentSignerAvatar} alt="" class="context-avatar" />
-                <div>
-	                  <h3>{derivedRuntime ? 'XLN wallet available' : 'Create XLN wallet'}</h3>
-	                  <p class="muted-tight">
-	                    {derivedRuntime ? 'Open the existing XLN wallet for this signer.' : 'Use this seed as your XLN account.'}
-                  </p>
-                  <p class="muted-tight">Entity {displayEntityId}</p>
-                  <p class="muted-tight">Signer {currentSignerAddress || ethereumAddress}</p>
-                </div>
-              </div>
-              <button
-                class="derive-btn network-btn"
-                on:click={() => createXlnWalletFromCurrentVault()}
-                disabled={creatingRuntime || !mnemonic24 || !ethereumAddress || activeRuntimeMatchesDerived}
-              >
-                {creatingRuntime ? 'Creating...' : activeRuntimeMatchesDerived ? 'XLN wallet active' : derivedRuntime ? 'Open XLN wallet' : 'Create XLN wallet'}
-              </button>
-            </div>
-            {#if runtimeCreateError}
-              <div class="matrix-status error">{runtimeCreateError}</div>
-            {/if}
-
-            <details class="brainvault-export-details" data-testid="brainvault-export-details">
-              <summary data-testid="brainvault-export-toggle">
-                <span>
-	                  <strong>Recovery export</strong>
-                  <small>Show EOA addresses and recovery phrases</small>
-                </span>
-                <span class="export-chevron">⌄</span>
-              </summary>
-
-              <div class="brainvault-export-panel">
-                <div class="export-address-row">
-                  <div>
-                    <span class="export-address-label">Signer address</span>
-                    <code>{currentSignerAddress || ethereumAddress}</code>
-                  </div>
-                  <button class="copy-btn" on:click={copyAddress}>
-                    {addressCopied ? '✓' : 'Copy address'}
-                  </button>
-                </div>
-
-                {#if derivedEoaAddresses.length > 0}
-                  <div class="result-section">
-                    <div class="result-label">
-                      EOA Addresses
-                      <span class="label-hint">(standard derivation)</span>
-                    </div>
-                    <div class="eoa-grid">
-                      {#each derivedEoaAddresses as item}
-                        <div class="eoa-row" data-testid={`brainvault-eoa-address-${item.index}`}>
-                          <div class="eoa-meta">
-                            <span>EOA {item.index + 1}</span>
-                            <code>{item.path}</code>
-                          </div>
-                          <code class="eoa-address">{item.address}</code>
-                          <button class="copy-btn" on:click={() => copyToClipboard(item.address, `eoa-${item.index}`)}>
-                            {copiedField === `eoa-${item.index}` ? '✓' : 'Copy'}
-                          </button>
-                        </div>
-                      {/each}
-                    </div>
-                  </div>
-                {/if}
-
-                {#if recoveryMnemonic12}
-                  <div class="result-section">
-                    <div class="result-label">
-                      Recovery Phrase
-                      <span class="label-hint">(12 words)</span>
-                    </div>
-                    <div class="result-box mnemonic" data-testid="brainvault-mnemonic-12">
-                      <div class="mnemonic-words compact">
-                        {#each recoveryMnemonic12.split(' ') as word, i}
-                          {#if word}
-                            <span class="word"><span class="word-num">{i + 1}.</span> {word}</span>
-                          {/if}
-                        {/each}
-                      </div>
-                      <button class="copy-btn full" on:click={() => copyToClipboard(recoveryMnemonic12, 'mnemonic12')}>
-                        {copiedField === 'mnemonic12' ? '✓ Copied!' : 'Copy 12 words'}
-                      </button>
-                    </div>
-                  </div>
-                {/if}
-
-                <div class="result-section">
-                  <div class="result-label">
-                    Recovery Phrase
-                    <span class="label-hint">(24 words)</span>
-                  </div>
-                  <div class="result-box mnemonic" data-testid="brainvault-mnemonic-24">
-                    <div class="mnemonic-words">
-                      {#each recoveryMnemonic24.split(' ') as word, i}
-                        {#if word}
-                          <span class="word"><span class="word-num">{i + 1}.</span> {word}</span>
-                        {/if}
-                      {/each}
-                    </div>
-                    <button class="copy-btn full" on:click={() => copyToClipboard(recoveryMnemonic24, 'mnemonic24')}>
-                      {copiedField === 'mnemonic24' ? '✓ Copied!' : 'Copy 24 words'}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            </details>
-
-            <button class="derive-btn secondary" on:click={reset}>
-              Derive Another Vault
-            </button>
-          </section>
-
-          {#if showSaveVaultModal}
-            <div class="modal-overlay">
-              <div class="modal-content">
-                <h3>Create XLN Wallet</h3>
-	                <p class="modal-desc">Name the XLN wallet created from this seed.</p>
-                <input
-                  type="text"
-                  class="vault-name-input"
-                  placeholder="Enter vault name..."
-                  bind:value={vaultNameInput}
-                  on:keydown={(e) => e.key === 'Enter' && saveCurrentAsVault()}
-                />
-                <div class="modal-actions">
-                  <button class="modal-btn cancel" on:click={() => showSaveVaultModal = false}>Cancel</button>
-                  <button class="modal-btn save" on:click={saveCurrentAsVault} disabled={!vaultNameInput.trim() || creatingRuntime}>
-                    {creatingRuntime ? 'Creating...' : 'Create Wallet'}
-                  </button>
-                </div>
-              </div>
-            </div>
-          {/if}
-        </div>
       </div>
     {/if}
   </div>
@@ -1949,20 +1470,6 @@
     background: linear-gradient(90deg, transparent, rgba(180, 140, 80, 0.4), transparent);
   }
 
-  /* Complete phase - no visible box, seamless with vault background */
-  .glass-card.complete {
-    background: transparent;
-    border: none;
-    box-shadow: none;
-    backdrop-filter: none;
-    -webkit-backdrop-filter: none;
-    padding: 0;
-  }
-
-  .glass-card.complete::before {
-    display: none;
-  }
-
   /* Input Groups - Sacred inscriptions */
   .input-group {
     margin-bottom: 16px;
@@ -2257,461 +1764,6 @@
     cursor: not-allowed;
   }
 
-  .derive-btn.secondary {
-    background: transparent;
-    border: 1px solid rgba(180, 140, 80, 0.2);
-    color: rgba(180, 140, 80, 0.6);
-    margin-top: 24px;
-  }
-
-  .derive-btn.secondary:hover:not(:disabled) {
-    background: rgba(180, 140, 80, 0.05);
-    border-color: rgba(180, 140, 80, 0.4);
-    color: rgba(180, 140, 80, 0.9);
-  }
-
-  .glass-card.complete.tabbed {
-    padding: 0;
-  }
-
-  .glass-card.complete.tabbed .success-header {
-    padding: 24px 32px 16px;
-  }
-
-  .complete-tab-content {
-    padding: 24px 32px;
-    min-height: 400px;
-  }
-
-  .context-bar {
-    display: flex;
-    gap: 8px;
-    padding: 12px;
-    background: rgba(0, 0, 0, 0.2);
-    border: 1px solid rgba(180, 140, 80, 0.15);
-    border-radius: 16px;
-    align-items: center;
-  }
-
-  .context-dropdown {
-    position: relative;
-  }
-
-  .context-dropdown.vault-signer-combo {
-    flex: 1;
-  }
-
-  .context-trigger {
-    width: 100%;
-    display: flex;
-    align-items: center;
-    gap: 10px;
-    padding: 10px 16px;
-    background: rgba(255, 255, 255, 0.03);
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 8px;
-    color: white;
-    font-size: 13px;
-    cursor: pointer;
-    transition: all 0.2s ease;
-  }
-
-  .context-trigger.pill {
-    border-radius: 24px;
-  }
-
-  .context-trigger:hover {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: rgba(180, 140, 80, 0.3);
-  }
-
-  .context-dropdown.open .context-trigger {
-    background: rgba(180, 140, 80, 0.1);
-    border-color: rgba(180, 140, 80, 0.4);
-  }
-
-  .context-avatar {
-    width: 28px;
-    height: 28px;
-    border-radius: 50%;
-    border: 2px solid rgba(180, 140, 80, 0.3);
-  }
-
-  .context-info {
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    flex: 1;
-    text-align: left;
-    min-width: 0;
-  }
-
-  .context-vault-name {
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: rgba(180, 140, 80, 0.7);
-  }
-
-  .context-signer-name {
-    font-size: 13px;
-    font-weight: 500;
-    color: white;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .recovery-card {
-    margin-top: 24px;
-    padding: 20px;
-    border: 1px solid rgba(180, 140, 80, 0.12);
-    border-radius: 16px;
-    background: rgba(255, 255, 255, 0.02);
-  }
-
-  .wallet-primary-card {
-    max-width: 900px;
-    margin-left: auto;
-    margin-right: auto;
-  }
-
-  .wallet-ready-head {
-    display: flex;
-    align-items: flex-start;
-    justify-content: space-between;
-    gap: 16px;
-    margin-bottom: 16px;
-  }
-
-  .wallet-ready-head .derive-btn.network-btn {
-    width: auto;
-    min-width: 190px;
-    margin: 0;
-    padding: 14px 20px;
-    font-size: 14px;
-  }
-
-  .recovery-identity {
-    display: flex;
-    align-items: flex-start;
-    gap: 12px;
-  }
-
-  .recovery-identity h3 {
-    margin: 0 0 6px;
-    font-size: 18px;
-    color: rgba(255, 255, 255, 0.95);
-  }
-
-  .brainvault-export-details {
-    margin-top: 14px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 12px;
-    background: rgba(0, 0, 0, 0.2);
-    overflow: hidden;
-  }
-
-  .brainvault-export-details summary {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 14px 16px;
-    cursor: pointer;
-    list-style: none;
-    user-select: none;
-  }
-
-  .brainvault-export-details summary::-webkit-details-marker {
-    display: none;
-  }
-
-  .brainvault-export-details summary strong {
-    display: block;
-    margin-bottom: 3px;
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.9);
-  }
-
-  .brainvault-export-details summary small {
-    display: block;
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.5);
-  }
-
-  .export-chevron {
-    flex: 0 0 auto;
-    font-size: 18px;
-    color: rgba(255, 255, 255, 0.5);
-    transition: transform 0.15s ease;
-  }
-
-  .brainvault-export-details[open] .export-chevron {
-    transform: rotate(180deg);
-  }
-
-  .brainvault-export-panel {
-    padding: 0 16px 16px;
-    border-top: 1px solid rgba(255, 255, 255, 0.08);
-  }
-
-  .export-address-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 12px;
-    padding: 14px 0;
-  }
-
-  .export-address-row code {
-    display: block;
-    margin-top: 4px;
-    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
-    font-size: 12px;
-    color: rgba(255, 255, 255, 0.72);
-    word-break: break-all;
-  }
-
-  .export-address-label {
-    display: block;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-    color: rgba(180, 140, 80, 0.8);
-  }
-
-  .eoa-grid {
-    display: grid;
-    gap: 10px;
-  }
-
-  .eoa-row {
-    display: grid;
-    grid-template-columns: minmax(90px, 120px) minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 12px;
-    padding: 12px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    border-radius: 10px;
-    background: rgba(0, 0, 0, 0.22);
-  }
-
-  .eoa-meta {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    min-width: 0;
-  }
-
-  .eoa-meta span {
-    font-size: 12px;
-    font-weight: 700;
-    color: rgba(255, 255, 255, 0.86);
-  }
-
-  .eoa-meta code {
-    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.45);
-    word-break: break-word;
-  }
-
-  .eoa-address {
-    min-width: 0;
-    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
-    font-size: 13px;
-    color: #fbbf24;
-    word-break: break-all;
-  }
-
-  .muted-tight {
-    margin: 0;
-    font-size: 12px;
-    line-height: 1.5;
-    color: rgba(255, 255, 255, 0.55);
-    word-break: break-word;
-  }
-
-  .dropdown-arrow {
-    font-size: 8px;
-    opacity: 0.5;
-    transition: transform 0.2s ease;
-  }
-
-  .context-dropdown.open .dropdown-arrow {
-    transform: rotate(180deg);
-  }
-
-  .context-menu {
-    position: absolute;
-    top: 100%;
-    left: 0;
-    min-width: min(420px, calc(100vw - 24px));
-    width: max-content;
-    max-width: calc(100vw - 24px);
-    margin-top: 4px;
-    background: rgba(20, 20, 30, 0.98);
-    border: 1px solid rgba(180, 140, 80, 0.2);
-    border-radius: 16px;
-    padding: 6px;
-    z-index: 100;
-    max-height: 340px;
-    overflow-y: auto;
-    overflow-x: hidden;
-    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.4);
-  }
-
-  .context-menu.cascading {
-    min-width: min(420px, calc(100vw - 24px));
-  }
-
-  .menu-section-label {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    padding: 10px 12px 6px;
-    font-size: 11px;
-    font-weight: 600;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    color: rgba(180, 140, 80, 0.8);
-  }
-
-  .section-icon {
-    font-size: 12px;
-  }
-
-  .signers-list {
-    padding-left: 8px;
-    border-left: 2px solid rgba(180, 140, 80, 0.2);
-    margin-left: 12px;
-  }
-
-  .menu-divider {
-    height: 1px;
-    background: rgba(255, 255, 255, 0.08);
-    margin: 6px 8px;
-  }
-
-  .menu-item {
-    width: 100%;
-    display: flex;
-    align-items: flex-start;
-    gap: 10px;
-    padding: 10px 12px;
-    background: transparent;
-    border: none;
-    border-radius: 10px;
-    color: rgba(255, 255, 255, 0.8);
-    font-size: 13px;
-    cursor: pointer;
-    transition: all 0.15s ease;
-    text-align: left;
-  }
-
-  .menu-item.indent {
-    margin-left: 4px;
-  }
-
-  .menu-item:hover {
-    background: rgba(255, 255, 255, 0.06);
-  }
-
-  .menu-item.active {
-    background: rgba(180, 140, 80, 0.15);
-    color: rgba(180, 140, 80, 0.95);
-  }
-
-  .menu-item.signer-item {
-    padding: 8px 10px;
-    flex: 1;
-  }
-
-  .signer-row {
-    display: flex;
-    align-items: center;
-    gap: 4px;
-  }
-
-  .menu-item.add-action,
-  .menu-item.derive-new {
-    color: rgba(180, 140, 80, 0.8);
-  }
-
-  .menu-item.add-action:hover,
-  .menu-item.derive-new:hover {
-    background: rgba(180, 140, 80, 0.1);
-  }
-
-  .menu-item-icon {
-    font-size: 14px;
-    width: 20px;
-    text-align: center;
-  }
-
-  .menu-item-avatar {
-    width: 24px;
-    height: 24px;
-    border-radius: 50%;
-  }
-
-  .menu-item-info {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    min-width: 0;
-  }
-
-  .menu-item-label {
-    font-size: 13px;
-    color: inherit;
-    line-height: 1.25;
-    overflow-wrap: anywhere;
-  }
-
-  .menu-item-addr {
-    font-family: 'SF Mono', 'Monaco', monospace;
-    font-size: 10px;
-    color: rgba(255, 255, 255, 0.4);
-    line-height: 1.25;
-    word-break: break-all;
-  }
-
-  .menu-item-meta {
-    font-size: 11px;
-    color: rgba(255, 255, 255, 0.4);
-    line-height: 1.25;
-    overflow-wrap: anywhere;
-  }
-
-  .derive-btn.network-btn {
-    display: inline-flex;
-    background: linear-gradient(135deg, rgba(220, 180, 100, 0.95), rgba(180, 140, 80, 0.9));
-    border: 2px solid rgba(255, 220, 120, 0.6);
-    box-shadow: 0 4px 24px rgba(180, 140, 80, 0.4), inset 0 1px 0 rgba(255, 255, 255, 0.15);
-    text-decoration: none;
-    color: #000;
-    font-weight: 700;
-    text-shadow: none;
-    padding: 20px 32px;
-    font-size: 16px;
-  }
-
-  .derive-btn.network-btn:hover:not(:disabled) {
-    background: linear-gradient(135deg, rgba(255, 220, 120, 1), rgba(220, 180, 100, 0.95));
-    border-color: rgba(255, 240, 160, 0.8);
-    box-shadow: 0 6px 32px rgba(180, 140, 80, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.2);
-    transform: translateY(-2px);
-    color: #000;
-  }
-
-  .derive-btn.network-btn:active:not(:disabled) {
-    transform: translateY(0);
-    box-shadow: 0 2px 12px rgba(180, 140, 80, 0.3);
-  }
-
   /* Deriving Phase */
   .glass-card.deriving h2 {
     text-align: center;
@@ -2948,173 +2000,6 @@
     letter-spacing: 1px;
   }
 
-  .success-header {
-    text-align: center;
-    margin-bottom: 36px;
-  }
-
-  .success-icon-container {
-    position: relative;
-    width: 80px;
-    height: 80px;
-    margin: 0 auto 20px;
-  }
-
-  .success-glow {
-    position: absolute;
-    inset: -20px;
-    background: radial-gradient(circle, rgba(251, 191, 36, 0.4) 0%, rgba(180, 140, 80, 0.2) 50%, transparent 70%);
-    filter: blur(20px);
-    animation: pulse-glow 2s ease-in-out infinite;
-  }
-
-  @keyframes pulse-glow {
-    0%, 100% { opacity: 0.6; transform: scale(1); }
-    50% { opacity: 1; transform: scale(1.1); }
-  }
-
-  @keyframes fadeOut {
-    from { opacity: 1; transform: translateY(0); }
-    to { opacity: 0; transform: translateY(-20px); }
-  }
-
-  .success-ring {
-    position: relative;
-    width: 100%;
-    height: 100%;
-    border-radius: 50%;
-    background: linear-gradient(135deg,
-      rgba(180, 140, 80, 0.2) 0%,
-      rgba(120, 90, 50, 0.1) 50%,
-      rgba(180, 140, 80, 0.15) 100%);
-    backdrop-filter: blur(20px);
-    -webkit-backdrop-filter: blur(20px);
-    border: 1px solid rgba(180, 140, 80, 0.3);
-    box-shadow:
-      0 8px 32px rgba(180, 140, 80, 0.3),
-      inset 0 1px 1px rgba(255, 200, 100, 0.3),
-      inset 0 -1px 1px rgba(0, 0, 0, 0.1);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-  }
-
-  .success-check {
-    width: 40px;
-    height: 40px;
-    animation: draw-check 0.6s ease-out forwards;
-  }
-
-  .success-check path {
-    stroke-dasharray: 30;
-    stroke-dashoffset: 30;
-    animation: draw-check-path 0.6s ease-out 0.2s forwards;
-  }
-
-  @keyframes draw-check-path {
-    to { stroke-dashoffset: 0; }
-  }
-
-  .success-header h2 {
-    background: linear-gradient(135deg, #fbbf24 0%, #f59e0b 50%, #d97706 100%);
-    -webkit-background-clip: text;
-    -webkit-text-fill-color: transparent;
-    background-clip: text;
-    margin: 0 0 8px 0;
-    font-size: 28px;
-    font-weight: 700;
-    letter-spacing: -0.02em;
-    text-shadow: 0 0 40px rgba(251, 191, 36, 0.3);
-  }
-
-  .success-stats {
-    color: rgba(180, 140, 80, 0.7);
-    margin: 0;
-    font-size: 14px;
-    font-weight: 500;
-    letter-spacing: 0.02em;
-  }
-
-  .stat-divider {
-    opacity: 0.4;
-    margin: 0 4px;
-  }
-
-  .result-section {
-    margin-bottom: 28px;
-  }
-
-  .result-label {
-    display: flex;
-    align-items: baseline;
-    gap: 8px;
-    margin-bottom: 10px;
-    font-size: 13px;
-    font-weight: 600;
-    color: rgba(220, 180, 100, 1);
-    text-transform: uppercase;
-    letter-spacing: 0.08em;
-  }
-
-  .label-hint {
-    font-size: 11px;
-    font-weight: 500;
-    color: rgba(255, 255, 255, 0.45);
-    text-transform: none;
-    letter-spacing: normal;
-  }
-
-  .result-box {
-    background: rgba(0, 0, 0, 0.4);
-    border: 1px solid rgba(180, 140, 80, 0.2);
-    border-radius: 10px;
-    padding: 16px;
-    display: flex;
-    align-items: center;
-    gap: 12px;
-  }
-
-  .copy-btn {
-    background: rgba(180, 140, 80, 0.15);
-    border: 1px solid rgba(180, 140, 80, 0.2);
-    border-radius: 8px;
-    padding: 8px 12px;
-    cursor: pointer;
-    font-size: 16px;
-    transition: all 0.2s ease;
-    flex-shrink: 0;
-    color: rgba(180, 140, 80, 0.8);
-  }
-
-  .copy-btn:hover {
-    background: rgba(180, 140, 80, 0.3);
-    border-color: rgba(220, 180, 100, 0.5);
-    color: rgba(255, 220, 120, 1);
-    transform: translateY(-1px);
-    box-shadow: 0 2px 8px rgba(180, 140, 80, 0.2);
-  }
-
-  .copy-btn:active {
-    transform: translateY(0);
-    box-shadow: none;
-  }
-
-  .copy-btn.full {
-    width: 100%;
-    margin-top: 12px;
-    padding: 12px;
-    font-size: 14px;
-    color: rgba(255, 255, 255, 0.9);
-  }
-
-  /* Mnemonic Display - Sensitive field styling */
-  .result-box.mnemonic {
-    flex-direction: column;
-    align-items: stretch;
-    border-left: 3px solid rgba(220, 100, 60, 0.6);
-    background: rgba(220, 100, 60, 0.03);
-  }
-
   .matrix-status {
     font-size: 12px;
     color: rgba(255, 255, 255, 0.65);
@@ -3129,164 +2014,11 @@
     background: rgba(220, 100, 60, 0.08);
   }
 
-  .mnemonic-words {
-    display: grid;
-    grid-template-columns: repeat(4, 1fr);
-    gap: 10px;
-    margin-top: 12px;
-    padding: 14px;
-    background: rgba(0, 0, 0, 0.5);
-    border-radius: 16px;
-    border: 1px solid rgba(180, 140, 80, 0.15);
-  }
-
-  .mnemonic-words.compact {
-    grid-template-columns: repeat(3, 1fr);
-  }
-
-  .word {
-    display: flex;
-    align-items: center;
-    justify-content: flex-start;
-    background: linear-gradient(135deg, rgba(180, 140, 80, 0.12) 0%, rgba(180, 140, 80, 0.06) 100%);
-    padding: 8px;
-    border-radius: 10px;
-    font-size: 16px;
-    color: #f5d78e;
-    font-family: 'SF Mono', 'Monaco', 'Inconsolata', 'Fira Mono', monospace;
-    font-weight: 600;
-    letter-spacing: 0.04em;
-    border: 1px solid rgba(180, 140, 80, 0.2);
-    text-shadow: 0 0 12px rgba(251, 191, 36, 0.25);
-    /* min-height: 52px; */
-    box-sizing: border-box;
-    transition: all 0.15s ease;
-  }
-
-  .word:hover {
-    background: linear-gradient(135deg, rgba(180, 140, 80, 0.18) 0%, rgba(180, 140, 80, 0.1) 100%);
-    border-color: rgba(180, 140, 80, 0.35);
-    transform: translateY(-1px);
-  }
-
-  .word-num {
-    color: rgba(180, 140, 80, 0.4);
-    margin-right: 12px;
-    font-size: 11px;
-    font-weight: 500;
-    min-width: 22px;
-    flex-shrink: 0;
-    opacity: 0.7;
-  }
-
-  .modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(0, 0, 0, 0.7);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    z-index: 1000;
-    backdrop-filter: blur(4px);
-  }
-
-  .modal-content {
-    background: rgba(20, 16, 12, 0.98);
-    border: 1px solid rgba(180, 140, 80, 0.3);
-    border-radius: 16px;
-    padding: 28px;
-    width: 90%;
-    max-width: 400px;
-    box-shadow: 0 20px 60px rgba(0, 0, 0, 0.6);
-  }
-
-  .modal-content h3 {
-    margin: 0 0 8px 0;
-    font-size: 18px;
-    font-weight: 600;
-    color: rgba(255, 255, 255, 0.95);
-  }
-
-  .modal-content p {
-    margin: 0 0 20px 0;
-    font-size: 13px;
-    color: rgba(255, 255, 255, 0.5);
-  }
-
-  .vault-name-input {
-    width: 100%;
-    padding: 14px 16px;
-    background: rgba(0, 0, 0, 0.4);
-    border: 1px solid rgba(180, 140, 80, 0.3);
-    border-radius: 10px;
-    font-size: 14px;
-    color: #fff;
-    outline: none;
-    transition: all 0.2s ease;
-    box-sizing: border-box;
-  }
-
-  .vault-name-input:focus {
-    border-color: rgba(180, 140, 80, 0.6);
-    background: rgba(0, 0, 0, 0.5);
-  }
-
-  .vault-name-input::placeholder {
-    color: rgba(255, 255, 255, 0.3);
-  }
-
-  .modal-actions {
-    display: flex;
-    gap: 12px;
-    margin-top: 20px;
-  }
-
-  .modal-btn {
-    flex: 1;
-    padding: 12px 20px;
-    border-radius: 10px;
-    font-size: 13px;
-    font-weight: 600;
-    cursor: pointer;
-    transition: all 0.2s ease;
-    border: none;
-  }
-
-  .modal-btn.cancel {
-    background: rgba(255, 255, 255, 0.08);
-    color: rgba(255, 255, 255, 0.7);
-  }
-
-  .modal-btn.cancel:hover {
-    background: rgba(255, 255, 255, 0.12);
-    color: rgba(255, 255, 255, 0.9);
-  }
-
-  .modal-btn.save {
-    background: linear-gradient(135deg, rgba(180, 140, 80, 0.9), rgba(140, 100, 50, 0.9));
-    color: #fff;
-  }
-
-  .modal-btn.save:hover:not(:disabled) {
-    background: linear-gradient(135deg, rgba(200, 160, 100, 0.95), rgba(160, 120, 60, 0.95));
-    box-shadow: 0 4px 20px rgba(180, 140, 80, 0.3);
-  }
-
-  .modal-btn.save:disabled {
-    opacity: 0.4;
-    cursor: not-allowed;
-  }
-
   /* Desktop - wider layout */
   @media (min-width: 900px) {
     .glass-card {
       padding: 48px 64px;
       max-width: 900px;
-    }
-
-    .mnemonic-words {
-      grid-template-columns: repeat(2, 1fr);
-      gap: 14px;
     }
 
     .derive-btn {
@@ -3328,33 +2060,6 @@
 
     .factor-tier {
       font-size: 8px;
-    }
-
-    .mnemonic-words {
-      grid-template-columns: repeat(3, 1fr);
-    }
-
-    .eoa-row {
-      grid-template-columns: 1fr;
-      align-items: stretch;
-    }
-
-    .eoa-row .copy-btn {
-      width: 100%;
-    }
-
-    .wallet-ready-head {
-      flex-direction: column;
-      align-items: stretch;
-    }
-
-    .wallet-ready-head .derive-btn.network-btn {
-      width: 100%;
-    }
-
-    .export-address-row {
-      flex-direction: column;
-      align-items: stretch;
     }
   }
 </style>

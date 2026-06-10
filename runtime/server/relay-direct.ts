@@ -50,6 +50,14 @@ export const sendEntityInputDirectViaRelaySocket = (
     );
     return false;
   }
+  const fromPubKeyHex = resolveEncryptionPublicKeyHex(relayStore, fromRuntimeId);
+  if (!fromPubKeyHex) {
+    logOneShot(
+      `direct-dispatch-missing-source-key:${fromRuntimeId}`,
+      `[RELAY] Direct dispatch missing source encryption key for runtime ${fromRuntimeId.slice(0, 10)}`,
+    );
+    return false;
+  }
 
   try {
     const payload = encryptJSON(input, hexToPubKey(targetPubKeyHex));
@@ -58,6 +66,7 @@ export const sendEntityInputDirectViaRelaySocket = (
       type: 'entity_input',
       id: `srv_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`,
       from: fromRuntimeId,
+      fromEncryptionPubKey: fromPubKeyHex,
       to: target?.runtimeId || targetRuntimeId,
       timestamp:
         typeof ingressTimestamp === 'number' && Number.isFinite(ingressTimestamp)
@@ -65,6 +74,8 @@ export const sendEntityInputDirectViaRelaySocket = (
           : nextWsTimestamp(relayStore),
       payload,
       encrypted: true,
+      entityId: input.entityId,
+      txs: input.entityTxs?.length ?? 0,
     };
     if (target) {
       target.ws.send(safeStringify(msg));

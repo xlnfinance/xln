@@ -40,6 +40,17 @@ type SwapRuntimeWindow = typeof window & {
           currentHeight?: number;
           frameHistory?: Array<{ accountTxs?: Array<{ type?: string }> }>;
           deltas?: Map<number | string, unknown>;
+          swapOrderHistory?: Map<string, {
+            resolves?: Array<{
+              fillRatio?: number;
+              fillNumerator?: bigint;
+              fillDenominator?: bigint;
+              cancelRemainder?: boolean;
+              executionGiveAmount?: bigint;
+              executionWantAmount?: bigint;
+              comment?: string;
+            }>;
+          }>;
         }>;
       };
     }>;
@@ -56,6 +67,17 @@ type DeltaSnapshot = {
   rightAllowance: string;
   leftHold: string;
   rightHold: string;
+};
+
+type SwapResolveSnapshot = {
+  offerId: string;
+  fillRatio: number;
+  fillNumerator: string;
+  fillDenominator: string;
+  cancelRemainder: boolean;
+  executionGiveAmount: string;
+  executionWantAmount: string;
+  comment: string;
 };
 
 function mirrorConsole(page: Page, tag: string): void {
@@ -632,6 +654,23 @@ async function waitForOrderbookLevelVisible(
   await expect(page.locator(`[data-testid="${testId}"][data-price="${priceTicks}"]`).first()).toBeVisible({ timeout: timeoutMs });
 }
 
+async function waitForOrderbookLevelGone(
+  page: Page,
+  side: 'ask' | 'bid',
+  price: string,
+  timeoutMs = 30_000,
+): Promise<void> {
+  const testId = side === 'ask' ? 'orderbook-ask-row' : 'orderbook-bid-row';
+  const priceTicks = displayPriceToTicks(price);
+  await expect
+    .poll(async () => await page.locator(`[data-testid="${testId}"][data-price="${priceTicks}"]`).count(), {
+      timeout: timeoutMs,
+      intervals: [250, 500, 750],
+      message: `${side} level ${price} must disappear after fill/cancel`,
+    })
+    .toBe(0);
+}
+
 async function waitForOrderbookLevelsVisible(
   page: Page,
   levels: Array<{ side: 'ask' | 'bid'; price: string }>,
@@ -640,6 +679,82 @@ async function waitForOrderbookLevelsVisible(
   for (const level of levels) {
     await waitForOrderbookLevelVisible(page, level.side, level.price, timeoutMs);
   }
+}
+
+async function readSwapResolveSnapshots(
+  page: Page,
+  entityId: string,
+  counterpartyId: string,
+): Promise<SwapResolveSnapshot[]> {
+  return await page.evaluate(({ entityId, counterpartyId }) => {
+    const view = window as SwapRuntimeWindow;
+    const env = view.isolatedEnv;
+    const recordOf = (value: unknown): Record<string, unknown> =>
+      value && typeof value === 'object' ? value as Record<string, unknown> : {};
+    const owner = String(entityId || '').toLowerCase();
+    const cp = String(counterpartyId || '').toLowerCase();
+    const out: SwapResolveSnapshot[] = [];
+
+    const accountMatches = (accountKey: string, rawAccount: unknown): boolean => {
+      const account = recordOf(rawAccount);
+      const left = typeof account.leftEntity === 'string' ? account.leftEntity.toLowerCase() : '';
+      const right = typeof account.rightEntity === 'string' ? account.rightEntity.toLowerCase() : '';
+      const canonicalCp = typeof account.counterpartyEntityId === 'string' ? account.counterpartyEntityId.toLowerCase() : '';
+      return accountKey.toLowerCase() === cp ||
+        canonicalCp === cp ||
+        Boolean(left && right && ((left === owner && right === cp) || (right === owner && left === cp)));
+    };
+
+    for (const [replicaKey, replica] of env?.eReplicas?.entries?.() || []) {
+      if (!String(replicaKey).toLowerCase().startsWith(`${owner}:`)) continue;
+      const state = recordOf(recordOf(replica).state);
+      const accounts = state.accounts;
+      if (!(accounts instanceof Map)) continue;
+      for (const [accountKey, rawAccount] of accounts.entries()) {
+        if (!accountMatches(String(accountKey || ''), rawAccount)) continue;
+        const history = recordOf(rawAccount).swapOrderHistory;
+        if (!(history instanceof Map)) return out;
+        for (const [offerId, rawLifecycle] of history.entries()) {
+          const resolves = recordOf(rawLifecycle).resolves;
+          if (!Array.isArray(resolves)) continue;
+          for (const rawResolve of resolves) {
+            const resolve = recordOf(rawResolve);
+            out.push({
+              offerId: String(offerId || ''),
+              fillRatio: Number(resolve.fillRatio || 0),
+              fillNumerator: String(resolve.fillNumerator ?? '0'),
+              fillDenominator: String(resolve.fillDenominator ?? '0'),
+              cancelRemainder: Boolean(resolve.cancelRemainder),
+              executionGiveAmount: String(resolve.executionGiveAmount ?? '0'),
+              executionWantAmount: String(resolve.executionWantAmount ?? '0'),
+              comment: String(resolve.comment || ''),
+            });
+          }
+        }
+        return out;
+      }
+    }
+    return out;
+  }, { entityId, counterpartyId });
+}
+
+async function waitForLatestSwapResolveSnapshot(
+  page: Page,
+  entityId: string,
+  counterpartyId: string,
+  minimumCount: number,
+): Promise<SwapResolveSnapshot> {
+  await expect
+    .poll(async () => (await readSwapResolveSnapshots(page, entityId, counterpartyId)).length, {
+      timeout: 30_000,
+      intervals: [250, 500, 750],
+      message: `swap resolve snapshots must reach ${minimumCount}`,
+    })
+    .toBeGreaterThanOrEqual(minimumCount);
+  const snapshots = await readSwapResolveSnapshots(page, entityId, counterpartyId);
+  const latest = snapshots.at(-1);
+  expect(latest, 'latest swap resolve snapshot must exist').toBeTruthy();
+  return latest!;
 }
 
 async function waitForRestoredRuntime(page: Page, runtimeId: string): Promise<void> {
@@ -1025,10 +1140,12 @@ test.describe('E2E Swap Isolated Flow', () => {
       await openSwapWorkspace(alicePage);
       await selectCounterpartyInSwap(alicePage, hubId);
       await placeAliceSellOffer(alicePage, '0.03', '2500');
+      await waitForOrderbookLevelVisible(alicePage, 'ask', '2500');
 
       await openSwapWorkspace(bobPage);
       await selectCounterpartyInSwap(bobPage, hubId);
-      await placeBobMatchingBuyOrder(bobPage, '75', '2500');
+      await waitForOrderbookLevelVisible(bobPage, 'ask', '2500');
+      await placeBobMatchingBuyOrder(bobPage, '78', '2600');
 
       await expect.poll(
         async () => await readSwapOfferCount(alicePage, alice.entityId, alice.signerId, hubId),
@@ -1038,6 +1155,10 @@ test.describe('E2E Swap Isolated Flow', () => {
           message: 'Alice swapOffers state must clear after Bob fills the order',
         },
       ).toBe(0);
+      await Promise.all([
+        waitForOrderbookLevelGone(alicePage, 'ask', '2500'),
+        waitForOrderbookLevelGone(bobPage, 'ask', '2500'),
+      ]);
 
       const aliceToken1After = await waitForOutCapChange(alicePage, alice.entityId, hubId, 1, aliceToken1Before, 'up');
       const aliceToken2After = await waitForOutCapChange(alicePage, alice.entityId, hubId, 2, aliceToken2Before, 'down');
@@ -1048,6 +1169,19 @@ test.describe('E2E Swap Isolated Flow', () => {
       expect(aliceToken2After).toBeLessThan(aliceToken2Before);
       expect(bobToken1After).toBeLessThan(bobToken1Before);
       expect(bobToken2After).toBeGreaterThan(bobToken2Before);
+
+      const aliceResolve = await waitForLatestSwapResolveSnapshot(alicePage, alice.entityId, hubId, 1);
+      expect(aliceResolve.executionGiveAmount, 'maker gives exactly 0.03 WETH').toBe('30000000000000000');
+      expect(aliceResolve.executionWantAmount, 'maker receives execution quote at resting ask, not taker limit').toBe('75000000000000000000');
+      expect(aliceResolve.fillRatio, 'maker order is fully filled').toBe(65_535);
+      expect(aliceResolve.cancelRemainder, 'maker order closes after full fill').toBe(true);
+
+      const bobResolve = await waitForLatestSwapResolveSnapshot(bobPage, bob.entityId, hubId, 1);
+      expect(bobResolve.executionGiveAmount, 'buyer spends execution quote at 2500, not the 2600 limit').toBe('75000000000000000000');
+      expect(bobResolve.executionWantAmount, 'buyer receives full 0.03 WETH target').toBe('30000000000000000');
+      expect(BigInt(bobResolve.executionGiveAmount), 'buyer source savings must be positive').toBeLessThan(78n * 10n ** 18n);
+      expect(BigInt(bobResolve.fillNumerator), 'source-savings exact ratio should be below full source spend').toBeLessThan(BigInt(bobResolve.fillDenominator));
+      expect(bobResolve.cancelRemainder, 'current taker closes unused source remainder after price improvement').toBe(true);
 
       // Runtime persistence/reload is covered by dedicated persistence specs.
       // This isolated swap case stays focused on cross-user no-MM execution.
@@ -1143,6 +1277,11 @@ test.describe('E2E Swap Isolated Flow', () => {
         remainingTextAfterReload.includes('0.02'),
         `expected remaining UI amount around 0.02 WETH after reload, got ${remainingTextAfterReload}`,
       ).toBe(true);
+
+      // The taker can disappear after receiving the partial fill; the maker must still be
+      // able to cancel/resolve the remaining committed order without counterparty UI help.
+      await bobContext.close();
+      bobContext = null;
 
       const cancelButton = alicePage.getByTestId('swap-open-order-cancel').first();
       await expect(cancelButton).toBeVisible({ timeout: 20_000 });

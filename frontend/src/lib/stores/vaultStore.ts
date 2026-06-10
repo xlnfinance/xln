@@ -30,7 +30,7 @@ import {
 import { settings } from './settingsStore';
 import { toasts } from './toastStore';
 import { writeSavedCollateralPolicy, writeHubJoinPreference } from '$lib/utils/onboardingPreferences';
-import { writeOnboardingComplete } from '$lib/utils/onboardingState';
+import { writeOnboardingCompleteForEntities } from '$lib/utils/onboardingState';
 import { tabOperations } from './tabStore';
 import { isInactiveTabStandby } from '$lib/utils/activeTabLock';
 import { unwrapLiveRuntimeEnv } from '$lib/utils/liveRuntimeEnv';
@@ -390,11 +390,14 @@ export const resolveDefaultRecoveryTowerUrls = (options: {
   hostname: string;
   globalUrls?: unknown;
   localUrls?: unknown;
+  envUrls?: unknown;
 }): string[] => {
   const globalTowerUrls = parseRecoveryTowerUrls(options.globalUrls);
   if (globalTowerUrls.length > 0) return globalTowerUrls;
   const localTowerUrls = parseRecoveryTowerUrls(options.localUrls);
   if (localTowerUrls.length > 0) return localTowerUrls;
+  const envTowerUrls = parseRecoveryTowerUrls(options.envUrls);
+  if (envTowerUrls.length > 0) return envTowerUrls;
   const hostname = String(options.hostname || '').trim().toLowerCase();
   // Local/dev environments should not assume an always-on watchtower. Recovery towers
   // there must be configured explicitly, otherwise fresh wallet creation gets blocked by
@@ -418,6 +421,7 @@ const defaultRecoveryTowerUrls = (): string[] => {
     hostname: window.location.hostname,
     globalUrls: w.__XLN_WATCHTOWERS__,
     localUrls,
+    envUrls: import.meta.env?.['VITE_XLN_WATCHTOWER_URL'],
   });
 };
 
@@ -736,6 +740,10 @@ export async function tryRestoreRuntimeEnvFromTower(
     }
   }
   applyRecoveryBundleMetadata(runtime, bundle);
+  // Tower bundles restore signer metadata before restoring env. Register the
+  // HD-derived local keys immediately; restored replicas may already exist, so
+  // no later import path will necessarily touch registerSignerKey again.
+  await registerRuntimeSignerKeys(runtime, xln);
   const restoredEnv = await xln.restoreEnvFromCheckpointSnapshot(bundle.checkpoint, {
     runtimeSeed: runtime.seed,
     runtimeId,
@@ -1673,6 +1681,7 @@ async function buildOrRestoreRuntimeEnv(runtime: Runtime, xln: XLNModule, strict
   if (!runtimeIdLower) {
     throw new Error(`[VaultStore] Invalid runtime.id for env restore: ${String(runtime.id)}`);
   }
+  await registerRuntimeSignerKeys(runtime, xln);
   const runtimeSeed = runtime.seed;
   let env: Env | null = null;
   let signerMetadataChanged = false;
@@ -2629,7 +2638,13 @@ export const vaultOperations = {
             maxFeeUsd: 15,
           });
           writeHubJoinPreference(loginType === 'demo' ? '1' : 'manual');
-          writeOnboardingComplete(entityId, true);
+          // Runtime creation imports every local signer/entity lane up front
+          // (primary Testnet plus cross-j siblings such as Tron). Onboarding is
+          // runtime-level, so never leave a sibling lane looking like signup.
+          writeOnboardingCompleteForEntities(
+            runtime.signers.map((signer) => signer.entityId || '').filter(Boolean),
+            true,
+          );
         }
       }
       runtimesState.update(state => ({

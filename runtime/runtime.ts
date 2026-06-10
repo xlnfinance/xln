@@ -1,6 +1,7 @@
 import { Level } from 'level';
 import { ethers } from 'ethers';
 import type { Provider } from 'ethers';
+import { TIMING } from './constants';
 import {
   DEFAULT_SNAPSHOT_INTERVAL_FRAMES,
   dbRootPath,
@@ -2033,28 +2034,21 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
       throw new Error(`FRAME_STEP: Stopped at frame ${env.height} for debugging`);
     }
 
+    const ingressNow = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
     if (inputs && inputs.length > 0) {
-      enqueueRuntimeInputs(env, inputs, undefined, undefined, env.timestamp);
+      enqueueRuntimeInputs(env, inputs, undefined, undefined, ingressNow);
     }
     if (env.pendingOutputs && env.pendingOutputs.length > 0) {
-      enqueueRuntimeInputs(env, env.pendingOutputs, undefined, undefined, env.timestamp);
+      enqueueRuntimeInputs(env, env.pendingOutputs, undefined, undefined, ingressNow);
       env.pendingOutputs = [];
     }
     if (env.networkInbox && env.networkInbox.length > 0) {
-      enqueueRuntimeInputs(env, env.networkInbox, undefined, undefined, env.timestamp);
+      enqueueRuntimeInputs(env, env.networkInbox, undefined, undefined, ingressNow);
       env.networkInbox = [];
     }
 
     if (!hasRuntimeWork(env)) return env;
 
-    const runtimeState = ensureRuntimeState(env);
-    const mempoolBeforeTick = ensureRuntimeMempool(env);
-    const queuedAtBeforeTick = mempoolBeforeTick.queuedAt;
-    const shouldAdvanceLogicalTime =
-      !env.scenarioMode &&
-      typeof queuedAtBeforeTick === 'number' &&
-      Number.isFinite(queuedAtBeforeTick) &&
-      queuedAtBeforeTick > (env.timestamp ?? 0);
     const frameGateNow = env.scenarioMode ? (env.timestamp ?? 0) : getWallClockMs();
     if (!isRuntimeFrameReady(env, frameGateNow, runtimeDelay)) {
       return env;
@@ -2068,8 +2062,18 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
 
     if (env.scenarioMode) {
       env.timestamp = (env.timestamp ?? 0) + 100;
-    } else if (shouldAdvanceLogicalTime || runtimeState.clockPrimed) {
-      env.timestamp = Math.max(env.timestamp ?? 0, queuedAtBeforeTick ?? (env.timestamp ?? 0));
+    } else {
+      // Live R-frame time is the wall clock at block creation. queuedAt is only
+      // scheduler/ingress metadata; using it here can resurrect a stale browser
+      // snapshot timestamp and make hubs reject account frames for drift.
+      const liveNow = getWallClockMs();
+      const previousTimestamp = Math.max(0, Math.floor(Number(env.timestamp ?? 0)));
+      if (previousTimestamp > liveNow + TIMING.TIMESTAMP_DRIFT_MS) {
+        throw new Error(
+          `RUNTIME_CLOCK_AHEAD: env.timestamp=${previousTimestamp} wall=${liveNow}`,
+        );
+      }
+      env.timestamp = Math.max(previousTimestamp, liveNow);
     }
     for (const jReplica of env.jReplicas?.values?.() ?? []) {
       jReplica.jadapter?.setBlockTimestamp(env.timestamp);
@@ -2324,6 +2328,20 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
 
     // === SIDE EFFECTS (safe to fail — bilateral consensus retries) ===
 
+    // A fresh account frame can reference a brand-new user entity. Publish the
+    // sender profile before remote delivery so the counterparty can enforce the
+    // same-jurisdiction invariant without racing gossip.
+    const p2p = getP2P(env);
+    const localEntityIds = p2p ? getLocallySignableEntityIds() : new Set<string>();
+    const changedLocalEntityIds = [...changedEntityIds].filter(entityId => localEntityIds.has(entityId));
+    if (p2p && changedLocalEntityIds.length > 0) {
+      if (remoteOutputs.length > 0 && typeof p2p.announceProfilesForEntitiesNow === 'function') {
+        await p2p.announceProfilesForEntitiesNow(changedLocalEntityIds, 'pre-output-profile-refresh');
+      } else {
+        p2p.announceProfilesForEntities(changedLocalEntityIds, 'routing-profile-refresh');
+      }
+    }
+
     // 1. Broadcast entity outputs via P2P (fire-and-forget)
     if (remoteOutputs.length > 0) {
       console.log(`📡 [SIDE-EFFECT] Dispatching ${remoteOutputs.length} remote entity outputs via P2P`);
@@ -2338,17 +2356,6 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
       waitingPendingOutputs,
       outputRoutingDeps,
     );
-
-    // 1b. Re-announce gossip profiles after account state changes (new accounts, capacity shifts)
-    // Broadcast changed local entities so relay routing metadata stays fresh.
-    const p2p = getP2P(env);
-    if (p2p) {
-      const localEntityIds = getLocallySignableEntityIds();
-      const changedLocalEntityIds = [...changedEntityIds].filter(entityId => localEntityIds.has(entityId));
-      if (changedLocalEntityIds.length > 0) {
-        p2p.announceProfilesForEntities(changedLocalEntityIds, 'routing-profile-refresh');
-      }
-    }
 
     // 2. Execute J-batches via JAdapter.submitTx (events arrive next frame via j-watcher)
     await submitRuntimeJOutbox(env, jOutbox, { enqueueRuntimeInputs });

@@ -1,16 +1,21 @@
 <!--
   OnboardingPanel.svelte
 
-  Single-pass post-wallet setup.
-  Public profile, default policy, and initial hub join live on one screen so
-  the user can create a usable entity in one pass.
+  Screen 2 of onboarding: runtime/seed already exists, only account configuration
+  belongs here. Do not derive, rehydrate, or create wallet state in this component.
 -->
 <script lang="ts">
   import { onMount } from 'svelte';
   import { createEventDispatcher } from 'svelte';
   import type { Env } from '@xln/runtime/xln-api';
   import { enqueueEntityInputs, getEnv, resolveConfiguredApiBase, xlnFunctions } from '../../stores/xlnStore';
-  import { activeRuntime } from '../../stores/vaultStore';
+  import {
+    activeRuntime,
+    buildRuntimeRecoveryConfigForMode,
+    vaultOperations,
+    type RecoveryTowerConfig,
+    type RecoveryTowerSetupMode,
+  } from '../../stores/vaultStore';
   import { entityAvatar } from '../../utils/avatar';
   import {
     type HubJoinPreference,
@@ -21,9 +26,21 @@
     writeSavedCollateralPolicy,
     getOpenAccountRebalancePolicyData,
   } from '../../utils/onboardingPreferences';
-  import { readOnboardingComplete, writeOnboardingComplete } from '../../utils/onboardingState';
+  import {
+    readOnboardingComplete,
+    writeOnboardingCompleteForEntities,
+  } from '../../utils/onboardingState';
   import { normalizeEntityId, hasCounterpartyAccount } from '../../utils/entityReplica';
   import { prewarmCounterpartyProfiles } from '../../utils/p2pPrefetch';
+  import {
+    getManualRecoveryTowers,
+    isOfficialRecoveryTower,
+    normalizeRecoveryDraft,
+    normalizeRecoveryUrl,
+    normalizeTowerMode,
+    resolveOfficialRecoveryTowerUrl,
+    type RecoveryServiceMode,
+  } from '../../utils/recoverySettings';
 
   export let entityId: string = '';
   export let signerId: string = '';
@@ -45,6 +62,13 @@
   let avatar = '';
   let revealBrainVaultSeed = false;
   let copiedBrainVaultField = '';
+  let recoveryMode: RecoveryTowerSetupMode = 'official';
+  let recoveryTowerDraft: RecoveryTowerConfig[] = [];
+  let recoveryDraftLoadedFor = '';
+  let recoveryManualUrl = '';
+  let recoveryManualKind: RecoveryServiceMode = 'blind_backup';
+  let recoveryMessage = '';
+  let recoveryMessageTone: 'neutral' | 'error' = 'neutral';
 
   const HUB_JOIN_OPTIONS: Array<{ value: HubJoinPreference; label: string }> = [
     { value: 'manual', label: 'Join hubs manually' },
@@ -64,18 +88,6 @@
   const parseJoinCount = (pref: HubJoinPreference): number =>
     pref === 'manual' ? 0 : Number(pref);
 
-  const shuffle = <T,>(items: T[]): T[] => {
-    const out = [...items];
-    for (let i = out.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      const a = out[i];
-      const b = out[j];
-      out[i] = b as T;
-      out[j] = a as T;
-    }
-    return out;
-  };
-
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
   type PublicHubResponse = {
@@ -94,6 +106,7 @@
     chainId?: unknown;
     depositoryAddress?: unknown;
   };
+  type OnboardingTarget = { entityId: string; signerId: string };
 
   const normalizeJurisdiction = (value: unknown): string => String(value || '').trim().toLowerCase();
   const jurisdictionKey = (value: unknown): string => {
@@ -118,6 +131,44 @@
         || jurisdictionKey(replica?.position?.jurisdiction);
     }
     return '';
+  }
+
+  function hasEntityReplica(currentEnv: Env | null | undefined, target: OnboardingTarget): boolean {
+    const normalizedEntityId = normalizeEntityId(target.entityId);
+    const normalizedSignerId = String(target.signerId || '').trim().toLowerCase();
+    if (!normalizedEntityId || !normalizedSignerId || !currentEnv?.eReplicas) return false;
+    for (const key of currentEnv.eReplicas.keys()) {
+      const [replicaEntityId, replicaSignerId] = String(key || '').split(':');
+      if (
+        normalizeEntityId(replicaEntityId) === normalizedEntityId
+        && String(replicaSignerId || '').trim().toLowerCase() === normalizedSignerId
+      ) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+  function getRuntimeOnboardingTargets(currentEnv: Env | null | undefined = getEnv()): OnboardingTarget[] {
+    const targets: OnboardingTarget[] = [];
+    const seen = new Set<string>();
+    const add = (rawEntityId: unknown, rawSignerId: unknown) => {
+      const nextEntityId = normalizeEntityId(String(rawEntityId || ''));
+      const nextSignerId = String(rawSignerId || '').trim().toLowerCase();
+      if (!nextEntityId || !nextSignerId) return;
+      const key = `${nextEntityId}:${nextSignerId}`;
+      if (seen.has(key)) return;
+      const target = { entityId: nextEntityId, signerId: nextSignerId };
+      if (currentEnv && !hasEntityReplica(currentEnv, target)) return;
+      seen.add(key);
+      targets.push(target);
+    };
+
+    add(entityId, signerId);
+    for (const runtimeSigner of $activeRuntime?.signers || []) {
+      add(runtimeSigner.entityId, runtimeSigner.address);
+    }
+    return targets;
   }
 
   const hasSavedHubJoinPreference = (): boolean =>
@@ -145,6 +196,8 @@
   $: brainVaultWordCount = brainVaultSeed ? brainVaultSeed.split(/\s+/).filter(Boolean).length : 0;
   $: brainVaultRuntimeLabel = String($activeRuntime?.label || 'BrainVault').trim();
   $: hasBrainVaultRecovery = Boolean(brainVaultSeed || brainVaultMnemonic12);
+  $: recoveryOfficialUrl = resolveOfficialRecoveryTowerUrl();
+  $: recoveryRuntimeSyncKey = `${$activeRuntime?.id || 'none'}:${JSON.stringify($activeRuntime?.recovery?.towers || [])}:${$activeRuntime?.recovery?.useDefaultTowers === true}`;
 
   const shortValue = (value: string): string => {
     const text = String(value || '').trim();
@@ -188,6 +241,100 @@
     URL.revokeObjectURL(url);
   }
 
+  function inferRecoveryMode(): RecoveryTowerSetupMode {
+    const runtime = $activeRuntime;
+    const officialUrl = resolveOfficialRecoveryTowerUrl();
+    const towers = normalizeRecoveryDraft(runtime?.recovery?.towers);
+    const officialTower = towers.find((tower) => isOfficialRecoveryTower(tower, officialUrl));
+    if (officialTower) {
+      return normalizeTowerMode(officialTower.towerMode) === 'delayed_last_resort'
+        ? 'official'
+        : 'backup_only';
+    }
+    if (!officialUrl && towers.length === 0) return 'local_only';
+    if (towers.length === 0) return 'official';
+    return 'local_only';
+  }
+
+  function syncRecoveryDraftFromRuntime(force = false): void {
+    const runtime = $activeRuntime;
+    const key = `${runtime?.id || 'none'}:${JSON.stringify(runtime?.recovery?.towers || [])}:${runtime?.recovery?.useDefaultTowers === true}`;
+    if (!force && recoveryDraftLoadedFor === key) return;
+    recoveryMode = inferRecoveryMode();
+    recoveryTowerDraft = normalizeRecoveryDraft(runtime?.recovery?.towers);
+    recoveryDraftLoadedFor = key;
+    recoveryMessage = '';
+    recoveryMessageTone = 'neutral';
+  }
+
+  function applyRecoveryModeDraft(mode: RecoveryTowerSetupMode): void {
+    const officialUrl = resolveOfficialRecoveryTowerUrl();
+    if (mode !== 'local_only' && !officialUrl) return;
+    recoveryMode = mode;
+    const config = buildRuntimeRecoveryConfigForMode(mode, {
+      officialTowerUrl: officialUrl,
+      manualTowers: getManualRecoveryTowers(recoveryTowerDraft, officialUrl),
+      previous: $activeRuntime?.recovery || null,
+    });
+    recoveryTowerDraft = normalizeRecoveryDraft(config.towers);
+    recoveryMessage = '';
+    recoveryMessageTone = 'neutral';
+  }
+
+  function addManualRecoveryTower(): void {
+    recoveryMessage = '';
+    recoveryMessageTone = 'neutral';
+    try {
+      const url = normalizeRecoveryUrl(recoveryManualUrl);
+      const nextTower: RecoveryTowerConfig = {
+        id: `manual-${recoveryTowerDraft.length + 1}`,
+        url,
+        towerMode: recoveryManualKind,
+        enabled: true,
+      };
+      recoveryTowerDraft = normalizeRecoveryDraft([
+        ...recoveryTowerDraft.filter((tower) => tower.url !== url),
+        nextTower,
+      ]);
+      recoveryManualUrl = '';
+    } catch (error) {
+      recoveryMessage = error instanceof Error ? error.message : String(error);
+      recoveryMessageTone = 'error';
+    }
+  }
+
+  function updateRecoveryTowerMode(url: string, mode: RecoveryServiceMode): void {
+    recoveryTowerDraft = normalizeRecoveryDraft(recoveryTowerDraft.map((tower) =>
+      tower.url === url
+        ? { ...tower, towerMode: mode }
+        : tower
+    ));
+  }
+
+  function removeRecoveryTower(url: string): void {
+    recoveryTowerDraft = recoveryTowerDraft.filter((tower) => tower.url !== url);
+  }
+
+  async function saveRecoveryConfig(): Promise<void> {
+    const runtime = $activeRuntime;
+    if (!runtime?.id) throw new Error('Runtime is required before configuring recovery services');
+    const officialUrl = resolveOfficialRecoveryTowerUrl();
+    const config = buildRuntimeRecoveryConfigForMode(recoveryMode, {
+      officialTowerUrl: officialUrl,
+      manualTowers: getManualRecoveryTowers(recoveryTowerDraft, officialUrl),
+      previous: runtime.recovery || null,
+    });
+    const updatedRuntime = await vaultOperations.updateRuntimeRecovery(runtime.id, config);
+    recoveryTowerDraft = normalizeRecoveryDraft(updatedRuntime.recovery?.towers);
+    recoveryDraftLoadedFor = '';
+    syncRecoveryDraftFromRuntime(true);
+  }
+
+  $: {
+    recoveryRuntimeSyncKey;
+    syncRecoveryDraftFromRuntime();
+  }
+
   $: canFinish =
     termsAccepted &&
     displayName.trim().length >= 2 &&
@@ -228,14 +375,14 @@
     }
   });
 
-  function getHubEntityIds(currentEnv: Env): string[] {
+  function getHubEntityIds(currentEnv: Env, targetEntityId: string): string[] {
     const discovered: string[] = [];
-    const entityJurisdiction = getEntityJurisdictionKey(currentEnv, entityId);
+    const entityJurisdiction = getEntityJurisdictionKey(currentEnv, targetEntityId);
     if (!entityJurisdiction) return discovered;
     const add = (value: unknown) => {
       const id = String(value || '').trim();
       if (!id) return;
-      if (normalizeEntityId(id) === normalizeEntityId(entityId)) return;
+      if (normalizeEntityId(id) === normalizeEntityId(targetEntityId)) return;
       if (!discovered.some(existing => normalizeEntityId(existing) === normalizeEntityId(id))) {
         discovered.push(id);
       }
@@ -251,9 +398,9 @@
     return discovered;
   }
 
-  async function fetchPublicHubEntityIds(currentEnv: Env): Promise<string[]> {
+  async function fetchPublicHubEntityIds(currentEnv: Env, targetEntityId: string): Promise<string[]> {
     if (typeof window === 'undefined') return [];
-    const entityJurisdiction = getEntityJurisdictionKey(currentEnv, entityId);
+    const entityJurisdiction = getEntityJurisdictionKey(currentEnv, targetEntityId);
     if (!entityJurisdiction) return [];
     const controller = new AbortController();
     const timer = setTimeout(() => controller.abort(), 2000);
@@ -269,7 +416,7 @@
         if (!hub?.entityId || hub.metadata?.isHub !== true) continue;
         if (jurisdictionKey(hub.metadata?.jurisdiction) !== entityJurisdiction) continue;
         const normalized = normalizeEntityId(hub.entityId);
-        if (!normalized || normalized === normalizeEntityId(entityId)) continue;
+        if (!normalized || normalized === normalizeEntityId(targetEntityId)) continue;
         if (!out.some(existing => normalizeEntityId(existing) === normalized)) out.push(hub.entityId);
       }
       return out;
@@ -280,8 +427,8 @@
     }
   }
 
-  async function queueAutoHubJoins(joinCount: number): Promise<number> {
-    if (joinCount <= 0 || !entityId || !signerId) return 0;
+  async function queueAutoHubJoinsForTarget(joinCount: number, target: OnboardingTarget): Promise<number> {
+    if (joinCount <= 0 || !target.entityId || !target.signerId) return 0;
 
     const waitForCandidates = async (): Promise<string[]> => {
       const timeoutMs = 12_000;
@@ -293,12 +440,12 @@
         const currentEnv = getEnv();
         if (currentEnv) {
           const ids = [
-            ...getHubEntityIds(currentEnv),
-            ...await fetchPublicHubEntityIds(currentEnv),
+            ...getHubEntityIds(currentEnv, target.entityId),
+            ...await fetchPublicHubEntityIds(currentEnv, target.entityId),
           ];
           const uniqueIds = Array.from(new Map(ids.map(id => [normalizeEntityId(id), id])).values());
-          const currentCandidates = shuffle(uniqueIds)
-            .filter((hubId) => !hasCounterpartyAccount(currentEnv, entityId, hubId));
+          const currentCandidates = uniqueIds
+            .filter((hubId) => !hasCounterpartyAccount(currentEnv, target.entityId, hubId));
           if (currentCandidates.length > best.length) best = currentCandidates;
           if (currentCandidates.length >= joinCount) return currentCandidates.slice(0, joinCount);
         }
@@ -330,12 +477,20 @@
     }));
 
     await enqueueEntityInputs(env, [{
-      entityId,
-      signerId,
+      entityId: target.entityId,
+      signerId: target.signerId,
       entityTxs,
     }]);
 
     return candidates.length;
+  }
+
+  async function queueAutoHubJoins(joinCount: number, targets: OnboardingTarget[]): Promise<number> {
+    // Each lane owns an independent bilateral account set. Primary and cross-j
+    // sibling entities must both open committed hub accounts during onboarding;
+    // otherwise the UI can select a sibling that exists but cannot route.
+    const joined = await Promise.all(targets.map((target) => queueAutoHubJoinsForTarget(joinCount, target)));
+    return joined.reduce((sum, count) => sum + count, 0);
   }
 
   async function finish() {
@@ -344,8 +499,9 @@
     error = '';
 
     try {
-      writeOnboardingComplete(entityId, true);
-      localStorage.setItem('xln-display-name', displayName.trim());
+      const cleanDisplayName = displayName.trim();
+      const env = getEnv();
+      const targets = getRuntimeOnboardingTargets(env);
 
       const policyData = writeSavedCollateralPolicy({
         mode: 'autopilot',
@@ -355,32 +511,38 @@
       });
       const savedJoinPreference = writeHubJoinPreference(autoJoinHubs);
 
-      if (entityId && signerId) {
-        const env = getEnv();
-        if (env) {
-          await enqueueEntityInputs(env, [{
-            entityId,
-            signerId,
+      if (env && targets.length > 0) {
+        await enqueueEntityInputs(env, targets.map((target) => ({
+            entityId: target.entityId,
+            signerId: target.signerId,
             entityTxs: [{
               type: 'profile-update' as const,
               data: {
                 profile: {
-                  entityId,
-                  name: displayName.trim(),
+                  entityId: target.entityId,
+                  name: cleanDisplayName,
                   bio: '',
                   website: '',
                 },
               },
             }],
-          }]);
-        }
+          })));
       }
 
+      // Recovery must be committed before opening hub accounts. Account opens create
+      // usable bilateral state; with a configured tower, the runtime backup barrier
+      // must already be installed before those committed frames can leave the device.
+      await saveRecoveryConfig();
+
       const autoJoinCount = parseJoinCount(savedJoinPreference);
-      const autoJoinedCount = await queueAutoHubJoins(autoJoinCount);
+      const autoJoinedCount = await queueAutoHubJoins(autoJoinCount, targets);
+
+      const completedEntityIds = targets.map((target) => target.entityId);
+      writeOnboardingCompleteForEntities(completedEntityIds.length > 0 ? completedEntityIds : [entityId], true);
+      localStorage.setItem('xln-display-name', cleanDisplayName);
 
       dispatch('complete', {
-        displayName: displayName.trim(),
+        displayName: cleanDisplayName,
         softLimitUsd: policyData.softLimitUsd,
         hardLimitUsd: policyData.hardLimitUsd,
         maxFeeUsd: policyData.maxFeeUsd,
@@ -413,6 +575,10 @@
 </script>
 
 <div class="onboarding">
+  <div class="setup-header">
+    <h2>Configure account</h2>
+    <p>Set the public profile, default limits, and first hub account.</p>
+  </div>
   <div class="setup-card">
     {#if hasBrainVaultRecovery}
       <section class="setup-section brainvault-section">
@@ -420,7 +586,7 @@
           <summary data-testid="brainvault-onboarding-recovery-toggle">
             <span class="brainvault-summary-copy">
               <strong>BrainVault recovery</strong>
-              <small>Download the seed sheet, then continue with account setup.</small>
+              <small>Save the seed sheet before account setup.</small>
             </span>
             <span class="brainvault-summary-meta">
               <span>{brainVaultWordCount ? `${brainVaultWordCount} words` : 'Seed ready'}</span>
@@ -476,10 +642,123 @@
           </div>
         </details>
         <p class="brainvault-continue" data-testid="brainvault-continue-copy">
-          Or continue creating the XLN account with these data.
+          Continue with the account settings below.
         </p>
       </section>
     {/if}
+
+    <section class="setup-section recovery-section">
+      <div class="section-headline">
+        <h3>Recovery services</h3>
+        <p>Encrypted watchtower backups and last-resort dispute response.</p>
+      </div>
+
+      <div class="recovery-mode-grid" role="radiogroup" aria-label="Runtime recovery mode">
+        <button
+          type="button"
+          class="recovery-mode-option"
+          class:selected={recoveryMode === 'official'}
+          disabled={!recoveryOfficialUrl}
+          on:click={() => applyRecoveryModeDraft('official')}
+        >
+          <span class="recovery-mode-title">Official tower</span>
+          <span class="recovery-mode-copy">
+            {recoveryOfficialUrl
+              ? 'Backup plus delayed last-resort response.'
+              : 'No official tower for this local runtime.'}
+          </span>
+        </button>
+
+        <button
+          type="button"
+          class="recovery-mode-option"
+          class:selected={recoveryMode === 'backup_only'}
+          disabled={!recoveryOfficialUrl}
+          on:click={() => applyRecoveryModeDraft('backup_only')}
+        >
+          <span class="recovery-mode-title">Backup only</span>
+          <span class="recovery-mode-copy">Encrypted backup, no rescue appointments.</span>
+        </button>
+
+        <button
+          type="button"
+          class="recovery-mode-option"
+          class:selected={recoveryMode === 'local_only'}
+          on:click={() => applyRecoveryModeDraft('local_only')}
+        >
+          <span class="recovery-mode-title">Local only</span>
+          <span class="recovery-mode-copy">No remote recovery unless you add a URL.</span>
+        </button>
+      </div>
+
+      <div class="recovery-service-list">
+        {#if recoveryTowerDraft.length === 0}
+          <div class="empty-recovery-card">No remote recovery service configured.</div>
+        {:else}
+          {#each recoveryTowerDraft as tower (tower.url)}
+            {@const isOfficial = isOfficialRecoveryTower(tower, recoveryOfficialUrl)}
+            <div class="recovery-service-row">
+              <div class="recovery-service-main">
+                <strong>{isOfficial ? 'Official XLN tower' : 'Manual service'}</strong>
+                <code>{tower.url}</code>
+              </div>
+              <div class="recovery-service-actions">
+                <select
+                  value={normalizeTowerMode(tower.towerMode)}
+                  disabled={isOfficial}
+                  aria-label="Recovery service mode"
+                  on:change={(event) => updateRecoveryTowerMode(tower.url, (event.currentTarget as HTMLSelectElement).value as RecoveryServiceMode)}
+                >
+                  <option value="blind_backup">Backup</option>
+                  <option value="delayed_last_resort">Last resort</option>
+                </select>
+                {#if !isOfficial}
+                  <button type="button" class="mini-action danger" on:click={() => removeRecoveryTower(tower.url)}>
+                    Remove
+                  </button>
+                {/if}
+              </div>
+            </div>
+          {/each}
+        {/if}
+      </div>
+
+      <details class="manual-recovery-details">
+        <summary>Advanced recovery service</summary>
+        <div class="manual-recovery-grid">
+          <label>
+            <span class="form-label">Service URL</span>
+            <input
+              type="url"
+              class="form-input"
+              bind:value={recoveryManualUrl}
+              placeholder="https://tower.example.com"
+              autocomplete="off"
+              spellcheck="false"
+            />
+          </label>
+          <label>
+            <span class="form-label">Role</span>
+            <select class="hub-join-select" bind:value={recoveryManualKind}>
+              <option value="blind_backup">Backup service</option>
+              <option value="delayed_last_resort">Last-resort disputer</option>
+            </select>
+          </label>
+          <button type="button" class="mini-action manual-add" on:click={addManualRecoveryTower}>
+            Add service
+          </button>
+        </div>
+      </details>
+
+      <p class="form-hint compact">
+        Towers never get spend authority. Last-resort disputers can only answer an already-open dispute in the final delay window.
+      </p>
+      {#if recoveryMessage}
+        <div class={recoveryMessageTone === 'error' ? 'error-msg' : 'recovery-note'}>
+          {recoveryMessage}
+        </div>
+      {/if}
+    </section>
 
     <section class="setup-section">
       <label class="form-label" for="display-name">Display name</label>
@@ -596,6 +875,25 @@
     display: flex;
     flex-direction: column;
     gap: 14px;
+  }
+
+  .setup-header {
+    margin-bottom: 14px;
+  }
+
+  .setup-header h2 {
+    margin: 0 0 6px;
+    color: rgba(255, 255, 255, 0.94);
+    font-size: 24px;
+    line-height: 1.15;
+    letter-spacing: 0;
+  }
+
+  .setup-header p {
+    margin: 0;
+    color: rgba(255, 255, 255, 0.58);
+    font-size: 13px;
+    line-height: 1.45;
   }
 
   .setup-section {
@@ -756,6 +1054,147 @@
     line-height: 1.45;
   }
 
+  .recovery-section {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .recovery-mode-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 8px;
+  }
+
+  .recovery-mode-option {
+    min-height: 86px;
+    padding: 12px;
+    border: 1px solid #322821;
+    border-radius: 12px;
+    background: #0f0b09;
+    color: #e7e5e4;
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 6px;
+    text-align: left;
+    cursor: pointer;
+  }
+
+  .recovery-mode-option.selected {
+    border-color: rgba(251, 191, 36, 0.65);
+    background: rgba(251, 191, 36, 0.08);
+  }
+
+  .recovery-mode-option:disabled {
+    opacity: 0.45;
+    cursor: not-allowed;
+  }
+
+  .recovery-mode-title {
+    color: #f5f5f4;
+    font-size: 13px;
+    font-weight: 800;
+  }
+
+  .recovery-mode-copy {
+    color: #a8a29e;
+    font-size: 12px;
+    line-height: 1.35;
+  }
+
+  .recovery-service-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+
+  .empty-recovery-card,
+  .recovery-service-row {
+    border: 1px solid #322821;
+    border-radius: 12px;
+    background: #0f0b09;
+    padding: 12px;
+  }
+
+  .empty-recovery-card {
+    color: #78716c;
+    font-size: 13px;
+  }
+
+  .recovery-service-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 12px;
+  }
+
+  .recovery-service-main {
+    min-width: 0;
+    display: flex;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .recovery-service-main strong {
+    color: #f5f5f4;
+    font-size: 13px;
+  }
+
+  .recovery-service-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .recovery-service-actions select {
+    min-height: 34px;
+    border: 1px solid #322821;
+    border-radius: 9px;
+    background: #080605;
+    color: #e7e5e4;
+    padding: 0 10px;
+    color-scheme: dark;
+  }
+
+  .mini-action.danger {
+    color: #fda4af;
+    border-color: rgba(244, 63, 94, 0.28);
+  }
+
+  .manual-recovery-details {
+    border-top: 1px solid #27211c;
+    padding-top: 12px;
+  }
+
+  .manual-recovery-details summary {
+    color: #fbbf24;
+    cursor: pointer;
+    font-size: 13px;
+    font-weight: 700;
+  }
+
+  .manual-recovery-grid {
+    margin-top: 12px;
+    display: grid;
+    grid-template-columns: minmax(0, 1.5fr) minmax(150px, 0.7fr) auto;
+    gap: 10px;
+    align-items: end;
+  }
+
+  .manual-add {
+    min-height: 48px;
+  }
+
+  .recovery-note {
+    padding: 10px 14px;
+    border: 1px solid rgba(251, 191, 36, 0.2);
+    border-radius: 10px;
+    color: #fbbf24;
+    background: rgba(251, 191, 36, 0.06);
+    font-size: 12px;
+  }
+
   .profile-preview-avatar {
     width: 48px;
     height: 48px;
@@ -870,13 +1309,21 @@
     }
 
     .brainvault-actions,
-    .policy-grid {
+    .policy-grid,
+    .recovery-mode-grid,
+    .manual-recovery-grid {
       grid-template-columns: minmax(0, 1fr);
     }
 
-    .brainvault-row {
+    .brainvault-row,
+    .recovery-service-row {
       grid-template-columns: minmax(0, 1fr);
       gap: 4px;
+    }
+
+    .recovery-service-actions {
+      align-items: stretch;
+      flex-direction: column;
     }
   }
 
@@ -979,6 +1426,17 @@
 
     .policy-grid {
       grid-template-columns: 1fr;
+    }
+
+    .recovery-mode-grid,
+    .manual-recovery-grid,
+    .recovery-service-row {
+      grid-template-columns: 1fr;
+    }
+
+    .recovery-service-actions {
+      align-items: stretch;
+      flex-direction: column;
     }
 
     .brainvault-row {

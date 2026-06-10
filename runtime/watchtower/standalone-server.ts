@@ -218,7 +218,7 @@ if (import.meta.main) {
     : process.env['XLN_WATCHTOWER_DB_PATH'];
   const maxStoredBytesPerLookupKey = quotaArgIdx !== -1 && args[quotaArgIdx + 1]
     ? Number(args[quotaArgIdx + 1])
-    : Number(process.env['XLN_WATCHTOWER_MAX_BYTES'] || 256 * 1024);
+    : Number(process.env['XLN_WATCHTOWER_MAX_BYTES'] || 4 * 1024 * 1024);
   const maxBundlesPerLookupKey = bundlesArgIdx !== -1 && args[bundlesArgIdx + 1]
     ? Number(args[bundlesArgIdx + 1])
     : Number(process.env['XLN_WATCHTOWER_MAX_BUNDLES'] || 3);

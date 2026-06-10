@@ -332,6 +332,55 @@ describe('relay-router gossip fanout', () => {
     expect(store.debugEvents.some(event => event.status === 'stale-target')).toBe(true);
   });
 
+  test('forwards encrypted accountInput to the active target runtime socket', async () => {
+    const store = createRelayStore(SERVER_RUNTIME_ID);
+    const sentBySocket = new Map<FakeWs, unknown[]>();
+    const config = {
+      store,
+      localRuntimeId: SERVER_RUNTIME_ID,
+      localDeliver: async () => {},
+      send: (ws: FakeWs, raw: string) => {
+        const bucket = sentBySocket.get(ws) ?? [];
+        bucket.push(JSON.parse(raw));
+        sentBySocket.set(ws, bucket);
+      },
+    };
+    const wsA: FakeWs = { label: 'A', readyState: 1 };
+    const wsB: FakeWs = { label: 'B', readyState: 1 };
+
+    await relayRoute(config, wsA, signedHello(RUNTIME_A, SEED_A, KEY_A));
+    await relayRoute(config, wsB, signedHello(RUNTIME_B, SEED_B, KEY_B, '2'));
+    await relayRoute(config, wsA, {
+      type: 'entity_input',
+      id: 'deliver-account-input',
+      from: RUNTIME_A,
+      fromEncryptionPubKey: KEY_A,
+      to: RUNTIME_B,
+      payload: 'encrypted-account-input',
+      encrypted: true,
+      entityId: ENTITY_B,
+      txs: 1,
+    });
+
+    expect(sentBySocket.get(wsB)?.at(-1)).toMatchObject({
+      type: 'entity_input',
+      id: 'deliver-account-input',
+      from: RUNTIME_A,
+      to: RUNTIME_B,
+      encrypted: true,
+      entityId: ENTITY_B,
+      txs: 1,
+    });
+    expect(store.pendingMessages.get(RUNTIME_B)).toBeUndefined();
+    expect(store.debugEvents.some(event =>
+      event.event === 'delivery' &&
+      event.status === 'delivered' &&
+      event.to === RUNTIME_B &&
+      (event.details as { entityId?: string; txs?: number } | undefined)?.entityId === ENTITY_B &&
+      (event.details as { entityId?: string; txs?: number } | undefined)?.txs === 1,
+    )).toBe(true);
+  });
+
   test('rejects unencrypted entity_input at relay ingress', async () => {
     const store = createRelayStore(SERVER_RUNTIME_ID);
     const sentBySocket = new Map<FakeWs, unknown[]>();
