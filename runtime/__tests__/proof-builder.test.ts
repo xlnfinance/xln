@@ -82,6 +82,71 @@ describe('proof-builder dispute hash', () => {
     expect(() => buildAccountProofBody(accountMachine)).toThrow('MISSING_DELTA_TRANSFORMER_ADDRESS');
   });
 
+  test('fails fast when an HTLC lock references a token without a delta slot', () => {
+    const accountMachine = {
+      deltas: new Map([[1, { offdelta: 0n }]]),
+      locks: new Map([
+        ['lock-missing-token', {
+          tokenId: 2,
+          senderIsLeft: true,
+          amount: 10n,
+          timelock: 123_000n,
+          revealBeforeHeight: 123,
+          hashlock: '0x' + '11'.repeat(32),
+        }],
+      ]),
+      swapOffers: new Map(),
+      pulls: new Map(),
+    } as any;
+
+    expect(() => buildAccountProofBody(accountMachine)).toThrow(
+      'PROOF_BODY_LOCK_TOKEN_MISSING:lock-missing-token:2',
+    );
+  });
+
+  test('fails fast when a swap references a token without a delta slot', () => {
+    const accountMachine = {
+      deltas: new Map([[1, { offdelta: 0n }]]),
+      locks: new Map(),
+      swapOffers: new Map([
+        ['swap-missing-token', {
+          makerIsLeft: true,
+          giveTokenId: 1,
+          giveAmount: 17n,
+          wantTokenId: 2,
+          wantAmount: 19n,
+        }],
+      ]),
+      pulls: new Map(),
+    } as any;
+
+    expect(() => buildAccountProofBody(accountMachine)).toThrow(
+      'PROOF_BODY_SWAP_TOKEN_MISSING:swap-missing-token:give=1:want=2',
+    );
+  });
+
+  test('fails fast when a pull references a token without a delta slot', () => {
+    const accountMachine = {
+      deltas: new Map([[1, { offdelta: 0n }]]),
+      locks: new Map(),
+      swapOffers: new Map(),
+      pulls: new Map([
+        ['pull-missing-token', {
+          tokenId: 2,
+          amount: 23n,
+          claimedRatio: 0,
+          revealedUntilTimestamp: 123_000,
+          fullHash: '0x' + '33'.repeat(32),
+          partialRoot: '0x' + '44'.repeat(32),
+        }],
+      ]),
+    } as any;
+
+    expect(() => buildAccountProofBody(accountMachine)).toThrow(
+      'PROOF_BODY_PULL_TOKEN_MISSING:pull-missing-token:2',
+    );
+  });
+
   test('builds transformer allowances for payments, swaps, and pulls', () => {
     setDeltaTransformerAddress(DEPOSITORY);
     const accountMachine = {
