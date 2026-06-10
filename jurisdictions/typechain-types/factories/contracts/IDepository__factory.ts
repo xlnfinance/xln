@@ -104,40 +104,6 @@ const _abi = [
     type: "function",
   },
   {
-    inputs: [
-      {
-        internalType: "bytes32",
-        name: "leftEntity",
-        type: "bytes32",
-      },
-      {
-        internalType: "bytes32",
-        name: "rightEntity",
-        type: "bytes32",
-      },
-      {
-        internalType: "uint256",
-        name: "tokenId",
-        type: "uint256",
-      },
-    ],
-    name: "getCollateral",
-    outputs: [
-      {
-        internalType: "uint256",
-        name: "collateral",
-        type: "uint256",
-      },
-      {
-        internalType: "int256",
-        name: "ondelta",
-        type: "int256",
-      },
-    ],
-    stateMutability: "view",
-    type: "function",
-  },
-  {
     inputs: [],
     name: "getTokensLength",
     outputs: [
@@ -169,36 +135,6 @@ const _abi = [
       },
     ],
     name: "mintToReserve",
-    outputs: [],
-    stateMutability: "nonpayable",
-    type: "function",
-  },
-  {
-    inputs: [
-      {
-        components: [
-          {
-            internalType: "bytes32",
-            name: "entity",
-            type: "bytes32",
-          },
-          {
-            internalType: "uint256",
-            name: "tokenId",
-            type: "uint256",
-          },
-          {
-            internalType: "uint256",
-            name: "amount",
-            type: "uint256",
-          },
-        ],
-        internalType: "struct IDepository.ReserveMint[]",
-        name: "mints",
-        type: "tuple[]",
-      },
-    ],
-    name: "mintToReserveBatch",
     outputs: [],
     stateMutability: "nonpayable",
     type: "function",

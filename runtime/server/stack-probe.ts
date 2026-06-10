@@ -19,16 +19,12 @@ export const probeLocalAnvilContractStack = async (adapter: JAdapter): Promise<{
     [
       'function getTokensLength() view returns(uint256)',
       'function mintToReserve(bytes32,uint256,uint256)',
-      'function mintToReserveBatch((bytes32,uint256,uint256)[])',
     ],
     adapter.signer as ethers.ContractRunner,
   );
   const getTokensLength = probe.getFunction('getTokensLength') as unknown as () => Promise<bigint>;
   const mintToReserve = probe.getFunction('mintToReserve') as unknown as {
     estimateGas(entityId: string, tokenId: bigint, amount: bigint): Promise<bigint>;
-  };
-  const mintToReserveBatch = probe.getFunction('mintToReserveBatch') as unknown as {
-    estimateGas(mints: Array<[string, bigint, bigint]>): Promise<bigint>;
   };
 
   let tokensLength = 0n;
@@ -51,15 +47,6 @@ export const probeLocalAnvilContractStack = async (adapter: JAdapter): Promise<{
     return {
       ok: false,
       reason: `MINT_TO_RESERVE_UNAVAILABLE:${error instanceof Error ? error.message : String(error)}`,
-    };
-  }
-
-  try {
-    await mintToReserveBatch.estimateGas([[STACK_COMPATIBILITY_PROBE_ENTITY, 1n, 1n]]);
-  } catch (error) {
-    return {
-      ok: false,
-      reason: `MINT_TO_RESERVE_BATCH_UNAVAILABLE:${error instanceof Error ? error.message : String(error)}`,
     };
   }
 

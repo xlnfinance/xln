@@ -41,6 +41,7 @@ import type {
 import {
   buildExternalTokenToReserveBatch,
   computeAccountKey,
+  packTokenReference,
   parseReceiptLogsToJEvents,
 } from './helpers';
 import { CANONICAL_J_EVENTS } from './helpers';
@@ -619,7 +620,7 @@ export async function createRpcAdapter(
         amount: tokenRegistrationAmount,
       }, await buildFeeOverrides());
       await waitForReceipt(registerTx, 'depository.externalTokenToReserve');
-      const packed = await depository.packTokenReference(0, erc20Address, 0);
+      const packed = packTokenReference(0, erc20Address, 0n);
       const tokenId = await depository.tokenToId(packed);
       if (tokenId === 0n) {
         throw new Error('[JAdapter:rpc] Failed to register bootstrap ERC20 token');
@@ -727,7 +728,7 @@ export async function createRpcAdapter(
         ]);
 
         for (let tokenId = 1; tokenId < length; tokenId++) {
-          const [contractAddress, _externalTokenId, _tokenType] = await depository.getTokenMetadata(tokenId);
+          const [contractAddress, _externalTokenId, _tokenType] = await depository._tokens(tokenId);
 
           // Skip zero/null addresses
           if (contractAddress === ethers.ZeroAddress) continue;
@@ -976,29 +977,28 @@ export async function createRpcAdapter(
         throw new Error('debugFundReservesBatch only available on configured dev chains');
       }
       if (mints.length === 0) return [];
-      const payload = mints.map((mint) => ({
-        entity: mint.entityId,
-        tokenId: BigInt(mint.tokenId),
-        amount: mint.amount,
-      }));
       console.log(
-        `[JAdapter:rpc] mintToReserveBatch start chainId=${config.chainId} ` +
+        `[JAdapter:rpc] mintToReserve loop start chainId=${config.chainId} ` +
           `count=${mints.length} ` +
           `first=${formatReserveMintDebug(mints[0])}`,
       );
       return runSerializedBatch(async () => {
         try {
-          const receipt = await sendTypedTx(
-            'mintToReserveBatch',
-            depository.mintToReserveBatch,
-            [payload],
-            {
-              gasFallback: 5_000_000n,
-              txNonce: await allocateSerializedSignerNonce(),
-              resetSignerNonce: false,
-            },
-          );
-          return parseReceiptLogsToJEvents(receipt, eventCarriers(depository));
+          const events: JEvent[] = [];
+          for (const mint of mints) {
+            const receipt = await sendTypedTx(
+              'mintToReserve',
+              depository.mintToReserve,
+              [mint.entityId, BigInt(mint.tokenId), mint.amount],
+              {
+                gasFallback: 1_000_000n,
+                txNonce: await allocateSerializedSignerNonce(),
+                resetSignerNonce: false,
+              },
+            );
+            events.push(...parseReceiptLogsToJEvents(receipt, eventCarriers(depository)));
+          }
+          return events;
         } catch (error) {
           await resetSerializedSignerNonce();
           throw error;

@@ -35,6 +35,17 @@ export function computeAccountKey(entity1: string, entity2: string): string {
   return ethers.solidityPacked(['bytes32', 'bytes32'], [left, right]);
 }
 
+export function packTokenReference(
+  tokenType: number,
+  contractAddress: string,
+  externalTokenId: ethers.BigNumberish,
+): string {
+  return ethers.keccak256(ethers.AbiCoder.defaultAbiCoder().encode(
+    ['uint8', 'address', 'uint96'],
+    [tokenType, contractAddress, externalTokenId],
+  ));
+}
+
 export function entityIdToAddress(entityId: string): string {
   const normalized = entityId.toLowerCase().replace('0x', '').padStart(64, '0');
   return ethers.getAddress('0x' + normalized.slice(-40));

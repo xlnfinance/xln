@@ -28,7 +28,7 @@ import { safeStringify } from '../serialization-utils.js';
 import { getCachedSignerPrivateKey } from '../account-crypto.js';
 import { isLeftEntity, normalizeEntityId } from '../entity-id-utils';
 import { batchAddSettlement, createEmptyBatch } from '../j-batch';
-import { buildExternalTokenToReserveBatch } from './helpers';
+import { buildExternalTokenToReserveBatch, packTokenReference } from './helpers';
 import { buildSingleSignerHanko, prepareSignedBatch } from '../hanko/batch';
 import { DEFAULT_TOKENS, DEFAULT_TOKEN_SUPPLY, DEFAULT_SIGNER_FAUCET, TOKEN_REGISTRATION_AMOUNT } from './default-tokens';
 import {
@@ -424,7 +424,7 @@ export class BrowserVMProvider {
   }
 
   private async registerErc20Token(tokenAddress: string): Promise<number> {
-    const packedToken = await this.packTokenReference(0, tokenAddress, 0);
+    const packedToken = packTokenReference(0, tokenAddress, 0n);
     await this.approveErc20(this.deployerPrivKey, tokenAddress, this.depositoryAddress!.toString(), TOKEN_REGISTRATION_AMOUNT);
 
     const callData = this.depositoryInterface!.encodeFunctionData('adminRegisterExternalToken', [{
@@ -453,28 +453,6 @@ export class BrowserVMProvider {
 
     const tokenId = await this.lookupTokenId(packedToken);
     return tokenId;
-  }
-
-  private async packTokenReference(tokenType: number, contractAddress: string, externalTokenId: number): Promise<string> {
-    const callData = this.depositoryInterface!.encodeFunctionData('packTokenReference', [
-      tokenType,
-      contractAddress,
-      externalTokenId,
-    ]);
-
-    const result = await this.vm.evm.runCall({
-      to: this.depositoryAddress!,
-      caller: this.deployerAddress,
-      data: hexToBytes(callData as `0x${string}`),
-      gasLimit: 100000n,
-    });
-
-    if (result.execResult.exceptionError) {
-      throw new Error(`packTokenReference failed: ${result.execResult.exceptionError}`);
-    }
-
-    const decoded = this.depositoryInterface!.decodeFunctionResult('packTokenReference', result.execResult.returnValue);
-    return decoded[0] as string;
   }
 
   private async lookupTokenId(packedToken: string): Promise<number> {
