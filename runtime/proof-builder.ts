@@ -23,8 +23,8 @@ import type {
   ProofBodyResult,
   DisputeConfig,
 } from './proof-body-types.ts';
-import type { ProofBodyStruct, TransformerClauseStruct } from './typechain/Depository.ts';
-import type { DeltaTransformer } from './typechain/DeltaTransformer.ts';
+import type { ProofBodyStruct, TransformerClauseStruct } from '../jurisdictions/typechain-types/contracts/Depository.sol/Depository.ts';
+import type { DeltaTransformer } from '../jurisdictions/typechain-types/contracts/DeltaTransformer.ts';
 import { PROOF_BODY_ABI, BATCH_ABI } from './proof-body-types.ts';
 import { sortTransformerEntries } from './transformer-ordering.ts';
 
@@ -313,18 +313,21 @@ function runtimeToProofBodyStruct(runtime: RuntimeProofBody): ProofBodyStruct {
  *
  * @param accountMachine - Current bilateral account state
  * @param counterpartySignature - Counterparty's signature on proofBodyHash
- * @param initialArguments - ABI-encoded initial arguments (leftArguments for left, rightArguments for right)
+ * @param starterInitialArguments - starter-side arguments for this proof body
+ * @param starterIncrementedArguments - starter-side arguments for one known newer proof body
  */
 export function buildInitialDisputeProof(
   accountMachine: AccountMachine,
   counterpartySignature: string,
-  initialArguments: string = '0x'
+  starterInitialArguments: string = '0x',
+  starterIncrementedArguments: string = '0x',
 ): {
   counterentity: string;
   nonce: number;
   proofbodyHash: string;
   sig: string;
-  initialArguments: string;
+  starterInitialArguments: string;
+  starterIncrementedArguments: string;
 } {
   const { proofBodyHash } = buildAccountProofBody(accountMachine);
 
@@ -333,7 +336,8 @@ export function buildInitialDisputeProof(
     nonce: accountMachine.proofHeader.nonce,
     proofbodyHash: proofBodyHash,
     sig: counterpartySignature,
-    initialArguments,
+    starterInitialArguments,
+    starterIncrementedArguments,
   };
 }
 

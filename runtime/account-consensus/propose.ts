@@ -21,6 +21,7 @@ import {
   isEntityId32,
   shouldIncludeToken,
 } from '../account-consensus-helpers';
+import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../dispute-arguments';
 import { MEMPOOL_LIMIT } from './constants';
 import type { AccountConsensusHashToSign, AccountSwapOfferCreated, ProposeAccountFrameResult } from './types';
 
@@ -352,6 +353,15 @@ export async function proposeAccountFrame(
     accountMachine.disputeProofBodiesByHash = {};
   }
   accountMachine.disputeProofBodiesByHash[proofResult.proofBodyHash] = proofResult.proofBodyStruct;
+  storeDisputeArgumentSnapshot(
+    accountMachine,
+    captureDisputeArgumentSnapshot(
+      clonedMachine,
+      proofResult.proofBodyHash,
+      clonedMachine.proofHeader.nonce,
+      proofResult.proofBodyStruct,
+    ),
+  );
 
   // Settlements are handled via SettlementWorkspace flow (entity-tx/handlers/settle.ts).
 

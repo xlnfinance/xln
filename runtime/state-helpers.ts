@@ -767,6 +767,9 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
   if (account.disputeProofBodiesByHash) {
     result.disputeProofBodiesByHash = { ...account.disputeProofBodiesByHash };
   }
+  if (account.disputeArgumentSnapshotsByHash) {
+    result.disputeArgumentSnapshotsByHash = { ...account.disputeArgumentSnapshotsByHash };
+  }
   if (account.currentFrameHanko) {
     result.currentFrameHanko = account.currentFrameHanko;
   }

@@ -153,6 +153,7 @@ export type StorageAccountDoc = {
   counterpartySettlementHanko?: AccountMachine['counterpartySettlementHanko'];
   disputeProofNoncesByHash?: AccountMachine['disputeProofNoncesByHash'];
   disputeProofBodiesByHash?: AccountMachine['disputeProofBodiesByHash'];
+  disputeArgumentSnapshotsByHash?: AccountMachine['disputeArgumentSnapshotsByHash'];
   onChainSettlementNonce: number;
   settlementWorkspace?: AccountMachine['settlementWorkspace'];
   activeDispute?: AccountMachine['activeDispute'];

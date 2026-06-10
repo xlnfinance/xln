@@ -1,6 +1,7 @@
 import type { CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
 import type { HankoString } from './hanko';
 import type { JurisdictionEvent } from './jurisdiction-events';
+import type { DisputeArgumentSnapshot } from '../dispute-arguments';
 import type { RebalancePolicy, RebalanceQuote, RebalanceRequestFeeState } from './rebalance';
 
 export interface AssetBalance {
@@ -254,6 +255,7 @@ export interface AccountMachine {
   counterpartySettlementHanko?: HankoString;           // Their hanko on settlement operations
   disputeProofNoncesByHash?: Record<string, number>;   // ProofBodyHash → nonce (local + counterparty)
   disputeProofBodiesByHash?: Record<string, unknown>;      // ProofBodyHash → ProofBodyStruct (for dispute finalize)
+  disputeArgumentSnapshotsByHash?: Record<string, DisputeArgumentSnapshot>; // ProofBodyHash → stable argument plan
 
   // ON-CHAIN NONCE: Tracks the nonce stored on-chain
   // Starts at 0, set to signedNonce when settlement/dispute succeeds
@@ -270,7 +272,8 @@ export interface AccountMachine {
     initialNonce: number;             // Unified nonce from disputeStart (replaces initialDisputeNonce)
     disputeTimeout: number;           // Block number when timeout expires
     onChainNonce: number;             // On-chain nonce at dispute start (replaces initialCooperativeNonce + onChainCooperativeNonce)
-    initialArguments?: string;        // On-chain initialArguments from disputeStart
+    starterInitialArguments: string;  // Starter-side args for initial proof
+    starterIncrementedArguments: string;  // Starter-side args for the one known newer proof, or 0x
     finalizeQueued?: boolean;         // Finalize op already queued locally (single-source lifecycle guard)
   };
 

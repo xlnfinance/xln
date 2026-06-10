@@ -111,7 +111,14 @@ contract Depository is ReentrancyGuardLite {
   // Hub tracking removed for size reduction
 
   // Events related to disputes and cooperative closures
-  event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed nonce, bytes32 proofbodyHash, bytes initialArguments);
+  event DisputeStartedV2(
+    bytes32 indexed sender,
+    bytes32 indexed counterentity,
+    uint indexed nonce,
+    bytes32 proofbodyHash,
+    bytes starterInitialArguments,
+    bytes starterIncrementedArguments
+  );
   event DisputeFinalized(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed nonce, bytes32 initialProofbodyHash, bytes32 finalProofbodyHash);
   event CooperativeClose(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed nonce);
 
@@ -851,51 +858,93 @@ contract Depository is ReentrancyGuardLite {
       if (params.finalNonce <= _accounts[acct_key].nonce) revert E2();
 
       require(params.sig.length > 0, "Signature required for cooperative finalize");
-      if (!Account.verifyCooperativeProofHanko(entityProvider, address(this), acct_key, params.finalNonce, keccak256(abi.encode(params.finalProofbody)), keccak256(params.initialArguments), params.sig, params.counterentity)) revert E4();
+      if (!Account.verifyCooperativeProofHanko(
+        entityProvider,
+        address(this),
+        acct_key,
+        params.finalNonce,
+        keccak256(abi.encode(params.finalProofbody)),
+        keccak256(params.starterInitialArguments),
+        params.sig,
+        params.counterentity
+      )) revert E4();
     } else {
       bytes32 storedHash = _accounts[acct_key].disputeHash;
       if (storedHash == bytes32(0)) revert E5();
 
       bytes32 expectedHash = Account.encodeDisputeHash(
         params.initialNonce, params.startedByLeft,
-        _accounts[acct_key].disputeTimeout, params.initialProofbodyHash, params.initialArguments
+        _accounts[acct_key].disputeTimeout,
+        params.initialProofbodyHash,
+        params.starterInitialArguments,
+        params.starterIncrementedArguments
       );
       if (storedHash != expectedHash) revert E9();
 
-      // Counter-dispute or unilateral finalization
+      // Counter-dispute or unilateral finalization.
+      // If `sig` is present, the counterparty is revealing a newer signed
+      // proof body, so the starter side must match starterIncrementedArguments.
+      // If `sig` is empty, this is the timeout path for the initial proof, so
+      // the starter side must match starterInitialArguments.
       if (params.sig.length > 0) {
-        // Counter-dispute: counterparty provides a NEWER signed proof
+        // Counter-dispute: counterparty provides a NEWER signed proof.
+        // The counterparty still supplies its own side in left/rightArguments.
+        // The starter side is not mutable and must equal the precommitted
+        // incremented blob from disputeStart.
         // NONCE CHECK: finalNonce > storedNonce (strictly greater)
         if (params.finalNonce <= _accounts[acct_key].nonce) revert E2();
         if (params.finalNonce <= params.initialNonce) revert E2();
 
         bytes32 finalProofbodyHash = keccak256(abi.encode(params.finalProofbody));
         if (!Account.verifyDisputeProofHanko(entityProvider, address(this), acct_key, params.finalNonce, finalProofbodyHash, params.sig, params.counterentity)) revert E4();
+        Account.requireStarterArguments(
+          params.startedByLeft,
+          params.leftArguments,
+          params.rightArguments,
+          params.starterIncrementedArguments
+        );
       } else {
-        // Unilateral finalization after timeout (no new signature)
+        // Unilateral finalization after timeout (no new signature).
+        // Same proof body as disputeStart, therefore starterInitialArguments.
         bool senderIsCounterparty = params.startedByLeft != (entityId < params.counterentity);
         if (!senderIsCounterparty && block.number < _accounts[acct_key].disputeTimeout) revert E2();
         if (params.initialProofbodyHash != keccak256(abi.encode(params.finalProofbody))) revert E2();
+        Account.requireStarterArguments(
+          params.startedByLeft,
+          params.leftArguments,
+          params.rightArguments,
+          params.starterInitialArguments
+        );
       }
     }
 
-    uint256 initialArgumentsTimestamp = block.timestamp;
+    uint256 starterArgumentsTimestamp = block.timestamp;
     if (!params.cooperative) {
-      initialArgumentsTimestamp = _accounts[acct_key].disputeStartTimestamp;
+      starterArgumentsTimestamp = _accounts[acct_key].disputeStartTimestamp;
     }
 
     _accounts[acct_key].disputeHash = bytes32(0);
     _accounts[acct_key].disputeTimeout = 0;
     _accounts[acct_key].disputeStartTimestamp = 0;
 
+    uint256 leftArgumentsTimestamp = block.timestamp;
+    uint256 rightArgumentsTimestamp = block.timestamp;
+    if (!params.cooperative) {
+      if (params.startedByLeft) {
+        leftArgumentsTimestamp = starterArgumentsTimestamp;
+      } else {
+        rightArgumentsTimestamp = starterArgumentsTimestamp;
+      }
+    }
+
     bool ok = _finalizeAccount(
       entityId,
       params.counterentity,
       params.finalProofbody,
-      params.finalArguments,
-      params.initialArguments,
-      block.timestamp,
-      initialArgumentsTimestamp
+      params.leftArguments,
+      params.rightArguments,
+      leftArgumentsTimestamp,
+      rightArgumentsTimestamp
     );
     if (ok) {
       // SET nonce based on finalization path
@@ -923,19 +972,19 @@ contract Depository is ReentrancyGuardLite {
     bytes32 entity1,
     bytes32 entity2,
     ProofBody memory proofbody,
-    bytes memory arguments1,
-    bytes memory arguments2,
-    uint256 arguments1Timestamp,
-    uint256 arguments2Timestamp
+    bytes memory leftArguments,
+    bytes memory rightArguments,
+    uint256 leftArgumentsTimestamp,
+    uint256 rightArgumentsTimestamp
   ) internal returns (bool) {
     if (proofbody.tokenIds.length != proofbody.offdeltas.length) revert E8();
 
     bytes32 leftAddr = entity1 < entity2 ? entity1 : entity2;
     bytes32 rightAddr = entity1 < entity2 ? entity2 : entity1;
-    bytes memory leftArgs = entity1 < entity2 ? arguments1 : arguments2;
-    bytes memory rightArgs = entity1 < entity2 ? arguments2 : arguments1;
-    uint256 leftArgsTimestamp = entity1 < entity2 ? arguments1Timestamp : arguments2Timestamp;
-    uint256 rightArgsTimestamp = entity1 < entity2 ? arguments2Timestamp : arguments1Timestamp;
+    bytes memory leftArgs = leftArguments;
+    bytes memory rightArgs = rightArguments;
+    uint256 leftArgsTimestamp = leftArgumentsTimestamp;
+    uint256 rightArgsTimestamp = rightArgumentsTimestamp;
     bytes memory acct_key = accountKey(leftAddr, rightAddr);
 
     // NOTE: On-chain settlement must apply TOTAL delta (ondelta + offdelta).

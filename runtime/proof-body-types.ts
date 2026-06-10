@@ -15,18 +15,16 @@ export type {
   TransformerClauseStructOutput,
   AllowanceStruct,
   AllowanceStructOutput,
-  InitialDisputeProofStruct,
-  InitialDisputeProofStructOutput,
   FinalDisputeProofStruct,
   FinalDisputeProofStructOutput,
-} from './typechain/Depository.ts';
+} from '../jurisdictions/typechain-types/contracts/Depository.sol/Depository.ts';
 
 export type {
   DeltaTransformer,
-} from './typechain/DeltaTransformer.ts';
+} from '../jurisdictions/typechain-types/contracts/DeltaTransformer.ts';
 
 // Import for internal use
-import type { ProofBodyStruct } from './typechain/Depository.ts';
+import type { ProofBodyStruct } from '../jurisdictions/typechain-types/contracts/Depository.sol/Depository.ts';
 
 /**
  * Runtime-friendly ProofBody (uses native types, not BigNumberish)

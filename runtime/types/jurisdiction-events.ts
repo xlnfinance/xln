@@ -76,7 +76,8 @@ export type JurisdictionEvent =
         counterentity: string;
         nonce: string;
         proofbodyHash: string;
-        initialArguments: string;
+        starterInitialArguments: string;
+        starterIncrementedArguments: string;
       };
     })
   | (JEventMetadata & {

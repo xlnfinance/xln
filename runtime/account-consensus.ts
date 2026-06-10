@@ -43,6 +43,7 @@ import {
 } from './account-consensus-helpers';
 import { MEMPOOL_LIMIT } from './account-consensus/constants';
 import { proposeAccountFrame } from './account-consensus/propose';
+import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from './dispute-arguments';
 import type { HandleAccountInputResult } from './account-consensus/types';
 export { proposeAccountFrame } from './account-consensus/propose';
 export type {
@@ -935,6 +936,15 @@ export async function handleAccountInput(
       accountMachine.disputeProofBodiesByHash = {};
     }
     accountMachine.disputeProofBodiesByHash[ackProofResult.proofBodyHash] = ackProofResult.proofBodyStruct;
+    storeDisputeArgumentSnapshot(
+      accountMachine,
+      captureDisputeArgumentSnapshot(
+        accountMachine,
+        ackProofResult.proofBodyHash,
+        ackSignedNonce,
+        ackProofResult.proofBodyStruct,
+      ),
+    );
 
     const response = {
       kind: 'ack',

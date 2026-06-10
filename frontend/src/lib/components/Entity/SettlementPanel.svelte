@@ -404,7 +404,8 @@
             { label: 'Counterparty', value: entityName(String(op?.counterentity || '')) },
             { label: 'Nonce', value: String(Number(op?.nonce || 0)) },
             { label: 'Proof Body Hash', value: shortHex(op?.proofbodyHash) },
-            { label: 'Initial Arguments', value: shortHex(op?.initialArguments) },
+            { label: 'Starter Args', value: shortHex(op?.starterInitialArguments) },
+            { label: 'Incremented Args', value: shortHex(op?.starterIncrementedArguments) },
           ],
         ),
       );

@@ -81,7 +81,14 @@ struct InitialDisputeProof {
   uint nonce;              // Unified nonce at time of signing
   bytes32 proofbodyHash;
   bytes sig;
-  bytes initialArguments;
+  // Starter-side transformer args for the proof body at `nonce`.
+  // Used when the dispute finalizes on the initial proof after timeout.
+  bytes starterInitialArguments;
+  // Starter-side transformer args for exactly one newer proof body already
+  // signed/sent by the starter before opening the dispute. These are not
+  // counterparty args; they are the starter's own args for the incremented
+  // state that the counterparty may reveal in a counter-dispute.
+  bytes starterIncrementedArguments;
 }
 
 struct FinalDisputeProof {
@@ -90,8 +97,13 @@ struct FinalDisputeProof {
   uint finalNonce;         // Used for signed finalize paths; unilateral timeout path may keep this equal to initialNonce
   bytes32 initialProofbodyHash;
   ProofBody finalProofbody;
-  bytes finalArguments;
-  bytes initialArguments;
+  // Side-normalized transformer args consumed by DeltaTransformer. The
+  // contract checks that the starter side equals one of the precommitted
+  // starter blobs above; the other side is supplied by the finalizer.
+  bytes leftArguments;
+  bytes rightArguments;
+  bytes starterInitialArguments;
+  bytes starterIncrementedArguments;
   bytes sig;
   bool startedByLeft;
   uint disputeUntilBlock;  // Legacy/off-chain field; on-chain finalize uses stored account timeout

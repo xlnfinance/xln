@@ -2252,7 +2252,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
       [{ fillRatios: [], secrets: [revealedSecret], pulls: [] }],
     );
-    const initialArguments = abiCoder.encode(['bytes[]'], [[paymentArgs]]);
+    const starterInitialArguments = abiCoder.encode(['bytes[]'], [[paymentArgs]]);
     const disputeStartedEvent: JurisdictionEvent = {
       type: 'DisputeStarted',
       data: {
@@ -2260,7 +2260,8 @@ describe('cross-jurisdiction hashledger swap', () => {
         counterentity: user,
         nonce: '1',
         proofbodyHash: secret('7a'),
-        initialArguments,
+        starterInitialArguments,
+        starterIncrementedArguments: '0x',
         disputeTimeout: 100,
         onChainNonce: 1,
       },
@@ -2359,7 +2360,7 @@ describe('cross-jurisdiction hashledger swap', () => {
       ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
       [{ fillRatios: [], secrets: [], pulls: [binary] }],
     );
-    const initialArguments = abiCoder.encode(['bytes[]'], [[crossPullArgs]]);
+    const starterInitialArguments = abiCoder.encode(['bytes[]'], [[crossPullArgs]]);
     const disputeStartedEvent: JurisdictionEvent = {
       type: 'DisputeStarted',
       data: {
@@ -2367,7 +2368,8 @@ describe('cross-jurisdiction hashledger swap', () => {
         counterentity: sourceUser,
         nonce: '1',
         proofbodyHash: secret('8a'),
-        initialArguments,
+        starterInitialArguments,
+        starterIncrementedArguments: '0x',
         disputeTimeout: 100,
         onChainNonce: 1,
       },
@@ -2459,7 +2461,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect((result.outputs?.[0]?.entityTxs?.[0]?.data as any).counterpartyEntityId).toBe(targetHub);
     expect((result.outputs?.[0]?.entityTxs?.[0]?.data as any).binary).toBe(binary);
     expect((result.outputs?.[0]?.entityTxs?.[1]?.data as any).counterpartyEntityId).toBe(targetHub);
-    expect((result.outputs?.[0]?.entityTxs?.[1]?.data as any).initialArguments).toBeUndefined();
+    expect((result.outputs?.[0]?.entityTxs?.[1]?.data as any).starterInitialArguments).toBeUndefined();
   });
 
   test('target DisputeStarted without pull args forces source dispute first', async () => {
@@ -2510,7 +2512,8 @@ describe('cross-jurisdiction hashledger swap', () => {
         counterentity: targetUser,
         nonce: '1',
         proofbodyHash: secret('9a'),
-        initialArguments: '0x',
+        starterInitialArguments: '0x',
+        starterIncrementedArguments: '0x',
         disputeTimeout: 100,
         onChainNonce: 1,
       },

@@ -92,13 +92,14 @@ These files define correctness and are the first audit target:
 
 ### Generated or compatibility surface
 
-- `typechain/`
 - `xln-api.ts`
 - `types.ts`
 
 `xln-api.ts` is a frontend-facing compatibility/export surface.
 `types.ts` is a compatibility barrel while the codebase still migrates to
 domain types under `runtime/types/`.
+Contract bindings are generated under `jurisdictions/typechain-types/`; do not
+recreate a second runtime-local typechain copy.
 
 ## Cleanup Targets
 
@@ -106,7 +107,7 @@ These are the current safe simplification targets:
 
 - keep BrowserVM adapters out of the default public-testnet reading path
 - continue replacing internal `./types` imports with narrower domain type modules
-- keep generated `typechain/` and scenario tooling out of protocol reviews
+- keep generated contract bindings and scenario tooling out of protocol reviews
 - avoid adding new root-level helper files when a domain folder already exists
 
 ## Safe Cleanup Rule

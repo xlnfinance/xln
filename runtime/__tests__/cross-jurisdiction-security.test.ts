@@ -241,11 +241,11 @@ describe('cross-jurisdiction security invariants', () => {
       ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
       [{ fillRatios: [], secrets: [], pulls: [partialBinary(0x1234)] }],
     );
-    const initialArguments = ethers.AbiCoder.defaultAbiCoder().encode(['bytes[]'], [[pullArgs]]);
+    const starterInitialArguments = ethers.AbiCoder.defaultAbiCoder().encode(['bytes[]'], [[pullArgs]]);
 
     const result = await applyEntityTx(env, state, {
       type: 'disputeStart',
-      data: { counterpartyEntityId: route.target.entityId, initialArguments },
+      data: { counterpartyEntityId: route.target.entityId, starterInitialArguments },
     });
 
     expect(result.newState.messages.at(-1)).toContain('Missing counterparty dispute hanko');

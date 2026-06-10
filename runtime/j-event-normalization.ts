@@ -122,23 +122,29 @@ export function normalizeJurisdictionEvent(value: unknown): JurisdictionEvent | 
     };
   }
 
-  if (type === 'DisputeStarted') {
+  if (type === 'DisputeStarted' || type === 'DisputeStartedV2') {
     const sender = normalizeEntity(data['sender']);
     const counterentity = normalizeEntity(data['counterentity']);
     const nonce = normalizeBigNumberish(data['nonce']);
     if (!sender || !counterentity || nonce === null || typeof data['proofbodyHash'] !== 'string') {
       return null;
     }
-    const initialArguments = typeof data['initialArguments'] === 'string' ? data['initialArguments'] : '0x';
+    const starterInitialArguments = typeof data['starterInitialArguments'] === 'string'
+      ? data['starterInitialArguments']
+      : '0x';
+    const starterIncrementedArguments = typeof data['starterIncrementedArguments'] === 'string'
+      ? data['starterIncrementedArguments']
+      : '0x';
     return {
       ...meta,
-      type,
+      type: 'DisputeStarted',
       data: {
         sender,
         counterentity,
         nonce,
         proofbodyHash: data['proofbodyHash'],
-        initialArguments,
+        starterInitialArguments,
+        starterIncrementedArguments,
       },
     };
   }

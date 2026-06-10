@@ -18,13 +18,13 @@ type DisputeTransformerArgs = {
   pulls?: Array<string>;
 };
 
-function decodeDisputeTransformerArgs(initialArgumentsRaw: unknown): DisputeTransformerArgs[] {
-  const initialArguments = String(initialArgumentsRaw || '0x');
-  if (initialArguments === '0x') return [];
+function decodeDisputeTransformerArgs(starterInitialArgumentsRaw: unknown): DisputeTransformerArgs[] {
+  const starterInitialArguments = String(starterInitialArgumentsRaw || '0x');
+  if (starterInitialArguments === '0x') return [];
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   let argArray: string[];
   try {
-    [argArray] = abiCoder.decode(['bytes[]'], initialArguments) as unknown as [string[]];
+    [argArray] = abiCoder.decode(['bytes[]'], starterInitialArguments) as unknown as [string[]];
   } catch {
     return [];
   }
@@ -45,9 +45,9 @@ function decodeDisputeTransformerArgs(initialArgumentsRaw: unknown): DisputeTran
   return decodedArgs;
 }
 
-export function decodeDisputeInitialSecrets(initialArgumentsRaw: unknown): string[] {
+export function decodeDisputeStarterInitialSecrets(starterInitialArgumentsRaw: unknown): string[] {
   const secrets = new Set<string>();
-  for (const decoded of decodeDisputeTransformerArgs(initialArgumentsRaw)) {
+  for (const decoded of decodeDisputeTransformerArgs(starterInitialArgumentsRaw)) {
     for (const secret of decoded.secrets || []) {
       if (ethers.isHexString(secret, 32)) {
         secrets.add(String(secret).toLowerCase());
@@ -57,9 +57,9 @@ export function decodeDisputeInitialSecrets(initialArgumentsRaw: unknown): strin
   return Array.from(secrets);
 }
 
-function decodeDisputeCrossPullBinaries(initialArgumentsRaw: unknown): Array<{ fillRatio: number; binary: string }> {
+function decodeDisputeCrossPullBinaries(starterInitialArgumentsRaw: unknown): Array<{ fillRatio: number; binary: string }> {
   const binaries: Array<{ fillRatio: number; binary: string }> = [];
-  for (const decoded of decodeDisputeTransformerArgs(initialArgumentsRaw)) {
+  for (const decoded of decodeDisputeTransformerArgs(starterInitialArgumentsRaw)) {
     for (const binary of decoded.pulls || []) {
       try {
         const decodedBinary = decodeHashLadderBinary(binary);
@@ -138,12 +138,15 @@ export function queueCrossJurisdictionSalvageFromDispute(
   state: EntityState,
   outputs: EntityInput[],
   counterpartyId: string,
-  initialArgumentsRaw: unknown,
+  starterInitialArgumentsRaw: unknown,
   blockNumber: number,
 ): boolean {
-  const initialArguments = String(initialArgumentsRaw || '0x');
-  if (!initialArguments || initialArguments === '0x') return false;
-  const pullBinaries = decodeDisputeCrossPullBinaries(initialArguments);
+  // Cross-j salvage observes only starterInitialArguments. Incremented args are
+  // committed for a possible counter-dispute and must not trigger source/target
+  // salvage until that newer proof is actually used.
+  const starterInitialArguments = String(starterInitialArgumentsRaw || '0x');
+  if (!starterInitialArguments || starterInitialArguments === '0x') return false;
+  const pullBinaries = decodeDisputeCrossPullBinaries(starterInitialArguments);
   if (pullBinaries.length === 0) return false;
 
   const route = findCrossJurisdictionRouteForSourceDispute(state, counterpartyId);
@@ -176,9 +179,9 @@ export function queueCrossJurisdictionSourceDisputeFromTargetDispute(
   state: EntityState,
   outputs: EntityInput[],
   counterpartyId: string,
-  initialArgumentsRaw: unknown,
+  starterInitialArgumentsRaw: unknown,
 ): boolean {
-  if (decodeDisputeCrossPullBinaries(initialArgumentsRaw).length > 0) return false;
+  if (decodeDisputeCrossPullBinaries(starterInitialArgumentsRaw).length > 0) return false;
   const route = findCrossJurisdictionRouteForTargetDispute(state, counterpartyId);
   if (!route) return false;
 

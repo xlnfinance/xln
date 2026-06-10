@@ -28,7 +28,7 @@ import { applyDebtCreated, applyDebtEnforced, applyDebtForgiven } from './j-even
 import { createStructuredLogger, shortHash, shortId } from '../logger';
 import {
   applyKnownHtlcSecret,
-  decodeDisputeInitialSecrets,
+  decodeDisputeStarterInitialSecrets,
   queueCrossJurisdictionSalvageFromDispute,
   queueCrossJurisdictionSourceDisputeFromTargetDispute,
 } from './j-events-htlc';
@@ -488,7 +488,14 @@ async function applyFinalizedJEvent(
     addMessage(newState, `🩶 DEBT FORGIVEN: ${forgivenDisplay} ${tokenSymbol} between ${(debtor as string).slice(-8)} and ${(creditor as string).slice(-8)} | Block ${blockNumber} · debt #${debtIndex}`);
 
   } else if (event.type === 'DisputeStarted') {
-    const { sender, counterentity, nonce, proofbodyHash } = event.data as { sender: string; counterentity: string; nonce: string; proofbodyHash: string; initialArguments: string };
+    const { sender, counterentity, nonce, proofbodyHash } = event.data as {
+      sender: string;
+      counterentity: string;
+      nonce: string;
+      proofbodyHash: string;
+      starterInitialArguments: string;
+      starterIncrementedArguments: string;
+    };
     const normalizeId = (id: string) => String(id).toLowerCase();
     const senderStr = normalizeId(sender as string);
     const counterentityStr = normalizeId(counterentity as string);
@@ -531,7 +538,8 @@ async function applyFinalizedJEvent(
         initialNonce: Number(nonce),
         disputeTimeout,
         onChainNonce,
-        initialArguments: event.data.initialArguments || '0x',
+        starterInitialArguments: event.data.starterInitialArguments || '0x',
+        starterIncrementedArguments: event.data.starterIncrementedArguments || '0x',
         finalizeQueued: false,
       };
       account.onChainSettlementNonce = Math.max(Number(account.onChainSettlementNonce ?? 0), onChainNonce);
@@ -542,7 +550,8 @@ async function applyFinalizedJEvent(
         jEventLog.error('dispute.proof_hash_mismatch', { counterparty: shortId(counterpartyId), local: shortHash(localProof.proofBodyHash), onChain: shortHash(account.activeDispute.initialProofbodyHash) });
       }
 
-      const disputeSecrets = decodeDisputeInitialSecrets(event.data.initialArguments || '0x');
+      const starterInitialArguments = event.data.starterInitialArguments || '0x';
+      const disputeSecrets = decodeDisputeStarterInitialSecrets(starterInitialArguments);
       if (disputeSecrets.length > 0) {
         for (const disputeSecret of disputeSecrets) {
           const hashlock = hashHtlcSecret(disputeSecret);
@@ -553,7 +562,7 @@ async function applyFinalizedJEvent(
         newState,
         outputs,
         counterpartyId,
-        event.data.initialArguments || '0x',
+        starterInitialArguments,
         blockNumber,
       );
       queueCrossJurisdictionSourceDisputeFromTargetDispute(
@@ -561,7 +570,7 @@ async function applyFinalizedJEvent(
         newState,
         outputs,
         counterpartyId,
-        event.data.initialArguments || '0x',
+        starterInitialArguments,
       );
 
       addMessage(newState, `⚔️ DISPUTE ${weAreStarter ? 'STARTED' : 'vs us'} with ${counterpartyId.slice(-4)}, timeout: block ${account.activeDispute.disputeTimeout}`);
@@ -588,7 +597,8 @@ async function applyFinalizedJEvent(
               nonce: Number(nonce || 0),
               proofbodyHash: String(proofbodyHash || '0x'),
               sig: '0x',
-              initialArguments: String(event.data.initialArguments || '0x'),
+              starterInitialArguments: String(starterInitialArguments || '0x'),
+              starterIncrementedArguments: String(event.data.starterIncrementedArguments || '0x'),
             }],
             disputeFinalizations: [],
             externalTokenToReserve: [],
@@ -701,8 +711,10 @@ async function applyFinalizedJEvent(
                 tokenIds: [],
                 transformers: [],
               },
-              finalArguments: '0x',
-              initialArguments: '0x',
+              leftArguments: '0x',
+              rightArguments: '0x',
+              starterInitialArguments: '0x',
+              starterIncrementedArguments: '0x',
               sig: '0x',
               startedByLeft: false,
               disputeUntilBlock: Number(blockNumber || 0),
