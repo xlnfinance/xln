@@ -211,7 +211,8 @@ export type EntityTx =
       type: 'disputeStart';
       data: {
         counterpartyEntityId: string;
-        initialArguments?: string;
+        starterInitialArguments?: string;
+        starterIncrementedArguments?: string;
         description?: string;
         allowUnsafeCrossJTargetDispute?: boolean;
         acceptedCrossJTargetLossAmount?: bigint;

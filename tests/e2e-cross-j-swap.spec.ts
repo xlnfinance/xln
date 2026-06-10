@@ -1475,7 +1475,7 @@ async function triggerSourceDisputeArguments(
     ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
     [{ fillRatios: [], secrets: [], pulls: [partialBinary] }],
   );
-  const initialArguments = abi.encode(['bytes[]'], [[crossPullArgs]]);
+  const starterInitialArguments = abi.encode(['bytes[]'], [[crossPullArgs]]);
   const suffix = routeId.replace(/[^a-fA-F0-9]/g, '').padEnd(64, '0').slice(0, 64);
   const event = {
     type: 'DisputeStarted',
@@ -1484,7 +1484,8 @@ async function triggerSourceDisputeArguments(
       counterentity: source.entityId,
       nonce: '1',
       proofbodyHash: `0x${suffix}`,
-      initialArguments,
+      starterInitialArguments,
+      starterIncrementedArguments: '0x',
       disputeTimeout: 100,
       onChainNonce: 1,
     },

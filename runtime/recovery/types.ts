@@ -45,16 +45,18 @@ export type TowerModeV1 =
 
 export type TowerActionKindV1 = 'counter_dispute_only';
 
-export type TowerFinalDisputeProofV1 = {
+export type TowerFinalDisputeProofV2 = {
   counterentity: string;
   finalNonce: number;
   finalProofbody: Record<string, unknown>;
-  finalArguments: string;
+  leftArguments: string;
+  rightArguments: string;
+  starterIncrementedArguments: string;
   sig: string;
 };
 
-export type TowerCounterDisputeRemedyV1 = {
-  version: 1;
+export type TowerCounterDisputeRemedyV2 = {
+  version: 2;
   type: 'counter_dispute_remedy';
   rpcUrl: string;
   chainId: number;
@@ -64,7 +66,7 @@ export type TowerCounterDisputeRemedyV1 = {
   lastResortWindowBlocks: number;
   appointmentSequence: number;
   ownerAuthorizationHanko: string;
-  latestProof: TowerFinalDisputeProofV1;
+  latestProof: TowerFinalDisputeProofV2;
 };
 
 export type TowerEncryptedPayloadV1 = {

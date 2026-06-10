@@ -154,7 +154,7 @@ describe('watchtower restart resilience', () => {
     const activePayload: TowerActivePayloadV1 = {
       triggerHint: 'restart-test',
       encryptedRemedy: encodeTowerCounterDisputeRemedy({
-        version: 1,
+        version: 2,
         type: 'counter_dispute_remedy',
         rpcUrl: 'http://127.0.0.1:1',
         chainId: 31337,
@@ -168,7 +168,9 @@ describe('watchtower restart resilience', () => {
           counterentity: `0x${'34'.repeat(32)}`,
           finalNonce: 7,
           finalProofbody: { tokenIds: [1], offdeltas: [-5n], transformers: [] },
-          finalArguments: '0x',
+          leftArguments: '0x',
+          rightArguments: '0x',
+          starterIncrementedArguments: '0x',
           sig: '0x5678',
         },
       }),

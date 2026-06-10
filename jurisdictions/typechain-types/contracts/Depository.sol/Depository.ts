@@ -139,8 +139,10 @@ export type FinalDisputeProofStruct = {
   finalNonce: BigNumberish;
   initialProofbodyHash: BytesLike;
   finalProofbody: ProofBodyStruct;
-  finalArguments: BytesLike;
-  initialArguments: BytesLike;
+  leftArguments: BytesLike;
+  rightArguments: BytesLike;
+  starterInitialArguments: BytesLike;
+  starterIncrementedArguments: BytesLike;
   sig: BytesLike;
   startedByLeft: boolean;
   disputeUntilBlock: BigNumberish;
@@ -153,8 +155,10 @@ export type FinalDisputeProofStructOutput = [
   finalNonce: bigint,
   initialProofbodyHash: string,
   finalProofbody: ProofBodyStructOutput,
-  finalArguments: string,
-  initialArguments: string,
+  leftArguments: string,
+  rightArguments: string,
+  starterInitialArguments: string,
+  starterIncrementedArguments: string,
   sig: string,
   startedByLeft: boolean,
   disputeUntilBlock: bigint,
@@ -165,8 +169,10 @@ export type FinalDisputeProofStructOutput = [
   finalNonce: bigint;
   initialProofbodyHash: string;
   finalProofbody: ProofBodyStructOutput;
-  finalArguments: string;
-  initialArguments: string;
+  leftArguments: string;
+  rightArguments: string;
+  starterInitialArguments: string;
+  starterIncrementedArguments: string;
   sig: string;
   startedByLeft: boolean;
   disputeUntilBlock: bigint;
@@ -232,7 +238,7 @@ export interface DepositoryInterface extends Interface {
       | "DebtEnforced"
       | "DebtForgiven"
       | "DisputeFinalized"
-      | "DisputeStarted"
+      | "DisputeStartedV2"
       | "HankoBatchProcessed"
       | "ReserveUpdated"
       | "SecretRevealed"
@@ -640,27 +646,30 @@ export namespace DisputeFinalizedEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
-export namespace DisputeStartedEvent {
+export namespace DisputeStartedV2Event {
   export type InputTuple = [
     sender: BytesLike,
     counterentity: BytesLike,
     nonce: BigNumberish,
     proofbodyHash: BytesLike,
-    initialArguments: BytesLike
+    starterInitialArguments: BytesLike,
+    starterIncrementedArguments: BytesLike
   ];
   export type OutputTuple = [
     sender: string,
     counterentity: string,
     nonce: bigint,
     proofbodyHash: string,
-    initialArguments: string
+    starterInitialArguments: string,
+    starterIncrementedArguments: string
   ];
   export interface OutputObject {
     sender: string;
     counterentity: string;
     nonce: bigint;
     proofbodyHash: string;
-    initialArguments: string;
+    starterInitialArguments: string;
+    starterIncrementedArguments: string;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -1310,11 +1319,11 @@ export interface Depository extends BaseContract {
     DisputeFinalizedEvent.OutputObject
   >;
   getEvent(
-    key: "DisputeStarted"
+    key: "DisputeStartedV2"
   ): TypedContractEvent<
-    DisputeStartedEvent.InputTuple,
-    DisputeStartedEvent.OutputTuple,
-    DisputeStartedEvent.OutputObject
+    DisputeStartedV2Event.InputTuple,
+    DisputeStartedV2Event.OutputTuple,
+    DisputeStartedV2Event.OutputObject
   >;
   getEvent(
     key: "HankoBatchProcessed"
@@ -1412,15 +1421,15 @@ export interface Depository extends BaseContract {
       DisputeFinalizedEvent.OutputObject
     >;
 
-    "DisputeStarted(bytes32,bytes32,uint256,bytes32,bytes)": TypedContractEvent<
-      DisputeStartedEvent.InputTuple,
-      DisputeStartedEvent.OutputTuple,
-      DisputeStartedEvent.OutputObject
+    "DisputeStartedV2(bytes32,bytes32,uint256,bytes32,bytes,bytes)": TypedContractEvent<
+      DisputeStartedV2Event.InputTuple,
+      DisputeStartedV2Event.OutputTuple,
+      DisputeStartedV2Event.OutputObject
     >;
-    DisputeStarted: TypedContractEvent<
-      DisputeStartedEvent.InputTuple,
-      DisputeStartedEvent.OutputTuple,
-      DisputeStartedEvent.OutputObject
+    DisputeStartedV2: TypedContractEvent<
+      DisputeStartedV2Event.InputTuple,
+      DisputeStartedV2Event.OutputTuple,
+      DisputeStartedV2Event.OutputObject
     >;
 
     "HankoBatchProcessed(bytes32,bytes32,uint256,bool)": TypedContractEvent<

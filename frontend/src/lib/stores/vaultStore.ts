@@ -9,7 +9,7 @@ import type {
   RoutedEntityInput,
   RuntimeInput,
   TowerActivePayloadV1,
-  TowerCounterDisputeRemedyV1,
+  TowerCounterDisputeRemedyV2,
   RuntimeRecoveryBundleV1,
   RuntimeRecoveryMetaV1,
   RuntimeRecoverySignerV1,
@@ -1300,8 +1300,13 @@ export async function buildDelayedLastResortAppointmentsForTower(
         signerPrivateKey,
       );
 
-      const remedy: TowerCounterDisputeRemedyV1 = {
-        version: 1,
+      const finalProofbody = structuredClone(proofBody as Record<string, unknown>);
+      const transformers = finalProofbody['transformers'];
+      if (Array.isArray(transformers) && transformers.length > 0) {
+        throw new Error('WATCHTOWER_V2_TRANSFORMER_ARGUMENTS_REQUIRED');
+      }
+      const remedy: TowerCounterDisputeRemedyV2 = {
+        version: 2,
         type: 'counter_dispute_remedy',
         rpcUrl,
         chainId,
@@ -1314,8 +1319,10 @@ export async function buildDelayedLastResortAppointmentsForTower(
         latestProof: {
           counterentity: counterpartyId,
           finalNonce: proofNonce,
-          finalProofbody: structuredClone(proofBody as Record<string, unknown>),
-          finalArguments: '0x',
+          finalProofbody,
+          leftArguments: '0x',
+          rightArguments: '0x',
+          starterIncrementedArguments: '0x',
           sig: proofHanko,
         },
       };

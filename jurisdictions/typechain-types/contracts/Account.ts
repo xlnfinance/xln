@@ -70,6 +70,7 @@ export interface AccountInterface extends Interface {
       | "accountKey"
       | "computeBatchHankoHash"
       | "encodeDisputeHash"
+      | "requireStarterArguments"
   ): FunctionFragment;
 
   getEvent(
@@ -77,7 +78,7 @@ export interface AccountInterface extends Interface {
       | "AccountSettled"
       | "DebtCreated"
       | "DebtForgiven"
-      | "DisputeStarted"
+      | "DisputeStartedV2"
       | "ReserveUpdated"
   ): EventFragment;
 
@@ -91,7 +92,18 @@ export interface AccountInterface extends Interface {
   ): string;
   encodeFunctionData(
     functionFragment: "encodeDisputeHash",
-    values: [BigNumberish, boolean, BigNumberish, BytesLike, BytesLike]
+    values: [
+      BigNumberish,
+      boolean,
+      BigNumberish,
+      BytesLike,
+      BytesLike,
+      BytesLike
+    ]
+  ): string;
+  encodeFunctionData(
+    functionFragment: "requireStarterArguments",
+    values: [boolean, BytesLike, BytesLike, BytesLike]
   ): string;
 
   decodeFunctionResult(functionFragment: "accountKey", data: BytesLike): Result;
@@ -101,6 +113,10 @@ export interface AccountInterface extends Interface {
   ): Result;
   decodeFunctionResult(
     functionFragment: "encodeDisputeHash",
+    data: BytesLike
+  ): Result;
+  decodeFunctionResult(
+    functionFragment: "requireStarterArguments",
     data: BytesLike
   ): Result;
 }
@@ -173,27 +189,30 @@ export namespace DebtForgivenEvent {
   export type LogDescription = TypedLogDescription<Event>;
 }
 
-export namespace DisputeStartedEvent {
+export namespace DisputeStartedV2Event {
   export type InputTuple = [
     sender: BytesLike,
     counterentity: BytesLike,
     nonce: BigNumberish,
     proofbodyHash: BytesLike,
-    initialArguments: BytesLike
+    starterInitialArguments: BytesLike,
+    starterIncrementedArguments: BytesLike
   ];
   export type OutputTuple = [
     sender: string,
     counterentity: string,
     nonce: bigint,
     proofbodyHash: string,
-    initialArguments: string
+    starterInitialArguments: string,
+    starterIncrementedArguments: string
   ];
   export interface OutputObject {
     sender: string;
     counterentity: string;
     nonce: bigint;
     proofbodyHash: string;
-    initialArguments: string;
+    starterInitialArguments: string;
+    starterIncrementedArguments: string;
   }
   export type Event = TypedContractEvent<InputTuple, OutputTuple, OutputObject>;
   export type Filter = TypedDeferredTopicFilter<Event>;
@@ -290,9 +309,21 @@ export interface Account extends BaseContract {
       startedByLeft: boolean,
       timeout: BigNumberish,
       proofbodyHash: BytesLike,
-      initialArguments: BytesLike
+      starterInitialArguments: BytesLike,
+      starterIncrementedArguments: BytesLike
     ],
     [string],
+    "view"
+  >;
+
+  requireStarterArguments: TypedContractMethod<
+    [
+      startedByLeft: boolean,
+      leftArguments: BytesLike,
+      rightArguments: BytesLike,
+      expectedStarterArguments: BytesLike
+    ],
+    [void],
     "view"
   >;
 
@@ -324,9 +355,22 @@ export interface Account extends BaseContract {
       startedByLeft: boolean,
       timeout: BigNumberish,
       proofbodyHash: BytesLike,
-      initialArguments: BytesLike
+      starterInitialArguments: BytesLike,
+      starterIncrementedArguments: BytesLike
     ],
     [string],
+    "view"
+  >;
+  getFunction(
+    nameOrSignature: "requireStarterArguments"
+  ): TypedContractMethod<
+    [
+      startedByLeft: boolean,
+      leftArguments: BytesLike,
+      rightArguments: BytesLike,
+      expectedStarterArguments: BytesLike
+    ],
+    [void],
     "view"
   >;
 
@@ -352,11 +396,11 @@ export interface Account extends BaseContract {
     DebtForgivenEvent.OutputObject
   >;
   getEvent(
-    key: "DisputeStarted"
+    key: "DisputeStartedV2"
   ): TypedContractEvent<
-    DisputeStartedEvent.InputTuple,
-    DisputeStartedEvent.OutputTuple,
-    DisputeStartedEvent.OutputObject
+    DisputeStartedV2Event.InputTuple,
+    DisputeStartedV2Event.OutputTuple,
+    DisputeStartedV2Event.OutputObject
   >;
   getEvent(
     key: "ReserveUpdated"
@@ -400,15 +444,15 @@ export interface Account extends BaseContract {
       DebtForgivenEvent.OutputObject
     >;
 
-    "DisputeStarted(bytes32,bytes32,uint256,bytes32,bytes)": TypedContractEvent<
-      DisputeStartedEvent.InputTuple,
-      DisputeStartedEvent.OutputTuple,
-      DisputeStartedEvent.OutputObject
+    "DisputeStartedV2(bytes32,bytes32,uint256,bytes32,bytes,bytes)": TypedContractEvent<
+      DisputeStartedV2Event.InputTuple,
+      DisputeStartedV2Event.OutputTuple,
+      DisputeStartedV2Event.OutputObject
     >;
-    DisputeStarted: TypedContractEvent<
-      DisputeStartedEvent.InputTuple,
-      DisputeStartedEvent.OutputTuple,
-      DisputeStartedEvent.OutputObject
+    DisputeStartedV2: TypedContractEvent<
+      DisputeStartedV2Event.InputTuple,
+      DisputeStartedV2Event.OutputTuple,
+      DisputeStartedV2Event.OutputObject
     >;
 
     "ReserveUpdated(bytes32,uint256,uint256)": TypedContractEvent<

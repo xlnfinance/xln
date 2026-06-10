@@ -9,7 +9,7 @@ import type { TowerAppointmentV1 } from '../recovery/types';
 
 const makeLookupKey = (label: string): string => keccak256(toUtf8Bytes(label));
 const disputeStartedInterface = new Interface([
-  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes initialArguments)',
+  'event DisputeStartedV2(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes starterInitialArguments, bytes starterIncrementedArguments)',
 ]);
 
 const tempRoots: string[] = [];
@@ -27,11 +27,19 @@ const encodeDisputeHash = (
   startedByLeft: boolean,
   disputeTimeout: bigint,
   initialProofbodyHash: string,
-  initialArguments: string,
+  starterInitialArguments: string,
+  starterIncrementedArguments: string,
 ): string => keccak256(
   solidityPacked(
-    ['uint256', 'bool', 'uint256', 'bytes32', 'bytes32'],
-    [BigInt(initialNonce), startedByLeft, disputeTimeout, initialProofbodyHash, keccak256(initialArguments)],
+    ['uint256', 'bool', 'uint256', 'bytes32', 'bytes32', 'bytes32'],
+    [
+      BigInt(initialNonce),
+      startedByLeft,
+      disputeTimeout,
+      initialProofbodyHash,
+      keccak256(starterInitialArguments),
+      keccak256(starterIncrementedArguments),
+    ],
   ),
 );
 
@@ -43,8 +51,9 @@ describe('watchtower delayed last-resort sweep', () => {
     const watchedEntityId = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
     const counterentity = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
     const initialProofbodyHash = '0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
-    const initialArguments = '0x1234';
-    const disputeHash = encodeDisputeHash(1, true, 100n, initialProofbodyHash, initialArguments);
+    const starterInitialArguments = '0x1234';
+    const starterIncrementedArguments = '0xabcd';
+    const disputeHash = encodeDisputeHash(1, true, 100n, initialProofbodyHash, starterInitialArguments, starterIncrementedArguments);
     const queriedFromBlocks: number[] = [];
     const tempRoot = join(process.cwd(), '.tmp-tests', `tower-last-resort-${Date.now()}`);
     tempRoots.push(tempRoot);
@@ -58,7 +67,7 @@ describe('watchtower delayed last-resort sweep', () => {
 
     const encryptedRemedy = await encryptTowerPayloadForPublicKey(
       encodeTowerCounterDisputeRemedy({
-        version: 1,
+        version: 2,
         type: 'counter_dispute_remedy',
         rpcUrl: 'mock://watchtower',
         chainId: 31337,
@@ -72,7 +81,9 @@ describe('watchtower delayed last-resort sweep', () => {
           counterentity,
           finalNonce: 2,
           finalProofbody: { offdeltas: [-1], tokenIds: [1], transformers: [] },
-          finalArguments: '0x',
+          leftArguments: starterIncrementedArguments,
+          rightArguments: '0x',
+          starterIncrementedArguments,
           sig: '0xcafe',
         },
       }),
@@ -121,13 +132,14 @@ describe('watchtower delayed last-resort sweep', () => {
         getLogs: async (filter) => {
           queriedFromBlocks.push(Number(filter['fromBlock']));
           const event = disputeStartedInterface.encodeEventLog(
-            disputeStartedInterface.getEvent('DisputeStarted'),
+            disputeStartedInterface.getEvent('DisputeStartedV2'),
             [
               watchedEntityId,
               counterentity,
               1n,
               initialProofbodyHash,
-              initialArguments,
+              starterInitialArguments,
+              starterIncrementedArguments,
             ],
           );
           return [{ topics: event.topics, data: event.data }];
@@ -195,7 +207,7 @@ describe('watchtower delayed last-resort sweep', () => {
       activePayload: {
         triggerHint: 'chain:31337:acct:skip',
         encryptedRemedy: encodeTowerCounterDisputeRemedy({
-          version: 1,
+          version: 2,
           type: 'counter_dispute_remedy',
           rpcUrl: 'mock://watchtower',
           chainId: 31337,
@@ -209,7 +221,9 @@ describe('watchtower delayed last-resort sweep', () => {
             counterentity: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
             finalNonce: 2,
             finalProofbody: { offdeltas: [-1], tokenIds: [1], transformers: [] },
-            finalArguments: '0x',
+            leftArguments: '0x',
+            rightArguments: '0x',
+            starterIncrementedArguments: '0x',
             sig: '0xcafe',
           },
         }),
@@ -292,7 +306,7 @@ describe('watchtower delayed last-resort sweep', () => {
       activePayload: {
         triggerHint: 'chain:31337:acct:ssrf',
         encryptedRemedy: encodeTowerCounterDisputeRemedy({
-          version: 1,
+          version: 2,
           type: 'counter_dispute_remedy',
           rpcUrl: 'http://169.254.169.254/latest/meta-data',
           chainId: 31337,
@@ -306,7 +320,9 @@ describe('watchtower delayed last-resort sweep', () => {
             counterentity: '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb',
             finalNonce: 2,
             finalProofbody: { offdeltas: [-1], tokenIds: [1], transformers: [] },
-            finalArguments: '0x',
+            leftArguments: '0x',
+            rightArguments: '0x',
+            starterIncrementedArguments: '0x',
             sig: '0xcafe',
           },
         }),

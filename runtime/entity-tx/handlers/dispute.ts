@@ -15,7 +15,7 @@
 
 import { ethers } from 'ethers';
 import type { EntityState, EntityTx, EntityInput, Env, AccountMachine } from '../../types';
-import type { ProofBodyStruct } from '../../typechain/Depository';
+import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { isUsableContractAddress } from '../../contract-address';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { initJBatch, batchAddRevealSecret, J_BATCH_CONTRACT_LIMITS, getBatchSize } from '../../j-batch';
@@ -26,25 +26,12 @@ import {
   createDisputeProofHashWithNonce,
 } from '../../proof-builder';
 import { inspectHankoForHash, verifyHankoForHash } from '../../hanko/signing';
-import { asOfferId, swapKey, type OfferId } from '../../swap-keys';
-import { buildPositionalSwapFillRatioBuckets, sortTransformerEntries } from '../../transformer-ordering';
 import { decodeHashLadderBinary } from '../../hashladder';
-
-// === Delta Transformer Arguments (inlined from transformer-args.ts) ===
-const MAX_FILL_RATIO = 0xffff;
-
-type BuildArgsOptions = {
-  fillRatiosByOfferId: ReadonlyMap<OfferId, number>;
-  overrideArguments?: string;
-  leftSecrets?: string[];
-  rightSecrets?: string[];
-  leftPulls?: PullArgumentBuckets;
-  rightPulls?: PullArgumentBuckets;
-};
-
-type PullArgumentBuckets = {
-  binaries: string[];
-};
+import {
+  buildDisputeArgumentsForSnapshot,
+  requireDisputeArgumentSnapshot,
+  type DisputeArgumentSide,
+} from '../../dispute-arguments';
 
 const isProofBodyStruct = (value: unknown): value is ProofBodyStruct => {
   if (!value || typeof value !== 'object') return false;
@@ -128,121 +115,8 @@ const canonicalizeProofBodyStruct = (
   };
 };
 
-function clampFillRatio(value: number): number {
-  if (!Number.isFinite(value) || value <= 0) return 0;
-  if (value >= MAX_FILL_RATIO) return MAX_FILL_RATIO;
-  return Math.floor(value);
-}
-
-function emptyPullArgumentBuckets(): PullArgumentBuckets {
-  return { binaries: [] };
-}
-
-function encodeDeltaTransformerArgs(fillRatios: number[], secrets: string[], pulls: PullArgumentBuckets = emptyPullArgumentBuckets()): string {
-  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-  const ratios = fillRatios.map(r => BigInt(clampFillRatio(r)));
-  return abiCoder.encode(
-    ['tuple(uint16[] fillRatios, bytes32[] secrets, bytes[] pulls)'],
-    [{
-      fillRatios: ratios,
-      secrets,
-      pulls: pulls.binaries,
-    }],
-  );
-}
-
-function wrapTransformerArgs(args: string): string {
-  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-  return abiCoder.encode(['bytes[]'], [[args]]);
-}
-
-function buildDeltaTransformerArguments(
-  accountMachine: AccountMachine,
-  options: BuildArgsOptions,
-): { leftArguments: string; rightArguments: string } {
-  if (options.overrideArguments && options.overrideArguments !== '0x') {
-    const counterpartyIsLeft = accountMachine.leftEntity !== accountMachine.proofHeader.fromEntity;
-    return counterpartyIsLeft
-      ? { leftArguments: options.overrideArguments, rightArguments: '0x' }
-      : { leftArguments: '0x', rightArguments: options.overrideArguments };
-  }
-
-  const hasLocks = accountMachine.locks?.size ? accountMachine.locks.size > 0 : false;
-  const hasSwaps = accountMachine.swapOffers?.size ? accountMachine.swapOffers.size > 0 : false;
-  const hasPulls = accountMachine.pulls?.size ? accountMachine.pulls.size > 0 : false;
-  if (!hasLocks && !hasSwaps && !hasPulls) {
-    return { leftArguments: '0x', rightArguments: '0x' };
-  }
-
-  const { leftFillRatios, rightFillRatios } = buildPositionalSwapFillRatioBuckets(
-    accountMachine.swapOffers.entries(),
-    options.fillRatiosByOfferId,
-  );
-
-  const leftSecrets = options.leftSecrets ?? [];
-  const rightSecrets = options.rightSecrets ?? [];
-  const leftPulls = options.leftPulls ?? emptyPullArgumentBuckets();
-  const rightPulls = options.rightPulls ?? emptyPullArgumentBuckets();
-
-  const leftArgs = encodeDeltaTransformerArgs(leftFillRatios, leftSecrets, leftPulls);
-  const rightArgs = encodeDeltaTransformerArgs(rightFillRatios, rightSecrets, rightPulls);
-
-  const hasLeftData =
-    leftSecrets.length > 0 ||
-    leftFillRatios.some(r => r > 0) ||
-    leftPulls.binaries.some(binary => binary !== '0x');
-  const hasRightData =
-    rightSecrets.length > 0 ||
-    rightFillRatios.some(r => r > 0) ||
-    rightPulls.binaries.some(binary => binary !== '0x');
-
-  return {
-    leftArguments: hasLeftData ? wrapTransformerArgs(leftArgs) : '0x',
-    rightArguments: hasRightData ? wrapTransformerArgs(rightArgs) : '0x',
-  };
-}
-
-function collectPullArgumentBuckets(account: AccountMachine): {
-  leftPulls: PullArgumentBuckets;
-  rightPulls: PullArgumentBuckets;
-  hasLeftReveal: boolean;
-  hasRightReveal: boolean;
-} {
-  const leftPulls = emptyPullArgumentBuckets();
-  const rightPulls = emptyPullArgumentBuckets();
-  const resolves = new Map<string, Extract<AccountMachine['mempool'][number], { type: 'pull_resolve' }>>();
-  const candidates = [
-    ...(account.pendingFrame?.accountTxs ?? []),
-    ...(account.mempool ?? []),
-  ];
-  for (const tx of candidates) {
-    if (tx.type === 'pull_resolve') resolves.set(tx.data.pullId, tx as Extract<typeof tx, { type: 'pull_resolve' }>);
-  }
-
-  let hasLeftReveal = false;
-  let hasRightReveal = false;
-  for (const [pullId, pull] of sortTransformerEntries((account.pulls ?? new Map()).entries())) {
-    const bucket = pull.amount >= 0n ? leftPulls : rightPulls;
-    const tx = resolves.get(pullId);
-    const binary = tx?.data.binary || '0x';
-    let ratio = 0;
-    try {
-      ratio = decodeHashLadderBinary(binary).fillRatio;
-    } catch {
-      ratio = 0;
-    }
-    bucket.binaries.push(ratio > 0 ? binary : '0x');
-    if (ratio > 0) {
-      if (pull.amount >= 0n) hasLeftReveal = true;
-      else hasRightReveal = true;
-    }
-  }
-
-  return { leftPulls, rightPulls, hasLeftReveal, hasRightReveal };
-}
-
-function hasNonZeroPullArgument(initialArguments?: string): boolean {
-  const raw = String(initialArguments || '0x');
+function hasNonZeroPullArgument(starterInitialArguments?: string): boolean {
+  const raw = String(starterInitialArguments || '0x');
   if (!raw || raw === '0x') return false;
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   let argArray: string[];
@@ -287,20 +161,6 @@ function targetCrossPullRiskAmount(state: EntityState, counterpartyEntityId: str
     }
   }
   return total;
-}
-
-function buildPendingSwapFillRatios(
-  entityState: EntityState,
-  counterpartyEntityId: string,
-  account: AccountMachine
-) : Map<OfferId, number> {
-  const pending = entityState.pendingSwapFillRatios;
-  const ratios = new Map<OfferId, number>();
-  for (const offerId of account.swapOffers.keys()) {
-    const key = swapKey(counterpartyEntityId, offerId);
-    ratios.set(asOfferId(offerId), pending?.get(key) ?? 0);
-  }
-  return ratios;
 }
 
 function collectHtlcSecrets(entityState: EntityState, counterpartyEntityId: string): string[] {
@@ -360,10 +220,11 @@ export async function handleDisputeStart(
   const {
     counterpartyEntityId,
     description,
-    initialArguments: overrideInitialArguments,
+    starterInitialArguments: overrideStarterInitialArguments,
     allowUnsafeCrossJTargetDispute,
     acceptedCrossJTargetLossAmount,
   } = entityTx.data;
+  const overrideInitialArguments = overrideStarterInitialArguments;
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
 
@@ -402,13 +263,13 @@ export async function handleDisputeStart(
     return { newState, outputs };
   }
 
-  const counterpartyIsLeft = account.leftEntity === counterpartyEntityId;
-
-  const fillRatiosByOfferId = buildPendingSwapFillRatios(newState, counterpartyEntityId, account);
-  const htlcSecrets = collectHtlcSecrets(newState, counterpartyEntityId);
-  const pullArgs = collectPullArgumentBuckets(account);
   const targetCrossRiskAmount = targetCrossPullRiskAmount(newState, counterpartyEntityId, account);
-  if (targetCrossRiskAmount > 0n && !pullArgs.hasLeftReveal && !pullArgs.hasRightReveal && !hasNonZeroPullArgument(overrideInitialArguments)) {
+  const explicitStarterPullArgs = hasNonZeroPullArgument(overrideInitialArguments);
+  const snapshotCanSupplyStarterArgs = Boolean(
+    account.counterpartyDisputeProofBodyHash &&
+    account.disputeArgumentSnapshotsByHash?.[account.counterpartyDisputeProofBodyHash],
+  );
+  if (targetCrossRiskAmount > 0n && !explicitStarterPullArgs && !snapshotCanSupplyStarterArgs) {
     const acceptedLoss = BigInt(acceptedCrossJTargetLossAmount ?? 0n);
     if (!allowUnsafeCrossJTargetDispute || acceptedLoss < targetCrossRiskAmount) {
       addMessage(
@@ -422,24 +283,6 @@ export async function handleDisputeStart(
       `⚠️ Unsafe cross-j target dispute accepted: pull arguments missing, possible loss up to ${targetCrossRiskAmount}`,
     );
   }
-  const { leftArguments, rightArguments } = buildDeltaTransformerArguments(account, {
-    fillRatiosByOfferId,
-    ...(overrideInitialArguments && overrideInitialArguments !== '0x'
-      ? { overrideArguments: overrideInitialArguments }
-      : {}),
-    // disputeStart commits the argument blob later replayed as activeDispute.initialArguments
-    // Keep secrets on the same side that we commit as initialArguments.
-    leftSecrets: counterpartyIsLeft ? htlcSecrets : [],
-    rightSecrets: counterpartyIsLeft ? [] : htlcSecrets,
-    leftPulls: pullArgs.leftPulls,
-    rightPulls: pullArgs.rightPulls,
-  });
-
-  const starterIsLeft = account.leftEntity === newState.entityId;
-  const starterHasPullReveal = starterIsLeft ? pullArgs.hasLeftReveal : pullArgs.hasRightReveal;
-  const initialArguments = starterHasPullReveal
-    ? (starterIsLeft ? leftArguments : rightArguments)
-    : (counterpartyIsLeft ? leftArguments : rightArguments);
 
   // Use stored counterparty dispute hanko AND proofBodyHash (exchanged during bilateral consensus)
   // CRITICAL: Must use the SAME proofBodyHash that the hanko signed, not a fresh one!
@@ -464,6 +307,34 @@ export async function handleDisputeStart(
     return { newState, outputs };
   }
   const proofBodyHashToUse = storedProofBodyHash;
+  requireDisputeArgumentSnapshot(account, proofBodyHashToUse, 'disputeStart.initial');
+  const starterIsLeft = account.leftEntity === newState.entityId;
+  const starterSide: DisputeArgumentSide = starterIsLeft ? 'left' : 'right';
+  const initialSnapshotArguments = buildDisputeArgumentsForSnapshot(
+    account,
+    newState,
+    counterpartyEntityId,
+    proofBodyHashToUse,
+    { secretsSide: starterSide },
+  );
+  const starterInitialArguments =
+    overrideInitialArguments && overrideInitialArguments !== '0x'
+      ? overrideInitialArguments
+      : (starterIsLeft ? initialSnapshotArguments.leftArguments : initialSnapshotArguments.rightArguments);
+  if (targetCrossRiskAmount > 0n && !hasNonZeroPullArgument(starterInitialArguments)) {
+    const acceptedLoss = BigInt(acceptedCrossJTargetLossAmount ?? 0n);
+    if (!allowUnsafeCrossJTargetDispute || acceptedLoss < targetCrossRiskAmount) {
+      addMessage(
+        newState,
+        `❌ Cross-j target dispute blocked: source pull arguments missing; accept possible loss up to ${targetCrossRiskAmount} or start source dispute first`,
+      );
+      return { newState, outputs };
+    }
+    addMessage(
+      newState,
+      `⚠️ Unsafe cross-j target dispute accepted: pull arguments missing, possible loss up to ${targetCrossRiskAmount}`,
+    );
+  }
   console.log(`✅ Using stored counterparty proofBodyHash: ${storedProofBodyHash.slice(0, 10)}...`);
 
   // Resolve the offchain nonce that matches the stored counterparty dispute signature.
@@ -514,6 +385,32 @@ export async function handleDisputeStart(
     console.warn(`⚠️ disputeStart blocked: ${msg}`);
     return { newState, outputs };
   }
+
+  // Single-round dispute safety:
+  // The starter can precommit args for the initial proof and for at most one
+  // already-signed incremented proof. More candidates would require a larger
+  // bundle design; guessing would let positional swap/pull args drift.
+  const localCounterCandidates = Object.values(account.disputeArgumentSnapshotsByHash ?? {})
+    .filter((snapshot) => snapshot.side === starterSide && snapshot.nonce > signedNonce)
+    .sort((left, right) => left.nonce - right.nonce);
+  if (localCounterCandidates.length > 1) {
+    throw new Error(
+      `DISPUTE_START_AMBIGUOUS_INCREMENTED_ARGUMENTS:${counterpartyEntityId}:${localCounterCandidates.map((s) => `${s.nonce}:${s.proofbodyHash}`).join(',')}`,
+    );
+  }
+  const starterIncrementedArguments = localCounterCandidates.length === 1
+    ? (() => {
+        const candidate = localCounterCandidates[0]!;
+        const args = buildDisputeArgumentsForSnapshot(
+          account,
+          newState,
+          counterpartyEntityId,
+          candidate.proofbodyHash,
+          { secretsSide: starterSide },
+        );
+        return starterIsLeft ? args.leftArguments : args.rightArguments;
+      })()
+    : '0x';
 
   const depositoryAddress = resolveDepositoryAddress(entityState);
   if (depositoryAddress) {
@@ -619,7 +516,8 @@ export async function handleDisputeStart(
     nonce: signedNonce,
     proofbodyHash: proofBodyHashToUse,
     sig: counterpartyDisputeHanko,
-    initialArguments,
+    starterInitialArguments,
+    starterIncrementedArguments,
   });
 
   // Freeze account immediately once disputeStart is queued.
@@ -658,7 +556,8 @@ export async function handleDisputeStart(
       initialNonce: signedNonce,
       disputeTimeout: currentJBlock + defaultDisputeDelayBlocks,
       onChainNonce,
-      initialArguments,
+      starterInitialArguments,
+      starterIncrementedArguments,
       finalizeQueued: false,
     };
   }
@@ -748,7 +647,7 @@ export async function handleDisputeFinalize(
     return { newState, outputs };
   }
 
-  // Build current proof (for finalization reveal)
+  // Build current proof only to compare against the stored dispute body.
   const currentProofResult = buildAccountProofBody(account);
   const finalNonce = account.activeDispute.initialNonce;
   const finalNonceSource = 'initialNonce (unilateral-only)';
@@ -763,19 +662,7 @@ export async function handleDisputeFinalize(
   const finalizeSig = '0x';
 
   const callerIsLeft = account.leftEntity === newState.entityId;
-  const fillRatiosByOfferId = buildPendingSwapFillRatios(newState, counterpartyEntityId, account);
-  const htlcSecrets = collectHtlcSecrets(newState, counterpartyEntityId);
-  const pullArgs = collectPullArgumentBuckets(account);
-  const { leftArguments, rightArguments } = buildDeltaTransformerArguments(account, {
-    fillRatiosByOfferId,
-    leftSecrets: callerIsLeft ? htlcSecrets : [],
-    rightSecrets: callerIsLeft ? [] : htlcSecrets,
-    leftPulls: pullArgs.leftPulls,
-    rightPulls: pullArgs.rightPulls,
-  });
-
-  const finalArguments = callerIsLeft ? leftArguments : rightArguments;
-  const initialArguments = account.activeDispute.initialArguments || (callerIsLeft ? rightArguments : leftArguments);
+  const callerSide: DisputeArgumentSide = callerIsLeft ? 'left' : 'right';
 
   const storedProofBodyRaw = account.activeDispute.initialProofbodyHash
     ? account.disputeProofBodiesByHash?.[account.activeDispute.initialProofbodyHash]
@@ -805,6 +692,23 @@ export async function handleDisputeFinalize(
   const finalProofbody = shouldUseStoredProof
     ? storedProofBody
     : currentProofBody;
+  // Finalization arguments are built for the stored proof body hash, not from
+  // whichever live account maps exist now. The starter side is overwritten by
+  // the blob committed in DisputeStartedV2; only the finalizer's side remains
+  // freshly supplied evidence.
+  const builtArguments = buildDisputeArgumentsForSnapshot(
+    account,
+    newState,
+    counterpartyEntityId,
+    account.activeDispute.initialProofbodyHash,
+    { secretsSide: callerSide },
+  );
+  const leftArguments = account.activeDispute.startedByLeft
+    ? account.activeDispute.starterInitialArguments
+    : builtArguments.leftArguments;
+  const rightArguments = account.activeDispute.startedByLeft
+    ? builtArguments.rightArguments
+    : account.activeDispute.starterInitialArguments;
 
   const finalProof = {
     counterentity: counterpartyEntityId,
@@ -812,8 +716,10 @@ export async function handleDisputeFinalize(
     finalNonce,  // Unilateral-only: same as initial.
     initialProofbodyHash: account.activeDispute.initialProofbodyHash,  // From disputeStart (commit)
     finalProofbody,  // REVEAL
-    finalArguments,
-    initialArguments,
+    leftArguments,
+    rightArguments,
+    starterInitialArguments: account.activeDispute.starterInitialArguments,
+    starterIncrementedArguments: account.activeDispute.starterIncrementedArguments,
     sig: finalizeSig,  // Always empty for unilateral finalize
     startedByLeft: account.activeDispute.startedByLeft,  // From on-chain
     disputeUntilBlock: account.activeDispute.disputeTimeout,  // From on-chain
@@ -822,6 +728,7 @@ export async function handleDisputeFinalize(
 
   // Optional fallback: on-chain HTLC registry (Sprites-style)
   if (entityTx.data.useOnchainRegistry) {
+    const htlcSecrets = collectHtlcSecrets(newState, counterpartyEntityId);
     const transformerAddress = getDeltaTransformerAddress();
     if (!isUsableContractAddress(transformerAddress)) {
       throw new Error('DISPUTE_FINALIZE_MISSING_DELTA_TRANSFORMER_ADDRESS');

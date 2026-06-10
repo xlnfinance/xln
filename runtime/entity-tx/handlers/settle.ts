@@ -19,6 +19,7 @@ import type { Env, HankoString } from '../../types';
 import { createSettlementHashWithNonce, createDisputeProofHashWithNonce, buildAccountProofBody } from '../../proof-builder';
 import { signEntityHashes } from '../../hanko/signing';
 import { compileOps, userAutoApprove as userAutoApproveByDiff } from '../../settlement-ops';
+import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../../dispute-arguments';
 
 import type { AccountMachine } from '../../types';
 
@@ -37,12 +38,20 @@ async function signPostSettlementDisputeProof(
   if (!signerId) return null;
 
   try {
-    const { proofBodyHash } = buildAccountProofBody(account);
+    const { proofBodyHash, proofBodyStruct } = buildAccountProofBody(account);
     const disputeHash = createDisputeProofHashWithNonce(
       account, proofBodyHash, jurisdiction.depositoryAddress, onChainNonce + 1
     );
     const hankos = await signEntityHashes(env, entityState.entityId, signerId, [disputeHash]);
     if (!hankos[0]) return null;
+    account.disputeProofBodiesByHash ??= {};
+    account.disputeProofBodiesByHash[proofBodyHash] = proofBodyStruct;
+    account.disputeProofNoncesByHash ??= {};
+    account.disputeProofNoncesByHash[proofBodyHash] = onChainNonce + 1;
+    storeDisputeArgumentSnapshot(
+      account,
+      captureDisputeArgumentSnapshot(account, proofBodyHash, onChainNonce + 1, proofBodyStruct),
+    );
     return { hanko: hankos[0], proofBodyHash, nonce: onChainNonce + 1 };
   } catch (e) {
     console.warn(`⚠️ Post-settlement dispute proof signing failed: ${e instanceof Error ? e.message : String(e)}`);

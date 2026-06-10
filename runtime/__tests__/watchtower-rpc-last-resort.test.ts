@@ -14,7 +14,7 @@ import {
   encryptTowerPayloadForPublicKey,
   getTowerPayloadEncryptionPublicKey,
 } from '../recovery/crypto';
-import type { TowerActivePayloadV1, TowerAppointmentV1, TowerCounterDisputeRemedyV1 } from '../recovery/types';
+import type { TowerActivePayloadV1, TowerAppointmentV1, TowerCounterDisputeRemedyV2 } from '../recovery/types';
 import { generateLazyEntityId } from '../entity-factory';
 import { encodeTowerCounterDisputeRemedy, runWatchtowerSweep } from '../watchtower/action';
 import { startStandaloneWatchtowerServer, type StandaloneWatchtowerServer } from '../watchtower/standalone-server';
@@ -202,7 +202,8 @@ describe('watchtower rpc last-resort integration', () => {
     const finalNonce = 2n;
     const appointmentSequence = 5;
     const lastResortWindowBlocks = 16;
-    const initialArguments = '0x';
+    const starterInitialArguments = '0x';
+    const starterIncrementedArguments = '0x';
 
     await (await depository.mintToReserve(watched.entityId, tokenId, 1_000n, {
       nonce: await nextNonce(left),
@@ -233,7 +234,8 @@ describe('watchtower rpc last-resort integration', () => {
       nonce: disputeNonce,
       proofbodyHash: initialProofbodyHash,
       sig: startSig,
-      initialArguments,
+      starterInitialArguments,
+      starterIncrementedArguments,
     });
     const disputeStartSigned = await signDepositoryBatch(depository, watched.entityId, watched.privateKey, disputeStartBatch);
     await (await depository.connect(watched.wallet).processBatch(
@@ -261,8 +263,8 @@ describe('watchtower rpc last-resort integration', () => {
     const runtimeId = watched.wallet.address.toLowerCase();
     const runtimeSeed = 'watchtower-rpc-last-resort-test';
     const lookupKey = deriveRuntimeRecoveryActionLookupKey(runtimeId, runtimeSeed, watched.entityId, counterparty.entityId);
-    const remedy: TowerCounterDisputeRemedyV1 = {
-      version: 1,
+    const remedy: TowerCounterDisputeRemedyV2 = {
+      version: 2,
       type: 'counter_dispute_remedy',
       rpcUrl,
       chainId: 31337,
@@ -276,7 +278,9 @@ describe('watchtower rpc last-resort integration', () => {
         counterentity: counterparty.entityId,
         finalNonce: Number(finalNonce),
         finalProofbody,
-        finalArguments: '0x',
+        leftArguments: starterIncrementedArguments,
+        rightArguments: '0x',
+        starterIncrementedArguments,
         sig: finalSig,
       },
     };
@@ -476,7 +480,8 @@ describe('watchtower rpc last-resort integration', () => {
     const userFinalNonce = 3n;
     const appointmentSequence = 6;
     const lastResortWindowBlocks = 16;
-    const initialArguments = '0x';
+    const starterInitialArguments = '0x';
+    const starterIncrementedArguments = '0x';
 
     await (await depository.mintToReserve(watched.entityId, tokenId, 1_000n, {
       nonce: await nextNonce(left),
@@ -507,7 +512,8 @@ describe('watchtower rpc last-resort integration', () => {
       nonce: disputeNonce,
       proofbodyHash: initialProofbodyHash,
       sig: startSig,
-      initialArguments,
+      starterInitialArguments,
+      starterIncrementedArguments,
     });
     const disputeStartSigned = await signDepositoryBatch(depository, watched.entityId, watched.privateKey, disputeStartBatch);
     await (await depository.connect(watched.wallet).processBatch(
@@ -535,8 +541,8 @@ describe('watchtower rpc last-resort integration', () => {
     const runtimeId = watched.wallet.address.toLowerCase();
     const runtimeSeed = 'watchtower-rpc-stale-last-resort-test';
     const lookupKey = deriveRuntimeRecoveryActionLookupKey(runtimeId, runtimeSeed, watched.entityId, counterparty.entityId);
-    const towerRemedy: TowerCounterDisputeRemedyV1 = {
-      version: 1,
+    const towerRemedy: TowerCounterDisputeRemedyV2 = {
+      version: 2,
       type: 'counter_dispute_remedy',
       rpcUrl,
       chainId: 31337,
@@ -550,7 +556,9 @@ describe('watchtower rpc last-resort integration', () => {
         counterentity: counterparty.entityId,
         finalNonce: Number(towerFinalNonce),
         finalProofbody: towerProofbody,
-        finalArguments: '0x',
+        leftArguments: starterIncrementedArguments,
+        rightArguments: '0x',
+        starterIncrementedArguments,
         sig: towerFinalSig,
       },
     };
@@ -633,8 +641,10 @@ describe('watchtower rpc last-resort integration', () => {
       finalNonce: userFinalNonce,
       initialProofbodyHash,
       finalProofbody: userProofbody,
-      finalArguments: '0x',
-      initialArguments,
+      leftArguments: starterIncrementedArguments,
+      rightArguments: '0x',
+      starterInitialArguments,
+      starterIncrementedArguments,
       sig: userFinalSig,
       startedByLeft: true,
       disputeUntilBlock: 0,

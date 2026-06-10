@@ -98,7 +98,7 @@ async function cooperativeDisputeProofHash(
   accountKey: string,
   nonce: bigint,
   proofbody: Record<string, unknown>,
-  initialArguments: string,
+  starterInitialArguments: string,
 ): Promise<string> {
   return ethers.keccak256(abi.encode(
     ["uint8", "address", "bytes", "uint256", "bytes32", "bytes32"],
@@ -108,7 +108,7 @@ async function cooperativeDisputeProofHash(
       accountKey,
       nonce,
       proofBodyHash(proofbody),
-      ethers.keccak256(initialArguments),
+      ethers.keccak256(starterInitialArguments),
     ],
   ));
 }
@@ -644,7 +644,8 @@ describe("Depository", function () {
         nonce: disputeNonce,
         proofbodyHash: initialProofbodyHash,
         sig: startSig,
-        initialArguments: "0x",
+        starterInitialArguments: "0x",
+        starterIncrementedArguments: "0x",
       }],
     });
     const start = await signDepositoryBatch(depository, left.entityId, left.privateKey, startBatch);
@@ -821,7 +822,7 @@ describe("Depository", function () {
 
     const initialProofbody = proofBody([0n], [tokenId]);
     const initialProofbodyHash = proofBodyHash(initialProofbody);
-    const initialArguments = "0x";
+    const starterInitialArguments = "0x";
     const disputeNonce = 1n;
     const startHash = await disputeProofHash(depository, acctKey, disputeNonce, initialProofbodyHash);
     const startSig = signEntityHash(right.entityId, startHash, right.privateKey);
@@ -830,15 +831,16 @@ describe("Depository", function () {
       nonce: disputeNonce,
       proofbodyHash: initialProofbodyHash,
       sig: startSig,
-      initialArguments,
+      starterInitialArguments: starterInitialArguments,
+        starterIncrementedArguments: "0x",
     };
     const startBatch = emptyBatch({ disputeStarts: [disputeStart] });
     const start = await signDepositoryBatch(depository, left.entityId, left.privateKey, startBatch);
 
     await expect(
       depository.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce)
-    ).to.emit(depository, "DisputeStarted")
-      .withArgs(left.entityId, right.entityId, disputeNonce, initialProofbodyHash, initialArguments);
+    ).to.emit(depository, "DisputeStartedV2")
+      .withArgs(left.entityId, right.entityId, disputeNonce, initialProofbodyHash, starterInitialArguments, "0x");
 
     const startedAccount = await depository._accounts(acctKey);
     expect(startedAccount.nonce).to.equal(disputeNonce);
@@ -855,8 +857,10 @@ describe("Depository", function () {
       finalNonce,
       initialProofbodyHash,
       finalProofbody,
-      finalArguments: "0x",
-      initialArguments,
+      leftArguments: "0x",
+      rightArguments: "0x",
+      starterInitialArguments: starterInitialArguments,
+      starterIncrementedArguments: "0x",
       sig: finalSig,
       startedByLeft: true,
       disputeUntilBlock: 0,
@@ -879,6 +883,210 @@ describe("Depository", function () {
     expect(collateralAfter.ondelta).to.equal(0n);
     expect(await depository._reserves(left.entityId, tokenId)).to.equal(800n);
     expect(await depository._reserves(right.entityId, tokenId)).to.equal(200n);
+  });
+
+  it("binds starter initial and incremented dispute arguments independently", async function () {
+    const starterInitialArguments = abi.encode(["bytes[]"], [[encodeDeltaTransformerArguments([1])]]);
+    const starterIncrementedArguments = abi.encode(["bytes[]"], [[encodeDeltaTransformerArguments([2])]]);
+    const wrongInitialArguments = abi.encode(["bytes[]"], [[encodeDeltaTransformerArguments([3])]]);
+    const wrongIncrementedArguments = abi.encode(["bytes[]"], [[encodeDeltaTransformerArguments([4])]]);
+
+    async function setupStartedDispute() {
+      const { depository } = await loadFixture(deployFixture);
+      const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+      const initialNonce = 1n;
+      const initialProofbody = proofBody([], []);
+      const initialProofbodyHash = proofBodyHash(initialProofbody);
+      const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+      const startHash = await disputeProofHash(depository, acctKey, initialNonce, initialProofbodyHash);
+      const startSig = signEntityHash(right.entityId, startHash, right.privateKey);
+      const startBatch = emptyBatch({
+        disputeStarts: [{
+          counterentity: right.entityId,
+          nonce: initialNonce,
+          proofbodyHash: initialProofbodyHash,
+          sig: startSig,
+          starterInitialArguments,
+          starterIncrementedArguments,
+        }],
+      });
+      const start = await signDepositoryBatch(depository, left.entityId, left.privateKey, startBatch);
+      await depository.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
+      return { depository, left, right, acctKey, initialNonce, initialProofbody, initialProofbodyHash };
+    }
+
+    async function signFinalBatch(
+      depository: Depository,
+      entity: TestActor,
+      finalization: Record<string, unknown>,
+    ) {
+      return signDepositoryBatch(
+        depository,
+        entity.entityId,
+        entity.privateKey,
+        emptyBatch({ disputeFinalizations: [finalization] }),
+      );
+    }
+
+    {
+      const { depository, left, right, initialNonce, initialProofbody, initialProofbodyHash } = await setupStartedDispute();
+      await mine(Number(await depository.defaultDisputeDelay()));
+      const finalization = {
+        counterentity: right.entityId,
+        initialNonce,
+        finalNonce: initialNonce,
+        initialProofbodyHash,
+        finalProofbody: initialProofbody,
+        leftArguments: starterInitialArguments,
+        rightArguments: "0x",
+        starterInitialArguments,
+        starterIncrementedArguments,
+        sig: "0x",
+        startedByLeft: true,
+        disputeUntilBlock: 0,
+        cooperative: false,
+      };
+      const final = await signFinalBatch(depository, left, finalization);
+      await depository.connect(left.signer).processBatch(final.encodedBatch, final.hankoData, final.nonce);
+      expect((await depository._accounts(await accountKeyFor(depository, left.entityId, right.entityId))).disputeHash)
+        .to.equal(ethers.ZeroHash);
+    }
+
+    {
+      const { depository, left, right, initialNonce, initialProofbody, initialProofbodyHash } = await setupStartedDispute();
+      await mine(Number(await depository.defaultDisputeDelay()));
+      const finalization = {
+        counterentity: right.entityId,
+        initialNonce,
+        finalNonce: initialNonce,
+        initialProofbodyHash,
+        finalProofbody: initialProofbody,
+        leftArguments: starterIncrementedArguments,
+        rightArguments: "0x",
+        starterInitialArguments,
+        starterIncrementedArguments,
+        sig: "0x",
+        startedByLeft: true,
+        disputeUntilBlock: 0,
+        cooperative: false,
+      };
+      const final = await signFinalBatch(depository, left, finalization);
+      await expect(
+        depository.connect(left.signer).processBatch(final.encodedBatch, final.hankoData, final.nonce)
+      ).to.be.revertedWithCustomError(depository, "E9");
+    }
+
+    {
+      const { depository, left, right, initialNonce, initialProofbody, initialProofbodyHash } = await setupStartedDispute();
+      await mine(Number(await depository.defaultDisputeDelay()));
+      const finalization = {
+        counterentity: right.entityId,
+        initialNonce,
+        finalNonce: initialNonce,
+        initialProofbodyHash,
+        finalProofbody: initialProofbody,
+        leftArguments: wrongInitialArguments,
+        rightArguments: "0x",
+        starterInitialArguments: wrongInitialArguments,
+        starterIncrementedArguments,
+        sig: "0x",
+        startedByLeft: true,
+        disputeUntilBlock: 0,
+        cooperative: false,
+      };
+      const final = await signFinalBatch(depository, left, finalization);
+      await expect(
+        depository.connect(left.signer).processBatch(final.encodedBatch, final.hankoData, final.nonce)
+      ).to.be.revertedWithCustomError(depository, "E9");
+    }
+
+    {
+      const { depository, left, right, initialNonce, initialProofbody, initialProofbodyHash } = await setupStartedDispute();
+      await mine(Number(await depository.defaultDisputeDelay()));
+      const finalization = {
+        counterentity: right.entityId,
+        initialNonce,
+        finalNonce: initialNonce,
+        initialProofbodyHash,
+        finalProofbody: initialProofbody,
+        leftArguments: starterInitialArguments,
+        rightArguments: "0x",
+        starterInitialArguments,
+        starterIncrementedArguments: wrongIncrementedArguments,
+        sig: "0x",
+        startedByLeft: true,
+        disputeUntilBlock: 0,
+        cooperative: false,
+      };
+      const final = await signFinalBatch(depository, left, finalization);
+      await expect(
+        depository.connect(left.signer).processBatch(final.encodedBatch, final.hankoData, final.nonce)
+      ).to.be.revertedWithCustomError(depository, "E9");
+    }
+
+    {
+      const { depository, left, right, initialNonce, initialProofbodyHash } = await setupStartedDispute();
+      const finalNonce = 2n;
+      const finalProofbody = proofBody([], []);
+      const finalProofbodyHash = proofBodyHash(finalProofbody);
+      const finalHash = await disputeProofHash(
+        depository,
+        await accountKeyFor(depository, left.entityId, right.entityId),
+        finalNonce,
+        finalProofbodyHash,
+      );
+      const finalization = {
+        counterentity: right.entityId,
+        initialNonce,
+        finalNonce,
+        initialProofbodyHash,
+        finalProofbody,
+        leftArguments: starterIncrementedArguments,
+        rightArguments: "0x",
+        starterInitialArguments,
+        starterIncrementedArguments,
+        sig: signEntityHash(right.entityId, finalHash, right.privateKey),
+        startedByLeft: true,
+        disputeUntilBlock: 0,
+        cooperative: false,
+      };
+      const final = await signFinalBatch(depository, left, finalization);
+      await depository.connect(left.signer).processBatch(final.encodedBatch, final.hankoData, final.nonce);
+      expect((await depository._accounts(await accountKeyFor(depository, left.entityId, right.entityId))).nonce)
+        .to.equal(finalNonce);
+    }
+
+    {
+      const { depository, left, right, initialNonce, initialProofbodyHash } = await setupStartedDispute();
+      const finalNonce = 2n;
+      const finalProofbody = proofBody([], []);
+      const finalProofbodyHash = proofBodyHash(finalProofbody);
+      const finalHash = await disputeProofHash(
+        depository,
+        await accountKeyFor(depository, left.entityId, right.entityId),
+        finalNonce,
+        finalProofbodyHash,
+      );
+      const finalization = {
+        counterentity: right.entityId,
+        initialNonce,
+        finalNonce,
+        initialProofbodyHash,
+        finalProofbody,
+        leftArguments: starterInitialArguments,
+        rightArguments: "0x",
+        starterInitialArguments,
+        starterIncrementedArguments,
+        sig: signEntityHash(right.entityId, finalHash, right.privateKey),
+        startedByLeft: true,
+        disputeUntilBlock: 0,
+        cooperative: false,
+      };
+      const final = await signFinalBatch(depository, left, finalization);
+      await expect(
+        depository.connect(left.signer).processBatch(final.encodedBatch, final.hankoData, final.nonce)
+      ).to.be.revertedWithCustomError(depository, "E9");
+    }
   });
 
   it("allows a designated tower to submit a delayed last-resort counter-dispute", async function () {
@@ -908,7 +1116,7 @@ describe("Depository", function () {
     const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
     const initialProofbody = proofBody([0n], [tokenId]);
     const initialProofbodyHash = proofBodyHash(initialProofbody);
-    const initialArguments = "0x";
+    const starterInitialArguments = "0x";
     const disputeNonce = 1n;
     const startHash = await disputeProofHash(depository, acctKey, disputeNonce, initialProofbodyHash);
     const startSig = signEntityHash(right.entityId, startHash, right.privateKey);
@@ -918,7 +1126,8 @@ describe("Depository", function () {
         nonce: disputeNonce,
         proofbodyHash: initialProofbodyHash,
         sig: startSig,
-        initialArguments,
+        starterInitialArguments: starterInitialArguments,
+        starterIncrementedArguments: "0x",
       }],
     });
     const start = await signDepositoryBatch(depository, left.entityId, left.privateKey, startBatch);
@@ -946,8 +1155,10 @@ describe("Depository", function () {
       finalNonce,
       initialProofbodyHash,
       finalProofbody,
-      finalArguments: "0x",
-      initialArguments,
+      leftArguments: "0x",
+      rightArguments: "0x",
+      starterInitialArguments: starterInitialArguments,
+      starterIncrementedArguments: "0x",
       sig: finalSig,
       startedByLeft: true,
       disputeUntilBlock: 0,
@@ -1010,8 +1221,10 @@ describe("Depository", function () {
       finalNonce,
       initialProofbodyHash: proofBodyHash(proofBody([0n], [tokenId])),
       finalProofbody,
-      finalArguments: "0x",
-      initialArguments: "0x",
+      leftArguments: "0x",
+      rightArguments: "0x",
+      starterInitialArguments: "0x",
+      starterIncrementedArguments: "0x",
       sig: signEntityHash(
         right.entityId,
         await disputeProofHash(
@@ -1076,7 +1289,7 @@ describe("Depository", function () {
     const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
     const initialProofbody = proofBody([0n], [tokenId]);
     const initialProofbodyHash = proofBodyHash(initialProofbody);
-    const initialArguments = "0x";
+    const starterInitialArguments = "0x";
     const disputeNonce = 1n;
     const startHash = await disputeProofHash(depository, acctKey, disputeNonce, initialProofbodyHash);
     const startSig = signEntityHash(right.entityId, startHash, right.privateKey);
@@ -1086,7 +1299,8 @@ describe("Depository", function () {
         nonce: disputeNonce,
         proofbodyHash: initialProofbodyHash,
         sig: startSig,
-        initialArguments,
+        starterInitialArguments: starterInitialArguments,
+        starterIncrementedArguments: "0x",
       }],
     });
     const start = await signDepositoryBatch(depository, left.entityId, left.privateKey, startBatch);
@@ -1114,8 +1328,10 @@ describe("Depository", function () {
       finalNonce,
       initialProofbodyHash,
       finalProofbody,
-      finalArguments: "0x",
-      initialArguments,
+      leftArguments: "0x",
+      rightArguments: "0x",
+      starterInitialArguments: starterInitialArguments,
+      starterIncrementedArguments: "0x",
       sig: finalSig,
       startedByLeft: true,
       disputeUntilBlock: 0,
@@ -1215,43 +1431,46 @@ describe("Depository", function () {
     );
     const proofbodyHash = proofBodyHash(proofbody);
     const rightTransformerArgs = encodeDeltaTransformerArguments([], [], [encodePartialPullBinary(fillRatio, pullProof.reveals)]);
-    const initialArguments = abi.encode(["bytes[]"], [[rightTransformerArgs]]);
+    const starterInitialArguments = abi.encode(["bytes[]"], [[rightTransformerArgs]]);
     const disputeNonce = 1n;
     const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
     const startHash = await disputeProofHash(depository, acctKey, disputeNonce, proofbodyHash);
-    const startSig = signEntityHash(right.entityId, startHash, right.privateKey);
+    const startSig = signEntityHash(left.entityId, startHash, left.privateKey);
     const startBatch = emptyBatch({
       disputeStarts: [{
-        counterentity: right.entityId,
+        counterentity: left.entityId,
         nonce: disputeNonce,
         proofbodyHash,
         sig: startSig,
-        initialArguments,
+        starterInitialArguments: starterInitialArguments,
+        starterIncrementedArguments: "0x",
       }],
     });
-    const start = await signDepositoryBatch(depository, left.entityId, left.privateKey, startBatch);
-    await depository.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
+    const start = await signDepositoryBatch(depository, right.entityId, right.privateKey, startBatch);
+    await depository.connect(right.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
 
     const startedAccount = await depository._accounts(acctKey);
     expect(startedAccount.disputeStartTimestamp).to.be.lessThanOrEqual(BigInt(revealDeadline));
     await mine(Number(await depository.defaultDisputeDelay()));
 
     const finalization = {
-      counterentity: right.entityId,
+      counterentity: left.entityId,
       initialNonce: disputeNonce,
       finalNonce: disputeNonce,
       initialProofbodyHash: proofbodyHash,
       finalProofbody: proofbody,
-      finalArguments: "0x",
-      initialArguments,
+      leftArguments: "0x",
+      rightArguments: starterInitialArguments,
+      starterInitialArguments: starterInitialArguments,
+      starterIncrementedArguments: "0x",
       sig: "0x",
-      startedByLeft: true,
+      startedByLeft: false,
       disputeUntilBlock: 0,
       cooperative: false,
     };
     const finalBatch = emptyBatch({ disputeFinalizations: [finalization] });
-    const final = await signDepositoryBatch(depository, left.entityId, left.privateKey, finalBatch);
-    await depository.connect(left.signer).processBatch(final.encodedBatch, final.hankoData, final.nonce);
+    const final = await signDepositoryBatch(depository, right.entityId, right.privateKey, finalBatch);
+    await depository.connect(right.signer).processBatch(final.encodedBatch, final.hankoData, final.nonce);
 
     expect(await transformer.hashToBlock(hashNode(pullProof.reveals[3]))).to.equal(0n);
     expect(await depository._reserves(left.entityId, tokenB)).to.equal(1_000n - BigInt(fillRatio));
@@ -1283,7 +1502,7 @@ describe("Depository", function () {
     const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
     const initialProofbody = proofBody([0n], [tokenId]);
     const initialProofbodyHash = proofBodyHash(initialProofbody);
-    const initialArguments = "0x";
+    const starterInitialArguments = "0x";
     const disputeNonce = 1n;
     const startHash = await disputeProofHash(depository, acctKey, disputeNonce, initialProofbodyHash);
     const startSig = signEntityHash(right.entityId, startHash, right.privateKey);
@@ -1293,7 +1512,8 @@ describe("Depository", function () {
         nonce: disputeNonce,
         proofbodyHash: initialProofbodyHash,
         sig: startSig,
-        initialArguments,
+        starterInitialArguments: starterInitialArguments,
+        starterIncrementedArguments: "0x",
       }],
     });
     const start = await signDepositoryBatch(depository, left.entityId, left.privateKey, startBatch);
@@ -1310,8 +1530,10 @@ describe("Depository", function () {
         finalNonce,
         initialProofbodyHash,
         finalProofbody,
-        finalArguments: "0x",
-        initialArguments,
+        leftArguments: "0x",
+      rightArguments: "0x",
+      starterInitialArguments: starterInitialArguments,
+      starterIncrementedArguments: "0x",
         sig: finalSig,
         startedByLeft: true,
         disputeUntilBlock: 0,
@@ -1423,7 +1645,7 @@ describe("Depository", function () {
     const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
     const finalProofbody = proofBody([], []);
     const finalProofbodyHash = proofBodyHash(finalProofbody);
-    const initialArguments = "0x";
+    const starterInitialArguments = "0x";
     const disputeNonce = 1n;
 
     const startHash = await disputeProofHash(depository, acctKey, disputeNonce, finalProofbodyHash);
@@ -1434,7 +1656,8 @@ describe("Depository", function () {
         nonce: disputeNonce,
         proofbodyHash: finalProofbodyHash,
         sig: startSig,
-        initialArguments,
+        starterInitialArguments: starterInitialArguments,
+        starterIncrementedArguments: "0x",
       }],
     });
     const start = await signDepositoryBatch(depository, left.entityId, left.privateKey, startBatch);
@@ -1446,8 +1669,10 @@ describe("Depository", function () {
       finalNonce: disputeNonce,
       initialProofbodyHash: finalProofbodyHash,
       finalProofbody,
-      finalArguments: "0x",
-      initialArguments,
+      leftArguments: "0x",
+      rightArguments: "0x",
+      starterInitialArguments: starterInitialArguments,
+      starterIncrementedArguments: "0x",
       sig: "0x",
       startedByLeft: true,
       disputeUntilBlock: 0,
@@ -1522,8 +1747,10 @@ describe("Depository", function () {
         finalNonce,
         initialProofbodyHash: ethers.ZeroHash,
         finalProofbody,
-        finalArguments: "0x",
-        initialArguments: "0x",
+        leftArguments: "0x",
+      rightArguments: "0x",
+      starterInitialArguments: "0x",
+      starterIncrementedArguments: "0x",
         sig: cooperativeSig,
         startedByLeft: true,
         disputeUntilBlock: 0,

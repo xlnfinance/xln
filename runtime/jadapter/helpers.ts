@@ -20,7 +20,7 @@ import {
 // ═══════════════════════════════════════════════════════════════════════════
 export const CANONICAL_J_EVENTS = [
   'ReserveUpdated', 'SecretRevealed', 'AccountSettled',
-  'DisputeStarted', 'DisputeFinalized', 'DebtCreated', 'DebtEnforced', 'DebtForgiven', 'HankoBatchProcessed',
+  'DisputeStarted', 'DisputeStartedV2', 'DisputeFinalized', 'DebtCreated', 'DebtEnforced', 'DebtForgiven', 'HankoBatchProcessed',
 ] as const;
 export type CanonicalJEvent = (typeof CANONICAL_J_EVENTS)[number];
 const CANONICAL_J_EVENT_SET = new Set<string>(CANONICAL_J_EVENTS);
@@ -214,6 +214,7 @@ export function isEventRelevantToEntity(event: RawJEvent, entityId: string): boo
     }
 
     case 'DisputeStarted':
+    case 'DisputeStartedV2':
       return normalize(args['sender']) === normalizedEntity || normalize(args['counterentity']) === normalizedEntity;
 
     case 'DisputeFinalized':
@@ -309,6 +310,7 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Jurisdict
       }];
 
     case 'DisputeStarted':
+    case 'DisputeStartedV2':
       return [{
         type: 'DisputeStarted',
         data: {
@@ -316,7 +318,8 @@ export function rawEventToJEvents(event: RawJEvent, entityId: string): Jurisdict
           counterentity: String(args['counterentity'] ?? ''),
           nonce: String(args['nonce'] ?? ''),
           proofbodyHash: String(args['proofbodyHash'] ?? ''),
-          initialArguments: String(args['initialArguments'] ?? '0x'),
+          starterInitialArguments: String(args['starterInitialArguments'] ?? '0x'),
+          starterIncrementedArguments: String(args['starterIncrementedArguments'] ?? '0x'),
         },
       }];
 

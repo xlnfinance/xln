@@ -35,7 +35,14 @@ library Account {
   event ReserveUpdated(bytes32 indexed entity, uint indexed tokenId, uint newBalance);
 
   // ========== OTHER EVENTS ==========
-  event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint indexed nonce, bytes32 proofbodyHash, bytes initialArguments);
+  event DisputeStartedV2(
+    bytes32 indexed sender,
+    bytes32 indexed counterentity,
+    uint indexed nonce,
+    bytes32 proofbodyHash,
+    bytes starterInitialArguments,
+    bytes starterIncrementedArguments
+  );
   event DebtCreated(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amount, uint256 debtIndex);
   event DebtForgiven(bytes32 indexed debtor, bytes32 indexed creditor, uint256 indexed tokenId, uint256 amountForgiven, uint256 debtIndex);
 
@@ -65,16 +72,57 @@ library Account {
 
   function encodeDisputeHash(
     uint nonce, bool startedByLeft,
-    uint256 timeout, bytes32 proofbodyHash, bytes memory initialArguments
+    uint256 timeout,
+    bytes32 proofbodyHash,
+    bytes memory starterInitialArguments,
+    bytes memory starterIncrementedArguments
   ) external pure returns (bytes32) {
-    return keccak256(abi.encodePacked(nonce, startedByLeft, timeout, proofbodyHash, keccak256(abi.encodePacked(initialArguments))));
+    return _encodeDisputeHash(
+      nonce,
+      startedByLeft,
+      timeout,
+      proofbodyHash,
+      starterInitialArguments,
+      starterIncrementedArguments
+    );
   }
 
   function _encodeDisputeHash(
     uint nonce, bool startedByLeft,
-    uint256 timeout, bytes32 proofbodyHash, bytes memory initialArguments
+    uint256 timeout,
+    bytes32 proofbodyHash,
+    bytes memory starterInitialArguments,
+    bytes memory starterIncrementedArguments
   ) internal pure returns (bytes32) {
-    return keccak256(abi.encodePacked(nonce, startedByLeft, timeout, proofbodyHash, keccak256(abi.encodePacked(initialArguments))));
+    // V2 dispute binding:
+    // - proofbodyHash binds the signed state at nonce N.
+    // - starterInitialArguments binds the starter's calldata for N.
+    // - starterIncrementedArguments binds the starter's calldata for one
+    //   already-signed newer proof that the counterparty may reveal.
+    // This avoids a second dispute round while preventing live-state argument
+    // rebuilding from being paired with an older proof body.
+    return keccak256(abi.encodePacked(
+      nonce,
+      startedByLeft,
+      timeout,
+      proofbodyHash,
+      keccak256(starterInitialArguments),
+      keccak256(starterIncrementedArguments)
+    ));
+  }
+
+  function requireStarterArguments(
+    bool startedByLeft,
+    bytes memory leftArguments,
+    bytes memory rightArguments,
+    bytes memory expectedStarterArguments
+  ) external pure {
+    // Finalization uses explicit left/right calldata. The starter side must
+    // equal the blob committed at disputeStart; only the non-starter side is
+    // free to provide fresh evidence at finalize time.
+    bytes32 expected = keccak256(expectedStarterArguments);
+    bytes32 actual = startedByLeft ? keccak256(leftArguments) : keccak256(rightArguments);
+    if (actual != expected) revert E9();
   }
 
   function computeBatchHankoHash(bytes32 domainSep, uint256 chainId, address depository, bytes memory encodedBatch, uint256 nonce) external pure returns (bytes32) {
@@ -121,11 +169,11 @@ library Account {
     bytes memory acct_key,
     uint nonce,
     bytes32 proofbodyHash,
-    bytes32 initialArgumentsHash,
+    bytes32 starterInitialArgumentsHash,
     bytes memory hanko,
     bytes32 expectedEntity
   ) external returns (bool success) {
-    bytes memory encoded_msg = abi.encode(MessageType.CooperativeDisputeProof, depository, acct_key, nonce, proofbodyHash, initialArgumentsHash);
+    bytes memory encoded_msg = abi.encode(MessageType.CooperativeDisputeProof, depository, acct_key, nonce, proofbodyHash, starterInitialArgumentsHash);
     bytes32 hash = keccak256(encoded_msg);
     (bytes32 recoveredEntity, bool valid) = IEntityProvider(entityProvider).verifyHankoSignature(hanko, hash);
     return valid && recoveredEntity == expectedEntity;
@@ -399,9 +447,14 @@ library Account {
     if (_accounts[acct_key].disputeHash != bytes32(0)) revert E6();
 
     uint256 timeout = block.number + defaultDelay;
+    // Store only the V2 hash, not raw proof bodies. Both starter argument
+    // blobs are emitted for observers and repeated at finalize for hash check.
     _accounts[acct_key].disputeHash = _encodeDisputeHash(
       params.nonce, entityId < params.counterentity,
-      timeout, params.proofbodyHash, params.initialArguments
+      timeout,
+      params.proofbodyHash,
+      params.starterInitialArguments,
+      params.starterIncrementedArguments
     );
     _accounts[acct_key].disputeTimeout = timeout;
     _accounts[acct_key].disputeStartTimestamp = block.timestamp;
@@ -409,7 +462,14 @@ library Account {
     // SET nonce = signedNonce (any settlement signed at ≤ this nonce is now dead)
     _accounts[acct_key].nonce = params.nonce;
 
-    emit DisputeStarted(entityId, params.counterentity, params.nonce, params.proofbodyHash, params.initialArguments);
+    emit DisputeStartedV2(
+      entityId,
+      params.counterentity,
+      params.nonce,
+      params.proofbodyHash,
+      params.starterInitialArguments,
+      params.starterIncrementedArguments
+    );
     return true;
   }
 

@@ -1175,8 +1175,9 @@ export async function swapWithOrderbook(env: Env): Promise<Env> {
 
   const [, hubBeforeBroadcast] = findReplica(env, hub.id);
   const finalProof = hubBeforeBroadcast.state.jBatchState?.batch.disputeFinalizations?.[0];
-  const finalArgs = finalProof?.finalArguments || '0x';
-  assert(finalArgs !== '0x', 'Dispute finalArguments encoded');
+  const hubIsLeft = hubAccountAfterStart.leftEntity === hub.id;
+  const finalArgs = (hubIsLeft ? finalProof?.leftArguments : finalProof?.rightArguments) || '0x';
+  assert(finalArgs !== '0x', 'Dispute caller-side arguments encoded');
 
   const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   const [argArray] = abiCoder.decode(['bytes[]'], finalArgs) as unknown as [string[]];
