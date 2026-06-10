@@ -943,6 +943,7 @@ export async function handleAccountInput(
         ackProofResult.proofBodyHash,
         ackSignedNonce,
         ackProofResult.proofBodyStruct,
+        { appliedAccountTxs: receivedFrame.accountTxs },
       ),
     );
 

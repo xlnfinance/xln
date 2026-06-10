@@ -14,7 +14,7 @@
  */
 
 import { ethers } from 'ethers';
-import type { EntityState, EntityTx, EntityInput, Env, AccountMachine } from '../../types';
+import type { EntityState, EntityTx, EntityInput, Env, AccountMachine, SwapOffer } from '../../types';
 import type { ProofBodyStruct } from '../../../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { isUsableContractAddress } from '../../contract-address';
 import { cloneEntityState, addMessage } from '../../state-helpers';
@@ -32,6 +32,9 @@ import {
   requireDisputeArgumentSnapshot,
   type DisputeArgumentSide,
 } from '../../dispute-arguments';
+import { removeBookOrderById } from '../../orderbook/cross-j';
+import { swapKey } from '../../swap-keys';
+import { crossJurisdictionBookOwnerRef } from '../../cross-jurisdiction-orderbook';
 
 const isProofBodyStruct = (value: unknown): value is ProofBodyStruct => {
   if (!value || typeof value !== 'object') return false;
@@ -209,6 +212,86 @@ function hasQueuedDisputeFinalize(state: EntityState, counterpartyEntityId: stri
   );
 }
 
+const firstSignerForEntity = (env: Env, entityId: string): string | null => {
+  for (const replica of env.eReplicas.values()) {
+    if (String(replica.state.entityId).toLowerCase() !== String(entityId).toLowerCase()) continue;
+    return replica.state.config.validators[0] ?? null;
+  }
+  return null;
+};
+
+const removeOrderbookRowForDispute = (
+  env: Env,
+  state: EntityState,
+  outputs: EntityInput[],
+  counterpartyEntityId: string,
+  offerId: string,
+  offer: SwapOffer,
+): { localRemoved: boolean; remoteQueued: boolean } => {
+  // Starting a dispute freezes account consensus. Any resting order from that
+  // account must stop being matchable before the dispute batch is broadcast:
+  // post-dispute fills would target an account state that can no longer ACK.
+  if (!offer.crossJurisdiction) {
+    return {
+      localRemoved: removeBookOrderById(env, state, swapKey(counterpartyEntityId, offerId)),
+      remoteQueued: false,
+    };
+  }
+
+  const route = offer.crossJurisdiction;
+  const bookOwnerEntityId = crossJurisdictionBookOwnerRef(route);
+  const sourceEntityId = route.source.entityId;
+  if (bookOwnerEntityId === String(state.entityId).toLowerCase()) {
+    return {
+      localRemoved: removeBookOrderById(env, state, swapKey(sourceEntityId, offerId)),
+      remoteQueued: false,
+    };
+  }
+
+  const signerId = firstSignerForEntity(env, bookOwnerEntityId);
+  if (!signerId) {
+    throw new Error(
+      `DISPUTE_CROSS_J_BOOK_OWNER_MISSING: order=${offerId} owner=${bookOwnerEntityId} source=${sourceEntityId}`,
+    );
+  }
+  outputs.push({
+    entityId: bookOwnerEntityId,
+    signerId,
+    entityTxs: [{
+      type: 'removeCrossJurisdictionBookOrder',
+      data: {
+        orderId: offerId,
+        sourceEntityId,
+        route,
+        reason: 'account_dispute_start',
+      },
+    }],
+  });
+  return { localRemoved: false, remoteQueued: true };
+};
+
+const removeDisputedAccountOrdersFromBook = (
+  env: Env,
+  state: EntityState,
+  outputs: EntityInput[],
+  counterpartyEntityId: string,
+  account: AccountMachine,
+): void => {
+  let localRemoved = 0;
+  let remoteQueued = 0;
+  for (const [offerId, offer] of account.swapOffers ?? new Map<string, SwapOffer>()) {
+    const result = removeOrderbookRowForDispute(env, state, outputs, counterpartyEntityId, offerId, offer);
+    if (result.localRemoved) localRemoved++;
+    if (result.remoteQueued) remoteQueued++;
+  }
+  if (localRemoved > 0 || remoteQueued > 0) {
+    addMessage(
+      state,
+      `⚔️ Dispute removed ${localRemoved} local orderbook row(s), queued ${remoteQueued} remote row removal(s)`,
+    );
+  }
+};
+
 /**
  * Handle disputeStart - Entity initiates dispute with signed proof
  */
@@ -262,6 +345,8 @@ export async function handleDisputeStart(
     );
     return { newState, outputs };
   }
+
+  removeDisputedAccountOrdersFromBook(env, newState, outputs, counterpartyEntityId, account);
 
   const targetCrossRiskAmount = targetCrossPullRiskAmount(newState, counterpartyEntityId, account);
   const explicitStarterPullArgs = hasNonZeroPullArgument(overrideInitialArguments);

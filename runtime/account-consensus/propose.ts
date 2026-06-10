@@ -360,6 +360,7 @@ export async function proposeAccountFrame(
       proofResult.proofBodyHash,
       clonedMachine.proofHeader.nonce,
       proofResult.proofBodyStruct,
+      { appliedAccountTxs: validTxs },
     ),
   );
 

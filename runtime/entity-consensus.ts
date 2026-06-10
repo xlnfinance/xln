@@ -172,6 +172,7 @@ const admitOrderbookOfferForMatching = (
       throw new Error(`CROSS_J_ORDERBOOK_ROUTE_NOT_WORKING: offer=${offer.offerId} status=${crossStatus}`);
     }
     const account = findAccountByCounterparty(state, offer.accountId);
+    if ((account?.status ?? 'active') !== 'active') return null;
     if (account?.swapOffers?.has(offer.offerId)) {
       assertCommittedSwapOfferMatchesEvent(state, offer);
     }
@@ -194,6 +195,7 @@ const admitOrderbookOfferForMatching = (
     }
   } else {
     const account = assertCommittedSwapOfferMatchesEvent(state, offer);
+    if ((account.status ?? 'active') !== 'active') return null;
     assertSameJurisdictionOrderHoldCommitted(account, offer);
   }
   return markWorkingOrderbookOffer(offer);
