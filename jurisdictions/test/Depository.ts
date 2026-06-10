@@ -1089,6 +1089,85 @@ describe("Depository", function () {
     }
   });
 
+  it("treats malformed dispute argument wrappers as empty evidence", async function () {
+    const { depository } = await loadFixture(deployFixture);
+    const DeltaTransformer = await ethers.getContractFactory("DeltaTransformer");
+    const transformer = await DeltaTransformer.deploy();
+    await transformer.waitForDeployment();
+
+    const [left, right] = orderedActors(lazyActor(user0, 0), lazyActor(user1, 1));
+    const encodedSwapBatch = await transformer.encodeBatch({
+      payment: [],
+      swap: [{
+        ownerIsLeft: false,
+        addDeltaIndex: 0,
+        addAmount: 100n,
+        subDeltaIndex: 1,
+        subAmount: 100n,
+      }],
+      pull: [],
+    });
+    const proofbody = proofBody(
+      [0n, 0n],
+      [1n, 2n],
+      [{
+        transformerAddress: await transformer.getAddress(),
+        encodedBatch: encodedSwapBatch,
+        allowances: [
+          { deltaIndex: 0n, rightAllowance: 0n, leftAllowance: 100n },
+          { deltaIndex: 1n, rightAllowance: 100n, leftAllowance: 0n },
+        ],
+      }],
+    );
+    const proofbodyHash = proofBodyHash(proofbody);
+    const starterInitialArguments = "0x1234";
+    const disputeNonce = 1n;
+    const acctKey = await accountKeyFor(depository, left.entityId, right.entityId);
+    const startHash = await disputeProofHash(depository, acctKey, disputeNonce, proofbodyHash);
+    const startSig = signEntityHash(right.entityId, startHash, right.privateKey);
+    const startBatch = emptyBatch({
+      disputeStarts: [{
+        counterentity: right.entityId,
+        nonce: disputeNonce,
+        proofbodyHash,
+        sig: startSig,
+        starterInitialArguments,
+        starterIncrementedArguments: "0x",
+      }],
+    });
+    const start = await signDepositoryBatch(depository, left.entityId, left.privateKey, startBatch);
+    await depository.connect(left.signer).processBatch(start.encodedBatch, start.hankoData, start.nonce);
+    await mine(Number(await depository.defaultDisputeDelay()));
+
+    const finalization = {
+      counterentity: right.entityId,
+      initialNonce: disputeNonce,
+      finalNonce: disputeNonce,
+      initialProofbodyHash: proofbodyHash,
+      finalProofbody: proofbody,
+      leftArguments: starterInitialArguments,
+      rightArguments: "0x",
+      starterInitialArguments,
+      starterIncrementedArguments: "0x",
+      sig: "0x",
+      startedByLeft: true,
+      disputeUntilBlock: 0,
+      cooperative: false,
+    };
+    const final = await signDepositoryBatch(
+      depository,
+      left.entityId,
+      left.privateKey,
+      emptyBatch({ disputeFinalizations: [finalization] }),
+    );
+
+    await expect(depository.connect(left.signer).processBatch(final.encodedBatch, final.hankoData, final.nonce))
+      .to.emit(depository, "DisputeFinalized");
+    expect((await depository._accounts(acctKey)).disputeHash).to.equal(ethers.ZeroHash);
+    expect(await depository._reserves(left.entityId, 1n)).to.equal(0n);
+    expect(await depository._reserves(right.entityId, 2n)).to.equal(0n);
+  });
+
   it("allows a designated tower to submit a delayed last-resort counter-dispute", async function () {
     const { depository } = await loadFixture(deployFixture);
     const [, , tower] = await hre.ethers.getSigners();

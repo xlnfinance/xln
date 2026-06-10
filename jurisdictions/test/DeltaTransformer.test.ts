@@ -187,6 +187,30 @@ describe("DeltaTransformer", function () {
     expect(result[1]).to.equal(-999);
   });
 
+  it("treats malformed adversarial argument blobs as empty evidence", async function () {
+    const { transformer } = await loadFixture(deployFixture);
+
+    const batch = {
+      payment: [],
+      swap: [
+        {
+          ownerIsLeft: true,
+          addDeltaIndex: 0,
+          addAmount: 1_000,
+          subDeltaIndex: 1,
+          subAmount: 2_000,
+        },
+      ],
+      pull: [],
+    };
+    const encodedBatch = await transformer.encodeBatch(batch);
+
+    const result = await transformer.applyBatch.staticCall([0, 0], encodedBatch, "0x", "0x1234");
+
+    expect(result[0]).to.equal(0);
+    expect(result[1]).to.equal(0);
+  });
+
   it("reverts on out-of-bounds swap delta indices", async function () {
     const { transformer } = await loadFixture(deployFixture);
 

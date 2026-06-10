@@ -139,7 +139,8 @@ function hasNonZeroPullArgument(starterInitialArguments?: string): boolean {
         try {
           if (decodeHashLadderBinary(binary).fillRatio > 0) return true;
         } catch {
-          // Ignore malformed pull arguments here; the transformer will reject them later.
+          // Malformed pull evidence proves nothing. This mirrors the Solidity
+          // no-op rule and avoids treating attacker garbage as target safety.
         }
       }
     } catch {
@@ -231,6 +232,12 @@ const removeOrderbookRowForDispute = (
   // Starting a dispute freezes account consensus. Any resting order from that
   // account must stop being matchable before the dispute batch is broadcast:
   // post-dispute fills would target an account state that can no longer ACK.
+  //
+  // Same-j rows live in this entity's book, so they are removed directly.
+  // Cross-j rows may live in the deterministic book-owner entity; in that case
+  // we queue an explicit removal. Do not "rehydrate" or resize cross-j rows
+  // during dispute: either the row is fully matchable before dispute, or it is
+  // removed forever because the underlying account is no longer live.
   if (!offer.crossJurisdiction) {
     return {
       localRemoved: removeBookOrderById(env, state, swapKey(counterpartyEntityId, offerId)),
@@ -472,15 +479,17 @@ export async function handleDisputeStart(
   }
 
   // Single-round dispute safety:
-  // The starter can precommit args for the initial proof and for at most one
-  // already-signed incremented proof. More candidates would require a larger
-  // bundle design; guessing would let positional swap/pull args drift.
+  // In normal sequential account consensus there is only one next signed proof:
+  // nonce N+1. If we see multiple local newer snapshots, that is not a protocol
+  // feature to encode into Solidity; it is corrupted local/recovered state.
+  // Fail fast instead of guessing which positional swap/pull arguments belong
+  // to which proof body.
   const localCounterCandidates = Object.values(account.disputeArgumentSnapshotsByHash ?? {})
     .filter((snapshot) => snapshot.side === starterSide && snapshot.nonce > signedNonce)
     .sort((left, right) => left.nonce - right.nonce);
   if (localCounterCandidates.length > 1) {
     throw new Error(
-      `DISPUTE_START_AMBIGUOUS_INCREMENTED_ARGUMENTS:${counterpartyEntityId}:${localCounterCandidates.map((s) => `${s.nonce}:${s.proofbodyHash}`).join(',')}`,
+      `DISPUTE_START_IMPOSSIBLE_MULTIPLE_INCREMENTED_SNAPSHOTS:${counterpartyEntityId}:${localCounterCandidates.map((s) => `${s.nonce}:${s.proofbodyHash}`).join(',')}`,
     );
   }
   const starterIncrementedArguments = localCounterCandidates.length === 1
@@ -499,12 +508,22 @@ export async function handleDisputeStart(
 
   const depositoryAddress = resolveDepositoryAddress(entityState);
   if (depositoryAddress) {
-    const exactDisputeHash =
-      storedDisputeHash && storedDisputeHash.startsWith('0x')
-        ? storedDisputeHash
-        : createDisputeProofHashWithNonce(account, proofBodyHashToUse, depositoryAddress, signedNonce);
-    const disputeHashSource =
-      storedDisputeHash && storedDisputeHash.startsWith('0x') ? 'stored' : 'recomputed';
+    const exactDisputeHash = createDisputeProofHashWithNonce(
+      account,
+      proofBodyHashToUse,
+      depositoryAddress,
+      signedNonce,
+    );
+    if (
+      storedDisputeHash &&
+      storedDisputeHash.startsWith('0x') &&
+      storedDisputeHash.toLowerCase() !== exactDisputeHash.toLowerCase()
+    ) {
+      throw new Error(
+        `DISPUTE_STORED_HASH_MISMATCH:${counterpartyEntityId}:${storedDisputeHash}:${exactDisputeHash}`,
+      );
+    }
+    const disputeHashSource = storedDisputeHash ? 'stored+recomputed' : 'recomputed';
     const hankoDebug = await inspectHankoForHash(counterpartyDisputeHanko, exactDisputeHash);
     const matchingClaim = hankoDebug.claims.find(
       (claim) => String(claim.entityId).toLowerCase() === String(counterpartyEntityId).toLowerCase(),

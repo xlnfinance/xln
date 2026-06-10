@@ -104,6 +104,8 @@ contract DeltaTransformer {
     uint leftArgumentsTimestamp,
     uint rightArgumentsTimestamp
   ) private view returns (int[] memory) {
+    // `encodedBatch` is part of the signed ProofBody. If it is malformed, the
+    // signed state itself is invalid and the dispute must fail loudly.
     Batch memory decodedBatch = abi.decode(encodedBatch, (Batch));
 
     Arguments memory left = _decodeArguments(leftArguments);
@@ -118,7 +120,11 @@ contract DeltaTransformer {
     for (uint i = 0; i < decodedBatch.swap.length; i++) {
       Swap memory swap = decodedBatch.swap[i];
 
-      // Counterparty chooses fill ratio (maker doesn't).
+      // Counterparty chooses fill ratio; the maker cannot fill its own order in
+      // dispute calldata. A malformed/missing counterparty argument is simply a
+      // 0% fill, not a revert. Otherwise an adversary could send garbage args
+      // and block the honest side from finalizing any other claim in the same
+      // account dispute.
       // Left-owned swap -> use right arguments; Right-owned swap -> use left arguments.
       uint16 fillRatio = 0;
       if (swap.ownerIsLeft) {
@@ -140,6 +146,8 @@ contract DeltaTransformer {
 
       // Pull args must come from the beneficiary side:
       // positive amount credits left; negative amount credits right.
+      // Invalid pull evidence is treated as no reveal. This is intentional:
+      // arguments are adversarial evidence, while ProofBody is signed state.
       if (pull.amount >= 0) {
         bytes memory pullArg = leftPulls < left.pulls.length ? left.pulls[leftPulls] : bytes("");
         applyPull(deltas, pull, pullArg, leftArgumentsTimestamp);
@@ -154,14 +162,32 @@ contract DeltaTransformer {
     return deltas;
   }
 
-  function _decodeArguments(bytes calldata encoded) private pure returns (Arguments memory args) {
-    if (encoded.length == 0) {
-      args.fillRatios = new uint16[](0);
-      args.secrets = new bytes32[](0);
-      args.pulls = new bytes[](0);
-      return args;
-    }
+  function decodeArgumentsStrict(bytes calldata encoded) external pure returns (Arguments memory) {
     return abi.decode(encoded, (Arguments));
+  }
+
+  function _emptyArguments() private pure returns (Arguments memory args) {
+    args.fillRatios = new uint16[](0);
+    args.secrets = new bytes32[](0);
+    args.pulls = new bytes[](0);
+    return args;
+  }
+
+  function _decodeArguments(bytes calldata encoded) private view returns (Arguments memory args) {
+    if (encoded.length == 0) {
+      return _emptyArguments();
+    }
+
+    // Dispute arguments are not trusted. They may be supplied by the party who
+    // benefits from blocking finalization, so malformed evidence must degrade
+    // to "no evidence". We deliberately use an external self-call because a
+    // direct abi.decode revert cannot be caught inside Solidity. This keeps the
+    // contract strict for signed ProofBody data and soft for adversarial args.
+    try this.decodeArgumentsStrict(encoded) returns (Arguments memory decoded) {
+      return decoded;
+    } catch {
+      return _emptyArguments();
+    }
   }
 
   function applyPayment(
@@ -172,7 +198,10 @@ contract DeltaTransformer {
     uint leftArgumentsTimestamp,
     uint rightArgumentsTimestamp
   ) private view {
-    // Apply amount when the hash was revealed on chain or supplied in settlement calldata.
+    // Apply amount when the hash was revealed on chain or supplied in dispute
+    // calldata before the side-specific argument timestamp. Argument timestamps
+    // matter because the starter's evidence is frozen at disputeStart while the
+    // finalizer's evidence is fresh at finalize time.
     uint revealedAt = hashToTimestamp[payment.hash];
     bool revealed = false;
     if (revealedAt != 0 && revealedAt <= payment.revealedUntilTimestamp) {

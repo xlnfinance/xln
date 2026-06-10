@@ -18,6 +18,9 @@ export type DisputeArgumentPlan = {
 };
 
 export type DisputeArgumentSnapshot = {
+  // Arguments are positional calldata for the transformer inside one exact
+  // proof body. The runtime may delete terminal swaps/pulls later; never rebuild
+  // this plan from live Maps for an older proofbodyHash.
   proofbodyHash: string;
   nonce: number;
   side: DisputeArgumentSide;
@@ -67,6 +70,11 @@ const swapFillFingerprint = (tx: Extract<AccountTx, { type: 'swap_resolve' }>): 
   // building dispute calldata later, the same pending frame may still be
   // present locally; matching by the economic payload prevents that fill from
   // being applied twice to the proof's remaining swap slot.
+  //
+  // Counterexample: hub sends 50%, then later signs a state where total progress
+  // is 75%, while the user is offline. If the 50% tx remains in pendingFrame and
+  // we blindly rebuild args, the 75% proof would receive the 50% residual again.
+  // The contract would see valid calldata, but it would settle the wrong amount.
   return [
     data.offerId,
     data.fillRatio,
@@ -103,6 +111,9 @@ const buildPendingSwapFillRatios = (
     if (alreadyApplied.has(swapFillFingerprint(tx))) continue;
     const offerId = asOfferId(tx.data.offerId);
     if (ratios.has(offerId)) {
+      // Two unresolved fills for the same positional offer are ambiguous. Do
+      // not guess "last wins": a dispute argument must correspond to one exact
+      // signed proof body, or we fail before producing unsafe calldata.
       throw new Error(`DISPUTE_ARGUMENT_SWAP_FILL_AMBIGUOUS:${tx.data.offerId}`);
     }
     ratios.set(offerId, tx.data.fillRatio);
@@ -148,6 +159,10 @@ const buildPullBuckets = (pullIds: string[], resolves: Map<string, string>): Pul
     try {
       binaries.push(decodeHashLadderBinary(binary).fillRatio > 0 ? binary : '0x');
     } catch {
+      // Pull arguments are adversarial evidence. Bad reveal bytes are not an
+      // account-state error; they simply prove nothing. This mirrors Solidity:
+      // malformed args must not prevent the honest side from finalizing the rest
+      // of the dispute.
       binaries.push('0x');
     }
   }
@@ -172,6 +187,13 @@ export function captureDisputeArgumentSnapshot(
   // Capture the positional argument plan at the same moment the proof body is
   // signed. Later dispute code must follow this plan; current account maps may
   // have deleted or reordered swaps/pulls by then.
+  //
+  // We keep runtime IDs only in this off-chain snapshot. Solidity receives
+  // compact positional arrays because pushing offerId/pullId strings into the
+  // jurisdiction would burn gas and freeze runtime bookkeeping into the ABI.
+  //
+  // Cross-j offers are intentionally excluded here: their safety is represented
+  // by pull hash-ladders and route-level receipts, not same-j swap fill ratios.
   const paymentHashlocks = sortTransformerEntries((account.locks ?? new Map()).entries())
     .map(([, lock]) => String(lock.hashlock));
   const leftSwapOfferIds: string[] = [];
@@ -225,6 +247,10 @@ export function buildDisputeArgumentsForSnapshot(
   // Fail closed when the exact signed proof body has no argument snapshot. A
   // live rebuild would be a rehydration bug and can pair wrong positional
   // swap/pull arguments with an old proof body.
+  //
+  // This fail-fast rule is runtime-local. Once bytes reach Solidity they are
+  // treated as adversarial optional evidence: malformed argument blobs become
+  // empty/no-op so the sender cannot block finalization of unrelated claims.
   const snapshot = requireDisputeArgumentSnapshot(account, proofbodyHash, 'build');
   const fillRatios = buildPendingSwapFillRatios(
     account,

@@ -183,6 +183,8 @@ xln.formatEntity(xln.getEnv().eReplicas.values().next().value.state)
 - lowercase .md filenames (next.md, readme.md)
 - "xln" lowercase always, never "XLN"
 - Debug with ASCII (quick scan) + JSON (deep analysis) - both auto-dumped on scenario completion
+- Security-critical code needs rich comments with counterexamples: explain why the design rejects tempting alternatives, especially for dispute arguments, cross-j orderbook lifecycle, and adversarial inputs.
+- Dispute transformer arguments are adversarial optional evidence: malformed args soft-fail to empty/no-op; signed ProofBody, nonces, hashes, and account state stay fail-fast.
 ## 🔍 EXTERNAL AUDIT RULE
 
 **Never blindly trust subagent or external audit findings.**

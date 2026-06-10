@@ -1816,6 +1816,74 @@ describe('audit fail-fast regressions', () => {
     expect(receiverAccount.deltas.get(1)?.leftCreditLimit ?? 0n).toBe(0n);
   });
 
+  test('handleAccountInput rejects dispute seal hash mismatch before committing frame', async () => {
+    const seed = 'account-frame-poisoned-dispute-seal';
+    const env = createEmptyEnv(seed);
+    env.quietRuntimeLogs = true;
+    env.timestamp = 10_000;
+    env.browserVM = {
+      getDepositoryAddress: () => hex20('dd'),
+    } as typeof env.browserVM;
+
+    const first = registerLazySigner(seed, '1');
+    const second = registerLazySigner(seed, '2');
+    const left = isLeftEntity(first.entityId, second.entityId) ? first : second;
+    const right = left === first ? second : first;
+    attachSigningReplica(env, left.entityId, left.signerId);
+    attachSigningReplica(env, right.entityId, right.signerId);
+
+    const receiverAccount = makeProposalAccount([], left.entityId, right.entityId);
+    receiverAccount.proofHeader = { fromEntity: right.entityId, toEntity: left.entityId, nonce: 0 };
+    const tx: AccountTx = {
+      type: 'set_credit_limit',
+      data: { tokenId: 1, amount: 100n },
+    };
+    const frame = {
+      height: 1,
+      timestamp: env.timestamp,
+      jHeight: 0,
+      accountTxs: [tx],
+      prevFrameHash: 'genesis',
+      stateHash: '',
+      byLeft: true,
+      deltas: [{
+        tokenId: 1,
+        collateral: 0n,
+        ondelta: 0n,
+        offdelta: 0n,
+        leftCreditLimit: 100n,
+        rightCreditLimit: 0n,
+        leftAllowance: 0n,
+        rightAllowance: 0n,
+        leftHold: 0n,
+        rightHold: 0n,
+      }],
+    };
+    frame.stateHash = await createFrameHash(frame);
+    const [newHanko] = await signEntityHashes(env, left.entityId, left.signerId, [frame.stateHash]);
+    const poisonedHash = `0x${'ab'.repeat(32)}`;
+    const [newDisputeHanko] = await signEntityHashes(env, left.entityId, left.signerId, [poisonedHash]);
+
+    const result = await handleAccountInput(env, receiverAccount, {
+      kind: 'frame',
+      fromEntityId: left.entityId,
+      toEntityId: right.entityId,
+      height: 1,
+      newAccountFrame: frame,
+      newHanko,
+      newDisputeHanko,
+      newDisputeHash: poisonedHash,
+      newDisputeProofBodyHash: `0x${'11'.repeat(32)}`,
+      disputeProofNonce: 0,
+    });
+
+    expect(result.success).toBe(false);
+    expect(result.error).toContain('FRAME:DISPUTE_SEAL_HASH_MISMATCH');
+    expect(receiverAccount.currentHeight).toBe(0);
+    expect(receiverAccount.deltas.get(1)?.leftCreditLimit ?? 0n).toBe(0n);
+    expect(receiverAccount.counterpartyDisputeHash).toBeUndefined();
+  });
+
   test('failed proposal keeps queued txs, including late arrivals, instead of wiping the mempool', async () => {
     const seed = 'account-proposal-failure-retains-mempool';
     const env = createEmptyEnv(seed);
