@@ -557,6 +557,31 @@ export function buildCrossJurisdictionPullBinding(
   });
 }
 
+export function buildCommittedCrossJurisdictionPullBinding(
+  route: CrossJurisdictionSwapRoute,
+  leg: CrossJurisdictionPullBinding['leg'],
+): CrossJurisdictionPullBinding {
+  const routeHash = String(route.routeHash || '').toLowerCase();
+  if (!routeHash) throw new Error(`CROSS_J_ROUTE_HASH_MISSING:${route.orderId}`);
+  // Use this only after the route has entered committed account state. Immutable
+  // economic terms were already route-hash checked at admission/swap_offer time;
+  // fill progress is mutable and deliberately not part of the route hash.
+  return cloneCrossJurisdictionPullBinding({
+    orderId: String(route.orderId || ''),
+    routeHash,
+    leg,
+    ...(route.targetReceipt ? { targetReceipt: route.targetReceipt } : {}),
+    status: route.status,
+    ...(route.cumulativeFillRatio !== undefined ? { cumulativeFillRatio: route.cumulativeFillRatio } : {}),
+    ...(route.claimedRatio !== undefined ? { claimedRatio: route.claimedRatio } : {}),
+    ...(route.filledSourceAmount !== undefined ? { filledSourceAmount: route.filledSourceAmount } : {}),
+    ...(route.filledTargetAmount !== undefined ? { filledTargetAmount: route.filledTargetAmount } : {}),
+    ...(route.sourceClaimed !== undefined ? { sourceClaimed: route.sourceClaimed } : {}),
+    ...(route.targetClaimed !== undefined ? { targetClaimed: route.targetClaimed } : {}),
+    ...(route.clearingPolicy ? { clearingPolicy: route.clearingPolicy } : {}),
+  });
+}
+
 export function cloneCrossJurisdictionBookAdmission(
   admission: CrossJurisdictionBookAdmission,
 ): CrossJurisdictionBookAdmission {

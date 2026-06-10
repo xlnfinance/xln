@@ -2,7 +2,7 @@ import type { AccountMachine, AccountTx, CrossJurisdictionSwapRoute } from '../.
 import type { SwapOfferEvent } from '../../entity-tx/handlers/account';
 import { MAX_SWAP_FILL_RATIO } from '../../swap-execution';
 import {
-  buildCrossJurisdictionPullBinding,
+  buildCommittedCrossJurisdictionPullBinding,
   requireCrossJurisdictionFillProgress,
   transitionCrossJurisdictionRouteStatus,
   withCrossJurisdictionFillProgress,
@@ -18,7 +18,7 @@ const syncSourcePullBinding = (accountMachine: AccountMachine, route: CrossJuris
   if (!sourcePullId) return;
   const pull = accountMachine.pulls?.get(sourcePullId);
   if (!pull) return;
-  pull.crossJurisdiction = buildCrossJurisdictionPullBinding(route, 'source');
+  pull.crossJurisdiction = buildCommittedCrossJurisdictionPullBinding(route, 'source');
 };
 
 export async function handleCrossSwapFillAck(
