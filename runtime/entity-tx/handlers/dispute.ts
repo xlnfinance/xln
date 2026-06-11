@@ -318,6 +318,10 @@ export async function handleDisputeStart(
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
 
+  if (entityTx.data.starterIncrementedArguments !== undefined) {
+    throw new Error('DISPUTE_INCREMENTED_ARGUMENT_OVERRIDE_UNSUPPORTED');
+  }
+
   console.log(`⚔️ disputeStart: ${entityState.entityId.slice(-4)} vs ${counterpartyEntityId.slice(-4)}`);
 
   // Initialize jBatch if needed
@@ -753,8 +757,23 @@ export async function handleDisputeFinalize(
 
   // Build current proof only to compare against the stored dispute body.
   const currentProofResult = buildAccountProofBody(account);
-  const finalNonce = account.activeDispute.initialNonce;
-  const finalNonceSource = 'initialNonce (unilateral-only)';
+  const counterProofBodyHash = account.counterpartyDisputeProofBodyHash;
+  const counterProofNonce = account.counterpartyDisputeProofNonce;
+  const counterProofHanko = account.counterpartyDisputeProofHanko;
+  const counterProofBodyRaw = counterProofBodyHash
+    ? account.disputeProofBodiesByHash?.[counterProofBodyHash]
+    : undefined;
+  const hasCounterProof =
+    Boolean(counterProofHanko && counterProofHanko !== '0x') &&
+    counterProofNonce !== undefined &&
+    counterProofNonce > account.activeDispute.initialNonce &&
+    Boolean(counterProofBodyHash) &&
+    isProofBodyStruct(counterProofBodyRaw);
+
+  const finalNonce = hasCounterProof
+    ? counterProofNonce!
+    : account.activeDispute.initialNonce;
+  const finalNonceSource = hasCounterProof ? 'counterpartyDisputeProof' : 'initialNonce (unilateral)';
 
   // ASSERT: finalNonce must be positive
   if (finalNonce <= 0) {
@@ -762,8 +781,7 @@ export async function handleDisputeFinalize(
     console.error(`❌ disputeFinalize: finalNonce=${finalNonce} is invalid (source=${finalNonceSource})`);
     return { newState, outputs };
   }
-  // Unilateral-only protocol: no counterparty signature on finalize.
-  const finalizeSig = '0x';
+  const finalizeSig = hasCounterProof ? counterProofHanko! : '0x';
 
   const callerIsLeft = account.leftEntity === newState.entityId;
   const callerSide: DisputeArgumentSide = callerIsLeft ? 'left' : 'right';
@@ -785,46 +803,86 @@ export async function handleDisputeFinalize(
         'stored',
       )
     : null;
-  const shouldUseStoredProof = storedProofBody !== null;
-  if (currentProofResult.proofBodyHash !== account.activeDispute.initialProofbodyHash) {
+  const counterProofBody = hasCounterProof
+    ? canonicalizeProofBodyStruct(
+        counterProofBodyRaw as ProofBodyStruct,
+        entityState.entityId,
+        counterpartyEntityId,
+        'counter',
+      )
+    : null;
+  const shouldUseCounterProof = counterProofBody !== null && counterProofBodyHash !== undefined;
+  const shouldUseStoredProof = !shouldUseCounterProof && storedProofBody !== null;
+
+  if (!shouldUseCounterProof && currentProofResult.proofBodyHash !== account.activeDispute.initialProofbodyHash) {
     console.warn(`⚠️ disputeFinalize: current proofBodyHash != initial (current=${currentProofResult.proofBodyHash.slice(0, 10)}..., initial=${account.activeDispute.initialProofbodyHash.slice(0, 10)}...)`);
     if (!storedProofBody) {
       throw new Error('disputeFinalize: missing stored proofBody for unilateral finalize');
     }
   }
 
-  const finalProofbody = shouldUseStoredProof
-    ? storedProofBody
-    : currentProofBody;
-  // Finalization arguments are built for the stored proof body hash, not from
-  // whichever live account maps exist now. The starter side is overwritten by
-  // the blob committed in DisputeStartedV2; only the finalizer's side remains
-  // freshly supplied evidence.
+  if (shouldUseCounterProof && account.counterpartyDisputeHash) {
+    const depositoryAddress = resolveDepositoryAddress(entityState);
+    if (!depositoryAddress) {
+      throw new Error('DISPUTE_COUNTER_FINALIZE_DEPOSITORY_MISSING');
+    }
+    const expectedHash = createDisputeProofHashWithNonce(
+      account,
+      counterProofBodyHash!,
+      depositoryAddress,
+      finalNonce,
+    );
+    if (account.counterpartyDisputeHash.toLowerCase() !== expectedHash.toLowerCase()) {
+      throw new Error(
+        `DISPUTE_COUNTER_FINALIZE_HASH_MISMATCH:${counterpartyEntityId}:${account.counterpartyDisputeHash}:${expectedHash}`,
+      );
+    }
+  }
+
+  const finalProofbody = shouldUseCounterProof
+    ? counterProofBody!
+    : shouldUseStoredProof
+      ? storedProofBody
+      : currentProofBody;
+  const finalProofbodyHash = shouldUseCounterProof
+    ? counterProofBodyHash!
+    : account.activeDispute.initialProofbodyHash;
+
+  // Finalization arguments are built for the exact proof body being revealed,
+  // not from whichever live account maps exist now. In counter-dispute mode the
+  // starter side is immutable and must equal the starterIncrementedArguments
+  // committed by DisputeStartedV2; the finalizer only supplies its own side.
+  // Counterexample: if the starter opened with proof N and had already sent N+1
+  // with 75% fill progress, using starterInitialArguments for the counter proof
+  // would reveal only the N-side evidence and underclaim the committed N+1 state.
   const builtArguments = buildDisputeArgumentsForSnapshot(
     account,
     newState,
     counterpartyEntityId,
-    account.activeDispute.initialProofbodyHash,
+    finalProofbodyHash,
     { secretsSide: callerSide },
   );
+  const starterArgumentsForFinalProof = shouldUseCounterProof
+    ? account.activeDispute.starterIncrementedArguments
+    : account.activeDispute.starterInitialArguments;
   const leftArguments = account.activeDispute.startedByLeft
-    ? account.activeDispute.starterInitialArguments
+    ? starterArgumentsForFinalProof
     : builtArguments.leftArguments;
   const rightArguments = account.activeDispute.startedByLeft
     ? builtArguments.rightArguments
-    : account.activeDispute.starterInitialArguments;
+    : starterArgumentsForFinalProof;
 
   const finalProof = {
     counterentity: counterpartyEntityId,
     initialNonce: account.activeDispute.initialNonce,  // Nonce when dispute was started
-    finalNonce,  // Unilateral-only: same as initial.
+    finalNonce,
     initialProofbodyHash: account.activeDispute.initialProofbodyHash,  // From disputeStart (commit)
     finalProofbody,  // REVEAL
     leftArguments,
     rightArguments,
     starterInitialArguments: account.activeDispute.starterInitialArguments,
     starterIncrementedArguments: account.activeDispute.starterIncrementedArguments,
-    sig: finalizeSig,  // Always empty for unilateral finalize
+    sig: finalizeSig,
     startedByLeft: account.activeDispute.startedByLeft,  // From on-chain
     disputeUntilBlock: account.activeDispute.disputeTimeout,  // From on-chain
     cooperative: false,
@@ -842,14 +900,14 @@ export async function handleDisputeFinalize(
     }
   }
 
-  console.log(`   Mode: unilateral, timeout=${account.activeDispute.disputeTimeout}`);
+  console.log(`   Mode: ${shouldUseCounterProof ? 'counter' : 'unilateral'}, timeout=${account.activeDispute.disputeTimeout}`);
   console.log(`   initialNonce=${finalProof.initialNonce}, finalNonce=${finalProof.finalNonce} (source=${finalNonceSource})`);
 
   // Protocol rule (matches Depository.sol):
   // - dispute starter must wait until timeout for unilateral finalize
   // - counterparty may finalize immediately (same-proof path) without waiting
   const callerIsStarter = callerIsLeft === account.activeDispute.startedByLeft;
-  if (callerIsStarter) {
+  if (!shouldUseCounterProof && callerIsStarter) {
     const currentJBlock = getRuntimeJurisdictionHeight(env, newState.lastFinalizedJHeight ?? 0);
     if (currentJBlock < account.activeDispute.disputeTimeout) {
       addMessage(
@@ -874,7 +932,7 @@ export async function handleDisputeFinalize(
   account.activeDispute.finalizeQueued = true;
 
   console.log(`✅ disputeFinalize: Added to jBatch for ${entityState.entityId.slice(-4)}`);
-  console.log(`   Mode: unilateral`);
+  console.log(`   Mode: ${shouldUseCounterProof ? 'counter' : 'unilateral'}`);
 
   addMessage(newState, `⚖️ Dispute finalized vs ${counterpartyEntityId.slice(-4)} ${description ? `(${description})` : ''} - use jBroadcast to commit`);
 

@@ -174,6 +174,7 @@ describe('dispute argument snapshots', () => {
       afterSecondFill,
       captureDisputeArgumentSnapshot(afterSecondFill, incrementedProof.proofBodyHash, 2, incrementedProof.proofBodyStruct, {
         appliedAccountTxs: [secondFill],
+        appliedFrameHeight: 2,
       }),
     );
 
@@ -185,5 +186,101 @@ describe('dispute argument snapshots', () => {
       { secretsSide: 'left' },
     );
     expect(incrementedArgs.rightArguments).toBe('0x');
+  });
+
+  test('does not suppress an identical swap fill when it belongs to a later pending frame', () => {
+    setDeltaTransformerAddress(DELTA_TRANSFORMER);
+    const repeatedFill = {
+      type: 'swap_resolve',
+      data: {
+        offerId: 'remaining-left-owned',
+        fillRatio: 32767,
+        fillNumerator: 1n,
+        fillDenominator: 2n,
+        executionGiveAmount: 25n,
+        executionWantAmount: 50n,
+        cancelRemainder: false,
+      },
+    } as AccountTx;
+    const account = accountWithSwaps([
+      ['remaining-left-owned', {
+        ...offer('remaining-left-owned', true, 1, 2),
+        giveAmount: 50n,
+        wantAmount: 100n,
+        quantizedGive: 50n,
+        quantizedWant: 100n,
+      }],
+    ]);
+    account.pendingFrame = {
+      height: 2,
+      timestamp: 20,
+      jHeight: 0,
+      accountTxs: [repeatedFill],
+      prevFrameHash: 'after-first',
+      stateHash: 'pending-second',
+      byLeft: false,
+      deltas: [],
+    };
+    const proof = buildAccountProofBody(account);
+    storeDisputeArgumentSnapshot(
+      account,
+      captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, proof.proofBodyStruct, {
+        appliedAccountTxs: [repeatedFill],
+        appliedFrameHeight: 1,
+      }),
+    );
+
+    const args = buildDisputeArgumentsForSnapshot(
+      account,
+      { entityId: 'left' } as unknown as EntityState,
+      'right',
+      proof.proofBodyHash,
+      { secretsSide: 'left' },
+    );
+    expect(decodeFirstRatio(args.rightArguments)).toBe(32767);
+  });
+
+  test('fails fast when applied fill identity is missing the frame height', () => {
+    setDeltaTransformerAddress(DELTA_TRANSFORMER);
+    const fill = {
+      type: 'swap_resolve',
+      data: {
+        offerId: 'remaining-left-owned',
+        fillRatio: 32767,
+        fillNumerator: 1n,
+        fillDenominator: 2n,
+        executionGiveAmount: 25n,
+        executionWantAmount: 50n,
+        cancelRemainder: false,
+      },
+    } as AccountTx;
+    const account = accountWithSwaps([
+      ['remaining-left-owned', offer('remaining-left-owned', true, 1, 2)],
+    ]);
+    account.pendingFrame = {
+      height: 2,
+      timestamp: 20,
+      jHeight: 0,
+      accountTxs: [fill],
+      prevFrameHash: 'after-first',
+      stateHash: 'pending-second',
+      byLeft: false,
+      deltas: [],
+    };
+    const proof = buildAccountProofBody(account);
+    storeDisputeArgumentSnapshot(
+      account,
+      captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, proof.proofBodyStruct, {
+        appliedAccountTxs: [fill],
+      }),
+    );
+
+    expect(() => buildDisputeArgumentsForSnapshot(
+      account,
+      { entityId: 'left' } as unknown as EntityState,
+      'right',
+      proof.proofBodyHash,
+      { secretsSide: 'left' },
+    )).toThrow('DISPUTE_ARGUMENT_APPLIED_FRAME_HEIGHT_MISSING');
   });
 });

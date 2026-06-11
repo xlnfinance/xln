@@ -10,6 +10,7 @@ import {
 import { deriveCanonicalCrossJurisdictionBookOwner } from '../../cross-jurisdiction-market';
 import {
   buildCrossJurisdictionBookAdmissionReceipt,
+  getCrossJurisdictionBookReceiptError,
   markCrossJurisdictionBookAdmissionClosed,
 } from '../../cross-jurisdiction-orderbook';
 import { decodeHashLadderBinary } from '../../hashladder';
@@ -254,41 +255,59 @@ const queueBookAdmissionOnCommittedPull = (
     if (!committedPullMatchesRoute(accountTx, route, leg)) {
       throw new Error(`CROSS_J_COMMITTED_PULL_ROUTE_MISMATCH: route=${route.orderId} leg=${leg} pull=${accountTx.data.pullId}`);
     }
-      const committedAt = Number(newState.timestamp || env.timestamp || 0);
-      const admissionRoute = cloneCrossJurisdictionRoute(route);
-      if (leg === 'source') {
-        admissionRoute.status = 'resting';
-        admissionRoute.updatedAt = committedAt;
+    const committedAt = Number(newState.timestamp || env.timestamp || 0);
+    const admissionRoute = cloneCrossJurisdictionRoute(route);
+    if (leg === 'source') {
+      const targetReceipt = accountTx.data.crossJurisdiction?.targetReceipt;
+      if (!targetReceipt) {
+        throw new Error(`CROSS_J_SOURCE_PULL_TARGET_RECEIPT_MISSING: route=${route.orderId}`);
       }
+      const receiptError = getCrossJurisdictionBookReceiptError(route, targetReceipt);
+      if (receiptError) {
+        throw new Error(`CROSS_J_SOURCE_PULL_TARGET_RECEIPT_INVALID: route=${route.orderId} ${receiptError}`);
+      }
+      // This is the source-hub counterpart of book admission: the account frame
+      // has now committed the source pull_lock whose binding already contains
+      // the exact target receipt. From this point the source account can accept
+      // a fill ACK, so the source entity route must become `resting` here.
+      //
+      // Do not let the fill-notice handler "repair" this from account offers.
+      // That rehydration masks dropped committed followups and lets matcher
+      // state run ahead of the source account consensus.
+      admissionRoute.targetReceipt = targetReceipt;
+      transitionCrossJurisdictionRouteStatus(admissionRoute, 'resting', committedAt);
+      Object.assign(route, admissionRoute);
+      newState.crossJurisdictionSwaps?.set(route.orderId, route);
+    }
     const receipt = buildCrossJurisdictionBookAdmissionReceipt(
       admissionRoute,
       leg,
       accountTx,
       newState.entityId,
       counterpartyId,
-        committedAt,
-      );
-      if (leg === 'target') {
-        // Target-first escrow invariant: source funds are never locked from the
-        // source account until the target account has committed this exact pull
-        // receipt. The receipt is copied into the source commit and later into
-        // the source pull binding, so raw account txs cannot pretend target-side
-        // safety happened.
-        admissionRoute.targetReceipt = receipt;
-        transitionCrossJurisdictionRouteStatus(admissionRoute, 'target_locked', committedAt);
-        Object.assign(route, admissionRoute);
-        newState.crossJurisdictionSwaps?.set(route.orderId, route);
-        outputs.push(buildCrossJurisdictionEntityOutput(env, route.source.entityId, [{
-          type: 'commitCrossJurisdictionSwap',
-          data: {
-            route: admissionRoute,
-            targetReceipt: receipt,
-          },
-        }]));
-      }
+      committedAt,
+    );
+    if (leg === 'target') {
+      // Target-first escrow invariant: source funds are never locked from the
+      // source account until the target account has committed this exact pull
+      // receipt. The receipt is copied into the source commit and later into
+      // the source pull binding, so raw account txs cannot pretend target-side
+      // safety happened.
+      admissionRoute.targetReceipt = receipt;
+      transitionCrossJurisdictionRouteStatus(admissionRoute, 'target_locked', committedAt);
+      Object.assign(route, admissionRoute);
+      newState.crossJurisdictionSwaps?.set(route.orderId, route);
+      outputs.push(buildCrossJurisdictionEntityOutput(env, route.source.entityId, [{
+        type: 'commitCrossJurisdictionSwap',
+        data: {
+          route: admissionRoute,
+          targetReceipt: receipt,
+        },
+      }]));
+    }
 
-      outputs.push(buildCrossJurisdictionEntityOutput(env, routeBookOwnerEntityId(route), [{
-        type: 'admitCrossJurisdictionBookOrder',
+    outputs.push(buildCrossJurisdictionEntityOutput(env, routeBookOwnerEntityId(route), [{
+      type: 'admitCrossJurisdictionBookOrder',
       data: {
         route: admissionRoute,
         receipt,
@@ -308,13 +327,20 @@ const applyPullResolveFollowup = (
   accountTx: Extract<AccountTx, { type: 'pull_resolve' }>,
   outputs: EntityInput[],
 ): boolean => {
+  if (!newState.crossJurisdictionSwaps?.size) return true;
   let fillRatio = 0;
   try {
     fillRatio = decodeHashLadderBinary(accountTx.data.binary).fillRatio;
-  } catch {
-    fillRatio = 0;
+  } catch (error) {
+    // Account consensus should never commit an invalid pull_resolve binary. If it
+    // happens here, treating it as ratio=0 would silently skip a money-moving
+    // cross-j claim followup and leave source/target legs inconsistent.
+    throw new Error(
+      `CROSS_J_PULL_RESOLVE_BINARY_INVALID: pull=${accountTx.data.pullId} ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+    );
   }
-  if (fillRatio <= 0 || !newState.crossJurisdictionSwaps?.size) return true;
+  if (fillRatio <= 0) return true;
 
   const currentEntityId = normalizeEntityRef(newState.entityId);
   const counterpartyEntityId = normalizeEntityRef(counterpartyId);

@@ -53,8 +53,10 @@ describe('watchtower delayed last-resort sweep', () => {
     const initialProofbodyHash = '0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc';
     const starterInitialArguments = '0x1234';
     const starterIncrementedArguments = '0xabcd';
+    const finalizerRightArguments = '0xbeef';
     const disputeHash = encodeDisputeHash(1, true, 100n, initialProofbodyHash, starterInitialArguments, starterIncrementedArguments);
     const queriedFromBlocks: number[] = [];
+    let submittedFinalization: Record<string, unknown> | null = null;
     const tempRoot = join(process.cwd(), '.tmp-tests', `tower-last-resort-${Date.now()}`);
     tempRoots.push(tempRoot);
     await mkdir(tempRoot, { recursive: true });
@@ -77,15 +79,15 @@ describe('watchtower delayed last-resort sweep', () => {
         lastResortWindowBlocks: 8,
         appointmentSequence: 5,
         ownerAuthorizationHanko: '0xbeef',
-        latestProof: {
-          counterentity,
-          finalNonce: 2,
-          finalProofbody: { offdeltas: [-1], tokenIds: [1], transformers: [] },
-          leftArguments: starterIncrementedArguments,
-          rightArguments: '0x',
-          starterIncrementedArguments,
-          sig: '0xcafe',
-        },
+	        latestProof: {
+	          counterentity,
+	          finalNonce: 2,
+	          finalProofbody: { offdeltas: [-1], tokenIds: [1], transformers: [] },
+	          leftArguments: '0x',
+	          rightArguments: finalizerRightArguments,
+	          starterIncrementedArguments,
+	          sig: '0xcafe',
+	        },
       }),
       getTowerPayloadEncryptionPublicKey(towerWallet.privateKey),
     );
@@ -153,12 +155,15 @@ describe('watchtower delayed last-resort sweep', () => {
           disputeTimeout: 100n,
         }),
         defaultDisputeDelay: async () => 95n,
-        watchtowerCounterDispute: async () => ({
-          hash: '0xtxhash',
-          wait: async () => ({ blockNumber: 96 }),
-        }),
-      }),
-    });
+	        watchtowerCounterDispute: async (_entityId, finalization) => {
+	          submittedFinalization = finalization as unknown as Record<string, unknown>;
+	          return {
+	            hash: '0xtxhash',
+	            wait: async () => ({ blockNumber: 96 }),
+	          };
+	        },
+	      }),
+	    });
 
     expect(result).toEqual({
       scanned: 1,
@@ -168,11 +173,13 @@ describe('watchtower delayed last-resort sweep', () => {
     });
 
     const receipts = await store.listActionReceipts(lookupKey);
-    expect(receipts.length).toBe(1);
-    expect(receipts[0]?.status).toBe('submitted');
-    expect(receipts[0]?.txHash).toBe('0xtxhash');
-    expect(queriedFromBlocks).toEqual([5, 5]);
-  });
+	    expect(receipts.length).toBe(1);
+	    expect(receipts[0]?.status).toBe('submitted');
+	    expect(receipts[0]?.txHash).toBe('0xtxhash');
+	    expect(queriedFromBlocks).toEqual([5, 5]);
+	    expect(submittedFinalization?.['leftArguments']).toBe(starterIncrementedArguments);
+	    expect(submittedFinalization?.['rightArguments']).toBe(finalizerRightArguments);
+	  });
 
   test('skips when dispute is inactive or still outside the last-resort window', async () => {
     const runtimeWallet = Wallet.createRandom();

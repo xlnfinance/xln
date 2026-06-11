@@ -19,11 +19,14 @@ import {
   getCrossJurisdictionBookAdmissionError,
   mergeCrossJurisdictionBookAdmission,
 } from '../cross-jurisdiction-orderbook';
-import { buildCrossJurisdictionPullBinding } from '../cross-jurisdiction';
+import {
+  buildCrossJurisdictionPullBinding,
+  buildPreparedCrossJurisdictionRoute,
+} from '../cross-jurisdiction';
 import { applyEntityTx } from '../entity-tx/apply';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity-tx/handlers/account-cross-j-followups';
 import { handleAdmitCrossJurisdictionBookOrderEntityTx } from '../entity-tx/handlers/cross-j-book-order';
-import { handleDisputeStart } from '../entity-tx/handlers/dispute';
+import { handleDisputeFinalize, handleDisputeStart } from '../entity-tx/handlers/dispute';
 import { handleJAbortSentBatch } from '../entity-tx/handlers/j-abort-sent-batch';
 import { handleJRebroadcast } from '../entity-tx/handlers/j-rebroadcast';
 import { handleJEvent } from '../entity-tx/j-events';
@@ -37,6 +40,8 @@ import { process, createEmptyEnv, registerEntityRuntimeHint, sendEntityInput } f
 import { safeStringify } from '../serialization-utils';
 import { projectAccountDoc } from '../storage/projections';
 import { createDefaultDelta } from '../validation-utils';
+import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '../dispute-arguments';
+import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../proof-builder';
 import { signEntityHashes } from '../hanko/signing';
 import type { AccountMachine, AccountTx, ConsensusConfig, CrossJurisdictionSwapRoute, EntityInput, EntityReplica, EntityState, JurisdictionEvent } from '../types';
 
@@ -573,6 +578,86 @@ describe('audit fail-fast regressions', () => {
     mergeCrossJurisdictionBookAdmission(sourceHubState, route, 1_002, badTargetReceipt);
     expect(() => assertCrossJurisdictionOrderAdmissible(sourceHubState, route, 1_002))
       .toThrow('CROSS_J_BOOK_ADMISSION_RECEIPT_MISMATCH');
+  });
+
+  test('committed source pull advances source route to resting before fill notice', () => {
+    const env = createEmptyEnv('cross-j-source-commit-resting');
+    env.timestamp = 10_000;
+    const sourceUser = `0x${'31'.repeat(32)}`;
+    const sourceHub = `0x${'41'.repeat(32)}`;
+    const targetHub = `0x${'42'.repeat(32)}`;
+    const targetUser = `0x${'32'.repeat(32)}`;
+    const route = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-source-commit-resting',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      bookOwnerEntityId: sourceHub,
+      venueId: 'cross:test:1/target:2',
+      source: {
+        jurisdiction: 'test',
+        entityId: sourceUser,
+        counterpartyEntityId: sourceHub,
+        tokenId: 1,
+        amount: 1_000n,
+      },
+      target: {
+        jurisdiction: 'target',
+        entityId: targetHub,
+        counterpartyEntityId: targetUser,
+        tokenId: 2,
+        amount: 900n,
+      },
+      status: 'target_prepared',
+      createdAt: 10_000,
+      updatedAt: 10_000,
+      expiresAt: 60_000,
+    }, { runtimeSeed: 'cross-source-commit-resting', sourceDisputeDelayMs: 5_000, now: 10_000 });
+    const targetReceipt = buildCrossJurisdictionBookAdmissionReceipt(
+      route,
+      'target',
+      {
+        type: 'pull_lock',
+        data: {
+          pullId: route.targetPull!.pullId,
+          tokenId: route.targetPull!.tokenId,
+          amount: route.targetPull!.signedAmount,
+          revealedUntilTimestamp: route.targetPull!.revealedUntilTimestamp,
+          fullHash: route.targetPull!.fullHash,
+          partialRoot: route.targetPull!.partialRoot,
+          crossJurisdiction: buildCrossJurisdictionPullBinding(route, 'target'),
+        },
+      },
+      targetHub,
+      targetUser,
+      10_001,
+    );
+    const sourceHubState = makeEntityState(sourceHub);
+    sourceHubState.crossJurisdictionSwaps = new Map([[route.orderId, route]]);
+    const outputs: EntityInput[] = [];
+
+    applyCommittedCrossJurisdictionAccountTxFollowup(env, sourceHubState, sourceUser, {
+      type: 'pull_lock',
+      data: {
+        pullId: route.sourcePull!.pullId,
+        tokenId: route.sourcePull!.tokenId,
+        amount: route.sourcePull!.signedAmount,
+        revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
+        fullHash: route.sourcePull!.fullHash,
+        partialRoot: route.sourcePull!.partialRoot,
+        crossJurisdiction: buildCrossJurisdictionPullBinding({
+          ...route,
+          targetReceipt,
+          status: 'resting',
+        }, 'source'),
+      },
+    }, outputs);
+
+    const sourceRoute = sourceHubState.crossJurisdictionSwaps.get(route.orderId);
+    expect(sourceRoute?.status).toBe('resting');
+    expect(sourceRoute?.targetReceipt?.receiptHash).toBe(targetReceipt.receiptHash);
+    expect(outputs.some((output) =>
+      output.entityTxs?.some((tx) => tx.type === 'admitCrossJurisdictionBookOrder'),
+    )).toBe(true);
   });
 
   test('cross-j same-token swap_offer quantizes by jurisdiction market side', async () => {
@@ -2064,6 +2149,108 @@ describe('audit fail-fast regressions', () => {
     expect(failed.newState.jBatchState?.batch.disputeFinalizations.length).toBe(0);
   });
 
+  test('disputeFinalize uses signed counter-proof and incremented starter arguments when a newer proof is available', async () => {
+    const starterId = `0x${'21'.repeat(32)}`;
+    const finalizerId = `0x${'22'.repeat(32)}`;
+    const depositoryAddress = hex20('1');
+    const state = makeEntityState(finalizerId);
+    state.config = {
+      ...state.config,
+      jurisdiction: {
+        name: 'Testnet',
+        depositoryAddress,
+        entityProviderAddress: hex20('2'),
+        chainId: 31337,
+      },
+    } as EntityState['config'];
+    const account = makeProposalAccount([], starterId, finalizerId);
+    account.proofHeader = { fromEntity: starterId, toEntity: finalizerId, nonce: 2 };
+    account.deltas.set(1, { ...createDefaultDelta(1), offdelta: 50n });
+
+    const initialProof = buildAccountProofBody(account);
+    storeDisputeArgumentSnapshot(
+      account,
+      captureDisputeArgumentSnapshot(account, initialProof.proofBodyHash, 1, initialProof.proofBodyStruct),
+    );
+
+    account.deltas.set(1, { ...createDefaultDelta(1), offdelta: 75n });
+    const counterProof = buildAccountProofBody(account);
+    storeDisputeArgumentSnapshot(
+      account,
+      captureDisputeArgumentSnapshot(account, counterProof.proofBodyHash, 2, counterProof.proofBodyStruct),
+    );
+    account.disputeProofBodiesByHash = {
+      [initialProof.proofBodyHash]: initialProof.proofBodyStruct,
+      [counterProof.proofBodyHash]: counterProof.proofBodyStruct,
+    };
+    account.counterpartyDisputeProofBodyHash = counterProof.proofBodyHash;
+    account.counterpartyDisputeProofNonce = 2;
+    account.counterpartyDisputeProofHanko = '0x1234';
+    account.counterpartyDisputeHash = createDisputeProofHashWithNonce(
+      account,
+      counterProof.proofBodyHash,
+      depositoryAddress,
+      2,
+    );
+    account.activeDispute = {
+      startedByLeft: true,
+      initialProofbodyHash: initialProof.proofBodyHash,
+      initialNonce: 1,
+      disputeTimeout: 100,
+      onChainNonce: 0,
+      starterInitialArguments: '0x1111',
+      starterIncrementedArguments: '0x2222',
+      finalizeQueued: false,
+    };
+    state.accounts.set(starterId, account);
+
+    const env = createEmptyEnv('counter-finalize-runtime');
+    env.quietRuntimeLogs = true;
+    env.lastJBlock = 1;
+
+    const { newState } = await handleDisputeFinalize(
+      state,
+      {
+        type: 'disputeFinalize',
+        data: { counterpartyEntityId: starterId },
+      },
+      env,
+    );
+
+    const finalization = newState.jBatchState?.batch.disputeFinalizations[0];
+    expect(finalization).toBeDefined();
+    expect(finalization?.initialNonce).toBe(1);
+    expect(finalization?.finalNonce).toBe(2);
+    expect(finalization?.sig).toBe('0x1234');
+    expect(finalization?.initialProofbodyHash).toBe(initialProof.proofBodyHash);
+    expect(finalization?.finalProofbody.offdeltas).toEqual([75n]);
+    expect(finalization?.finalProofbody.tokenIds).toEqual([1n]);
+    expect(finalization?.leftArguments).toBe('0x2222');
+    expect(finalization?.rightArguments).toBe('0x');
+    expect(finalization?.starterInitialArguments).toBe('0x1111');
+    expect(finalization?.starterIncrementedArguments).toBe('0x2222');
+    expect(newState.accounts.get(starterId)?.activeDispute?.finalizeQueued).toBe(true);
+  });
+
+  test('disputeStart rejects unsupported incremented argument override instead of silently ignoring it', async () => {
+    const entityId = `0x${'31'.repeat(32)}`;
+    const counterpartyId = `0x${'32'.repeat(32)}`;
+    const env = createEmptyEnv('dispute-start-incremented-override');
+    const state = makeEntityState(entityId);
+
+    await expect(handleDisputeStart(
+      state,
+      {
+        type: 'disputeStart',
+        data: {
+          counterpartyEntityId: counterpartyId,
+          starterIncrementedArguments: '0x1234',
+        },
+      },
+      env,
+    )).rejects.toThrow('DISPUTE_INCREMENTED_ARGUMENT_OVERRIDE_UNSUPPORTED');
+  });
+
   test('j_rebroadcast resubmits the exact sent batch without mutating ops', async () => {
     const entityId = `0x${'ab'.repeat(32)}`;
     const counterpartyId = `0x${'cd'.repeat(32)}`;
@@ -2266,6 +2453,74 @@ describe('audit fail-fast regressions', () => {
     expect(result.success).toBe(false);
     expect(result.error).toContain(`max ${LIMITS.MAX_ACCOUNT_HTLC_LOCKS}`);
     expect(accountMachine.locks.size).toBe(LIMITS.MAX_ACCOUNT_HTLC_LOCKS);
+  });
+
+  test('cross-j committed pull_resolve followup rejects malformed binary instead of skipping it', () => {
+    const env = createEmptyEnv('cross-pull-resolve-invalid-binary');
+    const sourceUser = `0x${'10'.repeat(32)}`;
+    const sourceHub = `0x${'20'.repeat(32)}`;
+    const targetHub = `0x${'30'.repeat(32)}`;
+    const targetUser = `0x${'40'.repeat(32)}`;
+    const sourceState = makeEntityState(sourceHub);
+    sourceState.crossJurisdictionSwaps = new Map([
+      ['cross-invalid-binary', {
+        orderId: 'cross-invalid-binary',
+        makerEntityId: sourceUser,
+        hubEntityId: sourceHub,
+        source: {
+          jurisdiction: 'eth',
+          entityId: sourceUser,
+          counterpartyEntityId: sourceHub,
+          tokenId: 1,
+          amount: 1_000n,
+        },
+        target: {
+          jurisdiction: 'tron',
+          entityId: targetHub,
+          counterpartyEntityId: targetUser,
+          tokenId: 1,
+          amount: 1_000n,
+        },
+        sourcePull: {
+          pullId: 'source-pull',
+          tokenId: 1,
+          amount: 1_000n,
+          signedAmount: 1_000n,
+          revealedUntilTimestamp: 60_000,
+          fullHash: `0x${'aa'.repeat(32)}`,
+          partialRoot: `0x${'bb'.repeat(32)}`,
+        },
+        targetPull: {
+          pullId: 'target-pull',
+          tokenId: 1,
+          amount: 1_000n,
+          signedAmount: 1_000n,
+          revealedUntilTimestamp: 60_000,
+          fullHash: `0x${'cc'.repeat(32)}`,
+          partialRoot: `0x${'dd'.repeat(32)}`,
+        },
+        status: 'partially_filled',
+        cumulativeFillRatio: 1,
+        fillSeq: 1,
+        createdAt: 1,
+        updatedAt: 1,
+        expiresAt: 60_000,
+      } satisfies CrossJurisdictionSwapRoute],
+    ]);
+
+    expect(() => applyCommittedCrossJurisdictionAccountTxFollowup(
+      env,
+      sourceState,
+      sourceUser,
+      {
+        type: 'pull_resolve',
+        data: {
+          pullId: 'source-pull',
+          binary: '0x1234',
+        },
+      },
+      [],
+    )).toThrow('CROSS_J_PULL_RESOLVE_BINARY_INVALID');
   });
 
   test('cross-j source fill ack routes book removal to canonical sibling owner', async () => {

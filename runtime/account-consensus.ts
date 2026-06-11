@@ -983,13 +983,13 @@ export async function handleAccountInput(
     storeDisputeArgumentSnapshot(
       accountMachine,
       captureDisputeArgumentSnapshot(
-        accountMachine,
-        ackProofResult.proofBodyHash,
-        ackSignedNonce,
-        ackProofResult.proofBodyStruct,
-        { appliedAccountTxs: receivedFrame.accountTxs },
-      ),
-    );
+	        accountMachine,
+	        ackProofResult.proofBodyHash,
+	        ackSignedNonce,
+	        ackProofResult.proofBodyStruct,
+	        { appliedAccountTxs: receivedFrame.accountTxs, appliedFrameHeight: receivedFrame.height },
+	      ),
+	    );
 
     const response = {
       kind: 'ack',

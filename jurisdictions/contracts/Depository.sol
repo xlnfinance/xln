@@ -91,6 +91,7 @@ contract Depository is ReentrancyGuardLite {
   uint256 private constant MAX_BATCH_EXTERNAL_TO_RESERVE = 64;
   uint256 private constant MAX_BATCH_RESERVE_TO_EXTERNAL = 64;
   uint256 private constant MAX_BATCH_SECRET_REVEALS = 32;
+  uint256 private constant MAX_BATCH_TOTAL_OPS = 50;
   uint256 private constant MAX_RESERVE_TO_COLLATERAL_PAIRS = 64;
   bytes4 private constant SUPPORTS_ARGUMENT_TIMESTAMPS_SELECTOR = bytes4(keccak256("supportsArgumentTimestamps()"));
   bytes4 private constant APPLY_BATCH_WITH_ARGUMENT_TIMESTAMPS_SELECTOR =
@@ -345,7 +346,7 @@ contract Depository is ReentrancyGuardLite {
       batch.disputeFinalizations.length +
       batch.externalTokenToReserve.length +
       batch.reserveToExternalToken.length +
-      batch.revealSecrets.length > 50
+      batch.revealSecrets.length > MAX_BATCH_TOTAL_OPS
     ) revert E10();
 
     if (batch.flashloans.length > MAX_BATCH_FLASHLOANS) revert E10();

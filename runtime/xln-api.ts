@@ -138,6 +138,7 @@ import type {
   RuntimeInput,
   EntityInput,
   EntityState,
+  AccountMachine,
 } from './types';
 import type {
   EncryptedRuntimeRecoveryBundleV1,
@@ -298,6 +299,13 @@ export interface XLNModule {
     params: CrossJurisdictionSwapSubmitParams,
   ) => Promise<CrossJurisdictionSwapSubmitResult>;
   setDeltaTransformerAddress?: (address: string) => void;
+  buildDisputeArgumentsForSnapshot?: (
+    account: AccountMachine,
+    entityState: EntityState,
+    counterpartyEntityId: string,
+    proofbodyHash: string,
+    options: { secretsSide: 'left' | 'right' | 'none' },
+  ) => { leftArguments: string; rightArguments: string };
 
   // Identity system (from ids.ts)
   parseReplicaKey: (keyString: string) => ReplicaKey;

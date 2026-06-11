@@ -412,14 +412,25 @@ export const runWatchtowerSweep = async (
         disputeTimeout,
         disputeStartBlock,
       );
+      // In counter-dispute mode Solidity requires the starter side to equal the
+      // blob committed in DisputeStartedV2. The tower remedy intentionally stores
+      // only the watched/finalizer side because the tower learns the actual
+      // starter side from the event. Reusing remedy.left/right blindly can make a
+      // valid transformer counter-dispute fail Account.requireStarterArguments.
+      const leftArguments = disputeContext.startedByLeft
+        ? disputeContext.starterIncrementedArguments
+        : remedy.latestProof.leftArguments;
+      const rightArguments = disputeContext.startedByLeft
+        ? remedy.latestProof.rightArguments
+        : disputeContext.starterIncrementedArguments;
       const finalization = {
         counterentity: remedy.latestProof.counterentity,
         initialNonce: disputeContext.initialNonce,
         finalNonce: remedy.latestProof.finalNonce,
         initialProofbodyHash: disputeContext.initialProofbodyHash,
         finalProofbody: remedy.latestProof.finalProofbody,
-        leftArguments: remedy.latestProof.leftArguments,
-        rightArguments: remedy.latestProof.rightArguments,
+        leftArguments,
+        rightArguments,
         starterInitialArguments: disputeContext.starterInitialArguments,
         starterIncrementedArguments: disputeContext.starterIncrementedArguments,
         sig: remedy.latestProof.sig,

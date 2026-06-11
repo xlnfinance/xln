@@ -358,11 +358,11 @@ export async function proposeAccountFrame(
     captureDisputeArgumentSnapshot(
       clonedMachine,
       proofResult.proofBodyHash,
-      clonedMachine.proofHeader.nonce,
-      proofResult.proofBodyStruct,
-      { appliedAccountTxs: validTxs },
-    ),
-  );
+	      clonedMachine.proofHeader.nonce,
+	      proofResult.proofBodyStruct,
+	      { appliedAccountTxs: validTxs, appliedFrameHeight: newFrame.height },
+	    ),
+	  );
 
   // Settlements are handled via SettlementWorkspace flow (entity-tx/handlers/settle.ts).
 

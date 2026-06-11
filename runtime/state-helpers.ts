@@ -14,6 +14,8 @@ import type {
   Env,
   LogCategory,
 } from './types';
+import type { DisputeArgumentSnapshot } from './dispute-arguments';
+import type { ProofBodyStruct } from '../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { HEAVY_LOGS } from './utils';
 import { validateEntityState } from './validation-utils';
 import { safeStringify } from './serialization-utils';
@@ -304,6 +306,83 @@ export function cloneAccountFrame(frame: AccountFrame): AccountFrame {
   }
 }
 
+const isProofBodyStructLike = (value: unknown): value is ProofBodyStruct => {
+  if (!value || typeof value !== 'object') return false;
+  const candidate = value as Record<string, unknown>;
+  return (
+    Array.isArray(candidate['offdeltas']) &&
+    Array.isArray(candidate['tokenIds']) &&
+    Array.isArray(candidate['transformers'])
+  );
+};
+
+const cloneProofBodyStruct = (proofBody: unknown): unknown => {
+  if (!isProofBodyStructLike(proofBody)) return proofBody;
+  return {
+    offdeltas: [...proofBody.offdeltas],
+    tokenIds: [...proofBody.tokenIds],
+    transformers: proofBody.transformers.map((transformer) => ({
+      transformerAddress: transformer.transformerAddress,
+      encodedBatch: transformer.encodedBatch,
+      allowances: transformer.allowances.map((allowance) => ({ ...allowance })),
+    })),
+  } satisfies ProofBodyStruct;
+};
+
+const cloneDisputeArgumentSnapshot = (
+  snapshot: DisputeArgumentSnapshot,
+): DisputeArgumentSnapshot => ({
+  proofbodyHash: snapshot.proofbodyHash,
+  nonce: snapshot.nonce,
+  side: snapshot.side,
+  proofBodyStruct: cloneProofBodyStruct(snapshot.proofBodyStruct) as ProofBodyStruct,
+  ...(snapshot.appliedFrameHeight !== undefined ? { appliedFrameHeight: snapshot.appliedFrameHeight } : {}),
+  plan: {
+    paymentHashlocks: [...snapshot.plan.paymentHashlocks],
+    leftSwapOfferIds: [...snapshot.plan.leftSwapOfferIds],
+    rightSwapOfferIds: [...snapshot.plan.rightSwapOfferIds],
+    leftPullIds: [...snapshot.plan.leftPullIds],
+    rightPullIds: [...snapshot.plan.rightPullIds],
+  },
+  ...(snapshot.appliedSwapFillFingerprints
+    ? { appliedSwapFillFingerprints: [...snapshot.appliedSwapFillFingerprints] }
+    : {}),
+});
+
+const cloneDisputeEvidenceIntoAccount = (
+  target: AccountMachine,
+  source: AccountMachine,
+): void => {
+  // These two maps deliberately contain different evidence:
+  // - disputeProofBodiesByHash is signed-state evidence revealed to Solidity.
+  // - disputeArgumentSnapshotsByHash is runtime-only positional calldata plan.
+  //
+  // Never let a generic clone preserve shared object aliases between them. A
+  // corrupted clone can make a proof-body lookup return a snapshot object, which
+  // then disables counter-dispute finalization or pairs wrong arguments with a
+  // signed proof.
+  if (source.disputeProofBodiesByHash) {
+    target.disputeProofBodiesByHash = Object.fromEntries(
+      Object.entries(source.disputeProofBodiesByHash).map(([hash, proofBody]) => [
+        hash,
+        cloneProofBodyStruct(proofBody),
+      ]),
+    );
+  } else {
+    delete target.disputeProofBodiesByHash;
+  }
+  if (source.disputeArgumentSnapshotsByHash) {
+    target.disputeArgumentSnapshotsByHash = Object.fromEntries(
+      Object.entries(source.disputeArgumentSnapshotsByHash).map(([hash, snapshot]) => [
+        hash,
+        cloneDisputeArgumentSnapshot(snapshot),
+      ]),
+    );
+  } else {
+    delete target.disputeArgumentSnapshotsByHash;
+  }
+};
+
 const cloneBatchHistoryEntry = (entry: CompletedBatch): CompletedBatch => {
   const cloned: CompletedBatch = { ...entry };
   if (entry.batch) {
@@ -348,7 +427,9 @@ export function cloneEntityState(entityState: EntityState, forSnapshot: boolean 
       cloned.jBatchState = cloneJBatchState(entityState.jBatchState);
     }
     cloneCrossJurisdictionRoutesInState(cloned);
-    for (const account of cloned.accounts.values()) {
+    for (const [accountId, account] of cloned.accounts.entries()) {
+      const sourceAccount = entityState.accounts.get(accountId);
+      if (sourceAccount) cloneDisputeEvidenceIntoAccount(account, sourceAccount);
       cloneCrossJurisdictionRoutesInAccount(account);
     }
 
@@ -602,7 +683,9 @@ export function cloneAccountMachine(account: AccountMachine, forSnapshot: boolea
     const { clonedForValidation, ...accountWithoutCloned } = account;
     void clonedForValidation;
     try {
-      return structuredClone(accountWithoutCloned) as AccountMachine;
+      const cloned = structuredClone(accountWithoutCloned) as AccountMachine;
+      cloneDisputeEvidenceIntoAccount(cloned, account);
+      return cloned;
     } catch {
       return manualCloneAccountMachine(account, true);
     }
@@ -612,6 +695,7 @@ export function cloneAccountMachine(account: AccountMachine, forSnapshot: boolea
   try {
     const cloned = structuredClone(account);
     setAccountFrameHistoryView(cloned, getAccountFrameHistoryView(account));
+    cloneDisputeEvidenceIntoAccount(cloned, account);
     cloneCrossJurisdictionRoutesInAccount(cloned);
     return cloned;
   } catch (error) {
@@ -764,12 +848,7 @@ function manualCloneAccountMachine(account: AccountMachine, skipClonedForValidat
   if (account.disputeProofNoncesByHash) {
     result.disputeProofNoncesByHash = { ...account.disputeProofNoncesByHash };
   }
-  if (account.disputeProofBodiesByHash) {
-    result.disputeProofBodiesByHash = { ...account.disputeProofBodiesByHash };
-  }
-  if (account.disputeArgumentSnapshotsByHash) {
-    result.disputeArgumentSnapshotsByHash = { ...account.disputeArgumentSnapshotsByHash };
-  }
+  cloneDisputeEvidenceIntoAccount(result, account);
   if (account.currentFrameHanko) {
     result.currentFrameHanko = account.currentFrameHanko;
   }

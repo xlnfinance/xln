@@ -26,6 +26,7 @@ export type DisputeArgumentSnapshot = {
   side: DisputeArgumentSide;
   proofBodyStruct: ProofBodyStruct;
   plan: DisputeArgumentPlan;
+  appliedFrameHeight?: number;
   appliedSwapFillFingerprints?: string[];
 };
 
@@ -68,8 +69,9 @@ const swapFillFingerprint = (tx: Extract<AccountTx, { type: 'swap_resolve' }>): 
   const data = tx.data;
   // A proof snapshot records fills already applied to that proof body. While
   // building dispute calldata later, the same pending frame may still be
-  // present locally; matching by the economic payload prevents that fill from
-  // being applied twice to the proof's remaining swap slot.
+  // present locally. We use this economic fingerprint only together with the
+  // applied frame height; value alone is not identity because two later fills can
+  // legitimately have identical amounts.
   //
   // Counterexample: hub sends 50%, then later signs a state where total progress
   // is 75%, while the user is offline. If the 50% tx remains in pendingFrame and
@@ -98,22 +100,42 @@ const collectAppliedSwapFillFingerprints = (accountTxs: readonly AccountTx[] | u
 
 const buildPendingSwapFillRatios = (
   account: AccountMachine,
-  plan: DisputeArgumentPlan,
-  appliedSwapFillFingerprints: readonly string[] | undefined,
+  snapshot: DisputeArgumentSnapshot,
 ): Map<OfferId, number> => {
   const ratios = new Map<OfferId, number>();
+  const { plan } = snapshot;
   const planned = new Set([...plan.leftSwapOfferIds, ...plan.rightSwapOfferIds]);
   if (planned.size === 0) return ratios;
-  const alreadyApplied = new Set(appliedSwapFillFingerprints ?? []);
-  for (const tx of [...(account.pendingFrame?.accountTxs ?? []), ...(account.mempool ?? [])]) {
+  const alreadyApplied = new Set(snapshot.appliedSwapFillFingerprints ?? []);
+  const pendingFrameHeight = account.pendingFrame?.height;
+  const pendingFrameTxs = account.pendingFrame?.accountTxs ?? [];
+  const shouldSkipAppliedPendingFrame =
+    snapshot.appliedFrameHeight !== undefined &&
+    pendingFrameHeight === snapshot.appliedFrameHeight;
+  for (const tx of pendingFrameTxs) {
     if (tx.type !== 'swap_resolve') continue;
     if (!planned.has(tx.data.offerId)) continue;
-    if (alreadyApplied.has(swapFillFingerprint(tx))) continue;
+    if (
+      snapshot.appliedFrameHeight === undefined &&
+      alreadyApplied.has(swapFillFingerprint(tx))
+    ) {
+      throw new Error(`DISPUTE_ARGUMENT_APPLIED_FRAME_HEIGHT_MISSING:${snapshot.proofbodyHash}`);
+    }
+    if (shouldSkipAppliedPendingFrame && alreadyApplied.has(swapFillFingerprint(tx))) continue;
     const offerId = asOfferId(tx.data.offerId);
     if (ratios.has(offerId)) {
       // Two unresolved fills for the same positional offer are ambiguous. Do
       // not guess "last wins": a dispute argument must correspond to one exact
       // signed proof body, or we fail before producing unsafe calldata.
+      throw new Error(`DISPUTE_ARGUMENT_SWAP_FILL_AMBIGUOUS:${tx.data.offerId}`);
+    }
+    ratios.set(offerId, tx.data.fillRatio);
+  }
+  for (const tx of account.mempool ?? []) {
+    if (tx.type !== 'swap_resolve') continue;
+    if (!planned.has(tx.data.offerId)) continue;
+    const offerId = asOfferId(tx.data.offerId);
+    if (ratios.has(offerId)) {
       throw new Error(`DISPUTE_ARGUMENT_SWAP_FILL_AMBIGUOUS:${tx.data.offerId}`);
     }
     ratios.set(offerId, tx.data.fillRatio);
@@ -182,7 +204,7 @@ export function captureDisputeArgumentSnapshot(
   proofbodyHash: string,
   nonce: number,
   proofBodyStruct: ProofBodyStruct,
-  options: { appliedAccountTxs?: readonly AccountTx[] } = {},
+  options: { appliedAccountTxs?: readonly AccountTx[]; appliedFrameHeight?: number } = {},
 ): DisputeArgumentSnapshot {
   // Capture the positional argument plan at the same moment the proof body is
   // signed. Later dispute code must follow this plan; current account maps may
@@ -215,6 +237,7 @@ export function captureDisputeArgumentSnapshot(
     side: account.leftEntity === account.proofHeader.fromEntity ? 'left' : 'right',
     proofBodyStruct,
     plan: { paymentHashlocks, leftSwapOfferIds, rightSwapOfferIds, leftPullIds, rightPullIds },
+    ...(options.appliedFrameHeight !== undefined ? { appliedFrameHeight: options.appliedFrameHeight } : {}),
     appliedSwapFillFingerprints: collectAppliedSwapFillFingerprints(options.appliedAccountTxs),
   };
 }
@@ -252,11 +275,7 @@ export function buildDisputeArgumentsForSnapshot(
   // treated as adversarial optional evidence: malformed argument blobs become
   // empty/no-op so the sender cannot block finalization of unrelated claims.
   const snapshot = requireDisputeArgumentSnapshot(account, proofbodyHash, 'build');
-  const fillRatios = buildPendingSwapFillRatios(
-    account,
-    snapshot.plan,
-    snapshot.appliedSwapFillFingerprints,
-  );
+  const fillRatios = buildPendingSwapFillRatios(account, snapshot);
   const resolves = collectPullResolves(account);
   const leftFillRatios = snapshot.plan.leftSwapOfferIds.map((offerId) => fillRatios.get(asOfferId(offerId)) ?? 0);
   const rightFillRatios = snapshot.plan.rightSwapOfferIds.map((offerId) => fillRatios.get(asOfferId(offerId)) ?? 0);
