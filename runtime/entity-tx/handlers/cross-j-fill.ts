@@ -1,14 +1,9 @@
 import {
   requireCrossJurisdictionFillProgress,
-  withCanonicalCrossJurisdictionRouteHash,
 } from '../../cross-jurisdiction';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import type { EntityInput, EntityState, EntityTx } from '../../types';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
-import {
-  findCrossJurisdictionOfferRoute,
-  mergeCrossJurisdictionRoute,
-} from '../cross-jurisdiction-helpers';
 import type { MempoolOp } from './account';
 
 type CrossJurisdictionFillNoticeTx = Extract<EntityTx, { type: 'crossJurisdictionFillNotice' }>;
@@ -47,19 +42,16 @@ export const handleCrossJurisdictionFillNoticeEntityTx = (
     throw new Error(`CROSS_J_FILL_NOTICE_ROUTE_MISSING: order=${orderId}`);
   }
 
-  const offerRoute = findCrossJurisdictionOfferRoute(newState, orderId);
-  if (offerRoute) {
-    route = mergeCrossJurisdictionRoute(route, withCanonicalCrossJurisdictionRouteHash(offerRoute.route));
-    newState.crossJurisdictionSwaps ||= new Map();
-    newState.crossJurisdictionSwaps.set(orderId, route);
-  }
-
+  // Fill notices are account writes, not book repairs. The book owner may create
+  // a match, but only the source hub owns the source bilateral account that can
+  // commit `cross_swap_fill_ack`. Do not rehydrate/merge from account offer state
+  // here: a missing or stale entity route is corruption and must fail loudly.
   const currentEntityId = normalizeEntityRef(newState.entityId);
   const routeBookOwner = normalizeEntityRef(route.bookOwnerEntityId || route.source.counterpartyEntityId || route.hubEntityId);
   const routeSourceHub = normalizeEntityRef(route.source.counterpartyEntityId);
-  if (routeBookOwner !== currentEntityId && routeSourceHub !== currentEntityId) {
+  if (routeSourceHub !== currentEntityId) {
     throw new Error(
-      `CROSS_J_FILL_NOTICE_WRONG_ENTITY: order=${orderId} current=${newState.entityId} owner=${routeBookOwner} sourceHub=${routeSourceHub}`,
+      `CROSS_J_FILL_NOTICE_SOURCE_HUB_REQUIRED: order=${orderId} current=${newState.entityId} owner=${routeBookOwner} sourceHub=${routeSourceHub}`,
     );
   }
 

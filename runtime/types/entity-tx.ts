@@ -281,53 +281,53 @@ export type EntityTx =
 	        observedAt?: number;
 	      };
 	    }
-	  | {
-	      type: 'orderbookSweepCrossJurisdiction';
-	      data: {
-	        reason?: string;
-	      };
-	    }
-		  | {
-		      type: 'admitCrossJurisdictionBookOrder';
-		      data: {
-		        route: CrossJurisdictionSwapRoute;
-		        receipt: CrossJurisdictionBookAdmissionReceipt;
-		        reason?: string;
-		      };
-		    }
-		  | {
-		      type: 'applyCrossJurisdictionBookProgress';
-		      data: {
-		        orderId: string;
-		        sourceEntityId: string;
-		        fillSeq: number;
-		        incrementalSourceAmount: bigint;
-		        incrementalTargetAmount: bigint;
-		        cumulativeSourceAmount: bigint;
-		        cumulativeTargetAmount: bigint;
-		        cumulativeFillRatio: number; // Coarse 0-65535 compatibility/dispute ratio.
-		        fillNumerator?: bigint;
-		        fillDenominator?: bigint;
-		        priceImprovementMode?: 'source_savings' | 'target_bonus' | 'none';
-		        priceImprovementAmount?: bigint;
-		        priceImprovementTokenId?: number;
-		        reason?: string;
-		      };
-		    }
-		  | {
-		      type: 'removeCrossJurisdictionBookOrder';
-		      data: {
-		        orderId: string;
-	        sourceEntityId: string;
-	        route?: CrossJurisdictionSwapRoute;
-	        reason?: string;
-	      };
-	    }
-	  | {
-	      type: 'disputeFinalize';
-	      data: {
+  | {
+      type: 'orderbookSweepCrossJurisdiction';
+      data: {
+        reason?: string;
+      };
+    }
+  | {
+      type: 'admitCrossJurisdictionBookOrder';
+      data: {
+        route: CrossJurisdictionSwapRoute;
+        receipt: CrossJurisdictionBookAdmissionReceipt;
+        reason?: string;
+      };
+    }
+  | {
+      type: 'applyCrossJurisdictionBookProgress';
+      data: {
+        orderId: string;
+        sourceEntityId: string;
+        fillSeq: number;
+        incrementalSourceAmount: bigint;
+        incrementalTargetAmount: bigint;
+        cumulativeSourceAmount: bigint;
+        cumulativeTargetAmount: bigint;
+        cumulativeFillRatio: number; // Coarse 0-65535 compatibility/dispute ratio.
+        fillNumerator?: bigint;
+        fillDenominator?: bigint;
+        priceImprovementMode?: 'source_savings' | 'target_bonus' | 'none';
+        priceImprovementAmount?: bigint;
+        priceImprovementTokenId?: number;
+        reason?: string;
+      };
+    }
+  | {
+      type: 'removeCrossJurisdictionBookOrder';
+      data: {
+        orderId: string;
+        sourceEntityId: string;
+        route?: CrossJurisdictionSwapRoute;
+        reason?: string;
+      };
+    }
+  | {
+      type: 'disputeFinalize';
+      data: {
         counterpartyEntityId: string;
-        cooperative?: boolean;  // Ignored compatibility flag. disputeFinalize is unilateral-only.
+        cooperative?: boolean;  // Unsupported compatibility flag. Finalize is unilateral timeout or signed counter-proof.
         useOnchainRegistry?: boolean; // Optional HTLC reveal via on-chain registry
         description?: string;
       };

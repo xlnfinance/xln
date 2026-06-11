@@ -1302,8 +1302,36 @@ export async function buildDelayedLastResortAppointmentsForTower(
 
       const finalProofbody = structuredClone(proofBody as Record<string, unknown>);
       const transformers = finalProofbody['transformers'];
+      let leftArguments = '0x';
+      let rightArguments = '0x';
       if (Array.isArray(transformers) && transformers.length > 0) {
-        throw new Error('WATCHTOWER_V2_TRANSFORMER_ARGUMENTS_REQUIRED');
+        if (typeof xln.buildDisputeArgumentsForSnapshot !== 'function') {
+          throw new Error('WATCHTOWER_V2_ARGUMENT_BUILDER_UNAVAILABLE');
+        }
+        const leftEntityId = normalizeEntityId(account.leftEntity);
+        const rightEntityId = normalizeEntityId(account.rightEntity);
+        const watchedSide = leftEntityId === entityId
+          ? 'left'
+          : rightEntityId === entityId
+            ? 'right'
+            : null;
+        if (!watchedSide) {
+          throw new Error(`WATCHTOWER_V2_ACCOUNT_SIDE_UNKNOWN:${entityId}:${counterpartyId}`);
+        }
+        // The remedy is a counter-dispute payload for the watched entity. Store
+        // only the watched side arguments here. The dispute starter's side is
+        // bound by DisputeStartedV2 and must be injected by tower action from the
+        // on-chain event, otherwise a stale/local guess can fail the hash check or
+        // reveal the wrong transformer evidence.
+        const builtArguments = xln.buildDisputeArgumentsForSnapshot(
+          account,
+          replica.state,
+          counterpartyId,
+          proofBodyHash,
+          { secretsSide: watchedSide },
+        );
+        if (watchedSide === 'left') leftArguments = builtArguments.leftArguments;
+        else rightArguments = builtArguments.rightArguments;
       }
       const remedy: TowerCounterDisputeRemedyV2 = {
         version: 2,
@@ -1320,8 +1348,8 @@ export async function buildDelayedLastResortAppointmentsForTower(
           counterentity: counterpartyId,
           finalNonce: proofNonce,
           finalProofbody,
-          leftArguments: '0x',
-          rightArguments: '0x',
+          leftArguments,
+          rightArguments,
           starterIncrementedArguments: '0x',
           sig: proofHanko,
         },

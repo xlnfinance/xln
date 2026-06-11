@@ -1894,6 +1894,49 @@ describe('cross-jurisdiction hashledger swap', () => {
     expect(canonical?.cumulativeFillRatio).toBeUndefined();
   });
 
+  test('fill notice is rejected on book owner when source hub owns the account ack', async () => {
+    const env = createEmptyEnv('cross-fill-notice-book-owner-reject');
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const eth = makeJurisdiction('Ethereum', 1, '11', '12');
+    const base = makeJurisdiction('Base', 8453, '21', '22');
+    const sourceUser = entity('b1');
+    const sourceHub = entity('b2');
+    const targetHub = entity('b3');
+    const targetUser = entity('b4');
+    const state = makeState(targetHub, addr('b3'), base, targetUser);
+    const route = {
+      ...buildPreparedCrossJurisdictionRoute({
+        orderId: 'cross-fill-book-owner-reject',
+        makerEntityId: sourceUser,
+        hubEntityId: sourceHub,
+        source: { jurisdiction: jref(eth), entityId: sourceUser, counterpartyEntityId: sourceHub, tokenId: 1, amount: 1_000n },
+        target: { jurisdiction: jref(base), entityId: targetHub, counterpartyEntityId: targetUser, tokenId: 1, amount: 900n },
+        status: 'resting',
+        createdAt: env.timestamp,
+        updatedAt: env.timestamp,
+        expiresAt: 70_000,
+      }, { runtimeSeed: 'cross-fill-book-owner-reject', sourceDisputeDelayMs: 5_000, now: env.timestamp }),
+      bookOwnerEntityId: targetHub,
+      status: 'resting' as const,
+    };
+    state.crossJurisdictionSwaps?.set(route.orderId, route);
+
+    await expect(applyEntityTx(env, state, {
+      type: 'crossJurisdictionFillNotice',
+      data: {
+        orderId: route.orderId,
+        fillSeq: 1,
+        incrementalSourceAmount: 500n,
+        incrementalTargetAmount: 450n,
+        cumulativeSourceAmount: 500n,
+        cumulativeTargetAmount: 450n,
+        cumulativeFillRatio: 32_768,
+        pairId: route.venueId || '',
+      },
+    })).rejects.toThrow('CROSS_J_FILL_NOTICE_SOURCE_HUB_REQUIRED');
+  });
+
   test('committed fill notice frame removes terminal source offer on the remote owner account', async () => {
     const seed = 'cross-fill-notice-owner-roundtrip seed alpha beta';
     const env = createEmptyEnv(seed);

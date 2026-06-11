@@ -3255,6 +3255,7 @@ export {
   buildCrossJurisdictionPullReveal,
   getCrossJurisdictionPrivateSeed,
 } from './cross-jurisdiction';
+export { buildDisputeArgumentsForSnapshot } from './dispute-arguments';
 
 // === NAME RESOLUTION WRAPPERS (override imports) ===
 // Runtime no longer keeps a module-global env/db; these pure wrappers expose
