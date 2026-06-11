@@ -283,7 +283,7 @@ const removeDisputedAccountOrdersFromBook = (
   outputs: EntityInput[],
   counterpartyEntityId: string,
   account: AccountMachine,
-): void => {
+): { localRemoved: number; remoteQueued: number } => {
   let localRemoved = 0;
   let remoteQueued = 0;
   for (const [offerId, offer] of account.swapOffers ?? new Map<string, SwapOffer>()) {
@@ -297,7 +297,120 @@ const removeDisputedAccountOrdersFromBook = (
       `⚔️ Dispute removed ${localRemoved} local orderbook row(s), queued ${remoteQueued} remote row removal(s)`,
     );
   }
+  return { localRemoved, remoteQueued };
 };
+
+const isAccountBusinessTx = (txType: string): boolean =>
+  txType !== 'j_event_claim' && txType !== 'reopen_disputed';
+
+const isDisputeEvidenceTx = (txType: string): boolean =>
+  txType === 'pull_resolve' || txType === 'swap_resolve';
+
+const isMutableAccountTxDuringPrepare = (txType: string): boolean =>
+  isAccountBusinessTx(txType) && !isDisputeEvidenceTx(txType);
+
+const collectHtlcRoutesAwaitingSecrets = (state: EntityState, counterpartyEntityId: string): string[] => {
+  const counterparty = String(counterpartyEntityId || '').toLowerCase();
+  const pending: string[] = [];
+  for (const [hashlock, route] of state.htlcRoutes?.entries() ?? []) {
+    if (route.secret) continue;
+    if (
+      String(route.inboundEntity || '').toLowerCase() !== counterparty &&
+      String(route.outboundEntity || '').toLowerCase() !== counterparty
+    ) {
+      continue;
+    }
+    pending.push(hashlock);
+  }
+  return pending;
+};
+
+const collectDisputeEvidenceReadinessIssues = (
+  state: EntityState,
+  counterpartyEntityId: string,
+  account: AccountMachine,
+  now: number,
+): string[] => {
+  const issues: string[] = [];
+  const readyAfter = Number(account.disputePrepare?.readyAfter ?? 0);
+  if (readyAfter > now) issues.push(`cooldown:${readyAfter - now}ms`);
+  if (account.pendingFrame) issues.push(`pendingFrame:${account.pendingFrame.height}`);
+  if (account.pendingAccountInput) issues.push('pendingAccountInput');
+  const businessMempool = (account.mempool ?? [])
+    .map((tx) => tx.type)
+    .filter(isMutableAccountTxDuringPrepare);
+  if (businessMempool.length > 0) issues.push(`mempool:${businessMempool.join(',')}`);
+  const awaitingSecrets = collectHtlcRoutesAwaitingSecrets(state, counterpartyEntityId);
+  if (awaitingSecrets.length > 0) issues.push(`htlcAwaitingSecret:${awaitingSecrets.length}`);
+  return issues;
+};
+
+const markAccountDisputePreparing = (
+  state: EntityState,
+  account: AccountMachine,
+  description: string,
+  minCooldownMs: number,
+): void => {
+  const startedAt = Number(state.timestamp ?? 0);
+  account.status = 'dispute_preparing';
+  account.disputePrepare = {
+    startedAt,
+    readyAfter: startedAt + Math.max(0, Math.floor(minCooldownMs)),
+    reason: description || 'prepare-dispute',
+  };
+
+  // Freeze optimistic account traffic. Secrets observed later through
+  // jurisdiction events can still be added to argument builders, but ordinary
+  // bilateral proposals must not keep changing the proof/argument pair while
+  // we are preparing an adversarial on-chain path.
+  account.mempool = (account.mempool || []).filter(
+    (tx) => tx.type === 'j_event_claim' || tx.type === 'reopen_disputed' || isDisputeEvidenceTx(tx.type),
+  );
+  delete account.pendingFrame;
+  delete account.pendingAccountInput;
+  delete account.clonedForValidation;
+  account.rollbackCount = 0;
+  delete account.lastRollbackFrameHash;
+};
+
+/**
+ * Handle prepareDispute - local cleanup/cooldown before any on-chain dispute op.
+ *
+ * This is intentionally not a contract action. It removes matchable orders and
+ * stops normal bilateral account traffic so transformer arguments can settle
+ * before disputeStart/counter-finalize calldata is committed. The jurisdiction
+ * only sees the later disputeStart/disputeFinalize, once readiness checks pass.
+ */
+export async function handlePrepareDispute(
+  entityState: EntityState,
+  entityTx: Extract<EntityTx, { type: 'prepareDispute' }>,
+  env: Env,
+): Promise<{ newState: EntityState; outputs: EntityInput[] }> {
+  const { counterpartyEntityId, description = 'prepare-dispute', minCooldownMs = 0 } = entityTx.data;
+  const newState = cloneEntityState(entityState);
+  const outputs: EntityInput[] = [];
+  const account = newState.accounts.get(counterpartyEntityId);
+  if (!account) {
+    addMessage(newState, `❌ No account with ${counterpartyEntityId.slice(-4)} - cannot prepare dispute`);
+    return { newState, outputs };
+  }
+  if (account.activeDispute || (account.status ?? 'active') === 'disputed') {
+    addMessage(newState, `ℹ️ Dispute already active/queued for ${counterpartyEntityId.slice(-4)}`);
+    return { newState, outputs };
+  }
+
+  removeDisputedAccountOrdersFromBook(env, newState, outputs, counterpartyEntityId, account);
+  markAccountDisputePreparing(newState, account, description, minCooldownMs);
+
+  const issues = collectDisputeEvidenceReadinessIssues(newState, counterpartyEntityId, account, Number(newState.timestamp ?? 0));
+  addMessage(
+    newState,
+    issues.length > 0
+      ? `⏳ Dispute prepared vs ${counterpartyEntityId.slice(-4)}; waiting for stable evidence: ${issues.join('; ')}`
+      : `⏳ Dispute prepared vs ${counterpartyEntityId.slice(-4)}; evidence currently stable, queue disputeStart when ready`,
+  );
+  return { newState, outputs };
+}
 
 /**
  * Handle disputeStart - Entity initiates dispute with signed proof
@@ -345,8 +458,22 @@ export async function handleDisputeStart(
     return { newState, outputs };
   }
 
-  if ((account.status ?? 'active') !== 'active') {
+  const accountStatus = account.status ?? 'active';
+  if (accountStatus === 'disputed') {
     addMessage(newState, `❌ Account with ${counterpartyEntityId.slice(-4)} is disputed - reopen required`);
+    return { newState, outputs };
+  }
+  const readinessIssues = collectDisputeEvidenceReadinessIssues(
+    newState,
+    counterpartyEntityId,
+    account,
+    Number(newState.timestamp ?? 0),
+  );
+  if (readinessIssues.length > 0) {
+    addMessage(
+      newState,
+      `⏳ disputeStart blocked until evidence is stable for ${counterpartyEntityId.slice(-4)}: ${readinessIssues.join('; ')}`,
+    );
     return { newState, outputs };
   }
   if (hasQueuedDisputeStart(newState, counterpartyEntityId)) {
@@ -632,6 +759,7 @@ export async function handleDisputeStart(
   // This is unilateral safety state on the local entity: no further business
   // frames should progress on this account while dispute is in-flight.
   account.status = 'disputed';
+  delete account.disputePrepare;
   const beforeMempool = account.mempool?.length || 0;
   if (beforeMempool > 0) {
     account.mempool = (account.mempool || []).filter(

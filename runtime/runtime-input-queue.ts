@@ -1,5 +1,5 @@
 import { TIMING } from './constants';
-import type { Env, JInput, RoutedEntityInput, RuntimeInput, RuntimeTx } from './types';
+import type { EntityInput, Env, JInput, RuntimeInput, RuntimeTx } from './types';
 import { getWallClockMs } from './utils';
 
 export type RuntimeInputQueueDeps = {
@@ -7,7 +7,7 @@ export type RuntimeInputQueueDeps = {
   requestRuntimeLoopWake: (env: Env) => void;
 };
 
-const hasMeaningfulEnqueuedWork = (inputs?: RoutedEntityInput[], runtimeTxs?: RuntimeTx[]): boolean => {
+const hasMeaningfulEnqueuedWork = (inputs?: EntityInput[], runtimeTxs?: RuntimeTx[]): boolean => {
   if ((runtimeTxs?.length ?? 0) > 0) return true;
   return (inputs ?? []).some((input) => {
     const hasEntityTxs = (input.entityTxs?.length ?? 0) > 0;
@@ -46,7 +46,7 @@ const normalizeIngressTimestamp = (env: Env, explicitTimestamp?: number): number
 export const enqueueRuntimeInputs = (
   env: Env,
   deps: RuntimeInputQueueDeps,
-  inputs?: RoutedEntityInput[],
+  inputs?: EntityInput[],
   runtimeTxs?: RuntimeTx[],
   jInputs?: JInput[],
   explicitTimestamp?: number,

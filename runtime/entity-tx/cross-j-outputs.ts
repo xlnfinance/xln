@@ -1,4 +1,5 @@
 import type { EntityInput, EntityState, EntityTx, Env } from '../types';
+import { resolveEntityProposerId } from '../state-helpers';
 
 const normalizeEntityRef = (value: string): string => String(value || '').trim().toLowerCase();
 
@@ -16,11 +17,20 @@ export const buildCrossJurisdictionEntityOutput = (
   entityId: string,
   entityTxs: EntityTx[],
 ): EntityInput => {
-  const state = findLocalEntityState(env, entityId);
-  const signerId = state?.config?.validators?.[0];
+  const normalizedEntityId = normalizeEntityRef(entityId);
+  const state = findLocalEntityState(env, normalizedEntityId);
+  let signerId: string;
+  try {
+    signerId = resolveEntityProposerId(env, state?.entityId || normalizedEntityId, 'cross-j entity output');
+  } catch (error) {
+    throw new Error(
+      `CROSS_J_ENTITY_OUTPUT_SIGNER_MISSING: entity=${normalizedEntityId} ` +
+      `reason=${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
   return {
-    entityId: state?.entityId || normalizeEntityRef(entityId),
-    ...(signerId ? { signerId } : {}),
+    entityId: state?.entityId || normalizedEntityId,
+    signerId,
     entityTxs,
   };
 };

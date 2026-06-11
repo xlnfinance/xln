@@ -39,11 +39,14 @@
 import { ethers } from 'ethers';
 
 import type { HankoBytes, HankoClaim } from '../types';
+import { signDigestBytesWithPrivateKey } from '../account-crypto';
 import { createHash, randomBytes } from '../utils';
 
 const HANKO_DEBUG =
   typeof process !== 'undefined' &&
   /^(1|true)$/i.test(process.env['HANKO_DEBUG'] ?? process.env['RUNTIME_VERBOSE_LOGS'] ?? '');
+
+const ABI_CODER = ethers.AbiCoder.defaultAbiCoder();
 
 // Browser-compatible Buffer.concat replacement
 const bufferConcat = (buffers: Buffer[]): Buffer => {
@@ -89,35 +92,21 @@ export const createDirectHashSignature = async (hash: Buffer, privateKey: Buffer
       throw new Error(`Invalid hash length: ${hash.length} bytes (expected 32)`);
     }
 
-    // Sign the raw hash directly (no message prefix)
-    const hashHex = ethers.hexlify(hash);
-
-    // Verify hex is correct length (0x + 64 chars = 32 bytes)
-    if (hashHex.length !== 66) {
-      throw new Error(`Invalid hash hex length: ${hashHex.length} (expected 66 with 0x prefix)`);
-    }
-
-    // For direct hash signing, we need to use the signing key directly
-    const signingKey = new ethers.SigningKey(ethers.hexlify(privateKey));
-    const sig = signingKey.sign(hashHex);
-
-    // Convert to Buffer format
-    const r = ethers.getBytes(sig.r);
-    const s = ethers.getBytes(sig.s);
-    const v = sig.v;
-
-    const rPadded = new Uint8Array(32);
-    const sPadded = new Uint8Array(32);
-    rPadded.set(r, 32 - r.length);
-    sPadded.set(s, 32 - s.length);
+    // Sign the raw hash directly (no message prefix). Use the same noble
+    // secp256k1 path as account consensus instead of constructing an ethers
+    // SigningKey for every Hanko signature. The packed Hanko format still uses
+    // Ethereum v values (27/28), so on-chain ecrecover compatibility is unchanged.
+    const { signature, recovery } = signDigestBytesWithPrivateKey(privateKey, hash);
+    const v = 27 + recovery;
 
     if (HANKO_DEBUG) {
       console.log(
-        `🔑 Created signature: r=${ethers.hexlify(r).slice(0, 10)}..., s=${ethers.hexlify(s).slice(0, 10)}..., v=${v}`,
+        `🔑 Created signature: r=${ethers.hexlify(signature.slice(0, 32)).slice(0, 10)}..., ` +
+          `s=${ethers.hexlify(signature.slice(32, 64)).slice(0, 10)}..., v=${v}`,
       );
     }
 
-    return bufferConcat([Buffer.from(rPadded), Buffer.from(sPadded), Buffer.from([v])]);
+    return bufferConcat([Buffer.from(signature), Buffer.from([v])]);
   } catch (error) {
     console.error(`❌ Failed to create direct hash signature: ${error}`);
     throw error;
@@ -518,7 +507,7 @@ export const testFullCycle = async (): Promise<{ hanko: HankoBytes; abiEncoded: 
   }
 
   // Create ABI-encoded data for Solidity (match EP.sol struct - 4 fields only)
-  const abiEncoded = ethers.AbiCoder.defaultAbiCoder().encode(
+  const abiEncoded = ABI_CODER.encode(
     ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'],
     [
       [
@@ -556,7 +545,7 @@ export const testGasOptimization = async (): Promise<void> => {
   const recovered = await recoverHankoEntities(hanko, hashToSign);
 
   // Encode optimized data (yesEntities + noEntities + claims)
-  const optimizedEncoded = ethers.AbiCoder.defaultAbiCoder().encode(
+  const optimizedEncoded = ABI_CODER.encode(
     ['bytes32[]', 'bytes32[]', 'tuple(bytes32,uint256[],uint256[],uint256)[]'],
     [
       recovered.yesEntities.map(entity => '0x' + Buffer.from(entity).toString('hex')),

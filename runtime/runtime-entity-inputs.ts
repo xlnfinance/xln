@@ -9,7 +9,6 @@ import {
   resolveRuntimeIdForCrossJurisdictionEntity,
   type RuntimeEntityRoutingDeps,
 } from './runtime-entity-routing';
-import { resolveEntityProposerId } from './state-helpers';
 import { safeStringify } from './serialization-utils';
 import type { EntityInput, EntityReplica, Env, JInput, RoutedEntityInput } from './types';
 import { validateEntityOutput } from './validation-utils';
@@ -121,90 +120,17 @@ export const applyMergedEntityInputs = async (
       continue;
     }
 
-    let actualSignerId = entityInput.signerId;
-    const syntheticSignerHint = String(actualSignerId || '').toLowerCase();
-    if (
-      !actualSignerId ||
-      actualSignerId === '' ||
-      syntheticSignerHint === 'j-event' ||
-      syntheticSignerHint === 'system'
-    ) {
-      try {
-        actualSignerId = resolveEntityProposerId(env, entityInput.entityId, 'applyRuntimeInput');
-      } catch (error) {
-        if (env.scenarioMode || isReplay) {
-          throw error;
-        }
-        const message = error instanceof Error ? error.message : String(error);
-        env.error(
-          'network',
-          'DROP_ENTITY_INPUT_SIGNER_RESOLUTION_FAILED',
-          {
-            entityId: entityInput.entityId,
-            signerId: entityInput.signerId,
-            txTypes: (entityInput.entityTxs || []).map(tx => tx.type),
-            message,
-          },
-          entityInput.entityId,
-        );
-        continue;
-      }
-    }
+    const actualSignerId = entityInput.signerId.trim();
 
     assertRuntimeIngress(
       typeof actualSignerId === 'string' && actualSignerId.length > 0,
-      'RUNTIME_SIGNER_RESOLUTION_FAILED',
-      'Unable to resolve signerId for entity input',
+      'RUNTIME_SIGNER_MISSING',
+      'Entity input missing mandatory signerId',
       { entityId: entityInput.entityId, providedSignerId: entityInput.signerId },
     );
 
     let replicaKey = `${entityInput.entityId}:${actualSignerId}`;
     let entityReplica = env.eReplicas.get(replicaKey);
-    if (!entityReplica) {
-      try {
-        const proposerSignerId = resolveEntityProposerId(env, entityInput.entityId, 'applyRuntimeInput.recovery');
-        if (proposerSignerId !== actualSignerId) {
-          actualSignerId = proposerSignerId;
-          replicaKey = `${entityInput.entityId}:${actualSignerId}`;
-          entityReplica = env.eReplicas.get(replicaKey);
-          if (!entityReplica) {
-            const insensitiveMatch = findReplicaKeyInsensitive(env, entityInput.entityId, actualSignerId);
-            if (insensitiveMatch) {
-              replicaKey = insensitiveMatch;
-              entityReplica = env.eReplicas.get(insensitiveMatch);
-            }
-          }
-        }
-      } catch (error) {
-        if (env.scenarioMode || isReplay) {
-          throw error;
-        }
-        const message = error instanceof Error ? error.message : String(error);
-        const localReplicaStillExists = !!findReplicaKeyInsensitive(env, entityInput.entityId, null);
-        if (!localReplicaStillExists) {
-          const dropDetails = {
-            entityId: entityInput.entityId,
-            signerId: entityInput.signerId,
-            txTypes: (entityInput.entityTxs || []).map(tx => tx.type),
-            message,
-          };
-          env.error('network', 'DROP_ENTITY_INPUT_UNKNOWN_ENTITY', dropDetails, entityInput.entityId);
-          continue;
-        }
-        env.error(
-          'network',
-          'DROP_ENTITY_INPUT_SIGNER_RESOLUTION_FAILED',
-          {
-            entityId: entityInput.entityId,
-            signerId: entityInput.signerId,
-            txTypes: (entityInput.entityTxs || []).map(tx => tx.type),
-            message,
-          },
-          entityInput.entityId,
-        );
-        continue;
-      }
-    }
 
     if (!entityReplica) {
       const insensitiveMatch = findReplicaKeyInsensitive(env, entityInput.entityId, actualSignerId);
@@ -229,7 +155,7 @@ export const applyMergedEntityInputs = async (
         assertRuntimeIngress(
           false,
           'RUNTIME_REPLICA_NOT_FOUND',
-          'Entity input target replica missing after signer resolution',
+          'Entity input target replica missing for exact signerId',
           missingReplicaDetails,
         );
       }
@@ -272,16 +198,13 @@ const applyEntityInputToReplica = async (
 
   const normalizedInput: EntityInput = {
     entityId: entityInput.entityId,
+    signerId: actualSignerId,
     ...(entityInput.entityTxs ? { entityTxs: entityInput.entityTxs } : {}),
     ...(entityInput.proposedFrame ? { proposedFrame: entityInput.proposedFrame } : {}),
     ...(entityInput.hashPrecommits ? { hashPrecommits: entityInput.hashPrecommits } : {}),
   };
-  const normalizedInputWithSigner: EntityInput = {
-    ...normalizedInput,
-    signerId: actualSignerId,
-  };
   const appliedInput: RoutedEntityInput = {
-    ...normalizedInputWithSigner,
+    ...normalizedInput,
     signerId: actualSignerId,
   };
   if (isReplay) {
@@ -294,7 +217,7 @@ const applyEntityInputToReplica = async (
   const { newState, outputs, jOutputs, workingReplica } = await applyEntityInput(
     env,
     entityReplica,
-    normalizedInputWithSigner,
+    normalizedInput,
   );
   const {
     proposal: _oldProposal,
@@ -315,9 +238,10 @@ const applyEntityInputToReplica = async (
     nextReplica.validatorComputedState = workingReplica.validatorComputedState;
   }
 
+  const routedOutputs: RoutedEntityInput[] = [];
   outputs.forEach((output, index) => {
     try {
-      validateEntityOutput(output);
+      routedOutputs.push(validateEntityOutput(output));
     } catch (error) {
       logError('RUNTIME_TICK', `🚨 CRITICAL FINANCIAL ERROR: Invalid EntityOutput[${index}] from ${replicaKey}!`, {
         error: (error as Error).message,
@@ -327,7 +251,7 @@ const applyEntityInputToReplica = async (
     }
   });
 
-  return { appliedInput, nextReplica, outputs, jOutputs: jOutputs || [] };
+  return { appliedInput, nextReplica, outputs: routedOutputs, jOutputs: jOutputs || [] };
 };
 
 const findReplicaKeyInsensitive = (env: Env, entityId: string, signerId?: string | null): string | null => {

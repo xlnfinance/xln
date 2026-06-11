@@ -109,6 +109,12 @@ library Account {
     // off-chain. A maker can have fills applied/deleted between nonce N and
     // dispute start; pairing live arguments with an old proofbodyHash would
     // settle the wrong positional swap/pull slots.
+    //
+    // The runtime may run a local "prepare dispute" cooldown before calling
+    // this path: cancel book exposure, collect HTLC secrets, then freeze the
+    // exact bytes. Solidity intentionally does not know that lifecycle; adding
+    // order IDs, pull IDs, or readiness checks here would duplicate runtime
+    // state and make dispute gas depend on off-chain bookkeeping.
     return keccak256(abi.encodePacked(
       nonce,
       startedByLeft,

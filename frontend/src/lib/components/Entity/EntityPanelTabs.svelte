@@ -3321,13 +3321,18 @@
   }
 
   function confirmDisputeAction(
-    kind: 'start' | 'finalize',
+    kind: 'prepare' | 'start' | 'finalize',
     counterpartyEntityId: string,
   ): boolean {
     const label = pendingBatchEntityLabel(counterpartyEntityId);
+    if (kind === 'prepare') {
+      return confirm(
+        `Prepare dispute with ${label}?\n\nThis freezes normal account traffic, removes orderbook exposure, and waits for stable dispute evidence before any on-chain batch is queued.`,
+      );
+    }
     if (kind === 'start') {
       return confirm(
-        `Start on-chain dispute with ${label}?\n\nThis adds Dispute Start to the pending batch and freezes normal use of this account until resolved.`,
+        `Start on-chain dispute with ${label}?\n\nThis adds Dispute Start to the pending batch. Use it only after dispute preparation reports stable evidence.`,
       );
     }
     return confirm(
@@ -3370,6 +3375,14 @@
     return `${amount} ${token.symbol}`;
   }
 
+  async function confirmAndQueueDisputePrepare(
+    counterpartyEntityId: string,
+    description = 'dispute-prepare-from-configure',
+  ) {
+    if (!confirmDisputeAction('prepare', counterpartyEntityId)) return;
+    await queueDisputePrepare(counterpartyEntityId, description);
+  }
+
   async function confirmAndQueueDisputeStart(
     counterpartyEntityId: string,
     description = 'dispute-from-configure',
@@ -3382,6 +3395,34 @@
   async function confirmAndQueueDisputeFinalize(counterpartyEntityId: string, description = 'dispute-finalize-from-configure') {
     if (!confirmDisputeAction('finalize', counterpartyEntityId)) return;
     await queueDisputeFinalize(counterpartyEntityId, description);
+  }
+
+  async function queueDisputePrepare(
+    counterpartyEntityId: string,
+    description = 'dispute-prepare-from-configure',
+  ) {
+    const entityId = replica?.state?.entityId || tab.entityId;
+    const signerId = resolveEntitySigner(entityId, 'dispute-prepare');
+    if (!entityId) {
+      notifyUserActionError('dispute-prepare', 'Active entity missing for dispute prepare');
+      return;
+    }
+    if (!signerId) {
+      notifyUserActionError('dispute-prepare', 'Active signer missing for dispute prepare');
+      return;
+    }
+    if (!activeIsLive) { toasts.error('Dispute prepare requires LIVE mode'); return; }
+    try {
+      const env = requireRuntimeEnv(activeEnv, 'dispute-prepare');
+      await enqueueEntityInputs(env, [buildEntityInput(entityId, signerId, [{
+        type: 'prepareDispute' as const,
+        data: { counterpartyEntityId, description },
+      }])]);
+      toasts.success('Dispute prepared — orderbook exposure removed');
+    } catch (err) {
+      console.error('[EntityPanel] Dispute prepare failed:', err);
+      toasts.error(`Dispute prepare failed: ${(err as Error).message}`);
+    }
   }
 
   async function queueDisputeStart(
@@ -5484,7 +5525,7 @@
                   <div class="configure-token-card danger-card">
                     <h4 class="section-head">Dispute Account</h4>
                     <p class="muted">
-                      This queues a dispute operation into the pending batch. Once broadcast and finalized, this account becomes unusable until reopened.
+                      Dispute preparation first freezes local account traffic and removes orderbook exposure. Start the on-chain dispute only after evidence is stable.
                     </p>
                     {#if configureAccount?.activeDispute}
                       <p class="danger-note">
@@ -5498,22 +5539,10 @@
                       >
                         Add Dispute Finalize To Batch
                       </button>
-                    {:else}
+                    {:else if configureAccount?.status === 'dispute_preparing'}
                       <p class="danger-note">
-                        Starting a dispute freezes normal use of this account and should only be used for recovery or adversarial settlement.
+                        Dispute is prepared locally. Normal account traffic is frozen; orderbook exposure is being removed before on-chain calldata is committed.
                       </p>
-                      {#if crossJTargetRisk}
-                        <label class="danger-confirm-row">
-                          <input
-                            type="checkbox"
-                            bind:checked={unsafeCrossJTargetDisputeAccepted}
-                          />
-                          <span>
-                            I accept possible cross-jurisdiction loss up to {formatCrossJTargetDisputeRisk(crossJTargetRisk)}
-                            if the hub pulls source funds before the target account has pull arguments.
-                          </span>
-                        </label>
-                      {/if}
                       <button
                         class="btn-danger-batch"
                         data-testid="configure-dispute-start"
@@ -5530,6 +5559,33 @@
                         disabled={!activeIsLive}
                       >
                         Add Dispute Start To Batch
+                      </button>
+                    {:else}
+                      <p class="danger-note">
+                        Prepare first. This removes orders and stops normal account traffic without committing an on-chain dispute hash yet.
+                      </p>
+                      {#if crossJTargetRisk}
+                        <label class="danger-confirm-row">
+                          <input
+                            type="checkbox"
+                            bind:checked={unsafeCrossJTargetDisputeAccepted}
+                          />
+                          <span>
+                            I accept possible cross-jurisdiction loss up to {formatCrossJTargetDisputeRisk(crossJTargetRisk)}
+                            if the hub pulls source funds before the target account has pull arguments.
+                          </span>
+                        </label>
+                      {/if}
+                      <button
+                        class="btn-danger-batch"
+                        data-testid="configure-dispute-prepare"
+                        on:click={() => confirmAndQueueDisputePrepare(
+                          workspaceAccountId,
+                          'dispute-prepare-from-configure',
+                        )}
+                        disabled={!activeIsLive}
+                      >
+                        Prepare Dispute
                       </button>
                     {/if}
                   </div>

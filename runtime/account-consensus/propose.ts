@@ -16,7 +16,7 @@ import { createFrameHash, MAX_ACCOUNT_FRAME_TXS, MAX_FRAME_SIZE_BYTES } from '..
 import {
   assertNoUnilateralSettlementMutation,
   captureSettlementVector,
-  getDepositoryAddress,
+  getAccountDepositoryAddress,
   isAddress20,
   isEntityId32,
   shouldIncludeToken,
@@ -291,16 +291,6 @@ export async function proposeAccountFrame(
 
   if (!quiet) accountLog.debug('hanko.sign', { entity: shortId(signingEntityId), signer: shortId(signingSignerId) });
 
-  // Build hanko for account frame
-  const { signEntityHashes } = await import('../hanko/signing');
-  // Sign frame hash for bilateral consensus
-  const hankos = await signEntityHashes(env, signingEntityId, signingSignerId, [newFrame.stateHash]);
-  const frameHanko = hankos[0];
-  if (!frameHanko) {
-    return { success: false, error: 'Failed to build frame hanko', events };
-  }
-  accountMachine.currentFrameHanko = frameHanko;
-
   // Build dispute proof and sign it (CRITICAL: always sign dispute proof with every frame)
   // BUG FIX: Use clonedMachine (has NEW state after txs) NOT accountMachine (old state)
   if (!isEntityId32(clonedMachine.leftEntity) || !isEntityId32(clonedMachine.rightEntity)) {
@@ -314,7 +304,7 @@ export async function proposeAccountFrame(
   }
 
   const { buildAccountProofBody, createDisputeProofHash } = await import('../proof-builder');
-  const depositoryAddress = getDepositoryAddress(env);
+  const depositoryAddress = getAccountDepositoryAddress(env, accountMachine);
   if (!isAddress20(depositoryAddress)) {
     return {
       success: false,
@@ -336,11 +326,21 @@ export async function proposeAccountFrame(
     };
   }
 
-  const disputeHankos = await signEntityHashes(env, signingEntityId, signingSignerId, [disputeHash]);
-  const disputeHanko = disputeHankos[0];
+  // Build both hankos in one signer-key/precheck pass. They remain separate
+  // hankos over separate hashes; batching here only removes duplicated local
+  // lookup/guard work from the hot account-consensus path.
+  const { signEntityHashes } = await import('../hanko/signing');
+  const [frameHanko, disputeHanko] = await signEntityHashes(env, signingEntityId, signingSignerId, [
+    newFrame.stateHash,
+    disputeHash,
+  ]);
+  if (!frameHanko) {
+    return { success: false, error: 'Failed to build frame hanko', events };
+  }
   if (!disputeHanko) {
     return { success: false, error: 'Failed to build dispute hanko', events };
   }
+  accountMachine.currentFrameHanko = frameHanko;
   accountMachine.currentDisputeProofHanko = disputeHanko;
   accountMachine.currentDisputeProofNonce = clonedMachine.proofHeader.nonce;
   accountMachine.currentDisputeProofBodyHash = proofResult.proofBodyHash;

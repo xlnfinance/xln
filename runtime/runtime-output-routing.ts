@@ -62,6 +62,7 @@ export type RuntimeOutputRoutingDeps = {
     ingressTimestamp?: number,
   ): void;
   extractEntityId(replicaKey: string): string;
+  hasLocalSignerForEntity(env: Env, entityId: string): boolean;
   resolveRuntimeIdForEntity(env: Env, entityId: string): string | null;
   resolveRuntimeIdForCrossJurisdictionEntity(env: Env, entityId: string): string | null;
 };
@@ -180,15 +181,6 @@ export const planEntityOutputs = (
   remoteOutputs: PlannedRemoteOutput[];
   deferredOutputs: RoutedEntityInput[];
 } => {
-  const localEntityIds = new Set<string>();
-  for (const replicaKey of env.eReplicas.keys()) {
-    try {
-      localEntityIds.add(deps.extractEntityId(replicaKey));
-    } catch {
-      // Skip malformed replica keys
-    }
-  }
-
   const localOutputs: RoutedEntityInput[] = [];
   const remoteOutputs: PlannedRemoteOutput[] = [];
   const deduped = new Map<string, RoutedEntityInput>();
@@ -205,7 +197,7 @@ export const planEntityOutputs = (
   const deferredOutputs: RoutedEntityInput[] = [];
 
   for (const output of allOutputs) {
-    if (localEntityIds.has(output.entityId)) {
+    if (deps.hasLocalSignerForEntity(env, output.entityId)) {
       localOutputs.push(output);
       continue;
     }

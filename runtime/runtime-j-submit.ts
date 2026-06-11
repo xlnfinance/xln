@@ -1,9 +1,9 @@
-import type { Env, JInput, RoutedEntityInput, RuntimeTx } from './types';
+import type { EntityInput, Env, JInput, RoutedEntityInput, RuntimeTx } from './types';
 import { getCachedSignerPrivateKey } from './account-crypto';
 
 export type RuntimeJOutboxQueue = (
   env: Env,
-  inputs?: RoutedEntityInput[],
+  inputs?: EntityInput[],
   runtimeTxs?: RuntimeTx[],
   jInputs?: JInput[],
   explicitTimestamp?: number,
@@ -17,29 +17,34 @@ const buildAbortSentBatchInput = (
   entityId: string,
   reason: string,
   signerId?: string,
-): RoutedEntityInput => ({
-  entityId,
-  ...(signerId ? { signerId } : {}),
-  entityTxs: [
-    {
-      type: 'j_abort_sent_batch',
-      data: {
-        requeueToCurrent: true,
-        reason: `submit_failed:${String(reason || 'unknown').slice(0, 240)}`,
+): RoutedEntityInput => {
+  if (!signerId) {
+    throw new Error(`J_ABORT_SENT_BATCH_SIGNER_MISSING: entity=${entityId}`);
+  }
+  return {
+    entityId,
+    signerId,
+    entityTxs: [
+      {
+        type: 'j_abort_sent_batch',
+        data: {
+          requeueToCurrent: true,
+          reason: `submit_failed:${String(reason || 'unknown').slice(0, 240)}`,
+        },
       },
-    },
-  ],
-});
+    ],
+  };
+};
 
-const hasJEventTx = (input: RoutedEntityInput): boolean =>
+const hasJEventTx = (input: EntityInput): boolean =>
   (input.entityTxs ?? []).some((tx) => tx?.type === 'j_event');
 
-const captureQueuedEntityInputs = (env: Env): RoutedEntityInput[] => {
+const captureQueuedEntityInputs = (env: Env): EntityInput[] => {
   const mempool = env.runtimeMempool ?? env.runtimeInput;
   return Array.isArray(mempool?.entityInputs) ? [...mempool.entityInputs] : [];
 };
 
-const prioritizeJEventsQueuedAfterSubmit = (env: Env, beforePoll: RoutedEntityInput[]): number => {
+const prioritizeJEventsQueuedAfterSubmit = (env: Env, beforePoll: EntityInput[]): number => {
   const mempool = env.runtimeMempool ?? env.runtimeInput;
   if (!mempool || !Array.isArray(mempool.entityInputs)) return 0;
   const current = mempool.entityInputs;

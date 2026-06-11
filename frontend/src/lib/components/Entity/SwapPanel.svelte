@@ -3417,7 +3417,11 @@
           </p>
         {/if}
         <div class="swap-modal-actions">
-          <button class="scope-btn active" on:click={() => (swapCompletionModal = null)}>Close</button>
+          <button
+            class="scope-btn active"
+            data-testid="swap-completion-close"
+            on:click={() => (swapCompletionModal = null)}
+          >Close</button>
         </div>
       </div>
     </div>

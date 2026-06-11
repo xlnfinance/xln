@@ -261,6 +261,7 @@ import {
 } from './validation-utils';
 import type {
   AccountFrame,
+  EntityInput,
   EntityState,
   EntityTx,
   Env,
@@ -543,7 +544,7 @@ function getRuntimeCleanLogDeps(): RuntimeCleanLogDeps {
 
 const enqueueRuntimeInputs = (
   env: Env,
-  inputs?: RoutedEntityInput[],
+  inputs?: EntityInput[],
   runtimeTxs?: RuntimeTx[],
   jInputs?: JInput[],
   explicitTimestamp?: number,
@@ -628,8 +629,8 @@ const prioritizeJEventFrame = (
   runtimeState: NonNullable<Env['runtimeState']>,
   timestamp: number,
 ): boolean => {
-  const priorityInputs: RoutedEntityInput[] = [];
-  const deferredInputs: RoutedEntityInput[] = [];
+  const priorityInputs: EntityInput[] = [];
+  const deferredInputs: EntityInput[] = [];
 
   for (const input of runtimeInput.entityInputs) {
     const entityTxs = input.entityTxs ?? [];
@@ -644,7 +645,7 @@ const prioritizeJEventFrame = (
     }
 
     if (otherTxs.length > 0 || hasNonTxPayload) {
-      const deferredInput: RoutedEntityInput = { ...input, entityTxs: otherTxs };
+      const deferredInput: EntityInput = { ...input, entityTxs: otherTxs };
       if (otherTxs.length === 0) {
         delete deferredInput.entityTxs;
       }
@@ -1060,11 +1061,44 @@ export const handleInboundP2PEntityInput = (
 
 const getRuntimeNowMs = (env: Env): number => env.timestamp ?? 0;
 
+const normalizeRuntimeEntityInput = (_env: Env, input: EntityInput, _context: string): RoutedEntityInput => {
+  const signerId = input.signerId.trim();
+  failfastAssert(
+    signerId.length > 0,
+    'RUNTIME_ENTITY_INPUT_SIGNER_MISSING',
+    'EntityInput signerId must be resolved before enqueue/process',
+    { entityId: input.entityId },
+  );
+  return {
+    ...input,
+    signerId,
+  };
+};
+
+const hasLocalSignerForEntity = (env: Env, entityId: string): boolean => {
+  const targetEntityId = String(entityId || '').toLowerCase();
+  for (const replicaKey of env.eReplicas.keys()) {
+    try {
+      if (extractEntityId(replicaKey).toLowerCase() !== targetEntityId) continue;
+      const signerId = extractSignerId(replicaKey);
+      if (!signerId) continue;
+      getSignerPrivateKey(env, signerId);
+      return true;
+    } catch {
+      // Imported/read-only replicas are useful for route inspection, but they
+      // must never make network outputs "local". Only a replica whose signer key
+      // is present can consume routed entity input without relay delivery.
+    }
+  }
+  return false;
+};
+
 function getRuntimeEntityRoutingDeps(): RuntimeEntityRoutingDeps {
   return {
     ensureRuntimeState,
     enqueueRuntimeInputs,
     extractEntityId,
+    hasLocalSignerForEntity,
     getP2P,
     startRuntimeLoop,
     processRuntime: (targetEnv) => process(targetEnv),
@@ -1229,11 +1263,9 @@ const applyRuntimeInput = async (
     }
 
     const validatedRuntimeTxs = [...runtimeInput.runtimeTxs];
-    const validatedEntityInputs = [...runtimeInput.entityInputs];
-
-    validatedEntityInputs.forEach((input, i) => {
+    const validatedEntityInputs = runtimeInput.entityInputs.map((input, i) => {
       try {
-        validateEntityInput(input);
+        return normalizeRuntimeEntityInput(env, validateEntityInput(input), `runtimeInput[${i}]`);
       } catch (error) {
         logError('RUNTIME_TICK', `🚨 CRITICAL FINANCIAL ERROR: Invalid EntityInput[${i}] before merge!`, {
           error: (error as Error).message,
@@ -2003,7 +2035,7 @@ const assertPersistedContractConfigReady = (env: Env, label: string): void => {
 // === CONSENSUS PROCESSING ===
 // ONE TICK = ONE ITERATION. No cascade. E→E communication always requires new tick.
 
-export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDelay = 0) => {
+export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0) => {
   const processState = ensureRuntimeState(env);
   while (processState.processingPromise) {
     await processState.processingPromise;
@@ -2141,7 +2173,7 @@ export const process = async (env: Env, inputs?: RoutedEntityInput[], runtimeDel
       return fingerprints;
     };
     const advertisedStateBeforeApply = getAdvertisedStateFingerprints(getLocallySignableEntityIds());
-    const shouldAnnounceEntityProfile = (input: RoutedEntityInput): boolean => {
+    const shouldAnnounceEntityProfile = (input: EntityInput): boolean => {
       if (!input?.entityTxs?.length) return false;
       return input.entityTxs.some(
         tx =>

@@ -150,7 +150,7 @@ export interface CrossJurisdictionSecretRelay {
 /** End-to-end payment notes stored locally by hashlock/lockId for activity rendering. */
 export type HtlcNoteKey = `hashlock:${string}` | `lock:${string}`;
 
-export type AccountStatus = 'active' | 'disputed';
+export type AccountStatus = 'active' | 'dispute_preparing' | 'disputed';
 
 export interface AccountMachine {
   // CANONICAL REPRESENTATION (like Channel.ts - both entities store IDENTICAL structure)
@@ -256,6 +256,19 @@ export interface AccountMachine {
   disputeProofNoncesByHash?: Record<string, number>;   // ProofBodyHash → nonce (local + counterparty)
   disputeProofBodiesByHash?: Record<string, unknown>;      // ProofBodyHash → ProofBodyStruct (for dispute finalize)
   disputeArgumentSnapshotsByHash?: Record<string, DisputeArgumentSnapshot>; // ProofBodyHash → stable argument plan
+  disputePrepare?: {
+    // Local-only cooldown before an on-chain dispute is queued.
+    //
+    // The jurisdiction never sees this object. It exists to stop normal account
+    // traffic, clear orderbook exposure, and wait until dispute transformer
+    // arguments are stable. Counterexample: if we immediately start/counter a
+    // dispute while an HTLC secret ACK or swap fill frame is still pending, the
+    // calldata for the signed proof body can change after we already committed
+    // the disputeStart hash.
+    startedAt: number;
+    readyAfter: number;
+    reason: string;
+  };
 
   // ON-CHAIN NONCE: Tracks the nonce stored on-chain
   // Starts at 0, set to signedNonce when settlement/dispute succeeds

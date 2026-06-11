@@ -210,16 +210,16 @@ export function getOffdelta(env: Env, leftId: string, rightId: string, tokenId: 
 // CONVERGENCE HELPERS
 // ============================================================================
 
-function filterOfflineInputs(
-  inputs: EntityInput[],
+function filterOfflineInputs<T extends EntityInput>(
+  inputs: T[],
   offlineSigners: Set<string>,
-): { filtered: EntityInput[]; dropped: EntityInput[] } {
+): { filtered: T[]; dropped: T[] } {
   if (offlineSigners.size === 0) {
     return { filtered: inputs, dropped: [] };
   }
 
-  const filtered: EntityInput[] = [];
-  const dropped: EntityInput[] = [];
+  const filtered: T[] = [];
+  const dropped: T[] = [];
 
   for (const input of inputs) {
     const signerId = input.signerId;

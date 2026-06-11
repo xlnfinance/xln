@@ -28,12 +28,12 @@ import { deriveAccountFrameOffdeltas, deriveAccountFrameTokenIds } from './accou
 import { createStructuredLogger, shortHash, shortId, shouldLogFullPayloads } from './logger';
 import {
   createFrameHash,
-  validateAccountFrame,
+  getAccountFrameValidationError,
 } from './account-consensus-frame';
 import {
   assertNoUnilateralSettlementMutation,
   captureSettlementVector,
-  getDepositoryAddress,
+  getAccountDepositoryAddress,
   isAddress20,
   kickHubRebalanceAfterFrameFinalize,
   prependUniqueMempoolTxs,
@@ -85,7 +85,7 @@ async function validateCounterpartyDisputeSeal(
     throw new Error(`${context}:DISPUTE_SEAL_INCOMPLETE`);
   }
 
-  const depositoryAddress = getDepositoryAddress(env);
+  const depositoryAddress = getAccountDepositoryAddress(env, accountMachine);
   if (!isAddress20(depositoryAddress)) {
     throw new Error(`${context}:DISPUTE_SEAL_DEPOSITORY_MISSING`);
   }
@@ -102,7 +102,20 @@ async function validateCounterpartyDisputeSeal(
     input.disputeProofNonce,
   );
   if (String(input.newDisputeHash).toLowerCase() !== expectedHash.toLowerCase()) {
-    throw new Error(`${context}:DISPUTE_SEAL_HASH_MISMATCH`);
+    throw new Error(`${context}:DISPUTE_SEAL_HASH_MISMATCH:${safeStringify({
+      kind: input.kind,
+      currentHeight: accountMachine.currentHeight,
+      pendingHeight: accountMachine.pendingFrame?.height ?? null,
+      inputHeight: input.height ?? null,
+      newFrameHeight: input.newAccountFrame?.height ?? null,
+      localNonce: accountMachine.proofHeader.nonce,
+      signedNonce: input.disputeProofNonce,
+      proofBodyHash: input.newDisputeProofBodyHash,
+      expected: expectedHash,
+      received: input.newDisputeHash,
+      from: shortId(input.fromEntityId),
+      to: shortId(input.toEntityId),
+    })}`);
   }
 
   const { valid } = await verifyHankoForHash(
@@ -184,6 +197,81 @@ export async function handleAccountInput(
     if (normalized.length % 2 !== 0) {
       return { success: false, error: 'Invalid dispute hanko (odd length)', events };
     }
+  }
+
+  const replayCurrentHeight = Number(accountMachine.currentHeight ?? 0);
+  const replayPendingHeight = Number(accountMachine.pendingFrame?.height ?? 0);
+  const replayInputHeight =
+    input.height === undefined || input.height === null
+      ? 0
+      : Number(input.height);
+  const replayNewFrameHeight =
+    input.newAccountFrame === undefined || input.newAccountFrame === null
+      ? undefined
+      : Number(input.newAccountFrame.height);
+  const replayAckIsStale =
+    Boolean(input.prevHanko) &&
+    replayInputHeight > 0 &&
+    (
+      (replayPendingHeight > 0 && replayInputHeight < replayPendingHeight) ||
+      (replayPendingHeight === 0 && replayInputHeight <= replayCurrentHeight)
+    );
+  const replayFrameIsStale =
+    replayNewFrameHeight !== undefined &&
+    replayNewFrameHeight <= replayCurrentHeight;
+  const cachedReplayAck = accountMachine.lastOutboundFrameAck;
+  const canReackCommittedReplay =
+    input.newAccountFrame !== undefined &&
+    input.newAccountFrame !== null &&
+    replayNewFrameHeight === replayCurrentHeight &&
+    input.newAccountFrame.stateHash === accountMachine.currentFrame?.stateHash &&
+    !!cachedReplayAck &&
+    Number(cachedReplayAck.height) === replayNewFrameHeight &&
+    cachedReplayAck.counterpartyEntityId.toLowerCase() === input.fromEntityId.toLowerCase();
+  if (canReackCommittedReplay) {
+    // Network delivery is at-least-once. If the peer retries an already
+    // committed frame because our ACK was lost, we must resend the exact cached
+    // ACK before the generic stale-input guard. Do not rebuild a new ACK here:
+    // the peer is waiting for the hanko over the old frame hash.
+    events.push(
+      `↩️ Re-sent ACK for duplicate committed frame ${String(replayNewFrameHeight)}`,
+    );
+    return {
+      success: true,
+      response: {
+        kind: 'ack',
+        fromEntityId: accountMachine.proofHeader.fromEntity,
+        toEntityId: input.fromEntityId,
+        height: cachedReplayAck.height,
+        prevHanko: cachedReplayAck.prevHanko,
+      },
+      events,
+    };
+  }
+  if (replayAckIsStale && (replayNewFrameHeight === undefined || replayFrameIsStale)) {
+    // Network delivery is at-least-once: a valid ACK/frame_ack can arrive after
+    // the account has already advanced. Its dispute seal was signed for the old
+    // account nonce, so validating it against the newer local nonce creates a
+    // false DISPUTE_SEAL_HASH_MISMATCH. Classify pure stale traffic before seal
+    // validation; any input that can still advance state falls through and must
+    // pass the full dispute-seal checks below.
+    accountLog.debug('input.stale_ack_ignored', {
+      currentHeight: replayCurrentHeight,
+      pendingHeight: replayPendingHeight,
+      inputHeight: replayInputHeight,
+      newFrameHeight: replayNewFrameHeight ?? null,
+      from: shortId(input.fromEntityId),
+    });
+    return { success: true, events };
+  }
+  if (!input.prevHanko && replayFrameIsStale) {
+    accountLog.debug('input.stale_frame_ignored', {
+      currentHeight: replayCurrentHeight,
+      inputHeight: replayInputHeight,
+      newFrameHeight: replayNewFrameHeight ?? null,
+      from: shortId(input.fromEntityId),
+    });
+    return { success: true, events };
   }
 
   let validatedCounterpartyDisputeSeal: ValidatedCounterpartyDisputeSeal | undefined;
@@ -485,8 +573,9 @@ export async function handleAccountInput(
     }
 
     const previousTimestamp = accountMachine.currentFrame?.timestamp;
-    if (!validateAccountFrame(receivedFrame, env.timestamp, previousTimestamp)) {
-      return { success: false, error: 'Invalid frame structure', events };
+    const frameValidationError = getAccountFrameValidationError(receivedFrame, env.timestamp, previousTimestamp);
+    if (frameValidationError) {
+      return { success: false, error: `Invalid frame structure: ${frameValidationError}`, events };
     }
 
     // CRITICAL: Verify prevFrameHash links to our current frame (prevent state fork)
@@ -949,28 +1038,29 @@ export async function handleAccountInput(
 
     accountLog.debug('hanko.ack.sign', { entity: shortId(ackEntityId), signer: shortId(ackSignerId), height: receivedFrame.height });
 
-    // Build ACK hanko
-    const { signEntityHashes } = await import('./hanko/signing');
-    const ackHankos = await signEntityHashes(env, ackEntityId, ackSignerId, [receivedFrame.stateHash]);
-    const confirmationHanko = ackHankos[0];
-    if (!confirmationHanko) {
-      return { success: false, error: 'Failed to build ACK hanko', events };
-    }
-
     // CHANNEL.TS PATTERN (Lines 576-612): Batch ACK + new frame in same message!
     // Check if we should batch BEFORE incrementing nonce
     let batchedWithNewFrame = false;
     let proposeResult: Awaited<ReturnType<typeof proposeAccountFrame>> | undefined;
     // Build dispute proof hanko for ACK response (always include current state's dispute proof)
     const { buildAccountProofBody: buildProof, createDisputeProofHash: createHash } = await import('./proof-builder');
-    const ackDepositoryAddress = getDepositoryAddress(env);
+    const ackDepositoryAddress = getAccountDepositoryAddress(env, accountMachine);
     if (!isAddress20(ackDepositoryAddress)) {
       return { success: false, error: 'ACK_DISPUTE_PROOF_BUILD_FAILED: MISSING_DEPOSITORY_ADDRESS', events };
     }
     const ackProofResult = buildProof(accountMachine);
     const ackDisputeHash = createHash(accountMachine, ackProofResult.proofBodyHash, ackDepositoryAddress);
-    const ackDisputeHankos = await signEntityHashes(env, ackEntityId, ackSignerId, [ackDisputeHash]);
-    const ackDisputeHanko = ackDisputeHankos[0];
+    // ACK and its dispute proof are separate hankos over separate hashes, but
+    // they are signed by the same entity in the same local step. One call keeps
+    // the hot path from repeating signer lookup and lazy-entity prechecks.
+    const { signEntityHashes } = await import('./hanko/signing');
+    const [confirmationHanko, ackDisputeHanko] = await signEntityHashes(env, ackEntityId, ackSignerId, [
+      receivedFrame.stateHash,
+      ackDisputeHash,
+    ]);
+    if (!confirmationHanko) {
+      return { success: false, error: 'Failed to build ACK hanko', events };
+    }
     const ackSignedNonce = accountMachine.proofHeader.nonce;
     if (!accountMachine.disputeProofNoncesByHash) {
       accountMachine.disputeProofNoncesByHash = {};

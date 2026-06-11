@@ -1,7 +1,7 @@
 import type { AccountInput, EntityState, Env, EntityInput, AccountMachine } from '../../types';
 import { markStorageAccountDirty, markStorageEntityDirty } from '../../env-events';
 import { handleAccountInput as processAccountInput } from '../../account-consensus';
-import { addMessage, addMessages, emitScopedEvents } from '../../state-helpers';
+import { addMessage, addMessages, emitScopedEvents, resolveEntityProposerId } from '../../state-helpers';
 import { createStructuredLogger, shortId } from '../../logger';
 import { isLeftEntity } from '../../entity-id-utils';
 import { scheduleHook as scheduleCrontabHook } from '../../entity-crontab';
@@ -178,16 +178,17 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
     throw new Error(`CRITICAL: AccountMachine creation failed for ${input.fromEntityId}`);
   }
 
-  // Dispute freeze: once account is disputed, only allow the minimal bilateral traffic
-  // that can resolve the dispute state itself. The account-tx layer already allows only
-  // `j_event_claim` and `reopen_disputed`, so the transport/input gate must mirror that
-  // rule instead of dropping reopen frames before consensus can apply them.
-  if ((accountMachine.status ?? 'active') === 'disputed') {
+  // Dispute freeze: once account is preparing for dispute or already disputed,
+  // only allow the minimal bilateral traffic that can resolve the dispute state
+  // itself. This mirrors the account-tx layer. Do not accept normal frames
+  // while transformer arguments are being frozen; otherwise a pending swap fill
+  // or HTLC reveal can mutate calldata after disputeStart has committed hashes.
+  if ((accountMachine.status ?? 'active') !== 'active') {
     const frameTxTypes = input.newAccountFrame?.accountTxs?.map((tx) => tx.type) || [];
     const allowedWhileDisputed = frameTxTypes.every((txType) => txType === 'j_event_claim' || txType === 'reopen_disputed');
     if (!allowedWhileDisputed) {
       const dropMsg =
-        `🛑 Disputed account input dropped for ${counterpartyId.slice(-4)} ` +
+        `🛑 Frozen account input dropped for ${counterpartyId.slice(-4)} ` +
         `(height=${input.height ?? input.newAccountFrame?.height ?? 'n/a'}, txs=[${frameTxTypes.join(',')}], ack=${!!input.prevHanko})`;
       console.error(dropMsg);
       addMessage(newState, dropMsg);
@@ -385,6 +386,11 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
         // Multi-validator entities sync account state via entity-level consensus (not bilateral broadcast)
         outputs.push({
           entityId: result.response.toEntityId,
+          signerId: resolveEntityProposerId(
+            env,
+            result.response.toEntityId,
+            `account response output ${newState.entityId}->${result.response.toEntityId}`,
+          ),
           entityTxs: [{
             type: 'accountInput',
             data: result.response

@@ -16,6 +16,7 @@ import { createEntityFrameHash } from '../entity-consensus-frame';
 import { assertCrossJurisdictionOrderAdmissible } from '../entity-consensus/cross-j-orderbook';
 import {
   buildCrossJurisdictionBookAdmissionReceipt,
+  buildCrossJurisdictionMarketOffer,
   getCrossJurisdictionBookAdmissionError,
   mergeCrossJurisdictionBookAdmission,
 } from '../cross-jurisdiction-orderbook';
@@ -26,7 +27,7 @@ import {
 import { applyEntityTx } from '../entity-tx/apply';
 import { applyCommittedCrossJurisdictionAccountTxFollowup } from '../entity-tx/handlers/account-cross-j-followups';
 import { handleAdmitCrossJurisdictionBookOrderEntityTx } from '../entity-tx/handlers/cross-j-book-order';
-import { handleDisputeFinalize, handleDisputeStart } from '../entity-tx/handlers/dispute';
+import { handleDisputeFinalize, handleDisputeStart, handlePrepareDispute } from '../entity-tx/handlers/dispute';
 import { handleJAbortSentBatch } from '../entity-tx/handlers/j-abort-sent-batch';
 import { handleJRebroadcast } from '../entity-tx/handlers/j-rebroadcast';
 import { handleJEvent } from '../entity-tx/j-events';
@@ -35,7 +36,7 @@ import {
   canonicalJurisdictionEventsHash,
 } from '../j-event-observation';
 import { createEmptyBatch } from '../j-batch';
-import { applyCommand, createBook, getBookOrder, type OrderbookExtState } from '../orderbook';
+import { applyCommand, createBook, getBookOrder, SWAP_LOT_SCALE, type OrderbookExtState } from '../orderbook';
 import { process, createEmptyEnv, registerEntityRuntimeHint, sendEntityInput } from '../runtime';
 import { safeStringify } from '../serialization-utils';
 import { projectAccountDoc } from '../storage/projections';
@@ -243,6 +244,7 @@ describe('audit fail-fast regressions', () => {
     await expect(process(env, [{
       from: remoteRuntime,
       entityId: `0x${'11'.repeat(32)}`,
+      signerId: `0x${'01'.repeat(20)}`,
       entityTxs: [{
         type: 'requestCrossJurisdictionSwap',
         data: { route: {} },
@@ -251,6 +253,7 @@ describe('audit fail-fast regressions', () => {
 
     expect(() => sendEntityInput(env, {
       entityId: `0x${'22'.repeat(32)}`,
+      signerId: `0x${'02'.repeat(20)}`,
       entityTxs: [{
         type: 'registerCrossJurisdictionSwap',
         data: { route: {} },
@@ -403,6 +406,7 @@ describe('audit fail-fast regressions', () => {
     await expect(process(env, [{
       from: remoteRuntime,
       entityId: sourceUserId,
+      signerId: '1',
       entityTxs: [{
         type: 'registerCrossJurisdictionSwap',
         data: {
@@ -633,6 +637,7 @@ describe('audit fail-fast regressions', () => {
     );
     const sourceHubState = makeEntityState(sourceHub);
     sourceHubState.crossJurisdictionSwaps = new Map([[route.orderId, route]]);
+    attachSigningReplica(env, sourceHub, '1');
     const outputs: EntityInput[] = [];
 
     applyCommittedCrossJurisdictionAccountTxFollowup(env, sourceHubState, sourceUser, {
@@ -1826,6 +1831,7 @@ describe('audit fail-fast regressions', () => {
       kind: 'frame',
       fromEntityId: right.entityId,
       toEntityId: left.entityId,
+      signerId: right.signerId,
       height: 10,
       newAccountFrame: {
         ...accountMachine.currentFrame,
@@ -2647,6 +2653,220 @@ describe('audit fail-fast regressions', () => {
     expect(nextBook ? getBookOrder(nextBook, namespacedOrderId) : null).toBeNull();
   });
 
+  test('target-bonus fill fails closed when target hub route is unavailable', async () => {
+    const env = createEmptyEnv('cross-target-bonus-unroutable');
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    const hubId = `0x${'20'.repeat(32)}`;
+    const sourceMaker = `0x${'31'.repeat(32)}`;
+    const sourceTaker = `0x${'32'.repeat(32)}`;
+    const makerTargetUser = `0x${'33'.repeat(32)}`;
+    const missingTargetHub = `0x${'34'.repeat(32)}`;
+    const takerTargetUser = `0x${'35'.repeat(32)}`;
+    const pairId = 'cross:base:1/tron:1';
+    const lot = SWAP_LOT_SCALE;
+    const hubState = makeEntityState(hubId);
+    hubState.config = makeSingleSignerConfigFor('hub-signer');
+    const makeHubAccount = (counterpartyId: string): AccountMachine => {
+      const [left, right] = hubId.toLowerCase() < counterpartyId.toLowerCase()
+        ? [hubId, counterpartyId]
+        : [counterpartyId, hubId];
+      return makeProposalAccount([], left, right);
+    };
+
+    const buildRoute = (
+      orderId: string,
+      sourceJurisdiction: string,
+      sourceEntityId: string,
+      sourceHubId: string,
+      sourceAmount: bigint,
+      targetJurisdiction: string,
+      targetHubId: string,
+      targetUserId: string,
+      targetAmount: bigint,
+    ): CrossJurisdictionSwapRoute => {
+      const prepared = buildPreparedCrossJurisdictionRoute({
+        orderId,
+        makerEntityId: sourceEntityId,
+        hubEntityId: hubId,
+        bookOwnerEntityId: hubId,
+        venueId: pairId,
+        source: {
+          jurisdiction: sourceJurisdiction,
+          entityId: sourceEntityId,
+          counterpartyEntityId: sourceHubId,
+          tokenId: 1,
+          amount: sourceAmount,
+        },
+        target: {
+          jurisdiction: targetJurisdiction,
+          entityId: targetHubId,
+          counterpartyEntityId: targetUserId,
+          tokenId: 1,
+          amount: targetAmount,
+        },
+        priceImprovementMode: 'target_bonus',
+        status: 'resting',
+        createdAt: env.timestamp,
+        updatedAt: env.timestamp,
+        expiresAt: env.timestamp + 60_000,
+      }, { runtimeSeed: 'cross-target-bonus-unroutable', sourceDisputeDelayMs: 5_000, now: env.timestamp });
+      return { ...prepared, status: 'resting', updatedAt: env.timestamp };
+    };
+
+    const makerRoute = buildRoute(
+      'target-bonus-maker-bid',
+      'tron',
+      sourceMaker,
+      hubId,
+      3n * lot,
+      'base',
+      hubId,
+      makerTargetUser,
+      2n * lot,
+    );
+    const takerRoute = buildRoute(
+      'target-bonus-taker-sell',
+      'base',
+      sourceTaker,
+      hubId,
+      2n * lot,
+      'tron',
+      missingTargetHub,
+      takerTargetUser,
+      2n * lot,
+    );
+
+    const sourceReceipt = (route: CrossJurisdictionSwapRoute) => buildCrossJurisdictionBookAdmissionReceipt(
+      route,
+      'source',
+      {
+        type: 'pull_lock',
+        data: {
+          pullId: route.sourcePull!.pullId,
+          tokenId: route.sourcePull!.tokenId,
+          amount: route.sourcePull!.signedAmount,
+          revealedUntilTimestamp: route.sourcePull!.revealedUntilTimestamp,
+          fullHash: route.sourcePull!.fullHash,
+          partialRoot: route.sourcePull!.partialRoot,
+        },
+      },
+      route.source.counterpartyEntityId,
+      route.source.entityId,
+      env.timestamp,
+    );
+    const targetReceipt = (route: CrossJurisdictionSwapRoute) => buildCrossJurisdictionBookAdmissionReceipt(
+      route,
+      'target',
+      {
+        type: 'pull_lock',
+        data: {
+          pullId: route.targetPull!.pullId,
+          tokenId: route.targetPull!.tokenId,
+          amount: route.targetPull!.signedAmount,
+          revealedUntilTimestamp: route.targetPull!.revealedUntilTimestamp,
+          fullHash: route.targetPull!.fullHash,
+          partialRoot: route.targetPull!.partialRoot,
+        },
+      },
+      route.target.entityId,
+      route.target.counterpartyEntityId,
+      env.timestamp,
+    );
+
+    mergeCrossJurisdictionBookAdmission(hubState, makerRoute, env.timestamp, sourceReceipt(makerRoute));
+    const makerAdmission = mergeCrossJurisdictionBookAdmission(hubState, makerRoute, env.timestamp, targetReceipt(makerRoute));
+    makerAdmission.status = 'admitted';
+    makerAdmission.admittedAt = env.timestamp;
+    hubState.crossJurisdictionSwaps?.set(makerRoute.orderId, makerRoute);
+    const makerAccount = makeHubAccount(sourceMaker);
+    makerAccount.swapOffers.set(makerRoute.orderId, {
+      offerId: makerRoute.orderId,
+      giveTokenId: 1,
+      giveAmount: makerRoute.source.amount,
+      wantTokenId: 1,
+      wantAmount: makerRoute.target.amount,
+      makerIsLeft: makerAccount.leftEntity.toLowerCase() === sourceMaker.toLowerCase(),
+      minFillRatio: 0,
+      timeInForce: 0,
+      createdHeight: 1,
+      priceTicks: 15_000n,
+      crossJurisdiction: makerRoute,
+    });
+    hubState.accounts.set(sourceMaker, makerAccount);
+
+    const makerMeta = buildCrossJurisdictionMarketOffer({
+      offerId: makerRoute.orderId,
+      accountId: sourceMaker,
+      makerIsLeft: true,
+      fromEntity: sourceMaker,
+      toEntity: hubId,
+      createdHeight: 1,
+      giveTokenId: 1,
+      giveAmount: makerRoute.source.amount,
+      wantTokenId: 1,
+      wantAmount: makerRoute.target.amount,
+      minFillRatio: 0,
+      timeInForce: 0,
+      priceTicks: 15_000n,
+      crossJurisdiction: makerRoute,
+    }, hubId);
+    expect(makerMeta).not.toBeNull();
+    let book = createBook({ bucketWidthTicks: 10_000n, maxOrders: 10_000, stpPolicy: 1 });
+    book = applyCommand(book, {
+      kind: 0,
+      ownerId: makerMeta!.makerId,
+      orderId: `${sourceMaker}:${makerRoute.orderId}`,
+      side: makerMeta!.side,
+      tif: 0,
+      postOnly: false,
+      priceTicks: makerMeta!.priceTicks,
+      qtyLots: Number(makerMeta!.baseAmount / lot),
+    }).state;
+    hubState.orderbookExt = {
+      books: new Map([[pairId, book]]),
+      orderPairs: new Map([[`${sourceMaker}:${makerRoute.orderId}`, [pairId]]]),
+      referrals: new Map(),
+      hubProfile: {
+        entityId: hubId,
+        name: 'Hub',
+        spreadDistribution: { makerBps: 0, takerBps: 10_000, hubBps: 0, makerReferrerBps: 0, takerReferrerBps: 0 },
+        referenceTokenId: 1,
+        minTradeSize: 0n,
+        supportedPairs: [pairId],
+      },
+    } satisfies OrderbookExtState;
+
+    const takerAccount = makeHubAccount(sourceTaker);
+    takerAccount.swapOffers.set(takerRoute.orderId, {
+      offerId: takerRoute.orderId,
+      giveTokenId: 1,
+      giveAmount: takerRoute.source.amount,
+      wantTokenId: 1,
+      wantAmount: takerRoute.target.amount,
+      makerIsLeft: takerAccount.leftEntity.toLowerCase() === sourceTaker.toLowerCase(),
+      minFillRatio: 0,
+      timeInForce: 0,
+      createdHeight: 2,
+      priceTicks: 10_000n,
+      crossJurisdiction: takerRoute,
+    });
+    hubState.accounts.set(sourceTaker, takerAccount);
+
+    await expect(applyEntityFrame(env, hubState, [
+      {
+        type: 'admitCrossJurisdictionBookOrder',
+        data: { route: takerRoute, receipt: sourceReceipt(takerRoute), reason: 'source_pull_committed' },
+      },
+      {
+        type: 'admitCrossJurisdictionBookOrder',
+        data: { route: takerRoute, receipt: targetReceipt(takerRoute), reason: 'target_pull_committed' },
+      },
+    ])).rejects.toThrow('CROSS_J_TARGET_BONUS_UNROUTABLE');
+
+    expect(getBookOrder(book, `${sourceMaker}:${makerRoute.orderId}`)).not.toBeNull();
+  });
+
   test('disputeStart removes same-account orderbook rows before freezing the account', async () => {
     const env = createEmptyEnv('dispute-start-orderbook-freeze');
     const hubId = `0x${'90'.repeat(32)}`;
@@ -2700,5 +2920,92 @@ describe('audit fail-fast regressions', () => {
     const nextBook = result.newState.orderbookExt?.books.get(pairId);
     expect(nextBook ? getBookOrder(nextBook, namespacedOrderId) : null).toBeNull();
     expect(result.newState.messages.some((msg) => msg.includes('Dispute removed 1 local orderbook row'))).toBe(true);
+  });
+
+  test('prepareDispute freezes account and removes orderbook rows without queuing on-chain disputeStart', async () => {
+    const env = createEmptyEnv('prepare-dispute-orderbook-freeze');
+    const hubId = `0x${'92'.repeat(32)}`;
+    const userId = `0x${'93'.repeat(32)}`;
+    const offerId = 'prepare-dispute-offer';
+    const pairId = '1/2';
+    const namespacedOrderId = `${userId}:${offerId}`;
+    const hubState = makeEntityState(hubId);
+    hubState.config = makeSingleSignerConfigFor('hub-signer');
+    const account = makeProposalAccount([], hubId, userId);
+    account.swapOffers.set(offerId, {
+      offerId,
+      giveTokenId: 1,
+      giveAmount: 1_000n,
+      wantTokenId: 2,
+      wantAmount: 2_000n,
+      makerIsLeft: false,
+      minFillRatio: 0,
+      createdHeight: 1,
+      quantizedGive: 1_000n,
+      quantizedWant: 2_000n,
+      priceTicks: 2_000n,
+    });
+    hubState.accounts.set(userId, account);
+    let book = createBook({ bucketWidthTicks: 1n, maxOrders: 10, stpPolicy: 1 });
+    book = applyCommand(book, {
+      kind: 0,
+      ownerId: userId,
+      orderId: namespacedOrderId,
+      side: 1,
+      tif: 0,
+      postOnly: false,
+      priceTicks: 2_000n,
+      qtyLots: 1,
+    }).state;
+    hubState.orderbookExt = {
+      books: new Map([[pairId, book]]),
+      orderPairs: new Map([[namespacedOrderId, [pairId]]]),
+      referrals: new Map(),
+    } as unknown as OrderbookExtState;
+
+    const result = await handlePrepareDispute(
+      hubState,
+      {
+        type: 'prepareDispute',
+        data: { counterpartyEntityId: userId, description: 'test-prepare' },
+      },
+      env,
+    );
+
+    const nextAccount = result.newState.accounts.get(userId)!;
+    const nextBook = result.newState.orderbookExt?.books.get(pairId);
+    expect(nextAccount.status).toBe('dispute_preparing');
+    expect(nextAccount.disputePrepare?.reason).toBe('test-prepare');
+    expect(nextBook ? getBookOrder(nextBook, namespacedOrderId) : null).toBeNull();
+    expect(result.newState.jBatchState?.batch.disputeStarts ?? []).toEqual([]);
+  });
+
+  test('disputeStart waits when HTLC route can still reveal future dispute evidence', async () => {
+    const env = createEmptyEnv('prepare-dispute-awaiting-secret');
+    const hubId = `0x${'94'.repeat(32)}`;
+    const userId = `0x${'95'.repeat(32)}`;
+    const hubState = makeEntityState(hubId);
+    hubState.config = makeSingleSignerConfigFor('hub-signer');
+    hubState.accounts.set(userId, makeProposalAccount([], hubId, userId));
+    hubState.htlcRoutes.set(`0x${'44'.repeat(32)}`, {
+      hashlock: `0x${'44'.repeat(32)}`,
+      tokenId: 1,
+      amount: 10n,
+      inboundEntity: userId,
+      inboundLockId: 'await-secret-lock',
+      createdTimestamp: hubState.timestamp,
+    });
+
+    const result = await handleDisputeStart(
+      hubState,
+      {
+        type: 'disputeStart',
+        data: { counterpartyEntityId: userId },
+      },
+      env,
+    );
+
+    expect(result.newState.jBatchState?.batch.disputeStarts ?? []).toEqual([]);
+    expect(result.newState.messages.some((msg) => msg.includes('htlcAwaitingSecret:1'))).toBe(true);
   });
 });

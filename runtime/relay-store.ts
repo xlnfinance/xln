@@ -66,6 +66,7 @@ const MAX_DEBUG_EVENTS = 5000;
 const MAX_PENDING_PER_CLIENT = 200;
 const MAX_PENDING_TARGETS = 10_000;
 const MAX_PENDING_TOTAL_BYTES = 256 * 1024 * 1024;
+const MAX_PENDING_MESSAGE_AGE_MS = 5 * 60 * 1000;
 const MAX_GOSSIP_PROFILES = 50_000;
 export const DEFAULT_GOSSIP_SYNC_LIMIT = DEFAULT_GOSSIP_BATCH_LIMIT;
 
@@ -73,11 +74,13 @@ type RelayPendingLimits = {
   maxPerTarget: number;
   maxTargets: number;
   maxTotalBytes: number;
+  maxAgeMs: number;
 };
 
 type PendingRelayMessage = {
   msg: unknown;
   bytes: number;
+  enqueuedAt: number;
 };
 
 type RelayStoreOptions = {
@@ -98,6 +101,7 @@ export const createRelayStore = (serverId: string, options: RelayStoreOptions = 
     maxPerTarget: options.pendingLimits?.maxPerTarget ?? MAX_PENDING_PER_CLIENT,
     maxTargets: options.pendingLimits?.maxTargets ?? MAX_PENDING_TARGETS,
     maxTotalBytes: options.pendingLimits?.maxTotalBytes ?? MAX_PENDING_TOTAL_BYTES,
+    maxAgeMs: options.pendingLimits?.maxAgeMs ?? MAX_PENDING_MESSAGE_AGE_MS,
   },
   maxGossipProfiles: Math.max(1, Math.floor(Number(options.maxGossipProfiles ?? MAX_GOSSIP_PROFILES))),
   gossipProfiles: new Map(),
@@ -303,7 +307,7 @@ export const enqueueMessage = (store: RelayStore, toKey: string, msg: unknown): 
     return store.pendingMessages.get(toKey)?.length ?? 0;
   }
   const queue = store.pendingMessages.get(toKey) || [];
-  queue.push({ msg, bytes });
+  queue.push({ msg, bytes, enqueuedAt: Date.now() });
   store.pendingMessageBytes += bytes;
   while (queue.length > store.pendingLimits.maxPerTarget) {
     const dropped = queue.shift();
@@ -318,10 +322,28 @@ export const enqueueMessage = (store: RelayStore, toKey: string, msg: unknown): 
 export const flushPendingMessages = (store: RelayStore, toKey: string): unknown[] => {
   const pending = store.pendingMessages.get(toKey) || [];
   store.pendingMessages.delete(toKey);
+  const now = Date.now();
+  const deliverable: unknown[] = [];
   for (const item of pending) {
     store.pendingMessageBytes = Math.max(0, store.pendingMessageBytes - item.bytes);
+    // Account frames reject timestamps outside the same five-minute window.
+    // Delivering older pending entity_input after a deterministic runtime reset
+    // can replay an old, validly signed frame into a fresh local account. Drop it
+    // at the relay boundary instead of letting stale consensus traffic poison
+    // the next live run.
+    if (now - item.enqueuedAt > store.pendingLimits.maxAgeMs) {
+      pushDebugEvent(store, {
+        event: 'pending_drop',
+        to: toKey,
+        status: 'dropped',
+        reason: 'PENDING_MESSAGE_EXPIRED',
+        size: item.bytes,
+      });
+      continue;
+    }
+    deliverable.push(item.msg);
   }
-  return pending.map(item => item.msg);
+  return deliverable;
 };
 
 export const clearPendingMessages = (store: RelayStore): void => {

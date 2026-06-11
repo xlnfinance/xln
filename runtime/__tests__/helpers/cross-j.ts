@@ -4,6 +4,7 @@ import { buildCrossJurisdictionBookAdmissionReceipt } from '../../cross-jurisdic
 import { getJurisdictionStackId } from '../../jurisdiction-runtime';
 import {
   buildJEventObservationDigest,
+  canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
 } from '../../j-event-observation';
 import type {
@@ -13,6 +14,7 @@ import type {
   EntityReplica,
   EntityState,
   Env,
+  DisputeFinalizationEvidence,
   JurisdictionConfig,
   JurisdictionEvent,
 } from '../../types';
@@ -51,9 +53,13 @@ export const signJEventObservation = (
     blockHash: string;
     transactionHash: string;
     events: JurisdictionEvent[];
+    disputeFinalizationEvidence?: DisputeFinalizationEvidence[];
   },
-): { eventsHash: string; signature: string } => {
+): { eventsHash: string; signature: string; disputeFinalizationEvidenceHash?: string } => {
   const eventsHash = canonicalJurisdictionEventsHash(input.events);
+  const disputeFinalizationEvidenceHash = input.disputeFinalizationEvidence?.length
+    ? canonicalDisputeFinalizationEvidenceHash(input.disputeFinalizationEvidence)
+    : undefined;
   const signature = signAccountFrame(
     env,
     signerId,
@@ -64,9 +70,14 @@ export const signJEventObservation = (
       blockHash: input.blockHash,
       transactionHash: input.transactionHash,
       eventsHash,
+      ...(disputeFinalizationEvidenceHash ? { disputeFinalizationEvidenceHash } : {}),
     }),
   );
-  return { eventsHash, signature };
+  return {
+    eventsHash,
+    signature,
+    ...(disputeFinalizationEvidenceHash ? { disputeFinalizationEvidenceHash } : {}),
+  };
 };
 
 export const makeConfig = (signerId: string, jurisdiction: JurisdictionConfig): ConsensusConfig => ({

@@ -23,6 +23,7 @@ describe('runtime output routing', () => {
     const output: DeliverableEntityInput = {
       runtimeId: targetRuntimeId,
       entityId: entityId('33'),
+      signerId: runtimeId('34'),
       entityTxs: [{
         type: 'registerCrossJurisdictionSwap',
         data: { route: { orderId: 'route-1' } },
@@ -38,6 +39,7 @@ describe('runtime output routing', () => {
       }),
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
+      hasLocalSignerForEntity: () => false,
       resolveRuntimeIdForEntity: () => targetRuntimeId,
       resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
     });
@@ -55,6 +57,7 @@ describe('runtime output routing', () => {
     const output: DeliverableEntityInput = {
       runtimeId: targetRuntimeId,
       entityId: entityId('55'),
+      signerId: runtimeId('56'),
       entityTxs: [],
     };
     const env = {
@@ -71,6 +74,7 @@ describe('runtime output routing', () => {
       getP2P: () => null,
       enqueueRuntimeInputs: () => {},
       extractEntityId: (replicaKey) => String(replicaKey).split(':')[0] || '',
+      hasLocalSignerForEntity: () => false,
       resolveRuntimeIdForEntity: () => targetRuntimeId,
       resolveRuntimeIdForCrossJurisdictionEntity: () => targetRuntimeId,
     });

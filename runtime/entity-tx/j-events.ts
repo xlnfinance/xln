@@ -4,6 +4,7 @@ import type {
   JBlockObservation,
   JBlockFinalized,
   JurisdictionEvent,
+  DisputeFinalizationEvidence,
   Env,
 } from '../types';
 import { cloneEntityState, addMessage } from '../state-helpers';
@@ -20,6 +21,8 @@ import {
 } from '../j-event-normalization';
 import {
   buildJEventObservationDigest,
+  canonicalDisputeFinalizationEvidenceHash,
+  canonicalDisputeFinalizationEvidenceKey,
   canonicalJurisdictionEventsHash,
 } from '../j-event-observation';
 import { verifyAccountSignature } from '../account-crypto';
@@ -29,6 +32,7 @@ import { createStructuredLogger, shortHash, shortId } from '../logger';
 import {
   applyKnownHtlcSecret,
   decodeDisputeStarterInitialSecrets,
+  queueCrossJurisdictionSalvageFromArgumentList,
   queueCrossJurisdictionSalvageFromDispute,
   queueCrossJurisdictionSourceDisputeFromTargetDispute,
 } from './j-events-htlc';
@@ -60,6 +64,8 @@ export interface JEventEntityTxData {
   transactionHash: string;  // Blockchain transaction hash
   eventsHash?: string;
   signature?: string;
+  disputeFinalizationEvidence?: DisputeFinalizationEvidence[];
+  disputeFinalizationEvidenceHash?: string;
 }
 
 const normalizeSignerId = (value: unknown): string => String(value || '').trim().toLowerCase();
@@ -167,6 +173,26 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
     );
   }
 
+  const disputeFinalizationEvidence = Array.isArray(batchData.disputeFinalizationEvidence)
+    ? batchData.disputeFinalizationEvidence
+    : [];
+  const suppliedEvidenceHash = typeof batchData.disputeFinalizationEvidenceHash === 'string'
+    ? batchData.disputeFinalizationEvidenceHash.toLowerCase()
+    : '';
+  const canonicalEvidenceHash = disputeFinalizationEvidence.length > 0
+    ? canonicalDisputeFinalizationEvidenceHash(disputeFinalizationEvidence)
+    : '';
+  if (disputeFinalizationEvidence.length > 0) {
+    if (!suppliedEvidenceHash) {
+      throw new Error(`j_event rejected: missing dispute finalization evidence hash for signer ${String(signerId)} block ${blockNumber}`);
+    }
+    if (suppliedEvidenceHash !== canonicalEvidenceHash) {
+      throw new Error(`j_event rejected: dispute finalization evidence hash mismatch for signer ${String(signerId)} block ${blockNumber}`);
+    }
+  } else if (suppliedEvidenceHash) {
+    throw new Error(`j_event rejected: dispute finalization evidence hash without evidence for signer ${String(signerId)} block ${blockNumber}`);
+  }
+
   const signature = typeof batchData.signature === 'string' ? batchData.signature : '';
   if (!signature) {
     throw new Error(`j_event rejected: missing observation signature for signer ${String(signerId)}`);
@@ -178,6 +204,7 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
     blockHash,
     transactionHash: batchData.transactionHash || '',
     eventsHash: canonicalEventsHash,
+    ...(canonicalEvidenceHash ? { disputeFinalizationEvidenceHash: canonicalEvidenceHash } : {}),
   });
   if (!verifyAccountSignature(env, String(signerId), digest, signature)) {
     throw new Error(`j_event rejected: invalid observation signature for signer ${String(signerId)}`);
@@ -191,6 +218,10 @@ export const handleJEvent = async (entityState: EntityState, entityTxData: JEven
     jBlockHash: blockHash,
     eventsHash: canonicalEventsHash,
     events: jEvents,
+    ...(canonicalEvidenceHash ? { disputeFinalizationEvidenceHash: canonicalEvidenceHash } : {}),
+    ...(disputeFinalizationEvidence.length
+      ? { disputeFinalizationEvidence }
+      : {}),
     observedAt,
   };
 
@@ -281,6 +312,7 @@ async function tryFinalizeJBlocks(
       }
 
       const events = mergeSignerObservations(observations);
+      const disputeFinalizationEvidence = mergeThresholdDisputeFinalizationEvidence(state, observations, threshold);
 
       const finalized: JBlockFinalized = {
         jHeight,
@@ -297,7 +329,12 @@ async function tryFinalizeJBlocks(
       finalizedHeights.push(jHeight);
 
       for (const event of events) {
-        const { newState, mempoolOps, outputs, dirtyAccounts: eventDirtyAccounts } = await applyFinalizedJEvent(state, event, env);
+        const { newState, mempoolOps, outputs, dirtyAccounts: eventDirtyAccounts } = await applyFinalizedJEvent(
+          state,
+          event,
+          env,
+          disputeFinalizationEvidence,
+        );
         state = newState;
         allMempoolOps.push(...mempoolOps);
         allOutputs.push(...outputs);
@@ -350,10 +387,43 @@ function mergeSignerObservations(observations: JBlockObservation[]): Jurisdictio
   return Array.from(eventMap.values());
 }
 
+function mergeThresholdDisputeFinalizationEvidence(
+  state: EntityState,
+  observations: JBlockObservation[],
+  threshold: bigint,
+): DisputeFinalizationEvidence[] {
+  type EvidenceVote = { evidence: DisputeFinalizationEvidence; signers: Set<string> };
+  const byKey = new Map<string, EvidenceVote>();
+  for (const observation of observations) {
+    const signerId = normalizeSignerId(observation.signerId);
+    const seenBySigner = new Set<string>();
+    for (const evidence of observation.disputeFinalizationEvidence ?? []) {
+      const key = canonicalDisputeFinalizationEvidenceKey(evidence);
+      if (seenBySigner.has(key)) continue;
+      seenBySigner.add(key);
+      const existing = byKey.get(key);
+      if (existing) {
+        existing.signers.add(signerId);
+      } else {
+        byKey.set(key, { evidence, signers: new Set([signerId]) });
+      }
+    }
+  }
+
+  // Calldata arguments are optional adversarial evidence, not canonical chain
+  // state. They may trigger cross-j salvage, so the runtime requires validator
+  // threshold agreement on the exact evidence item even though eventsHash stays
+  // provider-compatible and excludes calldata.
+  return Array.from(byKey.values())
+    .filter((vote) => signerVotingPower(state, vote.signers) >= threshold)
+    .map((vote) => vote.evidence);
+}
+
 async function applyFinalizedJEvent(
   entityState: EntityState,
   event: JurisdictionEvent,
-  env: Env
+  env: Env,
+  disputeFinalizationEvidence: DisputeFinalizationEvidence[] = [],
 ): Promise<JEventApplyResult> {
   const blockNumber = event.blockNumber ?? 0;
   const transactionHash = event.transactionHash || 'unknown';
@@ -385,7 +455,7 @@ async function applyFinalizedJEvent(
 
   } else if (event.type === 'SecretRevealed') {
     const { hashlock, secret } = event.data;
-    applyKnownHtlcSecret(newState, mempoolOps, outputs, String(hashlock), String(secret), blockNumber, 'SecretRevealed');
+    applyKnownHtlcSecret(env, newState, mempoolOps, outputs, String(hashlock), String(secret), blockNumber, 'SecretRevealed');
 
   } else if (event.type === 'AccountSettled') {
     const { leftEntity, rightEntity, tokenId, leftReserve, rightReserve, collateral } = event.data;
@@ -555,10 +625,11 @@ async function applyFinalizedJEvent(
       if (disputeSecrets.length > 0) {
         for (const disputeSecret of disputeSecrets) {
           const hashlock = hashHtlcSecret(disputeSecret);
-          applyKnownHtlcSecret(newState, mempoolOps, outputs, hashlock, disputeSecret, blockNumber, 'DisputeStarted');
+          applyKnownHtlcSecret(env, newState, mempoolOps, outputs, hashlock, disputeSecret, blockNumber, 'DisputeStarted');
         }
       }
       queueCrossJurisdictionSalvageFromDispute(
+        env,
         newState,
         outputs,
         counterpartyId,
@@ -746,6 +817,30 @@ async function applyFinalizedJEvent(
       const removed = removedDraft + removedSent;
       if (removed > 0) {
         addMessage(newState, `🧹 Removed ${removed} stale dispute-finalize op(s) for ${counterpartyId.slice(-4)}`);
+      }
+
+      const finalizationEvidence = disputeFinalizationEvidence.filter((evidence) =>
+        normalizeId(evidence.sender) === senderStr &&
+        normalizeId(evidence.counterentity) === counterentityStr &&
+        String(evidence.initialNonce) === String(initialNonce) &&
+        String(evidence.initialProofbodyHash).toLowerCase() === String(initialProofbodyHash).toLowerCase() &&
+        String(evidence.finalProofbodyHash).toLowerCase() === finalProofbodyHash.toLowerCase()
+      );
+      const finalizationArgumentBlobs = finalizationEvidence.flatMap((evidence) => [
+        evidence.leftArguments,
+        evidence.rightArguments,
+        evidence.starterInitialArguments,
+        evidence.starterIncrementedArguments,
+      ]);
+      if (finalizationArgumentBlobs.length > 0) {
+        queueCrossJurisdictionSalvageFromArgumentList(
+          env,
+          newState,
+          outputs,
+          counterpartyId,
+          finalizationArgumentBlobs,
+          blockNumber,
+        );
       }
 
       // DisputeFinalized is authoritative. Clear the off-chain component and transient holds

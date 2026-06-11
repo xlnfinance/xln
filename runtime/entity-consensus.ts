@@ -24,6 +24,7 @@ import {
   getAccountPerspective,
   emitScopedEvents,
   removeCommittedTxsFromMempool,
+  resolveEntityProposerId,
   txFingerprint,
 } from './state-helpers';
 import { markStorageAccountDirty, markStorageEntityDirty, recordOrderbookPairUpdate } from './env-events';
@@ -1430,11 +1431,13 @@ export const applyEntityFrame = async (
         const targetHubState = findEntityStateById(env, fill.route.target.entityId);
         const targetSigner = targetHubState?.config?.validators?.[0];
         if (!targetHubState || !targetSigner) {
-          entityLog.warn('crossj.target_price_improvement_unroutable', {
-            offer: shortOrder(fill.offerId, 8),
-            targetHub: shortId(fill.route.target.entityId, 8),
-          });
-          continue;
+          // target_bonus is owed value from the same firm fill, not an optional
+          // notification. If the target hub route is unavailable, committing the
+          // ACK/book progress would settle less than the matched economics.
+          throw new Error(
+            `CROSS_J_TARGET_BONUS_UNROUTABLE: offer=${shortOrder(fill.offerId, 8)} ` +
+            `targetHub=${shortId(fill.route.target.entityId, 8)}`,
+          );
         }
         allOutputs.push({
           entityId: targetHubState.entityId,
@@ -1599,6 +1602,11 @@ export const applyEntityFrame = async (
         if (proposal.success && proposal.accountInput) {
           const outputEntityInput: EntityInput = {
             entityId: proposal.accountInput.toEntityId,
+            signerId: resolveEntityProposerId(
+              env,
+              proposal.accountInput.toEntityId,
+              `account proposal output ${currentEntityState.entityId}->${proposal.accountInput.toEntityId}`,
+            ),
             entityTxs: [
               {
                 type: 'accountInput' as const,

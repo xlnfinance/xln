@@ -1,6 +1,7 @@
-import type { AccountMachine, AccountTx, Delta, Env } from './types';
-import { createStructuredLogger } from './logger';
+import type { AccountMachine, AccountTx, Delta, Env, JurisdictionConfig } from './types';
+import { createStructuredLogger, shortHash, shortId } from './logger';
 import { txFingerprint } from './state-helpers';
+import { getJurisdictionConfigName } from './jurisdiction-runtime';
 
 const accountConsensusHelperLog = createStructuredLogger('account.consensus');
 
@@ -84,6 +85,53 @@ export function getDepositoryAddress(env: Env): string {
 
   accountConsensusHelperLog.debug('depository.missing');
   return '';
+}
+
+const normalizeEntityRef = (value: unknown): string => String(value || '').toLowerCase();
+
+const findEntityJurisdiction = (env: Env, entityId: string): JurisdictionConfig | undefined => {
+  const wanted = normalizeEntityRef(entityId);
+  for (const replica of env.eReplicas?.values?.() || []) {
+    const replicaEntityId = normalizeEntityRef(replica?.state?.entityId || replica?.entityId);
+    if (replicaEntityId !== wanted) continue;
+    const jurisdiction = replica?.state?.config?.jurisdiction;
+    if (jurisdiction?.depositoryAddress) return jurisdiction;
+  }
+
+  const profile = env.gossip?.getProfiles?.().find((candidate) =>
+    normalizeEntityRef(candidate?.entityId || '') === wanted,
+  );
+  const profileJurisdiction = profile?.metadata?.jurisdiction as JurisdictionConfig | undefined;
+  return profileJurisdiction?.depositoryAddress ? profileJurisdiction : undefined;
+};
+
+export function getAccountDepositoryAddress(env: Env, accountMachine: AccountMachine): string {
+  const localJurisdiction = findEntityJurisdiction(env, accountMachine.proofHeader.fromEntity);
+  if (localJurisdiction?.depositoryAddress) {
+    return localJurisdiction.depositoryAddress;
+  }
+
+  const counterpartyJurisdiction = findEntityJurisdiction(env, accountMachine.proofHeader.toEntity);
+  if (counterpartyJurisdiction?.depositoryAddress) {
+    return counterpartyJurisdiction.depositoryAddress;
+  }
+
+  // Account dispute proofs are money evidence for one bilateral account, so
+  // they are bound to that account's jurisdiction, not to current UI/runtime
+  // focus. Counterexample: a user connects a Tron sibling while a Testnet hub
+  // frame is in flight; using env.activeJurisdiction makes the receiver verify
+  // a valid Testnet signature against the Tron depository and rejects consensus.
+  // The fallback is only for old pure-local tests that build an AccountMachine
+  // without an entity config; live entity accounts are expected to return above.
+  const fallback = getDepositoryAddress(env);
+  accountConsensusHelperLog.debug('account_depository.fallback', {
+    from: shortId(accountMachine.proofHeader.fromEntity),
+    to: shortId(accountMachine.proofHeader.toEntity),
+    localJurisdiction: getJurisdictionConfigName(localJurisdiction),
+    counterpartyJurisdiction: getJurisdictionConfigName(counterpartyJurisdiction),
+    fallback: shortHash(fallback),
+  });
+  return fallback;
 }
 
 export function shouldIncludeToken(delta: Delta, totalDelta: bigint): boolean {

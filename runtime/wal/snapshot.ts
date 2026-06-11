@@ -65,7 +65,7 @@ const cloneRuntimeInput = (runtimeInput: RuntimeInput): RuntimeInput => ({
   runtimeTxs: [...runtimeInput.runtimeTxs],
   entityInputs: runtimeInput.entityInputs.map(input => ({
     entityId: input.entityId,
-    ...(input.signerId ? { signerId: input.signerId } : {}),
+    signerId: input.signerId,
     ...(input.entityTxs ? { entityTxs: [...input.entityTxs] } : {}),
     ...(input.hashPrecommits
       ? { hashPrecommits: new Map(Array.from(input.hashPrecommits.entries()).map(([key, value]) => [key, [...value]])) }
@@ -77,7 +77,7 @@ const cloneRuntimeInput = (runtimeInput: RuntimeInput): RuntimeInput => ({
 const cloneRuntimeOutputs = (runtimeOutputs: RoutedEntityInput[]): RoutedEntityInput[] =>
   runtimeOutputs.map(output => ({
     entityId: output.entityId,
-    ...(output.signerId ? { signerId: output.signerId } : {}),
+    signerId: output.signerId,
     ...(output.entityTxs ? { entityTxs: [...output.entityTxs] } : {}),
     ...(output.hashPrecommits
       ? { hashPrecommits: new Map(Array.from(output.hashPrecommits.entries()).map(([key, value]) => [key, [...value]])) }

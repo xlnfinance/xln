@@ -9,6 +9,9 @@ type ConnectRuntimeOptions = {
   requireOnline?: boolean;
 };
 
+const stringifyDebug = (value: unknown): string =>
+  JSON.stringify(value, (_key, item) => typeof item === 'bigint' ? item.toString() : item, 2);
+
 async function readSelectedUiRuntimeIdentity(page: Page): Promise<{ entityId: string; signerId: string }> {
   const trigger = page.getByTestId('context-current').first();
   await expect(trigger).toBeVisible({ timeout: 20_000 });
@@ -485,6 +488,60 @@ async function getAccountOpenStatus(
   );
 }
 
+async function getConnectDebugState(
+  page: Page,
+  identity: { entityId: string; signerId: string },
+  hubId: string,
+): Promise<unknown> {
+  return page.evaluate(({ identity, hubId }) => {
+    const env = (window as typeof window & {
+      isolatedEnv?: {
+        height?: number;
+        timestamp?: number;
+        runtimeInput?: { entityInputs?: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> };
+        runtimeMempool?: { entityInputs?: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> };
+        eReplicas?: Map<string, {
+          state?: {
+            messages?: string[];
+            accounts?: Map<string, {
+              currentHeight?: number;
+              pendingFrame?: { height?: number };
+              mempool?: Array<{ type?: string }>;
+            }>;
+          };
+        }>;
+        gossip?: { getProfiles?: () => Array<{ entityId?: string; runtimeId?: string; metadata?: unknown }> };
+      };
+    }).isolatedEnv;
+    const replica = env?.eReplicas?.get(`${identity.entityId}:${identity.signerId}`.toLowerCase());
+    const account = replica?.state?.accounts?.get(hubId);
+    const profile = env?.gossip?.getProfiles?.().find((candidate) =>
+      String(candidate?.entityId || '').toLowerCase() === String(hubId || '').toLowerCase(),
+    );
+    const summarizeInputs = (inputs: Array<{ entityId?: string; entityTxs?: Array<{ type?: string }> }> | undefined) =>
+      (inputs || []).slice(-10).map((input) => ({
+        entityId: String(input.entityId || '').slice(-8),
+        txs: (input.entityTxs || []).map((tx) => tx.type),
+      }));
+    return {
+      height: env?.height,
+      timestamp: env?.timestamp,
+      account: account ? {
+        currentHeight: Number(account.currentHeight || 0),
+        pendingHeight: account.pendingFrame ? Number(account.pendingFrame.height || 0) : null,
+        mempool: (account.mempool || []).map((tx) => tx.type),
+      } : null,
+      runtimeInput: summarizeInputs(env?.runtimeInput?.entityInputs),
+      runtimeMempool: summarizeInputs(env?.runtimeMempool?.entityInputs),
+      hubProfile: profile ? {
+        runtimeId: String(profile.runtimeId || ''),
+        metadata: profile.metadata,
+      } : null,
+      recentMessages: (replica?.state?.messages || []).slice(-8),
+    };
+  }, { identity, hubId });
+}
+
 async function hasExportedRuntimeEnv(page: Page): Promise<boolean> {
   return await page.evaluate(() => typeof (window as typeof window & { isolatedEnv?: unknown }).isolatedEnv !== 'undefined');
 }
@@ -571,32 +628,45 @@ export async function connectRuntimeToHubWithCredit(
   }
 
   let reopenAttempted = false;
-  await expect.poll(
-    async () => {
-      await nudgeRuntimeOnline(page);
-      const status = await getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId);
-      if (
-        status.exists
-        && status.currentHeight === 0
-        && !status.pendingHeight
-        && !reopenAttempted
-      ) {
-        reopenAttempted = true;
-        if (canUseDefaultUiConnect) {
-          await connectHubThroughUi(page, hubId);
-        } else {
-          await enqueueOpenAccount(page, identity.entityId, identity.signerId, hubId);
+  let lastStatus: AccountOpenStatus | null = null;
+  try {
+    await expect.poll(
+      async () => {
+        await nudgeRuntimeOnline(page);
+        const status = await getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId);
+        lastStatus = status;
+        if (
+          status.exists
+          && status.currentHeight === 0
+          && !status.pendingHeight
+          && !reopenAttempted
+        ) {
+          reopenAttempted = true;
+          if (canUseDefaultUiConnect) {
+            await connectHubThroughUi(page, hubId);
+          } else {
+            await enqueueOpenAccount(page, identity.entityId, identity.signerId, hubId);
+          }
+          return false;
         }
-        return false;
-      }
-      return status.exists && status.currentHeight > 0 && !status.pendingHeight;
-    },
-    {
-      timeout: DEFAULT_OPEN_TIMEOUT_MS,
-      intervals: [250, 500, 750],
-      message: `account ${hubId.slice(0, 10)} must be committed after hub connect`,
-    },
-  ).toBe(true);
+        return status.exists && status.currentHeight > 0 && !status.pendingHeight;
+      },
+      {
+        timeout: DEFAULT_OPEN_TIMEOUT_MS,
+        intervals: [250, 500, 750],
+        message: `account ${hubId.slice(0, 10)} must be committed after hub connect`,
+      },
+    ).toBe(true);
+  } catch (error) {
+    const debugState = await getConnectDebugState(page, identity, hubId).catch((debugError) => ({
+      debugError: debugError instanceof Error ? debugError.message : String(debugError),
+    }));
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}\n` +
+      `lastStatus=${stringifyDebug(lastStatus)}\n` +
+      `connectDebug=${stringifyDebug(debugState)}`,
+    );
+  }
 
   for (const tokenId of tokenIds) {
     if (canUseDefaultUiConnect && tokenId === 1) continue;

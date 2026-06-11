@@ -12,7 +12,7 @@
  */
 
 import type { EntityState, EntityTx, EntityInput, SettlementWorkspace, SettlementDiff, SettlementOp, AccountInput } from '../../types';
-import { cloneEntityState, addMessage, getAccountPerspective } from '../../state-helpers';
+import { cloneEntityState, addMessage, getAccountPerspective, resolveEntityProposerId } from '../../state-helpers';
 import { initJBatch, batchAddSettlement } from '../../j-batch';
 import { isLeftEntity } from '../../entity-id-utils';
 import type { Env, HankoString } from '../../types';
@@ -125,7 +125,7 @@ function diffsToOps(data: { ops?: SettlementOp[]; diffs?: SettlementDiff[]; forg
 export async function handleSettlePropose(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_propose' }>,
-  _env: Env
+  env: Env
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[] }> {
   const { counterpartyEntityId, executorIsLeft: execParam, memo } = entityTx.data;
   const ops = diffsToOps(entityTx.data);
@@ -182,6 +182,7 @@ export async function handleSettlePropose(
 
   outputs.push({
     entityId: counterpartyEntityId,
+    signerId: resolveEntityProposerId(env, counterpartyEntityId, 'settle.propose.output'),
     entityTxs: [{
       type: 'accountInput',
       data: {
@@ -204,7 +205,7 @@ export async function handleSettlePropose(
 export async function handleSettleUpdate(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_update' }>,
-  _env: Env
+  env: Env
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[] }> {
   const { counterpartyEntityId, executorIsLeft: execParam, memo } = entityTx.data;
   const ops = diffsToOps(entityTx.data);
@@ -274,6 +275,7 @@ export async function handleSettleUpdate(
 
   outputs.push({
     entityId: counterpartyEntityId,
+    signerId: resolveEntityProposerId(env, counterpartyEntityId, 'settle.update.output'),
     entityTxs: [{
       type: 'accountInput',
       data: {
@@ -394,6 +396,7 @@ export async function handleSettleApprove(
 
   outputs.push({
     entityId: counterpartyEntityId,
+    signerId: resolveEntityProposerId(env, counterpartyEntityId, 'settle.approve.output'),
     entityTxs: [{
       type: 'accountInput',
       data: {
@@ -553,7 +556,7 @@ export async function handleSettleExecute(
 export async function handleSettleReject(
   entityState: EntityState,
   entityTx: Extract<EntityTx, { type: 'settle_reject' }>,
-  _env: Env
+  env: Env
 ): Promise<{ newState: EntityState; outputs: EntityInput[]; mempoolOps: MempoolOp[] }> {
   const { counterpartyEntityId, reason } = entityTx.data;
   const newState = cloneEntityState(entityState);
@@ -588,6 +591,7 @@ export async function handleSettleReject(
 
   outputs.push({
     entityId: counterpartyEntityId,
+    signerId: resolveEntityProposerId(env, counterpartyEntityId, 'settle.reject.output'),
     entityTxs: [{
       type: 'accountInput',
       data: {
@@ -679,6 +683,7 @@ export async function processSettleAction(
 
                 autoApproveOutput = {
                   entityId: fromEntityId,
+                  signerId: resolveEntityProposerId(env, fromEntityId, 'settle.auto-approve.output'),
                   entityTxs: [{
                     type: 'accountInput',
                     data: {

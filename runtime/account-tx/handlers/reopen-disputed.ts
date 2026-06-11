@@ -33,6 +33,7 @@ export function handleReopenDisputed(
   delete accountMachine.counterpartyDisputeProofHanko;
   delete accountMachine.counterpartyDisputeProofNonce;
   delete accountMachine.counterpartyDisputeProofBodyHash;
+  delete accountMachine.disputePrepare;
 
   accountMachine.status = 'active';
 

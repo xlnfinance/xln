@@ -7,6 +7,18 @@ interface JEventMetadata {
   transactionHash?: string;
 }
 
+export interface DisputeFinalizationEvidence {
+  sender: string;
+  counterentity: string;
+  initialNonce: string;
+  initialProofbodyHash: string;
+  finalProofbodyHash: string;
+  leftArguments: string;
+  rightArguments: string;
+  starterInitialArguments: string;
+  starterIncrementedArguments: string;
+}
+
 /**
  * Jurisdiction event types - discriminated union for type safety.
  * Each on-chain event has its own typed data structure.
@@ -121,6 +133,11 @@ export interface JurisdictionEventData {
   from: string;
   event: JurisdictionEvent;
   events?: JurisdictionEvent[];
+  // Optional calldata-derived evidence. This is deliberately outside
+  // canonical eventsHash: transformer args are adversarial evidence and must not
+  // fork J-event consensus when a provider cannot serve transaction input.
+  disputeFinalizationEvidence?: DisputeFinalizationEvidence[];
+  disputeFinalizationEvidenceHash?: string;
   eventsHash?: string;
   signature?: string;
   observedAt: number;
@@ -139,6 +156,8 @@ export interface JBlockObservation {
   jBlockHash: string;
   eventsHash: string;
   events: JurisdictionEvent[];
+  disputeFinalizationEvidence?: DisputeFinalizationEvidence[];
+  disputeFinalizationEvidenceHash?: string;
   observedAt: number;
 }
 

@@ -1,4 +1,4 @@
-import type { Env, JInput, RoutedEntityInput, RuntimeTx } from './types';
+import type { EntityInput, Env, JInput, RoutedEntityInput, RuntimeTx } from './types';
 import type { Profile } from './networking/gossip';
 import type { RuntimeOutputRoutingDeps } from './runtime-output-routing';
 import { extractCrossJurisdictionRouteFromTx } from './cross-jurisdiction-boundary';
@@ -10,12 +10,13 @@ export type RuntimeEntityRoutingDeps = {
   ensureRuntimeState(env: Env): RuntimeState;
   enqueueRuntimeInputs(
     env: Env,
-    inputs?: RoutedEntityInput[],
+    inputs?: EntityInput[],
     runtimeTxs?: RuntimeTx[],
     jInputs?: JInput[],
     ingressTimestamp?: number,
   ): void;
   extractEntityId(replicaKey: string): string;
+  hasLocalSignerForEntity(env: Env, entityId: string): boolean;
   getP2P: RuntimeOutputRoutingDeps['getP2P'];
   startRuntimeLoop(env: Env): void;
   processRuntime(env: Env): Promise<unknown>;
@@ -84,10 +85,10 @@ export const hasLocalEntityReplica = (
 export const resolveRuntimeIdForCrossJurisdictionEntity = (
   env: Env,
   entityId: string,
-  deps: Pick<RuntimeEntityRoutingDeps, 'ensureRuntimeState' | 'extractEntityId'>,
+  deps: Pick<RuntimeEntityRoutingDeps, 'ensureRuntimeState' | 'extractEntityId' | 'hasLocalSignerForEntity'>,
 ): string | null => {
   const localRuntimeId = normalizeRuntimeId(String(env.runtimeId || ''));
-  if (localRuntimeId && hasLocalEntityReplica(env, entityId, deps)) return localRuntimeId;
+  if (localRuntimeId && deps.hasLocalSignerForEntity(env, entityId)) return localRuntimeId;
   return resolveRuntimeIdForEntity(env, entityId, deps);
 };
 
@@ -125,7 +126,7 @@ export const collectCrossJurisdictionRemoteEntityHints = (
   env: Env,
   input: RoutedEntityInput,
   fromRuntimeId: string,
-  deps: Pick<RuntimeEntityRoutingDeps, 'extractEntityId'>,
+  deps: Pick<RuntimeEntityRoutingDeps, 'extractEntityId' | 'hasLocalSignerForEntity'>,
 ): string[] => {
   const localRuntimeId = normalizeRuntimeId(String(env.runtimeId || ''));
   const from = normalizeRuntimeId(fromRuntimeId);
@@ -138,8 +139,8 @@ export const collectCrossJurisdictionRemoteEntityHints = (
     const targetUserId = String(route.target?.counterpartyEntityId || '').toLowerCase();
     const sourceHubId = String(route.source?.counterpartyEntityId || '').toLowerCase();
     const targetHubId = String(route.target?.entityId || '').toLowerCase();
-    const localIsHubSide = [sourceHubId, targetHubId].some(entityId => entityId && hasLocalEntityReplica(env, entityId, deps));
-    const localIsUserSide = [sourceUserId, targetUserId].some(entityId => entityId && hasLocalEntityReplica(env, entityId, deps));
+    const localIsHubSide = [sourceHubId, targetHubId].some(entityId => entityId && deps.hasLocalSignerForEntity(env, entityId));
+    const localIsUserSide = [sourceUserId, targetUserId].some(entityId => entityId && deps.hasLocalSignerForEntity(env, entityId));
     const remoteIds = localIsHubSide && !localIsUserSide
       ? [sourceUserId, targetUserId]
       : localIsUserSide && !localIsHubSide
@@ -217,6 +218,7 @@ export const createRuntimeOutputRoutingDeps = (
     deps.enqueueRuntimeInputs(env, inputs, undefined, undefined, ingressTimestamp);
   },
   extractEntityId: deps.extractEntityId,
+  hasLocalSignerForEntity: deps.hasLocalSignerForEntity,
   resolveRuntimeIdForEntity: (env, entityId) => resolveRuntimeIdForEntity(env, entityId, deps),
   resolveRuntimeIdForCrossJurisdictionEntity: (env, entityId) =>
     resolveRuntimeIdForCrossJurisdictionEntity(env, entityId, deps),
