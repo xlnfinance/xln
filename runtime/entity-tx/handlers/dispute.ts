@@ -35,6 +35,11 @@ import {
 import { removeBookOrderById } from '../../orderbook/cross-j';
 import { swapKey } from '../../swap-keys';
 import { crossJurisdictionBookOwnerRef } from '../../cross-jurisdiction-orderbook';
+import {
+  isAccountControlTx,
+  isArgumentChangingAccountTx,
+  isDisputeEvidenceAccountTx,
+} from '../../account-dispute-policy';
 
 const isProofBodyStruct = (value: unknown): value is ProofBodyStruct => {
   if (!value || typeof value !== 'object') return false;
@@ -300,15 +305,6 @@ const removeDisputedAccountOrdersFromBook = (
   return { localRemoved, remoteQueued };
 };
 
-const isAccountBusinessTx = (txType: string): boolean =>
-  txType !== 'j_event_claim' && txType !== 'reopen_disputed';
-
-const isDisputeEvidenceTx = (txType: string): boolean =>
-  txType === 'pull_resolve' || txType === 'swap_resolve';
-
-const isMutableAccountTxDuringPrepare = (txType: string): boolean =>
-  isAccountBusinessTx(txType) && !isDisputeEvidenceTx(txType);
-
 const collectHtlcRoutesAwaitingSecrets = (state: EntityState, counterpartyEntityId: string): string[] => {
   const counterparty = String(counterpartyEntityId || '').toLowerCase();
   const pending: string[] = [];
@@ -336,10 +332,15 @@ const collectDisputeEvidenceReadinessIssues = (
   if (readyAfter > now) issues.push(`cooldown:${readyAfter - now}ms`);
   if (account.pendingFrame) issues.push(`pendingFrame:${account.pendingFrame.height}`);
   if (account.pendingAccountInput) issues.push('pendingAccountInput');
-  const businessMempool = (account.mempool ?? [])
+  // Any business tx can change the proof/argument pair. In prepare-dispute we
+  // may still process evidence-only txs to improve calldata, but as long as
+  // they are merely queued, disputeStart/finalize must not commit arguments.
+  // Counterexample: a queued swap_resolve contains the second 50% fill; starting
+  // with the old 50% arguments would let the on-chain dispute underclaim.
+  const argumentChangingMempool = (account.mempool ?? [])
     .map((tx) => tx.type)
-    .filter(isMutableAccountTxDuringPrepare);
-  if (businessMempool.length > 0) issues.push(`mempool:${businessMempool.join(',')}`);
+    .filter(isArgumentChangingAccountTx);
+  if (argumentChangingMempool.length > 0) issues.push(`argumentMempool:${argumentChangingMempool.join(',')}`);
   const awaitingSecrets = collectHtlcRoutesAwaitingSecrets(state, counterpartyEntityId);
   if (awaitingSecrets.length > 0) issues.push(`htlcAwaitingSecret:${awaitingSecrets.length}`);
   return issues;
@@ -364,7 +365,7 @@ const markAccountDisputePreparing = (
   // bilateral proposals must not keep changing the proof/argument pair while
   // we are preparing an adversarial on-chain path.
   account.mempool = (account.mempool || []).filter(
-    (tx) => tx.type === 'j_event_claim' || tx.type === 'reopen_disputed' || isDisputeEvidenceTx(tx.type),
+    (tx) => isAccountControlTx(tx.type) || isDisputeEvidenceAccountTx(tx.type),
   );
   delete account.pendingFrame;
   delete account.pendingAccountInput;
@@ -763,7 +764,7 @@ export async function handleDisputeStart(
   const beforeMempool = account.mempool?.length || 0;
   if (beforeMempool > 0) {
     account.mempool = (account.mempool || []).filter(
-      (tx) => tx.type === 'j_event_claim' || tx.type === 'reopen_disputed',
+      (tx) => isAccountControlTx(tx.type),
     );
     const dropped = beforeMempool - account.mempool.length;
     if (dropped > 0) {
@@ -879,6 +880,24 @@ export async function handleDisputeFinalize(
     );
     console.warn(
       `⚠️ disputeFinalize rejected: cooperative=true for ${counterpartyEntityId.slice(-4)} (unilateral-only)`,
+    );
+    return { newState, outputs };
+  }
+
+  // Same readiness gate as disputeStart. If the counterparty starts first, we
+  // still refuse to counter-finalize while evidence can change. Finalization
+  // arguments are as security-critical as start arguments: both commit calldata
+  // for a specific proof body, so pending secrets/fills must be settled first.
+  const readinessIssues = collectDisputeEvidenceReadinessIssues(
+    newState,
+    counterpartyEntityId,
+    account,
+    Number(newState.timestamp ?? 0),
+  );
+  if (readinessIssues.length > 0) {
+    addMessage(
+      newState,
+      `⏳ disputeFinalize blocked until evidence is stable for ${counterpartyEntityId.slice(-4)}: ${readinessIssues.join('; ')}`,
     );
     return { newState, outputs };
   }
