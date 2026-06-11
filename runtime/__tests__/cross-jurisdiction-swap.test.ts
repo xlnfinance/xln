@@ -35,6 +35,7 @@ import {
 } from '../cross-jurisdiction-orderbook';
 import { verifyHashLadderBinary } from '../hashladder';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook/types';
+import { buildAccountProofBody } from '../proof-builder';
 import {
   addReplica,
   addr,
@@ -568,6 +569,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const targetHub = entity('ac');
     const targetUser = entity('ad');
     const targetUserState = makeState(targetUser, addr('ae'), base, targetHub);
+    addReplica(env, makeState(sourceHub, addr('af'), eth, sourceUser), addr('af'));
     const route = buildPreparedCrossJurisdictionRoute({
       orderId: 'cross-target-remote-book-owner',
       makerEntityId: sourceUser,
@@ -619,6 +621,7 @@ describe('cross-jurisdiction hashledger swap', () => {
     const targetHub = entity('ac');
     const targetUser = entity('ad');
     const targetUserState = makeState(targetUser, addr('ae'), base, targetHub);
+    addReplica(env, makeState(sourceHub, addr('af'), eth, sourceUser), addr('af'));
     const route = buildPreparedCrossJurisdictionRoute({
       orderId: 'cross-target-delayed-fill-ack',
       makerEntityId: sourceUser,
@@ -2373,7 +2376,9 @@ describe('cross-jurisdiction hashledger swap', () => {
     const targetUser = entity('23');
     const targetHub = entity('24');
     const signer = registerTestSigner(env, 'cross-dispute-secret', '1');
+    const targetSigner = registerTestSigner(env, 'cross-dispute-secret', '2');
     const state = makeState(user, signer, eth, hub);
+    addReplica(env, makeState(targetUser, targetSigner, eth, targetHub), targetSigner);
     const revealedSecret = secret('77');
     const hashlock = hashHtlcSecret(revealedSecret);
     const targetLockId = secret('78');
@@ -2401,13 +2406,14 @@ describe('cross-jurisdiction hashledger swap', () => {
       [{ fillRatios: [], secrets: [revealedSecret], pulls: [] }],
     );
     const starterInitialArguments = abiCoder.encode(['bytes[]'], [[paymentArgs]]);
+    const proofbodyHash = buildAccountProofBody(state.accounts.get(hub)!).proofBodyHash;
     const disputeStartedEvent: JurisdictionEvent = {
       type: 'DisputeStarted',
       data: {
         sender: hub,
         counterentity: user,
         nonce: '1',
-        proofbodyHash: secret('7a'),
+        proofbodyHash,
         starterInitialArguments,
         starterIncrementedArguments: '0x',
         disputeTimeout: 100,
@@ -2454,31 +2460,33 @@ describe('cross-jurisdiction hashledger swap', () => {
     const targetHub = entity('33');
     const targetUser = entity('34');
     const signer = registerTestSigner(env, 'cross-dispute-salvage', '1');
-      const state = makeState(sourceUser, signer, eth, sourceHub);
-      const oldSettledRoute = buildPreparedCrossJurisdictionRoute({
-        orderId: 'old-cross-pull-dispute',
-        makerEntityId: sourceUser,
-        hubEntityId: sourceHub,
-        source: {
-          jurisdiction: jref(eth),
-          entityId: sourceUser,
-          counterpartyEntityId: sourceHub,
-          tokenId: 1,
-          amount: 100n,
-        },
-        target: {
-          jurisdiction: jref(base),
-          entityId: targetHub,
-          counterpartyEntityId: targetUser,
-          tokenId: 1,
-          amount: 90n,
-        },
-        status: 'settled' as const,
-        createdAt: env.timestamp - 1_000,
-        updatedAt: env.timestamp - 1_000,
-      }, { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.timestamp - 1_000 });
-      const route = buildPreparedCrossJurisdictionRoute({
-        orderId: 'cross-pull-dispute',
+    const targetSigner = registerTestSigner(env, 'cross-dispute-salvage', '2');
+    const state = makeState(sourceUser, signer, eth, sourceHub);
+    addReplica(env, makeState(targetUser, targetSigner, base, targetHub), targetSigner);
+    const oldSettledRoute = buildPreparedCrossJurisdictionRoute({
+      orderId: 'old-cross-pull-dispute',
+      makerEntityId: sourceUser,
+      hubEntityId: sourceHub,
+      source: {
+        jurisdiction: jref(eth),
+        entityId: sourceUser,
+        counterpartyEntityId: sourceHub,
+        tokenId: 1,
+        amount: 100n,
+      },
+      target: {
+        jurisdiction: jref(base),
+        entityId: targetHub,
+        counterpartyEntityId: targetUser,
+        tokenId: 1,
+        amount: 90n,
+      },
+      status: 'settled' as const,
+      createdAt: env.timestamp - 1_000,
+      updatedAt: env.timestamp - 1_000,
+    }, { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.timestamp - 1_000 });
+    const route = buildPreparedCrossJurisdictionRoute({
+      orderId: 'cross-pull-dispute',
       makerEntityId: sourceUser,
       hubEntityId: sourceHub,
       source: {
@@ -2497,9 +2505,9 @@ describe('cross-jurisdiction hashledger swap', () => {
       },
       status: 'resting' as const,
       createdAt: env.timestamp,
-        updatedAt: env.timestamp,
-      }, { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.timestamp });
-      state.crossJurisdictionSwaps?.set(oldSettledRoute.orderId, oldSettledRoute);
+      updatedAt: env.timestamp,
+    }, { runtimeSeed: 'test-seed', sourceDisputeDelayMs: 5_000, now: env.timestamp });
+    state.crossJurisdictionSwaps?.set(oldSettledRoute.orderId, oldSettledRoute);
     state.crossJurisdictionSwaps?.set(route.orderId, route);
 
     const abiCoder = ethers.AbiCoder.defaultAbiCoder();
@@ -2513,13 +2521,14 @@ describe('cross-jurisdiction hashledger swap', () => {
       [{ fillRatios: [], secrets: [], pulls: [binary] }],
     );
     const starterInitialArguments = abiCoder.encode(['bytes[]'], [[crossPullArgs]]);
+    const proofbodyHash = buildAccountProofBody(state.accounts.get(sourceHub)!).proofBodyHash;
     const disputeStartedEvent: JurisdictionEvent = {
       type: 'DisputeStarted',
       data: {
         sender: sourceHub,
         counterentity: sourceUser,
         nonce: '1',
-        proofbodyHash: secret('8a'),
+        proofbodyHash,
         starterInitialArguments,
         starterIncrementedArguments: '0x',
         disputeTimeout: 100,
@@ -2566,7 +2575,9 @@ describe('cross-jurisdiction hashledger swap', () => {
     const targetHub = entity('37');
     const targetUser = entity('38');
     const signer = registerTestSigner(env, 'cross-dispute-finalized-salvage', '1');
+    const targetSigner = registerTestSigner(env, 'cross-dispute-finalized-salvage', '2');
     const state = makeState(sourceUser, signer, eth, sourceHub);
+    addReplica(env, makeState(targetUser, targetSigner, base, targetHub), targetSigner);
     const route = buildPreparedCrossJurisdictionRoute({
       orderId: 'cross-pull-finalize',
       makerEntityId: sourceUser,
