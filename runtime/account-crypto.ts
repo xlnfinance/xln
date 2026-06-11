@@ -464,14 +464,23 @@ export function signAccountFrame(
 }
 
 export function signDigest(seed: Uint8Array | string, signerId: string, digestHex: string): string {
-  installHmacSync();
-
   const privateKey = getOrDeriveKey(seed, signerId);
-
   const messageBytes = Buffer.from(digestHex.replace('0x', ''), 'hex');
-  const [signature, recovery] = secp256k1.signSync(messageBytes, privateKey, { recovered: true, der: false });
+  const { signature, recovery } = signDigestBytesWithPrivateKey(privateKey, messageBytes);
   const sigHex = Buffer.from(signature).toString('hex') + recovery.toString(16).padStart(2, '0');
   return `0x${sigHex}`;
+}
+
+export function signDigestBytesWithPrivateKey(
+  privateKey: Uint8Array,
+  messageBytes: Uint8Array,
+): { signature: Uint8Array; recovery: number } {
+  installHmacSync();
+  if (messageBytes.length !== 32) {
+    throw new Error(`SIGN_DIGEST_INVALID_LENGTH:${messageBytes.length}`);
+  }
+  const [signature, recovery] = secp256k1.signSync(messageBytes, privateKey, { recovered: true, der: false });
+  return { signature, recovery };
 }
 
 /**

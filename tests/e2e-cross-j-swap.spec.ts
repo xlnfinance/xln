@@ -1,9 +1,9 @@
 import { test, expect, type BrowserContext, type Page } from '@playwright/test';
-import { AbiCoder, HDNodeWallet, Mnemonic, getIndexedAccountPath, keccak256, toUtf8Bytes } from 'ethers';
+import { AbiCoder, HDNodeWallet, Mnemonic, Wallet, getIndexedAccountPath, keccak256, toUtf8Bytes } from 'ethers';
 import { deriveDelta } from '../runtime/account-utils';
 import { ensureE2EBaseline, type E2EHealthResponse } from './utils/e2e-baseline';
 import { connectRuntimeToHubWithCredit } from './utils/e2e-connect';
-import { gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
+import { gotoApp } from './utils/e2e-demo-users';
 import { enqueueEntityTxs } from './utils/e2e-runtime-input';
 import { requireIsolatedBaseUrl } from './utils/e2e-isolated-env';
 import { timedStep } from './utils/e2e-timing';
@@ -53,6 +53,7 @@ type CrossRuntimeWindow = Window & {
 
 type CrossResolveSnapshot = {
   offerId: string;
+  height: number;
   fillRatio: number;
   fillNumerator: string;
   fillDenominator: string;
@@ -522,6 +523,11 @@ async function createRuntimeIdentityViaStore(
       loginType: 'manual',
       requiresOnboarding: false,
       mnemonic12: undefined,
+      // This spec is a swap/orderbook consensus test, not a recovery-tower test.
+      // Remote account frames must not be held behind a stale localhost tower
+      // configuration from another browser run; watchtower behavior has its own
+      // dedicated e2e suite.
+      recovery: { useDefaultTowers: false, towers: [] },
     });
     return String(runtime?.id || '');
   }, { label, mnemonic: normalizedMnemonic });
@@ -576,17 +582,33 @@ async function faucetOffchain(
   tokenId: number,
   amount: string,
 ): Promise<void> {
-  const response = await page.request.post(`${apiBaseUrl.replace(/\/$/, '')}/api/faucet/offchain`, {
-    data: {
-      userEntityId: entityId,
-      userRuntimeId: await page.evaluate(() => String((window as CrossRuntimeWindow).isolatedEnv?.runtimeId || '')),
-      hubEntityId,
-      tokenId,
-      amount,
+  let lastError = '';
+  await expect.poll(
+    async () => {
+      const response = await page.request.post(`${apiBaseUrl.replace(/\/$/, '')}/api/faucet/offchain`, {
+        data: {
+          userEntityId: entityId,
+          userRuntimeId: await page.evaluate(() => String((window as CrossRuntimeWindow).isolatedEnv?.runtimeId || '')),
+          hubEntityId,
+          tokenId,
+          amount,
+        },
+        timeout: 30_000,
+      });
+      if (response.ok()) return true;
+      lastError = `${response.status()} ${await response.text().catch(() => '')}`;
+      if (response.status() === 409 && lastError.includes('FAUCET_ACCOUNT_NOT_OPEN')) {
+        await flushRuntime(page, 2);
+        return false;
+      }
+      throw new Error(`offchain faucet failed: ${lastError}`);
     },
-    timeout: 30_000,
-  });
-  expect(response.ok(), `offchain faucet failed: ${response.status()} ${await response.text().catch(() => '')}`).toBe(true);
+    {
+      timeout: 60_000,
+      intervals: [250, 500, 1000],
+      message: `offchain faucet account must be visible on hub: ${lastError}`,
+    },
+  ).toBe(true);
 }
 
 async function outCap(page: Page, entityId: string, counterpartyId: string, tokenId: number): Promise<bigint> {
@@ -675,6 +697,11 @@ async function selectContextEntity(page: Page, identity: RuntimeIdentity): Promi
 }
 
 async function openSwapWorkspace(page: Page): Promise<void> {
+  const completionClose = page.getByTestId('swap-completion-close').first();
+  if (await completionClose.isVisible().catch(() => false)) {
+    await completionClose.click();
+    await expect(completionClose).toBeHidden({ timeout: 5_000 });
+  }
   const accountsTab = page.getByTestId('tab-accounts').first();
   await expect(accountsTab).toBeVisible({ timeout: 20_000 });
   await accountsTab.click();
@@ -790,10 +817,10 @@ async function placeCrossOrder(
     hubId: string;
     targetEntityId: string;
     side: 'buy' | 'sell';
-    amount: string;
-    price: string;
+  amount: string;
+  price: string;
   },
-): Promise<void> {
+): Promise<string> {
   await openSwapWorkspace(page);
   await selectSourceChainInSwap(page, params.source.entityId);
   await selectCounterpartyInSwap(page, params.hubId);
@@ -805,6 +832,7 @@ async function placeCrossOrder(
   await expect(amountInput).toBeVisible({ timeout: 20_000 });
   await expect(priceInput).toBeVisible({ timeout: 20_000 });
   const beforeSubmit = await readCrossState(page, params.source, params.hubId);
+  const beforeHeight = beforeSubmit.currentHeight;
   const beforeRouteIds = new Set(beforeSubmit.routeSummaries.map(route => route.orderId));
   const beforeOfferIds = new Set(beforeSubmit.offerSummaries.map(offer => offer.offerId));
   const beforeMessageCount = beforeSubmit.messages.length;
@@ -813,6 +841,7 @@ async function placeCrossOrder(
   await expect(submit).toBeEnabled({ timeout: 30_000 });
   await submit.click();
   let lastSubmitState: unknown = null;
+  let createdOrderId = '';
   try {
     await expect.poll(
       async () => {
@@ -863,6 +892,7 @@ async function placeCrossOrder(
           formValues,
           recentMessages: state.messages.slice(-8),
         };
+        createdOrderId = newRoutes[0]?.orderId || newOffers[0]?.offerId || '';
         return lastSubmitState;
       },
       {
@@ -874,6 +904,44 @@ async function placeCrossOrder(
   } catch (error) {
     throw new Error(`${error instanceof Error ? error.message : String(error)}\nlastSubmitState=${JSON.stringify(lastSubmitState, null, 2)}`);
   }
+  expect(createdOrderId, 'cross-j order submit must return exact created orderId').toBeTruthy();
+  let lastCommitState: unknown = null;
+  try {
+    await expect.poll(
+      async () => {
+        await flushRuntime(page, 1);
+        const state = await readCrossState(page, params.source, params.hubId);
+        lastCommitState = {
+          currentHeight: state.currentHeight,
+          beforeHeight,
+          hasPendingFrame: state.hasPendingFrame,
+          pendingTxs: state.pendingTxs,
+          mempoolTxs: state.mempoolTxs,
+          offers: state.offers,
+          route: state.routeSummaries.find((route) => route.orderId === createdOrderId) || null,
+          pendingOutputs: state.pendingOutputs,
+          pendingNetworkOutputs: state.pendingNetworkOutputs,
+          runtimeMempoolInputs: state.runtimeMempoolInputs,
+          p2pState: state.p2pState,
+          recoveryBarrier: state.recoveryBarrier,
+          messages: state.messages.slice(-10),
+        };
+        return {
+          committed: state.currentHeight > beforeHeight && !state.hasPendingFrame,
+          currentHeight: state.currentHeight,
+          hasPendingFrame: state.hasPendingFrame,
+        };
+      },
+      {
+        message: `cross-j order ${createdOrderId} must commit source account frame before matching`,
+        timeout: 75_000,
+        intervals: [250, 500, 1000],
+      },
+    ).toMatchObject({ committed: true });
+  } catch (error) {
+    throw new Error(`${error instanceof Error ? error.message : String(error)}\nlastCommitState=${JSON.stringify(lastCommitState, null, 2)}`);
+  }
+  return createdOrderId;
 }
 
 async function readCrossState(
@@ -884,6 +952,10 @@ async function readCrossState(
   offers: number;
   routes: number;
   pulls: number;
+  currentHeight: number;
+  hasPendingFrame: boolean;
+  pendingTxs: string[];
+  mempoolTxs: string[];
   settledRoutes: number;
   claimedRoutes: number;
   replicaFound: boolean;
@@ -911,6 +983,11 @@ async function readCrossState(
     cross: boolean;
   }>;
   pullIds: string[];
+  pendingOutputs: Array<{ entityId: string; signerId: string; txTypes: string[]; frame: boolean; precommits: number }>;
+  pendingNetworkOutputs: Array<{ entityId: string; signerId: string; runtimeId: string; txTypes: string[]; frame: boolean; precommits: number }>;
+  runtimeMempoolInputs: Array<{ entityId: string; signerId: string; txTypes: string[]; frame: boolean; precommits: number }>;
+  p2pState: { exists: boolean; connected: boolean; queue: unknown; directPeers: unknown };
+  recoveryBarrier: boolean;
 }> {
   return await page.evaluate(({ identity, hubId }) => {
     const env = (window as CrossRuntimeWindow).isolatedEnv;
@@ -977,6 +1054,10 @@ async function readCrossState(
       offers,
       routes: Number(state?.crossJurisdictionSwaps?.size || 0),
       pulls: Number(account?.pulls?.size || 0),
+      currentHeight: Number(account?.currentHeight || 0),
+      hasPendingFrame: Boolean(account?.pendingFrame),
+      pendingTxs: Array.from(account?.pendingFrame?.accountTxs || []).map((tx: any) => String(tx?.type || '')),
+      mempoolTxs: Array.from(account?.mempool || []).map((tx: any) => String(tx?.type || '')),
       settledRoutes,
       claimedRoutes,
       replicaFound: Boolean(replica),
@@ -991,6 +1072,35 @@ async function readCrossState(
         cross: Boolean(offer?.crossJurisdiction),
       })),
       pullIds: Array.from(account?.pulls?.keys?.() || []).map((pullId: unknown) => String(pullId)),
+      pendingOutputs: Array.from(env?.pendingOutputs || []).map((input: any) => ({
+        entityId: String(input?.entityId || ''),
+        signerId: String(input?.signerId || ''),
+        txTypes: Array.from(input?.entityTxs || []).map((tx: any) => String(tx?.type || '')),
+        frame: Boolean(input?.proposedFrame),
+        precommits: Number(input?.hashPrecommits?.size || 0),
+      })),
+      pendingNetworkOutputs: Array.from(env?.pendingNetworkOutputs || []).map((input: any) => ({
+        entityId: String(input?.entityId || ''),
+        signerId: String(input?.signerId || ''),
+        runtimeId: String(input?.runtimeId || ''),
+        txTypes: Array.from(input?.entityTxs || []).map((tx: any) => String(tx?.type || '')),
+        frame: Boolean(input?.proposedFrame),
+        precommits: Number(input?.hashPrecommits?.size || 0),
+      })),
+      runtimeMempoolInputs: Array.from(env?.runtimeMempool?.entityInputs || env?.runtimeInput?.entityInputs || []).map((input: any) => ({
+        entityId: String(input?.entityId || ''),
+        signerId: String(input?.signerId || ''),
+        txTypes: Array.from(input?.entityTxs || []).map((tx: any) => String(tx?.type || '')),
+        frame: Boolean(input?.proposedFrame),
+        precommits: Number(input?.hashPrecommits?.size || 0),
+      })),
+      p2pState: {
+        exists: Boolean(env?.runtimeState?.p2p),
+        connected: Boolean(env?.runtimeState?.p2p?.isConnected?.()),
+        queue: env?.runtimeState?.p2p?.getQueueState?.() || null,
+        directPeers: env?.runtimeState?.p2p?.getDirectPeerState?.() || null,
+      },
+      recoveryBarrier: Boolean(env?.runtimeState?.recoveryBackupBarrier),
     };
   }, { identity, hubId });
 }
@@ -1113,6 +1223,7 @@ async function readCrossResolveSnapshots(
     const owner = String(entityId || '').toLowerCase();
     const cp = String(counterpartyId || '').toLowerCase();
     const out: CrossResolveSnapshot[] = [];
+    const seen = new Set<string>();
 
     const accountMatches = (accountKey: string, rawAccount: unknown): boolean => {
       const account = recordOf(rawAccount);
@@ -1123,15 +1234,32 @@ async function readCrossResolveSnapshots(
         canonicalCp === cp ||
         Boolean(left && right && ((left === owner && right === cp) || (right === owner && left === cp)));
     };
-    const collectResolveSnapshots = (history: unknown) => {
+    const collectResolveSnapshots = (history: unknown, replicaKey: string, accountKey: string) => {
       if (!(history instanceof Map)) return;
       for (const [offerId, rawLifecycle] of history.entries()) {
         const resolves = recordOf(rawLifecycle).resolves;
         if (!Array.isArray(resolves)) continue;
         for (const rawResolve of resolves) {
           const resolve = recordOf(rawResolve);
+          const snapshotOfferId = String(offerId || '');
+          const height = Number(resolve.height ?? recordOf(rawLifecycle).lastUpdatedHeight ?? 0);
+          const fillRatio = Number(resolve.fillRatio || 0);
+          const key = [
+            String(replicaKey || ''),
+            String(accountKey || ''),
+            snapshotOfferId,
+            String(height),
+            String(fillRatio),
+            String(resolve.fillNumerator ?? '0'),
+            String(resolve.fillDenominator ?? '0'),
+            String(resolve.executionGiveAmount ?? '0'),
+            String(resolve.executionWantAmount ?? '0'),
+          ].join(':');
+          if (seen.has(key)) continue;
+          seen.add(key);
           out.push({
-            offerId: String(offerId || ''),
+            offerId: snapshotOfferId,
+            height,
             fillRatio: Number(resolve.fillRatio || 0),
             fillNumerator: String(resolve.fillNumerator ?? '0'),
             fillDenominator: String(resolve.fillDenominator ?? '0'),
@@ -1151,12 +1279,20 @@ async function readCrossResolveSnapshots(
       if (!(accounts instanceof Map)) continue;
       for (const [accountKey, rawAccount] of accounts.entries()) {
         if (!accountMatches(String(accountKey || ''), rawAccount)) continue;
-        collectResolveSnapshots(recordOf(rawAccount).swapOrderHistory);
-        collectResolveSnapshots(recordOf(rawAccount).swapClosedOrders);
-        return out;
+        // Multiple replicas can expose the same bilateral account while one is
+        // one frame behind. Do not stop at the first match: the assertion needs
+        // the latest committed account snapshot, not whichever Map entry appears
+        // first in the browser runtime.
+        collectResolveSnapshots(recordOf(rawAccount).swapOrderHistory, String(replicaKey || ''), String(accountKey || ''));
+        collectResolveSnapshots(recordOf(rawAccount).swapClosedOrders, String(replicaKey || ''), String(accountKey || ''));
       }
     }
-    return out;
+    return out.sort((a, b) =>
+      a.height - b.height ||
+      a.offerId.localeCompare(b.offerId) ||
+      a.executionGiveAmount.localeCompare(b.executionGiveAmount) ||
+      a.executionWantAmount.localeCompare(b.executionWantAmount)
+    );
   }, { entityId, counterpartyId });
 }
 
@@ -1166,13 +1302,69 @@ async function waitForLatestCrossResolveSnapshot(
   counterpartyId: string,
   minimumCount: number,
 ): Promise<CrossResolveSnapshot> {
-  await expect
-    .poll(async () => (await readCrossResolveSnapshots(page, entityId, counterpartyId)).length, {
-      timeout: 45_000,
-      intervals: [250, 500, 1000],
-      message: `cross resolve snapshots must reach ${minimumCount}`,
-    })
-    .toBeGreaterThanOrEqual(minimumCount);
+  try {
+    await expect
+      .poll(async () => (await readCrossResolveSnapshots(page, entityId, counterpartyId)).length, {
+        timeout: 45_000,
+        intervals: [250, 500, 1000],
+        message: `cross resolve snapshots must reach ${minimumCount}`,
+      })
+      .toBeGreaterThanOrEqual(minimumCount);
+  } catch (error) {
+    const debug = await page.evaluate(({ entityId, counterpartyId }) => {
+      const env = (window as CrossRuntimeWindow).isolatedEnv;
+      const owner = String(entityId || '').toLowerCase();
+      const cp = String(counterpartyId || '').toLowerCase();
+      const out: any[] = [];
+      for (const [replicaKey, replica] of env?.eReplicas?.entries?.() || []) {
+        if (!String(replicaKey).toLowerCase().startsWith(`${owner}:`)) continue;
+        const state = replica?.state;
+        out.push({
+          replicaKey: String(replicaKey),
+          entityId: String(state?.entityId || ''),
+          profileName: String(state?.profile?.name || ''),
+          messages: Array.from(state?.messages || []).slice(-16).map(String),
+          accounts: Array.from(state?.accounts?.entries?.() || []).map(([accountKey, account]: [string, any]) => ({
+            accountKey,
+            matchesCounterparty: String(accountKey || '').toLowerCase() === cp ||
+              String(account?.counterpartyEntityId || '').toLowerCase() === cp ||
+              [String(account?.leftEntity || '').toLowerCase(), String(account?.rightEntity || '').toLowerCase()].includes(cp),
+            currentHeight: Number(account?.currentHeight || 0),
+            pendingTxs: Array.from(account?.pendingFrame?.accountTxs || []).map((tx: any) => String(tx?.type || '')),
+            mempoolTxs: Array.from(account?.mempool || []).map((tx: any) => `${String(tx?.type || '')}:${String(tx?.data?.offerId || '').slice(-8)}`),
+            openOffers: Array.from(account?.swapOffers?.entries?.() || []).map(([offerId, offer]: [string, any]) => ({
+              offerId,
+              cross: Boolean(offer?.crossJurisdiction),
+              status: String(offer?.crossJurisdiction?.status || ''),
+              fillSeq: Number(offer?.crossJurisdiction?.fillSeq || 0),
+              ratio: Number(offer?.crossJurisdiction?.cumulativeFillRatio || 0),
+            })),
+            history: Array.from(account?.swapOrderHistory?.entries?.() || []).map(([offerId, entry]: [string, any]) => ({
+              offerId,
+              resolves: Array.from(entry?.resolves || []).map((resolve: any) => ({
+                height: Number(resolve?.height || 0),
+                fillRatio: Number(resolve?.fillRatio || 0),
+                executionGiveAmount: String(resolve?.executionGiveAmount ?? '0'),
+                executionWantAmount: String(resolve?.executionWantAmount ?? '0'),
+              })),
+            })),
+            closed: Array.from(account?.swapClosedOrders?.entries?.() || []).map(([offerId, entry]: [string, any]) => ({
+              offerId,
+              resolves: Array.from(entry?.resolves || []).map((resolve: any) => ({
+                height: Number(resolve?.height || 0),
+                fillRatio: Number(resolve?.fillRatio || 0),
+                executionGiveAmount: String(resolve?.executionGiveAmount ?? '0'),
+                executionWantAmount: String(resolve?.executionWantAmount ?? '0'),
+              })),
+            })),
+          })),
+        });
+      }
+      return out;
+    }, { entityId, counterpartyId });
+    console.log('[E2E cross resolve debug]', JSON.stringify({ entityId, counterpartyId, debug }, null, 2));
+    throw error;
+  }
   const latest = (await readCrossResolveSnapshots(page, entityId, counterpartyId)).at(-1);
   expect(latest, 'latest cross resolve snapshot must exist').toBeTruthy();
   return latest!;
@@ -1190,6 +1382,8 @@ async function waitForCrossOffersCleared(
         const state = await readCrossState(page, identity, hubId);
         return {
           offers: state.offers,
+          hasPendingFrame: state.hasPendingFrame,
+          mempoolTxs: state.mempoolTxs,
           replicaFound: state.replicaFound,
           accountFound: state.accountFound,
           accountKeys: state.accountKeys,
@@ -1200,7 +1394,7 @@ async function waitForCrossOffersCleared(
         intervals: [250, 500, 1000],
         message: `${label} cross order should resolve/cancel after match`,
       },
-    ).toMatchObject({ offers: 0 });
+    ).toMatchObject({ offers: 0, hasPendingFrame: false, mempoolTxs: [] });
   } catch (error) {
     const debug = await page.evaluate(({ identity, hubId }) => {
       const env = (window as CrossRuntimeWindow).isolatedEnv;
@@ -1617,8 +1811,12 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         timedStep('cross_j_swap.bob.goto', () => gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 })),
       ]);
 
-      const aliceMnemonic = selectDemoMnemonic('alice');
-      const bobMnemonic = selectDemoMnemonic('bob');
+      // Cross-j tests reset the hub mesh aggressively. Reusing demo mnemonics
+      // reuses runtimeId/entityId, so a fresh browser can accidentally pair a
+      // local restored account with a reset hub or receive stale relay frames.
+      // New mnemonics keep every run in a distinct bilateral namespace.
+      const aliceMnemonic = Wallet.createRandom().mnemonic!.phrase;
+      const bobMnemonic = Wallet.createRandom().mnemonic!.phrase;
       const alice = await timedStep('cross_j_swap.alice.create_runtime', () => createRuntimeIdentityViaStore(alicePage, 'alice-cross', aliceMnemonic));
       const bob = await timedStep('cross_j_swap.bob.create_runtime', () => createRuntimeIdentityViaStore(bobPage, 'bob-cross', bobMnemonic));
       await Promise.all([
@@ -1721,7 +1919,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         waitForOutCapAtLeast(bobPage, bobRpc2.entityId, targetHubId, USDC, 50n * 10n ** 18n),
       ]);
 
-      await timedStep('cross_j_swap.partial.alice_offer', () => placeCrossOrder(alicePage, {
+      const alicePartialOrderId = await timedStep('cross_j_swap.partial.alice_offer', () => placeCrossOrder(alicePage, {
         source: alice,
         hubId,
         targetEntityId: aliceRpc2.entityId,
@@ -1740,7 +1938,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
 
       const [aliceFirstPartial] = await Promise.all([
         timedStep('cross_j_swap.partial.alice_pending_fill', () =>
-          waitForCrossPendingFill(alicePage, alice, hubId, 'Alice partial'),
+          waitForCrossPendingFill(alicePage, alice, hubId, 'Alice partial', { routeId: alicePartialOrderId }),
         ),
         timedStep('cross_j_swap.partial.bob_first_cleared', () =>
           waitForCrossOffersCleared(bobPage, bobRpc2, targetHubId, 'Bob first partial counter-order'),
@@ -1786,7 +1984,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         waitForCrossOffersCleared(alicePage, alice, hubId, 'Alice partial cancel-clear'),
       );
 
-      await timedStep('cross_j_swap.dispute.alice_offer', () => placeCrossOrder(alicePage, {
+      const aliceDisputeOrderId = await timedStep('cross_j_swap.dispute.alice_offer', () => placeCrossOrder(alicePage, {
         source: alice,
         hubId,
         targetEntityId: aliceRpc2.entityId,
@@ -1805,7 +2003,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
 
       const [aliceDisputePartial] = await Promise.all([
         timedStep('cross_j_swap.dispute.alice_pending_fill', () =>
-          waitForCrossPendingFill(alicePage, alice, hubId, 'Alice dispute route'),
+          waitForCrossPendingFill(alicePage, alice, hubId, 'Alice dispute route', { routeId: aliceDisputeOrderId }),
         ),
         timedStep('cross_j_swap.dispute.bob_cleared', () =>
           waitForCrossOffersCleared(bobPage, bobRpc2, targetHubId, 'Bob dispute counter-order'),

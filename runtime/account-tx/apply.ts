@@ -52,6 +52,9 @@ type ProcessAccountTxResult = {
   pullCancelled?: { pullId: string; status: 'cancelled' | 'already-closed' };
 };
 
+const isAccountBusinessTx = (txType: string): boolean =>
+  txType !== 'j_event_claim' && txType !== 'reopen_disputed';
+
 type DebugEventEmitter = {
   sendDebugEvent(payload: Record<string, unknown>): void;
 };
@@ -98,12 +101,8 @@ export async function processAccountTx(
     }
   };
 
-  if (
-    (accountMachine.status ?? 'active') === 'disputed' &&
-    accountTx.type !== 'j_event_claim' &&
-    accountTx.type !== 'reopen_disputed'
-  ) {
-    const error = `Account is disputed; tx ${accountTx.type} rejected until reopen_disputed`;
+  if ((accountMachine.status ?? 'active') !== 'active' && isAccountBusinessTx(accountTx.type)) {
+    const error = `Account is ${accountMachine.status}; tx ${accountTx.type} rejected until dispute/reopen flow completes`;
     return { success: false, events: [error], error };
   }
 

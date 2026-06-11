@@ -35,7 +35,7 @@ import {
   listPersistedEntityIdsAtHeight,
   registerEnvChangeCallback,
 } from '../runtime.ts';
-import type { AccountMachine, CrossJurisdictionSwapRoute, EntityInput, Env } from '../types';
+import type { AccountMachine, CrossJurisdictionSwapRoute, EntityInput, Env, RoutedEntityInput } from '../types';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import {
   BOOTSTRAP_POLL_MS,
@@ -886,7 +886,7 @@ const ensureMarketMakerHubConnectivity = async (
 ): Promise<void> => {
   const accountOpenInputs: EntityInput[] = [];
   const localCreditInputsByEntity = new Map<string, EntityInput>();
-  const remoteCreditInputsByEntity = new Map<string, EntityInput>();
+  const remoteCreditInputsByEntity = new Map<string, RoutedEntityInput>();
 
   for (const hubEntityId of hubEntityIds) {
     const hubSignerId = String(hubSignerIdsByEntityId.get(hubEntityId.toLowerCase()) || '');

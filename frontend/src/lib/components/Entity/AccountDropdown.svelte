@@ -290,6 +290,7 @@
 
   .account-status.ready { color: #4ade80; }
   .account-status.sent { color: #fbbf24; }
+  .account-status.dispute_preparing { color: #fbbf24; }
   .account-status.disputed { color: #fb7185; }
   .account-status.finalized_disputed { color: #fca5a5; }
 

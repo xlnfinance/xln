@@ -85,8 +85,10 @@ export async function handleCrossSwapFillAck(
     route.clearingPolicy = 'cancel_and_clear';
     offer.crossJurisdiction = route;
     syncSourcePullBinding(accountMachine, route);
-    accountMachine.swapOffers?.delete(offerId);
-    recordSwapClosedLifecycle(accountMachine, offerId);
+    // Closed-order history is a user-facing projection of the committed account
+    // proof. Record the terminal resolve before copying into swapClosedOrders; a
+    // previous ordering copied the row first, which made closed cross-j orders
+    // look unfilled even though the ACK had already committed.
     recordSwapResolveLifecycle(accountMachine, offerId, currentHeight, {
       fillRatio: currentRatio,
       ...(route.fillNumerator !== undefined ? { fillNumerator: route.fillNumerator } : {}),
@@ -97,6 +99,8 @@ export async function handleCrossSwapFillAck(
       executionWantAmount: 0n,
       ...(comment ? { comment } : {}),
     });
+    accountMachine.swapOffers?.delete(offerId);
+    recordSwapClosedLifecycle(accountMachine, offerId);
     events.push(`🌉 Cross-j offer ${offerId.slice(0, 8)} cancel requested at ${currentRatio}/65535`);
     return {
       success: true,
@@ -187,57 +191,25 @@ export async function handleCrossSwapFillAck(
     fill.cumulativeSourceAmount >= sourceTotal ||
     fill.cumulativeTargetAmount >= targetTotal;
   const shouldClose = full || cancelRemainder;
-  let closedByDust = false;
+  const remainingSource = sourceTotal - fill.cumulativeSourceAmount;
+  const remainingTarget = targetTotal - fill.cumulativeTargetAmount;
+  const closedByDust = !shouldClose && (remainingSource <= 0n || remainingTarget <= 0n);
+  const terminalClose = shouldClose || closedByDust;
   let remainingOfferEvent: SwapOfferEvent | undefined;
-  if (shouldClose) {
-    accountMachine.swapOffers?.delete(offerId);
-    recordSwapClosedLifecycle(accountMachine, offerId);
-    events.push(`🌉 Cross-j offer ${offerId.slice(0, 8)} closed at ${fill.nextRatio}/65535`);
-  } else {
-    const remainingSource = sourceTotal - fill.cumulativeSourceAmount;
-    const remainingTarget = targetTotal - fill.cumulativeTargetAmount;
-    if (remainingSource <= 0n || remainingTarget <= 0n) {
-      accountMachine.swapOffers?.delete(offerId);
-      recordSwapClosedLifecycle(accountMachine, offerId);
-      closedByDust = true;
-      events.push(`🌉 Cross-j offer ${offerId.slice(0, 8)} closed after dust remainder`);
-    } else {
-      offer.giveAmount = remainingSource;
-      offer.wantAmount = remainingTarget;
-      offer.quantizedGive = remainingSource;
-      offer.quantizedWant = remainingTarget;
-      offer.minFillRatio = 0;
-      const nextPriceTicks = route.priceTicks ?? offer.priceTicks;
-      if (nextPriceTicks !== undefined) offer.priceTicks = nextPriceTicks;
-      remainingOfferEvent = {
-        offerId,
-        makerIsLeft: offer.makerIsLeft,
-        fromEntity: accountMachine.leftEntity,
-        toEntity: accountMachine.rightEntity,
-        createdHeight: offer.createdHeight,
-        giveTokenId: offer.giveTokenId,
-        giveAmount: offer.giveAmount,
-        wantTokenId: offer.wantTokenId,
-        wantAmount: offer.wantAmount,
-        ...(offer.priceTicks !== undefined ? { priceTicks: offer.priceTicks } : {}),
-        ...(offer.timeInForce !== undefined ? { timeInForce: offer.timeInForce } : {}),
-        minFillRatio: offer.minFillRatio,
-        crossJurisdiction: offer.crossJurisdiction,
-      };
-      events.push(`🌉 Cross-j offer ${offerId.slice(0, 8)} filled to ${fill.nextRatio}/65535, ${remainingSource} source remaining`);
-    }
-  }
-
-  recordSwapResolveLifecycle(accountMachine, offerId, currentHeight, {
+  const resolveHistory = {
     fillRatio: fill.nextRatio,
     ...(fill.fillNumerator !== undefined ? { fillNumerator: fill.fillNumerator } : {}),
     ...(fill.fillDenominator !== undefined ? { fillDenominator: fill.fillDenominator } : {}),
-    cancelRemainder: shouldClose || closedByDust,
+    cancelRemainder: terminalClose,
     height: currentHeight,
     executionGiveAmount: executionSourceAmount ?? fill.incrementalSourceAmount,
     executionWantAmount: executionTargetAmount ?? fill.incrementalTargetAmount,
     ...(comment ? { comment } : {}),
-  }, {
+  };
+  // The account ACK is the canonical committed swap progress. Persist the
+  // resolve before any close/copy projection so both open and closed histories
+  // carry the same final economics.
+  recordSwapResolveLifecycle(accountMachine, offerId, currentHeight, resolveHistory, {
     giveTokenId: offer.giveTokenId,
     giveAmount: sourceTotal,
     wantTokenId: offer.wantTokenId,
@@ -245,12 +217,43 @@ export async function handleCrossSwapFillAck(
     ...(offer.priceTicks !== undefined ? { priceTicks: offer.priceTicks } : {}),
     createdHeight: offer.createdHeight,
   });
+  if (terminalClose) {
+    accountMachine.swapOffers?.delete(offerId);
+    recordSwapClosedLifecycle(accountMachine, offerId);
+    events.push(shouldClose
+      ? `🌉 Cross-j offer ${offerId.slice(0, 8)} closed at ${fill.nextRatio}/65535`
+      : `🌉 Cross-j offer ${offerId.slice(0, 8)} closed after dust remainder`);
+  } else {
+    offer.giveAmount = remainingSource;
+    offer.wantAmount = remainingTarget;
+    offer.quantizedGive = remainingSource;
+    offer.quantizedWant = remainingTarget;
+    offer.minFillRatio = 0;
+    const nextPriceTicks = route.priceTicks ?? offer.priceTicks;
+    if (nextPriceTicks !== undefined) offer.priceTicks = nextPriceTicks;
+    remainingOfferEvent = {
+      offerId,
+      makerIsLeft: offer.makerIsLeft,
+      fromEntity: accountMachine.leftEntity,
+      toEntity: accountMachine.rightEntity,
+      createdHeight: offer.createdHeight,
+      giveTokenId: offer.giveTokenId,
+      giveAmount: offer.giveAmount,
+      wantTokenId: offer.wantTokenId,
+      wantAmount: offer.wantAmount,
+      ...(offer.priceTicks !== undefined ? { priceTicks: offer.priceTicks } : {}),
+      ...(offer.timeInForce !== undefined ? { timeInForce: offer.timeInForce } : {}),
+      minFillRatio: offer.minFillRatio,
+      crossJurisdiction: offer.crossJurisdiction,
+    };
+    events.push(`🌉 Cross-j offer ${offerId.slice(0, 8)} filled to ${fill.nextRatio}/65535, ${remainingSource} source remaining`);
+  }
 
   return {
     success: true,
     events,
     ...(remainingOfferEvent ? { swapOfferCreated: remainingOfferEvent } : {}),
-    ...(shouldClose || closedByDust
+    ...(terminalClose
       ? { swapOfferCancelled: { offerId, accountId: offer.makerIsLeft ? accountMachine.leftEntity : accountMachine.rightEntity } }
       : {}),
   };

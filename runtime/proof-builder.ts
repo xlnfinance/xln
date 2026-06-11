@@ -31,6 +31,7 @@ import { sortTransformerEntries } from './transformer-ordering.ts';
 type DisputeHashAccount = Pick<AccountMachine, 'leftEntity' | 'rightEntity' | 'proofHeader'>;
 
 const ZERO_ADDRESS = '0x0000000000000000000000000000000000000000';
+const ABI_CODER = ethers.AbiCoder.defaultAbiCoder();
 const PROOF_BODY_PARAM = ethers.ParamType.from(PROOF_BODY_ABI);
 const DELTA_BATCH_PARAM = ethers.ParamType.from(BATCH_ABI);
 
@@ -243,10 +244,8 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
   // Step 5: ABI-encode and hash
   // ═══════════════════════════════════════════════════════════════════════════
 
-  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-
   // Encode ProofBody struct
-  const encodedProofBody = abiCoder.encode(
+  const encodedProofBody = ABI_CODER.encode(
     [PROOF_BODY_PARAM],
     [proofBodyStruct]
   );
@@ -266,8 +265,6 @@ export function buildAccountProofBody(accountMachine: AccountMachine): ProofBody
  * Convert RuntimeProofBody to ABI-compatible ProofBodyStruct
  */
 function runtimeToProofBodyStruct(runtime: RuntimeProofBody): ProofBodyStruct {
-  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-
   const transformers: TransformerClauseStruct[] = runtime.transformers.map(t => {
     // Encode batch to bytes
     const batchStruct: DeltaTransformer.BatchStruct = {
@@ -294,7 +291,7 @@ function runtimeToProofBodyStruct(runtime: RuntimeProofBody): ProofBodyStruct {
       })),
     };
 
-    const encodedBatch = abiCoder.encode([DELTA_BATCH_PARAM], [batchStruct]);
+    const encodedBatch = ABI_CODER.encode([DELTA_BATCH_PARAM], [batchStruct]);
 
     return {
       transformerAddress: t.transformerAddress,
@@ -370,13 +367,12 @@ export function encodeDisputeMessage(
   proofBodyHash: string,
   depositoryAddress: string
 ): string {
-  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   const chKey = getCanonicalAccountKey(accountMachine);
 
   // MessageType.DisputeProof = 1
   const MESSAGE_TYPE_DISPUTE_PROOF = 1;
 
-  return abiCoder.encode(
+  return ABI_CODER.encode(
     ['uint256', 'address', 'bytes', 'uint256', 'bytes32'],
     [
       MESSAGE_TYPE_DISPUTE_PROOF,
@@ -422,10 +418,9 @@ export function createDisputeProofHashWithNonce(
   depositoryAddress: string,
   nonce: number,
 ): string {
-  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
   const chKey = getCanonicalAccountKey(accountMachine);
   const MESSAGE_TYPE_DISPUTE_PROOF = 1;
-  const encodedMessage = abiCoder.encode(
+  const encodedMessage = ABI_CODER.encode(
     ['uint256', 'address', 'bytes', 'uint256', 'bytes32'],
     [
       MESSAGE_TYPE_DISPUTE_PROOF,
@@ -484,8 +479,7 @@ export function createSettlementHashWithNonce(
   // Match Account.sol CooperativeUpdate encoding exactly:
   // abi.encode(MessageType.CooperativeUpdate, address(this), acct_key, s.nonce, s.diffs, s.forgiveDebtsInTokenIds)
   const MESSAGE_TYPE_COOPERATIVE_UPDATE = 0;
-  const abiCoder = ethers.AbiCoder.defaultAbiCoder();
-  const encodedMsg = abiCoder.encode(
+  const encodedMsg = ABI_CODER.encode(
     ['uint256', 'address', 'bytes', 'uint256', 'tuple(uint256,int256,int256,int256,int256)[]', 'uint256[]'],
     [
       MESSAGE_TYPE_COOPERATIVE_UPDATE,

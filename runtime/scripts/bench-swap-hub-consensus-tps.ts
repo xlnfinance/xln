@@ -29,10 +29,13 @@ type Cli = {
   swaps: number;
   warmup: number;
   minTps: number;
+  concurrency: number;
 };
 
 type BenchAccountCase = {
   kind: 'same' | 'cross';
+  proposerEnv: Env;
+  receiverEnv: Env;
   proposer: AccountMachine;
   receiver: AccountMachine;
   tx: AccountTx;
@@ -49,7 +52,31 @@ type HubConsensusBenchmarkResult = {
   sameTps: number;
   crossTps: number;
   committedFrames: number;
+  concurrency: number;
   scope: string;
+  stageMs?: {
+    propose: number;
+    receive: number;
+    commit: number;
+  };
+};
+
+type StageTotals = {
+  propose: number;
+  receive: number;
+  commit: number;
+  count: number;
+};
+
+const createStageTotals = (): StageTotals => ({ propose: 0, receive: 0, commit: 0, count: 0 });
+
+const averageStageMs = (stages: StageTotals): HubConsensusBenchmarkResult['stageMs'] | undefined => {
+  if (stages.count === 0) return undefined;
+  return {
+    propose: Number((stages.propose / stages.count).toFixed(3)),
+    receive: Number((stages.receive / stages.count).toFixed(3)),
+    commit: Number((stages.commit / stages.count).toFixed(3)),
+  };
 };
 
 const addr = (byte: string): string => `0x${byte.repeat(20)}`;
@@ -75,6 +102,7 @@ const parseCli = (args: string[]): Cli => ({
   swaps: positiveInt(args, '--swaps', 1_000),
   warmup: nonNegativeInt(args, '--warmup', 100),
   minTps: positiveInt(args, '--min-tps', 10_000),
+  concurrency: positiveInt(args, '--concurrency', 128),
 });
 
 const makeJurisdiction = (): JurisdictionConfig => ({
@@ -144,10 +172,18 @@ const registerBenchEntity = (
   seed: string,
   slot: string,
 ): { entityId: string; signerId: string } => {
+  const identity = registerBenchIdentity(seed, slot);
+  addReplica(env, identity.entityId, identity.signerId, jurisdiction);
+  return identity;
+};
+
+const registerBenchIdentity = (
+  seed: string,
+  slot: string,
+): { entityId: string; signerId: string } => {
   const signerId = deriveSignerAddressSync(seed, slot);
   registerSignerKey(signerId, deriveSignerKeySync(seed, slot));
   const entityId = generateLazyEntityId([signerId], 1n).toLowerCase();
-  addReplica(env, entityId, signerId, jurisdiction);
   return { entityId, signerId };
 };
 
@@ -254,12 +290,13 @@ const targetReceiptFor = (route: CrossJurisdictionSwapRoute) =>
   );
 
 const makeSameCase = (
-  env: Env,
+  hubEnv: Env,
   jurisdiction: JurisdictionConfig,
   hubId: string,
   index: number,
 ): BenchAccountCase => {
-  const userId = registerBenchEntity(env, jurisdiction, `hub-consensus-same-${index}`, 'user').entityId;
+  const receiverEnv = makeParticipantEnv(`hub-consensus-same-${index}`, jurisdiction);
+  const userId = registerBenchEntity(receiverEnv, jurisdiction, `hub-consensus-same-${index}`, 'user').entityId;
   const base = makeAccount(userId, hubId);
   const giveDelta = installDelta(base, 2);
   installDelta(base, 1);
@@ -286,6 +323,8 @@ const makeSameCase = (
   const hub = mirrorAccount(base, hubId, userId);
   return {
     kind: 'same',
+    proposerEnv: hubEnv,
+    receiverEnv,
     proposer: hub,
     receiver: user,
     tx: {
@@ -304,14 +343,15 @@ const makeSameCase = (
 };
 
 const makeCrossCase = (
-  env: Env,
+  hubEnv: Env,
   jurisdiction: JurisdictionConfig,
   hubId: string,
   index: number,
 ): BenchAccountCase => {
-  const sourceUser = registerBenchEntity(env, jurisdiction, `hub-consensus-cross-source-${index}`, 'user').entityId;
-  const targetUser = registerBenchEntity(env, jurisdiction, `hub-consensus-cross-target-${index}`, 'user').entityId;
-  const targetHub = registerBenchEntity(env, jurisdiction, `hub-consensus-cross-target-hub-${index}`, 'hub').entityId;
+  const receiverEnv = makeParticipantEnv(`hub-consensus-cross-source-${index}`, jurisdiction);
+  const sourceUser = registerBenchEntity(receiverEnv, jurisdiction, `hub-consensus-cross-source-${index}`, 'user').entityId;
+  const targetUser = registerBenchIdentity(`hub-consensus-cross-target-${index}`, 'user').entityId;
+  const targetHub = registerBenchIdentity(`hub-consensus-cross-target-hub-${index}`, 'hub').entityId;
   const sourceAmount = SWAP_LOT_SCALE;
   const targetAmount = 2n * SWAP_LOT_SCALE;
   const route = buildPreparedCrossJurisdictionRoute({
@@ -383,6 +423,8 @@ const makeCrossCase = (
   const hub = mirrorAccount(base, hubId, sourceUser);
   return {
     kind: 'cross',
+    proposerEnv: hubEnv,
+    receiverEnv,
     proposer: hub,
     receiver: user,
     tx: {
@@ -414,13 +456,23 @@ const expectInput = (input: AccountInput | undefined, context: string): AccountI
   return input;
 };
 
-const runConsensusRoundTrip = async (env: Env, benchCase: BenchAccountCase): Promise<void> => {
+const runConsensusRoundTrip = async (benchCase: BenchAccountCase, stages?: StageTotals): Promise<void> => {
   benchCase.proposer.mempool.push(benchCase.tx);
-  const proposed = await proposeAccountFrame(env, benchCase.proposer);
+  const proposeStartedAt = getPerfMs();
+  const proposed = await proposeAccountFrame(benchCase.proposerEnv, benchCase.proposer);
+  const receiveStartedAt = getPerfMs();
   if (!proposed.success) throw new Error(`${benchCase.kind}:propose_failed:${proposed.error}`);
-  const received = await handleAccountInput(env, benchCase.receiver, expectInput(proposed.accountInput, benchCase.kind));
+  const received = await handleAccountInput(benchCase.receiverEnv, benchCase.receiver, expectInput(proposed.accountInput, benchCase.kind));
+  const commitStartedAt = getPerfMs();
   if (!received.success) throw new Error(`${benchCase.kind}:receive_failed:${received.error}`);
-  const committed = await handleAccountInput(env, benchCase.proposer, expectInput(received.response, benchCase.kind));
+  const committed = await handleAccountInput(benchCase.proposerEnv, benchCase.proposer, expectInput(received.response, benchCase.kind));
+  const committedAt = getPerfMs();
+  if (stages) {
+    stages.propose += receiveStartedAt - proposeStartedAt;
+    stages.receive += commitStartedAt - receiveStartedAt;
+    stages.commit += committedAt - commitStartedAt;
+    stages.count += 1;
+  }
   if (!committed.success) throw new Error(`${benchCase.kind}:commit_failed:${committed.error}`);
   if (benchCase.proposer.currentHeight !== 1 || benchCase.receiver.currentHeight !== 1) {
     throw new Error(
@@ -433,6 +485,14 @@ const runConsensusRoundTrip = async (env: Env, benchCase: BenchAccountCase): Pro
   if (benchCase.proposer.swapOffers.size !== 0 || benchCase.receiver.swapOffers.size !== 0) {
     throw new Error(`${benchCase.kind}:offer_not_closed`);
   }
+};
+
+const makeParticipantEnv = (seed: string, jurisdiction: JurisdictionConfig): Env => {
+  const env = createEmptyEnv(seed);
+  env.runtimeSeed = seed;
+  env.quietRuntimeLogs = true;
+  installJurisdiction(env, jurisdiction);
+  return env;
 };
 
 const makeEnv = (seed: string): { env: Env; jurisdiction: JurisdictionConfig; hubId: string } => {
@@ -461,12 +521,14 @@ const buildCases = (
 };
 
 const runMeasuredCases = async (
-  env: Env,
   cases: BenchAccountCase[],
+  concurrency: number,
+  stages?: StageTotals,
 ): Promise<number> => {
   const startedAt = getPerfMs();
-  for (const benchCase of cases) {
-    await runConsensusRoundTrip(env, benchCase);
+  const width = Math.max(1, Math.floor(concurrency));
+  for (let index = 0; index < cases.length; index += width) {
+    await Promise.all(cases.slice(index, index + width).map((benchCase) => runConsensusRoundTrip(benchCase, stages)));
   }
   return getPerfMs() - startedAt;
 };
@@ -474,23 +536,30 @@ const runMeasuredCases = async (
 const runPass = async (
   swaps: number,
   seed: string,
-): Promise<{ sameElapsedMs: number; crossElapsedMs: number; elapsedMs: number }> => {
+  concurrency: number,
+): Promise<{ sameElapsedMs: number; crossElapsedMs: number; elapsedMs: number; stages: StageTotals }> => {
   const { env, jurisdiction, hubId } = makeEnv(seed);
   const { same, cross } = buildCases(env, jurisdiction, hubId, swaps);
+  const stages = concurrency === 1 ? createStageTotals() : undefined;
   const startedAt = getPerfMs();
-  const sameElapsedMs = await runMeasuredCases(env, same);
-  const crossElapsedMs = await runMeasuredCases(env, cross);
-  return { sameElapsedMs, crossElapsedMs, elapsedMs: getPerfMs() - startedAt };
+  const sameElapsedMs = await runMeasuredCases(same, concurrency, stages);
+  const crossElapsedMs = await runMeasuredCases(cross, concurrency, stages);
+  return { sameElapsedMs, crossElapsedMs, elapsedMs: getPerfMs() - startedAt, stages: stages ?? createStageTotals() };
 };
 
 export const runSwapHubConsensusBenchmark = async (cli: Cli): Promise<HubConsensusBenchmarkResult> => {
-  if (cli.warmup > 0) await runPass(cli.warmup, 'swap-hub-consensus-warmup');
-  const { sameElapsedMs, crossElapsedMs, elapsedMs } = await runPass(cli.swaps, 'swap-hub-consensus-measured');
+  if (cli.warmup > 0) await runPass(cli.warmup, 'swap-hub-consensus-warmup', cli.concurrency);
+  const { sameElapsedMs, crossElapsedMs, elapsedMs, stages } = await runPass(
+    cli.swaps,
+    'swap-hub-consensus-measured',
+    cli.concurrency,
+  );
   const totalSwaps = cli.swaps * 2;
   const elapsedSeconds = Math.max(elapsedMs / 1000, 0.001);
   const sameTps = cli.swaps / Math.max(sameElapsedMs / 1000, 0.001);
   const crossTps = cli.swaps / Math.max(crossElapsedMs / 1000, 0.001);
   const tps = totalSwaps / elapsedSeconds;
+  const stageMs = averageStageMs(stages);
   const output: HubConsensusBenchmarkResult = {
     benchmark: 'swap-hub-account-consensus',
     sameSwaps: cli.swaps,
@@ -502,7 +571,9 @@ export const runSwapHubConsensusBenchmark = async (cli: Cli): Promise<HubConsens
     sameTps: Number(sameTps.toFixed(2)),
     crossTps: Number(crossTps.toFixed(2)),
     committedFrames: totalSwaps,
-    scope: 'proposeAccountFrame + hanko sign/verify + dispute proof + ACK commit; excludes entity frame and storage flush',
+    concurrency: cli.concurrency,
+    scope: 'distributed account consensus throughput: hub propose/commit + user ACK on independent accounts; includes hanko sign/verify and dispute proof, excludes entity frame and storage flush',
+    ...(stageMs ? { stageMs } : {}),
   };
   return output;
 };

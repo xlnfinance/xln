@@ -22,7 +22,7 @@ import {
   ERC20Mock__factory,
 } from '../../jurisdictions/typechain-types/index.ts';
 
-import type { BrowserVMState, JTx, Env } from '../types';
+import type { BrowserVMState, DisputeFinalizationEvidence, JTx, Env } from '../types';
 import { normalizeEntityId } from '../entity-id-utils';
 import type {
   JAdapter,
@@ -54,7 +54,7 @@ import {
   type RawJEventArgs,
 } from './watcher';
 import { DEV_CHAIN_IDS } from './index';
-import { preflightBatchForE2 } from '../j-batch';
+import { decodeJBatch, preflightBatchForE2 } from '../j-batch';
 import { requireUsableContractAddress } from '../contract-address';
 import { setDeltaTransformerAddress } from '../proof-builder';
 import { prepareSignedBatch } from '../hanko/batch';
@@ -1606,6 +1606,87 @@ export async function createRpcAdapter(
         'event HankoBatchProcessed(bytes32 indexed entityId, bytes32 indexed hankoHash, uint256 nonce, bool success)',
       ];
       const depositoryIface = new ethers.Interface(depositoryABI);
+      const processBatchIface = new ethers.Interface([
+        'function processBatch(bytes encodedBatch, bytes hankoData, uint256 nonce)',
+      ]);
+      type TxFinalizationEvidence = Omit<DisputeFinalizationEvidence, 'sender' | 'finalProofbodyHash'>;
+      const txFinalizationEvidenceCache = new Map<string, Promise<TxFinalizationEvidence[]>>();
+      const toDecimalString = (value: unknown): string => {
+        if (typeof value === 'bigint') return value.toString();
+        if (typeof value === 'number') return Number.isFinite(value) ? Math.floor(value).toString() : '';
+        if (typeof value === 'string') return value.trim();
+        return '';
+      };
+      const toHexString = (value: unknown): string => {
+        if (typeof value === 'string' && value.startsWith('0x')) return value;
+        return '0x';
+      };
+      const readTxFinalizationEvidence = (txHash: string): Promise<TxFinalizationEvidence[]> => {
+        const normalizedHash = String(txHash || '').toLowerCase();
+        if (!normalizedHash || normalizedHash === '0x') return Promise.resolve([]);
+        const cached = txFinalizationEvidenceCache.get(normalizedHash);
+        if (cached) return cached;
+        const promise = (async (): Promise<TxFinalizationEvidence[]> => {
+          try {
+            const txProvider = provider as Provider & {
+              getTransaction?: (hash: string) => Promise<{ data?: string } | null>;
+            };
+            if (typeof txProvider.getTransaction !== 'function') return [];
+            const tx = await txProvider.getTransaction(txHash);
+            const data = typeof tx?.data === 'string' ? tx.data : '';
+            if (!data || data === '0x') return [];
+            const parsed = processBatchIface.parseTransaction({ data });
+            if (!parsed || parsed.name !== 'processBatch') return [];
+            const encodedBatch = toHexString(parsed.args[0]);
+            if (encodedBatch === '0x') return [];
+            const batch = decodeJBatch(encodedBatch);
+            return (batch.disputeFinalizations ?? []).map((finalization) => ({
+              counterentity: toHexString(finalization.counterentity),
+              initialNonce: toDecimalString(finalization.initialNonce),
+              initialProofbodyHash: toHexString(finalization.initialProofbodyHash),
+              leftArguments: toHexString(finalization.leftArguments),
+              rightArguments: toHexString(finalization.rightArguments),
+              starterInitialArguments: toHexString(finalization.starterInitialArguments),
+              starterIncrementedArguments: toHexString(finalization.starterIncrementedArguments),
+            }));
+          } catch {
+            return [];
+          }
+        })();
+        txFinalizationEvidenceCache.set(normalizedHash, promise);
+        if (txFinalizationEvidenceCache.size > 2_000) {
+          const oldest = txFinalizationEvidenceCache.keys().next().value;
+          if (oldest) txFinalizationEvidenceCache.delete(oldest);
+        }
+        return promise;
+      };
+      const findDisputeFinalizationEvidence = async (
+        txHash: string,
+        args: RawJEventArgs,
+      ): Promise<DisputeFinalizationEvidence | undefined> => {
+        const candidates = await readTxFinalizationEvidence(txHash);
+        if (candidates.length === 0) return undefined;
+        const counterentity = String(args['counterentity'] ?? '').toLowerCase();
+        const initialNonce = toDecimalString(args['initialNonce']);
+        const initialProofbodyHash = String(args['initialProofbodyHash'] ?? '').toLowerCase();
+        const matched = candidates.find((candidate) =>
+          candidate.counterentity.toLowerCase() === counterentity &&
+          candidate.initialNonce === initialNonce &&
+          candidate.initialProofbodyHash.toLowerCase() === initialProofbodyHash
+        );
+        if (!matched) return undefined;
+        return {
+          sender: toHexString(args['sender']),
+          counterentity: matched.counterentity,
+          initialNonce: matched.initialNonce,
+          initialProofbodyHash: matched.initialProofbodyHash,
+          finalProofbodyHash: toHexString(args['finalProofbodyHash']),
+          leftArguments: matched.leftArguments,
+          rightArguments: matched.rightArguments,
+          starterInitialArguments: matched.starterInitialArguments,
+          starterIncrementedArguments: matched.starterIncrementedArguments,
+        };
+      };
 
       const emitWatcherDebug = (payload: Record<string, unknown>) => {
         const p2p = watcherEnv?.runtimeState?.p2p;
@@ -1652,6 +1733,9 @@ export async function createRpcAdapter(
                   args[key] = parsed.args[idx]; // Use positional index (always works)
                   if (input.name) args[input.name] = parsed.args[idx];
                 }
+                const disputeFinalizationEvidence = parsed.name === 'DisputeFinalized'
+                  ? await findDisputeFinalizationEvidence(log.transactionHash, args)
+                  : undefined;
                 rawEvents.push({
                   name: parsed.name,
                   args,
@@ -1659,6 +1743,7 @@ export async function createRpcAdapter(
                   blockHash: log.blockHash,
                   transactionHash: log.transactionHash,
                   logIndex: log.index,
+                  ...(disputeFinalizationEvidence ? { disputeFinalizationEvidence } : {}),
                 });
               } catch {
                 // Skip unparseable logs

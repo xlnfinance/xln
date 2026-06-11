@@ -170,8 +170,11 @@ export function isDelta(obj: unknown): obj is Delta {
 
 /**
  * CRITICAL: Validate EntityInput has required routing identifiers.
- * signerId is an optional transport hint resolved at runtime boundary.
- * @param input - Unvalidated input claiming to be EntityInput
+ *
+ * signerId is not a convenience hint. It selects the exact local replica that
+ * proposes/signs the entity frame. Accepting entityId-only inputs makes routing
+ * depend on ambient local state and can send a proposal through the wrong
+ * jurisdiction sibling or a read-only imported replica.
  */
 export function validateEntityInput(input: unknown): RoutedEntityInput {
   const obj = validateObject(input, 'EntityInput');
@@ -180,8 +183,10 @@ export function validateEntityInput(input: unknown): RoutedEntityInput {
     throw new Error(`FINANCIAL-SAFETY: entityId is missing or invalid - financial routing corruption detected`);
   }
 
-  if (obj['signerId'] !== undefined && typeof obj['signerId'] !== 'string') {
-    throw new Error(`FINANCIAL-SAFETY: signerId must be string when provided`);
+  if (typeof obj['signerId'] !== 'string' || obj['signerId'].trim().length === 0) {
+    throw new Error(
+      `FINANCIAL-SAFETY: signerId is missing - entity input must target an exact signer replica`,
+    );
   }
 
   // entityTxs optional if proposedFrame or hashPrecommits present (multi-signer proposals)
@@ -208,8 +213,10 @@ export function validateEntityOutput(output: unknown): RoutedEntityInput {
     throw new Error(`FINANCIAL-SAFETY: EntityOutput entityId is missing - routing corruption`);
   }
 
-  if (obj['signerId'] !== undefined && typeof obj['signerId'] !== 'string') {
-    throw new Error(`FINANCIAL-SAFETY: EntityOutput signerId must be string when provided`);
+  if (typeof obj['signerId'] !== 'string' || obj['signerId'].trim().length === 0) {
+    throw new Error(
+      `FINANCIAL-SAFETY: EntityOutput signerId is missing - routed outputs must target an exact signer replica`,
+    );
   }
 
   return obj as unknown as RoutedEntityInput;

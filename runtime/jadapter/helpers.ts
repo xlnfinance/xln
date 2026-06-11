@@ -6,12 +6,13 @@
 
 import { ethers } from 'ethers';
 import type { JEvent } from './types';
-import type { EntityInput, Env, JurisdictionEvent } from '../types';
+import type { DisputeFinalizationEvidence, EntityInput, Env, JurisdictionEvent } from '../types';
 import { createEmptyBatch, type JBatch } from '../j-batch';
 import { enqueueRuntimeInput } from '../runtime';
 import { signAccountFrame } from '../account-crypto';
 import {
   buildJEventObservationDigest,
+  canonicalDisputeFinalizationEvidenceHash,
   canonicalJurisdictionEventsHash,
 } from '../j-event-observation';
 
@@ -138,6 +139,7 @@ export interface RawJEvent {
   blockHash?: string;
   transactionHash?: string;
   logIndex?: number;
+  disputeFinalizationEvidence?: DisputeFinalizationEvidence;
 }
 
 export type EventBatchCounter = {
@@ -463,6 +465,9 @@ function enqueueRawJEventsToRuntime(
     if (jEvents.length === 0) continue;
     const firstJEvent = jEvents[0];
     if (!firstJEvent) continue;
+    const disputeFinalizationEvidence = events
+      .map((event) => event.disputeFinalizationEvidence)
+      .filter((evidence): evidence is DisputeFinalizationEvidence => Boolean(evidence));
 
     const settledCount = jEvents.filter((event) => event.type === 'AccountSettled').length;
     if (emitSettledDebugEvents && settledCount > 0) {
@@ -489,6 +494,9 @@ function enqueueRawJEventsToRuntime(
       events[0]?.transactionHash ??
       `${adapterLabel}-${blockNumber}-${txCounter ? txCounter.value++ : entityInputs.length}`;
     const eventsHash = canonicalJurisdictionEventsHash(jEvents);
+    const disputeFinalizationEvidenceHash = disputeFinalizationEvidence.length > 0
+      ? canonicalDisputeFinalizationEvidenceHash(disputeFinalizationEvidence)
+      : undefined;
     const signature = signAccountFrame(
       env,
       signerId,
@@ -499,6 +507,7 @@ function enqueueRawJEventsToRuntime(
         blockHash,
         transactionHash,
         eventsHash,
+        ...(disputeFinalizationEvidenceHash ? { disputeFinalizationEvidenceHash } : {}),
       }),
     );
 
@@ -518,6 +527,8 @@ function enqueueRawJEventsToRuntime(
             signature,
             events: jEvents,
             event: firstJEvent,
+            ...(disputeFinalizationEvidenceHash ? { disputeFinalizationEvidenceHash } : {}),
+            ...(disputeFinalizationEvidence.length > 0 ? { disputeFinalizationEvidence } : {}),
           },
         },
       ],

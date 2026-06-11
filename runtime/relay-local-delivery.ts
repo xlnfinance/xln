@@ -8,6 +8,7 @@
 import { enqueueRuntimeInput, registerEntityRuntimeHint } from './runtime.ts';
 import { deriveEncryptionKeyPair, decryptJSON, type P2PKeyPair } from './networking/p2p-crypto';
 import type { Env, EntityInput, EntityReplica, RoutedEntityInput } from './types';
+import { validateDeliverableEntityInput } from './validation-utils';
 import {
   type RelayStore,
   normalizeRuntimeKey,
@@ -58,12 +59,12 @@ export const createLocalDeliveryHandler = (
       throw new Error('Invalid target runtimeId for local delivery');
     }
 
-    let input: EntityInput;
+    let input: RoutedEntityInput;
     if (msg.encrypted !== true || typeof payload !== 'string') {
       throw new Error('P2P_UNENCRYPTED: local entity_input must be encrypted');
     }
     const activeKeyPair = getServerKeyPair();
-    input = decryptJSON<EntityInput>(payload, activeKeyPair.privateKey);
+    input = validateDeliverableEntityInput(decryptJSON<EntityInput>(payload, activeKeyPair.privateKey));
     relayLog(`[RELAY] → decrypted entity_input: entityId=${input.entityId?.slice(-8)} txs=${input.entityTxs?.length ?? 0}`);
 
     // Check if local replica exists

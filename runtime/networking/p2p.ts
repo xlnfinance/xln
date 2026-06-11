@@ -134,6 +134,7 @@ const PROFILE_ANNOUNCE_DEBOUNCE_MS = 25;
 const PROFILE_HEARTBEAT_MS = 15_000;
 const GOSSIP_FETCH_RETRY_DELAYS_MS = [40, 80, 160];
 const PENDING_FLUSH_RETRY_MS = 500;
+const PENDING_ENTITY_INPUT_MAX_AGE_MS = 5 * 60 * 1000;
 const INACTIVE_TAB_STANDBY_KEY = 'xln-inactive-tab-standby';
 
 const isInactiveTabStandby = (): boolean => {
@@ -578,6 +579,17 @@ export class RuntimeP2P {
       if (!client || !client.isOpen()) continue;
       const remaining: { input: RoutedEntityInput, enqueuedAt: number, ingressTimestamp?: number }[] = [];
       for (const entry of queue) {
+        if (Date.now() - entry.enqueuedAt > PENDING_ENTITY_INPUT_MAX_AGE_MS) {
+          this.sendDebugEvent({
+            level: 'warn',
+            code: 'P2P_PENDING_EXPIRED',
+            message: 'Dropped stale pending entity input',
+            targetRuntimeId,
+            entityId: entry.input.entityId,
+            ageMs: Date.now() - entry.enqueuedAt,
+          });
+          continue;
+        }
         try {
           const sent = client.sendEntityInput(targetRuntimeId, entry.input, entry.ingressTimestamp);
           if (!sent) remaining.push(entry);

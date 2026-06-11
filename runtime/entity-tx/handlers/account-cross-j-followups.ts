@@ -16,6 +16,7 @@ import {
 import { decodeHashLadderBinary } from '../../hashladder';
 import { createStructuredLogger, shortId, shortOrder } from '../../logger';
 import { removeCrossJurisdictionBookOrder } from '../../orderbook/cross-j';
+import { resolveEntityProposerId } from '../../state-helpers';
 import { buildCrossJurisdictionEntityOutput, findLocalEntityState } from '../cross-j-outputs';
 import { applyCrossJurisdictionBookProgressToState } from './cross-j-book-order';
 
@@ -437,13 +438,13 @@ const applyFillAckFollowup = (
   const ratio = clampFillRatio(accountTx.data.cumulativeFillRatio);
   const route = newState.crossJurisdictionSwaps?.get(accountTx.data.offerId);
   if (!route) {
-    crossJFollowupLog.warn('fill_ack.route_missing', {
-      entity: shortId(newState.entityId),
-      offer: shortOrder(accountTx.data.offerId, 12),
-      ratio,
-      cancel: accountTx.data.cancelRemainder,
-    });
-    return true;
+    // A committed account ACK is canonical money progress. If the entity route
+    // mirror is gone, silently accepting the ACK leaves the shared book stale
+    // and hides projection corruption. Never rehydrate or skip here.
+    throw new Error(
+      `CROSS_J_FILL_ACK_ROUTE_MISSING: entity=${shortId(newState.entityId)} ` +
+      `offer=${shortOrder(accountTx.data.offerId, 12)} ratio=${ratio} cancel=${Boolean(accountTx.data.cancelRemainder)}`,
+    );
   }
 
   const currentRatio = committedCrossJurisdictionRatio(route);
@@ -500,6 +501,7 @@ const applyFillAckFollowup = (
       removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'fill_ack_closed');
       outputs.push({
         entityId: newState.entityId,
+        signerId: resolveEntityProposerId(env, newState.entityId, 'cross-j.clear-after-fill-ack'),
         entityTxs: [{
           type: 'requestCrossJurisdictionClear',
           data: {

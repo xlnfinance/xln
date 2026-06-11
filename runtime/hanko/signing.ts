@@ -6,7 +6,8 @@
 import type { Env, HankoString } from '../types';
 import { buildRealHanko } from './core';
 import { ethers } from 'ethers';
-import { detectEntityType } from '../entity-factory';
+import * as secp256k1 from '@noble/secp256k1';
+import { detectEntityType, generateLazyEntityId } from '../entity-factory';
 
 // Browser-compatible Buffer helpers - ALWAYS use manual hex parsing (Node Buffer.from can be broken in some envs)
 const bufferFrom = (data: string | Uint8Array | number[], encoding?: BufferEncoding): Buffer => {
@@ -66,6 +67,17 @@ const publicKeyToAddress = (value: string): string | null => {
 };
 
 const HANKO_ABI = ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'];
+const ABI_CODER = ethers.AbiCoder.defaultAbiCoder();
+
+const recoverAddressFromPackedSignature = (hashBuffer: Buffer, sig: Buffer): string | null => {
+  if (!sig || sig.length < 65) return null;
+  const v = sig[64];
+  if (v === undefined) return null;
+  const recovery = v >= 27 ? v - 27 : v;
+  if (recovery !== 0 && recovery !== 1) return null;
+  const publicKey = secp256k1.recoverPublicKey(hashBuffer, sig.slice(0, 64), recovery, false);
+  return `0x${ethers.keccak256(publicKey.slice(1)).slice(-40)}`.toLowerCase();
+};
 
 type DecodedHankoClaim = {
   entityId: string;
@@ -99,7 +111,7 @@ const toEntityIdHex = (value: Uint8Array | Buffer): string =>
   `0x${Array.from(value).map((b) => b.toString(16).padStart(2, '0')).join('')}`;
 
 function decodeHankoEnvelope(hankoBytes: HankoString): DecodedHankoEnvelope {
-  const decoded = ethers.AbiCoder.defaultAbiCoder().decode(HANKO_ABI, hankoBytes) as unknown as AbiDecodedHankoEnvelope;
+  const decoded = ABI_CODER.decode(HANKO_ABI, hankoBytes) as unknown as AbiDecodedHankoEnvelope;
   const [placeholders, packedSignatures, claims] = decoded[0];
   return {
     placeholders: placeholders.map((p) => ethers.hexlify(p).toLowerCase()),
@@ -136,7 +148,7 @@ const reconstructBoardHash = (
   weights: number[],
   boardEntityIds: string[],
 ): string => {
-  const encodedBoard = ethers.AbiCoder.defaultAbiCoder().encode(
+  const encodedBoard = ABI_CODER.encode(
     ['tuple(uint16,bytes32[],uint16[],uint32,uint32,uint32)'],
     [[threshold, boardEntityIds, weights, 0, 0, 0]],
   );
@@ -165,14 +177,8 @@ export async function inspectHankoForHash(
   const recoveredAddresses: string[] = [];
 
   for (const sig of eoaSignatures) {
-    if (!sig || sig.length < 65) continue;
-    const r = ethers.hexlify(sig.slice(0, 32));
-    const s = ethers.hexlify(sig.slice(32, 64));
-    const v = sig[64];
-    if (v === undefined) continue;
-    const yParity = (v >= 27 ? v - 27 : v) as 0 | 1;
-    const recoveredAddr = ethers.recoverAddress(ethers.hexlify(hashBuffer), { r, s, v, yParity });
-    recoveredAddresses.push(recoveredAddr.toLowerCase());
+    const recoveredAddr = recoverAddressFromPackedSignature(hashBuffer, sig);
+    if (recoveredAddr) recoveredAddresses.push(recoveredAddr);
   }
 
   const claims = hanko.claims.map((claim) => {
@@ -221,8 +227,27 @@ export async function signEntityHashes(
   const hankos: HankoString[] = [];
 
   // Get private key for this signer (pass env for pure function)
-  const { getSignerPrivateKey } = await import('../account-crypto');
+  const { getSignerPrivateKey, getSignerAddress } = await import('../account-crypto');
   const privateKey = getSignerPrivateKey(env, signerId);
+  const entityType = detectEntityType(entityId);
+  const signerAddress = getSignerAddress(env, signerId);
+  if (entityType === 'lazy') {
+    if (!signerAddress) {
+      throw new Error(`LAZY_HANKO_SIGNER_ADDRESS_MISSING: entityId=${entityId} signerId=${signerId}`);
+    }
+    // signEntityHashes builds a single-signer threshold=1 hanko below. The old
+    // guard decoded the just-built hanko and recovered the same ECDSA signature
+    // again for every hash. That was correct but doubled hot-path crypto cost.
+    // The safety invariant is simpler: before signing, the signer address must
+    // reconstruct exactly the lazy entity board hash that the hanko will claim.
+    const reconstructedEntityId = generateLazyEntityId([signerAddress], 1n).toLowerCase();
+    if (reconstructedEntityId !== entityId.toLowerCase()) {
+      throw new Error(
+        `LAZY_HANKO_SELF_MISMATCH: entityId=${entityId} reconstructed=${reconstructedEntityId} ` +
+          `signerId=${signerId} signerAddress=${signerAddress}`,
+      );
+    }
+  }
 
   // Sign each hash independently (single-signer = simple case)
   for (const hash of hashes) {
@@ -247,7 +272,7 @@ export async function signEntityHashes(
     const toHex = (buf: Buffer) => '0x' + Array.from(buf).map(b => b.toString(16).padStart(2, '0')).join('');
 
     // ABI encode - MATCH EP.sol struct exactly (4 fields, NO expectedQuorumHash)
-    const abiEncoded = ethers.AbiCoder.defaultAbiCoder().encode(
+    const abiEncoded = ABI_CODER.encode(
       ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'],
       [
         [
@@ -262,22 +287,6 @@ export async function signEntityHashes(
         ],
       ],
     );
-
-    if (detectEntityType(entityId) === 'lazy') {
-      const inspected = await inspectHankoForHash(abiEncoded, hash);
-      const matchingClaim = inspected.claims.find(
-        (claim) => String(claim.entityId).toLowerCase() === String(entityId).toLowerCase(),
-      );
-      if (!matchingClaim) {
-        throw new Error(`LAZY_HANKO_SELF_MISMATCH: missing claim for ${entityId}`);
-      }
-      if (String(matchingClaim.reconstructedBoardHash).toLowerCase() !== String(entityId).toLowerCase()) {
-        throw new Error(
-          `LAZY_HANKO_SELF_MISMATCH: entityId=${entityId} reconstructed=${matchingClaim.reconstructedBoardHash} ` +
-            `signerId=${signerId} recovered=${inspected.recoveredAddresses.join(',')}`,
-        );
-      }
-    }
 
     hankos.push(abiEncoded);
   }
@@ -412,7 +421,7 @@ export async function buildQuorumHanko(
 
   // ABI encode hanko - MATCH EP.sol struct exactly
   // With M-of-N: placeholders contains non-signing board members
-  const abiEncoded = ethers.AbiCoder.defaultAbiCoder().encode(
+  const abiEncoded = ABI_CODER.encode(
     ['tuple(bytes32[],bytes,tuple(bytes32,uint256[],uint256[],uint256)[])'],
     [
       [
@@ -483,16 +492,17 @@ export async function verifyHankoForHash(
         console.warn(`❌ Hanko signature ${i} is invalid or too short`);
         continue;
       }
-      const r = ethers.hexlify(sig.slice(0, 32));
-      const s = ethers.hexlify(sig.slice(32, 64));
-      const v = sig[64];
-      if (v === undefined) {
-        console.warn(`❌ Hanko signature ${i} missing recovery byte`);
+      try {
+        const recoveredAddr = recoverAddressFromPackedSignature(hashBuffer, sig);
+        if (!recoveredAddr) {
+          console.warn(`❌ Hanko signature ${i} has invalid recovery byte`);
+          continue;
+        }
+        recoveredAddresses.push(recoveredAddr);
+      } catch (error) {
+        console.warn(`❌ Hanko signature ${i} recovery failed: ${error instanceof Error ? error.message : String(error)}`);
         continue;
       }
-      const yParity = (v >= 27 ? v - 27 : v) as 0 | 1;
-      const recoveredAddr = ethers.recoverAddress(ethers.hexlify(hashBuffer), { r, s, v, yParity });
-      recoveredAddresses.push(recoveredAddr.toLowerCase());
     }
 
     // CRITICAL: Find claim for expectedEntityId (NOT just last claim!)

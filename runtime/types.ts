@@ -40,6 +40,7 @@ export type {
   DebtUpdate,
 } from './types/debt';
 export type {
+  DisputeFinalizationEvidence,
   JBlockFinalized,
   JBlockObservation,
   JurisdictionEvent,
@@ -164,7 +165,7 @@ export interface ConsensusConfig {
 
 export interface RuntimeInput {
   runtimeTxs: RuntimeTx[];
-  entityInputs: RoutedEntityInput[];
+  entityInputs: EntityInput[];
   jInputs?: JInput[]; // J-layer inputs (queue to J-mempool)
   timestamp?: number | undefined; // External ingress timestamp seed (ms) for this runtime input batch
   queuedAt?: number | undefined; // When first queued into runtime mempool (ms)
@@ -214,12 +215,16 @@ export type RuntimeTx =
 export interface EntityInput {
   entityId: string;
   /**
-   * Transport hint used by orchestrators, relay delivery, scenarios, and
-   * bootstrap helpers before the input is normalized into deterministic REA
-   * processing. Consensus code must keep treating signer/runtime routing as
-   * envelope metadata, not state-machine input.
+   * Exact local signer/replica that must process this input.
+   *
+   * Do not "resolve later" from entityId alone. Entity ids can have imported
+   * read-only replicas, sibling jurisdiction replicas, or several validators.
+   * Late proposer guessing previously let a proposal be applied to whichever
+   * local replica looked convenient after routing. In financial state machines
+   * the route is part of the command: entity + signer +, for network delivery,
+   * runtime.
    */
-  signerId?: string;
+  signerId: string;
   runtimeId?: string;
   from?: string;
   entityTxs?: EntityTx[];
@@ -232,10 +237,14 @@ export interface EntityInput {
 
 /**
  * Transport envelope for REA-bound entity inputs.
- * signerId/runtimeId are routing hints and MUST NOT be used by deterministic REA logic.
+ *
+ * signerId is mandatory once an input enters runtime queues/outbox/network. The
+ * older "entityId only, resolve later" shape can silently route to a stale
+ * read-only replica or the wrong validator; raw EntityInput is the only place
+ * where shorthand is allowed.
  */
 export interface RoutedEntityInput extends EntityInput {
-  signerId?: string;
+  signerId: string;
   runtimeId?: string;
 }
 

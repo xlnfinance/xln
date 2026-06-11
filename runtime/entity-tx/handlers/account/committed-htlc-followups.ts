@@ -16,6 +16,7 @@ import { terminateHtlcRoute } from '../../htlc-route-lifecycle';
 import { sanitizeBaseFee } from '../../../routing/fees';
 import { markStorageEntityDirty } from '../../../env-events';
 import { scheduleHook as scheduleCrontabHook, HTLC_SECRET_ACK_TIMEOUT_MS } from '../../../entity-crontab';
+import { resolveEntityProposerId } from '../../../state-helpers';
 import {
   buildHtlcFinalizedEventPayload,
   buildHtlcReceivedEventPayload,
@@ -358,6 +359,7 @@ export function applyHtlcSecretFollowups(ctx: HtlcFollowupContext, revealedSecre
       const relay = route.crossJurisdictionRelay;
       outputs.push({
         entityId: relay.targetEntityId,
+        signerId: resolveEntityProposerId(ctx.env, relay.targetEntityId, 'htlc.cross-j-relay.resolve'),
         entityTxs: [{
           type: 'resolveHtlcLock',
           data: {

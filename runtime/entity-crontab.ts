@@ -244,7 +244,7 @@ async function processDueHooks(
 
   // Group expired locks by type for batch processing
   const htlcTimeoutLocks: Array<{ accountId: string; lockId: string }> = [];
-  const disputeStartCounterparties = new Set<string>();
+  const disputePrepareCounterparties = new Set<string>();
   const disputeFinalizeCounterparties = new Set<string>();
   let shouldBroadcastQueuedDisputeFinalizations = false;
 
@@ -364,7 +364,7 @@ async function processDueHooks(
           // Dispute already active — nothing else to queue.
           if (account.activeDispute) break;
 
-          disputeStartCounterparties.add(counterpartyEntityId);
+          disputePrepareCounterparties.add(counterpartyEntityId);
           crontabLog.warn('htlc_secret_ack_timeout', {
             counterparty: shortId(counterpartyEntityId),
             hashlock: shortHash(hashlock),
@@ -423,20 +423,20 @@ async function processDueHooks(
     crontabLog.debug('htlc_timeout.queued', { locks: htlcTimeoutLocks.length });
   }
 
-  if (disputeStartCounterparties.size > 0) {
-    const startTxs = Array.from(disputeStartCounterparties).map((counterpartyEntityId) => ({
-      type: 'disputeStart' as const,
+  if (disputePrepareCounterparties.size > 0) {
+    const prepareTxs = Array.from(disputePrepareCounterparties).map((counterpartyEntityId) => ({
+      type: 'prepareDispute' as const,
       data: {
         counterpartyEntityId,
-        description: 'auto-dispute-after-secret-ack-timeout',
+        description: 'auto-prepare-dispute-after-secret-ack-timeout',
       },
     }));
     outputs.push({
       entityId: replica.entityId,
       signerId: firstValidator,
-      entityTxs: startTxs,
+      entityTxs: prepareTxs,
     });
-    crontabLog.debug('dispute_start.queued', { accounts: disputeStartCounterparties.size });
+    crontabLog.debug('dispute_prepare.queued', { accounts: disputePrepareCounterparties.size });
   }
 
   if (disputeFinalizeCounterparties.size > 0) {

@@ -39,7 +39,7 @@ import {
   handleSettleReject,
   handleSettleUpdate,
 } from './handlers/settle';
-import { handleDisputeFinalize, handleDisputeStart } from './handlers/dispute';
+import { handleDisputeFinalize, handleDisputeStart, handlePrepareDispute } from './handlers/dispute';
 import {
   handleChatEntityTx,
   handleChatMessageEntityTx,
@@ -228,6 +228,7 @@ const entityTxDispatchers: Record<string, EntityTxDispatcher> = {
   proposeCancelSwap: (_env, state, tx) => handleCancelSwapRequest(state, tx as Extract<EntityTx, { type: 'proposeCancelSwap' }>),
   r2e: (_env, state, tx) => handleR2E(state, tx as Extract<EntityTx, { type: 'r2e' }>),
   settleDiffs: (_env, state, tx) => handleSettleDiffsEntityTx(state, tx as Extract<EntityTx, { type: 'settleDiffs' }>),
+  prepareDispute: (env, state, tx) => handlePrepareDispute(state, tx as Extract<EntityTx, { type: 'prepareDispute' }>, env),
   disputeStart: (env, state, tx) => handleDisputeStart(state, tx as Extract<EntityTx, { type: 'disputeStart' }>, env),
   disputeFinalize: (env, state, tx) => handleDisputeFinalize(state, tx as Extract<EntityTx, { type: 'disputeFinalize' }>, env),
 };

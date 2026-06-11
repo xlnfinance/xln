@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from 'bun:test';
 import { mkdir, rm } from 'node:fs/promises';
 import { join } from 'node:path';
-import { Interface, Wallet, hexlify, keccak256, solidityPacked, toUtf8Bytes } from 'ethers';
+import { HDNodeWallet, Interface, Mnemonic, Wallet, getIndexedAccountPath, hexlify, keccak256, solidityPacked, toUtf8Bytes } from 'ethers';
 
 import * as xln from '../../runtime/runtime.ts';
 import { startStandaloneWatchtowerServer, type StandaloneWatchtowerServer } from '../../runtime/watchtower/standalone-server';
@@ -26,8 +26,14 @@ const addr = (byte: string): string => `0x${byte.repeat(20)}`;
 const servers: StandaloneWatchtowerServer[] = [];
 const tempRoots: string[] = [];
 const disputeStartedInterface = new Interface([
-  'event DisputeStarted(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes initialArguments)',
+  'event DisputeStartedV2(bytes32 indexed sender, bytes32 indexed counterentity, uint256 indexed nonce, bytes32 proofbodyHash, bytes starterInitialArguments, bytes starterIncrementedArguments)',
 ]);
+
+const deriveFrontendWallet = (seed: string, index: number): HDNodeWallet =>
+  HDNodeWallet.fromMnemonic(Mnemonic.fromPhrase(seed), getIndexedAccountPath(index));
+
+const deriveFrontendAddress = (seed: string, index: number): string =>
+  deriveFrontendWallet(seed, index).address.toLowerCase();
 
 afterEach(async () => {
   while (servers.length > 0) {
@@ -115,11 +121,19 @@ const encodeDisputeHash = (
   startedByLeft: boolean,
   disputeTimeout: bigint,
   initialProofbodyHash: string,
-  initialArguments: string,
+  starterInitialArguments: string,
+  starterIncrementedArguments: string,
 ): string => keccak256(
   solidityPacked(
-    ['uint256', 'bool', 'uint256', 'bytes32', 'bytes32'],
-    [BigInt(initialNonce), startedByLeft, disputeTimeout, initialProofbodyHash, keccak256(initialArguments)],
+    ['uint256', 'bool', 'uint256', 'bytes32', 'bytes32', 'bytes32'],
+    [
+      BigInt(initialNonce),
+      startedByLeft,
+      disputeTimeout,
+      initialProofbodyHash,
+      keccak256(starterInitialArguments),
+      keccak256(starterIncrementedArguments),
+    ],
   ),
 );
 
@@ -161,7 +175,7 @@ describe('watchtower recovery full flow', () => {
     servers.push(towerServer);
 
     const runtimeSeed = 'test test test test test test test test test test test junk';
-    const wallet = Wallet.createRandom();
+    const wallet = deriveFrontendWallet(runtimeSeed, 0);
     const runtimeId = wallet.address.toLowerCase();
     const env = xln.createEmptyEnv(runtimeSeed);
     env.runtimeId = runtimeId;
@@ -484,7 +498,8 @@ describe('watchtower recovery full flow', () => {
 
     const initialProofbodyHash = `0x${'cc'.repeat(32)}`;
     const initialArguments = '0x1234';
-    const disputeHash = encodeDisputeHash(7, true, 100n, initialProofbodyHash, initialArguments);
+    const incrementedArguments = '0x';
+    const disputeHash = encodeDisputeHash(7, true, 100n, initialProofbodyHash, initialArguments, incrementedArguments);
     const result = await runWatchtowerSweep(towerServer.store, {
       lookupKey: upload.lookupKey,
       towerPrivateKey: towerWallet.privateKey,
@@ -492,13 +507,14 @@ describe('watchtower recovery full flow', () => {
         getBlockNumber: async () => 95,
         getLogs: async () => {
           const event = disputeStartedInterface.encodeEventLog(
-            disputeStartedInterface.getEvent('DisputeStarted'),
+            disputeStartedInterface.getEvent('DisputeStartedV2'),
             [
               entityId,
               counterpartyId,
               7n,
               initialProofbodyHash,
               initialArguments,
+              incrementedArguments,
             ],
           );
           return [{ topics: event.topics, data: event.data }];

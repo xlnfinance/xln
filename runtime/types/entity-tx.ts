@@ -208,6 +208,14 @@ export type EntityTx =
       };
     }
   | {
+      type: 'prepareDispute';
+      data: {
+        counterpartyEntityId: string;
+        description?: string;
+        minCooldownMs?: number;
+      };
+    }
+  | {
       type: 'disputeStart';
       data: {
         counterpartyEntityId: string;

@@ -550,6 +550,10 @@
         <p class="dispute-status">
           Dispute active: {disputeBlocksLeft} block{disputeBlocksLeft === 1 ? '' : 's'} left (until J#{disputeTimeoutBlock}).
         </p>
+      {:else if account.status === 'dispute_preparing'}
+        <p class="dispute-status queued">
+          Dispute prepared. Normal account traffic is frozen while evidence and orderbook cleanup settle.
+        </p>
       {:else if account.status === 'disputed'}
         <p class="dispute-status queued">
           Dispute queued. Open the batch panel and broadcast the pending dispute batch.

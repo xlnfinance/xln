@@ -5,7 +5,7 @@ import type {
   EntityState,
   Env,
 } from '../types';
-import { addMessage } from '../state-helpers';
+import { addMessage, resolveEntityProposerId } from '../state-helpers';
 import { decodeHashLadderBinary } from '../hashladder';
 import { isCrossJurisdictionTerminalStatus } from '../cross-jurisdiction';
 import { createStructuredLogger, shortHash, shortId, shortOrder } from '../logger';
@@ -135,6 +135,7 @@ function hasQueuedDisputeStart(state: EntityState | null, counterpartyEntityId: 
 }
 
 export function queueCrossJurisdictionSalvageFromDispute(
+  env: Env,
   state: EntityState,
   outputs: EntityInput[],
   counterpartyId: string,
@@ -144,9 +145,36 @@ export function queueCrossJurisdictionSalvageFromDispute(
   // Cross-j salvage observes only starterInitialArguments. Incremented args are
   // committed for a possible counter-dispute and must not trigger source/target
   // salvage until that newer proof is actually used.
-  const starterInitialArguments = String(starterInitialArgumentsRaw || '0x');
-  if (!starterInitialArguments || starterInitialArguments === '0x') return false;
-  const pullBinaries = decodeDisputeCrossPullBinaries(starterInitialArguments);
+  return queueCrossJurisdictionSalvageFromArgumentList(
+    env,
+    state,
+    outputs,
+    counterpartyId,
+    [starterInitialArgumentsRaw],
+    blockNumber,
+  );
+}
+
+export function queueCrossJurisdictionSalvageFromArgumentList(
+  env: Env,
+  state: EntityState,
+  outputs: EntityInput[],
+  counterpartyId: string,
+  argumentBlobsRaw: unknown[],
+  blockNumber: number,
+): boolean {
+  const pullBinaries: Array<{ fillRatio: number; binary: string }> = [];
+  const seen = new Set<string>();
+  for (const raw of argumentBlobsRaw) {
+    const encoded = String(raw || '0x');
+    if (!encoded || encoded === '0x') continue;
+    for (const item of decodeDisputeCrossPullBinaries(encoded)) {
+      const key = `${item.fillRatio}:${item.binary.toLowerCase()}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      pullBinaries.push(item);
+    }
+  }
   if (pullBinaries.length === 0) return false;
 
   const route = findCrossJurisdictionRouteForSourceDispute(state, counterpartyId);
@@ -158,6 +186,7 @@ export function queueCrossJurisdictionSalvageFromDispute(
   const best = pullBinaries.reduce((acc, item) => item.fillRatio > acc.fillRatio ? item : acc, pullBinaries[0]!);
   outputs.push({
     entityId: route.target.counterpartyEntityId,
+    signerId: resolveEntityProposerId(env, route.target.counterpartyEntityId, 'cross-j.salvage.target-output'),
     entityTxs: [{
       type: 'crossJurisdictionSalvage',
       data: {
@@ -193,11 +222,12 @@ export function queueCrossJurisdictionSourceDisputeFromTargetDispute(
     jEventHtlcLog.warn('crossj.source_account_unavailable', { route: shortOrder(route.orderId), source: shortId(route.source.entityId), counterparty: shortId(route.source.counterpartyEntityId) });
     return false;
   }
-  if ((sourceAccount.status ?? 'active') === 'disputed' || sourceAccount.activeDispute) return false;
+  if ((sourceAccount.status ?? 'active') !== 'active' || sourceAccount.activeDispute) return false;
   if (hasQueuedDisputeStart(sourceUserState, route.source.counterpartyEntityId)) return false;
 
   outputs.push({
     entityId: route.source.entityId,
+    signerId: resolveEntityProposerId(env, route.source.entityId, 'cross-j.salvage.source-dispute-output'),
     entityTxs: [
       {
         type: 'disputeStart',
@@ -247,6 +277,7 @@ function queueInboundResolvesByHashlock(
 }
 
 export function applyKnownHtlcSecret(
+  env: Env,
   newState: EntityState,
   mempoolOps: JEventMempoolOp[],
   outputs: EntityInput[],
@@ -307,6 +338,7 @@ export function applyKnownHtlcSecret(
     const relay = route.crossJurisdictionRelay;
     outputs.push({
       entityId: relay.targetEntityId,
+      signerId: resolveEntityProposerId(env, relay.targetEntityId, 'j-event.htlc.cross-j-relay.resolve'),
       entityTxs: [{
         type: 'resolveHtlcLock',
         data: {

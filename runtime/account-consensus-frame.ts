@@ -11,31 +11,38 @@ export function validateAccountFrame(
   currentTimestamp?: number,
   previousFrameTimestamp?: number,
 ): boolean {
-  if (frame.height < 0) return false;
-  if (typeof frame.jHeight !== 'number' || frame.jHeight < 0) return false;
-  if (frame.accountTxs.length > MAX_ACCOUNT_FRAME_TXS) return false;
+  return getAccountFrameValidationError(frame, currentTimestamp, previousFrameTimestamp) === '';
+}
+
+export function getAccountFrameValidationError(
+  frame: AccountFrame,
+  currentTimestamp?: number,
+  previousFrameTimestamp?: number,
+): string {
+  if (frame.height < 0) return `height ${frame.height} < 0`;
+  if (typeof frame.jHeight !== 'number' || frame.jHeight < 0) {
+    return `jHeight ${String(frame.jHeight)} is invalid`;
+  }
+  if (frame.accountTxs.length > MAX_ACCOUNT_FRAME_TXS) {
+    return `tx count ${frame.accountTxs.length} > ${MAX_ACCOUNT_FRAME_TXS}`;
+  }
   try {
     assertAccountFrameDeltaIntegrity(frame, `AccountFrame#${frame.height}`);
   } catch (error) {
-    console.warn(`❌ Invalid account frame delta integrity: ${(error as Error).message}`);
-    return false;
+    return `delta integrity failed: ${(error as Error).message}`;
   }
 
   if (currentTimestamp !== undefined) {
     if (Math.abs(frame.timestamp - currentTimestamp) > MAX_FRAME_TIMESTAMP_DRIFT_MS) {
-      console.log(`❌ Frame timestamp drift too large: ${frame.timestamp} vs ${currentTimestamp}`);
-      return false;
+      return `timestamp drift ${Math.abs(frame.timestamp - currentTimestamp)}ms > ${MAX_FRAME_TIMESTAMP_DRIFT_MS}ms`;
     }
 
     if (previousFrameTimestamp !== undefined && frame.timestamp < previousFrameTimestamp) {
-      console.log(
-        `❌ Frame timestamp went backwards: ${frame.timestamp} < ${previousFrameTimestamp} (delta: ${previousFrameTimestamp - frame.timestamp}ms)`,
-      );
-      return false;
+      return `timestamp went backwards by ${previousFrameTimestamp - frame.timestamp}ms`;
     }
   }
 
-  return true;
+  return '';
 }
 
 export async function createFrameHash(frame: AccountFrame): Promise<string> {

@@ -1,8 +1,9 @@
 import {
   isCrossJurisdictionPullExpired,
+  isCrossJurisdictionRouteTransitionAllowed,
   transitionCrossJurisdictionRouteStatus,
 } from '../../cross-jurisdiction';
-import { decodeHashLadderBinary } from '../../hashladder';
+import { verifyHashLadderBinary } from '../../hashladder';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import type { EntityInput, EntityState, EntityTx, Env } from '../../types';
 import { normalizeEntityRef } from '../account-key';
@@ -25,18 +26,9 @@ export const handleCrossJurisdictionSalvageEntityTx = (
   const { routeId, binary, fillRatio, sourceEntityId, sourceCounterpartyEntityId, observedAt } = entityTx.data;
   const newState = cloneEntityState(entityState);
   const outputs: EntityInput[] = [];
-  if (!binary || binary === '0x' || fillRatio <= 0) {
+  const claimedFillRatio = Math.floor(Number(fillRatio) || 0);
+  if (!binary || binary === '0x' || claimedFillRatio <= 0) {
     addMessage(newState, `🌉 Cross-j salvage ignored for ${routeId}: empty pull args`);
-    return { newState, outputs };
-  }
-  try {
-    const decoded = decodeHashLadderBinary(binary);
-    if (decoded.fillRatio <= 0) {
-      addMessage(newState, `🌉 Cross-j salvage ignored for ${routeId}: zero pull binary`);
-      return { newState, outputs };
-    }
-  } catch (error) {
-    addMessage(newState, `❌ Cross-j salvage ${routeId} invalid pull binary: ${error instanceof Error ? error.message : String(error)}`);
     return { newState, outputs };
   }
 
@@ -47,6 +39,36 @@ export const handleCrossJurisdictionSalvageEntityTx = (
   }
   if (!route.targetPull) {
     addMessage(newState, `❌ Cross-j salvage ${routeId} missing target pull commitment`);
+    return { newState, outputs };
+  }
+  let verifiedFillRatio = 0;
+  try {
+    verifiedFillRatio = verifyHashLadderBinary({
+      fullHash: route.targetPull.fullHash,
+      partialRoot: route.targetPull.partialRoot,
+    }, binary).fillRatio;
+  } catch (error) {
+    addMessage(newState, `❌ Cross-j salvage ${routeId} invalid pull binary: ${error instanceof Error ? error.message : String(error)}`);
+    return { newState, outputs };
+  }
+  if (verifiedFillRatio <= 0) {
+    addMessage(newState, `🌉 Cross-j salvage ignored for ${routeId}: zero pull binary`);
+    return { newState, outputs };
+  }
+  if (verifiedFillRatio !== claimedFillRatio) {
+    addMessage(newState, `❌ Cross-j salvage ${routeId} fill mismatch: claimed ${claimedFillRatio}, verified ${verifiedFillRatio}`);
+    return { newState, outputs };
+  }
+  const committedRatio = Math.max(
+    Math.floor(Number(route.cumulativeFillRatio ?? 0) || 0),
+    Math.floor(Number(route.claimedRatio ?? 0) || 0),
+  );
+  if (committedRatio > 0 && verifiedFillRatio > committedRatio) {
+    addMessage(newState, `❌ Cross-j salvage ${routeId} exceeds committed fill: ${verifiedFillRatio}/${committedRatio}`);
+    return { newState, outputs };
+  }
+  if (!isCrossJurisdictionRouteTransitionAllowed(route.status, 'clearing')) {
+    addMessage(newState, `❌ Cross-j salvage ${routeId} blocked: route ${route.status}->clearing`);
     return { newState, outputs };
   }
   if (isCrossJurisdictionPullExpired(route, 'target', deterministicEntityTimestamp(newState, env))) {
@@ -72,9 +94,12 @@ export const handleCrossJurisdictionSalvageEntityTx = (
   newState.crossJurisdictionSwaps.set(route.orderId, route);
 
   const firstValidator = entityState.config.validators[0];
+  if (!firstValidator) {
+    throw new Error(`CROSS_J_SALVAGE_SIGNER_MISSING: entity=${newState.entityId} route=${routeId}`);
+  }
   outputs.push({
     entityId: newState.entityId,
-    ...(firstValidator ? { signerId: firstValidator } : {}),
+    signerId: firstValidator,
     entityTxs: [
       {
         type: 'resolvePull',
@@ -83,7 +108,7 @@ export const handleCrossJurisdictionSalvageEntityTx = (
           pullId: route.targetPull.pullId,
           binary,
           description:
-            `Cross-j salvage resolve ${routeId} fill=${fillRatio}/65535 ` +
+            `Cross-j salvage resolve ${routeId} fill=${verifiedFillRatio}/65535 ` +
             `source=${sourceEntityId.slice(-4)}:${sourceCounterpartyEntityId.slice(-4)}`,
         },
       },
@@ -92,7 +117,7 @@ export const handleCrossJurisdictionSalvageEntityTx = (
         data: {
           counterpartyEntityId: targetHubEntityId,
           description:
-            `Cross-j salvage ${routeId} fill=${fillRatio}/65535 ` +
+            `Cross-j salvage ${routeId} fill=${verifiedFillRatio}/65535 ` +
             `source=${sourceEntityId.slice(-4)}:${sourceCounterpartyEntityId.slice(-4)}` +
             (observedAt ? ` observed=${observedAt}` : ''),
         },

@@ -149,7 +149,7 @@ describe('htlc event contract and dispute tail', () => {
     });
   });
 
-  test('queues disputeStart when secret-ack removal stalls after recipient-side receive', async () => {
+  test('queues prepareDispute when secret-ack removal stalls after recipient-side receive', async () => {
     const entityId = `0x${'11'.repeat(32)}`;
     const counterpartyId = `0x${'22'.repeat(32)}`;
     const inboundLockId = 'lock-inbound';
@@ -197,10 +197,10 @@ describe('htlc event contract and dispute tail', () => {
     expect(outputs[0]?.entityId).toBe(entityId);
     expect(outputs[0]?.entityTxs).toEqual([
       {
-        type: 'disputeStart',
+        type: 'prepareDispute',
         data: {
           counterpartyEntityId: counterpartyId,
-          description: 'auto-dispute-after-secret-ack-timeout',
+          description: 'auto-prepare-dispute-after-secret-ack-timeout',
         },
       },
     ]);

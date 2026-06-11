@@ -362,10 +362,10 @@
         <button
           class="status-indicator"
           class:green={uiStatus === 'ready' && connState === 'connected'}
-          class:amber={uiStatus === 'sent'}
+          class:amber={uiStatus === 'sent' || uiStatus === 'dispute_preparing'}
           class:orange={connState === 'disconnected' || connState === 'queued'}
           class:red={uiStatus === 'disputed' || uiStatus === 'finalized_disputed'}
-          class:gray={uiStatus !== 'ready' && uiStatus !== 'sent' && uiStatus !== 'disputed' && uiStatus !== 'finalized_disputed' && connState !== 'disconnected' && connState !== 'queued'}
+          class:gray={uiStatus !== 'ready' && uiStatus !== 'sent' && uiStatus !== 'dispute_preparing' && uiStatus !== 'disputed' && uiStatus !== 'finalized_disputed' && connState !== 'disconnected' && connState !== 'queued'}
           type="button"
           title="Account status"
         >
@@ -383,6 +383,8 @@
               <span class="popover-dot green"></span> Active — Online
             {:else if uiStatus === 'sent'}
               <span class="popover-dot yellow"></span> {statusDescription}
+            {:else if uiStatus === 'dispute_preparing'}
+              <span class="popover-dot yellow"></span> Dispute Preparation
             {:else if connState === 'disconnected' || connState === 'queued'}
               <span class="popover-dot yellow"></span> Active — Offline
             {:else if uiStatus === 'disputed' || uiStatus === 'finalized_disputed'}

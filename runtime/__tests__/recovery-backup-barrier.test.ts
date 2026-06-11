@@ -10,7 +10,8 @@ test('recovery backup barrier holds remote outputs until backup succeeds', async
   env.timestamp = 1_000;
 
   const targetEntityId = `0x${'ab'.repeat(32)}`;
-  env.pendingNetworkOutputs = [{ entityId: targetEntityId }];
+  const targetSignerId = `0x${'01'.repeat(20)}`;
+  env.pendingNetworkOutputs = [{ entityId: targetEntityId, signerId: targetSignerId }];
   env.runtimeState = {
     ...(env.runtimeState || {}),
     loopActive: false,
@@ -52,6 +53,7 @@ test('direct remote sends fail closed while recovery backup barrier is active', 
   env.timestamp = 1_000;
 
   const targetEntityId = `0x${'cd'.repeat(32)}`;
+  const targetSignerId = `0x${'02'.repeat(20)}`;
   let dispatchCount = 0;
   env.runtimeState = {
     ...(env.runtimeState || {}),
@@ -64,7 +66,7 @@ test('direct remote sends fail closed while recovery backup barrier is active', 
 
   registerRecoveryBackupBarrier(env, async () => {});
 
-  expect(() => sendEntityInput(env, { entityId: targetEntityId })).toThrow(
+  expect(() => sendEntityInput(env, { entityId: targetEntityId, signerId: targetSignerId })).toThrow(
     'DIRECT_NETWORK_SEND_REQUIRES_COMMITTED_RECOVERY_BACKUP',
   );
   expect(dispatchCount).toBe(0);

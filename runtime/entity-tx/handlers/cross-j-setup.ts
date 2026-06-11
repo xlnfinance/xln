@@ -225,9 +225,12 @@ export const handleCommitCrossJurisdictionSwapEntityTx = (
   }
   newState.crossJurisdictionSwaps.set(restingRoute.orderId, mergeCrossJurisdictionRoute(existing, restingRoute));
   const firstValidator = entityState.config.validators[0];
+  if (!firstValidator) {
+    throw new Error(`CROSS_J_SOURCE_COMMIT_SIGNER_MISSING: entity=${newState.entityId} order=${restingRoute.orderId}`);
+  }
   outputs.push({
     entityId: newState.entityId,
-    ...(firstValidator ? { signerId: firstValidator } : {}),
+    signerId: firstValidator,
     entityTxs: [
       {
         type: 'pullLock',
