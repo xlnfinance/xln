@@ -6,8 +6,8 @@
 import type { Env, HankoString } from '../types';
 import { buildRealHanko } from './core';
 import { ethers } from 'ethers';
-import * as secp256k1 from '@noble/secp256k1';
 import { detectEntityType, generateLazyEntityId } from '../entity-factory';
+import { recoverAddressFromDigestSignature } from '../account-crypto';
 
 // Browser-compatible Buffer helpers - ALWAYS use manual hex parsing (Node Buffer.from can be broken in some envs)
 const bufferFrom = (data: string | Uint8Array | number[], encoding?: BufferEncoding): Buffer => {
@@ -75,8 +75,7 @@ const recoverAddressFromPackedSignature = (hashBuffer: Buffer, sig: Buffer): str
   if (v === undefined) return null;
   const recovery = v >= 27 ? v - 27 : v;
   if (recovery !== 0 && recovery !== 1) return null;
-  const publicKey = secp256k1.recoverPublicKey(hashBuffer, sig.slice(0, 64), recovery, false);
-  return `0x${ethers.keccak256(publicKey.slice(1)).slice(-40)}`.toLowerCase();
+  return recoverAddressFromDigestSignature(hashBuffer, sig.slice(0, 64), recovery);
 };
 
 type DecodedHankoClaim = {
@@ -460,6 +459,7 @@ export async function verifyHankoForHash(
 ): Promise<{ valid: boolean; entityId: string | null }> {
   try {
     const decodedHanko = decodeHankoEnvelope(hankoBytes);
+    const hashBuffer = bufferFrom(hash.replace('0x', ''), 'hex');
     const hanko = {
       placeholders: decodedHanko.placeholders.map((p) => bufferFrom(p.replace('0x', ''), 'hex')),
       packedSignatures: decodedHanko.packedSignatures,
@@ -471,11 +471,6 @@ export async function verifyHankoForHash(
       })),
     };
 
-    // Verify using flashloan governance logic
-    const { recoverHankoEntities } = await import('./core');
-    const hashBuffer = bufferFrom(hash.replace('0x', ''), 'hex');
-    const recovered = await recoverHankoEntities(hanko, hashBuffer);
-
     // CRITICAL: Require at least 1 EOA signature (prevent pure circular validation)
     const { unpackRealSignatures } = await import('./core');
     const eoaSignatures = unpackRealSignatures(hanko.packedSignatures);
@@ -483,6 +478,51 @@ export async function verifyHankoForHash(
       console.warn(`❌ Hanko rejected: No EOA signatures (circular claims not allowed in XLN)`);
       return { valid: false, entityId: null };
     }
+
+    const expectedEntityIdPadded = expectedEntityId.replace('0x', '').padStart(64, '0');
+
+    if (
+      detectEntityType(expectedEntityId) === 'lazy' &&
+      decodedHanko.placeholders.length === 0 &&
+      decodedHanko.claims.length === 1 &&
+      eoaSignatures.length === 1
+    ) {
+      const claim = decodedHanko.claims[0]!;
+      const canonicalSingleSignerClaim =
+        claim.entityId.replace('0x', '') === expectedEntityIdPadded &&
+        claim.threshold === 1 &&
+        claim.entityIndexes.length === 1 &&
+        claim.entityIndexes[0] === 0 &&
+        claim.weights.length === 1 &&
+        claim.weights[0] === 1;
+      if (canonicalSingleSignerClaim) {
+        // Hot path for the normal runtime shape: one lazy entity, one EOA,
+        // threshold 1. We still recover the signer from the exact signed hash,
+        // then reconstruct the lazy entity id from that signer. Anything more
+        // complex falls through to the full flashloan-governance verifier below.
+        const recoveredAddr = recoverAddressFromPackedSignature(hashBuffer, eoaSignatures[0]!);
+        if (!recoveredAddr) {
+          console.warn(`❌ Hanko rejected: single-signer lazy recovery failed`);
+          return { valid: false, entityId: null };
+        }
+        const reconstructedEntityId = generateLazyEntityId([recoveredAddr], 1n).toLowerCase();
+        if (reconstructedEntityId !== expectedEntityId.toLowerCase()) {
+          console.warn(
+            `❌ Hanko rejected: lazy signer mismatch ` +
+              `expected=${expectedEntityId.slice(-8)} reconstructed=${reconstructedEntityId.slice(-8)}`,
+          );
+          return { valid: false, entityId: null };
+        }
+        return { valid: true, entityId: claim.entityId };
+      }
+    }
+
+    // Verify using full flashloan governance logic for multisig, nested, and
+    // non-canonical Hanko envelopes. The single-signer lazy path above is only
+    // a specialization of the same rule and never accepts a shape this fallback
+    // would reject.
+    const { recoverHankoEntities } = await import('./core');
+    const recovered = await recoverHankoEntities(hanko, hashBuffer);
 
     // CRITICAL: Recover EOA addresses from signatures
     const recoveredAddresses: string[] = [];
@@ -506,7 +546,6 @@ export async function verifyHankoForHash(
     }
 
     // CRITICAL: Find claim for expectedEntityId (NOT just last claim!)
-    const expectedEntityIdPadded = expectedEntityId.replace('0x', '').padStart(64, '0');
     const matchingClaim = hanko.claims.find((c: { entityId: Uint8Array }) => {
       const claimEntityHex = toEntityIdHex(c.entityId).replace('0x', '');
       return claimEntityHex === expectedEntityIdPadded;

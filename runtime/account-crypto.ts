@@ -16,18 +16,42 @@ type RuntimeGlobal = typeof globalThis & {
   Buffer?: typeof BufferPolyfill;
 };
 
+type NativeSecp256k1 = {
+  ecdsaSign(message: Uint8Array, privateKey: Uint8Array): { signature: Uint8Array; recid: number };
+  ecdsaRecover(signature: Uint8Array, recid: number, message: Uint8Array, compressed: boolean): Uint8Array;
+  ecdsaVerify(signature: Uint8Array, message: Uint8Array, publicKey: Uint8Array): boolean;
+};
+
 type SignerKeyEnv = {
   runtimeSeed?: Uint8Array | string | null | undefined;
   quietRuntimeLogs?: boolean | undefined;
+};
+
+let nativeSecp256k1: NativeSecp256k1 | null | undefined;
+
+const isBrowserRuntime = (): boolean =>
+  typeof window !== 'undefined' &&
+  typeof window.document !== 'undefined';
+
+const getNativeSecp256k1 = (): NativeSecp256k1 | null => {
+  if (nativeSecp256k1 !== undefined) return nativeSecp256k1;
+  nativeSecp256k1 = null;
+  if (isBrowserRuntime()) return nativeSecp256k1;
+  try {
+    if (typeof require !== 'undefined') {
+      nativeSecp256k1 = require('secp256k1') as NativeSecp256k1;
+    }
+  } catch {
+    nativeSecp256k1 = null;
+  }
+  return nativeSecp256k1;
 };
 
 // Configure @noble/secp256k1 HMAC (required for signing)
 // Always install a sync HMAC implementation (Node/Bun fast path, browser fallback).
 const installHmacSync = () => {
   if (secp256k1.utils.hmacSha256Sync) return;
-  const isBrowser =
-    typeof window !== 'undefined' &&
-    typeof window.document !== 'undefined';
+  const isBrowser = isBrowserRuntime();
   const isNodeLike =
     !isBrowser &&
     (typeof (globalThis as RuntimeGlobal).Bun !== 'undefined' ||
@@ -479,8 +503,35 @@ export function signDigestBytesWithPrivateKey(
   if (messageBytes.length !== 32) {
     throw new Error(`SIGN_DIGEST_INVALID_LENGTH:${messageBytes.length}`);
   }
+  const native = getNativeSecp256k1();
+  if (native) {
+    // Same raw secp256k1 ECDSA operation as noble, only through the native
+    // backend available in Bun/Node. Browser builds keep the audited noble
+    // fallback below; Hanko bytes and on-chain ecrecover compatibility do not
+    // change.
+    const { signature, recid } = native.ecdsaSign(messageBytes, privateKey);
+    return { signature: new Uint8Array(signature), recovery: recid };
+  }
   const [signature, recovery] = secp256k1.signSync(messageBytes, privateKey, { recovered: true, der: false });
   return { signature, recovery };
+}
+
+export function recoverAddressFromDigestSignature(
+  messageBytes: Uint8Array,
+  signature: Uint8Array,
+  recovery: number,
+): string | null {
+  if (messageBytes.length !== 32 || signature.length !== 64) return null;
+  if (recovery !== 0 && recovery !== 1) return null;
+  try {
+    const native = getNativeSecp256k1();
+    const publicKey = native
+      ? native.ecdsaRecover(signature, recovery, messageBytes, false)
+      : secp256k1.recoverPublicKey(messageBytes, signature, recovery, false);
+    return `0x${keccak256(publicKey.slice(1)).slice(-40)}`.toLowerCase();
+  } catch {
+    return null;
+  }
 }
 
 /**
@@ -528,9 +579,10 @@ export function verifyAccountSignature(
     // Must match signAccountFrame and on-chain _recoverSigner behavior
     const messageBytes = Buffer.from(frameHash.replace('0x', ''), 'hex');
 
-    // Verify signature using @noble/secp256k1
-    const isValid = secp256k1.verify(sigBytes, messageBytes, publicKey);
-    return isValid;
+    const native = getNativeSecp256k1();
+    return native
+      ? native.ecdsaVerify(sigBytes, messageBytes, publicKey)
+      : secp256k1.verify(sigBytes, messageBytes, publicKey);
   } catch (error) {
     console.error(`❌ Signature verification error for ${signerId.slice(-4)}:`, error);
     return false;

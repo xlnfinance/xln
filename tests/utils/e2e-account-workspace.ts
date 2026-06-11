@@ -150,12 +150,35 @@ async function queueDisputeActionFromManageUi(
   await expect(disputeTab).toBeVisible({ timeout: 20_000 });
   await disputeTab.click();
 
-  const disputeButton = page.locator(`[data-testid="${buttonTestId}"]:visible`).first();
+  let disputeButton = page.locator(`[data-testid="${buttonTestId}"]:visible`).first();
   const selectedCounterparty = await entityInputHasSelection(page, 'configure-account-selector', counterpartyId);
   if (!selectedCounterparty) {
     await selectEntityInputOption(page, 'configure-account-selector', counterpartyId);
     await expect(disputeTab).toBeVisible({ timeout: 20_000 });
     await disputeTab.click();
+  }
+
+  if (action === 'start') {
+    const prepareButton = page.locator('[data-testid="configure-dispute-prepare"]:visible').first();
+    const needsPrepare = await prepareButton.isVisible({ timeout: 1_000 }).catch(() => false);
+    if (needsPrepare) {
+      await expect(prepareButton).toBeEnabled({ timeout: 20_000 });
+      const prepareDialogs = await clickWithDialogAccept(page, async () => {
+        await prepareButton.click();
+      });
+      const prepareAlert = prepareDialogs.find((entry) => entry.type === 'alert');
+      if (prepareAlert) {
+        throw new Error(`dispute prepare alert: ${prepareAlert.message}`);
+      }
+      await expect.poll(
+        async () => page.locator('[data-testid="configure-dispute-start"]:visible').first().isVisible().catch(() => false),
+        {
+          timeout: 20_000,
+          intervals: [500, 1000, 2000],
+        },
+      ).toBe(true);
+      disputeButton = page.locator('[data-testid="configure-dispute-start"]:visible').first();
+    }
   }
 
   await expect(disputeButton).toBeVisible({ timeout: 20_000 });

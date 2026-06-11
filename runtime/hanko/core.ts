@@ -316,14 +316,9 @@ export const buildRealHanko = async (
 
   // Create REAL Ethereum signatures
   const signatures: Buffer[] = [];
-  const signerAddresses: string[] = [];
 
   for (let i = 0; i < config.privateKeys.length; i++) {
     const privateKey = config.privateKeys[i]!;
-
-    // Get the address for this private key
-    const wallet = new ethers.Wallet(ethers.hexlify(privateKey));
-    signerAddresses.push(wallet.address);
 
     // Sign with key i
 
@@ -331,10 +326,16 @@ export const buildRealHanko = async (
     const signature = await createDirectHashSignature(hashToSign!, privateKey);
     signatures.push(signature);
 
-    // Verify the signature works
-    const verifySuccess = await verifySignatureRecovery(hashToSign!, signature, wallet.address);
-    if (!verifySuccess) {
-      throw new Error(`Signature verification failed for key ${i}`);
+    // Production consensus verification happens when peers receive the Hanko
+    // and again on-chain during disputes. Re-recovering our own freshly created
+    // signature here only doubles hot-path crypto cost. Keep the self-test
+    // available for Hanko debugging, but never make normal signing pay for it.
+    if (HANKO_DEBUG) {
+      const wallet = new ethers.Wallet(ethers.hexlify(privateKey));
+      const verifySuccess = await verifySignatureRecovery(hashToSign!, signature, wallet.address);
+      if (!verifySuccess) {
+        throw new Error(`Signature verification failed for key ${i}`);
+      }
     }
   }
 
