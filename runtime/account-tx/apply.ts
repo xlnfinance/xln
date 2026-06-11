@@ -21,6 +21,7 @@ import { handleCrossSwapFillAck } from './handlers/cross-swap-fill-ack';
 import { handleSwapCancelRequest } from './handlers/swap-cancel';
 import { handleSettleHold, handleSettleRelease } from './handlers/settle-hold';
 import { handleJEventClaim } from './handlers/j-event-claim';
+import { canProcessAccountTxForDisputeStatus } from '../account-dispute-policy';
 
 type ProcessAccountTxResult = {
   success: boolean;
@@ -51,9 +52,6 @@ type ProcessAccountTxResult = {
   pullResolved?: { pullId: string; fillRatio: number };
   pullCancelled?: { pullId: string; status: 'cancelled' | 'already-closed' };
 };
-
-const isAccountBusinessTx = (txType: string): boolean =>
-  txType !== 'j_event_claim' && txType !== 'reopen_disputed';
 
 type DebugEventEmitter = {
   sendDebugEvent(payload: Record<string, unknown>): void;
@@ -101,7 +99,7 @@ export async function processAccountTx(
     }
   };
 
-  if ((accountMachine.status ?? 'active') !== 'active' && isAccountBusinessTx(accountTx.type)) {
+  if (!canProcessAccountTxForDisputeStatus(accountMachine.status, accountTx.type)) {
     const error = `Account is ${accountMachine.status}; tx ${accountTx.type} rejected until dispute/reopen flow completes`;
     return { success: false, events: [error], error };
   }

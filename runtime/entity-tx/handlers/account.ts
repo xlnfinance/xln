@@ -21,6 +21,7 @@ import type {
   SwapCancelRequestEvent,
   SwapOfferEvent,
 } from './account/orderbook-offers';
+import { canProcessAccountTxForDisputeStatus } from '../../account-dispute-policy';
 
 export type { MempoolOp } from './account/orderbook-queue';
 export {
@@ -178,14 +179,16 @@ export async function handleAccountInput(state: EntityState, input: AccountInput
     throw new Error(`CRITICAL: AccountMachine creation failed for ${input.fromEntityId}`);
   }
 
-  // Dispute freeze: once account is preparing for dispute or already disputed,
-  // only allow the minimal bilateral traffic that can resolve the dispute state
-  // itself. This mirrors the account-tx layer. Do not accept normal frames
-  // while transformer arguments are being frozen; otherwise a pending swap fill
-  // or HTLC reveal can mutate calldata after disputeStart has committed hashes.
+  // Dispute freeze: this mirrors account-tx/apply.ts through
+  // canProcessAccountTxForDisputeStatus. During dispute_preparing we still allow
+  // evidence-only frames (pull_resolve/swap_resolve) to settle argument data.
+  // After disputeStart is queued/observed, only control traffic is allowed; the
+  // signed calldata hashes are already committed and must not drift.
   if ((accountMachine.status ?? 'active') !== 'active') {
     const frameTxTypes = input.newAccountFrame?.accountTxs?.map((tx) => tx.type) || [];
-    const allowedWhileDisputed = frameTxTypes.every((txType) => txType === 'j_event_claim' || txType === 'reopen_disputed');
+    const allowedWhileDisputed = frameTxTypes.every((txType) =>
+      canProcessAccountTxForDisputeStatus(accountMachine.status, txType)
+    );
     if (!allowedWhileDisputed) {
       const dropMsg =
         `🛑 Frozen account input dropped for ${counterpartyId.slice(-4)} ` +

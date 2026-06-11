@@ -3008,4 +3008,74 @@ describe('audit fail-fast regressions', () => {
     expect(result.newState.jBatchState?.batch.disputeStarts ?? []).toEqual([]);
     expect(result.newState.messages.some((msg) => msg.includes('htlcAwaitingSecret:1'))).toBe(true);
   });
+
+  test('disputeStart waits while evidence tx can still change dispute arguments', async () => {
+    const env = createEmptyEnv('prepare-dispute-evidence-mempool');
+    const hubId = `0x${'96'.repeat(32)}`;
+    const userId = `0x${'97'.repeat(32)}`;
+    const hubState = makeEntityState(hubId);
+    hubState.config = makeSingleSignerConfigFor('hub-signer');
+    hubState.accounts.set(
+      userId,
+      makeProposalAccount([
+        {
+          type: 'swap_resolve',
+          data: { offerId: 'pending-fill', fillRatio: 32_768, cancelRemainder: false },
+        } as AccountTx,
+      ], hubId, userId),
+    );
+
+    const result = await handleDisputeStart(
+      hubState,
+      {
+        type: 'disputeStart',
+        data: { counterpartyEntityId: userId },
+      },
+      env,
+    );
+
+    expect(result.newState.jBatchState?.batch.disputeStarts ?? []).toEqual([]);
+    expect(result.newState.messages.some((msg) => msg.includes('argumentMempool:swap_resolve'))).toBe(true);
+  });
+
+  test('disputeFinalize waits when incoming dispute can still collect HTLC evidence', async () => {
+    const env = createEmptyEnv('counter-dispute-awaiting-secret');
+    const hubId = `0x${'98'.repeat(32)}`;
+    const userId = `0x${'99'.repeat(32)}`;
+    const hubState = makeEntityState(hubId);
+    hubState.config = makeSingleSignerConfigFor('hub-signer');
+    const account = makeProposalAccount([], hubId, userId);
+    account.status = 'disputed';
+    account.activeDispute = {
+      startedByLeft: false,
+      initialProofbodyHash: `0x${'aa'.repeat(32)}`,
+      initialNonce: 1,
+      disputeTimeout: 100,
+      onChainNonce: 1,
+      starterInitialArguments: '0x',
+      starterIncrementedArguments: '0x',
+      finalizeQueued: false,
+    };
+    hubState.accounts.set(userId, account);
+    hubState.htlcRoutes.set(`0x${'55'.repeat(32)}`, {
+      hashlock: `0x${'55'.repeat(32)}`,
+      tokenId: 1,
+      amount: 10n,
+      inboundEntity: userId,
+      inboundLockId: 'counter-await-secret-lock',
+      createdTimestamp: hubState.timestamp,
+    });
+
+    const result = await handleDisputeFinalize(
+      hubState,
+      {
+        type: 'disputeFinalize',
+        data: { counterpartyEntityId: userId },
+      },
+      env,
+    );
+
+    expect(result.newState.jBatchState?.batch.disputeFinalizations ?? []).toEqual([]);
+    expect(result.newState.messages.some((msg) => msg.includes('htlcAwaitingSecret:1'))).toBe(true);
+  });
 });
