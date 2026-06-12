@@ -369,17 +369,43 @@ const getHealthyHubChild = (): HubChild | null =>
 
 const fetchHubMarketSnapshots = async (
   child: HubChild,
+  hubEntityId: string,
   pairIds: string[],
   depth: number,
 ): Promise<MarketSnapshotPayload[]> => {
   const params = new URLSearchParams();
+  params.set('hubEntityId', hubEntityId);
   params.set('depth', String(depth));
   for (const pairId of pairIds) params.append('pair', pairId);
-  const response = await fetchJson<{ snapshots?: MarketSnapshotPayload[] }>(
-    `http://${args.host}:${child.apiPort}/api/market/snapshots?${params.toString()}`,
-    2_000,
-  );
-  return Array.isArray(response?.snapshots) ? response!.snapshots : [];
+  const url = `http://${args.host}:${child.apiPort}/api/market/snapshots?${params.toString()}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 2_000);
+  try {
+    const response = await fetch(url, { signal: controller.signal });
+    const payload = await response.json().catch(() => null) as {
+      error?: unknown;
+      code?: unknown;
+      snapshots?: unknown;
+    } | null;
+    if (!response.ok || !Array.isArray(payload?.snapshots)) {
+      const message = typeof payload?.error === 'string' && payload.error
+        ? payload.error
+        : `Market snapshots unavailable for hub: ${hubEntityId}`;
+      const error = new Error(message) as Error & { code?: string };
+      error.code = typeof payload?.code === 'string' && /^E_[A-Z0-9_]+$/.test(payload.code)
+        ? payload.code
+        : 'E_MARKET_SNAPSHOT_UNAVAILABLE';
+      throw error;
+    }
+    return payload.snapshots as MarketSnapshotPayload[];
+  } catch (error) {
+    if (error instanceof Error && (error as Error & { code?: string }).code) throw error;
+    const wrapped = new Error(`Market snapshots unavailable for hub: ${hubEntityId}`) as Error & { code?: string };
+    wrapped.code = 'E_MARKET_SNAPSHOT_UNAVAILABLE';
+    throw wrapped;
+  } finally {
+    clearTimeout(timer);
+  }
 };
 
 const marketSubscriptionStack = createMarketSubscriptionStack<OrchestratorWebSocket>({
@@ -394,7 +420,7 @@ const marketSubscriptionStack = createMarketSubscriptionStack<OrchestratorWebSoc
       error.code = 'E_UNKNOWN_HUB';
       throw error;
     }
-    return fetchHubMarketSnapshots(child, pairIds, depth);
+    return fetchHubMarketSnapshots(child, hubEntityId, pairIds, depth);
   },
   onHandlerError: (error, msg) => {
     pushDebugEvent(relayStore, {
