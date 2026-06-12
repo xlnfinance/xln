@@ -389,7 +389,11 @@ const marketSubscriptionStack = createMarketSubscriptionStack<OrchestratorWebSoc
   getClientIp: ws => String(ws?.data?.clientIp || 'unknown'),
   fetchSnapshots: async (hubEntityId, pairIds, depth) => {
     const child = getHubChildByEntityId(hubEntityId);
-    if (!child) return [];
+    if (!child) {
+      const error = new Error(`Unknown market hub: ${hubEntityId}`) as Error & { code?: string };
+      error.code = 'E_UNKNOWN_HUB';
+      throw error;
+    }
     return fetchHubMarketSnapshots(child, pairIds, depth);
   },
   onHandlerError: (error, msg) => {

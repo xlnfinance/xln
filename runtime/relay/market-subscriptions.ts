@@ -61,6 +61,16 @@ const sendError = (ws: MarketSocket, inReplyTo: unknown, error: string, code?: s
   }));
 };
 
+const marketErrorCode = (error: unknown): string | undefined => {
+  const code = (error as { code?: unknown } | null | undefined)?.code;
+  return typeof code === 'string' && /^E_[A-Z0-9_]+$/.test(code) ? code : undefined;
+};
+
+const marketErrorMessage = (error: unknown, fallback: string): string => {
+  if (error instanceof Error && error.message) return error.message;
+  return fallback;
+};
+
 export const createMarketSubscriptionStack = <WS extends MarketSocket>(
   options: MarketSubscriptionStackOptions<WS>,
 ): MarketSubscriptionStack<WS> => {
@@ -121,8 +131,15 @@ export const createMarketSubscriptionStack = <WS extends MarketSocket>(
       for (const [ws, subscription] of subscriptions.entries()) {
         try {
           await sendSnapshot(ws, subscription);
-        } catch {
+        } catch (error) {
+          sendError(
+            ws,
+            undefined,
+            marketErrorMessage(error, 'Failed to send market snapshot'),
+            marketErrorCode(error),
+          );
           cleanup(ws);
+          options.onHandlerError?.(error, { type: 'market_publish' });
         }
       }
     } finally {
@@ -203,6 +220,12 @@ export const createMarketSubscriptionStack = <WS extends MarketSocket>(
       try {
         await sendSnapshot(ws, subscription);
       } catch (error) {
+        sendError(
+          ws,
+          id,
+          marketErrorMessage(error, 'Failed to send market snapshot'),
+          marketErrorCode(error),
+        );
         cleanup(ws);
         options.onHandlerError?.(error, msg);
       }
@@ -241,7 +264,12 @@ export const createMarketSubscriptionStack = <WS extends MarketSocket>(
       ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'market_snapshot_sent' }));
     } catch (error) {
       cleanup(ws);
-      sendError(ws, id, 'Failed to send market snapshot');
+      sendError(
+        ws,
+        id,
+        marketErrorMessage(error, 'Failed to send market snapshot'),
+        marketErrorCode(error),
+      );
       options.onHandlerError?.(error, msg);
     }
   };

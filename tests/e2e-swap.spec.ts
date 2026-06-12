@@ -180,10 +180,21 @@ const SILENT_RELAY_WEBSOCKET_SCRIPT = `
                 else if (listener && typeof listener.handleEvent === 'function') listener.handleEvent(event);
               }
               return true;
-            },
-            send(data) {
-              socket.sentMessages.push(String(data || ''));
-            },
+	            },
+	            send(data) {
+	              socket.sentMessages.push(String(data || ''));
+	              if (window.__relayErrorOnSubscribe && String(data || '').includes('"market_subscribe"')) {
+	                const errorMessage = {
+	                  type: 'error',
+	                  inReplyTo: 'market_subscribe',
+	                  code: 'E_UNKNOWN_HUB',
+	                  error: 'Unknown market hub in test relay',
+	                };
+	                setTimeout(() => {
+	                  socket.dispatchEvent(new MessageEvent('message', { data: JSON.stringify(errorMessage) }));
+	                }, 0);
+	              }
+	            },
             close(code, reason) {
               if (socket.readyState === NativeWebSocket.CLOSED) return;
               socket.readyState = NativeWebSocket.CLOSING;
@@ -209,14 +220,19 @@ const SILENT_RELAY_WEBSOCKET_SCRIPT = `
         });
         window.WebSocket.prototype = NativeWebSocket.prototype;
       })();
-    `;
+	    `;
 
-async function installSilentRelayWebSocket(page: Page, options?: { currentPage?: boolean }): Promise<void> {
-  await page.addInitScript({ content: SILENT_RELAY_WEBSOCKET_SCRIPT });
+async function installSilentRelayWebSocket(
+  page: Page,
+  options?: { currentPage?: boolean; errorOnSubscribe?: boolean },
+): Promise<void> {
+  const modeScript = `window.__relayErrorOnSubscribe = ${options?.errorOnSubscribe ? 'true' : 'false'};`;
+  await page.addInitScript({ content: `${modeScript}\n${SILENT_RELAY_WEBSOCKET_SCRIPT}` });
   if (options?.currentPage) {
-    await page.evaluate((script) => {
-      (0, eval)(script);
-    }, SILENT_RELAY_WEBSOCKET_SCRIPT);
+    await page.evaluate(({ modeScript: nextModeScript, installScript }) => {
+      (0, eval)(nextModeScript);
+      (0, eval)(installScript);
+    }, { modeScript, installScript: SILENT_RELAY_WEBSOCKET_SCRIPT });
   }
 }
 
@@ -1742,7 +1758,7 @@ test.describe('E2E Swap Flow', () => {
       expectSelectedBooksHaveVisibleLiquidity(page, CANONICAL_SWAP_PAIR_LABELS, runtimeRef.hubIds.slice(0, 3)));
   });
 
-  test('swap orderbook shows terminal no-market state when relay stream never returns a snapshot', async ({ page }) => {
+	  test('swap orderbook shows terminal no-market state when relay stream never returns a snapshot', async ({ page }) => {
     await timedStep('swap_no_market.goto_app', () => gotoApp(page));
     await timedStep('swap_no_market.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
     await timedStep('swap_no_market.create_runtime', () => createDemoRuntime(page, `swap-no-market-${Date.now()}`, randomMnemonic()));
@@ -1796,9 +1812,59 @@ test.describe('E2E Swap Flow', () => {
         intervals: [100, 250, 500],
       })
       .toEqual({ asks: 0, bids: 0 });
+	  });
+
+  test('swap orderbook shows terminal error state when relay rejects the market subscription', async ({ page }) => {
+    await timedStep('swap_error.goto_app', () => gotoApp(page));
+    await timedStep('swap_error.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
+    await timedStep('swap_error.create_runtime', () => createDemoRuntime(page, `swap-error-${Date.now()}`, randomMnemonic()));
+    const runtimeRef = await timedStep('swap_error.ensure_hub_account', () => ensureDeterministicSwapAccounts(page, 1));
+    const hubId = runtimeRef.hubIds[0]!;
+
+    await timedStep('swap_error.install_error_relay', () =>
+      installSilentRelayWebSocket(page, { currentPage: true, errorOnSubscribe: true }));
+    await timedStep('swap_error.open_workspace', () => openSwapWorkspace(page));
+    await timedStep('swap_error.select_counterparty', () => selectCounterpartyInSwap(page, hubId));
+    await timedStep('swap_error.open_orderbook', async () => {
+      await ensureSwapOrderbookVisible(page);
+      await ensureSwapScope(page, 'selected');
+      await selectSwapPairSide(page, 'WETH/USDC', 'buy');
+    });
+
+    const orderbook = page.getByTestId('swap-orderbook').first();
+    const panel = orderbook.locator('.orderbook-panel').first();
+    await expect(orderbook, 'right-side swap orderbook must stay visible in terminal relay error state').toBeVisible({ timeout: 20_000 });
+    await expect(panel, 'orderbook panel must remain mounted after relay error').toBeVisible({ timeout: 20_000 });
+    await expect
+      .poll(async () => await page.evaluate(() => {
+        const sockets = (window as any).__silentRelaySockets || [];
+        return sockets.some((socket: any) => (socket.sentMessages || []).some((msg: string) =>
+          msg.includes('"market_subscribe"') && msg.includes('"1/2"'),
+        ));
+      }), {
+        timeout: 10_000,
+        intervals: [100, 250, 500],
+        message: 'error relay test must subscribe before accepting terminal error state',
+      })
+      .toBe(true);
+    await expect
+      .poll(async () => String(await panel.getAttribute('data-source-status') || ''), {
+        timeout: 5_000,
+        intervals: [100, 250, 500],
+        message: 'relay error must resolve to terminal error instead of hanging in syncing',
+      })
+      .toBe('error');
+    await expect(page.getByTestId('orderbook-source-status').first()).toContainText(/Orderbook stream error/i, { timeout: 5_000 });
+    await expect(page.getByTestId('orderbook-source-status').first()).not.toContainText(/syncing/i, { timeout: 5_000 });
+    await expect
+      .poll(async () => readOrderbookRowCounts(page), {
+        timeout: 5_000,
+        intervals: [100, 250, 500],
+      })
+      .toEqual({ asks: 0, bids: 0 });
   });
 
-  // Scenario: place a valid non-marketable WETH/USDC offer through the visible swap UI
+	  // Scenario: place a valid non-marketable WETH/USDC offer through the visible swap UI
   // and verify the open order survives a reload.
   test('swap place WETH/USDC offer survives reload', async ({ page }) => {
     const accountRef = await timedStep('swap_auto.prepare_book', () => prepareOrderbookClickTest(page));
