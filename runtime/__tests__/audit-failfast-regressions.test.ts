@@ -36,7 +36,7 @@ import {
   canonicalJurisdictionEventsHash,
 } from '../j-event-observation';
 import { createEmptyBatch } from '../j-batch';
-import { applyCommand, createBook, getBookOrder, SWAP_LOT_SCALE, type OrderbookExtState } from '../orderbook';
+import { applyCommand, createBook, getBookOrder, ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE, type OrderbookExtState } from '../orderbook';
 import { process, createEmptyEnv, registerEntityRuntimeHint, sendEntityInput } from '../runtime';
 import { safeStringify } from '../serialization-utils';
 import { projectAccountDoc } from '../storage/projections';
@@ -1135,6 +1135,85 @@ describe('audit fail-fast regressions', () => {
 
     await expect(proposeAccountFrame(env, account)).rejects.toThrow(/CROSS_J_FILL_ACK_PROPOSAL_FAILED/);
     expect(account.mempool).toHaveLength(1);
+  });
+
+  test('proposeAccountFrame keeps valid swap_resolve txs when optimistic batch validation falls back', async () => {
+    const env = createEmptyEnv('swap-resolve-batch-fallback');
+    env.timestamp = 10_000;
+    env.quietRuntimeLogs = true;
+    env.browserVM = {
+      getDepositoryAddress: () => hex20('dd'),
+    } as typeof env.browserVM;
+
+    const makerIdentity = registerLazySigner('swap-resolve-batch-fallback', 'maker');
+    const hubIdentity = registerLazySigner('swap-resolve-batch-fallback', 'hub');
+    const maker = makerIdentity.entityId;
+    const hub = hubIdentity.entityId;
+    const makerIsLeft = isLeftEntity(maker, hub);
+    const [leftEntity, rightEntity] = makerIsLeft ? [maker, hub] : [hub, maker];
+    const giveAmount = SWAP_LOT_SCALE;
+    const wantAmount = 3_000n * SWAP_LOT_SCALE;
+    const validTx: Extract<AccountTx, { type: 'swap_resolve' }> = {
+      type: 'swap_resolve',
+      data: {
+        offerId: 'valid-batch-fill',
+        fillRatio: 65_535,
+        fillNumerator: 1n,
+        fillDenominator: 1n,
+        cancelRemainder: true,
+        executionGiveAmount: giveAmount,
+        executionWantAmount: wantAmount,
+      },
+    };
+    const invalidTx: Extract<AccountTx, { type: 'swap_resolve' }> = {
+      type: 'swap_resolve',
+      data: {
+        offerId: 'missing-batch-fill',
+        fillRatio: 65_535,
+        fillNumerator: 1n,
+        fillDenominator: 1n,
+        cancelRemainder: true,
+        executionGiveAmount: giveAmount,
+        executionWantAmount: wantAmount,
+      },
+    };
+    const account = makeProposalAccount([validTx, invalidTx], leftEntity, rightEntity);
+    account.proofHeader = { fromEntity: hub, toEntity: maker, nonce: 0 };
+    attachSigningReplica(env, hub, hubIdentity.signerId);
+
+    const giveDelta = createDefaultDelta(2);
+    giveDelta.leftCreditLimit = 10n ** 30n;
+    giveDelta.rightCreditLimit = 10n ** 30n;
+    if (makerIsLeft) giveDelta.leftHold = giveAmount;
+    else giveDelta.rightHold = giveAmount;
+    account.deltas.set(2, giveDelta);
+
+    const wantDelta = createDefaultDelta(1);
+    wantDelta.leftCreditLimit = 10n ** 30n;
+    wantDelta.rightCreditLimit = 10n ** 30n;
+    account.deltas.set(1, wantDelta);
+
+    account.swapOffers.set('valid-batch-fill', {
+      offerId: 'valid-batch-fill',
+      giveTokenId: 2,
+      giveAmount,
+      wantTokenId: 1,
+      wantAmount,
+      priceTicks: 3_000n * ORDERBOOK_PRICE_SCALE,
+      timeInForce: 0,
+      minFillRatio: 0,
+      makerIsLeft,
+      createdHeight: 0,
+      quantizedGive: giveAmount,
+      quantizedWant: wantAmount,
+    });
+
+    const result = await proposeAccountFrame(env, account);
+
+    expect(result.success).toBe(true);
+    expect(result.accountInput?.newAccountFrame.accountTxs).toEqual([validTx]);
+    expect(account.pendingFrame?.accountTxs).toEqual([validTx]);
+    expect(account.mempool).toEqual([]);
   });
 
   test('entity frame commits mark the entity core doc dirty for storage replay', async () => {

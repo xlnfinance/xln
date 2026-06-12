@@ -52,7 +52,7 @@
     "bench:storage:hub": "bun runtime/scripts/bench-storage-hub.ts",
     "bench:swap:orderbook": "bun runtime/scripts/bench-swap-orderbook-tps.ts --swaps 100000 --warmup 10000 --min-tps 10000",
     "bench:swap:runtime": "bun runtime/scripts/bench-swap-runtime-tps.ts --swaps 25000 --warmup 2500 --min-tps 10000",
-    "bench:swap:consensus": "bun runtime/scripts/bench-swap-hub-consensus-tps.ts --swaps 1000 --warmup 100 --min-tps 10000",
+    "bench:swap:consensus": "bun runtime/scripts/bench-swap-hub-consensus-tps.ts --swaps 1000 --warmup 100 --min-tps 10000 --batch-size 100 --processes 4",
     "bench:swap:scenarios": "bun runtime/scripts/bench-swap-scenarios-tps.ts --swaps 25000 --warmup 2500 --min-tps 10000",
     "bench:radapter:hub10k": "bun --expose-gc runtime/scripts/bench-radapter-hub-1m.ts --accounts=10000 --hot-percent=10 --memory=hot --seed-mode=bulk --chunk=1000 --traffic-rounds=10 --touch-per-round=100 --new-after-read=100 --rss-cap-mb=1024 --max-read-p99-ms=500 --max-durable-p99-ms=2000 --max-cold-open-ms=1000 --max-cold-read-ms=500",
     "bench:radapter:hub10k:rotation": "bun --expose-gc runtime/scripts/bench-radapter-hub-1m.ts --accounts=10000 --hot-percent=10 --memory=hot --seed-mode=bulk --chunk=1000 --traffic-rounds=10 --touch-per-round=100 --new-after-read=100 --rotation-probe --rotation-epoch-bytes=1073741824 --rss-cap-mb=1024 --max-read-p99-ms=500 --max-durable-p99-ms=2000 --max-cold-open-ms=1000 --max-cold-read-ms=500 --max-snapshot-ms=5000 --max-epoch-seed-ms=5000 --max-rotation-probe-ms=10000",

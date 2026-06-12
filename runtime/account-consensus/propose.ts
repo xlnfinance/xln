@@ -3,7 +3,7 @@
  * frame construction, frame hanko signing, and dispute-proof signing.
  */
 
-import type { AccountFrame, AccountInput, AccountMachine, Delta, Env } from '../types';
+import type { AccountFrame, AccountInput, AccountMachine, AccountTx, Delta, Env } from '../types';
 import { cloneAccountFrame, cloneAccountMachine, getAccountPerspective, removeCommittedTxsFromMempool } from '../state-helpers';
 import { isLeft } from '../account-utils';
 import { formatEntityId, HEAVY_LOGS } from '../utils';
@@ -117,15 +117,12 @@ export async function proposeAccountFrame(
   const validTxs: typeof accountMachine.mempool = [];
   const failedHtlcLocks: Array<{ hashlock: string; reason: string }> = [];
   const txsToRemove: typeof accountMachine.mempool = [];
+  const proposerByLeft = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
 
-  for (const accountTx of proposalWindow) {
-    if (HEAVY_LOGS) console.log(`   🔍 Processing accountTx type=${accountTx.type}`);
-    // Frame-level byLeft must use canonical entity ordering, not raw string equality.
-    const proposerByLeft = isLeft(accountMachine.proofHeader.fromEntity, accountMachine.proofHeader.toEntity);
-    const txMachine = cloneAccountMachine(clonedMachine);
-    const beforeSettlement = captureSettlementVector(txMachine);
+  const processOnMachine = async (machine: AccountMachine, accountTx: AccountTx) => {
+    const beforeSettlement = captureSettlementVector(machine);
     const result = await processAccountTx(
-      txMachine,
+      machine,
       accountTx,
       proposerByLeft,
       env.timestamp, // Will be replaced by frame.timestamp during commit
@@ -133,29 +130,16 @@ export async function proposeAccountFrame(
       true, // isValidation = true (on clone, skip persistent state updates)
       env,
     );
-
-    if (!result.success) {
-      if (accountTx.type === 'cross_swap_fill_ack') {
-        throw new Error(
-          `CROSS_J_FILL_ACK_PROPOSAL_FAILED: offer=${accountTx.data.offerId} ` +
-            `seq=${accountTx.data.fillSeq} error=${result.error || 'validation_failed'}`,
-        );
-      }
-      txsToRemove.push(accountTx);
-      accountLog.debug('tx.skipped', { type: accountTx.type, error: result.error || 'unknown' });
-
-      if (accountTx.type === 'htlc_lock') {
-        failedHtlcLocks.push({
-          hashlock: accountTx.data.hashlock,
-          reason: result.error || 'validation_failed',
-        });
-        accountLog.debug('htlc_lock.cancel_queued', { hashlock: shortHash(accountTx.data.hashlock) });
-      }
-      continue; // Skip to next tx
+    if (result.success) {
+      assertNoUnilateralSettlementMutation(machine, beforeSettlement, accountTx, 'propose/validate');
     }
-    assertNoUnilateralSettlementMutation(txMachine, beforeSettlement, accountTx, 'propose/validate');
-    clonedMachine = txMachine;
+    return result;
+  };
 
+  const collectSuccessfulTx = (
+    accountTx: AccountTx,
+    result: Awaited<ReturnType<typeof processAccountTx>>,
+  ): void => {
     validTxs.push(accountTx);
     allEvents.push(...result.events);
 
@@ -180,6 +164,61 @@ export async function proposeAccountFrame(
 
     if (result.swapOfferCancelled) {
       swapOffersCancelled.push(result.swapOfferCancelled);
+    }
+  };
+
+  const canOptimisticallyValidateBatch =
+    proposalWindow.length > 1 &&
+    proposalWindow.every((tx) => tx.type === 'swap_resolve' || tx.type === 'cross_swap_fill_ack');
+  let optimisticBatchFailed = false;
+  if (canOptimisticallyValidateBatch) {
+    const optimisticMachine = cloneAccountMachine(accountMachine);
+    const optimisticResults: Array<{ tx: AccountTx; result: Awaited<ReturnType<typeof processAccountTx>> }> = [];
+    for (const accountTx of proposalWindow) {
+      if (HEAVY_LOGS) console.log(`   🔍 Optimistic batch accountTx type=${accountTx.type}`);
+      const result = await processOnMachine(optimisticMachine, accountTx);
+      if (!result.success) {
+        optimisticBatchFailed = true;
+        break;
+      }
+      optimisticResults.push({ tx: accountTx, result });
+    }
+    if (!optimisticBatchFailed) {
+      clonedMachine = optimisticMachine;
+      for (const { tx, result } of optimisticResults) collectSuccessfulTx(tx, result);
+    }
+  }
+
+  if (!canOptimisticallyValidateBatch || optimisticBatchFailed) {
+    if (optimisticBatchFailed) {
+      clonedMachine = cloneAccountMachine(accountMachine);
+    }
+    for (const accountTx of proposalWindow) {
+      if (HEAVY_LOGS) console.log(`   🔍 Processing accountTx type=${accountTx.type}`);
+      const txMachine = cloneAccountMachine(clonedMachine);
+      const result = await processOnMachine(txMachine, accountTx);
+
+      if (!result.success) {
+        if (accountTx.type === 'cross_swap_fill_ack') {
+          throw new Error(
+            `CROSS_J_FILL_ACK_PROPOSAL_FAILED: offer=${accountTx.data.offerId} ` +
+              `seq=${accountTx.data.fillSeq} error=${result.error || 'validation_failed'}`,
+          );
+        }
+        txsToRemove.push(accountTx);
+        accountLog.debug('tx.skipped', { type: accountTx.type, error: result.error || 'unknown' });
+
+        if (accountTx.type === 'htlc_lock') {
+          failedHtlcLocks.push({
+            hashlock: accountTx.data.hashlock,
+            reason: result.error || 'validation_failed',
+          });
+          accountLog.debug('htlc_lock.cancel_queued', { hashlock: shortHash(accountTx.data.hashlock) });
+        }
+        continue; // Skip to next tx
+      }
+      clonedMachine = txMachine;
+      collectSuccessfulTx(accountTx, result);
     }
   }
 

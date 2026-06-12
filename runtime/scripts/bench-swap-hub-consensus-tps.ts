@@ -1,12 +1,15 @@
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { handleAccountInput, proposeAccountFrame } from '../account-consensus';
 import { isLeft } from '../account-utils';
+import { spawn } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import {
   buildCrossJurisdictionPullBinding,
   buildPreparedCrossJurisdictionRoute,
 } from '../cross-jurisdiction';
 import { buildCrossJurisdictionBookAdmissionReceipt } from '../cross-jurisdiction-orderbook';
 import { generateLazyEntityId } from '../entity-factory';
+import { MAX_ACCOUNT_FRAME_TXS } from '../account-consensus-frame';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
 import { setDeltaTransformerAddress } from '../proof-builder';
 import { createEmptyEnv } from '../runtime';
@@ -30,6 +33,8 @@ type Cli = {
   warmup: number;
   minTps: number;
   concurrency: number;
+  batchSize: number;
+  processes: number;
 };
 
 type BenchAccountCase = {
@@ -38,7 +43,8 @@ type BenchAccountCase = {
   receiverEnv: Env;
   proposer: AccountMachine;
   receiver: AccountMachine;
-  tx: AccountTx;
+  txs: AccountTx[];
+  swapCount: number;
 };
 
 type HubConsensusBenchmarkResult = {
@@ -52,7 +58,10 @@ type HubConsensusBenchmarkResult = {
   sameTps: number;
   crossTps: number;
   committedFrames: number;
+  batchSize: number;
+  committedSwaps: number;
   concurrency: number;
+  processes: number;
   scope: string;
   stageMs?: {
     propose: number;
@@ -103,6 +112,8 @@ const parseCli = (args: string[]): Cli => ({
   warmup: nonNegativeInt(args, '--warmup', 100),
   minTps: positiveInt(args, '--min-tps', 10_000),
   concurrency: positiveInt(args, '--concurrency', 128),
+  batchSize: Math.min(positiveInt(args, '--batch-size', MAX_ACCOUNT_FRAME_TXS), MAX_ACCOUNT_FRAME_TXS),
+  processes: positiveInt(args, '--processes', 1),
 });
 
 const makeJurisdiction = (): JurisdictionConfig => ({
@@ -293,32 +304,51 @@ const makeSameCase = (
   hubEnv: Env,
   jurisdiction: JurisdictionConfig,
   hubId: string,
-  index: number,
+  startIndex: number,
+  count: number,
 ): BenchAccountCase => {
-  const receiverEnv = makeParticipantEnv(`hub-consensus-same-${index}`, jurisdiction);
-  const userId = registerBenchEntity(receiverEnv, jurisdiction, `hub-consensus-same-${index}`, 'user').entityId;
+  const receiverEnv = makeParticipantEnv(`hub-consensus-same-${startIndex}`, jurisdiction);
+  const userId = registerBenchEntity(receiverEnv, jurisdiction, `hub-consensus-same-${startIndex}`, 'user').entityId;
   const base = makeAccount(userId, hubId);
   const giveDelta = installDelta(base, 2);
   installDelta(base, 1);
   const giveAmount = SWAP_LOT_SCALE;
   const wantAmount = 3_000n * SWAP_LOT_SCALE;
   const makerIsLeft = isLeft(userId, hubId);
-  if (makerIsLeft) giveDelta.leftHold = giveAmount;
-  else giveDelta.rightHold = giveAmount;
-  base.swapOffers.set(`same-${index}`, {
-    offerId: `same-${index}`,
-    giveTokenId: 2,
-    giveAmount,
-    wantTokenId: 1,
-    wantAmount,
-    priceTicks: 3_000n * ORDERBOOK_PRICE_SCALE,
-    timeInForce: 0,
-    minFillRatio: 0,
-    makerIsLeft,
-    createdHeight: 0,
-    quantizedGive: giveAmount,
-    quantizedWant: wantAmount,
-  });
+  const totalGiveAmount = giveAmount * BigInt(count);
+  if (makerIsLeft) giveDelta.leftHold = totalGiveAmount;
+  else giveDelta.rightHold = totalGiveAmount;
+  const txs: AccountTx[] = [];
+  for (let offset = 0; offset < count; offset += 1) {
+    const index = startIndex + offset;
+    const offerId = `same-${index}`;
+    base.swapOffers.set(offerId, {
+      offerId,
+      giveTokenId: 2,
+      giveAmount,
+      wantTokenId: 1,
+      wantAmount,
+      priceTicks: 3_000n * ORDERBOOK_PRICE_SCALE,
+      timeInForce: 0,
+      minFillRatio: 0,
+      makerIsLeft,
+      createdHeight: 0,
+      quantizedGive: giveAmount,
+      quantizedWant: wantAmount,
+    });
+    txs.push({
+      type: 'swap_resolve',
+      data: {
+        offerId,
+        fillRatio: 65_535,
+        fillNumerator: 1n,
+        fillDenominator: 1n,
+        cancelRemainder: true,
+        executionGiveAmount: giveAmount,
+        executionWantAmount: wantAmount,
+      },
+    });
+  }
   const user = mirrorAccount(base, userId, hubId);
   const hub = mirrorAccount(base, hubId, userId);
   return {
@@ -327,18 +357,8 @@ const makeSameCase = (
     receiverEnv,
     proposer: hub,
     receiver: user,
-    tx: {
-      type: 'swap_resolve',
-      data: {
-        offerId: `same-${index}`,
-        fillRatio: 65_535,
-        fillNumerator: 1n,
-        fillDenominator: 1n,
-        cancelRemainder: true,
-        executionGiveAmount: giveAmount,
-        executionWantAmount: wantAmount,
-      },
-    },
+    txs,
+    swapCount: count,
   };
 };
 
@@ -346,91 +366,88 @@ const makeCrossCase = (
   hubEnv: Env,
   jurisdiction: JurisdictionConfig,
   hubId: string,
-  index: number,
+  startIndex: number,
+  count: number,
 ): BenchAccountCase => {
-  const receiverEnv = makeParticipantEnv(`hub-consensus-cross-source-${index}`, jurisdiction);
-  const sourceUser = registerBenchEntity(receiverEnv, jurisdiction, `hub-consensus-cross-source-${index}`, 'user').entityId;
-  const targetUser = registerBenchIdentity(`hub-consensus-cross-target-${index}`, 'user').entityId;
-  const targetHub = registerBenchIdentity(`hub-consensus-cross-target-hub-${index}`, 'hub').entityId;
+  const receiverEnv = makeParticipantEnv(`hub-consensus-cross-source-${startIndex}`, jurisdiction);
+  const sourceUser = registerBenchEntity(receiverEnv, jurisdiction, `hub-consensus-cross-source-${startIndex}`, 'user').entityId;
+  const targetUser = registerBenchIdentity(`hub-consensus-cross-target-${startIndex}`, 'user').entityId;
+  const targetHub = registerBenchIdentity(`hub-consensus-cross-target-hub-${startIndex}`, 'hub').entityId;
   const sourceAmount = SWAP_LOT_SCALE;
   const targetAmount = 2n * SWAP_LOT_SCALE;
-  const route = buildPreparedCrossJurisdictionRoute({
-    orderId: `cross-${index}`,
-    makerEntityId: sourceUser,
-    hubEntityId: hubId,
-    bookOwnerEntityId: hubId,
-    venueId: 'cross:bench-source:1/bench-target:1',
-    source: {
-      jurisdiction: `stack:1:${addr('11')}`,
-      entityId: sourceUser,
-      counterpartyEntityId: hubId,
-      tokenId: 1,
-      amount: sourceAmount,
-    },
-    target: {
-      jurisdiction: `stack:2:${addr('22')}`,
-      entityId: targetHub,
-      counterpartyEntityId: targetUser,
-      tokenId: 1,
-      amount: targetAmount,
-    },
-    priceImprovementMode: 'source_savings',
-    status: 'intent',
-    createdAt: 1_000,
-    updatedAt: 1_000,
-    expiresAt: 61_000,
-  }, { runtimeSeed: 'swap-hub-consensus-bench', sourceDisputeDelayMs: 5_000, now: 1_000 });
-  const admittedRoute: CrossJurisdictionSwapRoute = {
-    ...route,
-    status: 'resting',
-  };
-  admittedRoute.targetReceipt = targetReceiptFor(admittedRoute);
-
   const base = makeAccount(sourceUser, hubId);
   const sourceDelta = installDelta(base, 1);
   const makerIsLeft = isLeft(sourceUser, hubId);
-  if (makerIsLeft) sourceDelta.leftHold = sourceAmount;
-  else sourceDelta.rightHold = sourceAmount;
-  base.pulls!.set(admittedRoute.sourcePull!.pullId, {
-    pullId: admittedRoute.sourcePull!.pullId,
-    tokenId: admittedRoute.sourcePull!.tokenId,
-    amount: admittedRoute.sourcePull!.signedAmount,
-    claimedRatio: 0,
-    claimedAmount: 0n,
-    revealedUntilTimestamp: admittedRoute.sourcePull!.revealedUntilTimestamp,
-    fullHash: admittedRoute.sourcePull!.fullHash,
-    partialRoot: admittedRoute.sourcePull!.partialRoot,
-    crossJurisdiction: buildCrossJurisdictionPullBinding(admittedRoute, 'source'),
-    createdHeight: 0,
-    createdTimestamp: 1_000,
-  });
-  base.swapOffers.set(`cross-${index}`, {
-    offerId: `cross-${index}`,
-    giveTokenId: admittedRoute.source.tokenId,
-    giveAmount: admittedRoute.source.amount,
-    wantTokenId: admittedRoute.target.tokenId,
-    wantAmount: admittedRoute.target.amount,
-    priceTicks: 2n * ORDERBOOK_PRICE_SCALE,
-    timeInForce: 0,
-    minFillRatio: 0,
-    makerIsLeft,
-    createdHeight: 0,
-    quantizedGive: admittedRoute.source.amount,
-    quantizedWant: admittedRoute.target.amount,
-    crossJurisdiction: admittedRoute,
-  });
-  const user = mirrorAccount(base, sourceUser, hubId);
-  const hub = mirrorAccount(base, hubId, sourceUser);
-  return {
-    kind: 'cross',
-    proposerEnv: hubEnv,
-    receiverEnv,
-    proposer: hub,
-    receiver: user,
-    tx: {
+  const totalSourceAmount = sourceAmount * BigInt(count);
+  if (makerIsLeft) sourceDelta.leftHold = totalSourceAmount;
+  else sourceDelta.rightHold = totalSourceAmount;
+  const txs: AccountTx[] = [];
+  for (let offset = 0; offset < count; offset += 1) {
+    const index = startIndex + offset;
+    const offerId = `cross-${index}`;
+    const route = buildPreparedCrossJurisdictionRoute({
+      orderId: offerId,
+      makerEntityId: sourceUser,
+      hubEntityId: hubId,
+      bookOwnerEntityId: hubId,
+      venueId: 'cross:bench-source:1/bench-target:1',
+      source: {
+        jurisdiction: `stack:1:${addr('11')}`,
+        entityId: sourceUser,
+        counterpartyEntityId: hubId,
+        tokenId: 1,
+        amount: sourceAmount,
+      },
+      target: {
+        jurisdiction: `stack:2:${addr('22')}`,
+        entityId: targetHub,
+        counterpartyEntityId: targetUser,
+        tokenId: 1,
+        amount: targetAmount,
+      },
+      priceImprovementMode: 'source_savings',
+      status: 'intent',
+      createdAt: 1_000,
+      updatedAt: 1_000,
+      expiresAt: 61_000,
+    }, { runtimeSeed: 'swap-hub-consensus-bench', sourceDisputeDelayMs: 5_000, now: 1_000 });
+    const admittedRoute: CrossJurisdictionSwapRoute = {
+      ...route,
+      status: 'resting',
+    };
+    admittedRoute.targetReceipt = targetReceiptFor(admittedRoute);
+    base.pulls!.set(admittedRoute.sourcePull!.pullId, {
+      pullId: admittedRoute.sourcePull!.pullId,
+      tokenId: admittedRoute.sourcePull!.tokenId,
+      amount: admittedRoute.sourcePull!.signedAmount,
+      claimedRatio: 0,
+      claimedAmount: 0n,
+      revealedUntilTimestamp: admittedRoute.sourcePull!.revealedUntilTimestamp,
+      fullHash: admittedRoute.sourcePull!.fullHash,
+      partialRoot: admittedRoute.sourcePull!.partialRoot,
+      crossJurisdiction: buildCrossJurisdictionPullBinding(admittedRoute, 'source'),
+      createdHeight: 0,
+      createdTimestamp: 1_000,
+    });
+    base.swapOffers.set(offerId, {
+      offerId,
+      giveTokenId: admittedRoute.source.tokenId,
+      giveAmount: admittedRoute.source.amount,
+      wantTokenId: admittedRoute.target.tokenId,
+      wantAmount: admittedRoute.target.amount,
+      priceTicks: 2n * ORDERBOOK_PRICE_SCALE,
+      timeInForce: 0,
+      minFillRatio: 0,
+      makerIsLeft,
+      createdHeight: 0,
+      quantizedGive: admittedRoute.source.amount,
+      quantizedWant: admittedRoute.target.amount,
+      crossJurisdiction: admittedRoute,
+    });
+    txs.push({
       type: 'cross_swap_fill_ack',
       data: {
-        offerId: `cross-${index}`,
+        offerId,
         fillSeq: 1,
         incrementalSourceAmount: sourceAmount,
         incrementalTargetAmount: targetAmount,
@@ -447,7 +464,18 @@ const makeCrossCase = (
         cancelRemainder: true,
         pairId: 'cross:bench-source:1/bench-target:1',
       },
-    },
+    });
+  }
+  const user = mirrorAccount(base, sourceUser, hubId);
+  const hub = mirrorAccount(base, hubId, sourceUser);
+  return {
+    kind: 'cross',
+    proposerEnv: hubEnv,
+    receiverEnv,
+    proposer: hub,
+    receiver: user,
+    txs,
+    swapCount: count,
   };
 };
 
@@ -457,7 +485,7 @@ const expectInput = (input: AccountInput | undefined, context: string): AccountI
 };
 
 const runConsensusRoundTrip = async (benchCase: BenchAccountCase, stages?: StageTotals): Promise<void> => {
-  benchCase.proposer.mempool.push(benchCase.tx);
+  benchCase.proposer.mempool.push(...benchCase.txs);
   const proposeStartedAt = getPerfMs();
   const proposed = await proposeAccountFrame(benchCase.proposerEnv, benchCase.proposer);
   const receiveStartedAt = getPerfMs();
@@ -510,12 +538,15 @@ const buildCases = (
   jurisdiction: JurisdictionConfig,
   hubId: string,
   swaps: number,
+  batchSize: number,
 ): { same: BenchAccountCase[]; cross: BenchAccountCase[] } => {
   const same: BenchAccountCase[] = [];
   const cross: BenchAccountCase[] = [];
-  for (let index = 0; index < swaps; index += 1) {
-    same.push(makeSameCase(env, jurisdiction, hubId, index));
-    cross.push(makeCrossCase(env, jurisdiction, hubId, index));
+  const width = Math.max(1, Math.min(batchSize, MAX_ACCOUNT_FRAME_TXS));
+  for (let index = 0; index < swaps; index += width) {
+    const count = Math.min(width, swaps - index);
+    same.push(makeSameCase(env, jurisdiction, hubId, index, count));
+    cross.push(makeCrossCase(env, jurisdiction, hubId, index, count));
   }
   return { same, cross };
 };
@@ -524,55 +555,158 @@ const runMeasuredCases = async (
   cases: BenchAccountCase[],
   concurrency: number,
   stages?: StageTotals,
-): Promise<number> => {
+): Promise<{ elapsedMs: number; swaps: number }> => {
   const startedAt = getPerfMs();
+  let swaps = 0;
   const width = Math.max(1, Math.floor(concurrency));
   for (let index = 0; index < cases.length; index += width) {
-    await Promise.all(cases.slice(index, index + width).map((benchCase) => runConsensusRoundTrip(benchCase, stages)));
+    const group = cases.slice(index, index + width);
+    await Promise.all(group.map((benchCase) => runConsensusRoundTrip(benchCase, stages)));
+    swaps += group.reduce((sum, benchCase) => sum + benchCase.swapCount, 0);
   }
-  return getPerfMs() - startedAt;
+  return { elapsedMs: getPerfMs() - startedAt, swaps };
 };
 
 const runPass = async (
   swaps: number,
   seed: string,
   concurrency: number,
-): Promise<{ sameElapsedMs: number; crossElapsedMs: number; elapsedMs: number; stages: StageTotals }> => {
+  batchSize: number,
+): Promise<{
+  sameElapsedMs: number;
+  crossElapsedMs: number;
+  sameSwaps: number;
+  crossSwaps: number;
+  elapsedMs: number;
+  stages: StageTotals;
+  frames: number;
+}> => {
   const { env, jurisdiction, hubId } = makeEnv(seed);
-  const { same, cross } = buildCases(env, jurisdiction, hubId, swaps);
+  const { same, cross } = buildCases(env, jurisdiction, hubId, swaps, batchSize);
   const stages = concurrency === 1 ? createStageTotals() : undefined;
   const startedAt = getPerfMs();
-  const sameElapsedMs = await runMeasuredCases(same, concurrency, stages);
-  const crossElapsedMs = await runMeasuredCases(cross, concurrency, stages);
-  return { sameElapsedMs, crossElapsedMs, elapsedMs: getPerfMs() - startedAt, stages: stages ?? createStageTotals() };
+  const sameResult = await runMeasuredCases(same, concurrency, stages);
+  const crossResult = await runMeasuredCases(cross, concurrency, stages);
+  return {
+    sameElapsedMs: sameResult.elapsedMs,
+    crossElapsedMs: crossResult.elapsedMs,
+    sameSwaps: sameResult.swaps,
+    crossSwaps: crossResult.swaps,
+    elapsedMs: getPerfMs() - startedAt,
+    stages: stages ?? createStageTotals(),
+    frames: same.length + cross.length,
+  };
+};
+
+const scriptPath = (): string => fileURLToPath(import.meta.url);
+
+const runWorkerProcess = (
+  cli: Cli,
+  workerIndex: number,
+): Promise<HubConsensusBenchmarkResult> => new Promise((resolve, reject) => {
+  const child = spawn(process.execPath, [
+    scriptPath(),
+    '--swaps', String(cli.swaps),
+    '--warmup', String(cli.warmup),
+    '--min-tps', '1',
+    '--concurrency', String(cli.concurrency),
+    '--batch-size', String(cli.batchSize),
+    '--processes', '1',
+  ], {
+    cwd: process.cwd(),
+    env: {
+      ...process.env,
+      XLN_SWAP_CONSENSUS_WORKER: String(workerIndex),
+    },
+    stdio: ['ignore', 'pipe', 'pipe'],
+  });
+  let stdout = '';
+  let stderr = '';
+  child.stdout?.on('data', (chunk) => { stdout += String(chunk); });
+  child.stderr?.on('data', (chunk) => { stderr += String(chunk); });
+  child.on('error', reject);
+  child.on('close', (code) => {
+    if (code !== 0) {
+      reject(new Error(`SWAP_CONSENSUS_WORKER_FAILED:${workerIndex}:code=${code}\n${stderr || stdout}`));
+      return;
+    }
+    try {
+      const parsed = JSON.parse(stdout.trim()) as HubConsensusBenchmarkResult;
+      resolve(parsed);
+    } catch (error) {
+      reject(new Error(`SWAP_CONSENSUS_WORKER_BAD_JSON:${workerIndex}:${(error as Error).message}\n${stdout}\n${stderr}`));
+    }
+  });
+});
+
+const runDistributedWorkers = async (cli: Cli): Promise<HubConsensusBenchmarkResult> => {
+  const workers = await Promise.all(
+    Array.from({ length: cli.processes }, (_, index) => runWorkerProcess(cli, index)),
+  );
+  const sameSwaps = workers.reduce((sum, worker) => sum + worker.sameSwaps, 0);
+  const crossSwaps = workers.reduce((sum, worker) => sum + worker.crossSwaps, 0);
+  const committedSwaps = workers.reduce((sum, worker) => sum + worker.committedSwaps, 0);
+  const committedFrames = workers.reduce((sum, worker) => sum + worker.committedFrames, 0);
+  const elapsedMs = Math.max(...workers.map((worker) => worker.elapsedMs), 0.001);
+  const sameElapsedMs = Math.max(...workers.map((worker) =>
+    worker.sameTps > 0 ? (worker.sameSwaps / worker.sameTps) * 1000 : worker.elapsedMs,
+  ), 0.001);
+  const crossElapsedMs = Math.max(...workers.map((worker) =>
+    worker.crossTps > 0 ? (worker.crossSwaps / worker.crossTps) * 1000 : worker.elapsedMs,
+  ), 0.001);
+  const totalSwaps = sameSwaps + crossSwaps;
+  const tps = totalSwaps / Math.max(elapsedMs / 1000, 0.001);
+  const output: HubConsensusBenchmarkResult = {
+    benchmark: 'swap-hub-account-consensus',
+    sameSwaps,
+    crossSwaps,
+    elapsedMs: Number(elapsedMs.toFixed(3)),
+    tps: Number(tps.toFixed(2)),
+    minTps: cli.minTps,
+    passed: tps >= cli.minTps,
+    sameTps: Number((sameSwaps / Math.max(sameElapsedMs / 1000, 0.001)).toFixed(2)),
+    crossTps: Number((crossSwaps / Math.max(crossElapsedMs / 1000, 0.001)).toFixed(2)),
+    committedFrames,
+    batchSize: cli.batchSize,
+    committedSwaps,
+    concurrency: cli.concurrency,
+    processes: cli.processes,
+    scope: 'batched distributed account consensus throughput aggregated across worker processes; each worker runs hub propose/commit + user ACK with hanko sign/verify and dispute proof',
+  };
+  return output;
 };
 
 export const runSwapHubConsensusBenchmark = async (cli: Cli): Promise<HubConsensusBenchmarkResult> => {
-  if (cli.warmup > 0) await runPass(cli.warmup, 'swap-hub-consensus-warmup', cli.concurrency);
-  const { sameElapsedMs, crossElapsedMs, elapsedMs, stages } = await runPass(
+  if (cli.processes > 1) return runDistributedWorkers(cli);
+  if (cli.warmup > 0) await runPass(cli.warmup, 'swap-hub-consensus-warmup', cli.concurrency, cli.batchSize);
+  const { sameElapsedMs, crossElapsedMs, sameSwaps, crossSwaps, elapsedMs, stages, frames } = await runPass(
     cli.swaps,
     'swap-hub-consensus-measured',
     cli.concurrency,
+    cli.batchSize,
   );
-  const totalSwaps = cli.swaps * 2;
+  const totalSwaps = sameSwaps + crossSwaps;
   const elapsedSeconds = Math.max(elapsedMs / 1000, 0.001);
-  const sameTps = cli.swaps / Math.max(sameElapsedMs / 1000, 0.001);
-  const crossTps = cli.swaps / Math.max(crossElapsedMs / 1000, 0.001);
+  const sameTps = sameSwaps / Math.max(sameElapsedMs / 1000, 0.001);
+  const crossTps = crossSwaps / Math.max(crossElapsedMs / 1000, 0.001);
   const tps = totalSwaps / elapsedSeconds;
   const stageMs = averageStageMs(stages);
   const output: HubConsensusBenchmarkResult = {
     benchmark: 'swap-hub-account-consensus',
-    sameSwaps: cli.swaps,
-    crossSwaps: cli.swaps,
+    sameSwaps,
+    crossSwaps,
     elapsedMs: Number(elapsedMs.toFixed(3)),
     tps: Number(tps.toFixed(2)),
     minTps: cli.minTps,
     passed: tps >= cli.minTps,
     sameTps: Number(sameTps.toFixed(2)),
     crossTps: Number(crossTps.toFixed(2)),
-    committedFrames: totalSwaps,
+    committedFrames: frames,
+    batchSize: cli.batchSize,
+    committedSwaps: totalSwaps,
     concurrency: cli.concurrency,
-    scope: 'distributed account consensus throughput: hub propose/commit + user ACK on independent accounts; includes hanko sign/verify and dispute proof, excludes entity frame and storage flush',
+    processes: cli.processes,
+    scope: 'batched distributed account consensus throughput: hub propose/commit + user ACK on independent accounts; up to 100 swap txs per account frame; includes hanko sign/verify and dispute proof, excludes entity frame and storage flush',
     ...(stageMs ? { stageMs } : {}),
   };
   return output;
