@@ -1,8 +1,10 @@
 import { devices, expect, test, type BrowserContext, type Page } from '@playwright/test';
 import { ensureE2EBaseline, APP_BASE_URL, waitForNamedHubs } from './utils/e2e-baseline';
-import { connectRuntimeToHub } from './utils/e2e-connect';
+import { connectRuntimeToHubWithCredit } from './utils/e2e-connect';
 import { createRuntimeIdentity, gotoApp, selectDemoMnemonic } from './utils/e2e-demo-users';
-import { capturePageScreenshot } from './utils/e2e-screenshots';
+import { captureLocatorScreenshot, capturePageScreenshot } from './utils/e2e-screenshots';
+
+const SWAP_CONNECT_TOKEN_IDS = [1, 2, 3] as const;
 
 async function openAssetsTab(page: Page): Promise<void> {
   const tab = page.getByTestId('tab-assets').first();
@@ -39,6 +41,122 @@ async function openAccountWorkspaceTab(page: Page, tabId: string): Promise<void>
   await tab.click();
 }
 
+async function readSwapScopeMode(page: Page): Promise<'aggregated' | 'selected' | ''> {
+  const raw = String(await page.getByTestId('swap-scope-toggle').first().getAttribute('data-scope-mode') || '').trim();
+  return raw === 'aggregated' || raw === 'selected' ? raw : '';
+}
+
+async function ensureSwapScope(page: Page, desired: 'aggregated' | 'selected'): Promise<void> {
+  const scopeToggle = page.getByTestId('swap-scope-toggle').first();
+  await expect(scopeToggle).toBeVisible({ timeout: 20_000 });
+  if (await readSwapScopeMode(page) === desired) return;
+  if (!await scopeToggle.isEnabled().catch(() => false)) return;
+  try {
+    await expect
+      .poll(async () => {
+        const current = await readSwapScopeMode(page);
+        if (current !== desired) {
+          await scopeToggle.click({ force: true });
+          await page.waitForTimeout(150);
+        }
+        return await readSwapScopeMode(page);
+      }, { timeout: 5_000, intervals: [50, 100, 200] })
+      .toBe(desired);
+  } catch {
+    // Mobile layouts can make the scope control hard to operate; the screenshot
+    // gate below still requires a terminal ready book with visible ask/bid rows.
+  }
+}
+
+async function expectSwapOrderbookReady(page: Page): Promise<void> {
+  const orderbook = page.getByTestId('swap-orderbook').first();
+  const panel = orderbook.locator('.orderbook-panel').first();
+  await expect(orderbook).toBeVisible({ timeout: 20_000 });
+  await expect(panel).toBeVisible({ timeout: 20_000 });
+  await ensureSwapScope(page, 'aggregated');
+  await expect
+    .poll(async () => String(await panel.getAttribute('data-source-status') || ''), {
+      timeout: 30_000,
+      intervals: [250, 500, 1000],
+      message: 'swap visual evidence must not capture a loading orderbook',
+    })
+    .toBe('ready');
+  await expect
+    .poll(async () => ({
+      asks: await page.getByTestId('orderbook-ask-row').count(),
+      bids: await page.getByTestId('orderbook-bid-row').count(),
+    }), {
+      timeout: 30_000,
+      intervals: [250, 500, 1000],
+      message: 'swap visual evidence must include visible ask and bid depth',
+    })
+    .toEqual({ asks: expect.any(Number), bids: expect.any(Number) });
+  await expect
+    .poll(async () => {
+      const asks = await page.getByTestId('orderbook-ask-row').count();
+      const bids = await page.getByTestId('orderbook-bid-row').count();
+      return asks > 0 && bids > 0;
+    }, {
+      timeout: 30_000,
+      intervals: [250, 500, 1000],
+      message: 'swap visual evidence must include visible ask and bid depth',
+    })
+    .toBe(true);
+  await expect(page.getByTestId('orderbook-source-status').first()).not.toContainText(/syncing|loading/i, {
+    timeout: 5_000,
+  });
+}
+
+async function closeSwapMenus(page: Page): Promise<void> {
+  await page.keyboard.press('Escape').catch(() => {});
+  await page.locator('.swap-panel').first().click({ position: { x: 4, y: 4 } }).catch(() => {});
+}
+
+async function captureSwapVisualStates(
+  page: Page,
+  prefix: string,
+  output: Parameters<typeof capturePageScreenshot>[1],
+): Promise<void> {
+  await openAccountWorkspaceTab(page, 'swap');
+  await expect(page.getByTestId('swap-order-amount').first()).toBeVisible({ timeout: 20_000 });
+  await expectSwapOrderbookReady(page);
+  const swapPanel = page.locator('.swap-panel').first();
+  await captureLocatorScreenshot(swapPanel, output, `${prefix}-swap-base.png`);
+
+  const sourceButton = page.locator('.swap-panel .anyswap-builder .entity-select-wrap').first()
+    .locator('button.entity-select-button').first();
+  await sourceButton.click();
+  await expect(page.locator('.swap-panel .entity-menu[aria-label="Source account"]').first()).toBeVisible({ timeout: 10_000 });
+  await captureLocatorScreenshot(swapPanel, output, `${prefix}-swap-source-menu.png`);
+  await closeSwapMenus(page);
+
+  const tokenButton = page.locator('.swap-panel .token-select-wrap button.token-select-button').first();
+  await tokenButton.click();
+  await expect(page.locator('.swap-panel .token-menu').first()).toBeVisible({ timeout: 10_000 });
+  await captureLocatorScreenshot(swapPanel, output, `${prefix}-swap-token-menu.png`);
+  await closeSwapMenus(page);
+
+  await page.locator('.swap-panel .route-menu-button').first().click();
+  await expect(page.locator('.swap-panel .route-menu').first()).toBeVisible({ timeout: 10_000 });
+  await captureLocatorScreenshot(swapPanel, output, `${prefix}-swap-route-menu.png`);
+  await closeSwapMenus(page);
+
+  await page.locator('.swap-panel .hub-select-wrap button.entity-select-button').first().click();
+  await expect(page.locator('.swap-panel .hub-menu').first()).toBeVisible({ timeout: 10_000 });
+  await captureLocatorScreenshot(swapPanel, output, `${prefix}-swap-hub-menu.png`);
+  await closeSwapMenus(page);
+}
+
+async function connectVisualRuntimeToHubs(
+  page: Page,
+  identity: { entityId: string; signerId: string },
+  hubIds: string[],
+): Promise<void> {
+  for (const hubId of hubIds) {
+    await connectRuntimeToHubWithCredit(page, identity, hubId, '10000', SWAP_CONNECT_TOKEN_IDS);
+  }
+}
+
 async function captureAccountWorkspaces(
   page: Page,
   prefix: string,
@@ -54,9 +172,7 @@ async function captureAccountWorkspaces(
   await expect(page.getByTestId('receive-invoice-amount').first()).toBeVisible({ timeout: 20_000 });
   await capturePageScreenshot(page, output, `${prefix}-accounts-receive.png`);
 
-  await openAccountWorkspaceTab(page, 'swap');
-  await expect(page.getByTestId('swap-order-amount').first()).toBeVisible({ timeout: 20_000 });
-  await capturePageScreenshot(page, output, `${prefix}-accounts-swap.png`);
+  await captureSwapVisualStates(page, prefix, output);
 
   await openAccountWorkspaceTab(page, 'move');
   await expect(page.getByTestId('move-confirm').first()).toBeVisible({ timeout: 20_000 });
@@ -122,15 +238,16 @@ test('ui screenshot smoke captures desktop and mobile main tabs', async ({ brows
   await ensureE2EBaseline(page, {
     timeoutMs: 120_000,
     requireHubMesh: true,
-    requireMarketMaker: false,
+    requireMarketMaker: true,
     minHubCount: 3,
   });
 
-  const hubs = await waitForNamedHubs(page, ['H1'], { timeoutMs: 60_000 });
+  const hubs = await waitForNamedHubs(page, ['H1', 'H2', 'H3'], { timeoutMs: 60_000 });
+  const hubIds = [hubs.h1, hubs.h2, hubs.h3];
 
   await gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
   const alice = await createRuntimeIdentity(page, 'alice-visual', selectDemoMnemonic('alice'));
-  await connectRuntimeToHub(page, { entityId: alice.entityId, signerId: alice.signerId }, hubs.h1);
+  await connectVisualRuntimeToHubs(page, { entityId: alice.entityId, signerId: alice.signerId }, hubIds);
   await captureMainTabs(page, 'desktop', testInfo);
 
   let mobileContext: BrowserContext | null = null;
@@ -142,7 +259,7 @@ test('ui screenshot smoke captures desktop and mobile main tabs', async ({ brows
     const mobilePage = await mobileContext.newPage();
     await gotoApp(mobilePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: 60_000, settleMs: 500 });
     const bob = await createRuntimeIdentity(mobilePage, 'bob-visual', selectDemoMnemonic('bob'));
-    await connectRuntimeToHub(mobilePage, { entityId: bob.entityId, signerId: bob.signerId }, hubs.h1);
+    await connectVisualRuntimeToHubs(mobilePage, { entityId: bob.entityId, signerId: bob.signerId }, hubIds);
     await captureMainTabs(mobilePage, 'mobile-iphone15pro', testInfo);
   } finally {
     await mobileContext?.close().catch(() => {});
