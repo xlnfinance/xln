@@ -17,6 +17,7 @@ import { resolveJurisdictionsJsonPath } from '../jurisdictions-path';
 import { DEFAULT_SPREAD_DISTRIBUTION } from '../orderbook';
 import {
   buildMarketSnapshotForReplica,
+  normalizeMarketEntityId,
   normalizeMarketPairId,
   RPC_MARKET_DEFAULT_DEPTH,
   RPC_MARKET_MAX_DEPTH,
@@ -1149,11 +1150,34 @@ const run = async (): Promise<void> => {
         const depth = Number.isFinite(depthRaw)
           ? Math.max(1, Math.min(Math.floor(depthRaw), RPC_MARKET_MAX_DEPTH))
           : RPC_MARKET_DEFAULT_DEPTH;
-        const replica = getEntityReplicaById(env, readyBootstrap.entityId);
+        const requestedHubEntityIdRaw = url.searchParams.get('hubEntityId') || url.searchParams.get('hub') || '';
+        const requestedHubEntityId = requestedHubEntityIdRaw
+          ? normalizeMarketEntityId(requestedHubEntityIdRaw)
+          : readyBootstrap.entityId;
+        if (!requestedHubEntityId) {
+          return new Response(safeStringify({
+            error: 'Invalid hubEntityId query parameter',
+            code: 'E_BAD_QUERY',
+          }), {
+            status: 400,
+            headers,
+          });
+        }
+        const replica = getEntityReplicaById(env, requestedHubEntityId);
+        if (!replica) {
+          return new Response(safeStringify({
+            error: `Unknown market hub: ${requestedHubEntityId}`,
+            code: 'E_UNKNOWN_HUB',
+            hubEntityId: requestedHubEntityId,
+          }), {
+            status: 404,
+            headers,
+          });
+        }
         const snapshots = pairIds.map((pairId) =>
-          buildMarketSnapshotForReplica(replica, readyBootstrap.entityId, pairId, depth),
+          buildMarketSnapshotForReplica(replica, requestedHubEntityId, pairId, depth),
         );
-        return new Response(safeStringify({ hubEntityId: readyBootstrap.entityId, depth, snapshots }), { headers });
+        return new Response(safeStringify({ hubEntityId: requestedHubEntityId, depth, snapshots }), { headers });
       }
 
       if (pathname === '/api/tokens' && request.method === 'GET') {
