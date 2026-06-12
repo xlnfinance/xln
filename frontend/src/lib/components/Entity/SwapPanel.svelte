@@ -1525,7 +1525,12 @@
   $: swapSubmitLabel = placingSwapOffer
     ? 'Submitting swap...'
     : `Swap ${giveTokenSymbol} to ${wantTokenSymbol}`;
-  $: if (selectedOrderLevel && orderbookScopeMode !== 'aggregated' && selectedOrderLevel.accountId !== selectedBookAccountId) {
+  $: if (
+    swapRouteMode !== 'cross'
+    && selectedOrderLevel
+    && orderbookScopeMode !== 'aggregated'
+    && selectedOrderLevel.accountId !== selectedBookAccountId
+  ) {
     selectedOrderLevel = null;
   }
 
@@ -1740,6 +1745,12 @@
     } else {
       selectedBookAccountId = clickedAccountId;
       createOrderAccountId = clickedAccountId;
+    }
+
+    const nextGiveToken = side === 'ask' ? pair.quoteTokenId : pair.baseTokenId;
+    const nextWantToken = side === 'ask' ? pair.baseTokenId : pair.quoteTokenId;
+    if (swapRouteMode !== 'cross') {
+      setSwapTokens(nextGiveToken, nextWantToken);
     }
 
     const priceTicks = parsedPriceTicks;
@@ -2803,13 +2814,13 @@
               </button>
               <select
                 class="token-select-native"
-                value={String(giveToken)}
+                bind:value={giveTokenId}
                 data-testid="swap-from-token-select"
                 aria-label="Swap from token"
                 on:change={handleGiveTokenChange}
               >
                 {#each swapTokenOptions as token}
-                  <option value={token.tokenId}>{token.symbol}</option>
+                  <option value={String(token.tokenId)}>{token.symbol}</option>
                 {/each}
               </select>
               {#if openTokenMenu === 'give'}
@@ -2932,13 +2943,13 @@
               </button>
               <select
                 class="token-select-native"
-                value={String(wantToken)}
+                bind:value={wantTokenId}
                 data-testid="swap-to-token-select"
                 aria-label="Swap to token"
                 on:change={handleWantTokenChange}
               >
                 {#each swapTokenOptions as token}
-                  <option value={token.tokenId}>{token.symbol}</option>
+                  <option value={String(token.tokenId)}>{token.symbol}</option>
                 {/each}
               </select>
               {#if openTokenMenu === 'want'}

@@ -141,6 +141,20 @@ export const applyMergedEntityInputs = async (
     }
 
     if (!entityReplica) {
+      const localReplicaKeys = findReplicaKeysForEntityInsensitive(env, entityInput.entityId);
+      if (localReplicaKeys.length === 1) {
+        replicaKey = localReplicaKeys[0]!;
+        entityReplica = env.eReplicas.get(replicaKey);
+        env.warn('network', 'ENTITY_INPUT_SIGNER_HINT_RETARGETED', {
+          entityId: entityInput.entityId,
+          inputSignerId: entityInput.signerId,
+          resolvedReplicaKey: replicaKey,
+          txTypes: (entityInput.entityTxs || []).map(tx => tx.type),
+        }, entityInput.entityId);
+      }
+    }
+
+    if (!entityReplica) {
       const missingReplicaDetails = {
         entityId: entityInput.entityId,
         resolvedSignerId: actualSignerId,
@@ -264,4 +278,12 @@ const findReplicaKeyInsensitive = (env: Env, entityId: string, signerId?: string
     if (repSignerId && String(repSignerId).toLowerCase() === signerNorm) return key;
   }
   return null;
+};
+
+const findReplicaKeysForEntityInsensitive = (env: Env, entityId: string): string[] => {
+  const entityNorm = String(entityId || '').toLowerCase();
+  return Array.from(env.eReplicas.keys()).filter((key) => {
+    const [repEntityId] = String(key).split(':');
+    return Boolean(repEntityId && String(repEntityId).toLowerCase() === entityNorm);
+  });
 };

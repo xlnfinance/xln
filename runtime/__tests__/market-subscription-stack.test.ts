@@ -74,6 +74,40 @@ test('market subscription stack subscribes, sends snapshots, and cleans up count
   stack.clear();
 });
 
+test('market subscription stack accepts cross-j venue ids without numeric-pair coercion', async () => {
+  const ws = makeSocket('10.0.0.2');
+  const stack = createMarketSubscriptionStack<FakeSocket>({
+    maxSubscriptions: 2,
+    maxSubscriptionsPerIp: 1,
+    maxCellsPerSubscription: 4,
+    getClientIp: socket => socket.ip,
+    fetchSnapshots: (hubEntityId, pairIds, depth) => pairIds.map(pairId => makeSnapshot(hubEntityId, pairId, depth)),
+  });
+  const venueId = `cross:stack:1:0x${'b'.repeat(40)}:3/stack:2:0x${'c'.repeat(40)}:3`;
+
+  await stack.handleMessage(ws, {
+    type: 'market_subscribe',
+    id: 'sub-cross',
+    hubEntityId: HUB_ID,
+    pairs: [venueId],
+    depth: 5,
+  });
+
+  expect(ws.sent).toHaveLength(2);
+  expect(ws.sent[0]).toMatchObject({
+    type: 'ack',
+    inReplyTo: 'sub-cross',
+    status: 'market_subscribed',
+    data: { hubEntityIds: [HUB_ID], pairs: [venueId], depth: 5 },
+  });
+  expect(ws.sent[1]).toMatchObject({
+    type: 'market_snapshot',
+    payload: { hubEntityId: HUB_ID, pairId: venueId, depth: 5 },
+  });
+  expect(stack.snapshot().total).toBe(1);
+  stack.clear();
+});
+
 test('market subscription stack rejects overbroad subscriptions', async () => {
   const ws = makeSocket();
   const stack = createMarketSubscriptionStack<FakeSocket>({

@@ -133,6 +133,93 @@ async function ensureSwapOrderbookVisible(page: Page): Promise<void> {
   await expect(page.getByTestId('swap-orderbook').first()).toBeVisible({ timeout: 20_000 });
 }
 
+const SILENT_RELAY_WEBSOCKET_SCRIPT = `
+      (() => {
+        if (window.__silentRelayWebSocketInstalled) return;
+        window.__silentRelayWebSocketInstalled = true;
+        const NativeWebSocket = window.WebSocket;
+        window.WebSocket = function SilentRelayWebSocket(url, protocols) {
+          const rawUrl = String(url || '');
+          const isRelay = /\\/relay(?:[?#].*)?$/.test(rawUrl);
+          if (!isRelay) return protocols === undefined ? new NativeWebSocket(url) : new NativeWebSocket(url, protocols);
+
+          const listeners = new Map();
+          window.__silentRelaySockets = window.__silentRelaySockets || [];
+          const socket = {
+            url: rawUrl,
+            protocol: '',
+            extensions: '',
+            bufferedAmount: 0,
+            binaryType: 'blob',
+            readyState: NativeWebSocket.CONNECTING,
+            CONNECTING: NativeWebSocket.CONNECTING,
+            OPEN: NativeWebSocket.OPEN,
+            CLOSING: NativeWebSocket.CLOSING,
+            CLOSED: NativeWebSocket.CLOSED,
+            onopen: null,
+            onmessage: null,
+            onerror: null,
+            onclose: null,
+            sentMessages: [],
+            addEventListener(type, listener) {
+              if (!listener) return;
+              const set = listeners.get(type) || new Set();
+              set.add(listener);
+              listeners.set(type, set);
+            },
+            removeEventListener(type, listener) {
+              const set = listeners.get(type);
+              if (set) set.delete(listener);
+            },
+            dispatchEvent(event) {
+              const type = String(event && event.type || '');
+              const handler = socket['on' + type];
+              if (typeof handler === 'function') handler.call(socket, event);
+              for (const listener of listeners.get(type) || []) {
+                if (typeof listener === 'function') listener.call(socket, event);
+                else if (listener && typeof listener.handleEvent === 'function') listener.handleEvent(event);
+              }
+              return true;
+            },
+            send(data) {
+              socket.sentMessages.push(String(data || ''));
+            },
+            close(code, reason) {
+              if (socket.readyState === NativeWebSocket.CLOSED) return;
+              socket.readyState = NativeWebSocket.CLOSING;
+              setTimeout(() => {
+                socket.readyState = NativeWebSocket.CLOSED;
+                socket.dispatchEvent(new CloseEvent('close', { code: code || 1000, reason: String(reason || ''), wasClean: true }));
+              }, 0);
+            },
+          };
+          window.__silentRelaySockets.push(socket);
+          setTimeout(() => {
+            if (socket.readyState !== NativeWebSocket.CONNECTING) return;
+            socket.readyState = NativeWebSocket.OPEN;
+            socket.dispatchEvent(new Event('open'));
+          }, 0);
+          return socket;
+        };
+        Object.assign(window.WebSocket, {
+          CONNECTING: NativeWebSocket.CONNECTING,
+          OPEN: NativeWebSocket.OPEN,
+          CLOSING: NativeWebSocket.CLOSING,
+          CLOSED: NativeWebSocket.CLOSED,
+        });
+        window.WebSocket.prototype = NativeWebSocket.prototype;
+      })();
+    `;
+
+async function installSilentRelayWebSocket(page: Page, options?: { currentPage?: boolean }): Promise<void> {
+  await page.addInitScript({ content: SILENT_RELAY_WEBSOCKET_SCRIPT });
+  if (options?.currentPage) {
+    await page.evaluate((script) => {
+      (0, eval)(script);
+    }, SILENT_RELAY_WEBSOCKET_SCRIPT);
+  }
+}
+
 async function selectSwapPairSide(page: Page, pairLabel: string, side: 'buy' | 'sell'): Promise<void> {
   const [baseSymbol, quoteSymbol] = pairLabel.split('/');
   const baseToken = SWAP_TOKEN_BY_SYMBOL[String(baseSymbol || '').trim().toUpperCase()];
@@ -146,6 +233,15 @@ async function selectSwapPairSide(page: Page, pairLabel: string, side: 'buy' | '
   await expect(toTokenSelect).toBeVisible({ timeout: 20_000 });
   await fromTokenSelect.selectOption(fromToken);
   await toTokenSelect.selectOption(toToken);
+}
+
+async function expectSwapTokens(page: Page, expected: { fromSymbol: string; toSymbol: string }): Promise<void> {
+  const fromTokenId = SWAP_TOKEN_BY_SYMBOL[expected.fromSymbol.toUpperCase()];
+  const toTokenId = SWAP_TOKEN_BY_SYMBOL[expected.toSymbol.toUpperCase()];
+  expect(fromTokenId, `unsupported expected from token ${expected.fromSymbol}`).toBeTruthy();
+  expect(toTokenId, `unsupported expected to token ${expected.toSymbol}`).toBeTruthy();
+  await expect(page.getByTestId('swap-from-token-label').first()).toHaveText(expected.fromSymbol, { timeout: 10_000 });
+  await expect(page.getByTestId('swap-to-token-label').first()).toHaveText(expected.toSymbol, { timeout: 10_000 });
 }
 
 async function ensureSwapScope(page: Page, desired: 'aggregated' | 'selected'): Promise<void> {
@@ -1317,10 +1413,15 @@ async function executeOrderbookClickFill(
   }, accountRef);
   try {
     const placeButton = page.getByTestId('swap-submit-order').first();
-    if (clickTarget === 'highest-bid') {
+    if (clickTarget === 'lowest-ask') {
       await selectSwapPairSide(page, 'WETH/USDC', 'sell');
+      await expectSwapTokens(page, { fromSymbol: 'WETH', toSymbol: 'USDC' });
+    } else if (clickTarget === 'highest-bid') {
+      await selectSwapPairSide(page, 'WETH/USDC', 'buy');
+      await expectSwapTokens(page, { fromSymbol: 'USDC', toSymbol: 'WETH' });
     } else {
       await selectSwapPairSide(page, 'WETH/USDC', 'buy');
+      await expectSwapTokens(page, { fromSymbol: 'USDC', toSymbol: 'WETH' });
     }
     await page.waitForTimeout(120);
 
@@ -1342,6 +1443,11 @@ async function executeOrderbookClickFill(
       await mid.click();
     }
 
+    if (clickTarget === 'lowest-ask') {
+      await expectSwapTokens(page, { fromSymbol: 'USDC', toSymbol: 'WETH' });
+    } else if (clickTarget === 'highest-bid') {
+      await expectSwapTokens(page, { fromSymbol: 'WETH', toSymbol: 'USDC' });
+    }
     await expect(
       page.getByTestId('swap-size-hint').first(),
     ).toBeVisible({ timeout: 10_000 });
@@ -1634,6 +1740,62 @@ test.describe('E2E Swap Flow', () => {
     await timedStep('swap_pairs.check_aggregated_depth', () => expectAllCanonicalSwapPairsHaveLiquidity(page));
     await timedStep('swap_pairs.check_selected_depth', () =>
       expectSelectedBooksHaveVisibleLiquidity(page, CANONICAL_SWAP_PAIR_LABELS, runtimeRef.hubIds.slice(0, 3)));
+  });
+
+  test('swap orderbook shows terminal no-market state when relay stream never returns a snapshot', async ({ page }) => {
+    await timedStep('swap_no_market.goto_app', () => gotoApp(page));
+    await timedStep('swap_no_market.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
+    await timedStep('swap_no_market.create_runtime', () => createDemoRuntime(page, `swap-no-market-${Date.now()}`, randomMnemonic()));
+    const runtimeRef = await timedStep('swap_no_market.ensure_hub_account', () => ensureDeterministicSwapAccounts(page, 1));
+    const hubId = runtimeRef.hubIds[0]!;
+
+    await timedStep('swap_no_market.install_silent_relay', () => installSilentRelayWebSocket(page, { currentPage: true }));
+    await timedStep('swap_no_market.open_workspace', () => openSwapWorkspace(page));
+    await timedStep('swap_no_market.select_counterparty', () => selectCounterpartyInSwap(page, hubId));
+    await timedStep('swap_no_market.open_orderbook', async () => {
+      await ensureSwapOrderbookVisible(page);
+      await ensureSwapScope(page, 'selected');
+      await selectSwapPairSide(page, 'WETH/USDC', 'buy');
+    });
+
+    const orderbook = page.getByTestId('swap-orderbook').first();
+    const panel = orderbook.locator('.orderbook-panel').first();
+    await expect(orderbook, 'right-side swap orderbook must stay visible in terminal no-market state').toBeVisible({ timeout: 20_000 });
+    await expect(panel, 'orderbook panel must remain mounted while stream resolves terminally').toBeVisible({ timeout: 20_000 });
+    await expect
+      .poll(async () => String(await panel.getAttribute('data-pair-id') || ''), {
+        timeout: 10_000,
+        intervals: [100, 250, 500],
+        message: 'silent relay test must still subscribe to the selected same-chain market',
+      })
+      .toBe('1/2');
+    await expect
+      .poll(async () => await page.evaluate(() => {
+        const sockets = (window as any).__silentRelaySockets || [];
+        return sockets.some((socket: any) => (socket.sentMessages || []).some((msg: string) =>
+          msg.includes('"market_subscribe"') && msg.includes('"1/2"'),
+        ));
+      }), {
+        timeout: 10_000,
+        intervals: [100, 250, 500],
+        message: 'orderbook must actually send a market subscription before terminal no-market is accepted',
+      })
+      .toBe(true);
+    await expect
+      .poll(async () => String(await panel.getAttribute('data-source-status') || ''), {
+        timeout: 12_000,
+        intervals: [250, 500, 1000],
+        message: 'silent relay must resolve to no-market instead of hanging in syncing',
+      })
+      .toBe('no-market');
+    await expect(page.getByTestId('orderbook-source-status').first()).toContainText(/No market/i, { timeout: 5_000 });
+    await expect(page.getByTestId('orderbook-source-status').first()).not.toContainText(/syncing/i, { timeout: 5_000 });
+    await expect
+      .poll(async () => readOrderbookRowCounts(page), {
+        timeout: 5_000,
+        intervals: [100, 250, 500],
+      })
+      .toEqual({ asks: 0, bids: 0 });
   });
 
   // Scenario: place a valid non-marketable WETH/USDC offer through the visible swap UI
