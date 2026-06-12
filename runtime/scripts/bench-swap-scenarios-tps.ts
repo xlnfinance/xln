@@ -255,12 +255,75 @@ const runSelfTradeScenario = (swaps: number, levels: number, minTps: number): Sc
   return finishScenario('orderbook.self_trade_cancel_taker', book, swaps * 3, getPerfMs() - startedAt, minTps, { rejects, cancels });
 };
 
+const runRoutedThreeHopScenario = (swaps: number, levels: number, minTps: number): ScenarioResult => {
+  const routeBooks = [
+    { name: 'forward.source_local', seededSide: 1 as Side, takerSide: 0 as Side, limitTicks: BASE_PRICE + BigInt(levels) },
+    { name: 'forward.bridge_cross', seededSide: 1 as Side, takerSide: 0 as Side, limitTicks: BASE_PRICE + BigInt(levels) },
+    { name: 'forward.target_local', seededSide: 1 as Side, takerSide: 0 as Side, limitTicks: BASE_PRICE + BigInt(levels) },
+    { name: 'reverse.target_local', seededSide: 0 as Side, takerSide: 1 as Side, limitTicks: BASE_PRICE - BigInt(levels) },
+    { name: 'reverse.bridge_cross', seededSide: 0 as Side, takerSide: 1 as Side, limitTicks: BASE_PRICE - BigInt(levels) },
+    { name: 'reverse.source_local', seededSide: 0 as Side, takerSide: 1 as Side, limitTicks: BASE_PRICE - BigInt(levels) },
+  ].map((entry) => ({
+    ...entry,
+    book: seedSide(swaps, entry.seededSide, levels),
+  }));
+
+  let trades = 0;
+  const startedAt = getPerfMs();
+  for (let index = 0; index < swaps; index += 1) {
+    for (const routeBook of routeBooks) {
+      const result = applyCommand(routeBook.book, {
+        kind: 0,
+        ownerId: `route-${routeBook.name}-${index % 4096}`,
+        orderId: `route-${routeBook.name}-${index}`,
+        side: routeBook.takerSide,
+        tif: 1,
+        postOnly: false,
+        priceTicks: routeBook.limitTicks,
+        qtyLots: 1,
+      });
+      requireEvent(result.events, 'TRADE', `ROUTED_${routeBook.name}:${index}`);
+      routeBook.book = result.state;
+      trades += countEvents(result.events, 'TRADE');
+    }
+  }
+
+  const activeOrders = routeBooks.reduce((sum, routeBook) => sum + routeBook.book.orders.size, 0);
+  if (activeOrders !== 0) throw new Error(`ROUTED_THREE_HOP_ORDERS_LEFT:${activeOrders}`);
+  for (const routeBook of routeBooks) {
+    if (routeBook.seededSide === 1 && getBestAsk(routeBook.book) !== null) {
+      throw new Error(`ROUTED_THREE_HOP_ASKS_LEFT:${routeBook.name}:${String(getBestAsk(routeBook.book))}`);
+    }
+    if (routeBook.seededSide === 0 && getBestBid(routeBook.book) !== null) {
+      throw new Error(`ROUTED_THREE_HOP_BIDS_LEFT:${routeBook.name}:${String(getBestBid(routeBook.book))}`);
+    }
+  }
+
+  const operations = swaps * routeBooks.length;
+  const elapsedMs = getPerfMs() - startedAt;
+  const elapsedSeconds = Math.max(elapsedMs / 1000, 0.001);
+  const tps = operations / elapsedSeconds;
+  return {
+    name: 'orderbook.routed_three_hop_roundtrip',
+    operations,
+    elapsedMs: Number(elapsedMs.toFixed(3)),
+    tps: Number(tps.toFixed(2)),
+    passed: tps >= minTps,
+    trades,
+    rejects: 0,
+    cancels: 0,
+    activeOrders,
+    bookHash: routeBooks.map((routeBook) => `${routeBook.name}:${computeBookHash(routeBook.book)}`).join('|'),
+  };
+};
+
 const runOrderbookScenarios = (cli: Cli): ScenarioResult[] => [
   runAskFillScenario(cli.swaps, cli.levels, cli.minTps),
   runBidFillScenario(cli.swaps, cli.levels, cli.minTps),
   runRestingCancelScenario(cli.swaps, 1, cli.levels, cli.minTps),
   runRestingCancelScenario(cli.swaps, 0, cli.levels, cli.minTps),
   runSelfTradeScenario(cli.swaps, cli.levels, cli.minTps),
+  runRoutedThreeHopScenario(cli.swaps, cli.levels, cli.minTps),
 ];
 
 export const runSwapScenarioBenchmark = async (cli: Cli): Promise<ScenarioBenchmarkResult> => {
