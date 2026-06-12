@@ -7,6 +7,7 @@ import { gotoApp } from './utils/e2e-demo-users';
 import { enqueueEntityTxs } from './utils/e2e-runtime-input';
 import { requireIsolatedBaseUrl } from './utils/e2e-isolated-env';
 import { timedStep } from './utils/e2e-timing';
+import { hasSilentRelayMarketSubscribe, installSilentRelayWebSocket } from './utils/e2e-silent-relay';
 
 const INIT_TIMEOUT = 30_000;
 const APP_BASE_URL = requireIsolatedBaseUrl('E2E_BASE_URL');
@@ -758,6 +759,13 @@ async function configureTokens(page: Page, fromTokenId: number, toTokenId: numbe
   await expect(toTokenSelect).toBeVisible({ timeout: 20_000 });
   await fromTokenSelect.selectOption(String(fromTokenId));
   await toTokenSelect.selectOption(String(toTokenId));
+}
+
+async function readOrderbookRowCounts(page: Page): Promise<{ asks: number; bids: number }> {
+  return {
+    asks: await page.getByTestId('orderbook-ask-row').count(),
+    bids: await page.getByTestId('orderbook-bid-row').count(),
+  };
 }
 
 async function selectCrossRoute(page: Page, targetEntityId: string): Promise<void> {
@@ -1972,6 +1980,82 @@ async function waitForCrossSalvageQueued(
 
 test.describe('E2E Cross-J Swap Isolated Flow', () => {
   test.setTimeout(360_000);
+
+  test('cross USDT/USDT orderbook resolves terminal no-market when the selected route relay has no snapshots', async ({ page }) => {
+    const baseline = await timedStep('cross_j_no_market.ensure_baseline', () => ensureE2EBaseline(page, {
+      apiBaseUrl: API_BASE_URL,
+      requireMarketMaker: false,
+      requireHubMesh: true,
+      minHubCount: 3,
+    }));
+    const hubId = getPrimaryHubId(baseline);
+    const primaryHubApiBaseUrl = getPrimaryHubApiBaseUrl(baseline, hubId);
+    const primaryHubName = getPrimaryHubName(baseline, hubId);
+    const targetHub = await timedStep('cross_j_no_market.resolve_rpc2_hub', () =>
+      getSecondaryHubInfo(page, hubId, primaryHubName, primaryHubApiBaseUrl),
+    );
+
+    await timedStep('cross_j_no_market.goto', () => gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 }));
+    const mnemonic = Wallet.createRandom().mnemonic!.phrase;
+    const source = await timedStep('cross_j_no_market.create_runtime', () =>
+      createRuntimeIdentityViaStore(page, 'cross-no-market', mnemonic),
+    );
+    await timedStep('cross_j_no_market.default_jurisdictions', () => waitForDefaultJurisdictionReplicas(page, 'cross-no-market'));
+    const target = await timedStep('cross_j_no_market.import_rpc2_sibling', () =>
+      importRpc2SiblingEntity(page, mnemonic, 'cross-no-market'),
+    );
+    await timedStep('cross_j_no_market.connect_primary', () =>
+      connectRuntimeToHubWithCredit(page, source, hubId, '10000', SWAP_TOKENS),
+    );
+    await timedStep('cross_j_no_market.connect_rpc2', () =>
+      ensureDirectHubAccount(page, target, targetHub.entityId, SWAP_TOKENS, 150_000),
+    );
+
+    await timedStep('cross_j_no_market.install_silent_relay', () =>
+      installSilentRelayWebSocket(page, { currentPage: true }),
+    );
+    await timedStep('cross_j_no_market.open_swap', async () => {
+      await openSwapWorkspace(page);
+      await selectSourceChainInSwap(page, source.entityId);
+      await selectCounterpartyInSwap(page, hubId);
+      await selectCrossRoute(page, target.entityId);
+      await configureTokens(page, USDT, USDT);
+    });
+
+    const orderbook = page.getByTestId('swap-orderbook').first();
+    const panel = orderbook.locator('.orderbook-panel').first();
+    await expect(orderbook, 'cross route must keep the right-side orderbook mounted when stream is silent').toBeVisible({ timeout: 20_000 });
+    await expect(panel, 'cross no-market state must still render the orderbook panel').toBeVisible({ timeout: 20_000 });
+    await expect
+      .poll(async () => String(await panel.getAttribute('data-pair-id') || ''), {
+        timeout: 10_000,
+        intervals: [100, 250, 500],
+        message: 'silent cross route must subscribe to a cross venue id',
+      })
+      .toMatch(/^cross:/);
+    await expect
+      .poll(async () => hasSilentRelayMarketSubscribe(page, ['cross:']), {
+        timeout: 10_000,
+        intervals: [100, 250, 500],
+        message: 'cross orderbook must actually send market_subscribe before terminal no-market is accepted',
+      })
+      .toBe(true);
+    await expect
+      .poll(async () => String(await panel.getAttribute('data-source-status') || ''), {
+        timeout: 12_000,
+        intervals: [250, 500, 1000],
+        message: 'silent cross relay must resolve to no-market instead of hanging in syncing',
+      })
+      .toBe('no-market');
+    await expect(page.getByTestId('orderbook-source-status').first()).toContainText(/No market/i, { timeout: 5_000 });
+    await expect(page.getByTestId('orderbook-source-status').first()).not.toContainText(/syncing|loading/i, { timeout: 5_000 });
+    await expect
+      .poll(async () => readOrderbookRowCounts(page), {
+        timeout: 5_000,
+        intervals: [100, 250, 500],
+      })
+      .toEqual({ asks: 0, bids: 0 });
+  });
 
   test('two users can place full, partial, and disputed cross-j swaps through the shared swap builder', async ({ browser, page }) => {
     let aliceContext: BrowserContext | null = null;

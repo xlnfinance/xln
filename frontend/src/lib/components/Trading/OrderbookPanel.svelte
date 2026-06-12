@@ -445,8 +445,16 @@
     sourceCount = actualSources.length;
     expectedSourceCount = requestedSources.length;
     const complete = actualSources.length >= requestedSources.length;
+    const hasVisibleLevel = nextBids.length > 0 || nextAsks.length > 0;
+    const preserveTerminalStatus = (
+      !forcedStatus
+      && !hasVisibleLevel
+      && requestedSources.length > 0
+      && actualSources.length < requestedSources.length
+      && (sourceStatus === 'no-market' || sourceStatus === 'error')
+    );
     sourceStatus = forcedStatus
-      || (!complete ? 'syncing' : (nextBids.length === 0 && nextAsks.length === 0 ? 'empty' : 'ready'));
+      || (preserveTerminalStatus ? sourceStatus : (!complete ? 'syncing' : (!hasVisibleLevel ? 'empty' : 'ready')));
     sourceLabel = sourceLabelFor(actualSources, requestedSources.length, sourceStatus);
     if (sourceStatus !== 'syncing') clearMarketSyncTimer();
     const bestBid = bids[0];
