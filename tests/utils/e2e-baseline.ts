@@ -240,7 +240,10 @@ const isBaselineReady = (health: E2EHealthResponse | null, options: Required<E2E
     const hubIds = health.hubMesh?.hubIds ?? [];
     if (hubIds.length < options.minHubCount) return false;
   }
-  if (options.requireMarketMaker && health.marketMaker?.ok !== true) return false;
+  if (options.requireMarketMaker) {
+    if (health.marketMaker?.enabled !== true) return false;
+    if (health.marketMaker?.ok !== true) return false;
+  }
   if (!health.bootstrapReserves?.ok) return false;
   return true;
 };

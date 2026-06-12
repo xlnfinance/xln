@@ -622,7 +622,18 @@ const listDynamicPlaywrightTargets = (
 
 const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
   const out: PlaywrightTarget[] = [];
-  const requiresMarketMaker = (file: string): boolean => /e2e-swap\.spec\.ts$/.test(file);
+  const sourcePathForTarget = (file: string): string =>
+    file.match(/^(.+\.spec\.ts)(?:::.*|:\d+(?::\d+)?)?$/)?.[1] || file;
+  const requiresMarketMaker = (file: string): boolean => {
+    const sourcePath = sourcePathForTarget(file);
+    if (/e2e-swap\.spec\.ts$/.test(sourcePath)) return true;
+    try {
+      const source = readFileSync(resolve(process.cwd(), sourcePath), 'utf8');
+      return /requireMarketMaker\s*:\s*true/.test(source);
+    } catch {
+      return false;
+    }
+  };
   const unsplittableSpecs = new Set<string>();
   const updateBraceDepth = (line: string, depth: number): number => {
     let next = depth;
@@ -928,7 +939,11 @@ const waitForHttpReady = async (url: string, timeoutMs: number): Promise<void> =
   throw new Error(`HTTP endpoint not ready: ${url}`);
 };
 
-const waitForServerHealthy = async (apiUrl: string, timeoutMs: number): Promise<HealthPayload> => {
+const waitForServerHealthy = async (
+  apiUrl: string,
+  timeoutMs: number,
+  requireMarketMaker = false,
+): Promise<HealthPayload> => {
   const deadline = Date.now() + timeoutMs;
   let lastHealth: HealthPayload | null = null;
   while (Date.now() < deadline) {
@@ -943,7 +958,10 @@ const waitForServerHealthy = async (apiUrl: string, timeoutMs: number): Promise<
         const bootstrapReserves = recordOrEmpty(body['bootstrapReserves']);
         const resetDone = reset['inProgress'] !== true;
         const meshReady = hubMesh['ok'] === true;
-        const mmReady = marketMaker['enabled'] === true ? marketMaker['ok'] === true : true;
+        const mmEnabled = marketMaker['enabled'] === true;
+        const mmReady = requireMarketMaker
+          ? mmEnabled && marketMaker['ok'] === true
+          : (mmEnabled ? marketMaker['ok'] === true : true);
         const reservesReady = bootstrapReserves['ok'] === true;
         const hasTs = typeof body['timestamp'] === 'number';
         if (hasTs && resetDone && meshReady && mmReady && reservesReady) return body;
@@ -1003,7 +1021,7 @@ const hardResetShardBaseline = async (
       throw new Error(`SHARD_BASELINE_RESET_FAILED status=${response.status} body=${body.slice(0, 800)}`);
     }
     const remainingMs = Math.max(1_000, timeoutMs - (Date.now() - startedAt));
-    return await waitForServerHealthy(apiUrl, remainingMs);
+    return await waitForServerHealthy(apiUrl, remainingMs, requireMarketMaker);
   } catch (error) {
     if (error instanceof Error && error.name === 'AbortError') {
       throw new Error(`SHARD_BASELINE_RESET_TIMEOUT api=${apiUrl} timeoutMs=${timeoutMs}`);
@@ -1333,12 +1351,12 @@ const runShard = async (
       });
       await resetLimiter.drain();
       const remainingHealthMs = Math.max(1_000, args.stackTimeoutMs - (Date.now() - resetQueuedAt));
-      baselineHealth = await waitForServerHealthy(apiUrl, remainingHealthMs);
+      baselineHealth = await waitForServerHealthy(apiUrl, remainingHealthMs, task.requireMarketMaker);
       markPhase('apiHealthy', resetQueuedAt);
       throwIfAborted();
     } else if (args.prewaitHealth === 'full') {
       const healthStart = Date.now();
-      baselineHealth = await waitForServerHealthy(apiUrl, args.stackTimeoutMs);
+      baselineHealth = await waitForServerHealthy(apiUrl, args.stackTimeoutMs, task.requireMarketMaker);
       markPhase('apiHealthy', healthStart);
       throwIfAborted();
     } else {
