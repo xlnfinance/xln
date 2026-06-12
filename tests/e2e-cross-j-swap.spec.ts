@@ -873,6 +873,59 @@ async function expectCrossOrderbookReady(page: Page): Promise<void> {
   await expect(page.getByTestId('orderbook-source-status').first()).not.toContainText(/syncing/i, { timeout: 5_000 });
 }
 
+async function expectRoutedRouteOrderbooks(page: Page): Promise<void> {
+  const buildButton = page.getByTestId('swap-build-routed-route').first();
+  await expect(buildButton, 'cross route builder button must be visible').toBeVisible({ timeout: 10_000 });
+  await expect(buildButton, 'cross route builder must be available for complex routed paths').toBeEnabled({ timeout: 10_000 });
+  await buildButton.click();
+
+  const route = page.getByTestId('swap-routed-route').first();
+  await expect(route, 'routed path chips must be visible after one click').toBeVisible({ timeout: 10_000 });
+  const hops = page.getByTestId('swap-routed-hop');
+  await expect
+    .poll(async () => await hops.count(), {
+      timeout: 10_000,
+      intervals: [100, 250, 500],
+      message: 'WETH/USDC cross route must expand into source, bridge, and target orderbooks',
+    })
+    .toBeGreaterThanOrEqual(3);
+
+  const hopCount = await hops.count();
+  const panel = page.getByTestId('swap-orderbook').locator('.orderbook-panel').first();
+  for (let index = 0; index < hopCount; index += 1) {
+    const hop = hops.nth(index);
+    const expectedPair = String(await hop.getAttribute('data-pair-id') || '');
+    const expectedHub = String(await hop.getAttribute('data-book-hub-id') || '').toLowerCase();
+    expect(expectedPair, `routed hop ${index} must expose pair id`).toBeTruthy();
+    expect(expectedHub, `routed hop ${index} must expose book hub id`).toMatch(/^0x[a-f0-9]{64}$/);
+    await hop.click();
+    await expect
+      .poll(async () => String(await panel.getAttribute('data-pair-id') || ''), {
+        timeout: 10_000,
+        intervals: [100, 250, 500],
+        message: `routed hop ${index} must switch the visible orderbook pair`,
+      })
+      .toBe(expectedPair);
+    await expect
+      .poll(async () => String(await panel.getAttribute('data-hub-ids') || '').toLowerCase(), {
+        timeout: 10_000,
+        intervals: [100, 250, 500],
+        message: `routed hop ${index} must switch the visible orderbook hub`,
+      })
+      .toContain(expectedHub);
+    await expect
+      .poll(async () => String(await panel.getAttribute('data-source-status') || ''), {
+        timeout: 12_000,
+        intervals: [250, 500, 1000],
+        message: `routed hop ${index} orderbook must resolve terminally instead of hanging in syncing`,
+      })
+      .toMatch(/^(ready|empty|no-market|error)$/);
+  }
+
+  await page.getByTestId('swap-clear-routed-route').first().click();
+  await expect(page.getByTestId('swap-routed-route')).toHaveCount(0, { timeout: 5_000 });
+}
+
 async function expectSwapTokens(page: Page, fromTokenId: number, toTokenId: number): Promise<void> {
   const fromSymbol = TOKEN_SYMBOL_BY_ID[fromTokenId];
   const toSymbol = TOKEN_SYMBOL_BY_ID[toTokenId];
@@ -923,6 +976,7 @@ async function placeCrossOrder(
     clickBookSide?: 'ask' | 'bid';
     expectedClickFromTokenId?: number;
     expectedClickToTokenId?: number;
+    checkRoutedPlan?: boolean;
   },
 ): Promise<string> {
   await openSwapWorkspace(page);
@@ -936,6 +990,10 @@ async function placeCrossOrder(
     await selectCrossRoute(page, params.targetEntityId);
   }
   await expectCrossOrderbookReady(page);
+  if (params.checkRoutedPlan) {
+    await expectRoutedRouteOrderbooks(page);
+    await expectCrossOrderbookReady(page);
+  }
   if (params.clickBookSide) {
     await clickCrossOrderbookLevel(
       page,
@@ -2022,6 +2080,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         hubId,
         targetEntityId: aliceRpc2.entityId,
         side: 'sell',
+        checkRoutedPlan: true,
         amount: '0.03',
         price: '2500',
       }));

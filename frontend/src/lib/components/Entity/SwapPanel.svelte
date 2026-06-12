@@ -198,6 +198,10 @@
   let crossTargetOptions: CrossTargetOption[] = [];
   let routeOptions: SwapRouteOption[] = [];
   let selectedCrossTarget: CrossTargetOption | null = null;
+  let routedPlanEnabled = false;
+  let selectedRouteHopIndex = 0;
+  let routedSwapPlan: RoutedSwapHop[] = [];
+  let activeRoutedHop: RoutedSwapHop | null = null;
   let autoExtendCrossInbound = true;
   let crossPriceImprovementMode: 'source_savings' | 'target_bonus' = 'source_savings';
   let selectedSourceEntityValue = '';
@@ -273,6 +277,7 @@
     ? createOrderAccountId
     : selectedBookAccountId;
   $: activeBookHubId = (() => {
+    if (activeRoutedHop?.bookHubId) return activeRoutedHop.bookHubId;
     const sourceHubId = String(activeOrderAccountId || '').trim().toLowerCase();
     if (swapRouteMode !== 'cross' || !selectedCrossTarget || !sourceHubId) return sourceHubId;
     const sourceJurisdictionRef = getReplicaJurisdictionRef(currentReplica);
@@ -353,6 +358,23 @@
   $: swapRouteMode = selectedRouteValue === 'same' ? 'same' : 'cross';
   $: selectedCrossTargetValue = swapRouteMode === 'cross' ? selectedRouteValue : '';
   $: selectedCrossTarget = crossTargetOptions.find((option) => option.value === selectedCrossTargetValue) || null;
+  $: if (swapRouteMode !== 'cross') {
+    routedPlanEnabled = false;
+    selectedRouteHopIndex = 0;
+  }
+  $: routedSwapPlan = buildRoutedSwapPlan(
+    swapRouteMode,
+    selectedCrossTarget,
+    activeOrderAccountId,
+    currentReplica,
+    sourceJurisdictionLabel,
+    giveToken,
+    wantToken,
+  );
+  $: if (selectedRouteHopIndex >= routedSwapPlan.length) {
+    selectedRouteHopIndex = 0;
+  }
+  $: activeRoutedHop = routedPlanEnabled ? (routedSwapPlan[selectedRouteHopIndex] || null) : null;
   $: sourceJurisdictionLabel = getReplicaJurisdictionName(currentReplica) || 'Current';
   $: targetJurisdictionLabel = swapRouteMode === 'cross' && selectedCrossTarget
     ? selectedCrossTarget.targetJurisdiction
@@ -405,6 +427,18 @@
     targetJurisdiction: string;
     targetJurisdictionRef: string;
     hasTargetAccount: boolean;
+  };
+  type RoutedSwapHop = {
+    id: string;
+    label: string;
+    fromLabel: string;
+    toLabel: string;
+    pairId: string;
+    bookHubId: string;
+    baseTokenId: number;
+    quoteTokenId: number;
+    kind: 'same' | 'cross';
+    sourceIsBase: boolean;
   };
   type SourceEntityOption = {
     value: string;
@@ -740,6 +774,137 @@
       });
     }
     return options;
+  }
+
+  function chooseBridgeToken(sourceToken: number, targetToken: number): number {
+    const preferred = [3, 1, 2];
+    return preferred.find((tokenIdValue) => tokenIdValue !== sourceToken && tokenIdValue !== targetToken) || 3;
+  }
+
+  function buildSameJurisdictionHop(
+    id: string,
+    label: string,
+    jurisdiction: string,
+    hubId: string,
+    fromToken: number,
+    toToken: number,
+  ): RoutedSwapHop | null {
+    if (!hubId || fromToken === toToken || fromToken <= 0 || toToken <= 0) return null;
+    const pair = resolvePairOrientation(fromToken, toToken);
+    return {
+      id,
+      label,
+      fromLabel: `${tokenSymbol(fromToken)} · ${jurisdiction}`,
+      toLabel: `${tokenSymbol(toToken)} · ${jurisdiction}`,
+      pairId: pair.pairId,
+      bookHubId: hubId,
+      baseTokenId: pair.baseTokenId,
+      quoteTokenId: pair.quoteTokenId,
+      kind: 'same',
+      sourceIsBase: fromToken === pair.baseTokenId,
+    };
+  }
+
+  function buildCrossJurisdictionHop(
+    id: string,
+    label: string,
+    sourceJurisdictionRef: string,
+    sourceJurisdiction: string,
+    sourceHubId: string,
+    targetJurisdictionRef: string,
+    targetJurisdiction: string,
+    targetHubId: string,
+    tokenIdValue: number,
+  ): RoutedSwapHop | null {
+    if (!sourceJurisdictionRef || !targetJurisdictionRef || !sourceHubId || !targetHubId || tokenIdValue <= 0) return null;
+    const market = deriveCanonicalCrossJurisdictionMarketForLegs(
+      sourceJurisdictionRef,
+      tokenIdValue,
+      targetJurisdictionRef,
+      tokenIdValue,
+    ) as CrossMarketView;
+    const bookHubId = deriveCanonicalCrossJurisdictionBookOwnerForLegs(
+      sourceJurisdictionRef,
+      tokenIdValue,
+      sourceHubId,
+      targetJurisdictionRef,
+      tokenIdValue,
+      targetHubId,
+    );
+    return {
+      id,
+      label,
+      fromLabel: `${tokenSymbol(tokenIdValue)} · ${sourceJurisdiction}`,
+      toLabel: `${tokenSymbol(tokenIdValue)} · ${targetJurisdiction}`,
+      pairId: market.venueId,
+      bookHubId,
+      baseTokenId: tokenIdValue,
+      quoteTokenId: tokenIdValue,
+      kind: 'cross',
+      sourceIsBase: market.sourceIsBase,
+    };
+  }
+
+  function buildRoutedSwapPlan(
+    mode = swapRouteMode,
+    target = selectedCrossTarget,
+    sourceHubInput = activeOrderAccountId,
+    sourceReplica: EntityReplica | null | undefined = currentReplica,
+    sourceJurisdiction = sourceJurisdictionLabel,
+    sourceToken = giveToken,
+    targetToken = wantToken,
+  ): RoutedSwapHop[] {
+    if (mode !== 'cross' || !target) return [];
+    const sourceHubId = String(sourceHubInput || '').trim().toLowerCase();
+    const targetHubId = String(target.targetHubEntityId || '').trim().toLowerCase();
+    const sourceJurisdictionRef = getReplicaJurisdictionRef(sourceReplica);
+    if (!sourceHubId || !targetHubId || !sourceJurisdictionRef || !target.targetJurisdictionRef) return [];
+    if (!Number.isFinite(sourceToken) || !Number.isFinite(targetToken) || sourceToken <= 0 || targetToken <= 0) return [];
+    const bridgeToken = chooseBridgeToken(sourceToken, targetToken);
+    return [
+      buildSameJurisdictionHop('source-local', 'Source', sourceJurisdiction, sourceHubId, sourceToken, bridgeToken),
+      buildCrossJurisdictionHop(
+        'bridge-cross',
+        'Bridge',
+        sourceJurisdictionRef,
+        sourceJurisdiction,
+        sourceHubId,
+        target.targetJurisdictionRef,
+        target.targetJurisdiction,
+        targetHubId,
+        bridgeToken,
+      ),
+      buildSameJurisdictionHop('target-local', 'Target', target.targetJurisdiction, targetHubId, bridgeToken, targetToken),
+    ].filter((hop): hop is RoutedSwapHop => hop !== null);
+  }
+
+  function createRoutedSwapPlan(): void {
+    const plan = buildRoutedSwapPlan();
+    if (plan.length === 0) {
+      routedPlanEnabled = false;
+      selectedRouteHopIndex = 0;
+      submitError = 'No routed exchange path is possible for the selected source, target, and assets.';
+      return;
+    }
+    submitError = '';
+    routedPlanEnabled = true;
+    selectedRouteHopIndex = 0;
+    routeDetailsOpen = true;
+    orderbookRefreshNonce += 1;
+  }
+
+  function clearRoutedSwapPlan(): void {
+    routedPlanEnabled = false;
+    selectedRouteHopIndex = 0;
+    selectedOrderLevel = null;
+    orderbookRefreshNonce += 1;
+  }
+
+  function selectRoutedHop(index: number): void {
+    if (index < 0 || index >= routedSwapPlan.length) return;
+    selectedRouteHopIndex = index;
+    selectedOrderLevel = null;
+    orderbookRefreshNonce += 1;
   }
 
   type PairOption = {
@@ -1495,7 +1660,9 @@
         )
   );
   $: swapActionDisabledReason = (
-    swapRouteMode === 'same' && isInboundCapacityValidationError(swapDisabledReason) && canAutoPrepareInboundCapacity
+    routedPlanEnabled
+      ? 'Routed path preview is orderbook-only; clear the route plan to submit a direct swap.'
+      : swapRouteMode === 'same' && isInboundCapacityValidationError(swapDisabledReason) && canAutoPrepareInboundCapacity
       ? ''
       : swapDisabledReason
   );
@@ -1865,6 +2032,12 @@
     ) as CrossMarketView;
   })();
   $: parsedOrderbookPair = (() => {
+    if (activeRoutedHop) {
+      return {
+        baseTokenId: activeRoutedHop.baseTokenId,
+        quoteTokenId: activeRoutedHop.quoteTokenId,
+      };
+    }
     if (swapRouteMode === 'cross' && activeCrossMarket) {
       return {
         baseTokenId: activeCrossMarket.sourceIsBase ? giveToken : wantToken,
@@ -1875,12 +2048,16 @@
       ? { baseTokenId: selectedPair.baseTokenId, quoteTokenId: selectedPair.quoteTokenId }
       : null;
   })();
-  $: orderbookPairId = swapRouteMode === 'cross' && activeCrossMarket
+  $: orderbookPairId = activeRoutedHop
+    ? activeRoutedHop.pairId
+    : swapRouteMode === 'cross' && activeCrossMarket
     ? activeCrossMarket.venueId
     : selectedPair?.pairId || '1/2';
   $: orderMode = parsedOrderbookPair
     ? (
-        swapRouteMode === 'cross' && activeCrossMarket
+        activeRoutedHop
+          ? (activeRoutedHop.sourceIsBase ? 'sell-base' : 'buy-base')
+          : swapRouteMode === 'cross' && activeCrossMarket
           ? (activeCrossMarket.sourceIsBase ? 'sell-base' : 'buy-base')
           : tradeSide
       )
@@ -3120,6 +3297,47 @@
           <span title={`${sourceRouteEntityLabel} -> ${targetRouteEntityLabel}`}>{routePathLabel}</span>
           <em>via {routeVenueLabel}</em>
         </div>
+        {#if swapRouteMode === 'cross'}
+          <div class="routed-actions">
+            <button
+              type="button"
+              class="route-plan-btn"
+              data-testid="swap-build-routed-route"
+              disabled={routedSwapPlan.length === 0}
+              on:click={createRoutedSwapPlan}
+            >Build route</button>
+            {#if routedPlanEnabled}
+              <button
+                type="button"
+                class="route-plan-btn clear"
+                data-testid="swap-clear-routed-route"
+                on:click={clearRoutedSwapPlan}
+              >Clear</button>
+            {/if}
+          </div>
+          {#if routedPlanEnabled && routedSwapPlan.length > 0}
+            <div class="routed-hop-list" data-testid="swap-routed-route">
+              {#each routedSwapPlan as hop, index (hop.id)}
+                <button
+                  type="button"
+                  class="routed-hop"
+                  class:active={index === selectedRouteHopIndex}
+                  data-testid="swap-routed-hop"
+                  data-hop-kind={hop.kind}
+                  data-pair-id={hop.pairId}
+                  data-book-hub-id={hop.bookHubId}
+                  on:click={() => selectRoutedHop(index)}
+                >
+                  <span>{hop.label}</span>
+                  <strong>{tokenSymbol(hop.baseTokenId)}/{tokenSymbol(hop.quoteTokenId)}</strong>
+                  <em>{hop.fromLabel} -> {hop.toLabel}</em>
+                </button>
+              {/each}
+            </div>
+          {:else if routedSwapPlan.length === 0}
+            <p class="route-no-market" data-testid="swap-route-no-route">No routed market for selected assets.</p>
+          {/if}
+        {/if}
         {#if swapRouteMode === 'cross' && canAutoPrepareCrossInboundCapacity}
           <label class="route-checkbox" data-testid="swap-cross-auto-extend">
             <input type="checkbox" bind:checked={autoExtendCrossInbound} />
@@ -4409,6 +4627,93 @@
     font-style: normal;
     font-weight: 700;
     text-align: right;
+  }
+
+  .routed-actions {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+  }
+
+  .route-plan-btn {
+    min-height: 32px;
+    padding: 0 10px;
+    background: #111827;
+    border: 1px solid #2d3342;
+    border-radius: 7px;
+    color: #dbeafe;
+    font-size: 12px;
+    font-weight: 800;
+  }
+
+  .route-plan-btn.clear {
+    color: #9ca3af;
+  }
+
+  .route-plan-btn:disabled {
+    cursor: not-allowed;
+    opacity: 0.5;
+  }
+
+  .routed-hop-list {
+    display: grid;
+    gap: 6px;
+  }
+
+  .routed-hop {
+    display: grid;
+    grid-template-columns: 54px minmax(92px, auto) minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+    min-height: 34px;
+    padding: 0 9px;
+    background: #080a0f;
+    border: 1px solid #202431;
+    border-radius: 7px;
+    color: #aab2c3;
+    text-align: left;
+  }
+
+  .routed-hop.active {
+    border-color: rgba(251, 191, 36, 0.55);
+    background: #12100a;
+  }
+
+  .routed-hop span,
+  .routed-hop strong,
+  .routed-hop em {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  .routed-hop span {
+    color: #7c8597;
+    font-size: 10px;
+    font-weight: 900;
+    text-transform: uppercase;
+  }
+
+  .routed-hop strong {
+    color: #f3f4f6;
+    font-size: 12px;
+  }
+
+  .routed-hop em {
+    color: #9ca3af;
+    font-size: 11px;
+    font-style: normal;
+  }
+
+  .route-no-market {
+    margin: 0;
+    padding: 8px 10px;
+    color: #fca5a5;
+    background: #140b0c;
+    border: 1px solid #3a1f23;
+    border-radius: 7px;
+    font-size: 12px;
   }
 
   .route-checkbox {
