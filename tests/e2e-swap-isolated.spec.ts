@@ -1078,11 +1078,113 @@ test.describe('E2E Swap Isolated Flow', () => {
           { side: 'bid', price: restingBidPrice },
         ]),
       ]);
+
+      await alicePage.getByTestId('swap-open-order-cancel').first().click({ force: true });
+      await expect
+        .poll(async () => await readSwapOfferCount(alicePage, alice.entityId, alice.signerId, hubId), {
+          timeout: 30_000,
+          intervals: [250, 500, 750],
+          message: 'alice resting ask should be removable from the UI',
+        })
+        .toBe(0);
+      await Promise.all([
+        waitForOrderbookLevelGone(alicePage, 'ask', restingAskPrice),
+        waitForOrderbookLevelGone(bobPage, 'ask', restingAskPrice),
+      ]);
+
+      await bobPage.getByTestId('swap-open-order-cancel').first().click({ force: true });
+      await expect
+        .poll(async () => await readSwapOfferCount(bobPage, bob.entityId, bob.signerId, hubId), {
+          timeout: 30_000,
+          intervals: [250, 500, 750],
+          message: 'bob resting bid should be removable from the UI',
+        })
+        .toBe(0);
+      await Promise.all([
+        waitForOrderbookLevelGone(alicePage, 'bid', restingBidPrice),
+        waitForOrderbookLevelGone(bobPage, 'bid', restingBidPrice),
+      ]);
+
+      await Promise.all([
+        expectClosedOrderRowStatus(alicePage, /Canceled/i),
+        expectClosedOrderRowStatus(bobPage, /Canceled/i),
+      ]);
     } finally {
       await Promise.all([
         aliceContext ? aliceContext.close().catch(() => {}) : Promise.resolve(),
         bobContext ? bobContext.close().catch(() => {}) : Promise.resolve(),
       ]);
+    }
+  });
+
+  test('self-trade protection cancels a user taker before matching their own resting order', async ({ browser, page }) => {
+    let aliceContext: BrowserContext | null = null;
+
+    try {
+      const baseline = await timedStep('swap_self_trade.ensure_baseline', () => ensureE2EBaseline(page, {
+        apiBaseUrl: API_BASE_URL,
+        requireMarketMaker: false,
+        requireHubMesh: true,
+        minHubCount: 3,
+      }));
+
+      const hubId = getPrimaryHubId(baseline);
+
+      aliceContext = await browser.newContext({ ignoreHTTPSErrors: true });
+      const alicePage = await aliceContext.newPage();
+      mirrorConsole(alicePage, 'SWAP-STP');
+
+      await gotoApp(alicePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 });
+      const alice = await createRuntimeIdentity(alicePage, 'alice-self-trade', selectDemoMnemonic('alice'));
+
+      await connectRuntimeToHubWithCredit(alicePage, alice, hubId, '10000', SWAP_CONNECT_TOKEN_IDS);
+      await extendCreditToken(alicePage, 2, '10000');
+      await waitForTokenDeltaActive(alicePage, alice.entityId, hubId, 2);
+
+      await Promise.all([
+        faucetOffchain(alicePage, alice.entityId, hubId, 2, '5'),
+        faucetOffchain(alicePage, alice.entityId, hubId, 1, '100'),
+      ]);
+      await Promise.all([
+        waitForOutCapAtLeast(alicePage, alice.entityId, hubId, 2, 1n * 10n ** 18n),
+        waitForOutCapAtLeast(alicePage, alice.entityId, hubId, 1, 75n * 10n ** 18n),
+      ]);
+
+      await openSwapWorkspace(alicePage);
+      await selectCounterpartyInSwap(alicePage, hubId);
+      await ensureSelectedScope(alicePage);
+
+      await placeAliceSellOffer(alicePage, '0.03', '2500');
+      await waitForOrderbookLevelVisible(alicePage, 'ask', '2500');
+      await expect
+        .poll(async () => await readSwapOfferCount(alicePage, alice.entityId, alice.signerId, hubId), {
+          timeout: 30_000,
+          intervals: [250, 500, 750],
+          message: 'Alice maker ask should remain open before the self-trade attempt',
+        })
+        .toBe(1);
+
+      await placeBobMatchingBuyOrder(alicePage, '75', '2500');
+      const stpResolve = await waitForLatestSwapResolveSnapshot(alicePage, alice.entityId, hubId, 1);
+      expect(stpResolve.cancelRemainder, 'self-trade taker must close without resting against own maker').toBe(true);
+      expect(stpResolve.comment, 'self-trade resolve must identify STP in machine state').toMatch(/^STP:/);
+      expect(stpResolve.executionGiveAmount, 'pure self-trade prevention must not spend quote tokens').toBe('0');
+      expect(stpResolve.executionWantAmount, 'pure self-trade prevention must not receive base tokens').toBe('0');
+
+      await expect
+        .poll(async () => await readSwapOfferCount(alicePage, alice.entityId, alice.signerId, hubId), {
+          timeout: 30_000,
+          intervals: [250, 500, 750],
+          message: 'self-trade protection must leave the original maker order resting',
+        })
+        .toBe(1);
+      await waitForOrderbookLevelVisible(alicePage, 'ask', '2500');
+
+      await expectClosedOrderRowStatus(alicePage, /Canceled/i);
+      const firstClosedRow = alicePage.getByTestId('swap-closed-order-row').first();
+      await expect(firstClosedRow.locator('td').first()).toContainText(/STP:/i, { timeout: 10_000 });
+    } finally {
+      await aliceContext?.close().catch(() => {});
     }
   });
 

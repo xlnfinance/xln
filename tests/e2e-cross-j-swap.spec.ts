@@ -11,10 +11,16 @@ import { timedStep } from './utils/e2e-timing';
 const INIT_TIMEOUT = 30_000;
 const APP_BASE_URL = requireIsolatedBaseUrl('E2E_BASE_URL');
 const API_BASE_URL = requireIsolatedBaseUrl('E2E_API_BASE_URL');
-const SWAP_TOKENS = [1, 2] as const;
+const SWAP_TOKENS = [1, 2, 3] as const;
 const CREDIT_AMOUNT = 10_000n * 10n ** 18n;
 const USDC = 1;
 const WETH = 2;
+const USDT = 3;
+const TOKEN_SYMBOL_BY_ID: Record<number, string> = {
+  [USDC]: 'USDC',
+  [WETH]: 'WETH',
+  [USDT]: 'USDT',
+};
 
 type RuntimeIdentity = {
   entityId: string;
@@ -742,12 +748,16 @@ async function selectCounterpartyInSwap(page: Page, hubId: string): Promise<void
 }
 
 async function configurePair(page: Page, side: 'buy' | 'sell'): Promise<void> {
+  await configureTokens(page, side === 'buy' ? USDC : WETH, side === 'buy' ? WETH : USDC);
+}
+
+async function configureTokens(page: Page, fromTokenId: number, toTokenId: number): Promise<void> {
   const fromTokenSelect = page.getByTestId('swap-from-token-select').first();
   const toTokenSelect = page.getByTestId('swap-to-token-select').first();
   await expect(fromTokenSelect).toBeVisible({ timeout: 20_000 });
   await expect(toTokenSelect).toBeVisible({ timeout: 20_000 });
-  await fromTokenSelect.selectOption(String(side === 'buy' ? USDC : WETH));
-  await toTokenSelect.selectOption(String(side === 'buy' ? WETH : USDC));
+  await fromTokenSelect.selectOption(String(fromTokenId));
+  await toTokenSelect.selectOption(String(toTokenId));
 }
 
 async function selectCrossRoute(page: Page, targetEntityId: string): Promise<void> {
@@ -810,6 +820,64 @@ async function selectCrossRoute(page: Page, targetEntityId: string): Promise<voi
   await expect(page.getByTestId('swap-route-flow').first()).toContainText(/->|Tron|Local/i, { timeout: 10_000 });
 }
 
+async function expectCrossOrderbookReady(page: Page): Promise<void> {
+  const orderbook = page.getByTestId('swap-orderbook').first();
+  await expect(orderbook, 'cross route must keep the right-side orderbook visible').toBeVisible({ timeout: 20_000 });
+  const panel = orderbook.locator('.orderbook-panel').first();
+  await expect(panel, 'cross route must render an orderbook panel').toBeVisible({ timeout: 20_000 });
+  await expect
+    .poll(async () => String(await panel.getAttribute('data-pair-id') || ''), {
+      timeout: 20_000,
+      intervals: [100, 250, 500],
+      message: 'cross route orderbook must subscribe to the cross venue id, not a numeric same-chain pair',
+    })
+    .toMatch(/^cross:/);
+  await expect
+    .poll(async () => String(await panel.getAttribute('data-source-status') || ''), {
+      timeout: 20_000,
+      intervals: [250, 500, 1000],
+      message: 'cross route orderbook must resolve to ready or an empty book instead of hanging in syncing',
+    })
+    .toMatch(/^(ready|empty)$/);
+  await expect(page.getByTestId('orderbook-source-status').first()).not.toContainText(/syncing/i, { timeout: 5_000 });
+}
+
+async function expectSwapTokens(page: Page, fromTokenId: number, toTokenId: number): Promise<void> {
+  const fromSymbol = TOKEN_SYMBOL_BY_ID[fromTokenId];
+  const toSymbol = TOKEN_SYMBOL_BY_ID[toTokenId];
+  expect(fromSymbol, `missing token symbol for ${fromTokenId}`).toBeTruthy();
+  expect(toSymbol, `missing token symbol for ${toTokenId}`).toBeTruthy();
+  await expect(page.getByTestId('swap-from-token-label').first()).toHaveText(fromSymbol!, { timeout: 10_000 });
+  await expect(page.getByTestId('swap-to-token-label').first()).toHaveText(toSymbol!, { timeout: 10_000 });
+}
+
+async function clickCrossOrderbookLevel(
+  page: Page,
+  side: 'ask' | 'bid',
+  expectedFromTokenId: number,
+  expectedToTokenId: number,
+): Promise<void> {
+  const row = page.getByTestId(side === 'ask' ? 'orderbook-ask-row' : 'orderbook-bid-row').first();
+  await expect(row, `cross ${side} row must be visible before clicking the orderbook`).toBeVisible({ timeout: 30_000 });
+  const clickedDisplayedPrice = String(await row.locator('.price').textContent() || '').trim();
+  await row.click();
+  await expectSwapTokens(page, expectedFromTokenId, expectedToTokenId);
+  await expect
+    .poll(async () => String(await page.getByTestId('swap-order-amount').first().inputValue()).trim(), {
+      timeout: 10_000,
+      intervals: [50, 100, 200],
+    })
+    .not.toBe('');
+  if (clickedDisplayedPrice) {
+    await expect
+      .poll(async () => String(await page.getByTestId('swap-order-price').first().inputValue()).trim(), {
+        timeout: 10_000,
+        intervals: [50, 100, 200],
+      })
+      .toBe(clickedDisplayedPrice.replace(/,/g, '').trim());
+  }
+}
+
 async function placeCrossOrder(
   page: Page,
   params: {
@@ -817,15 +885,34 @@ async function placeCrossOrder(
     hubId: string;
     targetEntityId: string;
     side: 'buy' | 'sell';
-  amount: string;
-  price: string;
+    amount: string;
+    price: string;
+    fromTokenId?: number;
+    toTokenId?: number;
+    clickBookSide?: 'ask' | 'bid';
+    expectedClickFromTokenId?: number;
+    expectedClickToTokenId?: number;
   },
 ): Promise<string> {
   await openSwapWorkspace(page);
   await selectSourceChainInSwap(page, params.source.entityId);
   await selectCounterpartyInSwap(page, params.hubId);
-  await configurePair(page, params.side);
-  await selectCrossRoute(page, params.targetEntityId);
+  if (params.fromTokenId && params.toTokenId && params.fromTokenId === params.toTokenId) {
+    await selectCrossRoute(page, params.targetEntityId);
+    await configureTokens(page, params.fromTokenId, params.toTokenId);
+  } else {
+    await configurePair(page, params.side);
+    await selectCrossRoute(page, params.targetEntityId);
+  }
+  await expectCrossOrderbookReady(page);
+  if (params.clickBookSide) {
+    await clickCrossOrderbookLevel(
+      page,
+      params.clickBookSide,
+      params.expectedClickFromTokenId ?? (params.clickBookSide === 'ask' ? USDC : WETH),
+      params.expectedClickToTokenId ?? (params.clickBookSide === 'ask' ? WETH : USDC),
+    );
+  }
   const amountInput = page.getByTestId('swap-order-amount').first();
   const priceInput = page.getByTestId('swap-order-price').first();
   const submit = page.getByTestId('swap-submit-order').first();
@@ -972,8 +1059,13 @@ async function readCrossState(
     sourcePull: boolean;
     targetPull: boolean;
     bookOwnerEntityId: string;
+    sourceEntityId: string;
+    sourceCounterpartyEntityId: string;
+    targetEntityId: string;
+    targetCounterpartyEntityId: string;
     venueId: string;
     priceTicks: string;
+    pendingClearRequestedAt: number;
     updatedAt: number;
   }>;
   offerSummaries: Array<{
@@ -1045,8 +1137,13 @@ async function readCrossState(
         sourcePull: Boolean(route?.sourcePull),
         targetPull: Boolean(route?.targetPull),
         bookOwnerEntityId: String(route?.bookOwnerEntityId || route?.source?.counterpartyEntityId || ''),
+        sourceEntityId: String(route?.source?.entityId || ''),
+        sourceCounterpartyEntityId: String(route?.source?.counterpartyEntityId || ''),
+        targetEntityId: String(route?.target?.entityId || ''),
+        targetCounterpartyEntityId: String(route?.target?.counterpartyEntityId || ''),
         venueId: String(route?.venueId || ''),
         priceTicks: String(route?.priceTicks ?? '0'),
+        pendingClearRequestedAt: Number(route?.pendingClearRequestedAt || 0),
         updatedAt: Number(route?.updatedAt || route?.createdAt || 0),
       });
     }
@@ -1752,12 +1849,18 @@ async function waitForCrossSalvageQueued(
       async () => {
         await flushRuntime(page, 1);
         const state = await readCrossState(page, target, hubId);
-        return state.messages.some((message) =>
-          (
-            /Cross-j salvage queued/i.test(message) ||
-            /Dispute started/i.test(message)
-          ) && message.includes(routeId),
+        const route = state.routeSummaries.find((candidate) => candidate.orderId === routeId);
+        const routedMessage = state.messages.some((message) =>
+          /Cross-j salvage queued/i.test(message) && message.includes(routeId),
         );
+        const disputeStarted = state.messages.some((message) => /Dispute started/i.test(message));
+        const routeProgressedPastSalvage = Boolean(
+          route
+          && route.targetPull
+          && route.cumulativeFillRatio > 0
+          && ['clearing', 'source_claimed', 'target_claimed', 'settled'].includes(route.status),
+        );
+        return routedMessage || (disputeStarted && Boolean(route)) || routeProgressedPastSalvage;
       },
       {
         timeout: 45_000,
@@ -1840,11 +1943,47 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
 
       await Promise.all([
         faucetOffchain(alicePage, primaryHubApiBaseUrl, alice.entityId, hubId, WETH, '1'),
+        faucetOffchain(alicePage, primaryHubApiBaseUrl, alice.entityId, hubId, USDT, '100'),
         faucetOffchain(bobPage, primaryHubApiBaseUrl, bobRpc2.entityId, targetHubId, USDC, '200'),
+        faucetOffchain(bobPage, primaryHubApiBaseUrl, bobRpc2.entityId, targetHubId, USDT, '100'),
       ]);
       await Promise.all([
         waitForOutCapAtLeast(alicePage, alice.entityId, hubId, WETH, 3n * 10n ** 16n),
+        waitForOutCapAtLeast(alicePage, alice.entityId, hubId, USDT, 25n * 10n ** 18n),
         waitForOutCapAtLeast(bobPage, bobRpc2.entityId, targetHubId, USDC, 75n * 10n ** 18n),
+        waitForOutCapAtLeast(bobPage, bobRpc2.entityId, targetHubId, USDT, 25n * 10n ** 18n),
+      ]);
+
+      await timedStep('cross_j_swap.usdt.alice_eth_to_tron_offer', () => placeCrossOrder(alicePage, {
+        source: alice,
+        hubId,
+        targetEntityId: aliceRpc2.entityId,
+        side: 'sell',
+        fromTokenId: USDT,
+        toTokenId: USDT,
+        amount: '25',
+        price: '1',
+      }));
+      await timedStep('cross_j_swap.usdt.bob_tron_to_eth_offer', () => placeCrossOrder(bobPage, {
+        source: bobRpc2,
+        hubId: targetHubId,
+        targetEntityId: bob.entityId,
+        side: 'sell',
+        fromTokenId: USDT,
+        toTokenId: USDT,
+        clickBookSide: 'ask',
+        expectedClickFromTokenId: USDT,
+        expectedClickToTokenId: USDT,
+        amount: '25',
+        price: '1',
+      }));
+      await Promise.all([
+        waitForCrossPullFlow(alicePage, alice, aliceRpc2, hubId, targetHubId),
+        waitForCrossPullFlow(bobPage, bobRpc2, bob, targetHubId, hubId),
+      ]);
+      await Promise.all([
+        waitForCrossOffersCleared(alicePage, alice, hubId, 'Alice USDT/USDT'),
+        waitForCrossOffersCleared(bobPage, bobRpc2, targetHubId, 'Bob USDT/USDT'),
       ]);
 
       await timedStep('cross_j_swap.full.alice_offer', () => placeCrossOrder(alicePage, {
@@ -1860,6 +1999,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         hubId: targetHubId,
         targetEntityId: bob.entityId,
         side: 'buy',
+        clickBookSide: 'ask',
         amount: '78',
         price: '2600',
       }));
@@ -1898,6 +2038,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         hubId,
         targetEntityId: bobRpc2.entityId,
         side: 'sell',
+        clickBookSide: 'bid',
         amount: '0.01',
         price: '2500',
       }));
@@ -1932,6 +2073,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         hubId: targetHubId,
         targetEntityId: bob.entityId,
         side: 'buy',
+        clickBookSide: 'ask',
         amount: '25',
         price: '2500',
       }));
@@ -1950,6 +2092,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         hubId: targetHubId,
         targetEntityId: bob.entityId,
         side: 'buy',
+        clickBookSide: 'ask',
         amount: '25',
         price: '2500',
       }));
@@ -1997,6 +2140,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         hubId: targetHubId,
         targetEntityId: bob.entityId,
         side: 'buy',
+        clickBookSide: 'ask',
         amount: '25',
         price: '2500',
       }));

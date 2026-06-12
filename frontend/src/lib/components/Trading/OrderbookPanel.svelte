@@ -61,6 +61,8 @@
   type MarketWsMessage = {
     type?: string;
     payload?: MarketSnapshotPayload;
+    error?: string;
+    code?: string;
   };
   const dispatch = createEventDispatcher<{ levelclick: LevelClickDetail; snapshot: SnapshotDetail }>();
   interface OrderLevel {
@@ -70,6 +72,7 @@
     owners?: string[];
     accountIds?: string[];
   }
+  type SourceStatus = 'ready' | 'syncing' | 'empty' | 'no-market' | 'error';
 
   let bids: OrderLevel[] = [];
   let asks: OrderLevel[] = [];
@@ -79,7 +82,7 @@
   let sourceCount = 0;
   let expectedSourceCount = 0;
   let sourceLabel = 'Sources: 0';
-  let sourceStatus: 'ready' | 'syncing' = 'ready';
+  let sourceStatus: SourceStatus = 'ready';
 
   // Cumulative hover: index of hovered row (-1 = none).
   // For asks (reversed display): hovering row i highlights rows [i..last] (toward center).
@@ -89,9 +92,11 @@
 
   let marketWs: WebSocket | null = null;
   let marketRetryTimer: ReturnType<typeof setTimeout> | null = null;
+  let marketSyncTimer: ReturnType<typeof setTimeout> | null = null;
   let marketWsClosing = false;
   let marketSubKey = '';
   const STREAM_STALE_MS = 3000;
+  const STREAM_FIRST_SNAPSHOT_TIMEOUT_MS = 6000;
   const STREAM_RETRY_MS = 2000;
   const UI_BOOK_DEPTH = 10;
   const streamSnapshots = new Map<string, MarketSnapshotPayload>();
@@ -101,21 +106,30 @@
   export let selectedPriceStep: (typeof PRICE_STEP_OPTIONS)[number] = 'auto';
   export let autoResolvedPriceStep: (typeof NUMERIC_PRICE_STEP_OPTIONS)[number] = '1';
   let priceStepOverrides: Record<string, string> = {};
+  let canonicalPair = '1/2';
+  let marketInputSignature = '';
 
   function normalizePairId(value: string): string | null {
     const trimmed = String(value || '').trim();
     const match = trimmed.match(/^(\d+)\/(\d+)$/);
-    if (!match) return null;
-    const a = Number(match[1]);
-    const b = Number(match[2]);
-    if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0 || a === b) return null;
-    const left = Math.min(a, b);
-    const right = Math.max(a, b);
-    return `${left}/${right}`;
+    if (match) {
+      const a = Number(match[1]);
+      const b = Number(match[2]);
+      if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0 || a === b) return null;
+      const left = Math.min(a, b);
+      const right = Math.max(a, b);
+      return `${left}/${right}`;
+    }
+    const crossMatch = trimmed.toLowerCase().match(/^cross:([a-z0-9:._-]+:\d+)\/([a-z0-9:._-]+:\d+)$/);
+    if (!crossMatch || trimmed.length > 256) return null;
+    const left = crossMatch[1] || '';
+    const right = crossMatch[2] || '';
+    if (!left || !right || left === right) return null;
+    return left < right ? `cross:${left}/${right}` : `cross:${right}/${left}`;
   }
 
   function canonicalPairId(): string {
-    return normalizePairId(pairId) || pairId;
+    return canonicalPair;
   }
 
   function loadPriceStepOverrides(): void {
@@ -156,7 +170,14 @@
     return Array.from(new Set(normalized));
   }
 
-  function sourceLabelFor(actualSources: string[], expectedCount: number): string {
+  function sourceLabelFor(actualSources: string[], expectedCount: number, status: SourceStatus = 'ready'): string {
+    if (status === 'error') return 'Orderbook stream error';
+    if (status === 'no-market') return 'No market for selected exchange';
+    if (status === 'empty') {
+      if (expectedCount <= 0) return 'No market sources';
+      if (expectedCount === 1) return 'Orderbook empty';
+      return `Sources: ${actualSources.length}/${expectedCount} empty`;
+    }
     if (expectedCount <= 0) return 'Sources: 0';
     if (actualSources.length === 1 && expectedCount === 1) return `Hub: ${formatEntityId(actualSources[0] || '')}`;
     if (actualSources.length < expectedCount) return `Sources: ${actualSources.length}/${expectedCount} syncing`;
@@ -176,6 +197,48 @@
     if (typeof window === 'undefined') return null;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${protocol}//${window.location.host}/relay`;
+  }
+
+  function emptySideLabel(side: 'asks' | 'bids'): string {
+    const hasVisibleLevel = asks.length > 0 || bids.length > 0;
+    if (sourceStatus === 'syncing' && !hasVisibleLevel) return side === 'asks' ? 'Syncing asks...' : 'Syncing bids...';
+    if (sourceStatus === 'no-market') return 'No market for this exchange';
+    if (sourceStatus === 'error') return 'Orderbook unavailable';
+    return side === 'asks' ? 'No asks' : 'No bids';
+  }
+
+  function clearMarketSyncTimer(): void {
+    if (!marketSyncTimer) return;
+    clearTimeout(marketSyncTimer);
+    marketSyncTimer = null;
+  }
+
+  function hasFreshSnapshotFor(sourceHubId: string, pair: string): boolean {
+    const snapshot = streamSnapshots.get(streamKey(sourceHubId, pair));
+    if (!snapshot) return false;
+    const updatedAt = Number(snapshot.updatedAt || 0);
+    return Number.isFinite(updatedAt) && Date.now() - updatedAt <= STREAM_STALE_MS;
+  }
+
+  function armMarketSyncTimer(pair: string, sources: string[]): void {
+    clearMarketSyncTimer();
+    if (sources.length === 0 || !normalizePairId(pair)) return;
+    marketSyncTimer = setTimeout(() => {
+      marketSyncTimer = null;
+      const normalizedPair = normalizePairId(pair);
+      if (!normalizedPair) return;
+      const missingSnapshot = sources.some((source) => !hasFreshSnapshotFor(source, normalizedPair));
+      if (!missingSnapshot) return;
+      updateView(
+        [],
+        [],
+        normalizedPair,
+        sources.filter((source) => hasFreshSnapshotFor(source, normalizedPair)),
+        sources,
+        Date.now(),
+        'no-market',
+      );
+    }, STREAM_FIRST_SNAPSHOT_TIMEOUT_MS);
   }
 
   function toPriceTicks(value: unknown): bigint | null {
@@ -349,13 +412,17 @@
     actualSources: string[],
     requestedSources: string[],
     updatedAtOverride?: number,
+    forcedStatus?: SourceStatus,
   ) {
     bids = nextBids;
     asks = nextAsks;
     sourceCount = actualSources.length;
     expectedSourceCount = requestedSources.length;
-    sourceStatus = actualSources.length >= requestedSources.length ? 'ready' : 'syncing';
-    sourceLabel = sourceLabelFor(actualSources, requestedSources.length);
+    const complete = actualSources.length >= requestedSources.length;
+    sourceStatus = forcedStatus
+      || (!complete ? 'syncing' : (nextBids.length === 0 && nextAsks.length === 0 ? 'empty' : 'ready'));
+    sourceLabel = sourceLabelFor(actualSources, requestedSources.length, sourceStatus);
+    if (sourceStatus !== 'syncing') clearMarketSyncTimer();
     const bestBid = bids[0];
     const bestAsk = asks[0];
     if (bestBid && bestAsk) {
@@ -462,11 +529,17 @@
     const pair = canonicalPairId();
 
     if (sources.length === 0) {
-      updateView([], [], pair, [], []);
+      updateView([], [], pair, [], [], Date.now(), 'no-market');
       return;
     }
 
-    applyStreamOrderbook(sources, pair);
+    const normalizedPair = normalizePairId(pair);
+    if (!normalizedPair) {
+      updateView([], [], pair, [], sources, Date.now(), 'no-market');
+      return;
+    }
+
+    applyStreamOrderbook(sources, normalizedPair);
   }
 
   function priceDisplayDecimals(): number {
@@ -536,16 +609,26 @@
     if (!marketWs || marketWs.readyState !== 1) return;
     const sources = uniqueSourceHubIds();
     const pair = canonicalPairId();
-    if (sources.length === 0 || !normalizePairId(pair)) return;
+    const normalizedPair = normalizePairId(pair);
+    if (sources.length === 0) {
+      updateView([], [], normalizedPair || pair, [], [], Date.now(), 'no-market');
+      return;
+    }
+    if (!normalizedPair) {
+      updateView([], [], pair, [], sources, Date.now(), 'no-market');
+      return;
+    }
+    updateView([], [], normalizedPair, [], sources, Date.now(), 'syncing');
+    armMarketSyncTimer(normalizedPair, sources);
     marketWs.send(JSON.stringify({
       type: 'market_subscribe',
       id: wsMessageId('market_sub'),
       replace,
       hubEntityIds: sources,
-      pairs: [pair],
+      pairs: [normalizedPair],
       depth: subscribedRawDepth(),
     }));
-    marketSubKey = `${pair}|${subscribedRawDepth()}|${sources.join(',')}`;
+    marketSubKey = `${normalizedPair}|${subscribedRawDepth()}|${sources.join(',')}`;
   }
 
   function requestMarketSnapshot(): void {
@@ -590,6 +673,10 @@
       } catch {
         return;
       }
+      if (msg?.type === 'error') {
+        updateView([], [], canonicalPairId(), [], uniqueSourceHubIds(), Date.now(), 'error');
+        return;
+      }
       if (msg?.type !== 'market_snapshot') return;
       const payload = msg?.payload as MarketSnapshotPayload | undefined;
       const hubEntityId = payload?.hubEntityId ? String(payload.hubEntityId).toLowerCase() : '';
@@ -619,6 +706,7 @@
       clearTimeout(marketRetryTimer);
       marketRetryTimer = null;
     }
+    clearMarketSyncTimer();
     marketSubKey = '';
     streamSnapshots.clear();
     if (!marketWs) return;
@@ -635,9 +723,11 @@
   }
 
   $: {
+    marketInputSignature;
     const sources = uniqueSourceHubIds();
     const pair = canonicalPairId();
-    const nextKey = `${pair}|${visibleDepth()}|${sources.join(',')}`;
+    const normalizedPair = normalizePairId(pair);
+    const nextKey = `${normalizedPair || pair}|${subscribedRawDepth()}|${sources.join(',')}`;
     if (typeof window !== 'undefined' && marketWs && marketWs.readyState === 1 && nextKey !== marketSubKey) {
       streamSnapshots.clear();
       sendMarketSubscribe(true);
@@ -665,11 +755,19 @@
     disconnectMarketStream();
   });
 
+  $: canonicalPair = normalizePairId(pairId) || String(pairId || '');
+  $: marketInputSignature = `${pairId}|${hubId}|${hubIds.join(',')}|${depth}`;
+
   // React to hubId/pairId changes
   $: if (hubId || hubIds.length || pairId) extractOrderbook();
 </script>
 
-<div class="orderbook-panel" class:compact-header={compactHeader}>
+<div
+  class="orderbook-panel"
+  class:compact-header={compactHeader}
+  data-pair-id={canonicalPair}
+  data-source-status={sourceStatus}
+>
   {#if !compactHeader}
     <div class="header">
       <span class="title">Order Book</span>
@@ -756,7 +854,7 @@
           {/if}
         </div>
       {:else}
-        <div class="empty-side">{sourceStatus === 'syncing' ? 'Syncing asks…' : 'No asks'}</div>
+        <div class="empty-side">{emptySideLabel('asks')}</div>
       {/each}
     </div>
 
@@ -831,7 +929,7 @@
           {/if}
         </div>
       {:else}
-        <div class="empty-side">{sourceStatus === 'syncing' ? 'Syncing bids…' : 'No bids'}</div>
+        <div class="empty-side">{emptySideLabel('bids')}</div>
       {/each}
     </div>
   </div>
@@ -858,9 +956,14 @@
     <span
       class="source-status"
       class:is-syncing={sourceStatus === 'syncing'}
+      class:is-terminal={sourceStatus === 'no-market' || sourceStatus === 'error'}
       data-testid="orderbook-source-status"
       title={sourceStatus === 'syncing'
         ? `Waiting for ${Math.max(0, expectedSourceCount - sourceCount)} source snapshot(s)`
+        : sourceStatus === 'no-market'
+          ? 'No relay market snapshot is available for this exchange.'
+          : sourceStatus === 'error'
+            ? 'The orderbook stream returned an error.'
         : `Book built from ${sourceCount} source${sourceCount === 1 ? '' : 's'}`}
     >{sourceLabel}</span>
     <span
@@ -1228,6 +1331,10 @@
 
   .source-status.is-syncing {
     color: #f3d27a;
+  }
+
+  .source-status.is-terminal {
+    color: #f27a7a;
   }
 
   .ratio-row {

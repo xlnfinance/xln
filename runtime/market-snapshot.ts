@@ -54,13 +54,21 @@ export const normalizeMarketPairId = (value: unknown): string | null => {
   if (typeof value !== 'string') return null;
   const trimmed = value.trim();
   const match = trimmed.match(/^(\d+)\/(\d+)$/);
-  if (!match) return null;
-  const a = Number(match[1]);
-  const b = Number(match[2]);
-  if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0 || a === b) return null;
-  const left = Math.min(a, b);
-  const right = Math.max(a, b);
-  return `${left}/${right}`;
+  if (match) {
+    const a = Number(match[1]);
+    const b = Number(match[2]);
+    if (!Number.isFinite(a) || !Number.isFinite(b) || a <= 0 || b <= 0 || a === b) return null;
+    const left = Math.min(a, b);
+    const right = Math.max(a, b);
+    return `${left}/${right}`;
+  }
+
+  const crossMatch = trimmed.toLowerCase().match(/^cross:([a-z0-9:._-]+:\d+)\/([a-z0-9:._-]+:\d+)$/);
+  if (!crossMatch || trimmed.length > 256) return null;
+  const left = crossMatch[1] || '';
+  const right = crossMatch[2] || '';
+  if (!left || !right || left === right) return null;
+  return left < right ? `cross:${left}/${right}` : `cross:${right}/${left}`;
 };
 
 function formatPercent3(numerator: number, denominator: number): string {

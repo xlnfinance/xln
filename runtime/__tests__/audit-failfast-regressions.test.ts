@@ -270,6 +270,58 @@ describe('audit fail-fast regressions', () => {
     })).toThrow('CROSS_J_REMOTE_TOPOLOGY_INVALID');
   });
 
+  test('runtime ingress retargets stale signer hints only when the local target entity has one replica', async () => {
+    const env = createEmptyEnv('stale-signer-retarget');
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    const entityId = `0x${'81'.repeat(32)}`;
+    const actualSignerId = `0x${'83'.repeat(20)}`;
+    const staleSignerId = `0xb262${'00'.repeat(18)}`;
+    const state = makeEntityState(entityId);
+    state.config = makeSingleSignerConfigFor(actualSignerId);
+    env.eReplicas.set(`${entityId}:${actualSignerId}`, {
+      entityId,
+      signerId: actualSignerId,
+      mempool: [],
+      isProposer: true,
+      state,
+    });
+
+    await expect(process(env, [{
+      entityId,
+      signerId: staleSignerId,
+      entityTxs: [],
+    }])).resolves.toBe(env);
+    expect(env.eReplicas.has(`${entityId}:${actualSignerId}`)).toBe(true);
+  });
+
+  test('runtime ingress still rejects stale signer hints when local target signer is ambiguous', async () => {
+    const env = createEmptyEnv('stale-signer-ambiguous');
+    env.scenarioMode = true;
+    env.quietRuntimeLogs = true;
+    const entityId = `0x${'82'.repeat(32)}`;
+    const signerA = `0x${'a1'.repeat(20)}`;
+    const signerB = `0x${'b1'.repeat(20)}`;
+    const staleSignerId = `0x${'cc'.repeat(20)}`;
+    for (const signerId of [signerA, signerB]) {
+      const state = makeEntityState(entityId);
+      state.config = makeSingleSignerConfigFor(signerId);
+      env.eReplicas.set(`${entityId}:${signerId}`, {
+        entityId,
+        signerId,
+        mempool: [],
+        isProposer: signerId === signerA,
+        state,
+      });
+    }
+
+    await expect(process(env, [{
+      entityId,
+      signerId: staleSignerId,
+      entityTxs: [],
+    }])).rejects.toThrow('RUNTIME_REPLICA_NOT_FOUND');
+  });
+
   test('process requeues oversized runtime input instead of silently dropping it', async () => {
     const env = createEmptyEnv('audit-regression-seed');
     env.scenarioMode = true;
