@@ -293,10 +293,11 @@
           ? hubAccountIds
           : (selectedBookAccountId ? [selectedBookAccountId] : [])
       );
+  $: activeOrderbookRelayUrl = activeBookHubId ? orderbookRelayUrlForHub(activeBookHubId) : '';
   $: orderbookDepth = orderbookScopeMode === 'aggregated'
     ? AGGREGATED_ORDERBOOK_DEPTH
     : SELECTED_ORDERBOOK_DEPTH;
-  $: orderbookViewKey = `${orderbookPairId}|${orderbookScopeMode}|${selectedBookAccountId}|${orderbookHubIds.join(',')}|${orderbookRefreshNonce}`;
+  $: orderbookViewKey = `${orderbookPairId}|${orderbookScopeMode}|${selectedBookAccountId}|${orderbookHubIds.join(',')}|${activeOrderbookRelayUrl}|${orderbookRefreshNonce}`;
 
   function resolveCounterpartyId(input: string): string {
     const normalized = String(input || '').trim().toLowerCase();
@@ -592,6 +593,12 @@
       profile?.metadata?.isHub === true
       && String(profile?.entityId || '').trim().toLowerCase() === normalized
     ) || null;
+  }
+
+  function orderbookRelayUrlForHub(entityIdValue: string): string {
+    const profile = getHubProfile(entityIdValue);
+    const relays = Array.isArray(profile?.relays) ? profile.relays : [];
+    return String(relays.find((value) => String(value || '').trim()) || '').trim();
   }
 
   function hubBaseName(profile: GossipProfile | null): string {
@@ -3210,6 +3217,7 @@
               <OrderbookPanel
                 hubIds={orderbookHubIds}
                 hubId={activeBookHubId || selectedBookAccountId}
+                relayUrl={activeOrderbookRelayUrl}
                 pairId={orderbookPairId}
                 pairLabel={`${baseTokenSymbol}/${quoteTokenSymbol}`}
                 depth={orderbookDepth}
