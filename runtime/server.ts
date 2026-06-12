@@ -271,6 +271,11 @@ const buildMarketSnapshot = (
   depth: number,
 ): MarketSnapshotPayload => {
   const hubReplica = getEntityReplicaById(env, hubEntityId);
+  if (!hubReplica) {
+    const error = new Error(`Unknown market hub: ${hubEntityId}`) as Error & { code?: string };
+    error.code = 'E_UNKNOWN_HUB';
+    throw error;
+  }
   return buildMarketSnapshotForReplica(hubReplica, hubEntityId, pairId, depth);
 };
 

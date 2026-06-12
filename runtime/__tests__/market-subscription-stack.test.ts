@@ -136,3 +136,44 @@ test('market subscription stack rejects overbroad subscriptions', async () => {
   expect(stack.snapshot().total).toBe(0);
   stack.clear();
 });
+
+test('market subscription stack reports snapshot fetch errors instead of leaving subscribers waiting', async () => {
+  const ws = makeSocket('10.0.0.3');
+  const handlerErrors: unknown[] = [];
+  const stack = createMarketSubscriptionStack<FakeSocket>({
+    maxSubscriptions: 2,
+    maxSubscriptionsPerIp: 1,
+    maxCellsPerSubscription: 4,
+    getClientIp: socket => socket.ip,
+    fetchSnapshots: () => {
+      const error = new Error(`Unknown market hub: ${HUB_ID}`) as Error & { code?: string };
+      error.code = 'E_UNKNOWN_HUB';
+      throw error;
+    },
+    onHandlerError: error => handlerErrors.push(error),
+  });
+
+  await stack.handleMessage(ws, {
+    type: 'market_subscribe',
+    id: 'sub-unknown-hub',
+    hubEntityId: HUB_ID,
+    pairs: ['1/2'],
+    depth: 5,
+  });
+
+  expect(ws.sent).toHaveLength(2);
+  expect(ws.sent[0]).toMatchObject({
+    type: 'ack',
+    inReplyTo: 'sub-unknown-hub',
+    status: 'market_subscribed',
+  });
+  expect(ws.sent[1]).toEqual({
+    type: 'error',
+    inReplyTo: 'sub-unknown-hub',
+    code: 'E_UNKNOWN_HUB',
+    error: `Unknown market hub: ${HUB_ID}`,
+  });
+  expect(handlerErrors).toHaveLength(1);
+  expect(stack.snapshot().total).toBe(0);
+  stack.clear();
+});
