@@ -20,6 +20,7 @@
   export let hubIds: string[] = [];
   export let pairId: string = '1/2';  // e.g., "1/2" for ETH/USDC
   export let pairLabel: string = '';
+  export let relayUrl: string = '';
   export let depth: number = 10;
   export let showOwners: boolean = false;
   export let showSources: boolean = false;
@@ -91,10 +92,12 @@
   let hoverBidIdx = -1;
 
   let marketWs: WebSocket | null = null;
+  let marketWsUrl = '';
   let marketRetryTimer: ReturnType<typeof setTimeout> | null = null;
   let marketSyncTimer: ReturnType<typeof setTimeout> | null = null;
   let marketWsClosing = false;
   let marketSubKey = '';
+  let mounted = false;
   const STREAM_STALE_MS = 3000;
   const STREAM_FIRST_SNAPSHOT_TIMEOUT_MS = 6000;
   const STREAM_RETRY_MS = 2000;
@@ -193,10 +196,33 @@
     return Math.max(visibleDepth(), Math.min(visibleDepth() * 6, 100));
   }
 
-  function relayWsUrl(): string | null {
+  function normalizeRelayWsUrl(value: string): string | null {
+    if (typeof window === 'undefined') return null;
+    const trimmed = String(value || '').trim();
+    if (!trimmed) return null;
+    try {
+      const parsed = trimmed.startsWith('/')
+        ? new URL(trimmed, window.location.origin)
+        : new URL(trimmed);
+      if (parsed.protocol === 'ws:' || parsed.protocol === 'wss:') return parsed.toString();
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
+        parsed.protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+        return parsed.toString();
+      }
+    } catch {
+      return null;
+    }
+    return null;
+  }
+
+  function defaultRelayWsUrl(): string | null {
     if (typeof window === 'undefined') return null;
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
     return `${protocol}//${window.location.host}/relay`;
+  }
+
+  function relayWsUrl(): string | null {
+    return normalizeRelayWsUrl(relayUrl) || defaultRelayWsUrl();
   }
 
   function emptySideLabel(side: 'asks' | 'bids'): string {
@@ -628,7 +654,7 @@
       pairs: [normalizedPair],
       depth: subscribedRawDepth(),
     }));
-    marketSubKey = `${normalizedPair}|${subscribedRawDepth()}|${sources.join(',')}`;
+    marketSubKey = `${marketWsUrl || relayWsUrl() || ''}|${normalizedPair}|${subscribedRawDepth()}|${sources.join(',')}`;
   }
 
   function requestMarketSnapshot(): void {
@@ -661,12 +687,16 @@
     if (marketWs && (marketWs.readyState === 0 || marketWs.readyState === 1)) return;
 
     marketWsClosing = false;
-    marketWs = new WebSocket(url);
-    marketWs.onopen = () => {
+    marketWsUrl = url;
+    const ws = new WebSocket(url);
+    marketWs = ws;
+    ws.onopen = () => {
+      if (marketWs !== ws) return;
       sendMarketSubscribe(true);
       marketWs?.send(JSON.stringify({ type: 'market_snapshot_request', id: wsMessageId('market_req') }));
     };
-    marketWs.onmessage = (event: MessageEvent) => {
+    ws.onmessage = (event: MessageEvent) => {
+      if (marketWs !== ws) return;
       let msg: MarketWsMessage;
       try {
         msg = JSON.parse(String(event.data || '{}')) as MarketWsMessage;
@@ -689,9 +719,11 @@
       });
       extractOrderbook();
     };
-    marketWs.onclose = () => {
+    ws.onclose = () => {
+      if (marketWs !== ws) return;
       marketWs = null;
       marketSubKey = '';
+      marketWsUrl = '';
       if (marketWsClosing) return;
       if (marketRetryTimer) clearTimeout(marketRetryTimer);
       marketRetryTimer = setTimeout(() => {
@@ -720,18 +752,27 @@
       // ignore
     }
     marketWs = null;
+    marketWsUrl = '';
   }
 
   $: {
     marketInputSignature;
-    const sources = uniqueSourceHubIds();
-    const pair = canonicalPairId();
-    const normalizedPair = normalizePairId(pair);
-    const nextKey = `${normalizedPair || pair}|${subscribedRawDepth()}|${sources.join(',')}`;
-    if (typeof window !== 'undefined' && marketWs && marketWs.readyState === 1 && nextKey !== marketSubKey) {
-      streamSnapshots.clear();
-      sendMarketSubscribe(true);
-      requestMarketSnapshot();
+    if (mounted) {
+      const sources = uniqueSourceHubIds();
+      const pair = canonicalPairId();
+      const normalizedPair = normalizePairId(pair);
+      const nextRelayUrl = relayWsUrl();
+      const nextKey = `${nextRelayUrl || ''}|${normalizedPair || pair}|${subscribedRawDepth()}|${sources.join(',')}`;
+      if (nextRelayUrl && marketWs && marketWsUrl && nextRelayUrl !== marketWsUrl) {
+        disconnectMarketStream();
+        connectMarketStream();
+      } else if (nextRelayUrl && !marketWs) {
+        connectMarketStream();
+      } else if (typeof window !== 'undefined' && marketWs && marketWs.readyState === 1 && nextKey !== marketSubKey) {
+        streamSnapshots.clear();
+        sendMarketSubscribe(true);
+        requestMarketSnapshot();
+      }
     }
   }
 
@@ -746,17 +787,19 @@
   $: sellRatioPct = visibleSizeTotal > 0 ? 100 - buyRatioPct : 0;
 
   onMount(() => {
+    mounted = true;
     loadPriceStepOverrides();
     extractOrderbook();
     connectMarketStream();
   });
 
   onDestroy(() => {
+    mounted = false;
     disconnectMarketStream();
   });
 
   $: canonicalPair = normalizePairId(pairId) || String(pairId || '');
-  $: marketInputSignature = `${pairId}|${hubId}|${hubIds.join(',')}|${depth}`;
+  $: marketInputSignature = `${relayUrl}|${pairId}|${hubId}|${hubIds.join(',')}|${depth}`;
 
   // React to hubId/pairId changes
   $: if (hubId || hubIds.length || pairId) extractOrderbook();
@@ -766,6 +809,8 @@
   class="orderbook-panel"
   class:compact-header={compactHeader}
   data-pair-id={canonicalPair}
+  data-hub-ids={uniqueSourceHubIds().join(',')}
+  data-relay-url={marketWsUrl || relayWsUrl() || ''}
   data-source-status={sourceStatus}
 >
   {#if !compactHeader}

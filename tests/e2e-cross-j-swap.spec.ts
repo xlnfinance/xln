@@ -839,6 +839,37 @@ async function expectCrossOrderbookReady(page: Page): Promise<void> {
       message: 'cross route orderbook must resolve to ready or an empty book instead of hanging in syncing',
     })
     .toMatch(/^(ready|empty)$/);
+  const relayCheck = await page.evaluate(() => {
+    const normalizeWs = (value: string): string => {
+      const raw = String(value || '').trim();
+      if (!raw) return '';
+      const parsed = raw.startsWith('/') ? new URL(raw, window.location.origin) : new URL(raw);
+      if (parsed.protocol === 'http:') parsed.protocol = 'ws:';
+      if (parsed.protocol === 'https:') parsed.protocol = 'wss:';
+      return parsed.toString();
+    };
+    const panelEl = document.querySelector('[data-testid="swap-orderbook"] .orderbook-panel') as HTMLElement | null;
+    const hubId = String(panelEl?.getAttribute('data-hub-ids') || '').split(',')[0]?.trim().toLowerCase() || '';
+    const relayUrl = normalizeWs(String(panelEl?.getAttribute('data-relay-url') || ''));
+    const env = (window as CrossRuntimeWindow).isolatedEnv as any;
+    const rawProfiles = typeof env?.gossip?.getProfiles === 'function'
+      ? env.gossip.getProfiles()
+      : env?.gossip?.profiles;
+    const profiles = rawProfiles instanceof Map
+      ? Array.from(rawProfiles.values())
+      : (Array.isArray(rawProfiles) ? rawProfiles : []);
+    const profile = profiles.find((candidate: any) =>
+      String(candidate?.entityId || '').trim().toLowerCase() === hubId
+      && candidate?.metadata?.isHub === true
+    ) as any;
+    const expectedRelayUrl = normalizeWs(String((Array.isArray(profile?.relays) ? profile.relays : []).find(Boolean) || ''));
+    return { hubId, relayUrl, expectedRelayUrl };
+  });
+  expect(relayCheck.hubId, 'cross orderbook must expose the selected book hub id').toMatch(/^0x[a-f0-9]{64}$/);
+  expect(relayCheck.relayUrl, 'cross orderbook must connect through an explicit market relay').toMatch(/\/relay$/);
+  if (relayCheck.expectedRelayUrl) {
+    expect(relayCheck.relayUrl, 'cross orderbook relay must follow the selected book hub gossip relay').toBe(relayCheck.expectedRelayUrl);
+  }
   await expect(page.getByTestId('orderbook-source-status').first()).not.toContainText(/syncing/i, { timeout: 5_000 });
 }
 
