@@ -3,6 +3,7 @@ import {
   compareCrossJurisdictionRouteStatus,
   applyCrossJurisdictionFillProgress,
   isCrossJurisdictionTerminalStatus,
+  transitionCrossJurisdictionRouteStatus,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../../cross-jurisdiction';
 import {
@@ -199,7 +200,11 @@ export const applyCrossJurisdictionBookProgressToState = (
   if (bookOwner !== normalizeEntityRef(newState.entityId)) {
     throw new Error(`CROSS_J_BOOK_PROGRESS_WRONG_OWNER: order=${route.orderId} owner=${bookOwner} current=${newState.entityId}`);
   }
-  if (isSameCommittedBookProgress(route, data)) return false;
+  if (isSameCommittedBookProgress(route, data)) {
+    delete admission.pendingFill;
+    admission.updatedAt = now;
+    return false;
+  }
 
   const currentSeq = Math.floor(Number(route.fillSeq ?? 0));
   if (Math.floor(Number(data.fillSeq)) <= currentSeq) {
@@ -225,8 +230,13 @@ export const applyCrossJurisdictionBookProgressToState = (
         (nextRoute.priceImprovementTargetAmount ?? 0n) + data.priceImprovementAmount!;
     }
   }
+  if (data.cancelRemainder) {
+    transitionCrossJurisdictionRouteStatus(nextRoute, 'clear_requested', now);
+    nextRoute.clearingPolicy = 'cancel_and_clear';
+  }
 
   admission.route = nextRoute;
+  delete admission.pendingFill;
   admission.updatedAt = now;
   const mirrorRoute = newState.crossJurisdictionSwaps?.get(route.orderId);
   if (mirrorRoute) {

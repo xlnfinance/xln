@@ -208,6 +208,7 @@ export const markCrossJurisdictionBookAdmissionResolving = (
   if (!admission || admission.status === 'closed') return;
   admission.status = 'resolving';
   admission.resolvingAt = now;
+  delete admission.pendingFill;
   admission.updatedAt = now;
 };
 
@@ -224,6 +225,7 @@ export const markCrossJurisdictionBookAdmissionClosed = (
   admission.status = 'closed';
   admission.closedAt = now;
   admission.closeReason = reason;
+  delete admission.pendingFill;
   admission.updatedAt = now;
 };
 
@@ -529,6 +531,11 @@ export const buildCrossJurisdictionFillAck = (
   const executionTargetAmount = priceImprovementMode === 'target_bonus' && targetBonus > 0n
     ? settlementTargetAmount + targetBonus
     : settlementTargetAmount;
+  const nextActualTargetAmount =
+    previousTargetClaimed + (meta.route.priceImprovementTargetAmount ?? 0n) + executionTargetAmount;
+  const terminalCancel =
+    fillRatio >= CROSS_J_MAX_FILL_RATIO ||
+    nextActualTargetAmount >= targetTotal;
 
   const instruction: CrossJurisdictionFillInstruction = {
     accountId,
@@ -537,7 +544,7 @@ export const buildCrossJurisdictionFillAck = (
     fillRatio,
     fillNumerator: exactFillRatio.numerator,
     fillDenominator: exactFillRatio.denominator,
-    cancelRemainder: fillRatio >= CROSS_J_MAX_FILL_RATIO,
+    cancelRemainder: terminalCancel,
     sourceAmount: settlementSourceAmount,
     targetAmount: settlementTargetAmount,
     executionSourceAmount,
@@ -553,6 +560,8 @@ export const buildCrossJurisdictionFillAck = (
     type: 'cross_swap_fill_ack',
     data: {
       offerId,
+      ...(meta.route.routeHash ? { routeHash: meta.route.routeHash } : {}),
+      previousFillSeq: Math.max(0, Math.floor(Number(meta.route.fillSeq ?? 0) || 0)),
       fillSeq: Math.max(0, Math.floor(Number(meta.route.fillSeq ?? 0) || 0)) + 1,
       incrementalSourceAmount: settlementSourceAmount,
       incrementalTargetAmount: settlementTargetAmount,
@@ -561,12 +570,13 @@ export const buildCrossJurisdictionFillAck = (
       cumulativeFillRatio: fillRatio,
       fillNumerator: exactFillRatio.numerator,
       fillDenominator: exactFillRatio.denominator,
+      ackKind: 'fill',
       executionSourceAmount,
       executionTargetAmount,
       priceImprovementMode,
       ...(priceImprovementAmount > 0n ? { priceImprovementAmount } : {}),
       ...(priceImprovementTokenId !== null ? { priceImprovementTokenId } : {}),
-      cancelRemainder: fillRatio >= CROSS_J_MAX_FILL_RATIO,
+      cancelRemainder: terminalCancel,
       comment: `cross-j-hashledger-fill:${fillRatio}`,
       priceTicks: meta.priceTicks,
       pairId: meta.pairId,
@@ -597,12 +607,15 @@ export const buildCrossJurisdictionCancelAck = (
     type: 'cross_swap_fill_ack',
     data: {
       offerId,
+      ...(route.routeHash ? { routeHash: route.routeHash } : {}),
+      previousFillSeq: Math.max(0, Math.floor(Number(route.fillSeq ?? 0) || 0)),
       fillSeq: Math.max(0, Math.floor(Number(route.fillSeq ?? 0) || 0)),
       incrementalSourceAmount: 0n,
       incrementalTargetAmount: 0n,
       cumulativeSourceAmount,
       cumulativeTargetAmount,
       cumulativeFillRatio: currentRatio,
+      ackKind: 'cancel',
       executionSourceAmount: 0n,
       executionTargetAmount: 0n,
       cancelRemainder: true,

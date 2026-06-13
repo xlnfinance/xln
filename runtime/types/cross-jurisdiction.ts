@@ -41,6 +41,20 @@ export type CrossJurisdictionBookStatus =
   | 'resolving'
   | 'closed';
 
+export interface CrossJurisdictionPendingFill {
+  fillId: string;
+  ackKind: 'fill' | 'cancel';
+  fillSeq: number;
+  previousFillSeq?: number;
+  cumulativeFillRatio: number;
+  cumulativeSourceAmount: bigint;
+  cumulativeTargetAmount: bigint;
+  fillNumerator?: bigint;
+  fillDenominator?: bigint;
+  routeHash: string;
+  updatedAt: number;
+}
+
 export interface CrossJurisdictionBookAdmissionReceipt {
   leg: CrossJurisdictionBookLeg;
   orderId: string;
@@ -84,6 +98,7 @@ export interface CrossJurisdictionBookAdmission {
   resolvingAt?: number;
   closedAt?: number;
   closeReason?: string;
+  pendingFill?: CrossJurisdictionPendingFill;
   updatedAt: number;
 }
 
@@ -92,6 +107,11 @@ export interface CrossJurisdictionSwapRoute {
   routeHash?: string;
   bookOwnerEntityId?: string;
   venueId?: string;
+  sourceSignerId?: string;
+  sourceHubSignerId?: string;
+  targetHubSignerId?: string;
+  targetSignerId?: string;
+  bookHubSignerId?: string;
   makerEntityId: string;
   hubEntityId: string;
   source: CrossJurisdictionSwapLeg;

@@ -143,6 +143,7 @@ export interface CrossJurisdictionSecretRelay {
   sourceAmount: bigint;
   targetAmount: bigint;
   targetEntityId: string;
+  targetSignerId?: string;
   targetCounterpartyEntityId: string;
   targetLockId: string;
 }
@@ -529,6 +530,7 @@ export interface SettlementWorkspace {
   postSettlementDisputeProof?: {
     leftHanko?: HankoString;                  // Left's dispute hanko at nonce+1
     rightHanko?: HankoString;                 // Right's dispute hanko at nonce+1
+    disputeHash: string;                      // Exact hash signed by both post-settlement hankos
     proofBodyHash: string;                    // Same as pre-settlement (offdelta unchanged)
     nonce: number;                            // = onChainSettlementNonce + 1 (replaces cooperativeNonce)
   };
@@ -720,15 +722,18 @@ export type AccountTx =
       type: 'cross_swap_fill_ack';
       data: {
         offerId: string;
+        routeHash?: string;
+        previousFillSeq?: number;
         fillSeq?: number;
         incrementalSourceAmount?: bigint;
         incrementalTargetAmount?: bigint;
         cumulativeSourceAmount?: bigint;
         cumulativeTargetAmount?: bigint;
-        cumulativeFillRatio: number; // Coarse 0-65535 compatibility/dispute ratio.
-        fillNumerator?: bigint;
-        fillDenominator?: bigint;
-        executionSourceAmount?: bigint;
+	        cumulativeFillRatio: number; // Coarse 0-65535 compatibility/dispute ratio.
+	        fillNumerator?: bigint;
+	        fillDenominator?: bigint;
+	        ackKind?: 'fill' | 'cancel';
+	        executionSourceAmount?: bigint;
         executionTargetAmount?: bigint;
         priceImprovementMode?: 'source_savings' | 'target_bonus' | 'none';
         priceImprovementAmount?: bigint;

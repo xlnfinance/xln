@@ -6,6 +6,7 @@ import type {
   AccountTx,
   CrossJurisdictionBookAdmission,
   CrossJurisdictionBookAdmissionReceipt,
+  CrossJurisdictionPendingFill,
   CrossJurisdictionPullBinding,
   CrossJurisdictionPullLeg,
   CrossJurisdictionSwapLeg,
@@ -437,6 +438,11 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
   const routeHash = optionalString(route.routeHash);
   const bookOwnerEntityId = optionalString(route.bookOwnerEntityId);
   const venueId = optionalString(route.venueId);
+  const sourceSignerId = optionalString(route.sourceSignerId);
+  const sourceHubSignerId = optionalString(route.sourceHubSignerId);
+  const targetHubSignerId = optionalString(route.targetHubSignerId);
+  const targetSignerId = optionalString(route.targetSignerId);
+  const bookHubSignerId = optionalString(route.bookHubSignerId);
   const sourcePull = cloneCrossJurisdictionPullLeg(route.sourcePull);
   const targetPull = cloneCrossJurisdictionPullLeg(route.targetPull);
   const targetReceipt = route.targetReceipt
@@ -463,6 +469,11 @@ export function cloneCrossJurisdictionRoute(route: CrossJurisdictionSwapRoute): 
   if (routeHash) clone.routeHash = routeHash;
   if (bookOwnerEntityId) clone.bookOwnerEntityId = bookOwnerEntityId;
   if (venueId) clone.venueId = venueId;
+  if (sourceSignerId) clone.sourceSignerId = sourceSignerId;
+  if (sourceHubSignerId) clone.sourceHubSignerId = sourceHubSignerId;
+  if (targetHubSignerId) clone.targetHubSignerId = targetHubSignerId;
+  if (targetSignerId) clone.targetSignerId = targetSignerId;
+  if (bookHubSignerId) clone.bookHubSignerId = bookHubSignerId;
   if (sourcePull) clone.sourcePull = sourcePull;
   if (targetPull) clone.targetPull = targetPull;
   if (targetReceipt) clone.targetReceipt = targetReceipt;
@@ -505,6 +516,26 @@ export function cloneCrossJurisdictionBookAdmissionReceipt(
     fullHash: String(receipt.fullHash || ''),
     partialRoot: String(receipt.partialRoot || ''),
     committedAt: Number(receipt.committedAt || 0),
+  };
+}
+
+function cloneCrossJurisdictionPendingFill(
+  pendingFill: CrossJurisdictionPendingFill,
+): CrossJurisdictionPendingFill {
+  return {
+    fillId: String(pendingFill.fillId || ''),
+    ackKind: pendingFill.ackKind === 'cancel' ? 'cancel' : 'fill',
+    fillSeq: Math.max(0, Math.floor(Number(pendingFill.fillSeq ?? 0) || 0)),
+    ...(pendingFill.previousFillSeq !== undefined
+      ? { previousFillSeq: Math.max(0, Math.floor(Number(pendingFill.previousFillSeq) || 0)) }
+      : {}),
+    cumulativeFillRatio: Math.max(0, Math.floor(Number(pendingFill.cumulativeFillRatio ?? 0) || 0)),
+    cumulativeSourceAmount: BigInt(pendingFill.cumulativeSourceAmount ?? 0n),
+    cumulativeTargetAmount: BigInt(pendingFill.cumulativeTargetAmount ?? 0n),
+    ...(pendingFill.fillNumerator !== undefined ? { fillNumerator: BigInt(pendingFill.fillNumerator) } : {}),
+    ...(pendingFill.fillDenominator !== undefined ? { fillDenominator: BigInt(pendingFill.fillDenominator) } : {}),
+    routeHash: String(pendingFill.routeHash || ''),
+    updatedAt: Number(pendingFill.updatedAt || 0),
   };
 }
 
@@ -608,6 +639,7 @@ export function cloneCrossJurisdictionBookAdmission(
   if (resolvingAt !== undefined) clone.resolvingAt = resolvingAt;
   if (closedAt !== undefined) clone.closedAt = closedAt;
   if (closeReason) clone.closeReason = closeReason;
+  if (admission.pendingFill) clone.pendingFill = cloneCrossJurisdictionPendingFill(admission.pendingFill);
   return clone;
 }
 
