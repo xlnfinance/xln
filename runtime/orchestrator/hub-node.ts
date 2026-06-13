@@ -10,6 +10,7 @@ import type {
 import { ERC20Mock__factory } from '../../jurisdictions/typechain-types/index.ts';
 import { createExternalWalletApi } from '../api/external-wallet-api';
 import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../networking/direct-runtime-bun';
+import { normalizeRuntimeId } from '../networking/runtime-id';
 import { bootstrapHub } from '../../scripts/bootstrap-hub';
 import { DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction } from '../jadapter/default-tokens';
 import type { JAdapter, JTokenInfo } from '../jadapter/types';
@@ -30,6 +31,11 @@ import { safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
 import { handleMeshBootstrapLoopError } from './mesh-bootstrap-fail-fast';
 import { isLocalOperatorRequest, publicLocalHubHealth } from '../health-redaction';
+import {
+  deriveRuntimeAdapterCapabilityToken,
+  resolveRuntimeAdapterAuthAudience,
+  resolveRuntimeAdapterAuthSeed,
+} from '../radapter/auth';
 import { decodeRuntimeAdapterMessage } from '../radapter/codec';
 import { getJReplicaByJurisdictionRef } from '../jurisdiction-runtime';
 import {
@@ -69,7 +75,7 @@ import {
   listPersistedEntityIdsAtHeight,
   registerEnvChangeCallback,
 } from '../runtime.ts';
-import type { EntityInput, Env } from '../types';
+import type { EntityInput, Env, JReplica } from '../types';
 import {
   hasPendingRuntimeWork,
   BOOTSTRAP_POLL_MS,
@@ -136,6 +142,7 @@ type HubPairHealth = {
 type VisibleHubProfile = {
   name: string;
   entityId: string;
+  runtimeId: string;
   jurisdictionName: string;
 };
 
@@ -260,6 +267,29 @@ const normalizeJurisdictionDisplayName = (value: unknown): string => {
 const normalizeJurisdictionKey = (value: unknown): string =>
   normalizeJurisdictionDisplayName(value).trim().toLowerCase();
 
+const resolveJReplicaForJurisdictionName = (
+  env: Env,
+  jurisdictionName: string,
+): { name: string; replica: JReplica } | null => {
+  const targetKey = normalizeJurisdictionKey(jurisdictionName);
+  if (!targetKey) return null;
+  for (const [name, replica] of env.jReplicas?.entries?.() || []) {
+    if (
+      normalizeJurisdictionKey(name) === targetKey ||
+      normalizeJurisdictionKey(replica?.name || '') === targetKey
+    ) {
+      return { name, replica };
+    }
+  }
+  return null;
+};
+
+const sameJurisdictionName = (left: unknown, right: unknown): boolean => {
+  const leftKey = normalizeJurisdictionKey(left);
+  const rightKey = normalizeJurisdictionKey(right);
+  return leftKey.length > 0 && leftKey === rightKey;
+};
+
 type JurisdictionImportDiagnostics = {
   name: string;
   rpc: string;
@@ -367,6 +397,37 @@ if (!directWsUrl) {
 }
 const nodeLog = createStructuredLogger('mesh.hub', { hub: resolvedArgs.name });
 let jurisdictionImportDiagnostics: JurisdictionImportDiagnostics | null = null;
+
+const resolveOperatorAppUrl = (): string => {
+  const explicit = String(process.env['XLN_OPERATOR_APP_URL'] || process.env['XLN_APP_URL'] || '').trim();
+  if (explicit) return explicit.replace(/\/+$/, '').endsWith('/app')
+    ? explicit.replace(/\/+$/, '')
+    : `${explicit.replace(/\/+$/, '')}/app`;
+  try {
+    const parsed = new URL(directWsUrl);
+    if (parsed.hostname === 'xln.finance' || parsed.hostname.endsWith('.xln.finance')) {
+      return `https://${parsed.hostname}/app`;
+    }
+  } catch {
+    // Fall back below.
+  }
+  return 'http://localhost:8080/app';
+};
+
+const buildRuntimeInspectUrl = (env: Env): string | null => {
+  const seed = resolveRuntimeAdapterAuthSeed(env);
+  if (!seed) return null;
+  const token = deriveRuntimeAdapterCapabilityToken(seed, 'read', Date.now() + 60 * 60 * 1_000, {
+    audience: resolveRuntimeAdapterAuthAudience(env),
+    keyId: String(resolvedArgs.name || 'hub').toLowerCase(),
+    tokenId: `inspect-${String(env.runtimeId || resolvedArgs.name || 'hub').toLowerCase()}-${Date.now()}`,
+  });
+  const url = new URL(resolveOperatorAppUrl());
+  url.searchParams.set('runtime', 'remote');
+  url.searchParams.set('ws', directWsUrl);
+  url.searchParams.set('token', token);
+  return url.toString();
+};
 
 const timings: TimingMap = {
   runtime_boot: { startedAt: null, completedAt: null, ms: null },
@@ -952,13 +1013,18 @@ const ensurePeerBootstrapReserves = async (
   }
 
   for (const [jurisdictionName, profiles] of profilesByJurisdiction) {
-    const jadapter = env.jReplicas?.get(jurisdictionName)?.jadapter;
+    const resolvedReplica = resolveJReplicaForJurisdictionName(env, jurisdictionName);
+    const replicaName = resolvedReplica?.replica?.name || resolvedReplica?.name || jurisdictionName;
+    const jadapter = resolvedReplica?.replica?.jadapter;
     if (!jadapter) {
-      throw new Error(`PEER_RESERVE_JADAPTER_MISSING: jurisdiction=${jurisdictionName}`);
+      throw new Error(
+        `PEER_RESERVE_JADAPTER_MISSING: jurisdiction=${jurisdictionName} ` +
+        `known=${Array.from(env.jReplicas?.keys?.() || []).join(',')}`,
+      );
     }
-    const catalog = jurisdictionName === env.activeJurisdiction
+    const catalog = sameJurisdictionName(jurisdictionName, env.activeJurisdiction || replicaName)
       ? tokenCatalog
-      : await ensureTokenCatalog(jadapter, true, jurisdictionName);
+      : await ensureTokenCatalog(jadapter, true, replicaName);
     const mints: Array<{ entityId: string; tokenId: number; amount: bigint }> = [];
     for (const peer of profiles) {
       for (const token of catalog.slice(0, HUB_REQUIRED_TOKEN_COUNT)) {
@@ -977,7 +1043,7 @@ const ensurePeerBootstrapReserves = async (
     }
     if (mints.length === 0) continue;
     const events = await jadapter.debugFundReservesBatch(mints);
-    await applyJEventsToEnv(env, events, `${resolvedArgs.name}-peer-reserve-fund-${jurisdictionName}`);
+    await applyJEventsToEnv(env, events, `${resolvedArgs.name}-peer-reserve-fund-${replicaName}`);
     await settleRuntimeFor(env, 20);
   }
 };
@@ -1094,9 +1160,26 @@ const readVisibleHubProfiles = (env: Env, jurisdictionName: string): VisibleHubP
     .map(profile => ({
       name: String(profile.name || '').trim(),
       entityId: String(profile.entityId || '').toLowerCase(),
+      runtimeId: normalizeRuntimeId(profile.runtimeId || ''),
       jurisdictionName: normalizeJurisdictionDisplayName(profile.metadata?.jurisdiction?.name || ''),
     }))
-    .filter(profile => profile.name.length > 0 && profile.entityId.length > 0 && profile.jurisdictionName.length > 0);
+    .filter(profile =>
+      profile.name.length > 0 &&
+      profile.entityId.length > 0 &&
+      profile.runtimeId.length > 0 &&
+      profile.jurisdictionName.length > 0,
+    );
+};
+
+const directHubPeersReady = (env: Env, peers: VisibleHubProfile[]): boolean => {
+  if (peers.length === 0) return true;
+  const openRuntimeIds = new Set(
+    (getP2PState(env).directPeers || [])
+      .filter(peer => peer.open === true)
+      .map(peer => normalizeRuntimeId(peer.runtimeId || ''))
+      .filter(runtimeId => runtimeId.length > 0),
+  );
+  return peers.every(peer => openRuntimeIds.has(peer.runtimeId));
 };
 
 const buildPairHealth = (env: Env, selfEntityId: string, peers: Array<{ name: string; entityId: string }>): HubPairHealth[] => {
@@ -1963,6 +2046,9 @@ const run = async (): Promise<void> => {
       }
 
       const peers = requiredHubProfiles.filter(profile => profile.entityId !== bootstrap.entityId.toLowerCase());
+      if (!directHubPeersReady(env, peers)) {
+        return;
+      }
       const visibleProfiles = env.gossip?.getProfiles?.() || [];
       const visibleSupportPeers = supportPeerIdentities.filter((identity) =>
         identity.entityId !== bootstrap.entityId.toLowerCase() &&
@@ -2137,6 +2223,16 @@ const run = async (): Promise<void> => {
   console.log(
     `[MESH-HUB] READY name=${resolvedArgs.name} entityId=${bootstrap.entityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
   );
+  try {
+    const inspectUrl = buildRuntimeInspectUrl(env);
+    if (inspectUrl) {
+      console.log(`[MESH-HUB] INSPECT_URL name=${resolvedArgs.name} url=${inspectUrl}`);
+    }
+  } catch (error) {
+    console.warn(
+      `[MESH-HUB] INSPECT_URL_UNAVAILABLE name=${resolvedArgs.name} error=${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
 
   let shutdownStarted = false;
   const shutdown = async (code: number = 0) => {
