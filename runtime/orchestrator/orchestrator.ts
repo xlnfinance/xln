@@ -980,6 +980,7 @@ const computeAggregatedHealth = (): AggregatedHealth => {
   }
   const rawMmCross = marketMakerChild.lastHealth?.marketMaker?.cross;
   const mmCross = {
+    applicable: rawMmCross?.applicable === true || Number(rawMmCross?.expectedRoutes || 0) > 0,
     ok: rawMmCross?.ok === true,
     expectedRoutes: Number(rawMmCross?.expectedRoutes || 0),
     expectedOffersPerRoute: Number(rawMmCross?.expectedOffersPerRoute || 0),

@@ -54,6 +54,7 @@ export type E2EMarketMakerCrossRouteHealth = {
 };
 
 export type E2EMarketMakerCrossHealth = {
+  applicable?: boolean;
   ok?: boolean;
   expectedRoutes?: number;
   expectedOffersPerRoute?: number;
@@ -221,6 +222,7 @@ const summarizeHealth = (health: E2EHealthResponse | null): string => {
         expectedOffersPerHub: health.marketMaker?.expectedOffersPerHub ?? 0,
         expectedOffersPerPair: health.marketMaker?.expectedOffersPerPair ?? 0,
         cross: {
+          applicable: health.marketMaker?.cross?.applicable ?? false,
           ok: health.marketMaker?.cross?.ok ?? false,
           expectedRoutes: health.marketMaker?.cross?.expectedRoutes ?? 0,
           expectedOffersPerRoute: health.marketMaker?.cross?.expectedOffersPerRoute ?? 0,

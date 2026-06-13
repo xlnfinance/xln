@@ -712,31 +712,36 @@ run_local_deploy() {
       run_or_fail_deploy "failed to enforce production host hygiene" ensure_production_host_hygiene
       run_or_fail_deploy "failed to configure production direct hub ports" ensure_production_direct_hub_ports
       run_or_fail_deploy "failed to enforce nginx site consistency" ensure_production_nginx_site_consistency
-      echo "[deploy] resetting production anvil + runtime state"
       mkdir -p db/runtime db/custody data logs
       pkill -TERM -f 'scripts/start-custody.sh' >/dev/null 2>&1 || true
       pkill -TERM -f 'runtime/scripts/start-custody-prod.ts' >/dev/null 2>&1 || true
       sleep 1
       pkill -KILL -f 'scripts/start-custody.sh' >/dev/null 2>&1 || true
       pkill -KILL -f 'runtime/scripts/start-custody-prod.ts' >/dev/null 2>&1 || true
-      rm -rf db/runtime/prod-main db/runtime/prod-mesh db/custody/prod db-tmp/prod-custody
-      rm -f data/anvil-state.json
 
-      lsof -ti TCP:8545 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
+      if [ "$FRESH" = "1" ]; then
+        echo "[deploy] resetting production anvil + runtime state (--fresh)"
+        rm -rf db/runtime/prod-main db/runtime/prod-mesh db/custody/prod db-tmp/prod-custody
+        rm -f data/anvil-state.json
+        lsof -ti TCP:8545 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
+        pm2 delete anvil >/dev/null 2>&1 || true
+        run_or_fail_deploy "failed to start anvil via pm2" pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M -- --reset
+      elif ! wait_for_rpc_chain "http://127.0.0.1:8545" "0x7a69"; then
+        echo "[deploy] production anvil is not healthy; restarting without deleting persisted state"
+        pm2 delete anvil >/dev/null 2>&1 || true
+        run_or_fail_deploy "failed to start anvil via pm2" pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M
+      else
+        echo "[deploy] preserving production anvil + runtime state"
+      fi
+      if ! wait_for_rpc_chain "http://127.0.0.1:8545" "0x7a69"; then
+        fail_deploy_with_debug "anvil did not become ready on :8545"
+      fi
+
       lsof -ti TCP:8087 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
       lsof -ti TCP:8088 -sTCP:LISTEN 2>/dev/null | xargs kill -9 2>/dev/null || true
       pm2 delete xln-server >/dev/null 2>&1 || true
       pm2 delete xln-watchtower >/dev/null 2>&1 || true
       pm2 delete xln-custody >/dev/null 2>&1 || true
-      pm2 delete anvil >/dev/null 2>&1 || true
-
-      run_or_fail_deploy "failed to start anvil via pm2" pm2 start scripts/start-anvil.sh --name anvil --interpreter bash --max-memory-restart 512M -- --reset
-      if ! wait_for_rpc_chain "http://127.0.0.1:8545" "0x7a69"; then
-        fail_deploy_with_debug "anvil did not become ready on :8545"
-      fi
-
-      pm2 delete xln-server >/dev/null 2>&1 || true
-      pm2 delete xln-watchtower >/dev/null 2>&1 || true
       run_or_fail_deploy "failed to start xln-server via pm2" pm2 start scripts/start-server.sh --name xln-server --interpreter bash --max-memory-restart 900M
       run_or_fail_deploy "failed to start xln-watchtower via pm2" pm2 start scripts/start-watchtower.sh --name xln-watchtower --interpreter bash --max-memory-restart 256M
       if ! wait_for_watchtower; then

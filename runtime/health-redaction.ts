@@ -230,6 +230,7 @@ const publicMarketMakerHealth = (marketMaker: PublicHealthRecord): Record<string
     const cross = valueOf(marketMaker, 'cross');
     if (!cross || typeof cross !== 'object') return undefined;
     return {
+      applicable: valueOf(cross as PublicHealthRecord, 'applicable') === true,
       ok: valueOf(cross as PublicHealthRecord, 'ok') === true,
       expectedRoutes: valueOf(cross as PublicHealthRecord, 'expectedRoutes'),
       routeCount: arrayOf(cross as PublicHealthRecord, 'routes')?.length,

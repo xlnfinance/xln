@@ -121,6 +121,7 @@ export const getMarketMakerHealth = (
   expectedOffersPerHub: number;
   expectedOffersPerPair: number;
   cross: {
+    applicable: boolean;
     ok: boolean;
     expectedRoutes: number;
     expectedOffersPerRoute: number;
@@ -143,6 +144,7 @@ export const getMarketMakerHealth = (
     0,
   );
   const cross = {
+    applicable: false,
     ok: true,
     expectedRoutes: 0,
     expectedOffersPerRoute: 0,

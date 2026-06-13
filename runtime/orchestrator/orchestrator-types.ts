@@ -182,6 +182,7 @@ export type MarketMakerCrossRouteHealthPayload = {
 };
 
 export type MarketMakerCrossHealthPayload = {
+  applicable: boolean;
   ok: boolean;
   expectedRoutes: number;
   expectedOffersPerRoute: number;
