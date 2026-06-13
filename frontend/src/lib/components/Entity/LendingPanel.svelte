@@ -1,5 +1,4 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
   import { Banknote, RefreshCw } from 'lucide-svelte';
   import type { EntityReplica } from '$lib/types/ui';
   import { xlnFunctions } from '../../stores/xlnStore';
@@ -77,6 +76,7 @@
   let lastError = '';
   let lastSuccess = '';
   let state: LendingStateResponse | null = null;
+  let lastAutoRefreshKey = '';
 
   $: activeXlnFunctions = $xlnFunctions;
   $: normalizedEntityId = String(entityId || replica?.state?.entityId || '').trim().toLowerCase();
@@ -258,13 +258,16 @@
     });
   }
 
-  $: if (selectedHubEntityId && normalizedEntityId && selectedTokenId) {
+  $: lendingStateKey = selectedHubEntityId && normalizedEntityId && selectedTokenId
+    ? `${selectedHubEntityId.toLowerCase()}:${normalizedEntityId}:${selectedTokenId}`
+    : '';
+  $: if (lendingStateKey && lendingStateKey !== lastAutoRefreshKey) {
+    lastAutoRefreshKey = lendingStateKey;
     void refreshLendingState();
+  } else if (!lendingStateKey && lastAutoRefreshKey) {
+    lastAutoRefreshKey = '';
+    state = null;
   }
-
-  onMount(() => {
-    void refreshLendingState();
-  });
 </script>
 
 <section class="lending-panel" data-testid="lending-panel">
