@@ -201,10 +201,10 @@ describe('serialization-utils', () => {
     });
 
     for (const command of [
-      { kind: 0 as const, ownerId: 'alice', orderId: 'a1', side: 1 as const, tif: 0 as const, postOnly: false, priceTicks: 110n, qtyLots: 25 },
-      { kind: 0 as const, ownerId: 'bob', orderId: 'b1', side: 1 as const, tif: 0 as const, postOnly: false, priceTicks: 112n, qtyLots: 30 },
-      { kind: 0 as const, ownerId: 'carol', orderId: 'c1', side: 0 as const, tif: 0 as const, postOnly: false, priceTicks: 90n, qtyLots: 20 },
-      { kind: 0 as const, ownerId: 'dan', orderId: 'd1', side: 0 as const, tif: 0 as const, postOnly: false, priceTicks: 88n, qtyLots: 15 },
+      { kind: 0 as const, ownerId: 'alice', orderId: 'a1', side: 1 as const, tif: 0 as const, postOnly: false, priceTicks: 110n, qtyLots: 25n },
+      { kind: 0 as const, ownerId: 'bob', orderId: 'b1', side: 1 as const, tif: 0 as const, postOnly: false, priceTicks: 112n, qtyLots: 30n },
+      { kind: 0 as const, ownerId: 'carol', orderId: 'c1', side: 0 as const, tif: 0 as const, postOnly: false, priceTicks: 90n, qtyLots: 20n },
+      { kind: 0 as const, ownerId: 'dan', orderId: 'd1', side: 0 as const, tif: 0 as const, postOnly: false, priceTicks: 88n, qtyLots: 15n },
       { kind: 1 as const, ownerId: 'bob', orderId: 'b1' },
     ]) {
       book = applyCommand(book, command).state;
@@ -230,7 +230,7 @@ describe('serialization-utils', () => {
       tif: 0 as const,
       postOnly: false,
       priceTicks: 111n,
-      qtyLots: 10,
+      qtyLots: 10n,
     };
     const afterLive = applyCommand(book, nextOrder);
     const afterRestored = applyCommand(restored, nextOrder);
@@ -251,8 +251,8 @@ describe('serialization-utils', () => {
     });
 
     for (const command of [
-      { kind: 0 as const, ownerId: 'alice', orderId: 'acct-a:offer-1', side: 1 as const, tif: 0 as const, postOnly: false, priceTicks: 25_000_000n, qtyLots: 2 },
-      { kind: 0 as const, ownerId: 'bob', orderId: 'acct-b:offer-2', side: 0 as const, tif: 0 as const, postOnly: false, priceTicks: 24_999_000n, qtyLots: 1 },
+      { kind: 0 as const, ownerId: 'alice', orderId: 'acct-a:offer-1', side: 1 as const, tif: 0 as const, postOnly: false, priceTicks: 25_000_000n, qtyLots: 2n },
+      { kind: 0 as const, ownerId: 'bob', orderId: 'acct-b:offer-2', side: 0 as const, tif: 0 as const, postOnly: false, priceTicks: 24_999_000n, qtyLots: 1n },
     ]) {
       book = applyCommand(book, command).state;
     }

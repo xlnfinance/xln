@@ -37,6 +37,13 @@ export async function handleJRebroadcast(
   }
 
   const sent = newState.jBatchState.sentBatch;
+  if (sent.terminalFailure) {
+    const msg =
+      `❌ Cannot rebroadcast failed sentBatch nonce=${sent.entityNonce}: ${sent.terminalFailure.message}. ` +
+      `Clear or rebuild the batch before submitting again.`;
+    addMessage(newState, msg);
+    throw new Error(msg);
+  }
   const signerId = entityState.config.validators[0];
   if (!signerId) {
     const msg = '❌ No signerId available for j_rebroadcast';

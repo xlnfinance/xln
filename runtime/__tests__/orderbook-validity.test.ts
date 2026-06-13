@@ -109,7 +109,7 @@ describe('orderbook validity', () => {
         tif: 0,
         postOnly: false,
         priceTicks: 1000n,
-        qtyLots: 1,
+        qtyLots: 1n,
       },
     ).state;
 
@@ -130,7 +130,7 @@ describe('orderbook validity', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 1001n,
-      qtyLots: 1,
+      qtyLots: 1n,
     }).state;
     book = applyCommand(book, {
       kind: 0,
@@ -140,7 +140,7 @@ describe('orderbook validity', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 1005n,
-      qtyLots: 1,
+      qtyLots: 1n,
     }).state;
 
     const report = validateBookAgainstOffers(makeState(book));
@@ -170,11 +170,41 @@ describe('orderbook validity', () => {
         tif: 0,
         postOnly: false,
         priceTicks: hugePriceTicks,
-        qtyLots: 1,
+        qtyLots: 1n,
       },
     ).state;
 
     const report = validateBookAgainstOffers(makeState(book, 'offer-1', makeOffer({ priceTicks: hugePriceTicks })));
+    expect(report.invalidOffers).toEqual([]);
+    expect(report.ok).toBe(true);
+  });
+
+  test('accepts order quantities above the old uint32 lot ceiling', () => {
+    const hugeQtyLots = 0x1_0000_0000n + 123n;
+    const hugeBaseAmount = hugeQtyLots * SWAP_LOT_SCALE;
+    const hugeQuoteAmount = (hugeBaseAmount * 1000n) / ORDERBOOK_PRICE_SCALE;
+    const book = applyCommand(
+      createBook({ bucketWidthTicks: 100n, maxOrders: 32, stpPolicy: 1 }),
+      {
+        kind: 0,
+        ownerId: 'hub',
+        orderId: 'alice:offer-1',
+        side: 1,
+        tif: 0,
+        postOnly: false,
+        priceTicks: 1000n,
+        qtyLots: hugeQtyLots,
+      },
+    ).state;
+
+    const report = validateBookAgainstOffers(makeState(
+      book,
+      'offer-1',
+      makeOffer({
+        giveAmount: hugeBaseAmount,
+        wantAmount: hugeQuoteAmount,
+      }),
+    ));
     expect(report.invalidOffers).toEqual([]);
     expect(report.ok).toBe(true);
   });
@@ -190,7 +220,7 @@ describe('orderbook validity', () => {
         tif: 0,
         postOnly: false,
         priceTicks: 1000n,
-        qtyLots: 1,
+        qtyLots: 1n,
       },
     ).state;
 

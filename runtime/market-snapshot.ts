@@ -1,7 +1,14 @@
 import type { EntityReplica } from './types';
 import { ORDERBOOK_PRICE_SCALE, getBookSideLevels, type BookState } from './orderbook';
 
-export type MarketSideLevel = { price: string; size: number; total: number; orderCount?: number };
+export type MarketSideLevel = {
+  price: string;
+  size: string;
+  total: string;
+  orderCount?: number;
+  ownerIds?: string[];
+  orderIds?: string[];
+};
 
 export type MarketSnapshotPayload = {
   format: 'exact-price-levels-v2';
@@ -33,14 +40,16 @@ const extractMarketSideLevels = (
 ): MarketSideLevel[] => {
   const capDepth = Math.max(1, Math.min(depth, RPC_MARKET_MAX_DEPTH));
   const levels = getBookSideLevels(book, side, capDepth);
-  let running = 0;
+  let running = 0n;
   return levels.map((level) => {
     running += level.qtyLots;
     return {
       price: level.priceTicks.toString(),
-      size: level.qtyLots,
-      total: running,
+      size: level.qtyLots.toString(),
+      total: running.toString(),
       orderCount: level.orderIds.length,
+      ownerIds: level.ownerIds,
+      orderIds: level.orderIds,
     };
   });
 };

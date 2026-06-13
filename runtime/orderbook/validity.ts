@@ -3,15 +3,15 @@ import {
   computeSwapPriceTicks,
   deriveSide,
   getBookOrders,
+  MAX_ORDERBOOK_QTY_LOTS,
   SWAP_LOT_SCALE,
   type BookOrderState,
   type BookState,
   type OrderbookExtState,
+  type PriceBucketState,
 } from './types';
 import { compareCanonicalText, swapKey, type SwapKey } from '../swap-execution';
 import type { AccountMachine, EntityState, SwapOffer } from '../types';
-
-const MAX_QTY_LOTS = 0xFFFFFFFFn;
 
 export type OrderbookMediumField = 'pairId' | 'side' | 'priceTicks' | 'qtyLots' | 'ownerId' | 'pairIndex';
 export type QuarantineReason =
@@ -123,7 +123,7 @@ const normalizeOpenOfferForBook = (
   if (baseAmount % SWAP_LOT_SCALE !== 0n) return { invalid: { swapKey: key, reason: 'lot-misaligned' } };
 
   const qtyLots = baseAmount / SWAP_LOT_SCALE;
-  if (qtyLots <= 0n || qtyLots > MAX_QTY_LOTS) return { invalid: { swapKey: key, reason: 'invalid-order' } };
+  if (qtyLots <= 0n || qtyLots > MAX_ORDERBOOK_QTY_LOTS) return { invalid: { swapKey: key, reason: 'invalid-order' } };
 
   const priceTicks =
     typeof offer.priceTicks === 'bigint' && offer.priceTicks > 0n
@@ -186,7 +186,7 @@ export function validateBookStructure(book: BookState): BookStructureReport {
   const validateSideBuckets = (
     side: 0 | 1,
     bucketIds: bigint[],
-    buckets: Map<string, { bucketId: bigint; pricesAsc: bigint[]; levels: Map<string, { priceTicks: bigint; orderIds: string[]; totalQtyLots: number }> }>,
+    buckets: Map<string, PriceBucketState>,
     label: 'bid' | 'ask',
   ): number => {
     let levelCount = 0;
@@ -214,7 +214,7 @@ export function validateBookStructure(book: BookState): BookStructureReport {
           continue;
         }
         if (level.orderIds.length === 0) errors.push(`${label} level ${priceTicks.toString()} empty orderIds`);
-        let computedTotal = 0;
+        let computedTotal = 0n;
         for (const orderId of level.orderIds) {
           reachable.add(orderId);
           const order = book.orders.get(orderId);
@@ -225,8 +225,8 @@ export function validateBookStructure(book: BookState): BookStructureReport {
           if (order.side !== side) errors.push(`${label} level ${priceTicks.toString()} side mismatch for ${orderId}`);
           if (order.priceTicks !== priceTicks) errors.push(`${label} level ${priceTicks.toString()} price mismatch for ${orderId}`);
           if (order.bucketId !== bucketId) errors.push(`${label} level ${priceTicks.toString()} bucket mismatch for ${orderId}`);
-          if (order.qtyLots <= 0) errors.push(`${label} level ${priceTicks.toString()} non-positive qty for ${orderId}`);
-          computedTotal += Math.max(0, order.qtyLots);
+          if (order.qtyLots <= 0n) errors.push(`${label} level ${priceTicks.toString()} non-positive qty for ${orderId}`);
+          if (order.qtyLots > 0n) computedTotal += order.qtyLots;
         }
         if (computedTotal !== level.totalQtyLots) {
           errors.push(`${label} level ${priceTicks.toString()} total mismatch expected=${computedTotal} actual=${level.totalQtyLots}`);
@@ -237,7 +237,7 @@ export function validateBookStructure(book: BookState): BookStructureReport {
         if (!bucket.pricesAsc.some((price) => price.toString() === levelKey)) {
           errors.push(`${label} bucket ${bucketId.toString()} level ${levelKey} missing from pricesAsc`);
         }
-        if (level.totalQtyLots <= 0) errors.push(`${label} level ${levelKey} non-positive total`);
+        if (level.totalQtyLots <= 0n) errors.push(`${label} level ${levelKey} non-positive total`);
       }
     }
     return levelCount;

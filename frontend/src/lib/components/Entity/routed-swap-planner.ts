@@ -6,7 +6,7 @@ import {
 
 export type BookSide = 'bid' | 'ask';
 
-export type SnapshotLevel = { price: bigint; size: number; total: number };
+export type SnapshotLevel = { price: bigint; size: bigint; total: bigint };
 
 export type OrderbookSnapshot = {
   pairId: string;

@@ -124,6 +124,16 @@ export async function createRpcAdapter(
   const watcherErrorMessage = (error: unknown): string => (
     error instanceof Error ? error.message : String(error)
   );
+  const isTransientRpcUnavailable = (error: unknown): boolean => {
+    const message = watcherErrorMessage(error);
+    const code = error instanceof Error && 'code' in error
+      ? String((error as Error & { code?: unknown }).code || '')
+      : '';
+    return [
+      code,
+      message,
+    ].some((value) => /ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND/i.test(value));
+  };
   const watcherErrorDetails = (error: unknown): Record<string, unknown> => {
     if (!(error instanceof Error)) return { raw: String(error) };
     const err = error as Error & {
@@ -1591,6 +1601,8 @@ export async function createRpcAdapter(
       (entityProvider as unknown as ContractListenerSource | undefined)?.removeAllListeners?.();
       watcherStopping = false;
       watcherEnv = env;
+      consecutiveTransientWatcherFailures = 0;
+      lastTransientWatcherLogAt = 0;
       txCounter.value = 0;
       txCounter._seenLogs = { set: new Set<string>(), order: [] as string[] };
       const watchPollMs = BLOCKCHAIN.J_WATCHER_POLL_INTERVAL_MS;
@@ -1805,6 +1817,7 @@ export async function createRpcAdapter(
               });
             }
             lastSyncedBlock = safeToBlock;
+            consecutiveTransientWatcherFailures = 0;
             updateWatcherJurisdictionCursor(activeEnv, lastSyncedBlock, addresses.depository);
             return;
           }
@@ -1818,6 +1831,7 @@ export async function createRpcAdapter(
           }
 
           lastSyncedBlock = safeToBlock;
+          consecutiveTransientWatcherFailures = 0;
           updateWatcherJurisdictionCursor(activeEnv, lastSyncedBlock, addresses.depository);
         })().catch((error: unknown) => {
           const message = watcherErrorMessage(error);
@@ -1832,6 +1846,33 @@ export async function createRpcAdapter(
               toBlock: pollToBlock,
               lastSyncedBlock,
             });
+            return;
+          }
+          if (isTransientRpcUnavailable(error)) {
+            consecutiveTransientWatcherFailures += 1;
+            const now = Date.now();
+            if (
+              consecutiveTransientWatcherFailures === 1 ||
+              now - lastTransientWatcherLogAt >= 10_000
+            ) {
+              lastTransientWatcherLogAt = now;
+              emitWatcherDebug({
+                event: 'j_watch_transient_rpc_unavailable',
+                message,
+                chainId: config.chainId,
+                rpcUrl: config.rpcUrl,
+                step: pollStep,
+                fromBlock: pollFromBlock,
+                toBlock: pollToBlock,
+                lastSyncedBlock,
+                consecutiveFailures: consecutiveTransientWatcherFailures,
+                error: watcherErrorDetails(error),
+              });
+              console.warn(
+                `🔭⚠️ [JAdapter:rpc] transient watcher RPC unavailable ` +
+                `(chain=${config.chainId}, failures=${consecutiveTransientWatcherFailures}): ${message}`,
+              );
+            }
             return;
           }
           const fatalPayload = {
@@ -1942,6 +1983,8 @@ export async function createRpcAdapter(
   let watcherFatalError: string | null = null;
   let watcherStopping = false;
   let lastSyncedBlock = 0;
+  let consecutiveTransientWatcherFailures = 0;
+  let lastTransientWatcherLogAt = 0;
   const txCounter: EventBatchCounter = { value: 0 };
 
   trace('return adapter');

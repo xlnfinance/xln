@@ -4,6 +4,7 @@ import {
   createBook,
   deriveSide,
   getBookOrder,
+  MAX_ORDERBOOK_QTY_LOTS,
   ORDERBOOK_PRICE_SCALE,
   SWAP_LOT_SCALE,
   type BookEvent,
@@ -55,13 +56,13 @@ type CanonicalRestingOffer = {
 };
 
 type SameTradeFillAggregate = {
-  filledLots: number;
-  originalLots: number;
+  filledLots: bigint;
+  originalLots: bigint;
   weightedCost: bigint;
 };
 
 type CrossTradeFillAggregate = {
-  filledLots: number;
+  filledLots: bigint;
   weightedCost: bigint;
 };
 
@@ -88,8 +89,6 @@ type SameFillResolvePlan = {
     exactFillRatio: ExactFillRatio;
   };
 };
-
-export const MAX_ORDERBOOK_QTY_LOTS = 0xffffffffn;
 
 type SameOrderbookMaterialization = {
   pairId: string;
@@ -367,9 +366,9 @@ const materializeCanonicalRestingOffer = (
   giveTokenId: number,
   wantTokenId: number,
   priceTicks: bigint,
-  qtyLots: number,
+  qtyLots: bigint,
 ): CanonicalRestingOffer => {
-  const baseAmount = BigInt(qtyLots) * SWAP_LOT_SCALE;
+  const baseAmount = qtyLots * SWAP_LOT_SCALE;
   const side = deriveSide(giveTokenId, wantTokenId);
   const quoteAmount = (baseAmount * priceTicks) / ORDERBOOK_PRICE_SCALE;
   if (side === 1) {
@@ -425,7 +424,7 @@ export const aggregateCrossTradeFills = (
 ): Map<string, CrossTradeFillAggregate> => {
   const fillsPerOrder = new Map<string, CrossTradeFillAggregate>();
   for (const event of events) {
-    const tradeCost = event.price * BigInt(event.qty);
+    const tradeCost = event.price * event.qty;
     for (const orderId of [event.makerOrderId, event.takerOrderId]) {
       const entry = fillsPerOrder.get(orderId);
       if (entry) {
@@ -444,7 +443,7 @@ export const aggregateSameTradeFills = (
 ): Map<string, SameTradeFillAggregate> => {
   const fillsPerOrder = new Map<string, SameTradeFillAggregate>();
   for (const event of events) {
-    const tradeCost = event.price * BigInt(event.qty);
+    const tradeCost = event.price * event.qty;
 
     const makerEntry = fillsPerOrder.get(event.makerOrderId);
     if (!makerEntry) {

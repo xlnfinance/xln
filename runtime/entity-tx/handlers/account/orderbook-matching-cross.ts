@@ -2,6 +2,7 @@ import type { EntityState } from '../../../types';
 import {
   applyCommand,
   getBookOrder,
+  MAX_ORDERBOOK_QTY_LOTS,
   SWAP_LOT_SCALE,
   type BookState,
   type OrderbookExtState,
@@ -31,7 +32,6 @@ import {
   aggregateCrossTradeFills,
   buildCrossMarketOfferFromBookOrder,
   createEmptyPairBook,
-  MAX_ORDERBOOK_QTY_LOTS,
   parseNamespacedOrderId,
   rejectEventsForOrder,
   tradeEvents as collectTradeEvents,
@@ -83,7 +83,7 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
 
   const crossLiveOfferMeta = new Map<string, CrossMarketOffer>();
   const assertedCrossJurisdictionPairs = new Set<string>();
-  const crossAggregatedFills = new Map<string, { filledLots: number; weightedCost: bigint }>();
+  const crossAggregatedFills = new Map<string, { filledLots: bigint; weightedCost: bigint }>();
   const suspendedCrossOrderIds = new Set<string>();
   const workingBookCache = new Map<string, BookState>();
   const speculativeTradePairs = new Set<string>();
@@ -243,7 +243,7 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
       }
       const staticMismatch =
         meta.pairId !== pairId || order.priceTicks !== meta.priceTicks || order.ownerId !== meta.makerId;
-      const storedQtyLots = BigInt(order.qtyLots);
+      const storedQtyLots = order.qtyLots;
       if (staticMismatch) {
         throw new Error(
           `ORDERBOOK_CROSS_J_CACHE_MISMATCH: pair=${pairId} order=${orderId} ` +
@@ -319,7 +319,7 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
     }
     const existingOrder = getBookOrder(committedBook, currentNamespacedOrderId);
     if (existingOrder) {
-      const storedQtyLots = BigInt(existingOrder.qtyLots);
+      const storedQtyLots = existingOrder.qtyLots;
       if (
         existingOrder.ownerId !== marketOffer.makerId ||
         existingOrder.side !== marketOffer.side ||
@@ -348,7 +348,7 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
         tif: rawOffer.timeInForce,
         postOnly: debugRebuildProjectionOnly,
         priceTicks: marketOffer.priceTicks,
-        qtyLots: Number(qtyLots),
+        qtyLots,
         minFillRatio: rawOffer.minFillRatio,
       }, { suspendedOrderIds: suspendedCrossOrderIds });
     } catch (error) {
@@ -389,7 +389,7 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
         tif: rawOffer.timeInForce,
         postOnly: debugRebuildProjectionOnly,
         priceTicks: marketOffer.priceTicks,
-        qtyLots: Number(qtyLots),
+        qtyLots,
         minFillRatio: rawOffer.minFillRatio,
       }, { suspendedOrderIds: suspendedCrossOrderIds });
       if (collectTradeEvents(committedResult.events).length > 0) {

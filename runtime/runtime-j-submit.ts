@@ -1,6 +1,7 @@
 import type { EntityInput, Env, JInput, JTx, RuntimeTx } from './types';
 import { getCachedSignerPrivateKey } from './account-crypto';
 import { isBatchEmpty } from './j-batch';
+import { getEntityReplicaById } from './orchestrator/mesh-common';
 
 export type RuntimeJOutboxQueue = (
   env: Env,
@@ -66,13 +67,54 @@ const validateSealedBatchJTx = (jTx: JTx): void => {
   );
 };
 
+export const isTransientJSubmitFailure = (error: unknown): boolean => {
+  const message = error instanceof Error ? error.message : String(error);
+  const code = error instanceof Error && 'code' in error
+    ? String((error as Error & { code?: unknown }).code || '')
+    : '';
+  return [
+    code,
+    message,
+  ].some((value) => (
+    /ECONNREFUSED|ECONNRESET|ETIMEDOUT|EPIPE|ENOTFOUND/i.test(value) ||
+    /transaction was not mined|timeout exceeded|request timeout|gateway timeout|503|504|rate limit/i.test(value)
+  ));
+};
+
+const markSentBatchTerminalFailure = (env: Env, jTx: JTx, message: string): void => {
+  if (jTx.type !== 'batch') return;
+  const replica = getEntityReplicaById(env, jTx.entityId);
+  const jBatchState = replica?.state?.jBatchState;
+  const sentBatch = jBatchState?.sentBatch;
+  if (!sentBatch) return;
+  const submittedNonce = typeof jTx.data?.entityNonce === 'number' ? jTx.data.entityNonce : null;
+  const submittedHash = String(jTx.data?.batchHash || '');
+  if (submittedNonce !== null && Number(sentBatch.entityNonce) !== submittedNonce) return;
+  if (submittedHash && sentBatch.batchHash && submittedHash !== sentBatch.batchHash) return;
+  sentBatch.terminalFailure = {
+    message,
+    failedAt: Number(env.timestamp || Date.now()),
+  };
+  jBatchState.status = 'failed';
+  jBatchState.failedAttempts = (jBatchState.failedAttempts || 0) + 1;
+};
+
+const markSentBatchTransientFailure = (env: Env, jTx: JTx): void => {
+  if (jTx.type !== 'batch') return;
+  const replica = getEntityReplicaById(env, jTx.entityId);
+  const jBatchState = replica?.state?.jBatchState;
+  if (!jBatchState?.sentBatch) return;
+  jBatchState.failedAttempts = (jBatchState.failedAttempts || 0) + 1;
+  jBatchState.status = 'sent';
+};
+
 /**
  * Submit post-commit J batches after the R-frame is durable.
  *
- * This is deliberately outside consensus. A failed chain submit is not a
- * market outcome; it means the runtime produced an invalid batch or the chain
- * transport is broken. Throw so the runtime loop halts with a debug payload
- * instead of manufacturing follow-up consensus state from a side-effect failure.
+ * This is deliberately outside consensus. Permanent/protocol submit failures
+ * mark the sent batch terminal before halting. Transient transport failures
+ * still halt the current loop with a debug payload, but must not poison the
+ * batch: a valid batch remains rebroadcastable after the operator fixes RPC.
  */
 export async function submitRuntimeJOutbox(
   env: Env,
@@ -99,29 +141,42 @@ export async function submitRuntimeJOutbox(
       console.log(`📤 [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} → ${jInput.jurisdictionName}`);
       validateSealedBatchJTx(jTx);
 
+      const submitData = jTx.data as { signerId?: unknown } | undefined;
+      const submitSignerId = typeof submitData?.signerId === 'string' ? submitData.signerId : undefined;
+      const submitSignerPrivateKey = submitSignerId ? getCachedSignerPrivateKey(submitSignerId) : null;
+      let result;
       try {
-        const submitData = jTx.data as { signerId?: unknown } | undefined;
-        const submitSignerId = typeof submitData?.signerId === 'string' ? submitData.signerId : undefined;
-        const submitSignerPrivateKey = submitSignerId ? getCachedSignerPrivateKey(submitSignerId) : null;
-        const result = await jAdapter.submitTx(jTx, {
+        result = await jAdapter.submitTx(jTx, {
           env,
           ...(submitSignerId ? { signerId: submitSignerId } : {}),
           ...(submitSignerPrivateKey ? { signerPrivateKey: submitSignerPrivateKey } : {}),
           timestamp: jTx.timestamp ?? env.timestamp,
         });
-
-        if (result.success) {
-          console.log(
-            `✅ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)}: ok (events=${result.events?.length ?? 0}, txHash=${result.txHash ?? 'n/a'})`,
-          );
-          await pollSubmittedJEventsBeforeFollowups(env, jAdapter);
-        } else {
-          console.error(`❌ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} FAILED: ${result.error}`);
-          throw new Error(`J_SUBMIT_FATAL: ${result.error || 'unknown'}`);
-        }
       } catch (error) {
         console.error(`❌ [J-SUBMIT] submitTx threw for ${jTx.entityId.slice(-4)}:`, error);
+        const message = error instanceof Error ? error.message : String(error);
+        if (isTransientJSubmitFailure(error)) {
+          markSentBatchTransientFailure(env, jTx);
+          throw new Error(`J_SUBMIT_TRANSIENT: ${message}`);
+        }
+        markSentBatchTerminalFailure(env, jTx, message);
         throw error;
+      }
+
+      if (result.success) {
+        console.log(
+          `✅ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)}: ok (events=${result.events?.length ?? 0}, txHash=${result.txHash ?? 'n/a'})`,
+        );
+        await pollSubmittedJEventsBeforeFollowups(env, jAdapter);
+      } else {
+        console.error(`❌ [J-SUBMIT] ${jTx.type} from ${jTx.entityId.slice(-4)} FAILED: ${result.error}`);
+        const message = result.error || 'unknown';
+        if (isTransientJSubmitFailure(message)) {
+          markSentBatchTransientFailure(env, jTx);
+          throw new Error(`J_SUBMIT_TRANSIENT: ${message}`);
+        }
+        markSentBatchTerminalFailure(env, jTx, message);
+        throw new Error(`J_SUBMIT_FATAL: ${message}`);
       }
     }
 

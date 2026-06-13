@@ -144,7 +144,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 1000n,
-      qtyLots: 1,
+      qtyLots: 1n,
     }).state;
     book = applyCommand(book, {
       kind: 0,
@@ -154,7 +154,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 1100n,
-      qtyLots: 1,
+      qtyLots: 1n,
     }).state;
 
     const lot = SWAP_LOT_SCALE;
@@ -897,7 +897,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 1000n,
-      qtyLots: 1,
+      qtyLots: 1n,
     }).state;
 
     const takerOffer = {
@@ -1397,7 +1397,7 @@ describe('orderbook matching fallback execution mapping', () => {
                 tif: 0,
                 postOnly: false,
                 priceTicks: nearAskPriceTicks,
-                qtyLots: 1,
+                qtyLots: 1n,
               }).state;
               book = applyCommand(book, {
                 kind: 0,
@@ -1407,7 +1407,7 @@ describe('orderbook matching fallback execution mapping', () => {
                 tif: 0,
                 postOnly: false,
                 priceTicks: farAskPriceTicks,
-                qtyLots: 1,
+                qtyLots: 1n,
               }).state;
               return book;
             })(),
@@ -1796,7 +1796,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 24_999_998n,
-      qtyLots: 1,
+      qtyLots: 1n,
     }).state;
 
     const makerOffer = {
@@ -1875,7 +1875,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 10_000n,
-      qtyLots: 1,
+      qtyLots: 1n,
     }).state;
 
     const route = {
@@ -1974,7 +1974,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 25_000_000n,
-      qtyLots: 30_000,
+      qtyLots: 30_000n,
     }).state;
 
     const route = {
@@ -2053,7 +2053,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const result = processCommittedOrderbookSwaps(entityState, [offer] as any);
 
     expect(result.bookUpdates).toEqual([]);
-    expect(getBookOrder(staleBook, namespacedOrderId)?.qtyLots).toBe(30_000);
+    expect(getBookOrder(staleBook, namespacedOrderId)?.qtyLots).toBe(30_000n);
   });
 
   test('does not persist speculative cross-j post-trade book before fill ack commits', () => {
@@ -2077,7 +2077,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 25_000_000n,
-      qtyLots: 40_000,
+      qtyLots: 40_000n,
     }).state;
 
     const makerRoute = {
@@ -2193,7 +2193,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(makerAck?.tx.data.cancelRemainder).toBe(false);
     expect((makerAck?.tx.data.incrementalSourceAmount ?? 0n) > 0n).toBe(true);
     expect((makerAck?.tx.data.incrementalSourceAmount ?? sourceTotal) < sourceTotal).toBe(true);
-    expect(getBookOrder(book, makerOrderId)?.qtyLots).toBe(40_000);
+    expect(getBookOrder(book, makerOrderId)?.qtyLots).toBe(40_000n);
     expect(result.bookUpdates.find(update => update.pairId === pairId)).toBeUndefined();
   });
 
@@ -2202,7 +2202,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const sourceTotal = 1_000_000n * lot;
     const targetTotal = 1_000_000n * lot;
     const previousRatio = 1_000n;
-    const makerQtyLots = Number(sourceTotal / lot);
+    const makerQtyLots = sourceTotal / lot;
     const fillSource = lot;
     const fillTarget = lot;
     const pairId = 'cross:testnet:2/tron:1';
@@ -2355,7 +2355,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 25_000_000n,
-      qtyLots: 1,
+      qtyLots: 1n,
     }).state;
 
     const staleRoute = {
@@ -2482,7 +2482,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 25_000_000n,
-      qtyLots: 1,
+      qtyLots: 1n,
     }).state;
 
     const staleRoute = {
@@ -2634,7 +2634,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 25_000_000n,
-      qtyLots: 30_000,
+      qtyLots: 30_000n,
     }).state;
 
     const route = {
@@ -2709,7 +2709,7 @@ describe('orderbook matching fallback execution mapping', () => {
     const result = processCommittedOrderbookSwaps(entityState, [] as any);
 
     expect(result.bookUpdates).toEqual([]);
-    expect(getBookOrder(staleBook, namespacedOrderId)?.qtyLots).toBe(30_000);
+    expect(getBookOrder(staleBook, namespacedOrderId)?.qtyLots).toBe(30_000n);
   });
 
   test('applies committed cross-j book progress before matcher sees the next snapshot', () => {
@@ -2735,7 +2735,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 25_000_000n,
-      qtyLots: 40_000,
+      qtyLots: 40_000n,
     }).state;
 
     const route = {
@@ -2818,7 +2818,7 @@ describe('orderbook matching fallback execution mapping', () => {
     expect(admission?.route.status).toBe('partially_filled');
     expect(admission?.route.filledSourceAmount).toBe(filledSourceAmount);
     expect(admission?.route.filledTargetAmount).toBe(filledTargetAmount);
-    expect(getBookOrder(book, namespacedOrderId)?.qtyLots).toBe(30_000);
+    expect(getBookOrder(book, namespacedOrderId)?.qtyLots).toBe(30_000n);
     expect(() => processCommittedOrderbookSwaps(entityState, [] as any)).not.toThrow();
   });
 
@@ -2844,7 +2844,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 25_000_000n,
-      qtyLots: Number(remainingSource / lot),
+      qtyLots: remainingSource / lot,
     }).state;
 
     const makerRoute = {
@@ -3005,7 +3005,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 25_000_000n,
-      qtyLots: Number(remainingSource / lot),
+      qtyLots: remainingSource / lot,
     }).state;
 
     const route = {
@@ -3122,7 +3122,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 10_000n,
-      qtyLots: 2,
+      qtyLots: 2n,
     }).state;
     book = applyCommand(book, {
       kind: 0,
@@ -3132,7 +3132,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 10_000n,
-      qtyLots: 2,
+      qtyLots: 2n,
     }).state;
 
     const pendingRoute = {
@@ -3333,7 +3333,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 25_000_000n,
-      qtyLots: 30,
+      qtyLots: 30n,
     }).state;
 
     const makerRoute = {
@@ -3459,7 +3459,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 25_000_000n,
-      qtyLots: 30,
+      qtyLots: 30n,
     }).state;
 
     const makerRoute = {
@@ -3593,7 +3593,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 25_000_000n,
-      qtyLots: 30,
+      qtyLots: 30n,
     }).state;
 
     const makerRoute = {
@@ -3982,7 +3982,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 24_999_500n,
-      qtyLots: 1,
+      qtyLots: 1n,
     }).state;
 
     const entityState = {
@@ -4034,7 +4034,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 24_999_998n,
-      qtyLots: 1,
+      qtyLots: 1n,
     }).state;
     staleBook = applyCommand(staleBook, {
       kind: 0,
@@ -4044,7 +4044,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: secondAskPriceTicks,
-      qtyLots: 1,
+      qtyLots: 1n,
     }).state;
 
     const makeAskOffer = (offerId: string, makerEntity: string, priceTicks: bigint) => ({
@@ -4135,7 +4135,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: askPriceTicks,
-      qtyLots: 1,
+      qtyLots: 1n,
     }).state;
 
     const makerOffer = {
@@ -4376,7 +4376,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 10_000n,
-      qtyLots: 1,
+      qtyLots: 1n,
     }).state;
     const corruptedOrder = corruptedBook.orders.get('maker-account:maker-ask');
     expect(corruptedOrder).toBeDefined();
@@ -4452,7 +4452,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 1000n,
-      qtyLots: 1,
+      qtyLots: 1n,
     }).state;
 
     const entityState = {
@@ -4532,7 +4532,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 1000n,
-      qtyLots: 1,
+      qtyLots: 1n,
     }).state;
 
     const entityState = {
@@ -4578,7 +4578,7 @@ describe('orderbook matching fallback execution mapping', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 10_000n,
-      qtyLots: 1,
+      qtyLots: 1n,
     }).state;
 
     const lot = SWAP_LOT_SCALE;
@@ -4667,7 +4667,7 @@ describe('orderbook matching fallback execution mapping', () => {
         tif: 0,
         postOnly: false,
         priceTicks: 1000n,
-        qtyLots: 1,
+        qtyLots: 1n,
       }).state;
       if (bookRef === bookA) bookA = updated;
       else bookB = updated;

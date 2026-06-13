@@ -2241,12 +2241,12 @@ const run = async (): Promise<void> => {
     shuttingDown = true;
     if (meshLoop) clearInterval(meshLoop);
     try {
-      await stopServerGracefully(server, httpDrain, resolvedArgs.name, 5_000);
-      stopP2P(env);
       const idle = await stopRuntimeLoopAndWait(env, 10_000);
       if (!idle) {
         console.warn(`[${resolvedArgs.name}] shutdown timed out waiting for runtime loop to drain`);
       }
+      await stopServerGracefully(server, httpDrain, resolvedArgs.name, 5_000);
+      stopP2P(env);
       await closeRuntimeDb(env);
       await closeInfraDb(env);
     } catch (error) {
