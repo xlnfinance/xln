@@ -49,6 +49,18 @@ type FaucetWalletState = {
   lock: FaucetLock;
 };
 
+type WaitableTransaction = {
+  hash: string;
+  wait: (confirms?: number, timeout?: number) => Promise<unknown | null>;
+};
+
+const readPositiveIntEnv = (name: string, fallback: number): number => {
+  const value = Number(process.env[name] || '');
+  return Number.isFinite(value) && value > 0 ? Math.floor(value) : fallback;
+};
+
+const FAUCET_TX_WAIT_TIMEOUT_MS = readPositiveIntEnv('XLN_FAUCET_TX_WAIT_TIMEOUT_MS', 20_000);
+
 const createJsonResponse = (
   headers: Record<string, string>,
   payload: unknown,
@@ -179,6 +191,28 @@ const withFaucetWalletLock = async <T>(
   }
 };
 
+const waitForFaucetProvisionTx = async (
+  tx: WaitableTransaction,
+  label: string,
+  details: Record<string, unknown>,
+): Promise<void> => {
+  try {
+    const receipt = await tx.wait(1, FAUCET_TX_WAIT_TIMEOUT_MS);
+    if (!receipt) {
+      throw new Error('receipt_timeout');
+    }
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    throw new Error(`FAUCET_PROVISION_TX_WAIT_FAILED:${safeStringify({
+      label,
+      hash: tx.hash,
+      timeoutMs: FAUCET_TX_WAIT_TIMEOUT_MS,
+      error: message,
+      ...details,
+    })}`);
+  }
+};
+
 const provisionFaucetWalletFunding = async (
   context: ExternalWalletApiContext,
   adapter: JAdapter,
@@ -191,9 +225,6 @@ const provisionFaucetWalletFunding = async (
   return withFaucetWalletLock(context, adapter, async (faucetWallet) => {
     const faucetAddress = await faucetWallet.getAddress();
     const deployerAddress = await adapter.signer.getAddress().catch(() => '');
-    let nextNonce = deployerAddress
-      ? await adapter.provider.getTransactionCount(deployerAddress, 'pending').catch(() => -1)
-      : -1;
 
     if (adapter.mode === 'browservm') {
       if (options.ensureEth) {
@@ -216,16 +247,21 @@ const provisionFaucetWalletFunding = async (
         );
         if (currentBalance >= targetBalance) continue;
         console.log(
-          `[EXT-FAUCET/PROVISION] token-transfer-start token=${token.symbol} deployer=${deployerAddress || 'unknown'} nonce=${nextNonce}`,
+          `[EXT-FAUCET/PROVISION] token-transfer-start token=${token.symbol} deployer=${deployerAddress || 'unknown'}`,
         );
         const refillTx = await tokenContract.transfer(
           faucetAddress,
           targetBalance - currentBalance,
-          nextNonce >= 0 ? { nonce: nextNonce } : {},
         );
-        if (nextNonce >= 0) nextNonce += 1;
         console.log(`[EXT-FAUCET/PROVISION] token-transfer-tx token=${token.symbol} hash=${refillTx.hash}`);
-        await refillTx.wait();
+        await waitForFaucetProvisionTx(refillTx, 'token-transfer', {
+          token: token.symbol,
+          tokenAddress: token.address,
+          faucetAddress,
+          deployerAddress,
+          currentBalance: currentBalance.toString(),
+          targetBalance: targetBalance.toString(),
+        });
         console.log(`[EXT-FAUCET/PROVISION] token-transfer-mined token=${token.symbol} hash=${refillTx.hash}`);
       }
     }
@@ -237,16 +273,19 @@ const provisionFaucetWalletFunding = async (
       );
       if (currentEth < context.faucetWalletEthTarget) {
         console.log(
-          `[EXT-FAUCET/PROVISION] eth-topup-start deployer=${deployerAddress || 'unknown'} nonce=${nextNonce}`,
+          `[EXT-FAUCET/PROVISION] eth-topup-start deployer=${deployerAddress || 'unknown'}`,
         );
         const topupTx = await adapter.signer.sendTransaction({
           to: faucetAddress,
           value: context.faucetWalletEthTarget - currentEth,
-          ...(nextNonce >= 0 ? { nonce: nextNonce } : {}),
         });
-        if (nextNonce >= 0) nextNonce += 1;
         console.log(`[EXT-FAUCET/PROVISION] eth-topup-tx hash=${topupTx.hash}`);
-        await topupTx.wait();
+        await waitForFaucetProvisionTx(topupTx, 'eth-topup', {
+          faucetAddress,
+          deployerAddress,
+          currentEth: currentEth.toString(),
+          targetEth: context.faucetWalletEthTarget.toString(),
+        });
         console.log(`[EXT-FAUCET/PROVISION] eth-topup-mined hash=${topupTx.hash}`);
       }
     }

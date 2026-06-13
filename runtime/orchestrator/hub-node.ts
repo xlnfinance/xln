@@ -1924,9 +1924,6 @@ const run = async (): Promise<void> => {
   if (bootstrap?.entityId) {
     tokenCatalogsByEntityId.set(normalizeEntityId(bootstrap.entityId), tokenCatalog);
   }
-  if (resolvedArgs.deployTokens) {
-    await externalWalletApi.provisionFaucetWallet();
-  }
 
   const p2pConnectStartedAt = startTiming('p2p_connect');
   const p2p = startP2P(env, {
@@ -2118,6 +2115,21 @@ const run = async (): Promise<void> => {
     void driveMeshBootstrap().catch(handleMeshBootstrapFatal);
   }, BOOTSTRAP_POLL_MS);
   void driveMeshBootstrap().catch(handleMeshBootstrapFatal);
+
+  if (resolvedArgs.deployTokens) {
+    void externalWalletApi.provisionFaucetWallet()
+      .then(() => {
+        if (!shuttingDown) {
+          console.log(`[MESH-HUB] FAUCET_PROVISION_READY name=${resolvedArgs.name}`);
+        }
+      })
+      .catch((error) => {
+        if (shuttingDown) return;
+        const message = error instanceof Error ? error.message : String(error);
+        console.error(`[MESH-HUB] FAUCET_PROVISION_FATAL name=${resolvedArgs.name} error=${message}`);
+        process.exit(1);
+      });
+  }
 
   console.log(
     `[MESH-HUB] READY name=${resolvedArgs.name} entityId=${bootstrap.entityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,
