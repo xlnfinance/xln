@@ -60,6 +60,10 @@ const readPositiveIntEnv = (name: string, fallback: number): number => {
 };
 
 const FAUCET_TX_WAIT_TIMEOUT_MS = readPositiveIntEnv('XLN_FAUCET_TX_WAIT_TIMEOUT_MS', 20_000);
+const FAUCET_REFILL_THRESHOLD_BPS = Math.min(
+  10_000,
+  readPositiveIntEnv('XLN_FAUCET_REFILL_THRESHOLD_BPS', 5_000),
+);
 
 const createJsonResponse = (
   headers: Record<string, string>,
@@ -213,6 +217,12 @@ const waitForFaucetProvisionTx = async (
   }
 };
 
+const refillThresholdFor = (target: bigint): bigint => {
+  if (target <= 0n) return 0n;
+  const threshold = target * BigInt(FAUCET_REFILL_THRESHOLD_BPS) / 10_000n;
+  return threshold > 0n ? threshold : 1n;
+};
+
 const provisionFaucetWalletFunding = async (
   context: ExternalWalletApiContext,
   adapter: JAdapter,
@@ -242,10 +252,11 @@ const provisionFaucetWalletFunding = async (
         );
         const currentBalance = await tokenContract.balanceOf(faucetAddress);
         const targetBalance = context.faucetTokenTargetUnits * 10n ** BigInt(token.decimals);
+        const refillThreshold = refillThresholdFor(targetBalance);
         console.log(
-          `[EXT-FAUCET/PROVISION] token=${token.symbol} faucet=${faucetAddress} current=${currentBalance.toString()} target=${targetBalance.toString()}`,
+          `[EXT-FAUCET/PROVISION] token=${token.symbol} faucet=${faucetAddress} current=${currentBalance.toString()} threshold=${refillThreshold.toString()} target=${targetBalance.toString()}`,
         );
-        if (currentBalance >= targetBalance) continue;
+        if (currentBalance >= refillThreshold) continue;
         console.log(
           `[EXT-FAUCET/PROVISION] token-transfer-start token=${token.symbol} deployer=${deployerAddress || 'unknown'}`,
         );
@@ -260,6 +271,7 @@ const provisionFaucetWalletFunding = async (
           faucetAddress,
           deployerAddress,
           currentBalance: currentBalance.toString(),
+          refillThreshold: refillThreshold.toString(),
           targetBalance: targetBalance.toString(),
         });
         console.log(`[EXT-FAUCET/PROVISION] token-transfer-mined token=${token.symbol} hash=${refillTx.hash}`);
@@ -268,10 +280,11 @@ const provisionFaucetWalletFunding = async (
 
     if (options.ensureEth) {
       const currentEth = await adapter.provider.getBalance(faucetAddress);
+      const refillThreshold = refillThresholdFor(context.faucetWalletEthTarget);
       console.log(
-        `[EXT-FAUCET/PROVISION] eth faucet=${faucetAddress} current=${currentEth.toString()} target=${context.faucetWalletEthTarget.toString()}`,
+        `[EXT-FAUCET/PROVISION] eth faucet=${faucetAddress} current=${currentEth.toString()} threshold=${refillThreshold.toString()} target=${context.faucetWalletEthTarget.toString()}`,
       );
-      if (currentEth < context.faucetWalletEthTarget) {
+      if (currentEth < refillThreshold) {
         console.log(
           `[EXT-FAUCET/PROVISION] eth-topup-start deployer=${deployerAddress || 'unknown'}`,
         );
@@ -284,6 +297,7 @@ const provisionFaucetWalletFunding = async (
           faucetAddress,
           deployerAddress,
           currentEth: currentEth.toString(),
+          refillThreshold: refillThreshold.toString(),
           targetEth: context.faucetWalletEthTarget.toString(),
         });
         console.log(`[EXT-FAUCET/PROVISION] eth-topup-mined hash=${topupTx.hash}`);
