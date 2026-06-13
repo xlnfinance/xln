@@ -19,6 +19,7 @@ import type {
   RuntimeOverlayRecord,
 } from './types/account';
 import type { HubRebalanceConfig } from './types/rebalance';
+import type { LendingState } from './types/lending';
 import type { EntityTx } from './types/entity-tx';
 import type { FrameLogEntry, LogCategory } from './types/logging';
 import type { JReplica, JTx } from './types/jurisdiction-runtime';
@@ -61,6 +62,14 @@ export type {
   HankoString,
   HankoVerificationResult,
 } from './types/hanko';
+export type {
+  LendingLoan,
+  LendingLoanStatus,
+  LendingPoolPosition,
+  LendingPoolStatus,
+  LendingState,
+  LendingTermId,
+} from './types/lending';
 export type {
   AccountDelta,
   AccountEvent,
@@ -403,6 +412,11 @@ export interface EntityState {
 
   // 🔄 Rebalance Configuration - Hub-level matching strategy
   hubRebalanceConfig?: HubRebalanceConfig;
+
+  // 🏦 Hub lending pools and term loans. This is hub-local consensus state:
+  // borrowers receive ordinary bilateral credit, while the hub records term,
+  // rate, and maturity here.
+  lending?: LendingState;
 }
 
 /** Derived open swap order entry for UI/debug projections */

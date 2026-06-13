@@ -1,6 +1,7 @@
 import type { JurisdictionEvent, JurisdictionEventData } from './jurisdiction-events';
 import type { AccountInput, CrossJurisdictionSecretRelay, SettlementDiff, SettlementOp } from './account';
 import type { CrossJurisdictionBookAdmissionReceipt, CrossJurisdictionPullBinding, CrossJurisdictionSwapRoute } from './cross-jurisdiction';
+import type { LendingTermId } from './lending';
 import type { ProfileUpdateTx } from './profile';
 import type { ProposalAction } from '../types';
 
@@ -429,6 +430,43 @@ export type EntityTx =
         counterpartyEntityId: string;
         tokenId: number;
         amount: bigint;
+      };
+    }
+  | {
+      type: 'lendingOffer';
+      data: {
+        lenderEntityId: string;
+        tokenId: number;
+        amount: bigint;
+        termId: LendingTermId;
+        interestBps: number;
+        positionId?: string;
+      };
+    }
+  | {
+      type: 'lendingBorrow';
+      data: {
+        borrowerEntityId: string;
+        tokenId: number;
+        amount: bigint;
+        termId: LendingTermId;
+        maxInterestBps?: number;
+        loanId?: string;
+      };
+    }
+  | {
+      type: 'lendingRepay';
+      data: {
+        borrowerEntityId: string;
+        loanId: string;
+        amount?: bigint;
+      };
+    }
+  | {
+      type: 'lendingClosePosition';
+      data: {
+        lenderEntityId: string;
+        positionId: string;
       };
     }
   | {

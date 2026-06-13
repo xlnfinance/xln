@@ -12,6 +12,9 @@ import type {
   EntityReplica,
   EntityState,
   Env,
+  LendingLoan,
+  LendingPoolPosition,
+  LendingState,
   LogCategory,
 } from './types';
 import type { DisputeArgumentSnapshot } from './dispute-arguments';
@@ -310,6 +313,29 @@ const cloneDebtLedger = (
   );
 };
 
+const cloneLendingPoolPosition = (position: LendingPoolPosition): LendingPoolPosition => ({
+  ...position,
+});
+
+const cloneLendingLoan = (loan: LendingLoan): LendingLoan => ({
+  ...loan,
+});
+
+const cloneLendingState = (lending: LendingState): LendingState => ({
+  pools: new Map(
+    Array.from(lending.pools.entries()).map(([positionId, position]) => [
+      positionId,
+      cloneLendingPoolPosition(position),
+    ]),
+  ),
+  loans: new Map(
+    Array.from(lending.loans.entries()).map(([loanId, loan]) => [
+      loanId,
+      cloneLendingLoan(loan),
+    ]),
+  ),
+});
+
 export function cloneAccountFrame(frame: AccountFrame): AccountFrame {
   try {
     return structuredClone(frame);
@@ -445,6 +471,9 @@ export function cloneEntityState(entityState: EntityState, forSnapshot: boolean 
     if (entityState.jBatchState && !cloned.jBatchState) {
       cloned.jBatchState = cloneJBatchState(entityState.jBatchState);
     }
+    if (entityState.lending) {
+      cloned.lending = cloneLendingState(entityState.lending);
+    }
     cloneCrossJurisdictionRoutesInState(cloned);
     for (const [accountId, account] of cloned.accounts.entries()) {
       const sourceAccount = entityState.accounts.get(accountId);
@@ -512,6 +541,7 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
     htlcFeesEarned: entityState.htlcFeesEarned || 0n,
     ...(entityState.outDebtsByToken ? { outDebtsByToken: cloneDebtLedger(entityState.outDebtsByToken) } : {}),
     ...(entityState.inDebtsByToken ? { inDebtsByToken: cloneDebtLedger(entityState.inDebtsByToken) } : {}),
+    ...(entityState.lending ? { lending: cloneLendingState(entityState.lending) } : {}),
     // Orderbook extension (hub-only, contains TypedArrays)
     // Must manually clone since structuredClone failed (we're in fallback path)
     ...(entityState.orderbookExt && { orderbookExt: cloneOrderbookExt(entityState.orderbookExt) }),

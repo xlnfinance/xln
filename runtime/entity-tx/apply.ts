@@ -64,6 +64,12 @@ import {
   handleSetHubConfigEntityTx,
   handleSetRebalancePolicyEntityTx,
 } from './handlers/account-admin';
+import {
+  handleLendingBorrowEntityTx,
+  handleLendingClosePositionEntityTx,
+  handleLendingOfferEntityTx,
+  handleLendingRepayEntityTx,
+} from './handlers/lending';
 import { handleSettleDiffsEntityTx } from './handlers/settle-diffs';
 import {
   handleCommitCrossJurisdictionSwapEntityTx,
@@ -202,6 +208,10 @@ const entityTxDispatchers: Record<string, EntityTxDispatcher> = {
   settle_execute: (env, state, tx) => handleSettleExecute(state, tx as Extract<EntityTx, { type: 'settle_execute' }>, env),
   settle_reject: (env, state, tx) => handleSettleReject(state, tx as Extract<EntityTx, { type: 'settle_reject' }>, env),
   extendCredit: (_env, state, tx) => handleExtendCreditEntityTx(state, tx as Extract<EntityTx, { type: 'extendCredit' }>),
+  lendingOffer: (env, state, tx) => handleLendingOfferEntityTx(env, state, tx as Extract<EntityTx, { type: 'lendingOffer' }>),
+  lendingBorrow: (env, state, tx) => handleLendingBorrowEntityTx(env, state, tx as Extract<EntityTx, { type: 'lendingBorrow' }>),
+  lendingRepay: (env, state, tx) => handleLendingRepayEntityTx(env, state, tx as Extract<EntityTx, { type: 'lendingRepay' }>),
+  lendingClosePosition: (env, state, tx) => handleLendingClosePositionEntityTx(env, state, tx as Extract<EntityTx, { type: 'lendingClosePosition' }>),
   setHubConfig: (env, state, tx) => handleSetHubConfigEntityTx(env, state, tx as Extract<EntityTx, { type: 'setHubConfig' }>),
   setRebalancePolicy: (_env, state, tx) => handleSetRebalancePolicyEntityTx(state, tx as Extract<EntityTx, { type: 'setRebalancePolicy' }>),
   requestCollateral: (_env, state, tx) => handleRequestCollateralEntityTx(state, tx as Extract<EntityTx, { type: 'requestCollateral' }>),

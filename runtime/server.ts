@@ -84,6 +84,12 @@ import { buildHubDiscoveryPayload } from './server/hub-discovery';
 import { buildDebugEntitiesPayload, buildKnownProfileBundle } from './server/gossip-profiles';
 import { maybeHandleDebugDumpsRequest } from './server/debug-dumps';
 import { handleCreditRequest } from './server/credit-request';
+import {
+  handleLendingBorrowRequest,
+  handleLendingOfferRequest,
+  handleLendingRepayRequest,
+  handleLendingStateRequest,
+} from './server/lending';
 import { handleWatchtowerProxy } from './server/watchtower-proxy';
 import { handleOffchainFaucet } from './server/offchain-faucet';
 import { handleReserveFaucet } from './server/reserve-faucet';
@@ -668,6 +674,41 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
   }
   if (pathname === '/api/credit/request' && req.method === 'POST') {
     return handleCreditRequest({
+      req,
+      env,
+      headers,
+      activeHubEntityIds: relayStore.activeHubEntityIds,
+      enqueueRuntimeInput,
+    });
+  }
+  if (pathname === '/api/lending/state' && req.method === 'GET') {
+    return handleLendingStateRequest({
+      req,
+      env,
+      headers,
+      activeHubEntityIds: relayStore.activeHubEntityIds,
+    });
+  }
+  if (pathname === '/api/lending/offer' && req.method === 'POST') {
+    return handleLendingOfferRequest({
+      req,
+      env,
+      headers,
+      activeHubEntityIds: relayStore.activeHubEntityIds,
+      enqueueRuntimeInput,
+    });
+  }
+  if (pathname === '/api/lending/borrow' && req.method === 'POST') {
+    return handleLendingBorrowRequest({
+      req,
+      env,
+      headers,
+      activeHubEntityIds: relayStore.activeHubEntityIds,
+      enqueueRuntimeInput,
+    });
+  }
+  if (pathname === '/api/lending/repay' && req.method === 'POST') {
+    return handleLendingRepayRequest({
       req,
       env,
       headers,
