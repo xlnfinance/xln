@@ -1,141 +1,64 @@
-# E2E Testing Quick Start
+# e2e quickstart
 
-## ⚠️ PREREQUISITE: Server Must Be Running
+Use the isolated runner for normal browser testing. It builds once, starts a dedicated local stack per test target, and tears it down after the run.
 
-**E2E tests will fail with "Connection Refused" if the dev server isn't running.**
+## Fast Path
 
-## Running Your First E2E Test
+```bash
+bun run test:e2e:fast
+```
 
-### 1. Start the Development Server (REQUIRED)
+This runs the canonical user flows listed in `runtime/scripts/run-e2e-fast.ts` with:
 
-**In a separate terminal, run:**
+- isolated Anvil RPCs
+- isolated runtime API server
+- isolated Vite frontend
+- isolated DB root
+- Chromium only
+- trace/video off by default
+- `--max-failures=1`
+
+## One Flow
+
+```bash
+bun runtime/scripts/run-e2e-parallel-isolated.ts \
+  --pw-project=chromium \
+  --pw-files='tests/e2e-payment-smoke.spec.ts::fresh runtimes can open accounts, faucet, pay, and reload persisted state' \
+  --video=off --trace=off --screenshot=only-on-failure --max-failures=1
+```
+
+Use exact test titles for focused work. The runner expands each title into its own isolated stack.
+
+## Full Browser Sweep
+
+```bash
+bun run test:e2e:all
+```
+
+Use this after focused L1/L2 failures are fixed. Default local parallelism is capped conservatively for a high-core workstation; market-maker tests still have their own concurrency limiter.
+
+## Manual Dev Server Mode
+
+Manual server mode is for interactive debugging, not the default gate.
 
 ```bash
 bun run dev
+PW_SKIP_WEBSERVER=1 PW_BASE_URL=https://localhost:8080 E2E_BASE_URL=https://localhost:8080 E2E_API_BASE_URL=https://localhost:8080 \
+  bunx playwright test tests/e2e-payment-smoke.spec.ts --project=chromium
 ```
 
-**Wait for this confirmation:**
-```
-✅ ✅ ✅ DEVELOPMENT ENVIRONMENT READY ✅ ✅ ✅
-
-🌐 Frontend: http://localhost:8080
-🌐 HTTPS:    https://localhost:8080  ← E2E tests use HTTPS
-🔗 Blockchain: http://localhost:8545 (anvil)
-📦 Auto-rebuild: Enabled (runtime.js + frontend)
-```
-
-**Keep this terminal running.** All E2E tests require:
-- ✅ HTTPS server at https://localhost:8080
-- ✅ Anvil blockchain at http://localhost:8545
-- ✅ Auto-rebuild watching for changes
-
-### 2. Run the Smoke Test
-
-Ask Claude Code:
-
-```
-Run E2E smoke test
-```
-
-Or manually navigate:
-
-```
-Navigate to https://localhost:8080 and verify XLN loads
-```
-
-### 3. Claude Will Execute
-
-Claude uses Playwright MCP tools to:
-
-1. **Navigate**: Opens browser to https://localhost:8080
-2. **Snapshot**: Captures page accessibility tree
-3. **Evaluate**: Runs JavaScript to check window.XLN
-4. **Verify**: Confirms no console errors
-5. **Screenshot**: Saves visual proof
-
-### 4. View Results
-
-Check screenshots:
-```bash
-open tests/e2e/screenshots/
-```
-
-## Example Test Session
-
-**User:** "Run E2E smoke test"
-
-**Claude:**
-```
-🧪 Running Smoke Test...
-
-1. Navigating to https://localhost:8080
-   ✅ Page loaded
-
-2. Checking XLN runtime
-   ✅ window.XLN exists
-   ✅ window.xlnEnv exists
-
-3. Verifying environment state
-   Height: 0
-   Replicas: 0
-   ✅ Initial state correct
-
-4. Checking console errors
-   ✅ No errors found
-
-5. Taking screenshot
-   📸 Saved: smoke-test-2025-10-10.png
-
-✅ SMOKE TEST PASSED
-```
-
-## Available Tests
-
-| Test | Command | Duration |
-|------|---------|----------|
-| Smoke | `Run E2E smoke test` | ~5s |
-| Entity Creation | `Run E2E entity creation test` | ~10s |
-| Payment Flow | `Run E2E payment flow test` | ~15s |
+Use this when you need to inspect the browser manually or debug a persistent local process.
 
 ## Troubleshooting
 
-**Error: `net::ERR_CONNECTION_REFUSED at https://localhost:8080/`**
+- `RUNNER_LOCKED`: another isolated E2E run is active. Wait for it or inspect `.logs/e2e-parallel/.runner-lock.json`.
+- `No isolated test targets matched`: the exact title or grep does not match the current spec.
+- Port conflicts: the isolated runner reaps stale shard processes during preflight; if this repeats, check `.logs/e2e-parallel/*/e2e-shard-*.log`.
+- Browser failure: inspect the shard log, `targets.json`, Playwright output, and failure screenshots under `.logs/e2e-parallel/`.
 
-This means the dev server isn't running.
+## Layer Choice
 
-**Fix:**
-1. Open a new terminal
-2. Run: `bun run dev`
-3. Wait for "DEVELOPMENT ENVIRONMENT READY"
-4. Keep that terminal open
-5. Now run E2E tests
-
----
-
-**Error: `net::ERR_CERT_AUTHORITY_INVALID` (HTTPS certificate)**
-
-XLN uses self-signed HTTPS certificates for localhost.
-
-**Fix:**
-- Playwright should automatically accept self-signed certs
-- If it doesn't, navigate manually once in Chrome and accept the certificate
-- Or use HTTP for testing: Update tests to use `http://localhost:8080`
-
----
-
-**Error: XLN not defined**
-→ Wait for runtime to load (use `waitForXLNReady()`)
-
----
-
-**Error: Blockchain tx failed**
-→ Check Anvil is running (should start automatically with `bun run dev`)
-
-## Next Steps
-
-1. ✅ Run smoke test
-2. Run entity creation test
-3. Run payment flow test
-4. Write custom tests for your features
-
-See `tests/e2e/README.md` for full documentation.
+- UI broke or user flow changed: start with L3 Playwright.
+- Runtime behavior broke after a long browser repro: add L2 scenario coverage.
+- Local algorithm broke: add L1 unit/component coverage.
+- Solidity behavior changed: add L4 contract coverage.

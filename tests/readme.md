@@ -1,153 +1,67 @@
-# Proofs - XLN Validation Suite
+# xln test strategy
 
-**Tests that PROVE correctness.**
+This directory contains the browser-facing tests and shared Playwright helpers. The current source of truth is the layered gate model below, not the removed proof-suite layout.
 
----
+## Layers
 
-## Directory Structure
+| Layer | Purpose | Command |
+| --- | --- | --- |
+| L1 unit/component | Pure or near-pure runtime/frontend/native checks with no browser stack. Use for orderbook, serialization, storage projections, recovery builders, guards. | `bun test runtime/__tests__ tests/unit tests/frontend native/__tests__` |
+| L2 runtime scenarios | Deterministic runtime behavior through scenario execution, including non-network and isolated RPC/relay paths. Use when behavior crosses entity/account/jurisdiction boundaries. | `bun run test:scenarios:parallel:isolated` |
+| L3 browser e2e | Real user flows in Playwright against isolated local stacks. Use for clicks, onboarding, payments, swaps, disputes, recovery, custody. | `bun run test:e2e:fast` |
+| L4 contracts | Solidity jurisdiction contracts and runtime/contract proof compatibility. | `bun run test:contracts:full` |
 
-```
-/proofs/
-├── README.md                           # This file
-├── smoke-tests/                        # Fast sanity checks (<5s each)
-│   ├── test-ethereumjs-vm.ts          # BrowserVM: Deploy + call Depository
-│   ├── test-browser-evm.html          # Browser integration test
-│   └── check-browser-errors.ts        # Console error detector
-│
-├── integration/                        # E2E scenarios (Playwright)
-│   ├── tutorial-working-demo.spec.ts  # Full tutorial workflow
-│   ├── payment-flow.spec.ts           # Entity creation → funding → transfer
-│   ├── consensus-round.spec.ts        # BFT consensus verification
-│   └── browser-evm.spec.ts            # BrowserVM panel integration
-│
-└── unit/                               # Unit tests (future)
-    └── (runtime/ consensus logic tests)
-```
+## Daily Commands
 
----
-
-## Test Categories
-
-### Smoke Tests (Run Before Every Commit)
-
-**BrowserVM Smoke Test**
 ```bash
-bun proofs/smoke-tests/test-ethereumjs-vm.ts
-# ✅ Deploys Depository.sol
-# ✅ Calls debugFundReserves()
-# ✅ Verifies logs emitted
-# Time: ~3s
+bun run check
+bun run test
+bun run test:e2e:fast
 ```
 
-**Purpose:** Catch BrowserVM breakage immediately (faster than E2E)
+For one browser flow:
 
----
-
-### Integration Tests (Playwright E2E)
-
-**All tests:**
 ```bash
-bun run test:e2e:parallel:isolated
-bun run test:e2e:parallel:max
-bun run test:e2e:parallel:long
+bun runtime/scripts/run-e2e-parallel-isolated.ts \
+  --pw-project=chromium \
+  --pw-files='tests/e2e-swap-isolated.spec.ts::two isolated users trade against each other through one hub orderbook without market maker liquidity' \
+  --video=off --trace=off --screenshot=only-on-failure --max-failures=1
 ```
 
-**Specific test:**
+For one runtime scenario:
+
 ```bash
-bun runtime/scripts/run-e2e-parallel-isolated.ts --pw-files=tests/e2e-swap-isolated.spec.ts
-HEADED=true bun runtime/scripts/run-e2e-parallel-isolated.ts --pw-files=tests/e2e-dispute.spec.ts
+bun runtime/scenarios/run.ts dispute-lifecycle
+bun runtime/scenarios/run.ts --set=smoke --workers=4
 ```
 
-**With notification:**
+For one contract area:
+
 ```bash
-bun run test:e2e:notify     # Plays sound when done
+cd jurisdictions && bunx hardhat test --grep DeltaTransformer
 ```
 
----
+## Test Placement
 
-## Test Strategy (Pyramid)
+- Put user-click coverage in `tests/e2e-*.spec.ts`.
+- Put shared Playwright operations in `tests/utils/`.
+- Put runtime behavior without browser clicks in `runtime/scenarios/`.
+- Put isolated runtime units in `runtime/__tests__/`.
+- Put frontend pure utility tests in `tests/frontend/`.
+- Put contract tests in `jurisdictions/test/`.
 
-```
-        /\         E2E (Playwright)         ~10 tests  (slow, comprehensive)
-       /  \        Integration              ~30 tests  (medium)
-      /    \       Unit                     ~200 tests (fast, future)
-     /______\      Smoke                    ~5 tests   (instant validation)
-```
+## Policy
 
-**Current focus:** E2E + Smoke (validate core user flows + BrowserVM)
-**Future:** Expand unit tests for `/runtime/` consensus logic
+- Prefer the full e2e flow first when adding a user-visible feature.
+- After a slow e2e exposes a bug, add the shortest deterministic regression below it: runtime scenario if the bug crosses machines, unit/component if the bug is local.
+- Keep Playwright assertions user-visible where possible. Use runtime debug reads only to prove consensus, persistence, or chain state that the UI cannot faithfully expose.
+- Do not add silent skips. `runtime/__tests__/test-skip-discipline.test.ts` enforces this.
+- Always run `bun run check` before reporting completion.
 
----
+## Current Fast Gates
 
-## Continuous Integration
-
-**Pre-commit hook** (future):
-```bash
-#!/bin/bash
-# .git/hooks/pre-commit
-bun run check || exit 1  # TypeScript validation
-bun proofs/smoke-tests/test-ethereumjs-vm.ts || exit 1  # BrowserVM check
-```
-
-**GitHub Actions** (future):
-```yaml
-name: Proofs
-on: [push, pull_request]
-jobs:
-  smoke:
-    - bun proofs/smoke-tests/test-ethereumjs-vm.ts
-  e2e:
-    - bunx playwright test
-  deploy-preview:
-    - Deploy to Vercel
-```
-
----
-
-## Writing New Tests
-
-### Smoke Test Template
-
-```typescript
-#!/usr/bin/env bun
-/**
- * Smoke Test: [Feature Name]
- * Purpose: Prove [specific thing] works
- * Time: <5s
- */
-
-async function test() {
-  // Setup (minimal)
-  // Execute (one core operation)
-  // Assert (throw on failure)
-
-  console.log('✅ [Feature] works');
-  process.exit(0);
-}
-
-test().catch(err => {
-  console.error('❌ Failed:', err);
-  process.exit(1);
-});
-```
-
-### E2E Test Template
-
-```typescript
-import { test, expect } from '@playwright/test';
-
-test('[Feature] works end-to-end', async ({ page }) => {
-  await page.goto('http://localhost:8080');
-
-  // User journey (click, type, wait)
-  await page.click('[data-test="action"]');
-  await expect(page.locator('#result')).toBeVisible();
-
-  // Assertions (what user should see)
-  await expect(page.locator('#status')).toContainText('Success');
-});
-```
-
----
-
-**Philosophy:** Fast feedback loop. Smoke tests catch 80% of breaks in 3s. E2E validates complete flows.
+- `bun run test` runs quick all-tests: smoke scenarios plus one focused E2E path.
+- `bun run test:e2e:fast` runs the canonical isolated browser flow set from `runtime/scripts/run-e2e-fast.ts`.
+- `bun run gate:quick` runs source checks, selected runtime/native tests, soundcheck, and whitespace checks.
+- `bun run gate:ci` adds frontend check, contracts, persistence/watchtower smoke, coverage markers, and fast E2E.
+- `bun run gate:release` adds soak, core E2E, RPC scenarios, storage benchmark, and production health smoke.

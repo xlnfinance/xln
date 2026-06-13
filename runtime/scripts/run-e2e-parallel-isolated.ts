@@ -156,7 +156,7 @@ const parseArgs = (): CliArgs => {
       return 8;
     }
   })();
-  const defaultShards = Math.max(2, Math.min(8, Math.floor(cpu / 2)));
+  const defaultShards = Math.max(2, Math.min(16, Math.floor(cpu / 2)));
   const getFlag = (name: string): string | undefined => {
     const prefix = `--${name}=`;
     const eq = args.find(a => a.startsWith(prefix));

@@ -1,29 +1,16 @@
-# E2E Test: Entity Creation
+# archived manual entity checklist
 
-**Purpose:** Test entity creation flow end-to-end
+This file is not an executable test.
 
-## Test Steps
+Entity creation is now covered through:
 
-1. Navigate to Settings
-2. Click "Create Entity" button
-3. Wait for blockchain transaction
-4. Verify entity appears in replica map
-5. Verify entity has jBlock=0
-6. Verify J-Watcher syncs reserves
-7. Check entity displays in UI
+```bash
+bun run test:e2e:fast
+bun run test:scenarios:parallel:isolated
+```
 
-## Expected Results
+Add new entity-flow regressions as:
 
-- Entity created on-chain (EntityProvider.sol)
-- Entity imported to runtime
-- J-Watcher syncs ReserveUpdated events
-- Entity visible in network graph
-- No consensus errors
-
-## Success Criteria
-
-✅ Entity registered on-chain
-✅ Runtime replica created
-✅ Reserves populated from J-Watcher
-✅ UI shows entity node
-✅ Height incremented
+- L3 Playwright when the user-visible creation path changes.
+- L2 runtime scenario when entity registration/import behavior changes without UI changes.
+- L1 runtime unit when a pure helper or validation rule changes.

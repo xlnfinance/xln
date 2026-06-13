@@ -1,42 +1,17 @@
-# E2E Test: Complete Payment Flow
+# archived manual payment checklist
 
-**Purpose:** Test full payment lifecycle (account opening → payment → settlement)
+This file is not an executable test.
 
-## Test Steps
+Payment behavior is now covered through:
 
-1. Create Entity A (Alice)
-2. Create Entity B (Bob)
-3. Open account: Alice → Bob
-4. Wait for bilateral consensus
-5. Verify account exists in both entities
-6. Send payment: Alice → Bob (100 USDC)
-7. Verify bilateral frame propagation
-8. Check balance updates
-9. Verify state roots match
+```bash
+bun run test:e2e:fast
+bun runtime/scenarios/run.ts lock-ahb
+bun runtime/scenarios/run.ts htlc-4hop
+```
 
-## Expected Results
+Add new payment regressions as:
 
-### Account Opening
-- Both entities create AccountMachine
-- Initial deltas: {balance: 0, creditLimit: 1000, collateral: 0}
-- Bilateral consensus: INIT → frame exchanged
-
-### Payment Processing
-- Alice creates payment tx
-- Bilateral consensus: PROPOSE → SIGN → COMMIT
-- Both compute identical state root
-- Account frame height increments
-
-### Balance Verification
-- Alice balance: -100
-- Bob balance: +100
-- State roots match (consensus verified)
-
-## Success Criteria
-
-✅ Account opened bilaterally
-✅ Payment processed via consensus
-✅ Balances updated correctly
-✅ State roots identical
-✅ No consensus failures
-✅ Frame history recorded
+- L3 Playwright for user-visible pay/receive/deeplink behavior.
+- L2 runtime scenario for HTLC routing, bilateral convergence, persistence, or network delivery.
+- L1 runtime unit for local accounting, envelope validation, serialization, and route math.

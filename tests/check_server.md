@@ -1,88 +1,40 @@
-# Verify Dev Server is Running
+# manual dev server checks
 
-Before running E2E tests, verify the dev server is up:
+Normal e2e runs do not require a pre-running dev server. Use `bun run test:e2e:fast` or `bun runtime/scripts/run-e2e-parallel-isolated.ts`; the isolated runner starts its own Anvil, runtime API, Vite frontend, and DB root per shard.
 
-## Quick Check
+Use this file only when debugging a manually started local dev server.
 
-```bash
-# Should return 200 OK (or redirect)
-curl -k https://localhost:8080
+## Start
 
-# Should show "READY" in output
-curl -k https://localhost:8080 | grep -i "xln\|ready\|runtime"
-```
-
-## If Server Not Running
-
-You'll see:
-```
-curl: (7) Failed to connect to localhost port 8080: Connection refused
-```
-
-**Fix:**
 ```bash
 bun run dev
 ```
 
-## Verify All Services
+## Check Frontend
 
-After `bun run dev`, check:
-
-### 1. HTTPS Frontend
 ```bash
 curl -k https://localhost:8080
-# Should return HTML
 ```
 
-### 2. HTTP Frontend (fallback)
-```bash
-curl http://localhost:8080
-# Should return HTML or redirect to HTTPS
-```
+The local dev frontend is HTTPS-first. If HTTP does not respond on port 8080, that is expected when certificates are enabled.
 
-### 3. Anvil Blockchain
+## Check Anvil
+
 ```bash
-curl -X POST http://localhost:8545 \
+curl -s -X POST http://localhost:8545 \
   -H "Content-Type: application/json" \
   -d '{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":1}'
-
-# Should return: {"jsonrpc":"2.0","id":1,"result":"0x..."}
 ```
 
-### 4. Runtime.js Built
+## Check Runtime Build Artifact
+
 ```bash
 ls -lh frontend/static/runtime.js
-# Should exist and be >100KB
 ```
 
-## Common Issues
+## Prefer Isolated Testing
 
-### Port 8080 Already in Use
 ```bash
-lsof -ti:8080 | xargs kill -9
-bun run dev
-```
-
-### Port 8545 Already in Use (Anvil)
-```bash
-lsof -ti:8545 | xargs kill -9
-bun run dev
-```
-
-### HTTPS Certificate Issues
-- XLN uses self-signed certs in `certs/`
-- Valid until 2028
-- Safe for localhost development
-- Playwright/Chrome may need `-k` or `--ignore-certificate-errors`
-
-## Ready to Test?
-
-Once `bun run dev` shows:
-```
-✅ ✅ ✅ DEVELOPMENT ENVIRONMENT READY ✅ ✅ ✅
-```
-
-You can run E2E tests:
-```
-Run E2E smoke test
+bun run test:e2e:fast
+bun runtime/scripts/run-e2e-parallel-isolated.ts --pw-project=chromium --pw-files=tests/e2e-payment-smoke.spec.ts
 ```
