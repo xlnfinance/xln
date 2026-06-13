@@ -257,6 +257,9 @@ const normalizeJurisdictionDisplayName = (value: unknown): string => {
   return name;
 };
 
+const normalizeJurisdictionKey = (value: unknown): string =>
+  normalizeJurisdictionDisplayName(value).trim().toLowerCase();
+
 type JurisdictionImportDiagnostics = {
   name: string;
   rpc: string;
@@ -982,7 +985,7 @@ const ensurePeerBootstrapReserves = async (
 const getEntityJurisdictionName = (env: Env, entityId: string | null): string => {
   if (!entityId) return '';
   const replica = getEntityReplicaById(env, entityId);
-  return String(replica?.state?.config?.jurisdiction?.name || '').trim().toLowerCase();
+  return normalizeJurisdictionDisplayName(replica?.state?.config?.jurisdiction?.name || '');
 };
 
 const resolveEntityTokenCatalog = async (
@@ -1080,18 +1083,18 @@ const ensureHubBootstrapReserves = async (
 };
 
 const readVisibleHubProfiles = (env: Env, jurisdictionName: string): VisibleHubProfile[] => {
-  const normalizedJurisdiction = String(jurisdictionName || '').trim().toLowerCase();
+  const normalizedJurisdiction = normalizeJurisdictionKey(jurisdictionName);
   const profiles = env.gossip?.getProfiles?.() || [];
   return profiles
     .filter(profile => profile.metadata?.isHub === true)
     .filter(profile => {
       if (!normalizedJurisdiction) return true;
-      return String(profile.metadata?.jurisdiction?.name || '').trim().toLowerCase() === normalizedJurisdiction;
+      return normalizeJurisdictionKey(profile.metadata?.jurisdiction?.name || '') === normalizedJurisdiction;
     })
     .map(profile => ({
       name: String(profile.name || '').trim(),
       entityId: String(profile.entityId || '').toLowerCase(),
-      jurisdictionName: String(profile.metadata?.jurisdiction?.name || '').trim(),
+      jurisdictionName: normalizeJurisdictionDisplayName(profile.metadata?.jurisdiction?.name || ''),
     }))
     .filter(profile => profile.name.length > 0 && profile.entityId.length > 0 && profile.jurisdictionName.length > 0);
 };
