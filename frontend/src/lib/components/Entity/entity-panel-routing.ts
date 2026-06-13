@@ -1,6 +1,6 @@
 export type ViewTab = 'assets' | 'accounts' | 'settings';
 export type SettingsSubview = 'wallet' | 'recovery' | 'display' | 'network' | 'data' | 'log' | 'entity';
-export type AccountWorkspaceTab = 'send' | 'receive' | 'swap' | 'open' | 'activity' | 'move' | 'history' | 'configure' | 'appearance';
+export type AccountWorkspaceTab = 'send' | 'receive' | 'swap' | 'open' | 'activity' | 'move' | 'lending' | 'history' | 'configure' | 'appearance';
 export type AssetWorkspaceTab = 'move' | 'history';
 export type ConfigureWorkspaceTab = 'extend-credit' | 'request-credit' | 'collateral' | 'token' | 'dispute';
 
@@ -74,6 +74,11 @@ export function canonicalizeEntityPanelRoute(routeRaw: string | null): string | 
     case 'accounts/move':
     case 'move':
       return 'accounts/move';
+    case 'accounts/lending':
+    case 'lending':
+    case 'borrow':
+    case 'lend':
+      return 'accounts/lending';
     case 'accounts/history':
     case 'history':
       return 'accounts/history';

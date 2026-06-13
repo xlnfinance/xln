@@ -40,7 +40,7 @@
   import {
     ArrowUpRight, ArrowDownLeft, Repeat, Landmark, Users, Activity,
     Settings as SettingsIcon,
-    ChevronDown, AlertTriangle, PlusCircle, Copy, Check, Trash2, SlidersHorizontal
+    ChevronDown, AlertTriangle, PlusCircle, Copy, Check, Trash2, SlidersHorizontal, Banknote
   } from 'lucide-svelte';
 
   import EntityDropdown from './EntityDropdown.svelte';
@@ -51,6 +51,7 @@
   import PaymentPanel from './PaymentPanel.svelte';
   import ReceivePanel from './ReceivePanel.svelte';
   import SwapPanel from './SwapPanel.svelte';
+  import LendingPanel from './LendingPanel.svelte';
   import SettlementPanel from './SettlementPanel.svelte';
   import MoveWorkspace from './MoveWorkspace.svelte';
   import DebtPanel from './DebtPanel.svelte';
@@ -4799,12 +4800,13 @@
     { id: 'receive', icon: ArrowDownLeft, label: 'Receive' },
     { id: 'swap', icon: Repeat, label: 'Swap' },
     { id: 'move', icon: Landmark, label: 'Move' },
+    { id: 'lending', icon: Banknote, label: 'Lending' },
     { id: 'history', icon: Activity, label: 'History' },
     { id: 'configure', icon: SettingsIcon, label: 'Manage' },
     { id: 'activity', icon: Activity, label: 'Activity' },
     { id: 'appearance', icon: SlidersHorizontal, label: 'Appearance' },
   ];
-  const accountWorkspacePrimaryTabIds: AccountWorkspaceTab[] = ['open', 'send', 'receive', 'swap', 'move'];
+  const accountWorkspacePrimaryTabIds: AccountWorkspaceTab[] = ['open', 'send', 'receive', 'swap', 'move', 'lending'];
   $: hasWorkspaceAccounts = workspaceAccountIds.length > 0;
   $: hasAnyAccounts = accountIds.length > 0;
   $: faucetSupportsReserve = !!getFaucetReserveTokenMeta(faucetAssetSymbol);
@@ -5428,6 +5430,14 @@
                 movePrimaryActionLabel={getMovePrimaryActionLabel()}
                 onMoveVisualRoot={(node) => moveVisualRoot = node}
                 toastMoveError={handleMoveWorkspaceError}
+              />
+
+            {:else if accountWorkspaceTab === 'lending'}
+              <LendingPanel
+                entityId={replica.state?.entityId || tab.entityId}
+                {replica}
+                accountIds={workspaceAccountIds}
+                isLive={activeIsLive}
               />
 
             {:else if accountWorkspaceTab === 'history'}
