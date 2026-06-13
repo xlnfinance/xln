@@ -1784,7 +1784,7 @@ test.describe('E2E Swap Flow', () => {
         message: 'relay error must resolve to terminal error instead of hanging in syncing',
       })
       .toBe('error');
-    await expect(page.getByTestId('orderbook-source-status').first()).toContainText(/Orderbook stream error/i, { timeout: 5_000 });
+    await expect(page.getByTestId('orderbook-source-status').first()).toContainText(/E_UNKNOWN_HUB Unknown market hub/i, { timeout: 5_000 });
     await expect(page.getByTestId('orderbook-source-status').first()).not.toContainText(/syncing/i, { timeout: 5_000 });
     await expect
       .poll(async () => readOrderbookRowCounts(page), {
