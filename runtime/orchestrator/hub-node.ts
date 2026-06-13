@@ -28,6 +28,7 @@ import { createHttpDrainTracker, stopServerGracefully } from './graceful-server'
 import { applyJEventsToEnv } from '../jadapter/watcher';
 import { safeStringify } from '../serialization-utils';
 import { createStructuredLogger } from '../logger';
+import { handleMeshBootstrapLoopError } from './mesh-bootstrap-fail-fast';
 import { isLocalOperatorRequest, publicLocalHubHealth } from '../health-redaction';
 import { decodeRuntimeAdapterMessage } from '../radapter/codec';
 import { getJReplicaByJurisdictionRef } from '../jurisdiction-runtime';
@@ -2098,19 +2099,25 @@ const run = async (): Promise<void> => {
     }
   };
 
-  const isExpectedMeshBootstrapError = (error: unknown): boolean => {
-    const message = String((error as Error)?.message || error || '');
-    return message.includes('ECONNREFUSED') || message.includes('fetch failed');
+  let meshLoopFatal = false;
+  const handleMeshBootstrapFatal = (error: unknown): void => {
+    handleMeshBootstrapLoopError(error, {
+      nodeName: resolvedArgs.name,
+      isShuttingDown: () => shuttingDown || meshLoopFatal,
+      clearLoop: () => {
+        meshLoopFatal = true;
+        if (meshLoop) clearInterval(meshLoop);
+      },
+      exit: (code) => process.exit(code),
+      logError: (...args) => console.error(...args),
+    });
   };
 
   meshLoop = setInterval(() => {
     if (shuttingDown) return;
-    void driveMeshBootstrap().catch(error => {
-      if (shuttingDown || isExpectedMeshBootstrapError(error)) return;
-      console.error(`[${resolvedArgs.name}] mesh bootstrap tick failed:`, (error as Error).message);
-    });
+    void driveMeshBootstrap().catch(handleMeshBootstrapFatal);
   }, BOOTSTRAP_POLL_MS);
-  void driveMeshBootstrap();
+  void driveMeshBootstrap().catch(handleMeshBootstrapFatal);
 
   console.log(
     `[MESH-HUB] READY name=${resolvedArgs.name} entityId=${bootstrap.entityId} runtimeId=${String(env.runtimeId || '')} api=${apiUrl} relay=${resolvedArgs.relayUrl}`,

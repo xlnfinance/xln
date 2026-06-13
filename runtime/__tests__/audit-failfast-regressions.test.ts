@@ -59,6 +59,7 @@ import { captureDisputeArgumentSnapshot, storeDisputeArgumentSnapshot } from '..
 import { buildAccountProofBody, createDisputeProofHashWithNonce } from '../proof-builder';
 import { signEntityHashes } from '../hanko/signing';
 import { NobleCryptoProvider } from '../crypto-noble';
+import { handleMeshBootstrapLoopError } from '../orchestrator/mesh-bootstrap-fail-fast';
 import { resolveEntityProposerId } from '../state-helpers';
 import type { AccountInput, AccountMachine, AccountTx, ConsensusConfig, CrossJurisdictionSwapRoute, EntityInput, EntityReplica, EntityState, Env, JurisdictionEvent } from '../types';
 import { ethers } from 'ethers';
@@ -482,6 +483,35 @@ describe('audit fail-fast regressions', () => {
       }],
     })).toThrow('RUNTIME_REPLICA_NOT_FOUND');
     expect(env.runtimeMempool?.entityInputs.length).toBe(0);
+  });
+
+  test('hub mesh bootstrap loop fail-fasts unexpected errors instead of logging forever', () => {
+    let cleared = 0;
+    const exits: number[] = [];
+    const logs: unknown[][] = [];
+
+    const halted = handleMeshBootstrapLoopError(new Error('BROKEN_BOOTSTRAP_INVARIANT'), {
+      nodeName: 'H1',
+      clearLoop: () => { cleared += 1; },
+      exit: (code) => { exits.push(code); },
+      logError: (...args) => { logs.push(args); },
+    });
+
+    expect(halted).toBe(true);
+    expect(cleared).toBe(1);
+    expect(exits).toEqual([1]);
+    expect(String(logs[0]?.[0] || '')).toContain('mesh bootstrap tick fatal');
+
+    const ignored = handleMeshBootstrapLoopError(new Error('fetch failed'), {
+      nodeName: 'H1',
+      clearLoop: () => { cleared += 1; },
+      exit: (code) => { exits.push(code); },
+      logError: (...args) => { logs.push(args); },
+    });
+
+    expect(ignored).toBe(false);
+    expect(cleared).toBe(1);
+    expect(exits).toEqual([1]);
   });
 
   test('runtime input admission accounts for importReplica earlier in the same batch', () => {
