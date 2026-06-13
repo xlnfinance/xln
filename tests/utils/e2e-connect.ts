@@ -391,6 +391,9 @@ async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
     return;
   }
 
+  const visibleStatus = hubCard.getByText(/^(Open|Opening)$/i).first();
+  if (await visibleStatus.isVisible().catch(() => false)) return;
+
   await expect(openState, `hub ${hubId} must expose Connect, Opening, or already be Open`).toBeVisible({ timeout: 5_000 });
 }
 
