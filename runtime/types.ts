@@ -27,6 +27,7 @@ export type {
   CrossJurisdictionBookAdmissionReceipt,
   CrossJurisdictionBookLeg,
   CrossJurisdictionBookStatus,
+  CrossJurisdictionPendingFill,
   CrossJurisdictionPullBinding,
   CrossJurisdictionPullLeg,
   CrossJurisdictionSwapLeg,
@@ -306,6 +307,13 @@ export interface EntitySwapPair {
   pairId: string; // canonical sorted token key used by orderbook books map
 }
 
+export interface PendingCrossJurisdictionFillAck {
+  accountId: string;
+  tx: Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;
+  storedAt: number;
+  reason?: string;
+}
+
 /**
  * Liveness sync - empty block observation to prove chain is alive.
  * Required every JBLOCK_LIVENESS_INTERVAL blocks even if no events.
@@ -384,6 +392,10 @@ export interface EntityState {
   // Cross-jurisdiction swap routes are duplicated into sibling entities so
   // target-side dispute salvage does not depend on relay/profile gossip.
   crossJurisdictionSwaps?: Map<string, CrossJurisdictionSwapRoute>;
+  // Fill notices can outrun the local account frame that materializes the
+  // source-side offer. Keep the ack durably in entity state until the account
+  // offer is visible instead of throwing every runtime loop.
+  pendingCrossJurisdictionFillAcks?: Map<string, PendingCrossJurisdictionFillAck>;
   // Cross-jurisdiction book admission is local hub gate state. A cross order
   // can enter the shared matcher only after source and target account frames
   // both committed their pull_lock receipts.
@@ -522,9 +534,16 @@ export interface Env {
       accountMerkleRadix?: 16 | 256;
     };
   } | undefined;
-  runtimeState?: {
-    loopActive?: boolean;
-    loopPromise?: Promise<void> | null;
+	  runtimeState?: {
+	    loopActive?: boolean;
+	    halted?: boolean;
+	    fatalDebugPayload?: {
+	      message: string;
+	      stack?: string;
+	      height?: number;
+	      timestamp?: number;
+	    };
+	    loopPromise?: Promise<void> | null;
     stopLoop?: (() => void) | null;
     wakeLoop?: (() => void) | null;
     wakeRequested?: boolean;
@@ -557,6 +576,29 @@ export interface Env {
       mirrorToConsole?: boolean;
     };
     pendingAuditEvents?: Array<Record<string, unknown>>;
+    quarantinedRuntimeInputs?: Array<{
+      id: string;
+      height: number;
+      timestamp: number;
+      reason: string;
+      message: string;
+      action: 'halted';
+      counts: {
+        runtimeTxs: number;
+        entityInputs: number;
+        jInputs: number;
+      };
+      entityInputs: Array<{
+        entityId: string;
+        signerId: string;
+        txTypes: string[];
+      }>;
+      runtimeTxTypes: string[];
+      jInputs: Array<{
+        jurisdictionName: string;
+        jTxCount: number;
+      }>;
+    }>;
     pendingFrameDbRecords?: RuntimeFrameDbRecord[];
     cleanLogs?: string[];
     routeDeferState?: Map<string, {
@@ -648,7 +690,7 @@ export interface Env {
   pendingOutputs?: RoutedEntityInput[]; // Outputs queued for next tick
   skipPendingForward?: boolean;   // Temp flag to defer forwarding to next frame
   networkInbox?: RoutedEntityInput[];   // Inbound network messages queued for next tick
-  pendingNetworkOutputs?: RoutedEntityInput[]; // Outputs waiting for runtimeId gossip before routing
+  pendingNetworkOutputs?: RoutedEntityInput[]; // Legacy persisted queue; live runtime treats non-empty values as fatal.
   lockRuntimeSeed?: boolean;      // Prevent runtime seed updates during scenarios
 
   // Frame-scoped structured logs (captured into snapshot, then reset)

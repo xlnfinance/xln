@@ -17,6 +17,11 @@ import {
   type CrossMarketOffer,
 } from '../../../cross-jurisdiction-orderbook';
 import {
+  buildCrossJurisdictionPendingFillFromAck,
+  CROSS_J_PENDING_FILL_ACK_TTL_MS,
+} from '../../../cross-jurisdiction-fill-ack';
+import { safeStringify } from '../../../serialization-utils';
+import {
   findQueuedCrossSwapAckForEntityState,
   hasQueuedCrossSwapAckForEntityState,
   hasQueuedSwapResolveForEntityState,
@@ -81,7 +86,7 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
   const crossAggregatedFills = new Map<string, { filledLots: number; weightedCost: bigint }>();
   const suspendedCrossOrderIds = new Set<string>();
   const workingBookCache = new Map<string, BookState>();
-  const dirtySimulationPairs = new Set<string>();
+  const speculativeTradePairs = new Set<string>();
 
   const getCrossMarketOffer = (offer: CrossJurisdictionWorkingOrderbookOffer): CrossMarketOffer | null => {
     const key = swapKey(offer.accountId, offer.offerId);
@@ -119,10 +124,38 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
     return workingBook;
   };
 
-  const committedCrossRouteStatus = (accountId: string, offerId: string): string | undefined => {
-    const admission = hubState.crossJurisdictionBookAdmissions?.get(
+  const getCrossAdmission = (accountId: string, offerId: string) =>
+    hubState.crossJurisdictionBookAdmissions?.get(
       crossJurisdictionBookAdmissionKeyFor(accountId, offerId),
     );
+
+  const assertPendingBookFillAckLive = (accountId: string, offerId: string): boolean => {
+    const admission = getCrossAdmission(accountId, offerId);
+    const pendingFill = admission?.pendingFill;
+    if (!pendingFill) return false;
+    const now = Number(hubState.timestamp || 0);
+    const updatedAt = Number(pendingFill.updatedAt || admission.updatedAt || 0);
+    const ageMs = Math.max(0, now - updatedAt);
+    if (ageMs > CROSS_J_PENDING_FILL_ACK_TTL_MS) {
+      const payload = {
+        entityId: hubState.entityId,
+        accountId,
+        offerId,
+        routeHash: admission.routeHash || admission.route?.routeHash || '',
+        bookOwnerEntityId: admission.bookOwnerEntityId,
+        sourceEntityId: admission.sourceEntityId,
+        pendingFill,
+        ageMs,
+        ttlMs: CROSS_J_PENDING_FILL_ACK_TTL_MS,
+      };
+      orderbookCrossLog.error('pending_fill_ack_expired_fatal', payload);
+      throw new Error(`ORDERBOOK_CROSS_J_PENDING_FILL_ACK_EXPIRED_FATAL: ${safeStringify(payload)}`);
+    }
+    return true;
+  };
+
+  const committedCrossRouteStatus = (accountId: string, offerId: string): string | undefined => {
+    const admission = getCrossAdmission(accountId, offerId);
     if (admission && admission.status !== 'admitted') return `admission:${admission.status}`;
     const entityRoute = hubState.crossJurisdictionSwaps?.get(offerId);
     if (entityRoute?.status) return entityRoute.status;
@@ -156,6 +189,7 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
         continue;
       }
       const queuedPendingAck = findQueuedCrossSwapAckForEntityState(hubState, accountId, offerId);
+      const pendingBookAck = assertPendingBookFillAckLive(accountId, offerId);
       const pendingAck = queuedPendingAck?.data ?? null;
       const committedStatus = committedCrossRouteStatus(accountId, offerId);
       if (committedStatus && !isWorkingCrossRouteStatus(committedStatus)) {
@@ -185,6 +219,10 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
       }
 
       crossLiveOfferMeta.set(orderId, meta);
+      if (pendingBookAck) {
+        suspendedCrossOrderIds.add(orderId);
+        continue;
+      }
       // Cross-j fill ratios are exact account/hash-ledger state, while the
       // matcher stores whole lots. Use a ceiling lot count for the live row:
       // the route cap still prevents over-settlement, and dropping the final
@@ -254,6 +292,10 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
     }
 
     crossLiveOfferMeta.set(currentNamespacedOrderId, marketOffer);
+    if (assertPendingBookFillAckLive(currentAccountId, rawOffer.offerId)) {
+      suspendedCrossOrderIds.add(currentNamespacedOrderId);
+      continue;
+    }
     if (hasQueuedCrossSwapAckForEntityState(hubState, currentAccountId, rawOffer.offerId)) {
       suspendedCrossOrderIds.add(currentNamespacedOrderId);
       continue;
@@ -322,7 +364,17 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
       );
       continue;
     }
-    if (tradeEvents.length === 0 && !dirtySimulationPairs.has(marketOffer.pairId)) {
+    if (debugRebuildProjectionOnly) {
+      if (tradeEvents.length > 0) {
+        recordDebugProjectionReject(
+          currentAccountId,
+          rawOffer.offerId,
+          `debug-rebuild-cross-trade:${tradeEvents.length}`,
+        );
+      }
+      continue;
+    }
+    if (tradeEvents.length === 0 && !speculativeTradePairs.has(marketOffer.pairId)) {
       const committedResult = applyCommand(committedBook, {
         kind: 0,
         ownerId: marketOffer.makerId,
@@ -341,17 +393,7 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
       bookCache.set(marketOffer.pairId, committedBook);
       bookUpdates.push({ pairId: marketOffer.pairId, book: committedBook });
     }
-    if (debugRebuildProjectionOnly) {
-      if (tradeEvents.length > 0) {
-        recordDebugProjectionReject(
-          currentAccountId,
-          rawOffer.offerId,
-          `debug-rebuild-cross-trade:${tradeEvents.length}`,
-        );
-      }
-      continue;
-    }
-    if (tradeEvents.length > 0) dirtySimulationPairs.add(marketOffer.pairId);
+    if (tradeEvents.length > 0) speculativeTradePairs.add(marketOffer.pairId);
     for (const event of tradeEvents) {
       orderbookCrossLog.debug('trade', {
         maker: shortOrder(event.makerOrderId, 20),
@@ -359,6 +401,13 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
         qty: event.qty,
         price: event.price.toString(),
       });
+      // Cross-j fills are not a local book-only event. Each matched order now
+      // has an account/hash-ledger ACK in flight, so further same-pass matching
+      // must stop until committed state reflects that ACK. This keeps the book
+      // a projection of terminal account outcomes instead of letting a single
+      // matcher pass over-consume a route before its first fill is committed.
+      suspendedCrossOrderIds.add(event.makerOrderId);
+      suspendedCrossOrderIds.add(event.takerOrderId);
     }
 
     for (const [namespacedOrderId, fill] of aggregateCrossTradeFills(tradeEvents)) {
@@ -400,7 +449,22 @@ export const processCrossJurisdictionOrderbookOffers = (input: CrossOrderbookPro
       continue;
     }
     const ack = buildCrossJurisdictionFillAck(accountId, offerId, namespacedOrderId, meta, fill);
-    if (!ack) continue;
+    if (!ack) {
+      throw new Error(
+        `ORDERBOOK_CROSS_J_FILL_ACK_MISSING: order=${namespacedOrderId} ` +
+          `account=${accountId} offer=${offerId} filledLots=${fill.filledLots}`,
+      );
+    }
+    const admission = getCrossAdmission(accountId, offerId);
+    if (admission) {
+      const pendingFill = buildCrossJurisdictionPendingFillFromAck(ack.tx, Number(hubState.timestamp || 0));
+      if (pendingFill) {
+        admission.pendingFill = pendingFill;
+      } else {
+        delete admission.pendingFill;
+      }
+      admission.updatedAt = Number(hubState.timestamp || admission.updatedAt || 0);
+    }
     orderbookCrossLog.debug('ack', {
       account: shortOrder(accountId, 12),
       offer: shortOrder(offerId, 12),
