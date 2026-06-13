@@ -4,6 +4,7 @@ import { createEmptyEnv } from '../runtime';
 import { applyEntityTx } from '../entity-tx/apply';
 import type { AccountMachine, ConsensusConfig, EntityState } from '../types';
 import { createDefaultDelta } from '../validation-utils';
+import { applyCommittedAccountFrameFollowups, type MempoolOp } from '../entity-tx/handlers/account';
 
 const entity = (byte: string): string => `0x${byte.repeat(32)}`;
 const HUB = entity('10');
@@ -89,6 +90,36 @@ const makeAccount = (leftEntity: string, rightEntity: string): AccountMachine =>
   onChainSettlementNonce: 0,
 });
 
+const fundAccountCapacity = (account: AccountMachine, tokenId: number, amount: bigint): void => {
+  const delta = account.deltas.get(tokenId) ?? createDefaultDelta(tokenId);
+  delta.collateral = amount;
+  account.deltas.set(tokenId, delta);
+};
+
+const commitAccountTx = (
+  state: EntityState,
+  counterpartyId: string,
+  tx: MempoolOp['tx'],
+): MempoolOp[] => {
+  const followupOps: MempoolOp[] = [];
+  applyCommittedAccountFrameFollowups(
+    state,
+    counterpartyId,
+    {
+      height: 2,
+      timestamp: state.timestamp,
+      jHeight: 0,
+      accountTxs: [tx],
+      prevFrameHash: FRAME_HASH,
+      deltas: [],
+      stateHash: FRAME_HASH,
+      byLeft: true,
+    },
+    followupOps,
+  );
+  return followupOps;
+};
+
 describe('hub lending pools', () => {
   test('offer, borrow, and repay update pool state and credit-limit ops', async () => {
     const env = createEmptyEnv('lending-unit');
@@ -96,6 +127,8 @@ describe('hub lending pools', () => {
     const state = makeState(HUB, true);
     state.accounts.set(LENDER, makeAccount(HUB, LENDER));
     state.accounts.set(BORROWER, makeAccount(HUB, BORROWER));
+    fundAccountCapacity(state.accounts.get(LENDER)!, 1, 20_000n);
+    fundAccountCapacity(state.accounts.get(BORROWER)!, 1, 20_000n);
 
     const offered = await applyEntityTx(env, state, {
       type: 'lendingOffer',
@@ -109,8 +142,28 @@ describe('hub lending pools', () => {
     });
     expect(offered.skippedError).toBeUndefined();
     const position = Array.from(offered.newState.lending?.pools.values() ?? [])[0]!;
-    expect(position.availableAmount).toBe(10_000n);
+    expect(position.status).toBe('funding');
+    expect(position.availableAmount).toBe(0n);
     expect(position.borrowedAmount).toBe(0n);
+    expect(offered.mempoolOps?.[0]).toEqual({
+      accountId: LENDER,
+      tx: {
+        type: 'direct_payment',
+        data: {
+          tokenId: 1,
+          amount: 10_000n,
+          route: [LENDER, HUB],
+          description: `xln:lending:fund:${position.positionId}`,
+          fromEntityId: LENDER,
+          toEntityId: HUB,
+        },
+      },
+    });
+
+    const fundingFollowups = commitAccountTx(offered.newState, LENDER, offered.mempoolOps![0]!.tx);
+    expect(fundingFollowups).toEqual([]);
+    expect(offered.newState.lending?.pools.get(position.positionId)?.status).toBe('open');
+    expect(offered.newState.lending?.pools.get(position.positionId)?.availableAmount).toBe(10_000n);
 
     env.timestamp = 2_000;
     const borrowed = await applyEntityTx(env, offered.newState, {
@@ -145,10 +198,26 @@ describe('hub lending pools', () => {
       },
     });
     expect(repaid.skippedError).toBeUndefined();
+    expect(repaid.newState.lending?.loans.get(loan.loanId)?.status).toBe('repaying');
+    expect(repaid.mempoolOps?.[0]).toEqual({
+      accountId: BORROWER,
+      tx: {
+        type: 'direct_payment',
+        data: {
+          tokenId: 1,
+          amount: 2_525n,
+          route: [BORROWER, HUB],
+          description: `xln:lending:repay:${loan.loanId}`,
+          fromEntityId: BORROWER,
+          toEntityId: HUB,
+        },
+      },
+    });
+    const repaymentFollowups = commitAccountTx(repaid.newState, BORROWER, repaid.mempoolOps![0]!.tx);
     expect(repaid.newState.lending?.loans.get(loan.loanId)?.status).toBe('repaid');
     expect(repaid.newState.lending?.pools.get(position.positionId)?.borrowedAmount).toBe(0n);
     expect(repaid.newState.lending?.pools.get(position.positionId)?.availableAmount).toBe(10_025n);
-    expect(repaid.mempoolOps?.[0]).toEqual({
+    expect(repaymentFollowups[0]).toEqual({
       accountId: BORROWER,
       tx: { type: 'set_credit_limit', data: { tokenId: 1, amount: 0n } },
     });

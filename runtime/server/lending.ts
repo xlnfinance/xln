@@ -1,9 +1,15 @@
 import type { Env, RuntimeInput } from '../types';
-import { normalizeInterestBps, normalizeLendingTerm, selectBestLendingPool, summarizeLendingState } from '../lending';
+import {
+  getAccountOutCapacity,
+  normalizeInterestBps,
+  normalizeLendingTerm,
+  selectBestLendingPool,
+  summarizeLendingState,
+} from '../lending';
 import { safeStringify } from '../serialization-utils';
 import { resolveEntityProposerId } from '../state-helpers';
 import { isEntityId32 } from '../server-utils';
-import { getAccountMachine, getEntityReplicaById, hasAccount } from './entity-lookup';
+import { getAccountMachine, getEntityReplicaById } from './entity-lookup';
 
 type LendingApiInput = {
   req: Request;
@@ -111,13 +117,20 @@ export const handleLendingOfferRequest = async (input: LendingApiInput): Promise
   }
   const hub = resolveHub(env, input.activeHubEntityIds, body['hubEntityId']);
   if (hub.error) return responseWithHeaders(hub.error, headers);
-  if (!hasAccount(env, hub.hubEntityId, lenderEntityId)) {
+  const lenderAccount = getAccountMachine(env, hub.hubEntityId, lenderEntityId);
+  if (!lenderAccount) {
     return new Response(safeStringify({ success: false, error: 'Open an account with this hub first' }), { status: 409, headers });
   }
   const tokenId = parseTokenId(body['tokenId']);
   const amount = parseAmount(body['amount']);
   if (tokenId === null || amount === null) {
     return new Response(safeStringify({ success: false, error: 'Invalid token or amount' }), { status: 400, headers });
+  }
+  if (!lenderAccount.deltas.has(tokenId)) {
+    return new Response(safeStringify({ success: false, error: 'Token is not enabled on this account' }), { status: 409, headers });
+  }
+  if (getAccountOutCapacity(lenderAccount, lenderEntityId, tokenId) < amount) {
+    return new Response(safeStringify({ success: false, error: 'Insufficient account capacity to fund lending pool' }), { status: 409, headers });
   }
   let termId;
   let interestBps;
@@ -207,6 +220,22 @@ export const handleLendingRepayRequest = async (input: LendingApiInput): Promise
   const amount = body['amount'] === undefined ? undefined : parseAmount(body['amount']);
   if (body['amount'] !== undefined && amount === null) {
     return new Response(safeStringify({ success: false, error: 'Invalid amount' }), { status: 400, headers });
+  }
+  const account = getAccountMachine(env, hub.hubEntityId, borrowerEntityId);
+  if (!account) {
+    return new Response(safeStringify({ success: false, error: 'Open an account with this hub first' }), { status: 409, headers });
+  }
+  const hubReplica = getEntityReplicaById(env, hub.hubEntityId)!;
+  const loan = hubReplica.state.lending?.loans.get(loanId);
+  if (!loan || loan.borrowerEntityId.toLowerCase() !== borrowerEntityId || loan.status !== 'active') {
+    return new Response(safeStringify({ success: false, error: 'Active loan not found' }), { status: 409, headers });
+  }
+  const remaining = loan.repaymentAmount - loan.repaidAmount;
+  if (amount !== undefined && amount !== null && amount < remaining) {
+    return new Response(safeStringify({ success: false, error: 'Partial repayments are not enabled' }), { status: 409, headers });
+  }
+  if (getAccountOutCapacity(account, borrowerEntityId, loan.tokenId) < remaining) {
+    return new Response(safeStringify({ success: false, error: 'Insufficient account capacity to repay loan' }), { status: 409, headers });
   }
   const signerId = resolveEntityProposerId(env, hub.hubEntityId, 'lending-repay');
   input.enqueueRuntimeInput(env, {

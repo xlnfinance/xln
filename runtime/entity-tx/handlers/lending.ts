@@ -3,10 +3,13 @@ import { createStructuredLogger, shortId } from '../../logger';
 import { addMessage, cloneEntityState } from '../../state-helpers';
 import type { MempoolOp } from './account';
 import {
+  buildLendingFundingMemo,
   buildLendingLoanId,
   buildLendingPositionId,
+  buildLendingRepayMemo,
   computeLendingInterest,
   ensureLendingState,
+  getAccountOutCapacity,
   getCreditGrantedByAccountOwner,
   isLendingEntityId,
   LENDING_TERM_MS,
@@ -54,6 +57,28 @@ const setCreditLimitOp = (
   } satisfies AccountTx,
 });
 
+const directPaymentOp = (
+  accountId: string,
+  tokenId: number,
+  amount: bigint,
+  fromEntityId: string,
+  toEntityId: string,
+  description: string,
+): MempoolOp => ({
+  accountId,
+  tx: {
+    type: 'direct_payment',
+    data: {
+      tokenId,
+      amount,
+      route: [fromEntityId, toEntityId],
+      description,
+      fromEntityId,
+      toEntityId,
+    },
+  } satisfies AccountTx,
+});
+
 export const handleLendingOfferEntityTx = (
   env: Env,
   entityState: EntityState,
@@ -68,6 +93,20 @@ export const handleLendingOfferEntityTx = (
   if (!Number.isFinite(tokenId) || tokenId <= 0) throw new Error(`LENDING_INVALID_TOKEN: ${String(entityTx.data.tokenId)}`);
   const amount = BigInt(entityTx.data.amount);
   requirePositiveAmount(amount, 'LENDING_OFFER');
+  const account = newState.accounts.get(lenderEntityId);
+  if (!account) {
+    addMessage(newState, `🏦 Lending pool rejected: account with ${shortId(lenderEntityId)} is not open`);
+    return { newState, outputs: [] };
+  }
+  if (!account.deltas.has(tokenId)) {
+    addMessage(newState, `🏦 Lending pool rejected: token ${tokenId} is not enabled on account ${shortId(lenderEntityId)}`);
+    return { newState, outputs: [] };
+  }
+  const outCapacity = getAccountOutCapacity(account, lenderEntityId, tokenId);
+  if (outCapacity < amount) {
+    addMessage(newState, `🏦 Lending pool rejected: insufficient account capacity (${outCapacity}/${amount})`);
+    return { newState, outputs: [] };
+  }
   const termId = normalizeLendingTerm(entityTx.data.termId);
   const interestBps = normalizeInterestBps(entityTx.data.interestBps);
   const now = Math.max(0, Math.floor(Number(env.timestamp || Date.now())));
@@ -101,16 +140,16 @@ export const handleLendingOfferEntityTx = (
     lenderEntityId,
     tokenId,
     principalAmount: amount,
-    availableAmount: amount,
+    availableAmount: 0n,
     borrowedAmount: 0n,
     interestBps,
     termId,
     termMs: LENDING_TERM_MS[termId],
     createdAt: now,
     updatedAt: now,
-    status: 'open',
+    status: 'funding',
   });
-  addMessage(newState, `🏦 Lending pool funded ${amount} token=${tokenId} term=${termId} rate=${interestBps}bps`);
+  addMessage(newState, `🏦 Lending pool funding queued ${amount} token=${tokenId} term=${termId} rate=${interestBps}bps`);
   log.info('pool.offer', {
     hub: shortId(newState.entityId),
     lender: shortId(lenderEntityId),
@@ -119,7 +158,20 @@ export const handleLendingOfferEntityTx = (
     termId,
     interestBps,
   });
-  return { newState, outputs: [] };
+  return {
+    newState,
+    outputs: processingTrigger(newState),
+    mempoolOps: [
+      directPaymentOp(
+        lenderEntityId,
+        tokenId,
+        amount,
+        lenderEntityId,
+        newState.entityId,
+        buildLendingFundingMemo(positionId),
+      ),
+    ],
+  };
 };
 
 export const handleLendingBorrowEntityTx = (
@@ -223,46 +275,55 @@ export const handleLendingRepayEntityTx = (
   const borrowerEntityId = String(entityTx.data.borrowerEntityId || '').toLowerCase();
   if (!isLendingEntityId(borrowerEntityId)) throw new Error(`LENDING_INVALID_BORROWER: ${String(entityTx.data.borrowerEntityId)}`);
   const loan = lending.loans.get(entityTx.data.loanId);
-  if (!loan || loan.borrowerEntityId !== borrowerEntityId || loan.status !== 'active') {
+  if (!loan || loan.borrowerEntityId !== borrowerEntityId || (loan.status !== 'active' && loan.status !== 'repaying')) {
     addMessage(newState, `🏦 Loan repay ignored: active loan not found`);
     return { newState, outputs: [] };
   }
-  const amount = entityTx.data.amount ?? (loan.repaymentAmount - loan.repaidAmount);
+  if (loan.status === 'repaying') {
+    addMessage(newState, `🏦 Loan repayment already pending`);
+    return { newState, outputs: [] };
+  }
+  const remainingAmount = loan.repaymentAmount - loan.repaidAmount;
+  const amount = entityTx.data.amount ?? remainingAmount;
   requirePositiveAmount(amount, 'LENDING_REPAY');
-  const repayApplied = amount > loan.repaymentAmount - loan.repaidAmount
-    ? loan.repaymentAmount - loan.repaidAmount
-    : amount;
+  if (amount < remainingAmount) {
+    addMessage(newState, `🏦 Loan repay rejected: partial repayments are not enabled`);
+    return { newState, outputs: [] };
+  }
+  const repayApplied = remainingAmount;
   const now = Math.max(loan.updatedAt, Math.floor(Number(env.timestamp || 0)));
-  loan.repaidAmount += repayApplied;
+  const account = newState.accounts.get(borrowerEntityId);
+  if (!account) {
+    addMessage(newState, `🏦 Loan repay rejected: account with ${shortId(borrowerEntityId)} is not open`);
+    return { newState, outputs: [] };
+  }
+  if (!account.deltas.has(loan.tokenId)) {
+    addMessage(newState, `🏦 Loan repay rejected: token ${loan.tokenId} is not enabled on account ${shortId(borrowerEntityId)}`);
+    return { newState, outputs: [] };
+  }
+  const outCapacity = getAccountOutCapacity(account, borrowerEntityId, loan.tokenId);
+  if (outCapacity < repayApplied) {
+    addMessage(newState, `🏦 Loan repay rejected: insufficient account capacity (${outCapacity}/${repayApplied})`);
+    return { newState, outputs: [] };
+  }
+  loan.status = 'repaying';
   loan.updatedAt = now;
 
-  const mempoolOps: MempoolOp[] = [];
-  if (loan.repaidAmount >= loan.repaymentAmount) {
-    loan.status = 'repaid';
-    const pool = lending.pools.get(loan.positionId);
-    if (!pool) throw new Error(`LENDING_POOL_MISSING_FOR_LOAN: ${loan.loanId}`);
-    if (pool.borrowedAmount < loan.principalAmount) {
-      throw new Error(`LENDING_POOL_BORROWED_UNDERFLOW: ${loan.positionId}`);
-    }
-    pool.borrowedAmount -= loan.principalAmount;
-    pool.availableAmount += loan.repaymentAmount;
-    pool.updatedAt = now;
-
-    const account = newState.accounts.get(borrowerEntityId);
-    if (account?.deltas.has(loan.tokenId)) {
-      const currentLimit = getCreditGrantedByAccountOwner(account, newState.entityId, loan.tokenId);
-      const nextLimit = currentLimit > loan.principalAmount ? currentLimit - loan.principalAmount : 0n;
-      mempoolOps.push(setCreditLimitOp(borrowerEntityId, loan.tokenId, nextLimit));
-    }
-    addMessage(newState, `🏦 Loan repaid ${loan.loanId}`);
-  } else {
-    addMessage(newState, `🏦 Loan repayment recorded ${repayApplied} on ${loan.loanId}`);
-  }
+  addMessage(newState, `🏦 Loan repayment queued ${repayApplied} on ${loan.loanId}`);
 
   return {
     newState,
-    outputs: mempoolOps.length > 0 ? processingTrigger(newState) : [],
-    ...(mempoolOps.length > 0 ? { mempoolOps } : {}),
+    outputs: processingTrigger(newState),
+    mempoolOps: [
+      directPaymentOp(
+        borrowerEntityId,
+        loan.tokenId,
+        repayApplied,
+        borrowerEntityId,
+        newState.entityId,
+        buildLendingRepayMemo(loan.loanId),
+      ),
+    ],
   };
 };
 
@@ -279,6 +340,10 @@ export const handleLendingClosePositionEntityTx = (
   const position = lending.pools.get(entityTx.data.positionId);
   if (!position || position.lenderEntityId !== lenderEntityId) {
     addMessage(newState, `🏦 Lending position close ignored: position not found`);
+    return { newState, outputs: [] };
+  }
+  if (position.status === 'funding') {
+    addMessage(newState, `🏦 Lending position funding is still pending`);
     return { newState, outputs: [] };
   }
   if (position.borrowedAmount > 0n) {

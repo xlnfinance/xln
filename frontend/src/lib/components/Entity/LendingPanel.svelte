@@ -94,7 +94,7 @@
   $: selectedTokenSymbol = tokenSymbol(selectedTokenId);
   $: pools = state?.pools ?? [];
   $: loans = state?.loans ?? [];
-  $: activeLoans = loans.filter((loan) => loan.status === 'active');
+  $: activeLoans = loans.filter((loan) => loan.status === 'active' || loan.status === 'repaying');
   $: totalAvailable = parseAmount(state?.totals?.availableAmount);
   $: totalBorrowed = parseAmount(state?.totals?.borrowedAmount);
   $: canSubmit = isLive && !!selectedHubEntityId && !!normalizedEntityId && !submitting;
@@ -394,10 +394,10 @@
           <div class="lending-row loan-row" data-testid="lending-loan-row">
             <div>
               <strong>{formatAmount(loan.repaymentAmount, loan.tokenId)} {tokenSymbol(loan.tokenId)}</strong>
-              <span>{loan.termId} · {rateLabel(loan.interestBps)} · due {dueLabel(loan.dueAt)}</span>
+              <span>{loan.termId} · {rateLabel(loan.interestBps)} · {loan.status} · due {dueLabel(loan.dueAt)}</span>
             </div>
-            <button class="secondary" type="button" disabled={submitting} on:click={() => repayLoan(loan.loanId)} data-testid="lending-repay-submit">
-              Repay
+            <button class="secondary" type="button" disabled={submitting || loan.status === 'repaying'} on:click={() => repayLoan(loan.loanId)} data-testid="lending-repay-submit">
+              {loan.status === 'repaying' ? 'Repaying' : 'Repay'}
             </button>
           </div>
         {/each}
