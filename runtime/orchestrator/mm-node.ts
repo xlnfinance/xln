@@ -40,6 +40,7 @@ import type { JAdapter, JTokenInfo } from '../jadapter/types';
 import {
   BOOTSTRAP_POLL_MS,
   DEFAULT_ACCOUNT_TOKEN_IDS,
+  HUB_DEFAULT_MIN_TRADE_SIZE,
   HUB_REQUIRED_TOKEN_COUNT,
   getAccountMachine,
   getCreditGrantedByEntity,
@@ -554,6 +555,35 @@ const invertPriceTicks = (ticks: bigint): bigint => {
   return (ORDERBOOK_PRICE_SCALE * ORDERBOOK_PRICE_SCALE) / ticks;
 };
 
+const ceilDiv = (numerator: bigint, denominator: bigint): bigint => {
+  if (denominator <= 0n) throw new Error('ceilDiv denominator must be positive');
+  return (numerator + denominator - 1n) / denominator;
+};
+
+const alignUpToLot = (amount: bigint): bigint => {
+  if (amount <= 0n) return 0n;
+  return ceilDiv(amount, SWAP_LOT_SCALE) * SWAP_LOT_SCALE;
+};
+
+const minBaseAmountForQuoteNotional = (priceTicks: bigint): bigint => {
+  if (priceTicks <= 0n) return 0n;
+  return alignUpToLot(ceilDiv(HUB_DEFAULT_MIN_TRADE_SIZE * ORDERBOOK_PRICE_SCALE, priceTicks));
+};
+
+const withMinQuoteNotionalBaseSize = (baseSize: bigint, priceTicks: bigint): bigint => {
+  const minBaseSize = minBaseAmountForQuoteNotional(priceTicks);
+  return baseSize >= minBaseSize ? baseSize : minBaseSize;
+};
+
+const withCrossMinQuoteNotionalSourceAmount = (
+  sourceAmount: bigint,
+  sourceIsBase: boolean,
+  priceTicks: bigint,
+): bigint => {
+  if (sourceIsBase) return withMinQuoteNotionalBaseSize(sourceAmount, priceTicks);
+  return sourceAmount >= HUB_DEFAULT_MIN_TRADE_SIZE ? sourceAmount : HUB_DEFAULT_MIN_TRADE_SIZE;
+};
+
 const getCrossSourceToTargetMidTicks = (sourceTokenId: number, targetTokenId: number): bigint => {
   if (sourceTokenId === targetTokenId) return ORDERBOOK_PRICE_SCALE;
   const oriented = getSwapPairOrientation(sourceTokenId, targetTokenId);
@@ -728,8 +758,10 @@ const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: number[]):
         }
         if (!isWithinPairBand(entry.midPriceTicks, askPriceTicks)) continue;
         if (!isWithinPairBand(entry.midPriceTicks, bidPriceTicks)) continue;
-        const askWantAmount = (baseSize * askPriceTicks) / ORDERBOOK_PRICE_SCALE;
-        const bidGiveAmount = (baseSize * bidPriceTicks) / ORDERBOOK_PRICE_SCALE;
+        const askBaseSize = withMinQuoteNotionalBaseSize(baseSize, askPriceTicks);
+        const bidBaseSize = withMinQuoteNotionalBaseSize(baseSize, bidPriceTicks);
+        const askWantAmount = (askBaseSize * askPriceTicks) / ORDERBOOK_PRICE_SCALE;
+        const bidGiveAmount = (bidBaseSize * bidPriceTicks) / ORDERBOOK_PRICE_SCALE;
         const levelId = level + 1;
 
         if (askWantAmount > 0n) {
@@ -738,7 +770,7 @@ const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: number[]):
             pairId: entry.pair.pairId,
             hubEntityId,
             giveTokenId: entry.pair.baseTokenId,
-            giveAmount: baseSize,
+            giveAmount: askBaseSize,
             wantTokenId: entry.pair.quoteTokenId,
             wantAmount: askWantAmount,
             // Resting MM quotes must be ordinary GTC orders. A non-zero minFillRatio on
@@ -755,7 +787,7 @@ const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: number[]):
             giveTokenId: entry.pair.quoteTokenId,
             giveAmount: bidGiveAmount,
             wantTokenId: entry.pair.baseTokenId,
-            wantAmount: baseSize,
+            wantAmount: bidBaseSize,
             // Same rule for resting bids: keep them plain GTC so they are always
             // eligible to rest on book and match incrementally.
             minFillRatio: 0,
@@ -852,12 +884,16 @@ const buildMarketMakerCrossOfferSpecs = (
 
       for (let level = 0; level < levelCount; level += 1) {
         const offsetBps = levelProfile.offsetsBps[level]!;
-        const sourceAmount = levelProfile.baseSizes[level]!;
         const rawPriceTicks = market.sourceIsBase
           ? (canonicalMidTicks * BigInt(10_000 + offsetBps)) / 10_000n
           : (canonicalMidTicks * BigInt(Math.max(1, 10_000 - offsetBps))) / 10_000n;
         const priceTicks = snapPriceTicks(rawPriceTicks, pairPolicy.priceStepTicks, market.sourceIsBase ? 'up' : 'down');
         if (!isWithinPairBand(canonicalMidTicks, priceTicks)) continue;
+        const sourceAmount = withCrossMinQuoteNotionalSourceAmount(
+          levelProfile.baseSizes[level]!,
+          market.sourceIsBase,
+          priceTicks,
+        );
         const targetAmount = computeCrossTargetAmount(sourceAmount, market.sourceIsBase, priceTicks);
         const levelId = level + 1;
         const bookOwnerEntityId = deriveCanonicalCrossJurisdictionBookOwnerForLegs(
@@ -896,6 +932,8 @@ const buildMarketMakerCrossOfferSpecs = (
           priceTicks,
         );
         if (amounts) {
+          const quoteAmount = market.sourceIsBase ? amounts.targetAmount : amounts.sourceAmount;
+          if (quoteAmount < HUB_DEFAULT_MIN_TRADE_SIZE) continue;
           const offerId = `mmx-${sourceHubSuffix}-${targetHubSuffix}-${pair.sourceTokenId}-${pair.targetTokenId}-sell-${levelId}`;
           const route = canonicalizeLocalCrossJurisdictionRoute(env, {
             ...routeBase,
