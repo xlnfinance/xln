@@ -1,5 +1,7 @@
   <script lang="ts">
+  import { flushSync, onMount, tick } from 'svelte';
     import type { AccountMachine, EntityReplica, Tab } from '$lib/types/ui';
+  import { writable } from 'svelte/store';
   import type { BookState, CrossJurisdictionSwapRoute, Delta, EntityState, Env, EnvSnapshot, RoutedEntityInput } from '@xln/runtime/xln-api';
   import {
     deriveCanonicalCrossJurisdictionBookOwnerForLegs,
@@ -28,6 +30,40 @@
     parseDecimalAmountToBigInt,
     toBigIntSafe,
   } from './swap-formatting';
+  import {
+    buildDeterministicSwapOfferId as buildSwapOfferId,
+    buildRoutedRouteCandidates as buildRoutedRouteCandidatesPure,
+    estimateRoutedHopOutput,
+    orderbookSnapshotCacheKey,
+    orderbookSnapshotSignature,
+    type OrderbookSnapshot,
+    type RouteQuote,
+    type RoutedSwapHop,
+    type RoutedSwapRouteCandidate,
+  } from './routed-swap-planner';
+  import {
+    buildClosedOrderViews,
+    buildOfferPriceImprovementByKey,
+    buildTotalPriceImprovementSummary,
+    closedOrderStatusLabel,
+    closedOrderStatusTone,
+    collectOfferLifecyclesFrom as collectOfferLifecyclesFromPure,
+    extractStpBlockingOrderId,
+    formatCloseComment,
+    formatOrderTime,
+    isDustOpenOffer as isDustOpenOfferPure,
+    offerLifecycleKey,
+    offerPriceTicks as offerPriceTicksPure,
+    offerSideLabel as offerSideLabelPure,
+    remainingOfferUsd as remainingOfferUsdPure,
+    type ClosedOrderStatus,
+    type ClosedOrderView,
+    type OfferLifecycle,
+    type OfferLike,
+    type SwapCompletionModal,
+  } from './swap-order-history';
+  import SwapOrderList from './SwapOrderList.svelte';
+  import './SwapPanel.css';
 
   export let replica: EntityReplica | null;
   export let tab: Tab;
@@ -37,14 +73,25 @@
   // Props
   export let counterpartyId: string = '';
   let orderbookScopeMode: 'aggregated' | 'selected' = 'selected';
+  let swapPanelRoot: HTMLDivElement | null = null;
+  let orderAmountInputElement: HTMLInputElement | null = null;
+  let orderAmountRevision = 0;
+  let orderAmountDomRevision = 0;
+  let latestOrderAmountDomValue = '';
+  let hasLatestOrderAmountDomValue = false;
   let createOrderAccountId = '';
   let selectedBookAccountId = '';
   let activeOrderAccountId = '';
   let showOrderbook = true;
+  let selectedRouteEntityId = '';
+  let selectedRouteEntityName = '';
+  let selectedRouteJurisdictionLabel = '';
   const AGGREGATED_ORDERBOOK_DEPTH = 10;
   const SELECTED_ORDERBOOK_DEPTH = 10;
   const ORDERBOOK_PRICE_SCALE = 10_000n;
   const ORDERBOOK_LOT_SCALE = 10n ** 12n;
+  const ORDERBOOK_SNAPSHOT_FRESH_MS = 10_000;
+  const ENABLE_MULTIHOP_SWAP_UI = false;
   type PreparedSwapOrderLike = {
     side: 0 | 1;
     priceTicks: bigint;
@@ -67,7 +114,6 @@
     accountId: string;
     accountIds: string[];
   };
-  type SnapshotLevel = { price: bigint; size: number; total: number };
   type OrderbookLevelClickDetail = {
     side: BookSide;
     priceTicks: string;
@@ -75,89 +121,25 @@
     accountIds: string[];
     displayPrice?: string;
   };
-  type OrderbookSnapshot = {
-    pairId: string;
-    bids: SnapshotLevel[];
-    asks: SnapshotLevel[];
-    spread: bigint | null;
-    spreadPercent: string;
-    sourceCount: number;
-    updatedAt: number;
-  };
   type FrameLike = Env | EnvSnapshot | EntityState | null | undefined;
-  type ClosedOrderStatus = 'filled' | 'partial' | 'canceled' | 'closed';
-  type ResolveRecord = {
-    fillRatio: number;
-    cancelRemainder: boolean;
-    height: number;
-    executionGiveAmount: bigint | null;
-    executionWantAmount: bigint | null;
-    feeTokenId: number | null;
-    feeAmount: bigint | null;
-    comment: string;
-  };
-  type OfferLifecycle = {
-    key: string;
-    offerId: string;
-    accountId: string;
-    giveTokenId: number;
-    wantTokenId: number;
-    giveAmount: bigint;
-    wantAmount: bigint;
-    priceTicks: bigint;
-    createdAt: number;
-    resolves: ResolveRecord[];
-    cancelRequested: boolean;
-  };
-  type ClosedOrderView = {
-    offerId: string;
-    accountId: string;
-    side: 'Ask' | 'Bid';
-    pairLabel: string;
-    priceTicks: bigint;
-    giveTokenId: number;
-    wantTokenId: number;
-    giveAmount: bigint;
-    wantAmount: bigint;
-    filledGiveAmount: bigint;
-    filledWantAmount: bigint;
-    filledBaseAmount: bigint;
-    targetBaseAmount: bigint;
-    filledPercent: number;
-    priceImprovementAmount: bigint;
-    priceImprovementTokenId: number | null;
-    feeAmount: bigint;
-    feeTokenId: number | null;
-    status: ClosedOrderStatus;
-    closeComment: string;
-    createdAt: number;
-    closedAt: number;
-  };
-  type SwapCompletionModal = {
-    offerId: string;
-    side: 'Ask' | 'Bid';
-    pairLabel: string;
-    filledGiveAmount: bigint;
-    filledWantAmount: bigint;
-    giveTokenId: number;
-    wantTokenId: number;
-    priceImprovementAmount: bigint;
-    priceImprovementTokenId: number | null;
-    feeAmount: bigint;
-    feeTokenId: number | null;
-  };
   let selectedOrderLevel: ClickedOrderLevel | null = null;
   let orderbookSnapshot: OrderbookSnapshot = {
     pairId: '1/2',
+    hubIds: [],
     bids: [],
     asks: [],
     spread: null,
     spreadPercent: '-',
     sourceCount: 0,
+    sourceStatus: 'syncing',
     updatedAt: 0,
   };
+  const orderbookSnapshotCache = new Map<string, OrderbookSnapshot>();
+  const orderbookSnapshotCacheSignatures = new Map<string, string>();
+  const orderbookSnapshotCacheBumpedAt = new Map<string, number>();
+  const routedOrderAmountInput = writable('');
+  let orderbookQuoteNonce = 0;
   let orderbookPairId = '1/2';
-  let orderbookViewKey = '';
   let orderbookRefreshNonce = 0;
   let orderPercent = 100;
   let submitError = '';
@@ -170,45 +152,76 @@
   let giveTokenId = '1';
   let wantTokenId = '2';
   let orderAmountInput = '';
+  let liveOrderAmountInput = '';
   let priceRatioInput = '';
   let giveAmount: bigint = 0n;
   let wantAmount: bigint = 0n;
   let preparedOrder: PreparedSwapOrderLike | null = null;
   let parsedOrderbookPair: { baseTokenId: number; quoteTokenId: number } | null = null;
+  let orderbookPairDisplayLabel = '';
+  let orderbookBaseJurisdictionLabel = '';
+  let orderbookQuoteJurisdictionLabel = '';
   let orderMode: 'buy-base' | 'sell-base' | 'none' = 'none';
   let limitPriceTicks: bigint | null = null;
   let orderListTab: 'open' | 'closed' = 'open';
   let orderRouteFilter: 'all' | 'same' | 'cross' = 'all';
   let closedOrderStatusFilter: 'all' | ClosedOrderStatus = 'all';
+  let activeOffers: SwapOfferLike[] = [];
+  let routeFilteredOpenOffers: SwapOfferLike[] = [];
+  let openOrders: SwapOfferLike[] = [];
   let offerLifecycles: OfferLifecycle[] = [];
   let closedOfferLifecycles: OfferLifecycle[] = [];
   let closedOrderViews: ClosedOrderView[] = [];
+  let filteredClosedOrderViews: ClosedOrderView[] = [];
   let wantTokenPresentInAccount = false;
   let availableGiveCapacity = 0n;
   let availableWantInCapacity = 0n;
   let autoInboundCreditTarget: bigint | null = null;
   let currentPeerCreditLimit = 0n;
+  let formattedAvailableGiveAmount = '0';
   let formattedAvailableGive = '0';
+  let formattedAvailableWantInAmount = '0';
   let formattedAvailableWantIn = '0';
+  let targetCapacityAmount = 0n;
+  let formattedTargetCapacityAmount = '0';
+  let targetCapacityLabel = '0';
   let autoInboundCreditIncrease = 0n;
   let canAutoPrepareInboundCapacity = false;
   let swapRouteMode: 'same' | 'cross' = 'same';
   let selectedRouteValue = 'same';
+  let liveSelectedRouteValue = 'same';
+  let committedRouteSelectionValue = 'same';
+  let routeSelectionCommitNonce = 0;
+  let routeSelectElement: HTMLSelectElement | null = null;
+  let lastRouteSelectNativeSyncKey = '';
+  let routeSelectNativeSyncVersion = 0;
   let selectedCrossTargetValue = '';
   let crossTargetOptions: CrossTargetOption[] = [];
   let routeOptions: SwapRouteOption[] = [];
+  let visibleRouteOptions: SwapRouteOption[] = [];
+  let selectedRouteOption: SwapRouteOption | null = null;
+  let selectedRouteOptionOverride: SwapRouteOption | null = null;
   let selectedCrossTarget: CrossTargetOption | null = null;
-  let routedPlanEnabled = false;
-  let selectedRouteHopIndex = 0;
-  let routedSwapPlan: RoutedSwapHop[] = [];
-  let activeRoutedHop: RoutedSwapHop | null = null;
+  let selectedCrossTargetOverride: CrossTargetOption | null = null;
+  let routedRouteRecommendations: RoutedSwapRouteCandidate[] = [];
+  let showManualRouteRecommendation = false;
+  let lastPriceContextSignature = '';
+  let preservePriceOnNextContextChange = false;
   let autoExtendCrossInbound = true;
-  let crossPriceImprovementMode: 'source_savings' | 'target_bonus' = 'source_savings';
+  let crossPriceImprovementMode: 'source_savings' | 'target_bonus' = 'target_bonus';
   let selectedSourceEntityValue = '';
   let routeDetailsOpen = false;
   let openTokenMenu: 'give' | 'want' | '' = '';
   let sourceMenuOpen = false;
   let routeMenuOpen = false;
+  const routeMenuOpenStore = writable(false);
+  let routeMenuToggleCount = 0;
+  let routeMenuNativeClickCount = 0;
+  let routeMenuSetCount = 0;
+  let routeMenuLastSetReason = 'init';
+  let ignoreOutsideMenuClickUntil = 0;
+  let ignoreNextWindowMenuClick = false;
+  let ignoreWindowMenuClickCount = 0;
   let hubMenuOpen = false;
   let crossTargetInCapacity = 0n;
   let crossAutoInboundCreditTarget: bigint | null = null;
@@ -257,28 +270,52 @@
     const profile = getGossipProfiles().find((entry) => String(entry?.entityId || '').trim().toLowerCase() === normalized);
     return profile?.metadata?.isHub === true;
   }
+  function normalizeEntityId(value: string): string {
+    return String(value || '').trim().toLowerCase();
+  }
+  function resolveHubIdCandidate(candidate: string, knownHubIds: string[]): string {
+    const normalized = normalizeEntityId(candidate);
+    if (!normalized) return '';
+    const matchedAccount = knownHubIds.find((id) => normalizeEntityId(id) === normalized);
+    if (matchedAccount) return matchedAccount;
+    return isHubAccount(normalized) ? normalized : '';
+  }
+  function firstAvailableHubId(knownHubIds: string[], candidates: string[]): string {
+    for (const candidate of candidates) {
+      const resolved = resolveHubIdCandidate(candidate, knownHubIds);
+      if (resolved) return resolved;
+    }
+    return knownHubIds[0] || '';
+  }
   $: hubAccountIds = accountIds.filter((id) => isHubAccount(id)).slice(0, 10);
   $: hiddenAccountCount = Math.max(0, accountIds.length - hubAccountIds.length);
-  $: if (!selectedBookAccountId || !hubAccountIds.includes(selectedBookAccountId)) {
-    selectedBookAccountId = counterpartyId && hubAccountIds.includes(counterpartyId)
-      ? counterpartyId
-      : (hubAccountIds[0] || '');
+  $: fallbackHubAccountId = firstAvailableHubId(hubAccountIds, [
+    counterpartyId,
+  ]);
+  $: if (!resolveHubIdCandidate(selectedBookAccountId, hubAccountIds) && fallbackHubAccountId) {
+    selectedBookAccountId = fallbackHubAccountId;
   }
-  $: if (!createOrderAccountId || !hubAccountIds.includes(createOrderAccountId)) {
-    createOrderAccountId = selectedBookAccountId || '';
+  $: if (!resolveHubIdCandidate(createOrderAccountId, hubAccountIds) && fallbackHubAccountId) {
+    createOrderAccountId = fallbackHubAccountId;
   }
   $: if (orderbookScopeMode === 'selected' && selectedBookAccountId) {
     createOrderAccountId = selectedBookAccountId;
   }
   $: currentHubSelection = orderbookScopeMode === 'aggregated'
-    ? createOrderAccountId
-    : selectedBookAccountId;
+    ? (resolveHubIdCandidate(createOrderAccountId, hubAccountIds) || fallbackHubAccountId)
+    : (resolveHubIdCandidate(selectedBookAccountId, hubAccountIds) || resolveHubIdCandidate(createOrderAccountId, hubAccountIds) || fallbackHubAccountId);
   $: activeOrderAccountId = orderbookScopeMode === 'aggregated'
-    ? createOrderAccountId
-    : selectedBookAccountId;
+    ? (resolveHubIdCandidate(createOrderAccountId, hubAccountIds) || fallbackHubAccountId)
+    : (resolveHubIdCandidate(selectedBookAccountId, hubAccountIds) || resolveHubIdCandidate(createOrderAccountId, hubAccountIds) || fallbackHubAccountId);
   $: activeBookHubId = (() => {
-    if (activeRoutedHop?.bookHubId) return activeRoutedHop.bookHubId;
-    const sourceHubId = String(activeOrderAccountId || '').trim().toLowerCase();
+    const sourceHubId = String(
+      activeOrderAccountId
+      || selectedRouteOption?.sourceHubEntityId
+      || fallbackHubAccountId
+      || selectedBookAccountId
+      || createOrderAccountId
+      || '',
+    ).trim().toLowerCase();
     if (swapRouteMode !== 'cross' || !selectedCrossTarget || !sourceHubId) return sourceHubId;
     const sourceJurisdictionRef = getReplicaJurisdictionRef(currentReplica);
     if (!sourceJurisdictionRef || !selectedCrossTarget.targetJurisdictionRef) return sourceHubId;
@@ -298,11 +335,13 @@
           ? hubAccountIds
           : (selectedBookAccountId ? [selectedBookAccountId] : [])
       );
+  $: visibleOrderbookHubIds = swapRouteMode !== 'cross' && orderbookScopeMode === 'aggregated'
+    ? orderbookHubIds
+    : [];
   $: activeOrderbookRelayUrl = activeBookHubId ? orderbookRelayUrlForHub(activeBookHubId) : '';
   $: orderbookDepth = orderbookScopeMode === 'aggregated'
     ? AGGREGATED_ORDERBOOK_DEPTH
     : SELECTED_ORDERBOOK_DEPTH;
-  $: orderbookViewKey = `${orderbookPairId}|${orderbookScopeMode}|${selectedBookAccountId}|${orderbookHubIds.join(',')}|${activeOrderbookRelayUrl}|${orderbookRefreshNonce}`;
 
   function resolveCounterpartyId(input: string): string {
     const normalized = String(input || '').trim().toLowerCase();
@@ -315,10 +354,65 @@
     return resolved || formatEntityId(accountIdValue);
   }
 
+  function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function stripJurisdictionSuffix(name: string, jurisdiction: string): string {
+    const cleanName = String(name || '').trim();
+    const cleanJurisdiction = normalizeJurisdictionDisplayName(jurisdiction);
+    if (!cleanName || !cleanJurisdiction) return cleanName;
+    return cleanName
+      .replace(new RegExp(`\\s*\\(${escapeRegExp(cleanJurisdiction)}\\)\\s*$`, 'i'), '')
+      .replace(new RegExp(`\\s+${escapeRegExp(cleanJurisdiction)}\\s*$`, 'i'), '')
+      .trim() || cleanName;
+  }
+
   function formatEntityNetworkLabel(name: string, jurisdiction: string): string {
-    const cleanName = String(name || '').trim() || 'Unknown';
-    const cleanJurisdiction = String(jurisdiction || '').trim();
+    const cleanName = stripJurisdictionSuffix(String(name || '').trim() || 'Unknown', jurisdiction);
+    const cleanJurisdiction = normalizeJurisdictionDisplayName(jurisdiction);
     return cleanJurisdiction ? `${cleanName} (${cleanJurisdiction})` : cleanName;
+  }
+
+  function normalizeJurisdictionDisplayName(value: unknown): string {
+    const name = String(value || '').trim();
+    const normalized = name.toLowerCase();
+    if (
+      normalized === 'arrakis'
+      || normalized === 'arrakis (shared anvil)'
+      || normalized === 'shared anvil'
+      || normalized === 'wakanda'
+    ) {
+      return 'Testnet';
+    }
+    return name;
+  }
+
+  function parseCrossAssetKey(value: string): { jurisdictionRef: string; tokenId: number } | null {
+    const match = String(value || '').trim().match(/^(.+):(\d+)$/);
+    if (!match) return null;
+    const tokenIdValue = Number(match[2]);
+    if (!Number.isFinite(tokenIdValue) || tokenIdValue <= 0) return null;
+    return {
+      jurisdictionRef: String(match[1] || '').trim(),
+      tokenId: Math.floor(tokenIdValue),
+    };
+  }
+
+  function jurisdictionLabelForAssetKey(assetKey: string): string {
+    const parsed = parseCrossAssetKey(assetKey);
+    if (!parsed) return sourceJurisdictionLabel;
+    const sourceRef = String(getReplicaJurisdictionRef(currentReplica) || '').trim().toLowerCase();
+    const targetRef = String(selectedCrossTarget?.targetJurisdictionRef || '').trim().toLowerCase();
+    const ref = parsed.jurisdictionRef.toLowerCase();
+    if (sourceRef && ref === sourceRef) return sourceJurisdictionLabel;
+    if (targetRef && ref === targetRef) return targetJurisdictionLabel;
+    return normalizeJurisdictionDisplayName(parsed.jurisdictionRef);
+  }
+
+  function tokenNetworkLabel(tokenIdValue: number, jurisdiction: string): string {
+    const cleanJurisdiction = normalizeJurisdictionDisplayName(jurisdiction);
+    return cleanJurisdiction ? `${tokenSymbol(tokenIdValue)} (${cleanJurisdiction})` : tokenSymbol(tokenIdValue);
   }
 
   function entityAvatarSrc(entityIdValue: string): string {
@@ -334,7 +428,7 @@
   }
 
   function jurisdictionBadgeText(jurisdiction: string): string {
-    const clean = String(jurisdiction || '').trim().replace(/[^a-zA-Z0-9\s._-]/g, ' ');
+    const clean = normalizeJurisdictionDisplayName(jurisdiction).replace(/[^a-zA-Z0-9\s._-]/g, ' ');
     if (!clean) return 'J';
     const words = clean.split(/[\s._-]+/).map((word) => word.replace(/[^a-zA-Z0-9]/g, '')).filter(Boolean);
     if (words.length >= 2) return `${words[0]?.[0] || ''}${words[1]?.[0] || ''}`.toUpperCase();
@@ -346,35 +440,66 @@
     return profileJurisdiction || sourceJurisdictionLabel;
   }
   $: selectedHubOptions = hubAccountIds.map((id) => ({ value: id, label: accountLabel(id) }));
-  $: selectedHubOption = selectedHubOptions.find((hub) => hub.value === createOrderAccountId) || null;
+  $: selectedHubOption = selectedHubOptions.find((hub) => hub.value === (createOrderAccountId || activeOrderAccountId)) || null;
   $: crossTargetOptions = buildCrossTargetOptions(activeFrame, sourceEntityIdValue, currentReplica);
   $: routeOptions = buildRouteOptions(sourceEntityIdValue, currentReplica, activeOrderAccountId, crossTargetOptions);
-  $: if (!routeOptions.some((option) => option.value === selectedRouteValue)) {
-    selectedRouteValue = 'same';
+  $: visibleRouteOptions = selectedRouteOptionOverride
+    && !routeOptions.some((option) => option.value === selectedRouteOptionOverride?.value)
+    ? [...routeOptions, selectedRouteOptionOverride]
+    : routeOptions;
+  $: liveSelectedRouteValue = selectedRouteValue || committedRouteSelectionValue || 'same';
+  $: {
+    const selectedRouteIsVisible = visibleRouteOptions.some((option) => option.value === liveSelectedRouteValue);
+    const syncKey = `${liveSelectedRouteValue}|${routeSelectionCommitNonce}|${visibleRouteOptions.map((option) => option.value).join('|')}`;
+    if (routeSelectElement && selectedRouteIsVisible && syncKey !== lastRouteSelectNativeSyncKey) {
+      lastRouteSelectNativeSyncKey = syncKey;
+      const expectedValue = liveSelectedRouteValue;
+      routeSelectElement.value = expectedValue;
+      const syncVersion = ++routeSelectNativeSyncVersion;
+      void tick().then(() => {
+        if (syncVersion !== routeSelectNativeSyncVersion || !routeSelectElement) return;
+        const stillVisible = Array.from(routeSelectElement.options).some((option) => option.value === expectedValue);
+        if (stillVisible && routeSelectElement.value !== expectedValue) {
+          routeSelectElement.value = expectedValue;
+        }
+      });
+    }
   }
-  $: if (selectedRouteValue !== 'same' && routeOptions.find((option) => option.value === selectedRouteValue)?.disabled) {
-    selectedRouteValue = 'same';
-  }
-  $: swapRouteMode = selectedRouteValue === 'same' ? 'same' : 'cross';
-  $: selectedCrossTargetValue = swapRouteMode === 'cross' ? selectedRouteValue : '';
-  $: selectedCrossTarget = crossTargetOptions.find((option) => option.value === selectedCrossTargetValue) || null;
-  $: if (swapRouteMode !== 'cross') {
-    routedPlanEnabled = false;
-    selectedRouteHopIndex = 0;
-  }
-  $: routedSwapPlan = buildRoutedSwapPlan(
-    swapRouteMode,
-    selectedCrossTarget,
-    activeOrderAccountId,
-    currentReplica,
-    sourceJurisdictionLabel,
-    giveToken,
-    wantToken,
+  $: selectedRouteOption = visibleRouteOptions.find((option) => option.value === liveSelectedRouteValue)
+    || (selectedRouteOptionOverride?.value === liveSelectedRouteValue ? selectedRouteOptionOverride : null)
+    || visibleRouteOptions[0]
+    || null;
+  $: swapRouteMode = selectedRouteOption?.mode === 'cross' ? 'cross' : 'same';
+  $: selectedCrossTargetValue = swapRouteMode === 'cross' && selectedRouteOption ? selectedRouteOption.value : '';
+  $: selectedCrossTarget = crossTargetOptions.find((option) => option.value === selectedCrossTargetValue)
+    || (selectedCrossTargetOverride?.value === selectedCrossTargetValue ? selectedCrossTargetOverride : null)
+    || null;
+  $: routedRouteRecommendations = !ENABLE_MULTIHOP_SWAP_UI
+    ? buildRoutedRouteCandidates(
+        swapRouteMode,
+        selectedCrossTarget,
+        activeOrderAccountId,
+        currentReplica,
+        sourceJurisdictionLabel,
+        giveToken,
+        wantToken,
+        giveAmount,
+        orderbookQuoteNonce,
+      )
+        .filter((candidate) => candidate.hops.length > 1 && candidate.id !== 'direct-cross')
+        .slice(0, 3)
+    : [];
+  $: showManualRouteRecommendation = (
+    swapRouteMode === 'cross'
+    && !ENABLE_MULTIHOP_SWAP_UI
+    && routedRouteRecommendations.length > 0
+    && String(orderbookSnapshot?.pairId || '').trim() === String(orderbookPairId || '').trim()
+    && (
+      orderbookSnapshot.sourceStatus === 'no-market'
+      || orderbookSnapshot.sourceStatus === 'empty'
+      || orderbookSnapshot.sourceStatus === 'error'
+    )
   );
-  $: if (selectedRouteHopIndex >= routedSwapPlan.length) {
-    selectedRouteHopIndex = 0;
-  }
-  $: activeRoutedHop = routedPlanEnabled ? (routedSwapPlan[selectedRouteHopIndex] || null) : null;
   $: sourceJurisdictionLabel = getReplicaJurisdictionName(currentReplica) || 'Current';
   $: targetJurisdictionLabel = swapRouteMode === 'cross' && selectedCrossTarget
     ? selectedCrossTarget.targetJurisdiction
@@ -384,20 +509,39 @@
     ? `${accountLabel(selectedCrossTarget.targetHubEntityId)} -> ${accountLabel(selectedCrossTarget.targetEntityId)}`
     : `${accountLabel(String(activeOrderAccountId || ''))} -> ${accountLabel(sourceEntityIdValue)}`;
   $: sourceChainLabel = selectedSourceEntity?.jurisdiction || sourceJurisdictionLabel;
-  $: selectedRouteOption = routeOptions.find((option) => option.value === selectedRouteValue) || routeOptions[0] || null;
-  $: selectedRouteUnavailableReason = selectedRouteOption?.disabled ? selectedRouteOption.disabledReason || 'Selected route is unavailable.' : '';
+  $: selectedRouteUnavailableReason = selectedRouteOption?.disabledReason || '';
   $: routeVenueLabel = activeOrderAccountId ? accountLabel(activeOrderAccountId) : 'Select venue';
   $: bookVenueLabel = activeBookHubId ? accountLabel(activeBookHubId) : routeVenueLabel;
   $: selectedSourceEntityLabel = selectedSourceEntity?.label || sourceChainLabel || '';
   $: selectedRouteLabel = selectedRouteOption?.label || '';
+  $: selectedRouteEntityId = swapRouteMode === 'cross'
+    ? (selectedRouteOption?.targetEntityId || selectedCrossTarget?.targetEntityId || '')
+    : sourceEntityIdValue;
+  $: selectedRouteEntityName = swapRouteMode === 'cross'
+    ? accountLabel(selectedRouteEntityId)
+    : accountLabel(sourceEntityIdValue);
+  $: selectedRouteJurisdictionLabel = swapRouteMode === 'cross'
+    ? (selectedRouteOption?.targetJurisdiction || targetJurisdictionLabel)
+    : sourceJurisdictionLabel;
   $: selectedHubLabel = selectedHubOption?.label || routeVenueLabel || '';
-  $: selectedHubJurisdictionLabel = hubJurisdictionLabel(createOrderAccountId) || sourceJurisdictionLabel;
-  $: selectedHubDisplayLabel = createOrderAccountId
+  $: selectedHubJurisdictionLabel = hubJurisdictionLabel(createOrderAccountId || activeOrderAccountId) || sourceJurisdictionLabel;
+  $: selectedHubDisplayLabel = (createOrderAccountId || activeOrderAccountId)
     ? formatEntityNetworkLabel(selectedHubLabel, selectedHubJurisdictionLabel)
     : 'Select hub';
+  $: routePathSourceLabel = sourceJurisdictionLabel || selectedRouteOption?.sourceJurisdiction || 'Current';
+  $: routePathTargetLabel = swapRouteMode === 'cross'
+    ? (targetJurisdictionLabel || selectedRouteOption?.targetJurisdiction || selectedCrossTarget?.targetJurisdiction || 'Target')
+    : routePathSourceLabel;
   $: routePathLabel = swapRouteMode === 'cross'
-    ? `${sourceJurisdictionLabel} -> ${targetJurisdictionLabel}`
-    : sourceJurisdictionLabel;
+    ? `${routePathSourceLabel} -> ${routePathTargetLabel}`
+    : routePathSourceLabel;
+  $: routeVenueDisplayLabel = activeOrderAccountId
+    ? formatEntityNetworkLabel(routeVenueLabel, hubJurisdictionLabel(activeOrderAccountId) || sourceJurisdictionLabel)
+    : routeVenueLabel || accountLabel(selectedRouteOption?.sourceHubEntityId || '') || 'Select venue';
+  $: routeSummaryLabel = swapRouteMode === 'cross' ? 'Direct route' : 'Same account';
+  $: routeSummaryAssetsLabel = swapRouteMode === 'cross'
+    ? `${tokenNetworkLabel(giveToken, sourceJurisdictionLabel)} -> ${tokenNetworkLabel(wantToken, targetJurisdictionLabel)}`
+    : `${giveTokenSymbol} -> ${wantTokenSymbol}`;
   $: swapTokenPairLabel = `${giveTokenSymbol} -> ${wantTokenSymbol}`;
   $: targetAccountReady = swapRouteMode !== 'cross' || Boolean(selectedCrossTarget && hasReplicaAccount(
     findReplicaByEntityId(selectedCrossTarget.targetEntityId),
@@ -428,18 +572,6 @@
     targetJurisdictionRef: string;
     hasTargetAccount: boolean;
   };
-  type RoutedSwapHop = {
-    id: string;
-    label: string;
-    fromLabel: string;
-    toLabel: string;
-    pairId: string;
-    bookHubId: string;
-    baseTokenId: number;
-    quoteTokenId: number;
-    kind: 'same' | 'cross';
-    sourceIsBase: boolean;
-  };
   type SourceEntityOption = {
     value: string;
     label: string;
@@ -465,17 +597,11 @@
     disabled?: boolean;
     disabledReason?: string;
   };
-  type OfferLike = {
-    giveTokenId: number;
-    wantTokenId: number;
-    giveAmount?: bigint;
-    wantAmount?: bigint;
-    priceTicks?: bigint;
-  };
-
   type CrossMarketView = {
     venueId: string;
     sourceIsBase: boolean;
+    baseKey: string;
+    quoteKey: string;
   };
 
   function getTokenMapValue<V>(map: TokenKeyedMap<V> | undefined, tokenIdValue: number): V | undefined {
@@ -506,9 +632,9 @@
   function getReplicaJurisdictionName(candidate: EntityReplica | null | undefined): string {
     const state = candidate?.state as { config?: { jurisdiction?: { name?: unknown } } } | undefined;
     const byConfig = String(state?.config?.jurisdiction?.name || '').trim();
-    if (byConfig) return byConfig;
+    if (byConfig) return normalizeJurisdictionDisplayName(byConfig);
     const byPosition = String(candidate?.position?.jurisdiction || '').trim();
-    if (byPosition) return byPosition;
+    if (byPosition) return normalizeJurisdictionDisplayName(byPosition);
     return '';
   }
 
@@ -518,7 +644,7 @@
     } | undefined;
     const stackId = getJurisdictionStackId(state?.config?.jurisdiction);
     if (stackId) return stackId;
-    return getReplicaJurisdictionName(candidate);
+    return '';
   }
 
   function getAccountDeltaForReplica(
@@ -617,7 +743,7 @@
   }
 
   function getProfileJurisdictionName(profile: GossipProfile | undefined | null): string {
-    return String(profile?.metadata?.jurisdiction?.name || '').trim();
+    return normalizeJurisdictionDisplayName(profile?.metadata?.jurisdiction?.name);
   }
 
   function getHubProfile(entityIdValue: string): GossipProfile | null {
@@ -758,7 +884,7 @@
         : `Try another hub: ${accountLabel(sourceHubEntityId)} has no sibling on ${target.targetJurisdiction}.`;
       options.push({
         value: target.value,
-        label: compatible ? recipientLabel : `Try another hub (${target.targetJurisdiction})`,
+        label: recipientLabel,
         mode: 'cross',
         sourceJurisdiction,
         targetJurisdiction: target.targetJurisdiction,
@@ -769,83 +895,161 @@
         targetEntityId: target.targetEntityId,
         targetHubEntityId: target.targetHubEntityId,
         targetLabel: target.label,
-        disabled: !compatible,
         disabledReason,
       });
     }
     return options;
   }
 
-  function chooseBridgeToken(sourceToken: number, targetToken: number): number {
-    const preferred = [3, 1, 2];
-    return preferred.find((tokenIdValue) => tokenIdValue !== sourceToken && tokenIdValue !== targetToken) || 3;
-  }
-
-  function buildSameJurisdictionHop(
-    id: string,
-    label: string,
-    jurisdiction: string,
-    hubId: string,
-    fromToken: number,
-    toToken: number,
-  ): RoutedSwapHop | null {
-    if (!hubId || fromToken === toToken || fromToken <= 0 || toToken <= 0) return null;
-    const pair = resolvePairOrientation(fromToken, toToken);
-    return {
-      id,
+  function buildCommittedRouteSelectionFromDom(node: HTMLSelectElement | null, value: string): {
+    route: SwapRouteOption;
+    target: CrossTargetOption | null;
+  } | null {
+    const cleanValue = String(value || '').trim();
+    if (!cleanValue) return null;
+    const existingRoute = visibleRouteOptions.find((option) => option.value === cleanValue);
+    const existingTarget = crossTargetOptions.find((option) => option.value === cleanValue) || null;
+    if (existingRoute) {
+      return { route: existingRoute, target: existingTarget };
+    }
+    if (cleanValue === 'same') return visibleRouteOptions[0] ? { route: visibleRouteOptions[0], target: null } : null;
+    const [targetEntityIdRaw, targetHubEntityIdRaw] = cleanValue.split(':');
+    const targetEntityId = String(targetEntityIdRaw || '').trim().toLowerCase();
+    const targetHubEntityId = String(targetHubEntityIdRaw || '').trim().toLowerCase();
+    if (!targetEntityId || !targetHubEntityId) return null;
+    const targetReplica = findReplicaByEntityId(targetEntityId);
+    const sourceHubEntityId = String(activeOrderAccountId || selectedBookAccountId || createOrderAccountId || '').trim().toLowerCase();
+    const sourceJurisdiction = String(sourceJurisdictionLabel || getReplicaJurisdictionName(currentReplica) || '').trim() || 'Current';
+    const sourceJurisdictionRef = String(getReplicaJurisdictionRef(currentReplica) || sourceJurisdiction).trim() || sourceJurisdiction;
+    const targetJurisdiction = String(existingTarget?.targetJurisdiction || getReplicaJurisdictionName(targetReplica) || '').trim() || 'Target';
+    const targetJurisdictionRef = String(existingTarget?.targetJurisdictionRef || getReplicaJurisdictionRef(targetReplica) || targetJurisdiction).trim() || targetJurisdiction;
+    const label = String(
+      Array.from(node?.options || []).find((option) => option.value === cleanValue)?.textContent
+      || existingTarget?.label
+      || formatEntityNetworkLabel(accountLabel(targetEntityId), targetJurisdiction),
+    ).trim();
+    const hasTargetAccount = existingTarget?.hasTargetAccount ?? hasReplicaAccount(targetReplica, targetHubEntityId);
+    const target: CrossTargetOption = existingTarget || {
+      value: cleanValue,
       label,
-      fromLabel: `${tokenSymbol(fromToken)} · ${jurisdiction}`,
-      toLabel: `${tokenSymbol(toToken)} · ${jurisdiction}`,
-      pairId: pair.pairId,
-      bookHubId: hubId,
-      baseTokenId: pair.baseTokenId,
-      quoteTokenId: pair.quoteTokenId,
-      kind: 'same',
-      sourceIsBase: fromToken === pair.baseTokenId,
+      targetEntityId,
+      targetSignerId: String(targetReplica?.signerId || '').trim(),
+      targetHubEntityId,
+      targetJurisdiction,
+      targetJurisdictionRef,
+      hasTargetAccount,
     };
+    const route: SwapRouteOption = {
+      value: cleanValue,
+      label: formatEntityNetworkLabel(accountLabel(targetEntityId), targetJurisdiction),
+      mode: 'cross',
+      sourceJurisdiction,
+      targetJurisdiction,
+      sourceJurisdictionRef,
+      targetJurisdictionRef,
+      sourceEntityId: sourceEntityIdValue,
+      sourceHubEntityId,
+      targetEntityId,
+      targetHubEntityId,
+      targetLabel: label,
+      disabledReason: '',
+    };
+    return { route, target };
   }
 
-  function buildCrossJurisdictionHop(
-    id: string,
-    label: string,
-    sourceJurisdictionRef: string,
-    sourceJurisdiction: string,
-    sourceHubId: string,
-    targetJurisdictionRef: string,
-    targetJurisdiction: string,
-    targetHubId: string,
-    tokenIdValue: number,
-  ): RoutedSwapHop | null {
-    if (!sourceJurisdictionRef || !targetJurisdictionRef || !sourceHubId || !targetHubId || tokenIdValue <= 0) return null;
-    const market = deriveCanonicalCrossJurisdictionMarketForLegs(
-      sourceJurisdictionRef,
-      tokenIdValue,
-      targetJurisdictionRef,
-      tokenIdValue,
-    ) as CrossMarketView;
-    const bookHubId = deriveCanonicalCrossJurisdictionBookOwnerForLegs(
-      sourceJurisdictionRef,
-      tokenIdValue,
-      sourceHubId,
-      targetJurisdictionRef,
-      tokenIdValue,
-      targetHubId,
-    );
-    return {
-      id,
-      label,
-      fromLabel: `${tokenSymbol(tokenIdValue)} · ${sourceJurisdiction}`,
-      toLabel: `${tokenSymbol(tokenIdValue)} · ${targetJurisdiction}`,
-      pairId: market.venueId,
-      bookHubId,
-      baseTokenId: tokenIdValue,
-      quoteTokenId: tokenIdValue,
-      kind: 'cross',
-      sourceIsBase: market.sourceIsBase,
-    };
+  function defaultTradingPairOrientations(): Array<{ baseTokenId: number; quoteTokenId: number; pairId: string }> {
+    const runtimeRequiredPairs = activeXlnFunctions?.getDefaultSwapTradingPairs?.() || [];
+    const requiredPairs = runtimeRequiredPairs.length > 0
+      ? runtimeRequiredPairs.map((pair) => resolvePairOrientation(Number(pair.baseTokenId), Number(pair.quoteTokenId)))
+      : [
+          resolvePairOrientation(1, 2),
+          resolvePairOrientation(2, 3),
+          resolvePairOrientation(1, 3),
+        ];
+    const seen = new Set<string>();
+    return requiredPairs.filter((pair) => {
+      const key = `${pair.baseTokenId}/${pair.quoteTokenId}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
   }
 
-  function buildRoutedSwapPlan(
+  function tradingPairsForHub(hubId: string): Array<{ baseTokenId: number; quoteTokenId: number; pairId: string }> {
+    const normalizedHubId = String(hubId || '').trim().toLowerCase();
+    const hubReplica = normalizedHubId ? findReplicaByEntityId(normalizedHubId) : null;
+    const configuredPairs = Array.isArray(hubReplica?.state?.swapTradingPairs)
+      ? hubReplica.state.swapTradingPairs
+      : [];
+    const rawPairs = [...configuredPairs, ...defaultTradingPairOrientations()];
+    const out: Array<{ baseTokenId: number; quoteTokenId: number; pairId: string }> = [];
+    const seen = new Set<string>();
+    for (const pair of rawPairs) {
+      const rawBase = Number(pair?.baseTokenId);
+      const rawQuote = Number(pair?.quoteTokenId);
+      if (!Number.isFinite(rawBase) || !Number.isFinite(rawQuote) || rawBase <= 0 || rawQuote <= 0 || rawBase === rawQuote) {
+        continue;
+      }
+      const oriented = resolvePairOrientation(rawBase, rawQuote);
+      const key = `${oriented.baseTokenId}/${oriented.quoteTokenId}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      out.push(oriented);
+    }
+    return out;
+  }
+
+  function cacheOrderbookSnapshot(snapshot: OrderbookSnapshot): void {
+    const pairIdValue = String(snapshot?.pairId || '').trim();
+    if (!pairIdValue) return;
+    if (snapshot.sourceStatus === 'syncing' || snapshot.sourceStatus === 'error') return;
+    const hubIds = (snapshot?.hubIds || [])
+      .map((id) => String(id || '').trim().toLowerCase())
+      .filter(Boolean);
+    if (hubIds.length !== 1) return;
+    const cacheKey = orderbookSnapshotCacheKey(hubIds[0]!, pairIdValue);
+    orderbookSnapshotCache.set(cacheKey, {
+      ...snapshot,
+      hubIds,
+    });
+    const nextSignature = orderbookSnapshotSignature(snapshot);
+    const now = Date.now();
+    const lastBumpedAt = orderbookSnapshotCacheBumpedAt.get(cacheKey) || 0;
+    if (orderbookSnapshotCacheSignatures.get(cacheKey) !== nextSignature || now - lastBumpedAt >= 1_000) {
+      orderbookSnapshotCacheSignatures.set(cacheKey, nextSignature);
+      orderbookSnapshotCacheBumpedAt.set(cacheKey, now);
+      orderbookQuoteNonce += 1;
+    }
+  }
+
+  function readCachedOrderbookSnapshot(hubEntityId: string, pairIdValue: string): OrderbookSnapshot | null {
+    const snapshot = orderbookSnapshotCache.get(orderbookSnapshotCacheKey(hubEntityId, pairIdValue));
+    if (!snapshot) return null;
+    const status = snapshot.sourceStatus;
+    if (status === 'syncing' || status === 'error') return null;
+    const updatedAt = Number(snapshot.updatedAt || 0);
+    if (!Number.isFinite(updatedAt) || updatedAt <= 0) return null;
+    if (Date.now() - updatedAt > ORDERBOOK_SNAPSHOT_FRESH_MS) return null;
+    return snapshot;
+  }
+
+  function estimateHopOutput(hop: RoutedSwapHop, inputAmount: bigint): RouteQuote {
+    return estimateRoutedHopOutput({
+      hop,
+      inputAmount,
+      readCachedOrderbookSnapshot,
+      readPairBook,
+      getBestBid,
+      getBestAsk,
+      quoteFromBase,
+      baseFromQuote,
+      getTokenDecimals,
+      tokenSymbol,
+      accountLabel,
+    });
+  }
+
+  function buildRoutedRouteCandidates(
     mode = swapRouteMode,
     target = selectedCrossTarget,
     sourceHubInput = activeOrderAccountId,
@@ -853,58 +1057,34 @@
     sourceJurisdiction = sourceJurisdictionLabel,
     sourceToken = giveToken,
     targetToken = wantToken,
-  ): RoutedSwapHop[] {
-    if (mode !== 'cross' || !target) return [];
-    const sourceHubId = String(sourceHubInput || '').trim().toLowerCase();
-    const targetHubId = String(target.targetHubEntityId || '').trim().toLowerCase();
-    const sourceJurisdictionRef = getReplicaJurisdictionRef(sourceReplica);
-    if (!sourceHubId || !targetHubId || !sourceJurisdictionRef || !target.targetJurisdictionRef) return [];
-    if (!Number.isFinite(sourceToken) || !Number.isFinite(targetToken) || sourceToken <= 0 || targetToken <= 0) return [];
-    const bridgeToken = chooseBridgeToken(sourceToken, targetToken);
-    return [
-      buildSameJurisdictionHop('source-local', 'Source', sourceJurisdiction, sourceHubId, sourceToken, bridgeToken),
-      buildCrossJurisdictionHop(
-        'bridge-cross',
-        'Bridge',
-        sourceJurisdictionRef,
-        sourceJurisdiction,
-        sourceHubId,
-        target.targetJurisdictionRef,
-        target.targetJurisdiction,
-        targetHubId,
-        bridgeToken,
-      ),
-      buildSameJurisdictionHop('target-local', 'Target', target.targetJurisdiction, targetHubId, bridgeToken, targetToken),
-    ].filter((hop): hop is RoutedSwapHop => hop !== null);
+    quoteInputAmount = 0n,
+    _quoteNonce = orderbookQuoteNonce,
+  ): RoutedSwapRouteCandidate[] {
+    void _quoteNonce;
+    return buildRoutedRouteCandidatesPure({
+      mode,
+      target,
+      sourceHubId: String(sourceHubInput || '').trim().toLowerCase(),
+      sourceJurisdictionRef: getReplicaJurisdictionRef(sourceReplica),
+      sourceJurisdiction,
+      sourceToken,
+      targetToken,
+      quoteInputAmount,
+      allowedSwapTokenIds,
+      resolvePairOrientation,
+      tradingPairsForHub,
+      isLiquidToken,
+      tokenSymbol,
+      compareStableText,
+      formatAmount,
+      estimateHopOutput,
+    });
   }
 
-  function createRoutedSwapPlan(): void {
-    const plan = buildRoutedSwapPlan();
-    if (plan.length === 0) {
-      routedPlanEnabled = false;
-      selectedRouteHopIndex = 0;
-      submitError = 'No routed exchange path is possible for the selected source, target, and assets.';
-      return;
-    }
-    submitError = '';
-    routedPlanEnabled = true;
-    selectedRouteHopIndex = 0;
-    routeDetailsOpen = true;
-    orderbookRefreshNonce += 1;
-  }
-
-  function clearRoutedSwapPlan(): void {
-    routedPlanEnabled = false;
-    selectedRouteHopIndex = 0;
-    selectedOrderLevel = null;
-    orderbookRefreshNonce += 1;
-  }
-
-  function selectRoutedHop(index: number): void {
-    if (index < 0 || index >= routedSwapPlan.length) return;
-    selectedRouteHopIndex = index;
-    selectedOrderLevel = null;
-    orderbookRefreshNonce += 1;
+  function manualRouteEstimateLabel(route: RoutedSwapRouteCandidate): string {
+    if (route.estimatedOutAmount !== null) return `Approx. ${route.estimatedOutLabel}`;
+    if (giveAmount > 0n) return 'Quote each hop manually';
+    return 'Enter amount for an estimate';
   }
 
   type PairOption = {
@@ -934,15 +1114,54 @@
     return tokenIdValue === 1 || tokenIdValue === 3;
   }
 
-  function buildPairOptions(): PairOption[] {
+  function tokenIdsForJurisdiction(jurisdiction: string): number[] {
+    const cleanJurisdiction = String(jurisdiction || '').trim();
+    if (!cleanJurisdiction) return [];
+    const resolver = activeXlnFunctions?.getTokenIdsForJurisdiction;
+    if (!resolver) return [1, 2, 3];
+    try {
+      return resolver(cleanJurisdiction)
+        .map((tokenId) => Number(tokenId))
+        .filter((tokenId) => Number.isFinite(tokenId) && tokenId > 0);
+    } catch {
+      return [1, 2, 3];
+    }
+  }
+
+  function buildPairOrientationsForTokenIds(tokenIds: number[]): Array<{ baseTokenId: number; quoteTokenId: number; pairId: string }> {
+    const unique = Array.from(new Set(
+      tokenIds
+        .map((tokenId) => Math.floor(Number(tokenId) || 0))
+        .filter((tokenId) => Number.isFinite(tokenId) && tokenId > 0),
+    )).sort((a, b) => a - b);
+    const pairs: Array<{ baseTokenId: number; quoteTokenId: number; pairId: string }> = [];
+    const seen = new Set<string>();
+    for (let i = 0; i < unique.length; i += 1) {
+      for (let j = i + 1; j < unique.length; j += 1) {
+        const oriented = resolvePairOrientation(unique[i]!, unique[j]!);
+        const key = `${oriented.baseTokenId}/${oriented.quoteTokenId}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        pairs.push(oriented);
+      }
+    }
+    return pairs;
+  }
+
+  function buildPairOptions(jurisdiction: string): PairOption[] {
     const runtimeRequiredPairs = activeXlnFunctions?.getDefaultSwapTradingPairs?.() || [];
-    const requiredPairs = runtimeRequiredPairs.length > 0
-      ? runtimeRequiredPairs.map((pair) => resolvePairOrientation(Number(pair.baseTokenId), Number(pair.quoteTokenId)))
+    const jurisdictionPairs = buildPairOrientationsForTokenIds(tokenIdsForJurisdiction(jurisdiction));
+    const requiredPairCandidates = [
+      ...runtimeRequiredPairs.map((pair) => resolvePairOrientation(Number(pair.baseTokenId), Number(pair.quoteTokenId))),
+      ...jurisdictionPairs,
+    ];
+    const requiredPairs = requiredPairCandidates.length > 0
+      ? requiredPairCandidates
       : [
-          resolvePairOrientation(1, 2), // WETH/USDC
-          resolvePairOrientation(2, 3), // WETH/USDT
-          resolvePairOrientation(1, 3), // USDC/USDT
-        ];
+        resolvePairOrientation(1, 2), // WETH/USDC
+        resolvePairOrientation(2, 3), // WETH/USDT
+        resolvePairOrientation(1, 3), // USDC/USDT
+      ];
     const allowedPairKeys = new Set(requiredPairs.map((pair) => `${pair.baseTokenId}/${pair.quoteTokenId}`));
     const configuredPairs = Array.isArray(currentReplica?.state?.swapTradingPairs)
       ? currentReplica.state.swapTradingPairs
@@ -1001,22 +1220,43 @@
     });
   }
 
-  $: pairOptions = buildPairOptions();
+  $: pairOptions = buildPairOptions(sourceJurisdictionLabel);
   $: allowedSwapTokenIds = (() => {
     const tokenIds = new Set<number>();
     for (const pair of pairOptions) {
       tokenIds.add(pair.baseTokenId);
       tokenIds.add(pair.quoteTokenId);
     }
+    for (const tokenId of tokenIdsForJurisdiction(sourceJurisdictionLabel)) tokenIds.add(tokenId);
+    for (const tokenId of tokenIdsForJurisdiction(targetJurisdictionLabel)) tokenIds.add(tokenId);
     return tokenIds;
   })();
-  $: swapTokenOptions = Array.from(allowedSwapTokenIds)
+  $: sourceSelectableSwapTokenIds = new Set(tokenIdsForJurisdiction(sourceJurisdictionLabel));
+  $: targetSelectableSwapTokenIds = new Set(tokenIdsForJurisdiction(targetJurisdictionLabel));
+  $: giveTokenOptions = Array.from(sourceSelectableSwapTokenIds)
+    .sort((a, b) => compareStableText(tokenSymbol(a), tokenSymbol(b)))
+    .map((tokenId) => ({ tokenId, symbol: tokenSymbol(tokenId) }));
+  $: wantTokenOptions = Array.from(targetSelectableSwapTokenIds)
+    .sort((a, b) => compareStableText(tokenSymbol(a), tokenSymbol(b)))
+    .map((tokenId) => ({ tokenId, symbol: tokenSymbol(tokenId) }));
+  $: swapTokenOptions = Array.from(new Set([...sourceSelectableSwapTokenIds, ...targetSelectableSwapTokenIds]))
     .sort((a, b) => compareStableText(tokenSymbol(a), tokenSymbol(b)))
     .map((tokenId) => ({ tokenId, symbol: tokenSymbol(tokenId) }));
   $: giveToken = Number.parseInt(giveTokenId, 10);
   $: wantToken = Number.parseInt(wantTokenId, 10);
+  $: if (giveTokenOptions.length > 0 && !giveTokenOptions.some((token) => String(token.tokenId) === String(giveTokenId))) {
+    giveTokenId = String(giveTokenOptions[0]?.tokenId || '');
+    selectedOrderLevel = null;
+  }
+  $: if (wantTokenOptions.length > 0 && !wantTokenOptions.some((token) => String(token.tokenId) === String(wantTokenId))) {
+    const fallbackWant = wantTokenOptions.find((token) => String(token.tokenId) !== String(giveTokenId))
+      || wantTokenOptions[0];
+    wantTokenId = String(fallbackWant?.tokenId || '');
+    selectedOrderLevel = null;
+  }
   $: derivedTokenPairValue = (() => {
-    if (!Number.isFinite(giveToken) || !Number.isFinite(wantToken) || giveToken <= 0 || wantToken <= 0 || giveToken === wantToken) return '';
+    if (!Number.isFinite(giveToken) || !Number.isFinite(wantToken) || giveToken <= 0 || wantToken <= 0) return '';
+    if (giveToken === wantToken && swapRouteMode === 'same') return '';
     const oriented = resolvePairOrientation(giveToken, wantToken);
     return `${oriented.baseTokenId}/${oriented.quoteTokenId}`;
   })();
@@ -1031,7 +1271,8 @@
       if (tokenIdValue === pair.baseTokenId) return pair.quoteTokenId;
       if (tokenIdValue === pair.quoteTokenId) return pair.baseTokenId;
     }
-    const fallback = swapTokenOptions.find((token) => token.tokenId !== tokenIdValue);
+    const fallback = wantTokenOptions.find((token) => token.tokenId !== tokenIdValue)
+      || swapTokenOptions.find((token) => token.tokenId !== tokenIdValue);
     return fallback?.tokenId ?? null;
   }
 
@@ -1044,7 +1285,7 @@
       submitError = '';
       return;
     }
-    if (nextGiveToken === nextWantToken && selectedRouteValue === 'same') {
+    if (nextGiveToken === nextWantToken && liveSelectedRouteValue === 'same') {
       const fallbackWantToken = fallbackCounterToken(nextGiveToken);
       if (!fallbackWantToken || fallbackWantToken === nextGiveToken) {
         submitError = 'Sell token and Buy token must be different.';
@@ -1060,10 +1301,55 @@
     submitError = '';
   }
 
+  function computeCurrentReceiveAmountForFlip(): bigint {
+    const fallbackAmount = canonicalWantAmount > 0n ? canonicalWantAmount : wantAmount;
+    if (!parsedOrderbookPair) return fallbackAmount;
+    const currentGiveAmount = parseDecimalAmountToBigInt(liveOrderAmountInput, getTokenDecimals(giveToken));
+    const explicitPriceTicks = selectedOrderLevel?.inputPriceTicks && selectedOrderLevel.inputPriceTicks > 0n
+      ? selectedOrderLevel.inputPriceTicks
+      : (selectedOrderLevel?.priceTicks && selectedOrderLevel.priceTicks > 0n ? selectedOrderLevel.priceTicks : limitPriceTicks);
+    if (currentGiveAmount <= 0n || !explicitPriceTicks || explicitPriceTicks <= 0n) return fallbackAmount;
+    const activeMode = orderMode !== 'none' ? orderMode : tradeSide;
+    const currentWantAmount = activeMode === 'sell-base'
+      ? quoteFromBase(
+          currentGiveAmount,
+          explicitPriceTicks,
+          getTokenDecimals(parsedOrderbookPair.baseTokenId),
+          getTokenDecimals(parsedOrderbookPair.quoteTokenId),
+        )
+      : baseFromQuote(
+          currentGiveAmount,
+          explicitPriceTicks,
+          getTokenDecimals(parsedOrderbookPair.baseTokenId),
+          getTokenDecimals(parsedOrderbookPair.quoteTokenId),
+        );
+    if (currentWantAmount <= 0n) return fallbackAmount;
+    return prepareCanonicalOrder(currentGiveAmount, currentWantAmount)?.effectiveWant ?? currentWantAmount;
+  }
+
+  function flipSwapTokens(): void {
+    const nextGiveToken = wantToken;
+    const nextWantToken = giveToken;
+    const nextGiveAmount = computeCurrentReceiveAmountForFlip();
+    const nextAmountInput = nextGiveAmount > 0n
+      ? formatAmountForInput(nextGiveAmount, nextGiveToken)
+      : '';
+    const currentPriceTicks = selectedOrderLevel?.inputPriceTicks && selectedOrderLevel.inputPriceTicks > 0n
+      ? selectedOrderLevel.inputPriceTicks
+      : (selectedOrderLevel?.priceTicks && selectedOrderLevel.priceTicks > 0n ? selectedOrderLevel.priceTicks : limitPriceTicks);
+    const nextPriceInput = currentPriceTicks && currentPriceTicks > 0n ? formatPriceTicks(currentPriceTicks) : priceRatioInput;
+    preservePriceOnNextContextChange = true;
+    setSwapTokens(nextGiveToken, nextWantToken);
+    if (nextPriceInput) {
+      priceRatioInput = nextPriceInput;
+      hasUserEditedPriceInput = true;
+      hasAutoSuggestedInitialPrice = true;
+    }
+    setOrderAmountInputValue(nextAmountInput);
+  }
   function handleSourceEntityChange(event: Event): void {
     selectSourceEntityOption(String((event.currentTarget as HTMLSelectElement | null)?.value || ''));
   }
-
   function selectSourceEntityOption(value: string): void {
     const option = sourceEntityOptions.find((candidate) => candidate.value === value);
     if (!option) return;
@@ -1072,54 +1358,140 @@
     submitError = '';
     sourceMenuOpen = false;
     openTokenMenu = '';
-    routeMenuOpen = false;
+    setRouteMenuOpen(false, 'source-change');
     hubMenuOpen = false;
   }
-
   function handleGiveTokenChange(event: Event): void {
     const nextGive = Number.parseInt(String((event.currentTarget as HTMLSelectElement | null)?.value || ''), 10);
     setSwapTokens(nextGive, wantToken);
   }
-
   function handleWantTokenChange(event: Event): void {
     const nextWant = Number.parseInt(String((event.currentTarget as HTMLSelectElement | null)?.value || ''), 10);
     setSwapTokens(giveToken, nextWant);
+  }
+  function setOrderAmountInputValue(value: string): void {
+    const next = String(value || '');
+    flushSync(() => {
+      routedOrderAmountInput.set(next);
+      if (!hasLatestOrderAmountDomValue || latestOrderAmountDomValue !== next) {
+        latestOrderAmountDomValue = next;
+        hasLatestOrderAmountDomValue = true;
+        orderAmountDomRevision += 1;
+      }
+      if (orderAmountInput !== next) {
+        orderAmountInput = next;
+        orderAmountRevision += 1;
+      }
+    });
+  }
+  function handleOrderAmountInput(event: Event): void {
+    setOrderAmountInputValue(String((event.currentTarget as HTMLInputElement | null)?.value || ''));
+  }
+  function syncOrderAmountInputFromContainer(node: HTMLElement): void {
+    const input = node.closest('.swap-panel')?.querySelector<HTMLInputElement>('[data-testid="swap-order-amount"]') || null;
+    if (!input) return;
+    const previousValue = String(node.dataset['orderAmountActionValue'] || '');
+    const ticks = Number(node.dataset['orderAmountActionTicks'] || 0) + 1;
+    node.dataset['orderAmountActionTicks'] = String(ticks);
+    node.dataset['orderAmountActionValue'] = input.value;
+    if (previousValue !== input.value) {
+      node.dispatchEvent(new Event('input', { bubbles: true }));
+    }
+    routedOrderAmountInput.set(input.value);
+    setOrderAmountInputValue(input.value);
+  }
+  function handleSwapPanelAmountSync(event: Event): void {
+    const panel = event.currentTarget as HTMLElement | null;
+    const input = panel?.querySelector<HTMLInputElement>('[data-testid="swap-order-amount"]') || null;
+    if (!input) return;
+    setOrderAmountInputValue(input.value);
+  }
+  function syncOrderAmountContainerAction(node: HTMLElement): { update: () => void; destroy: () => void } {
+    const sync = () => syncOrderAmountInputFromContainer(node);
+    sync();
+    window.addEventListener('input', sync, true);
+    window.addEventListener('change', sync, true);
+    window.addEventListener('keyup', sync, true);
+    const interval = window.setInterval(sync, 100);
+    return {
+      update: sync,
+      destroy() {
+        window.removeEventListener('input', sync, true);
+        window.removeEventListener('change', sync, true);
+        window.removeEventListener('keyup', sync, true);
+        window.clearInterval(interval);
+      },
+    };
   }
 
   function tokenIconText(symbol: string): string {
     const text = String(symbol || '').trim();
     return text.slice(0, 1).toUpperCase() || '?';
   }
-
   function tokenClass(symbol: string): string {
     return String(symbol || '').trim().toLowerCase().replace(/[^a-z0-9_-]/g, '') || 'token';
   }
 
   function toggleTokenMenu(menu: 'give' | 'want'): void {
     sourceMenuOpen = false;
-    routeMenuOpen = false;
+    setRouteMenuOpen(false, 'token-menu');
     hubMenuOpen = false;
     openTokenMenu = openTokenMenu === menu ? '' : menu;
   }
 
   function toggleSourceMenu(): void {
     openTokenMenu = '';
-    routeMenuOpen = false;
+    setRouteMenuOpen(false, 'source-menu');
     hubMenuOpen = false;
     sourceMenuOpen = !sourceMenuOpen;
+  }
+
+  function setRouteMenuOpen(nextOpen: boolean, reason = 'unknown'): void {
+    routeMenuSetCount += 1;
+    routeMenuLastSetReason = `${reason}:${nextOpen ? 'open' : 'closed'}`;
+    routeMenuOpen = nextOpen;
+    routeMenuOpenStore.set(nextOpen);
   }
 
   function toggleRouteMenu(): void {
     sourceMenuOpen = false;
     openTokenMenu = '';
     hubMenuOpen = false;
-    routeMenuOpen = !routeMenuOpen;
+    routeMenuToggleCount += 1;
+    setRouteMenuOpen(!routeMenuOpen, 'toggle');
+  }
+
+  function routeMenuButtonAction(node: HTMLButtonElement): { destroy: () => void } {
+    const handleClick = (event: MouseEvent) => {
+      event.preventDefault();
+      event.stopPropagation();
+      event.stopImmediatePropagation();
+      routeMenuNativeClickCount += 1;
+      node.dataset['routeNativeClickCount'] = String(routeMenuNativeClickCount);
+      const nextOpen = node.dataset['routeMenuOpen'] !== 'true';
+      routeMenuToggleCount += 1;
+      node.dataset['routeMenuToggleCount'] = String(routeMenuToggleCount);
+      node.dataset['routeNextOpen'] = String(nextOpen);
+      ignoreOutsideMenuClickUntil = Date.now() + 1500;
+      ignoreNextWindowMenuClick = true;
+      ignoreWindowMenuClickCount = 4;
+      if (typeof window !== 'undefined') {
+        (window as Window & { __xlnRouteMenuSuppressWindowClickUntil?: number }).__xlnRouteMenuSuppressWindowClickUntil = Date.now() + 3000;
+      }
+      setRouteMenuOpen(nextOpen, 'route-button');
+    };
+    node.addEventListener('click', handleClick);
+    return {
+      destroy() {
+        node.removeEventListener('click', handleClick);
+      },
+    };
   }
 
   function toggleHubMenu(): void {
     sourceMenuOpen = false;
     openTokenMenu = '';
-    routeMenuOpen = false;
+    setRouteMenuOpen(false, 'hub-menu');
     hubMenuOpen = !hubMenuOpen;
   }
 
@@ -1127,7 +1499,7 @@
     setSwapTokens(tokenIdValue, wantToken);
     sourceMenuOpen = false;
     openTokenMenu = '';
-    routeMenuOpen = false;
+    setRouteMenuOpen(false, 'give-token');
     hubMenuOpen = false;
   }
 
@@ -1135,7 +1507,7 @@
     setSwapTokens(giveToken, tokenIdValue);
     sourceMenuOpen = false;
     openTokenMenu = '';
-    routeMenuOpen = false;
+    setRouteMenuOpen(false, 'want-token');
     hubMenuOpen = false;
   }
 
@@ -1144,32 +1516,124 @@
     selectRouteOption(nextValue);
   }
 
+  function handleRouteCommitEvent(event: CustomEvent<{ value?: string }>): void {
+    const nextValue = String(event.detail?.value || '');
+    if (!nextValue) return;
+    selectRouteOption(nextValue);
+  }
+
+  function commitRouteSelection(selection: { route: SwapRouteOption; target: CrossTargetOption | null }): void {
+    selectedRouteOptionOverride = selection.route.mode === 'cross' ? selection.route : null;
+    selectedCrossTargetOverride = selection.target;
+    selectedRouteValue = selection.route.value;
+    committedRouteSelectionValue = selection.route.value;
+    routeSelectionCommitNonce += 1;
+  }
+
   function selectRouteOption(value: string): void {
-    const option = routeOptions.find((candidate) => candidate.value === value);
-    if (!option || option.disabled) return;
-    selectedRouteValue = option.value;
+    const selection = buildCommittedRouteSelectionFromDom(routeSelectElement, value);
+    if (!selection || selection.route.disabled) return;
+    commitRouteSelection(selection);
     sourceMenuOpen = false;
     openTokenMenu = '';
-    routeMenuOpen = false;
+    setRouteMenuOpen(false, 'route-select');
     hubMenuOpen = false;
     submitError = '';
   }
 
-  function closeSwapMenus(): void {
+  function dispatchRouteCommit(node: HTMLSelectElement, value: string): void {
+    const nextValue = String(value || '').trim();
+    if (!nextValue) return;
+    node.dataset['routeCommittedValue'] = nextValue;
+    node.dispatchEvent(new CustomEvent('xlnroutecommit', {
+      bubbles: true,
+      detail: { value: nextValue },
+    }));
+  }
+
+  function syncRouteSelectDomValue(): void {
+    const node = routeSelectElement;
+    if (!node) return;
+    node.dataset['routeDomSyncTicks'] = String(Number(node.dataset['routeDomSyncTicks'] || 0) + 1);
+    const nextValue = String(node.value || '');
+    if (!nextValue || nextValue === liveSelectedRouteValue) return;
+    node.dataset['routeDomSyncValue'] = nextValue;
+    const selection = buildCommittedRouteSelectionFromDom(node, nextValue);
+    if (!selection) return;
+    dispatchRouteCommit(node, selection.route.value);
+  }
+
+  function syncRouteSelectAction(node: HTMLSelectElement): { update: () => void; destroy: () => void } {
+    let lastDispatchedValue = '';
+    const sync = () => {
+      node.dataset['routeActionTicks'] = String(Number(node.dataset['routeActionTicks'] || 0) + 1);
+      const nextValue = String(node.value || '');
+      if (nextValue && nextValue !== liveSelectedRouteValue) {
+        node.dataset['routeSyncValue'] = nextValue;
+        const selection = buildCommittedRouteSelectionFromDom(node, nextValue);
+        node.dataset['routeSyncKnown'] = selection ? 'true' : 'false';
+        node.dataset['routeSyncDisabled'] = selection?.route.disabled ? 'true' : 'false';
+        if (selection && selection.route.value !== lastDispatchedValue) {
+          lastDispatchedValue = selection.route.value;
+          dispatchRouteCommit(node, selection.route.value);
+          node.dataset['routeCommitNonce'] = String(Number(node.dataset['routeCommitNonce'] || 0) + 1);
+        }
+      }
+    };
+    sync();
+    node.addEventListener('change', sync);
+    node.addEventListener('input', sync);
+    const interval = window.setInterval(sync, 100);
+    return {
+      update: sync,
+      destroy() {
+        node.removeEventListener('change', sync);
+        node.removeEventListener('input', sync);
+        window.clearInterval(interval);
+      },
+    };
+  }
+
+  onMount(() => {
+    const interval = window.setInterval(syncRouteSelectDomValue, 100);
+    return () => window.clearInterval(interval);
+  });
+
+  function closeSwapMenus(reason = 'window-close'): void {
     sourceMenuOpen = false;
     openTokenMenu = '';
-    routeMenuOpen = false;
+    if (reason === 'escape') {
+      setRouteMenuOpen(false, reason);
+    }
     hubMenuOpen = false;
   }
 
   function handleSwapWindowClick(event: MouseEvent): void {
-    const target = event.target as HTMLElement | null;
-    if (target?.closest?.('[data-swap-menu-root]')) return;
-    closeSwapMenus();
+    const globalSuppressUntil = typeof window !== 'undefined'
+      ? (window as Window & { __xlnRouteMenuSuppressWindowClickUntil?: number }).__xlnRouteMenuSuppressWindowClickUntil || 0
+      : 0;
+    if (Date.now() < globalSuppressUntil) return;
+    if (routeMenuLastSetReason === 'route-button:open') return;
+    if (routeMenuOpen) return;
+    if (ignoreWindowMenuClickCount > 0) {
+      ignoreWindowMenuClickCount -= 1;
+      return;
+    }
+    if (ignoreNextWindowMenuClick) {
+      ignoreNextWindowMenuClick = false;
+      return;
+    }
+    if (Date.now() < ignoreOutsideMenuClickUntil) return;
+    const path = typeof event.composedPath === 'function' ? event.composedPath() : [];
+    const clickedInsideMenuRoot = path.some((entry) =>
+      entry instanceof HTMLElement && Boolean(entry.closest('[data-swap-menu-root]')),
+    );
+    if (clickedInsideMenuRoot) return;
+    closeSwapMenus('window-click');
   }
 
   function handleSwapWindowKeydown(event: KeyboardEvent): void {
-    if (event.key === 'Escape') closeSwapMenus();
+    if (event.key === 'Escape') closeSwapMenus('escape');
   }
 
   function formatPriceTicks(ticks: bigint): string {
@@ -1207,7 +1671,16 @@
     priceRatioInput = normalized;
   }
 
-  $: activeOffers = currentReplica ? activeXlnFunctions.listOpenSwapOffers(currentReplica.state) : [];
+  $: {
+    try {
+      const nextOffers = currentReplica && activeXlnFunctions?.listOpenSwapOffers
+        ? activeXlnFunctions.listOpenSwapOffers(currentReplica.state)
+        : [];
+      activeOffers = Array.isArray(nextOffers) ? nextOffers : [];
+    } catch {
+      activeOffers = [];
+    }
+  }
 
   function readOutCapacity(counterpartyEntityId: string, tokenIdValue: number): bigint {
     const accountDelta = getAccountDelta(counterpartyEntityId, tokenIdValue);
@@ -1256,10 +1729,10 @@
     return nonNegative(toBigIntSafe(raw) ?? 0n);
   }
 
-  function findReplicaByEntityId(entityId: string): EntityReplica | null {
+  function findReplicaByEntityId(entityId: string, frame: FrameLike = activeFrame): EntityReplica | null {
     const normalized = String(entityId || '').trim().toLowerCase();
     if (!normalized) return null;
-    return localEntityReplicas().find((candidate) =>
+    return localEntityReplicas(frame).find((candidate) =>
       String(candidate.entityId || candidate.state?.entityId || '').trim().toLowerCase() === normalized,
     ) || null;
   }
@@ -1313,6 +1786,11 @@
     } catch {
       return desiredInboundAmount;
     }
+  }
+
+  function withCrossTargetInboundBuffer(amount: bigint): bigint {
+    if (amount <= 0n) return amount;
+    return amount + ((amount + 99n) / 100n);
   }
 
   function computeAutoInboundCreditTargetForReplica(
@@ -1369,13 +1847,16 @@
     crossTargetInCapacity = selectedCrossTarget
       ? readInCapacityForReplica(targetReplica, selectedCrossTarget.targetEntityId, selectedCrossTarget.targetHubEntityId, wantToken)
       : 0n;
+    const desiredCrossInboundAmount = crossPriceImprovementMode === 'target_bonus'
+      ? withCrossTargetInboundBuffer(canonicalWantAmount)
+      : canonicalWantAmount;
     crossAutoInboundCreditTarget = selectedCrossTarget
       ? computeAutoInboundCreditTargetForReplica(
           targetReplica,
           selectedCrossTarget.targetEntityId,
           selectedCrossTarget.targetHubEntityId,
           wantToken,
-          canonicalWantAmount,
+          desiredCrossInboundAmount,
         )
       : null;
     crossCurrentPeerCreditLimit = selectedCrossTarget
@@ -1388,12 +1869,23 @@
       && crossAutoInboundCreditTarget > crossCurrentPeerCreditLimit,
     );
   }
-  $: formattedAvailableGive = Number.isFinite(giveToken) && giveToken > 0
-    ? `${formatAmount(availableGiveCapacity, giveToken)} ${giveTokenSymbol}`
+  $: formattedAvailableGiveAmount = Number.isFinite(giveToken) && giveToken > 0
+    ? formatAmount(availableGiveCapacity, giveToken)
     : availableGiveCapacity.toString();
-  $: formattedAvailableWantIn = Number.isFinite(wantToken) && wantToken > 0
-    ? `${formatAmount(availableWantInCapacity, wantToken)} ${wantTokenSymbol}`
+  $: formattedAvailableGive = Number.isFinite(giveToken) && giveToken > 0
+    ? `${formattedAvailableGiveAmount} ${giveTokenSymbol}`
+    : formattedAvailableGiveAmount;
+  $: formattedAvailableWantInAmount = Number.isFinite(wantToken) && wantToken > 0
+    ? formatAmount(availableWantInCapacity, wantToken)
     : availableWantInCapacity.toString();
+  $: formattedAvailableWantIn = Number.isFinite(wantToken) && wantToken > 0
+    ? `${formattedAvailableWantInAmount} ${wantTokenSymbol}`
+    : formattedAvailableWantInAmount;
+  $: targetCapacityAmount = swapRouteMode === 'cross' ? crossTargetInCapacity : availableWantInCapacity;
+  $: formattedTargetCapacityAmount = Number.isFinite(wantToken) && wantToken > 0
+    ? formatAmount(targetCapacityAmount, wantToken)
+    : targetCapacityAmount.toString();
+  $: targetCapacityLabel = targetAccountReady ? formattedTargetCapacityAmount : 'Account setup required';
   $: estimatedPrice = limitPriceTicks && limitPriceTicks > 0n ? formatPriceTicks(limitPriceTicks) : 'n/a';
   $: estimatedReceiveLabel = Number.isFinite(wantToken) && wantToken > 0
     ? `${formatAmount(canonicalWantAmount, wantToken)} ${wantTokenSymbol}`
@@ -1460,13 +1952,19 @@
   }
 
   function readCurrentHubPairBook(hubEntityId: string): BookState | null {
+    return readPairBook(hubEntityId, orderbookPairId);
+  }
+
+  function readPairBook(hubEntityId: string, pairIdValue: string): BookState | null {
     if (!(activeFrame?.eReplicas instanceof Map) || !hubEntityId) return null;
     const normalizedHubId = String(hubEntityId).trim().toLowerCase();
     if (!normalizedHubId) return null;
+    const normalizedPairId = String(pairIdValue || '').trim();
+    if (!normalizedPairId) return null;
     for (const [key, replica] of activeFrame.eReplicas.entries()) {
       const entityId = String(key || '').split(':')[0]?.trim().toLowerCase();
       if (entityId !== normalizedHubId) continue;
-      return replica?.state?.orderbookExt?.books?.get?.(orderbookPairId) || null;
+      return replica?.state?.orderbookExt?.books?.get?.(normalizedPairId) || null;
     }
     return null;
   }
@@ -1660,9 +2158,7 @@
         )
   );
   $: swapActionDisabledReason = (
-    routedPlanEnabled
-      ? 'Routed path preview is orderbook-only; clear the route plan to submit a direct swap.'
-      : swapRouteMode === 'same' && isInboundCapacityValidationError(swapDisabledReason) && canAutoPrepareInboundCapacity
+    swapRouteMode === 'same' && isInboundCapacityValidationError(swapDisabledReason) && canAutoPrepareInboundCapacity
       ? ''
       : swapDisabledReason
   );
@@ -1718,7 +2214,7 @@
         ? quoteFromBase(rawGive, limitPriceTicks ?? 0n, baseTokenDecimals, quoteTokenDecimals)
         : baseFromQuote(rawGive, limitPriceTicks ?? 0n, baseTokenDecimals, quoteTokenDecimals);
       const fillGive = prepareCanonicalOrder(rawGive, rawWant)?.effectiveGive ?? 0n;
-      orderAmountInput = formatAmountForInput(fillGive, giveToken);
+      setOrderAmountInputValue(formatAmountForInput(fillGive, giveToken));
       return;
     }
 
@@ -1747,7 +2243,7 @@
     const requantized = requantizeAtLimitPrice(rawGive, explicitPriceTicks);
     const fillGive = requantized?.effectiveGive ?? 0n;
 
-    orderAmountInput = formatAmountForInput(fillGive, levelGiveTokenId);
+    setOrderAmountInputValue(formatAmountForInput(fillGive, levelGiveTokenId));
     priceRatioInput = selectedOrderLevel.displayPrice
       ? normalizeDisplayPriceForInput(selectedOrderLevel.displayPrice)
       : formatPriceTicks(selectedOrderLevel.priceTicks);
@@ -1758,44 +2254,9 @@
     return Number.isFinite(numeric) ? Math.max(0, Math.floor(numeric)) : 0;
   }
 
-  function stableIdHash(input: string): string {
-    let hash = 0xcbf29ce484222325n;
-    for (let i = 0; i < input.length; i += 1) {
-      hash ^= BigInt(input.charCodeAt(i));
-      hash = (hash * 0x100000001b3n) & 0xffffffffffffffffn;
-    }
-    return hash.toString(36).padStart(13, '0');
-  }
-
-  function buildSwapOfferId(
-    logicalTimestamp: number,
-    logicalHeight: number,
-    sourceEntityId: string,
-    counterpartyEntityId: string,
-    sellToken: number,
-    buyToken: number,
-    sellAmount: bigint,
-    buyAmount: bigint,
-    priceTicks: bigint,
-    routeValue: string,
-  ): string {
-    const seed = [
-      logicalTimestamp,
-      logicalHeight,
-      sourceEntityId,
-      counterpartyEntityId,
-      sellToken,
-      buyToken,
-      sellAmount.toString(),
-      buyAmount.toString(),
-      priceTicks.toString(),
-      routeValue,
-    ].join('|');
-    return `swap-${logicalTimestamp.toString(36)}-${logicalHeight.toString(36)}-${stableIdHash(seed)}`;
-  }
-
   function handleOrderbookSnapshot(event: CustomEvent<OrderbookSnapshot>) {
     orderbookSnapshot = event.detail;
+    cacheOrderbookSnapshot(event.detail);
   }
 
   function readCurrentHubBestPriceTicks(side: BookSide, hubEntityId: string): bigint | null {
@@ -1820,7 +2281,7 @@
     hubMenuOpen = false;
     sourceMenuOpen = false;
     openTokenMenu = '';
-    routeMenuOpen = false;
+    setRouteMenuOpen(false, 'hub-change');
   }
 
   function selectHubOption(nextValue: string): void {
@@ -1871,11 +2332,6 @@
     }
   }
 
-  function setOrderListTab(nextTab: 'open' | 'closed'): void {
-    if (orderListTab === nextTab) return;
-    orderListTab = nextTab;
-  }
-
   function handleOrderbookLevelClick(event: CustomEvent<OrderbookLevelClickDetail>) {
     submitError = '';
     const pair = parsedOrderbookPair;
@@ -1912,6 +2368,10 @@
       return;
     }
     if (swapRouteMode === 'cross') {
+      const takeableSide: BookSide = activeCrossMarket?.sourceIsBase ? 'bid' : 'ask';
+      if (side !== takeableSide) {
+        return;
+      }
       // Cross-j book owner can be the target hub. Source capacity still
       // belongs to activeOrderAccountId, so do not rewrite createOrderAccountId.
     } else if (orderbookScopeMode === 'aggregated') {
@@ -1984,7 +2444,7 @@
   function getTokenDecimals(tokenIdValue: number): number {
     const info = activeXlnFunctions?.getTokenInfo?.(tokenIdValue);
     const decimals = Number(info?.decimals);
-    return Number.isFinite(decimals) && decimals >= 0 ? decimals : 18;
+    return Number.isFinite(decimals) && decimals > 0 ? Math.floor(decimals) : 18;
   }
 
   function quoteFromBase(baseAmount: bigint, priceTicks: bigint, baseDecimals: number, quoteDecimals: number): bigint {
@@ -2032,12 +2492,6 @@
     ) as CrossMarketView;
   })();
   $: parsedOrderbookPair = (() => {
-    if (activeRoutedHop) {
-      return {
-        baseTokenId: activeRoutedHop.baseTokenId,
-        quoteTokenId: activeRoutedHop.quoteTokenId,
-      };
-    }
     if (swapRouteMode === 'cross' && activeCrossMarket) {
       return {
         baseTokenId: activeCrossMarket.sourceIsBase ? giveToken : wantToken,
@@ -2048,30 +2502,64 @@
       ? { baseTokenId: selectedPair.baseTokenId, quoteTokenId: selectedPair.quoteTokenId }
       : null;
   })();
-  $: orderbookPairId = activeRoutedHop
-    ? activeRoutedHop.pairId
-    : swapRouteMode === 'cross' && activeCrossMarket
+  $: orderbookPairId = swapRouteMode === 'cross' && activeCrossMarket
     ? activeCrossMarket.venueId
     : selectedPair?.pairId || '1/2';
   $: orderMode = parsedOrderbookPair
     ? (
-        activeRoutedHop
-          ? (activeRoutedHop.sourceIsBase ? 'sell-base' : 'buy-base')
-          : swapRouteMode === 'cross' && activeCrossMarket
+        swapRouteMode === 'cross' && activeCrossMarket
           ? (activeCrossMarket.sourceIsBase ? 'sell-base' : 'buy-base')
           : tradeSide
       )
     : 'none';
+  $: {
+    const nextPriceContextSignature = [
+      swapRouteMode,
+      liveSelectedRouteValue,
+      activeBookHubId,
+      orderbookPairId,
+      giveToken,
+      wantToken,
+      orderMode,
+    ].join('::');
+    if (nextPriceContextSignature !== lastPriceContextSignature) {
+      lastPriceContextSignature = nextPriceContextSignature;
+      if (preservePriceOnNextContextChange) {
+        preservePriceOnNextContextChange = false;
+      } else if (!selectedOrderLevel) {
+        priceRatioInput = '';
+        hasAutoSuggestedInitialPrice = false;
+        hasUserEditedPriceInput = false;
+      }
+    }
+  }
   $: baseTokenId = parsedOrderbookPair?.baseTokenId ?? giveToken;
   $: quoteTokenId = parsedOrderbookPair?.quoteTokenId ?? wantToken;
   $: baseTokenSymbol = tokenSymbol(baseTokenId);
   $: quoteTokenSymbol = tokenSymbol(quoteTokenId);
+  $: orderbookBaseJurisdictionLabel = swapRouteMode === 'cross' && activeCrossMarket
+    ? jurisdictionLabelForAssetKey(activeCrossMarket.baseKey)
+    : sourceJurisdictionLabel;
+  $: orderbookQuoteJurisdictionLabel = swapRouteMode === 'cross' && activeCrossMarket
+    ? jurisdictionLabelForAssetKey(activeCrossMarket.quoteKey)
+    : sourceJurisdictionLabel;
+  $: orderbookPairDisplayLabel = `${tokenNetworkLabel(baseTokenId, orderbookBaseJurisdictionLabel)}/${tokenNetworkLabel(quoteTokenId, orderbookQuoteJurisdictionLabel)}`;
   $: baseTokenDecimals = getTokenDecimals(baseTokenId);
   $: quoteTokenDecimals = getTokenDecimals(quoteTokenId);
   $: orderbookSizeDisplayScale = baseTokenDecimals > 12 ? 10 ** Math.max(0, baseTokenDecimals - 12) : 1;
   $: giveTokenDecimals = getTokenDecimals(giveToken);
   $: limitPriceTicks = parseDisplayPriceTicks(priceRatioInput, 0n);
-  $: giveAmount = parseDecimalAmountToBigInt(orderAmountInput, giveTokenDecimals);
+  $: liveOrderAmountInput = (
+    $routedOrderAmountInput,
+    orderAmountRevision,
+    orderAmountDomRevision,
+    $routedOrderAmountInput || (
+      hasLatestOrderAmountDomValue
+        ? latestOrderAmountDomValue
+        : String(orderAmountInputElement?.value ?? orderAmountInput ?? '')
+    )
+  );
+  $: giveAmount = parseDecimalAmountToBigInt(liveOrderAmountInput, giveTokenDecimals);
   $: wantAmount = (() => {
     if (giveAmount <= 0n || !limitPriceTicks || limitPriceTicks <= 0n || !parsedOrderbookPair) return 0n;
     if (orderMode === 'sell-base') {
@@ -2087,47 +2575,51 @@
   $: canonicalGiveAmount = preparedOrder?.effectiveGive ?? 0n;
   $: canonicalWantAmount = preparedOrder?.effectiveWant ?? 0n;
   $: giveAmountLeftover = preparedOrder?.unspentGiveAmount ?? 0n;
+  function computeSwapPriceTicksSafe(
+    giveTokenValue: number,
+    wantTokenValue: number,
+    giveAmountValue: bigint,
+    wantAmountValue: bigint,
+  ): bigint {
+    return activeXlnFunctions?.computeSwapPriceTicks
+      ? activeXlnFunctions.computeSwapPriceTicks(giveTokenValue, wantTokenValue, giveAmountValue, wantAmountValue)
+      : 0n;
+  }
+
+  function orderHistoryDeps() {
+    return {
+      resolvePairOrientation,
+      getTokenDecimals,
+      quoteFromBase,
+    };
+  }
+
   function offerSideLabel(offer: OfferLike): 'Ask' | 'Bid' {
-    const give = Number(offer.giveTokenId || 0);
-    const want = Number(offer.wantTokenId || 0);
-    const pair = resolvePairOrientation(give, want);
-    return give === pair.baseTokenId ? 'Ask' : 'Bid';
+    return offerSideLabelPure(offer, resolvePairOrientation);
   }
 
   function offerPriceTicks(offer: OfferLike): bigint {
-    const explicitPriceTicks = toBigIntSafe(offer.priceTicks);
-    if (explicitPriceTicks && explicitPriceTicks > 0n) return explicitPriceTicks;
-    const giveToken = Number(offer.giveTokenId || 0);
-    const wantToken = Number(offer.wantTokenId || 0);
-    const give = toBigIntSafe(offer.giveAmount) ?? 0n;
-    const want = toBigIntSafe(offer.wantAmount) ?? 0n;
-    if (!Number.isFinite(giveToken) || !Number.isFinite(wantToken)) return 0n;
-    if (giveToken <= 0 || wantToken <= 0) return 0n;
-    if (give <= 0n || want <= 0n) return 0n;
-    return activeXlnFunctions.computeSwapPriceTicks(giveToken, wantToken, give, want);
+    return offerPriceTicksPure(offer, computeSwapPriceTicksSafe);
   }
 
   function remainingOfferUsd(offer: SwapOfferLike): number {
-    const giveToken = Number(offer.giveTokenId || 0);
-    const giveAmountValue = toBigIntSafe(offer.giveAmount) ?? 0n;
-    if (!Number.isFinite(giveToken) || giveToken <= 0 || giveAmountValue <= 0n) return 0;
-    const info = activeXlnFunctions?.getTokenInfo?.(giveToken);
-    const decimals = Number(info?.decimals ?? 18);
-    const symbol = String(info?.symbol || '');
-    return amountToUsd(giveAmountValue, decimals, symbol);
+    return remainingOfferUsdPure(offer, (tokenIdValue) => activeXlnFunctions?.getTokenInfo?.(tokenIdValue));
   }
 
   function isDustOpenOffer(offer: SwapOfferLike): boolean {
-    const remainingUsd = remainingOfferUsd(offer);
-    return remainingUsd > 0 && remainingUsd < MIN_ORDER_NOTIONAL_USD;
+    return isDustOpenOfferPure(
+      offer,
+      MIN_ORDER_NOTIONAL_USD,
+      (tokenIdValue) => activeXlnFunctions?.getTokenInfo?.(tokenIdValue),
+    );
   }
 
-  $: routeFilteredOpenOffers = activeOffers.filter((offer: SwapOfferLike) => {
+  $: routeFilteredOpenOffers = (Array.isArray(activeOffers) ? activeOffers : []).filter((offer: SwapOfferLike) => {
     if (orderRouteFilter === 'all') return true;
     const isCross = Boolean(offer.crossJurisdiction);
     return orderRouteFilter === 'cross' ? isCross : !isCross;
   });
-  $: openOrders = [...routeFilteredOpenOffers].sort((a: SwapOfferLike, b: SwapOfferLike) => {
+  $: openOrders = [...(Array.isArray(routeFilteredOpenOffers) ? routeFilteredOpenOffers : [])].sort((a: SwapOfferLike, b: SwapOfferLike) => {
     const aDust = isDustOpenOffer(a);
     const bDust = isDustOpenOffer(b);
     if (aDust !== bDust) return aDust ? 1 : -1;
@@ -2145,235 +2637,10 @@
     }));
   }
 
-  function offerLifecycleKey(accountId: string, offerId: string): string {
-    return `${String(accountId || '').trim()}:${String(offerId || '').trim()}`;
-  }
-
-  function computeFilledPpmFromRatios(resolves: ResolveRecord[]): bigint {
-    let remainingPpm = 1_000_000n;
-    for (const resolve of resolves) {
-      const ratio = BigInt(Math.max(0, Math.min(65535, Math.round(resolve.fillRatio || 0))));
-      const filledThisStep = (remainingPpm * ratio) / 65535n;
-      remainingPpm = remainingPpm - filledThisStep;
-      if (remainingPpm < 0n) remainingPpm = 0n;
-      if (resolve.cancelRemainder) break;
-    }
-    return 1_000_000n - remainingPpm;
-  }
-
-  function isBuyLifecycle(lifecycle: OfferLifecycle): boolean {
-    return offerSideLabel(lifecycle) === 'Bid';
-  }
-
-  function computeOfferExecutionSummary(lifecycle: OfferLifecycle): {
-    filledGiveAmount: bigint;
-    filledWantAmount: bigint;
-    filledBaseAmount: bigint;
-    targetBaseAmount: bigint;
-    filledPpm: bigint;
-    priceImprovementAmount: bigint;
-    priceImprovementTokenId: number | null;
-    feeAmount: bigint;
-    feeTokenId: number | null;
-  } {
-    const pair = resolvePairOrientation(lifecycle.giveTokenId, lifecycle.wantTokenId);
-    const isBuy = isBuyLifecycle(lifecycle);
-    const baseDecimals = getTokenDecimals(pair.baseTokenId);
-    const quoteDecimals = getTokenDecimals(pair.quoteTokenId);
-    const targetBaseAmount = isBuy ? lifecycle.wantAmount : lifecycle.giveAmount;
-    let filledGiveAmount = 0n;
-    let filledWantAmount = 0n;
-    let filledBaseAmount = 0n;
-    let priceImprovementAmount = 0n;
-    let feeAmount = 0n;
-    let feeTokenId: number | null = null;
-    let sawExactExecution = false;
-
-    for (const resolve of lifecycle.resolves) {
-      const executionGiveAmount = resolve.executionGiveAmount;
-      const executionWantAmount = resolve.executionWantAmount;
-      if (executionGiveAmount === null || executionWantAmount === null) continue;
-      if (executionGiveAmount <= 0n || executionWantAmount <= 0n) continue;
-
-      sawExactExecution = true;
-      filledGiveAmount += executionGiveAmount;
-      filledWantAmount += executionWantAmount;
-
-      const filledBaseThisStep = isBuy ? executionWantAmount : executionGiveAmount;
-      const actualQuoteThisStep = isBuy ? executionGiveAmount : executionWantAmount;
-      filledBaseAmount += filledBaseThisStep;
-
-      const limitQuoteThisStep = quoteFromBase(
-        filledBaseThisStep,
-        lifecycle.priceTicks,
-        baseDecimals,
-        quoteDecimals,
-      );
-      if (isBuy) {
-        const saved = limitQuoteThisStep - actualQuoteThisStep;
-        if (saved > 0n) priceImprovementAmount += saved;
-      } else {
-        const gained = actualQuoteThisStep - limitQuoteThisStep;
-        if (gained > 0n) priceImprovementAmount += gained;
-      }
-
-      if ((resolve.feeAmount ?? 0n) > 0n) {
-        feeAmount += resolve.feeAmount ?? 0n;
-        feeTokenId = resolve.feeTokenId ?? lifecycle.wantTokenId;
-      }
-    }
-
-    if (!sawExactExecution) {
-      const filledPpm = computeFilledPpmFromRatios(lifecycle.resolves);
-      return {
-        filledGiveAmount: (lifecycle.giveAmount * filledPpm) / 1_000_000n,
-        filledWantAmount: (lifecycle.wantAmount * filledPpm) / 1_000_000n,
-        filledBaseAmount: (targetBaseAmount * filledPpm) / 1_000_000n,
-        targetBaseAmount,
-        filledPpm,
-        priceImprovementAmount: 0n,
-        priceImprovementTokenId: null,
-        feeAmount: 0n,
-        feeTokenId: null,
-      };
-    }
-
-    const boundedFilledBase = filledBaseAmount > targetBaseAmount ? targetBaseAmount : filledBaseAmount;
-    const filledPpm = targetBaseAmount > 0n
-      ? ((boundedFilledBase * 1_000_000n) / targetBaseAmount)
-      : 0n;
-
-    return {
-      filledGiveAmount,
-      filledWantAmount,
-      filledBaseAmount: boundedFilledBase,
-      targetBaseAmount,
-      filledPpm: filledPpm > 1_000_000n ? 1_000_000n : filledPpm,
-      priceImprovementAmount,
-      priceImprovementTokenId: priceImprovementAmount > 0n ? pair.quoteTokenId : null,
-      feeAmount,
-      feeTokenId,
-    };
-  }
-
   function collectOfferLifecyclesFrom(
     selectSource: (account: AccountMachine) => Map<string, unknown> | undefined,
   ): OfferLifecycle[] {
-    const lifecycles: OfferLifecycle[] = [];
-    for (const { accountId, account } of accountMachines()) {
-      const source = selectSource(account);
-      if (!(source instanceof Map)) continue;
-      for (const [offerId, rawEntry] of source.entries()) {
-        if (!rawEntry || typeof rawEntry !== 'object') continue;
-        const entry = rawEntry as {
-          giveTokenId?: unknown;
-          wantTokenId?: unknown;
-          giveAmount?: unknown;
-          wantAmount?: unknown;
-          priceTicks?: unknown;
-          createdHeight?: unknown;
-          cancelRequested?: unknown;
-          resolves?: unknown;
-        };
-        const giveTokenId = Number(entry.giveTokenId || 0);
-        const wantTokenId = Number(entry.wantTokenId || 0);
-        const giveAmount = toBigIntSafe(entry.giveAmount) ?? 0n;
-        const wantAmount = toBigIntSafe(entry.wantAmount) ?? 0n;
-        if (!Number.isFinite(giveTokenId) || !Number.isFinite(wantTokenId) || giveTokenId <= 0 || wantTokenId <= 0) continue;
-        if (giveAmount <= 0n || wantAmount <= 0n) continue;
-        const priceTicks = toBigIntSafe(entry.priceTicks)
-          ?? (activeXlnFunctions?.computeSwapPriceTicks
-            ? activeXlnFunctions.computeSwapPriceTicks(giveTokenId, wantTokenId, giveAmount, wantAmount)
-            : 0n);
-        const resolves = Array.isArray(entry.resolves)
-          ? entry.resolves.map((resolve) => {
-              const rawResolve = resolve as {
-                fillRatio?: unknown;
-                cancelRemainder?: unknown;
-                height?: unknown;
-                executionGiveAmount?: unknown;
-                executionWantAmount?: unknown;
-                feeTokenId?: unknown;
-                feeAmount?: unknown;
-                comment?: unknown;
-              };
-              const feeTokenId = Number(rawResolve.feeTokenId);
-              return {
-                fillRatio: Number.isFinite(Number(rawResolve.fillRatio)) ? Number(rawResolve.fillRatio) : 0,
-                cancelRemainder: Boolean(rawResolve.cancelRemainder),
-                height: Number.isFinite(Number(rawResolve.height)) ? Number(rawResolve.height) : 0,
-                executionGiveAmount: toBigIntSafe(rawResolve.executionGiveAmount),
-                executionWantAmount: toBigIntSafe(rawResolve.executionWantAmount),
-                feeTokenId: Number.isFinite(feeTokenId) ? feeTokenId : null,
-                feeAmount: toBigIntSafe(rawResolve.feeAmount),
-                comment: typeof rawResolve.comment === 'string' ? rawResolve.comment : '',
-              } satisfies ResolveRecord;
-            })
-          : [];
-        lifecycles.push({
-          key: offerLifecycleKey(accountId, String(offerId || '')),
-          offerId: String(offerId || ''),
-          accountId,
-          giveTokenId,
-          wantTokenId,
-          giveAmount,
-          wantAmount,
-          priceTicks,
-          createdAt: Number(entry.createdHeight || 0),
-          resolves,
-          cancelRequested: Boolean(entry.cancelRequested),
-        });
-      }
-    }
-    return lifecycles;
-  }
-
-  function classifyClosedStatus(lifecycle: OfferLifecycle): ClosedOrderStatus {
-    const summary = computeOfferExecutionSummary(lifecycle);
-    const filledPpm = summary.filledPpm;
-    if (filledPpm >= FILLED_DISPLAY_PPM_THRESHOLD) return 'filled';
-    const hasFill = summary.filledBaseAmount > 0n;
-    const hasCancelResolve = lifecycle.resolves.some((resolve) => resolve.cancelRemainder);
-    if (hasFill) return 'partial';
-    if (hasCancelResolve || lifecycle.cancelRequested) return 'canceled';
-    return 'closed';
-  }
-
-  function latestResolveComment(lifecycle: OfferLifecycle): string {
-    for (let i = lifecycle.resolves.length - 1; i >= 0; i -= 1) {
-      const comment = String(lifecycle.resolves[i]?.comment || '').trim();
-      if (comment) return comment;
-    }
-    return '';
-  }
-
-  function extractStpBlockingOrderId(comment: string): string {
-    return comment.startsWith('STP:') ? comment.slice(4).trim() : '';
-  }
-
-  function formatCloseComment(comment: string): string {
-    const blockingOrderId = extractStpBlockingOrderId(comment);
-    if (!blockingOrderId) return comment;
-    return `STP:${blockingOrderId.slice(-8)}`;
-  }
-
-  function formatOrderTime(ms: number): string {
-    if (!Number.isFinite(ms) || ms <= 0) return '-';
-    if (ms < 1_000_000_000_000) return `#${ms}`;
-    return new Date(ms).toLocaleTimeString();
-  }
-
-  function closedOrderStatusLabel(status: ClosedOrderStatus): string {
-    if (status === 'filled') return 'Filled';
-    if (status === 'partial') return 'Partial';
-    if (status === 'canceled') return 'Canceled';
-    return 'Closed';
-  }
-
-  function closedOrderStatusTone(status: ClosedOrderStatus): 'bid' | 'ask' | 'neutral' {
-    if (status === 'filled') return 'bid';
-    if (status === 'partial') return 'ask';
-    return 'neutral';
+    return collectOfferLifecyclesFromPure(accountMachines(), selectSource, computeSwapPriceTicksSafe);
   }
 
   $: {
@@ -2383,72 +2650,20 @@
     closedOfferLifecycles = collectOfferLifecyclesFrom((account) => account.swapClosedOrders);
   }
 
-  $: closedOrderViews = closedOfferLifecycles
-    .map((offer) => {
-      const side = offerSideLabel(offer);
-      const pair = resolvePairOrientation(offer.giveTokenId, offer.wantTokenId);
-      const pairLabel = `${tokenSymbol(pair.baseTokenId)}/${tokenSymbol(pair.quoteTokenId)}`;
-      const summary = computeOfferExecutionSummary(offer);
-      const filledPpm = summary.filledPpm;
-      const filledPercent = filledPpm >= FILLED_DISPLAY_PPM_THRESHOLD
-        ? 100
-        : Number((filledPpm * 10_000n) / 1_000_000n) / 100;
-      const latestResolveTs = offer.resolves.length > 0 ? offer.resolves[offer.resolves.length - 1]!.height : offer.createdAt;
-      const closeComment = latestResolveComment(offer);
-      return {
-        offerId: offer.offerId,
-        accountId: offer.accountId,
-        side,
-        pairLabel,
-        priceTicks: offer.priceTicks,
-        giveTokenId: offer.giveTokenId,
-        wantTokenId: offer.wantTokenId,
-        giveAmount: offer.giveAmount,
-        wantAmount: offer.wantAmount,
-        filledGiveAmount: summary.filledGiveAmount,
-        filledWantAmount: summary.filledWantAmount,
-        filledBaseAmount: summary.filledBaseAmount,
-        targetBaseAmount: summary.targetBaseAmount,
-        filledPercent,
-        priceImprovementAmount: summary.priceImprovementAmount,
-        priceImprovementTokenId: summary.priceImprovementTokenId,
-        feeAmount: summary.feeAmount,
-        feeTokenId: summary.feeTokenId,
-        status: classifyClosedStatus(offer),
-        closeComment,
-        createdAt: offer.createdAt,
-        closedAt: latestResolveTs,
-      } satisfies ClosedOrderView;
-    })
-    .sort((a, b) => b.closedAt - a.closedAt);
+  $: closedOrderViews = buildClosedOrderViews(closedOfferLifecycles, {
+    ...orderHistoryDeps(),
+    tokenSymbol,
+    filledDisplayPpmThreshold: FILLED_DISPLAY_PPM_THRESHOLD,
+  });
   $: filteredClosedOrderViews = closedOrderStatusFilter === 'all'
-    ? closedOrderViews
-    : closedOrderViews.filter((order) => order.status === closedOrderStatusFilter);
-  $: offerPriceImprovementByKey = (() => {
-    const map = new Map<string, { amount: bigint; tokenId: number | null }>();
-    for (const lifecycle of offerLifecycles) {
-      const summary = computeOfferExecutionSummary(lifecycle);
-      map.set(lifecycle.key, {
-        amount: summary.priceImprovementAmount,
-        tokenId: summary.priceImprovementTokenId,
-      });
-    }
-    return map;
-  })();
-  $: totalPriceImprovementSummary = (() => {
-    const totals = new Map<number, bigint>();
-    for (const lifecycle of offerLifecycles) {
-      const summary = computeOfferExecutionSummary(lifecycle);
-      const tokenId = summary.priceImprovementTokenId;
-      const amount = summary.priceImprovementAmount;
-      if (!tokenId || amount <= 0n) continue;
-      totals.set(tokenId, (totals.get(tokenId) ?? 0n) + amount);
-    }
-    const parts = Array.from(totals.entries())
-      .sort((a, b) => a[0] - b[0])
-      .map(([tokenId, amount]) => `${formatAmount(amount, tokenId)} ${tokenSymbol(tokenId)}`);
-    return parts.length > 0 ? parts.join(' · ') : '';
-  })();
+    ? (Array.isArray(closedOrderViews) ? closedOrderViews : [])
+    : (Array.isArray(closedOrderViews) ? closedOrderViews : []).filter((order) => order.status === closedOrderStatusFilter);
+  $: offerPriceImprovementByKey = buildOfferPriceImprovementByKey(offerLifecycles, orderHistoryDeps());
+  $: totalPriceImprovementSummary = buildTotalPriceImprovementSummary(offerLifecycles, {
+    ...orderHistoryDeps(),
+    formatAmount,
+    tokenSymbol,
+  });
   $: if (pendingSwapFeedbackOfferId) {
     const closed = closedOrderViews.find((order) => order.offerId === pendingSwapFeedbackOfferId);
     if (closed) {
@@ -2568,18 +2783,18 @@
 
       const logicalNow = readLogicalNumber(currentReplica?.state?.timestamp || env.timestamp);
       const logicalHeight = readLogicalNumber(currentReplica?.state?.height || env.height);
-      const offerId = buildSwapOfferId(
-        logicalNow,
+      const offerId = buildSwapOfferId({
+        logicalTimestamp: logicalNow,
         logicalHeight,
         sourceEntityId,
-        resolvedCounterparty,
-        giveToken,
-        wantToken,
-        effectiveGiveAmount,
-        effectiveWantAmount,
-        canonicalPriceTicks,
-        selectedRouteValue,
-      );
+        counterpartyEntityId: resolvedCounterparty,
+        sellToken: giveToken,
+        buyToken: wantToken,
+        sellAmount: effectiveGiveAmount,
+        buyAmount: effectiveWantAmount,
+        priceTicks: canonicalPriceTicks,
+        routeValue: liveSelectedRouteValue,
+      });
       const minFillRatio = 0;
       const requiredInboundCreditLimit = computeAutoInboundCreditTarget(
         resolvedCounterparty,
@@ -2596,13 +2811,16 @@
       );
       const targetRoute = selectedCrossTarget;
       const targetReplica = targetRoute ? findReplicaByEntityId(targetRoute.targetEntityId) : null;
+      const requiredTargetInboundAmount = crossPriceImprovementMode === 'target_bonus'
+        ? withCrossTargetInboundBuffer(effectiveWantAmount)
+        : effectiveWantAmount;
       const requiredTargetInboundCreditLimit = targetRoute
         ? computeAutoInboundCreditTargetForReplica(
             targetReplica,
             targetRoute.targetEntityId,
             targetRoute.targetHubEntityId,
             wantToken,
-            effectiveWantAmount,
+            requiredTargetInboundAmount,
           )
         : null;
       const currentTargetInboundCreditLimit = targetRoute
@@ -2635,12 +2853,24 @@
           wantToken,
           targetRoute.targetHubEntityId,
         );
+        const sourceHubSignerId = resolveSignerId(resolvedCounterparty);
+        const targetHubSignerId = resolveSignerId(targetRoute.targetHubEntityId);
+        const bookHubSignerId = bookOwnerEntityId.toLowerCase() === resolvedCounterparty.toLowerCase()
+          ? sourceHubSignerId
+          : bookOwnerEntityId.toLowerCase() === targetRoute.targetHubEntityId.toLowerCase()
+            ? targetHubSignerId
+            : resolveSignerId(bookOwnerEntityId);
         return {
           orderId: offerId,
           bookOwnerEntityId,
           venueId: deriveCanonicalCrossJurisdictionVenueIdForLegs(sourceJurisdictionRef, giveToken, targetRoute.targetJurisdictionRef, wantToken),
           makerEntityId: sourceEntityId,
           hubEntityId: bookOwnerEntityId,
+          sourceSignerId: signerId,
+          sourceHubSignerId,
+          targetHubSignerId,
+          targetSignerId: targetRoute.targetSignerId,
+          bookHubSignerId,
           source: {
             jurisdiction: sourceJurisdictionRef,
             entityId: sourceEntityId,
@@ -2732,7 +2962,7 @@
       // Reset form
       orderPercent = 100;
       selectedOrderLevel = null;
-      orderAmountInput = '';
+      setOrderAmountInputValue('');
       priceRatioInput = '';
     } catch (error) {
       console.error('Failed to place swap offer:', error);
@@ -2889,7 +3119,12 @@
 
 <svelte:window on:click={handleSwapWindowClick} on:keydown={handleSwapWindowKeydown} />
 
-<div class="swap-panel">
+<div
+  class="swap-panel"
+  bind:this={swapPanelRoot}
+  on:input|capture={handleSwapPanelAmountSync}
+  on:change|capture={handleSwapPanelAmountSync}
+>
   <div class="trade-grid" class:book-open={showOrderbook}>
     <div class="section section-order">
       <div class="swap-mode-bar">
@@ -2928,8 +3163,7 @@
                   <span class="jurisdiction-mini-badge">{jurisdictionBadgeText(selectedSourceEntity?.jurisdiction || sourceJurisdictionLabel)}</span>
                 </span>
                 <span class="entity-select-copy">
-                  <strong>{selectedSourceEntity?.name || accountLabel(sourceEntityIdValue)}</strong>
-                  <small>{selectedSourceEntity?.jurisdiction || sourceJurisdictionLabel}</small>
+                  <strong>{formatEntityNetworkLabel(selectedSourceEntity?.name || accountLabel(sourceEntityIdValue), selectedSourceEntity?.jurisdiction || sourceJurisdictionLabel)}</strong>
                 </span>
                 <span class="entity-select-chevron" aria-hidden="true">⌄</span>
               </button>
@@ -2966,8 +3200,7 @@
                         <span class="jurisdiction-mini-badge">{jurisdictionBadgeText(option.jurisdiction)}</span>
                       </span>
                       <span class="entity-select-copy">
-                        <strong>{option.name}</strong>
-                        <small>{option.jurisdiction}</small>
+                        <strong>{formatEntityNetworkLabel(option.name, option.jurisdiction)}</strong>
                       </span>
                     </button>
                   {/each}
@@ -2979,10 +3212,12 @@
             <input
               type="text"
               bind:value={orderAmountInput}
+              bind:this={orderAmountInputElement}
               inputmode="decimal"
               placeholder="0"
               data-testid="swap-order-amount"
               aria-label="Swap from amount"
+              on:input={handleOrderAmountInput}
             />
             <div class="token-select-wrap" data-swap-menu-root title={giveTokenSymbol}>
               <button
@@ -3003,13 +3238,13 @@
                 aria-label="Swap from token"
                 on:change={handleGiveTokenChange}
               >
-                {#each swapTokenOptions as token}
+                {#each giveTokenOptions as token}
                   <option value={String(token.tokenId)}>{token.symbol}</option>
                 {/each}
               </select>
               {#if openTokenMenu === 'give'}
                 <div class="token-menu" role="listbox" aria-label="Sell token">
-                  {#each swapTokenOptions as token}
+                  {#each giveTokenOptions as token}
                     <button
                       type="button"
                       class:selected={token.tokenId === giveToken}
@@ -3028,7 +3263,7 @@
           </div>
           <div class="leg-meta">
             <span>{sourceAssetLabel}</span>
-            <strong>{formattedAvailableGive}</strong>
+            <strong title={`Available ${formattedAvailableGive}`}>{formattedAvailableGiveAmount}</strong>
           </div>
         </div>
 
@@ -3036,7 +3271,8 @@
           <button
             type="button"
             class="direction-chip"
-            on:click={() => setSwapTokens(wantToken, giveToken)}
+            data-testid="swap-flip-tokens"
+            on:click={flipSwapTokens}
             title="Swap selected tokens"
             aria-label="Swap selected tokens"
           >⇅</button>
@@ -3048,53 +3284,84 @@
             <div class="route-select-wrap" data-swap-menu-root>
               <button
                 type="button"
-                class="chain-select route-menu-button"
+                class="entity-select-button route-menu-button"
+                use:routeMenuButtonAction
+                data-testid="swap-route-menu-button"
+                data-route-menu-open={$routeMenuOpenStore ? 'true' : 'false'}
+                data-route-menu-toggle-count={routeMenuToggleCount}
+                data-route-native-click-count={routeMenuNativeClickCount}
+                data-route-menu-set-count={routeMenuSetCount}
+                data-route-menu-last-set={routeMenuLastSetReason}
                 aria-haspopup="listbox"
-                aria-expanded={routeMenuOpen}
+                aria-expanded={$routeMenuOpenStore}
                 title={selectedRouteLabel}
-                on:click|stopPropagation={toggleRouteMenu}
               >
-                <span class={`route-glyph ${selectedRouteOption?.mode === 'cross' ? 'cross' : 'same'}`} aria-hidden="true">
-                  <span class="route-node route-node-a"></span>
-                  {#if selectedRouteOption?.mode === 'cross'}<span class="route-node route-node-b"></span>{/if}
-                  <span class="route-arrows">⇄</span>
+                <span class="entity-avatar-wrap">
+                  {#if selectedRouteEntityId && entityAvatarSrc(selectedRouteEntityId)}
+                    <img class="entity-avatar-mini" src={entityAvatarSrc(selectedRouteEntityId)} alt="" />
+                  {:else}
+                    <span class="entity-avatar-mini placeholder">{entityInitials(selectedRouteEntityId, selectedRouteEntityName)}</span>
+                  {/if}
+                  <span class="jurisdiction-mini-badge">{jurisdictionBadgeText(selectedRouteJurisdictionLabel)}</span>
                 </span>
-                <span>{selectedRouteLabel || 'Same account'}</span>
-                <em aria-hidden="true">⌄</em>
+                <span class="entity-select-copy">
+                  <strong>{formatEntityNetworkLabel(selectedRouteEntityName, selectedRouteJurisdictionLabel)}</strong>
+                </span>
+                <span class="entity-select-chevron" aria-hidden="true">⌄</span>
               </button>
               <select
                 class="route-select-native"
-                value={selectedRouteValue}
+                bind:this={routeSelectElement}
+                bind:value={selectedRouteValue}
                 data-testid="swap-route-select"
+                data-selected-route-value={liveSelectedRouteValue}
+                data-committed-route-value={committedRouteSelectionValue}
+                data-route-commit-nonce={routeSelectionCommitNonce}
+                data-selected-route-mode={swapRouteMode}
+                data-selected-route-known={visibleRouteOptions.some((option) => option.value === liveSelectedRouteValue) ? 'true' : 'false'}
+                data-selected-route-disabled={liveSelectedRouteValue !== 'same' && visibleRouteOptions.find((option) => option.value === liveSelectedRouteValue)?.disabled ? 'true' : 'false'}
                 aria-label="Swap to network"
                 title={selectedRouteLabel}
+                on:input={handleRouteSelectChange}
                 on:change={handleRouteSelectChange}
               >
-                {#each routeOptions as option}
-                  <option value={option.value} disabled={option.disabled} title={option.label}>{option.label}</option>
+                {#each visibleRouteOptions as option}
+                  <option
+                    value={option.value}
+                    disabled={option.disabled}
+                    selected={option.value === liveSelectedRouteValue}
+                    title={option.label}
+                  >
+                    {option.label}
+                  </option>
                 {/each}
               </select>
-              {#if routeMenuOpen}
-                <div class="route-menu" role="listbox" aria-label="Destination account">
-                  {#each routeOptions as option}
+              {#if $routeMenuOpenStore}
+                <div class="route-menu" data-testid="swap-route-menu" role="listbox" aria-label="Destination account">
+                  {#each visibleRouteOptions as option}
                     <button
                       type="button"
-                      class:selected={option.value === selectedRouteValue}
+                      data-testid="swap-route-option"
+                      data-route-value={option.value}
+                      class:selected={option.value === liveSelectedRouteValue}
                       class:disabled={option.disabled}
                       class="route-option"
                       role="option"
-                      aria-selected={option.value === selectedRouteValue}
+                      aria-selected={option.value === liveSelectedRouteValue}
                       disabled={option.disabled}
                       title={option.disabledReason || option.label}
                       on:click|stopPropagation={() => selectRouteOption(option.value)}
                     >
-                      <span class={`route-glyph ${option.mode}`} aria-hidden="true">
-                        <span class="route-node route-node-a"></span>
-                        {#if option.mode === 'cross'}<span class="route-node route-node-b"></span>{/if}
-                        <span class="route-arrows">⇄</span>
+                      <span class="entity-avatar-wrap">
+                        {#if option.targetEntityId && entityAvatarSrc(option.targetEntityId)}
+                          <img class="entity-avatar-mini" src={entityAvatarSrc(option.targetEntityId)} alt="" />
+                        {:else}
+                          <span class="entity-avatar-mini placeholder">{entityInitials(option.targetEntityId, accountLabel(option.targetEntityId))}</span>
+                        {/if}
+                        <span class="jurisdiction-mini-badge">{jurisdictionBadgeText(option.targetJurisdiction)}</span>
                       </span>
                       <span class="route-option-copy">
-                        <strong>{option.label}</strong>
+                        <strong>{formatEntityNetworkLabel(accountLabel(option.targetEntityId), option.targetJurisdiction)}</strong>
                         {#if option.disabledReason}
                           <small>{option.disabledReason}</small>
                         {/if}
@@ -3111,6 +3378,7 @@
               readonly
               value={formatAmount(wantAmount, wantToken)}
               class="readonly-input receive-amount"
+              data-testid="swap-receive-amount"
               aria-label="Estimated receive amount"
             />
             <div class="token-select-wrap" data-swap-menu-root title={wantTokenSymbol}>
@@ -3132,13 +3400,13 @@
                 aria-label="Swap to token"
                 on:change={handleWantTokenChange}
               >
-                {#each swapTokenOptions as token}
+                {#each wantTokenOptions as token}
                   <option value={String(token.tokenId)}>{token.symbol}</option>
                 {/each}
               </select>
               {#if openTokenMenu === 'want'}
                 <div class="token-menu" role="listbox" aria-label="Buy token">
-                  {#each swapTokenOptions as token}
+                  {#each wantTokenOptions as token}
                     <button
                       type="button"
                       class:selected={token.tokenId === wantToken}
@@ -3157,7 +3425,7 @@
           </div>
           <div class="leg-meta">
             <span>{targetAssetLabel}</span>
-            <strong>{targetAccountReady ? estimatedReceiveLabel : 'Account setup required'}</strong>
+            <strong title={targetAccountReady ? `Inbound capacity ${formattedTargetCapacityAmount} ${wantTokenSymbol}` : 'Account setup required'}>{targetCapacityLabel}</strong>
           </div>
         </div>
       </div>
@@ -3213,23 +3481,29 @@
               <span class="jurisdiction-mini-badge">{jurisdictionBadgeText(selectedHubJurisdictionLabel)}</span>
             </span>
             <span class="entity-select-copy">
-              <strong>{selectedHubLabel}</strong>
-              <small>{selectedHubJurisdictionLabel}</small>
+              <strong>{formatEntityNetworkLabel(selectedHubLabel, selectedHubJurisdictionLabel)}</strong>
             </span>
             <span class="entity-select-chevron" aria-hidden="true">⌄</span>
           </button>
           <select
             class="entity-select-native"
-            value={createOrderAccountId}
-            data-testid="swap-account-select"
-            title={selectedHubDisplayLabel}
-            aria-label="Swap venue"
-            on:change={(event) => handleSelectedHubChange((event.currentTarget as HTMLSelectElement).value)}
-          >
-            {#each selectedHubOptions as hub (hub.value)}
-              <option value={hub.value} title={formatEntityNetworkLabel(hub.label, hubJurisdictionLabel(hub.value))}>{formatEntityNetworkLabel(hub.label, hubJurisdictionLabel(hub.value))}</option>
-            {/each}
-          </select>
+	            bind:value={createOrderAccountId}
+	            data-testid="swap-account-select"
+	            data-active-order-account-id={activeOrderAccountId}
+	            title={selectedHubDisplayLabel}
+	            aria-label="Swap venue"
+	            on:change={(event) => handleSelectedHubChange((event.currentTarget as HTMLSelectElement).value)}
+	          >
+	            {#each selectedHubOptions as hub (hub.value)}
+	              <option
+	                value={hub.value}
+	                selected={hub.value === activeOrderAccountId}
+	                title={formatEntityNetworkLabel(hub.label, hubJurisdictionLabel(hub.value))}
+	              >
+	                {formatEntityNetworkLabel(hub.label, hubJurisdictionLabel(hub.value))}
+	              </option>
+	            {/each}
+	          </select>
           {#if hubMenuOpen}
             <div class="entity-menu hub-menu" role="listbox" aria-label="Hub">
               {#each selectedHubOptions as hub (hub.value)}
@@ -3252,8 +3526,7 @@
                     <span class="jurisdiction-mini-badge">{jurisdictionBadgeText(hubJurisdiction)}</span>
                   </span>
                   <span class="entity-select-copy">
-                    <strong>{hub.label}</strong>
-                    <small>{hubJurisdiction}</small>
+                    <strong>{formatEntityNetworkLabel(hub.label, hubJurisdiction)}</strong>
                   </span>
                 </button>
               {/each}
@@ -3287,57 +3560,42 @@
         </div>
       </div>
 
-      <div class="route-builder" class:cross-route={swapRouteMode === 'cross'} data-testid="swap-route-picker">
-        <button type="button" class="route-summary" title={`${selectedRouteLabel} · ${routeVenueLabel}`} on:click={() => routeDetailsOpen = !routeDetailsOpen}>
+      <div
+        class="route-builder"
+        class:cross-route={swapRouteMode === 'cross'}
+        use:syncOrderAmountContainerAction
+        data-testid="swap-route-picker"
+        data-order-amount-input={liveOrderAmountInput}
+        data-order-amount-state={orderAmountInput}
+        data-order-amount-dom={latestOrderAmountDomValue}
+        data-order-amount-has-dom={hasLatestOrderAmountDomValue ? 'true' : 'false'}
+        data-order-amount-revision={orderAmountRevision}
+        data-order-amount-dom-revision={orderAmountDomRevision}
+        data-order-amount-node={String(orderAmountInputElement?.value ?? '')}
+        data-give-token={giveToken}
+        data-want-token={wantToken}
+        data-give-decimals={giveTokenDecimals}
+        data-give-amount={giveAmount.toString()}
+        data-canonical-give-amount={canonicalGiveAmount.toString()}
+      >
+        <button type="button" class="route-summary" title={`${routeSummaryLabel} · ${routePathLabel} · ${routeVenueDisplayLabel}`} on:click={() => routeDetailsOpen = !routeDetailsOpen}>
           <span>Route</span>
-          <strong>{selectedRouteLabel || 'Same account'}</strong>
-          <em>{swapTokenPairLabel}</em>
+          <strong>{routeSummaryLabel}</strong>
+          <em>{routeSummaryAssetsLabel}</em>
         </button>
-        <div class="route-flow" data-testid="swap-route-flow">
+        <div
+          class="route-flow"
+          data-testid="swap-route-flow"
+          data-selected-route-value={liveSelectedRouteValue}
+          data-route-mode={swapRouteMode}
+          data-source-jurisdiction={routePathSourceLabel}
+          data-target-jurisdiction={routePathTargetLabel}
+          data-route-venue={routeVenueDisplayLabel}
+          data-selected-route-label={selectedRouteLabel}
+        >
           <span title={`${sourceRouteEntityLabel} -> ${targetRouteEntityLabel}`}>{routePathLabel}</span>
-          <em>via {routeVenueLabel}</em>
+          <em>via {routeVenueDisplayLabel}</em>
         </div>
-        {#if swapRouteMode === 'cross'}
-          <div class="routed-actions">
-            <button
-              type="button"
-              class="route-plan-btn"
-              data-testid="swap-build-routed-route"
-              disabled={routedSwapPlan.length === 0}
-              on:click={createRoutedSwapPlan}
-            >Build route</button>
-            {#if routedPlanEnabled}
-              <button
-                type="button"
-                class="route-plan-btn clear"
-                data-testid="swap-clear-routed-route"
-                on:click={clearRoutedSwapPlan}
-              >Clear</button>
-            {/if}
-          </div>
-          {#if routedPlanEnabled && routedSwapPlan.length > 0}
-            <div class="routed-hop-list" data-testid="swap-routed-route">
-              {#each routedSwapPlan as hop, index (hop.id)}
-                <button
-                  type="button"
-                  class="routed-hop"
-                  class:active={index === selectedRouteHopIndex}
-                  data-testid="swap-routed-hop"
-                  data-hop-kind={hop.kind}
-                  data-pair-id={hop.pairId}
-                  data-book-hub-id={hop.bookHubId}
-                  on:click={() => selectRoutedHop(index)}
-                >
-                  <span>{hop.label}</span>
-                  <strong>{tokenSymbol(hop.baseTokenId)}/{tokenSymbol(hop.quoteTokenId)}</strong>
-                  <em>{hop.fromLabel} -> {hop.toLabel}</em>
-                </button>
-              {/each}
-            </div>
-          {:else if routedSwapPlan.length === 0}
-            <p class="route-no-market" data-testid="swap-route-no-route">No routed market for selected assets.</p>
-          {/if}
-        {/if}
         {#if swapRouteMode === 'cross' && canAutoPrepareCrossInboundCapacity}
           <label class="route-checkbox" data-testid="swap-cross-auto-extend">
             <input type="checkbox" bind:checked={autoExtendCrossInbound} />
@@ -3357,7 +3615,27 @@
           <div class="route-details">
             <span>Source account: {sourceRouteEntityLabel}</span>
             <span>Target account: {targetRouteEntityLabel}</span>
-            <span>Venue/orderbook: {routeVenueLabel}</span>
+            <span>Venue/orderbook: {routeVenueDisplayLabel}</span>
+          </div>
+        {/if}
+        {#if showManualRouteRecommendation}
+          <div class="manual-route-card" data-testid="swap-route-recommendation">
+            <div class="manual-route-head">
+              <span>No direct orderbook</span>
+              <strong>Manual route candidates</strong>
+            </div>
+            {#each routedRouteRecommendations as route (route.id)}
+              <div
+                class="manual-route-row"
+                data-testid="swap-route-recommendation-row"
+                data-route-id={route.id}
+                data-hop-count={route.hops.length}
+              >
+                <span>{route.label}</span>
+                <strong>{manualRouteEstimateLabel(route)}</strong>
+                <em>{route.summary}</em>
+              </div>
+            {/each}
           </div>
         {/if}
       </div>
@@ -3411,11 +3689,23 @@
     </div>
 
     {#if showOrderbook}
-      <div class="section section-market">
+      <div
+        class="section section-market"
+        data-testid="swap-market-section"
+        data-active-book-hub-id={activeBookHubId}
+        data-orderbook-hub-ids={orderbookHubIds.join(',')}
+        data-active-order-account-id={activeOrderAccountId}
+        data-selected-book-account-id={selectedBookAccountId}
+        data-create-order-account-id={createOrderAccountId}
+        data-selected-route-source-hub={selectedRouteOption?.sourceHubEntityId || ''}
+        data-selected-route-target-hub={selectedRouteOption?.targetHubEntityId || ''}
+        data-selected-cross-target-hub={selectedCrossTarget?.targetHubEntityId || ''}
+        data-route-mode={swapRouteMode}
+      >
         <div class="book-toolbar">
           <div>
             <span>Orderbook</span>
-            <strong>{baseTokenSymbol}/{quoteTokenSymbol}</strong>
+            <strong>{orderbookPairDisplayLabel}</strong>
           </div>
           <button
             type="button"
@@ -3431,208 +3721,61 @@
         </div>
         {#if orderbookHubIds.length > 0}
           <div class="orderbook-wrap" data-testid="swap-orderbook">
-            {#key orderbookViewKey}
-              <OrderbookPanel
-                hubIds={orderbookHubIds}
-                hubId={activeBookHubId || selectedBookAccountId}
-                relayUrl={activeOrderbookRelayUrl}
-                pairId={orderbookPairId}
-                pairLabel={`${baseTokenSymbol}/${quoteTokenSymbol}`}
-                depth={orderbookDepth}
-                showSources={true}
-                sourceLabels={orderbookSourceLabels}
-                sourceAvatars={orderbookSourceAvatars}
-                compactHeader={true}
-                showPriceStepControl={false}
-                priceScale={Number(ORDERBOOK_PRICE_SCALE)}
-                sizeDisplayScale={orderbookSizeDisplayScale}
-                disablePriceAggregation={orderbookScopeMode === 'selected' || swapRouteMode === 'cross'}
-                preferredClickSide={orderMode === 'buy-base' ? 'ask' : 'bid'}
-                on:levelclick={handleOrderbookLevelClick}
-                on:snapshot={handleOrderbookSnapshot}
-              />
-            {/key}
+            <OrderbookPanel
+              hubIds={visibleOrderbookHubIds}
+              hubId={activeBookHubId || selectedBookAccountId}
+              relayUrl={activeOrderbookRelayUrl}
+              pairId={orderbookPairId}
+              pairLabel={orderbookPairDisplayLabel}
+              depth={orderbookDepth}
+              showSources={true}
+              sourceLabels={orderbookSourceLabels}
+              sourceAvatars={orderbookSourceAvatars}
+              compactHeader={true}
+              showPriceStepControl={false}
+              priceScale={Number(ORDERBOOK_PRICE_SCALE)}
+              sizeDisplayScale={orderbookSizeDisplayScale}
+              disablePriceAggregation={true}
+              preferredClickSide={orderMode === 'buy-base' ? 'ask' : 'bid'}
+              refreshNonce={orderbookRefreshNonce}
+              on:levelclick={handleOrderbookLevelClick}
+              on:snapshot={handleOrderbookSnapshot}
+            />
           </div>
         {:else}
-          <div class="orderbook-empty">No connected account orderbooks yet.</div>
+          <div class="orderbook-empty" data-testid="swap-orderbook-empty">No connected account orderbooks yet.</div>
         {/if}
       </div>
     {/if}
   </div>
 
-  <div class="section section-orders">
-    <div class="orders-toolbar">
-      <div class="orders-header-left">
-        <h4 class="orders-inline-title">Orders</h4>
-        <div class="orders-tabs" role="tablist" aria-label="Swap orders">
-          <button
-            type="button"
-            class="orders-tab-text"
-            class:active={orderListTab === 'open'}
-            aria-pressed={orderListTab === 'open'}
-            data-testid="swap-orders-tab-open"
-            on:click={() => setOrderListTab('open')}
-          >Open ({openOrders.length})</button>
-          <button
-            type="button"
-            class="orders-tab-text"
-            class:active={orderListTab === 'closed'}
-            aria-pressed={orderListTab === 'closed'}
-            data-testid="swap-orders-tab-closed"
-            on:click={() => setOrderListTab('closed')}
-          >Closed ({closedOrderViews.length})</button>
-        </div>
-      </div>
-      <label class="closed-status-filter" class:is-hidden={orderListTab !== 'open'}>
-        <span>Route</span>
-        <select bind:value={orderRouteFilter} disabled={orderListTab !== 'open'} data-testid="swap-orders-route-filter">
-          <option value="all">All</option>
-          <option value="same">Same</option>
-          <option value="cross">Cross-j</option>
-        </select>
-      </label>
-      <label class="closed-status-filter" class:is-hidden={orderListTab !== 'closed'}>
-        <span>Status</span>
-        <select bind:value={closedOrderStatusFilter} disabled={orderListTab !== 'closed'}>
-          <option value="all">All</option>
-          <option value="filled">Filled</option>
-          <option value="partial">Partial</option>
-          <option value="canceled">Canceled</option>
-          <option value="closed">Closed</option>
-        </select>
-      </label>
-    </div>
-    {#if orderListTab === 'closed' && totalPriceImprovementSummary}
-      <p class="improvement-summary">Total price improvement: <strong>{totalPriceImprovementSummary}</strong></p>
-    {/if}
-
-    {#if orderListTab === 'open'}
-      {#if openOrders.length === 0}
-        <div class="orders-empty">No open orders yet.</div>
-      {:else}
-        <div class="orders-table-wrap">
-          <table class="orders-table" data-testid="swap-open-orders">
-            <thead>
-              <tr>
-                <th>Side</th>
-                <th>Pair</th>
-                <th>Price</th>
-                <th>Remaining</th>
-                <th>Price Improvement</th>
-                <th>Hub</th>
-                <th></th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each openOrders as offer (offerLifecycleKey(String(offer.accountId || ''), String(offer.offerId || '')))}
-                {@const side = offerSideLabel(offer)}
-                {@const pairView = resolvePairOrientation(offer.giveTokenId, offer.wantTokenId)}
-                {@const isDust = isDustOpenOffer(offer)}
-                {@const remainingUsd = remainingOfferUsd(offer)}
-                {@const offerImprovement = offerPriceImprovementByKey.get(offerLifecycleKey(String(offer.accountId || ''), String(offer.offerId || ''))) || { amount: 0n, tokenId: null }}
-                <tr data-testid="swap-open-order-row">
-                  <td>
-                    <span class:side-ask={side === 'Ask'} class:side-bid={side === 'Bid'} class="side-badge">{side}</span>
-                  </td>
-                  <td>
-                    <span>{tokenSymbol(pairView.baseTokenId)}/{tokenSymbol(pairView.quoteTokenId)}</span>
-                    {#if offer.crossJurisdiction}
-                      <span class="route-badge">Cross-j</span>
-                    {/if}
-                  </td>
-                  <td>{formatPriceTicks(offerPriceTicks(offer))}</td>
-                  <td>
-                    {#if isDust}
-                      <div class="remaining-cell">
-                        <span class="dust-label">Dust (&lt;${MIN_ORDER_NOTIONAL_USD})</span>
-                        <span class="dust-amount">
-                          {formatAmount(toBigIntSafe(offer.giveAmount) ?? 0n, Number(offer.giveTokenId || 0))} {tokenSymbol(Number(offer.giveTokenId || 0))}
-                          {#if remainingUsd > 0}
-                            · ~${remainingUsd.toFixed(2)}
-                          {/if}
-                        </span>
-                      </div>
-                    {:else}
-                      {formatAmount(toBigIntSafe(offer.giveAmount) ?? 0n, Number(offer.giveTokenId || 0))} {tokenSymbol(Number(offer.giveTokenId || 0))}
-                    {/if}
-                    {#if offer.crossJurisdiction}
-                      {@const route = offer.crossJurisdiction}
-                      {@const pendingAmount = toBigIntSafe(route.filledSourceAmount ?? route.sourceClaimed ?? 0n) ?? 0n}
-                      {@const settledAmount = String(route.status || '') === 'settled' ? pendingAmount : 0n}
-                      <div class="cross-fill-meta">
-                        <span>{String(route.status || 'resting').replace(/_/g, ' ')}</span>
-                        <span>pending {formatAmount(pendingAmount, Number(offer.giveTokenId || 0))}</span>
-                        <span>settled {formatAmount(settledAmount, Number(offer.giveTokenId || 0))}</span>
-                      </div>
-                    {/if}
-                  </td>
-                  <td>{formatPriceImprovement(offerImprovement.amount, offerImprovement.tokenId)}</td>
-                  <td>{String(offer.accountId || '').slice(0, 10)}...</td>
-                  <td>
-                    {#if offer.crossJurisdiction}
-                      <div class="cross-order-actions">
-                        <button class="cancel-btn" data-testid="cross-swap-clear" on:click={() => requestCrossClear(String(offer.offerId || ''), true)}>
-                          Clear + Close
-                        </button>
-                      </div>
-                    {:else}
-                      <button class="cancel-btn" data-testid="swap-open-order-cancel" on:click={() => cancelSwapOffer(String(offer.offerId || ''), String(offer.accountId || ''))}>
-                        Request Cancel
-                      </button>
-                    {/if}
-                  </td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      {/if}
-    {:else}
-      {#if filteredClosedOrderViews.length === 0}
-        <div class="orders-empty">No closed orders for selected filter.</div>
-      {:else}
-        <div class="orders-table-wrap">
-          <table class="orders-table" data-testid="swap-closed-orders">
-            <thead>
-              <tr>
-                <th>Status</th>
-                <th>Pair</th>
-                <th>Price</th>
-                <th>Filled</th>
-                <th>Price Improvement</th>
-                <th>Closed At</th>
-                <th>Hub</th>
-              </tr>
-            </thead>
-            <tbody>
-              {#each filteredClosedOrderViews as order (offerLifecycleKey(order.accountId, order.offerId))}
-                {@const pairView = resolvePairOrientation(order.giveTokenId, order.wantTokenId)}
-                <tr data-testid="swap-closed-order-row">
-                  <td>
-                    <span class:side-ask={closedOrderStatusTone(order.status) === 'ask'} class:side-bid={closedOrderStatusTone(order.status) === 'bid'} class="side-badge">
-                      {closedOrderStatusLabel(order.status)}
-                    </span>
-                    {#if order.closeComment}
-                      <div class="close-comment">{formatCloseComment(order.closeComment)}</div>
-                    {/if}
-                  </td>
-                  <td>{order.pairLabel}</td>
-                  <td>{formatPriceTicks(order.priceTicks)}</td>
-                  <td>
-                    {order.filledPercent.toFixed(2)}%
-                    ({formatAmount(order.filledBaseAmount, pairView.baseTokenId)} {tokenSymbol(pairView.baseTokenId)})
-                  </td>
-                  <td>{formatPriceImprovement(order.priceImprovementAmount, order.priceImprovementTokenId)}</td>
-                  <td>{formatOrderTime(order.closedAt)}</td>
-                  <td>{order.accountId.slice(0, 10)}...</td>
-                </tr>
-              {/each}
-            </tbody>
-          </table>
-        </div>
-      {/if}
-    {/if}
-  </div>
+  <SwapOrderList
+    bind:orderListTab
+    bind:orderRouteFilter
+    bind:closedOrderStatusFilter
+    {openOrders}
+    {closedOrderViews}
+    {filteredClosedOrderViews}
+    {totalPriceImprovementSummary}
+    {offerPriceImprovementByKey}
+    minOrderNotionalUsd={MIN_ORDER_NOTIONAL_USD}
+    {tokenSymbol}
+    {resolvePairOrientation}
+    {offerLifecycleKey}
+    {offerSideLabel}
+    {offerPriceTicks}
+    {isDustOpenOffer}
+    {remainingOfferUsd}
+    {formatPriceTicks}
+    {formatAmount}
+    {formatPriceImprovement}
+    {formatCloseComment}
+    {formatOrderTime}
+    {closedOrderStatusLabel}
+    {closedOrderStatusTone}
+    {cancelSwapOffer}
+    {requestCrossClear}
+  />
 
   {#if swapCompletionModal}
     <div class="swap-modal-overlay">
@@ -3664,1699 +3807,3 @@
     </div>
   {/if}
 </div>
-
-<style>
-  .swap-panel {
-    padding: 0;
-    border-radius: 10px;
-  }
-
-  h3 {
-    margin: 0 0 16px 0;
-    color: #f3f4f6;
-    font-size: 16px;
-    font-weight: 700;
-  }
-
-  h4 {
-    margin: 0 0 12px 0;
-    color: #e5e7eb;
-    font-size: 14px;
-    font-weight: 600;
-  }
-
-  .section {
-    margin-bottom: 0;
-    padding: 12px;
-    background: #131419;
-    border-radius: 6px;
-    border: 1px solid #1e2028;
-  }
-
-  .trade-grid {
-    display: grid;
-    grid-template-columns: minmax(340px, 620px);
-    justify-content: center;
-    gap: 12px;
-    align-items: start;
-  }
-
-  .trade-grid.book-open {
-    grid-template-columns: minmax(340px, 560px) minmax(420px, 1fr);
-    justify-content: stretch;
-    gap: 14px;
-  }
-
-  .trade-grid > .section {
-    margin-bottom: 0;
-    min-width: 0;
-  }
-
-  .section-market {
-    height: auto;
-    min-width: 0;
-    max-width: 100%;
-    overflow: visible;
-  }
-
-  .section-order {
-    height: auto;
-    min-width: 0;
-    max-width: 100%;
-    overflow: visible;
-    background: #0a0c11;
-    border-color: #242936;
-    box-shadow: 0 14px 42px rgba(0, 0, 0, 0.22);
-  }
-
-  .section-orders {
-    margin-top: 14px;
-  }
-
-  .close-comment {
-    margin-top: 4px;
-    color: #7c8597;
-    font-size: 11px;
-    line-height: 1.2;
-  }
-
-  .input-label {
-    color: #6b7280;
-    font-size: 12px;
-    font-weight: 500;
-    min-width: 48px;
-    flex-shrink: 0;
-  }
-
-  .swap-mode-bar {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 10px;
-    min-height: 32px;
-    margin-bottom: 10px;
-    color: #8b94a7;
-    font-size: 11px;
-    font-weight: 800;
-    text-transform: uppercase;
-  }
-
-  .swap-mode-bar strong {
-    min-width: 0;
-    overflow: hidden;
-    color: #f3f4f6;
-    font-size: 12px;
-    font-weight: 900;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    text-transform: none;
-  }
-
-  .book-toggle {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 72px;
-    height: 28px;
-    padding: 0 10px;
-    border-radius: 7px;
-    border: 1px solid #2b3040;
-    background: #11141b;
-    color: #a7afbd;
-    font-size: 11px;
-    font-weight: 800;
-    cursor: pointer;
-  }
-
-  .book-toggle.active {
-    border-color: rgba(251, 191, 36, 0.55);
-    background: rgba(251, 191, 36, 0.12);
-    color: #f8d36f;
-  }
-
-  .anyswap-builder {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 0;
-    margin-bottom: 10px;
-  }
-
-  .swap-leg-card {
-    display: grid;
-    gap: 8px;
-    padding: 12px;
-    background: linear-gradient(180deg, #11141b 0%, #0d0f15 100%);
-    border: 1px solid #252a36;
-    border-radius: 8px;
-  }
-
-  .swap-leg-card:focus-within {
-    border-color: rgba(251, 191, 36, 0.55);
-    box-shadow: 0 0 0 1px rgba(251, 191, 36, 0.1);
-  }
-
-  .leg-header,
-  .leg-main,
-  .leg-meta,
-  .venue-row,
-  .quote-row {
-    display: flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-  }
-
-  .leg-header {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    gap: 10px;
-    align-items: center;
-  }
-
-  .leg-header > span,
-  .venue-row > span {
-    color: #8b94a7;
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-    line-height: 1.2;
-  }
-
-  .chain-select,
-  .entity-select-native,
-  .token-select-native,
-  .venue-row select {
-    min-width: 0;
-    border: 1px solid #232631;
-    border-radius: 7px;
-    background: #090b10;
-    color: #e5e7eb;
-    font-size: 12px;
-    font-weight: 700;
-    color-scheme: dark;
-    line-height: 1.25;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    box-sizing: border-box;
-  }
-
-  .chain-select {
-    width: 100%;
-    max-width: none;
-    min-width: 0;
-    min-height: 34px;
-    padding: 0 34px 0 10px;
-    justify-self: end;
-  }
-
-  .entity-select-wrap {
-    position: relative;
-    min-width: 0;
-    width: 100%;
-  }
-
-  .entity-select-button {
-    display: grid;
-    grid-template-columns: 32px minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 9px;
-    width: 100%;
-    min-height: 42px;
-    padding: 4px 10px 4px 7px;
-    border: 1px solid #232631;
-    border-radius: 8px;
-    background: #090b10;
-    color: #e5e7eb;
-    box-sizing: border-box;
-    cursor: pointer;
-    text-align: left;
-  }
-
-  .entity-select-button:hover,
-  .entity-option:hover {
-    border-color: rgba(251, 191, 36, 0.45);
-    background: #0c0f16;
-  }
-
-  .entity-avatar-wrap {
-    position: relative;
-    width: 30px;
-    height: 30px;
-    flex: 0 0 auto;
-  }
-
-  .entity-avatar-mini {
-    width: 30px;
-    height: 30px;
-    border-radius: 8px;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    object-fit: cover;
-    box-sizing: border-box;
-  }
-
-  .entity-avatar-mini.placeholder {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    background: #172033;
-    color: #dbeafe;
-    font-size: 10px;
-    font-weight: 900;
-  }
-
-  .jurisdiction-mini-badge {
-    position: absolute;
-    right: -5px;
-    bottom: -4px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    min-width: 17px;
-    height: 17px;
-    padding: 0 3px;
-    border-radius: 6px;
-    border: 1px solid rgba(251, 191, 36, 0.45);
-    background: #171107;
-    color: #f8d36f;
-    font-size: 8px;
-    font-weight: 900;
-    line-height: 1;
-    box-sizing: border-box;
-  }
-
-  .entity-select-copy {
-    display: grid;
-    gap: 1px;
-    min-width: 0;
-  }
-
-  .entity-select-copy strong,
-  .entity-select-copy small {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .entity-select-copy strong {
-    color: #f3f4f6;
-    font-size: 13px;
-    font-weight: 900;
-    line-height: 1.15;
-  }
-
-  .entity-select-copy small {
-    color: #8b94a7;
-    font-size: 10px;
-    font-weight: 700;
-    line-height: 1.1;
-  }
-
-  .entity-select-chevron {
-    color: #cbd5e1;
-    font-size: 16px;
-    line-height: 1;
-  }
-
-  .entity-select-native {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    opacity: 0;
-    pointer-events: none;
-  }
-
-  .token-select-wrap {
-    position: relative;
-    width: 132px;
-    min-width: 112px;
-    min-height: 42px;
-    box-sizing: border-box;
-    flex-shrink: 0;
-  }
-
-  .token-select-button {
-    display: grid;
-    grid-template-columns: 24px minmax(48px, 1fr) auto;
-    align-items: center;
-    gap: 8px;
-    width: 100%;
-    min-height: 42px;
-    padding: 0 10px;
-    border: 1px solid #232631;
-    border-radius: 7px;
-    background: #090b10;
-    color: #e5e7eb;
-    box-sizing: border-box;
-    cursor: pointer;
-  }
-
-  .token-select-button:hover,
-  .route-menu-button:hover {
-    border-color: rgba(251, 191, 36, 0.45);
-    background: #0c0f16;
-  }
-
-  .token-dot {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 22px;
-    height: 22px;
-    border-radius: 50%;
-    border: 1px solid rgba(255, 255, 255, 0.16);
-    background: #1f2937;
-    color: #f8fafc;
-    font-size: 11px;
-    font-weight: 900;
-    line-height: 1;
-  }
-
-  .token-usdc {
-    background: #2563eb;
-  }
-
-  .token-usdt {
-    background: #059669;
-  }
-
-  .token-weth,
-  .token-eth {
-    background: #64748b;
-  }
-
-  .token-select-visible,
-  .token-option span:last-child {
-    min-width: 0;
-    overflow: hidden;
-    color: #e5e7eb;
-    font-size: 13px;
-    font-weight: 900;
-    line-height: 1.2;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .token-select-chevron {
-    color: #cbd5e1;
-    font-size: 16px;
-    line-height: 1;
-    pointer-events: none;
-  }
-
-  .token-select-native {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    opacity: 0;
-    pointer-events: none;
-  }
-
-  .token-select-wrap:focus-within .token-select-button {
-    border-color: rgba(251, 191, 36, 0.65);
-  }
-
-  .entity-menu,
-  .token-menu,
-  .route-menu {
-    position: absolute;
-    z-index: 40;
-    right: 0;
-    top: calc(100% + 6px);
-    display: grid;
-    gap: 4px;
-    padding: 6px;
-    border: 1px solid rgba(255, 255, 255, 0.14);
-    border-radius: 12px;
-    background: rgba(18, 19, 24, 0.98);
-    box-shadow: 0 18px 42px rgba(0, 0, 0, 0.42);
-  }
-
-  .token-menu {
-    min-width: 150px;
-  }
-
-  .entity-menu {
-    left: 0;
-    right: 0;
-  }
-
-  .hub-menu {
-    top: calc(100% + 6px);
-  }
-
-  .entity-option,
-  .token-option,
-  .route-option {
-    border: 0;
-    border-radius: 9px;
-    background: transparent;
-    color: #e5e7eb;
-    cursor: pointer;
-    text-align: left;
-  }
-
-  .entity-option {
-    display: grid;
-    grid-template-columns: 32px minmax(0, 1fr);
-    gap: 10px;
-    align-items: center;
-    min-height: 46px;
-    padding: 7px 9px;
-    border: 1px solid transparent;
-  }
-
-  .entity-option.selected {
-    border-color: rgba(251, 191, 36, 0.28);
-    background: rgba(251, 191, 36, 0.12);
-  }
-
-  .token-option {
-    display: grid;
-    grid-template-columns: 24px minmax(0, 1fr);
-    align-items: center;
-    gap: 10px;
-    min-height: 40px;
-    padding: 0 10px;
-    font-size: 13px;
-    font-weight: 900;
-  }
-
-  .token-option:hover,
-  .route-option:hover {
-    background: rgba(255, 255, 255, 0.07);
-  }
-
-  .token-option.selected,
-  .route-option.selected {
-    background: rgba(251, 191, 36, 0.14);
-    color: #fde68a;
-  }
-
-  .route-select-wrap {
-    position: relative;
-    min-width: 0;
-  }
-
-  .route-menu-button {
-    display: grid;
-    grid-template-columns: 30px minmax(0, 1fr) auto;
-    gap: 8px;
-    align-items: center;
-    text-align: left;
-  }
-
-  .route-menu-button > span:not(.route-glyph) {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    text-transform: none;
-  }
-
-  .route-menu-button em {
-    color: #cbd5e1;
-    font-style: normal;
-  }
-
-  .route-select-native {
-    position: absolute;
-    inset: 0;
-    width: 100%;
-    height: 100%;
-    opacity: 0;
-    pointer-events: none;
-  }
-
-  .route-menu {
-    left: 0;
-    right: 0;
-  }
-
-  .route-option {
-    display: grid;
-    grid-template-columns: 30px minmax(0, 1fr);
-    gap: 10px;
-    align-items: center;
-    min-height: 44px;
-    padding: 8px 10px;
-  }
-
-  .route-option.disabled {
-    opacity: 0.52;
-    cursor: not-allowed;
-  }
-
-  .route-glyph {
-    position: relative;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 28px;
-    height: 28px;
-    color: #93c5fd;
-  }
-
-  .route-node {
-    position: absolute;
-    width: 20px;
-    height: 20px;
-    border-radius: 7px;
-    border: 1px solid rgba(96, 165, 250, 0.38);
-    background: rgba(96, 165, 250, 0.11);
-    box-sizing: border-box;
-  }
-
-  .route-glyph.same .route-node-a {
-    left: 4px;
-    top: 4px;
-  }
-
-  .route-glyph.cross .route-node-a {
-    left: 1px;
-    top: 5px;
-  }
-
-  .route-glyph.cross .route-node-b {
-    right: 1px;
-    top: 5px;
-    border-color: rgba(251, 191, 36, 0.42);
-    background: rgba(251, 191, 36, 0.12);
-  }
-
-  .route-arrows {
-    position: relative;
-    z-index: 1;
-    color: #dbeafe;
-    font-size: 13px;
-    font-weight: 900;
-    line-height: 1;
-  }
-
-  .route-option-copy {
-    display: grid;
-    gap: 2px;
-    min-width: 0;
-    text-transform: none;
-  }
-
-  .route-option-copy strong,
-  .route-option-copy small {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .route-option-copy strong {
-    color: #e5e7eb;
-    font-size: 13px;
-    font-weight: 900;
-  }
-
-  .route-option-copy small {
-    color: #8b94a7;
-    font-size: 11px;
-  }
-
-  .leg-main input {
-    flex: 1;
-    min-width: 0;
-    height: 48px;
-    padding: 0;
-    border: none;
-    background: transparent;
-    color: #f3f4f6;
-    font-size: 26px;
-    font-weight: 800;
-    text-align: left;
-  }
-
-  .leg-main input:focus {
-    outline: none;
-  }
-
-  .leg-main .receive-amount {
-    color: #9ca3af;
-  }
-
-  .leg-meta {
-    justify-content: space-between;
-    color: #7c8597;
-    font-size: 11px;
-    min-height: 16px;
-  }
-
-  .leg-meta span,
-  .leg-meta strong {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .leg-meta strong {
-    color: #d1d5db;
-    font-weight: 700;
-    text-align: right;
-  }
-
-  .swap-leg-divider {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    gap: 6px;
-    min-height: 36px;
-    margin: -4px 0;
-    position: relative;
-    z-index: 1;
-  }
-
-  .direction-chip {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    height: 28px;
-    border-radius: 7px;
-    border: 1px solid #252936;
-    background: #10131a;
-    color: #a7afbd;
-    font-size: 11px;
-    font-weight: 800;
-    cursor: pointer;
-  }
-
-  .direction-chip {
-    width: 34px;
-    color: #fbbf24;
-    background: #171b24;
-    border-color: rgba(251, 191, 36, 0.35);
-  }
-
-  .quote-row,
-  .venue-row {
-    min-height: 36px;
-    padding: 0 10px;
-    margin-bottom: 8px;
-    background: #0d0f15;
-    border: 1px solid #202431;
-    border-radius: 8px;
-    box-sizing: border-box;
-  }
-
-  .quote-row input {
-    flex: 1;
-    min-width: 0;
-    height: 100%;
-    border: none;
-    background: transparent;
-    color: #e5e7eb;
-    text-align: right;
-    font-size: 14px;
-    font-weight: 700;
-  }
-
-  .quote-row input:focus {
-    outline: none;
-  }
-
-  .venue-row {
-    display: grid;
-    grid-template-columns: minmax(80px, auto) minmax(0, 1fr);
-    justify-content: stretch;
-  }
-
-  .venue-row select {
-    width: 100%;
-    max-width: none;
-    min-width: 0;
-    min-height: 42px;
-    padding: 0 34px 0 10px;
-  }
-
-  .input-suffix {
-    color: #6b7280;
-    font-size: 12px;
-    font-weight: 600;
-    flex-shrink: 0;
-    min-width: 40px;
-    text-align: right;
-  }
-
-  .input-steppers {
-    display: flex;
-    flex-direction: column;
-    margin-left: 4px;
-    flex-shrink: 0;
-  }
-
-  .market-strip {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) minmax(120px, auto);
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-    margin-bottom: 8px;
-  }
-
-  .market-price-btn {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr);
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-    min-height: 34px;
-    padding: 0 10px;
-    border-radius: 8px;
-    border: 1px solid rgba(251, 191, 36, 0.28);
-    background: rgba(251, 191, 36, 0.08);
-    color: #f3f4f6;
-    cursor: pointer;
-  }
-
-  .market-price-btn:disabled {
-    opacity: 0.55;
-    cursor: not-allowed;
-  }
-
-  .market-price-btn span {
-    color: #9ca3af;
-    font-size: 11px;
-    font-weight: 800;
-    text-transform: uppercase;
-  }
-
-  .market-price-btn strong,
-  .book-owner-label {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .market-price-btn strong {
-    color: #f8d36f;
-    font-size: 12px;
-    font-weight: 900;
-    text-align: right;
-  }
-
-  .book-owner-label {
-    color: #7c8597;
-    font-size: 11px;
-    font-weight: 700;
-    text-align: right;
-  }
-
-  .book-toolbar {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    min-height: 32px;
-    margin-bottom: 8px;
-  }
-
-  .book-toolbar div {
-    display: grid;
-    min-width: 0;
-    gap: 2px;
-  }
-
-  .book-toolbar span {
-    color: #7c8597;
-    font-size: 10px;
-    font-weight: 800;
-    text-transform: uppercase;
-  }
-
-  .book-toolbar strong {
-    min-width: 0;
-    overflow: hidden;
-    color: #f3f4f6;
-    font-size: 13px;
-    font-weight: 900;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .route-builder {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr);
-    gap: 7px;
-    margin-bottom: 10px;
-    padding: 8px;
-    background: #0d0f15;
-    border: 1px solid #202431;
-    border-radius: 8px;
-  }
-
-  .route-builder.cross-route {
-    border-color: rgba(96, 165, 250, 0.28);
-  }
-
-  .route-summary {
-    display: grid;
-    grid-template-columns: auto minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 8px;
-    min-height: 30px;
-    padding: 0;
-    background: transparent;
-    border: none;
-    border-radius: 0;
-    color: #d1d5db;
-    text-align: left;
-  }
-
-  .route-summary span {
-    color: #7c8597;
-    font-size: 11px;
-    font-weight: 700;
-    text-transform: uppercase;
-  }
-
-  .route-summary strong,
-  .route-summary em {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    font-size: 12px;
-  }
-
-  .route-summary em {
-    color: #9ca3af;
-    font-style: normal;
-    text-align: right;
-  }
-
-  .route-select-row {
-    display: grid;
-    grid-template-columns: minmax(120px, auto) minmax(0, 1fr);
-    align-items: center;
-    gap: 8px;
-    padding: 0 10px;
-    min-height: 36px;
-    background: #090b10;
-    border: 1px solid #202431;
-    border-radius: 8px;
-    box-sizing: border-box;
-  }
-
-  .route-select-row span {
-    color: #7c8597;
-    font-size: 12px;
-    font-weight: 600;
-  }
-
-  .route-select {
-    width: 100%;
-    min-height: 38px;
-    min-width: 0;
-    padding: 0 34px 0 12px;
-    color: #d1d5db;
-    background: #080a0f;
-    border: 1px solid #232631;
-    border-radius: 7px;
-    font-size: 12px;
-    box-sizing: border-box;
-    color-scheme: dark;
-  }
-
-  .entity-select-native option,
-  .token-select-native option,
-  .route-select-native option,
-  .venue-row select option,
-  .route-select option {
-    background: #0f1117;
-    color: #f3f4f6;
-  }
-
-  .route-flow {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    align-items: center;
-    gap: 7px;
-    min-height: 30px;
-    padding: 0 10px;
-    background: #090b10;
-    border: 1px solid #1d2230;
-    border-radius: 8px;
-  }
-
-  .route-flow span,
-  .route-flow em {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .route-flow span {
-    color: #9ca3af;
-    font-size: 11px;
-    font-weight: 700;
-  }
-
-  .route-flow em {
-    color: #fbbf24;
-    font-size: 11px;
-    font-style: normal;
-    font-weight: 700;
-    text-align: right;
-  }
-
-  .routed-actions {
-    display: grid;
-    grid-template-columns: minmax(0, 1fr) auto;
-    gap: 8px;
-  }
-
-  .route-plan-btn {
-    min-height: 32px;
-    padding: 0 10px;
-    background: #111827;
-    border: 1px solid #2d3342;
-    border-radius: 7px;
-    color: #dbeafe;
-    font-size: 12px;
-    font-weight: 800;
-  }
-
-  .route-plan-btn.clear {
-    color: #9ca3af;
-  }
-
-  .route-plan-btn:disabled {
-    cursor: not-allowed;
-    opacity: 0.5;
-  }
-
-  .routed-hop-list {
-    display: grid;
-    gap: 6px;
-  }
-
-  .routed-hop {
-    display: grid;
-    grid-template-columns: 54px minmax(92px, auto) minmax(0, 1fr);
-    align-items: center;
-    gap: 8px;
-    min-height: 34px;
-    padding: 0 9px;
-    background: #080a0f;
-    border: 1px solid #202431;
-    border-radius: 7px;
-    color: #aab2c3;
-    text-align: left;
-  }
-
-  .routed-hop.active {
-    border-color: rgba(251, 191, 36, 0.55);
-    background: #12100a;
-  }
-
-  .routed-hop span,
-  .routed-hop strong,
-  .routed-hop em {
-    min-width: 0;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .routed-hop span {
-    color: #7c8597;
-    font-size: 10px;
-    font-weight: 900;
-    text-transform: uppercase;
-  }
-
-  .routed-hop strong {
-    color: #f3f4f6;
-    font-size: 12px;
-  }
-
-  .routed-hop em {
-    color: #9ca3af;
-    font-size: 11px;
-    font-style: normal;
-  }
-
-  .route-no-market {
-    margin: 0;
-    padding: 8px 10px;
-    color: #fca5a5;
-    background: #140b0c;
-    border: 1px solid #3a1f23;
-    border-radius: 7px;
-    font-size: 12px;
-  }
-
-  .route-checkbox {
-    display: inline-flex;
-    align-items: center;
-    gap: 8px;
-    min-width: 0;
-    color: #9ca3af;
-    font-size: 12px;
-    min-height: 24px;
-  }
-
-  .route-checkbox input {
-    width: 14px;
-    height: 14px;
-    margin: 0;
-    accent-color: #fbbf24;
-  }
-
-  .route-details {
-    display: grid;
-    gap: 4px;
-    padding: 8px 10px;
-    background: #0c0d12;
-    border: 1px solid #1e2028;
-    border-radius: 6px;
-    color: #8b94a7;
-    font-size: 11px;
-  }
-
-  .secondary-setup-btn {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 100%;
-    height: 34px;
-    margin-top: 8px;
-    border-radius: 7px;
-    border: 1px solid rgba(251, 191, 36, 0.35);
-    background: rgba(251, 191, 36, 0.12);
-    color: #fde68a;
-    font-size: 12px;
-    font-weight: 800;
-  }
-
-  .step-btn {
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    width: 20px;
-    height: 18px;
-    padding: 0;
-    border: 1px solid #1e2028 !important;
-    background: #181a20 !important;
-    color: #6b7280;
-    font-size: 8px;
-    line-height: 1;
-    cursor: pointer;
-    user-select: none;
-  }
-
-  .step-btn:first-child {
-    border-radius: 3px 3px 0 0;
-    border-bottom: none;
-  }
-
-  .step-btn:last-child {
-    border-radius: 0 0 3px 3px;
-  }
-
-  .step-btn:hover {
-    color: #f3f4f6;
-    background: #252830 !important;
-  }
-
-  .step-btn:active {
-    background: #353842 !important;
-  }
-
-  .size-slider-row {
-    position: relative;
-    margin-bottom: 10px;
-    width: 100%;
-    min-width: 0;
-    max-width: 100%;
-    padding: 6px 0 0;
-    box-sizing: border-box;
-  }
-
-  .diamond-slider {
-    width: 100%;
-    min-width: 0;
-    max-width: 100%;
-    cursor: pointer;
-    margin: 0;
-  }
-
-  .slider-marks {
-    display: flex;
-    justify-content: space-between;
-    margin-top: 4px;
-    pointer-events: none;
-    padding: 0 calc(var(--xln-slider-thumb-size, 14px) / 2);
-    min-width: 0;
-    max-width: 100%;
-    box-sizing: border-box;
-  }
-
-  .slider-mark-group {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    cursor: pointer;
-    pointer-events: auto;
-    user-select: none;
-    gap: 1px;
-  }
-
-  .slider-diamond {
-    font-size: 9px;
-    color: #353942;
-    line-height: 1;
-    transition: color 100ms;
-  }
-
-  .slider-pct {
-    font-size: 8px;
-    color: #4b5563;
-    line-height: 1;
-    transition: color 100ms;
-  }
-
-  .slider-mark-group.filled .slider-diamond {
-    color: #fbbf24;
-  }
-
-  .slider-mark-group.filled .slider-pct {
-    color: #fbbf24;
-  }
-
-  .avbl-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    font-size: 12px;
-    color: #6b7280;
-    margin-bottom: 10px;
-    padding: 0 2px;
-    gap: 10px;
-  }
-
-  .avbl-row strong {
-    color: #d1d5db;
-  }
-
-  .capacity-warn {
-    min-width: 0;
-    overflow: hidden;
-    color: #f59e0b;
-    font-size: 11px;
-    text-align: right;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-
-  .route-badge {
-    display: inline-flex;
-    align-items: center;
-    height: 18px;
-    margin-left: 6px;
-    padding: 0 6px;
-    border-radius: 999px;
-    border: 1px solid rgba(96, 165, 250, 0.35);
-    background: rgba(59, 130, 246, 0.1);
-    color: #93c5fd;
-    font-size: 10px;
-    font-weight: 700;
-    vertical-align: middle;
-  }
-
-  .cross-fill-meta {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    margin-top: 4px;
-    color: #8b93a5;
-    font-size: 10px;
-    text-transform: capitalize;
-  }
-
-  .scope-btn {
-    padding: 0 12px;
-    border-radius: 8px;
-    border: 1px solid #353942;
-    background: #111217;
-    color: #9ca3af;
-    font-size: 11px;
-    font-weight: 600;
-    cursor: pointer;
-  }
-
-  .scope-btn.active {
-    color: #fbbf24;
-    border-color: #fbbf24;
-    background: rgba(251, 191, 36, 0.08);
-  }
-
-  .scope-btn:disabled {
-    opacity: 0.45;
-    cursor: not-allowed;
-  }
-
-  .orderbook-empty {
-    border: 1px dashed #3f434d;
-    border-radius: 8px;
-    padding: 10px 12px;
-    color: #9ca3af;
-    font-size: 12px;
-  }
-
-  select, input:not([type="range"]):not([type="checkbox"]) {
-    padding: 8px;
-    width: 100%;
-    min-width: 0;
-    box-sizing: border-box;
-    background: #0c0d11;
-    border: 1px solid #303442;
-    border-radius: 8px;
-    color: #f3f4f6;
-    font-size: 13px;
-    font-family: 'JetBrains Mono', monospace;
-  }
-
-  select {
-    color-scheme: dark;
-  }
-
-  select option {
-    background: #0f1117;
-    color: #f3f4f6;
-  }
-
-  select:focus, input:not([type="range"]):not([type="checkbox"]):focus {
-    outline: none;
-    border-color: rgba(251, 191, 36, 0.65);
-  }
-
-
-
-  .readonly-input {
-    color: #9ca3af;
-    cursor: default;
-  }
-
-  .primary-btn {
-    width: 100%;
-    min-height: 44px;
-    padding: 0 12px;
-    background: linear-gradient(180deg, rgba(251, 191, 36, 0.18), rgba(217, 119, 6, 0.12)) !important;
-    border: 1px solid rgba(251, 191, 36, 0.55) !important;
-    border-radius: 8px;
-    color: #fde68a;
-    font-size: 14px;
-    font-weight: 900;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-
-  .primary-btn.buy-action {
-    background: #16a34a !important;
-    border-color: #16a34a !important;
-    color: #fff;
-  }
-
-  .primary-btn.buy-action:hover {
-    background: #15803d !important;
-  }
-
-  .primary-btn.sell-action {
-    background: #dc2626 !important;
-    border-color: #dc2626 !important;
-    color: #fff;
-  }
-
-  .primary-btn.sell-action:hover {
-    background: #b91c1c !important;
-  }
-
-  .primary-btn:disabled {
-    opacity: 0.48;
-    cursor: not-allowed;
-  }
-
-
-
-
-  .size-hint {
-    margin: 8px 0 0;
-    color: #9ca3af;
-    font-size: 11px;
-    line-height: 1.4;
-  }
-
-  .form-error {
-    margin: 8px 0 0;
-    color: #fda4af;
-    font-size: 12px;
-    line-height: 1.4;
-    font-weight: 600;
-  }
-
-  .auto-capacity-note {
-    margin: 8px 0;
-    padding: 8px 10px;
-    color: #a7f3d0;
-    background: rgba(34, 197, 94, 0.08);
-    border: 1px solid rgba(34, 197, 94, 0.18);
-    border-radius: 8px;
-    font-size: 12px;
-    line-height: 1.4;
-  }
-
-  .orders-toolbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    gap: 10px;
-    margin-bottom: 6px;
-    flex-wrap: wrap;
-  }
-
-  .orders-header-left {
-    display: flex;
-    align-items: center;
-    gap: 10px;
-  }
-
-  .orders-inline-title {
-    font-size: 13px;
-    font-weight: 600;
-    color: #e5e7eb;
-    margin: 0;
-  }
-
-  .orders-tabs {
-    display: inline-flex;
-    align-items: center;
-    gap: 4px;
-    padding: 3px;
-    border: 1px solid rgba(255, 255, 255, 0.06);
-    border-radius: 10px;
-    background: rgba(255, 255, 255, 0.02);
-  }
-
-  .orders-tab-text {
-    min-width: 58px;
-    min-height: 30px;
-    padding: 0 12px;
-    border: 1px solid transparent;
-    border-radius: 8px;
-    background: transparent;
-    font-size: 12px;
-    color: #6b7280;
-    cursor: pointer;
-    user-select: none;
-    transition: color 100ms, border-color 100ms, background 100ms;
-  }
-
-  .orders-tab-text:hover {
-    color: #d1d5db;
-  }
-
-  .orders-tab-text.active {
-    color: #e5e7eb;
-    border-color: rgba(251, 191, 36, 0.22);
-    background: rgba(251, 191, 36, 0.08);
-  }
-
-  .closed-status-filter {
-    display: inline-flex;
-    flex-direction: column;
-    gap: 4px;
-    color: #9ca3af;
-    font-size: 11px;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
-    min-width: 148px;
-    transition: opacity 120ms ease;
-  }
-
-  .closed-status-filter.is-hidden {
-    display: none;
-  }
-
-  .closed-status-filter select {
-    min-width: 180px;
-    height: 34px;
-    border-radius: 10px;
-    border: 1px solid rgba(255, 255, 255, 0.08);
-    background: #111217;
-    color: #f3f4f6;
-    font-family: inherit;
-    font-size: 12px;
-    font-weight: 600;
-    padding: 0 10px;
-    color-scheme: dark;
-  }
-
-  @media (max-width: 720px) {
-    .leg-header {
-      grid-template-columns: minmax(0, 1fr);
-      align-items: stretch;
-    }
-
-    .chain-select,
-    .venue-row select,
-    .route-select {
-      min-width: 0;
-      width: 100%;
-    }
-
-    .venue-row {
-      align-items: stretch;
-      flex-direction: column;
-      padding: 8px 10px;
-    }
-  }
-
-  .orders-empty {
-    border: 1px dashed #3f434d;
-    border-radius: 8px;
-    padding: 10px 12px;
-    color: #9ca3af;
-    font-size: 12px;
-  }
-
-  .remaining-cell {
-    display: inline-flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 2px;
-  }
-
-  .dust-label {
-    color: #fbbf24;
-    font-size: 11px;
-    font-weight: 700;
-    letter-spacing: 0.04em;
-    text-transform: uppercase;
-  }
-
-  .dust-amount {
-    color: #a1a1aa;
-    font-size: 12px;
-  }
-
-  .orders-table-wrap {
-    overflow: auto;
-  }
-
-  .orders-table {
-    width: 100%;
-    border-collapse: collapse;
-    min-width: 680px;
-  }
-
-  .orders-table th {
-    text-align: left;
-    font-size: 11px;
-    color: #9ca3af;
-    font-weight: 600;
-    padding: 8px;
-    border-bottom: 1px solid #2b2f39;
-  }
-
-  .orders-table td {
-    padding: 8px;
-    border-bottom: 1px solid rgba(255, 255, 255, 0.06);
-    color: #e5e7eb;
-    font-size: 12px;
-    font-family: 'JetBrains Mono', monospace;
-  }
-
-  .side-badge {
-    border-radius: 999px;
-    padding: 2px 8px;
-    font-size: 10px;
-    font-weight: 700;
-    letter-spacing: 0.03em;
-    border: 1px solid #4b5563;
-    color: #d1d5db;
-    background: rgba(75, 85, 99, 0.12);
-  }
-
-  .side-ask {
-    background: rgba(239, 68, 68, 0.16);
-    color: #fca5a5;
-    border: 1px solid rgba(239, 68, 68, 0.35);
-  }
-
-  .side-bid {
-    background: rgba(34, 197, 94, 0.16);
-    color: #86efac;
-    border: 1px solid rgba(34, 197, 94, 0.35);
-  }
-
-  .orderbook-wrap :global(.orderbook-panel) {
-    width: 100%;
-    min-width: 0;
-  }
-
-  .cancel-btn {
-    padding: 4px 8px;
-    background: rgba(239, 68, 68, 0.12);
-    border: 1px solid rgba(239, 68, 68, 0.4);
-    border-radius: 6px;
-    color: #fca5a5;
-    font-size: 11px;
-    cursor: pointer;
-    transition: all 0.2s;
-  }
-
-  .cancel-btn:hover {
-    background: rgba(239, 68, 68, 0.18);
-    border-color: rgba(239, 68, 68, 0.6);
-  }
-
-  .cross-order-actions {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
-    justify-content: flex-end;
-  }
-
-  .cross-order-actions .cancel-btn:first-child {
-    background: rgba(34, 197, 94, 0.1);
-    border-color: rgba(34, 197, 94, 0.35);
-    color: #86efac;
-  }
-
-  .improvement-summary {
-    margin: 0 0 12px;
-    color: #c7b27a;
-    font-size: 12px;
-  }
-
-  .improvement-summary strong {
-    color: #f3d17a;
-    font-weight: 700;
-  }
-
-  .swap-modal-overlay {
-    position: fixed;
-    inset: 0;
-    background: rgba(6, 8, 12, 0.78);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    padding: 20px;
-    z-index: 50;
-    backdrop-filter: blur(8px);
-  }
-
-  .swap-modal {
-    width: min(420px, 100%);
-    border-radius: 16px;
-    border: 1px solid rgba(243, 209, 122, 0.24);
-    background:
-      radial-gradient(circle at top, rgba(243, 209, 122, 0.14), transparent 45%),
-      #121317;
-    box-shadow: 0 18px 60px rgba(0, 0, 0, 0.38);
-    padding: 20px;
-  }
-
-  .swap-modal-kicker {
-    color: #f3d17a;
-    text-transform: uppercase;
-    letter-spacing: 0.12em;
-    font-size: 11px;
-    font-weight: 700;
-    margin-bottom: 8px;
-  }
-
-  .swap-modal-copy,
-  .swap-modal-improvement {
-    margin: 0;
-    color: #d7d9df;
-    font-size: 13px;
-    line-height: 1.5;
-  }
-
-  .swap-modal-improvement {
-    margin-top: 10px;
-    color: #c7b27a;
-  }
-
-  .swap-modal-actions {
-    margin-top: 18px;
-    display: flex;
-    justify-content: flex-end;
-  }
-
-  @media (max-width: 1100px) {
-    .trade-grid {
-      grid-template-columns: 1fr;
-      gap: 12px;
-    }
-
-    .section-orders {
-      margin-top: 6px;
-    }
-  }
-
-  @media (max-width: 720px) {
-    .leg-header,
-    .route-select-row {
-      grid-template-columns: 1fr;
-      align-items: stretch;
-    }
-
-    .chain-select,
-    .route-select,
-    .venue-row select {
-      width: 100%;
-    }
-
-    .leg-main {
-      flex-wrap: wrap;
-    }
-
-    .token-select-wrap {
-      flex: 1 1 120px;
-      width: auto;
-    }
-
-    .route-flow {
-      grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr);
-    }
-
-    .route-flow em {
-      grid-column: 1 / -1;
-      text-align: left;
-    }
-  }
-
-</style>

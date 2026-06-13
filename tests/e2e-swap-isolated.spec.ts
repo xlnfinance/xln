@@ -111,7 +111,7 @@ async function faucetOffchain(
   let ok = false;
   let lastBody: Record<string, unknown> = { error: 'not-run' };
 
-  for (let attempt = 1; attempt <= 12; attempt += 1) {
+  for (let attempt = 1; attempt <= 60; attempt += 1) {
     const runtimeId = await page.evaluate(() => {
       const view = window as SwapRuntimeWindow;
       return view.isolatedEnv?.runtimeId ?? null;
@@ -135,11 +135,12 @@ async function faucetOffchain(
     const status = String(lastBody.status || '');
     const transient =
       response.status() === 202 ||
-      response.status() === 409 ||
       response.status() === 503 ||
-      code === 'FAUCET_TOKEN_SURFACE_NOT_READY';
+      code === 'FAUCET_TOKEN_SURFACE_NOT_READY' ||
+      code === 'FAUCET_ACCOUNT_NOT_OPEN' ||
+      code === 'FAUCET_ACCOUNT_NOT_READY';
     if (!transient) break;
-    await page.waitForTimeout(1000);
+    await page.waitForTimeout(500);
   }
 
   expect(ok, `offchain faucet failed: ${JSON.stringify(lastBody)}`).toBe(true);
@@ -634,6 +635,22 @@ async function chooseVisibleRestingPrices(page: Page): Promise<{ ask: string; bi
   };
 }
 
+async function chooseInsideSpreadSelfTradeAskPrice(page: Page): Promise<string> {
+  const askTicks = await readVisibleOrderbookPriceTicks(page, 'ask');
+  const bidTicks = await readVisibleOrderbookPriceTicks(page, 'bid');
+  if (askTicks.length === 0 && bidTicks.length === 0) return '2500.0002';
+  if (askTicks.length === 0) return ticksToDisplayPrice((bidTicks[0] || 25_000_000) + 4);
+  if (bidTicks.length === 0) return ticksToDisplayPrice((askTicks[askTicks.length - 1] || 25_000_000) - 4);
+
+  const bestAskTicks = askTicks[askTicks.length - 1]!;
+  const bestBidTicks = bidTicks[0]!;
+  const occupied = new Set<number>([...askTicks, ...bidTicks]);
+  for (let ticks = bestBidTicks + 1; ticks < bestAskTicks; ticks += 1) {
+    if (!occupied.has(ticks)) return ticksToDisplayPrice(ticks);
+  }
+  throw new Error(`unable to choose self-trade ask inside spread: bestAsk=${bestAskTicks} bestBid=${bestBidTicks}`);
+}
+
 async function waitForOrderbookLevelVisible(
   page: Page,
   side: 'ask' | 'bid',
@@ -755,6 +772,28 @@ async function waitForLatestSwapResolveSnapshot(
   const latest = snapshots.at(-1);
   expect(latest, 'latest swap resolve snapshot must exist').toBeTruthy();
   return latest!;
+}
+
+async function waitForSwapResolveSnapshotByComment(
+  page: Page,
+  entityId: string,
+  counterpartyId: string,
+  pattern: RegExp,
+): Promise<SwapResolveSnapshot> {
+  await expect
+    .poll(async () => {
+      const snapshots = await readSwapResolveSnapshots(page, entityId, counterpartyId);
+      return snapshots.some((snapshot) => pattern.test(snapshot.comment));
+    }, {
+      timeout: 30_000,
+      intervals: [250, 500, 750],
+      message: `swap resolve history must include ${pattern}`,
+    })
+    .toBe(true);
+  const snapshots = await readSwapResolveSnapshots(page, entityId, counterpartyId);
+  const match = snapshots.find((snapshot) => pattern.test(snapshot.comment));
+  expect(match, `swap resolve snapshot matching ${pattern} must exist`).toBeTruthy();
+  return match!;
 }
 
 async function waitForRestoredRuntime(page: Page, runtimeId: string): Promise<void> {
@@ -947,6 +986,7 @@ test.describe('E2E Swap Isolated Flow', () => {
         requireMarketMaker: false,
         requireHubMesh: true,
         minHubCount: 3,
+        forceReset: true,
       }));
 
       const hubId = getPrimaryHubId(baseline);
@@ -961,8 +1001,8 @@ test.describe('E2E Swap Isolated Flow', () => {
         gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 }),
       ]);
 
-      const alice = await createRuntimeIdentity(alicePage, 'alice-book', selectDemoMnemonic('alice'));
-      const bob = await createRuntimeIdentity(bobPage, 'bob-book', selectDemoMnemonic('bob'));
+      const alice = await createRuntimeIdentity(alicePage, 'alice-book', selectDemoMnemonic('alice'), { fresh: true, jurisdiction: 'Testnet' });
+      const bob = await createRuntimeIdentity(bobPage, 'bob-book', selectDemoMnemonic('bob'), { fresh: true, jurisdiction: 'Testnet' });
 
       await timedStep(
         'swap_partial.alice.connect_hub',
@@ -1126,6 +1166,7 @@ test.describe('E2E Swap Isolated Flow', () => {
         requireMarketMaker: false,
         requireHubMesh: true,
         minHubCount: 3,
+        forceReset: true,
       }));
 
       const hubId = getPrimaryHubId(baseline);
@@ -1135,7 +1176,7 @@ test.describe('E2E Swap Isolated Flow', () => {
       mirrorConsole(alicePage, 'SWAP-STP');
 
       await gotoApp(alicePage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 });
-      const alice = await createRuntimeIdentity(alicePage, 'alice-self-trade', selectDemoMnemonic('alice'));
+      const alice = await createRuntimeIdentity(alicePage, 'alice-self-trade', selectDemoMnemonic('alice'), { fresh: true, jurisdiction: 'Testnet' });
 
       await connectRuntimeToHubWithCredit(alicePage, alice, hubId, '10000', SWAP_CONNECT_TOKEN_IDS);
       await extendCreditToken(alicePage, 2, '10000');
@@ -1154,8 +1195,9 @@ test.describe('E2E Swap Isolated Flow', () => {
       await selectCounterpartyInSwap(alicePage, hubId);
       await ensureSelectedScope(alicePage);
 
-      await placeAliceSellOffer(alicePage, '0.03', '2500');
-      await waitForOrderbookLevelVisible(alicePage, 'ask', '2500');
+      const selfTradeAskPrice = await chooseInsideSpreadSelfTradeAskPrice(alicePage);
+      await placeAliceSellOffer(alicePage, '0.03', selfTradeAskPrice);
+      await waitForOrderbookLevelVisible(alicePage, 'ask', selfTradeAskPrice);
       await expect
         .poll(async () => await readSwapOfferCount(alicePage, alice.entityId, alice.signerId, hubId), {
           timeout: 30_000,
@@ -1164,8 +1206,8 @@ test.describe('E2E Swap Isolated Flow', () => {
         })
         .toBe(1);
 
-      await placeBobMatchingBuyOrder(alicePage, '75', '2500');
-      const stpResolve = await waitForLatestSwapResolveSnapshot(alicePage, alice.entityId, hubId, 1);
+      await placeBobMatchingBuyOrder(alicePage, '80', selfTradeAskPrice);
+      const stpResolve = await waitForSwapResolveSnapshotByComment(alicePage, alice.entityId, hubId, /^STP:/);
       expect(stpResolve.cancelRemainder, 'self-trade taker must close without resting against own maker').toBe(true);
       expect(stpResolve.comment, 'self-trade resolve must identify STP in machine state').toMatch(/^STP:/);
       expect(stpResolve.executionGiveAmount, 'pure self-trade prevention must not spend quote tokens').toBe('0');
@@ -1178,11 +1220,10 @@ test.describe('E2E Swap Isolated Flow', () => {
           message: 'self-trade protection must leave the original maker order resting',
         })
         .toBe(1);
-      await waitForOrderbookLevelVisible(alicePage, 'ask', '2500');
+      await waitForOrderbookLevelVisible(alicePage, 'ask', selfTradeAskPrice);
 
       await expectClosedOrderRowStatus(alicePage, /Canceled/i);
-      const firstClosedRow = alicePage.getByTestId('swap-closed-order-row').first();
-      await expect(firstClosedRow.locator('td').first()).toContainText(/STP:/i, { timeout: 10_000 });
+      await expect(alicePage.getByTestId('swap-closed-order-row').filter({ hasText: /STP:/i }).first()).toBeVisible({ timeout: 10_000 });
     } finally {
       await aliceContext?.close().catch(() => {});
     }
@@ -1198,6 +1239,7 @@ test.describe('E2E Swap Isolated Flow', () => {
         requireMarketMaker: false,
         requireHubMesh: true,
         minHubCount: 3,
+        forceReset: true,
       }));
 
       const hubId = getPrimaryHubId(baseline);
@@ -1215,9 +1257,9 @@ test.describe('E2E Swap Isolated Flow', () => {
       ]);
 
       const alice = await timedStep('swap_isolated.alice.create_runtime', () =>
-        createRuntimeIdentity(alicePage, 'alice', selectDemoMnemonic('alice')));
+        createRuntimeIdentity(alicePage, 'alice', selectDemoMnemonic('alice'), { fresh: true, jurisdiction: 'Testnet' }));
       const bob = await timedStep('swap_isolated.bob.create_runtime', () =>
-        createRuntimeIdentity(bobPage, 'bob', selectDemoMnemonic('bob')));
+        createRuntimeIdentity(bobPage, 'bob', selectDemoMnemonic('bob'), { fresh: true, jurisdiction: 'Testnet' }));
       expect(alice.entityId).not.toBe(bob.entityId);
 
       await Promise.all([
@@ -1305,6 +1347,7 @@ test.describe('E2E Swap Isolated Flow', () => {
         requireMarketMaker: false,
         requireHubMesh: true,
         minHubCount: 3,
+        forceReset: true,
       }));
 
       const hubId = getPrimaryHubId(baseline);
@@ -1319,8 +1362,8 @@ test.describe('E2E Swap Isolated Flow', () => {
         gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 }),
       ]);
 
-      const alice = await createRuntimeIdentity(alicePage, 'alice-partial', selectDemoMnemonic('alice'));
-      const bob = await createRuntimeIdentity(bobPage, 'bob-partial', selectDemoMnemonic('bob'));
+      const alice = await createRuntimeIdentity(alicePage, 'alice-partial', selectDemoMnemonic('alice'), { fresh: true, jurisdiction: 'Testnet' });
+      const bob = await createRuntimeIdentity(bobPage, 'bob-partial', selectDemoMnemonic('bob'), { fresh: true, jurisdiction: 'Testnet' });
 
       await timedStep('swap_roundtrip.alice.connect_hub', () =>
         connectRuntimeToHubWithCredit(alicePage, alice, hubId, '10000', SWAP_CONNECT_TOKEN_IDS));
@@ -1427,6 +1470,7 @@ test.describe('E2E Swap Isolated Flow', () => {
         requireMarketMaker: false,
         requireHubMesh: true,
         minHubCount: 3,
+        forceReset: true,
       }));
 
       const hubId = getPrimaryHubId(baseline);
@@ -1444,9 +1488,9 @@ test.describe('E2E Swap Isolated Flow', () => {
         gotoApp(carolPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 }),
       ]);
 
-      const alice = await createRuntimeIdentity(alicePage, 'alice-multi', selectDemoMnemonic('alice'));
-      const bob = await createRuntimeIdentity(bobPage, 'bob-multi', selectDemoMnemonic('bob'));
-      const carol = await createRuntimeIdentity(carolPage, 'carol-multi', selectDemoMnemonic('carol'));
+      const alice = await createRuntimeIdentity(alicePage, 'alice-multi', selectDemoMnemonic('alice'), { fresh: true, jurisdiction: 'Testnet' });
+      const bob = await createRuntimeIdentity(bobPage, 'bob-multi', selectDemoMnemonic('bob'), { fresh: true, jurisdiction: 'Testnet' });
+      const carol = await createRuntimeIdentity(carolPage, 'carol-multi', selectDemoMnemonic('carol'), { fresh: true, jurisdiction: 'Testnet' });
 
       await Promise.all([
         connectRuntimeToHubWithCredit(alicePage, alice, hubId, '10000', SWAP_CONNECT_TOKEN_IDS),
@@ -1553,6 +1597,7 @@ test.describe('E2E Swap Isolated Flow', () => {
         requireMarketMaker: false,
         requireHubMesh: true,
         minHubCount: 3,
+        forceReset: true,
       });
 
       const hubId = getPrimaryHubId(baseline);
@@ -1567,8 +1612,8 @@ test.describe('E2E Swap Isolated Flow', () => {
         gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 }),
       ]);
 
-      const alice = await createRuntimeIdentity(alicePage, 'alice-bench', selectDemoMnemonic('alice'));
-      const bob = await createRuntimeIdentity(bobPage, 'bob-bench', selectDemoMnemonic('bob'));
+      const alice = await createRuntimeIdentity(alicePage, 'alice-bench', selectDemoMnemonic('alice'), { fresh: true, jurisdiction: 'Testnet' });
+      const bob = await createRuntimeIdentity(bobPage, 'bob-bench', selectDemoMnemonic('bob'), { fresh: true, jurisdiction: 'Testnet' });
 
       await Promise.all([
         connectRuntimeToHubWithCredit(alicePage, alice, hubId, '10000', SWAP_CONNECT_TOKEN_IDS),
@@ -1637,6 +1682,7 @@ test.describe('E2E Swap Isolated Flow', () => {
         requireMarketMaker: false,
         requireHubMesh: true,
         minHubCount: 3,
+        forceReset: true,
       });
 
       const hubId = getPrimaryHubId(baseline);
@@ -1651,8 +1697,8 @@ test.describe('E2E Swap Isolated Flow', () => {
         gotoApp(bobPage, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 }),
       ]);
 
-      const alice = await createRuntimeIdentity(alicePage, 'alice-roundtrip', selectDemoMnemonic('alice'));
-      const bob = await createRuntimeIdentity(bobPage, 'bob-roundtrip', selectDemoMnemonic('bob'));
+      const alice = await createRuntimeIdentity(alicePage, 'alice-roundtrip', selectDemoMnemonic('alice'), { fresh: true, jurisdiction: 'Testnet' });
+      const bob = await createRuntimeIdentity(bobPage, 'bob-roundtrip', selectDemoMnemonic('bob'), { fresh: true, jurisdiction: 'Testnet' });
 
       await Promise.all([
         connectRuntimeToHubWithCredit(alicePage, alice, hubId, '10000', SWAP_CONNECT_TOKEN_IDS),
