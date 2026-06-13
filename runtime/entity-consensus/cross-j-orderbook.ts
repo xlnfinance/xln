@@ -91,17 +91,22 @@ export const findCrossJurisdictionBookAdmissionForAck = (
   currentEntityState: EntityState,
   sourceEntityId: string,
   orderId: string,
+  routeHash?: string,
 ): CrossJurisdictionBookAdmission | null => {
   const admissions = currentEntityState.crossJurisdictionBookAdmissions;
   const direct = admissions?.get(crossJurisdictionBookAdmissionKeyFor(sourceEntityId, orderId));
   if (direct) return direct;
   if (!admissions || admissions.size === 0) return null;
+  const expectedRouteHash = String(routeHash || '').toLowerCase();
+  if (!expectedRouteHash) return null;
 
   let match: CrossJurisdictionBookAdmission | null = null;
   for (const admission of admissions.values()) {
     if (String(admission.route?.orderId || admission.orderId || '') !== orderId) continue;
+    const admissionRouteHash = String(admission.routeHash || admission.route?.routeHash || '').toLowerCase();
+    if (!admissionRouteHash || admissionRouteHash !== expectedRouteHash) continue;
     if (match) {
-      throw new Error(`CROSS_J_BOOK_ADMISSION_AMBIGUOUS: order=${orderId}`);
+      throw new Error(`CROSS_J_BOOK_ADMISSION_AMBIGUOUS: order=${orderId} routeHash=${routeHash}`);
     }
     match = admission;
   }

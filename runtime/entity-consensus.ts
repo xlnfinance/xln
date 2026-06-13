@@ -206,7 +206,12 @@ const buildCrossJurisdictionAdmissionFillNoticeOutput = (
   accountId: string,
   tx: CrossSwapFillAckTx,
 ): EntityInput | null => {
-  const admission = findCrossJurisdictionBookAdmissionForAck(currentEntityState, accountId, tx.data.offerId);
+  const admission = findCrossJurisdictionBookAdmissionForAck(
+    currentEntityState,
+    accountId,
+    tx.data.offerId,
+    tx.data.routeHash,
+  );
   if (!admission) return null;
   if (admission.status === 'closed' || admission.status === 'resolving') return null;
   const sourceHubEntityId = normalizeEntityRef(admission.route.source.counterpartyEntityId);

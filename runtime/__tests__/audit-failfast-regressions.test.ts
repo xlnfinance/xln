@@ -3978,7 +3978,7 @@ describe('audit fail-fast regressions', () => {
     expect(queuedAck).toBeDefined();
   });
 
-  test('cross-j fill ack admission lookup falls back to unique order id', () => {
+  test('cross-j fill ack admission fallback requires matching route hash', () => {
     const env = createEmptyEnv('cross-fill-ack-admission-fallback');
     env.timestamp = 10_000;
     const sourceHub = `0x${'20'.repeat(32)}`;
@@ -4017,9 +4017,10 @@ describe('audit fail-fast regressions', () => {
       expiresAt: env.timestamp + 60_000,
     }, { runtimeSeed: 'cross-fill-ack-admission-fallback', sourceDisputeDelayMs: 5_000, now: env.timestamp });
     const state = makeEntityState(targetHub);
+    const routeHash = route.routeHash || 'route-hash';
     const admission = {
       orderId,
-      routeHash: route.routeHash || 'route-hash',
+      routeHash,
       sourceEntityId: sourceUser,
       bookOwnerEntityId: targetHub,
       status: 'admitted' as const,
@@ -4028,7 +4029,10 @@ describe('audit fail-fast regressions', () => {
     };
     state.crossJurisdictionBookAdmissions = new Map([[`${sourceUser.toLowerCase()}:${orderId}`, admission]]);
 
-    expect(findCrossJurisdictionBookAdmissionForAck(state, targetHub, orderId)).toBe(admission);
+    expect(findCrossJurisdictionBookAdmissionForAck(state, sourceUser, orderId)).toBe(admission);
+    expect(findCrossJurisdictionBookAdmissionForAck(state, targetHub, orderId)).toBeNull();
+    expect(findCrossJurisdictionBookAdmissionForAck(state, targetHub, orderId, `0x${'ff'.repeat(32)}`)).toBeNull();
+    expect(findCrossJurisdictionBookAdmissionForAck(state, targetHub, orderId, routeHash)).toBe(admission);
   });
 
   test('target-bonus fill fails closed when target hub route is unavailable', async () => {
