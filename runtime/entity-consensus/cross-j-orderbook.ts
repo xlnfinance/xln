@@ -94,10 +94,16 @@ export const findCrossJurisdictionBookAdmissionForAck = (
   routeHash?: string,
 ): CrossJurisdictionBookAdmission | null => {
   const admissions = currentEntityState.crossJurisdictionBookAdmissions;
-  const direct = admissions?.get(crossJurisdictionBookAdmissionKeyFor(sourceEntityId, orderId));
-  if (direct) return direct;
-  if (!admissions || admissions.size === 0) return null;
   const expectedRouteHash = String(routeHash || '').toLowerCase();
+  const direct = admissions?.get(crossJurisdictionBookAdmissionKeyFor(sourceEntityId, orderId));
+  if (direct) {
+    if (expectedRouteHash) {
+      const directRouteHash = String(direct.routeHash || direct.route?.routeHash || '').toLowerCase();
+      if (!directRouteHash || directRouteHash !== expectedRouteHash) return null;
+    }
+    return direct;
+  }
+  if (!admissions || admissions.size === 0) return null;
   if (!expectedRouteHash) return null;
 
   let match: CrossJurisdictionBookAdmission | null = null;

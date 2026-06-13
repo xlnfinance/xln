@@ -164,6 +164,33 @@ async function selectSwapPairSide(page: Page, pairLabel: string, side: 'buy' | '
   await expect(toTokenSelect).toBeVisible({ timeout: 20_000 });
   await fromTokenSelect.selectOption(fromToken);
   await toTokenSelect.selectOption(toToken);
+  const pairSelect = page.getByTestId('swap-orderbook-pair-select').first();
+  await expect(pairSelect, 'same-chain orderbook pair selector must be present').toHaveCount(1, { timeout: 10_000 });
+  await expect
+    .poll(async () => pairSelect.evaluate((node) => {
+      const select = node as HTMLSelectElement;
+      return select.selectedOptions[0]?.textContent?.replace(/\s+/g, ' ').trim() || '';
+    }), {
+      timeout: 10_000,
+      intervals: [100, 250, 500],
+      message: 'same-chain orderbook selector must show Asset-Asset (Jurisdiction)',
+    })
+    .toMatch(new RegExp(`${baseSymbol}\\s*-\\s*${quoteSymbol}\\s*\\([^)]+\\)`, 'i'));
+}
+
+async function selectOrderbookPairByLabel(page: Page, labelPattern: RegExp): Promise<string> {
+  const pairSelect = page.getByTestId('swap-orderbook-pair-select').first();
+  await expect(pairSelect, 'orderbook pair selector must be mounted').toHaveCount(1, { timeout: 10_000 });
+  const options = await pairSelect.evaluate((node) =>
+    Array.from((node as HTMLSelectElement).options).map((option) => ({
+      value: option.value,
+      label: option.textContent?.replace(/\s+/g, ' ').trim() || '',
+    })),
+  );
+  const match = options.find((option) => labelPattern.test(option.label));
+  expect(match, `orderbook pair selector missing ${labelPattern}: ${JSON.stringify(options)}`).toBeTruthy();
+  await pairSelect.selectOption(match!.value);
+  return match!.label;
 }
 
 async function expectSwapTokens(page: Page, expected: { fromSymbol: string; toSymbol: string }): Promise<void> {
@@ -1792,6 +1819,34 @@ test.describe('E2E Swap Flow', () => {
         intervals: [100, 250, 500],
       })
       .toEqual({ asks: 0, bids: 0 });
+  });
+
+  test('swap orderbook pair dropdown updates same-chain form tokens', async ({ page }) => {
+    await timedStep('swap_pair_dropdown.goto_app', () => gotoApp(page));
+    await timedStep('swap_pair_dropdown.dismiss_onboarding', () => dismissOnboardingIfVisible(page));
+    await timedStep('swap_pair_dropdown.create_runtime', () => createDemoRuntime(page, `swap-pair-dropdown-${Date.now()}`, randomMnemonic()));
+    const runtimeRef = await timedStep('swap_pair_dropdown.ensure_hub_account', () => ensureDeterministicSwapAccounts(page, 1));
+    const hubId = runtimeRef.hubIds[0]!;
+
+    await timedStep('swap_pair_dropdown.open_workspace', () => openSwapWorkspace(page));
+    await timedStep('swap_pair_dropdown.select_counterparty', () => selectCounterpartyInSwap(page, hubId));
+    await timedStep('swap_pair_dropdown.open_orderbook', async () => {
+      await ensureSwapOrderbookVisible(page);
+      await ensureSwapScope(page, 'selected');
+      await selectSwapPairSide(page, 'WETH/USDC', 'buy');
+    });
+
+    const selectedLabel = await selectOrderbookPairByLabel(page, /USDC\s*-\s*USDT\s*\(Testnet\)/i);
+    expect(selectedLabel).toMatch(/USDC\s*-\s*USDT\s*\(Testnet\)/i);
+    await expectSwapTokens(page, { fromSymbol: 'USDT', toSymbol: 'USDC' });
+    const panel = page.getByTestId('swap-orderbook').first().locator('.orderbook-panel').first();
+    await expect
+      .poll(async () => String(await panel.getAttribute('data-pair-id') || ''), {
+        timeout: 10_000,
+        intervals: [100, 250, 500],
+        message: 'same-chain orderbook dropdown must switch the subscribed pair id',
+      })
+      .toBe('1/3');
   });
 
 	  // Scenario: place a valid non-marketable WETH/USDC offer through the visible swap UI
