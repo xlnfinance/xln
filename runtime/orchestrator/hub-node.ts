@@ -39,6 +39,12 @@ import {
   type RuntimeAdapterSocket,
 } from '../radapter/server';
 import {
+  handleLendingBorrowRequest,
+  handleLendingOfferRequest,
+  handleLendingRepayRequest,
+  handleLendingStateRequest,
+} from '../server/lending';
+import {
   getActiveJAdapter,
   getP2PState,
   closeInfraDb,
@@ -1465,6 +1471,42 @@ const run = async (): Promise<void> => {
           buildMarketSnapshotForReplica(replica, requestedHubEntityId, pairId, depth),
         );
         return new Response(safeStringify({ hubEntityId: requestedHubEntityId, depth, snapshots }), { headers });
+      }
+
+      if (pathname === '/api/lending/state' && request.method === 'GET') {
+        return handleLendingStateRequest({
+          req: request,
+          env,
+          headers,
+          activeHubEntityIds: hubBootstraps.map(entry => entry.entityId),
+        });
+      }
+      if (pathname === '/api/lending/offer' && request.method === 'POST') {
+        return handleLendingOfferRequest({
+          req: request,
+          env,
+          headers,
+          activeHubEntityIds: hubBootstraps.map(entry => entry.entityId),
+          enqueueRuntimeInput,
+        });
+      }
+      if (pathname === '/api/lending/borrow' && request.method === 'POST') {
+        return handleLendingBorrowRequest({
+          req: request,
+          env,
+          headers,
+          activeHubEntityIds: hubBootstraps.map(entry => entry.entityId),
+          enqueueRuntimeInput,
+        });
+      }
+      if (pathname === '/api/lending/repay' && request.method === 'POST') {
+        return handleLendingRepayRequest({
+          req: request,
+          env,
+          headers,
+          activeHubEntityIds: hubBootstraps.map(entry => entry.entityId),
+          enqueueRuntimeInput,
+        });
       }
 
       if (pathname === '/api/tokens' && request.method === 'GET') {

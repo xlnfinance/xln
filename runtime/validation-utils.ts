@@ -715,6 +715,12 @@ export function validateEntityState(value: unknown, context = 'EntityState'): En
     validateCrontabState(obj['crontabState'], `${context}.crontabState`);
   }
 
+  if (obj['lending'] !== undefined) {
+    const lending = validateObject(obj['lending'], `${context}.lending`);
+    validateMapInstance(lending['pools'], `${context}.lending.pools`);
+    validateMapInstance(lending['loans'], `${context}.lending.loans`);
+  }
+
   return obj as unknown as EntityState; // Cast after validation boundary
 }
 

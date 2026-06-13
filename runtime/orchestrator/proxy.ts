@@ -2,7 +2,11 @@ import { isLocalOperatorRequest } from '../health-redaction';
 import { safeStringify } from '../serialization-utils';
 import type { HubChild } from './orchestrator-types';
 
-type ProxyHubEndpoint = '/api/faucet/offchain';
+type ProxyHubEndpoint =
+  | '/api/faucet/offchain'
+  | '/api/lending/offer'
+  | '/api/lending/borrow'
+  | '/api/lending/repay';
 
 type OrchestratorProxyDeps = {
   host: string;

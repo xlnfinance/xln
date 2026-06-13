@@ -1581,6 +1581,20 @@ const server = Bun.serve({
       }
     }
 
+    if (pathname === '/api/lending/state' && request.method === 'GET') {
+      return await proxyAnyHubGet(request, `${pathname}${url.search}`);
+    }
+
+    if (pathname === '/api/lending/offer' && request.method === 'POST') {
+      return await proxyHubApi(request, '/api/lending/offer');
+    }
+    if (pathname === '/api/lending/borrow' && request.method === 'POST') {
+      return await proxyHubApi(request, '/api/lending/borrow');
+    }
+    if (pathname === '/api/lending/repay' && request.method === 'POST') {
+      return await proxyHubApi(request, '/api/lending/repay');
+    }
+
     if (
       (pathname === '/api/faucet/erc20' || pathname === '/api/faucet/gas' || pathname === '/api/faucet/reserve')
       && request.method === 'POST'
