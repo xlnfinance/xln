@@ -46,24 +46,12 @@ test('remote /app opens an existing hub runtime through radapter', async ({ page
   const audience = String(hubInfo.runtimeId || '').toLowerCase();
   expect(audience.length).toBeGreaterThan(0);
   const key = capabilityToken('xln-e2e-h1', 'full', Date.now() + 60 * 60 * 1_000, audience);
-  const url = `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(wsUrl)}&key=paste#accounts`;
+  const url = `${APP_BASE_URL}/app?runtime=remote&ws=${encodeURIComponent(wsUrl)}&token=${encodeURIComponent(key)}#accounts`;
 
   await page.goto(url, { waitUntil: 'domcontentloaded' });
 
   const remotePrompt = page.getByTestId('remote-runtime-login-screen');
-  const promptVisible = await remotePrompt.waitFor({ state: 'visible', timeout: 30_000 })
-    .then(() => true)
-    .catch(() => false);
-  if (promptVisible) {
-    const capabilityInput = page.getByLabel('Capability');
-    if (await capabilityInput.isVisible().catch(() => false)) {
-      await capabilityInput.fill(key);
-    }
-    await Promise.all([
-      page.waitForURL((nextUrl) => !nextUrl.searchParams.has('runtime'), { timeout: 30_000 }).catch(() => undefined),
-      page.getByRole('button', { name: /connect remote runtime/i }).click(),
-    ]);
-  }
+  await expect(remotePrompt).not.toBeVisible({ timeout: 10_000 });
 
   await page.waitForFunction(
     ({ hubId, expectedRuntimePrefix }) => {

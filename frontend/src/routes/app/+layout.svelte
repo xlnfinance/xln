@@ -161,8 +161,9 @@
     const mode = String(params.get('runtime') || params.get('adapter') || '').trim().toLowerCase();
     const wsParam = String(params.get('ws') || params.get('runtimeWs') || '').trim();
     if (mode !== 'remote' || !wsParam) return null;
-    const requiresAuthPaste = params.has('key') || params.has('auth');
-    const authKey = '';
+    const keyParam = String(params.get('token') || params.get('authKey') || params.get('key') || params.get('auth') || '').trim();
+    const authKey = keyParam.startsWith('xlnra1.') ? keyParam : '';
+    const requiresAuthPaste = !authKey && (params.has('key') || params.has('auth'));
     const wsUrl = normalizeRuntimeWsUrl(wsParam);
     return {
       wsUrl,
@@ -178,7 +179,7 @@
   function stripRemoteRuntimeParams(): void {
     if (!browser) return;
     const url = new URL(window.location.href);
-    for (const key of ['runtime', 'adapter', 'ws', 'runtimeWs', 'key', 'auth']) {
+    for (const key of ['runtime', 'adapter', 'ws', 'runtimeWs', 'token', 'authKey', 'key', 'auth']) {
       url.searchParams.delete(key);
     }
     const next = `${url.pathname}${url.search}${url.hash}`;
@@ -360,7 +361,7 @@
       if (await ensureCurrentDeployVersion()) return;
       if (await maybeHandleResetHash()) return;
       const remoteRequest = readRemoteRuntimeRequestFromUrl();
-      if (remoteRequest?.requiresAuthPaste || (remoteRequest && !hasAcceptedRemoteRuntime(remoteRequest))) {
+      if (remoteRequest?.requiresAuthPaste || (remoteRequest && !remoteRequest.authKey && !hasAcceptedRemoteRuntime(remoteRequest))) {
         pendingRemoteRuntime = remoteRequest;
         stripRemoteRuntimeParams();
         activeTabLockReady = true;

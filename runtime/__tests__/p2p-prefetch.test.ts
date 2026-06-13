@@ -47,10 +47,9 @@ test('enqueueEntityInput starts profile prefetch before transport resolution', (
   expect((p2p.pendingByRuntime as Map<string, unknown[]>).get(TARGET_RUNTIME_ID)?.length || 0).toBe(0);
 });
 
-test('enqueueEntityInput uses relay when direct endpoint exists but socket is not open', () => {
+test('enqueueEntityInput requires direct when a hub direct endpoint is advertised', () => {
   const p2p = Object.create(RuntimeP2P.prototype) as RuntimeP2P & Record<string, any>;
   const sent: Array<{ to: string; input: RoutedEntityInput; timestamp?: number }> = [];
-  const warnings: string[] = [];
   const debugEvents: unknown[] = [];
 
   const relayClient = {
@@ -66,9 +65,7 @@ test('enqueueEntityInput uses relay when direct endpoint exists but socket is no
   };
 
   p2p.env = {
-    warn: (_scope: string, code: string) => {
-      warnings.push(code);
-    },
+    warn: () => undefined,
   };
   p2p.sendDebugEvent = (payload: unknown) => {
     debugEvents.push(payload);
@@ -95,15 +92,15 @@ test('enqueueEntityInput uses relay when direct endpoint exists but socket is no
     }],
   };
 
-  expect(p2p.enqueueEntityInput(TARGET_RUNTIME_ID, input, 1234)).toBe(true);
+  expect(() => p2p.enqueueEntityInput(TARGET_RUNTIME_ID, input, 1234))
+    .toThrow(/P2P_ENTITY_INPUT_NOT_DELIVERED:.*transport=direct/);
 
-  expect(sent).toHaveLength(1);
-  expect(sent[0]).toEqual({ to: TARGET_RUNTIME_ID, input, timestamp: 1234 });
-  expect(warnings).toContain('P2P_DIRECT_UNAVAILABLE_RELAY_DELIVERY');
+  expect(sent).toHaveLength(0);
   expect(debugEvents.some((event) =>
     typeof event === 'object' &&
     event !== null &&
-    (event as { code?: string }).code === 'P2P_DIRECT_UNAVAILABLE_RELAY_DELIVERY',
+    (event as { code?: string; transport?: string }).code === 'P2P_ENTITY_INPUT_NOT_DELIVERED' &&
+    (event as { transport?: string }).transport === 'direct',
   )).toBe(true);
   expect((p2p.pendingByRuntime as Map<string, unknown[]>).get(TARGET_RUNTIME_ID)?.length || 0).toBe(0);
 });
