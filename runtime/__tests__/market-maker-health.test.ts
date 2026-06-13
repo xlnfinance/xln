@@ -8,7 +8,7 @@ import { buildMarketSnapshotForReplica } from '../market-snapshot';
 import { applyCommand, createBook } from '../orderbook';
 import type { Env } from '../types';
 
-test('market maker server health does not report cross books ready when no routes are exposed', () => {
+test('market maker server health treats absent cross topology as neutral', () => {
   const state = createMarketMakerServerState();
   state.entityId = 'mm';
   state.targetHubIds = ['hub'];
@@ -16,7 +16,7 @@ test('market maker server health does not report cross books ready when no route
 
   const health = getMarketMakerHealth({} as Env, state, () => null);
 
-  expect(health.cross.ok).toBe(false);
+  expect(health.cross.ok).toBe(true);
   expect(health.cross.expectedRoutes).toBe(0);
   expect(health.cross.routes).toEqual([]);
 });

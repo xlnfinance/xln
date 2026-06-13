@@ -143,7 +143,7 @@ export const getMarketMakerHealth = (
     0,
   );
   const cross = {
-    ok: false,
+    ok: true,
     expectedRoutes: 0,
     expectedOffersPerRoute: 0,
     expectedOffersPerPair: 0,
