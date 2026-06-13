@@ -19,6 +19,7 @@
 <script lang="ts">
   import { onMount, onDestroy, createEventDispatcher } from 'svelte';
   import { formatEntityId } from '$lib/utils/format';
+  import { resolveOrderbookRelayWsUrl } from './orderbook-relay-url';
 
   export let hubId: string = '';
   export let hubIds: string[] = [];
@@ -105,6 +106,7 @@
   let expectedSourceCount = 0;
   let sourceLabel = 'Sources: 0';
   let sourceStatus: SourceStatus = 'ready';
+  let sourceErrorLabel = '';
 
   // Cumulative hover: index of hovered row (-1 = none).
   // For asks (reversed display): hovering row i highlights rows [i..last] (toward center).
@@ -203,7 +205,7 @@
   }
 
   function sourceLabelFor(actualSources: string[], expectedCount: number, status: SourceStatus = 'ready'): string {
-    if (status === 'error') return 'Orderbook stream error';
+    if (status === 'error') return sourceErrorLabel || 'Orderbook stream error';
     if (status === 'no-market') return 'No market for selected exchange';
     if (status === 'empty') {
       if (expectedCount <= 0) return 'No market sources';
@@ -225,56 +227,25 @@
     return Math.max(visibleDepth(), Math.min(visibleDepth() * 6, 100));
   }
 
-  function isLoopbackHost(hostname: string): boolean {
-    const normalized = String(hostname || '').trim().toLowerCase();
-    return normalized === 'localhost'
-      || normalized === '127.0.0.1'
-      || normalized === '::1'
-      || normalized === '[::1]';
-  }
-
-  function isTrustedBrowserRelayUrl(parsed: URL): boolean {
-    if (typeof window === 'undefined') return false;
-    const pageHost = window.location.hostname;
-    if (parsed.hostname === pageHost) return true;
-    return isLoopbackHost(parsed.hostname) && isLoopbackHost(pageHost);
-  }
-
-  function normalizeRelayWsUrl(value: string): string | null {
-    if (typeof window === 'undefined') return null;
-    const trimmed = String(value || '').trim();
-    if (!trimmed) return null;
-    try {
-      const parsed = trimmed.startsWith('/')
-        ? new URL(trimmed, window.location.origin)
-        : new URL(trimmed);
-      if (!isTrustedBrowserRelayUrl(parsed)) return null;
-      if (parsed.protocol === 'ws:' || parsed.protocol === 'wss:') return parsed.toString();
-      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
-        parsed.protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
-        return parsed.toString();
-      }
-    } catch {
-      return null;
-    }
-    return null;
-  }
-
-  function defaultRelayWsUrl(): string | null {
-    if (typeof window === 'undefined') return null;
-    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-    return `${protocol}//${window.location.host}/relay`;
-  }
-
   function relayWsUrl(): string | null {
-    return normalizeRelayWsUrl(relayUrl) || defaultRelayWsUrl();
+    if (typeof window === 'undefined') return null;
+    return resolveOrderbookRelayWsUrl(relayUrl, window.location).url;
+  }
+
+  function markRelayUnavailable(): boolean {
+    if (typeof window === 'undefined') return false;
+    const resolution = resolveOrderbookRelayWsUrl(relayUrl, window.location);
+    if (!resolution.unavailableReason) return false;
+    sourceErrorLabel = resolution.unavailableReason;
+    updateView([], [], normalizePairId(canonicalPairId()) || canonicalPairId(), [], uniqueSourceHubIds(), Date.now(), 'error');
+    return true;
   }
 
   function emptySideLabel(side: 'asks' | 'bids'): string {
     const hasVisibleLevel = asks.length > 0 || bids.length > 0;
     if (sourceStatus === 'syncing' && !hasVisibleLevel) return side === 'asks' ? 'Syncing asks...' : 'Syncing bids...';
     if (sourceStatus === 'no-market') return 'No market for this exchange';
-    if (sourceStatus === 'error') return 'Orderbook unavailable';
+    if (sourceStatus === 'error') return sourceErrorLabel || 'Orderbook unavailable';
     return side === 'asks' ? 'No asks' : 'No bids';
   }
 
@@ -642,6 +613,7 @@
       marketSyncStartedAt = 0;
       marketContinuousSyncStartedAt = 0;
     }
+    if (nextStatus !== 'error') sourceErrorLabel = '';
     sourceStatus = nextStatus;
     sourceLabel = sourceLabelFor(actualSources, requestedSources.length, sourceStatus);
     if (sourceStatus !== 'syncing') {
@@ -900,7 +872,10 @@
 
   function connectMarketStream() {
     const url = relayWsUrl();
-    if (!url) return;
+    if (!url) {
+      markRelayUnavailable();
+      return;
+    }
     if (marketWs && (marketWs.readyState === 0 || marketWs.readyState === 1)) return;
 
     marketWsClosing = false;
@@ -934,6 +909,7 @@
           }, STREAM_RETRY_MS);
           return;
         }
+        sourceErrorLabel = errorText || 'Orderbook stream error';
         updateView([], [], canonicalPairId(), [], uniqueSourceHubIds(), Date.now(), 'error');
         return;
       }
@@ -1002,10 +978,13 @@
       const nextKey = `${nextRelayUrl || ''}|${normalizedPair || pair}|${subscribedRawDepth()}|${sources.join(',')}`;
       const refreshChanged = refreshNonce !== marketSeenRefreshNonce;
       marketSeenRefreshNonce = refreshNonce;
-      if (nextRelayUrl && marketWs && marketWsUrl && nextRelayUrl !== marketWsUrl) {
+      if (!nextRelayUrl) {
+        if (marketWs) disconnectMarketStream();
+        markRelayUnavailable();
+      } else if (marketWs && marketWsUrl && nextRelayUrl !== marketWsUrl) {
         disconnectMarketStream();
         connectMarketStream();
-      } else if (nextRelayUrl && !marketWs) {
+      } else if (!marketWs) {
         connectMarketStream();
       } else if (typeof window !== 'undefined' && marketWs && marketWs.readyState === 1 && nextKey !== marketSubKey) {
         streamSnapshots.clear();
@@ -1272,7 +1251,7 @@
         : sourceStatus === 'no-market'
           ? 'No relay market snapshot is available for this exchange.'
           : sourceStatus === 'error'
-            ? 'The orderbook stream returned an error.'
+            ? sourceErrorLabel || 'The orderbook stream returned an error.'
         : `Book built from ${sourceCount} source${sourceCount === 1 ? '' : 's'}`}
     >{sourceLabel}</span>
     <span
