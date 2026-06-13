@@ -1,26 +1,18 @@
-# E2E Test: Smoke Test
+# archived manual smoke checklist
 
-**Purpose:** Verify XLN loads and basic functionality works
+This file is not an executable test.
 
-## Test Steps
+Use the current gates instead:
 
-1. Navigate to https://localhost:8080
-2. Wait for XLN runtime to load
-3. Verify window.XLN exists
-4. Verify window.xlnEnv exists
-5. Check initial state (height=0, no entities)
-6. Verify no console errors
+```bash
+bun run test
+bun run test:e2e:fast
+```
 
-## Expected Results
+For browser smoke coverage, use `tests/e2e-payment-smoke.spec.ts`.
 
-- Runtime loads successfully
-- Environment initialized
-- No JavaScript errors
-- UI renders correctly
+For runtime scenario coverage, use:
 
-## Success Criteria
-
-✅ XLN runtime available
-✅ Environment store reactive
-✅ Zero console errors
-✅ Initial height = 0
+```bash
+bun runtime/scenarios/run.ts --set=smoke
+```

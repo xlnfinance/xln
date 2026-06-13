@@ -50,7 +50,7 @@ const passthrough = process.argv.slice(2);
 const args = [
   'runtime/scripts/run-e2e-parallel-isolated.ts',
   ...passthrough,
-  '--shards=8',
+  '--shards=16',
   '--workers-per-shard=1',
   '--max-mm-concurrency=2',
   '--max-reset-concurrency=4',
