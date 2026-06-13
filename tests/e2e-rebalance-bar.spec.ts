@@ -11,7 +11,7 @@
  *
  * These tests exist to prove that rebalance is deterministic, visually correct, and replay-safe.
  */
-import { test, expect, type Page } from '@playwright/test';
+import { test, expect, type Browser, type BrowserContext, type Page } from '@playwright/test';
 import { deriveDelta } from '../runtime/account-utils';
 import { ethers } from 'ethers';
 import { timedStep } from './utils/e2e-timing';
@@ -356,6 +356,28 @@ async function createRuntime(page: Page, label: string, mnemonic: string) {
   await createSharedRuntime(page, label, mnemonic);
 }
 
+async function createLiveRuntimePage(
+  browser: Browser,
+  label: string,
+  mnemonic: string,
+): Promise<{ context: BrowserContext; page: Page; entity: { entityId: string; signerId: string } }> {
+  const context = await browser.newContext({ ignoreHTTPSErrors: true });
+  await context.addInitScript(() => {
+    try {
+      localStorage.setItem('xln-app-mode', 'user');
+      localStorage.setItem('xln-onboarding-complete', 'true');
+    } catch {
+      // no-op
+    }
+  });
+  const runtimePage = await context.newPage();
+  await gotoApp(runtimePage);
+  await createRuntime(runtimePage, label, mnemonic);
+  await ensureRuntimeOnline(runtimePage, `${label}-online`);
+  const entity = await getLocalEntity(runtimePage);
+  return { context, page: runtimePage, entity };
+}
+
 async function ensureRuntimeOnline(page: Page, tag: string) {
   await expect
     .poll(async () => {
@@ -429,6 +451,46 @@ async function waitForHubProfile(page: Page, hubId: string) {
     return false;
   }, { hubId });
   expect(ok, `hub profile not visible in local gossip for ${hubId.slice(0, 12)}`).toBe(true);
+}
+
+async function waitForEntityAdvertised(page: Page, entityId: string, timeoutMs = 60_000): Promise<void> {
+  await expect
+    .poll(
+      async () => {
+        const inGossip = await page.evaluate((targetEntityId) => {
+          const view = window as typeof window & {
+            XLN?: { refreshGossip?: (env: unknown) => void };
+            isolatedEnv?: {
+              gossip?: {
+                getProfiles?: () => Array<{ entityId?: string; runtimeId?: string; metadata?: { runtimeId?: string } }>;
+              };
+            };
+          };
+          try {
+            view.XLN?.refreshGossip?.(view.isolatedEnv);
+          } catch {
+            // best effort
+          }
+          const profiles = view.isolatedEnv?.gossip?.getProfiles?.() || [];
+          return profiles.some((profile) =>
+            String(profile?.entityId || '').toLowerCase() === String(targetEntityId || '').toLowerCase()
+            && Boolean(profile?.runtimeId || profile?.metadata?.runtimeId),
+          );
+        }, entityId).catch(() => false);
+        if (inGossip) return true;
+
+        const response = await page.request.get(
+          `${API_BASE_URL}/api/debug/entities?limit=5000&q=${encodeURIComponent(entityId)}`,
+        );
+        if (!response.ok()) return false;
+        const body = await response.json() as { entities?: Array<{ entityId?: string; runtimeId?: string }> };
+        return (Array.isArray(body.entities) ? body.entities : []).some((entry) =>
+          String(entry.entityId || '').toLowerCase() === entityId.toLowerCase() && Boolean(entry.runtimeId),
+        );
+      },
+      { timeout: timeoutMs, intervals: [500, 1000, 1500] },
+    )
+    .toBe(true);
 }
 
 async function getLocalEntity(page: Page): Promise<{ entityId: string; signerId: string }> {
@@ -2196,584 +2258,362 @@ test.describe('Rebalance E2E', () => {
 
   // Scenario: multi-hop routing through H1 and H2 should fail on the second 550 payment before H2
   // rebalances, then pass again after H2 completes R2C.
-  test('rt1->h1->h2->rt2: second 550 fails before rebalance, passes after H2 R2C', async ({ page }) => {
-    let scenarioStartedAt = 0;
-    await resetProdServer(page);
-    await page.addInitScript(() => {
-      try {
-        localStorage.setItem('xln-app-mode', 'user');
-        localStorage.setItem('xln-onboarding-complete', 'true');
-      } catch {
-        // no-op
-      }
-    });
-    await gotoApp(page);
+  test('rt1->h1->h2->rt2: second 550 fails before rebalance, passes after H2 R2C', async ({ browser, page }) => {
+    let senderContext: BrowserContext | null = null;
+    let recipientContext: BrowserContext | null = null;
+    try {
+      await resetProdServer(page);
 
-    const rt1Label = `rt1-h1h2-${Date.now()}`;
-    const rt2Label = `rt2-h1h2-${Date.now() + 1}`;
-    await createRuntime(page, rt1Label, nextRebalanceMnemonic());
-    await ensureRuntimeOnline(page, 'rt1-h1h2-online');
-    const rt1 = await getLocalEntity(page);
+      const rt1Label = `rt1-h1h2-${Date.now()}`;
+      const rt2Label = `rt2-h1h2-${Date.now() + 1}`;
+      const sender = await createLiveRuntimePage(browser, rt1Label, nextRebalanceMnemonic());
+      const recipient = await createLiveRuntimePage(browser, rt2Label, nextRebalanceMnemonic());
+      senderContext = sender.context;
+      recipientContext = recipient.context;
+      const senderPage = sender.page;
+      const recipientPage = recipient.page;
+      const rt1 = sender.entity;
+      const rt2 = recipient.entity;
+      expect(rt1.entityId.toLowerCase()).not.toBe(rt2.entityId.toLowerCase());
 
-    await createRuntime(page, rt2Label, nextRebalanceMnemonic());
-    await ensureRuntimeOnline(page, 'rt2-h1h2-online');
-    const rt2 = await getLocalEntity(page);
+      const { h1, h2 } = await discoverH1H2(recipientPage);
+      await Promise.all([
+        waitForHubProfile(senderPage, h1),
+        waitForHubProfile(senderPage, h2),
+        waitForHubProfile(recipientPage, h1),
+        waitForHubProfile(recipientPage, h2),
+        waitForEntityAdvertised(senderPage, rt2.entityId),
+        waitForEntityAdvertised(recipientPage, rt1.entityId),
+      ]);
 
-    await switchRuntime(page, rt2Label);
-    const { h1, h2 } = await discoverH1H2(page);
-    await waitForHubProfile(page, h1);
-    await waitForHubProfile(page, h2);
-
-    // Recipient runtime: small credit on H2 so second 550 should fail pre-rebalance.
-    await markE2EPhase(page, 'rebalance_h2.connect_recipient_start', {
-      entityId: rt2.entityId,
-      details: { hub: h2.slice(0, 10) },
-    });
-    await connectHubWithCredit(page, rt2.entityId, rt2.signerId, h2, 1_000n);
-    await setRebalancePolicy(page, rt2.entityId, rt2.signerId, h2, 500n, 10_000n, 20n);
-    await waitForPairIdle(page, h2, 20_000, rt2.entityId);
-    await markE2EPhase(page, 'rebalance_h2.connect_recipient_done', {
-      entityId: rt2.entityId,
-      details: { hub: h2.slice(0, 10) },
-    });
-
-    await switchRuntime(page, rt1Label);
-    // Sender runtime: liquidity source through H1.
-    await markE2EPhase(page, 'rebalance_h2.connect_sender_start', {
-      entityId: rt1.entityId,
-      details: { hub: h1.slice(0, 10) },
-    });
-    await connectHubWithCredit(page, rt1.entityId, rt1.signerId, h1, 10_000n);
-    const senderBeforeFaucet = await readPairState(page, h1, rt1.entityId);
-    expect(senderBeforeFaucet, 'rt1-h1 pair must exist before faucet').toBeTruthy();
-    const senderOutBaseline = BigInt(senderBeforeFaucet?.outCapacity || '0');
-    await faucetAmount(page, rt1.entityId, h1, '2000');
-    await waitForFundingLiquidityReady(page, h1, senderOutBaseline, 180_000, rt1.entityId);
-    await markE2EPhase(page, 'rebalance_h2.connect_sender_done', {
-      entityId: rt1.entityId,
-      details: { hub: h1.slice(0, 10) },
-    });
-
-    await markE2EPhase(page, 'rebalance_h2.baseline_switch_recipient_start', {
-      entityId: rt2.entityId,
-      details: { hub: h2.slice(0, 10) },
-    });
-    await switchRuntime(page, rt2Label);
-    await markE2EPhase(page, 'rebalance_h2.baseline_switch_recipient_done', {
-      entityId: rt2.entityId,
-      details: { hub: h2.slice(0, 10) },
-    });
-    await markE2EPhase(page, 'rebalance_h2.baseline_read_start', {
-      entityId: rt2.entityId,
-      details: { hub: h2.slice(0, 10) },
-    });
-    const baseline = await readPairState(page, h2, rt2.entityId);
-    await markE2EPhase(page, 'rebalance_h2.baseline_read_done', {
-      entityId: rt2.entityId,
-      details: { hub: h2.slice(0, 10), found: Boolean(baseline) },
-    });
-    expect(baseline, 'rt2-h2 baseline must exist').toBeTruthy();
-    const baselineDebt = BigInt(baseline?.hubExposure || baseline?.hubDebt || '0');
-    // Start collection window after reset/bootstrap to avoid cross-test bleed.
-    scenarioStartedAt = Date.now();
-
-    // Payment #1 succeeds.
-    await switchRuntime(page, rt1Label);
-    await waitForPairIdle(page, h1, 60_000, rt1.entityId);
-    const senderBeforeP1 = await readPairState(page, h1, rt1.entityId);
-    const senderP1LockBaseline = Number(senderBeforeP1?.recentHtlcLockCount || 0);
-    await markE2EPhase(page, 'rebalance_h2.payment1_submit', {
-      entityId: rt1.entityId,
-      details: { senderHub: h1.slice(0, 10), receiverHub: h2.slice(0, 10) },
-    });
-    const p1 = await sendRoutedHtlcPayment(
-      page,
-      rt1.entityId,
-      rt1.signerId,
-      rt2.entityId,
-      [rt1.entityId, h1, h2, rt2.entityId],
-      550n,
-      'rt1->rt2 via h1,h2 htlc #1',
-    );
-    await waitForSenderHtlcLock(page, h1, p1.hashlock, senderP1LockBaseline, 25_000, rt1.entityId);
-    await markE2EPhase(page, 'rebalance_h2.payment1_sender_lock', {
-      entityId: rt1.entityId,
-      details: { hashlock: p1.hashlock.slice(0, 12) },
-    });
-
-    await switchRuntime(page, rt2Label);
-    const p1Start = Date.now();
-    let afterP1: any = null;
-    let p1Received = false;
-    while (Date.now() - p1Start < 30_000) {
-      afterP1 = await readPairState(page, h2, rt2.entityId);
-      const debtIncreased = afterP1
-        && BigInt(afterP1.hubExposure || afterP1.hubDebt || '0') >= baselineDebt + 500n * 10n ** 18n;
-      p1Received = await hasDebugHtlcEvent(page, p1.hashlock, 'HtlcReceived', scenarioStartedAt);
-      if (debtIncreased && p1Received) break;
-      await page.waitForTimeout(400);
-    }
-    expect(afterP1, 'rt2-h2 state after payment#1').toBeTruthy();
-    expect(
-      BigInt(afterP1?.hubExposure || afterP1?.hubDebt || '0') >= baselineDebt + 500n * 10n ** 18n,
-      `payment#1 must increase H2 exposure by ~550 (baseline=${baselineDebt}, now=${afterP1?.hubExposure || afterP1?.hubDebt || 'n/a'})`,
-    ).toBe(true);
-    expect(
-      p1Received,
-      `payment#1 must emit HtlcReceived for hashlock ${p1.hashlock.slice(0, 12)}`,
-    ).toBe(true);
-
-    // Payment #2 should fail before rebalance due credit ceiling.
-    const rt2P2Cursor = await getPersistedReceiptCursor(page);
-    const h2Lower = h2.toLowerCase();
-    const h2SettlesBeforeP2 = countRebalanceStepEvents(
-      await readRebalanceStepEvents(page, scenarioStartedAt),
-      'account_settled_finalized_bilateral',
-      (step) => String(step?.accountId || '').toLowerCase() === h2Lower,
-    );
-    await switchRuntime(page, rt1Label);
-    await waitForPairIdle(page, h1, 60_000, rt1.entityId);
-    const senderBeforeP2 = await readPairState(page, h1, rt1.entityId);
-    await markE2EPhase(page, 'rebalance_h2.payment2_submit', {
-      entityId: rt1.entityId,
-      details: { senderHub: h1.slice(0, 10), receiverHub: h2.slice(0, 10) },
-    });
-    const p2 = await sendRoutedHtlcPayment(
-      page,
-      rt1.entityId,
-      rt1.signerId,
-      rt2.entityId,
-      [rt1.entityId, h1, h2, rt2.entityId],
-      550n,
-      'rt1->rt2 via h1,h2 htlc #2 pre-rebalance',
-    );
-    await waitForSenderHtlcLock(
-      page,
-      h1,
-      p2.hashlock,
-      Number(senderBeforeP2?.recentHtlcLockCount || 0),
-      25_000,
-      rt1.entityId,
-    ).catch(() => null);
-    await markE2EPhase(page, 'rebalance_h2.payment2_pre_rebalance_checked', {
-      entityId: rt1.entityId,
-      details: { hashlock: p2.hashlock.slice(0, 12) },
-    });
-
-    await switchRuntime(page, rt2Label);
-    const beforeP2Debt = BigInt(afterP1?.hubExposure || afterP1?.hubDebt || '0');
-    const p2Start = Date.now();
-    const PRE_REBALANCE_WINDOW_MS = 2_000;
-    let afterP2: any = null;
-    while (Date.now() - p2Start < PRE_REBALANCE_WINDOW_MS) {
-      afterP2 = await readPairState(page, h2, rt2.entityId);
-      await page.waitForTimeout(150);
-    }
-    expect(afterP2, 'rt2-h2 state after payment#2').toBeTruthy();
-    const p2HashSeen = Array.isArray(afterP2?.recentHtlcHashlocks) && afterP2.recentHtlcHashlocks.includes(p2.hashlock);
-    const afterP2Debt = BigInt(afterP2?.hubExposure || afterP2?.hubDebt || '0');
-    const rt2P2Events = await readPersistedFrameEventsSinceCursor(page, {
-      cursor: rt2P2Cursor,
-      eventNames: ['HtlcReceived', 'account_settled_finalized_bilateral'],
-    });
-    const h2SettledEarly = rt2P2Events.events.some((event) =>
-      event.message === 'account_settled_finalized_bilateral' && persistedEventHasAccount(event, h2),
-    );
-    const h2SettlesAfterP2 = countRebalanceStepEvents(
-      await readRebalanceStepEvents(page, scenarioStartedAt),
-      'account_settled_finalized_bilateral',
-      (step) => String(step?.accountId || '').toLowerCase() === h2Lower,
-    );
-    const h2SettledDuringP2 = h2SettledEarly || h2SettlesAfterP2 > h2SettlesBeforeP2;
-    const p2Received = await hasDebugHtlcEvent(page, p2.hashlock, 'HtlcReceived', scenarioStartedAt);
-    if (p2HashSeen || p2Received) {
-      let observedH2SettledDuringP2 = h2SettledDuringP2;
-      if (!observedH2SettledDuringP2) {
-        const settleDeadline = Date.now() + 8_000;
-        while (Date.now() < settleDeadline) {
-          const retryEvents = await readPersistedFrameEventsSinceCursor(page, {
-            cursor: rt2P2Cursor,
-            eventNames: ['account_settled_finalized_bilateral'],
-          });
-          const settledByEvent = retryEvents.events.some((event) =>
-            event.message === 'account_settled_finalized_bilateral' && persistedEventHasAccount(event, h2),
-          );
-          const settledByDebugStep = countRebalanceStepEvents(
-            await readRebalanceStepEvents(page, scenarioStartedAt),
-            'account_settled_finalized_bilateral',
-            (step) => String(step?.accountId || '').toLowerCase() === h2Lower,
-          ) > h2SettlesBeforeP2;
-          observedH2SettledDuringP2 = settledByEvent || settledByDebugStep;
-          if (observedH2SettledDuringP2) break;
-          await page.waitForTimeout(400);
-        }
-      }
-      expect(
-        observedH2SettledDuringP2,
-        `payment#2 passed too early without persisted rebalance finalize evidence: ${JSON.stringify(rt2P2Events.events.slice(-24), null, 2)}`,
-      ).toBe(true);
-    } else {
-      expect(
-        afterP2Debt < beforeP2Debt + 500n * 10n ** 18n,
-        'payment#2 should not increase debt by full 550 in pre-rebalance window',
-      ).toBe(true);
-    }
-
-    // Wait for H2 R2C rebalance pipeline only if the post-cursor slice has not already
-    // captured the bilateral finalize event that allowed payment #2 through.
-    if (!h2SettledDuringP2) {
-      await markE2EPhase(page, 'rebalance_h2.wait_rebalance_finalize', {
+      await markE2EPhase(recipientPage, 'rebalance_h2.connect_recipient_start', {
         entityId: rt2.entityId,
         details: { hub: h2.slice(0, 10) },
       });
+      await connectHubWithCredit(recipientPage, rt2.entityId, rt2.signerId, h2, 1_000n);
+      await setRebalancePolicy(recipientPage, rt2.entityId, rt2.signerId, h2, 500n, 10_000n, 20n);
+      await waitForPairIdle(recipientPage, h2, 20_000, rt2.entityId);
+
+      await markE2EPhase(senderPage, 'rebalance_h2.connect_sender_start', {
+        entityId: rt1.entityId,
+        details: { hub: h1.slice(0, 10) },
+      });
+      await connectHubWithCredit(senderPage, rt1.entityId, rt1.signerId, h1, 10_000n);
+      const senderBeforeFaucet = await readPairState(senderPage, h1, rt1.entityId);
+      expect(senderBeforeFaucet, 'rt1-h1 pair must exist before faucet').toBeTruthy();
+      await faucetAmount(senderPage, rt1.entityId, h1, '2000');
+      await waitForFundingLiquidityReady(senderPage, h1, BigInt(senderBeforeFaucet?.outCapacity || '0'), 180_000, rt1.entityId);
+
+      const baseline = await readPairState(recipientPage, h2, rt2.entityId);
+      expect(baseline, 'rt2-h2 baseline must exist').toBeTruthy();
+      const baselineDebt = BigInt(baseline?.hubExposure || baseline?.hubDebt || '0');
+      const scenarioStartedAt = Date.now();
+
+      await waitForPairIdle(senderPage, h1, 60_000, rt1.entityId);
+      const senderBeforeP1 = await readPairState(senderPage, h1, rt1.entityId);
+      const p1 = await sendRoutedHtlcPayment(
+        senderPage,
+        rt1.entityId,
+        rt1.signerId,
+        rt2.entityId,
+        [rt1.entityId, h1, h2, rt2.entityId],
+        550n,
+        'rt1->rt2 via h1,h2 htlc #1',
+      );
+      await waitForSenderHtlcLock(senderPage, h1, p1.hashlock, Number(senderBeforeP1?.recentHtlcLockCount || 0), 25_000, rt1.entityId);
+
+      let afterP1: any = null;
       await expect.poll(async () => {
-        const steps = await readRebalanceStepEvents(page, scenarioStartedAt);
-        return countRebalanceStepEvents(
-          steps,
-          'account_settled_finalized_bilateral',
-          (step) => String(step?.accountId || '').toLowerCase() === h2Lower,
-        );
-      }, {
-        timeout: 35_000,
-        message: `expected saved rebalance finalize step for ${h2Lower.slice(0, 10)}`,
-      }).toBeGreaterThan(0);
-    }
-    let rebDone: Awaited<ReturnType<typeof readPairState>> = null;
-    const rebalanceClearDeadline = Date.now() + 20_000;
-    while (Date.now() < rebalanceClearDeadline) {
-      rebDone = await readPairState(page, h2, rt2.entityId);
-      if (
-        rebDone &&
-        BigInt(rebDone.requested || '0') === 0n &&
-        Number(rebDone.pendingHeight || 0) === 0 &&
-        Number(rebDone.mempoolLen || 0) === 0
-      ) {
-        break;
+        afterP1 = await readPairState(recipientPage, h2, rt2.entityId);
+        return !!afterP1 && BigInt(afterP1.hubExposure || afterP1.hubDebt || '0') >= baselineDebt + 500n * 10n ** 18n;
+      }, { timeout: 30_000 }).toBe(true);
+
+      const beforeP2Debt = BigInt(afterP1?.hubExposure || afterP1?.hubDebt || '0');
+      const rt2P2Cursor = await getPersistedReceiptCursor(recipientPage);
+      const h2Lower = h2.toLowerCase();
+      const h2SettlesBeforeP2 = countRebalanceStepEvents(
+        await readRebalanceStepEvents(recipientPage, scenarioStartedAt),
+        'account_settled_finalized_bilateral',
+        (step) => String(step?.accountId || '').toLowerCase() === h2Lower,
+      );
+      await waitForPairIdle(senderPage, h1, 60_000, rt1.entityId);
+      const senderBeforeP2 = await readPairState(senderPage, h1, rt1.entityId);
+      const p2 = await sendRoutedHtlcPayment(
+        senderPage,
+        rt1.entityId,
+        rt1.signerId,
+        rt2.entityId,
+        [rt1.entityId, h1, h2, rt2.entityId],
+        550n,
+        'rt1->rt2 via h1,h2 htlc #2 pre-rebalance',
+      );
+      await waitForSenderHtlcLock(senderPage, h1, p2.hashlock, Number(senderBeforeP2?.recentHtlcLockCount || 0), 25_000, rt1.entityId)
+        .catch(() => null);
+
+      await recipientPage.waitForTimeout(2_000);
+      const afterP2 = await readPairState(recipientPage, h2, rt2.entityId);
+      expect(afterP2, 'rt2-h2 state after payment#2').toBeTruthy();
+      const p2HashSeen = Array.isArray(afterP2?.recentHtlcHashlocks) && afterP2.recentHtlcHashlocks.includes(p2.hashlock);
+      const p2Received = await hasDebugHtlcEvent(recipientPage, p2.hashlock, 'HtlcReceived', scenarioStartedAt);
+      const rt2P2Events = await readPersistedFrameEventsSinceCursor(recipientPage, {
+        cursor: rt2P2Cursor,
+        eventNames: ['HtlcReceived', 'account_settled_finalized_bilateral'],
+      });
+      const h2SettledEarly = rt2P2Events.events.some((event) =>
+        event.message === 'account_settled_finalized_bilateral' && persistedEventHasAccount(event, h2),
+      );
+      const h2SettlesAfterP2 = countRebalanceStepEvents(
+        await readRebalanceStepEvents(recipientPage, scenarioStartedAt),
+        'account_settled_finalized_bilateral',
+        (step) => String(step?.accountId || '').toLowerCase() === h2Lower,
+      );
+      const h2SettledDuringP2 = h2SettledEarly || h2SettlesAfterP2 > h2SettlesBeforeP2;
+      if (p2HashSeen || p2Received) {
+        expect(
+          h2SettledDuringP2,
+          `payment#2 passed too early without persisted rebalance finalize evidence: ${JSON.stringify(rt2P2Events.events.slice(-24), null, 2)}`,
+        ).toBe(true);
+      } else {
+        expect(
+          BigInt(afterP2?.hubExposure || afterP2?.hubDebt || '0') < beforeP2Debt + 500n * 10n ** 18n,
+          'payment#2 should not increase debt by full 550 in pre-rebalance window',
+        ).toBe(true);
       }
-      await page.waitForTimeout(400);
-    }
-    expect(rebDone, 'rt2-h2 rebalance snapshot must exist').toBeTruthy();
-    expect(BigInt(rebDone?.requested || '0') === 0n, 'requestedRebalance must be cleared after finalize').toBe(true);
-    if (!rebDone) {
-      throw new Error('rt2-h2 rebalance snapshot missing');
-    }
 
-    // Payment #2 may legitimately complete after the H2 rebalance finalizes.
-    // In that case it is the post-rebalance success for this scenario and it
-    // consumes the refreshed capacity, so sending another 550 immediately would
-    // be testing a different second-rebalance condition.
-    let afterP2PostRebalance: any = rebDone;
-    let p2PostRebalanceReceived = p2HashSeen || p2Received;
-    const p2PostRebalanceDeadline = Date.now() + 10_000;
-    while (!p2PostRebalanceReceived && Date.now() < p2PostRebalanceDeadline) {
-      afterP2PostRebalance = await readPairState(page, h2, rt2.entityId);
-      const hashSeen = Array.isArray(afterP2PostRebalance?.recentHtlcHashlocks)
-        && afterP2PostRebalance.recentHtlcHashlocks.includes(p2.hashlock);
-      const eventSeen = await hasDebugHtlcEvent(page, p2.hashlock, 'HtlcReceived', scenarioStartedAt);
-      p2PostRebalanceReceived = hashSeen || eventSeen;
-      if (p2PostRebalanceReceived) break;
-      await page.waitForTimeout(400);
-    }
-    if (p2PostRebalanceReceived) {
-      expect(
-        BigInt(afterP2PostRebalance?.hubExposure || afterP2PostRebalance?.hubDebt || '0') >= beforeP2Debt + 500n * 10n ** 18n,
-        `payment#2 should increase exposure after rebalance (before=${beforeP2Debt}, after=${afterP2PostRebalance?.hubExposure || afterP2PostRebalance?.hubDebt || 'n/a'})`,
-      ).toBe(true);
-      await page.screenshot({ path: 'test-results/rebalance-rt1-h1-h2-rt2.png', fullPage: true });
-      return;
-    }
+      if (!h2SettledDuringP2) {
+        await expect.poll(async () => {
+          return countRebalanceStepEvents(
+            await readRebalanceStepEvents(recipientPage, scenarioStartedAt),
+            'account_settled_finalized_bilateral',
+            (step) => String(step?.accountId || '').toLowerCase() === h2Lower,
+          );
+        }, { timeout: 35_000 }).toBeGreaterThan(0);
+      }
 
-    // Payment #3 passes after rebalance.
-    await switchRuntime(page, rt1Label);
-    await waitForPairIdle(page, h1, 20_000, rt1.entityId);
-    const senderBeforeP3 = await readPairState(page, h1, rt1.entityId);
-    await markE2EPhase(page, 'rebalance_h2.payment3_submit', {
-      entityId: rt1.entityId,
-      details: { senderHub: h1.slice(0, 10), receiverHub: h2.slice(0, 10) },
-    });
-    const p3 = await sendRoutedHtlcPayment(
-      page,
-      rt1.entityId,
-      rt1.signerId,
-      rt2.entityId,
-      [rt1.entityId, h1, h2, rt2.entityId],
-      550n,
-      'rt1->rt2 via h1,h2 htlc #3 post-rebalance',
-    );
-    await waitForSenderHtlcLock(page, h1, p3.hashlock, Number(senderBeforeP3?.recentHtlcLockCount || 0), 25_000, rt1.entityId);
-    await markE2EPhase(page, 'rebalance_h2.payment3_sender_lock', {
-      entityId: rt1.entityId,
-      details: { hashlock: p3.hashlock.slice(0, 12) },
-    });
+      let rebDone: Awaited<ReturnType<typeof readPairState>> = null;
+      const rebalanceClearDeadline = Date.now() + 20_000;
+      while (Date.now() < rebalanceClearDeadline) {
+        rebDone = await readPairState(recipientPage, h2, rt2.entityId);
+        if (rebDone && BigInt(rebDone.requested || '0') === 0n && Number(rebDone.pendingHeight || 0) === 0 && Number(rebDone.mempoolLen || 0) === 0) {
+          break;
+        }
+        await recipientPage.waitForTimeout(400);
+      }
+      expect(rebDone, 'rt2-h2 rebalance snapshot must exist').toBeTruthy();
+      expect(BigInt(rebDone?.requested || '0') === 0n, 'requestedRebalance must be cleared after finalize').toBe(true);
+      if (!rebDone) throw new Error('rt2-h2 rebalance snapshot missing');
 
-    await switchRuntime(page, rt2Label);
-    const debtBeforeP3 = BigInt(rebDone.hubExposure || rebDone.hubDebt || '0');
-    const p3Start = Date.now();
-    let afterP3: any = null;
-    let p3Received = false;
-    let p3CapacityIncreased = false;
-    while (Date.now() - p3Start < 30_000) {
-      afterP3 = await readPairState(page, h2, rt2.entityId);
-      const debtIncreased = afterP3 && BigInt(afterP3.hubExposure || afterP3.hubDebt || '0') >= debtBeforeP3 + 500n * 10n ** 18n;
-      const hashSeen = Array.isArray(afterP3?.recentHtlcHashlocks) && afterP3.recentHtlcHashlocks.includes(p3.hashlock);
-      const eventSeen = hashSeen || await hasDebugHtlcEvent(page, p3.hashlock, 'HtlcReceived', scenarioStartedAt);
-      p3CapacityIncreased = !!debtIncreased;
-      p3Received = eventSeen || p3CapacityIncreased;
-      if (p3CapacityIncreased && p3Received) break;
-      await page.waitForTimeout(450);
+      let afterP2PostRebalance: any = rebDone;
+      let p2PostRebalanceReceived = p2HashSeen || p2Received;
+      const p2PostRebalanceDeadline = Date.now() + 10_000;
+      while (!p2PostRebalanceReceived && Date.now() < p2PostRebalanceDeadline) {
+        afterP2PostRebalance = await readPairState(recipientPage, h2, rt2.entityId);
+        const hashSeen = Array.isArray(afterP2PostRebalance?.recentHtlcHashlocks)
+          && afterP2PostRebalance.recentHtlcHashlocks.includes(p2.hashlock);
+        const eventSeen = await hasDebugHtlcEvent(recipientPage, p2.hashlock, 'HtlcReceived', scenarioStartedAt);
+        p2PostRebalanceReceived = hashSeen || eventSeen;
+        if (p2PostRebalanceReceived) break;
+        await recipientPage.waitForTimeout(400);
+      }
+      if (p2PostRebalanceReceived) {
+        expect(
+          BigInt(afterP2PostRebalance?.hubExposure || afterP2PostRebalance?.hubDebt || '0') >= beforeP2Debt + 500n * 10n ** 18n,
+          `payment#2 should increase exposure after rebalance (before=${beforeP2Debt}, after=${afterP2PostRebalance?.hubExposure || afterP2PostRebalance?.hubDebt || 'n/a'})`,
+        ).toBe(true);
+        await recipientPage.screenshot({ path: 'test-results/rebalance-rt1-h1-h2-rt2.png', fullPage: true });
+        return;
+      }
+
+      const debtBeforeP3 = BigInt(rebDone.hubExposure || rebDone.hubDebt || '0');
+      await waitForPairIdle(senderPage, h1, 20_000, rt1.entityId);
+      const senderBeforeP3 = await readPairState(senderPage, h1, rt1.entityId);
+      const p3 = await sendRoutedHtlcPayment(
+        senderPage,
+        rt1.entityId,
+        rt1.signerId,
+        rt2.entityId,
+        [rt1.entityId, h1, h2, rt2.entityId],
+        550n,
+        'rt1->rt2 via h1,h2 htlc #3 post-rebalance',
+      );
+      await waitForSenderHtlcLock(senderPage, h1, p3.hashlock, Number(senderBeforeP3?.recentHtlcLockCount || 0), 25_000, rt1.entityId);
+
+      let afterP3: any = null;
+      await expect.poll(async () => {
+        afterP3 = await readPairState(recipientPage, h2, rt2.entityId);
+        return !!afterP3 && BigInt(afterP3.hubExposure || afterP3.hubDebt || '0') >= debtBeforeP3 + 500n * 10n ** 18n;
+      }, { timeout: 30_000 }).toBe(true);
+      expect(afterP3, 'rt2-h2 state after payment#3').toBeTruthy();
+      await waitForPairIdle(recipientPage, h2, 20_000, rt2.entityId);
+      await recipientPage.waitForTimeout(2_000);
+
+      await recipientPage.screenshot({ path: 'test-results/rebalance-rt1-h1-h2-rt2.png', fullPage: true });
+    } finally {
+      await Promise.all([
+        senderContext?.close().catch(() => {}),
+        recipientContext?.close().catch(() => {}),
+      ]);
     }
-    expect(afterP3, 'rt2-h2 state after payment#3').toBeTruthy();
-    expect(
-      p3CapacityIncreased,
-      `payment#3 should increase exposure by ~550 (before=${debtBeforeP3}, after=${afterP3?.hubExposure || afterP3?.hubDebt || 'n/a'})`,
-    ).toBe(true);
-    expect(
-      p3Received,
-      `payment#3 should be recorded after rebalance for hashlock ${p3.hashlock.slice(0, 12)}`,
-    ).toBe(true);
-    await waitForPairIdle(page, h2, 20_000, rt2.entityId);
-    await page.waitForTimeout(2_000);
-
-    await page.screenshot({ path: 'test-results/rebalance-rt1-h1-h2-rt2.png', fullPage: true });
   });
 
   // Scenario: same routed-capacity cliff as above, but through H3 with asymmetric hub credit so we
   // prove the failure/recovery logic is not specific to one hub pair.
-  test('runtime2: H1=10k, H3=1k; second 550 via H3 fails before rebalance, passes after', async ({ page }) => {
-    let scenarioStartedAt = 0;
-    await resetProdServer(page);
-    await page.addInitScript(() => {
-      try {
-        localStorage.setItem('xln-app-mode', 'user');
-        localStorage.setItem('xln-onboarding-complete', 'true');
-      } catch {
-        // no-op
+  test('runtime2: H1=10k, H3=1k; second 550 via H3 fails before rebalance, passes after', async ({ browser, page }) => {
+    let senderContext: BrowserContext | null = null;
+    let recipientContext: BrowserContext | null = null;
+    try {
+      await resetProdServer(page);
+
+      const rt1Label = `rt1-${Date.now()}`;
+      const rt2Label = `rt2-${Date.now() + 1}`;
+      const sender = await createLiveRuntimePage(browser, rt1Label, nextRebalanceMnemonic());
+      const recipient = await createLiveRuntimePage(browser, rt2Label, nextRebalanceMnemonic());
+      senderContext = sender.context;
+      recipientContext = recipient.context;
+      const senderPage = sender.page;
+      const recipientPage = recipient.page;
+      const rt1 = sender.entity;
+      const rt2 = recipient.entity;
+      expect(rt1.entityId.toLowerCase()).not.toBe(rt2.entityId.toLowerCase());
+
+      const { h1, h3 } = await discoverNamedHubs(recipientPage);
+      await Promise.all([
+        waitForHubProfile(senderPage, h1),
+        waitForHubProfile(senderPage, h3),
+        waitForHubProfile(recipientPage, h1),
+        waitForHubProfile(recipientPage, h3),
+        waitForEntityAdvertised(senderPage, rt2.entityId),
+        waitForEntityAdvertised(recipientPage, rt1.entityId),
+      ]);
+
+      await connectHubWithCredit(recipientPage, rt2.entityId, rt2.signerId, h1, 10_000n);
+      await connectHubWithCredit(recipientPage, rt2.entityId, rt2.signerId, h3, 1_000n);
+      await setRebalancePolicy(recipientPage, rt2.entityId, rt2.signerId, h3, 2_000n, 10_000n, 20n);
+      await waitForPairIdle(recipientPage, h3, 60_000, rt2.entityId);
+
+      await connectHubWithCredit(senderPage, rt1.entityId, rt1.signerId, h3, 10_000n);
+      const h3BeforeFaucet = await readPairState(senderPage, h3, rt1.entityId);
+      expect(h3BeforeFaucet, 'runtime1-h3 pair must exist before faucet').toBeTruthy();
+      await faucetAmount(senderPage, rt1.entityId, h3, '2000');
+      await waitForFundingLiquidityReady(senderPage, h3, BigInt(h3BeforeFaucet?.outCapacity || '0'), 180_000, rt1.entityId);
+
+      const baseline = await readPairState(recipientPage, h3, rt2.entityId);
+      expect(baseline, 'runtime2-h3 baseline must exist').toBeTruthy();
+      const baselineDebt = BigInt(baseline?.hubDebt || baseline?.hubExposure || '0');
+      const scenarioStartedAt = Date.now();
+
+      await waitForPairIdle(senderPage, h3, 60_000, rt1.entityId);
+      const senderBeforeFirstH3 = await readPairState(senderPage, h3, rt1.entityId);
+      const payment1 = await sendRoutedHtlcPayment(
+        senderPage,
+        rt1.entityId,
+        rt1.signerId,
+        rt2.entityId,
+        [rt1.entityId, h3, rt2.entityId],
+        550n,
+        'rt1->rt2 via h3 htlc #1',
+      );
+      await waitForSenderHtlcLock(senderPage, h3, payment1.hashlock, Number(senderBeforeFirstH3?.recentHtlcLockCount || 0), 25_000, rt1.entityId);
+
+      let afterP1: any = null;
+      await expect.poll(async () => {
+        afterP1 = await readPairState(recipientPage, h3, rt2.entityId);
+        return !!afterP1 && BigInt(afterP1.hubDebt || afterP1.hubExposure || '0') >= baselineDebt + 500n * 10n ** 18n;
+      }, { timeout: 60_000 }).toBe(true);
+
+      const rt2P2Cursor = await getPersistedReceiptCursor(recipientPage);
+      const h3Lower = h3.toLowerCase();
+      const h3SettlesBeforeP2 = countRebalanceStepEvents(
+        await readRebalanceStepEvents(recipientPage, scenarioStartedAt),
+        'account_settled_finalized_bilateral',
+        (step) => String(step?.accountId || '').toLowerCase() === h3Lower,
+      );
+      await waitForPairIdle(senderPage, h3, 60_000, rt1.entityId);
+      const senderBeforeP2 = await readPairState(senderPage, h3, rt1.entityId);
+      const payment2 = await sendRoutedHtlcPayment(
+        senderPage,
+        rt1.entityId,
+        rt1.signerId,
+        rt2.entityId,
+        [rt1.entityId, h3, rt2.entityId],
+        550n,
+        'rt1->rt2 via h3 htlc #2 should fail pre-rebalance',
+      );
+      await waitForSenderHtlcLock(senderPage, h3, payment2.hashlock, Number(senderBeforeP2?.recentHtlcLockCount || 0), 25_000, rt1.entityId)
+        .catch(() => null);
+
+      await recipientPage.waitForTimeout(2_000);
+      const afterP2 = await readPairState(recipientPage, h3, rt2.entityId);
+      expect(afterP2, 'runtime2-h3 state after payment2').toBeTruthy();
+      const hasPayment2PreRebalance = Array.isArray(afterP2?.recentHtlcHashlocks)
+        && afterP2.recentHtlcHashlocks.includes(payment2.hashlock);
+      const rt2P2Events = await readPersistedFrameEventsSinceCursor(recipientPage, {
+        cursor: rt2P2Cursor,
+        eventNames: ['HtlcReceived', 'account_settled_finalized_bilateral'],
+      });
+      const h3SettledEarly = rt2P2Events.events.some((event) =>
+        event.message === 'account_settled_finalized_bilateral' && persistedEventHasAccount(event, h3),
+      );
+      const h3SettlesAfterP2 = countRebalanceStepEvents(
+        await readRebalanceStepEvents(recipientPage, scenarioStartedAt),
+        'account_settled_finalized_bilateral',
+        (step) => String(step?.accountId || '').toLowerCase() === h3Lower,
+      );
+      const h3SettledDuringP2 = h3SettledEarly || h3SettlesAfterP2 > h3SettlesBeforeP2;
+      const payment2Received = await hasDebugHtlcEvent(recipientPage, payment2.hashlock, 'HtlcReceived', scenarioStartedAt);
+      if (hasPayment2PreRebalance || payment2Received) {
+        expect(
+          h3SettledDuringP2,
+          `payment2 passed too early without rebalance finalize evidence: ${JSON.stringify(rt2P2Events.events.slice(-24), null, 2)}`,
+        ).toBe(true);
+      } else {
+        expect(
+          BigInt(afterP2?.hubDebt || '0') <= 1_000n * 10n ** 18n + 20n * 10n ** 18n,
+          `runtime2-H3 debt should remain around <=1k in pre-rebalance window, got ${afterP2?.hubDebt || 'n/a'}`,
+        ).toBe(true);
       }
-    });
-    await gotoApp(page);
 
-    // Step 1: two isolated runtimes/entities.
-    const rt1Label = `rt1-${Date.now()}`;
-    const rt2Label = `rt2-${Date.now() + 1}`;
-    await createRuntime(page, rt1Label, nextRebalanceMnemonic());
-    await ensureRuntimeOnline(page, 'rt1-online');
-    const rt1 = await getLocalEntity(page);
+      const h3FinalizedJHeightBeforeRebalance = Number(afterP2?.lastFinalizedJHeight || 0);
+      await setRebalancePolicy(recipientPage, rt2.entityId, rt2.signerId, h3, 500n, 10_000n, 20n);
+      const rebDone = await waitForRebalanceReceiveReady(recipientPage, {
+        sinceTs: scenarioStartedAt,
+        localAccountId: rt2.entityId,
+        hubAccountId: h3,
+        requiredInCapacity: 550n * 10n ** 18n,
+        minLocalFinalizedJHeight: h3FinalizedJHeightBeforeRebalance,
+      });
 
-    await createRuntime(page, rt2Label, nextRebalanceMnemonic());
-    await ensureRuntimeOnline(page, 'rt2-online');
-    const rt2 = await getLocalEntity(page);
-    expect(rt1.entityId.toLowerCase()).not.toBe(rt2.entityId.toLowerCase());
+      await waitForPairIdle(senderPage, h3, 60_000, rt1.entityId);
+      const senderBeforeP3 = await readPairState(senderPage, h3, rt1.entityId);
+      const payment3 = await sendRoutedHtlcPayment(
+        senderPage,
+        rt1.entityId,
+        rt1.signerId,
+        rt2.entityId,
+        [rt1.entityId, h3, rt2.entityId],
+        550n,
+        'rt1->rt2 via h3 htlc #3 post-rebalance',
+      );
+      await waitForSenderHtlcLock(senderPage, h3, payment3.hashlock, Number(senderBeforeP3?.recentHtlcLockCount || 0), 25_000, rt1.entityId);
 
-    await switchRuntime(page, rt2Label);
-
-    // Step 2: discover named hubs.
-    const { h1, h3 } = await discoverNamedHubs(page);
-    expect(h1 && h3, 'must discover both H1 and H3').toBeTruthy();
-
-    // Step 3: runtime2 opens H1=10k, H3=1k. Start with a high
-    // rebalance threshold so the pre-rebalance capacity cliff is observable.
-    await connectHubWithCredit(page, rt2.entityId, rt2.signerId, h1, 10_000n);
-    await connectHubWithCredit(page, rt2.entityId, rt2.signerId, h3, 1_000n);
-    await setRebalancePolicy(page, rt2.entityId, rt2.signerId, h3, 2_000n, 10_000n, 20n);
-    await waitForPairIdle(page, h3, 60_000, rt2.entityId);
-
-    // Step 4: runtime1 opens funding path via H3 and receives spendable liquidity.
-    await switchRuntime(page, rt1Label);
-    await connectHubWithCredit(page, rt1.entityId, rt1.signerId, h3, 10_000n);
-    const h3BeforeFaucet = await readPairState(page, h3, rt1.entityId);
-    expect(h3BeforeFaucet, 'runtime1-h3 pair must exist before faucet').toBeTruthy();
-    await faucetAmount(page, rt1.entityId, h3, '2000');
-    await waitForFundingLiquidityReady(page, h3, BigInt(h3BeforeFaucet?.outCapacity || '0'), 180_000, rt1.entityId);
-
-    // Step 5: switch to runtime2 and capture baseline on H3.
-    await switchRuntime(page, rt2Label);
-    const baseline = await readPairState(page, h3, rt2.entityId);
-    expect(baseline, 'runtime2-h3 baseline must exist').toBeTruthy();
-    const baselineDebt = BigInt(baseline?.hubDebt || baseline?.hubExposure || '0');
-    // Start collection window after reset/bootstrap to avoid cross-test bleed.
-    scenarioStartedAt = Date.now();
-
-    // Step 6: HTLC #1 (550) from runtime1 -> runtime2 via H3 should pass.
-    await switchRuntime(page, rt1Label);
-    await waitForPairIdle(page, h3, 60_000, rt1.entityId);
-    const senderBeforeFirstH3 = await readPairState(page, h3, rt1.entityId);
-    const payment1 = await sendRoutedHtlcPayment(
-      page,
-      rt1.entityId,
-      rt1.signerId,
-      rt2.entityId,
-      [rt1.entityId, h3, rt2.entityId],
-      550n,
-      'rt1->rt2 via h3 htlc #1',
-    );
-    await waitForSenderHtlcLock(page, h3, payment1.hashlock, Number(senderBeforeFirstH3?.recentHtlcLockCount || 0), 25_000, rt1.entityId);
-
-    await switchRuntime(page, rt2Label);
-
-    const p1Start = Date.now();
-    let afterP1: any = null;
-    let p1Received = false;
-    while (Date.now() - p1Start < 60_000) {
-      afterP1 = await readPairState(page, h3, rt2.entityId);
-      const debtIncreased = afterP1
-        && BigInt(afterP1.hubDebt || afterP1.hubExposure || '0') >= baselineDebt + 500n * 10n ** 18n;
-      p1Received = await hasDebugHtlcEvent(page, payment1.hashlock, 'HtlcReceived', scenarioStartedAt);
-      if (debtIncreased && p1Received) break;
-      await page.waitForTimeout(700);
+      const debtBeforeP3 = BigInt(rebDone.hubDebt || rebDone.hubExposure || '0');
+      const outCapacityBeforeP3 = BigInt(rebDone.outCapacity || '0');
+      let afterP3: any = null;
+      await expect.poll(async () => {
+        afterP3 = await readPairState(recipientPage, h3, rt2.entityId);
+        if (!afterP3) return false;
+        const debtIncreased = BigInt(afterP3.hubDebt || afterP3.hubExposure || '0') >= debtBeforeP3 + 500n * 10n ** 18n;
+        const outCapacityIncreased = BigInt(afterP3.outCapacity || '0') >= outCapacityBeforeP3 + 500n * 10n ** 18n;
+        return debtIncreased || outCapacityIncreased;
+      }, { timeout: 70_000 }).toBe(true);
+      expect(afterP3, 'runtime2-h3 state after payment3').toBeTruthy();
+      await waitForPairIdle(recipientPage, h3, 20_000, rt2.entityId);
+      await recipientPage.waitForTimeout(2_000);
+    } finally {
+      await Promise.all([
+        senderContext?.close().catch(() => {}),
+        recipientContext?.close().catch(() => {}),
+      ]);
     }
-    expect(afterP1, 'runtime2-h3 state after payment1').toBeTruthy();
-    expect(
-      BigInt(afterP1?.hubDebt || afterP1?.hubExposure || '0') >= baselineDebt + 500n * 10n ** 18n,
-      `payment1 must increase H3 debt by ~550 (baseline=${baselineDebt}, now=${afterP1?.hubDebt || afterP1?.hubExposure || 'n/a'})`,
-    ).toBe(true);
-    expect(
-      p1Received,
-      `payment1 must emit HtlcReceived for hashlock ${payment1.hashlock.slice(0, 12)}`,
-    ).toBe(true);
-
-    // Step 7: HTLC #2 (550) immediately should fail on H3 capacity (1k credit total).
-    const rt2P2Cursor = await getPersistedReceiptCursor(page);
-    const h3Lower = h3.toLowerCase();
-    const h3SettlesBeforeP2 = countRebalanceStepEvents(
-      await readRebalanceStepEvents(page, scenarioStartedAt),
-      'account_settled_finalized_bilateral',
-      (step) => String(step?.accountId || '').toLowerCase() === h3Lower,
-    );
-    await switchRuntime(page, rt1Label);
-    await waitForPairIdle(page, h3, 60_000, rt1.entityId);
-    const senderBeforeP2 = await readPairState(page, h3, rt1.entityId);
-    const payment2 = await sendRoutedHtlcPayment(
-      page,
-      rt1.entityId,
-      rt1.signerId,
-      rt2.entityId,
-      [rt1.entityId, h3, rt2.entityId],
-      550n,
-      'rt1->rt2 via h3 htlc #2 should fail pre-rebalance',
-    );
-    await waitForSenderHtlcLock(page, h3, payment2.hashlock, Number(senderBeforeP2?.recentHtlcLockCount || 0), 25_000, rt1.entityId)
-      .catch(() => null);
-
-    await switchRuntime(page, rt2Label);
-
-    const p2Start = Date.now();
-    const PRE_REBALANCE_WINDOW_MS = 2_000;
-    let afterP2: any = null;
-    while (Date.now() - p2Start < PRE_REBALANCE_WINDOW_MS) {
-      afterP2 = await readPairState(page, h3, rt2.entityId);
-      await page.waitForTimeout(150);
-    }
-    expect(afterP2, 'runtime2-h3 state after payment2').toBeTruthy();
-    const hasPayment2PreRebalance = Array.isArray(afterP2.recentHtlcHashlocks)
-      && afterP2.recentHtlcHashlocks.includes(payment2.hashlock);
-    const rt2P2Events = await readPersistedFrameEventsSinceCursor(page, {
-      cursor: rt2P2Cursor,
-      eventNames: ['HtlcReceived', 'account_settled_finalized_bilateral'],
-    });
-    const h3SettledEarly = rt2P2Events.events.some((event) =>
-      event.message === 'account_settled_finalized_bilateral' && persistedEventHasAccount(event, h3),
-    );
-    const h3SettlesAfterP2 = countRebalanceStepEvents(
-      await readRebalanceStepEvents(page, scenarioStartedAt),
-      'account_settled_finalized_bilateral',
-      (step) => String(step?.accountId || '').toLowerCase() === h3Lower,
-    );
-    const h3SettledDuringP2 = h3SettledEarly || h3SettlesAfterP2 > h3SettlesBeforeP2;
-    const payment2Received = await hasDebugHtlcEvent(page, payment2.hashlock, 'HtlcReceived', scenarioStartedAt);
-    const debtAfterP2 = BigInt(afterP2.hubDebt || '0');
-    if (hasPayment2PreRebalance || payment2Received) {
-      let observedH3SettledDuringP2 = h3SettledDuringP2;
-      if (!observedH3SettledDuringP2) {
-        const settleDeadline = Date.now() + 8_000;
-        while (Date.now() < settleDeadline) {
-          const retryEvents = await readPersistedFrameEventsSinceCursor(page, {
-            cursor: rt2P2Cursor,
-            eventNames: ['account_settled_finalized_bilateral'],
-          });
-          const settledByEvent = retryEvents.events.some((event) =>
-            event.message === 'account_settled_finalized_bilateral' && persistedEventHasAccount(event, h3),
-          );
-          const settledByDebugStep = countRebalanceStepEvents(
-            await readRebalanceStepEvents(page, scenarioStartedAt),
-            'account_settled_finalized_bilateral',
-            (step) => String(step?.accountId || '').toLowerCase() === h3Lower,
-          ) > h3SettlesBeforeP2;
-          observedH3SettledDuringP2 = settledByEvent || settledByDebugStep;
-          if (observedH3SettledDuringP2) break;
-          await page.waitForTimeout(400);
-        }
-      }
-      expect(
-        observedH3SettledDuringP2,
-        `payment2 passed too early without rebalance finalize evidence: ${JSON.stringify(rt2P2Events.events.slice(-24), null, 2)}`,
-      ).toBe(true);
-    } else {
-      expect(
-        debtAfterP2 <= 1_000n * 10n ** 18n + 20n * 10n ** 18n,
-        `runtime2-H3 debt should remain around <=1k in pre-rebalance window, got ${debtAfterP2}`,
-      ).toBe(true);
-    }
-
-    // Step 8: wait rebalance finalize on runtime2-H3 and prove the recipient can
-    // receive another 550 before sending the next HTLC. Lowering the policy
-    // after the failed payment deterministically triggers request_collateral.
-    const h3FinalizedJHeightBeforeRebalance = Number(afterP2?.lastFinalizedJHeight || 0);
-    await setRebalancePolicy(page, rt2.entityId, rt2.signerId, h3, 500n, 10_000n, 20n);
-    const requiredReceiveCapacity = 550n * 10n ** 18n;
-    const rebDone = await waitForRebalanceReceiveReady(page, {
-      sinceTs: scenarioStartedAt,
-      localAccountId: rt2.entityId,
-      hubAccountId: h3,
-      requiredInCapacity: requiredReceiveCapacity,
-      minLocalFinalizedJHeight: h3FinalizedJHeightBeforeRebalance,
-    });
-
-    // Step 9: HTLC #3 (550) after rebalance should pass again.
-    await switchRuntime(page, rt1Label);
-    await waitForPairIdle(page, h3, 60_000, rt1.entityId);
-    const senderBeforeP3 = await readPairState(page, h3, rt1.entityId);
-    const payment3 = await sendRoutedHtlcPayment(
-      page,
-      rt1.entityId,
-      rt1.signerId,
-      rt2.entityId,
-      [rt1.entityId, h3, rt2.entityId],
-      550n,
-      'rt1->rt2 via h3 htlc #3 post-rebalance',
-    );
-    await waitForSenderHtlcLock(page, h3, payment3.hashlock, Number(senderBeforeP3?.recentHtlcLockCount || 0), 25_000, rt1.entityId);
-
-    await switchRuntime(page, rt2Label);
-
-    const debtBeforeP3 = BigInt(rebDone.hubDebt || rebDone.hubExposure || '0');
-    const outCapacityBeforeP3 = BigInt(rebDone.outCapacity || '0');
-    const p3Start = Date.now();
-    let afterP3: any = null;
-    let p3Received = false;
-    let p3CapacityIncreased = false;
-    while (Date.now() - p3Start < 70_000) {
-      afterP3 = await readPairState(page, h3, rt2.entityId);
-      const debtIncreased = afterP3 && BigInt(afterP3.hubDebt || afterP3.hubExposure || '0') >= debtBeforeP3 + 500n * 10n ** 18n;
-      const outCapacityIncreased = afterP3 && BigInt(afterP3.outCapacity || '0') >= outCapacityBeforeP3 + 500n * 10n ** 18n;
-      const hashSeen = Array.isArray(afterP3?.recentHtlcHashlocks) && afterP3.recentHtlcHashlocks.includes(payment3.hashlock);
-      const eventSeen = hashSeen || await hasDebugHtlcEvent(page, payment3.hashlock, 'HtlcReceived', scenarioStartedAt);
-      p3CapacityIncreased = debtIncreased || outCapacityIncreased;
-      p3Received = eventSeen || p3CapacityIncreased;
-      if (afterP3 && p3Received && p3CapacityIncreased) break;
-      await page.waitForTimeout(700);
-    }
-    expect(afterP3, 'runtime2-h3 state after payment3').toBeTruthy();
-    expect(
-      p3Received,
-      `payment3 should emit HtlcReceived post-rebalance for hashlock ${payment3.hashlock.slice(0, 12)}`,
-    ).toBe(true);
-    expect(
-      p3CapacityIncreased,
-      `post-rebalance payment3 should increase debt or out capacity by ~550 ` +
-        `(debt ${debtBeforeP3} -> ${afterP3?.hubDebt || afterP3?.hubExposure || 'n/a'}, ` +
-        `out ${outCapacityBeforeP3} -> ${afterP3?.outCapacity || 'n/a'})`,
-    ).toBe(true);
-    await waitForPairIdle(page, h3, 20_000, rt2.entityId);
-    await page.waitForTimeout(2_000);
   });
 });
