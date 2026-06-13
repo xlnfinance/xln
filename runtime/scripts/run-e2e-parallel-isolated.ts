@@ -1531,6 +1531,7 @@ const runShard = async (
     markPhase('playwright', playwrightStart);
 
     if (code !== 0) {
+      teardownReason = `playwright_exit_${code}`;
       await captureShardFailureForensics({
         logsDir,
         shard,
@@ -1546,7 +1547,7 @@ const runShard = async (
         title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
         requireMarketMaker: task.requireMarketMaker,
         phaseMs,
-        error: `playwright_exit_${code}`,
+        error: teardownReason,
       };
     }
 
@@ -1589,7 +1590,13 @@ const runShard = async (
       const normalizedReason = teardownReason.replace(/\n/g, '\n[runner]   ');
       log.write(`[runner] ${teardownLabel} -> SIGTERM api pid=${api.pid} reason=${normalizedReason}\n`);
     }
-    await Promise.all([stopProcess(vite), stopProcess(api), stopProcess(anvil), stopProcess(anvil2)]);
+    if (!teardownReason && api && api.exitCode === null) {
+      log.write('[runner] playwright passed; draining runtime side-effects before teardown\n');
+      await delay(1500);
+    }
+    await stopProcess(vite);
+    await stopProcess(api);
+    await Promise.all([stopProcess(anvil), stopProcess(anvil2)]);
     log.end();
   }
 };
