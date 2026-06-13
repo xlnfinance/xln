@@ -4,6 +4,8 @@ const fs = require('fs');
 const path = require('path');
 const { execSync } = require('child_process');
 
+const DEFAULT_CHUNK_TOKEN_LIMIT = 180_000;
+
 // CORE FILES ONLY - Everything an LLM needs to understand XLN
 // READ ORDER: Solidity contracts FIRST (source of truth), then TypeScript runtime
 const CORE_FILES = {
@@ -43,6 +45,47 @@ const CORE_FILES = {
     'entity-tx/handlers/htlc-payment.ts',    // HTLC payment routing
     'entity-tx/handlers/create-settlement.ts', // Settlement creation
     'entity-tx/handlers/mint-reserves.ts',   // Reserve minting (J-events)
+    'entity-tx/handlers/dispute.ts',         // Dispute/salvage gateway and evidence handling
+
+    // Swaps, orderbooks, and cross-jurisdiction markets (critical for current product)
+    'runtime-swap-pairs.ts',                 // Canonical same-chain swap pair orientation and policies
+    'swap-execution.ts',                     // Swap lifecycle helpers and terminal settlement summaries
+    'swap-keys.ts',                          // Swap/order identifier keys and namespacing
+    'open-swap-offers.ts',                   // Open swap offer projection
+    'cross-jurisdiction.ts',                 // Cross-j route hash, market, and fill-progress helpers
+    'cross-jurisdiction-market.ts',          // Canonical cross-j market derivation
+    'cross-jurisdiction-orderbook.ts',       // Cross-j book-owner and route ownership rules
+    'cross-jurisdiction-boundary.ts',        // Runtime topology for source/target/book-owner roles
+    'entity-consensus/cross-j-orderbook.ts', // Cross-j admission lookup/stash/drain helpers
+    'entity-tx/cross-j-outputs.ts',          // Cross-j runtime outputs and notices
+    'entity-tx/cross-jurisdiction-helpers.ts', // Cross-j account/route helper logic
+    'entity-tx/handlers/swap-requests.ts',   // Same-chain and cross-j swap request creation
+    'entity-tx/handlers/cross-j-setup.ts',   // Cross-j setup/admission path
+    'entity-tx/handlers/cross-j-book-order.ts', // Remote book-order admission
+    'entity-tx/handlers/cross-j-fill.ts',    // Cross-j fill notice routing
+    'entity-tx/handlers/cross-j-salvage.ts', // Cross-j salvage path
+    'entity-tx/handlers/cross-j-clear.ts',   // Cross-j route cleanup
+    'entity-tx/handlers/cross-j-sweep.ts',   // Cross-j terminal sweep
+    'entity-tx/handlers/account/orderbook-offers.ts', // Book order projection from swap offers
+    'entity-tx/handlers/account/orderbook-matching.ts', // Account matching orchestrator
+    'entity-tx/handlers/account/orderbook-matching-same.ts', // Same-chain order matching
+    'entity-tx/handlers/account/orderbook-matching-cross.ts', // Cross-j order matching
+    'entity-tx/handlers/account/orderbook-matching-helpers.ts', // Shared matching helpers
+    'entity-tx/handlers/account/orderbook-cancels.ts', // Orderbook cancellation path
+    'account-tx/handlers/swap-offer.ts',     // Account-level swap offer placement
+    'account-tx/handlers/swap-resolve.ts',   // Swap settlement / hashladder resolution
+    'account-tx/handlers/swap-cancel.ts',    // Swap cancellation
+    'account-tx/handlers/cross-swap-fill-ack.ts', // Cross-j fill acknowledgement processing
+    'orderbook/cross-j.ts',                  // Cross-j book types and conversion helpers
+    'market-snapshot.ts',                    // Market snapshot projection
+    'relay/market-subscriptions.ts',         // Orderbook streaming subscriptions
+    'market-subscription-limiter.ts',        // Stream rate limiting
+    'orchestrator/mm-node.ts',               // Market maker bootstrap, quote loop, cross books
+    'server/market-maker-health.ts',         // Health/self-test contract for MM books
+    'orchestrator/mesh-common.ts',           // Bootstrap defaults for hubs/MM/accounts
+    'dispute-arguments.ts',                  // Dispute argument builder/evidence inclusion
+    'watchtower/action.ts',                  // Watchtower action decisions
+    'server/watchtower-proxy.ts',            // Runtime watchtower proxy API
 
     'account-tx/index.ts',   // Account transaction types
     'account-tx/apply.ts',   // Account transaction dispatcher
@@ -76,6 +119,30 @@ const CORE_FILES = {
     'implementation/payment-spec.md',  // Payment and HTLC/onion system
     'recovery-watchtower-protocol.md', // Recovery and offline dispute safety
     'fintech-type-safety-protocol.md', // Type-safety rules for money-moving code
+    'core/11_Jurisdiction_Machine.md', // J-machine semantics and on-chain settlement role
+    'security/dispute-two-arguments-spec.md', // Dispute/evidence proof model
+    'security/external-audit-brief.md', // Audit brief and current security framing
+  ],
+  swapUi: [
+    // Included in default llms.txt because swap UX bugs often come from UI/runtime mismatch
+    'src/lib/components/Entity/SwapPanel.svelte', // Main swap form, same/cross/routed UI
+    'src/lib/components/Trading/OrderbookPanel.svelte', // Orderbook stream/render/click behavior
+    'src/lib/components/Entity/RoutedRouteControls.svelte', // Routed route option and hop controls
+    'src/lib/components/Entity/routed-swap-planner.ts', // Route candidate planner and hop quotes
+    'src/lib/components/Entity/routed-swap-execution.ts', // Best-effort sequential route runner
+  ],
+  tests: [
+    // Behavior contracts: if code and prose disagree, these tests show intended user flow
+    'runtime/__tests__/cross-jurisdiction-swap.test.ts',
+    'runtime/__tests__/cross-jurisdiction-security.test.ts',
+    'runtime/__tests__/market-subscription-stack.test.ts',
+    'runtime/__tests__/market-maker-health.test.ts',
+    'runtime/__tests__/orderbook-lifecycle.test.ts',
+    'runtime/__tests__/orderbook-matching-fallback.test.ts',
+    'runtime/__tests__/swap-order-preparation.test.ts',
+    'tests/unit/routed-swap-planner.test.ts',
+    'tests/e2e-swap.spec.ts',
+    'tests/e2e-cross-j-swap.spec.ts',
   ],
   frontend: [
     // Optional UI/UX architecture (use --frontend flag)
@@ -94,9 +161,27 @@ function countLines(content) {
   return content.split('\n').length;
 }
 
+function estimateTokens(contentOrBytes) {
+  const bytes = typeof contentOrBytes === 'number'
+    ? contentOrBytes
+    : Buffer.byteLength(String(contentOrBytes), 'utf8');
+  return Math.round(bytes / 3.5);
+}
+
+function parseChunkTokenLimit() {
+  const arg = process.argv.find((value) => value.startsWith('--chunk-tokens='));
+  if (!arg) return DEFAULT_CHUNK_TOKEN_LIMIT;
+  const parsed = Number(arg.slice('--chunk-tokens='.length));
+  if (!Number.isFinite(parsed) || parsed < 50_000) {
+    throw new Error(`Invalid --chunk-tokens value: ${arg}`);
+  }
+  return Math.floor(parsed);
+}
+
 function generateSemanticOverview(contractsDir, runtimeDir, docsDir, frontendDir, totalTokens, includeFrontend) {
   // Count lines for each file
   const fileSizes = {};
+  const projectRoot = path.resolve(docsDir, '..');
 
   CORE_FILES.contracts.forEach(file => {
     const content = readFileContent(contractsDir, file);
@@ -111,6 +196,16 @@ function generateSemanticOverview(contractsDir, runtimeDir, docsDir, frontendDir
   CORE_FILES.docs.forEach(file => {
     const content = readFileContent(docsDir, file);
     if (content) fileSizes[`docs/${file}`] = countLines(content);
+  });
+
+  CORE_FILES.swapUi.forEach(file => {
+    const content = readFileContent(frontendDir, file);
+    if (content) fileSizes[`frontend/${file}`] = countLines(content);
+  });
+
+  CORE_FILES.tests.forEach(file => {
+    const content = readFileContent(projectRoot, file);
+    if (content) fileSizes[file] = countLines(content);
   });
 
   if (includeFrontend) {
@@ -301,6 +396,109 @@ One account, many subcontracts. All execute bilaterally, chain sees nothing unle
 - "Is recovery optional?" -> No. Offline recovery/watchtower is a live mainnet requirement
 - "What doc is current?" -> \`docs/status.md\` for current truth, \`docs/mainnet.md\` for launch bar
 
+## Swap + Cross-Jurisdiction Runtime Flow
+
+The current product-critical path is not just payments. It includes same-chain
+swaps, cross-jurisdiction swaps, public orderbooks, market-maker bootstrapping,
+route candidates, and best-effort routed execution.
+
+### Same-chain swap
+
+\`\`\`
+User UI -> placeSwapOffer
+  -> entity-tx/handlers/swap-requests.ts
+  -> account-tx/handlers/swap-offer.ts
+  -> account orderbook matching
+  -> account-tx/handlers/swap-resolve.ts
+  -> swap closed/open projections
+\`\`\`
+
+Same-chain orderbook matching lives in:
+- \`runtime/entity-tx/handlers/account/orderbook-matching-same.ts\`
+- \`runtime/entity-tx/handlers/account/orderbook-matching-helpers.ts\`
+- \`runtime/account-tx/handlers/swap-offer.ts\`
+- \`runtime/account-tx/handlers/swap-resolve.ts\`
+
+The UI contract is: clicking a red/green real orderbook level must select the
+concrete hub/row and update the visible form amounts/assets. All-hubs mode must
+not merge rows in a way that loses the source hub because a click must map to a
+specific executable venue.
+
+### Cross-jurisdiction swap
+
+Cross-j swaps have three roles:
+- source hub/account: where the user's source-side obligation starts
+- target hub/account: where the target-side obligation finishes
+- book owner: canonical owner of the shared cross-j orderbook for the venue
+
+\`\`\`
+requestCrossJurisdictionSwap
+  -> cross-j setup/admission
+  -> remote book order
+  -> book owner matching
+  -> cross_swap_fill_ack / fill notice
+  -> pull/swap resolve on both sides
+  -> clear/sweep/salvage if something breaks
+  -> dispute path if salvage cannot finish off-chain
+\`\`\`
+
+Read these together:
+- \`runtime/cross-jurisdiction.ts\`
+- \`runtime/cross-jurisdiction-market.ts\`
+- \`runtime/cross-jurisdiction-orderbook.ts\`
+- \`runtime/cross-jurisdiction-boundary.ts\`
+- \`runtime/entity-consensus/cross-j-orderbook.ts\`
+- \`runtime/entity-tx/handlers/cross-j-*.ts\`
+- \`runtime/account-tx/handlers/cross-swap-fill-ack.ts\`
+
+Design rule: expected market failures (no liquidity, no market, quote expired)
+are terminal user-visible swap failures/cancellations, not protocol fatals.
+Unexpected protocol divergence, impossible ownership, invalid signer binding, or
+state-machine contradiction must fail fast and stop the loop with a debuggable
+payload rather than retrying silently.
+
+### Routed swap
+
+Atomic routed settlement is intentionally not assumed. A route is best-effort:
+hop 2 starts only after hop 1 is fully settled; hop 3 starts only after hop 2 is
+fully settled. If a hop loses liquidity, the route stops, cancels open work where
+possible, and exposes a debug trail. The UI should show hop tabs/orderbooks, not
+pretend a multi-hop path is one merged executable orderbook unless a real
+synthetic book with compounded depth/slippage is explicitly implemented and
+clearly labeled.
+
+Relevant files:
+- \`frontend/src/lib/components/Entity/routed-swap-planner.ts\`
+- \`frontend/src/lib/components/Entity/routed-swap-execution.ts\`
+- \`frontend/src/lib/components/Entity/RoutedRouteControls.svelte\`
+- \`frontend/src/lib/components/Entity/SwapPanel.svelte\`
+- \`tests/unit/routed-swap-planner.test.ts\`
+- \`tests/e2e-cross-j-swap.spec.ts\`
+
+### Market maker and orderbook readiness
+
+The test market maker must prepublish same-chain books and ETH/TRON cross-chain
+books before user swaps run. Empty books are a setup failure, not a user-flow
+failure. Health/self-test lives in:
+- \`runtime/orchestrator/mm-node.ts\`
+- \`runtime/server/market-maker-health.ts\`
+- \`runtime/relay/market-subscriptions.ts\`
+- \`tests/e2e-cross-j-swap.spec.ts\` ("market maker prepublishes...")
+
+### Smart-contract backstop
+
+The security argument depends on the on-chain exit actually working:
+- \`Depository.sol\` anchors reserves/collateral and FIFO debt enforcement
+- \`Account.sol\` verifies bilateral account settlement/dispute state
+- \`DeltaTransformer.sol\` verifies delta-transforming primitives
+- \`runtime/dispute-arguments.ts\` builds dispute arguments/evidence
+- \`runtime/entity-tx/handlers/dispute.ts\` gates dispute starts
+- \`docs/security/dispute-two-arguments-spec.md\` explains the evidence model
+
+If cross-j salvage cannot lead to a valid dispute path, the backstop is broken.
+Do not accept “on-chain dispute fixes worst case” unless the exact
+salvage -> evidence -> dispute -> finalization path is tested.
+
 ## Token Budget Guide (~${Math.round(totalTokens / 1000)}k tokens total)
 
 **Conceptual path (read first, ~20min):**
@@ -351,6 +549,21 @@ xln/
     account-crypto.ts            ${fileSizes['runtime/account-crypto.ts'] || '?'} lines - Signature verification
     runtime-jurisdiction-api.ts  ${fileSizes['runtime/runtime-jurisdiction-api.ts'] || '?'} lines - J-adapter / on-chain integration
 
+    swap/cross-j/orderbook:
+      runtime-swap-pairs.ts       ${fileSizes['runtime/runtime-swap-pairs.ts'] || '?'} lines - Same-chain pair orientation/policies
+      swap-execution.ts           ${fileSizes['runtime/swap-execution.ts'] || '?'} lines - Swap lifecycle helpers
+      cross-jurisdiction.ts       ${fileSizes['runtime/cross-jurisdiction.ts'] || '?'} lines - Cross-j route hashes and fill progress
+      cross-jurisdiction-market.ts ${fileSizes['runtime/cross-jurisdiction-market.ts'] || '?'} lines - Cross-j market derivation
+      cross-jurisdiction-orderbook.ts ${fileSizes['runtime/cross-jurisdiction-orderbook.ts'] || '?'} lines - Cross-j book owner rules
+      entity-consensus/cross-j-orderbook.ts ${fileSizes['runtime/entity-consensus/cross-j-orderbook.ts'] || '?'} lines - Cross-j admissions
+      entity-tx/handlers/cross-j-*.ts - Cross-j setup/book/fill/salvage/clear/sweep
+      entity-tx/handlers/account/orderbook-matching-*.ts - Same/cross matching
+      account-tx/handlers/swap-*.ts - Account-level offer/resolve/cancel
+      account-tx/handlers/cross-swap-fill-ack.ts ${fileSizes['runtime/account-tx/handlers/cross-swap-fill-ack.ts'] || '?'} lines - Fill ACK processing
+      relay/market-subscriptions.ts ${fileSizes['runtime/relay/market-subscriptions.ts'] || '?'} lines - Book streaming
+      orchestrator/mm-node.ts     ${fileSizes['runtime/orchestrator/mm-node.ts'] || '?'} lines - Market-maker bootstrap/quotes
+      server/market-maker-health.ts ${fileSizes['runtime/server/market-maker-health.ts'] || '?'} lines - MM readiness health
+
     entity-tx/
       index.ts                   ${fileSizes['runtime/entity-tx/index.ts'] || '?'} lines - Entity transaction types
       apply.ts                   ${fileSizes['runtime/entity-tx/apply.ts'] || '?'} lines - Entity tx dispatcher
@@ -390,6 +603,21 @@ xln/
     implementation/payment-spec.md      ${fileSizes['docs/implementation/payment-spec.md'] || '?'} lines - Payments, HTLCs, onion routing
     recovery-watchtower-protocol.md     ${fileSizes['docs/recovery-watchtower-protocol.md'] || '?'} lines - Recovery and offline dispute safety
     fintech-type-safety-protocol.md     ${fileSizes['docs/fintech-type-safety-protocol.md'] || '?'} lines - Type-safety rules for money-moving code
+    core/11_Jurisdiction_Machine.md     ${fileSizes['docs/core/11_Jurisdiction_Machine.md'] || '?'} lines - J-machine semantics
+    security/dispute-two-arguments-spec.md ${fileSizes['docs/security/dispute-two-arguments-spec.md'] || '?'} lines - Dispute evidence model
+    security/external-audit-brief.md    ${fileSizes['docs/security/external-audit-brief.md'] || '?'} lines - External audit brief
+
+  frontend swap core/
+    src/lib/components/Entity/SwapPanel.svelte ${fileSizes['frontend/src/lib/components/Entity/SwapPanel.svelte'] || '?'} lines - Swap UI/state machine
+    src/lib/components/Trading/OrderbookPanel.svelte ${fileSizes['frontend/src/lib/components/Trading/OrderbookPanel.svelte'] || '?'} lines - Orderbook stream/render/clicks
+    src/lib/components/Entity/RoutedRouteControls.svelte ${fileSizes['frontend/src/lib/components/Entity/RoutedRouteControls.svelte'] || '?'} lines - Route option/hop controls
+    src/lib/components/Entity/routed-swap-planner.ts ${fileSizes['frontend/src/lib/components/Entity/routed-swap-planner.ts'] || '?'} lines - Routed planner
+    src/lib/components/Entity/routed-swap-execution.ts ${fileSizes['frontend/src/lib/components/Entity/routed-swap-execution.ts'] || '?'} lines - Routed runner
+
+  behavior tests/
+    tests/e2e-swap.spec.ts              ${fileSizes['tests/e2e-swap.spec.ts'] || '?'} lines - Same-chain swap UX contract
+    tests/e2e-cross-j-swap.spec.ts      ${fileSizes['tests/e2e-cross-j-swap.spec.ts'] || '?'} lines - Cross-j/routed UX contract
+    tests/unit/routed-swap-planner.test.ts ${fileSizes['tests/unit/routed-swap-planner.test.ts'] || '?'} lines - Routed planner contract
 
 ${includeFrontend ? `
   frontend/
@@ -473,6 +701,26 @@ function generateContext({ solOnly, includeFrontend }) {
       }
     });
 
+    CORE_FILES.swapUi.forEach(file => {
+      const content = readFileContent(frontendDir, file);
+      if (content) {
+        const lines = countLines(content);
+        const bytes = Buffer.byteLength(content, 'utf8');
+        fileStats.push({ file: `frontend/${file}`, lines, bytes });
+        allFiles.push({ path: `frontend/${file}`, content, lines });
+      }
+    });
+
+    CORE_FILES.tests.forEach(file => {
+      const content = readFileContent(projectRoot, file);
+      if (content) {
+        const lines = countLines(content);
+        const bytes = Buffer.byteLength(content, 'utf8');
+        fileStats.push({ file, lines, bytes });
+        allFiles.push({ path: file, content, lines });
+      }
+    });
+
     if (includeFrontend) {
       CORE_FILES.frontend.forEach(file => {
         const content = readFileContent(frontendDir, file);
@@ -491,7 +739,8 @@ function generateContext({ solOnly, includeFrontend }) {
   const totalTokens = Math.round(totalBytes / 3.5);
 
   // Generate overview with token count
-  let output = generateSemanticOverview(contractsDir, runtimeDir, docsDir, frontendDir, totalTokens, includeFrontend);
+  const overview = generateSemanticOverview(contractsDir, runtimeDir, docsDir, frontendDir, totalTokens, includeFrontend);
+  let output = overview;
 
   // Append all file contents
   allFiles.forEach(({ path, content, lines }) => {
@@ -499,7 +748,109 @@ function generateContext({ solOnly, includeFrontend }) {
     output += content + '\n';
   });
 
-  return { output, fileStats };
+  return { output, fileStats, overview, allFiles };
+}
+
+function makeChunkPreamble({ outputFilename, partIndex, totalParts, allChunkNames, files }) {
+  const coverage = files.length > 0
+    ? files.map((file) => `- ${file.path}`).join('\n')
+    : '- Semantic overview and audit instructions';
+  return `# XLN llms.txt Chunk ${partIndex}/${totalParts}
+
+This is one chunk of ${outputFilename}. Do not produce a final audit from this
+chunk alone. Load every chunk listed below, then audit the complete system.
+
+Chunks:
+${allChunkNames.map((name) => `- ${name}`).join('\n')}
+
+Coverage in this chunk:
+${coverage}
+
+`;
+}
+
+function buildChunkFiles({ overview, allFiles, outputFilename, tokenLimit }) {
+  const overviewFile = {
+    path: 'SEMANTIC_OVERVIEW.md',
+    lines: countLines(overview),
+    content: overview,
+  };
+  const sourceFiles = [overviewFile, ...allFiles];
+  const chunks = [];
+  let currentFiles = [];
+  let currentTokens = 0;
+
+  for (const file of sourceFiles) {
+    const serialized = file.path === 'SEMANTIC_OVERVIEW.md'
+      ? file.content
+      : `\n//${file.path} (${file.lines} lines)\n${file.content}\n`;
+    const tokens = estimateTokens(serialized);
+    if (currentFiles.length > 0 && currentTokens + tokens > tokenLimit) {
+      chunks.push(currentFiles);
+      currentFiles = [];
+      currentTokens = 0;
+    }
+    currentFiles.push({ ...file, serialized, tokens });
+    currentTokens += tokens;
+  }
+  if (currentFiles.length > 0) chunks.push(currentFiles);
+
+  const base = outputFilename.replace(/\.txt$/i, '');
+  const width = Math.max(2, String(chunks.length).length);
+  const chunkNames = chunks.map((_, index) => `${base}_part_${String(index + 1).padStart(width, '0')}.txt`);
+
+  return chunks.map((files, index) => {
+    const preamble = makeChunkPreamble({
+      outputFilename,
+      partIndex: index + 1,
+      totalParts: chunks.length,
+      allChunkNames: chunkNames,
+      files: files.filter((file) => file.path !== 'SEMANTIC_OVERVIEW.md'),
+    });
+    return {
+      filename: chunkNames[index],
+      files,
+      content: `${preamble}${files.map((file) => file.serialized).join('')}`,
+    };
+  });
+}
+
+function buildManifest({ outputFilename, chunkFiles, fileStats, tokenLimit }) {
+  const chunkRows = chunkFiles.map((chunk, index) => {
+    const tokens = estimateTokens(chunk.content);
+    const files = chunk.files.map((file) => file.path).join(', ');
+    return `${index + 1}. ${chunk.filename} - ~${tokens.toLocaleString()} tokens - ${files}`;
+  }).join('\n');
+  const topFiles = fileStats
+    .map((file) => ({ ...file, tokens: estimateTokens(file.bytes) }))
+    .sort((a, b) => b.tokens - a.tokens)
+    .slice(0, 25)
+    .map((file) => `- ${file.file}: ~${file.tokens.toLocaleString()} tokens`)
+    .join('\n');
+  return `# XLN llms.txt Chunk Manifest
+
+Primary monolithic file: ${outputFilename}
+Chunk token limit: ~${tokenLimit.toLocaleString()} tokens
+
+Use the chunk files below when an LLM cannot load the monolithic file. A report
+based on only the first chunk is invalid; it will mostly see contracts and miss
+runtime/UI/E2E behavior.
+
+Recommended audit protocol:
+1. Load every chunk in order.
+2. Confirm you saw runtime, frontend swap UI, E2E tests, dispute/watchtower docs,
+   and smart contracts before issuing findings.
+3. If context limits force triage, say exactly which chunks were omitted and do
+   not assign P0/P1 severity to paths you did not read.
+4. Separate expected market failures from unexpected protocol failures.
+5. Do not assume routed swaps are atomic; they are sequential best-effort.
+
+Chunks:
+${chunkRows}
+
+Largest files:
+${topFiles}
+`;
 }
 
 // Check for --sol flag
@@ -507,7 +858,7 @@ const solOnly = process.argv.includes('--sol');
 const includeFrontend = process.argv.includes('--frontend');
 
 // Generate and write
-const { output: context, fileStats } = generateContext({ solOnly, includeFrontend });
+const { output: context, fileStats, overview, allFiles } = generateContext({ solOnly, includeFrontend });
 const outputFilename = solOnly
   ? 'llms_sol.txt'
   : (includeFrontend ? 'llms_frontend.txt' : 'llms.txt');
@@ -522,6 +873,24 @@ if (!fs.existsSync(outputDir)) {
 // Write with UTF-8 BOM so browsers detect encoding correctly
 fs.writeFileSync(outputPath, '\ufeff' + context, 'utf8');
 
+const writeChunks = !process.argv.includes('--no-chunks');
+let chunkFiles = [];
+if (writeChunks) {
+  const chunkTokenLimit = parseChunkTokenLimit();
+  const base = outputFilename.replace(/\.txt$/i, '');
+  for (const stale of fs.readdirSync(outputDir)) {
+    if (new RegExp(`^${base}_part_\\d+\\.txt$`).test(stale) || stale === `${base}_manifest.txt`) {
+      fs.unlinkSync(path.join(outputDir, stale));
+    }
+  }
+  chunkFiles = buildChunkFiles({ overview, allFiles, outputFilename, tokenLimit: chunkTokenLimit });
+  for (const chunk of chunkFiles) {
+    fs.writeFileSync(path.join(outputDir, chunk.filename), '\ufeff' + chunk.content, 'utf8');
+  }
+  const manifest = buildManifest({ outputFilename, chunkFiles, fileStats, tokenLimit: chunkTokenLimit });
+  fs.writeFileSync(path.join(outputDir, `${base}_manifest.txt`), '\ufeff' + manifest, 'utf8');
+}
+
 // Stats
 const lines = context.split('\n').length;
 const bytes = Buffer.byteLength(context, 'utf8');
@@ -531,8 +900,14 @@ const tokensTotal = Math.round(bytes / 3.5);
 console.log(`OK ${outputFilename} generated`);
 console.log(`${lines.toLocaleString()} lines, ${kb} KB, ~${tokensTotal.toLocaleString()} tokens`);
 console.log(`xln.finance/${outputFilename}`);
+if (writeChunks) {
+  const base = outputFilename.replace(/\.txt$/i, '');
+  console.log(`Chunks: ${chunkFiles.length} | Manifest: xln.finance/${base}_manifest.txt`);
+}
 const frontendLabel = includeFrontend ? ` | Frontend: ${CORE_FILES.frontend.length}` : '';
-console.log(`Contracts: ${CORE_FILES.contracts.length} | Runtime: ${CORE_FILES.runtime.length} | Docs: ${CORE_FILES.docs.length}${frontendLabel}`);
+console.log(
+  `Contracts: ${CORE_FILES.contracts.length} | Runtime: ${CORE_FILES.runtime.length} | Docs: ${CORE_FILES.docs.length} | Swap UI: ${CORE_FILES.swapUi.length} | Tests: ${CORE_FILES.tests.length}${frontendLabel}`,
+);
 
 // Token breakdown by file (top 15)
 console.log('\nToken Breakdown (top 15):');

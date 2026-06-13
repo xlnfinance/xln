@@ -676,8 +676,8 @@
     return entityId;
   }
 
-  function formatStateRoot(stateRoot: Uint8Array | undefined): string {
-    if (!stateRoot || stateRoot.length === 0) return '0x0';
+  function formatStateRoot(stateRoot: Uint8Array | null | undefined): string {
+    if (!stateRoot || stateRoot.length === 0) return 'Unavailable';
     const hex = Array.from(stateRoot).map(b => b.toString(16).padStart(2, '0')).join('');
     return '0x' + hex;
   }

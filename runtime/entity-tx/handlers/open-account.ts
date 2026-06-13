@@ -8,6 +8,7 @@ import { upsertSortedStringMapEntry } from '../../sorted-index';
 import { cloneEntityState, addMessage } from '../../state-helpers';
 import { assertSameJurisdictionAccount } from '../../jurisdiction-runtime';
 import { findAccountKey, normalizeEntityRef } from '../account-key';
+import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../../default-account-tokens';
 
 type OpenAccountEntityTx = Extract<EntityTx, { type: 'openAccount' }>;
 
@@ -146,6 +147,8 @@ export const handleOpenAccountEntityTx = (
   }
 
   const tokenId = entityTx.data.tokenId ?? 1;
+  const defaultTokenIds = Array.from(new Set([tokenId, ...DEFAULT_ACCOUNT_TOKEN_IDS]))
+    .filter((id) => Number.isFinite(id) && id > 0);
   const creditAmount = entityTx.data.creditAmount;
 
   if (!createdLocalAccount) {
@@ -155,7 +158,9 @@ export const handleOpenAccountEntityTx = (
     );
   }
 
-  localAccount.mempool.push({ type: 'add_delta', data: { tokenId } });
+  for (const deltaTokenId of defaultTokenIds) {
+    localAccount.mempool.push({ type: 'add_delta', data: { tokenId: deltaTokenId } });
+  }
   if (creditAmount && creditAmount > 0n) {
     localAccount.mempool.push({ type: 'set_credit_limit', data: { tokenId, amount: creditAmount } });
   }
@@ -168,20 +173,22 @@ export const handleOpenAccountEntityTx = (
   if (autopilotSoftLimit <= 0n) autopilotSoftLimit = jurisdictionPolicyDefaults.r2cRequestSoftLimit;
   if (autopilotHardLimit < autopilotSoftLimit) autopilotHardLimit = autopilotSoftLimit;
   if (autopilotMaxFee < 0n) autopilotMaxFee = jurisdictionPolicyDefaults.maxAcceptableFee;
-  localAccount.rebalancePolicy.set(tokenId, {
-    r2cRequestSoftLimit: autopilotSoftLimit,
-    hardLimit: autopilotHardLimit,
-    maxAcceptableFee: autopilotMaxFee,
-  });
-  localAccount.mempool.push({
-    type: 'set_rebalance_policy',
-    data: {
-      tokenId,
+  for (const policyTokenId of defaultTokenIds) {
+    localAccount.rebalancePolicy.set(policyTokenId, {
       r2cRequestSoftLimit: autopilotSoftLimit,
       hardLimit: autopilotHardLimit,
       maxAcceptableFee: autopilotMaxFee,
-    },
-  });
+    });
+    localAccount.mempool.push({
+      type: 'set_rebalance_policy',
+      data: {
+        tokenId: policyTokenId,
+        r2cRequestSoftLimit: autopilotSoftLimit,
+        hardLimit: autopilotHardLimit,
+        maxAcceptableFee: autopilotMaxFee,
+      },
+    });
+  }
 
   addMessage(newState, `✅ Account opening request sent to Entity ${formatEntityId(counterpartyId)}`);
 

@@ -60,6 +60,7 @@ import { setDeltaTransformerAddress } from '../proof-builder';
 import { prepareSignedBatch } from '../hanko/batch';
 import { resolveEntityProposerId } from '../state-helpers';
 import { BLOCKCHAIN } from '../constants';
+import { DEFAULT_TOKEN_SUPPLY, TOKEN_REGISTRATION_AMOUNT, defaultTokensForJurisdiction } from './default-tokens';
 import {
   firstAddress,
   isDebugEventEmitter,
@@ -119,6 +120,28 @@ export async function createRpcAdapter(
   type UntypedNonPayableMethod = {
     estimateGas: (...args: unknown[]) => Promise<bigint>;
     (...args: unknown[]): Promise<unknown>;
+  };
+  const watcherErrorMessage = (error: unknown): string => (
+    error instanceof Error ? error.message : String(error)
+  );
+  const watcherErrorDetails = (error: unknown): Record<string, unknown> => {
+    if (!(error instanceof Error)) return { raw: String(error) };
+    const err = error as Error & {
+      code?: unknown;
+      shortMessage?: unknown;
+      info?: unknown;
+      cause?: unknown;
+    };
+    return {
+      name: err.name,
+      message: err.message,
+      code: err.code,
+      shortMessage: err.shortMessage,
+      info: err.info,
+      cause: err.cause instanceof Error
+        ? { name: err.cause.name, message: err.cause.message }
+        : err.cause,
+    };
   };
   const asFactoryRunner = (runner: unknown): Parameters<typeof Account__factory.connect>[1] =>
     runner as Parameters<typeof Account__factory.connect>[1];
@@ -593,39 +616,41 @@ export async function createRpcAdapter(
       setDeltaTransformerAddress(addresses.deltaTransformer);
       console.log(`  DeltaTransformer: ${addresses.deltaTransformer}`);
 
-      // Deploy bootstrap ERC20 test token (5th contract in local anvil stack)
+      // Deploy bootstrap ERC20 test tokens. The first three IDs stay stable
+      // across dev chains (USDC=1, WETH=2, USDT=3); Tron-like local chains
+      // receive extra jurisdiction-specific tokens after those IDs.
       const erc20Factory = makeErc20MockFactory(signer);
-      const erc20Contract = await erc20Factory.deploy('USD Coin', 'USDC', ethers.parseUnits('10000000000', 18));
-      await erc20Contract.waitForDeployment();
-      const erc20Address = await erc20Contract.getAddress();
-      console.log(`  ERC20Mock(USDC): ${erc20Address}`);
+      const bootstrapTokens = defaultTokensForJurisdiction({ chainId: config.chainId });
+      for (const token of bootstrapTokens) {
+        const erc20Contract = await erc20Factory.deploy(token.name, token.symbol, DEFAULT_TOKEN_SUPPLY);
+        await erc20Contract.waitForDeployment();
+        const erc20Address = await erc20Contract.getAddress();
+        console.log(`  ERC20Mock(${token.symbol}): ${erc20Address}`);
 
-      // Pre-fund Depository with ERC20 so withdrawals (reserveToExternalToken) work.
-      // mintToReserve only updates internal accounting — the Depository needs real ERC20 balance.
-      const prefundAmount = ethers.parseUnits('1000000000000', 18); // 1T tokens
-      const prefundTx = await erc20Contract.mint(addresses.depository, prefundAmount, await buildFeeOverrides());
-      await waitForReceipt(prefundTx, 'erc20.mint-to-depository');
-      console.log(`  Depository pre-funded: ${ethers.formatUnits(prefundAmount, 18)} USDC`);
+        // Pre-fund Depository with ERC20 so withdrawals (reserveToExternalToken) work.
+        // mintToReserve only updates internal accounting — the Depository needs real ERC20 balance.
+        const prefundTx = await erc20Contract.mint(addresses.depository, DEFAULT_TOKEN_SUPPLY, await buildFeeOverrides());
+        await waitForReceipt(prefundTx, `erc20.mint-to-depository.${token.symbol}`);
+        console.log(`  Depository pre-funded: ${ethers.formatUnits(DEFAULT_TOKEN_SUPPLY, token.decimals)} ${token.symbol}`);
 
-      // Register token in Depository token registry (tokenId > 0)
-      const tokenRegistrationAmount = 1_000_000n;
-      const approveTx = await erc20Contract.approve(addresses.depository, tokenRegistrationAmount, await buildFeeOverrides());
-      await waitForReceipt(approveTx, 'erc20.approve');
-      const registerTx = await depository.adminRegisterExternalToken({
-        entity: ethers.ZeroHash,
-        contractAddress: erc20Address,
-        externalTokenId: 0,
-        tokenType: 0,
-        internalTokenId: 0,
-        amount: tokenRegistrationAmount,
-      }, await buildFeeOverrides());
-      await waitForReceipt(registerTx, 'depository.externalTokenToReserve');
-      const packed = packTokenReference(0, erc20Address, 0n);
-      const tokenId = await depository.tokenToId(packed);
-      if (tokenId === 0n) {
-        throw new Error('[JAdapter:rpc] Failed to register bootstrap ERC20 token');
+        const approveTx = await erc20Contract.approve(addresses.depository, TOKEN_REGISTRATION_AMOUNT, await buildFeeOverrides());
+        await waitForReceipt(approveTx, `erc20.approve.${token.symbol}`);
+        const registerTx = await depository.adminRegisterExternalToken({
+          entity: ethers.ZeroHash,
+          contractAddress: erc20Address,
+          externalTokenId: 0,
+          tokenType: 0,
+          internalTokenId: 0,
+          amount: TOKEN_REGISTRATION_AMOUNT,
+        }, await buildFeeOverrides());
+        await waitForReceipt(registerTx, `depository.externalTokenToReserve.${token.symbol}`);
+        const packed = packTokenReference(0, erc20Address, 0n);
+        const tokenId = await depository.tokenToId(packed);
+        if (tokenId === 0n) {
+          throw new Error(`[JAdapter:rpc] Failed to register bootstrap ERC20 token ${token.symbol}`);
+        }
+        console.log(`  TokenRegistry: ${token.symbol} tokenId=${tokenId}`);
       }
-      console.log(`  TokenRegistry: USDC tokenId=${tokenId}`);
 
       deployed = true;
 
@@ -819,7 +844,7 @@ export async function createRpcAdapter(
             const item = responses.get(id);
             if (!item) return 0n;
             if (item.error) {
-              throw new Error(item.error.message || `RPC_BATCH_ITEM_ERROR:${id}`);
+              return 0n;
             }
             if (typeof item.result !== 'string') return 0n;
             try {
@@ -841,12 +866,12 @@ export async function createRpcAdapter(
 
       const [nativeBalance, tokenBalances, allowanceValues] = await Promise.all([
         includeNativeBalance ? provider.getBalance(owner).catch(() => 0n) : Promise.resolve<bigint | null>(null),
-        Promise.all(tokenAddresses.map((tokenAddress) => adapter.getErc20Balance(tokenAddress, owner))),
+        Promise.all(tokenAddresses.map((tokenAddress) => adapter.getErc20Balance(tokenAddress, owner).catch(() => 0n))),
         Promise.all(allowances.map((allowanceRead) => adapter.getErc20Allowance(
           allowanceRead.tokenAddress,
           owner,
           allowanceRead.spender,
-        ))),
+        ).catch(() => 0n))),
       ]);
 
       return {
@@ -1237,7 +1262,7 @@ export async function createRpcAdapter(
       console.log(`📤 [JAdapter:rpc] submitTx type=${jTx.type} entity=${jTx.entityId.slice(-4)}`);
 
       if (jTx.type === 'batch') {
-        const { encodeJBatch, computeBatchHankoHash, isBatchEmpty, getBatchSize } = await import('../j-batch');
+        const { isBatchEmpty, getBatchSize } = await import('../j-batch');
         const { normalizeEntityId } = await import('../entity-id-utils');
         const batchData = jTx.data;
         const batch = batchData.batch;
@@ -1271,7 +1296,6 @@ export async function createRpcAdapter(
         }
 
         return runSerializedBatch(async () => {
-          const entityProviderAddr = await getLiveEntityProviderAddress();
           const depositoryAddr = await getLiveDepositoryAddress();
           const batchRequiresExternalSubmitter = batch.externalTokenToReserve.length > 0;
           const expectedExternalSignerId = batchRequiresExternalSubmitter
@@ -1315,7 +1339,10 @@ export async function createRpcAdapter(
           const submitterDepository = externalSubmitterWallet
             ? depository.connect(externalSubmitterWallet as unknown as Parameters<typeof depository.connect>[0])
             : depository;
-          // Use pre-provided encoded batch + hanko (from entity consensus) or sign locally
+          // Consensus batches must arrive fully sealed by entity consensus.
+          // Do not fall back to reading the live chain nonce and locally signing here:
+          // this submit path runs after an R-frame is already durable, so a local-sign
+          // fallback can desync side effects from the committed entity frame.
           let encodedBatch: string;
           let hankoData: string;
           let nextNonce: bigint;
@@ -1331,35 +1358,15 @@ export async function createRpcAdapter(
             nextNonce = BigInt(batchData.entityNonce);
             console.log(`🔐 [JAdapter:rpc] Using consensus hanko: nonce=${nextNonce}`);
           } else {
-            // Fallback: single-signer sign locally
-            const sid = signerId || batchData.signerId;
-            if (!sid) {
-              return { success: false, error: `Missing signerId for batch from ${jTx.entityId.slice(-4)}` };
-            }
-            if (!depository || !depositoryAddr) {
-              return {
-                success: false,
-                error:
-                  `RPC_ADAPTER_NOT_CONNECTED:${normalizedId.slice(-4)}` +
-                  ` depository=${depositoryAddr || 'none'}` +
-                  ` entityProvider=${entityProviderAddr || 'none'}` +
-                  ` hasDepository=${depository ? 1 : 0}` +
-                  ` hasEntityProvider=${entityProvider ? 1 : 0}`,
-              };
-            }
-
-            encodedBatch = encodeJBatch(batch);
-            const currentNonce = await depository.entityNonces(normalizedId);
-            nextNonce = BigInt(currentNonce) + 1n;
-            const batchHash = computeBatchHankoHash(BigInt(config.chainId), depositoryAddr, encodedBatch, nextNonce);
-
-            console.log(`🔐 [JAdapter:rpc] Local signing: entity=${normalizedId.slice(-4)} nonce=${nextNonce}`);
-            const { signEntityHashes } = await import('../hanko/signing');
-            const hankos = await signEntityHashes(env, normalizedId, sid, [batchHash]);
-            hankoData = hankos[0]!;
-            if (!hankoData) {
-              return { success: false, error: 'Failed to build batch hanko signature' };
-            }
+            const missing = [
+              batchData.hankoSignature ? '' : 'hankoSignature',
+              batchData.encodedBatch ? '' : 'encodedBatch',
+              typeof batchData.entityNonce === 'number' ? '' : 'entityNonce',
+            ].filter(Boolean).join(',');
+            return {
+              success: false,
+              error: `J_BATCH_CONSENSUS_HANKO_MISSING:${normalizedId}:missing=${missing || 'unknown'}`,
+            };
           }
 
           let disputeStartDebug: Array<Record<string, unknown>> = [];
@@ -1582,6 +1589,7 @@ export async function createRpcAdapter(
       // parallel polling loop alive beside the 1s watcher interval.
       (depository as unknown as ContractListenerSource | undefined)?.removeAllListeners?.();
       (entityProvider as unknown as ContractListenerSource | undefined)?.removeAllListeners?.();
+      watcherStopping = false;
       watcherEnv = env;
       txCounter.value = 0;
       txCounter._seenLogs = { set: new Set<string>(), order: [] as string[] };
@@ -1698,22 +1706,39 @@ export async function createRpcAdapter(
           });
         }
       };
+      if (watcherFatalError) {
+        emitWatcherDebug({
+          event: 'j_watch_fatal_already_halted',
+          message: watcherFatalError,
+          lastSyncedBlock,
+        });
+        console.error(`🔭⛔ [JAdapter:rpc] Watcher halted after fatal error:`, watcherFatalError);
+        return;
+      }
       const doPoll = (): Promise<void> => {
         if (!watcherEnv) return Promise.resolve();
         if (pollInFlight) return pollInFlight;
+        let pollStep = 'start';
+        let pollFromBlock: number | null = null;
+        let pollToBlock: number | null = null;
         pollInFlight = (async () => {
           const activeEnv = watcherEnv;
           if (!activeEnv) return;
+          pollStep = 'eth_blockNumber';
           const currentBlock = parseInt(await (provider as ethers.JsonRpcProvider).send('eth_blockNumber', []), 16);
           const safeToBlock = currentBlock - confirmationDepth;
           if (safeToBlock <= 0) return;
           if (lastSyncedBlock >= safeToBlock) return;
 
           const fromBlock = lastSyncedBlock + 1;
+          pollFromBlock = fromBlock;
+          pollToBlock = safeToBlock;
           // Commit the watcher cursor only after a successful poll+apply.
           // Advancing it before getLogs()/event processing can persist a speculative
           // blockNumber into WAL snapshots and permanently skip finalized J events.
+          pollStep = 'resolveDepository';
           const filter = { address: await getLiveDepositoryAddress(), fromBlock, toBlock: safeToBlock };
+          pollStep = 'eth_getLogs';
           const logs = await provider.getLogs(filter);
 
           if (logs.length > 0) {
@@ -1764,6 +1789,7 @@ export async function createRpcAdapter(
               }
               for (const [blockNum, events] of byBlock) {
                 const blockHash = events[0]?.blockHash ?? '0x0';
+                pollStep = `processEventBatch:${blockNum}`;
                 processEventBatch(events, activeEnv, blockNum, blockHash, txCounter, 'rpc');
               }
 
@@ -1794,14 +1820,53 @@ export async function createRpcAdapter(
           lastSyncedBlock = safeToBlock;
           updateWatcherJurisdictionCursor(activeEnv, lastSyncedBlock, addresses.depository);
         })().catch((error: unknown) => {
-          emitWatcherDebug({
+          const message = watcherErrorMessage(error);
+          if (watcherStopping) {
+            emitWatcherDebug({
+              event: 'j_watch_shutdown_poll_aborted',
+              message,
+              chainId: config.chainId,
+              rpcUrl: config.rpcUrl,
+              step: pollStep,
+              fromBlock: pollFromBlock,
+              toBlock: pollToBlock,
+              lastSyncedBlock,
+            });
+            return;
+          }
+          const fatalPayload = {
             event: 'j_watch_error',
-            message: error instanceof Error ? error.message : String(error),
+            message,
+            chainId: config.chainId,
+            rpcUrl: config.rpcUrl,
+            step: pollStep,
+            fromBlock: pollFromBlock,
+            toBlock: pollToBlock,
+            lastSyncedBlock,
+            error: watcherErrorDetails(error),
+          };
+          emitWatcherDebug({
+            ...fatalPayload,
+          });
+          watcherFatalError = message;
+          if (watcherInterval) {
+            clearInterval(watcherInterval);
+          }
+          watcherInterval = null;
+          watcherEnv = null;
+          pollNowHandler = null;
+          emitWatcherDebug({
+            event: 'j_watch_fatal_halt',
+            message,
+            chainId: config.chainId,
+            rpcUrl: config.rpcUrl,
+            step: pollStep,
+            fromBlock: pollFromBlock,
+            toBlock: pollToBlock,
             lastSyncedBlock,
           });
-          if (!(error instanceof Error && error.message.includes('ECONNREFUSED'))) {
-            console.error(`🔭❌ [JAdapter:rpc] Sync error:`, error instanceof Error ? error.message : String(error));
-          }
+          console.error(`🔭⛔ [JAdapter:rpc] Fatal watcher error; exiting:`, fatalPayload);
+          process.exit(1);
         }).finally(() => {
           pollInFlight = null;
         });
@@ -1827,6 +1892,7 @@ export async function createRpcAdapter(
     },
 
     stopWatching(): void {
+      watcherStopping = true;
       if (watcherInterval) {
         clearInterval(watcherInterval);
         watcherInterval = null;
@@ -1873,6 +1939,8 @@ export async function createRpcAdapter(
   let watcherEnv: Env | null = null;
   let pollInFlight: Promise<void> | null = null;
   let pollNowHandler: (() => Promise<void>) | null = null;
+  let watcherFatalError: string | null = null;
+  let watcherStopping = false;
   let lastSyncedBlock = 0;
   const txCounter: EventBatchCounter = { value: 0 };
 

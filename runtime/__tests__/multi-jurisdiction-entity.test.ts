@@ -5,6 +5,7 @@ import { applyEntityTx } from '../entity-tx/apply';
 import { assertSameJurisdictionAccount } from '../jurisdiction-runtime';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { generateLazyEntityId } from '../entity-factory';
+import { DEFAULT_ACCOUNT_TOKEN_IDS } from '../default-account-tokens';
 import type { JAdapter } from '../jadapter/types';
 import { canonicalizeProfile, parseProfile } from '../networking/gossip';
 import type { ConsensusConfig, Env, JReplica, JurisdictionConfig } from '../types';
@@ -142,6 +143,42 @@ describe('multi-jurisdiction entity binding', () => {
     });
 
     expect(result.newState.accounts.has(entityB.toLowerCase())).toBe(true);
+  });
+
+  test('openAccount seeds default token deltas and rebalance policies', async () => {
+    const env = makeEnv('multi-jurisdiction-open-default-tokens');
+    const j1 = makeJurisdiction('J1', 31337, '11', '12');
+    installJurisdiction(env, j1);
+    env.activeJurisdiction = 'J1';
+
+    const entityA = entity('15');
+    const entityB = entity('16');
+    const signerA = '45';
+    const signerB = '46';
+    await importEntity(env, entityA, signerA, j1);
+    await importEntity(env, entityB, signerB, j1);
+
+    const result = await applyEntityTx(env, findState(env, entityA)!, {
+      type: 'openAccount',
+      data: { targetEntityId: entityB, tokenId: 1, creditAmount: 1_000n },
+    });
+
+    const account = result.newState.accounts.get(entityB.toLowerCase());
+    expect(account).toBeTruthy();
+    const expectedTokenIds = [...DEFAULT_ACCOUNT_TOKEN_IDS].sort((a, b) => a - b);
+    const addDeltaTokenIds = account!.mempool
+      .filter((tx) => tx.type === 'add_delta')
+      .map((tx) => tx.data.tokenId)
+      .sort((a, b) => a - b);
+    const policyTokenIds = Array.from(account!.rebalancePolicy.keys()).sort((a, b) => a - b);
+    const policyTxTokenIds = account!.mempool
+      .filter((tx) => tx.type === 'set_rebalance_policy')
+      .map((tx) => tx.data.tokenId)
+      .sort((a, b) => a - b);
+
+    expect(addDeltaTokenIds).toEqual(expectedTokenIds);
+    expect(policyTokenIds).toEqual(expectedTokenIds);
+    expect(policyTxTokenIds).toEqual(expectedTokenIds);
   });
 
   test('openAccount commits the first bilateral frame for local same-jurisdiction entities', async () => {

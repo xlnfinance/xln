@@ -16,6 +16,7 @@
 import {
   main,
   enqueueRuntimeInput,
+  validateRuntimeInputAdmission,
   startP2P,
   startRuntimeLoop,
   ensureGossipProfiles,
@@ -340,6 +341,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
     if (authError) return authError;
     return handleRuntimeInputControl(req, headers, env, {
       enqueueRuntimeInput,
+      validateRuntimeInputAdmission,
       parseTaggedControlBody,
       receipts: runtimeIngressReceipts,
       getCurrentRuntimeHeight: currentRuntimeHeight,
@@ -658,6 +660,7 @@ const handleApi = async (req: Request, pathname: string, env: Env | null): Promi
       headers,
       relayStore,
       enqueueRuntimeInput,
+      validateRuntimeInputAdmission,
       registerReceipt: (receipt) => runtimeIngressReceipts.register(receipt),
       getCurrentRuntimeHeight: currentRuntimeHeight,
       buildRuntimeInputStatusUrl: runtimeInputStatusUrl,
@@ -1073,10 +1076,11 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
       if (!env.jReplicas) env.jReplicas = new Map();
       const jName = 'arrakis';
       if (!env.jReplicas.has(jName)) {
+        const stateRoot = await (globalJAdapter.captureStateRoot?.() ?? Promise.resolve(null));
         env.jReplicas.set(jName, {
           name: jName,
           blockNumber: 0n,
-          stateRoot: new Uint8Array(32),
+          stateRoot,
           mempool: [],
           blockDelayMs: 300,
           lastBlockTimestamp: env.timestamp,
@@ -1106,10 +1110,14 @@ export async function startXlnServer(opts: Partial<XlnServerOptions> = {}): Prom
         if (!env.jReplicas) env.jReplicas = new Map();
         const jName = 'local';
         if (!env.jReplicas.has(jName)) {
+          const stateRoot = await (globalJAdapter.captureStateRoot?.() ?? Promise.resolve(null));
+          if (!(stateRoot instanceof Uint8Array && stateRoot.length === 32)) {
+            throw new Error('BROWSERVM_STATE_ROOT_UNAVAILABLE: startup local jReplica cannot time-travel safely');
+          }
           env.jReplicas.set(jName, {
             name: jName,
             blockNumber: 0n,
-            stateRoot: new Uint8Array(32),
+            stateRoot,
             mempool: [],
             blockDelayMs: 300,
             lastBlockTimestamp: env.timestamp,

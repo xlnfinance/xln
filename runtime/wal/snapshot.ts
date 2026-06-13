@@ -26,9 +26,35 @@ const cloneHankoWitness = (
   );
 };
 
-export const buildCanonicalEntityReplicaSnapshot = (replica: EntityReplica): EntityReplica => {
+const isZeroBytes32 = (value: Uint8Array): boolean =>
+  value.length === 32 && value.every(byte => byte === 0);
+
+const cloneJStateRoot = (
+  stateRoot: unknown,
+  options?: { rpcBacked?: boolean },
+): Uint8Array | null => {
+  const normalized = stateRoot instanceof Uint8Array
+    ? stateRoot
+    : Array.isArray(stateRoot)
+      ? new Uint8Array(stateRoot.map((value) => Number(value) & 0xff))
+      : null;
+  if (!(normalized instanceof Uint8Array) || normalized.length === 0) return null;
+  if (options?.rpcBacked && isZeroBytes32(normalized)) return null;
+  return new Uint8Array(normalized);
+};
+
+export const buildCanonicalEntityReplicaSnapshot = (
+  replica: EntityReplica,
+  options?: { compactTransient?: boolean },
+): EntityReplica => {
   const snapshot = cloneEntityReplica(replica, true);
   const hankoWitness = cloneHankoWitness(replica.hankoWitness);
+  if (options?.compactTransient) {
+    snapshot.mempool = [];
+    delete snapshot.proposal;
+    delete snapshot.lockedFrame;
+    delete snapshot.validatorComputedState;
+  }
   return {
     ...snapshot,
     ...(hankoWitness ? { hankoWitness } : {}),
@@ -38,7 +64,7 @@ export const buildCanonicalEntityReplicaSnapshot = (replica: EntityReplica): Ent
 export const buildCanonicalJReplicaSnapshot = (jr: JReplica): JReplica => ({
   name: jr.name,
   blockNumber: jr.blockNumber,
-  stateRoot: new Uint8Array(jr.stateRoot),
+  stateRoot: cloneJStateRoot(jr.stateRoot, { rpcBacked: Boolean(jr.rpcs?.length) }),
   mempool: [],
   blockDelayMs: jr.blockDelayMs,
   lastBlockTimestamp: jr.lastBlockTimestamp,
@@ -99,6 +125,7 @@ export const buildCanonicalRuntimeStateSnapshot = (
   env: Env,
   options?: {
     browserVMState?: Env['browserVMState'];
+    compactTransient?: boolean;
   },
 ): Record<string, unknown> => ({
   height: env.height,
@@ -110,7 +137,10 @@ export const buildCanonicalRuntimeStateSnapshot = (
   ...(options?.browserVMState ?? env.browserVMState ? { browserVMState: options?.browserVMState ?? env.browserVMState } : {}),
   eReplicas: Array.from(env.eReplicas.entries()).map(([replicaKey, replica]) => [
     replicaKey,
-    buildCanonicalEntityReplicaSnapshot(replica),
+    buildCanonicalEntityReplicaSnapshot(
+      replica,
+      options?.compactTransient ? { compactTransient: true } : undefined,
+    ),
   ]),
   jReplicas: Array.from((env.jReplicas || new Map()).entries()).map(([replicaKey, jr]) => [
     replicaKey,
@@ -120,6 +150,10 @@ export const buildCanonicalRuntimeStateSnapshot = (
 
 export const buildRuntimeCheckpointSnapshot = (env: Env): Record<string, unknown> => {
   return buildCanonicalRuntimeStateSnapshot(env);
+};
+
+export const buildRuntimeRecoveryCheckpointSnapshot = (env: Env): Record<string, unknown> => {
+  return buildCanonicalRuntimeStateSnapshot(env, { compactTransient: true });
 };
 
 export const buildCanonicalEnvSnapshot = (
@@ -186,13 +220,8 @@ export const normalizePersistedSnapshotInPlace = (
     snapshot['jReplicas'] = new Map(
       Array.from(jMap.entries()).map(([name, raw]) => {
         const jr = raw && typeof raw === 'object' ? raw as Record<string, unknown> : {};
-        const stateRoot = jr['stateRoot'];
-        const normalizedStateRoot =
-          stateRoot instanceof Uint8Array
-            ? stateRoot
-            : Array.isArray(stateRoot)
-              ? new Uint8Array(stateRoot.map((value) => Number(value) & 0xff))
-              : stateRoot;
+        const rpcs = Array.isArray(jr['rpcs']) ? jr['rpcs'] : [];
+        const normalizedStateRoot = cloneJStateRoot(jr['stateRoot'], { rpcBacked: rpcs.length > 0 });
         return [
           String(name),
           {

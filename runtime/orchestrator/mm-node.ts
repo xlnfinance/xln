@@ -52,14 +52,17 @@ import {
   sleep,
   waitUntil,
 } from './mesh-common';
-import { buildDefaultEntitySwapPairs, getSwapPairPolicyByBaseQuote } from '../account-utils';
+import { buildDefaultEntitySwapPairs, getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenIdsForJurisdiction } from '../account-utils';
 import { LIMITS, SWAP as SWAP_CONSTANTS } from '../constants';
 import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
+import { hasCrossJurisdictionBookOrder } from '../orderbook/cross-j';
 import {
+  deriveCanonicalCrossJurisdictionBookOwnerForLegs,
   deriveCanonicalCrossJurisdictionMarketForLegs,
   withCanonicalCrossJurisdictionRouteHash,
 } from '../cross-jurisdiction';
 import { resolveCrossJurisdictionRuntimeTopology } from '../cross-jurisdiction-boundary';
+import { crossJurisdictionBookOwnerRef } from '../cross-jurisdiction-orderbook';
 import { getJurisdictionStackId } from '../jurisdiction-stack';
 import { startParentLivenessWatch } from './parent-watch';
 import { createHttpDrainTracker, stopServerGracefully } from './graceful-server';
@@ -130,6 +133,24 @@ type MarketMakerEntityContext = {
   jurisdictionRef: string;
 };
 
+type MarketMakerTokenIdsByContext = ReadonlyMap<string, number[]>;
+
+type MarketMakerCrossRouteHealth = {
+  sourceJurisdiction: string;
+  targetJurisdiction: string;
+  sourceHubEntityId: string;
+  targetHubEntityId: string;
+  offers: number;
+  ready: boolean;
+  pairs: Array<{
+    pairId: string;
+    offers: number;
+    ready: boolean;
+    sourceTokenIds: number[];
+    targetTokenIds: number[];
+  }>;
+};
+
 type MarketMakerHealth = {
   enabled: boolean;
   ok: boolean;
@@ -162,6 +183,13 @@ type MarketMakerHealth = {
     ready: boolean;
     pairs: Array<{ pairId: string; offers: number; ready: boolean }>;
   }>;
+  cross: {
+    ok: boolean;
+    expectedRoutes: number;
+    expectedOffersPerRoute: number;
+    expectedOffersPerPair: number;
+    routes: MarketMakerCrossRouteHealth[];
+  };
 };
 
 const MARKET_MAKER_CREDIT_AMOUNT = 50_000_000n * 10n ** 18n;
@@ -182,6 +210,13 @@ const MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK = Math.max(
 const MARKET_MAKER_CROSS_LEVELS_PER_PAIR = Math.max(
   1,
   Math.min(8, Number(process.env['MARKET_MAKER_CROSS_LEVELS_PER_PAIR'] || '4')),
+);
+const MARKET_MAKER_MAX_LEVELS_PER_PAIR = Math.max(
+  1,
+  Math.min(
+    15,
+    Number(process.env['MARKET_MAKER_MAX_LEVELS_PER_PAIR'] || '15'),
+  ),
 );
 const MARKET_MAKER_CROSS_EXPIRY_MS = Math.max(
   60_000,
@@ -495,6 +530,50 @@ const getMarketMakerLevelProfile = (baseTokenId: number, quoteTokenId: number): 
   };
 };
 
+const normalizePositiveTokenIds = (tokenIds: readonly number[]): number[] =>
+  Array.from(new Set(tokenIds.filter(tokenId => Number.isFinite(tokenId) && tokenId > 0).map(tokenId => Math.floor(tokenId))))
+    .sort((a, b) => a - b);
+
+const buildMarketMakerCrossTokenPairs = (
+  sourceTokenIds: number[],
+  targetTokenIds: number[] = sourceTokenIds,
+): Array<{ sourceTokenId: number; targetTokenId: number }> => {
+  const uniqueSourceTokenIds = normalizePositiveTokenIds(sourceTokenIds);
+  const uniqueTargetTokenIds = normalizePositiveTokenIds(targetTokenIds);
+  const pairs: Array<{ sourceTokenId: number; targetTokenId: number }> = [];
+  for (const sourceTokenId of uniqueSourceTokenIds) {
+    for (const targetTokenId of uniqueTargetTokenIds) {
+      pairs.push({ sourceTokenId, targetTokenId });
+    }
+  }
+  return pairs;
+};
+
+const invertPriceTicks = (ticks: bigint): bigint => {
+  if (ticks <= 0n) return 0n;
+  return (ORDERBOOK_PRICE_SCALE * ORDERBOOK_PRICE_SCALE) / ticks;
+};
+
+const getCrossSourceToTargetMidTicks = (sourceTokenId: number, targetTokenId: number): bigint => {
+  if (sourceTokenId === targetTokenId) return ORDERBOOK_PRICE_SCALE;
+  const oriented = getSwapPairOrientation(sourceTokenId, targetTokenId);
+  const policy = getSwapPairPolicyByBaseQuote(oriented.baseTokenId, oriented.quoteTokenId);
+  return sourceTokenId === oriented.baseTokenId
+    ? policy.mmMidPriceTicks
+    : invertPriceTicks(policy.mmMidPriceTicks);
+};
+
+const computeCrossTargetAmount = (
+  sourceAmount: bigint,
+  sourceIsBase: boolean,
+  priceTicks: bigint,
+): bigint => {
+  if (sourceAmount <= 0n || priceTicks <= 0n) return 0n;
+  return sourceIsBase
+    ? (sourceAmount * priceTicks) / ORDERBOOK_PRICE_SCALE
+    : (sourceAmount * ORDERBOOK_PRICE_SCALE) / priceTicks;
+};
+
 const snapPriceTicks = (ticks: bigint, stepTicks: number, mode: 'up' | 'down'): bigint => {
   const step = BigInt(Math.max(1, stepTicks));
   if (mode === 'up') return ((ticks + step - 1n) / step) * step;
@@ -541,11 +620,43 @@ const normalizeTokenIdsForMm = (tokenCatalog: JTokenInfo[]): number[] => {
     .map(token => Number(token.tokenId))
     .filter(tokenId => Number.isFinite(tokenId) && tokenId > 0)
     .sort((a, b) => a - b);
-  const unique = Array.from(new Set(ids)).slice(0, 3);
+  const unique = Array.from(new Set(ids));
   if (unique.length >= HUB_REQUIRED_TOKEN_COUNT) {
     return unique;
   }
   return [...DEFAULT_ACCOUNT_TOKEN_IDS];
+};
+
+const marketMakerContextKey = (context: Pick<MarketMakerEntityContext, 'entityId'>): string =>
+  normalizeEntityRef(context.entityId);
+
+const buildMarketMakerTokenIdsByContext = (
+  tokenCatalog: JTokenInfo[],
+  contexts: MarketMakerEntityContext[],
+): Map<string, number[]> => {
+  const catalogTokenIds = normalizeTokenIdsForMm(tokenCatalog);
+  const fallback = catalogTokenIds.length >= HUB_REQUIRED_TOKEN_COUNT ? catalogTokenIds : [...DEFAULT_ACCOUNT_TOKEN_IDS];
+  const byContext = new Map<string, number[]>();
+  for (const context of contexts) {
+    const jurisdictionTokenIds = normalizePositiveTokenIds(getTokenIdsForJurisdiction({
+      name: context.jurisdictionName,
+      chainId: context.chainId,
+    }));
+    byContext.set(
+      marketMakerContextKey(context),
+      jurisdictionTokenIds.length >= HUB_REQUIRED_TOKEN_COUNT ? jurisdictionTokenIds : fallback,
+    );
+  }
+  return byContext;
+};
+
+const getMarketMakerTokenIds = (
+  tokenIdsByContext: MarketMakerTokenIdsByContext,
+  context: MarketMakerEntityContext,
+  fallback: number[] = [...DEFAULT_ACCOUNT_TOKEN_IDS],
+): number[] => {
+  const ids = tokenIdsByContext.get(marketMakerContextKey(context));
+  return ids && ids.length >= HUB_REQUIRED_TOKEN_COUNT ? ids : fallback;
 };
 
 const collectOfferIdsForAccount = (
@@ -594,7 +705,15 @@ const buildMarketMakerOfferSpecs = (hubEntityIds: string[], tokenIds: number[]):
         stepTicks: Math.max(1, pairPolicy.priceStepTicks),
       };
     });
-    const maxLevels = pairContexts.reduce((max, entry) => Math.max(max, entry.levelProfile.offsetsBps.length), 0);
+    const maxLevelsByAccountLimit = Math.max(
+      1,
+      Math.floor(LIMITS.MAX_ACCOUNT_SWAP_OFFERS / Math.max(1, pairContexts.length * 2)),
+    );
+    const maxLevels = Math.min(
+      MARKET_MAKER_MAX_LEVELS_PER_PAIR,
+      maxLevelsByAccountLimit,
+      pairContexts.reduce((max, entry) => Math.max(max, entry.levelProfile.offsetsBps.length), 0),
+    );
     for (let level = 0; level < maxLevels; level += 1) {
       for (const entry of pairContexts) {
         if (level >= entry.levelProfile.offsetsBps.length) continue;
@@ -697,14 +816,15 @@ const buildMarketMakerCrossOfferSpecs = (
   targetContext: MarketMakerEntityContext,
   sourceHubs: HubProfile[],
   targetHubs: HubProfile[],
-  tokenIds: number[],
+  sourceTokenIds: number[],
+  targetTokenIds: number[],
 ): MarketMakerOfferSpec[] => {
   if (sourceContext.entityId === targetContext.entityId || sameJurisdiction(sourceContext, targetContext)) return [];
   const sourceJurisdictionRef = sourceContext.jurisdictionRef;
   const targetJurisdictionRef = targetContext.jurisdictionRef;
   if (!sourceJurisdictionRef || !targetJurisdictionRef) return [];
   const specs: MarketMakerOfferSpec[] = [];
-  const defaultPairs = buildDefaultEntitySwapPairs(tokenIds);
+  const crossPairs = buildMarketMakerCrossTokenPairs(sourceTokenIds, targetTokenIds);
   const targetByBaseName = new Map(targetHubs.map(hub => [hubBaseName(hub.name), hub] as const));
   const now = Number(env.timestamp || Date.now());
 
@@ -714,130 +834,97 @@ const buildMarketMakerCrossOfferSpecs = (
     const sourceHubSuffix = sourceHub.entityId.slice(-6).toLowerCase();
     const targetHubSuffix = targetHub.entityId.slice(-6).toLowerCase();
 
-    for (const pair of defaultPairs) {
-      const pairPolicy = getSwapPairPolicyByBaseQuote(pair.baseTokenId, pair.quoteTokenId);
-      const levelProfile = getMarketMakerLevelProfile(pair.baseTokenId, pair.quoteTokenId);
+    for (const pair of crossPairs) {
+      const market = deriveCanonicalCrossJurisdictionMarketForLegs(
+        sourceJurisdictionRef,
+        pair.sourceTokenId,
+        targetJurisdictionRef,
+        pair.targetTokenId,
+      );
+      const sourceToTargetMidTicks = getCrossSourceToTargetMidTicks(pair.sourceTokenId, pair.targetTokenId);
+      const canonicalMidTicks = market.sourceIsBase ? sourceToTargetMidTicks : invertPriceTicks(sourceToTargetMidTicks);
+      const oriented = pair.sourceTokenId === pair.targetTokenId
+        ? { baseTokenId: pair.sourceTokenId, quoteTokenId: pair.targetTokenId }
+        : getSwapPairOrientation(pair.sourceTokenId, pair.targetTokenId);
+      const pairPolicy = getSwapPairPolicyByBaseQuote(oriented.baseTokenId, oriented.quoteTokenId);
+      const levelProfile = getMarketMakerLevelProfile(oriented.baseTokenId, oriented.quoteTokenId);
       const levelCount = Math.min(MARKET_MAKER_CROSS_LEVELS_PER_PAIR, levelProfile.offsetsBps.length);
 
       for (let level = 0; level < levelCount; level += 1) {
         const offsetBps = levelProfile.offsetsBps[level]!;
-        const baseSize = levelProfile.baseSizes[level]!;
-        const askRaw = (pairPolicy.mmMidPriceTicks * BigInt(10_000 + offsetBps)) / 10_000n;
-        const bidRaw = (pairPolicy.mmMidPriceTicks * BigInt(Math.max(1, 10_000 - offsetBps))) / 10_000n;
-        const askPriceTicks = snapPriceTicks(askRaw, pairPolicy.priceStepTicks, 'up');
-        let bidPriceTicks = snapPriceTicks(bidRaw, pairPolicy.priceStepTicks, 'down');
-        const stepTicksBig = BigInt(Math.max(1, pairPolicy.priceStepTicks));
-        if (bidPriceTicks >= askPriceTicks) {
-          bidPriceTicks = askPriceTicks > stepTicksBig ? askPriceTicks - stepTicksBig : 1n;
-        }
-        if (!isWithinPairBand(pairPolicy.mmMidPriceTicks, askPriceTicks)) continue;
-        if (!isWithinPairBand(pairPolicy.mmMidPriceTicks, bidPriceTicks)) continue;
-
-        const askWantAmount = (baseSize * askPriceTicks) / ORDERBOOK_PRICE_SCALE;
-        const bidGiveAmount = (baseSize * bidPriceTicks) / ORDERBOOK_PRICE_SCALE;
+        const sourceAmount = levelProfile.baseSizes[level]!;
+        const rawPriceTicks = market.sourceIsBase
+          ? (canonicalMidTicks * BigInt(10_000 + offsetBps)) / 10_000n
+          : (canonicalMidTicks * BigInt(Math.max(1, 10_000 - offsetBps))) / 10_000n;
+        const priceTicks = snapPriceTicks(rawPriceTicks, pairPolicy.priceStepTicks, market.sourceIsBase ? 'up' : 'down');
+        if (!isWithinPairBand(canonicalMidTicks, priceTicks)) continue;
+        const targetAmount = computeCrossTargetAmount(sourceAmount, market.sourceIsBase, priceTicks);
         const levelId = level + 1;
+        const bookOwnerEntityId = deriveCanonicalCrossJurisdictionBookOwnerForLegs(
+          sourceJurisdictionRef,
+          pair.sourceTokenId,
+          sourceHub.entityId,
+          targetJurisdictionRef,
+          pair.targetTokenId,
+          targetHub.entityId,
+        );
+        const bookHubSignerId = normalizeEntityRef(bookOwnerEntityId) === normalizeEntityRef(sourceHub.entityId)
+          ? sourceHub.signerId
+          : targetHub.signerId;
         const routeBase = {
           makerEntityId: sourceContext.entityId,
           hubEntityId: sourceHub.entityId,
+          bookOwnerEntityId,
+          sourceSignerId: sourceContext.signerId,
+          ...(sourceHub.signerId ? { sourceHubSignerId: sourceHub.signerId } : {}),
+          ...(targetHub.signerId ? { targetHubSignerId: targetHub.signerId } : {}),
+          targetSignerId: targetContext.signerId,
+          ...(bookHubSignerId ? { bookHubSignerId } : {}),
           status: 'intent' as const,
           createdAt: now,
           updatedAt: now,
           expiresAt: now + MARKET_MAKER_CROSS_EXPIRY_MS,
         };
 
-        const askAmounts = fitCrossAmountsToOrderbook(
+        const amounts = fitCrossAmountsToOrderbook(
           sourceJurisdictionRef,
-          pair.baseTokenId,
-          baseSize,
+          pair.sourceTokenId,
+          sourceAmount,
           targetJurisdictionRef,
-          pair.quoteTokenId,
-          askWantAmount,
-          askPriceTicks,
+          pair.targetTokenId,
+          targetAmount,
+          priceTicks,
         );
-        if (askAmounts) {
-          const offerId = `mmx-${sourceHubSuffix}-${targetHubSuffix}-${pair.baseTokenId}-${pair.quoteTokenId}-ask-${levelId}`;
+        if (amounts) {
+          const offerId = `mmx-${sourceHubSuffix}-${targetHubSuffix}-${pair.sourceTokenId}-${pair.targetTokenId}-sell-${levelId}`;
           const route = canonicalizeLocalCrossJurisdictionRoute(env, {
             ...routeBase,
             orderId: offerId,
-            priceTicks: askPriceTicks,
+            priceTicks,
             source: {
               jurisdiction: sourceJurisdictionRef,
               entityId: sourceContext.entityId,
               counterpartyEntityId: sourceHub.entityId,
-              tokenId: pair.baseTokenId,
-              amount: askAmounts.sourceAmount,
+              tokenId: pair.sourceTokenId,
+              amount: amounts.sourceAmount,
             },
             target: {
               jurisdiction: targetJurisdictionRef,
               entityId: targetHub.entityId,
               counterpartyEntityId: targetContext.entityId,
-              tokenId: pair.quoteTokenId,
-              amount: askAmounts.targetAmount,
+              tokenId: pair.targetTokenId,
+              amount: amounts.targetAmount,
             },
           });
           if (!route) continue;
           specs.push({
             offerId,
-            pairId: deriveCanonicalCrossJurisdictionMarketForLegs(
-              sourceJurisdictionRef,
-              pair.baseTokenId,
-              targetJurisdictionRef,
-              pair.quoteTokenId,
-            ).venueId,
+            pairId: market.venueId,
             hubEntityId: sourceHub.entityId,
-            giveTokenId: pair.baseTokenId,
-            giveAmount: askAmounts.sourceAmount,
-            wantTokenId: pair.quoteTokenId,
-            wantAmount: askAmounts.targetAmount,
-            minFillRatio: 0,
-            crossJurisdiction: route,
-          });
-        }
-
-        const bidAmounts = fitCrossAmountsToOrderbook(
-          sourceJurisdictionRef,
-          pair.quoteTokenId,
-          bidGiveAmount,
-          targetJurisdictionRef,
-          pair.baseTokenId,
-          baseSize,
-          bidPriceTicks,
-        );
-        if (bidAmounts) {
-          const offerId = `mmx-${sourceHubSuffix}-${targetHubSuffix}-${pair.baseTokenId}-${pair.quoteTokenId}-bid-${levelId}`;
-          const route = canonicalizeLocalCrossJurisdictionRoute(env, {
-            ...routeBase,
-            orderId: offerId,
-            priceTicks: bidPriceTicks,
-            source: {
-              jurisdiction: sourceJurisdictionRef,
-              entityId: sourceContext.entityId,
-              counterpartyEntityId: sourceHub.entityId,
-              tokenId: pair.quoteTokenId,
-              amount: bidAmounts.sourceAmount,
-            },
-            target: {
-              jurisdiction: targetJurisdictionRef,
-              entityId: targetHub.entityId,
-              counterpartyEntityId: targetContext.entityId,
-              tokenId: pair.baseTokenId,
-              amount: bidAmounts.targetAmount,
-            },
-          });
-          if (!route) continue;
-          specs.push({
-            offerId,
-            pairId: deriveCanonicalCrossJurisdictionMarketForLegs(
-              sourceJurisdictionRef,
-              pair.quoteTokenId,
-              targetJurisdictionRef,
-              pair.baseTokenId,
-            ).venueId,
-            hubEntityId: sourceHub.entityId,
-            giveTokenId: pair.quoteTokenId,
-            giveAmount: bidAmounts.sourceAmount,
-            wantTokenId: pair.baseTokenId,
-            wantAmount: bidAmounts.targetAmount,
+            giveTokenId: pair.sourceTokenId,
+            giveAmount: amounts.sourceAmount,
+            wantTokenId: pair.targetTokenId,
+            wantAmount: amounts.targetAmount,
             minFillRatio: 0,
             crossJurisdiction: route,
           });
@@ -1082,6 +1169,163 @@ const hasCrossRouteRegistered = (env: Env, entityId: string, orderId: string): b
   return Boolean(replica?.state?.crossJurisdictionSwaps?.has(orderId));
 };
 
+const collectPendingCrossRequestOrderIds = (env: Env, entityId: string): Set<string> => {
+  const normalizedEntityId = normalizeEntityRef(entityId);
+  const ids = new Set<string>();
+  const collectFromTxs = (txs: EntityInput['entityTxs'] | undefined): void => {
+    for (const tx of txs ?? []) {
+      if (tx?.type !== 'requestCrossJurisdictionSwap') continue;
+      const orderId = String(tx.data?.route?.orderId || '').trim();
+      if (orderId) ids.add(orderId);
+    }
+  };
+
+  const replica = getEntityReplicaById(env, normalizedEntityId);
+  collectFromTxs(replica?.mempool);
+  collectFromTxs(replica?.proposal?.txs);
+  collectFromTxs(replica?.lockedFrame?.txs);
+  for (const orderId of replica?.state?.crossJurisdictionSwaps?.keys?.() ?? []) {
+    if (orderId) ids.add(String(orderId));
+  }
+
+  const runtimeInputs = [
+    ...(env.runtimeMempool?.entityInputs ?? []),
+    ...(env.runtimeInput?.entityInputs ?? []),
+  ];
+  for (const input of runtimeInputs) {
+    if (normalizeEntityRef(input.entityId) !== normalizedEntityId) continue;
+    collectFromTxs(input.entityTxs);
+  }
+  return ids;
+};
+
+const hasMarketMakerCrossRequestInFlight = (env: Env, spec: MarketMakerOfferSpec): boolean => {
+  const route = spec.crossJurisdiction;
+  if (!route) return false;
+  return collectPendingCrossRequestOrderIds(env, route.source.entityId).has(route.orderId);
+};
+
+const hasMarketMakerCrossOffer = (env: Env, spec: MarketMakerOfferSpec): boolean => {
+  const route = spec.crossJurisdiction;
+  if (!route) return false;
+  const bookOwnerEntityId = crossJurisdictionBookOwnerRef(route);
+  const bookOwner = bookOwnerEntityId ? getEntityReplicaById(env, bookOwnerEntityId)?.state : null;
+  return Boolean(bookOwner && hasCrossJurisdictionBookOrder(bookOwner, route));
+};
+
+const buildMarketMakerCrossHealth = (
+  env: Env,
+  contexts: MarketMakerEntityContext[],
+  visibleHubs: HubProfile[],
+  tokenIdsByContext: MarketMakerTokenIdsByContext,
+): MarketMakerHealth['cross'] => {
+  const jurisdictionCount = new Set(contexts.map(context => context.jurisdictionRef).filter(Boolean)).size;
+  const routeGroups = new Map<string, {
+    sourceJurisdiction: string;
+    targetJurisdiction: string;
+    sourceHubEntityId: string;
+    targetHubEntityId: string;
+    specs: MarketMakerOfferSpec[];
+  }>();
+
+  for (const sourceContext of contexts) {
+    const sourceHubs = visibleHubs.filter(profile => sameJurisdiction(sourceContext, profile));
+    if (sourceHubs.length === 0) continue;
+    const sourceTokenIds = getMarketMakerTokenIds(tokenIdsByContext, sourceContext);
+    for (const targetContext of contexts) {
+      if (sourceContext.entityId === targetContext.entityId || sameJurisdiction(sourceContext, targetContext)) continue;
+      const targetHubs = visibleHubs.filter(profile => sameJurisdiction(targetContext, profile));
+      if (targetHubs.length === 0) continue;
+      const targetTokenIds = getMarketMakerTokenIds(tokenIdsByContext, targetContext);
+      for (const spec of buildMarketMakerCrossOfferSpecs(
+        env,
+        sourceContext,
+        targetContext,
+        sourceHubs,
+        targetHubs,
+        sourceTokenIds,
+        targetTokenIds,
+      )) {
+        const route = spec.crossJurisdiction;
+        if (!route) continue;
+        const sourceHubEntityId = normalizeEntityRef(route.source.counterpartyEntityId);
+        const targetHubEntityId = normalizeEntityRef(route.target.entityId);
+        if (!sourceHubEntityId || !targetHubEntityId) continue;
+        const key = `${sourceContext.entityId}:${targetContext.entityId}:${sourceHubEntityId}:${targetHubEntityId}`;
+        const group = routeGroups.get(key) ?? {
+          sourceJurisdiction: sourceContext.jurisdictionName,
+          targetJurisdiction: targetContext.jurisdictionName,
+          sourceHubEntityId,
+          targetHubEntityId,
+          specs: [],
+        };
+        group.specs.push(spec);
+        routeGroups.set(key, group);
+      }
+    }
+  }
+
+  const expectedRouteCount = jurisdictionCount > 1 && contexts.every(context =>
+    getMarketMakerTokenIds(tokenIdsByContext, context).length >= HUB_REQUIRED_TOKEN_COUNT,
+  )
+    ? routeGroups.size
+    : 0;
+  const routes = Array.from(routeGroups.values()).map((group) => {
+    const expectedByPair = new Map<string, MarketMakerOfferSpec[]>();
+    for (const spec of group.specs) {
+      const pairSpecs = expectedByPair.get(spec.pairId) ?? [];
+      pairSpecs.push(spec);
+      expectedByPair.set(spec.pairId, pairSpecs);
+    }
+    const pairs = Array.from(expectedByPair.entries())
+      .map(([pairId, specs]) => {
+        const offers = specs.filter(spec => hasMarketMakerCrossOffer(env, spec)).length;
+        const sourceTokenIds = normalizePositiveTokenIds(specs.map(spec => spec.crossJurisdiction?.source.tokenId ?? 0));
+        const targetTokenIds = normalizePositiveTokenIds(specs.map(spec => spec.crossJurisdiction?.target.tokenId ?? 0));
+        return {
+          pairId,
+          offers,
+          ready: specs.length > 0 && offers >= specs.length,
+          sourceTokenIds,
+          targetTokenIds,
+        };
+      })
+      .sort((left, right) => compareStableText(left.pairId, right.pairId));
+    const offers = group.specs.filter(spec => hasMarketMakerCrossOffer(env, spec)).length;
+    return {
+      sourceJurisdiction: group.sourceJurisdiction,
+      targetJurisdiction: group.targetJurisdiction,
+      sourceHubEntityId: group.sourceHubEntityId,
+      targetHubEntityId: group.targetHubEntityId,
+      offers,
+      ready: group.specs.length > 0 && offers >= group.specs.length && pairs.every(pair => pair.ready),
+      pairs,
+    };
+  }).sort((left, right) =>
+    compareStableText(left.sourceJurisdiction, right.sourceJurisdiction) ||
+    compareStableText(left.targetJurisdiction, right.targetJurisdiction) ||
+    compareStableText(left.sourceHubEntityId, right.sourceHubEntityId) ||
+    compareStableText(left.targetHubEntityId, right.targetHubEntityId),
+  );
+
+  const expectedOffersPerRoute = Math.max(0, ...Array.from(routeGroups.values()).map(group => group.specs.length));
+  const expectedOffersPerPair = Math.max(0, ...Array.from(routeGroups.values()).flatMap((group) => {
+    const counts = new Map<string, number>();
+    for (const spec of group.specs) counts.set(spec.pairId, (counts.get(spec.pairId) || 0) + 1);
+    return Array.from(counts.values());
+  }));
+
+  return {
+    ok: expectedRouteCount > 0
+      ? routes.length >= expectedRouteCount && routes.every(route => route.ready)
+      : routes.every(route => route.ready),
+    expectedRoutes: expectedRouteCount || routes.length,
+    expectedOffersPerRoute,
+    expectedOffersPerPair,
+    routes,
+  };
+};
+
 const pushEntityTx = (
   inputsByEntity: Map<string, EntityInput>,
   entityId: string,
@@ -1106,14 +1350,16 @@ const maintainMarketMakerCrossQuotes = async (
   sourceHubs: HubProfile[],
   targetHubs: HubProfile[],
   hubSignerIdsByEntityId: ReadonlyMap<string, string>,
-  tokenIds: number[],
+  sourceTokenIds: number[],
+  targetTokenIds: number[],
   maxOffersPerAccount = Math.max(2, Math.floor(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK / 2)),
   maxNewOffersTotal = Math.max(2, Math.floor(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK / 2)),
 ): Promise<void> => {
   if (
     sourceHubs.length === 0 ||
     targetHubs.length === 0 ||
-    tokenIds.length < 3 ||
+    sourceTokenIds.length < HUB_REQUIRED_TOKEN_COUNT ||
+    targetTokenIds.length < HUB_REQUIRED_TOKEN_COUNT ||
     sourceContext.entityId === targetContext.entityId ||
     sameJurisdiction(sourceContext, targetContext)
   ) {
@@ -1128,7 +1374,7 @@ const maintainMarketMakerCrossQuotes = async (
     sourceContext.signerId,
     sourceHubEntityIds,
     hubSignerIdsByEntityId,
-    tokenIds,
+    sourceTokenIds,
   );
   await ensureMarketMakerHubConnectivity(
     env,
@@ -1136,11 +1382,11 @@ const maintainMarketMakerCrossQuotes = async (
     targetContext.signerId,
     targetHubEntityIds,
     hubSignerIdsByEntityId,
-    tokenIds,
+    targetTokenIds,
   );
 
-  if (!isMarketMakerConnectivityReady(env, sourceContext.entityId, sourceHubEntityIds, tokenIds)) return;
-  if (!isMarketMakerConnectivityReady(env, targetContext.entityId, targetHubEntityIds, tokenIds)) return;
+  if (!isMarketMakerConnectivityReady(env, sourceContext.entityId, sourceHubEntityIds, sourceTokenIds)) return;
+  if (!isMarketMakerConnectivityReady(env, targetContext.entityId, targetHubEntityIds, targetTokenIds)) return;
 
   const desiredOffers = buildMarketMakerCrossOfferSpecs(
     env,
@@ -1148,7 +1394,8 @@ const maintainMarketMakerCrossQuotes = async (
     targetContext,
     sourceHubs,
     targetHubs,
-    tokenIds,
+    sourceTokenIds,
+    targetTokenIds,
   );
   if (desiredOffers.length === 0) return;
 
@@ -1183,6 +1430,7 @@ const maintainMarketMakerCrossQuotes = async (
         const route = spec.crossJurisdiction!;
         return (
           !hasCrossRouteRegistered(env, route.source.counterpartyEntityId, route.orderId) &&
+          !hasMarketMakerCrossRequestInFlight(env, spec) &&
           hasPairMutualCredit(env, sourceContext.entityId, route.source.counterpartyEntityId, route.source.tokenId, route.source.amount) &&
           hasPairMutualCredit(env, targetContext.entityId, route.target.entityId, route.target.tokenId, route.target.amount)
         );
@@ -1214,9 +1462,23 @@ const getMarketMakerHealth = (
   mmEntityId: string | null,
   hubEntityIds: string[],
   tokenIds: number[],
+  crossOptions?: {
+    contexts: MarketMakerEntityContext[];
+    visibleHubs: HubProfile[];
+    tokenIdsByContext: MarketMakerTokenIdsByContext;
+  },
 ): MarketMakerHealth => {
   const pairs = buildDefaultEntitySwapPairs(tokenIds);
   const desiredSpecs = buildMarketMakerOfferSpecs(hubEntityIds, tokenIds);
+  const cross = crossOptions
+    ? buildMarketMakerCrossHealth(env, crossOptions.contexts, crossOptions.visibleHubs, crossOptions.tokenIdsByContext)
+    : {
+        ok: true,
+        expectedRoutes: 0,
+        expectedOffersPerRoute: 0,
+        expectedOffersPerPair: 0,
+        routes: [],
+      };
   const expectedOffersByHub = new Map<string, number>();
   const expectedOffersByHubPair = new Map<string, number>();
   for (const spec of desiredSpecs) {
@@ -1242,6 +1504,7 @@ const getMarketMakerHealth = (
       expectedOffersPerHub: Math.max(0, expectedOffersPerHub),
       expectedOffersPerPair,
       hubs: [],
+      cross,
     };
   }
 
@@ -1288,12 +1551,13 @@ const getMarketMakerHealth = (
 
   return {
     enabled: true,
-    ok: hubs.length > 0 && hubs.every((entry) => entry.ready),
+    ok: hubs.length > 0 && hubs.every((entry) => entry.ready) && cross.ok,
     entityId: mmEntityId,
     connectivity,
     expectedOffersPerHub,
     expectedOffersPerPair,
     hubs,
+    cross,
   };
 };
 
@@ -1305,6 +1569,17 @@ const run = async (): Promise<void> => {
   let startupPhase = 'boot';
   let activeMmEntityId: string | null = null;
   let mmContexts: MarketMakerEntityContext[] = [];
+  let mmTokenIdsByContext: Map<string, number[]> = new Map();
+  type DirectEntityInputDebug = {
+    at: number;
+    fromRuntimeId: string;
+    entityId: string;
+    signerId: string;
+    txTypes: string[];
+    error?: string;
+  };
+  let lastDirectEntityInput: DirectEntityInputDebug | null = null;
+  let lastDirectEntityInputError: DirectEntityInputDebug | null = null;
 
   const jurisdiction = resolveJurisdictionConfig(resolvedArgs.rpcUrl);
   nodeLog.info('startup phase', { phase: startupPhase });
@@ -1313,7 +1588,23 @@ const run = async (): Promise<void> => {
     runtimeId: String(env.runtimeId || ''),
     runtimeSeed: resolvedArgs.seed,
     onEntityInput: async (from, input, ingressTimestamp) => {
-      handleInboundP2PEntityInput(env, from, input, ingressTimestamp);
+      const debugEntry: DirectEntityInputDebug = {
+        at: Date.now(),
+        fromRuntimeId: String(from || ''),
+        entityId: String(input.entityId || ''),
+        signerId: String(input.signerId || ''),
+        txTypes: (input.entityTxs || []).map(tx => String(tx?.type || '')),
+      };
+      lastDirectEntityInput = debugEntry;
+      try {
+        handleInboundP2PEntityInput(env, from, input, ingressTimestamp);
+      } catch (error) {
+        lastDirectEntityInputError = {
+          ...debugEntry,
+          error: error instanceof Error ? error.message : String(error),
+        };
+        throw error;
+      }
     },
   });
   env.runtimeState = env.runtimeState ?? {};
@@ -1373,8 +1664,15 @@ const run = async (): Promise<void> => {
       }
 
       if (pathname === '/api/health') {
-        const visibleHubs = readVisibleHubProfiles(env);
+        const primaryContext = mmContexts[0] ?? null;
+        const visibleHubs = readVisibleHubProfiles(env).filter(profile =>
+          primaryContext ? sameJurisdiction(primaryContext, profile) : true,
+        );
+        const allVisibleHubs = readVisibleHubProfiles(env, true);
         const activeEntityId = activeMmEntityId;
+        const primaryTokenIds = primaryContext
+          ? getMarketMakerTokenIds(mmTokenIdsByContext, primaryContext, normalizeTokenIdsForMm([]))
+          : normalizeTokenIdsForMm([]);
         const health = {
           ok: visibleHubs.length === resolvedArgs.meshHubNames.length,
           name: resolvedArgs.name,
@@ -1386,6 +1684,10 @@ const run = async (): Promise<void> => {
           startupPhase,
           p2p: {
             directPeers: getP2PState(env).directPeers || [],
+            directInput: {
+              lastSeen: lastDirectEntityInput,
+              lastError: lastDirectEntityInputError,
+            },
           },
           gossip: {
             visibleHubNames: visibleHubs.map(profile => profile.name),
@@ -1393,7 +1695,11 @@ const run = async (): Promise<void> => {
             ready: visibleHubs.length === resolvedArgs.meshHubNames.length,
           },
           marketMaker: activeEntityId
-            ? getMarketMakerHealth(env, activeEntityId, visibleHubs.map(profile => profile.entityId), normalizeTokenIdsForMm([]))
+            ? getMarketMakerHealth(env, activeEntityId, visibleHubs.map(profile => profile.entityId), primaryTokenIds, {
+                contexts: mmContexts,
+                visibleHubs: allVisibleHubs,
+                tokenIdsByContext: mmTokenIdsByContext,
+              })
             : {
                 enabled: true,
                 ok: false,
@@ -1401,6 +1707,13 @@ const run = async (): Promise<void> => {
                 expectedOffersPerHub: 0,
                 expectedOffersPerPair: 0,
                 hubs: [],
+                cross: {
+                  ok: false,
+                  expectedRoutes: 0,
+                  expectedOffersPerRoute: 0,
+                  expectedOffersPerPair: 0,
+                  routes: [],
+                },
               },
         };
         return new Response(safeStringify(health), { headers: JSON_HEADERS });
@@ -1467,7 +1780,6 @@ const run = async (): Promise<void> => {
   ensureJurisdictionReplica(env, jadapter, resolveImportedJurisdictionRpc(jurisdiction));
   startupPhase = 'token-catalog';
   const tokenCatalog = await waitForTokenCatalog(jadapter);
-  const tokenIds = normalizeTokenIdsForMm(tokenCatalog);
   const meshHubIdentities = parseMeshHubIdentities(resolvedArgs.meshHubIdentitiesJson);
   const configuredHubSignerIdsByEntityId = new Map(
     meshHubIdentities.map((hub) => [hub.entityId.toLowerCase(), hub.signerId.toLowerCase()] as const),
@@ -1504,6 +1816,10 @@ const run = async (): Promise<void> => {
       `[MESH-MM] Sibling MM ready jurisdiction=${secondaryName} entity=${siblingContext.entityId.slice(0, 12)}`,
     );
   }
+  mmTokenIdsByContext = buildMarketMakerTokenIdsByContext(tokenCatalog, mmContexts);
+  console.log(`[MESH-MM] Token universe for market making: ${mmContexts
+    .map(context => `${formatJurisdictionDisplayName(context.jurisdictionName) || context.jurisdictionName}=${getMarketMakerTokenIds(mmTokenIdsByContext, context).join(',')}`)
+    .join(' ')}`);
 
   startupPhase = 'start-p2p';
   const p2p = startP2P(env, {
@@ -1531,7 +1847,8 @@ const run = async (): Promise<void> => {
         const sameJurisdictionHubs = visibleHubs.filter(profile => sameJurisdiction(context, profile));
         const hubEntityIds = sameJurisdictionHubs.map(profile => profile.entityId);
         if (hubEntityIds.length === 0) continue;
-        const desiredOfferCount = buildMarketMakerOfferSpecs(hubEntityIds, tokenIds).length;
+        const contextTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, context);
+        const desiredOfferCount = buildMarketMakerOfferSpecs(hubEntityIds, contextTokenIds).length;
         const expectedOffersPerHub = Math.max(1, Math.ceil(desiredOfferCount / Math.max(1, hubEntityIds.length)));
         await maintainMarketMakerQuotes(
           env,
@@ -1539,7 +1856,7 @@ const run = async (): Promise<void> => {
           context.signerId,
           hubEntityIds,
           hubSignerIdsByEntityId,
-          tokenIds,
+          contextTokenIds,
           mode === 'bootstrap'
             ? Math.max(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK, expectedOffersPerHub)
             : MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK,
@@ -1552,17 +1869,20 @@ const run = async (): Promise<void> => {
       for (const sourceContext of mmContexts) {
         const sourceHubs = visibleHubs.filter(profile => sameJurisdiction(sourceContext, profile));
         if (sourceHubs.length === 0) continue;
+        const sourceTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, sourceContext);
         for (const targetContext of mmContexts) {
           if (sourceContext.entityId === targetContext.entityId || sameJurisdiction(sourceContext, targetContext)) continue;
           const targetHubs = visibleHubs.filter(profile => sameJurisdiction(targetContext, profile));
           if (targetHubs.length === 0) continue;
+          const targetTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, targetContext);
           const desiredCrossOfferCount = buildMarketMakerCrossOfferSpecs(
             env,
             sourceContext,
             targetContext,
             sourceHubs,
             targetHubs,
-            tokenIds,
+            sourceTokenIds,
+            targetTokenIds,
           ).length;
           await maintainMarketMakerCrossQuotes(
             env,
@@ -1571,9 +1891,10 @@ const run = async (): Promise<void> => {
             sourceHubs,
             targetHubs,
             hubSignerIdsByEntityId,
-            tokenIds,
+            sourceTokenIds,
+            targetTokenIds,
             mode === 'bootstrap'
-              ? Math.max(MARKET_MAKER_CROSS_LEVELS_PER_PAIR * buildDefaultEntitySwapPairs(tokenIds).length * 2, MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK)
+              ? Math.max(MARKET_MAKER_CROSS_LEVELS_PER_PAIR * buildMarketMakerCrossTokenPairs(sourceTokenIds, targetTokenIds).length, MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK)
               : Math.max(2, Math.floor(MARKET_MAKER_OFFERS_PER_ACCOUNT_PER_TICK / 2)),
             mode === 'bootstrap'
               ? Math.max(MARKET_MAKER_MAX_NEW_OFFERS_PER_TICK, desiredCrossOfferCount)
@@ -1599,15 +1920,27 @@ const run = async (): Promise<void> => {
     const deadline = Date.now() + MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS;
     while (!shuttingDown && Date.now() < deadline) {
       await driveQuotes('bootstrap');
-      const visibleHubs = readVisibleHubProfiles(env);
-      const health = getMarketMakerHealth(env, primaryMmContext.entityId, visibleHubs.map(profile => profile.entityId), tokenIds);
+      const visibleHubs = readVisibleHubProfiles(env).filter(profile => sameJurisdiction(primaryMmContext, profile));
+      const allVisibleHubs = readVisibleHubProfiles(env, true);
+      const primaryTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, primaryMmContext);
+      const health = getMarketMakerHealth(env, primaryMmContext.entityId, visibleHubs.map(profile => profile.entityId), primaryTokenIds, {
+        contexts: mmContexts,
+        visibleHubs: allVisibleHubs,
+        tokenIdsByContext: mmTokenIdsByContext,
+      });
       if (health.ok) return true;
       await sleep(MARKET_MAKER_BOOTSTRAP_LOOP_MS);
     }
-    const visibleHubs = readVisibleHubProfiles(env);
-    const health = getMarketMakerHealth(env, primaryMmContext.entityId, visibleHubs.map(profile => profile.entityId), tokenIds);
+    const visibleHubs = readVisibleHubProfiles(env).filter(profile => sameJurisdiction(primaryMmContext, profile));
+    const allVisibleHubs = readVisibleHubProfiles(env, true);
+    const primaryTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, primaryMmContext);
+    const health = getMarketMakerHealth(env, primaryMmContext.entityId, visibleHubs.map(profile => profile.entityId), primaryTokenIds, {
+      contexts: mmContexts,
+      visibleHubs: allVisibleHubs,
+      tokenIdsByContext: mmTokenIdsByContext,
+    });
     console.warn(
-      `[MESH-MM] BOOTSTRAP_TIMEOUT visibleHubs=${visibleHubs.length} offers=${safeStringify(health.hubs.map(hub => ({ hubEntityId: hub.hubEntityId, offers: hub.offers })))}`,
+      `[MESH-MM] BOOTSTRAP_TIMEOUT visibleHubs=${visibleHubs.length} offers=${safeStringify(health.hubs.map(hub => ({ hubEntityId: hub.hubEntityId, offers: hub.offers })))} cross=${safeStringify({ expectedRoutes: health.cross.expectedRoutes, routes: health.cross.routes.map(route => ({ sourceHubEntityId: route.sourceHubEntityId, targetHubEntityId: route.targetHubEntityId, offers: route.offers, ready: route.ready })) })}`,
     );
     return false;
   };
@@ -1629,15 +1962,24 @@ const run = async (): Promise<void> => {
     void (async () => {
       await driveQuotes();
       if (startupPhase !== 'offers-ready') {
-        const visibleHubs = readVisibleHubProfiles(env);
-        const health = getMarketMakerHealth(env, primaryMmContext.entityId, visibleHubs.map(profile => profile.entityId), tokenIds);
+        const visibleHubs = readVisibleHubProfiles(env).filter(profile => sameJurisdiction(primaryMmContext, profile));
+        const allVisibleHubs = readVisibleHubProfiles(env, true);
+        const primaryTokenIds = getMarketMakerTokenIds(mmTokenIdsByContext, primaryMmContext);
+        const health = getMarketMakerHealth(env, primaryMmContext.entityId, visibleHubs.map(profile => profile.entityId), primaryTokenIds, {
+          contexts: mmContexts,
+          visibleHubs: allVisibleHubs,
+          tokenIdsByContext: mmTokenIdsByContext,
+        });
         if (health.ok) {
           markOffersReady();
         }
       }
     })().catch(error => {
       if (shuttingDown) return;
-      console.error(`[MM] quote loop failed:`, (error as Error).message);
+      const message = error instanceof Error ? error.message : String(error);
+      console.error(`[MM] quote loop failed; shutting down:`, message);
+      if (loop) clearInterval(loop);
+      process.exit(1);
     });
   }, MARKET_MAKER_QUOTE_LOOP_MS);
 

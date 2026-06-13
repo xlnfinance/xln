@@ -1043,13 +1043,18 @@ export async function handleAccountInput(
     let batchedWithNewFrame = false;
     let proposeResult: Awaited<ReturnType<typeof proposeAccountFrame>> | undefined;
     // Build dispute proof hanko for ACK response (always include current state's dispute proof)
-    const { buildAccountProofBody: buildProof, createDisputeProofHash: createHash } = await import('./proof-builder');
+    const { buildAccountProofBody: buildProof, createDisputeProofHashWithNonce: createHash } = await import('./proof-builder');
     const ackDepositoryAddress = getAccountDepositoryAddress(env, accountMachine);
     if (!isAddress20(ackDepositoryAddress)) {
       return { success: false, error: 'ACK_DISPUTE_PROOF_BUILD_FAILED: MISSING_DEPOSITORY_ADDRESS', events };
     }
     const ackProofResult = buildProof(accountMachine);
-    const ackDisputeHash = createHash(accountMachine, ackProofResult.proofBodyHash, ackDepositoryAddress);
+    const ackDisputeHash = createHash(
+      accountMachine,
+      ackProofResult.proofBodyHash,
+      ackDepositoryAddress,
+      accountMachine.proofHeader.nonce,
+    );
     // ACK and its dispute proof are separate hankos over separate hashes, but
     // they are signed by the same entity in the same local step. One call keeps
     // the hot path from repeating signer lookup and lazy-entity prechecks.

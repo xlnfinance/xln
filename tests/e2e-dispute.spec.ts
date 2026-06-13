@@ -134,10 +134,31 @@ async function readLocalReserveState(page: Page, entityId: string, opts?: { allo
   return BigInt(value);
 }
 
-async function readOnchainReserveViaAnvil(page: Page, entityId: string, opts?: { allowUnavailable?: boolean }): Promise<bigint> {
+async function readOnchainReserveViaAnvil(
+  page: Page,
+  entityId: string,
+  opts?: { allowUnavailable?: boolean; hubEntityId?: string },
+): Promise<bigint> {
   const apiBase = await getActiveApiBase(page);
+  const jurisdiction = await page.evaluate(({ entityId }) => {
+    const env = (window as any).isolatedEnv;
+    if (!env?.eReplicas) return '';
+    const entityLower = String(entityId || '').toLowerCase();
+    for (const [key, rep] of env.eReplicas.entries()) {
+      const [eid] = String(key).split(':');
+      if (String(eid || '').toLowerCase() !== entityLower) continue;
+      return String(rep?.state?.config?.jurisdiction?.name || rep?.position?.jurisdiction || '').trim();
+    }
+    return '';
+  }, { entityId }).catch(() => '');
+  const params = new URLSearchParams({
+    entityId,
+    tokenId: '1',
+  });
+  if (jurisdiction) params.set('jurisdiction', jurisdiction);
+  if (opts?.hubEntityId) params.set('hubEntityId', opts.hubEntityId);
   const response = await page.request.get(
-    `${apiBase}/api/debug/reserve?entityId=${encodeURIComponent(entityId)}&tokenId=1`,
+    `${apiBase}/api/debug/reserve?${params.toString()}`,
   );
   if (!response.ok()) {
     if (opts?.allowUnavailable) return 0n;
@@ -1235,7 +1256,9 @@ test.describe('E2E Dispute Flow', () => {
 
     const localReserveBefore = await readLocalReserveState(page, accountRef.entityId, { allowUnavailable: true });
     expect(localReserveBefore).toBeGreaterThanOrEqual(0n);
-    const reserveBefore = await readOnchainReserveViaAnvil(page, accountRef.entityId);
+    const reserveBefore = await readOnchainReserveViaAnvil(page, accountRef.entityId, {
+      hubEntityId: accountRef.counterpartyId,
+    });
     const reserveBeforeUi = await readReserveBalanceUi(page, 'USDC');
     const batchBeforeDispute = await readJBatchSnapshot(page, accountRef.entityId, accountRef.signerId);
 
@@ -1324,7 +1347,9 @@ test.describe('E2E Dispute Flow', () => {
       }, { timeout: 120_000, intervals: [500, 1000, 2000] }).toBe(true);
     });
 
-    const reserveAfter = await readOnchainReserveViaAnvil(page, accountRef.entityId);
+    const reserveAfter = await readOnchainReserveViaAnvil(page, accountRef.entityId, {
+      hubEntityId: accountRef.counterpartyId,
+    });
     expect(
       reserveAfter >= 0n,
       `reserve must stay readable after dispute finalize (before=${reserveBefore}, after=${reserveAfter})`
@@ -1373,7 +1398,10 @@ test.describe('E2E Dispute Flow', () => {
       }, { timeout: 60_000 });
     });
     await timedStep('dispute.reload_assert_reserve', async () => {
-      await expect.poll(async () => await readOnchainReserveViaAnvil(page, accountRef.entityId, { allowUnavailable: true }), {
+      await expect.poll(async () => await readOnchainReserveViaAnvil(page, accountRef.entityId, {
+        allowUnavailable: true,
+        hubEntityId: accountRef.counterpartyId,
+      }), {
         timeout: 60_000,
         intervals: [500, 1000, 2000],
       }).toBeGreaterThanOrEqual(reserveAfter);
@@ -1382,6 +1410,13 @@ test.describe('E2E Dispute Flow', () => {
       await expect.poll(async () => {
         return await page.locator('.account-preview').filter({ hasText: accountRef.counterpartyId }).count();
       }, { timeout: 45_000, intervals: [500, 1000, 2000] }).toBe(0);
+    });
+    await timedStep('dispute.reload_assert_finalized_disputed_entry', async () => {
+      await page.getByRole('button', { name: /^Open Account$/ }).click();
+      const disputedRow = page.locator('.disputed-row').filter({ hasText: accountRef.counterpartyId }).first();
+      await expect(disputedRow).toBeVisible({ timeout: 60_000 });
+      await expect(disputedRow).toContainText('Finalized disputed account');
+      await expect(disputedRow.getByRole('button', { name: /^Reopen$/ })).toBeVisible();
     });
     await timedStep('dispute.reload_assert_batch_history', async () => {
       await expect.poll(async () => {
@@ -1447,9 +1482,12 @@ test.describe('E2E Dispute Flow', () => {
         return await page.locator('.account-preview').filter({ hasText: accountRef.counterpartyId }).count();
       }, { timeout: 60_000, intervals: [500, 1000, 2000] }).toBe(0);
 
+      await page.getByRole('button', { name: /^Open Account$/ }).click();
       const disputedRow = page.locator('.disputed-row').filter({ hasText: accountRef.counterpartyId }).first();
       await expect(disputedRow).toBeVisible({ timeout: 60_000 });
-      await expect(disputedRow.getByRole('button', { name: /^Reopen$/ })).toBeVisible({ timeout: 60_000 });
+      await expect(disputedRow).toContainText('Active dispute in progress');
+      await expect(disputedRow.getByRole('button', { name: /^Open$/ })).toBeVisible({ timeout: 60_000 });
+      await expect(disputedRow.getByRole('button', { name: /^Reopen$/ })).toHaveCount(0);
     });
   });
 });

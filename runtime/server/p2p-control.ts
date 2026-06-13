@@ -1,5 +1,6 @@
 import type { Env } from '../types';
 import { serializeTaggedJson } from '../serialization-utils';
+import { getControlBodyErrorStatus } from './auth';
 import type { parseTaggedControlBody as parseTaggedControlBodyType } from './auth';
 import type { startP2P as startP2PType } from '../runtime';
 
@@ -53,7 +54,7 @@ export const handleP2PControl = async (
   } catch (error) {
     return new Response(
       serializeTaggedJson({ ok: false, error: (error as Error).message || 'Failed to update P2P config' }),
-      { status: 500, headers },
+      { status: getControlBodyErrorStatus(error, 500), headers },
     );
   }
 };

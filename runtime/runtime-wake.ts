@@ -1,4 +1,3 @@
-import { buildRouteOutputKey } from './runtime-output-routing';
 import type { Env, EntityReplica, JInput, RoutedEntityInput, RuntimeInput, RuntimeTx } from './types';
 import { getWallClockMs } from './utils';
 
@@ -80,16 +79,6 @@ export const getEarliestWallClockDueTimestamp = (env: Env, deps: RuntimeWakeDeps
   const wallClockNow = getWallClockMs();
   let earliestDue = Infinity;
 
-  if (env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) {
-    const deferredMeta = deps.ensureRuntimeState(env).deferredNetworkMeta;
-    for (const output of env.pendingNetworkOutputs) {
-      const retryAt = deferredMeta?.get(buildRouteOutputKey(output))?.nextRetryAt ?? 0;
-      if (retryAt > logicalNow && retryAt <= wallClockNow) {
-        earliestDue = Math.min(earliestDue, retryAt);
-      }
-    }
-  }
-
   if (!env.eReplicas || env.eReplicas.size === 0) {
     return Number.isFinite(earliestDue) ? earliestDue : null;
   }
@@ -127,16 +116,6 @@ export const getNextWallClockWakeTimestamp = (env: Env, deps: RuntimeWakeDeps): 
   if (!deps.ensureRuntimeState(env).clockPrimed && !env.scenarioMode) return null;
   const logicalNow = deps.getRuntimeNowMs(env);
   let nextWake = Infinity;
-
-  if (env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) {
-    const deferredMeta = deps.ensureRuntimeState(env).deferredNetworkMeta;
-    for (const output of env.pendingNetworkOutputs) {
-      const retryAt = deferredMeta?.get(buildRouteOutputKey(output))?.nextRetryAt ?? 0;
-      if (retryAt > logicalNow) {
-        nextWake = Math.min(nextWake, retryAt);
-      }
-    }
-  }
 
   if (!env.eReplicas || env.eReplicas.size === 0) {
     return Number.isFinite(nextWake) ? nextWake : null;

@@ -32,7 +32,6 @@ import {
 
 const DEFAULT_RELAY_URL = 'wss://xln.finance/relay';
 const p2pLog = createStructuredLogger('p2p');
-const MAX_QUEUE_PER_RUNTIME = 100;
 const MIN_GOSSIP_POLL_MS = 250;
 const SLOW_BROWSER_TIMER_MS = 32;
 
@@ -160,6 +159,7 @@ export class RuntimeP2P {
   private clients: RuntimeWsClient[] = [];
   private directClients = new Map<string, RuntimeWsClient>();
   private directClientUrls = new Map<string, string>();
+  private directClientErrors = new Map<string, { at: number; error: string }>();
   private pendingByRuntime = new Map<string, { input: RoutedEntityInput, enqueuedAt: number, ingressTimestamp?: number }[]>();
   private pollInterval: ReturnType<typeof setInterval> | null = null;
   private retryInterval: ReturnType<typeof setInterval> | null = null;
@@ -425,19 +425,21 @@ export class RuntimeP2P {
     this.connect();
   }
 
-  getDirectPeerState(): Array<{ runtimeId: string; endpoint: string; open: boolean }> {
-    const rows: Array<{ runtimeId: string; endpoint: string; open: boolean }> = [];
+  getDirectPeerState(): Array<{ runtimeId: string; endpoint: string; open: boolean; lastError?: string; lastErrorAt?: number }> {
+    const rows: Array<{ runtimeId: string; endpoint: string; open: boolean; lastError?: string; lastErrorAt?: number }> = [];
     for (const [runtimeId, client] of this.directClients.entries()) {
+      const lastError = this.directClientErrors.get(runtimeId);
       rows.push({
         runtimeId,
         endpoint: this.directClientUrls.get(runtimeId) || client.getUrl(),
         open: client.isOpen(),
+        ...(lastError ? { lastError: lastError.error, lastErrorAt: lastError.at } : {}),
       });
     }
     return rows.sort((left, right) => compareStableText(left.runtimeId, right.runtimeId));
   }
 
-  enqueueEntityInput(targetRuntimeId: string, input: RoutedEntityInput, ingressTimestamp?: number) {
+  enqueueEntityInput(targetRuntimeId: string, input: RoutedEntityInput, ingressTimestamp?: number): boolean {
     try {
       failfastAssert(typeof targetRuntimeId === 'string' && targetRuntimeId.length > 0, 'P2P_TARGET_RUNTIME_INVALID', 'targetRuntimeId is required');
       failfastAssert(typeof input?.entityId === 'string' && input.entityId.length > 0, 'P2P_ENTITY_INPUT_INVALID', 'entity_input missing entityId', { targetRuntimeId });
@@ -463,21 +465,26 @@ export class RuntimeP2P {
       'targetRuntimeId must be signer EOA',
       { targetRuntimeId },
     );
-    const { client } = this.resolveTransportClient(normalizedTargetRuntimeId);
+    const { client, transport } = this.resolveTransportClient(normalizedTargetRuntimeId);
     if (client && client.isOpen()) {
       try {
         const sent = client.sendEntityInput(normalizedTargetRuntimeId, input, ingressTimestamp);
-        if (sent) return;
-        this.env.warn('network', 'P2P_SEND_FAILED', { targetRuntimeId: normalizedTargetRuntimeId });
+        if (sent) return true;
+        this.env.warn('network', 'P2P_SEND_FAILED', {
+          targetRuntimeId: normalizedTargetRuntimeId,
+          entityId: input.entityId,
+          transport,
+        });
       } catch (error) {
         const message = (error as Error).message || String(error);
         if (message.includes('P2P_NO_PUBKEY')) {
           this.sendDebugEvent({
-            level: 'warn',
-            code: 'P2P_NO_PUBKEY_QUEUE',
+            level: 'error',
+            code: 'P2P_NO_PUBKEY_DELIVERY_FAILED',
             message,
             targetRuntimeId: normalizedTargetRuntimeId,
             entityId: input.entityId,
+            transport,
           });
           this.refreshGossip();
         } else {
@@ -487,30 +494,30 @@ export class RuntimeP2P {
             message,
             targetRuntimeId: normalizedTargetRuntimeId,
             entityId: input.entityId,
+            transport,
           });
         }
+        throw new Error(
+          `P2P_ENTITY_INPUT_SEND_THROW: runtime=${normalizedTargetRuntimeId} entity=${input.entityId} ` +
+          `transport=${transport} error=${message}`,
+        );
       }
     }
 
-    const queue = this.pendingByRuntime.get(normalizedTargetRuntimeId) || [];
-    const queuedInput: { input: RoutedEntityInput; enqueuedAt: number; ingressTimestamp?: number } = {
-      input,
-      enqueuedAt: Date.now(),
-    };
-    if (ingressTimestamp !== undefined) queuedInput.ingressTimestamp = ingressTimestamp;
-    queue.push(queuedInput);
-    // Enforce queue size limit to prevent memory exhaustion
-    while (queue.length > MAX_QUEUE_PER_RUNTIME) queue.shift();
-    if (queue.length >= MAX_QUEUE_PER_RUNTIME) {
-      this.sendDebugEvent({
-        level: 'warn',
-        code: 'P2P_QUEUE_PRESSURE',
-        message: 'Pending queue at cap',
-        targetRuntimeId: normalizedTargetRuntimeId,
-        queueSize: queue.length,
-      });
-    }
-    this.pendingByRuntime.set(normalizedTargetRuntimeId, queue);
+    this.sendDebugEvent({
+      level: 'error',
+      code: 'P2P_ENTITY_INPUT_NOT_DELIVERED',
+      message: 'No open transport for entity input',
+      targetRuntimeId: normalizedTargetRuntimeId,
+      entityId: input.entityId,
+      transport,
+      relayConnected: Boolean(this.getActiveClient()),
+      directPeers: this.getDirectPeerState(),
+    });
+    throw new Error(
+      `P2P_ENTITY_INPUT_NOT_DELIVERED: runtime=${normalizedTargetRuntimeId} entity=${input.entityId} ` +
+      `transport=${transport}`,
+    );
   }
 
   requestGossip(runtimeId: string) {
@@ -1070,6 +1077,7 @@ export class RuntimeP2P {
     }
     this.directClients.clear();
     this.directClientUrls.clear();
+    this.directClientErrors.clear();
   }
 
   private getDirectPeerEndpoint(runtimeId: string): string | null {
@@ -1157,6 +1165,7 @@ export class RuntimeP2P {
       existing.close();
       this.directClients.delete(normalizedTargetRuntimeId);
       this.directClientUrls.delete(normalizedTargetRuntimeId);
+      this.directClientErrors.delete(normalizedTargetRuntimeId);
     }
     const client = new RuntimeWsClient({
       url: endpoint,
@@ -1178,6 +1187,7 @@ export class RuntimeP2P {
         this.peerRuntimeEncPubKeys.set(normalizedRuntimeId, normalizedKey);
       },
       onOpen: () => {
+        this.directClientErrors.delete(normalizedTargetRuntimeId);
         this.flushPending();
       },
       onEntityInput: async (from, input, timestamp) => {
@@ -1185,6 +1195,10 @@ export class RuntimeP2P {
         this.onEntityInput(from, input, timestamp);
       },
       onError: (error) => {
+        this.directClientErrors.set(normalizedTargetRuntimeId, {
+          at: Date.now(),
+          error: error.message,
+        });
         this.env.warn('network', 'WS_DIRECT_ERROR', {
           endpoint,
           targetRuntimeId: normalizedTargetRuntimeId,

@@ -3,12 +3,13 @@ import type { JBatch } from '../j-batch';
 
 /**
  * JReplica = Jurisdiction replica (J-Machine EVM state)
- * Contains stateRoot for time travel + decoded contracts for UI
+ * Contains optional stateRoot for BrowserVM time travel + decoded contracts for UI.
+ * RPC-backed jurisdictions are external machines; do not fake a bytes32 root.
  */
 export interface JReplica {
   name: string;                           // "ethereum", "base", "simnet"
   blockNumber: bigint;                    // Current J-block height
-  stateRoot: Uint8Array;                  // 32 bytes - for time travel via setStateRoot()
+  stateRoot: Uint8Array | null;           // 32 bytes for BrowserVM time travel; null for RPC/external roots
   mempool: JTx[];                         // Pending settlement txs
 
   // Block creation delay (ms-based for universal timing)

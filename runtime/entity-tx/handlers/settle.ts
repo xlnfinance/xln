@@ -31,7 +31,7 @@ async function signPostSettlementDisputeProof(
   entityState: EntityState,
   account: AccountMachine,
   onChainNonce: number,
-): Promise<{ hanko: HankoString; proofBodyHash: string; nonce: number } | null> {
+): Promise<{ hanko: HankoString; proofBodyHash: string; disputeHash: string; nonce: number } | null> {
   const jurisdiction = entityState.config.jurisdiction;
   if (!jurisdiction?.depositoryAddress) return null;
   const signerId = entityState.config.validators[0];
@@ -52,7 +52,7 @@ async function signPostSettlementDisputeProof(
       account,
       captureDisputeArgumentSnapshot(account, proofBodyHash, onChainNonce + 1, proofBodyStruct),
     );
-    return { hanko: hankos[0], proofBodyHash, nonce: onChainNonce + 1 };
+    return { hanko: hankos[0], proofBodyHash, disputeHash, nonce: onChainNonce + 1 };
   } catch (e) {
     console.warn(`⚠️ Post-settlement dispute proof signing failed: ${e instanceof Error ? e.message : String(e)}`);
     return null;
@@ -369,9 +369,15 @@ export async function handleSettleApprove(
   if (disputeResult) {
     if (!workspace.postSettlementDisputeProof) {
       workspace.postSettlementDisputeProof = {
+        disputeHash: disputeResult.disputeHash,
         proofBodyHash: disputeResult.proofBodyHash,
         nonce: disputeResult.nonce,
       };
+    }
+    if (workspace.postSettlementDisputeProof.disputeHash !== disputeResult.disputeHash) {
+      throw new Error(
+        `POST_SETTLEMENT_DISPUTE_HASH_MISMATCH:${workspace.postSettlementDisputeProof.disputeHash}:${disputeResult.disputeHash}`,
+      );
     }
     if (iAmLeft) {
       workspace.postSettlementDisputeProof.leftHanko = disputeResult.hanko;
@@ -705,9 +711,15 @@ export async function processSettleAction(
                 if (disputeResult) {
                   if (!workspace.postSettlementDisputeProof) {
                     workspace.postSettlementDisputeProof = {
+                      disputeHash: disputeResult.disputeHash,
                       proofBodyHash: disputeResult.proofBodyHash,
                       nonce: disputeResult.nonce,
                     };
+                  }
+                  if (workspace.postSettlementDisputeProof.disputeHash !== disputeResult.disputeHash) {
+                    throw new Error(
+                      `POST_SETTLEMENT_DISPUTE_HASH_MISMATCH:${workspace.postSettlementDisputeProof.disputeHash}:${disputeResult.disputeHash}`,
+                    );
                   }
                   if (iAmLeft) {
                     workspace.postSettlementDisputeProof.leftHanko = disputeResult.hanko;

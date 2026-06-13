@@ -77,16 +77,13 @@ export const applyMergedEntityInputs = async (
         from: entityInput.from,
         txTypes: (entityInput.entityTxs || []).map(tx => tx.type),
       };
-      if (env.scenarioMode || isReplay) {
-        assertRuntimeIngress(
-          false,
-          'RUNTIME_CROSS_J_TOPOLOGY_INVALID',
-          'Cross-j system inputs must stay inside their two-runtime route topology',
-          dropDetails,
-        );
-      }
-      env.error('network', 'DROP_CROSS_J_TOPOLOGY_INVALID', dropDetails, entityInput.entityId);
-      continue;
+      env.error('network', 'REJECT_CROSS_J_TOPOLOGY_INVALID', dropDetails, entityInput.entityId);
+      assertRuntimeIngress(
+        false,
+        'RUNTIME_CROSS_J_TOPOLOGY_INVALID',
+        'Cross-j system inputs must stay inside their two-runtime route topology',
+        dropDetails,
+      );
     }
 
     if (entityInput.from) {
@@ -108,16 +105,13 @@ export const applyMergedEntityInputs = async (
         txTypes: (entityInput.entityTxs || []).map(tx => tx.type),
         knownEntities: Array.from(env.eReplicas.keys()).map(k => String(k).split(':')[0]).filter(Boolean),
       };
-      if (env.scenarioMode || isReplay) {
-        assertRuntimeIngress(
-          false,
-          'RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET',
-          'Entity input target does not exist in local runtime',
-          dropDetails,
-        );
-      }
-      env.error('network', 'DROP_ENTITY_INPUT_UNKNOWN_ENTITY', dropDetails, entityInput.entityId);
-      continue;
+      env.error('network', 'REJECT_ENTITY_INPUT_UNKNOWN_ENTITY', dropDetails, entityInput.entityId);
+      assertRuntimeIngress(
+        false,
+        'RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET',
+        'Entity input target does not exist in local runtime',
+        dropDetails,
+      );
     }
 
     const actualSignerId = entityInput.signerId.trim();
@@ -142,14 +136,15 @@ export const applyMergedEntityInputs = async (
 
     if (!entityReplica) {
       const localReplicaKeys = findReplicaKeysForEntityInsensitive(env, entityInput.entityId);
-      if (localReplicaKeys.length === 1) {
+      const txTypes = (entityInput.entityTxs || []).map(tx => tx.type);
+      if (localReplicaKeys.length === 1 && txTypes.length === 0) {
         replicaKey = localReplicaKeys[0]!;
         entityReplica = env.eReplicas.get(replicaKey);
         env.warn('network', 'ENTITY_INPUT_SIGNER_HINT_RETARGETED', {
           entityId: entityInput.entityId,
           inputSignerId: entityInput.signerId,
           resolvedReplicaKey: replicaKey,
-          txTypes: (entityInput.entityTxs || []).map(tx => tx.type),
+          txTypes,
         }, entityInput.entityId);
       }
     }
@@ -165,16 +160,13 @@ export const applyMergedEntityInputs = async (
             .startsWith(`${String(entityInput.entityId).toLowerCase()}:`),
         ),
       };
-      if (env.scenarioMode || isReplay) {
-        assertRuntimeIngress(
-          false,
-          'RUNTIME_REPLICA_NOT_FOUND',
-          'Entity input target replica missing for exact signerId',
-          missingReplicaDetails,
-        );
-      }
-      env.error('network', 'DROP_ENTITY_INPUT_REPLICA_NOT_FOUND', missingReplicaDetails, entityInput.entityId);
-      throw new Error(`RUNTIME_REPLICA_NOT_FOUND: entityId=${entityInput.entityId} resolvedSignerId=${actualSignerId}`);
+      env.error('network', 'REJECT_ENTITY_INPUT_REPLICA_NOT_FOUND', missingReplicaDetails, entityInput.entityId);
+      assertRuntimeIngress(
+        false,
+        'RUNTIME_REPLICA_NOT_FOUND',
+        'Entity input target replica missing for exact signerId',
+        missingReplicaDetails,
+      );
     }
 
     const result = await applyEntityInputToReplica(env, entityReplica, replicaKey, entityInput, actualSignerId, isReplay);

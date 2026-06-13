@@ -124,6 +124,19 @@ export const createMarketSubscriptionStack = <WS extends MarketSocket>(
     return sentAny;
   };
 
+  const sendNoMarketStatus = (ws: WS, subscription: MarketSubscription, inReplyTo: unknown): void => {
+    ws.send(safeStringify({
+      type: 'market_status',
+      inReplyTo,
+      status: 'no_market',
+      data: {
+        hubEntityIds: Array.from(subscription.hubIds),
+        pairs: Array.from(subscription.pairIds),
+        depth: subscription.depth,
+      },
+    }));
+  };
+
   const publish = async (): Promise<void> => {
     if (publisherInFlight || subscriptions.size === 0) return;
     publisherInFlight = true;
@@ -218,7 +231,8 @@ export const createMarketSubscriptionStack = <WS extends MarketSocket>(
       }));
 
       try {
-        await sendSnapshot(ws, subscription);
+        const sentAny = await sendSnapshot(ws, subscription);
+        if (!sentAny) sendNoMarketStatus(ws, subscription, id);
       } catch (error) {
         sendError(
           ws,
@@ -260,7 +274,8 @@ export const createMarketSubscriptionStack = <WS extends MarketSocket>(
       return;
     }
     try {
-      await sendSnapshot(ws, existing);
+      const sentAny = await sendSnapshot(ws, existing);
+      if (!sentAny) sendNoMarketStatus(ws, existing, id);
       ws.send(safeStringify({ type: 'ack', inReplyTo: id, status: 'market_snapshot_sent' }));
     } catch (error) {
       cleanup(ws);

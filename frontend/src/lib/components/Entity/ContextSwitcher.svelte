@@ -259,7 +259,7 @@
   async function handleReset() {
     if (!confirm('Reset ALL data? Wallets, accounts, settings — everything will be wiped.')) return;
     open = false;
-    await resetEverything();
+    await resetEverything({ confirmed: true, reason: 'context-switcher-manual-reset' });
   }
 </script>
 
@@ -272,6 +272,7 @@
     data-runtime-id={currentRuntimeId}
     data-entity-id={currentEntityId}
     data-signer-id={currentSignerId}
+    data-jurisdiction={currentEntity?.jurisdiction || ''}
   >
     <span class="pill-avatar-wrap">
       {#if currentAvatar}

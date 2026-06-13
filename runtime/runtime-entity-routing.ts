@@ -17,6 +17,8 @@ export type RuntimeEntityRoutingDeps = {
   ): void;
   extractEntityId(replicaKey: string): string;
   hasLocalSignerForEntity(env: Env, entityId: string): boolean;
+  hasLocalSignerForEntitySigner(env: Env, entityId: string, signerId: string): boolean;
+  resolveSoleLocalSignerForEntity(env: Env, entityId: string): string | null;
   getP2P: RuntimeOutputRoutingDeps['getP2P'];
   startRuntimeLoop(env: Env): void;
   processRuntime(env: Env): Promise<unknown>;
@@ -59,8 +61,8 @@ export const resolveRuntimeIdForEntity = (
     const profiles = env.gossip.getProfiles() as Profile[];
     const profile = profiles.find((p: Profile) => normalizeEntityKey(String(p.entityId || '')) === target);
     const resolved = resolveRuntimeIdFromProfile(profile);
-    if (resolved && hints) {
-      hints.set(target, { runtimeId: resolved, seenAt: now });
+    if (resolved) {
+      hints?.set(target, { runtimeId: resolved, seenAt: now });
       return resolved;
     }
   }
@@ -167,12 +169,44 @@ export const handleInboundP2PEntityInput = (
     return String(entityKey || '').toLowerCase() === targetEntityId;
   });
   if (!localReplicaExists) {
+    const payload = {
+      fromRuntimeId: from,
+      entityId: input.entityId,
+      txTypes,
+    };
+    if ((input.entityTxs?.length ?? 0) > 0) {
+      env.error?.('network', 'INBOUND_ENTITY_UNKNOWN_TARGET', payload, input.entityId);
+      throw new Error(
+        `INBOUND_ENTITY_UNKNOWN_TARGET: entity=${input.entityId} signer=${input.signerId} txTypes=${txTypes}`,
+      );
+    }
+    env.warn('network', 'INBOUND_ENTITY_UNKNOWN_TARGET', payload, input.entityId);
+    return;
+  }
+  if (!deps.hasLocalSignerForEntitySigner(env, input.entityId, input.signerId)) {
+    if ((input.entityTxs?.length ?? 0) > 0) {
+      env.error?.(
+        'network',
+        'INBOUND_ENTITY_SIGNER_MISMATCH',
+        {
+          fromRuntimeId: from,
+          entityId: input.entityId,
+          signerId: input.signerId,
+          txTypes,
+        },
+        input.entityId,
+      );
+      throw new Error(
+        `INBOUND_ENTITY_SIGNER_MISMATCH: entity=${input.entityId} signer=${input.signerId} txTypes=${txTypes}`,
+      );
+    }
     env.warn(
       'network',
-      'INBOUND_ENTITY_UNKNOWN_TARGET',
+      'INBOUND_ENTITY_SIGNER_MISMATCH',
       {
         fromRuntimeId: from,
         entityId: input.entityId,
+        signerId: input.signerId,
         txTypes,
       },
       input.entityId,
@@ -188,12 +222,24 @@ export const handleInboundP2PEntityInput = (
   // still be untrusted here; applyRuntimeInput registers these hints only after
   // the strict two-runtime topology check passes.
 
-  deps.enqueueRuntimeInputs(env, [input], undefined, undefined, ingressTimestamp);
-  env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
-
   const runtimeState = deps.ensureRuntimeState(env) as RuntimeState & {
     inboundP2PProcessScheduled?: boolean;
   };
+  if (runtimeState.halted && !env.scenarioMode) {
+    const payload = { fromRuntimeId: from, entityId: input.entityId, txTypes };
+    if ((input.entityTxs?.length ?? 0) > 0) {
+      env.error?.('network', 'INBOUND_ENTITY_RUNTIME_HALTED', payload, input.entityId);
+      throw new Error(
+        `INBOUND_ENTITY_RUNTIME_HALTED: entity=${input.entityId} signer=${input.signerId} txTypes=${txTypes}`,
+      );
+    }
+    env.warn?.('network', 'INBOUND_ENTITY_RUNTIME_HALTED', payload, input.entityId);
+    return;
+  }
+
+  deps.enqueueRuntimeInputs(env, [input], undefined, undefined, ingressTimestamp);
+  env.info('network', 'INBOUND_ENTITY_INPUT', { fromRuntimeId: from, entityId: input.entityId }, input.entityId);
+
   if (!runtimeState.loopActive && !env.scenarioMode) {
     deps.startRuntimeLoop(env);
   }
@@ -203,7 +249,21 @@ export const handleInboundP2PEntityInput = (
       runtimeState.inboundP2PProcessScheduled = false;
       void deps.processRuntime(env).catch((error) => {
         const message = error instanceof Error ? error.message : String(error);
-        env.error?.('network', 'INBOUND_ENTITY_PROCESS_FAILED', { message }, input.entityId);
+        const stack = error instanceof Error ? error.stack : undefined;
+        runtimeState.halted = true;
+        runtimeState.fatalDebugPayload = {
+          message,
+          ...(stack ? { stack } : {}),
+          height: Math.max(0, env.height ?? 0),
+          timestamp: Math.max(0, env.timestamp ?? 0),
+        };
+        env.error?.('network', 'INBOUND_ENTITY_PROCESS_FAILED', {
+          message,
+          ...(stack ? { stack } : {}),
+          entityId: input.entityId,
+          signerId: input.signerId,
+          txTypes,
+        }, input.entityId);
       });
     });
   }
@@ -219,6 +279,8 @@ export const createRuntimeOutputRoutingDeps = (
   },
   extractEntityId: deps.extractEntityId,
   hasLocalSignerForEntity: deps.hasLocalSignerForEntity,
+  hasLocalSignerForEntitySigner: deps.hasLocalSignerForEntitySigner,
+  resolveSoleLocalSignerForEntity: deps.resolveSoleLocalSignerForEntity,
   resolveRuntimeIdForEntity: (env, entityId) => resolveRuntimeIdForEntity(env, entityId, deps),
   resolveRuntimeIdForCrossJurisdictionEntity: (env, entityId) =>
     resolveRuntimeIdForCrossJurisdictionEntity(env, entityId, deps),

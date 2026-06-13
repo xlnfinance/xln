@@ -2,7 +2,7 @@ import type { JAdapterConfig } from './jadapter/types';
 import { ensureLocalDisputeDelayConfigured } from './jadapter/local-config';
 import { setBrowserVMJurisdiction } from './jadapter';
 import { getSignerPrivateKey } from './account-crypto';
-import { buildDefaultEntitySwapPairs } from './account-utils';
+import { buildDefaultEntitySwapPairs, getTokenIdsForJurisdiction } from './account-utils';
 import { markStorageEntityDirty } from './env-events';
 import {
   deriveLocalEntityCryptoKeys,
@@ -124,10 +124,15 @@ const importJurisdictionRuntimeTx = async (
       );
     }
 
+    const stateRoot = await (jadapter.captureStateRoot?.() ?? Promise.resolve(null));
+    if (isBrowserVM && !(stateRoot instanceof Uint8Array && stateRoot.length === 32)) {
+      throw new Error(`IMPORT_J_STATE_ROOT_UNAVAILABLE: name=${runtimeTx.data.name} mode=browservm`);
+    }
+
     const jReplica: JReplica = {
       name: runtimeTx.data.name,
       blockNumber: 0n,
-      stateRoot: new Uint8Array(32),
+      stateRoot,
       mempool: [],
       blockDelayMs: 300,
       ...(runtimeTx.data.blockTimeMs ? { blockTimeMs: runtimeTx.data.blockTimeMs } : {}),
@@ -240,8 +245,9 @@ const importReplicaRuntimeTx = (env: Env, runtimeTx: ImportReplicaRuntimeTx): vo
       htlcFeesEarned: 0n,
       htlcNotes: new Map(),
       lockBook: new Map(),
-      swapTradingPairs: buildDefaultEntitySwapPairs(),
+      swapTradingPairs: buildDefaultEntitySwapPairs(getTokenIdsForJurisdiction(config.jurisdiction)),
       pendingSwapFillRatios: new Map(),
+      pendingCrossJurisdictionFillAcks: new Map(),
       crossJurisdictionBookAdmissions: new Map(),
     },
   };

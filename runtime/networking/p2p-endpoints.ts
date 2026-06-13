@@ -57,7 +57,11 @@ export const isBrowserDirectWsEndpointAllowed = (endpoint: string): boolean => {
   const pageProtocol = String(window.location?.protocol || '').toLowerCase();
   if (pageProtocol !== 'https:') return true;
   try {
-    return new URL(endpoint).protocol === 'wss:';
+    const parsed = new URL(endpoint);
+    if (parsed.protocol === 'wss:') return true;
+    if (parsed.protocol !== 'ws:') return false;
+    const host = normalizeLoopbackHost(parsed.hostname);
+    return host === 'localhost';
   } catch {
     return false;
   }

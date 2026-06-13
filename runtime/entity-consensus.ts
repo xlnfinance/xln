@@ -5,6 +5,7 @@
 
 import { applyEntityTx } from './entity-tx';
 import type {
+  AccountTx,
   ConsensusConfig,
   EntityInput,
   EntityReplica,
@@ -12,10 +13,12 @@ import type {
   EntityTx,
   Env,
   HankoString,
+  HashToSign,
+  HashType,
   JInput,
 } from './types';
 import { DEBUG, HEAVY_LOGS, formatEntityDisplay, log } from './utils';
-import { safeStringify } from './serialization-utils';
+import { compareStableText, safeStringify } from './serialization-utils';
 import { createStructuredLogger, logError, shortHash, shortId, shortOrder, shouldLogFullPayloads } from './logger';
 import {
   addMessages,
@@ -56,6 +59,7 @@ import {
   crossJurisdictionBookOwnerRef,
   deterministicEntityTimestamp,
   findAccountByCounterparty,
+  findCrossJurisdictionBookAdmissionForAck,
   findEntityStateById,
   findSwapOfferOwnerState,
   getCrossJurisdictionBookAdmissionError,
@@ -71,8 +75,11 @@ import {
   normalizeProposedFrameCollectedSigs,
   type HankoWitnessEntry,
 } from './entity-consensus/hanko-witness';
+import { cloneCrossJurisdictionAccountTxRoute } from './cross-jurisdiction';
+import { CROSS_J_PENDING_FILL_ACK_TTL_MS } from './cross-jurisdiction-fill-ack';
 export { mergeEntityInputs } from './entity-input-merge';
 export { createEntityFrameHash } from './entity-consensus-frame';
+export { CROSS_J_PENDING_FILL_ACK_TTL_MS } from './cross-jurisdiction-fill-ack';
 const entityLog = createStructuredLogger('entity');
 
 function queueUniqueAccountMempoolTx(
@@ -95,6 +102,8 @@ function queueUniqueAccountMempoolTx(
 }
 
 type EntityAccountMachine = EntityState['accounts'] extends Map<string, infer T> ? T : never;
+type CrossSwapFillAckTx = Extract<AccountTx, { type: 'cross_swap_fill_ack' }>;
+type CrossJurisdictionFillNoticeTx = Extract<EntityTx, { type: 'crossJurisdictionFillNotice' }>;
 
 const hasQueuedOrderLifecycleTx = (account: EntityAccountMachine, offerId: string): boolean => {
   for (const tx of account.mempool ?? []) {
@@ -114,6 +123,241 @@ const hasQueuedOrderLifecycleTx = (account: EntityAccountMachine, offerId: strin
     }
   }
   return false;
+};
+
+const fallbackFrameHashToSign = (hash: string, height: number): HashToSign[] => [{
+  hash,
+  type: 'entityFrame',
+  context: `entity-frame:${height}`,
+}];
+
+const verifyHashPrecommitSignatures = (
+  env: Env,
+  signerId: string,
+  hashesToSign: HashToSign[] | undefined,
+  frameHash: string,
+  frameHeight: number,
+  sigs: string[],
+  context: string,
+): boolean => {
+  const expectedHashes = hashesToSign?.length
+    ? hashesToSign
+    : fallbackFrameHashToSign(frameHash, frameHeight);
+  if (sigs.length !== expectedHashes.length) {
+    log.error(
+      `❌ ${context}: signature count mismatch from ${signerId}: got ${sigs.length}, expected ${expectedHashes.length}`,
+    );
+    return false;
+  }
+  for (let i = 0; i < expectedHashes.length; i++) {
+    const hashInfo = expectedHashes[i];
+    const sig = sigs[i];
+    if (!hashInfo || !sig) {
+      log.error(`❌ ${context}: missing signature[${i}] from ${signerId}`);
+      return false;
+    }
+    if (!verifyFrame(env, signerId, hashInfo.hash, sig)) {
+      log.error(
+        `❌ ${context}: invalid ${hashInfo.type} signature[${i}] from ${signerId} ` +
+          `hash=${hashInfo.hash.slice(0, 30)}... context=${hashInfo.context}`,
+      );
+      return false;
+    }
+  }
+  return true;
+};
+
+const buildCrossJurisdictionFillNoticeTx = (tx: CrossSwapFillAckTx, accountId: string): CrossJurisdictionFillNoticeTx => {
+  const fillSeq = Math.floor(Number(tx.data.fillSeq ?? 0));
+  const cumulativeFillRatio = Math.floor(Number(tx.data.cumulativeFillRatio ?? 0));
+  if (fillSeq <= 0 || cumulativeFillRatio <= 0) {
+    throw new Error(
+      `CROSS_J_FILL_ACK_INVALID_NOTICE: account=${accountId} offer=${tx.data.offerId} ` +
+        `fillSeq=${fillSeq} ratio=${cumulativeFillRatio}`,
+    );
+  }
+  return {
+    type: 'crossJurisdictionFillNotice',
+    data: {
+      orderId: tx.data.offerId,
+      ...(tx.data.routeHash ? { routeHash: tx.data.routeHash } : {}),
+      ...(tx.data.previousFillSeq !== undefined ? { previousFillSeq: Math.floor(Number(tx.data.previousFillSeq)) } : {}),
+      fillSeq,
+      incrementalSourceAmount: tx.data.incrementalSourceAmount ?? tx.data.executionSourceAmount ?? 0n,
+      incrementalTargetAmount: tx.data.incrementalTargetAmount ?? tx.data.executionTargetAmount ?? 0n,
+      cumulativeSourceAmount: tx.data.cumulativeSourceAmount ?? 0n,
+      cumulativeTargetAmount: tx.data.cumulativeTargetAmount ?? 0n,
+      cumulativeFillRatio,
+      ...(tx.data.fillNumerator !== undefined ? { fillNumerator: tx.data.fillNumerator } : {}),
+      ...(tx.data.fillDenominator !== undefined ? { fillDenominator: tx.data.fillDenominator } : {}),
+      ...(tx.data.priceImprovementMode ? { priceImprovementMode: tx.data.priceImprovementMode } : {}),
+      ...(tx.data.priceImprovementAmount !== undefined ? { priceImprovementAmount: tx.data.priceImprovementAmount } : {}),
+      ...(tx.data.priceImprovementTokenId !== undefined ? { priceImprovementTokenId: tx.data.priceImprovementTokenId } : {}),
+      ...(tx.data.cancelRemainder !== undefined ? { cancelRemainder: tx.data.cancelRemainder } : {}),
+      ...(tx.data.priceTicks !== undefined ? { priceTicks: tx.data.priceTicks } : {}),
+      pairId: String(tx.data.pairId || ''),
+    },
+  };
+};
+
+const buildCrossJurisdictionAdmissionFillNoticeOutput = (
+  env: Env,
+  currentEntityState: EntityState,
+  accountId: string,
+  tx: CrossSwapFillAckTx,
+): EntityInput | null => {
+  const admission = findCrossJurisdictionBookAdmissionForAck(currentEntityState, accountId, tx.data.offerId);
+  if (!admission) return null;
+  if (admission.status === 'closed' || admission.status === 'resolving') return null;
+  const sourceHubEntityId = normalizeEntityRef(admission.route.source.counterpartyEntityId);
+  if (!sourceHubEntityId) {
+    throw new Error(`CROSS_J_FILL_ACK_SOURCE_HUB_MISSING: account=${accountId} offer=${tx.data.offerId}`);
+  }
+  if (sourceHubEntityId === normalizeEntityRef(currentEntityState.entityId)) return null;
+  const sourceHubState = findEntityStateById(env, sourceHubEntityId);
+  const hintedSignerRaw = String(admission.route.sourceHubSignerId || '');
+  const hintedSignerId = normalizeEntityRef(hintedSignerRaw);
+  if (!sourceHubState && !hintedSignerId) {
+    throw new Error(
+      `CROSS_J_FILL_ACK_SOURCE_HUB_SIGNER_MISSING: account=${accountId} offer=${tx.data.offerId} ` +
+      `sourceHub=${sourceHubEntityId}`,
+    );
+  }
+  const sourceHubValidators = sourceHubState?.config?.validators ?? [];
+  const normalizedSourceHubValidators = sourceHubValidators.map(normalizeEntityRef).filter(Boolean);
+  if (
+    sourceHubState &&
+    hintedSignerId &&
+    !normalizedSourceHubValidators.includes(hintedSignerId)
+  ) {
+    throw new Error(
+      `CROSS_J_FILL_ACK_SOURCE_HUB_SIGNER_MISMATCH: account=${accountId} offer=${tx.data.offerId} ` +
+      `sourceHub=${sourceHubState.entityId} hint=${hintedSignerRaw} ` +
+      `validators=[${sourceHubValidators.join(',')}]`,
+    );
+  }
+  const signerId = hintedSignerRaw ||
+    sourceHubValidators[0] ||
+    (sourceHubState ? resolveEntityProposerId(env, sourceHubState.entityId, 'cross-j fill notice source hub') : '');
+  return {
+    entityId: sourceHubState?.entityId || sourceHubEntityId,
+    signerId,
+    entityTxs: [buildCrossJurisdictionFillNoticeTx(tx, accountId)],
+  };
+};
+
+const buildCrossJurisdictionFillNoticeOutput = (
+  env: Env,
+  currentEntityState: EntityState,
+  accountId: string,
+  tx: CrossSwapFillAckTx,
+): EntityInput | null => {
+  const admissionOutput = buildCrossJurisdictionAdmissionFillNoticeOutput(env, currentEntityState, accountId, tx);
+  if (admissionOutput) return admissionOutput;
+
+  const ownerState = findSwapOfferOwnerState(env, currentEntityState, accountId, tx.data.offerId);
+  if (!ownerState) return null;
+  const firstValidator = ownerState.config?.validators?.[0];
+  if (!firstValidator) {
+    throw new Error(
+      `CROSS_J_FILL_ACK_OWNER_SIGNER_MISSING: account=${accountId} offer=${tx.data.offerId} ` +
+        `owner=${ownerState.entityId}`,
+    );
+  }
+  return {
+    entityId: ownerState.entityId,
+    signerId: firstValidator,
+    entityTxs: [buildCrossJurisdictionFillNoticeTx(tx, accountId)],
+  };
+};
+
+const pendingCrossJurisdictionFillAckKey = (accountId: string, tx: CrossSwapFillAckTx): string =>
+  [
+    normalizeEntityRef(accountId),
+    tx.data.offerId,
+    Math.floor(Number(tx.data.fillSeq ?? 0)),
+    Math.floor(Number(tx.data.cumulativeFillRatio ?? 0)),
+    tx.data.cumulativeSourceAmount?.toString() ?? '',
+    tx.data.cumulativeTargetAmount?.toString() ?? '',
+  ].join('|');
+
+const ownsSourceHubRouteForFillAck = (
+  currentEntityState: EntityState,
+  tx: CrossSwapFillAckTx,
+): boolean => {
+  const route = currentEntityState.crossJurisdictionSwaps?.get(tx.data.offerId);
+  if (!route) return false;
+  return normalizeEntityRef(route.source.counterpartyEntityId) === normalizeEntityRef(currentEntityState.entityId);
+};
+
+const stashPendingCrossJurisdictionFillAck = (
+  env: Env,
+  currentEntityState: EntityState,
+  accountId: string,
+  tx: CrossSwapFillAckTx,
+  reason: string,
+): void => {
+  currentEntityState.pendingCrossJurisdictionFillAcks ||= new Map();
+  const key = pendingCrossJurisdictionFillAckKey(accountId, tx);
+  if (currentEntityState.pendingCrossJurisdictionFillAcks.has(key)) return;
+  currentEntityState.pendingCrossJurisdictionFillAcks.set(key, {
+    accountId,
+    tx: cloneCrossJurisdictionAccountTxRoute(tx) as CrossSwapFillAckTx,
+    storedAt: currentEntityState.timestamp || env.timestamp,
+    reason,
+  });
+  markStorageEntityDirty(env, currentEntityState.entityId);
+  entityLog.info('crossj.fill_ack_deferred', {
+    entity: shortId(currentEntityState.entityId, 8),
+    account: shortId(accountId, 8),
+    offer: shortOrder(tx.data.offerId, 8),
+    reason,
+  });
+};
+
+const drainPendingCrossJurisdictionFillAcks = (
+  env: Env,
+  currentEntityState: EntityState,
+  proposableAccounts: Set<string>,
+): number => {
+  const pending = currentEntityState.pendingCrossJurisdictionFillAcks;
+  if (!pending || pending.size === 0) return 0;
+  const now = Number(currentEntityState.timestamp || env.timestamp || 0);
+  let drained = 0;
+  for (const [key, pendingAck] of Array.from(pending.entries()).sort(([a], [b]) => compareStableText(a, b))) {
+    const ageMs = Math.max(0, now - Number(pendingAck.storedAt || 0));
+    if (ageMs > CROSS_J_PENDING_FILL_ACK_TTL_MS) {
+      const payload = {
+        entityId: currentEntityState.entityId,
+        accountId: pendingAck.accountId,
+        offerId: pendingAck.tx.data.offerId,
+        fillSeq: pendingAck.tx.data.fillSeq,
+        cumulativeFillRatio: pendingAck.tx.data.cumulativeFillRatio,
+        storedAt: pendingAck.storedAt,
+        ageMs,
+        ttlMs: CROSS_J_PENDING_FILL_ACK_TTL_MS,
+        reason: pendingAck.reason ?? 'unknown',
+      };
+      entityLog.error('crossj.fill_ack_expired_fatal', payload);
+      throw new Error(`CROSS_J_FILL_ACK_EXPIRED_FATAL: ${safeStringify(payload)}`);
+    }
+    const account = currentEntityState.accounts.get(pendingAck.accountId);
+    if (!account?.swapOffers?.has(pendingAck.tx.data.offerId)) continue;
+    if (queueUniqueAccountMempoolTx(account, pendingAck.tx)) {
+      proposableAccounts.add(pendingAck.accountId);
+      markStorageAccountDirty(env, currentEntityState.entityId, pendingAck.accountId);
+    }
+    pending.delete(key);
+    drained++;
+    markStorageEntityDirty(env, currentEntityState.entityId);
+    entityLog.info('crossj.fill_ack_drained', {
+      entity: shortId(currentEntityState.entityId, 8),
+      account: shortId(pendingAck.accountId, 8),
+      offer: shortOrder(pendingAck.tx.data.offerId, 8),
+      storedAt: pendingAck.storedAt,
+    });
+  }
+  return drained;
 };
 
 const assertCommittedSwapOfferMatchesEvent = (
@@ -473,8 +717,16 @@ export const applyEntityInput = async (
       }
 
       for (const [signerId, sigs] of frameCollectedSigs) {
-        if (!sigs[0] || !verifyFrame(env, signerId, entityInput.proposedFrame.hash, sigs[0])) {
-          logError('FRAME_CONSENSUS', `❌ BYZANTINE: Invalid signature from ${signerId}`);
+        if (!verifyHashPrecommitSignatures(
+          env,
+          signerId,
+          entityInput.proposedFrame.hashesToSign,
+          entityInput.proposedFrame.hash,
+          entityInput.proposedFrame.height,
+          sigs,
+          'COMMIT_REJECTED',
+        )) {
+          logError('FRAME_CONSENSUS', `❌ BYZANTINE: Invalid hash signature bundle from ${signerId}`);
           logError('FRAME_CONSENSUS', `   Frame hash: ${entityInput.proposedFrame.hash.slice(0, 30)}...`);
           return { newState: workingReplica.state, outputs: entityOutbox, jOutputs: jOutbox, workingReplica };
         }
@@ -657,25 +909,15 @@ export const applyEntityInput = async (
     const proposal = workingReplica.proposal;
 
     for (const [signerId, sigs] of entityInput.hashPrecommits!) {
-      // Verify signature count matches hashesToSign
-      if (proposal.hashesToSign && sigs.length !== proposal.hashesToSign.length) {
-        log.error(
-          `❌ Signature count mismatch from ${signerId}: got ${sigs.length}, expected ${proposal.hashesToSign.length}`,
-        );
-        continue;
-      }
-      // SECURITY: Verify frame hash signature (sigs[0]) before accepting precommit
-      // Prevents Byzantine validator from submitting garbage that wastes the entity frame
-      const firstHashToSign = proposal.hashesToSign?.[0];
-      if (proposal.hashesToSign && sigs[0] && firstHashToSign) {
-        const { verifyAccountSignature } = await import('./account-crypto');
-        const frameHashSig = sigs[0];
-        const frameHash = firstHashToSign.hash;
-        if (!verifyAccountSignature(env, signerId, frameHash, frameHashSig)) {
-          log.error(`❌ PRECOMMIT REJECTED: Invalid frame hash signature from ${signerId}`);
-          continue;
-        }
-      }
+      if (!verifyHashPrecommitSignatures(
+        env,
+        signerId,
+        proposal.hashesToSign,
+        proposal.hash,
+        proposal.height,
+        sigs,
+        'PRECOMMIT_REJECTED',
+      )) continue;
       if (!proposal.collectedSigs) {
         proposal.collectedSigs = new Map();
       }
@@ -1037,7 +1279,7 @@ export const applyEntityFrame = async (
   // Hashes emitted during frame processing that need entity-quorum signing
   collectedHashes?: Array<{
     hash: string;
-    type: 'accountFrame' | 'dispute' | 'profile' | 'settlement';
+    type: HashType;
     context: string;
   }>;
 }> => {
@@ -1056,8 +1298,14 @@ export const applyEntityFrame = async (
   currentEntityState.timestamp = frameTimestamp ?? env.timestamp;
   const allOutputs: EntityInput[] = [];
   const allJOutputs: JInput[] = [];
+  const collectedHashes: Array<{
+    hash: string;
+    type: HashType;
+    context: string;
+  }> = [];
 
   const proposableAccounts = new Set<string>();
+  drainPendingCrossJurisdictionFillAcks(env, currentEntityState, proposableAccounts);
 
   const allSwapOffersCreated: SwapOfferEvent[] = [];
   const allSwapCancelRequests: SwapCancelRequestEvent[] = [];
@@ -1071,6 +1319,7 @@ export const applyEntityFrame = async (
       newState,
       outputs,
       jOutputs,
+      hashesToSign,
       mempoolOps,
       dirtyAccounts,
       swapOffersCreated,
@@ -1088,19 +1337,42 @@ export const applyEntityFrame = async (
 
     allOutputs.push(...outputs);
     if (jOutputs) allJOutputs.push(...jOutputs);
+    if (hashesToSign && hashesToSign.length > 0) {
+      collectedHashes.push(...hashesToSign);
+    }
 
     // Entity handlers return mempoolOps; this orchestrator is the only place
     // that mutates account.mempool during entity-frame application.
     if (mempoolOps && mempoolOps.length > 0) {
       for (const { accountId, tx } of mempoolOps) {
         const account = currentEntityState.accounts.get(accountId);
-        if (account) {
-          if (tx.type === 'cross_swap_fill_ack' && !account.swapOffers?.has(tx.data.offerId)) {
+        if (tx.type === 'cross_swap_fill_ack' && !account?.swapOffers?.has(tx.data.offerId)) {
+          const routed = buildCrossJurisdictionFillNoticeOutput(env, currentEntityState, accountId, tx);
+          if (!routed) {
+            if (ownsSourceHubRouteForFillAck(currentEntityState, tx)) {
+              stashPendingCrossJurisdictionFillAck(
+                env,
+                currentEntityState,
+                accountId,
+                tx,
+                account ? 'source_offer_not_committed' : 'source_account_not_committed',
+              );
+              continue;
+            }
             throw new Error(
               `CROSS_J_FILL_ACK_ACCOUNT_OFFER_MISSING: account=${accountId} offer=${tx.data.offerId} ` +
                 `entity=${currentEntityState.entityId}`,
             );
           }
+          allOutputs.push(routed);
+          entityLog.info('crossj.sibling_fill_notice_routed', {
+            owner: shortId(routed.entityId, 8),
+            account: shortId(accountId, 8),
+            offer: shortOrder(tx.data.offerId, 8),
+          });
+          continue;
+        }
+        if (account) {
           if (
             tx.type === 'swap_cancel_request' &&
             account.swapOffers?.get(tx.data.offerId)?.crossJurisdiction &&
@@ -1188,6 +1460,7 @@ export const applyEntityFrame = async (
         proposableAccounts.add(counterpartyId);
       }
     }
+    drainPendingCrossJurisdictionFillAcks(env, currentEntityState, proposableAccounts);
   }
 
   // === APPLY AGGREGATED PURE EVENTS ===
@@ -1338,52 +1611,25 @@ export const applyEntityFrame = async (
           continue;
         }
 
-        const ownerState = findSwapOfferOwnerState(env, currentEntityState, accountId, tx.data.offerId);
-        const firstValidator = ownerState?.config?.validators?.[0];
-        if (!ownerState || !firstValidator) {
+        const routed = buildCrossJurisdictionFillNoticeOutput(env, currentEntityState, accountId, tx);
+        if (!routed) {
+          if (ownsSourceHubRouteForFillAck(currentEntityState, tx)) {
+            stashPendingCrossJurisdictionFillAck(
+              env,
+              currentEntityState,
+              accountId,
+              tx,
+              account ? 'source_offer_not_committed' : 'source_account_not_committed',
+            );
+            continue;
+          }
           throw new Error(
             `CROSS_J_FILL_ACK_OWNER_MISSING: account=${accountId} offer=${tx.data.offerId} current=${currentEntityState.entityId}`,
           );
         }
-        const fillSeq = Math.floor(Number(tx.data.fillSeq ?? 0));
-        const cumulativeFillRatio = Math.floor(Number(tx.data.cumulativeFillRatio ?? 0));
-        if (fillSeq <= 0 || cumulativeFillRatio <= 0) {
-          throw new Error(
-            `CROSS_J_FILL_ACK_INVALID_NOTICE: account=${accountId} offer=${tx.data.offerId} ` +
-              `fillSeq=${fillSeq} ratio=${cumulativeFillRatio}`,
-          );
-        }
-        allOutputs.push({
-          entityId: ownerState.entityId,
-          signerId: firstValidator,
-          entityTxs: [
-            {
-              type: 'crossJurisdictionFillNotice',
-              data: {
-                orderId: tx.data.offerId,
-                fillSeq,
-                incrementalSourceAmount: tx.data.incrementalSourceAmount ?? tx.data.executionSourceAmount ?? 0n,
-                incrementalTargetAmount: tx.data.incrementalTargetAmount ?? tx.data.executionTargetAmount ?? 0n,
-                cumulativeSourceAmount: tx.data.cumulativeSourceAmount ?? 0n,
-                cumulativeTargetAmount: tx.data.cumulativeTargetAmount ?? 0n,
-                cumulativeFillRatio,
-                ...(tx.data.fillNumerator !== undefined ? { fillNumerator: tx.data.fillNumerator } : {}),
-                ...(tx.data.fillDenominator !== undefined ? { fillDenominator: tx.data.fillDenominator } : {}),
-                ...(tx.data.priceImprovementMode ? { priceImprovementMode: tx.data.priceImprovementMode } : {}),
-                ...(tx.data.priceImprovementAmount !== undefined
-                  ? { priceImprovementAmount: tx.data.priceImprovementAmount }
-                  : {}),
-                ...(tx.data.priceImprovementTokenId !== undefined
-                  ? { priceImprovementTokenId: tx.data.priceImprovementTokenId }
-                  : {}),
-                ...(tx.data.priceTicks !== undefined ? { priceTicks: tx.data.priceTicks } : {}),
-                pairId: String(tx.data.pairId || ''),
-              },
-            },
-          ],
-        });
+        allOutputs.push(routed);
         entityLog.info('crossj.sibling_fill_notice_routed', {
-          owner: shortId(ownerState.entityId, 8),
+          owner: shortId(routed.entityId, 8),
           account: shortId(accountId, 8),
           offer: shortOrder(tx.data.offerId, 8),
         });
@@ -1525,6 +1771,7 @@ export const applyEntityFrame = async (
 
   // Hash before account proposals so proposer and validators commit to the same
   // deterministic entity state.
+  drainPendingCrossJurisdictionFillAcks(env, currentEntityState, proposableAccounts);
   const deterministicState = cloneEntityState(currentEntityState);
 
   const { proposeAccountFrame } = await import('./account-consensus');
@@ -1544,12 +1791,6 @@ export const applyEntityFrame = async (
       return true;
     })
     .sort();
-
-  const collectedHashes: Array<{
-    hash: string;
-    type: 'accountFrame' | 'dispute' | 'profile' | 'settlement';
-    context: string;
-  }> = [];
 
   if (accountsToProposeFrames.length > 0) {
     for (const accountKey of accountsToProposeFrames) {

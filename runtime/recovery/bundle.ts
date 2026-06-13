@@ -1,6 +1,6 @@
 import { ethers } from 'ethers';
 import { serializeTaggedJson } from '../serialization-utils';
-import { buildRuntimeCheckpointSnapshot } from '../wal';
+import { buildRuntimeRecoveryCheckpointSnapshot } from '../wal';
 import type { Env } from '../types';
 import type {
   RuntimeRecoveryBundleV1,
@@ -41,7 +41,7 @@ export const buildRuntimeRecoveryBundle = (
   if (!runtimeId) {
     throw new Error('RECOVERY_BUNDLE_RUNTIME_ID_REQUIRED');
   }
-  const checkpoint = buildRuntimeCheckpointSnapshot(env);
+  const checkpoint = buildRuntimeRecoveryCheckpointSnapshot(env);
   const checkpointHash = computeRuntimeRecoveryCheckpointHash(checkpoint);
   const signers = options.signers.map(normalizeSigner);
   return {

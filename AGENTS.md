@@ -93,6 +93,16 @@ Quick iteration signals (full autonomy):
 
 Everywhere in code: fail-fast and loud (full stop + throw popup on error).
 
+### Test Scope Ladder
+
+Use three test levels for every fix; do not jump straight to broad suites.
+
+1. **L1 narrow:** smallest unit/spec/scenario that directly covers the changed function or bug.
+2. **L2 targeted flow:** one focused integration or isolated e2e for the user-visible path that broke.
+3. **L3 broad gate:** related suite/full browser batch only after L1 and L2 are green.
+
+When a test fails, go back to L1/L2 around that failure before rerunning L3.
+
 Before claiming anything works:
 1. Run `bun run check` and show output
 2. Test the specific functionality (browser + F12 console)
@@ -185,6 +195,7 @@ xln.formatEntity(xln.getEnv().eReplicas.values().next().value.state)
 - Debug with ASCII (quick scan) + JSON (deep analysis) - both auto-dumped on scenario completion
 - Security-critical code needs rich comments with counterexamples: explain why the design rejects tempting alternatives, especially for dispute arguments, cross-j orderbook lifecycle, and adversarial inputs.
 - Dispute transformer arguments are adversarial optional evidence: malformed args soft-fail to empty/no-op; signed ProofBody, nonces, hashes, and account state stay fail-fast.
+- Test progression must be L1 narrow -> L2 targeted flow -> L3 broad gate; avoid large e2e batches while a single failure is still being isolated.
 ## 🔍 EXTERNAL AUDIT RULE
 
 **Never blindly trust subagent or external audit findings.**

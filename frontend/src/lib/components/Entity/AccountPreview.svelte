@@ -10,6 +10,7 @@
   import { buildTokenVisualScale, sumVisualScales } from './shared/delta-visual';
   import { buildAccountTokenDetails, isAccountLeftPerspective } from './shared/account-token-details';
   import { amountToUsdMicros } from '$lib/utils/assetPricing';
+  import { formatEntityId } from '$lib/utils/format';
   import { getGossipProfile, resolveEntityName } from '$lib/utils/entityNaming';
   import { getAccountUiStatus, getAccountUiStatusDescription, getAccountUiStatusLabel } from '$lib/utils/accountStatus';
 
@@ -50,8 +51,40 @@
     return getGossipProfile(id, activeEnv);
   }
 
+  function normalizeJurisdictionDisplayName(value: unknown): string {
+    const name = String(value || '').trim();
+    const normalized = name.toLowerCase();
+    if (
+      normalized === 'arrakis'
+      || normalized === 'arrakis (shared anvil)'
+      || normalized === 'shared anvil'
+      || normalized === 'wakanda'
+    ) {
+      return 'Testnet';
+    }
+    return name;
+  }
+
+  function escapeRegExp(value: string): string {
+    return value.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+
+  function formatEntityNetworkLabel(name: string, jurisdiction: string): string {
+    const cleanJurisdiction = normalizeJurisdictionDisplayName(jurisdiction);
+    let cleanName = String(name || '').trim() || 'Unknown';
+    if (cleanJurisdiction) {
+      cleanName = cleanName
+        .replace(new RegExp(`\\s*\\(${escapeRegExp(cleanJurisdiction)}\\)\\s*$`, 'i'), '')
+        .replace(new RegExp(`\\s+${escapeRegExp(cleanJurisdiction)}\\s*$`, 'i'), '')
+        .trim() || cleanName;
+    }
+    return cleanJurisdiction ? `${cleanName} (${cleanJurisdiction})` : cleanName;
+  }
+
   $: counterpartyProfile = getProfile(counterpartyId);
   $: counterpartyName = resolveEntityName(counterpartyId, activeEnv);
+  $: counterpartyJurisdiction = normalizeJurisdictionDisplayName(counterpartyProfile?.metadata?.jurisdiction?.name);
+  $: counterpartyDisplayName = formatEntityNetworkLabel(counterpartyName || formatEntityId(counterpartyId), counterpartyJurisdiction);
   $: tokenDetails = buildAccountTokenDetails(account, entityId, activeXlnFunctions);
 
   $: isHub = (() => {
@@ -355,7 +388,7 @@
   <!-- Row 1: Entity name + status dot -->
   <div class="row-header">
     <div class="entity-col">
-      <EntityIdentity entityId={counterpartyId} name={counterpartyName} size={30} clickable={false} copyable={false} showAddress={false} />
+      <EntityIdentity entityId={counterpartyId} name={counterpartyDisplayName} size={30} clickable={false} copyable={false} showAddress={false} />
     </div>
     <div class="status-col">
       <div class="status-dot-wrap">
@@ -395,7 +428,7 @@
           </div>
           <div class="consensus-popover-row">
             <span>Counterparty</span>
-            <strong>{counterpartyName}</strong>
+            <strong>{counterpartyDisplayName}</strong>
           </div>
           <div class="consensus-popover-row dim">
             <span>ID</span>

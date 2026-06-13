@@ -24,6 +24,9 @@ test('enqueueEntityInput starts profile prefetch before transport resolution', (
     resolvedAfterPrefetch = prefetched;
     return { client: null, transport: 'relay' };
   };
+  p2p.clients = [];
+  p2p.directClients = new Map();
+  p2p.directClientUrls = new Map();
   p2p.pendingByRuntime = new Map();
 
   const input: RoutedEntityInput = {
@@ -37,9 +40,9 @@ test('enqueueEntityInput starts profile prefetch before transport resolution', (
     }],
   };
 
-  p2p.enqueueEntityInput(TARGET_RUNTIME_ID, input);
+  expect(() => p2p.enqueueEntityInput(TARGET_RUNTIME_ID, input)).toThrow(/P2P_ENTITY_INPUT_NOT_DELIVERED/);
 
   expect(prefetched).toBe(true);
   expect(resolvedAfterPrefetch).toBe(true);
-  expect((p2p.pendingByRuntime as Map<string, unknown[]>).get(TARGET_RUNTIME_ID)?.length).toBe(1);
+  expect((p2p.pendingByRuntime as Map<string, unknown[]>).get(TARGET_RUNTIME_ID)?.length || 0).toBe(0);
 });

@@ -89,13 +89,20 @@ function activatePostSettlementProof(account: AccountMachine, counterpartyId: st
 
   const postProof = ws.postSettlementDisputeProof;
   if (postProof?.leftHanko && postProof?.rightHanko) {
+    if (!postProof.disputeHash) {
+      throw new Error(`POST_SETTLEMENT_DISPUTE_HASH_MISSING:${counterpartyId}`);
+    }
     const iAmLeftHere = account.leftEntity !== counterpartyId;
     account.currentDisputeProofHanko = iAmLeftHere ? postProof.leftHanko : postProof.rightHanko;
     account.counterpartyDisputeProofHanko = iAmLeftHere ? postProof.rightHanko : postProof.leftHanko;
     account.currentDisputeProofNonce = postProof.nonce;
     account.currentDisputeProofBodyHash = postProof.proofBodyHash;
+    account.currentDisputeHash = postProof.disputeHash;
     account.counterpartyDisputeProofNonce = postProof.nonce;
     account.counterpartyDisputeProofBodyHash = postProof.proofBodyHash;
+    account.counterpartyDisputeHash = postProof.disputeHash;
+    account.disputeProofNoncesByHash ??= {};
+    account.disputeProofNoncesByHash[postProof.proofBodyHash] = postProof.nonce;
   }
 
   const firstSettled = leftEvents.find((event) => event.type === 'AccountSettled');

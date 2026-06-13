@@ -137,6 +137,8 @@ import {
   deriveDelta,
   isLeft,
   getTokenInfo,
+  getKnownTokenIds,
+  getTokenIdsForJurisdiction,
   isLiquidSwapToken,
   getSwapPairOrientation,
   getDefaultSwapTradingPairs,
@@ -150,7 +152,6 @@ import {
   type CrossJurisdictionSwapSubmitResult,
 } from './runtime-jurisdiction-api';
 import {
-  buildRouteOutputKey,
   dispatchEntityOutputs,
   planEntityOutputs,
   rescheduleDeferredOutputs,
@@ -360,6 +361,7 @@ const ensureRuntimeState = (env: Env): NonNullable<Env['runtimeState']> => {
   if (!env.runtimeState) {
     env.runtimeState = {
       loopActive: false,
+      halted: false,
       loopPromise: null,
       stopLoop: null,
       wakeLoop: null,
@@ -441,6 +443,7 @@ export const closeInfraDb = (env: Env): Promise<void> => closeInfraDbStorage(env
 
 const requestRuntimeLoopWake = (env: Env): void => {
   const state = ensureRuntimeState(env);
+  if (state.halted) return;
   const wakeLoop = state.wakeLoop;
   if (wakeLoop) {
     state.wakeLoop = null;
@@ -610,14 +613,7 @@ const hasRuntimeWork = (env: Env): boolean => {
   if ((mempool.queuedAt ?? 0) > (env.timestamp ?? 0)) return true;
   if (env.pendingOutputs && env.pendingOutputs.length > 0) return true;
   if (env.networkInbox && env.networkInbox.length > 0) return true;
-  if (env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) {
-    const nowMs = getRuntimeNowMs(env);
-    const deferredMeta = ensureRuntimeState(env).deferredNetworkMeta;
-    for (const output of env.pendingNetworkOutputs) {
-      const retryAt = deferredMeta?.get(buildRouteOutputKey(output))?.nextRetryAt ?? 0;
-      if (retryAt <= nowMs) return true;
-    }
-  }
+  if (env.pendingNetworkOutputs && env.pendingNetworkOutputs.length > 0) return true;
   // Check for due scheduled hooks (setTimeout-like entity pings)
   if (hasDueEntityHooks(env)) return true;
   return false;
@@ -705,6 +701,7 @@ const ensureRuntimeWakeWatchdogStarted = (): void => {
       const dueTimestamp = getEarliestWallClockDueTimestamp(env);
       if (dueTimestamp === null || dueTimestamp > wallClockNow) continue;
       const state = ensureRuntimeState(env);
+      if (state.halted) continue;
       const mempool = ensureRuntimeMempool(env);
       mempool.queuedAt =
         mempool.queuedAt === undefined
@@ -771,6 +768,91 @@ const emitRuntimeLoopError = (
   }
 };
 
+const MAX_RUNTIME_INPUT_QUARANTINE_RECORDS = 50;
+const QUARANTINABLE_RUNTIME_INPUT_ERROR_MARKERS = [
+  'FINANCIAL-SAFETY:',
+  'Invalid runtimeTxs:',
+  'Invalid entityInputs:',
+  'Too many runtime transactions:',
+  'Too many entity inputs:',
+  'RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET',
+  'RUNTIME_REPLICA_NOT_FOUND',
+  'RUNTIME_SIGNER_MISSING',
+  'ENTITY_FRAME_TX_FAILED',
+  'CROSS_J_',
+  'ORDERBOOK_',
+] as const;
+
+const getRuntimeInputErrorMessage = (error: unknown): string =>
+  error instanceof Error ? error.message : String(error);
+
+const runtimeInputHasWork = (runtimeInput: RuntimeInput): boolean =>
+  runtimeInput.runtimeTxs.length > 0 ||
+  runtimeInput.entityInputs.length > 0 ||
+  (runtimeInput.jInputs?.length ?? 0) > 0;
+
+const getRuntimeInputQuarantineReason = (message: string): string | null =>
+  QUARANTINABLE_RUNTIME_INPUT_ERROR_MARKERS.find(marker => message.includes(marker)) ?? null;
+
+const summarizeRuntimeInputForQuarantine = (runtimeInput: RuntimeInput) => ({
+  counts: {
+    runtimeTxs: runtimeInput.runtimeTxs.length,
+    entityInputs: runtimeInput.entityInputs.length,
+    jInputs: runtimeInput.jInputs?.length ?? 0,
+  },
+  entityInputs: runtimeInput.entityInputs.slice(0, 10).map(input => ({
+    entityId: String(input.entityId || ''),
+    signerId: String(input.signerId || ''),
+    txTypes: (input.entityTxs || []).slice(0, 20).map(tx => String(tx?.type || '')),
+  })),
+  runtimeTxTypes: runtimeInput.runtimeTxs.slice(0, 20).map(tx => String(tx?.type || '')),
+  jInputs: (runtimeInput.jInputs || []).slice(0, 10).map(input => ({
+    jurisdictionName: String(input.jurisdictionName || ''),
+    jTxCount: input.jTxs?.length ?? 0,
+  })),
+});
+
+const quarantineLiveRuntimeInput = (
+  env: Env,
+  runtimeInput: RuntimeInput,
+  error: unknown,
+  quietRuntimeLogs: boolean,
+): boolean => {
+  if (env.scenarioMode === true || envRecord(env)[ENV_REPLAY_MODE_KEY] === true) return false;
+  if (!runtimeInputHasWork(runtimeInput)) return false;
+  const message = getRuntimeInputErrorMessage(error);
+  const reason = getRuntimeInputQuarantineReason(message);
+  if (!reason) return false;
+
+  const state = ensureRuntimeState(env);
+  const summary = summarizeRuntimeInputForQuarantine(runtimeInput);
+  const record = {
+    id: `runtime-input-quarantine-${Math.max(0, env.height)}-${Math.max(0, env.timestamp || 0)}-${(state.quarantinedRuntimeInputs?.length ?? 0) + 1}`,
+    height: Math.max(0, env.height),
+    timestamp: Math.max(0, env.timestamp || 0),
+    reason,
+    message,
+    action: 'halted' as const,
+    ...summary,
+  };
+  state.quarantinedRuntimeInputs = [
+    ...(state.quarantinedRuntimeInputs ?? []),
+    record,
+  ].slice(-MAX_RUNTIME_INPUT_QUARANTINE_RECORDS);
+  const payload = {
+    quarantineId: record.id,
+    reason,
+    action: record.action,
+    message,
+    ...summary,
+  };
+  env.error?.('system', 'RUNTIME_INPUT_QUARANTINED', payload, env.runtimeId);
+  if (!quietRuntimeLogs) {
+    console.error('[runtime] RUNTIME_INPUT_QUARANTINED', safeStringify(payload));
+  }
+  return true;
+};
+
 /**
  * Start the single runtime event loop. Called once on init.
  * Async while-loop — no re-entry possible by construction.
@@ -785,6 +867,7 @@ const emitRuntimeLoopError = (
 export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): () => void {
   if (env.scenarioMode) return () => {};
   const state = ensureRuntimeState(env);
+  if (state.halted) return state.stopLoop ?? (() => {});
   if (state.loopActive) return state.stopLoop ?? (() => {});
   void config;
   let running = true;
@@ -830,6 +913,13 @@ export function startRuntimeLoop(env: Env, config?: { tickDelayMs?: number }): (
           console.error('❌ Runtime loop error:', error);
           const message = error instanceof Error ? error.message : String(error);
           const stack = error instanceof Error ? error.stack : undefined;
+          state.halted = true;
+          state.fatalDebugPayload = {
+            message,
+            ...(stack ? { stack } : {}),
+            height: Math.max(0, env.height ?? 0),
+            timestamp: Math.max(0, env.timestamp ?? 0),
+          };
           emitRuntimeLoopError(
             env,
             'RUNTIME_LOOP_ERROR',
@@ -1076,21 +1166,101 @@ const normalizeRuntimeEntityInput = (_env: Env, input: EntityInput, _context: st
 };
 
 const hasLocalSignerForEntity = (env: Env, entityId: string): boolean => {
+  return getLocalSignerIdsForEntity(env, entityId).length > 0;
+};
+
+const getLocalSignerIdsForEntity = (env: Env, entityId: string): string[] => {
   const targetEntityId = String(entityId || '').toLowerCase();
+  const signerIds = new Set<string>();
   for (const replicaKey of env.eReplicas.keys()) {
     try {
       if (extractEntityId(replicaKey).toLowerCase() !== targetEntityId) continue;
       const signerId = extractSignerId(replicaKey);
       if (!signerId) continue;
       getSignerPrivateKey(env, signerId);
-      return true;
+      signerIds.add(signerId);
     } catch {
       // Imported/read-only replicas are useful for route inspection, but they
       // must never make network outputs "local". Only a replica whose signer key
       // is present can consume routed entity input without relay delivery.
     }
   }
-  return false;
+  return [...signerIds];
+};
+
+const hasLocalSignerForEntitySigner = (env: Env, entityId: string, signerId: string): boolean => {
+  const targetSignerId = String(signerId || '').toLowerCase();
+  if (!targetSignerId) return false;
+  return getLocalSignerIdsForEntity(env, entityId)
+    .some(localSignerId => localSignerId.toLowerCase() === targetSignerId);
+};
+
+const resolveSoleLocalSignerForEntity = (env: Env, entityId: string): string | null => {
+  const signerIds = getLocalSignerIdsForEntity(env, entityId);
+  return signerIds.length === 1 ? signerIds[0]! : null;
+};
+
+export const validateRuntimeInputAdmission = (env: Env, runtimeInput: RuntimeInput): void => {
+  if (!runtimeInput) {
+    throw new Error('RUNTIME_INPUT_ADMISSION_REJECTED: Null runtime input provided');
+  }
+  if (!Array.isArray(runtimeInput.runtimeTxs)) {
+    throw new Error(`RUNTIME_INPUT_ADMISSION_REJECTED: Invalid runtimeTxs: expected array, got ${typeof runtimeInput.runtimeTxs}`);
+  }
+  if (!Array.isArray(runtimeInput.entityInputs)) {
+    throw new Error(`RUNTIME_INPUT_ADMISSION_REJECTED: Invalid entityInputs: expected array, got ${typeof runtimeInput.entityInputs}`);
+  }
+  if (runtimeInput.runtimeTxs.length > 1000) {
+    throw new Error(`RUNTIME_INPUT_ADMISSION_REJECTED: Too many runtime transactions: ${runtimeInput.runtimeTxs.length} > 1000`);
+  }
+  if (runtimeInput.entityInputs.length > 10000) {
+    throw new Error(`RUNTIME_INPUT_ADMISSION_REJECTED: Too many entity inputs: ${runtimeInput.entityInputs.length} > 10000`);
+  }
+  const importedReplicaSigners = new Map<string, Set<string>>();
+  for (const runtimeTx of runtimeInput.runtimeTxs) {
+    if (runtimeTx.type !== 'importReplica') continue;
+    const entityId = String(runtimeTx.entityId || '').toLowerCase();
+    const signerId = String(runtimeTx.signerId || '').trim();
+    if (!entityId || !signerId) continue;
+    const signers = importedReplicaSigners.get(entityId) ?? new Set<string>();
+    signers.add(signerId);
+    importedReplicaSigners.set(entityId, signers);
+  }
+
+  runtimeInput.entityInputs.forEach((input, index) => {
+    const validated = normalizeRuntimeEntityInput(env, validateEntityInput(input), `runtimeInput[${index}]`);
+    const localSignerIds = [
+      ...getLocalSignerIdsForEntity(env, validated.entityId),
+      ...(importedReplicaSigners.get(String(validated.entityId || '').toLowerCase()) ?? []),
+    ];
+    if (localSignerIds.length === 0) {
+      throw new Error(
+        `RUNTIME_ENTITY_INPUT_UNKNOWN_TARGET: Entity input target does not exist in local runtime ` +
+        safeStringify({
+          index,
+          entityId: validated.entityId,
+          signerId: validated.signerId,
+          txTypes: (validated.entityTxs || []).map(tx => tx.type),
+        }),
+      );
+    }
+    if (
+      hasLocalSignerForEntitySigner(env, validated.entityId, validated.signerId) ||
+      localSignerIds.some(signerId => signerId.toLowerCase() === validated.signerId.toLowerCase())
+    ) return;
+    const txTypes = (validated.entityTxs || []).map(tx => tx.type);
+    if (localSignerIds.length === 1 && txTypes.length === 0) return;
+    throw new Error(
+      `RUNTIME_REPLICA_NOT_FOUND: Entity input target replica missing for exact signerId ` +
+      safeStringify({
+        index,
+        entityId: validated.entityId,
+        inputSignerId: validated.signerId,
+        localSignerIds,
+        txTypes,
+      }),
+    );
+  });
 };
 
 function getRuntimeEntityRoutingDeps(): RuntimeEntityRoutingDeps {
@@ -1099,6 +1269,8 @@ function getRuntimeEntityRoutingDeps(): RuntimeEntityRoutingDeps {
     enqueueRuntimeInputs,
     extractEntityId,
     hasLocalSignerForEntity,
+    hasLocalSignerForEntitySigner,
+    resolveSoleLocalSignerForEntity,
     getP2P,
     startRuntimeLoop,
     processRuntime: (targetEnv) => process(targetEnv),
@@ -1536,6 +1708,8 @@ export {
   deriveDelta,
   isLeft,
   getTokenInfo,
+  getKnownTokenIds,
+  getTokenIdsForJurisdiction,
   isLiquidSwapToken,
   getSwapPairOrientation,
   getDefaultSwapTradingPairs,
@@ -2221,6 +2395,11 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
           }
         }
       } catch (error) {
+        const quarantineResult = quarantineLiveRuntimeInput(env, runtimeInput, error, quietRuntimeLogs);
+        if (quarantineResult) {
+          clearPendingAuditEvents(env);
+          throw error;
+        }
         // Failed apply never becomes durable. We restore ingress back to the
         // mempool and abort this tick; only saveEnvToDB() below makes a frame
         // restartable / committed.
@@ -2239,9 +2418,11 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
       }
     }
 
-    // Retry deferred network outputs only when their retry window is due.
     const outputRoutingDeps = getRuntimeOutputRoutingDeps();
     const pendingBeforePlan = env.pendingNetworkOutputs ?? [];
+    if (pendingBeforePlan.length > 0) {
+      throw new Error(`PENDING_NETWORK_OUTPUTS_FATAL: count=${pendingBeforePlan.length}`);
+    }
     const { ready: readyPendingOutputs, waiting: waitingPendingOutputs } = splitPendingOutputsByRetryWindow(
       env,
       pendingBeforePlan,
@@ -2336,25 +2517,13 @@ export const process = async (env: Env, inputs?: EntityInput[], runtimeDelay = 0
           jInputCount: jOutbox.length,
         });
       } catch (error) {
-        const heldRemoteOutputs = remoteOutputs.map(({ output }) => output as RoutedEntityInput);
-        env.pendingNetworkOutputs = rescheduleDeferredOutputs(
-          env,
-          readyPendingOutputs,
-          [...heldRemoteOutputs, ...deferredOutputs],
-          waitingPendingOutputs,
-          outputRoutingDeps,
-        );
-        if (jOutbox.length > 0) {
-          state.pendingCommittedJOutbox = [...(state.pendingCommittedJOutbox ?? []), ...jOutbox];
-        }
-        env.warn('system', 'RECOVERY_BACKUP_BARRIER_DEFERRED', {
+        env.error('system', 'RECOVERY_BACKUP_BARRIER_FAILED', {
           height: env.height,
           remoteOutputCount: remoteOutputs.length,
           jInputCount: jOutbox.length,
           reason: error instanceof Error ? error.message : String(error),
         });
-        notifyEnvChange(env);
-        return env;
+        throw error;
       }
     }
 

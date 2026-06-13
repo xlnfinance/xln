@@ -3,7 +3,7 @@
   "lastUpdated": "2026-03-24T04:01:05.173Z",
   "jurisdictions": {
     "arrakis": {
-      "name": "Arrakis (Shared Anvil)",
+      "name": "Testnet",
       "chainId": 31337,
       "rpc": "http://127.0.0.1:20740",
       "blockTimeMs": 1000,
@@ -16,7 +16,7 @@
       "explorer": "http://localhost:8545",
       "currency": "SPICE",
       "status": "active",
-      "description": "The desert planet - strategic resource hub, high-value trade",
+      "description": "Primary local testnet",
       "rebalancePolicyUsd": {
         "r2cRequestSoftLimit": 500,
         "hardLimit": 10000,
@@ -24,7 +24,7 @@
       }
     },
     "wakanda": {
-      "name": "Wakanda",
+      "name": "Testnet",
       "chainId": 31337,
       "rpc": "/rpc",
       "blockTimeMs": 1000,

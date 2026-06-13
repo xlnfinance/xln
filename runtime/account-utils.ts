@@ -7,6 +7,7 @@ import type { Delta, DerivedDelta } from './types';
 import { PERFORMANCE } from './constants';
 import { validateDelta } from './validation-utils';
 import { isLeftEntity } from './entity-id-utils';
+import { defaultTokensForJurisdiction } from './jadapter/default-tokens';
 
 /**
  * Determine if an entity is the "left" party in a bilateral account (like old_src Channel.ts)
@@ -232,10 +233,33 @@ export const TOKEN_REGISTRY: Record<number, { symbol: string; name: string; deci
   1: { symbol: 'USDC', name: 'USD Coin', decimals: 18, color: '#2775ca' },
   2: { symbol: 'WETH', name: 'Wrapped Ether', decimals: 18, color: '#627eea' },
   3: { symbol: 'USDT', name: 'Tether USD', decimals: 18, color: '#26a17b' },
+  4: { symbol: 'TRX', name: 'Tron Native', decimals: 18, color: '#ef0027' },
+  5: { symbol: 'SUN', name: 'Sun Token', decimals: 18, color: '#f59e0b' },
 };
 
-// Canonical liquid tokens used for quote-side orientation in swap pairs.
-export const LIQUID_SWAP_TOKEN_IDS = new Set<number>([1, 3]); // USDC, USDT
+const TOKEN_ID_BY_SYMBOL = new Map(
+  Object.entries(TOKEN_REGISTRY).map(([tokenId, info]) => [info.symbol.toUpperCase(), Number(tokenId)] as const),
+);
+
+export function getKnownTokenIds(): number[] {
+  return Object.keys(TOKEN_REGISTRY)
+    .map((tokenId) => Number(tokenId))
+    .filter((tokenId) => Number.isFinite(tokenId) && tokenId > 0)
+    .sort((a, b) => a - b);
+}
+
+export function getTokenIdsForJurisdiction(
+  input?: { name?: string | null; chainId?: number | null } | string | null,
+): number[] {
+  return defaultTokensForJurisdiction(input)
+    .map((token) => TOKEN_ID_BY_SYMBOL.get(String(token.symbol || '').toUpperCase()) ?? 0)
+    .filter((tokenId) => Number.isFinite(tokenId) && tokenId > 0);
+}
+
+// Canonical USD reference stables used for quote-side orientation in swap pairs.
+// Prices for volatile/non-reference assets are displayed and quoted as stable per 1 asset.
+export const REFERENCE_STABLE_TOKEN_IDS = new Set<number>([1, 3]); // USDC, USDT
+export const LIQUID_SWAP_TOKEN_IDS = REFERENCE_STABLE_TOKEN_IDS;
 export const DEFAULT_ENTITY_SWAP_PAIR_TOKENS = [1, 2, 3] as const;
 export type EntitySwapPairConfig = {
   baseTokenId: number;
@@ -253,7 +277,7 @@ export function getTokenInfo(tokenId: number) {
 }
 
 export function isLiquidSwapToken(tokenId: number): boolean {
-  return LIQUID_SWAP_TOKEN_IDS.has(tokenId);
+  return REFERENCE_STABLE_TOKEN_IDS.has(tokenId);
 }
 
 export function getSwapPairOrientation(
@@ -310,6 +334,30 @@ const SWAP_PAIR_POLICY_BY_BASE_QUOTE: Record<string, SwapPairPolicy> = {
     priceStepTicks: 1,      // 0.0001
     bookBucketWidthTicks: 10_000, // 1.0000
     mmMidPriceTicks: 10_000n, // 1.0000
+  },
+  // TRX/USDC
+  '4/1': {
+    priceStepTicks: 1, // 0.0001 USDC per TRX
+    bookBucketWidthTicks: 100, // 0.0100
+    mmMidPriceTicks: 1_200n, // 0.1200
+  },
+  // TRX/USDT
+  '4/3': {
+    priceStepTicks: 1, // 0.0001 USDT per TRX
+    bookBucketWidthTicks: 100, // 0.0100
+    mmMidPriceTicks: 1_200n, // 0.1200
+  },
+  // SUN/USDC
+  '5/1': {
+    priceStepTicks: 1, // 0.0001 USDC per SUN
+    bookBucketWidthTicks: 10, // 0.0010
+    mmMidPriceTicks: 200n, // 0.0200
+  },
+  // SUN/USDT
+  '5/3': {
+    priceStepTicks: 1, // 0.0001 USDT per SUN
+    bookBucketWidthTicks: 10, // 0.0010
+    mmMidPriceTicks: 200n, // 0.0200
   },
 };
 

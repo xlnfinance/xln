@@ -166,10 +166,19 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
 
   const proxyAnyHubGet = async (request: Request, endpointWithQuery: string): Promise<Response> => {
     await deps.pollAllHubHealth();
-    const child = deps.getHealthyHub();
+    let requestedHubId = '';
+    try {
+      const parsed = new URL(endpointWithQuery, 'http://orchestrator.local');
+      requestedHubId = String(parsed.searchParams.get('hubEntityId') || '').trim().toLowerCase();
+    } catch {
+      requestedHubId = '';
+    }
+    const child = requestedHubId ? deps.getHubChildByEntityId(requestedHubId) : deps.getHealthyHub();
     if (!child) {
-      return new Response(safeStringify({ error: 'No healthy hub API available' }), {
-        status: 503,
+      return new Response(safeStringify(requestedHubId
+        ? { error: 'Requested hub API unavailable', hubEntityId: requestedHubId }
+        : { error: 'No healthy hub API available' }), {
+        status: requestedHubId ? 404 : 503,
         headers: CORS_JSON_HEADERS,
       });
     }
@@ -190,7 +199,10 @@ export const createOrchestratorProxyHandlers = (deps: OrchestratorProxyDeps) => 
         },
       });
     } catch (error) {
-      return new Response(safeStringify({ error: serializeError(error) }), {
+      return new Response(safeStringify({
+        error: serializeError(error),
+        ...(requestedHubId ? { hubEntityId: requestedHubId, apiPort: child.apiPort } : {}),
+      }), {
         status: 502,
         headers: CORS_JSON_HEADERS,
       });

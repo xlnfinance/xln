@@ -192,6 +192,25 @@
 
   const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+  function hubRuntimeIdFromGossip(currentEnv: Env, hubId: string): string {
+    const target = normalizeEntityId(hubId);
+    const profiles = currentEnv.gossip?.getProfiles?.() || [];
+    const profile = profiles.find((candidate: { entityId?: string; runtimeId?: string }) =>
+      normalizeEntityId(candidate?.entityId || '') === target,
+    );
+    return String(profile?.runtimeId || '').trim();
+  }
+
+  async function requireHubRuntimeRoute(currentEnv: Env, hubId: string): Promise<void> {
+    await prewarmCounterpartyProfiles(currentEnv, [hubId], 5_000);
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline) {
+      if (hubRuntimeIdFromGossip(currentEnv, hubId)) return;
+      await sleep(100);
+    }
+    throw new Error('Hub routing profile is not ready. Refresh hubs and try again.');
+  }
+
   async function fetchPublicHubs(timeoutMs = DISCOVERY_TIMEOUT_MS): Promise<Hub[]> {
     if (typeof window === 'undefined') return [];
     if (entityId && !getEntityJurisdictionKey(env, entityId)) return [];
@@ -305,7 +324,7 @@
 
       // Preload signed gossip/runtime routing metadata first so the initial
       // openAccount does not sit in the local pending queue waiting for pubkey discovery.
-      await prewarmCounterpartyProfiles(currentEnv, [hub.entityId]);
+      await requireHubRuntimeRoute(currentEnv, hub.entityId);
 
       // Open account WITH credit extension (both in same frame)
       // Frame #1 will have: [add_delta, set_credit_limit] - order matters!

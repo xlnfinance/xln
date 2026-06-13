@@ -116,7 +116,7 @@ describe('dispute argument snapshots', () => {
       type: 'swap_resolve',
       data: {
         offerId: 'remaining-left-owned',
-        fillRatio: 32767,
+        fillRatio: 32768,
         fillNumerator: 1n,
         fillDenominator: 2n,
         executionGiveAmount: 25n,
@@ -157,7 +157,7 @@ describe('dispute argument snapshots', () => {
       initialProof.proofBodyHash,
       { secretsSide: 'left' },
     );
-    expect(decodeFirstRatio(initialArgs.rightArguments)).toBe(32767);
+    expect(decodeFirstRatio(initialArgs.rightArguments)).toBe(32768);
 
     const afterSecondFill = accountWithSwaps([
       ['remaining-left-owned', {
@@ -194,7 +194,7 @@ describe('dispute argument snapshots', () => {
       type: 'swap_resolve',
       data: {
         offerId: 'remaining-left-owned',
-        fillRatio: 32767,
+        fillRatio: 32768,
         fillNumerator: 1n,
         fillDenominator: 2n,
         executionGiveAmount: 25n,
@@ -237,7 +237,7 @@ describe('dispute argument snapshots', () => {
       proof.proofBodyHash,
       { secretsSide: 'left' },
     );
-    expect(decodeFirstRatio(args.rightArguments)).toBe(32767);
+    expect(decodeFirstRatio(args.rightArguments)).toBe(32768);
   });
 
   test('fails fast when applied fill identity is missing the frame height', () => {
@@ -246,7 +246,7 @@ describe('dispute argument snapshots', () => {
       type: 'swap_resolve',
       data: {
         offerId: 'remaining-left-owned',
-        fillRatio: 32767,
+        fillRatio: 32768,
         fillNumerator: 1n,
         fillDenominator: 2n,
         executionGiveAmount: 25n,
@@ -282,5 +282,56 @@ describe('dispute argument snapshots', () => {
       proof.proofBodyHash,
       { secretsSide: 'left' },
     )).toThrow('DISPUTE_ARGUMENT_APPLIED_FRAME_HEIGHT_MISSING');
+  });
+
+  test('derives dispute uint16 fill projection from exact ratio and rejects coarse drift', () => {
+    setDeltaTransformerAddress(DELTA_TRANSFORMER);
+    const account = accountWithSwaps([
+      ['left-owned', offer('left-owned', true, 1, 2)],
+    ]);
+    const proof = buildAccountProofBody(account);
+    storeDisputeArgumentSnapshot(
+      account,
+      captureDisputeArgumentSnapshot(account, proof.proofBodyHash, 1, proof.proofBodyStruct),
+    );
+
+    account.mempool.push({
+      type: 'swap_resolve',
+      data: {
+        offerId: 'left-owned',
+        fillRatio: 16_384,
+        fillNumerator: 1n,
+        fillDenominator: 4n,
+        cancelRemainder: false,
+      },
+    } as AccountTx);
+
+    const args = buildDisputeArgumentsForSnapshot(
+      account,
+      { entityId: 'left' } as unknown as EntityState,
+      'right',
+      proof.proofBodyHash,
+      { secretsSide: 'left' },
+    );
+    expect(decodeFirstRatio(args.rightArguments)).toBe(16_384);
+
+    account.mempool = [{
+      type: 'swap_resolve',
+      data: {
+        offerId: 'left-owned',
+        fillRatio: 16_383,
+        fillNumerator: 1n,
+        fillDenominator: 4n,
+        cancelRemainder: false,
+      },
+    } as AccountTx];
+
+    expect(() => buildDisputeArgumentsForSnapshot(
+      account,
+      { entityId: 'left' } as unknown as EntityState,
+      'right',
+      proof.proofBodyHash,
+      { secretsSide: 'left' },
+    )).toThrow(/DISPUTE_ARGUMENT_SWAP_FILL_RATIO_MISMATCH/);
   });
 });

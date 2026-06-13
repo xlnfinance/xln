@@ -49,7 +49,7 @@ export async function chooseVisibleRoute(
   routeEntityIds: string[],
 ): Promise<string> {
   const routeOptions = page.locator('.route-option');
-  const routeCount = await routeOptions.count();
+  let routeCount = await routeOptions.count();
   const expectedPath = routeEntityIds.map((id) => String(id || '').trim().toLowerCase()).filter(Boolean);
 
   if (routeCount === 0 && expectedPath.length === 0) {
@@ -59,6 +59,15 @@ export async function chooseVisibleRoute(
   }
 
   expect(routeCount, 'expected at least one visible payment route').toBeGreaterThan(0);
+
+  if (expectedPath.length > 0) {
+    const expandRoutes = page.locator('.routes-expand').first();
+    if (await expandRoutes.isVisible().catch(() => false)) {
+      await expandRoutes.click();
+      await expect(expandRoutes).toBeHidden({ timeout: 5_000 });
+      routeCount = await routeOptions.count();
+    }
+  }
 
   const routeNeedles = await page.evaluate((ids) => {
     const env = (window as typeof window & {
@@ -180,6 +189,28 @@ export async function prepareUiPayment(
   const sendPaymentBtn = page.getByRole('button', { name: /Pay now/i }).first();
   await expect(sendPaymentBtn).toBeVisible({ timeout: 10_000 });
   return { selectedRouteText };
+}
+
+export async function expectUiPaymentNoRoute(
+  page: Page,
+  intent: UiPaymentIntent,
+  expectedMessage = 'No route has enough real capacity for this amount',
+): Promise<string> {
+  await openPayWorkspace(page);
+  await fillUiPaymentIntent(page, intent.recipientEntityId, intent.amount);
+
+  const findRoutesBtn = page.getByRole('button', { name: /^Find routes?$/i }).first();
+  await expect(findRoutesBtn).toBeEnabled({ timeout: 10_000 });
+  await findRoutesBtn.click();
+
+  const error = page.locator('.form-error').filter({ hasText: expectedMessage }).first();
+  await expect(error).toBeVisible({ timeout: 15_000 });
+  await expect(page.locator('.route-option')).toHaveCount(0);
+  await expect(page.locator('.route-inline')).toHaveCount(0);
+
+  const sendPaymentBtn = page.getByRole('button', { name: /Pay now/i }).first();
+  await expect(sendPaymentBtn).toBeDisabled({ timeout: 10_000 });
+  return (await error.textContent().catch(() => '')) || '';
 }
 
 export async function submitUiPayment(

@@ -1,11 +1,13 @@
 import type { Env, RuntimeInput } from '../types';
 import { serializeTaggedJson } from '../serialization-utils';
+import { getControlBodyErrorStatus } from './auth';
 import type { createRuntimeIngressReceiptStore } from './ingress-receipts';
 import type { parseTaggedControlBody as parseTaggedControlBodyType } from './auth';
 import type { enqueueRuntimeInput as enqueueRuntimeInputType } from '../runtime';
 
 type RuntimeInputControlDeps = {
   enqueueRuntimeInput: typeof enqueueRuntimeInputType;
+  validateRuntimeInputAdmission(env: Env, runtimeInput: RuntimeInput): void;
   parseTaggedControlBody: typeof parseTaggedControlBodyType;
   receipts: ReturnType<typeof createRuntimeIngressReceiptStore>;
   getCurrentRuntimeHeight(env: Env | null): number;
@@ -32,11 +34,13 @@ export const handleRuntimeInputControl = async (
         { status: 400, headers },
       );
     }
-    deps.enqueueRuntimeInput(env, {
+    const runtimeInput: RuntimeInput = {
       runtimeTxs,
       entityInputs,
       ...(jInputs.length > 0 ? { jInputs } : {}),
-    });
+    };
+    deps.validateRuntimeInputAdmission(env, runtimeInput);
+    deps.enqueueRuntimeInput(env, runtimeInput);
     const receipt = deps.receipts.register({
       kind: 'control-runtime-input',
       counts: {
@@ -62,7 +66,7 @@ export const handleRuntimeInputControl = async (
   } catch (error) {
     return new Response(
       serializeTaggedJson({ ok: false, error: (error as Error).message || 'Failed to queue runtime input' }),
-      { status: 500, headers },
+      { status: getControlBodyErrorStatus(error, 400), headers },
     );
   }
 };

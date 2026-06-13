@@ -36,8 +36,9 @@ const pushCrossJOutput = (
   outputs: EntityInput[],
   entityId: string,
   entityTxs: EntityTx[],
+  signerIdHint?: string | null,
 ): void => {
-  pushCrossJurisdictionEntityOutput(env, outputs, entityId, entityTxs);
+  pushCrossJurisdictionEntityOutput(env, outputs, entityId, entityTxs, signerIdHint);
 };
 
 export const handleRequestCrossJurisdictionSwapEntityTx = (
@@ -89,7 +90,7 @@ export const handleRequestCrossJurisdictionSwapEntityTx = (
   pushCrossJOutput(env, outputs, intentRoute.source.counterpartyEntityId, [{
     type: 'prepareCrossJurisdictionSwap',
     data: { route: intentRoute },
-  }]);
+  }], intentRoute.sourceHubSignerId);
   addMessage(newState, `🌉 Cross-j swap ${intentRoute.orderId} requested`);
   return { newState, outputs };
 };
@@ -154,10 +155,10 @@ export const handlePrepareCrossJurisdictionSwapEntityTx = (
           description: publicPreparedRoute.memo || `Cross-j target pull ${publicPreparedRoute.orderId}`,
         },
       },
-    ]);
+    ], publicPreparedRoute.targetHubSignerId);
   pushCrossJOutput(env, outputs, publicPreparedRoute.target.counterpartyEntityId, [
     { type: 'registerCrossJurisdictionSwap', data: { route: publicPreparedRoute } },
-  ]);
+  ], publicPreparedRoute.targetSignerId);
   addMessage(newState, `🌉 Cross-j swap ${preparedRoute.orderId} target lock requested by hub`);
   return { newState, outputs };
 };

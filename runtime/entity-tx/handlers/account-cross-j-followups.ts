@@ -17,7 +17,11 @@ import { decodeHashLadderBinary } from '../../hashladder';
 import { createStructuredLogger, shortId, shortOrder } from '../../logger';
 import { removeCrossJurisdictionBookOrder } from '../../orderbook/cross-j';
 import { resolveEntityProposerId } from '../../state-helpers';
-import { buildCrossJurisdictionEntityOutput, findLocalEntityState } from '../cross-j-outputs';
+import {
+  buildCrossJurisdictionEntityOutput,
+  crossJurisdictionRouteSignerHint,
+  findLocalEntityState,
+} from '../cross-j-outputs';
 import { applyCrossJurisdictionBookProgressToState } from './cross-j-book-order';
 
 const crossJFollowupLog = createStructuredLogger('crossj.followup');
@@ -125,7 +129,7 @@ const removeOrRouteCrossJurisdictionBookOrder = (
         route,
         reason,
       },
-  }]));
+  }], crossJurisdictionRouteSignerHint(route, owner.ownerId)));
 };
 
 const requireCrossFillAckNumber = (
@@ -174,6 +178,7 @@ const buildCrossJurisdictionBookProgressTx = (
     ...(accountTx.data.priceImprovementMode ? { priceImprovementMode: accountTx.data.priceImprovementMode } : {}),
     ...(accountTx.data.priceImprovementAmount !== undefined ? { priceImprovementAmount: accountTx.data.priceImprovementAmount } : {}),
     ...(accountTx.data.priceImprovementTokenId !== undefined ? { priceImprovementTokenId: accountTx.data.priceImprovementTokenId } : {}),
+    ...(accountTx.data.cancelRemainder !== undefined ? { cancelRemainder: accountTx.data.cancelRemainder } : {}),
     reason,
   },
 });
@@ -194,7 +199,12 @@ const applyOrRouteCrossJurisdictionBookProgress = (
     applyCrossJurisdictionBookProgressToState(env, newState, tx.data);
     return;
   }
-  outputs.push(buildCrossJurisdictionEntityOutput(env, owner.ownerId, [tx]));
+  outputs.push(buildCrossJurisdictionEntityOutput(
+    env,
+    owner.ownerId,
+    [tx],
+    crossJurisdictionRouteSignerHint(route, owner.ownerId),
+  ));
 };
 
 const committedPullMatchesRoute = (
@@ -304,17 +314,18 @@ const queueBookAdmissionOnCommittedPull = (
           route: admissionRoute,
           targetReceipt: receipt,
         },
-      }]));
+      }], route.sourceSignerId));
     }
 
-    outputs.push(buildCrossJurisdictionEntityOutput(env, routeBookOwnerEntityId(route), [{
+    const bookOwnerEntityId = routeBookOwnerEntityId(route);
+    outputs.push(buildCrossJurisdictionEntityOutput(env, bookOwnerEntityId, [{
       type: 'admitCrossJurisdictionBookOrder',
       data: {
         route: admissionRoute,
         receipt,
         reason: `${leg}_pull_committed`,
       },
-    }]));
+    }], crossJurisdictionRouteSignerHint(route, bookOwnerEntityId)));
     handled = true;
   }
 
@@ -399,7 +410,12 @@ const applyPullResolveFollowup = (
           },
         });
       }
-      outputs.push(buildCrossJurisdictionEntityOutput(env, route.target.counterpartyEntityId, targetEntityTxs));
+      outputs.push(buildCrossJurisdictionEntityOutput(
+        env,
+        route.target.counterpartyEntityId,
+        targetEntityTxs,
+        route.targetSignerId,
+      ));
       removeOrRouteCrossJurisdictionBookOrder(env, newState, route, outputs, 'source_claimed');
       crossJFollowupLog.debug('pull.resolve.relay_target', {
         route: shortOrder(route.orderId, 12),

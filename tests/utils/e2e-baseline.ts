@@ -4,6 +4,8 @@ import { requireAppBaseUrl, requireApiBaseUrl, requireResetBaseUrl } from './e2e
 export const APP_BASE_URL = requireAppBaseUrl();
 export const API_BASE_URL = requireApiBaseUrl();
 export const RESET_BASE_URL = process.env.E2E_RESET_BASE_URL ? requireResetBaseUrl() : '';
+const RESET_CONFIRMATION = 'RESET_MESH_STATE';
+const RESET_TOKEN = process.env.E2E_MESH_RESET_TOKEN || process.env.XLN_MESH_RESET_TOKEN || '';
 
 export type E2EResetHealth = {
   inProgress?: boolean;
@@ -32,7 +34,31 @@ export type E2EMarketMakerHubHealth = {
     pairId: string;
     offers: number;
     ready: boolean;
+    sourceTokenIds?: number[];
+    targetTokenIds?: number[];
   }>;
+};
+
+export type E2EMarketMakerCrossRouteHealth = {
+  sourceJurisdiction: string;
+  targetJurisdiction: string;
+  sourceHubEntityId: string;
+  targetHubEntityId: string;
+  offers: number;
+  ready: boolean;
+  pairs?: Array<{
+    pairId: string;
+    offers: number;
+    ready: boolean;
+  }>;
+};
+
+export type E2EMarketMakerCrossHealth = {
+  ok?: boolean;
+  expectedRoutes?: number;
+  expectedOffersPerRoute?: number;
+  expectedOffersPerPair?: number;
+  routes?: E2EMarketMakerCrossRouteHealth[];
 };
 
 export type E2EMarketMakerHealth = {
@@ -41,6 +67,7 @@ export type E2EMarketMakerHealth = {
   entityId?: string | null;
   expectedOffersPerHub?: number;
   expectedOffersPerPair?: number;
+  cross?: E2EMarketMakerCrossHealth;
   hubs?: E2EMarketMakerHubHealth[];
 };
 
@@ -94,6 +121,7 @@ export type E2EBaselineOptions = {
   requireMarketMaker?: boolean;
   minHubCount?: number;
   autoResetGraceMs?: number;
+  forceReset?: boolean;
 };
 
 export type E2EResetOptions = E2EBaselineOptions & {
@@ -192,6 +220,27 @@ const summarizeHealth = (health: E2EHealthResponse | null): string => {
         entityId: health.marketMaker?.entityId ?? null,
         expectedOffersPerHub: health.marketMaker?.expectedOffersPerHub ?? 0,
         expectedOffersPerPair: health.marketMaker?.expectedOffersPerPair ?? 0,
+        cross: {
+          ok: health.marketMaker?.cross?.ok ?? false,
+          expectedRoutes: health.marketMaker?.cross?.expectedRoutes ?? 0,
+          expectedOffersPerRoute: health.marketMaker?.cross?.expectedOffersPerRoute ?? 0,
+          expectedOffersPerPair: health.marketMaker?.cross?.expectedOffersPerPair ?? 0,
+          routes: (health.marketMaker?.cross?.routes ?? []).map((route) => ({
+            sourceJurisdiction: route.sourceJurisdiction,
+            targetJurisdiction: route.targetJurisdiction,
+            sourceHubEntityId: route.sourceHubEntityId,
+            targetHubEntityId: route.targetHubEntityId,
+            offers: route.offers,
+            ready: route.ready,
+            pairs: (route.pairs ?? []).map((pair) => ({
+              pairId: pair.pairId,
+              offers: pair.offers,
+              ready: pair.ready,
+              sourceTokenIds: pair.sourceTokenIds ?? [],
+              targetTokenIds: pair.targetTokenIds ?? [],
+            })),
+          })),
+        },
         hubs: (health.marketMaker?.hubs ?? []).map((hub) => ({
           hubEntityId: hub.hubEntityId,
           offers: hub.offers,
@@ -243,6 +292,8 @@ const isBaselineReady = (health: E2EHealthResponse | null, options: Required<E2E
   if (options.requireMarketMaker) {
     if (health.marketMaker?.enabled !== true) return false;
     if (health.marketMaker?.ok !== true) return false;
+  } else if (health.marketMaker?.enabled === true) {
+    return false;
   }
   if (!health.bootstrapReserves?.ok) return false;
   return true;
@@ -377,7 +428,7 @@ export const waitForApiReachable = async (
         const response = await api.get(`${apiBaseUrl}/api/health`);
         if (response.ok()) return;
         const body = await readText(response);
-        lastError = `status=${response.status()} body=${body.slice(0, 240)}`;
+        lastError = `status=${response.status()} body=${body.slice(0, 4_000)}`;
       } catch (error) {
         lastError = error instanceof Error ? error.message : String(error);
       }
@@ -399,12 +450,27 @@ export const ensureE2EBaseline = async (
     requireMarketMaker: options.requireMarketMaker ?? false,
     minHubCount: options.minHubCount ?? 3,
     autoResetGraceMs: options.autoResetGraceMs ?? DEFAULT_AUTO_RESET_GRACE_MS,
+    forceReset: options.forceReset ?? false,
   };
 
   // The isolated runner owns reset/readiness. Tests must not hide readiness
   // problems behind another long wait once Playwright has started.
   if (ISOLATED_STACK) {
     return await withApiContext((api) => assertIsolatedBaselineReadyWithApi(api, resolved));
+  }
+
+  if (resolved.forceReset) {
+    return await resetProdServer(page, {
+      apiBaseUrl: resolved.apiBaseUrl,
+      resetBaseUrl: RESET_BASE_URL || requireResetBaseUrl(),
+      timeoutMs: resolved.timeoutMs,
+      pollMs: resolved.pollMs,
+      requireHubMesh: resolved.requireHubMesh,
+      requireMarketMaker: resolved.requireMarketMaker,
+      minHubCount: resolved.minHubCount,
+      autoResetGraceMs: resolved.timeoutMs,
+      forceReset: true,
+    });
   }
 
   const initialWaitMs = Math.min(resolved.timeoutMs, resolved.autoResetGraceMs);
@@ -443,6 +509,7 @@ export const resetProdServer = async (
     requireMarketMaker: options.requireMarketMaker ?? false,
     minHubCount: options.minHubCount ?? 3,
     autoResetGraceMs: options.autoResetGraceMs ?? DEFAULT_AUTO_RESET_GRACE_MS,
+    forceReset: options.forceReset ?? false,
   };
 
   if (ISOLATED_STACK) {
@@ -480,11 +547,17 @@ export const resetProdServer = async (
     for (let attempt = 1; attempt <= retries; attempt++) {
       try {
         const resetBody = {
+          confirm: RESET_CONFIRMATION,
           requireMarketMaker: options.requireMarketMaker ?? false,
+          enableMarketMaker: options.requireMarketMaker ?? false,
         };
         const coldResponse = await api.post(`${resetBaseUrl}/api/reset`, {
           data: resetBody,
-          headers: { 'Content-Type': 'application/json' },
+          headers: {
+            'Content-Type': 'application/json',
+            'X-XLN-Reset-Confirm': RESET_CONFIRMATION,
+            ...(RESET_TOKEN ? { 'X-XLN-Reset-Token': RESET_TOKEN } : {}),
+          },
         });
         if (coldResponse.ok()) {
           resetDone = true;
@@ -492,7 +565,7 @@ export const resetProdServer = async (
         }
 
         const coldBody = await readText(coldResponse);
-        lastResetError = `reset(status=${coldResponse.status()} body=${coldBody.slice(0, 180)})`;
+        lastResetError = `reset(status=${coldResponse.status()} body=${coldBody.slice(0, 4_000)})`;
       } catch (error) {
         lastResetError = error instanceof Error ? error.message : String(error);
       }
@@ -504,7 +577,7 @@ export const resetProdServer = async (
         const response = await api.get(`${apiBaseUrl}/api/health`);
         if (!response.ok()) {
           const body = await readText(response);
-          lastResetError = `status=${response.status()} body=${body.slice(0, 240)}`;
+          lastResetError = `status=${response.status()} body=${body.slice(0, 4_000)}`;
         }
       } catch (error) {
         lastResetError = error instanceof Error ? error.message : String(error);

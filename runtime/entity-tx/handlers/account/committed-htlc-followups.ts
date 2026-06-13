@@ -13,10 +13,11 @@ import { HEAVY_LOGS } from '../../../utils';
 import { NobleCryptoProvider } from '../../../crypto-noble';
 import { unwrapEnvelope, validateEnvelope } from '../../../htlc-envelope-types';
 import { terminateHtlcRoute } from '../../htlc-route-lifecycle';
-import { sanitizeBaseFee } from '../../../routing/fees';
+import { calculateDirectionalFeePPM, calculateHopFee, sanitizeBaseFee, sanitizeFeePPM } from '../../../routing/fees';
+import { getTokenCapacity } from '../../../routing/capacity';
 import { markStorageEntityDirty } from '../../../env-events';
 import { scheduleHook as scheduleCrontabHook, HTLC_SECRET_ACK_TIMEOUT_MS } from '../../../entity-crontab';
-import { resolveEntityProposerId } from '../../../state-helpers';
+import { pushCrossJurisdictionEntityOutput } from '../../cross-j-outputs';
 import {
   buildHtlcFinalizedEventPayload,
   buildHtlcReceivedEventPayload,
@@ -197,7 +198,7 @@ export async function applyCommittedHtlcLockFollowup(
   }
 
   const localEntityId = String(newState.entityId || '').toLowerCase();
-  const localProfile = env.gossip?.getProfiles?.()?.find((p: { entityId?: unknown; metadata?: { baseFee?: bigint } } | undefined) =>
+  const localProfile = env.gossip?.getProfiles?.()?.find((p: { entityId?: unknown; metadata?: { baseFee?: bigint; routingFeePPM?: number }; accounts?: Array<{ counterpartyId?: unknown; tokenCapacities?: unknown }> } | undefined) =>
     String(p?.entityId || '').toLowerCase() === localEntityId
   );
   const baseFee = sanitizeBaseFee(localProfile?.metadata?.baseFee ?? 0n);
@@ -219,8 +220,16 @@ export async function applyCommittedHtlcLockFollowup(
     return;
   }
   const feeAmount = lock.amount - forwardAmount;
-  if (feeAmount < baseFee) {
-    cancelInboundLock('fee_below_base');
+  const nextHopNorm = String(nextHop || '').toLowerCase();
+  const nextHopAccount = (localProfile?.accounts || []).find((account) =>
+    String(account?.counterpartyId || '').toLowerCase() === nextHopNorm
+  );
+  const tokenCap = getTokenCapacity(nextHopAccount?.tokenCapacities, lock.tokenId);
+  const basePpm = sanitizeFeePPM(localProfile?.metadata?.routingFeePPM ?? 1, 1);
+  const feePpm = calculateDirectionalFeePPM(basePpm, tokenCap?.outCapacity ?? 0n, tokenCap?.inCapacity ?? 0n);
+  const requiredFee = calculateHopFee(lock.amount, feePpm, baseFee);
+  if (feeAmount < requiredFee) {
+    cancelInboundLock(feeAmount < baseFee ? 'fee_below_base' : 'fee_below_ppm');
     return;
   }
 
@@ -357,10 +366,7 @@ export function applyHtlcSecretFollowups(ctx: HtlcFollowupContext, revealedSecre
 
     if (route.crossJurisdictionRelay) {
       const relay = route.crossJurisdictionRelay;
-      outputs.push({
-        entityId: relay.targetEntityId,
-        signerId: resolveEntityProposerId(ctx.env, relay.targetEntityId, 'htlc.cross-j-relay.resolve'),
-        entityTxs: [{
+      pushCrossJurisdictionEntityOutput(ctx.env, outputs, relay.targetEntityId, [{
           type: 'resolveHtlcLock',
           data: {
             counterpartyEntityId: relay.targetCounterpartyEntityId,
@@ -368,8 +374,7 @@ export function applyHtlcSecretFollowups(ctx: HtlcFollowupContext, revealedSecre
             secret,
             description: `Cross-j ${relay.routeId} target claim ${relay.fillRatio}/65535`,
           },
-        }],
-      });
+        }], relay.targetSignerId);
     }
     terminateHtlcRoute(newState, hashlock, newState.timestamp);
     env.emit('HtlcFinalized', {

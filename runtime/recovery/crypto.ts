@@ -45,6 +45,22 @@ const importAesKey = async (runtimeId: string, runtimeSeed: string): Promise<Cry
   );
 };
 
+const gzipBytes = async (bytes: Uint8Array): Promise<Uint8Array | null> => {
+  const CompressionStreamCtor = globalThis.CompressionStream;
+  if (typeof CompressionStreamCtor !== 'function') return null;
+  const stream = new Blob([toOwnedArrayBuffer(bytes)]).stream().pipeThrough(new CompressionStreamCtor('gzip'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+};
+
+const gunzipBytes = async (bytes: Uint8Array): Promise<Uint8Array> => {
+  const DecompressionStreamCtor = globalThis.DecompressionStream;
+  if (typeof DecompressionStreamCtor !== 'function') {
+    throw new Error('RECOVERY_BUNDLE_COMPRESSION_UNSUPPORTED: gzip');
+  }
+  const stream = new Blob([toOwnedArrayBuffer(bytes)]).stream().pipeThrough(new DecompressionStreamCtor('gzip'));
+  return new Uint8Array(await new Response(stream).arrayBuffer());
+};
+
 const normalizeTowerPublicKey = (publicKey: string): string =>
   ethers.SigningKey.computePublicKey(String(publicKey || '').trim(), true);
 
@@ -210,9 +226,14 @@ export const encryptRuntimeRecoveryBundle = async (
   const validated = validateRuntimeRecoveryBundle(bundle);
   const key = await importAesKey(validated.runtimeId, runtimeSeed);
   const iv = crypto.getRandomValues(new Uint8Array(12));
-  const plaintext = encoder.encode(serializeTaggedJson(validated));
+  const rawPlaintext = encoder.encode(serializeTaggedJson(validated));
+  const gzippedPlaintext = await gzipBytes(rawPlaintext);
+  const plaintext = gzippedPlaintext && gzippedPlaintext.byteLength < rawPlaintext.byteLength
+    ? gzippedPlaintext
+    : rawPlaintext;
+  const compression = plaintext === gzippedPlaintext ? 'gzip' as const : undefined;
   const ciphertext = new Uint8Array(
-    await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, plaintext),
+    await crypto.subtle.encrypt({ name: 'AES-GCM', iv }, key, toOwnedArrayBuffer(plaintext)),
   );
   return {
     version: 1,
@@ -223,6 +244,7 @@ export const encryptRuntimeRecoveryBundle = async (
     bundleHash: computeRuntimeRecoveryBundleHash(validated),
     iv: ethers.hexlify(iv),
     ciphertext: ethers.hexlify(ciphertext),
+    ...(compression ? { compression } : {}),
   };
 };
 
@@ -234,13 +256,16 @@ export const decryptRuntimeRecoveryBundle = async (
     throw new Error(`RECOVERY_BUNDLE_ENCRYPTED_VERSION_UNSUPPORTED: ${String(encrypted?.version ?? 'unknown')}`);
   }
   const key = await importAesKey(encrypted.runtimeId, runtimeSeed);
-  const plaintext = new Uint8Array(
+  const encryptedPlaintext = new Uint8Array(
     await crypto.subtle.decrypt(
       { name: 'AES-GCM', iv: toOwnedArrayBuffer(ethers.getBytes(encrypted.iv)) },
       key,
       toOwnedArrayBuffer(ethers.getBytes(encrypted.ciphertext)),
     ),
   );
+  const plaintext = encrypted.compression === 'gzip'
+    ? await gunzipBytes(encryptedPlaintext)
+    : encryptedPlaintext;
   const parsed = deserializeTaggedJson<RuntimeRecoveryBundleV1>(decoder.decode(plaintext));
   const validated = validateRuntimeRecoveryBundle(parsed);
   const bundleHash = computeRuntimeRecoveryBundleHash(validated);

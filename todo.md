@@ -1,6 +1,6 @@
 # XLN TODO
 
-Last updated: 2026-05-29
+Last updated: 2026-06-13
 
 This is the only live TODO/NEXT file for the repository. Older planning notes
 under `docs/archive/` are historical evidence, not active backlog. When this
@@ -27,6 +27,18 @@ file and older docs disagree, prefer code and tests first, then this file.
 - Confirmed in the `0.1.5` release pass: `bun run gate:ci`,
   `bun run test:e2e:full`, `bun run test:e2e:prod:payment`, and
   `bun run prod:health` passed.
+- Closed RPC J-replica state commitment placeholder: RPC/external
+  jurisdictions now expose an explicit unavailable root instead of fake zero
+  bytes; BrowserVM replicas must provide a real captured root.
+- Closed destructive reset guardrails: mesh `/api/reset` now requires explicit
+  destructive confirmation and token protection for public binds; browser
+  `/resetdb` requires a nonce-cookie handshake, and restore/version failures no
+  longer wipe local client state automatically.
+- Closed persistence inspect/repair operator path: `bun run debug:persistence`
+  inspects frame DB, snapshots, WAL tail, recovery bundles, and tower receipts;
+  `--strict` turns warnings/critical findings into non-zero exit codes, and the
+  command is inspect-only with explicit repair guidance instead of automatic
+  persistence mutation.
 
 ## P0 - Release And Mainnet Readiness
 
@@ -79,18 +91,6 @@ file and older docs disagree, prefer code and tests first, then this file.
 5. **Contract governance/access-control scan.**
    - Re-run a current pass over `EntityProvider`/`Depository` for permission
      checks, gas bounds, and public debug surfaces before external audit.
-
-6. **RPC state commitment quality.**
-   - Replace placeholder RPC `stateRoot` output with useful J-state commitment
-     data or fail explicitly until it exists.
-
-7. **Persistence inspect and repair tooling.**
-   - Add operator commands to inspect frame DB, snapshots, WAL, tower receipts,
-     and recovery bundle coverage.
-
-8. **Destructive action guardrails.**
-   - Keep `clearDB`, reset, and dev-only actions gated so normal users cannot
-     accidentally erase recoverable state.
 
 ## P2 - Product And UI
 

@@ -21,6 +21,7 @@ import { validateEntityState } from './validation-utils';
 import { safeStringify } from './serialization-utils';
 import { isLeftEntity } from './entity-id-utils';
 import { getAccountFrameHistoryView, setAccountFrameHistoryView } from './env-events';
+import { getCachedSignerPrivateKey } from './account-crypto';
 import { cloneJBatch, type CompletedBatch, type JBatchState } from './j-batch';
 import {
   cloneCrossJurisdictionBookAdmission,
@@ -49,6 +50,17 @@ const cloneCrossJurisdictionRoutesInState = (state: EntityState): void => {
       Array.from(state.crossJurisdictionSwaps.entries()).map(([id, route]) => [
         id,
         cloneCrossJurisdictionRoute(route),
+      ]),
+    );
+  }
+  if (state.pendingCrossJurisdictionFillAcks) {
+    state.pendingCrossJurisdictionFillAcks = new Map(
+      Array.from(state.pendingCrossJurisdictionFillAcks.entries()).map(([id, pending]) => [
+        id,
+        {
+          ...pending,
+          tx: cloneCrossJurisdictionAccountTxRoute(pending.tx) as typeof pending.tx,
+        },
       ]),
     );
   }
@@ -231,24 +243,29 @@ export function emitScopedEvents(
 
 /**
  * Resolve the proposer signerId for a given entity.
- * Prefers local proposer replica, then local config validators[0], then gossip board[0].
+ * Prefers local proposer replica, then exact local replica signer, then local
+ * config validators[0], then gossip board[0].
  * Throws if no signer can be resolved (fail early).
  */
 export function resolveEntityProposerId(env: Env, entityId: string, context: string): string {
   const targetEntityId = String(entityId || '').toLowerCase();
-  let fallback: string | null = null;
+  let localKeyReplicaFallback: string | null = null;
+  let configFallback: string | null = null;
+  let gossipFallback: string | null = null;
 
   for (const [replicaKey, replica] of env.eReplicas.entries()) {
     const keyParts = String(replicaKey).split(':');
     const keyEntityId = String(keyParts[0] || '').toLowerCase();
     const replicaEntityId = String(replica.entityId || '').toLowerCase();
     if (replicaEntityId !== targetEntityId && keyEntityId !== targetEntityId) continue;
-    if (replica.isProposer) return replica.signerId;
-    if (!fallback) {
-      fallback =
-        replica.state.config.validators[0] ||
-        replica.signerId ||
-        (keyParts[1] ? String(keyParts[1]) : null);
+    const replicaSignerId = String(replica.signerId || keyParts[1] || '').trim();
+    const configuredValidators = replica.state.config.validators || [];
+    if (replica.isProposer && replicaSignerId && getCachedSignerPrivateKey(replicaSignerId)) return replicaSignerId;
+    if (!localKeyReplicaFallback && replicaSignerId && getCachedSignerPrivateKey(replicaSignerId)) {
+      localKeyReplicaFallback = replicaSignerId;
+    }
+    if (!configFallback) {
+      configFallback = configuredValidators[0] || null;
     }
   }
 
@@ -259,12 +276,14 @@ export function resolveEntityProposerId(env: Env, entityId: string, context: str
     const board = profile?.metadata.board;
     if (board && Array.isArray(board.validators) && board.validators.length > 0) {
       const first = board.validators[0];
-      if (first?.signerId) return first.signerId;
-      if (first?.signer) return first.signer;
+      gossipFallback = first?.signerId || first?.signer || null;
     }
   }
 
-  if (fallback) return fallback;
+  if (gossipFallback) return gossipFallback;
+  if (configFallback && (!localKeyReplicaFallback || getCachedSignerPrivateKey(configFallback))) return configFallback;
+  if (localKeyReplicaFallback) return localKeyReplicaFallback;
+  if (configFallback) return configFallback;
 
   throw new Error(`SIGNER_RESOLUTION_FAILED: ${context} entityId=${entityId}`);
 }
@@ -510,6 +529,19 @@ function manualCloneEntityState(entityState: EntityState, forSnapshot: boolean =
       : {}),
     ...(entityState.crossJurisdictionSwaps
       ? { crossJurisdictionSwaps: new Map(Array.from(entityState.crossJurisdictionSwaps.entries()).map(([id, route]) => [id, cloneCrossJurisdictionRoute(route)])) }
+      : {}),
+    ...(entityState.pendingCrossJurisdictionFillAcks
+      ? {
+          pendingCrossJurisdictionFillAcks: new Map(
+            Array.from(entityState.pendingCrossJurisdictionFillAcks.entries()).map(([id, pending]) => [
+              id,
+              {
+                ...pending,
+                tx: cloneCrossJurisdictionAccountTxRoute(pending.tx) as typeof pending.tx,
+              },
+            ]),
+          ),
+        }
       : {}),
     ...(entityState.crossJurisdictionBookAdmissions
       ? { crossJurisdictionBookAdmissions: new Map(Array.from(entityState.crossJurisdictionBookAdmissions.entries()).map(([id, admission]) => [id, cloneCrossJurisdictionBookAdmission(admission)])) }

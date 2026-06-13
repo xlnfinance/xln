@@ -183,6 +183,18 @@ const routeJurisdictionMatchesLocal = (
   return Boolean(localKey && routeKey && localKey === routeKey);
 };
 
+const routeSignerHintForLocalEntity = (
+  state: EntityState,
+  route: CrossJurisdictionSwapRoute,
+): string | null => {
+  const local = normalizeEntityRef(state.entityId);
+  if (normalizeEntityRef(route.source.entityId) === local) return normalizeAddress(route.sourceSignerId);
+  if (normalizeEntityRef(route.source.counterpartyEntityId) === local) return normalizeAddress(route.sourceHubSignerId);
+  if (normalizeEntityRef(route.target.entityId) === local) return normalizeAddress(route.targetHubSignerId);
+  if (normalizeEntityRef(route.target.counterpartyEntityId) === local) return normalizeAddress(route.targetSignerId);
+  return null;
+};
+
 export const validateCrossJurisdictionLocalBinding = (
   env: Env,
   state: EntityState,
@@ -206,6 +218,13 @@ export const validateCrossJurisdictionLocalBinding = (
   if (!isJurisdictionStackRef(expected)) return `route jurisdiction must be stack ref, got ${expected}`;
   if (!routeJurisdictionMatchesLocal(env, state, expected)) {
     return `route jurisdiction ${expected} does not match local jurisdiction ${state.config.jurisdiction.name}`;
+  }
+  const signerHint = routeSignerHintForLocalEntity(state, route);
+  if (signerHint) {
+    const validators = new Set((state.config.validators || []).map(normalizeAddress).filter(Boolean));
+    if (validators.size > 0 && !validators.has(signerHint)) {
+      return `route signer ${signerHint} is not a validator for local entity`;
+    }
   }
   return null;
 };

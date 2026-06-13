@@ -118,13 +118,63 @@ async function isAccountReady(
       }).isolatedEnv;
       if (!env?.eReplicas) return false;
 
+      const normalizeEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
+      const resolveCounterpartyAccount = (
+        accounts: Map<string, {
+          deltas?: Map<number, unknown>;
+          pendingFrame?: unknown;
+          currentHeight?: number;
+          currentFrame?: { height?: number };
+          leftEntity?: string;
+          rightEntity?: string;
+          counterpartyEntityId?: string;
+          proofHeader?: { fromEntity?: string; toEntity?: string };
+        }>,
+        ownerEntityId: string,
+        counterpartyEntityId: string,
+      ) => {
+        const owner = normalizeEntityId(ownerEntityId);
+        const target = normalizeEntityId(counterpartyEntityId);
+        const accountBelongsToPair = (account: {
+          leftEntity?: string;
+          rightEntity?: string;
+          counterpartyEntityId?: string;
+          proofHeader?: { fromEntity?: string; toEntity?: string };
+        } | null | undefined): boolean => {
+          if (!account) return false;
+          const proofFrom = normalizeEntityId(account.proofHeader?.fromEntity);
+          const proofTo = normalizeEntityId(account.proofHeader?.toEntity);
+          if (proofFrom || proofTo) return proofFrom === owner && proofTo === target;
+          const left = normalizeEntityId(account.leftEntity);
+          const right = normalizeEntityId(account.rightEntity);
+          if (left && right) {
+            return (left === owner && right === target) || (left === target && right === owner);
+          }
+          const counterparty = normalizeEntityId(account.counterpartyEntityId);
+          return !counterparty || counterparty === target;
+        };
+        const direct = accounts.get(target) ?? accounts.get(String(counterpartyEntityId || ''));
+        if (accountBelongsToPair(direct)) return direct;
+        for (const [accountKey, account] of accounts.entries()) {
+          if (normalizeEntityId(accountKey) === target && accountBelongsToPair(account)) return account;
+          const left = normalizeEntityId(account.leftEntity);
+          const right = normalizeEntityId(account.rightEntity);
+          if ((left === owner && right === target) || (right === owner && left === target)) return account;
+          if (accountBelongsToPair(account)) return account;
+        }
+        return null;
+      };
+
       const startedAt = Date.now();
 	      while (Date.now() - startedAt <= timeoutMs) {
 	        for (const [replicaKey, replica] of env.eReplicas.entries()) {
 	          const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
 	          if (String(replicaEntityId || '').toLowerCase() !== String(entityId || '').toLowerCase()) continue;
 	          if (String(replicaSignerId || '').toLowerCase() !== String(signerId || '').toLowerCase()) continue;
-	          const account = replica.state?.accounts?.get(hubId);
+	          const accounts = replica.state?.accounts;
+	          const account = accounts instanceof Map
+	            ? resolveCounterpartyAccount(accounts, entityId, hubId)
+	            : null;
 	          if (!account) continue;
 	          const hasDelta = tokenIds.every((tokenId) => {
 	            if (!(account.deltas instanceof Map)) return false;
@@ -320,6 +370,7 @@ async function ensureHubCardVisible(page: Page, hubId: string): Promise<void> {
 
 async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
   await ensureHubCardVisible(page, hubId);
+  await waitForHubRuntimeTransportReady(page, hubId);
   if (await hasRenderedCommittedAccountCard(page, hubId)) return;
 
   const panel = page.locator('.hub-panel').first();
@@ -333,7 +384,160 @@ async function connectHubThroughUi(page: Page, hubId: string): Promise<void> {
   if (await hasRenderedCommittedAccountCard(page, hubId)) return;
 
   const openState = hubCard.locator('.connection-state').filter({ hasText: /^Open$/i }).first();
-  await expect(openState, `hub ${hubId} must expose Connect or already be Open`).toBeVisible({ timeout: 5_000 });
+  if (await openState.isVisible().catch(() => false)) return;
+
+  const openingState = hubCard.locator('.connection-state').filter({ hasText: /^Opening$/i }).first();
+  if (await openingState.isVisible().catch(() => false)) {
+    return;
+  }
+
+  await expect(openState, `hub ${hubId} must expose Connect, Opening, or already be Open`).toBeVisible({ timeout: 5_000 });
+}
+
+async function waitForHubRuntimeProfile(page: Page, hubId: string, timeoutMs = 20_000): Promise<void> {
+  await expect
+    .poll(
+      async () => page.evaluate((targetHubId) => {
+        const env = (window as typeof window & {
+          isolatedEnv?: {
+            gossip?: { getProfiles?: () => Array<{ entityId?: string; runtimeId?: string }> };
+            runtimeState?: { p2p?: { ensureProfiles?: (ids: string[]) => Promise<boolean> } };
+          };
+        }).isolatedEnv;
+        const target = String(targetHubId || '').toLowerCase();
+        const profile = env?.gossip?.getProfiles?.().find((candidate) =>
+          String(candidate?.entityId || '').toLowerCase() === target,
+        );
+        if (String(profile?.runtimeId || '').trim()) return true;
+        void env?.runtimeState?.p2p?.ensureProfiles?.([target]);
+        return false;
+      }, hubId),
+      {
+        timeout: timeoutMs,
+        intervals: [100, 250, 500],
+        message: `hub ${hubId.slice(0, 10)} must have a gossip runtime route before connect`,
+      },
+    )
+    .toBe(true);
+}
+
+async function waitForHubRuntimeTransportReady(page: Page, hubId: string, timeoutMs = 30_000): Promise<void> {
+  await waitForHubRuntimeProfile(page, hubId, timeoutMs);
+  let lastStatus: unknown = null;
+  try {
+    await expect
+      .poll(
+      async () => page.evaluate(async (targetHubId) => {
+        const env = (window as typeof window & {
+          isolatedEnv?: {
+            gossip?: {
+              getProfiles?: () => Array<{ entityId?: string; runtimeId?: string; wsUrl?: string | null }>;
+            };
+            runtimeState?: {
+              p2p?: {
+                isConnected?: () => boolean;
+                connect?: () => void;
+                reconnect?: () => void;
+                ensureProfiles?: (ids: string[]) => Promise<boolean>;
+                getDirectPeerState?: () => Array<{ runtimeId: string; endpoint: string; open: boolean; lastError?: string; lastErrorAt?: number }>;
+                ensureDirectClientForRuntime?: (runtimeId: string) => void;
+                syncDirectPeerConnections?: () => void;
+              };
+            };
+          };
+        }).isolatedEnv;
+        const target = String(targetHubId || '').toLowerCase();
+        const p2p = env?.runtimeState?.p2p;
+        const profile = env?.gossip?.getProfiles?.().find((candidate) =>
+          String(candidate?.entityId || '').toLowerCase() === target,
+        );
+        const runtimeId = String(profile?.runtimeId || '').trim().toLowerCase();
+        if (!p2p || !runtimeId) {
+          await p2p?.ensureProfiles?.([target]).catch(() => false);
+          return { ok: false, reason: 'missing-profile-or-p2p', runtimeId };
+        }
+
+        const relayConnected = typeof p2p.isConnected === 'function' && p2p.isConnected();
+        if (!relayConnected) {
+          if (typeof p2p.connect === 'function') {
+            try { p2p.connect(); } catch {}
+          } else if (typeof p2p.reconnect === 'function') {
+            try { p2p.reconnect(); } catch {}
+          }
+        }
+
+        const directEndpoint = String(profile?.wsUrl || '').trim();
+        const directAllowed = (() => {
+          if (!directEndpoint) return false;
+          if (String(window.location?.protocol || '').toLowerCase() !== 'https:') return true;
+          try {
+            const parsed = new URL(directEndpoint);
+            if (parsed.protocol === 'wss:') return true;
+            if (parsed.protocol !== 'ws:') return false;
+            const host = String(parsed.hostname || '').toLowerCase();
+            return host === 'localhost' || host === '127.0.0.1' || host === '::1' || host === '[::1]';
+          } catch {
+            return false;
+          }
+        })();
+        if (directAllowed) {
+          try { p2p.ensureDirectClientForRuntime?.(runtimeId); } catch {}
+          try { p2p.syncDirectPeerConnections?.(); } catch {}
+          const directPeers = typeof p2p.getDirectPeerState === 'function'
+            ? p2p.getDirectPeerState()
+            : [];
+          const peer = directPeers.find((entry) => String(entry.runtimeId || '').toLowerCase() === runtimeId);
+          return {
+            ok: peer?.open === true,
+            reason: peer?.open === true ? 'direct-open' : 'direct-not-open',
+            runtimeId,
+            directEndpoint,
+            directAllowed,
+            relayConnected,
+            directPeers,
+          };
+        }
+
+        const relayClients = await fetch('/api/clients', { cache: 'no-store' })
+          .then((response) => response.ok ? response.json() : null)
+          .catch(() => null) as { clients?: string[] } | null;
+        const relayTargetConnected = Array.isArray(relayClients?.clients)
+          && relayClients.clients.some((clientRuntimeId) => String(clientRuntimeId || '').toLowerCase() === runtimeId);
+        return {
+          ok: relayConnected && relayTargetConnected,
+          reason: relayConnected
+            ? relayTargetConnected ? 'relay-target-open' : 'relay-target-not-open'
+            : 'relay-not-open',
+          runtimeId,
+          directEndpoint,
+          directAllowed,
+          relayConnected,
+          relayTargetConnected,
+          relayClients: relayClients?.clients || [],
+          directPeers: typeof p2p.getDirectPeerState === 'function' ? p2p.getDirectPeerState() : [],
+        };
+      }, hubId).then((status) => {
+        lastStatus = status;
+        return Boolean(status.ok);
+      }),
+      {
+        timeout: timeoutMs,
+        intervals: [100, 250, 500],
+        message: `hub ${hubId.slice(0, 10)} transport route must be open before account tx`,
+      },
+      )
+      .toBe(true);
+  } catch (error) {
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}\n` +
+      `lastTransportStatus=${stringifyDebug(lastStatus)}`,
+    );
+  }
+
+  expect(
+    Boolean((lastStatus as { ok?: boolean } | null)?.ok),
+    `hub transport route not ready: ${stringifyDebug(lastStatus)}`,
+  ).toBe(true);
 }
 
 async function enqueueOpenAccount(
@@ -342,6 +546,7 @@ async function enqueueOpenAccount(
   signerId: string,
   hubId: string,
 ): Promise<void> {
+  await waitForHubRuntimeTransportReady(page, hubId);
   await enqueueEntityTxs(page, entityId, signerId, [{
     type: 'openAccount',
     data: {
@@ -407,6 +612,12 @@ async function extendCreditToken(
   tokenId: number,
   amountDisplay: string,
 ): Promise<void> {
+  await waitForHubRuntimeTransportReady(page, hubId);
+  await assertNoLocalHubDivergence(page, identity, hubId, [tokenId], `extendCredit token=${tokenId}`);
+  const hubBaseStatus = await readHubAccountStatus(page, identity.entityId, hubId, [1]);
+  if (!hubBaseStatus.hasAccount || !hubBaseStatus.ready) {
+    await waitForHubBaseAccountReady(page, identity, hubId, `extendCredit token=${tokenId}`);
+  }
   const amount = BigInt(amountDisplay) * 10n ** 18n;
   await enqueueEntityTxs(page, identity.entityId, identity.signerId, [{
     type: 'extendCredit',
@@ -417,16 +628,40 @@ async function extendCreditToken(
     },
   }]);
 
-  await expect.poll(
-    async () => {
-      return await isAccountReady(page, identity.entityId, identity.signerId, hubId, [tokenId], 0);
-    },
-    {
-      timeout: DEFAULT_OPEN_TIMEOUT_MS,
-      intervals: [250, 500, 750],
-      message: `extendCredit should activate token ${tokenId} for ${hubId.slice(0, 10)}`,
-    },
-  ).toBe(true);
+  try {
+    await expect.poll(
+      async () => {
+        return await isAccountReady(page, identity.entityId, identity.signerId, hubId, [tokenId], 0);
+      },
+      {
+        timeout: DEFAULT_OPEN_TIMEOUT_MS,
+        intervals: [250, 500, 750],
+        message: `extendCredit should activate token ${tokenId} for ${hubId.slice(0, 10)}`,
+      },
+    ).toBe(true);
+  } catch (error) {
+    const [localStatus, hubStatus, debugState, relayDebug] = await Promise.all([
+      getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId).catch((statusError) => ({
+        error: statusError instanceof Error ? statusError.message : String(statusError),
+      })),
+      readHubAccountStatus(page, identity.entityId, hubId, [tokenId]).catch((statusError) => ({
+        error: statusError instanceof Error ? statusError.message : String(statusError),
+      })),
+      getConnectDebugState(page, identity, hubId).catch((debugError) => ({
+        error: debugError instanceof Error ? debugError.message : String(debugError),
+      })),
+      readRelayDebugEvents(page, 20).catch((debugError) => ({
+        error: debugError instanceof Error ? debugError.message : String(debugError),
+      })),
+    ]);
+    throw new Error(
+      `${error instanceof Error ? error.message : String(error)}\n` +
+      `localStatus=${stringifyDebug(localStatus)}\n` +
+      `hubStatus=${stringifyDebug(hubStatus)}\n` +
+      `connectDebug=${stringifyDebug(debugState)}\n` +
+      `relayDebug=${stringifyDebug(relayDebug)}`,
+    );
+  }
 }
 
 type AccountOpenStatus = {
@@ -435,6 +670,102 @@ type AccountOpenStatus = {
   pendingHeight: number | null;
   currentHeight: number;
 };
+
+type HubAccountStatus = {
+  success?: boolean;
+  hasAccount?: boolean;
+  ready?: boolean;
+  currentHeight?: number;
+  pendingFrameHeight?: number | null;
+  mempool?: number;
+  runtime?: {
+    halted?: boolean;
+    fatalDebugPayload?: unknown;
+  };
+  tokens?: Array<{
+    tokenId?: number;
+    hasDelta?: boolean;
+    hubOutCapacity?: string;
+  }>;
+  directInput?: {
+    lastSeen?: {
+      at?: number;
+      fromRuntimeId?: string;
+      entityId?: string;
+      signerId?: string;
+      txTypes?: string[];
+    } | null;
+    lastError?: {
+      at?: number;
+      fromRuntimeId?: string;
+      entityId?: string;
+      signerId?: string;
+      txTypes?: string[];
+      error?: string;
+    } | null;
+  };
+  code?: string;
+  error?: string;
+};
+
+async function assertNoLocalHubDivergence(
+  page: Page,
+  identity: { entityId: string; signerId: string },
+  hubId: string,
+  tokenIds: readonly number[],
+  context: string,
+): Promise<void> {
+  const [localStatus, hubStatus] = await Promise.all([
+    getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId),
+    readHubAccountStatus(page, identity.entityId, hubId, tokenIds).catch((error) => ({
+      success: false,
+      error: error instanceof Error ? error.message : String(error),
+    } satisfies HubAccountStatus)),
+  ]);
+
+  if (hubStatus.runtime?.halted) {
+    throw new Error(
+      `${context}: HUB_RUNTIME_HALTED before sending account tx\n` +
+      `localStatus=${stringifyDebug(localStatus)}\n` +
+      `hubStatus=${stringifyDebug(hubStatus)}`,
+    );
+  }
+
+}
+
+async function waitForHubBaseAccountReady(
+  page: Page,
+  identity: { entityId: string; signerId: string },
+  hubId: string,
+  context: string,
+): Promise<void> {
+  try {
+    await waitForHubAccountReady(page, identity.entityId, hubId, [1]);
+  } catch (error) {
+    const [localStatus, hubStatus, debugState, relayDebug] = await Promise.all([
+      getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId).catch((statusError) => ({
+        error: statusError instanceof Error ? statusError.message : String(statusError),
+      })),
+      readHubAccountStatus(page, identity.entityId, hubId, [1]).catch((statusError) => ({
+        error: statusError instanceof Error ? statusError.message : String(statusError),
+      })),
+      getConnectDebugState(page, identity, hubId).catch((debugError) => ({
+        error: debugError instanceof Error ? debugError.message : String(debugError),
+      })),
+      readRelayDebugEvents(page, 20).catch((debugError) => ({
+        error: debugError instanceof Error ? debugError.message : String(debugError),
+      })),
+    ]);
+    throw new Error(
+      `${context}: hub-side base account did not commit before next account tx\n` +
+      `${error instanceof Error ? error.message : String(error)}\n` +
+      `localStatus=${stringifyDebug(localStatus)}\n` +
+      `hubStatus=${stringifyDebug(hubStatus)}\n` +
+      `connectDebug=${stringifyDebug(debugState)}\n` +
+      `relayDebug=${stringifyDebug(relayDebug)}`,
+    );
+  }
+}
 
 async function getAccountOpenStatus(
   page: Page,
@@ -461,11 +792,61 @@ async function getAccountOpenStatus(
         return { exists: false, hasDelta: false, pendingHeight: null, currentHeight: 0 };
       }
 
+      const normalizeEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
+      const resolveCounterpartyAccount = (
+        accounts: Map<string, {
+          deltas?: Map<number, unknown>;
+          pendingFrame?: { height?: number };
+          currentHeight?: number;
+          currentFrame?: { height?: number };
+          leftEntity?: string;
+          rightEntity?: string;
+          counterpartyEntityId?: string;
+          proofHeader?: { fromEntity?: string; toEntity?: string };
+        }>,
+        ownerEntityId: string,
+        counterpartyEntityId: string,
+      ) => {
+        const owner = normalizeEntityId(ownerEntityId);
+        const target = normalizeEntityId(counterpartyEntityId);
+        const accountBelongsToPair = (account: {
+          leftEntity?: string;
+          rightEntity?: string;
+          counterpartyEntityId?: string;
+          proofHeader?: { fromEntity?: string; toEntity?: string };
+        } | null | undefined): boolean => {
+          if (!account) return false;
+          const proofFrom = normalizeEntityId(account.proofHeader?.fromEntity);
+          const proofTo = normalizeEntityId(account.proofHeader?.toEntity);
+          if (proofFrom || proofTo) return proofFrom === owner && proofTo === target;
+          const left = normalizeEntityId(account.leftEntity);
+          const right = normalizeEntityId(account.rightEntity);
+          if (left && right) {
+            return (left === owner && right === target) || (left === target && right === owner);
+          }
+          const counterparty = normalizeEntityId(account.counterpartyEntityId);
+          return !counterparty || counterparty === target;
+        };
+        const direct = accounts.get(target) ?? accounts.get(String(counterpartyEntityId || ''));
+        if (accountBelongsToPair(direct)) return direct;
+        for (const [accountKey, account] of accounts.entries()) {
+          if (normalizeEntityId(accountKey) === target && accountBelongsToPair(account)) return account;
+          const left = normalizeEntityId(account.leftEntity);
+          const right = normalizeEntityId(account.rightEntity);
+          if ((left === owner && right === target) || (right === owner && left === target)) return account;
+          if (accountBelongsToPair(account)) return account;
+        }
+        return null;
+      };
+
       for (const [replicaKey, replica] of env.eReplicas.entries()) {
         const [replicaEntityId, replicaSignerId] = String(replicaKey).split(':');
         if (String(replicaEntityId || '').toLowerCase() !== String(entityId || '').toLowerCase()) continue;
         if (String(replicaSignerId || '').toLowerCase() !== String(signerId || '').toLowerCase()) continue;
-	        const account = replica.state?.accounts?.get(hubId);
+	        const accounts = replica.state?.accounts;
+	        const account = accounts instanceof Map
+	          ? resolveCounterpartyAccount(accounts, entityId, hubId)
+	          : null;
 	        if (!account) continue;
 	        const hasTokenOneDelta = (() => {
 	          if (!(account.deltas instanceof Map)) return false;
@@ -511,10 +892,66 @@ async function getConnectDebugState(
           };
         }>;
         gossip?: { getProfiles?: () => Array<{ entityId?: string; runtimeId?: string; metadata?: unknown }> };
+        runtimeState?: {
+          p2p?: {
+            getDirectPeerState?: () => Array<{ runtimeId: string; endpoint: string; open: boolean; lastError?: string; lastErrorAt?: number }>;
+            getQueueState?: () => unknown;
+            getReconnectState?: () => unknown;
+            isConnected?: () => boolean;
+          };
+        };
       };
     }).isolatedEnv;
+    const normalizeEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
+    const resolveCounterpartyAccount = (
+      accounts: Map<string, {
+	        currentHeight?: number;
+	        pendingFrame?: { height?: number };
+	        mempool?: Array<{ type?: string }>;
+	        leftEntity?: string;
+	        rightEntity?: string;
+	        counterpartyEntityId?: string;
+	        proofHeader?: { fromEntity?: string; toEntity?: string };
+	      }>,
+	      ownerEntityId: string,
+	      counterpartyEntityId: string,
+	    ) => {
+	      const owner = normalizeEntityId(ownerEntityId);
+	      const target = normalizeEntityId(counterpartyEntityId);
+	      const accountBelongsToPair = (account: {
+	        leftEntity?: string;
+	        rightEntity?: string;
+	        counterpartyEntityId?: string;
+	        proofHeader?: { fromEntity?: string; toEntity?: string };
+	      } | null | undefined): boolean => {
+	        if (!account) return false;
+	        const proofFrom = normalizeEntityId(account.proofHeader?.fromEntity);
+	        const proofTo = normalizeEntityId(account.proofHeader?.toEntity);
+	        if (proofFrom || proofTo) return proofFrom === owner && proofTo === target;
+	        const left = normalizeEntityId(account.leftEntity);
+	        const right = normalizeEntityId(account.rightEntity);
+	        if (left && right) {
+	          return (left === owner && right === target) || (left === target && right === owner);
+	        }
+	        const counterparty = normalizeEntityId(account.counterpartyEntityId);
+	        return !counterparty || counterparty === target;
+	      };
+	      const direct = accounts.get(target) ?? accounts.get(String(counterpartyEntityId || ''));
+	      if (accountBelongsToPair(direct)) return direct;
+	      for (const [accountKey, account] of accounts.entries()) {
+	        if (normalizeEntityId(accountKey) === target && accountBelongsToPair(account)) return account;
+	        const left = normalizeEntityId(account.leftEntity);
+	        const right = normalizeEntityId(account.rightEntity);
+	        if ((left === owner && right === target) || (right === owner && left === target)) return account;
+	        if (accountBelongsToPair(account)) return account;
+	      }
+	      return null;
+	    };
     const replica = env?.eReplicas?.get(`${identity.entityId}:${identity.signerId}`.toLowerCase());
-    const account = replica?.state?.accounts?.get(hubId);
+    const accounts = replica?.state?.accounts;
+    const account = accounts instanceof Map
+      ? resolveCounterpartyAccount(accounts, identity.entityId, hubId)
+      : null;
     const profile = env?.gossip?.getProfiles?.().find((candidate) =>
       String(candidate?.entityId || '').toLowerCase() === String(hubId || '').toLowerCase(),
     );
@@ -526,11 +963,21 @@ async function getConnectDebugState(
     return {
       height: env?.height,
       timestamp: env?.timestamp,
-      account: account ? {
-        currentHeight: Number(account.currentHeight || 0),
-        pendingHeight: account.pendingFrame ? Number(account.pendingFrame.height || 0) : null,
-        mempool: (account.mempool || []).map((tx) => tx.type),
-      } : null,
+      p2p: {
+        connected: env?.runtimeState?.p2p?.isConnected?.() ?? null,
+        directPeers: env?.runtimeState?.p2p?.getDirectPeerState?.() ?? null,
+        queue: env?.runtimeState?.p2p?.getQueueState?.() ?? null,
+        reconnect: env?.runtimeState?.p2p?.getReconnectState?.() ?? null,
+      },
+	      account: account ? {
+	        currentHeight: Number(account.currentHeight || 0),
+	        pendingHeight: account.pendingFrame ? Number(account.pendingFrame.height || 0) : null,
+	        mempool: (account.mempool || []).map((tx) => tx.type),
+	        leftEntity: String(account.leftEntity || ''),
+	        rightEntity: String(account.rightEntity || ''),
+	        proofFrom: String(account.proofHeader?.fromEntity || ''),
+	        proofTo: String(account.proofHeader?.toEntity || ''),
+	      } : null,
       runtimeInput: summarizeInputs(env?.runtimeInput?.entityInputs),
       runtimeMempool: summarizeInputs(env?.runtimeMempool?.entityInputs),
       hubProfile: profile ? {
@@ -540,6 +987,70 @@ async function getConnectDebugState(
       recentMessages: (replica?.state?.messages || []).slice(-8),
     };
   }, { identity, hubId });
+}
+
+async function readRelayDebugEvents(page: Page, last = 20): Promise<unknown> {
+  const origin = new URL(page.url()).origin;
+  const url = new URL('/api/debug/events', origin);
+  url.searchParams.set('last', String(last));
+  const response = await page.request.get(url.toString());
+  const body = await response.json().catch(() => ({}));
+  return {
+    ok: response.ok(),
+    status: response.status(),
+    body,
+  };
+}
+
+async function readHubAccountStatus(
+  page: Page,
+  userEntityId: string,
+  hubId: string,
+  tokenIds: readonly number[],
+): Promise<HubAccountStatus> {
+  const origin = new URL(page.url()).origin;
+  const url = new URL('/api/hub/account-status', origin);
+  url.searchParams.set('hubEntityId', hubId);
+  url.searchParams.set('counterpartyEntityId', userEntityId);
+  if (tokenIds.length > 0) {
+    url.searchParams.set('tokenIds', tokenIds.join(','));
+  }
+  const response = await page.request.get(url.toString());
+  const body = await response.json().catch(() => ({} as HubAccountStatus));
+  return {
+    ...body,
+    success: response.ok() && body.success !== false,
+  };
+}
+
+async function waitForHubAccountReady(
+  page: Page,
+  userEntityId: string,
+  hubId: string,
+  tokenIds: readonly number[],
+): Promise<void> {
+  let lastStatus: HubAccountStatus = { error: 'not-run' };
+  await expect.poll(
+    async () => {
+      lastStatus = await readHubAccountStatus(page, userEntityId, hubId, tokenIds);
+      const tokens = Array.isArray(lastStatus.tokens) ? lastStatus.tokens : [];
+      const tokenReady = tokenIds.every(tokenId => {
+        const token = tokens.find(entry => Number(entry.tokenId) === Number(tokenId));
+        return Boolean(token?.hasDelta) && BigInt(String(token?.hubOutCapacity || '0')) > 0n;
+      });
+      return Boolean(lastStatus.success && lastStatus.hasAccount && lastStatus.ready && tokenReady);
+    },
+    {
+      timeout: DEFAULT_OPEN_TIMEOUT_MS,
+      intervals: [250, 500, 750],
+      message: `hub-side account ${hubId.slice(0, 10)} must be ready for ${userEntityId.slice(0, 10)}`,
+    },
+  ).toBe(true);
+
+  expect(
+    lastStatus.ready,
+    `hub-side account not ready: ${stringifyDebug(lastStatus)}`,
+  ).toBe(true);
 }
 
 async function hasExportedRuntimeEnv(page: Page): Promise<boolean> {
@@ -614,10 +1125,31 @@ export async function connectRuntimeToHubWithCredit(
     ).toBe(true);
     return;
   }
-  if (await isAccountReady(page, identity.entityId, identity.signerId, hubId, tokenIds)) {
-    return;
+  const initiallyLocalReady = await isAccountReady(page, identity.entityId, identity.signerId, hubId, tokenIds);
+  if (initiallyLocalReady) {
+    const hubStatus = await readHubAccountStatus(page, identity.entityId, hubId, tokenIds);
+    const hubTokens = Array.isArray(hubStatus.tokens) ? hubStatus.tokens : [];
+    const hubReady = Boolean(
+      hubStatus.success &&
+      hubStatus.hasAccount &&
+      hubStatus.ready &&
+      tokenIds.every(tokenId => {
+        const token = hubTokens.find(entry => Number(entry.tokenId) === Number(tokenId));
+        return Boolean(token?.hasDelta) && BigInt(String(token?.hubOutCapacity || '0')) > 0n;
+      }),
+    );
+    if (hubReady) {
+      return;
+    }
   }
   const initialStatus = await getAccountOpenStatus(page, identity.entityId, identity.signerId, hubId);
+  if (initialStatus.exists && initialStatus.currentHeight > 0) {
+    await assertNoLocalHubDivergence(page, identity, hubId, tokenIds, 'connectRuntimeToHub');
+    const hubBaseStatus = await readHubAccountStatus(page, identity.entityId, hubId, [1]);
+    if (!hubBaseStatus.hasAccount || !hubBaseStatus.ready) {
+      await waitForHubBaseAccountReady(page, identity, hubId, 'connectRuntimeToHub');
+    }
+  }
 
   if (!initialStatus.exists || (initialStatus.currentHeight === 0 && !initialStatus.pendingHeight)) {
     if (canUseDefaultUiConnect) {
@@ -681,6 +1213,8 @@ export async function connectRuntimeToHubWithCredit(
     `account open must converge for ${hubId.slice(0, 10)} ` +
       `(exists=${finalStatus.exists} hasDelta=${finalStatus.hasDelta} height=${finalStatus.currentHeight} pending=${finalStatus.pendingHeight})`,
   ).toBe(true);
+
+  await waitForHubAccountReady(page, identity.entityId, hubId, tokenIds);
 }
 
 export async function connectHub(page: Page, hubId: string): Promise<void> {

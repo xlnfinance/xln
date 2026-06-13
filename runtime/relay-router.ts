@@ -556,7 +556,34 @@ export const relayRoute = async (
       }
     }
 
-    // Queue for offline client
+    if (type === 'entity_input') {
+      relayLog(`[RELAY] → rejected entity_input (target not connected)`);
+      pushDebugEvent(store, {
+        event: 'delivery',
+        from,
+        to,
+        msgType: type,
+        encrypted: msg.encrypted === true,
+        status: 'rejected',
+        reason: 'ENTITY_INPUT_TARGET_NOT_CONNECTED',
+        details: {
+          traceId,
+          ...(deliveryEntityId ? { entityId: deliveryEntityId } : {}),
+          ...(deliveryTxCount !== undefined ? { txs: deliveryTxCount } : {}),
+        },
+      });
+      send(ws, safeStringify({
+        type: 'error',
+        error: 'ENTITY_INPUT_TARGET_NOT_CONNECTED',
+        inReplyTo: id,
+        to,
+      }));
+      return;
+    }
+
+    // Queue gossip for offline clients. Financial entity_input traffic is never
+    // queued here because the sender would otherwise continue with a pending
+    // consensus frame while the target runtime never saw the input.
     const queueSize = enqueueMessage(store, toKey, msg);
     relayLog(`[RELAY] → queued (no client, queue=${queueSize})`);
     pushDebugEvent(store, {

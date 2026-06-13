@@ -1,16 +1,26 @@
 import {
-  getDefaultSwapTradingPairs,
+  buildDefaultEntitySwapPairs,
+  getTokenIdsForJurisdiction,
   getSwapPairOrientation,
 } from './account-utils';
+import type { JurisdictionConfig } from './types';
 
 type RuntimeSwapTradingPairsState = {
+  config?: {
+    jurisdiction?: JurisdictionConfig;
+  };
   swapTradingPairs?: Array<{ baseTokenId: number; quoteTokenId: number; pairId?: string }>;
 };
+
+function defaultSwapTradingPairsForState(state: RuntimeSwapTradingPairsState): Array<{ baseTokenId: number; quoteTokenId: number; pairId: string }> {
+  const tokenIds = getTokenIdsForJurisdiction(state.config?.jurisdiction);
+  return buildDefaultEntitySwapPairs(tokenIds.length > 0 ? tokenIds : undefined);
+}
 
 export function normalizeEntitySwapTradingPairs(state: RuntimeSwapTradingPairsState): void {
   const inputPairs = Array.isArray(state.swapTradingPairs) ? state.swapTradingPairs : [];
   const normalized: Array<{ baseTokenId: number; quoteTokenId: number; pairId: string }> = [];
-  const defaultPairs = getDefaultSwapTradingPairs();
+  const defaultPairs = defaultSwapTradingPairsForState(state);
   const allowedKeys = new Set(defaultPairs.map((pair) => `${pair.baseTokenId}/${pair.quoteTokenId}`));
   const seen = new Set<string>();
 

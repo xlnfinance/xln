@@ -1,6 +1,7 @@
 export {
   normalizePersistedSnapshotInPlace,
   buildRuntimeCheckpointSnapshot,
+  buildRuntimeRecoveryCheckpointSnapshot,
 } from './snapshot';
 export {
   computePersistedEnvStateHash,

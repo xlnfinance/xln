@@ -57,7 +57,6 @@ import {
   RELAY_MARKET_MAX_SUBSCRIPTIONS,
   RELAY_MARKET_MAX_SUBSCRIPTIONS_PER_IP,
   STARTUP_TIMEOUT_MS,
-  UNEXPECTED_EXIT_RESTART_MS,
   parseArgs,
 } from './orchestrator-config';
 import {
@@ -66,7 +65,14 @@ import {
   type ManagedProcessTableEntry,
 } from './managed-runtime-leases';
 import { buildPrometheusMetrics } from './prometheus';
+import { deriveHubRuntimeHealth } from './health-model';
 import { buildPublicHubDiscoveryPayload } from './public-discovery';
+import {
+  assertOrchestratorResetAllowed,
+  ORCHESTRATOR_RESET_CONFIRMATION,
+  OrchestratorResetRejectedError,
+  type OrchestratorResetBody,
+} from './reset-guard';
 import {
   deployRpc2JurisdictionStack,
   readShardJurisdictions,
@@ -273,6 +279,13 @@ const stopProcess = async (proc: ChildProcess | null): Promise<void> => {
   if (proc.exitCode === null) {
     console.warn(`[MESH] child pid=${proc.pid ?? 'unknown'} did not exit after ${CHILD_GRACEFUL_SHUTDOWN_MS}ms; sending SIGKILL`);
     proc.kill('SIGKILL');
+    const killDeadline = Date.now() + CHILD_GRACEFUL_SHUTDOWN_MS;
+    while (proc.exitCode === null && Date.now() < killDeadline) {
+      await delay(100);
+    }
+    if (proc.exitCode === null) {
+      throw new Error(`CHILD_STOP_TIMEOUT pid=${proc.pid ?? 'unknown'}`);
+    }
   }
 };
 
@@ -551,32 +564,32 @@ const reapStaleManagedChildren = async (): Promise<void> => {
   }
 };
 
-const scheduleHubRestart = (child: HubChild): void => {
-  if (resetState.inProgress || child.restartTimer) return;
-  const delayMs = Math.min(30_000, UNEXPECTED_EXIT_RESTART_MS * 2 ** Math.min(5, Math.max(0, child.restartCount - 1)));
-  child.restartTimer = setTimeout(() => {
-    child.restartTimer = null;
-    if (resetState.inProgress || (child.proc && child.proc.exitCode === null)) return;
-    console.warn(`[MESH] restarting ${child.name} after unexpected exit delayMs=${delayMs} restartCount=${child.restartCount}`);
-    void spawnHub(child).catch(error => {
-      console.error(`[MESH] failed to restart ${child.name}: ${serializeError(error)}`);
-      scheduleHubRestart(child);
-    });
-  }, delayMs);
+let fatalOrchestratorShutdownStarted = false;
+const controlledStopPids = new Set<number>();
+
+const rememberControlledStop = (proc: ChildProcess | null): void => {
+  if (typeof proc?.pid === 'number') {
+    controlledStopPids.add(proc.pid);
+  }
 };
 
-const scheduleMarketMakerRestart = (): void => {
-  if (resetState.inProgress || marketMakerChild.restartTimer) return;
-  const delayMs = Math.min(30_000, UNEXPECTED_EXIT_RESTART_MS * 2 ** Math.min(5, Math.max(0, marketMakerChild.restartCount - 1)));
-  marketMakerChild.restartTimer = setTimeout(() => {
-    marketMakerChild.restartTimer = null;
-    if (resetState.inProgress || (marketMakerChild.proc && marketMakerChild.proc.exitCode === null)) return;
-    console.warn(`[MESH] restarting MM after unexpected exit delayMs=${delayMs} restartCount=${marketMakerChild.restartCount}`);
-    void spawnMarketMaker().catch(error => {
-      console.error(`[MESH] failed to restart MM: ${serializeError(error)}`);
-      scheduleMarketMakerRestart();
-    });
-  }, delayMs);
+const consumeControlledStop = (pid: number | null | undefined): boolean => (
+  typeof pid === 'number' ? controlledStopPids.delete(pid) : false
+);
+
+const failFastUnexpectedChildExit = (message: string): void => {
+  if (resetState.inProgress || fatalOrchestratorShutdownStarted) return;
+  fatalOrchestratorShutdownStarted = true;
+  console.error(`[MESH] ${message}; shutting down instead of restarting`);
+  void (async () => {
+    try {
+      await stopAllChildren();
+    } catch (error) {
+      console.error(`[MESH] failed while stopping children after fatal exit: ${serializeError(error)}`);
+    } finally {
+      process.exit(1);
+    }
+  })();
 };
 
 const spawnHub = async (child: HubChild): Promise<void> => {
@@ -638,12 +651,16 @@ const spawnHub = async (child: HubChild): Promise<void> => {
     process.stderr.write(`[${child.name}:err] ${chunk.toString()}`);
   });
   proc.once('exit', code => {
-    managedRuntimeLeases.removeLease(spec, proc.pid ?? null);
-    child.exitedAt = Date.now();
-    child.exitCode = code;
-    if (!resetState.inProgress && code !== 0) {
-      console.error(`[MESH] ${child.name} exited unexpectedly with code=${String(code)}`);
-      scheduleHubRestart(child);
+    const pid = proc.pid ?? null;
+    const controlledStop = consumeControlledStop(pid);
+    const isCurrentProc = child.proc === proc;
+    managedRuntimeLeases.removeLease(spec, pid);
+    if (isCurrentProc) {
+      child.exitedAt = Date.now();
+      child.exitCode = code;
+    }
+    if (!controlledStop && isCurrentProc && !resetState.inProgress && code !== 0) {
+      failFastUnexpectedChildExit(`${child.name} exited unexpectedly with code=${String(code)}`);
     }
   });
 };
@@ -707,15 +724,19 @@ const spawnMarketMaker = async (): Promise<void> => {
     process.stderr.write(`[MM:err] ${chunk.toString()}`);
   });
   proc.once('exit', (code, signal) => {
-    managedRuntimeLeases.removeLease(spec, proc.pid ?? null);
-    marketMakerChild.exitedAt = Date.now();
-    marketMakerChild.exitCode = code ?? null;
-    marketMakerChild.exitSignal = signal ?? null;
-    if (!resetState.inProgress && code !== 0) {
-      console.error(
-        `[MESH] MM exited unexpectedly code=${String(code)} signal=${String(signal)} phase=${String(marketMakerChild.lastStartupPhase)}`,
+    const pid = proc.pid ?? null;
+    const controlledStop = consumeControlledStop(pid);
+    const isCurrentProc = marketMakerChild.proc === proc;
+    managedRuntimeLeases.removeLease(spec, pid);
+    if (isCurrentProc) {
+      marketMakerChild.exitedAt = Date.now();
+      marketMakerChild.exitCode = code ?? null;
+      marketMakerChild.exitSignal = signal ?? null;
+    }
+    if (!controlledStop && isCurrentProc && !resetState.inProgress && code !== 0) {
+      failFastUnexpectedChildExit(
+        `MM exited unexpectedly code=${String(code)} signal=${String(signal)} phase=${String(marketMakerChild.lastStartupPhase)}`,
       );
-      scheduleMarketMakerRestart();
     }
   });
 };
@@ -742,8 +763,14 @@ const stopAllChildren = async (): Promise<void> => {
   });
   const mmProc = marketMakerChild.proc;
   marketMakerChild.proc = null;
+  marketMakerChild.lastHealth = null;
+  marketMakerChild.lastInfo = null;
+  marketMakerChild.lastStartupPhase = null;
   const currentCustody = custodySupport;
   custodySupport = null;
+
+  for (const proc of hubProcs) rememberControlledStop(proc);
+  rememberControlledStop(mmProc);
 
   await Promise.all([
     ...hubProcs.map((proc) => stopProcess(proc)),
@@ -839,13 +866,17 @@ const computeAggregatedHealth = (): AggregatedHealth => {
     const runtimeId = String(child.lastInfo?.runtimeId || child.lastHealth?.runtimeId || '');
     const normalizedRuntimeId = normalizeRuntimeKey(runtimeId);
     const relayOnline = normalizedRuntimeId ? relayStore.clients.has(normalizedRuntimeId) : false;
-    const online = child.proc?.exitCode === null && Boolean(child.lastHealth) && relayOnline;
+    const hubRuntimeHealth = deriveHubRuntimeHealth({
+      processExitCode: child.proc?.exitCode,
+      hasHealth: Boolean(child.lastHealth),
+      hasSelfRelayPresence: relayOnline,
+    });
     return {
       entityId,
       name: child.name,
-      online,
+      online: hubRuntimeHealth.online,
       runtimeId,
-      selfRelayPresence: relayOnline,
+      selfRelayPresence: hubRuntimeHealth.selfRelayPresence,
       pid: child.proc?.pid ?? null,
       apiPort: child.apiPort,
       apiUrl: String(child.lastInfo?.apiUrl || `http://${args.host}:${child.apiPort}`),
@@ -890,7 +921,23 @@ const computeAggregatedHealth = (): AggregatedHealth => {
   }
 
   const reserveEntities = hubChildren
-    .map((child) => {
+    .flatMap((child) => {
+      const nestedEntities = child.lastHealth?.bootstrapReserves?.entities;
+      if (Array.isArray(nestedEntities) && nestedEntities.length > 0) {
+        return nestedEntities
+          .map((entity) => {
+            const entityId = String(entity.entityId || '').trim().toLowerCase();
+            if (!entityId) return null;
+            return {
+              entityId,
+              role: 'hub' as const,
+              ready: entity.ready === true,
+              targetMet: entity.targetMet === true,
+              tokens: entity.tokens ?? [],
+            };
+          })
+          .filter((value): value is NonNullable<typeof value> => value !== null);
+      }
       const entityId = String(child.lastInfo?.entityId || child.lastHealth?.entityId || '');
       if (!entityId) return null;
       return {
@@ -903,7 +950,11 @@ const computeAggregatedHealth = (): AggregatedHealth => {
     })
     .filter((value): value is NonNullable<typeof value> => value !== null);
 
-  const mmEntityId = String(marketMakerChild.lastInfo?.entityId || marketMakerChild.lastHealth?.entityId || '').trim() || null;
+  const marketMakerOnline = marketMakerChild.proc?.exitCode === null && marketMakerChild.exitCode === null && marketMakerChild.exitSignal === null;
+  const marketMakerActive = args.mmEnabled && marketMakerOnline;
+  const mmEntityId = marketMakerActive
+    ? String(marketMakerChild.lastInfo?.entityId || marketMakerChild.lastHealth?.entityId || '').trim() || null
+    : null;
   const mmExpectedOffersPerHub = Number(marketMakerChild.lastHealth?.marketMaker?.expectedOffersPerHub || 0);
   const mmHubsById = new Map<string, {
     hubEntityId: string;
@@ -924,9 +975,39 @@ const computeAggregatedHealth = (): AggregatedHealth => {
             offers: Number(pair.offers || 0),
             ready: pair.ready === true,
           }))
-        : [],
+      : [],
     });
   }
+  const rawMmCross = marketMakerChild.lastHealth?.marketMaker?.cross;
+  const mmCross = {
+    ok: rawMmCross?.ok === true,
+    expectedRoutes: Number(rawMmCross?.expectedRoutes || 0),
+    expectedOffersPerRoute: Number(rawMmCross?.expectedOffersPerRoute || 0),
+    expectedOffersPerPair: Number(rawMmCross?.expectedOffersPerPair || 0),
+    routes: Array.isArray(rawMmCross?.routes)
+      ? rawMmCross.routes.map((route) => ({
+          sourceJurisdiction: String(route.sourceJurisdiction || ''),
+          targetJurisdiction: String(route.targetJurisdiction || ''),
+          sourceHubEntityId: String(route.sourceHubEntityId || '').toLowerCase(),
+          targetHubEntityId: String(route.targetHubEntityId || '').toLowerCase(),
+          offers: Number(route.offers || 0),
+          ready: route.ready === true,
+          pairs: Array.isArray(route.pairs)
+            ? route.pairs.map((pair) => ({
+                pairId: String(pair.pairId || ''),
+                offers: Number(pair.offers || 0),
+                ready: pair.ready === true,
+                sourceTokenIds: Array.isArray(pair.sourceTokenIds)
+                  ? pair.sourceTokenIds.map(Number).filter(tokenId => Number.isFinite(tokenId) && tokenId > 0)
+                  : [],
+                targetTokenIds: Array.isArray(pair.targetTokenIds)
+                  ? pair.targetTokenIds.map(Number).filter(tokenId => Number.isFinite(tokenId) && tokenId > 0)
+                  : [],
+              }))
+            : [],
+        }))
+      : [],
+  };
   const mmHubs = hubIds.map((hubEntityId) => {
     const existing = mmHubsById.get(hubEntityId);
     return {
@@ -936,9 +1017,10 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       pairs: existing?.pairs ?? [],
     };
   });
-  const mmOk = !args.mmEnabled
+  const mmCrossReady = !marketMakerActive || (Boolean(rawMmCross) && mmCross.ok);
+  const mmOk = !marketMakerActive
     ? true
-    : mmHubs.length === HUB_NAMES.length && mmHubs.every((hub) => hub.ready);
+    : mmHubs.length === HUB_NAMES.length && mmHubs.every((hub) => hub.ready) && mmCrossReady;
   const hubMeshOk =
     hubIds.length === HUB_NAMES.length &&
     hubChildren.every((child) => child.lastHealth?.mesh?.ready === true);
@@ -947,10 +1029,10 @@ const computeAggregatedHealth = (): AggregatedHealth => {
     ? Boolean(custodySupport?.identity.entityId && custodySupport?.daemonChild.proc.exitCode === null && custodySupport?.custodyChild.proc.exitCode === null)
     : true;
   const bootstrapReservesOk =
-    reserveEntities.length === HUB_NAMES.length &&
+    reserveEntities.length >= HUB_NAMES.length &&
     reserveEntities.every((entity) => entity.ready);
   const bootstrapReserveTargetsMet =
-    reserveEntities.length === HUB_NAMES.length &&
+    reserveEntities.length >= HUB_NAMES.length &&
     reserveEntities.every((entity) => entity.targetMet);
   const coreOk = storage.ok && hubsOnline && hubMeshOk;
   const systemOk = coreOk && mmOk && custodyOk && bootstrapReservesOk;
@@ -1000,11 +1082,13 @@ const computeAggregatedHealth = (): AggregatedHealth => {
       },
     },
     marketMaker: {
-      enabled: args.mmEnabled,
+      enabled: marketMakerActive,
       ok: mmOk,
       entityId: mmEntityId,
       startupPhase: marketMakerChild.lastStartupPhase,
       expectedOffersPerHub: mmExpectedOffersPerHub,
+      expectedOffersPerPair: Number(marketMakerChild.lastHealth?.marketMaker?.expectedOffersPerPair || 0),
+      cross: mmCross,
       hubs: mmHubs,
     },
     custody: {
@@ -1026,6 +1110,97 @@ const computeAggregatedHealth = (): AggregatedHealth => {
   };
 };
 
+const countSnapshotOrders = (snapshot: MarketSnapshotPayload | undefined): number => {
+  const countSide = (levels: MarketSnapshotPayload['bids'] | undefined): number =>
+    (levels ?? []).reduce((sum, level) => {
+      const orderCount = Number(level.orderCount);
+      return sum + (Number.isFinite(orderCount) && orderCount > 0 ? Math.floor(orderCount) : 1);
+    }, 0);
+  return countSide(snapshot?.bids) + countSide(snapshot?.asks);
+};
+
+const fetchRouteMarketSnapshots = async (
+  hubEntityId: string,
+  pairIds: string[],
+): Promise<Map<string, number>> => {
+  const child = getHubChildByEntityId(hubEntityId);
+  if (!child || pairIds.length === 0) return new Map();
+  const snapshots = await fetchHubMarketSnapshots(child, hubEntityId, pairIds, 20);
+  return new Map(snapshots.map((snapshot) => [snapshot.pairId, countSnapshotOrders(snapshot)]));
+};
+
+const recomputeHealthWithMarketMaker = (
+  health: AggregatedHealth,
+  marketMaker: AggregatedHealth['marketMaker'],
+): AggregatedHealth => {
+  const systemOk = health.coreOk &&
+    marketMaker.ok === true &&
+    health.custody.ok === true &&
+    health.bootstrapReserves.ok === true;
+  const degraded = [
+    health.storage.ok ? null : 'storage',
+    health.hubs.every((hub) => hub.online) ? null : 'hubs',
+    health.hubMesh.ok ? null : 'hubMesh',
+    marketMaker.ok ? null : 'marketMaker',
+    health.custody.ok ? null : 'custody',
+    health.bootstrapReserves.ok ? null : 'bootstrapReserves',
+    health.bootstrapReserves.targetMet ? null : 'bootstrapReserveTargets',
+  ].filter((value): value is string => Boolean(value));
+  return {
+    ...health,
+    systemOk,
+    degraded,
+    marketMaker,
+  };
+};
+
+const enrichMarketMakerCrossFromHubSnapshots = async (health: AggregatedHealth): Promise<AggregatedHealth> => {
+  const cross = health.marketMaker.cross;
+  if (!args.mmEnabled || cross.routes.length === 0) return health;
+
+  const routes = await Promise.all(cross.routes.map(async (route) => {
+    const pairIds = Array.from(new Set((route.pairs ?? []).map(pair => String(pair.pairId || '')).filter(Boolean)));
+    const [sourceSnapshots, targetSnapshots] = await Promise.all([
+      fetchRouteMarketSnapshots(route.sourceHubEntityId, pairIds),
+      fetchRouteMarketSnapshots(route.targetHubEntityId, pairIds),
+    ]);
+    const pairs = (route.pairs ?? []).map((pair) => {
+      const pairId = String(pair.pairId || '');
+      const sourceOffers = sourceSnapshots.get(pairId) ?? 0;
+      const targetOffers = targetSnapshots.get(pairId) ?? 0;
+      const offers = Math.max(Number(pair.offers || 0), sourceOffers, targetOffers);
+      return {
+        ...pair,
+        offers,
+        ready: offers >= Math.max(1, health.marketMaker.cross.expectedOffersPerPair || 1),
+      };
+    });
+    const offers = pairs.reduce((sum, pair) => sum + pair.offers, 0);
+    return {
+      ...route,
+      offers,
+      ready: pairs.length > 0 &&
+        offers >= Math.max(1, cross.expectedOffersPerRoute || 1) &&
+        pairs.every(pair => pair.ready),
+      pairs,
+    };
+  }));
+  const enrichedCross = {
+    ...cross,
+    routes,
+    ok: (cross.expectedRoutes > 0 ? routes.length >= cross.expectedRoutes : routes.length > 0) &&
+      routes.every(route => route.ready),
+  };
+  const sameChainReady = !health.marketMaker.enabled ||
+    (health.marketMaker.hubs.length === HUB_NAMES.length && health.marketMaker.hubs.every(hub => hub.ready));
+  const marketMaker = {
+    ...health.marketMaker,
+    ok: !health.marketMaker.enabled || (sameChainReady && enrichedCross.ok),
+    cross: enrichedCross,
+  };
+  return recomputeHealthWithMarketMaker(health, marketMaker);
+};
+
 type CustodyMePayload = {
   custody?: {
     entityId?: string | null;
@@ -1033,7 +1208,7 @@ type CustodyMePayload = {
 };
 
 const buildAggregatedHealthResponse = async (): Promise<AggregatedHealth> => {
-  const health = computeAggregatedHealth();
+  const health = await enrichMarketMakerCrossFromHubSnapshots(computeAggregatedHealth());
   if (!health.custody.enabled || health.custody.ok || !health.custody.servicePort) {
     return health;
   }
@@ -1142,10 +1317,10 @@ const waitForMarketMakerReady = async (): Promise<void> => {
   const deadline = Date.now() + MARKET_MAKER_READY_TIMEOUT_MS;
   while (Date.now() < deadline) {
     await pollMarketMakerHealth();
-    const health = computeAggregatedHealth();
+    const health = await buildAggregatedHealthResponse();
     if (
       !args.mmEnabled ||
-      (health.marketMaker.ok && marketMakerChild.lastStartupPhase === 'offers-ready')
+      health.marketMaker.ok
     ) {
       return;
     }
@@ -1157,7 +1332,7 @@ const waitForMarketMakerReady = async (): Promise<void> => {
     await delay(250);
   }
   throw new Error(
-    `MM_READY_TIMEOUT phase=${String(marketMakerChild.lastStartupPhase)} marketMaker=${safeStringify(computeAggregatedHealth().marketMaker)}`,
+    `MM_READY_TIMEOUT phase=${String(marketMakerChild.lastStartupPhase)} marketMaker=${safeStringify((await buildAggregatedHealthResponse()).marketMaker)}`,
   );
 };
 
@@ -1195,7 +1370,7 @@ const waitForShardJurisdictions = async (child: HubChild): Promise<void> => {
   throw new Error(`${child.name}_JURISDICTIONS_TIMEOUT path=${shardJurisdictionsPath}`);
 };
 
-const runReset = async (): Promise<void> => {
+const runReset = async (options: { enableMarketMaker: boolean } = { enableMarketMaker: args.mmEnabled }): Promise<void> => {
   resetState.inProgress = true;
   resetState.lastError = null;
   resetState.startedAt = Date.now();
@@ -1245,7 +1420,8 @@ const runReset = async (): Promise<void> => {
     finishTiming('reset_wait_hubs', waitStartedAt);
 
     let marketMakerBootstrapError: unknown = null;
-    const marketMakerReady = args.mmEnabled ? (async (): Promise<void> => {
+    const shouldStartMarketMaker = args.mmEnabled && options.enableMarketMaker;
+    const marketMakerReady = shouldStartMarketMaker ? (async (): Promise<void> => {
       const marketMakerStartedAt = startTiming('reset_market_maker');
       try {
         await spawnMarketMaker();
@@ -1310,6 +1486,14 @@ const ensureReset = async (): Promise<void> => {
   });
   await resetPromise;
 };
+
+const ensureResetWithOptions = async (options: { enableMarketMaker: boolean }): Promise<void> => {
+  if (resetPromise) await resetPromise;
+  resetPromise = runReset(options).finally(() => {
+    resetPromise = null;
+  });
+  await resetPromise;
+};
 const {
   proxyAnyHubGet,
   proxyAnyHubRequest,
@@ -1359,6 +1543,42 @@ const server = Bun.serve({
 
     if (pathname === '/api/faucet/offchain' && request.method === 'POST') {
       return await proxyHubApi(request, '/api/faucet/offchain');
+    }
+
+    if (pathname === '/api/hub/account-status' && request.method === 'GET') {
+      await pollAllHubHealth();
+      const hubEntityId = String(url.searchParams.get('hubEntityId') || '').toLowerCase();
+      const counterpartyEntityId = String(url.searchParams.get('counterpartyEntityId') || '').toLowerCase();
+      const child = getHubChildByEntityId(hubEntityId);
+      if (!child) {
+        return new Response(safeStringify({
+          success: false,
+          code: 'HUB_ACCOUNT_STATUS_HUB_NOT_FOUND',
+          error: `Hub not found for hubEntityId=${hubEntityId || 'missing'}`,
+        }), { status: 404, headers });
+      }
+      const childUrl = new URL(`http://${args.host}:${child.apiPort}/api/account/status`);
+      childUrl.searchParams.set('hubEntityId', hubEntityId);
+      childUrl.searchParams.set('counterpartyEntityId', counterpartyEntityId);
+      const tokenIds = String(url.searchParams.get('tokenIds') || '').trim();
+      if (tokenIds) childUrl.searchParams.set('tokenIds', tokenIds);
+      try {
+        const response = await fetch(childUrl);
+        const text = await response.text();
+        return new Response(text, {
+          status: response.status,
+          headers: {
+            ...headers,
+            'content-type': response.headers.get('content-type') || 'application/json',
+          },
+        });
+      } catch (error) {
+        return new Response(safeStringify({
+          success: false,
+          code: 'HUB_ACCOUNT_STATUS_PROXY_FAILED',
+          error: error instanceof Error ? error.message : String(error),
+        }), { status: 502, headers });
+      }
     }
 
     if (
@@ -1416,16 +1636,44 @@ const server = Bun.serve({
     if (debugResponse) return debugResponse;
 
     if (pathname === '/api/reset' && request.method === 'POST') {
-      if (!args.resetAllowed) {
-        return new Response(safeStringify({ error: 'RESET_DISABLED' }), { status: 403, headers });
-      }
       try {
-        await ensureReset();
+        const body = await request.json().catch(() => null) as OrchestratorResetBody | null;
+        assertOrchestratorResetAllowed(request, body, {
+          resetAllowed: args.resetAllowed,
+          bindHost: args.host,
+          resetToken: args.resetToken,
+        });
+        const requestedMarketMaker = body?.enableMarketMaker ?? body?.requireMarketMaker;
+        const enableMarketMaker = typeof requestedMarketMaker === 'boolean'
+          ? requestedMarketMaker
+          : args.mmEnabled;
+        await ensureResetWithOptions({ enableMarketMaker });
         await pollAllHubHealth();
-        return new Response(safeStringify(computeAggregatedHealth()), { headers });
+        if (enableMarketMaker) await pollMarketMakerHealth();
+        return new Response(safeStringify(await buildAggregatedHealthResponse()), { headers });
       } catch (error) {
+        if (error instanceof OrchestratorResetRejectedError) {
+          return new Response(
+            safeStringify({
+              error: error.code,
+              ...(error.code === 'RESET_CONFIRMATION_REQUIRED' ? { requiredConfirmation: ORCHESTRATOR_RESET_CONFIRMATION } : {}),
+            }),
+            { status: error.status, headers },
+          );
+        }
+        let health: AggregatedHealth | null = null;
+        let healthError: string | null = null;
+        try {
+          health = await buildAggregatedHealthResponse();
+        } catch (healthBuildError) {
+          healthError = serializeError(healthBuildError);
+        }
         return new Response(
-          safeStringify({ error: serializeError(error), health: computeAggregatedHealth() }),
+          safeStringify({
+            error: serializeError(error),
+            ...(health ? { health } : {}),
+            ...(healthError ? { healthError } : {}),
+          }),
           { status: 500, headers },
         );
       }

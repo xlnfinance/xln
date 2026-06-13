@@ -2,6 +2,7 @@ import { ethers } from 'ethers';
 import type { AccountMachine, AccountTx, EntityState } from './types';
 import type { ProofBodyStruct } from '../jurisdictions/typechain-types/contracts/Depository.sol/Depository';
 import { asOfferId, type OfferId } from './swap-keys';
+import { exactFillRatioToUint16, reduceExactFillRatio } from './swap-execution';
 import { sortTransformerEntries } from './transformer-ordering';
 import { decodeHashLadderBinary } from './hashladder';
 
@@ -98,6 +99,29 @@ const collectAppliedSwapFillFingerprints = (accountTxs: readonly AccountTx[] | u
   return fingerprints;
 };
 
+const committedSwapResolveFillRatio = (tx: Extract<AccountTx, { type: 'swap_resolve' }>): number => {
+  const data = tx.data;
+  const hasExactNumerator = data.fillNumerator !== undefined;
+  const hasExactDenominator = data.fillDenominator !== undefined;
+  if (hasExactNumerator !== hasExactDenominator) {
+    throw new Error(`DISPUTE_ARGUMENT_SWAP_FILL_EXACT_PARTIAL:${data.offerId}`);
+  }
+  if (!hasExactNumerator || !hasExactDenominator) {
+    return clampFillRatio(data.fillRatio);
+  }
+
+  const projected = exactFillRatioToUint16(
+    reduceExactFillRatio(data.fillNumerator!, data.fillDenominator!),
+  );
+  const committed = clampFillRatio(data.fillRatio);
+  if (committed !== projected) {
+    throw new Error(
+      `DISPUTE_ARGUMENT_SWAP_FILL_RATIO_MISMATCH:${data.offerId}:coarse=${committed}:exact=${projected}`,
+    );
+  }
+  return projected;
+};
+
 const buildPendingSwapFillRatios = (
   account: AccountMachine,
   snapshot: DisputeArgumentSnapshot,
@@ -129,7 +153,7 @@ const buildPendingSwapFillRatios = (
       // signed proof body, or we fail before producing unsafe calldata.
       throw new Error(`DISPUTE_ARGUMENT_SWAP_FILL_AMBIGUOUS:${tx.data.offerId}`);
     }
-    ratios.set(offerId, tx.data.fillRatio);
+    ratios.set(offerId, committedSwapResolveFillRatio(tx));
   }
   for (const tx of account.mempool ?? []) {
     if (tx.type !== 'swap_resolve') continue;
@@ -138,7 +162,7 @@ const buildPendingSwapFillRatios = (
     if (ratios.has(offerId)) {
       throw new Error(`DISPUTE_ARGUMENT_SWAP_FILL_AMBIGUOUS:${tx.data.offerId}`);
     }
-    ratios.set(offerId, tx.data.fillRatio);
+    ratios.set(offerId, committedSwapResolveFillRatio(tx));
   }
   return ratios;
 };

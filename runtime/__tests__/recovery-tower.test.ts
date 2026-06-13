@@ -148,6 +148,86 @@ describe('runtime recovery tower', () => {
     expect(restoredEnv.jReplicas.size).toBe(env.jReplicas.size);
   });
 
+  test('recovery bundle omits transient consensus caches and compresses large checkpoints below tower body cap', async () => {
+    const { env, runtimeSeed, runtimeId, entityId, wallet, jurisdiction } = await buildRuntimeEnv();
+    const replicaKey = `${entityId}:${runtimeId}`;
+    const replica = env.eReplicas.get(replicaKey);
+    expect(replica, 'test replica must exist').toBeTruthy();
+    const bloatedState = structuredClone(replica!.state);
+    bloatedState.messages = Array.from({ length: 400 }, (_, index) => `transient-${index}-${'x'.repeat(512)}`);
+    replica!.proposal = {
+      height: Number(replica!.state.height || 0) + 1,
+      txs: [],
+      hash: `0x${'a1'.repeat(32)}`,
+      newState: bloatedState,
+    };
+    replica!.lockedFrame = {
+      height: Number(replica!.state.height || 0) + 1,
+      txs: [],
+      hash: `0x${'b2'.repeat(32)}`,
+      newState: bloatedState,
+    };
+    replica!.validatorComputedState = bloatedState;
+    env.browserVMState = {
+      stateRoot: `0x${'c3'.repeat(32)}`,
+      trieData: Array.from({ length: 2_000 }, (_, index) => [
+        `0x${index.toString(16).padStart(64, '0')}`,
+        `0x${'ab'.repeat(64)}`,
+      ]),
+    };
+
+    const bundle = buildRuntimeRecoveryBundle(env, {
+      signers: [{
+        index: 0,
+        derivationIndex: 0,
+        address: runtimeId,
+        name: 'Signer 1',
+        entityId,
+        jurisdiction: jurisdiction.name,
+      }],
+      createdAt: 5678,
+    });
+    const checkpointReplica = (bundle.checkpoint['eReplicas'] as Array<[string, Record<string, unknown>]>)[0]?.[1];
+    expect(checkpointReplica?.proposal).toBeUndefined();
+    expect(checkpointReplica?.lockedFrame).toBeUndefined();
+    expect(checkpointReplica?.validatorComputedState).toBeUndefined();
+    expect(serializeTaggedJson(bundle).length, 'test fixture must exceed the tower JSON body cap before compression').toBeGreaterThan(128 * 1024);
+
+    const encrypted = await encryptRuntimeRecoveryBundle(bundle, runtimeSeed);
+    expect(encrypted.compression).toBe('gzip');
+    const signedAt = 42_001;
+    const signature = await wallet.signMessage(
+      buildTowerAppointmentOwnerMessage(
+        runtimeId,
+        'blind_backup',
+        encrypted.lookupKey,
+        0,
+        encrypted.bundleHash,
+        encrypted.height,
+        signedAt,
+        undefined,
+      ),
+    );
+    const appointment: TowerAppointmentV1 = {
+      type: 'tower_appointment',
+      version: 1,
+      towerMode: 'blind_backup',
+      lookupKey: encrypted.lookupKey,
+      slot: 0,
+      bundle: encrypted,
+      ownerProof: {
+        runtimeId,
+        signedAt,
+        signature,
+      },
+    };
+    expect(JSON.stringify(appointment).length, 'compressed appointment must fit the default tower HTTP body cap').toBeLessThan(128 * 1024);
+
+    const decrypted = await decryptRuntimeRecoveryBundle(encrypted, runtimeSeed);
+    expect(decrypted.checkpointHash).toBe(bundle.checkpointHash);
+    expect(decrypted.checkpoint['runtimeId']).toBe(runtimeId);
+  });
+
   test('tower stores blind backup appointments and serves restore payloads', async () => {
     const { env, runtimeSeed, runtimeId, entityId, wallet, jurisdiction } = await buildRuntimeEnv();
     const bundle = buildRuntimeRecoveryBundle(env, {

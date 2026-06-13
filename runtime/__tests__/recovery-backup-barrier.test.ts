@@ -2,7 +2,7 @@ import { expect, test } from 'bun:test';
 
 import { createEmptyEnv, process as processRuntime, registerRecoveryBackupBarrier, sendEntityInput } from '../runtime.ts';
 
-test('recovery backup barrier holds remote outputs until backup succeeds', async () => {
+test('stale pending network outputs fail fast instead of retrying after backup recovery', async () => {
   const env = createEmptyEnv('recovery-barrier-seed');
   env.runtimeId = '0x1111111111111111111111111111111111111111';
   env.dbNamespace = `recovery-barrier-${Date.now()}`;
@@ -24,25 +24,12 @@ test('recovery backup barrier holds remote outputs until backup succeeds', async
     },
   };
 
-  let barrierAttempts = 0;
   let dispatchCount = 0;
-  registerRecoveryBackupBarrier(env, async () => {
-    barrierAttempts += 1;
-    if (barrierAttempts === 1) {
-      throw new Error('tower unavailable');
-    }
-  });
+  registerRecoveryBackupBarrier(env, async () => {});
 
-  await processRuntime(env);
-  expect(barrierAttempts).toBe(1);
+  await expect(processRuntime(env)).rejects.toThrow('PENDING_NETWORK_OUTPUTS_FATAL');
   expect(dispatchCount).toBe(0);
   expect(env.pendingNetworkOutputs.length).toBe(1);
-
-  env.timestamp += 6_000;
-  await processRuntime(env);
-  expect(barrierAttempts).toBe(2);
-  expect(dispatchCount).toBe(1);
-  expect(env.pendingNetworkOutputs.length).toBe(0);
 });
 
 test('direct remote sends fail closed while recovery backup barrier is active', () => {

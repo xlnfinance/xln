@@ -14,6 +14,7 @@ export type Args = {
   dbRoot: string;
   mmEnabled: boolean;
   resetAllowed: boolean;
+  resetToken: string;
   deferInitialReset: boolean;
   custodyEnabled: boolean;
   custodyPort: number;
@@ -106,6 +107,23 @@ export type HubHealthPayload = {
       operational?: boolean;
       targetMet?: boolean;
     }>;
+    entities?: Array<{
+      entityId: string;
+      jurisdictionName?: string;
+      primary?: boolean;
+      ready: boolean;
+      targetMet: boolean;
+      tokens: Array<{
+        tokenId: number;
+        symbol: string;
+        decimals: number;
+        current: string;
+        expectedMin: string;
+        ready: boolean;
+        operational?: boolean;
+        targetMet?: boolean;
+      }>;
+    }>;
   };
   marketMaker?: {
     enabled: boolean;
@@ -147,6 +165,30 @@ export type HubInfoPayload = {
   startupPhase?: string;
 };
 
+export type MarketMakerCrossRouteHealthPayload = {
+  sourceJurisdiction: string;
+  targetJurisdiction: string;
+  sourceHubEntityId: string;
+  targetHubEntityId: string;
+  offers: number;
+  ready: boolean;
+  pairs?: Array<{
+    pairId: string;
+    offers: number;
+    ready: boolean;
+    sourceTokenIds?: number[];
+    targetTokenIds?: number[];
+  }>;
+};
+
+export type MarketMakerCrossHealthPayload = {
+  ok: boolean;
+  expectedRoutes: number;
+  expectedOffersPerRoute: number;
+  expectedOffersPerPair: number;
+  routes: MarketMakerCrossRouteHealthPayload[];
+};
+
 export type MarketMakerHealthPayload = {
   ok?: boolean;
   name?: string;
@@ -170,6 +212,7 @@ export type MarketMakerHealthPayload = {
     entityId: string | null;
     expectedOffersPerHub: number;
     expectedOffersPerPair?: number;
+    cross?: MarketMakerCrossHealthPayload;
     hubs: Array<{
       hubEntityId: string;
       offers: number;
@@ -268,11 +311,19 @@ export type AggregatedHealth = {
     entityId: string | null;
     startupPhase: string | null;
     expectedOffersPerHub: number;
+    expectedOffersPerPair?: number;
+    cross: MarketMakerCrossHealthPayload;
     hubs: Array<{
       hubEntityId: string;
       offers: number;
       ready: boolean;
-      pairs: Array<{ pairId: string; offers: number; ready: boolean }>;
+      pairs: Array<{
+        pairId: string;
+        offers: number;
+        ready: boolean;
+        sourceTokenIds?: number[];
+        targetTokenIds?: number[];
+      }>;
     }>;
   };
   custody: {
