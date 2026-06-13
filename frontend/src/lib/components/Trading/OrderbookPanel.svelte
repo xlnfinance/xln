@@ -12,6 +12,10 @@
     <OrderbookPanel hubId="0x..." pairId="1/2" />
     <OrderbookPanel hubIds={["0x...", "0x..."]} pairId="1/2" />
 -->
+<script context="module" lang="ts">
+  const marketSyncStartedByKey = new Map<string, number>();
+</script>
+
 <script lang="ts">
   import { onMount, onDestroy, createEventDispatcher } from 'svelte';
   import { formatEntityId } from '$lib/utils/format';
@@ -32,16 +36,19 @@
   export let preferredClickSide: BookSide = 'ask';
   export let disablePriceAggregation: boolean = false;
   export let showPriceStepControl: boolean = true;
+  export let refreshNonce: number = 0;
 
   type BookSide = 'bid' | 'ask';
   type LevelClickDetail = { side: BookSide; priceTicks: string; displayPrice: string; size: number; accountIds: string[] };
   type SnapshotDetail = {
     pairId: string;
+    hubIds: string[];
     bids: Array<{ price: bigint; size: number; total: number }>;
     asks: Array<{ price: bigint; size: number; total: number }>;
     spread: bigint | null;
     spreadPercent: string;
     sourceCount: number;
+    sourceStatus: SourceStatus;
     updatedAt: number;
   };
   type MarketSnapshotPayload = {
@@ -59,8 +66,17 @@
     hubUpdatedAt?: number;
     updatedAt: number;
   };
+  type StreamMarketSnapshotPayload = MarketSnapshotPayload & { receivedAt: number };
   type MarketWsMessage = {
     type?: string;
+    id?: string;
+    inReplyTo?: string;
+    status?: string;
+    data?: {
+      hubEntityIds?: unknown[];
+      pairs?: unknown[];
+      depth?: unknown;
+    };
     payload?: MarketSnapshotPayload;
     error?: string;
     code?: string;
@@ -73,6 +89,11 @@
     owners?: string[];
     accountIds?: string[];
   }
+  type SourceOrderLevel = {
+    price: bigint;
+    size: number;
+    sourceHubId: string;
+  };
   type SourceStatus = 'ready' | 'syncing' | 'empty' | 'no-market' | 'error';
 
   let bids: OrderLevel[] = [];
@@ -95,14 +116,21 @@
   let marketWsUrl = '';
   let marketRetryTimer: ReturnType<typeof setTimeout> | null = null;
   let marketSyncTimer: ReturnType<typeof setTimeout> | null = null;
+  let marketSyncTimerKey = '';
+  let marketWatchdogTimer: ReturnType<typeof setInterval> | null = null;
+  let marketSyncStartedAt = 0;
+  let marketContinuousSyncStartedAt = 0;
+  let marketSyncStateKey = '';
   let marketWsClosing = false;
   let marketSubKey = '';
+  let marketSeenRefreshNonce = 0;
+  let syncAgeTick = 0;
   let mounted = false;
   const STREAM_STALE_MS = 3000;
   const STREAM_FIRST_SNAPSHOT_TIMEOUT_MS = 6000;
   const STREAM_RETRY_MS = 2000;
   const UI_BOOK_DEPTH = 10;
-  const streamSnapshots = new Map<string, MarketSnapshotPayload>();
+  const streamSnapshots = new Map<string, StreamMarketSnapshotPayload>();
   const NUMERIC_PRICE_STEP_OPTIONS = ['0.0001', '0.001', '0.01', '0.1', '0.5', '1', '5', '10', '50', '100'] as const;
   const PRICE_STEP_OPTIONS = ['auto', ...NUMERIC_PRICE_STEP_OPTIONS] as const;
   const PRICE_STEP_STORAGE_KEY = 'xln.orderbook.price-step-overrides.v1';
@@ -111,6 +139,7 @@
   let priceStepOverrides: Record<string, string> = {};
   let canonicalPair = '1/2';
   let marketInputSignature = '';
+  let normalizedSourceHubIds: string[] = [];
 
   function normalizePairId(value: string): string | null {
     const trimmed = String(value || '').trim();
@@ -128,7 +157,7 @@
     const left = crossMatch[1] || '';
     const right = crossMatch[2] || '';
     if (!left || !right || left === right) return null;
-    return left < right ? `cross:${left}/${right}` : `cross:${right}/${left}`;
+    return `cross:${left}/${right}`;
   }
 
   function canonicalPairId(): string {
@@ -196,6 +225,21 @@
     return Math.max(visibleDepth(), Math.min(visibleDepth() * 6, 100));
   }
 
+  function isLoopbackHost(hostname: string): boolean {
+    const normalized = String(hostname || '').trim().toLowerCase();
+    return normalized === 'localhost'
+      || normalized === '127.0.0.1'
+      || normalized === '::1'
+      || normalized === '[::1]';
+  }
+
+  function isTrustedBrowserRelayUrl(parsed: URL): boolean {
+    if (typeof window === 'undefined') return false;
+    const pageHost = window.location.hostname;
+    if (parsed.hostname === pageHost) return true;
+    return isLoopbackHost(parsed.hostname) && isLoopbackHost(pageHost);
+  }
+
   function normalizeRelayWsUrl(value: string): string | null {
     if (typeof window === 'undefined') return null;
     const trimmed = String(value || '').trim();
@@ -204,6 +248,7 @@
       const parsed = trimmed.startsWith('/')
         ? new URL(trimmed, window.location.origin)
         : new URL(trimmed);
+      if (!isTrustedBrowserRelayUrl(parsed)) return null;
       if (parsed.protocol === 'ws:' || parsed.protocol === 'wss:') return parsed.toString();
       if (parsed.protocol === 'http:' || parsed.protocol === 'https:') {
         parsed.protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
@@ -234,23 +279,36 @@
   }
 
   function clearMarketSyncTimer(): void {
-    if (!marketSyncTimer) return;
-    clearTimeout(marketSyncTimer);
-    marketSyncTimer = null;
+    if (marketSyncTimer) {
+      clearTimeout(marketSyncTimer);
+      marketSyncTimer = null;
+    }
+    marketSyncTimerKey = '';
+  }
+
+  function clearMarketWatchdog(): void {
+    if (!marketWatchdogTimer) return;
+    clearInterval(marketWatchdogTimer);
+    marketWatchdogTimer = null;
   }
 
   function hasFreshSnapshotFor(sourceHubId: string, pair: string): boolean {
     const snapshot = streamSnapshots.get(streamKey(sourceHubId, pair));
     if (!snapshot) return false;
-    const updatedAt = Number(snapshot.updatedAt || 0);
-    return Number.isFinite(updatedAt) && Date.now() - updatedAt <= STREAM_STALE_MS;
+    const receivedAt = Number(snapshot.receivedAt || 0);
+    return Number.isFinite(receivedAt) && Date.now() - receivedAt <= STREAM_STALE_MS;
   }
 
   function armMarketSyncTimer(pair: string, sources: string[]): void {
+    const normalizedPairForKey = normalizePairId(pair);
+    if (sources.length === 0 || !normalizedPairForKey) return;
+    const nextKey = `${normalizedPairForKey}|${sources.join(',')}`;
+    if (marketSyncTimer && marketSyncTimerKey === nextKey) return;
     clearMarketSyncTimer();
-    if (sources.length === 0 || !normalizePairId(pair)) return;
+    marketSyncTimerKey = nextKey;
     marketSyncTimer = setTimeout(() => {
       marketSyncTimer = null;
+      marketSyncTimerKey = '';
       const normalizedPair = normalizePairId(pair);
       if (!normalizedPair) return;
       const missingSnapshot = sources.some((source) => !hasFreshSnapshotFor(source, normalizedPair));
@@ -267,6 +325,57 @@
     }, STREAM_FIRST_SNAPSHOT_TIMEOUT_MS);
   }
 
+  function syncStateKey(pair: string, sources: string[]): string {
+    return `${pair}|${sources.join(',')}`;
+  }
+
+  function syncDeadlineKey(pair: string, sources: string[]): string {
+    return `${relayWsUrl() || ''}|${syncStateKey(pair, sources)}`;
+  }
+
+  function syncStartedAtFor(pair: string, sources: string[]): number {
+    const key = syncDeadlineKey(pair, sources);
+    const existing = marketSyncStartedByKey.get(key);
+    if (existing && Number.isFinite(existing)) return existing;
+    const startedAt = Date.now();
+    marketSyncStartedByKey.set(key, startedAt);
+    return startedAt;
+  }
+
+  function clearSyncStartedAt(pair: string, sources: string[]): void {
+    marketSyncStartedByKey.delete(syncDeadlineKey(pair, sources));
+  }
+
+  function markSyncNoMarket(pair: string, sources: string[]): void {
+    const freshSources = sources.filter((source) => hasFreshSnapshotFor(source, pair));
+    updateView([], [], pair, freshSources, sources, Date.now(), 'no-market');
+  }
+
+  function enforceMarketSyncDeadline(): void {
+    if (sourceStatus !== 'syncing') return;
+    const sources = uniqueSourceHubIds();
+    const pair = normalizePairId(canonicalPairId());
+    if (sources.length === 0 || !pair) {
+      updateView([], [], pair || canonicalPairId(), [], sources, Date.now(), 'no-market');
+      return;
+    }
+    const nextStateKey = syncStateKey(pair, sources);
+    const globalStartedAt = syncStartedAtFor(pair, sources);
+    if (marketContinuousSyncStartedAt <= 0) {
+      marketContinuousSyncStartedAt = globalStartedAt;
+    }
+    if (marketSyncStateKey !== nextStateKey || marketSyncStartedAt <= 0) {
+      marketSyncStateKey = nextStateKey;
+      marketSyncStartedAt = globalStartedAt;
+    }
+    const now = Date.now();
+    if (
+      now - marketSyncStartedAt < STREAM_FIRST_SNAPSHOT_TIMEOUT_MS
+      && now - marketContinuousSyncStartedAt < STREAM_FIRST_SNAPSHOT_TIMEOUT_MS
+    ) return;
+    markSyncNoMarket(pair, sources);
+  }
+
   function toPriceTicks(value: unknown): bigint | null {
     if (typeof value === 'bigint') return value;
     if (typeof value === 'number') {
@@ -281,6 +390,30 @@
 
   function wsMessageId(prefix: string): string {
     return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+  }
+
+  function isMarketScopedError(msg: MarketWsMessage): boolean {
+    const ref = String(msg.inReplyTo || msg.id || '');
+    return !ref || ref.startsWith('market_');
+  }
+
+  function marketErrorText(msg: MarketWsMessage): string {
+    return `${msg.code || ''} ${msg.error || ''}`.trim();
+  }
+
+  function marketStatusAppliesToCurrentView(msg: MarketWsMessage): boolean {
+    const pair = normalizePairId(canonicalPairId());
+    const sources = uniqueSourceHubIds();
+    if (!pair || sources.length === 0) return false;
+    const dataPairs = Array.isArray(msg.data?.pairs)
+      ? msg.data.pairs.map((value) => normalizePairId(String(value || ''))).filter(Boolean)
+      : [];
+    const dataHubs = Array.isArray(msg.data?.hubEntityIds)
+      ? msg.data.hubEntityIds.map((value) => String(value || '').trim().toLowerCase()).filter(Boolean)
+      : [];
+    const pairMatches = dataPairs.length === 0 || dataPairs.includes(pair);
+    const hubMatches = dataHubs.length === 0 || sources.every((source) => dataHubs.includes(source));
+    return pairMatches && hubMatches;
   }
 
   function formatUpdatedAt(timestampMs: number): string {
@@ -321,6 +454,34 @@
       entry.accountIds = Array.from(sideSources.get(price) || []);
       return entry;
     });
+  }
+
+  function buildPerSourceOrderLevels(rawLevels: SourceOrderLevel[], side: 'bid' | 'ask'): OrderLevel[] {
+    const sorted = rawLevels
+      .filter((level) => level.price > 0n && Number.isFinite(level.size) && level.size > 0 && Boolean(level.sourceHubId))
+      .sort((a, b) => {
+        if (a.price !== b.price) {
+          if (side === 'bid') return a.price > b.price ? -1 : 1;
+          return a.price < b.price ? -1 : 1;
+        }
+        return sourceLabelForSort(a.sourceHubId).localeCompare(sourceLabelForSort(b.sourceHubId));
+      })
+      .slice(0, visibleDepth());
+
+    let cumulative = 0;
+    return sorted.map((level) => {
+      cumulative += level.size;
+      return {
+        price: level.price,
+        size: level.size,
+        total: cumulative,
+        accountIds: [level.sourceHubId],
+      };
+    });
+  }
+
+  function sourceLabelForSort(sourceId: string): string {
+    return String(sourceLabels[sourceId] || sourceId || '').trim().toLowerCase();
   }
 
   function getSelectedPriceStepTicks(): bigint {
@@ -453,10 +614,41 @@
       && actualSources.length < requestedSources.length
       && (sourceStatus === 'no-market' || sourceStatus === 'error')
     );
-    sourceStatus = forcedStatus
+    const nextStateKey = syncStateKey(pair, requestedSources);
+    let nextStatus: SourceStatus = forcedStatus
       || (preserveTerminalStatus ? sourceStatus : (!complete ? 'syncing' : (!hasVisibleLevel ? 'empty' : 'ready')));
+    if (nextStatus === 'syncing') {
+      const globalStartedAt = syncStartedAtFor(pair, requestedSources);
+      if (marketContinuousSyncStartedAt <= 0) {
+        marketContinuousSyncStartedAt = globalStartedAt;
+      }
+      if (marketSyncStateKey !== nextStateKey || marketSyncStartedAt <= 0) {
+        marketSyncStateKey = nextStateKey;
+        marketSyncStartedAt = globalStartedAt;
+      }
+      const now = Date.now();
+      if (
+        now - globalStartedAt >= STREAM_FIRST_SNAPSHOT_TIMEOUT_MS
+        || now - marketSyncStartedAt >= STREAM_FIRST_SNAPSHOT_TIMEOUT_MS
+        || now - marketContinuousSyncStartedAt >= STREAM_FIRST_SNAPSHOT_TIMEOUT_MS
+      ) {
+        nextStatus = 'no-market';
+      }
+    } else {
+      if (nextStatus === 'ready' || nextStatus === 'empty') {
+        clearSyncStartedAt(pair, requestedSources);
+      }
+      marketSyncStateKey = '';
+      marketSyncStartedAt = 0;
+      marketContinuousSyncStartedAt = 0;
+    }
+    sourceStatus = nextStatus;
     sourceLabel = sourceLabelFor(actualSources, requestedSources.length, sourceStatus);
-    if (sourceStatus !== 'syncing') clearMarketSyncTimer();
+    if (sourceStatus !== 'syncing') {
+      clearMarketSyncTimer();
+    } else if (!marketSyncTimer) {
+      armMarketSyncTimer(pair, requestedSources);
+    }
     const bestBid = bids[0];
     const bestAsk = asks[0];
     if (bestBid && bestAsk) {
@@ -472,11 +664,13 @@
       : Date.now();
     dispatch('snapshot', {
       pairId: pair,
+      hubIds: requestedSources,
       bids: bids.map(level => ({ price: level.price, size: level.size, total: level.total })),
       asks: asks.map(level => ({ price: level.price, size: level.size, total: level.total })),
       spread,
       spreadPercent,
       sourceCount,
+      sourceStatus,
       updatedAt: lastUpdate,
     });
   }
@@ -496,6 +690,8 @@
     const askOwners = new Map<bigint, Set<string>>();
     const bidSources = new Map<bigint, Set<string>>();
     const askSources = new Map<bigint, Set<string>>();
+    const rawBidLevels: SourceOrderLevel[] = [];
+    const rawAskLevels: SourceOrderLevel[] = [];
     const actualSources: string[] = [];
     let hasAnyLevel = false;
     let newestSnapshotUpdate = 0;
@@ -505,11 +701,11 @@
     for (const sourceHubId of sources) {
       const snapshot = streamSnapshots.get(streamKey(sourceHubId, pair));
       if (!snapshot) continue;
-      const snapshotUpdatedAt = Number(snapshot.updatedAt || 0);
-      if (!Number.isFinite(snapshotUpdatedAt) || now - snapshotUpdatedAt > STREAM_STALE_MS) continue;
+      const snapshotReceivedAt = Number(snapshot.receivedAt || 0);
+      if (!Number.isFinite(snapshotReceivedAt) || now - snapshotReceivedAt > STREAM_STALE_MS) continue;
       actualSources.push(sourceHubId);
-      if (snapshotUpdatedAt > newestSnapshotUpdate) {
-        newestSnapshotUpdate = snapshotUpdatedAt;
+      if (snapshotReceivedAt > newestSnapshotUpdate) {
+        newestSnapshotUpdate = snapshotReceivedAt;
       }
       const hubUpdatedAt = Number(snapshot.hubUpdatedAt || snapshot.updatedAt || 0);
       if (Number.isFinite(hubUpdatedAt) && hubUpdatedAt > newestHubUpdate) {
@@ -520,6 +716,7 @@
         const size = Number(level.size || 0);
         if (price === null || !Number.isFinite(size) || size <= 0) continue;
         hasAnyLevel = true;
+        rawBidLevels.push({ price, size, sourceHubId });
         bidSizes.set(price, (bidSizes.get(price) || 0) + size);
         const sourcesSet = bidSources.get(price) || new Set<string>();
         sourcesSet.add(sourceHubId);
@@ -530,6 +727,7 @@
         const size = Number(level.size || 0);
         if (price === null || !Number.isFinite(size) || size <= 0) continue;
         hasAnyLevel = true;
+        rawAskLevels.push({ price, size, sourceHubId });
         askSizes.set(price, (askSizes.get(price) || 0) + size);
         const sourcesSet = askSources.get(price) || new Set<string>();
         sourcesSet.add(sourceHubId);
@@ -547,6 +745,17 @@
     }
     if (!hasAnyLevel) {
       updateView([], [], pair, actualSources, sources, newestSnapshotUpdate || newestHubUpdate);
+      return true;
+    }
+    if (sources.length > 1) {
+      updateView(
+        buildPerSourceOrderLevels(rawBidLevels, 'bid'),
+        buildPerSourceOrderLevels(rawAskLevels, 'ask'),
+        pair,
+        actualSources,
+        sources,
+        newestSnapshotUpdate || newestHubUpdate,
+      );
       return true;
     }
     applySmartOrSavedStep(bidSizes, askSizes);
@@ -712,7 +921,26 @@
         return;
       }
       if (msg?.type === 'error') {
+        if (!isMarketScopedError(msg)) return;
+        const errorText = marketErrorText(msg);
+        if (/runtime not ready/i.test(errorText)) {
+          updateView([], [], canonicalPairId(), [], uniqueSourceHubIds(), Date.now(), 'syncing');
+          if (marketRetryTimer) clearTimeout(marketRetryTimer);
+          marketRetryTimer = setTimeout(() => {
+            marketRetryTimer = null;
+            if (marketWs !== ws || ws.readyState !== 1) return;
+            sendMarketSubscribe(true);
+            requestMarketSnapshot();
+          }, STREAM_RETRY_MS);
+          return;
+        }
         updateView([], [], canonicalPairId(), [], uniqueSourceHubIds(), Date.now(), 'error');
+        return;
+      }
+      if (msg?.type === 'market_status') {
+        if (msg.status === 'no_market' && marketStatusAppliesToCurrentView(msg)) {
+          updateView([], [], canonicalPairId(), [], uniqueSourceHubIds(), Date.now(), 'no-market');
+        }
         return;
       }
       if (msg?.type !== 'market_snapshot') return;
@@ -724,6 +952,7 @@
         ...payload,
         hubEntityId,
         pairId: streamPairId,
+        receivedAt: Date.now(),
       });
       extractOrderbook();
     };
@@ -767,10 +996,12 @@
     marketInputSignature;
     if (mounted) {
       const sources = uniqueSourceHubIds();
-      const pair = canonicalPairId();
+      const pair = canonicalPair;
       const normalizedPair = normalizePairId(pair);
       const nextRelayUrl = relayWsUrl();
       const nextKey = `${nextRelayUrl || ''}|${normalizedPair || pair}|${subscribedRawDepth()}|${sources.join(',')}`;
+      const refreshChanged = refreshNonce !== marketSeenRefreshNonce;
+      marketSeenRefreshNonce = refreshNonce;
       if (nextRelayUrl && marketWs && marketWsUrl && nextRelayUrl !== marketWsUrl) {
         disconnectMarketStream();
         connectMarketStream();
@@ -780,6 +1011,9 @@
         streamSnapshots.clear();
         sendMarketSubscribe(true);
         requestMarketSnapshot();
+      } else if (typeof window !== 'undefined' && marketWs && marketWs.readyState === 1 && refreshChanged) {
+        requestMarketSnapshot();
+        extractOrderbook();
       }
     }
   }
@@ -799,15 +1033,32 @@
     loadPriceStepOverrides();
     extractOrderbook();
     connectMarketStream();
+    marketWatchdogTimer = setInterval(() => {
+      syncAgeTick += 1;
+      if (!mounted || sourceStatus !== 'syncing') return;
+      if (marketWs && marketWs.readyState === 1 && !marketSubKey) {
+        sendMarketSubscribe(true);
+        requestMarketSnapshot();
+      }
+      enforceMarketSyncDeadline();
+      extractOrderbook();
+      enforceMarketSyncDeadline();
+    }, 500);
   });
 
   onDestroy(() => {
     mounted = false;
+    clearMarketWatchdog();
     disconnectMarketStream();
   });
 
   $: canonicalPair = normalizePairId(pairId) || String(pairId || '');
-  $: marketInputSignature = `${relayUrl}|${pairId}|${hubId}|${hubIds.join(',')}|${depth}`;
+  $: normalizedSourceHubIds = Array.from(new Set(
+    (hubIds.length > 0 ? hubIds : (hubId ? [hubId] : []))
+      .map((id) => String(id || '').trim().toLowerCase())
+      .filter(Boolean),
+  ));
+  $: marketInputSignature = `${relayUrl}|${canonicalPair}|${hubId}|${hubIds.join(',')}|${depth}|${refreshNonce}`;
 
   // React to hubId/pairId changes
   $: if (hubId || hubIds.length || pairId) extractOrderbook();
@@ -817,9 +1068,14 @@
   class="orderbook-panel"
   class:compact-header={compactHeader}
   data-pair-id={canonicalPair}
-  data-hub-ids={uniqueSourceHubIds().join(',')}
+  data-hub-ids={normalizedSourceHubIds.join(',')}
   data-relay-url={marketWsUrl || relayWsUrl() || ''}
   data-source-status={sourceStatus}
+  data-market-sub-key={marketSubKey}
+  data-sync-state-key={marketSyncStateKey}
+  data-sync-age-ms={marketSyncStartedAt > 0 ? Math.max(0, Date.now() - marketSyncStartedAt + syncAgeTick * 0) : 0}
+  data-sync-continuous-age-ms={marketContinuousSyncStartedAt > 0 ? Math.max(0, Date.now() - marketContinuousSyncStartedAt + syncAgeTick * 0) : 0}
+  data-sync-timer-active={marketSyncTimer ? 'true' : 'false'}
 >
   {#if !compactHeader}
     <div class="header">

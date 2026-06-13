@@ -121,6 +121,23 @@ async function countUniqueOrderbookSources(page: Page): Promise<number> {
   });
 }
 
+async function readRowSourceIds(row: Locator): Promise<string[]> {
+  return await row.locator('[data-testid="orderbook-source-icon"]').evaluateAll((nodes) =>
+    nodes
+      .map((node) => String((node as HTMLElement).dataset.sourceId || '').trim().toLowerCase())
+      .filter(Boolean),
+  );
+}
+
+async function expectVisibleOrderbookRowsUseSingleHub(page: Page): Promise<void> {
+  await expect
+    .poll(async () => await page.locator('[data-testid="orderbook-ask-row"],[data-testid="orderbook-bid-row"]').evaluateAll((rows) => {
+      if (rows.length === 0) return false;
+      return rows.every((row) => row.querySelectorAll('[data-testid="orderbook-source-icon"]').length === 1);
+    }), { timeout: 10_000, intervals: [50, 100, 200] })
+    .toBe(true);
+}
+
 async function readSwapScopeMode(page: Page): Promise<'aggregated' | 'selected' | ''> {
   const raw = String(await page.getByTestId('swap-scope-toggle').first().getAttribute('data-scope-mode') || '').trim();
   return raw === 'aggregated' || raw === 'selected' ? raw : '';
@@ -791,7 +808,11 @@ async function faucetSwapTokenUntilOutCapacity(
     lastBody = await faucetResponse.json().catch(() => ({}));
     if (!faucetResponse.ok()) {
       const code = String((lastBody as any)?.code || '');
-      if (code !== 'FAUCET_ACCOUNT_PENDING_FRAME' && code !== 'FAUCET_CLIENT_PENDING_FRAME') {
+      if (
+        code !== 'FAUCET_ACCOUNT_NOT_READY'
+        && code !== 'FAUCET_ACCOUNT_PENDING_FRAME'
+        && code !== 'FAUCET_CLIENT_PENDING_FRAME'
+      ) {
         break;
       }
     }
@@ -1118,7 +1139,10 @@ async function waitForSwapOrderbookLiquidity(
   };
 
   let lastState = await tryWaitOnce(45_000);
-  if (isReadyState(lastState)) return;
+  if (isReadyState(lastState)) {
+    if (desiredScope === 'Aggregated') await expectVisibleOrderbookRowsUseSingleHub(page);
+    return;
+  }
 
   await page.reload({ waitUntil: 'domcontentloaded' });
   await page.waitForFunction(() => {
@@ -1127,7 +1151,10 @@ async function waitForSwapOrderbookLiquidity(
   }, { timeout: 60_000 });
   await openSwapWorkspace(page);
   lastState = await tryWaitOnce(45_000);
-  if (isReadyState(lastState)) return;
+  if (isReadyState(lastState)) {
+    if (desiredScope === 'Aggregated') await expectVisibleOrderbookRowsUseSingleHub(page);
+    return;
+  }
 
   const selectedAccountId = await page.getByTestId('swap-account-select').first().inputValue().catch(() => '');
   throw new Error(
@@ -1221,6 +1248,7 @@ async function executeOrderbookClickFill(
   page: Page,
   accountRef: { entityId: string; signerId: string; counterpartyId: string; hubIds: string[] },
   clickTarget: 'lowest-ask' | 'highest-bid' | 'mid-price',
+  options?: { scope?: 'aggregated' | 'selected'; preferredAccountId?: string },
 ): Promise<{ routedCounterpartyId: string }> {
   const orderbookLogs: string[] = [];
   const onConsole = (msg: { text(): string }) => {
@@ -1326,7 +1354,12 @@ async function executeOrderbookClickFill(
     };
   }, accountRef);
   try {
+    const desiredScope = options?.scope ?? 'aggregated';
     const placeButton = page.getByTestId('swap-submit-order').first();
+    await ensureSwapScope(page, desiredScope);
+    if (options?.preferredAccountId) {
+      await selectCounterpartyInSwap(page, options.preferredAccountId);
+    }
     if (clickTarget === 'lowest-ask') {
       await selectSwapPairSide(page, 'WETH/USDC', 'sell');
       await expectSwapTokens(page, { fromSymbol: 'WETH', toSymbol: 'USDC' });
@@ -1340,16 +1373,21 @@ async function executeOrderbookClickFill(
     await page.waitForTimeout(120);
 
     let clickedDisplayedPrice = '';
+    let clickedSourceIds: string[] = [];
     if (clickTarget === 'lowest-ask') {
       const asks = page.getByTestId('orderbook-ask-row');
       await expect(asks.last()).toBeVisible({ timeout: 20_000 });
-      clickedDisplayedPrice = String(await asks.last().locator('.price').textContent() || '').trim();
-      await asks.last().click();
+      const row = asks.last();
+      clickedDisplayedPrice = String(await row.locator('.price').textContent() || '').trim();
+      clickedSourceIds = await readRowSourceIds(row);
+      await row.click();
     } else if (clickTarget === 'highest-bid') {
       const bids = page.getByTestId('orderbook-bid-row');
       await expect(bids.first()).toBeVisible({ timeout: 20_000 });
-      clickedDisplayedPrice = String(await bids.first().locator('.price').textContent() || '').trim();
-      await bids.first().click();
+      const row = bids.first();
+      clickedDisplayedPrice = String(await row.locator('.price').textContent() || '').trim();
+      clickedSourceIds = await readRowSourceIds(row);
+      await row.click();
     } else {
       const mid = page.getByTestId('orderbook-mid-row').first();
       await expect(mid).toBeVisible({ timeout: 20_000 });
@@ -1377,12 +1415,16 @@ async function executeOrderbookClickFill(
     const selectedHub = page.getByTestId('swap-account-select').first();
     await expect
       .poll(async () => await readSwapScopeMode(page), { timeout: 10_000, intervals: [50, 100, 200] })
-      .toBe('aggregated');
+      .toBe(desiredScope);
     await expect.poll(async () => String(await selectedHub.inputValue()).trim(), {
       timeout: 10_000,
       intervals: [50, 100, 200],
     }).not.toBe('');
     const routedCounterpartyId = String(await selectedHub.inputValue()).trim();
+    if (desiredScope === 'aggregated' && clickTarget !== 'mid-price') {
+      expect(clickedSourceIds, 'All Hubs click row must map to one concrete hub').toHaveLength(1);
+      expect(routedCounterpartyId.toLowerCase()).toBe(clickedSourceIds[0]);
+    }
     const swapStateBefore = await readSwapState(page, accountRef.entityId, accountRef.signerId, routedCounterpartyId);
     await expect(placeButton).toBeEnabled({ timeout: 10_000 });
     await placeButton.click();
@@ -1987,17 +2029,78 @@ async function prepareOrderbookClickTest(page: Page): Promise<{
     );
   });
 
+  test('swap flip keeps the displayed receive amount as the next source amount', async ({ page }) => {
+    await prepareOrderbookClickTest(page);
+    await ensureSwapScope(page, 'aggregated');
+    await selectSwapPairSide(page, 'WETH/USDC', 'buy');
+    await expectSwapTokens(page, { fromSymbol: 'USDC', toSymbol: 'WETH' });
+
+    const asks = page.getByTestId('orderbook-ask-row');
+    await expect(asks.last()).toBeVisible({ timeout: 20_000 });
+    await asks.last().click();
+    await expectSwapTokens(page, { fromSymbol: 'USDC', toSymbol: 'WETH' });
+
+    const amountInput = page.getByTestId('swap-order-amount').first();
+    const receiveInput = page.getByTestId('swap-receive-amount').first();
+    await expect(amountInput).toBeVisible({ timeout: 10_000 });
+    await expect(receiveInput).toBeVisible({ timeout: 10_000 });
+    const spendBefore = parseFirstNumber(await amountInput.inputValue());
+    const receiveBefore = parseFirstNumber(await receiveInput.inputValue());
+    expect(spendBefore, 'book click must populate source amount').toBeGreaterThan(0);
+    expect(receiveBefore, 'book click must populate receive amount').toBeGreaterThan(0);
+
+    await page.getByTestId('swap-flip-tokens').first().click();
+    await expectSwapTokens(page, { fromSymbol: 'WETH', toSymbol: 'USDC' });
+    const flippedSourceAmount = parseFirstNumber(await amountInput.inputValue());
+    const flippedReceiveAmount = parseFirstNumber(await receiveInput.inputValue());
+    expect(Math.abs(flippedSourceAmount - receiveBefore), 'flip must not reinterpret USDC amount as WETH').toBeLessThan(0.000001);
+    expect(flippedSourceAmount, 'WETH source amount after flip must be much smaller than old USDC source amount').toBeLessThan(spendBefore / 100);
+    expect(flippedReceiveAmount, 'flipped receive should stay near the original spend notional').toBeGreaterThan(spendBefore * 0.99);
+  });
+
+  test('swap flip keeps the sell-side displayed receive amount as the next source amount', async ({ page }) => {
+    await prepareOrderbookClickTest(page);
+    await ensureSwapScope(page, 'aggregated');
+    await selectSwapPairSide(page, 'WETH/USDC', 'sell');
+    await expectSwapTokens(page, { fromSymbol: 'WETH', toSymbol: 'USDC' });
+
+    const bids = page.getByTestId('orderbook-bid-row');
+    await expect(bids.first()).toBeVisible({ timeout: 20_000 });
+    await bids.first().click();
+    await expectSwapTokens(page, { fromSymbol: 'WETH', toSymbol: 'USDC' });
+
+    const amountInput = page.getByTestId('swap-order-amount').first();
+    const receiveInput = page.getByTestId('swap-receive-amount').first();
+    await expect(amountInput).toBeVisible({ timeout: 10_000 });
+    await expect(receiveInput).toBeVisible({ timeout: 10_000 });
+    const spendBefore = parseFirstNumber(await amountInput.inputValue());
+    const receiveBefore = parseFirstNumber(await receiveInput.inputValue());
+    expect(spendBefore, 'sell-side book click must populate source amount').toBeGreaterThan(0);
+    expect(receiveBefore, 'sell-side book click must populate receive amount').toBeGreaterThan(0);
+
+    await page.getByTestId('swap-flip-tokens').first().click();
+    await expectSwapTokens(page, { fromSymbol: 'USDC', toSymbol: 'WETH' });
+    const flippedSourceAmount = parseFirstNumber(await amountInput.inputValue());
+    const flippedReceiveAmount = parseFirstNumber(await receiveInput.inputValue());
+    expect(Math.abs(flippedSourceAmount - receiveBefore), 'sell-side flip must carry old USDC receive into new USDC source').toBeLessThan(0.000001);
+    expect(flippedSourceAmount, 'USDC source after sell-side flip must be much larger than old WETH source').toBeGreaterThan(spendBefore * 100);
+    expect(flippedReceiveAmount, 'sell-side flipped receive should stay near the original WETH spend').toBeGreaterThan(spendBefore * 0.99);
+  });
+
   test('swap can buy from asks and then sell back into bids on the same book', async ({ page }) => {
     const accountRef = await prepareOrderbookClickTest(page);
     const buyResult = await timedStep('swap_roundtrip.buy_fill', () =>
       executeOrderbookClickFill(page, accountRef, 'lowest-ask'));
     await waitForSwapOrderbookLiquidity(page, 'WETH/USDC', {
       preferredAccountId: buyResult.routedCounterpartyId,
-      scope: 'Aggregated',
-      minSources: 3,
+      scope: 'Selected',
+      minSources: 1,
     });
     await timedStep('swap_roundtrip.sell_fill', () =>
-      executeOrderbookClickFill(page, accountRef, 'highest-bid'));
+      executeOrderbookClickFill(page, accountRef, 'highest-bid', {
+        scope: 'selected',
+        preferredAccountId: buyResult.routedCounterpartyId,
+      }));
   });
 
   test('swap manual price override after book click uses the edited limit price', async ({ page }) => {

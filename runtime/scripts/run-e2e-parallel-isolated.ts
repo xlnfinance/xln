@@ -85,6 +85,7 @@ type RunTask = {
 type ManagedChildProcess = ChildProcessByStdio<null, Readable, Readable>;
 type JsonRecord = Record<string, unknown>;
 type HealthPayload = JsonRecord;
+const RESET_CONFIRMATION = 'RESET_MESH_STATE';
 
 const isRecord = (value: unknown): value is JsonRecord =>
   typeof value === 'object' && value !== null;
@@ -578,7 +579,7 @@ const collectSpecsFromSuite = (suite: unknown, out: Array<{ title: string; file?
 
 const listDynamicPlaywrightTargets = (
   file: string,
-  requiresMarketMaker: (file: string) => boolean,
+  requiresMarketMaker: (file: string, title?: string) => boolean,
 ): PlaywrightTarget[] => {
   const env = {
     ...process.env,
@@ -614,7 +615,7 @@ const listDynamicPlaywrightTargets = (
   }
   return specs.map(spec => ({
     target: file,
-    requireMarketMaker: requiresMarketMaker(file),
+    requireMarketMaker: requiresMarketMaker(file, spec.title),
     title: spec.title,
     grep: escapeRegExp(spec.title),
   }));
@@ -624,15 +625,10 @@ const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
   const out: PlaywrightTarget[] = [];
   const sourcePathForTarget = (file: string): string =>
     file.match(/^(.+\.spec\.ts)(?:::.*|:\d+(?::\d+)?)?$/)?.[1] || file;
-  const requiresMarketMaker = (file: string): boolean => {
+  const sourceNeedsMarketMakerByDefault = (file: string): boolean => {
     const sourcePath = sourcePathForTarget(file);
     if (/e2e-swap\.spec\.ts$/.test(sourcePath)) return true;
-    try {
-      const source = readFileSync(resolve(process.cwd(), sourcePath), 'utf8');
-      return /requireMarketMaker\s*:\s*true/.test(source);
-    } catch {
-      return false;
-    }
+    return false;
   };
   const unsplittableSpecs = new Set<string>();
   const updateBraceDepth = (line: string, depth: number): number => {
@@ -674,6 +670,41 @@ const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
 
     return next;
   };
+  const collectTestBlock = (lines: string[], startIndex: number, initialDepth: number): { text: string; endIndex: number; depthAfter: number } => {
+    const block: string[] = [];
+    let depth = initialDepth;
+    let endIndex = startIndex;
+    for (let i = startIndex; i < lines.length; i += 1) {
+      const line = lines[i] || '';
+      block.push(line);
+      depth = updateBraceDepth(line, depth);
+      endIndex = i;
+      if (i > startIndex && depth <= initialDepth) break;
+    }
+    return { text: block.join('\n'), endIndex, depthAfter: depth };
+  };
+  const findStaticTestBlock = (sourcePath: string, title: string): string | null => {
+    const absolute = resolve(process.cwd(), sourcePath);
+    const text = readFileSync(absolute, 'utf8');
+    const lines = text.split('\n');
+    let braceDepth = 0;
+    for (let i = 0; i < lines.length; i += 1) {
+      const line = lines[i] || '';
+      const matchesTopLevelTest = braceDepth <= 1 && /^\s*test(?:\.(?:only|fail))?\(/.test(line);
+      if (matchesTopLevelTest && extractTopLevelTestTitle(line) === title) {
+        return collectTestBlock(lines, i, braceDepth).text;
+      }
+      braceDepth = updateBraceDepth(line, braceDepth);
+    }
+    return null;
+  };
+  const requiresMarketMaker = (file: string, title?: string, testBlock?: string): boolean => {
+    const sourcePath = sourcePathForTarget(file);
+    if (sourceNeedsMarketMakerByDefault(sourcePath)) return true;
+    const block = testBlock ?? (title ? findStaticTestBlock(sourcePath, title) : null);
+    if (block !== null) return /requireMarketMaker\s*:\s*true/.test(block);
+    return false;
+  };
 
   for (const file of pwFiles) {
     const explicitTitleTarget = file.match(/^(.+\.spec\.ts)::(.+)$/);
@@ -682,7 +713,7 @@ const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
       const title = explicitTitleTarget[2]!;
       out.push({
         target: sourceFile,
-        requireMarketMaker: requiresMarketMaker(sourceFile),
+        requireMarketMaker: requiresMarketMaker(sourceFile, title),
         title,
         grep: escapeRegExp(title),
       });
@@ -715,13 +746,17 @@ const expandPlaywrightTargets = (pwFiles: string[]): PlaywrightTarget[] => {
       if (matchesTopLevelTest) {
         const title = extractTopLevelTestTitle(line);
         if (!title) continue;
+        const block = collectTestBlock(lines, i, braceDepth);
         out.push({
           target: file,
-          requireMarketMaker: requiresMarketMaker(file),
+          requireMarketMaker: requiresMarketMaker(file, title, block.text),
           title,
           grep: escapeRegExp(title),
         });
         added += 1;
+        braceDepth = block.depthAfter;
+        i = block.endIndex;
+        continue;
       }
       braceDepth = updateBraceDepth(line, braceDepth);
     }
@@ -899,8 +934,25 @@ const fetchWithTimeout = async (url: string, init: RequestInit = {}, timeoutMs =
   }
 };
 
+const formatErrorForLog = (error: unknown): string => {
+  if (!(error instanceof Error)) return String(error);
+  const code = (error as Error & { code?: unknown }).code;
+  const cause = (error as Error & { cause?: unknown }).cause;
+  const causeText = cause instanceof Error
+    ? `${cause.name}: ${cause.message}`
+    : cause === undefined
+      ? ''
+      : String(cause);
+  return [
+    `${error.name}: ${error.message}`,
+    code === undefined ? '' : `code=${String(code)}`,
+    causeText ? `cause=${causeText}` : '',
+  ].filter(Boolean).join(' ');
+};
+
 const waitForRpcReady = async (rpcUrl: string, timeoutMs: number, expectedChainId: number): Promise<void> => {
   const deadline = Date.now() + timeoutMs;
+  let lastError = '';
   while (Date.now() < deadline) {
     try {
       const res = await fetchWithTimeout(
@@ -916,27 +968,32 @@ const waitForRpcReady = async (rpcUrl: string, timeoutMs: number, expectedChainI
         const body = recordOrEmpty(await res.json());
         const chainId = Number.parseInt(String(body['result'] || '0x0'), 16);
         if (chainId === expectedChainId) return;
+        lastError = `unexpected_chainId=${String(body['result'] || 'missing')}`;
       }
-    } catch {
+    } catch (error) {
+      lastError = formatErrorForLog(error);
       // retry
     }
     await delay(200);
   }
-  throw new Error(`RPC not ready at ${rpcUrl} for chain ${expectedChainId}`);
+  throw new Error(`RPC_NOT_READY rpc=${rpcUrl} expectedChainId=${expectedChainId} timeoutMs=${timeoutMs} last=${lastError || 'none'}`);
 };
 
 const waitForHttpReady = async (url: string, timeoutMs: number): Promise<void> => {
   const deadline = Date.now() + timeoutMs;
+  let lastError = '';
   while (Date.now() < deadline) {
     try {
       const res = await fetchWithTimeout(url, {}, 2_000);
       if (res.status < 500) return;
-    } catch {
+      lastError = `status=${res.status}`;
+    } catch (error) {
+      lastError = formatErrorForLog(error);
       // retry
     }
     await delay(250);
   }
-  throw new Error(`HTTP endpoint not ready: ${url}`);
+  throw new Error(`HTTP_ENDPOINT_NOT_READY url=${url} timeoutMs=${timeoutMs} last=${lastError || 'none'}`);
 };
 
 const waitForServerHealthy = async (
@@ -946,6 +1003,7 @@ const waitForServerHealthy = async (
 ): Promise<HealthPayload> => {
   const deadline = Date.now() + timeoutMs;
   let lastHealth: HealthPayload | null = null;
+  let lastError = '';
   while (Date.now() < deadline) {
     try {
       const res = await fetchWithTimeout(`${apiUrl}/api/health`, {}, 2_000);
@@ -965,8 +1023,11 @@ const waitForServerHealthy = async (
         const reservesReady = bootstrapReserves['ok'] === true;
         const hasTs = typeof body['timestamp'] === 'number';
         if (hasTs && resetDone && meshReady && mmReady && reservesReady) return body;
+      } else {
+        lastError = `status=${res.status}`;
       }
-    } catch {
+    } catch (error) {
+      lastError = formatErrorForLog(error);
       // retry
     }
     await delay(250);
@@ -994,7 +1055,7 @@ const waitForServerHealthy = async (
       )
     : 'no-health-payload';
   throw new Error(
-    `SERVER_HEALTH_TIMEOUT phase=${String(marketMakerPhase)} api=${apiUrl} timeoutMs=${timeoutMs}\n${snapshot}`,
+    `SERVER_HEALTH_TIMEOUT phase=${String(marketMakerPhase)} api=${apiUrl} timeoutMs=${timeoutMs} last=${lastError || 'none'}\n${snapshot}`,
   );
 };
 
@@ -1009,8 +1070,15 @@ const hardResetShardBaseline = async (
   try {
     const response = await fetch(`${apiUrl}/api/reset`, {
       method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ requireMarketMaker }),
+      headers: {
+        'content-type': 'application/json',
+        'x-xln-reset-confirm': RESET_CONFIRMATION,
+      },
+      body: JSON.stringify({
+        confirm: RESET_CONFIRMATION,
+        requireMarketMaker,
+        enableMarketMaker: requireMarketMaker,
+      }),
       signal: controller.signal,
     });
     if (!response.ok) {
@@ -1026,7 +1094,9 @@ const hardResetShardBaseline = async (
     if (error instanceof Error && error.name === 'AbortError') {
       throw new Error(`SHARD_BASELINE_RESET_TIMEOUT api=${apiUrl} timeoutMs=${timeoutMs}`);
     }
-    throw error;
+    throw new Error(
+      `SHARD_BASELINE_RESET_ERROR api=${apiUrl} timeoutMs=${timeoutMs} requireMarketMaker=${requireMarketMaker} cause=${formatErrorForLog(error)}`,
+    );
   } finally {
     clearTimeout(timer);
   }
@@ -1035,16 +1105,21 @@ const hardResetShardBaseline = async (
 const waitForHttpsReady = async (url: string, timeoutMs: number): Promise<void> => {
   // Use curl -k for self-signed local certs.
   const deadline = Date.now() + timeoutMs;
+  let lastError = '';
   while (Date.now() < deadline) {
     const ok = await new Promise<boolean>(resolve => {
       const p = spawn('curl', ['-k', '-sSf', url], { stdio: 'ignore' });
       p.once('exit', code => resolve(code === 0));
-      p.once('error', () => resolve(false));
+      p.once('error', error => {
+        lastError = formatErrorForLog(error);
+        resolve(false);
+      });
     });
     if (ok) return;
+    if (!lastError) lastError = 'curl_exit_nonzero';
     await delay(250);
   }
-  throw new Error(`HTTPS endpoint not ready: ${url}`);
+  throw new Error(`HTTPS_ENDPOINT_NOT_READY url=${url} timeoutMs=${timeoutMs} last=${lastError || 'none'}`);
 };
 
 const sanitizeChildEnv = (env: NodeJS.ProcessEnv): NodeJS.ProcessEnv => {
@@ -1486,7 +1561,7 @@ const runShard = async (
       phaseMs,
     };
   } catch (error) {
-    teardownReason = (error as Error).message;
+    teardownReason = formatErrorForLog(error);
     try {
       await captureShardFailureForensics({
         logsDir,
@@ -1506,12 +1581,13 @@ const runShard = async (
       title: task.title || task.pwTargets[0] || `shard-${task.shard}`,
       requireMarketMaker: task.requireMarketMaker,
       phaseMs,
-      error: (error as Error).message,
+      error: teardownReason,
     };
   } finally {
     if (teardownReason && api && api.exitCode === null) {
       const teardownLabel = phaseMs.apiHealthy > 0 ? 'shard teardown' : 'startup failure';
-      log.write(`[runner] ${teardownLabel} -> SIGTERM api pid=${api.pid} reason=${teardownReason.split('\n')[0]}\n`);
+      const normalizedReason = teardownReason.replace(/\n/g, '\n[runner]   ');
+      log.write(`[runner] ${teardownLabel} -> SIGTERM api pid=${api.pid} reason=${normalizedReason}\n`);
     }
     await Promise.all([stopProcess(vite), stopProcess(api), stopProcess(anvil), stopProcess(anvil2)]);
     log.end();

@@ -14,6 +14,7 @@ const APP_BASE_URL = requireIsolatedBaseUrl('E2E_BASE_URL');
 const API_BASE_URL = requireIsolatedBaseUrl('E2E_API_BASE_URL');
 const SWAP_TOKENS = [1, 2, 3] as const;
 const CREDIT_AMOUNT = 10_000n * 10n ** 18n;
+const DEFAULT_REBALANCE_SOFT_LIMIT_WEI = 500n * 10n ** 18n;
 const USDC = 1;
 const WETH = 2;
 const USDT = 3;
@@ -74,6 +75,73 @@ function getPrimaryHubId(health: E2EHealthResponse): string {
   const hubId = health.hubMesh?.hubIds?.[0];
   expect(hubId, `hub mesh must expose a primary hub: ${JSON.stringify(health.hubMesh || {})}`).toMatch(/^0x[a-fA-F0-9]{64}$/);
   return hubId!;
+}
+
+function expectMarketMakerSameAndCrossBooksHealthy(health: E2EHealthResponse): void {
+  const marketMaker = health.marketMaker;
+  expect(marketMaker?.ok, `market maker must be ready before swap tests: ${JSON.stringify(marketMaker ?? {})}`).toBe(true);
+  expect(marketMaker?.hubs?.length ?? 0, 'market maker must publish same-chain books for all primary hubs').toBeGreaterThanOrEqual(3);
+  for (const hub of marketMaker?.hubs ?? []) {
+    expect(hub.ready, `same-chain MM hub ${hub.hubEntityId} must be ready`).toBe(true);
+    expect(hub.offers, `same-chain MM hub ${hub.hubEntityId} must expose resting offers`).toBeGreaterThan(0);
+    for (const pair of hub.pairs ?? []) {
+      expect(pair.ready, `same-chain MM pair ${pair.pairId} on hub ${hub.hubEntityId} must be ready`).toBe(true);
+      expect(pair.offers, `same-chain MM pair ${pair.pairId} on hub ${hub.hubEntityId} must expose offers`).toBeGreaterThan(0);
+    }
+  }
+
+  const cross = marketMaker?.cross;
+  expect(cross?.ok, `cross-chain MM books must be ready: ${JSON.stringify(cross ?? {})}`).toBe(true);
+  expect(cross?.expectedRoutes ?? 0, 'ETH/TRON cross-chain MM must declare expected routes').toBeGreaterThan(0);
+  expect(cross?.routes?.length ?? 0, 'ETH/TRON cross-chain MM must expose all route books').toBeGreaterThanOrEqual(cross?.expectedRoutes ?? 0);
+  type CrossHealthPair = {
+    pairId?: string;
+    sourceTokenIds?: number[];
+    targetTokenIds?: number[];
+  };
+  const isTronOnlyToken = (tokenId: number): boolean => tokenId === 4 || tokenId === 5;
+  const hasTronOnlySourcePair = (cross?.routes ?? []).some(route =>
+    /tron/i.test(String(route.sourceJurisdiction || '')) &&
+    (route.pairs ?? []).some(pair =>
+      ((pair as CrossHealthPair).sourceTokenIds ?? []).some(isTronOnlyToken),
+    ),
+  );
+  const hasTronOnlyTargetPair = (cross?.routes ?? []).some(route =>
+    /tron/i.test(String(route.targetJurisdiction || '')) &&
+    (route.pairs ?? []).some(pair =>
+      ((pair as CrossHealthPair).targetTokenIds ?? []).some(isTronOnlyToken),
+    ),
+  );
+  const tronOnlyLeaksIntoTestnet = (cross?.routes ?? []).flatMap(route => {
+    const sourceIsTestnet = /testnet/i.test(String(route.sourceJurisdiction || ''));
+    const targetIsTestnet = /testnet/i.test(String(route.targetJurisdiction || ''));
+    return (route.pairs ?? []).flatMap(pair => {
+      const sourceTokenIds = ((pair as CrossHealthPair).sourceTokenIds ?? []).filter(isTronOnlyToken);
+      const targetTokenIds = ((pair as CrossHealthPair).targetTokenIds ?? []).filter(isTronOnlyToken);
+      const leaks =
+        (sourceIsTestnet && sourceTokenIds.length > 0) ||
+        (targetIsTestnet && targetTokenIds.length > 0);
+      return leaks ? [{
+        sourceJurisdiction: route.sourceJurisdiction,
+        targetJurisdiction: route.targetJurisdiction,
+        pairId: pair.pairId,
+        sourceTokenIds,
+        targetTokenIds,
+      }] : [];
+    });
+  });
+  expect(hasTronOnlySourcePair, 'Tron source cross MM books must include Tron-only TRX/SUN token pairs').toBe(true);
+  expect(hasTronOnlyTargetPair, 'Tron target cross MM books must include Tron-only TRX/SUN token pairs').toBe(true);
+  expect(tronOnlyLeaksIntoTestnet, 'Testnet side must not publish Tron-only token ids').toEqual([]);
+  for (const route of cross?.routes ?? []) {
+    expect(route.ready, `cross MM route ${route.sourceHubEntityId}->${route.targetHubEntityId} must be ready`).toBe(true);
+    expect(route.offers, `cross MM route ${route.sourceHubEntityId}->${route.targetHubEntityId} must expose offers`).toBeGreaterThan(0);
+    expect(route.sourceJurisdiction, 'cross MM route source jurisdiction must be present').not.toEqual(route.targetJurisdiction);
+    for (const pair of route.pairs ?? []) {
+      expect(pair.ready, `cross MM pair ${pair.pairId} on ${route.sourceHubEntityId}->${route.targetHubEntityId} must be ready`).toBe(true);
+      expect(pair.offers, `cross MM pair ${pair.pairId} on ${route.sourceHubEntityId}->${route.targetHubEntityId} must expose offers`).toBeGreaterThan(0);
+    }
+  }
 }
 
 function getPrimaryHubApiBaseUrl(health: E2EHealthResponse, primaryHubId: string): string {
@@ -344,7 +412,34 @@ async function waitForAccountReady(
     async () => page.evaluate(({ identity, hubId, tokenIds }) => {
       const env = (window as CrossRuntimeWindow).isolatedEnv;
       const replica = env?.eReplicas?.get(`${identity.entityId}:${identity.signerId}`.toLowerCase());
-      const account = replica?.state?.accounts?.get(hubId);
+      const normalizeEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
+      const resolveCounterpartyAccount = (
+        accounts: Map<string, {
+          currentHeight?: number;
+          pendingFrame?: unknown;
+          deltas?: Map<number, unknown>;
+          leftEntity?: string;
+          rightEntity?: string;
+        }>,
+        ownerEntityId: string,
+        counterpartyEntityId: string,
+      ) => {
+        const owner = normalizeEntityId(ownerEntityId);
+        const target = normalizeEntityId(counterpartyEntityId);
+        const direct = accounts.get(target) ?? accounts.get(String(counterpartyEntityId || ''));
+        if (direct) return direct;
+        for (const [accountKey, account] of accounts.entries()) {
+          if (normalizeEntityId(accountKey) === target) return account;
+          const left = normalizeEntityId(account.leftEntity);
+          const right = normalizeEntityId(account.rightEntity);
+          if ((left === owner && right === target) || (right === owner && left === target)) return account;
+        }
+        return null;
+      };
+      const accounts = replica?.state?.accounts;
+      const account = accounts instanceof Map
+        ? resolveCounterpartyAccount(accounts, identity.entityId, hubId)
+        : null;
       if (!account || Number(account.currentHeight || 0) <= 0 || account.pendingFrame) return false;
       return tokenIds.every((tokenId: number) => account.deltas instanceof Map && account.deltas.has(tokenId));
     }, { identity, hubId, tokenIds: Array.from(tokenIds) }),
@@ -436,24 +531,80 @@ async function ensureDirectHubAccount(
   }
   await waitForAccountReady(page, identity, hubId, [USDC], timeoutMs);
 
+  const hasGrantedHubCredit = async (tokenId: number): Promise<boolean> => page.evaluate(({ identity, hubId, tokenId, amount }) => {
+    const env = (window as CrossRuntimeWindow).isolatedEnv;
+    const replica = env?.eReplicas?.get(`${identity.entityId}:${identity.signerId}`.toLowerCase());
+    const normalizeEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
+    const readBig = (value: unknown): bigint => {
+      if (typeof value === 'bigint') return value;
+      if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) return BigInt(value);
+      if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return BigInt(value.trim());
+      return 0n;
+    };
+    const resolveCounterpartyAccount = (
+      accounts: Map<string, {
+        currentHeight?: number;
+        pendingFrame?: unknown;
+        deltas?: Map<number, unknown>;
+        leftEntity?: string;
+        rightEntity?: string;
+      }>,
+      ownerEntityId: string,
+      counterpartyEntityId: string,
+    ) => {
+      const owner = normalizeEntityId(ownerEntityId);
+      const target = normalizeEntityId(counterpartyEntityId);
+      const direct = accounts.get(target) ?? accounts.get(String(counterpartyEntityId || ''));
+      if (direct) return direct;
+      for (const [accountKey, account] of accounts.entries()) {
+        if (normalizeEntityId(accountKey) === target) return account;
+        const left = normalizeEntityId(account.leftEntity);
+        const right = normalizeEntityId(account.rightEntity);
+        if ((left === owner && right === target) || (right === owner && left === target)) return account;
+      }
+      return null;
+    };
+    const accounts = replica?.state?.accounts;
+    const account = accounts instanceof Map
+      ? resolveCounterpartyAccount(accounts, identity.entityId, hubId)
+      : null;
+    if (!account || Number(account.currentHeight || 0) <= 0 || account.pendingFrame) return false;
+    if (!(account.deltas instanceof Map)) return false;
+    const rawDelta = account.deltas.get(tokenId);
+    if (!rawDelta || typeof rawDelta !== 'object') return false;
+    const delta = rawDelta as Record<string, unknown>;
+    const owner = normalizeEntityId(identity.entityId);
+    const left = normalizeEntityId(account.leftEntity);
+    const ownerIsLeft = left ? owner === left : owner < normalizeEntityId(hubId);
+    const creditGrantedToHub = ownerIsLeft
+      ? readBig(delta.rightCreditLimit)
+      : readBig(delta.leftCreditLimit);
+    return creditGrantedToHub >= BigInt(amount);
+  }, { identity, hubId, tokenId, amount: CREDIT_AMOUNT.toString() });
+
   for (const tokenId of tokenIds) {
-    const hasToken = await page.evaluate(({ identity, hubId, tokenId }) => {
-      const env = (window as CrossRuntimeWindow).isolatedEnv;
-      const replica = env?.eReplicas?.get(`${identity.entityId}:${identity.signerId}`.toLowerCase());
-      const account = replica?.state?.accounts?.get(hubId);
-      return Boolean(account?.deltas instanceof Map && account.deltas.has(tokenId));
-    }, { identity, hubId, tokenId });
-    if (hasToken) continue;
-    await enqueueEntityTxs(page, identity.entityId, identity.signerId, [{
-      type: 'extendCredit',
-      data: {
-        counterpartyEntityId: hubId,
-        tokenId,
-        amount: CREDIT_AMOUNT,
+    if (!await hasGrantedHubCredit(tokenId)) {
+      await enqueueEntityTxs(page, identity.entityId, identity.signerId, [{
+        type: 'extendCredit',
+        data: {
+          counterpartyEntityId: hubId,
+          tokenId,
+          amount: CREDIT_AMOUNT,
+        },
+      }]);
+      await flushRuntime(page, 8);
+    }
+    await expect.poll(
+      async () => {
+        await flushRuntime(page, 2);
+        return hasGrantedHubCredit(tokenId);
       },
-    }]);
-    await flushRuntime(page, 8);
-    await waitForAccountReady(page, identity, hubId, [tokenId], timeoutMs);
+      {
+        timeout: timeoutMs,
+        intervals: [250, 500, 1000],
+        message: `${identity.entityId.slice(0, 10)} must grant hub credit token=${tokenId}`,
+      },
+    ).toBe(true);
   }
 }
 
@@ -517,12 +668,13 @@ async function createRuntimeIdentityViaStore(
   mnemonic: string,
 ): Promise<RuntimeIdentity> {
   const normalizedMnemonic = mnemonic.trim().split(/\s+/).join(' ');
-  const runtimeId = await page.evaluate(async ({ label, mnemonic }) => {
-    const ops = (window as typeof window & {
+  const createOnce = async (): Promise<string> => page.evaluate(async ({ label, mnemonic }) => {
+    const view = window as typeof window & {
       __xlnVaultOperations?: {
         createRuntime?: (name: string, seed: string, options?: Record<string, unknown>) => Promise<{ id?: string }>;
       };
-    }).__xlnVaultOperations;
+    };
+    const ops = view.__xlnVaultOperations;
     if (typeof ops?.createRuntime !== 'function') {
       throw new Error('__xlnVaultOperations.createRuntime unavailable');
     }
@@ -538,6 +690,23 @@ async function createRuntimeIdentityViaStore(
     });
     return String(runtime?.id || '');
   }, { label, mnemonic: normalizedMnemonic });
+  let runtimeId = '';
+  let lastCreateError = '';
+  for (let attempt = 1; attempt <= 3; attempt += 1) {
+    try {
+      runtimeId = await createOnce();
+      break;
+    } catch (error) {
+      lastCreateError = error instanceof Error ? error.message : String(error);
+      if (!/Failed to fetch|NetworkError|Load failed/i.test(lastCreateError) || attempt === 3 || page.isClosed()) {
+        throw error;
+      }
+      await page.waitForTimeout(500 * attempt);
+    }
+  }
+  if (!runtimeId && lastCreateError) {
+    throw new Error(`${label} direct runtime create failed: ${lastCreateError}`);
+  }
   expect(runtimeId, `${label} direct runtime create must return runtime id`).toMatch(/^0x[a-fA-F0-9]{40}$/);
 
   await expect.poll(
@@ -604,7 +773,10 @@ async function faucetOffchain(
       });
       if (response.ok()) return true;
       lastError = `${response.status()} ${await response.text().catch(() => '')}`;
-      if (response.status() === 409 && lastError.includes('FAUCET_ACCOUNT_NOT_OPEN')) {
+      if (
+        response.status() === 409 &&
+        (lastError.includes('FAUCET_ACCOUNT_NOT_OPEN') || lastError.includes('FAUCET_ACCOUNT_NOT_READY'))
+      ) {
         await flushRuntime(page, 2);
         return false;
       }
@@ -670,14 +842,307 @@ async function waitForOutCapAtLeast(
   tokenId: number,
   minimum: bigint,
 ): Promise<void> {
+  try {
+    await expect.poll(
+      async () => {
+        await flushRuntime(page, 2);
+        return (await outCap(page, entityId, counterpartyId, tokenId)) >= minimum;
+      },
+      {
+        timeout: 45_000,
+        intervals: [250, 500, 1000],
+        message: `${entityId.slice(0, 10)} outCap token=${tokenId} must reach ${minimum}`,
+      },
+    ).toBe(true);
+  } catch (error) {
+    const debug = await page.evaluate(({ entityId, counterpartyId, tokenId }) => {
+      const env = (window as CrossRuntimeWindow).isolatedEnv;
+      const normalize = (value: unknown) => String(value || '').toLowerCase();
+      const stringifyBig = (value: unknown) => {
+        if (typeof value === 'bigint') return value.toString();
+        if (value === undefined || value === null) return '';
+        return String(value);
+      };
+      const targetEntityId = normalize(entityId);
+      const targetCounterpartyId = normalize(counterpartyId);
+      const replicas = Array.from(env?.eReplicas?.entries?.() || [])
+        .map(([key, replica]: [string, any]) => {
+          const state = replica?.state;
+          if (!state) return null;
+          const id = normalize(state.entityId || replica.entityId);
+          if (id !== targetEntityId && id !== targetCounterpartyId) return null;
+          const account = state.accounts?.get?.(targetCounterpartyId) || state.accounts?.get?.(targetEntityId) || null;
+          return {
+            key: String(key || ''),
+            entityId: String(state.entityId || replica.entityId || ''),
+            signerId: String(replica.signerId || state.config?.validators?.[0] || ''),
+            jurisdiction: String(state.config?.jurisdiction?.name || ''),
+            messages: Array.from(state.messages || []).slice(-20).map(String),
+            account: account ? {
+              proofFrom: String(account.proofHeader?.fromEntity || ''),
+              proofTo: String(account.proofHeader?.toEntity || ''),
+              currentHeight: Number(account.currentHeight || 0),
+              mempool: Array.from(account.mempool || []).map((tx: any) => String(tx?.type || '')),
+              pendingFrame: Array.from(account.pendingFrame?.accountTxs || []).map((tx: any) => String(tx?.type || '')),
+              pulls: Array.from(account.pulls?.entries?.() || []).map(([pullId, pull]: [string, any]) => ({
+                pullId: String(pullId || ''),
+                tokenId: Number(pull?.tokenId || 0),
+                amount: stringifyBig(pull?.amount),
+                claimedRatio: Number(pull?.claimedRatio || 0),
+                claimedAmount: stringifyBig(pull?.claimedAmount),
+                cross: pull?.crossJurisdiction ? {
+                  orderId: String(pull.crossJurisdiction.orderId || ''),
+                  leg: String(pull.crossJurisdiction.leg || ''),
+                  status: String(pull.crossJurisdiction.status || ''),
+                  cumulativeFillRatio: Number(pull.crossJurisdiction.cumulativeFillRatio || 0),
+                  claimedRatio: Number(pull.crossJurisdiction.claimedRatio || 0),
+                } : null,
+              })),
+              deltas: Array.from(account.deltas?.entries?.() || [])
+                .filter(([id]: [number, any]) => Number(id) === Number(tokenId))
+                .map(([id, delta]: [number, any]) => ({
+                  tokenId: Number(id),
+                  ondelta: stringifyBig(delta?.ondelta),
+                  offdelta: stringifyBig(delta?.offdelta),
+                  collateral: stringifyBig(delta?.collateral),
+                  leftCreditLimit: stringifyBig(delta?.leftCreditLimit),
+                  rightCreditLimit: stringifyBig(delta?.rightCreditLimit),
+                  leftAllowance: stringifyBig(delta?.leftAllowance),
+                  rightAllowance: stringifyBig(delta?.rightAllowance),
+                  leftHold: stringifyBig(delta?.leftHold),
+                  rightHold: stringifyBig(delta?.rightHold),
+                })),
+            } : null,
+            routes: Array.from(state.crossJurisdictionSwaps?.values?.() || []).map((route: any) => ({
+              orderId: String(route?.orderId || ''),
+              status: String(route?.status || ''),
+              source: String(route?.source?.entityId || ''),
+              sourceHub: String(route?.source?.counterpartyEntityId || ''),
+              targetHub: String(route?.target?.entityId || ''),
+              target: String(route?.target?.counterpartyEntityId || ''),
+              sourcePull: String(route?.sourcePull?.pullId || ''),
+              targetPull: String(route?.targetPull?.pullId || ''),
+              cumulativeFillRatio: Number(route?.cumulativeFillRatio || 0),
+              claimedRatio: Number(route?.claimedRatio || 0),
+              filledSourceAmount: stringifyBig(route?.filledSourceAmount),
+              filledTargetAmount: stringifyBig(route?.filledTargetAmount),
+            })),
+          };
+        })
+        .filter(Boolean);
+      return {
+        entityId,
+        counterpartyId,
+        tokenId,
+        runtimeMempoolInputs: Array.from(env?.runtimeMempool?.entityInputs || env?.runtimeInput?.entityInputs || []).map((input: any) => ({
+          entityId: String(input?.entityId || ''),
+          signerId: String(input?.signerId || ''),
+          txTypes: Array.from(input?.entityTxs || []).map((tx: any) => String(tx?.type || '')),
+          frame: Boolean(input?.proposedFrame),
+        })),
+        pendingNetworkOutputs: Array.from(env?.pendingNetworkOutputs || []).map((input: any) => ({
+          entityId: String(input?.entityId || ''),
+          signerId: String(input?.signerId || ''),
+          txTypes: Array.from(input?.entityTxs || []).map((tx: any) => String(tx?.type || '')),
+          frame: Boolean(input?.proposedFrame),
+        })),
+        replicas,
+      };
+    }, { entityId, counterpartyId, tokenId });
+    console.log('[E2E outcap wait debug]', JSON.stringify(debug, null, 2));
+    throw error;
+  }
+}
+
+type RebalanceSnapshot = {
+  entityId: string;
+  counterpartyId: string;
+  tokenId: number;
+  jurisdiction: string;
+  currentHeight: number;
+  lastFinalizedJHeight: number;
+  requested: string;
+  collateral: string;
+  hubDebt: string;
+  uncollateralized: string;
+  outCapacity: string;
+  hasPolicy: boolean;
+  policy: {
+    r2cRequestSoftLimit: string;
+    hardLimit: string;
+    maxAcceptableFee: string;
+  } | null;
+};
+
+async function readRebalanceSnapshot(
+  page: Page,
+  identity: RuntimeIdentity,
+  hubId: string,
+  tokenId = USDC,
+): Promise<RebalanceSnapshot | null> {
+  const raw = await page.evaluate(({ identity, hubId, tokenId }) => {
+    const env = (window as CrossRuntimeWindow).isolatedEnv;
+    const normalizeEntityId = (value: unknown): string => String(value || '').trim().toLowerCase();
+    const readBig = (value: unknown): string => {
+      if (typeof value === 'bigint') return value.toString();
+      if (typeof value === 'number' && Number.isFinite(value) && Number.isInteger(value)) return String(value);
+      if (typeof value === 'string' && /^-?\d+$/.test(value.trim())) return value.trim();
+      return '0';
+    };
+    const resolveCounterpartyAccount = (
+      accounts: Map<string, {
+        currentHeight?: number;
+        lastFinalizedJHeight?: number;
+        requestedRebalance?: Map<number, unknown>;
+        rebalancePolicy?: Map<number, unknown>;
+        deltas?: Map<number, unknown>;
+        leftEntity?: string;
+        rightEntity?: string;
+      }>,
+      ownerEntityId: string,
+      counterpartyEntityId: string,
+    ) => {
+      const owner = normalizeEntityId(ownerEntityId);
+      const target = normalizeEntityId(counterpartyEntityId);
+      const direct = accounts.get(target) ?? accounts.get(String(counterpartyEntityId || ''));
+      if (direct) return direct;
+      for (const [accountKey, account] of accounts.entries()) {
+        if (normalizeEntityId(accountKey) === target) return account;
+        const left = normalizeEntityId(account.leftEntity);
+        const right = normalizeEntityId(account.rightEntity);
+        if ((left === owner && right === target) || (right === owner && left === target)) return account;
+      }
+      return null;
+    };
+    const replica = env?.eReplicas?.get(`${identity.entityId}:${identity.signerId}`.toLowerCase());
+    const accounts = replica?.state?.accounts;
+    if (!(accounts instanceof Map)) return null;
+    const account = resolveCounterpartyAccount(accounts, identity.entityId, hubId);
+    if (!account) return null;
+    const delta = account.deltas?.get?.(tokenId);
+    if (!delta || typeof delta !== 'object') return null;
+    const policy = account.rebalancePolicy?.get?.(tokenId);
+    const policyRecord = policy && typeof policy === 'object' ? policy as Record<string, unknown> : null;
+    const deltaRecord = delta as Record<string, unknown>;
+    const owner = normalizeEntityId(identity.entityId);
+    const left = normalizeEntityId(account.leftEntity);
+    const ownerIsLeft = left ? owner === left : owner < normalizeEntityId(hubId);
+    return {
+      entityId: String(identity.entityId || ''),
+      counterpartyId: String(hubId || ''),
+      tokenId: Number(tokenId),
+      jurisdiction: String(replica?.state?.config?.jurisdiction?.name || replica?.position?.jurisdiction || ''),
+      ownerIsLeft,
+      currentHeight: Number(account.currentHeight || 0),
+      lastFinalizedJHeight: Number(account.lastFinalizedJHeight || 0),
+      requested: readBig(account.requestedRebalance?.get?.(tokenId)),
+      delta: {
+        ondelta: readBig(deltaRecord.ondelta),
+        offdelta: readBig(deltaRecord.offdelta),
+        collateral: readBig(deltaRecord.collateral),
+        leftCreditLimit: readBig(deltaRecord.leftCreditLimit),
+        rightCreditLimit: readBig(deltaRecord.rightCreditLimit),
+        leftAllowance: readBig(deltaRecord.leftAllowance),
+        rightAllowance: readBig(deltaRecord.rightAllowance),
+        leftHold: readBig(deltaRecord.leftHold),
+        rightHold: readBig(deltaRecord.rightHold),
+      },
+      hasPolicy: Boolean(policyRecord),
+      policy: policyRecord
+        ? {
+          r2cRequestSoftLimit: readBig(policyRecord.r2cRequestSoftLimit),
+          hardLimit: readBig(policyRecord.hardLimit),
+          maxAcceptableFee: readBig(policyRecord.maxAcceptableFee),
+        }
+        : null,
+    };
+  }, { identity, hubId, tokenId });
+  if (!raw) return null;
+  const derived = deriveDelta({
+    tokenId,
+    ondelta: BigInt(raw.delta.ondelta),
+    offdelta: BigInt(raw.delta.offdelta),
+    collateral: BigInt(raw.delta.collateral),
+    leftCreditLimit: BigInt(raw.delta.leftCreditLimit),
+    rightCreditLimit: BigInt(raw.delta.rightCreditLimit),
+    leftAllowance: BigInt(raw.delta.leftAllowance),
+    rightAllowance: BigInt(raw.delta.rightAllowance),
+    leftHold: BigInt(raw.delta.leftHold),
+    rightHold: BigInt(raw.delta.rightHold),
+  }, Boolean(raw.ownerIsLeft));
+  const outCollateral = derived.outCollateral;
+  const outPeerCredit = derived.outPeerCredit;
+  const uncollateralized = outPeerCredit > outCollateral ? outPeerCredit - outCollateral : 0n;
+  return {
+    entityId: raw.entityId,
+    counterpartyId: raw.counterpartyId,
+    tokenId: raw.tokenId,
+    jurisdiction: raw.jurisdiction,
+    currentHeight: raw.currentHeight,
+    lastFinalizedJHeight: raw.lastFinalizedJHeight,
+    requested: String(raw.requested || '0'),
+    collateral: outCollateral.toString(),
+    hubDebt: outPeerCredit.toString(),
+    uncollateralized: uncollateralized.toString(),
+    outCapacity: derived.outCapacity.toString(),
+    hasPolicy: Boolean(raw.hasPolicy),
+    policy: raw.policy,
+  };
+}
+
+async function waitForRebalancePolicy(
+  page: Page,
+  identity: RuntimeIdentity,
+  hubId: string,
+  tokenId = USDC,
+): Promise<RebalanceSnapshot> {
+  let last: RebalanceSnapshot | null = null;
   await expect.poll(
-    async () => (await outCap(page, entityId, counterpartyId, tokenId)) >= minimum,
+    async () => {
+      await flushRuntime(page, 2);
+      last = await readRebalanceSnapshot(page, identity, hubId, tokenId);
+      return Boolean(last?.hasPolicy) && BigInt(last?.policy?.r2cRequestSoftLimit || '0') > 0n;
+    },
     {
-      timeout: 45_000,
+      timeout: 60_000,
       intervals: [250, 500, 1000],
-      message: `${entityId.slice(0, 10)} outCap token=${tokenId} must reach ${minimum}`,
+      message: `rebalance policy must exist for ${identity.entityId.slice(0, 10)} ${TOKEN_SYMBOL_BY_ID[tokenId] || tokenId}`,
     },
   ).toBe(true);
+  return last!;
+}
+
+async function waitForRebalanceSecured(
+  page: Page,
+  identity: RuntimeIdentity,
+  hubId: string,
+  tokenId = USDC,
+  timeoutMs = 120_000,
+): Promise<RebalanceSnapshot> {
+  const startedAt = Date.now();
+  const timeline: RebalanceSnapshot[] = [];
+  let last: RebalanceSnapshot | null = null;
+  while (Date.now() - startedAt < timeoutMs) {
+    await flushRuntime(page, 2);
+    last = await readRebalanceSnapshot(page, identity, hubId, tokenId);
+    if (last) {
+      timeline.push(last);
+      if (
+        BigInt(last.requested) === 0n &&
+        BigInt(last.uncollateralized) === 0n &&
+        BigInt(last.collateral) > 0n &&
+        last.lastFinalizedJHeight > 0
+      ) {
+        return last;
+      }
+    }
+    await page.waitForTimeout(500);
+  }
+  throw new Error(
+    `rebalance did not secure ${identity.entityId.slice(0, 10)} on ${hubId.slice(0, 10)} ` +
+      `token=${TOKEN_SYMBOL_BY_ID[tokenId] || tokenId}: ` +
+      JSON.stringify({ last, timeline: timeline.slice(-20) }, null, 2),
+  );
 }
 
 async function selectContextEntity(page: Page, identity: RuntimeIdentity): Promise<void> {
@@ -703,12 +1168,16 @@ async function selectContextEntity(page: Page, identity: RuntimeIdentity): Promi
   ).toEqual({ entityId: normalizeId(identity.entityId), signerId: normalizeId(identity.signerId) });
 }
 
-async function openSwapWorkspace(page: Page): Promise<void> {
+async function dismissSwapCompletionModal(page: Page): Promise<void> {
   const completionClose = page.getByTestId('swap-completion-close').first();
-  if (await completionClose.isVisible().catch(() => false)) {
+  if (await completionClose.isVisible({ timeout: 1_000 }).catch(() => false)) {
     await completionClose.click();
     await expect(completionClose).toBeHidden({ timeout: 5_000 });
   }
+}
+
+async function openSwapWorkspace(page: Page): Promise<void> {
+  await dismissSwapCompletionModal(page);
   const accountsTab = page.getByTestId('tab-accounts').first();
   await expect(accountsTab).toBeVisible({ timeout: 20_000 });
   await accountsTab.click();
@@ -769,7 +1238,11 @@ async function readOrderbookRowCounts(page: Page): Promise<{ asks: number; bids:
 }
 
 async function selectCrossRoute(page: Page, targetEntityId: string): Promise<void> {
-  const routeSelect = page.getByTestId('swap-route-select').first();
+  const swapPanel = page.locator('.swap-panel')
+    .filter({ has: page.getByTestId('swap-order-amount') })
+    .filter({ has: page.getByTestId('swap-route-flow') })
+    .first();
+  const routeSelect = swapPanel.getByTestId('swap-route-select').first();
   await expect(routeSelect).toBeVisible({ timeout: 20_000 });
   try {
     await expect.poll(
@@ -825,10 +1298,81 @@ async function selectCrossRoute(page: Page, targetEntityId: string): Promise<voi
   }, targetEntityId);
   expect(value, 'cross route value must be present').toBeTruthy();
   await routeSelect.selectOption(value);
-  await expect(page.getByTestId('swap-route-flow').first()).toContainText(/->|Tron|Local/i, { timeout: 10_000 });
+  await routeSelect.dispatchEvent('input');
+  await routeSelect.dispatchEvent('change');
+  await expect.poll(
+    async () => routeSelect.evaluate((select) => ({
+      value: String((select as HTMLSelectElement).value || ''),
+      componentSelected: String((select as HTMLElement).dataset.selectedRouteValue || ''),
+      committedSelected: String((select as HTMLElement).dataset.committedRouteValue || ''),
+      commitNonce: String((select as HTMLElement).dataset.routeCommitNonce || ''),
+      options: Array.from((select as HTMLSelectElement).options).map((option) => String(option.value || '')),
+    })),
+    {
+      timeout: 10_000,
+      intervals: [100, 250, 500],
+      message: 'cross route select must retain the chosen route instead of falling back to same-chain',
+    },
+  ).toMatchObject({
+    componentSelected: value,
+    committedSelected: value,
+    commitNonce: expect.stringMatching(/[1-9]/),
+    options: expect.arrayContaining([value]),
+  });
+  const selectedOptionLabel = await routeSelect.evaluate((select) => {
+    const element = select as HTMLSelectElement;
+    return String(element.selectedOptions[0]?.textContent || '').replace(/\s+/g, ' ').trim();
+  });
+  expect(selectedOptionLabel, 'cross route option must name the target jurisdiction once').toMatch(/\((Testnet|Tron)\)/);
+  await expect.poll(
+    async () => routeSelect.evaluate((select) => {
+      const panel = (select as HTMLElement).closest('.swap-panel');
+      const routeFlow = panel?.querySelector('[data-testid="swap-route-flow"]') as HTMLElement | null;
+      const routeButton = panel?.querySelector('[data-testid="swap-route-menu-button"]') as HTMLElement | null;
+      const routeButtonText = String(routeButton?.textContent || '').replace(/\s+/g, ' ').trim();
+      return {
+        text: String(routeFlow?.textContent || ''),
+        routeButtonText,
+        visibleNetworkWordCount: (routeButtonText.match(/\b(?:Testnet|Tron)\b/g) || []).length,
+        mode: String(routeFlow?.dataset.routeMode || ''),
+        selected: String(routeFlow?.dataset.selectedRouteValue || ''),
+        selectValue: String((select as HTMLSelectElement).value || ''),
+        componentSelected: String((select as HTMLElement).dataset.selectedRouteValue || ''),
+        committedSelected: String((select as HTMLElement).dataset.committedRouteValue || ''),
+        commitNonce: String((select as HTMLElement).dataset.routeCommitNonce || ''),
+        componentMode: String((select as HTMLElement).dataset.selectedRouteMode || ''),
+        routeKnown: String((select as HTMLElement).dataset.selectedRouteKnown || ''),
+        routeDisabled: String((select as HTMLElement).dataset.selectedRouteDisabled || ''),
+        actionTicks: String((select as HTMLElement).dataset.routeActionTicks || ''),
+        domSyncTicks: String((select as HTMLElement).dataset.routeDomSyncTicks || ''),
+        domSyncValue: String((select as HTMLElement).dataset.routeDomSyncValue || ''),
+        actionSyncValue: String((select as HTMLElement).dataset.routeSyncValue || ''),
+        actionSyncKnown: String((select as HTMLElement).dataset.routeSyncKnown || ''),
+        actionSyncDisabled: String((select as HTMLElement).dataset.routeSyncDisabled || ''),
+        actionCommitted: String((select as HTMLElement).dataset.routeCommittedValue || ''),
+      };
+    }),
+    {
+      timeout: 10_000,
+      intervals: [100, 250, 500],
+      message: 'cross route selection must update the visible route flow in the same swap panel',
+    },
+  ).toMatchObject({
+    mode: 'cross',
+    selectValue: value,
+    componentSelected: value,
+    committedSelected: value,
+    commitNonce: expect.stringMatching(/[1-9]/),
+    componentMode: 'cross',
+    routeDisabled: 'false',
+    visibleNetworkWordCount: 1,
+  });
 }
 
-async function expectCrossOrderbookReady(page: Page): Promise<void> {
+async function expectCrossOrderbookReady(
+  page: Page,
+  options: { titlePattern?: RegExp; pairIdPattern?: RegExp } = {},
+): Promise<void> {
   const orderbook = page.getByTestId('swap-orderbook').first();
   await expect(orderbook, 'cross route must keep the right-side orderbook visible').toBeVisible({ timeout: 20_000 });
   const panel = orderbook.locator('.orderbook-panel').first();
@@ -839,7 +1383,11 @@ async function expectCrossOrderbookReady(page: Page): Promise<void> {
       intervals: [100, 250, 500],
       message: 'cross route orderbook must subscribe to the cross venue id, not a numeric same-chain pair',
     })
-    .toMatch(/^cross:/);
+    .toMatch(options.pairIdPattern ?? /^cross:/);
+  await expect(
+    page.locator('[data-testid="swap-market-section"] .book-toolbar strong').first(),
+    'cross orderbook title must disambiguate token jurisdictions',
+  ).toContainText(options.titlePattern ?? /\((Testnet|Tron)\).*\/.*\((Testnet|Tron)\)/, { timeout: 10_000 });
   await expect
     .poll(async () => String(await panel.getAttribute('data-source-status') || ''), {
       timeout: 20_000,
@@ -878,14 +1426,201 @@ async function expectCrossOrderbookReady(page: Page): Promise<void> {
   if (relayCheck.expectedRelayUrl) {
     expect(relayCheck.relayUrl, 'cross orderbook relay must follow the selected book hub gossip relay').toBe(relayCheck.expectedRelayUrl);
   }
-  await expect(page.getByTestId('orderbook-source-status').first()).not.toContainText(/syncing/i, { timeout: 5_000 });
+  await expect(orderbook.getByTestId('orderbook-source-status').first()).not.toContainText(/syncing/i, { timeout: 5_000 });
 }
 
-async function expectRoutedRouteOrderbooks(page: Page): Promise<void> {
+type RoutedRouteExpectationOptions = {
+  requireFullLiveQuotes?: boolean;
+  expectExecutableSettlement?: boolean;
+  preferComplexRoute?: boolean;
+};
+
+async function selectedRoutedCandidateLiveHopCount(page: Page, routeId: string): Promise<number> {
+  return page.getByTestId('swap-routed-candidate').evaluateAll((nodes, selectedRouteId) => {
+    const selected = nodes.find((node) => (node as HTMLElement).dataset.routeId === selectedRouteId) as HTMLElement | undefined;
+    if (!selected) return -1;
+    return Number(selected.dataset.liveHops || 0);
+  }, routeId);
+}
+
+async function collectRoutedQuoteDebug(page: Page): Promise<unknown> {
+  return page.evaluate(() => {
+    const readPanel = (root: ParentNode) => {
+      const panel = root.querySelector('.orderbook-panel') as HTMLElement | null;
+      const status = root.querySelector('[data-testid="orderbook-source-status"]') as HTMLElement | null;
+      return {
+        status: panel?.dataset.sourceStatus || '',
+        hubIds: panel?.dataset.hubIds || '',
+        pairId: panel?.dataset.pairId || '',
+        marketSubKey: panel?.dataset.marketSubKey || '',
+        relayUrl: panel?.dataset.relayUrl || '',
+        statusText: status?.textContent?.replace(/\s+/g, ' ').trim() || '',
+      };
+    };
+    return {
+      relayStats: (window as any).__silentRelayStats || null,
+      sockets: ((window as any).__silentRelaySockets || []).map((socket: any) => ({
+        url: String(socket?.url || ''),
+        readyState: socket?.readyState,
+        pendingMarketDispatch: Boolean(socket?.pendingMarketDispatch),
+        lastMarketSubscribe: socket?.lastMarketSubscribe || null,
+        sentMessages: Array.isArray(socket?.sentMessages) ? socket.sentMessages.slice(-5) : [],
+      })),
+      candidates: Array.from(document.querySelectorAll('[data-testid="swap-routed-candidate"]')).map((node) => {
+        const element = node as HTMLElement;
+        return {
+          routeId: element.dataset.routeId || '',
+          liveHops: element.dataset.liveHops || '',
+          totalHops: element.dataset.totalHops || '',
+          label: element.textContent?.replace(/\s+/g, ' ').trim().slice(0, 300) || '',
+        };
+      }),
+      routePicker: (() => {
+        const picker = document.querySelector('[data-testid="swap-route-picker"]') as HTMLElement | null;
+        return {
+          routedPlanEnabled: picker?.dataset.routedPlanEnabled || '',
+          selectedRoutedRouteId: picker?.dataset.selectedRoutedRouteId || '',
+        };
+      })(),
+      hops: Array.from(document.querySelectorAll('[data-testid="swap-routed-hop"]')).map((node) => {
+        const element = node as HTMLElement;
+        return {
+          pairId: element.dataset.pairId || '',
+          bookHubId: element.dataset.bookHubId || '',
+          label: element.textContent?.replace(/\s+/g, ' ').trim().slice(0, 200) || '',
+        };
+      }),
+      probes: Array.from(document.querySelectorAll('[data-testid="swap-routed-quote-probe"]')).map((node) => {
+        const element = node as HTMLElement;
+        return {
+          pairId: element.dataset.pairId || '',
+          bookHubId: element.dataset.bookHubId || '',
+          panel: readPanel(element),
+        };
+      }),
+      visiblePanel: readPanel(document),
+      execution: (() => {
+        const flow = document.querySelector('[data-testid="swap-routed-execution-flow"]') as HTMLElement | null;
+        const execute = document.querySelector('[data-testid="swap-execute-routed-route"]') as HTMLButtonElement | null;
+        return {
+          executeDisabled: execute?.disabled ?? null,
+          executeStatus: execute?.dataset.status || '',
+          executeText: execute?.textContent?.replace(/\s+/g, ' ').trim() || '',
+          flowStatus: flow?.dataset.status || '',
+          flowText: flow?.textContent?.replace(/\s+/g, ' ').trim().slice(0, 500) || '',
+          steps: Array.from(document.querySelectorAll('[data-testid="swap-routed-execution-step"]')).map((node) => {
+            const element = node as HTMLElement;
+            return {
+              index: element.dataset.stepIndex || '',
+              status: element.dataset.status || '',
+              progressPpm: element.dataset.progressPpm || '',
+              text: element.textContent?.replace(/\s+/g, ' ').trim().slice(0, 250) || '',
+            };
+          }),
+        };
+      })(),
+    };
+  });
+}
+
+async function expectRoutedRouteOrderbooks(page: Page, options: RoutedRouteExpectationOptions = {}): Promise<void> {
+  void options;
+  await expect(page.getByTestId('swap-build-routed-route'), 'multihop routed swaps are intentionally deferred from the main swap UI').toHaveCount(0, { timeout: 5_000 });
+  await expect(page.getByTestId('swap-routed-candidate'), 'routed candidates must stay hidden while direct cross swaps are the mainnet path').toHaveCount(0, { timeout: 5_000 });
+  await expect(page.getByTestId('swap-routed-route'), 'routed hop chips must stay hidden while multihop is deferred').toHaveCount(0, { timeout: 5_000 });
+  await expect(page.getByTestId('swap-routed-quote-probe'), 'hidden routed planner must not open background orderbook probes').toHaveCount(0, { timeout: 5_000 });
+  await expectCrossOrderbookReady(page);
+  return;
+
   const buildButton = page.getByTestId('swap-build-routed-route').first();
   await expect(buildButton, 'cross route builder button must be visible').toBeVisible({ timeout: 10_000 });
   await expect(buildButton, 'cross route builder must be available for complex routed paths').toBeEnabled({ timeout: 10_000 });
-  await buildButton.click();
+  const swapPanel = page.locator('.swap-panel').filter({ has: buildButton }).first();
+  const amountInput = swapPanel.getByTestId('swap-order-amount').first();
+  await expect(amountInput, 'routed best-effort runner needs the same user-entered source amount as a real swap').toBeVisible({ timeout: 10_000 });
+  await amountInput.fill('');
+  await amountInput.pressSequentially('0.01', { delay: 10 });
+  const routePicker = swapPanel.getByTestId('swap-route-picker').first();
+  let amountDiagnostics: Record<string, string | null> = {};
+  await expect
+    .poll(async () => {
+      amountDiagnostics = await routePicker.evaluate((node) => {
+        const element = node as HTMLElement;
+        const input = element.closest('.swap-panel')?.querySelector<HTMLInputElement>('[data-testid="swap-order-amount"]');
+        return {
+          inputValue: input?.value ?? null,
+          amountInput: element.dataset.orderAmountInput ?? null,
+          amountState: element.dataset.orderAmountState ?? null,
+          amountDom: element.dataset.orderAmountDom ?? null,
+          amountNode: element.dataset.orderAmountNode ?? null,
+          amountActionValue: element.dataset.orderAmountActionValue ?? null,
+          amountActionTicks: element.dataset.orderAmountActionTicks ?? null,
+          amountRevision: element.dataset.orderAmountRevision ?? null,
+          amountDomRevision: element.dataset.orderAmountDomRevision ?? null,
+          giveAmount: element.dataset.giveAmount ?? null,
+          canonicalGiveAmount: element.dataset.canonicalGiveAmount ?? null,
+        };
+      });
+      const raw = String(amountDiagnostics.giveAmount || '0');
+      return /^\d+$/.test(raw) ? BigInt(raw) > 0n : false;
+    }, {
+      timeout: 10_000,
+      intervals: [100, 250, 500],
+      message: 'visible source amount must be parsed into a non-zero route amount before building a route',
+    })
+    .toBe(true)
+    .catch((error) => {
+      throw new Error(`${String(error?.message || error)}\namount diagnostics: ${JSON.stringify(amountDiagnostics)}`);
+    });
+  const candidates = swapPanel.getByTestId('swap-routed-candidate');
+  await expect
+    .poll(async () => await candidates.count(), {
+      timeout: 10_000,
+      intervals: [100, 250, 500],
+      message: 'routed planner must expose at least one scored candidate before building a route',
+    })
+    .toBeGreaterThan(0);
+  const preferComplexRoute = options.preferComplexRoute !== false;
+  let complexRouteIndex = -1;
+  await expect
+    .poll(async () => candidates.evaluateAll((nodes) =>
+      nodes.findIndex((node) => Number((node as HTMLElement).dataset.totalHops || 0) >= 3),
+    ), {
+      timeout: 10_000,
+      intervals: [100, 250, 500],
+      message: 'complex routed planner must expose source/cross/target hop topology',
+    })
+    .toBeGreaterThanOrEqual(0);
+  complexRouteIndex = await candidates.evaluateAll((nodes) =>
+    nodes.findIndex((node) => Number((node as HTMLElement).dataset.totalHops || 0) >= 3),
+  );
+  expect(complexRouteIndex, 'complex routed candidate index must remain stable before selection').toBeGreaterThanOrEqual(0);
+  const selectedCandidate = preferComplexRoute ? candidates.nth(complexRouteIndex) : candidates.first();
+  const selectedRouteId = String(await selectedCandidate.getAttribute('data-route-id') || '');
+  expect(selectedRouteId, 'selected routed candidate must expose stable route id').toBeTruthy();
+  const selectedTotalHops = Number(await selectedCandidate.getAttribute('data-total-hops') || 0);
+  expect(selectedTotalHops, 'selected routed candidate must expose at least one executable hop').toBeGreaterThan(0);
+  if (preferComplexRoute) {
+    expect(selectedTotalHops, 'selected routed candidate must be the full source/cross/target topology').toBeGreaterThanOrEqual(3);
+  }
+  await selectedCandidate.scrollIntoViewIfNeeded({ timeout: 5_000 });
+  await selectedCandidate.click({ timeout: 10_000 }).catch(async (error) => {
+    const debug = await collectRoutedQuoteDebug(page);
+    console.log('[E2E routed candidate click debug]', JSON.stringify(debug, null, 2));
+    throw error;
+  });
+  const routeSelect = swapPanel.getByTestId('swap-routed-route-select').first();
+  await expect.poll(async () => String(await routeSelect.inputValue()).trim(), {
+    timeout: 10_000,
+    intervals: [100, 250, 500],
+    message: 'route option state must reflect the selected routed candidate',
+  }).toBe(selectedRouteId);
+  await buildButton.scrollIntoViewIfNeeded({ timeout: 5_000 });
+  await buildButton.click({ timeout: 10_000 }).catch(async (error) => {
+    const debug = await collectRoutedQuoteDebug(page);
+    console.log('[E2E routed build click debug]', JSON.stringify(debug, null, 2));
+    throw error;
+  });
 
   const route = page.getByTestId('swap-routed-route').first();
   await expect(route, 'routed path chips must be visible after one click').toBeVisible({ timeout: 10_000 });
@@ -894,12 +1629,42 @@ async function expectRoutedRouteOrderbooks(page: Page): Promise<void> {
     .poll(async () => await hops.count(), {
       timeout: 10_000,
       intervals: [100, 250, 500],
-      message: 'WETH/USDC cross route must expand into source, bridge, and target orderbooks',
+      message: 'selected cross route must expand into visible orderbook hops',
     })
-    .toBeGreaterThanOrEqual(3);
+    .toBe(selectedTotalHops);
 
   const hopCount = await hops.count();
-  const panel = page.getByTestId('swap-orderbook').locator('.orderbook-panel').first();
+  const pauseToggle = page.getByTestId('swap-routed-pause-toggle').first();
+  await expect(pauseToggle, 'routed flow must expose optional manual pause between hops').toBeVisible({ timeout: 10_000 });
+  if (options.requireFullLiveQuotes) {
+    const uniqueProbeTargets = await hops.evaluateAll((nodes) => new Set(nodes.map((node) => {
+      const element = node as HTMLElement;
+      return `${String(element.dataset.bookHubId || '').toLowerCase()}::${String(element.dataset.pairId || '')}`;
+    })).size);
+    const probes = page.getByTestId('swap-routed-quote-probe');
+    await expect
+      .poll(async () => await probes.count(), {
+        timeout: 10_000,
+        intervals: [100, 250, 500],
+        message: 'routed runner must start background quote probes for selected route hops',
+      })
+      .toBe(uniqueProbeTargets);
+    await expect
+      .poll(async () => selectedRoutedCandidateLiveHopCount(page, selectedRouteId), {
+        timeout: 12_000,
+        intervals: [100, 250, 500],
+        message: 'routed planner must quote every hop from background stream snapshots before manual hop clicks',
+      })
+      .toBe(hopCount)
+      .catch(async (error) => {
+        const debug = await collectRoutedQuoteDebug(page);
+        console.log('[E2E routed live quote debug]', JSON.stringify(debug, null, 2));
+        throw error;
+      });
+  }
+
+  const marketSection = page.getByTestId('swap-market-section').first();
+  const panel = marketSection.locator('.orderbook-panel').last();
   for (let index = 0; index < hopCount; index += 1) {
     const hop = hops.nth(index);
     const expectedPair = String(await hop.getAttribute('data-pair-id') || '');
@@ -914,6 +1679,20 @@ async function expectRoutedRouteOrderbooks(page: Page): Promise<void> {
         message: `routed hop ${index} must switch the visible orderbook pair`,
       })
       .toBe(expectedPair);
+    await expect
+      .poll(async () => String(await marketSection.getAttribute('data-active-book-hub-id') || '').toLowerCase(), {
+        timeout: 10_000,
+        intervals: [100, 250, 500],
+        message: `routed hop ${index} must switch the visible market section hub`,
+      })
+      .toContain(expectedHub);
+    await expect
+      .poll(async () => String(await marketSection.getAttribute('data-orderbook-hub-ids') || '').toLowerCase(), {
+        timeout: 10_000,
+        intervals: [100, 250, 500],
+        message: `routed hop ${index} must pass the selected hub list into the visible market section`,
+      })
+      .toContain(expectedHub);
     await expect
       .poll(async () => String(await panel.getAttribute('data-hub-ids') || '').toLowerCase(), {
         timeout: 10_000,
@@ -930,6 +1709,98 @@ async function expectRoutedRouteOrderbooks(page: Page): Promise<void> {
       .toMatch(/^(ready|empty|no-market|error)$/);
   }
 
+  if (options.requireFullLiveQuotes) {
+    await expect
+      .poll(async () => selectedRoutedCandidateLiveHopCount(page, selectedRouteId), {
+        timeout: 10_000,
+        intervals: [100, 250, 500],
+        message: 'routed planner must keep full live quotes after visible hop orderbooks open',
+      })
+      .toBe(hopCount);
+  } else {
+    await expect
+      .poll(async () => selectedRoutedCandidateLiveHopCount(page, selectedRouteId), {
+        timeout: 5_000,
+        intervals: [100, 250, 500],
+        message: 'selected routed candidate must remain visible while the route is checked',
+      })
+      .toBeGreaterThanOrEqual(0);
+  }
+  const executeButton = page.getByTestId('swap-execute-routed-route').first();
+  await expect(executeButton, 'routed plan must expose a one-click staged route runner').toBeVisible({ timeout: 10_000 });
+  await expect(executeButton, 'routed runner must be enabled once the user enters an amount').toBeEnabled({ timeout: 10_000 });
+  const manualPause = Boolean(options.expectExecutableSettlement && hopCount > 1);
+  if (manualPause) {
+    await pauseToggle.locator('input[type="checkbox"]').check({ timeout: 5_000 });
+  }
+  await executeButton.click({ timeout: 10_000 }).catch(async (error) => {
+    const debug = await collectRoutedQuoteDebug(page);
+    console.log('[E2E routed execute click debug]', JSON.stringify(debug, null, 2));
+    throw error;
+  });
+  const flow = page.getByTestId('swap-routed-execution-flow').first();
+  await expect(flow, 'routed execution flow must render after one click').toBeVisible({ timeout: 10_000 });
+  if (manualPause) {
+    const continueButton = page.getByTestId('swap-continue-routed-route').first();
+    for (let pauseIndex = 0; pauseIndex < hopCount - 1; pauseIndex += 1) {
+      await expect
+        .poll(async () => String(await flow.getAttribute('data-status') || ''), {
+          timeout: 15_000,
+          intervals: [100, 250, 500],
+          message: `routed execution must pause after hop ${pauseIndex} before continuing`,
+        })
+        .toBe('paused');
+      await expect(continueButton, 'paused routed execution must expose an explicit Continue action').toBeVisible({ timeout: 5_000 });
+      await continueButton.click({ timeout: 5_000 });
+    }
+  }
+  await expect
+    .poll(async () => String(await flow.getAttribute('data-status') || ''), {
+      timeout: 15_000,
+      intervals: [100, 250, 500],
+      message: 'routed execution flow must reach a terminal state instead of hanging',
+    })
+    .toMatch(options.expectExecutableSettlement ? /^done$/ : /^(done|failed)$/)
+    .catch(async (error) => {
+      const debug = await collectRoutedQuoteDebug(page);
+      console.log('[E2E routed execution terminal debug]', JSON.stringify(debug, null, 2));
+      throw error;
+    });
+  await expect(flow, 'routed flow must be honest about either unavailable liquidity or sequential best-effort execution').toContainText(
+    options.expectExecutableSettlement
+      ? /Best-effort route completed/i
+      : /(No live|No market|Settlement checkpoint timed out|Best-effort route completed)/i,
+    { timeout: 5_000 },
+  );
+  const steps = page.getByTestId('swap-routed-execution-step');
+  await expect
+    .poll(async () => await steps.count(), {
+      timeout: 5_000,
+      intervals: [100, 250],
+      message: 'routed execution flow must show a row per hop',
+    })
+    .toBe(hopCount);
+  const nonTerminalSteps = await steps.evaluateAll((nodes) =>
+    nodes.filter((node) => {
+      const status = String((node as HTMLElement).dataset.status || '');
+      return status === 'queued' || status === 'active';
+    }).length,
+  );
+  expect(nonTerminalSteps, 'terminal routed flow must not leave queued/active steps hanging').toBe(0);
+  if (options.requireFullLiveQuotes) {
+    await expect(flow, 'full-live routed flow must submit or prepare a concrete per-hop runtime tx').toContainText(
+      /(Submitted|Submitting) (placeSwapOffer|requestCrossJurisdictionSwap)/i,
+      { timeout: 5_000 },
+    );
+    const incompleteDoneSteps = await steps.evaluateAll((nodes) =>
+      nodes.filter((node) => {
+        const element = node as HTMLElement;
+        return element.dataset.status === 'done' && Number(element.dataset.progressPpm || 0) !== 1_000_000;
+      }).length,
+    );
+    expect(incompleteDoneSteps, 'done routed hops must expose full progress').toBe(0);
+  }
+
   await page.getByTestId('swap-clear-routed-route').first().click();
   await expect(page.getByTestId('swap-routed-route')).toHaveCount(0, { timeout: 5_000 });
 }
@@ -943,17 +1814,26 @@ async function expectSwapTokens(page: Page, fromTokenId: number, toTokenId: numb
   await expect(page.getByTestId('swap-to-token-label').first()).toHaveText(toSymbol!, { timeout: 10_000 });
 }
 
+function visibleOrderbookRow(page: Page, side: 'ask' | 'bid') {
+  return page
+    .getByTestId('swap-orderbook')
+    .first()
+    .getByTestId(side === 'ask' ? 'orderbook-ask-row' : 'orderbook-bid-row')
+    .first();
+}
+
 async function clickCrossOrderbookLevel(
   page: Page,
   side: 'ask' | 'bid',
   expectedFromTokenId: number,
   expectedToTokenId: number,
 ): Promise<void> {
-  const row = page.getByTestId(side === 'ask' ? 'orderbook-ask-row' : 'orderbook-bid-row').first();
+  const row = visibleOrderbookRow(page, side);
   await expect(row, `cross ${side} row must be visible before clicking the orderbook`).toBeVisible({ timeout: 30_000 });
   const clickedDisplayedPrice = String(await row.locator('.price').textContent() || '').trim();
-  await row.click();
+  await row.click({ timeout: 10_000 });
   await expectSwapTokens(page, expectedFromTokenId, expectedToTokenId);
+  await expect(page.getByTestId('swap-size-hint').first(), 'cross orderbook click must pin the clicked level in the visible form').toBeVisible({ timeout: 10_000 });
   await expect
     .poll(async () => String(await page.getByTestId('swap-order-amount').first().inputValue()).trim(), {
       timeout: 10_000,
@@ -968,6 +1848,63 @@ async function clickCrossOrderbookLevel(
       })
       .toBe(clickedDisplayedPrice.replace(/,/g, '').trim());
   }
+}
+
+async function expectCrossNonTakeableClickNoop(
+  page: Page,
+  side: 'ask' | 'bid',
+  expectedFromTokenId: number,
+  expectedToTokenId: number,
+): Promise<void> {
+  const panel = page.getByTestId('swap-orderbook').locator('.orderbook-panel').first();
+  const row = visibleOrderbookRow(page, side);
+  await expect(row, `cross ${side} row must be visible to prove wrong-side click behavior`).toBeVisible({ timeout: 20_000 });
+  const before = {
+    pairId: String(await panel.getAttribute('data-pair-id') || ''),
+    hubIds: String(await panel.getAttribute('data-hub-ids') || ''),
+    amount: String(await page.getByTestId('swap-order-amount').first().inputValue()).trim(),
+    price: String(await page.getByTestId('swap-order-price').first().inputValue()).trim(),
+    sizeHintCount: await page.getByTestId('swap-size-hint').count(),
+  };
+  expect(before.pairId, 'cross wrong-side click guard needs an active cross venue').toMatch(/^cross:/);
+
+  await row.click({ timeout: 10_000 });
+  await expectSwapTokens(page, expectedFromTokenId, expectedToTokenId);
+  await expect
+    .poll(async () => String(await panel.getAttribute('data-pair-id') || ''), {
+      timeout: 5_000,
+      intervals: [50, 100, 200],
+      message: 'cross wrong-side click must not switch the visible venue',
+    })
+    .toBe(before.pairId);
+  await expect
+    .poll(async () => String(await panel.getAttribute('data-hub-ids') || ''), {
+      timeout: 5_000,
+      intervals: [50, 100, 200],
+      message: 'cross wrong-side click must not switch the visible book hub',
+    })
+    .toBe(before.hubIds);
+  await expect
+    .poll(async () => String(await page.getByTestId('swap-order-amount').first().inputValue()).trim(), {
+      timeout: 5_000,
+      intervals: [50, 100, 200],
+      message: 'cross wrong-side click must not pin an amount from a non-takeable level',
+    })
+    .toBe(before.amount);
+  await expect
+    .poll(async () => String(await page.getByTestId('swap-order-price').first().inputValue()).trim(), {
+      timeout: 5_000,
+      intervals: [50, 100, 200],
+      message: 'cross wrong-side click must not pin a stale price from another route',
+    })
+    .toBe(before.price);
+  await expect
+    .poll(async () => await page.getByTestId('swap-size-hint').count(), {
+      timeout: 5_000,
+      intervals: [50, 100, 200],
+      message: 'cross wrong-side click must not show a fill hint',
+    })
+    .toBe(before.sizeHintCount);
 }
 
 async function placeCrossOrder(
@@ -988,6 +1925,7 @@ async function placeCrossOrder(
   },
 ): Promise<string> {
   await openSwapWorkspace(page);
+  await dismissSwapCompletionModal(page);
   await selectSourceChainInSwap(page, params.source.entityId);
   await selectCounterpartyInSwap(page, params.hubId);
   if (params.fromTokenId && params.toTokenId && params.fromTokenId === params.toTokenId) {
@@ -998,16 +1936,19 @@ async function placeCrossOrder(
     await selectCrossRoute(page, params.targetEntityId);
   }
   await expectCrossOrderbookReady(page);
+  await dismissSwapCompletionModal(page);
   if (params.checkRoutedPlan) {
     await expectRoutedRouteOrderbooks(page);
     await expectCrossOrderbookReady(page);
   }
   if (params.clickBookSide) {
+    const expectedFromTokenId = params.expectedClickFromTokenId ?? (params.clickBookSide === 'ask' ? USDC : WETH);
+    const expectedToTokenId = params.expectedClickToTokenId ?? (params.clickBookSide === 'ask' ? WETH : USDC);
     await clickCrossOrderbookLevel(
       page,
       params.clickBookSide,
-      params.expectedClickFromTokenId ?? (params.clickBookSide === 'ask' ? USDC : WETH),
-      params.expectedClickToTokenId ?? (params.clickBookSide === 'ask' ? WETH : USDC),
+      expectedFromTokenId,
+      expectedToTokenId,
     );
   }
   const amountInput = page.getByTestId('swap-order-amount').first();
@@ -1305,22 +2246,35 @@ async function waitForCrossPullFlow(
   target: RuntimeIdentity,
   sourceHubId: string,
   targetHubId: string,
+  options: { sourceRouteId?: string; targetRouteId?: string } = {},
 ): Promise<void> {
   try {
     await expect.poll(
       async () => {
         const sourceState = await readCrossState(page, source, sourceHubId);
         const targetState = await readCrossState(page, target, targetHubId);
+        const sourceRoute = options.sourceRouteId
+          ? sourceState.routeSummaries.find((route) => route.orderId === options.sourceRouteId)
+          : sourceState.routeSummaries.find((route) =>
+              route.sourcePull || route.targetPull || ['source_claimed', 'target_claimed', 'settled'].includes(route.status),
+            );
+        const targetRoute = options.targetRouteId
+          ? targetState.routeSummaries.find((route) => route.orderId === options.targetRouteId)
+          : targetState.routeSummaries.find((route) =>
+              route.sourcePull || route.targetPull || ['source_claimed', 'target_claimed', 'settled'].includes(route.status),
+            );
+        const routeHasProgress = (route: typeof sourceRoute): boolean =>
+          Boolean(route) &&
+          (
+            route.cumulativeFillRatio > 0 ||
+            ['source_claimed', 'target_claimed', 'settled'].includes(route.status)
+          );
         return {
-          ok: (
-            (sourceState.routes > 0 && targetState.routes > 0) &&
-            (
-              sourceState.pulls > 0 ||
-              targetState.pulls > 0 ||
-              sourceState.claimedRoutes > 0 ||
-              targetState.claimedRoutes > 0
-            )
-          ),
+          ok: routeHasProgress(sourceRoute) && routeHasProgress(targetRoute),
+          sourceRouteStatus: sourceRoute?.status || '',
+          targetRouteStatus: targetRoute?.status || '',
+          sourceRouteId: sourceRoute?.orderId || '',
+          targetRouteId: targetRoute?.orderId || '',
           sourceRoutes: sourceState.routes,
           targetRoutes: targetState.routes,
           sourcePulls: sourceState.pulls,
@@ -1569,18 +2523,23 @@ async function waitForCrossOffersCleared(
   identity: RuntimeIdentity,
   hubId: string,
   label: string,
+  options: { orderId?: string } = {},
 ): Promise<void> {
   try {
     await expect.poll(
       async () => {
         const state = await readCrossState(page, identity, hubId);
+        const matchingOfferOpen = options.orderId
+          ? state.offerSummaries.some((offer) => offer.offerId === options.orderId)
+          : state.offers > 0;
         return {
-          offers: state.offers,
+          offers: options.orderId ? (matchingOfferOpen ? 1 : 0) : state.offers,
           hasPendingFrame: state.hasPendingFrame,
           mempoolTxs: state.mempoolTxs,
           replicaFound: state.replicaFound,
           accountFound: state.accountFound,
           accountKeys: state.accountKeys,
+          openOfferIds: state.offerSummaries.map((offer) => offer.offerId),
         };
       },
       {
@@ -1981,6 +2940,16 @@ async function waitForCrossSalvageQueued(
 test.describe('E2E Cross-J Swap Isolated Flow', () => {
   test.setTimeout(360_000);
 
+  test('market maker prepublishes same-chain and ETH/TRON cross-chain books before user swaps', async ({ page }) => {
+    const baseline = await timedStep('cross_j_mm_books.ensure_baseline', () => ensureE2EBaseline(page, {
+      apiBaseUrl: API_BASE_URL,
+      requireMarketMaker: true,
+      requireHubMesh: true,
+      minHubCount: 3,
+    }));
+    expectMarketMakerSameAndCrossBooksHealthy(baseline);
+  });
+
   test('cross USDT/USDT orderbook resolves terminal no-market when the selected route relay has no snapshots', async ({ page }) => {
     const baseline = await timedStep('cross_j_no_market.ensure_baseline', () => ensureE2EBaseline(page, {
       apiBaseUrl: API_BASE_URL,
@@ -2047,14 +3016,228 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         message: 'silent cross relay must resolve to no-market instead of hanging in syncing',
       })
       .toBe('no-market');
-    await expect(page.getByTestId('orderbook-source-status').first()).toContainText(/No market/i, { timeout: 5_000 });
-    await expect(page.getByTestId('orderbook-source-status').first()).not.toContainText(/syncing|loading/i, { timeout: 5_000 });
+    await expect(orderbook.getByTestId('orderbook-source-status').first()).toContainText(/No market/i, { timeout: 5_000 });
+    await expect(orderbook.getByTestId('orderbook-source-status').first()).not.toContainText(/syncing|loading/i, { timeout: 5_000 });
+    await expect(page.getByTestId('swap-build-routed-route'), 'multihop execution controls stay hidden from the direct swap flow').toHaveCount(0);
+    await expect(page.getByTestId('swap-routed-quote-probe'), 'manual route recommendations must not open hidden orderbook probes').toHaveCount(0);
+    const recommendation = page.getByTestId('swap-route-recommendation').first();
+    await expect(recommendation, 'terminal no-market direct cross route should show manual route candidates').toBeVisible({ timeout: 10_000 });
     await expect
-      .poll(async () => readOrderbookRowCounts(page), {
+      .poll(async () => await page.getByTestId('swap-route-recommendation-row').count(), {
+        timeout: 5_000,
+        intervals: [100, 250, 500],
+      })
+      .toBeGreaterThan(0);
+    await expect
+      .poll(async () => ({
+        asks: await orderbook.getByTestId('orderbook-ask-row').count(),
+        bids: await orderbook.getByTestId('orderbook-bid-row').count(),
+      }), {
         timeout: 5_000,
         intervals: [100, 250, 500],
       })
       .toEqual({ asks: 0, bids: 0 });
+  });
+
+  test('Tron sibling inherits rebalance policy and auto-collateralizes USDC after faucet', async ({ page }) => {
+    const baseline = await timedStep('cross_j_tron_rebalance.ensure_baseline', () => ensureE2EBaseline(page, {
+      apiBaseUrl: API_BASE_URL,
+      requireMarketMaker: false,
+      requireHubMesh: true,
+      minHubCount: 3,
+    }));
+    const hubId = getPrimaryHubId(baseline);
+    const primaryHubApiBaseUrl = getPrimaryHubApiBaseUrl(baseline, hubId);
+    const primaryHubName = getPrimaryHubName(baseline, hubId);
+    const targetHub = await timedStep('cross_j_tron_rebalance.resolve_rpc2_hub', () =>
+      getSecondaryHubInfo(page, hubId, primaryHubName, primaryHubApiBaseUrl),
+    );
+
+    await timedStep('cross_j_tron_rebalance.goto', () =>
+      gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 }),
+    );
+    const mnemonic = Wallet.createRandom().mnemonic!.phrase;
+    await timedStep('cross_j_tron_rebalance.create_runtime', () =>
+      createRuntimeIdentityViaStore(page, 'cross-tron-rebalance', mnemonic),
+    );
+    await timedStep('cross_j_tron_rebalance.default_jurisdictions', () =>
+      waitForDefaultJurisdictionReplicas(page, 'cross-tron-rebalance'),
+    );
+    const target = await timedStep('cross_j_tron_rebalance.import_rpc2_sibling', () =>
+      importRpc2SiblingEntity(page, mnemonic, 'cross-tron-rebalance'),
+    );
+    expect(
+      /tron|rpc2/i.test(target.jurisdictionName),
+      `target sibling must be in Tron/rpc2 jurisdiction, got ${target.jurisdictionName}`,
+    ).toBe(true);
+
+    await timedStep('cross_j_tron_rebalance.connect_rpc2', () =>
+      ensureDirectHubAccount(page, target, targetHub.entityId, SWAP_TOKENS, 150_000),
+    );
+    const policySnapshot = await timedStep('cross_j_tron_rebalance.wait_policy', () =>
+      waitForRebalancePolicy(page, target, targetHub.entityId, USDC),
+    );
+    expect(policySnapshot.jurisdiction).toMatch(/tron|rpc2/i);
+    expect(BigInt(policySnapshot.policy?.r2cRequestSoftLimit || '0')).toBe(DEFAULT_REBALANCE_SOFT_LIMIT_WEI);
+
+    await timedStep('cross_j_tron_rebalance.faucet_usdc_over_soft_limit', () =>
+      faucetOffchain(page, primaryHubApiBaseUrl, target.entityId, targetHub.entityId, USDC, '700'),
+    );
+    const secured = await timedStep('cross_j_tron_rebalance.wait_secured', () =>
+      waitForRebalanceSecured(page, target, targetHub.entityId, USDC),
+    );
+    expect(BigInt(secured.collateral), `Tron USDC collateral must be positive: ${JSON.stringify(secured)}`).toBeGreaterThan(0n);
+    expect(BigInt(secured.uncollateralized), `Tron USDC debt must be secured: ${JSON.stringify(secured)}`).toBe(0n);
+    expect(secured.lastFinalizedJHeight, `Tron jwatch must finalize AccountSettled: ${JSON.stringify(secured)}`).toBeGreaterThan(0);
+  });
+
+  test('cross WETH/USDC ignores non-takeable orderbook side before filling the takeable side', async ({ page }) => {
+    const baseline = await timedStep('cross_j_wrong_side.ensure_baseline', () => ensureE2EBaseline(page, {
+      apiBaseUrl: API_BASE_URL,
+      requireMarketMaker: false,
+      requireHubMesh: true,
+      minHubCount: 3,
+    }));
+    const hubId = getPrimaryHubId(baseline);
+    const primaryHubApiBaseUrl = getPrimaryHubApiBaseUrl(baseline, hubId);
+    const primaryHubName = getPrimaryHubName(baseline, hubId);
+    const targetHub = await timedStep('cross_j_wrong_side.resolve_rpc2_hub', () =>
+      getSecondaryHubInfo(page, hubId, primaryHubName, primaryHubApiBaseUrl),
+    );
+
+    await timedStep('cross_j_wrong_side.goto', () => gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 }));
+    const mnemonic = Wallet.createRandom().mnemonic!.phrase;
+    const source = await timedStep('cross_j_wrong_side.create_runtime', () =>
+      createRuntimeIdentityViaStore(page, 'cross-wrong-side', mnemonic),
+    );
+    await timedStep('cross_j_wrong_side.default_jurisdictions', () => waitForDefaultJurisdictionReplicas(page, 'cross-wrong-side'));
+    const target = await timedStep('cross_j_wrong_side.import_rpc2_sibling', () =>
+      importRpc2SiblingEntity(page, mnemonic, 'cross-wrong-side'),
+    );
+    await timedStep('cross_j_wrong_side.connect_primary', () =>
+      connectRuntimeToHubWithCredit(page, source, hubId, '10000', SWAP_TOKENS),
+    );
+    await timedStep('cross_j_wrong_side.connect_rpc2', () =>
+      ensureDirectHubAccount(page, target, targetHub.entityId, SWAP_TOKENS, 150_000),
+    );
+    await timedStep('cross_j_wrong_side.faucet_source_weth', () =>
+      faucetOffchain(page, primaryHubApiBaseUrl, source.entityId, hubId, WETH, '1'),
+    );
+    await timedStep('cross_j_wrong_side.wait_source_weth', () =>
+      waitForOutCapAtLeast(page, source.entityId, hubId, WETH, 1n * 10n ** 16n),
+    );
+
+    await timedStep('cross_j_wrong_side.install_synthetic_relay', () =>
+      installSilentRelayWebSocket(page, {
+        currentPage: true,
+        marketSnapshots: [{
+          bids: [{ price: '24900000', size: 1000 }],
+          asks: [{ price: '25100000', size: 1000 }],
+        }],
+      }),
+    );
+    await timedStep('cross_j_wrong_side.open_swap', async () => {
+      await openSwapWorkspace(page);
+      await selectSourceChainInSwap(page, source.entityId);
+      await selectCounterpartyInSwap(page, hubId);
+      await configurePair(page, 'sell');
+      await selectCrossRoute(page, target.entityId);
+    });
+
+    await expectCrossOrderbookReady(page);
+    await expectSwapTokens(page, WETH, USDC);
+    await expectRoutedRouteOrderbooks(page, { requireFullLiveQuotes: true });
+    await expectCrossOrderbookReady(page);
+    await expectSwapTokens(page, WETH, USDC);
+    await expect(visibleOrderbookRow(page, 'ask'), 'synthetic cross book must show a non-takeable ask').toBeVisible({ timeout: 10_000 });
+    await expect(visibleOrderbookRow(page, 'bid'), 'synthetic cross book must show a takeable bid').toBeVisible({ timeout: 10_000 });
+
+    await expectCrossNonTakeableClickNoop(page, 'ask', WETH, USDC);
+    await clickCrossOrderbookLevel(page, 'bid', WETH, USDC);
+  });
+
+  test('cross WETH/USDT displays prices as stable quote per WETH for Tron source', async ({ page }) => {
+    const baseline = await timedStep('cross_j_stable_quote.ensure_baseline', () => ensureE2EBaseline(page, {
+      apiBaseUrl: API_BASE_URL,
+      requireMarketMaker: false,
+      requireHubMesh: true,
+      minHubCount: 3,
+    }));
+    const testnetHubId = getPrimaryHubId(baseline);
+    const primaryHubApiBaseUrl = getPrimaryHubApiBaseUrl(baseline, testnetHubId);
+    const primaryHubName = getPrimaryHubName(baseline, testnetHubId);
+    const tronHub = await timedStep('cross_j_stable_quote.resolve_rpc2_hub', () =>
+      getSecondaryHubInfo(page, testnetHubId, primaryHubName, primaryHubApiBaseUrl),
+    );
+
+    await timedStep('cross_j_stable_quote.goto', () => gotoApp(page, { appBaseUrl: APP_BASE_URL, initTimeoutMs: INIT_TIMEOUT, settleMs: 1200 }));
+    const mnemonic = Wallet.createRandom().mnemonic!.phrase;
+    const testnetEntity = await timedStep('cross_j_stable_quote.create_runtime', () =>
+      createRuntimeIdentityViaStore(page, 'cross-stable-quote', mnemonic),
+    );
+    await timedStep('cross_j_stable_quote.default_jurisdictions', () => waitForDefaultJurisdictionReplicas(page, 'cross-stable-quote'));
+    const tronEntity = await timedStep('cross_j_stable_quote.import_rpc2_sibling', () =>
+      importRpc2SiblingEntity(page, mnemonic, 'cross-stable-quote'),
+    );
+    await timedStep('cross_j_stable_quote.connect_testnet', () =>
+      connectRuntimeToHubWithCredit(page, testnetEntity, testnetHubId, '10000', SWAP_TOKENS),
+    );
+    await timedStep('cross_j_stable_quote.connect_tron', () =>
+      ensureDirectHubAccount(page, tronEntity, tronHub.entityId, SWAP_TOKENS, 150_000),
+    );
+
+    await timedStep('cross_j_stable_quote.install_synthetic_relay', () =>
+      installSilentRelayWebSocket(page, {
+        currentPage: true,
+        marketSnapshots: [{
+          bids: [{ price: '25000000', size: 1000 }],
+          asks: [{ price: '25100000', size: 1000 }],
+        }],
+      }),
+    );
+    await timedStep('cross_j_stable_quote.open_swap', async () => {
+      await openSwapWorkspace(page);
+      await selectSourceChainInSwap(page, tronEntity.entityId);
+      await selectCounterpartyInSwap(page, tronHub.entityId);
+      await configureTokens(page, WETH, USDT);
+      await selectCrossRoute(page, testnetEntity.entityId);
+    });
+
+    await expectCrossOrderbookReady(page, {
+      titlePattern: /WETH\s*\(Tron\)\s*\/\s*USDT\s*\(Testnet\)/,
+      pairIdPattern: /^cross:stack:31338:[^/]+:2\/stack:31337:[^/]+:3$/,
+    });
+    const tokenOptions = await page.evaluate(() => {
+      const optionTexts = (selector: string) => Array.from(document.querySelectorAll(`${selector} option`))
+        .map((option) => String((option as HTMLOptionElement).textContent || '').trim())
+        .filter(Boolean);
+      return {
+        from: optionTexts('[data-testid="swap-from-token-select"]'),
+        to: optionTexts('[data-testid="swap-to-token-select"]'),
+      };
+    });
+    expect(tokenOptions.from, 'Tron source token list must expose Tron-only assets').toEqual(expect.arrayContaining(['TRX', 'SUN']));
+    expect(tokenOptions.to, 'Testnet target token list must not leak Tron-only assets').not.toEqual(expect.arrayContaining(['TRX']));
+    expect(tokenOptions.to, 'Testnet target token list must not leak Tron-only assets').not.toEqual(expect.arrayContaining(['SUN']));
+    await expect(
+      page.getByTestId('orderbook-bid-row').first().locator('.price'),
+      'cross WETH/USDT price must be displayed as USDT per WETH, not inverted WETH per USDT',
+    ).toHaveText('2500.0000', { timeout: 10_000 });
+    await expectSwapTokens(page, WETH, USDT);
+
+    await timedStep('cross_j_stable_quote.configure_reverse_stable_source', async () => {
+      await configureTokens(page, USDT, WETH);
+      await selectCrossRoute(page, testnetEntity.entityId);
+    });
+    await expectCrossOrderbookReady(page, {
+      titlePattern: /WETH\s*\(Testnet\)\s*\/\s*USDT\s*\(Tron\)/,
+      pairIdPattern: /^cross:stack:31337:[^/]+:2\/stack:31338:[^/]+:3$/,
+    });
+    await expect(
+      page.getByTestId('orderbook-bid-row').first().locator('.price'),
+      'cross USDT/WETH must still display stable quote per WETH, not inverted WETH per USDT',
+    ).toHaveText('2500.0000', { timeout: 10_000 });
+    await expectSwapTokens(page, USDT, WETH);
   });
 
   test('two users can place full, partial, and disputed cross-j swaps through the shared swap builder', async ({ browser, page }) => {
@@ -2127,7 +3310,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         waitForOutCapAtLeast(bobPage, bobRpc2.entityId, targetHubId, USDT, 25n * 10n ** 18n),
       ]);
 
-      await timedStep('cross_j_swap.usdt.alice_eth_to_tron_offer', () => placeCrossOrder(alicePage, {
+      const aliceUsdtOrderId = await timedStep('cross_j_swap.usdt.alice_eth_to_tron_offer', () => placeCrossOrder(alicePage, {
         source: alice,
         hubId,
         targetEntityId: aliceRpc2.entityId,
@@ -2137,7 +3320,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         amount: '25',
         price: '1',
       }));
-      await timedStep('cross_j_swap.usdt.bob_tron_to_eth_offer', () => placeCrossOrder(bobPage, {
+      const bobUsdtOrderId = await timedStep('cross_j_swap.usdt.bob_tron_to_eth_offer', () => placeCrossOrder(bobPage, {
         source: bobRpc2,
         hubId: targetHubId,
         targetEntityId: bob.entityId,
@@ -2151,15 +3334,21 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         price: '1',
       }));
       await Promise.all([
-        waitForCrossPullFlow(alicePage, alice, aliceRpc2, hubId, targetHubId),
-        waitForCrossPullFlow(bobPage, bobRpc2, bob, targetHubId, hubId),
+        waitForCrossPullFlow(alicePage, alice, aliceRpc2, hubId, targetHubId, {
+          sourceRouteId: aliceUsdtOrderId,
+          targetRouteId: aliceUsdtOrderId,
+        }),
+        waitForCrossPullFlow(bobPage, bobRpc2, bob, targetHubId, hubId, {
+          sourceRouteId: bobUsdtOrderId,
+          targetRouteId: bobUsdtOrderId,
+        }),
       ]);
       await Promise.all([
-        waitForCrossOffersCleared(alicePage, alice, hubId, 'Alice USDT/USDT'),
-        waitForCrossOffersCleared(bobPage, bobRpc2, targetHubId, 'Bob USDT/USDT'),
+        waitForCrossOffersCleared(alicePage, alice, hubId, 'Alice USDT/USDT', { orderId: aliceUsdtOrderId }),
+        waitForCrossOffersCleared(bobPage, bobRpc2, targetHubId, 'Bob USDT/USDT', { orderId: bobUsdtOrderId }),
       ]);
 
-      await timedStep('cross_j_swap.full.alice_offer', () => placeCrossOrder(alicePage, {
+      const aliceFullOrderId = await timedStep('cross_j_swap.full.alice_offer', () => placeCrossOrder(alicePage, {
         source: alice,
         hubId,
         targetEntityId: aliceRpc2.entityId,
@@ -2168,7 +3357,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         amount: '0.03',
         price: '2500',
       }));
-      await timedStep('cross_j_swap.full.bob_offer', () => placeCrossOrder(bobPage, {
+      const bobFullOrderId = await timedStep('cross_j_swap.full.bob_offer', () => placeCrossOrder(bobPage, {
         source: bobRpc2,
         hubId: targetHubId,
         targetEntityId: bob.entityId,
@@ -2179,19 +3368,25 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       }));
 
       await Promise.all([
-        waitForCrossPullFlow(alicePage, alice, aliceRpc2, hubId, targetHubId),
-        waitForCrossPullFlow(bobPage, bobRpc2, bob, targetHubId, hubId),
+        waitForCrossPullFlow(alicePage, alice, aliceRpc2, hubId, targetHubId, {
+          sourceRouteId: aliceFullOrderId,
+          targetRouteId: aliceFullOrderId,
+        }),
+        waitForCrossPullFlow(bobPage, bobRpc2, bob, targetHubId, hubId, {
+          sourceRouteId: bobFullOrderId,
+          targetRouteId: bobFullOrderId,
+        }),
       ]);
 
       await Promise.all([
-        waitForCrossOffersCleared(alicePage, alice, hubId, 'Alice full'),
-        waitForCrossOffersCleared(bobPage, bobRpc2, targetHubId, 'Bob full'),
+        waitForCrossOffersCleared(alicePage, alice, hubId, 'Alice full', { orderId: aliceFullOrderId }),
+        waitForCrossOffersCleared(bobPage, bobRpc2, targetHubId, 'Bob full', { orderId: bobFullOrderId }),
       ]);
       const bobFullResolve = await timedStep('cross_j_swap.full.bob_price_improvement', () =>
         waitForLatestCrossResolveSnapshot(bobPage, bobRpc2.entityId, targetHubId, 1),
       );
-      expect(bobFullResolve.fillRatio, 'Bob full source-savings must close the cross order').toBe(65_535);
-      expect(bobFullResolve.cancelRemainder, 'Bob full source-savings must remove the terminal order').toBe(true);
+      expect(bobFullResolve.fillRatio, 'Bob target-bonus terminal fill may close before the coarse ratio reaches 65535').toBeLessThan(65_535);
+      expect(bobFullResolve.cancelRemainder, 'Bob target-bonus terminal fill must remove the terminal order').toBe(true);
       expect(bobFullResolve.executionGiveAmount, 'Bob spends execution source, not his 78 USDC limit').toBe('75000000000000000000');
       expect(bobFullResolve.executionWantAmount, 'Bob receives the full 0.03 WETH target').toBe('30000000000000000');
 
@@ -2199,7 +3394,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         waitForOutCapAtLeast(alicePage, aliceRpc2.entityId, targetHubId, USDC, 25n * 10n ** 18n),
         waitForOutCapAtLeast(bobPage, bob.entityId, hubId, WETH, 5n * 10n ** 15n),
       ]);
-      await timedStep('cross_j_swap.reverse.alice_offer', () => placeCrossOrder(alicePage, {
+      const aliceReverseOrderId = await timedStep('cross_j_swap.reverse.alice_offer', () => placeCrossOrder(alicePage, {
         source: aliceRpc2,
         hubId: targetHubId,
         targetEntityId: alice.entityId,
@@ -2207,7 +3402,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         amount: '25',
         price: '2500',
       }));
-      await timedStep('cross_j_swap.reverse.bob_offer', () => placeCrossOrder(bobPage, {
+      const bobReverseOrderId = await timedStep('cross_j_swap.reverse.bob_offer', () => placeCrossOrder(bobPage, {
         source: bob,
         hubId,
         targetEntityId: bobRpc2.entityId,
@@ -2217,12 +3412,18 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         price: '2500',
       }));
       await Promise.all([
-        waitForCrossPullFlow(alicePage, aliceRpc2, alice, targetHubId, hubId),
-        waitForCrossPullFlow(bobPage, bob, bobRpc2, hubId, targetHubId),
+        waitForCrossPullFlow(alicePage, aliceRpc2, alice, targetHubId, hubId, {
+          sourceRouteId: aliceReverseOrderId,
+          targetRouteId: aliceReverseOrderId,
+        }),
+        waitForCrossPullFlow(bobPage, bob, bobRpc2, hubId, targetHubId, {
+          sourceRouteId: bobReverseOrderId,
+          targetRouteId: bobReverseOrderId,
+        }),
       ]);
       await Promise.all([
-        waitForCrossOffersCleared(alicePage, aliceRpc2, targetHubId, 'Alice reverse'),
-        waitForCrossOffersCleared(bobPage, bob, hubId, 'Bob reverse'),
+        waitForCrossOffersCleared(alicePage, aliceRpc2, targetHubId, 'Alice reverse', { orderId: aliceReverseOrderId }),
+        waitForCrossOffersCleared(bobPage, bob, hubId, 'Bob reverse', { orderId: bobReverseOrderId }),
       ]);
 
       await Promise.all([
@@ -2242,7 +3443,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         amount: '0.04',
         price: '2500',
       }));
-      await timedStep('cross_j_swap.partial.bob_offer', () => placeCrossOrder(bobPage, {
+      const bobPartialFirstOrderId = await timedStep('cross_j_swap.partial.bob_offer', () => placeCrossOrder(bobPage, {
         source: bobRpc2,
         hubId: targetHubId,
         targetEntityId: bob.entityId,
@@ -2257,11 +3458,11 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
           waitForCrossPendingFill(alicePage, alice, hubId, 'Alice partial', { routeId: alicePartialOrderId }),
         ),
         timedStep('cross_j_swap.partial.bob_first_cleared', () =>
-          waitForCrossOffersCleared(bobPage, bobRpc2, targetHubId, 'Bob first partial counter-order'),
+          waitForCrossOffersCleared(bobPage, bobRpc2, targetHubId, 'Bob first partial counter-order', { orderId: bobPartialFirstOrderId }),
         ),
       ]);
 
-      await timedStep('cross_j_swap.partial.bob_second_offer', () => placeCrossOrder(bobPage, {
+      const bobPartialSecondOrderId = await timedStep('cross_j_swap.partial.bob_second_offer', () => placeCrossOrder(bobPage, {
         source: bobRpc2,
         hubId: targetHubId,
         targetEntityId: bob.entityId,
@@ -2282,7 +3483,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
       expect(aliceSecondPartial.ratio).toBeGreaterThan(aliceFirstPartial.ratio);
 
       await timedStep('cross_j_swap.partial.bob_second_cleared', () =>
-        waitForCrossOffersCleared(bobPage, bobRpc2, targetHubId, 'Bob second partial counter-order'),
+        waitForCrossOffersCleared(bobPage, bobRpc2, targetHubId, 'Bob second partial counter-order', { orderId: bobPartialSecondOrderId }),
       );
 
       await timedStep('cross_j_swap.partial.alice_cancel_clear', () =>
@@ -2298,7 +3499,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         ),
       ]);
       await timedStep('cross_j_swap.partial.alice_remainder_removed', () =>
-        waitForCrossOffersCleared(alicePage, alice, hubId, 'Alice partial cancel-clear'),
+        waitForCrossOffersCleared(alicePage, alice, hubId, 'Alice partial cancel-clear', { orderId: aliceSecondPartial.routeId }),
       );
 
       const aliceDisputeOrderId = await timedStep('cross_j_swap.dispute.alice_offer', () => placeCrossOrder(alicePage, {
@@ -2309,7 +3510,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
         amount: '0.04',
         price: '2500',
       }));
-      await timedStep('cross_j_swap.dispute.bob_offer', () => placeCrossOrder(bobPage, {
+      const bobDisputeOrderId = await timedStep('cross_j_swap.dispute.bob_offer', () => placeCrossOrder(bobPage, {
         source: bobRpc2,
         hubId: targetHubId,
         targetEntityId: bob.entityId,
@@ -2324,7 +3525,7 @@ test.describe('E2E Cross-J Swap Isolated Flow', () => {
           waitForCrossPendingFill(alicePage, alice, hubId, 'Alice dispute route', { routeId: aliceDisputeOrderId }),
         ),
         timedStep('cross_j_swap.dispute.bob_cleared', () =>
-          waitForCrossOffersCleared(bobPage, bobRpc2, targetHubId, 'Bob dispute counter-order'),
+          waitForCrossOffersCleared(bobPage, bobRpc2, targetHubId, 'Bob dispute counter-order', { orderId: bobDisputeOrderId }),
         ),
       ]);
 
