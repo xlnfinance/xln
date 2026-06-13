@@ -31,6 +31,7 @@
   export let showSources: boolean = false;
   export let sourceLabels: Record<string, string> = {};
   export let sourceAvatars: Record<string, string> = {};
+  export let ownEntityIds: string[] = [];
   export let compactHeader: boolean = false;
   export let priceScale: number = 1;
   export let sizeDisplayScale: number = 1;
@@ -40,12 +41,12 @@
   export let refreshNonce: number = 0;
 
   type BookSide = 'bid' | 'ask';
-  type LevelClickDetail = { side: BookSide; priceTicks: string; displayPrice: string; size: number; accountIds: string[] };
+  type LevelClickDetail = { side: BookSide; priceTicks: string; displayPrice: string; size: string; accountIds: string[] };
   type SnapshotDetail = {
     pairId: string;
     hubIds: string[];
-    bids: Array<{ price: bigint; size: number; total: number }>;
-    asks: Array<{ price: bigint; size: number; total: number }>;
+    bids: Array<{ price: bigint; size: bigint; total: bigint }>;
+    asks: Array<{ price: bigint; size: bigint; total: bigint }>;
     spread: bigint | null;
     spreadPercent: string;
     sourceCount: number;
@@ -60,8 +61,8 @@
     displayDecimals?: number;
     priceScale?: string;
     bucketWidthTicks?: string | null;
-    bids: Array<{ price: bigint | string; size: number; total: number }>;
-    asks: Array<{ price: bigint | string; size: number; total: number }>;
+    bids: Array<{ price: bigint | string; size: bigint | string | number; total: bigint | string | number; ownerIds?: string[]; orderIds?: string[] }>;
+    asks: Array<{ price: bigint | string; size: bigint | string | number; total: bigint | string | number; ownerIds?: string[]; orderIds?: string[] }>;
     spread: bigint | string | null;
     spreadPercent: string;
     hubUpdatedAt?: number;
@@ -85,15 +86,16 @@
   const dispatch = createEventDispatcher<{ levelclick: LevelClickDetail; snapshot: SnapshotDetail }>();
   interface OrderLevel {
     price: bigint;
-    size: number;
-    total: number;
+    size: bigint;
+    total: bigint;
     owners?: string[];
     accountIds?: string[];
   }
   type SourceOrderLevel = {
     price: bigint;
-    size: number;
+    size: bigint;
     sourceHubId: string;
+    ownerIds?: string[];
   };
   type SourceStatus = 'ready' | 'syncing' | 'empty' | 'no-market' | 'error';
 
@@ -107,6 +109,11 @@
   let sourceLabel = 'Sources: 0';
   let sourceStatus: SourceStatus = 'ready';
   let sourceErrorLabel = '';
+  $: ownEntityIdSet = new Set(
+    (Array.isArray(ownEntityIds) ? ownEntityIds : [])
+      .map((id) => String(id || '').trim().toLowerCase())
+      .filter(Boolean),
+  );
 
   // Cumulative hover: index of hovered row (-1 = none).
   // For asks (reversed display): hovering row i highlights rows [i..last] (toward center).
@@ -359,6 +366,19 @@
     return null;
   }
 
+  function toQtyLots(value: unknown): bigint | null {
+    if (typeof value === 'bigint') return value > 0n ? value : null;
+    if (typeof value === 'number') {
+      if (!Number.isFinite(value) || !Number.isInteger(value) || value <= 0) return null;
+      return BigInt(value);
+    }
+    if (typeof value === 'string' && /^\d+$/.test(value.trim())) {
+      const parsed = BigInt(value.trim());
+      return parsed > 0n ? parsed : null;
+    }
+    return null;
+  }
+
   function wsMessageId(prefix: string): string {
     return `${prefix}_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
   }
@@ -402,7 +422,7 @@
   }
 
   function buildOrderLevels(
-    sideSizes: Map<bigint, number>,
+    sideSizes: Map<bigint, bigint>,
     sideOwners: Map<bigint, Set<string>>,
     sideSources: Map<bigint, Set<string>>,
     side: 'bid' | 'ask'
@@ -415,21 +435,24 @@
       })
       .slice(0, visibleDepth());
 
-    let cumulative = 0;
+    let cumulative = 0n;
     return sorted.map(([price, size]) => {
       cumulative += size;
       const entry: OrderLevel = { price, size, total: cumulative };
-      if (showOwners) {
-        entry.owners = Array.from(sideOwners.get(price) || []);
-      }
+      entry.owners = Array.from(sideOwners.get(price) || []);
       entry.accountIds = Array.from(sideSources.get(price) || []);
       return entry;
     });
   }
 
+  function isOwnLevel(level: OrderLevel): boolean {
+    if (ownEntityIdSet.size === 0) return false;
+    return (level.owners || []).some((owner) => ownEntityIdSet.has(String(owner || '').trim().toLowerCase()));
+  }
+
   function buildPerSourceOrderLevels(rawLevels: SourceOrderLevel[], side: 'bid' | 'ask'): OrderLevel[] {
     const sorted = rawLevels
-      .filter((level) => level.price > 0n && Number.isFinite(level.size) && level.size > 0 && Boolean(level.sourceHubId))
+      .filter((level) => level.price > 0n && level.size > 0n && Boolean(level.sourceHubId))
       .sort((a, b) => {
         if (a.price !== b.price) {
           if (side === 'bid') return a.price > b.price ? -1 : 1;
@@ -439,7 +462,7 @@
       })
       .slice(0, visibleDepth());
 
-    let cumulative = 0;
+    let cumulative = 0n;
     return sorted.map((level) => {
       cumulative += level.size;
       return {
@@ -447,6 +470,7 @@
         size: level.size,
         total: cumulative,
         accountIds: [level.sourceHubId],
+        owners: level.ownerIds || [],
       };
     });
   }
@@ -463,19 +487,19 @@
     return BigInt(Math.max(1, Math.round(stepDisplay * scale)));
   }
 
-  function countPositiveLevels(sideSizes: Map<bigint, number>): number {
+  function countPositiveLevels(sideSizes: Map<bigint, bigint>): number {
     let count = 0;
     for (const size of sideSizes.values()) {
-      if (Number.isFinite(size) && size > 0) count += 1;
+      if (size > 0n) count += 1;
     }
     return count;
   }
 
-  function countAggregatedRows(sideSizes: Map<bigint, number>, side: 'bid' | 'ask', stepTicks: bigint): number {
+  function countAggregatedRows(sideSizes: Map<bigint, bigint>, side: 'bid' | 'ask', stepTicks: bigint): number {
     if (stepTicks <= 1n) return countPositiveLevels(sideSizes);
     const buckets = new Set<string>();
     for (const [price, size] of sideSizes.entries()) {
-      if (!Number.isFinite(size) || size <= 0) continue;
+      if (size <= 0n) continue;
       const bucketPrice = side === 'bid'
         ? (price / stepTicks) * stepTicks
         : (((price + stepTicks - 1n) / stepTicks) * stepTicks);
@@ -485,8 +509,8 @@
   }
 
   function computeSmartStep(
-    bidSizes: Map<bigint, number>,
-    askSizes: Map<bigint, number>,
+    bidSizes: Map<bigint, bigint>,
+    askSizes: Map<bigint, bigint>,
   ): (typeof NUMERIC_PRICE_STEP_OPTIONS)[number] {
     const scale = Number.isFinite(priceScale) && priceScale > 0 ? priceScale : 1;
     const bidTarget = Math.min(visibleDepth(), countPositiveLevels(bidSizes));
@@ -507,8 +531,8 @@
   }
 
   function applySmartOrSavedStep(
-    bidSizes: Map<bigint, number>,
-    askSizes: Map<bigint, number>,
+    bidSizes: Map<bigint, bigint>,
+    askSizes: Map<bigint, bigint>,
   ): void {
     const pair = canonicalPairId();
     const saved = priceStepOverrides[pair];
@@ -522,11 +546,11 @@
   }
 
   function aggregateSideLevels(
-    sideSizes: Map<bigint, number>,
+    sideSizes: Map<bigint, bigint>,
     sideOwners: Map<bigint, Set<string>>,
     sideSources: Map<bigint, Set<string>>,
     side: 'bid' | 'ask',
-  ): { sizes: Map<bigint, number>; owners: Map<bigint, Set<string>>; sources: Map<bigint, Set<string>> } {
+  ): { sizes: Map<bigint, bigint>; owners: Map<bigint, Set<string>>; sources: Map<bigint, Set<string>> } {
     if (disablePriceAggregation) {
       return { sizes: sideSizes, owners: sideOwners, sources: sideSources };
     }
@@ -535,7 +559,7 @@
       return { sizes: sideSizes, owners: sideOwners, sources: sideSources };
     }
 
-    const aggregatedSizes = new Map<bigint, number>();
+    const aggregatedSizes = new Map<bigint, bigint>();
     const aggregatedOwners = new Map<bigint, Set<string>>();
     const aggregatedSources = new Map<bigint, Set<string>>();
 
@@ -543,14 +567,12 @@
       const bucketPrice = side === 'bid'
         ? (price / stepTicks) * stepTicks
         : (((price + stepTicks - 1n) / stepTicks) * stepTicks);
-      aggregatedSizes.set(bucketPrice, (aggregatedSizes.get(bucketPrice) || 0) + size);
-      if (showOwners) {
-        const srcOwners = sideOwners.get(price);
-        if (srcOwners && srcOwners.size > 0) {
-          const dstOwners = aggregatedOwners.get(bucketPrice) || new Set<string>();
-          for (const owner of srcOwners) dstOwners.add(owner);
-          aggregatedOwners.set(bucketPrice, dstOwners);
-        }
+      aggregatedSizes.set(bucketPrice, (aggregatedSizes.get(bucketPrice) || 0n) + size);
+      const srcOwners = sideOwners.get(price);
+      if (srcOwners && srcOwners.size > 0) {
+        const dstOwners = aggregatedOwners.get(bucketPrice) || new Set<string>();
+        for (const owner of srcOwners) dstOwners.add(owner);
+        aggregatedOwners.set(bucketPrice, dstOwners);
       }
       const srcSources = sideSources.get(price);
       if (srcSources && srcSources.size > 0) {
@@ -656,8 +678,8 @@
   }
 
   function applyStreamOrderbook(sources: string[], pair: string): boolean {
-    const bidSizes = new Map<bigint, number>();
-    const askSizes = new Map<bigint, number>();
+    const bidSizes = new Map<bigint, bigint>();
+    const askSizes = new Map<bigint, bigint>();
     const bidOwners = new Map<bigint, Set<string>>();
     const askOwners = new Map<bigint, Set<string>>();
     const bidSources = new Map<bigint, Set<string>>();
@@ -685,22 +707,34 @@
       }
       for (const level of snapshot.bids || []) {
         const price = toPriceTicks(level.price);
-        const size = Number(level.size || 0);
-        if (price === null || !Number.isFinite(size) || size <= 0) continue;
+        const size = toQtyLots(level.size);
+        if (price === null || size === null) continue;
         hasAnyLevel = true;
-        rawBidLevels.push({ price, size, sourceHubId });
-        bidSizes.set(price, (bidSizes.get(price) || 0) + size);
+        const ownerIds = (level.ownerIds || [])
+          .map((ownerId) => String(ownerId || '').trim().toLowerCase())
+          .filter(Boolean);
+        rawBidLevels.push({ price, size, sourceHubId, ownerIds });
+        bidSizes.set(price, (bidSizes.get(price) || 0n) + size);
+        const ownerSet = bidOwners.get(price) || new Set<string>();
+        for (const ownerId of ownerIds) ownerSet.add(ownerId);
+        if (ownerSet.size > 0) bidOwners.set(price, ownerSet);
         const sourcesSet = bidSources.get(price) || new Set<string>();
         sourcesSet.add(sourceHubId);
         bidSources.set(price, sourcesSet);
       }
       for (const level of snapshot.asks || []) {
         const price = toPriceTicks(level.price);
-        const size = Number(level.size || 0);
-        if (price === null || !Number.isFinite(size) || size <= 0) continue;
+        const size = toQtyLots(level.size);
+        if (price === null || size === null) continue;
         hasAnyLevel = true;
-        rawAskLevels.push({ price, size, sourceHubId });
-        askSizes.set(price, (askSizes.get(price) || 0) + size);
+        const ownerIds = (level.ownerIds || [])
+          .map((ownerId) => String(ownerId || '').trim().toLowerCase())
+          .filter(Boolean);
+        rawAskLevels.push({ price, size, sourceHubId, ownerIds });
+        askSizes.set(price, (askSizes.get(price) || 0n) + size);
+        const ownerSet = askOwners.get(price) || new Set<string>();
+        for (const ownerId of ownerIds) ownerSet.add(ownerId);
+        if (ownerSet.size > 0) askOwners.set(price, ownerSet);
         const sourcesSet = askSources.get(price) || new Set<string>();
         sourcesSet.add(sourceHubId);
         askSources.set(price, sourcesSet);
@@ -772,25 +806,43 @@
     return `${whole.toString()}.${frac.toString().padStart(decimals, '0')}`;
   }
 
-  function scaledSize(size: number): number {
+  function scaledSize(size: bigint): number {
     const scale = Number.isFinite(sizeDisplayScale) && sizeDisplayScale > 0 ? sizeDisplayScale : 1;
-    return size / scale;
+    return Number(size) / scale;
   }
 
-  function formatSize(size: number): string {
+  function formatSize(size: bigint): string {
     const displaySize = scaledSize(size);
     if (displaySize >= 1_000_000) return (displaySize / 1_000_000).toFixed(2) + 'M';
     if (displaySize >= 1_000) return (displaySize / 1_000).toFixed(2) + 'K';
     return displaySize.toLocaleString(undefined, { minimumFractionDigits: 0, maximumFractionDigits: 6 });
   }
 
+  function maxLevelSize(levels: OrderLevel[]): bigint {
+    return levels.reduce((max, level) => level.size > max ? level.size : max, 1n);
+  }
+
+  function sumLevelSize(levels: OrderLevel[]): bigint {
+    return levels.reduce((sum, level) => sum + level.size, 0n);
+  }
+
+  function widthPct(size: bigint, max: bigint): number {
+    if (size <= 0n || max <= 0n) return 0;
+    return Number((size * 10_000n) / max) / 100;
+  }
+
+  function ratioPct(part: bigint, total: bigint): number {
+    if (part <= 0n || total <= 0n) return 0;
+    return Number((part * 10_000n) / total) / 100;
+  }
+
   function emitLevelClick(side: BookSide, level: OrderLevel) {
-    if (!Number.isFinite(level.size)) return;
+    if (level.size <= 0n) return;
     dispatch('levelclick', {
       side,
       priceTicks: String(level.price),
       displayPrice: formatPrice(level.price),
-      size: level.size,
+      size: level.size.toString(),
       accountIds: Array.isArray(level.accountIds) ? level.accountIds : [],
     });
   }
@@ -802,7 +854,7 @@
       side: preferredClickSide === 'bid' ? 'bid' : 'ask',
       priceTicks: String(preferredLevel.price),
       displayPrice: formatPrice(preferredLevel.price),
-      size: preferredLevel.size,
+      size: preferredLevel.size.toString(),
       accountIds: Array.isArray(preferredLevel.accountIds) ? preferredLevel.accountIds : [],
     });
   }
@@ -998,14 +1050,14 @@
   }
 
   // Max size for bar scaling
-  $: maxBidSize = Math.max(...bids.map(b => b.size), 1);
-  $: maxAskSize = Math.max(...asks.map(a => a.size), 1);
-  $: maxSize = Math.max(maxBidSize, maxAskSize);
-  $: bidVisibleSize = bids.reduce((acc, level) => acc + level.size, 0);
-  $: askVisibleSize = asks.reduce((acc, level) => acc + level.size, 0);
+  $: maxBidSize = maxLevelSize(bids);
+  $: maxAskSize = maxLevelSize(asks);
+  $: maxSize = maxBidSize > maxAskSize ? maxBidSize : maxAskSize;
+  $: bidVisibleSize = sumLevelSize(bids);
+  $: askVisibleSize = sumLevelSize(asks);
   $: visibleSizeTotal = bidVisibleSize + askVisibleSize;
-  $: buyRatioPct = visibleSizeTotal > 0 ? (bidVisibleSize / visibleSizeTotal) * 100 : 0;
-  $: sellRatioPct = visibleSizeTotal > 0 ? 100 - buyRatioPct : 0;
+  $: buyRatioPct = ratioPct(bidVisibleSize, visibleSizeTotal);
+  $: sellRatioPct = visibleSizeTotal > 0n ? 100 - buyRatioPct : 0;
 
   onMount(() => {
     mounted = true;
@@ -1099,7 +1151,9 @@
           data-testid="orderbook-ask-row"
           data-price={ask.price.toString()}
           data-size={String(ask.size)}
+          data-own-order={isOwnLevel(ask) ? 'true' : 'false'}
           class:with-sources={showSources}
+          class:own-order={isOwnLevel(ask)}
           class:cumulative-highlight={hoverAskDisplayIdx >= 0 && i >= hoverAskDisplayIdx}
           class:cumulative-first={hoverAskDisplayIdx >= 0 && i === hoverAskDisplayIdx}
           class:cumulative-last={hoverAskDisplayIdx >= 0 && i >= hoverAskDisplayIdx && i === asks.length - 1}
@@ -1115,7 +1169,7 @@
             }
           }}
         >
-          <div class="bar ask-bar" style="width: {(ask.size / maxSize) * 100}%"></div>
+          <div class="bar ask-bar" style="width: {widthPct(ask.size, maxSize)}%"></div>
           {#if showSources}
             <span class="sources-cell">
               {#each ask.accountIds || [] as sourceId (sourceId)}
@@ -1135,6 +1189,9 @@
             </span>
           {/if}
           <span class="price ask-price">{formatPrice(ask.price)}</span>
+          {#if isOwnLevel(ask)}
+            <span class="own-badge" title="Your open order at this level">Mine</span>
+          {/if}
           <span class="size">{formatSize(ask.size)}</span>
           <span class="total">{formatSize(ask.total)}</span>
           {#if showOwners && ask.owners}
@@ -1174,7 +1231,9 @@
           data-testid="orderbook-bid-row"
           data-price={bid.price.toString()}
           data-size={String(bid.size)}
+          data-own-order={isOwnLevel(bid) ? 'true' : 'false'}
           class:with-sources={showSources}
+          class:own-order={isOwnLevel(bid)}
           class:cumulative-highlight={hoverBidIdx >= 0 && i <= hoverBidIdx}
           class:cumulative-first={hoverBidIdx >= 0 && i === 0}
           class:cumulative-last={hoverBidIdx >= 0 && i === hoverBidIdx}
@@ -1190,7 +1249,7 @@
             }
           }}
         >
-          <div class="bar bid-bar" style="width: {(bid.size / maxSize) * 100}%"></div>
+          <div class="bar bid-bar" style="width: {widthPct(bid.size, maxSize)}%"></div>
           {#if showSources}
             <span class="sources-cell">
               {#each bid.accountIds || [] as sourceId (sourceId)}
@@ -1210,6 +1269,9 @@
             </span>
           {/if}
           <span class="price bid-price">{formatPrice(bid.price)}</span>
+          {#if isOwnLevel(bid)}
+            <span class="own-badge" title="Your open order at this level">Mine</span>
+          {/if}
           <span class="size">{formatSize(bid.size)}</span>
           <span class="total">{formatSize(bid.total)}</span>
           {#if showOwners && bid.owners}
@@ -1504,6 +1566,16 @@
     background: rgba(255, 255, 255, 0.06);
   }
 
+  .row.own-order {
+    outline: 1px solid rgba(251, 191, 36, 0.75);
+    outline-offset: -1px;
+    background: rgba(251, 191, 36, 0.08);
+  }
+
+  .row.own-order .bar {
+    opacity: 0.25;
+  }
+
   .row.cumulative-highlight {
     background: rgba(255, 255, 255, 0.03);
     border-left: 1px dashed rgba(255, 255, 255, 0.12);
@@ -1556,6 +1628,27 @@
   .price {
     font-weight: 500;
     z-index: 1;
+  }
+
+  .own-badge {
+    position: absolute;
+    left: 104px;
+    top: 50%;
+    transform: translateY(-50%);
+    z-index: 2;
+    padding: 0 5px;
+    border-radius: 4px;
+    border: 1px solid rgba(251, 191, 36, 0.55);
+    background: rgba(251, 191, 36, 0.14);
+    color: #facc15;
+    font-size: 9px;
+    font-weight: 700;
+    line-height: 14px;
+    pointer-events: none;
+  }
+
+  .row.with-sources .own-badge {
+    left: 136px;
   }
 
   .bid-price {

@@ -13,15 +13,15 @@ export type TIF = 0 | 1 | 2;     // 0 = GTC, 1 = IOC, 2 = FOK
 export const MAX_FILL_RATIO = 65535;
 
 export type OrderCmd =
-  | { kind: 0; ownerId: string; orderId: string; side: Side; tif: TIF; postOnly: boolean; priceTicks: bigint; qtyLots: number; minFillRatio?: number }
+  | { kind: 0; ownerId: string; orderId: string; side: Side; tif: TIF; postOnly: boolean; priceTicks: bigint; qtyLots: bigint; minFillRatio?: number }
   | { kind: 1; ownerId: string; orderId: string }
-  | { kind: 2; ownerId: string; orderId: string; newPriceTicks: bigint | null; qtyDeltaLots: number };
+  | { kind: 2; ownerId: string; orderId: string; newPriceTicks: bigint | null; qtyDeltaLots: bigint };
 
 export type BookEvent =
   | { type: 'ACK'; orderId: string; ownerId: string }
   | { type: 'REJECT'; orderId: string; ownerId: string; reason: string; blockingOrderId?: string }
-  | { type: 'TRADE'; price: bigint; qty: number; makerOwnerId: string; takerOwnerId: string; makerOrderId: string; takerOrderId: string; makerQtyBefore: number; takerQtyTotal: number }
-  | { type: 'REDUCED'; orderId: string; ownerId: string; delta: number; remain: number }
+  | { type: 'TRADE'; price: bigint; qty: bigint; makerOwnerId: string; takerOwnerId: string; makerOrderId: string; takerOrderId: string; makerQtyBefore: bigint; takerQtyTotal: bigint }
+  | { type: 'REDUCED'; orderId: string; ownerId: string; delta: bigint; remain: bigint }
   | { type: 'CANCELED'; orderId: string; ownerId: string };
 
 export interface BookParams {
@@ -35,7 +35,7 @@ export interface BookOrderState {
   ownerId: string;
   side: Side;
   priceTicks: bigint;
-  qtyLots: number;
+  qtyLots: bigint;
   seq: number;
   bucketId: bigint;
 }
@@ -43,7 +43,7 @@ export interface BookOrderState {
 export interface PriceLevelState {
   priceTicks: bigint;
   orderIds: string[];
-  totalQtyLots: number;
+  totalQtyLots: bigint;
 }
 
 export interface PriceBucketState {
@@ -54,7 +54,7 @@ export interface PriceBucketState {
 
 export interface BookSideLevel {
   priceTicks: bigint;
-  qtyLots: number;
+  qtyLots: bigint;
   ownerIds: string[];
   orderIds: string[];
 }
@@ -76,7 +76,7 @@ export interface ApplyCommandOptions {
   suspendedOrderIds?: ReadonlySet<string>;
 }
 
-const MAX_QTY = 0xFFFFFFFF;
+export const MAX_ORDERBOOK_QTY_LOTS = 10n ** 24n;
 const PRIME = 0x1_0000_01n;
 
 type MutableBookState = {
@@ -180,7 +180,7 @@ function addRestingOrder(state: MutableBookState, order: BookOrderState): void {
     level = {
       priceTicks: order.priceTicks,
       orderIds: [],
-      totalQtyLots: 0,
+      totalQtyLots: 0n,
     };
     bucket.levels.set(levelKey, level);
     insertPriceAsc(bucket.pricesAsc, order.priceTicks);
@@ -206,11 +206,11 @@ function removeExistingOrder(state: MutableBookState, orderId: string): BookOrde
     throw new Error(`BOOK_CORRUPTION: order ${orderId} missing from level queue`);
   }
   const nextTotalQtyLots = level.totalQtyLots - order.qtyLots;
-  if (nextTotalQtyLots < 0) {
+  if (nextTotalQtyLots < 0n) {
     throw new Error(`BOOK_CORRUPTION: level quantity underflow while removing ${orderId}`);
   }
   level.totalQtyLots = nextTotalQtyLots;
-  if (level.orderIds.length === 0 || level.totalQtyLots === 0) {
+  if (level.orderIds.length === 0 || level.totalQtyLots === 0n) {
     bucket.levels.delete(priceKey(order.priceTicks));
     removeBigInt(bucket.pricesAsc, order.priceTicks);
   }
@@ -237,14 +237,14 @@ function* iterateOrderedLevels(
       for (let i = bucket.pricesAsc.length - 1; i >= 0; i -= 1) {
         const priceTicks = bucket.pricesAsc[i]!;
         const level = bucket.levels.get(priceKey(priceTicks));
-        if (!level || level.orderIds.length === 0 || level.totalQtyLots <= 0) continue;
+        if (!level || level.orderIds.length === 0 || level.totalQtyLots <= 0n) continue;
         yield { bucketId, level };
       }
       continue;
     }
     for (const priceTicks of bucket.pricesAsc) {
       const level = bucket.levels.get(priceKey(priceTicks));
-      if (!level || level.orderIds.length === 0 || level.totalQtyLots <= 0) continue;
+      if (!level || level.orderIds.length === 0 || level.totalQtyLots <= 0n) continue;
       yield { bucketId, level };
     }
   }
@@ -268,7 +268,7 @@ function getTopLevelIgnoringSuspended(
     for (const orderId of view.level.orderIds) {
       if (suspendedOrderIds.has(orderId)) continue;
       const order = state.orders.get(orderId);
-      if (order && order.qtyLots > 0) return view;
+      if (order && order.qtyLots > 0n) return view;
     }
   }
   return null;
@@ -302,9 +302,9 @@ function estimateImmediateFill(
   takerSide: Side,
   takerOwnerId: string,
   takerPriceTicks: bigint,
-  qtyLots: number,
+  qtyLots: bigint,
   suspendedOrderIds?: ReadonlySet<string>,
-): { filledQty: number; blockingOrderId?: string } {
+): { filledQty: bigint; blockingOrderId?: string } {
   let remaining = qtyLots;
   const oppositeSide: Side = takerSide === 0 ? 1 : 0;
   for (const view of iterateOrderedLevels(state, oppositeSide)) {
@@ -312,14 +312,14 @@ function estimateImmediateFill(
     for (const makerOrderId of view.level.orderIds) {
       if (suspendedOrderIds?.has(makerOrderId)) continue;
       const maker = state.orders.get(makerOrderId);
-      if (!maker || maker.qtyLots <= 0) continue;
+      if (!maker || maker.qtyLots <= 0n) continue;
       if (maker.ownerId === takerOwnerId && state.params.stpPolicy === 1) {
         // STP cancels the remaining taker quantity from the first self-cross onward.
         // Better-priced third-party liquidity ahead of that self order is still fillable.
         return { filledQty: qtyLots - remaining, blockingOrderId: makerOrderId };
       }
-      remaining -= Math.min(maker.qtyLots, remaining);
-      if (remaining <= 0) return { filledQty: qtyLots };
+      remaining -= maker.qtyLots < remaining ? maker.qtyLots : remaining;
+      if (remaining <= 0n) return { filledQty: qtyLots };
     }
   }
   return { filledQty: qtyLots - remaining };
@@ -353,18 +353,18 @@ function matchAgainstBook(
   takerOwnerId: string,
   takerOrderId: string,
   takerPriceTicks: bigint,
-  takerQtyLots: number,
+  takerQtyLots: bigint,
   events: BookEvent[],
   suspendedOrderIds?: ReadonlySet<string>,
-): { remaining: number; blockingOrderId?: string } {
+): { remaining: bigint; blockingOrderId?: string } {
   let remaining = takerQtyLots;
 
-  while (remaining > 0) {
+  while (remaining > 0n) {
     const best = findBestMatchableMaker(state, takerSide, takerPriceTicks, suspendedOrderIds);
     if (!best) break;
     const { makerOrderId } = best;
     const maker = best.maker;
-    if (!maker || maker.qtyLots <= 0) {
+    if (!maker || maker.qtyLots <= 0n) {
       if (!removeOrderId(best.level.orderIds, makerOrderId)) {
         throw new Error(`BOOK_CORRUPTION: top-of-book order ${makerOrderId} missing from level queue`);
       }
@@ -392,11 +392,11 @@ function matchAgainstBook(
       return { remaining, blockingOrderId: maker.orderId };
     }
 
-    const tradeQty = Math.min(maker.qtyLots, remaining);
+    const tradeQty = maker.qtyLots < remaining ? maker.qtyLots : remaining;
     const makerQtyBefore = maker.qtyLots;
 
     state.tradeCount += 1;
-    state.tradeQtySum += BigInt(tradeQty);
+    state.tradeQtySum += tradeQty;
     bumpHash(state, 3, best.level.priceTicks, tradeQty);
 
     events.push({
@@ -418,7 +418,7 @@ function matchAgainstBook(
     } else {
       maker.qtyLots -= tradeQty;
       const nextTotalQtyLots = best.level.totalQtyLots - tradeQty;
-      if (nextTotalQtyLots < 0) {
+      if (nextTotalQtyLots < 0n) {
         throw new Error(`BOOK_CORRUPTION: level quantity underflow while reducing ${maker.orderId}`);
       }
       best.level.totalQtyLots = nextTotalQtyLots;
@@ -501,7 +501,7 @@ export function applyCommand(state: BookState, cmd: OrderCmd, options: ApplyComm
 
   const { ownerId, orderId, side, tif, postOnly, priceTicks, qtyLots, minFillRatio = 0 } = cmd;
 
-  if (qtyLots <= 0 || qtyLots > MAX_QTY) {
+  if (qtyLots <= 0n || qtyLots > MAX_ORDERBOOK_QTY_LOTS) {
     events.push({ type: 'REJECT', orderId, ownerId, reason: 'qty out of range' });
     return { state, events };
   }
@@ -539,7 +539,7 @@ export function applyCommand(state: BookState, cmd: OrderCmd, options: ApplyComm
     return { state, events };
   }
   if (minFillRatio > 0 && (tif === 1 || tif === 2)) {
-    const fillRatio = Math.floor((estimate.filledQty * MAX_FILL_RATIO) / qtyLots);
+    const fillRatio = Number((estimate.filledQty * BigInt(MAX_FILL_RATIO)) / qtyLots);
     if (fillRatio < minFillRatio) {
       events.push({ type: 'REJECT', orderId, ownerId, reason: `minFillRatio not met: ${fillRatio} < ${minFillRatio} (pre-check)` });
       return { state, events };
@@ -551,11 +551,11 @@ export function applyCommand(state: BookState, cmd: OrderCmd, options: ApplyComm
   const filledQty = qtyLots - remaining;
   const stpBlocked = match.blockingOrderId !== undefined;
 
-  if (remaining > 0) {
+  if (remaining > 0n) {
     if (stpBlocked) {
       // STP is an explicit cancel-remainder outcome. We never rest the leftover taker size.
     } else if (tif === 1 || tif === 2) {
-      if (filledQty === 0) {
+      if (filledQty === 0n) {
         events.push({ type: 'REJECT', orderId, ownerId, reason: 'no fill' });
       }
     } else {
@@ -609,15 +609,15 @@ export function getBookSideLevels(state: BookState, side: Side, depth = 10): Boo
   for (const view of getOrderedLevels(state, side)) {
     const ownerIds = new Set<string>();
     const orderIds: string[] = [];
-    let totalQtyLots = 0;
+    let totalQtyLots = 0n;
     for (const orderId of view.level.orderIds) {
       const order = state.orders.get(orderId);
-      if (!order || order.qtyLots <= 0) continue;
+      if (!order || order.qtyLots <= 0n) continue;
       ownerIds.add(order.ownerId);
       orderIds.push(orderId);
       totalQtyLots += order.qtyLots;
     }
-    if (totalQtyLots <= 0) continue;
+    if (totalQtyLots <= 0n) continue;
     out.push({
       priceTicks: view.level.priceTicks,
       qtyLots: totalQtyLots,

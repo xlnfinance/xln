@@ -104,7 +104,7 @@ const seedAsks = (count: number, levels: number): BookState => {
       tif: 0,
       postOnly: false,
       priceTicks,
-      qtyLots: 1,
+      qtyLots: 1n,
     });
     book = result.state;
     if (result.events.some((event) => event.type === 'REJECT')) {
@@ -127,7 +127,7 @@ const runSweep = (swaps: number, levels: number): { book: BookState; trades: num
       tif: 1,
       postOnly: false,
       priceTicks: 25_000_000n + BigInt(levels),
-      qtyLots: 1,
+      qtyLots: 1n,
     });
     book = result.state;
     trades += countTrades(result.events);

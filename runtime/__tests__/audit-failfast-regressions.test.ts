@@ -1939,10 +1939,44 @@ describe('audit fail-fast regressions', () => {
     expect(result.newState.accounts.get(counterpartyId)?.activeDispute?.finalizeQueued).toBe(false);
   });
 
-  test('submitRuntimeJOutbox fails fast without queuing abort state on submit failure', async () => {
+  test('submitRuntimeJOutbox stops on transient submit failure without poisoning sentBatch', async () => {
+    const entityId = `0x${'ab'.repeat(32)}`;
+    const batchHash = `0x${'11'.repeat(32)}`;
     const env = createEmptyEnv('j-submit-fail-fast');
     env.timestamp = 123;
     env.scenarioMode = false;
+    const state = makeEntityState(entityId);
+    state.jBatchState = {
+      batch: createEmptyBatch(),
+      jurisdiction: null,
+      lastBroadcast: 0,
+      broadcastCount: 0,
+      failedAttempts: 0,
+      status: 'sent',
+      sentBatch: {
+        batch: {
+          ...createEmptyBatch(),
+          reserveToReserve: [{
+            receivingEntity: `0x${'ef'.repeat(32)}`,
+            tokenId: 1,
+            amount: 10n,
+          }],
+        },
+        batchHash,
+        encodedBatch: '0x1234',
+        entityNonce: 1,
+        firstSubmittedAt: 123,
+        lastSubmittedAt: 123,
+        submitAttempts: 1,
+      },
+    };
+    env.eReplicas.set(`${entityId}:1`, {
+      entityId,
+      signerId: '1',
+      mempool: [],
+      isProposer: true,
+      state,
+    } as EntityReplica);
     env.jReplicas = new Map([
       [
         'Testnet',
@@ -1964,7 +1998,7 @@ describe('audit fail-fast regressions', () => {
           jTxs: [
             {
               type: 'batch',
-              entityId: `0x${'ab'.repeat(32)}`,
+              entityId,
               data: {
                 batch: {
                   ...createEmptyBatch(),
@@ -1974,7 +2008,7 @@ describe('audit fail-fast regressions', () => {
                     amount: 10n,
                   }],
                 },
-                batchHash: `0x${'11'.repeat(32)}`,
+                batchHash,
                 encodedBatch: '0x1234',
                 entityNonce: 1,
                 hankoSignature: '0x1234',
@@ -1991,9 +2025,104 @@ describe('audit fail-fast regressions', () => {
           queuedInputs.push(...(inputs ?? []));
         },
       },
-    )).rejects.toThrow(/J_SUBMIT_FATAL: ECONNREFUSED/);
+    )).rejects.toThrow(/J_SUBMIT_TRANSIENT: ECONNREFUSED/);
 
     expect(queuedInputs).toHaveLength(0);
+    expect(state.jBatchState?.status).toBe('sent');
+    expect(state.jBatchState?.failedAttempts).toBe(1);
+    expect(state.jBatchState?.sentBatch).toBeDefined();
+    expect(state.jBatchState?.sentBatch?.terminalFailure).toBeUndefined();
+  });
+
+  test('submitRuntimeJOutbox marks staticCall revert as terminal before halting', async () => {
+    const entityId = `0x${'ad'.repeat(32)}`;
+    const batchHash = `0x${'12'.repeat(32)}`;
+    const env = createEmptyEnv('j-submit-staticcall-fail-fast');
+    env.timestamp = 124;
+    env.scenarioMode = false;
+    const state = makeEntityState(entityId);
+    state.jBatchState = {
+      batch: createEmptyBatch(),
+      jurisdiction: null,
+      lastBroadcast: 0,
+      broadcastCount: 0,
+      failedAttempts: 0,
+      status: 'sent',
+      sentBatch: {
+        batch: {
+          ...createEmptyBatch(),
+          reserveToReserve: [{
+            receivingEntity: `0x${'ef'.repeat(32)}`,
+            tokenId: 1,
+            amount: 10n,
+          }],
+        },
+        batchHash,
+        encodedBatch: '0x1234',
+        entityNonce: 1,
+        firstSubmittedAt: 124,
+        lastSubmittedAt: 124,
+        submitAttempts: 1,
+      },
+    };
+    env.eReplicas.set(`${entityId}:1`, {
+      entityId,
+      signerId: '1',
+      mempool: [],
+      isProposer: true,
+      state,
+    } as EntityReplica);
+    env.jReplicas = new Map([
+      [
+        'Testnet',
+        {
+          jadapter: {
+            submitTx: async () => ({ success: false, error: 'staticCall revert: E3()' }),
+            pollNow: async () => {},
+          },
+        } as any,
+      ],
+    ]);
+
+    await expect(submitRuntimeJOutbox(
+      env,
+      [
+        {
+          jurisdictionName: 'Testnet',
+          jTxs: [
+            {
+              type: 'batch',
+              entityId,
+              data: {
+                batch: {
+                  ...createEmptyBatch(),
+                  reserveToReserve: [{
+                    receivingEntity: `0x${'ef'.repeat(32)}`,
+                    tokenId: 1,
+                    amount: 10n,
+                  }],
+                },
+                batchHash,
+                encodedBatch: '0x1234',
+                entityNonce: 1,
+                hankoSignature: '0x1234',
+                batchSize: 1,
+                signerId: `0x${'cd'.repeat(20)}`,
+              },
+              timestamp: env.timestamp,
+            } as any,
+          ],
+        },
+      ],
+      { enqueueRuntimeInputs: () => {} },
+    )).rejects.toThrow(/J_SUBMIT_FATAL: staticCall revert: E3\(\)/);
+
+    expect(state.jBatchState?.status).toBe('failed');
+    expect(state.jBatchState?.failedAttempts).toBe(1);
+    expect(state.jBatchState?.sentBatch?.terminalFailure).toEqual({
+      message: 'staticCall revert: E3()',
+      failedAt: 124,
+    });
   });
 
   test('submitRuntimeJOutbox rejects non-empty consensus batch before adapter when hanko is missing', async () => {
@@ -3182,6 +3311,46 @@ describe('audit fail-fast regressions', () => {
     expect(result.newState.jBatchState?.sentBatch?.batch.disputeFinalizations.length).toBe(1);
   });
 
+  test('j_rebroadcast refuses a terminally failed sent batch instead of retrying the same bad tx', async () => {
+    const entityId = `0x${'ae'.repeat(32)}`;
+    const state = makeEntityState(entityId);
+    state.jBatchState = {
+      batch: createEmptyBatch(),
+      jurisdiction: null,
+      lastBroadcast: 0,
+      broadcastCount: 0,
+      failedAttempts: 1,
+      status: 'failed',
+      sentBatch: {
+        batch: {
+          ...createEmptyBatch(),
+          reserveToReserve: [{
+            receivingEntity: `0x${'ef'.repeat(32)}`,
+            tokenId: 1,
+            amount: 10n,
+          }],
+        },
+        batchHash: `0x${'22'.repeat(32)}`,
+        encodedBatch: '0x1234',
+        entityNonce: 9,
+        firstSubmittedAt: 1000,
+        lastSubmittedAt: 1000,
+        submitAttempts: 1,
+        terminalFailure: {
+          message: 'J_SUBMIT_FATAL: staticCall revert: E3()',
+          failedAt: 1001,
+        },
+      },
+      entityNonce: 8,
+    } as EntityState['jBatchState'];
+
+    await expect(handleJRebroadcast(
+      state,
+      { type: 'j_rebroadcast', data: {} },
+      createEmptyEnv('j-rebroadcast-terminal-failure'),
+    )).rejects.toThrow(/Cannot rebroadcast failed sentBatch/);
+  });
+
   test('HankoBatchProcessed(false) drops stale dispute finalize when on-chain nonce already moved even before DisputeFinalized arrives', async () => {
     const entityId = `0x${'91'.repeat(32)}`;
     const counterpartyId = `0x${'92'.repeat(32)}`;
@@ -3414,7 +3583,7 @@ describe('audit fail-fast regressions', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 10_000n,
-      qtyLots: 1,
+      qtyLots: 1n,
     }).state;
     const targetState = makeEntityState(targetHub);
     targetState.config = makeSingleSignerConfigFor('target-signer');
@@ -3657,7 +3826,7 @@ describe('audit fail-fast regressions', () => {
       tif: 0,
       postOnly: false,
       priceTicks: makerMeta!.priceTicks,
-      qtyLots: Number(makerMeta!.baseAmount / lot),
+      qtyLots: makerMeta!.baseAmount / lot,
     }).state;
     bookOwnerState.orderbookExt = {
       books: new Map([[pairId, book]]),
@@ -4235,7 +4404,7 @@ describe('audit fail-fast regressions', () => {
       tif: 0,
       postOnly: false,
       priceTicks: makerMeta!.priceTicks,
-      qtyLots: Number(makerMeta!.baseAmount / lot),
+      qtyLots: makerMeta!.baseAmount / lot,
     }).state;
     hubState.orderbookExt = {
       books: new Map([[pairId, book]]),
@@ -4314,7 +4483,7 @@ describe('audit fail-fast regressions', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 2_000n,
-      qtyLots: 1,
+      qtyLots: 1n,
     }).state;
     hubState.orderbookExt = {
       books: new Map([[pairId, book]]),
@@ -4369,7 +4538,7 @@ describe('audit fail-fast regressions', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 2_000n,
-      qtyLots: 1,
+      qtyLots: 1n,
     }).state;
     hubState.orderbookExt = {
       books: new Map([[pairId, book]]),

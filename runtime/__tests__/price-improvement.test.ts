@@ -126,15 +126,15 @@ describe('price improvement', () => {
       let book = makeBook();
 
       // Makers place asks
-      const r1 = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'ask1', side: 1, tif: 0, postOnly: false, priceTicks: 100n, qtyLots: 1 });
+      const r1 = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'ask1', side: 1, tif: 0, postOnly: false, priceTicks: 100n, qtyLots: 1n });
       book = r1.state;
-      const r2 = applyCommand(book, { kind: 0, ownerId: 'mm2', orderId: 'ask2', side: 1, tif: 0, postOnly: false, priceTicks: 110n, qtyLots: 1 });
+      const r2 = applyCommand(book, { kind: 0, ownerId: 'mm2', orderId: 'ask2', side: 1, tif: 0, postOnly: false, priceTicks: 110n, qtyLots: 1n });
       book = r2.state;
-      const r3 = applyCommand(book, { kind: 0, ownerId: 'mm3', orderId: 'ask3', side: 1, tif: 0, postOnly: false, priceTicks: 120n, qtyLots: 1 });
+      const r3 = applyCommand(book, { kind: 0, ownerId: 'mm3', orderId: 'ask3', side: 1, tif: 0, postOnly: false, priceTicks: 120n, qtyLots: 1n });
       book = r3.state;
 
       // Taker places buy at 120 (willing to pay up to 120 per lot)
-      const result = applyCommand(book, { kind: 0, ownerId: 'taker', orderId: 'buy1', side: 0, tif: 0, postOnly: false, priceTicks: 120n, qtyLots: 3 });
+      const result = applyCommand(book, { kind: 0, ownerId: 'taker', orderId: 'buy1', side: 0, tif: 0, postOnly: false, priceTicks: 120n, qtyLots: 3n });
 
       const trades = getTrades(result.events);
       expect(trades).toHaveLength(3);
@@ -163,15 +163,15 @@ describe('price improvement', () => {
 
       // Makers: asks at 100, 110, 120
       let r;
-      r = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'a1', side: 1, tif: 0, postOnly: false, priceTicks: 100n, qtyLots: 1 });
+      r = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'a1', side: 1, tif: 0, postOnly: false, priceTicks: 100n, qtyLots: 1n });
       book = r.state;
-      r = applyCommand(book, { kind: 0, ownerId: 'mm2', orderId: 'a2', side: 1, tif: 0, postOnly: false, priceTicks: 110n, qtyLots: 1 });
+      r = applyCommand(book, { kind: 0, ownerId: 'mm2', orderId: 'a2', side: 1, tif: 0, postOnly: false, priceTicks: 110n, qtyLots: 1n });
       book = r.state;
-      r = applyCommand(book, { kind: 0, ownerId: 'mm3', orderId: 'a3', side: 1, tif: 0, postOnly: false, priceTicks: 120n, qtyLots: 1 });
+      r = applyCommand(book, { kind: 0, ownerId: 'mm3', orderId: 'a3', side: 1, tif: 0, postOnly: false, priceTicks: 120n, qtyLots: 1n });
       book = r.state;
 
       // Taker buy 3 lots @ limit 120
-      const result = applyCommand(book, { kind: 0, ownerId: 'taker', orderId: 'b1', side: 0, tif: 0, postOnly: false, priceTicks: 120n, qtyLots: 3 });
+      const result = applyCommand(book, { kind: 0, ownerId: 'taker', orderId: 'b1', side: 0, tif: 0, postOnly: false, priceTicks: 120n, qtyLots: 3n });
       const trades = getTrades(result.events);
       const { totalCost } = executionCost(trades);
 
@@ -205,15 +205,15 @@ describe('price improvement', () => {
       let book = makeBook();
 
       // Makers place bids
-      const r1 = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'bid1', side: 0, tif: 0, postOnly: false, priceTicks: 3100n, qtyLots: 1 });
+      const r1 = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'bid1', side: 0, tif: 0, postOnly: false, priceTicks: 3100n, qtyLots: 1n });
       book = r1.state;
-      const r2 = applyCommand(book, { kind: 0, ownerId: 'mm2', orderId: 'bid2', side: 0, tif: 0, postOnly: false, priceTicks: 3000n, qtyLots: 1 });
+      const r2 = applyCommand(book, { kind: 0, ownerId: 'mm2', orderId: 'bid2', side: 0, tif: 0, postOnly: false, priceTicks: 3000n, qtyLots: 1n });
       book = r2.state;
-      const r3 = applyCommand(book, { kind: 0, ownerId: 'mm3', orderId: 'bid3', side: 0, tif: 0, postOnly: false, priceTicks: 2900n, qtyLots: 1 });
+      const r3 = applyCommand(book, { kind: 0, ownerId: 'mm3', orderId: 'bid3', side: 0, tif: 0, postOnly: false, priceTicks: 2900n, qtyLots: 1n });
       book = r3.state;
 
       // Taker places sell at 2900 (willing to sell as low as 2900 per lot)
-      const result = applyCommand(book, { kind: 0, ownerId: 'taker', orderId: 'sell1', side: 1, tif: 0, postOnly: false, priceTicks: 2900n, qtyLots: 3 });
+      const result = applyCommand(book, { kind: 0, ownerId: 'taker', orderId: 'sell1', side: 1, tif: 0, postOnly: false, priceTicks: 2900n, qtyLots: 3n });
 
       const trades = getTrades(result.events);
       expect(trades).toHaveLength(3);
@@ -241,15 +241,15 @@ describe('price improvement', () => {
 
       // Makers: bids at 3100, 3000, 2900
       let r;
-      r = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'b1', side: 0, tif: 0, postOnly: false, priceTicks: 3100n, qtyLots: 1 });
+      r = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'b1', side: 0, tif: 0, postOnly: false, priceTicks: 3100n, qtyLots: 1n });
       book = r.state;
-      r = applyCommand(book, { kind: 0, ownerId: 'mm2', orderId: 'b2', side: 0, tif: 0, postOnly: false, priceTicks: 3000n, qtyLots: 1 });
+      r = applyCommand(book, { kind: 0, ownerId: 'mm2', orderId: 'b2', side: 0, tif: 0, postOnly: false, priceTicks: 3000n, qtyLots: 1n });
       book = r.state;
-      r = applyCommand(book, { kind: 0, ownerId: 'mm3', orderId: 'b3', side: 0, tif: 0, postOnly: false, priceTicks: 2900n, qtyLots: 1 });
+      r = applyCommand(book, { kind: 0, ownerId: 'mm3', orderId: 'b3', side: 0, tif: 0, postOnly: false, priceTicks: 2900n, qtyLots: 1n });
       book = r.state;
 
       // Taker sell 3 lots @ limit 2900
-      const result = applyCommand(book, { kind: 0, ownerId: 'taker', orderId: 's1', side: 1, tif: 0, postOnly: false, priceTicks: 2900n, qtyLots: 3 });
+      const result = applyCommand(book, { kind: 0, ownerId: 'taker', orderId: 's1', side: 1, tif: 0, postOnly: false, priceTicks: 2900n, qtyLots: 3n });
       const trades = getTrades(result.events);
       const { totalCost } = executionCost(trades);
 
@@ -304,11 +304,11 @@ describe('price improvement', () => {
     test('BUY taker gets price improvement with exact settlement', () => {
       let book = makeBook();
       let r;
-      r = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'a1', side: 1, tif: 0, postOnly: false, priceTicks: 100n, qtyLots: 1 }); book = r.state;
-      r = applyCommand(book, { kind: 0, ownerId: 'mm2', orderId: 'a2', side: 1, tif: 0, postOnly: false, priceTicks: 110n, qtyLots: 1 }); book = r.state;
-      r = applyCommand(book, { kind: 0, ownerId: 'mm3', orderId: 'a3', side: 1, tif: 0, postOnly: false, priceTicks: 120n, qtyLots: 1 }); book = r.state;
+      r = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'a1', side: 1, tif: 0, postOnly: false, priceTicks: 100n, qtyLots: 1n }); book = r.state;
+      r = applyCommand(book, { kind: 0, ownerId: 'mm2', orderId: 'a2', side: 1, tif: 0, postOnly: false, priceTicks: 110n, qtyLots: 1n }); book = r.state;
+      r = applyCommand(book, { kind: 0, ownerId: 'mm3', orderId: 'a3', side: 1, tif: 0, postOnly: false, priceTicks: 120n, qtyLots: 1n }); book = r.state;
 
-      const result = applyCommand(book, { kind: 0, ownerId: 'taker', orderId: 'b1', side: 0, tif: 0, postOnly: false, priceTicks: 120n, qtyLots: 3 });
+      const result = applyCommand(book, { kind: 0, ownerId: 'taker', orderId: 'b1', side: 0, tif: 0, postOnly: false, priceTicks: 120n, qtyLots: 3n });
       const trades = getTrades(result.events);
       const { totalCost, totalQty } = executionCost(trades);
 
@@ -336,11 +336,11 @@ describe('price improvement', () => {
     test('handleSwapResolve settles BUY at exact execution amounts', async () => {
       let book = makeBook();
       let r;
-      r = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'a1', side: 1, tif: 0, postOnly: false, priceTicks: 100n, qtyLots: 1 }); book = r.state;
-      r = applyCommand(book, { kind: 0, ownerId: 'mm2', orderId: 'a2', side: 1, tif: 0, postOnly: false, priceTicks: 110n, qtyLots: 1 }); book = r.state;
-      r = applyCommand(book, { kind: 0, ownerId: 'mm3', orderId: 'a3', side: 1, tif: 0, postOnly: false, priceTicks: 120n, qtyLots: 1 }); book = r.state;
+      r = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'a1', side: 1, tif: 0, postOnly: false, priceTicks: 100n, qtyLots: 1n }); book = r.state;
+      r = applyCommand(book, { kind: 0, ownerId: 'mm2', orderId: 'a2', side: 1, tif: 0, postOnly: false, priceTicks: 110n, qtyLots: 1n }); book = r.state;
+      r = applyCommand(book, { kind: 0, ownerId: 'mm3', orderId: 'a3', side: 1, tif: 0, postOnly: false, priceTicks: 120n, qtyLots: 1n }); book = r.state;
 
-      const result = applyCommand(book, { kind: 0, ownerId: 'taker', orderId: 'b1', side: 0, tif: 0, postOnly: false, priceTicks: 120n, qtyLots: 3 });
+      const result = applyCommand(book, { kind: 0, ownerId: 'taker', orderId: 'b1', side: 0, tif: 0, postOnly: false, priceTicks: 120n, qtyLots: 3n });
       const trades = getTrades(result.events);
       const { totalCost, totalQty } = executionCost(trades);
 
@@ -387,11 +387,11 @@ describe('price improvement', () => {
     test('SELL taker gets price improvement with exact settlement', () => {
       let book = makeBook();
       let r;
-      r = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'b1', side: 0, tif: 0, postOnly: false, priceTicks: 3100n, qtyLots: 1 }); book = r.state;
-      r = applyCommand(book, { kind: 0, ownerId: 'mm2', orderId: 'b2', side: 0, tif: 0, postOnly: false, priceTicks: 3000n, qtyLots: 1 }); book = r.state;
-      r = applyCommand(book, { kind: 0, ownerId: 'mm3', orderId: 'b3', side: 0, tif: 0, postOnly: false, priceTicks: 2900n, qtyLots: 1 }); book = r.state;
+      r = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'b1', side: 0, tif: 0, postOnly: false, priceTicks: 3100n, qtyLots: 1n }); book = r.state;
+      r = applyCommand(book, { kind: 0, ownerId: 'mm2', orderId: 'b2', side: 0, tif: 0, postOnly: false, priceTicks: 3000n, qtyLots: 1n }); book = r.state;
+      r = applyCommand(book, { kind: 0, ownerId: 'mm3', orderId: 'b3', side: 0, tif: 0, postOnly: false, priceTicks: 2900n, qtyLots: 1n }); book = r.state;
 
-      const result = applyCommand(book, { kind: 0, ownerId: 'taker', orderId: 's1', side: 1, tif: 0, postOnly: false, priceTicks: 2900n, qtyLots: 3 });
+      const result = applyCommand(book, { kind: 0, ownerId: 'taker', orderId: 's1', side: 1, tif: 0, postOnly: false, priceTicks: 2900n, qtyLots: 3n });
       const trades = getTrades(result.events);
       const { totalCost, totalQty } = executionCost(trades);
 
@@ -419,11 +419,11 @@ describe('price improvement', () => {
     test('handleSwapResolve settles SELL at exact execution amounts', async () => {
       let book = makeBook();
       let r;
-      r = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'b1', side: 0, tif: 0, postOnly: false, priceTicks: 3100n, qtyLots: 1 }); book = r.state;
-      r = applyCommand(book, { kind: 0, ownerId: 'mm2', orderId: 'b2', side: 0, tif: 0, postOnly: false, priceTicks: 3000n, qtyLots: 1 }); book = r.state;
-      r = applyCommand(book, { kind: 0, ownerId: 'mm3', orderId: 'b3', side: 0, tif: 0, postOnly: false, priceTicks: 2900n, qtyLots: 1 }); book = r.state;
+      r = applyCommand(book, { kind: 0, ownerId: 'mm1', orderId: 'b1', side: 0, tif: 0, postOnly: false, priceTicks: 3100n, qtyLots: 1n }); book = r.state;
+      r = applyCommand(book, { kind: 0, ownerId: 'mm2', orderId: 'b2', side: 0, tif: 0, postOnly: false, priceTicks: 3000n, qtyLots: 1n }); book = r.state;
+      r = applyCommand(book, { kind: 0, ownerId: 'mm3', orderId: 'b3', side: 0, tif: 0, postOnly: false, priceTicks: 2900n, qtyLots: 1n }); book = r.state;
 
-      const result = applyCommand(book, { kind: 0, ownerId: 'taker', orderId: 's1', side: 1, tif: 0, postOnly: false, priceTicks: 2900n, qtyLots: 3 });
+      const result = applyCommand(book, { kind: 0, ownerId: 'taker', orderId: 's1', side: 1, tif: 0, postOnly: false, priceTicks: 2900n, qtyLots: 3n });
       const trades = getTrades(result.events);
       const { totalCost, totalQty } = executionCost(trades);
 

@@ -133,6 +133,10 @@ export interface SentJBatch {
   lastSubmittedAt: number;
   submitAttempts: number;
   txHash?: string;
+  terminalFailure?: {
+    message: string;
+    failedAt: number;
+  };
 }
 
 /**

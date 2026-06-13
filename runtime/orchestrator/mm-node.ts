@@ -6,6 +6,7 @@ import { decodeRuntimeAdapterMessage } from '../radapter/codec';
 import { encodeBoard, hashBoard } from '../entity-factory';
 import { deriveSignerAddressSync, deriveSignerKeySync, registerSignerKey } from '../account-crypto';
 import { createDirectRuntimeWsRoute, type DirectWebSocket } from '../networking/direct-runtime-bun';
+import { normalizeRuntimeId } from '../networking/runtime-id';
 import {
   attachRuntimeAdapterTicker,
   closeInvalidRuntimeAdapterMessage,
@@ -55,7 +56,7 @@ import {
 } from './mesh-common';
 import { buildDefaultEntitySwapPairs, getSwapPairOrientation, getSwapPairPolicyByBaseQuote, getTokenIdsForJurisdiction } from '../account-utils';
 import { LIMITS, SWAP as SWAP_CONSTANTS } from '../constants';
-import { ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
+import { MAX_ORDERBOOK_QTY_LOTS, ORDERBOOK_PRICE_SCALE, SWAP_LOT_SCALE } from '../orderbook';
 import { hasCrossJurisdictionBookOrder } from '../orderbook/cross-j';
 import {
   deriveCanonicalCrossJurisdictionBookOwnerForLegs,
@@ -194,7 +195,7 @@ type MarketMakerHealth = {
   };
 };
 
-const MARKET_MAKER_CREDIT_AMOUNT = 50_000_000n * 10n ** 18n;
+const MARKET_MAKER_CREDIT_AMOUNT = 1_000_000_000n * 10n ** 18n;
 const MARKET_MAKER_QUOTE_LOOP_MS = Math.max(1000, Number(process.env['MARKET_MAKER_QUOTE_LOOP_MS'] || '30000'));
 const MARKET_MAKER_BOOTSTRAP_LOOP_MS = Math.max(250, Number(process.env['MARKET_MAKER_BOOTSTRAP_LOOP_MS'] || '1000'));
 const MARKET_MAKER_BOOTSTRAP_TIMEOUT_MS = Math.max(
@@ -224,43 +225,60 @@ const MARKET_MAKER_CROSS_EXPIRY_MS = Math.max(
   60_000,
   Number(process.env['MARKET_MAKER_CROSS_EXPIRY_MS'] || String(24 * 60 * 60 * 1000)),
 );
-const ORDERBOOK_MAX_QTY_LOTS = 0xFFFFFFFFn;
-const ORDERBOOK_MAX_BASE_AMOUNT = ORDERBOOK_MAX_QTY_LOTS * SWAP_LOT_SCALE;
+const ORDERBOOK_MAX_BASE_AMOUNT = MAX_ORDERBOOK_QTY_LOTS * SWAP_LOT_SCALE;
+const MARKET_MAKER_DEPTH_MULTIPLIER = (() => {
+  try {
+    const parsed = BigInt(String(process.env['MARKET_MAKER_DEPTH_MULTIPLIER'] || '10'));
+    return parsed > 0n ? parsed : 10n;
+  } catch {
+    return 10n;
+  }
+})();
+const MARKET_MAKER_STABLE_DEPTH_MULTIPLIER = (() => {
+  try {
+    const parsed = BigInt(String(process.env['MARKET_MAKER_STABLE_DEPTH_MULTIPLIER'] || '1000'));
+    return parsed > 0n ? parsed : 1000n;
+  } catch {
+    return 1000n;
+  }
+})();
+const MARKET_MAKER_SIZE_UNIT = MARKET_MAKER_DEPTH_MULTIPLIER * 10n ** 18n;
+const MARKET_MAKER_STABLE_SIZE_UNIT = MARKET_MAKER_STABLE_DEPTH_MULTIPLIER * 10n ** 18n;
 const MARKET_MAKER_LEVEL_OFFSETS_BPS = [2, 4, 6, 8, 10, 12, 15, 20, 25, 32, 40, 50, 65, 80, 100] as const;
 const MARKET_MAKER_LEVEL_BASE_SIZES = [
-  120n * 10n ** 18n,
-  140n * 10n ** 18n,
-  160n * 10n ** 18n,
-  180n * 10n ** 18n,
-  210n * 10n ** 18n,
-  240n * 10n ** 18n,
-  270n * 10n ** 18n,
-  300n * 10n ** 18n,
-  360n * 10n ** 18n,
-  420n * 10n ** 18n,
-  500n * 10n ** 18n,
-  600n * 10n ** 18n,
-  720n * 10n ** 18n,
-  840n * 10n ** 18n,
-  960n * 10n ** 18n,
+  120n * MARKET_MAKER_SIZE_UNIT,
+  140n * MARKET_MAKER_SIZE_UNIT,
+  160n * MARKET_MAKER_SIZE_UNIT,
+  180n * MARKET_MAKER_SIZE_UNIT,
+  210n * MARKET_MAKER_SIZE_UNIT,
+  240n * MARKET_MAKER_SIZE_UNIT,
+  270n * MARKET_MAKER_SIZE_UNIT,
+  300n * MARKET_MAKER_SIZE_UNIT,
+  360n * MARKET_MAKER_SIZE_UNIT,
+  420n * MARKET_MAKER_SIZE_UNIT,
+  500n * MARKET_MAKER_SIZE_UNIT,
+  600n * MARKET_MAKER_SIZE_UNIT,
+  720n * MARKET_MAKER_SIZE_UNIT,
+  840n * MARKET_MAKER_SIZE_UNIT,
+  960n * MARKET_MAKER_SIZE_UNIT,
 ] as const;
 const MARKET_MAKER_STABLE_LEVEL_OFFSETS_BPS = [1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24, 28, 36, 48] as const;
 const MARKET_MAKER_STABLE_LEVEL_BASE_SIZES = [
-  120n * 10n ** 18n,
-  140n * 10n ** 18n,
-  180n * 10n ** 18n,
-  210n * 10n ** 18n,
-  240n * 10n ** 18n,
-  300n * 10n ** 18n,
-  360n * 10n ** 18n,
-  420n * 10n ** 18n,
-  480n * 10n ** 18n,
-  560n * 10n ** 18n,
-  640n * 10n ** 18n,
-  720n * 10n ** 18n,
-  800n * 10n ** 18n,
-  900n * 10n ** 18n,
-  1_000n * 10n ** 18n,
+  120n * MARKET_MAKER_STABLE_SIZE_UNIT,
+  140n * MARKET_MAKER_STABLE_SIZE_UNIT,
+  180n * MARKET_MAKER_STABLE_SIZE_UNIT,
+  210n * MARKET_MAKER_STABLE_SIZE_UNIT,
+  240n * MARKET_MAKER_STABLE_SIZE_UNIT,
+  300n * MARKET_MAKER_STABLE_SIZE_UNIT,
+  360n * MARKET_MAKER_STABLE_SIZE_UNIT,
+  420n * MARKET_MAKER_STABLE_SIZE_UNIT,
+  480n * MARKET_MAKER_STABLE_SIZE_UNIT,
+  560n * MARKET_MAKER_STABLE_SIZE_UNIT,
+  640n * MARKET_MAKER_STABLE_SIZE_UNIT,
+  720n * MARKET_MAKER_STABLE_SIZE_UNIT,
+  800n * MARKET_MAKER_STABLE_SIZE_UNIT,
+  900n * MARKET_MAKER_STABLE_SIZE_UNIT,
+  1_000n * MARKET_MAKER_STABLE_SIZE_UNIT,
 ] as const;
 const argsRaw = process.argv.slice(2);
 
@@ -484,7 +502,7 @@ const readVisibleHubProfiles = (env: Env, includeSiblings = false): HubProfile[]
       name: String(profile.name || '').trim(),
       entityId: String(profile.entityId || '').toLowerCase(),
       signerId: readHubSignerId(profile),
-      runtimeId: String(profile.runtimeId || '').trim().toLowerCase(),
+      runtimeId: normalizeRuntimeId(profile.runtimeId || ''),
       jurisdictionName: String(profile.metadata?.jurisdiction?.name || '').trim(),
       chainId: Number(profile.metadata?.jurisdiction?.chainId || 0),
       depositoryAddress: String(profile.metadata?.jurisdiction?.depositoryAddress || '').trim(),
@@ -498,6 +516,22 @@ const readVisibleHubProfiles = (env: Env, includeSiblings = false): HubProfile[]
       (Number(left.chainId || 0) - Number(right.chainId || 0)) ||
       compareStableText(left.entityId, right.entityId),
     );
+};
+
+const directHubPeersReady = (env: Env, hubs: HubProfile[]): boolean => {
+  const requiredRuntimeIds = new Set(
+    hubs
+      .map(hub => normalizeRuntimeId(hub.runtimeId || ''))
+      .filter(runtimeId => runtimeId.length > 0),
+  );
+  if (requiredRuntimeIds.size === 0) return false;
+  const openRuntimeIds = new Set(
+    (getP2PState(env).directPeers || [])
+      .filter(peer => peer.open === true)
+      .map(peer => normalizeRuntimeId(peer.runtimeId || ''))
+      .filter(runtimeId => runtimeId.length > 0),
+  );
+  return Array.from(requiredRuntimeIds).every(runtimeId => openRuntimeIds.has(runtimeId));
 };
 
 const parseMeshHubIdentities = (raw: string): MeshHubIdentity[] => {
@@ -573,7 +607,8 @@ const minBaseAmountForQuoteNotional = (priceTicks: bigint): bigint => {
 
 const withMinQuoteNotionalBaseSize = (baseSize: bigint, priceTicks: bigint): bigint => {
   const minBaseSize = minBaseAmountForQuoteNotional(priceTicks);
-  return baseSize >= minBaseSize ? baseSize : minBaseSize;
+  const desiredBaseSize = baseSize >= minBaseSize ? baseSize : minBaseSize;
+  return desiredBaseSize <= ORDERBOOK_MAX_BASE_AMOUNT ? desiredBaseSize : ORDERBOOK_MAX_BASE_AMOUNT;
 };
 
 const withCrossMinQuoteNotionalSourceAmount = (
@@ -1963,6 +1998,7 @@ const run = async (): Promise<void> => {
     try {
       const visibleHubs = readVisibleHubProfiles(env, true);
       if (visibleHubs.length === 0) return;
+      if (!directHubPeersReady(env, visibleHubs)) return;
       const hubSignerIdsByEntityId = new Map(configuredHubSignerIdsByEntityId);
       for (const profile of visibleHubs) {
         if (profile.signerId) hubSignerIdsByEntityId.set(profile.entityId.toLowerCase(), profile.signerId.toLowerCase());
@@ -2115,12 +2151,12 @@ const run = async (): Promise<void> => {
     shuttingDown = true;
     if (loop) clearInterval(loop);
     try {
-      await stopServerGracefully(server, httpDrain, resolvedArgs.name, 5_000);
-      stopP2P(env);
       const idle = await stopRuntimeLoopAndWait(env, 10_000);
       if (!idle) {
         console.warn(`[${resolvedArgs.name}] shutdown timed out waiting for runtime loop to drain`);
       }
+      await stopServerGracefully(server, httpDrain, resolvedArgs.name, 5_000);
+      stopP2P(env);
       await closeRuntimeDb(env);
       await closeInfraDb(env);
     } catch (error) {

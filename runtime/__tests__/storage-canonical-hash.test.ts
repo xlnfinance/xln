@@ -112,7 +112,7 @@ const createBookWithSharedOrder = () => {
     tif: 0,
     postOnly: true,
     priceTicks: 100n,
-    qtyLots: 1,
+    qtyLots: 1n,
   }).state;
 };
 

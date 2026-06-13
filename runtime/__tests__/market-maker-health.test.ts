@@ -32,7 +32,7 @@ test('market snapshots expose order counts for aggregated price levels', () => {
     tif: 0,
     postOnly: true,
     priceTicks: 4n,
-    qtyLots: 10,
+    qtyLots: 10n,
   });
   applyCommand(book, {
     kind: 0,
@@ -42,7 +42,7 @@ test('market snapshots expose order counts for aggregated price levels', () => {
     tif: 0,
     postOnly: true,
     priceTicks: 4n,
-    qtyLots: 15,
+    qtyLots: 15n,
   });
 
   const snapshot = buildMarketSnapshotForReplica({
@@ -54,5 +54,5 @@ test('market snapshots expose order counts for aggregated price levels', () => {
   } as any, `0x${'a'.repeat(64)}`, 'cross:a/b', 20);
 
   expect(snapshot.asks).toHaveLength(1);
-  expect(snapshot.asks[0]).toMatchObject({ price: '4', size: 25, orderCount: 2 });
+  expect(snapshot.asks[0]).toMatchObject({ price: '4', size: '25', total: '25', orderCount: 2 });
 });

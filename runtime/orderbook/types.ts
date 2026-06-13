@@ -5,7 +5,16 @@
  */
 
 // Re-export core types
-export type { Side, TIF, OrderCmd, BookEvent, BookParams, BookOrderState, BookState } from './core';
+export type {
+  Side,
+  TIF,
+  OrderCmd,
+  BookEvent,
+  BookParams,
+  BookOrderState,
+  BookState,
+  PriceBucketState,
+} from './core';
 export {
   createBook,
   applyCommand,
@@ -18,6 +27,7 @@ export {
   bucketIdForPrice,
   computeBookHash,
   MAX_FILL_RATIO,
+  MAX_ORDERBOOK_QTY_LOTS,
 } from './core';
 
 // Import for local use
@@ -85,7 +95,16 @@ export function computeSwapPriceTicks(
 }
 
 /** Lot granularity for swap order quantization (shared with frontend) */
+// Internal orderbook lot granularity. User amounts stay in bigint token units;
+// the book compresses only the in-memory index, and qtyLots itself is bigint so
+// large orders do not hit JS number/uint32 ceilings.
 export const SWAP_LOT_SCALE = 10n ** 12n;
+
+if (SWAP_LOT_SCALE % ORDERBOOK_PRICE_SCALE !== 0n) {
+  throw new Error(
+    `ORDERBOOK_SCALE_INVARIANT: SWAP_LOT_SCALE=${SWAP_LOT_SCALE} must be divisible by ORDERBOOK_PRICE_SCALE=${ORDERBOOK_PRICE_SCALE}`,
+  );
+}
 
 export interface PreparedSwapOrder {
   side: 0 | 1;

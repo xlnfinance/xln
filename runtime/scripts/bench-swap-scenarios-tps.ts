@@ -100,7 +100,7 @@ const seedSide = (count: number, side: Side, levels: number): BookState => {
       tif: 0,
       postOnly: false,
       priceTicks: priceFor(side, index, levels),
-      qtyLots: 1,
+      qtyLots: 1n,
     });
     book = result.state;
     if (result.events.some((event) => event.type === 'REJECT')) {
@@ -147,7 +147,7 @@ const runAskFillScenario = (swaps: number, levels: number, minTps: number): Scen
       tif: 1,
       postOnly: false,
       priceTicks: BASE_PRICE + BigInt(levels),
-      qtyLots: 1,
+      qtyLots: 1n,
     });
     book = result.state;
     trades += countEvents(result.events, 'TRADE');
@@ -170,7 +170,7 @@ const runBidFillScenario = (swaps: number, levels: number, minTps: number): Scen
       tif: 1,
       postOnly: false,
       priceTicks: BASE_PRICE - BigInt(levels),
-      qtyLots: 1,
+      qtyLots: 1n,
     });
     book = result.state;
     trades += countEvents(result.events, 'TRADE');
@@ -196,7 +196,7 @@ const runRestingCancelScenario = (swaps: number, side: Side, levels: number, min
       tif: 0,
       postOnly: true,
       priceTicks: priceFor(side, index, levels),
-      qtyLots: 1,
+      qtyLots: 1n,
     });
     requireEvent(placed.events, 'ACK', `REST_${label.toUpperCase()}_PLACE:${index}`);
     book = placed.state;
@@ -225,7 +225,7 @@ const runSelfTradeScenario = (swaps: number, levels: number, minTps: number): Sc
       tif: 0,
       postOnly: true,
       priceTicks: BASE_PRICE + BigInt(index % levels),
-      qtyLots: 1,
+      qtyLots: 1n,
     });
     requireEvent(placed.events, 'ACK', `STP_PLACE:${index}`);
     book = placed.state;
@@ -237,7 +237,7 @@ const runSelfTradeScenario = (swaps: number, levels: number, minTps: number): Sc
       tif: 1,
       postOnly: false,
       priceTicks: BASE_PRICE + BigInt(levels),
-      qtyLots: 1,
+      qtyLots: 1n,
     });
     requireEvent(rejected.events, 'REJECT', `STP_TAKER:${index}`);
     if (!rejected.events.some((event) => event.type === 'REJECT' && /STP/i.test(event.reason))) {
@@ -280,7 +280,7 @@ const runRoutedThreeHopScenario = (swaps: number, levels: number, minTps: number
         tif: 1,
         postOnly: false,
         priceTicks: routeBook.limitTicks,
-        qtyLots: 1,
+        qtyLots: 1n,
       });
       requireEvent(result.events, 'TRADE', `ROUTED_${routeBook.name}:${index}`);
       routeBook.book = result.state;

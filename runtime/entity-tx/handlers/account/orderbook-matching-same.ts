@@ -227,7 +227,7 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
       if (
         order.priceTicks !== meta.priceTicks ||
         order.ownerId !== (meta.makerIsLeft ? meta.fromEntity : meta.toEntity) ||
-        BigInt(order.qtyLots) !== metaBaseAmount / SWAP_LOT_SCALE
+        order.qtyLots !== metaBaseAmount / SWAP_LOT_SCALE
       ) {
         throw new Error(
           `ORDERBOOK_CACHE_MISMATCH: pair=${pairId} order=${orderId} ` +
@@ -318,7 +318,7 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
       if (
         existingOrder.ownerId === makerId &&
         existingOrder.side === side &&
-        BigInt(existingOrder.qtyLots) === qtyLots &&
+        existingOrder.qtyLots === qtyLots &&
         existingOrder.priceTicks === priceTicks
       ) {
         console.log(
@@ -353,7 +353,7 @@ export const processSameAccountOrderbookOffers = (input: SameOrderbookProcessInp
         tif: offer.timeInForce,
         postOnly: debugRebuildProjectionOnly,
         priceTicks,
-        qtyLots: Number(qtyLots),
+        qtyLots,
         minFillRatio: offer.minFillRatio,
       }, { suspendedOrderIds: suspendedSameOrderIds });
     } catch (error) {

@@ -457,8 +457,8 @@ export async function swapMarket(env: Env): Promise<void> {
   console.log('  ✅ Grace: SELL 2 WBTC @ $61000 (ask)');
   console.log('  ✅ Alice: BUY 1 WBTC @ $59000 (bid)\n');
 
-  // USDC/DAI book (DAI @ $1) - scaled to fit MAX_LOTS (4.2B)
-  // Note: With LOT_SCALE=10^12, max order ~4000 tokens per lot math
+  // USDC/DAI book (DAI @ $1). The book now stores qtyLots as bigint, so
+  // scenario sizes are limited by collateral, not a uint32 lot ceiling.
   console.log('💱 USDC/DAI Orderbook (HubDAI):');
   await process(env, [
     // Bob: Sell 500 DAI @ $1.001 (tight spread, stablecoin pair)

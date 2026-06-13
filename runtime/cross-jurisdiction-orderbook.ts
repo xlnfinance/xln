@@ -340,7 +340,7 @@ export type CrossMarketOffer = {
 };
 
 export type CrossOrderbookFill = {
-  filledLots: number;
+  filledLots: bigint;
   weightedCost: bigint;
 };
 

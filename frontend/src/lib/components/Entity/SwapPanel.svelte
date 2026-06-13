@@ -116,7 +116,7 @@
   type OrderbookLevelClickDetail = {
     side: BookSide;
     priceTicks: string;
-    size: number;
+    size: string;
     accountIds: string[];
     displayPrice?: string;
   };
@@ -818,6 +818,15 @@
     return profiles.sort((a, b) => compareStableText(String(a.name || a.entityId), String(b.name || b.entityId)))[0] || null;
   }
 
+  function findHubProfilesForJurisdiction(jurisdictionName: string): GossipProfile[] {
+    const normalized = String(jurisdictionName || '').trim().toLowerCase();
+    if (!normalized) return [];
+    return getGossipProfiles()
+      .filter((profile) => profile?.metadata?.isHub === true)
+      .filter((profile) => getProfileJurisdictionName(profile).toLowerCase() === normalized)
+      .sort((a, b) => compareStableText(String(a.name || a.entityId), String(b.name || b.entityId)));
+  }
+
   function buildCrossTargetOptions(
     frame: FrameLike = activeFrame,
     sourceEntityId = sourceEntityIdValue,
@@ -840,7 +849,13 @@
         .filter((id) => id && isHubAccount(id))
         .sort(compareStableText);
       const fallbackHub = findHubProfileForJurisdiction(targetJurisdiction)?.entityId || '';
-      const targetHubIds = accountHubIds.length > 0 ? accountHubIds : (fallbackHub ? [fallbackHub] : []);
+      const targetHubIds = Array.from(new Set([
+        ...accountHubIds,
+        ...findHubProfilesForJurisdiction(targetJurisdiction)
+          .map((profile) => String(profile.entityId || '').trim())
+          .filter(Boolean),
+        ...(fallbackHub ? [fallbackHub] : []),
+      ].map((id) => id.toLowerCase()).filter(Boolean))).sort(compareStableText);
       for (const targetHubEntityId of targetHubIds) {
         const hasTargetAccount = accountHubIds.some((id) => id.toLowerCase() === targetHubEntityId.toLowerCase());
         options.push({
@@ -1790,9 +1805,8 @@
     return `${whole.toString()}.${frac}`;
   }
 
-  function lotsToBaseWei(sizeLots: number): bigint {
-    const lots = Math.max(0, Math.floor(Number(sizeLots) || 0));
-    return BigInt(lots) * ORDERBOOK_LOT_SCALE;
+  function lotsToBaseWei(sizeLots: bigint): bigint {
+    return sizeLots > 0n ? sizeLots * ORDERBOOK_LOT_SCALE : 0n;
   }
 
   function tokenSymbol(tokenIdValue: number): string {
@@ -2549,14 +2563,14 @@
     }
 
     const side = event.detail?.side;
-    const rawSize = Number(event.detail?.size || 0);
+    const rawSize = toBigIntSafe(event.detail?.size);
     const parsedPriceTicks = toBigIntSafe(event.detail?.priceTicks);
     if (
       (side !== 'ask' && side !== 'bid')
       || parsedPriceTicks === null
       || parsedPriceTicks <= 0n
-      || !Number.isFinite(rawSize)
-      || rawSize <= 0
+      || rawSize === null
+      || rawSize <= 0n
     ) {
       return;
     }
@@ -2865,6 +2879,10 @@
     if (aCreated === bCreated) return compareStableText(String(a.offerId), String(b.offerId));
     return aCreated > bCreated ? -1 : 1;
   });
+  $: ownOrderbookEntityIds = Array.from(new Set([
+    sourceEntityIdValue,
+    ...(selectedCrossTarget?.targetEntityId ? [selectedCrossTarget.targetEntityId] : []),
+  ].map((id) => String(id || '').trim().toLowerCase()).filter(Boolean)));
 
   function accountMachines(): Array<{ accountId: string; account: AccountMachine }> {
     if (!(currentReplica?.state?.accounts instanceof Map)) return [];
@@ -3986,6 +4004,7 @@
               showSources={true}
               sourceLabels={orderbookSourceLabels}
               sourceAvatars={orderbookSourceAvatars}
+              ownEntityIds={ownOrderbookEntityIds}
               compactHeader={true}
               showPriceStepControl={false}
               priceScale={Number(ORDERBOOK_PRICE_SCALE)}

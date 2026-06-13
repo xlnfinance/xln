@@ -14,10 +14,10 @@ describe('orderbook lifecycle cleanup', () => {
     });
 
     for (const command of [
-      { kind: 0 as const, ownerId: 'maker-a', orderId: 'ask-1', side: 1 as const, tif: 0 as const, postOnly: false, priceTicks: 110n, qtyLots: 25 },
-      { kind: 0 as const, ownerId: 'maker-b', orderId: 'ask-2', side: 1 as const, tif: 0 as const, postOnly: false, priceTicks: 112n, qtyLots: 20 },
-      { kind: 0 as const, ownerId: 'maker-c', orderId: 'bid-1', side: 0 as const, tif: 0 as const, postOnly: false, priceTicks: 90n, qtyLots: 15 },
-      { kind: 0 as const, ownerId: 'maker-d', orderId: 'bid-2', side: 0 as const, tif: 0 as const, postOnly: false, priceTicks: 88n, qtyLots: 10 },
+      { kind: 0 as const, ownerId: 'maker-a', orderId: 'ask-1', side: 1 as const, tif: 0 as const, postOnly: false, priceTicks: 110n, qtyLots: 25n },
+      { kind: 0 as const, ownerId: 'maker-b', orderId: 'ask-2', side: 1 as const, tif: 0 as const, postOnly: false, priceTicks: 112n, qtyLots: 20n },
+      { kind: 0 as const, ownerId: 'maker-c', orderId: 'bid-1', side: 0 as const, tif: 0 as const, postOnly: false, priceTicks: 90n, qtyLots: 15n },
+      { kind: 0 as const, ownerId: 'maker-d', orderId: 'bid-2', side: 0 as const, tif: 0 as const, postOnly: false, priceTicks: 88n, qtyLots: 10n },
     ]) {
       book = applyCommand(book, command).state;
     }
@@ -43,7 +43,7 @@ describe('orderbook lifecycle cleanup', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 120n,
-      qtyLots: 25,
+      qtyLots: 25n,
     });
     book = fill.state;
 
@@ -53,8 +53,8 @@ describe('orderbook lifecycle cleanup', () => {
     expect(book.orders.size).toBe(2);
 
     for (const command of [
-      { kind: 0 as const, ownerId: 'maker-e', orderId: 'ask-3', side: 1 as const, tif: 0 as const, postOnly: false, priceTicks: 115n, qtyLots: 12 },
-      { kind: 0 as const, ownerId: 'maker-f', orderId: 'bid-3', side: 0 as const, tif: 0 as const, postOnly: false, priceTicks: 87n, qtyLots: 11 },
+      { kind: 0 as const, ownerId: 'maker-e', orderId: 'ask-3', side: 1 as const, tif: 0 as const, postOnly: false, priceTicks: 115n, qtyLots: 12n },
+      { kind: 0 as const, ownerId: 'maker-f', orderId: 'bid-3', side: 0 as const, tif: 0 as const, postOnly: false, priceTicks: 87n, qtyLots: 11n },
     ]) {
       book = applyCommand(book, command).state;
     }
@@ -83,7 +83,7 @@ describe('orderbook lifecycle cleanup', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 120n,
-      qtyLots: 10,
+      qtyLots: 10n,
     }).state;
 
     const replace = applyCommand(book, {
@@ -116,7 +116,7 @@ describe('orderbook lifecycle cleanup', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 110n,
-      qtyLots: 5,
+      qtyLots: 5n,
     }).state;
 
     const staleOrder = book.orders.get('ask-stale');
@@ -132,7 +132,7 @@ describe('orderbook lifecycle cleanup', () => {
       tif: 0,
       postOnly: false,
       priceTicks: 120n,
-      qtyLots: 1,
+      qtyLots: 1n,
     });
 
     book = result.state;
