@@ -465,7 +465,22 @@ export class RuntimeP2P {
       'targetRuntimeId must be signer EOA',
       { targetRuntimeId },
     );
-    const { client, transport } = this.resolveTransportClient(normalizedTargetRuntimeId);
+    const { client, transport, directEndpoint } = this.resolveTransportClient(normalizedTargetRuntimeId);
+    if (client && transport === 'relay' && directEndpoint) {
+      this.env.warn('network', 'P2P_DIRECT_UNAVAILABLE_RELAY_DELIVERY', {
+        targetRuntimeId: normalizedTargetRuntimeId,
+        entityId: input.entityId,
+        directEndpoint,
+      });
+      this.sendDebugEvent({
+        level: 'warn',
+        code: 'P2P_DIRECT_UNAVAILABLE_RELAY_DELIVERY',
+        message: 'Direct peer endpoint is known but not open; delivering over official relay',
+        targetRuntimeId: normalizedTargetRuntimeId,
+        entityId: input.entityId,
+        directEndpoint,
+      });
+    }
     if (client && client.isOpen()) {
       try {
         const sent = client.sendEntityInput(normalizedTargetRuntimeId, input, ingressTimestamp);
@@ -562,21 +577,24 @@ export class RuntimeP2P {
     return this.getActiveDirectClient(runtimeId);
   }
 
-  private hasDirectPeerEndpoint(runtimeId: string): boolean {
-    return !!this.getDirectPeerEndpoint(runtimeId);
-  }
-
   private resolveTransportClient(runtimeId: string): {
     client: RuntimeWsClient | null;
     transport: 'direct' | 'relay';
+    directEndpoint?: string;
   } {
-    const requireDirect = this.hasDirectPeerEndpoint(runtimeId);
-    if (requireDirect) {
+    const directEndpoint = this.getDirectPeerEndpoint(runtimeId);
+    if (directEndpoint) {
       this.ensureDirectClientForRuntime(runtimeId);
+      const directClient = this.getDirectClientForRuntime(runtimeId);
+      if (directClient) {
+        return { client: directClient, transport: 'direct', directEndpoint };
+      }
     }
+    const relayClient = this.getActiveClient();
     return {
-      client: requireDirect ? this.getDirectClientForRuntime(runtimeId) : this.getActiveClient(),
-      transport: requireDirect ? 'direct' : 'relay',
+      client: relayClient,
+      transport: relayClient ? 'relay' : directEndpoint ? 'direct' : 'relay',
+      ...(directEndpoint ? { directEndpoint } : {}),
     };
   }
 
